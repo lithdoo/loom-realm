@@ -10,6 +10,10 @@
 4. 项目数据设计以 FSDB 为基础，并优先保证 AI 易分析、AI 易修改、程序易读取。
 5. 编辑器架构以 MVVM、Signal、Command/Transaction 和可序列化项目模型为核心。
 
+## 当前文档
+
+- [FSDB 文件存储系统目录结构详解](./fsdb/FSDB目录结构详解.md)
+
 ## 建议目录结构
 
 ```text
