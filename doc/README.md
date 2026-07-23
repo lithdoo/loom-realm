@@ -15,6 +15,7 @@
 ### 开发计划
 
 - [第一阶段：FSDB 驱动的地图运行时原型](./roadmap/phase-1-fsdb-map-runtime.md)
+- [第一阶段设计待办](./roadmap/phase-1-design-todos.md)
 
 ### 系统架构
 
