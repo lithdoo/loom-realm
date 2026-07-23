@@ -22,6 +22,7 @@
 
 ### FSDB
 
+- [第一阶段项目 FSDB 数据模型](./fsdb/phase-1-project-fsdb-design.md)
 - [FSDB 文件存储系统目录结构详解](./fsdb/FSDB目录结构详解.md)
 
 ## 建议目录结构
