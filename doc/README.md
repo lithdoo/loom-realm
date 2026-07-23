@@ -21,6 +21,10 @@
 
 - [运行时通信与状态同步](./architecture/runtime-rpc-and-state-sync.md)
 
+### 渲染
+
+- [第一阶段 DOM 渲染与渲染状态](./renderer/phase-1-dom-rendering.md)
+
 ### FSDB
 
 - [第一阶段项目 FSDB 数据模型](./fsdb/phase-1-project-fsdb-design.md)
