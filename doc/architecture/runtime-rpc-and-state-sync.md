@@ -2,227 +2,489 @@
 
 ## 1. 文档目的
 
-本文档确定 LoomRealm Web 前端与运行时后端之间的通信方向。
+本文档定义 LoomRealm Runtime Server 与 Web Client 之间的通信方向、状态同步语义、事件边界和传输适配规则。
 
-本文档只描述架构目标和协议边界，不规定具体消息字段、方法名称、状态差异格式、目录结构或实现技术细节。这些内容由实现阶段根据第一阶段原型的实际需求确定。
+客户端状态的具体数据结构由以下文档定义：
 
-LoomRealm 使用 Hostra 作为桌面客户端宿主时的进程、窗口和安全设计见：
+- [`client-state-tree-protocol.md`](./client-state-tree-protocol.md)
 
-- [`hostra-desktop-client-host.md`](./hostra-desktop-client-host.md)
+核心原则：
 
-## 2. 核心目标
+> 通信协议提供通用状态同步和事件传递能力，不围绕地图、人物、菜单、对话框或其他具体业务不断增加固定 RPC 接口。
 
-LoomRealm 的前端与运行时应保持松耦合。
+## 2. 通信能力
 
-前端既可以连接真实远程服务端，也可以连接浏览器本地运行时或 Hostra 启动的桌面本地运行时。无论运行时部署在哪里，前端都应使用同一种通信语义，不直接依赖具体运行环境。
-
-通信需要解决两个问题：
-
-1. 前端与运行时之间的状态保持一致；
-2. 前端与运行时之间能够双向传递事件。
-
-因此，协议只建立两个通用能力：
-
-- **状态同步**；
-- **事件传递**。
-
-协议不围绕地图、角色、项目、碰撞等具体业务分别设计接口。业务差异应体现在状态内容和事件类型中，而不是不断扩展通信协议本身。
-
-## 3. JSON-RPC 的定位
-
-JSON-RPC 作为统一的消息承载和调用语义，用于封装状态同步与事件传递。
-
-JSON-RPC 不承担游戏业务建模，也不决定运行时内部系统如何组织。
-
-协议层与传输层应分离：
-
-- 远程运行时可以使用 WebSocket；
-- Hostra 桌面本地运行时可以使用本机 WebSocket；
-- 浏览器本地运行时可以使用 Worker 消息通道；
-- 后续出现新的部署方式时，可以增加新的传输适配，而不改变上层通信语义。
-
-第一阶段不要求一次性确定完整协议格式，只需要保证不同传输方式可以承载相同的状态和事件消息。
-
-Hostra 自身也提供 JSON-RPC 窗口控制入口，但 Hostra 控制 RPC 与 LoomRealm Runtime RPC 是两个独立协议域：
+Runtime RPC 只建立两类通用能力：
 
 ```text
-Hostra Control RPC
-    = 窗口、宿主和进程协调
+状态同步
+    描述客户端现在应该呈现什么
 
-LoomRealm Runtime RPC
-    = 状态同步和事件传递
+事件传递
+    描述客户端或运行时发生了一次什么动作
 ```
 
-两套 RPC 不共享业务命名空间，也不通过 Hostra 控制 RPC 传递地图和人物状态。
+业务差异体现在：
 
-## 4. 权威状态原则
+- Scope 名称；
+- Client Node Tag；
+- Tag 对应的 Data Schema；
+- 事件名称和事件 Data。
 
-运行时是游戏逻辑状态的权威来源。
+基础通信层不预定义固定 RPG 业务 DTO。
 
-运行时负责决定：
+## 3. 权威状态原则
 
-- 当前世界和地图状态；
-- 玩家逻辑位置；
-- 移动结果；
+Runtime Core 是游戏规则和会话状态的权威来源。
+
+Runtime 负责决定：
+
+- 当前游戏状态；
+- 人物位置和行为结果；
 - 碰撞结果；
-- 地图跳转结果；
-- 其他会影响游戏规则的状态变化。
+- Portal 和地图切换结果；
+- 暂停和恢复结果；
+- 其他影响游戏规则的状态变化。
 
-前端负责：
+Web Client 负责：
 
-- 采集用户输入；
-- 渲染运行时状态；
-- 展示界面与消息；
-- 保存不影响游戏规则的临时视觉状态。
+- 采集并归一化用户输入；
+- 维护 Client State 本地镜像；
+- 将 Scoped State Tree 协调为 DOM；
+- 管理不影响游戏规则的临时视觉状态；
+- 按资源 Key 请求和缓存资源。
 
-前端不通过直接修改共享状态来表达用户意图。前端发送动作事件，由运行时处理动作并同步最终状态。
+客户端不得通过直接修改共享对象来改变权威状态。客户端发送事件或输入意图，由 Runtime 处理并同步新的客户端状态。
 
-这一原则用于避免前端和后端同时修改同一份权威数据，从而产生状态冲突。
+## 4. Runtime 状态与 Client State
 
-Hostra 也不持有或修改权威游戏状态。Hostra 只负责承载 Web Client、启动本地 Runtime 和管理桌面窗口生命周期。
+Runtime 内部状态不能直接序列化给客户端。
 
-## 5. 状态同步方向
+```text
+Runtime Core
+    权威状态和游戏规则
+        ↓
+Client State Projectors
+    投影为 Scope Tree
+        ↓
+Runtime Service
+    发送状态消息
+        ↓
+Web Client
+    更新 Client Store 和 DOM
+```
 
-状态同步用于描述“系统现在是什么状态”。
+Client State 使用通用 Scope Tree：
 
-状态同步应支持两种基本场景：
+```text
+Client State
+└── Scopes
+    └── Scope
+        └── Roots[]
+            └── Node
+                ├── key
+                ├── tag
+                ├── data
+                └── children[]
+```
 
-1. **完整同步**：用于首次连接、重新加载、重连或状态恢复；
-2. **增量同步**：用于正常运行过程中同步发生变化的部分。
+具体结构、Key 规则、Tag 注册、Roots 和 DOM 映射由 Client Scoped State Tree 协议定义。
 
-状态同步需要具备版本或顺序概念，使接收方能够判断本地状态是否仍然建立在正确的基础上。
+## 5. JSON-RPC 的定位
 
-当双方状态无法确认一致时，应重新获取完整状态，而不是继续在不确定的基础上应用增量变化。
+第一阶段使用 JSON-RPC 作为消息承载语义。
 
-具体采用何种差异格式、如何划分状态作用域、何时发送完整状态，由实现阶段决定。
+JSON-RPC 负责：
 
-## 6. 事件传递方向
+- 请求与响应关联；
+- 通知消息封装；
+- 方法名称空间；
+- 错误结果封装。
 
-事件用于描述“发生了什么”或“希望发生什么”。
+JSON-RPC 不负责：
+
+- 建模地图和人物；
+- 定义 Client Node Tag；
+- 决定 Runtime 内部模块；
+- 充当 DOM 操作协议；
+- 传递可执行代码。
+
+协议层与传输层分离：
+
+```text
+Runtime RPC 语义
+├── 远程 WebSocket
+├── 本机 WebSocket
+├── Dedicated Worker MessagePort
+└── 后续其他双向传输
+```
+
+不同传输适配必须承载相同的状态与事件语义。
+
+## 6. 消息顺序
+
+每个 Server → Client 状态或事件通知必须包含单调递增的消息序号：
+
+```ts
+interface RuntimeMessageMeta {
+  readonly protocolVersion: 1;
+  readonly sequence: number;
+}
+```
+
+客户端维护最后成功应用的序号。
+
+规则：
+
+```text
+sequence <= lastSequence
+→ 忽略重复或过期消息
+
+sequence == lastSequence + 1
+→ 正常应用
+
+sequence > lastSequence + 1
+→ 状态基础不确定，请求完整快照
+```
+
+重新建立连接后，客户端不能假定旧连接的消息仍然连续，应先获取完整状态。
+
+## 7. 完整状态同步
+
+完整状态用于：
+
+- 首次连接；
+- 页面重新加载；
+- 网络重新连接；
+- 检测到 Sequence 缺口；
+- 客户端状态校验失败；
+- 客户端主动请求恢复。
+
+状态内容：
+
+```ts
+interface ClientStateSnapshotMessage {
+  readonly type: "state.snapshot";
+  readonly state: ClientState;
+}
+```
+
+客户端收到完整状态后：
+
+1. 验证协议版本；
+2. 验证 Scope 和节点结构；
+3. 用新 Client State 替换本地镜像；
+4. 按 Scope 和 Key 协调 DOM；
+5. 将该消息 Sequence 记录为最新序号。
+
+完整状态描述目标结果，不要求客户端重放此前事件。
+
+## 8. Scope 替换
+
+第一阶段正常增量同步只支持替换单个 Scope：
+
+```ts
+interface ClientScopeReplaceMessage {
+  readonly type: "scope.replace";
+  readonly stateRevision: number;
+  readonly scope: string;
+  readonly value: ClientScope | null;
+}
+```
+
+语义：
+
+```text
+value = ClientScope
+→ 替换该 Scope 的目标 Roots Tree
+
+value = null
+→ 删除整个 Scope
+```
+
+Scope 内容为空时使用：
+
+```json
+{
+  "revision": 13,
+  "roots": []
+}
+```
+
+这与删除 Scope 不同。
+
+客户端收到 `scope.replace` 后，可以通过稳定 Key 对新旧树做 DOM 协调，不要求销毁所有节点。
+
+第一阶段不实现：
+
+- 节点级 Patch；
+- JSON Patch；
+- 服务端 DOM 指令；
+- ECS Component Replication；
+- 任意 HTML 字符串替换。
+
+## 9. 状态版本
+
+状态树内部有两级版本：
+
+```text
+ClientState.revision
+    整个客户端目标状态版本
+
+ClientScope.revision
+    单个 Scope 目标树版本
+```
+
+版本和消息 Sequence 的用途不同：
+
+```text
+sequence
+    检测通信消息顺序和缺口
+
+revision
+    判断客户端状态内容的新旧关系
+```
+
+客户端不得使用较旧 Scope Revision 覆盖较新 Scope。
+
+当 Revision 关系与消息 Sequence 无法一致解释时，应放弃局部更新并请求完整状态。
+
+## 10. Client Store
+
+Web Client 应维护独立于 DOM 的状态镜像：
+
+```ts
+interface ClientStore {
+  readonly state: ClientState | null;
+  readonly lastSequence: number;
+}
+```
+
+消息处理应先更新 Client Store，再由渲染协调器更新 DOM。
+
+```text
+Runtime Message
+→ 验证 Sequence 和 Revision
+→ 更新 Client Store
+→ 协调受影响 Scope
+→ 更新 DOM
+```
+
+WebSocket、Worker 或其他传输回调不得直接散布 DOM 修改逻辑。
+
+## 11. 事件传递
+
+事件用于表达一次动作或瞬时通知。
 
 事件通道是双向的：
 
-- 前端向运行时发送用户动作；
-- 运行时向前端发送消息、通知和运行时事件。
+```text
+Web Client
+→ 用户输入或节点事件
+→ Runtime Service
 
-前端发送的事件应表达经过归一化的用户意图，而不是直接传递浏览器原始事件对象。
+Runtime Service
+→ 一次性通知或表现事件
+→ Web Client
+```
 
-运行时发送的事件可以用于：
+### 11.1 节点事件
 
-- 提示界面进行一次性响应；
-- 通知某个运行时行为已经发生；
-- 输出日志、警告或错误；
-- 驱动不属于持久状态的表现行为。
+自定义节点可以通过 Scope 和 Key 定位事件来源：
 
-事件是瞬时信息，不应用来替代可恢复的状态。
+```ts
+interface ClientNodeEvent {
+  readonly type: "node.event";
+  readonly scope: string;
+  readonly key: string;
+  readonly event: string;
+  readonly data?: JsonValue;
+}
+```
 
-## 7. 状态与事件的边界
+节点事件不代表客户端可以任意调用 Runtime 内部方法。Runtime Service 必须根据当前 Client State 和业务路由验证事件来源与权限。
 
-状态表示系统当前可观察的结果，事件表示一次动作或变化过程。
+### 11.2 全局输入
 
-原则上：
+键盘方向、手柄轴等高频全局输入可以使用独立的归一化输入事件。
 
-- 需要在重新连接后恢复的内容属于状态；
-- 只需要处理一次的消息属于事件；
+基础协议不要求把所有输入伪装成 DOM 节点事件。
+
+客户端不得发送原始 Browser Event 对象。
+
+### 11.3 Runtime 事件
+
+Runtime → Client 的一次性事件适用于：
+
+- 音效或短暂表现触发；
+- 日志、警告和错误通知；
+- 不需要重新连接后恢复的提示；
+- 客户端本地过渡行为。
+
+需要重新连接后恢复的内容必须进入 Client State，而不能只依赖事件。
+
+## 12. 状态与事件边界
+
+```text
+状态
+    系统当前可观察结果
+    可通过完整同步恢复
+
+事件
+    一次动作或瞬时通知
+    不作为长期状态来源
+```
+
+原则：
+
 - 用户输入属于事件；
-- 用户输入产生的最终游戏结果属于状态；
-- 事件可以触发状态变化，但事件本身不等于状态。
+- 用户输入产生的最终结果属于状态；
+- 可恢复界面内容属于 Scope Tree；
+- 一次性表现可以使用事件；
+- 事件可以触发状态变化，但不能替代状态同步。
 
-前端应主要通过状态同步更新长期画面，通过事件处理一次性提示和表现。
+## 13. 资源传输边界
 
-## 8. 运行环境方向
+图片等资源主体不进入 Client State Tree。
 
-### 8.1 远程运行时
+节点 Data 只引用逻辑资源 Key：
 
-远程运行时通过 WebSocket 与前端通信。
-
-Web Client 从远程 Runtime 获取状态、事件和资源，不需要 Hostra 参与游戏协议。
-
-### 8.2 Hostra 桌面本地运行时
-
-Hostra 桌面模式下：
-
-- Hostra 启动 LoomRealm Runtime Server 子进程；
-- Runtime Server 在本机提供 Runtime WebSocket；
-- Web Client 在 Hostra 的 Electron 窗口中运行；
-- Web Client 直接连接 Runtime WebSocket；
-- Hostra 控制 RPC 只用于打开和关闭窗口等宿主操作；
-- Runtime Server 仍然是权威状态来源。
-
-Hostra 不作为 Runtime RPC 代理，也不将游戏状态保存到 Electron 主进程。
-
-### 8.3 浏览器本地运行时
-
-浏览器本地实时运行时优先使用 Dedicated Worker，并通过消息通道承载同一套协议。
-
-Service Worker 主要用于离线缓存、资源代理、版本更新和持久化协助。由于其生命周期由浏览器管理，不应作为第一阶段默认的持续游戏运行时或唯一世界状态容器。
-
-未来如需多窗口共享运行时，可以再评估 Shared Worker 或其他运行方式。
-
-## 9. Web Client 的环境独立性
-
-LoomRealm Web Client 应保持为普通 Web 应用。
-
-同一套状态镜像、输入归一化和 DOM 渲染代码应能够运行于：
-
-- Hostra Electron 窗口；
-- 普通浏览器；
-- 连接本地 Runtime 的开发环境；
-- 连接远程 Runtime 的部署环境。
-
-Web Client 不通过 Electron IPC 读取 FSDB、访问 Pokémon Essentials 本机目录、处理碰撞或修改人物权威状态。
-
-Hostra 提供的桌面能力应保持最小，并与游戏运行时协议分离。
-
-## 10. 第一阶段约束
-
-第一阶段只验证以下闭环：
-
-```text
-用户动作
-  → 事件传递到运行时
-  → 运行时执行移动、碰撞和地图跳转
-  → 运行时更新权威状态
-  → 状态同步到前端
-  → 前端完成 DOM 渲染
+```json
+{
+  "sprite": "actor.sprite/player"
+}
 ```
 
-在 Hostra 桌面模式下，第一阶段还验证：
+资源链路：
 
 ```text
-Hostra 启动 Runtime Server
-  → Runtime 服务就绪
-  → Hostra 打开 Web Client 窗口
-  → Web Client 连接 Runtime
-  → 完成相同的状态与事件闭环
+Client Node Data 中的资源 Key
+→ Web Client Resource Cache
+→ Runtime Service Resource Endpoint
+→ Resource Repository
+→ 资源主体
 ```
 
-第一阶段不要求实现：
+Runtime RPC 不暴露游戏包文件系统路径。
 
-- 业务导向的大量 RPC 方法；
-- 通过 Hostra 控制 RPC 承载游戏业务；
-- 多人状态同步；
-- 客户端预测和服务器校正；
+资源加载状态通常属于客户端本地状态，不是 Runtime 权威状态。
+
+## 14. Hostra 边界
+
+Hostra Control RPC 与 LoomRealm Runtime RPC 是两个独立协议域：
+
+```text
+Hostra Control RPC
+    窗口、宿主和进程协调
+
+LoomRealm Runtime RPC
+    Client State、事件和资源访问
+```
+
+Hostra 不保存、代理或修改权威游戏状态。
+
+Hostra 桌面模式下，Web Client 仍然直接使用 Runtime RPC 语义连接本地 Runtime Service。
+
+## 15. 运行环境
+
+### 15.1 远程 Runtime
+
+```text
+Web Client
+→ WebSocket
+→ Runtime Service
+```
+
+### 15.2 Hostra 本地 Runtime
+
+```text
+Hostra
+→ 启动本地 Runtime Service
+→ 打开 Web Client
+→ Web Client 连接本机 Runtime RPC
+```
+
+### 15.3 浏览器本地 Runtime
+
+```text
+Web Client
+→ Dedicated Worker MessagePort
+→ 浏览器本地 Runtime
+```
+
+Service Worker 不作为第一阶段默认持续 Runtime，因为其生命周期不适合保存唯一权威会话状态。
+
+## 16. 错误与恢复
+
+以下情况需要请求完整状态：
+
+- 消息 Sequence 出现缺口；
+- State Revision 不连续或倒退；
+- Scope Revision 冲突；
+- 一个 Scope 内出现重复 Key；
+- Tag 未注册；
+- Tree 验证失败；
+- 客户端协调器出现不可恢复错误。
+
+客户端不得在状态基础不确定时继续盲目应用局部更新。
+
+协议错误应与业务命令拒绝分开：
+
+```text
+协议错误
+    消息、版本、Tree 或 Sequence 无效
+
+业务拒绝
+    当前游戏状态不接受某次用户意图
+```
+
+## 17. 第一阶段闭环
+
+```text
+用户输入
+→ Client 发送归一化事件
+→ Runtime Service 调用 Runtime Core
+→ Runtime 更新权威状态
+→ Client State Projector 更新 Scope Tree
+→ Runtime Service 发送 state.snapshot 或 scope.replace
+→ Client Store 应用状态
+→ DOM 协调器按 Scope、Key 和 Tag 更新 DOM
+```
+
+地图和人物图片由资源接口另行加载。
+
+## 18. 第一阶段不实现
+
+- 固定地图、人物、HUD 或菜单 RPC；
+- 固定 RPG Client DTO；
+- 节点级 Patch；
+- 客户端预测和 Server 校正；
+- 多人同步；
 - 复杂断线重放；
-- 完整事件持久化；
 - 通用分布式状态系统；
-- 跨会话世界状态恢复；
-- 多窗口共享同一游戏运行时。
+- Hostra Control RPC 承载游戏业务；
+- Server 下发任意 HTML、CSS 或 JavaScript；
+- 客户端直接修改 Runtime 权威状态。
 
-## 11. 当前架构结论
+## 19. 已冻结决策
 
-LoomRealm 的前端与运行时通信采用以下方向：
+| 问题 | 第一阶段结论 |
+|---|---|
+| 消息承载 | JSON-RPC |
+| 传输 | WebSocket 或 MessagePort 适配 |
+| 权威状态 | Runtime Core |
+| 客户端状态 | Scoped State Tree |
+| 完整同步 | `state.snapshot` |
+| 正常状态更新 | `scope.replace` |
+| 消息顺序 | 单调递增 `sequence` |
+| 状态版本 | State Revision + Scope Revision |
+| 业务扩展 | Scope + Tag + Data Schema |
+| 节点事件 | Scope + Key + Event + Data |
+| 资源 | 独立资源接口 |
+| 节点级 Patch | 第一阶段不实现 |
+| 固定业务 DTO | 不定义 |
+| Runtime 状态直传 | 禁止 |
 
-- 使用 JSON-RPC 作为通用消息承载语义；
-- 不按具体 RPG 业务设计大量 RPC 接口；
-- 通过通用状态同步保持前端与运行时一致；
-- 通过通用事件通道双向传递用户动作和运行时消息；
-- 运行时持有权威游戏状态；
-- 前端发送用户意图，不直接写入权威状态；
-- 状态用于恢复和渲染，事件用于表达动作和一次性消息；
-- 协议语义独立于远程 WebSocket、本机 WebSocket、Worker 和其他传输实现；
-- Hostra 作为桌面宿主，可以启动本地 Runtime 并承载 Web Client 窗口；
-- Hostra 控制 RPC 与 LoomRealm Runtime RPC 完全分离；
-- Hostra 不保存或转发权威游戏状态；
-- Web Client 保持环境独立，不依赖 Electron 才能运行；
-- 具体消息结构与实现方案在开发阶段根据实际需求确定。
+## 20. 当前结论
+
+LoomRealm 的 Runtime 通信使用通用状态同步和事件通道。客户端可见状态统一投影为 Scoped State Tree，通过完整快照和 Scope 替换保持一致；业务通过 Scope、Tag 和 Data Schema 扩展，不通过新增固定 RPC 或固定 RPG DTO 扩展基础协议。
