@@ -24,6 +24,7 @@
 ### 运行时
 
 - [第一阶段 Pokémon Essentials v21.1 地图与行走运行时](./runtime/phase-1-pokemon-essentials-map-runtime.md)
+- [第一阶段人物行走与碰撞运行时](./runtime/phase-1-walking-and-collision.md)
 
 ### 渲染
 
