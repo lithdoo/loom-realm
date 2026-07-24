@@ -1,19 +1,20 @@
 # LoomRealm 开发文档
 
-本目录保存 LoomRealm 的总体架构、游戏包规范、存档、运行时、客户端、桌面宿主、开发计划和技术决策。
+本目录保存 LoomRealm 的总体架构、游戏包规范、内容加载、存档、运行时、客户端、桌面宿主、开发计划和技术决策。
 
 ## 从这里开始
 
 - [LoomRealm 总体架构](./architecture/system-overview.md)
 - [第一阶段游戏包规范](./game-package/phase-1-game-package-specification.md)
+- [第一阶段游戏启动与异步内容加载](./game-package/phase-1-game-loading.md)
 
-总体架构定义系统模块、职责边界和主要运行流程。游戏包规范定义 `loom-realm start <game-directory>` 接受的只读目录契约。具体 Schema、算法和协议由专题文档负责。
+总体架构定义系统模块、职责边界和主要运行流程。游戏包规范定义 `loom-realm start <game-directory>` 接受的只读目录契约。异步内容加载文档定义启动时建立轻量目录、按需加载地图和人物、以及资源按客户端请求读取的运行边界。
 
 ## 文档层级
 
 ```text
 总体架构
-├── 游戏包、存档与 CLI 公开契约
+├── 游戏包、加载、存档与 CLI 公开契约
 ├── 系统架构与通信边界
 ├── 运行时专题设计
 ├── 客户端渲染专题设计
@@ -25,11 +26,14 @@
 ## 文档原则
 
 1. 讨论结论应沉淀为结构化开发文档，而不是仅保留在聊天记录中。
-2. 总体架构只说明模块和边界，专题文档负责目录格式、数据结构、算法和实现约束。
+2. 总体架构只说明模块和边界，专题文档负责目录格式、数据结构、异步加载、算法和实现约束。
 3. 同一设计只保留一个主要定义位置，其他文档通过引用建立关系。
 4. 重大变更需要同步更新总体架构、相关专题文档和设计待办。
 5. 游戏包在运行期间只读，可变世界状态保存到独立存档。
-6. LoomRealm 不提供游戏内容编辑器或项目创作接口。
+6. 启动时只读取游戏身份、轻量索引和当前场景，不把整个游戏读入内存。
+7. 地图和人物由异步 Repository 按需加载，Runtime Core 不执行文件 I/O。
+8. 图片资源由 Web Client 通过 Runtime Service 按资源 Key 请求。
+9. LoomRealm 不提供游戏内容编辑器或项目创作接口。
 
 ## 当前文档
 
@@ -37,6 +41,7 @@
 
 - [LoomRealm 总体架构](./architecture/system-overview.md)
 - [第一阶段游戏包规范](./game-package/phase-1-game-package-specification.md)
+- [第一阶段游戏启动与异步内容加载](./game-package/phase-1-game-loading.md)
 
 ### 系统架构
 
