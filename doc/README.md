@@ -20,6 +20,7 @@
 ### 系统架构
 
 - [运行时通信与状态同步](./architecture/runtime-rpc-and-state-sync.md)
+- [Hostra 桌面客户端宿主架构](./architecture/hostra-desktop-client-host.md)
 
 ### 运行时
 
