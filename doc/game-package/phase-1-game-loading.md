@@ -2,17 +2,17 @@
 
 ## 1. 文档目的
 
-本文档定义 LoomRealm 第一阶段如何打开游戏包、建立运行入口，并在运行期间异步加载地图和人物内容。
+本文档定义 LoomRealm 第一阶段如何打开只读游戏包、建立轻量内容目录，并按需异步加载地图和人物。
 
-本文档取代“启动时把整个游戏编译为完整 Game Snapshot”的设计。第一阶段不要求把所有地图、人物或图片资源读入内存。
+本文档不定义 Session Coordinator 的完整状态机和命令流程；相关内容由《第一阶段 Session Coordinator》负责。
 
-核心原则是：
+核心原则：
 
-> 启动时读取游戏身份、入口和内容索引；当前场景所需的地图与人物异步加载；图片资源由 Web Client 通过 Runtime Service 按需请求。
+> 启动时读取游戏身份、入口和内容索引；只加载入口场景需要的地图与人物；后续内容按需异步加载；图片资源由 Web Client 通过 Runtime Service 请求。
 
-## 2. 模块定位
+第一阶段不把所有地图、人物或图片资源读入内存，也不构建全量 `Game Snapshot`。
 
-游戏加载不是一次性复制整个游戏包，而是创建一个可持续使用的只读内容访问上下文。
+## 2. 模块结构
 
 ```text
 只读游戏包目录
@@ -27,26 +27,28 @@ Game Package Context
         ↓
 Session Coordinator
         ↓
-按需加载当前地图和人物
-        ↓
 Runtime Core
 ```
 
-`Game Package Loader` 负责打开游戏包和建立索引。
+职责边界：
 
-`Session Coordinator` 负责所有异步 I/O、缓存和场景准备。
+- `Game Package Loader` 打开目录、校验清单并建立轻量索引；
+- `Repository` 按 ID 异步读取、解析、校验和缓存静态内容；
+- `Session Coordinator` 组织入口场景和地图切换流程；
+- `Runtime Core` 只处理已经准备好的结构化内容和权威状态；
+- `Runtime Service` 提供状态、命令和资源接口；
+- `Web Client` 请求、解码和缓存图片资源。
 
-`Runtime Core` 只接收已经加载和校验的结构化内容，不读取文件系统，也不直接执行异步加载。
+## 3. 核心对象
 
-## 3. 不再使用完整 Game Snapshot
-
-第一阶段不定义包含全部地图和全部人物的全量 `Game Snapshot`。
-
-改为以下对象：
+第一阶段使用以下对象：
 
 ```text
 Game Package Context
-    游戏身份、入口、目录和内容仓储
+    游戏包身份、轻量目录和内容仓储
+
+Game Catalog
+    地图、人物和资源的 ID 索引
 
 Map Snapshot
     单张已加载地图的只读运行定义
@@ -55,28 +57,14 @@ Actor Definition
     单个人物的只读定义
 
 Runtime State
-    当前会话中的可变权威状态
+    当前会话的可变权威状态
 ```
 
-这些对象边界如下：
+静态内容可以缓存、淘汰和重新加载。运行状态不能依赖某个静态对象是否仍在缓存中。
 
-```text
-静态游戏内容
-├── Game Catalog
-├── Map Snapshot
-└── Actor Definition
+## 4. Game Package Source
 
-可变会话内容
-└── Runtime State
-```
-
-静态内容可以从内存缓存中淘汰并重新加载；可变状态不得依赖静态内容对象是否仍在缓存中。
-
-## 4. 第一阶段模块组成
-
-### 4.1 Game Package Source
-
-`Game Package Source` 是对只读游戏目录的最小访问抽象。
+`Game Package Source` 是对只读游戏目录的最小访问抽象：
 
 ```ts
 interface GamePackageSource {
@@ -87,47 +75,60 @@ interface GamePackageSource {
 }
 ```
 
-第一阶段只实现普通目录后端：
+第一阶段只实现：
 
 ```text
 DirectoryGamePackageSource
 ```
 
-接口只提供加载所需的只读能力，不模拟完整文件系统。
+该接口只提供加载静态内容所需的只读能力，不模拟完整文件系统。
 
-路径解析必须保证：
+路径规则：
 
-- 规范路径位于游戏包根目录内；
+- 规范路径必须位于游戏包根目录内；
 - 禁止绝对路径；
 - 禁止路径穿越；
 - 禁止符号链接和目录连接点逃逸；
-- 禁止远程 URL。
+- 禁止远程 URL；
+- Runtime 不通过该接口写入任何内容。
 
-### 4.2 Game Package Loader
+## 5. Game Package Loader
 
-`Game Package Loader` 只负责打开游戏包并建立 `Game Package Context`。
+`Game Package Loader` 负责打开游戏包并建立 `Game Package Context`。
 
-它在启动阶段读取：
+启动时读取：
 
 - `realm.game.json`；
 - 游戏包格式和游戏身份；
-- Runtime 版本与 Feature 要求；
+- 初始地图和玩家人物入口；
+- Runtime 版本和 Feature 要求；
 - FSDB 根结构和必要 Namespace 元数据；
 - 地图 ID 与记录位置索引；
 - 人物 ID 与记录位置索引；
 - 资源 Key 与物理位置索引。
 
-它不在启动阶段读取：
+启动时不读取：
 
 - 所有地图的 Tile 详情；
-- 所有人物完整定义；
+- 所有人物的完整定义；
+- 所有 Portal 的运行数据；
 - 图片、音频等资源主体；
-- 所有 Portal 的完整运行数据；
-- 游戏包全部文件的内容摘要。
+- 整个游戏包的全量内容摘要。
 
-### 4.3 Game Catalog
+Loader 成功后返回：
 
-`Game Catalog` 是启动时常驻内存的轻量目录。
+```ts
+interface GamePackageContext {
+  readonly catalog: GameCatalog;
+  readonly maps: MapRepository;
+  readonly actors: ActorRepository;
+  readonly resources: ResourceRepository;
+}
+```
+
+## 6. Game Catalog
+
+`Game Catalog` 是启动后常驻内存的轻量目录：
 
 ```ts
 interface GameCatalog {
@@ -139,7 +140,7 @@ interface GameCatalog {
 }
 ```
 
-示意结构：
+示意目录项：
 
 ```ts
 interface MapCatalogEntry {
@@ -159,11 +160,11 @@ interface ResourceDescriptor {
 }
 ```
 
-目录项只保存定位和轻量元数据，不保存完整地图层、通行网格或图片字节。
+目录项保存定位和轻量元数据，不保存完整 Tile 层、通行网格、人物详情或图片字节。
 
-### 4.4 Map Repository
+## 7. Map Repository
 
-`Map Repository` 根据地图 ID 异步加载一张地图。
+`Map Repository` 根据地图 ID 异步加载一张地图：
 
 ```ts
 interface MapRepository {
@@ -200,11 +201,11 @@ interface MapSnapshot {
 }
 ```
 
-`Map Snapshot` 是单张地图的不可变运行定义，不包含当前玩家位置、当前移动进度或其他存档状态。
+`Map Snapshot` 不包含玩家当前坐标、移动进度或其他可变会话状态。
 
-### 4.5 Actor Repository
+## 8. Actor Repository
 
-`Actor Repository` 根据人物 ID 异步加载人物定义。
+`Actor Repository` 根据人物 ID 异步加载人物定义：
 
 ```ts
 interface ActorRepository {
@@ -225,11 +226,13 @@ interface ActorDefinition {
 }
 ```
 
-启动时只加载当前玩家人物。后续人物在进入包含该人物的地图或实际生成该人物前加载。
+启动时只加载玩家人物。其他人物在进入包含该人物的地图或实际创建运行时人物之前加载。
 
-### 4.6 Resource Repository
+Actor Repository 只返回静态定义，不创建运行时人物状态。
 
-`Resource Repository` 负责根据资源 Key 定位资源，并在 Runtime Service 收到客户端请求后打开资源内容。
+## 9. Resource Repository
+
+`Resource Repository` 根据资源 Key 定位资源，并在 Runtime Service 收到客户端请求后打开资源主体：
 
 ```ts
 interface ResourceRepository {
@@ -238,219 +241,163 @@ interface ResourceRepository {
 }
 ```
 
-资源加载链路：
+资源链路：
 
 ```text
 Web Client
 → 请求资源 Key
 → Runtime Service
 → Resource Repository
-→ 读取资源主体
+→ 打开资源主体
 → 返回给 Web Client
 ```
 
-Game Package Loader 只建立资源目录并做轻量完整性检查，不把资源主体放入启动快照或 Runtime Core。
+Game Package Loader 只建立资源目录并执行轻量完整性检查：
 
-## 5. 启动游戏的数据加载
+- 资源 Key 唯一；
+- 资源路径安全；
+- 文件存在；
+- 扩展名或声明类型受支持。
+
+第一阶段不在启动时读取、解码或预载全部图片。
+
+## 10. Repository 缓存
+
+缓存属于 Repository，而不是 Session Coordinator。
+
+```text
+MapRepository.load(mapId)
+├── ready：返回缓存内容
+├── loading：返回同一个 Promise
+└── not-loaded：读取、解析、校验并缓存
+```
+
+第一阶段缓存要求：
+
+- 同一 ID 的并发请求共享一个加载任务；
+- 当前地图可以常驻；
+- 两张验收地图可以全部驻留，但不是规范要求；
+- 缓存命中与否不得改变游戏语义；
+- 不要求持久化缓存；
+- 不要求 LRU；
+- 加载失败不永久缓存。
+
+## 11. 启动游戏
 
 命令：
 
 ```bash
-loom-realm start ./game --save ./game.0.lrsav
+loom-realm start ./game
 ```
 
-启动流程分为五个阶段。
-
-### 5.1 打开游戏包
+启动流程：
 
 ```text
 解析 CLI 参数
-→ 确认游戏目录存在
 → 创建 DirectoryGamePackageSource
-→ 读取 realm.game.json
-```
-
-失败时不创建运行会话。
-
-### 5.2 建立轻量目录
-
-```text
-读取游戏身份和入口
-→ 检查格式与 Feature
-→ 读取 FSDB Namespace 元数据
-→ 建立地图、人物和资源索引
+→ 读取和校验 realm.game.json
+→ 建立 Game Catalog
+→ 创建 Map、Actor、Resource Repository
 → 创建 Game Package Context
+→ 创建 Runtime Core
+→ 创建 Session Coordinator
+→ Session Coordinator.start()
 ```
 
-此阶段不深度读取所有地图和人物。
-
-### 5.3 确定会话入口
-
-没有存档时：
+Session Coordinator 并行加载入口内容：
 
 ```text
-当前地图 = manifest.entry.initialMapId
-当前人物 = manifest.entry.playerActorId
-当前位置 = 初始地图 defaultSpawn
+MapRepository.load(entry.initialMapId)
+ActorRepository.load(entry.playerActorId)
 ```
 
-存在存档时：
+加载完成后校验：
 
-```text
-当前地图 = save.currentMapId
-当前人物 = save.playerActorId 或游戏入口人物
-当前位置 = save.playerPosition
-```
-
-在加载地图详情前，必须先通过目录确认相关 ID 存在。
-
-### 5.4 异步准备启动场景
-
-`Session Coordinator` 并行发起：
-
-```text
-Map Repository.load(currentMapId)
-Actor Repository.load(playerActorId)
-```
-
-两者成功后执行启动场景校验：
-
+- 初始地图有效；
+- 玩家人物有效；
+- 默认出生位置在地图范围内；
+- 默认出生位置允许玩家站立；
 - 玩家 Sprite 资源 Key 存在；
-- 地图所需结构有效；
-- 目标坐标位于地图范围内；
-- 目标坐标允许玩家站立；
-- 地图引用的必需资源 Key 均存在；
-- 存档位置与当前地图兼容。
+- 地图引用的必需资源 Key 存在。
 
-资源主体仍不在此时读取。
+资源主体仍不在启动阶段读取。
 
-### 5.5 创建运行会话
+成功后：
 
 ```text
-Game Catalog
-+ 当前 Map Snapshot
+Game Identity
++ 入口 Map Snapshot
 + 玩家 Actor Definition
-+ 可选 Save Snapshot
++ 默认出生位置
         ↓
-Runtime Core 初始化
+Runtime Core.initialize(...)
         ↓
-Runtime Service 启动
+Session 进入 running
         ↓
-Web Client 获取首个完整状态
+Runtime Service 发布首个完整状态
 ```
 
-只有启动场景准备完成后，运行会话才进入 `ready` 状态。
+## 12. Runtime Core 与异步边界
 
-## 6. Runtime Core 与异步加载边界
+Runtime Core 不直接：
 
-`Runtime Core` 不直接调用 Repository，也不执行文件 I/O。
+- 调用 Repository；
+- 调用 `fs`；
+- 执行 `await`；
+- 读取 FSDB；
+- 打开图片资源。
 
-异步工作由 `Session Coordinator` 完成：
+Runtime Core 接收已经准备好的对象并执行同步事务。
+
+地图切换流程：
 
 ```text
-Session Coordinator
-├── Game Package Context
-├── Map Repository
-├── Actor Repository
-├── 内容缓存
-└── Runtime Core
+Runtime Core 检测 Portal
+→ 返回 MapTransitionEffect
+→ Session Coordinator 暂停 Runtime
+→ 异步准备目标地图和人物
+→ Runtime Core 原子提交 PreparedMapTransition
+→ 恢复 Runtime
 ```
 
-Runtime Core 的操作应保持确定性。它接收已经准备好的内容并执行同步状态事务。
+完整协调行为由《第一阶段 Session Coordinator》定义。
 
-例如地图切换不是：
+## 13. 地图异步加载
+
+地图切换遵循“准备—提交”：
 
 ```text
-Runtime Core
-→ await fs.readFile(...)
-```
-
-而是：
-
-```text
-Runtime Core 产生地图切换意图
-→ Session Coordinator 异步准备目标场景
-→ Runtime Core 原子提交已准备场景
-```
-
-## 7. 地图异步加载
-
-地图切换必须使用“准备—提交”两阶段流程。
-
-### 7.1 发现切换
-
-```text
-玩家完成合法移动
-→ Runtime Core 检测 Portal
-→ 生成 MapTransitionRequest
-```
-
-请求至少包含：
-
-```ts
-interface MapTransitionRequest {
-  readonly targetMapId: string;
-  readonly targetPosition: GridPosition;
-  readonly targetDirection?: Direction;
-}
-```
-
-### 7.2 准备目标场景
-
-`Session Coordinator` 执行：
-
-```text
-加载目标 Map Snapshot
-→ 加载目标地图必需人物定义
-→ 校验目标位置
-→ 建立 PreparedMapTransition
-```
-
-准备期间：
-
-- 当前地图继续保持有效；
-- Runtime 不接受会导致重复地图切换的输入；
-- 客户端可以显示过渡或加载状态；
-- 目标资源主体可由客户端根据即将到来的状态按需加载。
-
-### 7.3 原子提交
-
-全部必需内容加载成功后：
-
-```text
-PreparedMapTransition
+当前地图继续有效
+→ 加载目标 Map Snapshot
+→ 加载目标地图必需 Actor Definition
+→ 校验目标位置和引用
+→ 创建 PreparedMapTransition
 → Runtime Core 原子提交
-→ 更新当前地图和玩家位置
-→ 发送新地图完整状态
 ```
 
-若目标地图加载失败：
+目标地图准备失败时：
 
-- 当前地图和人物状态保持不变；
+- 当前地图保持不变；
+- 玩家状态保持不变；
 - 不提交部分切换；
-- 会话返回稳定错误；
-- 客户端退出加载状态并显示错误。
+- Session Coordinator 根据错误类型恢复或进入失败状态。
 
-## 8. 人物异步加载
+## 14. 人物异步加载
 
-第一阶段只要求玩家人物，但接口按长期模型设计。
-
-人物加载时机：
+第一阶段只要求玩家人物，但接口按长期模型设计：
 
 ```text
 启动游戏
 → 加载玩家人物
 
 进入地图
-→ 加载该地图运行必需的人物
+→ 加载地图运行必需的人物
 
-运行时生成新人物
-→ 生成前加载对应 Actor Definition
+运行时创建人物
+→ 创建前加载 Actor Definition
 ```
 
-人物定义加载失败时，不得创建对应运行时人物。
-
-人物静态定义与人物会话状态分离：
+静态人物定义与运行人物状态分离：
 
 ```text
 Actor Definition
@@ -460,219 +407,154 @@ Runtime Actor State
     地图、坐标、朝向和移动状态
 ```
 
-静态定义可以缓存或重新加载；运行时人物状态属于 Runtime Core 和存档系统。
+## 15. 校验策略
 
-## 9. 缓存与并发
+校验分为两种运行模式。
 
-第一阶段采用简单的进程内只读缓存。
-
-### 9.1 读取去重
-
-同一内容的并发请求必须共享一个加载任务：
-
-```text
-load(map/town)
-load(map/town)
-        ↓
-同一个 Promise<MapSnapshot>
-```
-
-避免重复读取和重复解析。
-
-### 9.2 缓存状态
-
-建议内部区分：
-
-```text
-not-loaded
-loading
-ready
-failed
-```
-
-失败结果不能永久缓存。修复游戏包后重新启动时必须重新读取。
-
-### 9.3 淘汰规则
-
-第一阶段可以采用：
-
-- 当前地图固定保留；
-- 正在准备的目标地图固定保留；
-- 已加载人物按引用保留；
-- 其他内容允许 LRU 淘汰；
-- 两张验收地图可以都常驻内存，但这不是规范要求。
-
-第一阶段不要求持久化内容缓存。
-
-## 10. 校验策略
-
-校验分为三层。
-
-### 10.1 启动结构校验
+### 15.1 启动快速校验
 
 启动时检查：
 
-- 清单格式；
-- 游戏身份；
-- 入口 ID；
+- 清单和格式版本；
+- 游戏身份和入口；
 - Runtime Feature；
 - FSDB 根结构；
 - 地图、人物和资源 Key 唯一性；
-- 索引路径安全；
-- 当前存档引用的地图和人物 ID 存在。
+- 入口地图和入口人物可以定位；
+- 所有资源路径均位于游戏包内。
 
-### 10.2 按需内容校验
+### 15.2 按需深度校验
 
-加载地图或人物时检查其完整详情和局部引用。
+内容首次加载时检查：
 
-地图错误只在该地图被启动、进入或显式验证时成为运行错误。
+- 地图层数据完整；
+- Tile 和 Tileset 引用可解析；
+- 通行和 Priority 数据有效；
+- Portal 目标存在；
+- 人物定义有效；
+- 资源 Key 存在；
+- 目标坐标在范围内且可站立。
 
-### 10.3 全包验证
-
-完整发布检查应由独立流程完成：
+未来可以增加独立命令：
 
 ```bash
 loom-realm validate ./game
 ```
 
-该命令遍历所有地图、人物和资源定义，执行深度校验，但不创建运行会话。
+该命令遍历全部内容执行深度校验，但不属于第一阶段启动闭环的必需实现。
 
-第一阶段可以先只定义该命令语义，具体实现可在启动闭环完成后补充。
+## 16. 加载错误
 
-## 11. 加载状态与错误
-
-会话至少具有以下启动状态：
+建议错误代码至少包括：
 
 ```text
-opening-package
-indexing-content
-loading-save
-loading-scene
-ready
-failed
-```
-
-地图切换至少具有：
-
-```text
-idle
-preparing-map
-committing-map
-failed
-```
-
-错误至少区分：
-
-```text
-GAME_PACKAGE_OPEN_FAILED
+GAME_MANIFEST_NOT_FOUND
 GAME_MANIFEST_INVALID
-GAME_CATALOG_INVALID
+GAME_FORMAT_VERSION_UNSUPPORTED
+GAME_FEATURE_UNSUPPORTED
+GAME_PATH_OUTSIDE_PACKAGE
+FSDB_NAMESPACE_INVALID
+CONTENT_ID_DUPLICATED
 MAP_NOT_FOUND
-MAP_LOAD_FAILED
-MAP_REFERENCE_INVALID
+MAP_INVALID
 ACTOR_NOT_FOUND
-ACTOR_LOAD_FAILED
+ACTOR_INVALID
 RESOURCE_NOT_FOUND
+RESOURCE_PATH_INVALID
 SPAWN_INVALID
-SAVE_ENTRY_INVALID
+PORTAL_TARGET_INVALID
 ```
 
-错误应携带游戏包路径、内容 ID、记录位置和字段路径，但不能把本机物理路径暴露给 Web Client。
+错误至少包含：
 
-## 12. 第一阶段接口建议
+- 稳定错误代码；
+- 人类可读说明；
+- 游戏包根目录；
+- 相关 FSDB Key；
+- 相关文件路径；
+- 字段路径；
+- 可选修复建议。
 
-```ts
-interface GamePackageLoader {
-  open(packageRoot: string): Promise<GamePackageContext>;
-}
-
-interface GamePackageContext {
-  readonly catalog: GameCatalog;
-  readonly maps: MapRepository;
-  readonly actors: ActorRepository;
-  readonly resources: ResourceRepository;
-}
-
-interface SessionCoordinator {
-  start(input: StartSessionInput): Promise<RuntimeSession>;
-  prepareMapTransition(
-    request: MapTransitionRequest,
-  ): Promise<PreparedMapTransition>;
-}
-```
-
-接口保持异步，即使验收游戏包很小，以免未来更换存储后端或增加大型地图时修改运行时边界。
-
-## 13. 第一阶段非目标
+## 17. 第一阶段非目标
 
 第一阶段不实现：
 
-- 启动时加载整个游戏；
-- 全量常驻 Game Snapshot；
-- 图片资源预加载到 Runtime；
-- Runtime Core 直接读取 FSDB；
-- Runtime Core 直接等待文件 I/O；
-- 地图热重载；
-- 游戏包文件监听；
-- 多线程内容解析；
-- 持久化地图缓存；
-- 后台下载远程内容；
+- 全游戏一次性加载；
+- 完整 `Game Snapshot`；
 - ZIP、ASAR 或其他单文件游戏包；
-- 自动预测复杂地图访问路径。
+- 热重载和文件监听；
+- 后台预加载；
+- 持久化编译缓存；
+- 增量构建；
+- 远程游戏包；
+- 内容依赖包；
+- DLC 和补丁合并；
+- 存档恢复；
+- 客户端图片就绪后再恢复 Runtime。
 
-## 14. 第一阶段验收
+## 18. 第一阶段验收
 
-### 14.1 启动验收
+正常路径：
 
-- 打开有效游戏包；
-- 建立地图、人物和资源目录；
-- 不读取非入口地图的完整 Tile 数据；
-- 并行加载入口地图和玩家人物；
-- 创建 Runtime Session；
-- 客户端接收首个完整状态。
+- 启动时只建立轻量目录；
+- 入口地图和玩家人物并行加载；
+- 图片资源主体不在启动时读取；
+- Portal 触发目标地图异步加载；
+- 目标内容准备完成后原子提交；
+- 资源由 Web Client 按 Key 请求；
+- 重复加载同一地图可以命中缓存。
 
-### 14.2 地图切换验收
+错误路径：
 
-- 玩家进入 Portal；
-- 目标地图异步加载；
-- 当前地图在准备期间保持有效；
-- 目标地图加载成功后原子切换；
-- 目标地图加载失败时不改变当前权威状态。
+- 清单不存在或损坏；
+- 入口地图不存在；
+- 入口人物不存在；
+- 地图 Tile 数据损坏；
+- 人物资源 Key 不存在；
+- Portal 目标地图不存在；
+- 目标出生位置无效；
+- 游戏包路径逃逸。
 
-### 14.3 人物加载验收
+确定性要求：
 
-- 玩家人物在启动场景创建前完成加载；
-- 未使用的人物不在启动时读取完整定义；
-- 同一人物的并发请求只触发一次实际读取；
-- 人物引用错误产生稳定诊断。
+- Repository 缓存命中与否不改变结果；
+- 同一地图产生语义一致的 Map Snapshot；
+- 异步完成顺序不改变 Runtime 提交结果；
+- 图片读取速度不影响权威状态。
 
-### 14.4 资源验收
+## 19. 已冻结决策
 
-- 启动时只建立资源目录并核验路径；
-- 图片主体不进入 Game Catalog、Map Snapshot 或 Runtime Core；
-- Web Client 请求资源后由 Runtime Service 按需读取并返回；
-- 不存在的资源 Key 返回稳定错误。
+| 问题 | 第一阶段结论 |
+|---|---|
+| 游戏包来源 | 普通只读目录 |
+| 启动加载 | 身份、入口和轻量索引 |
+| 全量 Game Snapshot | 不使用 |
+| 地图详情 | `MapRepository.load()` 按需加载 |
+| 人物详情 | `ActorRepository.load()` 按需加载 |
+| 图片主体 | 客户端请求时读取 |
+| 内容缓存 | Repository 负责 |
+| Runtime I/O | 禁止 |
+| 地图切换 | 异步准备、同步原子提交 |
+| 存档 | 第一阶段不接入 |
+| 单文件包 | 第一阶段不支持 |
 
-## 15. 当前结论
-
-第一阶段的加载链路是：
+## 20. 当前结论
 
 ```text
-启动时
-游戏包目录
-→ 清单与轻量内容索引
-→ 确定存档入口
-→ 异步加载当前地图和玩家人物
-→ 创建 Runtime Session
+启动
+→ 建立 Game Catalog
+→ 加载入口地图和玩家人物
+→ 初始化 Runtime
 
-运行时
-地图切换或人物生成请求
-→ Session Coordinator 异步准备内容
-→ Runtime Core 原子提交状态变化
+运行
+→ 地图和人物按需异步加载
+→ Repository 负责读取和缓存
+→ Session Coordinator 负责协调
+→ Runtime Core 负责同步权威状态事务
 
 资源
-Web Client 请求资源 Key
-→ Runtime Service 按需读取资源主体
+→ Web Client 按 Key 请求
+→ Runtime Service 调用 Resource Repository
 ```
 
-LoomRealm 不把整个游戏读入内存。它只常驻运行所需的全局目录和当前场景内容，并通过异步 Repository 逐步加载地图和人物。
+第一阶段加载架构的重点不是预先读取整个游戏，而是建立稳定的内容访问边界，使 Runtime Core 始终不依赖文件系统和异步 I/O。
