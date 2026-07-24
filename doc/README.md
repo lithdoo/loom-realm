@@ -21,6 +21,10 @@
 
 - [运行时通信与状态同步](./architecture/runtime-rpc-and-state-sync.md)
 
+### 运行时
+
+- [第一阶段 Pokémon Essentials v21.1 地图与行走运行时](./runtime/phase-1-pokemon-essentials-map-runtime.md)
+
 ### 渲染
 
 - [第一阶段 DOM 渲染与渲染状态](./renderer/phase-1-dom-rendering.md)
