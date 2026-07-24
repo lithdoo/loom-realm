@@ -6,11 +6,15 @@
 
 本文档只描述架构目标和协议边界，不规定具体消息字段、方法名称、状态差异格式、目录结构或实现技术细节。这些内容由实现阶段根据第一阶段原型的实际需求确定。
 
+LoomRealm 使用 Hostra 作为桌面客户端宿主时的进程、窗口和安全设计见：
+
+- [`hostra-desktop-client-host.md`](./hostra-desktop-client-host.md)
+
 ## 2. 核心目标
 
 LoomRealm 的前端与运行时应保持松耦合。
 
-前端既可以连接真实远程服务端，也可以连接浏览器本地运行时。无论运行时部署在哪里，前端都应使用同一种通信语义，不直接依赖具体运行环境。
+前端既可以连接真实远程服务端，也可以连接浏览器本地运行时或 Hostra 启动的桌面本地运行时。无论运行时部署在哪里，前端都应使用同一种通信语义，不直接依赖具体运行环境。
 
 通信需要解决两个问题：
 
@@ -33,10 +37,23 @@ JSON-RPC 不承担游戏业务建模，也不决定运行时内部系统如何�
 协议层与传输层应分离：
 
 - 远程运行时可以使用 WebSocket；
+- Hostra 桌面本地运行时可以使用本机 WebSocket；
 - 浏览器本地运行时可以使用 Worker 消息通道；
 - 后续出现新的部署方式时，可以增加新的传输适配，而不改变上层通信语义。
 
 第一阶段不要求一次性确定完整协议格式，只需要保证不同传输方式可以承载相同的状态和事件消息。
+
+Hostra 自身也提供 JSON-RPC 窗口控制入口，但 Hostra 控制 RPC 与 LoomRealm Runtime RPC 是两个独立协议域：
+
+```text
+Hostra Control RPC
+    = 窗口、宿主和进程协调
+
+LoomRealm Runtime RPC
+    = 状态同步和事件传递
+```
+
+两套 RPC 不共享业务命名空间，也不通过 Hostra 控制 RPC 传递地图和人物状态。
 
 ## 4. 权威状态原则
 
@@ -61,6 +78,8 @@ JSON-RPC 不承担游戏业务建模，也不决定运行时内部系统如何�
 前端不通过直接修改共享状态来表达用户意图。前端发送动作事件，由运行时处理动作并同步最终状态。
 
 这一原则用于避免前端和后端同时修改同一份权威数据，从而产生状态冲突。
+
+Hostra 也不持有或修改权威游戏状态。Hostra 只负责承载 Web Client、启动本地 Runtime 和管理桌面窗口生命周期。
 
 ## 5. 状态同步方向
 
@@ -113,7 +132,26 @@ JSON-RPC 不承担游戏业务建模，也不决定运行时内部系统如何�
 
 ## 8. 运行环境方向
 
+### 8.1 远程运行时
+
 远程运行时通过 WebSocket 与前端通信。
+
+Web Client 从远程 Runtime 获取状态、事件和资源，不需要 Hostra 参与游戏协议。
+
+### 8.2 Hostra 桌面本地运行时
+
+Hostra 桌面模式下：
+
+- Hostra 启动 LoomRealm Runtime Server 子进程；
+- Runtime Server 在本机提供 Runtime WebSocket；
+- Web Client 在 Hostra 的 Electron 窗口中运行；
+- Web Client 直接连接 Runtime WebSocket；
+- Hostra 控制 RPC 只用于打开和关闭窗口等宿主操作；
+- Runtime Server 仍然是权威状态来源。
+
+Hostra 不作为 Runtime RPC 代理，也不将游戏状态保存到 Electron 主进程。
+
+### 8.3 浏览器本地运行时
 
 浏览器本地实时运行时优先使用 Dedicated Worker，并通过消息通道承载同一套协议。
 
@@ -121,7 +159,22 @@ Service Worker 主要用于离线缓存、资源代理、版本更新和持久�
 
 未来如需多窗口共享运行时，可以再评估 Shared Worker 或其他运行方式。
 
-## 9. 第一阶段约束
+## 9. Web Client 的环境独立性
+
+LoomRealm Web Client 应保持为普通 Web 应用。
+
+同一套状态镜像、输入归一化和 DOM 渲染代码应能够运行于：
+
+- Hostra Electron 窗口；
+- 普通浏览器；
+- 连接本地 Runtime 的开发环境；
+- 连接远程 Runtime 的部署环境。
+
+Web Client 不通过 Electron IPC 读取 FSDB、访问 Pokémon Essentials 本机目录、处理碰撞或修改人物权威状态。
+
+Hostra 提供的桌面能力应保持最小，并与游戏运行时协议分离。
+
+## 10. 第一阶段约束
 
 第一阶段只验证以下闭环：
 
@@ -131,20 +184,32 @@ Service Worker 主要用于离线缓存、资源代理、版本更新和持久�
   → 运行时执行移动、碰撞和地图跳转
   → 运行时更新权威状态
   → 状态同步到前端
-  → 前端完成渲染
+  → 前端完成 DOM 渲染
+```
+
+在 Hostra 桌面模式下，第一阶段还验证：
+
+```text
+Hostra 启动 Runtime Server
+  → Runtime 服务就绪
+  → Hostra 打开 Web Client 窗口
+  → Web Client 连接 Runtime
+  → 完成相同的状态与事件闭环
 ```
 
 第一阶段不要求实现：
 
 - 业务导向的大量 RPC 方法；
+- 通过 Hostra 控制 RPC 承载游戏业务；
 - 多人状态同步；
 - 客户端预测和服务器校正；
 - 复杂断线重放；
 - 完整事件持久化；
 - 通用分布式状态系统；
-- 跨会话世界状态恢复。
+- 跨会话世界状态恢复；
+- 多窗口共享同一游戏运行时。
 
-## 10. 当前架构结论
+## 11. 当前架构结论
 
 LoomRealm 的前端与运行时通信采用以下方向：
 
@@ -155,5 +220,9 @@ LoomRealm 的前端与运行时通信采用以下方向：
 - 运行时持有权威游戏状态；
 - 前端发送用户意图，不直接写入权威状态；
 - 状态用于恢复和渲染，事件用于表达动作和一次性消息；
-- 协议语义独立于 WebSocket、Worker 和其他传输实现；
+- 协议语义独立于远程 WebSocket、本机 WebSocket、Worker 和其他传输实现；
+- Hostra 作为桌面宿主，可以启动本地 Runtime 并承载 Web Client 窗口；
+- Hostra 控制 RPC 与 LoomRealm Runtime RPC 完全分离；
+- Hostra 不保存或转发权威游戏状态；
+- Web Client 保持环境独立，不依赖 Electron 才能运行；
 - 具体消息结构与实现方案在开发阶段根据实际需求确定。
