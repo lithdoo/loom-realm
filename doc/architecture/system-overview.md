@@ -24,7 +24,9 @@ loom-realm start ./game
 - LoomRealm 打开游戏包、建立内容索引、加载入口场景并运行游戏；
 - 地图和人物内容按需异步加载；
 - Runtime Core 维护权威游戏状态；
-- 客户端可见状态投影为通用 Scoped State Tree；
+- Runtime Execution Loop 串行驱动命令、Tick 和控制操作；
+- Session Coordinator 协调异步内容准备；
+- Client State Projector 将 Runtime/Session 快照投影为通用 Scoped State Tree；
 - Web Client 通过已注册的自定义节点完成 DOM 渲染；
 - 图片资源由 Web Client 通过 Runtime Service 按 Key 请求；
 - LoomRealm 不提供游戏内容编辑器或项目创作接口；
@@ -46,8 +48,6 @@ loom-realm start ./game
 
 ### 3.2 Game Package Context
 
-Game Package Context 是打开游戏包后建立的只读内容访问上下文：
-
 ```text
 Game Package Context
 ├── Game Catalog
@@ -56,13 +56,11 @@ Game Package Context
 └── Resource Repository
 ```
 
-它不会把整个游戏复制到内存中。
+它是打开游戏包后建立的只读内容访问上下文，不会把整个游戏复制到内存中。
 
 ### 3.3 Game Catalog
 
-Game Catalog 是启动时常驻内存的轻量内容目录。
-
-它保存：
+Game Catalog 是启动时常驻内存的轻量内容目录，保存：
 
 - 游戏身份和入口；
 - 地图 ID 与记录位置；
@@ -70,26 +68,41 @@ Game Catalog 是启动时常驻内存的轻量内容目录。
 - 资源 Key 与物理位置；
 - Runtime Feature 要求。
 
-它不保存所有地图 Tile、所有人物详情或图片资源主体。
+它不保存所有地图 Tile、人物详情或图片资源主体。
 
 ### 3.4 Runtime State
 
-Runtime State 是 Runtime Core 持有的权威可变状态。
+Runtime State 是 Runtime Core 持有的权威可变状态，第一阶段至少包含：
 
-第一阶段至少包含：
-
-- 当前地图；
-- 当前场景人物；
+- 当前地图和场景人物；
 - 玩家位置和朝向；
 - 当前移动状态；
-- 权威状态版本；
+- 逻辑时间；
+- Runtime Lifecycle；
+- 权威 Runtime Revision；
 - 统一暂停状态。
 
 Runtime State 不是客户端协议对象，也不能直接序列化给 Web Client。
 
-### 3.5 Client State
+### 3.5 Session State
 
-Client State 是由权威状态投影得到的客户端目标状态：
+Session State 是 Session Coordinator 的会话控制状态：
+
+```text
+starting
+running
+loading
+failed
+closed
+```
+
+Session State 与 Runtime State 分离。`loading` 表示会话正在准备异步内容，不是新的游戏业务状态。
+
+Session Coordinator 提供带独立 Revision 的 Session Snapshot。
+
+### 3.6 Client State
+
+Client State 是由 Runtime Snapshot 和 Session Snapshot 投影得到的客户端目标状态：
 
 ```text
 Client State
@@ -105,30 +118,46 @@ Client State
 
 Client State 只描述客户端应该呈现什么，不拥有游戏规则权威性。
 
-### 3.6 运行会话
+### 3.7 Runtime Transaction
 
-运行会话只持有当前运行所需的静态内容和可变权威状态。
+Runtime Execution Loop 为每次 Core 操作产生 Runtime Transaction。
 
-其他地图和人物由异步 Repository 在需要时加载。Session Coordinator 负责把异步内容准备结果交给同步 Runtime Core。
+必须区分：
+
+```text
+RuntimeTransaction.id
+RuntimeState.revision
+SessionSnapshot.revision
+ClientState.revision
+ClientScope.revision
+Runtime RPC sequence
+```
+
+它们分别表示执行顺序、权威状态版本、会话版本、客户端状态版本、Scope 版本和通信消息顺序，不得混用。
 
 ## 4. 架构原则
 
 1. **游戏包只读**：运行过程不把状态、缓存或日志写回游戏目录。
 2. **启动只加载入口内容**：启动时不把整个游戏读入内存。
 3. **地图和人物按需加载**：静态内容通过异步 Repository 按 ID 读取。
-4. **Repository 负责内容缓存**：缓存策略不进入 Session Coordinator 和 Runtime Core。
-5. **Runtime Core 不执行 I/O**：Runtime Core 只接收已加载和校验的结构化内容。
-6. **运行时权威**：人物移动、碰撞、Portal 和地图切换结果由 Runtime Core 决定。
-7. **异步准备、同步提交**：目标场景准备完成前不改变当前权威状态。
-8. **统一暂停**：手动暂停、过场暂停和加载暂停共享相同冻结语义。
-9. **Runtime 与 Client State 分离**：Runtime 内部对象不得直接序列化给客户端。
-10. **通用客户端树**：业务通过 Scope、Tag 和 Data Schema 扩展，不固定地图、人物、菜单等 Client DTO。
-11. **一个节点对应一个 DOM Element**：Key 决定身份，Tag 决定节点实现，Data 决定节点数据，Children 决定直接子节点。
-12. **客户端只做投影**：Web Client 发送归一化意图并呈现 Client State。
-13. **资源主体按需交付**：图片不进入 Runtime Core 或 Client State 主体，由 Runtime Service 按 Key 提供。
-14. **协议与部署分离**：相同运行时语义可以通过本机或远程通道承载。
-15. **桌面宿主与游戏逻辑分离**：Hostra 管理窗口和进程，不参与游戏规则。
-16. **不提供创作能力**：游戏目录由外部工具、人或 AI 按规范生成和维护。
+4. **Repository 负责缓存**：缓存策略不进入 Coordinator、Loop 或 Core。
+5. **Core 不执行 I/O**：Runtime Core 只接收已加载和校验的结构化内容。
+6. **Core 单一写入口**：所有 Core 命令、Tick 和控制操作只通过 Runtime Execution Loop 执行。
+7. **严格串行**：Runtime Execution Loop 防止 Core 并发和重入。
+8. **运行时权威**：移动、碰撞、Portal 和地图切换结果由 Runtime Core 决定。
+9. **异步准备、同步提交**：目标场景准备完成前不改变当前权威状态。
+10. **统一暂停**：手动暂停、过场暂停和加载暂停共享相同冻结语义。
+11. **Runtime 与 Client State 分离**：Runtime 内部对象不得直接序列化给客户端。
+12. **投影层独立**：Client State Projector 在 Core 事务外读取不可变快照。
+13. **投影原子提交**：投影失败不发布部分 Client State，也不回滚 Core 状态。
+14. **通用客户端树**：业务通过 Scope、Tag 和 Data Schema 扩展，不固定 RPG Client DTO。
+15. **一个节点对应一个 DOM Element**：Key 决定身份，Tag 决定实现，Data 决定节点数据，Children 决定直接子节点。
+16. **多 Scope 原子性**：多个 Scope 同时变化时发布完整 Snapshot。
+17. **事件与状态分离**：状态 Frame 可以合并，一次性 Runtime Event 不得丢失。
+18. **资源主体按需交付**：图片不进入 Runtime Core 或 Client State 主体。
+19. **协议与部署分离**：相同 Runtime RPC 语义可以通过本机或远程通道承载。
+20. **桌面宿主与游戏逻辑分离**：Hostra 管理窗口和进程，不参与游戏规则。
+21. **不提供创作能力**：游戏目录由外部工具、人或 AI 按规范生成和维护。
 
 ## 5. 总体结构
 
@@ -144,32 +173,48 @@ Game Package Context
 └── Resource Repository
         ↓
 Session Coordinator
+├── Session State / Revision / Snapshot
 ├── 准备入口场景
-├── 协调异步地图加载
-├── 协调异步人物加载
-└── 请求 Runtime 原子提交
-        ↓
+├── 协调异步地图与人物加载
+└── 处理 Runtime Effect
+        ↓ control operations
+Runtime Execution Loop
+├── Control Queue
+├── Command Queue
+├── Monotonic Clock
+├── Fixed Tick Scheduler
+├── Effect Barrier
+└── Runtime Transaction Publisher
+        ↓ serialized synchronous calls
 Runtime Core
-├── 权威状态
+├── 权威 Runtime State
 ├── 移动与碰撞
 ├── Portal 检测
 └── 统一暂停
+        ↓ RuntimeSnapshot
+Projection Scheduler
+├── 合并连续状态请求
+└── 保留最新 Projection Frame
         ↓
-Client State Projectors
-├── 按功能生成 Scope
-├── 生成 Roots Tree
-└── 输出 Key / Tag / Data / Children
-        ↓
+Client State Projector
+├── Scope Projector Registry
+├── Tree Validation
+├── Structural Equality
+├── Client State Revision
+└── Scope Revision
+        ↓ Projection Commit
 Runtime Service
-├── 状态与事件通信
-├── Scope Tree 同步
+├── 命令与节点事件入口
+├── state.snapshot / scope.replace
+├── Runtime Event
 ├── 资源接口
 └── 健康检查
         ↓
 Web Client
 ├── Client Store
-├── Scope 协调器
-├── 自定义节点注册表
+├── Scope Tree Reconciler
+├── Custom Node Registry
+├── Resource Cache
 └── DOM / CSS 渲染
         ↓
 浏览器或 Hostra
@@ -181,9 +226,7 @@ Pokémon Essentials v21.1 导出、地图转换和 Autotile 处理属于游戏�
 
 ### 6.1 Game Package Specification
 
-游戏包规范定义 `loom-realm start <directory>` 接受的只读目录结构和语义。
-
-它约定：
+定义 `loom-realm start <directory>` 接受的只读目录结构和语义：
 
 - `realm.game.json`；
 - 格式版本；
@@ -195,8 +238,6 @@ Pokémon Essentials v21.1 导出、地图转换和 Autotile 处理属于游戏�
 - 路径安全规则。
 
 ### 6.2 Game Package Loader
-
-Game Package Loader 打开游戏目录并建立 Game Package Context。
 
 启动时读取：
 
@@ -225,174 +266,175 @@ Resource Repository
     resourceId → Descriptor / Resource Body
 ```
 
-Repository 负责：
-
-- 异步读取；
-- 解析和局部校验；
-- 同一 ID 的并发读取去重；
-- 简单进程内缓存。
-
-缓存命中与否不得改变游戏语义。
+Repository 负责异步读取、解析、局部校验、同 ID 并发去重和进程内缓存。
 
 ### 6.4 Session Coordinator
 
-Session Coordinator 是异步内容加载与同步 Runtime Core 之间的薄协调层。
+负责：
 
-它负责：
+- 准备入口地图和人物；
+- 维护 Session State、Revision 和 Snapshot；
+- 通过 Execution Loop 初始化 Core；
+- 接收 Pending Runtime Effect；
+- 在第一次 await 前进入 `loading`；
+- 异步准备目标场景；
+- 通过 Loop 提交地图切换；
+- 请求 Session Change 和 Map Commit Projection；
+- 处理加载失败和关闭。
 
-- 并行加载入口地图和玩家人物；
-- 初始化 Runtime Core；
-- 接收 Runtime Effect；
-- 加载目标地图和必需人物；
-- 加载期间暂停 Runtime；
-- 校验 PreparedMapTransition；
-- 请求 Runtime Core 原子提交；
-- 处理加载失败和会话关闭。
+不负责：
 
-它不负责：
-
-- 移动、碰撞和 Portal 规则；
-- FSDB 解析细节；
+- 游戏规则；
+- Tick 调度；
+- 直接调用 Core；
+- Client State 生成；
 - Repository 缓存；
-- 图片资源主体；
-- 网络和客户端渲染；
-- 存档。
+- 资源主体；
+- 网络和 DOM。
 
-第一阶段每个会话一个 Coordinator、一个 Runtime、一个活动加载任务。
+### 6.5 Runtime Execution Loop
 
-### 6.5 Runtime Core
+Runtime Execution Loop 是 Runtime Core 的唯一写入口。
 
-Runtime Core 是游戏规则和权威状态的核心。
+负责：
 
-启动输入：
+- 串行执行 Command、Tick 和 Control Operation；
+- 固定步长 Tick；
+- 单调时钟和 Accumulator；
+- 控制/命令队列；
+- 普通命令容量限制；
+- Effect Barrier；
+- Runtime Transaction；
+- Snapshot 边界读取；
+- 启动、关闭和故障生命周期。
 
-```text
-Game Identity
-+ 入口 Map Snapshot
-+ 玩家 Actor Definition
-+ 默认出生位置
-```
+Runtime Service 和 Session Coordinator 不能持有可写 Core 引用。
 
-职责：
+### 6.6 Runtime Core
 
-- 初始化权威 Runtime State；
+Runtime Core 是同步、确定性的游戏规则和权威状态核心。
+
+负责：
+
+- 初始化 Runtime State；
 - 维护当前地图和人物状态；
-- 处理方向意图和人物行走；
+- 处理方向意图和人物移动；
 - 执行碰撞判定；
 - 检测 Portal 并产生 MapTransitionEffect；
 - 原子提交 PreparedMapTransition；
-- 维护权威状态版本；
-- 提供统一暂停和恢复行为；
-- 向 Client State Projector 提供稳定的只读投影输入。
+- 维护 Runtime Revision；
+- 统一暂停和恢复；
+- 提供不可变 Runtime Snapshot。
 
-Runtime Core 不依赖文件系统、FSDB、Promise、DOM、Electron、Hostra、WebSocket、HTTP 或具体 Client Node Tag。
+不依赖文件系统、FSDB、Promise、DOM、Electron、Hostra、WebSocket、HTTP 或 Client Node Tag。
 
-### 6.6 Client State Projectors
+### 6.7 Projection Scheduler
 
-Client State Projector 将 Runtime 和 Session 的客户端可见状态转换成 Scoped State Tree。
+Projection Scheduler 位于 Runtime Transaction 和 Client State Projector 之间。
 
-它负责：
+负责：
 
-- 按功能划分 Scope；
-- 为每个 Scope 生成有序 Roots；
-- 为每个节点生成稳定 Key；
-- 选择客户端已注册 Tag；
-- 生成该 Tag 对应的 JSON Data；
-- 生成 Children Tree；
-- 维护 Client State Revision 和 Scope Revision。
+- 在 Core 事务回调栈外执行投影；
+- 合并连续普通 Tick 的状态 Frame；
+- 保留最新 Runtime/Session Snapshot；
+- 合并 `forceSnapshot` 标记；
+- 不合并或丢弃 Runtime Event。
 
-它不负责：
+### 6.8 Client State Projector
 
-- 修改 Runtime 权威状态；
-- 执行 DOM 操作；
-- 读取图片资源主体；
-- 处理文件系统或网络传输；
-- 下发任意 HTML、CSS 或 JavaScript。
+读取：
 
-业务功能通过增加 Scope Projector、节点 Tag 和 Data Schema 扩展，不修改基础状态树格式。
+```text
+Runtime Snapshot
++ Session Snapshot
++ Runtime Transaction ID
++ Projection Cause
+```
 
-### 6.7 Runtime Service
+负责：
 
-Runtime Service 将会话、Runtime Core 和 Client State 暴露给客户端。
+- 按功能注册 Scope Projector；
+- 为 Scope 生成有序 Roots；
+- 验证 Key、Tag、Data 和 Children；
+- 比较新旧 Scope 内容；
+- 维护 Client State Revision 和 Scope Revision；
+- 原子提交完整 Client State；
+- 返回 unchanged、snapshot 或 scope-replace。
 
-它负责：
+发布选择：
+
+```text
+0 个 Scope 变化 → unchanged
+1 个 Scope 变化 → scope.replace
+2 个以上变化 → state.snapshot
+地图切换提交 → state.snapshot
+```
+
+Projector 不修改 Runtime、不读取资源主体、不执行 DOM 或网络操作。
+
+### 6.9 Runtime Service
+
+Runtime Service 负责：
 
 - 接收用户命令和节点事件；
 - 检查 Session 状态；
-- 调用 Runtime Core；
-- 把异步 Effect 交给 Session Coordinator；
-- 调用 Client State Projector；
+- 通过 Execution Loop 提交命令；
+- 发布 Runtime Event；
+- 消费 Projection Commit；
 - 发布 `state.snapshot` 和 `scope.replace`；
-- 发布一次性事件和错误；
 - 按资源 Key 调用 Resource Repository；
 - 提供 Web Client 静态文件和健康检查。
 
-Runtime Service 不实现人物移动、碰撞、Portal 规则或 DOM 节点行为。
+Runtime Service 不直接调用 Core，不自行生成 Client State，也不实现人物移动、碰撞、Portal 或 DOM 节点行为。
 
-### 6.8 Web Client
+### 6.10 Web Client
 
-Web Client 是环境独立的普通 Web 应用。
-
-它负责：
+负责：
 
 - 连接 Runtime Service；
-- 接收完整状态、Scope 替换、事件和错误；
+- 接收 Snapshot、Scope Replace、Event 和 Error；
 - 维护独立于 DOM 的 Client Store；
-- 验证消息 Sequence、State Revision 和 Scope Revision；
+- 验证 Sequence、State Revision 和 Scope Revision；
 - 按 Scope 挂载 Roots；
 - 按稳定 Key 复用 DOM Element；
 - 按 Tag 解析已注册自定义节点；
-- 把 Data 交给节点实现；
-- 将键盘输入归一化为用户意图；
+- 将输入归一化为用户意图；
 - 按资源 Key 请求、解码和缓存图片；
-- 管理动画帧和其他非权威临时视觉状态。
+- 管理非权威动画和临时视觉状态。
 
 Web Client 不读取游戏目录，不判断碰撞，也不通过 DOM 反向修改权威状态。
 
-### 6.9 CLI & Session Bootstrap
+### 6.11 CLI & Session Bootstrap
 
-`loom-realm` CLI 是游戏启动入口。
+负责：
 
-它负责：
-
-- 解析 `start` 命令和参数；
+- 解析 `start` 命令；
 - 定位游戏包目录；
 - 调用 Game Package Loader；
 - 创建 Runtime Core；
+- 创建 Runtime Execution Loop；
+- 创建 Projection Scheduler 和 Client State Projector；
 - 创建 Session Coordinator；
-- 调用 `SessionCoordinator.start()`；
 - 启动 Runtime Service；
-- 选择浏览器或 Hostra 宿主；
+- 选择浏览器或 Hostra；
 - 管理启动失败和退出流程。
 
-CLI 不承载游戏规则，也不修改游戏内容。
+### 6.12 Hostra Desktop Adapter
 
-### 6.10 Hostra Desktop Adapter
+Hostra 是可选 Electron 桌面宿主，负责窗口、Runtime Service 进程和桌面生命周期。
 
-Hostra 是可选的 Electron 桌面宿主适配器。
+Hostra Control RPC 与 LoomRealm Runtime RPC 是独立通道。Hostra 不参与游戏规则、权威状态或 Client State 生成。
 
-它负责：
-
-- 启动或承载本地 Runtime Service 进程；
-- 管理 BrowserWindow；
-- 在 Runtime 就绪后打开 Web Client；
-- 管理窗口和子进程生命周期；
-- 提供受限制的桌面能力。
-
-Hostra 控制 RPC 与 LoomRealm Runtime RPC 是独立通道。Hostra 不参与游戏规则或权威状态。
-
-### 6.11 Save System
+### 6.13 Save System
 
 Save System 是后续模块，不进入第一阶段设计和实现闭环。
 
-架构只保留以下边界：
+仅保留边界：
 
 - 存档位于游戏包外部；
 - 存档保存可变会话状态；
-- 存档不复制地图、人物或资源定义；
-- Runtime Core 未来可以提供稳定的持久化快照。
-
-第一阶段不冻结 `.lrsav` 内部格式、迁移或写入策略。
+- 存档不复制静态地图、人物或资源定义；
+- Runtime Core 未来可以提供稳定持久化快照。
 
 ## 7. 主要运行流程
 
@@ -402,73 +444,80 @@ Save System 是后续模块，不进入第一阶段设计和实现闭环。
 loom-realm start ./game
 → 打开并校验游戏包
 → 建立 Game Catalog 和 Repository
-→ 创建 Session Coordinator 和 Runtime Core
-→ 并行加载入口地图与玩家人物
-→ 校验默认出生位置
-→ 初始化 Runtime Core
-→ Client State Projector 生成首个状态树
-→ 启动 Runtime Service
+→ 创建 Core / Execution Loop / Projector / Coordinator
+→ 并行加载入口地图与人物
+→ 校验出生位置
+→ executionLoop.start(initialization)
+→ Session running
+→ Client State Projector 首次投影
+→ Runtime Service ready
 → 打开 Web Client
 → 发布 state.snapshot
 ```
+
+初始投影成功前 Runtime Service 不进入 ready。
 
 ### 7.2 用户操作
 
 ```text
 用户输入
-→ Web Client 归一化意图
-→ Runtime Service 检查 Session 状态
-→ Runtime Core 同步处理命令
-→ 更新权威 Runtime State
-→ Client State Projector 更新相关 Scope
-→ Runtime Service 发布 scope.replace
+→ Web Client 归一化命令
+→ Runtime Service 检查 Session
+→ executionLoop.submitCommand(command)
+→ Runtime Core 同步事务
+→ RuntimeTransaction + RuntimeSnapshot
+→ Projection Scheduler
+→ Client State Projector
+→ unchanged / scope.replace / state.snapshot
+→ Runtime Service 发布
 → Client Store 更新
 → Web Client 协调 DOM
 ```
 
+Runtime Event 使用独立通道发布。
+
 ### 7.3 地图切换
 
 ```text
-人物合法完成一步
-→ Runtime Core 检测 Portal
-→ 返回 MapTransitionEffect
-→ Session Coordinator 进入 loading
-→ Runtime 进入统一暂停
-→ 异步加载目标地图和人物
-→ 校验 PreparedMapTransition
-→ Runtime Core 原子提交
-→ Session 返回 running
-→ Runtime 恢复
-→ Projector 生成新场景 Scope
-→ Runtime Service 发布 Scope 替换
+人物完成一步
+→ Core 检测 Portal
+→ MapTransitionEffect
+→ Loop 建立 Effect Barrier
+→ Session loading
+→ 投影 Loading Scope
+→ loop.pause()
+→ Repository 准备目标场景
+→ loop.commitMapTransition(prepared)
+→ 强制完整 Client State Snapshot
+→ loop.completeEffect(effectId)
+→ Session running
+→ 更新/删除 Loading Scope
+→ loop.resume()
 ```
 
-目标地图准备失败时，当前地图和人物状态保持不变。
+目标内容准备失败且 Core 尚未提交时，当前 Scene 保持完整有效。
 
 ### 7.4 Client State 同步
 
-首次连接或恢复：
+首次连接、恢复、多 Scope 变化和地图提交：
 
 ```text
-Runtime / Session 状态
-→ Client State Projectors
-→ ClientState
+ProjectionSnapshot
 → state.snapshot
 → Client Store 全量替换
 → 按 Scope 和 Key 协调 DOM
 ```
 
-正常更新：
+单 Scope 变化：
 
 ```text
-某功能的客户端可见状态变化
-→ 更新对应 Scope Tree
+ProjectionScopeReplace
 → scope.replace
-→ Client Store 替换单个 Scope
+→ Client Store 替换单 Scope
 → 复用稳定 Key 对应 Element
 ```
 
-第一阶段不实现节点级 Patch。
+第一阶段不实现节点级 Patch 或多 Scope Batch Patch。
 
 ### 7.5 资源加载
 
@@ -477,82 +526,55 @@ Client Node Data 中的资源 Key
 → Web Client 请求资源
 → Runtime Service
 → Resource Repository.open(resourceId)
-→ 返回图片字节
+→ 返回资源主体
 → Web Client 解码、缓存和显示
 ```
 
 资源读取速度不控制 Runtime 是否运行。
-
-### 7.6 统一暂停
-
-Runtime 暴露单一暂停语义：
-
-```text
-running
-↕
-paused
-```
-
-手动暂停、过场暂停和加载暂停共享以下行为：
-
-- 冻结游戏逻辑时间；
-- 停止游戏状态推进；
-- 拒绝普通游戏命令；
-- 保留当前权威状态；
-- 允许恢复、关闭、错误处理和场景提交等控制操作。
-
-暂停原因不进入 Runtime 业务状态模型，但业务 Projector 可以根据自身状态决定是否输出对应客户端节点。
 
 ## 8. 数据边界
 
 ### 8.1 Game Catalog
 
 - 游戏身份和入口；
-- 地图 ID 索引；
-- 人物 ID 索引；
-- 资源 Key 索引；
+- 地图、人物和资源索引；
 - Runtime Feature。
 
-### 8.2 Map Snapshot
+### 8.2 Runtime Scene Content
 
-- 单张地图的尺寸和 Tile 层；
-- 通行网格；
-- Portal 索引；
-- 地图人物 ID；
-- 地图资源 Key。
+- 当前 Map Snapshot；
+- Actor Definitions；
+- 通行和 Portal 定义；
+- 逻辑资源 Key。
 
-### 8.3 Actor Definition
+### 8.3 Runtime Snapshot
 
-- 人物静态身份；
-- Sprite 资源 Key；
-- Sprite 布局；
-- 后续扩展的静态能力。
+- Runtime Lifecycle；
+- Runtime Revision；
+- 逻辑时间；
+- 暂停状态；
+- 当前 Runtime Scene；
+- 可选 Runtime Failure。
 
-### 8.4 Runtime State
+不包含 Scope、Tag 或 DOM 信息。
 
-- 当前地图；
-- 人物位置和朝向；
-- 当前移动状态；
-- 碰撞和 Portal 结果；
-- 权威状态版本；
-- 统一暂停状态。
+### 8.4 Session Snapshot
+
+- Session State；
+- Session Revision；
+- 可选 Session Error。
+
+不包含加载 Promise、Repository 或 Client State。
 
 ### 8.5 Client State Tree
 
 - Client State Version 和 Revision；
 - Scope 名称和 Revision；
-- 每个 Scope 的有序 Roots；
-- 每个节点的 Key、Tag、Data 和 Children；
+- 有序 Roots；
+- Node Key、Tag、Data 和 Children；
 - 逻辑资源 Key。
 
-Client State Tree 不包含：
-
-- Runtime 内部类实例；
-- 碰撞和 Portal 索引；
-- FSDB 物理位置；
-- 游戏包文件路径；
-- DOM Element 引用；
-- 可执行代码。
+不包含 Runtime 类实例、碰撞索引、FSDB 物理位置、文件路径、DOM 引用或可执行代码。
 
 ### 8.6 Web Client 本地状态
 
@@ -569,25 +591,25 @@ Client State Tree 不包含：
 - `loom-realm start <game-directory>`；
 - 只读游戏包目录；
 - 轻量 Game Catalog；
-- 入口地图和玩家人物异步加载；
-- 两张测试地图；
-- 三层 Tile、普通 Tile、静态 Autotile、通行和 Priority；
-- 一个玩家人物的四方向格子行走；
-- 静态碰撞；
-- 双向 Portal；
+- 地图和人物异步 Repository；
+- Runtime Execution Loop 固定 Tick；
+- 一个玩家人物四方向格子行走；
+- 静态碰撞和双向 Portal；
 - 统一暂停；
 - 地图切换异步准备和原子提交；
+- Runtime/Session Snapshot；
+- Client State Projector；
 - Client Scoped State Tree；
 - `state.snapshot` 和 `scope.replace`；
 - Scope 多根 `roots[]`；
 - 稳定 Key 和注册 Tag；
 - Web Client 按 Key 请求资源；
-- 自定义节点完成 DOM/CSS 渲染；
+- 自定义节点 DOM/CSS 渲染；
 - 浏览器和 Hostra 桌面运行。
 
 第一阶段不包含：
 
-- 存档系统；
+- Save System；
 - ZIP、ASAR 或单文件游戏包；
 - 游戏内容编辑器；
 - 项目创作或修改 API；
@@ -596,6 +618,7 @@ Client State Tree 不包含：
 - NPC 和通用事件系统；
 - 战斗和完整 Pokémon 业务逻辑；
 - 节点级状态 Patch；
+- 多 Scope Batch Patch；
 - 固定地图、人物、HUD 或菜单 Client DTO；
 - Server 下发任意 HTML、CSS 或 JavaScript；
 - 插件系统。
@@ -604,47 +627,59 @@ Client State Tree 不包含：
 
 ```text
 总体架构
-├── 第一阶段游戏包规范
-├── 第一阶段游戏启动与异步内容加载
-├── 第一阶段 Session Coordinator
+├── 游戏包规范
+├── 游戏启动与异步内容加载
+├── Session Coordinator
+├── Runtime Execution Loop
+├── Runtime Core
+├── Client State Projector
 ├── Client Scoped State Tree 协议
-├── 运行时通信与状态同步
-├── Hostra 桌面客户端宿主
-├── Pokémon Essentials 地图兼容运行时
-├── 人物行走与碰撞运行时
-├── DOM 渲染与渲染状态
-└── 第一阶段路线图与设计待办
+├── Runtime RPC 与状态同步
+├── Hostra 桌面宿主
+├── 地图与人物运行时专题
+├── DOM 渲染专题
+└── 路线图与设计待办
 ```
 
-总体架构定义模块和边界。专题文档负责目录格式、接口、协议、算法和验收细节。
+## 11. 当前主要设计缺口
 
-## 11. 当前架构缺口
+已完成核心边界：
 
-当前最重要的缺口是：
+- Game Package Specification；
+- Game Loading 与 Repository；
+- Session Coordinator；
+- Runtime Execution Loop；
+- Runtime Core；
+- Client Scoped State Tree；
+- Client State Projector；
+- Runtime RPC 总体同步语义。
 
-1. **Runtime Core 状态模型**：命令、Effect、暂停、权威状态版本和原子事务尚未形成完整专题文档。
-2. **Client Node 业务 Registry**：第一阶段需要哪些 Scope、Tag 和 Data Schema 尚未冻结。
-3. **Client State Projector**：Runtime 与 Session 状态如何高效地产生 Scope Tree 尚未形成专题文档。
-4. **资源接口**：资源 Key、MIME、缓存 Header 和错误行为尚未正式定义。
-5. **CLI 契约**：参数、退出码、日志和宿主选择尚未形成正式规范。
-6. **统一错误模型**：游戏包、Repository、Session、Runtime、协议和渲染错误尚未统一分类。
-7. **测试基准**：原创游戏包夹具、状态树 Golden Data 和端到端启动测试尚未建立。
-8. **安全模型**：不可信游戏包、路径逃逸、未知 Tag、Tree 限制、资源访问和 Hostra Origin 限制仍需统一设计。
-9. **存档系统**：已明确暂缓，后续单独设计。
+仍需继续设计：
+
+1. **第一阶段 Scope/Tag/Data Registry**：具体业务节点和 Schema；
+2. **Runtime Service 精确 RPC 契约**：方法名、请求响应和连接生命周期；
+3. **Client Store 与 Scope Tree Reconciler**；
+4. **Custom Node Runtime 与 Input Controller**；
+5. **资源接口**：MIME、缓存、版本和错误；
+6. **CLI 契约与 Hostra Bootstrap**；
+7. **统一错误和安全模型**；
+8. **测试夹具、Golden Data 和端到端测试**；
+9. **内容生产工具链**：Exporter、Autotile、Passage/Priority Compiler；
+10. **Save System**：已明确暂缓。
 
 ## 12. 当前结论
 
-LoomRealm 第一阶段核心链路是：
-
 ```text
 只读游戏包
-→ 轻量 Game Catalog
-→ 地图和人物按需异步加载
-→ Session Coordinator 协调
-→ Runtime Core 同步执行权威事务
-→ Client State Projector 生成通用 Scope Tree
-→ Runtime Service 同步状态与提供资源
-→ Web Client 通过自定义节点呈现
+→ Game Catalog + Repositories
+→ Session Coordinator
+→ Runtime Execution Loop
+→ Runtime Core
+→ RuntimeSnapshot + SessionSnapshot
+→ Projection Scheduler
+→ Client State Projector
+→ Runtime Service
+→ Web Client
 ```
 
-Session Coordinator 必须保持薄；Repository 负责读取和缓存；Runtime Core 负责游戏规则、统一暂停和权威状态；Client State Projector 负责把权威状态转换为可扩展的 Scope、Roots 和节点树。
+Repository 负责读取和缓存；Session Coordinator 负责异步会话协调；Execution Loop 负责串行调度；Runtime Core 负责权威游戏规则；Client State Projector 负责原子生成通用 Scope Tree；Runtime Service 只负责协议、事件和资源；Web Client 负责状态镜像和呈现。
