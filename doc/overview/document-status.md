@@ -59,7 +59,7 @@
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| [`../runtime/phase-1-runtime-core.md`](../runtime/phase-1-runtime-core.md) | Active Design | 权威状态、命令、Tick、Event、Effect 和原子事务。 |
+| [`../runtime/phase-1-runtime-core.md`](../runtime/phase-1-runtime-core.md) | Active Design | 权威状态、命令、Tick、Event 和 Effect。 |
 | [`../runtime/phase-1-runtime-execution-loop.md`](../runtime/phase-1-runtime-execution-loop.md) | Active Design | Core 唯一写入口、固定 Tick、队列和屏障。 |
 | [`../runtime/phase-1-session-coordinator.md`](../runtime/phase-1-session-coordinator.md) | Active Design | 会话状态和异步内容准备。 |
 
