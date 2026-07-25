@@ -4,27 +4,45 @@ on:
   pull_request:
     paths:
       - "doc/**"
+      - "package.json"
       - "scripts/check-doc-links.py"
       - ".github/workflows/docs.yml"
+      - ".github/workflows/deploy-pages.yml"
   push:
     branches:
       - main
     paths:
       - "doc/**"
+      - "package.json"
       - "scripts/check-doc-links.py"
       - ".github/workflows/docs.yml"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  links:
-    name: Check internal links
+  build:
+    name: Validate and build documentation
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
 
       - name: Validate Markdown links
-        run: python3 scripts/check-doc-links.py
+        run: npm run docs:check-links
+
+      - name: Build VitePress site
+        run: npm run docs:build
