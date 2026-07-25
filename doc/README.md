@@ -10,10 +10,11 @@
 - [第一阶段 Session Coordinator](./runtime/phase-1-session-coordinator.md)
 - [第一阶段 Runtime Execution Loop](./runtime/phase-1-runtime-execution-loop.md)
 - [第一阶段 Runtime Core](./runtime/phase-1-runtime-core.md)
+- [第一阶段 Client State Projector](./architecture/client-state-projector.md)
 - [Client Scoped State Tree 协议](./architecture/client-state-tree-protocol.md)
 - [运行时通信与状态同步](./architecture/runtime-rpc-and-state-sync.md)
 
-总体架构定义系统模块和职责边界。游戏包规范定义只读目录契约。异步内容加载文档定义 Loader 与 Repository。Session Coordinator 文档定义异步内容准备和地图切换协调。Runtime Execution Loop 文档定义 Core 的唯一写入口、串行操作队列、固定 Tick、单调时钟和 Effect 屏障。Runtime Core 文档定义权威游戏状态、同步命令、移动、碰撞、Portal、Runtime Effect 和地图切换事务。Client Scoped State Tree 协议定义 Runtime Server 与 Web Client 之间的通用客户端状态格式。
+总体架构定义系统模块和职责边界。游戏包规范定义只读目录契约。异步内容加载文档定义 Loader 与 Repository。Session Coordinator 文档定义异步内容准备和地图切换协调。Runtime Execution Loop 文档定义 Core 的唯一写入口、串行操作队列、固定 Tick、单调时钟和 Effect 屏障。Runtime Core 文档定义权威游戏状态、同步命令、移动、碰撞、Portal、Runtime Effect 和地图切换事务。Client State Projector 文档定义 Runtime/Session 快照到 Scope Tree 的原子投影、版本分配、投影调度与发布选择。Client Scoped State Tree 协议定义 Runtime Server 与 Web Client 之间的通用客户端状态格式。
 
 ## 文档层级
 
@@ -23,6 +24,7 @@
 ├── 内容加载与 Session 协调
 ├── Runtime Execution Loop 调度与串行执行
 ├── Runtime Core 权威状态与规则
+├── Client State Projector 与投影调度
 ├── Client State 与 Runtime RPC 协议
 ├── Runtime 规则专题设计
 ├── 客户端节点渲染专题设计
@@ -44,13 +46,14 @@
 9. Runtime Execution Loop 是 Runtime Core 的唯一写入口，并串行执行命令、Tick 和控制操作。
 10. Runtime Core 不执行文件或网络 I/O，并以同步、确定性的事务维护权威游戏状态。
 11. Runtime Core 不依赖 Client State、Scope Tree、Runtime Service 或 DOM。
-12. 手动暂停、过场暂停和加载暂停共享统一暂停语义。
-13. Runtime 内部状态不得直接序列化给客户端。
-14. Client State 使用 Scope、Roots 和通用节点树，不固定地图、人物、菜单等业务 DTO。
-15. 每个 Client Node 通过稳定 Key、注册 Tag、JSON Data 和 Children 映射到一个 DOM Element。
-16. 图片资源由 Web Client 通过 Runtime Service 按资源 Key 请求。
-17. LoomRealm 不提供游戏内容编辑器或项目创作接口。
-18. 存档系统暂缓，不进入第一阶段闭环。
+12. Client State Projector 在 Core 事务外读取 Runtime/Session 快照，并原子生成客户端目标状态。
+13. 手动暂停、过场暂停和加载暂停共享统一暂停语义。
+14. Runtime 内部状态不得直接序列化给客户端。
+15. Client State 使用 Scope、Roots 和通用节点树，不固定地图、人物、菜单等业务 DTO。
+16. 每个 Client Node 通过稳定 Key、注册 Tag、JSON Data 和 Children 映射到一个 DOM Element。
+17. 图片资源由 Web Client 通过 Runtime Service 按资源 Key 请求。
+18. LoomRealm 不提供游戏内容编辑器或项目创作接口。
+19. 存档系统暂缓，不进入第一阶段闭环。
 
 ## 当前文档
 
@@ -62,10 +65,12 @@
 - [第一阶段 Session Coordinator](./runtime/phase-1-session-coordinator.md)
 - [第一阶段 Runtime Execution Loop](./runtime/phase-1-runtime-execution-loop.md)
 - [第一阶段 Runtime Core](./runtime/phase-1-runtime-core.md)
+- [第一阶段 Client State Projector](./architecture/client-state-projector.md)
 - [Client Scoped State Tree 协议](./architecture/client-state-tree-protocol.md)
 
 ### 系统架构与通信
 
+- [第一阶段 Client State Projector](./architecture/client-state-projector.md)
 - [运行时通信与状态同步](./architecture/runtime-rpc-and-state-sync.md)
 - [Hostra 桌面客户端宿主架构](./architecture/hostra-desktop-client-host.md)
 
@@ -79,6 +84,7 @@
 
 ### 客户端状态与渲染
 
+- [第一阶段 Client State Projector](./architecture/client-state-projector.md)
 - [Client Scoped State Tree 协议](./architecture/client-state-tree-protocol.md)
 - [第一阶段 DOM 渲染与渲染状态](./renderer/phase-1-dom-rendering.md)
 
