@@ -1,0 +1,14 @@
+{
+  "name": "loom-realm-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev doc",
+    "docs:build": "vitepress build doc",
+    "docs:preview": "vitepress preview doc",
+    "docs:check-links": "python3 scripts/check-doc-links.py"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}
