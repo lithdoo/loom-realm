@@ -1,122 +1,127 @@
 # Hostra 桌面客户端宿主架构
 
-## 1. 文档目的
+> 状态：**Active Design**  
+> 适用范围：第一阶段桌面本地模式  
+> 最近复核：2026-07-25  
+> 主要定义：桌面进程、窗口、通信通道、启动生命周期和安全边界
 
-本文档定义 LoomRealm 使用 [`lithdoo/hostra`](https://github.com/lithdoo/hostra) 承载桌面客户端时的组件职责、进程关系、通信通道、启动流程和安全边界。
+本文档定义 LoomRealm 使用 [`lithdoo/hostra`](https://github.com/lithdoo/hostra) 承载桌面 Web Client 时的集成边界。
 
-Hostra 是 Electron 本地宿主，负责启动本地子进程并通过 WebSocket JSON-RPC 打开和管理 Web UI 窗口。Hostra 不替代 LoomRealm Web Client，也不承担地图、人物、碰撞、Portal、FSDB 或权威状态逻辑。
+相关文档：
 
-核心结论是：
+- [`../contracts/game-package-v1.md`](../contracts/game-package-v1.md)：游戏包入口和 `realm.game.json`；
+- [`system-overview.md`](./system-overview.md)：总体模块边界；
+- [`runtime-rpc-and-state-sync.md`](./runtime-rpc-and-state-sync.md)：LoomRealm Runtime RPC；
+- [`../design/web-client-reconciliation.md`](../design/web-client-reconciliation.md)：Web Client 状态和 DOM 协调。
 
-> Hostra 是 LoomRealm 的桌面宿主；LoomRealm Web Client 是普通 Web 客户端；LoomRealm Runtime 是权威游戏运行时。
+核心结论：
 
-## 2. 总体架构
+> Hostra 是通用 Electron 桌面宿主；LoomRealm Runtime 是权威游戏运行时；LoomRealm Web Client 是普通 Web 应用。
 
-桌面本地模式采用以下结构：
+## 1. 总体结构
 
 ```text
 Hostra
 ├── Electron 主进程
 ├── BrowserWindow 生命周期
-├── Hostra 控制 RPC
-└── LoomRealm 本地服务子进程管理
+├── Hostra Control RPC
+└── LoomRealm Runtime 子进程管理
         │
-        │ openWindow / closeWindow / 宿主控制
+        │ 打开窗口、关闭窗口、宿主控制
         ▼
 LoomRealm Web Client
-├── 用户输入归一化
-├── 客户端状态镜像
-├── DOM 场景投影
-├── CSS 移动和动画表现
-└── 图片资源缓存
+├── Runtime RPC 连接
+├── Client Store
+├── Scope Tree Reconciler
+├── Custom Node Registry
+├── Resource Cache
+└── DOM / CSS
         │
-        │ LoomRealm 状态同步与事件协议
+        │ 状态、事件、命令和资源
         ▼
-LoomRealm Runtime Server
-├── 项目入口与 FSDB 加载
-├── Pokémon Essentials 兼容编译
-├── 地图、人物、碰撞和 Portal 运行时
-├── 权威状态
-├── Runtime WebSocket JSON-RPC
-├── 图片资源 HTTP 接口
-└── Web Client 静态资源服务
+LoomRealm Runtime Service
+├── 打开只读游戏包
+├── Game Catalog 与 Repository
+├── Session Coordinator
+├── Runtime Execution Loop
+├── Runtime Core
+├── Client State Projector
+├── Runtime RPC
+├── Resource Endpoint
+└── Web Client 静态文件服务
 ```
 
-Hostra 和 LoomRealm Runtime 可以都使用 JSON-RPC，但它们是两个独立协议域。
+Hostra 和 LoomRealm Runtime 可以都使用 JSON-RPC，但属于两个独立协议域。
 
-## 3. Hostra 的职责
+## 2. Hostra 职责
 
-Hostra 负责桌面宿主能力：
+Hostra 负责：
 
 - 启动和退出 Electron 应用；
 - 保证桌面应用单实例；
-- 启动 LoomRealm 本地服务子进程；
-- 创建、关闭和枚举 Web UI 窗口；
-- 设置窗口标题、尺寸和开发工具开关；
-- 为窗口提供隔离的 Electron 环境；
-- 在宿主退出时终止由其启动的子进程；
-- 提供必要的最小桌面平台能力。
+- 启动 LoomRealm Runtime Service 子进程；
+- 创建、关闭和枚举 Web Client 窗口；
+- 管理窗口标题、尺寸和开发工具设置；
+- 等待 Runtime 明确就绪后再打开窗口；
+- 限制窗口 Origin、导航和新窗口行为；
+- 在宿主退出时终止其启动的 Runtime 子进程；
+- 暴露最小、明确和可审计的桌面能力。
 
 Hostra 不负责：
 
-- 读取或解释 LoomRealm FSDB；
-- 解析 Pokémon Essentials 地图；
-- 维护地图和人物权威状态；
-- 处理人物移动和碰撞；
-- 判断 Portal；
-- 生成客户端可见地图状态；
+- 读取或解释 `realm.game.json`、FSDB 或 Pokémon Essentials 数据；
+- 维护人物、地图、碰撞和 Portal 权威状态；
+- 生成 Client State；
+- 处理 LoomRealm Runtime RPC 业务；
 - 渲染地图 DOM；
-- 直接向游戏状态写入用户输入。
+- 直接向 Runtime Core 写入用户输入；
+- 保存游戏会话状态。
 
-Hostra 应保持为通用桌面 Web 宿主，避免加入 LoomRealm 专用游戏业务代码。
+Hostra 应保持通用桌面 Web 宿主，不加入 LoomRealm 游戏规则。
 
-## 4. LoomRealm Web Client 的职责
+## 3. LoomRealm Web Client 职责
 
-LoomRealm Web Client 仍然是普通 Web 应用，负责：
+Web Client 负责：
 
-- 连接 LoomRealm Runtime；
-- 接收完整状态和增量状态；
-- 维护客户端状态镜像；
-- 将键盘等输入归一化为用户意图；
-- 将地图和人物状态投影为 DOM；
-- 使用 CSS Transform 表现人物格子间移动；
-- 管理前端本地动画帧、加载状态和调试显示；
-- 通过资源接口加载 Tileset、编译 Autotile 和人物图片；
-- 在地图切换时原子替换 DOM 场景。
+- 通过 LoomRealm Runtime RPC 连接 Runtime Service；
+- 接收 `state.snapshot`、`scope.replace` 和 Runtime Event；
+- 维护 Client Store；
+- 按 Scope、Key、Tag 和 Data 协调 DOM；
+- 将输入归一化为 Runtime 命令或节点事件；
+- 按资源 Key 请求和缓存图片；
+- 管理非权威动画和本地表现状态。
 
-Web Client 不应依赖 Electron 才能运行。同一套 Web Client 应能够运行于：
+Web Client 不依赖 Electron 才能运行。同一客户端代码应支持：
 
 - Hostra 桌面窗口；
-- 普通浏览器；
-- 连接本地 Runtime 的开发页面；
-- 连接远程 Runtime 的 Web 部署。
+- 普通浏览器连接本地 Runtime；
+- 普通浏览器连接远程 Runtime；
+- 后续兼容的浏览器内 Runtime 适配。
 
-Web Client 不通过 Electron IPC 读取 FSDB、本机 Pokémon Essentials 项目或人物逻辑状态。
+Web Client 不通过 Electron IPC 读取游戏包、本机 Pokémon Essentials 工程或 Runtime 内部状态。
 
-## 5. LoomRealm Runtime Server 的职责
+## 4. LoomRealm Runtime Service 职责
 
-桌面本地模式下，Hostra 启动一个 LoomRealm Runtime Server 子进程。
+桌面本地模式下，Hostra 启动 LoomRealm Runtime Service 子进程。
 
-该服务负责：
+Runtime Service 负责：
 
-- 读取 `realm.project.json`；
-- 加载、校验和编译项目 FSDB；
-- 加载 Pokémon Essentials 兼容地图数据；
-- 建立运行时地图、方向通行网格和渲染投影；
-- 维护人物行走、碰撞、Portal 和地图切换状态；
-- 维护后端权威状态；
-- 提供状态同步和事件通道；
-- 提供图片资源 HTTP 接口；
-- 提供 Web Client 静态文件；
-- 提供健康检查和服务就绪状态。
+- 根据 CLI 参数打开只读游戏包目录；
+- 读取和校验 `realm.game.json`；
+- 建立 Game Catalog 和 Repository；
+- 异步加载入口地图和玩家人物；
+- 创建 Session Coordinator、Execution Loop 和 Runtime Core；
+- 提供 Runtime RPC、资源接口、静态 Web Client 和健康检查；
+- 发布 Client State、Runtime Event 和明确错误；
+- 管理当前游戏会话生命周期。
 
-正式运行时不依赖 Hostra。远程部署或普通浏览器模式可以直接启动同一 Runtime Server，或者采用兼容协议的远程实现。
+Runtime Service 不依赖 Hostra 才能运行。
 
-## 6. 两套 RPC 通道
+## 5. 两套通信通道
 
-### 6.1 Hostra 控制 RPC
+### 5.1 Hostra Control RPC
 
-Hostra 控制 RPC 只处理桌面宿主能力，概念上包括：
+Hostra Control RPC 只处理桌面宿主能力，例如：
 
 ```text
 openWindow
@@ -126,302 +131,249 @@ getVersion
 getPlatform
 ```
 
-其调用方通常是 LoomRealm 本地启动器或 Runtime Server 的启动协调层，而不是地图渲染组件。
+该协议不承载游戏状态、人物命令、Client State 或资源访问。
 
-Hostra 控制 RPC 不承载游戏状态同步，也不为地图、人物、碰撞或 Portal 增加业务方法。
+### 5.2 LoomRealm Runtime RPC
 
-### 6.2 LoomRealm Runtime RPC
-
-LoomRealm Runtime RPC 只处理运行时通信：
+LoomRealm Runtime RPC 处理：
 
 ```text
-状态同步
-事件传递
-重新建立完整状态
-运行时错误与通知
+客户端状态同步
+用户命令和节点事件
+Runtime Event
+完整状态恢复
+运行时错误
+资源访问语义
 ```
 
-Web Client 通过这一通道发送归一化用户意图，并接收后端权威状态。
+Web Client 直接连接 Runtime Service，而不是经由 Hostra Control RPC 代理游戏通信。
 
-### 6.3 强制边界
+### 5.3 强制边界
 
 ```text
 Hostra Control RPC
-    = 窗口和桌面宿主控制
+    = 窗口、进程和桌面宿主控制
 
 LoomRealm Runtime RPC
-    = 游戏状态和用户事件
+    = 游戏会话、Client State、事件和资源
 ```
 
-两套 RPC 应使用不同的服务端点、连接生命周期和鉴权信息。不得因为二者都采用 JSON-RPC 而合并协议或共享业务命名空间。
+两套协议必须使用独立端点、生命周期、鉴权信息和命名空间。
 
-## 7. 桌面本地启动流程
+## 6. 桌面启动流程
 
-推荐启动流程：
+第一阶段启动流程：
 
 ```text
-启动 Hostra
-    ↓
-Hostra 建立控制 RPC
-    ↓
-Hostra 启动 LoomRealm Runtime Server 子进程
-    ↓
-Runtime 加载项目并启动服务
-    ↓
-HTTP 健康检查和 Runtime WebSocket 均就绪
-    ↓
-启动协调层调用 Hostra.openWindow
-    ↓
-Hostra 加载本地 Web Client URL
-    ↓
-Web Client 连接 LoomRealm Runtime WebSocket
-    ↓
-Runtime 发送完整客户端可见状态
-    ↓
-Web Client 加载图片并构建 DOM 场景
+用户选择或传入游戏包目录
+→ Hostra 启动 LoomRealm Runtime Service
+→ Runtime 执行 loom-realm start <game-directory>
+→ Runtime 读取 realm.game.json
+→ Runtime 建立当前 Session
+→ Runtime 健康检查和 Runtime RPC 就绪
+→ 启动协调层调用 Hostra.openWindow
+→ Hostra 加载本地 Web Client URL
+→ Web Client 直接连接 Runtime RPC
+→ Runtime 发送完整 Client State
+→ Web Client 建立 DOM 场景
 ```
 
-不得使用固定延时猜测 Runtime 是否已经启动。必须通过健康检查、端口握手或明确的 ready 信号确认服务可用后再打开窗口。
+不得使用固定延时猜测 Runtime 是否就绪。必须通过健康检查、端口握手或明确 ready 信号。
 
-Web Client 建议通过本地 HTTP 地址加载：
+Web Client 默认通过本地 HTTP Origin 加载：
 
 ```text
 http://127.0.0.1:<client-port>/
 ```
 
-不以 `file://` 作为默认加载方式，以保证 ES Module、资源请求、缓存、Origin 和远程部署行为保持一致。
+不以 `file://` 作为默认方式，以保持模块、资源、缓存、Origin 和远程部署行为一致。
 
-## 8. 进程与生命周期
-
-桌面本地模式的进程所有权为：
+## 7. 进程所有权和退出
 
 ```text
 Hostra
-└── LoomRealm Runtime Server
-    └── Web Client 静态服务与资源服务
+└── LoomRealm Runtime Service
+    ├── 当前 Runtime Session
+    ├── Web Client 静态服务
+    └── Resource Endpoint
 ```
 
-生命周期规则：
+规则：
 
-- Hostra 启动 Runtime 子进程；
-- Runtime 启动失败时，Hostra 不打开游戏窗口并报告启动错误；
-- Runtime 意外退出时，窗口显示连接故障或由 Hostra 关闭；
-- Hostra 正常退出时，先停止控制 RPC，再终止 Runtime 子进程；
-- 所有 LoomRealm 窗口关闭后，第一阶段可以同时结束本地 Runtime；
-- 退出过程应有正常终止和超时强制终止两级处理；
-- 不依赖浏览器窗口自身保存权威运行时状态。
+- Hostra 负责启动和终止其拥有的 Runtime 子进程；
+- Runtime 启动失败时不打开游戏窗口；
+- Runtime 意外退出时，客户端显示明确连接故障；
+- Hostra 退出时先停止接受新的宿主控制，再终止 Runtime；
+- 退出过程应支持正常终止和超时强制终止；
+- 浏览器窗口不保存唯一权威会话状态；
+- 第一阶段可以在最后一个 LoomRealm 窗口关闭后结束本地 Runtime。
 
-## 9. 本地配置
+## 8. 配置边界
 
-Hostra 可以通过环境变量或本地配置启动 LoomRealm，例如：
+Hostra 可以通过本地配置或环境变量得到：
 
-```env
-HOSTRA_APP_NAME=LoomRealm
-HOSTRA_RPC_PORT=9333
-HOSTRA_RPC_TOKEN=<random-local-token>
-HOSTRA_SUBCMD=node ./packages/runtime-server/dist/cli.js
-HOSTRA_CONFIG_DIR=.
-HOSTRA_USER_DATA_DIR=./.loomrealm/user-data
-```
+- 应用显示名称；
+- Hostra Control RPC 地址和 Token；
+- LoomRealm Runtime 启动命令；
+- 游戏包目录；
+- Runtime 本地端口或端口分配策略；
+- Hostra 用户数据目录；
+- 开发工具开关。
 
-以上字段仅表示宿主启动配置，不属于项目 FSDB。
+这些配置不属于游戏包 FSDB。
 
-项目内容、入口地图和玩家人物仍由 LoomRealm 项目入口和 FSDB 定义。Pokémon Essentials 本机路径仍只存在于被 Git 忽略的本地工作区配置中。
+游戏身份、入口地图、玩家人物和 Feature 要求只由游戏包的 `realm.game.json` 定义。
 
-## 10. 安全边界
+Pokémon Essentials 本机工程路径只能存在于被 Git 忽略的开发工作区配置或转换工具参数中，不进入可运行游戏包。
 
-### 10.1 Electron 隔离
+## 9. Electron 安全边界
 
-LoomRealm 窗口应保持：
+LoomRealm 窗口必须保持：
 
 ```text
 contextIsolation = true
 nodeIntegration = false
 ```
 
-Web Client 不直接获得 Node.js 文件系统、进程或任意 Electron 主进程能力。
+Web Client 不直接获得 Node.js 文件系统、进程或 Electron 主进程能力。
 
-### 10.2 最小 Preload API
+Preload 不应默认开放：
 
-Preload 只暴露必要、稳定和可审计的桌面能力。
-
-不应默认向游戏页面开放：
-
-- 任意文件路径读取；
+- 任意文件读取；
 - 任意命令执行；
 - 任意子进程启动；
 - 任意窗口创建；
-- 任意 Electron IPC 调用；
-- 对本机 Pokémon Essentials 目录的直接访问。
+- 通用 Electron IPC；
+- 游戏包外的素材目录访问；
+- Pokémon Essentials 原工程访问。
 
-当某项桌面能力确实需要时，应以明确的方法、参数校验和权限边界单独加入。
+确实需要的桌面能力应通过显式方法、参数 Schema、权限边界和独立审查加入。
 
-### 10.3 Hostra 控制 RPC
+## 10. Control RPC 安全
 
 第一阶段要求：
 
-- 仅监听 `127.0.0.1`；
-- 启动时生成或提供随机令牌；
-- 不允许无令牌的生产型桌面会话；
-- 对 RPC 参数进行结构校验；
-- 限制可加载 URL；
-- 不向不可信远程页面开放 Hostra Preload 能力。
+- 默认只监听 `127.0.0.1`；
+- 每次生产型桌面会话使用随机高熵 Token；
+- 所有 RPC 参数执行结构校验；
+- 不允许未授权客户端创建窗口；
+- 只允许加载当前 Runtime 提供的本地可信 Origin，或用户明确配置的受信远程 Origin；
+- 不向不可信远程页面开放 Preload 能力。
 
-### 10.4 窗口 URL 与导航
+## 11. 导航和窗口限制
 
-LoomRealm 桌面模式默认只允许加载：
-
-- 当前 Runtime Server 提供的本地可信 Origin；
-- 用户明确配置并通过验证的远程 LoomRealm Origin。
-
-窗口应限制：
+LoomRealm 窗口应限制：
 
 - 导航到未授权 Origin；
 - 页面自行创建未受控 Electron 窗口；
-- 外部页面继承 LoomRealm Preload 能力。
+- 外部页面继承 LoomRealm Preload 能力；
+- `javascript:`、不可信 `file:` 和其他危险 URL；
+- 任意下载后自动执行。
 
-外部链接应交给系统默认浏览器打开，而不是在拥有桌面桥接能力的 LoomRealm 窗口中加载。
+外部链接应交给系统默认浏览器打开。
 
-## 11. 推荐代码边界
+## 12. 本地和远程模式统一
 
-LoomRealm 仓库可以采用以下概念包结构：
+```text
+Hostra 桌面模式
+Web Client → 本地 Runtime RPC → 本地 Runtime
+
+普通浏览器本地模式
+Web Client → 本地 Runtime RPC → 本地 Runtime
+
+远程模式
+Web Client → 远程 Runtime RPC → 远程 Runtime
+```
+
+这些模式共享：
+
+- Client State 协议；
+- Runtime Event 语义；
+- Client Store 和 DOM 协调；
+- 资源 Key 模型；
+- 用户输入归一化。
+
+Hostra 不改变游戏通信协议。
+
+## 13. 推荐代码边界
 
 ```text
 packages/
 ├── runtime-core/
-│   └── 地图、人物、碰撞、Portal 和权威状态
 ├── runtime-server/
-│   ├── Runtime WebSocket JSON-RPC
-│   ├── 图片资源 HTTP 接口
-│   ├── Web Client 静态服务
-│   └── 健康检查
 ├── web-client/
-│   ├── 状态镜像
-│   ├── 输入归一化
-│   ├── DOM 场景投影
-│   └── 资源缓存
 └── hostra-launcher/
-    ├── Hostra 控制 RPC 客户端
-    ├── 服务就绪协调
-    └── openWindow 启动逻辑
 ```
 
-具体包名和目录结构由实现阶段决定，但职责边界应保持不变。
+其中：
 
-Hostra 仓库继续保存通用 Electron 宿主和窗口控制能力；LoomRealm 专用启动协调代码优先放在 LoomRealm 仓库中。
+- `runtime-core` 保存权威状态和规则；
+- `runtime-server` 保存 Session、Execution Loop、RPC、资源和健康检查；
+- `web-client` 保存 Client Store、节点协调和呈现；
+- `hostra-launcher` 保存 LoomRealm 专用的 Hostra 启动协调。
 
-## 12. 本地与远程模式统一
+Hostra 仓库继续保存通用 Electron 宿主能力。
 
-LoomRealm Web Client 不应知道 Runtime 是否由 Hostra 启动。
-
-```text
-桌面本地模式
-Web Client → 本地 WebSocket → 本地 Runtime
-
-普通浏览器本地模式
-Web Client → Worker 消息适配 → 浏览器内 Runtime
-
-远程模式
-Web Client → 远程 WebSocket → 远程 Runtime
-```
-
-三种方式共享：
-
-- 状态同步语义；
-- 事件传递语义；
-- 客户端状态镜像；
-- DOM 渲染实现；
-- 图片资源引用模型。
-
-Hostra 只增加桌面宿主和进程管理能力，不改变游戏通信协议。
-
-## 13. 第一阶段实施范围
+## 14. 第一阶段实施范围
 
 第一阶段实现：
 
-- Hostra 启动 LoomRealm Runtime Server；
-- Runtime Server 提供健康检查；
-- 启动协调层等待服务就绪；
-- 通过 Hostra 控制 RPC 打开一个 LoomRealm 窗口；
+- Hostra 启动 LoomRealm Runtime Service；
+- 向 Runtime 提供游戏包目录；
+- Runtime 提供健康检查和明确 ready 信号；
+- Hostra 等待就绪后打开一个 Web Client 窗口；
 - Web Client 通过本地 HTTP 加载；
-- Web Client 通过 Runtime WebSocket 接收地图和人物状态；
-- Web Client 使用 DOM 渲染 Pokémon Essentials 测试地图；
+- Web Client 直接连接 Runtime RPC；
 - Hostra 关闭时清理 Runtime 子进程；
-- Hostra 控制 RPC 仅监听本机并启用令牌；
-- 对窗口加载 Origin 和导航进行限制。
+- Control RPC 仅监听本机并启用 Token；
+- 限制窗口 Origin、导航和新窗口。
 
 第一阶段不实现：
 
-- 多窗口共享同一个游戏会话；
-- 编辑器和游戏预览的复杂窗口编排；
+- Hostra 读取或修改游戏包；
+- Hostra 承载 LoomRealm Runtime RPC；
+- Web Client 直接调用 Node.js 游戏逻辑；
+- 多窗口共享复杂会话编排；
 - 自动更新；
 - 桌面插件系统；
 - 任意本机文件浏览；
-- 操作系统深度集成；
-- Hostra 承载游戏业务 RPC；
-- Web Client 直接调用 Node.js 游戏逻辑。
+- 操作系统深度集成。
 
-## 14. 测试要求
+## 15. 测试要求
 
-至少应覆盖：
+至少覆盖：
 
 1. Hostra 能启动 Runtime 子进程；
 2. Runtime 未就绪时不会提前打开窗口；
-3. Runtime 就绪后能够打开本地 Web Client；
-4. Web Client 能连接 Runtime 而不是 Hostra 控制 RPC；
-5. 无效 Hostra 令牌连接被拒绝；
-6. 重复窗口 ID 被拒绝或按既定规则处理；
-7. 不可信窗口 URL 被拒绝；
-8. 未授权导航被阻止；
-9. Runtime 退出时客户端显示明确故障；
-10. Hostra 退出时 Runtime 子进程被清理；
-11. 普通浏览器仍能运行同一 Web Client；
-12. Electron 环境中 `nodeIntegration` 保持关闭。
+3. Runtime 正确读取 `realm.game.json`；
+4. Runtime 就绪后打开本地 Web Client；
+5. Web Client 连接 Runtime RPC 而不是 Hostra Control RPC；
+6. 无效 Control RPC Token 被拒绝；
+7. 不可信窗口 URL 和导航被拒绝；
+8. Runtime 退出时客户端显示明确故障；
+9. Hostra 退出时 Runtime 子进程被清理；
+10. 普通浏览器仍可运行同一 Web Client；
+11. `nodeIntegration` 保持关闭；
+12. Hostra 不读取 FSDB 或参与游戏状态同步。
 
-## 15. 当前 Hostra 基准
+## 16. 冻结决策
 
-本设计基于：
+| 问题 | 第一阶段结论 |
+|---|---|
+| 桌面宿主 | Hostra |
+| 游戏包入口 | `realm.game.json` |
+| Web Client | 普通 Web 应用 |
+| 权威状态 | LoomRealm Runtime |
+| 宿主控制 | Hostra Control RPC |
+| 游戏通信 | LoomRealm Runtime RPC |
+| 两套 RPC | 完全分离 |
+| 窗口默认 Origin | Runtime 提供的本地 HTTP Origin |
+| Runtime 就绪 | 健康检查或明确 ready 信号 |
+| Electron | Context Isolation 开启，Node Integration 关闭 |
+| Control RPC 监听 | `127.0.0.1` |
+| Control RPC 鉴权 | 随机会话 Token |
+| Runtime 子进程清理 | Hostra 负责 |
 
-```text
-repository: lithdoo/hostra
-branch: main
-initial commit: 17cdea6de7a097f725428f76e7b93a5e0bc94ac3
-```
+## 17. 当前结论
 
-当前 Hostra 已具备：
-
-- Electron CLI 与本地子进程启动；
-- WebSocket JSON-RPC 控制入口；
-- `openWindow`、`closeWindow` 和窗口枚举；
-- 可选 RPC Token；
-- `contextIsolation: true`；
-- `nodeIntegration: false`；
-- Preload 桥接基础；
-- 子进程退出清理基础。
-
-在 LoomRealm 第一阶段接入前，需要补强：
-
-- RPC 显式绑定 `127.0.0.1`；
-- 桌面模式强制使用随机令牌；
-- 窗口 URL 白名单；
-- 导航和新窗口限制；
-- 服务就绪协调；
-- 参数 Schema 校验；
-- 自动化测试。
-
-## 16. 当前架构结论
-
-LoomRealm 桌面客户端采用以下原则：
-
-- Hostra 作为 Electron 桌面宿主；
-- LoomRealm Web Client 保持为普通 Web 应用；
-- LoomRealm Runtime 持有 FSDB、地图、行走、碰撞和权威状态；
-- Hostra 控制 RPC 与 LoomRealm Runtime RPC 完全分离；
-- Hostra 可以启动本地 Runtime，但不参与游戏状态同步；
-- Web Client 只连接 Runtime 获取游戏状态和图片资源；
-- Web Client 不通过 Electron IPC 读取项目或修改权威状态；
-- 本地和远程 Runtime 使用相同的状态与事件语义；
-- 桌面窗口默认加载本地可信 HTTP Origin；
-- Electron 保持上下文隔离并关闭 Node 集成；
-- Hostra 控制端口只监听本机并使用随机令牌；
-- Hostra 退出时负责清理其启动的 Runtime 子进程。
+Hostra 只增加桌面窗口和进程管理能力。LoomRealm Runtime 独立打开只读游戏包并维护权威会话；Web Client 直接使用 Runtime RPC 和 Client State 协议。桌面模式不得改变 Runtime、Client State、资源或 DOM 协调的基础语义。

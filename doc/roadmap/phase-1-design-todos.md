@@ -1,248 +1,207 @@
 # 第一阶段设计待办
 
-## 1. 文档目的
+> 状态：**Tracking**  
+> 适用范围：第一阶段尚未关闭的设计和实施准备事项  
+> 最近复核：2026-07-25
 
-本文档记录 LoomRealm 第一阶段地图运行时原型已经确定和仍待确定的设计问题。
+本文档只追踪当前未关闭事项，不替代正式契约或设计。已经冻结的结论应进入对应权威文档，不应继续作为未完成问题保留。
 
-Pokémon Essentials v21.1 地图、素材和四方向行走已经成为第一阶段的测试基准。相关正式设计见：
+当前范围和文档状态：
 
-- [`../runtime/phase-1-pokemon-essentials-map-runtime.md`](../runtime/phase-1-pokemon-essentials-map-runtime.md)
+- [产品定位与第一阶段范围](../overview/product-scope.md)
+- [文档状态与权威来源](../overview/document-status.md)
+- [LoomRealm 总体架构](../architecture/system-overview.md)
 
-本文件只用于追踪决策状态，不替代正式设计文档。
+## 1. 已冻结、不再作为待办
 
-## 2. 已确定的核心设计
+以下方向已经形成正式设计：
 
-### 2.1 Pokémon Essentials v21.1 兼容基准
+- 第一阶段不接入 Save System；
+- 游戏包使用只读目录和 `realm.game.json`；
+- 启动建立轻量 Game Catalog，地图和人物按需异步加载；
+- Runtime Core 同步、确定性、无文件和网络 I/O；
+- Runtime Execution Loop 是 Core 的唯一写入口；
+- 默认固定 Tick 为 `20ms / 50Hz`，使用单调时钟和有限追赶；
+- Session Coordinator 负责异步地图准备；
+- 地图切换使用 Effect Barrier、异步准备和原子提交；
+- Client State 使用 Scope、Roots 和 `key/tag/data/children`；
+- Client State Projector 独立于 Core 事务；
+- `state.snapshot` 和 `scope.replace` 是第一阶段状态消息；
+- Runtime Event 与可恢复状态分离；
+- Web Client 不读取 FSDB，不把 DOM 作为权威状态；
+- Pokémon Essentials v21.1 三层地图、原始 Tile ID、静态 Autotile、方向通行和 Priority 进入第一阶段兼容范围。
 
-- [x] 使用 Pokémon Essentials v21.1 的真实地图和素材进行第一阶段测试。
-- [x] 地图兼容 RPG Maker XP 的三个 Tile 数据层。
-- [x] 保留原始 RPG Maker XP Tile ID。
-- [x] 普通 Tile 从 ID `384` 开始，每行 `8` 个，单格为 `32 × 32`。
-- [x] 第一阶段支持 Autotile 静态第一帧。
-- [x] Autotile 在导入或构建阶段预编译，前端不实现拼接算法。
-- [x] 第一阶段导入 Tile 通行属性和 Priority。
-- [x] Terrain Tag 保留数据但暂不执行完整 Pokémon 特殊行为。
-- [x] Pokémon 相关素材只作为本地测试来源，不提交到公共仓库。
+对应实现应直接阅读权威文档，而不是从本文件重建规则。
 
-### 2.2 坐标与人物行走
+## 2. P0：阻塞第一阶段实现的事项
 
-- [x] 地图逻辑坐标使用整数格子坐标。
-- [x] 地图原点为左上角，`x` 向右、`y` 向下。
-- [x] 玩家稳定位置使用格子坐标。
-- [x] 人物采用上、下、左、右四方向格子步进移动。
-- [x] 人物开始移动尝试时先更新朝向。
-- [x] 碰撞失败时保留新朝向，但不改变位置。
-- [x] 人物一次只移动一个格子。
-- [x] 后端维护一步移动的起点、终点和时序。
-- [x] 前端使用 CSS Transform 表现格子之间的像素插值。
-- [x] 人物动画帧和实际像素位置属于前端表现状态。
-- [x] CSS 动画完成不能作为后端逻辑完成判据。
-- [x] 同时按下多个方向时，使用最近按下且仍保持按下的方向。
-- [x] 前端发送归一化方向意图，不发送原始 DOM 键盘事件。
-- [x] `stepping` 期间不开始第二步，但后端保留最新方向意图。
+### 2.1 Pokémon Essentials 导出器
 
-### 2.3 地图和 Tile 数据格式
+- [ ] 确定导出器运行环境：原项目 Ruby 环境或独立 Ruby 工具；
+- [ ] 定义地图、Tileset、Autotile、passages、priorities 和 terrain tags 的中间 JSON Schema；
+- [ ] 定义两张验收地图的选择方式；
+- [ ] 定义原始 Map ID、Tileset ID、文件名和来源追踪字段；
+- [ ] 定义重复导入、覆盖和 LoomRealm 手工修改的处理规则；
+- [ ] 定义稳定、可重复的 FSDB Key 生成规则；
+- [ ] 准备不包含受限素材的公开导出夹具。
 
-- [x] `map.tile` 按地图 ID 分组。
-- [x] 每个图层的每一行保存为一条 JSONL 记录。
-- [x] `layer` 固定为 `0`、`1`、`2`。
-- [x] `tileIds` 数组索引表示 `x`。
-- [x] `tileIds.length` 必须等于地图宽度。
-- [x] 每个图层必须包含完整地图高度的行。
-- [x] Tile ID `0` 表示空 Tile。
-- [x] Tile ID `1–383` 表示 Autotile 组合。
-- [x] Tile ID `384` 及以上表示普通 Tileset Tile。
-- [x] `map.tile` 不再直接保存 `blocked`。
-- [x] Tile 通行、Priority 和 Terrain Tag 保存到 `tile.property`。
-- [x] LoomRealm 地图使用稳定字符串 Key，同时保留原始 Pokémon Essentials Map ID 作为来源信息。
+关闭条件：导出器对固定输入产生确定的中间数据，并有 Schema 和 Golden Fixture。
 
-### 2.4 Portal 和地图切换
+### 2.2 Autotile 编译器
 
-- [x] 第一阶段 Portal 由 LoomRealm `map.portal` 手工定义。
-- [x] 第一阶段不导入完整 RPG Maker XP 事件系统。
-- [x] Portal 在人物完成一步移动并稳定进入触发区域后检查。
-- [x] Portal 目标位置必须存在、在地图范围内且允许人物站立。
-- [x] 地图切换期间人物进入 `mapTransition` 状态。
-- [x] 地图切换期间不产生新的移动结果。
-- [x] 切换完成后清空方向意图，避免立即反向触发。
-- [x] 地图切换后向前端同步完整的新地图客户端状态。
-- [x] 前端准备资源和新 DOM 场景后原子替换旧场景。
+- [ ] 验证 RPG Maker XP 48 种 Autotile 组合规则；
+- [ ] 冻结 `tile.compiled` Atlas 排列；
+- [ ] 冻结编译产物资源 Key 和内容版本；
+- [ ] 决定只编译实际使用组合还是完整槽位；
+- [ ] 校验不同尺寸、多帧输入和静态第一帧选择；
+- [ ] 准备原创 Autotile 自动测试夹具。
 
-### 2.5 DOM 渲染边界
+关闭条件：固定输入可以确定性生成 Atlas，并通过像素或结构 Golden Test。
 
-- [x] 后端完整读取、校验和解释 FSDB。
-- [x] 前端不完整读取或解析 FSDB。
-- [x] 前端不解释原始 Pokémon Essentials Tile ID、passage flags 或 Priority。
-- [x] 后端将三个源数据层编译成标准渲染项和排序值。
-- [x] DOM 使用 `ground layer`、`world layer`、调试层和遮罩层。
-- [x] 人物和 Priority Tile 在 `world layer` 中按标准排序值排列。
-- [x] 前端通过资源接口获取 `tile.sheet`、`tile.compiled` 和 `actor.sprite`。
-- [x] DOM 只作为状态投影，不作为权威游戏状态来源。
+### 2.3 Passage Flags 与 Priority 编译
 
-## 3. 当前最高优先级待办
+- [ ] 精确确认 RPG Maker XP passage flags 的方向位语义；
+- [ ] 定义原始 flags 到标准四方向 `passable` 的转换；
+- [ ] 冻结三个 Tile 层的有效通行合并算法；
+- [ ] 冻结当前格离开和目标格进入的判定顺序；
+- [ ] 定义 Priority 到标准渲染平面和排序值的转换；
+- [ ] 建立墙体、门口、树冠和高 Priority Tile 测试地图；
+- [ ] 明确 Terrain Tag、Bush 和 Counter 等保留但不执行的字段。
 
-### 3.1 Pokémon Essentials 导出器
+关闭条件：兼容编译器输出稳定的 Passability Grid 和 Render Items，移动与前端不解释原始 flags。
 
-- [ ] 确定导出器运行在原 Pokémon Essentials Ruby 环境还是独立 Ruby 工具中。
-- [ ] 定义地图中间 JSON 的正式 Schema。
-- [ ] 定义 Tileset、Autotile、passages、priorities 和 terrain tags 的中间 JSON Schema。
-- [ ] 确定导出器如何选择需要导出的两张测试地图。
-- [ ] 确定导出结果中的原始文件名、Map ID 和 Tileset ID 追踪字段。
-- [ ] 确定重复导入时如何覆盖或保留 LoomRealm 手工修改。
-- [ ] 为导入结果生成稳定、可重复的 FSDB Key。
+### 2.4 第一阶段 Scope / Tag / Data Registry
 
-### 3.2 Autotile 编译器
+- [ ] 定义第一阶段实际使用的 Scope；
+- [ ] 定义地图、Tile、人物、Loading、错误和调试节点 Tag；
+- [ ] 为每个 Tag 定义 Data Schema；
+- [ ] 定义节点允许发送的 Event Schema；
+- [ ] 定义稳定 Key 规则；
+- [ ] 准备 Runtime Snapshot 到 Client State 的 Golden Fixture；
+- [ ] 确认业务 Registry 不进入基础 Client State 协议。
 
-- [ ] 实现并验证 48 种 Autotile 组合展开。
-- [ ] 确定 `tile.compiled` 的 Atlas 排列规则。
-- [ ] 确定编译产物的资源 Key 和内容版本。
-- [ ] 确定只编译地图使用到的组合，还是预编译完整槽位。
-- [ ] 校验不同尺寸和多帧 Autotile 输入。
-- [ ] 第一阶段固定使用静态第一帧。
-- [ ] 准备原创 Autotile 夹具用于公共仓库自动测试。
+关闭条件：两张验收地图可以通过固定 Registry 完整投影和渲染。
 
-### 3.3 通行与 Priority 编译
+### 2.5 Runtime Service 精确契约
 
-- [ ] 精确确认 RPG Maker XP passage flags 的方向位语义。
-- [ ] 定义原始 passage flags 到标准 `passable.down/left/right/up` 的转换。
-- [ ] 确定三个图层共同存在时的有效通行合并规则。
-- [ ] 确定当前格离开方向和目标格进入方向的完整判定顺序。
-- [ ] 定义 Priority 到标准 DOM 渲染平面和排序值的转换。
-- [ ] 建立包含墙体、门口、树冠和高 Priority Tile 的测试地图。
-- [ ] 明确 Terrain Tag、Bush、Counter 等第一阶段仅保存不执行的字段。
+- [ ] 冻结 JSON-RPC 方法和通知名称；
+- [ ] 定义请求、响应、通知 Envelope；
+- [ ] 定义客户端连接、首次 Snapshot 和重新连接流程；
+- [ ] 定义命令、节点事件和全局输入的 Schema；
+- [ ] 定义 Resync 请求和错误响应；
+- [ ] 定义 Runtime Event Envelope；
+- [ ] 定义健康检查和 ready 条件；
+- [ ] 确认 Runtime Service 不直接调用 Core、不生成 Client State。
 
-### 3.4 运行时更新时序
+关闭条件：浏览器、Hostra 和测试 Client 可以基于同一契约完成连接和恢复。
 
-- [ ] 确定后端运行时固定 Tick 的频率或调度方式。
-- [ ] 确定 `movement.startedAt` 使用的单调时间基准。
-- [ ] 确定一步移动完成时的状态版本递增规则。
-- [ ] 确定朝向变化、开始移动和完成移动分别产生几次状态更新。
-- [ ] 确定前端延迟收到 `stepping` 状态时如何缩短或对齐表现动画。
-- [ ] 确定浏览器后台降频时前端表现状态如何恢复到权威位置。
-- [ ] 确定运行时暂停、恢复和地图切换对 Tick 的影响。
+## 3. P1：完成客户端和资源闭环的事项
 
-### 3.5 客户端可见地图状态
+### 3.1 Client Store 与 Scope Tree Reconciler
 
-- [ ] 定义标准地图渲染项的最小字段集合。
-- [ ] 确定源矩形由后端直接输出还是由稳定编译索引派生。
-- [ ] 定义 `groundRenderItems` 和 `worldRenderItems` 的排序规则。
-- [ ] 确定地图完整状态和人物增量状态的作用域。
-- [ ] 确定地图内容版本与资源内容版本的关系。
-- [ ] 确定状态版本不连续时重新获取完整状态的流程。
+- [ ] 实现完整 Snapshot 原子替换；
+- [ ] 实现单 Scope Replace 和 Scope 删除；
+- [ ] 实现 Sequence、State Revision 和 Scope Revision 验证；
+- [ ] 实现按 `scope + key` 的 Element 复用；
+- [ ] 实现节点移动、删除和 Tag 变化；
+- [ ] 实现节点生命周期清理；
+- [ ] 实现结构错误后的完整 Resync；
+- [ ] 确认普通人物移动不会重建整张地图。
 
-## 4. 次级设计待办
+设计依据：[Web Client 状态协调与 DOM 呈现](../design/web-client-reconciliation.md)。
 
-### 4.1 项目入口
+### 3.2 Custom Node Runtime 与输入控制
 
-- [ ] 确定 `realm.project.json` 的格式版本字段。
-- [ ] 确定项目 FSDB 路径的表达方式。
-- [ ] 确定初始地图和玩家角色的引用方式。
-- [ ] 明确 Pokémon Essentials 本地项目路径只能存在于工作区本地配置。
-- [ ] 明确项目入口不保存地图内容或运行时状态。
+- [ ] 实现 Tag / Renderer / Data Schema Registry；
+- [ ] 实现地图、Tile、人物、Loading 和错误节点；
+- [ ] 实现方向输入归一化；
+- [ ] 处理页面失焦、断开和持续输入释放；
+- [ ] 实现节点事件的 Scope、Key 和 Schema 校验；
+- [ ] 确认 DOM Event 不直接进入 Runtime Core。
 
-### 4.2 最小权威状态 Schema
+### 3.3 资源接口
 
-- [ ] 将当前地图、人物稳定位置、朝向、移动状态和地图切换状态写成正式 Schema。
-- [ ] 确定状态版本的递增和作用域。
-- [ ] 确定首次连接、重新加载和重连的完整同步规则。
-- [ ] 确定增量同步失败后的恢复规则。
-- [ ] 确定资源加载失败是否进入权威故障状态或仅进入前端加载状态。
+- [ ] 定义资源请求路径或 RPC/HTTP 方法；
+- [ ] 定义资源 Key、内容版本和 MIME；
+- [ ] 定义缓存头和重新验证语义；
+- [ ] 定义资源不存在、读取失败和类型不匹配错误；
+- [ ] 定义最大资源大小和超时；
+- [ ] 实现 Web Client 请求去重、解码和缓存；
+- [ ] 确认图片下载不阻塞 Runtime 恢复。
 
-### 4.3 通用事件分类
+关闭条件：Tile、编译 Autotile 和人物 Sprite 可以完全通过稳定资源 Key 显示。
 
-- [ ] 正式定义归一化方向意图事件。
-- [ ] 确定运行时通知、日志、警告和故障的基本分类。
-- [ ] 明确事件和可恢复状态的边界。
-- [ ] 明确碰撞失败是否需要一次性表现事件。
-- [ ] 明确地图切换开始和结束是否同时需要事件。
-- [ ] 明确事件处理失败的报告方式。
+### 3.4 CLI 与 Hostra Bootstrap
 
-事件协议继续保持通用，不为每个地图或人物行为增加独立 RPC 方法。
+- [ ] 冻结 `start` 和 `validate` 参数；
+- [ ] 定义 CLI 退出码、日志和诊断输出；
+- [ ] 定义 Runtime 端口分配和 ready 信号；
+- [ ] 定义 Hostra 如何传入游戏包目录；
+- [ ] 实现 Hostra 等待 Runtime 就绪后打开窗口；
+- [ ] 实现本机 Token、Origin 白名单和导航限制；
+- [ ] 实现退出时 Runtime 子进程清理。
 
-### 4.4 数据与资源引用规则
+## 4. P1：统一错误与安全模型
 
-- [ ] 确定实体引用的正式稳定 Key 格式。
-- [ ] 确定资源 Key 是否包含语义命名空间。
-- [ ] 确定引用是否区分大小写。
-- [ ] 确定文件扩展名是否属于资源标识的一部分。
-- [ ] 确定重新导入和重命名后的引用更新规则。
-- [ ] 确定本地源文件名与 LoomRealm 资源 Key 的映射记录。
+- [ ] 定义稳定错误代码命名规则；
+- [ ] 定义严重级别；
+- [ ] 定义文件、内容 ID、字段路径和来源 ID 定位字段；
+- [ ] 区分内容校验、业务拒绝、Runtime、Session、Projection、Protocol 和 Resource Error；
+- [ ] 定义可恢复与致命错误；
+- [ ] 定义错误如何进入 CLI、日志、Runtime RPC 和 Client State；
+- [ ] 定义路径、消息、节点树和资源大小限制；
+- [ ] 定义敏感本机路径的日志脱敏规则。
 
-### 4.5 校验与错误模型
+关闭条件：所有第一阶段失败路径都能稳定分类、定位并测试。
 
-- [ ] 定义校验问题严重级别。
-- [ ] 定义稳定错误代码。
-- [ ] 确定错误是否包含源 Map ID、FSDB Key、文件路径和字段路径。
-- [ ] 确定项目加载遇到错误和警告时的行为。
-- [ ] 确定导入错误和运行时错误的边界。
-- [ ] 确定错误如何通过运行时通信返回前端。
-- [ ] 确保错误信息支持编辑器定位和 AI 自动修复。
+## 5. P1：测试与公开夹具
 
-第一阶段至少应能明确表达：
+- [ ] 建立两张原创或可公开分发的测试地图；
+- [ ] 建立普通 Tile、静态 Autotile、方向通行和 Priority 场景；
+- [ ] 建立四行四列原创人物 Sprite；
+- [ ] 建立双向 Portal；
+- [ ] 建立无效地图、引用、出生点和资源夹具；
+- [ ] 为 Game Package、Repository、Core、Loop、Coordinator、Projector、RPC 和 Web Client 建立分层测试；
+- [ ] 建立端到端 `loom-realm start ./game` 验收；
+- [ ] 建立 `loom-realm validate ./game` 全包验证测试；
+- [ ] 确认公共仓库不包含无权再分发的 Pokémon 素材。
 
-- 地图缺少某个图层或行；
-- 地图行宽度与地图定义不一致；
-- Tile ID 无法由 Tileset 解析；
-- Autotile 槽位或资源不存在；
-- Autotile 编译失败；
-- passage flags 无法转换；
-- 出生位置或 Portal 目标不可站立；
-- 人物图片不能按四行四列切分；
-- 资源不存在或版本不一致。
+## 6. P2：实现过程中观察
 
-### 4.6 文档一致性
+以下事项可以根据原型数据决定，但不得突破第一阶段范围：
 
-- [ ] 更新 `phase-1-fsdb-map-runtime.md` 中旧的单层和旧目录示例。
-- [ ] 更新 `phase-1-project-fsdb-design.md`，加入三层地图、原始 Tile ID、`tile.property` 和 Autotile 资源。
-- [ ] 更新 DOM 渲染文档，加入 Priority Tile 与 `world layer`。
-- [ ] 确保正式文档不再把多层地图、Autotile 和 Tile 属性列为第一阶段非目标。
+- [ ] Projection 深比较是否需要确定性 Fingerprint；
+- [ ] Repository 是否需要 LRU 或仅保留进程内缓存；
+- [ ] Web Client 是否需要有限地图节点池；
+- [ ] Resource Cache 的释放策略；
+- [ ] 是否增加开发期诊断 Scope；
+- [ ] 是否需要 `validate` 的并行度限制；
+- [ ] 是否需要记录仅用于调试的输入和 Transaction 日志。
 
-在以上同步完成前，Pokémon Essentials 兼容相关内容以 `phase-1-pokemon-essentials-map-runtime.md` 为准。
+## 7. 明确暂缓
 
-## 5. 暂缓设计的内容
+除非更新 [产品定位与第一阶段范围](../overview/product-scope.md)，以下内容不得进入第一阶段完成条件：
 
-以下内容仍不属于第一阶段，除非地图兼容原型证明无法绕开：
-
-- NPC 和普通地图事件；
-- RPG Maker XP 事件页和事件指令解释器；
-- 自动导入地图转移事件；
-- Terrain Tag 对应的完整地形行为；
-- Bush、Counter、反射、桥梁和瀑布表现；
+- Save System 和 `.lrsav`；
+- NPC 和完整地图事件；
+- Pokémon 业务和战斗；
 - Autotile 动画；
-- 动态地图实体；
-- 存档数据库；
-- 用户自定义数据结构；
-- 插件数据和插件生命周期；
-- 多角色控制；
-- 通用动画状态机；
-- 像素级碰撞和复杂物理系统；
-- 地图流式加载；
-- 多人状态同步；
-- 客户端预测和服务器校正；
-- Pokémon 业务数据和战斗系统。
+- 多会话和多人；
+- 客户端预测；
+- 插件和用户脚本；
+- 大地图流式加载；
+- Canvas / WebGL；
+- ZIP、ASAR 和远程游戏包；
+- 编辑器和项目创作 API。
 
-## 6. 建议实施顺序
+## 8. 待办关闭规则
 
-建议按以下顺序推进：
+每个待办关闭时必须：
 
-1. Pokémon Essentials 地图与 Tileset 导出器；
-2. FSDB 导入与三层地图校验；
-3. 普通 Tile 和 Autotile 静态编译；
-4. passage flags 与 Priority 编译；
-5. DOM 静态地图显示；
-6. 人物 Sprite 显示与四方向切帧；
-7. 人物行走状态机和方向意图；
-8. 格子碰撞；
-9. 双向 Portal 与完整地图状态切换；
-10. 状态版本、错误恢复和调试显示。
-
-## 7. 待办完成规则
-
-每一项设计待办完成后，应当：
-
-1. 将最终结论更新到对应正式设计文档；
-2. 删除或更新与结论冲突的旧描述；
-3. 在本文件中勾选对应待办；
-4. 如存在明显取舍，补充架构决策记录；
-5. 为兼容规则准备可以公开提交的原创测试夹具；
-6. 确认结论没有把 Pokémon Essentials 的完整游戏逻辑引入第一阶段。
+1. 将最终结论写入对应权威契约或设计；
+2. 删除或标记冲突的旧内容；
+3. 更新本文件；
+4. 更新 [文档状态与权威来源](../overview/document-status.md)；
+5. 重要取舍新增 ADR；
+6. 增加自动测试或公开夹具；
+7. 验证没有隐式扩大第一阶段范围。
