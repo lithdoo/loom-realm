@@ -4,11 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "doc/**"
-      - "package.json"
-      - "scripts/check-doc-links.py"
-      - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -48,6 +43,9 @@ jobs:
       - name: Build VitePress site
         run: npm run docs:build
 
+      - name: Verify build entrypoint
+        run: test -f doc/.vitepress/dist/index.html
+
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
@@ -65,3 +63,8 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify deployed site
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: curl --fail --location --retry 10 --retry-delay 6 --retry-all-errors "$PAGE_URL"
