@@ -2,17 +2,18 @@
 
 ## 1. 文档目的
 
-本文档定义 LoomRealm 第一阶段 `Session Coordinator` 的职责、状态、接口、地图切换流程和错误边界。
+本文档定义 LoomRealm 第一阶段 `Session Coordinator` 的职责、状态、Session Snapshot、地图切换流程和错误边界。
 
 相关文档：
 
 - [`phase-1-runtime-execution-loop.md`](./phase-1-runtime-execution-loop.md)：定义 Runtime Core 的唯一写入口、固定 Tick、队列和 Effect 屏障；
 - [`phase-1-runtime-core.md`](./phase-1-runtime-core.md)：定义权威游戏状态和同步规则事务；
+- [`../architecture/client-state-projector.md`](../architecture/client-state-projector.md)：定义 Runtime/Session 快照到 Client State 的投影；
 - [`../game-package/phase-1-game-loading.md`](../game-package/phase-1-game-loading.md)：定义 Loader、Catalog 和 Repository。
 
 核心原则：
 
-> Session Coordinator 只负责协调异步内容准备和会话流程。它不直接调用 Runtime Core，不实现游戏规则，也不承担持续 Tick 调度。
+> Session Coordinator 只负责协调异步内容准备和会话流程。它不直接调用 Runtime Core，不实现游戏规则，不承担持续 Tick 调度，也不生成 Client State。
 
 第一阶段保持：
 
@@ -32,10 +33,18 @@ Game Package Context
 └── Resource Repository
         ↓
 Session Coordinator
+├── Session State
+├── Session Revision
+├── Session Snapshot
+└── Async Map Preparation
         ↓ control operations
 Runtime Execution Loop
-        ↓ serialized synchronous calls
+        ↓ serialized calls
 Runtime Core
+
+Session Snapshot ─┐
+Runtime Snapshot ─┴→ Projection Scheduler
+                    → Client State Projector
 ```
 
 各层职责：
@@ -53,8 +62,11 @@ Runtime Execution Loop
 Runtime Core
     同步执行权威游戏规则事务
 
+Client State Projector
+    读取 Runtime/Session Snapshot 并生成 Client State
+
 Runtime Service
-    验证外部请求、检查 Session 状态并提交 Loop 操作
+    验证外部请求并发布状态、事件和资源
 ```
 
 ## 3. 第一阶段职责
@@ -67,6 +79,9 @@ Session Coordinator 负责：
 - 通过 Execution Loop 初始化 Runtime Core；
 - 同步接收 Execution Loop 发布的 Pending Effect；
 - 在第一次异步等待前进入 `loading`；
+- 维护 Session State 和 Session Revision；
+- 提供不可变 Session Snapshot；
+- Session 状态变化时请求客户端投影；
 - 通过 Execution Loop 申请加载暂停；
 - 异步加载目标地图和目标人物；
 - 校验 `PreparedMapTransition`；
@@ -82,11 +97,11 @@ Session Coordinator 不负责：
 - Runtime Tick 调度；
 - Runtime 操作队列；
 - 直接调用 Runtime Core；
+- 生成 Scope、Roots、Tag、Data 或 Client Revision；
 - FSDB 解析细节；
 - Repository 缓存策略；
 - 图片、音频等资源主体读取；
 - HTTP、WebSocket、DOM 或 Electron；
-- Client State Projector；
 - 存档读写；
 - 多会话和多玩家调度。
 
@@ -97,8 +112,12 @@ class DefaultSessionCoordinator
   implements SessionCoordinator {
   constructor(
     private readonly game: GamePackageContext,
+
     private readonly executionLoop:
       RuntimeExecutionLoop,
+
+    private readonly projectionScheduler:
+      ProjectionScheduler,
   ) {}
 }
 ```
@@ -119,7 +138,9 @@ await executionLoop.completeEffect(effectId);
 await executionLoop.resume();
 ```
 
-## 5. 会话状态
+Projection Scheduler 只接收快照请求，不能修改 Session 或 Runtime。
+
+## 5. Session State
 
 ```ts
 type SessionState =
@@ -140,7 +161,126 @@ type SessionState =
 
 `loading` 是会话控制状态，不是 Runtime Core 游戏业务状态。
 
-## 6. 第一阶段状态转换
+## 6. Session Snapshot
+
+Coordinator 暴露不可变快照：
+
+```ts
+interface SessionSnapshot {
+  readonly revision: number;
+  readonly state: SessionState;
+  readonly error?: SessionError;
+}
+```
+
+```ts
+interface SessionError {
+  readonly code: string;
+  readonly message: string;
+  readonly recoverable: boolean;
+}
+```
+
+最小接口：
+
+```ts
+interface SessionCoordinator {
+  readonly state: SessionState;
+  readonly revision: number;
+
+  start(): Promise<void>;
+
+  acceptRuntimeEffect(
+    pending: RuntimePendingEffect,
+  ): void;
+
+  getSnapshot(): SessionSnapshot;
+
+  close(): Promise<void>;
+}
+```
+
+Snapshot 规则：
+
+- Snapshot 不暴露可修改内部引用；
+- Snapshot 不包含 Repository、Promise 或加载任务；
+- Snapshot 不包含 Client State；
+- Session Snapshot 可以与最近 Runtime Snapshot 组合为 Projection Frame；
+- 纯读取不增加 Session Revision。
+
+## 7. Session Revision
+
+Session Revision 从 `0` 开始，在客户端可观察的 Session 状态提交时递增。
+
+```text
+starting → running
+running → loading
+loading → running
+running/loading → failed
+任意非 closed 状态 → closed
+```
+
+错误内容发生客户端可见变化时也递增。
+
+规则：
+
+- 每个 Session 状态事务最多递增一次；
+- 相同 State 和相同 Error 不递增；
+- Session Revision 不等于 Runtime Revision；
+- Session Revision 不等于 Client State Revision；
+- Session Revision 不等于 Runtime RPC Sequence。
+
+状态修改应集中在一个方法：
+
+```ts
+private commitSessionState(
+  nextState: SessionState,
+  error?: SessionError,
+): void {
+  if (
+    this.state === nextState &&
+    equalSessionError(this.error, error)
+  ) {
+    return;
+  }
+
+  this.state = nextState;
+  this.error = error;
+  this.revision += 1;
+
+  this.requestProjection();
+}
+```
+
+## 8. 投影请求
+
+Session 状态变化时，Coordinator 请求 Projection Scheduler：
+
+```ts
+private requestProjection(): void {
+  this.projectionScheduler.request({
+    runtime: this.latestRuntimeSnapshot,
+    session: this.getSnapshot(),
+    runtimeTransactionId:
+      this.latestRuntimeTransactionId,
+    cause: {
+      type: "session-change",
+    },
+  });
+}
+```
+
+Coordinator 不调用 Scope Projector，也不决定：
+
+- 哪个 Scope 变化；
+- 是否发布 Snapshot；
+- 是否发布 Scope Replace；
+- Client State Revision；
+- Scope Revision。
+
+这些属于 Client State Projector。
+
+## 9. 状态转换
 
 ```text
 starting
@@ -169,35 +309,7 @@ failed
 - `closed → 其他状态`；
 - 同时处理两个地图切换。
 
-## 7. 最小公开接口
-
-```ts
-interface SessionCoordinator {
-  readonly state: SessionState;
-
-  start(): Promise<void>;
-
-  /**
-   * 由 RuntimeExecutionSink 同步调用。
-   * 必须在返回前把 Session 切换到 loading。
-   */
-  acceptRuntimeEffect(
-    pending: RuntimePendingEffect,
-  ): void;
-
-  close(): Promise<void>;
-}
-```
-
-第一阶段 Coordinator 只接受：
-
-```ts
-type RuntimeEffect = MapTransitionEffect;
-```
-
-未知 Effect 属于不可恢复的宿主集成错误。
-
-## 8. Runtime Effect 接入
+## 10. Runtime Effect 接入
 
 Execution Loop 产生 Effect 后已经建立屏障：
 
@@ -223,7 +335,7 @@ acceptRuntimeEffect(
   pending: RuntimePendingEffect,
 ): void {
   if (this.state !== "running") {
-    this.enterFatalFailure(
+    void this.failSession(
       new Error(
         `Cannot accept effect while ${this.state}`,
       ),
@@ -231,8 +343,8 @@ acceptRuntimeEffect(
     return;
   }
 
-  this.state = "loading";
   this.activeEffect = pending;
+  this.commitSessionState("loading");
 
   void this.handleRuntimeEffect(pending);
 }
@@ -240,11 +352,11 @@ acceptRuntimeEffect(
 
 关键规则：
 
-> `state = "loading"` 必须发生在第一次 `await` 之前。
+> Session 必须在第一次 `await` 前切换到 `loading` 并请求投影。
 
-这样 Runtime Service 会立即停止接受普通游戏命令。
+这样 Runtime Service 会立即停止接受普通命令，客户端也可以立即得到 Loading Scope。
 
-## 9. 启动流程
+## 11. 启动流程
 
 ```text
 CLI
@@ -252,6 +364,7 @@ CLI
 → Game Package Context
 → 创建 Runtime Core
 → 创建 Runtime Execution Loop
+→ 创建 Projection Scheduler / Client State Projector
 → 创建 Session Coordinator
 → coordinator.start()
 ```
@@ -266,63 +379,16 @@ CLI
 → 创建 RuntimeSceneContent
 → 创建 RuntimeInitialization
 → executionLoop.start(initialization)
+→ 获取初始化后的 Runtime Snapshot
 → Session = running
+→ 请求 initial Projection（forceSnapshot）
 ```
 
-示意：
-
-```ts
-async start(): Promise<void> {
-  this.assertState("starting");
-
-  try {
-    const entry = this.game.catalog.entry;
-
-    const [map, playerDefinition] =
-      await Promise.all([
-        this.game.maps.load(
-          entry.initialMapId,
-        ),
-        this.game.actors.load(
-          entry.playerActorId,
-        ),
-      ]);
-
-    const actorDefinitions =
-      await this.loadSceneActorDefinitions(
-        map,
-        playerDefinition,
-      );
-
-    const initialization =
-      this.prepareInitialization({
-        map,
-        actorDefinitions,
-        playerActorId:
-          entry.playerActorId,
-        playerPosition:
-          entry.initialPosition ??
-          map.defaultSpawn.position,
-        playerDirection:
-          entry.initialDirection ??
-          map.defaultSpawn.direction,
-      });
-
-    await this.executionLoop.start(
-      initialization,
-    );
-
-    this.state = "running";
-  } catch (error) {
-    await this.failSession(error);
-    throw error;
-  }
-}
-```
+初始投影成功之前，Runtime Service 不应进入 ready。
 
 启动期间 Runtime 尚未初始化，因此不申请加载暂停，也不存在 Pending Effect。
 
-## 10. 普通命令处理边界
+## 12. 普通命令边界
 
 普通命令不经过 Session Coordinator：
 
@@ -333,22 +399,13 @@ Web Client
 → executionLoop.submitCommand(command)
 ```
 
-Runtime Service 必须拒绝：
-
-```text
-starting
-loading
-failed
-closed
-```
-
-期间的普通游戏命令。
+Runtime Service 必须拒绝 `starting`、`loading`、`failed` 和 `closed` 期间的普通命令。
 
 输入不缓存、不重放。
 
 Coordinator 只处理 Runtime Effect，不成为普通命令转发层。
 
-## 11. MapTransitionEffect
+## 13. MapTransitionEffect
 
 ```ts
 interface MapTransitionEffect {
@@ -359,16 +416,9 @@ interface MapTransitionEffect {
 }
 ```
 
-Effect 只描述目标，不包含：
+Effect 只描述目标，不包含 Repository、Promise、加载进度、图片主体、DOM 状态或 Runtime 内部对象引用。
 
-- Repository；
-- Promise；
-- 加载进度；
-- 图片主体；
-- DOM 状态；
-- Runtime 内部对象引用。
-
-## 12. 地图切换总体流程
+## 14. 地图切换总体流程
 
 ```text
 Runtime Core 完成人物移动
@@ -376,18 +426,21 @@ Runtime Core 完成人物移动
 → 返回 MapTransitionEffect
 → Execution Loop 建立 Effect Barrier
 → Coordinator 同步进入 loading
+→ 请求 Session Change Projection
 → loop.pause()
 → 异步加载目标 Map 和 Actor
 → 校验 PreparedMapTransition
 → loop.commitMapTransition(prepared)
+→ 请求 forceSnapshot Projection
 → loop.completeEffect(effectId)
 → Session = running
+→ 请求 Session Change Projection
 → loop.resume()
 ```
 
 第一阶段一次只允许一个 `activeEffect`。
 
-## 13. 申请加载暂停
+## 15. 申请加载暂停
 
 Coordinator 开始异步加载前必须：
 
@@ -395,16 +448,16 @@ Coordinator 开始异步加载前必须：
 await this.executionLoop.pause();
 ```
 
-Execution Loop 的 Effect 屏障已经阻止 Tick 和普通命令；暂停进一步保证：
+Effect Barrier 已经阻止 Tick 和普通命令；暂停进一步保证：
 
 - Runtime Core 的统一暂停状态可见；
-- 地图提交满足“仅允许在暂停时提交”的前置条件；
+- 地图提交满足仅允许在暂停时提交的前置条件；
 - 暂停可以与其他暂停嵌套；
 - 暂停期间不累计逻辑时间债务。
 
 Coordinator 不管理 `pauseDepth`，只保证自己申请的暂停最终只恢复一次。
 
-## 14. 准备目标场景
+## 16. 准备目标场景
 
 ```text
 Map Repository.load(targetMapId)
@@ -437,120 +490,63 @@ Coordinator 校验：
 
 图片资源主体不在地图切换阶段读取。
 
-## 15. 原子提交
+## 17. 原子提交与投影
 
 准备完成后：
 
 ```ts
-await this.executionLoop
-  .commitMapTransition(prepared);
+const transaction =
+  await this.executionLoop
+    .commitMapTransition(prepared);
 ```
 
-Execution Loop 串行调用：
+Core 一次性替换当前 Map、Actor Definitions、Runtime Actor State、玩家位置/朝向、移动状态和 Runtime Revision。
+
+提交成功后必须请求完整客户端投影：
 
 ```ts
-core.commitMapTransition(prepared);
-```
-
-Core 一次性替换：
-
-- 当前 Map 内容；
-- Map ID；
-- Actor Definition 集合；
-- Runtime Actor State；
-- 玩家位置和朝向；
-- 玩家移动状态；
-- 旧场景临时状态；
-- Runtime Revision。
-
-Coordinator 不得逐字段修改 Runtime。
-
-## 16. 完成 Effect 屏障
-
-提交成功后：
-
-```ts
-await this.executionLoop.completeEffect(
-  pending.id,
+this.projectionScheduler.request(
+  this.createProjectionFrame(
+    transaction,
+    {
+      type: "runtime-transaction",
+      kind: "map-transition",
+    },
+  ),
+  {
+    forceSnapshot: true,
+  },
 );
 ```
 
-规则：
+Coordinator 不逐字段修改 Runtime，也不自行生成新地图 Scope。
 
-- Effect ID 必须匹配当前 Pending Effect；
-- 完成后 Loop 才允许恢复普通 Tick；
-- 完成 Effect 不直接修改 Core 游戏状态；
-- Coordinator 在恢复 Session 前仍然保持输入门控；
-- Pending Effect 期间收到的输入已经被拒绝，不会重放。
+## 18. 完成 Effect 与恢复
 
-## 17. 恢复顺序
+成功顺序固定为：
 
-成功流程：
+```text
+commitMapTransition
+→ forceSnapshot Projection Request
+→ completeEffect
+→ Session running
+→ Session Change Projection Request
+→ resume
+```
 
 ```ts
 await this.executionLoop
-  .commitMapTransition(prepared);
-
-await this.executionLoop
   .completeEffect(pending.id);
 
-this.state = "running";
+this.activeEffect = null;
+this.commitSessionState("running");
 
 await this.executionLoop.resume();
 ```
 
-`resume()` 在同步调用时立即进入 Control Queue。即使 Session 已经切换为 `running`，Control Queue 仍优先于随后到达的普通 Command，因此 Runtime 会先恢复，再处理普通命令。
+地图提交 Snapshot 可以包含新 World/HUD 和仍存在的 Loading Scope。Session 返回 `running` 后，后续单 Scope Replace 可以删除 Loading Scope。
 
-Coordinator 必须确保本次 `resume()` 只对应本次地图加载申请的 `pause()`。
-
-## 18. 地图切换实现示意
-
-```ts
-private async handleRuntimeEffect(
-  pending: RuntimePendingEffect,
-): Promise<void> {
-  let loadingPauseAcquired = false;
-
-  try {
-    if (
-      pending.effect.type !==
-      "map-transition"
-    ) {
-      throw new Error(
-        `Unsupported Runtime Effect: ${
-          pending.effect.type
-        }`,
-      );
-    }
-
-    await this.executionLoop.pause();
-    loadingPauseAcquired = true;
-
-    const prepared =
-      await this.prepareMapTransition(
-        pending.effect,
-      );
-
-    await this.executionLoop
-      .commitMapTransition(prepared);
-
-    await this.executionLoop
-      .completeEffect(pending.id);
-
-    this.activeEffect = null;
-    this.state = "running";
-
-    await this.executionLoop.resume();
-    loadingPauseAcquired = false;
-  } catch (error) {
-    await this.handleTransitionFailure({
-      pending,
-      error,
-      loadingPauseAcquired,
-    });
-  }
-}
-```
+Pending Effect 期间收到的输入已被拒绝，不会重放。
 
 ## 19. 可恢复加载失败
 
@@ -558,45 +554,24 @@ private async handleRuntimeEffect(
 
 - 目标地图不存在；
 - 目标 Actor Definition 缺失；
-- 目标位置越界；
-- 目标位置不可站立；
+- 目标位置越界或不可站立；
 - 目标静态引用不完整；
 - Repository 临时读取失败；
-- Prepared Transition 校验失败且 Core 尚未提交。
+- Core 尚未提交前的 Prepared Transition 校验失败。
 
 处理：
 
 ```text
 保留当前 Runtime Scene
-→ 记录 Session Control Error
+→ 记录可恢复 Session Error
 → completeEffect(effectId)
 → activeEffect = null
 → Session = running
+→ 请求 Session Change Projection
 → resume loading pause
 ```
 
-示意：
-
-```ts
-await this.executionLoop
-  .completeEffect(pending.id);
-
-this.activeEffect = null;
-this.lastRecoverableError =
-  toSessionControlError(error);
-this.state = "running";
-
-if (loadingPauseAcquired) {
-  await this.executionLoop.resume();
-}
-```
-
-可恢复失败不会：
-
-- 提交半个目标场景；
-- 改写当前地图；
-- 回放加载期间输入；
-- 因图片未下载而阻塞恢复。
+可恢复失败不提交半个目标场景、不改写当前地图、不回放输入，也不因图片未下载而阻塞恢复。
 
 ## 20. 致命失败
 
@@ -604,44 +579,41 @@ if (loadingPauseAcquired) {
 
 - Core 提交抛出不变量错误；
 - Execution Loop 进入 `failed`；
-- 当前 Game Package Context 已不可继续使用；
+- Game Package Context 已不可继续使用；
 - Effect ID 或 Effect 生命周期不一致；
 - 必需 RuntimeExecutionSink 故障；
-- Coordinator 内部状态与 Loop 屏障状态失配。
+- Client State 初始或运行期投影失败；
+- Coordinator 与 Loop 屏障状态失配。
 
 处理：
 
 ```text
 Session = failed
+→ 请求 failed Session Projection
 → executionLoop.fail(error)
 → Runtime 停止推进
 → 保留最后 Snapshot 用于诊断
 ```
 
-致命失败时：
-
-- 不恢复为 `running`；
-- 不要求完成 Pending Effect；
-- 不调用普通 `resume()`；
-- 只允许状态读取、诊断和关闭。
+致命失败时不恢复为 `running`，不要求完成 Pending Effect，不调用普通 `resume()`。
 
 ## 21. 加载期间行为
 
 当 `state === "loading"`：
 
-- Execution Loop Effect Barrier 保持有效；
+- Effect Barrier 保持有效；
 - Runtime 保持加载暂停；
 - Runtime Service 拒绝普通游戏命令；
 - 当前 Scene 保持完整有效；
 - Runtime Service 继续提供健康检查；
-- Runtime Service 可以发布加载相关 Client State；
+- Client State Projector 可以输出加载相关 Scope；
 - 不接受第二个 Runtime Effect；
 - 不缓存用户输入；
 - 不等待客户端图片加载完成。
 
 Runtime 恢复不依赖客户端资源下载速度。
 
-## 22. Repository 缓存边界
+## 22. Repository 与资源边界
 
 Coordinator 只调用：
 
@@ -650,29 +622,9 @@ mapRepository.load(id)
 actorRepository.load(id)
 ```
 
-Repository 自行负责：
+Repository 自行负责并发去重、缓存、解析和局部校验。
 
-- 同一 ID 并发加载去重；
-- 进程内缓存；
-- 缓存失效策略；
-- 数据解析；
-- 局部内容校验。
-
-Coordinator 不读取缓存内部状态，也不决定缓存命中行为。
-
-缓存命中与否不得改变 Runtime 语义。
-
-## 23. 资源边界
-
-地图切换只处理逻辑资源引用：
-
-```text
-Map Snapshot
-Actor Definition
-Resource Key
-```
-
-图片资源链路独立：
+地图切换只处理逻辑资源引用。图片资源链路独立：
 
 ```text
 Web Client
@@ -680,37 +632,32 @@ Web Client
 → Resource Repository.open(resourceId)
 ```
 
-Coordinator 不参与：
+Coordinator 不参与图片请求、MIME、浏览器解码、Client Resource Cache 或 DOM 准备通知。
 
-- 图片请求；
-- 图片字节读取；
-- MIME 返回；
-- 浏览器解码；
-- Client Resource Cache；
-- DOM 准备完成通知。
-
-## 24. 与 Runtime Service 的边界
+## 23. Runtime Service 边界
 
 Runtime Service 负责：
 
 - 检查 `session.state`；
 - 把外部输入转换成 Game Command；
 - 调用 `executionLoop.submitCommand()`；
-- 返回命令接受或拒绝结果；
-- 发布 Runtime Transaction；
-- 调用 Client State Projector；
+- 发布 Runtime Event；
+- 消费 Projection Commit；
+- 发布 `state.snapshot` 和 `scope.replace`；
 - 提供资源接口。
 
 Coordinator 负责：
 
 - 接受 Pending Effect；
-- 控制 Session 状态；
+- 控制 Session State 和 Revision；
+- 提供 Session Snapshot；
 - 异步准备场景；
-- 提交 Loop 控制操作。
+- 提交 Loop 控制操作；
+- 请求 Session Change 和 Map Commit Projection。
 
 Runtime Service 不等待地图加载完成才结束原始移动命令事务。
 
-## 25. 关闭流程
+## 24. 关闭流程
 
 ```ts
 async close(): Promise<void> {
@@ -718,8 +665,8 @@ async close(): Promise<void> {
     return;
   }
 
-  this.state = "closed";
   this.activeEffect = null;
+  this.commitSessionState("closed");
 
   await this.executionLoop.close();
 }
@@ -731,18 +678,10 @@ async close(): Promise<void> {
 - Close 后不接受新 Effect；
 - Close 后不开始新 Repository 加载；
 - 第一阶段不实现加载取消；
-- 已经返回的 Repository Promise 可以自然结束，但结果不得提交；
+- 已返回的 Repository Promise 可以自然结束，但结果不得提交；
 - Execution Loop 负责停止 Scheduler 和关闭 Core。
 
-异步加载完成前必须再次检查：
-
-```ts
-if (this.state === "closed") {
-  return;
-}
-```
-
-## 26. 第一阶段不实现
+## 25. 第一阶段不实现
 
 - 多 Session；
 - 多 Runtime；
@@ -754,69 +693,49 @@ if (this.state === "closed") {
 - Repository 缓存策略；
 - 图片资源预加载屏障；
 - 客户端输入重放；
+- Session 直接生成 Client State；
 - NPC 通用事件调度；
 - Save System；
 - 通用工作流引擎。
 
-## 27. 测试要求
-
-第一阶段至少覆盖：
-
-1. 启动时并行加载入口 Map 和 Player；
-2. RuntimeInitialization 校验失败时 Session failed；
-3. Coordinator 只持有 Execution Loop，不持有 Runtime Core；
-4. 接收 Effect 时在第一次 await 前进入 loading；
-5. Effect 开始后申请统一暂停；
-6. 目标 Map 和 Actor 按需异步加载；
-7. Prepared Transition 在提交前完整校验；
-8. 成功时按 pause、commit、complete、resume 执行；
-9. 可恢复失败保留旧 Scene；
-10. 可恢复失败完成 Effect 并恢复 Runtime；
-11. 加载期间输入不缓存、不重放；
-12. 第二个 Effect 被拒绝并导致明确诊断；
-13. Effect ID 不匹配进入 fatal；
-14. Core 提交不变量错误进入 fatal；
-15. 图片加载不阻塞 Runtime 恢复；
-16. Close 幂等；
-17. Close 后加载结果不再提交；
-18. Repository 缓存命中不改变流程语义。
-
-## 28. 第一阶段已冻结决策
+## 26. 第一阶段冻结决策
 
 | 问题 | 第一阶段结论 |
 |---|---|
-| Coordinator 依赖 | GamePackageContext + RuntimeExecutionLoop |
-| Core 直接引用 | 禁止 |
-| Tick 调度 | Execution Loop 负责 |
+| Session 数量 | 单 Session |
+| Runtime 数量 | 单 Execution Loop + 单 Core |
+| Core 调用 | 只通过 Execution Loop |
+| Session 状态 | starting/running/loading/failed/closed |
+| Session Snapshot | revision + state + optional error |
+| Session Revision | 与 Runtime/Client Revision 分离 |
+| Effect | 同时最多一个 Pending Effect |
+| Loading 入口 | 第一次 await 前同步提交 |
+| Session 投影 | 状态提交后请求 Projection Scheduler |
+| 地图提交投影 | 强制完整 Snapshot |
 | 普通命令 | Runtime Service 直接提交 Loop |
-| 异步入口 | RuntimePendingEffect |
-| Effect 数量 | 同时最多一个 |
-| Effect 接收 | 同步进入 loading，再启动异步处理 |
-| 加载暂停 | 通过 Loop 申请统一暂停 |
-| 地图加载 | Repository 异步按需加载 |
-| 地图提交 | 通过 Loop 原子提交 |
-| Effect 完成 | `completeEffect(effectId)` |
-| 加载输入 | 拒绝、不缓存、不重放 |
-| 可恢复失败 | 保留旧 Scene，完成 Effect 并恢复 |
-| 致命失败 | Session/Loop failed，不恢复 |
-| 图片资源 | 不经过 Coordinator |
-| Close | Coordinator 关闭 Loop |
-| 加载取消 | 第一阶段不实现 |
+| 输入缓存 | 不缓存、不回放 |
+| 图片资源 | 不进入地图准备屏障 |
+| 加载失败 | 提交前可恢复，提交/不变量错误致命 |
+| 存档 | 第一阶段不接入 |
 
-## 29. 当前结论
+## 27. 当前结论
 
 ```text
 Repository
-    负责异步读取和缓存
-
+    ↓ async content
 Session Coordinator
-    负责异步内容准备和会话流程
-
+    ├── Session State / Revision / Snapshot
+    └── map transition orchestration
+            ↓ controls
 Runtime Execution Loop
-    负责串行执行、固定 Tick 和 Effect 屏障
-
+            ↓
 Runtime Core
-    负责同步权威游戏规则
+
+Runtime Snapshot + Session Snapshot
+            ↓
+Projection Scheduler
+            ↓
+Client State Projector
 ```
 
-Session Coordinator 不能直接调用 Runtime Core。地图切换必须经过 Execution Loop 的统一暂停、原子提交和 Effect 完成屏障。
+Session Coordinator 是异步会话协调层，不是 Runtime Core、Execution Loop、Runtime Service 或 Client State Projector。
