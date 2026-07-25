@@ -1,6 +1,6 @@
 # LoomRealm 开发文档
 
-LoomRealm 文档按“范围与架构、公开契约、内部设计、兼容资料、路线图和历史方案”组织。
+LoomRealm 文档按“范围与架构、公开契约、内部设计、兼容与参考资料、路线图”组织。
 
 阅读前先查看：
 
@@ -102,13 +102,10 @@ runtime/
     Runtime Core、Execution Loop、Session 和兼容运行时
 
 fsdb/
-    FSDB 基础资料和历史设计
+    FSDB 基础格式与参考资料
 
 roadmap/
     当前待办和开放事项
-
-renderer/
-    被新 Web Client 协调设计替代的历史入口
 ```
 
 ## 当前权威文档
@@ -129,19 +126,20 @@ renderer/
 | 地图兼容和 FSDB Profile | [Pokémon Essentials v21.1 地图与行走运行时](./runtime/phase-1-pokemon-essentials-map-runtime.md) |
 | 桌面宿主 | [Hostra 桌面客户端宿主架构](./architecture/hostra-desktop-client-host.md) |
 
-完整状态和替代关系见 [文档状态与权威来源](./overview/document-status.md)。
+完整状态见 [文档状态与权威来源](./overview/document-status.md)。
 
 ## 文档维护原则
 
 1. 同一设计只有一个主要定义位置；其他文档通过链接引用。
-2. 产品范围、契约、内部设计、路线图和历史方案必须分层。
-3. `Superseded` 文档不得作为当前实现依据。
-4. 重大变更需要同步更新权威文档、文档状态和路线图。
-5. 代码、Schema 和配置示例应尽可能由自动检查验证。
-6. 专题文档不得重新定义第一阶段总体范围。
-7. 游戏包第一阶段只读，Save System 暂缓。
-8. Runtime Core 不执行文件或网络 I/O。
-9. Runtime Execution Loop 是 Core 的唯一写入口。
-10. Runtime 内部状态不直接序列化给客户端。
-11. Client State 使用 Scope 和通用节点树。
-12. Web Client 不读取原始 FSDB，也不把 DOM 作为权威状态来源。
+2. 产品范围、契约、内部设计、路线图和参考资料必须分层。
+3. 被替代或失效的文档从当前文档树直接删除，历史内容通过 Git 记录追溯。
+4. 删除文档时必须同步清理 README、文档状态表和所有交叉引用。
+5. 重大变更需要同步更新权威文档和路线图。
+6. 代码、Schema、配置示例和内部链接应尽可能由自动检查验证。
+7. 专题文档不得重新定义第一阶段总体范围。
+8. 游戏包第一阶段只读，Save System 暂缓。
+9. Runtime Core 不执行文件或网络 I/O。
+10. Runtime Execution Loop 是 Core 的唯一写入口。
+11. Runtime 内部状态不直接序列化给客户端。
+12. Client State 使用 Scope 和通用节点树。
+13. Web Client 不读取原始 FSDB，也不把 DOM 作为权威状态来源。
