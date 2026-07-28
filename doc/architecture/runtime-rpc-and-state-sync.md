@@ -1,182 +1,440 @@
-# 运行时通信与状态同步
+# JSON-RPC 通信与客户端状态同步
 
-## 1. 文档目的
-
-本文档定义 LoomRealm Runtime Server 与 Web Client 之间的通信方向、状态同步语义、事件边界和传输适配规则。
+> 状态：**Active Design**  
+> 适用范围：程序主系统、模块子系统和 Web 渲染端  
+> 最近复核：2026-07-28  
+> 主要定义：JSON-RPC 方法、控制面与数据面、消息顺序、Scope 同步和恢复
 
 相关文档：
 
-- [`client-state-tree-protocol.md`](./client-state-tree-protocol.md)：定义 Client State、Scope、Roots 和 Client Node；
-- [`client-state-projector.md`](./client-state-projector.md)：定义 Runtime/Session 快照到 Client State 的原子投影；
-- [`../runtime/phase-1-runtime-execution-loop.md`](../runtime/phase-1-runtime-execution-loop.md)：定义命令、Tick 和控制操作的串行执行；
-- [`../runtime/phase-1-session-coordinator.md`](../runtime/phase-1-session-coordinator.md)：定义异步地图切换和 Session 状态。
+- [`main-system-and-subsystems.md`](./main-system-and-subsystems.md)：调用栈和进程职责；
+- [`client-state-tree-protocol.md`](./client-state-tree-protocol.md)：Scope Tree 数据格式；
+- [`client-state-projector.md`](./client-state-projector.md)：子系统如何生成 Scope；
+- [`../design/web-client-reconciliation.md`](../design/web-client-reconciliation.md)：渲染端如何应用状态。
 
 核心原则：
 
-> Runtime RPC 只承载通用状态同步、事件传递和资源访问，不围绕地图、人物、菜单或其他业务增加固定 RPC DTO。
+> 所有进程间语义使用 JSON-RPC 2.0；程序主系统只承载调用栈和生命周期控制；普通用户输入和 Scope 更新由模块子系统与渲染端直接交换。
 
-## 2. 模块链路
-
-```text
-Web Client
-    ↓ 归一化命令 / 节点事件
-Runtime Service
-    ↓ submitCommand / control
-Runtime Execution Loop
-    ↓ serialized synchronous call
-Runtime Core
-    ↓ RuntimeTransaction + RuntimeSnapshot
-Projection Scheduler
-    ↓ latest ProjectionFrame
-Client State Projector
-    ↓ ProjectionCommit
-Runtime Service
-    ↓ state.snapshot / scope.replace / event
-Web Client
-```
-
-边界：
-
-- Runtime Service 不直接调用 Runtime Core；
-- Runtime Service 通过 Execution Loop 提交命令和控制操作；
-- Runtime Service 不自行拼接 Client State；
-- Client State Revision 和 Scope Revision 由 Client State Projector 分配；
-- Runtime Service 只把 Projection Commit 转换成通信消息；
-- Runtime Event 与 Client State 使用独立发布通道。
-
-## 3. 通信能力
-
-第一阶段建立三类能力：
+## 1. 通信拓扑
 
 ```text
-状态同步
-    描述客户端现在应该呈现什么
+                     控制面
+程序主系统  ⇄  模块子系统
+程序主系统  ⇄  Web 渲染端
 
-事件传递
-    描述一次用户意图或瞬时通知
-
-资源访问
-    按逻辑资源 Key 获取静态资源主体
+                     数据面
+模块子系统  ⇄  Web 渲染端
 ```
 
-业务差异体现在：
+控制面低频、严格有序，负责 `call`、`return`、激活和连接管理。
 
-- Scope 名称；
-- Client Node Tag；
-- Tag 对应的 Data Schema；
-- 事件名称和事件 Data；
-- 逻辑资源 Key。
+数据面高频，负责输入、Scope 状态和一次性事件，不经过程序主系统转发。
 
-基础通信层不预定义固定 RPG 业务 DTO。
-
-## 4. 权威状态原则
-
-Runtime Core 是游戏规则和游戏状态的权威来源。
-
-Runtime Core 负责决定：
-
-- 人物位置、朝向和移动结果；
-- 碰撞结果；
-- Portal 和地图切换结果；
-- 暂停和恢复结果；
-- 其他影响游戏规则的状态变化。
-
-Session Coordinator 负责异步内容准备和会话控制状态。
-
-Client State Projector 读取 Runtime Snapshot 和 Session Snapshot，生成客户端目标状态。它不能修改 Runtime 或 Session。
-
-Web Client 负责：
-
-- 采集并归一化用户输入；
-- 维护 Client State 本地镜像；
-- 将 Scoped State Tree 协调为 DOM；
-- 管理不影响游戏规则的临时视觉状态；
-- 按资源 Key 请求和缓存资源。
-
-客户端不得通过直接修改共享对象或 DOM 来改变权威状态。
-
-## 5. Runtime State 与 Client State
-
-Runtime 内部状态不能直接序列化给客户端。
-
-```text
-Runtime Core
-    权威状态和游戏规则
-        ↓ RuntimeSnapshot
-
-Session Coordinator
-    会话控制状态
-        ↓ SessionSnapshot
-
-Projection Scheduler
-        ↓ ProjectionFrame
-Client State Projector
-        ↓ Scoped State Tree
-Runtime Service
-        ↓ Runtime RPC
-Web Client
-```
-
-Client State 使用通用树：
-
-```text
-Client State
-└── Scopes
-    └── Scope
-        └── Roots[]
-            └── Node
-                ├── key
-                ├── tag
-                ├── data
-                └── children[]
-```
-
-具体结构、Key 规则、Tag 注册、Roots 和 DOM 映射由 Client Scoped State Tree 协议定义。
-
-## 6. JSON-RPC 定位
-
-第一阶段使用 JSON-RPC 作为消息承载语义。
+## 2. JSON-RPC 定位
 
 JSON-RPC 负责：
 
 - 请求与响应关联；
-- 通知消息封装；
+- 通知封装；
 - 方法名称空间；
-- 协议级错误结果封装。
+- 协议错误；
+- 跨语言实现的一致消息语义。
 
 JSON-RPC 不负责：
 
-- 建模地图和人物；
-- 定义 Client Node Tag；
-- 生成 Client State；
-- 决定 Runtime 内部模块；
-- 充当 DOM 操作协议；
-- 传递可执行代码。
+- 规定子系统内部架构；
+- 定义地图、菜单或对话业务 DTO；
+- 生成 Scope Tree；
+- 操作 DOM；
+- 传递可执行代码；
+- 解决传输层连接和加密。
 
-协议与传输分离：
+协议与传输分离，可使用：
 
 ```text
-Runtime RPC
-├── 远程 WebSocket
-├── 本机 WebSocket
-├── Dedicated Worker MessagePort
-└── 后续其他双向传输
+MessagePort
+stdio 长度前缀帧
+Unix Domain Socket
+Windows Named Pipe
+WebSocket
 ```
 
-不同传输适配必须承载相同的状态、事件和资源语义。
+同一连接上必须保持 JSON-RPC 消息顺序。
 
-## 7. Server 消息顺序
+## 3. 公共元数据
 
-每个 Server → Client 的状态或事件通知必须包含单调递增的消息序号：
+所有与调用帧有关的方法参数至少包含：
 
 ```ts
-interface RuntimeMessageMeta {
-  readonly protocolVersion: 1;
+interface FrameMeta {
+  readonly frameId: string;
+  readonly activationId: string;
+}
+```
+
+状态和事件通知还应包含发送方向上的单调序号：
+
+```ts
+interface StreamMeta extends FrameMeta {
   readonly sequence: number;
 }
 ```
 
+必须区分：
+
+```text
+frameId
+    一次子系统调用实例
+
+activationId
+    一次活动周期
+
+sequence
+    一条连接或数据流上的消息顺序
+
+scopeRevision
+    单个 Scope 的内容版本
+
+subsystemRevision
+    子系统内部权威状态版本，可选
+```
+
+这些编号不得混用。
+
+## 4. 程序主系统与子系统
+
+### 4.1 主系统调用子系统
+
+主系统请求：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "init-1",
+  "method": "system.initialize",
+  "params": {
+    "frameId": "frame-dialog-3",
+    "systemId": "loom.dialog",
+    "input": {
+      "dialogId": "dialog/old-man"
+    }
+  }
+}
+```
+
+子系统响应成功后必须已完成参数验证和必要初始化，但尚不接收普通输入。
+
+激活：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "system.activate",
+  "params": {
+    "frameId": "frame-dialog-3",
+    "activationId": "activation-9"
+  }
+}
+```
+
+暂停：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "system.suspend",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8"
+  }
+}
+```
+
+恢复：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "system.resume",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-10",
+    "returnedFrameId": "frame-dialog-3",
+    "result": {
+      "status": "completed",
+      "value": {
+        "choiceId": "accept"
+      }
+    }
+  }
+}
+```
+
+关闭：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "system.close",
+  "params": {
+    "frameId": "frame-dialog-3",
+    "reason": "returned"
+  }
+}
+```
+
+### 4.2 子系统调用另一个子系统
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "call-42",
+  "method": "system.call",
+  "params": {
+    "callerFrameId": "frame-map-1",
+    "system": "loom.dialog",
+    "input": {
+      "dialogId": "dialog/old-man",
+      "entryNodeId": "start"
+    }
+  }
+}
+```
+
+主系统响应：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "call-42",
+  "result": {
+    "accepted": true,
+    "frameId": "frame-dialog-3"
+  }
+}
+```
+
+该响应只表示子调用已建立，不包含最终业务结果。
+
+### 4.3 子系统返回
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "system.return",
+  "params": {
+    "frameId": "frame-dialog-3",
+    "result": {
+      "status": "completed",
+      "value": {
+        "choiceId": "accept"
+      }
+    }
+  }
+}
+```
+
+只有当前栈顶帧可以返回。程序主系统完成弹栈后，通过 `system.resume` 把结果交给上一帧。
+
+## 5. 程序主系统与渲染端
+
+渲染端连接后，程序主系统发送完整栈快照：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "stack.snapshot",
+  "params": {
+    "stackRevision": 12,
+    "frames": [
+      {
+        "frameId": "frame-map-1",
+        "systemId": "loom.map",
+        "state": "suspended",
+        "visible": true
+      },
+      {
+        "frameId": "frame-dialog-3",
+        "systemId": "loom.dialog",
+        "state": "active",
+        "visible": true
+      }
+    ],
+    "inputTarget": {
+      "frameId": "frame-dialog-3",
+      "activationId": "activation-9"
+    }
+  }
+}
+```
+
+增量控制通知可以使用：
+
+```text
+frame.pushed
+frame.suspended
+frame.resumed
+frame.popped
+input.target.changed
+system.failed
+```
+
+渲染端不得根据自己的 DOM 状态推断调用栈。检测到 `stackRevision` 缺口时，请求新的 `stack.snapshot`。
+
+## 6. 渲染端与子系统
+
+### 6.1 用户输入
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "input.dispatch",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8",
+    "sequence": 132,
+    "input": {
+      "type": "direction.set",
+      "data": "up"
+    }
+  }
+}
+```
+
 规则：
+
+- 渲染端只向程序主系统声明的输入目标发送普通输入；
+- 子系统验证 `frameId` 和 `activationId`；
+- 不发送原始 Browser Event 对象；
+- 输入类型和 Data Schema 由目标子系统定义；
+- 暂停帧必须拒绝普通输入。
+
+### 6.2 节点事件
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "node.event",
+  "params": {
+    "frameId": "frame-menu-2",
+    "activationId": "activation-5",
+    "scopeId": "menu",
+    "key": "continue-button",
+    "event": "activate",
+    "data": null
+  }
+}
+```
+
+子系统必须验证 Scope、Key、Tag、事件名称和 Data Schema。
+
+## 7. Scope 完整状态
+
+每个子系统连接维护自己的 Scope 数据流。首次激活、渲染端重连或 Resync 时发送：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "state.snapshot",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8",
+    "sequence": 44,
+    "stateRevision": 17,
+    "scopes": {
+      "world": {
+        "revision": 38,
+        "roots": []
+      },
+      "hud": {
+        "revision": 12,
+        "roots": []
+      }
+    }
+  }
+}
+```
+
+`state.snapshot` 只包含当前 `frameId` 拥有的 Scope，不包含其他子系统 Frame。
+
+渲染端收到后：
+
+1. 验证连接和 Activation；
+2. 验证 Sequence；
+3. 验证 Scope Tree；
+4. 原子替换该 Frame 的 Scope 集合；
+5. 协调受影响 DOM。
+
+## 8. Scope 替换
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "scope.replace",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8",
+    "sequence": 45,
+    "stateRevision": 18,
+    "scopeId": "world",
+    "value": {
+      "revision": 39,
+      "roots": []
+    }
+  }
+}
+```
+
+删除 Scope：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "scope.replace",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8",
+    "sequence": 46,
+    "stateRevision": 19,
+    "scopeId": "loading",
+    "value": null
+  }
+}
+```
+
+空 Scope 与删除 Scope 不同。
+
+同一子系统一次事务改变多个 Scope 时，应发送该 Frame 的 `state.snapshot`。第一阶段不实现多 Scope Batch Patch。
+
+## 9. 一次性事件
+
+子系统向渲染端发送：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "event.emit",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8",
+    "sequence": 47,
+    "eventId": "event-91",
+    "type": "sound.play",
+    "data": {
+      "resource": "sound.step/grass"
+    }
+  }
+}
+```
+
+状态消息可以合并为最新目标状态；一次性事件默认不能随意丢弃或合并。
+
+可恢复界面内容必须进入 Scope，不应只使用 Event。
+
+## 10. Sequence 与恢复
+
+每条子系统数据流独立维护 Sequence：
 
 ```text
 sequence <= lastSequence
@@ -186,435 +444,166 @@ sequence == lastSequence + 1
 → 正常应用
 
 sequence > lastSequence + 1
-→ 状态基础不确定，请求完整快照
+→ 请求该 Frame 的 state.snapshot
 ```
 
-重新建立连接后，客户端不能假定旧连接的 Sequence 连续，应先获取完整状态。
+重连后不能沿用旧连接 Sequence。渲染端先获取主系统的 `stack.snapshot`，再向每个有效 Frame 请求子系统 `state.snapshot`。
 
-必须区分：
-
-```text
-RuntimeTransaction.id
-    Core 操作顺序
-
-RuntimeState.revision
-    权威游戏状态版本
-
-SessionSnapshot.revision
-    会话控制状态版本
-
-ClientState.revision
-    客户端目标状态版本
-
-ClientScope.revision
-    单个 Scope 版本
-
-Runtime RPC sequence
-    Server 通知顺序
-```
-
-这些编号不得混用。
-
-## 8. Projection Commit 到消息
-
-Client State Projector 返回传输无关的 Projection Commit：
-
-```text
-unchanged
-snapshot
-scope-replace
-```
-
-Runtime Service 转换规则：
-
-```text
-ProjectionUnchanged
-→ 不发送状态消息
-
-ProjectionSnapshot
-→ state.snapshot
-
-ProjectionScopeReplace
-→ scope.replace
-```
-
-Runtime Service 不重新计算 Scope 差异，不修改 Projection Commit 中的 Revision。
-
-## 9. 完整状态同步
-
-```ts
-interface ClientStateSnapshotMessage {
-  readonly type: "state.snapshot";
-  readonly state: ClientState;
-}
-```
-
-完整状态用于：
-
-- 首次投影；
-- 首次连接；
-- 页面重新加载；
-- 网络重新连接；
-- Sequence 或 Revision 出现缺口；
-- 客户端状态验证失败；
-- 多个 Scope 在一次投影中变化；
-- 地图切换提交；
-- Projector 明确设置 `forceSnapshot`；
-- 客户端主动请求恢复。
-
-客户端收到完整状态后：
-
-1. 验证协议版本；
-2. 验证 Scope 和节点结构；
-3. 用新 Client State 替换本地镜像；
-4. 按 Scope 和 Key 协调 DOM；
-5. 记录该消息 Sequence。
-
-重新发送已有 Client State 用于 Resync 时，不增加 Client State Revision，只增加 Runtime RPC Sequence。
-
-## 10. Scope 替换
-
-第一阶段正常增量同步只支持替换单个 Scope：
-
-```ts
-interface ClientScopeReplaceMessage {
-  readonly type: "scope.replace";
-  readonly stateRevision: number;
-  readonly scope: string;
-  readonly value: ClientScope | null;
-}
-```
-
-语义：
-
-```text
-value = ClientScope
-→ 替换该 Scope 的目标 Roots Tree
-
-value = null
-→ 删除整个 Scope
-```
-
-Scope 内容为空时使用：
+Resync 请求：
 
 ```json
 {
-  "revision": 13,
-  "roots": []
+  "jsonrpc": "2.0",
+  "id": "resync-7",
+  "method": "state.resync",
+  "params": {
+    "frameId": "frame-map-1",
+    "activationId": "activation-8",
+    "knownStateRevision": 17
+  }
 }
 ```
 
-空 Scope 与删除 Scope 不同。
+重新发送相同逻辑状态时可以保持 `stateRevision`，但新连接的 `sequence` 重新开始。
 
-客户端可以通过稳定 Key 对新旧 Scope Tree 做 DOM 协调，不要求销毁所有未变化节点。
+## 11. Activation 切换
 
-## 11. 发布原子性
+子系统暂停时：
 
-当前协议没有多 Scope 原子 Patch。
+- 旧 `activationId` 失效；
+- 子系统停止接受普通输入；
+- 已发布 Scope 可以继续显示；
+- 在途旧输入被拒绝。
 
-因此第一阶段冻结：
+子系统恢复时：
+
+- 程序主系统签发新 `activationId`；
+- 渲染端更新输入目标；
+- 子系统可以发送完整 Snapshot 或继续已有 Scope Revision；
+- 任何旧 Activation 消息都必须被忽略。
+
+## 12. Frame 出栈
+
+程序主系统发送 `frame.popped` 后，渲染端必须：
+
+- 关闭该 Frame 的子系统数据通道；
+- 删除 `frameId` 拥有的所有 Scope；
+- 清理 DOM Element、事件监听、动画和资源引用；
+- 不再接受该 Frame 的迟到状态或事件。
+
+## 13. 背压
+
+建议策略：
 
 ```text
-0 个 Scope 变化
-→ 不发送状态消息
+Scope State
+    同一 Frame/Scope 只保留最新目标状态
 
-1 个 Scope 变化
-→ scope.replace
+Event
+    有序、有界、不可静默丢弃关键事件
 
-2 个或更多 Scope 变化
-→ state.snapshot
+Input
+    有序、有界；高频方向输入可以合并为最新意图
 
-地图切换提交
-→ state.snapshot
+Control RPC
+    不丢弃；超时产生明确错误
 ```
 
-Runtime Service 不得将一个 Projection Snapshot 拆成多个 `scope.replace`。
+不要让大型资源内容与输入和 Scope 消息共用同一高优先级队列。
 
-第一阶段不实现：
+## 14. 错误模型
 
-- 节点级 Patch；
-- JSON Patch；
-- 多 Scope Batch Patch；
-- 服务端 DOM 指令；
-- ECS Component Replication；
-- 任意 HTML 字符串替换。
-
-## 12. Client Store
-
-Web Client 应维护独立于 DOM 的状态镜像：
+JSON-RPC 错误至少包含：
 
 ```ts
-interface ClientStore {
-  readonly state: ClientState | null;
-  readonly lastSequence: number;
+interface LoomRpcErrorData {
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly frameId?: string;
+  readonly activationId?: string;
+  readonly details?: unknown;
 }
 ```
 
-消息处理顺序：
+常见错误：
 
 ```text
-Runtime Message
-→ 验证 Sequence
-→ 验证 State/Scope Revision
-→ 更新 Client Store
-→ 协调受影响 Scope
-→ 更新 DOM
+SYSTEM_NOT_FOUND
+INVALID_SYSTEM_INPUT
+CALLER_NOT_STACK_TOP
+RETURNER_NOT_STACK_TOP
+STALE_ACTIVATION
+FRAME_NOT_FOUND
+INVALID_SCOPE_TREE
+SEQUENCE_GAP
+SUBSYSTEM_NOT_READY
+SUBSYSTEM_PROCESS_EXITED
 ```
 
-WebSocket、Worker 或其他传输回调不得直接散布 DOM 修改逻辑。
+业务拒绝应作为正常方法结果，不应全部映射为 JSON-RPC 协议错误。
 
-## 13. 事件传递
+## 15. 安全边界
 
-事件用于表达一次动作或瞬时通知。
+- 所有消息必须验证 Schema 和大小；
+- 渲染端只获得窄接口，不获得任意 IPC channel；
+- 子系统只能发布自己 `frameId` 的 Scope；
+- 子系统不能伪造其他 Frame 的 `activationId`；
+- Client Node 不允许携带可执行代码或任意 HTML；
+- 本机连接也不能被视为天然可信；
+- 资源路径不得通过 Scope 暴露给渲染端。
 
-事件通道是双向的：
+## 16. 第一阶段冻结方法
+
+### 程序主系统 ⇄ 子系统
 
 ```text
-Web Client
-→ 用户输入或节点事件
-→ Runtime Service
-→ Execution Loop / 业务事件路由
-
-RuntimeTransaction Event
-→ Runtime Event Publisher
-→ Runtime Service
-→ Web Client
+system.initialize
+system.activate
+system.suspend
+system.resume
+system.close
+system.call
+system.return
+system.ready
+system.failed
 ```
 
-Runtime Event 不通过 Projection Scheduler 合并。
-
-### 13.1 节点事件
-
-```ts
-interface ClientNodeEvent {
-  readonly type: "node.event";
-  readonly scope: string;
-  readonly key: string;
-  readonly event: string;
-  readonly data?: JsonValue;
-}
-```
-
-Runtime Service 必须根据当前 Client State 和业务事件路由验证：
-
-- Scope 存在；
-- Key 存在；
-- Tag 允许该事件；
-- Data 满足事件 Schema；
-- 当前 Session 状态允许该操作。
-
-节点事件不能任意调用 Runtime 内部方法。
-
-### 13.2 全局输入
-
-键盘方向、手柄轴等高频全局输入可以使用独立归一化输入消息。
-
-客户端不得发送原始 Browser Event 对象。
-
-### 13.3 Runtime Event
-
-Runtime → Client 的一次性事件适用于：
-
-- 音效或短暂表现触发；
-- 日志、警告和错误通知；
-- 不需要重连恢复的提示；
-- 客户端本地过渡行为。
-
-需要重新连接后恢复的内容必须进入 Client State，不能只依赖事件。
-
-## 14. 状态与事件边界
+### 程序主系统 ⇄ 渲染端
 
 ```text
-状态
-    系统当前可观察结果
-    可通过完整同步恢复
-
-事件
-    一次动作或瞬时通知
-    不作为长期状态来源
+stack.snapshot
+frame.pushed
+frame.suspended
+frame.resumed
+frame.popped
+input.target.changed
+system.failed
 ```
 
-原则：
-
-- 用户输入属于事件或命令；
-- 用户输入产生的最终结果属于状态；
-- 可恢复界面内容属于 Scope Tree；
-- 一次性表现可以使用事件；
-- Projection Scheduler 可以合并状态 Frame；
-- Runtime Event 不因状态 Frame 合并而丢失。
-
-## 15. Projection 错误
-
-Client State Projector 投影失败时：
-
-- 不发布部分 Client State；
-- 保留最后一个完整 Client State；
-- 不回滚已提交 Runtime Transaction；
-- 初始投影失败时 Runtime Service 不进入 ready；
-- 运行期间投影失败时 Session 进入 failed；
-- Execution Loop 应暂停或失败，避免客户端永久停留在旧状态而游戏继续推进；
-- Runtime Service 发布明确的投影/服务错误。
-
-Projection Error 与业务命令拒绝、协议错误分开。
-
-## 16. 资源传输边界
-
-资源主体不进入 Client State Tree。
-
-节点 Data 只引用逻辑资源 Key：
-
-```json
-{
-  "sprite": "actor.sprite/player"
-}
-```
-
-资源链路：
+### 子系统 ⇄ 渲染端
 
 ```text
-Client Node Data 中的资源 Key
-→ Web Client Resource Cache
-→ Runtime Service Resource Endpoint
-→ Resource Repository
-→ 资源主体
+input.dispatch
+node.event
+state.snapshot
+scope.replace
+state.resync
+event.emit
 ```
 
-Runtime RPC 不暴露游戏包文件系统路径。
+精确参数 Schema 可以在实现前继续细化，但不得改变控制面和数据面的职责边界。
 
-资源加载状态通常属于客户端本地状态，不是 Runtime 权威状态。
-
-## 17. Hostra 边界
+## 17. 当前结论
 
 ```text
-Hostra Control RPC
-    窗口、宿主和进程协调
+主系统控制面
+    管理 Frame、call、return 和连接
 
-LoomRealm Runtime RPC
-    Client State、事件和资源访问
+子系统数据面
+    直接接收输入并发布 Scope
+
+渲染端
+    按 Frame 合并 Scope，并将目标树协调为 DOM
 ```
 
-Hostra 不保存、代理或修改权威游戏状态，也不生成 Client State。
-
-Hostra 桌面模式下，Web Client 仍直接使用 Runtime RPC 语义连接本机 Runtime Service。
-
-## 18. 运行环境
-
-### 18.1 远程 Runtime
-
-```text
-Web Client
-→ WebSocket
-→ Runtime Service
-```
-
-### 18.2 Hostra 本地 Runtime
-
-```text
-Hostra
-→ 启动本地 Runtime Service
-→ 打开 Web Client
-→ Web Client 连接本机 Runtime RPC
-```
-
-### 18.3 浏览器本地 Runtime
-
-```text
-Web Client
-→ Dedicated Worker MessagePort
-→ 浏览器本地 Runtime
-```
-
-Service Worker 不作为第一阶段默认持续 Runtime，因为其生命周期不适合保存唯一权威会话状态。
-
-## 19. 错误与恢复
-
-以下情况需要请求完整状态：
-
-- 消息 Sequence 出现缺口；
-- State Revision 不连续或倒退；
-- Scope Revision 冲突；
-- 一个 Scope 内出现重复 Key；
-- Tag 未注册；
-- Tree 验证失败；
-- Client Store 或 DOM 协调器出现不可恢复错误。
-
-客户端不得在状态基础不确定时继续应用局部更新。
-
-错误分类：
-
-```text
-协议错误
-    消息、版本、Tree 或 Sequence 无效
-
-业务拒绝
-    当前游戏状态不接受某次用户意图
-
-投影错误
-    Runtime/Session 状态不能转换为合法 Client State
-
-资源错误
-    资源 Key、读取或内容无效
-```
-
-## 20. 第一阶段闭环
-
-```text
-用户输入
-→ Web Client 发送归一化命令
-→ Runtime Service 检查 Session
-→ Runtime Service 提交 Execution Loop
-→ Runtime Core 更新权威状态
-→ RuntimeTransaction 发布
-→ Projection Scheduler 合并状态 Frame
-→ Client State Projector 生成 Projection Commit
-→ Runtime Service 发送 state.snapshot 或 scope.replace
-→ Client Store 应用状态
-→ DOM 协调器按 Scope、Key 和 Tag 更新 DOM
-```
-
-Runtime Event 独立发送；地图和人物图片由资源接口另行加载。
-
-## 21. 第一阶段不实现
-
-- 固定地图、人物、HUD 或菜单 RPC；
-- 固定 RPG Client DTO；
-- 节点级 Patch；
-- 多 Scope Batch Patch；
-- 客户端预测和 Server 校正；
-- 多人同步；
-- 复杂断线重放；
-- 通用分布式状态系统；
-- Hostra Control RPC 承载游戏业务；
-- Server 下发任意 HTML、CSS 或 JavaScript；
-- 客户端直接修改 Runtime 权威状态；
-- Runtime Service 自行生成 Client State。
-
-## 22. 已冻结决策
-
-| 问题 | 第一阶段结论 |
-|---|---|
-| 消息承载 | JSON-RPC |
-| 传输 | WebSocket 或 MessagePort 适配 |
-| Core 写入口 | Runtime Execution Loop |
-| 权威游戏状态 | Runtime Core |
-| 会话控制状态 | Session Coordinator |
-| 客户端状态生成 | Client State Projector |
-| 客户端状态 | Scoped State Tree |
-| 完整同步 | `state.snapshot` |
-| 单 Scope 更新 | `scope.replace` |
-| 多 Scope 更新 | `state.snapshot` |
-| 地图切换 | 强制 `state.snapshot` |
-| 消息顺序 | 单调递增 `sequence` |
-| 状态版本 | Client State Revision + Scope Revision |
-| 业务扩展 | Scope + Tag + Data Schema |
-| 节点事件 | Scope + Key + Event + Data |
-| Runtime Event | 独立事件通道 |
-| 资源 | 独立资源接口 |
-| Resync | 重发当前 Client State，不增加 Revision |
-| 节点级 Patch | 第一阶段不实现 |
-| 固定业务 DTO | 不定义 |
-| Runtime 状态直传 | 禁止 |
-
-## 23. 当前结论
-
-LoomRealm Runtime RPC 消费 Client State Projector 产生的 Projection Commit，并通过完整快照或单 Scope 替换保持 Web Client 状态一致。Runtime Service 不直接调用 Core、不生成 Scope Tree、不分配 Client Revision；业务通过 Scope、Tag、Data Schema 和事件 Schema 扩展，而不通过新增固定 RPG RPC 扩展基础协议。
+JSON-RPC 是统一的跨进程语义；程序主系统不成为普通用户输入和 Client State 的转发瓶颈。
