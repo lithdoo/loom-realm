@@ -1,30 +1,34 @@
 # Client Scoped State Tree 协议
 
-## 1. 文档目的
+> 状态：**Active / Normative**  
+> 适用范围：所有模块子系统与 Web 渲染端  
+> 最近复核：2026-07-28  
+> 主要定义：Frame Client State、Scope、Roots、Client Node、身份和事件定位
 
-本文档定义 LoomRealm Runtime Server 向 Web Client 同步客户端可见状态时使用的通用数据格式。
+相关文档：
 
-该协议不围绕地图、人物、菜单、对话框或加载界面分别定义固定 DTO。业务功能通过 Scope、节点 Tag 和节点 Data Schema 扩展，基础同步协议保持稳定。
+- [`main-system-and-subsystems.md`](./main-system-and-subsystems.md)：Frame 和子系统边界；
+- [`runtime-rpc-and-state-sync.md`](./runtime-rpc-and-state-sync.md)：状态消息和恢复；
+- [`client-state-projector.md`](./client-state-projector.md)：子系统投影；
+- [`../design/web-client-reconciliation.md`](../design/web-client-reconciliation.md)：DOM 协调。
 
 核心原则：
 
-> 客户端状态由多个 Scope 组成；每个 Scope 包含一组有序根节点；每个节点对应一个 DOM 节点，并通过 `tag` 选择客户端注册的自定义节点实现。
+> 每个模块子系统调用帧拥有一组 Scope；Scope 包含有序根节点；每个 Client Node 对应一个 DOM Element。客户端状态只描述应该呈现什么，不包含子系统内部状态或 DOM 指令。
 
-## 2. 状态层次
+## 1. 状态层次
 
 ```text
-Runtime 权威状态
-        ↓ 业务投影
-Client Scoped State Tree
-        ↓ 客户端协调与节点复用
+子系统权威状态
+        ↓ 子系统投影
+Frame Client State
+        ↓ Scope Tree 协调
 DOM Tree
 ```
 
-Runtime Core 的内部对象不得直接序列化给客户端。
+程序主系统不生成业务 Scope。每个模块子系统只生成自己当前 `frameId` 的 Client State。
 
-业务投影器只负责把权威状态转换成客户端树。客户端只解释 Scope、节点结构和已注册 Tag，不理解 FSDB、Repository、碰撞索引或游戏包物理路径。
-
-## 3. 基础类型
+## 2. 基础类型
 
 ```ts
 type JsonValue =
@@ -35,8 +39,10 @@ type JsonValue =
   | readonly JsonValue[]
   | { readonly [key: string]: JsonValue };
 
-interface ClientState {
+interface FrameClientState {
   readonly version: 1;
+  readonly frameId: string;
+  readonly activationId: string;
   readonly revision: number;
   readonly scopes: Readonly<Record<string, ClientScope>>;
 }
@@ -54,65 +60,69 @@ interface ClientNode {
 }
 ```
 
-第一阶段冻结字段名称：
+字段名称在第一阶段冻结。
+
+## 3. Frame 所有权
+
+完整 Scope 身份是：
 
 ```text
-ClientState
-├── version
-├── revision
-└── scopes
+frameId + scopeId
+```
 
-ClientScope
-├── revision
-└── roots
+规则：
 
-ClientNode
-├── key
-├── tag
-├── data
-└── children
+- 同一 Frame 内 `scopeId` 唯一；
+- 不同 Frame 可以使用相同 `scopeId`；
+- 子系统只能发布自己 Frame 的 Scope；
+- Frame 出栈时，其全部 Scope 一并删除；
+- Frame 暂停时 Scope 可以保留显示；
+- `activationId` 用于拒绝暂停或恢复前的迟到状态消息。
+
+渲染端 Store 可以表示为：
+
+```ts
+interface ClientFrameStore {
+  readonly frames: ReadonlyMap<string, FrameClientState>;
+}
 ```
 
 ## 4. Scope
 
 Scope 是客户端状态的功能隔离、更新和挂载单位。
 
-```text
-Client State
-└── Scopes
-    ├── Scope A
-    │   └── Roots[]
-    └── Scope B
-        └── Roots[]
-```
-
-协议不预定义 Scope 名称枚举。业务可以注册例如：
+协议不预定义 Scope 枚举。示例：
 
 ```text
 world
 hud
-overlay
 menu
 dialog
+overlay
 debug
 ```
 
-这些名称只是示例，不属于协议固定字段。
+这些名称只在所属 Frame 内有意义。
 
-### 4.1 Scope 挂载
+### 4.1 挂载
 
-每个 Scope 在客户端对应一个挂载容器：
+渲染端根据 Frame 层级和 Scope Registry 决定挂载容器。概念结构：
 
 ```html
-<div data-lr-scope="world"></div>
-<div data-lr-scope="overlay"></div>
+<div data-lr-frame="frame-map-1">
+  <div data-lr-scope="world"></div>
+  <div data-lr-scope="hud"></div>
+</div>
+<div data-lr-frame="frame-dialog-3">
+  <div data-lr-scope="dialog"></div>
+</div>
 ```
 
-挂载容器由客户端应用拥有，不属于同步树节点。
+挂载容器由渲染端拥有，不属于同步树节点。
 
 ### 4.2 `roots`
 
-一个 Scope 可以直接包含多个顶层节点：
+一个 Scope 可以包含多个有序根节点：
 
 ```json
 {
@@ -134,21 +144,12 @@ debug
 }
 ```
 
-对应 DOM：
-
-```html
-<div data-lr-scope="world">
-  <lr-map></lr-map>
-  <lr-actor-layer></lr-actor-layer>
-</div>
-```
-
 规则：
 
-- `roots` 的数组顺序就是 Scope 容器内的 DOM 顺序；
-- `roots` 可以为空数组；
-- 协议不要求创建没有业务含义的虚拟根节点；
-- 根节点和后代节点遵守相同的 Key、Tag、Data 和 Children 规则。
+- 数组顺序就是容器内 DOM 顺序；
+- `roots` 可以为空；
+- 不要求创建无业务含义的虚拟根；
+- 根节点和后代节点遵守相同规则。
 
 ### 4.3 空 Scope 与删除 Scope
 
@@ -161,9 +162,9 @@ debug
 }
 ```
 
-表示 Scope 仍然存在，但没有 DOM 子节点。
+表示 Scope 仍存在但没有节点。
 
-删除 Scope 使用同步消息中的 `value: null`，表示客户端应移除该 Scope 的状态和所有节点。
+删除 Scope 使用 `scope.replace` 的 `value: null`。
 
 ## 5. 节点身份 `key`
 
@@ -171,79 +172,67 @@ debug
 
 规则：
 
-- `key` 在整个 Scope 内唯一，不仅要求同级唯一；
-- 根节点与所有后代共享同一个 Key 命名空间；
-- 节点业务身份未改变时，Key 必须保持稳定；
-- 节点位置、坐标或显示数据变化时，不应因此改变 Key；
-- Key 不等同于 DOM `id`；
-- 客户端内部使用 `scope + key` 定位元素。
+- `key` 在整个 Scope 内唯一，不只要求同级唯一；
+- 节点业务身份不变时，Key 必须稳定；
+- 位置、坐标、数量或样式变化不应改变 Key；
+- Key 不等于 DOM `id`；
+- 渲染端使用 `frameId + scopeId + key` 定位 Element。
 
 正确示例：
 
 ```text
-world:actor/player
-world:tile-layer/ground
-hud:player-status
+actor/player
+tile-layer/ground
+menu/continue-button
 ```
 
-不应将变化数据编码进 Key：
+不应把变化数据编码进 Key：
 
 ```text
 player-12-8
 player-13-8
 ```
 
-客户端依据稳定 Key 复用对应 DOM Element。
-
 ## 6. 节点类型 `tag`
 
-`tag` 表示客户端已经注册的可信节点类型。
+`tag` 表示渲染端注册的可信节点类型：
 
 ```ts
 renderer.register("lr-map", MapNodeRenderer);
 renderer.register("lr-actor", ActorNodeRenderer);
-renderer.register("lr-loading", LoadingNodeRenderer);
-```
-
-也可以直接使用 Web Component：
-
-```ts
-customElements.define("lr-actor", LoomActorElement);
+renderer.register("lr-dialog", DialogNodeRenderer);
 ```
 
 规则：
 
-- `tag` 不允许任意创建原生 HTML 标签；
-- 客户端只接受注册表中的 Tag；
-- 未注册 Tag 必须产生协议或渲染诊断；
-- Tag 决定对应 Data Schema 和节点实现；
-- Server 不通过 Tag 或 Data 下发可执行 JavaScript。
+- 渲染端只接受注册表中的 Tag；
+- Tag 决定对应 Renderer 和 Data Schema；
+- 未注册 Tag 产生渲染诊断；
+- Tag 不用于下发任意 HTML 标签；
+- 子系统不能通过 Tag 或 Data 下发 JavaScript。
 
-协议层只规定 `tag` 是字符串，不规定具体业务 Tag 列表。
+不同子系统可以使用不同 Tag Registry，但最终渲染端必须安装相应可信实现。
 
 ## 7. 节点数据 `data`
 
-`data` 是交给对应自定义节点实现的 JSON 数据。
-
-```text
-tag
-→ 对应客户端节点实现
-→ 对应 Data Schema
-```
-
-例如业务代码可以定义：
+`data` 是交给对应节点实现的 JSON 数据。
 
 ```ts
 interface ClientNodeDataRegistry {
   "lr-map": MapNodeData;
   "lr-actor": ActorNodeData;
-  "lr-loading": LoadingNodeData;
+  "lr-dialog": DialogNodeData;
 }
 ```
 
-这些 Schema 属于具体 Tag，不属于基础状态协议。
+规则：
 
-`data` 中可以保存逻辑资源 Key，但不得暴露游戏包文件路径：
+- Data 必须满足 Tag 对应 Schema；
+- Data 应声明目标状态，不应描述 DOM 操作步骤；
+- Data 可以携带逻辑资源 Key；
+- Data 不得暴露游戏包物理路径、文件句柄或可执行代码。
+
+正确：
 
 ```json
 {
@@ -251,39 +240,40 @@ interface ClientNodeDataRegistry {
 }
 ```
 
-不得发送：
+错误：
 
 ```json
 {
-  "path": "/home/user/game/data/player.png"
+  "path": "/home/user/game/player.png",
+  "script": "..."
 }
 ```
 
 ## 8. 子节点 `children`
 
-树关系必须由协议级 `children` 字段表达，不能隐藏在 `data` 中。
+树关系必须由 `children` 表达，不能隐藏在 `data` 中。
 
 规则：
 
-- `children` 数组顺序对应直接子 DOM Element 顺序；
+- 数组顺序对应直接子 Element 顺序；
 - 每个 Child Node 对应一个直接子 Element；
-- 客户端通过 Key 复用、移动、创建或销毁节点；
+- 渲染端通过 Key 复用、移动、创建或销毁节点；
 - 节点实现不得任意修改父节点或兄弟节点；
-- 复杂组件内部可以使用 Shadow DOM，但协议只管理外部自定义元素。
+- 复杂组件可以使用 Shadow DOM，但协议只管理外部节点边界。
 
-## 9. 节点与 DOM 的映射
+## 9. DOM 映射
 
 第一阶段冻结：
 
-1. 每个 `ClientNode` 对应一个 DOM `Element`；
-2. `tag` 决定 Element 类型或节点渲染器；
-3. `key` 决定 Element 身份和复用；
-4. `data` 更新 Element 自身状态；
-5. `children` 决定其直接子 Element；
+1. 每个 Client Node 对应一个 DOM Element；
+2. `tag` 决定 Element 类型或 Renderer；
+3. `key` 决定身份和复用；
+4. `data` 更新节点自身状态；
+5. `children` 决定直接子 Element；
 6. `roots` 决定 Scope 容器的直接子 Element；
-7. 节点销毁时必须清理事件监听、动画和本地资源引用。
+7. 节点销毁时清理事件、动画和资源引用。
 
-客户端可以使用以下最小接口：
+最小 Renderer：
 
 ```ts
 interface ClientNodeRenderer {
@@ -295,197 +285,142 @@ interface ClientNodeRenderer {
     next: ClientNode,
   ): void;
 
-  destroy?(
-    element: Element,
-    node: ClientNode,
-  ): void;
+  destroy?(element: Element, node: ClientNode): void;
 }
 ```
 
-## 10. 第一阶段状态消息
+## 10. 状态消息
 
-第一阶段只实现完整状态和 Scope 替换，不实现节点级 Patch。
-
-### 10.1 完整状态
+### 10.1 Frame 完整状态
 
 ```ts
-interface ClientStateSnapshotMessage {
-  readonly type: "state.snapshot";
-  readonly state: ClientState;
+interface FrameStateSnapshotMessage {
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly sequence: number;
+  readonly state: FrameClientState;
 }
 ```
 
-适用于：
+用于：
 
-- 首次连接；
-- 客户端重新加载；
-- 重新连接；
-- 检测到状态版本缺口；
-- 客户端请求完整恢复。
+- Frame 首次激活；
+- 渲染端重新连接；
+- Sequence 缺口；
+- 客户端验证失败；
+- 多 Scope 同时变化；
+- 主动 Resync。
 
-### 10.2 替换 Scope
+### 10.2 Scope 替换
 
 ```ts
 interface ClientScopeReplaceMessage {
-  readonly type: "scope.replace";
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly sequence: number;
   readonly stateRevision: number;
-  readonly scope: string;
+  readonly scopeId: string;
   readonly value: ClientScope | null;
 }
 ```
 
-语义：
+规则：
 
-- `value` 为 ClientScope：替换该 Scope 的目标树；
-- `value` 为 `null`：删除整个 Scope；
-- 客户端可以通过 Key 对新旧 Scope Tree 做 DOM 协调；
-- 替换 Scope 不要求销毁所有未变化节点。
-
-第一阶段不定义：
-
-- JSON Patch；
-- Node Patch；
-- ECS Component Replication；
-- 服务端下发 DOM 操作指令；
-- 任意 HTML 字符串同步。
+- `value` 为 ClientScope：替换该 Frame 的目标 Scope；
+- `value` 为 `null`：删除该 Scope；
+- 单 Scope 替换不要求重建其他 Scope；
+- 第一阶段不定义节点级 Patch 或多 Scope Batch Patch。
 
 ## 11. 版本规则
 
 ```text
-ClientState.revision
-    整个客户端状态的版本
+FrameClientState.revision
+    当前 Frame 全部 Client State 版本
 
 ClientScope.revision
-    单个 Scope 目标树的版本
+    单个 Scope 版本
+
+sequence
+    当前子系统数据连接上的消息顺序
 ```
 
 规则：
 
-- Client State 发生客户端可见变化时递增 `ClientState.revision`；
-- Scope 被替换时递增该 Scope 的 `revision`；
-- 客户端不得用较旧 Scope Revision 覆盖较新 Scope；
-- 无法确认版本连续性时请求 `state.snapshot`；
-- 具体传输 Envelope 和消息 Sequence 由 Runtime RPC 文档定义。
+- Frame 客户端可见状态变化时递增 State Revision；
+- Scope 内容变化时递增 Scope Revision；
+- 较旧 Revision 不得覆盖较新 Revision；
+- 无法确认连续性时请求该 Frame 的完整状态；
+- 不同 Frame 的 Revision 互相独立。
 
 ## 12. 客户端事件
 
-节点产生的业务事件可以使用 Scope 与 Key 定位来源：
+节点事件定位来源：
 
 ```ts
 interface ClientNodeEvent {
-  readonly type: "node.event";
-  readonly scope: string;
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly scopeId: string;
   readonly key: string;
   readonly event: string;
   readonly data?: JsonValue;
 }
 ```
 
-例如：
+子系统必须验证：
 
-```json
-{
-  "type": "node.event",
-  "scope": "menu",
-  "key": "continue-button",
-  "event": "activate",
-  "data": null
-}
-```
+- Frame 和 Activation 有效；
+- Scope 存在；
+- Key 存在；
+- Tag 允许该事件；
+- Data 满足事件 Schema。
 
-事件名称和 Data Schema 由对应业务节点定义。
+键盘方向、手柄轴等高频意图可以使用独立 `input.dispatch`，不强制伪装为节点事件。
 
-键盘方向输入等高频全局意图可以使用独立输入事件，不强制伪装为 DOM 节点事件。
+## 13. 状态与事件
 
-## 13. Runtime 投影边界
+状态表示客户端现在应该呈现什么，可以合并为最新目标。
 
-Runtime Core 不直接持有 Client Tree，也不让客户端树成为权威游戏状态。
+Event 表示一次性发生的事情，例如：
 
-推荐关系：
+- 音效触发；
+- 短暂震动；
+- Toast；
+- 调试通知。
 
-```text
-Runtime Core
-    权威状态和规则
-        ↓
-Client State Projectors
-    按业务生成或更新 Scope Tree
-        ↓
-Runtime Service
-    发送状态消息
-        ↓
-Web Client
-    协调 DOM Tree
-```
-
-一个业务模块可以拥有一个或多个 Scope Projector。增加新的功能通常只需要：
-
-1. 注册新的 Scope 或复用已有 Scope；
-2. 注册新的节点 Tag；
-3. 定义该 Tag 的 Data Schema；
-4. 实现对应客户端自定义节点；
-5. 将业务状态投影成 Client Node Tree。
-
-不需要修改基础同步协议。
+可恢复内容必须进入 Scope。Frame 被弹出后，其未处理的表现 Event 不得改变其他 Frame 的状态。
 
 ## 14. 安全和限制
 
-客户端必须验证：
+第一阶段至少限制：
 
-- 协议版本；
-- Scope 名称长度和格式；
-- Scope Revision；
-- 一个 Scope 内 Key 唯一；
-- Key 和 Tag 长度；
-- Tag 已注册；
-- 树最大深度；
-- Scope 最大节点数；
-- 单节点 Data 大小；
-- 整个状态消息大小；
-- Data 只包含合法 JSON 值。
+- Frame Scope 数量；
+- 单 Scope 节点数量；
+- 树深度；
+- Key、Tag 和 Scope ID 长度；
+- Data JSON 大小；
+- 单条消息大小；
+- 未注册 Tag；
+- 重复 Key；
+- 循环或非法树结构。
 
-客户端不得：
+不允许：
 
-- 执行 Data 中的字符串；
-- 将未净化字符串直接设置为 HTML；
-- 接受 `script`、`iframe` 等未注册标签；
-- 允许节点实现逃逸并任意改写其他 Scope；
-- 根据 Server 提供的文件路径读取本地文件。
+- 任意 HTML 字符串；
+- DOM 操作指令；
+- CSS 或 JavaScript 代码注入；
+- 文件系统路径；
+- 进程句柄或回调。
 
-## 15. 第一阶段已冻结决策
-
-| 问题 | 第一阶段结论 |
-|---|---|
-| 状态顶层 | `ClientState` |
-| 功能隔离 | `scopes` |
-| Scope 内容 | 有序 `roots[]` |
-| 单根限制 | 不限制，可有多个根节点 |
-| 节点字段 | `key/tag/data/children` |
-| Key 唯一范围 | 整个 Scope |
-| Tag | 客户端注册的自定义节点类型 |
-| Data | JSON 值，由 Tag 定义 Schema |
-| DOM 映射 | 一个 ClientNode 对应一个 Element |
-| Scope 容器 | 客户端拥有，不属于同步树 |
-| 初始同步 | `state.snapshot` |
-| 正常更新 | `scope.replace` |
-| 空 Scope | `roots: []` |
-| 删除 Scope | `value: null` |
-| 节点级 Patch | 第一阶段不实现 |
-| 固定 RPG DTO | 不定义 |
-| Runtime 内部状态直传 | 禁止 |
-| 资源引用 | 逻辑资源 Key |
-
-## 16. 当前结论
+## 15. 当前结论
 
 ```text
-Client State
-└── Scopes
-    └── Scope
-        └── Roots[]
-            └── Node
-                ├── key
-                ├── tag
-                ├── data
-                └── children[]
+模块子系统 Frame
+→ 生成 Frame Client State
+→ 发布一个或多个 Scope
+→ 渲染端按 frameId + scopeId 存储
+→ 按稳定 Key 协调 DOM
+→ Frame 出栈时整体清理
 ```
 
-该格式是 Runtime Server 与 Web Client 之间的通用客户端状态契约。业务功能通过 Scope、Tag 和 Data Schema 扩展，不通过修改基础协议增加固定业务字段。
+Scope 是视图扩展边界；Frame 是子系统调用实例和 Scope 所有权边界。
