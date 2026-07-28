@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   lang: 'zh-CN',
   title: 'LoomRealm',
-  description: 'LoomRealm 架构、契约与运行时设计文档',
+  description: 'LoomRealm 程序主系统、模块子系统、游戏包与客户端状态设计文档',
   base: '/loom-realm/',
   cleanUrls: true,
   lastUpdated: true,
@@ -23,8 +23,8 @@ export default defineConfig({
         items: [
           { text: '产品范围', link: '/overview/product-scope' },
           { text: '总体架构', link: '/architecture/system-overview' },
+          { text: '主系统与模块子系统', link: '/architecture/main-system-and-subsystems' },
           { text: '游戏包契约', link: '/contracts/game-package-v1' },
-          { text: 'Runtime Core', link: '/runtime/phase-1-runtime-core' },
         ],
       },
       { text: '路线图', link: '/roadmap/phase-1-design-todos' },
@@ -41,14 +41,22 @@ export default defineConfig({
         ],
       },
       {
-        text: '系统架构',
+        text: '程序架构',
         collapsed: false,
         items: [
           { text: '总体架构', link: '/architecture/system-overview' },
-          { text: 'Runtime RPC 与状态同步', link: '/architecture/runtime-rpc-and-state-sync' },
-          { text: 'Client State Tree 协议', link: '/architecture/client-state-tree-protocol' },
-          { text: 'Client State Projector', link: '/architecture/client-state-projector' },
+          { text: '程序主系统与模块子系统', link: '/architecture/main-system-and-subsystems' },
+          { text: 'JSON-RPC 与状态同步', link: '/architecture/runtime-rpc-and-state-sync' },
           { text: 'Hostra 桌面宿主', link: '/architecture/hostra-desktop-client-host' },
+        ],
+      },
+      {
+        text: 'Client State 与渲染端',
+        collapsed: false,
+        items: [
+          { text: 'Client State Tree 协议', link: '/architecture/client-state-tree-protocol' },
+          { text: '模块子系统 Client State Projector', link: '/architecture/client-state-projector' },
+          { text: 'Frame/Scope 状态协调与 DOM', link: '/design/web-client-reconciliation' },
         ],
       },
       {
@@ -61,20 +69,14 @@ export default defineConfig({
         ],
       },
       {
-        text: 'Runtime',
+        text: '第一阶段地图子系统',
         collapsed: false,
         items: [
-          { text: 'Runtime Core', link: '/runtime/phase-1-runtime-core' },
-          { text: 'Runtime Execution Loop', link: '/runtime/phase-1-runtime-execution-loop' },
-          { text: 'Session Coordinator', link: '/runtime/phase-1-session-coordinator' },
+          { text: '目录说明', link: '/runtime/README' },
+          { text: '地图 Runtime Core', link: '/runtime/phase-1-runtime-core' },
+          { text: '地图 Runtime Execution Loop', link: '/runtime/phase-1-runtime-execution-loop' },
+          { text: '地图 Session Coordinator', link: '/runtime/phase-1-session-coordinator' },
           { text: 'Pokémon Essentials 地图运行时', link: '/runtime/phase-1-pokemon-essentials-map-runtime' },
-        ],
-      },
-      {
-        text: 'Web Client',
-        collapsed: false,
-        items: [
-          { text: '状态协调与 DOM 呈现', link: '/design/web-client-reconciliation' },
         ],
       },
       {
