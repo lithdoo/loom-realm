@@ -1,158 +1,151 @@
-# LoomRealm 开发文档
+# LoomRealm 设计文档
 
-LoomRealm 文档按“范围与入口、程序主系统与子系统、公开契约、子系统内部设计、客户端呈现、兼容与路线图”组织。
+LoomRealm 文档按照从粗到细的依赖顺序组织：
 
-阅读前先查看：
+```text
+产品目标与范围
+→ 系统架构
+→ 正式契约
+→ 模块设计
+→ 实施计划
+```
 
-- [产品定位与第一阶段范围](./overview/product-scope.md)
-- [文档状态与权威来源](./overview/document-status.md)
-- [LoomRealm 总体架构](./architecture/system-overview.md)
-- [程序主系统与模块子系统架构](./architecture/main-system-and-subsystems.md)
+上层文档说明为什么以及必须保持什么；下层文档说明当前准备怎样实现。
+
+## 推荐阅读顺序
+
+1. [产品设计总览](./00-overview/product-vision.md)
+2. [文档分层与变更规则](./00-overview/document-governance.md)
+3. [系统架构总览](./10-architecture/system-overview.md)
+4. 按主题阅读各系统架构
+5. [正式契约目录](./15-contracts/README.md)
+6. [模块设计目录](./20-modules/README.md)
+7. [实施计划目录](./30-implementation/README.md)
+
+## 00 · 产品总览
+
+只定义产品目标、适用范围、第一阶段边界、长期原则和发展方向。
+
+- [产品设计总览](./00-overview/product-vision.md)
+- [文档分层与变更规则](./00-overview/document-governance.md)
+
+产品层不记录具体包名、类名、RPC 字段、Tick 参数或 Tile 格式。
+
+## 10 · 系统架构
+
+围绕产品中的各个系统说明设计目标、职责、非职责、状态所有权和系统关系。
+
+- [系统架构总览](./10-architecture/system-overview.md)
+- [栈式运行系统](./10-architecture/stack-runtime-system.md)
+- [通信系统](./10-architecture/communication-system.md)
+- [渲染系统](./10-architecture/rendering-system.md)
+- [存储与内容系统](./10-architecture/storage-system.md)
+- [模块子系统模型](./10-architecture/subsystem-model.md)
+
+## 15 · 正式契约
+
+定义不同实现必须共同遵守的协议、数据和版本语义。
+
+- [正式契约目录](./15-contracts/README.md)
+- [模块子系统生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
+- [Client Scoped State Tree v1](./15-contracts/client-state-tree-v1.md)
+- [游戏包契约 v1](./15-contracts/game-package-v1.md)
+- [资源交付协议草案](./15-contracts/resource-protocol.md)
+
+## 20 · 模块设计
+
+将系统拆解为内部模块，并明确依赖方向、不变量和测试边界。
+
+- [模块设计目录](./20-modules/README.md)
+- [程序主系统模块](./20-modules/main-system/README.md)
+- [Web 渲染端模块](./20-modules/web-renderer/README.md)
+- [游戏包与内容模块](./20-modules/game-package/README.md)
+- [`loom.map` 地图子系统](./20-modules/loom-map/README.md)
+- [Hostra 桌面宿主模块](./20-modules/desktop-host/README.md)
+
+地图 Runtime Core、Execution Loop、Session Coordinator 和 Pokémon Essentials 兼容层只属于 `loom.map`，不是所有模块子系统必须实现的平台接口。
+
+## 30 · 实施计划
+
+描述当前准备如何分包、测试和按阶段落地。
+
+- [实施计划目录](./30-implementation/README.md)
+- [仓库与分包方案](./30-implementation/repository-layout.md)
+- [测试策略](./30-implementation/testing-strategy.md)
+- [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
+
+实施层可以随代码调整，但不能反向改变产品架构或正式契约。
 
 ## 按角色阅读
 
 ### 第一次了解 LoomRealm
 
 ```text
-产品定位与第一阶段范围
-→ 总体架构
-→ 程序主系统与模块子系统
-→ 游戏包契约 v1
+产品设计总览
+→ 系统架构总览
+→ 栈式运行系统
+→ 模块子系统模型
 ```
-
-- [产品定位与第一阶段范围](./overview/product-scope.md)
-- [LoomRealm 总体架构](./architecture/system-overview.md)
-- [程序主系统与模块子系统架构](./architecture/main-system-and-subsystems.md)
-- [游戏包契约 v1](./contracts/game-package-v1.md)
 
 ### 实现程序主系统
 
 ```text
-程序主系统与模块子系统
-→ JSON-RPC 通信与状态同步
-→ 游戏包入口
-→ Hostra 桌面宿主
+栈式运行系统
+→ 通信系统
+→ 生命周期协议
+→ 程序主系统模块
+→ 分包和测试计划
 ```
-
-- [程序主系统与模块子系统架构](./architecture/main-system-and-subsystems.md)
-- [JSON-RPC 通信与客户端状态同步](./architecture/runtime-rpc-and-state-sync.md)
-- [游戏包契约 v1](./contracts/game-package-v1.md)
-- [Hostra 桌面程序主系统与渲染宿主](./architecture/hostra-desktop-client-host.md)
 
 ### 实现模块子系统
 
 ```text
-子系统调用协议
-→ 子系统 Client State Projector
-→ Client Scoped State Tree
-→ JSON-RPC 数据面
+模块子系统模型
+→ 生命周期协议
+→ Client State Tree
+→ subsystem SDK / 具体模块设计
 ```
-
-- [程序主系统与模块子系统架构](./architecture/main-system-and-subsystems.md)
-- [模块子系统 Client State Projector](./architecture/client-state-projector.md)
-- [Client Scoped State Tree 协议](./architecture/client-state-tree-protocol.md)
-- [JSON-RPC 通信与客户端状态同步](./architecture/runtime-rpc-and-state-sync.md)
-
-### 实现第一阶段地图子系统
-
-```text
-游戏启动与内容加载
-→ 地图子系统 Session Coordinator
-→ 地图子系统 Execution Loop
-→ 地图子系统 Runtime Core
-→ Pokémon Essentials 地图兼容
-```
-
-- [第一阶段游戏启动与异步内容加载](./game-package/phase-1-game-loading.md)
-- [第一阶段地图子系统 Session Coordinator](./runtime/phase-1-session-coordinator.md)
-- [第一阶段地图子系统 Runtime Execution Loop](./runtime/phase-1-runtime-execution-loop.md)
-- [第一阶段地图子系统 Runtime Core](./runtime/phase-1-runtime-core.md)
-- [Pokémon Essentials v21.1 地图与行走运行时](./runtime/phase-1-pokemon-essentials-map-runtime.md)
-
-这些 Runtime 文档只定义内置 `loom.map` 子系统的内部实现，不是所有模块子系统必须遵守的平台接口。
 
 ### 实现 Web 渲染端
 
 ```text
-调用栈镜像和输入目标
-→ Frame/Scope Store
-→ Scope Tree 协调
-→ DOM 呈现
+渲染系统
+→ 通信系统
+→ Client State Tree
+→ Web Renderer 模块
 ```
 
-- [JSON-RPC 通信与客户端状态同步](./architecture/runtime-rpc-and-state-sync.md)
-- [Client Scoped State Tree 协议](./architecture/client-state-tree-protocol.md)
-- [Web 渲染端 Frame/Scope 状态协调与 DOM 呈现](./design/web-client-reconciliation.md)
-
-### 实现游戏包、FSDB 或转换工具
-
-- [游戏包契约 v1](./contracts/game-package-v1.md)
-- [第一阶段游戏启动与异步内容加载](./game-package/phase-1-game-loading.md)
-- [FSDB 文件存储系统目录结构详解](./fsdb/FSDB目录结构详解.md)
-- [Pokémon Essentials v21.1 地图与行走运行时](./runtime/phase-1-pokemon-essentials-map-runtime.md)
-
-### 查看当前计划
-
-- [第一阶段设计待办](./roadmap/phase-1-design-todos.md)
-- [文档状态与权威来源](./overview/document-status.md)
-
-路线图只用于追踪未关闭事项，不替代正式契约或设计。
-
-## 文档分层
+### 实现游戏包或内容工具
 
 ```text
-overview/
-    产品范围、系统入口和文档治理
-
-contracts/
-    游戏包和其他公开规范
-
-architecture/
-    程序主系统、子系统协议、Client State、RPC 和宿主边界
-
-design/
-    渲染端等组件实现设计
-
-game-package/
-    游戏包打开、索引和内容加载设计
-
-runtime/
-    第一阶段地图子系统内部 Runtime 设计
-
-fsdb/
-    FSDB 基础格式与参考资料
-
-roadmap/
-    当前待办和开放事项
+存储与内容系统
+→ 游戏包契约
+→ 资源协议
+→ Game Package 模块
 ```
 
-## 当前权威文档
+### 实现第一阶段地图子系统
 
-| 主题 | 文档 |
-|---|---|
-| 第一阶段范围 | [产品定位与第一阶段范围](./overview/product-scope.md) |
-| 总体架构 | [LoomRealm 总体架构](./architecture/system-overview.md) |
-| 程序主系统、调用栈和子系统 | [程序主系统与模块子系统架构](./architecture/main-system-and-subsystems.md) |
-| 游戏包和入口文件 | [游戏包契约 v1](./contracts/game-package-v1.md) |
-| JSON-RPC 与状态同步 | [JSON-RPC 通信与客户端状态同步](./architecture/runtime-rpc-and-state-sync.md) |
-| Client State 数据结构 | [Client Scoped State Tree 协议](./architecture/client-state-tree-protocol.md) |
-| 子系统状态投影 | [模块子系统 Client State Projector](./architecture/client-state-projector.md) |
-| Web 渲染端 | [Web 渲染端 Frame/Scope 状态协调与 DOM 呈现](./design/web-client-reconciliation.md) |
-| 桌面宿主 | [Hostra 桌面程序主系统与渲染宿主](./architecture/hostra-desktop-client-host.md) |
-| 地图子系统内部 Runtime | [地图子系统 Runtime Core](./runtime/phase-1-runtime-core.md) |
-| 地图兼容和 FSDB Profile | [Pokémon Essentials 地图运行时](./runtime/phase-1-pokemon-essentials-map-runtime.md) |
+```text
+模块子系统模型
+→ loom.map 模块
+→ 地图 Runtime 详细资料
+→ Pokémon Essentials 兼容资料
+```
 
-完整状态见 [文档状态与权威来源](./overview/document-status.md)。
+## 迁移状态
 
-## 文档维护原则
+本次重构先建立新的权威阅读结构。原有目录中的详细文档暂时保留为过渡资料，以避免一次性移动导致内容和交叉链接丢失。
 
-1. 同一设计只有一个主要定义位置，其他文档通过链接引用。
-2. 程序主系统的固定职责仅限调用栈、进程生命周期和通信通道。
-3. 模块子系统内部实现不得被误写为平台固定模块。
-4. 子系统控制面统一使用 JSON-RPC，普通输入和 Scope 数据面直接连接渲染端。
-5. Scope 属于具体 Frame，完整身份为 `frameId + scopeId`。
-6. 游戏包第一阶段只读，Save System 暂缓。
-7. 子系统不得把内部状态或物理文件路径直接序列化给客户端。
-8. Web 渲染端不把 DOM 作为权威状态来源。
-9. 被替代文档从当前文档树删除，历史通过 Git 追溯。
-10. 重大变更必须同步更新权威文档、状态表和路线图。
+后续迁移规则见 [文档分层与变更规则](./00-overview/document-governance.md)。旧文件不应继续新增与新层级重复的主要定义。
+
+## 维护原则
+
+1. 同一设计只有一个主要定义位置；
+2. 下层文档只能细化，不能隐式修改上层结论；
+3. 协议变更必须说明版本和兼容性；
+4. 模块设计不得扩大系统职责；
+5. 实施方案不是产品架构；
+6. 路线图不替代正式设计；
+7. 重大变更同步更新依赖文档和测试；
+8. 删除或标记被替代内容，历史通过 Git 追溯。
