@@ -1,27 +1,48 @@
 # LoomRealm
 
-LoomRealm 是一个以程序主系统调用栈、独立模块子系统进程、JSON-RPC 和通用 Client Scope Tree 为核心的运行平台设计项目。
+LoomRealm 是一个通过只读游戏包启动、由程序主系统管理模块子系统调用栈，并使用 Web 渲染端呈现 Client Scope Tree 的运行平台设计项目。
 
-第一阶段使用面向 RPG Maker XP / Pokémon Essentials v21.1 内容的地图子系统验证完整纵向链路。
+第一阶段使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` 子系统的纵向验证场景。
+
+## 设计文档
+
+文档按照从粗到细的顺序组织：
+
+```text
+产品目标与范围
+→ 系统架构
+→ 正式契约
+→ 模块设计
+→ 实施计划
+```
+
+推荐入口：
+
+- [产品设计总览](./doc/00-overview/product-vision.md)
+- [文档分层与变更规则](./doc/00-overview/document-governance.md)
+- [系统架构总览](./doc/10-architecture/system-overview.md)
+- [正式契约目录](./doc/15-contracts/README.md)
+- [模块设计目录](./doc/20-modules/README.md)
+- [实施计划目录](./doc/30-implementation/README.md)
+- [完整阅读指南](./doc/README.md)
 
 ## 核心模型
 
 ```text
-入口文件
-→ 程序主系统启动初始子系统并压栈
-→ 子系统直接处理渲染端输入并发布 Scope
+游戏包入口
+→ 程序主系统创建初始 Frame
+→ 模块子系统入栈并拥有业务状态
+→ 活动子系统直接处理输入并发布 Scope
 → 子系统可以调用其他子系统入栈
-→ 被调用子系统出栈并返回结果
+→ 被调用子系统返回结果并出栈
+→ 调用者恢复
 ```
 
-详细设计见：
-
-- [`doc/architecture/main-system-and-subsystems.md`](./doc/architecture/main-system-and-subsystems.md)
-- [`doc/architecture/system-overview.md`](./doc/architecture/system-overview.md)
+程序主系统只管理调用关系、生命周期和通信通道；模块子系统管理自身业务状态和 Client State；渲染端维护 Store、DOM 和非权威表现状态。
 
 ## 文档站点
 
-GitHub Pages 部署完成后，文档地址为：
+GitHub Pages 部署完成后：
 
 - https://lithdoo.github.io/loom-realm/
 
