@@ -17,10 +17,47 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 1. [产品设计总览](./00-overview/product-vision.md)
 2. [文档分层与变更规则](./00-overview/document-governance.md)
 3. [系统架构总览](./10-architecture/system-overview.md)
-4. 按主题阅读各系统架构
-5. [正式契约目录](./15-contracts/README.md)
-6. [模块设计目录](./20-modules/README.md)
-7. [实施计划目录](./30-implementation/README.md)
+4. [运行承载系统](./10-architecture/runtime-hosting-system.md)
+5. [通信系统](./10-architecture/communication-system.md)
+6. [Frame 数据通道 v1](./15-contracts/frame-data-channel-v1.md)
+7. [渲染系统](./10-architecture/rendering-system.md)
+8. [只读 Content API v1](./15-contracts/content-api-v1.md)
+9. [模块设计目录](./20-modules/README.md)
+10. [实施计划目录](./30-implementation/README.md)
+
+## 当前核心结论
+
+```text
+每个 systemId
+    一个 Runtime Container
+
+桌面 Runtime Container
+    独立 OS Process
+
+PWA Runtime Container
+    Dedicated Worker
+
+每个 Frame
+    Container 内独立业务实例
+    独立 Activation、Projector、Revision 和数据连接
+```
+
+通信分为：
+
+```text
+控制面
+    Main ⇄ Runtime Container
+    Main ⇄ Renderer
+
+Frame 数据面
+    Frame Runtime ⇄ Renderer
+    输入上行 + Client State 下行
+
+内容面
+    Runtime Container / Renderer ⇄ Readonly Content Service
+```
+
+桌面使用 localhost WebSocket 和 HTTP；PWA 使用 MessagePort、Service Worker 和 OPFS。不同平台必须保持相同协议语义。
 
 ## 00 · 产品总览
 
@@ -37,6 +74,7 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 
 - [系统架构总览](./10-architecture/system-overview.md)
 - [栈式运行系统](./10-architecture/stack-runtime-system.md)
+- [运行承载系统](./10-architecture/runtime-hosting-system.md)
 - [通信系统](./10-architecture/communication-system.md)
 - [渲染系统](./10-architecture/rendering-system.md)
 - [存储与内容系统](./10-architecture/storage-system.md)
@@ -48,8 +86,10 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 
 - [正式契约目录](./15-contracts/README.md)
 - [模块子系统生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
+- [Frame 数据通道 v1](./15-contracts/frame-data-channel-v1.md)
 - [Client Scoped State Tree v1](./15-contracts/client-state-tree-v1.md)
 - [游戏包契约 v1](./15-contracts/game-package-v1.md)
+- [只读 Content API v1](./15-contracts/content-api-v1.md)
 - [资源交付协议草案](./15-contracts/resource-protocol.md)
 
 ## 20 · 模块设计
@@ -60,8 +100,10 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 - [程序主系统模块](./20-modules/main-system/README.md)
 - [Web 渲染端模块](./20-modules/web-renderer/README.md)
 - [游戏包与内容模块](./20-modules/game-package/README.md)
+- [FSDB Content Service](./20-modules/fsdb-content-service/README.md)
 - [`loom.map` 地图子系统](./20-modules/loom-map/README.md)
 - [Hostra 桌面宿主模块](./20-modules/desktop-host/README.md)
+- [PWA 宿主模块](./20-modules/pwa-host/README.md)
 
 地图 Runtime Core、Execution Loop、Session Coordinator 和 Pokémon Essentials 兼容层只属于 `loom.map`，不是所有模块子系统必须实现的平台接口。
 
@@ -76,21 +118,22 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 
 实施层可以随代码调整，但不能反向改变产品架构或正式契约。
 
+## 设计决策记录
+
+重大决策的背景、候选方案和代价记录在：
+
+- [ADR 0001：每个 System 一个 Runtime Container](./decisions/0001-system-container-per-system-id.md)
+- [ADR 0002：平台传输 Profile](./decisions/0002-platform-transport-profiles.md)
+- [ADR 0003：逻辑只读 Content API](./decisions/0003-readonly-content-api.md)
+- [ADR 0004：Client State 渲染流水线](./decisions/0004-client-state-rendering-pipeline.md)
+
 ## 按角色阅读
-
-### 第一次了解 LoomRealm
-
-```text
-产品设计总览
-→ 系统架构总览
-→ 栈式运行系统
-→ 模块子系统模型
-```
 
 ### 实现程序主系统
 
 ```text
 栈式运行系统
+→ 运行承载系统
 → 通信系统
 → 生命周期协议
 → 程序主系统模块
@@ -102,16 +145,38 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 ```text
 模块子系统模型
 → 生命周期协议
+→ Frame 数据通道
 → Client State Tree
-→ subsystem SDK / 具体模块设计
+→ 具体模块设计
 ```
 
 ### 实现 Web 渲染端
 
 ```text
 渲染系统
-→ 通信系统
+→ Frame 数据通道
 → Client State Tree
+→ Content API
+→ Web Renderer 模块
+```
+
+### 实现桌面宿主
+
+```text
+运行承载系统
+→ 通信系统
+→ Frame 数据通道
+→ Content API
+→ Hostra 桌面宿主模块
+```
+
+### 实现 PWA
+
+```text
+运行承载系统
+→ PWA 宿主模块
+→ Frame 数据通道
+→ Content API
 → Web Renderer 模块
 ```
 
@@ -120,24 +185,24 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 ```text
 存储与内容系统
 → 游戏包契约
-→ 资源协议
-→ Game Package 模块
-```
-
-### 实现第一阶段地图子系统
-
-```text
-模块子系统模型
-→ loom.map 模块
-→ 地图 Runtime 详细资料
-→ Pokémon Essentials 兼容资料
+→ Content API
+→ Game Package / FSDB Content Service 模块
 ```
 
 ## 迁移状态
 
-本次重构先建立新的权威阅读结构。原有目录中的详细文档暂时保留为过渡资料，以避免一次性移动导致内容和交叉链接丢失。
+本次更新确立新的权威结论：
 
-后续迁移规则见 [文档分层与变更规则](./00-overview/document-governance.md)。旧文件不应继续新增与新层级重复的主要定义。
+- 每个 System 一个 Runtime Container；
+- 每个 Frame 是 Container 内独立实例；
+- 桌面使用独立 LR Main、System Process、WebSocket 和 HTTP；
+- PWA 使用 Main/System Worker、每 Frame MessagePort、Service Worker 和 OPFS；
+- Frame 数据连接同时承载输入上行和视图状态下行；
+- FSDB 通过逻辑只读 Content API 访问。
+
+原有目录中的详细文档暂时保留为过渡资料。与上述结论冲突的旧内容不应继续作为实现依据。
+
+后续迁移规则见 [文档分层与变更规则](./00-overview/document-governance.md)。
 
 ## 维护原则
 
