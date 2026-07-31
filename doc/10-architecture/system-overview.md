@@ -303,4 +303,4 @@ Content API
 - [正式契约目录](../15-contracts/README.md)：跨系统可互操作语义；
 - [模块设计目录](../20-modules/README.md)：系统内部模块拆分；
 - [实施计划目录](../30-implementation/README.md)：当前仓库落地方案；
-- [设计决策记录](../decisions/)：重大架构选择的背景和代价。
+- [设计决策记录](../decisions/README.md)：重大架构选择的背景和代价。
