@@ -21,9 +21,10 @@ export default defineConfig({
       {
         text: '设计',
         items: [
-          { text: '产品设计总览', link: '/00-overview/product-vision' },
           { text: '系统架构总览', link: '/10-architecture/system-overview' },
-          { text: '正式契约', link: '/15-contracts/README' },
+          { text: '运行承载系统', link: '/10-architecture/runtime-hosting-system' },
+          { text: 'Frame 数据通道', link: '/15-contracts/frame-data-channel-v1' },
+          { text: '只读 Content API', link: '/15-contracts/content-api-v1' },
           { text: '模块设计', link: '/20-modules/README' },
         ],
       },
@@ -53,6 +54,7 @@ export default defineConfig({
         items: [
           { text: '系统架构总览', link: '/10-architecture/system-overview' },
           { text: '栈式运行系统', link: '/10-architecture/stack-runtime-system' },
+          { text: '运行承载系统', link: '/10-architecture/runtime-hosting-system' },
           { text: '通信系统', link: '/10-architecture/communication-system' },
           { text: '渲染系统', link: '/10-architecture/rendering-system' },
           { text: '存储与内容系统', link: '/10-architecture/storage-system' },
@@ -65,8 +67,10 @@ export default defineConfig({
         items: [
           { text: '契约目录', link: '/15-contracts/README' },
           { text: '生命周期与调用协议草案', link: '/15-contracts/system-lifecycle-protocol' },
+          { text: 'Frame 数据通道 v1', link: '/15-contracts/frame-data-channel-v1' },
           { text: 'Client State Tree v1', link: '/15-contracts/client-state-tree-v1' },
           { text: '游戏包契约 v1', link: '/15-contracts/game-package-v1' },
+          { text: '只读 Content API v1', link: '/15-contracts/content-api-v1' },
           { text: '资源协议草案', link: '/15-contracts/resource-protocol' },
         ],
       },
@@ -78,8 +82,10 @@ export default defineConfig({
           { text: '程序主系统', link: '/20-modules/main-system/README' },
           { text: 'Web 渲染端', link: '/20-modules/web-renderer/README' },
           { text: '游戏包与内容', link: '/20-modules/game-package/README' },
+          { text: 'FSDB Content Service', link: '/20-modules/fsdb-content-service/README' },
           { text: 'loom.map 地图子系统', link: '/20-modules/loom-map/README' },
           { text: 'Hostra 桌面宿主', link: '/20-modules/desktop-host/README' },
+          { text: 'PWA 宿主', link: '/20-modules/pwa-host/README' },
         ],
       },
       {
@@ -93,6 +99,16 @@ export default defineConfig({
         ],
       },
       {
+        text: '设计决策',
+        collapsed: true,
+        items: [
+          { text: 'ADR 0001 · System Container 粒度', link: '/decisions/0001-system-container-per-system-id' },
+          { text: 'ADR 0002 · 平台 Transport Profile', link: '/decisions/0002-platform-transport-profiles' },
+          { text: 'ADR 0003 · 只读 Content API', link: '/decisions/0003-readonly-content-api' },
+          { text: 'ADR 0004 · Client State 渲染流水线', link: '/decisions/0004-client-state-rendering-pipeline' },
+        ],
+      },
+      {
         text: '过渡资料',
         collapsed: true,
         items: [
@@ -101,6 +117,7 @@ export default defineConfig({
           { text: '旧主系统与子系统设计', link: '/architecture/main-system-and-subsystems' },
           { text: '旧 JSON-RPC 设计', link: '/architecture/runtime-rpc-and-state-sync' },
           { text: '旧 Client State 协议', link: '/architecture/client-state-tree-protocol' },
+          { text: '旧 Hostra 桌面设计', link: '/architecture/hostra-desktop-client-host' },
           { text: '旧游戏包契约', link: '/contracts/game-package-v1' },
           { text: '旧地图 Runtime 目录', link: '/runtime/README' },
           { text: '旧第一阶段待办', link: '/roadmap/phase-1-design-todos' },
