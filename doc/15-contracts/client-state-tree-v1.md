@@ -4,14 +4,14 @@
 > 状态：Active / Normative  
 > 稳定程度：Evolving  
 > 主要定义：Client State Tree v1 的权威入口与稳定边界  
-> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[模块子系统模型](../10-architecture/subsystem-model.md)、[Frame 数据通道 v1](./frame-data-channel-v1.md)  
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[模块子系统模型](../10-architecture/subsystem-model.md)、[Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md)  
 > 最近复核：2026-08-01
 
 本页是 Client State Tree v1 的契约入口。完整字段、校验和事件定位当前仍由现有协议文档定义：
 
 - [Client Scoped State Tree 协议](../architecture/client-state-tree-protocol.md)
 
-Frame 数据连接的方法、Sequence、Activation、背压和 Resync 由 [Frame 数据通道 v1](./frame-data-channel-v1.md) 定义。
+Renderer–Subsystem 数据连接、多 Frame 路由、Sequence、Activation、背压和 Resync 由 [Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md) 定义。
 
 ## 1. 已冻结边界
 
@@ -53,25 +53,28 @@ Frame Client State
 
 一个投影事务同时改变多个 Scope 时，应发送完整 Frame Snapshot。第一阶段不定义节点级 Patch 或多 Scope Batch Patch。
 
-## 3. 版本维度
+## 3. 版本与路由维度
 
 必须区分：
 
+- System Data Connection：`sessionId + systemId + connectionId`；
+- Frame Logical Stream：`frameId + activationId`；
+- Frame Logical Stream 单方向 Sequence；
 - Frame Client State Revision；
-- Scope Revision；
-- Frame 数据连接方向 Sequence；
-- Frame Activation；
-- 物理连接 Connection ID。
+- Scope Revision。
 
-较旧 Revision 不能覆盖较新状态；无法确认 Sequence 连续性时请求完整 Snapshot。新连接可以重置 Sequence，但 State Revision 可以保持。
+Frame 不拥有独立物理 WebSocket 或 MessagePort。多个属于同一 `systemId` 的 Frame 可以共享一个 System Data Connection，但各自的 Activation、Sequence、State Revision 和 Scope Revision 完全独立。
+
+较旧 Revision 不能覆盖较新状态；无法确认某 Frame Sequence 连续性时只请求该 Frame 的完整 Snapshot。物理连接重建可以重置 Logical Stream Sequence，但 State Revision 可以保持。
 
 ## 4. 状态与事件
 
 - Scope State 表示当前应该呈现什么，可通过 Snapshot 恢复；
 - Event 表示一次性发生的表现行为，不能替代可恢复界面状态；
-- State 可以在未发送或未呈现前合并为最新目标；
-- Event 通常需要有序、有界处理；
-- Frame 出栈后，其迟到 State 和 Event 不得影响其他 Frame。
+- State 可以在未发送或未呈现前按 Frame 合并为最新目标；
+- Event 通常需要按 Frame 有序、有界处理；
+- Frame 出栈后，其迟到 State 和 Event 不得影响其他 Frame；
+- 一个 Frame 的 Resync 不重置同一 System Data Connection 中其他 Frame 的 Store。
 
 ## 5. 资源引用
 
@@ -81,7 +84,7 @@ Client Node Data 可以包含逻辑资源引用：
 resourceKey + contentVersion
 ```
 
-资源主体通过 [只读 Content API v1](./content-api-v1.md) 获取，不进入 Client State Tree 或 Frame 数据通道。
+资源主体通过 [只读 Content API v1](./content-api-v1.md) 获取，不进入 Client State Tree 或 Renderer–Subsystem 数据协议。
 
 Client State 不携带 Content token、绝对 URL、本机路径或资源字节。
 
@@ -90,14 +93,16 @@ Client State 不携带 Content token、绝对 URL、本机路径或资源字节�
 Renderer 必须：
 
 ```text
-校验完整消息和 Scope Tree
+根据 System Data Connection 接收消息
+→ 根据 frameId 路由 Frame Logical Stream
+→ 校验 Activation、Sequence 和完整 Scope Tree
 → 原子提交 Frame/Scope Store
 → 标记需要呈现的 Scope
 → 在 Render Scheduler 中协调 DOM / Canvas / WebGL
 ```
 
-验证失败时保留旧 Store，并请求 Resync。DOM 或 Scene 不能作为恢复源。
+验证失败时保留目标 Frame 的旧 Store，并只请求该 Frame Resync。DOM 或 Scene 不能作为恢复源。
 
 ## 7. 后续迁移
 
-后续将现有完整协议逐节迁入本目录，并保留旧路径作为 Legacy 链接。迁移完成前，如本页与现有 Normative 协议的精确字段定义冲突，以现有 Normative 协议的字段 Schema 为准；如涉及通道方法、Sequence、Activation、背压或 Resync，则以 Frame 数据通道 v1 为准，并同步修正冲突文档。
+后续将现有完整协议逐节迁入本目录，并保留旧路径作为 Legacy 链接。迁移完成前，如本页与现有 Normative 协议的精确字段定义冲突，以现有 Normative 协议的字段 Schema 为准；如涉及 System Data Connection、Frame Logical Stream、Sequence、Activation、背压或 Resync，则以 Renderer–Subsystem 数据协议 v1 为准，并同步修正冲突文档。
