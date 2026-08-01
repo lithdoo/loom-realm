@@ -14,7 +14,7 @@
 | 主题 | 权威入口 | 当前详细来源或状态 |
 |---|---|---|
 | Runtime Container、Frame 生命周期与调用 | [生命周期协议草案](./system-lifecycle-protocol.md) | Draft；Container 与 Frame 两层状态仍需冻结 |
-| Frame 输入上行与视图下行 | [Frame 数据通道 v1](./frame-data-channel-v1.md) | Active / Normative；桌面 WebSocket 与 PWA MessagePort 共用语义 |
+| Renderer ⇄ Subsystem 输入/视图数据 | [Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md) | Active / Normative；每 System 一个 Transport，Frame 在连接内多路复用 |
 | Client State Tree | [Client State Tree v1](./client-state-tree-v1.md) | Active / Normative；精确树字段仍引用现有 Normative 协议 |
 | 游戏包 | [游戏包契约 v1](./game-package-v1.md) | Active / Normative |
 | 逻辑只读内容访问 | [Content API v1](./content-api-v1.md) | Active / Normative；桌面 HTTP 与 PWA Service Worker 共用语义 |
@@ -26,7 +26,9 @@
 生命周期协议
     创建、激活、暂停、恢复和关闭 Frame
         ↓
-Frame 数据通道
+Renderer–Subsystem 数据协议
+    每 System 一条数据连接
+    连接内按 Frame/Activation 多路复用
     输入上行、Client State 下行、Event 和 Resync
         ↓
 Client State Tree
@@ -39,7 +41,7 @@ Content API
     Manifest、Record、Group 和 Resource 的只读访问
 ```
 
-生命周期控制消息不承载普通输入或 Client State。资源主体不进入 Frame 数据通道。
+生命周期控制消息不承载普通输入或 Client State。资源主体不进入 Renderer–Subsystem 数据协议。
 
 ## 3. Transport Profile
 
@@ -47,14 +49,32 @@ Content API
 
 | 语义连接 | 桌面 Profile | PWA Profile |
 |---|---|---|
-| Renderer ⇄ Main | localhost WebSocket | MessagePort |
-| Main ⇄ Runtime Container | localhost WebSocket | MessagePort |
-| Renderer ⇄ Frame Runtime | localhost WebSocket | 每 Frame 一个 MessagePort |
+| Renderer ⇄ Main | 每会话 localhost WebSocket | MessagePort |
+| Main ⇄ Runtime Container | 每 System localhost WebSocket | 每 System 控制 MessagePort |
+| Renderer ⇄ Runtime Container | 每 System localhost WebSocket | 每 System 数据 MessagePort |
+| Frame Logical Stream | 在 System Data Connection 内多路复用 | 同左 |
 | Content API | localhost HTTP | same-origin Fetch + Service Worker |
 
-不同 Profile 必须通过同一契约 Fixture，产生相同状态、错误和恢复结果。
+不同 Profile 必须通过同一契约 Fixture，产生相同 Frame 路由、状态、错误和恢复结果。
 
-## 4. 契约文档要求
+## 4. 身份分层
+
+正式契约必须区分：
+
+```text
+System Data Connection
+    sessionId + systemId + connectionId
+
+Frame Logical Stream
+    frameId + activationId + direction + sequence
+
+Client State
+    stateRevision + scopeRevision
+```
+
+Frame 不拥有独立物理 WebSocket 或 MessagePort。一个 Frame 的暂停、恢复、关闭或 Resync 不关闭共享的 System Data Connection。
+
+## 5. 契约文档要求
 
 一份可冻结的契约至少应包含：
 
@@ -65,19 +85,20 @@ Content API
 - 前置条件和后置条件；
 - 合法状态转换；
 - 顺序与幂等性；
+- 多路复用与故障隔离；
 - 超时、取消和重试；
 - 错误码和失败恢复；
 - 安全和大小限制；
 - 版本与兼容性；
 - 最小互操作测试。
 
-## 5. 当前成熟度
+## 6. 当前成熟度
 
-Frame 数据通道、Client State Tree、游戏包和 Content API 已标记为 Normative，但仍处于第一阶段演进期。
+Renderer–Subsystem 数据协议、Client State Tree、游戏包和 Content API 已标记为 Normative，但仍处于第一阶段演进期。
 
 生命周期、调用返回、Container 故障展开、精确 JSON Schema 和部分资源授权仍未完全冻结。实现不能仅根据示例 JSON 推断最终协议。
 
-## 6. 版本规则
+## 7. 版本规则
 
 - 对现有实现无影响的说明性修改可以保持版本；
 - 新增可选字段必须定义旧实现行为；
@@ -86,7 +107,9 @@ Frame 数据通道、Client State Tree、游戏包和 Content API 已标记为 N
 - Transport 实现变化不应自动提升业务协议版本；
 - 实验字段不得假装为冻结字段。
 
-## 7. 迁移说明
+本次“每 Frame 物理连接”到“每 System 物理连接 + Frame Logical Stream”的修订发生在实现冻结前，属于对错误 Transport 粒度描述的纠正；协议版本仍保持 v1。
+
+## 8. 迁移说明
 
 本目录是新的契约权威入口。旧路径暂时保留详细内容，后续按主题迁入本目录。
 
@@ -96,4 +119,5 @@ Frame 数据通道、Client State Tree、游戏包和 Content API 已标记为 N
 2. 旧文档只维护必要的一致性修正；
 3. 主题完整迁移后，将旧文件改为 Legacy 提示；
 4. 内部链接迁移完成前不删除旧路径；
-5. Frame 数据通道和 Content API 的新定义优先于旧通信示例中的 Transport 假设。
+5. `frame-data-channel-v1.md` 文件路径为兼容保留，其权威标题已经是 Renderer–Subsystem 数据协议 v1；
+6. Renderer–Subsystem 数据协议和 Content API 的新定义优先于旧通信示例中的 Transport 假设。
