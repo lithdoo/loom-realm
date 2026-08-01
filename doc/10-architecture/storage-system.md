@@ -3,77 +3,101 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：只读游戏包、逻辑 Content API、内容索引、Repository、资源和路径安全  
-> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)  
-> 最近复核：2026-08-01
+> 主要定义：只读游戏包、Subsystem Descriptor 内容边界、逻辑 Content API、内容索引、Repository、资源和路径安全  
+> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)  
+> 最近复核：2026-08-02
 
 ## 1. 设计目标
 
-存储与内容系统为程序主系统、模块子系统和渲染端提供安全、只读、按需的静态内容访问，同时隔离逻辑内容身份与本机物理路径。
+存储与内容系统为 Main、Subsystem 和 Renderer 提供安全、只读、按需的游戏包内容访问，同时隔离逻辑内容身份与本机物理路径。
 
 核心结论：
 
-> 运行时通过统一的逻辑只读 Content API 访问 FSDB 和资源；桌面由 localhost HTTP 服务实现，PWA 由 Service Worker 和 OPFS 实现。
+> 运行时业务通过统一逻辑只读 Content API 访问 FSDB 和资源；Subsystem Launcher 是 Main 的受控启动能力，不属于 Content API，也不赋予普通 Runtime 任意文件执行能力。
 
-## 2. 内容层次
+## 2. 游戏包内容层次
 
 ```text
 游戏包物理存储
-├── 游戏清单
-├── 入口文件
+├── Game Manifest
+├── Game Entry
+│   ├── initial call
+│   └── Subsystem Descriptors
+├── 明确声明的 Subsystem Launcher Entry
 ├── FSDB 数据
 └── 资源主体
         ↓
 安装与路径安全层
         ↓
-fsdb.index.json / Package Index
+Package Index / Content Index
         ↓
 Readonly Content API
         ↓
-模块 Repository / Renderer Resource Client
-        ↓
-不可变业务内容 / 解码后的资源
+Subsystem Repository / Renderer Resource Client
 ```
 
-## 3. 游戏包
+Game Entry 中的 Launcher Entry 属于启动描述，不通过普通 Content API 执行。
 
-第一阶段游戏包是普通只读目录或其受控安装副本：
+## 3. 游戏包只读原则
 
-- 根目录存在统一游戏清单；
-- 清单引用唯一入口文件；
-- 入口指定初始子系统和 JSON 参数；
-- 所有物理路径必须限制在包内；
-- 不执行包内脚本或本机二进制；
-- 运行状态、缓存和日志不写回原始游戏包。
+游戏包在运行期间仍然只读：
 
-PWA 可以将经过验证的游戏包复制到 OPFS；该安装副本在运行阶段仍通过只读能力暴露。
+- Main 可以读取 Manifest、Entry 和 Subsystem Descriptor；
+- Launcher 可以读取并启动 Entry 明确声明、且当前平台支持的 Subsystem Entry；
+- Subsystem 和 Renderer 的普通内容访问通过只读 Content API；
+- Runtime 状态、缓存和日志不写回原始游戏包；
+- 任何 Launcher 都不能把游戏包升级为任意读写文件系统能力。
 
-## 4. 公共加载与业务加载
+“允许受控启动明确声明的 JavaScript Entry”与“运行时内容只读”不冲突：前者是 Main 的启动权限，后者是游戏业务 Runtime 的内容访问边界。
 
-程序主系统只负责公共加载：
+## 4. 公共加载与 Bootstrap
+
+Main 负责公共加载：
 
 ```text
 读取 manifest 和 entry
 → 校验格式、版本和安装实例
-→ 检查初始 System 可解析
+→ 读取 initial call
+→ 读取全部 Subsystem Descriptor
+→ 校验 Launcher Profile / Entry 路径 / env
 → 建立只读 Content Grant
-→ 初始化目标 Frame
+→ 将 Descriptor 交给 Runtime Bootstrap / Launcher
 ```
 
-目标子系统负责业务加载：
+Main 不根据 `systemId` 猜测地图、人物或业务字段。
+
+Subsystem Bootstrap 负责：
 
 ```text
-验证调用参数
-→ 使用 Catalog / Repository 访问逻辑 Content API
-→ 按需读取和校验
-→ 构造不可变业务内容
-→ 生成首次 Client State
-→ 报告 Frame ready
+根据 launcher.type 选择 Launcher
+→ 在受控安全边界内解析 launcher.entry
+→ 注入 Main 保留环境 + descriptor env
+→ 启动 Process / Worker
 ```
 
-程序主系统不根据 `systemId` 猜测地图、人物或其他业务字段。
+详细流程由 [运行时启动与连接建立系统](./runtime-bootstrap-system.md) 定义。
 
-## 5. 逻辑 Content API
+## 5. Launcher 与 Content API 的职责分离
+
+```text
+Launcher
+    Main 特权能力
+    只处理 Game Entry 明确声明的 Subsystem 启动入口
+
+Content API
+    Runtime / Renderer 只读数据能力
+    只处理 Manifest / Record / Group / Resource
+```
+
+禁止：
+
+- Renderer 通过 Content API 请求执行脚本；
+- Subsystem 通过 Content API 任意启动另一个可执行文件；
+- 游戏数据字段动态拼接任意本机执行路径；
+- Launcher Entry 逃逸出安装根目录；
+- Descriptor env 覆盖 LoomRealm 保留环境变量。
+
+## 6. 逻辑 Content API
 
 运行时只使用逻辑内容身份：
 
@@ -94,21 +118,26 @@ group(namespace, key)
 resource(namespace, key)
 ```
 
-Content API 不接受客户端提供的任意物理路径，不返回文件句柄、绝对路径或包内真实目录结构。
+Content API 不接受任意物理路径，不返回文件句柄、绝对路径或任意执行能力。
 
-## 6. 平台实现
+## 7. 平台实现
 
-### 桌面
+### Desktop
 
 ```text
-Runtime Container / Renderer
+Subsystem / Renderer
 → HTTP Fetch
 → localhost Readonly Content Service Process
 → Package Index
 → 真实只读游戏包目录
+
+Main Launcher
+→ 已校验 Subsystem Descriptor
+→ 已校验 launcher.entry
+→ spawn Process
 ```
 
-Content Service 只监听 loopback，使用会话授权，并只允许逻辑路由的 `GET` 和 `HEAD`。
+Content Service 只监听 loopback，使用会话授权，并只允许逻辑路由的 `GET` / `HEAD`。
 
 ### PWA
 
@@ -120,9 +149,9 @@ Subsystem Worker / Window Renderer
 → OPFS / Cache Storage
 ```
 
-Service Worker 是无状态请求处理器。它不拥有 Frame Stack、权威业务状态或 Runtime Tick，必须能够从 OPFS、IndexedDB 安装注册表和 Package Index 重建请求处理能力。
+PWA Launcher 只能使用浏览器支持的 Profile，例如受控 JavaScript Worker Entry。Shell / Native Executable 明确 unsupported。
 
-## 7. FSDB 索引
+## 8. FSDB / Package Index
 
 建议为发布和安装生成：
 
@@ -130,7 +159,7 @@ Service Worker 是无状态请求处理器。它不拥有 Frame Stack、权威�
 fsdb.index.json
 ```
 
-索引保存：
+或等价 Package Index，保存：
 
 - FSDB Namespace 与类型；
 - 逻辑 Key；
@@ -138,45 +167,15 @@ fsdb.index.json
 - MIME；
 - 文件大小；
 - `contentVersion` 或内容哈希；
-- 必要的 Schema 和引用元数据位置。
+- 必要 Schema / 引用元数据位置。
 
-索引是可重新生成的物理访问索引，不是业务记录真相源。
+Launcher Entry 的校验可以使用独立安装元数据，不应把可执行入口伪装成普通业务 Resource。
 
-层次关系：
-
-```text
-FSDB 文件
-    业务内容真相源
-
-fsdb.index.json
-    可生成的物理索引
-
-Game Catalog
-    当前会话轻量逻辑目录
-
-Repository Cache
-    已解析、已校验的不可变对象
-```
-
-HTTP 和 Service Worker 不依赖目录枚举即可通过索引解析逻辑请求。
-
-## 8. Catalog
+## 9. Catalog 与 Repository
 
 Catalog 是轻量内容目录，保存稳定逻辑 ID、类型、内容版本和 Content API 定位信息。
 
-Catalog 不应保存：
-
-- 全部地图 Tile；
-- 全部业务记录主体；
-- 图片或音频字节；
-- 会话状态；
-- Client State。
-
-Catalog 可以在程序主系统或受控内容服务中建立，并作为只读能力交给内置子系统。
-
-## 9. Repository
-
-Repository 是模块内部的按需内容访问边界，负责：
+Repository 是 Subsystem 内部按需内容访问边界，负责：
 
 - 通过 Catalog 构造逻辑 Content 请求；
 - 异步 Fetch、解析和局部 Schema 校验；
@@ -185,61 +184,46 @@ Repository 是模块内部的按需内容访问边界，负责：
 - 返回不可变结果；
 - 将 Content API 错误转换为模块错误。
 
-Repository 不负责业务 Tick、调用栈、Client State 投影或画面呈现。
-
-同一个 Runtime Container 内多个 Frame 可以共享 Repository 和不可变内容缓存，但不能共享 Frame 可变业务状态。
+Repository 不负责 Process Launcher、Frame Stack、User Input 或 Render 生命周期。
 
 ## 10. 资源模型
 
-Client State 只携带：
+Render State 只携带：
 
 ```text
 resourceKey + contentVersion
 ```
 
-Renderer Resource Client 通过 Content API 获取 MIME、版本和资源主体。图片、音频和其他资源字节不进入业务 Runtime Snapshot 或 Scope Tree。
+Renderer Resource Client 通过 Content API 获取 MIME、版本和资源主体。图片、音频和其他资源字节不进入 Subsystem 业务消息或 Render State Tree。
 
-内容版本不可变时，可以使用长期缓存。不同版本必须使用不同缓存身份，旧字节不能覆盖新版本。
+不同内容版本必须使用不同缓存身份，旧字节不能覆盖新版本。
 
 ## 11. Content API 与热路径
 
 Content API 用于：
 
-- 会话初始化；
+- 会话初始化后的业务内容读取；
 - 地图或场景切换；
-- 菜单和业务内容按需加载；
+- 菜单和其他业务内容按需加载；
 - 图片、音频和其他资源加载；
 - 缓存恢复和版本校验。
 
-Content API 不应进入每 Tick 热路径。Runtime Core 每帧只读取已经准备好的内存状态和不可变内容。
-
-错误示例：
-
-```text
-每个 Tick fetch Tile 或碰撞数据
-```
-
-正确示例：
-
-```text
-地图切换时 fetch、解析和校验
-→ 构造不可变 Map Snapshot
-→ Runtime Core 在内存中运行
-```
+Content API 不进入每 Tick 热路径。Runtime Core 每帧只读取已经准备好的内存状态和不可变内容。
 
 ## 12. 路径安全
 
-所有物理路径解析只发生在安装器或 Content Service 内，并必须：
+所有物理路径解析只发生在安装器、受控 Launcher 或 Content Service 内，并必须：
 
-- 使用包根目录相对路径；
-- 规范化后仍位于包内；
-- 拒绝绝对路径、URL、盘符和 UNC；
+- 使用安装根目录相对路径；
+- 规范化后仍位于安装根目录内部；
+- 拒绝绝对路径、任意 URL、盘符和 UNC；
 - 拒绝 `..` 越界；
 - 拒绝符号链接、junction 或等价逃逸；
 - 限制文件大小、记录数和递归深度；
-- 只允许 Package Index 中已声明的内容位置。
+- Content API 只允许 Index 中已声明的内容位置；
+- Launcher 只允许 Descriptor 中明确声明的启动入口。
 
-Runtime Container 和 Renderer 不获得物理路径。
+Subsystem 和 Renderer 不获得通用物理路径访问能力。
 
 ## 13. 授权和缓存
 
@@ -253,51 +237,51 @@ installationId
 expiresAt
 ```
 
-PWA Content API 使用同源安全边界，并由安装注册表验证 `installationId`。
-
-响应应支持：
-
-- 正确 `Content-Type`；
-- `contentVersion` / ETag；
-- `Cache-Control`；
-- `GET` 和 `HEAD`；
-- 明确 404、409、413 和内容校验错误。
-
-大型媒体的 Range 支持属于可选 Profile，必须通过跨平台一致性测试。
+Launcher 授权与 Content Grant 是两种不同能力。Launcher 的系统身份、入口和启动环境由 Main / Runtime Bootstrap 验证，不应复用 Content Bearer Token 作为进程身份。
 
 ## 14. 校验与安装
 
 启动和完整验证是两个不同操作：
 
-- `start` 只加载建立会话所需内容；
-- `validate` 遍历全部强引用并尽可能报告所有问题；
+- `start` 必须校验 Manifest、Entry、Subsystem Descriptor 和当前平台需要启动的 Launcher Entry；
+- `validate` 应遍历所有声明 Subsystem 的 Launcher Descriptor、必需内容和强引用；
 - PWA 安装先复制到临时 OPFS 目录，完整校验后再登记为可用；
 - 未完成安装不能作为运行时 `installationId` 使用；
 - 原始游戏包和运行时安装副本都视为不可信输入。
 
-## 15. 第一阶段 FSDB
+## 15. 第一阶段约束
 
-第一阶段地图子系统使用 FSDB 保存地图、Tile、人物和资源定义。FSDB 是当前内容格式和参考实现，不自动成为所有未来子系统必须使用的公共存储接口。
+第一阶段：
 
-公共稳定边界是逻辑只读 Content API。其他子系统可以使用自己的内容格式，只要通过相同的安全、版本和授权语义暴露。
+```text
+Desktop launcher.type
+    javascript
+
+PWA launcher.type
+    javascript worker compatible profile
+```
+
+Shell、Native Executable 等只作为未来扩展方向，不属于当前第一阶段互操作保证。
+
+第一阶段地图子系统继续使用 FSDB 保存地图、Tile、人物和资源定义。FSDB 是当前内容格式，不是所有未来 Subsystem 的强制存储接口。
 
 ## 16. 架构不变量
 
-1. 运行时不获得任意文件系统能力；
-2. Content API 只接受逻辑内容身份；
-3. 桌面 HTTP 和 PWA Service Worker 语义一致；
-4. Service Worker 和 Content Service 不拥有游戏运行状态；
-5. Repository 返回已校验不可变对象；
-6. Content Fetch 不进入每 Tick 热路径；
-7. Client State 不携带资源字节或物理路径。
+1. 游戏包运行期间只读；
+2. Main 可以启动 Game Entry 明确声明且当前平台支持的 Subsystem Launcher；
+3. 允许受控 Launcher 不等于允许任意脚本 / 文件执行；
+4. Content API 只接受逻辑内容身份，不承担 Launcher 职责；
+5. Launcher Entry 与普通业务 Resource 必须在能力模型上区分；
+6. Renderer 和普通 Subsystem Runtime 不获得任意文件系统能力；
+7. PWA 可以拒绝桌面专用 Launcher Profile；
+8. Service Worker 和 Content Service 不拥有游戏运行状态；
+9. Content Fetch 不进入每 Tick 热路径；
+10. Render State 不携带资源字节或物理路径。
 
 ## 17. 相关下层文档
 
-- [游戏包契约入口](../15-contracts/game-package-v1.md)；
+- [运行时启动与连接建立系统](./runtime-bootstrap-system.md)；
+- [游戏包契约入口](../15-contracts/game-package-v1.md)：当前 v1 仍使用旧的无可执行 Subsystem 模型，待版本迁移；
 - [只读 Content API v1](../15-contracts/content-api-v1.md)；
-- [资源协议草案](../15-contracts/resource-protocol.md)；
 - [游戏包模块设计](../20-modules/game-package/README.md)；
-- [FSDB Content Service 模块](../20-modules/fsdb-content-service/README.md)；
-- [现有详细设计：游戏启动与内容加载](../game-package/phase-1-game-loading.md)；
-- [现有参考：FSDB 目录结构](../fsdb/FSDB目录结构详解.md)；
-- [ADR 0003：逻辑只读 Content API](../decisions/0003-readonly-content-api.md)。
+- [FSDB Content Service 模块](../20-modules/fsdb-content-service/README.md)。
