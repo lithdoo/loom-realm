@@ -56,6 +56,7 @@ export default defineConfig({
           { text: '栈式运行系统', link: '/10-architecture/stack-runtime-system' },
           { text: '运行承载系统', link: '/10-architecture/runtime-hosting-system' },
           { text: '通信系统', link: '/10-architecture/communication-system' },
+          { text: 'Renderer–Subsystem 协议分层', link: '/10-architecture/renderer-subsystem-protocol-layers' },
           { text: '渲染系统', link: '/10-architecture/rendering-system' },
           { text: '存储与内容系统', link: '/10-architecture/storage-system' },
           { text: '模块子系统模型', link: '/10-architecture/subsystem-model' },
