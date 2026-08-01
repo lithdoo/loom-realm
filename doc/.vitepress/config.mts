@@ -22,6 +22,7 @@ export default defineConfig({
         text: '设计',
         items: [
           { text: '系统架构总览', link: '/10-architecture/system-overview' },
+          { text: '运行时启动与连接', link: '/10-architecture/runtime-bootstrap-system' },
           { text: '运行承载系统', link: '/10-architecture/runtime-hosting-system' },
           { text: 'Renderer–Subsystem 数据协议', link: '/15-contracts/frame-data-channel-v1' },
           { text: '只读 Content API', link: '/15-contracts/content-api-v1' },
@@ -53,6 +54,7 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: '系统架构总览', link: '/10-architecture/system-overview' },
+          { text: '运行时启动与连接建立系统', link: '/10-architecture/runtime-bootstrap-system' },
           { text: '栈式运行系统', link: '/10-architecture/stack-runtime-system' },
           { text: '运行承载系统', link: '/10-architecture/runtime-hosting-system' },
           { text: '通信系统', link: '/10-architecture/communication-system' },
@@ -107,6 +109,8 @@ export default defineConfig({
           { text: 'ADR 0002 · 平台 Transport Profile', link: '/decisions/0002-platform-transport-profiles' },
           { text: 'ADR 0003 · 只读 Content API', link: '/decisions/0003-readonly-content-api' },
           { text: 'ADR 0004 · Client State 渲染流水线', link: '/decisions/0004-client-state-rendering-pipeline' },
+          { text: 'ADR 0005 · Game Entry Subsystem Launcher', link: '/decisions/0005-game-entry-subsystem-launchers' },
+          { text: 'ADR 0006 · Frame 与 Render 解耦', link: '/decisions/0006-frame-render-decoupling' },
         ],
       },
       {
