@@ -13,13 +13,13 @@
 
 | 系统 | 模块入口 | 说明 |
 |---|---|---|
-| 程序主系统 | [main-system](./main-system/README.md) | System Registry、Runtime Container Registry、Frame Stack、监督和通道授权 |
-| Web 渲染端 | [web-renderer](./web-renderer/README.md) | Stack Store、Frame/Scope Store、输入、状态下行和 DOM/Canvas/WebGL 协调 |
+| 程序主系统 | [main-system](./main-system/README.md) | System Registry、Runtime Container Registry、Frame Stack、监督和 System Data Channel 授权 |
+| Web 渲染端 | [web-renderer](./web-renderer/README.md) | Stack Store、System Data Connection Registry、Frame Stream、Frame/Scope Store、输入和呈现协调 |
 | 游戏包与内容 | [game-package](./game-package/README.md) | Loader、Catalog、Repository 和 Validator |
 | FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | 桌面 HTTP 与 PWA Service Worker 的统一只读 Content API |
 | 地图子系统 | [loom-map](./loom-map/README.md) | 多 Frame Runtime、Coordinator、Execution Loop、Core 和兼容层 |
-| 桌面宿主 | [desktop-host](./desktop-host/README.md) | Hostra 窗口、localhost WebSocket/HTTP 和桌面安全适配 |
-| PWA 宿主 | [pwa-host](./pwa-host/README.md) | Main/System Worker、每 Frame MessagePort、Service Worker 和 OPFS |
+| 桌面宿主 | [desktop-host](./desktop-host/README.md) | Hostra 窗口、每 System localhost WebSocket/HTTP 和桌面安全适配 |
+| PWA 宿主 | [pwa-host](./pwa-host/README.md) | Main/System Worker、每 System Renderer Data MessagePort、Service Worker 和 OPFS |
 
 ## 跨平台承载映射
 
@@ -27,17 +27,38 @@
 桌面
     LoomRealm Main Process
     每个 System 一个 OS Process
-    每个 Frame 一个 WebSocket 数据连接
+    Renderer ⇄ 每个 System 一条 WebSocket 数据连接
+    连接内多路复用该 System 的 Frame Logical Stream
     FSDB localhost HTTP Service
 
 PWA
     Main Runtime Dedicated Worker
     每个 System 一个 Dedicated Worker
-    每个 Frame 一个 MessagePort 数据连接
+    Window ⇄ 每个 System 一条 MessagePort 数据连接
+    连接内多路复用该 System 的 Frame Logical Stream
     Service Worker Content Service
 ```
 
-平台模块实现不同 Transport Profile，但必须遵守相同的 System、Frame、Activation、Frame Data Channel 和 Content API 契约。
+平台模块实现不同 Transport Profile，但必须遵守相同的 System、Frame、Activation、Renderer–Subsystem Data 和 Content API 契约。
+
+## Transport 与 Frame 的边界
+
+```text
+Runtime Container 级
+    System Data Connection
+    共享协议编解码器
+    共享不可变 Repository Cache
+
+Frame 级
+    Runtime Instance
+    Activation
+    Input Queue
+    Client State Projector
+    State / Scope Revision
+    Logical Stream Sequence
+```
+
+关闭、暂停、恢复或 Resync 一个 Frame 不关闭共享的 System Data Connection。
 
 ## 模块文档规则
 
@@ -64,7 +85,7 @@ PWA
 - Hostra 适配层不能承载 LoomRealm Main、地图、菜单或对话业务；
 - Service Worker 不能承载 Frame Stack、权威业务状态或固定 Tick；
 - Content Service 不能读取或修改 Frame Runtime State；
-- 一个 System Container 可以共享不可变 Repository Cache，但 Frame 可变状态必须隔离；
+- 一个 System Container 可以共享不可变 Repository Cache 和 Renderer Data Transport，但 Frame 可变状态必须隔离；
 - 普通输入和 Client State 不经过 Main 或 Hostra 业务转发。
 
 ## 迁移说明
@@ -74,6 +95,7 @@ PWA
 与新权威入口冲突的旧结论包括：
 
 - 每 Frame 一个独立子系统进程；
+- 每 Frame 一个独立 Renderer WebSocket / MessagePort；
 - Hostra Main 承载 LoomRealm Main；
 - 桌面第一阶段依赖 Electron MessagePort；
 - FSDB 运行时直接暴露物理路径。
