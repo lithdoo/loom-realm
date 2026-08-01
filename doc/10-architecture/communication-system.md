@@ -3,55 +3,87 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：控制面、System 数据面、内容面、多路复用、顺序、恢复和安全边界  
-> 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)  
-> 最近复核：2026-08-01
+> 主要定义：控制面、System 数据面、内容面、协议职责域、恢复和安全边界  
+> 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[运行承载系统](./runtime-hosting-system.md)  
+> 最近复核：2026-08-02
 
 ## 1. 设计目标
 
-通信系统使程序主系统、模块子系统和渲染端在独立进程或不同传输环境中保持一致语义，同时避免程序主系统成为高频输入和视图状态更新的转发瓶颈。
+通信系统使程序主系统、模块子系统和 Renderer 在独立进程或不同平台 Transport 中保持一致语义，同时避免 Main 成为高频 User Input 和 Render Update 的转发瓶颈。
 
 核心通信原则：
 
-> 物理数据连接按 Runtime Container / `systemId` 建立；Frame 通过该连接内的 Logical Stream 多路复用。
+> 物理 System Data Connection 按 Runtime Container / `systemId` 建立；Connection、Render Update、User Input 是三套职责独立的协议域。Frame 只属于 User Input / Main Control 语义，Render 使用独立身份。
 
 ## 2. 三类通信平面
 
 ```text
 控制面
-    程序主系统 ⇄ Runtime Container
-    程序主系统 ⇄ Web 渲染端
+    Subsystem Runtime Container ⇄ Main
+    Renderer ⇄ Main
 
 System 数据面
-    Runtime Container ⇄ Web 渲染端
+    Runtime Container ⇄ Renderer
     每 System 一条物理连接
-    连接内承载多个 Frame Logical Stream
+    ├── Connection Layer
+    ├── Render Update Protocol
+    └── User Input Protocol
 
 内容面
-    Runtime Container / Web 渲染端 ⇄ Readonly Content Service
+    Runtime Container / Renderer ⇄ Readonly Content Service
 ```
 
 三类平面的职责、顺序和背压语义不同，不应复用一个无边界的通用消息队列。
 
-## 3. 控制面
+## 3. Main ⇄ Subsystem 控制面
+
+桌面 Bootstrap 中，Main 先开放 Control WebSocket Endpoint，再通过 Subsystem 启动环境传入该 Endpoint。
+
+连接方向：
+
+```text
+Subsystem Process
+    ── connect ──▶ Main Control WebSocket Server
+```
 
 控制面负责：
 
-- Runtime Container 启动、握手、ready、关闭和失败；
-- Frame 初始化、激活、暂停、恢复和关闭；
+- Subsystem 连接、身份确认、ready、关闭和失败；
+- Frame initialize / activate / suspend / resume / close；
 - 子系统调用与返回；
-- 调用栈 Snapshot 和增量通知；
-- 当前输入目标；
-- Renderer System Data Connection 的授权、建立和撤销；
 - heartbeat、超时、错误和诊断。
 
-每个 Runtime Container 与程序主系统之间有一条长期控制连接。渲染端与程序主系统之间有一条会话控制连接。
+`connected` 与 `ready` 必须区分。Subsystem 只有在完成自身初始化并发送与 Descriptor 相同 `systemId` 的 ready 后才可被 Main 标记为 ready。
 
-控制面低频、不可静默丢弃，并需要明确超时、幂等和错误结果。
+## 4. Main ⇄ Renderer 控制面
 
-## 4. System 数据面
+Renderer 与 Main 之间有一条会话级长期控制连接。
 
-每个有效 Runtime Container 与 Renderer 之间最多有一条长期双向 System Data Connection。该物理连接绑定：
+负责：
+
+- Session 状态；
+- 当前已声明 / starting / ready / failed System 状态；
+- Frame Stack Snapshot 与增量通知；
+- Activation；
+- Input Target；
+- Renderer System Data Connection 的授权、建立、替换和撤销；
+- 会话错误和诊断；
+- Renderer 重连。
+
+Main Control Plane 不负责：
+
+- 普通 User Input Payload；
+- Render State / Render Event；
+- 资源主体；
+- Render visibility / ordering。
+
+Renderer 不能通过 DOM、当前 Frame Stack 或已有 WebSocket 自行决定某个 System 是否允许连接。
+
+## 5. System 数据面
+
+每个有效 Runtime Container 与 Renderer 之间最多一条长期双向 System Data Connection。
+
+该物理连接绑定 System 级身份，例如：
 
 ```text
 sessionId
@@ -59,61 +91,132 @@ systemId
 connectionId
 ```
 
-连接内部按以下逻辑身份多路复用 Frame：
+具体身份 Schema 由 Connection Layer 契约冻结。
+
+System Data Connection 不以 Frame 为物理或总业务路由粒度。它可以同时承载：
 
 ```text
-frameId
-activationId
-sequence
+0..N Render Context
+0..N Frame Input Context
 ```
 
-其中 `frameId + activationId` 标识一个 Frame Logical Stream epoch，`sequence` 在该逻辑流的每个方向独立递增。
+即使没有 Frame，Subsystem 也可以通过同一连接维护 Render。
 
-数据面上行负责：
-
-- `input.dispatch`：归一化普通输入；
-- `node.event`：带完整节点来源的交互事件；
-- `state.resync`：请求指定 Frame 的完整 Client State。
-
-数据面下行负责：
-
-- `state.snapshot`：指定 Frame 的完整 Client State；
-- `scope.replace`：指定 Frame 的单 Scope 创建、替换或删除；
-- `event.emit`：指定 Frame 的一次性客户端表现事件；
-- 协议错误和诊断。
-
-普通数据面消息不由程序主系统解释或业务转发。
-
-一个 Frame 的关闭、暂停、Sequence Gap 或 Resync 不关闭同 System 的物理数据连接，也不得影响其他 Frame 的逻辑流。
-
-### 4.1 Renderer–Subsystem 协议职责分层
-
-System Data Connection 在概念上进一步拆分为三个职责独立的协议域：
+## 6. Renderer–Subsystem 三个协议域
 
 ```text
 Renderer ⇄ Runtime Container
 
 Connection Layer
-    建立和维护按 systemId 绑定的物理连接
+    System Connection 建立、认证、版本、存活、替换和关闭
 
 Render Update Protocol
-    主要负责 Subsystem → Renderer 的视图状态和表现更新
+    Subsystem → Renderer 为主
+    独立 Render identity / state / event / recovery
 
 User Input Protocol
-    主要负责 Renderer → Subsystem 的用户输入和界面交互
+    Renderer → Subsystem 为主
+    Frame + Activation 输入路由
 ```
 
-三个协议域共享同一条 System Data Connection，不代表三条 WebSocket 或三条 MessagePort。
-
-Connection Layer 只处理连接级问题，不拥有 Frame 生命周期或业务状态。它的建立依赖 Main ⇄ Renderer 控制面提供 Frame/System 关系、当前 Activation、Input Target 和连接授权；Renderer 不自行决定应该连接哪个 Runtime Container。
-
-Render Update 与 User Input 仍然直接在 Renderer 和 Runtime Container 之间传输，普通业务 Payload 不经过 Main 转发。
-
-当前只冻结上述职责边界。具体 JSON-RPC 方法、版本协商、握手字段、Sequence、错误码、心跳和协议域故障隔离将在后续契约设计中分别冻结。
+三个协议域共享同一物理 WebSocket / MessagePort，但状态所有权和协议身份独立。
 
 详见：[Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)。
 
-## 5. 内容面
+## 7. Connection Layer
+
+Connection Layer 只管理 System Data Connection。
+
+概念职责：
+
+- 根据 Main 授权建立连接；
+- 确认 Session / System / Connection 身份；
+- 协商协议版本和必要能力；
+- 连接级 heartbeat 与故障检测；
+- 连接替换和关闭。
+
+Connection Layer 不拥有：
+
+```text
+Frame Stack
+Activation
+Input Target
+Render Registry
+Render State
+业务状态
+```
+
+桌面 Renderer 只有在 Main 发布有效 Grant / Connection Information 后才能主动连接 Subsystem Data Endpoint。
+
+## 8. User Input Protocol 身份
+
+普通 User Input 使用 Main 发布的：
+
+```text
+systemId
+frameId
+activationId
+```
+
+路由：
+
+```text
+Browser input
+→ Renderer Input Router
+→ Main-declared Input Target
+→ 对应 System Data Connection
+→ User Input Protocol
+→ frameId + activationId
+→ Subsystem Input Handler
+```
+
+Frame / Activation 只约束输入上下文，不约束 Render。
+
+User Input 的 Sequence、连续输入合并、离散事件顺序和 UI Interaction 定位由独立契约冻结。
+
+## 9. Render Update Protocol 身份
+
+Render Update 不使用 `frameId + activationId` 作为平台级身份。
+
+概念路由：
+
+```text
+Subsystem Render Manager
+→ renderId
+→ Render Update Protocol
+→ Renderer Render Store
+```
+
+完整 Render 身份概念上是：
+
+```text
+systemId + renderId
+```
+
+其中 `systemId` 已由 System Data Connection 绑定。
+
+Render 的 Revision、Scope、Event、Sequence / Ordering 和 Resync 由 Render Update Protocol 独立冻结，不继承 Frame Activation epoch。
+
+## 10. Frame 与 Render 不存在协议级绑定
+
+以下关系不进入公共通信模型：
+
+```text
+frameId → renderId
+renderId → frameId
+```
+
+Subsystem 可以内部保存该映射，也可以完全不保存。
+
+因此：
+
+- Frame suspend 不使 Render 消息失效；
+- Frame Activation 改变不启动新的 Render epoch；
+- Frame close 不删除 Render Store；
+- Render destroy 不关闭 Frame；
+- Render recovery 不要求 Frame resync。
+
+## 11. 内容面
 
 内容面提供逻辑只读 Content API：
 
@@ -126,47 +229,50 @@ resource(namespace, key)
 
 内容面不承载：
 
-- 普通输入；
-- Client State；
+- User Input；
+- Render State；
 - Runtime Tick；
-- 调用栈或 Activation；
-- 任意物理路径访问。
+- Frame Stack / Activation；
+- Subsystem Process Bootstrap 控制。
 
-大型资源内容通过内容面获取，不能阻塞控制消息和普通输入。
+大型资源主体通过独立 HTTP / Fetch 获取，不能阻塞控制消息和 System 数据消息。
 
-## 6. 通道粒度
+## 12. 通道粒度
 
 ```text
 每个程序会话
     一个 Renderer ⇄ Main 控制连接
+    一个 Main Control Endpoint 供 Subsystem 连接
     一个只读 Content API 入口
 
 每个 systemId
-    一个 Main ⇄ Runtime Container 长期控制连接
-    一个 Renderer ⇄ Runtime Container 长期数据连接
+    一个 Subsystem ⇄ Main 长期控制连接
+    一个 Renderer ⇄ Subsystem 长期 System Data Connection
 
 每个 Frame Activation
-    一个位于 System Data Connection 内的 Logical Stream
+    一个 User Input Context
+
+每个 Render
+    一个独立 Render Context
 ```
 
-物理连接粒度与 Runtime Container 一致；Frame 的隔离由 Logical Stream、Activation、Sequence、Revision 和状态所有权实现。
+物理连接粒度与 Runtime Container 对齐；Frame 与 Render 分别通过各自协议域实现逻辑隔离。
 
-## 7. Transport Profile
+## 13. Transport Profile
 
-JSON-RPC 2.0 用于控制和 System 数据消息的跨语言 Envelope，但不规定传输层。
+JSON-RPC 2.0 可以用于控制和 System 数据消息 Envelope，但不规定传输层。
 
 ### 桌面 Profile
 
 ```text
+Subsystem → Main
+    每 System 一条 localhost WebSocket
+
 Renderer ⇄ Main
     每会话一条 localhost WebSocket
 
-Main ⇄ Runtime Container
-    每 System 一条 localhost WebSocket
-
 Renderer ⇄ Runtime Container
     每 System 一条 localhost WebSocket
-    内部多路复用 Frame Logical Stream
 
 Content API
     localhost HTTP
@@ -175,144 +281,84 @@ Content API
 ### PWA Profile
 
 ```text
-Window ⇄ Main Runtime Worker
-    一条 MessagePort
-
-Main Runtime Worker ⇄ System Worker
+System Worker ⇄ Main Runtime Worker
     每 System 一条控制 MessagePort
+
+Window ⇄ Main Runtime Worker
+    一条控制 MessagePort
 
 Window ⇄ System Worker
     每 System 一条数据 MessagePort
-    内部多路复用 Frame Logical Stream
 
 Content API
     same-origin Fetch，由 Service Worker 响应
 ```
 
-WebSocket 与 MessagePort 只是 Transport Profile。它们不得改变方法、Frame 身份、Activation、Sequence、Revision、Resync 和错误语义。
+WebSocket 与 MessagePort 是 Transport Profile，不改变 System、Frame/Input 和 Render 的所有权语义。
 
-## 8. 身份与顺序
-
-通信系统必须区分：
+## 14. 桌面启动连接顺序
 
 ```text
-systemId
-    业务子系统和物理数据连接路由身份
-
-frameId
-    一次子系统调用实例
-
-activationId
-    Frame 的一次活动周期
-
-connectionId
-    一次 Renderer ⇄ Runtime Container 物理或逻辑 Transport 实例
-
-sequence
-    一个 Frame Logical Stream 在单一方向上的消息顺序
-
-stateRevision / scopeRevision
-    客户端目标状态版本
-
-stackRevision
-    Renderer 调用栈镜像版本
+Main Control Endpoint ready
+→ Main 启动全部声明 Subsystem
+→ Subsystem 主动连接 Main
+→ Subsystem ready(systemId)
+→ Main 通过 Renderer Control Plane 发布 System 状态 / Data Grant
+→ Renderer 主动建立 System Data Connection
+→ Connection Layer ready
+→ User Input / Render Update 开始直接通信
 ```
 
-这些编号不能互相替代。
+详细 Bootstrap 见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)。
 
-Sequence 的作用域为：
+## 15. Renderer 重连恢复
+
+Renderer 重载后的恢复不再按 Frame 推导 Render。
 
 ```text
-connectionId + frameId + activationId + direction
+Renderer → Main Control reconnect
+→ 恢复 Session / ready System / Frame Stack / Input Target
+→ 按 Main 发布信息重建需要的 System Data Connection
+
+User Input domain
+→ 恢复 Frame / Activation 输入上下文
+
+Render domain
+→ 各 Subsystem 独立恢复自己的 Render State
 ```
 
-规则：
+一个域的恢复失败不能自动重置另一域的业务状态。
 
-- 每个方向从 1 开始严格递增；
-- 新 Activation 开启新的 Logical Stream epoch，可以从 1 重新开始；
-- 物理连接重建产生新的 `connectionId`，各有效 Frame 在 Resync 后重新建立接收顺序；
-- 一个 Frame 的 Sequence Gap 只影响该 Frame 的增量状态恢复，不阻塞同连接其他 Frame；
-- Sequence 只表示逻辑消息顺序，不代替 State Revision 或输入业务编号。
+## 16. 背压原则
 
-## 9. 输入上行链路
+不同协议域独立定义背压：
 
 ```text
-浏览器键盘 / 手柄 / 触摸 / 节点事件
-→ Renderer Input Router
-→ 归一化输入
-→ 根据 Input Target 取得 systemId + frameId + activationId
-→ 对应 System Data Connection
-→ Frame Logical Stream
-→ Frame Runtime 输入队列
-→ 已提交权威状态
-```
+Control RPC
+    不静默丢弃；超时产生明确错误
 
-规则：
+User Input
+    持续意图可以合并
+    离散输入必须有界并保持所需顺序
 
-- 普通输入只发送给程序主系统声明的 Input Target；
-- Renderer 必须把输入发送到该 Frame 所属 `systemId` 的数据连接；
-- 持续方向意图可以合并为最新值；
-- 确认、取消和其他离散输入保持顺序并有界；
-- 页面失焦、Input Target 改变或 Frame 暂停时释放持续意图；
-- 旧 Activation 的输入必须拒绝。
+Render State
+    可恢复目标状态可以按 Render / Scope 合并
 
-## 10. 视图状态下行链路
-
-```text
-Frame Runtime 已提交权威状态
-→ Client State Projector
-→ snapshot / scope.replace / event.emit
-→ Runtime Container 的 System Data Connection
-→ frameId + activationId 路由
-→ Renderer Validator
-→ Frame/Scope Store 原子提交
-→ Render Scheduler
-→ DOM / Canvas / WebGL
-```
-
-State 表示可恢复的当前目标，可以在发送前或呈现前合并为最新值。Event 表示一次性行为，通常需要有序、有界处理，不能替代可恢复 State。
-
-## 11. 恢复原则
-
-- 检测到 Stack Revision 缺口时请求完整 Stack Snapshot；
-- 检测到某 Frame 下行 Sequence 缺口时停止应用该 Frame 的增量 State，并对该 Frame 请求完整 Snapshot；
-- 同一 System Data Connection 中其他 Frame 继续正常处理；
-- Renderer 重连后先恢复调用栈，再按当前有效 `systemId` 重建 System Data Connection；
-- 每条 System Data Connection 恢复后，对其有效 Frame 分别请求完整 Client State；
-- 旧 Activation 的输入、状态和事件必须被拒绝；
-- DOM 不能作为恢复源；
-- Service Worker 内存不能作为内容恢复源。
-
-## 12. 背压原则
-
-```text
-Scope State
-    同一 Frame/Scope 可合并为最新目标
-
-Frame Snapshot
-    可以替代该 Frame 尚未发送或尚未呈现的旧增量 State
-
-Event
-    按 Frame 有序、有界，溢出必须显式处理
-
-Input
-    按 Frame 有序、有界；持续意图可以合并
+Render Event
+    一次性行为必须有界并定义溢出策略
 
 System Data Transport
-    必须公平调度多个 Frame，避免单 Frame 无限占用发送队列
-
-Control RPC
-    不丢弃；超时产生明确错误
+    公平调度协议域和多个 Render / Frame Input Context
 
 Content Body
     使用独立 HTTP / Fetch 流和缓存
 ```
 
-State 合并应发生在 Revision 和 Sequence 分配之前，避免人为制造缺口。
+Sequence / Revision 必须在各自协议域内定义，不能继续使用一套 Frame Sequence 统管全部 System 数据消息。
 
-## 13. 桌面连接授权
+## 17. 桌面连接授权
 
-桌面 localhost 连接也视为不可信。程序主系统签发短期 System Data Channel Grant，至少绑定：
+桌面 localhost 连接也视为不可信。Main 签发短期 System Data Connection Grant，至少在概念上绑定：
 
 ```text
 sessionId
@@ -323,44 +369,55 @@ endpoint
 expiresAt
 ```
 
-Grant 不绑定单个 Frame，因为物理连接服务整个 Runtime Container。
+Grant 是 System 级，不绑定 Frame 或 Render。
 
-子系统只监听 loopback 地址。Renderer 建立 WebSocket 后，首条 JSON-RPC 请求完成连接认证；token 成功使用后立即失效。
+Subsystem 只监听 loopback 地址。Renderer 建立 WebSocket 后先完成 Connection Layer 认证，再允许 User Input 或 Render Update。
 
-Frame 的合法性由双方结合 Main 发布的 Stack/Activation 信息和 Container 内的 Frame Registry 校验。Frame 出栈或 Activation 失效只使对应 Logical Stream 失效，不撤销整个 System Data Connection。
+精确认证字段和方法由 Connection Layer 契约冻结。
 
-## 14. 安全原则
+## 18. 安全原则
 
-- 所有消息都视为不可信输入；
-- 物理连接认证校验 Session、System、Connection 和 token；
-- 每条 Frame 业务消息校验方法权限、Schema、大小、`frameId` 和 `activationId`；
-- 子系统只能发布自身 Container 中存在的 Frame；
-- 共享 Transport 不赋予 Frame 跨流访问权限；
-- 渲染端不能获得任意 IPC Channel；
-- Client State 不允许可执行代码、任意 HTML 或物理路径；
-- 本机连接执行 Origin、token、速率和消息大小限制；
-- Content API 只接受逻辑资源身份，不接受任意路径参数；
-- PWA MessagePort 只向已创建的可信 Worker 转移。
+- 所有消息视为不可信输入；
+- Subsystem Control Connection 必须校验其声明 `systemId` 与 Main 启动 Descriptor 一致；
+- System Data Connection 必须绑定合法 Session / System / Connection；
+- User Input 必须校验 Frame / Activation / 输入权限；
+- Render Update 必须限制在当前 System 的 Render Namespace；
+- Frame 输入错误不能伪造其他 Frame；
+- Render 错误不能借机修改 Main Stack；
+- Renderer 不能获得任意 IPC Channel；
+- Render State 不允许可执行代码、任意 HTML 或物理路径；
+- Content API 只接受逻辑资源身份。
 
-## 15. 开放问题
+## 19. 当前契约迁移状态
+
+当前 `frame-data-channel-v1.md` 和 `client-state-tree-v1.md` 仍保存旧的 Frame-scoped Render 详细 Schema。这些文档将在下一阶段迁移为独立的：
+
+```text
+Connection Protocol
+Render Update Protocol
+User Input Protocol
+Render State Tree / equivalent state contract
+```
+
+在迁移完成前，本架构文档是 Frame / Render 所有权关系的当前上层真相；旧契约中的 `Frame Client State`、Frame-scoped Render Sequence 和“Frame close 自动清 Render”不能继续作为新增设计依据。
+
+## 20. 开放问题
 
 需要在契约层进一步冻结：
 
-- `system.returned` 与 `frame.resume(result)` 的最终关系；
-- Container 和 Frame 协议版本握手；
-- 请求超时、取消和重复请求幂等性；
-- heartbeat 与 Container 失联判定；
-- System Data Connection 授权与首个 Frame Snapshot 的时序；
-- 多 Frame 共享 Transport 的公平发送策略；
-- Event 溢出策略；
-- 最大消息、树深和发送速率的具体 Profile；
-- Connection Layer、Render Update Protocol 和 User Input Protocol 是否分别维护独立版本、顺序和故障上下文。
+- Main ⇄ Renderer Control Protocol；
+- Main ⇄ Subsystem Bootstrap / ready Schema；
+- Connection Layer 的认证、版本、heartbeat 和 reconnect；
+- Render Identity、Revision、Scope、Event 和 Resync；
+- User Input 的连续意图、离散输入、UI Interaction 与 Sequence；
+- 跨 System Render Composition / z-order；
+- System Data Transport 的协议域公平调度；
+- 最大消息、树深和发送速率 Profile。
 
-## 16. 相关下层文档
+## 21. 相关文档
 
-- [Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)：概念级三层职责和 Main 控制面依赖；
-- [正式契约目录](../15-contracts/README.md)；
-- [生命周期协议草案](../15-contracts/system-lifecycle-protocol.md)；
-- [Renderer–Subsystem 数据协议 v1](../15-contracts/frame-data-channel-v1.md)；
-- [只读 Content API v1](../15-contracts/content-api-v1.md)；
-- [现有详细设计：JSON-RPC 与状态同步](../architecture/runtime-rpc-and-state-sync.md)。
+- [运行时启动与连接建立系统](./runtime-bootstrap-system.md)；
+- [Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)；
+- [渲染系统](./rendering-system.md)；
+- [栈式运行系统](./stack-runtime-system.md)；
+- [正式契约目录](../15-contracts/README.md)。
