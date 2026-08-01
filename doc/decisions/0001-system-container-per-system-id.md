@@ -2,6 +2,7 @@
 
 > 状态：Accepted  
 > 日期：2026-08-01  
+> 修订：2026-08-01，对齐 ADR 0002，明确 Renderer Data Transport 属于 Container 而非 Frame  
 > 影响范围：程序主系统、模块子系统、桌面进程、PWA Worker、生命周期协议
 
 ## 背景
@@ -30,13 +31,14 @@ LoomRealm 的调用栈以 Frame 表达一次系统调用。早期文档曾允许
 - 共享系统代码和不可变内容缓存；
 - 桌面与 PWA 容易建立一致映射；
 - Frame 仍可作为独立协议实例；
-- 调用栈深度不直接决定进程数量。
+- 调用栈深度不直接决定进程数量；
+- Renderer Data Transport 可以与 Container 生命周期对齐。
 
 代价：
 
 - Container 内需要 Frame 路由和调度；
 - Container 崩溃会影响同 System 的多个 Frame；
-- 实现必须严格隔离 Frame 可变状态。
+- 实现必须严格隔离 Frame 可变状态和 Logical Stream。
 
 ### 所有 System 共用一个 Runtime
 
@@ -51,16 +53,20 @@ LoomRealm 的调用栈以 Frame 表达一次系统调用。早期文档曾允许
 ```text
 每个 systemId 一个 Runtime Container
 每个 Container 可以承载多个 Frame Runtime
-每个 Frame 独立业务状态、Activation、Projector、Revision 和数据连接
+每个 Container 与 Renderer 最多一条有效 System Data Connection
+每个 Frame 独立业务状态、Activation、Projector、Revision 和 Logical Stream
 ```
 
 桌面 Runtime Container 是独立 OS Process。PWA Runtime Container 是 Dedicated Worker。
+
+物理 Transport 属于 Runtime Container；Frame 通过 `frameId + activationId + sequence` 在共享 Transport 内多路复用，不拥有独立 WebSocket 或 MessagePort。
 
 ## 结果
 
 Container 可以共享：
 
 - 代码、Schema 和 WASM Module；
+- Renderer System Data Connection；
 - 只读 Content Client；
 - Repository、请求去重和不可变内容缓存。
 
@@ -71,13 +77,15 @@ Frame 必须隔离：
 - Execution Loop；
 - Activation；
 - Client State Projector；
-- Revision 和 Renderer 数据连接。
+- State/Scope Revision；
+- Renderer Logical Stream 双向 Sequence。
 
-关闭一个 Frame 不关闭 Container。Container 崩溃影响其承载的全部 Frame。
+关闭、暂停、恢复或 Resync 一个 Frame 不关闭共享 System Data Connection。关闭一个 Frame 不关闭 Container。Container 崩溃影响其承载的全部 Frame，并使该 System Data Connection 失效。
 
 ## 重新评估条件
 
 - 实测证明单 Container 多 Frame 调度造成不可接受的延迟；
+- 实测证明单 System 共享 Transport 造成不可接受的 Head-of-Line Blocking；
 - 第三方不可信 System 需要更细的安全隔离；
 - 移动平台限制 Dedicated Worker 创建方式；
 - 引入远程或分布式 Runtime Container；

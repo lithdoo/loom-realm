@@ -14,7 +14,7 @@ Hostra 是独立 Electron Shell，通过 WebSocket JSON-RPC 打开本地 Web UI 
 因此桌面第一阶段正式使用：
 
 ```text
-控制和 Frame 数据
+控制和业务数据
     localhost WebSocket
 
 FSDB 与资源
@@ -30,7 +30,7 @@ LoomRealm Main Process
 ├── Frame Stack
 ├── Runtime Container Registry
 ├── Subsystem Process Supervisor
-└── Channel / Content Grant Authority
+└── System Data Channel / Content Grant Authority
 
 FSDB Content Service Process
 └── Readonly HTTP Content API
@@ -42,6 +42,8 @@ Hostra Renderer Process
 └── LoomRealm Web Renderer
 
 Subsystem Process: <systemId>
+├── Main Control WebSocket
+├── Renderer Data WebSocket
 └── 多个 Frame Runtime
 ```
 
@@ -86,45 +88,77 @@ http://127.0.0.1:<random-port>/
 
 ## 5. Main 控制 WebSocket
 
-Renderer 与 LoomRealm Main 建立长期控制连接，负责：
+Renderer 与 LoomRealm Main 建立一条长期控制连接，负责：
 
 - Stack Snapshot；
 - Frame 生命周期通知；
 - Input Target；
-- Frame Channel Grant；
+- System Data Channel Grant / revoke；
 - 会话错误和诊断；
 - Renderer 重连。
 
 该连接不承载普通输入、Client State 或资源字节。
 
-## 6. Frame 数据 WebSocket
+## 6. System Renderer Data WebSocket
 
-每个 Frame 有独立数据连接：
+每个 Subsystem Process 与 Renderer 建立一条长期数据 WebSocket：
 
 ```text
 Hostra Renderer
-⇄ localhost WebSocket
-⇄ 对应 Subsystem Process 内的 Frame Runtime
+    ⇅ localhost WebSocket
+Subsystem Process: loom.map
+    ├── Frame A Runtime
+    ├── Frame B Runtime
+    └── Frame C Runtime
 ```
 
-程序主系统签发 Frame Channel Grant：
+一个 `systemId` 同时最多有一条有效 Renderer Data WebSocket。该连接承载该 System Container 内全部 Frame 的输入上行、Client State 下行、Event 和 Resync。
+
+程序主系统签发 System Data Channel Grant：
 
 ```text
 sessionId
 systemId
-frameId
-activationId
 connectionId
 endpoint
 一次性 token
 expiresAt
 ```
 
-Renderer 首条请求完成认证后，普通输入和 Client State 直接在 Renderer 与 Frame Runtime 之间传输。
+Grant 不包含 `frameId` 或 `activationId`。
 
-一个 Subsystem Process 可以接受多个 Frame WebSocket，并按 `frameId` 路由到独立 Frame Runtime。
+Renderer 首条 JSON-RPC 请求完成连接认证后，后续 Frame 业务消息都携带：
 
-## 7. Subsystem Process Adapter
+```text
+frameId
+activationId
+sequence
+```
+
+Subsystem Process 按 `frameId` 路由到独立 Frame Runtime，再校验 Activation 和该 Frame Logical Stream 的 Sequence。
+
+关闭、暂停、恢复或 Resync 单个 Frame 不关闭这条共享 WebSocket。
+
+## 7. Main ⇄ Subsystem Control WebSocket
+
+程序主系统与每个 Subsystem Process 之间另有一条长期控制 WebSocket：
+
+```text
+LoomRealm Main
+    ⇅ Control WebSocket
+Subsystem Process
+```
+
+承载：
+
+- Container hello / ready / shutdown；
+- Frame initialize / activate / suspend / resume / close；
+- system.call / return；
+- heartbeat、错误和诊断。
+
+控制 WebSocket 与 Renderer Data WebSocket 是不同平面，不应复用同一无边界队列。
+
+## 8. Subsystem Process Adapter
 
 程序主系统而不是 Hostra 负责启动业务子系统进程。
 
@@ -133,12 +167,13 @@ Process Adapter：
 - 按 `systemId` 启动一个独立进程；
 - 支持 Node.js、Rust、C++、Go、Java、.NET 等实现；
 - 建立 Main ⇄ Container 控制 WebSocket；
+- 暴露或登记 Renderer Data WebSocket endpoint；
 - 监听进程退出和错误；
 - 执行有限关闭期限；
 - 不使用 PID 作为 Frame 身份；
 - 同一进程承载多个 Frame Runtime。
 
-## 8. FSDB Content Service
+## 9. FSDB Content Service
 
 独立 Content Service 只提供逻辑只读 HTTP API：
 
@@ -151,7 +186,7 @@ GET /_lr/v1/games/{installationId}/resources/{namespace}/{key}
 
 Subsystem Process 和 Renderer Resource Client 都使用 Fetch 访问。服务不接受任意物理路径。
 
-## 9. 桌面安全策略
+## 10. 桌面安全策略
 
 Hostra 应保持：
 
@@ -167,66 +202,74 @@ LoomRealm 本地服务必须：
 - 只监听 `127.0.0.1` / `::1`；
 - 使用随机端口和高熵 token；
 - 验证 Origin；
+- System Data Connection 认证绑定 `sessionId + systemId + connectionId`；
+- Frame 业务消息继续校验 `frameId + activationId`；
 - 限制消息和请求大小、速率与并发；
-- Frame 出栈后撤销 Grant；
+- Container / Renderer 连接失效后撤销 System Data Grant；
+- Frame 出栈只使该 Frame Logical Stream 失效；
 - Content Grant 绑定安装实例；
 - 错误不泄露路径、token 和内部堆栈。
 
-## 10. Renderer 重载
+## 11. Renderer 重载
 
 ```text
 Renderer 重载
 → 重新连接 Main 控制 WebSocket
 → 获取 stack.snapshot
-→ 为每个有效 Frame 取得新 Grant
-→ 重建 Frame WebSocket
-→ 请求 state.resync
+→ 计算有效 Frame 涉及的 distinct systemId
+→ 为每个 systemId 取得一份新 System Data Grant
+→ 每 System 重建一条 Renderer Data WebSocket
+→ 对该 System 下各有效 Frame 分别 state.resync
 → 重建 Store 和画面
 ```
 
 Main、Subsystem Process 和 Frame Runtime 可以继续存在。
 
-## 11. 故障处理
+## 12. 故障处理
 
-- Frame WebSocket 断开：停止该 Frame 输入，通知 Main，保留或清理画面由 Stack 状态决定；
-- Subsystem Process 崩溃：该 System Container 的全部 Frame 失败；
-- Renderer 崩溃：重载并恢复 Stack 和 Snapshot；
+- System Data WebSocket 断开：停止该 System 下全部 Frame 的普通输入，通知 Main，保留 Store，重连后逐 Frame Resync；
+- 单 Frame Sequence / State 错误：只使目标 Frame 进入 Resync 或流级故障，不关闭共享 WebSocket；
+- Subsystem Process 崩溃：该 System Container 的 Data WebSocket 关闭，其全部 Frame 失败；
+- Renderer 崩溃：重载并恢复 Stack、每 System Data WebSocket 和各 Frame Snapshot；
 - LoomRealm Main 崩溃：第一阶段终止全部子系统并关闭窗口；
 - Hostra Main 崩溃：Renderer 消失，LoomRealm 结束当前桌面会话；
 - Content Service 崩溃：内容请求失败，但已加载 Frame 权威状态不应被错误地重置。
 
-## 12. 可选 MessagePort Broker
+## 13. 可选 MessagePort Broker
 
 未来 Hostra 可以提供窄化 Broker：
 
 ```text
-LoomRealm 请求建立 Frame Channel
+LoomRealm 请求建立 System Data Channel
 → Hostra Main 创建 MessageChannelMain
 → 端口交给 Renderer 和受控 Node Utility Process
 ```
 
 该 Profile 只适用于 Hostra 明确支持且子系统承载兼容的环境。它不能成为跨语言桌面子系统或 PWA 的公共前提。
 
-即使增加 Broker，Frame 数据通道契约也保持不变。
+即使增加 Broker，Renderer–Subsystem 数据协议和“每 System 一个 Transport”语义也保持不变。
 
-## 13. 核心不变量
+## 14. 核心不变量
 
 - Hostra 不承载 LoomRealm Main 或业务 Runtime；
 - Hostra 不解释 Frame 和 Scope；
 - 普通输入和 Client State 不通过 Hostra Main；
 - 每个 System 一个独立 Subsystem Process；
-- 每个 Frame 一个独立 WebSocket 数据连接；
-- 一个 System Process 可以承载多个 Frame；
+- Renderer 与每个 Subsystem Process 最多一条有效 Data WebSocket；
+- 同一 System 的多个 Frame 在该 WebSocket 内多路复用；
+- Frame 暂停、恢复、关闭或 Resync 不关闭共享 WebSocket；
 - FSDB 通过逻辑只读 HTTP API 访问；
 - Renderer 不获得通用 Electron IPC、文件系统或子进程能力。
 
-## 14. 测试入口
+## 15. 测试入口
 
 - Hostra 打开 Renderer URL；
 - Main 控制 WebSocket 建立和重连；
-- 一个 System Process 中两个 Frame 的独立数据 WebSocket；
-- Frame Grant 过期、伪造和撤销；
-- Renderer 重载恢复；
+- 一个 System Process 中两个 Frame 共用同一 Data WebSocket；
+- 两个 Frame 的输入、State、Activation 和 Sequence 相互隔离；
+- Frame A 关闭不关闭 WebSocket，也不影响 Frame B；
+- System Data Grant 过期、伪造和撤销；
+- Renderer 重载后每 System 只重建一条 Data WebSocket；
 - Subsystem Process 崩溃影响多个 Frame；
 - Content API CORS、token、MIME 和缓存；
 - Hostra 不参与普通输入和 Client State 转发。

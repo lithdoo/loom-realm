@@ -9,13 +9,14 @@
 
 ## 1. 设计目标
 
-渲染系统将各模块子系统发布的声明式 Client State 呈现为 Web UI，同时保持业务状态、调用关系和本地表现状态之间的边界。
+渲染系统将各模块子系统发布的声明式 Client State 呈现为 Web UI，同时保持业务状态、调用关系、物理 Transport 和本地表现状态之间的边界。
 
 核心链路：
 
 ```text
 子系统权威状态
 → Frame Client State
+→ System Data Connection 内的 Frame Logical Stream
 → 渲染端 Store
 → DOM / Canvas / WebGL
 ```
@@ -26,6 +27,8 @@ Store 是渲染端的目标状态镜像，实际呈现树是 Store 的派生结�
 
 - 维护程序主系统发布的调用栈镜像；
 - 维护当前普通输入目标；
+- 按 `systemId` 维护 Renderer ⇄ Runtime Container 的数据 Transport；
+- 在共享 Transport 内按 Frame/Activation 路由 Logical Stream；
 - 维护每个 Frame 独立的 Scope Store；
 - 校验和应用 Snapshot、Scope Replace 与 Scope 删除；
 - 使用稳定 Key 将 Client Node 协调为可信视图组件；
@@ -42,7 +45,8 @@ Store 是渲染端的目标状态镜像，实际呈现树是 Store 的派生结�
 - 不解释游戏包物理路径；
 - 不在多个 Frame 之间自行转发业务事件；
 - 不允许子系统直接发送 DOM 操作、任意 HTML 或脚本；
-- 不将本地插值结果写回为权威业务状态。
+- 不将本地插值结果写回为权威业务状态；
+- 不把 Frame 生命周期错误地映射为物理 Data Transport 生命周期。
 
 ## 4. 状态层次
 
@@ -55,6 +59,8 @@ Frame Runtime 权威状态
 ```
 
 权威状态只存在于子系统 Frame Runtime。Client State 是声明式目标投影。Renderer Store 是可恢复的本地镜像。DOM、Canvas Scene 和 WebGL Scene 是表现结果。
+
+物理 System Data Connection 只负责运输，不拥有 Client State 权威性。
 
 ## 5. Frame 与 Scope
 
@@ -93,7 +99,8 @@ Client Node 是视图组件节点，不要求每个 Tile、角色、粒子或场
 Frame Runtime 提交权威状态
 → Client State Projector 原子投影
 → state.snapshot / scope.replace / event.emit
-→ Frame 数据连接
+→ 所属 Runtime Container 的 System Data Connection
+→ 根据 frameId + activationId 路由 Logical Stream
 → Renderer Validator
 → Frame/Scope Store 原子提交
 → 标记 dirty Scope
@@ -103,20 +110,23 @@ Frame Runtime 提交权威状态
 
 消息回调不得直接分散操作 DOM 或 Scene。必须先校验并提交 Store，再进入呈现阶段。
 
+同一 System Data Connection 可以交错承载多个 Frame 的 State/Event；Renderer 必须先按 Frame 路由再执行 Revision 和 Scope 校验。
+
 ## 8. Store 提交
 
 收到状态消息时依次验证：
 
+- 消息是否来自目标 Frame 所属 `systemId` 的 Data Connection；
 - Frame 是否仍然存在；
 - Activation 是否匹配；
-- 数据 Sequence 是否连续；
+- 该 Frame Logical Stream 的数据 Sequence 是否连续；
 - State Revision 和 Scope Revision 是否可接受；
 - Scope 数量、树深和消息大小；
 - Key 是否在 Scope 内唯一；
 - Tag 是否已注册；
 - Data 是否满足 Tag Schema。
 
-验证成功后原子提交新的 Frame 或 Scope Store。验证失败时保留旧 Store 和旧画面，并请求该 Frame Resync。
+验证成功后原子提交新的 Frame 或 Scope Store。验证失败时保留旧 Store 和旧画面，并只请求该 Frame Resync。
 
 较旧 State Revision 或 Scope Revision 不得覆盖较新状态。
 
@@ -187,7 +197,19 @@ loading / error
 
 ## 13. 输入路由
 
-普通输入只发送给程序主系统声明的 Input Target。节点事件附带完整 Frame、Activation、Scope 和 Key 来源，直接发送给拥有该 Frame 的子系统。
+普通输入只发送给程序主系统声明的 Input Target。
+
+Renderer 根据 Input Target 的：
+
+```text
+systemId
+frameId
+activationId
+```
+
+选择对应 System Data Connection，并在其中发送该 Frame Logical Stream 的 `input.dispatch`。
+
+节点事件附带完整 Frame、Activation、Scope 和 Key 来源，直接发送给拥有该 Frame 的子系统。
 
 页面失焦、Frame 暂停或 Input Target 变化时，必须释放持续方向意图，防止旧 Frame 继续接收输入。
 
@@ -217,7 +239,7 @@ Scope State 表示当前应该呈现什么：
 
 Event 表示一次性发生的表现行为：
 
-- 通常需要有序、有界处理；
+- 通常需要按 Frame 有序、有界处理；
 - 不应替代可恢复 State；
 - 适合音效、伤害数字、屏幕震动和短暂粒子；
 - Frame 出栈后不得作用于其他 Frame。
@@ -238,42 +260,55 @@ Client State 不携带资源字节或本机路径。
 
 ## 17. 故障与恢复
 
-- Renderer 重载后先获取完整调用栈；
-- 为每个有效 Frame 重建数据连接；
-- 请求完整 Frame Client State；
-- 原子恢复 Store 后重新协调 DOM、Canvas 或 WebGL；
-- Frame 数据通道断开时停止向该 Frame 发送输入并通知 Main；
-- Frame 出栈后拒绝该 Frame 的迟到状态和 Event；
+Renderer 重载：
+
+```text
+先获取完整调用栈
+→ 根据当前 Frame 计算 distinct systemId
+→ 每个 System 重建一条 Data Connection
+→ 为各 System 的有效 Frame 建立 Logical Stream 状态
+→ 逐 Frame 请求完整 Client State
+→ 原子恢复 Store
+→ 重新协调 DOM / Canvas / WebGL
+```
+
+故障边界：
+
+- System Data Connection 断开时，停止该 System 下所有 Frame 的普通输入并通知 Main；
+- 某 Frame 的 Sequence Gap 或 State 校验失败只触发该 Frame Resync；
+- Frame 出栈后拒绝该 Frame 的迟到状态和 Event，但不关闭共享 Transport；
 - DOM 或 Scene 不作为恢复源。
 
 ## 18. 平台一致性
 
-桌面 Frame 数据连接使用 localhost WebSocket；PWA 使用 MessagePort。Renderer 上层模块保持一致：
+桌面每个 System Data Connection 使用 localhost WebSocket；PWA 每个 System Data Connection 使用 MessagePort。Renderer 上层模块保持一致：
 
 ```text
-Frame Connection Registry
+System Data Connection Registry
+→ Frame Stream Registry
 → Validator
 → Frame/Scope Store
 → Render Scheduler
 → Reconciler / Scene Renderer
 ```
 
-Transport 差异不能改变 Store、Revision、Resync 和呈现语义。
+Transport 差异不能改变 Frame Store、Activation、Sequence、Revision、Resync 和呈现语义。
 
 ## 19. 架构不变量
 
 1. 业务权威状态只属于子系统 Frame Runtime；
 2. Store 是 Renderer 的恢复目标，DOM 和 Scene 是派生结果；
-3. 状态先提交 Store，再更新画面；
-4. 同一 Frame/Scope 的未呈现 State 可以合并，Event 不能静默合并；
-5. 暂停 Frame 可以继续显示但不接收普通输入；
-6. Renderer 插值不能改变碰撞、选择和调用结果；
-7. Frame 出栈时整体清理所有呈现对象和资源引用。
+3. 物理 Data Transport 属于 System，Frame 只拥有 Logical Stream；
+4. 状态先提交 Store，再更新画面；
+5. 同一 Frame/Scope 的未呈现 State 可以合并，Event 不能静默合并；
+6. 暂停 Frame 可以继续显示但不接收普通输入；
+7. Renderer 插值不能改变碰撞、选择和调用结果；
+8. Frame 出栈时整体清理自身呈现对象和资源引用，但不关闭共享 System Data Connection。
 
 ## 20. 相关下层文档
 
 - [Client State Tree v1](../15-contracts/client-state-tree-v1.md)；
-- [Frame 数据通道 v1](../15-contracts/frame-data-channel-v1.md)；
+- [Renderer–Subsystem 数据协议 v1](../15-contracts/frame-data-channel-v1.md)；
 - [Web 渲染端模块设计](../20-modules/web-renderer/README.md)；
 - [现有详细设计：Web 渲染端协调](../design/web-client-reconciliation.md)；
 - [ADR 0004：Client State 渲染流水线](../decisions/0004-client-state-rendering-pipeline.md)。

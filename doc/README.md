@@ -19,7 +19,7 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 3. [系统架构总览](./10-architecture/system-overview.md)
 4. [运行承载系统](./10-architecture/runtime-hosting-system.md)
 5. [通信系统](./10-architecture/communication-system.md)
-6. [Frame 数据通道 v1](./15-contracts/frame-data-channel-v1.md)
+6. [Renderer–Subsystem 数据协议 v1](./15-contracts/frame-data-channel-v1.md)
 7. [渲染系统](./10-architecture/rendering-system.md)
 8. [只读 Content API v1](./15-contracts/content-api-v1.md)
 9. [模块设计目录](./20-modules/README.md)
@@ -30,16 +30,21 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 ```text
 每个 systemId
     一个 Runtime Container
+    一条 Main Control Connection
+    一条 Renderer Data Connection
 
 桌面 Runtime Container
     独立 OS Process
+    Renderer Data Connection = localhost WebSocket
 
 PWA Runtime Container
     Dedicated Worker
+    Renderer Data Connection = MessagePort
 
 每个 Frame
     Container 内独立业务实例
-    独立 Activation、Projector、Revision 和数据连接
+    独立 Activation、Projector、Revision 和 Logical Stream
+    不拥有独立物理 WebSocket / MessagePort
 ```
 
 通信分为：
@@ -49,9 +54,10 @@ PWA Runtime Container
     Main ⇄ Runtime Container
     Main ⇄ Renderer
 
-Frame 数据面
-    Frame Runtime ⇄ Renderer
-    输入上行 + Client State 下行
+System 数据面
+    Runtime Container ⇄ Renderer
+    每 System 一条物理 Transport
+    连接内多路复用 Frame Logical Stream
 
 内容面
     Runtime Container / Renderer ⇄ Readonly Content Service
@@ -86,7 +92,7 @@ Frame 数据面
 
 - [正式契约目录](./15-contracts/README.md)
 - [模块子系统生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
-- [Frame 数据通道 v1](./15-contracts/frame-data-channel-v1.md)
+- [Renderer–Subsystem 数据协议 v1](./15-contracts/frame-data-channel-v1.md)
 - [Client Scoped State Tree v1](./15-contracts/client-state-tree-v1.md)
 - [游戏包契约 v1](./15-contracts/game-package-v1.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
@@ -145,7 +151,7 @@ Frame 数据面
 ```text
 模块子系统模型
 → 生命周期协议
-→ Frame 数据通道
+→ Renderer–Subsystem 数据协议
 → Client State Tree
 → 具体模块设计
 ```
@@ -154,7 +160,7 @@ Frame 数据面
 
 ```text
 渲染系统
-→ Frame 数据通道
+→ Renderer–Subsystem 数据协议
 → Client State Tree
 → Content API
 → Web Renderer 模块
@@ -165,7 +171,7 @@ Frame 数据面
 ```text
 运行承载系统
 → 通信系统
-→ Frame 数据通道
+→ Renderer–Subsystem 数据协议
 → Content API
 → Hostra 桌面宿主模块
 ```
@@ -175,7 +181,7 @@ Frame 数据面
 ```text
 运行承载系统
 → PWA 宿主模块
-→ Frame 数据通道
+→ Renderer–Subsystem 数据协议
 → Content API
 → Web Renderer 模块
 ```
@@ -191,13 +197,15 @@ Frame 数据面
 
 ## 迁移状态
 
-本次更新确立新的权威结论：
+当前权威结论：
 
 - 每个 System 一个 Runtime Container；
 - 每个 Frame 是 Container 内独立实例；
+- Renderer 与每个 Runtime Container 之间最多一条有效数据 Transport；
+- Frame 通过共享 Transport 内的 `frameId + activationId + sequence` Logical Stream 隔离；
 - 桌面使用独立 LR Main、System Process、WebSocket 和 HTTP；
-- PWA 使用 Main/System Worker、每 Frame MessagePort、Service Worker 和 OPFS；
-- Frame 数据连接同时承载输入上行和视图状态下行；
+- PWA 使用 Main/System Worker、每 System 数据 MessagePort、Service Worker 和 OPFS；
+- Renderer–Subsystem 数据协议同时承载输入上行和视图状态下行；
 - FSDB 通过逻辑只读 Content API 访问。
 
 原有目录中的详细文档暂时保留为过渡资料。与上述结论冲突的旧内容不应继续作为实现依据。
