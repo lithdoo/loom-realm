@@ -86,6 +86,33 @@ sequence
 
 一个 Frame 的关闭、暂停、Sequence Gap 或 Resync 不关闭同 System 的物理数据连接，也不得影响其他 Frame 的逻辑流。
 
+### 4.1 Renderer–Subsystem 协议职责分层
+
+System Data Connection 在概念上进一步拆分为三个职责独立的协议域：
+
+```text
+Renderer ⇄ Runtime Container
+
+Connection Layer
+    建立和维护按 systemId 绑定的物理连接
+
+Render Update Protocol
+    主要负责 Subsystem → Renderer 的视图状态和表现更新
+
+User Input Protocol
+    主要负责 Renderer → Subsystem 的用户输入和界面交互
+```
+
+三个协议域共享同一条 System Data Connection，不代表三条 WebSocket 或三条 MessagePort。
+
+Connection Layer 只处理连接级问题，不拥有 Frame 生命周期或业务状态。它的建立依赖 Main ⇄ Renderer 控制面提供 Frame/System 关系、当前 Activation、Input Target 和连接授权；Renderer 不自行决定应该连接哪个 Runtime Container。
+
+Render Update 与 User Input 仍然直接在 Renderer 和 Runtime Container 之间传输，普通业务 Payload 不经过 Main 转发。
+
+当前只冻结上述职责边界。具体 JSON-RPC 方法、版本协商、握手字段、Sequence、错误码、心跳和协议域故障隔离将在后续契约设计中分别冻结。
+
+详见：[Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)。
+
 ## 5. 内容面
 
 内容面提供逻辑只读 Content API：
@@ -326,10 +353,12 @@ Frame 的合法性由双方结合 Main 发布的 Stack/Activation 信息和 Cont
 - System Data Connection 授权与首个 Frame Snapshot 的时序；
 - 多 Frame 共享 Transport 的公平发送策略；
 - Event 溢出策略；
-- 最大消息、树深和发送速率的具体 Profile。
+- 最大消息、树深和发送速率的具体 Profile；
+- Connection Layer、Render Update Protocol 和 User Input Protocol 是否分别维护独立版本、顺序和故障上下文。
 
 ## 16. 相关下层文档
 
+- [Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)：概念级三层职责和 Main 控制面依赖；
 - [正式契约目录](../15-contracts/README.md)；
 - [生命周期协议草案](../15-contracts/system-lifecycle-protocol.md)；
 - [Renderer–Subsystem 数据协议 v1](../15-contracts/frame-data-channel-v1.md)；
