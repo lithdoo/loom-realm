@@ -23,7 +23,7 @@ export default defineConfig({
         items: [
           { text: '系统架构总览', link: '/10-architecture/system-overview' },
           { text: '运行承载系统', link: '/10-architecture/runtime-hosting-system' },
-          { text: 'Frame 数据通道', link: '/15-contracts/frame-data-channel-v1' },
+          { text: 'Renderer–Subsystem 数据协议', link: '/15-contracts/frame-data-channel-v1' },
           { text: '只读 Content API', link: '/15-contracts/content-api-v1' },
           { text: '模块设计', link: '/20-modules/README' },
         ],
@@ -67,7 +67,7 @@ export default defineConfig({
         items: [
           { text: '契约目录', link: '/15-contracts/README' },
           { text: '生命周期与调用协议草案', link: '/15-contracts/system-lifecycle-protocol' },
-          { text: 'Frame 数据通道 v1', link: '/15-contracts/frame-data-channel-v1' },
+          { text: 'Renderer–Subsystem 数据协议 v1', link: '/15-contracts/frame-data-channel-v1' },
           { text: 'Client State Tree v1', link: '/15-contracts/client-state-tree-v1' },
           { text: '游戏包契约 v1', link: '/15-contracts/game-package-v1' },
           { text: '只读 Content API v1', link: '/15-contracts/content-api-v1' },
