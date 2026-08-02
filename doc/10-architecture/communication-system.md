@@ -9,64 +9,76 @@
 
 ## 1. 设计目标
 
-通信系统使程序主系统、模块子系统和 Renderer 在独立进程或不同平台 Transport 中保持一致语义，同时避免 Main 成为高频 User Input 和 Render Update 的转发瓶颈。
+通信系统使 Main、Subsystem 和 Renderer 在独立进程或不同平台 Transport 中保持一致语义，同时避免 Main 成为高频 User Input 和 Render Update 的转发瓶颈。
 
-核心通信原则：
+核心原则：
 
-> 物理 System Data Connection 按 Runtime Container / `systemId` 建立；Connection、Render Update、User Input 是三套职责独立的协议域。Frame 只属于 User Input / Main Control 语义，Render 使用独立身份。
+> 物理 System Data Connection 按 Runtime Container / Subsystem 建立；Connection、Render Update、User Input 是三个职责独立的协议域。Frame 只属于 User Input / Main Control 语义，Render 使用独立身份。
+
+部分旧 v1 数据协议仍使用 `systemId`。Descriptor `key` 与旧 `systemId` 的最终 wire 映射由对应协议迁移冻结，本文不通过术语替换静默改变旧字段含义。
 
 ## 2. 三类通信平面
 
 ```text
-控制面
-    Subsystem Runtime Container ⇄ Main
+Control Plane
+    Subsystem ⇄ Main
     Renderer ⇄ Main
 
-System 数据面
-    Runtime Container ⇄ Renderer
-    每 System 一条物理连接
+System Data Plane
+    Subsystem ⇄ Renderer
+    每 Subsystem 一条物理连接
     ├── Connection Layer
     ├── Render Update Protocol
     └── User Input Protocol
 
-内容面
-    Runtime Container / Renderer ⇄ Readonly Content Service
+Content Plane
+    Runtime / Renderer ⇄ Readonly Content Service
 ```
 
-三类平面的职责、顺序和背压语义不同，不应复用一个无边界的通用消息队列。
+三个平面的职责、顺序、恢复和背压语义不同。
 
-## 3. Main ⇄ Subsystem 控制面
+## 3. Main ⇄ Subsystem Control Plane
 
-桌面 Bootstrap 中，Main 先开放 Control WebSocket Endpoint，再通过 Subsystem 启动环境传入该 Endpoint。
-
-连接方向：
+Desktop Bootstrap 中，Main 先开放 Control WebSocket Endpoint，再启动 Subsystem Runtime。连接方向固定为：
 
 ```text
 Subsystem Process
     ── connect ──▶ Main Control WebSocket Server
 ```
 
-控制面负责：
+Bootstrap 与 Runtime Lifecycle 的 v1 流程：
 
-- Subsystem 连接、身份确认、ready、关闭和失败；
-- Frame initialize / activate / suspend / resume / close；
-- 子系统调用与返回；
-- heartbeat、超时、错误和诊断。
+```text
+Transport connected
+→ subsystem.hello(key, bootstrapToken, protocolVersions)
+→ Main 验证 Launch Attempt / identity / version
+→ Connection 永久绑定 descriptor.key
+→ identified
+→ subsystem.status(initializing | ready | stopping | failed)
+```
 
-`connected` 与 `ready` 必须区分。Subsystem 只有在完成自身初始化并发送与 Descriptor 相同 `systemId` 的 ready 后才可被 Main 标记为 ready。
+因此：
 
-## 4. Main ⇄ Renderer 控制面
+```text
+connected ≠ identified ≠ ready
+```
 
-Renderer 与 Main 之间有一条会话级长期控制连接。
+`ready` 是 Runtime Status，不重新携带或声明 Subsystem identity。
 
-负责：
+精确 Schema、合法状态转换和 fatal error 行为由 [Main ⇄ Subsystem 控制与运行时生命周期协议 v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 定义。
+
+同一 Control Connection 后续可继续承载 Frame initialize / activate / suspend / resume / close、调用 / 返回、shutdown、heartbeat 和诊断；其中尚未冻结的部分由后续契约定义。
+
+## 4. Main ⇄ Renderer Control Plane
+
+Renderer 与 Main 之间有一条会话级长期控制连接，负责：
 
 - Session 状态；
-- 当前已声明 / starting / ready / failed System 状态；
+- 当前 declared / starting / connected / identified / ready / failed Subsystem 状态；
 - Frame Stack Snapshot 与增量通知；
 - Activation；
 - Input Target；
-- Renderer System Data Connection 的授权、建立、替换和撤销；
+- System Data Connection Grant / replace / revoke；
 - 会话错误和诊断；
 - Renderer 重连。
 
@@ -77,13 +89,13 @@ Main Control Plane 不负责：
 - 资源主体；
 - Render visibility / ordering。
 
-Renderer 不能通过 DOM、当前 Frame Stack 或已有 WebSocket 自行决定某个 System 是否允许连接。
+Renderer 不能通过 DOM、Frame Stack 或已有 WebSocket 自行决定某个 Subsystem 是否允许连接。
 
-## 5. System 数据面
+## 5. System Data Plane
 
 每个有效 Runtime Container 与 Renderer 之间最多一条长期双向 System Data Connection。
 
-该物理连接绑定 System 级身份，例如：
+连接绑定 System/SubSystem 级身份。现有 v1 例子常使用：
 
 ```text
 sessionId
@@ -91,9 +103,9 @@ systemId
 connectionId
 ```
 
-具体身份 Schema 由 Connection Layer 契约冻结。
+其正式身份 Schema 由未来 Connection Protocol 冻结。
 
-System Data Connection 不以 Frame 为物理或总业务路由粒度。它可以同时承载：
+System Data Connection 可以同时承载：
 
 ```text
 0..N Render Context
@@ -119,20 +131,18 @@ User Input Protocol
     Frame + Activation 输入路由
 ```
 
-三个协议域共享同一物理 WebSocket / MessagePort，但状态所有权和协议身份独立。
+三个协议域共享同一物理 WebSocket / MessagePort，但状态所有权、Sequence、背压和恢复语义独立。
 
 详见：[Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)。
 
 ## 7. Connection Layer
 
-Connection Layer 只管理 System Data Connection。
+Connection Layer 只管理 System Data Connection：
 
-概念职责：
-
-- 根据 Main 授权建立连接；
-- 确认 Session / System / Connection 身份；
+- 根据 Main Grant 建立连接；
+- 确认 Session / Subsystem / Connection 身份；
 - 协商协议版本和必要能力；
-- 连接级 heartbeat 与故障检测；
+- heartbeat 与故障检测；
 - 连接替换和关闭。
 
 Connection Layer 不拥有：
@@ -146,14 +156,12 @@ Render State
 业务状态
 ```
 
-桌面 Renderer 只有在 Main 发布有效 Grant / Connection Information 后才能主动连接 Subsystem Data Endpoint。
-
 ## 8. User Input Protocol 身份
 
-普通 User Input 使用 Main 发布的：
+普通 User Input 使用 Main 发布的 Frame/Input Target。现有概念字段：
 
 ```text
-systemId
+systemId / subsystem reference
 frameId
 activationId
 ```
@@ -172,7 +180,7 @@ Browser input
 
 Frame / Activation 只约束输入上下文，不约束 Render。
 
-User Input 的 Sequence、连续输入合并、离散事件顺序和 UI Interaction 定位由独立契约冻结。
+User Input Sequence、连续输入合并、离散事件顺序和 UI Interaction 定位由独立契约冻结。
 
 ## 9. Render Update Protocol 身份
 
@@ -182,31 +190,23 @@ Render Update 不使用 `frameId + activationId` 作为平台级身份。
 
 ```text
 Subsystem Render Manager
-→ renderId
+→ Render identity
 → Render Update Protocol
 → Renderer Render Store
 ```
 
-完整 Render 身份概念上是：
+本文和其他架构文档可能使用 `renderId` 作为概念占位名，仅为了描述“连接内独立 Render identity”。`renderId` 不是已经冻结的 wire 字段名。
 
-```text
-systemId + renderId
-```
-
-其中 `systemId` 已由 System Data Connection 绑定。
-
-Render 的 Revision、Scope、Event、Sequence / Ordering 和 Resync 由 Render Update Protocol 独立冻结，不继承 Frame Activation epoch。
+Render Revision、Scope、Event、Sequence / Ordering 和 Resync 由 Render Update Protocol 独立冻结，不继承 Frame Activation epoch。
 
 ## 10. Frame 与 Render 不存在协议级绑定
 
-以下关系不进入公共通信模型：
+以下映射不进入公共协议：
 
 ```text
-frameId → renderId
-renderId → frameId
+frameId → render identity
+render identity → frameId
 ```
-
-Subsystem 可以内部保存该映射，也可以完全不保存。
 
 因此：
 
@@ -216,7 +216,7 @@ Subsystem 可以内部保存该映射，也可以完全不保存。
 - Render destroy 不关闭 Frame；
 - Render recovery 不要求 Frame resync。
 
-## 11. 内容面
+## 11. Content Plane
 
 内容面提供逻辑只读 Content API：
 
@@ -227,98 +227,68 @@ group(namespace, key)
 resource(namespace, key)
 ```
 
-内容面不承载：
+内容面不承载 User Input、Render State、Runtime Tick、Frame Stack、Activation 或 Runtime Bootstrap 控制。
 
-- User Input；
-- Render State；
-- Runtime Tick；
-- Frame Stack / Activation；
-- Subsystem Process Bootstrap 控制。
+大型资源主体通过独立 HTTP / Fetch 获取。
 
-大型资源主体通过独立 HTTP / Fetch 获取，不能阻塞控制消息和 System 数据消息。
+## 12. Transport Profile
 
-## 12. 通道粒度
-
-```text
-每个程序会话
-    一个 Renderer ⇄ Main 控制连接
-    一个 Main Control Endpoint 供 Subsystem 连接
-    一个只读 Content API 入口
-
-每个 systemId
-    一个 Subsystem ⇄ Main 长期控制连接
-    一个 Renderer ⇄ Subsystem 长期 System Data Connection
-
-每个 Frame Activation
-    一个 User Input Context
-
-每个 Render
-    一个独立 Render Context
-```
-
-物理连接粒度与 Runtime Container 对齐；Frame 与 Render 分别通过各自协议域实现逻辑隔离。
-
-## 13. Transport Profile
-
-JSON-RPC 2.0 可以用于控制和 System 数据消息 Envelope，但不规定传输层。
-
-### 桌面 Profile
+Desktop：
 
 ```text
 Subsystem → Main
-    每 System 一条 localhost WebSocket
+    每 Subsystem 一条 localhost WebSocket
 
 Renderer ⇄ Main
     每会话一条 localhost WebSocket
 
-Renderer ⇄ Runtime Container
-    每 System 一条 localhost WebSocket
+Renderer ⇄ Subsystem
+    每 Subsystem 一条 localhost WebSocket
 
 Content API
     localhost HTTP
 ```
 
-### PWA Profile
+PWA：
 
 ```text
 System Worker ⇄ Main Runtime Worker
-    每 System 一条控制 MessagePort
+    每 Subsystem 一条控制 MessagePort
 
 Window ⇄ Main Runtime Worker
     一条控制 MessagePort
 
 Window ⇄ System Worker
-    每 System 一条数据 MessagePort
+    每 Subsystem 一条数据 MessagePort
 
 Content API
     same-origin Fetch，由 Service Worker 响应
 ```
 
-WebSocket 与 MessagePort 是 Transport Profile，不改变 System、Frame/Input 和 Render 的所有权语义。
+Transport Profile 不改变 Subsystem、Frame/Input 和 Render 的所有权语义。
 
-## 14. 桌面启动连接顺序
+## 13. Desktop 启动连接顺序
 
 ```text
 Main Control Endpoint ready
 → Main 启动全部声明 Subsystem
 → Subsystem 主动连接 Main
-→ Subsystem ready(systemId)
-→ Main 通过 Renderer Control Plane 发布 System 状态 / Data Grant
+→ subsystem.hello 成功，Connection identified
+→ subsystem.status(state="ready")
+→ Main 发布 Subsystem 状态 / Data Grant
 → Renderer 主动建立 System Data Connection
 → Connection Layer ready
 → User Input / Render Update 开始直接通信
 ```
 
-详细 Bootstrap 见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)。
+## 14. Renderer 重连恢复
 
-## 15. Renderer 重连恢复
-
-Renderer 重载后的恢复不再按 Frame 推导 Render。
+Renderer 重载后的恢复不按 Frame 推导 Render 或 Subsystem Connection：
 
 ```text
 Renderer → Main Control reconnect
-→ 恢复 Session / ready System / Frame Stack / Input Target
-→ 按 Main 发布信息重建需要的 System Data Connection
+→ 恢复 Session / ready Subsystem / Data Grant / Frame Stack / Input Target
+→ 按 Main Grant 重建需要的 System Data Connection
 
 User Input domain
 → 恢复 Frame / Activation 输入上下文
@@ -329,20 +299,18 @@ Render domain
 
 一个域的恢复失败不能自动重置另一域的业务状态。
 
-## 16. 背压原则
-
-不同协议域独立定义背压：
+## 15. 背压原则
 
 ```text
 Control RPC
     不静默丢弃；超时产生明确错误
 
 User Input
-    持续意图可以合并
-    离散输入必须有界并保持所需顺序
+    连续意图可合并
+    离散输入有界且保持协议要求的顺序
 
 Render State
-    可恢复目标状态可以按 Render / Scope 合并
+    可恢复目标状态可按 Render / Scope 合并
 
 Render Event
     一次性行为必须有界并定义溢出策略
@@ -354,70 +322,35 @@ Content Body
     使用独立 HTTP / Fetch 流和缓存
 ```
 
-Sequence / Revision 必须在各自协议域内定义，不能继续使用一套 Frame Sequence 统管全部 System 数据消息。
+Sequence / Revision 必须在各自协议域内定义，不能使用一套 Frame Sequence 统管全部 System Data 消息。
 
-## 17. 桌面连接授权
-
-桌面 localhost 连接也视为不可信。Main 签发短期 System Data Connection Grant，至少在概念上绑定：
-
-```text
-sessionId
-systemId
-connectionId
-endpoint
-一次性高熵 token
-expiresAt
-```
-
-Grant 是 System 级，不绑定 Frame 或 Render。
-
-Subsystem 只监听 loopback 地址。Renderer 建立 WebSocket 后先完成 Connection Layer 认证，再允许 User Input 或 Render Update。
-
-精确认证字段和方法由 Connection Layer 契约冻结。
-
-## 18. 安全原则
+## 16. 安全原则
 
 - 所有消息视为不可信输入；
-- Subsystem Control Connection 必须校验其声明 `systemId` 与 Main 启动 Descriptor 一致；
-- System Data Connection 必须绑定合法 Session / System / Connection；
+- `subsystem.hello` 必须绑定合法 Launch Attempt、Descriptor `key` 与 Bootstrap Credential；
+- hello 成功后后续 Runtime status 不得重新声称其他 identity；
+- System Data Connection 必须绑定合法 Session / Subsystem / Connection；
 - User Input 必须校验 Frame / Activation / 输入权限；
-- Render Update 必须限制在当前 System 的 Render Namespace；
-- Frame 输入错误不能伪造其他 Frame；
-- Render 错误不能借机修改 Main Stack；
+- Render Update 必须限制在当前 Subsystem 的 Render Namespace；
 - Renderer 不能获得任意 IPC Channel；
 - Render State 不允许可执行代码、任意 HTML 或物理路径；
 - Content API 只接受逻辑资源身份。
 
-## 19. 当前契约迁移状态
+## 17. 当前契约迁移状态
 
-当前 `frame-data-channel-v1.md` 和 `client-state-tree-v1.md` 仍保存旧的 Frame-scoped Render 详细 Schema。这些文档将在下一阶段迁移为独立的：
+已冻结：
 
-```text
-Connection Protocol
-Render Update Protocol
-User Input Protocol
-Render State Tree / equivalent state contract
-```
+- Main ⇄ Subsystem Bootstrap / Runtime Lifecycle v1 的 hello/status Schema 和状态机。
 
-在迁移完成前，本架构文档是 Frame / Render 所有权关系的当前上层真相；旧契约中的 `Frame Client State`、Frame-scoped Render Sequence 和“Frame close 自动清 Render”不能继续作为新增设计依据。
+仍待冻结：
 
-## 20. 开放问题
-
-需要在契约层进一步冻结：
-
+- Main ⇄ Subsystem Frame / Call Protocol；
 - Main ⇄ Renderer Control Protocol；
-- Main ⇄ Subsystem Bootstrap / ready Schema；
-- Connection Layer 的认证、版本、heartbeat 和 reconnect；
-- Render Identity、Revision、Scope、Event 和 Resync；
-- User Input 的连续意图、离散输入、UI Interaction 与 Sequence；
-- 跨 System Render Composition / z-order；
-- System Data Transport 的协议域公平调度；
+- Renderer ⇄ Subsystem Connection Protocol；
+- Render Update Protocol；
+- User Input Protocol；
+- Render State Tree / equivalent；
+- 跨 Subsystem Render Composition / z-order；
 - 最大消息、树深和发送速率 Profile。
 
-## 21. 相关文档
-
-- [运行时启动与连接建立系统](./runtime-bootstrap-system.md)；
-- [Renderer–Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)；
-- [渲染系统](./rendering-system.md)；
-- [栈式运行系统](./stack-runtime-system.md)；
-- [正式契约目录](../15-contracts/README.md)。
+旧 `frame-data-channel-v1.md` 与 `client-state-tree-v1.md` 只保留迁移历史和旧实现字段，不得继续作为 Frame/Render 所有权真相。
