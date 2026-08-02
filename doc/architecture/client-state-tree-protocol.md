@@ -3,18 +3,18 @@
 > 状态：**Active / Normative**  
 > 适用范围：所有模块子系统与 Web 渲染端  
 > 最近复核：2026-07-28  
-> 主要定义：Frame Client State、Scope、Roots、Client Node、身份和事件定位
+> 主要定义：Frame Client State、Scope、Roots、Client Node、身份、Activation 数据 Epoch 和事件定位
 
 相关文档：
 
-- [`main-system-and-subsystems.md`](./main-system-and-subsystems.md)：Frame 和子系统边界；
-- [`runtime-rpc-and-state-sync.md`](./runtime-rpc-and-state-sync.md)：状态消息和恢复；
+- [`main-system-and-subsystems.md`](./main-system-and-subsystems.md)：Frame、前台控制和子系统边界；
+- [`runtime-rpc-and-state-sync.md`](./runtime-rpc-and-state-sync.md)：状态消息、输入授权和恢复；
 - [`client-state-projector.md`](./client-state-projector.md)：子系统投影；
 - [`../design/web-client-reconciliation.md`](../design/web-client-reconciliation.md)：DOM 协调。
 
 核心原则：
 
-> 每个模块子系统调用帧拥有一组 Scope；Scope 包含有序根节点；每个 Client Node 对应一个 DOM Element。客户端状态只描述应该呈现什么，不包含子系统内部状态或 DOM 指令。
+> 每个模块子系统调用帧拥有一组 Scope；Scope 包含有序根节点；每个 Client Node 对应一个 DOM Element。客户端状态只描述应该呈现什么，不包含子系统内部状态或 DOM 指令。Frame 失去前台控制后，其 Scope 可以继续显示和更新；普通输入权由程序主系统的 `inputTarget` 单独决定。
 
 ## 1. 状态层次
 
@@ -27,6 +27,18 @@ DOM Tree
 ```
 
 程序主系统不生成业务 Scope。每个模块子系统只生成自己当前 `frameId` 的 Client State。
+
+调用栈状态和 Client State 是两个不同维度：
+
+```text
+Frame Control State
+    active / suspended / closing
+
+Frame Client State
+    revision + scopes
+```
+
+`Frame Control State: suspended` 不表示 Frame Client State 冻结，也不表示子系统进程停止。
 
 ## 2. 基础类型
 
@@ -62,7 +74,7 @@ interface ClientNode {
 
 字段名称在第一阶段冻结。
 
-## 3. Frame 所有权
+## 3. Frame 所有权和 Activation
 
 完整 Scope 身份是：
 
@@ -76,8 +88,11 @@ frameId + scopeId
 - 不同 Frame 可以使用相同 `scopeId`；
 - 子系统只能发布自己 Frame 的 Scope；
 - Frame 出栈时，其全部 Scope 一并删除；
-- Frame 暂停时 Scope 可以保留显示；
-- `activationId` 用于拒绝暂停或恢复前的迟到状态消息。
+- Frame 失去前台控制时 Scope 可以保留显示和继续更新；
+- `activationId` 标识该 Frame 当前的数据 Epoch；
+- Frame 进入 `suspended` 时，当前 `activationId` 不立即失效；
+- Frame 恢复前台控制并获得新 `activationId` 后，旧 Epoch 的迟到状态必须拒绝；
+- Frame 关闭后，该 Frame 的所有 Activation 均失效。
 
 渲染端 Store 可以表示为：
 
@@ -86,6 +101,29 @@ interface ClientFrameStore {
   readonly frames: ReadonlyMap<string, FrameClientState>;
 }
 ```
+
+### 3.1 状态资格与输入资格
+
+必须区分：
+
+```text
+状态消息资格
+    Frame 存在
+    + 数据通道有效
+    + activationId 是该 Frame 当前数据 Epoch
+    + Sequence / Revision 有效
+
+普通输入资格
+    状态消息资格
+    + frameId / activationId 等于 Main 当前 inputTarget
+```
+
+因此：
+
+- 暂停 Frame 可以继续发布合法后台状态；
+- 暂停 Frame 默认不能接收普通输入或节点事件；
+- 匹配 `activationId` 不等于拥有输入权；
+- Renderer 不得根据 Scope 是否变化推断输入目标。
 
 ## 4. Scope
 
@@ -309,7 +347,10 @@ interface FrameStateSnapshotMessage {
 - Sequence 缺口；
 - 客户端验证失败；
 - 多 Scope 同时变化；
-- 主动 Resync。
+- 主动 Resync；
+- Activation 恢复后需要重新建立完整状态时。
+
+Snapshot 必须原子替换该 Frame 的 Scope 集合。
 
 ### 10.2 Scope 替换
 
@@ -329,9 +370,11 @@ interface ClientScopeReplaceMessage {
 - `value` 为 ClientScope：替换该 Frame 的目标 Scope；
 - `value` 为 `null`：删除该 Scope；
 - 单 Scope 替换不要求重建其他 Scope；
-- 第一阶段不定义节点级 Patch 或多 Scope Batch Patch。
+- 第一阶段不定义节点级 Patch 或多 Scope Batch Patch；
+- Frame 处于 `suspended` 不构成拒绝 Replace 的理由；
+- 新 Activation 生效后，旧 Activation 的 Replace 必须拒绝。
 
-## 11. 版本规则
+## 11. 版本和顺序规则
 
 ```text
 FrameClientState.revision
@@ -342,6 +385,9 @@ ClientScope.revision
 
 sequence
     当前子系统数据连接上的消息顺序
+
+activationId
+    当前 Frame 数据 Epoch
 ```
 
 规则：
@@ -350,7 +396,22 @@ sequence
 - Scope 内容变化时递增 Scope Revision；
 - 较旧 Revision 不得覆盖较新 Revision；
 - 无法确认连续性时请求该 Frame 的完整状态；
-- 不同 Frame 的 Revision 互相独立。
+- 不同 Frame 的 Revision 互相独立；
+- 连接重建后 Sequence 可以重新开始；
+- Frame `suspended` 时 Sequence 可以在原连接继续递增；
+- Frame 恢复后可以使用新 Activation 继续原 Revision；
+- 新 Activation 生效后，旧 Activation 消息无论 Sequence 多大都必须拒绝。
+
+推荐校验顺序：
+
+```text
+连接属于 frameId
+→ Frame 仍存在
+→ Activation 是当前数据 Epoch
+→ Sequence 连续
+→ State/Scope Revision 不倒退
+→ Tree Schema 有效
+```
 
 ## 12. 客户端事件
 
@@ -370,6 +431,7 @@ interface ClientNodeEvent {
 子系统必须验证：
 
 - Frame 和 Activation 有效；
+- Frame 是当前普通输入目标；
 - Scope 存在；
 - Key 存在；
 - Tag 允许该事件；
@@ -377,9 +439,18 @@ interface ClientNodeEvent {
 
 键盘方向、手柄轴等高频意图可以使用独立 `input.dispatch`，不强制伪装为节点事件。
 
-## 13. 状态与事件
+暂停 Frame 的 Scope 默认不可交互。未来如果支持并行输入，应另行定义输入路由和能力协议，不能只依赖 Activation。
+
+## 13. 状态与一次性 Event
 
 状态表示客户端现在应该呈现什么，可以合并为最新目标。
+
+非栈顶 Frame 可以继续发布可恢复状态，例如：
+
+- 后台加载进度；
+- 网络状态；
+- 调试指标；
+- 后台计算结果。
 
 Event 表示一次性发生的事情，例如：
 
@@ -388,7 +459,9 @@ Event 表示一次性发生的事情，例如：
 - Toast；
 - 调试通知。
 
-可恢复内容必须进入 Scope。Frame 被弹出后，其未处理的表现 Event 不得改变其他 Frame 的状态。
+可恢复内容必须进入 Scope。
+
+非栈顶 Frame 的 Event 投递策略由事件类型或子系统契约定义，可以立即投递、延迟、取消或转换为 Scope。Frame 被弹出后，其未处理 Event 不得改变其他 Frame 的状态。
 
 ## 14. 安全和限制
 
@@ -402,7 +475,9 @@ Event 表示一次性发生的事情，例如：
 - 单条消息大小；
 - 未注册 Tag；
 - 重复 Key；
-- 循环或非法树结构。
+- 循环或非法树结构；
+- 非输入目标 Frame 的输入和节点事件；
+- 子系统伪造其他 Frame 或 Activation。
 
 不允许：
 
@@ -412,7 +487,22 @@ Event 表示一次性发生的事情，例如：
 - 文件系统路径；
 - 进程句柄或回调。
 
-## 15. 当前结论
+## 15. 第一阶段冻结结论
+
+| 主题 | 结论 |
+|---|---|
+| Frame 所有权 | 每个子系统调用 Frame 拥有自己的 Scope |
+| Scope 身份 | `frameId + scopeId` |
+| Node 身份 | `frameId + scopeId + key` |
+| Node 结构 | `key / tag / data / children` |
+| DOM 映射 | 每个 Client Node 对应一个 DOM Element |
+| 暂停 Frame | Scope 可以继续显示和更新 |
+| 数据 Epoch | `activationId` 在 suspend 时保留，resume 时替换 |
+| 普通输入 | 还必须匹配 Main 当前 `inputTarget` |
+| 状态恢复 | Snapshot + Sequence + Revision |
+| 安全边界 | 不允许任意 HTML、脚本或物理路径 |
+
+## 16. 当前结论
 
 ```text
 模块子系统 Frame
@@ -420,7 +510,9 @@ Event 表示一次性发生的事情，例如：
 → 发布一个或多个 Scope
 → 渲染端按 frameId + scopeId 存储
 → 按稳定 Key 协调 DOM
+→ 非栈顶期间可继续合法后台状态
+→ 新 Activation 生效后拒绝旧 Epoch
 → Frame 出栈时整体清理
 ```
 
-Scope 是视图扩展边界；Frame 是子系统调用实例和 Scope 所有权边界。
+Scope 是视图扩展边界；Frame 是子系统调用实例和 Scope 所有权边界；Activation 是数据 Epoch；普通输入权由调用栈的 `inputTarget` 独立决定。
