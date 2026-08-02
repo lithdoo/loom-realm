@@ -11,12 +11,15 @@
 
 ## 1. 当前架构迁移提示
 
-2026-08-02 的架构修订已经确定两项会导致契约重组的上层结论：
+2026-08-02 的架构修订已经确定会导致契约重组的上层结论：
 
-1. Game Entry 声明本次会话全部 Subsystem 及其 Launcher Descriptor，Main 启动 Subsystem 后由 Subsystem 主动连接 Main，并以匹配 `systemId` 的 `ready` 表示加载完成；
-2. Frame 只属于调用 / User Input Context，Render 生命周期完全属于 Subsystem；Frame 与 Render 没有公共协议所有权关系。
+1. Game Entry 一次性声明本次会话全部 Subsystem Descriptor，Main 在启动阶段立即启动全部声明 Subsystem；Subsystem 主动连接 Main，connected 与 ready 分离；
+2. Subsystem Descriptor MVP 只使用全局唯一、稳定的 `key` 作为 Descriptor 身份，不再保留独立 `id` / `name`；
+3. 当前桌面 MVP 唯一 Launcher Type 为 `nodejs`；任一 unsupported Launcher 或任一声明 Subsystem无法进入 ready 都使 Game Bootstrap 失败；MVP 不定义 `lazy` 字段；
+4. `launcher.entry` 的路径基准和安全规则暂未冻结；
+5. Frame 只属于调用 / User Input Context，Render 生命周期完全属于 Subsystem；Frame 与 Render 没有公共协议所有权关系。
 
-因此当前以下 v1 契约仍保留旧 Schema，**只能作为迁移前详细字段参考，不能继续作为新增架构设计的所有权依据**：
+因此当前以下 v1 契约仍保留旧 Schema，**只能作为迁移前详细字段参考，不能继续作为新增架构设计的所有权或 Bootstrap 依据**：
 
 ```text
 frame-data-channel-v1.md
@@ -27,11 +30,43 @@ client-state-tree-v1.md
 
 game-package-v1.md
     仍采用平台提供 System Registry、游戏包不声明可执行 Subsystem 的旧模型
+    也尚未定义 key / nodejs / eager-all-required Descriptor 语义
 ```
 
-这些不兼容变化将在后续契约 PR 中通过新版本 / 新协议域正式迁移，而不是在本轮架构 PR 中静默修改字段含义。
+这些不兼容变化将在后续契约 PR 中通过新版本 / 新协议域正式迁移，而不是静默修改现有 v1 字段含义。
 
-## 2. 当前契约
+## 2. 当前 Subsystem Descriptor MVP 边界
+
+后续 Game Package / Bootstrap Contract 至少需要表达当前已经冻结的 MVP 语义：
+
+```ts
+interface SubsystemDescriptor {
+  readonly key: string;
+  readonly launcher: {
+    readonly type: "nodejs";
+    readonly entry: string;
+  };
+  readonly env?: Readonly<Record<string, string>>;
+}
+```
+
+当前已确定：
+
+- Main 一次性读取全部 Descriptor；
+- `key` 在 Descriptor 集合中不得重复，并作为稳定 Subsystem 身份；
+- MVP 唯一 Launcher Type 为 `nodejs`；
+- Game Entry 中全部 Descriptor 都是启动必需项；
+- Main 在启动阶段立即启动全部声明 Subsystem；
+- 任一 unsupported Launcher 导致整体 Game Bootstrap 失败；
+- 全部声明 Subsystem ready 后 Bootstrap 才完成；
+- MVP 不定义 `lazy` 字段；
+- Descriptor env 不能覆盖 LoomRealm 保留启动环境；
+- `launcher.entry` 的路径基准、安全约束和安装根边界仍待冻结；
+- Main ⇄ Subsystem 的 hello / identify / ready 精确方法名和字段尚未冻结。
+
+现有协议中的 `systemId` 字段如何与新的 Descriptor `key` 最终统一或映射，留到对应契约迁移时决定，本轮不直接改写旧 v1 Schema。
+
+## 3. 当前契约
 
 | 主题 | 权威入口 | 当前状态 |
 |---|---|---|
@@ -42,11 +77,21 @@ game-package-v1.md
 | 逻辑只读内容访问 | [Content API v1](./content-api-v1.md) | Active / Normative；只读内容语义继续有效 |
 | 资源交付 | [资源协议草案](./resource-protocol.md) | Draft；逐步并入 Content API 和 Renderer Resource Client |
 
-## 3. 目标契约关系
+## 4. 目标契约关系
 
 架构层已经确定后续应收敛为：
 
 ```text
+Game Package v2 or equivalent
+    initial target
+    subsystem descriptors
+        key
+        launcher.type = nodejs
+        launcher.entry
+        env
+    eager / all-required bootstrap semantics
+        │
+        ▼
 Main ⇄ Subsystem Bootstrap / Lifecycle Protocol
     Subsystem connect / identify / ready
     Frame initialize / activate / suspend / resume / close
@@ -68,14 +113,11 @@ Renderer ⇄ Subsystem System Data Connection
 
 Render State Tree / equivalent contract
     renderId / scopeId / node identity
-
-Game Package v2 or equivalent
-    initial call + subsystem descriptors + launcher profiles
 ```
 
 内容主体继续通过 Content API 独立传输，不进入上述控制或 System Data Protocol。
 
-## 4. Transport Profile
+## 5. Transport Profile
 
 正式协议继续区分语义与传输：
 
@@ -86,15 +128,21 @@ Game Package v2 or equivalent
 | Renderer ⇄ Runtime Container | 每 System localhost WebSocket | 每 System 数据 MessagePort |
 | Content API | localhost HTTP | same-origin Fetch + Service Worker |
 
+当前 `nodejs` Launcher Profile 只覆盖桌面 MVP。PWA 如何映射 Subsystem Descriptor 到 Worker Bootstrap 尚未冻结。
+
 不同 Profile 必须保持相同 System、Frame/Input 和 Render 所有权语义。
 
-## 5. 身份分层
+## 6. 身份分层
 
 后续正式契约必须严格区分：
 
 ```text
+Subsystem Descriptor identity
+    key
+
 System Data Connection
     sessionId + systemId + connectionId
+    （systemId 与 Descriptor key 的迁移关系待冻结）
 
 Frame Input Context
     frameId + activationId
@@ -108,7 +156,7 @@ Render State
 
 Frame 不拥有 Render。Render Revision / Sequence 不能继续复用 Frame Activation Sequence。
 
-## 6. 契约文档要求
+## 7. 契约文档要求
 
 一份可冻结的契约至少应包含：
 
@@ -126,7 +174,7 @@ Frame 不拥有 Render。Render Revision / Sequence 不能继续复用 Frame Act
 - 版本与兼容性；
 - 最小互操作测试。
 
-## 7. 版本规则
+## 8. 版本规则
 
 - 对现有实现无影响的说明性修改可以保持版本；
 - 新增可选字段必须定义旧实现行为；
@@ -135,20 +183,20 @@ Frame 不拥有 Render。Render Revision / Sequence 不能继续复用 Frame Act
 - Transport 实现变化不应自动提升业务协议版本；
 - 实验字段不得假装为冻结字段。
 
-本次 Frame-owned Render → Subsystem-owned Render、Game Package v1 → Subsystem Launcher Descriptor 都属于不兼容语义变更，因此后续不能直接覆盖现有 v1 字段定义。
+Frame-owned Render → Subsystem-owned Render、Game Package v1 → Subsystem Launcher Descriptor 都属于不兼容语义变更，因此后续不能直接覆盖现有 v1 字段定义。
 
-## 8. 迁移顺序
+## 9. 迁移顺序
 
 建议按依赖顺序推进：
 
 ```text
-1. Main ⇄ Subsystem Bootstrap / Lifecycle
-2. Main ⇄ Renderer Control Protocol
-3. Renderer ⇄ Subsystem Connection Protocol
-4. Render Update Protocol
-5. User Input Protocol
-6. Render State Tree
-7. Game Package 新版本
+1. Game Package / Subsystem Descriptor 新版本边界
+2. Main ⇄ Subsystem Bootstrap / Lifecycle
+3. Main ⇄ Renderer Control Protocol
+4. Renderer ⇄ Subsystem Connection Protocol
+5. Render Update Protocol
+6. User Input Protocol
+7. Render State Tree
 ```
 
-现有 v1 文件在新契约完成前保留，避免链接失效和历史语义丢失；新设计不得继续向旧 Frame-scoped Render 模型增加功能。
+现有 v1 文件在新契约完成前保留，避免链接失效和历史语义丢失；新设计不得继续向旧 Frame-scoped Render 或旧平台固定 System Registry 模型增加功能。
