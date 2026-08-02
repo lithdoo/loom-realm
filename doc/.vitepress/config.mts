@@ -69,6 +69,7 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: '契约目录', link: '/15-contracts/README' },
+          { text: 'Main ⇄ Subsystem 控制与运行时生命周期协议草案', link: '/15-contracts/subsystem-control-lifecycle-protocol' },
           { text: '生命周期与调用协议草案', link: '/15-contracts/system-lifecycle-protocol' },
           { text: 'Renderer–Subsystem 数据协议 v1', link: '/15-contracts/frame-data-channel-v1' },
           { text: 'Client State Tree v1', link: '/15-contracts/client-state-tree-v1' },
