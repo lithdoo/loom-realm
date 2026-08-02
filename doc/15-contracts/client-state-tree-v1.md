@@ -1,108 +1,60 @@
-# Client Scoped State Tree v1
+# Client Scoped State Tree v1（Legacy）
 
 > 层级：正式契约  
-> 状态：Active / Normative  
-> 稳定程度：Evolving  
-> 主要定义：Client State Tree v1 的权威入口与稳定边界  
-> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[模块子系统模型](../10-architecture/subsystem-model.md)、[Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md)  
-> 最近复核：2026-08-01
+> 状态：Legacy / Superseded  
+> 稳定程度：Frozen Historical  
+> 主要定义：旧 Frame-scoped Client State Tree 的退役入口  
+> 被替代原因：Render State 已改为 Subsystem-owned Render identity，不再属于 Frame  
+> 最近复核：2026-08-02
 
-本页是 Client State Tree v1 的契约入口。完整字段、校验和事件定位当前仍由现有协议文档定义：
+本路径保留用于旧链接和 Git 历史追溯。**本文不再是新增 Renderer / Render State 实现的 Normative Contract。**
 
-- [Client Scoped State Tree 协议](../architecture/client-state-tree-protocol.md)
-
-Renderer–Subsystem 数据连接、多 Frame 路由、Sequence、Activation、背压和 Resync 由 [Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md) 定义。
-
-## 1. 已冻结边界
+旧 v1 曾冻结：
 
 ```text
 Frame Client State
 └── Scopes
     └── ordered roots
         └── Client Node
-            ├── key
-            ├── tag
-            ├── data
-            └── children
 ```
 
-第一阶段冻结：
+并使用 `frameId + scopeId`、`frameId + scopeId + key` 作为 Scope / Node identity。该所有权模型已经被当前架构替代。
 
-- Scope 完整身份是 `frameId + scopeId`；
-- Node 完整身份是 `frameId + scopeId + key`；
-- Key 在整个 Scope 内唯一并保持业务身份稳定；
-- Tag 必须来自渲染端可信 Registry；
-- Data 是 JSON 目标状态，不是 DOM、Canvas 或 WebGL 操作指令；
-- Children 表达直接子节点和顺序；
-- 一个 Client Node 对应一个可信视图组件实例；
-- 组件实例可以使用 DOM、Canvas 或 WebGL 作为呈现后端；
-- Client Node 不要求每个 Tile、角色或粒子成为 DOM Element；
-- Frame 出栈时删除其全部 Scope；
-- 暂停 Frame 的 Scope 可以继续显示；
-- 协议不允许任意 HTML、脚本、CSS 代码或物理文件路径。
-
-## 2. 状态消息
-
-第一阶段支持：
-
-- 完整 Frame `state.snapshot`；
-- 单 Scope `scope.replace`；
-- `value: null` 删除 Scope；
-- `state.resync` 请求完整状态；
-- `event.emit` 表示一次性客户端事件。
-
-一个投影事务同时改变多个 Scope 时，应发送完整 Frame Snapshot。第一阶段不定义节点级 Patch 或多 Scope Batch Patch。
-
-## 3. 版本与路由维度
-
-必须区分：
-
-- System Data Connection：`sessionId + systemId + connectionId`；
-- Frame Logical Stream：`frameId + activationId`；
-- Frame Logical Stream 单方向 Sequence；
-- Frame Client State Revision；
-- Scope Revision。
-
-Frame 不拥有独立物理 WebSocket 或 MessagePort。多个属于同一 `systemId` 的 Frame 可以共享一个 System Data Connection，但各自的 Activation、Sequence、State Revision 和 Scope Revision 完全独立。
-
-较旧 Revision 不能覆盖较新状态；无法确认某 Frame Sequence 连续性时只请求该 Frame 的完整 Snapshot。物理连接重建可以重置 Logical Stream Sequence，但 State Revision 可以保持。
-
-## 4. 状态与事件
-
-- Scope State 表示当前应该呈现什么，可通过 Snapshot 恢复；
-- Event 表示一次性发生的表现行为，不能替代可恢复界面状态；
-- State 可以在未发送或未呈现前按 Frame 合并为最新目标；
-- Event 通常需要按 Frame 有序、有界处理；
-- Frame 出栈后，其迟到 State 和 Event 不得影响其他 Frame；
-- 一个 Frame 的 Resync 不重置同一 System Data Connection 中其他 Frame 的 Store。
-
-## 5. 资源引用
-
-Client Node Data 可以包含逻辑资源引用：
+## 当前有效方向
 
 ```text
-resourceKey + contentVersion
+Subsystem-owned Render Context
+└── Render State
+    └── Scope / Node
 ```
 
-资源主体通过 [只读 Content API v1](./content-api-v1.md) 获取，不进入 Client State Tree 或 Renderer–Subsystem 数据协议。
+Frame 只属于调用 / User Input Context。Render State 的身份、Revision、Scope、Node、Snapshot、Event 与恢复语义将由新的 Render Update Protocol 与 Render State Tree / equivalent contract 冻结。
 
-Client State 不携带 Content token、绝对 URL、本机路径或资源字节。
+架构文档可能使用 `renderId` 作为概念占位名，但该名称尚不是冻结 wire 字段。
 
-## 6. Renderer 应用原则
+## 不再有效的 v1 假设
 
-Renderer 必须：
+- Scope identity 必须以 `frameId` 开头；
+- Node identity 必须以 `frameId` 开头；
+- Frame 出栈自动删除全部 Render/Scope Store；
+- Frame Activation 控制 Render Revision / Sequence；
+- Renderer 逐 Frame Resync 是 Render 恢复的唯一模型；
+- 每个 Frame 必须拥有独立 Projector 或 Client State。
 
-```text
-根据 System Data Connection 接收消息
-→ 根据 frameId 路由 Frame Logical Stream
-→ 校验 Activation、Sequence 和完整 Scope Tree
-→ 原子提交 Frame/Scope Store
-→ 标记需要呈现的 Scope
-→ 在 Render Scheduler 中协调 DOM / Canvas / WebGL
-```
+## 仍然有效的设计原则
 
-验证失败时保留目标 Frame 的旧 Store，并只请求该 Frame Resync。DOM 或 Scene 不能作为恢复源。
+- 声明式目标状态与 DOM / Canvas / WebGL 分离；
+- Node 使用稳定 Key 和可信 Tag Registry；
+- Data 是受 Schema 约束的 JSON，不是任意 DOM 命令；
+- DOM / Scene 不是权威恢复源；
+- 资源使用逻辑 Key，通过只读 Content API 获取；
+- 状态提交需要校验、Revision 和原子边界。
 
-## 7. 后续迁移
+当前定义见：
 
-后续将现有完整协议逐节迁入本目录，并保留旧路径作为 Legacy 链接。迁移完成前，如本页与现有 Normative 协议的精确字段定义冲突，以现有 Normative 协议的字段 Schema 为准；如涉及 System Data Connection、Frame Logical Stream、Sequence、Activation、背压或 Resync，则以 Renderer–Subsystem 数据协议 v1 为准，并同步修正冲突文档。
+- [渲染系统](../10-architecture/rendering-system.md)；
+- [通信系统](../10-architecture/communication-system.md)；
+- [Renderer–Subsystem 协议分层](../10-architecture/renderer-subsystem-protocol-layers.md)；
+- [正式契约目录](./README.md)。
+
+旧 v1 的精确历史 Schema 请通过本文件 Git 历史查阅。
