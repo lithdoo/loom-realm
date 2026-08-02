@@ -38,7 +38,7 @@
         │                       Web Renderer
         │                       ├── System Connection Registry
         │                       ├── Render Store / Scheduler
-        │                       ├── Input Router
+        │                       ├── Frame Input Registry
         │                       └── DOM / Canvas / WebGL
         │
         └──────────────▶ Readonly Content Service
@@ -48,15 +48,15 @@
 
 ## 2. 核心对象
 
-### System / Subsystem
+### Subsystem / System
 
-`systemId` 是现有协议中标识业务扩展单元的字段，例如 `loom.map` 或 `loom.menu`。新的 Game Entry Subsystem Descriptor 使用全局唯一、稳定的 `key` 作为 Descriptor 身份；`key` 与现有协议身份字段的最终迁移方式由后续契约版本冻结。
+Game Entry 中的 Subsystem Descriptor 使用全局唯一、稳定的 `key` 作为 Descriptor 身份，例如 `loom.map`、`loom.menu`。
 
-当前会话可用的 Subsystem 由 Game Entry 中的完整 Descriptor 集合声明。
+现有部分 v1 数据协议仍使用 `systemId`。`systemId` 与 Descriptor `key` 的最终 wire 迁移或统一方式由对应协议版本冻结；架构层不通过全局替换提前改变旧协议字段含义。
 
 ### Runtime Container
 
-一个 System 对应一个有效 Runtime Container：桌面为独立进程，PWA 为 Dedicated Worker。Container 是 System 级承载单元，不等于 Frame。
+一个 Subsystem 对应一个有效 Runtime Container：桌面为独立进程，PWA 为 Dedicated Worker。Container 是 Subsystem/System 级承载单元，不等于 Frame。
 
 ### Frame
 
@@ -69,46 +69,46 @@ Frame 是 Main 管理的一次调用 / 用户输入上下文。它用于：
 - 用户输入路由；
 - 调用返回关系。
 
-Frame 不是 Render 身份，也不是平台强制的业务状态所有权单元。平台不要求每个 Frame 拥有独立 Projector、Render Tree 或 Renderer Store。
+Frame 不是 Render 身份，也不是平台强制的业务状态所有权单元。平台不要求每个 Frame 拥有独立 Runtime Core、Projector、Render Tree、Revision 或 Renderer Store。
 
 ### Render
 
-Render 是 Subsystem 完全拥有的呈现上下文。Subsystem 决定 Render 的：
-
-- 创建和销毁；
-- 当前声明式目标状态；
-- 排序与组合；
-- 可见性；
-- 更新和恢复。
+Render 是 Subsystem 完全拥有的呈现上下文。Subsystem 决定 Render 的创建、销毁、目标状态、排序、组合、可见性、更新和恢复。
 
 公共架构不定义 Frame 与 Render 的所有权关系。Subsystem 可以在内部手动关联二者，也可以完全不关联。
 
-## 3. 系统划分
+## 3. 运行时启动
 
-### 运行时启动与连接建立系统
-
-负责 Game Entry 中的 Subsystem Descriptor、Launcher、Subsystem Process / Worker Bootstrap、Main Control Connection、Renderer Bootstrap 和 System Data Connection 的建立顺序。
-
-当前桌面 MVP 规则：
+当前桌面 MVP：
 
 ```text
 Main Control Endpoint ready
 → 一次性读取全部 Subsystem Descriptor
 → 校验 key 唯一、launcher.type = nodejs、env 公共约束
-→ Main 立即启动全部声明的 Subsystem Process
-→ 注入 descriptor key + Main Control Endpoint + descriptor env
+→ Main 启动全部声明的 Subsystem Process
+→ 为每次 Launch Attempt 注入 descriptor key、Control Endpoint 和 Bootstrap Credential
 → Subsystem 主动连接 Main
-→ Subsystem 提交与 descriptor.key 一致的 ready identity
+→ subsystem.hello 完成身份绑定与协议版本协商
+→ Main 将连接标记为 identified
+→ Subsystem 通过 subsystem.status 报告 initializing / ready / stopping / failed
 → 全部声明 Subsystem ready
 → Subsystem Bootstrap 完成
-→ Renderer 根据 Main 授权连接各 ready System
+→ Renderer 根据 Main 授权连接各 ready Subsystem
+```
+
+因此：
+
+```text
+connected ≠ identified ≠ ready
 ```
 
 MVP 中所有 Descriptor 都是启动必需项；任一 unsupported Launcher 或任一声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败。当前不定义 `lazy` 字段。
 
+Bootstrap 的精确 wire schema 由 [Main ⇄ Subsystem 控制与运行时生命周期协议 v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 定义；架构层不复制其字段定义。
+
 详见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)。
 
-### 栈式运行系统
+## 4. 栈式运行系统
 
 负责 Frame 调用栈、激活周期、输入目标和调用返回关系。
 
@@ -116,72 +116,71 @@ MVP 中所有 Descriptor 都是启动必需项；任一 unsupported Launcher 或
 
 详见：[栈式运行系统](./stack-runtime-system.md)。
 
-### 运行承载系统
-
-负责 System、Runtime Container、Frame、Render 承载边界以及桌面进程和 PWA Worker 的映射。
+## 5. 运行承载系统
 
 核心规则：
 
 ```text
-每个 System 一个 Runtime Container
-每个 Container 可以承载零个或多个 Frame / Input Context
-每个 Container 可以拥有零个或多个 Render Context
-每个 Container 与 Renderer 之间最多一个长期 System Data Connection
+每个 Subsystem / System 一个 Runtime Container
+每个 Container 可以承载 0..N Frame / Input Context
+每个 Container 可以拥有 0..N Render Context
+每个 Container 与 Renderer 之间最多一条长期 System Data Connection
 Frame 与 Render 没有平台级所有权绑定
 ```
 
 详见：[运行承载系统](./runtime-hosting-system.md)。
 
-### 通信系统
+## 6. 通信系统
 
-负责 Main、Runtime Container、Renderer 和 Content Service 之间的控制面、System 数据面和内容面。
-
-Renderer–Subsystem System Data Connection 内进一步区分：
+通信分为：
 
 ```text
-Connection Layer
-Render Update Protocol
-User Input Protocol
+Control Plane
+    Subsystem ⇄ Main
+    Renderer ⇄ Main
+
+System Data Plane
+    Subsystem ⇄ Renderer
+    ├── Connection Layer
+    ├── Render Update Protocol
+    └── User Input Protocol
+
+Content Plane
+    Runtime / Renderer ⇄ Readonly Content Service
 ```
 
-Render Update 使用 Render 身份；User Input 使用 Frame / Activation 身份。两者共享 System Transport，但不共享业务生命周期。
+Render Update 使用独立 Render 身份；User Input 使用 Frame / Activation 身份。两者共享 System Transport，但不共享业务生命周期、Sequence 或恢复语义。
 
 详见：[通信系统](./communication-system.md)。
 
-### 渲染系统
+## 7. 渲染系统
 
-负责接收各 Subsystem 发布的声明式 Render State，在本地维护 Render Store，并协调为可信 DOM、Canvas 或 WebGL 视图。
+Renderer 接收各 Subsystem 发布的声明式 Render State，在本地维护 Render Store，并协调为可信 DOM、Canvas 或 WebGL 视图。
 
 Renderer 不从 Frame Stack 推导哪些 Render 应显示，也不因 Frame suspend / close 自动隐藏或删除 Render。
 
 详见：[渲染系统](./rendering-system.md)。
 
-### 存储与内容系统
+## 8. 存储与内容系统
 
-负责只读游戏包、安装实例、内容索引、逻辑 Content API、Repository、资源 Key 和路径安全。
+Content API 只提供只读数据与资源。受控 Subsystem Launcher 是 Main 的运行能力，不属于 Content API。
 
-Content API 仍然只提供数据与资源；受控 Subsystem Launcher 是 Main 的运行能力，不属于 Content API。
+Desktop MVP 的 Launcher Type 为 `nodejs`；`launcher.entry` 的路径基准和安全规则仍是待冻结契约问题，不能从当前实现推导稳定保证。
 
 详见：[存储与内容系统](./storage-system.md)。
 
-### 模块子系统模型
-
-规定子系统作为业务扩展单元的职责、业务状态所有权、Frame/Input 适配、Render 所有权和 Container 共享边界。
-
-详见：[模块子系统模型](./subsystem-model.md)。
-
-## 4. 状态所有权
+## 9. 状态所有权
 
 ```text
-程序主系统
+LoomRealm Main
     Session
     Subsystem Descriptor / Runtime Registry
-    Runtime Container 生命周期
+    Runtime Container 生命周期观察
     Frame Stack / Activation / Input Target
     Connection Authority
 
-Runtime Container / Subsystem
-    本 System 的业务状态和规则
+Subsystem Runtime Container
+    本 Subsystem 的权威业务状态和规则
     Frame Input Handler / Frame 关联（如需要）
     Render Registry / Render State
     System 级共享资源和缓存
@@ -190,6 +189,7 @@ Web Renderer
     Main Control State 的只读镜像
     System Data Connection Registry
     Render Store
+    Frame Input 路由状态
     DOM / Canvas / WebGL 与非权威表现状态
     原始输入设备状态
 
@@ -199,38 +199,27 @@ Content Service
 
 任何状态都必须能够回答：谁是权威拥有者、谁可以修改、谁只能读取或投影、断线或重载后从哪里恢复。
 
-## 5. 桌面承载
+## 10. 桌面承载
 
 ```text
 LoomRealm Main Process
-    Session、Subsystem 启动监督、Frame Stack、Input Target、连接授权
-
 FSDB Content Service Process
-    localhost Readonly HTTP Content API
-
 Hostra Electron Main Process
-    BrowserWindow 与桌面宿主
-
-Hostra Renderer Process
-    Web Renderer
-
+Hostra Renderer Process / LoomRealm Web Renderer
 每个已声明 Subsystem 一个 Subsystem Process
-    System 业务 Runtime
-    Frame/Input Contexts（按需）
-    Render Contexts（按需）
 ```
 
 通信：
 
 ```text
 Subsystem Process → Main
-    每 System 一条长期 Control WebSocket
+    每 Subsystem 一条长期 Control WebSocket
 
 Renderer → Main
     每会话一条长期 Control WebSocket
 
 Renderer ⇄ Subsystem Process
-    每 System 一条长期 Data WebSocket
+    每 Subsystem 一条长期 Data WebSocket
 
 Runtime / Renderer ⇄ Content Service
     localhost HTTP Fetch
@@ -238,19 +227,17 @@ Runtime / Renderer ⇄ Content Service
 
 Hostra 不承载 LoomRealm Main，也不解释 Frame、Render、Input 或业务消息。
 
-## 6. PWA 承载
+## 11. PWA 承载
 
 ```text
 Window
-    Web Renderer 和页面宿主能力
+    Web Renderer
 
 Main Runtime Dedicated Worker
     Session、Frame Stack、Input Target、System Worker Registry
 
-每个 System 一个 Dedicated Worker
-    System 业务 Runtime
-    Frame/Input Contexts
-    Render Contexts
+每个 Subsystem 一个 Dedicated Worker
+    业务 Runtime、Frame/Input Contexts、Render Contexts
 
 Service Worker
     same-origin Readonly Content API
@@ -259,155 +246,17 @@ OPFS / Cache Storage
     已安装游戏包和资源
 ```
 
-当前 Subsystem Descriptor MVP 只冻结桌面 `nodejs` Launcher。PWA 如何从同一或不同 Descriptor 建立 System Worker 尚未冻结，不应把浏览器 Worker 启动方式解释为当前 `nodejs` Launcher 的隐式语义。
+PWA 的 Launcher Descriptor 映射尚未冻结；不得把 Desktop `nodejs` Profile 直接解释为浏览器 Worker 启动契约。
 
-## 7. 会话启动链路
+## 12. 核心不变量
 
-```text
-loom-realm start <installation>
-→ Main 创建 Session / Control Endpoint / Renderer Web Service / Content Service
-→ 读取 Manifest / Entry
-→ 一次性读取全部 Subsystem Descriptor
-→ 校验完整 Descriptor 集合
-→ Main 立即启动全部声明的 Subsystem
-→ Subsystem 主动连接 Main
-→ Subsystem 提交与 descriptor.key 一致的 ready identity
-→ 全部声明 Subsystem ready
-→ Hostra 打开 Renderer
-→ Renderer 连接 Main Control Connection
-→ Main 发布 System / Frame / Input 控制状态和 System Data Grant
-→ Renderer 每 ready System 建立 Data Connection
-→ Connection Layer ready
-```
-
-当前 MVP 的 Subsystem Bootstrap 是 eager/all-required；不支持 Launcher 或任一必需 Subsystem 启动失败都会使 Game Bootstrap 失败。
-
-随后 Frame/Input 与 Render 分别演进：
-
-```text
-Main → Frame / Activation / Input Target
-Renderer → User Input Protocol → Subsystem
-```
-
-以及：
-
-```text
-Subsystem → Render Update Protocol → Renderer → DOM / Canvas / WebGL
-```
-
-两条链没有隐式绑定。
-
-## 8. 调用链路
-
-```text
-当前 active Frame A 发起 call(system B, input)
-→ Main 验证 B 已声明且 Runtime Container ready
-→ Main 在 B 中建立新的 Frame / Input Context
-→ Frame B ready for input
-→ Frame A suspend
-→ Frame B 入栈并获得新 Activation / Input Target
-→ Frame B 返回 result
-→ Frame B 出栈
-→ Frame A 获得新 Activation 并恢复输入
-```
-
-上述流程不要求创建、隐藏或删除任何 Render。B 是否创建菜单、场景或其他 Render，以及 A 的 Render 是否继续显示，完全由对应 Subsystem 自己决定。
-
-## 9. 输入上行链路
-
-```text
-键盘 / 手柄 / 触摸 / UI Interaction
-→ Renderer Input Router
-→ 根据 Main Input Target 取得 systemId + frameId + activationId
-→ 对应 System Data Connection
-→ User Input Protocol
-→ Subsystem Frame Input Handler
-→ Subsystem 业务逻辑
-```
-
-普通输入不经过 Main 或 Hostra 业务转发。旧 Activation 输入必须拒绝。
-
-## 10. Render 下行链路
-
-```text
-Subsystem 业务状态 / Render Manager
-→ Render State / Render Event
-→ Render Update Protocol
-→ 所属 System Data Connection
-→ Renderer Render Store
-→ Render Scheduler
-→ DOM / Canvas / WebGL
-```
-
-Render 消息不以 Frame 作为平台级身份。Main 不解释 Render 内容，也不拥有 Render Registry。
-
-Subsystem 可以在没有 Frame、Frame 未 active、Frame suspended 或某 Frame close 后继续维护 Render。
-
-## 11. 三类通信平面
-
-```text
-控制面
-    Main ⇄ Runtime Container
-    Main ⇄ Renderer
-
-System 数据面
-    Runtime Container ⇄ Renderer
-    每 System 一条物理连接
-    ├── Connection Layer
-    ├── Render Update Protocol
-    └── User Input Protocol
-
-内容面
-    Runtime Container / Renderer ⇄ Content Service
-```
-
-大型资源内容不能进入控制面或普通 System 数据消息。
-
-## 12. 第一阶段实例
-
-`loom.map` 是第一个完整业务实现。它可以自行采用：
-
-```text
-Map Runtime
-├── shared / per-session business state
-├── Frame Input Adapter
-├── Render Manager
-├── Render Projector
-└── Repository / Content Client
-```
-
-`loom.map` 可以内部建立 Frame 与 Render 的关联，但这不构成 LoomRealm 对其他 Subsystem 的要求。
-
-## 13. 架构不变量
-
-1. Game Entry 一次性声明本次会话全部 Subsystem Descriptor；
-2. Subsystem Descriptor 使用全局唯一、稳定的 `key`，MVP 不保留独立 `id` / `name`；
-3. 当前桌面 MVP 唯一 Launcher Type 是 `nodejs`；
-4. Main 在启动阶段立即启动全部声明 Subsystem；MVP 不定义 `lazy` 字段；
-5. 任一 unsupported Launcher 或任一声明 Subsystem 无法 ready 都使 Game Bootstrap 失败；
-6. LoomRealm Main 负责启动和监督 Subsystem，Hostra 与 Renderer 不启动业务进程；
-7. Subsystem 主动连接 Main Control Endpoint，connected 与 ready 分离；ready identity 必须匹配 Descriptor `key`；
-8. 每个 System 同时最多一个有效 Runtime Container；
-9. Renderer 与每个 Runtime Container 同时最多一个有效 System Data Connection；
-10. Frame 是调用 / 输入上下文，不是进程、物理连接或 Render 身份；
-11. Frame suspend / resume / close 不产生任何隐式 Render 行为；
-12. Render 的创建、更新、排序、可见性和销毁完全由 Subsystem 控制；
-13. Main 不维护 Render Registry，Renderer 不从 Stack 推导 Render；
-14. 普通 User Input 和 Render Update 不经过 Main 业务转发；
-15. 游戏包运行期间只读，只有 Game Entry 明确声明且当前 Launcher Profile 支持的 Subsystem Entry 可以被受控启动；
-16. `launcher.entry` 的路径基准和安全规则仍待后续契约冻结；
-17. Service Worker 和 Content Service 不拥有游戏运行状态；
-18. 桌面与 PWA Transport 差异不能改变 System、Frame/Input 和 Render 所有权语义。
-
-## 14. 下层文档
-
-- [运行时启动与连接建立系统](./runtime-bootstrap-system.md)；
-- [栈式运行系统](./stack-runtime-system.md)；
-- [运行承载系统](./runtime-hosting-system.md)；
-- [通信系统](./communication-system.md)；
-- [渲染系统](./rendering-system.md)；
-- [模块子系统模型](./subsystem-model.md)；
-- [正式契约目录](../15-contracts/README.md)；
-- [模块设计目录](../20-modules/README.md)；
-- [实施计划目录](../30-implementation/README.md)；
-- [设计决策记录](../decisions/README.md)。
+1. 进程 / Worker 隔离粒度是 Subsystem，不是 Frame；
+2. Frame 是逻辑调用 / User Input Context；
+3. Render 生命周期完全由 Subsystem 控制；
+4. Main 不维护 Render Registry；
+5. Renderer 不从 Frame Stack 推导 Render；
+6. System Data Connection 的存在不依赖 Frame 数量；
+7. Desktop MVP 使用 `key + nodejs + eager all-required bootstrap`；
+8. Control Bootstrap 使用 connection-bound identity，`ready` 是 Runtime Status；
+9. 旧协议中的 `systemId` 不通过架构文档静默改义；
+10. Content API 与 Launcher 是不同能力边界。
