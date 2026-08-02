@@ -23,11 +23,11 @@
 ├── Game Entry
 │   ├── initial call
 │   └── Subsystem Descriptors
-├── 明确声明的 Subsystem Launcher Entry
+├── Descriptor 声明的 Launcher Entry
 ├── FSDB 数据
 └── 资源主体
         ↓
-安装与路径安全层
+安装 / 内容安全层
         ↓
 Package Index / Content Index
         ↓
@@ -36,46 +36,47 @@ Readonly Content API
 Subsystem Repository / Renderer Resource Client
 ```
 
-Game Entry 中的 Launcher Entry 属于启动描述，不通过普通 Content API 执行。
+Launcher Entry 属于启动描述，不通过普通 Content API 执行。
 
 ## 3. 游戏包只读原则
 
-游戏包在运行期间仍然只读：
+游戏包在运行期间保持只读：
 
 - Main 可以读取 Manifest、Entry 和 Subsystem Descriptor；
-- Launcher 可以读取并启动 Entry 明确声明、且当前平台支持的 Subsystem Entry；
+- Main Launcher 可以读取并启动 Entry 明确声明、且当前平台支持的 Subsystem Entry；
 - Subsystem 和 Renderer 的普通内容访问通过只读 Content API；
 - Runtime 状态、缓存和日志不写回原始游戏包；
-- 任何 Launcher 都不能把游戏包升级为任意读写文件系统能力。
+- 允许受控 Launcher 不等于授予普通 Runtime 任意文件读写或执行能力。
 
-“允许受控启动明确声明的 JavaScript Entry”与“运行时内容只读”不冲突：前者是 Main 的启动权限，后者是游戏业务 Runtime 的内容访问边界。
+Desktop MVP 当前受控 Launcher Type 为 `nodejs`。
 
 ## 4. 公共加载与 Bootstrap
 
-Main 负责公共加载：
+Main 公共加载：
 
 ```text
 读取 manifest 和 entry
 → 校验格式、版本和安装实例
 → 读取 initial call
 → 读取全部 Subsystem Descriptor
-→ 校验 Launcher Profile / Entry 路径 / env
+→ 校验 Descriptor 公共结构、key 唯一、launcher.type、env 保留字段
 → 建立只读 Content Grant
 → 将 Descriptor 交给 Runtime Bootstrap / Launcher
 ```
 
-Main 不根据 `systemId` 猜测地图、人物或业务字段。
+Main 不根据旧 `systemId` 或业务名称猜测地图、人物或其他业务字段。
 
-Subsystem Bootstrap 负责：
+Subsystem Bootstrap：
 
 ```text
 根据 launcher.type 选择 Launcher
-→ 在受控安全边界内解析 launcher.entry
-→ 注入 Main 保留环境 + descriptor env
+→ 准备 Launch Attempt / Bootstrap Credential
+→ 解析 launcher.entry（具体规则待契约冻结）
+→ 注入 Main 保留启动上下文 + descriptor env
 → 启动 Process / Worker
 ```
 
-详细流程由 [运行时启动与连接建立系统](./runtime-bootstrap-system.md) 定义。
+详细流程见 [运行时启动与连接建立系统](./runtime-bootstrap-system.md)。
 
 ## 5. Launcher 与 Content API 的职责分离
 
@@ -92,10 +93,15 @@ Content API
 禁止：
 
 - Renderer 通过 Content API 请求执行脚本；
-- Subsystem 通过 Content API 任意启动另一个可执行文件；
-- 游戏数据字段动态拼接任意本机执行路径；
-- Launcher Entry 逃逸出安装根目录；
-- Descriptor env 覆盖 LoomRealm 保留环境变量。
+- Subsystem 通过 Content API 启动另一个可执行文件；
+- Descriptor env 覆盖 LoomRealm 保留启动字段；
+- Content API 把逻辑 Key 当任意本机路径解释。
+
+关于 `launcher.entry`：
+
+- 当前只确认字段存在；
+- 路径基准、安装根边界、符号链接策略、URL/绝对路径规则和尚需的完整性校验均**尚未冻结**；
+- 在这些规则进入正式 Game Package / Launcher Contract 前，不应将某个实现行为写成稳定架构保证。
 
 ## 6. 逻辑 Content API
 
@@ -118,7 +124,7 @@ group(namespace, key)
 resource(namespace, key)
 ```
 
-Content API 不接受任意物理路径，不返回文件句柄、绝对路径或任意执行能力。
+Content API 不接受任意物理路径，不返回文件句柄、绝对路径或执行能力。
 
 ## 7. 平台实现
 
@@ -127,17 +133,17 @@ Content API 不接受任意物理路径，不返回文件句柄、绝对路径�
 ```text
 Subsystem / Renderer
 → HTTP Fetch
-→ localhost Readonly Content Service Process
+→ localhost Readonly Content Service
 → Package Index
-→ 真实只读游戏包目录
+→ 已登记只读游戏包内容
 
 Main Launcher
-→ 已校验 Subsystem Descriptor
-→ 已校验 launcher.entry
-→ spawn Process
+→ 已校验 Subsystem Descriptor 公共结构
+→ Node.js Launcher
+→ descriptor.entry
 ```
 
-Content Service 只监听 loopback，使用会话授权，并只允许逻辑路由的 `GET` / `HEAD`。
+Desktop Content Service 只监听 loopback，并只允许 Content API 的逻辑路由。
 
 ### PWA
 
@@ -149,27 +155,21 @@ Subsystem Worker / Window Renderer
 → OPFS / Cache Storage
 ```
 
-PWA Launcher 只能使用浏览器支持的 Profile，例如受控 JavaScript Worker Entry。Shell / Native Executable 明确 unsupported。
+PWA Launcher Descriptor 到 Worker Bootstrap 的映射尚未冻结。不得把 Desktop `nodejs` Launcher 直接解释为 PWA wire contract。
 
 ## 8. FSDB / Package Index
 
-建议为发布和安装生成：
-
-```text
-fsdb.index.json
-```
-
-或等价 Package Index，保存：
+建议为发布和安装生成 `fsdb.index.json` 或等价 Package Index，保存：
 
 - FSDB Namespace 与类型；
 - 逻辑 Key；
-- 经过校验的内部位置；
+- 经过校验的内部内容位置；
 - MIME；
 - 文件大小；
 - `contentVersion` 或内容哈希；
 - 必要 Schema / 引用元数据位置。
 
-Launcher Entry 的校验可以使用独立安装元数据，不应把可执行入口伪装成普通业务 Resource。
+Launcher Entry 的可执行入口校验属于 Launcher / Game Package 安全边界，不应把可执行入口伪装成普通业务 Resource。
 
 ## 9. Catalog 与 Repository
 
@@ -188,46 +188,35 @@ Repository 不负责 Process Launcher、Frame Stack、User Input 或 Render 生�
 
 ## 10. 资源模型
 
-Render State 只携带：
+Render State 只携带逻辑资源引用，例如：
 
 ```text
 resourceKey + contentVersion
 ```
 
-Renderer Resource Client 通过 Content API 获取 MIME、版本和资源主体。图片、音频和其他资源字节不进入 Subsystem 业务消息或 Render State Tree。
+Renderer Resource Client 通过 Content API 获取 MIME、版本和资源主体。图片、音频和其他资源字节不进入 Render State 或普通 System Data 消息。
 
-不同内容版本必须使用不同缓存身份，旧字节不能覆盖新版本。
+资源访问不因 Frame suspend / close 自动失效。资源缓存生命周期和业务 Render 生命周期也不能从 Frame Stack 推导。
 
 ## 11. Content API 与热路径
 
-Content API 用于：
+Content API 用于会话初始化后的业务内容读取、地图/场景切换、菜单内容加载、资源加载以及缓存恢复。
 
-- 会话初始化后的业务内容读取；
-- 地图或场景切换；
-- 菜单和其他业务内容按需加载；
-- 图片、音频和其他资源加载；
-- 缓存恢复和版本校验。
+Content API 不进入每 Tick 热路径。Runtime Core 每 Tick 只读取已经准备好的内存状态和不可变内容。
 
-Content API 不进入每 Tick 热路径。Runtime Core 每帧只读取已经准备好的内存状态和不可变内容。
+## 12. 路径安全边界
 
-## 12. 路径安全
+Content API 的物理路径安全已经由 Content Contract / Content Service 定义：
 
-所有物理路径解析只发生在安装器、受控 Launcher 或 Content Service 内，并必须：
+- URL 参数不能直接拼接物理路径；
+- Content Service 只解析安装登记和 Package Index 允许的位置；
+- Renderer / Subsystem 不获得任意物理路径能力。
 
-- 使用安装根目录相对路径；
-- 规范化后仍位于安装根目录内部；
-- 拒绝绝对路径、任意 URL、盘符和 UNC；
-- 拒绝 `..` 越界；
-- 拒绝符号链接、junction 或等价逃逸；
-- 限制文件大小、记录数和递归深度；
-- Content API 只允许 Index 中已声明的内容位置；
-- Launcher 只允许 Descriptor 中明确声明的启动入口。
-
-Subsystem 和 Renderer 不获得通用物理路径访问能力。
+Launcher Entry 是不同的高权限路径边界。其最终规则仍待专门契约冻结，不能直接复用 Content API 路径规则并声称两者完全等价。
 
 ## 13. 授权和缓存
 
-桌面 Content Grant 至少绑定：
+Desktop Content Grant 至少绑定：
 
 ```text
 sessionId
@@ -237,31 +226,29 @@ installationId
 expiresAt
 ```
 
-Launcher 授权与 Content Grant 是两种不同能力。Launcher 的系统身份、入口和启动环境由 Main / Runtime Bootstrap 验证，不应复用 Content Bearer Token 作为进程身份。
+Launcher Bootstrap Credential 与 Content Grant 是不同能力。Control `bootstrapToken` 不应复用 Content Bearer Token；Content Token 也不能代替 Subsystem identity。
 
 ## 14. 校验与安装
 
-启动和完整验证是两个不同操作：
+`start` 与 `validate` 是不同操作：
 
-- `start` 必须校验 Manifest、Entry、Subsystem Descriptor 和当前平台需要启动的 Launcher Entry；
-- `validate` 应遍历所有声明 Subsystem 的 Launcher Descriptor、必需内容和强引用；
-- PWA 安装先复制到临时 OPFS 目录，完整校验后再登记为可用；
-- 未完成安装不能作为运行时 `installationId` 使用；
-- 原始游戏包和运行时安装副本都视为不可信输入。
+- `start` 校验当前启动所需的 Manifest / Entry / Descriptor 公共结构以及当前已冻结的 Launcher 约束；
+- `validate` 应尽可能遍历全部声明 Descriptor、必需内容和强引用；
+- 对 `launcher.entry` 物理路径的最终验证规则只有在 Game Package / Launcher Contract 冻结后才能成为互操作要求；
+- PWA 安装应先进入临时位置，完整校验后再登记为可用；
+- 原始游戏包和安装副本都视为不可信输入。
 
 ## 15. 第一阶段约束
 
-第一阶段：
-
 ```text
 Desktop launcher.type
-    javascript
+    nodejs
 
-PWA launcher.type
-    javascript worker compatible profile
+PWA launcher profile
+    尚未冻结
 ```
 
-Shell、Native Executable 等只作为未来扩展方向，不属于当前第一阶段互操作保证。
+MVP 不预定义 Shell、Native Executable、Deno、Bun 等 Launcher Type。
 
 第一阶段地图子系统继续使用 FSDB 保存地图、Tile、人物和资源定义。FSDB 是当前内容格式，不是所有未来 Subsystem 的强制存储接口。
 
@@ -273,15 +260,16 @@ Shell、Native Executable 等只作为未来扩展方向，不属于当前第一
 4. Content API 只接受逻辑内容身份，不承担 Launcher 职责；
 5. Launcher Entry 与普通业务 Resource 必须在能力模型上区分；
 6. Renderer 和普通 Subsystem Runtime 不获得任意文件系统能力；
-7. PWA 可以拒绝桌面专用 Launcher Profile；
-8. Service Worker 和 Content Service 不拥有游戏运行状态；
-9. Content Fetch 不进入每 Tick 热路径；
-10. Render State 不携带资源字节或物理路径。
+7. Desktop MVP Launcher Type 是 `nodejs`；
+8. PWA Launcher 映射尚未冻结；
+9. `launcher.entry` 路径与安全规则仍是显式待冻结项；
+10. Service Worker 和 Content Service 不拥有游戏运行状态；
+11. Render State 不携带资源字节或物理路径。
 
-## 17. 相关下层文档
+## 17. 相关文档
 
 - [运行时启动与连接建立系统](./runtime-bootstrap-system.md)；
-- [游戏包契约入口](../15-contracts/game-package-v1.md)：当前 v1 仍使用旧的无可执行 Subsystem 模型，待版本迁移；
+- [游戏包契约 v1](../15-contracts/game-package-v1.md)：作为旧版本迁移资料保留，不定义当前 Descriptor Launcher 模型；
 - [只读 Content API v1](../15-contracts/content-api-v1.md)；
 - [游戏包模块设计](../20-modules/game-package/README.md)；
 - [FSDB Content Service 模块](../20-modules/fsdb-content-service/README.md)。
