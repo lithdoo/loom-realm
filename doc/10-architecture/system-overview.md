@@ -50,11 +50,13 @@
 
 ### System / Subsystem
 
-`systemId` 标识一个业务扩展单元，例如 `loom.map` 或 `loom.menu`。当前会话可用的 System 由 Game Entry 中的 Subsystem Descriptor 声明。
+`systemId` 是现有协议中标识业务扩展单元的字段，例如 `loom.map` 或 `loom.menu`。新的 Game Entry Subsystem Descriptor 使用全局唯一、稳定的 `key` 作为 Descriptor 身份；`key` 与现有协议身份字段的最终迁移方式由后续契约版本冻结。
+
+当前会话可用的 Subsystem 由 Game Entry 中的完整 Descriptor 集合声明。
 
 ### Runtime Container
 
-一个 `systemId` 对应一个有效 Runtime Container：桌面为独立进程，PWA 为 Dedicated Worker。Container 是 System 级承载单元，不等于 Frame。
+一个 System 对应一个有效 Runtime Container：桌面为独立进程，PWA 为 Dedicated Worker。Container 是 System 级承载单元，不等于 Frame。
 
 ### Frame
 
@@ -87,18 +89,22 @@ Render 是 Subsystem 完全拥有的呈现上下文。Subsystem 决定 Render �
 
 负责 Game Entry 中的 Subsystem Descriptor、Launcher、Subsystem Process / Worker Bootstrap、Main Control Connection、Renderer Bootstrap 和 System Data Connection 的建立顺序。
 
-核心桌面规则：
+当前桌面 MVP 规则：
 
 ```text
 Main Control Endpoint ready
-→ 读取全部 Subsystem Descriptor
-→ Main 启动全部声明的 Subsystem Process
-→ 注入 systemId + Main Control Endpoint + descriptor env
+→ 一次性读取全部 Subsystem Descriptor
+→ 校验 key 唯一、launcher.type = nodejs、env 公共约束
+→ Main 立即启动全部声明的 Subsystem Process
+→ 注入 descriptor key + Main Control Endpoint + descriptor env
 → Subsystem 主动连接 Main
-→ ready(systemId)
-→ Main 标记 System ready
+→ Subsystem 提交与 descriptor.key 一致的 ready identity
+→ 全部声明 Subsystem ready
+→ Subsystem Bootstrap 完成
 → Renderer 根据 Main 授权连接各 ready System
 ```
+
+MVP 中所有 Descriptor 都是启动必需项；任一 unsupported Launcher 或任一声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败。当前不定义 `lazy` 字段。
 
 详见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)。
 
@@ -117,7 +123,7 @@ Main Control Endpoint ready
 核心规则：
 
 ```text
-每个 systemId 一个 Runtime Container
+每个 System 一个 Runtime Container
 每个 Container 可以承载零个或多个 Frame / Input Context
 每个 Container 可以拥有零个或多个 Render Context
 每个 Container 与 Renderer 之间最多一个长期 System Data Connection
@@ -208,7 +214,7 @@ Hostra Electron Main Process
 Hostra Renderer Process
     Web Renderer
 
-每个 systemId 一个 Subsystem Process
+每个已声明 Subsystem 一个 Subsystem Process
     System 业务 Runtime
     Frame/Input Contexts（按需）
     Render Contexts（按需）
@@ -241,7 +247,7 @@ Window
 Main Runtime Dedicated Worker
     Session、Frame Stack、Input Target、System Worker Registry
 
-每个 systemId 一个 Dedicated Worker
+每个 System 一个 Dedicated Worker
     System 业务 Runtime
     Frame/Input Contexts
     Render Contexts
@@ -253,7 +259,7 @@ OPFS / Cache Storage
     已安装游戏包和资源
 ```
 
-PWA Launcher Profile 受浏览器能力限制；例如 JavaScript Worker 可以支持，而 Shell / Native Executable 必须明确报告 unsupported。
+当前 Subsystem Descriptor MVP 只冻结桌面 `nodejs` Launcher。PWA 如何从同一或不同 Descriptor 建立 System Worker 尚未冻结，不应把浏览器 Worker 启动方式解释为当前 `nodejs` Launcher 的隐式语义。
 
 ## 7. 会话启动链路
 
@@ -261,16 +267,20 @@ PWA Launcher Profile 受浏览器能力限制；例如 JavaScript Worker 可以�
 loom-realm start <installation>
 → Main 创建 Session / Control Endpoint / Renderer Web Service / Content Service
 → 读取 Manifest / Entry
-→ 读取全部 Subsystem Descriptor
-→ Main 启动全部声明的 Subsystem
-→ Subsystem 主动连接 Main 并发送 ready(systemId)
-→ Main 建立 ready System Registry
+→ 一次性读取全部 Subsystem Descriptor
+→ 校验完整 Descriptor 集合
+→ Main 立即启动全部声明的 Subsystem
+→ Subsystem 主动连接 Main
+→ Subsystem 提交与 descriptor.key 一致的 ready identity
+→ 全部声明 Subsystem ready
 → Hostra 打开 Renderer
 → Renderer 连接 Main Control Connection
 → Main 发布 System / Frame / Input 控制状态和 System Data Grant
 → Renderer 每 ready System 建立 Data Connection
 → Connection Layer ready
 ```
+
+当前 MVP 的 Subsystem Bootstrap 是 eager/all-required；不支持 Launcher 或任一必需 Subsystem 启动失败都会使 Game Bootstrap 失败。
 
 随后 Frame/Input 与 Render 分别演进：
 
@@ -370,19 +380,24 @@ Map Runtime
 
 ## 13. 架构不变量
 
-1. Game Entry 声明本次会话全部 Subsystem 及其启动 Descriptor；
-2. LoomRealm Main 负责启动和监督 Subsystem，Hostra 与 Renderer 不启动业务进程；
-3. Subsystem 主动连接 Main Control Endpoint，并以匹配 `systemId` 的 ready 表示加载完成；
-4. 每个 `systemId` 同时最多一个有效 Runtime Container；
-5. Renderer 与每个 Runtime Container 同时最多一个有效 System Data Connection；
-6. Frame 是调用 / 输入上下文，不是进程、物理连接或 Render 身份；
-7. Frame suspend / resume / close 不产生任何隐式 Render 行为；
-8. Render 的创建、更新、排序、可见性和销毁完全由 Subsystem 控制；
-9. Main 不维护 Render Registry，Renderer 不从 Stack 推导 Render；
-10. 普通 User Input 和 Render Update 不经过 Main 业务转发；
-11. 游戏包运行期间只读，只有明确声明且 Launcher Profile 允许的 Subsystem Entry 可以被受控启动；
-12. Service Worker 和 Content Service 不拥有游戏运行状态；
-13. 桌面与 PWA Transport 差异不能改变 System、Frame/Input 和 Render 所有权语义。
+1. Game Entry 一次性声明本次会话全部 Subsystem Descriptor；
+2. Subsystem Descriptor 使用全局唯一、稳定的 `key`，MVP 不保留独立 `id` / `name`；
+3. 当前桌面 MVP 唯一 Launcher Type 是 `nodejs`；
+4. Main 在启动阶段立即启动全部声明 Subsystem；MVP 不定义 `lazy` 字段；
+5. 任一 unsupported Launcher 或任一声明 Subsystem 无法 ready 都使 Game Bootstrap 失败；
+6. LoomRealm Main 负责启动和监督 Subsystem，Hostra 与 Renderer 不启动业务进程；
+7. Subsystem 主动连接 Main Control Endpoint，connected 与 ready 分离；ready identity 必须匹配 Descriptor `key`；
+8. 每个 System 同时最多一个有效 Runtime Container；
+9. Renderer 与每个 Runtime Container 同时最多一个有效 System Data Connection；
+10. Frame 是调用 / 输入上下文，不是进程、物理连接或 Render 身份；
+11. Frame suspend / resume / close 不产生任何隐式 Render 行为；
+12. Render 的创建、更新、排序、可见性和销毁完全由 Subsystem 控制；
+13. Main 不维护 Render Registry，Renderer 不从 Stack 推导 Render；
+14. 普通 User Input 和 Render Update 不经过 Main 业务转发；
+15. 游戏包运行期间只读，只有 Game Entry 明确声明且当前 Launcher Profile 支持的 Subsystem Entry 可以被受控启动；
+16. `launcher.entry` 的路径基准和安全规则仍待后续契约冻结；
+17. Service Worker 和 Content Service 不拥有游戏运行状态；
+18. 桌面与 PWA Transport 差异不能改变 System、Frame/Input 和 Render 所有权语义。
 
 ## 14. 下层文档
 
