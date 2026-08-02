@@ -111,6 +111,7 @@ export default defineConfig({
           { text: 'ADR 0004 · Client State 渲染流水线', link: '/decisions/0004-client-state-rendering-pipeline' },
           { text: 'ADR 0005 · Game Entry Subsystem Launcher', link: '/decisions/0005-game-entry-subsystem-launchers' },
           { text: 'ADR 0006 · Frame 与 Render 解耦', link: '/decisions/0006-frame-render-decoupling' },
+          { text: 'ADR 0007 · Subsystem Descriptor MVP', link: '/decisions/0007-subsystem-descriptor-mvp' },
         ],
       },
       {
