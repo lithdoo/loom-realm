@@ -3,252 +3,322 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：程序主系统的内部模块边界  
-> 依赖：[栈式运行系统](../../10-architecture/stack-runtime-system.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[生命周期协议草案](../../15-contracts/system-lifecycle-protocol.md)  
-> 最近复核：2026-08-01
+> 主要定义：LoomRealm Main 的内部模块边界  
+> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[栈式运行系统](../../10-architecture/stack-runtime-system.md)、[Main ⇄ Subsystem Control Lifecycle v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call 协议草案](../../15-contracts/system-lifecycle-protocol.md)  
+> 最近复核：2026-08-02
 
 ## 1. 建议模块
 
 ```text
 Main System
 ├── Game Package Bootstrap
-├── System Registry
+├── Subsystem Descriptor Registry
+├── Launcher Registry / Dispatcher
 ├── Runtime Container Registry
+├── Runtime Supervisor
+├── Control Connection Registry
 ├── Frame Registry
 ├── Frame Stack Controller
-├── Lifecycle Coordinator
-├── Container Supervisor
+├── Frame / Call Coordinator
 ├── Renderer Control Publisher
-├── System Data Channel Authority
+├── System Data Connection Authority
 └── Content Grant Authority
 ```
 
 ## 2. Game Package Bootstrap
 
+负责：
+
 - 打开和校验游戏包公共结构；
-- 读取入口；
-- 解析安装实例和初始 `systemId`；
-- 申请只读 Content Grant；
-- 将 `systemId` 和 `params` 交给栈控制流程；
-- 不解释目标子系统业务参数。
+- 读取 Manifest / Entry；
+- 读取 initial target；
+- 一次性读取全部 Subsystem Descriptor；
+- 校验 Descriptor 公共结构、重复 `key`、当前支持的 Launcher Type、env 保留字段；
+- 建立 Descriptor Registry；
+- 把 Descriptor 集合交给 Runtime Bootstrap。
 
-## 3. System Registry
+不负责：
 
-- 根据 `systemId` 解析 Runtime Container Provider；
-- 校验协议版本和能力；
-- 区分 System 不存在、版本不兼容、Container 启动失败和 Frame 初始化失败；
-- 第一阶段明确游戏包不携带可执行子系统。
+- 解释目标 Subsystem 业务参数；
+- 根据 `systemId` 猜测平台预注册 Provider；
+- 把首个 Frame 调用当作启动 Runtime 的触发器。
 
-待冻结：命名规则、Provider 配置、系统代码来源和内置 System 注册方式。
+## 3. Subsystem Descriptor Registry
 
-## 4. Runtime Container Registry
+按稳定 `descriptor.key` 保存当前会话声明：
 
-按 `systemId` 保存唯一有效 Container：
+```ts
+interface SubsystemDescriptorRecord {
+  readonly key: string;
+  readonly launcherType: "nodejs";
+  readonly entry: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+```
+
+MVP：
+
+- `key` 在当前 Game Entry 中唯一；
+- 当前只接受 `nodejs`；
+- 所有 Descriptor 都是 eager / required；
+- 任一 unsupported Launcher 使 Game Bootstrap 失败。
+
+Registry 不决定 `launcher.entry` 的最终路径安全规则；该规则仍待 Game Package / Launcher Contract 冻结。
+
+## 4. Launcher Registry / Dispatcher
+
+Launcher Registry 将 Descriptor Launcher Type 映射到 Main 特权启动实现。
+
+Desktop MVP：
+
+```text
+nodejs → NodeJsSubsystemLauncher
+```
+
+Node.js Launcher：
+
+- 为每个 Descriptor 创建 Launch Attempt；
+- 生成一次性 Bootstrap Credential；
+- 注入 Descriptor Key、Main Control Endpoint、Bootstrap Credential 和 descriptor env；
+- 启动一个 Subsystem Process；
+- 不把 PID 当协议身份；
+- 不解释业务 Payload。
+
+MVP 不声明 Shell / Executable / Deno / Bun 等其他 Launcher 已受支持。
+
+## 5. Runtime Container Registry
+
+按 Subsystem 保存唯一有效 Runtime Container：
 
 ```ts
 interface RuntimeContainerRecord {
-  readonly systemId: string;
-  readonly containerId: string;
-  readonly controlConnection: ControlConnection;
+  readonly subsystemKey: string;
+  readonly launchId: string;
+  readonly controlConnectionId: string | null;
   readonly rendererDataConnectionId: string | null;
   readonly frameIds: ReadonlySet<string>;
-  readonly status: "starting" | "ready" | "idle" | "serving" | "closing" | "failed";
+  readonly status:
+    | "declared"
+    | "starting"
+    | "connected"
+    | "identified"
+    | "ready"
+    | "stopping"
+    | "stopped"
+    | "failed";
 }
 ```
 
 职责：
 
-- 首次调用时启动或取得 Container；
-- 复用同一 `systemId` 的 Container；
-- 跟踪 Container 承载的 Frame；
-- 跟踪该 Container 与 Renderer 的 System Data Connection；
-- 最后一个 Frame 关闭后执行常驻或空闲退出策略；
-- 将 Container 故障关联到其全部 Frame。
+- 在 Game Bootstrap 阶段记录所有声明 Subsystem；
+- 跟踪 Launch Attempt 与 Control Connection；
+- 区分 connected / identified / ready；
+- 跟踪所属 Frame/Input Context；
+- 跟踪 Renderer System Data Connection；
+- 将 Runtime failure 关联到受影响 Frame。
 
-Registry 不持有 Container 内部业务状态。
+Registry 不持有 Subsystem 业务状态或 Render Registry。
 
-## 5. Frame Registry
+## 6. Runtime Supervisor
+
+Desktop：
+
+- 启动和终止 Subsystem Process；
+- 监听退出和错误；
+- 执行有限关闭期限；
+- 将 Process observation 转换为 Main-observed Runtime state。
+
+PWA：
+
+- 创建和终止每 Subsystem 一个 Dedicated Worker；
+- 监听 `error` / `messageerror`；
+- 与 PWA Bootstrap Profile 组合控制 MessagePort。
+
+Supervisor 不解释 Frame、Render 或业务 Payload。
+
+## 7. Control Connection Registry
+
+负责 Main ⇄ Subsystem Control Connection：
+
+```text
+connected
+→ subsystem.hello
+→ identified
+→ subsystem.status(...)
+→ ready / stopping / failed
+```
+
+职责：
+
+- 校验 Bootstrap Credential；
+- 校验 hello `key` 与 Launch Attempt；
+- 协商 Control Protocol Version；
+- hello 成功后将 Connection 永久绑定到 Descriptor Key；
+- 接收 Runtime status；
+- 把 Protocol Error 转换为 Runtime failure；
+- 为后续 Frame / Call Control 提供已认证通道。
+
+## 8. Frame Registry
 
 ```ts
 interface FrameRecord {
   readonly frameId: string;
-  readonly systemId: string;
-  readonly containerId: string;
+  readonly subsystemKey: string;
   readonly callerFrameId: string | null;
-  readonly status: "starting" | "ready" | "active" | "suspended" | "closing" | "failed";
+  readonly status: "starting" | "active" | "suspended" | "closing" | "failed";
   readonly activationId: string | null;
 }
 ```
 
-Frame Registry 负责：
+Frame Registry 只负责：
 
-- Frame 与 System/Container 的映射；
+- Frame → Subsystem 映射；
+- 调用者关系；
 - 生命周期状态；
 - Activation；
-- 调用者关系；
-- Renderer 是否可以为该 Frame 建立或继续使用 Logical Stream。
+- Input eligibility。
 
-它不保存子系统权威业务状态、Client State Tree 或物理 Renderer Data Transport。
+它不保存：
 
-## 6. Frame Stack Controller
+- Subsystem 权威业务状态；
+- Render identity / Render State；
+- Render Revision；
+- Renderer Render Store；
+- 物理 System Data Transport。
+
+## 9. Frame Stack Controller
 
 - 持有唯一调用栈；
-- 校验只有栈顶 active Frame 可以普通 call/return；
-- 维护 Frame 状态和 Stack Revision；
+- 校验只有栈顶 active Frame 可以普通 call / return；
+- 维护 Stack Revision；
 - 决定 Input Target；
-- 不以 Container、进程或数据连接身份代替 Frame；
-- 不持有子系统业务状态。
+- 串行提交栈变化；
+- 不发布 Render visibility；
+- 不根据栈顺序生成 Render z-order。
 
-所有栈变化通过单一串行写入口提交，避免并发 call、return、Container 退出和 Renderer 断线产生不一致。
+## 10. Frame / Call Coordinator
 
-## 7. Lifecycle Coordinator
-
-调用建立事务：
+调用建立：
 
 ```text
-解析 System
-→ 取得或启动 Runtime Container
-→ 确保 Renderer ⇄ Container 的 System Data Connection 可用
-→ 在 Container 内初始化 Frame
-→ Frame ready
-→ 暂停旧 Frame
-→ 新 Frame 入栈
-→ 激活新 Frame
-→ 发布 Stack 和 Input Target
+解析目标 Subsystem
+→ 确认 Descriptor 已声明且 Runtime ready
+→ 分配 newFrameId
+→ 通过已存在的 Control Connection frame.initialize
+→ Frame/Input Context 初始化成功
+→ suspend caller input
+→ push target Frame
+→ sign activationId
+→ publish Stack / Input Target
 ```
 
-如果该 System 已存在 Renderer Data Connection，不因为创建新 Frame 再签发新的物理连接。
+调用建立**不负责**：
 
-返回事务：
+- 启动 Runtime Container；
+- 确保 Render 已创建；
+- 等待 Render Snapshot；
+- 为 Frame 建立新的物理 Data Connection。
+
+返回：
 
 ```text
 停止当前 Frame 输入
-→ Frame 出栈并关闭实例
-→ 清理该 Frame Logical Stream
-→ 为调用者签发新 Activation
-→ 交付返回结果并恢复调用者
-→ 发布 Stack 和 Input Target
+→ pop / close Frame Input Context
+→ 为 caller 签发新 Activation
+→ 交付 result
+→ publish Stack / Input Target
 ```
 
-关闭 Frame 不关闭共享的 System Data Connection。
+Frame close 不产生任何隐式 Render 操作。
 
-## 8. Container Supervisor
+## 11. Renderer Control Publisher
 
-桌面实现负责：
+发布：
 
-- 启动和关闭 System 进程；
-- 监听退出和错误；
-- 执行关闭期限；
-- 建立 localhost 控制连接；
-- 将进程异常转换为 Container 故障。
+- Session 状态；
+- Subsystem Runtime 状态；
+- Frame Stack Snapshot / increment；
+- Activation / Input Target；
+- System Data Connection Grant / replace / revoke；
+- 会话错误和诊断。
 
-PWA 实现负责：
+明确不发布：
 
-- 创建和终止 System Dedicated Worker；
-- 建立控制 MessagePort；
-- 监听 `error` 和 `messageerror`；
-- 在页面恢复时检查 Worker 状态。
+- Frame visibility；
+- Render Registry；
+- Render visibility / z-order；
+- Frame → Render mapping。
 
-共同规则：
+Renderer 重连时：
 
-- 不使用 PID 或 Worker 名称作为调用身份；
-- 一个 `systemId` 对应一个有效 Container；
-- Container 崩溃影响其承载的全部 Frame；
-- Supervisor 不解释业务 Payload。
+```text
+恢复 Session / ready Subsystem 状态
+→ 恢复 Frame Stack / Input Target
+→ 根据 ready Subsystem 与授权策略重新发布 Data Grant
+```
 
-## 9. Renderer Control Publisher
+不能只从当前 Frame 集合推导需要连接的 Subsystem，因为 Subsystem 可以在零 Frame 时继续 Render。
 
-- 发布完整调用栈 Snapshot；
-- 发布 Frame 入栈、暂停、恢复和出栈；
-- 发布 Frame 可见性和 Input Target；
-- 在 Renderer 需要连接某 System 时发布 System Data Channel Grant；
-- 发布 System Data Connection 失效/撤销信息；
-- 处理 Renderer 重连；
-- 不解释 Scope Tree 或转发普通数据面消息。
+## 12. System Data Connection Authority
 
-Renderer 根据 Stack 中的 `systemId` 将 Frame 业务消息路由到对应 System Data Connection。
-
-## 10. System Data Channel Authority
-
-System Data Channel Authority 管理的是 Renderer 与 Runtime Container 的**物理数据连接授权**，而不是每个 Frame 的连接。
+管理 Renderer 与 Runtime Container 的**System 级物理连接授权**。
 
 职责：
 
-- 每个 `systemId` 同时最多授权一条 Renderer Data Connection；
-- 桌面签发 WebSocket endpoint、`sessionId`、`systemId`、`connectionId`、一次性 token 和过期时间；
-- PWA 为每个 System Worker 创建一条 Renderer Data MessageChannel，并将两端分别转移给 Window 与 System Worker；
-- 在 Renderer 重载、Container 重启、会话结束或 Transport 故障时更新或撤销连接；
-- 限制消息大小、速率和授权范围；
-- 不读取普通输入和 Client State Payload。
+- 每个 Subsystem 同时最多一条 Renderer Data Connection；
+- Desktop 签发 endpoint、Session/Subsystem/Connection identity、一次性 credential 与过期时间；
+- PWA 创建每 Subsystem 一条 Renderer Data MessageChannel；
+- Renderer 重载、Runtime restart、Session end 或 Transport failure 时替换 / 撤销；
+- 不读取 User Input 或 Render Update Payload。
 
-Grant 不包含 `frameId` 或 `activationId`。Frame 消息在已认证的 System Data Connection 内通过 `frameId + activationId` 路由。
+Grant 不绑定 `frameId`、`activationId` 或 Render identity。
 
-Frame 暂停、恢复、关闭或 Resync 只更新 Frame Registry / Activation / Logical Stream 状态，不撤销共享物理连接。
+## 13. Content Grant Authority
 
-## 11. Content Grant Authority
-
-- 为程序主系统公共加载、Runtime Container 和 Renderer Resource Client 签发只读 Content Grant；
-- Grant 绑定当前会话和 `installationId`；
-- 区分 Manifest、Record、Group 和 Resource 权限；
+- 为 Main、Runtime Container 和 Renderer Resource Client 签发只读 Content Grant；
+- Grant 绑定 Session 与 `installationId`；
+- 区分 Manifest / Record / Group / Resource 权限；
 - 不暴露物理游戏包路径；
-- 会话或安装授权失效后撤销相应授权。
+- 不复用 Control Bootstrap Credential。
 
-PWA 同源 Content API 不需要 Bearer token，但仍由安装注册表和 Service Worker 校验安装实例。
-
-## 12. Container 故障协调
-
-Container 失败时：
+## 14. Runtime failure 协调
 
 ```text
-查找该 Container 的全部 Frame
-→ 撤销该 System 的 Renderer Data Connection
-→ 停止相关 Input Target
-→ 计算受影响调用链
-→ 生成 failed 结果或会话故障
-→ 更新 Stack Store
+Runtime failed / stopped unexpectedly
+→ 撤销对应 System Data Connection
+→ 停止相关 Frame 普通输入
+→ 查找受影响 Frame
+→ 按调用栈计算 failed result 或 Session failure
+→ 更新 Stack / Runtime State
 ```
 
-第一阶段如果无法安全保持调用栈一致，应使会话失败，而不是保留失去权威 Runtime 的 Frame。
+Main 不删除 Renderer Render Store 来“完成”Frame failure；Render 恢复/清理由 Render Protocol 决定。
 
-## 13. Renderer 重连
+## 15. 核心不变量
 
-```text
-Renderer 重连 Main Control Connection
-→ Main 发布 stack.snapshot
-→ 计算当前有效 Frame 涉及的 distinct systemId
-→ 每个 systemId 签发一份 System Data Channel Grant
-→ Renderer 每 System 建立一条 Data Transport
-→ Renderer 对该 System 的有效 Frame 分别 state.resync
-```
+- Game Bootstrap 在 Frame 创建前启动全部 required Subsystem；
+- `connected ≠ identified ≠ ready`；
+- hello 成功后 Control Connection 绑定稳定 Descriptor Key；
+- 一个 Subsystem 同时最多一个有效 Runtime Container；
+- 一个 Runtime Container 可以承载多个 Frame/Input Context；
+- Frame 不是业务状态或 Render 所有权单元；
+- Main 不维护 Render Registry；
+- Main 不发布 Frame visibility；
+- System Data Grant 基于 ready Subsystem / connection policy，不基于 Frame 集合；
+- Frame suspend/resume/close 不关闭共享 Data Connection；
+- 普通 User Input 和 Render Update 不通过 Main 转发。
 
-Main 不为同一 System 的每个 Frame 重复创建 WebSocket 或 MessagePort。
+## 16. 测试入口
 
-## 14. 核心不变量
-
-- 栈变化与 Input Target 变化一致；
-- 一个 Frame 同时最多有一个有效 Activation；
-- 一个 `systemId` 同时最多有一个有效 Runtime Container；
-- 一个 Runtime Container 与 Renderer 同时最多有一个有效 System Data Connection；
-- 未 ready 的 Frame 不接收普通输入；
-- Frame 出栈后只清理该 Frame 的 Logical Stream 和 Renderer Store，不关闭共享 Transport；
-- 关闭一个 Frame 不关闭同 Container 内其他 Frame；
-- 普通输入和 Client State 不通过 Main 转发；
-- Main 不依赖 `loom.map` 内部类型；
-- Content Grant 不泄露物理路径。
-
-## 15. 测试入口
-
-- 初始 Container 和 Frame 成功与失败；
-- 同一 System 同时承载多个 Frame；
-- 同一 System 的多个 Frame 共享一条 Renderer Data Transport；
-- Frame A 关闭、暂停或 Resync 不影响 Frame B 和共享 Transport；
+- Descriptor duplicate / unsupported Launcher；
+- eager 启动全部声明 Subsystem；
+- hello key/token/version 校验；
+- connected / identified / ready 状态转换；
+- 同一 Subsystem 多 Frame；
 - 三层嵌套调用；
-- completed、cancelled 和 failed；
-- 并发 call/return 拒绝；
-- Container 崩溃关闭该 System Data Connection 并影响多个 Frame；
-- Renderer 重载后按 distinct systemId 重建连接并逐 Frame Resync；
-- 旧 Activation 消息拒绝；
-- 桌面 WebSocket 与 PWA MessagePort 行为一致；
-- Content Grant 权限和撤销。
-
-现有详细资料：[程序主系统与模块子系统](../../architecture/main-system-and-subsystems.md)。
+- 旧 Activation 输入拒绝；
+- Frame close 不修改 Render 或 Data Connection；
+- Runtime failure 影响多个 Frame；
+- Renderer 重载时零 Frame 但有 Render 的 Subsystem 仍可恢复 Data Connection；
+- Content / Bootstrap Credential 隔离。
