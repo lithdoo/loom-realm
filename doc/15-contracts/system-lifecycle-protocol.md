@@ -1,272 +1,179 @@
-# 模块子系统生命周期与调用协议草案
+# Main ⇄ Subsystem Frame 生命周期与调用协议草案
 
 > 层级：正式契约  
 > 状态：Draft  
 > 稳定程度：Experimental  
-> 主要定义：Runtime Container、Frame 生命周期、子系统调用和返回的待冻结协议边界  
-> 依赖：[栈式运行系统](../10-architecture/stack-runtime-system.md)、[运行承载系统](../10-architecture/runtime-hosting-system.md)、[通信系统](../10-architecture/communication-system.md)  
-> 最近复核：2026-08-01
+> 主要定义：已 ready Subsystem 中 Frame/Input Context 的创建、Activation、调用、返回与关闭边界  
+> 依赖：[栈式运行系统](../10-architecture/stack-runtime-system.md)、[模块子系统模型](../10-architecture/subsystem-model.md)、[Main ⇄ Subsystem 控制与运行时生命周期协议 v1](./subsystem-control-lifecycle-protocol.md)  
+> 最近复核：2026-08-02
 
-本文档收拢 Runtime Container 与 Frame 的生命周期结论。精确 JSON Schema、超时和幂等规则尚未完全冻结。
+本文只定义 **Frame / Call Control** 的待冻结边界。
 
-## 1. 参与方
+Runtime Container Bootstrap、Subsystem identity 和 ready 状态已经由独立 [Control / Runtime Lifecycle Protocol v1](./subsystem-control-lifecycle-protocol.md) 接管，不再由本文定义。
 
-- 程序主系统；
-- 模块子系统 Runtime Container；
-- Runtime Container 内的 Frame Runtime；
-- Web 渲染端控制连接；
-- Renderer ⇄ Runtime Container 的 System Data Connection。
+Frame 只代表调用 / User Input Context。本文不定义 Render 创建、可见性、销毁、Render Snapshot、Render Revision 或 Renderer Store 生命周期。
 
-## 2. 核心身份
+## 1. 前置条件
+
+建立任何 Frame 前：
 
 ```text
-systemId
-    可解析的模块子系统标识
+Game Entry 已声明目标 Subsystem
+→ 目标 Runtime Container 已由 Bootstrap 启动
+→ Control Connection 已 identified
+→ Subsystem 已进入 ready
+```
 
-containerId
-    当前 System Runtime Container 实例
+Frame 调用不得承担“首次启动 Subsystem”的职责。Desktop MVP 中所有声明 Subsystem 已在 Game Bootstrap 阶段 eager 启动。
 
-connectionId
-    Renderer 与该 Container 的 System Data Transport 实例
+## 2. 参与方
 
+- LoomRealm Main；
+- 已 ready 的 Subsystem Runtime Container；
+- Runtime Container 内由 Subsystem 自己实现的 Frame/Input Context；
+- Renderer 只通过 Main Control Plane 获得 Stack / Activation / Input Target，并通过 User Input Protocol 发送普通输入。
+
+Renderer Data Connection 的认证、Render Update 和 User Input wire schema 不由本文定义。
+
+## 3. Frame 核心身份
+
+概念身份：
+
+```text
 frameId
-    一次调用实例
+    一次调用 / 输入上下文
 
 activationId
-    Frame 的一次活动周期
+    Frame 的一次普通输入有效周期
 
 callerFrameId
     调用者 Frame；初始 Frame 为 null
+
+Subsystem reference
+    Frame 所属 Subsystem/System
 ```
 
-进程 ID、Worker 名称和端口号不能代替上述协议身份。
+现有旧协议可能使用 `systemId`。Descriptor `key` 与该字段的最终统一方式由后续协议版本冻结。
 
-物理数据连接身份是 `sessionId + systemId + connectionId`；Frame Logical Stream 身份是 `frameId + activationId`。
+进程 ID、Worker 名称、Connection ID 或 Render identity 不能代替 `frameId`。
 
-## 3. 承载关系
+## 4. Frame 不拥有的公共状态
+
+平台不要求每个 Frame 拥有：
 
 ```text
-一个 systemId
-→ 一个有效 Runtime Container
-
-一个 Runtime Container
-→ 零个、一个或多个 Frame Runtime
-→ 与 Renderer 最多一个有效 System Data Connection
-
-一个 Frame Runtime
-→ 一次调用的独立业务状态和 Client State
-→ 一个共享 Transport 内的 Frame Logical Stream
+独立业务 World State
+Runtime Core
+Execution Loop
+Client/Render State Projector
+Render Context
+Render Revision / Scope
+Renderer Store
+System Data Connection
 ```
 
-`frame.close(A)` 只关闭 A，不得隐式关闭同 Container 内的 B、C Frame，也不得隐式关闭共享 System Data Connection。
+Subsystem 可以内部为某个 Frame 创建这些对象，但它们不是 Frame Protocol 的公共所有权语义。
 
-## 4. Container 生命周期
+## 5. Frame 概念状态
 
-概念状态：
-
-```text
-absent
-→ starting
-→ ready
-↔ serving / idle
-→ closing
-→ absent
-
-starting / ready / serving / idle
-→ failed
-```
-
-### 4.1 启动
-
-程序主系统解析 `systemId` 后，如不存在可用 Container，则启动对应进程或 Worker，并完成：
-
-```text
-container.hello
-→ 协议版本和能力协商
-→ container.initialize(runtimeContext)
-→ container.ready
-```
-
-Container ready 表示可以接收 Frame 初始化，不表示任何 Frame 已 ready，也不要求 Renderer Data Connection 已建立。
-
-### 4.2 Renderer Data Connection
-
-当 Renderer 第一次需要与该 System 交换 Frame 业务数据时，程序主系统授权建立 System Data Connection：
-
-```text
-Renderer ⇄ Runtime Container
-```
-
-该连接：
-
-- 绑定 `sessionId + systemId + connectionId`；
-- 服务该 Container 当前和后续的全部 Frame；
-- 不因为创建、暂停、恢复或关闭单个 Frame而重新建立；
-- 可以在最后一个 Frame 关闭后继续保留，直到 Container 空闲退出或宿主主动回收。
-
-### 4.3 常驻与空闲
-
-最后一个 Frame 关闭后，Container 可以进入 idle 并继续保留共享不可变缓存和 System Data Connection，也可以由宿主在空闲期限后关闭。
-
-空闲退出是资源策略，不改变 Frame 调用和返回语义。
-
-### 4.4 关闭
-
-程序主系统关闭 Container 前必须：
-
-- 停止分配新 Frame；
-- 关闭或失败其全部剩余 Frame；
-- 撤销该 System 的 Renderer Data Connection；
-- 给予有限清理期限；
-- 超时后强制终止桌面进程或 PWA Worker。
-
-## 5. Frame 状态
-
-第一阶段概念状态：
+当前架构状态：
 
 ```text
 starting
-→ ready
 → active
 ↔ suspended
 → closing
 → closed
 
-starting / ready / active / suspended
+starting / active / suspended / closing
 → failed
 ```
 
-Frame 状态属于调用栈语义，与 Container 状态和 System Data Connection 生命周期分离。
+如果最终 wire protocol 需要额外 `ready` 状态，必须只表达“Frame/Input Context 已完成必要初始化，可被 Main 激活”，不能隐含“首次 Render Snapshot 已生成”。
 
 ## 6. Frame 初始化
 
-程序主系统在目标 Container 中创建 Frame：
+概念操作：
 
 ```text
-frame.initialize(frameId, callerFrameId, input, contentGrant)
+frame.initialize(frameId, callerFrameId, input, contentContext?)
 ```
 
-目标 Frame 必须在成功 ready 前完成：
+Subsystem 必须：
 
-- 调用参数公共和业务 Schema 校验；
-- 当前调用所需内容加载和必要准备；
-- 独立 Frame Runtime 创建；
-- 独立 Client State Projector 创建；
-- 首次有效 Client State 的可生成性检查；
-- Frame Logical Stream 路由身份可被 Container 识别。
+- 验证公共和业务调用参数；
+- 建立能够接收该 Frame 输入的内部上下文；
+- 能够在后续 Activation 下校验输入资格；
+- 初始化失败时释放本次调用建立的局部资源。
 
-初始化失败：
+Subsystem **不需要**为了 Frame initialize：
 
-- Frame 不进入正式活动栈；
-- 已创建的局部资源必须释放；
-- Container 仍可继续服务其他 Frame，除非失败表明 Container 已损坏；
-- 不关闭已有 System Data Connection。
+- 创建 Render；
+- 发布 Render Snapshot；
+- 建立新的 System Data Connection；
+- 为 Frame 创建独立业务世界或 Projector。
 
-## 7. Frame ready 与首次 Snapshot
+目标 Frame 初始化失败时不进入正式活动栈，所属 Runtime Container 可以继续服务其他 Frame/Input Context。
 
-`frame.ready` 必须表示：
+## 7. Activation
 
-- Frame Runtime 已建立；
-- 首次完整 Client State Snapshot 已生成并保存在 Projector State 中；
-- Frame Logical Stream 可以在所属 System Data Connection 上被路由；
-- Frame 可以在激活后接收普通输入。
+Main 为 Frame 首次激活或从子调用恢复时签发新的 `activationId`。
 
-如果 Renderer 与该 System 的数据连接尚未建立，Main 必须先完成或触发 System Data Connection 授权，再让 Renderer 获取首次 Snapshot。
-
-仍需在最终 Schema 中冻结：
-
-1. `frame.ready` 是否携带首次 Snapshot 元数据；
-2. 首次 Snapshot 是否由 Renderer 主动 `state.resync` 触发或由子系统主动发布；
-3. System Data Connection、ready、入栈、激活和首次 Snapshot 的严格原子顺序。
-
-在冻结前，实现必须保证 Renderer 不会展示未初始化的活动 Frame。
-
-## 8. 激活和暂停
-
-激活时程序主系统签发新的 `activationId`：
+概念操作：
 
 ```text
 frame.activate(frameId, activationId)
-```
-
-只有当前 Activation 可以接收普通输入和发布活动状态。
-
-在所属 System Data Connection 上，这会形成一个新的 Frame Logical Stream epoch：
-
-```text
-frameId + activationId
-```
-
-双向 Sequence 从 1 开始。
-
-暂停时：
-
-```text
 frame.suspend(frameId, activationId)
-```
-
-- 旧 Activation 失效；
-- Frame Runtime 停止接受普通输入；
-- 已发布 Scope 可以继续显示；
-- Frame 可以暂停 Tick 或内部调度；
-- Container 继续服务其他活跃 Frame；
-- Renderer 拒绝旧 Activation 的迟到 State 和 Event；
-- System Data Connection 保持，不因暂停关闭。
-
-## 9. 恢复
-
-调用者恢复时，程序主系统签发新的 Activation：
-
-```text
 frame.resume(frameId, newActivationId, returnedFrameId, result)
 ```
 
-恢复流程：
+Activation 只隔离 Frame 的普通输入 / 控制周期：
 
-- 验证 Frame 仍然 suspended；
-- 交付子调用结果；
-- 子系统更新权威状态；
-- 必要时重新投影 Client State；
-- 在现有 System Data Connection 上建立新的 Frame Logical Stream epoch；
-- 双向 Sequence 从 1 开始；
-- Renderer 请求或等待完整 Snapshot；
-- 恢复普通输入目标。
+- 旧 Activation 的普通输入必须拒绝；
+- suspend 后该 Frame 不再是普通 Input Target；
+- resume 使用新的 Activation；
+- Activation 改变不产生 Render epoch；
+- Activation 改变不要求 Render resync；
+- suspend 不要求 Subsystem 停止业务 Tick 或隐藏 Render。
 
-恢复 Frame 不重建物理数据连接。
+## 8. 调用建立
 
-## 10. 调用
+只有当前栈顶 active Frame 可以发起普通调用。
 
-只有当前栈顶 active Frame 可以发起普通调用：
+概念请求：
 
 ```text
-system.call(systemId, input)
+system.call(targetSubsystem, input)
 ```
 
-调用建立流程：
+Main 处理：
 
 ```text
-验证调用者是栈顶和当前 Activation
-→ 解析目标 systemId
-→ 取得或启动目标 Runtime Container
-→ 确保 Renderer ⇄ 目标 Container 的 System Data Connection 可用
-→ 在 Container 内 frame.initialize(newFrameId, input)
-→ 目标 Frame ready
-→ 暂停调用者
-→ 目标 Frame 入栈并激活
-→ 建立目标 Frame Logical Stream
-→ 更新 Renderer Stack 和 Input Target
-→ 获取首次 Frame Snapshot
+验证调用者是当前有效 Input/Call Context
+→ 确认目标 Subsystem 已在 Game Entry 声明且 Runtime ready
+→ 分配 newFrameId
+→ 在现有目标 Runtime Container 内 frame.initialize
+→ Frame/Input Context 初始化成功
+→ 暂停调用者输入资格
+→ 新 Frame 入栈
+→ 为新 Frame 签发 Activation
+→ 发布新的 Stack / Input Target
 ```
 
-如果目标 System 已有 Data Connection，创建新 Frame 必须复用该连接。
+调用建立不：
 
-调用请求的成功响应只表示子调用已建立，不包含最终业务结果。
+- 启动新的 Subsystem Process / Worker；
+- 为目标 Frame创建独立物理 Renderer Transport；
+- 等待首次 Render Snapshot；
+- 隐式创建或显示 Render。
 
-同一 Container 可以因为递归或重复调用而同时承载多个 Frame。
+调用请求的成功只表示子调用已建立，不包含最终业务结果。
 
-## 11. 返回
+同一 Runtime Container 可以同时承载多个 Frame/Input Context。
 
-被调用 Frame 返回统一结果：
+## 9. 返回
+
+Frame 返回统一结果：
 
 ```text
 completed(value)
@@ -274,144 +181,164 @@ cancelled
 failed(error)
 ```
 
-只有栈顶 active Frame 可以普通返回。
+只有当前栈顶 active Frame 可以执行普通返回。
 
-程序主系统应：
+概念事务：
 
 ```text
-标记当前 Frame closing
-→ 停止该 Frame 输入
-→ 通知 Renderer frame.popped
-→ 删除该 Frame Logical Stream
-→ frame.close(currentFrameId)
-→ 弹栈
+停止当前 Frame 普通输入资格
+→ 标记 closing
+→ 从调用栈移除
+→ 通知 Subsystem frame.close
 → 为调用者签发新 Activation
-→ frame.resume(callerFrameId, result)
-→ 更新 Renderer Stack 和 Input Target
+→ frame.resume(callerFrameId, returnedFrameId, result)
+→ 更新 Stack / Input Target
 ```
 
-关闭当前 Frame 不关闭其 Runtime Container，也不关闭该 Container 的 Renderer Data Connection，除非宿主随后执行空闲退出策略。
+Frame 返回或关闭不自动：
 
-## 12. Frame 关闭
+- 关闭 Runtime Container；
+- 关闭 System Data Connection；
+- 删除任何 Render；
+- 清理 Renderer Render Store；
+- 停止 Subsystem 的共享业务状态。
 
-`frame.close` 必须：
+## 10. Frame 关闭
 
-- 停止新的输入、Tick 和异步业务提交；
-- 取消或隔离该 Frame 的未完成异步工作；
-- 删除该 Frame 的 Logical Stream 路由和 Sequence 状态；
-- 释放该 Frame 的 Runtime、Projector、队列和表现事件资源；
-- 不清理 Container 共享不可变缓存；
-- 不关闭共享 System Data Connection；
-- 不影响同 Container 内其他 Frame。
+`frame.close` 只终止该 Frame/Input Context 的公共生命周期。
 
-关闭完成后，该 `frameId` 不得重新使用。
+Subsystem 应：
 
-## 13. Container 故障
+- 停止接受该 Frame 的新普通输入；
+- 取消、隔离或完成该 Frame 自己拥有的未完成异步控制工作；
+- 删除 Frame Input Handler / routing state；
+- 释放该 Frame 明确拥有的局部资源；
+- 不影响同 Runtime Container 内其他 Frame；
+- 不根据平台规则删除 Render。
 
-Container 进程退出或 Worker 发生不可恢复错误时：
+如果 Subsystem 内部选择让某个 Frame 拥有某个 Render，它可以在业务实现中显式销毁该 Render，但这种关系不进入公共 Frame Protocol。
+
+关闭后的 `frameId` 不应在同一会话重新使用。
+
+## 11. User Input 关系
+
+Main Control Plane 发布当前 Input Target，概念上包含：
 
 ```text
-container.failed
-→ System Data Connection 失效
-→ 其全部 Frame 失去权威运行环境
-→ Main 停止相关输入
-→ 按调用栈规则生成失败结果或会话故障
+Subsystem/System reference
+frameId
+activationId
 ```
 
-第一阶段原则：
+普通 User Input 不通过 Main Payload 转发，而由 Renderer 经目标 Subsystem 的 System Data Connection 和 User Input Protocol 发送。
 
-- 只影响栈顶且可安全展开时，可以生成 failed 结果并恢复调用者；
-- 如果失败 Container 同时承载非栈顶 Frame，Main 必须显式计算受影响调用链；
-- 无法保持栈一致时，会话失败；
-- 初始 Frame 所在 Container 失败通常导致会话失败；
-- 不从 Renderer Store 或 DOM 恢复权威状态。
+Frame Protocol 只负责决定哪个 Frame/Activation 有输入资格；连续意图、离散输入、Sequence、UI Interaction 和 reset 语义由 User Input Protocol 单独冻结。
 
-具体多 Frame 故障展开算法仍需冻结。
+## 12. Render 关系
+
+Frame Protocol 不定义：
+
+```text
+frame.initialize → render.create
+frame.activate   → render.show
+frame.suspend    → render.hide
+frame.resume     → render.resync
+frame.close      → render.destroy
+```
+
+Render Update Protocol 使用独立 Render identity 和独立恢复语义。
+
+因此：
+
+```text
+not input target ≠ not rendered
+not in Frame Stack ≠ not rendered
+Frame closed ≠ Render deleted
+```
+
+## 13. Runtime Container 故障
+
+Runtime Container 退出或 Control Protocol 报告 terminal failure 时：
+
+```text
+Main 标记 Subsystem failed / stopped
+→ 该 Subsystem 的 System Data Connection 失效
+→ 停止相关 Frame 普通输入
+→ 找出该 Runtime Container 承载的受影响 Frame
+→ 按调用栈规则生成 failed result 或使 Session failed
+```
+
+如果同一 Container 同时承载多个 Frame，故障会使这些 Frame 的输入上下文同时失去权威处理方；具体多 Frame 调用链展开算法仍需冻结。
+
+Renderer Render Store 不是业务状态恢复源。
 
 ## 14. Renderer 重连
 
-Renderer 重载不关闭 Main、Container 或 Frame Runtime。
+Renderer 重载不关闭 Main、Runtime Container 或 Frame/Input Context。
 
-恢复流程：
+恢复拆成两条独立链：
 
 ```text
-Renderer 连接 Main
-→ 获取 stack.snapshot
-→ 计算有效 Frame 涉及的 distinct systemId
-→ 为每个 systemId 重新签发 System Data Connection
-→ Renderer 每 System 建立一条 Transport
-→ 对该 System 的有效 Frame 分别建立 Logical Stream 接收状态
-→ Renderer 向各 Frame 请求 state.resync
-→ 原子重建 Frame/Scope Store
-→ 恢复画面和 Input Target
+Main Control
+→ 恢复 Frame Stack / Activation / Input Target
+
+System Data / User Input
+→ 根据 Main Grant 恢复目标 Subsystem Connection
+→ 恢复 Frame 输入路由
+
+Render Update
+→ 各 Subsystem 独立恢复 Render State
 ```
 
-Renderer 重连后使用新的 `connectionId`。各 Frame Logical Stream Sequence 从 1 开始；Frame State Revision 可以保持。
+禁止：
+
+```text
+从有效 Frame 集合推导所有需要存在的 Subsystem Data Connection
+逐 Frame state.resync 作为 Render 恢复模型
+Frame Store 重建 = Render 恢复
+```
 
 ## 15. 待冻结问题
 
-### 15.1 返回结果交付方法
+本文仍需冻结：
 
-当前推荐：
+- Frame initialize / activate / suspend / resume / close 的最终 JSON Schema；
+- `system.call` / return 的最终方法与结果 Envelope；
+- 是否保留独立 Frame `ready` wire state；
+- 幂等性、重复请求和错误码；
+- Frame 初始化、关闭和调用超时；
+- 调用取消与会话取消；
+- 多 Frame Runtime failure 的调用链展开；
+- Frame Control Protocol 与 Main ⇄ Renderer Control 更新的原子关系；
+- PWA Transport Profile 下相同语义的映射。
 
-```text
-frame.resume(newActivationId, returnedFrameId, result)
-```
+以下问题不再属于本文开放范围：
 
-即恢复与返回结果由同一请求原子交付。
+- Runtime Container Bootstrap / identity / ready；
+- Renderer Data Connection 与 Frame Snapshot 的顺序；
+- Frame Client State / Scope；
+- Render Revision / Resync；
+- Render visibility / lifecycle。
 
-仍需冻结：
+## 16. 冻结条件
 
-- 请求和响应 Schema；
-- 重复 resume 的幂等结果；
-- 调用者恢复失败时的会话处理；
-- result 大小上限。
+转为 Normative 前至少需要：
 
-### 15.2 其他开放问题
-
-- Container 启动、Frame 初始化和关闭超时；
-- 调用取消和外部会话取消；
-- 重复请求幂等性；
-- ready、System Data Connection、Activation 和首次 Snapshot 的原子关系；
-- heartbeat 和 Container 失联判定；
-- Container 内多个 Frame 的故障展开；
-- 关闭期间新的调用请求；
-- PWA 页面冻结后的检查点和恢复 Profile；
-- Container 协议版本和能力协商 Schema；
-- 最后一个 Frame 关闭后 System Data Connection 的 idle 回收时机。
-
-## 16. 故障原则
-
-- 目标 Container 启动失败：调用不建立；
-- System Data Connection 建立失败：目标 Frame 可以保持 ready，但不得激活为可输入 Frame，直到连接恢复或调用失败；
-- 目标 Frame 初始化失败：调用不建立，Container 和现有 System Data Connection 可继续服务；
-- Frame Runtime 业务失败：生成 failed 结果；
-- 单 Frame Logical Stream 协议错误：默认只影响目标 Frame；
-- Container 崩溃：影响其承载的全部 Frame，并关闭对应 System Data Connection；
-- Renderer 重连：调用栈和 Frame Runtime 继续存在；
-- Main 崩溃：第一阶段不提供透明恢复；
-- Service Worker 重启：不影响 Frame Runtime，仅重新建立内容请求处理状态。
-
-## 17. 冻结条件
-
-本协议转为 Normative 前必须完成：
-
-- Container 和 Frame JSON Schema；
-- 两层状态转换表；
-- System Data Connection 与 Frame Logical Stream 身份 Schema；
-- 超时、取消、幂等和错误码；
-- 同一 System 多 Frame 共用 Transport 测试；
-- Frame close/suspend/resume 不关闭共享 Transport 测试；
+- Frame / Call JSON Schema；
+- 状态转换表；
+- Activation 语义；
+- 幂等、超时、取消与错误码；
 - 三层嵌套调用测试；
-- 完成、取消、失败和 Container 崩溃测试；
-- 旧 Activation 和重复消息测试；
-- Renderer 重载按 System 重建连接、逐 Frame Resync；
-- 桌面进程与 PWA Worker 的互操作一致性测试；
-- 不同语言桌面测试子系统互操作。
+- 同一 Subsystem 多 Frame 测试；
+- 旧 Activation 输入拒绝测试；
+- Frame close 不改变 Render / System Data Connection 的测试；
+- Runtime Container failure 的调用链测试；
+- Desktop / PWA Transport-independent fixture。
 
-## 18. 相关文档
+## 17. 相关文档
 
-- [运行承载系统](../10-architecture/runtime-hosting-system.md)；
-- [Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md)；
-- [程序主系统与模块子系统](../architecture/main-system-and-subsystems.md)；
-- [JSON-RPC 通信与状态同步](../architecture/runtime-rpc-and-state-sync.md)。
+- [Main ⇄ Subsystem Control & Runtime Lifecycle Protocol v1](./subsystem-control-lifecycle-protocol.md)；
+- [栈式运行系统](../10-architecture/stack-runtime-system.md)；
+- [模块子系统模型](../10-architecture/subsystem-model.md)；
+- [通信系统](../10-architecture/communication-system.md)；
+- [Renderer–Subsystem 协议分层](../10-architecture/renderer-subsystem-protocol-layers.md)。
