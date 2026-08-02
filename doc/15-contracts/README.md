@@ -7,38 +7,24 @@
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)  
 > 最近复核：2026-08-02
 
-契约层定义不同系统或不同实现必须共同遵守的可互操作语义。系统架构说明为什么这样设计；契约说明消息、状态和数据到底如何表现。
+契约层定义不同系统或不同实现必须共同遵守的可互操作语义。系统架构说明系统职责和所有权；契约冻结消息、状态、顺序、错误和兼容性。
 
-## 1. 当前架构迁移提示
+## 1. 当前已确定的上层边界
 
-2026-08-02 的架构修订已经确定会导致契约重组的上层结论：
+1. Game Entry 一次性声明本次会话全部 Subsystem Descriptor；
+2. Descriptor identity 使用稳定 `key`，MVP 不保留独立 `id` / `name`；
+3. Desktop MVP 唯一 Launcher Type 为 `nodejs`；
+4. 全部 Descriptor eager / all-required，MVP 不定义 `lazy`；
+5. 任一 unsupported Launcher 或任一 required Subsystem 无法 ready 都使 Game Bootstrap 失败；
+6. `launcher.entry` 路径基准和安全规则尚未冻结；
+7. Main ⇄ Subsystem Control v1 使用 `subsystem.hello` 完成 identity binding / version negotiation，使用 `subsystem.status` 报告 Runtime lifecycle；
+8. `connected ≠ identified ≠ ready`；
+9. Frame 只属于 call / User Input Context；
+10. Render 生命周期完全属于 Subsystem；
+11. Renderer ⇄ Subsystem 数据面拆分为 Connection / Render Update / User Input 三个协议域；
+12. Content 继续通过独立只读 Content API 传输。
 
-1. Game Entry 一次性声明本次会话全部 Subsystem Descriptor，Main 在启动阶段立即启动全部声明 Subsystem；Subsystem 主动连接 Main，connected 与 ready 分离；
-2. Subsystem Descriptor MVP 只使用全局唯一、稳定的 `key` 作为 Descriptor 身份，不再保留独立 `id` / `name`；
-3. 当前桌面 MVP 唯一 Launcher Type 为 `nodejs`；任一 unsupported Launcher 或任一声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败；MVP 不定义 `lazy` 字段；
-4. `launcher.entry` 的路径基准和安全规则暂未冻结；
-5. Main ⇄ Subsystem Control Protocol v1 使用 `subsystem.hello` 完成身份绑定与版本协商，使用统一 `subsystem.status` Notification 报告 Runtime 生命周期；`ready` 是 Runtime Status，不是独立协议；
-6. Frame 只属于调用 / User Input Context，Render 生命周期完全属于 Subsystem；Frame 与 Render 没有公共协议所有权关系。
-
-因此当前以下 v1 契约仍保留旧 Schema，**只能作为迁移前详细字段参考，不能继续作为新增架构设计的所有权或 Bootstrap 依据**：
-
-```text
-frame-data-channel-v1.md
-    仍把 Render State / Event 放进 Frame Logical Stream
-
-client-state-tree-v1.md
-    仍把 Scope / Node identity 绑定到 frameId
-
-game-package-v1.md
-    仍采用平台提供 System Registry、游戏包不声明可执行 Subsystem 的旧模型
-    也尚未定义 key / nodejs / eager-all-required Descriptor 语义
-```
-
-这些不兼容变化将在后续契约 PR 中通过新版本 / 新协议域正式迁移，而不是静默修改现有 v1 字段含义。
-
-## 2. 当前 Subsystem Descriptor MVP 边界
-
-后续 Game Package / Bootstrap Contract 至少需要表达当前已经冻结的 MVP 语义：
+## 2. Subsystem Descriptor MVP
 
 ```ts
 interface SubsystemDescriptor {
@@ -51,186 +37,164 @@ interface SubsystemDescriptor {
 }
 ```
 
-当前已确定：
+已冻结语义：
 
-- Main 一次性读取全部 Descriptor；
-- `key` 在 Descriptor 集合中不得重复，并作为稳定 Subsystem 身份；
-- MVP 唯一 Launcher Type 为 `nodejs`；
-- Game Entry 中全部 Descriptor 都是启动必需项；
-- Main 在启动阶段立即启动全部声明 Subsystem；
-- 任一 unsupported Launcher 导致整体 Game Bootstrap 失败；
-- 全部声明 Subsystem ready 后 Bootstrap 才完成；
-- MVP 不定义 `lazy` 字段；
-- Descriptor env 不能覆盖 LoomRealm 保留启动环境；
-- `launcher.entry` 的路径基准、安全约束和安装根边界仍待冻结。
+- `key` 在 Descriptor 集合中唯一并保持稳定；
+- Main 在启动任何业务 Subsystem 前读取完整 Descriptor 集合；
+- Main 在 Bootstrap 阶段启动全部声明 Subsystem；
+- Descriptor env 不能覆盖 LoomRealm 保留启动字段；
+- `launcher.entry` 的最终路径与安全规则仍待 Game Package v2 / Launcher Contract 冻结。
 
-Main ⇄ Subsystem 的连接身份与 Runtime 生命周期已经由 [Main ⇄ Subsystem 控制与运行时生命周期协议 v1 Schema 草案](./subsystem-control-lifecycle-protocol.md) 定义。
+## 3. Main ⇄ Subsystem Control v1
 
-v1 wire surface：
+权威入口：[Main ⇄ Subsystem 控制与运行时生命周期协议 v1](./subsystem-control-lifecycle-protocol.md)。
+
+冻结的 wire surface：
 
 ```text
-subsystem.hello      Request
+subsystem.hello Request
     key
     bootstrapToken
     protocolVersions[]
 
-subsystem.status     Notification
+subsystem.status Notification
     initializing
     ready + rendererDataEndpoint
     stopping
     failed + error
 ```
 
-其中：
+核心规则：
 
-- hello 成功后 Control Connection 永久绑定到 `descriptor.key`；
-- `initializing` 为可选状态报告；
-- `failed` 为 terminal；
-- 重复状态和未列入状态转换表的转换都是 fatal Protocol Error；
-- Desktop v1 `ready.rendererDataEndpoint` 固定为 `{ transport: "websocket", url }`；
-- 生命周期消息不增加 timestamp、sequence、PID 或 runtime metadata。
+- hello 成功后 Control Connection 永久绑定 `descriptor.key`；
+- `ready` 是 Runtime status，不重新声明 identity；
+- `initializing` 可选；
+- `failed` terminal；
+- duplicate / illegal reverse status transition 为 fatal Protocol Error；
+- Desktop v1 ready endpoint 使用 WebSocket Profile；
+- Runtime lifecycle message 不加入 timestamp / sequence / PID / arbitrary metadata。
 
-现有协议中的 `systemId` 字段如何与新的 Descriptor `key` 最终统一或映射，留到对应契约迁移时决定，本轮不直接改写旧 v1 Schema。
+## 4. 当前契约状态
 
-## 3. 当前契约
-
-| 主题 | 权威入口 | 当前状态 |
+| 主题 | 入口 | 状态 |
 |---|---|---|
-| Main ⇄ Subsystem Control Connection、身份绑定与 Runtime Lifecycle | [Main ⇄ Subsystem 控制与运行时生命周期协议 v1 Schema 草案](./subsystem-control-lifecycle-protocol.md) | Draft / Stabilizing；v1 hello/status wire schema、状态机和 fatal error 行为已冻结，少量 host/error-code 参数待补齐 |
-| Frame 生命周期与调用 | [生命周期与调用协议草案](./system-lifecycle-protocol.md) | Draft / 迁移中；Container Bootstrap 部分已由独立 Control/Lifecycle 协议接管，Frame-scoped Render 假设待移除 |
-| Renderer ⇄ Subsystem 数据 | [Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md) | 迁移中；旧 Frame-scoped 数据模型待拆分 |
-| Client State Tree | [Client State Tree v1](./client-state-tree-v1.md) | 迁移中；旧 Frame-scoped identity 待替换为 Render identity |
-| 游戏包 | [游戏包契约 v1](./game-package-v1.md) | v1 保留；新的 Subsystem Descriptor / Launcher 需要新版本 |
-| 逻辑只读内容访问 | [Content API v1](./content-api-v1.md) | Active / Normative；只读内容语义继续有效 |
-| 资源交付 | [资源协议草案](./resource-protocol.md) | Draft；逐步并入 Content API 和 Renderer Resource Client |
+| Main ⇄ Subsystem Bootstrap / Identity / Runtime Lifecycle | [subsystem-control-lifecycle-protocol.md](./subsystem-control-lifecycle-protocol.md) | Draft / Stabilizing；v1 hello/status Schema 与状态机已冻结 |
+| Main ⇄ Subsystem Frame / Call | [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) | Draft；已移除 Container Bootstrap 与 Frame-owned Render 假设 |
+| Renderer ⇄ Subsystem Connection | 尚待新文档 | Draft target |
+| Render Update | 尚待新文档 | Draft target |
+| User Input | 尚待新文档 | Draft target |
+| Render State Tree / equivalent | 尚待新文档 | Draft target |
+| Game Package v2 / Descriptor | 尚待新版本 | Draft target；`entry` 安全仍待冻结 |
+| Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative |
+| Renderer–Subsystem Data v1 | [frame-data-channel-v1.md](./frame-data-channel-v1.md) | Legacy / Superseded |
+| Client State Tree v1 | [client-state-tree-v1.md](./client-state-tree-v1.md) | Legacy / Superseded |
+| Game Package v1 | [game-package-v1.md](./game-package-v1.md) | Legacy for new bootstrap |
+| 独立 Resource Protocol | [resource-protocol.md](./resource-protocol.md) | Legacy / Superseded by Content API |
 
-## 4. 目标契约关系
+旧 v1 路径保留用于链接兼容和 Git 历史追溯，不再重复发布已被当前架构否定的 Normative Schema。
+
+## 5. 目标契约关系
 
 ```text
-Game Package v2 or equivalent
+Game Package v2
     initial target
     subsystem descriptors
         key
         launcher.type = nodejs
         launcher.entry
         env
-    eager / all-required bootstrap semantics
+    eager / all-required bootstrap
         │
         ▼
-Main ⇄ Subsystem Control & Runtime Lifecycle Protocol v1
+Main ⇄ Subsystem Control & Runtime Lifecycle v1
     subsystem.hello
-        key + bootstrapToken + protocolVersions[]
-        Control Connection identity binding
     subsystem.status
-        initializing / ready / stopping / failed
         │
         ▼
 Main ⇄ Subsystem Frame / Call Protocol
-    Frame initialize / activate / suspend / resume / close
-    Frame call / return
-        │
-        └── Frame 只负责调用与 User Input Context
+    frame initialize / activate / suspend / resume / close
+    call / return
 
 Main ⇄ Renderer Control Protocol
-    Session / ready Subsystem
+    Session / Subsystem State
     Frame Stack / Activation / Input Target
-    System Data Connection Grant / revoke
+    System Data Grant / revoke
 
 Renderer ⇄ Subsystem System Data Connection
     ├── Connection Protocol
-    │       System-level identity / auth / version / heartbeat
     ├── Render Update Protocol
-    │       render-oriented state / event / recovery
     └── User Input Protocol
-            frameId + activationId-oriented input
 
-Render State Tree / equivalent contract
-    render identity / scope identity / node identity
+Render State Contract
+    Render identity / Scope / Node / Revision / Event / Recovery
+
+Readonly Content API
+    Manifest / Record / Group / Resource
 ```
-
-内容主体继续通过 Content API 独立传输，不进入上述控制或 System Data Protocol。
-
-## 5. Transport Profile
-
-| 语义连接 | 桌面 Profile | PWA Profile |
-|---|---|---|
-| Renderer ⇄ Main | 每会话 localhost WebSocket | MessagePort |
-| Subsystem ⇄ Main | 每 Subsystem localhost WebSocket，Subsystem 主动连接 | 每 Subsystem 控制 MessagePort / Worker bootstrap |
-| Renderer ⇄ Runtime Container | 每 Subsystem localhost WebSocket | 每 Subsystem 数据 MessagePort |
-| Content API | localhost HTTP | same-origin Fetch + Service Worker |
-
-当前 `nodejs` Launcher Profile 只覆盖桌面 MVP。PWA 如何映射 Subsystem Descriptor 到 Worker Bootstrap 尚未冻结。
-
-不同 Profile 必须保持相同 Subsystem、Frame/Input 和 Render 所有权语义。
 
 ## 6. 身份分层
 
 ```text
-Subsystem Descriptor identity
+Subsystem Descriptor
     key
 
-Main ⇄ Subsystem Control Connection identity
-    subsystem.hello 成功后绑定到 descriptor.key
-    后续 Runtime Lifecycle 消息不重复声明 key
+Main ⇄ Subsystem Control Connection
+    hello 成功后 connection-bound descriptor.key
 
 System Data Connection
-    sessionId + systemId + connectionId
-    （systemId 与 Descriptor key 的迁移关系待冻结）
+    当前旧协议常用 sessionId + systemId + connectionId
+    systemId 与 Descriptor key 的最终统一方式待 Connection Contract 冻结
 
 Frame Input Context
     frameId + activationId
 
 Render Context
-    systemId + render identity
-
-Render State
-    Render/Scope Revision（精确名称待冻结）
+    independent Render identity
+    精确 wire 字段名待冻结
 ```
 
-Frame 不拥有 Render。Render Revision / Sequence 不能继续复用 Frame Activation Sequence。
+不要全局把现有 `systemId` 文本替换为 `key`。Descriptor identity 已冻结为 `key`，但旧数据协议字段的兼容迁移必须在对应协议版本中显式完成。
 
-## 7. 契约文档要求
+## 7. 版本规则
 
-一份可冻结的契约至少应包含：
-
-- 参与方和适用范围；
-- 术语和身份；
-- 数据 Schema；
-- 方法、请求、响应和通知；
-- 前置条件和后置条件；
-- 合法状态转换；
-- 顺序与幂等性；
-- 多路复用与故障隔离；
-- 超时、取消和重试；
-- 错误码和失败恢复；
-- 安全和大小限制；
-- 版本与兼容性；
-- 最小互操作测试。
-
-## 8. 版本规则
-
-- 对现有实现无影响的说明性修改可以保持版本；
+- 说明性修改且不改变实现行为，可以保持协议版本；
 - 新增可选字段必须定义旧实现行为；
-- 改变字段含义、身份归属、状态转换或顺序保证属于不兼容变更；
-- 不兼容变更必须提升协议版本或提供明确迁移；
-- Transport 实现变化不应自动提升业务协议版本；
-- 实验字段不得假装为冻结字段。
+- 改变字段含义、identity ownership、状态转换或顺序保证属于不兼容变更；
+- 不兼容变更必须提升版本或提供迁移；
+- Transport Profile 变化不自动提升业务协议版本；
+- 架构概念占位名不得假装为冻结 wire field。
 
-Control Protocol v1 中已经冻结的 `subsystem.hello` 字段含义、connection-bound identity、`subsystem.status` 状态机若发生不兼容修改，必须提升 Control Protocol Version。
+Frame-owned Render → Subsystem-owned Render、Game Package v1 → Descriptor Launcher 都是不兼容语义变化，因此旧 v1 已降为 Legacy，而不是原地改义。
 
-Frame-owned Render → Subsystem-owned Render、Game Package v1 → Subsystem Launcher Descriptor 同样属于不兼容语义变更。
-
-## 9. 迁移顺序
+## 8. 推荐迁移顺序
 
 ```text
-1. Game Package / Subsystem Descriptor 新版本边界
-2. Main ⇄ Subsystem Control & Runtime Lifecycle v1   ← v1 Schema 已收敛
-3. Main ⇄ Subsystem Frame / Call Protocol 重构
+1. Game Package v2 / Launcher entry security
+2. Main ⇄ Subsystem Control & Runtime Lifecycle v1   ← hello/status 已收敛
+3. Main ⇄ Subsystem Frame / Call Protocol
 4. Main ⇄ Renderer Control Protocol
 5. Renderer ⇄ Subsystem Connection Protocol
-6. Render Update Protocol
-7. User Input Protocol
-8. Render State Tree
+6. User Input Protocol
+7. Render Update Protocol
+8. Render State Contract
 ```
 
-现有 v1 文件在新契约完成前保留，避免链接失效和历史语义丢失；新设计不得继续向旧 Frame-scoped Render 或旧平台固定 System Registry 模型增加功能。
+User Input 与 Render Update 可以并行设计，但都依赖 System Data Connection 边界已经明确。
+
+## 9. 契约冻结要求
+
+一份可冻结契约至少包含：
+
+- 参与方 / scope；
+- terminology / identity；
+- JSON Schema；
+- request / response / notification；
+- precondition / postcondition；
+- state transition；
+- ordering / idempotency；
+- multiplexing / failure isolation；
+- timeout / cancellation / retry；
+- error code；
+- security / size limit；
+- version / compatibility；
+- interoperable fixture / conformance test。

@@ -28,8 +28,8 @@ LoomRealm 是一个通过只读游戏包启动、由程序主系统组织模块�
 ```text
 只读游戏包
 → 程序主系统读取入口和 Subsystem Descriptor
-→ Main 启动并监督声明的 Subsystem
-→ Subsystem 主动连接 Main 并 ready
+→ Main 使用受控 Launcher 启动声明的 Subsystem
+→ Subsystem 主动连接 Main、完成身份绑定并报告 ready
 → Main 管理 Frame / Stack / Input Target
 → Subsystem 处理业务与输入
 → Subsystem 独立发布 Render State
@@ -55,13 +55,15 @@ LoomRealm 适用于需要以下能力的本地游戏或交互内容：
 
 ```text
 游戏包入口
-→ Subsystem Descriptor / JavaScript Launcher
+→ Subsystem Descriptor / Node.js Launcher
 → 程序主系统
 → loom.map 子系统进程
 → 固定 Tick、移动、碰撞和 Portal
 → Render State
 → DOM / Canvas / WebGL 呈现
 ```
+
+桌面 MVP 的 Subsystem Descriptor 使用稳定 `key`，当前唯一 Launcher Type 为 `nodejs`。Game Entry 一次性声明当前会话全部 Subsystem；Main 在 Bootstrap 阶段启动全部声明项，并在全部 Subsystem 成功进入 ready 后完成 Subsystem Bootstrap。
 
 同时验证一次通用嵌套调用：
 
@@ -78,8 +80,6 @@ Render 是否随上述 Frame 生命周期变化完全由各子系统自己决定
 第一阶段的价值是验证平台边界，而不是实现完整 RPG 产品。
 
 ## 4. 长期设计原则
-
-以下原则预计长期保持：
 
 1. **产品语义与实施结构分离**：包目录、文件数量和进程承载方式可以调整，但系统职责不能被实施细节反向定义。
 2. **主系统与业务子系统分离**：主系统管理会话、子系统运行拓扑、调用关系和输入目标，子系统管理自身业务状态与 Render。
@@ -99,7 +99,7 @@ Render 是否随上述 Frame 生命周期变化完全由各子系统自己决定
 - 完整菜单、对话、战斗、任务或 Pokémon 业务；
 - 游戏内容编辑器；
 - 未经 Game Entry 声明的任意脚本执行或通用插件沙箱；
-- 第一阶段除 JavaScript Entry 之外的 Shell / Native Launcher；
+- 第一阶段除 `nodejs` 之外的 Shell / Native / 其他 Launcher Type；
 - 在线系统商店、签名和自动更新；
 - 多主调用栈、后台 Frame Graph 或多人同步；
 - Save System；
@@ -108,8 +108,6 @@ Render 是否随上述 Frame 生命周期变化完全由各子系统自己决定
 非目标可以在后续阶段重新评估，但必须先更新本层文档，再向下修改架构和实施方案。
 
 ## 6. 发展方向
-
-LoomRealm 的发展顺序是：
 
 ```text
 明确产品边界

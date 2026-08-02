@@ -1,68 +1,62 @@
-# 资源交付协议草案
+# 资源交付协议草案（Superseded）
 
 > 层级：正式契约  
-> 状态：Draft  
-> 稳定程度：Experimental  
-> 主要定义：逻辑资源 Key、授权读取、版本和缓存边界  
-> 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[渲染系统](../10-architecture/rendering-system.md)  
-> 最近复核：2026-07-29
+> 状态：Legacy / Superseded  
+> 稳定程度：Frozen Historical  
+> 主要定义：旧独立资源协议方案的退役入口  
+> 被替代原因：资源主体已经由统一只读 Content API v1 提供  
+> 最近复核：2026-08-02
 
-## 1. 目标
+本草案不再作为独立协议继续演进。
 
-资源协议负责把图片等大型静态资源安全地交付给渲染端，而不让 Client State 携带资源字节或暴露本机物理路径。
+资源读取的公共语义已经由 [只读 Content API v1](./content-api-v1.md) 定义：
 
-## 2. 资源身份
+```text
+GET /_lr/v1/games/{installationId}/resources/{namespace}/{key}
+```
 
-客户端引用至少包含：
+资源通过独立 HTTP / Fetch 内容面交付，不进入 Main Control Connection 或 Renderer–Subsystem System Data Connection。
+
+## 当前有效资源模型
+
+Render State 可以携带逻辑资源引用，例如：
 
 ```text
 resourceKey + contentVersion
 ```
 
-`resourceKey` 是当前游戏包内稳定逻辑身份；`contentVersion` 用于缓存失效和诊断。
+Renderer Resource Client 再通过 Content API 获取 MIME、版本、缓存头和二进制主体。
 
-## 3. 基本流程
+资源访问：
 
-```text
-Client Node Data 引用 resourceKey
-→ 渲染端请求资源
-→ 资源接口验证游戏包、Frame 和权限
-→ Resource Repository 定位和读取
-→ 返回 MIME、版本和主体
-→ 渲染端解码并缓存
-```
+- 不要求绑定 Frame；
+- 不因 Frame suspend / close 自动失效；
+- 不通过 DOM 或 Render 层级推导权限；
+- 不暴露物理文件路径；
+- 不允许客户端把逻辑 Key 当任意本机路径使用；
+- 不与高频 User Input / Render Update 共用业务队列。
 
-## 4. 边界
+Desktop 授权由 Content API 的 Session / Installation / Scope / Token Profile 定义；PWA 由 same-origin Service Worker 与安装登记控制。
 
-- Client State 不携带图片字节；
-- Client State 不携带物理路径；
-- Runtime Core 不读取资源主体；
-- 资源请求不能获得任意文件系统能力；
-- 大型资源流量不与高优先级控制消息共用队列；
-- 资源加载失败不应破坏 Frame/Scope Store。
+## 不再保留的开放问题
 
-## 5. 待冻结问题
+以下旧问题已经由 Content API 架构决定，不再需要作为独立资源协议选择：
 
-- 资源接口由平台服务还是子系统授权端口提供；
-- 请求是否必须绑定 Frame 和 Activation；
+- 资源接口由平台服务还是 Subsystem 端口提供；
+- 请求是否必须绑定 Frame / Activation；
+- 浏览器与桌面是否使用不同逻辑资源协议。
+
+仍可在 Content API / Renderer Resource Client 中继续细化：
+
 - MIME 白名单；
-- 最大资源大小和并发数；
-- 内容版本计算方式；
-- 缓存、校验和完整性；
-- Frame 出栈后的资源授权和缓存生命周期；
-- 浏览器模式与桌面模式的统一传输语义。
+- 最大资源大小与并发；
+- Range Profile；
+- 缓存和完整性；
+- Renderer 资源引用计数与本地释放策略。
 
-## 6. 冻结条件
+相关文档：
 
-- 定义请求和响应 Schema；
-- 定义权限模型；
-- 定义大小与速率限制；
-- 定义版本和缓存规则；
-- 覆盖路径逃逸、伪造 Key、超大文件和错误 MIME 测试；
-- 验证资源洪峰不阻塞控制面和输入。
-
-当前详细资料：
-
-- [游戏启动与内容加载](../game-package/phase-1-game-loading.md)；
-- [Web 渲染端协调](../design/web-client-reconciliation.md)；
-- [Hostra 桌面宿主](../architecture/hostra-desktop-client-host.md)。
+- [只读 Content API v1](./content-api-v1.md)；
+- [存储与内容系统](../10-architecture/storage-system.md)；
+- [渲染系统](../10-architecture/rendering-system.md)；
+- [FSDB Content Service 模块](../20-modules/fsdb-content-service/README.md)。

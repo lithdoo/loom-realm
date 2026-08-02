@@ -1,44 +1,17 @@
-# LoomRealm 游戏包契约 v1
+# LoomRealm 游戏包契约 v1（Legacy for Subsystem Bootstrap）
 
 > 层级：正式契约  
-> 状态：Active / Normative  
-> 稳定程度：Evolving  
-> 主要定义：游戏包契约 v1 的权威入口与稳定边界  
-> 依赖：[存储与内容系统](../10-architecture/storage-system.md)  
-> 最近复核：2026-07-29
+> 状态：Legacy / Superseded for new bootstrap  
+> 稳定程度：Frozen Historical  
+> 主要定义：旧 Game Package v1 入口模型的退役说明  
+> 被替代原因：Game Entry 现已声明完整 Subsystem Descriptor 与 Launcher；需要新的 Game Package 版本  
+> 最近复核：2026-08-02
 
-本页是游戏包契约 v1 的新入口。完整字段、Schema、路径安全和校验规则当前仍由以下文档定义：
+本路径保留用于旧链接和 Git 历史追溯。旧 v1 的 `realm.game.json` / `realm.entry.json` 基础格式和路径安全历史可以通过 Git 历史查询，但**旧入口模型不能继续作为当前 Subsystem Bootstrap 的实现依据**。
 
-- [LoomRealm 游戏包契约 v1](../contracts/game-package-v1.md)
+## 旧 v1 模型
 
-## 1. 已冻结边界
-
-第一阶段：
-
-- 普通目录即游戏包；
-- 运行期间只读；
-- 根目录包含 `realm.game.json`；
-- 清单引用唯一 `realm.entry.json`；
-- 入口定义初始 `system` 和 JSON `params`；
-- 主系统只验证入口公共结构；
-- 目标子系统验证业务参数；
-- 所有物理路径必须限制在包内；
-- 游戏包不要求执行包内脚本或本机二进制；
-- Client State 只携带逻辑资源 Key。
-
-## 2. 启动与验证
-
-```text
-loom-realm start ./game
-    建立会话，只加载入口所需内容
-
-loom-realm validate ./game
-    遍历全部强引用，尽可能报告所有问题
-```
-
-`validate` 不启动正式调用栈，也不生成会话状态。
-
-## 3. 入口边界
+旧版本入口主要表达：
 
 ```json
 {
@@ -49,19 +22,53 @@ loom-realm validate ./game
 }
 ```
 
-`params` 的字段属于目标子系统调用契约，不属于程序主系统固定 Schema。
+并假设游戏包只选择平台预注册 System，实现由平台固定 Registry 提供。
 
-## 4. 路径安全
+该假设已经被 Subsystem Descriptor 架构替代。
 
-必须拒绝：
+## 当前架构要求的新版本能力
 
-- 绝对路径、盘符和 UNC；
-- URL；
-- `..` 越界；
-- 符号链接或连接点逃逸；
-- 指向游戏包外部的资源；
-- 超过实现限制的文件大小和递归深度。
+新的 Game Package Contract 必须至少表达：
 
-## 5. 后续迁移
+```ts
+interface SubsystemDescriptor {
+  readonly key: string;
+  readonly launcher: {
+    readonly type: "nodejs";
+    readonly entry: string;
+  };
+  readonly env?: Readonly<Record<string, string>>;
+}
+```
 
-后续将现有完整契约迁入本目录。迁移完成前，以旧路径中的 Normative 文档作为字段级单一真相源，本页负责维持新的文档层级和阅读入口。
+并定义：
+
+- initial target 如何引用已声明 Subsystem；
+- Game Entry 一次性声明当前会话全部 Descriptor；
+- `key` 唯一和稳定身份规则；
+- Desktop MVP `launcher.type = nodejs`；
+- 所有声明项 eager / all-required；
+- unsupported Launcher 导致 Game Bootstrap 失败；
+- Descriptor env 不能覆盖 LoomRealm 保留启动字段；
+- `launcher.entry` 的最终路径基准、安全和安装根边界。
+
+最后一项目前仍未冻结，不应从旧 v1 路径安全条款直接推导为 Node.js Launcher 的稳定保证。
+
+## 仍然有效的跨版本原则
+
+- 游戏包运行期间只读；
+- Manifest / Entry 公共结构由 Main 校验；
+- 业务 `params` 由目标 Subsystem 校验；
+- 普通 Content API 不暴露物理路径；
+- Runtime 状态不写回原始游戏包；
+- `validate` 与正式运行会话是不同操作。
+
+## 当前权威来源
+
+- [产品设计总览](../00-overview/product-vision.md)；
+- [运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)；
+- [存储与内容系统](../10-architecture/storage-system.md)；
+- [ADR 0007：Subsystem Descriptor MVP 收敛](../decisions/0007-subsystem-descriptor-mvp.md)；
+- [正式契约目录](./README.md)。
+
+新的 Subsystem Descriptor 入口必须使用新的 Game Package 版本或等价明确迁移，不能静默改变 v1 字段含义。

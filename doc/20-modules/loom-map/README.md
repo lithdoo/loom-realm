@@ -4,42 +4,69 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：第一阶段地图子系统的内部模块和依赖方向  
-> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)  
-> 最近复核：2026-07-29
+> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)  
+> 最近复核：2026-08-02
 
-`loom.map` 是第一阶段纵向切片。这里的内部模块不是 LoomRealm 对所有子系统的公共要求。
+`loom.map` 是第一阶段纵向切片。这里的内部模块不是 LoomRealm 对所有 Subsystem 的公共要求。
 
 ## 1. 模块结构
 
 ```text
 loom.map
-├── System Adapter
-├── Input Adapter
+├── System Control Adapter
+├── Frame Input Adapter
 ├── Game Catalog / Repositories
 ├── Session Coordinator
 ├── Runtime Execution Loop
-├── Runtime Core
-├── Client State Projector
+├── Runtime Core / World State
+├── Render Manager
+├── Render Projector
 └── Pokémon Essentials Compatibility Compiler
 ```
 
-## 2. System Adapter
+地图子系统可以选择共享 world state、共享 Execution Loop 和共享 Render；平台不要求按 Frame 创建上述对象。
 
-将平台生命周期映射到地图子系统内部：
+## 2. System Control Adapter
 
-- initialize → 准备入口内容并启动 Core；
-- activate → 接收输入；
-- suspend → 停止输入并暂停 Loop；
-- resume → 更新 Activation、处理返回结果并恢复；
-- close → 停止输入、关闭 Loop 和 Repository。
+处理 Main Control Plane：
 
-## 3. Input Adapter
+- Runtime Bootstrap 完成后进入 ready；
+- `frame.initialize` 建立地图调用 / 输入上下文；
+- `frame.activate` 允许对应 Activation 的普通输入；
+- `frame.suspend` 停止该 Frame 普通输入；
+- `frame.resume` 更新 Activation 并交付子调用结果；
+- `frame.close` 删除对应 Frame/Input Context。
 
-将归一化客户端输入转换为地图命令。持续移动使用方向意图，而不是依赖浏览器键盘重复频率。
+这些 Frame 操作**不自动**：
+
+- 启停整个地图 Runtime Loop；
+- 创建/隐藏/销毁 Render；
+- 删除共享 world state；
+- 清空 Repository Cache。
+
+如果地图业务希望某个 Frame 生命周期影响某个地图 Session 或 Render，由 `loom.map` 自己显式实现。
+
+## 3. Frame Input Adapter
+
+将 User Input Protocol 的归一化输入转换为地图命令：
+
+```text
+frameId + activationId
+→ locate input context
+→ validate current activation
+→ normalize intent/action
+→ submit command to map runtime
+```
+
+持续移动使用方向意图，不依赖浏览器键盘重复频率。
+
+Input Adapter 不负责 Render 路由。
 
 ## 4. Repositories
 
-按需加载地图、人物和资源描述，负责解析、局部校验、并发去重和进程内缓存。返回结果必须不可变。
+按需加载地图、人物和资源描述，负责解析、局部校验、并发去重和 Container 级不可变缓存。
+
+Repository 不依赖 Frame Stack，也不按 Frame 强制复制同一份只读内容。
 
 ## 5. Session Coordinator
 
@@ -48,25 +75,25 @@ loom.map
 - 入口地图和人物加载；
 - 出生位置校验；
 - 地图切换目标准备；
-- Loading/Error Session State；
+- Loading/Error business state；
 - 迟到异步结果和关闭取消。
 
-Coordinator 不在普通移动热路径，也不直接修改 Core。
+地图内部可以拥有一个或多个 Session；其与公共 Frame 的映射是 `loom.map` 内部实现，不属于 LoomRealm Frame Contract。
 
 ## 6. Runtime Execution Loop
 
-Core 的唯一写入口：
+Core 的串行写入口：
 
-- 串行 Command、Tick 和 Control Operation；
-- 使用单调时钟和固定 Tick；
+- Command / Tick / Control Operation；
+- 单调时钟和固定 Tick；
 - 有界命令队列和有限追赶；
 - 控制操作优先；
-- 建立地图切换 Effect Barrier；
+- 地图切换 Effect Barrier；
 - 在事务边界产生不可变 Snapshot。
 
-当前默认参数属于实现选择，不属于平台契约。
+是否只有一个共享 Loop 或多个内部 Session Loop 是地图 Subsystem 设计问题，不是平台 Frame 语义。
 
-## 7. Runtime Core
+## 7. Runtime Core / World State
 
 同步、确定性、无 I/O，负责：
 
@@ -77,17 +104,56 @@ Core 的唯一写入口：
 - 地图切换 Effect；
 - 已准备场景的原子提交。
 
-Core 不包含 Frame、JSON-RPC、Repository、Scope、DOM 或图片字节。
+Core 不包含 Main Frame Stack、JSON-RPC、DOM、Hostra 或物理 Transport。
 
-## 8. Client State Projector
+## 8. Render Manager
 
-读取已提交的 Runtime Snapshot 与 Session Snapshot，生成 `world`、`hud`、`loading`、`error` 或 `debug` Scope。
+`loom.map` 自己拥有 Render Registry 和 Render 生命周期。
 
-多 Scope 同时变化时发布完整 Frame Snapshot；投影失败不能发布部分树。
+例如可以维护：
 
-## 9. Pokémon Essentials 兼容层
+```text
+world render
+hud render
+loading render
+debug render
+```
 
-兼容层负责把 RPG Maker XP / Pokémon Essentials v21.1 来源格式转换为 LoomRealm 标准运行内容：
+Render Manager 决定：
+
+- create / destroy；
+- visibility / ordering；
+- 哪些 Runtime Snapshot 影响哪些 Render；
+- Render recovery；
+- Presentation Event。
+
+Render 可以在零 Frame 时存在，也可以跨 Frame suspend / close 保持。
+
+## 9. Render Projector
+
+Render Projector 读取已提交 Runtime / Session Snapshot，生成声明式 Render State，例如：
+
+```text
+world
+hud
+loading
+error
+debug
+```
+
+这里的名称是地图内部 Render/Scope 设计，不表示公共 Frame Store。
+
+Projector：
+
+- 不要求每 Frame 一份；
+- 不输出 “Frame Snapshot” 作为平台语义；
+- 使用 Render Update Protocol 发布状态；
+- 多 Scope 同时变化时按未来 Render Contract 的事务边界原子发布；
+- 投影失败不能发布部分错误状态。
+
+## 10. Pokémon Essentials 兼容层
+
+负责把 RPG Maker XP / Pokémon Essentials v21.1 来源格式转换为 LoomRealm 标准运行内容：
 
 - 三个 Tile 数据层；
 - 原始 Tile ID；
@@ -96,48 +162,51 @@ Core 不包含 Frame、JSON-RPC、Repository、Scope、DOM 或图片字节。
 - 四列四行人物行走图；
 - 手工 LoomRealm Portal。
 
-前端和 Runtime Core 不直接解释 Ruby Marshal、`.rxdata` 或来源类。
+Renderer 和 Runtime Core 不直接解释 Ruby Marshal、`.rxdata` 或来源类。
 
-## 10. 依赖方向
+## 11. 依赖方向
 
 ```text
-System Adapter
-→ Coordinator / Loop
+System Control Adapter
+→ Frame Input Adapter / Coordinator / Runtime
+
+Frame Input Adapter
+→ Runtime Command API
 
 Coordinator
 → Repositories
-→ Loop Control API
+→ Runtime Control API
 
 Execution Loop
 → Runtime Core
-→ Projection Scheduler
+→ Render Projection Scheduler
 
-Projector
-→ Client State Types
+Render Manager / Projector
+→ Render State Types
 
 Compatibility Compiler
 → Repository Content Types
 ```
 
-禁止 Core 反向依赖 Coordinator、Repository 或 Renderer。
+禁止 Core 反向依赖 Main、Repository、Renderer 或 Hostra。
 
-## 11. 测试入口
+## 12. 测试入口
 
-- 相同输入产生相同 Snapshot、Event 和 Effect；
+- 相同输入产生相同 Runtime Snapshot / Effect；
 - Core 不并发和不重入；
 - 固定 Tick 与有限追赶；
 - 命令队列背压；
 - Portal Effect Barrier；
 - 地图切换失败保留旧 Scene；
 - 成功切换原子提交；
-- suspend/resume 不污染调用栈状态；
+- 同一 `loom.map` Process 可以服务多个 Frame/Input Context；
+- Frame A/B 输入 Activation 相互隔离；
+- Frame suspend / close 不隐式隐藏或销毁 world/hud Render；
+- 没有 Frame 时 loading/debug Render 仍可存在；
+- Renderer reload 后按 Render Protocol 恢复地图 Render；
 - 两张地图双向往返；
-- DOM 呈现 Priority 和人物遮挡。
+- DOM/Canvas/WebGL 呈现 Priority 和人物遮挡。
 
-## 12. 现有详细资料
+## 13. 现有详细资料
 
-- [地图 Runtime Core](../../runtime/phase-1-runtime-core.md)；
-- [Runtime Execution Loop](../../runtime/phase-1-runtime-execution-loop.md)；
-- [Session Coordinator](../../runtime/phase-1-session-coordinator.md)；
-- [Pokémon Essentials 地图运行时](../../runtime/phase-1-pokemon-essentials-map-runtime.md)；
-- [游戏启动与内容加载](../../game-package/phase-1-game-loading.md)。
+旧 `runtime/`、`game-package/` 目录中的地图详细设计继续作为实现参考；如果其中存在“每 Frame 固定拥有 Core / Projector / Render State”之类假设，应按本模块和上层架构修正或降级为 Legacy。
