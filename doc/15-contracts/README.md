@@ -15,9 +15,10 @@
 
 1. Game Entry 一次性声明本次会话全部 Subsystem Descriptor，Main 在启动阶段立即启动全部声明 Subsystem；Subsystem 主动连接 Main，connected 与 ready 分离；
 2. Subsystem Descriptor MVP 只使用全局唯一、稳定的 `key` 作为 Descriptor 身份，不再保留独立 `id` / `name`；
-3. 当前桌面 MVP 唯一 Launcher Type 为 `nodejs`；任一 unsupported Launcher 或任一声明 Subsystem无法进入 ready 都使 Game Bootstrap 失败；MVP 不定义 `lazy` 字段；
+3. 当前桌面 MVP 唯一 Launcher Type 为 `nodejs`；任一 unsupported Launcher 或任一声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败；MVP 不定义 `lazy` 字段；
 4. `launcher.entry` 的路径基准和安全规则暂未冻结；
-5. Frame 只属于调用 / User Input Context，Render 生命周期完全属于 Subsystem；Frame 与 Render 没有公共协议所有权关系。
+5. Main ⇄ Subsystem Control Connection 使用 `subsystem.hello` 完成身份绑定与 Control Protocol Version 协商，使用统一 `subsystem.status` Notification 报告 Runtime 生命周期；`ready` 是 Runtime Status，不是独立协议；
+6. Frame 只属于调用 / User Input Context，Render 生命周期完全属于 Subsystem；Frame 与 Render 没有公共协议所有权关系。
 
 因此当前以下 v1 契约仍保留旧 Schema，**只能作为迁移前详细字段参考，不能继续作为新增架构设计的所有权或 Bootstrap 依据**：
 
@@ -61,8 +62,20 @@ interface SubsystemDescriptor {
 - 全部声明 Subsystem ready 后 Bootstrap 才完成；
 - MVP 不定义 `lazy` 字段；
 - Descriptor env 不能覆盖 LoomRealm 保留启动环境；
-- `launcher.entry` 的路径基准、安全约束和安装根边界仍待冻结；
-- Main ⇄ Subsystem 的 hello / identify / ready 精确方法名和字段尚未冻结。
+- `launcher.entry` 的路径基准、安全约束和安装根边界仍待冻结。
+
+Main ⇄ Subsystem 的连接身份与 Runtime 状态通信已经由 [Main ⇄ Subsystem 控制与运行时生命周期协议草案](./subsystem-control-lifecycle-protocol.md) 定义：
+
+```text
+subsystem.hello      Request
+subsystem.status     Notification
+
+Runtime Status:
+    initializing
+    ready
+    stopping
+    failed
+```
 
 现有协议中的 `systemId` 字段如何与新的 Descriptor `key` 最终统一或映射，留到对应契约迁移时决定，本轮不直接改写旧 v1 Schema。
 
@@ -70,7 +83,8 @@ interface SubsystemDescriptor {
 
 | 主题 | 权威入口 | 当前状态 |
 |---|---|---|
-| Runtime Container、Frame 生命周期与调用 | [生命周期协议草案](./system-lifecycle-protocol.md) | Draft；需按新的 Frame/Input-only 语义重写 ready 与恢复条件 |
+| Main ⇄ Subsystem Control Connection、身份绑定与 Runtime Lifecycle | [Main ⇄ Subsystem 控制与运行时生命周期协议草案](./subsystem-control-lifecycle-protocol.md) | Draft；已定义 hello、connection-bound identity、Runtime Status 与 ready 语义 |
+| Frame 生命周期与调用 | [生命周期与调用协议草案](./system-lifecycle-protocol.md) | Draft / 迁移中；Container Bootstrap 部分已由独立 Control/Lifecycle 协议接管，Frame-scoped Render 假设待移除 |
 | Renderer ⇄ Subsystem 数据 | [Renderer–Subsystem 数据协议 v1](./frame-data-channel-v1.md) | 迁移中；旧 Frame-scoped 数据模型待拆分 |
 | Client State Tree | [Client State Tree v1](./client-state-tree-v1.md) | 迁移中；旧 Frame-scoped identity 待替换为 Render identity |
 | 游戏包 | [游戏包契约 v1](./game-package-v1.md) | v1 保留；新的 Subsystem Descriptor / Launcher 需要新版本 |
@@ -92,14 +106,22 @@ Game Package v2 or equivalent
     eager / all-required bootstrap semantics
         │
         ▼
-Main ⇄ Subsystem Bootstrap / Lifecycle Protocol
-    Subsystem connect / identify / ready
+Main ⇄ Subsystem Control & Runtime Lifecycle Protocol
+    subsystem.hello
+        key + bootstrap credential + control protocol offer
+        Control Connection identity binding
+    subsystem.status
+        initializing / ready / stopping / failed
+        │
+        ▼
+Main ⇄ Subsystem Frame / Call Protocol
     Frame initialize / activate / suspend / resume / close
+    Frame call / return
         │
         └── Frame 只负责调用与 User Input Context
 
 Main ⇄ Renderer Control Protocol
-    Session / ready System
+    Session / ready Subsystem
     Frame Stack / Activation / Input Target
     System Data Connection Grant / revoke
 
@@ -107,12 +129,12 @@ Renderer ⇄ Subsystem System Data Connection
     ├── Connection Protocol
     │       System-level identity / auth / version / heartbeat
     ├── Render Update Protocol
-    │       renderId-oriented state / event / recovery
+    │       render-oriented state / event / recovery
     └── User Input Protocol
             frameId + activationId-oriented input
 
 Render State Tree / equivalent contract
-    renderId / scopeId / node identity
+    render identity / scope identity / node identity
 ```
 
 内容主体继续通过 Content API 独立传输，不进入上述控制或 System Data Protocol。
@@ -124,13 +146,13 @@ Render State Tree / equivalent contract
 | 语义连接 | 桌面 Profile | PWA Profile |
 |---|---|---|
 | Renderer ⇄ Main | 每会话 localhost WebSocket | MessagePort |
-| Subsystem ⇄ Main | 每 System localhost WebSocket，Subsystem 主动连接 | 每 System 控制 MessagePort / Worker bootstrap |
-| Renderer ⇄ Runtime Container | 每 System localhost WebSocket | 每 System 数据 MessagePort |
+| Subsystem ⇄ Main | 每 Subsystem localhost WebSocket，Subsystem 主动连接 | 每 Subsystem 控制 MessagePort / Worker bootstrap |
+| Renderer ⇄ Runtime Container | 每 Subsystem localhost WebSocket | 每 Subsystem 数据 MessagePort |
 | Content API | localhost HTTP | same-origin Fetch + Service Worker |
 
 当前 `nodejs` Launcher Profile 只覆盖桌面 MVP。PWA 如何映射 Subsystem Descriptor 到 Worker Bootstrap 尚未冻结。
 
-不同 Profile 必须保持相同 System、Frame/Input 和 Render 所有权语义。
+不同 Profile 必须保持相同 Subsystem、Frame/Input 和 Render 所有权语义。
 
 ## 6. 身份分层
 
@@ -140,6 +162,10 @@ Render State Tree / equivalent contract
 Subsystem Descriptor identity
     key
 
+Main ⇄ Subsystem Control Connection identity
+    subsystem.hello 成功后绑定到 descriptor.key
+    后续 Runtime Lifecycle 消息不重复声明 key
+
 System Data Connection
     sessionId + systemId + connectionId
     （systemId 与 Descriptor key 的迁移关系待冻结）
@@ -148,7 +174,7 @@ Frame Input Context
     frameId + activationId
 
 Render Context
-    systemId + renderId
+    systemId + render identity
 
 Render State
     Render/Scope Revision（精确名称待冻结）
@@ -191,12 +217,13 @@ Frame-owned Render → Subsystem-owned Render、Game Package v1 → Subsystem La
 
 ```text
 1. Game Package / Subsystem Descriptor 新版本边界
-2. Main ⇄ Subsystem Bootstrap / Lifecycle
-3. Main ⇄ Renderer Control Protocol
-4. Renderer ⇄ Subsystem Connection Protocol
-5. Render Update Protocol
-6. User Input Protocol
-7. Render State Tree
+2. Main ⇄ Subsystem Control & Runtime Lifecycle       ← 当前已有 Draft
+3. Main ⇄ Subsystem Frame / Call Protocol 重构
+4. Main ⇄ Renderer Control Protocol
+5. Renderer ⇄ Subsystem Connection Protocol
+6. Render Update Protocol
+7. User Input Protocol
+8. Render State Tree
 ```
 
 现有 v1 文件在新契约完成前保留，避免链接失效和历史语义丢失；新设计不得继续向旧 Frame-scoped Render 或旧平台固定 System Registry 模型增加功能。
