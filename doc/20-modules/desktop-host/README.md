@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：Hostra 窗口宿主、LoomRealm Desktop Runtime 拓扑、WebSocket/HTTP 适配和安全边界  
-> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[通信系统](../../10-architecture/communication-system.md)  
+> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[通信系统](../../10-architecture/communication-system.md)  
 > 最近复核：2026-08-03
 
 ## 1. Hostra 边界
@@ -20,7 +20,7 @@ Hostra：
 - 不解释 Subsystem、Frame、Activation、Render、Input 或 Content Payload；
 - 不代理 Renderer ⇄ Subsystem 业务数据。
 
-Desktop 的 LoomRealm 通信：
+Desktop LoomRealm transport：
 
 ```text
 Control / System Data
@@ -30,16 +30,15 @@ Content
     localhost HTTP
 ```
 
-## 2. Desktop 进程结构
+## 2. Desktop Process Topology
 
 ```text
 LoomRealm Main Process
 ├── Session / Subsystem Descriptor Registry
 ├── Launcher Target Resolver
-├── Launcher / Launch Attempt Registry
-├── Runtime Supervisor
+├── Launch Attempt / Runtime Supervisor
 ├── Control Connection Registry
-├── Frame Stack / Input Target
+├── Frame Registry / Stack / Activation / Input Target
 └── System Data Connection Authority
 
 FSDB Content Service Process
@@ -51,50 +50,51 @@ Hostra Electron Main Process
 Hostra Renderer Process
 └── LoomRealm Web Renderer
 
-每个已声明 Subsystem 一个 Subsystem Process
+per-Subsystem Process
 ├── Main Control WebSocket Client
 ├── Renderer Data WebSocket Endpoint
 ├── 0..N Frame/Input Context
 └── 0..N Render Context
 ```
 
-进程隔离粒度 = Subsystem，不是 Frame。
+Process isolation granularity = Subsystem, not Frame。
 
 ## 3. Hostra Window Adapter
 
 ```text
-LoomRealm Main 启动 Renderer Web Service
-→ 生成 Renderer URL
+LoomRealm Main starts Renderer Web Service
 → Hostra openWindow(Renderer URL)
-→ Hostra 创建 BrowserWindow
-→ Renderer 加载 LoomRealm Web 应用
-→ Renderer 连接 LoomRealm Main Control WebSocket
+→ BrowserWindow
+→ Renderer loads LoomRealm Web app
+→ Renderer connects LoomRealm Main
 ```
 
-Adapter 不把 LoomRealm Payload 经 Hostra Main 转发。
+Hostra Adapter 不转发 LoomRealm business payload。
 
 ## 4. Renderer Web Service
 
 要求：
 
 - loopback only；
-- 随机端口；
-- 限制可导航 Origin；
+- random port；
+- restricted navigation Origin；
 - CSP；
-- 不暴露目录列表；
-- 控制 WebSocket 使用明确路径；
-- Session 退出后关闭服务。
+- no directory listing；
+- explicit Control WebSocket path；
+- Session end 后关闭服务。
 
-## 5. Main Control WebSocket
+## 5. Renderer ⇄ Main Control WebSocket
 
-Renderer ⇄ Main 一条会话级长期 WebSocket，负责：
+每 Session 一条长期 Control WebSocket，负责：
 
 - Session / Subsystem Runtime State；
-- Frame Stack / Activation / Input Target；
+- Frame Stack / lifecycle mirror / Activation / Input Target；
 - System Data Grant / replace / revoke；
-- 会话错误、诊断和 Renderer reconnect。
+- session error / diagnostics / reconnect。
 
-不承载普通 User Input、Render Update 或资源主体。
+不承载 ordinary User Input、Render Update 或 Content body。
+
+Renderer 不拥有 Frame authority。
 
 ## 6. Main ⇄ Subsystem Control WebSocket
 
@@ -102,63 +102,51 @@ Renderer ⇄ Main 一条会话级长期 WebSocket，负责：
 
 ```text
 Subsystem Process
-    ── connect ──▶
-LoomRealm Main Control WebSocket Server
+    ── connect ──▶ LoomRealm Main Control WebSocket Server
 ```
 
-启动链路：
+启动：
 
 ```text
-链路 1
-Main Launcher
-→ validated Entry
-→ Launch Attempt / Bootstrap Token
-→ token registration
+Launcher chain
 → spawn + Supervisor
-→ public state remains starting
-
-链路 2
-Process connects Main
+→ public state starting
+→ Process connects Main
 → connected
 → subsystem.hello
 → identified
-→ subsystem.status(initializing?)
-→ subsystem.status(ready + rendererDataEndpoint)
+→ optional initializing
+→ ready
 ```
 
-因此：
-
-```text
-spawn success ≠ connected ≠ identified ≠ ready
-```
-
-同一已认证 Control WebSocket 上的协议职责分开：
+同一已认证 WebSocket 逻辑复用两个协议域：
 
 ```text
 Subsystem Control Protocol v1
-    subsystem.hello
-    subsystem.status
-    subsystem.shutdown
+    Frozen
+    Runtime identity / lifecycle / shutdown
 
-Frame / Call Protocol
-    独立协议域，待冻结
+Frame / Call Protocol v1
+    Batch A Frozen
+    Batch B-F Draft
 ```
 
-正常 Runtime 关闭：
+共享物理 WebSocket MUST NOT 合并两套状态机。
+
+Frame Batch A 当前必须保持：
 
 ```text
-Main establishes shutdown intent
-→ subsystem.shutdown(session-end | bootstrap-abort)
-→ subsystem.status(stopping) [optional]
-→ Supervisor confirms Process exit
-→ stopped
+frameId Main-generated / Session unique / never reused
+permanent Frame → descriptor.key assignment
+callerFrameId immutable
+lifecycle = starting / active / suspended / closing / closed
+outcome separate from lifecycle
+no Frame ready / frame.status
+Activation unique / never reused / never rolls back
+only active Frame has current Activation
 ```
 
-`subsystem.shutdown` Response 只表示请求已接受；`status(stopping)` 也不等于 Process 已退出。
-
-Subsystem Control v1 明确没有 application-level heartbeat、same-attempt reconnect、resume 或 automatic restart。WebSocket ping/pong 可以作为 Desktop Transport health 机制，但不是 LoomRealm Subsystem Control RPC。
-
-## 7. Subsystem Process Launcher / Supervisor Adapter
+## 7. Subsystem Process Launcher / Supervisor
 
 Desktop v1：
 
@@ -166,188 +154,156 @@ Desktop v1：
 launcher.type = nodejs
 ```
 
-Process Launcher 必须遵循 [Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)：
+Launcher：
 
-- 只接受安全解析后的 `ResolvedLauncherTarget`；
-- Entry 位于 Installation Root 内，路径链禁止 symlink/junction/reparse redirect；
-- Host 选择具体 Node.js Runtime；
-- Game Package 不提供 Node flags / argv；
+- only validated `ResolvedLauncherTarget`；
+- Host-selected Node Runtime；
+- no Game-supplied flags / argv；
 - `shell = false`；
 - `cwd = Installation Root`；
-- 每次 Launch Attempt 生成新的 Bootstrap Token；
-- Token 在 Process spawn 前注册到 Main Control authentication state；
-- 通过 `LOOMREALM_BOOTSTRAP_CONTEXT` 传递 version / subsystemKey / controlEndpoint / bootstrapToken；
-- child environment 由安全基线 + validated descriptor env + LoomRealm reserved env 显式构造；
-- 不默认继承 Main 完整 ambient environment；
-- 监听 spawn error / exit / signal；
-- PID / launchId / Process Handle 不作为协议身份；
-- v1 不自动 restart failed Runtime。
+- Bootstrap Token registered before spawn；
+- explicit safe child environment；
+- PID / launchId / Process Handle not protocol identity；
+- no automatic restart。
 
-Supervisor 必须与 Subsystem Control v1 的 Main-owned shutdown intent 配合：
+Supervisor 配合 Main-owned shutdown intent：
 
 ```text
 shutdown intent
-→ graceful Control request
-→ finite Host-defined deadline
+→ subsystem.shutdown
+→ finite deadline
 → force terminate if required
 → actual exit observation
+→ stopped
 ```
 
-只要 shutdown intent 已存在且 Supervisor 最终确认 Process 不再存在，公共 terminal state 为 `stopped`；graceful / forced 只作为内部诊断。没有 shutdown intent 的 Process exit 一律是 failure，即使 exit code 为 0。
-
-当前不支持 Rust/C++/Go/Java/.NET/Shell/Executable 等其他 Launcher Type。
+没有 shutdown intent 的 Process exit 是 failure，即使 exit code = 0。
 
 ## 8. Node.js Trust Boundary
 
-Desktop v1 的 Subsystem JavaScript 是 trusted executable code。
+Desktop v1 Subsystem JavaScript 是 trusted executable code。
 
 ```text
 safe launcher.entry
-    = Main 只执行 Installation 内已声明、已验证的 Entry
+    limits what Main executes
 
 Node.js sandbox
-    = v1 不提供
+    not provided by v1
 ```
-
-因此不能声称 Node Subsystem 因为使用 Content API 就没有 OS 文件系统、网络或 child_process 能力。
-
-不可信第三方 executable sandbox、Publisher Trust、签名和 OS capability broker 都是后续独立 Profile 的问题。
 
 ## 9. Renderer ⇄ Subsystem System Data WebSocket
 
-每个 Runtime Container 与 Renderer 最多一条长期 Data WebSocket：
+每 Runtime Container 与 Renderer 最多一条长期 Data WebSocket：
 
 ```text
 Renderer
     ⇄ System Data WebSocket
-Subsystem Process
+Subsystem
     ├── Connection Layer
     ├── Render Update Protocol
     └── User Input Protocol
 ```
 
-物理连接与 Frame 数量无关，可以同时服务 0..N Render Context 与 0..N Frame Input Context。
+物理连接与 Frame 数量无关。
 
-Main 签发 System Data Grant。Grant 不绑定 `frameId`、`activationId` 或 Render identity。
+Main Grant 不绑定 `frameId`、`activationId` 或 Render identity。
 
-## 10. Data Protocol 域
+## 10. User Input 与 Frame Batch A
 
-### Connection Layer
+Renderer ordinary input 必须使用 Main 当前 Input Target。
 
-- 认证 Main Grant；
-- 绑定 Session / Subsystem / Connection；
-- 版本协商；
-- heartbeat / replace / close。
-
-这里的 heartbeat 属于 System Data Connection Layer，与 Main ⇄ Subsystem Control v1 无关。
-
-### Render Update Protocol
-
-- Subsystem → Renderer 为主；
-- 使用独立 Render identity；
-- Render State / Event / Recovery；
-- 不受 Frame Activation 控制。
-
-### User Input Protocol
-
-- Renderer → Subsystem 为主；
-- 使用 `frameId + activationId`；
-- 只向当前 Main-declared Input Target 发送普通输入。
-
-不得使用统一 Frame Logical Stream 同时管理 Render State 与 User Input。
-
-## 11. Renderer 重载
+Subsystem Frame Input Router 至少校验：
 
 ```text
-Renderer 重载
+Frame exists
+Frame lifecycle == active
+activationId == currentActivationId
+Frame is Main-authorized target
+```
+
+revoked / stale Activation 永久拒绝。
+
+Desktop Transport 或 Renderer reload 不允许让旧 Activation 重新有效。
+
+Frame suspend / closing / closed 不关闭 Data WebSocket，也不隐式修改 Render。
+
+## 11. Render Update
+
+- Subsystem → Renderer 为主；
+- independent Render identity；
+- Frame Activation 不作为 Render epoch；
+- Frame lifecycle 不控制 Render visibility / destroy / recovery。
+
+## 12. Renderer Reload
+
+```text
+Renderer reload
 → reconnect Main Control
-→ restore ready Subsystem / Frame / Input control state
-→ Main 重新发布需要的 System Data Grant
-→ Renderer 按 Subsystem 重建 Data WebSocket
-→ restore Frame Input Registry
+→ restore Runtime / Stack / current Activation / Input Target
+→ rebuild authorized per-Subsystem Data WebSocket
+→ only current Activation resumes ordinary input
 → each Subsystem independently restores Render State
 ```
 
-不能按当前 Frame 集合推导所有需要恢复的 Data Connection；零 Frame 的 Subsystem 仍可能拥有 Render。
+不得恢复 revoked Activation，也不得从 Frame 集合推导全部 Render/Data lifecycle。
 
-## 12. FSDB Content Service
+## 13. FSDB Content Service
 
-独立 Content Service 提供：
+Desktop localhost HTTP 提供 Manifest / Record / Group / Resource 的只读 Content API。
 
-```text
-GET /_lr/v1/games/{installationId}/manifest
-GET /_lr/v1/games/{installationId}/records/{namespace}/{key}
-GET /_lr/v1/games/{installationId}/groups/{namespace}/{key}
-GET /_lr/v1/games/{installationId}/resources/{namespace}/{key}
-```
+Content capability 与 Node Process OS capability 是不同安全边界。
 
-Subsystem Runtime 的普通业务内容访问与 Renderer Resource Client 使用 Fetch；Content Service 不接受任意物理路径。
-
-Content API 的能力边界与 Node Process 的 OS 权限是不同层次。
-
-## 13. Desktop 安全策略
+## 14. Desktop Security
 
 Hostra：
 
 - `contextIsolation = true`；
 - `nodeIntegration = false`；
-- 尽可能启用 Sandbox；
-- 限制导航、`window.open` 和外部 URL；
+- 尽可能启用 sandbox；
+- 限制 navigation / `window.open`；
 - 不暴露通用 Electron IPC。
 
 LoomRealm localhost services / Launcher：
 
 - loopback only；
-- 随机端口 / 高熵 credential；
-- Origin 校验；
-- Launcher Entry Installation containment；
-- Process creation 不经过 Shell；
-- Bootstrap Token 绑定 Launch Attempt 与 Descriptor Key；
-- child environment 不默认继承 Main 全量环境；
-- Subsystem Control semantic error 不泄露 token；
-- System Data Grant 绑定 Session / Subsystem / Connection；
-- User Input 校验 Frame / Activation；
-- Render Update 限制当前 Subsystem Render namespace；
-- 大小、速率与并发限制；
-- 错误不泄露 token 或不必要内部路径。
+- random port / high-entropy credential；
+- Origin validation；
+- Launcher containment；
+- no Shell process creation；
+- Bootstrap Token binding；
+- explicit child environment；
+- Control semantic error 不泄露 secret；
+- Data Grant binding；
+- User Input active/current Activation validation；
+- Render namespace validation；
+- bounded size/rate/concurrency。
 
-## 14. 故障处理
+## 15. Failure Handling
 
-- Entry / env / Launcher 校验失败：Game Bootstrap fatal；
-- Process spawn 失败：Game Bootstrap fatal；
-- Process 在 ready 前退出：Game Bootstrap fatal；
-- hello/token/version 失败：Runtime Bootstrap fatal；
-- Runtime 无法 ready：Game Bootstrap 失败；
-- unsolicited / invalid / duplicate Runtime Status：fatal Subsystem Control Protocol Error；
-- 没有 shutdown intent 的 Control WebSocket 断开：Runtime failure；
-- ready 后、没有 shutdown intent 的 Process exit：Runtime failure，即使 exit code 为 0；
-- Main shutdown intent 下，Control Connection 先断开：继续由 Supervisor 在 deadline 内收敛，不立即创造第二个 failure；
-- shutdown timeout：Supervisor 强制终止；
-- 已 terminal `failed` 的 Runtime 后续 exit 不改回 `stopped`；
-- System Data WebSocket 断开：停止该 Subsystem 普通输入，Render Store 按 Render Protocol 保留/恢复；
-- Subsystem Process 崩溃：其 Control/Data Connection 失效，Main 处理全部受影响 Frame；
-- Renderer 崩溃：Subsystem Process 可继续存在；
-- LoomRealm Main 崩溃：第一阶段终止其管理的 Subsystem；
-- Content Service 崩溃：内容请求失败，不隐式改变 Frame 或 Render 生命周期。
+- Launcher / spawn / pre-ready Process failure → Game Bootstrap failure；
+- hello/token/version failure → Runtime Bootstrap failure；
+- invalid Runtime status → fatal Subsystem Control failure；
+- no shutdown intent + Control loss / Process exit → Runtime failure；
+- shutdown timeout → Supervisor force termination；
+- terminal failed 后 exit 不改回 stopped；
+- Runtime failure → revoke affected Frame current Activation；
+- Runtime failure MUST NOT set Frame lifecycle to `failed`；Frame termination uses failed outcome + `closing → closed` according to Frame Batch E；
+- Data WebSocket failure → ordinary input stops; Render recovery independent；
+- Renderer crash does not require Subsystem termination；
+- Main crash first phase terminates managed Subsystems；
+- Content failure does not implicitly alter Frame/Render lifecycle。
 
-## 15. 核心不变量
+## 16. Core Invariants
 
-- Hostra 不承载 LoomRealm Main 或业务协议；
-- 每个 Subsystem 一个独立 Process；
-- 每个 Process 可以承载多个 Frame/Input Context 和 Render Context；
-- Desktop v1 Launcher = `nodejs`；
-- Entry 在 spawn 前安全解析；
-- Node Runtime 由 Host 选择，shell=false；
-- Bootstrap Token 在 spawn 前注册；
-- spawn success 仍属于 `starting`；
-- hello 成功后 Control Connection 绑定 Descriptor Key；
-- Main 拥有正常 Runtime shutdown intent；
-- shutdown Response / status(stopping) 不等于 stopped；
-- Supervisor 观察实际 exit 并最终确认 stopped；
-- 没有 shutdown intent 的 Process exit / Control loss 是 failure；
-- Subsystem Control v1 不定义 application heartbeat / reconnect / resume / automatic restart；
-- Node.js executable code 是 trusted code，不宣称 sandbox；
-- Renderer 与每个 Process 最多一条 Data WebSocket；
-- Frame 生命周期不控制 Data WebSocket 或 Render；
-- Content = readonly HTTP API；
-- 普通 User Input 和 Render Update 不通过 Main/Hostra 转发。
+- Hostra 不承载 LoomRealm Main；
+- one Subsystem = one Process；
+- one Process = 0..N Frame + 0..N Render；
+- one authenticated Main Control WebSocket per Runtime；
+- Subsystem Control v1 and Frame / Call v1 remain separate logical protocols；
+- Frame ID / Activation ID never reuse；
+- Frame v1 has no ready/status；
+- outcome ≠ lifecycle；
+- only active Frame owns current Activation；
+- stale Activation never becomes valid again；
+- Frame lifecycle does not control Runtime/Data/Render lifecycle；
+- ordinary User Input / Render Update do not flow through Hostra/Main business forwarding。
