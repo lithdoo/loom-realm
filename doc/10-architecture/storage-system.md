@@ -5,7 +5,8 @@
 > 稳定程度：Evolving  
 > 主要定义：只读游戏包、Subsystem Descriptor 内容边界、逻辑 Content API、内容索引、Repository、资源和路径安全  
 > 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)  
-> 最近复核：2026-08-02
+> 正式契约：[Game Package v2 Bootstrap / Descriptor](../15-contracts/game-package-v2.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Content API v1](../15-contracts/content-api-v1.md)  
+> 最近复核：2026-08-03
 
 ## 1. 设计目标
 
@@ -13,7 +14,7 @@
 
 核心结论：
 
-> 运行时业务通过统一逻辑只读 Content API 访问 FSDB 和资源；Subsystem Launcher 是 Main 的受控启动能力，不属于 Content API，也不赋予普通 Runtime 任意文件执行能力。
+> 运行时业务内容通过统一逻辑只读 Content API 访问 FSDB 和资源；Subsystem Launcher 是 Main 的独立特权执行能力。Content API 不提供任意物理路径或执行能力，但 Desktop Node.js Runtime 的 OS 权限属于 Launcher trust model，不能与 Content API 能力边界混为一谈。
 
 ## 2. 游戏包内容层次
 
@@ -21,7 +22,7 @@
 游戏包物理存储
 ├── Game Manifest
 ├── Game Entry
-│   ├── initial call
+│   ├── initial target
 │   └── Subsystem Descriptors
 ├── Descriptor 声明的 Launcher Entry
 ├── FSDB 数据
@@ -43,12 +44,14 @@ Launcher Entry 属于启动描述，不通过普通 Content API 执行。
 游戏包在运行期间保持只读：
 
 - Main 可以读取 Manifest、Entry 和 Subsystem Descriptor；
-- Main Launcher 可以读取并启动 Entry 明确声明、且当前平台支持的 Subsystem Entry；
-- Subsystem 和 Renderer 的普通内容访问通过只读 Content API；
+- Main Launcher 可以解析并启动 Entry 明确声明、且当前平台支持的 Subsystem Entry；
+- Subsystem 和 Renderer 的普通业务内容访问 SHOULD 通过只读 Content API；
 - Runtime 状态、缓存和日志不写回原始游戏包；
-- 允许受控 Launcher 不等于授予普通 Runtime 任意文件读写或执行能力。
+- Launcher Entry 与普通 Content Resource 使用不同能力边界。
 
-Desktop MVP 当前受控 Launcher Type 为 `nodejs`。
+Desktop v1 受控 Launcher Type 为 `nodejs`。
+
+注意：Desktop Node.js Profile 把被执行的 Subsystem JavaScript 视为 trusted executable code；当前 Profile 不提供 OS sandbox。因此“Content API 不暴露任意物理路径”不能被解释成“Node Process 在 OS 层没有文件系统、网络或子进程能力”。
 
 ## 4. 公共加载与 Bootstrap
 
@@ -57,10 +60,10 @@ Main 公共加载：
 ```text
 读取 manifest 和 entry
 → 校验格式、版本和安装实例
-→ 读取 initial call
+→ 读取 initial target
 → 读取全部 Subsystem Descriptor
-→ 校验 Descriptor 公共结构、key 唯一、launcher.type、env 保留字段
-→ 建立只读 Content Grant
+→ 校验 Descriptor 公共结构、key 唯一、launcher.type、entry 语法、env 保留字段
+→ 建立 Descriptor Registry
 → 将 Descriptor 交给 Runtime Bootstrap / Launcher
 ```
 
@@ -70,42 +73,54 @@ Subsystem Bootstrap：
 
 ```text
 根据 launcher.type 选择 Launcher
-→ 准备 Launch Attempt / Bootstrap Credential
-→ 解析 launcher.entry（具体规则待契约冻结）
-→ 注入 Main 保留启动上下文 + descriptor env
-→ 启动 Process / Worker
+→ 安全解析 launcher.entry 到 Installation Root 内 regular file
+→ 创建 Launch Attempt / Bootstrap Token
+→ 在 Main Control authentication state 注册 Token
+→ 显式构造 child environment / Bootstrap Context
+→ 使用 Host-selected Node.js，shell=false，spawn Process
+→ Runtime Supervisor 接管
 ```
 
-详细流程见 [运行时启动与连接建立系统](./runtime-bootstrap-system.md)。
+详细规则见 [Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)。
 
 ## 5. Launcher 与 Content API 的职责分离
 
 ```text
 Launcher
     Main 特权能力
-    只处理 Game Entry 明确声明的 Subsystem 启动入口
+    只处理 Game Entry 明确声明的 Subsystem executable Entry
+    产生受监督 Runtime Process
 
 Content API
-    Runtime / Renderer 只读数据能力
+    Runtime / Renderer 逻辑只读数据能力
     只处理 Manifest / Record / Group / Resource
 ```
 
 禁止：
 
 - Renderer 通过 Content API 请求执行脚本；
-- Subsystem 通过 Content API 启动另一个可执行文件；
-- Descriptor env 覆盖 LoomRealm 保留启动字段；
-- Content API 把逻辑 Key 当任意本机路径解释。
+- Subsystem 通过 Content API 请求启动另一个 Runtime；
+- Descriptor env 覆盖 LoomRealm / Node 保留启动字段；
+- Content API 把逻辑 Key 当任意本机路径解释；
+- 把 Launcher 的物理 Entry path 当普通 Content Resource 暴露。
 
-关于 `launcher.entry`：
+### 5.1 `launcher.entry` 已冻结边界
 
-- 当前只确认字段存在；
-- 路径基准、安装根边界、符号链接策略、URL/绝对路径规则和尚需的完整性校验均**尚未冻结**；
-- 在这些规则进入正式 Game Package / Launcher Contract 前，不应将某个实现行为写成稳定架构保证。
+Desktop v1：
+
+- Entry 是 Installation Root 相对的 package logical path；
+- 禁止 absolute / URL / traversal / backslash 等路径形式；
+- 路径链禁止 symlink / junction / reparse redirect；
+- 最终目标必须位于 Installation Root 内且为 regular file；
+- 当前只接受 `.js` / `.mjs` / `.cjs`；
+- Node executable 由 Host 选择，Game Package 不提供 Node flags / argv；
+- Process creation 不经过 Shell。
+
+这些规则属于 Launcher Contract，不复用普通 Content API 的路径解析算法作为隐式实现。
 
 ## 6. 逻辑 Content API
 
-运行时只使用逻辑内容身份：
+运行时业务内容使用逻辑内容身份：
 
 ```text
 installationId
@@ -138,9 +153,10 @@ Subsystem / Renderer
 → 已登记只读游戏包内容
 
 Main Launcher
-→ 已校验 Subsystem Descriptor 公共结构
+→ validated Subsystem Descriptor
+→ ResolvedLauncherTarget
 → Node.js Launcher
-→ descriptor.entry
+→ supervised Process
 ```
 
 Desktop Content Service 只监听 loopback，并只允许 Content API 的逻辑路由。
@@ -204,15 +220,26 @@ Content API 用于会话初始化后的业务内容读取、地图/场景切换�
 
 Content API 不进入每 Tick 热路径。Runtime Core 每 Tick 只读取已经准备好的内存状态和不可变内容。
 
-## 12. 路径安全边界
+## 12. 两类路径安全边界
 
-Content API 的物理路径安全已经由 Content Contract / Content Service 定义：
+### Content path
+
+由 Content Contract / Content Service 定义：
 
 - URL 参数不能直接拼接物理路径；
 - Content Service 只解析安装登记和 Package Index 允许的位置；
-- Renderer / Subsystem 不获得任意物理路径能力。
+- Renderer 只获得逻辑资源能力。
 
-Launcher Entry 是不同的高权限路径边界。其最终规则仍待专门契约冻结，不能直接复用 Content API 路径规则并声称两者完全等价。
+### Launcher Entry path
+
+由 Game Package v2 / Desktop Node.js Launcher Profile 定义：
+
+- Installation-relative executable logical path；
+- 禁止路径逃逸和文件系统 redirect；
+- 解析结果是 Main 私有 `ResolvedLauncherTarget`；
+- 物理 Entry 不进入业务协议。
+
+两类路径具有相似安全目标，但能力完全不同，不能共享“允许读取 = 允许执行”的隐式规则。
 
 ## 13. 授权和缓存
 
@@ -232,9 +259,10 @@ Launcher Bootstrap Credential 与 Content Grant 是不同能力。Control `boots
 
 `start` 与 `validate` 是不同操作：
 
-- `start` 校验当前启动所需的 Manifest / Entry / Descriptor 公共结构以及当前已冻结的 Launcher 约束；
-- `validate` 应尽可能遍历全部声明 Descriptor、必需内容和强引用；
-- 对 `launcher.entry` 物理路径的最终验证规则只有在 Game Package / Launcher Contract 冻结后才能成为互操作要求；
+- `start` MUST 校验当前启动所需的 Manifest / Entry / Descriptor 与冻结的 Launcher Entry/env 约束；
+- `validate` SHOULD 尽可能遍历全部声明 Descriptor、Launcher Entry、必需内容和强引用；
+- Descriptor 集合级错误 MUST 在任何业务 Process spawn 前被拒绝；
+- Entry existence / regular-file / redirect / containment 校验 MUST 在对应 Process spawn 前完成；
 - PWA 安装应先进入临时位置，完整校验后再登记为可用；
 - 原始游戏包和安装副本都视为不可信输入。
 
@@ -244,32 +272,37 @@ Launcher Bootstrap Credential 与 Content Grant 是不同能力。Control `boots
 Desktop launcher.type
     nodejs
 
+Desktop executable trust
+    trusted code; no OS sandbox claim
+
 PWA launcher profile
     尚未冻结
 ```
 
-MVP 不预定义 Shell、Native Executable、Deno、Bun 等 Launcher Type。
+MVP 不预定义 Shell、Native Executable、Deno、Bun 等 Launcher Type，也不定义自动 Runtime restart。
 
 第一阶段地图子系统继续使用 FSDB 保存地图、Tile、人物和资源定义。FSDB 是当前内容格式，不是所有未来 Subsystem 的强制存储接口。
 
 ## 16. 架构不变量
 
 1. 游戏包运行期间只读；
-2. Main 可以启动 Game Entry 明确声明且当前平台支持的 Subsystem Launcher；
-3. 允许受控 Launcher 不等于允许任意脚本 / 文件执行；
-4. Content API 只接受逻辑内容身份，不承担 Launcher 职责；
-5. Launcher Entry 与普通业务 Resource 必须在能力模型上区分；
-6. Renderer 和普通 Subsystem Runtime 不获得任意文件系统能力；
-7. Desktop MVP Launcher Type 是 `nodejs`；
-8. PWA Launcher 映射尚未冻结；
-9. `launcher.entry` 路径与安全规则仍是显式待冻结项；
+2. Main 只能启动 Game Entry 明确声明且当前平台支持的 Subsystem Launcher；
+3. Desktop Entry 必须在 Installation Root 内安全解析；
+4. Launcher Entry 与普通业务 Resource 是不同能力；
+5. Content API 只接受逻辑内容身份，不承担 Launcher 职责；
+6. Content API / Renderer 不获得任意物理文件路径或执行能力；
+7. Desktop Node.js Subsystem executable code 属于 trusted code，当前不提供 OS sandbox；
+8. Desktop v1 Launcher Type 是 `nodejs`，Process creation 不经过 Shell；
+9. PWA Launcher 映射尚未冻结；
 10. Service Worker 和 Content Service 不拥有游戏运行状态；
 11. Render State 不携带资源字节或物理路径。
 
 ## 17. 相关文档
 
 - [运行时启动与连接建立系统](./runtime-bootstrap-system.md)；
-- [游戏包契约 v1](../15-contracts/game-package-v1.md)：作为旧版本迁移资料保留，不定义当前 Descriptor Launcher 模型；
+- [Game Package v2 Bootstrap / Descriptor Contract](../15-contracts/game-package-v2.md)；
+- [Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)；
+- [游戏包契约 v1](../15-contracts/game-package-v1.md)：Legacy；
 - [只读 Content API v1](../15-contracts/content-api-v1.md)；
 - [游戏包模块设计](../20-modules/game-package/README.md)；
 - [FSDB Content Service 模块](../20-modules/fsdb-content-service/README.md)。
