@@ -24,10 +24,13 @@
 11. Main 拥有正常 Runtime shutdown intent，`stopped` 只来自 Supervisor observation；
 12. Subsystem Control v1 不定义 application heartbeat、reconnect、resume 或 automatic restart；
 13. `spawn success ≠ connected ≠ identified ≠ ready`；
-14. Frame 只属于 call / User Input Context，并使用独立 Frame / Call Protocol；
-15. Render 生命周期完全属于 Subsystem；
-16. Renderer ⇄ Subsystem 数据面拆分为 Connection / Render Update / User Input 三个协议域；
-17. Content 继续通过独立只读 Content API 传输。
+14. Frame / Call 是独立协议域；Batch A 已冻结 Frame identity、authority、lifecycle 与 Activation；
+15. Frame lifecycle 只有 `starting / active / suspended / closing / closed`；`completed / cancelled / failed` 是 outcome，不是 lifecycle state；
+16. Frame v1 不定义独立 `ready / initialized / frame.status`；
+17. `frameId` / `activationId` 由 Main 生成、Session 内唯一且不复用；Activation 一旦 revoke 永久失效；
+18. Render 生命周期完全属于 Subsystem；
+19. Renderer ⇄ Subsystem 数据面拆分为 Connection / Render Update / User Input 三个协议域；
+20. Content 继续通过独立只读 Content API 传输。
 
 ## 2. Game Package v2 / Desktop Launcher
 
@@ -106,55 +109,81 @@ Main → Subsystem
 - LoomRealm semantic RPC error 使用 JSON-RPC `-32000` + 稳定 `error.data.code`；
 - Runtime lifecycle message 不加入 PID / launchId / arbitrary metadata。
 
-## 4. 当前契约状态
+## 4. Frame / Call Protocol v1
+
+权威入口：[Main ⇄ Subsystem Frame / Call Protocol v1](./frame-call-protocol-v1.md)。
+
+当前采用分批冻结：
+
+```text
+Batch A  Identity / Authority / Lifecycle / Activation    ← Frozen
+Batch B  RPC Schema                                        ← Draft
+Batch C  Call / Return transaction / commit barrier         ← Draft
+Batch D  Error / timeout / retry / cancellation              ← Draft
+Batch E  Runtime failure unwind                              ← Draft
+Batch F  Limits / fixtures / profile/version completion      ← Draft
+```
+
+Batch A 已冻结：
+
+- Frame 是 Main-owned call / ordinary-input control object；
+- `frameId` Main-generated、Session-scoped unique、opaque、never reused；
+- 每个 Frame 永久绑定一个 `descriptor.key`；
+- `callerFrameId` 创建后 immutable；
+- Main 是 Frame lifecycle、Stack、Activation 与 Input Target 的唯一权威；
+- lifecycle = `starting / active / suspended / closing / closed`；
+- `completed / cancelled / failed` 是 termination outcome，不是 lifecycle state；
+- v1 不存在 Frame `ready / initialized / frame.status`；
+- 只有 `active` Frame 有有效 current Activation；
+- `activationId` Main-generated、Session-scoped unique、never reused；
+- Frame 每次重新 active 都获得新的 Activation；
+- Activation 一旦 revoke 永久失效，never rolls back；
+- 稳定状态中 Stack Top = active，其他 live Frame = suspended；
+- Frame 只能在 ready 且无 shutdown intent 的 Runtime 上建立；
+- Frame lifecycle 不隐式控制 Runtime、Render 或 System Data Connection。
+
+旧 [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) 已降为 Legacy / redirect，不再作为当前 Frame 设计权威入口。
+
+## 5. 当前契约状态
 
 | 主题 | 入口 | 状态 |
 |---|---|---|
 | Game Package v2 Bootstrap / Descriptor | [game-package-v2.md](./game-package-v2.md) | Active / Normative；Desktop Bootstrap subset 已冻结 |
 | Desktop Node.js Launcher Profile v1 | [nodejs-launcher-profile-v1.md](./nodejs-launcher-profile-v1.md) | Active / Normative；Entry / env / spawn / Supervisor / failure 已冻结 |
 | Subsystem Control Protocol v1 | [subsystem-control-lifecycle-protocol.md](./subsystem-control-lifecycle-protocol.md) | Active / Normative；hello/status/shutdown、错误、limits 与 failure semantics 已冻结 |
-| Main ⇄ Subsystem Frame / Call | [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) | Draft；独立协议域，不重新定义 Runtime lifecycle |
+| Main ⇄ Subsystem Frame / Call v1 | [frame-call-protocol-v1.md](./frame-call-protocol-v1.md) | Draft overall；Batch A Identity/Lifecycle/Activation 已 Normative / Frozen |
 | Main ⇄ Renderer Control | 尚待新文档 | Draft target |
 | Renderer ⇄ Subsystem Connection | 尚待新文档 | Draft target |
 | Render Update | 尚待新文档 | Draft target |
 | User Input | 尚待新文档 | Draft target |
 | Render State Tree / equivalent | 尚待新文档 | Draft target |
 | Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative |
+| 旧 Frame 生命周期草案路径 | [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) | Legacy / Superseded by Frame / Call v1 |
 | Renderer–Subsystem Data v1 | [frame-data-channel-v1.md](./frame-data-channel-v1.md) | Legacy / Superseded |
 | Client State Tree v1 | [client-state-tree-v1.md](./client-state-tree-v1.md) | Legacy / Superseded |
 | Game Package v1 | [game-package-v1.md](./game-package-v1.md) | Legacy for new bootstrap |
 | 独立 Resource Protocol | [resource-protocol.md](./resource-protocol.md) | Legacy / Superseded by Content API |
 
-旧 v1 路径保留用于链接兼容和 Git 历史追溯，不再重复发布已被当前架构否定的 Normative Schema。
-
-## 5. 目标契约关系
+## 6. 目标契约关系
 
 ```text
 Game Package v2
     subsystem descriptors
-        key
-        launcher.type = nodejs
-        launcher.entry
-        env
-    eager / all-required bootstrap
         │
         ▼
 Desktop Node.js Launcher Profile v1
-    target resolution
-    Launch Attempt / Bootstrap Context
     process spawn / supervision
         │
         ▼
 Subsystem Control Protocol v1
-    subsystem.hello
-    subsystem.status
-    subsystem.shutdown
+    Runtime identity / lifecycle / shutdown
         │
         ├─────────────────────────────┐
         ▼                             ▼
-Frame / Call Protocol          Runtime Supervisor
-    frame lifecycle            process existence / termination
-    activation / call
+Frame / Call Protocol v1       Runtime Supervisor
+    Frame identity             process existence / termination
+    lifecycle / Activation
+    call / return (Batch B+)
 
 Main ⇄ Renderer Control Protocol
     Session / Subsystem State
@@ -173,7 +202,7 @@ Readonly Content API
     Manifest / Record / Group / Resource
 ```
 
-## 6. 身份分层
+## 7. 身份分层
 
 ```text
 Subsystem Descriptor
@@ -186,22 +215,27 @@ Launch Attempt
 Main ⇄ Subsystem Control Connection
     hello 成功后 connection-bound descriptor.key
 
-Frame Input Context
-    frameId + activationId
-    independent from Subsystem Control identity
+Frame
+    frameId
+    permanently assigned descriptor.key
+    callerFrameId
+
+Frame Activation
+    activationId
+    one-shot ordinary input epoch
 
 System Data Connection
     当前旧协议常用 sessionId + systemId + connectionId
-    systemId 与 Descriptor key 的最终统一方式待 Connection Contract 冻结
+    systemId 与 Descriptor key 的最终 wire 迁移由 Connection Contract 冻结
 
 Render Context
     independent Render identity
     精确 wire 字段名待冻结
 ```
 
-不要全局把现有 `systemId` 文本替换为 `key`。Descriptor identity 已冻结为 `key`，但旧数据协议字段的兼容迁移必须在对应协议版本中显式完成。
+不要全局把 Legacy 数据协议中的 `systemId` 文本替换为 `key`；但新 Frame / Call v1 不应再以旧 `systemId` 建立新的身份来源。
 
-## 7. 版本与 Profile 规则
+## 8. 版本与 Profile 规则
 
 - 说明性修改且不改变实现行为，可以保持协议版本；
 - 新增可选字段必须定义旧实现行为；
@@ -210,18 +244,20 @@ Render Context
 - Transport Profile 变化不自动提升业务协议版本；
 - Launcher Profile 变化不得静默改变 Game Package 字段含义；
 - Frame / Call 与 Subsystem Control 是独立协议域，即使共享物理 Control Connection；
+- Frame Batch B+ 不得重新打开 Batch A 已冻结的 identity / lifecycle / Activation；
 - 架构概念占位名不得假装为冻结 wire field。
 
-Frame-owned Render → Subsystem-owned Render、Game Package v1 → Descriptor Launcher 都是不兼容语义变化，因此旧 v1 已降为 Legacy，而不是原地改义。
-
-## 8. 当前推荐冻结顺序
-
-链路 1 与 Subsystem Control v1 已完成本阶段冻结：
+## 9. 当前推荐冻结顺序
 
 ```text
 1. Game Package v2 Bootstrap / Desktop Node.js Launcher v1  ← 已冻结
 2. Subsystem Control Protocol v1                             ← 已冻结
-3. Frame / Call Protocol
+3A. Frame / Call Batch A: Identity/Lifecycle/Activation      ← 已冻结
+3B. Frame / Call Batch B: RPC Schema                         ← 下一步
+3C. Frame / Call Batch C: transaction / commit barrier
+3D. Frame / Call Batch D: error / timeout / retry
+3E. Frame / Call Batch E: Runtime failure unwind
+3F. Frame / Call Batch F: limits / fixtures / profile
 4. Main ⇄ Renderer Control Protocol
 5. Renderer ⇄ Subsystem Connection Protocol
 6. User Input Protocol
@@ -229,11 +265,11 @@ Frame-owned Render → Subsystem-owned Render、Game Package v1 → Descriptor L
 8. Render State Contract
 ```
 
-User Input 与 Render Update 可以并行设计，但都依赖 System Data Connection 边界已经明确。
+Main ⇄ Renderer Control 可以在 Frame Batch C 时同步验证 Input Target commit barrier，但不得反向改变 Batch A identity / Activation 语义。
 
-## 9. 当前明确暂缓项
+## 10. 当前明确暂缓项
 
-以下项目不阻塞当前已冻结的 Launcher / Subsystem Control v1：
+以下项目不阻塞当前已冻结的 Launcher / Subsystem Control / Frame Batch A：
 
 - PWA Descriptor → Worker Script Profile；
 - PWA Bootstrap Credential / Control Transport Profile；
@@ -249,18 +285,21 @@ User Input 与 Render Update 可以并行设计，但都依赖 System Data Conne
 - Node version negotiation in Game Entry；
 - Host timeout 默认数值；
 - Bootstrap Token 精确熵 / 生成算法；
-- executable signature / Publisher Trust。
+- executable signature / Publisher Trust；
+- 多主栈 / 一般 Frame Graph；
+- Frame migration；
+- Activation reuse / persistent resume。
 
 实现不得以“优化”为由偷偷加入这些语义。
 
-## 10. 契约冻结要求
+## 11. 契约冻结要求
 
-一份可冻结契约至少包含：
+一份完整可冻结协议至少包含：
 
 - 参与方 / scope；
 - terminology / identity；
 - Schema；
-- request / response / notification（若存在 wire surface）；
+- request / response / notification；
 - precondition / postcondition；
 - state transition；
 - ordering / idempotency；
@@ -270,3 +309,5 @@ User Input 与 Render Update 可以并行设计，但都依赖 System Data Conne
 - security / size limit；
 - version / compatibility；
 - interoperable fixture / conformance test。
+
+Frame / Call 当前只完成上述清单中属于 Batch A 的身份、权威、生命周期与 Activation 部分，因此整体状态仍保持 Draft，直到 Batch F 完成。
