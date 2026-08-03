@@ -65,13 +65,7 @@ complete Descriptor set validation
 eager / all-required bootstrap
 ```
 
-至少包含：
-
-- Descriptor Schema validator；
-- Entry logical syntax validator；
-- reserved env validator；
-- machine-readable error categories；
-- conformance fixtures。
+至少包含 Descriptor validator、Entry logical syntax validator、reserved env validator、machine-readable error categories 与 conformance fixtures。
 
 ### `nodejs-launcher-profile-v1`
 
@@ -105,13 +99,10 @@ subsystem.shutdown   Main → Subsystem Request
 - Runtime status discriminated union；
 - Main shutdown intent / status transition state machine；
 - shutdown params/result Schema；
-- `BOOTSTRAP_AUTHENTICATION_FAILED`；
-- `CONTROL_PROTOCOL_UNSUPPORTED`；
-- `DUPLICATE_CONTROL_CONNECTION`；
-- `PROTOCOL_STATE_ERROR`；
+- frozen semantic error codes；
 - JSON-RPC semantic error helper；
 - v1 wire limits；
-- conformance fixtures for hello/status/shutdown/failure/limits。
+- hello/status/shutdown/failure/limits fixtures。
 
 该包必须明确：
 
@@ -122,19 +113,73 @@ no application retry for state-changing control requests
 no automatic Runtime restart
 ```
 
-Launcher 负责在 Process spawn 前创建并注册 Bootstrap Credential；Control Protocol 负责在 hello 时认证/消费 Credential。
-
 ### `frame-call-protocol`
 
-待冻结：
+当前整体仍 Draft，但 **Batch A 已 Normative / Frozen**。
 
-- Frame initialize / activate / suspend / resume / close；
-- Frame call / return；
-- Activation；
-- 幂等、取消、超时和错误；
-- Runtime failure unwind。
+Batch A 包内容应立即实现：
 
-不包含 Runtime bootstrap / ready / shutdown / restart，也不包含 Render State。
+```text
+FrameLifecycleState
+    starting / active / suspended / closing / closed
+
+Frame identity rules
+    frameId Main-generated / Session unique / never reused
+    permanent subsystemKey / descriptor.key assignment
+    callerFrameId immutable
+
+Activation rules
+    activationId Main-generated / Session unique / never reused
+    only active Frame owns current Activation
+    revoked Activation never valid again
+    reactivated Frame always gets new Activation
+
+Stack stable-state rules
+    Stack Top active
+    other live Frames suspended
+
+Outcome separation
+    completed / cancelled / failed are outcome, not lifecycle
+
+No Frame ready / initialized / frame.status
+```
+
+建议包内先提供与 Batch A 对应的纯模型类型与 validator：
+
+```ts
+type FrameLifecycleState =
+  | "starting"
+  | "active"
+  | "suspended"
+  | "closing"
+  | "closed";
+
+interface FrameIdentity {
+  readonly frameId: string;
+  readonly subsystemKey: string;
+  readonly callerFrameId: string | null;
+}
+```
+
+最终 `FrameOutcome` wire Schema 仍待 Batch B；实现层暂时不得把 `unknown` 概念类型误当冻结 wire schema。
+
+Batch B+ 继续冻结：
+
+- `frame.initialize / activate / suspend / resume / close`；
+- `frame.call / frame.return`；
+- Call/Return transaction 与 commit barrier；
+- semantic error / timeout / retry / cancellation；
+- Runtime failure unwind；
+- wire limits / profile / conformance completion。
+
+该包 MUST NOT：
+
+- 定义 Runtime bootstrap / ready / shutdown / restart；
+- 增加 Frame `ready / frame.status`；
+- 把 `failed` 加回 Frame lifecycle enum；
+- 复用 `frameId` 或 `activationId`；
+- 使用旧 `systemId` 建立新的 Frame ownership identity；
+- 包含 Render State。
 
 ### `renderer-subsystem-connection-protocol`
 
@@ -161,12 +206,16 @@ Subsystem-owned Render：
 
 ### `user-input-protocol`
 
-- `frameId + activationId` 输入路由；
+- Main-authorized Subsystem reference + `frameId + activationId` 输入路由；
+- active/current Activation validation；
+- stale Activation rejection；
 - continuous intent；
 - discrete action；
 - input reset；
 - UI Interaction；
 - input-domain ordering/backpressure。
+
+User Input 实现必须遵守 Frame Batch A：只有 active Frame 的 current Activation 能接收普通输入。
 
 ### `render-state-protocol`
 
@@ -189,34 +238,27 @@ Subsystem-owned Render：
 - Runtime Supervisor；
 - Runtime shutdown intent；
 - Control Connection Registry；
-- Frame Stack / Activation / Input Target；
+- Frame Registry；
+- Activation Registry / generator；
+- Frame Stack / Input Target；
 - Frame / Call Coordinator；
 - Renderer Control Publisher；
 - System Data Connection Authority。
 
-Desktop Launcher 实现必须遵守：
+Frame Registry MUST 分开保存：
 
 ```text
-validated target only
-Host-selected Node.js
-shell=false
-explicit child environment
-Bootstrap Token registered before spawn
-Supervisor observation
-no automatic restart in v1
+lifecycle state
+    starting / active / suspended / closing / closed
+
+outcome
+    null / completed / cancelled / failed
+
+currentActivationId
+    only non-null for active Frame
 ```
 
-Subsystem Control 实现必须遵守：
-
-```text
-hello → connection-bound descriptor.key
-status validation
-Main-owned shutdown intent
-subsystem.shutdown
-stopped only from Supervisor observation
-no application heartbeat / reconnect / resume
-wire limits / semantic error envelope
-```
+不得用 `Frame.status = failed` 取代 cleanup lifecycle。
 
 ### `subsystem-sdk`
 
@@ -224,9 +266,9 @@ wire limits / semantic error envelope
 
 - Bootstrap Context decoder；
 - Subsystem Control v1 client / adapter；
-- `subsystem.hello` helper；
 - Runtime status publisher；
 - `subsystem.shutdown` handler adapter；
+- Frame Control adapter；
 - Frame Input Context registry/router；
 - Renderer System Data server/adapter；
 - Render Update adapter；
@@ -239,6 +281,9 @@ SDK MUST NOT：
 - 自动 reconnect 同一 Launch Attempt；
 - 自动 restart Runtime；
 - 把 shutdown Request ACK 当成 Process stopped；
+- 自行创建公共 frameId / activationId；
+- 接受 revoked Activation 重新有效；
+- 增加 Frame ready/status；
 - 要求 Subsystem 使用 per-Frame business state、per-Frame Projector 或 per-Frame Render。
 
 ### `web-renderer`
@@ -255,6 +300,8 @@ DOM / Canvas / WebGL Reconciler
 Resource Client
 ```
 
+Renderer Frame Input Registry 只镜像 Main 发布的 current Input Target，不自行创建 Activation。
+
 ### `game-package`
 
 Manifest/Entry/Descriptor Loader、Launcher Entry Validator、Catalog 与 Repository Toolkit。
@@ -269,7 +316,7 @@ Desktop localhost HTTP / PWA Service Worker 的统一只读 Content API 实现�
 
 Main/Subsystem Worker、Control/Data MessagePort、Service Worker、OPFS Installer 和页面生命周期协调。
 
-PWA Launcher Descriptor / Bootstrap Credential / Control Transport 映射仍待冻结；未来必须映射已冻结的 Subsystem Control v1 identity / lifecycle / shutdown 语义，不得直接复用 Desktop Node.js Process API 细节。
+PWA Launcher Descriptor / Bootstrap Credential / Control Transport 映射仍待冻结；未来必须保持已冻结的 Subsystem Control 与 Frame Batch A 语义。
 
 ## 4. 业务与适配包
 
@@ -279,7 +326,12 @@ PWA Launcher Descriptor / Bootstrap Credential / Control Transport 映射仍待�
 
 一个 `loom.map` Process 可以承载多个 Frame/Input Context，并由地图自己决定共享或拆分业务 world/session/render。
 
-Runtime 必须响应 `subsystem.shutdown`，但 shutdown cleanup 不得被 Frame lifecycle 隐式替代。
+Frame Input Adapter 必须：
+
+- 按 `frameId` 路由；
+- 只接受 active Frame current Activation；
+- 永久拒绝 revoked Activation；
+- 不把 Frame suspend/close 转换成隐式 Render operation。
 
 ### `map-content-profile-pe`
 
@@ -309,6 +361,8 @@ ignore-shutdown
 echo-input
 nested-call
 multi-frame-input
+stale-activation
+frame-outcome-failure
 render-without-frame
 shared-render-multi-frame
 independent-render-recovery
@@ -344,7 +398,7 @@ Main → Subsystem Process
 Subsystem ⇄ Main
     每 Subsystem 一条 localhost Control WebSocket
     ├── Subsystem Control Protocol v1
-    └── Frame / Call Protocol
+    └── Frame / Call Protocol v1
 
 Renderer ⇄ Main
     每 Session 一条 localhost Control WebSocket
@@ -353,9 +407,7 @@ Renderer ⇄ Subsystem
     每 Subsystem 一条 localhost System Data WebSocket
 ```
 
-Launcher 链与 Control 链的边界不得合并成“spawn 后即 ready”。
-
-Subsystem Control 与 Frame / Call 共享物理 Control WebSocket 时，也必须保持独立协议状态机和错误语义。
+Subsystem Control 与 Frame / Call 共享物理 Control WebSocket 时，必须保持独立协议状态机和所有权语义。
 
 ## 6. PWA 入口
 
@@ -374,20 +426,7 @@ Service Worker
     → Content Service browser adapter
 ```
 
-连接：
-
-```text
-Window ⇄ Main Worker
-    Control MessagePort
-
-Main Worker ⇄ Subsystem Worker
-    每 Subsystem Control MessagePort
-
-Window ⇄ Subsystem Worker
-    每 Subsystem System Data MessagePort
-```
-
-PWA Control MessagePort 的实际 envelope / credential transfer / termination observation 尚待 Profile 冻结。
+PWA Control MessagePort 的 envelope / credential transfer / termination observation 尚待 Profile 冻结，但 Frame identity / lifecycle / Activation 不因 Transport 改变。
 
 ## 7. 依赖规则
 
@@ -429,25 +468,15 @@ pwa-host
 - `hostra-adapter` 承载 LoomRealm Main；
 - `subsystem-sdk` 为每 Frame 强制创建独立 Process / Worker / Transport；
 - Frame / Call Protocol 重新定义 Runtime shutdown / restart；
+- Frame lifecycle enum 加回 `failed`；
+- Frame 协议增加 `ready / initialized / frame.status`；
 - Renderer 用 Frame Stack 控制 Render lifecycle；
 - Render Update Protocol 使用 Frame Activation Sequence；
-- Desktop Subsystem Control v1 增加 application heartbeat / reconnect / implicit restart；
-- PWA 偷偷实现当前未定义的 lazy 或改变 frozen Control lifecycle 语义。
+- PWA 偷偷改变 frozen Control / Frame Batch A 语义。
 
 ## 8. Transport Adapter 边界
 
-建议：
-
-```ts
-interface SystemDataTransport {
-  readonly subsystemRef: string;
-  readonly connectionId: string;
-  send(message: RendererSubsystemMessage): void;
-  close(): void;
-}
-```
-
-Transport 上方分成：
+System Data Transport 上方分成：
 
 ```text
 SystemDataTransport
@@ -455,9 +484,9 @@ SystemDataTransport
 └── UserInputRouter(frameId, activationId)
 ```
 
-不建立统一 FrameStreamRouter 负责全部数据消息。
+UserInputRouter 必须读取 Main-authorized current Activation，不自行推导 Input Target。
 
-Control Transport Adapter 则必须把 Transport 可靠有序 delivery 与上方 Subsystem Control / Frame Call 协议域分开；WebSocket ping/pong 等 Transport health 不进入 application method namespace。
+Control Transport Adapter 则把 Transport delivery 与上方 Subsystem Control / Frame Call 协议域分开。
 
 ## 9. Schema 与 Fixture
 
@@ -470,23 +499,26 @@ src/
 test-fixtures/
 ```
 
-Subsystem Control fixture 至少覆盖：
+Frame Batch A fixture 至少覆盖：
 
 ```text
-hello identity / version / auth
-status state machine
-shutdown intent / ordering / timeout
-connection loss
-semantic error envelope
-wire limits
+frameId unique / no reuse
+permanent subsystem assignment
+callerFrameId immutable
+lifecycle transition model
+no Frame ready/status
+outcome separate from lifecycle
+active ↔ current Activation invariant
+new Activation on every reactivation
+revoked Activation never valid again
+stable Stack top-active / others-suspended
+no two ordinary Input Targets
 ```
 
-Launcher 额外维护 filesystem/process conformance fixtures，覆盖 Entry escape、symlink、env、spawn、exit classification 和 termination。
-
-生成代码不得手工修改。Contract 变更触发兼容性检查和 Golden Fixture 更新。
+Batch B 再加入最终 RPC Schema fixture。
 
 ## 10. 发布策略
 
 第一阶段可以保持 monorepo + unified version。协议稳定后再评估独立包版本。
 
-包拆分或合并只要不改变系统职责和协议，就不是产品架构变更。
+Frame / Call v1 在 Batch F 以前整体包版本仍属于 pre-stable / Draft；但任何实现不得违反 Batch A 已 Frozen 的模型。
