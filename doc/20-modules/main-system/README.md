@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：LoomRealm Main 的内部模块边界  
-> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Main ⇄ Subsystem Control Lifecycle v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call 协议草案](../../15-contracts/system-lifecycle-protocol.md)  
+> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call 协议草案](../../15-contracts/system-lifecycle-protocol.md)  
 > 最近复核：2026-08-03
 
 ## 1. 建议模块
@@ -58,10 +58,10 @@ interface SubsystemDescriptorRecord {
 }
 ```
 
-MVP：
+当前：
 
 - `key` 唯一且大小写敏感；
-- 当前只接受 `nodejs`；
+- Desktop 只接受 `nodejs`；
 - 所有 Descriptor eager / required；
 - unsupported Launcher 使 Game Bootstrap 失败。
 
@@ -112,7 +112,7 @@ Node.js Launcher：
 - 不默认继承 Main 完整 `process.env`；
 - 不解释业务 Payload。
 
-MVP 不声明 Shell / Executable / Deno / Bun 等其他 Launcher 已受支持。
+当前不声明 Shell / Executable / Deno / Bun 等其他 Launcher 已受支持。
 
 ## 6. Launch Attempt Registry
 
@@ -138,6 +138,8 @@ interface LaunchAttemptRecord {
 
 ## 7. Runtime Container Registry
 
+概念记录：
+
 ```ts
 interface RuntimeContainerRecord {
   readonly subsystemKey: string;
@@ -145,6 +147,11 @@ interface RuntimeContainerRecord {
   readonly controlConnectionId: string | null;
   readonly rendererDataConnectionId: string | null;
   readonly frameIds: ReadonlySet<string>;
+
+  readonly shutdownIntent: null | {
+    readonly reason: "session-end" | "bootstrap-abort";
+  };
+
   readonly status:
     | "declared"
     | "starting"
@@ -172,9 +179,17 @@ hello accepted
 ready status accepted
     → ready
 
-actual Process exit observed
-    → stopped / failed according to lifecycle context
+Main establishes shutdown intent
+    → stopping
+
+actual Process exit observed under shutdown intent
+    → stopped
+
+unexpected Process/Control loss or terminal protocol/runtime failure
+    → failed
 ```
+
+Runtime self-reported Status 与 Main-observed state 必须分开保存；`stopped` 只来自 Supervisor observation。
 
 Registry 不持有 Subsystem 业务状态或 Render Registry。
 
@@ -185,40 +200,59 @@ Desktop：
 - 持有受管理 Process Handle；
 - 监听 spawn error、exit code、signal / platform exit reason；
 - 区分 expected / unexpected exit；
-- 执行有限 graceful period 后的强制终止；
+- 在 Main 已建立 shutdown intent 时等待有限 graceful deadline；
+- deadline 后执行强制终止；
 - SHOULD 使用 process group / Job Object / 平台等价监督域；
 - 将实际 Process observation 转换为 Main-observed Runtime state。
 
 v1 明确：
 
 - ready 前 Process 退出 → Game Bootstrap failure；
-- ready 后、Main 未请求 termination 的退出 → Runtime failure；
+- ready 后、Main 没有 shutdown intent 的退出 → Runtime failure；
 - exit code 0 不自动表示正常；
+- Main shutdown intent 下，Supervisor 确认 Runtime 已不存在 → `stopped`；
+- 已经 terminal `failed` 的 Runtime 不因后续 exit 改回 `stopped`；
 - 不自动 restart failed Runtime。
 
-PWA Worker Supervisor 继续由 PWA Bootstrap Profile 单独冻结，不复用 Desktop Process API 细节。
+PWA Worker Supervisor 的创建/终止 API 继续由 PWA Profile 单独冻结，但其 Runtime lifecycle 语义不得静默改变 Subsystem Control v1。
 
 ## 9. Control Connection Registry
 
-负责 Main ⇄ Subsystem Control Connection：
+负责 Main ⇄ Subsystem 的 **Subsystem Control Protocol v1**：
 
 ```text
 connected
 → subsystem.hello
 → identified
-→ subsystem.status(...)
-→ ready / stopping / failed
+→ subsystem.status(initializing?)
+→ subsystem.status(ready)
+
+normal termination:
+Main establishes shutdown intent
+→ subsystem.shutdown(reason)
+→ subsystem.status(stopping) [optional]
+→ Supervisor confirms exit
+→ stopped
 ```
 
 职责：
 
 - 校验 Bootstrap Credential；
 - 校验 hello `key` 与 active Launch Attempt；
-- 协商 Control Protocol Version；
+- 协商 Subsystem Control Protocol Version；
 - hello 成功后将 Connection 永久绑定到 Descriptor Key；
-- 接收 Runtime status；
-- 把 Protocol Error 转换为 Runtime failure；
-- 为后续 Frame / Call Control 提供已认证通道。
+- 接收并验证 Runtime status state machine；
+- 原子建立 Main-owned shutdown intent；
+- 发送 `subsystem.shutdown`；
+- 保证 shutdown Response 只表示 accepted，不把它当作 `stopped`；
+- 将非法 status / fatal Protocol Error 转换为 Runtime failure；
+- 实现 JSON-RPC `-32000` + `error.data.code` 的 LoomRealm semantic error envelope；
+- 执行 Subsystem Control v1 wire limits；
+- 没有 shutdown intent 的 Control Connection loss → Runtime failure；
+- shutdown intent 下的连接关闭交给 Supervisor 收敛为 `stopped / failed`；
+- 为独立 Frame / Call Protocol 提供已经认证的物理 Control Connection。
+
+Subsystem Control v1 **不实现 application-level heartbeat、same-attempt reconnect、resume 或 automatic restart**。Desktop Transport health 可以使用 WebSocket ping/pong 与 Supervisor，但不能伪装成新的 Subsystem Control RPC。
 
 ## 10. Frame Registry
 
@@ -263,6 +297,8 @@ resolve target Subsystem
 
 Frame close 不产生隐式 Render 操作。
 
+Frame / Call 是独立协议域，不得重新定义 `subsystem.hello / status / shutdown` 或 Runtime restart 语义。
+
 ## 12. Renderer Control Publisher
 
 发布：
@@ -284,6 +320,7 @@ Renderer 重连时根据 ready Subsystem 与授权策略恢复 Data Grant，不�
 - Desktop 签发 endpoint、Session/Subsystem/Connection identity、credential 与过期信息；
 - PWA 创建每 Subsystem Renderer Data MessageChannel；
 - Renderer 重载、Runtime failure、Session end 或 Transport failure 时替换 / 撤销；
+- Runtime 进入 Main-owned shutdown intent 后停止签发新的 Data Grant，并按后续 Connection Contract 撤销现有授权；
 - 不读取 User Input 或 Render Update Payload。
 
 Grant 不绑定 `frameId`、`activationId` 或 Render identity。
@@ -297,10 +334,23 @@ Grant 不绑定 `frameId`、`activationId` 或 Render identity。
 
 注意：Content API 的能力限制不等于 Desktop Node.js Process 的 OS sandbox。Desktop v1 executable Subsystem code 属于 trusted code。
 
-## 15. Runtime failure 协调
+## 15. Runtime termination / failure 协调
+
+正常结束：
 
 ```text
-Runtime failed / stopped unexpectedly
+Main establishes shutdown intent
+→ stop issuing new Runtime work / connection grants
+→ subsystem.shutdown(reason)
+→ wait finite deadline
+→ Supervisor confirms exit or force terminates
+→ publish stopped
+```
+
+不可恢复故障：
+
+```text
+Runtime failed / stopped unexpectedly / Control Connection lost unexpectedly
 → revoke corresponding System Data Connection
 → stop affected Frame normal input
 → find affected Frames
@@ -320,8 +370,11 @@ Main 不通过删除 Renderer Render Store 来“完成”Frame failure；Render
 - `spawn success ≠ connected ≠ identified ≠ ready`；
 - hello 成功后 Control Connection 绑定 Descriptor Key；
 - PID / launchId / Process Handle 不是协议身份；
-- Supervisor 对实际 Process exit 有最终观察权；
-- Desktop v1 不自动 restart；
+- Main 拥有正常 Runtime shutdown intent；
+- `stopped` 只来自 Supervisor 对实际 Process exit 的确认；
+- shutdown Response / status(stopping) 都不等于 stopped；
+- 没有 shutdown intent 的 Process exit / Control Connection loss 是 Runtime failure；
+- Subsystem Control v1 没有 application heartbeat、same-attempt reconnect、resume 或 automatic restart；
 - 一个 Subsystem 同时最多一个有效 Runtime Container；
 - 一个 Runtime Container 可以承载多个 Frame/Input Context；
 - Frame 不是业务状态或 Render 所有权单元；
@@ -338,11 +391,17 @@ Main 不通过删除 Renderer Render Store 来“完成”Frame failure；Render
 - shell interpretation impossible；
 - spawn success 仍保持 `starting`；
 - early Process exit → Bootstrap failure；
-- ready 后 exit code 0 unexpected exit → Runtime failure；
-- no automatic restart；
-- bounded termination；
 - hello key/token/version 校验；
 - connected / identified / ready 状态转换；
+- Subsystem Control semantic error envelope；
+- unsolicited / duplicate / invalid status → fatal Protocol Error；
+- identified / initializing / ready shutdown；
+- shutdown intent happens-before status(stopping)；
+- shutdown Response 不等于 stopped；
+- shutdown timeout → Supervisor force termination；
+- no shutdown intent + Control loss / exit code 0 → Runtime failure；
+- failed 后 exit 不改回 stopped；
+- no application heartbeat / reconnect / automatic restart；
 - 同一 Subsystem 多 Frame；
 - Frame close 不修改 Render 或 Data Connection；
 - Runtime failure 影响多个 Frame；
