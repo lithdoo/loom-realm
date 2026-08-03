@@ -22,16 +22,16 @@
         ├──────────────▶ LoomRealm Main
         │                  ├── Session / Subsystem Registry
         │                  ├── Launcher / Runtime Supervisor
-        │                  ├── Frame Stack / Activation
+        │                  ├── Frame Registry / Stack / Activation
         │                  ├── Input Target
         │                  └── Connection Authority
         │                           │
         │                           │ Control Plane
         │                           ▼
         │                  Subsystem Runtime Container
-        │                  ├── System 业务状态与规则
-        │                  ├── 可选 Frame / Input Context
-        │                  ├── Render Manager / Render Contexts
+        │                  ├── 权威业务状态与规则
+        │                  ├── 0..N Frame / Input Context
+        │                  ├── 0..N Render Context
         │                  └── Renderer Data Endpoint
         │                           │
         │                           │ System Data Connection
@@ -45,52 +45,71 @@
         └──────────────▶ Readonly Content Service
 ```
 
-桌面由独立 LoomRealm Main Process、FSDB Content Service、Hostra 和各 Subsystem Process 组成。PWA 使用 Window、Main Runtime Worker、每 Subsystem 一个 Dedicated Worker、Service Worker 和 OPFS 映射相同逻辑边界。
-
 ## 2. 核心对象
 
-### Subsystem / System
+### Subsystem
 
-Game Entry 中的 Subsystem Descriptor 使用全局唯一、稳定的 `key` 作为 Descriptor 身份，例如 `loom.map`、`loom.menu`。
+Game Entry 中的 Subsystem Descriptor 使用唯一、稳定的 `key` 作为 Descriptor identity，例如 `loom.map`、`loom.menu`。
 
-现有部分 v1 数据协议仍使用 `systemId`。`systemId` 与 Descriptor `key` 的最终 wire 迁移或统一方式由对应协议版本冻结；架构层不通过全局替换提前改变旧协议字段含义。
+Legacy 数据协议仍可能使用 `systemId`。其 wire 迁移由对应协议版本冻结；新 Frame / Call v1 不使用旧 `systemId` 建立第二套 Frame ownership identity。
 
 ### Runtime Container
 
-一个 Subsystem 对应一个有效 Runtime Container：Desktop 为独立进程，PWA 为 Dedicated Worker。Container 是 Subsystem/System 级承载单元，不等于 Frame。
+一个 Subsystem 对应一个有效 Runtime Container：Desktop 为独立 Process，PWA 为 Dedicated Worker。Container 是 Subsystem 级承载单元，不等于 Frame。
 
 ### Frame
 
-Frame 是 Main 管理的一次调用 / 用户输入上下文。它用于调用栈、`frameId`、Activation、Input Target、输入路由和调用返回关系。
+Frame 是 Main-owned 的一次调用 / ordinary User Input Context。
 
-Frame 不是 Render 身份，也不是平台强制的业务状态所有权单元。平台不要求每个 Frame 拥有独立 Runtime Core、Projector、Render Tree、Revision 或 Renderer Store。
+Frame / Call v1 Batch A 已冻结：
+
+```text
+frameId
+    Main-generated / Session unique / never reused
+
+Frame → Subsystem
+    permanently bound to descriptor.key
+
+callerFrameId
+    immutable
+
+lifecycle
+    starting / active / suspended / closing / closed
+
+outcome
+    completed / cancelled / failed
+    separate from lifecycle
+
+Activation
+    only active Frame owns current Activation
+    Main-generated / Session unique / never reused
+    revoked Activation never becomes valid again
+```
+
+v1 没有 Frame `ready / initialized / frame.status`。
+
+Frame 不是 Render identity，也不是平台强制的业务状态所有权单元。
 
 ### Render
 
-Render 是 Subsystem 完全拥有的呈现上下文。Subsystem 决定 Render 的创建、销毁、目标状态、排序、组合、可见性、更新和恢复。
+Render 是 Subsystem 完全拥有的呈现 Context。公共架构不定义 Frame 与 Render 的 ownership 关系。
 
-公共架构不定义 Frame 与 Render 的所有权关系。Subsystem 可以内部显式关联二者，也可以完全不关联。
-
-## 3. 运行时启动与结束
+## 3. Runtime 启动与结束
 
 Desktop v1 启动：
 
 ```text
 Main Control Endpoint ready
-→ 一次性读取全部 Subsystem Descriptor
-→ 校验完整 Descriptor 集合
-→ 安全解析全部 required launcher.entry
-→ 为各 Descriptor 创建 Launch Attempt / Bootstrap Token
-→ 在 Main Control authentication state 注册 Token
-→ Host-selected Node.js + shell=false 启动全部 required Process
-→ Runtime Supervisor 接管各 Process
-→ Subsystem 主动连接 Main
-→ subsystem.hello 完成身份绑定与 Subsystem Control version negotiation
+→ validate all Subsystem Descriptors
+→ resolve launcher targets
+→ create Launch Attempts / Tokens
+→ token registration
+→ spawn required Processes + Supervisor
+→ Subsystem connects Main
+→ subsystem.hello
 → identified
-→ subsystem.status(initializing?)
-→ subsystem.status(ready + rendererDataEndpoint)
-→ 全部声明 Subsystem ready
-→ Renderer 根据 Main 授权连接各 ready Subsystem
+→ optional initializing
+→ ready
 ```
 
 因此：
@@ -99,12 +118,12 @@ Main Control Endpoint ready
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-正常 Runtime 结束由 Main 控制：
+正常结束：
 
 ```text
 Main establishes shutdown intent
 → subsystem.shutdown(reason)
-→ subsystem.status(stopping) [optional]
+→ status(stopping) [optional]
 → Supervisor confirms Runtime exit
 → stopped
 ```
@@ -116,102 +135,91 @@ shutdown Response ≠ stopped
 status(stopping) ≠ stopped
 ```
 
-没有 Main shutdown intent 的 Runtime exit 或 Control Connection loss 是 failure，即使 Process exit code 为 0。
+没有 Main shutdown intent 的 Runtime exit 或 Control Connection loss 是 failure。
 
-当前全部 Descriptor 都是 eager / required；任一 unsupported Launcher、Entry/Process failure 或声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败。当前不定义 `lazy`。
-
-Desktop v1 还冻结：
-
-- `launcher.entry` 是 Installation Root 相对的安全 package path；
-- Node Runtime 由 Host 选择；
-- Game Package 不能提供 Node flags / argv；
-- Process creation 不经过 Shell；
-- child environment 显式构造；
-- Subsystem Control v1 不支持 same-attempt reconnect / resume / automatic restart；
-- Subsystem Control v1 不定义 application-level heartbeat；
-- executable Subsystem JavaScript 属于 trusted code，当前不宣称 OS sandbox。
-
-详见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Game Package v2](../15-contracts/game-package-v2.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)。
+当前全部 Descriptor eager / required；不定义 lazy。Subsystem Control v1 不支持 same-attempt reconnect / resume / automatic restart，也不定义 application-level heartbeat。
 
 ## 4. 栈式运行系统
 
-负责 Frame 调用栈、激活周期、输入目标和调用返回关系。
+Frame / Call 是独立协议域，可以复用已认证 Main ⇄ Subsystem Control Connection，但不得重新定义 Runtime Bootstrap、Subsystem identity、ready、shutdown 或 restart。
 
-调用栈只控制 Frame / Input，不控制 Runtime Container 或 Render 生命周期。
+Batch A 已冻结的稳定 Stack 关系：
 
-Frame / Call 是独立协议域，可以复用已认证的 Main ⇄ Subsystem Control Connection，但不得重新定义 Runtime Bootstrap、Subsystem identity、ready、shutdown 或 restart 语义。
+```text
+Stack Top
+    active + current Activation
 
-详见：[栈式运行系统](./stack-runtime-system.md)。
+all lower live Frames
+    suspended + no current Activation
+```
+
+事务切换期间可以短暂没有 active Frame，但 Main 不得发布两个同时有效的 ordinary Input Target。
+
+Frame 只能在目标 Runtime `ready` 且没有 shutdown intent 时建立。
+
+后续 Batch B-F 继续冻结 RPC Schema、Call transaction、error/timeout、Runtime failure unwind 和完整 profile。
+
+详见：[栈式运行系统](./stack-runtime-system.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)。
 
 ## 5. 运行承载系统
 
 核心规则：
 
 ```text
-每个 Subsystem / System 一个 Runtime Container
-每个 Container 可以承载 0..N Frame / Input Context
-每个 Container 可以拥有 0..N Render Context
+每个 Subsystem 一个 Runtime Container
+每个 Container 0..N Frame / Input Context
+每个 Container 0..N Render Context
 每个 Container 与 Main 一条长期 Control Connection
-每个 Container 与 Renderer 之间最多一条长期 System Data Connection
-Frame 与 Render 没有平台级所有权绑定
+每个 Container 与 Renderer 最多一条 System Data Connection
 ```
 
-详见：[运行承载系统](./runtime-hosting-system.md)。
+Frame create / suspend / resume / close 不隐式创建、销毁或重启 Runtime/Data Connection/Render。
 
 ## 6. 通信系统
-
-通信分为：
 
 ```text
 Control Plane
     Subsystem ⇄ Main
-        Subsystem Control Protocol v1
-        Frame / Call Protocol（独立域，待冻结）
+        Subsystem Control Protocol v1          Frozen
+        Frame / Call v1 Batch A                Frozen
+        Frame / Call v1 Batch B-F              Draft
+
     Renderer ⇄ Main
+        Draft target
 
 System Data Plane
     Subsystem ⇄ Renderer
-    ├── Connection Layer
-    ├── Render Update Protocol
-    └── User Input Protocol
+        Connection Layer
+        Render Update Protocol
+        User Input Protocol
 
 Content Plane
     Runtime / Renderer ⇄ Readonly Content Service
 ```
 
-Subsystem Control v1 已冻结 `subsystem.hello / subsystem.status / subsystem.shutdown`、Runtime 状态机、错误 Envelope、limits 与 connection/shutdown failure semantics。
+User Input 必须遵守 Frame Batch A 的 current Activation：旧/revoked Activation 永久拒绝。
 
-Render Update 使用独立 Render 身份；User Input 使用 Frame / Activation 身份。两者共享 System Transport，但不共享业务生命周期、Sequence 或恢复语义。
-
-详见：[通信系统](./communication-system.md)。
+Render Update 使用独立 Render identity，不继承 Frame Activation epoch。
 
 ## 7. 渲染系统
 
 Renderer 接收各 Subsystem 发布的声明式 Render State，在本地维护 Render Store，并协调为可信 DOM、Canvas 或 WebGL 视图。
 
-Renderer 不从 Frame Stack 推导哪些 Render 应显示，也不因 Frame suspend / close 自动隐藏或删除 Render。
+Renderer 不从 Frame Stack 推导 Render visibility/order/lifecycle，也不因 Frame `suspended / closing / closed` 自动删除 Render。
 
-详见：[渲染系统](./rendering-system.md)。
-
-## 8. 存储、Launcher 与内容系统
+## 8. Storage / Launcher / Content
 
 Content API 只提供只读逻辑数据与资源。受控 Subsystem Launcher 是 Main 的运行能力，不属于 Content API。
-
-Desktop v1 Launcher Type 为 `nodejs`，其 Entry/path/env/spawn/Supervisor 语义已经冻结。
 
 必须区分：
 
 ```text
 Content API capability
-    不提供任意物理路径或执行能力
+    no arbitrary physical path / execution capability
 
 Desktop Node.js Process OS capability
-    当前 v1 不提供 sandbox；executable code 属于 trusted code
+    v1 no sandbox; executable code is trusted
 ```
-
-不能从 Content API 的限制推导 Node Process 没有 `fs`、network 或 child_process 能力。
-
-详见：[存储与内容系统](./storage-system.md)。
 
 ## 9. 状态所有权
 
@@ -221,29 +229,26 @@ LoomRealm Main
     Subsystem Descriptor / Runtime Registry
     Launcher / Launch Attempt / Runtime Supervisor
     Runtime shutdown intent
-    Runtime Container 生命周期观察
-    Frame Stack / Activation / Input Target
+    Frame identity / lifecycle / Stack
+    Activation / Input Target
     Connection Authority
 
 Subsystem Runtime Container
-    本 Subsystem 的权威业务状态和规则
-    Frame Input Handler / Frame 关联（如需要）
+    authoritative business state / rules
+    Frame Input Handler / internal associations
     Render Registry / Render State
-    System 级共享资源和缓存
+    shared resources/cache
 
 Web Renderer
-    Main Control State 的只读镜像
+    read-only Main Control mirror
     System Data Connection Registry
+    Frame Input Registry
     Render Store
-    Frame Input 路由状态
-    DOM / Canvas / WebGL 与非权威表现状态
-    原始输入设备状态
+    non-authoritative presentation state
 
 Content Service
-    安装登记、只读内容定位、校验和资源交付
+    installation registry / readonly content delivery
 ```
-
-任何状态都必须能够回答：谁是权威拥有者、谁可以修改、谁只能读取或投影、断线或重载后从哪里恢复。
 
 ## 10. Desktop 承载
 
@@ -251,30 +256,30 @@ Content Service
 LoomRealm Main Process
 FSDB Content Service Process
 Hostra Electron Main Process
-Hostra Renderer Process / LoomRealm Web Renderer
+Hostra Renderer Process / Web Renderer
 每个已声明 Subsystem 一个 Subsystem Process
 ```
 
-通信 / 启动链：
+通信：
 
 ```text
 Main → Subsystem Process
     Desktop Node.js Launcher Profile v1
 
-Subsystem Process ⇄ Main
-    每 Subsystem 一条长期 Control WebSocket
+Subsystem ⇄ Main
+    per-Subsystem Control WebSocket
+    ├── Subsystem Control v1
+    └── Frame / Call v1
 
-Renderer → Main
-    每会话一条长期 Control WebSocket
+Renderer ⇄ Main
+    per-Session Control WebSocket
 
-Renderer ⇄ Subsystem Process
-    每 Subsystem 一条长期 Data WebSocket
+Renderer ⇄ Subsystem
+    per-Subsystem Data WebSocket
 
-Runtime / Renderer ⇄ Content Service
-    localhost HTTP Fetch
+Runtime / Renderer ⇄ Content
+    localhost HTTP
 ```
-
-Hostra 不承载 LoomRealm Main，也不解释 Frame、Render、Input 或业务消息。
 
 ## 11. PWA 承载
 
@@ -283,38 +288,33 @@ Window
     Web Renderer
 
 Main Runtime Dedicated Worker
-    Session、Frame Stack、Input Target、Subsystem Worker Registry
+    Session / Runtime Registry / Frame Stack / Activation / Input Target
 
 每个 Subsystem 一个 Dedicated Worker
-    业务 Runtime、Frame/Input Contexts、Render Contexts
+    Business Runtime / Frame Input Context / Render Context
 
 Service Worker
-    same-origin Readonly Content API
-
-OPFS / Cache Storage
-    已安装游戏包和资源
+    Readonly Content API
 ```
 
-PWA 的 Launcher Descriptor → Worker Script、Bootstrap Credential 与 Control Transport Profile 尚未冻结；不得把 Desktop `nodejs` Process Profile 直接解释为浏览器 Worker 启动契约。
+PWA Launcher / Bootstrap Credential / Control Transport Profile 尚未冻结，但不得改变 Subsystem Control v1 和 Frame Batch A 已 Frozen 的逻辑语义。
 
 ## 12. 核心不变量
 
-1. 进程 / Worker 隔离粒度是 Subsystem，不是 Frame；
-2. Frame 是逻辑调用 / User Input Context；
-3. Render 生命周期完全由 Subsystem 控制；
-4. Main 不维护 Render Registry；
-5. Renderer 不从 Frame Stack 推导 Render；
-6. System Data Connection 的存在不依赖 Frame 数量；
-7. Desktop v1 使用 `key + nodejs + eager all-required bootstrap`；
-8. Entry 在 Process spawn 前安全解析；
-9. Bootstrap Token 在 Process spawn 前注册；
-10. `spawn success ≠ connected ≠ identified ≠ ready`；
-11. Control Bootstrap 使用 connection-bound identity，`ready` 是 Runtime Status；
-12. Main 拥有正常 Runtime shutdown intent；
-13. `stopped` 只来自 Supervisor 对实际退出的观察；
-14. 没有 shutdown intent 的 Runtime exit / Control Connection loss 是 failure；
-15. Subsystem Control v1 不定义 application heartbeat、reconnect、resume 或 automatic restart；
-16. Frame / Call 与 Subsystem Control 是独立协议域，即使共享同一物理 Control Connection；
-17. 旧协议中的 `systemId` 不通过架构文档静默改义；
-18. Content API 与 Launcher 是不同能力边界；
-19. Entry 路径安全不等于 Node.js Process sandbox。
+1. Process / Worker 隔离粒度是 Subsystem，不是 Frame；
+2. Frame 是 Main-owned call / ordinary User Input Context；
+3. `frameId` Session 内唯一且不复用；
+4. Frame 永久绑定 `descriptor.key` 与 immutable caller；
+5. Frame lifecycle = `starting / active / suspended / closing / closed`；
+6. Frame outcome 与 lifecycle 分离；
+7. v1 无 Frame ready/status；
+8. 只有 active Frame 有有效 Activation；
+9. revoked Activation 永久失效；
+10. Render lifecycle 完全由 Subsystem 控制；
+11. Main 不维护 Render Registry；
+12. System Data Connection 不依赖 Frame 数量；
+13. `spawn success ≠ connected ≠ identified ≠ ready`；
+14. Main 拥有正常 Runtime shutdown intent；
+15. `stopped` 只来自实际 Runtime termination observation；
+16. Subsystem Control 与 Frame / Call 是独立协议域；
+17. Content API 与 Launcher 是不同能力边界。
