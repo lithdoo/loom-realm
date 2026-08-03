@@ -1,25 +1,22 @@
-# Main ⇄ Subsystem 控制与运行时生命周期协议 v1 Schema 草案
+# Main ⇄ Subsystem Control Protocol v1
 
 > 层级：正式契约  
-> 状态：Draft  
+> 状态：Active / Normative  
 > 协议版本：1  
-> 稳定程度：Stabilizing  
-> 主要定义：Main ⇄ Subsystem Control Connection 的 Bootstrap、Subsystem 身份绑定、Runtime 生命周期状态 Schema、状态转换与错误行为  
-> 依赖：[运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)、[运行承载系统](../10-architecture/runtime-hosting-system.md)、[通信系统](../10-architecture/communication-system.md)、[Subsystem Descriptor MVP ADR](../decisions/0007-subsystem-descriptor-mvp.md)  
-> 被以下草案继续使用：[模块子系统生命周期与调用协议草案](./system-lifecycle-protocol.md)  
-> 最近复核：2026-08-02
-
-本文档冻结 LoomRealm Control Protocol v1 中已经确认的 Main ⇄ Subsystem Bootstrap 与 Runtime Lifecycle wire schema。
-
-核心原则：
-
-> `ready` 不是独立协议，而是 `subsystem.status` 中的一个 Runtime 生命周期状态。Main 同时结合 Process / Worker Supervisor、Control Connection 状态、`subsystem.hello` 身份绑定结果和 Runtime 自报告状态，维护最终 Runtime Container 状态。
+> 稳定程度：Frozen  
+> 主要定义：Main ⇄ Subsystem Control Connection 的 Bootstrap、Subsystem 身份绑定、Runtime Lifecycle、Shutdown、错误与连接失败语义  
+> 依赖：[运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)、[运行承载系统](../10-architecture/runtime-hosting-system.md)、[通信系统](../10-architecture/communication-system.md)、[Game Package v2](./game-package-v2.md)、[Desktop Node.js Launcher Profile v1](./nodejs-launcher-profile-v1.md)  
+> 被以下协议继续使用：[Frame 生命周期与调用协议草案](./system-lifecycle-protocol.md)  
+> 决策记录：[ADR 0009：冻结 Subsystem Control Protocol v1](../decisions/0009-freeze-subsystem-control-protocol-v1.md)  
+> 最近复核：2026-08-03
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-## 1. 适用范围
+核心原则：
 
-本协议适用于：
+> Subsystem Control Protocol 只管理 Runtime Container 级身份和生命周期。Frame / Call 是独立协议域，可以复用已经认证的 Control Connection，但不得重新定义 Runtime Bootstrap、Subsystem identity、ready、shutdown 或 restart 语义。
+
+## 1. 适用范围
 
 ```text
 LoomRealm Main
@@ -29,264 +26,123 @@ Main ⇄ Subsystem Control Connection
 Subsystem Runtime Container
 ```
 
-桌面 MVP：
+v1 负责：
 
 ```text
-Main
-    LoomRealm Main Process
-
-Subsystem
-    一个 descriptor.key 对应的 Node.js Process
-
-Transport
-    localhost WebSocket
+Control Connection Bootstrap
+Subsystem identity binding
+Runtime initializing / ready / failed
+Main-requested Runtime shutdown
+Control Connection failure
+Protocol version negotiation
+Subsystem Control error / limit semantics
 ```
 
-PWA 或其他 Host Profile 可以使用不同 Transport，但 MUST 保持本文的身份、状态和生命周期语义。
+v1 不负责：
 
-公共协议使用 `Subsystem`、`Runtime`、`Runtime Container`、`Control Connection`，不将 OS Process 作为业务身份。
+```text
+Frame lifecycle / call / return
+Renderer Data Connection authentication / Grant
+Render Update
+User Input
+Content API
+Runtime restart / resume / checkpoint
+application-level heartbeat / health probe
+```
 
-### 1.1 本协议冻结
-
-- Subsystem 主动连接 Main；
-- `subsystem.hello` Request 的最终 v1 字段；
-- Bootstrap Token 的使用语义；
-- Control Protocol Version 协商；
-- Control Connection 与 `descriptor.key` 的永久绑定；
-- `subsystem.status` Notification 的最终 v1 discriminated union；
-- `initializing / ready / stopping / failed` 的合法转换；
-- 重复状态和逆向状态转换的 fatal error 行为；
-- Main-observed State 与 Runtime-reported Status 的职责分离；
-- Desktop v1 Renderer Data Endpoint Schema；
-- Runtime `ready`、`failed` 与 Game Bootstrap 的关系。
-
-### 1.2 本协议不冻结
-
-- Frame create / activate / suspend / resume / close；
-- Subsystem 调用和返回；
-- Renderer Data Connection 的 Grant / Credential / Authentication；
-- Render Update；
-- User Input；
-- Content API；
-- graceful shutdown 的 Main → Subsystem 方法；
-- heartbeat / health；
-- Runtime restart / resume；
-- Bootstrap Token 的字节长度和编码；
-- JSON-RPC application error 的最终整数 code；
-- 各 timeout 的默认数值；
-- PWA Bootstrap Credential Transport Profile。
+Desktop v1 Transport 为 localhost WebSocket + JSON-RPC 2.0。PWA Transport / Bootstrap Credential Profile 暂缓，但未来 Profile MUST 保持本文的身份与生命周期语义，除非提升协议版本。
 
 ## 2. 前置条件
 
-Main 建立本协议前已经：
+Main 在启动 Subsystem 前已经：
 
 ```text
-读取 Game Entry
-→ 一次性读取全部 Subsystem Descriptor
-→ 校验完整 Descriptor 集合
-→ 为每个 Descriptor 创建 Launch Attempt
-→ 启动全部 required Subsystem
+读取完整 Game Entry / Descriptor 集合
+→ 完成 Game Package v2 校验
+→ 创建 Launch Attempt
+→ 注册 Bootstrap Credential
+→ 启动并监督 Runtime Container
 ```
 
-当前 Descriptor 概念结构：
+Desktop v1 启动上下文由 [Desktop Node.js Launcher Profile v1](./nodejs-launcher-profile-v1.md) 冻结。
 
-```ts
-interface SubsystemDescriptor {
-  readonly key: string;
-  readonly launcher: {
-    readonly type: "nodejs";
-    readonly entry: string;
-  };
-  readonly env?: Readonly<Record<string, string>>;
-}
-```
-
-`descriptor.key` 是稳定 Subsystem identity。本协议不重新冻结其字符集或命名空间格式。
-
-## 3. Control Connection 分层
+基础关系：
 
 ```text
-Main ⇄ Subsystem Control Connection
-│
-├── Connection / Bootstrap
-│   └── subsystem.hello
-│
-├── Runtime Lifecycle
-│   └── subsystem.status
-│
-└── 后续 Control Protocol
-    ├── Frame Control
-    ├── Shutdown
-    └── 其他控制能力
+spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-v1 Bootstrap 成功后，同一条 Control Connection MAY 继续承载后续控制方法。
+## 3. Transport 与连接方向
 
-## 4. Transport 与连接方向
-
-桌面 MVP 使用 localhost WebSocket。
-
-连接方向固定为：
+Desktop v1：
 
 ```text
-Subsystem Runtime
-    ── connect ──▶
-LoomRealm Main Control WebSocket Server
+Transport     localhost WebSocket
+Application   JSON-RPC 2.0
+Direction     Subsystem → Main 主动建立连接
 ```
 
-Main MUST 在启动 Subsystem Runtime 前使 Main Control Endpoint 可连接。
+Main Control Endpoint MUST 在 Runtime Process 开始执行前可连接。
 
-Transport connected 只表示底层连接建立：
+WebSocket 建立只产生：
 
 ```text
-connected ≠ identified ≠ ready
+Main observed state = connected
 ```
 
-## 5. 启动上下文
+此时连接仍没有 Subsystem identity。
 
-Main 启动每个 Subsystem Runtime 时 MUST 提供至少：
+## 4. Connection Bootstrap 规则
+
+新 Control Connection 的第一条 LoomRealm application message MUST 是：
 
 ```text
-Subsystem Descriptor Key
-Main Control Endpoint
-Bootstrap Token
+subsystem.hello
 ```
 
-桌面 MVP MAY 通过 Main 保留环境变量传递这些值。
+hello 成功前：
 
-Descriptor 自定义 `env` MUST NOT 覆盖 LoomRealm 保留启动字段。
+- Connection 尚未绑定 Subsystem identity；
+- Subsystem MUST NOT 发送 `subsystem.status`；
+- 双方 MUST NOT 在该连接上执行 Frame / Call 或其他已认证 Control operation。
 
-精确保留环境变量名不由本协议冻结。
+第一条 LoomRealm application message 不是合法 `subsystem.hello` 时，Main MUST 将该连接视为 fatal Bootstrap / Protocol Error 并关闭连接。
 
-## 6. Bootstrap Token
+## 5. Bootstrap Token
 
 `bootstrapToken` 是 Main 为一次 Launch Attempt 生成的一次性 bearer-style Bootstrap Credential。
 
-协议语义：
+它 MUST：
 
-- MUST 每次 Launch Attempt 重新生成；
-- MUST 绑定到一个确定的 Launch Attempt 与 `descriptor.key`；
-- MUST 只允许成功认证一次；
-- `subsystem.hello` 成功后 MUST 立即视为 consumed；
-- consumed token MUST NOT 再次成功认证；
-- MUST NOT 使用 PID、端口号或 Worker 名称代替；
-- SHOULD NOT 出现在普通日志或用户可见错误信息中。
+- 每次 Launch Attempt 重新生成；
+- 绑定唯一 Launch Attempt 与 `descriptor.key`；
+- 只允许成功消费一次；
+- 在 hello 成功后立即 consumed；
+- 不允许 consumed token 再次认证；
+- 不使用 PID、端口、launchId、Worker 名称或 runtime metadata 替代；
+- 不在普通日志或用户可见错误中明文输出。
 
-Wire Schema 中 `bootstrapToken` 是 opaque non-empty string。
+Wire 中 `bootstrapToken` 是 opaque non-empty string。
 
-Token 的字节长度、随机算法和字符串编码不在本版本冻结。
+精确熵、随机算法与底层字节编码属于安全实现 Profile，不属于本协议版本冻结内容。
 
-## 7. Main 内部 Launch Attempt
+## 6. `subsystem.hello`
 
-Main SHOULD 维护内部 Launch Attempt identity，例如：
-
-```ts
-interface SubsystemLaunchRecord {
-  descriptorKey: string;
-  launchId: string;
-  bootstrapToken: string;
-  observedState: MainObservedSubsystemState;
-  reportedStatus?: SubsystemRuntimeStatus;
-}
-```
-
-`launchId` 不属于 v1 wire schema。
-
-同一个 `descriptor.key` 重新启动时 MUST 使用新的 Launch Attempt 和新的 Bootstrap Token。
-
-## 8. Main-observed State 与 Runtime-reported Status
-
-两套状态来源不同，MUST 分开维护。
-
-### 8.1 Main-observed Runtime Container State
-
-```ts
-type MainObservedSubsystemState =
-  | "declared"
-  | "starting"
-  | "connected"
-  | "identified"
-  | "ready"
-  | "stopping"
-  | "stopped"
-  | "failed";
-```
-
-来源：
+### 6.1 Method
 
 ```text
-declared
-    Game Entry / Descriptor Registry
-
-starting
-    Launcher invoked
-
-connected
-    Control Transport accepted
-
-identified
-    subsystem.hello accepted
-
-ready
-    legal subsystem.status(state="ready") accepted
-
-stopping
-    legal subsystem.status(state="stopping") accepted
-    or Main has begun a future explicit shutdown flow
-
-stopped
-    Supervisor confirms normal Runtime exit
-
-failed
-    Supervisor / Transport / Protocol / subsystem.status(failed)
-```
-
-### 8.2 Subsystem-reported Runtime Status
-
-```ts
-type SubsystemRuntimeStatus =
-  | "initializing"
-  | "ready"
-  | "stopping"
-  | "failed";
-```
-
-`stopped` MUST NOT 由 Subsystem 自报告；它是 Main Supervisor 对实际 Runtime 退出的观察结果。
-
-## 9. Connection Bootstrap 规则
-
-新 Control Connection 建立后：
-
-```text
-starting → connected
-```
-
-在 `subsystem.hello` 成功前：
-
-- 连接尚未绑定 Subsystem identity；
-- Subsystem MUST NOT 发送普通业务 Control Method；
-- 第一条业务协议消息 MUST 是 `subsystem.hello`。
-
-如果第一条业务消息不是 `subsystem.hello`，Main MUST 将其视为 fatal Control Protocol Error 并关闭该连接。
-
-## 10. `subsystem.hello`
-
-### 10.1 Method
-
-```text
-Method: subsystem.hello
-JSON-RPC Type: Request
+Method:    subsystem.hello
+Type:      JSON-RPC Request
 Direction: Subsystem → Main
-Control Protocol Version: 1
 ```
 
-### 10.2 Final v1 Request Schema
+### 6.2 Request
 
 ```ts
 interface SubsystemHelloParams {
-  key: string;
-  bootstrapToken: string;
-  protocolVersions: readonly number[];
+  readonly key: string;
+  readonly bootstrapToken: string;
+  readonly protocolVersions: readonly number[];
 }
 ```
 
@@ -305,87 +161,67 @@ interface SubsystemHelloParams {
 }
 ```
 
-v1 `params` MUST NOT 依赖以下字段：
+v1 hello MUST NOT 依赖：
 
 ```text
 pid
 name
 launcherType
 entry
-runtimeVersion
 nodeVersion
+runtimeVersion
 capabilities
 sessionId
 launchId
 ```
 
-未来版本可以新增字段，但 v1 实现不得把上述信息作为 Bootstrap 成功条件。
-
-### 10.3 `key`
-
-`key` MUST 是 non-empty string。
-
-Main MUST 使用大小写敏感、逐字符精确匹配，在本 Session Descriptor Registry 中寻找：
-
-```text
-params.key === descriptor.key
-```
-
-本协议不冻结 `key` 的 lower-case、字符集或命名空间规则；这些属于 Game Package Contract。
-
-### 10.4 `bootstrapToken`
-
-`bootstrapToken` MUST 是 non-empty opaque string。
+### 6.3 Identity Validation
 
 Main MUST 验证：
 
 ```text
-存在与 key 对应的 active Launch Attempt
+key 存在于当前 Descriptor Registry
+存在该 key 的 active Launch Attempt
 bootstrapToken 属于该 Launch Attempt
-bootstrapToken 未 consumed
+bootstrapToken 尚未 consumed
 ```
 
-认证成功后 Main MUST consume 该 token。
+`key` MUST 使用大小写敏感、逐字符精确匹配。
 
-Main MUST NOT 在 wire error 中区分“未知 key”和“错误 token”，避免通过 Control Endpoint 探测当前 Session 的 Subsystem identity。
+Main MUST NOT 在 wire error 中区分 unknown key、invalid token、consumed token 或 key/token mismatch。
 
-### 10.5 `protocolVersions`
+### 6.4 Version Negotiation
 
-`protocolVersions` 表示 Subsystem 支持的 Main ⇄ Subsystem Control Protocol 版本。
+`protocolVersions` 只协商 **Subsystem Control Protocol**，不协商 Frame / Call、Renderer Data、Render Update、User Input 或 Content API。
 
 约束：
 
 - MUST 是非空数组；
 - 每项 MUST 是正整数；
-- MUST NOT 包含重复值；
-- SHOULD 按从高到低排列。
+- MUST NOT 重复；
+- 项数 MUST 为 `1..16`。
 
-Main 从双方支持版本交集中选择最高版本：
+Main 选择双方支持版本交集中的最大值：
 
 ```text
 selectedVersion = max(
-  subsystem.protocolVersions ∩ main.supportedProtocolVersions
+  subsystem.protocolVersions
+  ∩
+  main.supportedSubsystemControlVersions
 )
 ```
 
-如果交集为空，`subsystem.hello` MUST 失败。
+没有交集时 hello MUST 失败。
 
-本 `hello` 只协商 Main ⇄ Subsystem Control Protocol，不协商：
-
-- Renderer ⇄ Subsystem Connection Protocol；
-- Render Update Protocol；
-- User Input Protocol；
-- Content API。
-
-### 10.6 Final v1 Success Result
+### 6.5 Success Result
 
 ```ts
 interface SubsystemHelloResult {
-  protocolVersion: number;
+  readonly protocolVersion: number;
 }
 ```
 
-示例：
+v1：
 
 ```json
 {
@@ -397,25 +233,21 @@ interface SubsystemHelloResult {
 }
 ```
 
-### 10.7 Hello 成功后的 Identity
-
-`subsystem.hello` 成功后：
+hello 成功后 Main MUST：
 
 ```text
-connected → identified
+consume bootstrapToken
+→ permanently bind this Control Connection to descriptor.key
+→ observed state: connected → identified
 ```
 
-Main MUST 将当前 Control Connection 永久绑定到本次 `descriptor.key`，直到连接关闭。
+同一条 Control Connection 生命周期内 identity MUST NOT 改变。
 
-连接身份 MUST NOT 在同一条 Control Connection 生命周期内改变。
+后续 Subsystem Control Message MUST 依赖 connection-bound identity，MUST NOT 再携带 `key` 建立第二身份来源。
 
-后续 Runtime Lifecycle 或其他 Control Message MUST 根据 connection-bound identity 确定 Subsystem；MUST NOT 依赖消息再次携带 `key`。
+## 7. Hello Error
 
-## 11. Hello Error Behavior
-
-`subsystem.hello` 是 Request，因此 Bootstrap 失败 MUST 返回 JSON-RPC Error，然后关闭 Control Connection。
-
-v1 冻结以下 wire-level 语义错误类别：
+v1 冻结语义错误：
 
 ```text
 BOOTSTRAP_AUTHENTICATION_FAILED
@@ -424,341 +256,491 @@ DUPLICATE_CONTROL_CONNECTION
 PROTOCOL_STATE_ERROR
 ```
 
-其中：
+`BOOTSTRAP_AUTHENTICATION_FAILED` 统一覆盖：
 
-### `BOOTSTRAP_AUTHENTICATION_FAILED`
-
-统一覆盖：
-
-- 未知 `key`；
-- 没有对应 active Launch Attempt；
-- `bootstrapToken` 不匹配；
-- token 已 consumed；
+- unknown key；
+- missing active Launch Attempt；
+- invalid token；
+- consumed token；
+- key/token mismatch；
 - 其他 Bootstrap identity / credential 校验失败。
 
-Wire Response MUST NOT 暴露这些内部失败原因之间的差异。
+每个 Launch Attempt 最多一条成功 identified 的 Control Connection。已有 identified connection 时，新的 hello MUST 返回 `DUPLICATE_CONTROL_CONNECTION` 并关闭新连接；v1 不自动替换旧连接。
 
-### `CONTROL_PROTOCOL_UNSUPPORTED`
-
-双方不存在共同 `protocolVersions`。
-
-### `DUPLICATE_CONTROL_CONNECTION`
-
-当前 Launch Attempt 已存在成功 identified 的 Control Connection。
-
-### `PROTOCOL_STATE_ERROR`
-
-当前连接或 Launch Attempt 状态不允许执行 hello。
-
-JSON-RPC application error 的最终整数 `code` 尚未冻结；实现 MUST 保留以上可机器识别的语义类别，不得只依赖自然语言 `message`。
-
-## 12. Connection-bound Identity
-
-Hello 成功以后，以下形式是 v1 正确模型：
+Hello fatal error：
 
 ```text
-Control Connection
-    └── descriptor.key = loom.map
+return JSON-RPC Error
+→ close Control Connection
+→ Launch Attempt / Runtime Bootstrap fails
 ```
 
-因此：
+## 8. Main-observed State 与 Runtime-reported Status
 
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "subsystem.status",
-  "params": {
-    "state": "ready",
-    "rendererDataEndpoint": {
-      "transport": "websocket",
-      "url": "ws://127.0.0.1:49152"
+Main 与 Runtime MUST 分开维护两套来源不同的状态。
+
+### 8.1 Main-observed State
+
+```ts
+type MainObservedSubsystemState =
+  | "declared"
+  | "starting"
+  | "connected"
+  | "identified"
+  | "ready"
+  | "stopping"
+  | "stopped"
+  | "failed";
+```
+
+来源：
+
+```text
+declared     Descriptor Registry
+starting     Launcher / Launch Attempt
+connected    Control Transport accepted
+identified   subsystem.hello accepted
+ready        legal status(ready) accepted
+stopping     Main established shutdown intent
+stopped      Supervisor confirms expected termination
+failed       Supervisor / Transport / Protocol / status(failed)
+```
+
+### 8.2 Runtime-reported Status
+
+```ts
+type SubsystemRuntimeStatus =
+  | "initializing"
+  | "ready"
+  | "stopping"
+  | "failed";
+```
+
+`stopped` MUST NOT 由 Runtime 自报告；Supervisor 是 Runtime Process / Worker 是否实际存在的权威来源。
+
+## 9. `subsystem.status`
+
+### 9.1 Method
+
+```text
+Method:    subsystem.status
+Type:      JSON-RPC Notification
+Direction: Subsystem → Main
+```
+
+### 9.2 Schema
+
+```ts
+type SubsystemStatusParams =
+  | { readonly state: "initializing" }
+  | {
+      readonly state: "ready";
+      readonly rendererDataEndpoint: RendererDataEndpoint;
     }
-  }
+  | { readonly state: "stopping" }
+  | {
+      readonly state: "failed";
+      readonly error: SubsystemRuntimeError;
+    };
+
+interface RendererDataEndpoint {
+  readonly transport: "websocket";
+  readonly url: string;
+}
+
+interface SubsystemRuntimeError {
+  readonly code: string;
+  readonly message?: string;
 }
 ```
 
-MUST NOT 通过额外 `key` 字段建立第二身份来源。
+Lifecycle message MUST NOT 包含：
 
-## 13. `subsystem.status`
+```text
+key
+pid
+launchId
+timestamp
+sequence
+statusRevision
+arbitrary runtime metadata
+```
+
+WebSocket 已提供单连接可靠有序传输，v1 不增加 Status Sequence / Revision / Replay。
+
+## 10. `initializing`
+
+`initializing` 是 OPTIONAL。
+
+合法：
+
+```text
+identified → initializing
+identified → ready
+```
+
+其语义只表示：
+
+```text
+identity established
+required Runtime initialization not completed yet
+```
+
+它不代表 Frame、Render 或 Renderer Data Connection 状态。
+
+## 11. `ready`
+
+Desktop v1 `ready` MUST 携带：
+
+```ts
+interface RendererDataEndpoint {
+  readonly transport: "websocket";
+  readonly url: string;
+}
+```
+
+Subsystem 报告 `ready` MUST 表示：
+
+1. 当前 Control Connection 已 identified；
+2. required Runtime initialization 已完成；
+3. Runtime 可以接受后续 Control Profile 中允许的 Control operation；
+4. Renderer Data Endpoint 已建立，可供后续 Main Connection Authority 使用。
+
+`ready` MUST NOT 被解释为：
+
+```text
+Renderer 已连接
+Renderer Data Connection 已认证
+存在 Frame
+存在 Render
+存在 Input Target
+全部游戏内容已预加载
+```
+
+`rendererDataEndpoint` 只表示 endpoint location，不表示授权。Data Grant、credential 和 Renderer authentication 属于 Renderer ⇄ Subsystem Connection Protocol。
+
+## 12. `failed`
+
+```text
+subsystem.status(state="failed")
+```
+
+表示 Runtime 自己确认发生不可恢复错误。
+
+`failed` 是 terminal Runtime-reported Status。
+
+发送后 Runtime：
+
+- MUST NOT 发起新的正常 Control operation；
+- SHOULD 进行有限 cleanup；
+- SHOULD 尽快退出。
+
+Main MAY 在 Host-defined grace period 后强制终止 Runtime。
+
+不允许：
+
+```text
+failed → initializing
+failed → ready
+failed → stopping
+```
+
+恢复只能使用：
+
+```text
+new Launch Attempt
+→ new bootstrapToken
+→ new Runtime Container
+→ new Control Connection
+→ new subsystem.hello
+```
+
+v1 不支持 restart / resume / same-attempt reconnect。
+
+## 13. `subsystem.shutdown`
 
 ### 13.1 Method
 
 ```text
-Method: subsystem.status
-JSON-RPC Type: Notification
-Direction: Subsystem → Main
+Method:    subsystem.shutdown
+Type:      JSON-RPC Request
+Direction: Main → Subsystem
 ```
 
-`subsystem.status` 表示 Runtime 已进入一个新的生命周期状态。
-
-由于它是 Notification，Main 不发送业务 ACK。
-
-Main MUST 校验 Schema 与状态转换；非法 Status 是 fatal Control Protocol Error。
-
-### 13.2 Final v1 Schema
+### 13.2 Params
 
 ```ts
-type SubsystemStatusParams =
-  | SubsystemInitializingStatus
-  | SubsystemReadyStatus
-  | SubsystemStoppingStatus
-  | SubsystemFailedStatus;
+type SubsystemShutdownReason =
+  | "session-end"
+  | "bootstrap-abort";
 
-interface SubsystemInitializingStatus {
-  state: "initializing";
-}
-
-interface SubsystemReadyStatus {
-  state: "ready";
-  rendererDataEndpoint: RendererDataEndpoint;
-}
-
-interface SubsystemStoppingStatus {
-  state: "stopping";
-}
-
-interface SubsystemFailedStatus {
-  state: "failed";
-  error: SubsystemRuntimeError;
-}
-
-interface RendererDataEndpoint {
-  transport: "websocket";
-  url: string;
-}
-
-interface SubsystemRuntimeError {
-  code: string;
-  message?: string;
+interface SubsystemShutdownParams {
+  readonly reason: SubsystemShutdownReason;
 }
 ```
 
-v1 生命周期消息不包含：
+### 13.3 Result
+
+```ts
+interface SubsystemShutdownResult {}
+```
+
+Success Response 只表示：
 
 ```text
-key
-timestamp
-sequence
-statusRevision
-pid
-runtime metadata
+Runtime accepted the graceful shutdown request
 ```
 
-Control WebSocket 自身提供同一连接内的可靠有序传输，因此 v1 不建立额外 Status Sequence。
+它 MUST NOT 被解释为：
 
-## 14. `initializing`
+```text
+Process / Worker 已退出
+cleanup 已完成
+Main observed state 已 stopped
+```
+
+## 14. Shutdown Ownership 与 Ordering
+
+Main 拥有正常 Runtime shutdown intent。
+
+Main 允许在下列已 identified 阶段发起 shutdown：
+
+```text
+identified
+initializing
+ready
+```
+
+在发送 `subsystem.shutdown` 前，Main MUST 原子地建立该 Runtime 的 shutdown intent，并将 Main-observed state 进入：
+
+```text
+stopping
+```
+
+这样即使 Runtime 在发送 shutdown Response 前先发送 `status(stopping)`，该 Notification 仍具有确定合法语义。
+
+典型 reason：
+
+```text
+session-end
+    正常 Session termination
+
+bootstrap-abort
+    Game Bootstrap 已失败或取消，需要清理已启动 Runtime
+```
+
+v1 没有单独的 runtime-stop / restart operation；当前全部 Subsystem eager + required。
+
+## 15. `stopping`
+
+`subsystem.status(state="stopping")` 只有在 Main 已经建立该 Runtime 的 shutdown intent 后合法。
+
+Runtime MUST NOT 在正常运行期间自行执行：
+
+```text
+ready → stopping
+```
+
+如果 Runtime 无法继续正常提供服务，正确表达是：
+
+```text
+status(failed)
+```
+
+收到合法 shutdown 后，Runtime SHOULD 在连接仍可用时发送一次 `status(stopping)`，但该 Notification 不是 Process 退出的必要证据；Runtime MAY 在来得及发送 stopping 前完成快速退出。
+
+`stopping` 不等于 `stopped`。
+
+## 16. Runtime Status 状态机
+
+没有 shutdown intent 时合法转换：
+
+| 当前 Runtime phase | 收到 Status | 结果 |
+|---|---|---|
+| `identified` | `initializing` | 合法 |
+| `identified` | `ready` | 合法 |
+| `identified` | `failed` | 合法 |
+| `initializing` | `ready` | 合法 |
+| `initializing` | `failed` | 合法 |
+| `ready` | `failed` | 合法 |
+
+Main 已建立 shutdown intent 后，额外允许：
+
+| 当前 Runtime phase | 收到 Status | 结果 |
+|---|---|---|
+| `identified` | `stopping` | 合法 |
+| `initializing` | `stopping` | 合法 |
+| `ready` | `stopping` | 合法 |
+| `stopping` | `failed` | 合法，进入 terminal failed |
+
+除上述转换外全部非法。
+
+特别地：
+
+```text
+initializing → initializing
+ready → ready
+stopping → stopping
+ready → initializing
+stopping → ready
+failed → anything
+```
+
+均为 fatal Control Protocol Error。
+
+## 17. Shutdown Timeout 与 Force Termination
+
+Shutdown MUST 有有限 deadline，具体默认数值属于 Host Runtime Policy，Game Package MUST NOT 覆盖。
+
+v1 不进行 application-level shutdown retry。
+
+如果 shutdown Response 超时、Runtime 不退出或 cleanup 超时：
+
+```text
+Main keeps shutdown intent
+→ Supervisor termination escalation
+→ force terminate if required
+```
+
+Supervisor 确认 Runtime 已不存在后：
+
+```text
+Main observed state = stopped
+```
+
+即使最终使用了 force termination，也不增加 `forced-stopped` 等公共状态；实现 SHOULD 把 graceful / forced 记录为内部诊断。
+
+如果 Supervisor 无法确认 Runtime 已终止，则：
+
+```text
+Main observed state = failed
+```
+
+若 Runtime 已经合法报告 `failed`，后续 Process exit MUST NOT 把 terminal `failed` 改回 `stopped`。
+
+## 18. Control Connection 非预期断开
+
+没有 shutdown intent 时：
+
+```text
+Control Connection unexpectedly closes
+→ Main observed state = failed
+```
+
+Main MUST 进入 Runtime failure / termination cleanup。
+
+v1 不支持：
+
+```text
+same Launch Attempt reconnect
+Control Connection resume
+old Bootstrap Token reuse
+transparent replacement
+```
+
+已有 shutdown intent 时，Control Connection 关闭不立即构成新的 Runtime failure；Main 继续依赖 Supervisor：
+
+```text
+Runtime exits / is terminated within deadline
+→ stopped
+
+termination cannot be confirmed
+→ failed
+```
+
+## 19. Process / Worker Exit
+
+Supervisor 是 Runtime Container existence 的权威来源。
+
+没有 shutdown intent：
+
+```text
+Runtime exits
+→ failed
+```
+
+即使 exit code 为 0 也一样。
+
+已有 shutdown intent：
+
+```text
+Runtime exits
+→ stopped
+```
+
+但若 Runtime 此前已经进入 terminal `failed`，则 failed 保持 terminal。
+
+## 20. JSON-RPC Error Model
+
+标准 JSON-RPC Layer 使用标准 code：
+
+```text
+-32700 Parse error
+-32600 Invalid Request
+-32601 Method not found
+-32602 Invalid params
+```
+
+LoomRealm semantic error 统一使用：
+
+```text
+JSON-RPC error.code = -32000
+```
+
+并冻结：
+
+```ts
+interface LoomRealmRpcErrorData {
+  readonly code: string;
+}
+```
 
 示例：
 
 ```json
 {
   "jsonrpc": "2.0",
-  "method": "subsystem.status",
-  "params": {
-    "state": "initializing"
-  }
-}
-```
-
-语义：
-
-- `subsystem.hello` 已成功；
-- Runtime 正在执行 required initialization；
-- Runtime 尚未 ready。
-
-`initializing` Notification 在 v1 中是 OPTIONAL。
-
-Hello 成功后，即使 Runtime 没有显式发送 `initializing`，Main 也已经知道该 Runtime 处于：
-
-```text
-identified but not ready
-```
-
-因此允许直接：
-
-```text
-identified → ready
-```
-
-## 15. `ready`
-
-### 15.1 Desktop v1 Schema
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "subsystem.status",
-  "params": {
-    "state": "ready",
-    "rendererDataEndpoint": {
-      "transport": "websocket",
-      "url": "ws://127.0.0.1:49152"
+  "id": 1,
+  "error": {
+    "code": -32000,
+    "message": "LoomRealm protocol error",
+    "data": {
+      "code": "BOOTSTRAP_AUTHENTICATION_FAILED"
     }
   }
 }
 ```
 
-Desktop v1 `rendererDataEndpoint` MUST 满足：
-
-```ts
-interface RendererDataEndpoint {
-  transport: "websocket";
-  url: string;
-}
-```
-
-`url` MUST 是语法合法的 WebSocket URL。Loopback host 的进一步安全限制属于 Desktop Host Profile / Connection Contract，不在本协议重复冻结。
-
-### 15.2 `ready` 语义
-
-Subsystem 报告 `ready` MUST 表示：
-
-1. 当前 Control Connection 已 identified；
-2. required Runtime initialization 已完成；
-3. Runtime 可以接受后续 Main Control Protocol；
-4. Renderer Data Endpoint 已经建立并可供后续 Connection Grant 使用。
-
-`ready` MUST NOT 被解释为：
-
-- Renderer 已连接；
-- Renderer Data Connection 已认证；
-- 存在任何 Frame；
-- 存在任何 Render；
-- 存在 Input Target；
-- 游戏内容已全部预加载。
-
-Main 接受合法 `ready` 后：
+稳定的机器可识别错误身份是：
 
 ```text
-identified / initializing → ready
+error.data.code
 ```
 
-## 16. Renderer Data Endpoint 与 Grant 分离
+不是自然语言 `message`，也不是额外分配的 JSON-RPC integer code。
 
-`rendererDataEndpoint` 只回答：
-
-> Renderer Data Server 在哪里。
-
-它不代表授权。
+Subsystem Control v1 冻结 semantic code：
 
 ```text
-Subsystem Runtime Lifecycle
-    提供 endpoint
-
-Main Connection Authority
-    签发 grant / credential
-
-Renderer ⇄ Subsystem Connection Layer
-    建立并认证 data connection
+BOOTSTRAP_AUTHENTICATION_FAILED
+CONTROL_PROTOCOL_UNSUPPORTED
+DUPLICATE_CONTROL_CONNECTION
+PROTOCOL_STATE_ERROR
 ```
 
-Grant、Data Connection Credential 与 Renderer Authentication 不属于本协议。
+## 21. Notification Protocol Error
 
-## 17. `stopping`
+`subsystem.status` 是 Notification，因此没有业务 Error Response。
 
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "subsystem.status",
-  "params": {
-    "state": "stopping"
-  }
-}
-```
+以下情况是 fatal Control Protocol Error：
 
-`stopping` 表示 Runtime 已开始正常终止流程。
-
-它不是 terminal 状态，也不证明 Process / Worker 已经退出。
-
-真正的 `stopped` MUST 由 Main 根据 Supervisor / Transport 观察确认。
-
-## 18. `failed`
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "subsystem.status",
-  "params": {
-    "state": "failed",
-    "error": {
-      "code": "INITIALIZATION_FAILED",
-      "message": "Unable to initialize runtime"
-    }
-  }
-}
-```
-
-`failed` 表示 Runtime 自己确认发生不可恢复错误。
-
-`failed` 在 v1 中是 terminal Runtime-reported Status。
-
-发送 `failed` 后：
-
-- Runtime MUST NOT 再发送正常业务 Control Message；
-- Runtime SHOULD 进行有限 cleanup 并退出；
-- Main MAY 在 graceful-exit window 后强制终止 Runtime。
-
-恢复必须通过新的 Launch Attempt 完成：
-
-```text
-new Launch Attempt
-→ new bootstrapToken
-→ new Control Connection
-```
-
-v1 不允许：
-
-```text
-failed → initializing
-failed → ready
-```
-
-## 19. Runtime Status 有限状态机
-
-`identified` 是 Main-observed pre-status 状态，不属于 `SubsystemRuntimeStatus` enum。
-
-v1 合法转换：
-
-| 当前状态 | 收到 `subsystem.status` | 结果 |
-|---|---|---|
-| `identified` | `initializing` | 合法 → `initializing` |
-| `identified` | `ready` | 合法 → `ready` |
-| `identified` | `failed` | 合法 → `failed` |
-| `initializing` | `ready` | 合法 → `ready` |
-| `initializing` | `failed` | 合法 → `failed` |
-| `ready` | `stopping` | 合法 → `stopping` |
-| `ready` | `failed` | 合法 → `failed` |
-| `stopping` | `failed` | 合法 → `failed` |
-
-除表中列出的转换外，其他全部非法。
-
-特别地，以下均为 fatal Protocol Error：
-
-```text
-initializing → initializing
-ready → ready
-stopping → stopping
-failed → failed
-ready → initializing
-stopping → ready
-failed → initializing
-failed → ready
-```
-
-v1 不提供 Status replay / retry 语义。
-
-## 20. 非法 `subsystem.status` 的错误行为
-
-以下任一情况 MUST 视为 fatal Control Protocol Error：
-
-- hello 成功前发送 `subsystem.status`；
-- `params` 不符合 discriminated union；
-- 未知 `state`；
-- `ready` 缺少 `rendererDataEndpoint`；
-- Desktop v1 endpoint `transport` 不是 `websocket`；
-- endpoint URL Schema 非法；
-- `failed` 缺少合法 `error.code`；
-- 重复发送同一状态；
+- hello 成功前发送 status；
+- params 不符合 discriminated union；
+- unknown state；
+- ready 缺少合法 endpoint；
+- failed 缺少合法 `error.code`；
+- stopping 没有 Main shutdown intent；
+- duplicate status；
 - 任何非法状态转换。
 
 Main MUST：
@@ -769,379 +751,217 @@ mark Runtime failed
 → terminate Runtime if necessary
 ```
 
-Main MUST NOT 静默忽略非法 Status，否则双方生命周期状态可能永久分叉。
+不得静默忽略非法 Status。
 
-因为 `subsystem.status` 是 Notification，Main 不为该消息发送 JSON-RPC Error Response；Protocol Error 通过连接终止和 Main-observed `failed` 表达。
+## 22. Ordering / Retry / Idempotency
 
-## 21. `failed` 不是唯一故障来源
+Desktop WebSocket 提供单连接可靠有序 delivery。
 
-Main MUST NOT 依赖 `subsystem.status(state="failed")` 作为唯一故障检测机制。
-
-以下情况均可使 Main 进入 `failed`：
-
-- spawn error；
-- connect timeout；
-- hello timeout；
-- Bootstrap Authentication failure；
-- unsupported Control Protocol Version；
-- duplicate identified Control Connection；
-- ready timeout；
-- Control Connection 非预期关闭；
-- Process / Worker 非正常退出；
-- fatal Control Protocol Error。
-
-Runtime 可能在崩溃前来不及发送 `failed`。
-
-## 22. 重复 Control Connection 与 Token Replay
-
-每个 Launch Attempt 最多一条成功 identified 的 Control Connection。
-
-如果已有 identified Control Connection：
+因此 v1：
 
 ```text
-new subsystem.hello for same Launch Attempt
-→ DUPLICATE_CONTROL_CONNECTION
-→ reject
-→ close new connection
+no Status Sequence
+no Status Revision
+no Status Replay
 ```
 
-MVP MUST NOT 自动使用新连接替换旧连接。
+`subsystem.hello` 不在同一连接进行 application retry。
 
-成功 hello 后旧 `bootstrapToken` 已 consumed；即使原 Control Connection 随后断开，也 MUST NOT 重新使用旧 token。
+`subsystem.status` 重复发送是 Protocol Error，不是 idempotent replay。
 
-## 23. Timeout
+`subsystem.shutdown` 不进行 application retry。重复 shutdown Request 在已经存在 shutdown intent 时 MUST 返回 `PROTOCOL_STATE_ERROR`；Main 仍继续既有 termination flow。
 
-实现 MUST 支持：
+状态改变 Request timeout 不通过重发相同 Request 恢复。
+
+## 23. Heartbeat / Health
+
+Subsystem Control Protocol v1 **不定义 application-level heartbeat / health RPC**。
+
+Desktop Host MAY 使用：
 
 ```text
-connect timeout
-hello timeout
-ready timeout
-graceful stopping timeout
+WebSocket ping/pong
+TCP connection state
+Process Supervisor
+Host-defined timeout
 ```
 
-本协议只冻结这些 timeout phase 必须存在；默认数值由 Host Profile / Runtime Configuration 定义。
+进行 transport / process health 检测。
 
-## 24. Control Connection 非预期断开
+未来若需要检测“连接仍存在但 Runtime event loop 不健康”等 application health，必须通过显式协议扩展或新版本引入。
 
-若 Runtime 在 `connected / identified / ready` 等非正常关闭阶段失去 Control Connection：
+## 24. Timeout Phases
+
+实现 MUST 为以下阶段设置有限期限：
 
 ```text
-Main observed state → failed
-```
-
-v1 不支持同一 Launch Attempt 自动 reconnect / resume。
-
-## 25. Process / Worker Exit
-
-Supervisor 观察 Runtime Container 退出时：
-
-- 如果此前进入合法 `stopping` 且退出符合正常 shutdown 流程，Main MAY 转为 `stopped`；
-- 否则 Main MUST 转为 `failed`。
-
-精确 exit code 映射属于 Host Profile / Supervisor 实现细节。
-
-## 26. Main 综合状态转换
-
-正常路径：
-
-```text
-DECLARED
-    │ spawn
-    ▼
-STARTING
-    │ Transport connected
-    ▼
-CONNECTED
-    │ subsystem.hello accepted
-    ▼
-IDENTIFIED
-    │ optional status(initializing)
-    │ status(ready)
-    ▼
-READY
-    │ status(stopping)
-    ▼
-STOPPING
-    │ Supervisor confirms normal exit
-    ▼
-STOPPED
-```
-
-任一非终止阶段均可能进入：
-
-```text
-FAILED
-```
-
-Main Registry SHOULD 分开保存：
-
-```ts
-interface SubsystemRuntimeRecord {
-  observedState: MainObservedSubsystemState;
-  reportedStatus?: SubsystemRuntimeStatus;
-}
-```
-
-不得把两套来源不同的状态强行压缩为一个单一真相源。
-
-## 27. Game Bootstrap 完成条件
-
-当前 MVP 中所有 Game Entry Descriptor 都是 required。
-
-因此：
-
-```text
-every declared Subsystem observedState == "ready"
-```
-
-是 Subsystem Bootstrap Complete 的必要条件。
-
-任一 required Subsystem 在启动阶段进入 `failed`：
-
-```text
-Game Bootstrap → FAILED
-```
-
-MVP 不支持 unavailable-but-continue，也不定义 lazy Subsystem。
-
-## 28. JSON-RPC 与 Protocol Error 分层
-
-错误分三层：
-
-```text
-JSON-RPC Layer
-    malformed request
-    invalid params
-    unknown method
-
-Bootstrap Layer
-    authentication failed
-    unsupported control protocol
-    duplicate connection
-    invalid bootstrap state
-
-Runtime Lifecycle Layer
-    status before hello
-    malformed status
-    illegal transition
-```
-
-Bootstrap fatal error：
-
-```text
-return JSON-RPC Error for subsystem.hello
-→ close Control Connection
-```
-
-Runtime Lifecycle fatal error：
-
-```text
-mark Runtime failed
-→ close Control Connection
-```
-
-业务错误 MUST NOT 混入 Bootstrap / Runtime Lifecycle Error。
-
-## 29. Security Requirements
-
-- Bootstrap Token MUST 被视为 secret；
-- Main MUST NOT 在 hello wire error 中区分未知 `key` 与错误 / consumed token；
-- 错误响应 MUST NOT 回显 `bootstrapToken`；
-- 普通日志 SHOULD 对 Bootstrap Token 脱敏；
-- Process ID、端口和客户端自报 runtime metadata MUST NOT 代替 Bootstrap Authentication；
-- connection-bound identity MUST 是 hello 后后续 Control Message 的唯一 Subsystem identity 来源。
-
-## 30. Successful Bootstrap Sequence
-
-```text
-Main                                      Subsystem
- │                                            │
- │ spawn(nodejs)                              │
- │───────────────────────────────────────────▶│
- │                                            │
- │               WebSocket connect            │
- │◀───────────────────────────────────────────│
- │                                            │
- │          subsystem.hello Request           │
- │◀───────────────────────────────────────────│
- │ key + bootstrapToken + protocolVersions    │
- │                                            │
- │ validate authentication / version          │
- │ consume bootstrapToken                     │
- │ bind connection to descriptor.key          │
- │                                            │
- │          subsystem.hello Response          │
- │             protocolVersion = 1            │
- │───────────────────────────────────────────▶│
- │                                            │
- │                 initialize runtime         │
- │                                            │
- │   status(initializing) [optional]           │
- │◀───────────────────────────────────────────│
- │                                            │
- │             start Data Endpoint            │
- │                                            │
- │             status(ready)                  │
- │◀───────────────────────────────────────────│
- │          rendererDataEndpoint              │
- │                                            │
- │ Main observedState = READY                 │
-```
-
-## 31. Failure Sequence
-
-### 31.1 Runtime 主动失败
-
-```text
-hello accepted
-→ initializing
-→ subsystem.status(failed)
-→ Main observedState = FAILED
-→ Runtime exits
-```
-
-### 31.2 Runtime 崩溃
-
-```text
-hello accepted
-→ process / worker crashes
-→ Supervisor / Control Connection detects loss
-→ Main observedState = FAILED
-```
-
-### 31.3 非法 Status
-
-```text
+connect
+hello
 ready
-→ duplicate status(ready)
-→ fatal Protocol Error
-→ Main observedState = FAILED
-→ close Control Connection
+shutdown / termination
 ```
 
-## 32. v1 Wire Surface Summary
+具体默认时间属于 Host Runtime Policy，不进入 Game Package 或本协议 wire schema。
 
-Subsystem → Main 只有两个本协议方法：
+connect / hello / ready timeout 在 Bootstrap / Runtime 正常运行路径中导致 failure。
+
+shutdown timeout 按第 17 节进入 Supervisor termination escalation，不进行 RPC retry。
+
+## 25. Wire Limits
+
+Subsystem Control Protocol v1 冻结：
+
+```text
+max JSON-RPC message UTF-8 size   1 MiB
+max JSON nesting depth            64
+protocolVersions count            1..16
+bootstrapToken UTF-8 length       1..4096 bytes
+rendererDataEndpoint.url length   1..2048 UTF-8 bytes
+SubsystemRuntimeError.code        1..128 ASCII chars
+SubsystemRuntimeError.message     0..4096 UTF-8 bytes
+```
+
+`SubsystemRuntimeError.code` SHOULD 匹配：
+
+```text
+^[A-Z][A-Z0-9_]{0,127}$
+```
+
+超过对应限制的 Request 使用标准 JSON-RPC Invalid Params；非法 Status Notification 按 fatal Protocol Error 处理。
+
+## 26. Security Requirements
+
+- Bootstrap Token MUST 视为 secret；
+- hello error MUST NOT 区分 unknown key 与 invalid / consumed token；
+- error response MUST NOT 回显 Bootstrap Token；
+- ordinary log SHOULD 脱敏 credential；
+- PID、端口、launchId 与 Runtime 自报 metadata MUST NOT 替代 Bootstrap Authentication；
+- hello 成功后的 connection-bound `descriptor.key` 是该 Connection 唯一 Subsystem identity；
+- Runtime error / protocol error MUST NOT 泄露不必要的宿主路径、完整环境或 secret。
+
+## 27. Game Bootstrap
+
+当前 Game Package v2 Desktop MVP 中全部 declared Subsystem 都是 eager + required。
+
+Subsystem Bootstrap success requires：
+
+```text
+every declared Runtime observedState == ready
+```
+
+任意 required Runtime 在 Bootstrap 完成前进入 failed：
+
+```text
+Game Bootstrap failed
+→ Main establishes bootstrap-abort shutdown intent
+→ shutdown / terminate remaining started Runtime Containers
+```
+
+## 28. Wire Surface Summary
+
+Subsystem Control Protocol v1 只有三个方法：
 
 | Method | JSON-RPC 类型 | 方向 | 职责 |
 |---|---|---|---|
-| `subsystem.hello` | Request | Subsystem → Main | Bootstrap Authentication、identity binding、Control Protocol version negotiation |
-| `subsystem.status` | Notification | Subsystem → Main | Runtime lifecycle status transition |
+| `subsystem.hello` | Request | Subsystem → Main | Bootstrap authentication、identity binding、Subsystem Control version negotiation |
+| `subsystem.status` | Notification | Subsystem → Main | Runtime lifecycle report |
+| `subsystem.shutdown` | Request | Main → Subsystem | Main-owned graceful Runtime termination |
 
-最终类型摘要：
+v1 没有：
 
-```ts
-interface SubsystemHelloParams {
-  key: string;
-  bootstrapToken: string;
-  protocolVersions: readonly number[];
-}
-
-interface SubsystemHelloResult {
-  protocolVersion: number;
-}
-
-type SubsystemStatusParams =
-  | { state: "initializing" }
-  | {
-      state: "ready";
-      rendererDataEndpoint: {
-        transport: "websocket";
-        url: string;
-      };
-    }
-  | { state: "stopping" }
-  | {
-      state: "failed";
-      error: {
-        code: string;
-        message?: string;
-      };
-    };
+```text
+subsystem.ping
+subsystem.health
+subsystem.restart
+subsystem.resume
+subsystem.capabilities
 ```
 
-## 33. v1 已冻结不变量
+## 29. 暂缓项
 
-1. Subsystem 主动连接 Main；
-2. 新 Control Connection 第一条业务消息必须是 `subsystem.hello`；
-3. `subsystem.hello` 是 JSON-RPC Request；
-4. hello v1 字段只有 `key / bootstrapToken / protocolVersions`；
-5. Hello success result 只有 `protocolVersion`；
-6. Hello 成功后 identity 永久绑定到 Control Connection；
-7. 后续 Lifecycle Message 不携带 `key`；
-8. `subsystem.status` 是 JSON-RPC Notification；
-9. `initializing` 可选；
-10. `ready` 必须携带 Desktop v1 `rendererDataEndpoint`；
-11. `stopping` 不等于 `stopped`；
-12. `failed` terminal；
-13. 重复 Status 和所有未列入合法转换表的状态转换都是 fatal Protocol Error；
-14. Runtime Lifecycle Status 不替代 Process / Worker Supervisor；
-15. Runtime ready 不依赖任何 Frame 或 Render；
-16. Runtime ready 不意味着 Renderer Data Connection 已建立；
-17. Hello authentication wire error 不区分 unknown key 与 invalid / consumed token；
-18. Lifecycle v1 不增加 timestamp、sequence、PID 或 runtime metadata。
+以下项目明确不阻塞 v1：
 
-## 34. 仍待后续冻结
+- Frame / Call Protocol；
+- application-level heartbeat / health probe；
+- Runtime restart / resume / checkpoint；
+- same-attempt reconnect；
+- PWA Bootstrap Credential Transport / Control Transport Profile；
+- Host timeout 默认秒数；
+- Bootstrap Token 精确熵与生成算法；
+- Renderer Data Connection authentication / Grant。
 
-以下内容不阻止当前 wire schema 与状态机作为 Control Protocol v1 Schema 草案实现：
+实现不得通过私有行为静默改变本文已冻结语义。
 
-- JSON-RPC application error 的最终整数 code；
-- Bootstrap Token 最低熵、字节长度和编码；
-- Main 保留环境变量名；
-- Desktop endpoint 更严格的 loopback 安全约束；
-- 各 timeout 默认数值；
-- graceful shutdown Main → Subsystem method；
-- heartbeat / health；
-- restart / resume；
-- PWA Transport Profile。
+## 30. Conformance Tests
 
-这些后续补充 MUST NOT 改变本版本已冻结的字段含义、身份绑定和状态转换语义；若需要不兼容修改，必须提升协议版本。
-
-## 35. 最小互操作测试
-
-实现 v1 至少必须覆盖：
+实现 v1 至少 MUST 覆盖：
 
 ### Hello
 
-- 合法 `hello` 返回 `protocolVersion: 1`；
-- `key` 使用大小写敏感精确匹配；
-- unknown key 与 invalid token 在 wire 上都归类为 `BOOTSTRAP_AUTHENTICATION_FAILED`；
-- consumed token replay 被拒绝；
-- `protocolVersions` 为空被拒绝；
-- `protocolVersions` 包含非正整数或重复值被拒绝；
-- 无共同版本时返回 `CONTROL_PROTOCOL_UNSUPPORTED`；
-- 第二条 identified connection 被拒绝；
-- hello 成功后后续消息不需要 `key`。
+- valid hello → `protocolVersion: 1`；
+- key 大小写敏感；
+- unknown key / invalid token / consumed token wire 上统一认证失败；
+- empty / duplicate / invalid protocolVersions；
+- unsupported version；
+- duplicate identified connection；
+- non-hello first application message；
+- hello 成功后 status 不携带 key。
 
 ### Runtime Status
 
-- `identified → ready` 合法；
-- `identified → initializing → ready` 合法；
-- `identified / initializing → failed` 合法；
-- `ready → stopping` 合法；
-- `ready / stopping → failed` 合法；
-- 重复 `ready` 是 fatal Protocol Error；
-- `ready → initializing` 是 fatal Protocol Error；
-- `failed → ready` 是 fatal Protocol Error；
-- hello 前发送 status 是 fatal Protocol Error；
-- ready 缺少 endpoint 是 fatal Protocol Error；
-- failed 缺少 `error.code` 是 fatal Protocol Error。
+- `identified → ready`；
+- `identified → initializing → ready`；
+- `identified / initializing / ready → failed`；
+- duplicate initializing / ready；
+- `ready → initializing`；
+- `failed → ready`；
+- status before hello；
+- ready missing / invalid endpoint；
+- failed missing / invalid error code。
 
-### Supervisor / Bootstrap
+### Shutdown
 
-- Control Connection 非预期断开导致 Main observed `failed`；
-- Process 在 ready 前退出导致 Runtime / Game Bootstrap failed；
-- `stopping` 后正常退出才可进入 Main observed `stopped`；
-- 多个 required Subsystem 只有全部 ready 后 Game Bootstrap 才完成；
-- Runtime 在零个 Frame、零个 Render 时进入 ready 完全合法。
+- identified / initializing / ready 阶段 Main 发起 shutdown；
+- shutdown intent 先于可能到达的 status(stopping)；
+- shutdown → stopping → Process exit；
+- shutdown → Process 快速退出、没有 stopping Notification；
+- shutdown timeout → force termination；
+- unsolicited status(stopping) → fatal Protocol Error；
+- duplicate shutdown → `PROTOCOL_STATE_ERROR`；
+- shutdown Response 不等于 stopped。
 
-## 36. 相关文档
+### Failure / Supervisor
 
-- [运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)；
-- [系统架构总览](../10-architecture/system-overview.md)；
-- [运行承载系统](../10-architecture/runtime-hosting-system.md)；
-- [通信系统](../10-architecture/communication-system.md)；
-- [Subsystem Descriptor MVP ADR](../decisions/0007-subsystem-descriptor-mvp.md)；
-- [模块子系统生命周期与调用协议草案](./system-lifecycle-protocol.md)；
-- [正式契约目录](./README.md)。
+- Control Connection 非预期断开 before ready / after ready；
+- Process exit code 0 without shutdown intent → failed；
+- Runtime crash；
+- status(failed) terminal；
+- failed 后 exit 不改回 stopped；
+- shutdown intent 下 Connection 先断开、Supervisor 后确认退出 → stopped。
+
+### Limits / Security
+
+- oversized message / URL / error；
+- token 不回显；
+- PID 不作为 identity；
+- old token 不可 reconnect；
+- replacement Runtime 必须使用新 Launch Attempt / Token。
+
+## 31. Frozen Invariants
+
+1. Subsystem 主动连接 Main；
+2. 第一条 LoomRealm application message 必须是 `subsystem.hello`；
+3. hello 成功后 Control Connection 永久绑定 `descriptor.key`；
+4. Bootstrap Token 是一次 Launch Attempt 的一次性 credential；
+5. `spawn success ≠ connected ≠ identified ≠ ready`；
+6. Runtime self-report 与 Supervisor observation 是不同状态来源；
+7. `ready` 只表达 Runtime control readiness，不表达 Frame / Render / Renderer readiness；
+8. Main 拥有正常 shutdown intent；
+9. `stopping` 只有在 Main-requested shutdown 下合法；
+10. `stopped` 只能由 Supervisor 确认实际退出；
+11. 没有 shutdown intent 的 Runtime exit 是 failure，即使 exit code 为 0；
+12. 没有 shutdown intent 的 Control Connection loss 是 Runtime failure；
+13. v1 不支持 reconnect / resume / old-token reuse；
+14. v1 不支持 automatic restart；
+15. v1 不定义 application heartbeat；
+16. Frame / Call 是独立协议域，不得重新定义上述 Runtime 级语义。
