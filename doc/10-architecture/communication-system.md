@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：控制面、System 数据面、内容面、协议职责域、恢复和安全边界  
 > 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[运行承载系统](./runtime-hosting-system.md)  
-> 最近复核：2026-08-02
+> 最近复核：2026-08-03
 
 ## 1. 设计目标
 
@@ -39,14 +39,14 @@ Content Plane
 
 ## 3. Main ⇄ Subsystem Control Plane
 
-Desktop Bootstrap 中，Main 先开放 Control WebSocket Endpoint，再启动 Subsystem Runtime。连接方向固定为：
+Desktop 中，Main 先开放 Control WebSocket Endpoint，再启动 Subsystem Runtime。连接方向固定为：
 
 ```text
 Subsystem Process
     ── connect ──▶ Main Control WebSocket Server
 ```
 
-Bootstrap 与 Runtime Lifecycle 的 v1 流程：
+已冻结的 [Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 管理 Runtime Container 级 Bootstrap、身份和生命周期：
 
 ```text
 Transport connected
@@ -54,27 +54,42 @@ Transport connected
 → Main 验证 Launch Attempt / identity / version
 → Connection 永久绑定 descriptor.key
 → identified
-→ subsystem.status(initializing | ready | stopping | failed)
+→ subsystem.status(initializing?)
+→ subsystem.status(ready + rendererDataEndpoint)
+
+正常结束：
+Main 建立 shutdown intent
+→ subsystem.shutdown(reason)
+→ subsystem.status(stopping) [optional]
+→ Supervisor confirms exit
+→ stopped
 ```
 
 因此：
 
 ```text
-connected ≠ identified ≠ ready
+spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-`ready` 是 Runtime Status，不重新携带或声明 Subsystem identity。
+以及：
 
-精确 Schema、合法状态转换和 fatal error 行为由 [Main ⇄ Subsystem 控制与运行时生命周期协议 v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 定义。
+```text
+shutdown Response ≠ stopped
+status(stopping) ≠ stopped
+```
 
-同一 Control Connection 后续可继续承载 Frame initialize / activate / suspend / resume / close、调用 / 返回、shutdown、heartbeat 和诊断；其中尚未冻结的部分由后续契约定义。
+`ready` 是 Runtime Status，不重新携带或声明 Subsystem identity；`stopped` 只来自 Supervisor 对 Runtime 实际退出的观察。
+
+Subsystem Control v1 不定义 application-level heartbeat、same-attempt reconnect、resume 或 automatic restart。Desktop Host 可以使用 WebSocket ping/pong、Transport 状态和 Process Supervisor 进行底层健康检测。
+
+Frame / Call 是独立协议域，可以复用已经认证的 Control Connection，但不得重新定义 Runtime Bootstrap、Subsystem identity、ready、shutdown 或 restart 语义。
 
 ## 4. Main ⇄ Renderer Control Plane
 
 Renderer 与 Main 之间有一条会话级长期控制连接，负责：
 
 - Session 状态；
-- 当前 declared / starting / connected / identified / ready / failed Subsystem 状态；
+- 当前 declared / starting / connected / identified / ready / stopping / stopped / failed Subsystem 状态；
 - Frame Stack Snapshot 与增量通知；
 - Activation；
 - Input Target；
@@ -95,7 +110,7 @@ Renderer 不能通过 DOM、Frame Stack 或已有 WebSocket 自行决定某个 S
 
 每个有效 Runtime Container 与 Renderer 之间最多一条长期双向 System Data Connection。
 
-连接绑定 System/SubSystem 级身份。现有 v1 例子常使用：
+连接绑定 System/Subsystem 级身份。现有 v1 例子常使用：
 
 ```text
 sessionId
@@ -144,6 +159,8 @@ Connection Layer 只管理 System Data Connection：
 - 协商协议版本和必要能力；
 - heartbeat 与故障检测；
 - 连接替换和关闭。
+
+这里的 heartbeat 属于 **Renderer ⇄ Subsystem System Data Connection Layer**，不得与 Subsystem Control Protocol v1 混为一谈；后者明确没有 application heartbeat。
 
 Connection Layer 不拥有：
 
@@ -252,18 +269,20 @@ Content API
 PWA：
 
 ```text
-System Worker ⇄ Main Runtime Worker
+Subsystem Worker ⇄ Main Runtime Worker
     每 Subsystem 一条控制 MessagePort
 
 Window ⇄ Main Runtime Worker
     一条控制 MessagePort
 
-Window ⇄ System Worker
+Window ⇄ Subsystem Worker
     每 Subsystem 一条数据 MessagePort
 
 Content API
     same-origin Fetch，由 Service Worker 响应
 ```
+
+PWA Control Transport / Bootstrap Credential Profile 尚未冻结；未来映射必须保持 Subsystem Control v1 的身份与生命周期语义，除非显式提升协议版本。
 
 Transport Profile 不改变 Subsystem、Frame/Input 和 Render 的所有权语义。
 
@@ -302,8 +321,14 @@ Render domain
 ## 15. 背压原则
 
 ```text
-Control RPC
-    不静默丢弃；超时产生明确错误
+Subsystem Control v1
+    不静默丢弃
+    状态改变 Request 不做 application retry
+    shutdown timeout 进入 Supervisor termination escalation
+    单消息上限 1 MiB
+
+其他 Control RPC
+    不静默丢弃；具体 timeout / retry 由对应协议冻结
 
 User Input
     连续意图可合并
@@ -328,7 +353,9 @@ Sequence / Revision 必须在各自协议域内定义，不能使用一套 Frame
 
 - 所有消息视为不可信输入；
 - `subsystem.hello` 必须绑定合法 Launch Attempt、Descriptor `key` 与 Bootstrap Credential；
-- hello 成功后后续 Runtime status 不得重新声称其他 identity；
+- hello 成功后 connection-bound `descriptor.key` 是该 Control Connection 唯一 Subsystem identity；
+- Bootstrap authentication wire error 不区分 unknown key 与 invalid / consumed token；
+- `subsystem.status(stopping)` 只有 Main 已建立 shutdown intent 后合法；
 - System Data Connection 必须绑定合法 Session / Subsystem / Connection；
 - User Input 必须校验 Frame / Activation / 输入权限；
 - Render Update 必须限制在当前 Subsystem 的 Render Namespace；
@@ -340,7 +367,10 @@ Sequence / Revision 必须在各自协议域内定义，不能使用一套 Frame
 
 已冻结：
 
-- Main ⇄ Subsystem Bootstrap / Runtime Lifecycle v1 的 hello/status Schema 和状态机。
+- Game Package v2 Desktop Bootstrap subset；
+- Desktop Node.js Launcher Profile v1；
+- Subsystem Control Protocol v1：`hello / status / shutdown`、Runtime 状态机、错误 Envelope、wire limits、connection failure 与 shutdown semantics；
+- Subsystem Control v1 明确没有 application heartbeat / reconnect / automatic restart。
 
 仍待冻结：
 
@@ -351,6 +381,6 @@ Sequence / Revision 必须在各自协议域内定义，不能使用一套 Frame
 - User Input Protocol；
 - Render State Tree / equivalent；
 - 跨 Subsystem Render Composition / z-order；
-- 最大消息、树深和发送速率 Profile。
+- 上述未冻结协议各自的最大消息、树深、发送速率与背压 Profile。
 
 旧 `frame-data-channel-v1.md` 与 `client-state-tree-v1.md` 只保留迁移历史和旧实现字段，不得继续作为 Frame/Render 所有权真相。
