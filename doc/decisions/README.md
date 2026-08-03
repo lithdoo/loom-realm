@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策的背景、取舍、结果和重新评估条件  
-> 最近复核：2026-08-02
+> 最近复核：2026-08-03
 
 本目录记录 LoomRealm 重大架构结论的形成过程。当前有效的系统职责和协议仍以 `10-architecture` 与 `15-contracts` 中的权威文档为准；ADR 用于保存候选方案、决定原因、代价和重新评估条件。
 
@@ -16,6 +16,8 @@
 5. [Game Entry 声明 Subsystem Launcher](./0005-game-entry-subsystem-launchers.md)
 6. [Frame 与 Render 生命周期解耦](./0006-frame-render-decoupling.md)
 7. [Subsystem Descriptor MVP 收敛](./0007-subsystem-descriptor-mvp.md)
+8. [冻结 Desktop Node.js Launcher Profile v1](./0008-desktop-nodejs-launcher-profile-v1.md)
+9. [冻结 Subsystem Control Protocol v1](./0009-freeze-subsystem-control-protocol-v1.md)
 
 ## 当前替代关系
 
@@ -23,6 +25,8 @@
 - ADR 0004 的“声明式目标状态 → Renderer Store → Render Scheduler → DOM / Canvas / WebGL”流水线继续有效；
 - ADR 0005 替代旧架构中“游戏只声明 systemId，由平台固定 System Registry 提供全部可执行实现”的第一阶段假设；
 - ADR 0007 **部分替代** ADR 0005 中 `id + name` Descriptor、`javascript` Launcher、未冻结 eager/lazy 以及已冻结 entry 路径安全的表述；
+- ADR 0008 **补充并部分替代** ADR 0007 中 `launcher.entry` 尚未冻结的结论，冻结 Desktop Node.js Launcher Profile v1；
+- ADR 0009 将此前 Draft / Stabilizing 的 Subsystem Bootstrap / Runtime Lifecycle 收敛为独立 Frozen Protocol，并明确 Frame / Call 不属于该协议域；
 - ADR 0005 的“Game Entry 声明 Launcher、Main 启动 Subsystem、Subsystem 主动连接 Main、connected 与 ready 分离”继续有效。
 
 ## 维护规则
