@@ -1,6 +1,6 @@
 # LoomRealm
 
-LoomRealm 是一个通过只读游戏包启动、由程序主系统管理模块子系统调用栈，并使用 Web 渲染端呈现 Client Scope Tree 的运行平台设计项目。
+LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独立 Subsystem Runtime，并由 Web Renderer 呈现 Subsystem 声明式 Render State 的模块化游戏运行平台设计项目。
 
 第一阶段使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` 子系统的纵向验证场景。
 
@@ -22,6 +22,8 @@ LoomRealm 是一个通过只读游戏包启动、由程序主系统管理模块�
 - [文档分层与变更规则](./doc/00-overview/document-governance.md)
 - [系统架构总览](./doc/10-architecture/system-overview.md)
 - [正式契约目录](./doc/15-contracts/README.md)
+- [Game Package v2 Bootstrap / Descriptor](./doc/15-contracts/game-package-v2.md)
+- [Desktop Node.js Launcher Profile v1](./doc/15-contracts/nodejs-launcher-profile-v1.md)
 - [模块设计目录](./doc/20-modules/README.md)
 - [实施计划目录](./doc/30-implementation/README.md)
 - [完整阅读指南](./doc/README.md)
@@ -29,16 +31,54 @@ LoomRealm 是一个通过只读游戏包启动、由程序主系统管理模块�
 ## 核心模型
 
 ```text
-游戏包入口
-→ 程序主系统创建初始 Frame
-→ 模块子系统入栈并拥有业务状态
-→ 活动子系统直接处理输入并发布 Scope
-→ 子系统可以调用其他子系统入栈
-→ 被调用子系统返回结果并出栈
-→ 调用者恢复
+Game Entry
+→ 一次声明全部 Subsystem Descriptor
+→ Main 校验完整 Descriptor 集合
+→ Desktop Main 启动并监督每个 required Subsystem Process
+→ Subsystem 主动连接 Main，完成 hello / ready
+→ Main 在已 ready Runtime 上管理 Frame / Call / Activation
+→ Renderer 与每个 Subsystem 建立独立 System Data Connection
+→ User Input 按 Frame/Activation 路由
+→ Render 按独立 Render identity 发布和恢复
 ```
 
-程序主系统只管理调用关系、生命周期和通信通道；模块子系统管理自身业务状态和 Client State；渲染端维护 Store、DOM 和非权威表现状态。
+核心所有权：
+
+```text
+Main
+    Session / Runtime topology
+    Frame Stack / Activation / Input Target
+
+Subsystem
+    authoritative business state
+    Frame input handling
+    Render contexts / Render lifecycle
+
+Renderer
+    Render Store / presentation
+    Frame input routing mirror
+    non-authoritative local presentation state
+```
+
+Frame 是调用和普通输入上下文，不是 Process、业务状态或 Render ownership 单元。Render 生命周期不从 Frame suspend / close 推导。
+
+Desktop Bootstrap 明确区分：
+
+```text
+spawn success ≠ connected ≠ identified ≠ ready
+```
+
+当前 Desktop v1：
+
+- `launcher.type = nodejs`；
+- `launcher.entry` 必须安全解析到 Installation Root 内；
+- Host 选择 Node Runtime，Process creation 不经过 Shell；
+- Bootstrap Token 在 Process spawn 前注册；
+- Process 由 Runtime Supervisor 管理；
+- failed Runtime 不自动 restart；
+- executable Subsystem JavaScript 属于 trusted code，当前不宣称 Node.js OS sandbox。
+
+普通业务内容通过独立 Readonly Content API 获取；Content API 不暴露任意物理路径或执行能力。
 
 ## 文档站点
 
