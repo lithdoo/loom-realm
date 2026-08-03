@@ -26,7 +26,7 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 10. [Game Package v2 Bootstrap / Descriptor](./15-contracts/game-package-v2.md)
 11. [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
 12. [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
-13. [Frame 生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
+13. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
 14. [只读 Content API v1](./15-contracts/content-api-v1.md)
 15. [模块设计目录](./20-modules/README.md)
 16. [实施计划目录](./30-implementation/README.md)
@@ -58,21 +58,23 @@ Subsystem Control Protocol v1
     stopped 只来自 Supervisor termination observation
     无 application heartbeat / same-attempt reconnect / resume
 
-每个 Subsystem / System
-    一个 Runtime Container
-    Desktop = 一个 OS Process
-    PWA = 一个 Dedicated Worker
-
-每个 Runtime Container
-    与 Main 一条长期 Control Connection
-    与 Renderer 最多一条长期 System Data Connection
-    可以承载 0..N Frame/Input Context
-    可以拥有 0..N Render Context
+Frame / Call Protocol v1
+    整体仍 Draft
+    Batch A 已 Frozen：identity / authority / lifecycle / Activation
 
 Frame
-    Main 管理的调用 / User Input Context
-    使用独立 Frame / Call Protocol
-    不是进程、Worker、业务状态所有权单元或 Render 身份
+    frameId = Main-generated / Session unique / never reused
+    permanently bound to descriptor.key
+    callerFrameId immutable
+    lifecycle = starting / active / suspended / closing / closed
+    completed / cancelled / failed = outcome, not lifecycle
+    no Frame ready / initialized / frame.status
+
+Activation
+    Main-generated / Session unique / never reused
+    only active Frame owns current Activation
+    revoked Activation never becomes valid again
+    Frame 每次重新 active 都获得新 Activation
 
 Render
     完全由 Subsystem 管理
@@ -105,12 +107,24 @@ Main establishes shutdown intent
 → stopped
 ```
 
+Frame 稳定状态：
+
+```text
+Stack Top
+    active + current Activation
+
+all other live Frames
+    suspended + no current Activation
+```
+
 核心边界：
 
 ```text
 spawn success ≠ connected ≠ identified ≠ ready
 shutdown Response ≠ stopped
 status(stopping) ≠ stopped
+Frame outcome ≠ Frame lifecycle state
+Frame lifecycle ≠ Render lifecycle
 ```
 
 没有 Main shutdown intent 的 Control Connection loss 或 Runtime exit 是 failure，即使 Process exit code 为 0。
@@ -127,22 +141,12 @@ User Input Protocol
 
 Render Update 使用独立 Render identity；User Input 使用 Frame / Activation identity。二者共享 System Transport，但不共享生命周期、Sequence 或恢复语义。
 
-内容面独立使用只读 Content API：
-
-```text
-Runtime / Renderer
-→ manifest / record / group / resource
-→ Desktop localhost HTTP 或 PWA same-origin Fetch
-```
-
-Content API 不提供任意物理路径或执行能力；这一能力边界与 Desktop Node Process 的 OS 权限必须分开理解。
+内容面独立使用只读 Content API。
 
 ## 00 · 产品总览
 
 - [产品设计总览](./00-overview/product-vision.md)
 - [文档分层与变更规则](./00-overview/document-governance.md)
-
-产品层不记录具体包名、RPC 字段或实现参数。
 
 ## 10 · 系统架构
 
@@ -162,14 +166,15 @@ Content API 不提供任意物理路径或执行能力；这一能力边界与 D
 - [Game Package v2 Bootstrap / Descriptor Contract](./15-contracts/game-package-v2.md)
 - [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
 - [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
-- [Frame 生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
+- [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
+- [旧 Frame 生命周期草案路径（Legacy）](./15-contracts/system-lifecycle-protocol.md)
 - [Renderer–Subsystem 数据协议 v1（Legacy）](./15-contracts/frame-data-channel-v1.md)
 - [Client Scoped State Tree v1（Legacy）](./15-contracts/client-state-tree-v1.md)
 - [游戏包契约 v1（Legacy for new bootstrap）](./15-contracts/game-package-v1.md)
 - [资源交付协议草案（Superseded）](./15-contracts/resource-protocol.md)
 
-旧 v1 文件为迁移和历史互操作保留，不得作为新增 Frame/Render 所有权或 Subsystem Bootstrap 设计依据。
+旧路径只为迁移和历史互操作保留，不得作为新增 Frame/Render 所有权或 Runtime Bootstrap 设计依据。
 
 ## 20 · 模块设计
 
@@ -199,49 +204,40 @@ Content API 不提供任意物理路径或执行能力；这一能力边界与 D
 - [ADR 0006：Frame 与 Render 生命周期解耦](./decisions/0006-frame-render-decoupling.md)
 - [ADR 0007：Subsystem Descriptor MVP 收敛](./decisions/0007-subsystem-descriptor-mvp.md)
 - [ADR 0008：Desktop Node.js Launcher Profile v1](./decisions/0008-desktop-nodejs-launcher-profile-v1.md)
-- [ADR 0009：冻结 Subsystem Control Protocol v1](./decisions/0009-freeze-subsystem-control-protocol-v1.md)
+- [ADR 0009：Subsystem Control Protocol v1](./decisions/0009-freeze-subsystem-control-protocol-v1.md)
+- [ADR 0010：Frame / Call Protocol v1 Batch A](./decisions/0010-freeze-frame-call-protocol-v1-batch-a.md)
 
 ADR 保存历史决策过程。当前有效结论以 `00-overview`、`10-architecture` 和 `15-contracts` 的当前权威文档为准，不通过重写旧 ADR 表达新的决定。
 
-- ADR 0008 补充并部分替代 ADR 0007 中 `launcher.entry` 尚未冻结的历史状态；
-- ADR 0009 将此前 Draft / Stabilizing 的 Subsystem Bootstrap / Runtime Lifecycle 收敛为 Frozen Subsystem Control Protocol v1，并把 Frame / Call 明确留在独立协议域。
+## 当前协议推进状态
+
+```text
+Game Package v2 / Launcher v1       Frozen
+Subsystem Control Protocol v1       Frozen
+Frame / Call v1 Batch A             Frozen
+Frame / Call v1 Batch B-F           Draft
+Main ⇄ Renderer Control             Draft target
+Renderer ⇄ Subsystem Connection     Draft target
+User Input / Render Update          Draft target
+Render State                        Draft target
+```
+
+下一冻结目标是 Frame / Call Batch B：7 个 RPC 的最终 Schema 与 pre/postcondition。
 
 ## 当前明确暂缓
-
-以下能力不属于当前已冻结的 Desktop Launcher / Subsystem Control v1：
 
 - PWA Launcher Descriptor / Bootstrap Credential / Control Transport Profile；
 - 第二种 Launcher Type；
 - executable sandbox / Publisher Trust / signing；
-- automatic Runtime restart / resume / checkpoint；
-- same-attempt Control reconnect；
-- application-level heartbeat / health probe 扩展；
+- automatic Runtime restart / checkpoint；
 - lazy / idle recycle；
 - 一个 `key` 多 Runtime instance；
 - remote Subsystem；
 - Game-supplied Node executable / flags / argv；
-- Host timeout 默认数值；
-- Bootstrap Token 精确熵 / 生成算法。
-
-注意：`subsystem.shutdown` wire method **已经冻结**；暂缓的只是 Host timeout 默认数值和未来更高级的 recovery / health 能力。
+- application-level Control heartbeat；
+- same-attempt Control reconnect；
+- 多主栈 / 一般 Frame Graph；
+- Frame migration；
+- Activation reuse / persistent resume。
 
 实现不得以优化名义隐式增加这些语义。
-
-## 迁移状态
-
-当前仍存在若干旧路径文档。它们只作为历史和迁移资料保留；如果旧目录内容与新分层文档冲突，应以 [文档分层与变更规则](./00-overview/document-governance.md) 的依赖顺序处理，并修复旧文档状态，而不是依赖提交时间判断真相。
-
-尤其不得继续新增以下旧模型：
-
-- 一 Frame 一个进程 / Worker；
-- 每 Frame 一个物理 Renderer Transport；
-- Frame 固定拥有业务 Runtime、Projector 或 Render State；
-- Frame suspend / close 自动隐藏或销毁 Render；
-- Renderer 根据 Frame Stack 推导 Render 集合；
-- 首次 Frame 调用才启动当前已声明的 Subsystem；
-- 游戏包仅声明 `systemId`、平台 Registry 提供所有可执行实现；
-- 把 Process spawn 当作 Subsystem ready；
-- Runtime 自行 `ready → stopping` 作为正常退出；
-- 把 shutdown RPC Response 当作 stopped；
-- 在 Subsystem Control v1 私自加入 heartbeat / reconnect / implicit restart；
-- 把 Content API 的只读能力误写成 Node Process 的 OS sandbox。
