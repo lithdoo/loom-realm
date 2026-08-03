@@ -28,9 +28,16 @@
 - Runtime Supervisor exit classification；
 - Desktop v1 no automatic restart；
 - Desktop Node.js executable code = trusted code，Entry 安全不等于 sandbox；
-- Control Protocol v1 `subsystem.hello` / `subsystem.status`；
+- Subsystem Control Protocol v1：`subsystem.hello / subsystem.status / subsystem.shutdown`；
+- connection-bound `descriptor.key` identity；
+- Main-owned Runtime shutdown intent；
+- `stopped` 只来自 Supervisor termination observation；
+- JSON-RPC `-32000` + stable `error.data.code` semantic error envelope；
+- Subsystem Control v1 wire limits、timeout phase、retry / connection-loss semantics；
+- Subsystem Control v1 无 application heartbeat、same-attempt reconnect / resume 或 automatic restart；
 - `spawn success ≠ connected ≠ identified ≠ ready`；
 - Frame = call/input context；
+- Frame / Call 与 Subsystem Control 是独立协议域；
 - Render = Subsystem-owned context；
 - 每 Subsystem 一个 Runtime Container / 一个 Renderer System Data Connection。
 
@@ -45,19 +52,21 @@
 
 明确暂缓，不作为里程碑 0 缺口：
 
-- PWA Launcher Descriptor 映射；
+- PWA Launcher Descriptor / Bootstrap Credential / Control Transport 映射；
 - 第二种 Desktop Launcher Type；
 - executable sandbox / Publisher Trust / signing；
-- automatic Runtime restart / checkpoint；
+- automatic Runtime restart / resume / checkpoint；
+- application-level heartbeat / health probe 扩展；
 - lazy / idle recycle；
 - 一个 `key` 多 Runtime instance；
-- graceful shutdown wire method 与 timeout 默认数值。
+- Host timeout 默认数值；
+- Bootstrap Token 精确熵 / 生成算法。
 
-关闭条件：链路 1 的 Game Package / Launcher v1 已有 Normative Contract 与 conformance fixture；旧 Frame-scoped Render 契约已降为 Legacy。
+关闭条件：链路 1 与 Subsystem Control v1 已有 Normative Contract、ADR 与 conformance fixture；旧 Frame-scoped Render 契约已降为 Legacy。
 
-## 里程碑 1：Game Package v2 与 Desktop Bootstrap
+## 里程碑 1：Game Package v2 与 Desktop Runtime Bootstrap / Control
 
-目标：不创建任何 Frame 也能完成完整 Subsystem Runtime Bootstrap。
+目标：不创建任何 Frame 也能完成完整 Subsystem Runtime Bootstrap、Control identity、ready、正常 shutdown 与失败收敛。
 
 - 实现 Manifest / Entry / Descriptor Loader；
 - 实现 duplicate `key` / unsupported Launcher 校验；
@@ -68,13 +77,21 @@
 - 实现显式 child environment 与 `LOOMREALM_BOOTSTRAP_CONTEXT`；
 - 实现 Launch Attempt / Bootstrap Token，并保证 Token registration happens-before spawn；
 - 实现 Runtime Supervisor / expected-unexpected exit classification；
-- 实现 bounded termination；
-- 明确不实现 automatic restart；
 - 实现 Main Control WebSocket Endpoint；
-- 实现 `subsystem.hello` / version negotiation；
+- 实现 `subsystem.hello` / version negotiation / connection-bound identity；
 - 实现 `subsystem.status` lifecycle；
+- 实现 Main-owned shutdown intent；
+- 实现 `subsystem.shutdown(session-end | bootstrap-abort)`；
+- 保证 shutdown intent happens-before shutdown Request / `status(stopping)` 合法性判断；
+- 实现 shutdown Response 与 Supervisor-confirmed `stopped` 的分离；
+- 实现 finite shutdown deadline / force termination；
+- 实现 JSON-RPC semantic error envelope 与稳定 Subsystem Control error code；
+- 实现 Subsystem Control v1 wire limits；
+- 实现 unexpected Control loss / Process exit failure semantics；
+- 明确不实现 application-level heartbeat、same-attempt reconnect / resume 或 automatic restart；
 - 并行或顺序启动全部声明 Subsystem；
-- 任一 required Subsystem 无法 ready 时 Game Bootstrap 失败并清理已启动 Runtime。
+- 任一 required Subsystem 无法 ready 时 Game Bootstrap 失败；
+- Game Bootstrap 失败后对其他已启动 Runtime 建立 `bootstrap-abort` shutdown intent 并统一清理。
 
 关闭条件：
 
@@ -83,34 +100,43 @@ valid Descriptor set
 → all required Process supervised
 → all hello / identified / ready
 → no Frame required
+
+normal shutdown
+→ Main shutdown intent
+→ subsystem.shutdown
+→ Supervisor confirms termination
+→ stopped
 ```
 
-并通过 invalid Entry、reserved env、spawn failure、early exit、never-ready、exit-zero-after-ready、ignore-shutdown 测试。
+并通过 invalid Entry、reserved env、spawn failure、early exit、invalid/replayed hello、never-ready、unsolicited-stopping、Control disconnect、exit-zero-after-ready、shutdown-fast-exit、shutdown-timeout、ignore-shutdown、wire-limit 与 semantic-error 测试。
 
 ## 里程碑 2：Frame / Call Control
 
-目标：在已经 ready 的 Runtime Container 上验证调用栈和输入上下文。
+目标：在已经 ready 的 Runtime Container 上验证调用栈和输入上下文，不重新定义 Subsystem Control v1。
 
 - 冻结 Frame initialize / activate / suspend / resume / close；
 - 冻结 call / completed / cancelled / failed；
+- 冻结 Frame / Call error、timeout、rollback 与 Runtime-failure unwind；
 - 实现 Frame Registry / Stack / Activation / Input Target；
 - 实现三层嵌套调用；
 - 实现同一 Subsystem 多 Frame/Input Context；
 - 实现旧 Activation 拒绝；
-- 实现 Runtime failure 调用链处理。
+- 实现 Runtime failure 调用链处理；
+- 保证 Frame / Call 不定义 Runtime ready / shutdown / reconnect / restart。
 
-关闭条件：Frame 创建不启动新 Process/Worker，不创建 Render，不建立 per-Frame Transport。
+关闭条件：Frame 创建不启动新 Process/Worker，不创建 Render，不建立 per-Frame Transport；Frame / Call 只在已认证 Control Connection 上提供独立协议域。
 
 ## 里程碑 3：Renderer Control 与 System Data Connection
 
 目标：建立 Main-authorized、per-Subsystem Data Transport。
 
 - 冻结 Main ⇄ Renderer Control Protocol；
-- 发布 ready Subsystem 状态；
+- 发布 ready / stopping / stopped / failed Subsystem 状态；
 - 发布 Frame Stack / Activation / Input Target；
 - 冻结 Connection Protocol identity / auth / version；
 - 实现 Desktop WebSocket Data Grant；
 - 实现 Renderer System Data Connection Registry；
+- Runtime 进入 stopping / failed 后不再签发新的 Data Grant；
 - 验证零 Frame Subsystem 仍可建立/保持 Data Connection；
 - Renderer reload 根据 ready Subsystem / Grant 恢复连接。
 
@@ -165,17 +191,18 @@ valid Descriptor set
 
 目标：完成原创测试内容地图纵向闭环。
 
-- 实现 System Control Adapter；
+- 实现 Subsystem Control Adapter；
 - 实现 Frame Input Adapter；
 - 实现 Session Coordinator；
 - 实现 Execution Loop / Runtime Core；
 - 实现方向意图、移动、碰撞和 Portal；
 - 实现 Render Manager / Render Projector；
 - world/hud/loading Render 使用 Render Protocol 发布；
+- 正确响应 `subsystem.shutdown` 并进行有限 cleanup；
 - 验证一个 `loom.map` Process 服务多个 Frame/Input Context；
 - 验证 Frame lifecycle 不隐式销毁地图 Render。
 
-关闭条件：两张原创测试地图可双向往返；Render 与 Frame 解耦测试通过。
+关闭条件：两张原创测试地图可双向往返；Render 与 Frame 解耦测试通过；Runtime 能按 Subsystem Control v1 正常启动与关闭。
 
 ## 里程碑 8：Pokémon Essentials 兼容工具链
 
@@ -192,34 +219,46 @@ valid Descriptor set
 - Hostra 只打开/管理 Renderer BrowserWindow；
 - Renderer ⇄ Main 一条 Control WebSocket；
 - Subsystem → Main 每 Subsystem 一条 Control WebSocket；
+- Subsystem Control WebSocket 实现 frozen hello / status / shutdown semantics；
 - Renderer ⇄ Subsystem 每 Subsystem 一条 Data WebSocket；
 - Data WebSocket 内拆分 Connection / Render Update / User Input；
 - Origin / credential / loopback 校验；
+- WebSocket ping/pong 只作为 Transport health，不引入 `subsystem.ping`；
 - Renderer reload 独立恢复 Control、Input 与 Render；
+- Session end 由 Main 建立 shutdown intent → `subsystem.shutdown` → Supervisor termination observation；
 - 有限关闭和强制终止。
 
-关闭条件：Main/Hostra 不转发普通输入或 Render State；Frame lifecycle 不决定 Render/Data Transport lifecycle。
+关闭条件：Main/Hostra 不转发普通输入或 Render State；Frame lifecycle 不决定 Runtime/Render/Data Transport lifecycle；`stopped` 不由 shutdown RPC ACK 推导。
 
 ## 里程碑 10：PWA Transport Profile
 
 - Main Runtime Dedicated Worker；
 - 每 Subsystem 一个 Dedicated Worker；
+- 冻结 Descriptor → Worker Script / Bootstrap Credential 映射；
+- 冻结 Main ⇄ Subsystem Control MessagePort Profile；
+- 映射 Subsystem Control v1 hello / status / shutdown identity 与 lifecycle semantics；
+- 定义 Worker termination observation → stopped；
+- 明确 PWA Host health detection，不偷偷增加 Subsystem Control heartbeat；
 - Bootstrap 阶段建立全部 required Worker；
-- Main ⇄ Subsystem 每 Subsystem Control MessagePort；
 - Window ⇄ Subsystem 每 Subsystem Data MessagePort；
 - Service Worker Content API；
 - OPFS 安装；
 - 页面隐藏/恢复；
 - Frame Input 与 Render 独立恢复。
 
-PWA Launcher Descriptor → Worker Script 的可互操作映射是独立暂缓设计，不从 Desktop Node.js Profile 推导。
+关闭条件：PWA 与 Desktop 保持相同 Subsystem/Frame/Render 所有权和 Subsystem Control 生命周期语义；任何 Transport 差异不静默改变协议含义。
 
 ## 第一阶段最终验收
 
 - Game Entry 一次声明全部 Subsystem；
 - Desktop `key + nodejs + eager all-required bootstrap`；
 - Entry / env / spawn / Supervisor 符合 Launcher v1；
+- Subsystem Control v1 hello / status / shutdown / error / limits 全部符合 Normative Contract；
 - `spawn success ≠ connected ≠ identified ≠ ready`；
+- Main 拥有正常 Runtime shutdown intent；
+- `stopped` 只来自实际 Runtime termination observation；
+- 没有 shutdown intent 的 Control loss / Process exit 是 failure；
+- Subsystem Control v1 没有 application heartbeat / same-attempt reconnect / resume；
 - 每 Subsystem 最多一个有效 Runtime Container；
 - unexpected Process exit 不被隐式 restart；
 - 同一 Container 可承载多个 Frame/Input Context；
@@ -239,12 +278,15 @@ PWA Launcher Descriptor → Worker Script 的可互操作映射是独立暂缓�
 - Save System；
 - 不可信 executable Sandbox；
 - 第二种 Desktop Launcher Type；
-- PWA Launcher Descriptor 映射；
-- automatic Runtime restart / checkpoint / crash recovery；
+- PWA Launcher / Bootstrap Credential / Control Transport 的具体 Profile（里程碑 10 前完成）；
+- automatic Runtime restart / resume / checkpoint / crash recovery；
+- application-level heartbeat / health probe 扩展；
+- same-attempt Control reconnect；
 - lazy / idle recycle；
 - 一个 `key` 多 Runtime instance；
+- Host timeout 默认数值；
+- Bootstrap Token 精确熵 / 生成算法；
 - online system store / Publisher Trust / signing；
-- graceful shutdown wire method / timeout 默认数值；
 - 多主栈和后台 Frame Graph；
 - 完整菜单、对话、战斗和任务；
 - 多人同步和客户端预测；
