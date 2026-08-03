@@ -25,10 +25,11 @@ LoomRealm 文档按照从粗到细的依赖顺序组织：
 9. [正式契约目录](./15-contracts/README.md)
 10. [Game Package v2 Bootstrap / Descriptor](./15-contracts/game-package-v2.md)
 11. [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
-12. [Main ⇄ Subsystem 控制与运行时生命周期协议](./15-contracts/subsystem-control-lifecycle-protocol.md)
-13. [只读 Content API v1](./15-contracts/content-api-v1.md)
-14. [模块设计目录](./20-modules/README.md)
-15. [实施计划目录](./30-implementation/README.md)
+12. [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
+13. [Frame 生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
+14. [只读 Content API v1](./15-contracts/content-api-v1.md)
+15. [模块设计目录](./20-modules/README.md)
+16. [实施计划目录](./30-implementation/README.md)
 
 ## 当前核心结论
 
@@ -49,6 +50,14 @@ Desktop Launcher
     Process 由 Runtime Supervisor 管理
     v1 不自动 restart
 
+Subsystem Control Protocol v1
+    subsystem.hello
+    subsystem.status
+    subsystem.shutdown
+    Main 拥有正常 Runtime shutdown intent
+    stopped 只来自 Supervisor termination observation
+    无 application heartbeat / same-attempt reconnect / resume
+
 每个 Subsystem / System
     一个 Runtime Container
     Desktop = 一个 OS Process
@@ -62,6 +71,7 @@ Desktop Launcher
 
 Frame
     Main 管理的调用 / User Input Context
+    使用独立 Frame / Call Protocol
     不是进程、Worker、业务状态所有权单元或 Render 身份
 
 Render
@@ -85,11 +95,25 @@ Main Control Endpoint ready
 → Renderer 按 Main 授权建立每 Subsystem 一条 System Data Connection
 ```
 
+Desktop 正常 Runtime 结束：
+
+```text
+Main establishes shutdown intent
+→ subsystem.shutdown(session-end | bootstrap-abort)
+→ subsystem.status(stopping) [optional]
+→ Supervisor confirms Process exit
+→ stopped
+```
+
 核心边界：
 
 ```text
 spawn success ≠ connected ≠ identified ≠ ready
+shutdown Response ≠ stopped
+status(stopping) ≠ stopped
 ```
+
+没有 Main shutdown intent 的 Control Connection loss 或 Runtime exit 是 failure，即使 Process exit code 为 0。
 
 Desktop `nodejs` Profile 中 executable Subsystem JavaScript 属于 trusted code；安全 `launcher.entry` 只限制 Main 执行哪个 Installation 文件，不构成 Node.js OS sandbox。
 
@@ -137,7 +161,7 @@ Content API 不提供任意物理路径或执行能力；这一能力边界与 D
 - [正式契约目录](./15-contracts/README.md)
 - [Game Package v2 Bootstrap / Descriptor Contract](./15-contracts/game-package-v2.md)
 - [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
-- [Main ⇄ Subsystem 控制与运行时生命周期协议 v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
+- [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
 - [Frame 生命周期与调用协议草案](./15-contracts/system-lifecycle-protocol.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
 - [Renderer–Subsystem 数据协议 v1（Legacy）](./15-contracts/frame-data-channel-v1.md)
@@ -175,22 +199,31 @@ Content API 不提供任意物理路径或执行能力；这一能力边界与 D
 - [ADR 0006：Frame 与 Render 生命周期解耦](./decisions/0006-frame-render-decoupling.md)
 - [ADR 0007：Subsystem Descriptor MVP 收敛](./decisions/0007-subsystem-descriptor-mvp.md)
 - [ADR 0008：Desktop Node.js Launcher Profile v1](./decisions/0008-desktop-nodejs-launcher-profile-v1.md)
+- [ADR 0009：冻结 Subsystem Control Protocol v1](./decisions/0009-freeze-subsystem-control-protocol-v1.md)
 
-ADR 保存历史决策过程。当前有效结论以 `00-overview`、`10-architecture` 和 `15-contracts` 的当前权威文档为准，不通过重写旧 ADR 表达新的决定。ADR 0008 明确补充并部分替代 ADR 0007 中 `launcher.entry` 尚未冻结的历史状态。
+ADR 保存历史决策过程。当前有效结论以 `00-overview`、`10-architecture` 和 `15-contracts` 的当前权威文档为准，不通过重写旧 ADR 表达新的决定。
+
+- ADR 0008 补充并部分替代 ADR 0007 中 `launcher.entry` 尚未冻结的历史状态；
+- ADR 0009 将此前 Draft / Stabilizing 的 Subsystem Bootstrap / Runtime Lifecycle 收敛为 Frozen Subsystem Control Protocol v1，并把 Frame / Call 明确留在独立协议域。
 
 ## 当前明确暂缓
 
-Launcher 相关以下能力不属于 Desktop v1：
+以下能力不属于当前已冻结的 Desktop Launcher / Subsystem Control v1：
 
-- PWA Launcher Descriptor 映射；
+- PWA Launcher Descriptor / Bootstrap Credential / Control Transport Profile；
 - 第二种 Launcher Type；
 - executable sandbox / Publisher Trust / signing；
-- automatic Runtime restart / checkpoint；
+- automatic Runtime restart / resume / checkpoint；
+- same-attempt Control reconnect；
+- application-level heartbeat / health probe 扩展；
 - lazy / idle recycle；
 - 一个 `key` 多 Runtime instance；
 - remote Subsystem；
 - Game-supplied Node executable / flags / argv；
-- graceful shutdown wire method / timeout 默认数值。
+- Host timeout 默认数值；
+- Bootstrap Token 精确熵 / 生成算法。
+
+注意：`subsystem.shutdown` wire method **已经冻结**；暂缓的只是 Host timeout 默认数值和未来更高级的 recovery / health 能力。
 
 实现不得以优化名义隐式增加这些语义。
 
@@ -205,8 +238,10 @@ Launcher 相关以下能力不属于 Desktop v1：
 - Frame 固定拥有业务 Runtime、Projector 或 Render State；
 - Frame suspend / close 自动隐藏或销毁 Render；
 - Renderer 根据 Frame Stack 推导 Render 集合；
-- 首次 Frame 调用才启动当前 MVP 中已声明的 Subsystem；
+- 首次 Frame 调用才启动当前已声明的 Subsystem；
 - 游戏包仅声明 `systemId`、平台 Registry 提供所有可执行实现；
 - 把 Process spawn 当作 Subsystem ready；
-- Desktop v1 failed Runtime 隐式自动 restart；
+- Runtime 自行 `ready → stopping` 作为正常退出；
+- 把 shutdown RPC Response 当作 stopped；
+- 在 Subsystem Control v1 私自加入 heartbeat / reconnect / implicit restart；
 - 把 Content API 的只读能力误写成 Node Process 的 OS sandbox。
