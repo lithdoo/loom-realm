@@ -132,15 +132,18 @@ foo\\main.mjs
 foo//main.mjs
 ```
 
-### 5.2 文件类型
+### 5.2 文件类型与模块语义
 
 Desktop Node.js Profile v1 只接受：
 
 ```text
-.js
-.mjs
-.cjs
+.mjs   → ECMAScript Module
+.cjs   → CommonJS
 ```
+
+普通 `.js` MUST 以 `LAUNCH_ENTRY_TYPE_UNSUPPORTED` 拒绝。
+
+原因是 `.js` 的模块语义可能依赖最近的 `package.json.type`、Node Runtime 版本或其他宿主解析规则；v1 不把这种隐式外部状态纳入 Launcher Contract。
 
 最终目标 MUST 存在且为 regular file。
 
@@ -191,6 +194,8 @@ Windows Host MUST 额外检测环境变量 Key 的 ASCII case-insensitive collis
 
 保留字段冲突 MUST 产生 `LAUNCH_ENV_RESERVED` 并使 Game Bootstrap 失败。
 
+除 `descriptor.env` 与 LoomRealm 明确冻结的保留环境外，Subsystem MUST NOT 依赖 Host Safe Baseline 中未规范化字段实现跨 Host 可移植业务语义。
+
 ## 7. 完整 Descriptor 集合校验
 
 Main MUST 在启动任何业务 Subsystem 前完成全部 Descriptor 的结构与集合级校验，至少包括：
@@ -200,7 +205,7 @@ Descriptor Schema
 key uniqueness
 initial target reference
 Launcher Type support
-launcher.entry syntax
+launcher.entry syntax / module extension
 Descriptor env syntax
 reserved env collision
 ```
@@ -211,7 +216,7 @@ reserved env collision
 MUST NOT spawn any business Subsystem Process
 ```
 
-需要访问文件系统的 Entry existence / regular-file / symlink / containment 校验可以由 Game Package Validator 或 Launcher Target Resolver 执行，但 MUST 在对应 Subsystem Process spawn 前完成。
+需要访问文件系统的 Entry existence / regular-file / redirect / containment 校验可以由 Game Package Validator 或 Launcher Target Resolver 执行，但 MUST 在对应 Subsystem Process spawn 前完成。
 
 ## 8. Eager / All-required Bootstrap
 
@@ -228,14 +233,7 @@ read all descriptors
 
 Main MAY 并行启动多个 Subsystem。
 
-任意 required Subsystem：
-
-- Launcher Target 无效；
-- spawn 失败；
-- 无法建立 Control Bootstrap；
-- 无法进入 `ready`；
-
-都 MUST 使整个 Game Bootstrap 失败，并进入统一清理流程。
+任意 required Subsystem的 Launcher Target 无效、spawn 失败、Control Bootstrap 失败或无法进入 `ready`，都 MUST 使整个 Game Bootstrap 失败并进入统一清理流程。
 
 ## 9. Launcher 与 Content 能力分离
 
@@ -288,6 +286,7 @@ LAUNCH_ENV_RESERVED
 
 - PWA Descriptor → Worker Script Profile；
 - 第二种 Launcher Type；
+- `.js` + `package.json.type` 的 Node module resolution Profile；
 - `lazy` / optional Subsystem；
 - 一个 `key` 多 Runtime instance；
 - remote Subsystem；
@@ -305,7 +304,9 @@ LAUNCH_ENV_RESERVED
 - undeclared initial target；
 - unsupported Launcher；
 - absolute / parent traversal / URL / backslash Entry；
-- missing / directory / unsupported-extension Entry；
+- `.mjs` / `.cjs` valid Entry；
+- `.js` / unsupported-extension rejection；
+- missing / directory Entry；
 - symlink Entry 与 symlink ancestor；
 - Installation Root escape；
 - case-collision；
@@ -321,6 +322,7 @@ Descriptor key is the runtime identity.
 Desktop v1 Launcher is nodejs only.
 All declared Subsystems are eager and required.
 launcher.entry is Installation-relative and path-safe.
+.mjs / .cjs make module semantics explicit; plain .js is not v1.
 Descriptor env cannot alter LoomRealm or Node bootstrap semantics.
 Launcher capability is distinct from Content capability.
 Safe Entry resolution does not imply Node.js sandboxing.
