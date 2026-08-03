@@ -23,16 +23,29 @@
 
 - [Game Package v2 Bootstrap / Descriptor Contract](../15-contracts/game-package-v2.md)；
 - [Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)；
-- [Main ⇄ Subsystem Control v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 已收敛的 hello/status surface；
+- [Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)：hello / status / shutdown、identity、Runtime 状态机、semantic error、wire limits、connection / shutdown failure semantics；
 - [Content API v1](../15-contracts/content-api-v1.md)。
 
-Desktop Launcher 当前不再是开放架构题：Entry/env/spawn/Supervisor/trust model 已冻结；PWA Launcher、第二 Launcher Type、Sandbox、Runtime restart 等明确暂缓。
+Desktop Launcher 与 Subsystem Control 当前都不再是开放架构题：
+
+```text
+Launcher v1
+    Entry / env / spawn / Supervisor / trust model 已冻结
+
+Subsystem Control v1
+    hello / status / shutdown 已冻结
+    Main-owned shutdown intent
+    stopped only from Supervisor observation
+    no application heartbeat / reconnect / resume / automatic restart
+```
+
+仍待设计冻结的主链从 Frame / Call 开始。PWA Launcher / Control Transport、第二 Launcher Type、Sandbox、Runtime recovery 等属于明确暂缓或后续 Profile。
 
 ## 实施原则
 
 1. 先冻结最小协议，再并行实现通信两端；
 2. 已冻结 Contract 先写 conformance fixture，再写平台实现；
-3. Launcher / Control / Frame / Render / Content 的能力边界不得因代码便利重新合并；
+3. Launcher / Subsystem Control / Frame Call / Render / Content 的能力边界不得因代码便利重新合并；
 4. 先完成测试子系统，再接入复杂地图子系统；
 5. 先建立纵向最小闭环，再增加兼容内容；
 6. 每个包只能依赖上层允许的方向；
@@ -44,11 +57,11 @@ Desktop Launcher 当前不再是开放架构题：Entry/env/spawn/Supervisor/tru
 ## 当前实施顺序
 
 ```text
-Game Package v2 / Desktop Launcher v1
+Game Package v2 / Desktop Launcher v1        ← Frozen
     ↓
-Main ⇄ Subsystem Control v1
+Subsystem Control Protocol v1                ← Frozen
     ↓
-Frame / Call
+Frame / Call                                 ← next freeze target
     ↓
 Main ⇄ Renderer Control
     ↓
@@ -61,4 +74,4 @@ Render State
 loom.map vertical slice
 ```
 
-Launcher v1 已完成设计冻结，当前工作应转向 schema/fixture/实现，而不是继续扩张 Launcher 范围。
+Launcher v1 与 Subsystem Control v1 当前工作应转向 schema、fixture、SDK/Main implementation 和互操作测试，而不是继续扩张已冻结协议范围。
