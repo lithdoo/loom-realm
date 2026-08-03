@@ -55,7 +55,8 @@ interface SubsystemDescriptor {
 - unsupported Launcher 导致 Game Bootstrap 失败；
 - Descriptor env 不能覆盖 LoomRealm / Node 保留启动字段；
 - `launcher.entry` 是 Installation Root 相对的安全 package logical path；
-- Desktop v1 Entry 禁止 traversal / absolute / URL / symlink escape，并只接受 `.js` / `.mjs` / `.cjs` regular file；
+- Desktop v1 Entry 禁止 traversal / absolute / URL / symlink escape；
+- Desktop v1 只接受 `.mjs` / `.cjs` regular file，以扩展名显式固定 ESM / CommonJS 语义；普通 `.js` 不属于 v1；
 - Node executable 由 Host 选择，Process creation 不经过 Shell；
 - Launcher 在 spawn 前创建/注册 Launch Attempt Bootstrap Credential；
 - spawn success 不等于 connected / identified / ready；
