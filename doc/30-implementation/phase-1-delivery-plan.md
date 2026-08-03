@@ -5,30 +5,37 @@
 > 稳定程度：Evolving  
 > 主要定义：第一阶段实施顺序、里程碑和关闭条件  
 > 依赖：[仓库与分包方案](./repository-layout.md)、[测试策略](./testing-strategy.md)  
-> 最近复核：2026-08-02
+> 最近复核：2026-08-03
 
 本计划按当前架构依赖顺序组织实施。
 
 ## 里程碑 0：文档与契约基线
 
-目标：两个独立实现对 Subsystem、Frame/Input、Render 和 Content 的边界理解一致。
+目标：两个独立实现对 Subsystem、Runtime Bootstrap、Frame/Input、Render 和 Content 的边界理解一致。
 
 已收敛：
 
 - Descriptor identity = `key`；
-- Desktop MVP Launcher = `nodejs`；
+- Desktop v1 Launcher = `nodejs`；
 - Game Entry 一次声明全部 required Subsystem；
 - eager all-required Bootstrap；
+- Game Package v2 Bootstrap / Descriptor Contract；
+- Desktop Node.js Launcher Profile v1；
+- `launcher.entry` Installation-relative path / redirect / containment / extension 规则；
+- Host-selected Node Runtime、`shell=false`、固定 `cwd`；
+- explicit child environment / reserved env；
+- Launch Attempt / Bootstrap Context / Token-before-spawn；
+- Runtime Supervisor exit classification；
+- Desktop v1 no automatic restart；
+- Desktop Node.js executable code = trusted code，Entry 安全不等于 sandbox；
 - Control Protocol v1 `subsystem.hello` / `subsystem.status`；
-- `connected ≠ identified ≠ ready`；
+- `spawn success ≠ connected ≠ identified ≠ ready`；
 - Frame = call/input context；
 - Render = Subsystem-owned context；
 - 每 Subsystem 一个 Runtime Container / 一个 Renderer System Data Connection。
 
 仍需冻结：
 
-- Game Package v2 / Descriptor Schema；
-- `launcher.entry` 路径与安全；
 - Frame / Call Protocol；
 - Main ⇄ Renderer Control Protocol；
 - Renderer ⇄ Subsystem Connection Protocol；
@@ -36,7 +43,17 @@
 - User Input Protocol；
 - Render State Contract。
 
-关闭条件：旧 Frame-scoped Render 契约已降为 Legacy，新实现不再依赖旧 Client State ownership。
+明确暂缓，不作为里程碑 0 缺口：
+
+- PWA Launcher Descriptor 映射；
+- 第二种 Desktop Launcher Type；
+- executable sandbox / Publisher Trust / signing；
+- automatic Runtime restart / checkpoint；
+- lazy / idle recycle；
+- 一个 `key` 多 Runtime instance；
+- graceful shutdown wire method 与 timeout 默认数值。
+
+关闭条件：链路 1 的 Game Package / Launcher v1 已有 Normative Contract 与 conformance fixture；旧 Frame-scoped Render 契约已降为 Legacy。
 
 ## 里程碑 1：Game Package v2 与 Desktop Bootstrap
 
@@ -44,16 +61,31 @@
 
 - 实现 Manifest / Entry / Descriptor Loader；
 - 实现 duplicate `key` / unsupported Launcher 校验；
-- 冻结并实现 `launcher.entry` 安全边界；
-- 实现 Node.js Launcher；
-- 实现 Launch Attempt / Bootstrap Credential；
+- 实现 Launcher Entry syntax / symlink / containment / case-collision 校验；
+- 实现 env reserved-key 与大小校验；
+- 实现 Launcher Target Resolver；
+- 实现 Node.js Launcher：Host-selected Node、shell=false、cwd=Installation Root；
+- 实现显式 child environment 与 `LOOMREALM_BOOTSTRAP_CONTEXT`；
+- 实现 Launch Attempt / Bootstrap Token，并保证 Token registration happens-before spawn；
+- 实现 Runtime Supervisor / expected-unexpected exit classification；
+- 实现 bounded termination；
+- 明确不实现 automatic restart；
 - 实现 Main Control WebSocket Endpoint；
 - 实现 `subsystem.hello` / version negotiation；
 - 实现 `subsystem.status` lifecycle；
 - 并行或顺序启动全部声明 Subsystem；
-- 任一 required Subsystem 无法 ready 时 Game Bootstrap 失败。
+- 任一 required Subsystem 无法 ready 时 Game Bootstrap 失败并清理已启动 Runtime。
 
-关闭条件：测试游戏声明多个 Subsystem 时，Main 在 Frame 创建前完成全部 Runtime ready，并正确拒绝伪造 hello / token / key / version。
+关闭条件：
+
+```text
+valid Descriptor set
+→ all required Process supervised
+→ all hello / identified / ready
+→ no Frame required
+```
+
+并通过 invalid Entry、reserved env、spawn failure、early exit、never-ready、exit-zero-after-ready、ignore-shutdown 测试。
 
 ## 里程碑 2：Frame / Call Control
 
@@ -100,7 +132,7 @@
 
 ## 里程碑 5：Render Update 与 Web Renderer
 
-目标：在没有 Frame 绑定前提下建立声明式 Render 闭环。
+目标：在没有 Frame ownership 前提下建立声明式 Render 闭环。
 
 - 冻结 Render identity；
 - 冻结 Render create/update/destroy/recovery；
@@ -127,7 +159,7 @@
 - 实现 resource route、MIME、ETag、Content Version；
 - 实现 `validate` 聚合错误。
 
-关闭条件：Runtime / Renderer 只通过逻辑 Content API 读取业务内容；Launcher 与 Content 权限不混用。
+关闭条件：业务内容通过逻辑 Content API 读取；Launcher 与 Content 权限不混用；文档不把 Content API 限制错误描述为 Node Process OS sandbox。
 
 ## 里程碑 7：`loom.map` 最小运行时
 
@@ -180,14 +212,16 @@
 - 页面隐藏/恢复；
 - Frame Input 与 Render 独立恢复。
 
-关闭条件：PWA 与 Desktop 保持相同 Subsystem/Frame/Render 所有权语义；PWA Launcher Descriptor 映射若仍未冻结，不得伪装成跨平台稳定契约。
+PWA Launcher Descriptor → Worker Script 的可互操作映射是独立暂缓设计，不从 Desktop Node.js Profile 推导。
 
 ## 第一阶段最终验收
 
 - Game Entry 一次声明全部 Subsystem；
-- Desktop MVP `key + nodejs + eager all-required bootstrap`；
-- `connected ≠ identified ≠ ready`；
+- Desktop `key + nodejs + eager all-required bootstrap`；
+- Entry / env / spawn / Supervisor 符合 Launcher v1；
+- `spawn success ≠ connected ≠ identified ≠ ready`；
 - 每 Subsystem 最多一个有效 Runtime Container；
+- unexpected Process exit 不被隐式 restart；
 - 同一 Container 可承载多个 Frame/Input Context；
 - Frame 不拥有 Render；
 - Renderer 与每 Subsystem 最多一个有效 Data Transport；
@@ -203,9 +237,14 @@
 ## 暂缓
 
 - Save System；
-- 未声明的任意插件执行；
+- 不可信 executable Sandbox；
 - 第二种 Desktop Launcher Type；
-- 在线系统商店和签名；
+- PWA Launcher Descriptor 映射；
+- automatic Runtime restart / checkpoint / crash recovery；
+- lazy / idle recycle；
+- 一个 `key` 多 Runtime instance；
+- online system store / Publisher Trust / signing；
+- graceful shutdown wire method / timeout 默认数值；
 - 多主栈和后台 Frame Graph；
 - 完整菜单、对话、战斗和任务；
 - 多人同步和客户端预测；
