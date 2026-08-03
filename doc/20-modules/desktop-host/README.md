@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：Hostra 窗口宿主、LoomRealm Desktop Runtime 拓扑、WebSocket/HTTP 适配和安全边界  
-> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[通信系统](../../10-architecture/communication-system.md)  
+> 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[通信系统](../../10-architecture/communication-system.md)  
 > 最近复核：2026-08-03
 
 ## 1. Hostra 边界
@@ -106,13 +106,14 @@ Subsystem Process
 LoomRealm Main Control WebSocket Server
 ```
 
-链路边界：
+启动链路：
 
 ```text
 链路 1
 Main Launcher
 → validated Entry
 → Launch Attempt / Bootstrap Token
+→ token registration
 → spawn + Supervisor
 → public state remains starting
 
@@ -131,9 +132,33 @@ Process connects Main
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-后续同一 Control Connection 可以承载 Frame / Call Control，以及未来冻结的 shutdown / heartbeat / diagnostics 能力。
+同一已认证 Control WebSocket 上的协议职责分开：
 
-## 7. Subsystem Process Launcher Adapter
+```text
+Subsystem Control Protocol v1
+    subsystem.hello
+    subsystem.status
+    subsystem.shutdown
+
+Frame / Call Protocol
+    独立协议域，待冻结
+```
+
+正常 Runtime 关闭：
+
+```text
+Main establishes shutdown intent
+→ subsystem.shutdown(session-end | bootstrap-abort)
+→ subsystem.status(stopping) [optional]
+→ Supervisor confirms Process exit
+→ stopped
+```
+
+`subsystem.shutdown` Response 只表示请求已接受；`status(stopping)` 也不等于 Process 已退出。
+
+Subsystem Control v1 明确没有 application-level heartbeat、same-attempt reconnect、resume 或 automatic restart。WebSocket ping/pong 可以作为 Desktop Transport health 机制，但不是 LoomRealm Subsystem Control RPC。
+
+## 7. Subsystem Process Launcher / Supervisor Adapter
 
 Desktop v1：
 
@@ -155,9 +180,20 @@ Process Launcher 必须遵循 [Desktop Node.js Launcher Profile v1](../../15-con
 - child environment 由安全基线 + validated descriptor env + LoomRealm reserved env 显式构造；
 - 不默认继承 Main 完整 ambient environment；
 - 监听 spawn error / exit / signal；
-- 执行有限关闭期限并提供强制终止；
 - PID / launchId / Process Handle 不作为协议身份；
 - v1 不自动 restart failed Runtime。
+
+Supervisor 必须与 Subsystem Control v1 的 Main-owned shutdown intent 配合：
+
+```text
+shutdown intent
+→ graceful Control request
+→ finite Host-defined deadline
+→ force terminate if required
+→ actual exit observation
+```
+
+只要 shutdown intent 已存在且 Supervisor 最终确认 Process 不再存在，公共 terminal state 为 `stopped`；graceful / forced 只作为内部诊断。没有 shutdown intent 的 Process exit 一律是 failure，即使 exit code 为 0。
 
 当前不支持 Rust/C++/Go/Java/.NET/Shell/Executable 等其他 Launcher Type。
 
@@ -202,6 +238,8 @@ Main 签发 System Data Grant。Grant 不绑定 `frameId`、`activationId` 或 R
 - 绑定 Session / Subsystem / Connection；
 - 版本协商；
 - heartbeat / replace / close。
+
+这里的 heartbeat 属于 System Data Connection Layer，与 Main ⇄ Subsystem Control v1 无关。
 
 ### Render Update Protocol
 
@@ -266,6 +304,7 @@ LoomRealm localhost services / Launcher：
 - Process creation 不经过 Shell；
 - Bootstrap Token 绑定 Launch Attempt 与 Descriptor Key；
 - child environment 不默认继承 Main 全量环境；
+- Subsystem Control semantic error 不泄露 token；
 - System Data Grant 绑定 Session / Subsystem / Connection；
 - User Input 校验 Frame / Activation；
 - Render Update 限制当前 Subsystem Render namespace；
@@ -279,7 +318,12 @@ LoomRealm localhost services / Launcher：
 - Process 在 ready 前退出：Game Bootstrap fatal；
 - hello/token/version 失败：Runtime Bootstrap fatal；
 - Runtime 无法 ready：Game Bootstrap 失败；
-- ready 后 unexpected Process exit：Runtime failure，不自动 restart；
+- unsolicited / invalid / duplicate Runtime Status：fatal Subsystem Control Protocol Error；
+- 没有 shutdown intent 的 Control WebSocket 断开：Runtime failure；
+- ready 后、没有 shutdown intent 的 Process exit：Runtime failure，即使 exit code 为 0；
+- Main shutdown intent 下，Control Connection 先断开：继续由 Supervisor 在 deadline 内收敛，不立即创造第二个 failure；
+- shutdown timeout：Supervisor 强制终止；
+- 已 terminal `failed` 的 Runtime 后续 exit 不改回 `stopped`；
 - System Data WebSocket 断开：停止该 Subsystem 普通输入，Render Store 按 Render Protocol 保留/恢复；
 - Subsystem Process 崩溃：其 Control/Data Connection 失效，Main 处理全部受影响 Frame；
 - Renderer 崩溃：Subsystem Process 可继续存在；
@@ -296,8 +340,12 @@ LoomRealm localhost services / Launcher：
 - Node Runtime 由 Host 选择，shell=false；
 - Bootstrap Token 在 spawn 前注册；
 - spawn success 仍属于 `starting`；
-- Supervisor 观察实际 exit；
-- v1 不自动 restart；
+- hello 成功后 Control Connection 绑定 Descriptor Key；
+- Main 拥有正常 Runtime shutdown intent；
+- shutdown Response / status(stopping) 不等于 stopped；
+- Supervisor 观察实际 exit 并最终确认 stopped；
+- 没有 shutdown intent 的 Process exit / Control loss 是 failure；
+- Subsystem Control v1 不定义 application heartbeat / reconnect / resume / automatic restart；
 - Node.js executable code 是 trusted code，不宣称 sandbox；
 - Renderer 与每个 Process 最多一条 Data WebSocket；
 - Frame 生命周期不控制 Data WebSocket 或 Render；
