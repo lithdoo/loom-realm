@@ -1,11 +1,11 @@
-# `loom.map` 地图子系统模块设计
+# `loom.map` 地图 Subsystem 模块设计
 
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：第一阶段地图子系统的内部模块和依赖方向  
-> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)  
-> 最近复核：2026-08-02
+> 主要定义：第一阶段地图 Subsystem 的内部模块和依赖方向  
+> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[渲染系统](../../10-architecture/rendering-system.md)  
+> 最近复核：2026-08-03
 
 `loom.map` 是第一阶段纵向切片。这里的内部模块不是 LoomRealm 对所有 Subsystem 的公共要求。
 
@@ -13,7 +13,8 @@
 
 ```text
 loom.map
-├── System Control Adapter
+├── Subsystem Control Adapter
+├── Frame Control Adapter
 ├── Frame Input Adapter
 ├── Game Catalog / Repositories
 ├── Session Coordinator
@@ -24,189 +25,239 @@ loom.map
 └── Pokémon Essentials Compatibility Compiler
 ```
 
-地图子系统可以选择共享 world state、共享 Execution Loop 和共享 Render；平台不要求按 Frame 创建上述对象。
+地图 Subsystem 可以选择共享 world state、Execution Loop 和 Render；平台不要求按 Frame 创建这些对象。
 
-## 2. System Control Adapter
+## 2. Subsystem Control Adapter
 
-处理 Main Control Plane：
+只处理 Runtime Container 级 Subsystem Control v1：
 
-- Runtime Bootstrap 完成后进入 ready；
-- `frame.initialize` 建立地图调用 / 输入上下文；
-- `frame.activate` 允许对应 Activation 的普通输入；
-- `frame.suspend` 停止该 Frame 普通输入；
-- `frame.resume` 更新 Activation 并交付子调用结果；
-- `frame.close` 删除对应 Frame/Input Context。
+```text
+subsystem.hello
+subsystem.status(initializing / ready / failed / stopping)
+subsystem.shutdown
+```
 
-这些 Frame 操作**不自动**：
+它不拥有 Frame Stack / Activation，也不把 Runtime ready 当作 Frame ready。
 
-- 启停整个地图 Runtime Loop；
-- 创建/隐藏/销毁 Render；
-- 删除共享 world state；
-- 清空 Repository Cache。
+正常 shutdown 负责有限 Runtime-level cleanup，但不通过逐 Frame Render destroy 来定义 Process 是否可以退出。
 
-如果地图业务希望某个 Frame 生命周期影响某个地图 Session 或 Render，由 `loom.map` 自己显式实现。
+## 3. Frame Control Adapter
 
-## 3. Frame Input Adapter
+处理 Frame / Call Protocol。
 
-将 User Input Protocol 的归一化输入转换为地图命令：
+Batch A 已冻结的本地模型必须保持：
+
+```text
+frameId
+    Main-assigned / never reused
+
+callerFrameId
+    immutable
+
+lifecycle
+    starting / active / suspended / closing / closed
+
+Activation
+    only active Frame has current Activation
+    revoked Activation never becomes valid again
+
+outcome
+    completed / cancelled / failed
+    separate from lifecycle
+```
+
+Frame Context 记录示例：
+
+```ts
+interface MapFrameContext {
+  readonly frameId: string;
+  readonly callerFrameId: string | null;
+  state: "starting" | "active" | "suspended" | "closing" | "closed";
+  currentActivationId: string | null;
+}
+```
+
+地图实现 MUST NOT：
+
+- 创建公共 `frameId`；
+- 创建公共 `activationId`；
+- 恢复旧 Activation；
+- 增加 Frame `ready / initialized / frame.status`；
+- 把业务 failure 表示为永久 Frame `failed` lifecycle state。
+
+最终 `frame.initialize / activate / suspend / resume / close` wire Schema 由 Batch B 冻结。
+
+## 4. Frame Input Adapter
+
+User Input 路由：
 
 ```text
 frameId + activationId
-→ locate input context
-→ validate current activation
+→ locate Frame Context
+→ require lifecycle == active
+→ require activationId == currentActivationId
 → normalize intent/action
 → submit command to map runtime
 ```
 
-持续移动使用方向意图，不依赖浏览器键盘重复频率。
+revoked Activation 必须永久拒绝。
+
+例如：
+
+```text
+F1/A1 active
+→ F1 suspended
+→ later F1/A3 active
+
+任何迟到 F1/A1 input
+→ reject
+```
+
+持续移动使用方向意图，不依赖浏览器 key-repeat frequency。
 
 Input Adapter 不负责 Render 路由。
 
-## 4. Repositories
+## 5. Frame Lifecycle 与地图业务状态
+
+Frame operation **不自动**：
+
+- 启停整个地图 Runtime Loop；
+- 创建/隐藏/销毁 Render；
+- 删除共享 world state；
+- 清空 Repository Cache；
+- 创建新的 Process / Data Connection。
+
+如果地图业务希望某个 Frame lifecycle 影响内部 Session 或 Render，由 `loom.map` 显式实现。
+
+`completed / cancelled / failed` outcome 表示一次调用结果；Frame Context cleanup 仍使用 `closing → closed`。
+
+## 6. Repositories
 
 按需加载地图、人物和资源描述，负责解析、局部校验、并发去重和 Container 级不可变缓存。
 
 Repository 不依赖 Frame Stack，也不按 Frame 强制复制同一份只读内容。
 
-## 5. Session Coordinator
+## 7. Session Coordinator
 
-协调异步内容准备：
+协调：
 
-- 入口地图和人物加载；
+- 入口地图 / 人物加载；
 - 出生位置校验；
 - 地图切换目标准备；
 - Loading/Error business state；
-- 迟到异步结果和关闭取消。
+- 迟到异步结果；
+- Frame-local cancellation / cleanup；
+- Runtime shutdown cleanup。
 
-地图内部可以拥有一个或多个 Session；其与公共 Frame 的映射是 `loom.map` 内部实现，不属于 LoomRealm Frame Contract。
+地图内部 Session 与公共 Frame 的映射属于 `loom.map` 内部实现。
 
-## 6. Runtime Execution Loop
+## 8. Runtime Execution Loop
 
-Core 的串行写入口：
+Core 串行写入口：
 
 - Command / Tick / Control Operation；
-- 单调时钟和固定 Tick；
-- 有界命令队列和有限追赶；
-- 控制操作优先；
-- 地图切换 Effect Barrier；
-- 在事务边界产生不可变 Snapshot。
+- monotonic clock + fixed Tick；
+- bounded command queue / catch-up；
+- control operation priority；
+- map transition Effect Barrier；
+- immutable snapshot at transaction boundaries。
 
-是否只有一个共享 Loop 或多个内部 Session Loop 是地图 Subsystem 设计问题，不是平台 Frame 语义。
+是否一个共享 Loop 或多个内部 Session Loop 是地图实现问题，不是平台 Frame 语义。
 
-## 7. Runtime Core / World State
+## 9. Runtime Core / World State
 
-同步、确定性、无 I/O，负责：
+同步、确定性、无 I/O，负责地图和人物状态、移动、碰撞、Portal、地图切换 Effect 与已准备场景原子提交。
 
-- 当前地图和人物状态；
-- 单格移动和方向；
-- 碰撞；
-- Portal 检测；
-- 地图切换 Effect；
-- 已准备场景的原子提交。
+Core 不包含 Main Frame Stack、JSON-RPC、DOM、Hostra 或 physical Transport。
 
-Core 不包含 Main Frame Stack、JSON-RPC、DOM、Hostra 或物理 Transport。
+## 10. Render Manager
 
-## 8. Render Manager
-
-`loom.map` 自己拥有 Render Registry 和 Render 生命周期。
-
-例如可以维护：
-
-```text
-world render
-hud render
-loading render
-debug render
-```
-
-Render Manager 决定：
-
-- create / destroy；
-- visibility / ordering；
-- 哪些 Runtime Snapshot 影响哪些 Render；
-- Render recovery；
-- Presentation Event。
-
-Render 可以在零 Frame 时存在，也可以跨 Frame suspend / close 保持。
-
-## 9. Render Projector
-
-Render Projector 读取已提交 Runtime / Session Snapshot，生成声明式 Render State，例如：
+`loom.map` 自己拥有 Render Registry / lifecycle，例如：
 
 ```text
 world
 hud
 loading
-error
 debug
 ```
 
-这里的名称是地图内部 Render/Scope 设计，不表示公共 Frame Store。
+Render 可以 zero Frame 存在，也可以跨 Frame suspended / closed 保持。
+
+Render Manager 不读取 Frame lifecycle 作为隐式 destroy/show/hide 指令。
+
+## 11. Render Projector
+
+读取已提交 Runtime / Session Snapshot，生成声明式 Render State。
 
 Projector：
 
 - 不要求每 Frame 一份；
-- 不输出 “Frame Snapshot” 作为平台语义；
-- 使用 Render Update Protocol 发布状态；
-- 多 Scope 同时变化时按未来 Render Contract 的事务边界原子发布；
+- 不输出“Frame Snapshot”作为平台语义；
+- 使用 Render Update Protocol；
+- 不因 Activation replacement 做 Render resync；
 - 投影失败不能发布部分错误状态。
 
-## 10. Pokémon Essentials 兼容层
+## 12. Pokémon Essentials Compatibility
 
-负责把 RPG Maker XP / Pokémon Essentials v21.1 来源格式转换为 LoomRealm 标准运行内容：
+负责将来源格式转换为 LoomRealm 标准运行内容：Tile layers、Autotile、Passage/Priority、Character sprite、Portal 等。
 
-- 三个 Tile 数据层；
-- 原始 Tile ID；
-- Autotile 预编译；
-- 四方向通行和 Priority；
-- 四列四行人物行走图；
-- 手工 LoomRealm Portal。
+Renderer / Runtime Core 不直接解释 Ruby Marshal / `.rxdata`。
 
-Renderer 和 Runtime Core 不直接解释 Ruby Marshal、`.rxdata` 或来源类。
-
-## 11. 依赖方向
+## 13. 依赖方向
 
 ```text
-System Control Adapter
-→ Frame Input Adapter / Coordinator / Runtime
+Subsystem Control Adapter
+→ Runtime lifecycle / shutdown coordinator
+
+Frame Control Adapter
+→ Frame Context Registry / Coordinator
 
 Frame Input Adapter
 → Runtime Command API
 
 Coordinator
-→ Repositories
-→ Runtime Control API
+→ Repositories / Runtime Control API
 
 Execution Loop
 → Runtime Core
 → Render Projection Scheduler
 
 Render Manager / Projector
-→ Render State Types
-
-Compatibility Compiler
-→ Repository Content Types
+→ Render Contract
 ```
 
-禁止 Core 反向依赖 Main、Repository、Renderer 或 Hostra。
+Core 不反向依赖 Main、Repository、Renderer 或 Hostra。
 
-## 12. 测试入口
+## 14. Tests
 
-- 相同输入产生相同 Runtime Snapshot / Effect；
-- Core 不并发和不重入；
-- 固定 Tick 与有限追赶；
-- 命令队列背压；
-- Portal Effect Barrier；
-- 地图切换失败保留旧 Scene；
-- 成功切换原子提交；
-- 同一 `loom.map` Process 可以服务多个 Frame/Input Context；
-- Frame A/B 输入 Activation 相互隔离；
-- Frame suspend / close 不隐式隐藏或销毁 world/hud Render；
-- 没有 Frame 时 loading/debug Render 仍可存在；
-- Renderer reload 后按 Render Protocol 恢复地图 Render；
-- 两张地图双向往返；
-- DOM/Canvas/WebGL 呈现 Priority 和人物遮挡。
+至少验证：
 
-## 13. 现有详细资料
+- deterministic Core；
+- fixed Tick / bounded catch-up；
+- map transition atomicity；
+- one `loom.map` Process serves multiple Frames；
+- frameId no local generation/reuse；
+- only active Frame accepts ordinary input；
+- current Activation accepts input；
+- old/revoked Activation rejects forever；
+- resume does not restore old Activation；
+- no Frame ready/status；
+- failed outcome still performs closing/closed cleanup；
+- Frame suspend/close does not hide/destroy world/hud Render；
+- zero-frame loading/debug Render；
+- Renderer reload restores current Activation from Main, not cached old Activation；
+- normal Subsystem shutdown independent from Frame Render cleanup。
 
-旧 `runtime/`、`game-package/` 目录中的地图详细设计继续作为实现参考；如果其中存在“每 Frame 固定拥有 Core / Projector / Render State”之类假设，应按本模块和上层架构修正或降级为 Legacy。
+## 15. Legacy Implementation Notes
+
+旧 `runtime/`、`game-package/` 等目录只作为实现参考。如果存在：
+
+```text
+per-Frame mandatory Core / Projector / Render
+Frame status = failed
+Frame ready state
+Activation reuse
+Frame close = Render destroy
+```
+
+必须按当前权威 Contract 修正或降级为 Legacy。
