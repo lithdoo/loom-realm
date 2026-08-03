@@ -24,6 +24,7 @@ LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独�
 - [正式契约目录](./doc/15-contracts/README.md)
 - [Game Package v2 Bootstrap / Descriptor](./doc/15-contracts/game-package-v2.md)
 - [Desktop Node.js Launcher Profile v1](./doc/15-contracts/nodejs-launcher-profile-v1.md)
+- [Subsystem Control Protocol v1](./doc/15-contracts/subsystem-control-lifecycle-protocol.md)
 - [模块设计目录](./doc/20-modules/README.md)
 - [实施计划目录](./doc/30-implementation/README.md)
 - [完整阅读指南](./doc/README.md)
@@ -47,6 +48,7 @@ Game Entry
 ```text
 Main
     Session / Runtime topology
+    Runtime shutdown intent / Supervisor observation
     Frame Stack / Activation / Input Target
 
 Subsystem
@@ -75,8 +77,24 @@ spawn success ≠ connected ≠ identified ≠ ready
 - Host 选择 Node Runtime，Process creation 不经过 Shell；
 - Bootstrap Token 在 Process spawn 前注册；
 - Process 由 Runtime Supervisor 管理；
-- failed Runtime 不自动 restart；
+- Subsystem Control Protocol v1 冻结 `subsystem.hello / subsystem.status / subsystem.shutdown`；
+- Main 拥有正常 Runtime shutdown intent；
+- `stopped` 只来自 Supervisor 对实际 Runtime termination 的观察；
+- 没有 shutdown intent 的 Control loss / Process exit 是 Runtime failure；
+- Subsystem Control v1 不定义 application heartbeat、same-attempt reconnect / resume 或 automatic restart；
 - executable Subsystem JavaScript 属于 trusted code，当前不宣称 Node.js OS sandbox。
+
+正常结束：
+
+```text
+Main shutdown intent
+→ subsystem.shutdown
+→ status(stopping) [optional]
+→ Supervisor confirms exit
+→ stopped
+```
+
+因此 shutdown RPC Response 和 `status(stopping)` 都不等于 `stopped`。
 
 普通业务内容通过独立 Readonly Content API 获取；Content API 不暴露任意物理路径或执行能力。
 
