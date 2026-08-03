@@ -5,8 +5,9 @@
 > 稳定程度：Evolving  
 > 主要定义：Subsystem、Runtime Container、Frame/Input、Render、进程、Worker 与平台宿主之间的承载关系  
 > 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[栈式运行系统](./stack-runtime-system.md)  
+> 正式契约：[Game Package v2](../15-contracts/game-package-v2.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[桌面宿主模块](../20-modules/desktop-host/README.md)、[PWA 宿主模块](../20-modules/pwa-host/README.md)  
-> 最近复核：2026-08-02
+> 最近复核：2026-08-03
 
 ## 1. 设计目标
 
@@ -21,7 +22,7 @@
 ```text
 Subsystem Descriptor
     Game Entry 中声明的启动描述
-    MVP 字段：key、launcher、env
+    当前字段：key、launcher、env
 
 Subsystem / System
     业务扩展单元，例如 loom.map 或 loom.menu
@@ -57,6 +58,7 @@ Host
 每个 Runtime Container
     0..N Frame / Input Context
     0..N Render Context
+    与 Main 一条长期 Control Connection
     与 Renderer 最多一个有效 System Data Connection
 
 每个 Frame
@@ -77,9 +79,9 @@ Frame close 必须删除 Render
 
 如果存在这些关系，全部属于 Subsystem 内部实现。
 
-## 4. Subsystem Descriptor 与启动
+## 4. Subsystem Descriptor 与 Desktop 启动
 
-Desktop MVP Descriptor：
+Desktop v1 Descriptor：
 
 ```ts
 interface SubsystemDescriptor {
@@ -92,26 +94,35 @@ interface SubsystemDescriptor {
 }
 ```
 
-当前会话全部 Subsystem 由 Game Entry 一次性声明。Main 在启动阶段立即启动全部声明项；MVP 不定义 lazy 启动。
+当前会话全部 Subsystem 由 Game Entry 一次性声明。Main 在启动阶段立即启动全部声明项；当前不定义 lazy 启动。
 
-单个 Runtime 的概念流程：
+Desktop 单个 Runtime：
 
 ```text
-Main 创建 Launch Attempt / Bootstrap Credential
-→ Node.js Launcher 启动 descriptor.entry
-→ 注入 descriptor key + Main Control Endpoint + Bootstrap Credential + descriptor env
-→ Subsystem 主动连接 Main
-→ subsystem.hello 完成身份绑定
-→ Main observed state = identified
+validate Descriptor / launcher.entry / env
+→ resolve trusted ResolvedLauncherTarget
+→ create Launch Attempt / Bootstrap Token
+→ register Token in Main Control authentication state
+→ construct explicit child environment / Bootstrap Context
+→ Host-selected Node.js + shell=false spawn Process
+→ Runtime Supervisor takes ownership
+→ public state remains starting
+→ Subsystem connects Main
+→ subsystem.hello completes identity binding
+→ identified
 → subsystem.status(state="ready", ...)
-→ Main observed state = ready
+→ ready
 ```
 
-因此 `connected ≠ identified ≠ ready`。
+因此：
 
-Control wire schema 由 [Main ⇄ Subsystem 控制与运行时生命周期协议 v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 定义。
+```text
+spawn success ≠ connected ≠ identified ≠ ready
+```
 
-`launcher.entry` 的路径基准、安装根边界和安全规则尚未冻结。
+`launcher.entry`、Node selection、环境、spawn 和 Process supervision 由 [Game Package v2](../15-contracts/game-package-v2.md) 与 [Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md) 冻结；Control wire schema 和 Runtime lifecycle 由 [Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md) 冻结。
+
+PID、Process Handle 和 Launch Attempt ID 只属于 Host supervision，不是 Subsystem protocol identity。
 
 ## 5. Container 级共享与内部自由度
 
@@ -160,7 +171,7 @@ Render Context 由 Runtime Container 创建、更新和销毁。
 - 在 Frame suspended 时继续更新 Render；
 - 在 Frame close 后保留 Render；
 - 同时维护多个 Render；
-- 根据自身业务手动将某个 Frame 与某个 Render 关联。
+- 根据自身业务显式将某个 Frame 与某个 Render 关联。
 
 Main 不维护 Render Registry。Renderer 也不能从 Main Stack 推导哪些 Render 应存在。
 
@@ -173,7 +184,9 @@ Main 拥有：
 ```text
 Session
 Subsystem Descriptor Registry
-Runtime Container Registry
+Launch Attempt / Runtime Container Registry
+Runtime Supervisor
+Runtime shutdown intent
 Frame Registry / Stack
 Activation / Input Target
 Control Connection authority
@@ -202,6 +215,8 @@ localhost HTTP 承载只读 Content API。
 
 Hostra 只负责窗口与桌面生命周期，不承载 LoomRealm Main，不解释 Subsystem、Frame、Render 或 Input。
 
+Desktop `nodejs` Subsystem executable code 在 v1 中属于 trusted code；安全 `launcher.entry` 不构成 OS sandbox。
+
 ## 10. PWA Profile
 
 ```text
@@ -221,7 +236,9 @@ OPFS / Cache Storage
     已安装游戏包和资源
 ```
 
-PWA 只支持浏览器可实现的 Launcher Profile。Desktop `nodejs` Descriptor 如何映射为 Worker Bootstrap 尚未冻结。
+PWA 的 Descriptor → Worker Script、Bootstrap Credential 和 Control Transport Profile 尚未冻结。不得把 Desktop `nodejs` Process API 细节直接解释成 PWA Contract。
+
+未来 PWA Profile SHOULD 保持当前 Subsystem Control v1 的 identity / lifecycle 语义；若 wire 行为不兼容则必须显式提升对应协议版本。
 
 ## 11. Runtime Container 生命周期
 
@@ -236,18 +253,44 @@ declared
 → stopping
 → stopped
 
-任意合法阶段
+任意非终止阶段
 → failed
 ```
 
 其中：
 
+- `starting`：Launch Attempt 已开始；Process spawn 成功后仍保持该状态；
 - `connected`：Control Transport 已建立；
 - `identified`：`subsystem.hello` 成功，Connection 已永久绑定 `descriptor.key`；
 - `ready`：Main 接受合法 `subsystem.status(state="ready")`；
-- `stopped`：Supervisor 观察到 Runtime 正常退出。
+- `stopping`：Main 已建立正常 shutdown intent；
+- `stopped`：Supervisor 观察到 Runtime 在 shutdown intent 下实际退出；
+- `failed`：不可恢复的 Launcher / Transport / Protocol / Runtime failure。
 
-ready 不表示任何 Frame 或 Render 必须已经存在。
+正常结束固定为：
+
+```text
+Main establishes shutdown intent
+→ subsystem.shutdown(reason)
+→ status(stopping) [optional]
+→ Supervisor confirms Runtime exit
+→ stopped
+```
+
+关键边界：
+
+```text
+subsystem.shutdown Response ≠ stopped
+status(stopping) ≠ stopped
+```
+
+Runtime 不得在没有 Main shutdown intent 时自行 `ready → stopping`；不能继续正常服务时应报告 `failed`。
+
+没有 shutdown intent 的 Control Connection loss 或 Runtime exit 都是 failure，即使 Process exit code 为 0。
+
+Subsystem Control v1 不支持 same-attempt reconnect / resume / automatic restart，也不定义 application-level heartbeat。
+
+ready 不表示任何 Frame、Render 或 Renderer Data Connection 必须已经存在。
 
 ## 12. System Data Connection 生命周期
 
@@ -268,18 +311,32 @@ Main 根据 ready Subsystem 状态和连接授权策略发布 System Data Connec
 
 System Data Connection 的建立依据 ready Subsystem / Main Grant，不根据当前 Frame 集合推导。
 
-## 13. Container 故障
+## 13. Container 正常终止与故障
 
-Runtime 退出或发生不可恢复错误时：
+正常终止：
 
 ```text
-Main 标记 stopped / failed
-→ Control Connection 失效
-→ 撤销该 Subsystem 的 System Data Connection
-→ 停止相关 Frame 普通输入
-→ 按调用栈规则处理受影响 Frame
-→ Render Store 的清理 / 重建由 Render Protocol 决定
+Main shutdown intent
+→ graceful Control request
+→ finite Host-defined deadline
+→ Supervisor confirms exit
+→ stopped
 ```
+
+如果 Runtime 未在期限内退出，Supervisor 可以强制终止；只要最终确认 Runtime 已不存在，公共状态仍为 `stopped`，graceful / forced 只属于诊断信息。
+
+不可恢复故障：
+
+```text
+Runtime failed / exits unexpectedly / Control Connection lost unexpectedly
+→ Main marks failed
+→ revoke corresponding System Data Connection
+→ stop affected Frame normal input
+→ handle affected Frames according to call stack
+→ Render Store cleanup / recovery remains a Render Protocol concern
+```
+
+Runtime 如果已经进入 terminal `failed`，后续 Process exit 不得把它改回 `stopped`。
 
 Renderer DOM / Canvas / WebGL 不能作为权威业务状态恢复源。
 
@@ -291,7 +348,13 @@ Renderer DOM / Canvas / WebGL 不能作为权威业务状态恢复源。
 4. Render 生命周期完全属于 Subsystem；
 5. Frame 与 Render 不存在平台级所有权关系；
 6. System Data Connection 与 Frame 数量解耦；
-7. Desktop MVP = `key + nodejs + eager all-required bootstrap`；
-8. Control identity 在 `subsystem.hello` 成功后绑定到 Connection；
-9. `ready` 是 Runtime status，不是身份声明；
-10. PWA Launcher 映射与 `launcher.entry` 路径安全仍待专门契约冻结。
+7. Desktop v1 = `key + nodejs + eager all-required bootstrap`；
+8. Desktop Entry / env / spawn / Supervisor 语义已经冻结；
+9. Control identity 在 `subsystem.hello` 成功后绑定到 Connection；
+10. `spawn success ≠ connected ≠ identified ≠ ready`；
+11. `ready` 是 Runtime status，不是身份声明；
+12. Main 拥有正常 Runtime shutdown intent；
+13. `stopped` 只来自 Supervisor 对实际退出的观察；
+14. 没有 shutdown intent 的 Runtime exit / Control loss 是 failure；
+15. Subsystem Control v1 不定义 application heartbeat、reconnect、resume 或 automatic restart；
+16. PWA Launcher / Bootstrap Transport Profile 仍待单独冻结。
