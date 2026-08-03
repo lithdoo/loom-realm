@@ -78,7 +78,8 @@ interface SubsystemDescriptor {
 - 校验 Descriptor Schema；
 - 检测重复 `key`；
 - 校验当前 Host Profile 支持的 Launcher Type；
-- 校验 `launcher.entry` 逻辑语法；
+- 校验 `launcher.entry` 逻辑语法与 `.mjs` / `.cjs` 模块扩展名；
+- 普通 `.js` 在 v1 中必须拒绝，不能隐式依赖 `package.json.type`；
 - 校验 env 数量、Key/Value 和保留字段；
 - 确保 initial target 引用已声明 Subsystem；
 - 将规范化 Descriptor 集合交给 Main Descriptor Registry。
@@ -97,12 +98,11 @@ interface SubsystemDescriptor {
 按照 [Game Package v2](../../15-contracts/game-package-v2.md) 与 [Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md) 验证 Desktop executable Entry：
 
 ```text
-entry syntax
+entry syntax / explicit .mjs|.cjs module type
 → Installation-relative resolution
 → reject symlink / junction / reparse redirect
 → regular-file check
 → canonical containment
-→ supported extension (.js / .mjs / .cjs)
 ```
 
 安装 / `validate` SHOULD 提前遍历全部 required Entry；正式 `start` MUST 在对应 Process spawn 前再次保证目标仍满足契约。
@@ -144,7 +144,7 @@ Manifest / Entry
 → duplicate key
 → initial target references
 → Launcher Type support
-→ Launcher Entry syntax + physical safety
+→ Launcher Entry syntax + module type + physical safety
 → env reserved-key conflicts
 → case-collision checks
 → 内容强引用
@@ -182,6 +182,7 @@ Desktop Node.js Process
 - Desktop v1 Launcher Type = `nodejs`；
 - Game Package 模块只加载/校验 Descriptor，不启动进程；
 - Launcher Entry 在 spawn 前按正式契约安全解析；
+- Desktop v1 Entry 使用 `.mjs` / `.cjs` 显式模块语义，普通 `.js` 不受支持；
 - Launcher 是 Main 特权能力；
 - Game Package 不能提供 Node executable / flags / argv；
 - Descriptor env 不能覆盖 `LOOMREALM_*`、`NODE_OPTIONS`、`NODE_PATH`；
@@ -200,7 +201,8 @@ Desktop Node.js Process
 - unsupported Launcher；
 - initial target 指向未声明 Subsystem；
 - absolute / traversal / URL / backslash Entry；
-- missing / directory / unsupported extension Entry；
+- valid `.mjs` / `.cjs` Entry；
+- `.js` / missing / directory / unsupported extension Entry；
 - symlink Entry / symlink ancestor / Installation escape；
 - executable namespace case collision；
 - descriptor env 覆盖 `LOOMREALM_*` / `NODE_OPTIONS` / `NODE_PATH`；
