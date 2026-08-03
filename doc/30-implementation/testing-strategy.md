@@ -3,9 +3,9 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：协议、模块、跨平台 Transport、内容兼容和端到端测试分层  
-> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Content API v1](../15-contracts/content-api-v1.md)  
-> 最近复核：2026-08-02
+> 主要定义：协议、Launcher、模块、跨平台 Transport、内容兼容和端到端测试分层  
+> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Content API v1](../15-contracts/content-api-v1.md)  
+> 最近复核：2026-08-03
 
 ## 1. 测试目标
 
@@ -14,8 +14,9 @@
 第一阶段重点验证：
 
 - Game Entry 一次性声明全部 Subsystem；
-- Desktop MVP `key + nodejs + eager all-required bootstrap`；
-- `connected ≠ identified ≠ ready`；
+- Desktop `key + nodejs + eager all-required bootstrap`；
+- Launcher Entry / env / spawn / Supervisor 语义符合 v1；
+- `spawn success ≠ connected ≠ identified ≠ ready`；
 - 每个 Subsystem 一个 Runtime Container / Process / Worker；
 - 一个 Container 承载 0..N Frame/Input Context；
 - 一个 Container 拥有 0..N Render Context；
@@ -23,12 +24,13 @@
 - Frame 只管理 call/input，不拥有 Render；
 - Render 生命周期由 Subsystem 独立控制；
 - User Input 与 Render Update 使用独立协议域和恢复语义；
-- Desktop WebSocket/HTTP 与 PWA MessagePort/Service Worker 保持相同逻辑边界。
+- Desktop WebSocket/HTTP 与 PWA MessagePort/Service Worker 保持相同逻辑边界，但 PWA Launcher Profile 独立冻结。
 
 ## 2. 测试层次
 
 ```text
 Schema / Contract Test
+→ Launcher Filesystem / Process Conformance
 → State Machine Fixture
 → Module Unit Test
 → Transport Conformance Test
@@ -40,6 +42,34 @@ Schema / Contract Test
 ```
 
 ## 3. Contract 测试
+
+### Game Package v2 / Desktop Launcher v1
+
+- Descriptor Schema；
+- duplicate `key`；
+- initial target 引用未声明 Subsystem；
+- unsupported Launcher；
+- Entry absolute / traversal / URL / backslash / empty segment；
+- missing / directory / unsupported extension Entry；
+- symlink Entry / symlink ancestor / junction / reparse escape；
+- canonical Installation containment；
+- executable namespace case collision；
+- `LOOMREALM_*` / `NODE_OPTIONS` / `NODE_PATH` env rejection；
+- env 数量 / key / value / 总大小限制；
+- Descriptor 集合失败时零业务 Process side effect；
+- Host-selected Node Runtime；
+- Shell interpretation impossible；
+- Game Package cannot supply Node flags / argv；
+- `cwd = Installation Root`；
+- child environment 不无条件继承 Main 完整环境；
+- Bootstrap Token 在 Process spawn 前注册；
+- new Launch Attempt gets new Token；
+- spawn failure / early exit revoke unconsumed Token；
+- spawn success 后 public state 仍为 `starting`；
+- early Process exit → Bootstrap failure；
+- ready 后 exit code 0 unexpected exit → Runtime failure；
+- no automatic restart；
+- bounded termination / force kill。
 
 ### Subsystem Control v1
 
@@ -94,26 +124,33 @@ Schema / Contract Test
 
 ## 4. Bootstrap 测试
 
-测试 Game Entry / Descriptor：
-
-- duplicate `key`；
-- unsupported Launcher；
-- initial target 引用未声明 Subsystem；
-- descriptor env 覆盖保留字段；
-- 多 Subsystem parallel spawn；
-- 任一 required Subsystem 无法 ready → Game Bootstrap fail；
-- Frame 尚不存在时全部 declared Subsystem 已 ready；
-- `launcher.entry` 安全规则冻结后加入路径逃逸 / link / absolute URL fixture。
-
-测试最小 Subsystem：
+Descriptor / Launcher 测试必须独立于具体游戏业务：
 
 ```text
+valid-entry
+invalid-entry
+symlink-entry
+reserved-env
+spawn-failure
+early-exit
 hello-ready
 hello-invalid-key
 hello-reused-token
 never-ready
+exit-zero-after-ready
+ignore-shutdown
 runtime-failure
 ```
+
+至少验证：
+
+- 完整 Descriptor 集合先校验再产生 Process side effect；
+- 多 Subsystem 可以 parallel spawn；
+- Bootstrap Credential registration happens-before process execution；
+- 任一 required Subsystem 无法 ready → Game Bootstrap fail；
+- Bootstrap 失败后清理已经启动的其他 required Runtime；
+- Frame 尚不存在时全部 declared Subsystem 已 ready；
+- Launcher failure 与 Control Bootstrap failure 使用不同故障来源，但最终都能收敛为 Game Bootstrap failure。
 
 ## 5. Frame / Call 互操作测试
 
@@ -215,10 +252,13 @@ Frame F2 input
 ## 8. Main System 测试
 
 - Descriptor Registry；
+- Launcher Target Resolver；
 - Node.js Launcher Dispatch；
 - Launch Attempt / Bootstrap Token；
-- Runtime states declared→starting→connected→identified→ready；
+- Runtime Supervisor exit classification；
+- public Runtime states declared→starting→connected→identified→ready；
 - one Runtime Container per Subsystem；
+- no implicit Runtime restart；
 - Frame Stack / Input Target 原子一致；
 - Data Grant 绑定 Subsystem/Connection，不绑定 Frame/Render；
 - Renderer reconnect 根据 ready Subsystem / Grant 恢复连接；
@@ -248,7 +288,8 @@ InMemoryContentService
 - Service Worker cold start；
 - Package Index corruption；
 - Content request 不读取 Frame state；
-- Resource access 不因 Frame close 自动失效。
+- Resource access 不因 Frame close 自动失效；
+- Content API 不暴露 Launcher physical Entry。
 
 ## 10. Map Subsystem 测试
 
@@ -267,10 +308,13 @@ InMemoryContentService
 - no-frame loading/debug Render；
 - Render Projector 输出 Render State，而非 Frame Snapshot。
 
-## 11. Golden Test
+## 11. Golden / Fixture Test
 
 适合 Golden Fixture：
 
+- Game Package v2 Descriptor / Entry validity；
+- Launcher error categories；
+- Bootstrap Context decoder；
 - Control Protocol hello/status；
 - Frame/Call messages；
 - Connection auth；
@@ -279,10 +323,11 @@ InMemoryContentService
 - Render Tree / Scope；
 - Content API Response；
 - `fsdb.index.json`；
-- Game Package v2 Descriptor；
 - Pokémon Essentials intermediate JSON；
 - Autotile outputs；
 - map Runtime Snapshot。
+
+Filesystem fixture 需要跨 Windows / Linux/macOS 能力差异归一化测试 symlink/reparse/case collision 语义。
 
 Golden 更新必须说明是设计变化还是回归修复。
 
@@ -292,7 +337,10 @@ Golden 更新必须说明是设计变化还是回归修复。
 start LoomRealm Main
 → Main Control Endpoint ready
 → read Game Entry / all descriptors
-→ spawn all nodejs Subsystem Processes
+→ validate complete Descriptor set
+→ resolve all Launcher Entries
+→ create/register Launch Attempts / Tokens
+→ spawn all nodejs Subsystem Processes under Supervisor
 → hello / identified / ready for each
 → open Renderer through Hostra
 → Renderer connects Main
@@ -306,8 +354,10 @@ start LoomRealm Main
 → Renderer reload
 → reconnect Main / Data
 → restore Input Context and Render independently
-→ clean shutdown
+→ clean shutdown with bounded termination
 ```
+
+必须另外运行失败 E2E：Entry invalid、spawn failure、early exit、never-ready、ready-after-crash、ignore-shutdown。
 
 ## 13. PWA E2E
 
@@ -324,47 +374,35 @@ install package to OPFS
 → restore Control / Data / Input / Render by their own domains
 ```
 
-PWA Launcher Descriptor mapping 必须在该 Profile 冻结后加入互操作 Fixture。
+PWA Launcher Descriptor mapping 必须在该 Profile 冻结后加入互操作 Fixture。Desktop Node.js Process fixture 不直接套用到 Worker。
 
 ## 14. 性能与背压
 
-分别采集：
+分别采集 User Input path 与 Render path 的 P50 / P95 / P99 / max。
 
-```text
-User Input path
-    capture → normalize → transport → Frame Input Handler → business commit
+背压测试包括 continuous intent、discrete burst、multi-Frame input、multi-Render update、Event burst、large Content fetch、Renderer long frame、Subsystem GC/CPU saturation。
 
-Render path
-    business commit → projection → transport → Render Store → rAF presentation
-```
-
-记录 P50 / P95 / P99 / max。
-
-背压测试：
-
-- 高频 continuous intent；
-- discrete action burst；
-- multiple Frame input interleave；
-- multiple Render update interleave；
-- one Render flood must not starve other domains；
-- Event burst；
-- large Content fetch；
-- Renderer long frame；
-- Subsystem GC / CPU saturation。
+Launcher/日志还需验证 stdout/stderr flood 不导致 Main 无限内存增长。
 
 ## 15. 架构回归测试
 
-必须长期保留以下“禁止回退”测试：
+必须长期保留：
 
-1. 创建第二个 Frame 不创建第二个 Process / Worker；
-2. 创建第二个 Frame 不创建第二条 System Data Transport；
-3. Frame suspend 不隐藏 Render；
-4. Frame close 不销毁 Render；
-5. Frame close 不清空 Render Store；
-6. Render 可以在零 Frame 时创建和更新；
-7. zero-frame Subsystem 可以保持 / 恢复 Data Connection；
-8. Renderer 不根据 Stack order 计算 Render z-order；
-9. Render recovery 不改变 Activation；
-10. User Input Sequence 不充当 Render Revision；
-11. Game call 不触发当前 MVP 的 Runtime lazy spawn；
-12. Hostra 不承载 LoomRealm Main 或业务 Payload。
+1. Descriptor 集合校验失败时不 spawn 任何业务 Process；
+2. Launcher 不经 Shell 执行 Entry；
+3. Bootstrap Token 在 Process spawn 前注册；
+4. spawn success 不跳过 `connected / identified / ready`；
+5. ready 后 unexpected exit code 0 仍是 failure；
+6. Desktop v1 不自动 restart failed Runtime；
+7. 创建第二个 Frame 不创建第二个 Process / Worker；
+8. 创建第二个 Frame 不创建第二条 System Data Transport；
+9. Frame suspend 不隐藏 Render；
+10. Frame close 不销毁 Render；
+11. Frame close 不清空 Render Store；
+12. Render 可以在零 Frame 时创建和更新；
+13. zero-frame Subsystem 可以保持 / 恢复 Data Connection；
+14. Renderer 不根据 Stack order 计算 Render z-order；
+15. Render recovery 不改变 Activation；
+16. User Input Sequence 不充当 Render Revision；
+17. Game call 不触发当前 MVP 的 Runtime lazy spawn；
+18. Hostra 不承载 LoomRealm Main 或业务 Payload。
