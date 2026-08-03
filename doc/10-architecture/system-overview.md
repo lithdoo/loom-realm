@@ -71,9 +71,9 @@ Render 是 Subsystem 完全拥有的呈现上下文。Subsystem 决定 Render �
 
 公共架构不定义 Frame 与 Render 的所有权关系。Subsystem 可以内部显式关联二者，也可以完全不关联。
 
-## 3. 运行时启动
+## 3. 运行时启动与结束
 
-Desktop v1：
+Desktop v1 启动：
 
 ```text
 Main Control Endpoint ready
@@ -85,9 +85,10 @@ Main Control Endpoint ready
 → Host-selected Node.js + shell=false 启动全部 required Process
 → Runtime Supervisor 接管各 Process
 → Subsystem 主动连接 Main
-→ subsystem.hello 完成身份绑定与协议版本协商
+→ subsystem.hello 完成身份绑定与 Subsystem Control version negotiation
 → identified
-→ subsystem.status(initializing / ready / stopping / failed)
+→ subsystem.status(initializing?)
+→ subsystem.status(ready + rendererDataEndpoint)
 → 全部声明 Subsystem ready
 → Renderer 根据 Main 授权连接各 ready Subsystem
 ```
@@ -98,7 +99,26 @@ Main Control Endpoint ready
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-MVP 中所有 Descriptor 都是启动必需项；任一 unsupported Launcher、Entry/Process failure 或声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败。当前不定义 `lazy`。
+正常 Runtime 结束由 Main 控制：
+
+```text
+Main establishes shutdown intent
+→ subsystem.shutdown(reason)
+→ subsystem.status(stopping) [optional]
+→ Supervisor confirms Runtime exit
+→ stopped
+```
+
+因此：
+
+```text
+shutdown Response ≠ stopped
+status(stopping) ≠ stopped
+```
+
+没有 Main shutdown intent 的 Runtime exit 或 Control Connection loss 是 failure，即使 Process exit code 为 0。
+
+当前全部 Descriptor 都是 eager / required；任一 unsupported Launcher、Entry/Process failure 或声明 Subsystem 无法进入 ready 都使 Game Bootstrap 失败。当前不定义 `lazy`。
 
 Desktop v1 还冻结：
 
@@ -107,16 +127,19 @@ Desktop v1 还冻结：
 - Game Package 不能提供 Node flags / argv；
 - Process creation 不经过 Shell；
 - child environment 显式构造；
-- failed Runtime 不自动 restart；
+- Subsystem Control v1 不支持 same-attempt reconnect / resume / automatic restart；
+- Subsystem Control v1 不定义 application-level heartbeat；
 - executable Subsystem JavaScript 属于 trusted code，当前不宣称 OS sandbox。
 
-详见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Game Package v2](../15-contracts/game-package-v2.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)。
+详见：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Game Package v2](../15-contracts/game-package-v2.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)。
 
 ## 4. 栈式运行系统
 
 负责 Frame 调用栈、激活周期、输入目标和调用返回关系。
 
-调用栈只控制 Frame / Input，不控制 Render 生命周期。
+调用栈只控制 Frame / Input，不控制 Runtime Container 或 Render 生命周期。
+
+Frame / Call 是独立协议域，可以复用已认证的 Main ⇄ Subsystem Control Connection，但不得重新定义 Runtime Bootstrap、Subsystem identity、ready、shutdown 或 restart 语义。
 
 详见：[栈式运行系统](./stack-runtime-system.md)。
 
@@ -128,6 +151,7 @@ Desktop v1 还冻结：
 每个 Subsystem / System 一个 Runtime Container
 每个 Container 可以承载 0..N Frame / Input Context
 每个 Container 可以拥有 0..N Render Context
+每个 Container 与 Main 一条长期 Control Connection
 每个 Container 与 Renderer 之间最多一条长期 System Data Connection
 Frame 与 Render 没有平台级所有权绑定
 ```
@@ -141,6 +165,8 @@ Frame 与 Render 没有平台级所有权绑定
 ```text
 Control Plane
     Subsystem ⇄ Main
+        Subsystem Control Protocol v1
+        Frame / Call Protocol（独立域，待冻结）
     Renderer ⇄ Main
 
 System Data Plane
@@ -152,6 +178,8 @@ System Data Plane
 Content Plane
     Runtime / Renderer ⇄ Readonly Content Service
 ```
+
+Subsystem Control v1 已冻结 `subsystem.hello / subsystem.status / subsystem.shutdown`、Runtime 状态机、错误 Envelope、limits 与 connection/shutdown failure semantics。
 
 Render Update 使用独立 Render 身份；User Input 使用 Frame / Activation 身份。两者共享 System Transport，但不共享业务生命周期、Sequence 或恢复语义。
 
@@ -192,6 +220,7 @@ LoomRealm Main
     Session
     Subsystem Descriptor / Runtime Registry
     Launcher / Launch Attempt / Runtime Supervisor
+    Runtime shutdown intent
     Runtime Container 生命周期观察
     Frame Stack / Activation / Input Target
     Connection Authority
@@ -232,7 +261,7 @@ Hostra Renderer Process / LoomRealm Web Renderer
 Main → Subsystem Process
     Desktop Node.js Launcher Profile v1
 
-Subsystem Process → Main
+Subsystem Process ⇄ Main
     每 Subsystem 一条长期 Control WebSocket
 
 Renderer → Main
@@ -266,7 +295,7 @@ OPFS / Cache Storage
     已安装游戏包和资源
 ```
 
-PWA 的 Launcher Descriptor 映射尚未冻结；不得把 Desktop `nodejs` Process Profile 直接解释为浏览器 Worker 启动契约。
+PWA 的 Launcher Descriptor → Worker Script、Bootstrap Credential 与 Control Transport Profile 尚未冻结；不得把 Desktop `nodejs` Process Profile 直接解释为浏览器 Worker 启动契约。
 
 ## 12. 核心不变量
 
@@ -281,8 +310,11 @@ PWA 的 Launcher Descriptor 映射尚未冻结；不得把 Desktop `nodejs` Proc
 9. Bootstrap Token 在 Process spawn 前注册；
 10. `spawn success ≠ connected ≠ identified ≠ ready`；
 11. Control Bootstrap 使用 connection-bound identity，`ready` 是 Runtime Status；
-12. Supervisor 对实际 Process exit 有最终观察权；
-13. Desktop v1 不自动 restart；
-14. 旧协议中的 `systemId` 不通过架构文档静默改义；
-15. Content API 与 Launcher 是不同能力边界；
-16. Entry 路径安全不等于 Node.js Process sandbox。
+12. Main 拥有正常 Runtime shutdown intent；
+13. `stopped` 只来自 Supervisor 对实际退出的观察；
+14. 没有 shutdown intent 的 Runtime exit / Control Connection loss 是 failure；
+15. Subsystem Control v1 不定义 application heartbeat、reconnect、resume 或 automatic restart；
+16. Frame / Call 与 Subsystem Control 是独立协议域，即使共享同一物理 Control Connection；
+17. 旧协议中的 `systemId` 不通过架构文档静默改义；
+18. Content API 与 Launcher 是不同能力边界；
+19. Entry 路径安全不等于 Node.js Process sandbox。
