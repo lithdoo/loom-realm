@@ -62,7 +62,7 @@ Main 公共加载：
 → 校验格式、版本和安装实例
 → 读取 initial target
 → 读取全部 Subsystem Descriptor
-→ 校验 Descriptor 公共结构、key 唯一、launcher.type、entry 语法、env 保留字段
+→ 校验 Descriptor 公共结构、key 唯一、launcher.type、entry 语法/模块扩展名、env 保留字段
 → 建立 Descriptor Registry
 → 将 Descriptor 交给 Runtime Bootstrap / Launcher
 ```
@@ -112,7 +112,8 @@ Desktop v1：
 - 禁止 absolute / URL / traversal / backslash 等路径形式；
 - 路径链禁止 symlink / junction / reparse redirect；
 - 最终目标必须位于 Installation Root 内且为 regular file；
-- 当前只接受 `.js` / `.mjs` / `.cjs`；
+- `.mjs` 明确表示 ESM，`.cjs` 明确表示 CommonJS；
+- 普通 `.js` 不属于 v1，以避免依赖 `package.json.type` / Node 版本等隐式模块解析状态；
 - Node executable 由 Host 选择，Game Package 不提供 Node flags / argv；
 - Process creation 不经过 Shell。
 
@@ -154,7 +155,7 @@ Subsystem / Renderer
 
 Main Launcher
 → validated Subsystem Descriptor
-→ ResolvedLauncherTarget
+→ ResolvedLauncherTarget (.mjs / .cjs)
 → Node.js Launcher
 → supervised Process
 ```
@@ -235,6 +236,7 @@ Content API 不进入每 Tick 热路径。Runtime Core 每 Tick 只读取已经�
 由 Game Package v2 / Desktop Node.js Launcher Profile 定义：
 
 - Installation-relative executable logical path；
+- 显式 `.mjs` / `.cjs` module semantics；
 - 禁止路径逃逸和文件系统 redirect；
 - 解析结果是 Main 私有 `ResolvedLauncherTarget`；
 - 物理 Entry 不进入业务协议。
@@ -262,7 +264,7 @@ Launcher Bootstrap Credential 与 Content Grant 是不同能力。Control `boots
 - `start` MUST 校验当前启动所需的 Manifest / Entry / Descriptor 与冻结的 Launcher Entry/env 约束；
 - `validate` SHOULD 尽可能遍历全部声明 Descriptor、Launcher Entry、必需内容和强引用；
 - Descriptor 集合级错误 MUST 在任何业务 Process spawn 前被拒绝；
-- Entry existence / regular-file / redirect / containment 校验 MUST 在对应 Process spawn 前完成；
+- Entry existence / regular-file / module type / redirect / containment 校验 MUST 在对应 Process spawn 前完成；
 - PWA 安装应先进入临时位置，完整校验后再登记为可用；
 - 原始游戏包和安装副本都视为不可信输入。
 
@@ -272,6 +274,9 @@ Launcher Bootstrap Credential 与 Content Grant 是不同能力。Control `boots
 Desktop launcher.type
     nodejs
 
+Desktop Entry module types
+    .mjs / .cjs
+
 Desktop executable trust
     trusted code; no OS sandbox claim
 
@@ -279,7 +284,7 @@ PWA launcher profile
     尚未冻结
 ```
 
-MVP 不预定义 Shell、Native Executable、Deno、Bun 等 Launcher Type，也不定义自动 Runtime restart。
+MVP 不预定义 Shell、Native Executable、Deno、Bun 等 Launcher Type，也不定义 `.js` module resolution Profile 或自动 Runtime restart。
 
 第一阶段地图子系统继续使用 FSDB 保存地图、Tile、人物和资源定义。FSDB 是当前内容格式，不是所有未来 Subsystem 的强制存储接口。
 
@@ -288,14 +293,15 @@ MVP 不预定义 Shell、Native Executable、Deno、Bun 等 Launcher Type，也�
 1. 游戏包运行期间只读；
 2. Main 只能启动 Game Entry 明确声明且当前平台支持的 Subsystem Launcher；
 3. Desktop Entry 必须在 Installation Root 内安全解析；
-4. Launcher Entry 与普通业务 Resource 是不同能力；
-5. Content API 只接受逻辑内容身份，不承担 Launcher 职责；
-6. Content API / Renderer 不获得任意物理文件路径或执行能力；
-7. Desktop Node.js Subsystem executable code 属于 trusted code，当前不提供 OS sandbox；
-8. Desktop v1 Launcher Type 是 `nodejs`，Process creation 不经过 Shell；
-9. PWA Launcher 映射尚未冻结；
-10. Service Worker 和 Content Service 不拥有游戏运行状态；
-11. Render State 不携带资源字节或物理路径。
+4. Desktop Entry 的 Node module type 由 `.mjs` / `.cjs` 显式决定；
+5. Launcher Entry 与普通业务 Resource 是不同能力；
+6. Content API 只接受逻辑内容身份，不承担 Launcher 职责；
+7. Content API / Renderer 不获得任意物理文件路径或执行能力；
+8. Desktop Node.js Subsystem executable code 属于 trusted code，当前不提供 OS sandbox；
+9. Desktop v1 Launcher Type 是 `nodejs`，Process creation 不经过 Shell；
+10. PWA Launcher 映射尚未冻结；
+11. Service Worker 和 Content Service 不拥有游戏运行状态；
+12. Render State 不携带资源字节或物理路径。
 
 ## 17. 相关文档
 
