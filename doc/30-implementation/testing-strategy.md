@@ -4,7 +4,7 @@
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
 > 主要定义：协议、Launcher、模块、跨平台 Transport、内容兼容和端到端测试分层  
-> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Content API v1](../15-contracts/content-api-v1.md)  
+> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)、[Content API v1](../15-contracts/content-api-v1.md)  
 > 最近复核：2026-08-03
 
 ## 1. 测试目标
@@ -17,6 +17,9 @@
 - Desktop `key + nodejs + eager all-required bootstrap`；
 - Launcher Entry / env / spawn / Supervisor 语义符合 v1；
 - `spawn success ≠ connected ≠ identified ≠ ready`；
+- Subsystem Control v1 的 hello / status / shutdown、错误 Envelope、wire limits 与 failure semantics；
+- Main 拥有正常 Runtime shutdown intent，`stopped` 只来自 Supervisor observation；
+- Subsystem Control v1 不存在 application heartbeat、same-attempt reconnect / resume 或 automatic restart；
 - 每个 Subsystem 一个 Runtime Container / Process / Worker；
 - 一个 Container 承载 0..N Frame/Input Context；
 - 一个 Container 拥有 0..N Render Context；
@@ -24,7 +27,7 @@
 - Frame 只管理 call/input，不拥有 Render；
 - Render 生命周期由 Subsystem 独立控制；
 - User Input 与 Render Update 使用独立协议域和恢复语义；
-- Desktop WebSocket/HTTP 与 PWA MessagePort/Service Worker 保持相同逻辑边界，但 PWA Launcher Profile 独立冻结。
+- Desktop WebSocket/HTTP 与未来 PWA MessagePort/Service Worker 保持相同逻辑边界，但 PWA Launcher / Control Transport Profile 独立冻结。
 
 ## 2. 测试层次
 
@@ -71,17 +74,69 @@ Schema / Contract Test
 - no automatic restart；
 - bounded termination / force kill。
 
-### Subsystem Control v1
+### Subsystem Control Protocol v1
+
+#### Hello / identity
 
 - `subsystem.hello` Schema；
-- Descriptor key mismatch；
-- invalid / reused Bootstrap Token；
-- protocol version negotiation；
+- 第一条 LoomRealm application message 不是 hello → fatal；
+- Descriptor key 大小写敏感精确匹配；
+- unknown key / invalid token / consumed token 在 wire 上统一为 `BOOTSTRAP_AUTHENTICATION_FAILED`；
+- protocolVersions 非空、正整数、无重复、1..16 项；
+- no common version → `CONTROL_PROTOCOL_UNSUPPORTED`；
+- duplicate identified connection → `DUPLICATE_CONTROL_CONNECTION`；
 - hello 成功后 Connection identity 固定；
-- `initializing / ready / stopping / failed` 合法状态转换；
-- duplicate / backward status 为 fatal；
-- `stopped` 只来自 Supervisor observation；
-- `ready` 不重新声明 identity。
+- 后续 Runtime status 不携带第二份 key identity。
+
+#### Runtime status
+
+- `identified → ready`；
+- `identified → initializing → ready`；
+- `identified / initializing / ready → failed`；
+- duplicate initializing / ready / stopping 为 fatal；
+- `ready → initializing` 为 fatal；
+- `failed → anything` 为 fatal；
+- status before hello 为 fatal；
+- ready missing / invalid endpoint 为 fatal；
+- failed missing / invalid `error.code` 为 fatal；
+- `stopped` 只来自 Supervisor observation。
+
+#### Shutdown
+
+- Main 在 identified / initializing / ready 建立 shutdown intent；
+- shutdown intent MUST happens-before `subsystem.shutdown` send；
+- `subsystem.shutdown(reason="session-end")`；
+- `subsystem.shutdown(reason="bootstrap-abort")`；
+- shutdown Response 只表示 accepted，不等于 stopped；
+- shutdown → status(stopping) → Process exit；
+- shutdown → Process 快速退出，无 stopping Notification；
+- unsolicited status(stopping) → fatal Protocol Error；
+- duplicate shutdown → `PROTOCOL_STATE_ERROR`，既有 termination flow 继续；
+- shutdown Response / cleanup timeout → Supervisor termination escalation；
+- force termination 后 Supervisor 确认 Process 不存在 → stopped；
+- Supervisor 无法确认 termination → failed；
+- Runtime 已 terminal failed 后 exit 不改回 stopped。
+
+#### Connection / retry / health
+
+- no shutdown intent + Control Connection loss → failed；
+- shutdown intent + Control Connection loss → 等待 Supervisor 收敛，不立即制造第二个 failure；
+- old Bootstrap Token 不可 same-attempt reconnect；
+- no Control Connection resume / transparent replacement；
+- state-changing Control Request 不做 application-level retry；
+- Subsystem Control v1 没有 `subsystem.ping / subsystem.health`；
+- WebSocket ping/pong 不进入 LoomRealm application message fixture。
+
+#### Error / limits / security
+
+- 标准 JSON-RPC parse/request/method/params error code；
+- LoomRealm semantic error 固定 `-32000` + `error.data.code`；
+- `BOOTSTRAP_AUTHENTICATION_FAILED / CONTROL_PROTOCOL_UNSUPPORTED / DUPLICATE_CONTROL_CONNECTION / PROTOCOL_STATE_ERROR` 稳定；
+- max Control JSON-RPC message = 1 MiB；
+- max JSON nesting depth = 64；
+- token / endpoint URL / runtime error code / message limits；
+- Bootstrap Token 不回显；
+- PID / launchId 不作为 identity。
 
 ### Frame / Call
 
@@ -91,7 +146,8 @@ Schema / Contract Test
 - nested call；
 - 同一 Subsystem 多 Frame；
 - Frame close 不影响 Render / Data Connection；
-- Runtime failure 调用链。
+- Runtime failure 调用链；
+- Frame / Call 不重新定义 Runtime ready / shutdown / restart。
 
 ### Renderer–Subsystem Connection
 
@@ -101,6 +157,8 @@ Schema / Contract Test
 - reconnect / replace / revoke；
 - zero Frame connection；
 - protocol version / heartbeat / message limits。
+
+这里的 heartbeat 只属于 System Data Connection Layer，不属于 Subsystem Control v1。
 
 ### User Input
 
@@ -122,9 +180,9 @@ Schema / Contract Test
 - Render recovery；
 - Frame lifecycle 不改变 Render epoch。
 
-## 4. Bootstrap 测试
+## 4. Bootstrap / Runtime Control 测试
 
-Descriptor / Launcher 测试必须独立于具体游戏业务：
+Descriptor / Launcher / Control 测试必须独立于具体游戏业务：
 
 ```text
 valid-entry
@@ -138,6 +196,11 @@ hello-invalid-key
 hello-reused-token
 never-ready
 exit-zero-after-ready
+shutdown-normal
+shutdown-fast-exit
+shutdown-timeout
+unsolicited-stopping
+control-disconnect
 ignore-shutdown
 runtime-failure
 ```
@@ -148,7 +211,8 @@ runtime-failure
 - 多 Subsystem 可以 parallel spawn；
 - Bootstrap Credential registration happens-before process execution；
 - 任一 required Subsystem 无法 ready → Game Bootstrap fail；
-- Bootstrap 失败后清理已经启动的其他 required Runtime；
+- Bootstrap 失败后 Main 对已经启动的其他 required Runtime 建立 `bootstrap-abort` shutdown intent；
+- cleanup 优先走 `subsystem.shutdown`，有限 deadline 后由 Supervisor 强制终止；
 - Frame 尚不存在时全部 declared Subsystem 已 ready；
 - Launcher failure 与 Control Bootstrap failure 使用不同故障来源，但最终都能收敛为 Game Bootstrap failure。
 
@@ -216,6 +280,7 @@ Frame F2 input
 - Grant auth / replace / close；
 - zero Frame Subsystem 仍可连接；
 - Frame close 不删除 connection；
+- Runtime stopping / failed 后不再获得新的 Grant；
 - Runtime failure 关闭对应 connection。
 
 ### Frame Input Registry
@@ -257,10 +322,15 @@ Frame F2 input
 - Launch Attempt / Bootstrap Token；
 - Runtime Supervisor exit classification；
 - public Runtime states declared→starting→connected→identified→ready；
+- Main-owned shutdown intent → stopping → Supervisor-confirmed stopped；
+- Control Connection Registry hello/status/shutdown state machine；
+- semantic error envelope / wire limits；
+- unexpected Control loss / Process exit failure；
 - one Runtime Container per Subsystem；
-- no implicit Runtime restart；
+- no application heartbeat / reconnect / implicit Runtime restart；
 - Frame Stack / Input Target 原子一致；
 - Data Grant 绑定 Subsystem/Connection，不绑定 Frame/Render；
+- Runtime stopping / failed 后停止新 Data Grant；
 - Renderer reconnect 根据 ready Subsystem / Grant 恢复连接；
 - **不能**只按 distinct Frame Subsystem 推导 Data Connection；
 - zero-frame rendering Subsystem 的 Grant 保持；
@@ -315,7 +385,7 @@ InMemoryContentService
 - Game Package v2 Descriptor / Entry validity；
 - Launcher error categories；
 - Bootstrap Context decoder；
-- Control Protocol hello/status；
+- Subsystem Control hello / status / shutdown / semantic errors；
 - Frame/Call messages；
 - Connection auth；
 - User Input sequences；
@@ -354,10 +424,13 @@ start LoomRealm Main
 → Renderer reload
 → reconnect Main / Data
 → restore Input Context and Render independently
-→ clean shutdown with bounded termination
+→ Main establishes session-end shutdown intent for each Runtime
+→ subsystem.shutdown
+→ Supervisor confirms exit / force terminates within deadline
+→ stopped
 ```
 
-必须另外运行失败 E2E：Entry invalid、spawn failure、early exit、never-ready、ready-after-crash、ignore-shutdown。
+必须另外运行失败 E2E：Entry invalid、spawn failure、early exit、never-ready、Control disconnect、unsolicited stopping、ready-after-crash、ignore-shutdown。
 
 ## 13. PWA E2E
 
@@ -374,7 +447,7 @@ install package to OPFS
 → restore Control / Data / Input / Render by their own domains
 ```
 
-PWA Launcher Descriptor mapping 必须在该 Profile 冻结后加入互操作 Fixture。Desktop Node.js Process fixture 不直接套用到 Worker。
+PWA Launcher Descriptor、Bootstrap Credential、Control Transport 与 termination observation Profile 必须冻结后再加入正式 Subsystem Control transport conformance fixture。Desktop Node.js Process fixture 不直接套用到 Worker。
 
 ## 14. 性能与背压
 
@@ -384,6 +457,8 @@ PWA Launcher Descriptor mapping 必须在该 Profile 冻结后加入互操作 Fi
 
 Launcher/日志还需验证 stdout/stderr flood 不导致 Main 无限内存增长。
 
+Subsystem Control 额外验证 oversized Control message 在达到 v1 限制时不会导致 Main 无界内存增长。
+
 ## 15. 架构回归测试
 
 必须长期保留：
@@ -392,17 +467,22 @@ Launcher/日志还需验证 stdout/stderr flood 不导致 Main 无限内存增�
 2. Launcher 不经 Shell 执行 Entry；
 3. Bootstrap Token 在 Process spawn 前注册；
 4. spawn success 不跳过 `connected / identified / ready`；
-5. ready 后 unexpected exit code 0 仍是 failure；
-6. Desktop v1 不自动 restart failed Runtime；
-7. 创建第二个 Frame 不创建第二个 Process / Worker；
-8. 创建第二个 Frame 不创建第二条 System Data Transport；
-9. Frame suspend 不隐藏 Render；
-10. Frame close 不销毁 Render；
-11. Frame close 不清空 Render Store；
-12. Render 可以在零 Frame 时创建和更新；
-13. zero-frame Subsystem 可以保持 / 恢复 Data Connection；
-14. Renderer 不根据 Stack order 计算 Render z-order；
-15. Render recovery 不改变 Activation；
-16. User Input Sequence 不充当 Render Revision；
-17. Game call 不触发当前 MVP 的 Runtime lazy spawn；
-18. Hostra 不承载 LoomRealm Main 或业务 Payload。
+5. hello 成功后 connection-bound `descriptor.key` 不改变；
+6. unsolicited status(stopping) 是 fatal Protocol Error；
+7. shutdown Response / status(stopping) 不等于 stopped；
+8. stopped 只来自 Supervisor termination observation；
+9. 没有 shutdown intent 的 Control loss / exit code 0 是 failure；
+10. Subsystem Control v1 没有 application heartbeat / same-attempt reconnect / resume；
+11. Desktop v1 不自动 restart failed Runtime；
+12. 创建第二个 Frame 不创建第二个 Process / Worker；
+13. 创建第二个 Frame 不创建第二条 System Data Transport；
+14. Frame suspend 不隐藏 Render；
+15. Frame close 不销毁 Render；
+16. Frame close 不清空 Render Store；
+17. Render 可以在零 Frame 时创建和更新；
+18. zero-frame Subsystem 可以保持 / 恢复 Data Connection；
+19. Renderer 不根据 Stack order 计算 Render z-order；
+20. Render recovery 不改变 Activation；
+21. User Input Sequence 不充当 Render Revision；
+22. Game call 不触发当前模型的 Runtime lazy spawn；
+23. Hostra 不承载 LoomRealm Main 或业务 Payload。
