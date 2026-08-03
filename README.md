@@ -2,7 +2,7 @@
 
 LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独立 Subsystem Runtime，并由 Web Renderer 呈现 Subsystem 声明式 Render State 的模块化游戏运行平台设计项目。
 
-第一阶段使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` 子系统的纵向验证场景。
+第一阶段使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` Subsystem 的纵向验证场景。
 
 ## 设计文档
 
@@ -25,6 +25,7 @@ LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独�
 - [Game Package v2 Bootstrap / Descriptor](./doc/15-contracts/game-package-v2.md)
 - [Desktop Node.js Launcher Profile v1](./doc/15-contracts/nodejs-launcher-profile-v1.md)
 - [Subsystem Control Protocol v1](./doc/15-contracts/subsystem-control-lifecycle-protocol.md)
+- [Frame / Call Protocol v1](./doc/15-contracts/frame-call-protocol-v1.md)
 - [模块设计目录](./doc/20-modules/README.md)
 - [实施计划目录](./doc/30-implementation/README.md)
 - [完整阅读指南](./doc/README.md)
@@ -34,12 +35,11 @@ LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独�
 ```text
 Game Entry
 → 一次声明全部 Subsystem Descriptor
-→ Main 校验完整 Descriptor 集合
-→ Desktop Main 启动并监督每个 required Subsystem Process
-→ Subsystem 主动连接 Main，完成 hello / ready
-→ Main 在已 ready Runtime 上管理 Frame / Call / Activation
+→ Main 校验并启动全部 required Runtime
+→ Subsystem Control v1 完成 Runtime identity / ready / shutdown
+→ Frame / Call 在已 ready Runtime 上管理 call/input Context
 → Renderer 与每个 Subsystem 建立独立 System Data Connection
-→ User Input 按 Frame/Activation 路由
+→ User Input 按 current Frame/Activation 路由
 → Render 按独立 Render identity 发布和恢复
 ```
 
@@ -49,39 +49,68 @@ Game Entry
 Main
     Session / Runtime topology
     Runtime shutdown intent / Supervisor observation
-    Frame Stack / Activation / Input Target
+    Frame identity / lifecycle / Stack
+    Activation / Input Target
 
 Subsystem
     authoritative business state
-    Frame input handling
-    Render contexts / Render lifecycle
+    Frame Input Context handling
+    Render Context / lifecycle
 
 Renderer
+    read-only Main Control mirror
+    Frame Input routing mirror
     Render Store / presentation
-    Frame input routing mirror
-    non-authoritative local presentation state
 ```
 
-Frame 是调用和普通输入上下文，不是 Process、业务状态或 Render ownership 单元。Render 生命周期不从 Frame suspend / close 推导。
+## 当前协议状态
 
-Desktop Bootstrap 明确区分：
+```text
+Game Package v2 / Desktop Launcher v1       Frozen
+Subsystem Control Protocol v1               Frozen
+Frame / Call Protocol v1 Batch A            Frozen
+Frame / Call Protocol v1 Batch B-F          Draft
+```
+
+Frame Batch A 已冻结：
+
+```text
+frameId
+    Main-generated / Session unique / never reused
+
+Frame lifecycle
+    starting / active / suspended / closing / closed
+
+Frame outcome
+    completed / cancelled / failed
+    separate from lifecycle
+
+Activation
+    only active Frame owns current Activation
+    unique / never reused / never rolls back
+
+no Frame ready / initialized / frame.status
+```
+
+Frame 不是 Process、business state ownership 或 Render ownership 单元。Render lifecycle 不从 Frame suspend/close 推导。
+
+## Desktop Runtime 边界
 
 ```text
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-当前 Desktop v1：
+Desktop v1：
 
 - `launcher.type = nodejs`；
-- `launcher.entry` 必须安全解析到 Installation Root 内；
+- `launcher.entry` 安全解析到 Installation Root 内；
 - Host 选择 Node Runtime，Process creation 不经过 Shell；
-- Bootstrap Token 在 Process spawn 前注册；
+- Bootstrap Token 在 spawn 前注册；
 - Process 由 Runtime Supervisor 管理；
-- Subsystem Control Protocol v1 冻结 `subsystem.hello / subsystem.status / subsystem.shutdown`；
+- Subsystem Control v1 冻结 `hello / status / shutdown`；
 - Main 拥有正常 Runtime shutdown intent；
-- `stopped` 只来自 Supervisor 对实际 Runtime termination 的观察；
-- 没有 shutdown intent 的 Control loss / Process exit 是 Runtime failure；
-- Subsystem Control v1 不定义 application heartbeat、same-attempt reconnect / resume 或 automatic restart；
+- `stopped` 只来自实际 Runtime termination observation；
+- no application Control heartbeat / same-attempt reconnect / resume / automatic restart；
 - executable Subsystem JavaScript 属于 trusted code，当前不宣称 Node.js OS sandbox。
 
 正常结束：
@@ -94,7 +123,7 @@ Main shutdown intent
 → stopped
 ```
 
-因此 shutdown RPC Response 和 `status(stopping)` 都不等于 `stopped`。
+Frame ordinary input 只允许当前 Main-authorized active Frame/current Activation；旧/revoked Activation 永久拒绝。
 
 普通业务内容通过独立 Readonly Content API 获取；Content API 不暴露任意物理路径或执行能力。
 
@@ -131,5 +160,3 @@ npm run docs:check-links
 ## 部署
 
 合并到 `main` 后，GitHub Actions 会构建 `doc/.vitepress/dist` 并部署到 GitHub Pages。
-
-仓库首次启用时，需要在 **Settings → Pages → Build and deployment → Source** 中选择 **GitHub Actions**。
