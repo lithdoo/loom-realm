@@ -41,89 +41,71 @@ Frame / Call v1
     Batch B Frozen
     Batch C Frozen
     Batch D Frozen
-    Batch E-F Draft
+    Batch E Frozen
+    Batch F Next / Final
 ```
 
-### Batch A
+### Batch A/B
 
-Frame 是 Main-owned call/input Context：frameId Session unique/never reused，永久绑定 descriptor.key，caller Main-owned immutable；lifecycle=`starting/active/suspended/closing/closed`；outcome 与 lifecycle 分离；Activation one-shot、never reused/resumed/rolled back；无 Frame ready/status。
+Frame 是 Main-owned call/input Context：frameId Session unique/never reused，永久绑定 descriptor.key，caller Main-owned immutable；lifecycle只有 `starting/active/suspended/closing/closed`；Activation one-shot；outcome 与 lifecycle分离。
 
-### Batch B
-
-```text
-Main → Subsystem
-    frame.initialize / activate / suspend / resume / close
-
-Subsystem → Main
-    frame.call / return
-```
-
-exact seven JSON-RPC Requests；Caller relationship 不下发；close 无 reason；resume 同时交付 Child Outcome + replacement Activation；call 不等待最终业务结果；no `system.call/system.return/frame.result/frame.cancel`。
+Wire exactly seven Requests：Main→Subsystem `initialize/activate/suspend/resume/close`，Subsystem→Main `call/return`。无 Caller wire、close reason、`system.call/system.return/frame.result/frame.cancel/frame.abort/frame.unwind`。
 
 ### Batch C
 
 ```text
 Call Acceptance Commit
-    Caller suspended
-    old Activation revoked
-    Child starting / pushed
-    InputTarget = null
-→ frame.call Success
-→ Child initialize / activate ACK
+    Caller suspended / old Activation revoked
+    Child starting / pushed / InputTarget=null
+→ call Success
+→ Child initialize/activate ACK
 → Child InputTarget publish
-```
 
-```text
 Return Acceptance Commit
-    outcome accepted
-    Child old Activation revoked
-    Child closing
-    InputTarget = null
-→ frame.return Success
-→ close ACK / pop
-→ resume Caller(new Activation) ACK
+    outcome accepted / old Activation revoked
+    Child closing / InputTarget=null
+→ return Success
+→ close ACK/pop
+→ Caller resume(fresh Activation) ACK
 → Caller InputTarget publish
 ```
 
-ordinary call 不额外发送 `frame.suspend`；call/return Response 先于 dependent reverse RPC；activate/resume ACK 先于 publication；pre-commit 可 abort、post-commit 只能 forward recovery。
+ordinary call无 reverse suspend；Response-before-dependent-RPC；activate/resume ACK-before-publication；accepted outcome/revoked Activation不可回滚。
 
 ### Batch D
 
 ```text
-Success Response
-    → known committed
-
-Explicit Error Response
-    → known not committed
-
-Timeout / Response loss / pending-request connection loss
-    → applied/not-applied unknown
-    → Runtime failure
+Success        → known committed
+Explicit Error → known not committed
+Timeout/loss   → ambiguous → Runtime failure
 ```
 
-全部 Frame Request finite deadline；v1 不自动 retry/replay，不定义 operationId/idempotencyKey/dedup journal。
+全部 Request finite deadline；no retry/replay/idempotency journal。Recoverable仅 target-not-found/unavailable 与 `FRAME_INITIALIZE_REJECTED`；divergence/protocol error Runtime-fatal；无 caller-driven cancel。
 
-Recoverable：
+### Batch E
+
+Runtime failure不按“当前 Frame”局部处理，而按 Runtime key + caller chain确定性收敛：
 
 ```text
-FRAME_CALL_TARGET_NOT_FOUND
-FRAME_CALL_TARGET_UNAVAILABLE
-FRAME_INITIALIZE_REJECTED
+failedRuntimeKeys
+→ lowest failed-runtime Frame = unwind root
+→ root..top whole suffix doomed
+→ Top→Bottom cleanup
+→ failed Runtime Frame logical retire without Frame RPC ACK
+→ healthy descendants best-effort close
+→ cleanup failure expands failed set/root
+→ repeat to fixed point
+→ accepted root outcome preserved
+   or failed(SUBSYSTEM_RUNTIME_FAILED)
+→ fresh-resume direct healthy Caller
+   or Stack empty
 ```
 
-Control divergence：
+同一 Runtime在 Stack出现多次时取最低 occurrence；intermediate doomed Frame不逐层 resume；recovery不新增 abort/unwind/replay/resync wire；旧 Activation永不恢复。
 
-```text
-FRAME_NOT_FOUND
-FRAME_STATE_MISMATCH
-ACTIVATION_MISMATCH
-FRAME_STACK_MISMATCH
-FRAME_OWNERSHIP_MISMATCH
-```
+### Batch F
 
-ambiguous timeout、divergence、Frozen protocol/schema error 都进入 Runtime failure path。v1 不支持 caller-driven Frame cancel；`cancelled` 只表示 active Frame 自行 return cancelled。
-
-下一冻结目标：**Batch E — Runtime failure deterministic Stack unwind**。
+最后冻结 wire limits、完整 A-E conformance fixtures、finite-deadline Profile配置、Desktop/PWA transport-independent conformance 与 version/profile binding。完成后 Frame / Call v1整体转 Active / Normative / Frozen。
 
 ## Runtime / Frame / Render 边界
 
@@ -134,7 +116,7 @@ Frame outcome ≠ Frame lifecycle
 Frame lifecycle ≠ Render lifecycle
 ```
 
-Renderer 只使用 Main 已 commit 的 current Activation/InputTarget；transaction gap 可为 `InputTarget=null`。Frame Control timeout/divergence 不通过 Renderer reconnect恢复。Render 完全由 Subsystem 管理。
+Renderer只使用 Main已 commit current Activation/InputTarget；normal/recovery gap都可 `InputTarget=null`。Runtime failure unwind不通过 Renderer reconnect/Data resync修复。Render完全由 Subsystem独立管理。
 
 ## 文档目录
 
@@ -183,8 +165,9 @@ Renderer 只使用 Main 已 commit 的 current Activation/InputTarget；transact
 - [ADR 0011 · Frame / Call Batch B](./decisions/0011-freeze-frame-call-protocol-v1-batch-b.md)
 - [ADR 0012 · Frame / Call Batch C](./decisions/0012-freeze-frame-call-protocol-v1-batch-c.md)
 - [ADR 0013 · Frame / Call Batch D](./decisions/0013-freeze-frame-call-protocol-v1-batch-d.md)
+- [ADR 0014 · Frame / Call Batch E](./decisions/0014-freeze-frame-call-protocol-v1-batch-e.md)
 
-当前有效结论以 `00-overview`、`10-architecture`、`15-contracts` 为准；ADR 保存历史决策过程。
+当前有效结论以 `00-overview`、`10-architecture`、`15-contracts` 为准；ADR保存历史决策过程。
 
 ## 当前推进状态
 
@@ -195,12 +178,12 @@ Frame / Call Batch A                Frozen
 Frame / Call Batch B                Frozen
 Frame / Call Batch C                Frozen
 Frame / Call Batch D                Frozen
-Frame / Call Batch E                Next
-Frame / Call Batch F                Draft
+Frame / Call Batch E                Frozen
+Frame / Call Batch F                Next / Final
 Main ⇄ Renderer Control             Draft target
 Renderer ⇄ Subsystem Connection     Draft target
 User Input / Render Update          Draft target
 Render State                        Draft target
 ```
 
-明确暂缓：PWA Launcher/Credential/Control Transport Profile、第二 Launcher、sandbox/Publisher Trust、automatic Runtime recovery、Control heartbeat/same-attempt reconnect、lazy/idle recycle、多 Runtime per key、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync。
+明确暂缓：PWA Launcher/Credential/Control Transport Profile、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume、Control heartbeat/same-attempt reconnect、lazy/idle recycle、多 Runtime per key、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery。
