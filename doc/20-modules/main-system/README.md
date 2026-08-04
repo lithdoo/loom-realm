@@ -3,7 +3,7 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：LoomRealm Main 内部模块边界、Frame transaction/error coordinator 与 Runtime supervision  
+> 主要定义：LoomRealm Main 内部模块边界、Frame transaction/error/recovery coordinator 与 Runtime supervision  
 > 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
 
@@ -23,6 +23,7 @@ Main System
 ├── Frame Stack Controller
 ├── Frame / Call Coordinator
 ├── Frame RPC Deadline / Failure Classifier
+├── Runtime Failure Unwind Coordinator
 ├── Renderer Control Publisher
 ├── System Data Connection Authority
 └── Content Grant Authority
@@ -30,15 +31,15 @@ Main System
 
 ## 2. Runtime Bootstrap / Control
 
-Game Package Bootstrap 在产生 Process side effect 前完成全部 Descriptor/Entry/env 校验。Launcher 只接受安全解析后的 target，使用 Host-selected Node、`shell=false`、固定 cwd、显式 child environment。
+Game Package Bootstrap 在产生 Process side effect 前完成 Descriptor/Entry/env 校验。Launcher 使用 Host-selected Node、`shell=false`、固定 cwd、显式 child environment。
 
-Runtime Supervisor 负责真实 Process existence/termination；Control Connection Registry 实现 Frozen Subsystem Control v1：hello/status/shutdown、connection-bound `descriptor.key`、Main shutdown intent、semantic error envelope 与 wire limits。
+Runtime Supervisor / Control Registry 实现 Frozen Subsystem Control v1：hello/status/shutdown、connection-bound `descriptor.key`、Main shutdown intent、semantic error envelope 与 Runtime terminal failure。
 
-`spawn success ≠ connected ≠ identified ≠ ready`；`stopped` 只来自 Supervisor observation；v1 无 automatic restart / same-attempt reconnect / application heartbeat。
+`spawn success ≠ connected ≠ identified ≠ ready`；`stopped` 只来自 Supervisor observation；v1 无 automatic restart/same-attempt reconnect/application heartbeat。
 
 ## 3. Frame Registry
 
-Frame / Call Batch A/B/C/D 已 Frozen。
+Frame / Call Batch A-E 已 Frozen。
 
 ```ts
 type FrameLifecycleState =
@@ -48,25 +49,10 @@ type FrameLifecycleState =
   | "closing"
   | "closed";
 
-type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | readonly JsonValue[]
-  | { readonly [key: string]: JsonValue };
-
 type FrameOutcome =
   | { readonly type: "completed"; readonly value: JsonValue }
   | { readonly type: "cancelled" }
-  | {
-      readonly type: "failed";
-      readonly error: {
-        readonly code: string;
-        readonly message?: string;
-        readonly data?: JsonValue;
-      };
-    };
+  | { readonly type: "failed"; readonly error: FrameFailure };
 
 interface FrameRecord {
   readonly frameId: string;
@@ -78,11 +64,23 @@ interface FrameRecord {
 }
 ```
 
-Registry 保证 frameId never reused、subsystemKey permanent、callerFrameId Main-owned immutable、只有 active Frame 有 current Activation、outcome 与 lifecycle 分离。
+Registry 保证 frameId never reused、subsystemKey permanent、caller immutable、只有 active Frame有 current Activation、outcome 与 lifecycle分离。
+
+实现 MAY 额外保存 Host-private：
+
+```text
+remoteContextState = absent / established / unknown
+pendingFrameRpc
+recoveryGeneration
+```
+
+这些不是 wire/public lifecycle。
 
 ## 4. Activation Registry
 
-Main 是 Activation 唯一签发方：first active/resume 使用 fresh Activation；leave active 时 revoke；revoked never valid again。Activation never rolls back/resumes/reuses。
+Main 是 Activation唯一签发方。首次 active/resume使用 fresh Activation；离开 active 时 revoke；revoked never valid again。
+
+Failure barrier之后确认远端 late activate/resume Success时，对应 Activation视为已消耗/不可复用，但如果 Frame已 doomed则绝不发布为 InputTarget。
 
 ## 5. Frame / Call RPC Adapter
 
@@ -90,83 +88,71 @@ Frozen exact wire：
 
 ```text
 Main → Subsystem
-    frame.initialize({ frameId, input })
-    frame.activate({ frameId, activationId })
-    frame.suspend({ frameId, activationId })
-    frame.resume({ frameId, activationId, returnedFrameId, result })
-    frame.close({ frameId })
+    frame.initialize
+    frame.activate
+    frame.suspend
+    frame.resume
+    frame.close
 
 Subsystem → Main
-    frame.call({ frameId, activationId, targetSubsystemKey, input }) → { childFrameId }
-    frame.return({ frameId, activationId, result }) → {}
+    frame.call
+    frame.return
 ```
 
-全部 JSON-RPC Request / closed schema。Adapter MUST NOT 接受 `system.call/system.return`、`frame.result/frame.cancel`、close reason、Caller wire field 或 source system identity 变体。
+全部 JSON-RPC Request / closed schema。Adapter MUST NOT 增加 `system.call/system.return/frame.result/frame.cancel/frame.abort/frame.unwind`、close reason、Caller wire field 或 operation replay identity。
 
 ## 6. Stack Mutation Coordinator
 
-单一 Frame Stack 的 commit-sensitive mutation MUST 串行执行。建议内部 transaction record：
+normal transaction 与 Runtime failure recovery共用单一 serial coordinator。
+
+建议内部：
 
 ```ts
 interface FrameMutationTransaction {
-  readonly kind: "initial" | "call" | "return" | "suspend" | "recovery";
-  readonly frameId: string;
-  readonly childFrameId?: string;
-  phase: string; // Host-private, not protocol lifecycle
+  readonly kind: "initial" | "call" | "return" | "suspend" | "failure-unwind";
+  phase: string; // Host-private
 }
 ```
 
-内部 phase 不是公共 Frame lifecycle。
+内部 phase不是公共 Frame lifecycle。
 
-## 7. Normal Transaction Rules
-
-Initial：initialize ACK → activate(fresh A0) ACK → commit active/A0 → publish InputTarget。
-
-Call：validate → Call Acceptance Commit (Caller suspended/A1 revoked/Child starting+push/InputTarget null) → `frame.call` Success → Child initialize/activate → activate ACK → commit/publish Child。
-
-Return：Return Acceptance Commit (outcome accepted/A2 revoked/Child closing/InputTarget null) → `frame.return` Success → close ACK → closed/pop → resume Caller(fresh A3) ACK → commit/publish Caller。
-
-ordinary call 不发送 reverse `frame.suspend`；call/return Response 必须先于 dependent reverse RPC；activate/resume ACK 必须先于 InputTarget publication。
-
-这里的“Normal Transaction Rules”只描述 Runtime 仍可信时的 healthy path。RPC 一旦被 Batch D 分类为 Runtime-fatal，就不得继续假装后续 healthy ACK 一定可获得。
-
-## 8. Frame RPC Deadline Manager
-
-每个七方法 Request 必须有 finite deadline。Deadline Manager 维护 Host/Profile policy 的实际时间值，但不得把它暴露成新的 Frame wire field。
-
-结果分类：
+## 7. Healthy Transaction Rules
 
 ```text
-Success Response
-    → known committed
+Initial:
+initialize ACK → activate(fresh A0) ACK → commit/publish
 
-Explicit Error Response
-    → known not committed
+Call:
+validate
+→ Call Acceptance Commit
+→ call Success
+→ Child initialize/activate
+→ activate ACK → commit/publish
 
-Timeout / Response loss / pending-request connection loss
-    → commit unknown / ambiguous
+Return:
+Return Acceptance Commit
+→ return Success
+→ close ACK/pop
+→ resume Caller(fresh A3) ACK → commit/publish
 ```
 
-`Explicit Error = known no-commit` 只是 commit evidence，**并不代表该 Runtime 一定仍可继续使用**。Error 必须继续经过 Semantic Error Classifier 判断 recoverable / divergence / protocol-fatal。
+ordinary call无 reverse suspend；call/return Response先于 dependent reverse RPC；activate/resume ACK先于 InputTarget publication。
 
-Main outbound lifecycle RPC 一旦 ambiguous：
+这些只描述 Runtime仍可信的 healthy path。
 
-1. 不 retry / replay；
-2. 停止向该 Runtime 发新的正常 Frame Control；
-3. Runtime failure reason=`FRAME_CONTROL_TIMEOUT`；
-4. 忽略迟到 Response 对状态的恢复作用；
-5. 交给 Batch E Runtime Failure Coordinator unwind。
+## 8. Deadline / Failure Classifier
 
-## 9. Semantic Error Classifier
-
-Frame semantic error envelope 复用：
+七方法全部 finite deadline。
 
 ```text
-error.code = -32000
-error.data.code = stable semantic code
+Success        → known commit
+Explicit Error → known no-commit
+Timeout/loss   → ambiguous
 ```
 
-### Recoverable
+Explicit Error仍需继续分类：recoverable / divergence / protocol-fatal。
+
+Recoverable：
 
 ```text
 FRAME_CALL_TARGET_NOT_FOUND
@@ -174,11 +160,7 @@ FRAME_CALL_TARGET_UNAVAILABLE
 FRAME_INITIALIZE_REJECTED
 ```
 
-前两个只在 Call Acceptance Commit 前返回，Caller/old Activation保持不变。
-
-`FRAME_INITIALIZE_REJECTED` 携带 `FrameFailure`；target Runtime remains healthy。若 Child 已 accepted，则把该 failure 作为 Child `FrameOutcome.failed` forward-resolve，并 fresh-resume Caller。
-
-### Runtime-fatal divergence
+Runtime-fatal divergence：
 
 ```text
 FRAME_NOT_FOUND
@@ -188,170 +170,234 @@ FRAME_STACK_MISMATCH
 FRAME_OWNERSHIP_MISMATCH
 ```
 
-Main 收到/产生上述错误后把涉及 Runtime 标记为 `FRAME_CONTROL_DIVERGENCE` failure，不尝试 reinitialize/resync/retry。
+Frozen method/schema protocol error→`FRAME_CONTROL_PROTOCOL_ERROR`；ambiguous timeout→`FRAME_CONTROL_TIMEOUT`；divergence→`FRAME_CONTROL_DIVERGENCE`。
 
-Frozen Frame method/schema 出现标准 JSON-RPC protocol error 则 Runtime failure reason=`FRAME_CONTROL_PROTOCOL_ERROR`。
+No retry/replay/idempotency journal。Late Response不恢复 terminal failure。
 
-## 10. Main-issued Lifecycle Strictness
+## 9. Initial / Post-call Failure Classification
 
-合法 `frame.activate / frame.suspend / frame.resume / frame.close` 在 Runtime healthy 且 state一致时必须成功。Subsystem 对合法请求返回 identity/lifecycle/Activation semantic error即 control divergence。
+Initial `FRAME_INITIALIZE_REJECTED`：Runtime healthy、Context absent、higher-level bootstrap处理业务失败。
 
-`frame.initialize` 是唯一允许合法业务 rejection 的 Main-issued Frame lifecycle RPC，通过 `FRAME_INITIALIZE_REJECTED` 表达。
+Initial activate timeout/divergence/protocol error：Runtime failed；不得尝试普通 close“修好”Runtime，交 failure unwind。
 
-因此 Main MUST NOT 使用如下“局部修复”模式处理 fatal Error：
-
-```text
-activate semantic Error
-→ try frame.close
-→ pop
-→ resume Caller
-```
-
-也不得：
+Accepted Child initialize：
 
 ```text
-FRAME_NOT_FOUND
-→ reinitialize same frameId
+FRAME_INITIALIZE_REJECTED
+    → healthy Child failed outcome + fresh Caller resume
+
+fatal/ambiguous
+    → target Runtime failed + failure unwind
 ```
 
-一旦 Error 被分类为 divergence/protocol-fatal，Runtime 已不可信；Main 只停止新的正常 Frame Control，并把 Stack 收敛交给 Batch E。
+所有 post-accept分支都不得恢复 Caller old Activation。
 
-## 11. Initial Frame Failure Handling
+## 10. Runtime Failure Unwind Coordinator
 
-Initial `frame.initialize` 返回 `FRAME_INITIALIZE_REJECTED`：
+Batch E Coordinator输入：
 
 ```text
-no target Frame Context committed
-Runtime remains healthy
-initial Frame does not become active
-higher-level Session/bootstrap handles the business failure
+failedRuntimeKeys: Set<descriptor.key>
 ```
 
-Initial `frame.activate` 的 semantic rejection、protocol error、timeout/loss：
+核心算法：
 
 ```text
-MUST NOT publish Activation/InputTarget
-MUST NOT assume normal frame.close can safely repair the Runtime
-→ classify Runtime failure
-→ Batch E initial-Frame failure convergence
+while true:
+    root = lowest live Frame owned by failedRuntimeKeys
+
+    if no root:
+        finish without Stack mutation
+
+    establish Failure Unwind Barrier
+    affected = root..top
+
+    cleanup affected Top→Bottom
+
+    if cleanup creates new failed Runtime:
+        add key
+        recompute root from whole Stack
+        continue
+
+    if direct surviving Caller exists and Session continues:
+        fresh resume Caller
+        if resume fails:
+            add Caller Runtime
+            recompute root
+            continue
+
+    finish with healthy Caller active or Stack empty
 ```
 
-这一区分避免把 Batch C 的“postcondition未 commit”误读为“可以继续信任目标 Runtime”。
+Coordinator MUST NOT只删除 failed Runtime自己的 Frame，也不得只选择最近 failed-runtime occurrence。
 
-## 12. Outbound `frame.call` Handling
+## 11. Failure Unwind Barrier
 
-收到合法 call 后先做 precommit target validation。`FRAME_CALL_TARGET_NOT_FOUND/UNAVAILABLE` 在 commit 前返回，Caller保持 active/current Activation。
-
-验证通过才 acceptance-commit Caller suspension/Activation revoke/Child identity/push。Response 完成后才发 Child initialize/activate。
-
-Call success 后必须按失败类别分流：
+Barrier commit 后：
 
 ```text
-Child frame.initialize → FRAME_INITIALIZE_REJECTED
-    → target Runtime healthy
-    → Child failed outcome
-    → fresh-resume surviving Caller
-
-Child initialize/activate → timeout/loss
-    → target Runtime FRAME_CONTROL_TIMEOUT
-    → Batch E unwind
-
-Child initialize/activate → divergence/protocol error
-    → target Runtime FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR
-    → Batch E unwind
+no new normal call/return for doomed suffix
+clear affected InputTarget
+no new affected Activation publication
+failed Runtime gets no normal Frame RPC
 ```
 
-所有 post-accept 分支都不能恢复 old Caller Activation；但只有 recoverable initialize rejection可以在 healthy Runtime 路径内直接完成 Child failed outcome compensation。
+只承认 Main已经 commit的 Call/Return Acceptance、Activation revoke、terminal outcome等事实。
 
-## 13. Outbound `frame.return` Handling
+## 12. Failed-runtime Frame Retirement
 
-合法 return acceptance commit后 outcome terminal、old Activation revoked、Child closing。Response 完成后才进入正常 close/pop/resume healthy path。
-
-Return acceptance 不可 rollback。若后续 `frame.close` / `frame.resume` timeout、divergence 或 protocol-fatal，则不是恢复 Child、retry RPC 或继续普通 close/resume 的理由，而是相关 Runtime failure，交 Batch E deterministic unwind。
-
-已 acceptance-commit 的 terminal outcome 与 revoked Activation 必须保持不可逆。
-
-## 14. Subsystem→Main Pending Request Failure
-
-Main 必须理解 Subsystem SDK 对 outbound `frame.call / frame.return` 有 mutation gate。
-
-如果 Main 能明确返回 recoverable precommit Error，SDK可释放 gate。
-
-如果 Response 在 Main已 commit 后丢失，Subsystem无法知道 acceptance state并会进入 Runtime failure。Main随后可能收到 `subsystem.status(failed)` 或 Control loss；必须按 Runtime failure处理，而不是认为原 Frame transaction仍可继续正常推进。
-
-## 15. No Retry / Idempotency / Cancel
-
-Main Frame Coordinator不得自动重发七方法 Request，也不实现 operationId/idempotencyKey/dedup journal/replay cache。
-
-v1 不提供 caller-driven `frame.cancel`。`FrameOutcome.cancelled` 只是 active Frame 自行 return cancelled；Session end走更高层 shutdown。
-
-## 16. Renderer Control Publisher
-
-Publisher 只发布已 commit Main state。activate/resume ACK precedes publication；revoked Activation 后续 revision必须消失；可 coalesce transitional `InputTarget=null`，但不得越过 causal barrier。
-
-Frame timeout/divergence 不通过 Renderer reconnect/resync修复。
-
-## 17. System Data / Render Boundary
-
-每 Subsystem 最多一条有效 Renderer Data Connection；Data Grant 不绑定 Frame/Activation/Render；Frame lifecycle 不隐式控制 Data Connection/Render；Main 不读取 User Input/Render Update payload。
-
-## 18. Runtime Failure Coordination
-
-Batch D 只确定何时 Runtime 不再可信：
+Frame所属 Runtime已 failed：
 
 ```text
-FRAME_CONTROL_TIMEOUT
-FRAME_CONTROL_DIVERGENCE
-FRAME_CONTROL_PROTOCOL_ERROR
+DO NOT send suspend/close/resume/activate
 ```
 
-进入上述状态后，Main 对该 Runtime 的普通 Frame Coordinator 必须停止；不能以 Frame-specific compensation 模拟 Runtime recovery。
+Main直接：
 
-Batch E 冻结 Runtime failed 后的 deterministic suffix unwind、transaction 中 crash、best-effort cleanup 与 surviving Caller resume。Runtime failure不得通过 `Frame.state=failed` 表示。
+```text
+revoke public authority
+→ closing
+→ closed
+→ remove from live Stack
+```
 
-## 19. 核心不变量
+这是 normal close ACK-before-pop 的 failure-path exception。`closed` 只表示 Main不再持有 live Frame authority；远端资源最终由 Supervisor/Runtime termination清理。
 
+## 13. Healthy Doomed Frame Cleanup
+
+健康 Runtime上的 doomed Frame尽量只清 Frame Context、保留 Runtime：
+
+- initialize明确未 commit → Context absent，无 close；
+- Context established → commit Main-side closing/revoke authority，然后 `frame.close` 一次；
+- close已 pending → 使用原 Request，不 duplicate；
+- 不先额外 `frame.suspend`；active→closing合法，terminal `frame.close` 足够，减少一个 timeout surface。
+
+close ACK后正常 pop。
+
+## 14. Fixed-point Expansion
+
+healthy cleanup/pending RPC如果 timeout/loss/diverge/protocol-fail/Runtime exit：
+
+```text
+failedRuntimeKeys += key
+→ recompute lowest root across entire current live Stack
+```
+
+新 Runtime如果在旧 root下方还有 Frame，root必须向下移动。Coordinator不能继续假设原 suffix边界有效。
+
+## 15. Pending RPC During Recovery
+
+目标 Runtime已 failed：late Response diagnostics-only。
+
+目标 Runtime healthy但 Frame doomed：原 Request不重发，只按原 deadline处理一次。
+
+Success只更新 cleanup knowledge；不得重新发布 doomed Activation。`FRAME_INITIALIZE_REJECTED` 表示 Context absent。fatal/ambiguous使 Runtime加入 failed set。
+
+## 16. Outcome Preservation / Root Outcome
+
+已 Return Acceptance 的 outcome永远不可覆盖，即使之后 Runtime crash。
+
+final root：
+
+```text
+if outcome != null:
+    rootOutcome = accepted outcome
+else:
+    rootOutcome = failed("SUBSYSTEM_RUNTIME_FAILED")
+```
+
+`SUBSYSTEM_RUNTIME_FAILED` 是 Caller-visible platform code。Runtime diagnostic细节留在 diagnostics，不要求暴露给业务 Caller。
+
+## 17. Intermediate Frames / Surviving Caller
+
+Intermediate doomed Frame不执行逐层 normal resume；完整 suffix直接清理。
+
+final root下方的 direct Caller如果 Runtime healthy且 Session继续：
+
+```text
+Anew = fresh activation
+frame.resume(Caller,Anew,root.frameId,rootOutcome)
+→ ACK
+→ commit active/Anew
+→ publish InputTarget
+```
+
+resume failure→Caller Runtime加入 failed set→recompute root。
+
+## 18. Initial / Zero-frame / Session Termination
+
+root是 initial Frame：清 suffix后 Stack empty，不 resume；accepted initial outcome保持，否则记录 `SUBSYSTEM_RUNTIME_FAILED` 供 Session层处理。
+
+failed Runtime无 live Frame：Frame Stack不自动变化。
+
+Session termination/bootstrap-abort已建立时，不为继续游戏而 resume surviving Caller；仍保持 revoked/outcome/failure terminal语义。
+
+## 19. Renderer Control Publisher
+
+Publisher只发布 Main已 commit state。Failure recovery开始后 affected InputTarget清空；Renderer不能恢复 cached old Activation。
+
+只有 recovery `frame.resume` ACK后才发布 surviving Caller新 Activation。Recovery可以长期 `InputTarget=null`。
+
+## 20. System Data / Render Boundary
+
+Frame failure unwind不拥有 Render/Data lifecycle。healthy doomed Frame close不删除 Render；failed Runtime Data/Render authority失效与 cleanup由 Runtime/Data/Render层负责。
+
+## 21. No Recovery Wire / Fail Closed
+
+Main不实现：
+
+```text
+frame.abort
+frame.unwind
+recovery retry/replay
+Frame snapshot/resync
+```
+
+极端 recovery race导致其他 Runtime失去可信状态时，扩大 failed set，而不是创建第二套 recovery协议。
+
+## 22. 核心不变量
+
+- Batch A-E Frozen；
 - Frame Stack mutation serial；
-- ordinary call 不依赖反向 `frame.suspend`；
-- call/return Response precedes dependent reverse RPC；
-- activate/resume ACK precedes corresponding InputTarget publication；
-- revoked Activation 永久失效；accepted outcome 不可撤销；
-- Explicit Error 与 ambiguous timeout不得混淆；
+- exact seven Frame Requests；
+- Response-before-dependent-RPC；ACK-before-publication；
+- revoked Activation永久失效；accepted outcome不可撤销；
 - Explicit Error=no-commit evidence，不等于 recoverable；
-- ambiguous Frame RPC 不 retry/replay，相关 Runtime failed；
-- recoverable initialize rejection不使 target Runtime failed；
-- control divergence/protocol error Runtime-fatal；
-- Runtime-fatal 分支不得继续普通 close/pop/resume 作为局部修复；
-- no caller-driven Frame cancellation；
-- Frame 不拥有 Runtime/Render/Data Connection lifecycle。
+- ambiguous/divergence/protocol error Runtime-fatal/no retry；
+- Runtime failure以 subsystem key为单位；
+- lowest failed-runtime Frame决定 unwind root；
+- whole suffix Top→Bottom cleanup；
+- failed-runtime Frame logical retire无 close ACK；
+- healthy Frame best-effort close，无额外 suspend requirement；
+- cleanup failure fixed-point扩大 root；
+- root无 outcome→`SUBSYSTEM_RUNTIME_FAILED`；
+- only final surviving Caller fresh-resume；
+- resume ACK-before-publish；
+- final state=healthy Caller active or Stack empty；
+- no caller cancel / no recovery abort-unwind wire；
+- Frame不拥有 Runtime/Render/Data lifecycle。
 
-## 20. 测试入口
+## 23. 测试入口
 
-除 Batch A/B/C fixtures 外，Batch D 至少验证：
+除 A-D fixtures 外，Batch E至少验证：
 
 ```text
-finite-deadline-required
-success-known-commit
-explicit-error-known-no-commit
-explicit-error-still-requires-failure-classification
-timeout-is-ambiguous
-no-frame-rpc-retry-after-timeout
-late-response-does-not-recover-runtime
-call-target-not-found-recoverable
-call-target-unavailable-recoverable
-initialize-rejected-runtime-stays-healthy
-initialize-rejected-forward-failed-outcome
-frame-not-found-divergence-fatal
-frame-state-mismatch-divergence-fatal
-activation-mismatch-divergence-fatal
-stack-mismatch-divergence-fatal
-ownership-mismatch-divergence-fatal
-valid-activate-semantic-error-does-not-trigger-local-close-repair
-invalid-params-protocol-fatal
-method-not-found-protocol-fatal
-call-timeout-keeps-sdk-gate-and-fails-runtime
-return-timeout-keeps-sdk-gate-and-fails-runtime
-no-operation-id-or-replay
-no-caller-driven-frame-cancel
-callee-return-cancelled-remains-valid
+lowest-failed-runtime-occurrence-is-root
+same-runtime-multiple-frames-whole-suffix
+healthy-descendant-close-top-down
+failed-runtime-frame-no-close-rpc
+failed-runtime-logical-retire
+active-doomed-frame-close-without-extra-suspend
+cleanup-timeout-expands-failed-set
+new-failed-runtime-lower-frame-moves-root
+fixed-point-resumes-or-empty
+accepted-outcome-preserved
+root-without-outcome-subsystem-runtime-failed
+intermediate-doomed-no-resume
+recovery-resume-fresh-activation
+recovery-resume-ack-before-publish
+recovery-resume-failure-expands-root
+initial-failure-stack-empty
+zero-frame-runtime-failure-no-stack-change
+no-retry-during-recovery
 ```
