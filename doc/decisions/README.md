@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策的背景、取舍、结果和重新评估条件  
-> 最近复核：2026-08-03
+> 最近复核：2026-08-04
 
 本目录记录 LoomRealm 重大架构结论的形成过程。当前有效的系统职责和协议仍以 `10-architecture` 与 `15-contracts` 中的权威文档为准；ADR 用于保存候选方案、决定原因、代价和重新评估条件。
 
@@ -19,17 +19,19 @@
 8. [冻结 Desktop Node.js Launcher Profile v1](./0008-desktop-nodejs-launcher-profile-v1.md)
 9. [冻结 Subsystem Control Protocol v1](./0009-freeze-subsystem-control-protocol-v1.md)
 10. [冻结 Frame / Call Protocol v1 Batch A](./0010-freeze-frame-call-protocol-v1-batch-a.md)
+11. [冻结 Frame / Call Protocol v1 Batch B](./0011-freeze-frame-call-protocol-v1-batch-b.md)
 
 ## 当前替代关系
 
 - ADR 0006 **部分替代** ADR 0004 中“Client State / Store 必须以 Frame 为所有权单元”的假设；
-- ADR 0004 的“声明式目标状态 → Renderer Store → Render Scheduler → DOM / Canvas / WebGL”流水线继续有效；
+- ADR 0004 的声明式目标状态 → Renderer Store → Render Scheduler → DOM / Canvas / WebGL 流水线继续有效；
 - ADR 0005 替代旧架构中“游戏只声明 systemId，由平台固定 System Registry 提供全部可执行实现”的第一阶段假设；
-- ADR 0007 **部分替代** ADR 0005 中 `id + name` Descriptor、`javascript` Launcher、未冻结 eager/lazy 以及已冻结 entry 路径安全的表述；
-- ADR 0008 **补充并部分替代** ADR 0007 中 `launcher.entry` 尚未冻结的结论，冻结 Desktop Node.js Launcher Profile v1；
+- ADR 0007 **部分替代** ADR 0005 中 `id + name` Descriptor、`javascript` Launcher、未冻结 eager/lazy 等表述；
+- ADR 0008 **补充并部分替代** ADR 0007 中 `launcher.entry` 尚未冻结的结论；
 - ADR 0009 将此前 Draft / Stabilizing 的 Subsystem Bootstrap / Runtime Lifecycle 收敛为独立 Frozen Protocol，并明确 Frame / Call 不属于该协议域；
-- ADR 0010 冻结 Frame / Call v1 的 identity / authority / lifecycle / Activation 基线，并将旧 `system-lifecycle-protocol.md` 路径降为 Legacy；
-- ADR 0010 明确 `completed / cancelled / failed` 是 Frame outcome，不是 lifecycle state；Frame v1 不存在独立 `ready / initialized / frame.status`；
+- ADR 0010 冻结 Frame / Call v1 的 identity / authority / lifecycle / Activation 基线，将 `completed / cancelled / failed` 定义为 outcome，并淘汰独立 Frame `ready / initialized / frame.status`；
+- ADR 0011 冻结 Frame / Call v1 的七方法 wire surface、FrameOutcome Schema、Caller relationship 不下发、`frame.resume` 结果+新 Activation 原子局部语义，以及 `frame.call` 非 long-running result RPC；
+- 旧 `system.call / system.return`、`frame.result` 与 `frame.close(reason)` 不进入 Frame / Call v1；
 - ADR 0005 的“Game Entry 声明 Launcher、Main 启动 Subsystem、Subsystem 主动连接 Main、connected 与 ready 分离”继续有效。
 
 ## 维护规则
