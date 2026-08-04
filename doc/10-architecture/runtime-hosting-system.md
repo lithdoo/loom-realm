@@ -128,7 +128,9 @@ frame.resume ACK
     happens-before Caller replacement InputTarget publication
 ```
 
-事务 gap 中 `InputTarget=null` 合法。old Activation commit revoked 后永久不能重新合法。Pre-commit failure 可 abort；Post-commit failure只能 forward recovery。
+事务 gap 中 `InputTarget=null` 合法。old Activation commit revoked 后永久不能重新合法。
+
+Batch C 的“Pre-commit 可 abort / Post-commit 只能 forward recovery”描述的是不可逆性边界，不代表所有 failure 都能在当前 Runtime 上继续做局部 compensation。Batch D 进一步决定：只有 recoverable Error 保持 Runtime healthy；timeout/loss/divergence/protocol error 直接使 Runtime 不可信，后续 recovery ownership 转交 Batch E。
 
 ## 8. Error / Timeout Hosting Requirements
 
@@ -142,6 +144,8 @@ Explicit Error → known not committed
 Timeout/loss   → ambiguous → Runtime failure
 ```
 
+`Explicit Error=known no-commit` 只是远端 operation 的 commit evidence，不自动意味着 Runtime healthy；还必须经过 Batch D 的 recoverable/fatal classification。
+
 Transport 自身的 packet retry / WebSocket/TCP reliable delivery 不等于 application-level Frame RPC replay。v1 不允许 Host adapter 在 timeout 后重新发送同一 Frame operation，也不要求 operationId/dedup journal。
 
 Main→Subsystem Frame RPC ambiguous 时，Main 停止向该 Runtime 发新的正常 Frame Control 并进入 Runtime failure path。
@@ -152,9 +156,37 @@ Subsystem→Main `frame.call / frame.return` ambiguous 时，Subsystem 保持 mu
 
 ## 9. Error Classification 与 Runtime Failure
 
-Recoverable business/control rejection 仅包括 call target not-found/unavailable 与 `FRAME_INITIALIZE_REJECTED`。后者不使 target Runtime failed。
+Recoverable business/control rejection 仅包括：
 
-Frame identity/state/Activation/Stack/ownership divergence、Frozen JSON-RPC method/schema incompatibility、Frame RPC ambiguous timeout 都使相关 Runtime terminal failed。
+```text
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
+```
+
+`FRAME_INITIALIZE_REJECTED` 表示 target Runtime healthy 且 target Frame Context 未 commit；如果 Child 已 acceptance-commit，Main 可在 healthy Runtime 模型下把它收敛为 Child failed outcome + fresh Caller Activation。
+
+Runtime-fatal 情况包括：
+
+```text
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
+Frozen JSON-RPC method/schema/protocol error
+Frame RPC timeout / Response ambiguity
+```
+
+这些分支 MUST NOT 被 Host/Main adapter实现成：
+
+```text
+retry same Frame RPC
+reinitialize same frameId
+activate old Activation
+best-effort local close then continue normal Stack flow
+Renderer/Data reconnect then resume Frame authority
+```
 
 承载层应保留 Runtime diagnostic category：
 
@@ -169,6 +201,8 @@ FRAME_CONTROL_PROTOCOL_ERROR
 ## 10. `frame.suspend` / Cancellation Boundary
 
 `frame.suspend` 保留为 Main 主动 quiesce / terminal preparation 原语，不是 ordinary call establishment step。ACK 后才允许 commit active→suspended / old Activation revoke / InputTarget clear。
+
+如果 suspend Error 被分类为 divergence/protocol-fatal，或产生 ambiguous timeout，不能把 no-commit evidence 当作“可以继续旧 active Frame”的充分条件；Runtime failure classification优先。
 
 v1 无 caller-driven `frame.cancel`。`FrameOutcome.cancelled` 是 active Frame 自行 return 的 outcome；Session termination 走更高层 shutdown。
 
@@ -190,7 +224,7 @@ Desktop：Main Process + per-Subsystem Process；Control/Data = localhost WebSoc
 
 PWA：Main Dedicated Worker + per-Subsystem Dedicated Worker；Control/Data = MessagePort。
 
-PWA Descriptor→Worker Script、Bootstrap Credential、Control Transport 尚未冻结，但 future Profile MUST 保持 Subsystem Control v1 与 Frame Batch A/B/C/D 应用语义，包括 Response-before-dependent-RPC、ACK-before-publish、post-commit no rollback、finite deadline、ambiguous-no-retry。
+PWA Descriptor→Worker Script、Bootstrap Credential、Control Transport 尚未冻结，但 future Profile MUST 保持 Subsystem Control v1 与 Frame Batch A/B/C/D 应用语义，包括 Response-before-dependent-RPC、ACK-before-publish、post-commit no rollback、finite deadline、ambiguous-no-retry 与 Runtime-fatal no-local-resync。
 
 ## 14. System Data Connection Lifecycle
 
@@ -204,11 +238,12 @@ Runtime terminal failure：
 Main marks Runtime failed
 → revoke Data Connection authority
 → stop/revoke affected ordinary input authority
+→ stop normal Frame Control for that Runtime
 → Batch E deterministic Frame unwind
 → Render recovery remains Render Protocol concern
 ```
 
-Runtime failure 不意味着 Frame lifecycle=`failed`；failed 是 outcome，cleanup 仍通过 `closing→closed`。
+Runtime failure 不意味着 Frame lifecycle=`failed`；failed 是 outcome，cleanup 仍需收敛到合法 Frame lifecycle。具体受影响 Frame 如何进入 `closing/closed` 由 Batch E 冻结，不在承载层提前规定 suffix 范围或 cleanup RPC 顺序。
 
 ## 16. 核心不变量
 
@@ -221,9 +256,11 @@ Runtime failure 不意味着 Frame lifecycle=`failed`；failed 是 outcome，cle
 7. ordinary call 不依赖 reverse `frame.suspend`；
 8. call/return Response precedes dependent reverse RPC；
 9. activate/resume ACK precedes InputTarget publication；
-10. post-commit failure只 forward recover；
-11. Frame RPC timeout/loss 不 retry，ambiguous→Runtime failure；
-12. control divergence/protocol mismatch Runtime-fatal；
-13. no caller-driven Frame cancellation；
-14. Render lifecycle 完全属于 Subsystem；
-15. Desktop/PWA Transport 差异不得改变 Frozen application semantics。
+10. post-commit failure不恢复 revoked/accepted state，但 recovery owner 由 Batch D classification 决定；
+11. Explicit Error=no-commit evidence，不自动等于 recoverable；
+12. Frame RPC timeout/loss 不 retry，ambiguous→Runtime failure；
+13. control divergence/protocol mismatch Runtime-fatal；
+14. Runtime-fatal 分支不做 Frame-specific local resync/repair；
+15. no caller-driven Frame cancellation；
+16. Render lifecycle 完全属于 Subsystem；
+17. Desktop/PWA Transport 差异不得改变 Frozen application semantics。
