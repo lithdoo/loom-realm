@@ -7,7 +7,7 @@
 > 依赖：[产品设计总览](../00-overview/product-vision.md)  
 > 最近复核：2026-08-04
 
-本文只描述系统划分与协作关系；精确 wire field 由 `15-contracts` 定义。
+本文描述系统划分与协作关系；精确 wire field 与 transaction semantics 由 `15-contracts` 定义。
 
 ## 1. 顶层结构
 
@@ -21,6 +21,7 @@ Game Package
         ├──────────────▶ LoomRealm Main
         │                  ├── Runtime Registry / Supervisor
         │                  ├── Frame Registry / Stack / Activation
+        │                  ├── Frame Transaction Coordinator
         │                  ├── Input Target
         │                  └── Connection Authority
         │                           │
@@ -32,7 +33,6 @@ Game Package
         │                  ├── 0..N Render Context
         │                  └── Renderer Data Endpoint
         │                           │
-        │                           │ System Data Connection
         │                           ▼
         │                       Web Renderer
         │                       ├── Connection Registry
@@ -45,59 +45,22 @@ Game Package
 
 ## 2. 核心对象
 
-### Subsystem
+Subsystem Descriptor identity = stable `key`。每 Subsystem 同时最多一个有效 Runtime Container：Desktop Process / PWA Dedicated Worker。
 
-Descriptor identity = stable `key`。Legacy 数据协议可能仍有 `systemId`，但新 Frame / Call v1 不从它建立第二套 identity。
+Frame 是 Main-owned call / ordinary User Input Context：`frameId` Session unique/never reused，永久绑定 descriptor.key，caller Main-owned immutable；lifecycle=`starting/active/suspended/closing/closed`；outcome=`completed/cancelled/failed`；只有 active Frame 有 current Activation。
 
-### Runtime Container
+Activation one-shot、never reused/resumed/rolled back。v1 无 Frame ready/status。
 
-每 Subsystem 同时最多一个有效 Runtime Container：Desktop Process / PWA Dedicated Worker。它是执行与故障隔离单元，不等于 Frame。
+Render 是 Subsystem-owned presentation Context，公共架构不定义 Frame→Render ownership。
 
-### Frame
-
-Frame 是 Main-owned call / ordinary User Input Context。
-
-Batch A 已冻结：
-
-```text
-frameId
-    Main-generated / Session unique / never reused
-
-Frame → Subsystem
-    permanent descriptor.key assignment
-
-callerFrameId
-    Main-owned / immutable
-
-lifecycle
-    starting / active / suspended / closing / closed
-
-outcome
-    completed / cancelled / failed
-    separate from lifecycle
-
-Activation
-    only active Frame owns current Activation
-    unique / never reused / revoked forever
-```
-
-v1 无 Frame `ready / initialized / frame.status`。
-
-### Render
-
-Render 是 Subsystem-owned presentation Context。公共架构不定义 Frame→Render ownership。
-
-## 3. Runtime 启动与结束
-
-Desktop：
+## 3. Runtime Bootstrap / Shutdown
 
 ```text
 validate descriptors
 → resolve launcher targets
-→ create Launch Attempts / Tokens
-→ register token before spawn
+→ Launch Attempt / token registration
 → spawn + Supervisor
-→ Subsystem connects Main
+→ Control connect
 → subsystem.hello
 → identified
 → optional initializing
@@ -112,160 +75,168 @@ spawn success ≠ connected ≠ identified ≠ ready
 
 ```text
 Main shutdown intent
-→ subsystem.shutdown(reason)
-→ status(stopping) [optional]
+→ subsystem.shutdown
+→ optional stopping
 → Supervisor confirms Runtime exit
 → stopped
 ```
 
-`shutdown Response ≠ stopped`；无 shutdown intent 的 Process/Control loss 是 failure。
-
-## 4. Frame / Call Control
-
-Subsystem Control 与 Frame / Call 是独立协议域，但可共享已认证 Control Connection。
-
-当前 Frame / Call 状态：
+## 4. Frame / Call 当前状态
 
 ```text
-Batch A  Identity / Lifecycle / Activation              Frozen
-Batch B  RPC Wire Schema / Direction / Local Semantics   Frozen
-Batch C-F                                                Draft
+Batch A  Identity / Authority / Lifecycle / Activation       Frozen
+Batch B  RPC Wire Schema / Direction / Local Semantics        Frozen
+Batch C  Transaction / Commit Barrier / Rollback              Frozen
+Batch D-F                                                     Draft
 ```
 
-Batch B exact wire surface：
+Frozen wire exactly seven Requests：
 
 ```text
 Main → Subsystem
-    frame.initialize({ frameId, input })
-    frame.activate({ frameId, activationId })
-    frame.suspend({ frameId, activationId })
-    frame.resume({ frameId, activationId, returnedFrameId, result })
-    frame.close({ frameId })
+    frame.initialize
+    frame.activate
+    frame.suspend
+    frame.resume
+    frame.close
 
 Subsystem → Main
-    frame.call({ frameId, activationId, targetSubsystemKey, input })
-        → { childFrameId }
-    frame.return({ frameId, activationId, result })
-        → {}
+    frame.call
+    frame.return
 ```
 
-关键边界：
+## 5. Frame Transaction Model
 
-- `callerFrameId` 由 Main 保存，不进入 Subsystem Frame wire；
-- source Subsystem identity 来自 authenticated Control Connection；
-- `frame.call` 只建立 Child call，不等待最终 outcome；
-- Child outcome 经 `frame.return → Main → frame.resume` 交付；
-- `frame.resume` 同时交付 outcome + replacement Activation；
-- `frame.close` 无 reason；
-- v1 无 `system.call / system.return / frame.result`。
-
-Batch C 继续冻结这些 RPC 之间的事务顺序、Input Target commit barrier 与 rollback，不再改变字段。
-
-## 5. Stack / Input Target
-
-稳定状态：
+ordinary call：
 
 ```text
-Stack Top
-    active + current Activation
-
-all lower live Frames
-    suspended + no current Activation
+Caller active/current Activation
+→ frame.call Request
+→ Main Call Acceptance Commit:
+     Caller suspended
+     old Activation revoked
+     Child starting / pushed
+     InputTarget=null
+→ frame.call Success
+→ Child initialize / activate
+→ activate ACK
+→ Child active + InputTarget publication
 ```
 
-事务中可短暂无 active Frame，但 Main 不得发布两个 ordinary Input Target。
+ordinary call 不额外发送 reverse `frame.suspend`。Main 必须完成 call Response 后才依赖 Child RPC，因此 same-Subsystem recursion 不要求 nested bidirectional Request handler reentrancy。
 
-合法 ordinary input 至少要求 active Frame + current Activation + Main-authorized Input Target。revoked Activation 永久拒绝。
-
-## 6. 运行承载
+return：
 
 ```text
-每 Subsystem 一个 Runtime Container
-每 Container 0..N Frame/Input Context
-每 Container 0..N Render Context
-每 Container 与 Main 一条长期 Control Connection
-每 Container 与 Renderer 最多一条 System Data Connection
+frame.return Request
+→ Main Return Acceptance Commit:
+     outcome terminal
+     Child old Activation revoked
+     Child closing
+     InputTarget=null
+→ frame.return Success
+→ close ACK / closed / pop
+→ Caller resume(new Activation) ACK
+→ Caller active + InputTarget publication
+```
+
+冻结：
+
+```text
+frame.activate ACK
+    happens-before Child InputTarget publication
+
+frame.resume ACK
+    happens-before Caller InputTarget publication
+```
+
+Pre-commit failure 可 abort；Post-commit failure只能 forward recovery。revoked Activation 和 accepted terminal outcome 不可 rollback。
+
+## 6. Stack / Input Target
+
+稳定状态：Stack Top active + current Activation；所有 lower live Frames suspended + no Activation。
+
+事务期间允许 Top starting/closing、zero active Frame、`InputTarget=null`。Main 不得发布两个 ordinary InputTargets，也不得发布尚未被目标 Subsystem ACK 的 Activation。
+
+## 7. Runtime / Frame / Render 承载
+
+```text
+one Subsystem → one Runtime Container
+one Runtime   → 0..N Frame/Input Context
+              → 0..N Render Context
+              → one Main Control Connection
+              → at most one Renderer Data Connection
 ```
 
 Frame create/suspend/resume/close 不隐式创建、销毁或重启 Runtime/Data Connection/Render。
 
-## 7. 通信系统
+## 8. 通信系统
 
 ```text
 Control Plane
     Subsystem ⇄ Main
-        Subsystem Control v1          Frozen
-        Frame / Call Batch A/B        Frozen
-        Frame / Call Batch C-F        Draft
+        Subsystem Control v1      Frozen
+        Frame / Call A/B/C        Frozen
+        Frame / Call D-F          Draft
 
     Renderer ⇄ Main
-        Draft target
+        Draft target, but must obey Batch C causal barriers
 
 System Data Plane
     Subsystem ⇄ Renderer
         Connection Layer
-        Render Update Protocol
-        User Input Protocol
+        Render Update
+        User Input
 
 Content Plane
     Runtime / Renderer ⇄ Readonly Content Service
 ```
 
-User Input 继承 Frame current Activation；Render Update 使用独立 Render identity，不继承 Frame Activation epoch。
+Renderer 不是 Frame RPC participant，只镜像 Main 已 commit 状态。User Input 使用 current Frame/Activation；Render Update 使用独立 Render identity。
 
-## 8. 状态所有权
+## 9. 状态所有权
 
 ```text
 Main
     Session / Runtime Registry / Supervisor
     Runtime shutdown intent
     Frame identity / caller / lifecycle / Stack
-    Activation / Input Target
+    Frame transaction commit
+    Activation / InputTarget
     Connection Authority
 
 Subsystem
-    authoritative business state / rules
-    Frame Input Contexts
+    authoritative business state
+    Frame/Input Context + outbound mutation gate
     Render Registry / Render State
-    shared resources/cache
 
 Renderer
-    read-only Main Control mirror
+    read-only committed Main Control mirror
     Data Connection Registry
     Frame Input Registry
     Render Store / presentation state
-
-Content Service
-    installation registry / readonly delivery
 ```
 
-## 9. Desktop / PWA Mapping
+## 10. Desktop / PWA Mapping
 
-Desktop：Main Process + per-Subsystem Process + Hostra Renderer + Content Service；Control/Data 使用 localhost WebSocket，Content 使用 HTTP。
+Desktop Control/Data 使用 localhost WebSocket；PWA Control/Data 使用 MessagePort。
 
-PWA：Main Dedicated Worker + per-Subsystem Dedicated Worker + Window Renderer + Service Worker；Control/Data 使用 MessagePort。
-
-PWA Launcher/Credential/Transport Profile 尚未冻结，但必须保持 Subsystem Control v1 与 Frame Batch A/B 的应用层语义，不能因 MessagePort 改方法名或字段。
-
-## 10. Render 与 Content
-
-Renderer 不从 Frame Stack 推导 Render visibility/order/lifecycle，也不因 Frame closed 自动删除 Render。
-
-Content API 只提供只读逻辑内容；Launcher 是独立 privileged capability。Desktop Node.js Process v1 不宣称 OS sandbox。
+PWA Profile 尚未冻结，但必须保持 Subsystem Control v1 与 Frame Batch A/B/C 应用层语义，包括 Response-before-dependent-RPC、activate/resume ACK publication barrier、post-commit no rollback；Transport 不得要求 nested reverse-request handler reentrancy。
 
 ## 11. 核心不变量
 
-1. Process/Worker 隔离粒度 = Subsystem；
+1. Process/Worker isolation granularity = Subsystem；
 2. Frame = Main-owned call/input Context；
 3. Frame/Activation identity 不复用；
-4. Caller relationship Main-owned，不进入 Subsystem Frame wire；
+4. Caller Main-owned，不进入 Subsystem wire；
 5. lifecycle 与 outcome 分离；
 6. Batch B exactly seven JSON-RPC Requests；
-7. `frame.call` 非 long-running result RPC；
-8. `frame.resume` 同时 outcome + replacement Activation；
-9. Render lifecycle 完全由 Subsystem 控制；
-10. System Data Connection 不依赖 Frame 数量；
-11. `spawn success ≠ connected ≠ identified ≠ ready`；
-12. `stopped` 只来自实际 Runtime termination observation；
-13. Subsystem Control 与 Frame / Call 是独立协议域；
-14. Content API 与 Launcher 是不同能力边界。
+7. Batch C Stack mutation serial；
+8. ordinary call 不依赖 reverse `frame.suspend`；
+9. call/return Response precedes dependent reverse RPC；
+10. activate/resume ACK precedes corresponding InputTarget publication；
+11. post-commit failure只 forward recover；
+12. Render lifecycle 完全由 Subsystem 控制；
+13. `spawn success ≠ connected ≠ identified ≠ ready`；
+14. `stopped` 只来自 actual Runtime termination observation；
+15. Content API 与 Launcher 是不同 capability boundary。
