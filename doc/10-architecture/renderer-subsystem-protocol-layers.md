@@ -9,7 +9,7 @@
 
 本文只描述 Renderer ⇄ Subsystem 数据面的概念边界，不冻结 Data Connection / Render / User Input wire Schema，也不能覆盖正式契约。
 
-Frame / Call v1 Batch A/B/C 已 Frozen，但全部 Frame RPC 与 Batch C transaction 都属于 **Main ⇄ Subsystem Control Plane**。Renderer 不是 Frame / Call RPC participant。
+Frame / Call v1 Batch A/B/C/D 已 Frozen，但全部 Frame RPC、transaction 和 Frame Control timeout/error classification 都属于 **Main ⇄ Subsystem Control Plane**。Renderer 不是 Frame / Call RPC participant，也不是 Frame Control recovery authority。
 
 ## 1. 基本拓扑
 
@@ -40,7 +40,8 @@ Main ⇄ Subsystem Control
     Frame / Call v1
         initialize / activate / suspend / resume / close
         call / return
-        Batch C transaction / acceptance barriers
+        transaction / acceptance barriers
+        semantic error / timeout / failure classification
 
 Main ⇄ Renderer Control
     committed Runtime / Stack / lifecycle / Activation / InputTarget mirror
@@ -50,13 +51,15 @@ Renderer ⇄ Subsystem Data
     Render Update(independent Render identity)
 ```
 
-禁止把 Batch B/C Frame control 复制到 Data Plane，例如 Renderer→Subsystem `frame.activate/frame.resume/frame.call` 或 Data Connection carrying `frame.return`。
+禁止把 Frame control 复制到 Data Plane，例如 Renderer→Subsystem `frame.activate/frame.resume/frame.call`、Data Connection carrying `frame.return`，或通过 Data message 对 Frame timeout transaction做 retry/replay/resync。
 
 ## 4. Connection Layer
 
 负责 Main Grant、Session/Subsystem/Connection identity、version/capability、liveness、replace/close。
 
-不拥有 Frame lifecycle/Stack/Activation/InputTarget、Render Registry 或 business state。
+不拥有 Frame lifecycle/Stack/Activation/InputTarget、Frame RPC deadline/error state、Render Registry 或 business state。
+
+Data Connection reconnect MAY 恢复数据面连接，但 MUST NOT 被解释成 Frame Control reconnect/resume。
 
 ## 5. Render Update
 
@@ -73,6 +76,7 @@ Subsystem Render Manager
 Activation replacement ≠ Render epoch replacement
 Frame suspended ≠ Render hidden
 Frame closed ≠ Render destroyed
+Frame Control failure ≠ Render replay authority
 ```
 
 ## 6. User Input
@@ -85,22 +89,11 @@ raw input
 → Subsystem Frame Input Handler
 ```
 
-ordinary input 合法至少要求：
-
-```text
-Frame exists
-AND lifecycle == active
-AND activationId == currentActivationId
-AND Frame == Main-authorized InputTarget
-```
-
-旧/revoked Activation 永久无效。
+ordinary input 合法至少要求 Frame exists + active + activation current + Frame == Main-authorized InputTarget。旧/revoked Activation 永久无效。
 
 Renderer 不生成 Activation，不恢复缓存旧 Activation，不根据 Render focus/z-order 自行改变公共 InputTarget。
 
 ## 7. Batch C Causal Dependency
-
-Batch C 已冻结：
 
 ```text
 frame.activate ACK
@@ -110,23 +103,11 @@ frame.resume ACK
     happens-before Caller replacement Activation/InputTarget publication
 ```
 
-因此 Main-generated activationId 本身不是 Renderer authority；Renderer 只能使用 Main 在上述 ACK 之后发布的 committed value。
+Main-generated activationId 本身不是 Renderer authority；Renderer 只能使用 Main 在 ACK 后发布的 committed value。
 
-Call/Return transaction 中合法存在：
+Call/Return transaction 中 `InputTarget=null` 合法；Renderer在 gap 停止 ordinary input，不沿用旧 target。old Activation revoke 后不得再次发布为 current。Main MAY coalesce intermediate Stack revision，但不得越过 safety barrier或发布两个 ordinary InputTargets。
 
-```text
-InputTarget = null
-```
-
-Renderer MUST 在该 gap 停止 ordinary input routing，不得沿用旧 target。
-
-old Activation 一旦在 Main transaction 中 commit revoked，后续 Renderer revision MUST NOT 再把它发布为 current。
-
-Main MAY coalesce intermediate Stack revisions，但不得越过上述 causal safety barrier，也不得发布两个 ordinary InputTargets。
-
-## 8. Batch C Response Ordering 不进入 Data Plane
-
-Batch C 还冻结：
+## 8. Response Ordering 不进入 Data Plane
 
 ```text
 frame.call Response
@@ -136,36 +117,51 @@ frame.return Response
     before dependent close / resume
 ```
 
-这是 Main⇄Subsystem Control Connection 的 ordering rule，用于避免 same-Subsystem recursive call 依赖 nested bidirectional Request handler reentrancy。
+这是 Main⇄Subsystem Control ordering rule，用于避免 same-Subsystem recursive call依赖 nested Request handler。Renderer/Data Connection不参与，也不通过 Data messages确认或重放 Frame transaction。
 
-Renderer/Data Connection 不参与这个 RPC ordering，也不应通过 Data messages 尝试补充、确认或重放 Frame transaction。
+## 9. Batch D Failure Boundary
 
-## 9. 一条连接，多组 Context
-
-Data Connection 可以同时服务：
+Frame Request 的控制结果：
 
 ```text
-0..N Render Context
-0..N Frame Input Context
+Success        → known committed
+Explicit Error → known not committed
+Timeout/loss   → ambiguous → Runtime failure
 ```
 
-不存在平台级 `Frame owns Render`。
+Renderer/Data Plane MUST NOT：
 
-## 10. Main Dependency
+- 在 Frame timeout 后重新发送或重放 Frame operation；
+- 用 Data reconnect 判断操作是否已 applied；
+- 用本地 Stack/Input snapshot 修复 Main⇄Subsystem divergence；
+- 接受迟到 Frame Response作为 authority恢复信号；
+- 恢复 timeout 前 cached Activation。
 
-Main 是 Session、Runtime readiness、Frame identity/lifecycle/Stack、Caller relationship、transaction commit、Activation、InputTarget 和 Data Grant 的权威。
+Frame Control failure后，Renderer只服从 Main 后续发布的 committed Runtime/Frame failure state。具体 Stack unwind由 Batch E冻结。
 
-稳定状态：Stack Top active + current Activation；其他 live Frames suspended。事务状态可以 Top starting/closing + null InputTarget。
+## 10. 一条连接，多组 Context
 
-## 11. Runtime Bootstrap / Connection
+Data Connection 可以同时服务 0..N Render Context + 0..N Frame Input Context。不存在平台级 `Frame owns Render`。
 
-Data Connection 只能在 Runtime `ready` 后按 Main Grant 建立。Frame creation 不承担 Runtime startup，也不决定 Data Connection lifecycle。
+## 11. Main Dependency
 
-## 12. Frame / Render Independence
+Main 是 Session、Runtime readiness/failure、Frame identity/lifecycle/Stack、Caller、transaction/error classification、Activation、InputTarget 和 Data Grant 的权威。
 
-Frame initialize/activate/suspend/resume/close 不隐式 create/show/hide/resync/destroy Render；Render create/destroy 不创建/关闭 Frame；Render recovery 不恢复旧 Activation。
+稳定状态 Stack Top active+current Activation；其他 live Frames suspended；transaction state可以 Top starting/closing+null InputTarget。
 
-## 13. 当前协议拆分方向
+## 12. Runtime Bootstrap / Connection
+
+Data Connection只能在 Runtime ready 后按 Main Grant建立。Frame creation不承担 Runtime startup，也不决定 Data Connection lifecycle。
+
+## 13. Cancellation Boundary
+
+Renderer不能代表 suspended Caller发 `frame.cancel`。UI“取消/返回”只能作为当前 active Frame的 User Input，由该 Frame决定是否以 `FrameOutcome.cancelled` return。
+
+## 14. Frame / Render Independence
+
+Frame initialize/activate/suspend/resume/close不隐式 create/show/hide/resync/destroy Render；Render create/destroy不创建/关闭 Frame；Render/Data recovery不恢复旧 Activation或 Frame Control authority。
+
+## 15. 当前协议拆分方向
 
 ```text
 Renderer ⇄ Subsystem
@@ -176,4 +172,4 @@ Renderer ⇄ Subsystem
 另有：Render State Contract
 ```
 
-旧 Frame-scoped Data Protocol 只作为迁移历史保留，不得把 Frame RPC、transaction commit 或 Activation authority 再引入 Data Plane。
+旧 Frame-scoped Data Protocol只作为迁移历史保留，不得把 Frame RPC、transaction/error recovery 或 Activation authority再引入 Data Plane。
