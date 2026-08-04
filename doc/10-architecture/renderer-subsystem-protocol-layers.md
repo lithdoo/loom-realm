@@ -3,19 +3,17 @@
 > 层级：系统架构  
 > 状态：Archived Design / Conceptual  
 > 稳定程度：Evolving  
-> 主要定义：Renderer 与 Subsystem 之间的协议职责分层及其对 Main 控制面的依赖  
+> 主要定义：Renderer 与 Subsystem 之间的数据面职责分层及其对 Main committed control state 的依赖  
 > 依赖：[通信系统](./communication-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
 
-本文只描述 Renderer ⇄ Subsystem 数据面的职责边界，不冻结 Data Connection / Render / User Input wire Schema，也不能覆盖正式契约。
+本文只描述 Renderer ⇄ Subsystem 数据面的概念边界，不冻结 Data Connection / Render / User Input wire Schema，也不能覆盖正式契约。
 
-Frame / Call v1 Batch A/B 已 Frozen，但它运行在 **Main ⇄ Subsystem Control Plane**。Batch B 的 `frame.initialize / activate / suspend / resume / close / call / return` **不得复制到 Renderer ⇄ Subsystem Data Plane**。
+Frame / Call v1 Batch A/B/C 已 Frozen，但全部 Frame RPC 与 Batch C transaction 都属于 **Main ⇄ Subsystem Control Plane**。Renderer 不是 Frame / Call RPC participant。
 
 ## 1. 基本拓扑
 
-每个 Subsystem Runtime 与 Renderer 之间最多一条长期 Data Transport：Desktop WebSocket / PWA MessagePort。
-
-物理连接粒度是 Subsystem，不是 Frame，也不是 Render。
+每个 Subsystem Runtime 与 Renderer 之间最多一条长期 Data Transport：Desktop WebSocket / PWA MessagePort。物理连接粒度是 Subsystem，不是 Frame，也不是 Render。
 
 ## 2. 三个数据协议域
 
@@ -34,23 +32,42 @@ User Input Protocol
 
 三个域共享物理 Transport，但 identity、lifecycle、Sequence、recovery/backpressure 独立。
 
-## 3. Connection Layer
+## 3. Control Plane 与 Data Plane 分离
+
+```text
+Main ⇄ Subsystem Control
+    Subsystem Control v1
+    Frame / Call v1
+        initialize / activate / suspend / resume / close
+        call / return
+        Batch C transaction / acceptance barriers
+
+Main ⇄ Renderer Control
+    committed Runtime / Stack / lifecycle / Activation / InputTarget mirror
+
+Renderer ⇄ Subsystem Data
+    User Input(frameId + current activationId)
+    Render Update(independent Render identity)
+```
+
+禁止把 Batch B/C Frame control 复制到 Data Plane，例如 Renderer→Subsystem `frame.activate/frame.resume/frame.call` 或 Data Connection carrying `frame.return`。
+
+## 4. Connection Layer
 
 负责 Main Grant、Session/Subsystem/Connection identity、version/capability、liveness、replace/close。
 
-不拥有 Frame lifecycle/Stack/Activation/Input Target、Render Registry 或 business state。
+不拥有 Frame lifecycle/Stack/Activation/InputTarget、Render Registry 或 business state。
 
-## 4. Render Update
+## 5. Render Update
+
+Render Update 使用独立 Render identity：
 
 ```text
 Subsystem Render Manager
-→ independent Render identity
 → Render Update
 → Renderer Render Store
 → Scheduler / DOM / Canvas / WebGL
 ```
-
-Render Update 不使用 `frameId + activationId` 作为 Render identity。
 
 ```text
 Activation replacement ≠ Render epoch replacement
@@ -58,63 +75,72 @@ Frame suspended ≠ Render hidden
 Frame closed ≠ Render destroyed
 ```
 
-## 5. User Input
+## 6. User Input
 
 ```text
 raw input
 → Renderer Input Router
-→ Main-declared Input Target
+→ Main-declared InputTarget
 → User Input Protocol
 → Subsystem Frame Input Handler
 ```
 
-Input Target 概念上包含 Subsystem reference + `frameId + activationId`。
-
-根据 Frame Batch A：
+ordinary input 合法至少要求：
 
 ```text
 Frame exists
 AND lifecycle == active
 AND activationId == currentActivationId
-AND Frame == Main-authorized Input Target
+AND Frame == Main-authorized InputTarget
 ```
 
 旧/revoked Activation 永久无效。
 
-Renderer 不生成 Activation，不恢复缓存旧 Activation，不根据 Render focus/z-order 自行改变公共 Input Target。
+Renderer 不生成 Activation，不恢复缓存旧 Activation，不根据 Render focus/z-order 自行改变公共 InputTarget。
 
-Batch B 与 User Input 的接口边界只有：`frame.activate / frame.resume` 在 Subsystem Control 侧安装 current Activation；**何时把新 Activation 发布给 Renderer** 由 Batch C + Main ⇄ Renderer Control 冻结。
+## 7. Batch C Causal Dependency
 
-## 6. Control Plane 与 Data Plane 不重复方法
-
-正确关系：
+Batch C 已冻结：
 
 ```text
-Main ⇄ Subsystem Control
-    Frame / Call Batch B RPC
-        frame.initialize / activate / suspend / resume / close
-        frame.call / frame.return
+frame.activate ACK
+    happens-before Child Activation/InputTarget publication
 
-Main ⇄ Renderer Control
-    Frame Stack / lifecycle / current Activation / Input Target mirror
-
-Renderer ⇄ Subsystem Data
-    User Input(frameId + current activationId)
-    Render Update(independent Render identity)
+frame.resume ACK
+    happens-before Caller replacement Activation/InputTarget publication
 ```
 
-禁止：
+因此 Main-generated activationId 本身不是 Renderer authority；Renderer 只能使用 Main 在上述 ACK 之后发布的 committed value。
+
+Call/Return transaction 中合法存在：
 
 ```text
-Renderer → Subsystem frame.activate
-Renderer → Subsystem frame.resume
-Renderer → Subsystem frame.call
-Data Connection carrying frame.return
+InputTarget = null
 ```
 
-Renderer 不是 Frame / Call RPC participant。
+Renderer MUST 在该 gap 停止 ordinary input routing，不得沿用旧 target。
 
-## 7. 一条连接，多组 Context
+old Activation 一旦在 Main transaction 中 commit revoked，后续 Renderer revision MUST NOT 再把它发布为 current。
+
+Main MAY coalesce intermediate Stack revisions，但不得越过上述 causal safety barrier，也不得发布两个 ordinary InputTargets。
+
+## 8. Batch C Response Ordering 不进入 Data Plane
+
+Batch C 还冻结：
+
+```text
+frame.call Response
+    before dependent Child initialize / activate
+
+frame.return Response
+    before dependent close / resume
+```
+
+这是 Main⇄Subsystem Control Connection 的 ordering rule，用于避免 same-Subsystem recursive call 依赖 nested bidirectional Request handler reentrancy。
+
+Renderer/Data Connection 不参与这个 RPC ordering，也不应通过 Data messages 尝试补充、确认或重放 Frame transaction。
+
+## 9. 一条连接，多组 Context
 
 Data Connection 可以同时服务：
 
@@ -125,23 +151,21 @@ Data Connection 可以同时服务：
 
 不存在平台级 `Frame owns Render`。
 
-## 8. Main Dependency
+## 10. Main Dependency
 
-Main 是 Session、Runtime readiness、Frame identity/lifecycle/Stack、Caller relationship、Activation、Input Target 和 Data Grant 的权威。
+Main 是 Session、Runtime readiness、Frame identity/lifecycle/Stack、Caller relationship、transaction commit、Activation、InputTarget 和 Data Grant 的权威。
 
-稳定状态：Stack Top active + current Activation；其他 live Frames suspended。Main/Renderer 不得暴露两个 ordinary Input Target。
+稳定状态：Stack Top active + current Activation；其他 live Frames suspended。事务状态可以 Top starting/closing + null InputTarget。
 
-Batch C 将冻结 `frame.activate / frame.resume` success 与 Main→Renderer Input Target publish 的 causal barrier。
-
-## 9. Runtime Bootstrap / Connection
+## 11. Runtime Bootstrap / Connection
 
 Data Connection 只能在 Runtime `ready` 后按 Main Grant 建立。Frame creation 不承担 Runtime startup，也不决定 Data Connection lifecycle。
 
-## 10. Frame / Render Independence
+## 12. Frame / Render Independence
 
 Frame initialize/activate/suspend/resume/close 不隐式 create/show/hide/resync/destroy Render；Render create/destroy 不创建/关闭 Frame；Render recovery 不恢复旧 Activation。
 
-## 11. 当前协议拆分方向
+## 13. 当前协议拆分方向
 
 ```text
 Renderer ⇄ Subsystem
@@ -152,4 +176,4 @@ Renderer ⇄ Subsystem
 另有：Render State Contract
 ```
 
-旧 Frame-scoped Data Protocol 只作为迁移历史保留，不得把 Batch B Control RPC 再引入 Data Plane。
+旧 Frame-scoped Data Protocol 只作为迁移历史保留，不得把 Frame RPC、transaction commit 或 Activation authority 再引入 Data Plane。
