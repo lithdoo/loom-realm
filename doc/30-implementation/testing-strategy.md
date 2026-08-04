@@ -5,433 +5,400 @@
 > 稳定程度：Evolving  
 > 主要定义：协议、Launcher、模块、跨平台 Transport、内容兼容和端到端测试分层  
 > 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[Content API v1](../15-contracts/content-api-v1.md)  
-> 最近复核：2026-08-03
+> 最近复核：2026-08-04
 
 ## 1. 测试目标
 
-测试不仅验证实现正确，还用于防止下层实现破坏上层架构边界。
+测试不仅验证实现正确，还必须防止下层实现破坏上层架构边界。
 
 第一阶段重点验证：
 
-- Game Entry 一次性声明全部 Subsystem；
-- Desktop `key + nodejs + eager all-required bootstrap`；
-- Launcher Entry / env / spawn / Supervisor 语义符合 v1；
+- Game Entry / Launcher / Supervisor / Subsystem Control v1 已冻结语义；
 - `spawn success ≠ connected ≠ identified ≠ ready`；
-- Subsystem Control v1 的 hello / status / shutdown、错误 Envelope、wire limits 与 failure semantics；
-- Main 拥有正常 Runtime shutdown intent，`stopped` 只来自 Supervisor observation；
-- Frame / Call v1 Batch A 的 identity / authority / lifecycle / Activation 不变量；
-- `failed` Frame outcome 不得替代 `closing → closed` lifecycle；
-- Frame v1 不存在 `ready / initialized / frame.status`；
-- revoked Activation 永久不能重新有效；
-- 每个 Subsystem 一个 Runtime Container / Process / Worker；
-- 一个 Container 承载 0..N Frame/Input Context；
-- 一个 Container 拥有 0..N Render Context；
-- Renderer 与每个 Container 最多一条 System Data Transport；
-- Frame 只管理 call/input，不拥有 Render；
-- Render 生命周期由 Subsystem 独立控制；
-- User Input 与 Render Update 使用独立协议域和恢复语义。
+- Frame = Main-owned call/input context；Render = Subsystem-owned context；
+- Frame / Call Batch A 的 identity/lifecycle/Activation；
+- Frame / Call Batch B 的 exact seven RPC wire surface；
+- Caller relationship 不下发给 Subsystem；
+- `frame.resume` = outcome delivery + replacement Activation；
+- `frame.call` 不等待 Child 最终 result；
+- Frame close 不改变 Runtime / Render / Data Connection；
+- User Input / Render Update 使用独立协议域。
 
 ## 2. 测试层次
 
 ```text
 Schema / Contract Test
 → Launcher Filesystem / Process Conformance
-→ Protocol State Machine Fixture
+→ State Machine Fixture
 → Module Unit Test
 → Transport Conformance Test
-→ Runtime Container / Worker Interop
+→ Runtime Container Interop
 → Component Integration
 → Content Golden Test
 → End-to-End Vertical Test
 → Performance / Backpressure Test
 ```
 
-已经 Frozen 的 Contract 部分必须先有 fixture，再允许实现依赖。
+已 Frozen 的 Contract 必须先有机器可校验 fixture，再允许 Main/SDK 各自实现。
 
-## 3. Game Package v2 / Desktop Launcher v1
+## 3. Game Package / Launcher / Subsystem Control
+
+继续覆盖：
+
+### Game Package / Launcher
+
+- duplicate key / unsupported Launcher；
+- Entry absolute/traversal/URL/backslash/missing/directory/unsupported extension；
+- symlink/junction/reparse escape 与 canonical containment；
+- reserved env / env size；
+- Descriptor 集合失败零 Process side effect；
+- Host-selected Node / shell interpretation impossible / fixed cwd；
+- Token registered before spawn / new per attempt / revoke on early failure；
+- spawn success public state still `starting`；
+- unexpected exit including code 0 → failure；
+- no automatic restart；
+- bounded termination。
+
+### Subsystem Control v1
+
+- hello auth / identity / version / duplicate connection；
+- `identified → ready` 与 optional initializing；
+- invalid/duplicate status fatal；
+- Main-owned shutdown intent；
+- `subsystem.shutdown` accepted ≠ stopped；
+- unsolicited stopping fatal；
+- shutdown timeout → Supervisor escalation；
+- connection loss behavior；
+- semantic `-32000 + error.data.code`；
+- wire limits；
+- no heartbeat / same-attempt reconnect / resume / automatic restart。
+
+## 4. Frame / Call Batch A Conformance
 
 至少覆盖：
 
-- Descriptor Schema / duplicate `key`；
-- initial target 引用未声明 Subsystem；
-- unsupported Launcher；
-- Entry absolute / traversal / URL / backslash / empty segment；
-- `.mjs / .cjs` only；
-- missing / directory Entry；
-- symlink / junction / reparse escape；
-- canonical Installation containment；
-- executable namespace case collision；
-- `LOOMREALM_* / NODE_OPTIONS / NODE_PATH` rejection；
-- env 数量 / key / value / 总大小限制；
-- Descriptor 集合失败时零业务 Process side effect；
-- Host-selected Node Runtime；
-- Shell interpretation impossible；
-- `cwd = Installation Root`；
-- child environment 不无条件继承 Main 完整环境；
-- Bootstrap Token registration happens-before Process execution；
-- new Launch Attempt gets new Token；
-- spawn failure / early exit revoke unconsumed Token；
-- spawn success 后 public state 仍为 `starting`；
-- ready 后 exit code 0 unexpected exit → Runtime failure；
-- no automatic restart；
-- bounded termination / force kill。
-
-## 4. Subsystem Control Protocol v1
-
-### Hello / identity
-
-- 第一条 LoomRealm application message 必须是 `subsystem.hello`；
-- Descriptor key 大小写敏感；
-- unknown key / invalid token / consumed token wire 上统一为 `BOOTSTRAP_AUTHENTICATION_FAILED`；
-- protocolVersions 非空、正整数、无重复、1..16 项；
-- no common version → `CONTROL_PROTOCOL_UNSUPPORTED`；
-- duplicate identified connection → `DUPLICATE_CONTROL_CONNECTION`；
-- hello 成功后 Connection identity 固定；
-- 后续 Runtime status 不携带第二份 key identity。
-
-### Runtime status
-
-- `identified → ready`；
-- `identified → initializing → ready`；
-- `identified / initializing / ready → failed`；
-- duplicate / backward transition 为 fatal；
-- status before hello 为 fatal；
-- ready invalid endpoint 为 fatal；
-- failed invalid error code 为 fatal；
-- `stopped` 只来自 Supervisor observation。
-
-### Shutdown
-
-- Main 在 identified / initializing / ready 建立 shutdown intent；
-- shutdown intent happens-before `subsystem.shutdown` send；
-- `session-end / bootstrap-abort`；
-- shutdown Response 只表示 accepted；
-- shutdown → optional stopping → Process exit；
-- fast exit without stopping Notification；
-- unsolicited stopping → fatal；
-- duplicate shutdown → `PROTOCOL_STATE_ERROR`；
-- shutdown timeout → Supervisor termination escalation；
-- forced termination confirmed → stopped；
-- failed 后 exit 不改回 stopped。
-
-### Connection / health / retry
-
-- no shutdown intent + Control loss → failed；
-- shutdown intent + Control loss → Supervisor 决定 terminal state；
-- no same-attempt reconnect / resume；
-- no application-level state-changing RPC retry；
-- no `subsystem.ping / subsystem.health`；
-- WebSocket ping/pong 只属于 Transport。
-
-### Error / limits / security
-
-- standard JSON-RPC layer errors；
-- LoomRealm semantic error = `-32000 + error.data.code`；
-- frozen semantic code；
-- max Control message / nesting / token / endpoint / runtime error field limits；
-- Bootstrap Token 不回显；
-- PID / launchId 不作为 identity。
-
-## 5. Frame / Call Protocol v1 — Batch A Conformance
-
-Batch A 已 Frozen，因此以下 fixture 现在就是实施前置条件，而不是未来测试建议。
-
-### 5.1 Frame identity
-
-- `frameId` 只能由 Main 创建；
-- Session 内创建大量 Frame 时 `frameId` 无重复；
-- `closed` 后相同业务调用必须得到新的 `frameId`；
-- Frame 创建后 `subsystemKey` 不得改变；
-- Frame 不能 migrate 到另一个 Runtime；
-- `callerFrameId` 创建后 immutable；
-- initial Frame `callerFrameId = null`；
-- PID / Worker / Connection ID / Render ID 不能替代 `frameId`；
-- 新 Frame Protocol 不从 Legacy `systemId` 建立第二 ownership identity。
-
-### 5.2 Lifecycle state model
-
-唯一合法公共 enum：
-
 ```text
-starting
-active
-suspended
-closing
-closed
+frame-id-unique
+frame-id-no-reuse
+permanent-subsystem-assignment
+caller-immutable
+lifecycle-starting-active-suspended-closing-closed
+no-frame-ready
+no-frame-status
+no-frame-failed-lifecycle
+outcome-failed-still-closes
+activation-first
+activation-resume-new-id
+activation-revoked-rejected
+activation-never-restored
+stack-top-active
+lower-frame-suspended
+no-two-input-targets
+runtime-not-ready-reject-frame
+runtime-stopping-reject-frame
+frame-close-does-not-destroy-render
+frame-close-does-not-close-data-connection
 ```
 
-必须显式验证：
+## 5. Frame / Call Batch B Schema Conformance
 
-- 不存在 `ready`；
-- 不存在 `initialized`；
-- 不存在 lifecycle `failed`；
-- 不存在 `frame.status`；
-- `closed` terminal；
-- `closed → active` impossible；
-- `closing → active` impossible；
-- `suspended → active` 必须伴随新的 Activation；
-- `starting → closing` 合法用于 abort；
-- `suspended → closing` 合法用于 unwind/termination。
+### 5.1 Exact method surface
 
-### 5.3 Outcome 与 lifecycle 分离
-
-测试 Main Registry 模型：
+唯一合法方法：
 
 ```text
-state
-    starting / active / suspended / closing / closed
+Main → Subsystem
+    frame.initialize
+    frame.activate
+    frame.suspend
+    frame.resume
+    frame.close
 
+Subsystem → Main
+    frame.call
+    frame.return
+```
+
+必须显式拒绝：
+
+```text
+system.call
+system.return
+frame.ready
+frame.status
+frame.result
+frame.cancel
+frame.close-with-reason extension
+```
+
+### 5.2 JSON-RPC form
+
+- 七个方法全部是 Request，不是 Notification；
+- params 必须是 Object；
+- params/result `additionalProperties=false`；
+- missing/wrong-type/extra-field/invalid discriminant → `-32602 Invalid params`；
+- Batch B Schema Test 不提前冻结 Batch D semantic error code。
+
+### 5.3 `frame.initialize`
+
+合法：
+
+```json
+{
+  "frameId": "F1",
+  "input": null
+}
+```
+
+验证：
+
+- required exactly `frameId + input`；
+- no `callerFrameId`；
+- no source `subsystemKey/systemId`；
+- result `{}`；
+- success 后仍是 `starting`、无 Activation。
+
+### 5.4 `frame.activate`
+
+验证：
+
+- `frameId + activationId`；
+- activationId 是 Main 新值；
+- 只用于首次 activation，不作为 resume 的替代；
+- result `{}`。
+
+### 5.5 `frame.suspend`
+
+验证：
+
+- `frameId + current activationId`；
+- success 后该 Activation 永久 revoke；
+- result `{}`；
+- 不隐式改变 Render/Data Connection。
+
+### 5.6 `frame.resume`
+
+验证 exact fields：
+
+```text
+frameId
+activationId        // new replacement
+returnedFrameId
+result              // FrameOutcome
+```
+
+必须验证：
+
+- no callerFrameId；
+- Child outcome 和 replacement Activation 在 Subsystem-side 一个操作完成；
+- 不允许 `frame.resume` 后再公共 `frame.activate` 才完成恢复。
+
+### 5.7 `frame.close`
+
+合法 params 只有：
+
+```json
+{ "frameId": "F1" }
+```
+
+以下必须 rejected as invalid params：
+
+```text
+reason
 outcome
-    null / completed / cancelled / failed
+callerFrameId
+activationId
+subsystemKey
 ```
 
-至少验证：
+并验证 close 只删除 Frame/Input Context，不停止 Runtime、不 destroy Render、不关闭 Data Connection。
 
-- `failed outcome` 不把 Frame state 设置成 `failed`；
-- failed/cancelled/completed Frame 仍通过 `closing → closed` cleanup；
-- cleanup 完成前 outcome 可以已确定，但 Frame 仍不是 `closed`；
-- closed Frame tombstone 不重新成为 live Frame。
+### 5.8 `frame.call`
 
-### 5.4 Activation
-
-- `activationId` 只能由 Main 创建；
-- Session 内不重复；
-- `starting.currentActivationId == null`；
-- `active.currentActivationId != null`；
-- `suspended / closing / closed.currentActivationId == null`；
-- first active gets fresh Activation；
-- resume gets fresh Activation；
-- suspend 前 Activation 不得在 resume 时恢复；
-- revoked Activation 永久 reject；
-- Frame active→closing 时旧 Activation 立即失效；
-- Runtime failure 时该 Runtime 所承载 active Frame Activation 立即失效；
-- Renderer / SDK 不能自行生成或替换 Activation。
-
-### 5.5 Stack stable state
-
-稳定态必须满足：
+合法 shape：
 
 ```text
-Stack empty
-OR
-Stack Top = active
-AND all lower live Frames = suspended
+frameId
+activationId
+targetSubsystemKey
+input
 ```
 
-至少验证：
-
-- 非栈顶 Frame 不能保持 ordinary active；
-- 同时最多一个 ordinary Input Target；
-- 事务中允许短暂零 active Frame；
-- 任何时间不得向 Renderer 发布两个有效 ordinary Input Target。
-
-### 5.6 Runtime precondition
-
-新 Frame 只能建立在：
+success result：
 
 ```text
-Runtime observed state == ready
-AND shutdownIntent == null
+childFrameId
 ```
 
-测试：
+验证：
 
-- starting Runtime reject Frame creation；
-- identified-but-not-ready reject；
-- stopping reject；
-- failed/stopped reject；
-- call 不触发 lazy spawn / restart。
+- source identity 来自 Control Connection；
+- no source subsystem identity field；
+- same-Subsystem call 合法且仍创建新 childFrameId；
+- Request 只建立 Child call，不持续等待 Child outcome。
 
-### 5.7 Render / Data independence
+### 5.9 `frame.return`
 
-回归测试：
-
-- Frame starting 不自动 create Render；
-- active 不自动 show Render；
-- suspended 不 hide/freeze Render；
-- closing/closed 不自动 destroy Render；
-- Frame create/close 不创建或关闭 System Data Connection；
-- zero-frame Render 仍可存在。
-
-## 6. Frame / Call Batch B+ — Tracking Tests
-
-这些 fixture 先作为设计目标，不应伪装成已冻结 wire conformance：
-
-- initialize / activate / suspend / resume / close final Schema；
-- frame.call / frame.return；
-- nested call；
-- call establishment vs business result separation；
-- Activation commit barrier；
-- rollback；
-- timeout / no-retry；
-- cancellation scope；
-- multi-Frame Runtime failure suffix-unwind。
-
-Batch B/C 每冻结一批，就把相应 fixture 从 Tracking 转成 Normative Conformance。
-
-## 7. Renderer–Subsystem Connection
-
-- Main Grant authentication；
-- Session / Subsystem / Connection identity；
-- one active connection per Subsystem；
-- reconnect / replace / revoke；
-- zero Frame connection；
-- protocol version / heartbeat / message limits。
-
-这里的 heartbeat 只属于 System Data Connection Layer，不属于 Subsystem Control v1。
-
-## 8. User Input
-
-User Input 必须继承 Frame Batch A：
+合法 shape：
 
 ```text
-Frame exists
-AND lifecycle == active
-AND activationId == currentActivationId
-AND current Main-authorized Input Target
+frameId
+activationId
+result
 ```
 
-至少验证：
+验证：
 
-- stale Activation rejection；
-- Frame A 输入不进入 Frame B；
-- suspend / resume 后旧输入拒绝；
-- input reset；
-- continuous intent；
-- discrete action ordering；
-- UI Interaction 不假设 Render identity = frameId。
+- no `callerFrameId` / target receiver；
+- Main Registry 决定 receiver；
+- result 是 FrameOutcome；
+- success result `{}`。
 
-## 9. Render Update / Renderer
+### 5.10 `FrameOutcome`
 
-必须长期验证：
+```text
+completed
+    { type:"completed", value: JsonValue }
+
+cancelled
+    { type:"cancelled" }
+
+failed
+    { type:"failed", error:{ code, message?, data? } }
+```
+
+必须测试：
+
+- `completed.value` 缺失 → invalid params；
+- 无业务返回值必须 `value:null`；
+- cancelled 带额外 Payload → invalid params；
+- failed 缺 error/code → invalid params；
+- `FrameOutcome.failed` 不走 JSON-RPC Error envelope。
+
+## 6. Batch C-F 的测试边界
+
+Batch B fixture **不得提前编码**以下尚未冻结行为：
+
+```text
+call establishment exact ordering
+frame.call response commit point
+InputTarget publish barrier
+partial rollback
+semantic error codes
+request timeout
+retry / idempotency
+caller cancellation
+Runtime failure suffix unwind
+wire numeric limits
+```
+
+这些分别在 Batch C-F 增加 fixture。这样 Schema Test 不会反向把未冻结实现偶然行为变成协议。
+
+## 7. Renderer–Subsystem / User Input / Render
+
+### Connection
+
+- one active Data Connection per Subsystem；
+- Main Grant auth / replace / revoke；
+- zero-Frame Subsystem 可保持连接；
+- Runtime stopping/failed 后不发新 Grant。
+
+### User Input
+
+- current active `frameId + activationId` only；
+- revoked Activation rejection；
+- Frame A/B isolation；
+- Input Target change / blur reset；
+- UI interaction 不假设 Render identity = frameId。
+
+### Render
 
 - independent Render identity；
-- create / update / destroy；
-- Revision / Event / recovery；
-- Frame lifecycle 不改变 Render epoch；
-- Frame pop / close 不删除 Render Store；
+- create/update/destroy/recovery；
+- Frame suspend/close 不改变 Render epoch；
 - zero-frame Render；
-- Stack order 不作为 Render z-order；
-- active Frame 不等于 only visible Render。
+- shared Render across multiple Frames；
+- Renderer reload 不按 Frame resync Render。
 
-## 10. Main System
-
-至少验证：
+## 8. Main System Tests
 
 - Descriptor / Launcher / Runtime Supervisor；
-- public Runtime state machine；
-- Control Connection Registry；
-- Main-owned shutdown intent；
-- one Runtime Container per Subsystem；
+- Subsystem Control hello/status/shutdown；
 - Frame Registry lifecycle/outcome separation；
-- frameId / activationId generator non-reuse；
-- permanent Frame → subsystemKey；
-- callerFrameId immutable；
-- active ↔ currentActivationId invariant；
-- stable Stack top-active / others-suspended；
-- no two ordinary Input Targets；
-- Runtime failure revokes affected Activation；
-- Main 不发布 Frame visibility / Render Registry。
+- Activation uniqueness/revocation；
+- exact Batch B RPC dispatcher；
+- connection-bound source Subsystem identity；
+- caller relationship only in Main Registry；
+- call target resolution from `targetSubsystemKey`；
+- same-Subsystem call produces new childFrameId；
+- no `system.call / frame.result / close reason` compatibility shortcut；
+- Main 不发布两个 ordinary Input Target；
+- Main 不维护 Render Registry。
 
-## 11. Map Subsystem
+## 9. Subsystem SDK / Test Subsystems
 
-- shared Repository Cache；
-- Core deterministic；
-- Execution Loop serialized；
-- multiple Frame Input Context；
-- current Activation accept / old Activation reject；
-- shared world state 可跨多个 Frame handler；
-- Render Manager 独立于 Frame Registry；
-- Frame suspend 不自动暂停 Render；
-- Frame close 不自动 destroy world/hud Render；
-- no-frame loading/debug Render。
-
-## 12. Golden / Fixture
-
-适合 Golden Fixture：
-
-- Game Package v2 Descriptor / Entry validity；
-- Launcher errors；
-- Bootstrap Context decoder；
-- Subsystem Control hello / status / shutdown / semantic errors；
-- Frame Batch A lifecycle / identity / Activation vectors；
-- 后续 Batch B Frame/Call messages；
-- Connection auth；
-- User Input sequences；
-- Render State / Event sequences；
-- Content API Response；
-- `fsdb.index.json`；
-- Pokémon Essentials intermediate JSON。
-
-Golden 更新必须说明是设计变化还是回归修复。
-
-## 13. Desktop E2E
+SDK contract test：
 
 ```text
-start Main
-→ Bootstrap all required Runtime Containers
-→ hello / identified / ready
-→ open Renderer
-→ establish Data Connections
-→ create initial Frame
-→ initial Frame gets fresh Activation
-→ ordinary input accepted only for current Activation
-→ create child Frame without new Process/Data socket
-→ caller old Activation revoked
-→ child active with new Activation
-→ close/return child
-→ caller receives another new Activation
-→ old caller Activation remains rejected
-→ close Frame while shared Render remains
+onInitialize(frameId, input)
+onActivate(frameId, activationId)
+onSuspend(frameId, activationId)
+onResume(frameId, activationId, returnedFrameId, outcome)
+onClose(frameId)
+call(frameId, activationId, targetSubsystemKey, input)
+return(frameId, activationId, outcome)
+```
+
+推荐 test-subsystems：
+
+```text
+frame-schema-valid
+frame-schema-extra-field
+frame-no-caller-wire
+same-subsystem-call
+nested-call
+completed-null
+failed-outcome
+stale-activation
+multi-frame-input
+render-without-frame
+shared-render-multi-frame
+```
+
+## 10. Content / Map / E2E
+
+Content API 继续验证 path/grant/cache/ETag/read-only 与 Launcher capability 隔离。
+
+`loom.map` 至少验证：
+
+- Frame Control Adapter 符合 Batch B exact method fields；
+- initialize 不依赖 callerFrameId；
+- resume 同时收到 Child result + new Activation；
+- no-value return 使用 `completed(value:null)`；
+- Frame close 不隐式 destroy world/hud Render；
+- 一个 Process 服务多个 Frame/Input Context；
+- old Activation input rejected。
+
+Desktop E2E：
+
+```text
+bootstrap all required Runtime
+→ hello / ready
+→ establish initial Frame
+→ Frame initialize / activate
+→ nested frame.call
+→ child frame.return
+→ caller frame.resume with new Activation
+→ close child Context
 → Renderer reload
-→ restore current Stack/Input state and Render independently
-→ clean Runtime shutdown
+→ Render/Data recover independently
+→ normal subsystem.shutdown
 ```
 
-失败 E2E 至少包括 invalid Entry、early exit、never-ready、Control disconnect、shutdown timeout、stale Activation、Frame outcome failure、Runtime failure with active Frame。
+Batch C 冻结前，E2E 不把 call/suspend/push/activate 的某个具体中间顺序写成跨实现兼容要求。
 
-## 14. PWA E2E
+## 11. Golden / Fixture 规则
 
-PWA Launcher / Control Transport Profile 冻结后运行与 Desktop 同一组：
+适合 Golden：Game Package Descriptor、Launcher errors、Bootstrap Context、Subsystem Control messages、Frame/Call Batch B messages、Connection auth、User Input sequences、Render State/Event、Content Responses。
 
-```text
-Subsystem identity / Runtime lifecycle
-Frame identity / lifecycle / Activation
-User Input stale-Activation rejection
-Render independence
-```
-
-Transport 差异不得改变 Batch A 语义。
-
-## 15. 性能与背压
-
-分别采集 User Input path 与 Render path 的 P50 / P95 / P99 / max。
-
-背压测试包括 continuous intent、discrete burst、multi-Frame input、multi-Render update、Event burst、large Content fetch、Renderer long frame、Subsystem GC/CPU saturation。
-
-Launcher/日志还需验证 stdout/stderr flood 不导致 Main 无限内存增长。
-
-## 16. 架构回归测试
-
-必须长期保留：
-
-1. Descriptor 集合校验失败时不 spawn 任何业务 Process；
-2. Bootstrap Token 在 Process spawn 前注册；
-3. spawn success 不跳过 `connected / identified / ready`；
-4. Desktop v1 不自动 restart failed Runtime；
-5. Frame `failed` 不能成为 lifecycle state；
-6. Frame v1 不出现 `ready / initialized / frame.status`；
-7. closed frameId 不复用；
-8. revoked activationId 不复用；
-9. Caller resume 不恢复旧 Activation；
-10. 正常稳定状态只有 Stack Top active；
-11. 创建第二个 Frame 不创建第二个 Process / Worker；
-12. 创建第二个 Frame 不创建第二条 System Data Transport；
-13. Frame suspend 不隐藏 Render；
-14. Frame close 不销毁 Render；
-15. Render 可以在零 Frame 时创建和更新；
-16. Renderer 不根据 Stack order 计算 Render z-order；
-17. Render recovery 不改变 Activation；
-18. User Input Sequence 不充当 Render Revision；
-19. Game call 不触发当前 MVP 的 Runtime lazy spawn；
-20. Hostra 不承载 LoomRealm Main 或业务 Payload。
+Golden 更新必须说明是协议设计变化还是回归修复。已 Frozen Batch 的 fixture 发生不兼容改变时必须先更新 ADR / compatibility decision。
