@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：各系统的内部模块拆分和详细设计入口  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-03
+> 最近复核：2026-08-04
 
 模块层说明各系统当前准备如何拆解。模块可以重构、合并或替换，但不能改变上层系统职责和正式契约。
 
@@ -13,17 +13,15 @@
 
 | 系统 | 模块入口 | 说明 |
 |---|---|---|
-| 程序主系统 | [main-system](./main-system/README.md) | Descriptor/Runtime Registry、Supervisor、Frame Registry/Stack/Activation、Control 与 Data Grant |
-| Web 渲染端 | [web-renderer](./web-renderer/README.md) | Main Control mirror、System Connection、Render Store、Frame Input、DOM/Canvas/WebGL |
-| 游戏包与内容 | [game-package](./game-package/README.md) | Manifest/Entry/Descriptor Loader、Launcher Entry Validator、Catalog、Repository |
+| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Supervisor、Activation、Frame/Call Coordinator、Control/Data Grant |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main Control mirror、System Connection、Render Store、Frame Input、DOM/Canvas/WebGL |
+| Game Package | [game-package](./game-package/README.md) | Manifest/Entry/Descriptor Loader、Launcher Entry Validator、Catalog、Repository |
 | FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop HTTP 与 PWA Service Worker 的统一只读 Content API |
-| 地图 Subsystem | [loom-map](./loom-map/README.md) | Subsystem/Frame Control Adapter、Frame Input、Runtime、Render Manager/Projector、兼容层 |
-| Desktop Host | [desktop-host](./desktop-host/README.md) | Hostra Window Adapter、Desktop WebSocket/HTTP、Node Launcher / Process Supervisor |
+| `loom.map` | [loom-map](./loom-map/README.md) | Subsystem/Frame Control Adapter、Frame Input、Runtime、Render Manager/Projector |
+| Desktop Host | [desktop-host](./desktop-host/README.md) | Hostra Window、WebSocket/HTTP、Node Launcher / Process Supervisor |
 | PWA Host | [pwa-host](./pwa-host/README.md) | Main/Subsystem Worker、Control/Data MessagePort、Service Worker、OPFS |
 
 ## 已冻结模块前提
-
-模块实现现在可以直接依赖：
 
 ```text
 Game Package v2 / Desktop Launcher v1
@@ -32,8 +30,10 @@ Game Package v2 / Desktop Launcher v1
 Subsystem Control v1
     Frozen
 
-Frame / Call v1 Batch A
-    Frozen identity / authority / lifecycle / Activation
+Frame / Call v1
+    Batch A Frozen
+    Batch B Frozen
+    Batch C-F Draft
 ```
 
 Frame 模块必须统一使用：
@@ -43,10 +43,10 @@ frameId
     Main-generated / Session unique / never reused
 
 subsystemKey
-    permanent Frame ownership reference to descriptor.key
+    permanent Frame assignment to descriptor.key
 
 callerFrameId
-    immutable
+    Main-owned / immutable
 
 Frame lifecycle
     starting / active / suspended / closing / closed
@@ -60,39 +60,52 @@ currentActivationId
     unique / never reused / never rolls back
 ```
 
-不得继续实现：
+## Batch B 模块接口
+
+Main 与 Subsystem SDK 的公共 Frame adapter 只围绕七个方法实现：
 
 ```text
-Frame.status = failed
-Frame ready / initialized / frame.status
-Activation reuse
-Frame migration
-Frame close = Render/Data Connection close
+frame.initialize
+frame.activate
+frame.suspend
+frame.resume
+frame.close
+frame.call
+frame.return
 ```
+
+必须保持：
+
+- initialize = `frameId + input`，无 callerFrameId；
+- resume = `frameId + new activationId + returnedFrameId + outcome`；
+- close = `frameId` only；
+- call = current frame/activation + `targetSubsystemKey + input`，result=`childFrameId`；
+- return = current frame/activation + outcome，无 Caller/receiver；
+- `completed.value` 必填，无返回值=`null`；
+- no `system.call / system.return / frame.result / frame.ready / frame.status`。
+
+模块不得创建“更方便的兼容接口”绕过 Frozen Schema。
 
 ## Runtime Container / Frame / Render
 
 ```text
 Runtime Container
     Subsystem business state
-    Control Connection
-    System Data Connection
+    Control/Data Connection
     Content/cache
     Render Manager / Registry
 
 Frame
     Main-owned call/input Context
-    lifecycle + caller + current Activation
+    lifecycle / caller / current Activation
 
 Render
     Subsystem-owned independent presentation Context
 ```
 
-平台不要求 per-Frame Runtime Core、business state、Execution Loop、Projector、Render Revision/Scope 或 Event Queue。
+平台不要求 per-Frame Runtime Core、business state、Execution Loop、Projector 或 Render ownership。
 
 ## Renderer 模块边界
-
-Renderer：
 
 ```text
 System Data Connection Registry
@@ -100,26 +113,7 @@ System Data Connection Registry
 └── Frame Input Registry / Input Router
 ```
 
-Frame Input Registry 只能镜像 Main 的 Frame lifecycle / current Activation / Input Target。
-
-Renderer MUST NOT：
-
-- create frameId / activationId；
-- revive stale Activation；
-- use Frame Stack for Render visibility/order/lifecycle。
-
-## Desktop Launcher 模块边界
-
-```text
-Game Package Bootstrap
-→ Descriptor Registry
-→ Launcher Target Resolver
-→ Launch Attempt Registry
-→ NodeJsSubsystemLauncher
-→ Runtime Supervisor
-```
-
-约束仍保持：validated target only、Host-selected Node、no shell、Token-before-spawn、explicit environment、no automatic restart。
+Renderer 只镜像 Main current Frame/Activation/Input Target，不参与 Frame RPC 调用链，不创建或恢复 Activation，也不从 Stack 推导 Render lifecycle。
 
 ## Cross-platform Hosting
 
@@ -137,22 +131,7 @@ PWA
     Service Worker Content
 ```
 
-Transport 差异不得改变 Frozen Subsystem Control / Frame Batch A semantics。
-
-## 模块文档规则
-
-模块文档应说明：
-
-1. 模块目标；
-2. 输入/输出；
-3. owned state；
-4. explicitly non-owned state；
-5. dependency/call direction；
-6. concurrency/transaction boundary；
-7. failure/cleanup；
-8. implementation invariants；
-9. formal contract dependencies；
-10. minimum tests。
+Transport 差异不得改变 Frozen Subsystem Control 或 Frame Batch A/B 的 method/field/application semantics。
 
 ## 依赖规则
 
@@ -162,9 +141,11 @@ Transport 差异不得改变 Frozen Subsystem Control / Frame Batch A semantics�
 - Hostra 不承载 Main/business Runtime；
 - Subsystem SDK 不强制 per-Frame Process/Worker/Transport；
 - Frame protocol 不拥有 Render；
+- Caller relationship 不能在 Subsystem 侧成为第二份 authority；
+- Batch B RPC 不能被 Transport adapter 私自扩字段；
 - User Input / Render Update 不经过 Main/Hostra business forwarding；
 - Legacy 文档不能覆盖当前 Contract。
 
 ## 迁移说明
 
-仍存在的旧目录资料只作为迁移/历史参考。与当前模块设计冲突的旧结论必须降级为 Legacy，而不是继续作为实现入口。
+旧目录资料只作为迁移/历史参考。与当前 Contract 冲突的 `system.call`、Frame ready、failed lifecycle、Activation reuse、Frame-owned Render 等结论必须降级为 Legacy，而不是继续作为实现入口。
