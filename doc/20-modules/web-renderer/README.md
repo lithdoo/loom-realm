@@ -5,9 +5,9 @@
 > 稳定程度：Experimental  
 > 主要定义：Web Renderer 内部模块、Render 下行、User Input 上行和呈现依赖方向  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer–Subsystem 协议分层](../../10-architecture/renderer-subsystem-protocol-layers.md)  
-> 最近复核：2026-08-03
+> 最近复核：2026-08-04
 
-## 1. 建议模块
+## 1. 模块结构
 
 ```text
 Web Renderer
@@ -21,55 +21,59 @@ Web Renderer
 ├── Frame Input Registry
 ├── Input Router
 ├── Resource Client
-├── Presentation Clock
 └── Presentation State
 ```
 
-Render 与 User Input 是独立协议域，不建立统一 `Frame Stream Registry`。
+Render 与 User Input 是独立协议域，不建立统一 Frame Stream Registry。
 
-## 2. Main Control Connection
+## 2. Renderer 不是 Frame / Call RPC Participant
 
-接收 Main 的只读控制状态：
+Frame / Call Batch B 的七个 RPC 只存在于：
+
+```text
+Main ⇄ Subsystem Control Connection
+```
+
+Renderer MUST NOT 直接发送或处理：
+
+```text
+frame.initialize
+frame.activate
+frame.suspend
+frame.resume
+frame.close
+frame.call
+frame.return
+```
+
+Renderer 从 **Main ⇄ Renderer Control** 接收这些 RPC 执行后的权威投影：Frame Stack / lifecycle / current Activation / Input Target。
+
+因此 Batch B 不得被实现成 Renderer ⇄ Subsystem Data method namespace。
+
+## 3. Main Control Connection / Store
+
+Renderer 接收 Main 的只读控制状态：
 
 - Session；
 - Subsystem Runtime State；
-- Frame Stack；
+- Frame Stack / order；
 - Frame lifecycle mirror；
 - current Activation；
 - Input Target；
-- Data Connection Grant / revoke / replace；
-- session errors / diagnostics。
+- Data Grant / revoke / replace；
+- session diagnostics。
 
 不接收 ordinary User Input payload 或 Render Update。
-
-Renderer MUST NOT 创建公共 `frameId` / `activationId` 或修改 Frame lifecycle。
-
-## 3. Control State Store
-
-保存 Main 的只读镜像：
-
-```text
-Session State
-Subsystem Runtime State
-Stack Revision
-Frame descriptors / order
-Frame → Subsystem mapping
-Frame lifecycle
-current Activation
-Input Target
-System Data Grants
-```
-
-Frame Batch A 不变量必须保持：
 
 ```text
 stable Stack Top = active
 lower live Frames = suspended
 only active Frame has current Activation
-no Frame ready / initialized / frame.status
 ```
 
-Renderer 不保存 Frame visibility，也不从 Stack 推导 Render visibility/z-order。
+Renderer 不创建公共 `frameId / activationId`，不修改 lifecycle，不恢复 revoked Activation。
+
+Caller relationship 如果未来出现在 Renderer Stack descriptor，只能是 Main 的只读投影；Renderer 不需要它执行 `frame.return`，因为 Renderer 根本不是该 RPC 的参与方。
 
 ## 4. System Data Connection Registry
 
@@ -84,48 +88,17 @@ interface SystemDataConnectionRecord {
 }
 ```
 
-职责：
-
-- 每 Subsystem 最多一条有效 Data Transport；
-- 根据 Main Grant 建立/认证/替换/关闭；
-- 下行 Render → Render domain；
-- 上行 User Input → Input domain；
-- Transport 断开时停止 ordinary input 并进入 Connection recovery；
-- 不根据 Frame 数量决定 Connection 是否存在。
+每 Subsystem 最多一条有效 Data Transport，根据 Main Grant 建立/认证/替换/关闭，不根据 Frame 数量决定 Connection 是否存在。
 
 ## 5. Render Registry / Store
 
-Render Registry 管理 Subsystem-owned Render Context：
+Render Registry 管理 Subsystem-owned Render Context。Render Record 不包含 frameId ownership。
 
-```text
-Subsystem Connection
-└── Render identity
-    └── Render Store / Scope / Node
-```
+Frame `suspended / closing / closed` 不删除 Render Store；只有 Render Protocol 显式 lifecycle 改变 Render Context。
 
-Render Record 不包含 `frameId` ownership。
+Render Scheduler 不读取 Frame Stack 决定 visibility/order/destroy。
 
-Frame `suspended / closing / closed` 不删除 Render Store。只有 Render Protocol 显式 lifecycle 可以改变 Render Context。
-
-## 6. Render Validation / Scheduler
-
-Render 消息至少校验：
-
-- correct Subsystem Data Connection；
-- Render identity；
-- Revision；
-- tree/schema/size limits；
-- node/tag/event validity。
-
-Render 错误不得自动修改 Frame Stack / Activation / Input Target。
-
-Scheduler 不读取 Frame Stack 来决定 Render visibility/order/destroy。
-
-## 7. Frame Input Registry
-
-Frame Input Registry 只镜像输入域。
-
-概念记录：
+## 6. Frame Input Registry
 
 ```ts
 type FrameLifecycleState =
@@ -143,57 +116,52 @@ interface FrameInputRecord {
 }
 ```
 
-Renderer 实现必须验证 Main snapshot 自洽：
+Renderer 必须验证：active → activationId != null；其他 lifecycle → activationId == null。
 
-```text
-active
-    activationId != null
+Renderer 不创建 lifecycle `failed`。`completed / cancelled / failed` 如果未来需要显示，只是 outcome/diagnostic。
 
-starting / suspended / closing / closed
-    activationId == null
-```
-
-Renderer 不需要、也不得创建 lifecycle `failed`。`completed / cancelled / failed` 如果未来需要呈现在 Renderer Control State，只能作为 call outcome / diagnostic，不是 Frame lifecycle。
-
-## 8. Input Router
-
-ordinary input 路由：
+## 7. Input Router
 
 ```text
 raw browser input
 → normalize
-→ read Main-declared current Input Target
-→ verify target Frame mirror is active
-→ verify target activationId == Frame current Activation
-→ choose target Subsystem Data Connection
+→ read Main current Input Target
+→ require mirrored Frame active
+→ require target activationId == current Activation
+→ choose Subsystem Data Connection
 → User Input Protocol
 ```
 
-Renderer MUST NOT：
+Renderer MUST NOT 为非 active Frame 发送 ordinary input，不使用历史 Activation，不根据 Render focus/z-index 改变 Input Target。
 
-- 为 suspended/closing/closed Frame 发送 ordinary input；
-- 使用历史 Activation；
-- 在 Main 没有发布新 Activation 时自行恢复旧 Activation；
-- 根据 Render focus/z-index 改变公共 Input Target。
+Input Target/Activation 改变时的 input reset 由 User Input Protocol 冻结。
 
-Input Target / Activation 改变时需要释放持续输入；具体 reset wire 语义由 User Input Protocol 冻结。
+## 8. Batch C Interface
 
-## 9. Stale Activation
-
-Frame Batch A 冻结：revoked Activation 永久无效。
-
-因此 Renderer reload / reconnect 后：
+Batch B 已保证 Subsystem 侧：
 
 ```text
-MUST restore only current Activation from Main
-MUST NOT revive cached historical Activation
+frame.activate success
+    first Activation installed
+
+frame.resume success
+    Child outcome delivered + replacement Activation installed
 ```
 
-本地缓存可以用于诊断，但不能成为输入 authority。
+Renderer 何时看到该 Activation 仍由 Batch C + Main ⇄ Renderer Control 冻结。
 
-## 10. Render 与 Frame Independence
+因此当前实现 MUST NOT 假设：
 
-以下全部禁止：
+```text
+Main generated activationId
+    ⇒ Renderer immediately may send input
+```
+
+必须等待未来冻结的 Main publish commit point。
+
+## 9. Render / Frame Independence
+
+禁止：
 
 ```text
 active Frame → only visible Render
@@ -205,17 +173,7 @@ Activation replacement → Render resync
 
 Render 与 Input 只共享 physical Data Connection。
 
-## 11. Resource Client
-
-通过只读 Content API 获取逻辑资源。资源 cache 生命周期不按 Frame close 自动清空。
-
-## 12. Presentation State
-
-Presentation State 只保存 DOM/Canvas/GPU refs、animation、interpolation、focus/scroll/hover、audio/particle 等非权威表现状态。
-
-不得成为 Frame / business / Render protocol authority。
-
-## 13. Renderer Reload
+## 10. Renderer Reload
 
 ```text
 reconnect Main
@@ -226,19 +184,13 @@ reconnect Main
 → each Subsystem independently restores Render State
 ```
 
-关键：
+current Main state 是 Frame authority；cached Activation / Render Store 都不是。
 
-```text
-current Main state is authority
-cached Activation is not authority
-Render Store is not Frame authority
-```
+## 11. Core Invariants
 
-## 14. Core Invariants
-
+- Renderer 不参与 Batch B Frame RPC；
 - Renderer only mirrors Frame authority；
 - frameId / activationId 只能来自 Main；
-- Frame lifecycle mirror = `starting / active / suspended / closing / closed`；
 - no Frame ready/status；
 - only active Frame has current Activation；
 - revoked Activation never reactivates；
