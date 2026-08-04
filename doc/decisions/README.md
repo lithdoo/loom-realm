@@ -21,6 +21,7 @@
 10. [冻结 Frame / Call Protocol v1 Batch A](./0010-freeze-frame-call-protocol-v1-batch-a.md)
 11. [冻结 Frame / Call Protocol v1 Batch B](./0011-freeze-frame-call-protocol-v1-batch-b.md)
 12. [冻结 Frame / Call Protocol v1 Batch C](./0012-freeze-frame-call-protocol-v1-batch-c.md)
+13. [冻结 Frame / Call Protocol v1 Batch D](./0013-freeze-frame-call-protocol-v1-batch-d.md)
 
 ## 当前替代 / 补充关系
 
@@ -33,7 +34,9 @@
 - ADR 0011 冻结七方法 wire surface、FrameOutcome Schema、Caller relationship 不下发、`frame.resume` outcome+new Activation 局部原子语义和 `frame.call` 非 long-running result RPC；
 - ADR 0012 冻结 Stack transaction / acceptance barrier / InputTarget causal barrier / rollback boundary，并明确 ordinary `frame.call` 不依赖反向 `frame.suspend`、same-Subsystem recursive call 不依赖 nested request-handler reentrancy；
 - ADR 0012 进一步冻结：pre-commit 可 abort，post-commit 只能 forward recovery；revoked Activation 和 accepted terminal outcome 不可恢复/撤销；
-- 旧 `system.call / system.return / frame.result / frame.close(reason)` 不进入 Frame / Call v1。
+- ADR 0013 冻结 Frame error/timeout/retry/cancellation：明确 Success / Explicit Error / Ambiguous 三分法、finite deadline、no app retry/replay、recoverable initialize/call rejection、control divergence Runtime-fatal 与 no caller-driven cancel；
+- ADR 0013 进一步明确 Frame Control timeout/divergence/protocol error 进入 Runtime failure path，具体 Stack unwind 留给 Batch E；
+- 旧 `system.call / system.return / frame.result / frame.close(reason) / frame.cancel` 不进入 Frame / Call v1。
 
 ## 维护规则
 
@@ -41,4 +44,4 @@
 - 架构文档保存当前有效结论，ADR 保存结论形成过程；
 - 契约发生不兼容变化时必须提升协议版本或提供迁移；
 - 分批冻结协议时，后续批次不得静默改变已 Frozen 批次；
-- Transport/Profile 实现不得通过平台差异覆盖已冻结应用层 transaction semantics。
+- Transport/Profile 实现不得通过平台差异覆盖已冻结应用层 transaction/error semantics。
