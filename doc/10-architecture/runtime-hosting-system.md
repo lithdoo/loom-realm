@@ -14,31 +14,7 @@
 
 > 每个 Subsystem 对应一个可复用 Runtime Container；Frame 是 Main-owned call / ordinary User Input Context；Render 是 Subsystem-owned presentation Context。Frame 与 Render 都不是独立 Process / Worker / physical connection，也没有平台级 ownership 绑定。
 
-## 2. 核心术语与粒度
-
-```text
-Subsystem Descriptor
-    identity = key
-
-Runtime Container
-    Desktop = OS Process
-    PWA = Dedicated Worker
-
-Main Control Connection
-    one long-lived control transport per Runtime
-
-System Data Connection
-    at most one Renderer data transport per Runtime
-
-Frame
-    Main-owned call / ordinary input Context
-
-Activation
-    one-shot ordinary input epoch for active Frame
-
-Render Context
-    Subsystem-owned presentation Context
-```
+## 2. 粒度
 
 ```text
 one descriptor.key
@@ -55,15 +31,11 @@ PID、Worker identity、Connection ID、Frame ID、Activation ID、Render identi
 
 ## 3. Runtime Bootstrap / Lifecycle
 
-Desktop：
-
 ```text
 validate Descriptor / entry / env
 → resolve Launcher Target
-→ Launch Attempt / Token
-→ token registration
+→ Launch Attempt / Token registration
 → spawn + Supervisor
-→ public state starting
 → Control connect
 → subsystem.hello
 → identified
@@ -71,33 +43,23 @@ validate Descriptor / entry / env
 → ready
 ```
 
-因此：
-
 ```text
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-正常 shutdown：
+normal shutdown = Main shutdown intent → `subsystem.shutdown` → optional stopping → Supervisor confirms actual termination → stopped。
 
-```text
-Main shutdown intent
-→ subsystem.shutdown
-→ optional status(stopping)
-→ Supervisor confirms actual termination
-→ stopped
-```
-
-无 shutdown intent 的 Runtime exit / Control loss 是 failure，即使 exit code = 0。Subsystem Control v1 无 application heartbeat、same-attempt reconnect / resume、automatic restart。
+无 shutdown intent 的 Runtime exit / Control loss 是 failure，即使 exit code = 0。Subsystem Control v1 无 application heartbeat、same-attempt reconnect/resume、automatic restart。
 
 ## 4. Container Shared State
 
-Runtime Container MAY 共享 Subsystem code/schema、Data Connection、Content Client、Repository cache、immutable content、WASM/texture metadata、Subsystem-defined business state、Render Manager/Registry。
+Runtime Container MAY 共享 Subsystem code/schema、Data Connection、Content Client、Repository cache、immutable content、Subsystem-defined business state、Render Manager/Registry。
 
 平台只要求不同 Frame 的公共 identity / input authority 不混淆，不要求 business state、Runtime Core、Tick 或 Projector 按 Frame 拆分。
 
-## 5. Frame Batch A 承载边界
+## 5. Frame A/B/C 承载边界
 
-Batch A 已冻结：
+Frame / Call Batch A/B/C 已 Frozen。
 
 ```text
 frameId
@@ -107,131 +69,110 @@ Frame → Subsystem
     permanent descriptor.key assignment
 
 callerFrameId
-    Main-owned / immutable relationship
+    Main-owned / immutable
 
 lifecycle
     starting / active / suspended / closing / closed
 
 outcome
     completed / cancelled / failed
-    separate from lifecycle
 
 Activation
-    only active Frame owns current Activation
-    Main-generated / Session unique / never reused
-    revoked Activation never becomes valid again
+    active only / one-shot / never reused / never rolls back
 ```
 
-Container 内 Subsystem Frame/Input Context **不要求保存公共 caller relationship 副本**。Caller/Stack authority 留在 Main；业务若需要调用来源，应通过业务 `input` 显式传递。
+Subsystem Frame/Input Context 不要求保存公共 caller relationship 副本。Caller/Stack authority 留在 Main。
 
-Subsystem Context 至少需要能够按 `frameId` 执行 lifecycle control，并在 active 时维护当前 Activation 以校验 ordinary input。
-
-Frame v1 没有独立 `ready / initialized / frame.status`。
-
-## 6. Frame Batch B Control Surface
-
-Frame / Call Batch B 已冻结七个 JSON-RPC Request，并运行于已经认证的 Main Control Connection：
+Frozen control surface：
 
 ```text
 Main → Subsystem
-    frame.initialize({ frameId, input })
-    frame.activate({ frameId, activationId })
-    frame.suspend({ frameId, activationId })
-    frame.resume({ frameId, activationId, returnedFrameId, result })
-    frame.close({ frameId })
+    frame.initialize
+    frame.activate
+    frame.suspend
+    frame.resume
+    frame.close
 
 Subsystem → Main
-    frame.call({ frameId, activationId, targetSubsystemKey, input })
-        → { childFrameId }
-    frame.return({ frameId, activationId, result })
-        → {}
+    frame.call
+    frame.return
 ```
 
-承载层不得：
+## 6. Transaction Hosting Requirements
 
-- 重复携带 source `systemId / subsystemKey`；source identity 来自 Control Connection；
-- 把 `callerFrameId` 加到 initialize/return wire；
-- 给 `frame.close` 增加 reason；
-- 增加 `frame.result`；
-- 使用 `system.call / system.return`；
-- 把 `frame.resume` 拆成 resume + activate；
-- 让 `frame.call` 长时间等待 Child 最终业务结果。
+ordinary `frame.call` transaction 不使用 reverse `frame.suspend` 建立 Caller suspension。
 
-Child outcome 固定沿 `frame.return → Main → frame.resume` 交付。
-
-## 7. Stack / Activation Stable State
-
-Main-owned 单一 LIFO Stack 稳定状态：
+承载层必须支持：
 
 ```text
-Stack Top
-    active + current Activation
-
-all lower live Frames
-    suspended + no current Activation
+frame.call Request
+→ Main acceptance commit
+→ frame.call Response
+→ dependent child initialize / activate
 ```
 
-事务切换中 MAY 短暂无 active Frame，但不得同时存在两个 ordinary Input Target。
-
-Frame 只在目标 Runtime：
+以及：
 
 ```text
-observed state == ready
-AND shutdownIntent == null
+frame.return Request
+→ Main acceptance commit
+→ frame.return Response
+→ dependent close / resume
 ```
 
-时建立。
+因此 Desktop/PWA Transport adapter MUST NOT 要求“入站 Request handler pending 时同时处理并等待反向 Frame Request”才能保证正确性。
 
-Batch C 将冻结这些 Batch B RPC 之间的精确事务顺序、Input Target publish barrier 与 rollback。
+same-Subsystem recursive call 可以复用同一个 Runtime Container / Control Connection，但仍必须建立新的 childFrameId / Activation，并按 Main-owned Stack transaction push/pop。
 
-## 8. Render 承载边界
+## 7. Activation / InputTarget Barrier
 
-Render Context 由 Runtime Container 创建、更新和销毁。
+承载差异不得改变：
 
-Container 可以 zero Frame 时拥有 Render、Frame suspended 时继续更新 Render、Frame closed 后保留 Render、同时维护多个 Render，也可以内部显式关联 Frame 与 Render。
+```text
+frame.activate ACK
+    happens-before Child InputTarget publication
+
+frame.resume ACK
+    happens-before Caller replacement InputTarget publication
+```
+
+事务 gap 中 `InputTarget=null` 合法。old Activation commit revoked 后永久不能重新合法。
+
+Pre-commit failure 可 abort；Post-commit failure只能 forward recovery，不得恢复旧 Activation或撤销 accepted terminal outcome。
+
+## 8. `frame.suspend` Role
+
+`frame.suspend` 保留为 Main 主动 quiesce / terminal preparation 原语，不是 ordinary call establishment step。
+
+ACK 后才允许 commit active→suspended / old Activation revoke / InputTarget clear。后续若重新 active 必须使用 fresh Activation。
+
+## 9. Render 承载边界
+
+Render Context 完全由 Runtime Container 创建、更新、销毁。Container 可以 zero Frame 时拥有 Render、Frame suspended 时继续更新 Render、Frame closed 后保留 Render。
 
 Main 不维护 Render Registry；Renderer 不从 Stack 推导 Render 集合。
 
-## 9. Main Ownership
+## 10. Main Ownership
 
-Main 拥有：
-
-```text
-Session
-Subsystem Descriptor / Runtime Registry
-Launch Attempt / Runtime Supervisor
-Runtime shutdown intent
-Frame Registry / Stack
-caller relationship / lifecycle / outcome
-Activation / Input Target
-Control Connection Authority
-System Data Connection Authority
-```
+Main 拥有：Runtime Registry/Supervisor/shutdown intent、Frame Registry/Stack/caller/lifecycle/outcome、Frame transaction commit、Activation/InputTarget、Connection authority。
 
 Main 不拥有 Subsystem business state / Render Registry，也不转发 ordinary User Input / Render Update payload。
 
-## 10. Desktop / PWA Profile
+## 11. Desktop / PWA Profile
 
-Desktop：Main Process、FSDB Content Service、Hostra、per-Subsystem Process；Control/Data = localhost WebSocket，Content = HTTP。
+Desktop：Main Process + per-Subsystem Process；Control/Data = localhost WebSocket。
 
-PWA：Window、Main Dedicated Worker、per-Subsystem Dedicated Worker、Service Worker、OPFS/Cache；Control/Data = MessagePort。
+PWA：Main Dedicated Worker + per-Subsystem Dedicated Worker；Control/Data = MessagePort。
 
-PWA Descriptor→Worker Script、Bootstrap Credential、Control Transport 尚未冻结，但未来 Profile MUST 保持 Subsystem Control v1 与 Frame Batch A/B **应用层方法与字段语义**，不得因 Transport 改名或扩字段。
+PWA Descriptor→Worker Script、Bootstrap Credential、Control Transport 尚未冻结，但 future Profile MUST 保持 Subsystem Control v1 与 Frame Batch A/B/C 应用语义，包括 Response-before-dependent-RPC、ACK-before-publish 和 post-commit no rollback。
 
 Desktop `nodejs` executable code 当前属于 trusted code；safe launcher entry 不等于 OS sandbox。
 
-## 11. System Data Connection Lifecycle
+## 12. System Data Connection Lifecycle
 
-System Data Connection 可以同时服务：
+Data Connection 可以同时服务 0..N Frame Input Context + 0..N Render Context。Frame create/close 或 Render create/destroy 不隐式创建/关闭 Data Connection；Runtime termination 才使对应 Connection authority 失效。
 
-```text
-0..N Frame Input Context
-0..N Render Context
-```
-
-因此 Frame create/close 不创建/关闭 Data Connection，Render create/destroy 也不创建/关闭 Data Connection；zero Frame 时 Connection 可继续存在；Runtime termination 才使对应 Connection authority 失效。
-
-## 12. Container Failure
+## 13. Container Failure
 
 Runtime terminal failure：
 
@@ -239,27 +180,24 @@ Runtime terminal failure：
 Main marks Runtime failed
 → revoke Data Connection authority
 → revoke affected current Activation
-→ stop affected ordinary input
-→ Frame / Call Batch E performs deterministic unwind
-→ Render cleanup/recovery remains Render Protocol concern
+→ stop ordinary input
+→ Batch E deterministic Frame unwind
+→ Render recovery remains Render Protocol concern
 ```
 
-Runtime failure 不意味着 Frame lifecycle = `failed`。`failed` 是 outcome；Frame Context cleanup 仍通过 `closing → closed`。
+Runtime failure 不意味着 Frame lifecycle=`failed`；failed 是 outcome，cleanup 仍通过 `closing→closed`。
 
-## 13. 核心不变量
+## 14. 核心不变量
 
-1. Process / Worker isolation granularity = Subsystem；
+1. Process/Worker isolation granularity = Subsystem；
 2. one Subsystem → at most one active Runtime Container；
 3. one Runtime → 0..N Frame + 0..N Render；
-4. Frame 是 Main-owned call/input Context；
-5. Caller relationship Main-owned，不要求 Subsystem 保存公共副本；
-6. Frame lifecycle = `starting / active / suspended / closing / closed`；
-7. Frame outcome 与 lifecycle 分离；
-8. only active Frame owns current Activation；revoked Activation never reuses；
-9. Batch B exactly seven JSON-RPC Request methods；
-10. `frame.call` 非 long-running result RPC；`frame.resume` 同时 outcome + replacement Activation；
+4. Caller/Stack/transaction authority = Main；
+5. Frame lifecycle/outcome 分离；
+6. Batch B exactly seven Requests；
+7. ordinary call 不依赖 reverse `frame.suspend`；
+8. call/return Response precedes dependent reverse RPC；
+9. activate/resume ACK precedes InputTarget publication；
+10. post-commit failure只 forward recover；
 11. Render lifecycle 完全属于 Subsystem；
-12. Frame/Data Connection/Render lifecycle 无隐式联动；
-13. `spawn success ≠ connected ≠ identified ≠ ready`；
-14. `stopped` 只来自 actual Runtime termination observation；
-15. Desktop/PWA Transport 差异不得改变 Frozen application semantics。
+12. Desktop/PWA Transport 差异不得改变 Frozen application semantics。
