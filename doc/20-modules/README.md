@@ -13,56 +13,30 @@
 
 | 系统 | 模块入口 | 说明 |
 |---|---|---|
-| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Supervisor、Activation、Frame/Call Coordinator、Control/Data Grant |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | Main Control mirror、System Connection、Render Store、Frame Input、DOM/Canvas/WebGL |
+| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Supervisor、Activation、Frame Transaction Coordinator、Control/Data Grant |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main committed Control mirror、System Connection、Render Store、Frame Input |
 | Game Package | [game-package](./game-package/README.md) | Manifest/Entry/Descriptor Loader、Launcher Entry Validator、Catalog、Repository |
-| FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop HTTP 与 PWA Service Worker 的统一只读 Content API |
-| `loom.map` | [loom-map](./loom-map/README.md) | Subsystem/Frame Control Adapter、Frame Input、Runtime、Render Manager/Projector |
+| FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop/PWA 统一只读 Content API |
+| `loom.map` | [loom-map](./loom-map/README.md) | Subsystem/Frame Adapter、Mutation Gate、Frame Input、Runtime、Render Manager/Projector |
 | Desktop Host | [desktop-host](./desktop-host/README.md) | Hostra Window、WebSocket/HTTP、Node Launcher / Process Supervisor |
 | PWA Host | [pwa-host](./pwa-host/README.md) | Main/Subsystem Worker、Control/Data MessagePort、Service Worker、OPFS |
 
 ## 已冻结模块前提
 
 ```text
-Game Package v2 / Desktop Launcher v1
-    Frozen
-
-Subsystem Control v1
-    Frozen
-
-Frame / Call v1
-    Batch A Frozen
-    Batch B Frozen
-    Batch C-F Draft
+Game Package v2 / Desktop Launcher v1   Frozen
+Subsystem Control v1                    Frozen
+Frame / Call Batch A                    Frozen
+Frame / Call Batch B                    Frozen
+Frame / Call Batch C                    Frozen
+Frame / Call Batch D-F                  Draft
 ```
 
-Frame 模块必须统一使用：
+Frame 模块必须统一使用 Main-owned `frameId / subsystemKey / callerFrameId / lifecycle / Stack / Activation / InputTarget`，并保持 outcome 与 lifecycle 分离。
 
-```text
-frameId
-    Main-generated / Session unique / never reused
+## Batch B Adapter
 
-subsystemKey
-    permanent Frame assignment to descriptor.key
-
-callerFrameId
-    Main-owned / immutable
-
-Frame lifecycle
-    starting / active / suspended / closing / closed
-
-Frame outcome
-    completed / cancelled / failed
-    separate from lifecycle
-
-currentActivationId
-    active only
-    unique / never reused / never rolls back
-```
-
-## Batch B 模块接口
-
-Main 与 Subsystem SDK 的公共 Frame adapter 只围绕七个方法实现：
+公共 Frame adapter 只有：
 
 ```text
 frame.initialize
@@ -74,30 +48,39 @@ frame.call
 frame.return
 ```
 
-必须保持：
+Caller 不进入 Subsystem wire；close 无 reason；resume 同时 outcome + replacement Activation；call 非 long-running result RPC；无 `system.call/system.return/frame.result`。
 
-- initialize = `frameId + input`，无 callerFrameId；
-- resume = `frameId + new activationId + returnedFrameId + outcome`；
-- close = `frameId` only；
-- call = current frame/activation + `targetSubsystemKey + input`，result=`childFrameId`；
-- return = current frame/activation + outcome，无 Caller/receiver；
-- `completed.value` 必填，无返回值=`null`；
-- no `system.call / system.return / frame.result / frame.ready / frame.status`。
+## Batch C Module Responsibilities
 
-模块不得创建“更方便的兼容接口”绕过 Frozen Schema。
+### Main
 
-## Runtime Container / Frame / Render
+必须有单一 Stack mutation coordinator：
+
+- Call Acceptance Commit；
+- Return Acceptance Commit；
+- close ACK → pop barrier；
+- activate/resume ACK → InputTarget publish barrier；
+- pre-commit abort / post-commit forward recovery；
+- Response-before-dependent-reverse-RPC ordering。
+
+### Subsystem SDK
+
+outbound call/return pending 必须建立 mutation gate，停止新的 ordinary input dispatch；call success 本地 commit Caller suspended/revoked；return success 本地 commit Child closing/revoked。
+
+ordinary call 不等待 `frame.suspend`；SDK 不应要求 nested request-handler reentrancy。
+
+### Renderer
+
+只镜像 Main 已 commit control state。必须接受 `InputTarget=null` transaction gap；不得在 activate/resume ACK 前获得新 Activation，也不得 revive revoked Activation。
+
+## Runtime / Frame / Render
 
 ```text
 Runtime Container
-    Subsystem business state
-    Control/Data Connection
-    Content/cache
-    Render Manager / Registry
+    Subsystem business state / Control/Data / Render Registry
 
 Frame
-    Main-owned call/input Context
-    lifecycle / caller / current Activation
+    Main-owned call/input Context + transaction state
 
 Render
     Subsystem-owned independent presentation Context
@@ -105,47 +88,28 @@ Render
 
 平台不要求 per-Frame Runtime Core、business state、Execution Loop、Projector 或 Render ownership。
 
-## Renderer 模块边界
-
-```text
-System Data Connection Registry
-├── Render Registry / Store / Scheduler
-└── Frame Input Registry / Input Router
-```
-
-Renderer 只镜像 Main current Frame/Activation/Input Target，不参与 Frame RPC 调用链，不创建或恢复 Activation，也不从 Stack 推导 Render lifecycle。
-
 ## Cross-platform Hosting
 
-```text
-Desktop
-    Main Process
-    per-Subsystem Process
-    WebSocket Control/Data
-    HTTP Content
+Desktop WebSocket 与 PWA MessagePort 都只能映射 Frozen application semantics。Transport MUST NOT：
 
-PWA
-    Main Worker
-    per-Subsystem Worker
-    MessagePort Control/Data
-    Service Worker Content
-```
-
-Transport 差异不得改变 Frozen Subsystem Control 或 Frame Batch A/B 的 method/field/application semantics。
+- 把 ordinary call 改回 reverse `frame.suspend` chain；
+- 在 call/return Response 前依赖反向 Frame RPC；
+- 在 activate/resume ACK 前发布新 Activation；
+- post-commit 恢复旧 Activation；
+- 要求 same-Subsystem recursion 的 nested handler reentrancy。
 
 ## 依赖规则
 
-- Main 不依赖具体地图业务 DTO；
+- Main 不依赖具体地图 DTO；
 - Renderer 不读 package physical path；
 - Game Package Loader 不产生 Runtime side effect；
 - Hostra 不承载 Main/business Runtime；
 - Subsystem SDK 不强制 per-Frame Process/Worker/Transport；
 - Frame protocol 不拥有 Render；
 - Caller relationship 不能在 Subsystem 侧成为第二份 authority；
-- Batch B RPC 不能被 Transport adapter 私自扩字段；
 - User Input / Render Update 不经过 Main/Hostra business forwarding；
 - Legacy 文档不能覆盖当前 Contract。
 
 ## 迁移说明
 
-旧目录资料只作为迁移/历史参考。与当前 Contract 冲突的 `system.call`、Frame ready、failed lifecycle、Activation reuse、Frame-owned Render 等结论必须降级为 Legacy，而不是继续作为实现入口。
+旧资料中 `system.call`、Frame ready、failed lifecycle、Activation reuse、Frame-owned Render、call→reverse-suspend dependency、return-success=caller-resumed 等结论不得继续作为实现入口。
