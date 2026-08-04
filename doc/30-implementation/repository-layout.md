@@ -37,7 +37,7 @@ packages/
 
 ## 2. `frame-call-protocol`
 
-整体仍 Draft，但 **Batch A / B / C 已 Normative / Frozen**。
+整体仍 Draft，但 **Batch A / B / C / D 已 Normative / Frozen**。
 
 包必须提供：
 
@@ -46,83 +46,87 @@ FrameLifecycleState
 FrameOutcome / FrameFailure
 exact seven JSON-RPC method Schema
 identity / Activation validator
-local pre/postcondition validator
 transaction trace / commit-barrier fixture
+semantic error Schema/classifier
+request-result classifier
+Runtime failure diagnostic categories
 ```
 
-Frozen wire：
+Frozen method surface：
 
 ```text
 Main → Subsystem
-    frame.initialize
-    frame.activate
-    frame.suspend
-    frame.resume
-    frame.close
-
+    frame.initialize / activate / suspend / resume / close
 Subsystem → Main
-    frame.call
-    frame.return
+    frame.call / return
 ```
 
-Batch C fixture/utility 必须表达：
+Batch C utility/fixture 表达 Call/Return Acceptance Commit、ACK publication barrier、close ACK before pop、pre/post-commit boundary、Response-before-dependent-RPC。
+
+Batch D utility/fixture 表达：
 
 ```text
-Call Acceptance Commit
-Return Acceptance Commit
-activate/resume ACK publication barrier
-close ACK before pop
-pre-commit abort vs post-commit forward recovery
-Response-before-dependent-reverse-RPC
+Success        → known commit
+Explicit Error → known no-commit
+Timeout/loss   → ambiguous
+finite deadline
+no automatic retry/replay
+recoverable vs Runtime-fatal error classification
 ```
 
-包 MUST NOT：
+Frozen recoverable semantic codes：
 
-- 接受 `system.call / system.return / frame.result / frame.close(reason)`；
-- 把 `callerFrameId` 加入 Subsystem wire；
-- ordinary call 中要求 `frame.suspend`；
-- 把 `frame.call` 变成长时间等待 Child outcome 的 RPC；
-- 把 `frame.resume` 拆成 resume + activate；
-- 在 activate/resume ACK 前标记 Activation 可对 Renderer 发布；
-- 定义 Runtime/Render lifecycle。
+```text
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
+```
+
+Frozen divergence codes：
+
+```text
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
+```
+
+Runtime failure diagnostics：`FRAME_CONTROL_TIMEOUT / FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR`。
+
+包 MUST NOT 定义 operationId/idempotencyKey/dedup journal/replay cache、caller-driven `frame.cancel` 或 Runtime/Render lifecycle。
 
 ## 3. `main-system`
 
-负责 Descriptor/Launcher/Runtime Supervisor、Control Registry、Frame Registry、Activation Registry、Stack Controller、Frame Transaction Coordinator、Renderer Control Publisher 与 Data Connection Authority。
+负责 Descriptor/Launcher/Runtime Supervisor、Control Registry、Frame Registry、Activation Registry、Stack Controller、Frame Transaction Coordinator、Frame RPC Deadline/Failure Classifier、Renderer Control Publisher 与 Data Connection Authority。
 
-建议内部明确拆出：
+建议：
 
 ```text
 FrameMutationCoordinator
     serialize stack mutation
-    call acceptance commit
-    return acceptance commit
-    close/pop barrier
-    resume commit
+    acceptance/commit barriers
     forward-recovery entry
+
+FrameRpcDeadlineManager
+    finite Host/Profile deadline
+    timeout/loss → ambiguous
+    late Response diagnostic-only
+
+FrameErrorClassifier
+    recoverable semantic error
+    divergence
+    protocol failure
 
 RendererControlPublisher
     publish committed state only
 ```
 
-内部 transaction phase 是 Host-private，不得升级成公共 Frame lifecycle。
-
-Main 必须保证：
-
-```text
-frame.call Result
-    before dependent child initialize/activate
-
-frame.return Result
-    before dependent close/resume
-
-activate/resume ACK
-    before corresponding InputTarget publication
-```
+Main 不得 timeout 后 retry，也不得用 Renderer state修复 Frame Control ambiguity。
 
 ## 4. `subsystem-sdk`
 
-至少提供：Bootstrap Context、Subsystem Control v1、Frame RPC dispatcher/client、Frame Input Context Registry、System Data / Render / User Input adapters、Content Client。
+至少提供 Bootstrap Context、Subsystem Control v1、Frame RPC dispatcher/client、Frame Input Context Registry、mutation gate、Frame RPC Deadline Handler、System Data/Render/User Input adapters、Content Client。
 
 Frame adapter：
 
@@ -136,79 +140,50 @@ call(frameId,currentActivationId,targetSubsystemKey,input)
 return(frameId,currentActivationId,outcome)
 ```
 
-SDK 还必须实现 outbound mutation gate：
+SDK mutation gate：call/return pending时停止新 ordinary input、阻止第二个 call/return；Success commit 本地新状态；recoverable Error release gate；timeout/loss MUST NOT release gate back to old Activation，而进入 Runtime failure。
 
-```text
-call/return Request pending
-→ stop new ordinary input dispatch
-→ block second call/return
+合法 initialize 业务拒绝通过 `FRAME_INITIALIZE_REJECTED + FrameFailure`；合法 activate/suspend/resume/close 的 lifecycle/Activation mismatch 是 divergence。
 
-call Success
-→ local Caller suspended + old Activation revoked
-
-return Success
-→ local Frame closing + old Activation revoked
-```
-
-SDK MUST NOT 依赖入站 Request handler pending 时处理反向 Frame Request。
+SDK 不 retry/replay Frame RPC，不实现 operation journal，不提供 caller remote cancel。
 
 ## 5. `web-renderer`
 
-Renderer 只镜像 Main committed control state，不直接解析/发送 Batch B Frame RPC。
+Renderer 只镜像 Main committed control state，不直接解析/发送 Frame RPC。
 
-Frame Input Registry 必须支持：
+Frame Input Registry 支持 `InputTarget=null` gap、new Activation only after Main publication、revoked Activation never revived、no two InputTargets。
 
-```text
-InputTarget=null transaction gap
-new Activation only after Main publication
-revoked Activation never revived
-no two InputTargets
-```
+Frame Control timeout/divergence 不通过 Renderer reload 恢复。
 
-Renderer 不从 Stack 控制 Render lifecycle。
+## 6. Desktop / PWA Transport
 
-## 6. `pwa-host` / Desktop Transport
+Desktop WebSocket 与 PWA MessagePort 都必须保持：Response-before-dependent-RPC、no nested reverse-request requirement、ACK-before-InputTarget-publication、post-commit no rollback、finite Frame RPC deadline、ambiguous-no-retry。
 
-Transport adapter 只映射应用协议，不改 transaction semantics。
-
-Desktop WebSocket 与 PWA MessagePort 都必须保持：
-
-- Response-before-dependent-RPC；
-- no nested reverse-request requirement；
-- ACK-before-InputTarget-publication；
-- post-commit no rollback。
-
-PWA Launcher/Credential/Transport 具体 Profile 尚未冻结。
+底层 TCP/MessagePort delivery mechanics 不得形成第二次 application Frame operation。PWA Launcher/Credential/Transport 具体 Profile 尚未冻结。
 
 ## 7. `map-subsystem`
 
-`loom.map` Frame Adapter 必须：
-
-- 不依赖 Caller wire；
-- outbound call/return 使用 SDK mutation gate；
-- call success 本地 commit suspended/revoked；
-- return success 本地 commit closing/revoked；
-- no-value completion 使用 `value:null`；
-- Frame lifecycle 不隐式改变 Render / Runtime / Data Connection。
+`loom.map` Frame Adapter 必须使用 SDK mutation gate/deadline handler；call/return timeout 进入 Runtime failure；initialize 可以业务 reject；cancelled outcome 由 active Frame 自行 return；Frame lifecycle 不隐式改变 Render/Runtime/Data Connection。
 
 ## 8. `test-subsystems`
 
-建议新增：
+建议包含：
 
 ```text
 same-subsystem-recursive
 no-reentrant-handler
 call-child-init-reject
-call-child-activate-reject
-call-gap-null-target
-return-normal
-return-close-delay
-resume-delay
+call-target-unavailable
+frame-rpc-timeout
+late-frame-response
+frame-state-divergence
+activation-divergence
+invalid-frame-schema
+call-timeout-gate-held
+return-timeout-gate-held
+callee-cancelled
 postcommit-no-rollback
 stale-activation
 ```
-
-并保留 Launcher/Control、schema-invalid、multi-frame-input、render-without-frame 等 fixture。
 
 ## 9. 依赖规则
 
@@ -229,9 +204,9 @@ map-subsystem
     → subsystem-sdk / render / input / content contracts
 ```
 
-禁止 Main/SDK/Host adapter 私自改变 A/B/C Frozen semantics。
+禁止 Main/SDK/Host adapter 私自改变 A/B/C/D Frozen semantics。
 
-## 10. Schema / Transaction Fixture Layout
+## 10. Fixture Layout
 
 建议：
 
@@ -242,18 +217,20 @@ frame-call-protocol/
 ├── src/
 │   ├── lifecycle.ts
 │   ├── activation.ts
-│   └── transaction-invariants.ts
+│   ├── transaction-invariants.ts
+│   └── errors.ts
 └── test-fixtures/
     ├── schema/
-    └── transactions/
+    ├── transactions/
+    └── errors-timeouts/
 ```
 
-Batch C transaction fixtures 至少包含 initial activate-before-publish、call Response-before-child-RPC、ordinary call no-suspend、same-Subsystem no-reentrant-handler、post-call failure fresh resume、return Response-before-close、close-ACK-before-pop、resume-ACK-before-publish、post-commit no rollback。
+Batch D fixtures 至少覆盖 finite deadline、no retry、late Response ignored for state、initialize rejection、target unavailable、divergence fatal、protocol error fatal、call/return timeout mutation gate、no caller-driven cancel。
 
 ## 11. 其他协议包
 
-`subsystem-control-protocol` 保持 Active/Normative/Frozen；Connection/Render/User Input/Render State 继续独立冻结。Connection heartbeat/reconnect 不得改写 Subsystem Control 或 Frame transaction semantics。
+`subsystem-control-protocol` 保持 Active/Normative/Frozen；Connection/Render/User Input/Render State 独立冻结。Connection heartbeat/reconnect 不得改写 Frame timeout/error semantics。
 
 ## 12. 发布策略
 
-第一阶段可保持 monorepo + unified version。Frame / Call 在 Batch F 前整体仍 pre-stable / Draft，但 A/B/C 已冻结部分必须接受兼容性检查，不能被普通实现重构静默修改。
+第一阶段可保持 monorepo + unified version。Frame / Call 在 Batch F 前整体仍 Draft，但 A/B/C/D 已冻结部分必须接受兼容性检查；Batch E 只补 Runtime failure unwind，Batch F 完成 limits/fixtures/profile/version。
