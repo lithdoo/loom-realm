@@ -3,7 +3,7 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：LoomRealm Main 的内部模块边界  
+> 主要定义：LoomRealm Main 内部模块边界、Frame transaction coordinator 与 Runtime supervision  
 > 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
 
@@ -13,8 +13,7 @@
 Main System
 ├── Game Package Bootstrap
 ├── Subsystem Descriptor Registry
-├── Launcher Target Resolver
-├── Launcher Registry / Dispatcher
+├── Launcher Target Resolver / Dispatcher
 ├── Launch Attempt Registry
 ├── Runtime Container Registry
 ├── Runtime Supervisor
@@ -28,135 +27,17 @@ Main System
 └── Content Grant Authority
 ```
 
-## 2. Game Package Bootstrap
+## 2. Runtime Bootstrap / Control
 
-负责读取 Manifest / Entry / initial target 与全部 Subsystem Descriptor，在产生任何业务 Process side effect 前完成 Descriptor Schema、duplicate `key`、Launcher、Entry 与 env 集合级校验并建立 Descriptor Registry。
+Game Package Bootstrap 在产生 Process side effect 前完成全部 Descriptor/Entry/env 校验。Launcher 只接受安全解析后的 target，使用 Host-selected Node、`shell=false`、固定 cwd、显式 child environment。
 
-不负责解释 Subsystem 业务输入，不根据 Legacy `systemId` 猜 Provider，也不把首次 Frame 调用当 Runtime 启动触发器。
+Runtime Supervisor 负责真实 Process existence/termination；Control Connection Registry 实现 Frozen Subsystem Control v1：hello/status/shutdown、connection-bound `descriptor.key`、Main shutdown intent、semantic error envelope 与 wire limits。
 
-## 3. Subsystem Descriptor Registry
+`spawn success ≠ connected ≠ identified ≠ ready`；`stopped` 只来自 Supervisor observation；v1 无 automatic restart / same-attempt reconnect / application heartbeat。
 
-```ts
-interface SubsystemDescriptorRecord {
-  readonly key: string;
-  readonly launcherType: "nodejs";
-  readonly entry: string;
-  readonly env: Readonly<Record<string, string>>;
-}
-```
+## 3. Frame Registry
 
-当前所有 Descriptor eager / required；`key` 唯一且大小写敏感；Desktop 只接受 `nodejs`。
-
-Registry 保存逻辑 Descriptor，不保存 Process Handle、物理 Entry 或 Render Registry。
-
-## 4. Launcher Target Resolver / Dispatcher
-
-Resolver 实现 Game Package v2 与 Node.js Launcher Profile v1：
-
-```text
-logical entry
-→ resolve against trusted Installation Root
-→ reject redirect / escape
-→ verify regular file
-→ canonical containment
-→ ResolvedLauncherTarget
-```
-
-Launcher 只接受已验证目标，使用 Host-selected Node.js，`shell=false`、`cwd=Installation Root`、显式 child environment，不接受 Game-supplied Node executable / flags / argv。
-
-## 5. Launch Attempt Registry
-
-```ts
-interface LaunchAttemptRecord {
-  readonly launchId: string;
-  readonly subsystemKey: string;
-  readonly target: ResolvedLauncherTarget;
-  readonly bootstrapToken: string;
-  readonly state: "prepared" | "spawning" | "supervised" | "exited" | "failed";
-}
-```
-
-每次 Launch Attempt 使用新 Token；Token 必须在 Process spawn 前注册；spawn/early-exit/cancel 时 revoke 未 consumed Token。`launchId`、PID、Process Handle 不是协议 identity。
-
-## 6. Runtime Container Registry
-
-```ts
-interface RuntimeContainerRecord {
-  readonly subsystemKey: string;
-  readonly launchId: string;
-  readonly controlConnectionId: string | null;
-  readonly rendererDataConnectionId: string | null;
-  readonly frameIds: ReadonlySet<string>;
-
-  readonly shutdownIntent: null | {
-    readonly reason: "session-end" | "bootstrap-abort";
-  };
-
-  readonly status:
-    | "declared"
-    | "starting"
-    | "connected"
-    | "identified"
-    | "ready"
-    | "stopping"
-    | "stopped"
-    | "failed";
-}
-```
-
-```text
-spawn success          → still starting
-Control accepted       → connected
-hello accepted         → identified
-status(ready) accepted → ready
-Main shutdown intent   → stopping
-Supervisor expected exit → stopped
-unexpected loss/failure  → failed
-```
-
-Runtime self-report 与 Main-observed state 必须分开；`stopped` 只来自 Supervisor observation。
-
-## 7. Runtime Supervisor
-
-Desktop Supervisor 持有 Process Handle，监听 spawn/exit/signal，区分 expected/unexpected exit，执行有限 graceful deadline 与强制终止。
-
-冻结语义：
-
-- ready 前退出 → Game Bootstrap failure；
-- ready 后、无 shutdown intent 的任何退出 → Runtime failure；
-- exit code 0 不表示正常；
-- shutdown intent 下确认 Runtime 不存在 → `stopped`；
-- terminal `failed` 不因后续 exit 改回 `stopped`；
-- v1 不自动 restart。
-
-## 8. Control Connection Registry
-
-实现 Frozen Subsystem Control Protocol v1：
-
-```text
-connected
-→ subsystem.hello
-→ identified
-→ subsystem.status(initializing?)
-→ subsystem.status(ready)
-
-normal termination:
-Main shutdown intent
-→ subsystem.shutdown(reason)
-→ subsystem.status(stopping) [optional]
-→ Supervisor confirms exit
-→ stopped
-```
-
-职责包括 Bootstrap Credential/version/identity 校验、Runtime status state machine、shutdown intent、semantic error envelope、wire limits 与 connection-loss failure handling。
-
-它还向 Frame / Call Protocol 提供已经认证且 connection-bound `descriptor.key` 的物理 Control Connection。
-
-Subsystem Control v1 无 application heartbeat、same-attempt reconnect / resume 或 automatic restart。
-
-## 9. Frame Registry
-
-Frame / Call Protocol v1 Batch A/B 已冻结 Frame identity/lifecycle/Activation 与 wire Outcome。
+Frame / Call Batch A/B/C 已 Frozen。
 
 ```ts
 type FrameLifecycleState =
@@ -196,35 +77,26 @@ interface FrameRecord {
 }
 ```
 
-Registry 必须保证：
+Registry 必须保证：frameId Session unique/never reused；subsystemKey permanent；callerFrameId Main-owned immutable；只有 active Frame 有 current Activation；outcome 与 lifecycle 分离。
 
-```text
-frameId       Main-generated / Session unique / never reused
-subsystemKey  permanent descriptor.key assignment
-callerFrameId Main-owned / immutable
-active        currentActivationId != null
-other states  currentActivationId == null
-```
+不得保存 Render/Data Transport 作为 Frame-owned state，不得使用 `status=failed` 代替 `closing→closed`。
 
-不得使用 `status=failed` 代替 cleanup lifecycle，不得加入 Frame `ready/initialized`，不得复用 frameId/Activation，也不得保存 Render/Data Transport 作为 Frame-owned state。
-
-## 10. Activation Registry
+## 4. Activation Registry
 
 Main 是 Activation 唯一签发方。
 
-每次 Frame first active 或 suspended Frame 被恢复时都创建新的 Session-unique `activationId`。
-
 ```text
-Activation never rolls back.
-Activation never resumes.
-Revoked Activation never becomes valid again.
+first active        → fresh Activation
+resume              → fresh Activation
+leave active        → revoke old Activation
+revoked             → never valid again
 ```
 
-Frame 离开 `active` 时，旧 Activation 必须 revoke。
+Activation never rolls back / resumes / reuses。
 
-## 11. Frame / Call RPC Adapter
+## 5. Frame / Call RPC Adapter
 
-Batch B 冻结的完整 wire surface：
+Frozen exact wire：
 
 ```text
 Main → Subsystem
@@ -241,123 +113,202 @@ Subsystem → Main
         → {}
 ```
 
-全部是 JSON-RPC Request，params/result 使用 closed schema。
+全部是 JSON-RPC Request，closed schema。
 
-Main Adapter MUST NOT：
+Adapter MUST NOT 接受 `system.call/system.return`、`frame.result`、close reason、Caller wire field 或 source system identity 变体。
 
-- 接受 `system.call / system.return` 作为 v1 方法；
-- 在 `frame.initialize` 或 `frame.return` wire 中要求 `callerFrameId`；
-- 在 Main→Subsystem RPC 中重复 source `systemId / subsystemKey`；
-- 给 `frame.close` 增加实现私有 reason；
-- 增加独立 `frame.result`；
-- 把 `FrameOutcome.failed` 当 JSON-RPC Error；
-- 把无业务返回值编码为缺失 `completed.value`，必须使用 `null`。
+## 6. Stack Mutation Coordinator
 
-结构性 Schema 错误使用 JSON-RPC `-32602`；稳定 semantic error 与 fatal/local policy 等 Batch D。
+单一 Frame Stack 的 commit-sensitive mutation MUST 串行执行。
 
-## 12. Frame Stack Controller / Call Coordinator
+Coordinator 建议显式维护内部 transaction record，例如：
 
-Frame Stack Controller：
-
-- 持有 Main-owned 单一 LIFO Stack；
-- 稳定状态 Stack Top = `active`，其他 live Frame = `suspended`；
-- 只有当前 active Stack Top 可 ordinary `frame.call / frame.return`；
-- 维护 Stack Revision 与 Input Target；
-- 串行提交栈变化；
-- 事务期间允许短暂零 active Frame；
-- MUST NOT 发布两个 ordinary Input Target；
-- 不发布 Render visibility / z-order。
-
-Call Coordinator 只能在 ready 且无 shutdown intent 的 Runtime 上建立 Frame。
-
-Batch B 已确定局部操作语义：
-
-```text
-frame.initialize  create target-side Frame Context
-frame.activate    install first Activation
-frame.suspend     revoke current Activation
-frame.resume      deliver Child Outcome + install replacement Activation
-frame.close       delete target-side Frame Context
-frame.call        request creation of Child call
-frame.return      submit terminal FrameOutcome
+```ts
+interface FrameMutationTransaction {
+  readonly kind: "initial" | "call" | "return" | "suspend" | "recovery";
+  readonly frameId: string;
+  readonly childFrameId?: string;
+  phase: string; // Host-private, not protocol lifecycle
+}
 ```
 
-特别：
+内部 phase 不是公共 Frame lifecycle，不得发布成新 wire state。
 
-- `callerFrameId` 只留在 Main Registry，不复制到 Subsystem wire；
-- `frame.return` 的 receiver 由 Main Registry 决定；
-- `frame.call` success 只返回 `childFrameId`，不是 Child 最终业务结果；
-- Child 最终结果沿 `frame.return → Main → frame.resume` 交付；
-- `frame.resume` 不拆成 resume + activate 两步。
+## 7. Initial Frame Transaction
 
-Batch C 继续冻结 RPC 之间的精确事务顺序、commit barrier 与 rollback，不得修改上述 wire fields。
+```text
+allocate F0 / starting / Stack=[F0]
+→ frame.initialize(F0)
+→ ACK
+→ generate A0
+→ frame.activate(F0,A0)
+→ ACK
+→ commit active+A0
+→ RendererControlPublisher publishes F0/A0
+```
 
-## 13. Renderer Control Publisher
+activate ACK 前不得发布 A0。
 
-发布 Session / Runtime State、Frame Stack、Frame lifecycle 只读镜像、current Activation/Input Target、Data Grant/revoke/replace。
+initialize ACK 后 activate 失败时，Coordinator 必须 close 已建立 Context，不得把 F0 发布为 active。
 
-不发布 Frame visibility、Render Registry、Render z-order 或 Frame→Render ownership。
+## 8. Outbound `frame.call` Handling
 
-Batch C 将冻结 `frame.activate / frame.resume` 与 Input Target publish 的 happens-before barrier；在此之前实现不得自行选择会改变语义的顺序。
+收到合法 `frame.call(F1,A1,target,input)` 后：
 
-## 14. System Data Connection Authority
+1. 校验 connection ownership、F1 active/Stack Top/current A1、target declared+ready+no-shutdown；
+2. 分配 F2；
+3. 原子 Call Acceptance Commit：
+
+```text
+F1 → suspended
+A1 revoke
+F2 starting / caller=F1 / push
+InputTarget = null
+```
+
+4. 返回 `{childFrameId:F2}`；
+5. **Response 完成后**才发送目标 `frame.initialize(F2)` / `frame.activate(F2,A2)`；
+6. activate ACK 后 commit F2 active+A2，再允许 Renderer 发布 F2/A2。
+
+ordinary call MUST NOT 额外发送 `frame.suspend(F1,A1)`。`frame.call` success 就是 Caller suspension acceptance barrier。
+
+这样 same-Subsystem recursive call 共用一个 Control Connection 也不要求 handler reentrancy。
+
+## 9. Call Post-commit Failure
+
+`frame.call` success 后 Child initialize/activate 失败属于 post-commit failure：
+
+```text
+MUST NOT restore F1/A1
+MUST NOT erase F2 identity
+```
+
+Coordinator 必须把 F2 forward-resolve 为平台 failed outcome，并使用 fresh Activation `frame.resume(F1,...)`。
+
+如果 Child initialize 未 commit，不需要 target `frame.close`；如果 initialize ACK 后 activate 失败，则必须 close target Context 后 pop，再 resume Caller。
+
+稳定 error code 留给 Batch D/E。
+
+## 10. `frame.suspend` Role
+
+`frame.suspend` 不是 ordinary call establishment step。
+
+它仅保留为 Main 主动 quiesce / terminal preparation 控制原语。ACK 后才可 commit active→suspended、old Activation revoke、InputTarget clear。
+
+任何重新 active 都必须使用 fresh Activation。
+
+## 11. Outbound `frame.return` Handling
+
+收到合法 `frame.return(F2,A2,result)` 后原子 Return Acceptance Commit：
+
+```text
+F2.outcome = result
+A2 revoke
+F2 → closing
+InputTarget = null
+```
+
+然后返回 `{}`。
+
+`frame.return` success **不等于** Child closed / popped / Caller resumed。
+
+Main MUST 在 Response 完成后才发送：
+
+```text
+frame.close(F2)
+→ ACK
+→ commit closed / pop
+```
+
+之后才允许：
+
+```text
+A3 = fresh Activation
+frame.resume(F1,A3,F2,result)
+→ ACK
+→ commit F1 active+A3
+→ publish F1/A3
+```
+
+Return acceptance 不可 rollback；后续 failure不得恢复 A2 或抹掉 accepted outcome。
+
+## 12. Renderer Control Publisher
+
+Publisher 只发布已 commit Main state。
+
+Batch C causal rules：
+
+```text
+frame.activate ACK
+    happens-before Child InputTarget publication
+
+frame.resume ACK
+    happens-before Caller replacement InputTarget publication
+
+Activation revoke commit
+    happens-before all later revisions omit it as current
+```
+
+Publisher MAY coalesce transitional Stack states / `InputTarget=null` gap，但不得越过 causal barrier，也不得发布两个 ordinary InputTargets。
+
+## 13. Subsystem SDK Coordination Contract
+
+Main 假设 SDK 对 outbound `frame.call / frame.return` 实现 mutation gate：Request pending 时停止新的 ordinary input dispatch，并禁止第二个 call/return。
+
+Main 不依赖 SDK 在入站 call/return handler 尚 pending 时处理反向 Frame Request；Response-before-dependent-RPC 是协议保证。
+
+## 14. System Data / Render Boundary
 
 - 每 Subsystem 最多一条有效 Renderer Data Connection；
-- Grant 不绑定 `frameId / activationId / Render identity`；
-- Runtime stopping/failed 后停止新 Grant；
-- Frame create/suspend/resume/close 不隐式创建或关闭 Data Connection；
-- Main 不读取 User Input 或 Render Update Payload。
+- Data Grant 不绑定 Frame/Activation/Render；
+- Frame create/suspend/resume/close 不隐式创建/关闭 Data Connection；
+- Main 不维护 Render Registry，也不读取 User Input/Render Update payload。
 
-## 15. Runtime Failure Coordination
+## 15. Failure Coordination
+
+Batch C 已冻结：
 
 ```text
-Runtime failure / unexpected loss
-→ revoke affected current Activations
-→ stop ordinary input
-→ identify affected Frames
-→ assign failed outcome where required
-→ drive lifecycle through closing / closed
-→ publish Runtime / Stack state
+pre-commit failure  → abort allowed
+post-commit failure → forward recovery only
 ```
 
-`Runtime failure ≠ Frame lifecycle state = failed`。
+Batch D 冻结 semantic error / timeout / retry / ambiguous delivery；Batch E 冻结 Runtime crash multi-Frame unwind。
 
-Batch E 冻结具体 multi-Frame suffix-unwind；Renderer Render Store 不是 Frame cleanup 或业务恢复源。
+Runtime failure仍不得通过 `Frame.state=failed` 表示。
 
 ## 16. 核心不变量
 
-- Runtime bootstrap 在 Frame 前完成；
-- `spawn success ≠ connected ≠ identified ≠ ready`；
-- Subsystem Control 与 Frame / Call 是独立协议域；
-- Frame 是 Main-owned call/input object；
-- Frame lifecycle = `starting / active / suspended / closing / closed`；
-- outcome = `completed / cancelled / failed`；
-- only active Frame has valid Activation；
+- Frame Stack mutation serial；
+- ordinary call 不依赖反向 `frame.suspend`；
+- call success precedes dependent child initialize/activate；
+- return success precedes dependent close/resume；
+- activate/resume ACK precedes corresponding InputTarget publication；
 - revoked Activation 永久失效；
-- Batch B wire surface exactly seven JSON-RPC Requests；
-- Caller relationship 不下发给 Subsystem；
-- `frame.call` 非 long-running result RPC；
-- `frame.resume` 同时交付 outcome + replacement Activation；
-- Frame 不拥有 Render/Data Connection；
-- Main 不维护 Render Registry；
-- ordinary User Input / Render Update 不通过 Main 转发。
+- accepted terminal outcome 不可撤销；
+- same-Subsystem recursion 不依赖 nested Request handling；
+- Frame 不拥有 Runtime/Render/Data Connection lifecycle。
 
 ## 17. 测试入口
 
-除 Launcher / Subsystem Control 与 Batch A fixture 外，Batch B 至少验证：
+除 Batch A/B fixtures 外至少增加：
 
-- exact seven method names / directions；
-- all seven are JSON-RPC Request；
-- closed params/result schema；
-- `frame.initialize` has exactly `frameId + input`，无 `callerFrameId`；
-- `frame.activate` only accepts new Activation on starting Frame；
-- `frame.suspend` carries current Activation；
-- `frame.resume` carries new Activation + `returnedFrameId + result`；
-- `frame.close` only carries `frameId`；
-- `frame.call` uses `targetSubsystemKey` and returns `childFrameId`；
-- same-Subsystem call 仍产生新 childFrameId；
-- `frame.return` 无 caller/target identity；
-- completed outcome requires `value`，no-value uses `null`；
-- `FrameOutcome.failed` is not JSON-RPC Error；
-- `system.call / system.return / frame.result / frame.close(reason)` rejected；
-- structural invalid params → JSON-RPC `-32602`。
+```text
+initial-activate-before-publish
+call-accept-suspends-caller
+call-success-before-child-initialize
+call-no-frame-suspend-rpc
+call-gap-no-input-target
+child-activate-before-publish
+same-subsystem-no-nested-request
+recursive-same-subsystem-call
+call-postcommit-init-failure-fresh-resume
+call-postcommit-activate-failure-close-then-fresh-resume
+return-accept-closing-before-response
+return-success-before-close
+close-ack-before-pop
+resume-ack-before-publish
+return-postcommit-no-rollback
+revoked-activation-never-restored
+no-two-input-targets-during-transaction
+```
