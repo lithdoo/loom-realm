@@ -81,7 +81,13 @@ allocate F0 / starting / Stack=[F0] / no target
 → publish InputTarget F0/A0
 ```
 
-`frame.activate` ACK happens-before corresponding InputTarget publication。initialize explicit rejection 可 abort；initialize ACK 后 activate Error/Failure 不得发布 F0/A0。
+`frame.activate` ACK happens-before corresponding InputTarget publication。
+
+Batch C 的“Explicit Error = 本次 RPC postcondition 未 commit”只描述 commit evidence；**Batch D 决定该 Error 后 Runtime 是否仍可继续使用**：
+
+- `frame.initialize` 的合法业务拒绝只有 `FRAME_INITIALIZE_REJECTED`，可作为已知 no-commit 的业务失败收敛；
+- 合法 `frame.activate` 的 identity/lifecycle/Activation semantic rejection 是 control divergence；标准 JSON-RPC/schema/method error 是 protocol-fatal；timeout/loss 是 ambiguous；这些都进入 Runtime failure path；
+- 因此 activate failure 时不得发布 F0/A0，也不得假定可以继续用普通 `frame.close` 做局部 rollback；具体 cleanup / initial failure convergence 由 Batch E 冻结。
 
 ## 8. Child Call Acceptance
 
@@ -117,7 +123,24 @@ frame.initialize(F2,input)
 
 Call acceptance 后不得再发布 F1/A1；activate ACK 前不得发布 F2/A2。`InputTarget=null` gap 合法。
 
-Child initialize 的合法业务 rejection forward-resolve 为 Child failed outcome；其他 post-commit failure不得恢复 F1/A1。
+失败收敛必须先按 Batch D 分类：
+
+```text
+FRAME_INITIALIZE_REJECTED
+    → target Runtime healthy
+    → Child failed outcome
+    → fresh Activation resume surviving Caller
+
+initialize/activate timeout or response ambiguity
+    → target Runtime failed
+    → Batch E unwind
+
+initialize/activate divergence/protocol error
+    → target Runtime failed
+    → Batch E unwind
+```
+
+无论哪种 post-accept failure，都不得恢复 F1/A1。**“forward recovery”不等于 Main 可以在 Runtime-fatal 情况下自行 close/pop/resume；Runtime 已不可信时必须进入 Batch E 的 deterministic unwind。**
 
 ## 10. Return / Resume
 
@@ -132,6 +155,8 @@ InputTarget = null
 
 然后 Main返回 success；return success 不等于 Child closed 或 Caller resumed。
 
+正常 healthy 路径：
+
 ```text
 frame.close(F2) → ACK
 → F2 closed / pop
@@ -143,6 +168,8 @@ frame.close(F2) → ACK
 
 close ACK 前不能 pop；resume ACK 前不能发布 A3。Return acceptance 不可 rollback。
 
+如果 close/resume 出现 timeout、divergence 或 protocol-fatal error，不能继续按正常 healthy 路径猜测或 retry；相关 Runtime 进入 failure path，Batch E 决定后续 Stack 收敛，同时 accepted outcome 与 revoked Activation 保持不可逆。
+
 ## 11. Pre/Post Commit Failure
 
 ```text
@@ -151,10 +178,15 @@ Pre-commit failure
     old valid Activation may remain valid
 
 Post-commit failure
-    forward recovery only
-    never restore revoked Activation
-    never erase accepted terminal outcome
+    never restores committed-revoked state
+    but recovery owner depends on Batch D classification
 ```
+
+具体解释：
+
+- recoverable explicit rejection：可以在仍可信 Runtime 上进行协议定义的 forward compensation；
+- timeout/loss/divergence/protocol failure：Runtime 已不可信，不做局部 resync/retry，由 Batch E 执行 Runtime-failure unwind；
+- 任何路径都不得恢复 revoked Activation，也不得抹掉 accepted terminal outcome。
 
 ## 12. Batch D Request Outcome
 
@@ -171,6 +203,8 @@ Timeout / Response loss / pending-request connection loss
     ambiguous applied/not-applied
     → Runtime failure
 ```
+
+这里 `Explicit Error = known not committed` **不等于“Error 一定可恢复”**。Error 是否允许继续使用 Runtime，必须再经过 Batch D 的 recoverable / divergence / protocol-fatal 分类。
 
 v1 不自动 retry/replay，也不定义 operationId/idempotency journal。timeout 后的迟到 Response 不改变已经 commit 的 Runtime failure。
 
@@ -208,6 +242,8 @@ FRAME_OWNERSHIP_MISMATCH
 
 `frame.suspend` 不参与 ordinary caller-initiated call establishment，仅作为 Main 主动 quiesce / terminal preparation 原语。ACK 后 commit active→suspended、old Activation revoke、InputTarget clear。
 
+如果该 RPC 返回 divergence/protocol error 或产生 ambiguous timeout，也不能把“postcondition未 commit”误读成“Runtime仍可信”；Batch D failure classification优先决定是否进入 Runtime failure path。
+
 v1 无 caller-driven `frame.cancel`。`cancelled` outcome 仅表示当前 active Frame 自行 `frame.return({type:"cancelled"})`。
 
 ## 16. Renderer Causal Boundary
@@ -235,13 +271,14 @@ same-Subsystem call 与跨 Subsystem call 使用完全相同 transaction：新 c
 5. ordinary `frame.call` 不依赖 reverse `frame.suspend`；
 6. call/return Response 先于 dependent reverse RPC；
 7. activate/resume ACK 先于对应 InputTarget publication；
-8. post-commit failure只能 forward recovery；
-9. explicit Error 与 ambiguous timeout严格区分；
+8. post-commit failure 永远不能恢复已 revoke/accepted 的状态，但具体 recovery owner 必须服从 Batch D error classification；
+9. Explicit Error=no-commit evidence，不等于 recoverable；
 10. ambiguous Frame RPC 不 retry，相关 Runtime failed；
 11. control divergence/protocol mismatch Runtime-fatal；
-12. no caller-driven Frame cancellation；
-13. same-Subsystem recursion 不依赖 nested request-handler reentrancy；
-14. Frame lifecycle 不控制 Render/Runtime/Data Connection。
+12. Runtime-fatal Frame failure 不做局部 Frame resync/close 假设，交 Batch E unwind；
+13. no caller-driven Frame cancellation；
+14. same-Subsystem recursion 不依赖 nested request-handler reentrancy；
+15. Frame lifecycle 不控制 Render/Runtime/Data Connection。
 
 ## 20. 相关文档
 
