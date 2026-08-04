@@ -22,20 +22,21 @@
 11. [冻结 Frame / Call Protocol v1 Batch B](./0011-freeze-frame-call-protocol-v1-batch-b.md)
 12. [冻结 Frame / Call Protocol v1 Batch C](./0012-freeze-frame-call-protocol-v1-batch-c.md)
 13. [冻结 Frame / Call Protocol v1 Batch D](./0013-freeze-frame-call-protocol-v1-batch-d.md)
+14. [冻结 Frame / Call Protocol v1 Batch E](./0014-freeze-frame-call-protocol-v1-batch-e.md)
 
 ## 当前替代 / 补充关系
 
-- ADR 0006 **部分替代** ADR 0004 中“Client State / Store 必须以 Frame 为所有权单元”的假设；
+- ADR 0006 部分替代 ADR 0004 中“Client State / Store 必须以 Frame 为所有权单元”的假设；
 - ADR 0005 替代旧“游戏只声明 systemId，由平台固定 Registry 提供实现”的第一阶段假设；
-- ADR 0007 **部分替代** ADR 0005 中旧 Descriptor/Launcher 表述；
+- ADR 0007 部分替代 ADR 0005 中旧 Descriptor/Launcher 表述；
 - ADR 0008 冻结 Desktop Node.js Launcher Profile v1；
 - ADR 0009 将 Runtime Bootstrap/Lifecycle 收敛为独立 Frozen Subsystem Control Protocol；
 - ADR 0010 冻结 Frame identity / authority / lifecycle / Activation，明确 outcome≠lifecycle、无 Frame ready/status；
-- ADR 0011 冻结七方法 wire surface、FrameOutcome Schema、Caller relationship 不下发、`frame.resume` outcome+new Activation 局部原子语义和 `frame.call` 非 long-running result RPC；
-- ADR 0012 冻结 Stack transaction / acceptance barrier / InputTarget causal barrier / rollback boundary，并明确 ordinary `frame.call` 不依赖反向 `frame.suspend`、same-Subsystem recursive call 不依赖 nested request-handler reentrancy；
-- ADR 0012 进一步冻结：pre-commit 可 abort，post-commit 只能 forward recovery；revoked Activation 和 accepted terminal outcome 不可恢复/撤销；
-- ADR 0013 冻结 Frame error/timeout/retry/cancellation：明确 Success / Explicit Error / Ambiguous 三分法、finite deadline、no app retry/replay、recoverable initialize/call rejection、control divergence Runtime-fatal 与 no caller-driven cancel；
-- ADR 0013 进一步明确 Frame Control timeout/divergence/protocol error 进入 Runtime failure path，具体 Stack unwind 留给 Batch E；
+- ADR 0011 冻结七方法 wire、FrameOutcome、Caller relationship 不下发、resume outcome+new Activation 与 call 非 long-running result RPC；
+- ADR 0012 冻结 Stack transaction / acceptance barrier / InputTarget causal barrier / rollback boundary，并明确 ordinary call不依赖 reverse suspend、same-Subsystem recursion不依赖 nested request-handler reentrancy；
+- ADR 0013 冻结 Success/Explicit Error/Ambiguous 三分法、finite deadline、no retry/replay、recoverable rejection、control divergence Runtime-fatal 与 no caller-driven cancel；
+- ADR 0014 冻结 Runtime failure fixed-point suffix unwind：lowest failed-runtime Frame为 root、Top→Bottom cleanup、failed Runtime Frame logical retire、healthy descendant best-effort close、cleanup failure扩展 failed set/root、accepted outcome保留、`SUBSYSTEM_RUNTIME_FAILED` 与 fresh surviving-Caller resume；
+- ADR 0014 不新增 `frame.abort/frame.unwind/frame.cancel` 或 recovery replay/resync，Batch B 七方法 surface 保持不变；
 - 旧 `system.call / system.return / frame.result / frame.close(reason) / frame.cancel` 不进入 Frame / Call v1。
 
 ## 维护规则
@@ -44,4 +45,4 @@
 - 架构文档保存当前有效结论，ADR 保存结论形成过程；
 - 契约发生不兼容变化时必须提升协议版本或提供迁移；
 - 分批冻结协议时，后续批次不得静默改变已 Frozen 批次；
-- Transport/Profile 实现不得通过平台差异覆盖已冻结应用层 transaction/error semantics。
+- Transport/Profile 实现不得通过平台差异覆盖已冻结应用层 transaction/error/recovery semantics。
