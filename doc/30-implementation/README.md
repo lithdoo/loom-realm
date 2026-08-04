@@ -19,66 +19,45 @@
 
 ## 当前已冻结的实施前提
 
-第一阶段实现可以直接依赖：
-
-- Game Package v2；
-- Desktop Node.js Launcher Profile v1；
-- Subsystem Control Protocol v1；
-- Frame / Call Protocol v1 **Batch A / B / C**；
-- Content API v1。
-
-当前状态：
+第一阶段实现可以直接依赖 Game Package v2、Desktop Node.js Launcher v1、Subsystem Control v1、Frame / Call v1 Batch A/B/C/D 和 Content API v1。
 
 ```text
-Launcher v1            Frozen
-Subsystem Control v1   Frozen
-
 Frame / Call v1
-    Batch A  identity / authority / lifecycle / Activation     Frozen
+    Batch A  identity / lifecycle / Activation                  Frozen
     Batch B  exact seven RPC / Schema / local semantics         Frozen
     Batch C  transaction / commit barrier / rollback            Frozen
-    Batch D  error / timeout / retry / cancellation             Next
-    Batch E  Runtime failure unwind                              Draft
+    Batch D  error / timeout / no-retry / cancellation          Frozen
+    Batch E  Runtime failure unwind                              Next
     Batch F  limits / fixtures / profile completion             Draft
 ```
 
-Batch C 已经可以直接实现 transaction coordinator / trace fixture：
+Batch D 现在可直接实现：
 
 ```text
-initial:
-    initialize ACK
-    → activate ACK
-    → publish InputTarget
-
-call:
-    call acceptance commit
-    → frame.call Result
-    → child initialize / activate
-    → activate ACK
-    → publish child InputTarget
-
-return:
-    return acceptance commit
-    → frame.return Result
-    → close ACK / pop
-    → resume ACK
-    → publish caller InputTarget
+finite deadline for every Frame Request
+Success        → known committed
+Explicit Error → known not committed
+Timeout/loss   → ambiguous → Runtime failure
+no automatic retry/replay
+recoverable call-target / initialize rejection
+control divergence / protocol mismatch → Runtime-fatal
+no caller-driven frame.cancel
 ```
 
 实现不得：
 
-- ordinary call 中重新插入 reverse `frame.suspend`；
-- 在 `frame.call` Response 前依赖 Child initialize/activate；
-- 在 `frame.return` Response 前依赖 close/resume；
-- activate/resume ACK 前发布新 Activation；
-- post-commit failure 时恢复旧 Activation 或撤销 accepted outcome；
-- 因 Desktop/PWA Transport 差异要求 nested bidirectional Request handler reentrancy。
+- timeout 后重发 Frame operation；
+- 把 JSON-RPC id 当 operationId/idempotency key；
+- ambiguous 时释放 call/return mutation gate继续旧 Activation；
+- 对 Frame state divergence 尝试私有 reinitialize/resync；
+- 用 `-32602` 表示游戏业务 input rejection；
+- 把 `FrameOutcome.cancelled` 解释成 Caller remote cancellation。
 
 ## 实施原则
 
 1. Frozen Contract 先写 conformance fixture，再写两端实现；
 2. 部分冻结协议必须明确 Frozen Batch 与 Draft Batch；
-3. Batch D-F 不得静默修改 A/B/C 已冻结的 identity/lifecycle/wire/transaction semantics；
+3. Batch E/F 不得静默修改 A/B/C/D 已冻结的 identity/lifecycle/wire/transaction/error semantics；
 4. Launcher / Control / Frame / Render / Content 能力边界不得因代码便利重新合并；
 5. 先完成 test-subsystems，再接复杂地图 Subsystem；
 6. 每个 Frozen 结论必须有自动测试或公开 fixture；
@@ -98,11 +77,10 @@ Frame / Call Batch B                         Frozen
     ↓
 Frame / Call Batch C                         Frozen
     ↓
-Frame / Call Batch D                         ← next
-    semantic error / timeout / retry / cancellation
+Frame / Call Batch D                         Frozen
     ↓
-Frame / Call Batch E
-    Runtime failure unwind
+Frame / Call Batch E                         ← next
+    Runtime failure deterministic unwind
     ↓
 Frame / Call Batch F
     limits / fixtures / profile completion
@@ -116,4 +94,4 @@ User Input + Render Update
 Render State
 ```
 
-Main ⇄ Renderer Control 现在已经有来自 Batch C 的强制 causal constraints：activate/resume ACK 必须先于对应 InputTarget publication；未来 wire 设计不得反向改变它们。
+Main ⇄ Renderer Control 已受 Batch C causal constraints 约束；Batch D 进一步规定 Frame Control timeout/divergence 不通过 Renderer reconnect/resync 修复。
