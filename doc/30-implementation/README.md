@@ -5,9 +5,9 @@
 > 稳定程度：Experimental  
 > 主要定义：当前分包、依赖、测试和第一阶段交付入口  
 > 依赖：[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-03
+> 最近复核：2026-08-04
 
-实施层描述当前仓库准备如何落地。这里的包名、目录和交付顺序可以随实现调整，只要仍遵守上层架构和正式契约。
+实施层描述当前仓库准备如何落地。包名、目录和交付顺序可以调整，但必须遵守上层架构和正式契约。
 
 ## 当前 Tracking 文档
 
@@ -15,16 +15,16 @@
 - [测试策略](./testing-strategy.md)；
 - [第一阶段交付计划](./phase-1-delivery-plan.md)。
 
-旧 [第一阶段设计待办](../roadmap/phase-1-design-todos.md) 已标记为 **Legacy / Superseded**，不再作为当前待办来源。
+旧 [第一阶段设计待办](../roadmap/phase-1-design-todos.md) 已标记 **Legacy / Superseded**，不再作为当前待办来源。
 
 ## 当前已冻结的实施前提
 
 第一阶段实现可以直接依赖：
 
-- [Game Package v2 Bootstrap / Descriptor Contract](../15-contracts/game-package-v2.md)；
+- [Game Package v2](../15-contracts/game-package-v2.md)；
 - [Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)；
 - [Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)；
-- [Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md) 的 **Batch A**；
+- [Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md) 的 **Batch A / B**；
 - [Content API v1](../15-contracts/content-api-v1.md)。
 
 当前冻结状态：
@@ -38,54 +38,50 @@ Subsystem Control v1
 
 Frame / Call v1
     Batch A Frozen
-        identity
-        authority
-        lifecycle
-        Activation
+        identity / authority / lifecycle / Activation
 
-    Batch B-F Draft
+    Batch B Frozen
+        seven RPC methods
+        params/result Schema
+        FrameOutcome wire union
+        local pre/postcondition
+
+    Batch C-F Draft
 ```
 
-Frame Batch A 已经可以直接生成类型、validator 和 state-machine fixture：
+Batch B 已可直接生成 JSON Schema、TypeScript 类型、runtime validator 和 Main/SDK dispatcher：
 
 ```text
-frameId
-    Main-generated / Session unique / never reused
-
-Frame assignment
-    permanent descriptor.key / subsystemKey
-
-callerFrameId
-    immutable
-
-lifecycle
-    starting / active / suspended / closing / closed
-
-outcome
-    completed / cancelled / failed
-    separate from lifecycle
-
-Activation
-    only active Frame owns current Activation
-    unique / never reused / never rolls back
-
-no Frame ready / initialized / frame.status
+frame.initialize({ frameId, input })
+frame.activate({ frameId, activationId })
+frame.suspend({ frameId, activationId })
+frame.resume({ frameId, activationId, returnedFrameId, result })
+frame.close({ frameId })
+frame.call({ frameId, activationId, targetSubsystemKey, input }) → { childFrameId }
+frame.return({ frameId, activationId, result }) → {}
 ```
 
-实现不得等 Batch B 才决定这些基础模型，也不得为了代码方便继续使用 `Frame.status = failed`。
+实现不得自行增加：
+
+```text
+system.call / system.return
+frame.ready / frame.status / frame.result
+callerFrameId on Subsystem wire
+frame.close(reason)
+optional completed.value
+```
 
 ## 实施原则
 
-1. 先冻结最小协议，再并行实现通信两端；
-2. 已冻结 Contract 先写 conformance fixture，再写平台实现；
-3. Launcher / Subsystem Control / Frame Call / Render / Content 的能力边界不得因代码便利重新合并；
-4. 部分冻结协议必须明确 Frozen Batch 与 Draft Batch，不能把两者混成一个模糊状态；
-5. 先完成测试 Subsystem，再接入复杂地图 Subsystem；
-6. 每个包只能依赖上层允许的方向；
-7. 公共类型不能引用具体地图 DTO；
-8. 每个 Frozen 设计结论必须有自动测试或公开夹具；
-9. 实施中发现架构问题时，先修改上层设计文档；
-10. 路线图只追踪工作，不定义正式行为。
+1. 已 Frozen Contract 先写 conformance fixture，再写两端实现；
+2. 部分冻结协议必须明确 Frozen Batch 与 Draft Batch；
+3. Batch C-F 不得静默修改 Batch A/B 已冻结方法、字段、identity 或 lifecycle；
+4. Launcher / Control / Frame / Render / Content 的能力边界不得因代码便利重新合并；
+5. 先完成 test-subsystems，再接复杂地图 Subsystem；
+6. 公共类型不能引用具体地图 DTO；
+7. 每个 Frozen 结论必须有自动测试或公开 fixture；
+8. 实施发现架构问题时先修改上层文档；
+9. 路线图只追踪工作，不定义正式行为。
 
 ## 当前实施顺序
 
@@ -96,11 +92,16 @@ Subsystem Control Protocol v1                ← Frozen
     ↓
 Frame / Call Batch A                         ← Frozen
     ↓
-Frame / Call Batch B                         ← next freeze target
-    7 RPC final Schema / pre-postcondition
+Frame / Call Batch B                         ← Frozen
     ↓
-Frame / Call Batch C-E
-    transaction / error / unwind
+Frame / Call Batch C                         ← next freeze target
+    transaction / commit barrier / rollback
+    ↓
+Frame / Call Batch D
+    error / timeout / retry / cancellation
+    ↓
+Frame / Call Batch E
+    Runtime failure unwind
     ↓
 Frame / Call Batch F
     limits / fixtures / profile completion
@@ -116,4 +117,4 @@ Render State
 loom.map vertical slice
 ```
 
-Main ⇄ Renderer Control 在 Frame Batch C 期间可以同步设计 Input Target commit barrier，但不得反向改变 Batch A 已冻结的 Frame identity / lifecycle / Activation。
+Main ⇄ Renderer Control 可以在 Batch C 同步验证 Input Target publish barrier，但不得反向改变 Batch A/B。
