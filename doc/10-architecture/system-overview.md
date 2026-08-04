@@ -7,7 +7,7 @@
 > 依赖：[产品设计总览](../00-overview/product-vision.md)  
 > 最近复核：2026-08-04
 
-本文描述系统划分与协作关系；精确 wire field 与 transaction semantics 由 `15-contracts` 定义。
+本文描述系统划分与协作关系；精确 wire field、transaction 与 error semantics 由 `15-contracts` 定义。
 
 ## 1. 顶层结构
 
@@ -22,6 +22,7 @@ Game Package
         │                  ├── Runtime Registry / Supervisor
         │                  ├── Frame Registry / Stack / Activation
         │                  ├── Frame Transaction Coordinator
+        │                  ├── Frame Failure Classifier
         │                  ├── Input Target
         │                  └── Connection Authority
         │                           │
@@ -71,15 +72,7 @@ validate descriptors
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-正常结束：
-
-```text
-Main shutdown intent
-→ subsystem.shutdown
-→ optional stopping
-→ Supervisor confirms Runtime exit
-→ stopped
-```
+正常结束：Main shutdown intent → `subsystem.shutdown` → optional stopping → Supervisor confirms Runtime exit → stopped。
 
 ## 4. Frame / Call 当前状态
 
@@ -87,7 +80,8 @@ Main shutdown intent
 Batch A  Identity / Authority / Lifecycle / Activation       Frozen
 Batch B  RPC Wire Schema / Direction / Local Semantics        Frozen
 Batch C  Transaction / Commit Barrier / Rollback              Frozen
-Batch D-F                                                     Draft
+Batch D  Error / timeout / retry / cancellation               Frozen
+Batch E-F                                                     Draft
 ```
 
 Frozen wire exactly seven Requests：
@@ -140,25 +134,39 @@ frame.return Request
 → Caller active + InputTarget publication
 ```
 
-冻结：
+`frame.activate` / `frame.resume` ACK happens-before 对应 InputTarget publication。Pre-commit failure 可 abort；Post-commit failure只能 forward recovery。
+
+## 6. Frame Error / Timeout Model
+
+Batch D 将 Request 结果固定为：
 
 ```text
-frame.activate ACK
-    happens-before Child InputTarget publication
+Success
+    → known committed
 
-frame.resume ACK
-    happens-before Caller InputTarget publication
+Explicit Error
+    → known not committed
+
+Timeout / Response loss / pending-request connection loss
+    → applied/not-applied unknown
+    → Runtime failure
 ```
 
-Pre-commit failure 可 abort；Post-commit failure只能 forward recovery。revoked Activation 和 accepted terminal outcome 不可 rollback。
+因此 Frame v1 不自动 retry/replay，也不通过 operationId / idempotency journal 尝试恢复 ambiguous state。
 
-## 6. Stack / Input Target
+正常可恢复拒绝只有有限场景，例如 call target 不存在/不可用，以及 `frame.initialize` 的业务拒绝。Frame identity/lifecycle/Activation/Stack/ownership 不一致则属于 control divergence，相关 Runtime terminal failed。
+
+`FrameOutcome.cancelled` 表示 active Frame 自己 return cancelled；v1 没有 Caller 远程 `frame.cancel`。
+
+Runtime 已 failed 后如何确定性清理 Stack 由 Batch E 定义。
+
+## 7. Stack / Input Target
 
 稳定状态：Stack Top active + current Activation；所有 lower live Frames suspended + no Activation。
 
 事务期间允许 Top starting/closing、zero active Frame、`InputTarget=null`。Main 不得发布两个 ordinary InputTargets，也不得发布尚未被目标 Subsystem ACK 的 Activation。
 
-## 7. Runtime / Frame / Render 承载
+## 8. Runtime / Frame / Render 承载
 
 ```text
 one Subsystem → one Runtime Container
@@ -170,14 +178,14 @@ one Runtime   → 0..N Frame/Input Context
 
 Frame create/suspend/resume/close 不隐式创建、销毁或重启 Runtime/Data Connection/Render。
 
-## 8. 通信系统
+## 9. 通信系统
 
 ```text
 Control Plane
     Subsystem ⇄ Main
         Subsystem Control v1      Frozen
-        Frame / Call A/B/C        Frozen
-        Frame / Call D-F          Draft
+        Frame / Call A/B/C/D      Frozen
+        Frame / Call E/F          Draft
 
     Renderer ⇄ Main
         Draft target, but must obey Batch C causal barriers
@@ -187,21 +195,17 @@ System Data Plane
         Connection Layer
         Render Update
         User Input
-
-Content Plane
-    Runtime / Renderer ⇄ Readonly Content Service
 ```
 
 Renderer 不是 Frame RPC participant，只镜像 Main 已 commit 状态。User Input 使用 current Frame/Activation；Render Update 使用独立 Render identity。
 
-## 9. 状态所有权
+## 10. 状态所有权
 
 ```text
 Main
-    Session / Runtime Registry / Supervisor
-    Runtime shutdown intent
+    Runtime Registry / Supervisor / shutdown intent
     Frame identity / caller / lifecycle / Stack
-    Frame transaction commit
+    Frame transaction commit / error classification
     Activation / InputTarget
     Connection Authority
 
@@ -212,18 +216,17 @@ Subsystem
 
 Renderer
     read-only committed Main Control mirror
-    Data Connection Registry
-    Frame Input Registry
+    Data Connection Registry / Frame Input Registry
     Render Store / presentation state
 ```
 
-## 10. Desktop / PWA Mapping
+## 11. Desktop / PWA Mapping
 
 Desktop Control/Data 使用 localhost WebSocket；PWA Control/Data 使用 MessagePort。
 
-PWA Profile 尚未冻结，但必须保持 Subsystem Control v1 与 Frame Batch A/B/C 应用层语义，包括 Response-before-dependent-RPC、activate/resume ACK publication barrier、post-commit no rollback；Transport 不得要求 nested reverse-request handler reentrancy。
+PWA Profile 尚未冻结，但必须保持 Subsystem Control v1 与 Frame Batch A/B/C/D 应用层语义，包括 Response-before-dependent-RPC、ACK-before-publish、post-commit no rollback、finite deadline 与 ambiguous-no-retry。Transport 不得把 timeout 重解释为 retryable normal Error。
 
-## 11. 核心不变量
+## 12. 核心不变量
 
 1. Process/Worker isolation granularity = Subsystem；
 2. Frame = Main-owned call/input Context；
@@ -236,7 +239,9 @@ PWA Profile 尚未冻结，但必须保持 Subsystem Control v1 与 Frame Batch 
 9. call/return Response precedes dependent reverse RPC；
 10. activate/resume ACK precedes corresponding InputTarget publication；
 11. post-commit failure只 forward recover；
-12. Render lifecycle 完全由 Subsystem 控制；
-13. `spawn success ≠ connected ≠ identified ≠ ready`；
-14. `stopped` 只来自 actual Runtime termination observation；
-15. Content API 与 Launcher 是不同 capability boundary。
+12. Frame RPC ambiguous result 不 retry、不猜测，进入 Runtime failure；
+13. control divergence / protocol incompatibility 是 Runtime-fatal；
+14. v1 无 caller-driven Frame cancellation；
+15. Render lifecycle 完全由 Subsystem 控制；
+16. `spawn success ≠ connected ≠ identified ≠ ready`；
+17. `stopped` 只来自 actual Runtime termination observation。
