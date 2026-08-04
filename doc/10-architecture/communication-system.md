@@ -3,7 +3,7 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：控制面、System 数据面、内容面、协议职责域、恢复和安全边界  
+> 主要定义：控制面、System 数据面、内容面、协议职责域、事务因果与恢复边界  
 > 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[运行承载系统](./runtime-hosting-system.md)  
 > 最近复核：2026-08-04
 
@@ -11,7 +11,7 @@
 
 Main、Subsystem、Renderer 在 Process/Worker 和不同 Transport 中保持一致应用语义，同时避免 Main 转发高频 User Input / Render Update。
 
-核心原则：Runtime Control、Frame/Call、Renderer Control、System Data Connection、User Input、Render Update、Content 是不同协议域；共享 Transport 不代表共享 identity/lifecycle/error model。
+核心原则：Runtime Control、Frame/Call、Renderer Control、System Data Connection、User Input、Render Update、Content 是不同协议域；共享 Transport 不代表共享 identity/lifecycle/error/transaction model。
 
 ## 2. 三类通信平面
 
@@ -22,7 +22,7 @@ Control Plane
         Frame / Call Protocol v1
 
     Renderer ⇄ Main
-        Session / Runtime / Stack / Activation / Input Target / Grants
+        Session / Runtime / Stack / Activation / InputTarget / Grants
 
 System Data Plane
     Subsystem ⇄ Renderer
@@ -36,7 +36,7 @@ Content Plane
 
 ## 3. Main ⇄ Subsystem Control Plane
 
-Desktop：Subsystem 主动连接 Main Control WebSocket。
+Desktop 中 Subsystem 主动连接 Main Control WebSocket。
 
 ### Subsystem Control v1
 
@@ -59,67 +59,74 @@ Main shutdown intent
 → stopped
 ```
 
-`spawn success ≠ connected ≠ identified ≠ ready`；`shutdown Response / stopping ≠ stopped`。v1 无 app heartbeat/reconnect/resume/restart。
+`spawn success ≠ connected ≠ identified ≠ ready`；`shutdown Response / stopping ≠ stopped`。v1 无 application heartbeat/reconnect/resume/restart。
 
 ### Frame / Call v1
-
-当前状态：
 
 ```text
 Batch A  Identity / Authority / Lifecycle / Activation       Frozen
 Batch B  RPC Wire Schema / Direction / Local Semantics        Frozen
-Batch C-F                                                     Draft
+Batch C  Transaction / Commit Barrier / Rollback              Frozen
+Batch D-F                                                     Draft
 ```
 
-Batch B exact methods：
+Frozen methods：
 
 ```text
 Main → Subsystem
-    frame.initialize({ frameId, input })
-    frame.activate({ frameId, activationId })
-    frame.suspend({ frameId, activationId })
-    frame.resume({ frameId, activationId, returnedFrameId, result })
-    frame.close({ frameId })
+    frame.initialize
+    frame.activate
+    frame.suspend
+    frame.resume
+    frame.close
 
 Subsystem → Main
-    frame.call({ frameId, activationId, targetSubsystemKey, input })
-        → { childFrameId }
-    frame.return({ frameId, activationId, result })
-        → {}
+    frame.call
+    frame.return
 ```
 
-全部是 JSON-RPC Request。
+全部是 JSON-RPC Request，closed schema。
 
-通信层必须保持：
+Batch C communication requirements：
 
-- source Subsystem identity 来自认证 Control Connection；
-- `callerFrameId` 不进入 Subsystem Frame wire；
-- `frame.close` 无 reason；
-- `frame.resume` 同时交付 Child Outcome + replacement Activation；
-- `frame.call` 不作为等待最终 Child outcome 的 long-running RPC；
-- no `system.call / system.return / frame.result`；
-- closed schema；结构 invalid params → `-32602`。
+- outbound `frame.call / frame.return` pending 时 Subsystem SDK 必须 quiesce 对应 Frame 的 ordinary input dispatch；
+- ordinary `frame.call` 不依赖 Main→Subsystem `frame.suspend`；Caller suspension 由 call acceptance commit + success Response 确认；
+- Main MUST complete `frame.call` Response before dependent Child `frame.initialize / frame.activate`；
+- Main MUST complete `frame.return` Response before dependent `frame.close / frame.resume`；
+- 因此 same-Subsystem recursive call 不要求 bidirectional nested-request handler reentrancy；
+- post-commit failure不得恢复 revoked Activation。
 
 ## 4. Main ⇄ Renderer Control Plane
 
-Renderer 与 Main 一条 session-level Control Connection，负责 Runtime State、Frame Stack/lifecycle mirror/current Activation/Input Target、Data Grant/revoke/replace、session errors/reconnect。
+Renderer 与 Main 一条 session-level Control Connection，负责 Runtime State、Frame Stack/lifecycle mirror/current Activation/InputTarget、Data Grant/revoke/replace、session diagnostics/reconnect。
 
-Renderer 不拥有 Frame authority。
+Renderer 不拥有 Frame authority，也不是 Batch B Frame RPC participant。
 
-必须遵守：
+Batch C 冻结的 causal constraints：
 
 ```text
-stable state:
-    Stack Top active + current Activation
-    lower live Frames suspended
+frame.activate ACK
+    happens-before Child Activation/InputTarget publication
 
-no two ordinary Input Targets
-revoked Activation never republished as valid
+frame.resume ACK
+    happens-before Caller replacement Activation/InputTarget publication
 ```
 
-Batch C 将冻结 `frame.activate / frame.resume` success 与 Renderer Input Target publish 的精确 causal barrier。
+并且：
 
-Renderer Control 不承载 ordinary User Input Payload 或 Render Update。
+```text
+old Activation commit revoked
+    happens-before
+任何后续 Renderer revision 不再把它标为 current
+```
+
+Main MAY 发布或 coalesce `InputTarget=null` transitional revision，但 MUST NOT：
+
+- 提前发布尚未被目标 Subsystem ACK 的 Activation；
+- 重新发布 revoked Activation；
+- 发布两个同时有效 ordinary InputTargets。
+
+Renderer Control wire Schema 后续单独冻结，但不得改变这些 Batch C ordering guarantees。
 
 ## 5. System Data Plane
 
@@ -135,22 +142,12 @@ Render Update
     independent Render identity / state / event / recovery
 
 User Input
-    current Frame + Activation input routing
+    current Frame + Activation ordinary input routing
 ```
 
-三个域共享 WebSocket/MessagePort，但 Sequence、backpressure、recovery、failure isolation 独立。
+三个域共享 WebSocket/MessagePort，但 Sequence、backpressure、recovery、failure isolation 独立。Connection heartbeat 只属于 Data Connection Layer，不是 Subsystem Control heartbeat。
 
-Connection heartbeat 只属于 Data Connection Layer，不是 Subsystem Control heartbeat。
-
-## 7. User Input Identity
-
-概念 Input Target：
-
-```text
-subsystem reference
-frameId
-activationId
-```
+## 7. User Input Identity 与 Transaction Gap
 
 普通输入合法至少要求：
 
@@ -158,18 +155,24 @@ activationId
 Frame exists
 AND lifecycle == active
 AND activationId == currentActivationId
-AND Frame == Main-authorized Input Target
+AND Frame == Main-authorized InputTarget
 ```
 
 revoked/old Activation MUST reject。
 
-Batch B 影响 User Input 的一点是：Caller result + replacement Activation 通过一个 `frame.resume` 安装；Batch C 再定义何时把该新 Activation 对 Renderer 公开。
+Batch C transaction gap 允许：
+
+```text
+InputTarget = null
+```
+
+例如 Caller call accepted 后到 Child activate ACK 前，或 Child return accepted 后到 Caller resume ACK 前。
+
+Subsystem sender-side mutation gate 必须在 outbound call/return pending 时阻止新的 ordinary input 继续进入业务 Handler；User Input Protocol 后续决定队列/drop/reset 的 wire 细节。
 
 ## 8. Render Update Identity
 
-Render Update 使用独立 Render identity，不使用 `frameId + activationId` 作为 Render lifecycle identity。
-
-Activation replacement 不启动 Render epoch，也不要求 Render resync。
+Render Update 使用独立 Render identity，不使用 `frameId + activationId` 作为 Render lifecycle identity。Activation replacement 不启动 Render epoch，也不要求 Render resync。
 
 ## 9. Frame / Render / Data Independence
 
@@ -183,8 +186,6 @@ Frame create      → Data Connection create
 Frame closed      → Data Connection close
 ```
 
-因此 zero-Frame Subsystem 可继续 Render/Data，Render recovery 不修改 Frame Activation。
-
 ## 10. Content Plane
 
 Readonly Content API 提供 manifest/record/group/resource，不承载 User Input、Render State、Runtime Tick、Frame Stack、Activation 或 Runtime Bootstrap 控制。
@@ -195,20 +196,25 @@ Desktop：Control/Data = localhost WebSocket，Content = HTTP。
 
 PWA：Control/Data = MessagePort，Content = same-origin Fetch/Service Worker。
 
-PWA Control Transport 尚未冻结，但 MUST 映射相同 Subsystem Control v1 与 Frame Batch A/B 应用层方法/字段，不得因 Transport 添加 caller/close reason/旧 system method 等变体。
+PWA Control Transport Profile 尚未冻结，但 MUST 精确保持 Subsystem Control v1 与 Frame Batch A/B/C 应用语义。Transport adapter MUST NOT：
+
+- 把 `frame.call` 改成依赖嵌套反向 Request；
+- 在 activate/resume ACK 前发布新 Activation；
+- 以 MessagePort/Worker convenience 恢复旧 Activation；
+- 添加 caller/close reason/system method 等 wire 变体。
 
 ## 12. Renderer Reconnect
 
 ```text
 reconnect Main Control
-→ restore Session / Runtime / Stack
-→ restore current Activation / Input Target
+→ restore committed Session / Runtime / Stack
+→ restore current Activation / InputTarget
 → rebuild authorized Data Connections
 → User Input only current Activation
 → Render independently restores
 ```
 
-不得恢复 revoked Activation，不得从 Frame 集合推导全部 Render/Data lifecycle。
+不得恢复 revoked Activation，不得从 transitional/uncommitted local state推导 authority。
 
 ## 13. Backpressure / Retry Boundaries
 
@@ -217,28 +223,25 @@ Subsystem Control v1
     no silent drop / state-changing app retry
 
 Frame / Call
-    Batch B fixes request surface
-    Batch D freezes timeout/retry/idempotency
+    Batch C fixes transaction barriers
+    Batch D freezes timeout/retry/idempotency/ambiguous delivery
 
 User Input
     continuous may coalesce / discrete bounded ordered
 
 Render
     recoverable state may coalesce per Render/Scope
-
-Content
-    HTTP/Fetch streaming
 ```
 
-Batch B Schema fixture 不得提前把某个 transaction ordering 或 retry 实现偶然行为变成协议。
+JSON-RPC Response delivery loss after commit 的 ambiguous handling 属于 Batch D，通信层不得自行把它当普通 retry。
 
-## 14. Security Principles
+## 14. Security / Authority Principles
 
 - 所有 wire message 视为不可信；
 - Control hello 绑定 Launch Attempt / key / credential；
 - Frame operation 必须来自 frame 所属 connection-bound Subsystem；
-- Subsystem 不能创建公共 frameId / activationId；
 - Caller receiver 由 Main 决定；
+- Subsystem 不能创建公共 frameId / activationId；
 - User Input 校验 active/current Activation；
 - Data Connection 绑定合法 Grant；
 - Render Update 限制 Subsystem Render namespace；
@@ -246,21 +249,13 @@ Batch B Schema fixture 不得提前把某个 transaction ordering 或 retry 实�
 
 ## 15. 当前契约状态
 
-已冻结：
-
-- Game Package v2 Desktop subset；
-- Desktop Node.js Launcher v1；
-- Subsystem Control Protocol v1；
-- Frame / Call Batch A；
-- Frame / Call Batch B。
+已冻结：Game Package v2 Desktop subset、Desktop Node.js Launcher v1、Subsystem Control v1、Frame / Call Batch A/B/C。
 
 下一冻结目标：
 
 ```text
-Frame / Call Batch C
-    transaction / commit barrier / rollback
+Frame / Call Batch D
+    semantic error / timeout / retry / idempotency / cancellation
 ```
 
-之后 Batch D error/timeout/retry、Batch E Runtime unwind、Batch F limits/fixtures/profile，然后 Main⇄Renderer Control、Data Connection、User Input、Render Update、Render State。
-
-Legacy `frame-data-channel-v1.md` / `client-state-tree-v1.md` 不得继续作为 Frame/Render ownership 真相。
+随后 Batch E Runtime unwind、Batch F limits/fixtures/profile，再冻结 Main⇄Renderer Control、Data Connection、User Input、Render Update、Render State。
