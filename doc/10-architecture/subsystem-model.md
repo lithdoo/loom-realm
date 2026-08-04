@@ -3,7 +3,7 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Subsystem 的职责、状态所有权、Frame/Input 适配、outbound mutation gate 与 Render 边界  
+> 主要定义：Subsystem 的职责、状态所有权、Frame/Input 适配、outbound mutation gate、错误收敛与 Render 边界  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)  
 > 下层契约：[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
@@ -22,12 +22,13 @@ Main
     Frame identity / caller / lifecycle
     Stack / transaction commit
     Activation / InputTarget
-    Connection authorization
+    Frame error classification
 
 Subsystem Runtime
     authoritative business state
     Frame/Input Context
     outbound call/return mutation gate
+    local Frame RPC deadline handling
     Render Registry / Render State
     shared resources/cache
 
@@ -80,9 +81,7 @@ Activation
     active only / one-shot / never reused / never rolled back
 ```
 
-v1 无 Frame `ready / initialized / frame.status`。
-
-`callerFrameId` 不下发给 `frame.initialize` / `frame.return`。业务如果需要调用来源，必须显式放在业务 `input`，不能依赖 Main-owned Caller relationship 作为隐式业务 API。
+v1 无 Frame `ready / initialized / frame.status`。`callerFrameId` 不下发给 initialize/return；业务如需调用来源，应显式放在 `input`。
 
 ## 5. Frozen RPC Surface
 
@@ -95,13 +94,11 @@ Main → Subsystem
     frame.close({ frameId })
 
 Subsystem → Main
-    frame.call({ frameId, activationId, targetSubsystemKey, input })
-        → { childFrameId }
-    frame.return({ frameId, activationId, result })
-        → {}
+    frame.call({ frameId, activationId, targetSubsystemKey, input }) → { childFrameId }
+    frame.return({ frameId, activationId, result }) → {}
 ```
 
-全部为 JSON-RPC Request；source identity 来自 authenticated Control Connection；无 `system.call/system.return/frame.result`；close 无 reason；resume=Child outcome+replacement Activation。
+全部为 JSON-RPC Request；source identity 来自 authenticated Control Connection；无 `system.call/system.return/frame.result/frame.cancel`；close 无 reason；resume=Child outcome+replacement Activation。
 
 ## 6. FrameOutcome
 
@@ -116,53 +113,39 @@ type FrameOutcome =
 
 ## 7. Outbound Mutation Gate
 
-Batch C 要求 Subsystem 在发送 outbound `frame.call` 或 `frame.return` 后，直到收到 Response 前对该 Frame 建立内部 mutation gate。
+Subsystem 发送 outbound `frame.call` / `frame.return` 后，直到收到 Response 前必须建立内部 mutation gate：停止新的 ordinary input dispatch，禁止第二个 call/return。该 gate 不是公共 lifecycle state。
 
-pending 期间 MUST：
+结果处理：
 
 ```text
-停止向业务 Handler 派发新的 ordinary input
-禁止第二个 frame.call
-禁止第二个 frame.return
+Success
+    → commit Batch C local state
+
+Explicit recoverable Error
+    → gate releases
+    → Frame remains active/current Activation remains valid
+
+Timeout / Response loss / pending-request connection loss
+    → commit state unknown
+    → gate MUST NOT release back to old Activation
+    → Runtime failure path
 ```
 
-该 gate 不是公共 Frame lifecycle state。
-
-如果收到 pre-commit Error：解除 gate，Frame 保持 active，旧 current Activation 仍有效。
+因此 SDK 不能把 timeout 当成“没发生过”。
 
 ## 8. `frame.call` Local Commit
 
-ordinary `frame.call` 不使用 reverse `frame.suspend` 建立 Caller suspension。
+ordinary call 不使用 reverse `frame.suspend`。
 
-当 Caller 收到成功 `{childFrameId}`：
+当 Caller 收到成功 `{childFrameId}`：Caller local Context→suspended、old activationId永久 revoke、mutation gate→committed suspension。success 不表示 Child 已 initialize/active。
 
-```text
-Caller local Context → suspended
-old activationId → permanently revoked
-mutation gate → committed suspension
-```
-
-该 success 只表示 logical Child call accepted，不表示 Child 已 initialize/active。
-
-因此 Subsystem MUST NOT 在 call success 后继续使用 Caller old Activation，也不得等待 `frame.suspend` 才把 Caller 视为 suspended。
-
-Main 必须先完成 call Response，再发送 dependent Child initialize/activate；same-Subsystem recursive call 因此不要求入站 call handler pending 时处理反向 Request。
+Main 必须先完成 call Response，再发送 dependent Child initialize/activate；same-Subsystem recursive call 不要求入站 call handler pending 时处理反向 Request。
 
 ## 9. `frame.return` Local Commit
 
-Subsystem 发送 `frame.return` 后进入 mutation gate。
+Subsystem 发送 `frame.return` 后进入 mutation gate。若收到成功 `{}`：terminal outcome accepted、old activationId永久 revoke、local Frame Context→closing。
 
-若收到成功 `{}`：
-
-```text
-terminal outcome accepted
-old activationId permanently revoked
-local Frame Context → closing
-```
-
-success 不表示 `frame.close` 已完成，也不表示 Caller 已 resumed。Subsystem 必须等待 Main 后续 `frame.close(frameId)` 清理 Context。
-
-Main 先完成 return Response，之后才依赖 close/resume，因此 same-Subsystem return 也不要求 handler reentrancy。
+success 不表示 `frame.close` 已完成，也不表示 Caller 已 resumed。Subsystem 等待 Main 后续 `frame.close(frameId)`。
 
 ## 10. Incoming Control Operations
 
@@ -170,23 +153,57 @@ Main 先完成 return Response，之后才依赖 close/resume，因此 same-Subs
 
 建立 target-side Frame/Input Context；不依赖 Caller relationship，不代表 active。
 
-### activate
+合法业务拒绝使用 `FRAME_INITIALIZE_REJECTED`，并携带 `FrameFailure`。该 rejection 表示 Context 未 commit、Runtime 仍 healthy；不得用 `-32602` 表示游戏业务输入不满足条件。
 
-安装首次 Activation。ACK 后 Main 才可发布对应 InputTarget。
+### activate / suspend / resume / close
 
-### suspend
+这些 Main-issued lifecycle operation 在双方 state一致且 Runtime healthy 时应成功。若 Subsystem 因 Frame identity/lifecycle/Activation mismatch 拒绝合法请求，说明 control divergence，Runtime 必须进入 failure path，而不是尝试私有 resync。
 
-不参与 ordinary call establishment。仅作为 Main 主动 quiesce / terminal preparation 原语。成功后 old Activation 永久 revoke。
+`resume` 同时交付 Child Outcome + replacement Activation；`close` 不隐式关闭 Runtime/Data Connection、共享业务状态或 Render。
 
-### resume
+## 11. Semantic Error / Failure Classification
 
-一个不可分割的控制操作：同时交付 Child Outcome + 安装 replacement Activation。ACK 后 Main 才可发布 Caller new InputTarget。
+Recoverable Frame semantic errors：
 
-### close
+```text
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
+```
 
-删除 Frame/Input Context。只携带 `frameId`，不隐式关闭 Runtime/Data Connection、删除共享业务状态或销毁 Render。
+前两个由 Main 在 call acceptance 前返回；Subsystem 收到后可解除 mutation gate 并继续当前 active Frame。
 
-## 11. Ordinary Input Router
+Control divergence：
+
+```text
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
+```
+
+收到 divergence error、Frozen method/schema protocol error 或 ambiguous timeout 时，Subsystem MUST 停止正常 Frame processing并进入 Runtime failure path。
+
+Runtime 可通过 `subsystem.status(state="failed")` 报告：
+
+```text
+FRAME_CONTROL_TIMEOUT
+FRAME_CONTROL_DIVERGENCE
+FRAME_CONTROL_PROTOCOL_ERROR
+```
+
+如果 Control Connection 已丢失，则 Main 直接按 Subsystem Control loss 处理。
+
+## 12. Deadline / No Retry
+
+全部 Frame Request MUST 有 finite deadline。Subsystem SDK 对 `frame.call / frame.return` 不得自动 retry/replay，也不得使用 JSON-RPC id 作为幂等 operation identity。
+
+v1 不定义 operationId/idempotencyKey/dedup journal/replay cache。
+
+一旦 timeout failure 已 commit，迟到 Response 只做 diagnostics，不能恢复 Runtime、Frame 或 Activation。
+
+## 13. Ordinary Input Router
 
 ```text
 User Input
@@ -195,74 +212,55 @@ User Input
 → require lifecycle == active
 → require activationId == current Activation
 → require not blocked by outbound mutation gate
-→ validate User Input ordering
 → dispatch business Handler
 ```
 
-revoked/old Activation 永久拒绝。
+revoked/old Activation 永久拒绝。mutation gate timeout 后不得恢复旧输入 dispatch；Runtime 进入 failure path。
 
-Batch C 只冻结 gate 必须停止业务 dispatch；具体 input drop/buffer/reset semantics 由 User Input Protocol 冻结。
+## 14. Cancellation Boundary
 
-## 12. Same-Subsystem / Recursive Call
+v1 不支持 caller-driven `frame.cancel`。suspended Caller 无远程取消 Child 的公共能力。
 
-same-Subsystem call 合法但必须：
+`FrameOutcome.cancelled` 仍合法，但只表示当前 active Frame 自己通过 `frame.return({type:"cancelled"})` 结束。Session termination 使用更高层 shutdown。
 
-```text
-new childFrameId
-new Child Activation
-normal Main Stack push/pop
-Caller old Activation revoke
-```
+## 15. Same-Subsystem / Recursive Call
 
-允许一个 Runtime 内：
+same-Subsystem call 合法但仍必须 new childFrameId/new Child Activation/normal Main Stack push-pop/Caller old Activation revoke。不得通过本地函数调用绕过 Main。
+
+## 16. Failure Boundary
 
 ```text
-F1 suspended
-F2 suspended
-F3 active
-```
-
-不得通过本地函数调用绕过 `frame.call/frame.return` 和 Main transaction authority。
-
-## 13. Failure Boundary
-
-```text
-Pre-commit Error
-    local gate releases
-    old Activation may remain current
+Pre-commit Explicit Error
+    known not committed
+    local gate may release
 
 Post-commit failure
     never restore revoked Activation
     never erase accepted outcome
-    forward recovery only
+
+Ambiguous timeout/loss
+    commit state unknown
+    no retry / no guess
+    Runtime failure
 ```
 
-具体 semantic code/timeout/ambiguous Response-loss 由 Batch D 冻结；Runtime crash multi-Frame unwind 由 Batch E 冻结。
+Runtime failed 后 multi-Frame unwind 由 Batch E 冻结。
 
-## 14. Render / Data Independence
+## 17. Render / Data Independence
 
-Render create/update/visibility/order/destroy/recovery 完全属于 Subsystem/Render Protocol。
+Render create/update/visibility/order/destroy/recovery 完全属于 Subsystem/Render Protocol。Frame lifecycle 不控制 Render/Data Connection/Runtime lifecycle。
 
-以下不是平台规则：
-
-```text
-Frame active → Render visible
-Frame suspended → Render hidden
-Frame closed → Render destroyed
-Frame create/close → Data Connection create/close
-```
-
-## 15. Internal Freedom
+## 18. Internal Freedom
 
 Subsystem 可以共享 world state、Execution Loop、Repository cache、Render Manager，也可以为不同 Frame 建立内部 session。平台只要求 Frozen external Contract 正确。
 
-## 16. 第一阶段 `loom.map`
+## 19. 第一阶段 `loom.map`
 
 建议内部：
 
 ```text
 Subsystem Control Adapter
-Frame / Call Adapter + Mutation Gate
+Frame / Call Adapter + Mutation Gate + Deadline Handler
 Frame Input Adapter
 Runtime Execution Loop / Core
 Render Manager / Projector
@@ -271,16 +269,17 @@ Repository Cache
 
 这些结构不是所有 Subsystem 的公共要求。
 
-## 17. 架构不变量
+## 20. 架构不变量
 
-1. Frame/Stack/Activation transaction authority = Main；
+1. Frame/Stack/Activation/error authority = Main；
 2. Subsystem 不维护第二份公共 Caller/Stack authority；
 3. Frame/Activation identity 不复用；
 4. Batch B exact seven Requests；
 5. outbound call/return pending 必须有 mutation gate；
-6. call success 本地 commit Caller suspended/revoked，不等待 reverse `frame.suspend`；
-7. return success 本地 commit Child closing/revoked，不等于 close/resume 完成；
-8. activate/resume ACK 后 Main 才可发布新 Activation；
-9. post-commit failure不能恢复旧 Activation；
-10. same-Subsystem recursion 不依赖 nested handler reentrancy；
-11. Frame lifecycle 不控制 Render/Data Connection/Runtime lifecycle。
+6. Success/Explicit Error/Ambiguous 三种结果不可混淆；
+7. ambiguous timeout 不解除 gate继续旧 Activation，不 retry；
+8. recoverable initialize rejection 不使 Runtime failed；
+9. divergence/protocol error Runtime-fatal；
+10. no caller-driven Frame cancellation；
+11. post-commit failure不能恢复旧 Activation；
+12. Frame lifecycle 不控制 Render/Data Connection/Runtime lifecycle。
