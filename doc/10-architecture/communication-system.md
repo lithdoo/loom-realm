@@ -36,9 +36,7 @@ Content Plane
 
 ## 3. Main ⇄ Subsystem Control Plane
 
-Desktop 中 Subsystem 主动连接 Main Control WebSocket。
-
-### Subsystem Control v1
+Subsystem Control v1：
 
 ```text
 connected
@@ -49,17 +47,7 @@ connected
 → ready
 ```
 
-正常 shutdown：
-
-```text
-Main shutdown intent
-→ subsystem.shutdown
-→ optional status(stopping)
-→ Supervisor confirms exit
-→ stopped
-```
-
-`spawn success ≠ connected ≠ identified ≠ ready`；`shutdown Response / stopping ≠ stopped`。v1 无 application heartbeat/reconnect/resume/restart。
+正常 shutdown：Main shutdown intent → `subsystem.shutdown` → optional stopping → Supervisor confirms exit → stopped。`spawn success ≠ connected ≠ identified ≠ ready`；v1 无 application heartbeat/reconnect/resume/restart。
 
 ### Frame / Call v1
 
@@ -67,72 +55,94 @@ Main shutdown intent
 Batch A  Identity / Authority / Lifecycle / Activation       Frozen
 Batch B  RPC Wire Schema / Direction / Local Semantics        Frozen
 Batch C  Transaction / Commit Barrier / Rollback              Frozen
-Batch D-F                                                     Draft
+Batch D  Error / timeout / retry / cancellation               Frozen
+Batch E-F                                                     Draft
 ```
 
-Frozen methods：
+Frozen methods exactly seven JSON-RPC Requests：
 
 ```text
 Main → Subsystem
-    frame.initialize
-    frame.activate
-    frame.suspend
-    frame.resume
-    frame.close
+    frame.initialize / activate / suspend / resume / close
 
 Subsystem → Main
-    frame.call
-    frame.return
+    frame.call / return
 ```
-
-全部是 JSON-RPC Request，closed schema。
 
 Batch C communication requirements：
 
-- outbound `frame.call / frame.return` pending 时 Subsystem SDK 必须 quiesce 对应 Frame 的 ordinary input dispatch；
-- ordinary `frame.call` 不依赖 Main→Subsystem `frame.suspend`；Caller suspension 由 call acceptance commit + success Response 确认；
-- Main MUST complete `frame.call` Response before dependent Child `frame.initialize / frame.activate`；
-- Main MUST complete `frame.return` Response before dependent `frame.close / frame.resume`；
-- 因此 same-Subsystem recursive call 不要求 bidirectional nested-request handler reentrancy；
+- outbound `frame.call / frame.return` pending 时 Subsystem SDK quiesce 对应 Frame 的 ordinary input；
+- ordinary call 不依赖 reverse `frame.suspend`；
+- Main completes call Response before dependent Child initialize/activate；
+- Main completes return Response before dependent close/resume；
+- same-Subsystem recursion 不要求 nested reverse-request handler reentrancy；
 - post-commit failure不得恢复 revoked Activation。
 
-## 4. Main ⇄ Renderer Control Plane
+Batch D communication requirements：
+
+```text
+Success Response
+    known committed
+
+Explicit Error Response
+    known not committed
+
+Timeout / Response loss / pending-request connection loss
+    ambiguous
+    → Runtime failure
+```
+
+全部 Frame Request MUST 有 finite deadline；v1 不做 application-level retry/replay，不定义 operationId/idempotency journal。timeout 后迟到 Response 只用于 diagnostics。
+
+## 4. Error Classification
+
+Frame recoverable semantic errors：
+
+```text
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
+```
+
+其中 initialize rejection 表示 target Runtime healthy、Context 未 commit；已 accepted Child 以 `FrameOutcome.failed` + fresh Caller Activation forward-resolve。
+
+Control divergence：
+
+```text
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
+```
+
+这些错误、Frozen method/schema 的 JSON-RPC protocol error，以及 ambiguous timeout 均是 Runtime-fatal，不允许通信层自行 resync/retry。
+
+Frame semantic error 复用 `-32000 + error.data.code`。Runtime failure diagnostics 至少区分 `FRAME_CONTROL_TIMEOUT / FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR`。
+
+## 5. Main ⇄ Renderer Control Plane
 
 Renderer 与 Main 一条 session-level Control Connection，负责 Runtime State、Frame Stack/lifecycle mirror/current Activation/InputTarget、Data Grant/revoke/replace、session diagnostics/reconnect。
 
-Renderer 不拥有 Frame authority，也不是 Batch B Frame RPC participant。
+Renderer 不拥有 Frame authority，也不是 Frame RPC participant。
 
-Batch C 冻结的 causal constraints：
+Batch C causal constraints：
 
 ```text
 frame.activate ACK
-    happens-before Child Activation/InputTarget publication
+    happens-before Child InputTarget publication
 
 frame.resume ACK
-    happens-before Caller replacement Activation/InputTarget publication
+    happens-before Caller replacement InputTarget publication
 ```
 
-并且：
+old Activation commit revoked 后，任何后续 Renderer revision 不得再把它标为 current。`InputTarget=null` transitional revision 合法；不得提前发布未 ACK Activation 或两个同时有效 ordinary InputTargets。
 
-```text
-old Activation commit revoked
-    happens-before
-任何后续 Renderer revision 不再把它标为 current
-```
+Batch D 的 Frame RPC timeout 不通过 Renderer Control 修复；Renderer 只观察 Main 最终 commit 的 Runtime/Frame failure state。
 
-Main MAY 发布或 coalesce `InputTarget=null` transitional revision，但 MUST NOT：
-
-- 提前发布尚未被目标 Subsystem ACK 的 Activation；
-- 重新发布 revoked Activation；
-- 发布两个同时有效 ordinary InputTargets。
-
-Renderer Control wire Schema 后续单独冻结，但不得改变这些 Batch C ordering guarantees。
-
-## 5. System Data Plane
+## 6. System Data Plane
 
 每有效 Runtime Container 与 Renderer 最多一条长期双向 Data Connection，可同时承载 0..N Render Context + 0..N Frame Input Context。zero-Frame Subsystem 也可以维护 Render/Data Connection。
-
-## 6. Renderer–Subsystem Protocol Domains
 
 ```text
 Connection Layer
@@ -145,86 +155,51 @@ User Input
     current Frame + Activation ordinary input routing
 ```
 
-三个域共享 WebSocket/MessagePort，但 Sequence、backpressure、recovery、failure isolation 独立。Connection heartbeat 只属于 Data Connection Layer，不是 Subsystem Control heartbeat。
+三个域共享 WebSocket/MessagePort，但 Sequence、backpressure、recovery、failure isolation 独立。
 
-## 7. User Input Identity 与 Transaction Gap
+## 7. User Input 与 Transaction Gap
 
-普通输入合法至少要求：
+普通输入合法至少要求：Frame exists + active + activationId current + Frame == Main-authorized InputTarget。revoked/old Activation MUST reject。
 
-```text
-Frame exists
-AND lifecycle == active
-AND activationId == currentActivationId
-AND Frame == Main-authorized InputTarget
-```
+Batch C transaction gap 允许 `InputTarget=null`。Subsystem mutation gate 在 outbound call/return pending 时阻止新的 ordinary input 进入业务 Handler；具体 drop/buffer/reset 留给 User Input Protocol。
 
-revoked/old Activation MUST reject。
+Batch D timeout 时 mutation gate 不得被解除后继续旧 Activation；Runtime 进入 failure path。
 
-Batch C transaction gap 允许：
+## 8. Render / Frame Independence
 
-```text
-InputTarget = null
-```
+Render Update 使用独立 Render identity。Activation replacement 不启动 Render epoch，也不要求 Render resync。
 
-例如 Caller call accepted 后到 Child activate ACK 前，或 Child return accepted 后到 Caller resume ACK 前。
+以下不是公共协议规则：Frame active→Render visible、suspended→hidden、closed→destroyed、Frame create/close→Data Connection create/close。
 
-Subsystem sender-side mutation gate 必须在 outbound call/return pending 时阻止新的 ordinary input 继续进入业务 Handler；User Input Protocol 后续决定队列/drop/reset 的 wire 细节。
+## 9. Transport Profiles
 
-## 8. Render Update Identity
+Desktop：Control/Data = localhost WebSocket，Content = HTTP。PWA：Control/Data = MessagePort，Content = same-origin Fetch/Service Worker。
 
-Render Update 使用独立 Render identity，不使用 `frameId + activationId` 作为 Render lifecycle identity。Activation replacement 不启动 Render epoch，也不要求 Render resync。
+PWA Control Transport Profile 尚未冻结，但 MUST 精确保持 Frame Batch A/B/C/D：
 
-## 9. Frame / Render / Data Independence
+- method/field 不变；
+- Response-before-dependent-RPC；
+- activate/resume ACK-before-publish；
+- post-commit no rollback；
+- finite deadline；
+- ambiguous timeout = Runtime failure；
+- no automatic Frame RPC retry/replay。
 
-以下都不是公共协议规则：
+Transport adapter 不得因底层可靠重传机制创造第二次 application operation。
 
-```text
-Frame active      → Render visible
-Frame suspended   → Render hidden
-Frame closed      → Render destroyed
-Frame create      → Data Connection create
-Frame closed      → Data Connection close
-```
+## 10. Renderer Reconnect
 
-## 10. Content Plane
+Renderer reconnect 使用 Main 当前 committed Stack/lifecycle/Activation/InputTarget；不得恢复 revoked Activation，不得把 Frame Control timeout 解释成可恢复的 Renderer reconnect 问题。Render/Data Connection 独立恢复。
 
-Readonly Content API 提供 manifest/record/group/resource，不承载 User Input、Render State、Runtime Tick、Frame Stack、Activation 或 Runtime Bootstrap 控制。
-
-## 11. Transport Profiles
-
-Desktop：Control/Data = localhost WebSocket，Content = HTTP。
-
-PWA：Control/Data = MessagePort，Content = same-origin Fetch/Service Worker。
-
-PWA Control Transport Profile 尚未冻结，但 MUST 精确保持 Subsystem Control v1 与 Frame Batch A/B/C 应用语义。Transport adapter MUST NOT：
-
-- 把 `frame.call` 改成依赖嵌套反向 Request；
-- 在 activate/resume ACK 前发布新 Activation；
-- 以 MessagePort/Worker convenience 恢复旧 Activation；
-- 添加 caller/close reason/system method 等 wire 变体。
-
-## 12. Renderer Reconnect
+## 11. Backpressure / Retry Boundaries
 
 ```text
-reconnect Main Control
-→ restore committed Session / Runtime / Stack
-→ restore current Activation / InputTarget
-→ rebuild authorized Data Connections
-→ User Input only current Activation
-→ Render independently restores
-```
-
-不得恢复 revoked Activation，不得从 transitional/uncommitted local state推导 authority。
-
-## 13. Backpressure / Retry Boundaries
-
-```text
-Subsystem Control v1
-    no silent drop / state-changing app retry
+Subsystem Control
+    no state-changing app retry
 
 Frame / Call
-    Batch C fixes transaction barriers
-    Batch D freezes timeout/retry/idempotency/ambiguous delivery
+    no state-changing app retry/replay
+    ambiguous result → Runtime failure
 
 User Input
     continuous may coalesce / discrete bounded ordered
@@ -233,29 +208,25 @@ Render
     recoverable state may coalesce per Render/Scope
 ```
 
-JSON-RPC Response delivery loss after commit 的 ambiguous handling 属于 Batch D，通信层不得自行把它当普通 retry。
+不要把 User Input/Render 可重放或可合并的思想套到 Frame Control RPC。
 
-## 14. Security / Authority Principles
+## 12. Cancellation Boundary
 
-- 所有 wire message 视为不可信；
-- Control hello 绑定 Launch Attempt / key / credential；
-- Frame operation 必须来自 frame 所属 connection-bound Subsystem；
-- Caller receiver 由 Main 决定；
-- Subsystem 不能创建公共 frameId / activationId；
-- User Input 校验 active/current Activation；
-- Data Connection 绑定合法 Grant；
-- Render Update 限制 Subsystem Render namespace；
-- Content API 只接受逻辑资源 identity。
+v1 无 caller-driven `frame.cancel`。`FrameOutcome.cancelled` 仅表示 active Frame 自己 return cancelled。Session termination 使用 Session/Subsystem shutdown，不通过 Frame cancellation 表达。
 
-## 15. 当前契约状态
+## 13. Security / Authority Principles
 
-已冻结：Game Package v2 Desktop subset、Desktop Node.js Launcher v1、Subsystem Control v1、Frame / Call Batch A/B/C。
+所有 wire message 视为不可信；Control hello 绑定 Launch Attempt/key/credential；Frame operation 必须来自 frame 所属 connection-bound Subsystem；Caller receiver 由 Main 决定；Subsystem 不能创建公共 frameId/activationId；User Input 校验 active/current Activation；Data Connection 绑定合法 Grant；Render Update 限制 Subsystem namespace。
+
+## 14. 当前契约状态
+
+已冻结：Game Package v2 Desktop subset、Desktop Node.js Launcher v1、Subsystem Control v1、Frame / Call Batch A/B/C/D。
 
 下一冻结目标：
 
 ```text
-Frame / Call Batch D
-    semantic error / timeout / retry / idempotency / cancellation
+Frame / Call Batch E
+    Runtime failure deterministic unwind
 ```
 
-随后 Batch E Runtime unwind、Batch F limits/fixtures/profile，再冻结 Main⇄Renderer Control、Data Connection、User Input、Render Update、Render State。
+随后 Batch F limits/fixtures/profile，再冻结 Main⇄Renderer Control、Data Connection、User Input、Render Update、Render State。
