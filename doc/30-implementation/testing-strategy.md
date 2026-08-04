@@ -3,29 +3,15 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：协议、Launcher、模块、跨平台 Transport、内容兼容和端到端测试分层  
-> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Desktop Node.js Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
+> 主要定义：协议、Launcher、Frame transaction/error/recovery、Transport、内容兼容和端到端测试分层  
+> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
 
 ## 1. 测试目标
 
-测试不仅验证实现正确，还必须阻止下层实现破坏 Frozen Contract。
+测试不仅验证实现正确，还必须阻止实现破坏 Frozen Contract。
 
-第一阶段重点验证：Game Package/Launcher/Subsystem Control v1；Frame A identity/lifecycle/Activation；Batch B exact seven RPC；Batch C transaction/acceptance/publication；Batch D error/timeout/no-retry/cancellation；Frame/Render/Data lifecycle independence。
-
-特别要验证跨 Batch C/D 的组合语义：
-
-```text
-Explicit Error = RPC postcondition known not committed
-```
-
-**不等于**：
-
-```text
-Explicit Error = Runtime healthy / local rollback always allowed
-```
-
-是否可继续使用 Runtime 必须再由 Batch D error classification 决定。
+当前重点：Launcher/Subsystem Control；Frame Batch A identity/lifecycle/Activation；B exact wire；C transaction/publication；D error/timeout/no-retry；E deterministic Runtime-failure unwind；Frame/Render/Data independence。
 
 ## 2. 测试层次
 
@@ -33,31 +19,24 @@ Explicit Error = Runtime healthy / local rollback always allowed
 Schema / Contract Test
 → State Machine / Transaction Fixture
 → Error / Timeout Fixture
-→ Launcher Filesystem / Process Conformance
+→ Runtime Failure Unwind Fixture
+→ Launcher / Supervisor Conformance
 → Module Unit Test
-→ Transport Conformance Test
+→ Transport Conformance
 → Runtime Container Interop
 → Component Integration
-→ End-to-End Vertical Test
+→ End-to-End
 ```
 
-Frozen Contract 必须先有机器可校验 fixture，再允许 Main/SDK 各自实现。
+## 3. Frame Batch A/B
 
-## 3. Launcher / Subsystem Control
+Batch A：Frame ID unique/no-reuse、permanent subsystem assignment、caller immutable、lifecycle only five states、no ready/status/failed-lifecycle、Activation fresh/revoked-never-restored、stable Stack、no two InputTargets、Frame/Render independence。
 
-继续覆盖 Descriptor 集合校验、Entry containment、Host-selected Node/no shell、Token-before-spawn、Supervisor exit classification、hello/status/shutdown、Main-owned shutdown intent、semantic error envelope、no heartbeat/reconnect/restart。
+Batch B：exact seven methods/directions、all Request、closed schema、exact fields、`completed.value` required、no caller wire/close reason/system.call/frame.result/frame.cancel/frame.abort/frame.unwind、structural invalid→`-32602`。
 
-保持：`spawn success ≠ connected ≠ identified ≠ ready`、shutdown accepted≠stopped、unexpected exit including code 0→failure。
+## 4. Batch C Transaction Conformance
 
-## 4. Frame Batch A/B
-
-Batch A fixture：frame ID unique/no-reuse、permanent subsystem assignment、caller immutable、lifecycle only starting/active/suspended/closing/closed、no ready/status/failed-lifecycle、Activation fresh/revoked-never-restored、stable stack、no two InputTargets、Frame close不控制 Render/Data。
-
-Batch B fixture：exact seven method/direction、all Request、closed schema、exact fields、`completed.value` required、no caller wire/close reason/system.call/frame.result/frame.cancel、structural invalid→`-32602`。
-
-## 5. Batch C Transaction Conformance
-
-至少覆盖：
+至少：
 
 ```text
 initial-initialize-before-activate
@@ -72,49 +51,29 @@ return-accept-stores-terminal-outcome
 return-accept-revokes-old-activation
 return-success-before-frame-close
 return-success-does-not-mean-caller-resumed
-close-ack-before-pop
+close-ack-before-normal-pop
 resume-ack-before-publish
 same-subsystem-no-nested-reverse-request
 recursive-same-subsystem-depth-3
-precommit-error-may-abort
-postcommit-error-never-restores-revoked-activation
-postcommit-return-error-never-erases-outcome
+precommit-recoverable-error-may-abort
+postcommit-never-restores-revoked-activation
+accepted-outcome-never-erased
 ```
 
-Subsystem SDK mutation gate fixture 验证 call/return pending停止 ordinary input/第二个 call/return；Success分别 commit suspended/closing；明确可恢复的 precommit Error 可释放 gate。
+## 5. Batch D Result / Error Conformance
 
-Batch C transaction fixture 只验证 commit/no-commit 与不可逆边界；**不得单独假设任意 Explicit Error 都允许 Runtime 继续运行。** Error 后的 Runtime health classification 必须和 Batch D fixture 联合验证。
-
-## 6. Batch D Request Result Conformance
-
-### 6.1 Finite Deadline
-
-```text
-frame-initialize-finite-deadline
-frame-activate-finite-deadline
-frame-suspend-finite-deadline
-frame-resume-finite-deadline
-frame-close-finite-deadline
-frame-call-finite-deadline
-frame-return-finite-deadline
-```
-
-Batch D 不固定具体毫秒数；fixture 只验证 Request 不允许无限 pending，并允许 Profile 注入 policy。
-
-### 6.2 Success / Error / Ambiguous
+Finite deadline：七方法不得无限 pending。
 
 ```text
 success-is-known-commit
 explicit-error-is-known-no-commit
-explicit-error-does-not-imply-runtime-healthy
+explicit-error-still-requires-failure-classification
 timeout-is-ambiguous
 response-loss-is-ambiguous
 pending-connection-loss-is-ambiguous
 ```
 
-不得把 timeout fixture 实现成普通 Error Response，也不得把 Explicit Error fixture直接等价成 recoverable。
-
-### 6.3 No Retry / Replay
+No retry：
 
 ```text
 no-retry-after-initialize-timeout
@@ -122,40 +81,22 @@ no-retry-after-activate-timeout
 no-retry-after-resume-timeout
 no-retry-after-call-timeout
 no-retry-after-return-timeout
-no-operation-id-required
 jsonrpc-id-not-idempotency-key
-late-success-does-not-recover-runtime
-late-error-does-not-recover-runtime
+late-response-does-not-recover-runtime
 ```
 
-Transport mock 应记录 wire count，证明同一 application Frame operation timeout 后没有第二次发送。
-
-## 7. Batch D Recoverable Semantic Errors
-
-### Call target
+Recoverable：
 
 ```text
-call-target-not-found-recoverable
 call-target-not-found-keeps-caller-active
-call-target-not-found-keeps-activation
-call-target-unavailable-recoverable
 call-target-unavailable-before-acceptance
-```
-
-### Initialize rejection
-
-```text
 initialize-rejected-has-frame-failure
-initialize-rejected-no-context-commit
 initialize-rejected-runtime-stays-healthy
 accepted-child-init-rejected-forward-failed-outcome
 accepted-child-init-rejected-fresh-caller-activation
-initial-frame-init-rejected-no-runtime-failure
 ```
 
-业务 input 不满足条件必须使用 `FRAME_INITIALIZE_REJECTED`，不能错误使用 `-32602`。
-
-## 8. Batch D Divergence / Protocol Fatal
+Fatal：
 
 ```text
 frame-not-found-divergence-fatal
@@ -163,95 +104,196 @@ frame-state-mismatch-divergence-fatal
 activation-mismatch-divergence-fatal
 stack-mismatch-divergence-fatal
 ownership-mismatch-divergence-fatal
-valid-main-activate-semantic-reject-fatal
-valid-main-suspend-semantic-reject-fatal
-valid-main-resume-semantic-reject-fatal
-valid-main-close-semantic-reject-fatal
-initialize-protocol-error-fatal
+valid-activate-semantic-error-does-not-local-close-repair
 invalid-params-protocol-fatal
 method-not-found-protocol-fatal
-internal-error-protocol-fatal
 ```
 
-必须额外验证不存在私有 resync/局部修复：
-
-```text
-activate-semantic-error-does-not-send-close-as-repair
-activate-semantic-error-does-not-resume-caller-directly
-frame-not-found-does-not-reinitialize-same-frame
-protocol-error-does-not-retry-frame-rpc
-runtime-fatal-error-delegates-stack-recovery-to-batch-e
-```
-
-验证 Runtime failure diagnostics：
-
-```text
-FRAME_CONTROL_TIMEOUT
-FRAME_CONTROL_DIVERGENCE
-FRAME_CONTROL_PROTOCOL_ERROR
-```
-
-这些 diagnostics 不得被测试成 Caller-visible `FrameOutcome.failed.error.code`；后者由 Batch E 冻结。
-
-## 9. Cross-Batch C/D Failure Matrix
-
-实现测试必须覆盖下面的组合，而不是只测单一 Batch：
-
-| 场景 | RPC commit evidence | Runtime health | 当前阶段允许的处理 |
-|---|---|---|---|
-| `FRAME_INITIALIZE_REJECTED` | known no-commit | healthy | normal failed-outcome compensation |
-| `FRAME_CALL_TARGET_NOT_FOUND/UNAVAILABLE` | known no-commit | healthy | Caller保持 active |
-| `frame.activate` divergence Error | known no-commit | failed | stop normal Frame control；Batch E unwind |
-| `frame.close` protocol Error | known no-commit | failed | accepted outcome不可撤销；Batch E unwind |
-| any Frame RPC timeout/loss | unknown | failed | no retry；Batch E unwind |
-
-该矩阵用于防止把 Batch C 的 `Error=no commit` 错误推广成“所有 Error 都可以 local rollback”。
-
-## 10. Mutation Gate on Ambiguous Sender Request
-
-Subsystem SDK 必须覆盖：
+Mutation gate：
 
 ```text
 call-timeout-does-not-release-gate
 call-timeout-does-not-reuse-old-activation
-call-timeout-stops-frame-processing
-call-timeout-reports-runtime-failure
 return-timeout-does-not-release-gate
 return-timeout-does-not-restore-active
-return-timeout-stops-frame-processing
+fatal-explicit-error-does-not-release-gate-to-normal-processing
 ```
 
-如果 Control Connection 同时丢失，允许由 Subsystem Control connection-loss fixture 触发 Main failure；不得再补 Frame Request retry。
+## 6. Batch E Root Selection
 
-## 11. Cancellation Conformance
+必须验证 Runtime failure是 key级而不是 Frame级：
 
 ```text
-frame-cancel-method-rejected
-caller-cannot-remotely-cancel-child
-callee-return-cancelled-valid
-cancelled-is-outcome-not-lifecycle
-session-shutdown-not-frame-cancel
+failure-root-is-lowest-failed-runtime-occurrence
+failure-root-not-nearest-occurrence
+failure-does-not-remove-only-same-key-frames
+whole-root-to-top-suffix-is-doomed
+same-runtime-multiple-frame-recursion
+same-runtime-separated-by-other-subsystems
 ```
 
-## 12. Main System Tests
+示例 fixture：
 
-- transaction single-flight / acceptance atomicity；
-- Response-before-dependent-RPC；
-- Renderer publication only after ACK；
-- finite deadline manager；
-- explicit Error commit-evidence classifier；
-- recoverable/fatal classification独立于 commit evidence；
-- ambiguous timeout→Runtime failure；
-- late Response diagnostic-only；
-- recoverable initialize rejection；
-- divergence/protocol failure classification；
-- Runtime-fatal branch不继续普通 close/pop/resume；
-- no retry/replay/idempotency journal；
-- no two InputTargets；Main不维护 Render Registry。
+```text
+F1 A
+F2 B   ← expected root
+F3 C
+F4 B
+F5 D
 
-## 13. Subsystem SDK / Test Subsystems
+failed={B}
+expected suffix=F2..F5
+```
 
-SDK API保持 `onInitialize/onActivate/onSuspend/onResume/onClose/call/return`，增加 deadline/mutation-gate/failure coordination。
+## 7. Batch E Cleanup Ordering
+
+```text
+failure-unwind-top-to-bottom
+failure-barrier-clears-input-target
+no-new-call-return-from-doomed-suffix
+failed-runtime-frame-does-not-receive-close
+failed-runtime-frame-logical-retire-without-ack
+failed-runtime-active-frame-revokes-public-activation
+healthy-descendant-context-absent-no-close
+healthy-descendant-context-exists-one-close
+healthy-descendant-does-not-require-extra-suspend
+existing-close-request-is-not-duplicated
+healthy-descendant-close-ack-before-removal
+```
+
+特别验证 normal `close ACK before pop` 与 failure-path exception：
+
+```text
+healthy Runtime → ACK required
+failed Runtime  → ACK impossible/not required; logical retire
+```
+
+## 8. Batch E Fixed-point Expansion
+
+```text
+cleanup-close-timeout-adds-runtime-to-failed-set
+cleanup-close-divergence-adds-runtime
+cleanup-protocol-error-adds-runtime
+new-failed-runtime-with-lower-frame-moves-root-down
+new-failed-runtime-without-lower-frame-keeps-root
+multiple-root-expansions-converge
+fixed-point-eventually-resumes-or-empty
+no-retry-during-fixed-point-unwind
+```
+
+关键 fixture：
+
+```text
+F1 D
+F2 A
+F3 B   ← B initially fails
+F4 C
+F5 D
+
+close(F5) timeout
+→ D failed
+→ root must move F3 → F1
+→ entire Stack unwinds
+```
+
+## 9. Transaction-in-flight Recovery
+
+覆盖 failure barrier与已有 RPC race：
+
+```text
+crash-before-call-acceptance-uses-precommit-state
+crash-after-call-acceptance-preserves-suspended-caller
+crash-during-child-initialize
+crash-after-initialize-before-activate
+activate-response-after-barrier-never-publishes-activation
+crash-before-return-acceptance-no-terminal-outcome
+crash-after-return-acceptance-preserves-outcome
+close-pending-at-barrier-not-resent
+resume-response-after-frame-becomes-doomed-not-published
+late-response-from-failed-runtime-diagnostic-only
+```
+
+只允许 Main已 commit facts进入 recovery。
+
+## 10. Outcome Preservation / Caller Failure
+
+```text
+accepted-completed-outcome-survives-runtime-crash
+accepted-cancelled-outcome-survives-runtime-crash
+accepted-failed-outcome-survives-runtime-crash
+intermediate-doomed-accepted-outcome-not-mutated
+root-without-outcome-generates-subsystem-runtime-failed
+runtime-diagnostic-code-not-required-in-caller-failure-data
+```
+
+Caller-visible platform code必须：
+
+```text
+SUBSYSTEM_RUNTIME_FAILED
+```
+
+但仅在 final root没有 accepted outcome时生成。
+
+## 11. Surviving Caller Recovery
+
+```text
+intermediate-doomed-frames-are-not-resumed
+only-final-root-direct-caller-is-resumed
+recovery-resume-uses-fresh-activation
+recovery-never-restores-old-caller-activation
+recovery-resume-ack-before-inputtarget-publish
+recovery-resume-timeout-fails-caller-runtime
+recovery-resume-failure-expands-root
+same-subsystem-failed-runtime-does-not-resume-lower-same-runtime-frame
+```
+
+最后一项尤其重要：如果 lower Frame 与 failed root属于同 Runtime，则它不可能是 surviving healthy Caller；lowest-root算法必须自动把 root下移到更低 occurrence。
+
+## 12. Initial / Zero-frame / Session Cases
+
+```text
+initial-runtime-failure-unwinds-whole-stack
+initial-root-no-caller-resume
+initial-root-without-outcome-records-subsystem-runtime-failed
+initial-accepted-outcome-preserved
+zero-frame-runtime-failure-keeps-current-stack
+zero-frame-runtime-failure-keeps-current-inputtarget
+session-termination-does-not-force-recovery-resume
+```
+
+## 13. Renderer / Input / Render
+
+Renderer fixture：
+
+```text
+failure-barrier-publishes-no-old-target
+recovery-gap-allows-inputtarget-null
+old-activation-never-republished
+new-recovery-activation-only-after-resume-ack
+no-two-inputtargets-during-unwind
+renderer-reload-does-not-cancel-runtime-failure
+```
+
+Frame unwind不得隐式删除 healthy Runtime Render；Runtime failure后的 Data/Render cleanup单独测试。
+
+## 14. Main System Tests
+
+- Frame Stack transaction single-flight；
+- RuntimeFailureUnwindCoordinator failed-set/fixed-point；
+- lowest root across repeated subsystem keys；
+- logical retirement vs healthy close；
+- pending RPC state tracking；
+- accepted outcome preservation；
+- root outcome synthesis；
+- only final Caller resume；
+- resume failure expansion；
+- no retry/replay；
+- no two InputTargets；
+- Main不维护 Render Registry。
+
+## 15. Subsystem SDK / Test Subsystems
+
+SDK继续验证 `onInitialize/onActivate/onSuspend/onResume/onClose/call/return`、mutation gate/deadline/failure coordination。
 
 推荐 test-subsystems：
 
@@ -261,41 +303,40 @@ frame-rpc-never-respond
 frame-rpc-late-respond
 frame-state-divergence
 activation-divergence
-main-lifecycle-semantic-reject
-main-lifecycle-protocol-error
 same-subsystem-recursive
 no-reentrant-handler
+runtime-crash-on-close
+runtime-crash-on-resume
+runtime-multiple-frame-occurrence
 callee-cancelled
 stale-activation
 render-without-frame
 ```
 
-## 14. Renderer / User Input / Render
+## 16. Transport Conformance
 
-Renderer fixture继续验证 activate/resume ACK before publish、revoked never republished、InputTarget null gap、no two InputTargets。Frame Control timeout/divergence 不通过 Renderer reconnect恢复。
+Desktop WebSocket 与 PWA MessagePort必须跑相同 A-E trace。Transport不能增加 application retry、改变 root算法、在 failed Runtime上补 close RPC或把 reconnect当 Frame recovery。
 
-User Input 只允许 current active frame+activation；Render 使用独立 identity。
+## 17. E2E
 
-## 15. E2E
+正常：bootstrap→initial→nested call→return→resume→Renderer reload→shutdown。
 
-正常 E2E 保留 bootstrap→initial→nested call→return→resume→Renderer reload→shutdown。
-
-增加 failure E2E：
+Failure：
 
 ```text
-call target unavailable → caller continues
-child initialize rejected → failed outcome / fresh resume
-outbound activate timeout → Runtime failure
-valid activate semantic rejection → Runtime failure, no local close repair
-subsystem frame.call timeout → mutation gate remains / Runtime failure
-late response after timeout → no recovery
-control divergence → Runtime failure
+child Runtime crash → Caller gets SUBSYSTEM_RUNTIME_FAILED
+ancestor Runtime crash → whole suffix unwind
+same Runtime repeated → lowest occurrence root
+healthy descendant close → Runtime survives
+cleanup timeout → root expands downward
+accepted return outcome + crash → original outcome delivered
+resume failure → further root expansion
+initial Runtime failure → Stack empty
+zero-frame Runtime failure → current unrelated Stack unchanged
 ```
 
-Batch E 前 E2E 不硬编码 Runtime failed 后具体 suffix unwind，只验证 Batch D 已正确产生 failure classification、停止正常 Frame processing，并没有执行私有 resync/局部 rollback。
+## 18. Golden / Fixture 规则
 
-## 16. Golden / Fixture 规则
+适合 Golden：Launcher/Control messages、Frame Schema、Batch C transaction traces、Batch D error/timeout traces、Batch E unwind traces、Connection auth、User Input sequence、Render State/Event、Content Response。
 
-适合 Golden：Launcher/Control messages、Frame Schema、Batch C transaction traces、Batch D semantic errors和 timeout traces、Connection auth、User Input sequence、Render State/Event、Content Response。
-
-已 Frozen Batch fixture 发生不兼容改变时必须先有 ADR / compatibility decision。
+已 Frozen A-E fixture发生不兼容改变时必须先有 ADR/版本决策。
