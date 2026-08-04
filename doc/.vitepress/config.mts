@@ -76,7 +76,7 @@ export default defineConfig({
           { text: 'Game Package v2', link: '/15-contracts/game-package-v2' },
           { text: 'Desktop Node.js Launcher Profile v1', link: '/15-contracts/nodejs-launcher-profile-v1' },
           { text: 'Subsystem Control Protocol v1', link: '/15-contracts/subsystem-control-lifecycle-protocol' },
-          { text: 'Frame / Call Protocol v1 · Batch A Frozen', link: '/15-contracts/frame-call-protocol-v1' },
+          { text: 'Frame / Call Protocol v1 · Batch A/B Frozen', link: '/15-contracts/frame-call-protocol-v1' },
           { text: '只读 Content API v1', link: '/15-contracts/content-api-v1' },
           { text: 'Legacy · 旧 Frame 生命周期草案路径', link: '/15-contracts/system-lifecycle-protocol' },
           { text: 'Legacy · Renderer–Subsystem Data v1', link: '/15-contracts/frame-data-channel-v1' },
@@ -123,6 +123,7 @@ export default defineConfig({
           { text: 'ADR 0008 · Desktop Node.js Launcher v1', link: '/decisions/0008-desktop-nodejs-launcher-profile-v1' },
           { text: 'ADR 0009 · Subsystem Control Protocol v1', link: '/decisions/0009-freeze-subsystem-control-protocol-v1' },
           { text: 'ADR 0010 · Frame / Call Batch A', link: '/decisions/0010-freeze-frame-call-protocol-v1-batch-a' },
+          { text: 'ADR 0011 · Frame / Call Batch B', link: '/decisions/0011-freeze-frame-call-protocol-v1-batch-b' },
         ],
       },
       {
