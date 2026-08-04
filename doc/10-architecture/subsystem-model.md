@@ -115,23 +115,31 @@ type FrameOutcome =
 
 Subsystem 发送 outbound `frame.call` / `frame.return` 后，直到收到 Response 前必须建立内部 mutation gate：停止新的 ordinary input dispatch，禁止第二个 call/return。该 gate 不是公共 lifecycle state。
 
-结果处理：
+结果必须先按两层判断：
 
 ```text
-Success
-    → commit Batch C local state
+Layer 1: commit evidence
+    Success        → known committed
+    Explicit Error → known not committed
+    Timeout/loss   → unknown / ambiguous
 
-Explicit recoverable Error
-    → gate releases
-    → Frame remains active/current Activation remains valid
-
-Timeout / Response loss / pending-request connection loss
-    → commit state unknown
-    → gate MUST NOT release back to old Activation
-    → Runtime failure path
+Layer 2: Runtime health classification
+    recoverable Error → Runtime remains healthy
+    divergence/protocol Error → Runtime failed
+    ambiguous timeout/loss → Runtime failed
 ```
 
-因此 SDK 不能把 timeout 当成“没发生过”。
+只有 **recoverable Explicit Error** 才允许：
+
+```text
+release mutation gate
+→ keep current active Frame/Activation
+→ continue normal Frame processing
+```
+
+收到 divergence/protocol-fatal Explicit Error 时，即使对应 Main operation known not committed，也 MUST NOT 把 gate解除回旧业务状态继续运行；Subsystem 必须停止正常 Frame processing并进入 Runtime failure path。
+
+Timeout / Response loss 同样不得解除 gate回旧 Activation。
 
 ## 8. `frame.call` Local Commit
 
@@ -157,7 +165,7 @@ success 不表示 `frame.close` 已完成，也不表示 Caller 已 resumed。Su
 
 ### activate / suspend / resume / close
 
-这些 Main-issued lifecycle operation 在双方 state一致且 Runtime healthy 时应成功。若 Subsystem 因 Frame identity/lifecycle/Activation mismatch 拒绝合法请求，说明 control divergence，Runtime 必须进入 failure path，而不是尝试私有 resync。
+这些 Main-issued lifecycle operation 在双方 state一致且 Runtime healthy 时必须成功。若 Subsystem 因 Frame identity/lifecycle/Activation mismatch 拒绝合法请求，说明 control divergence，Runtime 必须进入 failure path，而不是尝试私有 resync。
 
 `resume` 同时交付 Child Outcome + replacement Activation；`close` 不隐式关闭 Runtime/Data Connection、共享业务状态或 Render。
 
@@ -171,7 +179,9 @@ FRAME_CALL_TARGET_UNAVAILABLE
 FRAME_INITIALIZE_REJECTED
 ```
 
-前两个由 Main 在 call acceptance 前返回；Subsystem 收到后可解除 mutation gate 并继续当前 active Frame。
+前两个由 Main 在 call acceptance 前返回；Subsystem 收到后可解除 mutation gate并继续当前 active Frame。
+
+`FRAME_INITIALIZE_REJECTED` 是 Main→target Subsystem initialize 的业务拒绝；target Runtime保持 healthy。它不是 outbound call/return gate 的通用“恢复信号”。
 
 Control divergence：
 
@@ -215,7 +225,7 @@ User Input
 → dispatch business Handler
 ```
 
-revoked/old Activation 永久拒绝。mutation gate timeout 后不得恢复旧输入 dispatch；Runtime 进入 failure path。
+revoked/old Activation 永久拒绝。mutation gate timeout/fatal Error 后不得恢复旧输入 dispatch；Runtime 进入 failure path。
 
 ## 14. Cancellation Boundary
 
@@ -227,12 +237,20 @@ v1 不支持 caller-driven `frame.cancel`。suspended Caller 无远程取消 Chi
 
 same-Subsystem call 合法但仍必须 new childFrameId/new Child Activation/normal Main Stack push-pop/Caller old Activation revoke。不得通过本地函数调用绕过 Main。
 
+如果 same-Subsystem recursive call 所在 Runtime 自身进入 terminal failure，则该 Runtime 内的 Caller/Child Context 都不再是 surviving healthy Caller；不得在 Subsystem 内部自行 resume lower Frame。具体 suffix unwind 由 Main 的 Batch E policy 决定。
+
 ## 16. Failure Boundary
 
 ```text
-Pre-commit Explicit Error
+Recoverable Explicit Error
     known not committed
-    local gate may release
+    Runtime healthy
+    gate may release where operation semantics allow
+
+Fatal Explicit Error
+    known not committed
+    Runtime untrusted
+    no local resync / no gate release to normal processing
 
 Post-commit failure
     never restore revoked Activation
@@ -243,6 +261,8 @@ Ambiguous timeout/loss
     no retry / no guess
     Runtime failure
 ```
+
+“no-commit”与“Runtime healthy”是两个不同维度，SDK/adapter MUST NOT 合并成一个布尔错误分支。
 
 Runtime failed 后 multi-Frame unwind 由 Batch E 冻结。
 
@@ -276,10 +296,13 @@ Repository Cache
 3. Frame/Activation identity 不复用；
 4. Batch B exact seven Requests；
 5. outbound call/return pending 必须有 mutation gate；
-6. Success/Explicit Error/Ambiguous 三种结果不可混淆；
-7. ambiguous timeout 不解除 gate继续旧 Activation，不 retry；
-8. recoverable initialize rejection 不使 Runtime failed；
-9. divergence/protocol error Runtime-fatal；
-10. no caller-driven Frame cancellation；
-11. post-commit failure不能恢复旧 Activation；
-12. Frame lifecycle 不控制 Render/Data Connection/Runtime lifecycle。
+6. Success/Explicit Error/Ambiguous commit evidence不可混淆；
+7. Explicit Error=no-commit 不等于 Runtime healthy；
+8. 只有 recoverable Error允许 gate 回到 normal processing；
+9. ambiguous timeout/fatal Error 不解除 gate继续旧 Activation，不 retry；
+10. recoverable initialize rejection 不使 Runtime failed；
+11. divergence/protocol error Runtime-fatal；
+12. no caller-driven Frame cancellation；
+13. post-commit failure不能恢复旧 Activation；
+14. same-Subsystem failed Runtime不能在本地自行恢复 lower Frame；
+15. Frame lifecycle 不控制 Render/Data Connection/Runtime lifecycle。
