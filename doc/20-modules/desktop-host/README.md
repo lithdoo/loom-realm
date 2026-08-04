@@ -9,7 +9,7 @@
 
 ## 1. Hostra 边界
 
-Hostra 是独立 Electron Shell，只负责 BrowserWindow / desktop lifecycle。它不承载 LoomRealm Main，不启动 Subsystem，不解释 Subsystem/Frame/Activation/Render/Input/Content Payload，也不代理 Renderer⇄Subsystem 业务数据。
+Hostra 是独立 Electron Shell，只负责 BrowserWindow / desktop lifecycle。它不承载 LoomRealm Main，不启动 Subsystem，不解释业务协议 Payload，也不代理 Renderer⇄Subsystem 数据。
 
 Desktop LoomRealm：Control/System Data 使用 localhost WebSocket；Content 使用 localhost HTTP。
 
@@ -20,6 +20,7 @@ LoomRealm Main Process
 ├── Runtime Supervisor
 ├── Control Connection Registry
 ├── Frame Stack / Transaction Coordinator
+├── Frame RPC Deadline / Failure Classifier
 ├── Activation / InputTarget
 └── Data Connection Authority
 
@@ -35,123 +36,76 @@ per-Subsystem Process
 
 进程隔离粒度 = Subsystem，不是 Frame。
 
-## 3. Main ⇄ Subsystem Control WebSocket
+## 3. Control WebSocket
 
 同一已认证 WebSocket 逻辑复用：
 
 ```text
 Subsystem Control Protocol v1        Frozen
-Frame / Call Batch A/B/C             Frozen
-Frame / Call Batch D-F               Draft
+Frame / Call Batch A/B/C/D           Frozen
+Frame / Call Batch E/F               Draft
 ```
 
-Batch B exact methods必须原样映射；WebSocket envelope、connection ID、ping/pong 不得进入应用 RPC Schema。
+Batch B exact methods必须原样映射；WebSocket envelope、connection ID、ping/pong 不进入应用 RPC Schema。
 
-## 4. Batch C Transport Ordering
+## 4. Transaction Ordering
 
-Desktop adapter MUST preserve：
+Desktop adapter MUST preserve：call Request→acceptance commit→call Response→dependent Child initialize/activate；return Request→acceptance commit→return Response→dependent close/resume。
+
+ordinary call 不发送 reverse `frame.suspend`。WebSocket adapter 不得要求 nested reverse-request handler reentrancy。
+
+## 5. Renderer Publication
+
+`frame.activate` / `frame.resume` ACK happens-before 对应 InputTarget publication。transaction gap `InputTarget=null` 合法；revoked Activation 不得重新发布；Renderer不参与 Frame RPC。
+
+## 6. Batch D Deadline / Retry Boundary
+
+每个 Frame Request 必须有 finite deadline。Desktop Host/Profile 选择实际 timeout 数值，但不得修改协议结果分类：
 
 ```text
-frame.call Request
-→ Main acceptance commit
-→ frame.call Response
-→ dependent Child frame.initialize / frame.activate
+Success        → known commit
+Explicit Error → known no-commit
+Timeout/loss   → ambiguous → Runtime failure
 ```
 
-以及：
+WebSocket/TCP 自身可靠传输/重传机制不等于 application-level Frame Request replay。Desktop adapter MUST NOT 在 Frame RPC timeout 后重新发送同一 operation，不实现 operationId/idempotency journal。
 
-```text
-frame.return Request
-→ Main acceptance commit
-→ frame.return Response
-→ dependent frame.close / frame.resume
-```
+迟到 Response 不恢复已 commit 的 Runtime failure。
 
-ordinary call 不发送 reverse `frame.suspend` 作为建立步骤。
+## 7. Subsystem Mutation Gate
 
-WebSocket adapter MUST NOT 要求“入站 Request handler pending 时处理并等待反向 Request”才能正常完成 same-Subsystem recursive call。
+Desktop Subsystem SDK 在 outbound `frame.call / frame.return` pending 时停止对应 Frame 的新 ordinary input并阻止第二个 call/return。
 
-## 5. Renderer Control Publication
+recoverable Explicit Error 可释放 gate；Success commit suspended/closing；timeout/Response-loss 不得释放 gate后继续旧 Activation，而是进入 Runtime failure path。
 
-Desktop Renderer⇄Main Control WebSocket 只发布 Main 已 commit state。
+## 8. Error Mapping
 
-必须满足：
+Recoverable Frame semantic error保持 `FRAME_CALL_TARGET_NOT_FOUND / FRAME_CALL_TARGET_UNAVAILABLE / FRAME_INITIALIZE_REJECTED`。
 
-```text
-frame.activate ACK
-    happens-before Child InputTarget publication
+Frame identity/state/Activation/Stack/ownership divergence、Frozen method/schema JSON-RPC error 与 ambiguous timeout 都是 Runtime-fatal。Desktop diagnostics保留 `FRAME_CONTROL_TIMEOUT / FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR`。
 
-frame.resume ACK
-    happens-before Caller replacement InputTarget publication
-```
-
-transaction gap 可以为 `InputTarget=null`。revoked Activation 不得重新发布；不得同时发布两个 ordinary InputTargets。
-
-Renderer 不直接参与 Frame RPC。
-
-## 6. Subsystem-side Mutation Gate
-
-Desktop Subsystem SDK 在 outbound `frame.call / frame.return` pending 时必须停止对应 Frame 的新 ordinary input dispatch，并禁止第二个 call/return。
-
-call success 本地 commit Caller suspended + old Activation revoked；return success 本地 commit Frame closing + old Activation revoked。
-
-具体 pending input drop/buffer/reset 由 User Input Protocol 后续冻结。
-
-## 7. Launcher / Supervisor
+## 9. Launcher / Supervisor
 
 Desktop v1 `launcher.type=nodejs`：validated target only、Host-selected Node、no Game flags/argv、`shell=false`、固定 cwd、Token-before-spawn、explicit child env、no automatic restart。
 
-```text
-shutdown intent
-→ subsystem.shutdown
-→ finite deadline
-→ force terminate if required
-→ actual exit observation
-→ stopped
-```
+normal shutdown：shutdown intent→subsystem.shutdown→finite deadline→force terminate if required→actual exit observation→stopped。无 shutdown intent 的 Process exit 是 failure。
 
-无 shutdown intent 的 Process exit 是 failure，即使 exit code=0。
+## 10. Renderer ⇄ Subsystem Data WebSocket
 
-## 8. Trust Boundary
+每 Runtime 与 Renderer 最多一条长期 Data WebSocket：Connection Layer / Render Update / User Input。连接与 Frame 数量无关。
 
-Desktop v1 Subsystem JavaScript 是 trusted executable code。safe launcher entry 只约束 Main 执行哪个 Installation 文件，不构成 Node.js OS sandbox。
+Data Connection reconnect 不得用于修复 Frame Control timeout/divergence。
 
-## 9. Renderer ⇄ Subsystem Data WebSocket
+## 11. Cancellation / User Input
 
-每 Runtime 与 Renderer 最多一条长期 Data WebSocket：Connection Layer / Render Update / User Input。连接与 Frame 数量无关，可服务 0..N Frame Input Context + 0..N Render Context。
+v1 无 caller-driven `frame.cancel`。`cancelled` outcome 由 active Frame 自行 return。Session termination 走 shutdown。
 
-Data Connection heartbeat/reconnect 不得与 Subsystem Control 或 Frame transaction semantics 混淆。
+只有 Main-declared active/current frameId+activationId 合法；transaction gap/Runtime failure 时 Input Router停止普通输入，不能沿用旧 target。
 
-## 10. User Input
+## 12. Renderer Reload
 
-只有 Main-declared active/current `frameId + activationId` 合法。revoked Activation 永久拒绝。
+reload 后只恢复 Main current committed Runtime/Stack/Activation/InputTarget，重建 Data Connection/Render；不得 revive old Activation，也不得用 reload 撤销 Frame Control failure。
 
-Batch C transaction gap 时 Main 可以没有 InputTarget；Desktop Input Router 必须停止 ordinary input，而不是沿用旧 target。
+## 13. Security / Core Invariants
 
-## 11. Renderer Reload
-
-reload 后只恢复 Main 当前 committed Runtime/Stack/Activation/InputTarget，重建 Data Grants/Connections，Render 独立恢复。不得恢复缓存旧 Activation或未 commit transaction state。
-
-## 12. Security / Failure
-
-- localhost services loopback-only；
-- Hostra `contextIsolation=true` / `nodeIntegration=false`；
-- credential / Data Grant 绑定正确 Session/Subsystem；
-- Launcher containment + no shell；
-- User Input 校验 active/current Activation；
-- unexpected Control/Process loss → Runtime failure；
-- Data WebSocket loss → stop ordinary input，Render 独立 recovery；
-- Main crash 第一阶段终止受管理 Subsystem。
-
-## 13. 核心不变量
-
-- Hostra 不承载 Main 或业务协议；
-- 每 Subsystem 一个 Process，可承载多个 Frame/Render；
-- Subsystem Control 与 Frame / Call 共享物理 WebSocket但协议独立；
-- Frame A/B/C application semantics 不因 Desktop Transport 改变；
-- ordinary call no reverse-suspend dependency；
-- call/return Response precedes dependent reverse RPC；
-- activate/resume ACK precedes Renderer publication；
-- post-commit failure不恢复旧 Activation；
-- same-Subsystem recursion 不要求 nested handler reentrancy；
-- Frame lifecycle 不控制 Data WebSocket 或 Render。
+Hostra 不承载 Main；每 Subsystem 一个 Process；Control protocol domains共享 WebSocket但语义独立；Frame A/B/C/D 不因 Desktop Transport改变；finite deadline/no retry/ambiguous failure必须保持；Frame lifecycle不控制 Data WebSocket或 Render。
