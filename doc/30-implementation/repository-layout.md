@@ -63,16 +63,21 @@ Subsystem → Main
 
 Batch C utility/fixture 表达 Call/Return Acceptance Commit、ACK publication barrier、close ACK before pop、pre/post-commit boundary、Response-before-dependent-RPC。
 
-Batch D utility/fixture 表达：
+Batch D utility/fixture 必须把两个维度分开：
 
 ```text
-Success        → known commit
-Explicit Error → known no-commit
-Timeout/loss   → ambiguous
-finite deadline
-no automatic retry/replay
-recoverable vs Runtime-fatal error classification
+Commit evidence
+    Success        → known commit
+    Explicit Error → known no-commit
+    Timeout/loss   → ambiguous
+
+Runtime health
+    recoverable Error → healthy
+    divergence/protocol Error → failed
+    ambiguous → failed
 ```
+
+同时表达 finite deadline 与 no automatic retry/replay。
 
 Frozen recoverable semantic codes：
 
@@ -118,9 +123,16 @@ FrameErrorClassifier
     divergence
     protocol failure
 
+RuntimeFailureCoordinator   // Batch E implementation target
+    deterministic suffix unwind
+    failed-runtime cleanup boundary
+    surviving-caller recovery
+
 RendererControlPublisher
     publish committed state only
 ```
+
+Batch E Frozen 前 `RuntimeFailureCoordinator` 只保留接口/测试桩，不得私自冻结 suffix 范围或 Caller-visible failure code。
 
 Main 不得 timeout 后 retry，也不得用 Renderer state修复 Frame Control ambiguity。
 
@@ -140,7 +152,32 @@ call(frameId,currentActivationId,targetSubsystemKey,input)
 return(frameId,currentActivationId,outcome)
 ```
 
-SDK mutation gate：call/return pending时停止新 ordinary input、阻止第二个 call/return；Success commit 本地新状态；recoverable Error release gate；timeout/loss MUST NOT release gate back to old Activation，而进入 Runtime failure。
+SDK mutation gate必须按分类处理：
+
+```text
+call/return pending
+    → stop new ordinary input
+    → block second call/return
+
+Success
+    → commit Batch C local state
+
+Recoverable Explicit Error
+    → known no-commit
+    → release gate where operation semantics allow
+
+Divergence / protocol Explicit Error
+    → known no-commit
+    → DO NOT resume normal Frame processing
+    → Runtime failure
+
+Timeout/loss
+    → ambiguous
+    → DO NOT release gate back to old Activation
+    → Runtime failure
+```
+
+因此 SDK 不得实现一个通用 `catch(error) { releaseGate() }` 分支。
 
 合法 initialize 业务拒绝通过 `FRAME_INITIALIZE_REJECTED + FrameFailure`；合法 activate/suspend/resume/close 的 lifecycle/Activation mismatch 是 divergence。
 
@@ -162,7 +199,9 @@ Desktop WebSocket 与 PWA MessagePort 都必须保持：Response-before-dependen
 
 ## 7. `map-subsystem`
 
-`loom.map` Frame Adapter 必须使用 SDK mutation gate/deadline handler；call/return timeout 进入 Runtime failure；initialize 可以业务 reject；cancelled outcome 由 active Frame 自行 return；Frame lifecycle 不隐式改变 Render/Runtime/Data Connection。
+`loom.map` Frame Adapter 必须使用 SDK mutation gate/deadline handler；call/return timeout或 fatal Explicit Error进入 Runtime failure；只有 recoverable Error允许恢复普通 Frame processing；initialize 可以业务 reject；cancelled outcome 由 active Frame自行 return；Frame lifecycle 不隐式改变 Render/Runtime/Data Connection。
+
+same-Subsystem Runtime failure时 map-subsystem不得自行选择 lower local Frame resume；Stack unwind属于 Main/Batch E。
 
 ## 8. `test-subsystems`
 
@@ -180,6 +219,8 @@ activation-divergence
 invalid-frame-schema
 call-timeout-gate-held
 return-timeout-gate-held
+fatal-explicit-error-gate-held
+same-runtime-failure-no-local-lower-frame-resume
 callee-cancelled
 postcommit-no-rollback
 stale-activation
@@ -225,7 +266,7 @@ frame-call-protocol/
     └── errors-timeouts/
 ```
 
-Batch D fixtures 至少覆盖 finite deadline、no retry、late Response ignored for state、initialize rejection、target unavailable、divergence fatal、protocol error fatal、call/return timeout mutation gate、no caller-driven cancel。
+Batch D fixtures 至少覆盖 finite deadline、no retry、late Response ignored for state、initialize rejection、target unavailable、divergence fatal、protocol error fatal、call/return timeout mutation gate、fatal Explicit Error不释放 gate到 normal processing、no caller-driven cancel。
 
 ## 11. 其他协议包
 
