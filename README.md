@@ -40,55 +40,25 @@ Subsystem Control Protocol v1               Frozen
 Frame / Call Protocol v1 Batch A            Frozen
 Frame / Call Protocol v1 Batch B            Frozen
 Frame / Call Protocol v1 Batch C            Frozen
-Frame / Call Protocol v1 Batch D-F          Draft
+Frame / Call Protocol v1 Batch D            Frozen
+Frame / Call Protocol v1 Batch E-F          Draft
 ```
 
-Batch B frozen wire：
+Batch B 冻结七个 RPC：Main→Subsystem `initialize/activate/suspend/resume/close`，Subsystem→Main `call/return`。
+
+Batch C 冻结正常 transaction：ordinary call 不依赖 reverse `frame.suspend`；call/return Response 先于 dependent reverse RPC；activate/resume ACK 先于 InputTarget publication；pre-commit 可 abort、post-commit 只能 forward recovery。
+
+Batch D 冻结异常边界：
 
 ```text
-Main → Subsystem
-    frame.initialize
-    frame.activate
-    frame.suspend
-    frame.resume
-    frame.close
-
-Subsystem → Main
-    frame.call
-    frame.return
+Success        → known committed
+Explicit Error → known not committed
+Timeout/loss   → ambiguous → Runtime failure
 ```
 
-Batch C frozen transaction rules：
+全部 Frame Request 必须有 finite deadline；v1 不自动 retry/replay，不定义 operationId/idempotency journal。call target not-found/unavailable 和 initialize business rejection 可恢复；Frame identity/state/Activation/Stack/ownership divergence、Frozen protocol/schema error 与 ambiguous timeout Runtime-fatal。v1 无 caller-driven `frame.cancel`。
 
-```text
-ordinary frame.call
-    validate
-    → Caller suspend + old Activation revoke + Child starting/push
-    → frame.call Success
-    → Child initialize / activate
-    → activate ACK
-    → publish Child InputTarget
-
-frame.return
-    outcome accept + Child closing + old Activation revoke
-    → frame.return Success
-    → close ACK / pop
-    → Caller resume(new Activation) ACK
-    → publish Caller InputTarget
-```
-
-关键不变量：
-
-- ordinary call 不依赖 reverse `frame.suspend`；
-- Main completes `frame.call` Response before dependent Child RPC；
-- Main completes `frame.return` Response before dependent close/resume；
-- activate/resume ACK happens-before corresponding InputTarget publication；
-- `InputTarget=null` transaction gap 合法；
-- pre-commit failure 可 abort，post-commit failure只能 forward recovery；
-- revoked Activation 永久不能恢复；accepted terminal outcome 不可撤销；
-- same-Subsystem recursive call 不要求 nested bidirectional Request handler reentrancy。
-
-下一冻结目标是 **Frame / Call Batch D：semantic error / timeout / retry / cancellation**。
+下一冻结目标是 **Frame / Call Batch E：Runtime failure deterministic Stack unwind**。
 
 ## Desktop Runtime 边界
 
@@ -98,9 +68,7 @@ spawn success ≠ connected ≠ identified ≠ ready
 
 Desktop v1 使用 `nodejs` Launcher、安全 Installation Root entry、Host-selected Node、`shell=false`、token-before-spawn、Runtime Supervisor；Subsystem Control v1 冻结 hello/status/shutdown，Main 拥有 shutdown intent，`stopped` 只来自实际 Runtime termination observation。当前不定义 automatic restart / same-attempt reconnect / application heartbeat，也不宣称 Node.js OS sandbox。
 
-Frame 不是 Process、业务状态 ownership 或 Render ownership 单元。Render lifecycle 不从 Frame suspend/close 推导。
-
-普通业务内容通过独立 Readonly Content API 获取。
+Frame 不是 Process、业务状态 ownership 或 Render ownership 单元。Render lifecycle 不从 Frame suspend/close 推导。普通业务内容通过独立 Readonly Content API 获取。
 
 ## 文档站点
 
