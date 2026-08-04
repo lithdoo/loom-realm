@@ -76,7 +76,7 @@ export default defineConfig({
           { text: 'Game Package v2', link: '/15-contracts/game-package-v2' },
           { text: 'Desktop Node.js Launcher Profile v1', link: '/15-contracts/nodejs-launcher-profile-v1' },
           { text: 'Subsystem Control Protocol v1', link: '/15-contracts/subsystem-control-lifecycle-protocol' },
-          { text: 'Frame / Call Protocol v1 · Batch A/B Frozen', link: '/15-contracts/frame-call-protocol-v1' },
+          { text: 'Frame / Call Protocol v1 · Batch A/B/C Frozen', link: '/15-contracts/frame-call-protocol-v1' },
           { text: '只读 Content API v1', link: '/15-contracts/content-api-v1' },
           { text: 'Legacy · 旧 Frame 生命周期草案路径', link: '/15-contracts/system-lifecycle-protocol' },
           { text: 'Legacy · Renderer–Subsystem Data v1', link: '/15-contracts/frame-data-channel-v1' },
@@ -124,6 +124,7 @@ export default defineConfig({
           { text: 'ADR 0009 · Subsystem Control Protocol v1', link: '/decisions/0009-freeze-subsystem-control-protocol-v1' },
           { text: 'ADR 0010 · Frame / Call Batch A', link: '/decisions/0010-freeze-frame-call-protocol-v1-batch-a' },
           { text: 'ADR 0011 · Frame / Call Batch B', link: '/decisions/0011-freeze-frame-call-protocol-v1-batch-b' },
+          { text: 'ADR 0012 · Frame / Call Batch C', link: '/decisions/0012-freeze-frame-call-protocol-v1-batch-c' },
         ],
       },
       {
@@ -143,9 +144,7 @@ export default defineConfig({
       },
     ],
 
-    search: {
-      provider: 'local',
-    },
+    search: { provider: 'local' },
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/lithdoo/loom-realm' },
@@ -156,23 +155,14 @@ export default defineConfig({
       text: '在 GitHub 上编辑此页',
     },
 
-    outline: {
-      level: [2, 3],
-      label: '页面导航',
-    },
+    outline: { level: [2, 3], label: '页面导航' },
 
     lastUpdated: {
       text: '最后更新',
-      formatOptions: {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      },
+      formatOptions: { dateStyle: 'medium', timeStyle: 'short' },
     },
 
-    docFooter: {
-      prev: '上一篇',
-      next: '下一篇',
-    },
+    docFooter: { prev: '上一篇', next: '下一篇' },
 
     footer: {
       message: 'LoomRealm documentation',
