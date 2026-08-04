@@ -11,7 +11,7 @@
 
 Window 只拥有浏览器 UI/gesture 能力和 Web Renderer，不拥有 Frame Stack、Activation authority、Subsystem business state 或 Render authority。
 
-Main Runtime Worker 是 Desktop Main 的 PWA 对应物：Session、Runtime Registry、Frame Registry/Stack/transaction coordinator、Activation/InputTarget、Data Connection Authority。
+Main Runtime Worker 对应 Desktop Main：Session、Runtime Registry、Frame Registry/Stack/transaction+failure coordinator、Activation/InputTarget、Data Connection Authority。
 
 每个 declared Subsystem 一个 Dedicated Worker；一个 Worker 可承载 0..N Frame/Input Context、0..N Render Context 和一个 Renderer Data MessagePort。
 
@@ -21,121 +21,86 @@ PWA Descriptor→Worker script、Bootstrap Credential transfer、Control Message
 
 已经固定：eager create all required Workers、one Main Control Port per Subsystem、one Renderer Data Port per Subsystem、one Runtime Container per Subsystem。
 
-future PWA Profile MUST preserve Subsystem Control v1 与 Frame Batch A/B/C exact application semantics。
+future PWA Profile MUST preserve Subsystem Control v1 与 Frame Batch A/B/C/D exact application semantics。
 
 ## 3. Control MessagePort Mapping
 
 ```text
-Subsystem Control v1      Frozen
-Frame / Call Batch A/B/C   Frozen
-Frame / Call Batch D-F     Draft
+Subsystem Control v1        Frozen
+Frame / Call Batch A/B/C/D   Frozen
+Frame / Call Batch E/F       Draft
 ```
 
-Batch B exact methods必须原样映射，MessagePort envelope/transfer list/Port identity 不进入 Frame application Schema。
+Batch B exact methods必须原样映射；MessagePort envelope/transfer list/Port identity 不进入 Frame application Schema。
 
-PWA adapter MUST NOT 增加 caller/close reason/system method/optional completed.value 等变体。
+## 4. Transaction Ordering
 
-## 4. Batch C Ordering
+MessagePort adapter保持 call Response-before-Child initialize/activate、return Response-before-close/resume、ordinary call no reverse-suspend、activate/resume ACK-before-InputTarget publication。
 
-MessagePort adapter 必须保持：
+same-Subsystem recursive call 即使共享同一 MessagePort 也不能要求 nested reverse-request handler reentrancy。
+
+## 5. Worker Mutation Gate
+
+outbound call/return pending：stop new ordinary input dispatch + block second call/return。
+
+Success分别本地 commit suspended/closing；recoverable Explicit Error release gate；timeout/Response-loss不释放 gate回旧 Activation，而进入 Runtime failure。
+
+## 6. Batch D Deadline / No Retry
+
+所有 Frame Request MUST 有 finite deadline。具体 timeout 数值由未来 PWA Profile/Host policy 选择。
 
 ```text
-frame.call Request
-→ Main acceptance commit
-→ frame.call Response
-→ dependent Child initialize / activate
+Success        → known committed
+Explicit Error → known not committed
+Timeout/loss   → ambiguous → Runtime failure
 ```
 
-```text
-frame.return Request
-→ Main acceptance commit
-→ frame.return Response
-→ dependent close / resume
-```
+MessagePort 的排队/交付特性不得被解释成 application Frame operation replay。PWA adapter 不自动 retry、不定义 operationId/idempotencyKey/dedup journal。
 
-ordinary call 不通过 reverse `frame.suspend` 建立 Caller suspension。
+如果 Worker 侧 `frame.call/return` timeout 且 Control Port仍可用，Worker SHOULD `subsystem.status(failed)`；Port已丢失则 Main按 Control loss处理。迟到 Response不能恢复 Runtime。
 
-实现 MUST NOT 要求入站 `frame.call/frame.return` handler pending 时同时处理并等待反向 Frame Request。same-Subsystem recursive call 即使共享同一 MessagePort 也必须正确工作。
+## 7. Error Classification
 
-## 5. Subsystem Worker Mutation Gate
+Recoverable：`FRAME_CALL_TARGET_NOT_FOUND / FRAME_CALL_TARGET_UNAVAILABLE / FRAME_INITIALIZE_REJECTED`。
 
-Worker SDK 在 outbound call/return pending 时：
+Divergence：`FRAME_NOT_FOUND / FRAME_STATE_MISMATCH / ACTIVATION_MISMATCH / FRAME_STACK_MISMATCH / FRAME_OWNERSHIP_MISMATCH`。
 
-```text
-stop new ordinary input dispatch
-block second call/return
-```
+Divergence、Frozen JSON-RPC/schema protocol error、ambiguous timeout Runtime-fatal；诊断至少为 `FRAME_CONTROL_TIMEOUT / FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR`。
 
-call Error → gate release / Caller remains active / old Activation remains valid。
+## 8. InputTarget / Frame Context
 
-call Success → local Caller suspended / old Activation permanently revoked。
+Main Worker→Window必须 obey activate/resume ACK-before-publication；`InputTarget=null` gap合法；Window不得沿用 old target或恢复 cached Activation。
 
-return Error → gate release / Frame remains active。
+ordinary input要求 Frame active/current Activation/current Main InputTarget/无 mutation gate。
 
-return Success → local Frame closing / old Activation permanently revoked，等待 Main `frame.close`。
+## 9. Frame RPC Semantics
 
-## 6. InputTarget Publication
+`frame.resume` 一次完成 outcome+replacement Activation；`frame.call` success只表示 logical call accepted；`frame.return` success只表示 outcome accepted+closing begun；`frame.suspend`仅 Main主动 quiesce/terminal preparation。
 
-Main Worker→Window Control mapping必须满足：
+合法 initialize 业务 rejection使用 `FRAME_INITIALIZE_REJECTED`；合法 activate/suspend/resume/close 的 state mismatch是 divergence。
 
-```text
-frame.activate ACK
-    happens-before Child InputTarget publication
+## 10. Cancellation
 
-frame.resume ACK
-    happens-before Caller replacement InputTarget publication
-```
+v1 无 caller-driven `frame.cancel`。`FrameOutcome.cancelled` 只由 active Frame自行 return。页面隐藏/Session termination不等同 Frame cancellation。
 
-transaction gap `InputTarget=null` 合法。Window MUST NOT 继续沿用旧 target，也不得恢复缓存 old Activation。
+## 11. System Data / Render / Page Lifecycle
 
-## 7. Frame Input Context
+Window 与每 Worker 最多一条 Data Port，Connection/Render/User Input域独立。Render由 Subsystem控制，可 zero Frame存在。
 
-ordinary User Input 至少要求：Frame active、provided Activation=current、Frame=current Main InputTarget、当前没有 outbound mutation gate 阻止 dispatch。
+页面恢复只恢复 Main current committed state；不得 revive revoked Activation、未 commit transaction 或已 failed Frame Control状态。
 
-revoked Activation 永久 reject。
+## 12. Worker Failure
 
-`suspended/closing/closed` 不关闭 Data Port、不 destroy Render、不删除 shared business state。
-
-## 8. Frame RPC Semantics
-
-- `frame.resume` 一次完成 Child outcome delivery + replacement Activation installation；
-- `frame.call` success 返回 childFrameId，只表示 logical call accepted，不表示 Child active；
-- `frame.return` success 表示 outcome accepted + closing begun，不表示 close/resume complete；
-- `frame.suspend` 只保留为 Main 主动 quiesce / terminal preparation，不是 ordinary call step。
-
-## 9. System Data MessagePort / Render
-
-Window 与每个 Subsystem Worker 最多一条 Data Port：Connection Layer / Render Update / User Input。Port 与 Frame 数量无关，可 zero Frame 服务 Render。
-
-Subsystem Worker 完全控制 Render lifecycle，Renderer 不能从 Frame Stack 推导 Render visibility/order/destroy。
-
-## 10. Page Lifecycle
-
-页面隐藏只停止 raw ordinary input capture / reset local input state，不改变 Main-owned Frame/Activation authority。
-
-恢复时只恢复 Main 当前 committed Stack/current Activation/InputTarget；不得 revive revoked Activation或未 commit transaction state。Render 独立恢复。
-
-## 11. Worker Resource / Failure
-
-当前 one Subsystem→one Worker、all required eager。lazy/idle recycle/composite Container 需要新契约。
-
-Worker unexpected termination → Runtime failure；Runtime failure revoke affected Activation；Frame lifecycle 不设置 `failed`，Batch E 负责 multi-Frame unwind；Data Port failure stop ordinary input，Render 独立 recovery。
-
-## 12. Security
-
-Worker script 来自受信任启动边界；Data Port 只转移给目标 Worker/Window；User Input 校验 active/current Activation；Render Update 限制 Subsystem namespace；Content API 只访问登记 installation。
+Worker unexpected termination、Frame Control timeout/divergence/protocol error都进入 Runtime failure。Frame lifecycle不设为 failed；Batch E负责 deterministic multi-Frame unwind。
 
 ## 13. Core Invariants
 
 - one Subsystem = one Dedicated Worker；
-- Subsystem Control v1 + Frame A/B/C application semantics preserved；
-- exactly seven Frame RPC methods even over MessagePort；
-- Caller Main-owned，不进入 Subsystem wire；
-- ordinary call no reverse-suspend dependency；
-- call/return Response precedes dependent reverse RPC；
-- activate/resume ACK precedes Window InputTarget publication；
-- outbound call/return mutation gate required；
-- post-commit failure不恢复旧 Activation；
-- same-Subsystem recursion 不要求 nested handler reentrancy；
-- Frame lifecycle 不控制 Render/Data Port；
+- Frame A/B/C/D semantics preserved；
+- exactly seven Frame RPC methods；
+- no reverse-suspend dependency / nested-handler requirement；
+- ACK-before-publication；
+- finite deadline / no application retry / ambiguous failure；
+- no caller-driven cancel；
+- Frame lifecycle不控制 Render/Data Port；
 - PWA Transport differences do not redefine application protocol。
