@@ -1,12 +1,12 @@
 # Main ⇄ Subsystem Frame / Call Protocol v1
 
 > 层级：正式契约  
-> 状态：Draft；Batch A / B / C 已 Normative / Frozen  
+> 状态：Draft；Batch A / B / C / D 已 Normative / Frozen  
 > 协议版本：1（目标版本）  
-> 稳定程度：Batch A / B / C Frozen；Batch D+ Evolving  
-> 主要定义：已 ready Runtime Container 中 Frame/Input Context 的身份、生命周期、Activation、RPC wire surface、调用事务与公开提交屏障  
+> 稳定程度：Batch A / B / C / D Frozen；Batch E+ Evolving  
+> 主要定义：已 ready Runtime Container 中 Frame/Input Context 的身份、生命周期、Activation、RPC wire surface、调用事务、错误/超时与公开提交屏障  
 > 依赖：[栈式运行系统](../10-architecture/stack-runtime-system.md)、[模块子系统模型](../10-architecture/subsystem-model.md)、[Subsystem Control Protocol v1](./subsystem-control-lifecycle-protocol.md)  
-> 决策记录：[ADR 0010：Batch A](../decisions/0010-freeze-frame-call-protocol-v1-batch-a.md)、[ADR 0011：Batch B](../decisions/0011-freeze-frame-call-protocol-v1-batch-b.md)、[ADR 0012：Batch C](../decisions/0012-freeze-frame-call-protocol-v1-batch-c.md)  
+> 决策记录：[ADR 0010：Batch A](../decisions/0010-freeze-frame-call-protocol-v1-batch-a.md)、[ADR 0011：Batch B](../decisions/0011-freeze-frame-call-protocol-v1-batch-b.md)、[ADR 0012：Batch C](../decisions/0012-freeze-frame-call-protocol-v1-batch-c.md)、[ADR 0013：Batch D](../decisions/0013-freeze-frame-call-protocol-v1-batch-d.md)  
 > 最近复核：2026-08-04
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
@@ -15,12 +15,12 @@
 Batch A  Identity / Authority / Lifecycle / Activation       ← Frozen
 Batch B  RPC Wire Schema / Direction / Local Semantics        ← Frozen
 Batch C  Transaction / Commit Barrier / Rollback              ← Frozen
-Batch D  Error / timeout / retry / cancellation               ← Draft
+Batch D  Error / timeout / retry / cancellation               ← Frozen
 Batch E  Runtime failure unwind                                ← Draft
 Batch F  Limits / fixtures / profile/version completion       ← Draft
 ```
 
-只有明确标记为 Batch A / B / C 的语义已经成为 v1 Normative 基线。后续 Batch MUST NOT 静默修改这些语义。
+只有明确标记为 Batch A / B / C / D 的语义已经成为 v1 Normative 基线。后续 Batch MUST NOT 静默修改这些语义。
 
 Runtime Container Bootstrap、Subsystem identity、Runtime ready / shutdown / restart 由独立 [Subsystem Control Protocol v1](./subsystem-control-lifecycle-protocol.md) 定义。Frame / Call 不定义 Render lifecycle、System Data Connection lifecycle 或 User Input payload schema。
 
@@ -966,47 +966,390 @@ Post-commit → forward recovery only
 
 ---
 
-# Part IV · Batch D+ — Draft / Non-Normative
+# Part IV · Batch D — Normative / Frozen
 
-## 40. Batch D — Error / Timeout / Retry / Cancellation
+## 40. Batch D Scope
 
-仍需冻结：
+Batch D 冻结：
 
-- semantic error code registry；
-- initialize business rejection；
-- control divergence fatal/local classification；
-- request timeout；
-- ambiguous delivery/application handling；
-- retry / idempotency；
-- caller cancellation scope。
+```text
+semantic error registry
+recoverable vs control-fatal classification
+frame.initialize business rejection
+timeout / ambiguous delivery
+no-retry / no-replay policy
+mutation gate timeout convergence
+caller cancellation scope
+Runtime failure diagnostic category
+```
 
-Batch D MUST 遵守 Batch C：Post-commit 状态不能通过恢复旧 Activation 回滚。
+Batch D 不定义 Runtime failed 后的 Stack unwind；该工作属于 Batch E。
 
-## 41. Batch E — Runtime Failure Unwind
+## 41. Request Result 三分法
+
+Frame / Call v1 对每个 Request 只接受三种控制结论：
+
+```text
+Success Response
+    RPC postcondition 已知 commit
+
+Explicit Error Response
+    RPC postcondition 已知未 commit
+
+Timeout / Response loss / pending-request connection loss
+    applied/not-applied unknown
+    ambiguous control state
+```
+
+Ambiguous state MUST NOT 被伪装成 Explicit Error，也不得根据本地猜测决定远端是否已 commit。
+
+Batch C 的规则继续有效：Success 是 commit evidence；Explicit Error 是 no-commit evidence。
+
+## 42. Finite Deadline
+
+全部七个 Frame / Call Request MUST 有有限 deadline：
+
+```text
+frame.initialize
+frame.activate
+frame.suspend
+frame.resume
+frame.close
+frame.call
+frame.return
+```
+
+Batch D 不冻结具体毫秒数。实际 timeout value 由 Host / Transport Profile policy 选择，并在 Batch F/Profile 完成时进入 conformance 要求。
+
+没有任何 Frame Request 可以无限等待。
+
+## 43. No Application Retry / Replay
+
+v1 MUST NOT 对 state-changing Frame Request 执行 application-level automatic retry、retransmission 或 reconnect replay。
+
+v1 不定义：
+
+```text
+operationId
+idempotencyKey
+deduplication journal
+replay cache
+same-operation replay protocol
+```
+
+JSON-RPC `id` 只用于一次 Request/Response correlation，不是 Frame operation identity。
+
+因此：
+
+```text
+Success        → known committed
+Explicit Error → known not committed
+Timeout/loss   → unknown → Runtime failure path
+```
+
+## 44. Ambiguous Result → Runtime Failure
+
+### 44.1 Main→Subsystem Request
+
+如果 Main 对 `frame.initialize / activate / suspend / resume / close` 发生 timeout、Response loss 或 pending-request connection loss，使 Main 无法证明操作 applied/not-applied：
+
+1. Main MUST NOT retry；
+2. Main MUST NOT继续向该 Runtime 发新的正常 Frame Control operation；
+3. Main MUST 将该 Runtime 进入 terminal failure path；
+4. Main MUST 保持 Batch C 已 commit 的 Activation/outcome 不可回滚；
+5. 后续 Stack recovery 交给 Batch E。
+
+### 44.2 Subsystem→Main Request
+
+如果 Subsystem 对 `frame.call / frame.return` 无法确定 Main 是否已 acceptance-commit：
+
+1. Subsystem MUST 保持对应 mutation gate；
+2. MUST 停止新的 ordinary input dispatch 与新的正常 Frame operation；
+3. MUST NOT解除 gate 后继续使用旧 Activation；
+4. MUST 进入 Runtime failure path；
+5. Connection 仍可用时 SHOULD 通过 `subsystem.status(state="failed")` 报告 Frame Control failure；若 Connection 已丢失，则 Subsystem Control v1 的 Control loss 规则使 Main 进入 Runtime failure path。
+
+## 45. Late Response
+
+一旦某次 timeout / ambiguous failure 已被本地 Runtime authority commit 为 failure：
+
+```text
+late Success / Error Response
+    diagnostic only
+```
+
+迟到 Response MUST NOT：
+
+```text
+restore Runtime healthy
+restore Frame active
+restore/revive Activation
+cancel already-committed Runtime failure
+erase accepted terminal outcome
+```
+
+## 46. Semantic Error Envelope
+
+Frame / Call v1 复用 Subsystem Control v1 的 LoomRealm semantic error envelope：
+
+```text
+error.code = -32000
+error.data.code = stable LoomRealm semantic code
+```
+
+概念类型：
+
+```ts
+type FrameRpcErrorData =
+  | { readonly code: "FRAME_CALL_TARGET_NOT_FOUND" }
+  | { readonly code: "FRAME_CALL_TARGET_UNAVAILABLE" }
+  | {
+      readonly code: "FRAME_INITIALIZE_REJECTED";
+      readonly failure: FrameFailure;
+    }
+  | { readonly code: "FRAME_NOT_FOUND" }
+  | { readonly code: "FRAME_STATE_MISMATCH" }
+  | { readonly code: "ACTIVATION_MISMATCH" }
+  | { readonly code: "FRAME_STACK_MISMATCH" }
+  | { readonly code: "FRAME_OWNERSHIP_MISMATCH" };
+```
+
+该对象是 closed schema。除 `FRAME_INITIALIZE_REJECTED.failure` 外，Frozen semantic errors 不携带开放式 metadata bag。
+
+## 47. Recoverable Errors
+
+只有以下 Frozen semantic errors 被定义为正常可恢复拒绝：
+
+```text
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
+```
+
+### 47.1 `FRAME_CALL_TARGET_NOT_FOUND`
+
+Main 在 `frame.call` Call Acceptance Commit 前发现 `targetSubsystemKey` 没有被 Game Entry 声明。
+
+结果：
+
+```text
+Caller remains active
+current Activation remains valid
+Stack unchanged
+InputTarget unchanged
+no Child Frame committed
+```
+
+### 47.2 `FRAME_CALL_TARGET_UNAVAILABLE`
+
+目标 Subsystem 已声明，但目标 Runtime 当前不能接受新的 Frame，例如 not-ready / stopping / stopped / failed / shutdown-intent established。
+
+该错误只能发生在 Call Acceptance Commit 前，结果与 target-not-found 相同。具体 Runtime observed state 可进入 diagnostics，但不扩展 Frozen wire error schema。
+
+### 47.3 `FRAME_INITIALIZE_REJECTED`
+
+目标 Runtime 正常收到合法 `frame.initialize`，但因业务条件拒绝建立该 Frame Context，例如目标业务对象不存在、业务输入不满足前置条件或本次调用不能被接受。
+
+该 Error MUST 携带：
+
+```ts
+interface FrameInitializeRejectedErrorData {
+  readonly code: "FRAME_INITIALIZE_REJECTED";
+  readonly failure: FrameFailure;
+}
+```
+
+该 Error 明确表示：
+
+```text
+frame.initialize postcondition not committed
+target Runtime remains healthy
+```
+
+如果这是 initial Frame initialize，则更高层 Session/bootstrap 根据 `failure` 决定启动失败表现。
+
+如果 Child call 已由 Batch C acceptance-commit，则 Main MUST 把该 rejection forward-resolve 为该 Child 的：
+
+```text
+{ type: "failed", error: failure }
+```
+
+并用全新 Activation 恢复 surviving Caller。Caller 的旧 Activation 永远不能恢复。
+
+## 48. Control Divergence Errors
+
+以下 semantic errors 表示 Main 与 Subsystem 对 Frame Control authority/state 已经不一致：
+
+```text
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
+```
+
+它们不是普通游戏业务拒绝。
+
+### `FRAME_NOT_FOUND`
+
+接收方按 Frozen transaction/state 应当存在某个 Frame，但本地找不到。
+
+### `FRAME_STATE_MISMATCH`
+
+Frame 存在，但 lifecycle 与该 operation 要求不一致。
+
+### `ACTIVATION_MISMATCH`
+
+Frame identity 一致，但 current/referenced Activation 与 authority state 不一致。
+
+### `FRAME_STACK_MISMATCH`
+
+Subsystem→Main `frame.call / frame.return` 来自不是当前合法 Stack Top/call authority 的 Frame。
+
+### `FRAME_OWNERSHIP_MISMATCH`
+
+Subsystem→Main Frame operation 来自与 Main-owned `frameId → descriptor.key` assignment 不一致的 Control Connection。
+
+收到或产生上述错误后，涉及的 Subsystem Runtime MUST 进入 control-divergence failure path，不得继续正常 Frame operation。
+
+## 49. Main-issued Lifecycle RPC Strictness
+
+合法 Main-issued：
+
+```text
+frame.activate
+frame.suspend
+frame.resume
+frame.close
+```
+
+在目标 Runtime healthy 且 Main/Subsystem state一致时 MUST 成功。
+
+除 `frame.initialize` 的 `FRAME_INITIALIZE_REJECTED` 外，Subsystem 对合法 Main-issued lifecycle operation 返回 Frame identity/lifecycle/Activation semantic error，表示 control divergence，并使该 Runtime 进入 failure path。
+
+实现不得通过“再 initialize 一次”“重新 activate 旧 Activation”或其他私有 resync 修复该分歧。
+
+## 50. Standard JSON-RPC Errors
+
+标准 JSON-RPC errors 继续适用，包括：
+
+```text
+-32700 Parse error
+-32600 Invalid Request
+-32601 Method not found
+-32602 Invalid params
+-32603 Internal error
+```
+
+Batch B 已冻结 structural invalid params → `-32602`。
+
+在 Frozen Frame / Call method surface 上出现上述错误，表示实现不兼容、协议消息损坏或 Frame Control implementation failure，不属于游戏业务失败；涉及 Runtime MUST 进入 protocol-failure path。
+
+业务输入本身的合法业务拒绝不得滥用 `-32602` 表达；`frame.initialize` 的业务拒绝使用 `FRAME_INITIALIZE_REJECTED`，运行中业务结束失败使用 `FrameOutcome.failed`。
+
+## 51. Runtime Failure Diagnostic Categories
+
+Frame Control 导致 Runtime terminal failure 时，至少使用：
+
+```text
+FRAME_CONTROL_TIMEOUT
+FRAME_CONTROL_DIVERGENCE
+FRAME_CONTROL_PROTOCOL_ERROR
+```
+
+语义：
+
+```text
+FRAME_CONTROL_TIMEOUT
+    Frame Request deadline expired or result became ambiguous
+
+FRAME_CONTROL_DIVERGENCE
+    Main and Subsystem no longer agree on Frame authority/state
+
+FRAME_CONTROL_PROTOCOL_ERROR
+    JSON-RPC/schema/method implementation is incompatible or invalid
+```
+
+这些 code 属于 Runtime failure diagnostics / `SubsystemRuntimeError.code` 语义，不等同于最终 Caller-visible `FrameOutcome.failed.error.code`。Runtime failure 如何转换成 surviving Caller outcome 由 Batch E 冻结。
+
+## 52. Cancellation Scope
+
+Frame / Call v1 不支持 caller-driven cancellation：
+
+```text
+no frame.cancel
+no suspended Caller remote-cancel operation
+```
+
+`FrameOutcome.cancelled` 保留，但只表示当前 active Frame 自己决定通过：
+
+```text
+frame.return({ result: { type: "cancelled" } })
+```
+
+结束。
+
+Session termination、Game exit 或 Runtime shutdown 不通过 Frame cancellation 表达，而使用更高层 Session / `subsystem.shutdown` 流程。
+
+## 53. Batch D Frozen Invariants
+
+1. 所有 Frame / Call Request MUST 有 finite deadline；具体毫秒数由 Profile/Host policy 决定。
+2. Success Response = known committed。
+3. Explicit Error Response = known not committed。
+4. timeout / Response loss / pending-request connection loss = ambiguous applied/not-applied state。
+5. Ambiguous state MUST NOT 被猜测或降级成 recoverable Error。
+6. v1 对七个 Frame Request不做 application-level automatic retry/replay。
+7. v1 不定义 operationId / idempotencyKey / dedup journal / replay cache。
+8. timeout failure commit 后迟到 Response 只用于 diagnostics。
+9. `FRAME_CALL_TARGET_NOT_FOUND` 是 recoverable pre-commit call error。
+10. `FRAME_CALL_TARGET_UNAVAILABLE` 是 recoverable pre-commit call error。
+11. `FRAME_INITIALIZE_REJECTED` 是 recoverable business rejection，并携带 `FrameFailure`。
+12. initialize rejection 不使 target Runtime failed；已 accepted Child 必须 forward-resolve 为 failed outcome + fresh Caller Activation。
+13. `FRAME_NOT_FOUND / FRAME_STATE_MISMATCH / ACTIVATION_MISMATCH / FRAME_STACK_MISMATCH / FRAME_OWNERSHIP_MISMATCH` 是 Runtime-fatal control divergence。
+14. 合法 Main-issued activate/suspend/resume/close 的 semantic lifecycle rejection 是 control divergence。
+15. Frozen Frame wire 的 JSON-RPC/schema/method protocol error 是 control-fatal。
+16. `frame.call / frame.return` timeout 时 Subsystem MUST NOT解除 mutation gate 后继续旧 Activation。
+17. Main outbound Frame RPC timeout 时 MUST 停止该 Runtime 的新正常 Frame Control operation。
+18. Runtime failure diagnostics 至少区分 timeout/divergence/protocol-error。
+19. v1 不支持 caller-driven `frame.cancel`。
+20. `FrameOutcome.cancelled` 只表示 active Frame 自行 return cancelled。
+21. Session shutdown 不是 Frame cancellation。
+22. Runtime failure 后的具体 Stack unwind 属于 Batch E。
+
+---
+
+# Part V · Batch E+ — Draft / Non-Normative
+
+## 54. Batch E — Runtime Failure Unwind
 
 仍需冻结：
 
 - Runtime failure multi-Frame suffix-unwind；
-- Runtime crash during any Batch C transaction；
+- Runtime crash during any Batch C/D transaction；
 - initial Frame failure；
 - best-effort close when Runtime unavailable；
-- surviving caller failed outcome + fresh Activation resume。
+- surviving caller failed outcome + fresh Activation resume；
+- `FRAME_CONTROL_TIMEOUT / DIVERGENCE / PROTOCOL_ERROR` 与 Runtime crash 如何统一进入 deterministic unwind；
+- Caller-visible Runtime failure `FrameOutcome.failed.error.code`。
 
-## 42. Renderer Recovery
+Batch E MUST 遵守 Batch A-D：revoked Activation 不恢复、accepted outcome 不撤销、ambiguous state 不 retry。
+
+## 55. Renderer Recovery
 
 Renderer reload 不关闭 Main、Runtime Container 或 Frame Context。恢复使用 Main 当前 Stack/lifecycle/current Activation/InputTarget；不得恢复本地缓存中的旧 Activation。Render/Data Connection 独立恢复。
 
-## 43. Batch F — Completion
+## 56. Batch F — Completion
 
 最终冻结：
 
 - wire numeric limits；
 - complete conformance fixtures；
+- finite deadline/profile configuration requirements；
 - Desktop / PWA transport-independent fixture；
 - Frame / Call profile/version completion；
 - protocol overall status → Active / Normative / Frozen。
 
-## 44. Related Documents
+## 57. Related Documents
 
 - [Subsystem Control Protocol v1](./subsystem-control-lifecycle-protocol.md)；
 - [栈式运行系统](../10-architecture/stack-runtime-system.md)；
