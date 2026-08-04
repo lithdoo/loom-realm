@@ -3,8 +3,8 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Web Renderer 内部模块、Render 下行、User Input 上行和 Main committed control state  
-> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer–Subsystem 协议分层](../../10-architecture/renderer-subsystem-protocol-layers.md)  
+> 主要定义：Web Renderer 内部模块、Render 下行、User Input 上行和 Main committed control/recovery state  
+> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
 
 ## 1. 模块结构
@@ -14,80 +14,92 @@ Web Renderer
 ├── Main Control Connection
 ├── Control State Store
 ├── System Data Connection Registry
-├── Connection Protocol Adapter
 ├── Render Registry / Store / Scheduler
 ├── Frame Input Registry / Input Router
 ├── Resource Client
 └── Presentation State
 ```
 
-Render 与 User Input 是独立协议域。
-
 ## 2. Renderer 不是 Frame RPC Participant
 
-Frame / Call 七个 RPC 只存在于 Main⇄Subsystem Control Connection。Renderer不直接发送或处理 initialize/activate/suspend/resume/close/call/return，也不参与 Frame timeout/retry 判定。
+Frame / Call 七个 RPC只存在于 Main⇄Subsystem Control。Renderer不发送/处理 initialize/activate/suspend/resume/close/call/return，也不决定 timeout、error classification 或 Runtime failure unwind root。
 
-Renderer 只接收 Main 已 commit 后的 Runtime/Frame Stack/lifecycle/current Activation/InputTarget 投影。
+Renderer只镜像 Main已 commit的 Runtime/Frame Stack/lifecycle/current Activation/InputTarget。
 
-## 3. Control State Store
-
-稳定状态：Stack Top=active+current Activation，lower live Frames=suspended。
-
-合法 transaction gap可以是 `InputTarget=null`、Top starting/closing。Renderer必须接受该状态，不得自行恢复 old target。
-
-## 4. Publication Barrier
+## 3. Normal Publication Barrier
 
 ```text
 frame.activate ACK
-    happens-before Child Activation/InputTarget publication
+    happens-before Child InputTarget publication
 
 frame.resume ACK
-    happens-before Caller replacement Activation/InputTarget publication
-
-old Activation revoke commit
-    happens-before later revisions stop advertising it
+    happens-before Caller replacement InputTarget publication
 ```
 
-Main MAY coalesce intermediate revisions，但不得提前发布 Activation、revive revoked Activation 或暴露两个 ordinary InputTargets。
+Main MAY coalesce intermediate revision，但不得提前发布 Activation、revive revoked Activation或暴露两个 ordinary InputTargets。
 
-## 5. Batch D Failure Visibility
+`InputTarget=null` 是合法 normal transaction gap。
 
-Frame Control timeout/divergence/protocol error发生在 Main⇄Subsystem Control Plane。
+## 4. Batch E Failure Visibility
+
+Runtime failure recovery开始后，Renderer只服从 Main的 Failure Unwind Barrier 投影：
+
+```text
+old affected InputTarget disappears
+→ recovery may remain InputTarget=null
+→ Stack/lifecycle revisions may shrink as suffix unwinds
+→ only final healthy Caller resume ACK can publish a new InputTarget
+```
 
 Renderer MUST NOT：
 
 ```text
-把 Frame RPC timeout 解释为 Renderer reconnect issue
-通过本地 cached Activation 恢复输入
-通过 Data Connection resync 恢复 Frame authority
-根据迟到 Frame Response改变 Main failed state
+根据 failed subsystemKey 自己计算/修改 Stack
+只隐藏 failed Runtime自己的 Frame而保留 descendants
+根据 cached Caller恢复 old Activation
+根据 Data reconnect恢复 Frame authority
+根据迟到 Frame RPC Response撤销 Main failure
 ```
 
-Main 最终把 Runtime/Frame failure状态发布给 Renderer后，Renderer只按新的 committed authority停止输入并更新 UI/diagnostics。具体 Runtime failed后的 Stack unwind由 Batch E决定。
+Unwind root、whole suffix、fixed-point expansion都由 Main决定。
 
-## 6. Frame Input Registry / Router
+## 5. Control State Store
+
+稳定状态：Stack Top=active+current Activation，lower live Frames=suspended。
+
+Recovery合法状态包括：
+
+```text
+Top closing
+zero active Frame
+InputTarget=null
+多个 Frame 连续从 suffix移除
+```
+
+Renderer必须接受这些状态，不把它们当成需要本地修复的异常。
+
+## 6. Frame Input Router
 
 ```text
 raw input
 → read Main current InputTarget
 → if null: do not route ordinary input
-→ require mirrored Frame active
-→ require activationId == current Activation
+→ require mirrored Frame active/current Activation
 → choose Subsystem Data Connection
 → User Input Protocol
 ```
 
-Renderer不得为 suspended/closing/closed Frame发送 ordinary input，不使用 historical Activation，不根据 Render focus/z-index改变公共 InputTarget。
+revoked/removed Frame的历史输入不得发送。Recovery gap期间 Renderer停止 ordinary input，不缓存后在新 Activation下重放旧动作，除非未来 User Input Protocol明确允许某类输入语义。
 
-## 7. Call / Return 可见性
+## 7. Runtime Failure Outcome 对 Renderer 的含义
 
-Renderer MAY只观察 F1/A1→F2/A2，而不观察全部内部 transaction phase；前提是 F2/A2只有 Child activate ACK后发布，F1/A1 revoke后不再出现。Return同理，Caller replacement Activation只有 resume ACK后可见。
+`SUBSYSTEM_RUNTIME_FAILED` 是 Caller-visible Frame outcome code，不是 Renderer用来决定 Stack的命令。Renderer只展示 Main/业务层最终状态；基础设施 diagnostics如 `FRAME_CONTROL_TIMEOUT/DIVERGENCE/PROTOCOL_ERROR` 可另行展示，但不改变 input authority。
 
-## 8. System Data / Render
+## 8. Data / Render Independence
 
-每 Subsystem最多一条有效 Data Transport。Data Connection failure停止 ordinary input，但不修改 Main Frame lifecycle；Frame Control failure也不通过 Data reconnect恢复。
+Runtime failure可能使对应 Data Connection authority失效；这不等于 Renderer可以删除所有相关 Render state并推导 Frame lifecycle。
 
-Render Record不包含 Frame ownership。Frame suspended/closing/closed不自动删除 Render Store；Scheduler不读取 Stack决定 Render visibility/order/destroy。
+Frame close/unwind不自动删除 Render Record。Render recovery、snapshot、visibility/order仍属于 Render Protocol。
 
 ## 9. Renderer Reload
 
@@ -99,21 +111,24 @@ reconnect Main
 → independently restore Render State
 ```
 
-不得恢复 cached old Activation、未 commit transaction state或已被 Main判定 failed 的 Frame Control authority。
+Reload不得恢复 cached old Activation、未 commit transaction state、已被 Main logical-retire 的 Frame或已 failed Runtime的旧 input authority。
+
+如果 reload发生在 Batch E unwind中，Renderer只接受 Main当时的 recovery snapshot/revision，不能终止或重启 recovery。
 
 ## 10. Cancellation Boundary
 
-Renderer不能代表 Caller发送 `frame.cancel`。如果 UI操作需要“返回/取消”，它通过当前 active Frame的 User Input到 Subsystem，由 active Frame决定是否 `frame.return({type:"cancelled"})`。
+Renderer不能代表 suspended Caller发送 `frame.cancel`。UI取消通过当前 active Frame的 User Input交给 Subsystem，由 active Frame自行决定是否 return cancelled。
 
 ## 11. Core Invariants
 
-- Renderer不参与 Frame RPC/error retry；
+- Renderer不参与 Frame RPC/retry/unwind；
 - Renderer只镜像 Main committed authority；
-- transaction gap `InputTarget=null` 合法；
-- activate/resume ACK precedes publication；
+- normal/recovery `InputTarget=null` 合法；
+- ACK-before-publication；
 - revoked Activation never reappears；
-- Frame Control timeout/divergence不由 Renderer resync修复；
+- Runtime failure root/suffix由 Main决定；
+- recovery期间不恢复 cached target；
+- only final resume ACK publishes new target；
 - no two ordinary InputTargets；
-- no caller-driven Frame cancellation from Renderer；
-- Frame/Render/Data lifecycle独立；
-- DOM/Canvas/WebGL not authority。
+- no caller-driven Frame cancellation；
+- Frame/Render/Data lifecycle独立。
