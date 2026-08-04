@@ -26,9 +26,7 @@
 
 ## 旧目录处理原则
 
-旧 `overview/`、`architecture/`、`contracts/`、`design/`、`game-package/`、`runtime/`、`fsdb/`、`roadmap/` 资料只作为迁移、实现细节或历史参考。
-
-若旧路径与当前分层冲突，以当前 `00/10/15` 权威文档为准；仍有效细节迁入当前分层，失效内容标记 Legacy/Superseded。
+旧 `overview/`、`architecture/`、`contracts/`、`design/`、`game-package/`、`runtime/`、`fsdb/`、`roadmap/` 资料只作为迁移、实现细节或历史参考。若旧路径与当前分层冲突，以当前 `00/10/15` 权威文档为准。
 
 ## 当前已确认失效的旧模型
 
@@ -43,37 +41,28 @@
 - Process spawn = Runtime ready；failed Runtime automatic restart；
 - Frame 公共 `ready / initialized / frame.status`；
 - `failed/completed/cancelled` 作为 Frame lifecycle；
-- closed frameId reuse；
-- old activationId 在 resume 后恢复有效；
+- closed frameId reuse；old activationId 在 resume 后恢复有效；
 - Renderer reload 从本地缓存恢复旧 Activation；
 - Legacy `systemId` 作为新 Frame ownership identity；
 - `system.call / system.return / frame.result` 作为当前 Frame RPC；
-- `frame.close(reason)` 作为 v1 wire；
-- `callerFrameId` 下发给 Subsystem 成为第二份 Stack authority；
-- ordinary `frame.call` 必须执行 `frame.suspend` 反向 Request 才能建立 Child；
-- `frame.call` success 等于 Child 已 active；
-- `frame.return` success 等于 Child 已 closed 或 Caller 已 resumed；
-- activate/resume ACK 前向 Renderer 发布对应新 Activation；
-- post-commit failure 恢复 revoked Activation 或撤销 accepted terminal outcome；
-- same-Subsystem recursive call 依赖 nested bidirectional Request handler reentrancy。
+- `frame.close(reason)` 或 callerFrameId-on-wire；
+- ordinary `frame.call` 必须 reverse `frame.suspend` 才能建立 Child；
+- `frame.call` success = Child active；
+- `frame.return` success = Child closed / Caller resumed；
+- activate/resume ACK 前发布新 Activation；
+- post-commit failure 恢复 revoked Activation 或撤销 accepted outcome；
+- same-Subsystem recursive call 依赖 nested bidirectional handler；
+- Frame RPC timeout 自动重发/重试；
+- JSON-RPC id 作为 operationId/idempotency key；
+- timeout 后释放 mutation gate继续旧 Activation；
+- Frame control divergence 通过 reinitialize/resync 修复；
+- Renderer/Data reconnect 用于恢复 Frame Control authority；
+- caller-driven `frame.cancel`；
+- 把 `FrameOutcome.cancelled` 解释成远程 Caller cancellation。
 
 ## 当前 Frame 协议迁移状态
 
-旧路径：
-
-```text
-15-contracts/system-lifecycle-protocol.md
-```
-
-已降为 Legacy / redirect。
-
-当前权威入口：
-
-```text
-15-contracts/frame-call-protocol-v1.md
-```
-
-当前状态：
+旧 `15-contracts/system-lifecycle-protocol.md` 已降为 Legacy / redirect；当前权威入口是 `15-contracts/frame-call-protocol-v1.md`。
 
 ```text
 Frame / Call v1 overall
@@ -93,12 +82,16 @@ Batch C
 
 Batch D
     Error / Timeout / Retry / Cancellation
+    Normative / Frozen
+
+Batch E
+    Runtime Failure Unwind
     Next
 
-Batch E-F
+Batch F
     Draft
 ```
 
-Batch C 当前关键迁移规则：ordinary call 不依赖 reverse `frame.suspend`；call/return Response 先于 dependent reverse RPC；activate/resume ACK 先于对应 InputTarget publication；pre-commit 可 abort，post-commit 只能 forward recovery。
+Batch D 当前迁移规则：所有 Frame Request finite deadline；Success=known commit；Explicit Error=known no-commit；timeout/loss=ambiguous→Runtime failure；no automatic retry/replay；recoverable rejection与 Runtime-fatal divergence/protocol error分离；no caller-driven Frame cancellation。
 
-历史方案需要追溯时使用 Git 历史和 ADR 0010/0011/0012；Legacy 路径不得反向覆盖已冻结语义。
+历史方案需要追溯时使用 Git 历史和 ADR 0010/0011/0012/0013；Legacy 路径不得反向覆盖已冻结语义。
