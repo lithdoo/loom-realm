@@ -7,7 +7,7 @@
 > 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[渲染系统](../../10-architecture/rendering-system.md)  
 > 最近复核：2026-08-04
 
-`loom.map` 是第一阶段纵向切片。内部模块不是 LoomRealm 对所有 Subsystem 的公共要求。
+`loom.map` 是第一阶段纵向切片。内部模块不是所有 Subsystem 的公共要求。
 
 ## 1. 模块结构
 
@@ -20,13 +20,12 @@ loom.map
 ├── Frame Input Adapter
 ├── Game Catalog / Repositories
 ├── Session Coordinator
-├── Runtime Execution Loop
-├── Runtime Core / World State
+├── Runtime Execution Loop / Core / World State
 ├── Render Manager / Projector
 └── Pokémon Essentials Compatibility Compiler
 ```
 
-地图可以共享 world state、Execution Loop 和 Render；平台不要求按 Frame 创建这些对象。
+一个 map Runtime可服务多个 Frame，并共享 world/cache/loop/render。
 
 ## 2. Frame Context / RPC
 
@@ -38,153 +37,106 @@ interface MapFrameContext {
 }
 ```
 
-不保存公共 caller authority。Frame/Activation 不由地图生成或复用；v1 无 Frame ready/status。
+不保存公共 caller/Stack/recovery authority。Frame/Activation不由地图生成/复用。
 
-Frozen RPC exactly seven：initialize/activate/suspend/resume/close/call/return。不得增加 Caller wire、close reason、`system.call/system.return/frame.result/frame.cancel`。
+RPC exactly seven：initialize/activate/suspend/resume/close/call/return。无 `frame.cancel/frame.abort/frame.unwind`、Caller wire、close reason、`system.call/system.return/frame.result`。
 
-## 3. Outbound Mutation Gate
+## 3. Mutation Gate / Deadline
 
-outbound `frame.call / frame.return` pending 时：stop new ordinary input dispatch + block second call/return。
+outbound call/return pending：stop new ordinary input + block second call/return。
 
 ```text
 Success
-    call   → local Caller suspended / old Activation revoked
-    return → local Frame closing / old Activation revoked
-
+    → suspended/closing local commit
 Recoverable Explicit Error
     → release gate
-    → current active Frame/Activation remains
-
-Fatal Explicit Error
-    → operation known not committed
-    → but Runtime is no longer trusted
-    → MUST NOT release gate back to normal processing
-
-Timeout / Response loss
-    → commit state unknown
-    → MUST NOT release gate back to old Activation
-    → stop normal Frame processing
-    → Runtime failure path
+Fatal Explicit Error / timeout/loss
+    → no release to old Activation
+    → Runtime failure
 ```
 
-因此 `Explicit Error` 不能统一实现成“catch 后解除 gate”。必须先检查 stable semantic error classification。
+No retry/replay/idempotency journal。
 
-ordinary call不等待 reverse `frame.suspend`。Main保证 call/return Response先于 dependent reverse RPC，因此 same-Subsystem recursion不要求 reentrant handler。
+## 4. Incoming Control
 
-## 4. Incoming Control Operations
+`frame.initialize` 可用 `FRAME_INITIALIZE_REJECTED + FrameFailure` 做业务拒绝，Context未 commit且 Runtime healthy。
 
-`frame.initialize` 建立 Context；允许业务上通过 `FRAME_INITIALIZE_REJECTED + FrameFailure` 拒绝，表示 Context未 commit、Runtime healthy。
+合法 activate/suspend/resume/close 的 identity/lifecycle/Activation mismatch是 divergence，不私有 resync。
 
-`frame.activate/suspend/resume/close` 对合法 Main state必须成功；identity/lifecycle/Activation mismatch表示 control divergence，不做私有 resync。
+`resume`=Child outcome+replacement Activation；`close`只清该 Frame/Input Context，不停止 Runtime、不删除共享 world/cache/Render。
 
-`frame.resume` 一次完成 Child Outcome delivery + replacement Activation；`frame.close` 不停止 Runtime、不销毁 Render、不清共享 world/cache。
+## 5. Batch E Runtime Failure Boundary
 
-## 5. FrameOutcome / Cancellation
-
-```ts
-type FrameOutcome =
-  | { type: "completed"; value: JsonValue }
-  | { type: "cancelled" }
-  | { type: "failed"; error: FrameFailure };
-```
-
-无返回值使用 `{type:"completed", value:null}`。
-
-v1 无 caller-driven cancel；`cancelled` 只表示当前 active Frame 自己 `frame.return({type:"cancelled"})`。
-
-## 6. Batch D Error / Timeout
-
-Map adapter复用 Frame semantic envelope `-32000 + error.data.code`。
-
-Recoverable：
+地图 Runtime自身一旦 terminal failed：
 
 ```text
-FRAME_CALL_TARGET_NOT_FOUND
-FRAME_CALL_TARGET_UNAVAILABLE
-FRAME_INITIALIZE_REJECTED
+MUST NOT 自行选择 suspended map Frame恢复
+MUST NOT 恢复旧 Activation
+MUST NOT 根据本地 Context决定 Stack unwind
 ```
 
-Control divergence：
+Main会按 lowest failed-runtime occurrence计算 whole suffix。如果同一个 map Runtime在 Stack中有：
 
 ```text
-FRAME_NOT_FOUND
-FRAME_STATE_MISMATCH
-ACTIVATION_MISMATCH
-FRAME_STACK_MISMATCH
-FRAME_OWNERSHIP_MISMATCH
+F1 map suspended
+F2 other suspended
+F3 map active
 ```
 
-全部 Frame Request有 finite deadline，但具体值来自 SDK/Profile。v1 不 retry/replay，不定义 operationId/idempotency journal。
+map Runtime失败时 root必须是最低的 F1，不能只清 F3。
 
-地图自身发现 outbound call/return timeout、Control Frame divergence 或 protocol error时，停止正常 Frame处理，并通过 Subsystem Control failure path报告：`FRAME_CONTROL_TIMEOUT / FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR`。
+## 6. Healthy Map Runtime 被卷入 Suffix
 
-## 7. Frame Input Adapter
+map Runtime本身健康，但某个 map Frame可能因 ancestor Runtime failure成为 doomed descendant。
+
+Main撤销该 Frame公共 authority并发送一次 `frame.close(frameId)`；Map Adapter删除对应 Frame/Input Context。
+
+Recovery不要求额外 suspend-before-close。`frame.close`必须能完成 terminal cleanup；共享 world/Render是否保留由 map业务设计决定，不能被平台 Frame close强制删除。
+
+## 7. Cleanup Failure
+
+如果健康 map Runtime在 recovery `frame.close` 时 timeout/diverge/protocol-fail，则整个 map Runtime进入 terminal failed。Main会把 map key加入 `failedRuntimeKeys`，若更低 Stack层还有 map Frame，unwind root进一步下移。
+
+Map Adapter不得 retry close或请求 Main“只重做这个 Frame”。
+
+## 8. Outcome / Caller Recovery
+
+已经成功 `frame.return` 的 map Frame outcome在 Return Acceptance后不可被随后 Runtime crash覆盖。
+
+如果 map Runtime作为 final root在没有 accepted outcome时失败，Main给 surviving Caller的结果可能是：
+
+```text
+failed(SUBSYSTEM_RUNTIME_FAILED)
+```
+
+这不是 map业务错误 code，Map Runtime不自行构造该 platform outcome。
+
+## 9. Frame Input Adapter
 
 ```text
 frameId + activationId
 → locate Context
 → require active/current Activation
 → require no mutation gate
-→ normalize intent/action
-→ submit runtime command
+→ normalize action
+→ runtime command
 ```
 
-revoked Activation永久拒绝。timeout或 fatal Error 后不能解除 gate继续旧 input。
+revoked Activation永久拒绝。Runtime failure后不重新开启旧 Frame输入。
 
-## 8. Post-commit Failure
-
-Call Acceptance 已完成后，Caller old Activation永远不能恢复，但后续如何收敛必须区分失败类别：
+## 10. FrameOutcome / Cancellation
 
 ```text
-Child frame.initialize → FRAME_INITIALIZE_REJECTED
-    target Runtime healthy
-    → Child failed outcome
-    → 如果 Caller Runtime仍 healthy，则 Main可用 fresh Activation resume Caller
-
-Child Runtime timeout/divergence/protocol failure
-    → target Runtime failed
-    → loom.map 不自行猜测 Caller 是否能恢复
-    → Batch E 决定受影响 Stack suffix 与 surviving Caller
+completed(value)
+cancelled
+failed(FrameFailure)
 ```
 
-特别是 same-Subsystem recursive call：Caller 与 Child 可能属于同一个已经 failed 的 `loom.map` Runtime，这时 lower Caller **不是** surviving healthy Caller，地图进程不能在本地自行 resume 它。
+v1无 caller-driven cancel；`cancelled`只由当前 active map Frame自行 return。
 
-Return Acceptance 成功后 close/resume链路若发生 Runtime-fatal failure，也不能恢复 returned Frame或撤回 outcome；具体 Stack处理同样由 Batch E定义。
+## 11. Frame / Render / Runtime Independence
 
-## 9. Runtime Failure Local Behavior
-
-一旦 `loom.map` Runtime 进入 Frame Control terminal failure：
-
-```text
-stop ordinary Frame input dispatch
-stop new frame.call / frame.return
-keep revoked Activation revoked
-keep accepted outcome immutable
-best-effort local diagnostics / finite cleanup
-SHOULD report subsystem.status(failed) if Control still usable
-```
-
-地图内部不得：
-
-```text
-reinitialize same frameId
-retry timed-out Frame RPC
-reactivate old Activation
-choose a lower local Frame and resume it
-infer Stack unwind from its own local Context list
-```
-
-Main 是 Stack authority；Batch E 才决定 deterministic unwind。
-
-## 10. Frame / Render / Runtime Independence
-
-Frame operation不自动启停 Runtime Loop、创建/隐藏/销毁 Render、删除共享 world、清 Cache 或创建/关闭 Data Connection。Render world/hud/loading/debug由地图 Render Manager独立控制。
-
-Runtime Frame Control failure也不意味着 Renderer 可以通过 Render/Data reconnect恢复 Frame authority。
-
-## 11. Runtime / Repository / Core
-
-Repositories负责内容加载/缓存；Session Coordinator负责业务 session/loading/error；Execution Loop/Core负责地图状态、移动、碰撞、Portal。Core不包含 Main Stack、JSON-RPC、DOM、Hostra或物理 Transport。
+Frame operation/unwind不自动启停 Runtime Loop、创建/隐藏/销毁 Render、删除共享 world或关闭 Data Connection。Render world/hud/loading/debug由 Render Manager独立控制。
 
 ## 12. Tests
 
@@ -193,25 +145,18 @@ Repositories负责内容加载/缓存；Session Coordinator负责业务 session/
 ```text
 exact-seven-rpc-methods
 call-pending-gate
-call-success-local-suspended-revoked
-return-success-local-closing-revoked
-same-subsystem-recursive-no-reentrant-handler
 initialize-business-reject
-initialize-reject-runtime-healthy
 frame-rpc-timeout-no-retry
-call-timeout-gate-not-released
-return-timeout-gate-not-released
-fatal-explicit-error-gate-not-released-to-normal-processing
-late-response-does-not-recover
-frame-state-divergence-runtime-failure
-activation-divergence-runtime-failure
-same-subsystem-runtime-failure-does-not-local-resume-lower-frame
-callee-return-cancelled
+same-subsystem-recursive-no-reentrant-handler
+runtime-failed-does-not-local-resume-lower-map-frame
+healthy-doomed-map-frame-close-only
+healthy-doomed-close-does-not-destroy-render
+close-timeout-fails-map-runtime-and-expands-root
+accepted-map-outcome-survives-crash
 stale-activation-rejected
-frame-close-does-not-destroy-render
 zero-frame-render
 ```
 
 ## 13. Legacy Notes
 
-旧实现中的 per-Frame mandatory Core/Render、Frame status=failed、Frame ready、Activation reuse、`system.call`、Caller-as-Subsystem-authority、call→reverse-suspend、timeout→retry、Explicit Error统一解除 gate、failed Runtime本地恢复 lower Frame、caller remote cancel、Frame close=Render destroy 都必须按当前 Contract 修正或降为 Legacy。
+per-Frame mandatory Core/Render、Frame status=failed、Frame ready、Activation reuse、`system.call`、Caller-as-Subsystem-authority、call→reverse-suspend、timeout→retry、caller remote cancel、partial same-runtime unwind、Frame close=Render destroy 都不得恢复。
