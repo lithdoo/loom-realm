@@ -5,7 +5,7 @@
 > 主要定义：重大架构决策的背景、取舍、结果和重新评估条件  
 > 最近复核：2026-08-04
 
-本目录记录 LoomRealm 重大架构结论的形成过程。当前有效的系统职责和协议仍以 `10-architecture` 与 `15-contracts` 中的权威文档为准；ADR 用于保存候选方案、决定原因、代价和重新评估条件。
+本目录记录 LoomRealm 重大架构结论的形成过程。当前有效系统职责和协议仍以 `10-architecture` 与 `15-contracts` 权威文档为准；ADR 保存候选方案、决定原因、代价和重新评估条件。
 
 ## 当前决策
 
@@ -20,23 +20,25 @@
 9. [冻结 Subsystem Control Protocol v1](./0009-freeze-subsystem-control-protocol-v1.md)
 10. [冻结 Frame / Call Protocol v1 Batch A](./0010-freeze-frame-call-protocol-v1-batch-a.md)
 11. [冻结 Frame / Call Protocol v1 Batch B](./0011-freeze-frame-call-protocol-v1-batch-b.md)
+12. [冻结 Frame / Call Protocol v1 Batch C](./0012-freeze-frame-call-protocol-v1-batch-c.md)
 
-## 当前替代关系
+## 当前替代 / 补充关系
 
 - ADR 0006 **部分替代** ADR 0004 中“Client State / Store 必须以 Frame 为所有权单元”的假设；
-- ADR 0004 的声明式目标状态 → Renderer Store → Render Scheduler → DOM / Canvas / WebGL 流水线继续有效；
-- ADR 0005 替代旧架构中“游戏只声明 systemId，由平台固定 System Registry 提供全部可执行实现”的第一阶段假设；
-- ADR 0007 **部分替代** ADR 0005 中 `id + name` Descriptor、`javascript` Launcher、未冻结 eager/lazy 等表述；
-- ADR 0008 **补充并部分替代** ADR 0007 中 `launcher.entry` 尚未冻结的结论；
-- ADR 0009 将此前 Draft / Stabilizing 的 Subsystem Bootstrap / Runtime Lifecycle 收敛为独立 Frozen Protocol，并明确 Frame / Call 不属于该协议域；
-- ADR 0010 冻结 Frame / Call v1 的 identity / authority / lifecycle / Activation 基线，将 `completed / cancelled / failed` 定义为 outcome，并淘汰独立 Frame `ready / initialized / frame.status`；
-- ADR 0011 冻结 Frame / Call v1 的七方法 wire surface、FrameOutcome Schema、Caller relationship 不下发、`frame.resume` 结果+新 Activation 原子局部语义，以及 `frame.call` 非 long-running result RPC；
-- 旧 `system.call / system.return`、`frame.result` 与 `frame.close(reason)` 不进入 Frame / Call v1；
-- ADR 0005 的“Game Entry 声明 Launcher、Main 启动 Subsystem、Subsystem 主动连接 Main、connected 与 ready 分离”继续有效。
+- ADR 0005 替代旧“游戏只声明 systemId，由平台固定 Registry 提供实现”的第一阶段假设；
+- ADR 0007 **部分替代** ADR 0005 中旧 Descriptor/Launcher 表述；
+- ADR 0008 冻结 Desktop Node.js Launcher Profile v1；
+- ADR 0009 将 Runtime Bootstrap/Lifecycle 收敛为独立 Frozen Subsystem Control Protocol；
+- ADR 0010 冻结 Frame identity / authority / lifecycle / Activation，明确 outcome≠lifecycle、无 Frame ready/status；
+- ADR 0011 冻结七方法 wire surface、FrameOutcome Schema、Caller relationship 不下发、`frame.resume` outcome+new Activation 局部原子语义和 `frame.call` 非 long-running result RPC；
+- ADR 0012 冻结 Stack transaction / acceptance barrier / InputTarget causal barrier / rollback boundary，并明确 ordinary `frame.call` 不依赖反向 `frame.suspend`、same-Subsystem recursive call 不依赖 nested request-handler reentrancy；
+- ADR 0012 进一步冻结：pre-commit 可 abort，post-commit 只能 forward recovery；revoked Activation 和 accepted terminal outcome 不可恢复/撤销；
+- 旧 `system.call / system.return / frame.result / frame.close(reason)` 不进入 Frame / Call v1。
 
 ## 维护规则
 
-- ADR 一经接受，不通过重写历史来表达新决定；后续变化新增 ADR，并标记被替代关系。
-- 架构文档保存当前有效结论，ADR 保存结论形成过程。
-- 契约发生不兼容变化时，除 ADR 外还必须提升协议版本或提供明确迁移方案。
-- 分批冻结协议时，后续批次不得静默改变已经标记 Frozen 的前序批次；需要改变时必须新增 ADR 并明确兼容性影响。
+- ADR 一经接受，不通过重写历史表达新决定；后续变化新增 ADR，并明确兼容性影响；
+- 架构文档保存当前有效结论，ADR 保存结论形成过程；
+- 契约发生不兼容变化时必须提升协议版本或提供迁移；
+- 分批冻结协议时，后续批次不得静默改变已 Frozen 批次；
+- Transport/Profile 实现不得通过平台差异覆盖已冻结应用层 transaction semantics。
