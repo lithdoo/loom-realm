@@ -15,7 +15,7 @@
 - Desktop v1 Launcher = `nodejs`，Game Package v2 / Node.js Launcher v1 已冻结 Entry/env/spawn/Supervisor/trust 边界；
 - Subsystem Control Protocol v1 已冻结 `hello / status / shutdown`，Main 拥有 shutdown intent，`stopped` 只来自 Supervisor observation；
 - `spawn success ≠ connected ≠ identified ≠ ready`；
-- Frame / Call 是独立协议域，当前 Batch A / B / C 已 Frozen；
+- Frame / Call 是独立协议域，当前 Batch A / B / C / D 已 Frozen；
 - Frame lifecycle = `starting / active / suspended / closing / closed`，`completed / cancelled / failed` 是 outcome；
 - `frameId` / `activationId` Main-generated、Session unique、never reused；revoked Activation 永久失效；
 - Frame / Call v1 wire surface exactly seven JSON-RPC Requests；
@@ -24,6 +24,9 @@
 - `frame.call` / `frame.return` Success 是 Main acceptance barrier，不表示 Child active / closed / Caller resumed；
 - `frame.activate` / `frame.resume` ACK happens-before 对应 InputTarget publication；
 - pre-commit failure 可 abort，post-commit failure只能 forward recovery，不能恢复旧 Activation；
+- Frame Request 必须有 finite deadline；timeout/Response-loss 的 ambiguous result 不猜测、不 retry，而进入 Runtime failure path；
+- recoverable Frame errors 与 control divergence 分离；`FRAME_INITIALIZE_REJECTED` 不使目标 Runtime failed；
+- v1 不支持 caller-driven `frame.cancel`；`cancelled` 只表示 active Frame 自行 return cancelled；
 - Render 生命周期完全属于 Subsystem；Renderer⇄Subsystem 数据面分为 Connection / Render Update / User Input；
 - Content 使用独立只读 Content API。
 
@@ -34,17 +37,7 @@
 - [Game Package v2 Bootstrap / Descriptor Contract](./game-package-v2.md)；
 - [Desktop Node.js Launcher Profile v1](./nodejs-launcher-profile-v1.md)。
 
-Desktop v1：
-
-- Descriptor `key + launcher.type=nodejs + launcher.entry + env`；
-- 完整 Descriptor 集合先校验再产生 Process side effect；
-- `launcher.entry` 是 Installation Root 相对 logical path，禁止 traversal / absolute / URL / redirect escape；
-- Entry 仅接受 `.mjs / .cjs` regular file；
-- Host 选择 Node Runtime，Game Package 不提供 Node executable / flags / argv；
-- `shell=false`、固定 `cwd`、显式 child environment；
-- Bootstrap authentication state 在 spawn 前建立；
-- unexpected exit 包括 code 0 均为 failure；
-- Desktop v1 不自动 restart；Node.js executable code 当前属于 trusted code，不宣称 OS sandbox。
+Desktop v1：完整 Descriptor 集合先校验再产生 Process side effect；Entry 安全解析在 Installation Root；Host 选择 Node Runtime；`shell=false`、固定 cwd、显式 child environment；Bootstrap authentication state 在 spawn 前建立；unexpected exit 包括 code 0 均为 failure；v1 不自动 restart；Node executable code 当前属于 trusted code，不宣称 OS sandbox。
 
 ## 3. Subsystem Control Protocol v1
 
@@ -69,8 +62,8 @@ Main → Subsystem
 Batch A  Identity / Authority / Lifecycle / Activation       ← Frozen
 Batch B  RPC Wire Schema / Direction / Local Semantics        ← Frozen
 Batch C  Transaction / Commit Barrier / Rollback              ← Frozen
-Batch D  Error / timeout / retry / cancellation               ← Next
-Batch E  Runtime failure unwind                                ← Draft
+Batch D  Error / timeout / retry / cancellation               ← Frozen
+Batch E  Runtime failure unwind                                ← Next
 Batch F  Limits / fixtures / profile/version completion       ← Draft
 ```
 
@@ -83,7 +76,6 @@ Batch F  Limits / fixtures / profile/version completion       ← Draft
 - `completed / cancelled / failed` 是 outcome，不是 lifecycle；
 - 无 Frame `ready / initialized / frame.status`；
 - 只有 active Frame 有 current Activation；Activation never rolls back/resumes/reuses；
-- 稳定状态 Stack Top active，其他 live Frame suspended；
 - Frame lifecycle 不控制 Runtime / Render / Data Connection。
 
 ### Batch B
@@ -103,66 +95,89 @@ Subsystem → Main
         → {}
 ```
 
-全部是 JSON-RPC Request；closed schema；`FrameOutcome.completed.value` REQUIRED，无值用 `null`；`callerFrameId` 不下发；`frame.close` 无 reason；`frame.resume` 同时交付 Child Outcome + replacement Activation；`frame.call` 不等待最终业务结果；无 `system.call / system.return / frame.result`。
+全部是 JSON-RPC Request；closed schema；`FrameOutcome.completed.value` REQUIRED，无值用 `null`；`callerFrameId` 不下发；`frame.close` 无 reason；`frame.resume` 同时交付 Child Outcome + replacement Activation；`frame.call` 不等待最终业务结果；无 `system.call / system.return / frame.result / frame.cancel`。
 
 ### Batch C
 
-ordinary call transaction：
+ordinary call：
 
 ```text
 frame.call Request
-→ Main validates
 → Call Acceptance Commit:
-     Caller active → suspended
+     Caller suspended
      old Activation revoke
      Child starting / pushed
-     InputTarget = null
-→ frame.call Success { childFrameId }
-→ frame.initialize Child
-→ frame.activate Child
-→ ACK
+     InputTarget=null
+→ frame.call Success
+→ Child initialize / activate
+→ activate ACK
 → Child active + InputTarget publish
 ```
 
-`frame.call` Success 表示 logical Child call accepted，不表示 Child active。ordinary call 不再额外发送 `frame.suspend`；该 RPC 仅保留为 Main 主动 quiesce / terminal preparation 原语。
-
-return transaction：
+return：
 
 ```text
 frame.return Request
 → Return Acceptance Commit:
      outcome terminal
      Child old Activation revoke
-     Child → closing
-     InputTarget = null
+     Child closing
+     InputTarget=null
 → frame.return Success
-→ frame.close Child
-→ ACK / closed / pop
-→ frame.resume Caller(new Activation + outcome)
-→ ACK
+→ close ACK / closed / pop
+→ Caller resume(new Activation) ACK
 → Caller active + InputTarget publish
 ```
 
-冻结 causal barriers：
+`frame.call`/`frame.return` Response 必须先于 dependent reverse RPC；activate/resume ACK 必须先于对应 InputTarget publication。Pre-commit 可 abort；Post-commit 只能 forward recovery。
+
+### Batch D
+
+Request 结果冻结为：
 
 ```text
-frame.activate ACK
-    happens-before Child InputTarget publication
+Success Response
+    → known committed
 
-frame.resume ACK
-    happens-before Caller replacement InputTarget publication
+Explicit Error Response
+    → known not committed
+
+Timeout / Response loss / pending-request connection loss
+    → applied/not-applied unknown
+    → Runtime failure path
 ```
 
-Main MUST complete `frame.call` Response before dependent Child `initialize/activate`，并 complete `frame.return` Response before dependent `close/resume`，因此 same-Subsystem recursive call 不依赖 nested bidirectional request-handler reentrancy。
+v1 对七个 Frame Request 不做 application-level retry/replay，也不定义 operationId/idempotencyKey/dedup journal。
 
-失败边界：
+Recoverable semantic errors：
 
 ```text
-Pre-commit  → abort allowed
-Post-commit → forward recovery only
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
 ```
 
-一旦 Activation 已 commit revoke，后续 failure MUST NOT 恢复旧 Activation；一旦 Return outcome 已接受，后续 cleanup failure MUST NOT 抹掉该 outcome。
+`FRAME_INITIALIZE_REJECTED` 携带 `FrameFailure`，目标 Runtime 保持 healthy；若 Child call 已 acceptance-commit，则以 failed Child outcome + fresh Caller Activation forward-resolve。
+
+Control divergence：
+
+```text
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
+```
+
+上述 divergence、Frozen wire 的 JSON-RPC/schema/method protocol error，以及 ambiguous timeout 均进入 Runtime failure path。Runtime failure diagnostics 至少区分：
+
+```text
+FRAME_CONTROL_TIMEOUT
+FRAME_CONTROL_DIVERGENCE
+FRAME_CONTROL_PROTOCOL_ERROR
+```
+
+Batch D 不决定 Runtime failed 后 Stack 如何 unwind；该职责属于 Batch E。
 
 旧 [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) 仅为 Legacy redirect。
 
@@ -173,7 +188,7 @@ Post-commit → forward recovery only
 | Game Package v2 | [game-package-v2.md](./game-package-v2.md) | Active / Normative；Desktop subset Frozen |
 | Desktop Node.js Launcher v1 | [nodejs-launcher-profile-v1.md](./nodejs-launcher-profile-v1.md) | Active / Normative / Frozen |
 | Subsystem Control v1 | [subsystem-control-lifecycle-protocol.md](./subsystem-control-lifecycle-protocol.md) | Active / Normative / Frozen |
-| Frame / Call v1 | [frame-call-protocol-v1.md](./frame-call-protocol-v1.md) | Draft overall；Batch A/B/C Normative / Frozen |
+| Frame / Call v1 | [frame-call-protocol-v1.md](./frame-call-protocol-v1.md) | Draft overall；Batch A/B/C/D Normative / Frozen |
 | Main ⇄ Renderer Control | 尚待新文档 | Draft target |
 | Renderer ⇄ Subsystem Connection | 尚待新文档 | Draft target |
 | User Input | 尚待新文档 | Draft target |
@@ -184,29 +199,27 @@ Post-commit → forward recovery only
 | Renderer–Subsystem Data v1 | [frame-data-channel-v1.md](./frame-data-channel-v1.md) | Legacy / Superseded |
 | Client State Tree v1 | [client-state-tree-v1.md](./client-state-tree-v1.md) | Legacy / Superseded |
 
-## 6. Identity / Transaction 分层
+## 6. Identity / Transaction / Failure 分层
 
 ```text
 Subsystem Descriptor
     key
 
-Launch Attempt
-    launchId / PID / Process Handle
-    Host-private
-
-Control Connection
-    connection-bound descriptor.key
+Runtime Control
+    hello / ready / shutdown / failed
 
 Frame
-    frameId
-    permanent descriptor.key
-    callerFrameId (Main-owned)
+    frameId / caller / lifecycle / outcome
 
 Activation
     one-shot ordinary input epoch
 
 Stack Transaction
     Main-owned acceptance / commit / forward recovery
+
+Frame RPC Failure
+    explicit recoverable error
+    or Runtime-fatal ambiguous/divergence/protocol failure
 
 System Data Connection
     independent per-Subsystem data transport
@@ -217,10 +230,11 @@ Render Context
 
 ## 7. 版本与 Profile 规则
 
-- 改变字段含义、identity ownership、RPC surface、commit point 或 ordering guarantee 属于不兼容变更；
+- 改变字段含义、identity ownership、RPC surface、commit point、error classification 或 ordering guarantee 属于不兼容变更；
 - Transport Profile 不得改变应用协议语义；
-- Batch D-F 不得静默改变 A/B/C 已 Frozen 的 identity/lifecycle/Activation/RPC/transaction semantics；
-- Main⇄Renderer Control 的未来 wire 可选择如何编码 intermediate revision，但必须服从 Batch C causal barriers。
+- Batch E/F 不得静默改变 A/B/C/D 已 Frozen 的 identity/lifecycle/Activation/RPC/transaction/error semantics；
+- Main⇄Renderer Control 的未来 wire 可选择如何编码 intermediate revision，但必须服从 Batch C causal barriers；
+- Profile 可以选择具体 finite deadline 数值，但不得把 timeout 重新解释为 retryable normal Error。
 
 ## 8. 推荐冻结顺序
 
@@ -230,8 +244,8 @@ Subsystem Control v1                        Frozen
 Frame / Call Batch A                        Frozen
 Frame / Call Batch B                        Frozen
 Frame / Call Batch C                        Frozen
-Frame / Call Batch D                        ← Next
-Frame / Call Batch E
+Frame / Call Batch D                        Frozen
+Frame / Call Batch E                        ← Next
 Frame / Call Batch F
 Main ⇄ Renderer Control
 Renderer ⇄ Subsystem Connection
@@ -242,10 +256,10 @@ Render State
 
 ## 9. 当前明确暂缓
 
-PWA Launcher/credential/Control Transport Profile、第二 Launcher、Sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、same-attempt reconnect、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume。
+PWA Launcher/credential/Control Transport Profile、第二 Launcher、Sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、same-attempt reconnect、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync。
 
 实现不得以“优化”为由隐式加入这些语义。
 
 ## 10. 完整冻结要求
 
-Frame / Call 整体仍需 Batch D 的 error/timeout/retry/cancellation、Batch E 的 Runtime failure unwind，以及 Batch F 的 limits/fixtures/profile/version completion；完成后整体才能转为 Active / Normative / Frozen。
+Frame / Call 整体仍需 Batch E 的 Runtime failure unwind，以及 Batch F 的 limits/fixtures/profile/version completion；完成后整体才能转为 Active / Normative / Frozen。
