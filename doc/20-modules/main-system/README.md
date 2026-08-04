@@ -3,7 +3,7 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：LoomRealm Main 内部模块边界、Frame transaction coordinator 与 Runtime supervision  
+> 主要定义：LoomRealm Main 内部模块边界、Frame transaction/error coordinator 与 Runtime supervision  
 > 依赖：[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Desktop Node.js Launcher Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control Protocol v1](../../15-contracts/subsystem-control-lifecycle-protocol.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-04
 
@@ -22,6 +22,7 @@ Main System
 ├── Activation Registry
 ├── Frame Stack Controller
 ├── Frame / Call Coordinator
+├── Frame RPC Deadline / Failure Classifier
 ├── Renderer Control Publisher
 ├── System Data Connection Authority
 └── Content Grant Authority
@@ -37,7 +38,7 @@ Runtime Supervisor 负责真实 Process existence/termination；Control Connecti
 
 ## 3. Frame Registry
 
-Frame / Call Batch A/B/C 已 Frozen。
+Frame / Call Batch A/B/C/D 已 Frozen。
 
 ```ts
 type FrameLifecycleState =
@@ -77,22 +78,11 @@ interface FrameRecord {
 }
 ```
 
-Registry 必须保证：frameId Session unique/never reused；subsystemKey permanent；callerFrameId Main-owned immutable；只有 active Frame 有 current Activation；outcome 与 lifecycle 分离。
-
-不得保存 Render/Data Transport 作为 Frame-owned state，不得使用 `status=failed` 代替 `closing→closed`。
+Registry 保证 frameId never reused、subsystemKey permanent、callerFrameId Main-owned immutable、只有 active Frame 有 current Activation、outcome 与 lifecycle 分离。
 
 ## 4. Activation Registry
 
-Main 是 Activation 唯一签发方。
-
-```text
-first active        → fresh Activation
-resume              → fresh Activation
-leave active        → revoke old Activation
-revoked             → never valid again
-```
-
-Activation never rolls back / resumes / reuses。
+Main 是 Activation 唯一签发方：first active/resume 使用 fresh Activation；leave active 时 revoke；revoked never valid again。Activation never rolls back/resumes/reuses。
 
 ## 5. Frame / Call RPC Adapter
 
@@ -107,21 +97,15 @@ Main → Subsystem
     frame.close({ frameId })
 
 Subsystem → Main
-    frame.call({ frameId, activationId, targetSubsystemKey, input })
-        → { childFrameId }
-    frame.return({ frameId, activationId, result })
-        → {}
+    frame.call({ frameId, activationId, targetSubsystemKey, input }) → { childFrameId }
+    frame.return({ frameId, activationId, result }) → {}
 ```
 
-全部是 JSON-RPC Request，closed schema。
-
-Adapter MUST NOT 接受 `system.call/system.return`、`frame.result`、close reason、Caller wire field 或 source system identity 变体。
+全部 JSON-RPC Request / closed schema。Adapter MUST NOT 接受 `system.call/system.return`、`frame.result/frame.cancel`、close reason、Caller wire field 或 source system identity 变体。
 
 ## 6. Stack Mutation Coordinator
 
-单一 Frame Stack 的 commit-sensitive mutation MUST 串行执行。
-
-Coordinator 建议显式维护内部 transaction record，例如：
+单一 Frame Stack 的 commit-sensitive mutation MUST 串行执行。建议内部 transaction record：
 
 ```ts
 interface FrameMutationTransaction {
@@ -132,183 +116,173 @@ interface FrameMutationTransaction {
 }
 ```
 
-内部 phase 不是公共 Frame lifecycle，不得发布成新 wire state。
+内部 phase 不是公共 Frame lifecycle。
 
-## 7. Initial Frame Transaction
+## 7. Normal Transaction Rules
 
-```text
-allocate F0 / starting / Stack=[F0]
-→ frame.initialize(F0)
-→ ACK
-→ generate A0
-→ frame.activate(F0,A0)
-→ ACK
-→ commit active+A0
-→ RendererControlPublisher publishes F0/A0
-```
+Initial：initialize ACK → activate(fresh A0) ACK → commit active/A0 → publish InputTarget。
 
-activate ACK 前不得发布 A0。
+Call：validate → Call Acceptance Commit (Caller suspended/A1 revoked/Child starting+push/InputTarget null) → `frame.call` Success → Child initialize/activate → activate ACK → commit/publish Child。
 
-initialize ACK 后 activate 失败时，Coordinator 必须 close 已建立 Context，不得把 F0 发布为 active。
+Return：Return Acceptance Commit (outcome accepted/A2 revoked/Child closing/InputTarget null) → `frame.return` Success → close ACK → closed/pop → resume Caller(fresh A3) ACK → commit/publish Caller。
 
-## 8. Outbound `frame.call` Handling
+ordinary call 不发送 reverse `frame.suspend`；call/return Response 必须先于 dependent reverse RPC；activate/resume ACK 必须先于 InputTarget publication。
 
-收到合法 `frame.call(F1,A1,target,input)` 后：
+## 8. Frame RPC Deadline Manager
 
-1. 校验 connection ownership、F1 active/Stack Top/current A1、target declared+ready+no-shutdown；
-2. 分配 F2；
-3. 原子 Call Acceptance Commit：
+每个七方法 Request 必须有 finite deadline。Deadline Manager 维护 Host/Profile policy 的实际时间值，但不得把它暴露成新的 Frame wire field。
+
+结果分类：
 
 ```text
-F1 → suspended
-A1 revoke
-F2 starting / caller=F1 / push
-InputTarget = null
+Success Response
+    → known committed
+
+Explicit Error Response
+    → known not committed
+
+Timeout / Response loss / pending-request connection loss
+    → commit unknown / ambiguous
 ```
 
-4. 返回 `{childFrameId:F2}`；
-5. **Response 完成后**才发送目标 `frame.initialize(F2)` / `frame.activate(F2,A2)`；
-6. activate ACK 后 commit F2 active+A2，再允许 Renderer 发布 F2/A2。
+Main outbound lifecycle RPC 一旦 ambiguous：
 
-ordinary call MUST NOT 额外发送 `frame.suspend(F1,A1)`。`frame.call` success 就是 Caller suspension acceptance barrier。
+1. 不 retry / replay；
+2. 停止向该 Runtime 发新的正常 Frame Control；
+3. Runtime failure reason=`FRAME_CONTROL_TIMEOUT`；
+4. 忽略迟到 Response 对状态的恢复作用；
+5. 交给 Batch E Runtime Failure Coordinator unwind。
 
-这样 same-Subsystem recursive call 共用一个 Control Connection 也不要求 handler reentrancy。
+## 9. Semantic Error Classifier
 
-## 9. Call Post-commit Failure
-
-`frame.call` success 后 Child initialize/activate 失败属于 post-commit failure：
+Frame semantic error envelope 复用：
 
 ```text
-MUST NOT restore F1/A1
-MUST NOT erase F2 identity
+error.code = -32000
+error.data.code = stable semantic code
 ```
 
-Coordinator 必须把 F2 forward-resolve 为平台 failed outcome，并使用 fresh Activation `frame.resume(F1,...)`。
-
-如果 Child initialize 未 commit，不需要 target `frame.close`；如果 initialize ACK 后 activate 失败，则必须 close target Context 后 pop，再 resume Caller。
-
-稳定 error code 留给 Batch D/E。
-
-## 10. `frame.suspend` Role
-
-`frame.suspend` 不是 ordinary call establishment step。
-
-它仅保留为 Main 主动 quiesce / terminal preparation 控制原语。ACK 后才可 commit active→suspended、old Activation revoke、InputTarget clear。
-
-任何重新 active 都必须使用 fresh Activation。
-
-## 11. Outbound `frame.return` Handling
-
-收到合法 `frame.return(F2,A2,result)` 后原子 Return Acceptance Commit：
+### Recoverable
 
 ```text
-F2.outcome = result
-A2 revoke
-F2 → closing
-InputTarget = null
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+FRAME_INITIALIZE_REJECTED
 ```
 
-然后返回 `{}`。
+前两个只在 Call Acceptance Commit 前返回，Caller/old Activation保持不变。
 
-`frame.return` success **不等于** Child closed / popped / Caller resumed。
+`FRAME_INITIALIZE_REJECTED` 携带 `FrameFailure`；target Runtime remains healthy。若 Child 已 accepted，则把该 failure 作为 Child `FrameOutcome.failed` forward-resolve，并 fresh-resume Caller。
 
-Main MUST 在 Response 完成后才发送：
+### Runtime-fatal divergence
 
 ```text
-frame.close(F2)
-→ ACK
-→ commit closed / pop
+FRAME_NOT_FOUND
+FRAME_STATE_MISMATCH
+ACTIVATION_MISMATCH
+FRAME_STACK_MISMATCH
+FRAME_OWNERSHIP_MISMATCH
 ```
 
-之后才允许：
+Main 收到/产生上述错误后把涉及 Runtime 标记为 `FRAME_CONTROL_DIVERGENCE` failure，不尝试 reinitialize/resync/retry。
+
+Frozen Frame method/schema 出现标准 JSON-RPC protocol error 则 Runtime failure reason=`FRAME_CONTROL_PROTOCOL_ERROR`。
+
+## 10. Main-issued Lifecycle Strictness
+
+合法 `frame.activate / frame.suspend / frame.resume / frame.close` 在 Runtime healthy 且 state一致时应成功。Subsystem 对合法请求返回 identity/lifecycle/Activation semantic error即 control divergence。
+
+`frame.initialize` 是唯一允许合法业务 rejection 的 Main-issued Frame lifecycle RPC，通过 `FRAME_INITIALIZE_REJECTED` 表达。
+
+## 11. Outbound `frame.call` Handling
+
+收到合法 call 后先做 precommit target validation。`FRAME_CALL_TARGET_NOT_FOUND/UNAVAILABLE` 在 commit 前返回，Caller保持 active/current Activation。
+
+验证通过才 acceptance-commit Caller suspension/Activation revoke/Child identity/push。Response 完成后才发 Child initialize/activate。
+
+Call success 后 initialize rejection/other failure都不能恢复 old Activation；按 Frozen forward-recovery处理。
+
+## 12. Outbound `frame.return` Handling
+
+合法 return acceptance commit后 outcome terminal、old Activation revoked、Child closing。Response 完成后才 close/pop/resume。
+
+Return acceptance 不可 rollback。若后续 Frame RPC timeout/divergence，则不是恢复 Child 的理由，而是相关 Runtime failure，交 Batch E。
+
+## 13. Subsystem→Main Pending Request Failure
+
+Main 必须理解 Subsystem SDK 对 outbound `frame.call / frame.return` 有 mutation gate。
+
+如果 Main 能明确返回 recoverable precommit Error，SDK可释放 gate。
+
+如果 Response 在 Main已 commit 后丢失，Subsystem无法知道 acceptance state并会进入 Runtime failure。Main随后可能收到 `subsystem.status(failed)` 或 Control loss；必须按 Runtime failure处理，而不是认为原 Frame transaction仍可继续正常推进。
+
+## 14. No Retry / Idempotency / Cancel
+
+Main Frame Coordinator不得自动重发七方法 Request，也不实现 operationId/idempotencyKey/dedup journal/replay cache。
+
+v1 不提供 caller-driven `frame.cancel`。`FrameOutcome.cancelled` 只是 active Frame 自行 return cancelled；Session end走更高层 shutdown。
+
+## 15. Renderer Control Publisher
+
+Publisher 只发布已 commit Main state。activate/resume ACK precedes publication；revoked Activation 后续 revision必须消失；可 coalesce transitional `InputTarget=null`，但不得越过 causal barrier。
+
+Frame timeout/divergence 不通过 Renderer reconnect/resync修复。
+
+## 16. System Data / Render Boundary
+
+每 Subsystem 最多一条有效 Renderer Data Connection；Data Grant 不绑定 Frame/Activation/Render；Frame lifecycle 不隐式控制 Data Connection/Render；Main 不读取 User Input/Render Update payload。
+
+## 17. Runtime Failure Coordination
+
+Batch D 只确定何时 Runtime 不再可信：
 
 ```text
-A3 = fresh Activation
-frame.resume(F1,A3,F2,result)
-→ ACK
-→ commit F1 active+A3
-→ publish F1/A3
+FRAME_CONTROL_TIMEOUT
+FRAME_CONTROL_DIVERGENCE
+FRAME_CONTROL_PROTOCOL_ERROR
 ```
 
-Return acceptance 不可 rollback；后续 failure不得恢复 A2 或抹掉 accepted outcome。
+Batch E 冻结 Runtime failed 后的 deterministic suffix unwind、transaction 中 crash、best-effort cleanup 与 surviving Caller resume。Runtime failure不得通过 `Frame.state=failed` 表示。
 
-## 12. Renderer Control Publisher
-
-Publisher 只发布已 commit Main state。
-
-Batch C causal rules：
-
-```text
-frame.activate ACK
-    happens-before Child InputTarget publication
-
-frame.resume ACK
-    happens-before Caller replacement InputTarget publication
-
-Activation revoke commit
-    happens-before all later revisions omit it as current
-```
-
-Publisher MAY coalesce transitional Stack states / `InputTarget=null` gap，但不得越过 causal barrier，也不得发布两个 ordinary InputTargets。
-
-## 13. Subsystem SDK Coordination Contract
-
-Main 假设 SDK 对 outbound `frame.call / frame.return` 实现 mutation gate：Request pending 时停止新的 ordinary input dispatch，并禁止第二个 call/return。
-
-Main 不依赖 SDK 在入站 call/return handler 尚 pending 时处理反向 Frame Request；Response-before-dependent-RPC 是协议保证。
-
-## 14. System Data / Render Boundary
-
-- 每 Subsystem 最多一条有效 Renderer Data Connection；
-- Data Grant 不绑定 Frame/Activation/Render；
-- Frame create/suspend/resume/close 不隐式创建/关闭 Data Connection；
-- Main 不维护 Render Registry，也不读取 User Input/Render Update payload。
-
-## 15. Failure Coordination
-
-Batch C 已冻结：
-
-```text
-pre-commit failure  → abort allowed
-post-commit failure → forward recovery only
-```
-
-Batch D 冻结 semantic error / timeout / retry / ambiguous delivery；Batch E 冻结 Runtime crash multi-Frame unwind。
-
-Runtime failure仍不得通过 `Frame.state=failed` 表示。
-
-## 16. 核心不变量
+## 18. 核心不变量
 
 - Frame Stack mutation serial；
 - ordinary call 不依赖反向 `frame.suspend`；
-- call success precedes dependent child initialize/activate；
-- return success precedes dependent close/resume；
+- call/return Response precedes dependent reverse RPC；
 - activate/resume ACK precedes corresponding InputTarget publication；
-- revoked Activation 永久失效；
-- accepted terminal outcome 不可撤销；
-- same-Subsystem recursion 不依赖 nested Request handling；
+- revoked Activation 永久失效；accepted outcome 不可撤销；
+- Explicit Error 与 ambiguous timeout不得混淆；
+- ambiguous Frame RPC 不 retry/replay，相关 Runtime failed；
+- recoverable initialize rejection不使 target Runtime failed；
+- control divergence/protocol error Runtime-fatal；
+- no caller-driven Frame cancellation；
 - Frame 不拥有 Runtime/Render/Data Connection lifecycle。
 
-## 17. 测试入口
+## 19. 测试入口
 
-除 Batch A/B fixtures 外至少增加：
+除 Batch A/B/C fixtures 外，Batch D 至少验证：
 
 ```text
-initial-activate-before-publish
-call-accept-suspends-caller
-call-success-before-child-initialize
-call-no-frame-suspend-rpc
-call-gap-no-input-target
-child-activate-before-publish
-same-subsystem-no-nested-request
-recursive-same-subsystem-call
-call-postcommit-init-failure-fresh-resume
-call-postcommit-activate-failure-close-then-fresh-resume
-return-accept-closing-before-response
-return-success-before-close
-close-ack-before-pop
-resume-ack-before-publish
-return-postcommit-no-rollback
-revoked-activation-never-restored
-no-two-input-targets-during-transaction
+finite-deadline-required
+success-known-commit
+explicit-error-known-no-commit
+timeout-is-ambiguous
+no-frame-rpc-retry-after-timeout
+late-response-does-not-recover-runtime
+call-target-not-found-recoverable
+call-target-unavailable-recoverable
+initialize-rejected-runtime-stays-healthy
+initialize-rejected-forward-failed-outcome
+frame-not-found-divergence-fatal
+frame-state-mismatch-divergence-fatal
+activation-mismatch-divergence-fatal
+stack-mismatch-divergence-fatal
+ownership-mismatch-divergence-fatal
+invalid-params-protocol-fatal
+method-not-found-protocol-fatal
+call-timeout-keeps-sdk-gate-and-fails-runtime
+return-timeout-keeps-sdk-gate-and-fails-runtime
+no-operation-id-or-replay
+no-caller-driven-frame-cancel
+callee-return-cancelled-remains-valid
 ```
