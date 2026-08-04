@@ -9,73 +9,52 @@
 
 ## 1. 测试目标
 
-测试不仅验证实现正确，还必须防止下层实现破坏上层架构边界。
+测试不仅验证实现正确，还必须阻止下层实现破坏 Frozen Contract。
 
 第一阶段重点验证：
 
-- Game Entry / Launcher / Supervisor / Subsystem Control v1 已冻结语义；
-- `spawn success ≠ connected ≠ identified ≠ ready`；
-- Frame = Main-owned call/input context；Render = Subsystem-owned context；
-- Frame / Call Batch A 的 identity/lifecycle/Activation；
-- Frame / Call Batch B 的 exact seven RPC wire surface；
+- Game Package / Launcher / Supervisor / Subsystem Control v1；
+- Frame / Call Batch A identity/lifecycle/Activation；
+- Batch B exact seven RPC wire surface；
+- Batch C transaction / acceptance / publication / rollback barriers；
 - Caller relationship 不下发给 Subsystem；
-- `frame.resume` = outcome delivery + replacement Activation；
-- `frame.call` 不等待 Child 最终 result；
-- Frame close 不改变 Runtime / Render / Data Connection；
-- User Input / Render Update 使用独立协议域。
+- `frame.call` 不等待最终 Child outcome，也不依赖 reverse `frame.suspend`；
+- `frame.return` success 不等于 close/resume 完成；
+- activate/resume ACK 先于对应 InputTarget publication；
+- post-commit failure 不恢复 revoked Activation；
+- Frame/Render/Data Connection 生命周期独立。
 
 ## 2. 测试层次
 
 ```text
 Schema / Contract Test
+→ State Machine / Transaction Fixture
 → Launcher Filesystem / Process Conformance
-→ State Machine Fixture
 → Module Unit Test
 → Transport Conformance Test
 → Runtime Container Interop
 → Component Integration
-→ Content Golden Test
 → End-to-End Vertical Test
 → Performance / Backpressure Test
 ```
 
-已 Frozen 的 Contract 必须先有机器可校验 fixture，再允许 Main/SDK 各自实现。
+Frozen Contract 必须先有机器可校验 fixture，再允许 Main/SDK 各自实现。
 
 ## 3. Game Package / Launcher / Subsystem Control
 
-继续覆盖：
+继续覆盖 Descriptor 集合校验、Entry containment、Host-selected Node/no shell、Token-before-spawn、Supervisor exit classification、hello/status/shutdown、Main-owned shutdown intent、wire limits、semantic error envelope、no heartbeat/reconnect/restart。
 
-### Game Package / Launcher
+特别保持：
 
-- duplicate key / unsupported Launcher；
-- Entry absolute/traversal/URL/backslash/missing/directory/unsupported extension；
-- symlink/junction/reparse escape 与 canonical containment；
-- reserved env / env size；
-- Descriptor 集合失败零 Process side effect；
-- Host-selected Node / shell interpretation impossible / fixed cwd；
-- Token registered before spawn / new per attempt / revoke on early failure；
-- spawn success public state still `starting`；
-- unexpected exit including code 0 → failure；
-- no automatic restart；
-- bounded termination。
-
-### Subsystem Control v1
-
-- hello auth / identity / version / duplicate connection；
-- `identified → ready` 与 optional initializing；
-- invalid/duplicate status fatal；
-- Main-owned shutdown intent；
-- `subsystem.shutdown` accepted ≠ stopped；
-- unsolicited stopping fatal；
-- shutdown timeout → Supervisor escalation；
-- connection loss behavior；
-- semantic `-32000 + error.data.code`；
-- wire limits；
-- no heartbeat / same-attempt reconnect / resume / automatic restart。
+```text
+spawn success ≠ connected ≠ identified ≠ ready
+shutdown accepted ≠ stopped
+unexpected exit including code 0 → failure
+```
 
 ## 4. Frame / Call Batch A Conformance
 
-至少覆盖：
+至少：
 
 ```text
 frame-id-unique
@@ -102,8 +81,6 @@ frame-close-does-not-close-data-connection
 
 ## 5. Frame / Call Batch B Schema Conformance
 
-### 5.1 Exact method surface
-
 唯一合法方法：
 
 ```text
@@ -119,286 +96,281 @@ Subsystem → Main
     frame.return
 ```
 
-必须显式拒绝：
+必须拒绝 `system.call / system.return / frame.ready / frame.status / frame.result / frame.cancel / frame.close(reason)`。
+
+所有方法为 Request；params/result closed schema；structural invalid → `-32602`。
+
+字段 fixture：
 
 ```text
-system.call
-system.return
-frame.ready
-frame.status
-frame.result
-frame.cancel
-frame.close-with-reason extension
+initialize: frameId + input
+activate:   frameId + new activationId
+suspend:    frameId + current activationId
+resume:     frameId + new activationId + returnedFrameId + result
+close:      frameId only
+call:       frameId + current activationId + targetSubsystemKey + input
+return:     frameId + current activationId + result
 ```
 
-### 5.2 JSON-RPC form
+`FrameOutcome.completed.value` REQUIRED，无值=`null`；failed outcome 与 JSON-RPC Error 分离。
 
-- 七个方法全部是 Request，不是 Notification；
-- params 必须是 Object；
-- params/result `additionalProperties=false`；
-- missing/wrong-type/extra-field/invalid discriminant → `-32602 Invalid params`；
-- Batch B Schema Test 不提前冻结 Batch D semantic error code。
+## 6. Frame / Call Batch C Transaction Conformance
 
-### 5.3 `frame.initialize`
-
-合法：
-
-```json
-{
-  "frameId": "F1",
-  "input": null
-}
-```
-
-验证：
-
-- required exactly `frameId + input`；
-- no `callerFrameId`；
-- no source `subsystemKey/systemId`；
-- result `{}`；
-- success 后仍是 `starting`、无 Activation。
-
-### 5.4 `frame.activate`
-
-验证：
-
-- `frameId + activationId`；
-- activationId 是 Main 新值；
-- 只用于首次 activation，不作为 resume 的替代；
-- result `{}`。
-
-### 5.5 `frame.suspend`
-
-验证：
-
-- `frameId + current activationId`；
-- success 后该 Activation 永久 revoke；
-- result `{}`；
-- 不隐式改变 Render/Data Connection。
-
-### 5.6 `frame.resume`
-
-验证 exact fields：
+### 6.1 Initial Frame
 
 ```text
-frameId
-activationId        // new replacement
-returnedFrameId
-result              // FrameOutcome
+initial-initialize-before-activate
+initial-activate-ack-before-publish
+initial-no-target-before-activate-ack
+initial-initialize-error-no-target
+initial-activate-error-close-context
+initial-activate-error-never-published
 ```
 
-必须验证：
+断言：`frame.activate` ACK 前 Renderer/Main publication fixture 不得出现新 Activation。
 
-- no callerFrameId；
-- Child outcome 和 replacement Activation 在 Subsystem-side 一个操作完成；
-- 不允许 `frame.resume` 后再公共 `frame.activate` 才完成恢复。
-
-### 5.7 `frame.close`
-
-合法 params 只有：
-
-```json
-{ "frameId": "F1" }
-```
-
-以下必须 rejected as invalid params：
+### 6.2 Call Acceptance
 
 ```text
-reason
-outcome
-callerFrameId
-activationId
-subsystemKey
+call-precommit-reject-keeps-caller-active
+call-precommit-reject-keeps-old-activation
+call-accept-suspends-caller
+call-accept-revokes-old-activation
+call-accept-pushes-starting-child
+call-accept-clears-input-target
+call-success-before-child-initialize
+call-success-does-not-mean-child-active
+call-ordinary-flow-does-not-send-frame-suspend
 ```
 
-并验证 close 只删除 Frame/Input Context，不停止 Runtime、不 destroy Render、不关闭 Data Connection。
-
-### 5.8 `frame.call`
-
-合法 shape：
+特别验证 Main 的 wire trace：
 
 ```text
-frameId
-activationId
-targetSubsystemKey
-input
+IN  frame.call Request
+OUT frame.call Result
+OUT frame.initialize Child
+OUT frame.activate Child
 ```
 
-success result：
+不得是：
 
 ```text
-childFrameId
+IN  frame.call Request
+OUT frame.suspend Caller
+... wait ...
+OUT frame.call Result
 ```
 
-验证：
+### 6.3 Sender Mutation Gate
 
-- source identity 来自 Control Connection；
-- no source subsystem identity field；
-- same-Subsystem call 合法且仍创建新 childFrameId；
-- Request 只建立 Child call，不持续等待 Child outcome。
-
-### 5.9 `frame.return`
-
-合法 shape：
+Subsystem SDK fixture：
 
 ```text
-frameId
-activationId
-result
+call-pending-stops-ordinary-input-dispatch
+call-pending-blocks-second-call
+call-pending-blocks-return
+call-error-releases-gate-keeps-old-activation
+call-success-commits-local-suspended
+
+return-pending-stops-ordinary-input-dispatch
+return-pending-blocks-second-return
+return-pending-blocks-call
+return-error-releases-gate-keeps-frame-active
+return-success-commits-local-closing
 ```
 
-验证：
+Input pending 时具体 drop/buffer/reset 不在 Batch C fixture 冻结；只验证不会继续进入业务 Handler。
 
-- no `callerFrameId` / target receiver；
-- Main Registry 决定 receiver；
-- result 是 FrameOutcome；
-- success result `{}`。
-
-### 5.10 `FrameOutcome`
+### 6.4 Child Activation / Publication
 
 ```text
-completed
-    { type:"completed", value: JsonValue }
-
-cancelled
-    { type:"cancelled" }
-
-failed
-    { type:"failed", error:{ code, message?, data? } }
+child-initialize-after-call-response
+child-activate-after-initialize-ack
+child-activate-ack-before-publish
+call-gap-input-target-null
+old-caller-target-never-republished-after-call-commit
+no-two-input-targets-call-transition
 ```
 
-必须测试：
+Renderer Control fixture MAY coalesce intermediate revision，但最终 trace 必须满足 causal barrier。
 
-- `completed.value` 缺失 → invalid params；
-- 无业务返回值必须 `value:null`；
-- cancelled 带额外 Payload → invalid params；
-- failed 缺 error/code → invalid params；
-- `FrameOutcome.failed` 不走 JSON-RPC Error envelope。
-
-## 6. Batch C-F 的测试边界
-
-Batch B fixture **不得提前编码**以下尚未冻结行为：
+### 6.5 Post-call Failure
 
 ```text
-call establishment exact ordering
-frame.call response commit point
-InputTarget publish barrier
-partial rollback
-semantic error codes
-request timeout
-retry / idempotency
-caller cancellation
-Runtime failure suffix unwind
-wire numeric limits
+call-postcommit-initialize-error-no-old-activation-restore
+call-postcommit-initialize-error-failed-outcome
+call-postcommit-initialize-error-fresh-caller-resume
+call-postcommit-activate-error-closes-child
+call-postcommit-activate-error-fresh-caller-resume
+call-postcommit-failure-never-restores-a1
 ```
 
-这些分别在 Batch C-F 增加 fixture。这样 Schema Test 不会反向把未冻结实现偶然行为变成协议。
+Child initialize 没有 commit 时不要求 close target Context；initialize ACK 后 activate Error 必须 close。
 
-## 7. Renderer–Subsystem / User Input / Render
+### 6.6 Return Acceptance
 
-### Connection
+```text
+return-precommit-reject-keeps-child-active
+return-precommit-reject-keeps-a2-valid
+return-accept-stores-terminal-outcome
+return-accept-revokes-a2
+return-accept-enters-closing
+return-accept-clears-input-target
+return-success-before-frame-close
+return-success-does-not-mean-closed
+return-success-does-not-mean-caller-resumed
+```
 
-- one active Data Connection per Subsystem；
-- Main Grant auth / replace / revoke；
-- zero-Frame Subsystem 可保持连接；
-- Runtime stopping/failed 后不发新 Grant。
+wire trace：
 
-### User Input
+```text
+IN  frame.return Request
+OUT frame.return Result
+OUT frame.close Child
+... ACK ...
+OUT frame.resume Caller
+```
 
-- current active `frameId + activationId` only；
-- revoked Activation rejection；
-- Frame A/B isolation；
-- Input Target change / blur reset；
-- UI interaction 不假设 Render identity = frameId。
+### 6.7 Close / Pop / Resume
 
-### Render
+```text
+close-ack-before-pop
+closing-frame-remains-live-before-close-ack
+caller-resume-after-child-pop
+resume-uses-fresh-activation
+resume-ack-before-publish
+resume-does-not-follow-with-activate
+old-child-target-never-republished-after-return-commit
+no-two-input-targets-return-transition
+```
 
-- independent Render identity；
-- create/update/destroy/recovery；
-- Frame suspend/close 不改变 Render epoch；
-- zero-frame Render；
-- shared Render across multiple Frames；
-- Renderer reload 不按 Frame resync Render。
+### 6.8 Initial Frame Return
+
+```text
+initial-return-accepts-outcome
+initial-return-close-before-stack-empty
+initial-return-stack-empty-no-input-target
+```
+
+Session exit policy不在 Frame fixture 中硬编码。
+
+### 6.9 Same-Subsystem / Recursive Reentrancy
+
+必须用单一模拟 Control Connection 验证：
+
+```text
+same-subsystem-call-new-frame-id
+same-subsystem-call-new-activation
+same-subsystem-no-nested-reverse-request
+recursive-same-subsystem-depth-3
+recursive-stack-f1-f2-suspended-f3-active
+recursive-return-unwinds-with-fresh-activations
+```
+
+测试 handler 可以故意设置为“入站 Request handler pending 时拒绝处理反向 Request”，协议实现仍必须通过，以证明 v1 不依赖 bidirectional nested-request reentrancy。
+
+### 6.10 Pre/Post Commit Classification
+
+```text
+precommit-error-may-abort
+postcommit-error-never-restores-revoked-activation
+postcommit-return-error-never-erases-outcome
+```
+
+Ambiguous timeout / lost Response 留到 Batch D，不在这里指定 retry。
+
+## 7. `frame.suspend` Conformance
+
+Batch C 明确 ordinary call 不使用它。
+
+独立测试：
+
+```text
+main-initiated-suspend-ack-then-revoke
+main-initiated-suspend-error-no-commit
+suspend-never-allows-old-activation-resume
+suspend-does-not-change-render-data-runtime
+```
+
+不要写“call must emit frame.suspend”的 fixture。
 
 ## 8. Main System Tests
 
-- Descriptor / Launcher / Runtime Supervisor；
-- Subsystem Control hello/status/shutdown；
-- Frame Registry lifecycle/outcome separation；
-- Activation uniqueness/revocation；
-- exact Batch B RPC dispatcher；
-- connection-bound source Subsystem identity；
-- caller relationship only in Main Registry；
-- call target resolution from `targetSubsystemKey`；
-- same-Subsystem call produces new childFrameId；
-- no `system.call / frame.result / close reason` compatibility shortcut；
-- Main 不发布两个 ordinary Input Target；
+- Frame mutation transaction single-flight；
+- Call Acceptance Commit atomicity；
+- Return Acceptance Commit atomicity；
+- Response-before-dependent-RPC ordering；
+- Renderer publisher only emits committed Activation；
+- post-commit forward recovery；
+- same-Subsystem recursive call without nested request handling；
+- Main 不发布两个 ordinary InputTargets；
 - Main 不维护 Render Registry。
 
 ## 9. Subsystem SDK / Test Subsystems
 
-SDK contract test：
+SDK contract API：
 
 ```text
-onInitialize(frameId, input)
-onActivate(frameId, activationId)
-onSuspend(frameId, activationId)
-onResume(frameId, activationId, returnedFrameId, outcome)
+onInitialize(frameId,input)
+onActivate(frameId,activationId)
+onSuspend(frameId,activationId)
+onResume(frameId,activationId,returnedFrameId,outcome)
 onClose(frameId)
-call(frameId, activationId, targetSubsystemKey, input)
-return(frameId, activationId, outcome)
+call(frameId,activationId,targetSubsystemKey,input)
+return(frameId,activationId,outcome)
 ```
+
+SDK 必须把 call success 映射为 Caller suspended/revoked，return success 映射为 Child closing，并实现 pending mutation gate。
 
 推荐 test-subsystems：
 
 ```text
-frame-schema-valid
-frame-schema-extra-field
-frame-no-caller-wire
-same-subsystem-call
-nested-call
-completed-null
-failed-outcome
+same-subsystem-recursive
+no-reentrant-handler
+call-child-init-reject
+call-child-activate-reject
+return-normal
+return-nested
 stale-activation
 multi-frame-input
 render-without-frame
-shared-render-multi-frame
 ```
 
-## 10. Content / Map / E2E
+## 10. Renderer / User Input / Render
 
-Content API 继续验证 path/grant/cache/ETag/read-only 与 Launcher capability 隔离。
+Renderer Control 尚未冻结 wire，但测试 adapter 必须接受以下 invariant：
 
-`loom.map` 至少验证：
+```text
+activate/resume ACK before publish
+revoked Activation never republished
+InputTarget=null transaction gap allowed
+no two InputTargets
+```
 
-- Frame Control Adapter 符合 Batch B exact method fields；
-- initialize 不依赖 callerFrameId；
-- resume 同时收到 Child result + new Activation；
-- no-value return 使用 `completed(value:null)`；
-- Frame close 不隐式 destroy world/hud Render；
-- 一个 Process 服务多个 Frame/Input Context；
-- old Activation input rejected。
+User Input 只允许 current active `frameId+activationId`；Render 使用独立 identity，不因 Frame transaction 自动 hide/destroy/resync。
+
+## 11. E2E
 
 Desktop E2E：
 
 ```text
 bootstrap all required Runtime
 → hello / ready
-→ establish initial Frame
-→ Frame initialize / activate
-→ nested frame.call
-→ child frame.return
-→ caller frame.resume with new Activation
-→ close child Context
-→ Renderer reload
-→ Render/Data recover independently
+→ initial initialize / activate ACK / publish
+→ nested frame.call acceptance
+→ child initialize / activate / publish
+→ child frame.return acceptance
+→ close child
+→ caller resume fresh Activation / publish
+→ same-Subsystem recursive variant
+→ Renderer reload restores only committed Activation
 → normal subsystem.shutdown
 ```
 
-Batch C 冻结前，E2E 不把 call/suspend/push/activate 的某个具体中间顺序写成跨实现兼容要求。
+Batch D 前 E2E 不自行增加 retry/idempotency 或 timeout recovery 作为兼容要求。
 
-## 11. Golden / Fixture 规则
+## 12. Golden / Fixture 规则
 
-适合 Golden：Game Package Descriptor、Launcher errors、Bootstrap Context、Subsystem Control messages、Frame/Call Batch B messages、Connection auth、User Input sequences、Render State/Event、Content Responses。
+适合 Golden：Launcher/Control messages、Frame Batch B schema、Batch C transaction traces、Connection auth、User Input sequence、Render State/Event、Content Response。
 
-Golden 更新必须说明是协议设计变化还是回归修复。已 Frozen Batch 的 fixture 发生不兼容改变时必须先更新 ADR / compatibility decision。
+已 Frozen Batch fixture 发生不兼容改变时必须先有 ADR / compatibility decision。
