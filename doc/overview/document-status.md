@@ -6,7 +6,7 @@
 
 本文件来自文档分层重构前的旧状态表。其“单一真相源”列表和优先级规则已经失效，**不得用于判断当前架构或契约权威来源**。
 
-当前治理由 [文档分层与变更规则](../00-overview/document-governance.md) 定义：
+当前治理：
 
 ```text
 00-overview
@@ -24,10 +24,6 @@
 - [Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)；
 - [Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)。
 
-## 旧目录处理原则
-
-旧 `overview/`、`architecture/`、`contracts/`、`design/`、`game-package/`、`runtime/`、`fsdb/`、`roadmap/` 资料只作为迁移、实现细节或历史参考。若旧路径与当前分层冲突，以当前 `00/10/15` 权威文档为准。
-
 ## 当前已确认失效的旧模型
 
 不得恢复：
@@ -36,33 +32,40 @@
 - Frame 必须拥有独立业务 Runtime/Projector/Client State；
 - Frame close 自动删除 Render/Data Connection；
 - Renderer 根据 Frame Stack 推导 Render visibility/z-order；
-- Game Entry 只声明 Legacy `systemId`、由固定 Registry 提供实现；
-- eager 模型首次 Frame call 才启动 Subsystem；
 - Process spawn = Runtime ready；failed Runtime automatic restart；
 - Frame 公共 `ready / initialized / frame.status`；
 - `failed/completed/cancelled` 作为 Frame lifecycle；
-- closed frameId reuse；old activationId 在 resume 后恢复有效；
-- Renderer reload 从本地缓存恢复旧 Activation；
-- Legacy `systemId` 作为新 Frame ownership identity；
+- closed frameId reuse / old activationId resume后复活；
+- Renderer reload 恢复旧 Activation；
 - `system.call / system.return / frame.result` 作为当前 Frame RPC；
 - `frame.close(reason)` 或 callerFrameId-on-wire；
-- ordinary `frame.call` 必须 reverse `frame.suspend` 才能建立 Child；
+- ordinary call reverse `frame.suspend` dependency；
 - `frame.call` success = Child active；
 - `frame.return` success = Child closed / Caller resumed；
-- activate/resume ACK 前发布新 Activation；
-- post-commit failure 恢复 revoked Activation 或撤销 accepted outcome；
-- same-Subsystem recursive call 依赖 nested bidirectional handler；
-- Frame RPC timeout 自动重发/重试；
-- JSON-RPC id 作为 operationId/idempotency key；
-- timeout 后释放 mutation gate继续旧 Activation；
-- Frame control divergence 通过 reinitialize/resync 修复；
-- Renderer/Data reconnect 用于恢复 Frame Control authority；
+- activate/resume ACK前发布新 Activation；
+- post-commit failure恢复 revoked Activation或撤销 accepted outcome；
+- same-Subsystem recursive call依赖 nested bidirectional handler；
+- Frame RPC timeout automatic retry/replay；
+- JSON-RPC id作为 operationId/idempotency key；
+- timeout后释放 mutation gate继续旧 Activation；
+- Frame control divergence通过 reinitialize/resync修复；
+- Renderer/Data reconnect恢复 Frame Control authority；
 - caller-driven `frame.cancel`；
-- 把 `FrameOutcome.cancelled` 解释成远程 Caller cancellation。
+- `FrameOutcome.cancelled` = remote Caller cancellation；
+- Runtime failure只删除当前 top Frame；
+- Runtime failure只删除相同 subsystemKey 的 Frame而保留 descendants；
+- 同一 failed Runtime多次出现在 Stack时只从最近 occurrence unwind；
+- failed Runtime上继续依赖 `frame.close ACK` 后才能移除 Frame；
+- Batch E cleanup timeout 后 retry 或继续把 Runtime当 healthy；
+- recovery固定使用首次 root，不因新 failed Runtime向下扩展；
+- Runtime crash覆盖已经 accepted 的 completed/cancelled/failed outcome；
+- 对 doomed intermediate Frame逐层 resume；
+- recovery恢复 Caller old Activation；
+- 新增 `frame.abort / frame.unwind` 或 recovery replay/resync作为 v1实现捷径。
 
 ## 当前 Frame 协议迁移状态
 
-旧 `15-contracts/system-lifecycle-protocol.md` 已降为 Legacy / redirect；当前权威入口是 `15-contracts/frame-call-protocol-v1.md`。
+旧 `15-contracts/system-lifecycle-protocol.md` 已 Legacy / redirect；当前权威入口是 `15-contracts/frame-call-protocol-v1.md`。
 
 ```text
 Frame / Call v1 overall
@@ -86,12 +89,13 @@ Batch D
 
 Batch E
     Runtime Failure Unwind
-    Next
+    Normative / Frozen
 
 Batch F
-    Draft
+    Limits / Fixtures / Profile / Version Completion
+    Next / Final
 ```
 
-Batch D 当前迁移规则：所有 Frame Request finite deadline；Success=known commit；Explicit Error=known no-commit；timeout/loss=ambiguous→Runtime failure；no automatic retry/replay；recoverable rejection与 Runtime-fatal divergence/protocol error分离；no caller-driven Frame cancellation。
+Batch E 当前迁移规则：Runtime failure按 `descriptor.key` 进入 failed set；lowest failed-runtime Frame为 root；root..top whole suffix Top→Bottom unwind；failed Runtime Frame logical retire无 Frame RPC ACK；healthy descendant best-effort close；cleanup failure扩大 failed set并重新计算 root；accepted outcome保留；root无 outcome使用 `SUBSYSTEM_RUNTIME_FAILED`；只 fresh-resume final direct healthy Caller或清空 Stack。
 
-历史方案需要追溯时使用 Git 历史和 ADR 0010/0011/0012/0013；Legacy 路径不得反向覆盖已冻结语义。
+历史方案需要追溯时使用 Git 历史和 ADR 0010-0014；Legacy 路径不得反向覆盖已冻结语义。
