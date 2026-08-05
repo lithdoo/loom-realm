@@ -32,18 +32,16 @@ Schema / JSON Profile Test
 
 ## 3. Frame v1 Normative Source
 
-测试身份以：
+测试身份：
 
 ```text
 protocol = loomrealm.frame-call
 version = 1
 ```
 
-为准。
-
 Batch A-F只用于 fixture分组，不是独立兼容等级。
 
-Fixture id与最低必测项见 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。本文件说明实施方式和 E2E组合，不重新定义协议。
+Fixture最低必测项见 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。本文件说明实施方式和 E2E组合，不重新定义协议。
 
 ## 4. Identity / Lifecycle / Wire
 
@@ -63,6 +61,7 @@ closed schema
 completed.value required
 no caller wire / close reason
 no frame.result/cancel/abort/unwind/version/capabilities
+no JSON-RPC Batch
 ```
 
 ## 5. Transaction Golden Traces
@@ -227,8 +226,6 @@ zero-frame-runtime-failure-keeps-current-stack
 
 ## 11. JSON / Number Profile Tests
 
-Frame v1所有 transport共用：
-
 ```text
 plain-json-values-accepted
 undefined-rejected
@@ -250,7 +247,8 @@ PWA额外确保 Structured Clone不会让 ArrayBuffer/MessagePort/Blob等绕过 
 每个 limit同时测试 exactly-at-limit 与 one-over-limit：
 
 ```text
-message 1 MiB
+reference message 1 MiB
+Desktop actual WebSocket text 1 MiB
 JSON depth 64 / 65
 business JsonValue 512 KiB + 1
 JsonValue string 256 KiB + 1
@@ -264,7 +262,9 @@ FrameFailure.code 128 / 129
 FrameFailure.message 4096 / 4097 bytes
 ```
 
-Size计算使用协议的 Reference Compact JSON UTF-8 encoding。
+Business/PWA semantic size使用 Reference Compact JSON UTF-8 encoding。
+
+Desktop还必须单独验证实际 carrier hard cap：构造一个 compact equivalent `<1 MiB`、但因 insignificant whitespace使实际 WebSocket text `>1 MiB` 的消息，必须在解析路径中拒绝，不能让 compact-size检查绕过实际输入资源上限。
 
 ## 13. JSON-RPC Request ID Tests
 
@@ -282,14 +282,26 @@ over-max-id-rejected
 lifetime-id-reuse-rejected
 pending-id-collision-across-control-domains-rejected
 late-response-cannot-bind-new-request
+allocator-exhaustion-does-not-wrap
 ```
 
 Main与Subsystem相反方向可以同时使用相同数值 ID。
 
 ## 14. Deadline Profile Tests
 
+按 sender role验证：
+
 ```text
-all-seven-deadlines-present
+Main
+    initialize / activate / suspend / resume / close deadline present
+
+Subsystem
+    call / return deadline present
+```
+
+共同验证：
+
+```text
 min-1000ms
 max-300000ms
 integer-only
@@ -300,6 +312,8 @@ deadline-uses-monotonic-clock
 timeout-still-ambiguous-no-retry
 ```
 
+不要求 Main配置 call/return，也不要求 Subsystem配置五个 Main→Subsystem方法；两端 deadline 数值也无需相同。
+
 使用 virtual/injectable clock，不依赖真实长时间 sleep。
 
 ## 15. Desktop WebSocket Conformance
@@ -308,10 +322,13 @@ timeout-still-ambiguous-no-retry
 one-complete-text-message-one-rpc
 binary-frame-not-frame-v1-carrier
 no-jsonrpc-batch
+sender-emits-compact-json
 ordered-per-direction
 no-adapter-duplicate
 no-adapter-retry
-compact-json-limit
+actual-text-byte-hard-limit
+reference-compact-semantic-limit
+whitespace-cannot-bypass-hard-limit
 oversize-protocol-failure
 connection-loss-propagated
 ```
@@ -370,6 +387,7 @@ no-runtime-frame-version-downgrade
 partial-frame-method-support-not-conformant
 custom-retry-extension-not-conformant
 closed-schema-extension-not-conformant
+nonstandard-envelope-extension-not-conformant
 ```
 
 ## 19. Main System Tests
@@ -438,5 +456,7 @@ Frame v1 Subsystem conformance
 Frame v1 Desktop Transport conformance
 Frame v1 PWA Transport conformance
 ```
+
+每份 conformance report MUST记录 tested `fixtureSetRevision`。
 
 当前文档冻结了 conformance要求；在这些 executable checks实际建立并通过前，不得把“协议已 Frozen”误写成“实现已经 conformant”。
