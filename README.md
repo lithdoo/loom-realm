@@ -11,6 +11,7 @@ LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独�
 - [系统架构总览](./doc/10-architecture/system-overview.md)
 - [正式契约目录](./doc/15-contracts/README.md)
 - [Subsystem Control Protocol v1](./doc/15-contracts/subsystem-control-lifecycle-protocol.md)
+- [Runtime Control Application Profile v1](./doc/15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call Protocol v1](./doc/15-contracts/frame-call-protocol-v1.md)
 - [Frame / Call v1 Conformance Profile](./doc/15-contracts/frame-call-conformance-v1.md)
 - [实施计划目录](./doc/30-implementation/README.md)
@@ -23,6 +24,7 @@ Game Entry
 → declare required Subsystems
 → Main validates / launches Runtime Containers
 → Subsystem Control binds identity / ready / shutdown / failed
+→ Runtime Control Profile binds Control v1 + Frame / Call v1
 → Frame / Call manages Main-owned call/input Context
 → Main publishes committed InputTarget
 → Renderer routes current Frame/Activation input
@@ -34,6 +36,7 @@ Game Entry
 ```text
 Game Package v2 / Desktop Launcher v1       Frozen
 Subsystem Control Protocol v1               Frozen
+Runtime Control Application Profile v1      Frozen
 Frame / Call Protocol v1                    Active / Normative / Frozen
 ```
 
@@ -50,22 +53,31 @@ F  limits / conformance / transport mapping / version completion
 
 Batch 标签只保留为设计历史，不再是兼容等级。
 
+### Runtime Control Profile
+
+第一阶段同一 Main ⇄ Subsystem Control Connection静态组合：
+
+```text
+Subsystem Control v1 + Frame / Call v1
+```
+
+`subsystem.hello.protocolVersions`仍只协商 Subsystem Control；Frame v1不增加自己的 hello/version handshake。hello成功前无 Frame operation；Runtime在该 Profile下 ready表示完整承担 Frame v1 Subsystem角色。
+
 ### Frame v1 completion profile
 
 ```text
 protocol = loomrealm.frame-call / 1
-no JSON-RPC Batch
-Request ID = positive safe integer; sender Connection lifetime no reuse
+no JSON-RPC Batch in Runtime Control Profile v1
+Request ID = positive safe integer; shared sender Connection lifetime no reuse
 max message = 1 MiB
+Desktop actual WebSocket text bytes also hard-capped at 1 MiB
 max JSON depth = 64
 max business JsonValue = 512 KiB
 frameId / activationId <= 128 UTF-8 bytes
 targetSubsystemKey <= 256 UTF-8 bytes
-seven method deadlines = 1s..5min sender-local monotonic profile
+sender-role Frame deadlines = 1s..5min monotonic
 Desktop WebSocket / PWA MessagePort use the same application semantics
 ```
-
-Frame v1 没有独立 `frame.hello/version/capabilities`；`subsystem.hello.protocolVersions`仍只协商 Subsystem Control。
 
 正式兼容要求见 [Frame / Call v1 Conformance Profile](./doc/15-contracts/frame-call-conformance-v1.md)。协议已 Frozen 不等于实现/CI 已通过 conformance fixtures。
 
