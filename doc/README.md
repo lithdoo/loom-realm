@@ -24,19 +24,35 @@ LoomRealm 文档按依赖顺序组织：
 10. [Game Package v2](./15-contracts/game-package-v2.md)
 11. [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
 12. [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
-13. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
-14. [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
-15. [只读 Content API v1](./15-contracts/content-api-v1.md)
-16. [模块设计目录](./20-modules/README.md)
-17. [实施计划目录](./30-implementation/README.md)
+13. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
+14. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
+15. [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
+16. [只读 Content API v1](./15-contracts/content-api-v1.md)
+17. [模块设计目录](./20-modules/README.md)
+18. [实施计划目录](./30-implementation/README.md)
 
 ## 当前核心结论
 
 ```text
-Game Package / Desktop Launcher    Frozen
-Subsystem Control v1               Frozen
-Frame / Call Protocol v1           Active / Normative / Frozen
+Game Package / Desktop Launcher        Frozen
+Subsystem Control v1                   Frozen
+Runtime Control Application Profile v1 Frozen
+Frame / Call Protocol v1               Active / Normative / Frozen
 ```
+
+### Runtime Control Application Profile v1
+
+第一阶段同一 Main ⇄ Subsystem Control Connection组合：
+
+```text
+Subsystem Control Protocol v1
++
+Frame / Call Protocol v1
+```
+
+Profile静态绑定 Frame v1，不新增 runtime handshake。`subsystem.hello.protocolVersions`只协商 Subsystem Control；hello成功前无 Frame operation；Runtime在该 Profile下 ready表示完整承担 Frame v1 Subsystem角色。
+
+同一 sender的 Control + Frame Request共享 connection-lifetime one-shot positive-safe-integer ID namespace，避免不同协议域的迟到 Response互相误匹配。
 
 ### Frame / Call v1
 
@@ -96,11 +112,12 @@ Completion profile：
 
 ```text
 protocol loomrealm.frame-call / 1
-no JSON-RPC Batch
-Request ID positive safe integer / sender Connection lifetime no reuse
+no JSON-RPC Batch in Runtime Control Profile v1
+Request ID positive safe integer / shared sender Connection lifetime no reuse
 message <=1 MiB / JSON depth <=64 / business JsonValue <=512 KiB
+Desktop actual WebSocket text bytes also hard-capped at 1 MiB
 identity/failure field limits
-seven method deadlines 1s..5min sender-local monotonic
+sender-role Frame deadlines 1s..5min monotonic
 Desktop WebSocket / PWA MessagePort same Frame application semantics
 no frame.hello/version/capabilities or runtime downgrade
 ```
@@ -139,6 +156,7 @@ Renderer只使用 Main已 commit current Activation/InputTarget；normal/recover
 - [Game Package v2](./15-contracts/game-package-v2.md)
 - [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
 - [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
+- [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
 - [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
@@ -174,14 +192,15 @@ Renderer只使用 Main已 commit current Activation/InputTarget；normal/recover
 ## 当前推进状态
 
 ```text
-Game Package v2 / Launcher v1       Frozen
-Subsystem Control v1                Frozen
-Frame / Call Protocol v1            Frozen
-Frame v1 executable conformance     Implementation tracking
-Main ⇄ Renderer Control             Next protocol target
-Renderer ⇄ Subsystem Connection     Draft target
-User Input / Render Update          Draft target
-Render State                        Draft target
+Game Package v2 / Launcher v1           Frozen
+Subsystem Control v1                    Frozen
+Runtime Control Application Profile v1  Frozen
+Frame / Call Protocol v1                Frozen
+Frame v1 executable conformance         Implementation tracking
+Main ⇄ Renderer Control                 Next protocol target
+Renderer ⇄ Subsystem Connection         Draft target
+User Input / Render Update              Draft target
+Render State                            Draft target
 ```
 
-明确暂缓：PWA Launcher/Credential/Control Port Bootstrap Profile、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume、Control heartbeat/same-attempt reconnect、lazy/idle recycle、多 Runtime per key、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame v1 runtime version downgrade/capability negotiation。
+明确暂缓：PWA Launcher/Credential/Control Port Bootstrap Profile、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume、Control heartbeat/same-attempt reconnect、lazy/idle recycle、多 Runtime per key、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame runtime version downgrade/capability negotiation。
