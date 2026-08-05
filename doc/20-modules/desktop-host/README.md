@@ -59,11 +59,11 @@ Frame / Call v1 不使用 WebSocket binary message，也不使用 JSON-RPC Batch
 
 底层 WebSocket fragmentation不改变 application message边界。
 
-Adapter MUST保持 per-direction发送顺序，不得 batch/coalesce/duplicate/retry/replay Frame operation。
+Conforming sender MUST输出 compact JSON text。Adapter MUST保持 per-direction发送顺序，不得 batch/coalesce/duplicate/retry/replay Frame operation。
 
 ## 5. JSON / Limit Validation
 
-Desktop adapter与PWA使用同一 Frame validator：plain JSON-only、valid Unicode、finite number/safe integer、closed schema。
+Desktop adapter与PWA使用同一 Frame semantic validator：plain JSON-only、valid Unicode、finite number/safe integer、closed schema。
 
 ```text
 message <= 1 MiB
@@ -74,7 +74,11 @@ frameId / activationId <= 128 UTF-8 bytes
 targetSubsystemKey <= 256 UTF-8 bytes
 ```
 
-WebSocket text按 compact JSON UTF-8实际 bytes判断；outbound message在发送前 preflight。
+Desktop receiver必须在完整 JSON materialization前或过程中对**实际完整 WebSocket text message 的 UTF-8 bytes**执行 `<=1 MiB`硬上限；不能只把消息 parse后重新 compact再判断大小。
+
+同时，解析出的 Frame application value仍须满足 Reference Compact JSON equivalent `<=1 MiB`。因此一个实际 text `>1 MiB` 的 whitespace-heavy消息即使 compact后很小也必须拒绝。
+
+Outbound message在发送前 preflight；sender使用 compact JSON，因此正常 outbound actual bytes与reference compact size一致。
 
 ## 6. Request ID
 
@@ -86,6 +90,8 @@ Connection lifetime never reused
 ```
 
 Main SHOULD为 Subsystem Control + Frame / Call使用 connection-wide allocator；Subsystem独立维护自身 outbound namespace。Request ID不是 operationId。
+
+Allocator耗尽不得 wrap/reuse，应终止/替换 Connection 或进入明确 failure path。
 
 ## 7. Normal Ordering / Publication
 
@@ -101,7 +107,7 @@ ordinary call无 reverse suspend；same-Subsystem call不要求 nested reverse-r
 
 ## 8. Deadline / Retry Boundary
 
-每个 endpoint为自己发送的 Frame Request使用 connection-stable sender-local deadline profile；每项 `1,000..300,000ms`，使用 monotonic clock。
+每个 sender只为自己能够发送的 Frame方法配置 connection-stable deadline：Main配置 initialize/activate/suspend/resume/close；Subsystem配置 call/return。每项 `1,000..300,000ms`，使用 monotonic clock。
 
 ```text
 Success        → known commit
@@ -155,7 +161,7 @@ Runtime在该 profile下进入 ready表示完整实现其 Frame v1角色；部�
 
 Desktop Control adapter必须通过 [Frame / Call v1 Conformance Profile](../../15-contracts/frame-call-conformance-v1.md) 的 Desktop WebSocket + cross-transport适用 fixtures。
 
-协议冻结不等于这些 executable tests已经通过；实现阶段必须实际运行后才能声明 `Frame / Call v1 Transport Adapter Conformant`。
+协议冻结不等于这些 executable tests已经通过；实现阶段必须实际运行后才能声明 `Frame / Call v1 Transport Adapter Conformant`，并记录 tested fixtureSetRevision。
 
 ## 15. Cancellation / Render
 
@@ -167,8 +173,9 @@ v1无 caller-driven `frame.cancel`。`cancelled`只由 active Frame自行 return
 - one Subsystem=one Process；
 - Frame / Call v1 application semantics Frozen；
 - WebSocket text message一一对应 JSON-RPC application message；
+- actual text bytes hard-capped at 1 MiB；
 - no JSON-RPC Batch / binary Frame carrier / application retry；
-- shared JSON/ID/limit/deadline profile；
+- shared JSON/ID/limit semantics；role-specific finite deadlines；
 - failure unwind root/fixed-point只在 Main；
 - failed Runtime Frame可无 Frame RPC ACK retire；
 - accepted outcome preserved / fresh final resume；
