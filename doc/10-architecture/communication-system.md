@@ -117,13 +117,11 @@ JSON-RPC Batch forbidden
 
 ```text
 positive safe integer 1..2^53-1
-Connection lifetime never reused
+Connection lifetime never reused / never wrapped
 no pending collision across Subsystem Control / Frame domains
 ```
 
-两个方向 namespace独立。
-
-Frame / Call Request ID不是 operationId/idempotency key。
+两个方向 namespace独立。Frame Request ID不是 operationId/idempotency key。
 
 ## 8. Frame / Call v1 JSON / Limits
 
@@ -141,17 +139,31 @@ targetSubsystemKey               1..256 UTF-8 bytes
 FrameFailure.message             <=4096 UTF-8 bytes
 ```
 
-WebSocket与MessagePort都按 Reference Compact JSON UTF-8 equivalent计算 size。Structured Clone能力不进入 Frame application type system。
+Reference Compact JSON UTF-8 encoding用于 business value size、PWA whole-message equivalent size和跨 Transport fixture。
+
+Desktop text carrier额外必须对**实际完整 WebSocket text UTF-8 bytes**执行 `<=1 MiB`硬限制；不能只按 parse后 compact equivalent判断。正常 Desktop sender输出 compact JSON，因此 outbound actual/reference size一致。
+
+PWA object没有原始 JSON text bytes，按 reference compact equivalent执行 1 MiB whole-message limit。Structured Clone能力不进入 Frame application type system。
 
 ## 9. Frame Deadline Profile
 
-每个 endpoint为七个 Frame Request选择 sender-local monotonic deadline：
+每个发送角色只为自己能发送的方法选择 connection-stable sender-local monotonic deadline：
 
 ```text
-1,000 .. 300,000 ms per method
+Main
+    initialize / activate / suspend / resume / close
+
+Subsystem
+    call / return
 ```
 
-Profile在 Control Connection生命周期内稳定；不进入 RPC params、不由 Game Package/business input控制、不 per-request negotiation。两端无需使用相同数值。
+每个适用 method：
+
+```text
+1,000 .. 300,000 ms
+```
+
+Deadline不进入 RPC params、不由 Game Package/business input控制、不 per-request negotiation。两端无需使用相同数值。
 
 Timeout语义仍只有 Batch D 的 ambiguous Runtime failure；Transport不得因此重发 operation。
 
@@ -192,7 +204,7 @@ Frame active/suspended/closed/unwound不推导 Render visible/hidden/destroyed�
 
 Desktop：Control/Data=localhost WebSocket。
 
-Frame / Call Control mapping：one complete WebSocket text message = one JSON-RPC application message；binary message不作为 Frame v1 carrier；adapter保持 order/message boundary，不 batch/coalesce/retry/replay Frame operation。
+Frame / Call Control mapping：one complete WebSocket text message = one JSON-RPC application message；binary message不作为 Frame v1 carrier；sender使用 compact JSON；receiver执行 actual text byte hard cap；adapter保持 order/message boundary，不 batch/coalesce/retry/replay Frame operation。
 
 ## 14. PWA MessagePort Binding
 
@@ -201,7 +213,8 @@ PWA Control/Data=MessagePort。PWA Bootstrap Credential / Worker→Control Port 
 ```text
 one postMessage plain JSON-compatible object = one JSON-RPC application message
 no Transferable dependency
-same JSON/limit/deadline/transaction/failure semantics as Desktop
+reference compact equivalent size limits
+same JSON/deadline/transaction/failure semantics as Desktop
 ```
 
 ## 15. Version Binding
@@ -234,7 +247,7 @@ Render
 
 Frame v1兼容性由 [Frame / Call Protocol v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md) 判断。
 
-Desktop/PWA adapter必须通过相同 abstract golden trace；Transport差异不能改变 Frame schema、commit point、timeout meaning、unwind root、outcome或 Activation。
+Desktop/PWA adapter必须通过相同 abstract golden trace；Transport差异不能改变 Frame schema、commit point、timeout meaning、unwind root、outcome或 Activation。正式报告记录 tested fixtureSetRevision。
 
 ## 18. Security / Authority
 
