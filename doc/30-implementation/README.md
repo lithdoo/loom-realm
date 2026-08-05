@@ -19,9 +19,22 @@
 
 ## 当前已冻结实施前提
 
-第一阶段实现可以直接依赖 Game Package v2、Desktop Node.js Launcher v1、Subsystem Control v1、**Frame / Call Protocol v1** 和 Content API v1。
+第一阶段实现可以直接依赖：
 
 ```text
+Game Package v2 / Desktop Launcher v1
+Subsystem Control Protocol v1
+Runtime Control Application Profile v1
+Frame / Call Protocol v1
+Content API v1
+```
+
+```text
+Runtime Control Application Profile v1
+    Subsystem Control v1 + Frame / Call v1
+    shared sender/Connection Request-ID namespace
+    static Frame version binding
+
 Frame / Call Protocol v1
     Protocol identity  loomrealm.frame-call
     Version            1
@@ -58,17 +71,19 @@ failedRuntimeKeys
 → fresh final Caller resume or empty Stack
 ```
 
-### Completion Profile
+### Completion / Runtime Control Profile
 
 ```text
 plain JSON application model
-no JSON-RPC Batch
-Request ID positive safe integer / sender Connection lifetime no reuse
+no JSON-RPC Batch on Runtime Control Profile v1 Connection
+Request ID positive safe integer / shared sender Connection lifetime no reuse
 message <=1 MiB / depth <=64 / business JsonValue <=512 KiB
+Desktop actual WebSocket text bytes also <=1 MiB
 frameId/activationId <=128 UTF-8 bytes
 targetSubsystemKey <=256 UTF-8 bytes
-seven method deadlines 1000..300000ms sender-local monotonic
-Desktop WebSocket / PWA MessagePort same application semantics
+Main five Frame deadlines 1000..300000ms monotonic
+Subsystem call/return deadlines 1000..300000ms monotonic
+Desktop WebSocket / PWA MessagePort same Frame application semantics
 no Frame hello/version downgrade
 ```
 
@@ -83,23 +98,25 @@ manifest / harness
 normalized authority trace
 fault injection
 JSON/limit boundary fixtures
-Request ID fixtures
+Request ID / shared Control-domain allocator fixtures
 deadline virtual-clock fixtures
 Desktop/PWA transport equivalence fixtures
+Runtime Control Profile integration fixtures
 ```
 
-在 executable fixtures实际通过之前，只能说“协议已 Frozen”，不能声称具体实现已经 v1 conformant。
+在 executable fixtures实际通过之前，只能说“协议/Profile已 Frozen”，不能声称具体实现已经 v1 conformant。正式 report必须记录 tested fixtureSetRevision。
 
 ## 实施原则
 
 1. Frozen Contract先写 conformance fixture，再写/接入两端实现；
 2. Launcher / Control / Frame / Render / Content能力边界不得因代码便利重新合并；
-3. Main RuntimeFailureUnwindCoordinator是唯一 Stack recovery authority；
-4. Subsystem SDK不得本地恢复 lower Frame；
-5. Renderer/Transport不得计算 unwind root或修改 Frame recovery；
-6. Desktop/PWA必须共享 Frame JSON/limit/ID/deadline validator语义；
-7. 实施发现协议问题时先更新正式 Contract/新 ADR，不增加 Batch G；
-8. 路线图只追踪工作，不定义正式行为。
+3. Runtime Control Profile只组合协议，不改变 Subsystem Control/Frame各自方法语义；
+4. Main RuntimeFailureUnwindCoordinator是唯一 Stack recovery authority；
+5. Subsystem SDK不得本地恢复 lower Frame；
+6. Renderer/Transport不得计算 unwind root或修改 Frame recovery；
+7. Desktop/PWA必须共享 Frame JSON/limit/ID/deadline validator语义；
+8. 实施发现协议问题时先更新正式 Contract/新 ADR，不增加 Batch G；
+9. 路线图只追踪工作，不定义正式行为。
 
 ## 当前实施顺序
 
@@ -107,6 +124,8 @@ Desktop/PWA transport equivalence fixtures
 Game Package v2 / Desktop Launcher v1        Frozen
     ↓
 Subsystem Control Protocol v1                Frozen
+    ↓
+Runtime Control Application Profile v1       Frozen
     ↓
 Frame / Call Protocol v1                     Frozen
     ↓
