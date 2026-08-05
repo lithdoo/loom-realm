@@ -522,7 +522,7 @@ Ambiguous MUST NOT被猜测或降级成 recoverable Error。
 
 ## 25. Finite Deadline / No Retry
 
-全部七个 Frame Request MUST有 finite deadline。Batch F定义 profile limits。
+全部七个 Frame Request MUST有 finite deadline。Batch F定义 sender-role profile limits。
 
 v1 MUST NOT对 state-changing Frame operation做 application retry/replay/reconnect replay；无 `operationId/idempotencyKey/dedup journal/replay cache`。
 
@@ -745,6 +745,8 @@ Batch A-F 不作为运行时版本号或 capability bit。
 
 Frame / Call v1 MUST NOT使用 JSON-RPC Batch Array，也不定义 Frame Notification。
 
+Frame v1 Request envelope只能依赖标准 JSON-RPC成员：`jsonrpc/id/method/params`；Response只能依赖 `jsonrpc/id/result` 或 `jsonrpc/id/error`，其中 error遵守 JSON-RPC标准结构与本协议冻结的 semantic data。非标准 top-level成员不得改变 Frame v1语义；正式 conformance sender不得通过它们扩展协议。
+
 ### Request ID
 
 所有 outbound JSON-RPC Request在一条承载 Frame / Call v1 的 Control Connection上遵守：
@@ -759,6 +761,8 @@ range    = 1 .. 9,007,199,254,740,991 (2^53-1)
 同一发送方在同一 Connection 生命周期内 MUST NOT复用 outbound Request ID，即使旧 Request已经 Success/Error/Timeout。两个方向的 sender-local ID namespace独立；Main和Subsystem MAY同时使用相同数值。
 
 因为 Subsystem Control与Frame / Call共享 Connection，同一发送方还 MUST 避免跨协议域 pending ID collision；SHOULD 使用 connection-wide monotonic allocator。
+
+如果 allocator耗尽，MUST NOT wrap/reuse旧 ID；实现必须终止/替换该 Connection或进入明确 failure path。
 
 Request ID只做 correlation，不是 operation identity/idempotency key。
 
@@ -796,9 +800,9 @@ JSON text中的 duplicate object member name MUST视为 protocol-invalid；PWA o
 
 更大整数必须作为 string传输。Negative zero在 reference encoding中规范为 `0`。
 
-## 39. Reference Compact JSON Encoding
+## 39. Reference Compact JSON Encoding / Carrier Size
 
-为统一 WebSocket与MessagePort limits，定义 Reference Compact JSON Encoding：
+定义 Reference Compact JSON Encoding：
 
 ```text
 validated plain JSON value
@@ -807,7 +811,24 @@ validated plain JSON value
 → UTF-8
 ```
 
-Whole-message 与 standalone `JsonValue` byte size都按该 reference encoding计算。PWA即使实际使用 Structured Clone，也 MUST按此方式验证 equivalent size。
+它用于：
+
+- standalone business `JsonValue` byte size；
+- PWA MessagePort 等非文本 carrier 的 whole-message equivalent size；
+- transport-independent conformance fixture。
+
+Conforming Desktop Frame sender MUST发送 compact JSON text。
+
+Desktop/WebSocket receiver MUST在完整 JSON materialization前或过程中对**实际完整 text message 的 UTF-8 encoded bytes**执行 `<=1 MiB`硬限制。即使去掉 insignificant whitespace后 compact equivalent低于1 MiB，只要实际 text message超过1 MiB也必须拒绝。
+
+因此 Desktop text message同时必须满足：
+
+```text
+actual UTF-8 text bytes       <= 1 MiB
+reference compact equivalent  <= 1 MiB
+```
+
+PWA MessagePort没有原始 JSON text bytes，因此 whole-message size按 reference compact equivalent验证。
 
 JSON container nesting depth：root JSON-RPC object depth=`1`；每进入一个 array/object增加 `1`；scalar不增加 depth。
 
@@ -828,7 +849,9 @@ FrameFailure.code                    1..128 ASCII chars
 FrameFailure.message                 0..4096 UTF-8 bytes
 ```
 
-每个独立 business payload受 512 KiB limit：
+Whole-message 1 MiB limit按 §39 carrier规则执行。
+
+每个独立 business payload受 512 KiB reference-compact limit：
 
 ```text
 frame.initialize.input
@@ -837,8 +860,6 @@ FrameOutcome.completed.value
 FrameFailure.data
 FRAME_INITIALIZE_REJECTED.failure.data
 ```
-
-整个 RPC同时受 1 MiB message limit。
 
 `FrameFailure.code` MUST匹配：
 
@@ -852,17 +873,40 @@ FRAME_INITIALIZE_REJECTED.failure.data
 
 ## 41. Outbound Preflight / Invalid Wire
 
-Conforming Main和Subsystem SDK MUST在发送前验证自己生成的 Frame message，包括 schema、JSON model与limits。
+Conforming Main和Subsystem SDK MUST在发送前验证自己生成的 Frame message，包括 schema、JSON model、ID与limits。
 
 如果 Request envelope可安全解析但 params违反 Frozen field/JsonValue limit，接收方使用 `-32602 Invalid params`，并按 Batch D protocol-fatal处理。
 
-如果 application message oversize、JSON invalid、Unicode invalid、Batch Array或其他情况使安全解析/Request correlation不可保证，receiver MAY直接关闭 Control Connection并进入 `FRAME_CONTROL_PROTOCOL_ERROR` failure path。
+如果 application message actual carrier size超限、reference equivalent超限、JSON invalid、Unicode invalid、duplicate member、Batch Array或其他情况使安全解析/Request correlation不可保证，receiver MAY直接关闭 Control Connection并进入 `FRAME_CONTROL_PROTOCOL_ERROR` failure path。
 
 Invalid Response（id/result/error/schema/limit不合法）不能再回复 Error：request owner直接进入 protocol-fatal Runtime failure path。
 
 ## 42. Deadline Profile v1
 
-每个 endpoint在一条 Control Connection上选择一组：
+七个 Frame Request 都必须由其**发送角色**使用 finite deadline：
+
+```text
+Main outbound
+    frame.initialize
+    frame.activate
+    frame.suspend
+    frame.resume
+    frame.close
+
+Subsystem outbound
+    frame.call
+    frame.return
+```
+
+每个适用方法的 deadline MUST是整数毫秒：
+
+```text
+1,000 <= value <= 300,000
+```
+
+每个 endpoint在首次发送其 Frame Request前确定自己的 outbound deadline policy；该 Connection生命周期内保持稳定。
+
+实现 MAY 使用统一的完整七字段配置结构：
 
 ```ts
 interface FrameCallDeadlineProfileV1 {
@@ -876,13 +920,7 @@ interface FrameCallDeadlineProfileV1 {
 }
 ```
 
-每项 MUST是整数毫秒且：
-
-```text
-1,000 <= value <= 300,000
-```
-
-Profile在该 Connection上首次 Frame Request前确定，Connection生命周期内稳定。
+但该完整结构是实现便利，不表示 Main MUST配置其不会发送的 `call/return`，也不表示 Subsystem MUST配置其不会发送的五个 Main→Subsystem方法。
 
 Deadline是 sender-local policy：
 
@@ -912,6 +950,8 @@ One complete WebSocket **text message** = exactly one JSON-RPC application messa
 
 Frame / Call application message MUST NOT依赖 binary WebSocket message。
 
+Sender MUST产生 compact JSON text；receiver MUST执行 §39 actual UTF-8 text hard cap 与 reference semantic limits。
+
 Adapter MUST保持 per-direction order，不得 batch/coalesce/duplicate/retry/replay Frame operation。
 
 ## 44. PWA MessagePort Binding
@@ -922,7 +962,7 @@ One `postMessage` payload = exactly one JSON-RPC application message object。
 
 Payload MUST是 plain JSON-compatible object，Frame / Call MUST NOT依赖 Transferable；不得通过 Structured Clone传输 BigInt、ArrayBuffer、MessagePort、Blob等非 JSON capability。
 
-PWA adapter MUST在发送和接收时执行同一 Frame JSON/schema/limit validator，并使用 Reference Compact JSON Encoding计算 size。
+PWA adapter MUST在发送和接收时执行同一 Frame JSON/schema/limit validator，并使用 Reference Compact JSON Encoding计算 whole-message equivalent size。
 
 ## 45. Transport-independent Semantics
 
@@ -964,7 +1004,7 @@ v1没有 Frame version downgrade。若实际 implementation出现 method/schema/
 
 v1没有 `1.1/1.2` wire compatibility层。
 
-不兼容改变（method/field/ownership/commit/error/unwind/ordering）需要未来明确新版本。
+不兼容改变（method/field/ownership/commit/error/unwind/ordering/limit semantics）需要未来明确新版本。
 
 Closed schema继续有效：实现不得给现有 v1 method私加 `metadata/version/retry/cancel/capability` 字段。
 
@@ -977,6 +1017,8 @@ Closed schema继续有效：实现不得给现有 v1 method私加 `metadata/vers
 它冻结：fixture format、normalized state、fault vocabulary、A-F required fixture catalog、Desktop/PWA equivalence与正式 conformance claim规则。
 
 Fixture coverage revision MAY增长而不改变 protocol version，只要新增 fixture只验证现有 Frozen v1行为。
+
+正式 conformance report MUST记录 tested `fixtureSetRevision`。较旧 corpus的 pass不能自动视为通过较新 revision。
 
 正式兼容声明只能是完整角色 conformance；不允许“v1 except recovery / Batch C compatible / v1 with custom retry”等部分兼容声明。
 
@@ -1004,16 +1046,16 @@ Frame / Call Protocol v1 最终不变量：
 16. cleanup failure fixed-point扩展 failed set/root；
 17. root无 accepted outcome使用 `SUBSYSTEM_RUNTIME_FAILED`；surviving Caller只 fresh-resume；
 18. Frame unwind不控制 Runtime/Render/Data lifecycle；
-19. no JSON-RPC Batch；Request ID=positive safe integer且 sender-side Connection lifetime不复用；
+19. no JSON-RPC Batch；Request ID=positive safe integer且 sender-side Connection lifetime不复用/不wrap；
 20. plain JSON model；finite binary64 number；valid Unicode scalar strings；
-21. message/depth/business-payload/identity/failure字段服从 Frozen limits；
-22. 七方法 deadline均 `1s..5min` sender-local monotonic policy；
+21. text carrier actual byte hard cap + reference compact semantic size；depth/business-payload/identity/failure字段服从 Frozen limits；
+22. 每个发送角色的 Frame方法 deadline均 `1s..5min` sender-local monotonic policy；
 23. Desktop one WebSocket text message = one RPC；PWA one plain JSON `postMessage` object = one RPC；
 24. PWA Structured Clone不能扩大 Frame value model；
 25. Desktop/PWA必须保持相同 Frame semantic trace；
 26. `subsystem.hello.protocolVersions`仍只协商 Subsystem Control；Frame v1无独立 handshake/downgrade；
 27. closed schema不允许私有兼容扩展改变 v1 semantics；
-28. Conformance Profile是正式兼容判断依据；
+28. Conformance Profile + tested fixtureSetRevision是正式兼容判断依据；
 29. Batch A-F只是历史溯源，不是独立兼容版本；
 30. 整个 Frame / Call Protocol v1 = Active / Normative / Frozen。
 
