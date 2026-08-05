@@ -23,6 +23,16 @@ LoomRealm Frame / Call v1 Transport Adapter Conformant
 
 完整产品必须通过其承担的全部角色。
 
+正式 conformance report MUST 至少记录：
+
+```text
+protocol = loomrealm.frame-call
+protocolVersion = 1
+fixtureSetRevision = <tested revision>
+role = main | subsystem | transport
+result = pass
+```
+
 不得把以下措辞作为正式互操作声明：
 
 ```text
@@ -106,15 +116,7 @@ interface FixtureInputTarget {
 }
 ```
 
-Trace 还需表达：
-
-```text
-Stack bottom→top
-Runtime ready / failed state
-InputTarget | null
-failedRuntimeKeys when recovery active
-pending Request/fault events when relevant
-```
+Trace 还需表达：Stack bottom→top、Runtime ready/failed、InputTarget|null、failedRuntimeKeys、pending Request/fault events when relevant。
 
 ## 5. Fault Injection Vocabulary
 
@@ -261,7 +263,8 @@ session-termination-no-forced-resume
 每个限制 MUST 覆盖 exactly-at-limit 与 one-over-limit：
 
 ```text
-message-1mib
+reference-message-1mib
+websocket-actual-text-1mib
 json-depth-64
 business-jsonvalue-512kib
 json-string-256kib
@@ -290,23 +293,54 @@ jsonrpc-batch-rejected
 invalid-response-is-protocol-fatal
 ```
 
-## 12. Deadline Profile Fixtures
-
-至少：
+Message size fixture 必须区分：
 
 ```text
-deadline-all-seven-methods-present
+Desktop text carrier
+    actual complete WebSocket text UTF-8 bytes <= 1 MiB
+    AND reference compact equivalent <= 1 MiB
+
+PWA object carrier
+    reference compact equivalent <= 1 MiB
+```
+
+应包含“compact后小于1 MiB、但实际 WebSocket text因大量 insignificant whitespace超过1 MiB”的拒绝 fixture，证明实际 carrier hard cap不能被 compact-size绕过。
+
+## 12. Deadline Profile Fixtures
+
+Deadline fixture按 sender role验证：
+
+### Main role
+
+```text
+main-initialize-deadline-present
+main-activate-deadline-present
+main-suspend-deadline-present
+main-resume-deadline-present
+main-close-deadline-present
+```
+
+### Subsystem role
+
+```text
+subsystem-call-deadline-present
+subsystem-return-deadline-present
+```
+
+共同验证：
+
+```text
 deadline-min-1000ms
 deadline-max-300000ms
 deadline-integer-only
-deadline-immutable-for-connection
+deadline-stable-for-connection
 deadline-not-in-rpc-params
 deadline-not-game-package-controlled
 deadline-uses-monotonic-clock
 timeout-remains-ambiguous-no-retry
 ```
 
-Fixture 不要求 Main 与 Subsystem 使用相同 deadline 数值。
+Fixture 不要求 Main 与 Subsystem 使用相同 deadline 数值，也不要求某角色配置自己永远不会发送的方法。
 
 ## 13. Request ID Fixtures
 
@@ -322,6 +356,7 @@ null-id-rejected
 lifetime-reuse-rejected
 pending-collision-across-control-domains-rejected
 late-response-cannot-match-new-operation
+allocator-exhaustion-does-not-wrap
 ```
 
 Main→Subsystem 与 Subsystem→Main 的 ID namespace独立，因此双方 MAY 同时存在相同数值的 outbound ID。
@@ -337,7 +372,10 @@ ordered-per-direction
 no-adapter-duplicate
 no-adapter-retry
 no-jsonrpc-batch
-compact-json-size-limit
+sender-emits-compact-json
+actual-text-byte-hard-limit
+reference-compact-semantic-limit
+whitespace-cannot-bypass-actual-byte-limit
 oversize-protocol-failure
 connection-loss-propagated
 ```
@@ -364,7 +402,7 @@ no-adapter-retry
 connection-loss-runtime-lifecycle-mapping-by-profile
 ```
 
-PWA Bootstrap Credential / Worker creation 如何建立 Control MessagePort 是独立 Profile，不属于 Frame / Call conformance。
+PWA Bootstrap Credential / Worker creation 如何建立 Control MessagePort 是独立 Profile，不属于 Frame / Call application conformance。
 
 ## 16. Cross-transport Semantic Equivalence
 
@@ -408,22 +446,11 @@ closed-schema-extension-not-conformant
 
 新增 fixture MAY 增加 `fixtureSetRevision` 而保持 Frame / Call protocolVersion=1，前提是新增 fixture 只验证已经由 Frozen Contract 决定的行为。
 
-如果为了让 fixture通过必须改变：
+如果为了让 fixture通过必须改变：合法 wire、字段语义、commit point、error classification、timeout/no-retry、failure unwind或 Frozen limits，则不能只升级 fixture revision，必须先走新的协议/ADR兼容性决策。
 
-```text
-合法 wire
-字段语义
-commit point
-error classification
-timeout/no-retry
-failure unwind
-```
-
-则不能只升级 fixture revision，必须先走新的协议/ADR兼容性决策。
+正式 conformance report MUST写明 tested `fixtureSetRevision`。较旧 revision的 pass记录不能自动宣称通过较新 corpus。
 
 ## 19. 推荐实现目录
-
-实现层建议：
 
 ```text
 packages/frame-call-protocol/
@@ -450,6 +477,8 @@ Frame / Call v1 conformance 的判断标准是：
 Frozen Contract
 +
 本 Profile 的适用 fixture catalog
++
+记录明确的 fixtureSetRevision
 +
 相同 fault 下的相同 authority outcome
 ```
