@@ -7,6 +7,7 @@
 > 稳定程度：Frozen  
 > 主要定义：ready Runtime 中 Frame/Input Context 的身份、生命周期、Activation、七方法 wire、调用事务、错误/超时、Runtime failure unwind、limits、Transport binding 与 conformance  
 > 依赖：[栈式运行系统](../10-architecture/stack-runtime-system.md)、[模块子系统模型](../10-architecture/subsystem-model.md)、[Subsystem Control Protocol v1](./subsystem-control-lifecycle-protocol.md)  
+> 组合 Profile：[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
 > Conformance：[Frame / Call Protocol v1 Conformance Profile](./frame-call-conformance-v1.md)  
 > 决策记录：[ADR 0010：Batch A](../decisions/0010-freeze-frame-call-protocol-v1-batch-a.md)、[ADR 0011：Batch B](../decisions/0011-freeze-frame-call-protocol-v1-batch-b.md)、[ADR 0012：Batch C](../decisions/0012-freeze-frame-call-protocol-v1-batch-c.md)、[ADR 0013：Batch D](../decisions/0013-freeze-frame-call-protocol-v1-batch-d.md)、[ADR 0014：Batch E](../decisions/0014-freeze-frame-call-protocol-v1-batch-e.md)、[ADR 0015：Batch F](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)  
 > 最近复核：2026-08-05
@@ -741,15 +742,17 @@ Batch A-F 不作为运行时版本号或 capability bit。
 
 ## 37. JSON-RPC Application Profile
 
-每个 Control Transport application unit MUST承载 exactly one JSON-RPC Request或Response。
+每个 **Frame / Call application message** MUST是 exactly one JSON-RPC Request或Response；七个 Frame method全部是 Request，因此 Frame / Call自身不定义 Notification。
 
-Frame / Call v1 MUST NOT使用 JSON-RPC Batch Array，也不定义 Frame Notification。
+共享 Control Connection还承载 Subsystem Control v1 的 `subsystem.status` Notification；该组合由 [Runtime Control Application Profile v1](./runtime-control-profile-v1.md) 定义。该 Notification不是 Frame / Call message，不与本节“Frame method全部为 Request”的规则冲突。
+
+Runtime Control Application Profile v1 不使用 JSON-RPC Batch Array。
 
 Frame v1 Request envelope只能依赖标准 JSON-RPC成员：`jsonrpc/id/method/params`；Response只能依赖 `jsonrpc/id/result` 或 `jsonrpc/id/error`，其中 error遵守 JSON-RPC标准结构与本协议冻结的 semantic data。非标准 top-level成员不得改变 Frame v1语义；正式 conformance sender不得通过它们扩展协议。
 
 ### Request ID
 
-所有 outbound JSON-RPC Request在一条承载 Frame / Call v1 的 Control Connection上遵守：
+Frame / Call v1 在组合 Profile下使用 sender-local、Control-Connection-lifetime Request ID namespace：
 
 ```text
 ID type  = positive integer
@@ -760,7 +763,7 @@ range    = 1 .. 9,007,199,254,740,991 (2^53-1)
 
 同一发送方在同一 Connection 生命周期内 MUST NOT复用 outbound Request ID，即使旧 Request已经 Success/Error/Timeout。两个方向的 sender-local ID namespace独立；Main和Subsystem MAY同时使用相同数值。
 
-因为 Subsystem Control与Frame / Call共享 Connection，同一发送方还 MUST 避免跨协议域 pending ID collision；SHOULD 使用 connection-wide monotonic allocator。
+因为 Subsystem Control与Frame / Call共享 Connection，同一发送方的 Request ID必须按 [Runtime Control Application Profile v1](./runtime-control-profile-v1.md) 避免跨协议域 collision；SHOULD 使用 connection-wide monotonic allocator。
 
 如果 allocator耗尽，MUST NOT wrap/reuse旧 ID；实现必须终止/替换该 Connection或进入明确 failure path。
 
@@ -992,7 +995,7 @@ frame.version
 frame.capabilities
 ```
 
-Frame version由 Host/runtime deployment Profile静态绑定，而不是在当前 Connection上单独协商。
+Frame version由 [Runtime Control Application Profile v1](./runtime-control-profile-v1.md) / Host deployment静态绑定，而不是在当前 Connection上单独协商。
 
 在声明参与 Frame / Call v1 的 Runtime Profile中，Runtime进入 `ready`表示它完整支持自己角色所需的 Frame / Call v1，不允许“ready但只实现部分方法/Batch”。
 
@@ -1046,14 +1049,14 @@ Frame / Call Protocol v1 最终不变量：
 16. cleanup failure fixed-point扩展 failed set/root；
 17. root无 accepted outcome使用 `SUBSYSTEM_RUNTIME_FAILED`；surviving Caller只 fresh-resume；
 18. Frame unwind不控制 Runtime/Render/Data lifecycle；
-19. no JSON-RPC Batch；Request ID=positive safe integer且 sender-side Connection lifetime不复用/不wrap；
+19. Runtime Control Profile v1无 JSON-RPC Batch；Request ID=positive safe integer且 sender-side Connection lifetime不复用/不wrap；
 20. plain JSON model；finite binary64 number；valid Unicode scalar strings；
 21. text carrier actual byte hard cap + reference compact semantic size；depth/business-payload/identity/failure字段服从 Frozen limits；
 22. 每个发送角色的 Frame方法 deadline均 `1s..5min` sender-local monotonic policy；
 23. Desktop one WebSocket text message = one RPC；PWA one plain JSON `postMessage` object = one RPC；
 24. PWA Structured Clone不能扩大 Frame value model；
 25. Desktop/PWA必须保持相同 Frame semantic trace；
-26. `subsystem.hello.protocolVersions`仍只协商 Subsystem Control；Frame v1无独立 handshake/downgrade；
+26. `subsystem.hello.protocolVersions`仍只协商 Subsystem Control；Frame v1由 Runtime Control Profile静态绑定，无独立 handshake/downgrade；
 27. closed schema不允许私有兼容扩展改变 v1 semantics；
 28. Conformance Profile + tested fixtureSetRevision是正式兼容判断依据；
 29. Batch A-F只是历史溯源，不是独立兼容版本；
