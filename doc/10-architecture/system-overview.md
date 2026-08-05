@@ -5,9 +5,9 @@
 > 稳定程度：Evolving  
 > 主要定义：顶层系统划分、状态所有权、运行承载、启动拓扑和系统关系  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)  
-> 最近复核：2026-08-04
+> 最近复核：2026-08-05
 
-本文描述系统职责与协作关系；精确 wire、transaction、error 与 failure-unwind semantics 由 `15-contracts` 定义。
+本文描述系统职责与协作关系；精确 wire、transaction、error、failure-unwind、limit 与 conformance semantics 由 `15-contracts` 定义。
 
 ## 1. 顶层结构
 
@@ -19,6 +19,7 @@ LoomRealm Main
 ├── Frame Registry / Stack / Activation
 ├── Frame Transaction + Failure Unwind Coordinator
 ├── Frame Deadline / Error Classifier
+├── Frame Protocol Validator / Conformance Boundary
 ├── InputTarget / Renderer Control Authority
 └── Data Connection Authority
     │
@@ -60,16 +61,17 @@ validate descriptors
 
 正常结束属于 Subsystem Control：Main shutdown intent→shutdown→Supervisor confirms exit→stopped。无 shutdown intent的 exit/Control loss或 Runtime-reported failed进入 terminal failure。
 
-## 4. Frame / Call 状态
+## 4. Frame / Call v1
+
+Frame / Call Protocol v1 已整体冻结：
 
 ```text
-Batch A  Identity / Authority / Lifecycle / Activation       Frozen
-Batch B  RPC Wire Schema / Direction / Local Semantics        Frozen
-Batch C  Transaction / Commit Barrier / Rollback              Frozen
-Batch D  Error / timeout / retry / cancellation               Frozen
-Batch E  Runtime failure unwind                                Frozen
-Batch F  Limits / fixtures / profile/version completion       Next
+Protocol   loomrealm.frame-call / 1
+Status     Active / Normative
+Stability  Frozen
 ```
+
+设计历史 A-F 分别冻结 identity、wire、transaction、error/timeout、Runtime failure unwind 与 completion profile；Batch 不再是兼容等级。
 
 Wire exactly seven Requests：
 
@@ -121,8 +123,6 @@ v1 no automatic retry/replay。Recoverable只有 call target not-found/unavailab
 
 ## 7. Runtime Failure Unwind
 
-Batch E 将 Runtime failure统一成 Main-owned fixed-point Stack recovery：
-
 ```text
 failedRuntimeKeys
 → lowest live failed-runtime Frame = root
@@ -138,17 +138,40 @@ failedRuntimeKeys
    or Stack empty
 ```
 
-同一个 Runtime在 Stack出现多次时取最低 occurrence，不能只删除当前/最近 Frame。
+同一 Runtime在 Stack出现多次时取最低 occurrence。
 
-## 8. Failure Recovery Safety
+## 8. Frame v1 Completion / Interop Boundary
+
+Frame / Call v1 还冻结：
+
+```text
+one JSON-RPC application message per transport unit
+no JSON-RPC Batch
+Request ID = positive safe integer
+sender-side Connection lifetime no Request ID reuse
+max message = 1 MiB
+max JSON depth = 64
+max business JsonValue = 512 KiB
+frameId/activationId <= 128 UTF-8 bytes
+targetSubsystemKey <= 256 UTF-8 bytes
+all seven method deadlines = 1s..5min sender-local monotonic profile
+```
+
+PWA Structured Clone不能扩大 Frame JSON type model。Desktop WebSocket与PWA MessagePort必须保持同一 application semantics和 conformance trace。
+
+Frame v1无独立 `frame.hello/version/capabilities`；`subsystem.hello.protocolVersions`继续只协商 Subsystem Control。Frame version由 Host/runtime deployment profile静态绑定。
+
+正式 compatibility判断见 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
+
+## 9. Failure Recovery Safety
 
 Failure barrier建立后 affected InputTarget清空；Renderer不得恢复旧 Activation。
 
 accepted terminal outcome不可被 Runtime crash覆盖。surviving Caller只获得 fresh Activation，resume ACK后才可发布。Resume失败会让 Caller Runtime也进入 failed set并重新计算 root。
 
-failed Runtime Frame可以无 `frame.close ACK` logical retire；healthy Runtime Frame仍使用 best-effort close。Recovery不新增 `frame.abort/frame.unwind/replay/resync`。
+failed Runtime Frame可以无 `frame.close ACK` logical retire；healthy Runtime Frame仍 best-effort close。Recovery不新增 `frame.abort/frame.unwind/replay/resync`。
 
-## 9. Runtime / Frame / Render 承载
+## 10. Runtime / Frame / Render 承载
 
 ```text
 one Subsystem → one Runtime Container
@@ -160,12 +183,12 @@ one Runtime   → 0..N Frame/Input Context
 
 Frame transaction/unwind不隐式 create/destroy Runtime/Data Connection/Render。
 
-## 10. 通信平面
+## 11. 通信平面
 
 ```text
 Subsystem ⇄ Main Control
     Subsystem Control v1          Frozen
-    Frame / Call A-E              Frozen
+    Frame / Call v1               Frozen
 
 Renderer ⇄ Main Control
     Draft target; must obey Frame publication/recovery barriers
@@ -176,7 +199,7 @@ Subsystem ⇄ Renderer Data
 
 Renderer不是 Frame RPC participant。User Input依赖 current Frame/Activation；Render Update使用独立 Render identity。
 
-## 11. 状态所有权
+## 12. 状态所有权
 
 ```text
 Main
@@ -184,10 +207,12 @@ Main
     Frame identity / caller / lifecycle / outcome / Stack
     transaction / error classification / failure unwind
     Activation / InputTarget
+    Frame v1 outbound validation / deadline profile
 
 Subsystem
     business state
     Frame/Input Context + mutation gate
+    Frame v1 outbound validation / deadline profile
     Render Registry / Render State
 
 Renderer
@@ -195,17 +220,19 @@ Renderer
     Data/Input/Render presentation state
 ```
 
-## 12. Desktop / PWA
+## 13. Desktop / PWA
 
-Desktop Control/Data=localhost WebSocket；PWA=MessagePort。PWA Profile尚未最终冻结，但必须保持 Frame A-E应用语义，包括 normal ordering、ACK-before-publish、finite deadline/no retry、lowest-root whole-suffix unwind、fixed-point expansion与 outcome preservation。
+Desktop Control/Data=localhost WebSocket；PWA=MessagePort。
 
-## 13. 核心不变量
+Frame / Call v1 application mapping已经冻结；PWA Launcher/credential/Control MessagePort bootstrap仍是独立待冻结 Profile。Transport建立后必须保持 Frame v1 JSON/limit/deadline/no-retry/transaction/unwind semantics。
+
+## 14. 核心不变量
 
 1. Process/Worker isolation granularity=Subsystem；
 2. Frame=Main-owned call/input Context；
 3. identity/Activation不复用；
 4. Caller/Stack/transaction/recovery authority=Main；
-5. exactly seven Requests；
+5. Frame v1 exactly seven Requests；
 6. ordinary call无 reverse suspend；
 7. Response-before-dependent-RPC；ACK-before-publication；
 8. ambiguous/divergence/protocol error Runtime-fatal/no retry；
@@ -214,5 +241,7 @@ Desktop Control/Data=localhost WebSocket；PWA=MessagePort。PWA Profile尚未�
 11. cleanup failure fixed-point扩大 root；
 12. accepted outcome不覆盖；surviving Caller fresh resume；
 13. no caller cancel / no recovery abort-unwind wire；
-14. Render lifecycle完全由 Subsystem控制；
-15. stopped只来自 actual Runtime termination observation。
+14. Frame v1 JSON/ID/limits/deadline/transport mapping是正式兼容边界；
+15. Frame v1无独立 runtime version negotiation；
+16. Render lifecycle完全由 Subsystem控制；
+17. stopped只来自 actual Runtime termination observation。
