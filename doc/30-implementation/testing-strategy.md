@@ -3,38 +3,69 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：协议、Launcher、Frame transaction/error/recovery、Transport、内容兼容和端到端测试分层  
-> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
-> 最近复核：2026-08-04
+> 主要定义：协议、Launcher、Frame transaction/error/recovery/limits、Transport、内容兼容和端到端测试分层  
+> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)  
+> 最近复核：2026-08-05
 
 ## 1. 测试目标
 
 测试不仅验证实现正确，还必须阻止实现破坏 Frozen Contract。
 
-当前重点：Launcher/Subsystem Control；Frame Batch A identity/lifecycle/Activation；B exact wire；C transaction/publication；D error/timeout/no-retry；E deterministic Runtime-failure unwind；Frame/Render/Data independence。
+Frame / Call Protocol v1 的设计与 conformance catalog 已全部 Frozen；当前实施任务是把 catalog落成 executable fixture/harness，并分别验证 Main、Subsystem、Desktop/PWA Transport adapter。
 
 ## 2. 测试层次
 
 ```text
-Schema / Contract Test
-→ State Machine / Transaction Fixture
+Schema / JSON Profile Test
+→ Identity / State Machine Fixture
+→ Transaction Golden Trace
 → Error / Timeout Fixture
 → Runtime Failure Unwind Fixture
+→ Limit / Request ID / Deadline Fixture
+→ Transport / Version Conformance
 → Launcher / Supervisor Conformance
 → Module Unit Test
-→ Transport Conformance
 → Runtime Container Interop
 → Component Integration
 → End-to-End
 ```
 
-## 3. Frame Batch A/B
+## 3. Frame v1 Normative Source
 
-Batch A：Frame ID unique/no-reuse、permanent subsystem assignment、caller immutable、lifecycle only five states、no ready/status/failed-lifecycle、Activation fresh/revoked-never-restored、stable Stack、no two InputTargets、Frame/Render independence。
+测试身份以：
 
-Batch B：exact seven methods/directions、all Request、closed schema、exact fields、`completed.value` required、no caller wire/close reason/system.call/frame.result/frame.cancel/frame.abort/frame.unwind、structural invalid→`-32602`。
+```text
+protocol = loomrealm.frame-call
+version = 1
+```
 
-## 4. Batch C Transaction Conformance
+为准。
+
+Batch A-F只用于 fixture分组，不是独立兼容等级。
+
+Fixture id与最低必测项见 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。本文件说明实施方式和 E2E组合，不重新定义协议。
+
+## 4. Identity / Lifecycle / Wire
+
+至少覆盖：
+
+```text
+frame/activation unique + no reuse
+caller immutable
+subsystem binding permanent
+five lifecycle states only
+no Frame ready/status
+outcome != lifecycle
+stable Stack / no two InputTargets
+exact seven methods/directions
+all Frame methods are Request
+closed schema
+completed.value required
+no caller wire / close reason
+no frame.result/cancel/abort/unwind/version/capabilities
+```
+
+## 5. Transaction Golden Traces
 
 至少：
 
@@ -42,32 +73,28 @@ Batch B：exact seven methods/directions、all Request、closed schema、exact f
 initial-initialize-before-activate
 initial-activate-ack-before-publish
 call-accept-suspends-caller
-call-accept-revokes-old-activation
 call-success-before-child-initialize
-call-ordinary-flow-does-not-send-frame-suspend
-call-gap-input-target-null
+ordinary-call-no-reverse-suspend
+call-gap-inputtarget-null
 child-activate-ack-before-publish
-return-accept-stores-terminal-outcome
-return-accept-revokes-old-activation
+return-accept-stores-outcome
 return-success-before-frame-close
-return-success-does-not-mean-caller-resumed
-close-ack-before-normal-pop
+return-success-not-caller-resumed
+close-before-resume
 resume-ack-before-publish
 same-subsystem-no-nested-reverse-request
 recursive-same-subsystem-depth-3
-precommit-recoverable-error-may-abort
+precommit-recoverable-abort
 postcommit-never-restores-revoked-activation
 accepted-outcome-never-erased
 ```
 
-## 5. Batch D Result / Error Conformance
-
-Finite deadline：七方法不得无限 pending。
+## 6. Error / Timeout / Mutation Gate
 
 ```text
 success-is-known-commit
 explicit-error-is-known-no-commit
-explicit-error-still-requires-failure-classification
+explicit-error-still-requires-classification
 timeout-is-ambiguous
 response-loss-is-ambiguous
 pending-connection-loss-is-ambiguous
@@ -104,7 +131,6 @@ frame-state-mismatch-divergence-fatal
 activation-mismatch-divergence-fatal
 stack-mismatch-divergence-fatal
 ownership-mismatch-divergence-fatal
-valid-activate-semantic-error-does-not-local-close-repair
 invalid-params-protocol-fatal
 method-not-found-protocol-fatal
 ```
@@ -119,41 +145,17 @@ return-timeout-does-not-restore-active
 fatal-explicit-error-does-not-release-gate-to-normal-processing
 ```
 
-## 6. Batch E Root Selection
-
-必须验证 Runtime failure是 key级而不是 Frame级：
+## 7. Runtime Failure Root / Cleanup
 
 ```text
 failure-root-is-lowest-failed-runtime-occurrence
 failure-root-not-nearest-occurrence
-failure-does-not-remove-only-same-key-frames
 whole-root-to-top-suffix-is-doomed
 same-runtime-multiple-frame-recursion
-same-runtime-separated-by-other-subsystems
-```
-
-示例 fixture：
-
-```text
-F1 A
-F2 B   ← expected root
-F3 C
-F4 B
-F5 D
-
-failed={B}
-expected suffix=F2..F5
-```
-
-## 7. Batch E Cleanup Ordering
-
-```text
 failure-unwind-top-to-bottom
 failure-barrier-clears-input-target
-no-new-call-return-from-doomed-suffix
 failed-runtime-frame-does-not-receive-close
 failed-runtime-frame-logical-retire-without-ack
-failed-runtime-active-frame-revokes-public-activation
 healthy-descendant-context-absent-no-close
 healthy-descendant-context-exists-one-close
 healthy-descendant-does-not-require-extra-suspend
@@ -161,14 +163,7 @@ existing-close-request-is-not-duplicated
 healthy-descendant-close-ack-before-removal
 ```
 
-特别验证 normal `close ACK before pop` 与 failure-path exception：
-
-```text
-healthy Runtime → ACK required
-failed Runtime  → ACK impossible/not required; logical retire
-```
-
-## 8. Batch E Fixed-point Expansion
+## 8. Fixed-point Expansion
 
 ```text
 cleanup-close-timeout-adds-runtime-to-failed-set
@@ -186,19 +181,17 @@ no-retry-during-fixed-point-unwind
 ```text
 F1 D
 F2 A
-F3 B   ← B initially fails
+F3 B   ← initial B failure
 F4 C
 F5 D
 
 close(F5) timeout
 → D failed
-→ root must move F3 → F1
-→ entire Stack unwinds
+→ root F3 → F1
+→ whole Stack unwind
 ```
 
 ## 9. Transaction-in-flight Recovery
-
-覆盖 failure barrier与已有 RPC race：
 
 ```text
 crash-before-call-acceptance-uses-precommit-state
@@ -215,85 +208,185 @@ late-response-from-failed-runtime-diagnostic-only
 
 只允许 Main已 commit facts进入 recovery。
 
-## 10. Outcome Preservation / Caller Failure
+## 10. Outcome / Surviving Caller
 
 ```text
 accepted-completed-outcome-survives-runtime-crash
 accepted-cancelled-outcome-survives-runtime-crash
 accepted-failed-outcome-survives-runtime-crash
-intermediate-doomed-accepted-outcome-not-mutated
 root-without-outcome-generates-subsystem-runtime-failed
-runtime-diagnostic-code-not-required-in-caller-failure-data
-```
-
-Caller-visible platform code必须：
-
-```text
-SUBSYSTEM_RUNTIME_FAILED
-```
-
-但仅在 final root没有 accepted outcome时生成。
-
-## 11. Surviving Caller Recovery
-
-```text
 intermediate-doomed-frames-are-not-resumed
 only-final-root-direct-caller-is-resumed
 recovery-resume-uses-fresh-activation
-recovery-never-restores-old-caller-activation
 recovery-resume-ack-before-inputtarget-publish
 recovery-resume-timeout-fails-caller-runtime
-recovery-resume-failure-expands-root
 same-subsystem-failed-runtime-does-not-resume-lower-same-runtime-frame
-```
-
-最后一项尤其重要：如果 lower Frame 与 failed root属于同 Runtime，则它不可能是 surviving healthy Caller；lowest-root算法必须自动把 root下移到更低 occurrence。
-
-## 12. Initial / Zero-frame / Session Cases
-
-```text
-initial-runtime-failure-unwinds-whole-stack
-initial-root-no-caller-resume
-initial-root-without-outcome-records-subsystem-runtime-failed
-initial-accepted-outcome-preserved
+initial-runtime-failure-stack-empty
 zero-frame-runtime-failure-keeps-current-stack
-zero-frame-runtime-failure-keeps-current-inputtarget
-session-termination-does-not-force-recovery-resume
 ```
 
-## 13. Renderer / Input / Render
+## 11. JSON / Number Profile Tests
 
-Renderer fixture：
+Frame v1所有 transport共用：
 
 ```text
-failure-barrier-publishes-no-old-target
-recovery-gap-allows-inputtarget-null
-old-activation-never-republished
-new-recovery-activation-only-after-resume-ack
-no-two-inputtargets-during-unwind
-renderer-reload-does-not-cancel-runtime-failure
+plain-json-values-accepted
+undefined-rejected
+nan-rejected
+positive-infinity-rejected
+negative-infinity-rejected
+bigint-rejected
+unsafe-integer-rejected
+safe-integer-boundaries
+unpaired-surrogate-rejected
+duplicate-json-member-rejected
+negative-zero-reference-encodes-as-zero
 ```
 
-Frame unwind不得隐式删除 healthy Runtime Render；Runtime failure后的 Data/Render cleanup单独测试。
+PWA额外确保 Structured Clone不会让 ArrayBuffer/MessagePort/Blob等绕过 validator。
 
-## 14. Main System Tests
+## 12. Wire Limit Boundary Tests
 
-- Frame Stack transaction single-flight；
+每个 limit同时测试 exactly-at-limit 与 one-over-limit：
+
+```text
+message 1 MiB
+JSON depth 64 / 65
+business JsonValue 512 KiB + 1
+JsonValue string 256 KiB + 1
+object key 256 / 257 bytes
+array elements 16384 / 16385
+object members 16384 / 16385
+frameId 128 / 129 bytes
+activationId 128 / 129 bytes
+targetSubsystemKey 256 / 257 bytes
+FrameFailure.code 128 / 129
+FrameFailure.message 4096 / 4097 bytes
+```
+
+Size计算使用协议的 Reference Compact JSON UTF-8 encoding。
+
+## 13. JSON-RPC Request ID Tests
+
+同一 sender / Connection：
+
+```text
+positive-safe-integer-only
+zero-rejected
+negative-rejected
+fraction-rejected
+string-id-rejected
+null-id-rejected
+max-safe-id-accepted
+over-max-id-rejected
+lifetime-id-reuse-rejected
+pending-id-collision-across-control-domains-rejected
+late-response-cannot-bind-new-request
+```
+
+Main与Subsystem相反方向可以同时使用相同数值 ID。
+
+## 14. Deadline Profile Tests
+
+```text
+all-seven-deadlines-present
+min-1000ms
+max-300000ms
+integer-only
+connection-stable-profile
+deadline-not-in-rpc-params
+deadline-not-game-package-controlled
+deadline-uses-monotonic-clock
+timeout-still-ambiguous-no-retry
+```
+
+使用 virtual/injectable clock，不依赖真实长时间 sleep。
+
+## 15. Desktop WebSocket Conformance
+
+```text
+one-complete-text-message-one-rpc
+binary-frame-not-frame-v1-carrier
+no-jsonrpc-batch
+ordered-per-direction
+no-adapter-duplicate
+no-adapter-retry
+compact-json-limit
+oversize-protocol-failure
+connection-loss-propagated
+```
+
+WebSocket fragmentation不能改变 application message边界。
+
+## 16. PWA MessagePort Conformance
+
+在 Control Port已经安全建立后：
+
+```text
+one-postmessage-one-rpc-object
+plain-json-compatible-only
+no-transferable-dependency
+bigint-rejected
+arraybuffer-rejected
+messageport-rejected
+blob-rejected
+same-reference-size-limit
+ordered-per-direction
+no-adapter-duplicate
+no-adapter-retry
+```
+
+PWA Bootstrap/credential/Port establishment单独测试，不属于 Frame v1 application conformance。
+
+## 17. Cross-transport Golden Trace
+
+Desktop WebSocket与PWA MessagePort至少对以下同一 abstract trace产生相同 authority outcome：
+
+```text
+initial-frame-success
+nested-call-return-resume
+same-subsystem-recursion
+initialize-business-rejection
+call-timeout
+return-timeout
+runtime-crash-whole-suffix
+cleanup-timeout-root-expansion
+accepted-outcome-then-crash
+recovery-resume-failure
+```
+
+差异只能来自 carrier/bootstrap/platform lifecycle integration。
+
+## 18. Version / Profile Tests
+
+```text
+protocol-id-loomrealm-frame-call
+protocol-version-1
+no-frame-hello
+no-frame-version-method
+no-frame-capability-method
+subsystem-hello-versions-remain-control-only
+no-runtime-frame-version-downgrade
+partial-frame-method-support-not-conformant
+custom-retry-extension-not-conformant
+closed-schema-extension-not-conformant
+```
+
+## 19. Main System Tests
+
+- Stack mutation single-flight；
+- Frame Protocol Validator；
+- connection-wide outbound Request ID allocator；
+- deadline profile/monotonic scheduler；
 - RuntimeFailureUnwindCoordinator failed-set/fixed-point；
-- lowest root across repeated subsystem keys；
-- logical retirement vs healthy close；
-- pending RPC state tracking；
 - accepted outcome preservation；
-- root outcome synthesis；
-- only final Caller resume；
-- resume failure expansion；
 - no retry/replay；
 - no two InputTargets；
 - Main不维护 Render Registry。
 
-## 15. Subsystem SDK / Test Subsystems
+## 20. Subsystem SDK / Test Subsystems
 
-SDK继续验证 `onInitialize/onActivate/onSuspend/onResume/onClose/call/return`、mutation gate/deadline/failure coordination。
+SDK验证 `onInitialize/onActivate/onSuspend/onResume/onClose/call/return`、preflight validator、Request ID allocator、mutation gate、deadline/failure coordination。
 
 推荐 test-subsystems：
 
@@ -308,35 +401,42 @@ no-reentrant-handler
 runtime-crash-on-close
 runtime-crash-on-resume
 runtime-multiple-frame-occurrence
+oversize-message
+unsafe-json-number
+request-id-reuse
 callee-cancelled
 stale-activation
 render-without-frame
 ```
 
-## 16. Transport Conformance
-
-Desktop WebSocket 与 PWA MessagePort必须跑相同 A-E trace。Transport不能增加 application retry、改变 root算法、在 failed Runtime上补 close RPC或把 reconnect当 Frame recovery。
-
-## 17. E2E
+## 21. E2E
 
 正常：bootstrap→initial→nested call→return→resume→Renderer reload→shutdown。
 
-Failure：
+Failure：child crash→Caller `SUBSYSTEM_RUNTIME_FAILED`；ancestor crash→whole suffix；same Runtime repeated→lowest occurrence；cleanup timeout→root expansion；accepted outcome + crash→original outcome；resume failure→further expansion；initial failure→empty Stack。
+
+Interop：同一 scripted scenario分别运行 Desktop WebSocket与PWA MessagePort adapter并比较 normalized Frame authority trace。
+
+## 22. Fixture Revision / CI
+
+Executable fixture corpus SHOULD跟踪：
 
 ```text
-child Runtime crash → Caller gets SUBSYSTEM_RUNTIME_FAILED
-ancestor Runtime crash → whole suffix unwind
-same Runtime repeated → lowest occurrence root
-healthy descendant close → Runtime survives
-cleanup timeout → root expands downward
-accepted return outcome + crash → original outcome delivered
-resume failure → further root expansion
-initial Runtime failure → Stack empty
-zero-frame Runtime failure → current unrelated Stack unchanged
+fixtureFormatVersion = 1
+protocol = loomrealm.frame-call
+protocolVersion = 1
+fixtureSetRevision = N
 ```
 
-## 18. Golden / Fixture 规则
+新增验证既有 Frozen v1语义的 fixture只提升 fixtureSetRevision，不改变 protocolVersion。
 
-适合 Golden：Launcher/Control messages、Frame Schema、Batch C transaction traces、Batch D error/timeout traces、Batch E unwind traces、Connection auth、User Input sequence、Render State/Event、Content Response。
+CI最终应分别报告：
 
-已 Frozen A-E fixture发生不兼容改变时必须先有 ADR/版本决策。
+```text
+Frame v1 Main conformance
+Frame v1 Subsystem conformance
+Frame v1 Desktop Transport conformance
+Frame v1 PWA Transport conformance
+```
+
+当前文档冻结了 conformance要求；在这些 executable checks实际建立并通过前，不得把“协议已 Frozen”误写成“实现已经 conformant”。
