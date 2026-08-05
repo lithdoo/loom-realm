@@ -12,6 +12,7 @@ LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独�
 - [正式契约目录](./doc/15-contracts/README.md)
 - [Subsystem Control Protocol v1](./doc/15-contracts/subsystem-control-lifecycle-protocol.md)
 - [Frame / Call Protocol v1](./doc/15-contracts/frame-call-protocol-v1.md)
+- [Frame / Call v1 Conformance Profile](./doc/15-contracts/frame-call-conformance-v1.md)
 - [实施计划目录](./doc/30-implementation/README.md)
 - [完整阅读指南](./doc/README.md)
 
@@ -33,47 +34,52 @@ Game Entry
 ```text
 Game Package v2 / Desktop Launcher v1       Frozen
 Subsystem Control Protocol v1               Frozen
-Frame / Call Protocol v1 Batch A            Frozen
-Frame / Call Protocol v1 Batch B            Frozen
-Frame / Call Protocol v1 Batch C            Frozen
-Frame / Call Protocol v1 Batch D            Frozen
-Frame / Call Protocol v1 Batch E            Frozen
-Frame / Call Protocol v1 Batch F            Next / Final
+Frame / Call Protocol v1                    Active / Normative / Frozen
 ```
 
-Batch B：exact seven Frame RPC。
-
-Batch C：call/return acceptance transaction、Response-before-dependent-RPC、ACK-before-InputTarget publication、post-commit no rollback。
-
-Batch D：
+Frame / Call v1 的 A-F 设计批次现已全部完成：
 
 ```text
-Success        → known committed
-Explicit Error → known not committed
-Timeout/loss   → ambiguous → Runtime failure
+A  identity / lifecycle / Activation
+B  exact seven RPC wire
+C  transaction / commit / publication barriers
+D  error / timeout / no-retry / cancellation boundary
+E  Runtime failure fixed-point Stack unwind
+F  limits / conformance / transport mapping / version completion
 ```
 
-finite deadline；no automatic retry/replay；recoverable rejection与 Runtime-fatal divergence/protocol error分离；无 caller-driven `frame.cancel`。
+Batch 标签只保留为设计历史，不再是兼容等级。
 
-Batch E：
+### Frame v1 completion profile
 
 ```text
-Runtime failed
-→ failedRuntimeKeys
-→ lowest failed-runtime Frame = root
-→ whole root..top suffix Top→Bottom unwind
-→ failed Runtime Frames logical retire
-→ healthy descendants best-effort close
-→ cleanup failure expands failed set/root until fixed point
-→ preserve accepted root outcome
-   or failed(SUBSYSTEM_RUNTIME_FAILED)
-→ fresh-resume final healthy Caller
-   or Stack empty
+protocol = loomrealm.frame-call / 1
+no JSON-RPC Batch
+Request ID = positive safe integer; sender Connection lifetime no reuse
+max message = 1 MiB
+max JSON depth = 64
+max business JsonValue = 512 KiB
+frameId / activationId <= 128 UTF-8 bytes
+targetSubsystemKey <= 256 UTF-8 bytes
+seven method deadlines = 1s..5min sender-local monotonic profile
+Desktop WebSocket / PWA MessagePort use the same application semantics
 ```
 
-Recovery不新增 `frame.abort/frame.unwind`、replay或 Frame resync。Runtime crash不能覆盖已 accepted terminal outcome；旧 Activation永不恢复。
+Frame v1 没有独立 `frame.hello/version/capabilities`；`subsystem.hello.protocolVersions`仍只协商 Subsystem Control。
 
-下一步只有 **Batch F：Limits / Fixtures / Profile / Version Completion**，完成后整个 Frame / Call v1 转为 Active / Normative / Frozen。
+正式兼容要求见 [Frame / Call v1 Conformance Profile](./doc/15-contracts/frame-call-conformance-v1.md)。协议已 Frozen 不等于实现/CI 已通过 conformance fixtures。
+
+## 下一协议目标
+
+Frame / Call v1 不再有 Batch G。下一主要设计目标是：
+
+```text
+Main ⇄ Renderer Control
+→ Renderer ⇄ Subsystem Connection
+→ User Input
+→ Render Update
+→ Render State
+```
 
 ## Desktop Runtime 边界
 
@@ -81,9 +87,9 @@ Recovery不新增 `frame.abort/frame.unwind`、replay或 Frame resync。Runtime 
 spawn success ≠ connected ≠ identified ≠ ready
 ```
 
-Desktop v1 使用 `nodejs` Launcher、Host-selected Node、`shell=false`、token-before-spawn、Runtime Supervisor；Subsystem Control v1 管 hello/status/shutdown/failed，`stopped` 只来自实际 Runtime termination observation。当前不定义 automatic restart/same-attempt reconnect/application heartbeat。
+Desktop v1 使用 `nodejs` Launcher、Host-selected Node、`shell=false`、token-before-spawn、Runtime Supervisor；Subsystem Control v1 管 hello/status/shutdown/failed，`stopped`只来自实际 Runtime termination observation。当前不定义 automatic restart/same-attempt reconnect/application heartbeat。
 
-Frame 不是 Process、业务状态 ownership 或 Render ownership 单元。Render lifecycle 不从 Frame suspend/close/unwind推导。业务内容通过独立 Readonly Content API 获取。
+Frame不是 Process、业务状态 ownership或 Render ownership单元。Render lifecycle不从 Frame suspend/close/unwind推导。业务内容通过独立 Readonly Content API获取。
 
 ## 文档站点
 
