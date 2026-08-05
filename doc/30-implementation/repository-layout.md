@@ -5,7 +5,7 @@
 > 稳定程度：Experimental  
 > 主要定义：建议的代码分包、进程入口和依赖规则  
 > 依赖：[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-04
+> 最近复核：2026-08-05
 
 本方案用于指导第一阶段落地，不是产品协议。包名可以调整，但职责边界必须遵守上层架构和契约。
 
@@ -37,7 +37,7 @@ packages/
 
 ## 2. `frame-call-protocol`
 
-整体仍 Draft，但 Batch A-E 已 Normative / Frozen；Batch F 是最终 completion。
+Frame / Call Protocol v1 已 Active / Normative / Frozen。
 
 包必须提供：
 
@@ -46,27 +46,58 @@ FrameLifecycleState
 FrameOutcome / FrameFailure
 exact seven JSON-RPC method Schema
 identity / Activation validator
-transaction invariant fixtures
+JSON/number/string/limit validator
+Request ID validator / allocator helper
+FrameCallDeadlineProfileV1 validator
 semantic error Schema/classifier
-request-result classifier
-Runtime failure diagnostic categories
+transaction invariant fixtures
 Runtime failure unwind invariants / trace fixtures
+conformance manifest / harness helpers
 ```
 
-Frozen method surface：
+不得定义 `frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`、operationId/idempotencyKey/replay journal、Runtime/Render lifecycle。
+
+## 3. Frozen v1 Limits/API Surface
+
+协议包 validator必须统一：
 
 ```text
-Main → Subsystem
-    frame.initialize / activate / suspend / resume / close
-Subsystem → Main
-    frame.call / return
+message <= 1 MiB compact JSON equivalent
+JSON depth <= 64
+business JsonValue <= 512 KiB
+JsonValue string <= 256 KiB UTF-8
+object key <= 256 UTF-8 bytes
+array/object member count <= 16,384
+frameId / activationId <= 128 UTF-8 bytes
+targetSubsystemKey <= 256 UTF-8 bytes
+FrameFailure code/message limits
+finite binary64 + safe integer
+valid Unicode scalar sequence
+no duplicate JSON object members
 ```
 
-不得定义 `frame.cancel/frame.abort/frame.unwind`、operationId/idempotencyKey/replay journal、Runtime/Render lifecycle。
+PWA与Desktop都复用同一逻辑 validator；不能让 Structured Clone形成第二套 Frame type system。
 
-## 3. Batch E Fixture/API Surface
+## 4. Request ID / Deadline Helpers
 
-协议包可以提供纯函数/fixture helper表达：
+建议：
+
+```text
+ConnectionRequestIdAllocator
+    positive safe integer
+    sender-local
+    Connection lifetime no reuse
+
+FrameDeadlineProfileValidator
+    all seven methods
+    integer 1000..300000ms
+```
+
+Main/Subsystem实际计时使用 monotonic clock。Deadline不进入 wire、不由 Game Package/business input覆盖。
+
+## 5. Transaction / Failure Helpers
+
+协议包可提供纯函数/fixture helper：
 
 ```text
 findLowestFailedRuntimeFrame(stack, failedKeys)
@@ -78,69 +109,35 @@ assertFreshRecoveryActivation(...)
 
 这些 helper不得创建新的 public wire state。
 
-Runtime failure规则：
+## 6. `main-system`
 
-```text
-lowest failed-runtime Frame = root
-root..top = whole doomed suffix
-cleanup Top→Bottom
-failed Runtime Frame logical retire without RPC ACK
-healthy Runtime Frame best-effort close
-cleanup failure expands failed set and recomputes root
-root no outcome → SUBSYSTEM_RUNTIME_FAILED
-only final direct surviving Caller fresh-resume
-```
-
-## 4. `main-system`
-
-负责 Descriptor/Launcher/Runtime Supervisor、Control Registry、Frame/Activation Registry、Stack Controller、Frame Transaction Coordinator、Deadline/Failure Classifier、RuntimeFailureUnwindCoordinator、Renderer Control Publisher 与 Data Connection Authority。
-
-建议：
+负责 Descriptor/Launcher/Runtime Supervisor、Control Registry、Frame/Activation Registry、Stack Controller、Transaction Coordinator、Protocol Validator、Request ID Allocator、Deadline/Failure Classifier、RuntimeFailureUnwindCoordinator、Renderer Control Publisher 与 Data Connection Authority。
 
 ```text
 FrameMutationCoordinator
     serializes normal transaction + failure unwind
 
+FrameProtocolValidator
+    schema / JSON / limits
+
+ConnectionRequestIdAllocator
+    shared sender-side Control Connection ID namespace
+
 FrameRpcDeadlineManager
-    finite deadline / ambiguous classification
+    monotonic finite deadline / ambiguous classification
 
 FrameErrorClassifier
     recoverable / divergence / protocol-fatal
 
 RuntimeFailureUnwindCoordinator
-    failedRuntimeKeys
-    lowest-root selection
-    top-down suffix cleanup
-    fixed-point root expansion
-    accepted outcome preservation
-    surviving Caller resume
-
-RendererControlPublisher
-    committed state only
+    failedRuntimeKeys / lowest-root / fixed-point / Caller resume
 ```
 
 Main不得 timeout后 retry，也不得用 Renderer state修复 Frame Control ambiguity。
 
-## 5. Main Recovery State
+## 7. `subsystem-sdk`
 
-建议 Host-private recovery record：
-
-```ts
-interface RuntimeFailureUnwindState {
-  readonly generation: number;
-  readonly failedRuntimeKeys: ReadonlySet<string>;
-  rootFrameId: string | null;
-  phase: "scan" | "cleanup" | "resume" | "complete";
-}
-```
-
-这不是 wire/public lifecycle；具体结构可改，只需保持 Frozen行为。
-
-Main还应跟踪 per-Frame remote Context knowledge：`absent / established / unknown`，用于决定 healthy doomed Frame是否需要 close。Ambiguous remote state意味着相关 Runtime已按 Batch D failure，不应通过 retry探测。
-
-## 6. `subsystem-sdk`
-
-至少提供 Bootstrap Context、Subsystem Control v1、Frame RPC dispatcher/client、Frame Input Context Registry、mutation gate、deadline/failure handler、Data/Render/User Input adapters、Content Client。
+至少提供 Bootstrap Context、Subsystem Control v1、Frame RPC dispatcher/client、Frame Protocol Validator、Request ID allocator、Frame Input Context Registry、mutation gate、deadline/failure handler、Data/Render/User Input adapters、Content Client。
 
 Frame adapter：
 
@@ -154,36 +151,40 @@ call
 return
 ```
 
-SDK不实现 Stack failure-unwind authority；terminal failed Runtime不选择 lower Frame resume。健康 Runtime收到 Main `frame.close` 时只清指定 doomed Frame Context，不把它映射成 Runtime/Render cleanup。
+SDK必须 outbound preflight；PWA/Node使用相同 JSON/limit semantics。SDK不实现 Stack unwind authority；terminal failed Runtime不选择 lower Frame resume。
 
-## 7. `web-renderer`
+## 8. `web-renderer`
 
 Renderer只镜像 Main committed control state，不直接解析/发送 Frame RPC。
 
-必须支持 failure recovery的较长 `InputTarget=null` gap、old Activation永久消失、只在 recovery resume ACK后看到新 Activation。Renderer reconnect不能取消 Runtime failure或推断 unwind root。
+必须支持较长 `InputTarget=null` gap、old Activation永久消失、只在 resume ACK后看到新 Activation。Renderer reconnect不能取消 Runtime failure或推断 unwind root。
 
-## 8. Desktop / PWA Transport
+## 9. Desktop / PWA Transport
 
 Desktop WebSocket 与 PWA MessagePort都必须保持：
 
 ```text
+exact seven Frame methods
+one transport unit = one JSON-RPC message
+no JSON-RPC Batch
+plain JSON-only application model
+shared limits
+Request ID one-shot per sender/Connection
 Response-before-dependent-RPC
 ACK-before-InputTarget-publication
-finite Frame RPC deadline
+finite monotonic Frame deadline
 ambiguous-no-retry
 lowest-root whole-suffix unwind
-failed-runtime logical retirement
-fixed-point failed-set expansion
 accepted outcome preservation
 ```
 
 Transport adapter不得自行发送 recovery close/retry或改变 root选择。
 
-## 9. `map-subsystem`
+## 10. `map-subsystem`
 
-`loom.map` 使用 SDK mutation gate/deadline handler；Runtime失败后不自行恢复 suspended map Frame。健康 map Runtime若某 map Frame因 ancestor failure被 unwind，只按 Main `frame.close` 删除该 Frame/Input Context，world/Render共享状态按业务设计保留。
+`loom.map` 使用 SDK validator/mutation gate/deadline handler；Runtime失败后不自行恢复 suspended map Frame。健康 map Runtime若某 map Frame因 ancestor failure被 unwind，只按 Main `frame.close` 删除该 Frame/Input Context，world/Render共享状态按业务设计保留。
 
-## 10. `test-subsystems`
+## 11. `test-subsystems`
 
 建议包含：
 
@@ -201,30 +202,51 @@ cleanup-timeout-root-expansion
 call-timeout-gate-held
 return-timeout-gate-held
 accepted-outcome-then-crash
+oversize-frame-message
+invalid-frame-number
+request-id-reuse
+non-json-messageport-value
 callee-cancelled
 stale-activation
 ```
 
-## 11. Fixture Layout
+## 12. Conformance Layout
+
+依据 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)：
 
 ```text
-frame-call-protocol/
+packages/frame-call-protocol/
 ├── src/
 │   ├── lifecycle.ts
 │   ├── activation.ts
+│   ├── json-profile.ts
+│   ├── limits.ts
+│   ├── request-id.ts
+│   ├── deadlines.ts
 │   ├── errors.ts
 │   ├── transaction-invariants.ts
 │   └── failure-unwind-invariants.ts
-└── test-fixtures/
-    ├── schema/
-    ├── transactions/
-    ├── errors-timeouts/
-    └── runtime-failure-unwind/
+└── conformance/
+    └── v1/
+        ├── manifest.json
+        ├── identity-lifecycle/
+        ├── wire-schema/
+        ├── transactions/
+        ├── errors-timeouts/
+        ├── runtime-failure/
+        ├── limits/
+        └── transport-version/
 ```
 
-Batch E fixtures必须覆盖 repeated-runtime root、whole suffix、logical retire、healthy close、fixed-point expansion、accepted outcome、fresh recovery resume与 initial/zero-frame failure。
+Conformance Profile已经冻结 fixture catalog；这里仍需实现可执行 trace/harness。完成这些测试是实现声明 v1 conformant的条件，不是协议再次设计的条件。
 
-## 12. 依赖规则
+## 13. Version Binding
+
+Frame v1不需要新的 runtime handshake package。
+
+`subsystem.hello.protocolVersions`仍属于 Subsystem Control。Host/runtime deployment profile静态绑定 Frame v1。未来 Frame v2动态协商需要新 profile/control version。
+
+## 14. 依赖规则
 
 ```text
 protocol packages
@@ -243,8 +265,8 @@ map-subsystem
     → subsystem-sdk / render / input / content
 ```
 
-禁止 Main/SDK/Host adapter 私自改变 A-E Frozen semantics。
+禁止 Main/SDK/Host adapter私自改变 Frozen Frame v1 semantics/limits/profile。
 
-## 13. 发布策略
+## 15. 发布策略
 
-第一阶段可保持 monorepo + unified version。Frame / Call 在 Batch F前整体仍 Draft，但 A-E 已冻结部分必须接受兼容性检查。Batch F完成 limits/fixtures/profile/version后整体转 Active / Normative / Frozen。
+第一阶段可保持 monorepo + unified version。Frame / Call v1协议本身已经 Frozen；实现包在通过适用 Conformance Profile fixture后才能声明对应 v1角色 conformant。
