@@ -7,7 +7,7 @@
 > 稳定程度：Evolving  
 > 主要定义：Main 向 Renderer 复制 committed Runtime / Frame / Activation / InputTarget / Data Authority 的只读控制状态  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[通信系统](../10-architecture/communication-system.md)、[Frame / Call Protocol v1](./frame-call-protocol-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
-> 后续依赖：Renderer ⇄ Subsystem Connection Protocol、User Input Protocol  
+> 后续依赖：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)、[User Input Protocol v1](./user-input-v1.md)  
 > 最近复核：2026-08-08
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
@@ -54,7 +54,7 @@ Frame failure unwind
 Renderer⇄Subsystem Data endpoint/MessagePort discovery
 Data bearer credential
 Data Connection handshake
-User Input payload
+User Input payload / Input Interest
 Render Update / Render State
 Content API / Content Grant
 business state
@@ -109,7 +109,27 @@ Main MUST NOT 在对应 ACK 前发布新 ordinary InputTarget。
 
 Activation 一旦 revoked，任何后续 Snapshot都 MUST NOT再将其作为 current Activation/InputTarget。
 
-`InputTarget=null` 是合法 committed authority，可出现在 initial/call/return/recovery/empty-stack gap。
+`InputTarget=null` 是合法 committed authority，可出现在 initial/call/return/recovery/empty-stack gap，也可表示 active Frame 当前没有 ordinary input authority。
+
+### 3.1 InputTarget One-Shot Lease
+
+为使 full-Snapshot publication coalescing 与 User Input teardown 可证明闭合，Main MUST保证：
+
+> **一个已经发布过的 `InputTarget(frameId, activationId)` 一旦被撤销、移除或替换，该同一 `frameId + activationId` MUST NOT 在之后再次成为 InputTarget。**
+
+因此：
+
+```text
+A1 published as InputTarget
+→ A1 target revoked/removed/replaced
+→ A1 permanently input-dead
+```
+
+未来重新授予 ordinary input authority必须使用 fresh authority epoch，通常即 fresh `activationId`。
+
+v1 不定义独立 `inputEpoch` / `inputLeaseId`。
+
+该约束比“Activation 被 revoked 后不得复用”更具体：即使 Frame/Activation本身仍 active，只要其已发布 InputTarget被撤销，也不得在相同 `activationId` 下 re-grant ordinary input。
 
 ## 4. Connection Ownership
 
@@ -379,6 +399,8 @@ same current activationId
 
 `active Frame + InputTarget=null` 合法；Renderer不得自行构造 target。
 
+InputTarget publication还必须满足 §3.1 one-shot lease：同一 `frameId + activationId` 被撤销后不能重新出现为 InputTarget。
+
 ## 14. Logical Data Authority
 
 Renderer Control只发布逻辑 Data authority：
@@ -441,7 +463,7 @@ connection nonce
 transport-specific locator
 ```
 
-Renderer⇄Subsystem Connection Protocol/Profile负责：
+Renderer⇄Subsystem Connection Contract/Profile负责：
 
 ```text
 如何取得 endpoint/Port
@@ -463,7 +485,7 @@ authority disappears
 OR generation changes
 ```
 
-MUST停止使用旧 generation，并按 Connection Protocol关闭/替换旧 Data Connection。
+MUST停止使用旧 generation，并按 Connection Contract关闭/替换旧 Data Connection。
 
 旧 generation不得重新建立。
 
@@ -565,7 +587,17 @@ revision 33 B/InputTarget
 Renderer receives 30 → 33
 ```
 
-因此 Renderer/User Input实现 MUST把任何 InputTarget identity变化视为旧 Activation continuous-input intent的终止边界；不依赖一定观察到显式 `null` revision。
+因此 Renderer/User Input实现 MUST把任何 InputTarget identity变化视为旧 target User Input State的终止边界；不依赖一定观察到显式 `null` revision。
+
+但以下历史在 v1 **非法**：
+
+```text
+revision 30 A(frameId=F, activationId=A1)
+revision 31 null
+revision 32 A(frameId=F, activationId=A1)
+```
+
+因为 §3.1 禁止同一 InputTarget lease revoke→regrant。这样 Main 的 snapshot coalescing 不需要额外保留 null revision，也不会隐藏 authority regrant。
 
 该规则不改变 Frame v1 stale Activation rejection。
 
@@ -692,18 +724,25 @@ Data Connection closed != Render authority destroyed
 
 ## 28. User Input Dependency
 
-未来 User Input Protocol MUST以当前 Snapshot `InputTarget` 为普通输入 authority。
+User Input Protocol MUST以当前 Snapshot `InputTarget` 为 ordinary input sender-side authority。
 
 ```text
-raw input
+raw / custom input
 → read current InputTarget
-→ null: do not send
+→ null: do not send ordinary State/Event
 → non-null: verify active/current Activation
 → require matching current Data generation connection
-→ send User Input(frameId, activationId,...)
+→ apply User Input Interest / Producer Effective Channel gate
+→ send State/Event(frameId, activationId,...)
 ```
 
-InputTarget identity变化 MUST终止旧 Activation的持续输入意图；旧输入不得自动迁移/重放到新 Activation。
+Renderer Core是 Main InputTarget 的 trusted sender-side enforcement point。
+
+Subsystem会重新验证 local Frame/Activation与 local Interest，但 User Input wire本身不提供 Main-signed InputTarget proof。
+
+InputTarget identity变化 MUST终止旧 target User Input State；旧输入不得自动迁移/重放到新 Activation。
+
+同一 InputTarget lease被撤销后必须遵守 §3.1，不得 re-grant。
 
 ## 29. Ordering
 
@@ -849,6 +888,8 @@ close Control Connection
 
 Renderer不得局部修复 Snapshot或继续使用最后一次 control authority。
 
+InputTarget one-shot lease 的历史合法性由 Main负责维护；若 Renderer实现保留足够 session-local history发现明显的 same-lease regrant，MUST fail closed。
+
 ## 36. Security
 
 - Renderer Control bootstrap token按 secret处理；
@@ -857,6 +898,7 @@ Renderer不得局部修复 Snapshot或继续使用最后一次 control authority
 - Snapshot不携带物理 filesystem path；
 - Runtime business state不进入 Control Snapshot；
 - Connection/Data bootstrap secrets属于其独立 Profile；
+- Renderer Core是普通 User Input `InputTarget` 的 trusted sender-side enforcement point；
 - Host应限制 Control carrier在认可的本地/受控 boundary。
 
 ## 37. Minimum Conformance
@@ -882,7 +924,9 @@ activate-ack-before-target
 return-null-gap
 resume-fresh-activation
 revoked-activation-never-reappears
-inputtarget-switch-implies-old-intent-reset
+inputtarget-switch-implies-old-state-reset
+inputtarget-revoked-same-activation-never-regrant
+coalescing-cannot-hide-same-lease-regrant
 
 runtime-failure-main-only-unwind
 recovery-final-resume-publication
@@ -916,7 +960,8 @@ Data endpoint discovery
 Data connection credential
 Data handshake
 Render State
-User Input payload
+User Input payload / Input Interest wire
+Main-signed input capability
 Content Grant
 telemetry/diagnostic stream
 heartbeat
@@ -941,11 +986,13 @@ v1只有这两个 application methods。
 6. ACK-before-InputTarget publication；
 7. revoked Activation never reappears；
 8. `InputTarget=null`合法；
-9. DataAuthority只有 `subsystemKey + generation + connectionProfile`；
-10. endpoint/token/Port不进入 Authority Snapshot；
-11. Control loss立即撤销 ordinary input和全部 Data lease，并关闭 Data Connections；
-12. InputTarget replacement本身终止旧 continuous-input intent；
-13. bounded latest-state coalescing，无历史 Snapshot无界排队；
-14. topology有界，任何合法 authority state均可单条 full Snapshot恢复；
-15. Render lifecycle/revision独立；
-16. Renderer不参与 Frame failure unwind。
+9. 已发布 InputTarget lease一旦撤销，同一 `frameId + activationId` 不得 re-grant；
+10. DataAuthority只有 `subsystemKey + generation + connectionProfile`；
+11. endpoint/token/Port不进入 Authority Snapshot；
+12. Control loss立即撤销 ordinary input和全部 Data lease，并关闭 Data Connections；
+13. InputTarget replacement本身终止旧 User Input State；
+14. bounded latest-state coalescing，无历史 Snapshot无界排队；
+15. topology有界，任何合法 authority state均可单条 full Snapshot恢复；
+16. Render lifecycle/revision独立；
+17. Renderer Core执行 sender-side InputTarget gate；
+18. Renderer不参与 Frame failure unwind。
