@@ -3,40 +3,68 @@
 > 层级：正式契约  
 > 状态：Active / Normative  
 > 稳定程度：Evolving  
-> 主要定义：跨桌面与 PWA 的逻辑只读内容访问、缓存、授权和错误语义  
-> 依赖：[存储与内容系统](../10-architecture/storage-system.md)  
-> 最近复核：2026-08-01
+> 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
+> 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[Game Package v2](./game-package-v2.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
+> 最近复核：2026-08-08
+
+本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
+
+核心原则：
+
+> **Content API 定义“已经拥有访问能力的客户端如何读取逻辑只读内容”；Content capability 如何被签发、分发、轮换属于独立 Content Access Bootstrap/Profile。**
 
 ## 1. 适用范围
 
-本契约定义运行中的程序主系统、模块子系统和 Web Renderer 如何通过 Fetch/HTTP 语义读取游戏包清单、FSDB 记录、分组数据和资源主体。
-
-平台实现：
+运行中的 Main、Subsystem Runtime 与 Web Renderer 可以通过统一逻辑 Content API 读取：
 
 ```text
-桌面
+manifest
+record
+group
+resource
+```
+
+平台 binding：
+
+```text
+Desktop
     localhost HTTP Content Service
 
 PWA
     same-origin Fetch + Service Worker + OPFS / Cache Storage
 ```
 
-两种实现必须保持相同的逻辑路由、状态码、MIME、版本和缓存语义。
+两种实现 MUST 保持相同逻辑 identity、route、status/error code、MIME、version 与 cache semantics。
 
-## 2. 设计原则
+## 2. 不负责的内容
 
-- 只读；
-- 以逻辑身份访问，不暴露物理路径；
-- 所有内容视为不可信输入；
-- 支持按需读取和标准缓存；
-- 资源主体不进入 Frame 数据通道；
-- Content Service 不拥有游戏运行状态；
-- FSDB 是第一阶段实现，Content API 是公共稳定边界。
+Content API v1 不负责：
+
+```text
+Content Grant如何交给Runtime/Renderer
+Renderer Control authority
+Frame / Call
+Render Update
+User Input
+Package安装/写入/删除
+Launcher executable access
+OS sandbox
+```
+
+特别：
+
+```text
+Content API semantics
+!=
+Content Access Bootstrap
+```
+
+任何实现不得把 Content credential 塞入 Frame params、Render State、resource URL query 或普通业务 payload。
 
 ## 3. 核心身份
 
 ```ts
-interface ContentIdentity {
+interface ContentIdentityV1 {
   readonly installationId: string;
   readonly kind: "manifest" | "record" | "group" | "resource";
   readonly namespace?: string;
@@ -45,84 +73,82 @@ interface ContentIdentity {
 }
 ```
 
-`installationId` 标识经过验证并登记的游戏包安装实例，不等同于游戏业务 ID 或本机目录。
+`installationId` 标识经过验证/登记的安装实例，不等于本机目录。
 
-`namespace` 和 `key` 是逻辑内容身份，不得解释为任意路径。
+`namespace/key` 是逻辑 identity，MUST NOT 直接解释成 filesystem path。
 
-## 4. 基础路径
-
-v1 API 基础路径：
+## 4. Base Route
 
 ```text
 /_lr/v1/games/{installationId}
 ```
 
-所有路径段必须使用 UTF-8 百分号编码。解码后必须满足实现声明的最大长度和字符规则，并不得包含：
+路径段使用 UTF-8 percent-encoding。解码后不得包含：
 
-- `/` 或 `\`；
-- `.`、`..`；
-- NUL；
-- 控制字符；
-- 盘符、URL 或 UNC 语义。
+```text
+/ or \
+. / .. path semantics
+NUL
+control characters
+Drive/UNC/URL semantics
+```
 
-## 5. 路由
+URL参数 MUST 先按逻辑 identity校验，再查询 Package Index；不得直接拼接 filesystem path。
 
-### 5.1 游戏清单
+## 5. Routes
+
+### Manifest
 
 ```http
-GET /_lr/v1/games/{installationId}/manifest
+GET  /_lr/v1/games/{installationId}/manifest
 HEAD /_lr/v1/games/{installationId}/manifest
 ```
 
-返回规范化的游戏清单 JSON，不返回安装目录和物理入口路径。
+返回 normalized public manifest，不返回 Installation Root 或 launcher physical path。
 
-### 5.2 结构记录
+### Record
 
 ```http
-GET /_lr/v1/games/{installationId}/records/{namespace}/{key}
+GET  /_lr/v1/games/{installationId}/records/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/records/{namespace}/{key}
 ```
 
-用于 FSDB `[struct]`、`[extend]` 或其他单记录内容。
-
-默认响应：
+默认：
 
 ```text
 Content-Type: application/json; charset=utf-8
 ```
 
-### 5.3 分组记录
+### Group
 
 ```http
-GET /_lr/v1/games/{installationId}/groups/{namespace}/{key}
+GET  /_lr/v1/games/{installationId}/groups/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/groups/{namespace}/{key}
 ```
 
-第一阶段默认返回 JSON Lines：
+v1默认 JSON Lines：
 
 ```text
 Content-Type: application/x-ndjson; charset=utf-8
 ```
 
-客户端可以流式解析。每一行必须是独立 JSON 值，并受记录数、单行大小和总大小限制。
+每行必须是独立 JSON value，并受单行/记录数/总大小限制。
 
-### 5.4 资源主体
+### Resource
 
 ```http
-GET /_lr/v1/games/{installationId}/resources/{namespace}/{key}
+GET  /_lr/v1/games/{installationId}/resources/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/resources/{namespace}/{key}
 ```
 
-返回 Package Index 声明的真实 MIME 和二进制主体。资源不得 Base64 包装进 JSON。
+返回 Package Index 声明的真实 MIME 与 binary body；不得把普通资源 Base64 包入 JSON。
 
-## 6. Package Index
+## 6. Package Index Boundary
 
-Content Service 通过经过验证的 `fsdb.index.json` 或等价 Package Index 将逻辑请求映射到内部内容位置。
-
-索引条目至少包含：
+Content Service使用已经验证的 Package Index：
 
 ```ts
-interface ContentIndexEntry {
+interface ContentIndexEntryV1 {
   readonly kind: "record" | "group" | "resource";
   readonly namespace: string;
   readonly key: string;
@@ -133,72 +159,80 @@ interface ContentIndexEntry {
 }
 ```
 
-`internalPath` 只在受信任的 Content Service 内使用，不得返回给客户端。
+`internalPath` 只存在于可信 Content Service 内部，MUST NOT 返回客户端。
 
-请求解析必须先查询索引；禁止将 URL 参数直接拼接为文件系统路径。
+请求：
 
-## 7. 成功响应头
+```text
+logical identity
+→ Package Index lookup
+→ validated internal location
+→ read/validate content
+```
 
-成功响应至少包含：
+禁止 URL→filesystem direct mapping。
+
+## 7. Success Metadata
+
+成功响应至少提供：
 
 ```text
 Content-Type
-Content-Length（可确定时）
 ETag
 X-Loom-Content-Version
 Cache-Control
+Content-Length when determinable
 ```
 
-建议：
+推荐：
 
 ```text
 ETag: "<contentVersion>"
 X-Loom-Content-Version: <contentVersion>
 ```
 
-当 `contentVersion` 表示不可变内容哈希时：
+不可变 hash-addressed content MAY：
 
 ```text
 Cache-Control: public, max-age=31536000, immutable
 ```
 
-Manifest 或可变安装登记信息应使用更保守的缓存策略。
+Manifest/registration-like content应采用更保守 cache policy。
 
-## 8. 条件请求
+## 8. Conditional Request
 
-实现应支持：
+实现 MUST 支持：
 
 ```text
 If-None-Match
 ```
 
-ETag 匹配时返回：
+匹配时：
 
 ```text
 304 Not Modified
+no body
 ```
 
-304 不包含主体。
-
-客户端缓存身份至少包含：
+客户端 cache identity至少包含：
 
 ```text
 installationId + kind + namespace + key + contentVersion
 ```
 
-不同版本不得共享错误字节。
+不同 `contentVersion` 不得共享错误 bytes。
 
 ## 9. HEAD
 
-`HEAD` 必须执行与 `GET` 相同的授权、路由和存在性校验，但不返回主体。
+`HEAD` MUST执行与 GET相同的 authorization、route、existence、version检查，但不返回 body。
 
-响应头应与相应 `GET` 一致，包括 MIME、版本、大小和缓存信息。
+可确定的 headers SHOULD与对应 GET一致。
 
 ## 10. Range Profile
 
-v1 Core 不要求所有内容支持 Range。
+Range 不属于 v1 Core mandatory capability。
 
-实现声明支持时，必须正确处理：
+实现显式声明 Range Profile时，至少支持合法：
 
 ```text
 Range: bytes=<start>-<end>
@@ -212,133 +246,155 @@ Content-Range
 Accept-Ranges: bytes
 ```
 
-第一阶段建议对 JSON、JSONL 和普通图片整体读取；大型音频、视频或归档资源再启用 Range Profile。
+Desktop/PWA 的 Range Profile必须通过同一业务 fixture。
 
-桌面 HTTP 和 PWA Service Worker 的 Range 行为必须使用相同 Fixture 验证。
+## 11. Authorization Semantics
 
-## 11. 桌面授权 Profile
+### Desktop request authorization
 
-桌面 Content Service 只监听：
+Desktop Content Service只监听 Host认可的 loopback endpoint。
 
-```text
-127.0.0.1 / ::1
-```
-
-程序主系统签发 Content Grant：
-
-```ts
-interface ContentGrant {
-  readonly baseUrl: string;
-  readonly sessionId: string;
-  readonly installationId: string;
-  readonly token: string;
-  readonly expiresAt: number;
-  readonly permissions: readonly ("manifest" | "records" | "groups" | "resources")[];
-}
-```
-
-请求使用：
+授权请求使用：
 
 ```text
 Authorization: Bearer <token>
 ```
 
-规则：
+概念 grant：
 
-- token 使用高熵随机值；
-- token 绑定会话、安装实例和权限范围；
-- 服务拒绝过期或错误范围；
-- 不在错误、日志或 URL 中回显 token；
-- Renderer 跨 Origin 访问时使用精确 CORS Origin，不允许无边界 `*`。
+```ts
+interface DesktopContentGrantV1 {
+  readonly installationId: string;
+  readonly token: string;
+  readonly permissions: readonly (
+    | "manifest"
+    | "records"
+    | "groups"
+    | "resources"
+  )[];
+  readonly expiresAtUnixMs: number;
+}
+```
 
-## 12. PWA 授权 Profile
+`expiresAtUnixMs` MUST 是 Unix epoch milliseconds 的 positive safe integer。
 
-PWA Content API 与应用同源，由 Service Worker 拦截 `/_lr/v1/` 请求。
+Token要求：
 
-Service Worker 必须验证：
+```text
+high entropy
+opaque
+bound to installation + permission scope
+not in URL
+not echoed in error/log
+```
 
-- `installationId` 已在当前 Origin 的安装注册表中登记；
-- 请求方法和路由合法；
-- Package Index 条目存在；
-- OPFS 或 Cache Storage 中的内容版本匹配；
-- 当前请求不尝试访问未安装或未完成安装的内容。
+**本文不冻结该 Grant 如何从 Main/Host 被交给 Renderer 或 Subsystem。** 该分发路径由未来 Content Access Bootstrap/Profile冻结。
 
-Service Worker 全局内存不是授权或内容真相源。它必须能从 IndexedDB、OPFS 和 Package Index 恢复。
+因此当前 Desktop Content API 可以声明 request/response conformance，但在 Content Access Profile完成前不能宣称跨角色 capability-distribution 已完整冻结。
 
-## 13. 方法限制
+### PWA request authorization
 
-运行时 Content API 只允许：
+PWA 使用 same-origin Service Worker boundary。
+
+Service Worker MUST验证：
+
+```text
+installation registered for current origin
+installation complete
+route/method valid
+Package Index entry valid
+stored content version matches
+```
+
+Service Worker process memory不是 authority；必须可从持久安装登记/Index/OPFS恢复。
+
+未来如果 PWA需要更细角色 scope，应由 Content Access Profile增加，而不是修改 resource route identity。
+
+## 12. Methods
+
+Runtime Content API只允许：
 
 ```text
 GET
 HEAD
 ```
 
-其他方法返回：
+其他方法：
 
 ```text
 405 Method Not Allowed
 Allow: GET, HEAD
 ```
 
-安装、导入、写入、删除和全包验证属于独立的 Package Storage / Installer 能力，不属于本契约。
+安装、导入、写入、删除属于 Package Storage/Installer，不属于本契约。
 
-## 14. 状态码
+## 13. Deterministic Status / Error Mapping
+
+v1固定：
 
 ```text
 200 OK
-    成功完整响应
+    full success
 
 206 Partial Content
-    Range Profile 成功
+    Range Profile success
 
 304 Not Modified
-    ETag 匹配
+    ETag match
 
 400 Bad Request
-    URL 编码、参数或 Header 非法
+    malformed URL/header/encoding/parameter
 
 401 Unauthorized
-    桌面 token 缺失或无效
+    Desktop bearer missing/invalid/expired
 
 403 Forbidden
-    token 权限不足或 Origin 不允许
+    authenticated but insufficient scope / forbidden origin
 
 404 Not Found
-    安装实例、Namespace、Key 或主体不存在
+    installation / namespace / key / indexed body not found
 
 405 Method Not Allowed
-    非 GET/HEAD
+    method other than GET/HEAD
 
 409 Conflict
-    安装未完成、内容版本冲突或索引与主体不一致
+    logical installation/version/index state conflict
+    e.g. INSTALLATION_INCOMPLETE / CONTENT_VERSION_MISMATCH
 
 413 Content Too Large
-    超过当前 Profile 的大小限制
+    current Profile size limit exceeded
 
 416 Range Not Satisfiable
-    Range 非法
+    invalid/unsatisfiable Range
 
 422 Unprocessable Content
-    已读取内容无法通过格式或完整性校验
+    selected body exists but fails content validation/integrity
+    e.g. CONTENT_SCHEMA_INVALID / CONTENT_INTEGRITY_FAILED
 
 429 Too Many Requests
-    超过速率或并发限制
+    explicit concurrency/rate policy exceeded
 
 500 Internal Server Error
-    非预期服务错误
+    unexpected service failure
 ```
 
-错误响应使用：
+**同一个失败事实不得由实现自由选择 409 或 422。**
+
+规则：
+
+```text
+state/version/index conflict → 409
+body schema/integrity failure → 422
+```
+
+## 14. Error Body
 
 ```text
 Content-Type: application/problem+json
 ```
 
-## 15. 错误主体
-
 ```ts
-interface ContentProblem {
+interface ContentProblemV1 {
   readonly type: string;
   readonly title: string;
   readonly status: number;
@@ -350,101 +406,155 @@ interface ContentProblem {
 }
 ```
 
-稳定错误码建议：
+Stable codes：
 
 ```text
-INSTALLATION_NOT_FOUND
-INSTALLATION_INCOMPLETE
-CONTENT_NOT_FOUND
-CONTENT_VERSION_MISMATCH
-CONTENT_TOO_LARGE
-CONTENT_SCHEMA_INVALID
-CONTENT_INTEGRITY_FAILED
-CONTENT_PERMISSION_DENIED
-RANGE_INVALID
+INSTALLATION_NOT_FOUND              404
+INSTALLATION_INCOMPLETE             409
+CONTENT_NOT_FOUND                   404
+CONTENT_VERSION_MISMATCH            409
+CONTENT_TOO_LARGE                   413
+CONTENT_SCHEMA_INVALID              422
+CONTENT_INTEGRITY_FAILED            422
+CONTENT_PERMISSION_DENIED           403
+RANGE_INVALID                       416
 ```
 
-错误不得包含：
+错误不得泄露：
 
-- 物理路径；
-- token；
-- 用户目录；
-- 内部堆栈；
-- 未授权的索引内容。
+```text
+physical path
+token
+user home
+internal stack
+unauthorized index content
+```
 
-## 16. 大小与并发限制
+## 15. Limits / Backpressure
 
-实现 Profile 必须声明：
+具体 deployment Profile MUST给出：
 
-- URL 和路径段最大长度；
-- JSON/JSONL 最大主体；
-- Resource 最大主体；
-- 单行 JSONL 最大长度；
-- 并发请求上限；
-- 每会话速率限制；
-- 超时和取消行为。
+```text
+max URL/path segment
+max JSON body
+max JSONL line/body/record count
+max Resource size
+concurrent request bound
+rate bound if enabled
+timeout/cancel policy
+```
 
-Repository 应对相同逻辑内容的并发请求去重。失败结果默认不永久缓存。
+Content Repository MAY对相同 logical content的并发 read去重，但不得改变独立 request的 authorization/error semantics。
 
-## 17. 完整性
+失败结果默认不得永久缓存。
 
-当 Package Index 提供内容哈希时，安装阶段必须校验主体。运行阶段可以按策略重新验证，但不得将已知哈希不匹配的主体返回为 200。
+## 16. Integrity
 
-索引与主体不一致时返回 409 或 422，并记录安装损坏诊断。
+Package Index存在 content hash 时，安装阶段 MUST验证。
 
-## 18. Client State 中的资源引用
+运行时检测到已知 hash mismatch：
 
-Client State 只携带：
+```text
+MUST NOT return 200
+→ 422 CONTENT_INTEGRITY_FAILED
+```
+
+若安装/Index本身处于 version conflict/incomplete state：
+
+```text
+→ 409 CONTENT_VERSION_MISMATCH / INSTALLATION_INCOMPLETE
+```
+
+这两个类别不得混用。
+
+## 17. Render State Resource Reference
+
+Render State/等价 presentation contract只携带逻辑引用，例如：
 
 ```ts
-interface ResourceReference {
+interface ResourceReferenceV1 {
   readonly resourceKey: string;
   readonly contentVersion: string;
 }
 ```
 
-Renderer 通过 Catalog 或 Resource Client 将 `resourceKey` 解析为 Content API 请求。
+Renderer Resource Client再根据安装上下文解析到 Content API。
 
-Client State 不携带：
+Render State MUST NOT携带：
 
-- Content API token；
-- 绝对 URL；
-- 本机路径；
-- 资源字节。
+```text
+Content token
+absolute Content URL
+local filesystem path
+resource bytes
+```
 
-## 19. Service Worker 生命周期
+Resource identity不要求绑定 Frame/Activation。
 
-Service Worker 可以被浏览器随时终止。处理每个 Fetch Event 时不得假设以下内存仍存在：
+## 18. Service Worker Lifecycle
 
-- Package Index Cache；
-- 安装注册表；
-- 授权对象；
-- 打开的 OPFS Handle。
+Service Worker MAY随时被浏览器终止。
 
-实现可以缓存这些对象以提高性能，但必须能够重新加载。
+请求正确性不得依赖以下 volatile memory：
 
-Service Worker 不承担 Runtime Tick、Frame Stack、Client State Projector 或输入处理。
+```text
+Package Index cache
+installation registry cache
+open OPFS handle
+authorization cache
+```
 
-## 20. 最小互操作测试
+实现可以缓存，但必须可从 persistent authority恢复。
 
-- Manifest、Record、Group 和 Resource 成功读取；
-- GET 与 HEAD 头部一致；
-- ETag 和 304；
-- Content Version 缓存隔离；
-- 未知 installationId、Namespace 和 Key；
-- 非法编码、路径穿越和超长参数；
-- 桌面 token 缺失、过期和权限不足；
-- PWA 未完成安装拒绝；
-- JSONL 流式读取；
-- MIME 正确；
-- 内容过大和并发限制；
-- 索引与主体哈希不匹配；
-- 可选 Range Profile；
-- 桌面 HTTP 与 PWA Service Worker 返回相同业务结果和错误码。
+Service Worker不承担 Runtime Tick、Frame Stack、Renderer Control或User Input处理。
 
-## 21. 相关文档
+## 19. Conformance Minimum
 
-- [游戏包契约 v1](./game-package-v1.md)；
-- [资源协议草案](./resource-protocol.md)；
-- [存储与内容系统](../10-architecture/storage-system.md)；
-- [FSDB Content Service 模块](../20-modules/fsdb-content-service/README.md)。
+至少：
+
+```text
+manifest/record/group/resource success
+GET/HEAD semantic equivalence
+ETag/304
+contentVersion cache isolation
+unknown installation/namespace/key
+invalid encoding/traversal-like logical segment
+Desktop bearer missing/invalid/expired
+Desktop permission insufficient
+PWA incomplete installation
+JSONL streaming
+MIME correctness
+content too large
+index/version conflict → deterministic 409
+schema failure → deterministic 422
+integrity failure → deterministic 422
+optional Range Profile
+Desktop/PWA same business status + code for same abstract fault
+no physical path/token leak
+```
+
+## 20. Open Boundary Before Freeze
+
+Content API v1 尚未 Frozen，主要剩余边界：
+
+```text
+Content Access Bootstrap/Profile
+exact deployment size/concurrency profiles
+optional Range Profile details
+MIME allow/deny policy if required
+```
+
+这些不得重新把 Content capability塞入 Frame、Renderer Control authority Snapshot或Render State。
+
+## 21. Core Invariants
+
+1. Content API只读；
+2. logical identity不暴露physical path；
+3. request先Index lookup后内部读取；
+4. GET/HEAD semantics稳定；
+5. Desktop/PWA逻辑route/status/code一致；
+6. Content capability distribution与Content resource protocol分离；
+7. state/version conflict固定409；body validation/integrity固定422；
+8. Resource bytes不进入Control/User Input/Render State；
+9. Render引用使用logical key + contentVersion；
+10. Content Service不拥有Runtime/Frame/Render authority。
