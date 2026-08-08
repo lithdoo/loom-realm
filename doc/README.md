@@ -45,9 +45,9 @@ Subsystem Control v2                    Draft / lifecycle-only direction
 Runtime Control Application Profile v1  Frozen
 Frame / Call v1                         Frozen
 Frame Suspend Clarification             Frozen clarification
-Main ⇄ Renderer Control v1              Draft / authority model refined
+Main ⇄ Renderer Control v1              Draft / InputTarget lease closed
 Data Connection Contract v1             Draft / lifecycle closed
-User Input v1                           Core Draft / Channel+Interest model
+User Input v1                           Core Draft / semantic closure reviewed
 Content API v1                          Active / Normative / Evolving
 ```
 
@@ -114,6 +114,16 @@ no patch/replay
 
 Snapshot包含 Runtime projection、Frame Stack、Activation/InputTarget 与逻辑 DataAuthority；不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
 
+InputTarget现在明确使用 one-shot lease：
+
+```text
+published InputTarget(frameId, activationId)
+→ revoked/removed/replaced
+→ same frameId + activationId never becomes InputTarget again
+```
+
+因此 Main可以继续 coalesce中间 snapshots，而不需要独立 `inputEpoch` 或强制发布每个 null gap。
+
 Control loss或 Renderer participant replacement会撤销该 participant 的 ordinary input 与 Data authority。
 
 ## Data Connection Contract v1
@@ -140,6 +150,16 @@ current-carrier installation必须 serialized；每个 Subsystem同时至多一�
 
 `generation` 是 Main-owned Data authority epoch，不是 reconnect counter。
 
+User Input在 current carrier 上包含双向 domain：
+
+```text
+Subsystem → Renderer
+    Input Interest
+
+Renderer → Subsystem
+    State / Event / Reset
+```
+
 ```text
 Data loss != Runtime failure
 Data loss != Frame unwind
@@ -150,32 +170,30 @@ Host如何建立 WebSocket / MessagePort carrier属于 Platform binding，不属
 
 ## User Input v1 Core Draft
 
-[User Input v1](./15-contracts/user-input-v1.md) 当前采用 Channel + Interest 模型：
+[User Input v1](./15-contracts/user-input-v1.md) 当前采用 Channel + Interest + Effective Channel 模型。
+
+### Authority / Trust
 
 ```text
-Subsystem → Renderer
-    Input Interest
+Main
+    owns InputTarget / Activation
 
-Renderer → Subsystem
-    State / Event / Reset
+Renderer Core
+    trusted sender-side InputTarget enforcement point
+
+Subsystem
+    validates local Frame/Activation + local Interest
 ```
 
-公共 authority仍来自：
+wire authority identity只需要：
 
 ```text
-current Data Connection
-+ Main current InputTarget
-+ frameId
-+ current activationId
+frameId + activationId
 ```
 
-Interest不是权限；有效输入固定为：
+Subsystem不能从 User Input wire独立证明 Main当前 `InputTarget` 非空；v1 不增加 signed input capability。
 
-```text
-Main-authorized input
-∩
-Subsystem current Input Interest
-```
+### Channel / Interest
 
 标准 Channel：
 
@@ -192,24 +210,50 @@ x.<custom-name>.state
 x.<custom-name>.event
 ```
 
-v1 Interest是 Data-Connection scoped full replacement exact set；fresh connection默认 empty，不支持 wildcard。
+Interest是 Data-Connection scoped full replacement exact set；fresh connection默认 empty，不支持 wildcard，也不是权限。
 
-语义：
+### Effective Input Channel
+
+```text
+Effective(C)
+=
+current matching Data Connection
+∧ Main current InputTarget matches
+∧ active/current Activation matches
+∧ C is interested
+∧ Producer(C) available
+```
+
+只有 Effective Channel 产生普通 State/Event。
+
+### State / Event / Reset
 
 ```text
 .state
     self-contained current snapshot
+    every false→true Effective transition sends fresh baseline
     latest wins / may coalesce
 
 .event
     ordered transient event
-    no coalescing / no history or reconnect replay
+    future only
+    no coalescing / no replay
 
 reset
     clears all input state for frameId + activationId
+    global ordering/coalescing barrier
 ```
 
-Event与Reset是 State coalescing barrier；移除 `.state` Interest时 Subsystem立即清空对应本地 state；InputTarget撤销时 Renderer在旧 connection仍 current 时 best-effort Reset previous target。
+Event与Reset是 State coalescing barrier。
+
+InputTarget撤销时 Renderer在旧 connection仍 current 时 best-effort Reset previous target。
+
+Effective `.state` Producer消失而 authority仍有效时：
+
+```text
+Reset current Activation
+→ fresh baselines for remaining Effective State Channels
+```
 
 Activation replacement、Connection retired、Renderer Control loss/replacement、Session end均形成 implicit reset boundary。
 
@@ -236,6 +280,7 @@ Frame lifecycle != Render lifecycle
 Data Connection retire != Render destroy
 Renderer/Data reconnect != Frame recovery
 Input Interest != Input authority
+Producer availability != Input authority
 User Input loss != Runtime failure
 ```
 
@@ -309,10 +354,10 @@ Legacy入口仍保留历史追溯，但不得作为新实现依据：
 ```text
 Protocol boundary cleanup                Accepted
 Subsystem Control v2                     Draft
-Renderer Control v1                      Draft / under review
+Renderer Control v1                      Draft / InputTarget lease closed
 Frame suspend semantics                  Clarified
 Data Connection Contract v1              Draft / lifecycle closed
-User Input v1                            Core Draft / Channel+Interest review
+User Input v1                            Core Draft / semantic closure reviewed
     ↓
 Standard Input Mapping + wire/limits
     ↓
