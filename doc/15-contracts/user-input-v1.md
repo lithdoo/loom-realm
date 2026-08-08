@@ -15,9 +15,9 @@
 
 核心原则：
 
-> **Main 决定输入 authority；Subsystem 只声明自己感兴趣的 Input Channels；Renderer 只采集并发送两者交集。Input Interest 只能缩小输入面，不能扩大 InputTarget / Activation authority。**
+> **Main 决定 ordinary input authority；Subsystem 只声明 Input Interest；Renderer Core 是 Main `InputTarget` 的 sender-side trusted enforcement point。最终只有 Effective Input Channel 才产生 State/Event 流。**
 
-User Input v1 Core 定义 authority、Input Channel / Input Interest、State / Event / Reset、ordering、coalescing、recovery 与扩展边界。标准设备具体 payload 仍由后续 Mapping/Profile 冻结，不直接复制浏览器或 OS Event 对象。
+User Input v1 Core 定义 authority、Input Channel / Input Interest、Effective Channel、State / Event / Reset、ordering、coalescing、recovery 与扩展边界。标准设备具体 payload 由后续 Mapping/Profile 冻结，不直接复制浏览器或 OS Event 对象。
 
 ---
 
@@ -49,7 +49,7 @@ Renderer → Subsystem
 
 不定义 Input ACK / Result / transactional Response。
 
-## 2. Authority 与 Interest 分离
+## 2. Trust / Authority Model
 
 ordinary input 的公共 authority 始终来自 Main：
 
@@ -63,58 +63,36 @@ current Frame
 current Activation
 ```
 
-Input Interest 不是 authority，也不是 permission grant。
-
-有效发送集合是：
+角色边界：
 
 ```text
-Main-authorized input
-∩
-Subsystem current Input Interest
+Main
+    owns InputTarget / Activation authority
+
+Renderer Core
+    trusted sender-side enforcement point for Main InputTarget routing
+
+Subsystem
+    independently validates local Frame/Activation freshness
+    and local Input Interest
 ```
 
-因此即使 Subsystem声明任意 Channel，只要 `InputTarget=null`、连接非 current 或 Activation不匹配，Renderer仍 MUST NOT发送 ordinary input。
-
-## 3. Renderer Send Gate
-
-Renderer 发送 State/Event 时必须同时满足：
-
-```text
-Data Connection lifecycle == current
-Main current InputTarget != null
-InputTarget.subsystemKey == current Data Connection subsystemKey
-mirrored Frame exists
-mirrored Frame lifecycle == active
-mirrored Frame activationId == InputTarget.activationId
-channel ∈ current Input Interest
-```
-
-任一条件不成立：
-
-```text
-MUST NOT send ordinary State/Event
-```
-
-Renderer不得根据 Render focus、DOM focus、carrier存在、自定义组件存在或 cached Activation自行扩展 InputTarget。
-
-## 4. Subsystem Receive Gate
-
-Subsystem接收 State/Event 时必须重新确认：
+Subsystem **不能仅凭 User Input wire 独立证明 Main 当前 `InputTarget` 非空**；它能够重新验证的是：
 
 ```text
 frameId exists
 Frame is locally active
-message activationId == current Activation
-message channel ∈ Subsystem local current Input Interest
+activationId is current
+channel is locally interested
 ```
 
-否则 MUST drop；MAY记录受限 diagnostics，但不得改变 Main Frame authority。
+因此 v1 的安全模型不是“不信任 Renderer Core”。如果未来要求恶意 Renderer 也无法伪造 Main InputTarget authority，应设计独立的 signed/capability input authority，而不是给 v1 偷加 token。
 
-Interest由 Subsystem自己维护，因此 Interest缩小时，即使旧消息仍在 carrier 上迟到，也可以在本地 gate 被丢弃。
+Input Interest 不是 authority，也不是 permission grant。
 
-## 5. Wire Authority Identity
+## 3. Wire Authority Identity
 
-每条 Renderer → Subsystem input message 的 authority identity只需要：
+每条 Renderer → Subsystem State/Event/Reset 的 authority identity 只需要：
 
 ```text
 frameId
@@ -130,7 +108,7 @@ generation
 connectionProfile
 ```
 
-这些已由 current Data Connection绑定。
+这些已经由 current Data Connection identity 绑定。
 
 ```ts
 interface UserInputAuthorityV1 {
@@ -139,9 +117,20 @@ interface UserInputAuthorityV1 {
 }
 ```
 
-v1 不新增 `inputEpoch`、`inputSessionId`、`connectionId` 或 operation ID；`activationId` 已经是 ordinary-input authority epoch。
+v1 不新增：
 
-## 6. Input Channel
+```text
+inputEpoch
+inputSessionId
+inputLeaseId
+connectionId
+operationId
+inputSequence
+```
+
+`activationId` 已经是 ordinary-input authority epoch。
+
+## 4. Input Channel
 
 Input Channel 是一种可独立声明 Interest、独立定义 payload 的输入流。
 
@@ -156,25 +145,22 @@ gamepad.state
 gamepad.event
 ```
 
-使用 `pointer` 而不是 `mouse`，避免把协议绑定到单一 pointing device。
+使用 `pointer` 而不是 `mouse`，避免绑定单一 pointing device。
 
-Channel 名称使用 exact match；v1 不支持 wildcard / prefix subscription。
-
-原因：
+Channel 名称只使用 exact match；v1 不支持 wildcard / prefix subscription。
 
 ```text
 future new channel
 MUST NOT silently expand an old Interest
 ```
 
-## 7. Custom Channel Namespace
+## 5. Custom Channel Namespace
 
-Subsystem提供的 Renderer component MAY 定义自定义 Input Channel。
-
-自定义 Channel MUST 使用：
+Subsystem 提供的 Renderer component MAY 定义自定义 Input Channel：
 
 ```text
-x.<custom-name>.(state|event)
+x.<custom-name>.state
+x.<custom-name>.event
 ```
 
 示例：
@@ -185,15 +171,15 @@ x.inventory.drop.event
 x.dialog.choice.event
 ```
 
-标准前缀由 LoomRealm保留；自定义 Channel不得占用 `keyboard.*`、`pointer.*`、`gamepad.*` 或未来保留标准前缀。
+标准前缀由 LoomRealm 保留；自定义 Channel不得占用 `keyboard.*`、`pointer.*`、`gamepad.*` 或未来保留标准前缀。
 
-因为 Data Connection已绑定 Subsystem，自定义名称无需重复 `subsystemKey`。
+因为 Data Connection 已绑定 Subsystem，自定义名称无需重复 `subsystemKey`。
 
-User Input Core不解释自定义 payload 的业务含义，只要求其遵守对应 `.state` / `.event` 语义和通用 wire limits。
+User Input Core 不解释自定义 payload 的业务含义，只要求其遵守 `.state/.event` 语义、plain-data 约束与通用 limits。
 
-## 8. Input Interest
+## 6. Input Interest
 
-Input Interest 是 Subsystem 对当前 Data Connection声明的 **完整 Channel 集合**。
+Input Interest 是 Subsystem 对当前 Data Connection 声明的**完整 exact Channel 集合**。
 
 概念结构：
 
@@ -203,7 +189,7 @@ interface InputInterestV1 {
 }
 ```
 
-语义：
+语义固定：
 
 ```text
 full replacement
@@ -214,57 +200,173 @@ not Activation-scoped
 not authority
 ```
 
-Subsystem MAY 随业务/Renderer component 状态变化更新 Interest。
+Subsystem MAY 随业务状态或 Renderer component 状态变化更新 Interest。
 
-Renderer收到新的 Interest后原子替换旧集合；不定义 subscribe/unsubscribe/add/remove patch wire。
-
-## 9. Interest Lifecycle
-
-新的 current Data Connection 的初始 Interest固定为：
+Renderer收到新的 Interest后原子替换旧集合；v1 不定义：
 
 ```text
-empty set
+subscribe
+unsubscribe
+add
+remove
+patch
+wildcard
 ```
 
-因此新连接默认不产生 ordinary input traffic。
+## 7. Interest Lifecycle / Race Closure
 
-Subsystem建立 current Data Connection 后，应发布当前完整 Interest。
-
-Interest不跨 retired connection自动继承，也不通过 reconnect replay 恢复。
-
-同一 current carrier 上，Interest publication按 Subsystem → Renderer carrier order处理；多个尚未发送的完整 Interest MAY latest-state coalesce。
-
-## 10. Interest Change Semantics
-
-新增 `.state` Channel Interest：
+新的 current Data Connection 初始：
 
 ```text
-Renderer SHOULD promptly emit one fresh current State snapshot
-if ordinary input authority is currently valid
+Interest = empty
 ```
 
-新增 `.event` Channel Interest：
+因此 fresh connection 默认不产生 ordinary input traffic。
+
+Subsystem建立 current Data Connection 后发布当前完整 Interest。
+
+Interest 不跨 retired connection自动继承，也不通过 reconnect replay 恢复。
+
+同一 current carrier 上，Interest publication按 Subsystem → Renderer per-direction order处理；多个尚未发送的完整 Interest MAY latest-state coalesce。
+
+Interest update 不需要 ACK。
+
+### 7.1 Interest 缩小
+
+Subsystem MUST 先把新的完整 Interest 作为本地 current Interest，再进行 publication。
+
+因此即使 Renderer 尚未观察到缩小，旧 Channel 消息迟到：
 
 ```text
-future Events only
-MUST NOT replay events from before the Interest became effective
+message channel ∉ Subsystem local current Interest
+→ MUST drop
 ```
 
-移除 `.state` Channel Interest：
+移除 `.state` Channel时 Subsystem MUST 立即清空该 Channel retained state。
+
+### 7.2 Interest 扩大
+
+Subsystem先在本地允许新的 Channel，再 publication。
+
+Renderer观察后：
 
 ```text
-Subsystem MUST immediately clear its locally retained state for that removed Channel
+.event
+    future Events only
+    no history replay
+
+.state
+    if Channel becomes Effective
+    → establish fresh State baseline
 ```
 
-移除 `.event` Channel Interest不需要历史清理。
+因此 Interest 不需要 revision / ACK / two-phase subscription。
 
-Interest变化不需要 ACK；传播期间允许短暂少发/多发，但 Receive Gate保证已移除 Channel的迟到输入不会重新生效。
+## 8. Effective Input Channel
 
-## 11. State Channels
+对某个 exact Channel `C`，定义：
 
-所有以 `.state` 结尾的 Channel 使用 **current-state snapshot** 语义。
+```text
+Effective(C)
+=
+Data Connection lifecycle == current
+AND Main current InputTarget != null
+AND InputTarget.subsystemKey == current Data Connection subsystemKey
+AND mirrored Frame exists
+AND mirrored Frame lifecycle == active
+AND mirrored Frame activationId == InputTarget.activationId
+AND C ∈ current Input Interest
+AND Producer(C) is available
+```
 
-要求：
+这是 User Input Core 的中心派生状态，不是新的 wire field。
+
+ordinary State/Event 的有效发送集合因此等于：
+
+```text
+Main authority
+∩ Subsystem Interest
+∩ Producer availability
+```
+
+Interest 或 Producer 都只能缩小输入面，不能产生 Main authority。
+
+## 9. Effective Transition Rules
+
+### 9.1 `.state`: false → true
+
+任意原因导致一个 `.state` Channel 从 non-effective 变为 effective 时：
+
+```text
+Renderer MUST promptly establish one fresh current State snapshot
+before relying on later State changes for that Channel
+```
+
+典型原因：
+
+```text
+Interest newly includes the Channel
+InputTarget becomes this Subsystem/Activation
+fresh Activation becomes current
+fresh Data Connection becomes current and Interest is republished
+Producer becomes available
+```
+
+这条规则比“新增 Interest 时发送 snapshot”更强：**只要 State Channel 重新变得 Effective，就建立 fresh baseline。**
+
+### 9.2 `.event`: false → true
+
+只允许发送变为 Effective 之后发生的 Event：
+
+```text
+MUST NOT replay historical Events
+```
+
+### 9.3 Effective: true → false
+
+Renderer MUST 立即停止该 Channel 的新 ordinary State/Event 发送。
+
+如果 false 的原因已经形成 implicit reset boundary（Activation/Connection/Control/Session loss），按对应 implicit reset收敛。
+
+如果 authority仍存在而只是 Producer 不可用，按 §15 Producer Loss Teardown 收敛。
+
+如果只是 Interest移除，Subsystem本地 Interest gate与 retained-state clear已经闭环，不要求额外 wire ACK。
+
+## 10. Renderer Send Gate
+
+Renderer 只有在 `Effective(channel) == true` 时 MAY 发送普通 State/Event。
+
+Renderer不得根据：
+
+```text
+Render focus
+DOM focus
+carrier physical existence
+custom component existence
+cached Activation
+Interest alone
+```
+
+自行生成或扩大 InputTarget。
+
+## 11. Subsystem Receive Gate
+
+Subsystem 接收 State/Event 时 MUST 重新确认：
+
+```text
+frameId exists
+Frame is locally active
+message activationId == current Activation
+message channel ∈ Subsystem local current Input Interest
+```
+
+否则 MUST drop；MAY 记录受限 diagnostics，但不得改变 Main Frame authority。
+
+Subsystem不把“收到一个合法格式消息”解释成 Main InputTarget grant。
+
+## 12. State Channels
+
+所有 `.state` Channel 使用 **current-state snapshot** 语义：
 
 ```text
 latest state wins
@@ -282,15 +384,13 @@ pointer current position/buttons
 current gamepad axes/buttons
 ```
 
-建模为对应 State snapshot。
+建模为 State snapshot。
 
-任何需要未来“release”消息才能解除的持续输入状态，不应只依赖 Event 流表达。
+任何需要未来“release”消息才能解除的持续输入状态，MUST NOT 只依赖 Event 流表达。
 
-## 12. Event Channels
+## 13. Event Channels
 
-所有以 `.event` 结尾的 Channel 使用瞬时 Event 语义。
-
-要求：
+所有 `.event` Channel 使用瞬时 Event 语义：
 
 ```text
 ordered
@@ -299,39 +399,98 @@ MUST NOT replay after reconnect
 MUST NOT establish protocol-level persistent state that requires a future Event to clear
 ```
 
-例如概念上的 click、wheel step、confirm/cancel、custom UI action 可以属于 Event。
+例如 click、wheel step、confirm/cancel、custom UI action 可以属于 Event。
 
-如果业务需要“当前仍按住/仍拖动/当前轴值”等持续事实，应使用对应 State Channel。
+如果业务需要“当前仍按住 / 仍拖动 / 当前轴值”等持续事实，应使用 State Channel。
 
-## 13. Reset
+## 14. Reset
 
-Reset不是普通 Channel，而是 User Input Core 的 teardown primitive。
+Reset不是普通 Channel，而是 User Input Core teardown primitive：
 
 ```text
 Reset(frameId, activationId)
 ```
 
-表示：
+含义：
 
 > 清空该 Frame + Activation 下所有 User Input `.state` Channel 的当前输入状态。
 
-Reset不改变 Input Interest，也不影响历史 Event。
+Reset：
 
-Reset是全局 input ordering barrier。
+```text
+does not modify Input Interest
+does not replay/undo Events
+is a global input ordering/coalescing barrier
+```
 
-## 14. InputTarget Revocation Teardown
+Subsystem只在 `frameId + activationId` 仍对应本地 current Activation时应用 Reset；stale Reset可安全丢弃。
 
-当 Renderer观察到旧 InputTarget 被移除或替换时，普通 State/Event authority立即失效。
+## 15. Producer Loss Teardown
+
+如果一个**当前 Interested 且 Effective 的 `.state` Producer** 在 ordinary authority仍有效时变为 unavailable：
+
+```text
+Renderer MUST stop that Channel immediately
+Renderer MUST best-effort send Reset(current frameId, activationId)
+Renderer MUST promptly re-establish fresh snapshots
+for every remaining Effective .state Channel
+```
+
+这使用已有全局 Reset收敛状态，不增加：
+
+```text
+channel.reset
+producer.closed
+channel.invalid
+```
+
+如果 Producer loss 与 Connection/Activation/Control loss同时发生，则对应 implicit reset boundary已经足够，不要求额外发送 Reset。
+
+当 Producer重新 available 且 Channel重新 Effective 时，按 `.state false → true` 建立 fresh snapshot。
+
+## 16. InputTarget Revocation Teardown
+
+当 Renderer观察到旧 InputTarget 被移除或替换时：
+
+```text
+ordinary State/Event authority for old target ends immediately
+```
 
 如果旧 target 对应 Data Connection仍 current，Renderer MUST best-effort 向 **immediately previous** `frameId + activationId` 发送一次 Reset，然后停止旧 target ordinary input。
 
-这是 Reset 唯一允许在普通 Send Gate已经撤销后发送的 teardown 例外。
+这是 Reset 允许在普通 Send Gate已经撤销后发送的 teardown 例外。
 
-Subsystem只在该 `frameId + activationId` 仍是本地 current Activation时应用 Reset；若 Activation已经被 Frame Control撤销，则旧 state本就必须被清空，迟到 Reset可安全丢弃。
+如果 Frame Control 已经撤销该 Activation，Subsystem的 implicit reset已经生效，迟到 Reset可丢弃。
 
-## 15. Implicit Reset Boundaries
+## 17. InputTarget One-Shot Lease
 
-以下事件本身 MUST 等价于清空相关 User Input State，无需依赖 Reset成功送达：
+为使 Renderer Control full-snapshot coalescing 与 User Input teardown闭合，v1 冻结：
+
+> **一个已发布过的 `InputTarget(frameId, activationId)` 一旦被 Main 撤销、移除或替换，该同一 `frameId + activationId` MUST NOT 在之后再次成为 InputTarget。**
+
+因此：
+
+```text
+A1 granted
+→ A1 target revoked
+→ A1 permanently input-dead
+```
+
+未来重新授予 ordinary input authority必须使用 fresh authority epoch，通常即 fresh `activationId`。
+
+v1 不增加独立 `inputEpoch`。
+
+该规则保证即使 Main coalesce：
+
+```text
+A1 → null → ?
+```
+
+Renderer也不会因为看不到中间 null 而错误地把 A1 当作连续未撤销 authority。
+
+## 18. Implicit Reset Boundaries
+
+以下事件本身 MUST 等价于清空相关 User Input State，无需依赖显式 Reset成功送达：
 
 ```text
 Activation revoked/replaced
@@ -341,9 +500,9 @@ Renderer Control authority lost/replaced
 Session ends
 ```
 
-因此连接断开、Runtime/Frame authority变化时不会因为缺失 release/event 而永久保留旧输入状态。
+因此连接断开、Runtime/Frame authority变化不会因为缺失 release/event 永久保留旧输入状态。
 
-## 16. Activation Boundary
+## 19. Activation Boundary
 
 Activation 是不可跨越的 User Input authority epoch。
 
@@ -357,11 +516,11 @@ Reset
 
 都不能重新解释为 fresh Activation输入。
 
-Renderer MUST NOT replay旧 Activation输入；Subsystem MUST reject stale activationId。
+Renderer MUST NOT replay旧 Activation输入；Subsystem MUST reject stale `activationId`。
 
-v1 不依赖“同一 Activation revoke input 后再次 re-grant”语义；需要重新建立 ordinary input authority时应使用新的 authority epoch，而不是恢复旧输入状态。
+结合 InputTarget One-Shot Lease，v1 不支持在同一 `activationId` 上 revoke ordinary input 后再 re-grant。
 
-## 17. Connection Re-establishment
+## 20. Connection Re-establishment
 
 如果 Data Connection丢失但相同 DataAuthority generation和 Frame/Activation仍有效：
 
@@ -369,21 +528,21 @@ v1 不依赖“同一 Activation revoke input 后再次 re-grant”语义；需�
 fresh connection starts with Interest = empty
 Subsystem republishes current full Interest
 Events during outage are lost / not replayed
-interested State Channels are re-established from fresh snapshots
+Effective State Channels establish fresh snapshots
 old remote State MUST NOT be assumed preserved
 ```
 
 因此 User Input v1不需要 replay cursor、input revision或 connection-level resume token。
 
-## 18. Ordering 与 Coalescing
+## 21. Ordering / Coalescing
 
-User Input v1依赖 Data Connection提供 Renderer → Subsystem per-direction ordered carrier。
+User Input v1依赖 Data Connection提供 per-direction ordered carrier。
 
 v1不增加独立 `inputSequence`。
 
 State MAY coalesce，但不得跨 Event 或 Reset barrier移动。
 
-示例：
+例如：
 
 ```text
 State A1
@@ -395,7 +554,7 @@ Reset
 State A5
 ```
 
-可以收敛为：
+MAY 收敛为：
 
 ```text
 State A2
@@ -405,23 +564,21 @@ Reset
 State A5
 ```
 
-不得把 A1/A2 合并到 Event E 之后，也不得把 Reset 前 State移动到 Reset之后。
+多个 State Channel连续出现时，实现 MAY 在不跨 Event/Reset barrier 的前提下只保留每个 Channel最新 pending snapshot。
 
-多个 State Channel连续出现时，实现 MAY 在不跨 Event/Reset barrier 的前提下保留每个 Channel 的最新待发送 snapshot。
+## 22. Backpressure
 
-## 19. Backpressure
-
-建议的最小队列模型：
+最小队列模型：
 
 ```text
 State
-    bounded latest pending snapshot per interested Channel
+    bounded latest pending snapshot per Effective Channel
 
 Event
     bounded ordered FIFO
 
 Reset
-    ordering barrier / teardown priority
+    teardown / ordering barrier priority
 
 Interest
     latest full replacement state
@@ -429,11 +586,11 @@ Interest
 
 不得无界增长。
 
-Event overflow本身不是 Runtime failure；具体 numeric limits 与 drop policy在 Completion/Profile冻结。已发送/保留的 Event相对顺序不得改变，丢弃的 Event不得重放。
+Event overflow本身不是 Runtime failure。具体 numeric limits 与 drop policy在 Completion/Profile冻结；已保留/发送的 Event相对顺序不得改变，丢弃的 Event不得重放。
 
-## 20. No Broadcast / No Frame Commands
+## 23. No Broadcast / No Frame Commands
 
-ordinary User Input不是 Subsystem broadcast。
+ordinary User Input不是 broadcast。
 
 一条 State/Event只属于：
 
@@ -444,11 +601,20 @@ one Activation
 one exact Input Channel
 ```
 
-User Input不得直接表达或代替 `frame.call`、`frame.return`、`frame.close`、`frame.resume`、Frame Stack mutation或 InputTarget mutation。
+User Input不得直接表达或代替：
 
-UI “取消”仍只是输入 Event；是否 `frame.return({type:"cancelled"})` 由 Subsystem业务逻辑决定。
+```text
+frame.call
+frame.return
+frame.close
+frame.resume
+Frame Stack mutation
+InputTarget mutation
+```
 
-## 21. Failure Boundary
+UI “取消”仍只是 Event；是否 `frame.return({type:"cancelled"})` 由 Subsystem业务逻辑决定。
+
+## 24. Failure Boundary
 
 以下事件本身不产生 Runtime failure或 Frame unwind：
 
@@ -459,12 +625,14 @@ input dropped due to no current connection
 Event lost during connection failure
 State coalescing
 Interest propagation gap
+Producer availability change
 local/reset teardown
+Event overflow
 ```
 
 Malformed/oversize wire和 numeric limits在 User Input completion阶段冻结；不得通过 User Input error重新定义 Frame/Runtime failure authority。
 
-## 22. Device / Payload Mapping Boundary
+## 25. Device / Payload Mapping Boundary
 
 Core v1不直接复制：
 
@@ -477,7 +645,7 @@ DOM Event
 Host object
 ```
 
-后续 Standard Input Mapping Profile应定义标准 Channel payload：
+后续 Standard Input Mapping Profile定义标准 Channel payload：
 
 ```text
 keyboard.state / keyboard.event
@@ -485,11 +653,11 @@ pointer.state / pointer.event
 gamepad.state / gamepad.event
 ```
 
-Text / IME、gesture、accessibility action可以独立 Profile/Channel 扩展，不要求塞入 Core v1。
+Text / IME、gesture、accessibility action可以独立 Profile/Channel 扩展，不要求进入 Core v1。
 
-自定义 `x.*` Channel payload由 Subsystem Renderer component 与 Subsystem Runtime共同定义，但必须保持 plain-data、limits和 `.state/.event` Core语义。
+自定义 `x.*` Channel payload由 Subsystem Renderer component 与 Runtime共同定义，但必须保持 plain-data、limits和 `.state/.event` Core语义。
 
-## 23. Minimum Core Conformance Scenarios
+## 26. Minimum Core Conformance Scenarios
 
 至少覆盖：
 
@@ -499,27 +667,33 @@ null-target-no-send
 not-interested-channel-no-send
 wrong-subsystem-no-send
 non-current-connection-no-send
+renderer-is-inputtarget-enforcement-point
 
 interest-default-empty
 interest-full-replacement
 interest-exact-match-no-wildcard
 interest-removal-drops-late-message
 interest-removal-clears-removed-state
-state-interest-add-sends-fresh-snapshot
-event-interest-add-no-history-replay
-custom-x-channel-accepted
-reserved-channel-collision-rejected
+interest-update-no-ack-required
 
-stale-activation-rejected
-inputtarget-revocation-best-effort-reset
-activation-replacement-implicit-reset
-connection-retire-implicit-reset
-
+state-effective-false-to-true-fresh-baseline
+event-effective-false-to-true-no-history-replay
 state-latest-coalescing
 state-self-contained
 event-order-preserved
 event-not-coalesced
 event-reset-are-coalescing-barriers
+
+custom-x-channel-accepted
+reserved-channel-collision-rejected
+producer-loss-reset-and-rebaseline
+producer-return-fresh-state
+
+stale-activation-rejected
+inputtarget-revocation-best-effort-reset
+inputtarget-one-shot-no-same-activation-regrant
+activation-replacement-implicit-reset
+connection-retire-implicit-reset
 reset-clears-all-input-state
 
 same-generation-reconnect-interest-empty
@@ -531,7 +705,7 @@ input-loss-does-not-unwind-frame
 ui-cancel-does-not-directly-mutate-frame
 ```
 
-## 24. Explicit Non-Goals Core Draft
+## 27. Explicit Non-Goals Core Draft
 
 当前 Core Draft不冻结：
 
@@ -551,32 +725,36 @@ compression / binary representation
 input acknowledgement
 input replay cursor
 wildcard Interest
+per-channel reset wire
+untrusted-Renderer signed input capability
 ```
 
-## 25. Core Invariants
+## 28. Core Invariants
 
-1. Main InputTarget/Activation是 ordinary input authority；
-2. Input Interest只能缩小输入面，不能扩大 authority；
-3. User Input domain包含 Subsystem→Renderer Interest 与 Renderer→Subsystem State/Event/Reset；
-4. 新 Data Connection的 Interest默认 empty；
-5. Interest是 Runtime/Data-Connection scoped full replacement exact set；
-6. 标准 Channel使用 `keyboard|pointer|gamepad.(state|event)`；
-7. 自定义 Channel使用 `x.*.(state|event)`；
-8. v1不支持 wildcard Interest；
-9. wire authority identity = `frameId + activationId`；
-10. Subsystem重新验证 Activation与 local Interest；
-11. `.state` 是 self-contained latest-state snapshot，可 coalesce；
-12. `.event` 是 ordered transient input，不可 coalesce/replay；
+1. Main `InputTarget` / Activation 是 ordinary input authority；
+2. Renderer Core 是 Main InputTarget sender-side trusted enforcement point；
+3. Subsystem重新验证 local Activation与 local Interest，但不从 User Input wire独立证明 Main InputTarget；
+4. Input Interest只能缩小输入面，不能扩大 authority；
+5. fresh Data Connection的 Interest默认 empty；
+6. Interest是 Runtime/Data-Connection scoped full replacement exact set；
+7. 标准 Channel使用 `keyboard|pointer|gamepad.(state|event)`；
+8. 自定义 Channel使用 `x.*.(state|event)`；
+9. v1不支持 wildcard Interest；
+10. Effective Channel = Main authority ∩ Interest ∩ Producer availability；
+11. `.state` 每次 non-effective→effective都建立 fresh self-contained baseline；
+12. `.event` 只发送 Effective 后的 future Events，不 coalesce/replay；
 13. Event与Reset是 State coalescing barrier；
 14. Reset清空当前 Activation全部 input State；
 15. Interest移除 `.state` Channel立即清空该 Channel本地 state；
-16. InputTarget撤销时 Renderer best-effort Reset旧 target；
-17. Activation/Connection/Control/Session authority loss形成 implicit reset；
-18. reconnect从 empty Interest + fresh State恢复，不重放 Event；
-19. input loss/overflow不等于 Runtime failure或 Frame unwind；
-20. User Input不是 broadcast，也不是 Frame command。
+16. Effective State Producer消失时 Reset并 rebaseline其余 State；
+17. InputTarget撤销时 Renderer best-effort Reset旧 target；
+18. 同一 `frameId + activationId` 的 InputTarget 一旦撤销不得 re-grant；
+19. Activation/Connection/Control/Session authority loss形成 implicit reset；
+20. reconnect从 empty Interest + fresh State恢复，不重放 Event；
+21. input loss/overflow不等于 Runtime failure或 Frame unwind；
+22. User Input不是 broadcast，也不是 Frame command。
 
-## 26. Summary
+## 29. Summary
 
 ```text
 Subsystem
@@ -585,21 +763,26 @@ Subsystem
         pointer.event
         x.inventory.drag.state
 
-Renderer
-    Main authority valid?
-    AND channel interested?
-        ↓
-    collect / normalize only useful inputs
-        ↓
-    State / Event / Reset
-        ↓
-    attach frameId + activationId
-        ↓
+Renderer Core
+    computes Effective(Channel):
+        Main authority
+        ∩ Interest
+        ∩ Producer availability
+
+    .state false→true
+        → fresh baseline
+
+    .event
+        → future ordered transient events only
+
+    teardown
+        → Reset / implicit reset
+
 Subsystem
-    validate current Activation + local Interest
-    accept or drop
+    validates current Activation + local Interest
+    accepts or drops
 ```
 
 最终原则：
 
-> **Connection 决定“管道是否有效”，Main InputTarget 决定“输入给谁”，Activation 决定“输入是否仍可接受”，Input Interest 决定“这个 Subsystem 当前值得接收哪些输入流”。**
+> **Connection 决定“管道是否有效”，Main InputTarget 决定“输入给谁”，Activation 决定“authority epoch”，Input Interest 决定“值得接收哪些流”，Producer 决定“哪些流此刻可生成”；只有它们的交集才是 Effective Input Channel。**
