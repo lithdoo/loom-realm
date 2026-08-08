@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：跨系统和对外协议的入口、版本、Profile 与迁移关系  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)  
-> 最近复核：2026-08-05
+> 最近复核：2026-08-08
 
 契约层定义不同系统或不同实现必须共同遵守的可互操作语义。系统架构说明职责和所有权；契约冻结消息、状态、顺序、错误、failure recovery、limits、Profile和兼容性。
 
@@ -144,7 +144,27 @@ Conformance companion：[Frame / Call Protocol v1 Conformance Profile](./frame-c
 
 旧 [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) 仅为 Legacy redirect。
 
-## 6. 当前契约状态
+## 6. Main ⇄ Renderer Control Protocol v1 Draft
+
+权威草案：[Main ⇄ Renderer Control Protocol v1](./main-renderer-control-v1.md)。
+
+当前 Draft 采用：
+
+```text
+Main = authority
+Renderer = read-only committed mirror
+full Authority Snapshot
+monotonic Session-local revision
+revision gap allowed / publication may coalesce
+renderer.hello + renderer.state only
+reconnect = fresh current snapshot, no historical replay
+```
+
+协议继续服从 Frame v1 publication/recovery barrier：`activate/resume ACK` 后才可发布对应 InputTarget；revoked Activation 永不重新出现；normal/recovery `InputTarget=null` 合法；Renderer 不参与 Frame RPC、failure root计算或 unwind。
+
+当前仍需重点审查 Data Grant ownership/lifecycle，以及 Renderer Control loss 对既有 Renderer⇄Subsystem Data Connection 的影响边界；因此本协议尚未 Frozen。
+
+## 7. 当前契约状态
 
 | 主题 | 入口 | 状态 |
 |---|---|---|
@@ -154,7 +174,7 @@ Conformance companion：[Frame / Call Protocol v1 Conformance Profile](./frame-c
 | Runtime Control Application Profile v1 | [runtime-control-profile-v1.md](./runtime-control-profile-v1.md) | Active / Normative / Frozen |
 | Frame / Call v1 | [frame-call-protocol-v1.md](./frame-call-protocol-v1.md) | **Active / Normative / Frozen** |
 | Frame / Call v1 Conformance | [frame-call-conformance-v1.md](./frame-call-conformance-v1.md) | Active / Normative / Frozen |
-| Main ⇄ Renderer Control | 尚待新文档 | Draft target |
+| Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | **Active Design / Draft** |
 | Renderer ⇄ Subsystem Connection | 尚待新文档 | Draft target |
 | User Input | 尚待新文档 | Draft target |
 | Render Update | 尚待新文档 | Draft target |
@@ -164,7 +184,7 @@ Conformance companion：[Frame / Call Protocol v1 Conformance Profile](./frame-c
 | Renderer–Subsystem Data v1 | [frame-data-channel-v1.md](./frame-data-channel-v1.md) | Legacy / Superseded |
 | Client State Tree v1 | [client-state-tree-v1.md](./client-state-tree-v1.md) | Legacy / Superseded |
 
-## 7. Version / Profile 规则
+## 8. Version / Profile 规则
 
 - 改变 Frame method/field含义、identity ownership、commit point、error classification、unwind root、Frozen limits或 ordering guarantee属于不兼容改变；
 - Frame / Call v1没有 minor wire version、独立 hello或运行时 downgrade；
@@ -172,9 +192,9 @@ Conformance companion：[Frame / Call Protocol v1 Conformance Profile](./frame-c
 - Transport不得改变 Frame application semantics；
 - `subsystem.hello.protocolVersions`只协商 Subsystem Control；
 - Fixture coverage可以增加而不改变 protocol version，前提是只验证既有 v1语义；
-- Main⇄Renderer Control未来 wire可以 coalesce intermediate revision，但必须服从 Frame publication/recovery barrier。
+- Renderer Control v1 当前 Draft 使用 full Snapshot + monotonic revision；Main MAY coalesce intermediate revision，但必须服从 Frame publication/recovery barrier。
 
-## 8. 后续冻结顺序
+## 9. 后续冻结顺序
 
 ```text
 Game Package v2 / Desktop Launcher v1       Frozen
@@ -182,14 +202,15 @@ Subsystem Control v1                        Frozen
 Runtime Control Application Profile v1      Frozen
 Frame / Call Protocol v1                    Frozen
     ↓
-Main ⇄ Renderer Control                     ← next
+Main ⇄ Renderer Control v1                  Draft / under review
+    ↓
 Renderer ⇄ Subsystem Connection
 User Input
 Render Update
 Render State
 ```
 
-## 9. 当前明确暂缓
+## 10. 当前明确暂缓
 
 PWA Launcher/credential bootstrap profile、第二 Launcher、Sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、same-attempt reconnect、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame runtime downgrade/capability negotiation。
 
