@@ -24,136 +24,166 @@ LoomRealm 文档按依赖顺序组织：
 10. [Game Package v2](./15-contracts/game-package-v2.md)
 11. [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
 12. [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
-13. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
-14. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
-15. [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
-16. [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
-17. [只读 Content API v1](./15-contracts/content-api-v1.md)
-18. [模块设计目录](./20-modules/README.md)
-19. [实施计划目录](./30-implementation/README.md)
+13. [Subsystem Control Protocol v2 Draft](./15-contracts/subsystem-control-protocol-v2.md)
+14. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
+15. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
+16. [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
+17. [Frame v1 Suspend Semantics Clarification](./15-contracts/frame-call-v1-suspend-clarification.md)
+18. [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
+19. [只读 Content API v1](./15-contracts/content-api-v1.md)
+20. [模块设计目录](./20-modules/README.md)
+21. [实施计划目录](./30-implementation/README.md)
 
 ## 当前核心结论
 
 ```text
-Game Package / Desktop Launcher        Frozen
-Subsystem Control v1                   Frozen
-Runtime Control Application Profile v1 Frozen
-Frame / Call Protocol v1               Active / Normative / Frozen
-Main ⇄ Renderer Control v1             Active Design / Draft
+Game Package / Desktop Launcher         Frozen
+Subsystem Control v1                    Frozen
+Subsystem Control v2                    Draft / lifecycle-only direction
+Runtime Control Application Profile v1  Frozen
+Frame / Call v1                         Frozen
+Frame Suspend Clarification             Frozen clarification
+Main ⇄ Renderer Control v1              Draft / boundary refined
+Content API v1                          Active / Normative / Evolving
 ```
 
-### Runtime Control Application Profile v1
+协议边界清理决策见 [ADR 0016](./decisions/0016-protocol-boundary-cleanup.md)。
 
-第一阶段同一 Main ⇄ Subsystem Control Connection组合：
+核心原则：
 
 ```text
-Subsystem Control Protocol v1
+Runtime != Frame != Renderer Control != Data Connection != Render != Content
+```
+
+## Runtime Control
+
+Profile v1 继续冻结：
+
+```text
+Subsystem Control v1
 +
-Frame / Call Protocol v1
+Frame / Call v1
 ```
 
-Profile静态绑定 Frame v1，不新增 runtime handshake。`subsystem.hello.protocolVersions`只协商 Subsystem Control；hello成功前无 Frame operation；Runtime在该 Profile下 ready表示完整承担 Frame v1 Subsystem角色。
+不静默加入 Data lease method。
 
-同一 sender的 Control + Frame Request共享 connection-lifetime one-shot positive-safe-integer ID namespace，避免不同协议域的迟到 Response互相误匹配。
+Subsystem Control v2 Draft把 Runtime `ready` 收纯为 lifecycle readiness，不再携带 Renderer Data endpoint，从而允许 Desktop/PWA 使用不同 Data bootstrap Profile而共享同一 Runtime lifecycle semantics。
 
-### Frame / Call v1
+未来 Runtime Control Application Profile v2 只有在所需组成协议冻结后才定义。
+
+## Frame / Call v1
 
 ```text
-A  identity / lifecycle / Activation
-B  exact seven RPC / closed schema / FrameOutcome
-C  transaction / acceptance / ACK-before-publication
-D  error / timeout / no-retry / cancellation boundary
-E  Runtime failure lowest-root fixed-point unwind
-F  JSON/ID/limits/deadline/transport/version/conformance
+Main → Subsystem
+    initialize / activate / suspend / resume / close
+
+Subsystem → Main
+    call / return
 ```
 
-Batch A-F 都已 Frozen；Batch标签只用于设计溯源。
-
-正常 call：
+核心：
 
 ```text
-Caller active
-→ Call Acceptance Commit
-→ call Success
-→ Child initialize/activate
-→ activate ACK
-→ publish Child InputTarget
+Main owns Frame/Stack/Activation/InputTarget
+Response-before-dependent-RPC
+activate/resume ACK-before-publication
+Success = known commit
+Explicit Error = known no-commit
+Timeout/loss = ambiguous → Runtime failure
+no retry/replay
+lowest failed-runtime root → whole suffix fixed-point unwind
+accepted outcome preserved
+fresh surviving Caller resume
+Frame lifecycle != Render/Data lifecycle
 ```
 
-Return：
+显式 `frame.suspend` 的 v1 闭合语义见 [Suspend Clarification](./15-contracts/frame-call-v1-suspend-clarification.md)：
 
 ```text
-Return Acceptance Commit
-→ return Success
-→ close ACK/pop
-→ Caller resume(fresh Activation) ACK
-→ publish Caller InputTarget
+child-call suspension
+    → existing frame.resume(child outcome) may reactivate
+
+administrative frame.suspend
+    → one-way quiesce in v1
+    → no generic reactivation
 ```
 
-Error：
+## Renderer Control v1 Draft
 
-```text
-Success        → known committed
-Explicit Error → known not committed
-Timeout/loss   → ambiguous → Runtime failure
-```
-
-Runtime failure：
-
-```text
-failedRuntimeKeys
-→ lowest failed-runtime Frame root
-→ whole suffix Top→Bottom
-→ failed logical retire / healthy close
-→ fixed-point expansion
-→ accepted outcome or SUBSYSTEM_RUNTIME_FAILED
-→ fresh final Caller resume or empty Stack
-```
-
-Completion profile：
-
-```text
-protocol loomrealm.frame-call / 1
-no JSON-RPC Batch in Runtime Control Profile v1
-Request ID positive safe integer / shared sender Connection lifetime no reuse
-message <=1 MiB / JSON depth <=64 / business JsonValue <=512 KiB
-Desktop actual WebSocket text bytes also hard-capped at 1 MiB
-identity/failure field limits
-sender-role Frame deadlines 1s..5min monotonic
-Desktop WebSocket / PWA MessagePort same Frame application semantics
-no frame.hello/version/capabilities or runtime downgrade
-```
-
-正式兼容要求见 [Conformance Profile](./15-contracts/frame-call-conformance-v1.md)。协议已经 Frozen，但 executable fixture/harness 是否完成属于实施状态，不能从协议状态反推。
-
-### Main ⇄ Renderer Control v1 Draft
-
-当前 Draft 采用：
+当前 Draft 使用：
 
 ```text
 Main = authority
 Renderer = read-only committed mirror
 full Authority Snapshot
 Session-local monotonic revision
-revision gap allowed / publication coalescing allowed
-renderer.hello + renderer.state only
-reconnect = current snapshot / no history replay
+revision gap/coalescing allowed
+no patch/replay
+reconnect = current Snapshot
 ```
 
-协议必须继续服从 Frame v1 的 ACK-before-publication、revoked Activation never reappears 与 failure barrier；Renderer不能根据 Runtime/Data状态自行修改 Stack或恢复旧 InputTarget。
-
-当前仍需审查 Renderer Data Grant ownership/lifecycle 与 Control Connection loss 对既有 Data Connection 的影响，因此尚未 Frozen。
-
-## Runtime / Frame / Render 边界
+Snapshot只包含逻辑 authority：
 
 ```text
-spawn success ≠ connected ≠ identified ≠ ready
-shutdown Response ≠ stopped
-Frame outcome ≠ Frame lifecycle
-Frame lifecycle ≠ Render lifecycle
+Runtime projection
+Frame Stack
+Activation/InputTarget
+DataAuthority {
+    subsystemKey
+    generation
+    connectionProfile
+}
 ```
 
-Renderer只使用 Main已 commit current Activation/InputTarget；normal/recovery gap都可 `InputTarget=null`。Runtime failure unwind不通过 Renderer reconnect/Data resync修复。Render完全由 Subsystem独立管理。
+不包含：
+
+```text
+Data endpoint
+MessagePort
+bearer Data token
+Render State
+Content Grant
+```
+
+Renderer Control loss会撤销 ordinary input 与全部 DataAuthority，并关闭当前 Data Connections；重新连接后从 fresh full Snapshot恢复。
+
+## Content API v1
+
+Content API负责：
+
+```text
+logical readonly routes
+MIME/cache/version
+request authorization semantics
+errors/integrity
+```
+
+但不负责 Content capability distribution。
+
+```text
+Content API semantics
+!=
+Content Access Bootstrap/Profile
+```
+
+错误分类已收敛为：
+
+```text
+state/version/index conflict → 409
+body schema/integrity failure → 422
+```
+
+## Runtime / Frame / Render / Data 边界
+
+```text
+spawn success != connected != identified != ready
+shutdown Response != stopped
+Frame outcome != Frame lifecycle
+Frame lifecycle != Data Connection lifecycle
+Frame lifecycle != Render lifecycle
+Data Connection close != Render destroy
+Renderer reconnect != Frame recovery
+```
 
 ## 文档目录
 
@@ -176,12 +206,21 @@ Renderer只使用 Main已 commit current Activation/InputTarget；normal/recover
 - [Game Package v2](./15-contracts/game-package-v2.md)
 - [Desktop Node.js Launcher Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
 - [Subsystem Control Protocol v1](./15-contracts/subsystem-control-lifecycle-protocol.md)
+- [Subsystem Control Protocol v2 Draft](./15-contracts/subsystem-control-protocol-v2.md)
 - [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
 - [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
+- [Frame v1 Suspend Semantics Clarification](./15-contracts/frame-call-v1-suspend-clarification.md)
 - [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
-- [旧 Frame 生命周期草案路径（Legacy）](./15-contracts/system-lifecycle-protocol.md)
+
+Legacy入口仍保留历史追溯，但不得作为新实现依据：
+
+- `game-package-v1.md`
+- `system-lifecycle-protocol.md`
+- `frame-data-channel-v1.md`
+- `client-state-tree-v1.md`
+- `resource-protocol.md`
 
 ### 20 · 模块设计
 - [模块设计目录](./20-modules/README.md)
@@ -207,21 +246,24 @@ Renderer只使用 Main已 commit current Activation/InputTarget；normal/recover
 - [ADR 0013 · Frame / Call Batch D](./decisions/0013-freeze-frame-call-protocol-v1-batch-d.md)
 - [ADR 0014 · Frame / Call Batch E](./decisions/0014-freeze-frame-call-protocol-v1-batch-e.md)
 - [ADR 0015 · Frame / Call Batch F / v1 Completion](./decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)
-
-当前有效结论以 `00-overview`、`10-architecture`、`15-contracts` 为准；ADR保存历史决策过程。
+- [ADR 0016 · Protocol Boundary Cleanup](./decisions/0016-protocol-boundary-cleanup.md)
 
 ## 当前推进状态
 
 ```text
-Game Package v2 / Launcher v1           Frozen
-Subsystem Control v1                    Frozen
-Runtime Control Application Profile v1  Frozen
-Frame / Call Protocol v1                Frozen
-Frame v1 executable conformance         Implementation tracking
-Main ⇄ Renderer Control v1              Draft / under review
-Renderer ⇄ Subsystem Connection         Next protocol target after review
-User Input / Render Update              Draft target
-Render State                            Draft target
+Protocol boundary cleanup                Accepted
+Subsystem Control v2                     Draft
+Renderer Control v1                      Draft / under review
+Frame suspend semantics                  Clarified
+    ↓
+Renderer ⇄ Subsystem Connection v1       Next protocol target
+    ↓
+Runtime Control Profile v2               If required by frozen composition
+    ↓
+User Input v1
+Render Update v1
+Render State Contract v1
+Content Access Profile
 ```
 
-明确暂缓：PWA Launcher/Credential/Control Port Bootstrap Profile、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume、Control heartbeat/same-attempt reconnect、lazy/idle recycle、多 Runtime per key、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame runtime version downgrade/capability negotiation。
+明确暂缓：第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame replay/resync、transparent partial-Runtime recovery、Frame runtime dynamic downgrade/capability negotiation。
