@@ -122,6 +122,16 @@ no replay/patch
 Control loss → revoke InputTarget/DataAuthority → retire Data Connections
 ```
 
+InputTarget进一步使用 one-shot lease：
+
+```text
+published InputTarget(frameId, activationId)
+→ revoked/removed/replaced
+→ same frameId + activationId MUST NOT become InputTarget again
+```
+
+这样 Main 可以继续 coalesce 中间 full Snapshots，而不会隐藏同一 input authority 的 revoke→regrant。
+
 ## 6. Data Authority
 
 Main是 Renderer⇄Subsystem Data authority。
@@ -195,7 +205,7 @@ Render Update
     Subsystem → Renderer
 ```
 
-User Input的反向 Interest只是输入域自己的 filtering/configuration state，不是新的第三个 System Data protocol，也不产生 Main authority。
+User Input反向 Interest只是输入域自己的 filtering/configuration state，不是新的第三个 System Data protocol，也不产生 Main authority。
 
 User Input与Render Update共享 carrier，但必须独立定义 payload、ordering/sequence、backpressure、recovery 与 limits。
 
@@ -203,26 +213,22 @@ User Input与Render Update共享 carrier，但必须独立定义 payload、order
 
 权威草案：[User Input v1](../15-contracts/user-input-v1.md)。
 
-### Authority
+### Authority / Trust
 
-ordinary input合法至少要求：
-
-```text
-current Data Connection
-Main current InputTarget != null
-InputTarget.subsystemKey matches current connection
-Frame active
-activationId current
-channel ∈ Subsystem current Input Interest
-```
-
-这里 Interest只缩小流量：
+Main仍独占 ordinary input authority。
 
 ```text
-Effective Input = Main authority ∩ Subsystem Interest
+Main
+    owns InputTarget / Activation
+
+Renderer Core
+    trusted sender-side InputTarget enforcement point
+
+Subsystem
+    validates local Frame/Activation + local Interest
 ```
 
-Interest不能自行获取 InputTarget，也不能恢复 revoked Activation。
+Subsystem不能从 User Input wire独立证明 Main当前 `InputTarget` 非空；如果未来要求不信任 Renderer，应另行设计 signed/capability authority，而不是扩展 v1普通 payload。
 
 wire authority identity保持：
 
@@ -232,9 +238,9 @@ frameId + activationId
 
 不重复 sessionId/subsystemKey/generation。
 
-### Input Channel
+### Input Channel / Interest
 
-标准 Core Channel：
+标准 Channel：
 
 ```text
 keyboard.state
@@ -245,29 +251,60 @@ gamepad.state
 gamepad.event
 ```
 
-自定义 Renderer component可扩展：
+自定义 Renderer component：
 
 ```text
 x.<custom-name>.state
 x.<custom-name>.event
 ```
 
-v1使用 exact Channel Interest，不支持 wildcard，避免未来新增 Channel静默改变旧订阅语义。
-
-### Input Interest
+Interest：
 
 ```text
 Subsystem → Renderer
-full replacement set
+full replacement exact set
 new current Data Connection default = empty
 Runtime/Data-Connection scoped
+no wildcard
+not authority
 ```
 
-Subsystem可根据当前业务或自定义 Renderer component动态改变 Interest。
+Interest缩小时，Subsystem先更新 local Interest gate；迟到旧消息自然丢弃，因此无需 ACK/revision。
 
-新增 `.state` Interest后 Renderer应尽快发送 fresh snapshot；新增 `.event` 只接收未来事件，不 replay历史。
+### Effective Input Channel
 
-移除 `.state` Interest时 Subsystem本地立即清除该 Channel retained state；迟到消息由 local Interest gate丢弃。
+对 exact Channel `C`：
+
+```text
+Effective(C)
+=
+current matching Data Connection
+∧ Main current InputTarget matches this Subsystem
+∧ active Frame/current Activation matches
+∧ C ∈ current Input Interest
+∧ Producer(C) available
+```
+
+因此：
+
+```text
+Interest != authority
+Producer availability != authority
+```
+
+二者都只能缩小输入面。
+
+### Effective Transition
+
+`.state` 从 false→true 时，无论原因是 Interest、InputTarget、Activation、reconnect 或 Producer恢复：
+
+```text
+Renderer MUST establish a fresh self-contained State baseline
+```
+
+`.event` false→true 只允许 future Events，不补历史。
+
+true→false 时立即停止普通 State/Event。
 
 ### State / Event / Reset
 
@@ -280,24 +317,36 @@ Subsystem可根据当前业务或自定义 Renderer component动态改变 Intere
 .event
     ordered transient event
     no coalescing
-    no reconnect replay
+    no replay
     must not be sole persistent held-state representation
 
 reset
     clears all input state for frameId + activationId
+    global ordering/coalescing barrier
 ```
 
 Event与Reset是 State coalescing barrier。
 
-Renderer观察 InputTarget移除/替换时，普通 input authority立即失效；若旧 Data Connection仍 current，则 best-effort Reset immediately previous target。
+### Teardown
+
+InputTarget撤销/替换时，Renderer停止旧 target普通输入；若旧 Data Connection仍 current，best-effort Reset immediately previous target。
+
+如果一个当前 Effective `.state` Producer消失而 ordinary authority仍有效：
+
+```text
+Reset current Activation
+→ fresh snapshots for remaining Effective .state Channels
+```
+
+这样不需要 per-channel reset wire。
 
 Activation revocation/replacement、Frame leaves active、Data Connection retire、Renderer Control loss/replacement、Session end都是 implicit reset boundary。
 
 ### Recovery / Failure
 
-fresh Data Connection从 `Interest=empty` 开始；Subsystem重新发布完整 Interest；Event不重放，State以 fresh snapshot恢复。
+fresh Data Connection从 `Interest=empty` 开始；Subsystem重新发布完整 Interest；Event不重放，Effective State以 fresh baseline恢复。
 
-User Input无 transactional ACK；input loss、Interest传播 gap、State coalescing、Event overflow都不得自行升级为 Runtime failure或 Frame unwind。
+User Input无 transactional ACK；input loss、Interest传播 gap、Producer availability change、State coalescing、Event overflow都不得自行升级为 Runtime failure或 Frame unwind。
 
 标准 Channel payload、numeric limits、Event overflow final policy仍待 Completion/Profile冻结。
 
@@ -377,7 +426,10 @@ Content credential不得进入 Frame、Renderer Authority Snapshot或 Render Sta
 
 - wire视为不可信；
 - Main是 Frame/Input/Data authority；
+- Renderer Core是 ordinary InputTarget sender-side trusted enforcement point；
 - Input Interest只允许过滤，不允许授予 authority；
+- Producer availability只允许过滤，不允许授予 authority；
+- InputTarget lease撤销后 same `frameId + activationId` 不 re-grant；
 - Renderer Control不携Data bootstrap secret；
 - Control loss/replacement撤销 Renderer input/Data authority；
 - Subsystem不能创建公共 frameId/activationId；
@@ -395,9 +447,9 @@ Subsystem Control v2                     Draft
 Runtime Control Profile v1               Frozen
 Frame / Call v1 + Conformance            Frozen
 Frame suspend clarification              Frozen clarification
-Renderer Control v1                      Draft / under review
+Renderer Control v1                      Draft / input lease closed
 Data Connection Contract v1              Draft / lifecycle closed
-User Input v1                            Core Draft / Channel+Interest review
+User Input v1                            Core Draft / semantic closure review
     ↓
 Standard Input Mapping + wire/limits
     ↓
