@@ -38,17 +38,21 @@ Renderer
 Subsystem Runtime
 ```
 
-建立后的 Data Connection 只承载独立业务协议：
+建立后的 Data Connection 承载独立业务协议：
 
 ```text
-Renderer → Subsystem
-    User Input Protocol
+User Input v1
+    Subsystem → Renderer
+        Input Interest
 
-Subsystem → Renderer
-    Render Update Protocol
+    Renderer → Subsystem
+        State / Event / Reset
+
+Render Update v1
+    Subsystem → Renderer
 ```
 
-Connection Contract 本身不定义第三套业务消息协议。
+Connection Contract 本身不定义第三套业务消息协议，也不解释这些 child protocol payload。
 
 ## 2. Zero-Application-Message Contract
 
@@ -309,7 +313,7 @@ Renderer观察到新 Authority Snapshot后 MUST：
 
 ```text
 retire generation G current carrier
-stop User Input on G
+stop User Input application traffic on G
 discard pending establishment material for G
 only establish G2 through current Host/Platform binding
 ```
@@ -328,6 +332,8 @@ stop treating carrier as current
 close/release carrier
 discard pending establishment material
 ```
+
+Subsystem 与 Renderer都 MUST停止把该 retired carrier 用作 User Input / Render Update current carrier。
 
 ```text
 Transport existence != Data authority
@@ -357,7 +363,7 @@ current carrier 意外丢失时：
 
 ```text
 current → retired
-User Input transmission stops
+User Input application traffic stops
 Render Update reception stops
 ```
 
@@ -404,32 +410,45 @@ Renderer MAY 保留最后一个合法 presentation state；重新建立 connecti
 
 ## 20. User Input Independence
 
-`current Data Connection` 只表示 carrier authority，不表示 ordinary input authority。
+`current Data Connection` 只表示 carrier authority，不表示 ordinary input authority，也不表示任何 Input Channel当前 Effective。
 
-普通 User Input 仍必须满足 Main current `InputTarget + frameId + activationId`。
+普通 State/Event 仍必须满足 User Input v1 的：
 
-因此：
+```text
+Main current InputTarget
+current frameId + activationId
+current Input Interest
+Producer availability
+```
+
+因此以下状态合法：
 
 ```text
 Data Connection = current
 InputTarget = null
+Interest = non-empty
 ```
 
-是合法状态。
+此时普通 State/Event仍不得发送。
 
 ## 21. Child Protocol Boundary
 
 第一阶段 current Data Connection 承载两个独立 child protocol：
 
 ```text
-Renderer → Subsystem
-    User Input v1
+User Input v1
+    Subsystem → Renderer
+        Input Interest
+    Renderer → Subsystem
+        State / Event / Reset
 
-Subsystem → Renderer
-    Render Update v1
+Render Update v1
+    Subsystem → Renderer
 ```
 
-两者共享 carrier，但 MUST 拥有独立 payload、sequence/order policy、backpressure、recovery 和 limits。
+两者共享 carrier，但 MUST 独立定义 payload、sequence/order policy、backpressure、recovery 和 limits。
+
+User Input 内部的反向 Interest是该 application domain 的 configuration/filtering state，不是 Connection Core method，也不是第三套 protocol。
 
 Connection v1 不定义这些业务语义。
 
@@ -459,7 +478,7 @@ v1 不定义：
 Connection application handshake
 Connection JSON-RPC methods
 heartbeat/liveness RPC
-User Input payload
+User Input payload / Interest schema details
 Render Update payload
 Render State
 child-protocol sequence/backpressure
@@ -499,9 +518,11 @@ data-loss-does-not-unwind-frame
 same-generation-reestablish-after-loss
 
 connection-current-with-null-inputtarget
+connection-current-with-interest-but-no-inputtarget
 frame-close-does-not-retire-healthy-data-connection
 activation-change-does-not-replace-data-generation
 
+user-input-bidirectional-domain-on-current-carrier
 runtime-failure-revokes-data-authority
 session-end-retires-all
 platform-bindings-produce-equivalent-connection-identity
@@ -520,10 +541,10 @@ platform-bindings-produce-equivalent-connection-identity
 9. Renderer participant replacement / Control loss retire其全部 Data Connections；
 10. Data Connection failure不等于 Runtime failure，也不触发 Frame unwind；
 11. Data retire不等于 Render destroy；
-12. current Data Connection不等于 InputTarget有效；
+12. current Data Connection不等于 InputTarget有效，也不等于 User Input Channel Effective；
 13. Connection Core本身零 application methods；
 14. Host/Platform establishment机制可不同，但建立后的 identity/lifecycle必须一致；
-15. User Input 与 Render Update 是建立后的独立业务消息协议。
+15. User Input 与 Render Update 是建立后的独立业务协议；User Input自身包含双向 Interest + input flow。
 
 ## 26. Summary
 
@@ -539,8 +560,9 @@ Connection Contract:
     installs at most one current carrier
 
 Then:
-    Renderer ── User Input ───────▶ Subsystem
-    Renderer ◀─ Render Update ───── Subsystem
+    Subsystem ── Input Interest ──▶ Renderer
+    Renderer  ── State/Event/Reset ▶ Subsystem
+    Renderer  ◀─ Render Update ──── Subsystem
 
 Carrier lost:
     current → retired
