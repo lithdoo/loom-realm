@@ -31,7 +31,7 @@ LoomRealm 文档按依赖顺序组织：
 17. [Frame v1 Suspend Semantics Clarification](./15-contracts/frame-call-v1-suspend-clarification.md)
 18. [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
 19. [Renderer ⇄ Subsystem Data Connection Contract v1](./15-contracts/renderer-subsystem-data-connection-v1.md)
-20. [Renderer → Subsystem User Input Protocol v1](./15-contracts/user-input-v1.md)
+20. [Renderer ⇄ Subsystem User Input Protocol v1](./15-contracts/user-input-v1.md)
 21. [只读 Content API v1](./15-contracts/content-api-v1.md)
 22. [模块设计目录](./20-modules/README.md)
 23. [实施计划目录](./30-implementation/README.md)
@@ -47,7 +47,7 @@ Frame / Call v1                         Frozen
 Frame Suspend Clarification             Frozen clarification
 Main ⇄ Renderer Control v1              Draft / authority model refined
 Data Connection Contract v1             Draft / lifecycle closed
-User Input v1                           Core Draft / current review
+User Input v1                           Core Draft / Channel+Interest model
 Content API v1                          Active / Normative / Evolving
 ```
 
@@ -112,20 +112,7 @@ revision gap/coalescing allowed
 no patch/replay
 ```
 
-Snapshot：
-
-```text
-Runtime projection
-Frame Stack
-Activation/InputTarget
-DataAuthority {
-    subsystemKey
-    generation
-    connectionProfile
-}
-```
-
-不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
+Snapshot包含 Runtime projection、Frame Stack、Activation/InputTarget 与逻辑 DataAuthority；不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
 
 Control loss或 Renderer participant replacement会撤销该 participant 的 ordinary input 与 Data authority。
 
@@ -163,39 +150,70 @@ Host如何建立 WebSocket / MessagePort carrier属于 Platform binding，不属
 
 ## User Input v1 Core Draft
 
-[User Input v1](./15-contracts/user-input-v1.md) 当前冻结方向与 authority/recovery模型：
+[User Input v1](./15-contracts/user-input-v1.md) 当前采用 Channel + Interest 模型：
 
 ```text
-Renderer → Subsystem only
+Subsystem → Renderer
+    Input Interest
+
+Renderer → Subsystem
+    State / Event / Reset
+```
+
+公共 authority仍来自：
+
+```text
 current Data Connection
 + Main current InputTarget
 + frameId
 + current activationId
 ```
 
-wire authority identity只需要：
+Interest不是权限；有效输入固定为：
 
 ```text
-frameId + activationId
+Main-authorized input
+∩
+Subsystem current Input Interest
 ```
 
-Core输入类别：
+标准 Channel：
 
 ```text
-discrete
-continuous
+keyboard.state / keyboard.event
+pointer.state  / pointer.event
+gamepad.state  / gamepad.event
+```
+
+Subsystem提供的自定义 Renderer component可扩展：
+
+```text
+x.<custom-name>.state
+x.<custom-name>.event
+```
+
+v1 Interest是 Data-Connection scoped full replacement exact set；fresh connection默认 empty，不支持 wildcard。
+
+语义：
+
+```text
+.state
+    self-contained current snapshot
+    latest wins / may coalesce
+
+.event
+    ordered transient event
+    no coalescing / no history or reconnect replay
+
 reset
+    clears all input state for frameId + activationId
 ```
 
-```text
-discrete   ordered / no coalescing / no reconnect replay
-continuous latest-state / may coalesce
-reset      clears current Activation continuous intent
-```
+Event与Reset是 State coalescing barrier；移除 `.state` Interest时 Subsystem立即清空对应本地 state；InputTarget撤销时 Renderer在旧 connection仍 current 时 best-effort Reset previous target。
 
-Activation replacement、Connection retired、Renderer Control loss/replacement、Session end均形成 implicit continuous reset boundary。
+Activation replacement、Connection retired、Renderer Control loss/replacement、Session end均形成 implicit reset boundary。
 
-下一步收敛具体 Keyboard / Pointer / Touch / Gamepad normalized payload、message/queue limits 与 overflow policy。
+下一步收敛 Standard Input Mapping、exact payload schema、message/Channel/Event queue limits与 overflow policy；Text/IME继续作为独立边界处理。
 
 ## Content API v1
 
@@ -207,7 +225,7 @@ Content API semantics
 Content Access Bootstrap/Profile
 ```
 
-## Runtime / Frame / Data / Render 边界
+## Runtime / Frame / Data / Input / Render 边界
 
 ```text
 spawn success != connected != identified != ready
@@ -217,6 +235,7 @@ Frame lifecycle != Data Connection lifecycle
 Frame lifecycle != Render lifecycle
 Data Connection retire != Render destroy
 Renderer/Data reconnect != Frame recovery
+Input Interest != Input authority
 User Input loss != Runtime failure
 ```
 
@@ -248,7 +267,7 @@ User Input loss != Runtime failure
 - [Frame v1 Suspend Semantics Clarification](./15-contracts/frame-call-v1-suspend-clarification.md)
 - [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
 - [Renderer ⇄ Subsystem Data Connection Contract v1](./15-contracts/renderer-subsystem-data-connection-v1.md)
-- [Renderer → Subsystem User Input Protocol v1](./15-contracts/user-input-v1.md)
+- [Renderer ⇄ Subsystem User Input Protocol v1](./15-contracts/user-input-v1.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
 
 Legacy入口仍保留历史追溯，但不得作为新实现依据：
@@ -293,9 +312,9 @@ Subsystem Control v2                     Draft
 Renderer Control v1                      Draft / under review
 Frame suspend semantics                  Clarified
 Data Connection Contract v1              Draft / lifecycle closed
-User Input v1                            Core Draft / current review
+User Input v1                            Core Draft / Channel+Interest review
     ↓
-User Input payload mapping + limits
+Standard Input Mapping + wire/limits
     ↓
 Render Update v1
 Render State Contract v1
