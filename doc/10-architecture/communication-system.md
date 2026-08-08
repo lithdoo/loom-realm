@@ -109,21 +109,7 @@ renderer.hello
 renderer.state(full Snapshot)
 ```
 
-Snapshot：
-
-```text
-Runtime projection
-Frame Stack
-Activation
-InputTarget
-DataAuthority {
-    subsystemKey
-    generation
-    connectionProfile
-}
-```
-
-不包含 Data bootstrap material / Render State / Content Grant。
+Snapshot包含 Runtime projection、Frame Stack、Activation、InputTarget 与逻辑 DataAuthority；不包含 Data bootstrap material / Render State / Content Grant。
 
 恢复模型：
 
@@ -182,15 +168,7 @@ retired terminal
 
 每个 `(Session, current Renderer participant, subsystemKey)` 同时最多一条 current carrier；installation必须 serialized。
 
-以下事件 retire connection：
-
-```text
-carrier loss
-DataAuthority removal/replacement
-Renderer Control loss
-Renderer participant replacement
-Session end
-```
+以下事件 retire connection：carrier loss、DataAuthority removal/replacement、Renderer Control loss、Renderer participant replacement、Session end。
 
 同 generation仍授权时，可以在旧 carrier retired 后建立 fresh current carrier。
 
@@ -209,20 +187,23 @@ Data retire != Render destroy
 建立后的 current Data Connection承载两个独立 application domains：
 
 ```text
-Renderer → Subsystem
-    User Input
+User Input
+    Subsystem → Renderer: Input Interest
+    Renderer → Subsystem: State / Event / Reset
 
-Subsystem → Renderer
-    Render Update
+Render Update
+    Subsystem → Renderer
 ```
 
-它们共享 carrier，但必须独立定义 payload、ordering/sequence、backpressure、recovery 与 limits。
+User Input的反向 Interest只是输入域自己的 filtering/configuration state，不是新的第三个 System Data protocol，也不产生 Main authority。
 
-Connection Contract不增加第三套业务消息。
+User Input与Render Update共享 carrier，但必须独立定义 payload、ordering/sequence、backpressure、recovery 与 limits。
 
 ## 9. User Input v1 Core
 
 权威草案：[User Input v1](../15-contracts/user-input-v1.md)。
+
+### Authority
 
 ordinary input合法至少要求：
 
@@ -232,9 +213,18 @@ Main current InputTarget != null
 InputTarget.subsystemKey matches current connection
 Frame active
 activationId current
+channel ∈ Subsystem current Input Interest
 ```
 
-wire authority identity：
+这里 Interest只缩小流量：
+
+```text
+Effective Input = Main authority ∩ Subsystem Interest
+```
+
+Interest不能自行获取 InputTarget，也不能恢复 revoked Activation。
+
+wire authority identity保持：
 
 ```text
 frameId + activationId
@@ -242,35 +232,74 @@ frameId + activationId
 
 不重复 sessionId/subsystemKey/generation。
 
-Core三类：
+### Input Channel
+
+标准 Core Channel：
 
 ```text
-discrete
-    ordered
-    no coalescing
-    no reconnect replay
+keyboard.state
+keyboard.event
+pointer.state
+pointer.event
+gamepad.state
+gamepad.event
+```
 
-continuous
-    latest-state semantics
+自定义 Renderer component可扩展：
+
+```text
+x.<custom-name>.state
+x.<custom-name>.event
+```
+
+v1使用 exact Channel Interest，不支持 wildcard，避免未来新增 Channel静默改变旧订阅语义。
+
+### Input Interest
+
+```text
+Subsystem → Renderer
+full replacement set
+new current Data Connection default = empty
+Runtime/Data-Connection scoped
+```
+
+Subsystem可根据当前业务或自定义 Renderer component动态改变 Interest。
+
+新增 `.state` Interest后 Renderer应尽快发送 fresh snapshot；新增 `.event` 只接收未来事件，不 replay历史。
+
+移除 `.state` Interest时 Subsystem本地立即清除该 Channel retained state；迟到消息由 local Interest gate丢弃。
+
+### State / Event / Reset
+
+```text
+.state
+    self-contained current snapshot
+    latest wins
     may coalesce
 
+.event
+    ordered transient event
+    no coalescing
+    no reconnect replay
+    must not be sole persistent held-state representation
+
 reset
-    clears current Activation continuous intent
+    clears all input state for frameId + activationId
 ```
 
-以下事件都是 implicit continuous reset boundary：
+Event与Reset是 State coalescing barrier。
 
-```text
-InputTarget replacement
-Activation revocation/replacement
-Data Connection current → retired
-Renderer Control loss/replacement
-Session end
-```
+Renderer观察 InputTarget移除/替换时，普通 input authority立即失效；若旧 Data Connection仍 current，则 best-effort Reset immediately previous target。
 
-User Input无ACK、不是事务、不是broadcast、不是Frame command；input/Data loss本身不导致 Runtime failure。
+Activation revocation/replacement、Frame leaves active、Data Connection retire、Renderer Control loss/replacement、Session end都是 implicit reset boundary。
 
-具体 Keyboard/Pointer/Touch/Gamepad normalized payload 与 numeric limits仍待 User Input completion/profile冻结。
+### Recovery / Failure
+
+fresh Data Connection从 `Interest=empty` 开始；Subsystem重新发布完整 Interest；Event不重放，State以 fresh snapshot恢复。
+
+User Input无 transactional ACK；input loss、Interest传播 gap、State coalescing、Event overflow都不得自行升级为 Runtime failure或 Frame unwind。
+
+标准 Channel payload、numeric limits、Event overflow final policy仍待 Completion/Profile冻结。
 
 ## 10. Render Update Independence
 
@@ -286,7 +315,7 @@ Activation replacement != Render epoch
 Data retire != Render destroy
 ```
 
-Data reconnect后的 Render recovery由 Render Update / Render State 自己的 snapshot/revision model决定，不参与 Frame recovery。
+Data reconnect后的 Render recovery由 Render Update / Render State自己的 snapshot/revision model决定，不参与 Frame recovery。
 
 ## 11. Renderer Control Backpressure
 
@@ -348,11 +377,13 @@ Content credential不得进入 Frame、Renderer Authority Snapshot或 Render Sta
 
 - wire视为不可信；
 - Main是 Frame/Input/Data authority；
+- Input Interest只允许过滤，不允许授予 authority；
 - Renderer Control不携Data bootstrap secret；
 - Control loss/replacement撤销 Renderer input/Data authority；
 - Subsystem不能创建公共 frameId/activationId；
 - Renderer不能生成/恢复 Activation；
 - stale Activation input必须拒绝；
+- removed Interest Channel的迟到 input必须拒绝；
 - transport不能成为 Runtime/Frame recovery authority。
 
 ## 15. 当前推进状态
@@ -366,9 +397,9 @@ Frame / Call v1 + Conformance            Frozen
 Frame suspend clarification              Frozen clarification
 Renderer Control v1                      Draft / under review
 Data Connection Contract v1              Draft / lifecycle closed
-User Input v1                            Core Draft / current review
+User Input v1                            Core Draft / Channel+Interest review
     ↓
-User Input payload mapping + limits
+Standard Input Mapping + wire/limits
     ↓
 Render Update v1
 Render State Contract v1
