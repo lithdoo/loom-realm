@@ -27,9 +27,10 @@ LoomRealm 文档按依赖顺序组织：
 13. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
 14. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
 15. [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
-16. [只读 Content API v1](./15-contracts/content-api-v1.md)
-17. [模块设计目录](./20-modules/README.md)
-18. [实施计划目录](./30-implementation/README.md)
+16. [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
+17. [只读 Content API v1](./15-contracts/content-api-v1.md)
+18. [模块设计目录](./20-modules/README.md)
+19. [实施计划目录](./30-implementation/README.md)
 
 ## 当前核心结论
 
@@ -38,6 +39,7 @@ Game Package / Desktop Launcher        Frozen
 Subsystem Control v1                   Frozen
 Runtime Control Application Profile v1 Frozen
 Frame / Call Protocol v1               Active / Normative / Frozen
+Main ⇄ Renderer Control v1             Active Design / Draft
 ```
 
 ### Runtime Control Application Profile v1
@@ -124,6 +126,24 @@ no frame.hello/version/capabilities or runtime downgrade
 
 正式兼容要求见 [Conformance Profile](./15-contracts/frame-call-conformance-v1.md)。协议已经 Frozen，但 executable fixture/harness 是否完成属于实施状态，不能从协议状态反推。
 
+### Main ⇄ Renderer Control v1 Draft
+
+当前 Draft 采用：
+
+```text
+Main = authority
+Renderer = read-only committed mirror
+full Authority Snapshot
+Session-local monotonic revision
+revision gap allowed / publication coalescing allowed
+renderer.hello + renderer.state only
+reconnect = current snapshot / no history replay
+```
+
+协议必须继续服从 Frame v1 的 ACK-before-publication、revoked Activation never reappears 与 failure barrier；Renderer不能根据 Runtime/Data状态自行修改 Stack或恢复旧 InputTarget。
+
+当前仍需审查 Renderer Data Grant ownership/lifecycle 与 Control Connection loss 对既有 Data Connection 的影响，因此尚未 Frozen。
+
 ## Runtime / Frame / Render 边界
 
 ```text
@@ -159,6 +179,7 @@ Renderer只使用 Main已 commit current Activation/InputTarget；normal/recover
 - [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
 - [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
+- [Main ⇄ Renderer Control Protocol v1 Draft](./15-contracts/main-renderer-control-v1.md)
 - [只读 Content API v1](./15-contracts/content-api-v1.md)
 - [旧 Frame 生命周期草案路径（Legacy）](./15-contracts/system-lifecycle-protocol.md)
 
@@ -197,8 +218,8 @@ Subsystem Control v1                    Frozen
 Runtime Control Application Profile v1  Frozen
 Frame / Call Protocol v1                Frozen
 Frame v1 executable conformance         Implementation tracking
-Main ⇄ Renderer Control                 Next protocol target
-Renderer ⇄ Subsystem Connection         Draft target
+Main ⇄ Renderer Control v1              Draft / under review
+Renderer ⇄ Subsystem Connection         Next protocol target after review
 User Input / Render Update              Draft target
 Render State                            Draft target
 ```
