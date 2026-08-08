@@ -36,7 +36,7 @@ Frame / Call v1
     + Suspend Semantics Clarification
 
 Main ⇄ Renderer Control v1 Draft
-    ↓ DataAuthority
+    ↓ DataAuthority / InputTarget
 Renderer ⇄ Subsystem Data Connection Contract v1 Draft
     ↓ current carrier
 User Input v1 Core Draft
@@ -169,6 +169,16 @@ no replay / no patch
 Control loss → invalidate InputTarget/DataAuthority → retire Data Connections
 ```
 
+User Input 依赖的 InputTarget 现在明确为 one-shot lease：
+
+```text
+published InputTarget(frameId, activationId)
+→ revoked/removed/replaced
+→ same frameId + activationId MUST NOT become InputTarget again
+```
+
+因此 snapshot coalescing 不需要保留中间 null revision，也不会隐藏 same-authority revoke→regrant。
+
 ## 5. Renderer ⇄ Subsystem Data Connection Contract v1 Draft
 
 权威草案：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)。
@@ -198,6 +208,18 @@ Current-carrier installation MUST serialized；并发 establishment attempt 至�
 
 同 generation仍被授权时，旧 carrier retired 后 MAY 建立 fresh current carrier。
 
+User Input 在该 current carrier 上是一个双向 application domain：
+
+```text
+Subsystem → Renderer
+    Input Interest
+
+Renderer → Subsystem
+    State / Event / Reset
+```
+
+Connection Core仍不解释这些业务消息。
+
 重要边界：
 
 ```text
@@ -214,25 +236,26 @@ Host/Platform如何建立 WebSocket/MessagePort、ticket/capability如何交付�
 
 权威草案：[Renderer ⇄ Subsystem User Input Protocol v1](./user-input-v1.md)。
 
-### Authority
-
-ordinary input authority仍由 Main 独占：
+### Authority / Trust
 
 ```text
-current Data Connection
-+
-Main current InputTarget
-+
-frameId
-+
-current activationId
+Main
+    owns InputTarget / Activation
+
+Renderer Core
+    trusted sender-side InputTarget enforcement point
+
+Subsystem
+    validates local Frame/Activation + local Interest
 ```
 
 wire authority identity只需要 `frameId + activationId`；不重复 subsystemKey/sessionId/generation。
 
+Subsystem不能从 User Input wire独立证明 Main当前 `InputTarget` 非空；v1 不增加 signed input capability。
+
 ### Input Channel / Input Interest
 
-Subsystem可以声明当前感兴趣的 exact Input Channels：
+标准 Channel：
 
 ```text
 keyboard.state
@@ -241,6 +264,11 @@ pointer.state
 pointer.event
 gamepad.state
 gamepad.event
+```
+
+自定义 Renderer component：
+
+```text
 x.<custom-name>.state
 x.<custom-name>.event
 ```
@@ -256,45 +284,57 @@ no wildcard
 not authority
 ```
 
-有效发送集合固定为：
+Interest缩小时，Subsystem先更新自身 local gate，因此迟到旧消息会被丢弃，不需要 ACK/revision。
+
+### Effective Input Channel
+
+对 exact Channel `C`：
 
 ```text
-Main-authorized input
-∩
-Subsystem current Input Interest
+Effective(C)
+=
+current matching Data Connection
+∧ Main current InputTarget matches this Subsystem
+∧ active/current Activation matches
+∧ C ∈ current Input Interest
+∧ Producer(C) available
 ```
 
-所以 Interest只能减少采集/传输，不能扩大 InputTarget/Activation authority。
-
-Subsystem提供的 Renderer component MAY 定义 `x.*` 自定义 Channel；User Input Core只理解 Channel的 `.state/.event` 语义，不解释自定义 payload。
+所以 Interest和Producer availability都只能缩小输入面，不能扩大 Main authority。
 
 ### State / Event / Reset
 
 ```text
 .state
     self-contained current-state snapshot
-    latest state wins
-    may coalesce
-    fresh snapshot on newly interested state channel
+    every non-effective→effective transition establishes fresh baseline
+    latest wins / may coalesce
 
 .event
     ordered transient event
-    no coalescing
-    no reconnect/history replay
-    must not be the sole persistent held-state representation
+    future events only
+    no coalescing / no replay
+    not sole persistent held-state representation
 
 reset
     clears all input state for frameId + activationId
-    ordering/coalescing barrier
+    global ordering/coalescing barrier
 ```
 
 Event与Reset都是 State coalescing barrier。
 
-Interest移除 `.state` Channel时，Subsystem立即清空该 Channel本地 state；InputTarget撤销时 Renderer在旧 Data Connection仍 current 的情况下 best-effort Reset immediately previous target。
+InputTarget撤销时 Renderer在旧 Data Connection仍 current 的情况下 best-effort Reset immediately previous target。
+
+Effective `.state` Producer消失而 authority仍有效时：
+
+```text
+Reset current Activation
+→ fresh baselines for remaining Effective State Channels
+```
 
 Activation replacement、Connection retired、Renderer Control loss/replacement、Session end仍是 implicit reset boundary。
 
-User Input无 transactional ACK；input/Data loss、Interest传播 gap、State coalescing本身都不构成 Runtime failure或 Frame unwind。
+User Input无 transactional ACK；input/Data loss、Interest传播 gap、Producer availability change、State coalescing和 Event overflow本身都不构成 Runtime failure或 Frame unwind。
 
 当前尚待收敛：
 
@@ -340,9 +380,9 @@ Render State Contract定义被 Render Update携带的声明式 presentation stat
 | Frame / Call v1 | [frame-call-protocol-v1.md](./frame-call-protocol-v1.md) | **Active / Normative / Frozen** |
 | Frame / Call v1 Conformance | [frame-call-conformance-v1.md](./frame-call-conformance-v1.md) | Active / Normative / Frozen |
 | Frame v1 Suspend Clarification | [frame-call-v1-suspend-clarification.md](./frame-call-v1-suspend-clarification.md) | Active / Normative / Frozen Clarification |
-| Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | **Active Design / Draft** |
+| Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | **Active Design / Draft；InputTarget lease closed** |
 | Renderer ⇄ Subsystem Data Connection v1 | [renderer-subsystem-data-connection-v1.md](./renderer-subsystem-data-connection-v1.md) | **Active Design / Draft；lifecycle closed** |
-| User Input v1 | [user-input-v1.md](./user-input-v1.md) | **Active Design / Core Draft；Channel/Interest model** |
+| User Input v1 | [user-input-v1.md](./user-input-v1.md) | **Active Design / Core Draft；semantic closure reviewed** |
 | Render Update | 尚待新文档 | Next major data protocol target |
 | Render State | 尚待新文档 | Draft target |
 | Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative / Evolving |
@@ -356,6 +396,7 @@ Legacy / Superseded入口继续仅用于历史追溯：`game-package-v1.md`、`s
 - Subsystem Control v1 Data endpoint不扩展到PWA；跨平台使用v2方向；
 - Frame v1继续由 Runtime Profile静态绑定，无独立 Frame hello/downgrade；
 - Renderer Control不携Data bootstrap secret；
+- Renderer Control v1禁止 same InputTarget lease revoke→regrant；
 - Data Connection Core不得私加 handshake/heartbeat；
 - User Input Interest不得绕过 Main InputTarget/Activation authority；
 - User Input v1 Interest只支持 exact Channel，不支持 wildcard；
@@ -368,10 +409,10 @@ Legacy / Superseded入口继续仅用于历史追溯：`game-package-v1.md`、`s
 ```text
 Protocol Boundary Cleanup                 Accepted
 Subsystem Control v2                      Draft
-Renderer Control v1                       Draft / under review
+Renderer Control v1                       Draft / InputTarget lease closed
 Frame suspend clarification               Frozen clarification
 Data Connection Contract v1               Draft / lifecycle closed
-User Input v1                             Core Draft / Channel+Interest review
+User Input v1                             Core Draft / semantic closure reviewed
     ↓
 Standard Input Mapping + wire/limits
     ↓
