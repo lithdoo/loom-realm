@@ -40,6 +40,8 @@ Main ⇄ Renderer Control v1 Draft
 Renderer ⇄ Subsystem Data Connection Contract v1 Draft
     ↓ current carrier
 User Input v1 Core Draft
+    ├── Subsystem → Renderer: Input Interest
+    └── Renderer → Subsystem: State / Event / Reset
 Render Update v1                         next major data protocol
 Render State Contract v1
 
@@ -155,21 +157,7 @@ renderer.hello
 renderer.state(full Snapshot)
 ```
 
-Snapshot包含：
-
-```text
-Runtime projection
-Frame Stack
-current Activation
-InputTarget
-DataAuthority {
-    subsystemKey
-    generation
-    connectionProfile
-}
-```
-
-不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
+Snapshot包含 Runtime projection、Frame Stack、current Activation、InputTarget 与逻辑 DataAuthority；不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
 
 核心恢复模型：
 
@@ -185,14 +173,11 @@ Control loss → invalidate InputTarget/DataAuthority → retire Data Connection
 
 权威草案：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)。
 
-该 Contract **没有 application wire methods**，只冻结建立后 Data carrier 的 authority/lifecycle：
+该 Contract没有 application wire methods，只冻结建立后 Data carrier 的 authority/lifecycle：
 
 ```text
 identity
-    Session
-    + current Renderer participant
-    + subsystemKey
-    + generation
+    Session + current Renderer participant + subsystemKey + generation
 
 generation
     Main-owned Data authority epoch
@@ -209,15 +194,7 @@ cardinality
 
 Current-carrier installation MUST serialized；并发 establishment attempt 至多一个成为 current。
 
-以下事件 retire current connection：
-
-```text
-carrier loss
-DataAuthority removal/replacement
-Renderer Control loss
-Renderer participant replacement
-Session end
-```
+以下事件 retire current connection：carrier loss、DataAuthority removal/replacement、Renderer Control loss、Renderer participant replacement、Session end。
 
 同 generation仍被授权时，旧 carrier retired 后 MAY 建立 fresh current carrier。
 
@@ -235,9 +212,11 @@ Host/Platform如何建立 WebSocket/MessagePort、ticket/capability如何交付�
 
 ## 6. User Input Protocol v1 Core Draft
 
-权威草案：[Renderer → Subsystem User Input Protocol v1](./user-input-v1.md)。
+权威草案：[Renderer ⇄ Subsystem User Input Protocol v1](./user-input-v1.md)。
 
-Core authority：
+### Authority
+
+ordinary input authority仍由 Main 独占：
 
 ```text
 current Data Connection
@@ -249,47 +228,81 @@ frameId
 current activationId
 ```
 
-wire authority identity只需要：
+wire authority identity只需要 `frameId + activationId`；不重复 subsystemKey/sessionId/generation。
+
+### Input Channel / Input Interest
+
+Subsystem可以声明当前感兴趣的 exact Input Channels：
 
 ```text
-frameId + activationId
+keyboard.state
+keyboard.event
+pointer.state
+pointer.event
+gamepad.state
+gamepad.event
+x.<custom-name>.state
+x.<custom-name>.event
 ```
 
-不重复 subsystemKey/sessionId/generation，因为这些已由 current Data Connection绑定。
-
-Core输入类别：
+`Input Interest`：
 
 ```text
-discrete
-    ordered / no coalescing / no reconnect replay
+Subsystem → Renderer
+full replacement exact set
+new Data Connection default = empty
+Runtime/Data-Connection scoped
+no wildcard
+not authority
+```
 
-continuous
-    latest-state semantics / may coalesce
+有效发送集合固定为：
+
+```text
+Main-authorized input
+∩
+Subsystem current Input Interest
+```
+
+所以 Interest只能减少采集/传输，不能扩大 InputTarget/Activation authority。
+
+Subsystem提供的 Renderer component MAY 定义 `x.*` 自定义 Channel；User Input Core只理解 Channel的 `.state/.event` 语义，不解释自定义 payload。
+
+### State / Event / Reset
+
+```text
+.state
+    self-contained current-state snapshot
+    latest state wins
+    may coalesce
+    fresh snapshot on newly interested state channel
+
+.event
+    ordered transient event
+    no coalescing
+    no reconnect/history replay
+    must not be the sole persistent held-state representation
 
 reset
-    clears current Activation continuous intent
+    clears all input state for frameId + activationId
+    ordering/coalescing barrier
 ```
 
-Activation replacement、Connection retired、Renderer Control loss、Session end都是 implicit continuous reset boundary。
+Event与Reset都是 State coalescing barrier。
 
-User Input：
+Interest移除 `.state` Channel时，Subsystem立即清空该 Channel本地 state；InputTarget撤销时 Renderer在旧 Data Connection仍 current 的情况下 best-effort Reset immediately previous target。
 
-```text
-Renderer → Subsystem only
-no ACK
-not a transaction
-not broadcast
-not a Frame command
-input/Data loss != Runtime failure
-```
+Activation replacement、Connection retired、Renderer Control loss/replacement、Session end仍是 implicit reset boundary。
+
+User Input无 transactional ACK；input/Data loss、Interest传播 gap、State coalescing本身都不构成 Runtime failure或 Frame unwind。
 
 当前尚待收敛：
 
 ```text
-Keyboard / Pointer / Touch / Gamepad normalized payload
+standard Channel exact payload schemas
 message encoding / limits
-queue numeric limits
-discrete overflow policy
+Channel/count limits
+Event queue numeric limits / overflow final policy
 text/IME boundary
 ```
 
@@ -329,20 +342,12 @@ Render State Contract定义被 Render Update携带的声明式 presentation stat
 | Frame v1 Suspend Clarification | [frame-call-v1-suspend-clarification.md](./frame-call-v1-suspend-clarification.md) | Active / Normative / Frozen Clarification |
 | Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | **Active Design / Draft** |
 | Renderer ⇄ Subsystem Data Connection v1 | [renderer-subsystem-data-connection-v1.md](./renderer-subsystem-data-connection-v1.md) | **Active Design / Draft；lifecycle closed** |
-| User Input v1 | [user-input-v1.md](./user-input-v1.md) | **Active Design / Core Draft** |
+| User Input v1 | [user-input-v1.md](./user-input-v1.md) | **Active Design / Core Draft；Channel/Interest model** |
 | Render Update | 尚待新文档 | Next major data protocol target |
 | Render State | 尚待新文档 | Draft target |
 | Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative / Evolving |
 
-Legacy / Superseded：
-
-| 路径 | 状态 |
-|---|---|
-| [game-package-v1.md](./game-package-v1.md) | Legacy / Superseded |
-| [system-lifecycle-protocol.md](./system-lifecycle-protocol.md) | Legacy / Superseded |
-| [frame-data-channel-v1.md](./frame-data-channel-v1.md) | Legacy / Superseded |
-| [client-state-tree-v1.md](./client-state-tree-v1.md) | Legacy / Superseded |
-| [resource-protocol.md](./resource-protocol.md) | Legacy / Superseded |
+Legacy / Superseded入口继续仅用于历史追溯：`game-package-v1.md`、`system-lifecycle-protocol.md`、`frame-data-channel-v1.md`、`client-state-tree-v1.md`、`resource-protocol.md`。
 
 ## 10. Version / Compatibility Rules
 
@@ -352,8 +357,10 @@ Legacy / Superseded：
 - Frame v1继续由 Runtime Profile静态绑定，无独立 Frame hello/downgrade；
 - Renderer Control不携Data bootstrap secret；
 - Data Connection Core不得私加 handshake/heartbeat；
+- User Input Interest不得绕过 Main InputTarget/Activation authority；
+- User Input v1 Interest只支持 exact Channel，不支持 wildcard；
+- 标准 Channel前缀保留，自定义扩展使用 `x.*.(state|event)`；
 - User Input不得把浏览器 Host Event对象直接当稳定 wire schema；
-- fixture coverage可以扩展，但不能改变 Frozen语义；
 - Transport差异不得改变建立后的 application semantics。
 
 ## 11. 推进顺序
@@ -364,9 +371,9 @@ Subsystem Control v2                      Draft
 Renderer Control v1                       Draft / under review
 Frame suspend clarification               Frozen clarification
 Data Connection Contract v1               Draft / lifecycle closed
-User Input v1                             Core Draft / current review
+User Input v1                             Core Draft / Channel+Interest review
     ↓
-User Input payload mapping + limits
+Standard Input Mapping + wire/limits
     ↓
 Render Update v1
 Render State Contract v1
