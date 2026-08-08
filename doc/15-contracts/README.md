@@ -12,10 +12,10 @@
 协议边界清理决策见 [ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)。核心原则：
 
 ```text
-Runtime != Frame != Renderer Control != Data Connection != Render != Content
+Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
 ```
 
-共享 Transport 不代表共享 identity/lifecycle/recovery model。
+共享 Transport 不代表共享 identity / lifecycle / authority / sequence / recovery。
 
 ## 1. 当前协议地图
 
@@ -36,11 +36,11 @@ Frame / Call v1
     + Suspend Semantics Clarification
 
 Main ⇄ Renderer Control v1 Draft
-    ↓
-Renderer ⇄ Subsystem Connection v1      next
-    ↓
-User Input v1
-Render Update v1
+    ↓ DataAuthority
+Renderer ⇄ Subsystem Data Connection Contract v1 Draft
+    ↓ current carrier
+User Input v1 Core Draft
+Render Update v1                         next major data protocol
 Render State Contract v1
 
 Readonly Content API v1
@@ -67,16 +67,7 @@ Readonly Content API v1
 
 ### Subsystem Control v1
 
-[Subsystem Control v1](./subsystem-control-lifecycle-protocol.md) 已 Frozen：
-
-```text
-Subsystem → Main
-    subsystem.hello
-    subsystem.status
-
-Main → Subsystem
-    subsystem.shutdown
-```
+[Subsystem Control v1](./subsystem-control-lifecycle-protocol.md) 已 Frozen。
 
 核心：
 
@@ -89,7 +80,7 @@ stopped only from Supervisor
 unexpected Control loss/exit without shutdown intent = failure
 ```
 
-v1 的 `ready.rendererDataEndpoint` 是早期 Desktop Data discovery binding。该 closed schema保持历史兼容，不再扩展 MessagePort/新 Data capability。跨 Desktop/PWA 的收敛方向改为 Subsystem Control v2。
+v1 的 `ready.rendererDataEndpoint` 是早期 Desktop binding；closed schema保持历史兼容，不扩展到 PWA。跨 Desktop/PWA 收敛方向使用 Subsystem Control v2。
 
 ### Runtime Control Application Profile v1
 
@@ -103,7 +94,7 @@ Frame / Call v1
 
 同一 authenticated Control Connection；hello前无 Frame；同 sender跨 Control+Frame共享 connection-lifetime positive-safe-integer Request-ID namespace；no JSON-RPC Batch。
 
-不得静默把未来 Data Lease Control 加进 Profile v1。
+不得静默把未来 Data domain 加进 Profile v1。
 
 ### Frame / Call v1
 
@@ -136,66 +127,32 @@ surviving Caller fresh resume
 Frame lifecycle != Render/Data lifecycle
 ```
 
-Completion profile：
-
-```text
-protocol = loomrealm.frame-call / 1
-message <= 1 MiB
-JSON depth <= 64
-business JsonValue <= 512 KiB
-Request ID positive safe integer / sender Connection lifetime no reuse
-Frame deadline 1,000..300,000ms monotonic sender-local
-Desktop WebSocket / PWA MessagePort same application semantics
-```
-
 规范性伴随文档：
 
 - [Frame / Call v1 Conformance Profile](./frame-call-conformance-v1.md)
 - [Frame / Call v1 Suspend Semantics Clarification](./frame-call-v1-suspend-clarification.md)
 
-Suspend clarification不修改七方法 wire：child-call suspension可通过既有 child outcome `frame.resume` 恢复；显式 administrative `frame.suspend` 在 v1 无 generic reactivation，只能继续 close/failure cleanup。
+显式 administrative `frame.suspend` 在 v1 无 generic reactivation；child-call suspension仍由既有 child outcome `frame.resume` 恢复。
 
 ## 3. Subsystem Control v2 Draft
 
 [Subsystem Control v2](./subsystem-control-protocol-v2.md) 是新的跨 Desktop/PWA 收敛方向。
 
-主要变化：
-
 ```text
 ready = Runtime lifecycle readiness only
 ```
 
-不再携带：
-
-```text
-rendererDataEndpoint
-Data Port
-Data credential
-```
-
-Data endpoint/Port/auth/generation全部进入独立 Renderer⇄Subsystem Connection/Profile。
+不再携带 rendererDataEndpoint / Data Port / Data credential。Data carrier establishment退出 Runtime lifecycle。
 
 Frame / Call v1 不需要因此升级。
 
 ## 4. Main ⇄ Renderer Control v1 Draft
 
-[Renderer Control v1](./main-renderer-control-v1.md) 当前采用最小 authority-replication surface：
+[Renderer Control v1](./main-renderer-control-v1.md) 是 Main → Renderer committed authority replication：
 
 ```text
-renderer.hello      Renderer → Main Request
-renderer.state      Main → Renderer Notification
-```
-
-核心模型：
-
-```text
-Main = authority
-Renderer = read-only committed mirror
-full Snapshot
-monotonic Session-local revision
-revision gap/coalescing allowed
-reconnect = fresh current Snapshot
-no replay / no patch
+renderer.hello
+renderer.state(full Snapshot)
 ```
 
 Snapshot包含：
@@ -212,64 +169,152 @@ DataAuthority {
 }
 ```
 
-Snapshot明确不包含：
+不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
+
+核心恢复模型：
 
 ```text
-Data endpoint
-MessagePort
-bearer Data token
-Render State
-Content Grant
+full Snapshot
+Session-local monotonic revision
+revision gap/coalescing allowed
+no replay / no patch
+Control loss → invalidate InputTarget/DataAuthority → retire Data Connections
 ```
 
-Renderer Control loss：
+## 5. Renderer ⇄ Subsystem Data Connection Contract v1 Draft
+
+权威草案：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)。
+
+该 Contract **没有 application wire methods**，只冻结建立后 Data carrier 的 authority/lifecycle：
 
 ```text
-stop ordinary input
-invalidate InputTarget
-invalidate all DataAuthority
-close existing Data Connections
-fresh hello/current Snapshot
+identity
+    Session
+    + current Renderer participant
+    + subsystemKey
+    + generation
+
+generation
+    Main-owned Data authority epoch
+    != transport reconnect counter
+
+lifecycle
+    current → retired
+    retired terminal
+
+cardinality
+    per Renderer participant + subsystemKey
+    at most one current carrier
 ```
 
-Data Connection close不等于 Render destroy。
+Current-carrier installation MUST serialized；并发 establishment attempt 至多一个成为 current。
 
-v1 full Snapshot 使用 bounded latest-state coalescing，不无界排队；Phase-1 topology Profile限制 Runtime<=256、live Frame Stack<=64、DataAuthority<=256，保证合法 authority state可单条恢复。
-
-## 5. 下一协议：Renderer ⇄ Subsystem Connection
-
-下一正式设计目标只回答：
-
-> Renderer 与某个 Subsystem Runtime 如何依据 Main 的 matching DataAuthority generation 建立、认证、替换和关闭一条 Data Connection？
-
-必须保持：
+以下事件 retire current connection：
 
 ```text
-one Runtime → at most one Renderer Data Connection
-Data generation authority = Main
-Frame lifecycle does not own Data lifecycle
-Data reconnect cannot restore Frame authority
-Desktop/PWA bootstrap carrier may differ
-established connection identity/lifecycle semantics must match
+carrier loss
+DataAuthority removal/replacement
+Renderer Control loss
+Renderer participant replacement
+Session end
 ```
 
-Connection协议冻结后，再决定 Runtime Control Application Profile v2 是否需要组合独立的 Data Lease Control domain。
+同 generation仍被授权时，旧 carrier retired 后 MAY 建立 fresh current carrier。
 
-## 6. Content API
-
-[Readonly Content API v1](./content-api-v1.md) 状态仍为 Active / Normative / Evolving。
-
-其职责是逻辑只读内容读取、MIME/cache/version/error/integrity，不负责 capability delivery。
+重要边界：
 
 ```text
-Content API semantics
-!=
-Content Access Grant bootstrap/distribution
+Data loss != Runtime failure
+Data loss != Frame unwind
+Frame close != Data retire
+Activation replacement != Data generation replacement
+Data retire != Render destroy
 ```
 
-Content Access Bootstrap/Profile 后续独立冻结；不得把 Content credential塞入 Frame / Render State /普通 resource response。
+Host/Platform如何建立 WebSocket/MessagePort、ticket/capability如何交付不属于本 Contract。
 
-## 7. 当前状态表
+## 6. User Input Protocol v1 Core Draft
+
+权威草案：[Renderer → Subsystem User Input Protocol v1](./user-input-v1.md)。
+
+Core authority：
+
+```text
+current Data Connection
++
+Main current InputTarget
++
+frameId
++
+current activationId
+```
+
+wire authority identity只需要：
+
+```text
+frameId + activationId
+```
+
+不重复 subsystemKey/sessionId/generation，因为这些已由 current Data Connection绑定。
+
+Core输入类别：
+
+```text
+discrete
+    ordered / no coalescing / no reconnect replay
+
+continuous
+    latest-state semantics / may coalesce
+
+reset
+    clears current Activation continuous intent
+```
+
+Activation replacement、Connection retired、Renderer Control loss、Session end都是 implicit continuous reset boundary。
+
+User Input：
+
+```text
+Renderer → Subsystem only
+no ACK
+not a transaction
+not broadcast
+not a Frame command
+input/Data loss != Runtime failure
+```
+
+当前尚待收敛：
+
+```text
+Keyboard / Pointer / Touch / Gamepad normalized payload
+message encoding / limits
+queue numeric limits
+discrete overflow policy
+text/IME boundary
+```
+
+## 7. Render Update / Render State
+
+下一主要数据协议目标：Render Update v1。
+
+它必须独立于 Frame/Input authority，负责 Subsystem-owned Render identity、revision、snapshot/update/recovery 与 backpressure。
+
+```text
+Frame suspend != Render hidden
+Frame close/unwind != Render destroy
+Activation replacement != Render epoch
+Data reconnect recovery != Frame recovery
+```
+
+Render State Contract定义被 Render Update携带的声明式 presentation state，不应把 DOM/Canvas/WebGL对象直接变成 authority state。
+
+## 8. Content API
+
+[Readonly Content API v1](./content-api-v1.md) 状态为 Active / Normative / Evolving。
+
+职责是逻辑只读内容读取、MIME/cache/version/error/integrity；Content capability 如何分发属于独立 Content Access Bootstrap/Profile。
+
+## 9. 当前状态表
 
 | 主题 | 入口 | 状态 |
 |---|---|---|
@@ -283,9 +328,9 @@ Content Access Bootstrap/Profile 后续独立冻结；不得把 Content credenti
 | Frame / Call v1 Conformance | [frame-call-conformance-v1.md](./frame-call-conformance-v1.md) | Active / Normative / Frozen |
 | Frame v1 Suspend Clarification | [frame-call-v1-suspend-clarification.md](./frame-call-v1-suspend-clarification.md) | Active / Normative / Frozen Clarification |
 | Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | **Active Design / Draft** |
-| Renderer ⇄ Subsystem Connection | 尚待新文档 | Next Draft target |
-| User Input | 尚待新文档 | Draft target |
-| Render Update | 尚待新文档 | Draft target |
+| Renderer ⇄ Subsystem Data Connection v1 | [renderer-subsystem-data-connection-v1.md](./renderer-subsystem-data-connection-v1.md) | **Active Design / Draft；lifecycle closed** |
+| User Input v1 | [user-input-v1.md](./user-input-v1.md) | **Active Design / Core Draft** |
+| Render Update | 尚待新文档 | Next major data protocol target |
 | Render State | 尚待新文档 | Draft target |
 | Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative / Evolving |
 
@@ -299,35 +344,38 @@ Legacy / Superseded：
 | [client-state-tree-v1.md](./client-state-tree-v1.md) | Legacy / Superseded |
 | [resource-protocol.md](./resource-protocol.md) | Legacy / Superseded |
 
-## 8. Version / Compatibility Rules
+## 10. Version / Compatibility Rules
 
 - Frozen closed schema不得私加字段/方法；
 - Frame method/identity/commit/error/unwind/order/limit改变需要新 Frame版本；
-- Subsystem Control v1的 Data endpoint不扩展到PWA；跨平台使用v2方向；
+- Subsystem Control v1 Data endpoint不扩展到PWA；跨平台使用v2方向；
 - Frame v1继续由 Runtime Profile静态绑定，无独立 Frame hello/downgrade；
-- Renderer Control v1不携Data bootstrap secret；
-- fixture coverage可增加而保持 protocolVersion，前提是只验证既有 Frozen semantics；
+- Renderer Control不携Data bootstrap secret；
+- Data Connection Core不得私加 handshake/heartbeat；
+- User Input不得把浏览器 Host Event对象直接当稳定 wire schema；
+- fixture coverage可以扩展，但不能改变 Frozen语义；
 - Transport差异不得改变建立后的 application semantics。
 
-## 9. 推进顺序
+## 11. 推进顺序
 
 ```text
-Protocol Boundary Cleanup             Accepted
-Subsystem Control v2                  Draft
-Renderer Control v1                   Draft / under review
-Frame suspend clarification           Frozen clarification
+Protocol Boundary Cleanup                 Accepted
+Subsystem Control v2                      Draft
+Renderer Control v1                       Draft / under review
+Frame suspend clarification               Frozen clarification
+Data Connection Contract v1               Draft / lifecycle closed
+User Input v1                             Core Draft / current review
     ↓
-Renderer ⇄ Subsystem Connection v1    next
+User Input payload mapping + limits
     ↓
-Runtime Control Profile v2            if required by frozen composition
-    ↓
-User Input v1
 Render Update v1
 Render State Contract v1
+    ↓
+Runtime Control Profile v2                only if frozen composition requires it
 Content Access Profile
 ```
 
-## 10. 当前明确暂缓
+## 12. 当前明确暂缓
 
 PWA executable/bootstrap细节、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame runtime dynamic downgrade/capability negotiation。
 
