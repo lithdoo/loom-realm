@@ -51,7 +51,7 @@ no Frame handshake/downgrade/partial-v1 claim
 
 ## 里程碑 3：Main ⇄ Renderer Control
 
-状态：**协议 Draft 已建立，进入 review/closure。**
+状态：**协议 Draft 已建立，InputTarget lease语义已闭合，继续 review/closure。**
 
 目标：冻结 Main向 Renderer发布 committed Runtime / Frame / Activation / InputTarget / DataAuthority 的最小 authority-replication contract。
 
@@ -71,6 +71,7 @@ no replay / no patch
 activate/resume ACK-before-publication
 revoked Activation never republished
 normal/recovery InputTarget=null legal
+published InputTarget lease revoke后 same frameId+activationId never re-granted
 Renderer不计算failure unwind
 Control loss/replacement撤销Renderer input/Data authority
 ```
@@ -81,7 +82,7 @@ Control loss/replacement撤销Renderer input/Data authority
 
 ```text
 Data Connection Contract v1    Draft / lifecycle closed
-User Input v1                  Core Draft / Channel+Interest review
+User Input v1                  Core Draft / semantic closure reviewed
 ```
 
 ### Data Connection Contract
@@ -115,22 +116,27 @@ Data loss：
 
 ### User Input Core
 
-公共输入 authority：
+v1 trust boundary：
 
 ```text
-current Data Connection
-+
-Main current InputTarget
-+
-frameId
-+
-current activationId
+Main
+    owns InputTarget / Activation
+
+Renderer Core
+    trusted sender-side InputTarget enforcement point
+
+Subsystem
+    validates local Frame/Activation + local Interest
 ```
 
-Subsystem额外声明 current Input Interest；它只能缩小输入面：
+User Input domain：
 
 ```text
-Effective Input = Main authority ∩ Subsystem Interest
+Subsystem → Renderer
+    Input Interest
+
+Renderer → Subsystem
+    State / Event / Reset
 ```
 
 标准 Channel：
@@ -141,7 +147,7 @@ pointer.state  / pointer.event
 gamepad.state  / gamepad.event
 ```
 
-自定义 Renderer component可定义：
+自定义 Renderer component：
 
 ```text
 x.<custom-name>.state
@@ -151,33 +157,39 @@ x.<custom-name>.event
 Interest：
 
 ```text
-Subsystem → Renderer
 full replacement exact set
 fresh Data Connection default empty
 no wildcard
+not authority
 ```
 
-输入数据：
+统一派生状态：
 
 ```text
-Renderer → Subsystem
-.state  = self-contained latest snapshot / may coalesce
-.event  = ordered transient / no coalescing / no replay
-reset   = clear all state for frameId + activationId
+Effective(C)
+=
+current matching Data Connection
+∧ Main current InputTarget matches
+∧ active/current Activation matches
+∧ C is interested
+∧ Producer(C) available
 ```
 
 必须实现：
 
 ```text
-Interest removal clears removed state locally
+.state false→true → fresh self-contained baseline
+.event false→true → future events only / no replay
+Interest removal clears removed State locally
 late input for removed Interest is dropped
 Event/Reset are State coalescing barriers
 InputTarget revoke best-effort Reset previous target
+Effective State Producer loss → Reset + remaining State rebaseline
 Activation/Data/Control authority loss implicit reset
 fresh connection republishes Interest + fresh State
 ```
 
-User Input仍无 transactional ACK、不是 broadcast、不是 direct Frame command；input loss/overflow不得自行触发 Runtime failure/Frame unwind。
+User Input无 transactional ACK、不是 broadcast、不是 direct Frame command；input loss/overflow不得自行触发 Runtime failure/Frame unwind。
 
 下一关闭项：
 
@@ -189,7 +201,18 @@ Event queue numeric limits / overflow final policy
 text/IME boundary
 ```
 
-里程碑 4 最终关闭条件：Data Connection Contract lifecycle + User Input Channel/Interest/wire/payload/limits/conformance全部明确，且 stale Activation、Interest filtering、custom x.* Channel、Control loss、same-generation reconnect、State/Event/Reset都有 fixtures。
+里程碑 4 最终关闭条件：Data Connection lifecycle + User Input Channel/Interest/Effective transition/wire/payload/limits/conformance全部明确，并覆盖：
+
+```text
+stale Activation
+InputTarget one-shot lease
+Interest filtering race
+custom x.* Channel
+Producer loss/recovery
+Control loss
+same-generation reconnect
+State/Event/Reset ordering
+```
 
 ## 里程碑 5：Render Update 与 Web Renderer
 
@@ -206,7 +229,19 @@ Activation replacement != Render epoch
 Data Connection retire != Render destroy
 ```
 
-Web Renderer同时实现 User Input Interest Registry、标准 Input Channel Producers 与 Subsystem自定义 `x.*` Renderer component producers，但这些不能改变 Main input authority。
+Web Renderer同时实现：
+
+```text
+trusted InputTarget sender gate
+Input Interest Registry
+Input Channel Producer Registry
+Effective Input Channel Resolver
+standard Input Channel Producers
+Subsystem custom x.* Renderer component Producers
+Producer-loss Reset/rebaseline
+```
+
+这些都不能改变 Main input authority。
 
 Render State Contract作为 Render Update携带的声明式状态模型独立冻结。
 
@@ -245,10 +280,13 @@ PWA Bootstrap Profile MUST NOT重新定义 Frame version、Frame JSON type、Dat
 - exact seven Frame RPC across Desktop/PWA；
 - stale Activation永久拒绝；
 - Main⇄Renderer Control完成；
+- InputTarget one-shot lease完成；
 - Data Connection current/retired authority闭合；
 - Data loss不触发 Runtime failure/Frame unwind；
 - User Input Input Interest / Channel filtering完成；
+- Effective Channel transition语义完成；
 - standard与custom `x.*` Channel边界完成；
+- Producer loss Reset/rebaseline完成；
 - User Input State/Event/Reset、ordering/backpressure/limits完成；
 - Render Update / Render State完成；
 - Frame不拥有 Render；zero-frame Render可工作；
