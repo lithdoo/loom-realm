@@ -3,49 +3,55 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：Runtime Control、Frame transaction/error/recovery/limits、Renderer/Data/Input/Render、Transport、Content 与端到端测试分层  
-> 依赖：[仓库与分包方案](./repository-layout.md)、[正式契约目录](../15-contracts/README.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[Frame / Call v1 Conformance](../15-contracts/frame-call-conformance-v1.md)  
+> 主要定义：Control、Frame、Renderer/Data/Input/Render、Content 与跨平台测试分层  
+> 依赖：[正式契约目录](../15-contracts/README.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Frame v1 Conformance](../15-contracts/frame-call-conformance-v1.md)  
 > 最近复核：2026-08-09
 
 ## 1. 测试目标
 
-测试不仅验证实现正确，还必须阻止实现破坏当前协议边界。
+测试必须验证**跨角色可观察语义**，并阻止实现重新耦合协议边界。
 
 当前协议栈：
 
 ```text
-Game Package v1 / Desktop Launcher v1
-Subsystem Control v1
-Runtime Control Profile v1
-Frame / Call v1 Frozen
-Renderer Control v1
-Data Connection v1
-User Input v1
-Render Update v1 closure candidate
-Content API v1
+Game Package / Desktop Launcher
+Subsystem Control
+Runtime Control Profile
+Frame / Call
+Renderer Control
+Data Connection
+User Input
+Render Update
+Content API
 ```
 
-不测试从未实现的历史版本兼容；它们不属于 compatibility matrix。
+不测试从未实现的历史版本兼容，也不把以下实现选择变成 conformance requirement：
+
+```text
+Component Registry/Factory
+DOM/OS event adapter
+Host ticket/token/MessagePort delivery mechanism
+queue concrete capacity/drop preference
+Patch-vs-Snapshot heuristic
+cache/index/scheduler implementation
+```
 
 ## 2. 测试层次
 
 ```text
-Schema / Closed-wire Test
-→ Identity / State Machine Fixture
-→ Protocol Composition Fixture
+Schema / Closed-wire
+→ Identity / State Machine
+→ Protocol Composition
 → Transaction Golden Trace
-→ Error / Timeout / Recovery Fixture
-→ Limit / Request ID / Revision Fixture
-→ Transport / Platform Binding Conformance
-→ Module Unit Test
-→ Runtime Container Interop
-→ Renderer/Data/Input/Render Integration
+→ Error / Timeout / Recovery
+→ Hard Limit / ID / Revision
+→ Transport semantic equivalence
+→ Module Unit
+→ Runtime/Renderer integration
 → End-to-End
 ```
 
 ## 3. Subsystem Control v1
-
-至少覆盖：
 
 ```text
 hello-first-message
@@ -64,121 +70,57 @@ no-automatic-restart
 wire-limits
 ```
 
-反向 fixture：
-
-```text
-ready.rendererDataEndpoint → closed-schema protocol error
-unknown control version → unsupported
-```
+`ready.rendererDataEndpoint` 必须是 closed-schema error。
 
 ## 4. Runtime Control Profile v1
 
 ```text
-Control v1 + Frame v1
-```
-
-至少：
-
-```text
 hello-before-frame-operation
 hello-versions-control-only
-Frame version statically bound to 1
+Frame v1 statically bound
 shared-sender-id-namespace-across-control-and-frame
-no-jsonrpc-batch-on-control-carrier
-ready-under-profile-requires-complete-frame-role
+no-jsonrpc-batch
+ready-requires-complete-frame-role
 frame-failure-enters-runtime-failed-path
 shutdown-deadline-distinct-from-frame-deadline
 no-data-method-in-runtime-control-profile
 ```
 
-Desktop WebSocket与PWA MessagePort对相同 abstract Control/Frame trace应得到相同 application outcome。
+Desktop WebSocket 与 PWA MessagePort 对同一 abstract trace 得到相同 application outcome。
 
-## 5. Frame v1 Normative Source
+## 5. Frame / Call v1
+
+正式最小 corpus 以 [Frame v1 Conformance](../15-contracts/frame-call-conformance-v1.md) 为准。
+
+重点覆盖：
 
 ```text
-protocol = loomrealm.frame-call
-version = 1
+identity/lifecycle/Activation no reuse
+exact seven Requests / closed schema
+Response-before-dependent-RPC
+activate/resume ACK-before-publication
+post-commit no rollback
+same-Subsystem recursion
+Success/Explicit Error/ambiguous timeout classification
+no retry / late response no recovery
+lowest failed-runtime occurrence whole-suffix unwind
+fixed-point expansion
+accepted outcome preservation
+fresh final Caller resume
 ```
 
-Batch A-F只用于设计历史/fixture分组，不是独立兼容等级。
-
-[Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)是 Frame角色最小规范来源。
-
-## 6. Frame Identity / Lifecycle / Wire
-
-至少：
+Suspend 直接测试主协议：
 
 ```text
-frame/activation unique + no reuse
-caller immutable
-subsystem binding permanent
-five lifecycle states only
-outcome != lifecycle
-stable Stack / no two InputTargets
-exact seven methods/directions
-all Frame methods are Request
-closed schema
-completed.value required
-no caller wire / close reason
-no frame.result/cancel/abort/unwind/version/capabilities
-no JSON-RPC Batch
-```
-
-## 7. Frame Transaction Golden Traces
-
-```text
-initial-initialize-before-activate
-initial-activate-ack-before-publish
-call-accept-suspends-caller
-call-success-before-child-initialize
+child-call-suspension-resumable-with-corresponding-child-outcome
 ordinary-call-no-reverse-suspend
-call-gap-inputtarget-null
-child-activate-ack-before-publish
-return-accept-stores-outcome
-return-success-before-frame-close
-close-before-resume
-resume-ack-before-publish
-same-subsystem-no-nested-reverse-request
-precommit-recoverable-abort
-postcommit-never-restores-revoked-activation
-accepted-outcome-never-erased
+administrative-suspend-revokes-activation
+administrative-suspend-no-generic-resume
+administrative-suspend-may-close
+administrative-suspend-timeout-runtime-fatal
 ```
 
-## 8. Frame Error / Timeout / Mutation Gate
-
-```text
-Success        → known commit
-Explicit Error → known no-commit
-Timeout/loss   → ambiguous
-```
-
-验证 no retry、late response不恢复、fatal divergence进入 Runtime failure、mutation gate不回退旧 Activation。
-
-Recoverable至少：target not-found/unavailable、`FRAME_INITIALIZE_REJECTED`。
-
-Fatal至少：Frame/Activation/Stack/ownership mismatch、invalid params/method、timeout/connection loss。
-
-## 9. Runtime Failure Unwind
-
-```text
-failure-root-is-lowest-failed-runtime-occurrence
-whole-root-to-top-suffix-is-doomed
-same-runtime-multiple-frame-recursion
-failure-unwind-top-to-bottom
-failure-barrier-clears-input-target
-failed-runtime-frame-logical-retire-without-ack
-healthy-descendant-context-exists-one-close
-cleanup-failure-expands-root
-multiple-root-expansions-converge
-accepted-outcome-preserved
-only-final-direct-caller-resumed
-recovery-resume-uses-fresh-activation
-fixed-point-eventually-resumes-or-empty
-```
-
-必须覆盖 same Runtime多次出现在 Stack以及 cleanup timeout导致 root下移。
-
-## 10. JSON / Number / Limit Tests
+## 6. JSON / Request ID / Limits
 
 共享 JSON边界：
 
@@ -187,38 +129,22 @@ undefined / NaN / Infinity / BigInt rejected
 unsafe integer rejected
 unpaired surrogate rejected
 duplicate JSON member rejected
-closed-schema unknown fields rejected
+closed-schema unknown field rejected
 ```
 
-Frame hard limits测试 exactly-at-limit / one-over-limit：
+Frame limits测试 exactly-at / one-over：
 
 ```text
 message 1 MiB
 JSON depth 64
 business JsonValue 512 KiB
-frameId / activationId 128 bytes
+frameId/activationId 128 bytes
 targetSubsystemKey 256 bytes
 ```
 
-Desktop actual WebSocket text bytes也有 hard cap；PWA Structured Clone不得绕过 JSON semantic validator。
+Request ID：positive safe integer、sender Connection lifetime no reuse、Control+Frame pending collision rejected、allocator exhaustion no wrap。
 
-## 11. JSON-RPC Request ID
-
-同一 sender / Runtime Control Connection：
-
-```text
-positive-safe-integer-only
-Connection-lifetime no reuse
-pending collision across Control+Frame rejected
-late response cannot bind new request
-allocator exhaustion does not wrap
-```
-
-Main与Subsystem两个方向 namespace独立。
-
-## 12. Renderer Control v1
-
-至少：
+## 7. Renderer Control v1
 
 ```text
 hello-first / one-shot token
@@ -227,7 +153,7 @@ session/revision monotonic
 revision gaps accepted
 revision regression rejected
 InputTarget references active/current activation
-InputTarget one-shot no same-activation regrant
+InputTarget one-shot no regrant
 DataAuthority has no endpoint/token/Port
 control-loss-clears-inputtarget
 control-loss-invalidates-dataauthority
@@ -238,7 +164,9 @@ snapshot-topology-limits
 
 Renderer不得计算 Runtime failure unwind。
 
-## 13. Data Connection v1
+Renderer Control token如何由 Host交付不做跨实现 conformance，只测试成功 bootstrap 后的协议行为和失效边界。
+
+## 8. Data Connection v1
 
 ```text
 current-generation-establish
@@ -256,9 +184,11 @@ data-loss-does-not-unwind-frame
 frame-close-does-not-retire-healthy-data-connection
 ```
 
-Platform binding额外证明 carrier安全绑定 Session/current Renderer/subsystem/generation。
+Desktop/PWA Host integration只需证明实际 carrier 在安装为 current 前绑定正确 Session/current Renderer/subsystem/generation；不要求 endpoint/ticket/Port wire相同。
 
-## 14. User Input v1 Core
+## 9. User Input v1
+
+Core：
 
 ```text
 interest-default-empty
@@ -279,9 +209,29 @@ same-generation-reconnect-fresh-state
 input-loss-does-not-fail-runtime
 ```
 
-Standard Input Mapping另测 keyboard/pointer/gamepad exact payload、normalization和limits。
+标准 `keyboard/pointer/gamepad` payload 一旦在 User Input v1 中冻结，直接加入同一 corpus：
 
-## 15. Render Update v1 Incremental Closure
+```text
+canonical-schema-valid/invalid
+identifier/coordinate/button semantics
+exactly-at/over numeric limits
+platform adapters produce equivalent canonical payload for equivalent logical input
+```
+
+不测试某个 Renderer 必须使用 DOM API、某个 key lookup table 或固定 polling cadence。
+
+Event queue测试协议事实：
+
+```text
+bounded
+surviving order preserved
+dropped event never replayed
+overflow does not fail Runtime/Frame
+```
+
+不要求固定 capacity/drop-oldest/drop-newest。
+
+## 10. Render Update v1
 
 Fresh baseline：
 
@@ -295,106 +245,60 @@ no-event-before-fresh-snapshot
 Revision：
 
 ```text
-post-baseline-commit-R-to-R-plus-1
+post-baseline-exact-R-to-R-plus-1
 patch-base-matches-current
-patch-gap-or-base-mismatch-fails-closed
-post-baseline-snapshot-gap-or-stale-fails-closed
+patch-gap/base-mismatch-fails-closed
+post-baseline-snapshot-gap/stale-fails-closed
 publication-cursor-resets-on-fresh-carrier
 ```
 
-Patch operations：
+Patch：
 
 ```text
 insert-root-child-subtree
 remove-leaf-subtree-cascade
-move-reorder-reparent-root-transition
+move-reorder/reparent/root-transition
 move-detach-then-resolve
 move-before-self-rejected
 move-under-descendant-rejected
-update-attrs-data-set-remove
+update-attrs/data-set-remove
 patch-local-tombstone-blocks-key-reuse
 one-shot-node-key
 same-live-key-tag-stable
 atomic-no-partial-apply
 ```
 
-Event/barrier：
+`tag` conformance只测试：
+
+```text
+is string
+within byte limit
+same live key stable
+no semantic/known/unknown validation required
+```
+
+Event/recovery：
 
 ```text
 patch-insert-X-then-event-target-X
 event-X-then-patch-remove-X
 stale-event-target-dropped
-event-no-replay-no-coalesce
+event-no-replay/no-coalesce
 event-overflow-does-not-block-authoritative-progress
-```
-
-Recovery：
-
-```text
-authoritative-continuity-failure-retires-data-connection
+authoritative-failure-retires-data-connection
 fresh-registry-plus-snapshots-recovery
-same-generation-reconnect-does-not-use-cache-as-patch-base
-data-retire-does-not-destroy-presentation-cache
+data-retire-does-not-fail-runtime/unwind-frame
 ```
 
-## 16. Render Limits / Opaque Tag Boundary
+Event queue不要求固定数字/丢弃偏好。
 
-Completion阶段需要 exactly-at/over-limit fixtures：
+Hard limits一旦冻结，做 exactly-at/over：message、JSON depth、tree depth、node count、patch op count、attrs/data、domainId/key/tag bytes、zIndex。
 
-```text
-message size
-JSON depth
-tree depth
-node count
-patch op count
-attrs/data count/size/depth
-key/tag/domainId bytes
-zIndex range
-Event FIFO capacity/drop policy
-```
-
-`tag` conformance只测试：
-
-```text
-string/wire validity
-byte limit
-same live key keeps same tag
-```
-
-明确 **不测试也不标准化**：
-
-```text
-known/unknown tag
-Component Factory presence
-component loading
-per-tag attrs/data schema
-Renderer Component Profile
-```
-
-这些属于具体 Renderer/Subsystem implementation integration tests，而不是 Render protocol conformance。
-
-## 17. Desktop / PWA Cross-platform
-
-同一 abstract trace在 Desktop WebSocket与PWA MessagePort/Host binding上应得到相同：
-
-```text
-Control v1 Runtime lifecycle
-Frame v1 authority/outcome/unwind
-Renderer Control authority
-Data Connection current/retired identity
-User Input recovery
-Render Domain authoritative state
-```
-
-差异只能来自 carrier/bootstrap/platform lifecycle integration。
-
-## 18. Content
-
-至少：
+## 11. Content API v1
 
 ```text
 manifest/record/group/resource GET+HEAD
-logical identity/path traversal rejection
+logical path traversal rejection
 ETag/304
 contentVersion isolation
 MIME correctness
@@ -402,68 +306,65 @@ Desktop bearer auth semantics
 PWA same-origin semantics
 409 state/version conflict
 422 schema/integrity failure
-content limits/concurrency profile
 no physical path/token leak
 ```
 
-Content Access Profile完成后增加 capability issuance/distribution/rotation fixtures。
+Range：若实现宣称支持，测试标准 HTTP `206/Content-Range/416`；不要求所有实现支持，也没有 Range Profile conformance。
 
-## 19. Test Subsystems
+Deployment limits：测试 bounded 行为与 `413/429/timeout`，不要求不同部署共享具体资源上限/并发数字。
 
-推荐：
+Host grant如何生成/注入/轮换不做 Content API conformance；只验证最终请求 authorization 行为。
+
+## 12. Desktop / PWA Semantic Equivalence
+
+相同 abstract application trace 应得到相同：
 
 ```text
-control-v1-valid
-frame-init-business-reject
-frame-rpc-never-respond
-frame-rpc-late-respond
-frame-state-divergence
-same-subsystem-recursive
-runtime-crash-on-close
-runtime-crash-on-resume
-runtime-multiple-frame-occurrence
-stale-activation
-input-interest-toggle
-input-producer-loss
-render-patch-stream
-render-invalid-patch
-render-event-barrier
-render-without-frame
+Control Runtime lifecycle
+Frame authority/outcome/unwind
+Renderer Control authority
+Data Connection current/retired
+User Input canonical semantics/recovery
+Render Domain authoritative state
+Content logical HTTP/Fetch semantics
 ```
 
-## 20. E2E
+平台差异只能来自 Host carrier/credential establishment 与 platform lifecycle integration。
+
+## 13. E2E
 
 正常：
 
 ```text
 Game bootstrap
-→ Control v1 ready
+→ Control ready
 → initial Frame
 → Renderer Control
-→ Data carrier
+→ Host-established Data carrier
 → User Input + Render Snapshot/Patch/Event
 → nested call/return/resume
 → Renderer reload/recovery
+→ Content reads
 → shutdown
 ```
 
-Failure：Runtime crash、Frame timeout/divergence、Data carrier loss/reconnect、Renderer Control loss、invalid Render Patch、Content fault分别验证独立 failure boundary。
+Failure：Runtime crash、Frame timeout/divergence、Data loss、Renderer Control loss、invalid Render Patch、Content fault分别验证独立 failure boundary。
 
-## 21. Fixture Revision / CI
+## 14. CI / Fixture Revision
 
-每个协议 fixture corpus独立跟踪 protocol/version/fixtureSetRevision。
+每个真正协议 corpus独立记录 protocol/version/fixtureSetRevision。
 
-CI最终至少报告：
+CI至少报告：
 
 ```text
-Subsystem Control v1 conformance
-Runtime Control Profile v1 integration
-Frame v1 Main / Subsystem / Desktop / PWA conformance
-Renderer Control v1 conformance
-Data Connection v1 conformance
-User Input v1 Core conformance
-Render Update v1 conformance
-Content API v1 conformance
+Subsystem Control v1
+Runtime Control Profile v1
+Frame v1 Main / Subsystem / Transport
+Renderer Control v1
+Data Connection v1
+User Input v1
+Render Update v1
+Content API v1
 ```
 
-协议已写完不等于实现 conformant；只有 executable fixtures通过后才能声明对应角色兼容。
+只有 executable fixtures通过后，具体实现才能声明 conformant。
