@@ -29,7 +29,7 @@ Subsystem Runtime Container
 ├── 0..N Render Domains
 └── one Main Control carrier
     │
-    ├── Control v2 + Frame v1
+    ├── Control v1 + Frame v1
     │
     └──────────────┐
                    │ Host/Platform establishes Data carrier
@@ -56,9 +56,9 @@ Render由 Subsystem拥有：一个 Runtime可拥有 `0..N Render Domains`，Doma
 当前 Control主线：
 
 ```text
-Subsystem Control v2
-Runtime Control Application Profile v2
-    = Control v2 + Frame / Call v1
+Subsystem Control v1
+Runtime Control Application Profile v1
+    = Control v1 + Frame / Call v1
 ```
 
 启动：
@@ -68,22 +68,20 @@ validate descriptors
 → Launch Attempt / bootstrapToken
 → spawn + Supervisor
 → Control carrier connect
-→ subsystem.hello(protocolVersions includes 2)
+→ subsystem.hello(protocolVersions includes 1)
 → identified
 → optional initializing
 → subsystem.status({state:"ready"})
 ```
 
 ```text
-spawn success ≠ connected ≠ identified ≠ ready
-ready ≠ Data Connection exists
+spawn success != connected != identified != ready
+ready != Data Connection exists
 ```
 
 `ready`不携 Data endpoint。
 
 正常结束：Main shutdown intent→`subsystem.shutdown`→Supervisor confirms exit→stopped。无 shutdown intent的 exit/Control loss或 Runtime-reported failed进入 terminal failure。
-
-Subsystem Control v1及 Runtime Control Profile v1均为 `Abandoned Before Implementation`，只保留历史路径。
 
 ## 4. Frame / Call v1
 
@@ -104,7 +102,7 @@ Subsystem → Main
     call / return
 ```
 
-Control version 2不改变 Frame version 1；当前 Runtime Control Profile v2静态绑定二者。
+Subsystem Control v1与 Frame / Call v1是独立协议版本空间；Runtime Control Profile v1静态绑定二者。
 
 ## 5. Normal Frame Transaction
 
@@ -181,7 +179,7 @@ all seven method deadlines = 1s..5min sender-local monotonic profile
 
 PWA Structured Clone不能扩大 Frame JSON type model。Desktop WebSocket与PWA MessagePort必须保持同一 application semantics和 conformance trace。
 
-`subsystem.hello.protocolVersions`只协商 Subsystem Control v2；Frame version由 Runtime Control Profile v2静态绑定。
+`subsystem.hello.protocolVersions`只协商 Subsystem Control v1；Frame version由 Runtime Control Profile v1静态绑定。
 
 ## 9. Failure Recovery Safety
 
@@ -209,9 +207,9 @@ Frame transaction/unwind不隐式 create/destroy Runtime/Data Connection/Render 
 
 ```text
 Subsystem ⇄ Main Control
-    Subsystem Control v2          Current
-    Frame / Call v1               Frozen
-    Runtime Control Profile v2    Current composition
+    Subsystem Control v1
+    Frame / Call v1
+    Runtime Control Profile v1
 
 Renderer ⇄ Main Control
     Renderer Control v1
@@ -314,7 +312,7 @@ Subsystem → Renderer only
 Desktop：
 
 ```text
-Subsystem Control v2      localhost WebSocket Host binding
+Subsystem Control v1      localhost WebSocket Host binding
 Frame / Call v1           same Control carrier
 Renderer Control v1       localhost WebSocket
 Renderer⇄Subsystem Data   Host-established carrier
@@ -324,7 +322,7 @@ Content                    localhost HTTP
 PWA：
 
 ```text
-Subsystem Control v2      authenticated MessagePort
+Subsystem Control v1      authenticated MessagePort
 Frame / Call v1           same application semantics
 Renderer Control v1       authenticated Control Port
 Renderer⇄Subsystem Data   Host-established MessagePort
@@ -336,8 +334,8 @@ Transport/bootstrap机制可不同，但建立后的 application identity/lifecy
 ## 16. 核心不变量
 
 1. Process/Worker isolation granularity=Subsystem；
-2. 当前 Subsystem Control只有 v2；v1已实现前废弃；
-3. Runtime Control Profile v2 = Control v2 + Frame v1；
+2. Subsystem Control v1 是 Runtime identity/lifecycle协议；
+3. Runtime Control Profile v1 = Control v1 + Frame v1；
 4. Runtime `ready`不携/暗示 Data endpoint；
 5. Frame=Main-owned call/input Context；
 6. identity/Activation不复用；
