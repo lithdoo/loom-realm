@@ -8,7 +8,7 @@ titleTemplate: false
 hero:
   name: LoomRealm
   text: 分层设计的模块子系统运行平台
-  tagline: 从产品目标、系统架构、正式契约到模块设计和实施计划，逐层收敛可演进的运行平台。
+  tagline: 从产品目标、系统架构、正式契约到模块设计和实施计划，逐层收敛可实现、可验证的运行平台。
   actions:
     - theme: brand
       text: 产品设计总览
@@ -17,19 +17,19 @@ hero:
       text: 系统架构
       link: /10-architecture/system-overview
     - theme: alt
-      text: 阅读指南
-      link: /README
+      text: 正式契约
+      link: /15-contracts/README
     - theme: alt
       text: 查看 GitHub
       link: https://github.com/lithdoo/loom-realm
 
 features:
-  - title: 从粗到细
-    details: 先定义产品目标和系统边界，再冻结协议、拆解模块，最后确定分包与实施顺序。
+  - title: 单一当前入口
+    details: 当前协议只保留可实现版本；被替代的协议正文从文档树移除，设计历史由 ADR 与 Git history 保存。
   - title: 单向设计依赖
     details: Overview → Architecture → Contracts → Modules → Implementation，下层不能隐式修改上层结论。
-  - title: 渐进迁移
-    details: 新目录成为推荐入口，旧详细文档暂时保留，后续逐篇迁移而不丢失有效设计。
+  - title: 兼容边界明确
+    details: 协议版本表示真实互操作边界，不作为设计稿迭代编号；首次实现前可直接修正 first-version contract。
 ---
 
 ## 推荐阅读顺序
