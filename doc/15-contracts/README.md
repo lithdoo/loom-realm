@@ -280,7 +280,7 @@ fresh Data Connection
 
 无 ACK/NACK、Patch replay、resume cursor、Renderer resync RPC、cross-Domain transaction。
 
-剩余只关闭 hard limits/encoding/conformance；不再保留第二份 incremental v1 文档。
+剩余只关闭 hard limits/encoding/conformance。
 
 ---
 
@@ -305,21 +305,71 @@ Deployment body/resource/concurrency/rate/timeouts 是 bounded implementation co
 
 ---
 
-## 11. 当前状态表
+## 11. 链路协议设计进度
 
-| 主题 | 状态 |
-|---|---|
-| Game Package v1 | Active / Normative；Desktop subset Frozen |
-| Desktop Node.js Launcher v1 | Active / Normative / Frozen |
-| Subsystem Control v1 | Active / Normative；Stabilizing |
-| Runtime Control Application Profile v1 | Active / Normative；Stabilizing |
-| Frame / Call v1 | Active / Normative / Frozen |
-| Frame / Call v1 Conformance | Active / Normative / Frozen |
-| Main ⇄ Renderer Control v1 | Active Design / Draft；near closure |
-| Renderer ⇄ Subsystem Data Connection v1 | Active Design / Draft；lifecycle closed |
-| User Input v1 | Core Closure Candidate；standard payload待关闭 |
-| Render Update v1 | Closure Candidate |
-| Content API v1 | Active / Normative / Evolving |
+以下百分比表示**协议设计成熟度估算**，用于判断“协议边界与语义距离可实现/可冻结还有多少设计工作”。它不是代码实现完成度、测试覆盖率或发布进度。
+
+| 链路 / 协议 | 通俗理解 | 设计目的 | 设计成熟度 | 剩余工作 |
+|---|---|---|---:|---|
+| Game Package v1 | “这个游戏有哪些子系统、分别启动什么” | 声明 Subsystem、Launcher、Entry、Env 等静态启动拓扑 | ≈95% | 少量集合级 validation / conformance 收尾；PWA Launcher 映射另由实现边界处理 |
+| Desktop Node.js Launcher v1 | “怎么安全启动并监管一个 Node 子系统进程” | 冻结 entry 解析、spawn、Bootstrap Context、Supervisor 与失败边界 | 100% / Frozen | 无新的协议设计工作；进入实现与 conformance |
+| Subsystem Control v1 | “这个 Runtime 是谁、ready 了吗、什么时候关闭” | Runtime 身份认证、生命周期、ready/failed/shutdown | ≈95% | 最终 conformance review；原则上不再扩 wire |
+| Runtime Control Application Profile v1 | “Control 和 Frame 共用一条控制连接时怎么共存” | 冻结协议组合、Request ID namespace、no Batch、版本绑定 | ≈95% | 最终组合 conformance review |
+| Frame / Call v1 | “当前调用栈是谁在运行、谁调用谁、失败后怎么收栈” | Frame/Stack/Activation/call/return/commit/failure unwind | 100% / Frozen | 无新的协议设计工作；只维护 conformance fixture |
+| Main ⇄ Renderer Control v1 | “Renderer 现在应该相信 Main 的哪些权威状态” | 同步 Runtime、Stack、Activation、InputTarget、DataAuthority | ≈95% | 最终 closure/freeze review；补齐 limits/conformance 检查 |
+| Renderer ⇄ Subsystem Data Connection v1 | “Renderer 与某个 Subsystem 现在有没有合法数据通道” | 冻结 Data Connection identity、generation、current/retired lifecycle | ≈95% | 最终 freeze review；实际 WebSocket/MessagePort 建立属于 Host 实现 |
+| User Input v1 | “用户输入最终应该发给哪个 Frame” | InputTarget authority + Interest + Producer gate；State/Event/Reset | ≈80–85% | keyboard/pointer/gamepad canonical payload、wire limits、conformance |
+| Render Update v1 | “Subsystem 怎么把 UI 状态同步给 Renderer” | Domain Registry、Snapshot、Patch、Event、revision 与 recovery | ≈85–90% | hard limits、encoding、key/domain/tag byte limits、zIndex、conformance |
+| Content API v1 | “Runtime/Renderer 怎么只读获取地图、数据和资源” | logical readonly route、缓存、版本、完整性、request authorization | ≈85–90% | 少量 limits/policy 收尾；重点转 implementation/conformance |
+
+### 11.1 端到端链路成熟度
+
+一次正常 Session 从游戏包到实际交互，大致经过：
+
+| 阶段 | 使用的协议 | 回答的问题 | 设计成熟度 |
+|---|---|---|---:|
+| 1. 读取游戏 | Game Package v1 | 我要启动哪些 Subsystem？ | ≈95% |
+| 2. 启动进程 | Desktop Node.js Launcher v1 | 怎么安全启动并监管 Runtime？ | 100% |
+| 3. Runtime 上线 | Subsystem Control v1 | 你是谁？初始化/ready 了吗？ | ≈95% |
+| 4. 建立调用栈 | Frame / Call v1 | 当前谁执行？谁调用谁？ | 100% |
+| 5. Renderer 获取 Main 权威 | Main ⇄ Renderer Control v1 | 当前 Stack/Input/Data authority 是什么？ | ≈95% |
+| 6. 建立数据通道 | Data Connection v1 | Renderer 与 Subsystem 能合法通信吗？ | ≈95% |
+| 7. 用户操作 | User Input v1 | 键盘/指针/手柄输入该发给谁？ | ≈80–85% |
+| 8. UI 更新 | Render Update v1 | authoritative UI state 发生了什么变化？ | ≈85–90% |
+| 9. 加载内容 | Content API v1 | 地图、资源和业务内容去哪里读取？ | ≈85–90% |
+
+从设计角度可归纳为三段：
+
+```text
+启动 / Runtime / Frame 控制链       ≈97%  —— 基本定型
+Renderer Authority / Data 链       ≈95%  —— 主要剩 freeze/conformance
+User Input / Render / Content 数据层 ≈85%  —— 主要剩 wire limits/payload/conformance
+```
+
+整体协议架构成熟度可粗略视为 **≈90%**。这个数字只表示“主要 authority/lifecycle/recovery 问题已经解决”，不表示实现工作已经完成。
+
+### 11.2 当前真正剩余的协议设计工作
+
+按收益和依赖顺序：
+
+| 优先级 | 工作 | 关闭标准 |
+|---|---|---|
+| P0 | User Input v1 canonical standard payload | keyboard/pointer/gamepad 双端可按同一 canonical schema 实现；hard limits 明确；conformance fixture 可执行 |
+| P0 | Render Update v1 hard limits + conformance | message/tree/node/op/attrs/data/zIndex 等边界冻结；Snapshot/Patch/Event fixture 覆盖 continuity/recovery |
+| P1 | Main ⇄ Renderer Control v1 Frozen review | 当前 authority snapshot、one-shot InputTarget、DataAuthority、Control-loss 收敛语义无未决项 |
+| P1 | Data Connection v1 Frozen review | current/retired、generation、replacement、Control-loss、reconnect 语义无未决项 |
+| P1 | Subsystem Control / Runtime Control Profile 最终 review | hello/ready/shutdown、组合 Request ID/no-Batch、Frame binding conformance 完整 |
+| P2 | Content API v1 implementation/conformance | 核心 route/cache/auth/integrity 已稳定；剩余问题不再制造新的 Access/Range/Deployment Profile |
+| P2 | Desktop/PWA Host integration | 以模块实现满足既有 authority binding，不新增 application protocol |
+
+因此后续默认方向应从“继续增加协议”转为：
+
+```text
+关闭少量剩余 wire 边界
+→ 冻结成熟协议
+→ 编写 executable conformance
+→ 实现 Main / Host / Renderer / Subsystem vertical slice
+```
 
 ---
 
