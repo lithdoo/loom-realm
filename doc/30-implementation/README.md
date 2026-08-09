@@ -7,7 +7,7 @@
 > 依赖：[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
 > 最近复核：2026-08-09
 
-实施层描述当前仓库准备如何落地。包名、目录和交付顺序可以调整，但必须遵守上层架构和正式契约。
+实施层描述如何落地当前协议；内部机制可以调整，但不得改变上层 authority/lifecycle/recovery 语义。
 
 ## 当前 Tracking 文档
 
@@ -20,96 +20,64 @@
 ```text
 Game Package v1
 Desktop Node.js Launcher Profile v1
-Subsystem Control Protocol v1
+Subsystem Control v1
 Runtime Control Application Profile v1
-Frame / Call Protocol v1
+Frame / Call v1
 Renderer Control v1
 Data Connection v1
-User Input v1 Core
-Render Update v1 incremental closure candidate
+User Input v1
+Render Update v1
 Content API v1
 ```
 
-历史 pre-implementation 协议正文已从当前文档树移除；实现不需要 fallback/dual-stack。
+没有 Renderer Component Profile、Standard Input Mapping Profile、Content Access Profile、Range Profile、Event FIFO Profile 或 Desktop/PWA Data Bootstrap application protocol。
 
-## Runtime Control
+## Runtime / Frame
 
 ```text
 Runtime Control Application Profile v1
     = Subsystem Control v1 + Frame / Call v1
 ```
 
-Profile约束：
+关键约束：
 
 ```text
-Control hello selects version 1
-Frame version statically bound to 1
+Control hello selects v1
+Frame v1 statically bound
 hello before Frame operation
-shared sender/Connection Request-ID namespace
+shared sender-side Request ID namespace
 one JSON-RPC message per transport unit
 no JSON-RPC Batch
 ready has no Data endpoint
 ```
 
-Launcher Profile v1、Bootstrap Context v1、Control v1、Frame v1是独立版本空间，当前恰好均为1。
-
-## Frame v1 可直接实现
-
-```text
-Main-owned identity/lifecycle/Stack/Activation/InputTarget
-exact seven RPC
-Response-before-dependent-RPC
-ACK-before-publication
-post-commit no rollback
-```
-
-Error/recovery：
-
-```text
-Success        → known committed
-Explicit Error → known not committed
-Timeout/loss   → ambiguous → Runtime failure
-
-failedRuntimeKeys
-→ lowest failed-runtime Frame
-→ whole suffix Top→Bottom
-→ fixed-point expansion
-→ accepted outcome or SUBSYSTEM_RUNTIME_FAILED
-→ fresh final Caller resume or empty Stack
-```
-
-Completion：
-
-```text
-plain JSON application model
-no JSON-RPC Batch
-Request ID positive safe integer / sender Connection lifetime no reuse
-message <=1 MiB / depth <=64 / business JsonValue <=512 KiB
-Desktop actual WebSocket text bytes <=1 MiB
-frameId/activationId <=128 UTF-8 bytes
-targetSubsystemKey <=256 UTF-8 bytes
-Frame deadlines 1000..300000ms monotonic
-Desktop WebSocket / PWA MessagePort same Frame application semantics
-no Frame hello/version downgrade
-```
+Frame v1 已直接包含 suspend provenance：child-call suspension可通过对应 Child outcome + fresh `frame.resume` 恢复；administrative `frame.suspend` 没有 generic resume。
 
 ## Renderer / Data / Input / Render
 
-Renderer Control：Main发布 full committed Authority Snapshot，不携 endpoint/ticket/MessagePort。
+Renderer Control：Main 发布 full committed Authority Snapshot，不携 endpoint/ticket/MessagePort。
 
 Data Connection：
 
 ```text
 Renderer Control DataAuthority
-→ Host/Platform carrier establishment
+→ Host implementation establishes carrier
 → Data Connection current/retired
 ```
 
-Data loss不自动升级为 Runtime failure/Frame unwind。
+Host 可以自由选择 Desktop localhost WebSocket/ticket、PWA MessagePort 等建立机制，只需满足 Data Connection 的 identity/generation/current-carrier invariants。
 
-User Input：`InputTarget/Activation ∩ Interest ∩ Producer availability`，State fresh-baseline、Event transient、Reset/implicit teardown。
+User Input：
 
-Render Update当前实现目标：
+```text
+InputTarget/Activation
+∩ Interest
+∩ Producer availability
+```
+
+标准 keyboard/pointer/gamepad canonical payload 最终直接补进 User Input v1；DOM/OS/device adapter 不进入协议。
+
+Render Update唯一正式入口：
 
 ```text
 Registry
@@ -118,52 +86,64 @@ Patch(R→R+1, insert/remove/move/update)
 Event
 ```
 
-`tag` 只作为 opaque string进入 Render Tree；Renderer如何解释 `tag/attrs/data` 完全由实现掌控，不存在 Renderer Component Profile。
+`tag` 是 opaque string；Renderer 如何映射/呈现属于实现。
 
-## Conformance 实施状态
+## Content
 
-[测试策略](./testing-strategy.md) 覆盖 Control v1、Runtime Profile v1、Frame v1、Renderer Control、Data Connection、User Input、Render Update与Content。
+Content API 只定义 logical readonly HTTP/Fetch semantics。
 
-Frame正式兼容判断使用 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
+Desktop Host 自行创建/注入/轮换 scoped bearer；PWA 使用 same-origin Service Worker authority。credential distribution 不再形成独立 Content Access Profile。
 
-在 executable fixtures实际通过之前，只能说协议/Profile达到相应设计状态，不能声称具体实现 conformant。
+Range 若支持直接使用标准 HTTP Range；resource/concurrency/rate/timeouts 是 bounded deployment configuration。
+
+## Conformance
+
+[测试策略](./testing-strategy.md) 覆盖 Control、Runtime Profile、Frame、Renderer Control、Data Connection、User Input、Render Update、Content。
+
+正式兼容判断只检查跨实现必须一致的行为，不检查：
+
+```text
+Component Factory/Registry
+DOM/OS mapping implementation
+Host token/ticket/Port delivery mechanism
+queue concrete capacity/drop preference
+Patch-vs-Snapshot heuristic
+cache/index implementation
+```
 
 ## 实施原则
 
-1. Current Contract先写 conformance fixture，再写/接入两端实现；
-2. 不为从未实现的历史协议保留 fallback/compat code；
-3. Launcher / Control / Frame / Renderer Control / Data / Input / Render / Content边界不得因代码便利重新合并；
+1. Current Contract先写/补 conformance fixture，再接入两端实现；
+2. 不为未实现历史设计保留 fallback/dual-stack；
+3. Launcher/Control/Frame/Renderer Control/Data/Input/Render/Content边界不得因代码便利合并；
 4. Runtime `ready`不得成为 Data endpoint discovery；
-5. Runtime Control Profile只组合 Control v1 + Frame v1，不引入 Data methods；
-6. Main RuntimeFailureUnwindCoordinator是唯一 Stack recovery authority；
-7. Renderer/Transport不得计算 unwind root或修改 Frame recovery；
-8. Desktop/PWA共享 application semantics；平台差异只留 Host/Bootstrap binding；
-9. `tag/attrs/data` 的 presentation解释属于实现，不新增公共协议/Profile；
-10. 实施发现协议问题时先更新 Contract/ADR，不用私有 wire扩展绕过；
-11. Tracking文档不定义正式行为。
+5. Main RuntimeFailureUnwindCoordinator是唯一 Stack recovery authority；
+6. Renderer/Transport不得计算 unwind root或恢复旧 Activation；
+7. Host platform binding只负责实际 carrier/credential establishment，不成为 application protocol authority；
+8. bounded implementation policy 不应为了统一数值被错误升级成协议；
+9. 实施发现真正跨实现语义缺口时先更新 Contract/ADR；纯实现差异留在模块文档；
+10. Tracking文档不定义正式行为。
 
 ## 当前实施顺序
 
 ```text
-Game Package v1 / Desktop Launcher v1
+Game Package / Desktop Launcher
     ↓
-Subsystem Control v1
+Subsystem Control / Runtime Control Profile
     ↓
-Runtime Control Application Profile v1
-    ↓
-Frame / Call v1 + executable conformance
+Frame / Call + executable conformance
     ↓
 Main ⇄ Renderer Control closure
     ↓
-Renderer ⇄ Subsystem Data Connection + Host bindings
+Data Connection + Desktop/PWA Host binding implementation
     ↓
-User Input Core + Standard Input Mapping
+User Input canonical payload + limits
     ↓
-Render Update limits/conformance + official merge
+Render Update hard limits/conformance
     ↓
-Content Access Profile
+Content API implementation/conformance
+    ↓
+loom.map + Hostra/PWA vertical slice
 ```
 
-Renderer presentation/component mapping直接作为 Web Renderer / Subsystem implementation integration完成，不作为独立协议里程碑。
-
-当前治理原则：**只标准化真正跨实现必须一致的 observable semantics；本地实现细节不升级成协议。**
+治理原则：**只协议化必须互操作的事实，其余交给实现。**
