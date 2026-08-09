@@ -3,13 +3,13 @@
 > 层级：正式契约  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：跨系统和对外协议的入口、版本、Profile、迁移与当前冻结边界  
+> 主要定义：跨系统和对外协议的入口、版本、Profile、迁移与当前兼容边界  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)  
-> 最近复核：2026-08-08
+> 最近复核：2026-08-09
 
 契约层定义不同实现必须共同遵守的可互操作语义。系统架构说明 ownership；契约冻结 identity、wire、state、ordering、error、recovery、limits、version/Profile。
 
-协议边界清理决策见 [ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)。核心原则：
+协议边界清理见 [ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)；Control 版本治理见 [ADR 0017](../decisions/0017-abandon-subsystem-control-v1.md)。核心原则：
 
 ```text
 Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
@@ -24,14 +24,12 @@ Game Package v2
     ↓
 Desktop Node.js Launcher v1
     ↓
-Subsystem Control
-    ├── v1 Frozen
-    └── v2 Draft / lifecycle only
+Subsystem Control v2                  CURRENT
     ↓
-Runtime Control Application Profile v1
-    = Subsystem Control v1 + Frame / Call v1
+Runtime Control Application Profile v2
+    = Subsystem Control v2 + Frame / Call v1
 
-Frame / Call v1
+Frame / Call v1                      FROZEN
     + Conformance v1
     + Suspend Semantics Clarification
 
@@ -42,60 +40,145 @@ Renderer ⇄ Subsystem Data Connection Contract v1 Draft
     │   ├── Subsystem → Renderer: Input Interest
     │   └── Renderer → Subsystem: State / Event / Reset
     │
-    └── Render Update v1 Draft
+    └── Render Update v1
         └── Subsystem → Renderer only
             ├── render.domains
-            ├── render.snapshot
+            ├── render.snapshot(revision)
+            ├── render.patch(R→R+1)   closure candidate
             └── render.event
 
 Readonly Content API v1
     + future Content Access Bootstrap/Profile
 ```
 
-## 2. 已冻结基线
+历史但不再实现：
 
-### Game Package v2 / Desktop Launcher
+```text
+Subsystem Control v1
+Runtime Control Application Profile v1
+```
 
-- Game Entry一次性声明 required Subsystem Descriptor；
+两者均为 `Abandoned Before Implementation`，不存在兼容/fallback要求。
+
+## 2. Game Package v2 / Desktop Launcher
+
+### Game Package v2
+
+- Game Entry 一次性声明 required Subsystem Descriptor；
 - `descriptor.key` 是 Runtime identity；
-- Desktop Launcher=`nodejs`；
-- spawn/trust/path/Supervisor边界已冻结；
-- unexpected exit code 0 仍是 failure；
-- no automatic restart。
+- 当前 Desktop Launcher=`nodejs`；
+- Descriptor/entry/env边界由正式契约定义。
 
-入口：
+入口：[Game Package v2](./game-package-v2.md)。
 
-- [Game Package v2](./game-package-v2.md)
-- [Desktop Node.js Launcher Profile v1](./nodejs-launcher-profile-v1.md)
+### Desktop Node.js Launcher Profile v1
 
-### Subsystem Control v1
+[Desktop Node.js Launcher Profile v1](./nodejs-launcher-profile-v1.md) Active / Normative / Frozen：
 
-[Subsystem Control v1](./subsystem-control-lifecycle-protocol.md) 已 Frozen。
+```text
+validated descriptor
+→ Launch Attempt
+→ bootstrap token registered before spawn
+→ supervised Node.js process
+```
+
+spawn成功不等于 connected/identified/ready；unexpected exit code 0仍是 failure；no automatic restart。
+
+Launcher Profile版本与 Subsystem Control协议版本独立。当前 Launcher启动的 Runtime随后必须使用 Control v2。
+
+## 3. Subsystem Control v2 — Current
+
+当前权威：[Subsystem Control v2](./subsystem-control-protocol-v2.md)。
+
+协议标识：
+
+```text
+loomrealm.subsystem-control / 2
+```
+
+职责只有 Runtime identity/lifecycle：
+
+```text
+Subsystem → Main
+    subsystem.hello
+    subsystem.status
+
+Main → Subsystem
+    subsystem.shutdown
+```
+
+核心语义：
 
 ```text
 spawn != connected != identified != ready
 hello binds descriptor.key
+bootstrapToken one-shot
 Main owns shutdown intent
 stopping != stopped
 stopped only from Supervisor
 unexpected Control loss/exit without shutdown intent = failure
+no same-attempt reconnect/resume
+no automatic restart
 ```
 
-v1 的 `ready.rendererDataEndpoint` 保持历史 closed schema，不扩展到 PWA；跨 Desktop/PWA 的 Runtime lifecycle方向使用 Subsystem Control v2。
+`ready` closed schema不携带 Renderer Data endpoint：
 
-### Runtime Control Application Profile v1
+```json
+{"state":"ready"}
+```
 
-[Runtime Control Profile v1](./runtime-control-profile-v1.md) Frozen：
+并且：
 
 ```text
-Subsystem Control v1
+ready != Data Connection exists
+ready != Renderer connected
+ready != DataAuthority granted
+ready != Frame/Render/InputTarget exists
+```
+
+Desktop与PWA可以用不同 Host Control carrier，但 application lifecycle schema保持相同。
+
+## 4. Subsystem Control v1 — Abandoned
+
+历史入口：[Subsystem Control v1 Tombstone](./subsystem-control-lifecycle-protocol.md)。
+
+状态：
+
+```text
+Abandoned Before Implementation
+Superseded by Control v2
+```
+
+旧 v1 曾把 Desktop `rendererDataEndpoint` 放入 `ready`，后来确认属于错误协议层。由于 v1 从未形成 conformant implementation / deployment / third-party dependency，ADR 0017 明确取消其兼容义务。
+
+新实现 MUST NOT advertise/select Control version 1。
+
+## 5. Runtime Control Application Profile v2 — Current
+
+当前组合：[Runtime Control Application Profile v2](./runtime-control-profile-v2.md)：
+
+```text
+Subsystem Control v2
 +
 Frame / Call v1
 ```
 
-不得静默把 Renderer/Data domain 加进 Profile v1。
+Profile冻结/收敛以下组合边界：
 
-### Frame / Call v1
+```text
+hello before Frame operation
+Control version negotiated independently
+Frame v1 statically bound
+shared sender-side Request ID namespace
+one JSON-RPC message per transport unit
+no JSON-RPC Batch
+ready under Profile means complete Frame v1 role support
+Data/User Input/Render do not enter Runtime Control Profile
+```
+
+旧 [Runtime Control Profile v1](./runtime-control-profile-v1.md) 随 Control v1 一并 `Abandoned Before Implementation`。
+
+## 6. Frame / Call v1
 
 [Frame / Call v1](./frame-call-protocol-v1.md) Active / Normative / Frozen。
 
@@ -127,20 +210,12 @@ Frame lifecycle != Render/Data lifecycle
 
 伴随文档：
 
-- [Frame / Call v1 Conformance Profile](./frame-call-conformance-v1.md)
-- [Frame / Call v1 Suspend Semantics Clarification](./frame-call-v1-suspend-clarification.md)
+- [Frame / Call v1 Conformance](./frame-call-conformance-v1.md)
+- [Frame / Call v1 Suspend Clarification](./frame-call-v1-suspend-clarification.md)
 
-## 3. Subsystem Control v2 Draft
+Control使用 v2不改变 Frame / Call v1 wire/version。
 
-[Subsystem Control v2](./subsystem-control-protocol-v2.md) 收纯 Runtime lifecycle：
-
-```text
-ready = Runtime lifecycle readiness only
-```
-
-不再携带 Renderer Data endpoint / Port / credential。
-
-## 4. Main ⇄ Renderer Control v1 Draft
+## 7. Main ⇄ Renderer Control v1
 
 [Renderer Control v1](./main-renderer-control-v1.md) 复制 Main committed authority：
 
@@ -161,7 +236,7 @@ no replay / no patch
 Control loss → revoke InputTarget/DataAuthority → retire Data Connections
 ```
 
-InputTarget是 one-shot lease：
+InputTarget one-shot lease：
 
 ```text
 published InputTarget(frameId, activationId)
@@ -169,7 +244,7 @@ published InputTarget(frameId, activationId)
 → same frameId + activationId MUST NOT become InputTarget again
 ```
 
-## 5. Renderer ⇄ Subsystem Data Connection Contract v1 Draft
+## 8. Renderer ⇄ Subsystem Data Connection v1
 
 权威草案：[Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)。
 
@@ -186,7 +261,7 @@ lifecycle
     retired terminal
 ```
 
-每个 Subsystem同时最多一条 current carrier；installation必须 serialized。同 generation仍授权时，旧 carrier retired 后 MAY建立 fresh carrier。
+每个 Subsystem同时最多一条 current carrier；installation必须 serialized。同 generation仍授权时，旧 carrier retired后 MAY建立 fresh carrier。
 
 重要边界：
 
@@ -198,9 +273,9 @@ Activation replacement != Data generation replacement
 Data retire != authoritative Render Domain destroy
 ```
 
-Connection Core没有 application handshake/heartbeat；User Input与Render Update是建立后的独立 child application domains。
+Connection Core没有 application handshake/heartbeat；endpoint/ticket/MessagePort establishment属于 Host/Platform Binding，而不是 Subsystem Control `ready`。
 
-## 6. User Input Protocol v1 Core Draft
+## 9. User Input v1 Core
 
 权威草案：[User Input v1](./user-input-v1.md)。
 
@@ -251,9 +326,9 @@ reset
     clears all input state for frameId + activationId
 ```
 
-具体 Standard Input Mapping payload/limits延后到实现阶段继续冻结。
+Core authority/recovery语义基本闭合；Standard Input Mapping exact payload/limits继续独立收敛。
 
-## 7. Render Domain / Tree Architecture
+## 10. Render Domain / Tree Architecture
 
 现行架构入口：[渲染系统](../10-architecture/rendering-system.md)。
 
@@ -274,7 +349,7 @@ zIndex
 Node：
 
 ```text
-key       Domain Tree-wide reconciliation identity
+key       Domain Tree-wide logical identity
 tag       logical Renderer Component type
 attrs     string→string declarative attributes
 data      JSON object component state
@@ -291,170 +366,131 @@ tag != DOM tag
 Render Node != Input authority
 ```
 
-Domain允许多个 roots；需要共享布局/裁剪/坐标语义时，Subsystem显式创建真实 container/component Node。
+## 11. Render Update v1
 
-## 8. Render Update Protocol v1 Draft
+正式 Draft入口：[Render Update Protocol v1](./render-update-v1.md)。
 
-权威草案：[Renderer ⇐ Subsystem Render Update Protocol v1](./render-update-v1.md)。
+当前增量 closure candidate：[Render Update v1 Incremental Design](./render-update-v1-incremental-design.md)。
 
-协议标识：
-
-```text
-loomrealm.render-update / 1
-```
-
-方向：
+方向固定：
 
 ```text
 Subsystem → Renderer only
 ```
 
-v1 Core只有三种 message kinds：
+当前 closure candidate已经收敛为：
 
 ```text
 render.domains
-    full current Domain Registry
-    lifecycle authority
+    full Registry / Domain lifecycle authority
 
-render.snapshot
-    full current zIndex + roots for one Domain
-    atomic replacement
-    latest-state coalescible
+render.snapshot(revision)
+    full authoritative baseline / full commit
+
+render.patch(baseRevision, revision)
+    R → R+1 atomic incremental commit
+    key-addressed insert/remove/move/update
 
 render.event
-    transient presentation impulse to one current Node
-    ordered / no replay / no coalescing
+    transient presentation impulse
 ```
 
-核心恢复模型：
+关键恢复：
 
 ```text
 fresh Data Connection
-→ current full Domain Registry
+→ current Registry
 → fresh Snapshot for every current Domain
-→ ordinary Render Events may resume
+→ ordinary Patch/Event
 ```
 
-关键 closure：
+无：
 
 ```text
-domainId removed within one DataAuthority generation
-    → same domainId MUST NOT be re-granted in that generation
-
-Snapshot
-    → full replacement / atomic commit
-
-Event
-    → presentation-local only
-    → MUST NOT establish authoritative persistent state
-
-same-generation reconnect
-    → no event replay
-    → fresh Registry + fresh Domain Snapshots
-
-generation replacement
-    → new Render replication authority universe
-```
-
-v1明确不定义：
-
-```text
-revision
-ACK
-history replay
+ACK/NACK
+Patch history replay
 resume cursor
-Tree Patch / operation log
-Renderer→Subsystem resync
+Renderer→Subsystem resync RPC
 cross-Domain transaction
-render frame fence
 ```
 
-Renderer MAY使用 stable Node key对 full Snapshot做本地 reconciliation；这不是 wire Tree Patch。
+incremental closure完成 limits/conformance 后应合并回正式 `render-update-v1.md`，避免长期维持两个不同 v1事实。
 
-## 9. Render Tree / Component Boundary
+## 12. Render Tree / Component Profile
 
-Render Update v1 已冻结最小通用 Tree value shape：
-
-```text
-roots[]
-Node { key, tag, attrs, data, children[] }
-```
-
-后续 Render Tree / Renderer Component Profile仍可继续冻结：
+继续冻结：
 
 ```text
 exact tag grammar
-component bootstrap/loading
+component declaration/bootstrap/loading
 per-tag attrs/data schema
 message/tree numeric limits
 resource reference conventions
 ```
 
-这些 Profile不得改变 Render Update v1 的 Domain lifecycle、Snapshot atomicity、Event transient语义或单向方向。
+Component bootstrap不得改变 Render Update的 Domain authority、revision、Patch atomicity或单向方向。
 
-## 10. Content API
+## 13. Content API
 
 [Readonly Content API v1](./content-api-v1.md) Active / Normative / Evolving。
 
 Content API定义logical readonly读取、MIME/cache/version/error/integrity；capability distribution属于独立 Content Access Bootstrap/Profile。
 
-## 11. 当前状态表
+## 14. 当前状态表
 
 | 主题 | 入口 | 状态 |
 |---|---|---|
 | Game Package v2 | [game-package-v2.md](./game-package-v2.md) | Active / Normative；Desktop subset Frozen |
 | Desktop Node.js Launcher v1 | [nodejs-launcher-profile-v1.md](./nodejs-launcher-profile-v1.md) | Active / Normative / Frozen |
-| Subsystem Control v1 | [subsystem-control-lifecycle-protocol.md](./subsystem-control-lifecycle-protocol.md) | Active / Normative / Frozen |
-| Subsystem Control v2 | [subsystem-control-protocol-v2.md](./subsystem-control-protocol-v2.md) | Active Design / Draft |
-| Runtime Control Application Profile v1 | [runtime-control-profile-v1.md](./runtime-control-profile-v1.md) | Active / Normative / Frozen |
+| **Subsystem Control v2** | [subsystem-control-protocol-v2.md](./subsystem-control-protocol-v2.md) | **Active / Normative / Current；Stabilizing** |
+| **Runtime Control Application Profile v2** | [runtime-control-profile-v2.md](./runtime-control-profile-v2.md) | **Active / Normative / Current；Stabilizing** |
 | Frame / Call v1 | [frame-call-protocol-v1.md](./frame-call-protocol-v1.md) | Active / Normative / Frozen |
 | Frame / Call v1 Conformance | [frame-call-conformance-v1.md](./frame-call-conformance-v1.md) | Active / Normative / Frozen |
 | Frame v1 Suspend Clarification | [frame-call-v1-suspend-clarification.md](./frame-call-v1-suspend-clarification.md) | Frozen Clarification |
-| Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | Active Design / Draft |
+| Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | Active Design / Draft；semantic closure high |
 | Renderer ⇄ Subsystem Data Connection v1 | [renderer-subsystem-data-connection-v1.md](./renderer-subsystem-data-connection-v1.md) | Active Design / Draft；lifecycle closed |
 | User Input v1 | [user-input-v1.md](./user-input-v1.md) | Active Design / Core Draft；semantic closure reviewed |
-| Render Update v1 | [render-update-v1.md](./render-update-v1.md) | **Active Design / Draft；single-way model established** |
+| Render Update v1 | [render-update-v1-incremental-design.md](./render-update-v1-incremental-design.md) | Working Draft / Closure Candidate |
 | Render Tree / Component Profile | 尚待进一步冻结 | Planned |
 | Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative / Evolving |
+| **Subsystem Control v1** | [subsystem-control-lifecycle-protocol.md](./subsystem-control-lifecycle-protocol.md) | **Legacy / Abandoned Before Implementation** |
+| **Runtime Control Profile v1** | [runtime-control-profile-v1.md](./runtime-control-profile-v1.md) | **Legacy / Abandoned Before Implementation** |
 
-Legacy / Superseded入口只用于历史追溯：`game-package-v1.md`、`system-lifecycle-protocol.md`、`frame-data-channel-v1.md`、`client-state-tree-v1.md`、`resource-protocol.md`。
+其他 Legacy / Superseded入口只用于历史追溯：`game-package-v1.md`、`system-lifecycle-protocol.md`、`frame-data-channel-v1.md`、`client-state-tree-v1.md`、`resource-protocol.md`。
 
-## 12. Version / Compatibility Rules
+## 15. Version / Compatibility Rules
 
-- Frozen closed schema不得私加字段/方法；
+- **Control v1/Profile v1从未实现，已明确 abandoned；当前实现不得协商/回退到 v1；**
+- 当前 Subsystem Control协商版本为 2；
+- Runtime Control Profile v2静态绑定 Control v2 + Frame v1；
+- 已形成真实 compatibility boundary 的 Frozen closed schema不得私加字段/方法；
 - Frame method/identity/commit/error/unwind/order/limit改变需要新 Frame版本；
-- Subsystem Control v1 Data endpoint不扩展到PWA；
 - Renderer Control不携Data bootstrap secret；
 - Renderer Control v1禁止 same InputTarget lease revoke→regrant；
 - Data Connection Core不得私加 handshake/heartbeat；
 - User Input Interest不得绕过 Main InputTarget/Activation authority；
-- Render Update v1不得增加 Renderer→Subsystem reverse RPC；
-- Render Update v1不得把 Render Event升级为 authoritative persistent state；
-- Render Update v1不得静默增加 revision/Tree Patch/replay/resync；
+- Render Event不得升级为 authoritative persistent state；
 - Render tag不得退化成任意 DOM tag/DOM command；
-- Renderer内部 key-based diff不得被误解释成 wire Tree Patch；
 - Transport差异不得改变建立后的 application semantics。
 
-## 13. 推进顺序
+## 16. 推进顺序
 
 ```text
 Protocol Boundary Cleanup                 Accepted
-Subsystem Control v2                      Draft
-Renderer Control v1                       Draft / InputTarget lease closed
+Control v1 abandonment / v2 promotion     Accepted
+Subsystem Control v2                      Current / Stabilizing
+Runtime Control Profile v2                Current / Stabilizing
+Frame / Call v1                           Frozen
+Renderer Control v1                       Draft / near closure
 Data Connection Contract v1               Draft / lifecycle closed
 User Input v1                             Core semantic closure reviewed
-Render Domain / Tree Architecture         Refined
-Render Update v1                          Draft / single-way model established
+Render Update incremental model           Closure Candidate
     ↓
-Render Tree / Renderer Component Profile
-Render Update numeric limits / completion review
-    ↓
-Runtime Control Profile v2                only if frozen composition requires it
+Render Update limits / conformance / official merge
+Renderer Component Profile
+Standard Input Mapping Profile
+Host Bootstrap / Data Binding Profiles
 Content Access Profile
 ```
 
-Standard Input Mapping具体 payload/limits延后到实现阶段继续细化。
-
-## 14. 当前明确暂缓
-
-PWA executable/bootstrap细节、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame runtime dynamic downgrade/capability negotiation、Render Tree Patch、Render history replay、cross-Domain render transaction。
+最终目标不是保留最多版本，而是让每个 current implementation只有一个明确权威入口。
