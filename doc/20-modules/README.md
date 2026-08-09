@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：各系统的内部模块拆分和详细设计入口  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-05
+> 最近复核：2026-08-09
 
 模块层可以重构，但不能改变上层系统职责和正式契约。
 
@@ -13,23 +13,43 @@
 
 | 系统 | 模块入口 | 说明 |
 |---|---|---|
-| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Transaction/Error/Failure-Unwind、Protocol Validator、Activation、Control/Data Authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | Main committed Control/recovery mirror、System Connection、Render Store、Frame Input |
+| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Transaction/Error/Failure-Unwind、Protocol Validator、Activation、Renderer Control/DataAuthority |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main committed Control mirror、Data Connection、User Input、Render Store/Component |
 | Game Package | [game-package](./game-package/README.md) | Manifest/Entry/Descriptor Loader、Launcher Entry Validator、Catalog、Repository |
-| FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop/PWA 统一只读 Content API |
-| `loom.map` | [loom-map](./loom-map/README.md) | Frame Adapter、Mutation Gate/Deadline Handler、Frame Input、Runtime、Render Manager |
-| Desktop Host | [desktop-host](./desktop-host/README.md) | Hostra Window、WebSocket/HTTP、Node Launcher / Process Supervisor |
-| PWA Host | [pwa-host](./pwa-host/README.md) | Main/Subsystem Worker、Control/Data MessagePort、Service Worker、OPFS |
+| FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop/PWA统一只读 Content API |
+| `loom.map` | [loom-map](./loom-map/README.md) | Control v2、Frame Adapter、Input、Runtime、Render Manager/Projector |
+| Desktop Host | [desktop-host](./desktop-host/README.md) | Hostra Window、Node Launcher、Control WebSocket、Renderer/Data platform binding |
+| PWA Host | [pwa-host](./pwa-host/README.md) | Main/Subsystem Worker、Control/Data MessagePort binding、Service Worker、OPFS |
 
-## 已冻结模块前提
+## 当前模块前提
 
 ```text
-Game Package v2 / Desktop Launcher v1   Frozen
-Subsystem Control v1                    Frozen
-Frame / Call Protocol v1                Active / Normative / Frozen
+Game Package v2 / Desktop Launcher v1        Stable/Frozen baseline
+Subsystem Control v1                         Abandoned Before Implementation
+Subsystem Control v2                         Current
+Runtime Control Profile v2                   Control v2 + Frame v1
+Frame / Call Protocol v1                     Active / Normative / Frozen
+Renderer Control / Data Connection / Input   current Draft stack
+Render Update incremental design             Closure Candidate
 ```
 
-Frame / Call设计历史 A-F 已全部冻结，但 Batch 不再是独立 compatibility level。
+旧 Control v1/Profile v1只保留历史路径，模块代码不得实现 fallback或 dual-stack。
+
+## Runtime Control 模块职责
+
+Main/Subsystem当前共享 Runtime Control组合：
+
+```text
+Subsystem Control v2
+    Runtime identity / lifecycle / shutdown
+
+Frame / Call v1
+    Frame transaction / outcome / recovery
+```
+
+由 Runtime Control Application Profile v2约束 shared Control carrier、Request ID namespace、no Batch和 version binding。
+
+`ready`不携 Renderer Data endpoint；DataAuthority与实际 Data carrier通过 Renderer Control + Host/Platform Binding独立建立。
 
 ## Frame 模块职责
 
@@ -49,8 +69,6 @@ Main RuntimeFailureUnwindCoordinator：failed set → lowest root → whole suff
 
 ### Completion Profile
 
-模块实现还必须遵守：
-
 ```text
 plain JSON-only Frame values
 no JSON-RPC Batch
@@ -62,35 +80,61 @@ Desktop WebSocket / PWA MessagePort same application semantics
 no Frame handshake/downgrade
 ```
 
-Subsystem SDK/业务 Subsystem不拥有 Stack unwind authority；Renderer只镜像 Main committed recovery state；Transport不得实现 root选择或 Frame retry。
+## Renderer / Data / Input / Render
+
+```text
+Renderer Control
+    Main committed authority mirror
+
+Data Connection
+    Session/current Renderer/subsystem/generation carrier identity
+
+User Input
+    InputTarget/Activation ∩ Interest ∩ Producer availability
+
+Render Update
+    Subsystem → Renderer
+    Registry + Snapshot + Patch + Event
+```
+
+这些域共享部分物理 carrier，但不共享 authority/lifecycle/recovery。
 
 ## Conformance
 
-正式兼容判断使用 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
+正式兼容判断使用各协议自己的 conformance fixtures。Frame入口为 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
 
-设计层已经冻结 fixture catalog，但 `packages/frame-call-protocol` 的 executable fixture实现仍属于实施工作。模块只有通过适用 fixture后才能声明对应 v1角色 conformant。
+协议完成不等于实现 conformant；模块只有通过适用 executable fixture后才能声明对应角色兼容。
 
 ## Runtime / Frame / Render
 
 ```text
 Runtime Container
-    Subsystem business state / Control/Data / Render Registry
+    lifecycle + Subsystem business state
 
 Frame
     Main-owned call/input Context + transaction/error/recovery authority
 
-Render
-    Subsystem-owned independent presentation Context
+Render Domain
+    Subsystem-owned independent presentation state
 ```
 
 ## Cross-platform Hosting
 
-Transport MUST NOT：改回 reverse-suspend；在 call/return Response前依赖反向 RPC；ACK前发布 Activation；timeout后 application retry/replay；只清 failed Runtime最近 Frame；自行选择 unwind root；使用 Structured Clone扩展 Frame数据类型；放宽/改变 Frame v1 limits；用 Renderer reconnect修复 Frame failure。
+Transport MUST NOT：
+
+```text
+改变 Control v2 lifecycle
+fallback to Control v1
+改回 reverse-suspend
+在 Response前依赖 dependent reverse RPC
+ACK前发布 Activation
+Frame timeout后 retry/replay
+自行选择 unwind root
+使用 Structured Clone扩大协议类型
+把 Runtime ready解释成 Data endpoint discovery
+用 Data/Renderer reconnect修复 Frame failure
+```
 
 ## 依赖规则
 
-Main不依赖具体地图 DTO；Renderer不读物理 package path；Hostra不承载 Main；Subsystem SDK不强制 per-Frame Process/Transport；Frame protocol不拥有 Render；Legacy文档不能覆盖当前 Contract。
-
-## 迁移说明
-
-旧 `system.call`、Frame ready/failed lifecycle、Activation reuse、Frame-owned Render、call→reverse-suspend、return-success=caller-resumed、timeout→retry、Frame state resync、caller remote cancel、partial failed-runtime deletion、Runtime crash覆盖 accepted outcome、Frame partial-v1 compatibility、PWA non-JSON Frame values 等模型不得作为实现入口。
+Main不依赖具体地图 DTO；Renderer不读物理 package path；Hostra/PWA Host不承载 Main authority；Subsystem SDK不强制 per-Frame Process/Transport；Frame protocol不拥有 Render；Legacy文档不能覆盖当前 Contract。
