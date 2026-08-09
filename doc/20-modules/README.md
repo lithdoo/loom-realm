@@ -13,61 +13,48 @@
 
 | 系统 | 模块入口 | 说明 |
 |---|---|---|
-| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Transaction/Error/Failure-Unwind、Protocol Validator、Activation、Renderer Control/DataAuthority |
+| 程序主系统 | [main-system](./main-system/README.md) | Runtime/Frame Registry、Transaction/Error/Failure-Unwind、Renderer Control/DataAuthority |
 | Web Renderer | [web-renderer](./web-renderer/README.md) | Main committed Control mirror、Data Connection、User Input、Render Store/Component |
 | Game Package | [game-package](./game-package/README.md) | Manifest/Entry/Descriptor Loader、Launcher Entry Validator、Catalog、Repository |
 | FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop/PWA统一只读 Content API |
-| `loom.map` | [loom-map](./loom-map/README.md) | Control v2、Frame Adapter、Input、Runtime、Render Manager/Projector |
+| `loom.map` | [loom-map](./loom-map/README.md) | Control v1、Frame Adapter、Input、Runtime、Render Manager/Projector |
 | Desktop Host | [desktop-host](./desktop-host/README.md) | Hostra Window、Node Launcher、Control WebSocket、Renderer/Data platform binding |
 | PWA Host | [pwa-host](./pwa-host/README.md) | Main/Subsystem Worker、Control/Data MessagePort binding、Service Worker、OPFS |
 
 ## 当前模块前提
 
 ```text
-Game Package v2 / Desktop Launcher v1        Stable/Frozen baseline
-Subsystem Control v1                         Abandoned Before Implementation
-Subsystem Control v2                         Current
-Runtime Control Profile v2                   Control v2 + Frame v1
+Game Package v1 / Desktop Launcher v1        current bootstrap baseline
+Subsystem Control v1                         Stabilizing
+Runtime Control Profile v1                   Control v1 + Frame v1
 Frame / Call Protocol v1                     Active / Normative / Frozen
 Renderer Control / Data Connection / Input   current Draft stack
 Render Update incremental design             Closure Candidate
 ```
 
-旧 Control v1/Profile v1只保留历史路径，模块代码不得实现 fallback或 dual-stack。
-
 ## Runtime Control 模块职责
 
-Main/Subsystem当前共享 Runtime Control组合：
-
 ```text
-Subsystem Control v2
+Subsystem Control v1
     Runtime identity / lifecycle / shutdown
 
 Frame / Call v1
     Frame transaction / outcome / recovery
 ```
 
-由 Runtime Control Application Profile v2约束 shared Control carrier、Request ID namespace、no Batch和 version binding。
+Runtime Control Application Profile v1约束 shared Control carrier、Request ID namespace、no Batch和 version binding。
 
 `ready`不携 Renderer Data endpoint；DataAuthority与实际 Data carrier通过 Renderer Control + Host/Platform Binding独立建立。
 
 ## Frame 模块职责
 
-### Identity / Wire
+Main拥有 Frame identity/lifecycle/Stack/Activation/InputTarget；wire exactly seven RPC；Caller不进 wire；outcome与 lifecycle分离。
 
-Main-owned identity/lifecycle/Stack/Activation/InputTarget；exact seven RPC；Caller不进 wire；outcome/lifecycle分离。
+Main单一 Stack mutation coordinator；Subsystem SDK有 outbound mutation gate；ordinary call无 reverse-suspend；Response-before-dependent-RPC；ACK-before-publication；post-commit no rollback。
 
-### Transaction
+Runtime failure：failed set → lowest root → whole suffix Top→Bottom → failed logical retire / healthy close → fixed-point expansion → accepted outcome或 `SUBSYSTEM_RUNTIME_FAILED` → fresh final Caller resume或 empty Stack。
 
-Main单一 Stack mutation coordinator；Subsystem SDK outbound mutation gate；ordinary call无 reverse-suspend；Response-before-dependent-RPC；ACK-before-publication；post-commit no rollback。
-
-### Error / Runtime Failure
-
-finite deadline；Success/Explicit Error/Ambiguous classifier；no retry/replay；recoverable rejection vs Runtime-fatal divergence/protocol error。
-
-Main RuntimeFailureUnwindCoordinator：failed set → lowest root → whole suffix Top→Bottom → failed logical retire / healthy close → fixed-point expansion → accepted outcome或 `SUBSYSTEM_RUNTIME_FAILED` → fresh final Caller resume或 empty Stack。
-
-### Completion Profile
+Completion：
 
 ```text
 plain JSON-only Frame values
@@ -97,7 +84,7 @@ Render Update
     Registry + Snapshot + Patch + Event
 ```
 
-这些域共享部分物理 carrier，但不共享 authority/lifecycle/recovery。
+这些域可以共享物理 carrier，但不共享 authority/lifecycle/recovery。
 
 ## Conformance
 
@@ -123,8 +110,7 @@ Render Domain
 Transport MUST NOT：
 
 ```text
-改变 Control v2 lifecycle
-fallback to Control v1
+改变 Control v1 lifecycle
 改回 reverse-suspend
 在 Response前依赖 dependent reverse RPC
 ACK前发布 Activation
@@ -137,4 +123,4 @@ Frame timeout后 retry/replay
 
 ## 依赖规则
 
-Main不依赖具体地图 DTO；Renderer不读物理 package path；Hostra/PWA Host不承载 Main authority；Subsystem SDK不强制 per-Frame Process/Transport；Frame protocol不拥有 Render；Legacy文档不能覆盖当前 Contract。
+Main不依赖具体地图 DTO；Renderer不读物理 package path；Hostra/PWA Host不承载 Main authority；Subsystem SDK不强制 per-Frame Process/Transport；Frame protocol不拥有 Render；Git历史/旧 ADR不能覆盖当前 Contract。
