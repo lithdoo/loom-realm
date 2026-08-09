@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：Subsystem 的职责、Runtime Control、Frame/Input 适配、Render Domain、mutation gate、协议校验、错误收敛与 Runtime failure unwind 边界  
 > 依赖：[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)  
-> 下层契约：[Subsystem Control v2](../15-contracts/subsystem-control-protocol-v2.md)、[Runtime Control Profile v2](../15-contracts/runtime-control-profile-v2.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
+> 下层契约：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-09
 
 ## 1. Subsystem 职责
@@ -15,14 +15,12 @@ Subsystem负责自身 business state、Runtime lifecycle reporting、Frame/Input
 当前 Runtime Control组合：
 
 ```text
-Subsystem Control v2
+Subsystem Control v1
 +
 Frame / Call v1
 =
-Runtime Control Application Profile v2
+Runtime Control Application Profile v1
 ```
-
-Control v1/Profile v1已实现前废弃。
 
 ## 2. Authority Boundary
 
@@ -36,7 +34,7 @@ Main
     Frame error classification
 
 Subsystem Runtime
-    Runtime status reporting under Control v2
+    Runtime status reporting under Control v1
     business state
     Frame/Input Context
     Frame Protocol Validator
@@ -52,11 +50,11 @@ Renderer
 
 Subsystem不得创建公共 frameId/activationId、修改 Main Stack/Caller、维护第二份公共 recovery authority或从本地决定 lower Frame resume。
 
-Subsystem Control `ready`不得携带 Renderer Data endpoint；Data carrier由 Renderer Control DataAuthority + Host/Platform Binding独立建立。
+Subsystem Control `ready`不得携 Renderer Data endpoint；Data carrier由 Renderer Control DataAuthority + Host/Platform Binding独立建立。
 
 ## 3. Runtime Lifecycle / Ready
 
-Subsystem通过 Control v2：
+Subsystem通过 Control v1：
 
 ```text
 subsystem.hello
@@ -64,13 +62,13 @@ subsystem.status
 subsystem.shutdown
 ```
 
-报告/参与 Runtime lifecycle。
+参与 Runtime lifecycle。
 
 ```text
 spawn != connected != identified != ready
 ```
 
-`ready`只表示 required initialization完成，并能承担 Runtime Control Profile v2中的完整 Frame / Call v1 Subsystem角色。
+`ready`只表示 required initialization完成，并能承担 Runtime Control Profile v1中的完整 Frame / Call v1 Subsystem角色。
 
 `ready`不表示：
 
@@ -108,7 +106,7 @@ Domain是 Subsystem-owned lifecycle/state/composition unit，不属于 Frame，�
 Node当前模型：
 
 ```text
-key       Domain-wide logical identity
+key       Domain-lifecycle logical identity
 tag       logical Renderer Component type
 attrs     string→string declarative attributes
 data      JSON object component state
@@ -117,7 +115,7 @@ children  ordered child nodes
 
 Domain Host不是 Render Node；轻量 Domain无需 fake root/container。
 
-Subsystem可以让多个 Frame共享同一 Domain，也可以让 zero Frame Runtime继续拥有 Domain。
+Subsystem可以让多个 Frame共享同一 Domain，也可以让 zero-Frame Runtime继续拥有 Domain。
 
 ## 5. Frozen Frame Model / RPC
 
@@ -140,7 +138,7 @@ Subsystem → Main
 
 ## 6. Shared Control Connection / Version
 
-Control v2与 Frame v1复用同一 authenticated Control carrier时，按 Runtime Control Profile v2：
+Control v1与 Frame v1复用同一 authenticated Control carrier时，按 Runtime Control Profile v1：
 
 ```text
 one transport unit = one JSON-RPC message
@@ -148,9 +146,9 @@ no JSON-RPC Batch
 shared sender-side Request ID namespace across Control + Frame
 ```
 
-`subsystem.hello.protocolVersions`只协商 Subsystem Control，当前 Runtime MUST支持/advertise version 2。
+`subsystem.hello.protocolVersions`只协商 Subsystem Control，当前 Runtime MUST支持/advertise version 1。
 
-Frame v1无独立 `frame.hello/version/capabilities`；由 Profile v2静态绑定。
+Frame v1无独立 `frame.hello/version/capabilities`；由 Profile v1静态绑定。
 
 Desktop WebSocket与PWA MessagePort建立后必须共享相同 application semantics。
 
@@ -175,7 +173,7 @@ PWA Runtime不得借 Structured Clone传 BigInt/ArrayBuffer/MessagePort/Blob等�
 
 Subsystem outbound JSON-RPC Request ID是 positive safe integer `1..2^53-1`，同一 Control Connection生命周期内 sender-side不得复用。
 
-由于 Control v2与 Frame v1共享 carrier，`subsystem.hello`、`frame.call`、`frame.return`共用 Subsystem sender namespace。
+由于 Control v1与 Frame v1共享 carrier，`subsystem.hello`、`frame.call`、`frame.return`共用 Subsystem sender namespace。
 
 Subsystem为 `frame.call/frame.return`选择 connection-stable sender-local deadline，整数 `1000..300000ms`，使用 monotonic clock。
 
@@ -212,7 +210,7 @@ Subsystem自身 `frame.call/return` timeout、Control divergence或 protocol err
 ```text
 stop normal Frame processing
 keep ambiguous mutation gate closed
-report subsystem.status(failed) when Control v2 carrier is usable
+report subsystem.status(failed) when Control carrier is usable
 ```
 
 诊断至少：`FRAME_CONTROL_TIMEOUT / FRAME_CONTROL_DIVERGENCE / FRAME_CONTROL_PROTOCOL_ERROR`。No retry/replay/idempotency journal。
@@ -244,7 +242,7 @@ Runtime terminal failed后 MUST NOT发起新的正常 Frame operation。Main也�
 
 已成功 `frame.return` 的 terminal outcome不会因为 Runtime随后 crash而被覆盖。
 
-ordinary input router至少要求：
+ordinary input receive gate至少要求：
 
 ```text
 current Data Connection
@@ -276,7 +274,7 @@ Component实现代码/资源如何进入 Renderer属于 Renderer Component Boots
 
 Render Update独立于 Control/Frame，运行在 current Renderer⇄Subsystem Data Connection上。
 
-当前 closure candidate使用：
+当前 closure candidate：
 
 ```text
 Domain Registry
@@ -291,15 +289,15 @@ Frame close/unwind不隐式 create/hide/destroy Domain；Data reconnect也不能
 
 Subsystem SDK必须通过：
 
-- Control v2 / Runtime Control Profile v2适用 integration fixtures；
-- [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)中 Subsystem角色适用 fixtures。
+- Control v1 / Runtime Control Profile v1适用 integration fixtures；
+- [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md) 中 Subsystem角色适用 fixtures。
 
 才能声明当前 Runtime Control角色 conformant。
 
 ## 18. 架构不变量
 
-1. 当前 Subsystem Control版本=2；v1已实现前废弃；
-2. Runtime Control Profile v2 = Control v2 + Frame v1；
+1. Subsystem Control版本=1；
+2. Runtime Control Profile v1 = Control v1 + Frame v1；
 3. `ready`不携 Data endpoint；
 4. Frame/Stack/Activation/recovery authority=Main；
 5. Subsystem无第二份 Caller/Stack/unwind authority；
