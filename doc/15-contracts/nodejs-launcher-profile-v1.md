@@ -5,13 +5,13 @@
 > Profile Version：1  
 > 稳定程度：Frozen  
 > 主要定义：Main 将已验证 Subsystem Descriptor 转换为受监督 Node.js Runtime Process 的确定性启动语义  
-> 依赖：[Game Package v2 Bootstrap / Descriptor Contract](./game-package-v2.md)、[Subsystem Control v2](./subsystem-control-protocol-v2.md)、[Runtime Control Application Profile v2](./runtime-control-profile-v2.md)  
+> 依赖：[Game Package v1 Bootstrap / Descriptor Contract](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
 > 最近复核：2026-08-09
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 > [!NOTE]
-> 本文的 **Launcher Profile v1**、`LoomRealmBootstrapContextV1.version = 1` 与 **Subsystem Control protocol version** 是不同版本空间。当前由本 Launcher 启动的 Runtime 使用 Subsystem Control v2；已废弃的 Control v1 不参与实现或协商。
+> **Launcher Profile v1**、`LoomRealmBootstrapContextV1.version = 1` 与 **Subsystem Control v1** 是三个独立版本空间；当前它们恰好都使用版本 1，不能据此推导未来必须同步升级。
 
 ## 1. 范围与链路边界
 
@@ -65,7 +65,7 @@ Session created
 → Descriptor Registry installed
 ```
 
-调用方 MUST 提供已经通过 Game Package v2 校验的 `SubsystemDescriptor`。
+调用方 MUST 提供已经通过 Game Package v1 校验的 `SubsystemDescriptor`。
 
 Node.js Launcher MUST NOT 再从业务名称、旧 `systemId` 或平台固定 Registry 推导可执行实现。
 
@@ -208,7 +208,7 @@ Spawn Process
 - Game Bootstrap 被取消；
 - Session termination。
 
-Token 成功消费后的身份绑定与重放规则由 **Subsystem Control v2** 管理。
+Token 成功消费后的身份绑定与重放规则由 **Subsystem Control v1** 管理。
 
 ## 7. Bootstrap Context
 
@@ -235,7 +235,7 @@ interface LoomRealmBootstrapContextV1 {
 }
 ```
 
-这里的 `version: 1` 只表示 **Desktop Launcher Bootstrap Context v1**，不表示 Subsystem Control v1。Runtime随后通过 `subsystem.hello.protocolVersions` 协商当前 Control v2。
+这里的 `version: 1` 只表示 **Desktop Launcher Bootstrap Context v1**。Runtime 随后通过 `subsystem.hello.protocolVersions` 协商 Subsystem Control v1；两个版本空间独立。
 
 Bootstrap Context MUST NOT 包含：
 
@@ -272,7 +272,7 @@ Launcher MUST NOT 无条件继承 Main 的完整 `process.env`。
 
 Safe Baseline MAY 包含 Node/OS 正常运行所需的最小平台字段，但 SHOULD 避免向 Subsystem 泄露 Main 的云凭证、开发者 Token、代理 Secret 或其他无关敏感环境。
 
-Game Package v2 已保留：
+Game Package v1 已保留：
 
 ```text
 LOOMREALM_*
@@ -491,7 +491,7 @@ request graceful termination
 → force terminate if still alive
 ```
 
-graceful shutdown 的 Main → Subsystem wire method 由 Subsystem Control v2 定义，不属于本 Launcher Profile。
+graceful shutdown 的 Main → Subsystem wire method 由 Subsystem Control v1 定义，不属于本 Launcher Profile。
 
 本 Profile 只冻结：
 
@@ -690,7 +690,7 @@ cwd equals Installation Root
 stdout/stderr are diagnostic only
 
 spawn success leaves public state at starting
-Control v2 hello selects version 2
+Control v1 hello selects version 1
 exit before connect fails bootstrap
 exit after connect before hello fails bootstrap
 exit after identified before ready fails bootstrap
@@ -737,11 +737,11 @@ Launcher never invokes a shell.
 Node executable is selected by LoomRealm Host.
 Game Package cannot inject Node CLI semantics.
 Bootstrap authentication state exists before process execution.
-Bootstrap Context v1 version != Subsystem Control version.
+Bootstrap Context v1 and Subsystem Control v1 are independent version spaces.
 Child environment is explicitly constructed.
 PID / launchId / Process Handle are not protocol identity.
 Spawn success does not mean connected / identified / ready.
-Current Control protocol is v2; Control v1 is abandoned.
+Current Control protocol is v1.
 Runtime ready does not carry Data endpoint.
 Supervisor is authoritative for actual Process exit.
 Unexpected exit is failure even when exit code is zero.
