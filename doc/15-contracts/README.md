@@ -269,6 +269,8 @@ render.event
     transient presentation impulse
 ```
 
+Node `tag` 是 opaque string。Render协议不定义其具体含义、known/unknown分类、Registry/Factory、component loading或 per-tag schema；这些是 Renderer/Subsystem实现细节，不存在 Renderer Component Profile。
+
 恢复：
 
 ```text
@@ -330,8 +332,9 @@ User Input v1                                       Core semantic closure review
 Render Update incremental model                     Closure Candidate
     ↓
 Render Update limits / conformance / official merge
-Renderer Component Profile
 Standard Input Mapping Profile
 Host Bootstrap / Data Binding Profiles
 Content Access Profile
 ```
+
+Renderer presentation/tag mapping不进入协议推进列表，由具体实现直接完成。
