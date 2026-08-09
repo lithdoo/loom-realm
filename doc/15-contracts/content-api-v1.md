@@ -1,8 +1,7 @@
 # 只读 Content API v1
 
 > 层级：正式契约  
-> 状态：Active / Normative  
-> 稳定程度：Evolving  
+> 状态：Active / Normative / Evolving  
 > 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
 > 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
 > 最近复核：2026-08-09
@@ -11,11 +10,13 @@
 
 核心原则：
 
-> **Content API 定义“已经拥有访问能力的客户端如何读取逻辑只读内容”；Content capability 如何被签发、分发、轮换属于独立 Content Access Bootstrap/Profile。**
+> **Content API 只标准化 Runtime/Renderer 与只读 Content Service 之间必须互操作的 HTTP/Fetch 语义。访问凭据如何由 Host 创建、注入、轮换是 Host implementation responsibility，不再建立 Content Access Bootstrap/Profile。**
 
-## 1. 适用范围
+---
 
-运行中的 Main、Subsystem Runtime 与 Web Renderer 可以通过统一逻辑 Content API 读取：
+## 1. Scope / Platform Binding
+
+运行中的 Main、Subsystem Runtime 与 Web Renderer MAY 读取：
 
 ```text
 manifest
@@ -24,7 +25,7 @@ group
 resource
 ```
 
-平台 binding：
+平台：
 
 ```text
 Desktop
@@ -34,34 +35,33 @@ PWA
     same-origin Fetch + Service Worker + OPFS / Cache Storage
 ```
 
-两种实现 MUST 保持相同逻辑 identity、route、status/error code、MIME、version 与 cache semantics。
+两种实现 MUST 保持相同 logical identity、route、status/error、MIME、version、cache 与 integrity semantics。
 
-## 2. 不负责的内容
-
-Content API v1 不负责：
+Content API 不负责：
 
 ```text
-Content Grant如何交给Runtime/Renderer
-Renderer Control authority
+Package install/write/delete
+Launcher executable access
 Frame / Call
+Renderer Control
 Render Update
 User Input
-Package安装/写入/删除
-Launcher executable access
 OS sandbox
+credential delivery wire
 ```
 
-特别：
+尤其不得把 Content credential 塞入：
 
 ```text
-Content API semantics
-!=
-Content Access Bootstrap
+Frame params
+Render State
+resource URL query
+ordinary business payload
 ```
 
-任何实现不得把 Content credential 塞入 Frame params、Render State、resource URL query 或普通业务 payload。
+---
 
-## 3. 核心身份
+## 2. Logical Identity
 
 ```ts
 interface ContentIdentityV1 {
@@ -73,29 +73,23 @@ interface ContentIdentityV1 {
 }
 ```
 
-`installationId` 标识经过验证/登记的安装实例，不等于本机目录。
+`installationId` 标识已验证/登记安装实例，不等于 physical directory。
 
-`namespace/key` 是逻辑 identity，MUST NOT 直接解释成 filesystem path。
+`namespace/key` 是 logical identity，MUST NOT 直接解释成 filesystem path。
 
-## 4. Base Route
+Base route：
 
 ```text
 /_lr/v1/games/{installationId}
 ```
 
-路径段使用 UTF-8 percent-encoding。解码后不得包含：
+路径段使用 UTF-8 percent-encoding。解码后不得包含 `/`、`\`、`.`/`..` path semantics、NUL/control chars、Drive/UNC/URL semantics。
 
-```text
-/ or \
-. / .. path semantics
-NUL
-control characters
-Drive/UNC/URL semantics
-```
+请求必须先做 logical identity validation，再查询 trusted Package Index；禁止 URL→filesystem direct mapping。
 
-URL参数 MUST 先按逻辑 identity校验，再查询 Package Index；不得直接拼接 filesystem path。
+---
 
-## 5. Routes
+## 3. Routes
 
 ### Manifest
 
@@ -104,7 +98,7 @@ GET  /_lr/v1/games/{installationId}/manifest
 HEAD /_lr/v1/games/{installationId}/manifest
 ```
 
-返回 normalized public manifest，不返回 Installation Root 或 launcher physical path。
+返回 normalized public manifest，不返回 Installation Root/launcher physical path。
 
 ### Record
 
@@ -126,13 +120,13 @@ GET  /_lr/v1/games/{installationId}/groups/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/groups/{namespace}/{key}
 ```
 
-v1默认 JSON Lines：
+v1 默认 JSON Lines：
 
 ```text
 Content-Type: application/x-ndjson; charset=utf-8
 ```
 
-每行必须是独立 JSON value，并受单行/记录数/总大小限制。
+每行是独立 JSON value。
 
 ### Resource
 
@@ -141,11 +135,13 @@ GET  /_lr/v1/games/{installationId}/resources/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/resources/{namespace}/{key}
 ```
 
-返回 Package Index 声明的真实 MIME 与 binary body；不得把普通资源 Base64 包入 JSON。
+返回 Package Index 声明的 MIME + binary body；普通资源不得 Base64 包入 JSON。
 
-## 6. Package Index Boundary
+---
 
-Content Service使用已经验证的 Package Index：
+## 4. Package Index Boundary
+
+Content Service 使用 trusted/validated Package Index：
 
 ```ts
 interface ContentIndexEntryV1 {
@@ -159,9 +155,7 @@ interface ContentIndexEntryV1 {
 }
 ```
 
-`internalPath` 只存在于可信 Content Service 内部，MUST NOT 返回客户端。
-
-请求：
+`internalPath` 只存在可信 Content Service 内部，MUST NOT 返回客户端。
 
 ```text
 logical identity
@@ -170,9 +164,9 @@ logical identity
 → read/validate content
 ```
 
-禁止 URL→filesystem direct mapping。
+---
 
-## 7. Success Metadata
+## 5. Success / Cache Metadata
 
 成功响应至少提供：
 
@@ -191,15 +185,7 @@ ETag: "<contentVersion>"
 X-Loom-Content-Version: <contentVersion>
 ```
 
-不可变 hash-addressed content MAY：
-
-```text
-Cache-Control: public, max-age=31536000, immutable
-```
-
-Manifest/registration-like content应采用更保守 cache policy。
-
-## 8. Conditional Request
+不可变 hash-addressed content MAY 使用长期 immutable cache；Manifest/registration-like content使用更保守 cache policy。
 
 实现 MUST 支持：
 
@@ -207,14 +193,14 @@ Manifest/registration-like content应采用更保守 cache policy。
 If-None-Match
 ```
 
-匹配时：
+匹配：
 
 ```text
 304 Not Modified
 no body
 ```
 
-客户端 cache identity至少包含：
+client cache identity 至少包含：
 
 ```text
 installationId + kind + namespace + key + contentVersion
@@ -222,39 +208,46 @@ installationId + kind + namespace + key + contentVersion
 
 不同 `contentVersion` 不得共享错误 bytes。
 
-## 9. HEAD
+---
 
-`HEAD` MUST执行与 GET相同的 authorization、route、existence、version检查，但不返回 body。
+## 6. HEAD
 
-可确定的 headers SHOULD与对应 GET一致。
+`HEAD` MUST 执行与 GET 相同的 authorization、route、existence、version 检查，但不返回 body。
 
-## 10. Range Profile
+可确定 headers SHOULD 与对应 GET 一致。
 
-Range 不属于 v1 Core mandatory capability。
+---
 
-实现显式声明 Range Profile时，至少支持合法：
+## 7. Optional HTTP Range
 
-```text
+Range 不是 mandatory capability，也不再定义 LoomRealm `Range Profile`。
+
+实现若支持 byte range，直接遵守标准 HTTP Range semantics，至少正确处理：
+
+```http
 Range: bytes=<start>-<end>
 ```
 
-并返回：
+并返回适用的：
 
 ```text
 206 Partial Content
 Content-Range
 Accept-Ranges: bytes
+416 Range Not Satisfiable
 ```
 
-Desktop/PWA 的 Range Profile必须通过同一业务 fixture。
+客户端不得假设所有部署都支持 Range；可依据标准 HTTP response/header 判断。
 
-## 11. Authorization Semantics
+---
 
-### Desktop request authorization
+## 8. Authorization Semantics
+
+### 8.1 Desktop
 
 Desktop Content Service只监听 Host认可的 loopback endpoint。
 
-授权请求使用：
+受保护请求使用：
 
 ```text
 Authorization: Bearer <token>
@@ -276,23 +269,23 @@ interface DesktopContentGrantV1 {
 }
 ```
 
-`expiresAtUnixMs` MUST 是 Unix epoch milliseconds 的 positive safe integer。
+`expiresAtUnixMs` 是 positive safe integer Unix epoch milliseconds。
 
-Token要求：
+Token MUST：
 
 ```text
 high entropy
 opaque
 bound to installation + permission scope
 not in URL
-not echoed in error/log
+not echoed in logs/errors
 ```
 
-**本文不冻结该 Grant 如何从 Main/Host 被交给 Renderer 或 Subsystem。** 该分发路径由未来 Content Access Bootstrap/Profile冻结。
+**Host 如何生成、保存、注入、刷新或轮换该 grant 不属于 Content API wire，也不需要独立 Content Access Profile。**
 
-因此当前 Desktop Content API 可以声明 request/response conformance，但在 Content Access Profile完成前不能宣称跨角色 capability-distribution 已完整冻结。
+Host 只需保证接收方获得其当前需要的访问材料，并满足上述安全边界。不同 Desktop Host implementation MAY 使用不同内部 IPC/env/context/in-memory injection 方式。
 
-### PWA request authorization
+### 8.2 PWA
 
 PWA 使用 same-origin Service Worker boundary。
 
@@ -306,11 +299,13 @@ Package Index entry valid
 stored content version matches
 ```
 
-Service Worker process memory不是 authority；必须可从持久安装登记/Index/OPFS恢复。
+Service Worker process memory不是 authority；必须可从 persistent installation registry/Index/OPFS恢复。
 
-未来如果 PWA需要更细角色 scope，应由 Content Access Profile增加，而不是修改 resource route identity。
+PWA 不要求为了与 Desktop bearer 对齐而制造额外 token distribution protocol。
 
-## 12. Methods
+---
+
+## 9. Methods
 
 Runtime Content API只允许：
 
@@ -326,18 +321,18 @@ HEAD
 Allow: GET, HEAD
 ```
 
-安装、导入、写入、删除属于 Package Storage/Installer，不属于本契约。
+安装、导入、写入、删除属于 Package Storage/Installer。
 
-## 13. Deterministic Status / Error Mapping
+---
 
-v1固定：
+## 10. Deterministic Status / Error Mapping
 
 ```text
 200 OK
     full success
 
 206 Partial Content
-    Range Profile success
+    supported Range success
 
 304 Not Modified
     ETag match
@@ -358,36 +353,36 @@ v1固定：
     method other than GET/HEAD
 
 409 Conflict
-    logical installation/version/index state conflict
-    e.g. INSTALLATION_INCOMPLETE / CONTENT_VERSION_MISMATCH
+    installation/version/index state conflict
 
 413 Content Too Large
-    current Profile size limit exceeded
+    deployment hard limit exceeded
 
 416 Range Not Satisfiable
-    invalid/unsatisfiable Range
+    invalid/unsatisfiable supported Range request
 
 422 Unprocessable Content
-    selected body exists but fails content validation/integrity
-    e.g. CONTENT_SCHEMA_INVALID / CONTENT_INTEGRITY_FAILED
+    selected body exists but schema/integrity invalid
 
 429 Too Many Requests
-    explicit concurrency/rate policy exceeded
+    deployment concurrency/rate policy exceeded
 
 500 Internal Server Error
     unexpected service failure
 ```
 
-**同一个失败事实不得由实现自由选择 409 或 422。**
-
-规则：
+固定分类：
 
 ```text
 state/version/index conflict → 409
 body schema/integrity failure → 422
 ```
 
-## 14. Error Body
+同一失败事实不得自由选择 409/422。
+
+---
+
+## 11. Error Body
 
 ```text
 Content-Type: application/problem+json
@@ -406,7 +401,7 @@ interface ContentProblemV1 {
 }
 ```
 
-Stable codes：
+Stable codes 至少：
 
 ```text
 INSTALLATION_NOT_FOUND              404
@@ -420,56 +415,63 @@ CONTENT_PERMISSION_DENIED           403
 RANGE_INVALID                       416
 ```
 
-错误不得泄露：
+错误不得泄露 physical path、token、user home、internal stack、unauthorized index content。
+
+---
+
+## 12. Deployment Limits / Backpressure
+
+不再建立 Content deployment Profile。
+
+以下属于 deployment/implementation configuration：
 
 ```text
-physical path
-token
-user home
-internal stack
-unauthorized index content
-```
-
-## 15. Limits / Backpressure
-
-具体 deployment Profile MUST给出：
-
-```text
-max URL/path segment
-max JSON body
-max JSONL line/body/record count
-max Resource size
+max JSON/JSONL/resource body size
+max record count
 concurrent request bound
-rate bound if enabled
+rate bound
 timeout/cancel policy
+internal read dedupe/cache sizing
 ```
 
-Content Repository MAY对相同 logical content的并发 read去重，但不得改变独立 request的 authorization/error semantics。
+实现 MUST bounded，并通过现有 HTTP semantics暴露失败：
 
-失败结果默认不得永久缓存。
+```text
+413
+429
+timeout/cancel
+```
 
-## 16. Integrity
+客户端不得依赖一个跨所有部署固定的资源容量或并发数字。
+
+如果某个未来 limit 被证明是解析安全/跨实现互操作所必需，直接加入 Content API v1/vNext 的 hard wire rule，而不是另建 deployment Profile。
+
+---
+
+## 13. Integrity
 
 Package Index存在 content hash 时，安装阶段 MUST验证。
 
-运行时检测到已知 hash mismatch：
+运行时已知 hash mismatch：
 
 ```text
 MUST NOT return 200
 → 422 CONTENT_INTEGRITY_FAILED
 ```
 
-若安装/Index本身处于 version conflict/incomplete state：
+安装/Index version conflict/incomplete：
 
 ```text
 → 409 CONTENT_VERSION_MISMATCH / INSTALLATION_INCOMPLETE
 ```
 
-这两个类别不得混用。
+两类不得混用。
 
-## 17. Render State Resource Reference
+---
 
-Render State/等价 presentation contract只携带逻辑引用，例如：
+## 14. Resource Reference Boundary
+
+业务/Render data只携 logical resource reference，例如：
 
 ```ts
 interface ResourceReferenceV1 {
@@ -478,9 +480,9 @@ interface ResourceReferenceV1 {
 }
 ```
 
-Renderer Resource Client再根据安装上下文解析到 Content API。
+具体 Renderer Resource Client再根据 installation context 解析 Content API。
 
-Render State MUST NOT携带：
+不得在 Render/Frame/business payload中携带：
 
 ```text
 Content token
@@ -489,13 +491,15 @@ local filesystem path
 resource bytes
 ```
 
-Resource identity不要求绑定 Frame/Activation。
+Resource identity 不绑定 Frame/Activation。
 
-## 18. Service Worker Lifecycle
+---
+
+## 15. Service Worker Lifecycle
 
 Service Worker MAY随时被浏览器终止。
 
-请求正确性不得依赖以下 volatile memory：
+请求正确性不得依赖 volatile：
 
 ```text
 Package Index cache
@@ -504,11 +508,13 @@ open OPFS handle
 authorization cache
 ```
 
-实现可以缓存，但必须可从 persistent authority恢复。
+缓存 MAY存在，但 authority 必须能从 persistent storage恢复。
 
-Service Worker不承担 Runtime Tick、Frame Stack、Renderer Control或User Input处理。
+Service Worker 不承担 Runtime Tick、Frame Stack、Renderer Control、User Input。
 
-## 19. Conformance Minimum
+---
+
+## 16. Conformance Minimum
 
 至少：
 
@@ -518,43 +524,30 @@ GET/HEAD semantic equivalence
 ETag/304
 contentVersion cache isolation
 unknown installation/namespace/key
-invalid encoding/traversal-like logical segment
-Desktop bearer missing/invalid/expired
-Desktop permission insufficient
-PWA incomplete installation
-JSONL streaming
+logical path traversal rejection
 MIME correctness
-content too large
-index/version conflict → deterministic 409
-schema failure → deterministic 422
-integrity failure → deterministic 422
-optional Range Profile
-Desktop/PWA same business status + code for same abstract fault
+Desktop bearer missing/invalid/expired/scope-denied
+PWA same-origin registration validation
+409 state/version conflict
+422 schema/integrity failure
 no physical path/token leak
+optional Range standards-compliant when enabled
+413/429 deployment-limit behavior
 ```
 
-## 20. Open Boundary Before Freeze
+Conformance 不检查 Host 使用何种内部机制把 Desktop grant交给 Runtime/Renderer，也不要求 PWA复制 Desktop bearer flow。
 
-Content API v1 尚未 Frozen，主要剩余边界：
+---
 
-```text
-Content Access Bootstrap/Profile
-exact deployment size/concurrency profiles
-optional Range Profile details
-MIME allow/deny policy if required
-```
+## 17. Final Invariants
 
-这些不得重新把 Content capability塞入 Frame、Renderer Control authority Snapshot或Render State。
-
-## 21. Core Invariants
-
-1. Content API只读；
-2. logical identity不暴露physical path；
-3. request先Index lookup后内部读取；
-4. GET/HEAD semantics稳定；
-5. Desktop/PWA逻辑route/status/code一致；
-6. Content capability distribution与Content resource protocol分离；
-7. state/version conflict固定409；body validation/integrity固定422；
-8. Resource bytes不进入Control/User Input/Render State；
-9. Render引用使用logical key + contentVersion；
-10. Content Service不拥有Runtime/Frame/Render authority。
+1. Content API 是 logical readonly GET/HEAD API；
+2. logical identity 不直接映射 filesystem path；
+3. Desktop/PWA共享 route/cache/error/integrity semantics；
+4. Desktop request authorization使用 scoped opaque bearer；PWA使用 same-origin Service Worker authority；
+5. Host credential issuance/distribution/rotation 是 implementation responsibility，不存在独立 Content Access Profile；
+6. credential 不进入 Frame、Render、URL query或 ordinary business payload；
+7. Range 是可选标准 HTTP能力，不存在 LoomRealm Range Profile；
+8. deployment size/concurrency/rate/timeouts 是 bounded implementation configuration，不形成协议 Profile；
+9. 409 与 422 failure category固定；
+10. Content API 不拥有 Runtime/Frame/Renderer/Input authority。
