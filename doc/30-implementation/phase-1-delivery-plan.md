@@ -20,6 +20,8 @@
 - 每 current Renderer / Subsystem最多一个 current Data Connection；
 - Render ownership=Subsystem；每 Runtime `0..N` Render Domains；
 - Render Update incremental model已进入 Closure Candidate；
+- Render `tag` 是 opaque string，具体 presentation含义由实现掌控；
+- 不存在 Renderer Component Profile；
 - 从未实现的旧协议正文已从当前文档树清理，ADR/Git history保留设计来源。
 
 Frame v1 completion baseline：
@@ -212,11 +214,13 @@ Domain
 
 Node
     key       Domain-lifecycle one-shot logical identity
-    tag       logical Renderer Component type
-    attrs     string→string declarative attributes
-    data      JSON object component state
+    tag       opaque string
+    attrs     string→string map
+    data      JSON object
     children  ordered child nodes
 ```
+
+协议不定义 `tag` 的具体含义、known/unknown分类、Registry/Factory或 per-tag schema。具体 Renderer presentation映射是实现细节。
 
 ### Render Update closure candidate
 
@@ -242,6 +246,7 @@ Correctness：
 ```text
 Domain one-shot lifecycle within DataAuthority generation
 Node key one-shot within Domain lifecycle
+same live key keeps stable tag string
 sender lastEmittedRevision publication cursor
 Patch requires base=current and revision=base+1
 Patch applies to isolated candidate and commits atomically
@@ -266,13 +271,21 @@ Authoritative progress不得被 Event backlog无限阻塞。
 Remaining Completion：
 
 ```text
-domainId/key/tag grammar + limits
+domainId/key grammar + byte limits
+tag byte limit only; no semantic grammar
 message/tree/node/op/attrs/data numeric limits
 zIndex range
 Event FIFO numeric policy
-unknown/undeclared tag classification
 closed-schema JSON encoding
 conformance fixture matrix
+```
+
+不再有：
+
+```text
+unknown/undeclared tag classification
+Renderer Component Profile
+Component Factory/bootstrap protocol
 ```
 
 完成后把 incremental closure candidate合并回正式 `render-update-v1.md`，再删除工作草案。
@@ -287,10 +300,12 @@ Domain Store + revision
 key/parent indexes
 atomic Patch candidate engine
 Domain Host
-Renderer Component Registry
+implementation-owned presentation mapping
 logical commit/Event processing queue
 Global Domain Composer
 ```
+
+Renderer可以内部使用 Registry/Factory/Component/DOM/Canvas/WebGL 等任意机制，但这些不进入 protocol conformance。
 
 必须保持：
 
@@ -302,24 +317,7 @@ Data Connection retire != authoritative Domain destroy
 Domain/Node != Input authority
 ```
 
-## 里程碑 7：Renderer Component Profile
-
-冻结：
-
-```text
-tag grammar / declaration
-(subsystemKey, tag) → Component Factory
-component bootstrap/loading
-per-tag attrs/data schema
-unknown/undeclared tag classification
-presentation pending/error semantics
-resource-reference conventions
-custom Input Producer lifecycle
-```
-
-Component implementation暂未加载不得直接误判为 Render authoritative divergence。
-
-## 里程碑 8：Content API 与 Content Access
+## 里程碑 7：Content API 与 Content Access
 
 实现 Safe Package Root、Catalog/Package Index、Readonly Content Service、resource/MIME/ETag/contentVersion/integrity。
 
@@ -327,7 +325,7 @@ Content API只定义读取语义；另行冻结 Content Access Bootstrap/Profile
 
 不得把 Content credential塞入 Frame params、Renderer Control Snapshot或 Render State。
 
-## 里程碑 9：`loom.map` 最小运行时
+## 里程碑 8：`loom.map` 最小运行时
 
 实现：
 
@@ -343,11 +341,13 @@ Data Connection / User Input / Render Update adapters
 
 Render Manager发布 map/world/hud等 Domains，并支持 Snapshot/Patch策略。
 
-## 里程碑 10：Pokémon Essentials 兼容工具链
+`loom.map` 与 Web Renderer 对 `map-world` / `map-hud` 等 tag 的具体解释直接作为实现级 integration约定，不建立公共 Profile。
+
+## 里程碑 9：Pokémon Essentials 兼容工具链
 
 定义中间 JSON、导入 Tile/Autotile/Passage/Priority/Character、Golden fixtures；受限素材不进入公共仓库。
 
-## 里程碑 11：Hostra Desktop 闭环
+## 里程碑 10：Hostra Desktop 闭环
 
 Main与 Hostra authority分离；Desktop Host完成：
 
@@ -361,7 +361,7 @@ finite shutdown/force termination
 
 endpoint/ticket不进入 Subsystem Control `ready`或 Renderer Authority Snapshot。
 
-## 里程碑 12：PWA Bootstrap / 闭环
+## 里程碑 11：PWA Bootstrap / 闭环
 
 Main/Subsystem Dedicated Worker；冻结 Descriptor→Worker、bootstrap credential、Control MessagePort establishment；Control Port建立后使用 **Control v1 + Frame v1**。
 
@@ -384,7 +384,7 @@ PWA Profile不得重新定义 Frame version、Data generation、User Input recov
 - Patch revision/atomic/recovery闭合；
 - 每 Subsystem支持 `0..N` Domains；
 - Domain zIndex / multi-root / one-shot Node key闭合；
-- Renderer Component tag resolution/profile完成；
+- `tag` 保持 opaque，Renderer presentation映射由实现完成；
 - Frame不拥有 Domain；zero-frame Domain可工作；
 - Content API只读且路径安全；Content capability distribution独立；
 - Hostra/PWA Host只做平台 binding，不接管 Main authority。
