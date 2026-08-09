@@ -15,7 +15,8 @@
 - Subsystem Control Protocol v1；
 - Frame / Call Protocol v1 A-F 全部 Frozen，整体 Active / Normative / Frozen；
 - Frame v1 Suspend Semantics Clarification；
-- Render=Subsystem-owned Context；每 Subsystem一个 Runtime Container / 最多一个 current Renderer Data Connection。
+- 每 Subsystem一个 Runtime Container / 最多一个 current Renderer Data Connection；
+- Render ownership=Subsystem；当前架构进一步收敛为 `0..N` Render Domains / Runtime。
 
 Frame v1 completion profile：
 
@@ -139,29 +140,7 @@ Renderer → Subsystem
     State / Event / Reset
 ```
 
-标准 Channel：
-
-```text
-keyboard.state / keyboard.event
-pointer.state  / pointer.event
-gamepad.state  / gamepad.event
-```
-
-自定义 Renderer component：
-
-```text
-x.<custom-name>.state
-x.<custom-name>.event
-```
-
-Interest：
-
-```text
-full replacement exact set
-fresh Data Connection default empty
-no wildcard
-not authority
-```
+Interest是 full replacement exact set、fresh Data Connection default empty、no wildcard、not authority。
 
 统一派生状态：
 
@@ -175,75 +154,164 @@ current matching Data Connection
 ∧ Producer(C) available
 ```
 
-必须实现：
+必须保持 State/Event/Reset、Producer-loss teardown 与 InputTarget one-shot lease语义。
+
+Standard Input Mapping exact payload、message/Channel/Event queue limits与 text/IME细节延后到具体开发阶段继续收敛，不再阻塞下一协议设计。
+
+## 里程碑 5：Render Update + Render Tree + Web Renderer
+
+**当前下一主要 Data protocol 目标。**
+
+### Render Domain Architecture
+
+每个 Subsystem Runtime MAY拥有：
 
 ```text
-.state false→true → fresh self-contained baseline
-.event false→true → future events only / no replay
-Interest removal clears removed State locally
-late input for removed Interest is dropped
-Event/Reset are State coalescing barriers
-InputTarget revoke best-effort Reset previous target
-Effective State Producer loss → Reset + remaining State rebaseline
-Activation/Data/Control authority loss implicit reset
-fresh connection republishes Interest + fresh State
+0..N Render Domains
 ```
 
-User Input无 transactional ACK、不是 broadcast、不是 direct Frame command；input loss/overflow不得自行触发 Runtime failure/Frame unwind。
-
-下一关闭项：
+Domain：
 
 ```text
-Standard Input Mapping exact payloads
-message encoding / limits
-Channel/count limits
-Event queue numeric limits / overflow final policy
-text/IME boundary
+domainId
+zIndex
+0..N ordered roots
 ```
 
-里程碑 4 最终关闭条件：Data Connection lifecycle + User Input Channel/Interest/Effective transition/wire/payload/limits/conformance全部明确，并覆盖：
+Node：
 
 ```text
-stale Activation
-InputTarget one-shot lease
-Interest filtering race
-custom x.* Channel
-Producer loss/recovery
-Control loss
-same-generation reconnect
-State/Event/Reset ordering
+key
+    current Domain Tree-wide unique reconciliation identity
+
+tag
+    logical Renderer Component type
+
+attrs
+    string→string declarative attributes
+
+data
+    JSON object component state
+
+children
+    ordered child nodes
 ```
 
-## 里程碑 5：Render Update 与 Web Renderer
+Domain identity：
 
-**下一主要 Data protocol 目标。**
+```text
+subsystemKey + domainId
+```
 
-冻结独立 Render identity/lifecycle/state/revision/snapshot/recovery/backpressure；支持 zero-frame Render、Frame close/unwind后 Render独立、Renderer reload/Data reconnect独立恢复。
+Domain是：
+
+```text
+Render lifecycle unit
+atomic authoritative state unit
+global composition unit
+```
+
+Domain Host不是 Node，因此轻量 Domain不需要 fake container root。
+
+### Render Update v1 关闭目标
+
+冻结：
+
+```text
+Domain Registry / lifecycle
+Domain current-state publication
+atomic commit boundary
+zIndex composition / equal-zIndex rules
+fresh Data reconnect recovery
+backpressure/coalescing
+error model
+wire limits
+```
+
+当前优先方向：
+
+```text
+full current Domain State
++ ordered carrier
++ Renderer local key-based reconciliation
++ fresh reconnect state
+```
+
+不要在没有证明必要性前引入：
+
+```text
+revision
+Tree Patch
+operation log
+resume cursor
+cross-Domain transaction
+Renderer→Subsystem resync RPC
+```
+
+### Render Tree Contract v1 关闭目标
+
+冻结：
+
+```text
+roots[] / children[] ordering
+Node key uniqueness
+same-key tag continuity/replacement semantics
+attrs/data plain-data model
+Subsystem-scoped tag → Renderer Component resolution
+unknown/unavailable tag handling
+tree depth/node-count/data/message limits
+```
+
+`tag` 不得退化成任意 DOM tag；`attrs/data` 不得成为 executable callback 或 remote DOM command surface。
+
+### Web Renderer 实现
+
+实现：
+
+```text
+Render Domain Registry
+Domain Store
+Domain Host
+Renderer Component Registry
+Domain Tree Reconciler
+Global Domain Composer / Scheduler
+```
+
+Renderer MAY按 stable Node key对 full Domain State做本地 diff/reconciliation；内部 diff不产生 wire Tree Patch兼容承诺。
 
 必须保持：
 
 ```text
-Frame suspend != Render hidden
-Frame close/unwind != Render destroy
-Activation replacement != Render epoch
-Data Connection retire != Render destroy
+Frame suspend != Domain hidden
+Frame close/unwind != Domain destroy
+Activation replacement != Domain lifecycle
+Data Connection retire != Domain destroy
+Domain/Node != Input authority
 ```
 
-Web Renderer同时实现：
+Component MAY提供 custom `x.*` Input Channel Producer，但仍服从 User Input Effective Channel gate。
+
+里程碑 5 最终关闭条件至少覆盖：
 
 ```text
-trusted InputTarget sender gate
-Input Interest Registry
-Input Channel Producer Registry
-Effective Input Channel Resolver
-standard Input Channel Producers
-Subsystem custom x.* Renderer component Producers
-Producer-loss Reset/rebaseline
+zero-domain
+single-domain-single-root
+single-domain-multi-root
+empty-domain-roots
+multiple-domains-one-subsystem
+multiple-subsystems-domains
+zIndex-ordering
+equal-zIndex-determinism
+node-key-domain-wide-unique
+same-key-tag-rule
+ordered-root/children
+unknown-component-tag
+full-domain-atomic-replace
+local-key-reconciliation-does-not-change-wire-semantics
+frame-close-does-not-destroy-domain
+data-retire-does-not-authoritatively-destroy-domain
+fresh-connection-domain-recovery
 ```
-
-这些都不能改变 Main input authority。
-
-Render State Contract作为 Render Update携带的声明式状态模型独立冻结。
 
 ## 里程碑 6：Content API 与游戏内容
 
@@ -255,6 +323,8 @@ Content API只定义读取语义；Content capability distribution使用独立 B
 
 实现 Subsystem Control Adapter；完整 Frame v1 Adapter；JSON/limit validator；Request ID/deadline handler；mutation gate；initialize rejection；timeout/divergence reporting；healthy doomed Frame close；Runtime Core/Loop、移动/碰撞/Portal、Render Manager/Projector。
 
+Render Manager至少能发布适用的 map/world/hud 等 Render Domains，Domain内使用 Renderer Component tags与 Domain-wide stable Node keys。
+
 同时实现适用的 Data Connection / User Input / Render Update adapter，但不能把 Frame authority搬到 Data Plane。
 
 ## 里程碑 8：Pokémon Essentials 兼容工具链
@@ -263,7 +333,7 @@ Content API只定义读取语义；Content capability distribution使用独立 B
 
 ## 里程碑 9：Hostra Desktop 闭环
 
-Main 与 Hostra 分离；Desktop Host建立 per-Subsystem Control/Data carrier；Renderer reload只恢复 Main committed state；finite shutdown/force termination。
+Main 与 Hostra 分离；Desktop Host建立 per-Subsystem Control/Data carrier；Renderer reload只恢复 Main committed control state；Domain恢复通过 Render Update独立完成；finite shutdown/force termination。
 
 WebSocket endpoint/ticket等属于 Desktop Host binding，不进入 Data Connection Core。
 
@@ -271,7 +341,7 @@ WebSocket endpoint/ticket等属于 Desktop Host binding，不进入 Data Connect
 
 Main/Subsystem Dedicated Worker；冻结 Descriptor→Worker / credential / Control MessagePort establishment；Port建立后直接使用已 Frozen Frame v1 application mapping；Window⇄Subsystem Data carrier由 Host安全建立；Service Worker Content API / OPFS。
 
-PWA Bootstrap Profile MUST NOT重新定义 Frame version、Frame JSON type、Data generation authority或 User Input recovery semantics。
+PWA Bootstrap Profile MUST NOT重新定义 Frame version、Frame JSON type、Data generation authority、User Input recovery或 Render Domain authority semantics。
 
 ## 第一阶段最终验收
 
@@ -283,13 +353,12 @@ PWA Bootstrap Profile MUST NOT重新定义 Frame version、Frame JSON type、Dat
 - InputTarget one-shot lease完成；
 - Data Connection current/retired authority闭合；
 - Data loss不触发 Runtime failure/Frame unwind；
-- User Input Input Interest / Channel filtering完成；
-- Effective Channel transition语义完成；
-- standard与custom `x.*` Channel边界完成；
-- Producer loss Reset/rebaseline完成；
-- User Input State/Event/Reset、ordering/backpressure/limits完成；
-- Render Update / Render State完成；
-- Frame不拥有 Render；zero-frame Render可工作；
+- User Input Core authority/Interest/Effective Channel闭合；
+- Render Update / Render Tree Contract完成；
+- 每 Subsystem支持 `0..N` Domains；
+- Domain zIndex / multi-root / Domain-wide Node key闭合；
+- Renderer Component tag resolution边界完成；
+- Frame不拥有 Domain；zero-frame Domain可工作；
 - Content API只读且路径安全；
 - Hostra不承载 Main authority。
 
