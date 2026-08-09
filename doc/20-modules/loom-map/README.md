@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：第一阶段地图 Subsystem 的内部模块和依赖方向  
-> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Frame / Call v1 Conformance Profile](../../15-contracts/frame-call-conformance-v1.md)、[渲染系统](../../10-architecture/rendering-system.md)  
-> 最近复核：2026-08-08
+> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Subsystem Control v2](../../15-contracts/subsystem-control-protocol-v2.md)、[Runtime Control Profile v2](../../15-contracts/runtime-control-profile-v2.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Render Update Incremental Design](../../15-contracts/render-update-v1-incremental-design.md)  
+> 最近复核：2026-08-09
 
 `loom.map` 是第一阶段纵向切片。内部模块不是所有 Subsystem 的公共要求。
 
@@ -13,28 +13,55 @@
 
 ```text
 loom.map
-├── Subsystem Control Adapter
+├── Subsystem Control v2 Adapter
+├── Runtime Control Profile v2 Dispatcher
 ├── Frame / Call Adapter
 │   ├── Protocol Validator
-│   ├── Request ID Allocator
+│   ├── Shared Request ID Allocator
 │   ├── Outbound Mutation Gate
 │   └── Frame RPC Deadline / Failure Handler
-├── Frame Input Adapter
+├── User Input Adapter
 ├── Game Catalog / Repositories
 ├── Session Coordinator
 ├── Runtime Execution Loop / Core / World State
 ├── Render Manager
 │   ├── Domain Registry
 │   ├── Domain Tree Projectors
-│   └── Renderer Component State Projectors
+│   ├── Published Revision / Snapshot Store
+│   └── Patch Diff Generator
 └── Pokémon Essentials Compatibility Compiler
 ```
 
 一个 map Runtime可服务多个 Frame，并共享 world/cache/loop/render domains。
 
-## 2. Frame Context / RPC
+## 2. Runtime Control
 
-Frame / Call Protocol v1 已 Active / Normative / Frozen。
+当前 map Runtime只实现：
+
+```text
+Subsystem Control v2
++
+Frame / Call v1
+=
+Runtime Control Application Profile v2
+```
+
+Control v1/Profile v1已实现前废弃，不提供 fallback。
+
+Bootstrap：
+
+```text
+subsystem.hello { protocolVersions:[2] }
+→ identified
+→ optional initializing
+→ subsystem.status({state:"ready"})
+```
+
+`ready`不携 Renderer Data endpoint，也不表示 Data Connection已建立。
+
+## 3. Frame Context / RPC
+
+Frame / Call Protocol v1保持 Active / Normative / Frozen。
 
 ```ts
 interface MapFrameContext {
@@ -46,103 +73,105 @@ interface MapFrameContext {
 
 不保存公共 caller/Stack/recovery authority。Frame/Activation不由地图生成/复用。
 
-RPC exactly seven：initialize/activate/suspend/resume/close/call/return。无 `frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`、Caller wire、close reason、`system.call/system.return/frame.result`。
+RPC exactly seven：initialize/activate/suspend/resume/close/call/return。
 
-## 3. Protocol Validator / Completion Profile
+## 4. Shared Control Dispatcher
 
-Map Adapter必须通过 SDK复用 Frozen Frame v1 validator：
+Control v2 + Frame v1共享 authenticated Control carrier时：
 
 ```text
-plain JSON values only
-finite binary64 / safe integer
-valid Unicode scalar strings
+one transport unit = one JSON-RPC message
+no JSON-RPC Batch
+shared sender-side Request ID namespace
+```
+
+Map Runtime outbound sender namespace覆盖：
+
+```text
+subsystem.hello
+frame.call
+frame.return
+```
+
+Request ID=positive safe integer，同一 Control Connection生命周期内不复用。
+
+Frame v1由 Profile v2静态绑定；不实现 `frame.hello/version/capabilities`。
+
+## 5. Frame Validator / Deadline / Mutation Gate
+
+Map Adapter复用 Frozen Frame v1 validator：
+
+```text
+plain JSON
+finite number / safe integer
 closed schema
 message <=1 MiB
 JSON depth <=64
 business JsonValue <=512 KiB
 frameId / activationId <=128 UTF-8 bytes
 targetSubsystemKey <=256 UTF-8 bytes
-FrameFailure field limits
 ```
 
-PWA map Worker不得利用 Structured Clone传输 BigInt/ArrayBuffer/MessagePort/Blob作为 Frame value。
-
-## 4. Request ID / Deadline
-
-Outbound `frame.call/frame.return` Request ID：positive safe integer `1..2^53-1`，Control Connection生命周期内不复用。
-
-Map Runtime为 call/return使用 sender-local monotonic deadline profile，每项 `1000..300000ms`，Connection生命周期内稳定，不由地图数据/事件 per-call改变。
-
-## 5. Mutation Gate
+call/return使用 sender-local monotonic deadline `1000..300000ms`。
 
 outbound call/return pending：stop new ordinary input + block second call/return。
 
 ```text
 Success
-    → suspended/closing local commit
+    → local suspended/closing commit
 Recoverable Explicit Error
     → release gate
 Fatal Explicit Error / timeout/loss
-    → no release to old Activation
+    → no return to old Activation
     → Runtime failure
 ```
 
 No retry/replay/idempotency journal。
 
-## 6. Incoming Control
+## 6. Incoming Frame Control
 
-`frame.initialize` 可用 `FRAME_INITIALIZE_REJECTED + FrameFailure` 做业务拒绝，Context未 commit且 Runtime healthy。
+`frame.initialize`可用 `FRAME_INITIALIZE_REJECTED + FrameFailure`做业务拒绝，Context未 commit且 Runtime healthy。
 
-合法 activate/suspend/resume/close 的 identity/lifecycle/Activation mismatch是 divergence，不私有 resync。
+合法 activate/suspend/resume/close的 identity/lifecycle/Activation mismatch是 divergence，不私有 resync。
 
-`resume`=Child outcome+replacement Activation；`close`只清该 Frame/Input Context，不停止 Runtime、不删除共享 world/cache/Render Domains。
+`resume`=Child outcome + replacement Activation；`close`只清该 Frame/Input Context，不停止 Runtime、不删除共享 world/cache/Render Domains。
 
 ## 7. Runtime Failure Boundary
 
-地图 Runtime自身一旦 terminal failed：
+地图 Runtime terminal failed后：
 
 ```text
-MUST NOT 自行选择 suspended map Frame恢复
-MUST NOT 恢复旧 Activation
-MUST NOT 根据本地 Context决定 Stack unwind
+MUST NOT自行恢复 suspended Frame
+MUST NOT恢复旧 Activation
+MUST NOT决定 Stack unwind root
 ```
 
-Main按 lowest failed-runtime occurrence计算 whole suffix。同一个 map Runtime在 Stack多次出现时 root取最低 occurrence。
+Control可用时通过 Control v2 `subsystem.status(failed)`报告 Runtime self-failure。
 
-## 8. Healthy Map Runtime 被卷入 Suffix
+Main按 lowest failed-runtime occurrence + fixed-point规则收敛整个 doomed suffix。
 
-map Runtime健康但某 map Frame因 ancestor failure成为 doomed descendant时，Main撤销该 Frame公共 authority并发送一次 `frame.close(frameId)`；Map Adapter删除对应 Frame/Input Context。
+## 8. User Input Adapter
 
-Recovery不要求额外 suspend-before-close。共享 world/cache/Render Domains是否保留由 map业务设计决定。
-
-## 9. Cleanup Failure / Outcome
-
-Recovery close timeout/diverge/protocol-fail使整个 map Runtime terminal failed；Main把 map key加入 failed set并可能下移 root。Map Adapter不得 retry close或请求局部 resync。
-
-已成功 `frame.return` 的 outcome在 Return Acceptance后不可被 Runtime crash覆盖。
-
-Final root无 accepted outcome时 Main可能向 Caller生成 `failed(SUBSYSTEM_RUNTIME_FAILED)`；Map Runtime不自行构造该 platform outcome。
-
-## 10. Frame Input Adapter
+普通输入至少验证：
 
 ```text
-frameId + activationId
-→ locate Context
-→ require active/current Activation
-→ require no mutation gate
-→ normalize action
-→ runtime command
+current Data Connection
+frameId exists
+Frame local active
+activationId current
+channel in local current Interest
+no mutation gate
 ```
 
-revoked Activation永久拒绝。Runtime failure后不重新开启旧 Frame输入。
+Main公共 ordinary input authority由 Renderer Core依据 current InputTarget执行 sender-side gate。
 
-Render Domain/Node identity不参与 ordinary input authority；Renderer Component产生的 custom Input Channel仍服从 Main InputTarget + User Input Interest。
+Render Domain/Node identity不参与 ordinary input authority；Renderer Component产生的 `x.*` Channel仍服从 User Input Effective Channel模型。
 
-## 11. Render Domain Model
+## 9. Render Domain Model
 
 Map Render Manager使用通用 Subsystem-owned Domain架构。
 
-第一阶段可以按业务需要创建例如：
+示例：
 
 ```text
 world Domain        zIndex=0
@@ -151,7 +180,7 @@ loading Domain      zIndex=200
 debug Domain        zIndex=1000
 ```
 
-这些只是示例，不是固定公共 Domain names。
+Domain names/zIndex只是业务示例，不是公共标准。
 
 每个 Domain：
 
@@ -161,117 +190,170 @@ zIndex
 0..N ordered roots
 ```
 
-Map Domain可以直接拥有多个 top-level nodes，例如：
+Node：
 
 ```text
-hud
-├── status component
-├── minimap component
-└── notification component
+key       Domain lifecycle内 one-shot logical identity
+tag       map-owned logical Renderer Component type
+attrs     string→string
+data      JSON object
+children  ordered nodes
 ```
 
-无需为了协议创建无业务语义的 `hud-root` fake container。只有确实需要共享布局/裁剪/坐标系时才创建真实 container/component Node。
+Domain Host不是 Node，不需要 fake root。
 
-Node当前设计：
+## 10. Render Publication Model
+
+Map Runtime不是只发送 full Snapshot。当前 Render Update实现目标：
 
 ```text
-key
-    current Domain Tree-wide unique
+render.domains
+    current Domain Registry
 
-tag
-    map-owned logical Renderer Component type
+render.snapshot(revision)
+    fresh baseline / full commit
 
-attrs
-    string→string
+render.patch(baseRevision, revision)
+    exact R → R+1 atomic incremental commit
+    insert / remove / move / update
 
-data
-    JSON object
-
-children
-    ordered nodes
+render.event
+    transient presentation impulse
 ```
 
-典型 tag可以是：
+Subsystem sender对每个 current carrier + Domain维护逻辑：
 
 ```text
-map-world
-map-tile-layer
-map-character-layer
-map-effect-layer
-map-hud
+lastEmittedRevision
+last published logical Domain Tree
+new desired Domain Tree
 ```
 
-它们是概念示例，不是当前冻结标准 tag。
+Projector / Diff Engine根据 stable key计算 Patch；业务逻辑不直接拼 wire operations。
 
-Renderer可按 stable key对 full Domain State做本地 reconciliation；map Runtime不应因此假设 wire已提供 subtree patch/operation log。
+## 11. Patch Generation
 
-## 12. Renderer Component Boundary
+Diff规则：
 
-`loom.map` 的 Render Node `tag` 通过 Subsystem-scoped Component Registry解析：
+```text
+old has / new missing
+    → remove
+
+old missing / new has
+    → insert subtree
+
+same key parent/order changed
+    → move
+
+same key attrs/data changed
+    → update
+
+same key tag changed
+    → producer modeling error;
+      remove old key + insert fresh key
+```
+
+Patch必须从 `lastEmittedRevision`精确转换到 `R+1`，不是业务 mutation counter。
+
+当 diff过大/复杂/队列压力高时，Map Runtime可以发送 full Snapshot(`lastEmittedRevision+1`)作为下一次 authoritative commit。
+
+## 12. Render Recovery
+
+fresh Data Connection：
+
+```text
+render.domains
+→ fresh Snapshot for every current Domain
+→ ordinary Patch/Event
+```
+
+Renderer旧 presentation cache不能作为 Patch base。
+
+authoritative continuity/validation failure：
+
+```text
+retire current Data carrier
+→ if generation still current, establish fresh carrier
+→ Registry + fresh Snapshots
+```
+
+不存在 Renderer→Subsystem render resync RPC、Patch replay、ACK/NACK。
+
+## 13. Renderer Component Boundary
+
+`loom.map` Node `tag`通过：
 
 ```text
 (loom.map, tag)
 → Renderer Component Factory
 ```
 
-Component implementation如何被 Host/Package加载由未来 Renderer Component Bootstrap/Profile定义，不由 Render State携带 executable code。
+解析。
 
-Component MAY产生 `x.*` User Input Channel，但 Component existence本身不产生 InputTarget authority。
+典型 tag例如 `map-world`、`map-character-layer`、`map-hud`，但 exact标准由 Renderer Component Profile冻结。
 
-## 13. FrameOutcome / Cancellation
+Component implementation加载不属于 Render State；wire不得传 executable code。
 
-```text
-completed(value)
-cancelled
-failed(FrameFailure)
-```
+Component MAY产生 `x.*` User Input Producer，但 Component existence本身不产生 InputTarget authority。
 
-v1无 caller-driven cancel；`cancelled`只由当前 active map Frame自行 return。
-
-## 14. Version / Transport Boundary
-
-Map Runtime不实现 `frame.hello/version/capabilities`。`subsystem.hello.protocolVersions`只协商 Subsystem Control；Frame v1由 deployment profile静态绑定。
-
-Desktop Node map Runtime使用 WebSocket JSON文本；PWA map Worker使用已建立 Control MessagePort上的 plain JSON-compatible object；应用层必须保持同一 Frame v1行为。
-
-Render Update / Render Tree independently freeze their own wire/limits/recovery semantics。
-
-## 15. Frame / Domain / Runtime Independence
-
-Frame operation/unwind不自动启停 Runtime Loop、创建/隐藏/销毁 Render Domain、删除共享 world或关闭 Data Connection。
+## 14. Frame / Domain / Data Independence
 
 ```text
 Frame close != Domain destroy
 Frame suspend != Domain hidden
 Activation change != Domain lifecycle
+Runtime ready != Data Connection exists
 Data retire != authoritative Domain destroy
 ```
 
-## 16. Tests
+Runtime terminal failure最终会使 Main撤销相应 DataAuthority，但 Frame/Data/Render各自按照自己的 authority/lifecycle收敛。
 
-除已有 transaction/failure tests外，必须接入 Frame v1 Subsystem conformance，并为 Render vertical slice补充：
+## 15. Tests
+
+除 Frame v1 Subsystem conformance外，至少覆盖：
 
 ```text
-exact-seven-rpc-methods
+control-v2-version-selection
+no-control-v1-fallback
+ready-has-no-data-endpoint
+shared-control-frame-request-id
+
 call-pending-gate
 initialize-business-reject
 frame-rpc-timeout-no-retry
-same-subsystem-recursive-no-reentrant-handler
-runtime-failed-does-not-local-resume-lower-map-frame
-healthy-doomed-map-frame-close-only
-close-timeout-expands-root
-accepted-map-outcome-survives-crash
+same-subsystem-recursive
+runtime-failed-does-not-local-resume
 stale-activation-rejected
-oversize-message-rejected
-unsafe-json-number-rejected
-request-id-reuse-rejected
-pwa-non-json-value-rejected
+
 zero-frame-render-domain
 multi-domain-map-render
 multi-root-domain
+published-node-key-one-shot
+snapshot-fresh-baseline
+patch-R-to-R-plus-1
+patch-insert/remove/move/update
+patch-atomic-no-partial-apply
+snapshot-fallback-under-backpressure
+render-event-barrier
+same-generation-reconnect-fresh-snapshots
 frame-close-does-not-destroy-domain
 ```
 
-## 17. Legacy Notes
+## 16. Legacy Notes
 
-per-Frame mandatory Core/Render、Frame status=failed、Frame ready、Activation reuse、`system.call`、Caller-as-Subsystem-authority、call→reverse-suspend、timeout→retry、caller remote cancel、partial same-runtime unwind、Frame close=Render destroy、Frame partial-v1 support 都不得恢复。
+以下不得恢复：
+
+```text
+Control v1 fallback
+ready.rendererDataEndpoint
+per-Frame mandatory Core/Render
+Frame status=failed / Frame ready
+Activation reuse
+system.call
+call→reverse-suspend
+timeout→retry
+caller remote cancel
+partial same-runtime unwind
+Frame close=Render destroy
+Snapshot-only assumption after incremental Render closure
+```
