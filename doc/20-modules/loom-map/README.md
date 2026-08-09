@@ -5,7 +5,7 @@
 > 稳定程度：Experimental  
 > 主要定义：第一阶段地图 Subsystem 的内部模块和依赖方向  
 > 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Frame / Call v1 Conformance Profile](../../15-contracts/frame-call-conformance-v1.md)、[渲染系统](../../10-architecture/rendering-system.md)  
-> 最近复核：2026-08-05
+> 最近复核：2026-08-08
 
 `loom.map` 是第一阶段纵向切片。内部模块不是所有 Subsystem 的公共要求。
 
@@ -23,11 +23,14 @@ loom.map
 ├── Game Catalog / Repositories
 ├── Session Coordinator
 ├── Runtime Execution Loop / Core / World State
-├── Render Manager / Projector
+├── Render Manager
+│   ├── Domain Registry
+│   ├── Domain Tree Projectors
+│   └── Renderer Component State Projectors
 └── Pokémon Essentials Compatibility Compiler
 ```
 
-一个 map Runtime可服务多个 Frame，并共享 world/cache/loop/render。
+一个 map Runtime可服务多个 Frame，并共享 world/cache/loop/render domains。
 
 ## 2. Frame Context / RPC
 
@@ -92,7 +95,7 @@ No retry/replay/idempotency journal。
 
 合法 activate/suspend/resume/close 的 identity/lifecycle/Activation mismatch是 divergence，不私有 resync。
 
-`resume`=Child outcome+replacement Activation；`close`只清该 Frame/Input Context，不停止 Runtime、不删除共享 world/cache/Render。
+`resume`=Child outcome+replacement Activation；`close`只清该 Frame/Input Context，不停止 Runtime、不删除共享 world/cache/Render Domains。
 
 ## 7. Runtime Failure Boundary
 
@@ -110,7 +113,7 @@ Main按 lowest failed-runtime occurrence计算 whole suffix。同一个 map Runt
 
 map Runtime健康但某 map Frame因 ancestor failure成为 doomed descendant时，Main撤销该 Frame公共 authority并发送一次 `frame.close(frameId)`；Map Adapter删除对应 Frame/Input Context。
 
-Recovery不要求额外 suspend-before-close。共享 world/Render是否保留由 map业务设计决定。
+Recovery不要求额外 suspend-before-close。共享 world/cache/Render Domains是否保留由 map业务设计决定。
 
 ## 9. Cleanup Failure / Outcome
 
@@ -133,7 +136,89 @@ frameId + activationId
 
 revoked Activation永久拒绝。Runtime failure后不重新开启旧 Frame输入。
 
-## 11. FrameOutcome / Cancellation
+Render Domain/Node identity不参与 ordinary input authority；Renderer Component产生的 custom Input Channel仍服从 Main InputTarget + User Input Interest。
+
+## 11. Render Domain Model
+
+Map Render Manager使用通用 Subsystem-owned Domain架构。
+
+第一阶段可以按业务需要创建例如：
+
+```text
+world Domain        zIndex=0
+hud Domain          zIndex=100
+loading Domain      zIndex=200
+debug Domain        zIndex=1000
+```
+
+这些只是示例，不是固定公共 Domain names。
+
+每个 Domain：
+
+```text
+domainId
+zIndex
+0..N ordered roots
+```
+
+Map Domain可以直接拥有多个 top-level nodes，例如：
+
+```text
+hud
+├── status component
+├── minimap component
+└── notification component
+```
+
+无需为了协议创建无业务语义的 `hud-root` fake container。只有确实需要共享布局/裁剪/坐标系时才创建真实 container/component Node。
+
+Node当前设计：
+
+```text
+key
+    current Domain Tree-wide unique
+
+tag
+    map-owned logical Renderer Component type
+
+attrs
+    string→string
+
+data
+    JSON object
+
+children
+    ordered nodes
+```
+
+典型 tag可以是：
+
+```text
+map-world
+map-tile-layer
+map-character-layer
+map-effect-layer
+map-hud
+```
+
+它们是概念示例，不是当前冻结标准 tag。
+
+Renderer可按 stable key对 full Domain State做本地 reconciliation；map Runtime不应因此假设 wire已提供 subtree patch/operation log。
+
+## 12. Renderer Component Boundary
+
+`loom.map` 的 Render Node `tag` 通过 Subsystem-scoped Component Registry解析：
+
+```text
+(loom.map, tag)
+→ Renderer Component Factory
+```
+
+Component implementation如何被 Host/Package加载由未来 Renderer Component Bootstrap/Profile定义，不由 Render State携带 executable code。
+
+Component MAY产生 `x.*` User Input Channel，但 Component existence本身不产生 InputTarget authority。
+
+## 13. FrameOutcome / Cancellation
 
 ```text
 completed(value)
@@ -143,19 +228,28 @@ failed(FrameFailure)
 
 v1无 caller-driven cancel；`cancelled`只由当前 active map Frame自行 return。
 
-## 12. Version / Transport Boundary
+## 14. Version / Transport Boundary
 
 Map Runtime不实现 `frame.hello/version/capabilities`。`subsystem.hello.protocolVersions`只协商 Subsystem Control；Frame v1由 deployment profile静态绑定。
 
 Desktop Node map Runtime使用 WebSocket JSON文本；PWA map Worker使用已建立 Control MessagePort上的 plain JSON-compatible object；应用层必须保持同一 Frame v1行为。
 
-## 13. Frame / Render / Runtime Independence
+Render Update / Render Tree independently freeze their own wire/limits/recovery semantics。
 
-Frame operation/unwind不自动启停 Runtime Loop、创建/隐藏/销毁 Render、删除共享 world或关闭 Data Connection。Render world/hud/loading/debug由 Render Manager独立控制。
+## 15. Frame / Domain / Runtime Independence
 
-## 14. Tests
+Frame operation/unwind不自动启停 Runtime Loop、创建/隐藏/销毁 Render Domain、删除共享 world或关闭 Data Connection。
 
-除已有 transaction/failure tests外，必须接入 Frame v1 Subsystem conformance：
+```text
+Frame close != Domain destroy
+Frame suspend != Domain hidden
+Activation change != Domain lifecycle
+Data retire != authoritative Domain destroy
+```
+
+## 16. Tests
+
+除已有 transaction/failure tests外，必须接入 Frame v1 Subsystem conformance，并为 Render vertical slice补充：
 
 ```text
 exact-seven-rpc-methods
@@ -172,9 +266,12 @@ oversize-message-rejected
 unsafe-json-number-rejected
 request-id-reuse-rejected
 pwa-non-json-value-rejected
-zero-frame-render
+zero-frame-render-domain
+multi-domain-map-render
+multi-root-domain
+frame-close-does-not-destroy-domain
 ```
 
-## 15. Legacy Notes
+## 17. Legacy Notes
 
 per-Frame mandatory Core/Render、Frame status=failed、Frame ready、Activation reuse、`system.call`、Caller-as-Subsystem-authority、call→reverse-suspend、timeout→retry、caller remote cancel、partial same-runtime unwind、Frame close=Render destroy、Frame partial-v1 support 都不得恢复。
