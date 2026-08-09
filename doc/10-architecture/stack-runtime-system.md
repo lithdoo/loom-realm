@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：调用栈、Frame 生命周期、Activation、事务提交、错误边界、Runtime failure unwind 与 ordinary InputTarget  
-> 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Subsystem Control v2](../15-contracts/subsystem-control-protocol-v2.md)、[Runtime Control Profile v2](../15-contracts/runtime-control-profile-v2.md)  
-> 下层契约：[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[Frame v1 Runtime Control v2 Binding Clarification](../15-contracts/frame-call-v1-runtime-control-v2-clarification.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)  
+> 下层契约：[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[Frame v1 Suspend Clarification](../15-contracts/frame-call-v1-suspend-clarification.md)  
 > 最近复核：2026-08-09
 
 ## 1. 设计目标
@@ -15,14 +15,12 @@
 当前 Runtime Control组合：
 
 ```text
-Subsystem Control v2
+Subsystem Control v1
 +
 Frame / Call v1
 =
-Runtime Control Application Profile v2
+Runtime Control Application Profile v1
 ```
-
-Control v1/Profile v1已实现前废弃；这不改变 Frozen Frame v1语义。
 
 ## 2. Authority
 
@@ -95,7 +93,7 @@ Subsystem → Main
 
 七个方法全部为 JSON-RPC Request。无 Caller wire、close reason、`frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`。
 
-Frame v1当前运行在 Runtime Control Profile v2中；`subsystem.hello.protocolVersions`只协商 Control version 2，Frame version 1静态绑定。
+Frame v1运行在 Runtime Control Profile v1中；`subsystem.hello.protocolVersions`只协商 Control version 1，Frame version 1静态绑定。
 
 ## 6. Mutation Serialization
 
@@ -225,11 +223,11 @@ Frame close/unwind != Render Domain destroy
 Data reconnect != Frame recovery
 ```
 
-Control v2 `ready`只表示 Runtime能够承担 Runtime Control Profile v2角色，不携 Renderer Data endpoint。
+Control v1 `ready`只表示 Runtime能够承担 Runtime Control Profile v1角色，不携 Renderer Data endpoint。
 
 ## 13. Control Carrier Integration
 
-Control v2 + Frame v1共享 carrier时：
+Control v1 + Frame v1共享 carrier时：
 
 ```text
 one transport unit = one JSON-RPC message
@@ -243,17 +241,15 @@ Desktop/PWA platform binding可以不同，但建立后的 transaction/error/rec
 
 ## 14. 核心不变量
 
-1. 当前 Runtime Control=Control v2 + Frame v1；
-2. Frame protocolVersion仍为1；
-3. Control v1/Profile v1无 compatibility requirement；
-4. Main拥有 Frame/Stack/Activation/InputTarget/recovery authority；
-5. frameId/activationId不复用；
-6. Stack mutation串行；
-7. Response-before-dependent-RPC；
-8. ACK-before-publication；
-9. timeout/loss ambiguous→Runtime failure/no retry；
-10. failure root取 lowest failed-runtime occurrence；
-11. whole suffix fixed-point unwind；
-12. accepted outcome不可覆盖；
-13. surviving Caller使用 fresh Activation；
-14. Runtime/Frame/Data/Render lifecycle互相独立。
+1. Runtime Control=Control v1 + Frame v1；
+2. Main拥有 Frame/Stack/Activation/InputTarget/recovery authority；
+3. frameId/activationId不复用；
+4. Stack mutation串行；
+5. Response-before-dependent-RPC；
+6. ACK-before-publication；
+7. timeout/loss ambiguous→Runtime failure/no retry；
+8. failure root取 lowest failed-runtime occurrence；
+9. whole suffix fixed-point unwind；
+10. accepted outcome不可覆盖；
+11. surviving Caller使用 fresh Activation；
+12. Runtime/Frame/Data/Render lifecycle互相独立。
