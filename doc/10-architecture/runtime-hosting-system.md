@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：Subsystem、Runtime Container、Control、Frame/Input、Render 与平台宿主之间的承载关系  
-> 依赖：[系统架构总览](./system-overview.md)、[栈式运行系统](./stack-runtime-system.md)、[Subsystem Control v2](../15-contracts/subsystem-control-protocol-v2.md)、[Runtime Control Profile v2](../15-contracts/runtime-control-profile-v2.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[栈式运行系统](./stack-runtime-system.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-09
 
 ## 1. 承载粒度
@@ -29,18 +29,16 @@ Frame是 Main-owned call/input Context；Render Domain是 Subsystem-owned presen
 当前 Runtime bootstrap/ready/shutdown/failed属于：
 
 ```text
-Subsystem Control v2
+Subsystem Control v1
 ```
 
-当前 Control/Frame组合属于：
+当前 Control/Frame组合：
 
 ```text
-Runtime Control Application Profile v2
+Runtime Control Application Profile v1
 =
-Subsystem Control v2 + Frame / Call v1
+Subsystem Control v1 + Frame / Call v1
 ```
-
-Control v1/Profile v1已实现前废弃。
 
 ```text
 spawn != connected != identified != ready
@@ -71,7 +69,7 @@ frame.return Request
 → close/resume
 ```
 
-ordinary call无 reverse suspend；activate/resume ACK先于对应 InputTarget publication；same-Subsystem recursion复用 Runtime/Control/Data carrier但仍使用 new childFrameId/new Activation。
+ordinary call无 reverse suspend；activate/resume ACK先于对应 InputTarget publication；same-Subsystem recursion复用 Runtime/Control/Data carrier但仍使用 fresh childFrameId / Activation。
 
 ## 5. Deadline / Error Boundary
 
@@ -87,7 +85,7 @@ Host/Transport不得在 timeout后 application-level retry/replay。
 
 ## 6. Runtime Failure Hosting
 
-Runtime failure是 `descriptor.key`级事件。Main维护 `failedRuntimeKeys`，并从 live Stack中最下面的 failed-runtime Frame作为 unwind root；root..top整个 suffix都要结束。
+Runtime failure是 `descriptor.key` 级事件。Main维护 `failedRuntimeKeys`，从 live Stack最下面的 failed-runtime Frame作为 unwind root；root..top整个 suffix结束。
 
 同一 Runtime在 Stack出现多次时不能只删最近 occurrence。
 
@@ -103,11 +101,11 @@ cleanup/resume failure可使新 Runtime加入 failed set，重新计算 root直�
 
 已 Return Acceptance 的 outcome不能被 Runtime crash覆盖。
 
-final root无 accepted outcome时使用 `SUBSYSTEM_RUNTIME_FAILED`；只向 final root下方 direct healthy Caller进行 fresh Activation resume，ACK后才发布 InputTarget。
+final root无 accepted outcome时使用 `SUBSYSTEM_RUNTIME_FAILED`；只向 final root下方 direct healthy Caller执行 fresh Activation resume，ACK后才发布 InputTarget。
 
 ## 9. Runtime Control Carrier Profile
 
-当前 Control carrier同时承载 Control v2 + Frame v1时，必须满足 Profile v2：
+当前 Control carrier同时承载 Control v1 + Frame v1时，必须满足 Runtime Control Profile v1：
 
 ```text
 one transport application unit = one JSON-RPC message
@@ -124,30 +122,23 @@ Frame仍额外满足其 Frozen business value/identity/deadline limits。
 
 ## 10. Desktop / PWA
 
-Desktop：Control v2可绑定 localhost WebSocket。
+Desktop：Control v1可绑定 localhost WebSocket。
 
-PWA：Control v2可绑定 authenticated MessagePort。
+PWA：Control v1可绑定 authenticated MessagePort。
 
-建立后两者必须保持相同 Control v2 lifecycle 与 Frame v1 transaction semantics；PWA Structured Clone不能扩大协议 JSON model。
+建立后两者必须保持相同 Control v1 lifecycle 与 Frame v1 transaction semantics；PWA Structured Clone不能扩大协议 JSON model。
 
 ## 11. Version Binding
 
-`subsystem.hello.protocolVersions`只协商 Subsystem Control；当前 conformant Runtime支持/选择 version 2。
+`subsystem.hello.protocolVersions`只协商 Subsystem Control；当前 conformant Runtime支持/选择 version 1。
 
-Frame / Call v1没有独立 `frame.hello/version/capabilities`，由 Runtime Control Profile v2静态绑定。
+Frame / Call v1没有独立 `frame.hello/version/capabilities`，由 Runtime Control Profile v1静态绑定。
 
-```text
-Control version = 2
-Frame version   = 1
-```
-
-是正常且有意的组合。
+Control 与 Frame 是独立版本空间；当前二者恰好均为 1。
 
 ## 12. Data Authority / Connection Boundary
 
 Runtime `ready`不是 Data carrier discovery。
-
-Data链路：
 
 ```text
 Main Renderer Control
@@ -168,7 +159,7 @@ same generation仍授权时，old carrier retired后可建立 fresh carrier。
 
 ## 13. Zero-frame / Session Policy
 
-Runtime可以：
+Runtime可以同时：
 
 ```text
 ready
@@ -185,21 +176,20 @@ failed Runtime在 Stack无 live Frame时，Frame v1不修改现有 Stack/InputTa
 
 Frame unwind不隐式 create/hide/destroy Render Domain，也不决定 Data Connection lifecycle。
 
-Data carrier retired时 Renderer可以保留最后合法 presentation cache；authoritative Render恢复由 Render Update通过 fresh Registry/Snapshots完成。
+Data carrier retired时 Renderer MAY 保留最后合法 presentation cache；authoritative Render恢复由 Render Update通过 fresh Registry/Snapshots完成。
 
 ## 15. Conformance
 
 实现适用：
 
-- Subsystem Control v2 conformance；
-- Runtime Control Profile v2 integration conformance；
+- Subsystem Control v1 conformance；
+- Runtime Control Profile v1 integration conformance；
 - [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)；
 - Data Connection/Profile适用 carrier conformance。
 
 ## 16. 核心不变量
 
-- current Runtime Control=Control v2 + Frame v1；
-- Control v1/Profile v1已实现前废弃；
+- current Runtime Control = Control v1 + Frame v1；
 - `ready`不携 Data endpoint；
 - one Runtime可承载多个 Frame/Render Domains；
 - Frame / Call v1保持 Frozen；
