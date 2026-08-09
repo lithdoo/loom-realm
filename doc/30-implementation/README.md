@@ -118,6 +118,8 @@ Patch(R→R+1, insert/remove/move/update)
 Event
 ```
 
+`tag` 只作为 opaque string进入 Render Tree；Renderer如何解释 `tag/attrs/data` 完全由实现掌控，不存在 Renderer Component Profile。
+
 ## Conformance 实施状态
 
 [测试策略](./testing-strategy.md) 覆盖 Control v1、Runtime Profile v1、Frame v1、Renderer Control、Data Connection、User Input、Render Update与Content。
@@ -136,8 +138,9 @@ Frame正式兼容判断使用 [Frame / Call v1 Conformance Profile](../15-contra
 6. Main RuntimeFailureUnwindCoordinator是唯一 Stack recovery authority；
 7. Renderer/Transport不得计算 unwind root或修改 Frame recovery；
 8. Desktop/PWA共享 application semantics；平台差异只留 Host/Bootstrap binding；
-9. 实施发现协议问题时先更新 Contract/ADR，不用私有 wire扩展绕过；
-10. Tracking文档不定义正式行为。
+9. `tag/attrs/data` 的 presentation解释属于实现，不新增公共协议/Profile；
+10. 实施发现协议问题时先更新 Contract/ADR，不用私有 wire扩展绕过；
+11. Tracking文档不定义正式行为。
 
 ## 当前实施顺序
 
@@ -158,9 +161,9 @@ User Input Core + Standard Input Mapping
     ↓
 Render Update limits/conformance + official merge
     ↓
-Renderer Component Profile
-    ↓
 Content Access Profile
 ```
 
-当前治理原则：**只实现当前 first-version contracts，不为从未实现的历史设计制造兼容成本。**
+Renderer presentation/component mapping直接作为 Web Renderer / Subsystem implementation integration完成，不作为独立协议里程碑。
+
+当前治理原则：**只标准化真正跨实现必须一致的 observable semantics；本地实现细节不升级成协议。**
