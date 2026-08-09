@@ -11,16 +11,16 @@
 
 已收敛/确认：
 
-- Game Package v2 / Desktop Node.js Launcher Profile v1；
-- **Subsystem Control v1 与 Runtime Control Profile v1 已实现前废弃，不进入实现；**
-- **Subsystem Control v2 是唯一 current Runtime lifecycle协议；**
-- **Runtime Control Application Profile v2 = Control v2 + Frame / Call v1；**
+- Game Package v1 / Desktop Node.js Launcher Profile v1；
+- Subsystem Control v1 是 first implementation Runtime lifecycle contract；
+- Runtime Control Profile v1 = Control v1 + Frame / Call v1；
 - Frame / Call Protocol v1 A-F全部 Frozen；
 - Frame v1 Suspend Semantics Clarification；
 - 每 Subsystem一个 Runtime Container；
 - 每 current Renderer / Subsystem最多一个 current Data Connection；
 - Render ownership=Subsystem；每 Runtime `0..N` Render Domains；
-- Render Update incremental model已进入 Closure Candidate。
+- Render Update incremental model已进入 Closure Candidate；
+- 从未实现的旧协议正文已从当前文档树清理，ADR/Git history保留设计来源。
 
 Frame v1 completion baseline：
 
@@ -36,7 +36,7 @@ Desktop WebSocket / PWA MessagePort same application semantics
 no Frame handshake/downgrade/partial-v1 claim
 ```
 
-## 里程碑 1：Game Package v2 与 Desktop Runtime Bootstrap / Control v2
+## 里程碑 1：Game Package v1 / Desktop Runtime Bootstrap / Control v1
 
 目标：零 Frame条件下完成 Runtime Bootstrap、Control identity、ready、normal shutdown与 failure convergence。
 
@@ -49,17 +49,16 @@ Node Launcher
 Launch Attempt / Bootstrap Context
 Runtime Supervisor
 Control carrier
-Subsystem Control v2 hello/status/shutdown
-Control v2 semantic errors / limits
-Runtime Control Profile v2 dispatcher / shared ID namespace
+Subsystem Control v1 hello/status/shutdown
+Control v1 semantic errors / limits
+Runtime Control Profile v1 dispatcher / shared ID namespace
 cleanup / finite termination
 ```
 
 关闭条件：
 
 ```text
-subsystem.hello selects protocol version 2
-Control version 1 is never advertised/selected
+subsystem.hello selects protocol version 1
 spawn != connected != identified != ready
 ready payload has no Renderer Data endpoint
 ready does not imply Data Connection
@@ -68,7 +67,7 @@ unexpected exit code 0 fails Runtime without shutdown intent
 no automatic restart / same-attempt reconnect
 ```
 
-Desktop Launcher Bootstrap Context仍是自己的 `version:1`；该版本不得被误解释为 Control v1。
+Launcher Profile v1、Bootstrap Context v1、Control v1是独立版本空间，当前恰好都为1。
 
 ## 里程碑 2：Frame / Call v1 实现与 Conformance
 
@@ -76,10 +75,10 @@ Desktop Launcher Bootstrap Context仍是自己的 `version:1`；该版本不得�
 
 实现 Main-owned Frame/Stack/Activation/InputTarget、Subsystem Context、exact seven Requests、closed schema、Outcome、transaction barriers、timeout/no-retry、lowest-root fixed-point unwind、accepted outcome preservation与 fresh final Caller resume。
 
-Runtime Control integration使用：
+Runtime Control integration：
 
 ```text
-Profile v2 = Control v2 + Frame v1
+Profile v1 = Control v1 + Frame v1
 ```
 
 关闭条件：Main、Subsystem SDK、适用 Transport adapter通过对应 Frame v1 fixtures，包括 same-Subsystem recursion、limits/ID/deadline、Desktop/PWA semantic equivalence与 suspend clarification。
@@ -89,8 +88,6 @@ Profile v2 = Control v2 + Frame v1
 状态：**协议 Draft已建立，核心 authority/recovery/limits高度闭合。**
 
 目标：冻结 Main向 Renderer发布 committed Runtime / Frame / Activation / InputTarget / DataAuthority 的最小 authority-replication contract。
-
-当前模型：
 
 ```text
 renderer.hello
@@ -112,7 +109,7 @@ DataAuthority carries no endpoint/ticket/MessagePort
 Control loss/replacement撤销 Renderer input/Data authority
 ```
 
-关闭条件：完成 Frozen review + executable conformance fixtures + Desktop/PWA Control bootstrap/Profile边界确认。
+关闭条件：Frozen review + executable conformance fixtures + Desktop/PWA Renderer Control bootstrap/Profile边界确认。
 
 ## 里程碑 4：Renderer ⇄ Subsystem Data Connection
 
@@ -120,10 +117,7 @@ Control loss/replacement撤销 Renderer input/Data authority
 
 ```text
 identity
-    Session
-    + current Renderer participant
-    + subsystemKey
-    + generation
+    Session + current Renderer participant + subsystemKey + generation
 
 lifecycle
     current → retired
@@ -158,7 +152,7 @@ Data retire != Render Domain destroy
 
 ## 里程碑 5：User Input v1 Core + Standard Mapping
 
-Core authority模型：
+Core authority：
 
 ```text
 Main
@@ -171,7 +165,7 @@ Subsystem
     validates local Frame/Activation + local Interest
 ```
 
-Domain：
+Directions：
 
 ```text
 Subsystem → Renderer
@@ -192,15 +186,7 @@ current matching Data Connection
 
 Core关闭：State false→true fresh baseline、Event no replay/coalescing、Reset/implicit reset、Producer-loss teardown、same-generation reconnect、InputTarget one-shot lease。
 
-随后单独冻结 Standard Input Mapping：
-
-```text
-keyboard.state / keyboard.event
-pointer.state / pointer.event
-gamepad.state / gamepad.event
-```
-
-包括 exact payload、coordinate/key mapping、limits、Event FIFO容量/overflow policy。
+随后单独冻结 Standard Input Mapping：keyboard/pointer/gamepad exact payload、coordinate/key mapping、limits、Event FIFO容量/overflow policy。
 
 ## 里程碑 6：Render Update v1 + Web Renderer
 
@@ -213,46 +199,32 @@ Render Update Incremental Design           Closure Candidate
 
 工作入口：[Render Update v1 Incremental Design](../15-contracts/render-update-v1-incremental-design.md)。
 
-### Render Domain Model
-
-每个 Subsystem Runtime MAY拥有：
+### Domain / Node
 
 ```text
-0..N Render Domains
+Subsystem Runtime
+    0..N Render Domains
+
+Domain
+    domainId
+    zIndex
+    0..N ordered roots
+
+Node
+    key       Domain-lifecycle one-shot logical identity
+    tag       logical Renderer Component type
+    attrs     string→string declarative attributes
+    data      JSON object component state
+    children  ordered child nodes
 ```
 
-Domain：
-
-```text
-domainId
-zIndex
-0..N ordered roots
-```
-
-Node：
-
-```text
-key       Domain-lifecycle one-shot logical identity
-tag       logical Renderer Component type
-attrs     string→string declarative attributes
-data      JSON object component state
-children  ordered child nodes
-```
-
-### Render Update 当前 closure candidate
-
-方向严格：
+### Render Update closure candidate
 
 ```text
 Subsystem → Renderer only
-```
 
-wire surface：
-
-```text
 render.domains
     full current Registry
-    Domain lifecycle authority
 
 render.snapshot(revision)
     fresh baseline / full authoritative commit
@@ -263,11 +235,9 @@ render.patch(baseRevision, revision)
 
 render.event
     transient presentation impulse
-    ordered against logical component commits
-    no replay / no coalescing
 ```
 
-核心 correctness：
+Correctness：
 
 ```text
 Domain one-shot lifecycle within DataAuthority generation
@@ -281,32 +251,19 @@ invalid authoritative commit cannot be skipped
 continuity failure → retire Data carrier → fresh Registry + Snapshots
 ```
 
-无：
+无 ACK/NACK、Patch replay、resume cursor、Renderer→Subsystem resync RPC、cross-Domain transaction。
+
+Backpressure：
 
 ```text
-ACK / NACK
-Patch history replay
-resume cursor
-Renderer→Subsystem resync RPC
-cross-Domain transaction
-render frame fence
+small diff                 → Patch
+large/complex/backpressure → Snapshot(lastEmittedRevision+1)
+transient Event backlog    → bounded / may drop
 ```
 
-### Backpressure
+Authoritative progress不得被 Event backlog无限阻塞。
 
-```text
-small diff
-    → Patch
-
-large/complex/backpressured diff
-    → Snapshot(lastEmittedRevision+1)
-
-transient Event backlog
-    → bounded FIFO / may drop
-    → MUST NOT indefinitely block authoritative progress
-```
-
-### Remaining Completion
+Remaining Completion：
 
 ```text
 domainId/key/tag grammar + limits
@@ -318,9 +275,9 @@ closed-schema JSON encoding
 conformance fixture matrix
 ```
 
-完成这些后，把 incremental closure candidate合并回正式 `render-update-v1.md`，结束“双 v1事实”。
+完成后把 incremental closure candidate合并回正式 `render-update-v1.md`，再删除工作草案。
 
-### Web Renderer 实现
+### Web Renderer
 
 实现：
 
@@ -357,10 +314,10 @@ per-tag attrs/data schema
 unknown/undeclared tag classification
 presentation pending/error semantics
 resource-reference conventions
-custom Input Producer registration lifecycle
+custom Input Producer lifecycle
 ```
 
-Component implementation暂未加载不得直接被误判为 Render authoritative divergence。
+Component implementation暂未加载不得直接误判为 Render authoritative divergence。
 
 ## 里程碑 8：Content API 与 Content Access
 
@@ -375,8 +332,8 @@ Content API只定义读取语义；另行冻结 Content Access Bootstrap/Profile
 实现：
 
 ```text
-Subsystem Control v2 Adapter
-Runtime Control Profile v2 dispatcher
+Subsystem Control v1 Adapter
+Runtime Control Profile v1 dispatcher
 Frame v1 Adapter / Validator / Deadline / Mutation Gate
 business Runtime Core / Loop
 movement / collision / Portal
@@ -384,7 +341,7 @@ Render Manager / Projector / Diff Engine
 Data Connection / User Input / Render Update adapters
 ```
 
-Render Manager发布 map/world/hud等 Render Domains，并支持 Snapshot/Patch策略。
+Render Manager发布 map/world/hud等 Domains，并支持 Snapshot/Patch策略。
 
 ## 里程碑 10：Pokémon Essentials 兼容工具链
 
@@ -395,7 +352,7 @@ Render Manager发布 map/world/hud等 Render Domains，并支持 Snapshot/Patch�
 Main与 Hostra authority分离；Desktop Host完成：
 
 ```text
-Control v2 WebSocket binding
+Control v1 WebSocket binding
 Renderer Control bootstrap
 per-Subsystem Data endpoint/ticket binding
 Renderer reload recovery
@@ -406,17 +363,16 @@ endpoint/ticket不进入 Subsystem Control `ready`或 Renderer Authority Snapsho
 
 ## 里程碑 12：PWA Bootstrap / 闭环
 
-Main/Subsystem Dedicated Worker；冻结 Descriptor→Worker、bootstrap credential、Control MessagePort establishment；Control Port建立后使用 **Control v2 + Frame v1**。
+Main/Subsystem Dedicated Worker；冻结 Descriptor→Worker、bootstrap credential、Control MessagePort establishment；Control Port建立后使用 **Control v1 + Frame v1**。
 
 Window⇄Subsystem Data carrier由 Host安全建立；Service Worker负责 Content API/OPFS。
 
-PWA Profile不得重新定义 Frame version、Data generation、User Input recovery或 Render Domain authority semantics。
+PWA Profile不得重新定义 Frame version、Data generation、User Input recovery或 Render Domain authority。
 
 ## 第一阶段最终验收
 
-- 只实现/协商 Subsystem Control v2；Control v1无 fallback；
-- Runtime Control Profile v2 = Control v2 + Frame v1；
-- Launcher / Runtime Control符合适用 Normative Contract；
+- Game Package v1 / Desktop Launcher v1符合适用契约；
+- Subsystem Control v1 / Runtime Control Profile v1实现并通过适用 fixtures；
 - Frame / Call v1适用角色通过 Conformance；
 - stale Activation永久拒绝；
 - Main⇄Renderer Control完成；
