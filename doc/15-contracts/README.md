@@ -42,8 +42,11 @@ Renderer ⇄ Subsystem Data Connection Contract v1 Draft
 User Input v1 Core Draft
     ├── Subsystem → Renderer: Input Interest
     └── Renderer → Subsystem: State / Event / Reset
+
+Render Domain / Tree Architecture
+    ↓
 Render Update v1                         next major data protocol
-Render State Contract v1
+Render Tree Contract v1                  next render-state contract
 
 Readonly Content API v1
     + future Content Access Bootstrap/Profile
@@ -169,15 +172,13 @@ no replay / no patch
 Control loss → invalidate InputTarget/DataAuthority → retire Data Connections
 ```
 
-User Input 依赖的 InputTarget 现在明确为 one-shot lease：
+User Input 依赖的 InputTarget 是 one-shot lease：
 
 ```text
 published InputTarget(frameId, activationId)
 → revoked/removed/replaced
 → same frameId + activationId MUST NOT become InputTarget again
 ```
-
-因此 snapshot coalescing 不需要保留中间 null revision，也不会隐藏 same-authority revoke→regrant。
 
 ## 5. Renderer ⇄ Subsystem Data Connection Contract v1 Draft
 
@@ -227,7 +228,7 @@ Data loss != Runtime failure
 Data loss != Frame unwind
 Frame close != Data retire
 Activation replacement != Data generation replacement
-Data retire != Render destroy
+Data retire != Render Domain destroy
 ```
 
 Host/Platform如何建立 WebSocket/MessagePort、ticket/capability如何交付不属于本 Contract。
@@ -300,7 +301,7 @@ current matching Data Connection
 ∧ Producer(C) available
 ```
 
-所以 Interest和Producer availability都只能缩小输入面，不能扩大 Main authority。
+Interest和Producer availability都只能缩小输入面，不能扩大 Main authority。
 
 ### State / Event / Reset
 
@@ -336,38 +337,126 @@ Activation replacement、Connection retired、Renderer Control loss/replacement�
 
 User Input无 transactional ACK；input/Data loss、Interest传播 gap、Producer availability change、State coalescing和 Event overflow本身都不构成 Runtime failure或 Frame unwind。
 
-当前尚待收敛：
+具体 Standard Input Mapping payload/limits延后到实现阶段继续冻结。
+
+## 7. Render Domain / Tree Architecture
+
+[渲染系统](../10-architecture/rendering-system.md) 已把下一代 Render 模型收敛到 Subsystem-owned Domains。
+
+每个 Subsystem Runtime：
 
 ```text
-standard Channel exact payload schemas
-message encoding / limits
-Channel/count limits
-Event queue numeric limits / overflow final policy
-text/IME boundary
+0..N Render Domains
 ```
 
-## 7. Render Update / Render State
+Domain：
+
+```text
+domainId
+zIndex
+0..N ordered roots
+```
+
+Node：
+
+```text
+key
+    current Domain Tree-wide unique reconciliation identity
+
+tag
+    logical Renderer Component type
+
+attrs
+    string→string declarative attributes
+
+data
+    JSON object component state
+
+children
+    ordered child nodes
+```
+
+核心边界：
+
+```text
+Domain identity = subsystemKey + domainId
+Domain Host != Render Node
+Domain lifecycle != Frame lifecycle
+Domain zIndex != Frame Stack order
+tag != DOM tag
+Render Node != Input authority
+```
+
+Domain允许多个 roots，避免轻量 Domain被迫创建 fake container root。需要真实共享布局/裁剪/坐标语义时，由 Subsystem显式创建真正的 container/component Node。
+
+Renderer Component resolution至少按：
+
+```text
+(subsystemKey, tag)
+→ Component Factory
+```
+
+隔离；Component实现的加载/Bootstrap不属于 Render Tree State。
+
+Renderer MAY使用 stable Node key对 full current Domain State做本地 diff/reconciliation；这不意味着 v1 wire必须支持 Tree Patch。
+
+## 8. Render Update v1 / Render Tree Contract v1 Target
 
 下一主要数据协议目标：Render Update v1。
 
-它必须独立于 Frame/Input authority，负责 Subsystem-owned Render identity、revision、snapshot/update/recovery 与 backpressure。
+Render Update v1 应负责：
 
 ```text
-Frame suspend != Render hidden
-Frame close/unwind != Render destroy
-Activation replacement != Render epoch
-Data reconnect recovery != Frame recovery
+Domain Registry / lifecycle
+Domain current-state publication
+ordering / atomic commit
+zIndex composition constraints
+reconnect recovery
+coalescing/backpressure
+wire/error/limits
 ```
 
-Render State Contract定义被 Render Update携带的声明式 presentation state，不应把 DOM/Canvas/WebGL对象直接变成 authority state。
+Render Tree Contract v1 应负责：
 
-## 8. Content API
+```text
+roots[]
+Node key/tag/attrs/data/children
+key uniqueness / tag continuity
+Component availability validation
+plain-data constraints
+tree depth/count/payload limits
+```
+
+当前不预设以下机制必须进入 v1：
+
+```text
+revision
+Tree Patch
+operation log
+resume cursor
+cross-Domain transaction
+Renderer→Subsystem resync request
+```
+
+它们只有在 closure review证明 full current-state + ordered carrier + fresh reconnect state不足时才应加入。
+
+必须保持：
+
+```text
+Frame suspend != Domain hidden
+Frame close/unwind != Domain destroy
+Activation replacement != Domain epoch
+Data reconnect recovery != Frame recovery
+Data Connection retire != authoritative Domain destroy
+```
+
+## 9. Content API
 
 [Readonly Content API v1](./content-api-v1.md) 状态为 Active / Normative / Evolving。
 
 职责是逻辑只读内容读取、MIME/cache/version/error/integrity；Content capability 如何分发属于独立 Content Access Bootstrap/Profile。
 
-## 9. 当前状态表
+## 10. 当前状态表
 
 | 主题 | 入口 | 状态 |
 |---|---|---|
@@ -383,13 +472,14 @@ Render State Contract定义被 Render Update携带的声明式 presentation stat
 | Main ⇄ Renderer Control v1 | [main-renderer-control-v1.md](./main-renderer-control-v1.md) | **Active Design / Draft；InputTarget lease closed** |
 | Renderer ⇄ Subsystem Data Connection v1 | [renderer-subsystem-data-connection-v1.md](./renderer-subsystem-data-connection-v1.md) | **Active Design / Draft；lifecycle closed** |
 | User Input v1 | [user-input-v1.md](./user-input-v1.md) | **Active Design / Core Draft；semantic closure reviewed** |
-| Render Update | 尚待新文档 | Next major data protocol target |
-| Render State | 尚待新文档 | Draft target |
+| Render Domain / Tree Architecture | [rendering-system.md](../10-architecture/rendering-system.md) | **Active Design / refined** |
+| Render Update v1 | 尚待新文档 | Next major data protocol target |
+| Render Tree Contract v1 | 尚待新文档 | Next render-state contract target |
 | Content API | [content-api-v1.md](./content-api-v1.md) | Active / Normative / Evolving |
 
 Legacy / Superseded入口继续仅用于历史追溯：`game-package-v1.md`、`system-lifecycle-protocol.md`、`frame-data-channel-v1.md`、`client-state-tree-v1.md`、`resource-protocol.md`。
 
-## 10. Version / Compatibility Rules
+## 11. Version / Compatibility Rules
 
 - Frozen closed schema不得私加字段/方法；
 - Frame method/identity/commit/error/unwind/order/limit改变需要新 Frame版本；
@@ -400,11 +490,12 @@ Legacy / Superseded入口继续仅用于历史追溯：`game-package-v1.md`、`s
 - Data Connection Core不得私加 handshake/heartbeat；
 - User Input Interest不得绕过 Main InputTarget/Activation authority；
 - User Input v1 Interest只支持 exact Channel，不支持 wildcard；
-- 标准 Channel前缀保留，自定义扩展使用 `x.*.(state|event)`；
-- User Input不得把浏览器 Host Event对象直接当稳定 wire schema；
+- Render Domain/Node不得恢复 Frame-owned render identity；
+- Render tag不得退化成任意 DOM tag/DOM command；
+- Renderer内部 key-based diff不得被误解释成已经冻结的 wire Tree Patch；
 - Transport差异不得改变建立后的 application semantics。
 
-## 11. 推进顺序
+## 12. 推进顺序
 
 ```text
 Protocol Boundary Cleanup                 Accepted
@@ -413,17 +504,18 @@ Renderer Control v1                       Draft / InputTarget lease closed
 Frame suspend clarification               Frozen clarification
 Data Connection Contract v1               Draft / lifecycle closed
 User Input v1                             Core Draft / semantic closure reviewed
-    ↓
-Standard Input Mapping + wire/limits
+Render Domain / Tree Architecture         Refined
     ↓
 Render Update v1
-Render State Contract v1
+Render Tree Contract v1
     ↓
 Runtime Control Profile v2                only if frozen composition requires it
 Content Access Profile
 ```
 
-## 12. 当前明确暂缓
+Standard Input Mapping具体 payload/limits延后到实现阶段继续细化，不阻塞 Render协议设计。
+
+## 13. 当前明确暂缓
 
 PWA executable/bootstrap细节、第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame operation replay/resync、transparent partial-Runtime recovery、Frame runtime dynamic downgrade/capability negotiation。
 
