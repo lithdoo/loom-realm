@@ -4,8 +4,8 @@
 > 状态：Legacy / Superseded  
 > 稳定程度：Frozen Historical  
 > 主要定义：旧 Frame-scoped Client State Tree 的退役入口  
-> 被替代原因：Render State 已改为 Subsystem-owned Render identity，不再属于 Frame  
-> 最近复核：2026-08-02
+> 被替代原因：Render State 已改为 Subsystem-owned Render Domain，不再属于 Frame  
+> 最近复核：2026-08-08
 
 本路径保留用于旧链接和 Git 历史追溯。**本文不再是新增 Renderer / Render State 实现的 Normative Contract。**
 
@@ -23,32 +23,53 @@ Frame Client State
 ## 当前有效方向
 
 ```text
-Subsystem-owned Render Context
-└── Render State
-    └── Scope / Node
+Subsystem Runtime
+└── 0..N Render Domains
+    ├── domainId
+    ├── zIndex
+    └── 0..N ordered roots
+        └── Render Node
+            ├── key
+            ├── tag
+            ├── attrs
+            ├── data
+            └── ordered children[]
 ```
 
-Frame 只属于调用 / User Input Context。Render State 的身份、Revision、Scope、Node、Snapshot、Event 与恢复语义将由新的 Render Update Protocol 与 Render State Tree / equivalent contract 冻结。
+当前 Domain identity：
 
-架构文档可能使用 `renderId` 作为概念占位名，但该名称尚不是冻结 wire 字段。
+```text
+subsystemKey + domainId
+```
 
-## 不再有效的 v1 假设
+Frame 只属于调用 / User Input Context；Render Domain 的身份、lifecycle、snapshot/recovery与 Node Tree精确 wire将由新的 Render Update Protocol v1 与 Render Tree Contract v1 冻结。
+
+Domain Host不是 Render Node，因此 Domain可以拥有多个 roots，不需要为协议强制创建无业务语义的 container root。
+
+## 不再有效的旧 v1 假设
 
 - Scope identity 必须以 `frameId` 开头；
 - Node identity 必须以 `frameId` 开头；
 - Frame 出栈自动删除全部 Render/Scope Store；
 - Frame Activation 控制 Render Revision / Sequence；
 - Renderer 逐 Frame Resync 是 Render 恢复的唯一模型；
-- 每个 Frame 必须拥有独立 Projector 或 Client State。
+- 每个 Frame 必须拥有独立 Projector 或 Client State；
+- 旧 Scope/Revision 字段必须被新协议保留。
 
-## 仍然有效的设计原则
+## 仍然有效并已演进的设计原则
 
 - 声明式目标状态与 DOM / Canvas / WebGL 分离；
-- Node 使用稳定 Key 和可信 Tag Registry；
-- Data 是受 Schema 约束的 JSON，不是任意 DOM 命令；
-- DOM / Scene 不是权威恢复源；
+- Render ownership属于 Subsystem，不属于 Frame；
+- Node 使用稳定 Key 和可信 Tag/Component Registry；
+- Node key当前设计为 Domain Tree-wide unique reconciliation identity；
+- Tag是逻辑 Renderer Component type，不是任意 DOM tag；
+- Data 是受约束的 JSON，不是任意 DOM 命令或 executable callback；
+- roots/children 是 ordered relation；
+- DOM / Scene / Component实例不是权威恢复源；
 - 资源使用逻辑 Key，通过只读 Content API 获取；
-- 状态提交需要校验、Revision 和原子边界。
+- Domain State需要校验和原子提交边界；
+- Renderer MAY按 stable key本地 diff/reconciliation，但这不表示 wire Tree Patch已冻结；
+- 是否需要 Revision必须由新 Render Update closure证明，不从 Legacy v1自动继承。
 
 当前定义见：
 
