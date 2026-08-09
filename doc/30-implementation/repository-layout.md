@@ -22,7 +22,7 @@ packages/
 ├── user-input-protocol/
 ├── render-update-protocol/
 ├── content-api-contract/
-├── game-package-contract-v2/
+├── game-package-contract-v1/
 ├── nodejs-launcher-profile-v1/
 ├── main-system/
 ├── subsystem-sdk/
@@ -36,14 +36,14 @@ packages/
 └── test-subsystems/
 ```
 
-不存在需要实现的 `subsystem-control-v1` / `runtime-control-profile-v1`兼容包；当前包只实现 Control v2 / Profile v2。
+不为从未实现的历史协议建立 compatibility packages；当前包只实现 current contracts。
 
 ## 2. `subsystem-control-protocol`
 
-当前只提供：
+当前：
 
 ```text
-loomrealm.subsystem-control / 2
+loomrealm.subsystem-control / 1
 ```
 
 至少包含：
@@ -54,31 +54,29 @@ bootstrap credential validation helpers
 Runtime lifecycle validator
 semantic error codes
 wire limits
-Control v2 conformance fixtures
+Control v1 conformance fixtures
 ```
 
-不得提供 Control v1 fallback、`ready.rendererDataEndpoint`兼容字段或 dual-stack negotiation。
+不得增加 `ready.rendererDataEndpoint`、Data control methods或私有 dual-stack negotiation。
 
 ## 3. `runtime-control-profile`
 
-当前 Profile：
-
 ```text
-Runtime Control Application Profile v2
+Runtime Control Application Profile v1
 =
-Subsystem Control v2
+Subsystem Control v1
 +
 Frame / Call v1
 ```
 
-包/集成层至少提供：
+至少提供：
 
 ```text
 shared Control dispatcher rules
 hello-before-frame gate
-shared sender-side Request ID allocator policy
+shared sender-side Request ID policy
 no-Batch enforcement
-Control v2 + Frame v1 version binding
+Control v1 + Frame v1 static binding
 integration fixtures
 ```
 
@@ -86,9 +84,9 @@ integration fixtures
 
 ## 4. `frame-call-protocol`
 
-Frame / Call Protocol v1保持 Active / Normative / Frozen。
+Frame / Call v1保持 Active / Normative / Frozen。
 
-包必须提供：
+包提供：
 
 ```text
 FrameLifecycleState
@@ -98,7 +96,7 @@ identity / Activation validator
 JSON/number/string/limit validator
 Request ID helper
 FrameCallDeadlineProfileV1 validator
-semantic error Schema/classifier
+semantic error classifier
 transaction invariants
 Runtime failure unwind invariants
 conformance manifest / harness helpers
@@ -106,7 +104,7 @@ conformance manifest / harness helpers
 
 不得定义 `frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`、operation replay或 Runtime/Render lifecycle。
 
-当前 enclosing Runtime Profile是 v2；参见 Frame v1 Runtime Control v2 binding clarification。
+当前 enclosing Runtime Profile是 v1。
 
 ## 5. Frame v1 Limits/API Surface
 
@@ -129,8 +127,6 @@ PWA与Desktop复用同一 logical validator；Structured Clone不能形成第二
 
 ## 6. Request ID / Deadline Helpers
 
-建议：
-
 ```text
 ConnectionRequestIdAllocator
     positive safe integer
@@ -139,20 +135,20 @@ ConnectionRequestIdAllocator
     shared by Control + Frame for same sender/carrier
 
 FrameDeadlineProfileValidator
-    Frame seven methods
+    seven Frame methods
     integer 1000..300000ms
 ```
 
-Main/Subsystem使用 monotonic clock。Deadline不进入 wire、不由 Game Package/business input覆盖。
+使用 monotonic clock。Deadline不进入 wire、不由 Game Package/business input覆盖。
 
 ## 7. `main-system`
 
 负责：
 
 ```text
-Descriptor/Launcher
+Descriptor / Launcher
 Runtime Supervisor
-Control v2 Registry/Dispatcher
+Control v1 Registry/Dispatcher
 Frame/Activation Registry
 Stack/Transaction/Failure Unwind
 Renderer Control Publisher
@@ -167,8 +163,8 @@ Main不得 timeout后 retry，也不得用 Renderer/Data state修复 Frame Contr
 
 ```text
 Desktop/PWA bootstrap adapter interfaces
-Subsystem Control v2
-Runtime Control Profile v2 dispatcher
+Subsystem Control v1
+Runtime Control Profile v1 dispatcher
 Frame RPC client/dispatcher/validator
 shared outbound Request ID allocator
 Frame Input Context Registry
@@ -199,8 +195,6 @@ DataAuthority
 
 ## 10. `renderer-subsystem-connection-protocol`
 
-提供 Data Connection Core：
-
 ```text
 identity = Session + current Renderer + subsystemKey + generation
 lifecycle = current → retired
@@ -210,7 +204,7 @@ one current connection per Subsystem/current Renderer
 
 不提供 endpoint discovery/application handshake/heartbeat。
 
-Desktop/PWA实际 carrier establishment属于 Host packages/Profile。
+Desktop/PWA carrier establishment属于 Host packages/Profile。
 
 ## 11. `user-input-protocol`
 
@@ -224,11 +218,11 @@ ordering/coalescing/recovery invariants
 Core conformance fixtures
 ```
 
-Standard keyboard/pointer/gamepad mapping可独立模块/Profile实现。
+Standard keyboard/pointer/gamepad mapping可由独立 Profile实现。
 
 ## 12. `render-update-protocol`
 
-当前实现目标按 incremental closure candidate：
+当前实现目标：
 
 ```text
 Domain Registry
@@ -243,17 +237,15 @@ Event
 recursive Node schema
 Domain/Node identity validation
 per-Domain revision state
-insert/remove/move/update op schemas
+insert/remove/move/update schemas
 Patch candidate validator/applicator helpers
 Event barrier rules
 limits/conformance fixtures
 ```
 
-业务 Subsystem应由 Projector/Diff Engine生成 Patch，而不是直接从业务 handler拼 wire mutation。
+业务 Subsystem应由 Projector/Diff Engine生成 Patch，而不是从业务 handler直接拼 wire mutation。
 
 ## 13. `web-renderer`
-
-Renderer不解析/发送 Frame RPC。
 
 负责：
 
@@ -268,11 +260,11 @@ atomic Patch engine
 Component Registry / composition
 ```
 
-Renderer reconnect不能取消 Runtime failure或推断 Frame unwind root。
+Renderer不解析/发送 Frame RPC；Renderer reconnect不能取消 Runtime failure或推断 Frame unwind root。
 
 ## 14. Desktop / PWA Host Packages
 
-Desktop/PWA Host只负责 platform binding：
+Host只负责 platform binding：
 
 ```text
 Runtime Control carrier establishment
@@ -281,11 +273,11 @@ Renderer⇄Subsystem Data endpoint/ticket/MessagePort establishment
 Content platform binding
 ```
 
-Host不得把 transport bootstrap material塞入 Control `ready`或 Renderer Authority Snapshot。
+不得把 transport bootstrap material塞入 Control `ready`或 Renderer Authority Snapshot。
 
 ## 15. `map-subsystem`
 
-`loom.map`使用 SDK Control v2/Profile v2/Frame v1/User Input/Render Update adapters。
+`loom.map`使用 SDK Control v1/Profile v1/Frame v1/User Input/Render Update adapters。
 
 Render Manager维护 desired recursive Domain Tree，与 last published state diff生成 Patch；大 diff/backpressure可 materialize Snapshot。
 
@@ -294,8 +286,7 @@ Render Manager维护 desired recursive Domain Tree，与 last published state di
 建议：
 
 ```text
-control-v2-valid
-control-v1-only-rejected
+control-v1-valid
 same-subsystem-recursive
 runtime-multiple-frame-occurrence
 call-child-init-reject
@@ -317,7 +308,7 @@ render-event-barrier
 
 Frame依据 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
 
-其他协议各自维护独立 fixture corpus；建议统一 manifest字段：
+其他协议各自维护独立 fixture corpus；建议统一：
 
 ```text
 fixtureFormatVersion
@@ -327,35 +318,31 @@ fixtureSetRevision
 role
 ```
 
-新增验证既有语义的 fixture只提升 fixtureSetRevision，不改变 protocolVersion。
+新增只验证既有语义的 fixture仅提升 fixtureSetRevision，不改变 protocolVersion。
 
 ## 18. Version Binding
 
-当前 Runtime：
-
 ```text
-Subsystem Control = 2
+Subsystem Control = 1
 Frame / Call      = 1
-Runtime Profile   = 2
+Runtime Profile   = 1
 ```
 
-版本空间独立。
+版本空间独立；当前恰好都为1。
 
-`subsystem.hello.protocolVersions`只协商 Control；Frame v1由 Profile v2静态绑定。
-
-Control v1/Profile v1不属于 compatibility matrix。
+`subsystem.hello.protocolVersions`只协商 Control；Frame v1由 Profile v1静态绑定。
 
 ## 19. 依赖规则
 
 ```text
 protocol packages
-    不依赖实现包
+    do not depend on implementation packages
 
 main-system
-    → control-v2 / runtime-profile-v2 / frame / renderer-control / launcher / game-package
+    → control / runtime-profile / frame / renderer-control / launcher / game-package
 
 subsystem-sdk
-    → control-v2 / runtime-profile-v2 / frame / connection / input / render / content
+    → control / runtime-profile / frame / connection / input / render / content
 
 web-renderer
     → renderer-control / connection / input / render / content
@@ -368,6 +355,6 @@ host packages
 
 ## 20. 发布策略
 
-第一阶段可保持 monorepo + unified implementation version，但 protocol version必须独立管理。
+第一阶段可保持 monorepo + unified implementation version，但 protocol version独立管理。
 
 只有通过适用 executable conformance fixtures后，包/角色才能声明对应 protocol/profile conformant。
