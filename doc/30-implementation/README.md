@@ -32,6 +32,37 @@ Content API v1
 
 没有 Renderer Component Profile、Standard Input Mapping Profile、Content Access Profile、Range Profile、Event FIFO Profile 或 Desktop/PWA Data Bootstrap application protocol。
 
+## 协议设计成熟度与实施含义
+
+详细链路目的、成熟度和剩余协议工作以 [正式契约目录 · 链路协议设计进度](../15-contracts/README.md#11-链路协议设计进度) 为 source of truth。
+
+这里的百分比表示**协议设计成熟度**，不是代码实现完成度、测试覆盖率或发布进度。即使某协议标记 `100% / Frozen`，实现仓库仍可能尚未开始对应模块。
+
+| 协议 | 设计成熟度 | 对实施阶段的含义 | 当前下一步 |
+|---|---:|---|---|
+| Game Package v1 | ≈95% | schema/topology 已稳定，可开始 validator 与 loader | 补集合级 validation/conformance |
+| Desktop Node.js Launcher v1 | 100% / Frozen | 可以直接实现，不应再等待协议设计 | Launcher + Supervisor + bootstrap fixtures |
+| Subsystem Control v1 | ≈95% | wire/lifecycle 已基本稳定 | 实现 hello/status/shutdown + final conformance |
+| Runtime Control Application Profile v1 | ≈95% | Control/Frame 组合规则可直接落地 | shared dispatcher/ID/no-Batch integration tests |
+| Frame / Call v1 | 100% / Frozen | 核心调用栈实现不应再等待设计 | authority state machine + executable conformance |
+| Main ⇄ Renderer Control v1 | ≈95% | authority snapshot 模型可实现 | 实现 snapshot/control-loss；同步做 Frozen review |
+| Data Connection v1 | ≈95% | lifecycle/identity 已闭合 | Host carrier binding + current/retired tests |
+| User Input v1 | ≈80–85% | Core 可实现，但标准设备 payload 仍需先封口 | canonical keyboard/pointer/gamepad schema + limits |
+| Render Update v1 | ≈85–90% | Registry/Snapshot/Patch/Event 可实现原型 | hard limits/encoding/conformance 后冻结 |
+| Content API v1 | ≈85–90% | 核心 HTTP/Fetch 语义已足够进入实现 | service/client implementation + conformance |
+
+整体协议架构成熟度可粗略视为 **≈90%**。这意味着主要 authority、lifecycle、commit、failure/recovery 问题已经解决；后续工作重心应该逐步从“继续设计协议”转向“关闭少量 wire 边界 + executable conformance + vertical slice implementation”。
+
+### 当前三段链路成熟度
+
+```text
+启动 / Runtime / Frame 控制链       ≈97%  —— 基本定型，可直接实现
+Renderer Authority / Data 链       ≈95%  —— 主要剩 freeze/conformance + Host integration
+User Input / Render / Content 数据层 ≈85%  —— 主要剩 payload/limits/conformance
+```
+
+当前不应因为实现便利重新引入已经取消的 Component/Input Mapping/Content Access/Transport Bootstrap application Profile。
+
 ## Runtime / Frame
 
 ```text
@@ -145,5 +176,17 @@ Content API implementation/conformance
     ↓
 loom.map + Hostra/PWA vertical slice
 ```
+
+### 当前优先级
+
+| 优先级 | 工作 | 目的 |
+|---|---|---|
+| P0 | User Input canonical payload + limits | 让标准设备输入真正可以跨 Renderer/Subsystem 互操作 |
+| P0 | Render Update hard limits + conformance | 让已闭合的 Patch/revision/recovery 模型进入可冻结状态 |
+| P1 | Renderer Control Frozen review | 停止 authority plane 继续演化，进入稳定实现 |
+| P1 | Data Connection Frozen review | 固定 generation/current/retired/reconnect 边界 |
+| P1 | Control/Profile final conformance | 把已成熟控制链转成 executable compatibility baseline |
+| P2 | Content API implementation/conformance | 不再扩 Profile，直接验证当前 HTTP/Fetch contract |
+| P2 | Desktop/PWA Host integration | 实现 carrier/credential binding，不创造新的 application protocol |
 
 治理原则：**只协议化必须互操作的事实，其余交给实现。**
