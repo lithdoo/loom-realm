@@ -3,7 +3,7 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Web Renderer 内部模块、Main committed authority、Data Connection、User Input、Render Registry/Snapshot/Patch/Event 与 Renderer Component  
+> 主要定义：Web Renderer 内部模块、Main committed authority、Data Connection、User Input、Render Registry/Snapshot/Patch/Event 与本地 presentation  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update Incremental Design](../../15-contracts/render-update-v1-incremental-design.md)  
 > 最近复核：2026-08-09
 
@@ -23,7 +23,7 @@ Web Renderer
 │   ├── Snapshot Validator
 │   ├── Atomic Patch Engine
 │   └── logical Commit/Event Queue
-├── Renderer Component Registry
+├── Presentation Adapter / Registry        implementation-owned
 ├── Global Domain Composer
 ├── Input Interest Registry
 ├── Input Channel Producer Registry
@@ -163,13 +163,15 @@ Node：
 
 ```text
 key       Domain lifecycle内 one-shot logical identity
-tag       logical Renderer Component type
+tag       opaque string
 attrs     string→string
 data      JSON object
 children  ordered child nodes
 ```
 
 Domain Host不是 Node。
+
+Renderer只按 Render协议验证 Node结构和类型，不解释 `tag` 的协议语义。
 
 ## 8. Fresh Render Baseline
 
@@ -185,7 +187,7 @@ Renderer MAY暂存旧 presentation cache以减少视觉闪烁，但在 fresh Sna
 
 ```text
 MUST NOT apply new Patch to cached state
-MUST NOT deliver new Event to cached component lifetime
+MUST NOT deliver new Event to cached Node lifetime
 ```
 
 cache不是 recovery authority。
@@ -233,8 +235,6 @@ post-baseline Snapshot只能是 `currentRevision+1`，通常用于 full commit /
 不得暴露 partial tree或新旧 zIndex/tree混合状态。
 
 ## 11. Patch Engine
-
-Patch：
 
 ```text
 render.patch {
@@ -318,22 +318,26 @@ MUST NOT skip and continue
 
 这不等于 Runtime failure或 Frame unwind。
 
+`tag` 的具体含义或本地 presentation 映射失败不属于 Render Core continuity validation。
+
 ## 14. Render Event / Logical Barrier
 
 `render.event`是 transient presentation impulse，不修改 authoritative Domain Store。
 
-Event只有在 current Domain + fresh baseline + current targetKey存在时交给 Component；stale target直接 drop。
+Event只有在 current Domain + fresh baseline + current targetKey存在时交给本地 presentation layer；stale target直接 drop。
 
 同 Domain logical processing顺序必须保持：
 
 ```text
 commit R
-→ reconcile component lifetime
+→ reconcile local presentation
 → Event
 → commit R+1
 ```
 
 不要求等待 physical paint/vsync，但不得让 Event越过 authoritative commit barrier。
+
+Event `name/data` 的解释是 implementation detail。
 
 ## 15. Render Backpressure
 
@@ -351,20 +355,37 @@ Event
 
 Authoritative convergence MUST NOT被 transient Event backlog无限阻塞。
 
-## 16. Renderer Component Registry
+## 16. Presentation Implementation Boundary
 
-`tag`不是 DOM tag。
+Renderer如何将：
 
 ```text
-(subsystemKey, tag)
-→ Renderer Component Factory
+tag
+attrs
+data
+children
 ```
 
-Component代码如何加载属于 Renderer Component Bootstrap/Profile，不进入 Render wire。
+映射到实际 UI，完全由 Renderer实现掌控。
 
-Component Factory暂未加载属于 presentation pending/error，不应直接导致 Patch continuity failure；unknown/undeclared tag的 authoritative分类由 Component Profile最终冻结。
+实现 MAY使用：
 
-Component MAY注册 `x.*` Input Producers，但必须通过 Renderer Core的 Interest/InputTarget gate。
+```text
+registry
+factory
+class/function/component
+DOM/Canvas/WebGL
+lazy loading
+static registration
+code generation
+other internal mechanism
+```
+
+但这些都不是 LoomRealm Protocol/Profile，也不参与 Render wire negotiation/conformance。
+
+Render Core不存在 `known tag` / `unknown tag` 状态；只验证 `tag` 是符合通用 wire/size规则的 string。
+
+本地 presentation对象 MAY注册 `x.*` Input Producers，但仍必须经过 Renderer Core的 Interest/InputTarget gate。
 
 ## 17. Global Composition
 
@@ -372,7 +393,7 @@ Domain `zIndex`决定跨 Domain层级：higher above lower。
 
 Frame Stack绝不作为 Render z-order。
 
-same-z deterministic tie-break由 Render/Composition Profile冻结；实现不能依赖消息到达、连接建立或 reconnect顺序。
+same-z deterministic tie-break由 Renderer实现固定；业务不得依赖 arrival/reconnect order，也不得把 equal-z顺序当 portable semantics。
 
 ## 18. Renderer Reload
 
@@ -395,6 +416,7 @@ fresh Renderer Control
 - 每个 Subsystem可拥有 `0..N` Render Domains；
 - Domain Host不是 Render Node；
 - Node key在 Domain lifecycle内 one-shot；
+- `tag` 是 opaque string，协议不定义其具体含义；
 - recursive Tree仍是 authoritative model；
 - fresh connection先 Registry+Snapshot，再 Patch/Event；
 - baseline以后 authoritative revision严格 `R→R+1`；
@@ -402,4 +424,5 @@ fresh Renderer Control
 - Event是 transient logical barrier，不是 authoritative state；
 - continuity failure通过 Data reconnect + fresh Snapshot恢复；
 - no Render ACK/NACK/replay/resync RPC；
+- no Renderer Component Profile；
 - Frame/Domain/Data/Input lifecycle保持独立。
