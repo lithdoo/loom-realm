@@ -5,7 +5,7 @@
 > 稳定程度：Experimental  
 > 主要定义：建议的代码分包、进程入口和依赖规则  
 > 依赖：[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-05
+> 最近复核：2026-08-09
 
 本方案用于指导第一阶段落地，不是产品协议。包名可以调整，但职责边界必须遵守上层架构和契约。
 
@@ -15,11 +15,12 @@
 packages/
 ├── protocol-core/
 ├── subsystem-control-protocol/
+├── runtime-control-profile/
 ├── frame-call-protocol/
+├── renderer-control-protocol/
 ├── renderer-subsystem-connection-protocol/
-├── render-update-protocol/
 ├── user-input-protocol/
-├── render-state-protocol/
+├── render-update-protocol/
 ├── content-api-contract/
 ├── game-package-contract-v2/
 ├── nodejs-launcher-profile-v1/
@@ -35,31 +36,79 @@ packages/
 └── test-subsystems/
 ```
 
-## 2. `frame-call-protocol`
+不存在需要实现的 `subsystem-control-v1` / `runtime-control-profile-v1`兼容包；当前包只实现 Control v2 / Profile v2。
 
-Frame / Call Protocol v1 已 Active / Normative / Frozen。
+## 2. `subsystem-control-protocol`
+
+当前只提供：
+
+```text
+loomrealm.subsystem-control / 2
+```
+
+至少包含：
+
+```text
+hello/status/shutdown schemas
+bootstrap credential validation helpers
+Runtime lifecycle validator
+semantic error codes
+wire limits
+Control v2 conformance fixtures
+```
+
+不得提供 Control v1 fallback、`ready.rendererDataEndpoint`兼容字段或 dual-stack negotiation。
+
+## 3. `runtime-control-profile`
+
+当前 Profile：
+
+```text
+Runtime Control Application Profile v2
+=
+Subsystem Control v2
++
+Frame / Call v1
+```
+
+包/集成层至少提供：
+
+```text
+shared Control dispatcher rules
+hello-before-frame gate
+shared sender-side Request ID allocator policy
+no-Batch enforcement
+Control v2 + Frame v1 version binding
+integration fixtures
+```
+
+不新增 Data methods。
+
+## 4. `frame-call-protocol`
+
+Frame / Call Protocol v1保持 Active / Normative / Frozen。
 
 包必须提供：
 
 ```text
 FrameLifecycleState
 FrameOutcome / FrameFailure
-exact seven JSON-RPC method Schema
+exact seven JSON-RPC method schemas
 identity / Activation validator
 JSON/number/string/limit validator
-Request ID validator / allocator helper
+Request ID helper
 FrameCallDeadlineProfileV1 validator
 semantic error Schema/classifier
-transaction invariant fixtures
-Runtime failure unwind invariants / trace fixtures
+transaction invariants
+Runtime failure unwind invariants
 conformance manifest / harness helpers
 ```
 
-不得定义 `frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`、operationId/idempotencyKey/replay journal、Runtime/Render lifecycle。
+不得定义 `frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`、operation replay或 Runtime/Render lifecycle。
 
-## 3. Frozen v1 Limits/API Surface
+当前 enclosing Runtime Profile是 v2；参见 Frame v1 Runtime Control v2 binding clarification。
 
-协议包 validator必须统一：
+## 5. Frame v1 Limits/API Surface
 
 ```text
 message <= 1 MiB compact JSON equivalent
@@ -76,9 +125,9 @@ valid Unicode scalar sequence
 no duplicate JSON object members
 ```
 
-PWA与Desktop都复用同一逻辑 validator；不能让 Structured Clone形成第二套 Frame type system。
+PWA与Desktop复用同一 logical validator；Structured Clone不能形成第二套 Frame type system。
 
-## 4. Request ID / Deadline Helpers
+## 6. Request ID / Deadline Helpers
 
 建议：
 
@@ -87,108 +136,166 @@ ConnectionRequestIdAllocator
     positive safe integer
     sender-local
     Connection lifetime no reuse
+    shared by Control + Frame for same sender/carrier
 
 FrameDeadlineProfileValidator
-    all seven methods
+    Frame seven methods
     integer 1000..300000ms
 ```
 
-Main/Subsystem实际计时使用 monotonic clock。Deadline不进入 wire、不由 Game Package/business input覆盖。
+Main/Subsystem使用 monotonic clock。Deadline不进入 wire、不由 Game Package/business input覆盖。
 
-## 5. Transaction / Failure Helpers
+## 7. `main-system`
 
-协议包可提供纯函数/fixture helper：
+负责：
 
 ```text
-findLowestFailedRuntimeFrame(stack, failedKeys)
-deriveAffectedSuffix(stack, rootIndex)
-deriveRootOutcome(frame)
-assertAcceptedOutcomePreserved(...)
-assertFreshRecoveryActivation(...)
+Descriptor/Launcher
+Runtime Supervisor
+Control v2 Registry/Dispatcher
+Frame/Activation Registry
+Stack/Transaction/Failure Unwind
+Renderer Control Publisher
+DataAuthority Registry
 ```
 
-这些 helper不得创建新的 public wire state。
+Main不得 timeout后 retry，也不得用 Renderer/Data state修复 Frame Control ambiguity。
 
-## 6. `main-system`
+## 8. `subsystem-sdk`
 
-负责 Descriptor/Launcher/Runtime Supervisor、Control Registry、Frame/Activation Registry、Stack Controller、Transaction Coordinator、Protocol Validator、Request ID Allocator、Deadline/Failure Classifier、RuntimeFailureUnwindCoordinator、Renderer Control Publisher 与 Data Connection Authority。
+至少提供：
 
 ```text
-FrameMutationCoordinator
-    serializes normal transaction + failure unwind
-
-FrameProtocolValidator
-    schema / JSON / limits
-
-ConnectionRequestIdAllocator
-    shared sender-side Control Connection ID namespace
-
-FrameRpcDeadlineManager
-    monotonic finite deadline / ambiguous classification
-
-FrameErrorClassifier
-    recoverable / divergence / protocol-fatal
-
-RuntimeFailureUnwindCoordinator
-    failedRuntimeKeys / lowest-root / fixed-point / Caller resume
+Desktop/PWA bootstrap adapter interfaces
+Subsystem Control v2
+Runtime Control Profile v2 dispatcher
+Frame RPC client/dispatcher/validator
+shared outbound Request ID allocator
+Frame Input Context Registry
+mutation gate/deadline/failure handler
+Data Connection adapter
+User Input adapter
+Render Update Snapshot/Patch/Event producer
+Content Client
 ```
 
-Main不得 timeout后 retry，也不得用 Renderer state修复 Frame Control ambiguity。
+Frame adapter：`onInitialize/onActivate/onSuspend/onResume/onClose/call/return`。
 
-## 7. `subsystem-sdk`
+SDK不实现 Stack unwind authority；terminal failed Runtime不选择 lower Frame resume。
 
-至少提供 Bootstrap Context、Subsystem Control v1、Frame RPC dispatcher/client、Frame Protocol Validator、Request ID allocator、Frame Input Context Registry、mutation gate、deadline/failure handler、Data/Render/User Input adapters、Content Client。
+## 9. `renderer-control-protocol`
 
-Frame adapter：
+提供 Main→Renderer full Authority Snapshot schema/validation：
 
 ```text
-onInitialize
-onActivate
-onSuspend
-onResume
-onClose
-call
-return
+Session / revision
+Runtime projection
+Frame Stack / Activation
+InputTarget
+DataAuthority
 ```
 
-SDK必须 outbound preflight；PWA/Node使用相同 JSON/limit semantics。SDK不实现 Stack unwind authority；terminal failed Runtime不选择 lower Frame resume。
+不包含 endpoint/token/MessagePort。
 
-## 8. `web-renderer`
+## 10. `renderer-subsystem-connection-protocol`
 
-Renderer只镜像 Main committed control state，不直接解析/发送 Frame RPC。
-
-必须支持较长 `InputTarget=null` gap、old Activation永久消失、只在 resume ACK后看到新 Activation。Renderer reconnect不能取消 Runtime failure或推断 unwind root。
-
-## 9. Desktop / PWA Transport
-
-Desktop WebSocket 与 PWA MessagePort都必须保持：
+提供 Data Connection Core：
 
 ```text
-exact seven Frame methods
-one transport unit = one JSON-RPC message
-no JSON-RPC Batch
-plain JSON-only application model
-shared limits
-Request ID one-shot per sender/Connection
-Response-before-dependent-RPC
-ACK-before-InputTarget-publication
-finite monotonic Frame deadline
-ambiguous-no-retry
-lowest-root whole-suffix unwind
-accepted outcome preservation
+identity = Session + current Renderer + subsystemKey + generation
+lifecycle = current → retired
+serialized installation
+one current connection per Subsystem/current Renderer
 ```
 
-Transport adapter不得自行发送 recovery close/retry或改变 root选择。
+不提供 endpoint discovery/application handshake/heartbeat。
 
-## 10. `map-subsystem`
+Desktop/PWA实际 carrier establishment属于 Host packages/Profile。
 
-`loom.map` 使用 SDK validator/mutation gate/deadline handler；Runtime失败后不自行恢复 suspended map Frame。健康 map Runtime若某 map Frame因 ancestor failure被 unwind，只按 Main `frame.close` 删除该 Frame/Input Context，world/Render共享状态按业务设计保留。
+## 11. `user-input-protocol`
 
-## 11. `test-subsystems`
-
-建议包含：
+提供：
 
 ```text
+Input Interest
+Effective Channel derivation
+State / Event / Reset schemas
+ordering/coalescing/recovery invariants
+Core conformance fixtures
+```
+
+Standard keyboard/pointer/gamepad mapping可独立模块/Profile实现。
+
+## 12. `render-update-protocol`
+
+当前实现目标按 incremental closure candidate：
+
+```text
+Domain Registry
+Snapshot(revision)
+Patch(baseRevision=R, revision=R+1)
+Event
+```
+
+至少提供：
+
+```text
+recursive Node schema
+Domain/Node identity validation
+per-Domain revision state
+insert/remove/move/update op schemas
+Patch candidate validator/applicator helpers
+Event barrier rules
+limits/conformance fixtures
+```
+
+业务 Subsystem应由 Projector/Diff Engine生成 Patch，而不是直接从业务 handler拼 wire mutation。
+
+## 13. `web-renderer`
+
+Renderer不解析/发送 Frame RPC。
+
+负责：
+
+```text
+Renderer Control mirror
+Data Connection Registry
+User Input producers/gates
+Render Domain Store + revision
+key/parent indexes
+Snapshot validator
+atomic Patch engine
+Component Registry / composition
+```
+
+Renderer reconnect不能取消 Runtime failure或推断 Frame unwind root。
+
+## 14. Desktop / PWA Host Packages
+
+Desktop/PWA Host只负责 platform binding：
+
+```text
+Runtime Control carrier establishment
+Renderer Control bootstrap
+Renderer⇄Subsystem Data endpoint/ticket/MessagePort establishment
+Content platform binding
+```
+
+Host不得把 transport bootstrap material塞入 Control `ready`或 Renderer Authority Snapshot。
+
+## 15. `map-subsystem`
+
+`loom.map`使用 SDK Control v2/Profile v2/Frame v1/User Input/Render Update adapters。
+
+Render Manager维护 desired recursive Domain Tree，与 last published state diff生成 Patch；大 diff/backpressure可 materialize Snapshot。
+
+## 16. `test-subsystems`
+
+建议：
+
+```text
+control-v2-valid
+control-v1-only-rejected
 same-subsystem-recursive
 runtime-multiple-frame-occurrence
 call-child-init-reject
@@ -198,75 +305,69 @@ frame-state-divergence
 activation-divergence
 runtime-crash-on-close
 runtime-crash-on-resume
-cleanup-timeout-root-expansion
-call-timeout-gate-held
-return-timeout-gate-held
-accepted-outcome-then-crash
-oversize-frame-message
-invalid-frame-number
 request-id-reuse
-non-json-messageport-value
-callee-cancelled
 stale-activation
+input-producer-loss
+render-patch-stream
+render-invalid-patch
+render-event-barrier
 ```
 
-## 12. Conformance Layout
+## 17. Conformance Layout
 
-依据 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)：
+Frame依据 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
+
+其他协议各自维护独立 fixture corpus；建议统一 manifest字段：
 
 ```text
-packages/frame-call-protocol/
-├── src/
-│   ├── lifecycle.ts
-│   ├── activation.ts
-│   ├── json-profile.ts
-│   ├── limits.ts
-│   ├── request-id.ts
-│   ├── deadlines.ts
-│   ├── errors.ts
-│   ├── transaction-invariants.ts
-│   └── failure-unwind-invariants.ts
-└── conformance/
-    └── v1/
-        ├── manifest.json
-        ├── identity-lifecycle/
-        ├── wire-schema/
-        ├── transactions/
-        ├── errors-timeouts/
-        ├── runtime-failure/
-        ├── limits/
-        └── transport-version/
+fixtureFormatVersion
+protocol
+protocolVersion
+fixtureSetRevision
+role
 ```
 
-Conformance Profile已经冻结 fixture catalog；这里仍需实现可执行 trace/harness。完成这些测试是实现声明 v1 conformant的条件，不是协议再次设计的条件。
+新增验证既有语义的 fixture只提升 fixtureSetRevision，不改变 protocolVersion。
 
-## 13. Version Binding
+## 18. Version Binding
 
-Frame v1不需要新的 runtime handshake package。
+当前 Runtime：
 
-`subsystem.hello.protocolVersions`仍属于 Subsystem Control。Host/runtime deployment profile静态绑定 Frame v1。未来 Frame v2动态协商需要新 profile/control version。
+```text
+Subsystem Control = 2
+Frame / Call      = 1
+Runtime Profile   = 2
+```
 
-## 14. 依赖规则
+版本空间独立。
+
+`subsystem.hello.protocolVersions`只协商 Control；Frame v1由 Profile v2静态绑定。
+
+Control v1/Profile v1不属于 compatibility matrix。
+
+## 19. 依赖规则
 
 ```text
 protocol packages
     不依赖实现包
 
 main-system
-    → control / frame-call / launcher / game-package / content contracts
+    → control-v2 / runtime-profile-v2 / frame / renderer-control / launcher / game-package
 
 subsystem-sdk
-    → control / frame-call / connection / render / input / content contracts
+    → control-v2 / runtime-profile-v2 / frame / connection / input / render / content
 
 web-renderer
-    → renderer-control mirror / connection / render / input / content
+    → renderer-control / connection / input / render / content
 
-map-subsystem
-    → subsystem-sdk / render / input / content
+host packages
+    → protocol/profile contracts, but do not own protocol authority
 ```
 
-禁止 Main/SDK/Host adapter私自改变 Frozen Frame v1 semantics/limits/profile。
+禁止 Main/SDK/Host adapter私自改变 Frozen/Current protocol semantics。
 
-## 15. 发布策略
+## 20. 发布策略
 
-第一阶段可保持 monorepo + unified version。Frame / Call v1协议本身已经 Frozen；实现包在通过适用 Conformance Profile fixture后才能声明对应 v1角色 conformant。
+第一阶段可保持 monorepo + unified implementation version，但 protocol version必须独立管理。
+
+只有通过适用 executable conformance fixtures后，包/角色才能声明对应 protocol/profile conformant。
