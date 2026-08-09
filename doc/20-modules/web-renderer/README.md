@@ -3,7 +3,7 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Web Renderer 内部模块、Render 下行、User Input Channel/Interest、Main committed control/recovery state  
+> 主要定义：Web Renderer 内部模块、Render Domain/Tree 下行、User Input Channel/Interest、Main committed control/recovery state  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[User Input Protocol v1](../../15-contracts/user-input-v1.md)  
 > 最近复核：2026-08-08
 
@@ -16,7 +16,11 @@ Web Renderer
 ├── Main Control Connection
 ├── Control State Store
 ├── System Data Connection Registry
-├── Render Registry / Store / Scheduler
+├── Render Domain Registry
+├── Render Domain Store
+├── Renderer Component Registry
+├── Domain Tree Reconciler
+├── Global Domain Composer / Scheduler
 ├── Input Interest Registry
 ├── Input Channel Producer Registry
 │   ├── Keyboard Producer
@@ -37,7 +41,7 @@ Renderer只镜像 Main已 commit的 Runtime/Frame Stack/lifecycle/current Activa
 
 ## 3. Renderer Core 的 Input Trust Boundary
 
-User Input v1 的 v1 trust model 明确：
+User Input v1 的 v1 trust model：
 
 ```text
 Main
@@ -68,7 +72,7 @@ Main MAY coalesce intermediate revision，但不得提前发布 Activation、rev
 
 `InputTarget=null` 是合法 normal/recovery gap。
 
-Renderer还依赖 Renderer Control v1 的 one-shot lease：
+Renderer依赖 Renderer Control v1 one-shot lease：
 
 ```text
 published InputTarget(frameId, activationId)
@@ -97,7 +101,121 @@ Renderer MUST NOT根据 failed subsystemKey 自己计算 Stack、恢复 cached A
 
 Recovery合法状态包括 Top closing、zero active Frame、`InputTarget=null`、多个 Frame连续从 suffix移除。Renderer必须接受这些状态，不做本地修复。
 
-## 7. Input Interest Registry
+## 7. Render Domain Registry / Store
+
+Renderer对每个 current/known Subsystem维护独立 Render Domain namespace。
+
+```text
+Renderer Render Domain Store
+
+Map<subsystemKey,
+    Map<domainId,
+        DomainState
+    >
+>
+```
+
+一个 Subsystem Runtime MAY拥有 `0..N` Domains。
+
+Domain identity：
+
+```text
+(subsystemKey, domainId)
+```
+
+Renderer不能根据 Frame Stack创建、隐藏或销毁 Domain。Domain lifecycle只服从 Subsystem发布的 Render Update lifecycle state。
+
+Domain是一个原子 authoritative Render state unit，当前设计至少包含：
+
+```text
+zIndex
+0..N ordered roots
+whole current Node Tree
+```
+
+Renderer收到完整合法 Domain State后原子替换该 Domain Store；实际 Component/DOM/Canvas/WebGL reconciliation是派生过程。
+
+## 8. Domain Host / Global Composition
+
+Renderer为每个 Domain提供一个系统级 Domain Host。Domain Host：
+
+```text
+is composition boundary
+is NOT Render Node
+has no key/tag/attrs/data
+```
+
+因此一个 Domain可以直接拥有多个 top-level roots，不需要创建 fake container root。
+
+Renderer全局 composition 至少按 Domain `zIndex`工作：
+
+```text
+lower zIndex → below
+higher zIndex → above
+```
+
+同 zIndex 的最终 deterministic tie-break仍由 Render Update/Composition contract冻结；实现不得依赖连接到达顺序、Domain创建时序或 reconnect顺序作为业务 z-order。
+
+## 9. Domain Tree / Reconciliation
+
+当前 Render Node设计：
+
+```text
+Node
+    key
+    tag
+    attrs : string→string
+    data  : JSON object
+    children[] ordered
+```
+
+Domain拥有 `0..N` ordered roots。
+
+Renderer必须验证：
+
+```text
+Node key unique across all roots + descendants in one current Domain Tree
+roots order preserved
+children order preserved
+plain declarative attrs/data
+```
+
+稳定 `key` 是 Renderer本地 reconciliation identity；Renderer MAY比较 old/new full Domain State，在 wire仍是完整 state的情况下只更新实际变化的 Component/DOM/Scene实例。
+
+协议不因为 Renderer内部 diff 而自动获得 Tree Patch语义。
+
+## 10. Renderer Component Registry
+
+Node `tag` 是逻辑 Renderer Component type，不是 DOM tag。
+
+Renderer Component resolution至少按：
+
+```text
+(subsystemKey, tag)
+→ Component Factory
+```
+
+隔离。
+
+因此不同 Subsystem可以使用相同 tag 字符串而对应不同组件实现。
+
+Custom Renderer Component MAY产生 DOM/Canvas/WebGL presentation，也 MAY注册 `x.*` User Input Channel Producer。
+
+Renderer Core负责：
+
+```text
+Component namespace/availability validation
+Domain Tree lifecycle and reconciliation
+Input Producer availability tracking
+User Input authority/Interest gate
+wire limits
+```
+
+Component不能通过 tag/attrs/data直接获得 Frame/Input authority。
+
+Component implementation如何被 Host/Package加载不属于 Render Tree State；Render wire不得传 executable Function/Class/Host object。
+
+## 11. Input Interest Registry
 
 每条 current Subsystem Data Connection维护一个 current Input Interest：
 
@@ -113,7 +231,7 @@ Interest只决定哪些 Channel值得采集/normalize/queue/send，不产生输�
 
 Subsystem缩小 Interest时会先更新自身 local Interest gate，因此传播中的旧消息可在 Subsystem端安全丢弃；Renderer不需要 Interest ACK/revision。
 
-## 8. Input Channel Producers
+## 12. Input Channel Producers
 
 标准 Producers对应：
 
@@ -129,21 +247,13 @@ Renderer Core不把浏览器原始 `KeyboardEvent` / `PointerEvent` / `Gamepad` 
 
 Producer availability 是 Effective Channel 的必要条件，不产生 authority。
 
-## 9. Custom Renderer Component Channels
+## 13. Custom Renderer Component Channels
 
-Subsystem提供的自定义 Renderer component MAY 注册：
+Subsystem自定义 Renderer Component MAY注册：
 
 ```text
 x.<custom-name>.state
 x.<custom-name>.event
-```
-
-例如：
-
-```text
-x.inventory.drag.state
-x.inventory.drop.event
-x.dialog.choice.event
 ```
 
 Custom Producer负责自身 payload语义；Renderer Core负责：
@@ -158,9 +268,9 @@ wire limits
 routing to owning Subsystem connection
 ```
 
-自定义 Component不能通过注册 `x.*` Channel绕过 Main authority，也不能占用标准保留 Channel前缀。
+Node/Component出现不意味着 Channel Interested；Component消失导致 Producer unavailable 时使用 User Input Producer Loss teardown。
 
-## 10. Effective Input Channel Resolver
+## 14. Effective Input Channel Resolver
 
 对 exact Channel `C`：
 
@@ -186,21 +296,11 @@ Data reconnect
 Producer availability change
 ```
 
-## 11. Effective Transition Behavior
+## 15. Effective Transition Behavior
 
 ### `.state` false → true
 
 Renderer MUST尽快建立 fresh current snapshot baseline，而不是等待下一次物理输入变化。
-
-因此以下场景都能正确恢复当前 held/axis/pointer state：
-
-```text
-new Interest
-InputTarget newly granted
-fresh Activation
-fresh Data Connection + republished Interest
-Producer becomes available
-```
 
 ### `.event` false → true
 
@@ -212,7 +312,7 @@ Producer becomes available
 
 Interest移除由 Subsystem local gate清理；authority loss由 implicit reset清理；Producer loss按下一节处理。
 
-## 12. Producer Loss Teardown
+## 16. Producer Loss Teardown
 
 如果一个当前 Effective `.state` Producer 在 ordinary authority仍有效时消失：
 
@@ -228,7 +328,7 @@ stop missing Channel
 
 Producer重新 available 后按 `.state false → true` 建立 fresh baseline。
 
-## 13. Frame Input Router
+## 17. Frame Input Router
 
 ```text
 raw / custom component input
@@ -239,25 +339,19 @@ raw / custom component input
 → User Input State/Event
 ```
 
-revoked/removed Frame历史输入不得重放到新 Activation。
+Domain/Node identity不进入 ordinary input authority envelope；revoked/removed Frame历史输入不得重放到新 Activation。
 
-## 14. InputTarget Teardown / Reset
+## 18. InputTarget Teardown / Reset
 
-Renderer观察到旧 InputTarget被移除或替换时：
-
-```text
-stop old ordinary State/Event immediately
-```
+Renderer观察到旧 InputTarget被移除或替换时立即停止旧 ordinary State/Event。
 
 如果旧 target 的 Data Connection仍 current，Renderer按 User Input v1 best-effort发送旧 `frameId + activationId` Reset。
 
 如果 Connection已 retired，则 Connection retirement本身是 implicit reset boundary。
 
-Renderer不得等待 Reset ACK；User Input没有 transactional ACK。
-
 同一 old `frameId + activationId` 不会再次成为 InputTarget，因此不需要处理 revoke→same-lease regrant race。
 
-## 15. User Input Backpressure
+## 19. User Input Backpressure
 
 Renderer内部按 User Input Core维护：
 
@@ -279,48 +373,58 @@ State不得跨 Event/Reset barrier coalesce；Event不得 coalesce或 reconnect 
 
 具体 numeric limits由 User Input completion/profile冻结。
 
-## 16. Data / Render Independence
+## 20. Data / Domain Independence
 
-Runtime failure可能使对应 Data Connection authority失效；这不等于 Renderer可以删除全部相关 Render state并推导 Frame lifecycle。
+Runtime failure可能使对应 Data Connection authority失效；这不等于 Renderer可以根据 Frame/Data状态推导 Domain authoritative destroy。
 
-Frame close/unwind不自动删除 Render Record。Render recovery、snapshot、visibility/order仍属于 Render Protocol。
+```text
+Frame close/unwind != Domain destroy
+Data Connection retire != Domain destroy
+Input Interest change != Domain lifecycle
+Producer availability != Domain lifecycle
+```
 
-Input Interest和Producer availability同样不拥有 Render lifecycle；Render component存在不意味着其 Channel必须 Interested。
+Renderer MAY在 Data outage期间保留最后合法 Domain presentation Store；fresh connection后的 authoritative Domain recovery由 Render Update定义。
 
-## 17. Renderer Reload
+## 21. Renderer Reload
 
 ```text
 reconnect Main
 → restore current committed Runtime/Stack/Activation/InputTarget
 → rebuild Data Connections
-→ each fresh Data Connection starts Interest=empty
-→ Subsystem republishes full Interest
+→ each fresh Data Connection starts Input Interest=empty
+→ Subsystem republishes Input Interest
 → Effective .state Channels emit fresh baselines
-→ independently restore Render State
+→ independently recover Render Domain Registry + fresh Domain States
 ```
 
 Reload不得恢复 cached old Activation、历史 Event、旧 Interest、未 commit transaction state或 failed Runtime旧 input authority。
 
-## 18. Cancellation Boundary
+旧 Domain presentation是否暂存、何时删除 stale Domain由 Render Update recovery语义决定，不从 Frame Stack推导。
+
+## 22. Cancellation Boundary
 
 Renderer不能代表 suspended Caller发送 `frame.cancel`。UI cancel只是当前 active Frame的 User Input Event；由 Subsystem业务逻辑决定是否 `frame.return({type:"cancelled"})`。
 
-## 19. Core Invariants
+## 23. Core Invariants
 
 - Renderer不参与 Frame RPC/retry/unwind/version negotiation；
-- Renderer只镜像 Main committed authority；
+- Renderer只镜像 Main committed control authority；
 - Renderer Core是 Main InputTarget sender-side trusted enforcement point；
 - InputTarget lease一旦撤销，同一 `frameId + activationId` 不 re-grant；
+- 每个 Subsystem可拥有 `0..N` Render Domains；
+- Domain identity=`subsystemKey + domainId`；
+- Domain是 lifecycle/atomic-state/global-composition unit；
+- Domain拥有 zIndex + `0..N` ordered roots；
+- Domain Host不是 Render Node；
+- Node key在当前 Domain Tree内全局唯一；
+- roots/children均保持 authoritative order；
+- tag按 Subsystem scope解析到 Renderer Component，不等于 DOM tag；
+- Renderer可以按 stable key本地 reconciliation，但这不等于 wire Tree Patch；
 - Input Interest只过滤，不授予 authority；
 - fresh Data Connection Interest默认 empty；
-- exact Channel only，no wildcard；
-- standard Channel由 Renderer Core/Profile提供；
-- custom Renderer component只使用 `x.*.(state|event)`；
 - Effective Channel = Main authority ∩ Interest ∩ Producer availability；
 - `.state` 每次 false→true建立 fresh baseline；
 - `.event` 只发送 future ordered transient events；
 - Producer loss使用 Reset + remaining State rebaseline；
-- Event/Reset是 State coalescing barrier；
-- InputTarget撤销时 old target best-effort Reset；
-- revoked Activation/Event/Interest不得跨 reload/reconnect恢复；
-- Frame/Render/Data/Input lifecycle保持独立。
+- Frame/Domain/Data/Input lifecycle保持独立。
