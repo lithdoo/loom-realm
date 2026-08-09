@@ -122,15 +122,13 @@ no replay/patch
 Control loss → revoke InputTarget/DataAuthority → retire Data Connections
 ```
 
-InputTarget进一步使用 one-shot lease：
+InputTarget使用 one-shot lease：
 
 ```text
 published InputTarget(frameId, activationId)
 → revoked/removed/replaced
 → same frameId + activationId MUST NOT become InputTarget again
 ```
-
-这样 Main 可以继续 coalesce 中间 full Snapshots，而不会隐藏同一 input authority 的 revoke→regrant。
 
 ## 6. Data Authority
 
@@ -189,7 +187,7 @@ Data loss != Runtime failure
 Data loss != Frame unwind
 Frame close != Data retire
 Activation replacement != Data generation replacement
-Data retire != Render destroy
+Data retire != Render Domain destroy
 ```
 
 ## 8. System Data Application Domains
@@ -202,7 +200,7 @@ User Input
     Renderer → Subsystem: State / Event / Reset
 
 Render Update
-    Subsystem → Renderer
+    Subsystem → Renderer: Render Domain lifecycle/state
 ```
 
 User Input反向 Interest只是输入域自己的 filtering/configuration state，不是新的第三个 System Data protocol，也不产生 Main authority。
@@ -285,14 +283,7 @@ current matching Data Connection
 ∧ Producer(C) available
 ```
 
-因此：
-
-```text
-Interest != authority
-Producer availability != authority
-```
-
-二者都只能缩小输入面。
+因此 Interest和Producer availability都只能缩小输入面。
 
 ### Effective Transition
 
@@ -338,8 +329,6 @@ Reset current Activation
 → fresh snapshots for remaining Effective .state Channels
 ```
 
-这样不需要 per-channel reset wire。
-
 Activation revocation/replacement、Frame leaves active、Data Connection retire、Renderer Control loss/replacement、Session end都是 implicit reset boundary。
 
 ### Recovery / Failure
@@ -350,21 +339,74 @@ User Input无 transactional ACK；input loss、Interest传播 gap、Producer ava
 
 标准 Channel payload、numeric limits、Event overflow final policy仍待 Completion/Profile冻结。
 
-## 10. Render Update Independence
+## 10. Render Update / Domain Tree Direction
 
 Render Update是下一主要 Data protocol target。
 
-Render必须保持 Subsystem-owned identity/lifecycle：
+当前已经明确的架构需求不是“单个 opaque Render blob”，而是 Subsystem-owned 多 Domain 模型：
 
 ```text
-Frame active != Render visible
-Frame suspend != Render hidden
-Frame close/unwind != Render destroy
-Activation replacement != Render epoch
-Data retire != Render destroy
+Subsystem Runtime
+    0..N Render Domains
+
+Domain
+    domainId
+    zIndex
+    0..N ordered roots
+
+Node
+    key
+    tag
+    attrs : string→string
+    data  : JSON object
+    children[] ordered
 ```
 
-Data reconnect后的 Render recovery由 Render Update / Render State自己的 snapshot/revision model决定，不参与 Frame recovery。
+Domain identity：
+
+```text
+(subsystemKey, domainId)
+```
+
+Domain 是 Render lifecycle / atomic-state / global-composition unit；Domain Host不是 Render Node，因此多个 roots不需要 fake container root。
+
+Node `key` 作为 Domain-wide reconciliation identity；`tag` 是逻辑 Renderer Component type，至少按 `(subsystemKey, tag)` 解析，不等于 DOM tag。
+
+Render Update / Render Tree closure需要继续冻结：
+
+```text
+Domain Registry / lifecycle
+Domain full-state publication
+zIndex tie-break / composition semantics
+Node key/tag compatibility rules
+unknown Component handling
+reconnect recovery
+coalescing/backpressure
+wire limits
+whether revision/patch is actually required
+```
+
+当前优先方向是：
+
+```text
+Subsystem authoritative current state
+→ Renderer full Domain Store
+→ Renderer local key-based reconciliation
+```
+
+而不是默认把 Tree Patch / operation log / resume cursor放进 v1。
+
+必须保持：
+
+```text
+Frame active != Domain visible
+Frame suspend != Domain hidden
+Frame close/unwind != Domain destroy
+Activation replacement != Domain lifecycle
+Data retire != Domain destroy
+```
+
+Data reconnect后的 Domain recovery由 Render Update自己的 Registry + fresh current Domain State模型决定，不参与 Frame recovery。
 
 ## 11. Renderer Control Backpressure
 
@@ -436,6 +478,7 @@ Content credential不得进入 Frame、Renderer Authority Snapshot或 Render Sta
 - Renderer不能生成/恢复 Activation；
 - stale Activation input必须拒绝；
 - removed Interest Channel的迟到 input必须拒绝；
+- Render tag/data不得成为任意 executable/DOM命令注入面；
 - transport不能成为 Runtime/Frame recovery authority。
 
 ## 15. 当前推进状态
@@ -451,9 +494,10 @@ Renderer Control v1                      Draft / input lease closed
 Data Connection Contract v1              Draft / lifecycle closed
 User Input v1                            Core Draft / semantic closure review
     ↓
-Standard Input Mapping + wire/limits
+Render Domain / Tree architecture        Refined
     ↓
 Render Update v1
-Render State Contract v1
+Render Tree Contract v1
+    ↓
 Content Access Profile
 ```
