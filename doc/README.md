@@ -10,7 +10,7 @@ LoomRealm 文档按依赖顺序组织：
 → 实施计划
 ```
 
-当前权威目录只有：
+当前权威目录：
 
 ```text
 00-overview
@@ -20,7 +20,7 @@ LoomRealm 文档按依赖顺序组织：
 30-implementation
 ```
 
-`decisions/` 保存 ADR；`fsdb/` 保存仍有独立价值的外部格式参考。已被替代的旧架构/协议/Phase 1 草稿不再保留在当前文档树，完整历史通过 Git 查询。
+`decisions/` 保存 ADR；`fsdb/` 保存独立参考。被替代的协议/设计正文不继续留在当前树，历史通过 Git 追溯。
 
 ## 推荐阅读顺序
 
@@ -38,15 +38,14 @@ LoomRealm 文档按依赖顺序组织：
 12. [Subsystem Control Protocol v1](./15-contracts/subsystem-control-protocol-v1.md)
 13. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
 14. [Frame / Call Protocol v1](./15-contracts/frame-call-protocol-v1.md)
-15. [Frame / Call v1 Conformance Profile](./15-contracts/frame-call-conformance-v1.md)
-16. [Frame v1 Suspend Semantics Clarification](./15-contracts/frame-call-v1-suspend-clarification.md)
-17. [Main ⇄ Renderer Control Protocol v1](./15-contracts/main-renderer-control-v1.md)
-18. [Renderer ⇄ Subsystem Data Connection Contract v1](./15-contracts/renderer-subsystem-data-connection-v1.md)
-19. [Renderer ⇄ Subsystem User Input Protocol v1](./15-contracts/user-input-v1.md)
-20. [Render Update v1 Incremental Closure](./15-contracts/render-update-v1-incremental-design.md)
-21. [只读 Content API v1](./15-contracts/content-api-v1.md)
-22. [模块设计目录](./20-modules/README.md)
-23. [实施计划目录](./30-implementation/README.md)
+15. [Frame / Call v1 Conformance](./15-contracts/frame-call-conformance-v1.md)
+16. [Main ⇄ Renderer Control Protocol v1](./15-contracts/main-renderer-control-v1.md)
+17. [Renderer ⇄ Subsystem Data Connection Contract v1](./15-contracts/renderer-subsystem-data-connection-v1.md)
+18. [Renderer ⇄ Subsystem User Input Protocol v1](./15-contracts/user-input-v1.md)
+19. [Render Update Protocol v1](./15-contracts/render-update-v1.md)
+20. [只读 Content API v1](./15-contracts/content-api-v1.md)
+21. [模块设计目录](./20-modules/README.md)
+22. [实施计划目录](./30-implementation/README.md)
 
 ## 当前核心协议图
 
@@ -81,9 +80,7 @@ Content API v1
 Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
 ```
 
-## Runtime Control
-
-当前唯一组合：
+## Runtime / Frame
 
 ```text
 Runtime Control Application Profile v1
@@ -93,66 +90,24 @@ Subsystem Control v1
 Frame / Call v1
 ```
 
-Control v1负责 Runtime identity/lifecycle：
+Control负责 Runtime identity/lifecycle；`ready` 不携 Renderer Data endpoint。
+
+Frame v1 exactly seven Requests，并冻结 Response-before-dependent-RPC、ACK-before-publication、timeout/loss ambiguous→Runtime failure、no retry、whole-suffix fixed-point unwind。
+
+Suspend语义直接在 Frame v1 主契约中：
 
 ```text
-subsystem.hello
-subsystem.status
-subsystem.shutdown
-```
+child-call suspension
+    → corresponding child outcome + fresh resume
 
-```text
-spawn success != connected != identified != ready
-ready != Data Connection exists
-```
-
-`subsystem.status({state:"ready"})` 不携 Renderer Data endpoint。
-
-`subsystem.hello.protocolVersions`只协商 Control version 1；Frame v1由 Profile v1静态绑定。
-
-## Frame / Call v1
-
-```text
-Main → Subsystem
-    initialize / activate / suspend / resume / close
-
-Subsystem → Main
-    call / return
-```
-
-核心：
-
-```text
-Main owns Frame/Stack/Activation/InputTarget
-Response-before-dependent-RPC
-activate/resume ACK-before-publication
-Success = known commit
-Explicit Error = known no-commit
-Timeout/loss = ambiguous → Runtime failure
-no retry/replay
-lowest failed-runtime root → whole suffix fixed-point unwind
-accepted outcome preserved
-fresh surviving Caller resume
-Frame lifecycle != Render/Data lifecycle
+administrative frame.suspend
+    → no generic v1 resume
+    → close/failure cleanup only
 ```
 
 ## Renderer / Data
 
-Renderer Control只复制 Main committed authority：
-
-```text
-Runtime projection
-Frame Stack
-Activation / InputTarget
-DataAuthority { subsystemKey, generation, connectionProfile }
-```
-
-实际 Data carrier bootstrap 独立：
-
-```text
-Desktop → endpoint/ticket/WebSocket
-PWA     → MessagePort creation/transfer
-```
+Renderer Control只复制 Main committed authority；实际 WebSocket endpoint/ticket/MessagePort由 Host implementation建立，不进入 Renderer Authority Snapshot。
 
 ```text
 Data loss != Runtime failure
@@ -163,40 +118,36 @@ Data retire != authoritative Render Domain destroy
 ## User Input v1
 
 ```text
-Subsystem → Renderer
-    Input Interest
-
-Renderer → Subsystem
-    State / Event / Reset
-```
-
-Effective Channel：
-
-```text
+Effective Channel
+=
 current Data Connection
-∩ Main InputTarget / Activation
+∩ Main InputTarget/Activation
 ∩ Subsystem Interest
 ∩ Producer availability
 ```
 
+标准 keyboard/pointer/gamepad canonical wire payload最终直接属于 User Input v1；不另建 Mapping Profile。DOM/OS/device adapter属于 Renderer实现。
+
 ## Render Update v1
 
-当前 closure candidate：
+唯一正式 v1：
 
 ```text
 render.domains
 render.snapshot(revision)
-render.patch(baseRevision, revision)  // R → R+1
+render.patch(baseRevision, revision)  // exact R→R+1
 render.event
 ```
 
-Patch 使用 key-addressed `insert/remove/move/update`，整个 Domain candidate 原子验证/提交。continuity failure 通过 retire Data carrier + fresh Registry/Snapshot 收敛，不增加 ACK/replay/resync RPC。
+Patch 使用 key-addressed `insert/remove/move/update`，whole Domain candidate原子验证/提交。`tag`只是 opaque string，不存在 Component Profile/unknown-tag 协议语义。
 
-增量模型冻结后应合并回正式 `render-update-v1.md`，并删除工作草案。
+continuity failure：retire Data carrier → fresh Registry/Snapshots；无 ACK/replay/resync RPC。
 
 ## Content API v1
 
-Content API负责 logical readonly routes、MIME/cache/version、authorization semantics、errors/integrity；Content capability distribution属于独立 Access Bootstrap/Profile。
+Content API负责 logical readonly GET/HEAD、MIME/cache/version、request authorization、error/integrity。
+
+Host负责 Desktop credential issuance/injection/rotation；不再有 Content Access Profile。Range若支持直接使用标准 HTTP Range；deployment容量/并发/timeout是实现配置。
 
 ## 当前状态
 
@@ -208,13 +159,15 @@ Runtime Control Profile v1              Stabilizing
 Frame / Call v1                         Frozen
 Renderer Control v1                     Draft / near closure
 Data Connection v1                      Draft / lifecycle closed
-User Input v1                           Core closure reviewed
+User Input v1                           Core Closure Candidate
 Render Update v1                        Closure Candidate
 Content API v1                          Evolving
 ```
 
 ## 文档治理
 
-协议版本表示真实互操作边界，不表示设计稿次数。首次 conformant implementation 前的错误设计直接修订 first-version contract；形成真实兼容边界后，不兼容变化才升级协议/Profile version。
+正式 Protocol/Profile 只用于独立实现必须共享、否则会破坏互操作/authority/identity/state/order/recovery/security 的规则。
 
-关键设计演变见 [ADR 目录](./decisions/README.md) 与 Git history。
+默认不协议化：组件映射、DOM/OS adapter、Host ticket/token/Port交付、队列具体容量/丢弃偏好、cache/index、部署容量，以及标准 HTTP 已有能力的重复 Profile。
+
+协议版本表示真实互操作边界，不表示设计稿次数。关键设计演变见 [ADR 目录](./decisions/README.md) 与 Git history。
