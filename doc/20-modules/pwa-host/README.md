@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：Window、Main Runtime Worker、Subsystem Worker、MessagePort、Service Worker 和 OPFS 的平台适配  
-> 依赖：[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Subsystem Control v2 Draft](../../15-contracts/subsystem-control-protocol-v2.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1 Draft](../../15-contracts/main-renderer-control-v1.md)  
-> 最近复核：2026-08-08
+> 依赖：[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Subsystem Control v2](../../15-contracts/subsystem-control-protocol-v2.md)、[Runtime Control Profile v2](../../15-contracts/runtime-control-profile-v2.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)  
+> 最近复核：2026-08-09
 
 ## 1. Authority / Topology
 
@@ -20,45 +20,54 @@ Frame Registry/Stack
 transaction/error/failure-unwind coordinator
 Activation/InputTarget
 Renderer Control authority
-Data Connection authority
+DataAuthority
 ```
 
 每个 declared Subsystem一个 Dedicated Worker；一个 Worker可承载：
 
 ```text
 0..N Frame/Input Context
-0..N Render Context
+0..N Render Domains
 one Main Control Port
-at most one Renderer Data Connection generation
 ```
+
+Renderer对每个 Subsystem至多一条 current Data Connection。
 
 ## 2. PWA Bootstrap Boundary
 
-Descriptor→Worker script、Bootstrap Credential transfer、Control MessagePort establishment仍是独立待冻结 PWA Host Profile。
+Descriptor→Worker script、Bootstrap Credential transfer、Control MessagePort establishment属于独立 PWA Host Profile。
 
-PWA后续 Runtime lifecycle目标使用：
+当前唯一 Runtime lifecycle protocol：
 
 ```text
 Subsystem Control v2
 ```
 
-而不是把 Subsystem Control v1 的 Desktop `ready.rendererDataEndpoint` 扩展成 MessagePort字段。
+旧 Control v1已 `Abandoned Before Implementation`，PWA不得实现、advertise、fallback到 version 1。
 
-这是 protocol-version boundary；Subsystem Control v1保持 Frozen。
+当前 Runtime Control组合：
+
+```text
+Runtime Control Application Profile v2
+=
+Subsystem Control v2
++
+Frame / Call v1
+```
 
 ## 3. Subsystem Control v2 Mapping
 
 authenticated Control Port建立后：
 
 ```text
-connect/port establish
-→ subsystem.hello
+port establish
+→ subsystem.hello(protocolVersions includes 2)
 → identified
 → optional initializing
-→ ready
+→ subsystem.status({state:"ready"})
 ```
 
-`ready` 只表示 Runtime readiness，不携带 Data Port/endpoint。
+`ready`只表示 Runtime readiness，不携带 Data Port/endpoint，也不表示 Renderer Data Connection已存在。
 
 ```text
 one postMessage payload
@@ -66,11 +75,11 @@ one postMessage payload
 one JSON-RPC application message object
 ```
 
-Port bootstrap方式属于 Host Profile；建立后 lifecycle semantics必须与其他 Subsystem Control v2 transport profile一致。
+当前 Profile禁止 JSON-RPC Batch。
 
 ## 4. Frame / Call v1 Mapping
 
-Frame / Call v1 application semantics保持 Frozen，不因 Control版本升级而变化。
+Frame / Call v1 application semantics保持 Frozen，不因 Control版本为2而变化。
 
 ```text
 Main → Subsystem
@@ -95,17 +104,24 @@ Date / Map / Set
 Host object
 ```
 
-## 5. Frame Limits / Deadline
+## 5. Shared Request ID / Limits
 
-保持 Frame v1：
+Control v2与 Frame v1共享 Control Port时，同一 sender使用 connection-lifetime one-shot Request ID namespace。
+
+基础：
 
 ```text
-message <=1 MiB reference compact equivalent
+positive safe integer ID
+message <=1 MiB
 JSON depth <=64
+```
+
+Frame额外：
+
+```text
 business JsonValue <=512 KiB
 frameId / activationId <=128 UTF-8 bytes
 targetSubsystemKey <=256 UTF-8 bytes
-Request ID positive safe integer / sender Connection lifetime never reused
 Frame deadlines 1,000..300,000ms sender-local monotonic
 ```
 
@@ -124,7 +140,7 @@ activate/resume ACK before InputTarget publication
 
 same-Subsystem recursion共享同一 Control Port时不能要求 nested reverse-request handler。
 
-显式 administrative `frame.suspend` 按 Frozen clarification处理：v1无 generic reactivation；普通 child-call suspension仍只通过 child outcome `frame.resume` 恢复。
+显式 administrative `frame.suspend`按 Frozen clarification处理：v1无 generic reactivation。
 
 ## 7. Runtime Failure Recovery
 
@@ -136,28 +152,24 @@ failedRuntimeKeys
 → whole suffix
 → Top→Bottom cleanup
 → fixed-point expansion
-→ accepted outcome preserve
+→ accepted outcome preserved
 → fresh final Caller resume or Stack empty
 ```
 
 Window、Subsystem Worker wrapper、MessagePort adapter、Data Connection均不得自行改变 root/Stack/Activation。
 
-Late Frame Response不能恢复 failed Runtime。
-
 ## 8. Renderer Control v1
 
-Window/Web Renderer通过 Main-owned Renderer Control Port获得：
+Window/Web Renderer通过 Main-owned Renderer Control获得：
 
 ```text
 full authority Snapshot
-monotonic revision
 Runtime projection
-Frame Stack
-Activation/InputTarget
-DataAuthority generation
+Frame Stack / Activation / InputTarget
+DataAuthority { subsystemKey, generation, connectionProfile }
 ```
 
-Renderer Control不携带 Data MessagePort 或 bearer Data credential。
+Renderer Control不携 Data MessagePort、endpoint或 bearer Data credential。
 
 Control loss时 Window MUST：
 
@@ -165,41 +177,45 @@ Control loss时 Window MUST：
 stop ordinary input
 invalidate InputTarget
 invalidate DataAuthority
-close Renderer⇄Subsystem Data Connections
+retire/close Renderer⇄Subsystem Data Connections
 ```
 
 随后重新建立 Renderer Control并取得 current full Snapshot。
 
 ## 9. Renderer ⇄ Subsystem Data
 
-PWA Data Connection目标使用独立 MessagePort-based Connection Profile。
-
-Main发布逻辑：
+PWA Data Connection由 Host建立 MessagePort carrier。
 
 ```text
-subsystemKey + generation + connectionProfile
+Main publishes DataAuthority(S,G)
+→ PWA Host creates/transfers matching Data carrier
+→ bind carrier to Session/current Renderer/S/G
+→ install at most one current connection
 ```
 
-Host/Profile负责把 matching Data Port bootstrap material交给双方。
+Data Port bootstrap不进入 Renderer Control Snapshot，也不进入 Subsystem Control `ready`。
 
-Data Port transfer/bootstrap不进入 Renderer Control Snapshot，也不进入 Subsystem Control `ready`。
+同 generation仍授权时，旧 carrier retired后 MAY建立 fresh carrier。
 
-建立后的 Connection identity/lifecycle必须与 Desktop Profile保持相同抽象语义。
+```text
+Data loss != Runtime failure
+Data loss != Frame unwind
+```
 
 ## 10. User Input
 
-普通输入只根据 Main current InputTarget：
+ordinary input authority：
 
 ```text
-Frame exists
-active
-activationId current
-matching Data generation connected
+current Data Connection
+∩ Main current InputTarget/Activation
+∩ current Input Interest
+∩ Producer availability
 ```
 
-Renderer Control revision从旧 target直接跳到新 target时，也必须终止旧 Activation的持续输入意图；不依赖一定看到中间 null Snapshot。
+Renderer Control target变化会终止旧 Activation持续输入意图；旧 input不得 replay到 fresh Activation。
 
-旧 input不得 replay到新 Activation。
+fresh Data Connection从 empty Interest开始，State重新建立baseline，Event不重放。
 
 ## 11. Render
 
@@ -211,7 +227,16 @@ Data Connection close != Render destroy
 Renderer Control reconnect != Frame recovery
 ```
 
-Data reconnect后的 Render Store恢复由 Render Update/State protocol独立完成。
+当前 Render Update closure candidate：
+
+```text
+Registry
+Snapshot(revision)
+Patch(R→R+1)
+Event
+```
+
+Data reconnect后通过 fresh Registry + Snapshots恢复，不从缓存状态继续 Patch。
 
 ## 12. Content
 
@@ -223,34 +248,35 @@ Service Worker
 OPFS / Cache Storage
 ```
 
-Content API与 Control/Data plane分离。
-
-Service Worker不得承担 Frame Stack、Runtime Tick、Renderer Control或input authority。
+Content API与 Control/Data plane分离。Service Worker不得承担 Frame Stack、Runtime Tick、Renderer Control或input authority。
 
 ## 13. Cross-platform Conformance
 
-Frame v1继续要求 Desktop WebSocket / PWA MessagePort 对同一 abstract Frame trace得到相同：
+Desktop WebSocket / PWA MessagePort必须对相同 abstract trace保持：
 
 ```text
-Frame authority
-outcome
-Activation
-failure-unwind result
+Control v2 lifecycle
+Frame v1 authority/outcome/unwind
+Renderer Control authority
+Data Connection identity/lifecycle
+User Input recovery
+Render recovery
 ```
 
-Subsystem Control v2与未来 Data Connection v1也应各自建立 Desktop/PWA abstract trace conformance；不同平台允许不同 bootstrap carrier，但不允许不同 application authority semantics。
+不同平台允许不同 bootstrap carrier，不允许不同 application authority semantics。
 
 ## 14. Core Invariants
 
 - one Subsystem=one Dedicated Worker in Phase 1；
-- PWA Runtime lifecycle方向使用 Subsystem Control v2；
+- current Runtime Control = Control v2 + Frame v1；
+- Control v1/Profile v1已实现前废弃；
 - Control v2 ready不携Data endpoint/Port；
-- Frame / Call v1保持 Frozen；
-- Structured Clone不能扩大 Frame类型；
+- Structured Clone不能扩大协议 JSON类型；
 - ACK-before-publication；
 - no Frame retry/replay；
 - fixed-point unwind只在 Main Worker；
 - Renderer Control只复制逻辑 authority；
-- Data Port bootstrap属于独立 Profile；
+- Data Port bootstrap属于 Host Profile；
 - Control loss撤销 Input/Data authority；
+- Data loss不等于 Runtime/Frame failure；
 - Frame lifecycle不控制 Render/Data lifecycle。
