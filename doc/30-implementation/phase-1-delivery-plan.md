@@ -4,21 +4,25 @@
 > 状态：Tracking  
 > 稳定程度：Evolving  
 > 主要定义：第一阶段实施顺序、里程碑和关闭条件  
-> 依赖：[仓库与分包方案](./repository-layout.md)、[测试策略](./testing-strategy.md)  
-> 最近复核：2026-08-08
+> 依赖：[仓库与分包方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
+> 最近复核：2026-08-09
 
 ## 里程碑 0：文档与契约基线
 
-已收敛：
+已收敛/确认：
 
-- Game Package v2 / Desktop Node.js Launcher v1；
-- Subsystem Control Protocol v1；
-- Frame / Call Protocol v1 A-F 全部 Frozen，整体 Active / Normative / Frozen；
+- Game Package v2 / Desktop Node.js Launcher Profile v1；
+- **Subsystem Control v1 与 Runtime Control Profile v1 已实现前废弃，不进入实现；**
+- **Subsystem Control v2 是唯一 current Runtime lifecycle协议；**
+- **Runtime Control Application Profile v2 = Control v2 + Frame / Call v1；**
+- Frame / Call Protocol v1 A-F全部 Frozen；
 - Frame v1 Suspend Semantics Clarification；
-- 每 Subsystem一个 Runtime Container / 最多一个 current Renderer Data Connection；
-- Render ownership=Subsystem；当前架构为 `0..N` Render Domains / Runtime。
+- 每 Subsystem一个 Runtime Container；
+- 每 current Renderer / Subsystem最多一个 current Data Connection；
+- Render ownership=Subsystem；每 Runtime `0..N` Render Domains；
+- Render Update incremental model已进入 Closure Candidate。
 
-Frame v1 completion profile：
+Frame v1 completion baseline：
 
 ```text
 protocol loomrealm.frame-call / 1
@@ -32,27 +36,57 @@ Desktop WebSocket / PWA MessagePort same application semantics
 no Frame handshake/downgrade/partial-v1 claim
 ```
 
-后续新增 Frame / Call 不兼容语义必须进入新版本。
+## 里程碑 1：Game Package v2 与 Desktop Runtime Bootstrap / Control v2
 
-## 里程碑 1：Game Package v2 与 Desktop Runtime Bootstrap / Control
+目标：零 Frame条件下完成 Runtime Bootstrap、Control identity、ready、normal shutdown与 failure convergence。
 
-目标：零 Frame 条件下完成 Runtime Bootstrap、Control identity、ready、normal shutdown 与 failure convergence。
+实现：
 
-实现 Descriptor Loader / Entry Resolver / Node Launcher / Bootstrap Context / Supervisor / Control carrier / hello/status/shutdown / semantic errors / wire limits / cleanup。
+```text
+Descriptor Loader / Validator
+Entry Resolver
+Node Launcher
+Launch Attempt / Bootstrap Context
+Runtime Supervisor
+Control carrier
+Subsystem Control v2 hello/status/shutdown
+Control v2 semantic errors / limits
+Runtime Control Profile v2 dispatcher / shared ID namespace
+cleanup / finite termination
+```
 
-跨 Desktop/PWA 的 Runtime lifecycle 收敛方向使用 Subsystem Control v2；v1保持 Frozen historical/Desktop-compatible baseline。
+关闭条件：
+
+```text
+subsystem.hello selects protocol version 2
+Control version 1 is never advertised/selected
+spawn != connected != identified != ready
+ready payload has no Renderer Data endpoint
+ready does not imply Data Connection
+stopped only from Supervisor
+unexpected exit code 0 fails Runtime without shutdown intent
+no automatic restart / same-attempt reconnect
+```
+
+Desktop Launcher Bootstrap Context仍是自己的 `version:1`；该版本不得被误解释为 Control v1。
 
 ## 里程碑 2：Frame / Call v1 实现与 Conformance
 
-目标：实现 Frozen Frame / Call v1，并把 Conformance Profile 落成 executable fixtures。
+目标：实现 Frozen Frame / Call v1，并把 Conformance Profile落成 executable fixtures。
 
-实现 Main-owned Frame/Stack/Activation/InputTarget、Subsystem Context、exact seven Requests、closed schema、Outcome、transaction barriers、timeout/no-retry、lowest-root fixed-point unwind、accepted outcome preservation 与 fresh final Caller resume。
+实现 Main-owned Frame/Stack/Activation/InputTarget、Subsystem Context、exact seven Requests、closed schema、Outcome、transaction barriers、timeout/no-retry、lowest-root fixed-point unwind、accepted outcome preservation与 fresh final Caller resume。
 
-关闭条件：Main、Subsystem SDK、适用 Transport adapter通过对应 Frame v1 fixtures，包括 same-Subsystem recursion、limits/ID/deadline、Desktop/PWA semantic equivalence 和 suspend clarification。
+Runtime Control integration使用：
+
+```text
+Profile v2 = Control v2 + Frame v1
+```
+
+关闭条件：Main、Subsystem SDK、适用 Transport adapter通过对应 Frame v1 fixtures，包括 same-Subsystem recursion、limits/ID/deadline、Desktop/PWA semantic equivalence与 suspend clarification。
 
 ## 里程碑 3：Main ⇄ Renderer Control
 
-状态：**协议 Draft 已建立，InputTarget lease语义已闭合，继续 review/closure。**
+状态：**协议 Draft已建立，核心 authority/recovery/limits高度闭合。**
 
 目标：冻结 Main向 Renderer发布 committed Runtime / Frame / Activation / InputTarget / DataAuthority 的最小 authority-replication contract。
 
@@ -71,22 +105,18 @@ no replay / no patch
 ```text
 activate/resume ACK-before-publication
 revoked Activation never republished
-normal/recovery InputTarget=null legal
+InputTarget=null legal
 published InputTarget lease revoke后 same frameId+activationId never re-granted
-Renderer不计算failure unwind
-Control loss/replacement撤销Renderer input/Data authority
+Renderer不计算 failure unwind
+DataAuthority carries no endpoint/ticket/MessagePort
+Control loss/replacement撤销 Renderer input/Data authority
 ```
 
-## 里程碑 4：Renderer ⇄ Subsystem Data Connection + User Input
+关闭条件：完成 Frozen review + executable conformance fixtures + Desktop/PWA Control bootstrap/Profile边界确认。
 
-状态：
+## 里程碑 4：Renderer ⇄ Subsystem Data Connection
 
-```text
-Data Connection Contract v1    Draft / lifecycle closed
-User Input v1                  Core Draft / semantic closure reviewed
-```
-
-### Data Connection Contract
+目标：实现 Data carrier identity/lifecycle，不把 bootstrap机制塞回 Runtime `ready`。
 
 ```text
 identity
@@ -99,19 +129,36 @@ lifecycle
     current → retired
 
 cardinality
-    at most one current carrier per subsystem
+    at most one current carrier per subsystem/current Renderer
 ```
 
 `generation` 是 Main-owned Data authority epoch，不是 reconnect counter。
 
-Data loss：
+建立路径：
 
 ```text
-!= Runtime failure
-!= Frame unwind
+Renderer Control DataAuthority
+→ Host/Platform Binding
+→ current Data Connection
 ```
 
-### User Input Core
+Desktop endpoint/ticket与PWA MessagePort creation/transfer属于 Host binding/Profile。
+
+关闭条件：
+
+```text
+serialized installation
+no overlapping current carriers
+same-generation reconnect only after old retired
+Control loss retires all old Renderer Data carriers
+Data loss != Runtime failure
+Data loss != Frame unwind
+Data retire != Render Domain destroy
+```
+
+## 里程碑 5：User Input v1 Core + Standard Mapping
+
+Core authority模型：
 
 ```text
 Main
@@ -124,7 +171,7 @@ Subsystem
     validates local Frame/Activation + local Interest
 ```
 
-User Input domain：
+Domain：
 
 ```text
 Subsystem → Renderer
@@ -134,34 +181,39 @@ Renderer → Subsystem
     State / Event / Reset
 ```
 
-统一派生状态：
+Effective：
 
 ```text
-Effective(C)
-=
 current matching Data Connection
-∧ Main current InputTarget matches
-∧ active/current Activation matches
-∧ C is interested
-∧ Producer(C) available
+∩ Main current InputTarget/Activation
+∩ current Input Interest
+∩ Producer availability
 ```
 
-必须保持 State/Event/Reset、Producer-loss teardown 与 InputTarget one-shot lease语义。
+Core关闭：State false→true fresh baseline、Event no replay/coalescing、Reset/implicit reset、Producer-loss teardown、same-generation reconnect、InputTarget one-shot lease。
 
-Standard Input Mapping exact payload、message/Channel/Event queue limits与 text/IME细节延后到具体开发阶段继续收敛。
+随后单独冻结 Standard Input Mapping：
 
-## 里程碑 5：Render Update + Web Renderer
+```text
+keyboard.state / keyboard.event
+pointer.state / pointer.event
+gamepad.state / gamepad.event
+```
+
+包括 exact payload、coordinate/key mapping、limits、Event FIFO容量/overflow policy。
+
+## 里程碑 6：Render Update v1 + Web Renderer
 
 状态：
 
 ```text
-Render Domain / Tree Architecture    Refined
-Render Update Protocol v1            Draft / single-way model established
+Render Domain / Tree Architecture          Refined
+Render Update Incremental Design           Closure Candidate
 ```
 
-权威草案：[Render Update Protocol v1](../15-contracts/render-update-v1.md)。
+工作入口：[Render Update v1 Incremental Design](../15-contracts/render-update-v1-incremental-design.md)。
 
-### Render Domain Architecture
+### Render Domain Model
 
 每个 Subsystem Runtime MAY拥有：
 
@@ -180,148 +232,93 @@ zIndex
 Node：
 
 ```text
-key
-    current Domain Tree-wide unique reconciliation identity
-
-tag
-    logical Renderer Component type
-
-attrs
-    string→string declarative attributes
-
-data
-    JSON object component state
-
-children
-    ordered child nodes
+key       Domain-lifecycle one-shot logical identity
+tag       logical Renderer Component type
+attrs     string→string declarative attributes
+data      JSON object component state
+children  ordered child nodes
 ```
 
-Domain是：
+### Render Update 当前 closure candidate
 
-```text
-Render lifecycle unit
-atomic authoritative state unit
-global composition unit
-```
-
-Domain Host不是 Node，因此轻量 Domain不需要 fake container root。
-
-### Render Update v1 当前模型
-
-协议方向严格单向：
+方向严格：
 
 ```text
 Subsystem → Renderer only
 ```
 
-wire surface只有：
+wire surface：
 
 ```text
 render.domains
     full current Registry
     Domain lifecycle authority
 
-render.snapshot
-    one Domain full current zIndex + roots
-    atomic replacement
-    latest-state coalescible
+render.snapshot(revision)
+    fresh baseline / full authoritative commit
+
+render.patch(baseRevision, revision)
+    exact R → R+1 atomic incremental commit
+    ops: insert / remove / move / update
 
 render.event
-    transient presentation impulse to one current Node
-    ordered / no replay / no coalescing
+    transient presentation impulse
+    ordered against logical component commits
+    no replay / no coalescing
 ```
 
-Domain lifecycle closure：
+核心 correctness：
 
 ```text
-same DataAuthority generation:
-    absent → present → absent
-    removed domainId MUST NOT become present again
+Domain one-shot lifecycle within DataAuthority generation
+Node key one-shot within Domain lifecycle
+sender lastEmittedRevision publication cursor
+Patch requires base=current and revision=base+1
+Patch applies to isolated candidate and commits atomically
+remove creates patch-local tombstones
+move uses detach-then-resolve
+invalid authoritative commit cannot be skipped
+continuity failure → retire Data carrier → fresh Registry + Snapshots
 ```
 
-因此 Registry可以安全 latest-state coalesce，而不会隐藏同 ID destroy→recreate。
-
-fresh connection恢复：
+无：
 
 ```text
-render.domains(current full Registry)
-→ fresh render.snapshot for every current Domain
-→ ordinary render.event may resume per Domain
-```
-
-same-generation reconnect不恢复历史 Event；Renderer MAY暂时保留最后合法 presentation cache，但 fresh Snapshot前不得把新 Event应用到旧 cached baseline。
-
-Data generation replacement：
-
-```text
-old Render replication authority ends
-new generation = new Render replication authority universe
-```
-
-相同 domainId/key字符串不自动延续 authority-level component identity。
-
-### Snapshot / Event Ordering
-
-同 Domain：
-
-```text
-Snapshot A1
-Snapshot A2
-Event E
-Snapshot A3
-Snapshot A4
-```
-
-允许：
-
-```text
-Snapshot A2
-Event E
-Snapshot A4
-```
-
-Snapshot不得跨 retained same-Domain Event barrier。
-
-Event：
-
-```text
-transient
-presentation-local only
-no authoritative Store mutation
-no replay
-no coalescing
-```
-
-任何丢失后会让 Renderer永久分叉的事实都必须放在 Snapshot，而不是只靠 Event。
-
-### 明确不进入 v1 Core
-
-```text
-revision / sequence
-ACK
-history replay
+ACK / NACK
+Patch history replay
 resume cursor
-Tree Patch / JSON Patch
-operation log
-Renderer→Subsystem resync
+Renderer→Subsystem resync RPC
 cross-Domain transaction
 render frame fence
 ```
 
-恢复依赖 current full state，不依赖历史更新日志。
-
-### 仍需 Completion/Profile 冻结
+### Backpressure
 
 ```text
-exact tag grammar
-component bootstrap/loading
-per-tag attrs/data schema
-message/tree numeric limits
-Event FIFO numeric capacity / overflow preference
-resource reference conventions
+small diff
+    → Patch
+
+large/complex/backpressured diff
+    → Snapshot(lastEmittedRevision+1)
+
+transient Event backlog
+    → bounded FIFO / may drop
+    → MUST NOT indefinitely block authoritative progress
 ```
 
-这些不得改变已建立的 Domain lifecycle、Snapshot atomicity、Event transient与单向方向。
+### Remaining Completion
+
+```text
+domainId/key/tag grammar + limits
+message/tree/node/op/attrs/data numeric limits
+zIndex range
+Event FIFO numeric policy
+unknown/undeclared tag classification
+closed-schema JSON encoding
+conformance fixture matrix
+```
+
+完成这些后，把 incremental closure candidate合并回正式 `render-update-v1.md`，结束“双 v1事实”。
 
 ### Web Renderer 实现
 
@@ -329,14 +326,14 @@ resource reference conventions
 
 ```text
 Render Domain Registry
-Domain Store
+Domain Store + revision
+key/parent indexes
+atomic Patch candidate engine
 Domain Host
 Renderer Component Registry
-Domain Tree Reconciler
-Global Domain Composer / Scheduler
+logical commit/Event processing queue
+Global Domain Composer
 ```
-
-Renderer MAY按 stable Node key对 full Snapshot做本地 diff/reconciliation；内部 diff不产生 wire Tree Patch兼容承诺。
 
 必须保持：
 
@@ -348,84 +345,94 @@ Data Connection retire != authoritative Domain destroy
 Domain/Node != Input authority
 ```
 
-Component MAY提供 custom `x.*` Input Channel Producer，但仍服从 User Input Effective Channel gate。
+## 里程碑 7：Renderer Component Profile
 
-里程碑 5 最终关闭条件至少覆盖：
+冻结：
 
 ```text
-fresh-connection-first-render-message-registry
-empty-registry
-registry-full-replacement
-registry-add/remove-domain
-domain-id-one-shot-within-generation
-zero-root-domain
-multi-root-domain
-multiple-domains-one-subsystem
-multiple-subsystems-domains
-zIndex-ordering
-node-key-domain-wide-unique
-same-key-tag-stability
-ordered-roots/children
-unknown-component-tag
-snapshot-atomic-replace
-snapshot-coalescing
-render-event-order/no-replay
-render-event-before-fresh-baseline-drop
-same-generation-reconnect
-generation-replacement-authority-reset
-frame-close-does-not-destroy-domain
-data-loss-does-not-fail-runtime
+tag grammar / declaration
+(subsystemKey, tag) → Component Factory
+component bootstrap/loading
+per-tag attrs/data schema
+unknown/undeclared tag classification
+presentation pending/error semantics
+resource-reference conventions
+custom Input Producer registration lifecycle
 ```
 
-## 里程碑 6：Content API 与游戏内容
+Component implementation暂未加载不得直接被误判为 Render authoritative divergence。
 
-实现 Safe Package Root、Catalog / Package Index、Readonly Content Service、resource/MIME/ETag/Content Version 与 validate。
+## 里程碑 8：Content API 与 Content Access
 
-Content API只定义读取语义；Content capability distribution使用独立 Bootstrap/Profile。
+实现 Safe Package Root、Catalog/Package Index、Readonly Content Service、resource/MIME/ETag/contentVersion/integrity。
 
-## 里程碑 7：`loom.map` 最小运行时
+Content API只定义读取语义；另行冻结 Content Access Bootstrap/Profile：capability issuance/distribution/rotation。
 
-实现 Subsystem Control Adapter；完整 Frame v1 Adapter；JSON/limit validator；Request ID/deadline handler；mutation gate；initialize rejection；timeout/divergence reporting；healthy doomed Frame close；Runtime Core/Loop、移动/碰撞/Portal、Render Manager/Projector。
+不得把 Content credential塞入 Frame params、Renderer Control Snapshot或 Render State。
 
-Render Manager至少能发布适用的 map/world/hud 等 Render Domains，Domain内使用 Renderer Component tags与 Domain-wide stable Node keys。
+## 里程碑 9：`loom.map` 最小运行时
 
-同时实现适用的 Data Connection / User Input / Render Update adapter，但不能把 Frame authority搬到 Data Plane。
+实现：
 
-## 里程碑 8：Pokémon Essentials 兼容工具链
+```text
+Subsystem Control v2 Adapter
+Runtime Control Profile v2 dispatcher
+Frame v1 Adapter / Validator / Deadline / Mutation Gate
+business Runtime Core / Loop
+movement / collision / Portal
+Render Manager / Projector / Diff Engine
+Data Connection / User Input / Render Update adapters
+```
 
-定义中间 JSON、导入 Tile/Autotile/Passage/Priority/Character、Golden fixture，受限素材不进入公共仓库。
+Render Manager发布 map/world/hud等 Render Domains，并支持 Snapshot/Patch策略。
 
-## 里程碑 9：Hostra Desktop 闭环
+## 里程碑 10：Pokémon Essentials 兼容工具链
 
-Main 与 Hostra 分离；Desktop Host建立 per-Subsystem Control/Data carrier；Renderer reload只恢复 Main committed control state；Domain恢复通过 Render Update独立完成；finite shutdown/force termination。
+定义中间 JSON、导入 Tile/Autotile/Passage/Priority/Character、Golden fixtures；受限素材不进入公共仓库。
 
-WebSocket endpoint/ticket等属于 Desktop Host binding，不进入 Data Connection Core。
+## 里程碑 11：Hostra Desktop 闭环
 
-## 里程碑 10：PWA Bootstrap / 闭环
+Main与 Hostra authority分离；Desktop Host完成：
 
-Main/Subsystem Dedicated Worker；冻结 Descriptor→Worker / credential / Control MessagePort establishment；Port建立后直接使用已 Frozen Frame v1 application mapping；Window⇄Subsystem Data carrier由 Host安全建立；Service Worker Content API / OPFS。
+```text
+Control v2 WebSocket binding
+Renderer Control bootstrap
+per-Subsystem Data endpoint/ticket binding
+Renderer reload recovery
+finite shutdown/force termination
+```
 
-PWA Bootstrap Profile MUST NOT重新定义 Frame version、Frame JSON type、Data generation authority、User Input recovery或 Render Domain authority semantics。
+endpoint/ticket不进入 Subsystem Control `ready`或 Renderer Authority Snapshot。
+
+## 里程碑 12：PWA Bootstrap / 闭环
+
+Main/Subsystem Dedicated Worker；冻结 Descriptor→Worker、bootstrap credential、Control MessagePort establishment；Control Port建立后使用 **Control v2 + Frame v1**。
+
+Window⇄Subsystem Data carrier由 Host安全建立；Service Worker负责 Content API/OPFS。
+
+PWA Profile不得重新定义 Frame version、Data generation、User Input recovery或 Render Domain authority semantics。
 
 ## 第一阶段最终验收
 
+- 只实现/协商 Subsystem Control v2；Control v1无 fallback；
+- Runtime Control Profile v2 = Control v2 + Frame v1；
 - Launcher / Runtime Control符合适用 Normative Contract；
-- Frame / Call v1适用角色通过 Conformance Profile；
-- exact seven Frame RPC across Desktop/PWA；
+- Frame / Call v1适用角色通过 Conformance；
 - stale Activation永久拒绝；
 - Main⇄Renderer Control完成；
-- InputTarget one-shot lease完成；
+- DataAuthority与Data bootstrap material分离；
 - Data Connection current/retired authority闭合；
 - Data loss不触发 Runtime failure/Frame unwind；
-- User Input Core authority/Interest/Effective Channel闭合；
-- Render Update v1单向 Registry/Snapshot/Event模型完成；
+- User Input Core + Standard Mapping满足定义；
+- Render Update v1 Registry/Snapshot/Patch/Event模型完成；
+- Patch revision/atomic/recovery闭合；
 - 每 Subsystem支持 `0..N` Domains；
-- Domain zIndex / multi-root / Domain-wide Node key闭合；
-- Renderer Component tag resolution边界完成；
+- Domain zIndex / multi-root / one-shot Node key闭合；
+- Renderer Component tag resolution/profile完成；
 - Frame不拥有 Domain；zero-frame Domain可工作；
-- Content API只读且路径安全；
-- Hostra不承载 Main authority。
+- Content API只读且路径安全；Content capability distribution独立；
+- Hostra/PWA Host只做平台 binding，不接管 Main authority。
 
 ## 暂缓
 
-Save System、不可信 executable Sandbox、第二 Launcher、automatic Runtime recovery/restart、Control heartbeat、lazy/idle recycle、多 Runtime per key、Publisher Trust/signing、多主栈/Frame Graph、Frame migration、Activation reuse、caller-driven Frame cancellation、Frame RPC replay/resync、transparent partial-Runtime recovery、Frame runtime downgrade/capability negotiation、完整菜单/战斗/任务、多人同步、高级渲染优化、ZIP/ASAR/remote package、Render Tree Patch、Render history replay、cross-Domain render transaction。
+Save System、不可信 executable Sandbox、第二 Launcher、automatic Runtime recovery/restart、Control heartbeat、lazy/idle recycle、多 Runtime per key、Publisher Trust/signing、多主栈/Frame Graph、Frame migration、Activation reuse、caller-driven Frame cancellation、Frame RPC replay/resync、transparent partial-Runtime recovery、Frame runtime dynamic downgrade/capability negotiation、完整菜单/战斗/任务、多人同步、高级渲染优化、ZIP/ASAR/remote package、Render history replay、cross-Domain render transaction。
