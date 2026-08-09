@@ -3,13 +3,13 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Web Renderer 内部模块、Main committed authority、Data Connection、User Input、Render Registry/Snapshot/Patch/Event 与本地 presentation  
-> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[通信系统](../../10-architecture/communication-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update Incremental Design](../../15-contracts/render-update-v1-incremental-design.md)  
+> 主要定义：Renderer Control、Data Connection、User Input、Render Store/Patch/Event 与本地 presentation 实现  
+> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
 > 最近复核：2026-08-09
 
-Renderer **不是 Frame / Call participant**。Frame v1七个 RPC只存在于 Main⇄Subsystem Runtime Control；Renderer只服从 Main committed authority，并处理建立后的 Data application domains。
+Renderer **不是 Frame / Call participant**。它镜像 Main committed authority，并处理建立后的 Data application protocols。
 
-## 1. 模块结构
+## 1. 内部模块
 
 ```text
 Web Renderer
@@ -22,95 +22,70 @@ Web Renderer
 │   ├── key/parent indexes
 │   ├── Snapshot Validator
 │   ├── Atomic Patch Engine
-│   └── logical Commit/Event Queue
-├── Presentation Adapter / Registry        implementation-owned
+│   └── Commit/Event Queue
+├── local presentation mapping
 ├── Global Domain Composer
 ├── Input Interest Registry
-├── Input Channel Producer Registry
-├── Effective Input Channel Resolver
+├── Input Producer Registry
+├── Effective Input Resolver
 ├── User Input Router
 ├── Resource Client
 └── Presentation State
 ```
 
+上述 `presentation mapping` 可以内部使用 Component Registry/Factory、React/Vue/Web Component、DOM/Canvas/WebGL 等任意机制；这些不是 LoomRealm protocol surface。
+
 ## 2. Renderer Control Authority
 
-Renderer通过 Main ⇄ Renderer Control获得 full committed Snapshot：
+Renderer 从 Main 获得：
 
 ```text
 Runtime projection
 Frame Stack
 Activation
 InputTarget
-DataAuthority { subsystemKey, generation, connectionProfile }
+DataAuthority {subsystemKey, generation, connectionProfile}
 ```
 
-Renderer不得自行：
+Renderer 不得自行：
 
 ```text
-创建/恢复 Frame或Activation
-修改 Stack
-计算 Runtime failure unwind
-根据 DOM focus创建 InputTarget
-根据 Render Domain推导 input authority
+create/recover Frame or Activation
+modify Stack
+compute Runtime failure unwind
+create InputTarget from DOM focus
+infer input authority from Render Domain
 ```
 
-## 3. InputTarget Lease / Control Loss
-
-```text
-frame.activate ACK → Main commit → InputTarget may publish
-frame.resume ACK   → Main commit → InputTarget may publish
-```
-
-已发布 `InputTarget(frameId,activationId)` 一旦被撤销/替换，同一 lease不得再次成为 InputTarget。
-
-Renderer Control loss/replacement时：
+Control loss/replacement：
 
 ```text
 InputTarget := null
 stop ordinary input
 invalidate DataAuthority
-retire/close all old Renderer Data Connections
+retire old Data Connections
 ```
 
-然后通过 fresh Renderer Control hello + full Snapshot恢复。
+然后 fresh Renderer Control hello + full Snapshot恢复。
 
-## 4. Data Connection Registry
+## 3. Data Connection
 
-Renderer只依据 current DataAuthority建立/持有 Data Connection。
-
-完整 logical identity：
+Renderer 只依据 current DataAuthority 建立/持有 Data Connection。
 
 ```text
-Session
-+ current Renderer participant
-+ subsystemKey
-+ generation
+Session + current Renderer + subsystemKey + generation
 ```
 
-每个 `(Session,current Renderer,subsystemKey)` 至多一个 current carrier。
+每个 Subsystem最多一个 current carrier。
 
-actual WebSocket endpoint/ticket或 MessagePort由 Host/Platform Binding提供，不来自 Subsystem `ready`，也不进入 Renderer Control Snapshot。
+actual Desktop WebSocket/ticket 或 PWA MessagePort 由 Host implementation 安全建立；不来自 Subsystem `ready`，也不进入 Renderer Control Snapshot。
 
 ```text
 Data loss != Runtime failure
 Data loss != Frame unwind
 ```
 
-## 5. User Input Trust Boundary
-
-```text
-Main
-    owns InputTarget / Activation
-
-Renderer Core
-    trusted sender-side InputTarget enforcement point
-
-Subsystem
-    validates local Frame/Activation + local Interest
-```
-
-对 Channel `C`：
+## 4. User Input
 
 ```text
 Effective(C)
@@ -118,311 +93,161 @@ Effective(C)
 current matching Data Connection
 ∧ current Main InputTarget matches subsystem
 ∧ mirrored Frame active/current Activation matches
-∧ C in current Input Interest
+∧ C in current Interest
 ∧ Producer(C) available
 ```
 
-只有 Effective Channel产生 ordinary State/Event。
+fresh Data Connection：Interest empty。
 
-## 6. Input Interest / State / Event / Reset
+`.state` 每次 non-effective→effective建立 fresh baseline；`.event` future-only/no replay；Reset/implicit reset处理 teardown。
 
-fresh Data Connection：
+标准 keyboard/pointer/gamepad canonical wire payload由 User Input v1本身定义。Renderer如何从 DOM/OS/device API生成 canonical payload 是本模块实现细节。
 
-```text
-Interest = empty
-```
+## 5. Render Authority
 
-Subsystem发布 full exact Interest set；无 wildcard、无 ACK/revision。
-
-`.state` non-effective→effective时必须立即建立 fresh self-contained baseline。
-
-`.event`只发送未来 transient events，不 coalesce/replay。
-
-Reset/implicit reset清理持续 state；Producer loss按 User Input v1执行 Reset + remaining State rebaseline。
-
-## 7. Render Authority Model
-
-Subsystem是 Render Domain Registry / State / revision唯一 authority；Renderer是 read-only replica + presentation engine。
-
-一个 Subsystem拥有：
+Subsystem 是 Domain Registry / State / revision唯一 authority；Renderer 是 read-only replica + presentation engine。
 
 ```text
-0..N Render Domains
+Domain
+    domainId
+    zIndex
+    revision
+    roots[]
+
+Node
+    key       one-shot logical identity within Domain lifecycle
+    tag       opaque string
+    attrs     string→string
+    data      JSON object
+    children  ordered nodes
 ```
 
-Domain：
+`tag` 不在 protocol层解析成 known/unknown component type。Renderer如何解释 tag 是本地 integration contract。
 
-```text
-domainId
-zIndex
-0..N ordered roots
-revision
-```
-
-Node：
-
-```text
-key       Domain lifecycle内 one-shot logical identity
-tag       opaque string
-attrs     string→string
-data      JSON object
-children  ordered child nodes
-```
-
-Domain Host不是 Node。
-
-Renderer只按 Render协议验证 Node结构和类型，不解释 `tag` 的协议语义。
-
-## 8. Fresh Render Baseline
-
-fresh Data Connection上的 Render恢复固定：
+## 6. Fresh Render Baseline
 
 ```text
 render.domains(current Registry)
-→ fresh render.snapshot for every current Domain
+→ fresh render.snapshot every current Domain
 → ordinary render.patch / render.event
 ```
 
-Renderer MAY暂存旧 presentation cache以减少视觉闪烁，但在 fresh Snapshot前：
+旧 presentation cache MAY暂时显示，但 fresh Snapshot前：
 
 ```text
-MUST NOT apply new Patch to cached state
-MUST NOT deliver new Event to cached Node lifetime
+no Patch applies to cached authority
+no Event targets cached lifetime
 ```
 
 cache不是 recovery authority。
 
-## 9. Domain Store / Revision
+## 7. Domain Store / Patch
 
-Renderer对每个 current Domain维护：
-
-```text
-DomainStore
-├── revision
-├── zIndex
-├── recursive roots
-├── nodeByKey
-└── parentByKey
-```
-
-wire仍保持自然递归 Tree；内部 MAY normalized/indexed/copy-on-write。
-
-fresh Snapshot可直接建立当前 authoritative revision `R`。
-
-baseline以后每次 authoritative commit必须：
+每个 current Domain MAY内部维护：
 
 ```text
-R → R+1
+revision
+zIndex
+recursive roots
+nodeByKey
+parentByKey
 ```
 
-## 10. Snapshot
+wire仍是递归 Tree。
 
-```text
-render.snapshot(revision,zIndex,roots)
-```
+baseline后 authoritative commit严格 `R→R+1`。
 
-Renderer：
-
-```text
-validate full candidate
-→ build indexes
-→ atomic replace Domain Store
-→ commit revision
-```
-
-post-baseline Snapshot只能是 `currentRevision+1`，通常用于 full commit / backpressure fallback。
-
-不得暴露 partial tree或新旧 zIndex/tree混合状态。
-
-## 11. Patch Engine
-
-```text
-render.patch {
-    baseRevision = R,
-    revision = R+1,
-    zIndex?,
-    ops[]
-}
-```
-
-Core ops固定：
-
-```text
-insert
-remove
-move
-update
-```
-
-Renderer处理：
+Patch：
 
 ```text
 require base=current revision
 → isolated candidate
-→ apply ordered ops
-→ validate final candidate
+→ ordered insert/remove/move/update
+→ final validation
 → atomic commit
 ```
 
-任何 op/candidate失败不得 partial apply或跳过后继续。
+失败不得 partial apply/skip later commit。
 
-## 12. Patch Operation Semantics
+## 8. Event Barrier
 
-### Insert
+`render.event` 是 transient presentation impulse，不修改 authoritative Store。
 
-通过 `parentKey + beforeKey`插入完整 fresh subtree；inserted keys不得 live/tombstoned/违反 Domain-lifecycle one-shot key rule。
+只有 current Domain + fresh baseline + existing targetKey 时才 dispatch；stale target直接 drop。
 
-### Remove
-
-删除 target及 op执行时仍属于它的 current subtree；所有删除 key进入 Patch-local tombstone，当前 Patch后续不得复用。
-
-### Move
-
-固定 detach-then-resolve：
-
-```text
-detach target
-→ resolve destination parent in detached candidate
-→ resolve beforeKey in destination list
-→ insert
-```
-
-不得 move到自身/descendant，`beforeKey == key`非法。
-
-### Update
-
-只修改 attrs/data top-level `set/remove`；不修改 key/tag/children。remove missing member或 set/remove冲突是 invalid Patch。
-
-## 13. Authoritative Continuity Failure
-
-以下属于 Render stream continuity failure：
-
-```text
-Patch base mismatch
-revision not R+1
-Patch op precondition failure
-Patch final candidate invalid
-post-baseline Snapshot stale/gap/invalid
-hard malformed authoritative message
-```
-
-Renderer：
-
-```text
-MUST NOT skip and continue
-→ stop trusting current Render stream
-→ retire current Data Connection
-→ if authority still current, establish fresh carrier
-→ Registry + fresh Snapshots
-```
-
-这不等于 Runtime failure或 Frame unwind。
-
-`tag` 的具体含义或本地 presentation 映射失败不属于 Render Core continuity validation。
-
-## 14. Render Event / Logical Barrier
-
-`render.event`是 transient presentation impulse，不修改 authoritative Domain Store。
-
-Event只有在 current Domain + fresh baseline + current targetKey存在时交给本地 presentation layer；stale target直接 drop。
-
-同 Domain logical processing顺序必须保持：
+逻辑顺序：
 
 ```text
 commit R
-→ reconcile local presentation
+→ local reconciliation/lifetime install
 → Event
 → commit R+1
 ```
 
-不要求等待 physical paint/vsync，但不得让 Event越过 authoritative commit barrier。
+不要求等待 physical paint/vsync。
 
-Event `name/data` 的解释是 implementation detail。
-
-## 15. Render Backpressure
+## 9. Backpressure
 
 ```text
-small desired-state diff
-    → Patch
-
-large/complex/backpressured diff
-    → Snapshot(lastEmittedRevision+1)
-
-Event
-    bounded ordered FIFO
-    may drop on overflow
+small diff                 → Patch
+large/complex/backpressure → full Snapshot(lastEmittedRevision+1)
+Event                       → bounded queue; may drop
 ```
 
-Authoritative convergence MUST NOT被 transient Event backlog无限阻塞。
+协议只要求 bounded、surviving Event order、no replay、authoritative progress优先；具体 Event capacity/drop strategy 是 Renderer implementation。
 
-## 16. Presentation Implementation Boundary
+## 10. Presentation Mapping
 
-Renderer如何将：
+Render Update只给出 authoritative plain data：
 
 ```text
-tag
-attrs
-data
-children
+key/tag/attrs/data/children
 ```
 
-映射到实际 UI，完全由 Renderer实现掌控。
-
-实现 MAY使用：
+本模块自己决定：
 
 ```text
-registry
-factory
-class/function/component
-DOM/Canvas/WebGL
-lazy loading
-static registration
-code generation
-other internal mechanism
+tag → local view/component/backend
+code/module loading
+mount/update/unmount
+DOM/Canvas/WebGL resources
+style/layout
+animation/cache
+per-tag attrs/data interpretation
 ```
 
-但这些都不是 LoomRealm Protocol/Profile，也不参与 Render wire negotiation/conformance。
+这些实现失败属于 local presentation diagnostics，不改变合法 committed Domain Store，也不产生 Render protocol unknown-tag error。
 
-Render Core不存在 `known tag` / `unknown tag` 状态；只验证 `tag` 是符合通用 wire/size规则的 string。
+Presentation 实现 MAY注册 `x.*` Input Producer，但 Producer仍通过 User Input Core的 Interest/InputTarget gate。
 
-本地 presentation对象 MAY注册 `x.*` Input Producers，但仍必须经过 Renderer Core的 Interest/InputTarget gate。
+## 11. Global Composition
 
-## 17. Global Composition
+Domain `zIndex`：higher above lower。Frame Stack绝不充当 Render z-order。
 
-Domain `zIndex`决定跨 Domain层级：higher above lower。
+相同 zIndex 的 tie-break只要求本实现 deterministic/non-semantic，不得使用 arrival/reconnect order作为业务语义。
 
-Frame Stack绝不作为 Render z-order。
-
-same-z deterministic tie-break由 Renderer实现固定；业务不得依赖 arrival/reconnect order，也不得把 equal-z顺序当 portable semantics。
-
-## 18. Renderer Reload
+## 12. Renderer Reload
 
 ```text
 fresh Renderer Control
-→ current Authority Snapshot
-→ fresh Data Connections for current generations
+→ full Authority Snapshot
+→ Host establishes fresh Data Connections
 → User Input: Interest empty → republish → State baselines
 → Render: Registry → fresh Snapshots → Patch/Event
 ```
 
-不得恢复 cached old Activation、old Interest、historical input Event或 historical Render Event/Patch chain。
+不得恢复 cached old Activation、Interest、historical Input Event 或 historical Render Patch/Event chain。
 
-## 19. Core Invariants
+## 13. Core Invariants
 
 - Renderer不是 Frame RPC participant；
-- Renderer只镜像 Main committed control authority；
-- Renderer Core执行 ordinary InputTarget sender-side gate；
+- Renderer只镜像 Main committed authority；
+- Renderer Core执行 ordinary InputTarget sender gate；
 - Data carrier只依据 current DataAuthority；
-- 每个 Subsystem可拥有 `0..N` Render Domains；
-- Domain Host不是 Render Node；
-- Node key在 Domain lifecycle内 one-shot；
-- `tag` 是 opaque string，协议不定义其具体含义；
-- recursive Tree仍是 authoritative model；
-- fresh connection先 Registry+Snapshot，再 Patch/Event；
-- baseline以后 authoritative revision严格 `R→R+1`；
-- Patch只有 insert/remove/move/update且原子提交；
-- Event是 transient logical barrier，不是 authoritative state；
-- continuity failure通过 Data reconnect + fresh Snapshot恢复；
-- no Render ACK/NACK/replay/resync RPC；
-- no Renderer Component Profile；
-- Frame/Domain/Data/Input lifecycle保持独立。
+- Domain/Node不产生 Input authority；
+- Render wire保持 recursive tree + exact revision chain；
+- Patch原子提交；Event transient；
+- continuity failure通过 fresh Data carrier + Snapshots恢复；
+- component/presentation mapping完全属于实现；
+- Host carrier/bootstrap机制不进入 application protocol；
+- no Render ACK/NACK/replay/resync RPC。
