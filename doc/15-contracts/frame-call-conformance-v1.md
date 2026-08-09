@@ -1,15 +1,14 @@
 # Frame / Call Protocol v1 Conformance Profile
 
 > 层级：正式契约 / Conformance Profile  
-> 状态：Active / Normative  
+> 状态：Active / Normative / Frozen  
 > Profile 版本：1  
-> 稳定程度：Frozen  
 > 适用协议：`loomrealm.frame-call / 1`  
 > 依赖：[Frame / Call Protocol v1](./frame-call-protocol-v1.md)  
-> 决策记录：[ADR 0015：冻结 Batch F](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)  
-> 最近复核：2026-08-05
+> 决策记录：[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)  
+> 最近复核：2026-08-09
 
-本文定义如何验证一个 Main、Subsystem 或 Control Transport Adapter 是否符合 Frame / Call Protocol v1。它不新增业务语义；若本文与主协议冲突，以 [Frame / Call Protocol v1](./frame-call-protocol-v1.md) 为准。
+本文只定义如何验证 Frame / Call v1；不新增业务语义。与主协议冲突时，以 [Frame / Call v1](./frame-call-protocol-v1.md) 为准。
 
 ## 1. Conformance Claim
 
@@ -21,9 +20,7 @@ LoomRealm Frame / Call v1 Subsystem Conformant
 LoomRealm Frame / Call v1 Transport Adapter Conformant
 ```
 
-完整产品必须通过其承担的全部角色。
-
-正式 conformance report MUST 至少记录：
+Report 至少记录：
 
 ```text
 protocol = loomrealm.frame-call
@@ -33,18 +30,9 @@ role = main | subsystem | transport
 result = pass
 ```
 
-不得把以下措辞作为正式互操作声明：
+不得声明 partial compatibility，例如 `v1 except recovery`、`Batch C compatible`、`v1 with retry extension`。
 
-```text
-v1 except Runtime recovery
-Batch C compatible
-mostly v1 compatible
-v1 with custom retry extension
-```
-
-## 2. Fixture Manifest Model
-
-机器可执行 fixture corpus SHOULD 使用：
+## 2. Fixture Manifest
 
 ```ts
 interface FrameCallFixtureManifestV1 {
@@ -69,56 +57,22 @@ interface FrameCallFixtureDescriptorV1 {
 }
 ```
 
-`protocolVersion` 与 `fixtureSetRevision` 不同：前者改变 wire/semantic compatibility；后者只表示测试覆盖增加。
+`fixtureSetRevision` 只表示覆盖增加，不改变 protocol version。
 
-## 3. Golden Trace Model
+Behavioral fixture 至少表达：initial normalized state、ordered inputs/events、expected outbound wire/commit、fault injection、forbidden outputs、final normalized state。
 
-Behavioral fixture 至少描述：
+## 3. Normalized State / Faults
+
+Main trace 至少归一化：
 
 ```text
-fixture id / role
-initial normalized authority state
-ordered input/events
-expected outbound wire
-expected Main/Subsystem commit
-fault injection
-forbidden outputs
-expected final normalized state
+Stack bottom→top
+Frame {frameId, subsystemKey, callerFrameId, state, currentActivationId, outcome}
+Runtime ready/failed
+InputTarget|null
+failedRuntimeKeys
+pending Request/fault when relevant
 ```
-
-实现内部 class、thread、function 或 queue 名称不得成为通过 fixture 的必要条件。
-
-## 4. Normalized Authority State
-
-Main trace 至少可归一化为：
-
-```ts
-type FixtureFrameState =
-  | "starting"
-  | "active"
-  | "suspended"
-  | "closing"
-  | "closed";
-
-interface FixtureFrameRecord {
-  readonly frameId: string;
-  readonly subsystemKey: string;
-  readonly callerFrameId: string | null;
-  readonly state: FixtureFrameState;
-  readonly currentActivationId: string | null;
-  readonly outcome: FrameOutcome | null;
-}
-
-interface FixtureInputTarget {
-  readonly subsystemKey: string;
-  readonly frameId: string;
-  readonly activationId: string;
-}
-```
-
-Trace 还需表达：Stack bottom→top、Runtime ready/failed、InputTarget|null、failedRuntimeKeys、pending Request/fault events when relevant。
-
-## 5. Fault Injection Vocabulary
 
 Harness 至少支持：
 
@@ -133,11 +87,9 @@ protocol-error
 late-response
 ```
 
-Timeout fixture SHOULD 使用 virtual/injectable monotonic clock，不依赖真实长时间 sleep。
+Timeout SHOULD 使用 virtual/injectable monotonic clock。
 
-## 6. Batch A Required Fixtures
-
-至少：
+## 4. Identity / Lifecycle Required Fixtures
 
 ```text
 frame-id-session-unique
@@ -152,12 +104,27 @@ outcome-not-lifecycle
 revoked-activation-never-valid-again
 stable-stack-top-active
 no-two-inputtargets
-frame-render-independence
+frame-render-data-independence
 ```
 
-## 7. Batch B Required Fixtures
+### Suspension provenance
 
-至少：
+```text
+explicit-suspend-revokes-activation
+explicit-suspend-disables-input
+explicit-suspend-produces-administrative-suspended-state
+explicit-suspend-no-generic-resume
+explicit-suspend-may-close
+explicit-suspend-timeout-runtime-fatal
+call-suspension-does-not-send-frame-suspend
+child-call-suspension-resumes-only-with-returned-child
+administrative-suspend-cannot-forge-returned-child
+administrative-suspend-cannot-reuse-old-activation
+```
+
+这些 fixture 已并入主协议，不再依赖独立 clarification 文档。
+
+## 5. Wire Schema Required Fixtures
 
 ```text
 exact-seven-methods
@@ -173,12 +140,11 @@ no-system-call-return
 no-frame-result
 no-frame-cancel
 no-frame-abort-unwind
+no-frame-reactivate
 extra-field-invalid-params
 ```
 
-## 8. Batch C Required Fixtures
-
-至少：
+## 6. Transaction Required Fixtures
 
 ```text
 initial-initialize-before-activate
@@ -202,9 +168,7 @@ postcommit-no-activation-rollback
 accepted-outcome-terminal
 ```
 
-## 9. Batch D Required Fixtures
-
-至少：
+## 7. Errors / Timeout Required Fixtures
 
 ```text
 success-known-commit
@@ -213,6 +177,7 @@ explicit-error-still-classified
 initialize-rejected-runtime-healthy
 initialize-rejected-forward-failed-outcome
 activate-timeout-runtime-failed
+suspend-timeout-runtime-failed
 call-timeout-gate-held
 return-timeout-gate-held
 late-response-no-recovery
@@ -227,16 +192,14 @@ protocol-error-fatal
 no-caller-driven-cancel
 ```
 
-## 10. Batch E Required Fixtures
-
-至少：
+## 8. Runtime Failure Required Fixtures
 
 ```text
 lowest-failed-runtime-occurrence-root
 same-runtime-multiple-occurrence
 whole-suffix-doomed
 top-to-bottom-unwind
-failed-runtime-no-close-rpc
+failed-runtime-no-frame-rpc
 failed-runtime-logical-retire
 healthy-descendant-context-absent-no-close
 healthy-descendant-one-close
@@ -258,9 +221,9 @@ zero-frame-runtime-failure-keeps-stack
 session-termination-no-forced-resume
 ```
 
-## 11. Batch F Limit Fixtures
+## 9. Hard Limit Fixtures
 
-每个限制 MUST 覆盖 exactly-at-limit 与 one-over-limit：
+每个限制覆盖 exactly-at-limit 与 one-over-limit：
 
 ```text
 reference-message-1mib
@@ -280,7 +243,7 @@ request-id-max-safe-integer
 request-id-reuse-rejected
 ```
 
-还必须验证：
+还必须：
 
 ```text
 nan-rejected
@@ -293,24 +256,11 @@ jsonrpc-batch-rejected
 invalid-response-is-protocol-fatal
 ```
 
-Message size fixture 必须区分：
+Desktop 同时验证 actual complete WebSocket text bytes 与 reference compact equivalent；PWA object carrier验证 reference compact equivalent。
 
-```text
-Desktop text carrier
-    actual complete WebSocket text UTF-8 bytes <= 1 MiB
-    AND reference compact equivalent <= 1 MiB
+## 10. Deadline Fixtures
 
-PWA object carrier
-    reference compact equivalent <= 1 MiB
-```
-
-应包含“compact后小于1 MiB、但实际 WebSocket text因大量 insignificant whitespace超过1 MiB”的拒绝 fixture，证明实际 carrier hard cap不能被 compact-size绕过。
-
-## 12. Deadline Profile Fixtures
-
-Deadline fixture按 sender role验证：
-
-### Main role
+Main role：
 
 ```text
 main-initialize-deadline-present
@@ -320,7 +270,7 @@ main-resume-deadline-present
 main-close-deadline-present
 ```
 
-### Subsystem role
+Subsystem role：
 
 ```text
 subsystem-call-deadline-present
@@ -340,11 +290,9 @@ deadline-uses-monotonic-clock
 timeout-remains-ambiguous-no-retry
 ```
 
-Fixture 不要求 Main 与 Subsystem 使用相同 deadline 数值，也不要求某角色配置自己永远不会发送的方法。
+## 11. Request ID Fixtures
 
-## 13. Request ID Fixtures
-
-同一发送方同一 Control Connection：
+同一 sender / Control Connection：
 
 ```text
 positive-safe-integer-only
@@ -359,11 +307,9 @@ late-response-cannot-match-new-operation
 allocator-exhaustion-does-not-wrap
 ```
 
-Main→Subsystem 与 Subsystem→Main 的 ID namespace独立，因此双方 MAY 同时存在相同数值的 outbound ID。
+两个方向 sender namespace 独立。
 
-## 14. Desktop WebSocket Transport Fixtures
-
-至少：
+## 12. Desktop WebSocket Transport Fixtures
 
 ```text
 websocket-text-message-only
@@ -380,11 +326,11 @@ oversize-protocol-failure
 connection-loss-propagated
 ```
 
-底层 WebSocket fragmentation 不改变“one complete WebSocket message = one application message”。
+WebSocket fragmentation 不改变 complete-message application boundary。
 
-## 15. PWA MessagePort Transport Fixtures
+## 13. PWA MessagePort Transport Fixtures
 
-在 Control MessagePort 已建立的前提下至少：
+在 Host 已建立 Control MessagePort 的前提下：
 
 ```text
 one-postmessage-one-rpc-object
@@ -399,21 +345,20 @@ reference-compact-json-size-limit
 ordered-per-direction
 no-adapter-duplicate
 no-adapter-retry
-connection-loss-runtime-lifecycle-mapping-by-profile
+connection-loss-propagated
 ```
 
-PWA Bootstrap Credential / Worker creation 如何建立 Control MessagePort 是独立 Profile，不属于 Frame / Call application conformance。
+Worker/MessagePort 如何建立属于 Host implementation，不属于 Frame conformance。
 
-## 16. Cross-transport Semantic Equivalence
+## 14. Cross-transport Equivalence
 
-Desktop 与 PWA adapter MUST 对同一抽象 trace 产生相同 Frame authority结果。
-
-至少使用：
+Desktop 与 PWA adapter 对同一 abstract trace MUST 产生相同 Frame authority结果：
 
 ```text
 initial-frame-success
 nested-call-return-resume
 same-subsystem-recursion
+administrative-suspend-close
 initialize-business-rejection
 call-timeout
 return-timeout
@@ -423,11 +368,9 @@ accepted-outcome-then-crash
 recovery-resume-failure
 ```
 
-允许差异只有 carrier/bootstrap/platform lifecycle event；不允许差异包括 Frame schema、commit point、timeout含义、retry、unwind root、outcome与 Activation。
+允许差异只有 carrier/bootstrap/platform lifecycle integration；不允许差异包括 Frame schema、commit point、timeout含义、retry、suspend provenance、unwind root、outcome与 Activation。
 
-## 17. Version / Binding Fixtures
-
-至少：
+## 15. Version / Binding Fixtures
 
 ```text
 protocol-id-is-loomrealm-frame-call
@@ -442,45 +385,23 @@ custom-retry-extension-not-conformant
 closed-schema-extension-not-conformant
 ```
 
-## 18. Fixture Revision Rule
+## 16. Fixture Revision Rule
 
-新增 fixture MAY 增加 `fixtureSetRevision` 而保持 Frame / Call protocolVersion=1，前提是新增 fixture 只验证已经由 Frozen Contract 决定的行为。
+新增 fixture MAY 增加 `fixtureSetRevision` 而保持 protocolVersion=1，只要它验证已经由 Frozen Contract 决定的行为。
 
-如果为了让 fixture通过必须改变：合法 wire、字段语义、commit point、error classification、timeout/no-retry、failure unwind或 Frozen limits，则不能只升级 fixture revision，必须先走新的协议/ADR兼容性决策。
+如果 fixture 要求改变合法 wire、字段语义、commit point、suspend provenance、error classification、timeout/no-retry、failure unwind或 Frozen limits，则不能只升级 fixture revision，必须走新的协议版本决策。
 
-正式 conformance report MUST写明 tested `fixtureSetRevision`。较旧 revision的 pass记录不能自动宣称通过较新 corpus。
+正式 report MUST记录 tested `fixtureSetRevision`；旧 revision pass 不能自动声明通过更高 revision。
 
-## 19. 推荐实现目录
+## 17. Final Rule
 
-```text
-packages/frame-call-protocol/
-├── src/
-├── conformance/
-│   └── v1/
-│       ├── manifest.json
-│       ├── schema/
-│       ├── transactions/
-│       ├── errors-timeouts/
-│       ├── runtime-failure/
-│       ├── limits/
-│       └── transport/
-└── test/
-```
-
-目录结构不是 wire Contract；fixture id/expected behavior才是兼容性依据。
-
-## 20. Final Rule
-
-Frame / Call v1 conformance 的判断标准是：
+Frame / Call v1 conformance =：
 
 ```text
-Frozen Contract
-+
-本 Profile 的适用 fixture catalog
-+
-记录明确的 fixtureSetRevision
-+
-相同 fault 下的相同 authority outcome
+Frozen Frame / Call v1 Contract
++ applicable fixture catalog
++ explicit fixtureSetRevision
++ same fault → same authority outcome
 ```
 
-Transport便利性、内部恢复技巧或“基本兼容”不能覆盖正式 v1 规则。
+内部 class/thread/queue/transport convenience 不属于兼容性依据。
