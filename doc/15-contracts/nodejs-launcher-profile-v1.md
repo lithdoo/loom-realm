@@ -5,10 +5,13 @@
 > Profile Version：1  
 > 稳定程度：Frozen  
 > 主要定义：Main 将已验证 Subsystem Descriptor 转换为受监督 Node.js Runtime Process 的确定性启动语义  
-> 依赖：[Game Package v2 Bootstrap / Descriptor Contract](./game-package-v2.md)、[Main ⇄ Subsystem Control & Runtime Lifecycle v1](./subsystem-control-lifecycle-protocol.md)  
-> 最近复核：2026-08-03
+> 依赖：[Game Package v2 Bootstrap / Descriptor Contract](./game-package-v2.md)、[Subsystem Control v2](./subsystem-control-protocol-v2.md)、[Runtime Control Application Profile v2](./runtime-control-profile-v2.md)  
+> 最近复核：2026-08-09
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
+
+> [!NOTE]
+> 本文的 **Launcher Profile v1**、`LoomRealmBootstrapContextV1.version = 1` 与 **Subsystem Control protocol version** 是不同版本空间。当前由本 Launcher 启动的 Runtime 使用 Subsystem Control v2；已废弃的 Control v1 不参与实现或协商。
 
 ## 1. 范围与链路边界
 
@@ -158,7 +161,7 @@ interface LaunchAttempt {
 
 同一 Session 中一个 `descriptor.key` 同时最多对应一个 active Runtime Container。
 
-v1 MUST NOT 并发创建两个有效 Runtime 来竞争同一 Subsystem identity。
+本 Launcher Profile v1 MUST NOT 并发创建两个有效 Runtime 来竞争同一 Subsystem identity。
 
 ## 6. Bootstrap Credential
 
@@ -172,7 +175,7 @@ v1 MUST NOT 并发创建两个有效 Runtime 来竞争同一 Subsystem identity�
 - MUST NOT 由 PID、端口、路径或时间戳推导；
 - SHOULD NOT 出现在普通日志或用户可见错误中。
 
-Token 的字节数、编码与随机算法由安全实现 Profile 决定，不在本版本冻结。
+Token 的字节数、编码与随机算法由安全实现 Profile 决定，不在本 Launcher Profile 版本冻结。
 
 ### 6.1 顺序保证
 
@@ -205,7 +208,7 @@ Spawn Process
 - Game Bootstrap 被取消；
 - Session termination。
 
-Token 成功消费后的身份绑定与重放规则由 Control Protocol v1 管理。
+Token 成功消费后的身份绑定与重放规则由 **Subsystem Control v2** 管理。
 
 ## 7. Bootstrap Context
 
@@ -232,6 +235,8 @@ interface LoomRealmBootstrapContextV1 {
 }
 ```
 
+这里的 `version: 1` 只表示 **Desktop Launcher Bootstrap Context v1**，不表示 Subsystem Control v1。Runtime随后通过 `subsystem.hello.protocolVersions` 协商当前 Control v2。
+
 Bootstrap Context MUST NOT 包含：
 
 ```text
@@ -239,12 +244,15 @@ PID
 launchId
 physicalEntry
 Renderer Data Endpoint
+DataAuthority generation
+Data ticket / bearer credential
+MessagePort
 frameId
 activationId
 Render identity
 ```
 
-Bootstrap Context 只提供发起 Control Bootstrap 所必需的信息；它本身不完成 Subsystem identity binding。
+Bootstrap Context 只提供发起 Control Bootstrap 所必需的信息；它本身不完成 Subsystem identity binding，也不建立 Renderer⇄Subsystem Data Connection。
 
 唯一的 Control identity binding 仍由 `subsystem.hello` 完成。
 
@@ -276,7 +284,7 @@ Launcher MUST 在 spawn 前再次拒绝任何未经过 Descriptor Validator 的�
 
 ## 9. Process Creation
 
-Node.js v1 Process Creation 语义等价于：
+Node.js Launcher Profile v1 Process Creation 语义等价于：
 
 ```text
 executable:
@@ -304,7 +312,7 @@ stderr:
     captured diagnostic stream
 
 extra process IPC:
-    none required by LoomRealm v1
+    none required by this Launcher Profile
 ```
 
 Game Package MUST NOT 追加 argv。
@@ -321,7 +329,7 @@ Launcher MUST 使用参数化 Process Creation API。
 
 ### 9.2 Working Directory
 
-v1 固定：
+Launcher Profile v1 固定：
 
 ```text
 cwd = Installation Root
@@ -374,14 +382,14 @@ Process 创建成功后，公共 Runtime Container 状态 MUST 保持：
 starting
 ```
 
-v1 MUST NOT 因 Launcher 内部状态增加新的跨实现公共状态：
+Launcher Profile v1 MUST NOT 因 Launcher 内部状态增加新的跨实现公共状态：
 
 ```text
 spawned
 running
 ```
 
-之后只有 Control Transport 被 Main 接受时才进入 `connected`。
+之后只有 Control carrier 被 Main 接受时才进入 `connected`。
 
 ## 12. Runtime Supervisor
 
@@ -451,7 +459,7 @@ exit code = 0
 ```text
 PROCESS_EXITED_UNEXPECTEDLY
 → Runtime failure
-→ revoke/close affected connections
+→ revoke affected current authority/connections
 → upper Main lifecycle handles affected Frames
 ```
 
@@ -469,7 +477,7 @@ MUST NOT automatically restart a failed Subsystem.
 
 Unexpected exit 必须暴露为 Runtime failure。
 
-如果未来引入 restart，每个新 Runtime MUST 是新的显式 Launch Attempt，并使用新的 Bootstrap Credential；Runtime generation、Frame recovery、Render recovery 与 Data Connection replacement 必须由新契约同时定义。
+如果未来引入 restart，每个新 Runtime MUST 是新的显式 Launch Attempt，并使用新的 Bootstrap Credential；Runtime/Data authority、Frame recovery、Render recovery 与 Data Connection replacement 必须由新契约同时定义。
 
 ## 15. Termination
 
@@ -483,7 +491,7 @@ request graceful termination
 → force terminate if still alive
 ```
 
-graceful shutdown 的 Main → Subsystem wire method 不属于本 Profile。
+graceful shutdown 的 Main → Subsystem wire method 由 Subsystem Control v2 定义，不属于本 Launcher Profile。
 
 本 Profile 只冻结：
 
@@ -511,7 +519,7 @@ Game Package MUST NOT 覆盖这些 timeout。
 
 ## 17. Error Model
 
-Launcher v1 冻结以下机器可识别错误类别：
+Launcher Profile v1 冻结以下机器可识别错误类别：
 
 ```text
 LAUNCHER_TYPE_UNSUPPORTED
@@ -649,7 +657,7 @@ Launcher MUST NOT 创建第二套公共 Runtime lifecycle。
 
 ## 21. Conformance Tests
 
-符合 v1 的实现至少 MUST 验证：
+符合 Launcher Profile v1 的实现至少 MUST 验证：
 
 ```text
 valid package-relative Entry launches
@@ -674,6 +682,7 @@ Bootstrap Token registered before spawn
 new Launch Attempt gets new Token
 spawn failure revokes Token
 early exit revokes unconsumed Token
+bootstrap-context-version-independent-from-control-version
 
 shell interpretation impossible
 Game Package cannot supply Node flags
@@ -681,6 +690,7 @@ cwd equals Installation Root
 stdout/stderr are diagnostic only
 
 spawn success leaves public state at starting
+Control v2 hello selects version 2
 exit before connect fails bootstrap
 exit after connect before hello fails bootstrap
 exit after identified before ready fails bootstrap
@@ -691,7 +701,7 @@ non-responsive Runtime is eventually force-terminated
 
 ## 22. 暂缓项
 
-以下项目明确不属于 v1，MUST NOT 阻塞本 Profile，也不得由实现自行发明隐式行为：
+以下项目明确不属于 Launcher Profile v1，MUST NOT 阻塞本 Profile，也不得由实现自行发明隐式行为：
 
 ```text
 PWA Descriptor → Worker Script Profile
@@ -709,28 +719,32 @@ Game-supplied Node executable
 Game-supplied Node flags / argv
 Node version negotiation in Game Entry
 default timeout numeric values
-graceful shutdown Control wire method
 OS-specific process-group/job-object API
 Bootstrap Token final byte length/encoding
 executable integrity/signature verification
 ```
+
+Data endpoint/ticket/MessagePort establishment不属于本 Launcher Profile，也不通过 Control `ready`补回。
 
 ## 23. 核心不变量
 
 ```text
 Main is the only privileged Subsystem Launcher.
 One descriptor.key has at most one active Runtime Container.
-Desktop v1 launches nodejs only.
+Desktop Launcher Profile v1 launches nodejs only.
 Entry is Installation-relative and validated before spawn.
 Launcher never invokes a shell.
 Node executable is selected by LoomRealm Host.
 Game Package cannot inject Node CLI semantics.
 Bootstrap authentication state exists before process execution.
+Bootstrap Context v1 version != Subsystem Control version.
 Child environment is explicitly constructed.
 PID / launchId / Process Handle are not protocol identity.
 Spawn success does not mean connected / identified / ready.
+Current Control protocol is v2; Control v1 is abandoned.
+Runtime ready does not carry Data endpoint.
 Supervisor is authoritative for actual Process exit.
 Unexpected exit is failure even when exit code is zero.
-v1 never performs implicit automatic restart.
+Launcher Profile v1 never performs implicit automatic restart.
 Node.js executable code is trusted code, not sandboxed code.
 ```
