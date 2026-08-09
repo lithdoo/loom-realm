@@ -112,7 +112,7 @@ Subsystem
 
 User Input wire只携 `frameId + activationId` authority identity。Subsystem不能仅从 User Input wire独立证明 Main当前 `InputTarget`非空，因此 Renderer Core的 sender gate是 v1 trust boundary的一部分。
 
-Renderer不得根据 DOM focus、Render focus、Interest或 Component自行生成 InputTarget。
+Renderer不得根据 DOM focus、Render focus、Interest或本地 presentation state自行生成 InputTarget。
 
 ## 6. Input Interest / Effective Channel
 
@@ -234,20 +234,31 @@ retire current Data carrier
 
 无 ACK/NACK、Patch history replay、resume cursor或 Renderer→Subsystem resync RPC。
 
-## 12. Node / Component Boundary
+## 12. Node / Presentation Boundary
 
-Node tag是 logical Renderer Component type：
+Render Core对 Node 字段只定义数据结构：
 
 ```text
-(subsystemKey, tag)
-→ Renderer Component Factory
+key       stable Node identity
+tag       opaque string
+attrs     string→string map
+data      JSON object
+children  ordered structure
 ```
 
-它不是任意 DOM tag。
+协议不定义 `tag` 的具体含义，也不定义：
 
-`attrs`是 string→string declarative attributes；`data`是 JSON object component state；`children[]`是 ordered structure。
+```text
+known / unknown tag
+Component Registry / Factory
+component code/bootstrap
+per-tag attrs/data schema
+DOM/Canvas/WebGL mapping
+```
 
-Component code/bootstrap不进入 Render Update payload。Component existence也不产生 ordinary input authority。
+这些全部由具体 Subsystem 与 Renderer 实现掌控，不构成独立协议/Profile。
+
+本地 presentation 对象的存在也不产生 ordinary input authority。
 
 ## 13. Domain Composition
 
@@ -300,8 +311,8 @@ Renderer ⇄ Subsystem
 ├── User Input v1
 └── Render Update v1
 
-Renderer component loading
-└── Renderer Component Bootstrap/Profile
+Renderer presentation implementation
+└── implementation-owned; no LoomRealm wire/Profile
 ```
 
 旧 Frame-scoped Data/Client-State模型已经从当前文档树移除；设计历史由 ADR 0004/0006 与 Git history保留。
