@@ -1,77 +1,62 @@
-# ADR 0016：协议边界清理与 Data Lease 方向
+# ADR 0016：协议边界清理与 Data Authority 方向
 
-> 状态：Accepted；Control v1/v2 迁移部分被 ADR 0017 更新  
-> 日期：2026-08-08  
-> 影响范围：Subsystem Control、Renderer Control、Renderer⇄Subsystem Data、Content Access、Frame v1 clarification  
-> 后续决定：[ADR 0017：实现前废弃 Subsystem Control v1，确立 v2 为唯一当前版本](./0017-abandon-subsystem-control-v1.md)
-
-> [!IMPORTANT]
-> 本 ADR 的协议边界结论继续有效；其中“保留 Control v1 作为 Frozen compatibility baseline、以 v2 作为后续方向”的版本迁移安排已被 ADR 0017 替代。当前唯一 Subsystem Control 实现目标是 v2。
+> 状态：Accepted  
+> 日期：2026-08-08；文档归一复核：2026-08-09  
+> 影响范围：Subsystem Control、Renderer Control、Renderer⇄Subsystem Data、Content Access、Frame v1 clarification
 
 ## 背景
 
-Frame / Call v1 已冻结并形成清晰的 Main-owned Frame/Activation authority，但后续 Renderer/Data 设计暴露出几个跨协议接缝：
+Frame / Call v1 已形成清晰的 Main-owned Frame/Activation authority，但 Renderer/Data 设计暴露出几个跨协议接缝：
 
-1. Subsystem Control v1 的 `ready` 在 Desktop Profile 中携带 WebSocket `rendererDataEndpoint`，把 Runtime readiness 与 Data transport discovery 绑定；PWA 目标却使用 MessagePort。
-2. Renderer Control v1 Draft 原先把 Data authority、endpoint 与 bearer token放在同一 Snapshot 中，但没有定义 Subsystem 如何获得/验证 Main 签发的 token。
-3. Renderer Control loss 后既有 Data Connection 的 authority 未闭合。
-4. Content API 已定义 Content Grant，但 grant distribution 属于 bootstrap/access capability，不应混入 Content resource semantics。
-5. Frame v1 的显式 `frame.suspend` 需要在不改变 Frozen wire 的前提下澄清其恢复边界。
+1. 早期 Control 草案把 Renderer Data endpoint 放入 Runtime `ready`，错误绑定 Runtime readiness 与 Data transport discovery；
+2. Renderer Control 草案曾混合逻辑 Data authority、endpoint 与 bearer token；
+3. Renderer Control loss 后既有 Data Connection authority需要闭合；
+4. Content API 的资源语义与 capability distribution 需要拆分；
+5. Frame v1 显式 `frame.suspend` 的恢复边界需要澄清。
 
 ## 决策原则
 
 协议按 authority / lifecycle ownership 拆分，不按“少几个协议文件”优化。
 
 ```text
-Runtime != Frame != Renderer Control != Data Connection != Render != Content
+Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
 ```
 
-共享物理 Transport 不代表共享协议 identity、lifecycle、revision、error 或 recovery model。
+共享物理 Transport 不代表共享 protocol identity、lifecycle、revision、error 或 recovery。
 
-## 决策 1：已实现的 Frozen contract 不静默扩展
+## 决策 1：Subsystem Control v1 只管理 Runtime lifecycle
 
-Frame / Call v1、Frame / Call v1 Conformance 等已经形成实际当前 compatibility boundary 的 Frozen contract保持 wire 不变。
-
-Subsystem Control v1 当时也按同样原则保留；后续 ADR 0017 根据“v1 从未实现、没有兼容依赖”的事实，明确将其实现前废弃，而不是继续维持无实际消费者的双版本兼容。
-
-因此当前规则是：
+当前 [Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md) 只负责：
 
 ```text
-implemented/released compatibility boundary
-    → incompatible change requires new version
-
-unimplemented abandoned design
-    → may be retired explicitly by ADR
+bootstrap authentication
+Runtime identity
+initializing / ready / failed
+Main-owned shutdown
+Control-loss lifecycle
 ```
 
-## 决策 2：Subsystem Control v2 纯化为 Runtime lifecycle
+`ready`：
 
-Subsystem Control v2 保留 Runtime identity / hello / ready / failed / shutdown 语义，但 `ready` 不再携带 Renderer Data Endpoint。
-
-```text
-ready = Runtime 已完成 required initialization，能够承担 enclosing Runtime Profile 声明的后续角色
+```json
+{"state":"ready"}
 ```
 
-Data endpoint / MessagePort / Data lease establishment 不属于 Runtime lifecycle。
+不携带 Renderer Data endpoint、MessagePort、Data credential 或 generation。
 
-根据 ADR 0017：
+因为 endpoint-in-ready 的旧形态从未形成 conformant implementation，first implementation contract 直接以 lifecycle-only v1 为准；不为预实现设计稿保留额外协议版本。
 
-```text
-Subsystem Control v1 = Abandoned Before Implementation
-Subsystem Control v2 = Current
-```
-
-当前 Runtime Control Application Profile v2 静态组合：
+当前 Runtime Control Application Profile v1：
 
 ```text
-Subsystem Control v2
+Subsystem Control v1
 +
 Frame / Call v1
 ```
 
-## 决策 3：Renderer Control 只复制逻辑 authority
+## 决策 2：Renderer Control 只复制逻辑 authority
 
-Renderer Control v1 Draft 的 Snapshot 只包含 Main-owned committed authority：
+Renderer Control v1 Snapshot 只包含 Main-owned committed authority：
 
 ```text
 Runtime projection
@@ -90,9 +75,9 @@ bearer connection token
 transport-specific bootstrap material
 ```
 
-这些属于 Renderer⇄Subsystem Connection Bootstrap/Profile。
+这些属于 Renderer⇄Subsystem Connection Host/Platform Binding。
 
-## 决策 4：Data authority 使用 generation 模型
+## 决策 3：Data authority 使用 generation 模型
 
 对每个 Subsystem，Main 是 Data Connection authority。
 
@@ -101,11 +86,11 @@ DataAuthority generation N
     = Main 当前允许 Renderer 建立/持有该 Subsystem 第 N 代 Data Connection
 ```
 
-generation Session-local、Subsystem-scoped、positive safe integer、never reused。
+`generation` Session-local、Subsystem-scoped、positive safe integer、never reused。
 
-Renderer⇄Subsystem Connection Protocol 定义 matching generation 的建立后 identity、替换和关闭；bootstrap material可以按 Desktop/PWA Profile不同，但建立后的 identity/lifecycle语义必须一致。
+Renderer⇄Subsystem Data Connection Contract 定义 matching generation 的建立后 identity、替换与关闭；Desktop/PWA bootstrap 机制可以不同，但建立后的 Core semantics 必须一致。
 
-## 决策 5：Renderer Control lease 是 Data authority 的父级 authority
+## 决策 4：Renderer Control lease 是 Data authority 的父级 authority
 
 Renderer失去当前 Main Control authority后：
 
@@ -116,14 +101,14 @@ invalidate DataAuthority
 close existing Renderer⇄Subsystem Data Connections
 reconnect Main
 obtain fresh full Authority Snapshot
-re-establish Data Connections from current generations
+re-establish current Data generations
 ```
 
-Render Store可以保留最后一个合法 presentation snapshot，但 Render恢复独立进行；Data Connection close不等于 Render destroy。
+Render Store MAY 保留最后合法 presentation snapshot；Data Connection close 不等于 Render destroy。
 
-## 决策 6：Renderer Control 使用 full snapshot，不引入 patch/replay
+## 决策 5：Renderer Control 使用 full snapshot
 
-v1继续采用：
+Renderer Control v1：
 
 ```text
 full Authority Snapshot
@@ -134,42 +119,47 @@ no historical replay
 reconnect = current snapshot
 ```
 
-为避免合法状态无法编码，Renderer Control Profile必须对 topology 和 whole-message size建立可证明的上界。
+必须对 topology 与 whole-message size 建立上界；慢 Renderer 使用 bounded latest-state coalescing，不无界排队历史 snapshots。
 
-慢 Renderer采用 bounded latest-state coalescing；不得无界排队历史 snapshots。
-
-## 决策 7：Frame v1 suspend 只做语义澄清
+## 决策 6：Frame v1 suspend 只做语义澄清
 
 不修改 Frame v1 七方法 wire。
 
-区分：
-
 ```text
 call-owned suspension
-    active → suspended
-    child terminal outcome → frame.resume(...returnedFrameId,result,freshActivation) → active
+    child terminal outcome
+    → frame.resume(...returnedFrameId,result,freshActivation)
 
-explicit administrative suspend
-    active → suspended
-    v1 不提供 generic reactivation
-    后续只能进入 closing/closed
+administrative suspension
+    v1 没有 generic resume
+    → 后续 closing/closed 或 failure cleanup
 ```
 
-因此不得用伪造 `returnedFrameId`、`result=null` 或私有字段把 `frame.resume` 当 generic resume。
+不得用伪造 child outcome 把 `frame.resume` 当 generic resume。
 
-## 决策 8：Content service semantics 与 capability distribution 分离
+## 决策 7：Content semantics 与 capability distribution 分离
 
-Content API继续定义逻辑只读请求、响应、缓存、MIME、错误与完整性。
+Content API定义：
 
-Content Grant 如何交给 Renderer/Runtime、何时轮换/失效属于独立 Content Access Bootstrap/Profile，不进入 Frame、Render State 或普通 resource response。
+```text
+logical readonly routes
+MIME / cache / version
+errors / integrity
+authorized request semantics
+```
+
+Content capability 如何签发、分发、轮换/失效属于独立 Content Access Bootstrap/Profile，不进入 Frame、Render State 或普通 resource response。
 
 ## 当前推进顺序
 
 ```text
-Subsystem Control v2 Current
-Runtime Control Application Profile v2 = Control v2 + Frame v1
+Game Package v1
+Desktop Launcher Profile v1
+Subsystem Control v1
+Runtime Control Application Profile v1
+Frame / Call v1
 Renderer Control v1
-Renderer ⇄ Subsystem Connection v1
+Renderer ⇄ Subsystem Data Connection v1
 User Input v1
 Render Update v1
 Renderer Component / Render Tree Profile
@@ -190,4 +180,4 @@ Render Update      → Subsystem-owned Render如何同步？
 Content API        → 逻辑只读内容如何读取？
 ```
 
-协议数量不是优化目标；单一 authority、闭合 lifecycle 和最小 wire surface 才是。
+协议数量不是优化目标；单一 authority、闭合 lifecycle、最小 wire surface 和可恢复性才是。
