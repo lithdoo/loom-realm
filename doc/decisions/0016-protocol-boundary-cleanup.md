@@ -1,8 +1,12 @@
 # ADR 0016：协议边界清理与 Data Lease 方向
 
-> 状态：Accepted  
+> 状态：Accepted；Control v1/v2 迁移部分被 ADR 0017 更新  
 > 日期：2026-08-08  
-> 影响范围：Subsystem Control、Renderer Control、Renderer⇄Subsystem Data、Content Access、Frame v1 clarification
+> 影响范围：Subsystem Control、Renderer Control、Renderer⇄Subsystem Data、Content Access、Frame v1 clarification  
+> 后续决定：[ADR 0017：实现前废弃 Subsystem Control v1，确立 v2 为唯一当前版本](./0017-abandon-subsystem-control-v1.md)
+
+> [!IMPORTANT]
+> 本 ADR 的协议边界结论继续有效；其中“保留 Control v1 作为 Frozen compatibility baseline、以 v2 作为后续方向”的版本迁移安排已被 ADR 0017 替代。当前唯一 Subsystem Control 实现目标是 v2。
 
 ## 背景
 
@@ -24,20 +28,21 @@ Runtime != Frame != Renderer Control != Data Connection != Render != Content
 
 共享物理 Transport 不代表共享协议 identity、lifecycle、revision、error 或 recovery model。
 
-## 决策 1：保留 Frozen v1，不做静默兼容扩展
+## 决策 1：已实现的 Frozen contract 不静默扩展
 
-以下已 Frozen 合同保持 wire 不变：
+Frame / Call v1、Frame / Call v1 Conformance 等已经形成实际当前 compatibility boundary 的 Frozen contract保持 wire 不变。
+
+Subsystem Control v1 当时也按同样原则保留；后续 ADR 0017 根据“v1 从未实现、没有兼容依赖”的事实，明确将其实现前废弃，而不是继续维持无实际消费者的双版本兼容。
+
+因此当前规则是：
 
 ```text
-Subsystem Control v1
-Runtime Control Application Profile v1
-Frame / Call v1
-Frame / Call v1 Conformance
+implemented/released compatibility boundary
+    → incompatible change requires new version
+
+unimplemented abandoned design
+    → may be retired explicitly by ADR
 ```
-
-不得给 closed v1 schema 私加 `messageport`、Data Grant、capability、generic resume 等字段/方法。
-
-需要修正层级错误时使用新协议版本或独立 Profile。
 
 ## 决策 2：Subsystem Control v2 纯化为 Runtime lifecycle
 
@@ -49,7 +54,20 @@ ready = Runtime 已完成 required initialization，能够承担 enclosing Runti
 
 Data endpoint / MessagePort / Data lease establishment 不属于 Runtime lifecycle。
 
-Subsystem Control v1 继续作为 Frozen 历史/Desktop-compatible contract；v2 是后续跨 Desktop/PWA 的收敛方向。
+根据 ADR 0017：
+
+```text
+Subsystem Control v1 = Abandoned Before Implementation
+Subsystem Control v2 = Current
+```
+
+当前 Runtime Control Application Profile v2 静态组合：
+
+```text
+Subsystem Control v2
++
+Frame / Call v1
+```
 
 ## 决策 3：Renderer Control 只复制逻辑 authority
 
@@ -74,7 +92,7 @@ transport-specific bootstrap material
 
 这些属于 Renderer⇄Subsystem Connection Bootstrap/Profile。
 
-## 决策 4：Data authority 使用 lease/generation 模型
+## 决策 4：Data authority 使用 generation 模型
 
 对每个 Subsystem，Main 是 Data Connection authority。
 
@@ -85,9 +103,9 @@ DataAuthority generation N
 
 generation Session-local、Subsystem-scoped、positive safe integer、never reused。
 
-未来 Renderer⇄Subsystem Connection Protocol 必须定义 matching generation 的建立、认证、替换和关闭；其 bootstrap material 可以按 Desktop/PWA Profile 不同，但建立后的 identity/lifecycle语义必须一致。
+Renderer⇄Subsystem Connection Protocol 定义 matching generation 的建立后 identity、替换和关闭；bootstrap material可以按 Desktop/PWA Profile不同，但建立后的 identity/lifecycle语义必须一致。
 
-## 决策 5：Renderer Control lease 是 Data lease 的父级 authority
+## 决策 5：Renderer Control lease 是 Data authority 的父级 authority
 
 Renderer失去当前 Main Control authority后：
 
@@ -145,32 +163,28 @@ Content API继续定义逻辑只读请求、响应、缓存、MIME、错误与�
 
 Content Grant 如何交给 Renderer/Runtime、何时轮换/失效属于独立 Content Access Bootstrap/Profile，不进入 Frame、Render State 或普通 resource response。
 
-## 后续顺序
+## 当前推进顺序
 
 ```text
-Subsystem Control v2 Draft
-Renderer Control v1 boundary cleanup
-Frame v1 clarification companion
-    ↓
+Subsystem Control v2 Current
+Runtime Control Application Profile v2 = Control v2 + Frame v1
+Renderer Control v1
 Renderer ⇄ Subsystem Connection v1
-    ↓
-Runtime Control Application Profile v2（在所需组成协议冻结后定义）
-    ↓
 User Input v1
 Render Update v1
-Render State Contract v1
+Renderer Component / Render Tree Profile
 Content Access Profile
 ```
 
 ## 结果
 
-这次清理不重新设计 Frame核心，而是让每个协议只回答一个问题：
+每个协议只回答一个问题：
 
 ```text
 Subsystem Control  → Runtime是谁、是否ready、何时停止？
 Frame / Call       → 谁调用谁、谁拥有ordinary input？
 Renderer Control   → Main当前公开的control authority是什么？
-Data Connection    → Renderer和Subsystem当前是否拥有合法Data lease？
+Data Connection    → Renderer和Subsystem当前是否拥有合法Data carrier authority？
 User Input         → 当前Activation下输入如何传递？
 Render Update      → Subsystem-owned Render如何同步？
 Content API        → 逻辑只读内容如何读取？
