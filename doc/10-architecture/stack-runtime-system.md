@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：调用栈、Frame 生命周期、Activation、事务提交、错误边界、Runtime failure unwind 与 ordinary InputTarget  
 > 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)  
-> 下层契约：[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[Frame v1 Suspend Clarification](../15-contracts/frame-call-v1-suspend-clarification.md)  
+> 下层契约：[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)  
 > 最近复核：2026-08-09
 
 ## 1. 设计目标
@@ -141,22 +141,21 @@ Child active
 
 Response-before-dependent-RPC；activate/resume ACK-before-publication。
 
-## 8. Suspend Clarification
+## 8. Suspend Semantics
 
-`frame.suspend`有两种原因：
+Suspend语义已经直接属于 Frame / Call v1：
 
 ```text
 child-call suspension
-    recovery only by child outcome + frame.resume
+    → only corresponding child outcome + fresh frame.resume can reactivate
 
-administrative suspension
-    v1 has no generic reactivation
-    later closing/closed or failure cleanup only
+administrative frame.suspend
+    → old Activation revoked
+    → no generic v1 resume
+    → close/failure cleanup only
 ```
 
-不得伪造 child result把 `frame.resume`当 generic resume。
-
-任何 suspend都会 revoke current Activation/InputTarget。
+ordinary `frame.call` 不发送 reverse `frame.suspend`；不得伪造 child result把 `frame.resume`当 generic resume。
 
 ## 9. Error / Timeout
 
@@ -237,7 +236,7 @@ shared sender-side Request ID namespace
 
 Frame Request ID、JSON model、message/business payload limits与 deadline profile继续按 Frozen Frame v1。
 
-Desktop/PWA platform binding可以不同，但建立后的 transaction/error/recovery semantics必须相同。
+Desktop/PWA Host binding可以不同，但建立后的 transaction/error/recovery semantics必须相同。
 
 ## 14. 核心不变量
 
@@ -247,9 +246,10 @@ Desktop/PWA platform binding可以不同，但建立后的 transaction/error/rec
 4. Stack mutation串行；
 5. Response-before-dependent-RPC；
 6. ACK-before-publication；
-7. timeout/loss ambiguous→Runtime failure/no retry；
-8. failure root取 lowest failed-runtime occurrence；
-9. whole suffix fixed-point unwind；
-10. accepted outcome不可覆盖；
-11. surviving Caller使用 fresh Activation；
-12. Runtime/Frame/Data/Render lifecycle互相独立。
+7. child-call suspension与administrative suspension provenance不同；administrative无 generic resume；
+8. timeout/loss ambiguous→Runtime failure/no retry；
+9. failure root取 lowest failed-runtime occurrence；
+10. whole suffix fixed-point unwind；
+11. accepted outcome不可覆盖；
+12. surviving Caller使用 fresh Activation；
+13. Runtime/Frame/Data/Render lifecycle互相独立。
