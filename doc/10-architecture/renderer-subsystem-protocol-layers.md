@@ -4,7 +4,7 @@
 > 状态：Archived Design / Conceptual  
 > 稳定程度：Evolving  
 > 主要定义：Renderer 与 Subsystem 数据面职责及其对 Main committed control/recovery state 的依赖  
-> 依赖：[通信系统](./communication-system.md)、[运行承载系统](./runtime-hosting-system.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[User Input Protocol v1](../15-contracts/user-input-v1.md)  
+> 依赖：[通信系统](./communication-system.md)、[运行承载系统](./runtime-hosting-system.md)、[渲染系统](./rendering-system.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[User Input Protocol v1](../15-contracts/user-input-v1.md)  
 > 最近复核：2026-08-08
 
 本文只描述 Renderer ⇄ Subsystem 数据面的概念边界；正式语义以 `doc/15-contracts` 为准。
@@ -17,7 +17,14 @@ Frame / Call Protocol v1 已整体 Active / Normative / Frozen。全部 Frame RP
 
 物理 carrier可由 Desktop WebSocket 或 PWA MessagePort承载，但 carrier establishment属于 Host/Platform binding；Connection Core只定义建立后的 authority/lifecycle。
 
-连接粒度=Subsystem，不是 Frame/Activation/Render。
+连接粒度=Subsystem，不是 Frame/Activation/Domain/Node。
+
+一条 current Data Connection MAY承载：
+
+```text
+0..N Frame/Input contexts
+0..N Render Domains
+```
 
 ## 2. 三个数据协议域
 
@@ -36,7 +43,7 @@ User Input
 
 Render Update
     Subsystem → Renderer
-        presentation state/events
+        Domain lifecycle / current Domain State
 ```
 
 三个域共享物理 carrier，但 authority、identity、ordering、recovery、backpressure与limits各自独立。
@@ -79,17 +86,7 @@ current → retired
 retired terminal
 ```
 
-Connection Core不负责：
-
-```text
-Data Grant payload
-endpoint/Port discovery
-bearer ticket format
-Connection hello/ping/replay
-Frame lifecycle
-Render lifecycle
-User Input payload
-```
+Connection Core不负责 endpoint/Port discovery、bearer ticket、Connection hello/ping/replay、Frame lifecycle、Render Domain lifecycle或 child-protocol payload。
 
 同 generation允许在旧 carrier retired 后建立 fresh carrier；Data reconnect只恢复数据连接，不能取消 Runtime failure或 Frame unwind。
 
@@ -114,18 +111,9 @@ Renderer不得根据 Render focus、DOM focus、Interest或 custom component自�
 
 ## 6. Input Interest / Effective Channel
 
-Subsystem声明 Data-Connection scoped full exact Interest：
-
-```text
-keyboard.state / keyboard.event
-pointer.state / pointer.event
-gamepad.state / gamepad.event
-x.<custom-name>.state / x.<custom-name>.event
-```
+Subsystem声明 Data-Connection scoped full exact Interest。
 
 fresh Data Connection默认 `Interest=empty`；v1无 wildcard。
-
-Interest不是 authority。
 
 对 Channel `C`：
 
@@ -175,11 +163,87 @@ published InputTarget(frameId, activationId)
 → same frameId + activationId never becomes InputTarget again
 ```
 
-因此 Main full-Snapshot coalescing不需要保留中间 null revision，也不会隐藏 same-authority revoke→regrant。
-
 重新授予 ordinary input authority使用 fresh authority epoch，通常即 fresh `activationId`。
 
-## 9. Normal Causal Barriers
+## 9. Render Domain Model
+
+当前 Render 架构已经收敛为：
+
+```text
+Subsystem Runtime
+└── 0..N Render Domains
+    ├── domainId
+    ├── zIndex
+    └── 0..N ordered roots
+        └── Node
+            ├── key
+            ├── tag
+            ├── attrs
+            ├── data
+            └── ordered children[]
+```
+
+Domain identity：
+
+```text
+subsystemKey + domainId
+```
+
+Domain 是：
+
+```text
+Render lifecycle unit
+atomic current-state unit
+global composition unit
+```
+
+Domain Host不是 Render Node，因此协议允许多个 roots，不强迫轻量 Domain创建 fake container root。
+
+## 10. Node / Component Boundary
+
+Node key当前设计为 current Domain Tree-wide unique reconciliation identity。
+
+Node tag是逻辑 Renderer Component type：
+
+```text
+(subsystemKey, tag)
+→ Renderer Component Factory
+```
+
+它不是任意 DOM tag。
+
+`attrs` 是 string→string declarative attributes，`data` 是 JSON object component state，`children[]` 是 ordered child relation。
+
+Renderer MAY对 full current Domain State按 stable key做本地 reconciliation，但本地 diff不意味着 Render Update wire已经支持 Tree Patch。
+
+## 11. Domain Composition
+
+Domain zIndex由 Subsystem控制：
+
+```text
+lower zIndex → below
+higher zIndex → above
+```
+
+Frame Stack order不能充当 Domain z-order。
+
+多个 Subsystem可能产生相同 zIndex；equal-zIndex deterministic tie-break及其不可依赖范围由 Render Update/Composition contract冻结，不能使用 connection/reconnect arrival order作为业务语义。
+
+## 12. Domain / Frame / Data Independence
+
+```text
+Activation replacement != Domain epoch replacement
+Frame suspended != Domain hidden
+Frame closed/unwound != Domain destroyed
+Data Connection retired != authoritative Domain destroyed
+Domain/Node != ordinary Input authority
+```
+
+healthy Runtime的 doomed Frame被 close后，Domain是否保留仍由 Subsystem/Render Protocol决定。
+
+Data outage期间 Renderer MAY保留最后合法 presentation，但 fresh connection后的 authoritative recovery必须由 Render Update Domain Registry + fresh Domain State闭合。
+
+## 13. Normal Causal Barriers
 
 ```text
 frame.activate ACK
@@ -189,9 +253,9 @@ frame.resume ACK
     happens-before Caller InputTarget publication
 ```
 
-call/return Response-before-dependent-RPC只属于 Main⇄Subsystem Control ordering，不进入 Data Plane。
+这些只约束 InputTarget，不创建/切换/销毁 Render Domain。
 
-## 10. Frame Control Failure Boundary
+## 14. Frame Control Failure Boundary
 
 ```text
 Success        → known committed
@@ -201,54 +265,29 @@ Timeout/loss   → ambiguous → Runtime failure
 
 Renderer/Data不得在 timeout后重放 Frame operation、用 reconnect判断远端 commit、用本地 snapshot修复 divergence或接受迟到 Response恢复 authority。
 
-## 11. Runtime Failure Recovery Boundary
+## 15. Runtime Failure Recovery Boundary
 
-Main按：
+Main按 Frozen Frame rules计算 whole-suffix unwind。Renderer/Data不得自行推断 root、恢复 doomed Caller或覆盖 Main已 accepted outcome。
 
-```text
-failedRuntimeKeys
-→ lowest failed-runtime Frame root
-→ whole suffix Top→Bottom unwind
-→ fixed-point expansion
-→ final healthy Caller resume or Stack empty
-```
+Render Domain cleanup仍由 Runtime/Data/Render contract独立收敛，不由 Frame unwind推导。
 
-Renderer/Data不得自行推断 root、恢复 doomed Caller或覆盖 Main已 accepted outcome。
-
-## 12. Frame v1 Transport Profile 与 Data Plane 无关
+## 16. Frame Transport 与 Data Plane 无关
 
 Frame v1对 Control carrier冻结 Desktop WebSocket / PWA MessagePort application semantics与自身 limits。
 
-这些规则不能被 Data Connection的 transport能力借用来扩展 Frame Control wire。
+Frame limits不自动成为 Render/User Input limits；每个 Data protocol必须单独冻结 payload/backpressure/recovery规则。
 
-反方向也一样：Frame v1 limits不自动成为 Render/User Input limits；每个 Data protocol必须单独冻结 payload/backpressure/recovery规则。
+## 17. Version Boundary
 
-## 13. Render Update Independence
+Frame / Call v1没有独立 runtime handshake；未来 Data/User Input/Render version negotiation不得被解释成 Frame version negotiation。
 
-```text
-Activation replacement ≠ Render epoch replacement
-Frame suspended ≠ Render hidden
-Frame closed/unwound ≠ Render destroyed
-Data Connection retired ≠ Render destroyed
-```
+Render Update / Render Tree 是否需要 revision、Tree Patch、resume cursor必须由自身 closure证明，不从 Legacy Client State Tree或 Frame sequence继承。
 
-healthy Runtime的 doomed Frame被 close后，Render是否保留仍由 Subsystem/Render Protocol决定。
-
-## 14. Runtime Failure / Data Connection
-
-Runtime terminal failure通常使该 Runtime的 DataAuthority失效；但 Data Connection failure不反向定义 Runtime failure，也不定义 Frame cleanup。
-
-## 15. Version Boundary
-
-Frame / Call v1没有独立 runtime handshake；`subsystem.hello.protocolVersions`只协商 Subsystem Control。
-
-未来 Data Connection/User Input/Render version negotiation不得被解释成 Frame version negotiation。
-
-## 16. Cancellation
+## 18. Cancellation
 
 Renderer不能代表 suspended Caller发 `frame.cancel`。UI返回/取消只是 current active Frame User Input Event，由该 Frame决定是否 return cancelled。
 
-## 17. 当前拆分方向
+## 19. 当前拆分方向
 
 ```text
 Renderer ⇄ Subsystem
@@ -256,7 +295,11 @@ Renderer ⇄ Subsystem
 ├── User Input Protocol
 └── Render Update Protocol
 
-另有 Render State Contract
+Render state schema
+└── Render Tree Contract
+
+Renderer component loading
+└── Renderer Component Bootstrap/Profile
 ```
 
-旧 Frame-scoped Data Protocol只作为历史，不得把 Frame RPC、transaction/error/failure-unwind、Frame limits或 Activation authority重新引入 Data Plane。
+旧 Frame-scoped Data/Client State Protocol只作为历史，不得把 Frame RPC、transaction/error/failure-unwind、Frame limits或 Activation authority重新引入 Data Plane。
