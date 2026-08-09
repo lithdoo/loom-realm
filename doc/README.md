@@ -48,6 +48,7 @@ Frame Suspend Clarification             Frozen clarification
 Main ⇄ Renderer Control v1              Draft / InputTarget lease closed
 Data Connection Contract v1             Draft / lifecycle closed
 User Input v1                           Core Draft / semantic closure reviewed
+Render Domain / Tree Architecture       Refined
 Content API v1                          Active / Normative / Evolving
 ```
 
@@ -114,15 +115,13 @@ no patch/replay
 
 Snapshot包含 Runtime projection、Frame Stack、Activation/InputTarget 与逻辑 DataAuthority；不包含 Data endpoint / MessagePort / bearer Data token / Render State / Content Grant。
 
-InputTarget现在明确使用 one-shot lease：
+InputTarget使用 one-shot lease：
 
 ```text
 published InputTarget(frameId, activationId)
 → revoked/removed/replaced
 → same frameId + activationId never becomes InputTarget again
 ```
-
-因此 Main可以继续 coalesce中间 snapshots，而不需要独立 `inputEpoch` 或强制发布每个 null gap。
 
 Control loss或 Renderer participant replacement会撤销该 participant 的 ordinary input 与 Data authority。
 
@@ -163,7 +162,7 @@ Renderer → Subsystem
 ```text
 Data loss != Runtime failure
 Data loss != Frame unwind
-Data retire != Render destroy
+Data retire != Render Domain destroy
 ```
 
 Host如何建立 WebSocket / MessagePort carrier属于 Platform binding，不属于 Connection Core。
@@ -171,8 +170,6 @@ Host如何建立 WebSocket / MessagePort carrier属于 Platform binding，不属
 ## User Input v1 Core Draft
 
 [User Input v1](./15-contracts/user-input-v1.md) 当前采用 Channel + Interest + Effective Channel 模型。
-
-### Authority / Trust
 
 ```text
 Main
@@ -185,79 +182,92 @@ Subsystem
     validates local Frame/Activation + local Interest
 ```
 
-wire authority identity只需要：
+标准与自定义 Channel通过 Input Interest过滤；Effective Channel固定为：
 
 ```text
-frameId + activationId
-```
-
-Subsystem不能从 User Input wire独立证明 Main当前 `InputTarget` 非空；v1 不增加 signed input capability。
-
-### Channel / Interest
-
-标准 Channel：
-
-```text
-keyboard.state / keyboard.event
-pointer.state  / pointer.event
-gamepad.state  / gamepad.event
-```
-
-Subsystem提供的自定义 Renderer component可扩展：
-
-```text
-x.<custom-name>.state
-x.<custom-name>.event
-```
-
-Interest是 Data-Connection scoped full replacement exact set；fresh connection默认 empty，不支持 wildcard，也不是权限。
-
-### Effective Input Channel
-
-```text
-Effective(C)
-=
 current matching Data Connection
-∧ Main current InputTarget matches
-∧ active/current Activation matches
-∧ C is interested
-∧ Producer(C) available
+∩ Main current InputTarget / Activation
+∩ Subsystem Interest
+∩ Producer availability
 ```
 
-只有 Effective Channel 产生普通 State/Event。
+`.state` 每次 non-effective→effective建立 fresh baseline；`.event`只发送未来瞬时事件；Reset负责清理当前 Activation输入状态。
 
-### State / Event / Reset
+Standard Input Mapping具体 payload/limits延后到实现阶段继续细化，不阻塞 Render协议设计。
+
+## Render Domain / Tree Architecture
+
+当前 Render 需求已从抽象 `renderId/scopeId` 收敛为 Subsystem-owned Domain 模型。
+
+每个 Subsystem Runtime：
 
 ```text
-.state
-    self-contained current snapshot
-    every false→true Effective transition sends fresh baseline
-    latest wins / may coalesce
-
-.event
-    ordered transient event
-    future only
-    no coalescing / no replay
-
-reset
-    clears all input state for frameId + activationId
-    global ordering/coalescing barrier
+0..N Render Domains
 ```
 
-Event与Reset是 State coalescing barrier。
-
-InputTarget撤销时 Renderer在旧 connection仍 current 时 best-effort Reset previous target。
-
-Effective `.state` Producer消失而 authority仍有效时：
+每个 Domain：
 
 ```text
-Reset current Activation
-→ fresh baselines for remaining Effective State Channels
+domainId
+zIndex
+0..N ordered roots
 ```
 
-Activation replacement、Connection retired、Renderer Control loss/replacement、Session end均形成 implicit reset boundary。
+Node：
 
-下一步收敛 Standard Input Mapping、exact payload schema、message/Channel/Event queue limits与 overflow policy；Text/IME继续作为独立边界处理。
+```text
+key
+    current Domain Tree-wide unique reconciliation identity
+
+tag
+    logical Renderer Component type
+
+attrs
+    string→string declarative attributes
+
+data
+    JSON object component state
+
+children
+    ordered child nodes
+```
+
+关键边界：
+
+```text
+Domain identity = subsystemKey + domainId
+Domain = lifecycle / atomic-state / global-composition unit
+Domain Host != Render Node
+Domain may have multiple roots
+Node key unique across current Domain Tree
+tag != DOM tag
+Frame lifecycle != Domain lifecycle
+Data Connection retire != authoritative Domain destroy
+Domain/Node != ordinary input authority
+```
+
+允许 `0..N roots` 是有意设计：Domain本身已经是系统级 composition boundary，轻量 Domain不应被迫创建没有业务语义的 fake container root。只有确实需要共享布局/裁剪/坐标语义时才创建真实 container/component Node。
+
+Renderer Component resolution至少按 `(subsystemKey, tag)` 隔离。Renderer可以按 stable key对 full current Domain State做本地 reconciliation，但内部 diff不等于 wire Tree Patch。
+
+下一阶段：
+
+```text
+Render Update v1
+    Domain Registry / lifecycle
+    current-state publication
+    composition
+    recovery / backpressure / limits
+
+Render Tree Contract v1
+    roots / Node schema
+    key/tag rules
+    attrs/data constraints
+    Component validation
+    tree limits
+```
+
+revision、Tree Patch、operation log、resume cursor、cross-Domain transaction 暂不预设必须进入 v1。
 
 ## Content API v1
 
@@ -276,11 +286,12 @@ spawn success != connected != identified != ready
 shutdown Response != stopped
 Frame outcome != Frame lifecycle
 Frame lifecycle != Data Connection lifecycle
-Frame lifecycle != Render lifecycle
-Data Connection retire != Render destroy
+Frame lifecycle != Render Domain lifecycle
+Data Connection retire != authoritative Domain destroy
 Renderer/Data reconnect != Frame recovery
 Input Interest != Input authority
 Producer availability != Input authority
+Render Component availability != Input authority
 User Input loss != Runtime failure
 ```
 
@@ -358,12 +369,14 @@ Renderer Control v1                      Draft / InputTarget lease closed
 Frame suspend semantics                  Clarified
 Data Connection Contract v1              Draft / lifecycle closed
 User Input v1                            Core Draft / semantic closure reviewed
-    ↓
-Standard Input Mapping + wire/limits
+Render Domain / Tree Architecture        Refined
     ↓
 Render Update v1
-Render State Contract v1
+Render Tree Contract v1
+    ↓
 Content Access Profile
 ```
+
+Standard Input Mapping具体 payload/limits延后到实现阶段细化。
 
 明确暂缓：第二 Launcher、sandbox/Publisher Trust、automatic Runtime restart/resume/checkpoint、Control heartbeat、lazy/idle recycle、多 Runtime per key、remote Subsystem、多主栈/Frame Graph、Frame migration、Activation reuse/persistent resume、caller-driven Frame cancellation、Frame replay/resync、transparent partial-Runtime recovery、Frame runtime dynamic downgrade/capability negotiation。
