@@ -1,9 +1,13 @@
 # ADR 0009：冻结 Subsystem Control Protocol v1
 
-> 状态：Accepted  
+> 状态：Superseded  
 > 日期：2026-08-03  
 > 影响范围：Main ⇄ Subsystem Control Connection、Runtime Lifecycle、Runtime Supervisor、Desktop Bootstrap  
-> 补充并收敛：[Main ⇄ Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)
+> 原契约：[Main ⇄ Subsystem Control Protocol v1](../15-contracts/subsystem-control-lifecycle-protocol.md)  
+> **被替代：** [ADR 0017：实现前废弃 Subsystem Control v1，确立 v2 为唯一当前版本](./0017-abandon-subsystem-control-v1.md)
+
+> [!IMPORTANT]
+> 本 ADR 保存 2026-08-03 当时冻结 v1 的历史决定。v1 后来确认从未形成 conformant implementation / deployment / third-party compatibility dependency，并在 ADR 0017 中于实现前正式废弃。当前实现不得据此实现或协商 Control v1。
 
 ## 背景
 
@@ -11,9 +15,9 @@
 
 与此同时 Frame 已经被明确收缩为独立的 call / User Input Context。Frame lifecycle / call 不应继续阻塞 Runtime Container 级 Control Protocol 的冻结。
 
-## 决定
+## 决定（历史）
 
-冻结 **Subsystem Control Protocol v1**，只管理 Runtime Container 级控制语义。
+当时冻结 **Subsystem Control Protocol v1**，只管理 Runtime Container 级控制语义。
 
 v1 wire surface 固定为：
 
@@ -103,15 +107,21 @@ Host MAY 使用 WebSocket ping/pong、TCP connection state、Process Supervisor 
 
 v1 不进行 application-level state-changing RPC retry；shutdown timeout 进入 Supervisor termination escalation，而不是重新发送 shutdown。
 
-## 结果
+## 结果（历史）
 
-Subsystem Control Protocol v1 可以独立转为 `Active / Normative / Frozen`。
+当时将 Subsystem Control Protocol v1 转为 `Active / Normative / Frozen`。
 
-后续 Frame / Call Protocol 不得重新定义 Runtime Bootstrap、Subsystem identity、Runtime ready、Runtime shutdown 或 Runtime restart 语义。
+该实现目标现已被 ADR 0017 废弃。当前 Runtime Control 使用：
 
-## 暂缓
+```text
+Subsystem Control v2
++
+Runtime Control Application Profile v2
+```
 
-以下内容不阻塞 v1：
+Frame / Call v1 仍保持 Frozen。
+
+## 暂缓（历史）
 
 - Frame / Call Protocol；
 - application heartbeat / health probe；
@@ -122,12 +132,6 @@ Subsystem Control Protocol v1 可以独立转为 `Active / Normative / Frozen`�
 - Bootstrap Token 精确熵与生成算法；
 - Renderer Data Connection authentication / Grant。
 
-## 重新评估条件
+## 当前解释
 
-出现以下需求时重新评估，而不是静默扩展 v1：
-
-- 必须在 Control Connection 存活时检测 Runtime event-loop hang；
-- 必须支持透明 Runtime restart / reconnect；
-- PWA 需要与 Desktop 不兼容的 Control wire schema；
-- 一个 Subsystem 需要多个并发 Runtime instance；
-- Frame / Call capability 需要独立版本协商。
+本 ADR 不再构成当前 wire compatibility requirement。当前 Subsystem Control 规范见 [Subsystem Control v2](../15-contracts/subsystem-control-protocol-v2.md)。
