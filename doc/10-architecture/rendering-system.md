@@ -16,12 +16,12 @@ Subsystem business state / Render Manager
 → Render Domain Registry / Domain Tree State
 → Render Update Protocol
 → Renderer Domain Store
-→ Renderer Component reconciliation
+→ Renderer local presentation
 → Render Scheduler
-→ DOM / Canvas / WebGL
+→ DOM / Canvas / WebGL / other backend
 ```
 
-Renderer Store 是权威 Render state 的只读镜像；DOM/Canvas/WebGL Scene 和组件实例属于派生 presentation state。
+Renderer Store 是权威 Render state 的只读镜像；具体 UI 对象、缓存和绘制资源属于派生 presentation state。
 
 ## 2. 核心原则
 
@@ -104,9 +104,9 @@ Domain Host是 Renderer基础设施 composition boundary，不是 Render Node。
 
 `roots=[]` 表示 Domain存在但 authoritative presentation tree为空。
 
-roots/children顺序属于 authoritative state；具体 DOM/Canvas/SceneGraph呈现由 Component implementation决定。
+roots/children顺序属于 authoritative state；具体 DOM/Canvas/SceneGraph 呈现由 Renderer 实现决定。
 
-需要共享布局/裁剪/坐标语义时，Subsystem应创建真实 container/component Node，而不是协议 fake root。
+需要共享布局/裁剪/坐标语义时，Subsystem应创建真实 Node，而不是协议 fake root。
 
 ## 6. Render Node Tree
 
@@ -139,41 +139,53 @@ Renderer可通过：
 
 定位 current logical Node。
 
-同 key 的连续存在表示同一 logical component lifetime；`tag` 在该 lifetime 内保持稳定。Node被移除后，如果 producer需要新的 logical lifetime，必须使用 fresh key。
+同 key 的连续存在表示同一 logical Node lifetime；`tag` 在该 lifetime 内保持稳定。Node被移除后，如果 producer需要新的 logical lifetime，必须使用 fresh key。
+
+### `tag`
+
+`tag` 是协议携带的 opaque string。
+
+Render Core只关心：
+
+```text
+string/wire validity
+bounded size
+same live key keeps the same tag
+```
+
+Render Core **不定义 `tag` 的具体含义**，也不定义：
+
+```text
+known / unknown tag
+(subsystemKey, tag) registry
+Component Factory
+module/component loading
+per-tag schema discovery
+DOM/Canvas/WebGL mapping
+```
+
+这些全部属于 Subsystem 与 Renderer 的具体实现约定。协议不需要对 tag 做 capability negotiation、声明或错误分类。
 
 ### `children`
 
 `children[]` 是 ordered child relation。协议冻结结构顺序，不替具体 tag规定布局语义。
 
-## 7. Node Tag / Renderer Component
-
-`tag` 是逻辑 Renderer Component 类型，不是 DOM tag。
-
-```text
-(subsystemKey, tag)
-→ Renderer Component Factory
-```
-
-Render Update只引用 tag，不传 JavaScript module、Component class、CSS bundle 或 executable code。
-
-Component implementation loading属于 Renderer Component Bootstrap/Profile / Host/Package boundary。
-
-未知 tag不得自动退化为任意 DOM element。tag声明/Component availability的精确错误分类由 Component Profile冻结；组件当前未加载不应自动被解释成 Render state continuity divergence。
-
-## 8. `attrs` / `data`
+## 7. `attrs` / `data`
 
 ```text
 attrs : {[key:string]: string}
 data  : JSON object
 ```
 
-二者都是 plain declarative data，不是 executable behavior。
+协议只冻结两者的数据类型和 plain-data 边界，不定义其业务含义。
 
-`attrs`不是 raw DOM attributes；`data`是 tag-specific structured component state。不得携 Function、DOM object、MessagePort、Blob、class instance、callback。
+具体 Renderer 实现 MAY 将它们解释为属性、组件状态、绘制参数或其他本地 presentation input；这些解释不进入 Render Update wire contract。
+
+不得携 Function、DOM object、MessagePort、Blob、class instance、callback。
 
 当前 Patch设计只对 attrs/data 做 top-level map delta，不引入 generic JSON Pointer / JSON Patch path language。
 
-## 9. Renderer Domain Store
+## 8. Renderer Domain Store
 
 Renderer按 `(subsystemKey, domainId)`维护 authoritative replica，并可内部维护：
 
@@ -189,7 +201,7 @@ Wire/业务模型保持递归 Tree；内部索引用于 O(1) Patch寻址和 reco
 
 Renderer必须在暴露新 Domain state前完成完整 candidate validation，并以 Domain为单位 atomic commit。
 
-## 10. Render Update State Model
+## 9. Render Update State Model
 
 当前 closure candidate：
 
@@ -220,7 +232,7 @@ update attrs/data
 
 不增加 JSON Patch、path identity、appendChild/removeChild 等等价操作族。
 
-## 11. Patch Atomicity / Revision
+## 10. Patch Atomicity / Revision
 
 Domain `revision` 表示已发布 authoritative commit 序号，不是业务 mutation count、transport sequence 或 replay cursor。
 
@@ -251,7 +263,7 @@ current Domain Store
 
 任何 authoritative continuity/validation failure都不能跳过继续；Renderer retire当前 Data carrier，以 fresh connection + Registry + Snapshots重新建立基线。
 
-## 12. Event / Presentation Ordering
+## 11. Event / Presentation Ordering
 
 `render.event` 是 transient presentation impulse，不是 authoritative state。
 
@@ -263,11 +275,13 @@ Patch
 → Patch
 ```
 
-Renderer保证 logical component commit/event顺序，但不要求每个 Event前等待浏览器 physical paint。
+Renderer保证 logical Store commit / local presentation dispatch 顺序，但不要求每个 Event前等待浏览器 physical paint。
 
 stale/missing target Event可以 soft drop，不排队等待 target重现、不 replay、不 retarget。
 
-## 13. Backpressure / Recovery
+Event 的业务解释属于 Renderer/Subsystem 实现，不由 Render Core定义。
+
+## 12. Backpressure / Recovery
 
 Subsystem sender维护 per-Domain publication cursor（例如 `lastEmittedRevision`），不是 ACK cursor。
 
@@ -276,7 +290,7 @@ Subsystem sender维护 per-Domain publication cursor（例如 `lastEmittedRevisi
 ```text
 small diff          → Patch
 large/backpressured → Snapshot
-Event backlog        → bounded; may drop
+Event backlog       → bounded; may drop
 ```
 
 Authoritative state progress优先于 transient Event backlog。
@@ -291,7 +305,7 @@ render.domains(current Registry)
 
 不 replay历史 Patch/Event，不要求 ACK/NACK/resync RPC。
 
-## 14. Render Scheduler / Presentation
+## 13. Render Scheduler / Presentation
 
 ```text
 Render message
@@ -299,29 +313,30 @@ Render message
 → dirty Domain scheduling
 → global zIndex composition
 → requestAnimationFrame
-→ Component / DOM / Canvas / WebGL reconciliation
+→ local presentation reconciliation
 ```
 
 Scheduler只决定何时呈现 current Store，不改变 authoritative state。
 
+Renderer 如何把 `tag/attrs/data/children` 映射到 DOM、Canvas、WebGL 或其他对象完全属于 implementation detail。
+
 v1无 cross-Domain transaction；强原子 presentation应优先建模在同一 Domain。
 
-## 15. User Input / Component 边界
+## 14. User Input / Presentation 边界
 
 普通输入仍只发送到 Main授权的 Frame/Activation，不以 Domain/Node为 ordinary input authority。
 
+Renderer 实现 MAY 因某些本地 presentation 对象存在而提供 `x.*` Input Channel Producer，但 Producer 仍只通过 User Input Core参与：
+
 ```text
-Render Component
-→ optional Input Channel Producer
-→ User Input Core
-→ Main authority ∩ Interest ∩ Producer availability
+Main authority ∩ Interest ∩ Producer availability
 ```
 
-Domain/Node/component existence本身不授予 InputTarget。
+Domain/Node/presentation object existence本身不授予 InputTarget。
 
-Custom Component MAY提供 `x.*` Input Channel Producer；Producer loss继续服从 User Input v1 teardown，而不是由 Render协议修改 Frame authority。
+Producer loss继续服从 User Input v1 teardown，而不是由 Render协议修改 Frame authority。
 
-## 16. Data / Frame / Domain Independence
+## 15. Data / Frame / Domain Independence
 
 ```text
 Frame active != Domain visible
@@ -334,7 +349,7 @@ Domain destroy != Frame close
 
 Data loss期间 Renderer MAY保留最后合法 presentation cache，但 cache不是 fresh authority proof。fresh Data Connection后的 authoritative recovery只能由 Registry + fresh Snapshots重建。
 
-## 17. Runtime Failure Boundary
+## 16. Runtime Failure Boundary
 
 Runtime terminal failure通常最终导致 Main撤销对应 DataAuthority，但 Frame unwind与 Render Domain cleanup仍是不同协议域。
 
@@ -342,13 +357,13 @@ healthy Runtime的 doomed Frame被 close后 MAY继续拥有/更新 Domains。
 
 failed Runtime旧 Data carrier退休不等于已收到 authoritative Domain destroy；stale presentation保留/清理策略由 Render/runtime teardown policy明确。
 
-## 18. 本地表现状态
+## 17. 本地表现状态
 
-DOM Element、Component instance、Canvas/WebGL资源、CSS动画、图片缓存、焦点/滚动/Hover、设备瞬时状态、纯视觉插值等可以只留 Renderer，但不得改变业务规则、Frame Stack或 recovery authority。
+DOM Element、UI object、Canvas/WebGL资源、CSS动画、图片缓存、焦点/滚动/Hover、设备瞬时状态、纯视觉插值等可以只留 Renderer，但不得改变业务规则、Frame Stack或 recovery authority。
 
-stable Node key可用于连续 lifetime内保留合法 component-local presentation state；authoritative state始终来自最新合法 Domain commit。
+stable Node key可用于连续 lifetime内保留合法 local presentation state；authoritative state始终来自最新合法 Domain commit。
 
-## 19. 当前渲染不变量
+## 18. 当前渲染不变量
 
 1. 每个 Subsystem Runtime拥有 `0..N` Render Domains；
 2. Domain identity=`subsystemKey + domainId`，同 generation内 domainId one-shot；
@@ -358,8 +373,8 @@ stable Node key可用于连续 lifetime内保留合法 component-local presentat
 6. Node=`key/tag/attrs/data/children` recursive declarative model；
 7. Node key Domain-lifecycle one-shot且 current tree全局唯一；
 8. roots/children保持 authoritative order；
-9. tag是 logical Renderer Component，不等于 DOM tag；
-10. attrs/data是 plain data；
+9. `tag` 是 opaque string，Render Core不定义其具体含义；
+10. attrs/data只冻结 plain-data类型边界，不冻结业务解释；
 11. Main不维护 Domain Registry；Frame不拥有 Domain；
 12. Snapshot是 full recovery baseline；Patch是 normal incremental authoritative commit；Event是 transient impulse；
 13. Domain revision在 baseline后严格 `R→R+1`；
