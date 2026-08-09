@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：第一阶段地图 Subsystem 的内部模块和依赖方向  
-> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Subsystem Control v2](../../15-contracts/subsystem-control-protocol-v2.md)、[Runtime Control Profile v2](../../15-contracts/runtime-control-profile-v2.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Render Update Incremental Design](../../15-contracts/render-update-v1-incremental-design.md)  
+> 依赖：[模块子系统模型](../../10-architecture/subsystem-model.md)、[Subsystem Control v1](../../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)、[Render Update Incremental Design](../../15-contracts/render-update-v1-incremental-design.md)  
 > 最近复核：2026-08-09
 
 `loom.map` 是第一阶段纵向切片。内部模块不是所有 Subsystem 的公共要求。
@@ -13,8 +13,8 @@
 
 ```text
 loom.map
-├── Subsystem Control v2 Adapter
-├── Runtime Control Profile v2 Dispatcher
+├── Subsystem Control v1 Adapter
+├── Runtime Control Profile v1 Dispatcher
 ├── Frame / Call Adapter
 │   ├── Protocol Validator
 │   ├── Shared Request ID Allocator
@@ -36,22 +36,18 @@ loom.map
 
 ## 2. Runtime Control
 
-当前 map Runtime只实现：
-
 ```text
-Subsystem Control v2
+Subsystem Control v1
 +
 Frame / Call v1
 =
-Runtime Control Application Profile v2
+Runtime Control Application Profile v1
 ```
-
-Control v1/Profile v1已实现前废弃，不提供 fallback。
 
 Bootstrap：
 
 ```text
-subsystem.hello { protocolVersions:[2] }
+subsystem.hello { protocolVersions:[1] }
 → identified
 → optional initializing
 → subsystem.status({state:"ready"})
@@ -77,7 +73,7 @@ RPC exactly seven：initialize/activate/suspend/resume/close/call/return。
 
 ## 4. Shared Control Dispatcher
 
-Control v2 + Frame v1共享 authenticated Control carrier时：
+Control v1 + Frame v1共享 authenticated Control carrier：
 
 ```text
 one transport unit = one JSON-RPC message
@@ -95,7 +91,7 @@ frame.return
 
 Request ID=positive safe integer，同一 Control Connection生命周期内不复用。
 
-Frame v1由 Profile v2静态绑定；不实现 `frame.hello/version/capabilities`。
+Frame v1由 Profile v1静态绑定；不实现 `frame.hello/version/capabilities`。
 
 ## 5. Frame Validator / Deadline / Mutation Gate
 
@@ -146,9 +142,9 @@ MUST NOT恢复旧 Activation
 MUST NOT决定 Stack unwind root
 ```
 
-Control可用时通过 Control v2 `subsystem.status(failed)`报告 Runtime self-failure。
+Control可用时通过 `subsystem.status(failed)`报告 Runtime self-failure。
 
-Main按 lowest failed-runtime occurrence + fixed-point规则收敛整个 doomed suffix。
+Main按 lowest failed-runtime occurrence + fixed-point规则收敛 doomed suffix。
 
 ## 8. User Input Adapter
 
@@ -168,8 +164,6 @@ Main公共 ordinary input authority由 Renderer Core依据 current InputTarget�
 Render Domain/Node identity不参与 ordinary input authority；Renderer Component产生的 `x.*` Channel仍服从 User Input Effective Channel模型。
 
 ## 9. Render Domain Model
-
-Map Render Manager使用通用 Subsystem-owned Domain架构。
 
 示例：
 
@@ -204,7 +198,7 @@ Domain Host不是 Node，不需要 fake root。
 
 ## 10. Render Publication Model
 
-Map Runtime不是只发送 full Snapshot。当前 Render Update实现目标：
+当前 Render Update实现目标：
 
 ```text
 render.domains
@@ -221,7 +215,7 @@ render.event
     transient presentation impulse
 ```
 
-Subsystem sender对每个 current carrier + Domain维护逻辑：
+Subsystem sender对每个 current carrier + Domain维护：
 
 ```text
 lastEmittedRevision
@@ -232,8 +226,6 @@ new desired Domain Tree
 Projector / Diff Engine根据 stable key计算 Patch；业务逻辑不直接拼 wire operations。
 
 ## 11. Patch Generation
-
-Diff规则：
 
 ```text
 old has / new missing
@@ -249,13 +241,12 @@ same key attrs/data changed
     → update
 
 same key tag changed
-    → producer modeling error;
-      remove old key + insert fresh key
+    → modeling error; remove old + insert fresh key
 ```
 
-Patch必须从 `lastEmittedRevision`精确转换到 `R+1`，不是业务 mutation counter。
+Patch从 `lastEmittedRevision`精确转换到 `R+1`，不是业务 mutation counter。
 
-当 diff过大/复杂/队列压力高时，Map Runtime可以发送 full Snapshot(`lastEmittedRevision+1`)作为下一次 authoritative commit。
+当 diff过大/复杂/队列压力高时，可以发送 full Snapshot(`lastEmittedRevision+1`)作为下一次 authoritative commit。
 
 ## 12. Render Recovery
 
@@ -277,18 +268,14 @@ retire current Data carrier
 → Registry + fresh Snapshots
 ```
 
-不存在 Renderer→Subsystem render resync RPC、Patch replay、ACK/NACK。
+无 Renderer→Subsystem render resync RPC、Patch replay、ACK/NACK。
 
 ## 13. Renderer Component Boundary
-
-`loom.map` Node `tag`通过：
 
 ```text
 (loom.map, tag)
 → Renderer Component Factory
 ```
-
-解析。
 
 典型 tag例如 `map-world`、`map-character-layer`、`map-hud`，但 exact标准由 Renderer Component Profile冻结。
 
@@ -313,8 +300,7 @@ Runtime terminal failure最终会使 Main撤销相应 DataAuthority，但 Frame/
 除 Frame v1 Subsystem conformance外，至少覆盖：
 
 ```text
-control-v2-version-selection
-no-control-v1-fallback
+control-v1-version-selection
 ready-has-no-data-endpoint
 shared-control-frame-request-id
 
@@ -331,7 +317,7 @@ multi-root-domain
 published-node-key-one-shot
 snapshot-fresh-baseline
 patch-R-to-R-plus-1
-patch-insert/remove/move/update
+patch-insert-remove-move-update
 patch-atomic-no-partial-apply
 snapshot-fallback-under-backpressure
 render-event-barrier
@@ -339,12 +325,9 @@ same-generation-reconnect-fresh-snapshots
 frame-close-does-not-destroy-domain
 ```
 
-## 16. Legacy Notes
-
-以下不得恢复：
+## 16. 不得恢复的旧模型
 
 ```text
-Control v1 fallback
 ready.rendererDataEndpoint
 per-Frame mandatory Core/Render
 Frame status=failed / Frame ready
@@ -355,5 +338,5 @@ timeout→retry
 caller remote cancel
 partial same-runtime unwind
 Frame close=Render destroy
-Snapshot-only assumption after incremental Render closure
+Snapshot-only Render transport
 ```
