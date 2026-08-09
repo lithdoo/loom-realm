@@ -217,4 +217,4 @@ Content API v1                          Evolving
 
 协议版本表示真实互操作边界，不表示设计稿次数。首次 conformant implementation 前的错误设计直接修订 first-version contract；形成真实兼容边界后，不兼容变化才升级协议/Profile version。
 
-关键设计演变见 [ADR 目录](./decisions/) 与 Git history。
+关键设计演变见 [ADR 目录](./decisions/README.md) 与 Git history。
