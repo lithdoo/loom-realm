@@ -1,73 +1,55 @@
 # Renderer ⇐ Subsystem Render Update Protocol v1
 
 > 层级：正式契约  
-> 状态：Active Design / Draft Baseline  
+> 状态：Active Design / Closure Candidate  
 > 协议版本：1  
 > 协议标识：`loomrealm.render-update / 1`  
-> 稳定程度：Evolving  
+> 稳定程度：Stabilizing  
 > 方向：Subsystem → Renderer only  
 > Carrier：[Renderer ⇄ Subsystem Data Connection Contract v1](./renderer-subsystem-data-connection-v1.md)  
 > 架构：[渲染系统](../10-architecture/rendering-system.md)  
-> 当前增量闭环：[Render Update v1 Incremental Design](./render-update-v1-incremental-design.md)  
+> 相邻协议：[User Input Protocol v1](./user-input-v1.md)  
 > 最近复核：2026-08-09
 
-本文保留 Render Update v1 的基础 Registry/Snapshot/Event 语义。当前实现目标已经由 Incremental Design扩展为 Registry/Snapshot/Patch/Event；两份文档最终应合并为单一 `render-update-v1.md`。
+本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 核心原则：
 
-> **Render Update 是 Subsystem-owned Render Domain State 到 Renderer 的单向复制协议。它标准化 Domain/Tree identity、数据结构、lifecycle、ordering 与 recovery，不标准化 Renderer 如何解释或呈现 `tag/attrs/data`。**
+> **Render Update v1 只复制 Subsystem-owned Render Domain authoritative state。Registry 管 lifecycle，Snapshot 建立/替换完整基线，Patch 表达严格 `R→R+1` 的原子增量 commit，Event 表达可丢失的一次性 presentation impulse。`tag` 只是 opaque string；协议不定义组件语义、组件注册或加载。**
 
 ---
 
-## 1. 协议位置
+## 1. Scope / Direction
+
+Render Update v1 运行在 current Renderer ⇄ Subsystem Data Connection 上，方向固定：
 
 ```text
-Subsystem Runtime
-    authoritative Render Domain Registry / State
-              │
-              │ Render Update v1
-              ▼
-Renderer
-    authoritative replica Store
-              │
-              ▼
-    implementation-owned presentation
+Subsystem → Renderer only
 ```
 
-Render Update不是 Frame protocol、Input protocol、Renderer RPC、DOM protocol、component registry/loading protocol或 historical event stream。
-
-## 2. Roles / Direction
+它负责：
 
 ```text
-Subsystem
-    producer / authority
-
-Renderer
-    consumer / read-only mirror
+Domain Registry / lifecycle
+full Snapshot baseline / full commit
+incremental Patch
+transient Event
 ```
 
-方向固定：
+它不负责：
 
 ```text
-Subsystem → Renderer
+Renderer → Subsystem RPC
+Render ACK / NACK / Result
+Renderer-driven resync
+historical Patch/Event replay
+component registry / loading
+DOM remote-control
+Frame / Input authority
+Content transport
 ```
 
-v1 定义 zero Renderer → Subsystem Render Update application messages。
-
-不存在：
-
-```text
-render.ack
-render.error
-render.resync
-render.requestSnapshot
-render.subscribe
-render.resume
-```
-
-## 3. Carrier / Scope
-
-Render Update运行在 current Data Connection 上。Carrier已经绑定：
+Carrier 已绑定：
 
 ```text
 Session
@@ -76,73 +58,34 @@ subsystemKey
 DataAuthority generation
 ```
 
-因此每条 Render message不重复这些 identity字段。
+因此 Render Update message 不重复 `sessionId`、`rendererId`、`subsystemKey`、`generation` 或 `connectionProfile`。
 
-Data Connection retired后，旧 carrier上的 Render Update不再具有 current authority。
+---
 
-## 4. Plain-Data Model
+## 2. Message Surface
 
-Render Update是 plain-data message protocol，不使用 JSON-RPC。
+v1 只有四种 application message：
 
-一个 carrier application-message boundary对应一个 Render Update message；Batch禁止。
-
-允许 JSON-compatible plain values；协议对象 closed schema；整数语义字段必须 safe integer。
-
-不得携带 executable/host values，例如 Function、BigInt、MessagePort、DOM object、class instance。
-
-## 5. Baseline Message Surface
-
-本基础 Draft定义：
+```ts
+type RenderUpdateMessageV1 =
+  | RenderDomainsV1
+  | RenderSnapshotV1
+  | RenderPatchV1
+  | RenderEventV1;
+```
 
 ```text
 render.domains
 render.snapshot
+render.patch
 render.event
 ```
 
-当前 incremental closure candidate增加：
+没有 Batch，也不再增加第五种 Render message kind。
 
-```text
-render.patch
-```
+---
 
-并给 Snapshot增加 per-Domain revision。当前实现应以 incremental closure candidate为准；本文件不再扩展旧 Snapshot-only wire。
-
-## 6. Render Domain
-
-每个 Subsystem在 current DataAuthority generation内拥有 `0..N` Render Domains。
-
-Domain是：
-
-```text
-Render lifecycle unit
-atomic authoritative-state unit
-global composition unit
-```
-
-Domain不是 Render Node。
-
-logical identity由 current Data Connection authority scope + `domainId`构成。
-
-## 7. `domainId` Lifecycle
-
-在同一：
-
-```text
-Session + subsystemKey + DataAuthority generation
-```
-
-内：
-
-```text
-absent → present → absent
-```
-
-是 terminal lifecycle。removed `domainId`不得在同 generation重新出现；新 lifecycle使用 fresh ID。
-
-Generation replacement开启新的 Render authority universe。
-
-## 8. Domain Registry
+## 3. Domain Registry / Lifecycle
 
 ```ts
 interface RenderDomainsV1 {
@@ -151,47 +94,64 @@ interface RenderDomainsV1 {
 }
 ```
 
-`domains`：
+`domains` 是 full replacement set：
 
 ```text
-full replacement
-set semantics
 no duplicates
-array order non-semantic
+array order has no presentation meaning
 ```
 
-Registry membership就是 Domain lifecycle authority；不存在单独 create/destroy/close message。
+在同一：
 
-fresh Data Connection上的第一条 Render Update message MUST 是 `render.domains`。
+```text
+Session + subsystemKey + DataAuthority generation
+```
 
-Registry加入 Domain后，其 state在 first fresh Snapshot前是 pending。Registry移除 Domain后，旧 authoritative Store和该 Domain pending Render work失效。
+内，`domainId` 是 one-shot lifecycle identity：
 
-Registry可以 latest-state coalesce，但必须保持 lifecycle barrier。
+```text
+absent → present → absent
+```
 
-## 9. Domain Snapshot
+一旦 removed，同一 generation 内 MUST NOT重新出现；新 lifecycle 使用 fresh `domainId`。
 
-基础 schema：
+不存在独立：
+
+```text
+render.create
+render.destroy
+render.close
+```
+
+Registry membership 本身就是 Domain lifecycle authority。
+
+### 3.1 Publication barrier
+
+fresh Data Connection 上第一条 **Render Update** message MUST 是 `render.domains`。
+
+某 Domain 只有在更早 emitted Registry 已包含该 `domainId` 后，才可发送 Snapshot/Patch/Event。
+
+一旦 emitted Registry 移除 Domain：
+
+```text
+all pending unsent Snapshot/Patch/Event for that Domain
+    MUST be discarded
+```
+
+之后不得再发送该 Domain 的 Render message。
+
+尚未 emitted 的 Registry MAY latest-state coalesce，但不得破坏 one-shot lifecycle 与 publication barrier。
+
+---
+
+## 4. Authoritative Domain Data Model
 
 ```ts
-interface RenderDomainSnapshotV1 {
-  readonly type: "render.snapshot";
-  readonly domainId: string;
+interface RenderDomainStateV1 {
   readonly zIndex: number;
   readonly roots: readonly RenderNodeV1[];
 }
-```
 
-Incremental closure candidate在此基础上增加 `revision`。
-
-Snapshot语义始终是：
-
-> **完整验证后，以消息中的 Domain current state 原子替换旧 authoritative Domain Store。**
-
-不得 partial apply。
-
-## 10. Render Node Value Model
-
-```ts
 interface RenderNodeV1 {
   readonly key: string;
   readonly tag: string;
@@ -201,73 +161,398 @@ interface RenderNodeV1 {
 }
 ```
 
-Domain允许 `roots=[]`；`roots[]` 与 `children[]` 都是 ordered structure。
+Domain 允许 `0..N` ordered roots；Node 允许 `0..N` ordered children。Domain Host 不是 Render Node。
 
-Domain Host不是隐式 Render Node。
+### 4.1 Node key
 
-## 11. Node `key`
+`key` 是 Domain-wide logical Node identity。
 
-`key` 是 Domain内 logical Node identity。
-
-每个合法 authoritative Tree：
+每个 committed Domain State 中：
 
 ```text
-all Node keys across roots + descendants are unique
+all Node keys across all roots + descendants MUST be unique
 ```
 
-当前 closure candidate进一步规定 published key在同 Domain lifecycle内 one-shot。
-
-同一 live key的 `tag`保持稳定；需要不同 tag时使用 fresh key。
-
-## 12. Node `tag`
-
-`tag` 是 **opaque string**。
-
-Render Update只规定：
+published Node key 在同一 Domain lifecycle 内是 one-shot identity：
 
 ```text
-string/wire validity
-bounded size
+once removed from published Domain state
+→ same key MUST NOT be introduced again
+  during the same Domain lifecycle
+```
+
+新 logical Node lifetime 使用 fresh key。
+
+### 4.2 `tag`
+
+`tag` 是 opaque string 字段。
+
+Render Core只定义：
+
+```text
+it is a string
+it obeys generic wire/byte limits
 same live key keeps the same tag
 ```
 
-Render Update **不定义 `tag` 的具体含义**，也不存在：
+Render Core不定义：
 
 ```text
+tag 的具体含义
 known / unknown tag
-tag declaration/discovery
+tag declaration / discovery
 (subsystemKey, tag) registry
-Renderer Component Profile
-Component Factory protocol
-component/module loading protocol
-per-tag schema negotiation
-DOM/Canvas/WebGL mapping semantics
+Component Factory
+component/module loading
+per-tag attrs/data schema
+DOM / Canvas / WebGL mapping
 ```
 
-Renderer与Subsystem如何约定和解释 tag属于实现问题，不属于 LoomRealm wire contract。
+因此不存在 Render Core 的 unknown-tag error category，也不存在 Renderer Component Profile。
 
-因此 tag不会因为“Renderer未注册/未知”而形成 Render protocol error；协议没有这个状态。
-
-## 13. `attrs` / `data`
+同一 live key 若需要不同 `tag`，必须建模为：
 
 ```text
-attrs : string → string
-data  : plain JSON object
+remove old key
++ insert fresh key
 ```
 
-协议只定义数据类型和 size/depth/closed-wire边界，不定义业务含义。
+### 4.3 `attrs` / `data`
 
-具体实现可以根据自身逻辑解释 attrs/data；不需要 per-tag public Profile。
+Core只定义数据类型：
 
-## 14. Local Reconciliation
+```text
+attrs = string → string map
+data  = plain JSON object
+```
 
-Renderer MAY使用 stable Node key本地计算 mount/update/move/unmount 或其他 backend reconciliation。
+不定义业务含义。具体解释由 Subsystem 与 Renderer 实现掌控。
 
-这些全部属于 implementation detail，不改变 authoritative Render Store，也不进入 wire。
+---
 
-协议不定义 DOM mutation command family或 generic JSON Patch。
+## 5. Wire Tree / Internal Store
 
-## 15. Render Event
+wire 保持自然递归 Tree，不为了 Patch 强制 normalized representation。
+
+Renderer/Subsystem MAY 内部维护：
+
+```text
+revision
+zIndex
+roots
+key → node index
+key → parent index
+```
+
+并 MAY 使用 copy-on-write、persistent tree、structural sharing 或 transactional mutable candidate。
+
+协议只要求最终 authoritative commit 原子可见，不要求 deep-clone 整棵 Tree。
+
+---
+
+## 6. Domain Revision
+
+每个 Domain lifecycle 拥有独立 revision space。
+
+Revision：
+
+```text
+Subsystem-owned
+Domain-lifecycle scoped
+positive safe integer
+represents published authoritative commits
+```
+
+Revision 不是：
+
+```text
+business mutation count
+transport message sequence
+Event sequence
+ACK sequence
+replay cursor
+resume token
+```
+
+fresh carrier 上某 Domain 的第一条 Snapshot 可直接建立当前 authoritative revision `R`；`R` 不要求从 1 开始。
+
+baseline 建立后，同一 current carrier 上每个 authoritative commit严格：
+
+```text
+newRevision = currentRevision + 1
+```
+
+不同 Domain revision 相互独立；没有 global Render revision 或 cross-Domain transaction。
+
+---
+
+## 7. Sender Publication Cursor
+
+Subsystem 对每个：
+
+```text
+current carrier + domainId
+```
+
+维护 sender-local：
+
+```text
+lastEmittedRevision
+```
+
+它不是 wire field，也不是 ACK cursor。
+
+```text
+fresh carrier
+    lastEmittedRevision = unset
+
+emit baseline Snapshot R
+    lastEmittedRevision = R
+
+emit Patch R→R+1
+    lastEmittedRevision = R+1
+
+emit full Snapshot R+1
+    lastEmittedRevision = R+1
+```
+
+Data Connection 已保证同方向 ordered delivery、preserved application-message boundaries、observable loss、no adapter retry、no adapter duplicate，因此 v1 不需要 Render ACK。
+
+carrier loss 后旧 publication cursor 整体废弃；fresh carrier 用 Registry + fresh Snapshots 重建。
+
+---
+
+## 8. Snapshot
+
+```ts
+interface RenderSnapshotV1 {
+  readonly type: "render.snapshot";
+  readonly domainId: string;
+  readonly revision: number;
+  readonly zIndex: number;
+  readonly roots: readonly RenderNodeV1[];
+}
+```
+
+Snapshot 是：
+
+```text
+full current authoritative state
+atomic replacement
+fresh-connection recovery baseline
+normal full-commit fallback
+```
+
+Renderer：
+
+```text
+validate whole Snapshot
+→ build candidate Domain Store
+→ atomic replace
+→ current revision = snapshot.revision
+```
+
+不得暴露 partial tree 或新旧 `zIndex/tree` 混合状态。
+
+### 8.1 Fresh baseline
+
+fresh connection 中某 Domain 第一条 authoritative state message MUST 是 Snapshot。
+
+它直接建立 current Domain Store 与 current revision；旧 presentation cache 不是 Patch base authority。
+
+### 8.2 Post-baseline full commit
+
+baseline 之后 Snapshot 仍可作为 full authoritative commit，例如用于 backpressure fallback。
+
+此时 MUST：
+
+```text
+snapshot.revision == currentRevision + 1
+```
+
+stale/duplicate/gapped post-baseline Snapshot 都是 continuity violation。
+
+---
+
+## 9. Patch
+
+```ts
+interface RenderPatchV1 {
+  readonly type: "render.patch";
+  readonly domainId: string;
+  readonly baseRevision: number;
+  readonly revision: number;
+  readonly zIndex?: number;
+  readonly ops: readonly RenderPatchOpV1[];
+}
+```
+
+可应用条件固定：
+
+```text
+patch.baseRevision == currentRevision
+patch.revision == patch.baseRevision + 1
+```
+
+多个尚未发布的内部变化可以直接相对 `lastEmittedRevision` 的已发布 state 重新 diff，只产生一个下一 revision commit。
+
+### 9.1 Operation algebra
+
+```ts
+type RenderPatchOpV1 =
+  | RenderNodeInsertV1
+  | RenderNodeRemoveV1
+  | RenderNodeMoveV1
+  | RenderNodeUpdateV1;
+```
+
+Core 只有：
+
+```text
+insert
+remove
+move
+update
+```
+
+不定义 JSON Patch、JSON Pointer、path identity 或 DOM mutation command family。
+
+每个 op 的 precondition 与寻址都针对“该 op 执行前的 candidate state”。
+
+### 9.2 Insert
+
+```ts
+interface RenderNodeInsertV1 {
+  readonly op: "insert";
+  readonly parentKey: string | null;
+  readonly beforeKey: string | null;
+  readonly node: RenderNodeV1;
+}
+```
+
+`parentKey=null` 表示 roots；`beforeKey=null` 表示 append。
+
+`node` 可携完整递归 subtree。所有 inserted keys MUST fresh、内部唯一、当前 candidate 不存在，且不得违反 Domain-lifecycle one-shot key rule。
+
+同一 Patch 后续 op MAY target 刚插入的 key。
+
+### 9.3 Remove
+
+```ts
+interface RenderNodeRemoveV1 {
+  readonly op: "remove";
+  readonly key: string;
+}
+```
+
+Remove 删除 target 以及该 op 执行时仍属于 target 的整个 current subtree。
+
+被删除 target + descendants 加入 Patch-local tombstone set；当前 Patch 后续不得：
+
+```text
+reinsert tombstoned key
+move/update tombstoned key
+use tombstoned key as parentKey/beforeKey
+```
+
+### 9.4 Move
+
+```ts
+interface RenderNodeMoveV1 {
+  readonly op: "move";
+  readonly key: string;
+  readonly parentKey: string | null;
+  readonly beforeKey: string | null;
+}
+```
+
+固定解释顺序：
+
+```text
+1. require target exists
+2. detach target subtree
+3. resolve destination parent in detached candidate
+4. resolve beforeKey in destination sibling list after detach
+5. insert before beforeKey, or append if null
+```
+
+`beforeKey == key` 非法；不得 move 到自身或 descendant 下。
+
+### 9.5 Update
+
+```ts
+interface RenderNodeUpdateV1 {
+  readonly op: "update";
+  readonly key: string;
+  readonly attrs?: StringMapDeltaV1;
+  readonly data?: JsonObjectDeltaV1;
+}
+
+interface StringMapDeltaV1 {
+  readonly set?: Readonly<Record<string, string>>;
+  readonly remove?: readonly string[];
+}
+
+interface JsonObjectDeltaV1 {
+  readonly set?: Readonly<Record<string, JsonValueV1>>;
+  readonly remove?: readonly string[];
+}
+```
+
+Update 只能修改 attrs/data；不能修改 key/tag/children。
+
+`set/remove` 只作用于 top-level members：
+
+```text
+set MAY replace/create
+remove target MUST exist
+remove list has no duplicates
+same member MUST NOT appear in set and remove
+```
+
+嵌套 object 变化通过替换其 top-level value 表达，不扩展 generic nested patch language。
+
+### 9.6 zIndex
+
+Patch `zIndex` 若存在，替换当前 Domain zIndex，并与 `ops[]` 属于同一个原子 Domain commit。
+
+---
+
+## 10. Patch Atomicity / Final Validation
+
+Renderer：
+
+```text
+current committed Domain Store
+→ verify baseRevision/revision
+→ isolated candidate
+→ apply ordered ops
+→ validate final candidate
+→ atomic commit once
+```
+
+中间 candidate MUST NOT 暴露给 presentation。
+
+最终 candidate 至少满足：
+
+```text
+all Node keys Domain-wide unique
+0..N ordered roots valid
+one Node has at most one parent
+root Node has no parent
+all live Nodes reachable from roots
+no cycles
+one-shot Node key rule not violated
+same live key keeps stable tag string
+attrs/data plain-data constraints valid
+all wire/tree limits satisfied
+```
+
+Renderer 当前如何解释 tag、是否存在某种 Component/Factory、presentation 是否成功，不属于 authoritative candidate validation。
+
+---
+
+## 11. Event
 
 ```ts
 interface RenderEventV1 {
@@ -285,242 +570,340 @@ Event：
 ordered
 transient
 non-authoritative
-no replay
-no coalescing
-may be lost
+MUST NOT coalesce
+MUST NOT replay
+MAY be lost
 ```
 
-Event必须 target current Tree中的 Node；Domain Host不是 Event target。
+Event 不能成为 persistent correctness 唯一来源。
 
-`name/data` 的具体业务含义同样属于实现，不定义 Event-name registry/Profile。
-
-Event不能成为 Node existence、persistent visibility、position、selection或其他 authoritative current state的唯一来源。
-
-## 16. Event Target Gate
-
-Renderer只在：
+只有：
 
 ```text
 Domain current
-fresh current-connection Snapshot applied
-targetKey exists in current Tree
+fresh baseline already applied
+targetKey exists in current committed tree
 ```
 
-时处理 Event。
+时才交给本地 presentation。否则直接 drop；不得 queue-until-target、retarget 或 reconnect replay。
 
-否则 drop，不 queue-until-appears、不 retarget、不 reconnect replay。
+### 11.1 Event / commit barrier
 
-Event target如何由本地 presentation实现处理，不属于协议。
+Snapshot/Patch/Event 共享 ordered carrier。
 
-## 17. Ordering / Coalescing
-
-Registry是 global Domain lifecycle barrier。
-
-Snapshot是 full current Domain state，可以在未 emitted阶段 latest-state coalesce，但不能越过同 Domain Event barrier。
-
-Event是 transient barrier，不 coalesce。
-
-当前 incremental closure candidate进一步以 per-Domain revision + Patch精确冻结 authoritative commit ordering。
-
-## 18. zIndex / Composition
-
-每个 Domain拥有 authoritative `zIndex`：
+Renderer 必须保证 logical processing order：
 
 ```text
-lower → below
-higher → above
+commit state
+→ reconcile local presentation lifetime as needed
+→ deliver Event
+→ apply later commit
 ```
 
-Frame Stack/Activation不转换成 zIndex。
-
-相同 zIndex的 tie-break只要求一个 Renderer实现内部 deterministic，业务不得依赖其 portable ordering。
-
-## 19. Fresh Connection / Reconnect
-
-fresh current Data Connection：
+例如：
 
 ```text
-render.domains(current full Registry)
+Patch inserts X
+→ Event targets X
+```
+
+Event 必须作用于该 Patch 建立的 X lifetime。
+
+```text
+Event targets X
+→ Patch removes X
+```
+
+Event 必须先作用于旧 X lifetime，再处理 removal。
+
+不要求等待 physical paint / vsync，也不增加 `afterRevision`。
+
+---
+
+## 12. Backpressure / Coalescing
+
+所有实现队列 MUST bounded。
+
+协议只冻结 correctness，不冻结具体容量或 drop-oldest/drop-newest 参数。
+
+### Registry
+
+尚未 emitted 的 full Registry MAY latest-state coalesce，但必须保持 lifecycle barrier。
+
+### Authoritative commits
+
+已 emitted Snapshot/Patch：
+
+```text
+MUST NOT retract
+MUST NOT reorder
+MUST NOT silently skip
+```
+
+尚未 emitted 的 desired-state 变化可以相对最后已发布 state 重新 diff 为一个 Patch `R→R+1`。
+
+如果 Patch 过大/过复杂/队列压力高，sender MAY 直接 materialize：
+
+```text
+Snapshot revision = lastEmittedRevision + 1
+```
+
+作为下一次 full commit。
+
+具体 Patch-vs-Snapshot cost heuristic 是 implementation detail。
+
+### Event
+
+Event 使用 bounded ordered queue；MAY 在压力下丢弃，surviving Events 保持原相对顺序，丢弃后不得 replay。
+
+如果 transient Event backlog 妨碍 authoritative state progress，实现 MUST 优先保证 authoritative convergence；具体队列容量与丢弃策略不属于 protocol conformance。
+
+---
+
+## 13. Continuity Failure / Recovery
+
+以下属于 authoritative Render stream continuity failure：
+
+```text
+Patch baseRevision mismatch
+Patch revision != baseRevision + 1
+Patch op precondition failure
+Patch final candidate invalid
+post-baseline Snapshot revision != currentRevision + 1
+post-baseline Snapshot invalid
+hard malformed authoritative message
+hard wire/size/depth violation
+```
+
+Renderer MUST NOT：
+
+```text
+skip failed authoritative commit
+continue later Patch
+invent missing state
+silently downgrade invalid mutation to no-op
+```
+
+恢复固定：
+
+```text
+stop trusting current Render stream
+→ retire current Data Connection
+→ if DataAuthority still current, establish fresh carrier
+→ render.domains(current Registry)
 → fresh Snapshot for every current Domain
-→ ordinary Event / Patch according to current closure candidate
+→ ordinary Patch/Event
 ```
 
-Renderer MAY暂时保留旧 presentation cache，但 cache不是 current authority proof。
+不定义：
 
-同 generation reconnect仍必须 fresh baseline；Event不 replay。
+```text
+render.patchError
+render.requestSnapshot
+render.resync
+ACK / NACK
+Patch history replay
+resume cursor
+```
 
-Generation replacement终止旧 Render authority；相同字符串 ID不自动证明跨 generation identity continuity。
+Render continuity failure不等于 Runtime terminal failure，也不触发 Frame unwind。
 
-## 20. Frame / Input Independence
+---
 
-Render Update message不包含 Frame/Activation/InputTarget authority。
+## 14. Frame / Input / Data Independence
+
+Render Update message MUST NOT携带 `frameId`、`activationId`、InputTarget 或 Frame lifecycle。
 
 ```text
 Frame active != Domain visible
 Frame suspended != Domain hidden
-Frame close != Domain destroy
-Activation replacement != Domain epoch
-Data loss != Runtime failure / Frame unwind
+Frame close/unwind != Domain destroy
+Activation replacement != Domain lifecycle
+Data Connection retire != authoritative Domain destroy
+Domain/Node existence != ordinary input authority
 ```
 
-Node/Domain存在也不产生 ordinary Input authority。
+Runtime failure authority仍属于 Control/Supervisor；ordinary input authority仍属于 Main InputTarget/Activation + User Input v1。
 
-Renderer实现 MAY因本地 presentation对象提供 custom Input Producer，但 User Input仍只由：
+---
+
+## 15. Plain JSON / Closed Schema
+
+Render Update v1 使用 plain JSON-compatible values；protocol objects 为 closed schema。
+
+禁止：
 
 ```text
-Main InputTarget/Activation
-∩ Input Interest
-∩ Producer availability
+undefined
+NaN / Infinity
+BigInt
+Function / Symbol
+DOM/Host object
+MessagePort
+Blob
+class instance
+invalid Unicode scalar sequence
+duplicate JSON object member
 ```
 
-决定。
+整数语义字段 MUST 是 safe integer。
 
-## 21. Backpressure
+`attrs` 只允许 string→string；`data`/Event `data` 只允许 plain JSON object。
 
-所有 Render queues bounded。
+---
 
-基础原则：
+## 16. Limits Boundary
+
+在 v1 closure 中需要固定会影响跨实现 validation 的 hard limits：
 
 ```text
-Registry/Snapshot authoritative progress
-    preferred over transient Event backlog
+domainId byte limit / grammar
+Node key byte limit / grammar
+tag byte limit only; no semantic grammar
+message byte limit
+JSON depth
+tree depth
+Node count
+Patch op count
+attrs count/key/value limits
+data size/depth limits
+zIndex numeric range
 ```
 
-Event MAY按 bounded overflow policy丢弃；Event overflow不意味着 Runtime failure、Frame unwind或DataAuthority replacement。
-
-Incremental closure candidate允许未 emitted state重新 diff成 Patch，或在压力下 materialize为 full Snapshot。
-
-## 22. Structural Validation
-
-Renderer至少验证：
+不需要协议化：
 
 ```text
-valid message discriminator / closed schema
-domainId validity
-Registry duplicate rules
-Snapshot targets current Domain
-zIndex numeric validity
-finite recursive Tree
-Node key unique Domain-wide
-tag is a valid bounded string
-attrs string→string
-data plain JSON object
-children array
-Event target exists
-message/tree within active limits
+Event FIFO concrete capacity
+Event drop-oldest/drop-newest preference
+Patch-vs-Snapshot cost threshold
+internal index/cache size
+presentation scheduler policy
 ```
 
-**Renderer不验证 tag 的语义或“可解析性”。**
+---
 
-Snapshot/authoritative candidate任何结构验证失败不得 partial apply。
+## 17. Minimum Conformance Scenarios
 
-## 23. Error / Failure Boundary
-
-Soft transient Event错误，例如 target stale/missing，可直接 drop。
-
-Invalid authoritative state必须 fail closed，不能局部修复后继续。
-
-当前 incremental closure candidate进一步统一为：authoritative continuity/validation failure → retire Data Connection → fresh Registry/Snapshots。
-
-无论 Render failure如何分类，都不得由 Renderer自行宣布 Runtime terminal failure或 Frame outcome/failure unwind。
-
-## 24. Security Boundary
-
-- Render data作为跨边界输入必须执行通用 schema/size/depth验证；
-- Render payload不得携 executable/host objects；
-- `tag/attrs/data` 的具体解释属于 Renderer实现，其安全策略也属于实现责任；
-- Render协议本身不把 `tag`解释成代码位置、模块地址或其他 capability；
-- Render Event不能扩大 Frame/Input/Data authority；
-- Renderer不得从 Render Tree推断 Main Stack/InputTarget。
-
-## 25. Minimum Baseline Conformance
-
-基础场景至少覆盖：
+至少覆盖：
 
 ```text
-fresh-connection-first-render-message-is-registry
-empty-registry
-registry-full-replacement
-registry-add-domain-pending-until-snapshot
-registry-remove-domain-destroys-authoritative-store
-registry-duplicate-domain-rejected
-registry-coalescing-safe
+fresh-connection-registry-before-render-state
+fresh-snapshot-establishes-arbitrary-current-revision
+post-baseline-snapshot-exact-plus-one
+post-baseline-stale-or-gap-snapshot-fails-closed
 
-domain-id-one-shot-within-generation
-removed-domain-id-not-regranted
+patch-base-matches-current
+patch-revision-exactly-plus-one
+patch-base-mismatch-fails-closed
+patch-gap-revision-fails-closed
+patch-no-partial-apply
 
-snapshot-only-for-present-domain
-snapshot-atomic-zindex-and-tree-replace
-snapshot-full-replacement
-snapshot-invalid-tree-no-partial-apply
+insert-root
+insert-child
+insert-subtree
+insert-duplicate-key-rejected
+insert-tombstoned-key-rejected
 
+remove-leaf
+remove-subtree-cascade
+move-child-before-remove-parent-preserves-child
+patch-local-tombstone-blocks-reuse
+
+move-reorder-same-parent
+move-reparent
+move-root-to-child
+move-child-to-root
+move-detach-then-resolve-before-key
+move-before-self-rejected
+move-under-descendant-rejected
+
+update-attrs-set-remove
+update-data-set-remove
+update-set-remove-same-member-rejected
+update-remove-missing-member-rejected
+
+node-key-domain-wide-unique
+published-node-key-one-shot
+same-live-key-tag-stable
+opaque-tag-no-semantic-validation
 zero-root-domain
-multiple-ordered-roots
-domain-wide-unique-node-key
-same-key-stable-tag
-tag-is-opaque-string
-ordered-children
-attrs-data-plain-data
+multi-root-order
 
-render-event-current-target
-render-event-transient
-render-event-no-authoritative-store-mutation
-render-event-no-replay
-render-event-not-coalesced
-render-event-before-fresh-baseline-dropped
-render-event-missing-target-dropped
+snapshot-fallback-under-backpressure
+publication-cursor-resets-on-fresh-carrier
+same-generation-reconnect-requires-fresh-snapshot
 
-same-generation-reconnect-full-registry
-same-generation-reconnect-fresh-snapshot-per-domain
-cached-presentation-is-not-current-proof
+patch-insert-node-then-event-targets-new-lifetime
+event-before-remove-targets-old-lifetime
+stale-event-target-dropped
+event-overflow-does-not-block-authoritative-progress
 
-generation-replacement-retires-old-render-authority
-frame-close-does-not-remove-domain
-activation-change-does-not-change-domain-lifecycle
-data-loss-does-not-fail-runtime
-data-loss-does-not-unwind-frame
+authoritative-continuity-failure-retires-data-connection
+data-retire-does-not-fail-runtime
+data-retire-does-not-unwind-frame
 ```
 
-Conformance不包含 tag registry、known/unknown tag、Component Factory或 component loading测试。
+---
 
-## 26. Explicit Non-Goals
+## 18. Explicit Non-Goals
 
-Render Update不定义：
+v1 不定义：
 
 ```text
 Renderer → Subsystem Render RPC
-ACK / Result
-history replay
+ACK / Result / NACK
+historical mutation log
+Patch replay
 resume cursor
+JSON Patch / JSON Pointer
 cross-Domain transaction
+cross-Subsystem transaction
 render frame fence
 vsync protocol
-animation clock sync
-graphics codec
-component registry/profile
-component module loading
+animation clock synchronization
+damage rectangles
+raster command stream
+graphics codec negotiation
+binary texture streaming
+component registry/profile/loading
 DOM/CSS protocol
-per-tag schema protocol
 Frame binding
 Input authority
-business mutation
+business state mutation
 ```
 
-## 27. Current Direction
+---
 
-当前实现/冻结工作以 [Incremental Design](./render-update-v1-incremental-design.md) 为准：
+## 19. Current Closure Invariants
+
+1. Render Update 只有 Subsystem → Renderer 单向数据流；
+2. Subsystem 是 Domain Registry / State / revision authority；
+3. Domain Registry full replacement 决定 lifecycle；
+4. 同 generation removed `domainId` 不复用；
+5. authoritative wire model 保持递归 `roots[]/children[]`；
+6. Node key Domain-wide unique 且同 Domain lifecycle one-shot；
+7. `tag` 只是 opaque string，同 live key 保持稳定；
+8. fresh connection 先 Registry，再为每个 current Domain建立 fresh Snapshot；
+9. baseline 后 authoritative commit 严格 `R→R+1`；
+10. sender 用 `lastEmittedRevision`，不使用 ACK；
+11. Patch 仅 `insert/remove/move/update`，whole candidate atomic commit；
+12. generic JSON Patch/JSON Pointer 不进入 Core；
+13. Event 是 transient logical barrier，不修改 authoritative Store；
+14. continuity failure 通过 fresh Data Connection + Registry/Snapshots 恢复；
+15. no ACK/NACK/replay/resync RPC；
+16. Frame/Data/Input/Render authority 与 lifecycle 保持独立；
+17. Component/presentation 实现完全不属于 Render protocol conformance。
+
+## 20. Remaining Closure Work
+
+剩余工作只关闭：
 
 ```text
-Registry
-Snapshot(revision)
-Patch(R→R+1)
-Event
+hard wire/tree numeric limits
+identifier byte limits/grammar
+zIndex range
+closed-schema encoding details
+Snapshot/Patch/Event/Registry fixture matrix
 ```
 
-它继承本文所有“tag opaque / implementation-owned”边界。
-
-完成 limits/conformance 后，应把 Incremental Design合并回本文件并删除工作草案，结束双文档状态。
-
-最终原则：
-
-> **Render协议负责复制 current authoritative structure/state；Renderer如何解释 `tag/attrs/data` 是实现问题，不是协议问题。**
+不再新增 Component Profile、tag semantic grammar、Event FIFO Profile、Render ACK 或新的 message kind。
