@@ -161,7 +161,7 @@ no mutation gate
 
 Main公共 ordinary input authority由 Renderer Core依据 current InputTarget执行 sender-side gate。
 
-Render Domain/Node identity不参与 ordinary input authority；Renderer Component产生的 `x.*` Channel仍服从 User Input Effective Channel模型。
+Render Domain/Node identity不参与 ordinary input authority；Renderer内部 presentation对象产生的 `x.*` Channel仍服从 User Input Effective Channel模型。
 
 ## 9. Render Domain Model
 
@@ -188,13 +188,15 @@ Node：
 
 ```text
 key       Domain lifecycle内 one-shot logical identity
-tag       map-owned logical Renderer Component type
+tag       opaque string
 attrs     string→string
 data      JSON object
 children  ordered nodes
 ```
 
 Domain Host不是 Node，不需要 fake root。
+
+`loom.map` 内部当然可以约定 `map-world`、`map-hud` 等 tag，但这些字符串的含义属于 `loom.map` 与 Web Renderer 实现，不进入公共 Render协议。
 
 ## 10. Render Publication Model
 
@@ -270,18 +272,23 @@ retire current Data carrier
 
 无 Renderer→Subsystem render resync RPC、Patch replay、ACK/NACK。
 
-## 13. Renderer Component Boundary
+## 13. Renderer Integration
+
+`tag/attrs/data/children` 如何被 Web Renderer解释，由第一阶段实现直接约定。
+
+例如实现可以内部使用：
 
 ```text
-(loom.map, tag)
-→ Renderer Component Factory
+"map-world"           → map world renderer
+"map-character-layer" → character layer renderer
+"map-hud"             → HUD renderer
 ```
 
-典型 tag例如 `map-world`、`map-character-layer`、`map-hud`，但 exact标准由 Renderer Component Profile冻结。
+但这不是 LoomRealm Protocol/Profile，不需要 public tag registry、known/unknown tag分类、Factory negotiation或 component bootstrap wire。
 
-Component implementation加载不属于 Render State；wire不得传 executable code。
+Render Update只复制这些字段的值和结构。
 
-Component MAY产生 `x.*` User Input Producer，但 Component existence本身不产生 InputTarget authority。
+本地 presentation对象 MAY产生 `x.*` User Input Producer，但其存在本身不产生 InputTarget authority。
 
 ## 14. Frame / Domain / Data Independence
 
@@ -315,6 +322,7 @@ zero-frame-render-domain
 multi-domain-map-render
 multi-root-domain
 published-node-key-one-shot
+same-live-key-tag-stable
 snapshot-fresh-baseline
 patch-R-to-R-plus-1
 patch-insert-remove-move-update
@@ -324,6 +332,8 @@ render-event-barrier
 same-generation-reconnect-fresh-snapshots
 frame-close-does-not-destroy-domain
 ```
+
+不需要 Renderer Component Profile conformance；具体 map tag/presentation映射只做实现级 integration tests。
 
 ## 16. 不得恢复的旧模型
 
