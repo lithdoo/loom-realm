@@ -337,7 +337,7 @@ same-generation-reconnect-does-not-use-cache-as-patch-base
 data-retire-does-not-destroy-presentation-cache
 ```
 
-## 16. Render Limits / Component Boundary
+## 16. Render Limits / Opaque Tag Boundary
 
 Completion阶段需要 exactly-at/over-limit fixtures：
 
@@ -353,7 +353,25 @@ zIndex range
 Event FIFO capacity/drop policy
 ```
 
-Component Factory暂时未加载属于 presentation/bootstrap concern；unknown/undeclared tag是否 authoritative invalid由 Renderer Component Profile冻结。
+`tag` conformance只测试：
+
+```text
+string/wire validity
+byte limit
+same live key keeps same tag
+```
+
+明确 **不测试也不标准化**：
+
+```text
+known/unknown tag
+Component Factory presence
+component loading
+per-tag attrs/data schema
+Renderer Component Profile
+```
+
+这些属于具体 Renderer/Subsystem implementation integration tests，而不是 Render protocol conformance。
 
 ## 17. Desktop / PWA Cross-platform
 
