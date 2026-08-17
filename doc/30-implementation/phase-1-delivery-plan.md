@@ -4,12 +4,14 @@
 > 状态：Tracking  
 > 稳定程度：Evolving  
 > 主要定义：第一阶段实施顺序、里程碑和关闭条件  
-> 依赖：[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-09
+> 依赖：[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
+> 最近复核：2026-08-17
 
-## 里程碑 0：文档与契约基线
+第一阶段采用“**协议足够成熟后进入开发，在实现中继续细化非核心 wire 边界**”的节奏。协议设计不再要求先达到纸面 100% 才允许实现。
 
-已确认：
+## 里程碑 0：文档、契约与分包基线
+
+已确认协议：
 
 ```text
 Game Package v1
@@ -17,32 +19,50 @@ Desktop Node.js Launcher v1
 Subsystem Control v1
 Runtime Control Profile v1 = Control v1 + Frame v1
 Frame / Call v1 Frozen
-Renderer Control v1 Draft / near closure
+Renderer Control v1 near closure
 Data Connection v1 lifecycle closed
 User Input v1 Core closure candidate
 Render Update v1 single canonical closure candidate
 Content API v1
 ```
 
-已删除/取消：
+已确认分包：
 
 ```text
+能力一包
+角色一包
+技术 Adapter 一包
+Desktop/PWA 作为 composition root
+protocol version != package semver
+```
+
+不再采用：
+
+```text
+协议一文档一 npm package
+host-desktop / host-pwa 万能公共包
 历史未实现协议正文
-Render Update 双 v1 文档
-Frame Suspend 独立 clarification 文档
 Renderer Component Profile
 Standard Input Mapping Profile
-Content Access Profile
-Range Profile
-Event FIFO numeric Profile
+Content Access/Range/Event FIFO Profile
 Desktop/PWA Data Bootstrap application protocol
 ```
 
-治理原则：只有跨实现必须一致的 observable semantics 才进入 `15-contracts`。
-
 ---
 
-## 里程碑 1：Game Package / Desktop Bootstrap / Control
+## 里程碑 1：Workspace + Game Package + Runtime Control 基础
+
+优先创建实际需要的 workspace：
+
+```text
+@loomrealm/wire
+@loomrealm/game-package
+@loomrealm/runtime-control
+@loomrealm/main
+@loomrealm/subsystem
+@loomrealm/launcher-node
+@loomrealm/transport-websocket
+```
 
 实现：
 
@@ -52,10 +72,9 @@ Entry Resolver
 Node Launcher
 Launch Attempt / Bootstrap Context
 Runtime Supervisor
-Control carrier
+Control carrier adapter
 Subsystem Control v1 hello/status/shutdown
-Runtime Control Profile v1 dispatcher / shared ID namespace
-finite cleanup
+Runtime Control Profile dispatcher/shared ID namespace
 ```
 
 关闭：
@@ -67,36 +86,43 @@ ready has no Data endpoint
 stopped only from Supervisor
 unexpected exit/control loss fails Runtime
 no automatic restart / same-attempt reconnect
+package dependency direction可执行检查
 ```
 
 ---
 
-## 里程碑 2：Frame / Call v1 + Conformance
+## 里程碑 2：Frame / Call v1 Vertical Slice + Conformance
 
 实现 Frozen Frame v1：Main-owned Frame/Stack/Activation/InputTarget、exact seven Requests、closed schema、commit barriers、timeout/no-retry、lowest-root fixed-point unwind、accepted outcome preservation、fresh final Caller resume。
 
-Suspend 已属于主协议：
+`@loomrealm/runtime-control` 内部保持：
 
 ```text
-child-call suspended
-    → corresponding child outcome + fresh frame.resume
-
-administrative frame.suspend
-    → no generic v1 resume
-    → close/failure cleanup only
+control/
+frame/
+profile/
+testing/
 ```
 
-关闭：Main、Subsystem SDK、Desktop/PWA Transport adapter通过适用 fixtureSetRevision。
+包合并不得合并协议 version/authority/lifecycle。
+
+关闭：Main、Subsystem、WebSocket adapter 通过适用 Frame fixtures，并跑通 initial Frame → nested call → return/resume → shutdown。
 
 ---
 
 ## 里程碑 3：Main ⇄ Renderer Control
 
-目标：冻结 Main 向 Renderer 复制 committed authority 的最小 contract：
+新增：
 
 ```text
-renderer.hello
-renderer.state(full Snapshot)
+@loomrealm/renderer-control
+@loomrealm/renderer
+```
+
+实现 Main 向 Renderer 复制 committed authority：
+
+```text
+full Snapshot
 Runtime projection
 Frame Stack / Activation
 InputTarget
@@ -113,89 +139,64 @@ Control loss revokes Renderer input/Data authority
 Renderer does not compute failure unwind
 ```
 
-关闭：Frozen review + executable fixtures。
-
-Renderer Control token/WebSocket/MessagePort 如何交付由 Host 实现，不另建 bootstrap protocol。
+Frozen review 与实现/conformance 并行，不阻塞 package skeleton 和基本 snapshot path。
 
 ---
 
-## 里程碑 4：Renderer ⇄ Subsystem Data Connection + Host Binding
+## 里程碑 4：Data Connection + Carrier Adapters
 
-Data Connection只实现：
-
-```text
-identity
-    Session + current Renderer + subsystemKey + generation
-
-lifecycle
-    current → retired
-
-cardinality
-    max one current carrier per current Renderer/subsystem
-```
-
-Desktop/PWA Host 自己建立实际 carrier：
+新增：
 
 ```text
-Desktop MAY use localhost WebSocket + one-shot ticket
-PWA MAY use MessageChannel/MessagePort
+@loomrealm/data
+@loomrealm/transport-websocket
 ```
 
-Host 机制不进入 application contract，只需证明 carrier 安装前绑定正确 Session/Renderer/subsystem/generation。
-
-关闭：
+`@loomrealm/data` 内部保持：
 
 ```text
-serialized installation
-no overlapping current carriers
-same-generation reestablish only after old retired
-Control loss retires old Renderer carriers
-Data loss != Runtime failure
-Data loss != Frame unwind
+connection/
+input/
+render/
+testing/
 ```
+
+Data Connection 只实现：
+
+```text
+identity = Session + current Renderer + subsystemKey + generation
+lifecycle = current → retired
+max one current carrier per Renderer/subsystem
+```
+
+Desktop composition 用 WebSocket adapter 建立 actual carrier；adapter 不拥有 Data authority。
+
+后续 PWA 再接 `@loomrealm/transport-messageport`，不建立第二套 application protocol。
 
 ---
 
-## 里程碑 5：User Input v1
+## 里程碑 5：User Input v1 实现驱动细化
 
-Core：
+先实现已闭合 Core：
 
 ```text
 Main InputTarget/Activation authority
 ∩ Subsystem Interest
 ∩ Producer availability
-```
 
-方向：
-
-```text
 Subsystem → Renderer  Interest
 Renderer → Subsystem  State / Event / Reset
 ```
 
-Core关闭：State fresh baseline、Event future-only/no replay、Reset/implicit reset、Producer-loss teardown、same-generation reconnect、InputTarget one-shot。
+standard keyboard/pointer/gamepad canonical payload、identifier/coordinate/button semantics 与 hard limits **在真实输入实现和 fixture 中同步细化**，直接回写 User Input v1，不另建 Mapping Profile。
 
-剩余直接补进 **User Input v1**：
-
-```text
-keyboard.state/event canonical payload
-pointer.state/event canonical payload
-gamepad.state/event canonical payload
-identifier/coordinate/button semantics required for interop
-wire size/depth/count/numeric limits
-```
-
-不另建 Standard Input Mapping Profile。
-
-以下属于 Renderer implementation：DOM/OS/device adapter、polling cadence、内部 mapping table。
-
-Event queue只要求 bounded + surviving order + no replay；具体容量/drop preference不协议化。
+不要求该 payload 在开始 Renderer/Input 实现前一次性纸面冻结。
 
 ---
 
-## 里程碑 6：Render Update v1 + Web Renderer
+## 里程碑 6：Render Update v1 + Renderer
 
-唯一工作入口：[Render Update v1](../15-contracts/render-update-v1.md)。
+实现：
 
 ```text
 render.domains
@@ -208,7 +209,7 @@ render.event
 
 ```text
 Domain one-shot lifecycle
-Node key Domain-lifecycle one-shot
+Node key one-shot
 same live key stable opaque tag
 fresh connection Registry + Snapshots
 baseline后 exact R→R+1
@@ -217,34 +218,22 @@ continuity failure → retire carrier → fresh baseline
 no ACK/NACK/replay/resync
 ```
 
-剩余：
+message/tree/node/op/attrs/data/key/tag/zIndex 等 hard limits 在 Patch engine、fixtures、实际 map state 中同步收敛，再完成 Frozen review。
 
-```text
-domainId/key grammar + byte limits
-tag byte limit only
-message/tree/node/op/attrs/data limits
-zIndex range
-closed-schema encoding
-conformance fixture matrix
-```
-
-不再存在 unknown-tag/Component Profile/Event FIFO Profile closure item。
-
-Web Renderer内部可自由实现：
-
-```text
-Domain Store/index
-Patch engine
-Registry/Factory/component mapping
-DOM/Canvas/WebGL presentation
-scheduler/cache
-```
-
-这些不是 protocol conformance。
+Renderer内部 Registry/Factory/DOM/Canvas/WebGL/scheduler/cache 不属于 protocol conformance。
 
 ---
 
-## 里程碑 7：Content API
+## 里程碑 7：Content 能力与 Desktop Adapters
+
+新增：
+
+```text
+@loomrealm/content
+@loomrealm/content-service
+@loomrealm/content-fs
+@loomrealm/content-http
+```
 
 实现：
 
@@ -255,83 +244,119 @@ Readonly Content Service
 manifest/record/group/resource GET+HEAD
 MIME / ETag / contentVersion / integrity
 Desktop bearer request authorization
-PWA same-origin Service Worker authority
 ```
 
-Host 自行负责 Desktop grant issuance/injection/rotation；不建立 Content Access Profile。
-
-Range 若启用直接遵守标准 HTTP Range；body/resource/concurrency/rate/timeouts 是 bounded deployment configuration。
-
-关闭：Content API conformance + credential/path leak safety tests。
+filesystem 与 HTTP 是独立技术 adapter；credential injection 留在 Desktop composition，不建立 Content Access Profile。
 
 ---
 
-## 里程碑 8：`loom.map` 最小 Runtime
+## 里程碑 8：`@loomrealm/map` 最小 Runtime
+
+`loom.map` 必须是普通 Subsystem consumer：
+
+```text
+@loomrealm/map
+    → @loomrealm/subsystem
+```
 
 实现：
 
 ```text
-Subsystem Control Adapter
-Runtime Control dispatcher
-Frame Adapter / Validator / Deadline / Mutation Gate
+Frame handlers
 business Runtime Core / Loop
 movement / collision / Portal
 Render Manager / Projector / Diff Engine
-Data Connection / User Input / Render Update adapters
+User Input consumer
+Content client
 ```
 
-Render Manager支持 `0..N` Domains 与 Snapshot/Patch策略。
+Core/Main/Renderer 不得反向依赖 `@loomrealm/map`。
 
 ---
 
-## 里程碑 9：Pokémon Essentials 兼容工具链
+## 里程碑 9：Pokémon Essentials / RMXP 兼容能力
+
+兼容逻辑独立于 Core 发布周期。初始可使用：
+
+```text
+@loomrealm/map-essentials
+```
+
+如果实现证明更适合格式导向，可以调整为类似 `@loomrealm/rmxp-content`；这属于 package design，不改变协议。
 
 定义中间 JSON、导入 Tile/Autotile/Passage/Priority/Character、Golden fixtures；受限素材不进入公共仓库。
 
 ---
 
-## 里程碑 10：Hostra Desktop 闭环
+## 里程碑 10：`apps/desktop` 闭环
+
+Desktop 是 composition root，不是万能 library package。
+
+组合：
 
 ```text
-Control WebSocket binding
-Renderer Control token/bootstrap internal flow
-per-Subsystem Data carrier establishment
+main
+renderer
+launcher-node
+transport-websocket
+content-service
+content-fs
+content-http
+map
+```
+
+闭环：
+
+```text
+Control carrier
+Renderer Control bootstrap internal flow
+per-Subsystem Data carrier
 Content bearer injection
 Renderer reload recovery
 finite shutdown/force termination
 ```
 
-Hostra不接管 Main authority，endpoint/ticket不进入 Subsystem `ready` 或 Renderer Authority Snapshot。
+平台 glue 只有证明跨产品复用时才进一步抽 package。
 
 ---
 
-## 里程碑 11：PWA 闭环
+## 里程碑 11：PWA Adapters + `apps/pwa`
+
+按实际需要新增：
+
+```text
+@loomrealm/transport-messageport
+@loomrealm/content-service-worker
+```
+
+PWA composition：
 
 ```text
 Main/Subsystem Dedicated Worker
-Host-created Control MessagePort
+Control MessagePort
 Control v1 + Frame v1 application semantics
-Host-created Renderer⇄Subsystem Data MessagePort
+Renderer⇄Subsystem Data MessagePort
 Service Worker Content API / OPFS
 ```
 
-Worker/Port creation是 Host implementation，不定义额外 LoomRealm bootstrap application protocol。
+Worker/Port creation 是 composition/adapter implementation，不定义额外 application protocol，也不默认创建 `@loomrealm/host-pwa`。
 
 ---
 
 ## 第一阶段最终验收
 
-- Game Package / Launcher / Control / Runtime Profile实现；
+- monorepo dependency graph 与 package public surfaces 清晰；
+- package semver 与 protocol version 没有错误绑定；
+- Game Package / Launcher / Control / Runtime Profile 实现；
 - Frame v1适用角色通过 Conformance；
-- suspend provenance行为符合主协议；
 - Renderer Control authority闭合；
-- Data Connection current/retired闭合且 Host binding不污染 logical authority；
-- User Input Core + standard canonical payload完成；
-- Render Update Registry/Snapshot/Patch/Event完成 hard limits/conformance；
-- `tag` 不产生协议级组件语义；
-- Content API只读/路径安全/鉴权正确，Host credential delivery保持内部；
-- Desktop/PWA共享 application semantics，平台差异留在 Host implementation。
+- Data Connection current/retired闭合且 carrier adapter 不污染 logical authority；
+- User Input Core 跑通，canonical payload 由实现/fixture 驱动形成稳定 v1；
+- Render Update Registry/Snapshot/Patch/Event 跑通，limits 由实现/fixture 驱动关闭；
+- Content API只读/路径安全/鉴权正确；
+- `@loomrealm/map` 只依赖 Subsystem-facing capability；
+- Desktop/PWA共享 application semantics，平台差异留在 Adapter + composition root。
 
 ## 暂缓
 
-Save System、不可信 executable Sandbox、第二 Launcher、automatic Runtime recovery/restart、Control heartbeat、lazy recycle、多 Runtime per key、Publisher signing、多主栈/Frame Graph、Frame migration、Activation reuse、caller-driven cancellation、Frame replay/resync、完整菜单/战斗/任务、多人同步、高级渲染优化、ZIP/ASAR/remote package、Render history replay、cross-Domain transaction。
+Save System、不可信 executable Sandbox、第二 Launcher、automatic Runtime recovery/restart、Control heartbeat、lazy recycle、多 Runtime per key、Publisher signing、多主栈/Frame Graph、Frame migration、Activation reuse、caller-driven cancellation、Frame replay/resync、完整菜单/战斗/任务、多人同步、高级渲染优化、ZIP/ASAR/remote package、Render history replay、cross-Domain transaction，以及预测性创建但暂无真实消费者的 adapter package。
