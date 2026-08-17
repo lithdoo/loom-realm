@@ -6,7 +6,7 @@ FSDB（File Store Database）是一种基于文件系统的轻量级数据存储
 
 FSDB 支持四种类型的数据表：基础表、拓展表、分组数组表和资源表。
 
-### 1.1 目录命名规范
+### 1.1 数据库、表与 TableIdentity
 
 FSDB 数据库目录使用：
 
@@ -23,7 +23,23 @@ FSDB 数据库目录使用：
 [resource]<TableName>
 ```
 
+统一定义：
+
+```text
+TableKind = struct | extend | group | resource
+TableIdentity = (TableKind, TableName)
+```
+
 `DatabaseName` 与 `TableName` 都使用 1.2 定义的 `NameSegment`。
+
+因此同一个数据库中：
+
+```text
+[struct]角色
+[resource]角色
+```
+
+可以共存，因为它们的 `TableKind` 不同；同一 `(TableKind, TableName)` 不得出现两个 logical table。
 
 以上四类表目录均可包含 `.desc.meta`；其中 `[resource]` 与 `[group]` 必填，`[struct]` 与 `[extend]` 可选。
 
@@ -50,7 +66,7 @@ FSDB 定义一个统一的 `NameSegment`：
 9. 不得包含 NUL、Unicode control character（General Category `Cc`）或无效 Unicode scalar value；
 10. 为保持常见桌面文件系统兼容性，名称中第一个 `.` 之前的部分不得以 ASCII case-insensitive 方式等于 `CON`、`PRN`、`AUX`、`NUL`、`COM1`..`COM9`、`COM¹`..`COM³`、`LPT1`..`LPT9`、`LPT¹`..`LPT³`。
 
-第 2 条的 normalization 是 **physical filename → logical identity** 的 canonicalization，不表示 FSDB 可以存在两个 canonically equivalent 的不同 key。FSDB identity 始终只使用 NFC logical form。
+第 2 条 normalization 是 **physical filename → logical identity** 的 canonicalization，不表示 FSDB 可以存在两个 canonically equivalent 的不同 key。FSDB identity 始终只使用 NFC logical form。
 
 合法示例：
 
@@ -79,7 +95,7 @@ foo?bar          # non-portable filename character
 CON              # Windows reserved device basename
 ```
 
-FSDB logical identity **区分大小写**，实现不得自动 lowercase/uppercase、trim、collapse whitespace 或改变 NFC logical name 的合法内容。为了跨大小写不敏感文件系统迁移，作者 SHOULD 避免仅通过大小写区分两个名称，例如 `Hero` 与 `hero`。
+FSDB logical identity **区分大小写**。实现不得自动 lowercase/uppercase、trim、collapse whitespace 或改变合法 NFC logical name。为了跨大小写不敏感文件系统迁移，作者 SHOULD 避免只通过大小写区分两个名称，例如 `Hero` 与 `hero`。
 
 统一 logical type：
 
@@ -95,9 +111,9 @@ ResourceKey = NameSegment ("/" NameSegment)*
 
 普通 `[struct]`、`[extend]`、`[group]` key 都是单个 `NameSegment`。ResourceKey 可以由多个 `NameSegment` 组成。
 
-同一 logical namespace 内，NFC 后的完整 logical identity 必须唯一。
+同一 logical namespace 内，NFC 后的完整 logical identity必须唯一。
 
-### 1.3 物理文件命名与识别规则
+### 1.3 物理对象、候选识别与文件系统间接引用
 
 `.` 与 `$` 分别承担不同层级的保留空间：
 
@@ -112,10 +128,23 @@ $foo   → logical protocol / service namespace
 
 - `[struct]` / `[extend]`：非 dot-prefixed regular file 以 `.json` 结尾时是 data entry candidate；去掉固定末尾 `.json` 后，经 NFC canonicalization 必须得到合法 `Key`；
 - `[group]`：非 dot-prefixed regular file 以 `.jsonl` 结尾时是 data entry candidate；去掉固定末尾 `.jsonl` 后，经 NFC canonicalization 必须得到合法 `Key`；
-- `[resource]`：递归扫描非 dot-prefixed 目录；目录名 canonicalize 为 NFC 后必须是合法 `NameSegment`。非 dot-prefixed regular file 是 resource candidate，必须具有非空最后扩展名并满足 5.3；
-- recognized candidate 若命名或内容 malformed，应使该 FSDB validation 失败，而不是静默忽略；
-- 不属于 candidate 的普通辅助文件可以忽略；
+- `[resource]`：递归扫描非 dot-prefixed directory；目录名 canonicalize 为 NFC 后必须是合法 `NameSegment`。非 dot-prefixed regular file 是 resource candidate，必须具有非空最后扩展名并满足 5.3；
+- recognized candidate 若命名、类型或内容 malformed，应使 FSDB validation 失败，而不是静默忽略；
+- 不属于 candidate 的普通辅助对象可以忽略；
 - dot-prefixed 文件/目录默认不进入普通 data namespace；只有本规范明确声明的 `.info.meta`、`.extend.meta`、`.desc.meta` 具有 FSDB metadata 语义。
+
+FSDB logical data object 必须由实际 regular file / directory 承载。symbolic link、junction 或其他文件系统间接引用不形成新的 FSDB logical object，也不得被 reader 递归 follow：
+
+```text
+recognized FSDB table / metadata / data candidate is indirection
+    → malformed FSDB
+
+unrecognized / auxiliary indirection
+    → ignore
+    → never traverse
+```
+
+数据库 root 本身可以由宿主通过 symlink 等路径定位；reader 可以先把调用方提供的 root 解析到实际目录，再以该实际目录作为 FSDB root。该宿主定位行为不改变 FSDB logical identity。
 
 这使实现能够区分：
 
@@ -126,6 +155,29 @@ unrecognized auxiliary object
 recognized FSDB object but malformed
     → validation failure
 ```
+
+### 1.4 文本编码
+
+FSDB 的结构化文本文件采用统一编码：
+
+```text
+{Key}.json
+{Key}.jsonl
+.info.meta
+.extend.meta
+.desc.meta
+```
+
+均 MUST 使用 **UTF-8 without BOM**。
+
+其中：
+
+- `.json` / `.info.meta` 按 JSON 解析；
+- `.jsonl` / `.extend.meta` 按 UTF-8 JSON Lines 解析；LF 与 CRLF 均可作为行结束符；空行或仅含空白的行不产生 record；每个非空 record 必须是合法 JSON object；
+- `.desc.meta` 是 UTF-8 Markdown；
+- Resource 文件内容是 opaque bytes，FSDB 不因为 Resource extension 为 `txt`、`json`、`html` 等就隐式声明其字符编码。
+
+UTF-8 / JSON / JSONL 约束属于 Well-formed validation；JSON Schema 的业务 schema validation 仍属于后文定义的 Integrity-valid 层。
 
 ## 2. 基础表数据目录（[struct]）
 
@@ -145,7 +197,7 @@ recognized FSDB object but malformed
 
 ### 2.3 数据文件规范
 
-- **文件格式**：独立 JSON 文件；
+- **文件格式**：UTF-8 JSON object；
 - **文件命名**：`{Key}.json`；
 - **Key 规则**：只去掉固定末尾 `.json`；文件名 stem 经 NFC canonicalization 后作为 `Key`，并满足 1.2；
 - **数据内容**：每条数据必须是 JSON object。
@@ -190,7 +242,7 @@ recognized FSDB object but malformed
 
 ### 3.3 数据文件规范
 
-- **文件格式**：独立 JSON 文件；
+- **文件格式**：UTF-8 JSON object；
 - **文件命名**：`{Key}.json`；
 - **Key 规则**：只去掉固定末尾 `.json`；文件名 stem 经 NFC canonicalization 后得到 `Key`，并满足 1.2；
 - **数据内容**：每条数据必须是 JSON object，其中部分字段可保存被引用基础表的 key。
@@ -205,7 +257,7 @@ recognized FSDB object but malformed
 
 #### 3.4.2 .extend.meta 文件
 
-每个 `[extend]` 必须包含 `.extend.meta`。文件采用 JSONL，每行一个 JSON object：
+每个 `[extend]` 必须包含 `.extend.meta`。文件采用 UTF-8 JSONL，每个非空 record 为一个 JSON object：
 
 ```json
 {"field": "<字段名>", "struct": "<引用的基础表名>", "desc": "<引用关系描述>"}
@@ -240,7 +292,7 @@ recognized FSDB object but malformed
 
 ### 4.3 数据文件规范
 
-- **文件格式**：JSONL；
+- **文件格式**：UTF-8 JSONL；
 - **文件命名**：`{Key}.jsonl`；
 - **Key 规则**：只去掉固定末尾 `.jsonl`；文件名 stem 经 NFC canonicalization 后得到 `Key`，并满足 1.2；
 - **数据内容**：每个非空 JSONL record 必须是 JSON object，整文件表示该分组下对象序列。
@@ -308,7 +360,8 @@ logical ResourceKey:
 - `Extension` 必须是 `1..32` 个 lowercase ASCII `a-z`、`0-9`、`-`、`_`，且首字符必须是 `a-z` 或 `0-9`；
 - Extension 不属于 Resource identity；
 - 同一 Resource 表中 NFC 后完整 ResourceKey 必须唯一；同一 key 即使扩展名不同仍然冲突；
-- unknown extension 仍然可以是合法 Resource；扩展名只描述物理格式，不限制业务类型。
+- unknown extension 仍然可以是合法 Resource；扩展名只描述物理格式，不限制业务类型；
+- Resource content 永远按 opaque bytes 处理，extension 不对文本编码作隐式保证。
 
 示例：
 
@@ -348,7 +401,7 @@ Resource 子目录中的 dot-prefixed 文件或目录不进入 Resource namespac
 
 ### 5.4 元数据文件（.desc.meta）
 
-`.desc.meta` 为 Markdown。对于 `[resource]` 和 `[group]` 必填；对于 `[struct]` 和 `[extend]` 可选。
+`.desc.meta` 为 UTF-8 Markdown。对于 `[resource]` 和 `[group]` 必填；对于 `[struct]` 和 `[extend]` 可选。
 
 Resource 表只有根目录 `.desc.meta` 具有表级 metadata 语义；子目录不创建新的 metadata scope。
 
@@ -399,17 +452,21 @@ Resource 表只有根目录 `.desc.meta` 具有表级 metadata 语义；子目�
 
 ### 7.3 Well-formed 与 Integrity-valid
 
-为了让 reader、HTTP adapter、installer 和完整 validator 的职责可分离，FSDB 区分两个有效性层级：
+为了让 reader、HTTP adapter、installer 和完整 validator 的职责可分离，FSDB 区分两个有效性层级。
 
 **Well-formed FSDB**：
 
 ```text
-directory/table naming valid
+database / table naming valid
+TableIdentity unique
 NameSegment / Key / ResourceKey valid
+recognized physical object has expected regular file/directory type
+recognized symlink/junction/indirection rejected
 required metadata exists
+UTF-8 text encoding valid
 metadata syntax valid
 struct/extend entry is JSON object
-group JSONL record is JSON object
+group/.extend.meta non-empty JSONL record is JSON object
 logical identity unique
 resource physical mapping unambiguous
 ```
