@@ -2,11 +2,15 @@
 
 Read-only HTTP adapter for filesystem-backed FSDB directories.
 
-> Status: package skeleton / design draft only. No runtime implementation yet.
+> Status: **Frozen for Implementation — v1**. Runtime implementation has not started yet.
 
-The package is intended to open a validated FSDB directory, build a safe immutable index, and expose FSDB logical objects through a small HTTP interface without leaking physical filesystem paths.
+The package opens a Well-formed FSDB directory, builds a safe immutable logical index, and exposes FSDB logical objects through a small Node.js-native HTTP interface without leaking physical filesystem paths.
 
-Current design draft: [DESIGN.md](./DESIGN.md).
+## Contracts
+
+- Frozen implementation contract: [DESIGN.md](./DESIGN.md)
+- Mandatory conformance cases: [CONFORMANCE.md](./CONFORMANCE.md)
+- FSDB storage authority: [FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)
 
 ## Package boundary
 
@@ -15,9 +19,25 @@ This package is intentionally independent from LoomRealm Main, Renderer, Frame, 
 ```text
 filesystem FSDB directory
         ↓
-@loomrealm/fsdb-http
+openFsdb()
         ↓
-readonly HTTP interface
+FsdbDatabase
+        ↓
+createFsdbHttpHandler()
+        ↓
+node:http RequestListener
 ```
 
-The first implementation should prefer Node.js standard-library primitives and avoid runtime dependencies unless a concrete need appears.
+`serveFsdb()` is the convenience composition that owns a database plus a `node:http` server. Express, Koa, Fastify and Hono are not core dependencies or primary integration contracts.
+
+## Frozen v1 public shape
+
+```ts
+const db = await openFsdb({ root });
+const handler = createFsdbHttpHandler(db);
+
+// or
+const service = await serveFsdb({ root, host: "127.0.0.1", port: 0 });
+```
+
+The first implementation targets Node.js `>=20`, prefers standard-library primitives, and keeps **0 runtime dependencies**. Internal implementation details may evolve as long as the Frozen v1 observable contract and conformance suite remain satisfied.
