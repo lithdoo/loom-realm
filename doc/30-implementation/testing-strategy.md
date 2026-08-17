@@ -3,13 +3,21 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：Control、Frame、Renderer/Data/Input/Render、Content 与跨平台测试分层  
-> 依赖：[正式契约目录](../15-contracts/README.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Frame v1 Conformance](../15-contracts/frame-call-conformance-v1.md)  
-> 最近复核：2026-08-09
+> 主要定义：协议 conformance、package unit/integration、adapter equivalence 与 Desktop/PWA E2E 测试分层  
+> 依赖：[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Frame v1 Conformance](../15-contracts/frame-call-conformance-v1.md)  
+> 最近复核：2026-08-17
 
 ## 1. 测试目标
 
-测试必须验证**跨角色可观察语义**，并阻止实现重新耦合协议边界。
+测试必须同时验证两类边界：
+
+```text
+protocol conformance
+    跨角色可观察语义一致
+
+package architecture
+    public surface / dependency direction / adapter authority 不越界
+```
 
 当前协议栈：
 
@@ -30,10 +38,11 @@ Content API
 ```text
 Component Registry/Factory
 DOM/OS event adapter
-Host ticket/token/MessagePort delivery mechanism
+endpoint/ticket/MessagePort delivery mechanism
 queue concrete capacity/drop preference
 Patch-vs-Snapshot heuristic
 cache/index/scheduler implementation
+Desktop/PWA composition wiring details
 ```
 
 ## 2. 测试层次
@@ -45,11 +54,22 @@ Schema / Closed-wire
 → Transaction Golden Trace
 → Error / Timeout / Recovery
 → Hard Limit / ID / Revision
-→ Transport semantic equivalence
-→ Module Unit
-→ Runtime/Renderer integration
-→ End-to-End
+→ Capability Package Unit
+→ Adapter Contract / Semantic Equivalence
+→ Role Package Integration
+→ Desktop/PWA Composition E2E
 ```
+
+可复用协议 fixture/helper 跟随最近的 capability package，例如：
+
+```text
+@loomrealm/runtime-control/testing
+@loomrealm/renderer-control/testing
+@loomrealm/data/testing
+@loomrealm/content/testing
+```
+
+仓库级 test Subsystem/E2E 位于 `tests/`，默认不发布。
 
 ## 3. Subsystem Control v1
 
@@ -86,7 +106,9 @@ shutdown-deadline-distinct-from-frame-deadline
 no-data-method-in-runtime-control-profile
 ```
 
-Desktop WebSocket 与 PWA MessagePort 对同一 abstract trace 得到相同 application outcome。
+这些 fixture 可以统一发布在 `@loomrealm/runtime-control/testing`，但仍分别标记 Control/Frame/Profile protocol identity/version。
+
+WebSocket 与 MessagePort adapter 对同一 abstract trace 得到相同 application outcome。
 
 ## 5. Frame / Call v1
 
@@ -122,7 +144,7 @@ administrative-suspend-timeout-runtime-fatal
 
 ## 6. JSON / Request ID / Limits
 
-共享 JSON边界：
+共享 JSON 边界：
 
 ```text
 undefined / NaN / Infinity / BigInt rejected
@@ -162,11 +184,13 @@ bounded-latest-snapshot-publication
 snapshot-topology-limits
 ```
 
-Renderer不得计算 Runtime failure unwind。
+Renderer 不得计算 Runtime failure unwind。
 
-Renderer Control token如何由 Host交付不做跨实现 conformance，只测试成功 bootstrap 后的协议行为和失效边界。
+Renderer Control token/Port 如何由 composition root/adapter 交付不做跨实现 conformance，只测试成功 bootstrap 后的协议行为和失效边界。
 
-## 8. Data Connection v1
+## 8. Data Connection v1 / Carrier Adapter
+
+Core：
 
 ```text
 current-generation-establish
@@ -184,7 +208,9 @@ data-loss-does-not-unwind-frame
 frame-close-does-not-retire-healthy-data-connection
 ```
 
-Desktop/PWA Host integration只需证明实际 carrier 在安装为 current 前绑定正确 Session/current Renderer/subsystem/generation；不要求 endpoint/ticket/Port wire相同。
+`@loomrealm/transport-websocket` / `@loomrealm/transport-messageport` 只需证明 actual carrier 在安装为 current 前绑定正确 Session/current Renderer/subsystem/generation，并保持 child protocol 所需的 ordering/message-boundary/loss semantics。
+
+Adapter 测试不得要求 endpoint/ticket/Port bootstrap wire 相同，也不得让 adapter 获得 DataAuthority ownership。
 
 ## 9. User Input v1
 
@@ -209,7 +235,7 @@ same-generation-reconnect-fresh-state
 input-loss-does-not-fail-runtime
 ```
 
-标准 `keyboard/pointer/gamepad` payload 一旦在 User Input v1 中冻结，直接加入同一 corpus：
+标准 `keyboard/pointer/gamepad` payload 允许在实现阶段同步细化；一旦某个 canonical schema 写入 User Input v1，就加入同一 `@loomrealm/data/testing` corpus：
 
 ```text
 canonical-schema-valid/invalid
@@ -218,18 +244,9 @@ exactly-at/over numeric limits
 platform adapters produce equivalent canonical payload for equivalent logical input
 ```
 
-不测试某个 Renderer 必须使用 DOM API、某个 key lookup table 或固定 polling cadence。
+不测试某个 Renderer 必须使用 DOM API、固定 key lookup table 或 polling cadence。
 
-Event queue测试协议事实：
-
-```text
-bounded
-surviving order preserved
-dropped event never replayed
-overflow does not fail Runtime/Frame
-```
-
-不要求固定 capacity/drop-oldest/drop-newest。
+Event queue只验证 bounded + surviving order + no replay，不要求固定 capacity/drop policy。
 
 ## 10. Render Update v1
 
@@ -268,33 +285,13 @@ same-live-key-tag-stable
 atomic-no-partial-apply
 ```
 
-`tag` conformance只测试：
+`tag` 只测试 string、byte limit、same live key stable，不测试 known/unknown/component semantics。
 
-```text
-is string
-within byte limit
-same live key stable
-no semantic/known/unknown validation required
-```
+Hard limits 可在 Patch engine/real fixture 开发中逐步确定；确定后补 exactly-at/over fixture，而不是在实现前阻塞全部 Render path。
 
-Event/recovery：
+## 11. Content API / Content Adapter
 
-```text
-patch-insert-X-then-event-target-X
-event-X-then-patch-remove-X
-stale-event-target-dropped
-event-no-replay/no-coalesce
-event-overflow-does-not-block-authoritative-progress
-authoritative-failure-retires-data-connection
-fresh-registry-plus-snapshots-recovery
-data-retire-does-not-fail-runtime/unwind-frame
-```
-
-Event queue不要求固定数字/丢弃偏好。
-
-Hard limits一旦冻结，做 exactly-at/over：message、JSON depth、tree depth、node count、patch op count、attrs/data、domainId/key/tag bytes、zIndex。
-
-## 11. Content API v1
+Content contract：
 
 ```text
 manifest/record/group/resource GET+HEAD
@@ -309,13 +306,47 @@ PWA same-origin semantics
 no physical path/token leak
 ```
 
-Range：若实现宣称支持，测试标准 HTTP `206/Content-Range/416`；不要求所有实现支持，也没有 Range Profile conformance。
+Adapter：
 
-Deployment limits：测试 bounded 行为与 `413/429/timeout`，不要求不同部署共享具体资源上限/并发数字。
+```text
+content-fs
+    trusted logical identity cannot escape package root
 
-Host grant如何生成/注入/轮换不做 Content API conformance；只验证最终请求 authorization 行为。
+content-http
+    preserves Content API status/header/body semantics
 
-## 12. Desktop / PWA Semantic Equivalence
+content-service-worker
+    preserves same logical identity/cache/version semantics
+```
+
+Range 若实现宣称支持，测试标准 HTTP 行为；不要求所有 adapter 支持。
+
+## 12. Package Architecture Checks
+
+CI 应增加静态依赖约束：
+
+```text
+wire must not import domain/role packages
+contract/capability must not import role implementation
+main/subsystem/renderer must not import apps/*
+Core must not import @loomrealm/map
+@loomrealm/map may import @loomrealm/subsystem
+adapter must not import product composition root
+```
+
+同时对公开 package 做：
+
+```text
+exports surface smoke test
+pack dry-run
+tarball consumer smoke test
+no internal relative-path consumption
+package dependency graph cycle check
+```
+
+npm semver 不与 protocol version 做数值相等断言。
+
+## 13. Desktop / PWA Semantic Equivalence
 
 相同 abstract application trace 应得到相同：
 
@@ -326,45 +357,45 @@ Renderer Control authority
 Data Connection current/retired
 User Input canonical semantics/recovery
 Render Domain authoritative state
-Content logical HTTP/Fetch semantics
+Content logical API semantics
 ```
 
-平台差异只能来自 Host carrier/credential establishment 与 platform lifecycle integration。
+平台差异只能来自 Adapter/composition lifecycle integration。
 
-## 13. E2E
+## 14. E2E
 
-正常：
+Desktop：
 
 ```text
 Game bootstrap
-→ Control ready
+→ launcher-node
+→ Control WebSocket adapter
+→ Runtime ready
 → initial Frame
 → Renderer Control
-→ Host-established Data carrier
-→ User Input + Render Snapshot/Patch/Event
-→ nested call/return/resume
-→ Renderer reload/recovery
+→ Data carrier
+→ User Input + Render
 → Content reads
+→ nested call/return
+→ Renderer reload/recovery
 → shutdown
 ```
 
+PWA：同一 application trace 替换为 Worker/MessagePort/Service Worker adapters。
+
 Failure：Runtime crash、Frame timeout/divergence、Data loss、Renderer Control loss、invalid Render Patch、Content fault分别验证独立 failure boundary。
 
-## 14. CI / Fixture Revision
+## 15. CI / Fixture Revision
 
-每个真正协议 corpus独立记录 protocol/version/fixtureSetRevision。
-
-CI至少报告：
+每个真正协议 corpus 独立记录：
 
 ```text
-Subsystem Control v1
-Runtime Control Profile v1
-Frame v1 Main / Subsystem / Transport
-Renderer Control v1
-Data Connection v1
-User Input v1
-Render Update v1
-Content API v1
+protocol
+protocolVersion
+fixtureSetRevision
+role
 ```
 
-只有 executable fixtures通过后，具体实现才能声明 conformant。
+Package 可以聚合多个 corpus，但不能把它们的 protocolVersion 合并。
+
+只有 executable fixtures 通过后，具体实现才能声明 conformant；只有 package architecture checks 通过后，workspace 才能作为独立可发布模块进入 release pipeline。
