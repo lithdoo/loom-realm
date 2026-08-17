@@ -1,0 +1,42 @@
+{
+  "name": "@loomrealm/fsdb-http",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "description": "Read-only HTTP adapter for filesystem-backed FSDB directories.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "DESIGN.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lithdoo/loom-realm.git",
+    "directory": "packages/fsdb-http"
+  },
+  "bugs": {
+    "url": "https://github.com/lithdoo/loom-realm/issues"
+  },
+  "homepage": "https://github.com/lithdoo/loom-realm/tree/main/packages/fsdb-http#readme"
+}
