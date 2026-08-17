@@ -104,18 +104,30 @@ resource
 
 FSDB 的 `DatabaseName`、`TableName`、普通 `Key` 与 ResourceKey segment 都基于同一个 `NameSegment`。
 
-本包不得自行 ASCII 化、lowercase、trim 或 normalize 已合法名称。
+FSDB logical canonical form 是 NFC；本包的 scanner 从 filesystem 获得 physical name 后：
+
+```text
+physical Unicode name
+→ NFC canonicalization
+→ NameSegment validation
+→ logical identity
+```
+
+因此本包不得把 physical normalization form 当作独立业务 identity。若两个 physical name canonicalize 为同一个 NFC logical name，`openFsdb()` 必须因 logical identity collision 失败。
+
+除此之外，本包不得自行 ASCII 化、lowercase、trim、collapse whitespace 或改变合法 NFC logical name。
 
 必须继承的关键约束包括：
 
 ```text
 valid Unicode / UTF-8
-NFC
-1..200 UTF-8 bytes
+NFC logical canonical form
+1..200 UTF-8 bytes after NFC
 not starting with "." or "$"
 no leading/trailing Unicode whitespace
 no trailing "."
 no path separators / NUL / control chars / non-portable filename chars
+reserved device basename rejection
 ```
 
 因此中文等人类可读名称是正常 identity：
@@ -385,16 +397,23 @@ HTTP 不携 Resource extension。
 
 ### 7.4 URL Segment 编码
 
-FSDB logical identity 使用 Unicode；HTTP wire 必须定义唯一的 segment 边界规则。
+FSDB logical identity 使用 Unicode；HTTP wire 对每个 logical segment 单独编码。
 
-客户端构造 URL 时：
+Canonical client encoding：
 
 ```text
-1. 先按 FSDB logical structure 得到独立 segment
-2. 每个 NameSegment 单独以 UTF-8 编码
-3. 再对该 segment 做 percent-encoding
-4. ResourceKey 的 "/" 只由 segment boundary 产生
+logical segment
+→ UTF-8 bytes
+→ RFC 3986 percent-encoding
 ```
+
+普通 segment 只保留 ASCII unreserved characters：
+
+```text
+A-Z a-z 0-9 - . _ ~
+```
+
+其他 UTF-8 bytes 使用 `%HH`，hex 使用 uppercase。metadata entry `$info/$extend/$desc` 作为协议保留 segment 可以直接使用其 ASCII spelling。
 
 例如 logical URL：
 
@@ -402,15 +421,16 @@ FSDB logical identity 使用 Unicode；HTTP wire 必须定义唯一的 segment �
 /fsdb/v1/struct/角色/皮卡丘
 ```
 
-wire 上可以表示为 UTF-8 percent-encoded URI；具体是否保留浏览器可直接展示的 Unicode 由 HTTP client 决定，identity 以 decoded segment 为准。
+canonical wire path 中中文 segment 使用 UTF-8 percent-encoding。
 
 服务端必须：
 
 ```text
-按 raw literal "/" 切分 path
+取 raw path，不先做整体 decode
+→ 按 raw literal "/" 切分 segment
 → 每个 segment percent-decode exactly once
 → UTF-8 decode
-→ validation
+→ logical validation
 → index lookup
 ```
 
@@ -419,20 +439,24 @@ wire 上可以表示为 UTF-8 percent-encoded URI；具体是否保留浏览器�
 - `+` 在 path 中就是 `+`，不得按 form encoding 转为空格；
 - malformed percent encoding 返回 `400`；
 - invalid UTF-8 返回 `400`；
-- decoded ordinary segment 必须满足 FSDB `NameSegment`；
+- decoded ordinary segment canonicalize 为 NFC 后必须满足 FSDB `NameSegment`；
 - decoded segment 中出现 `/`、`\`、NUL 等 FSDB 禁止字符返回 `400`；因此 `%2F` 不能在单个 segment 内制造额外 Resource 层级；
-- reader 不自动 NFC normalize；decoded 非 NFC ordinary name 返回 `400`；
-- metadata `$info/$extend/$desc` 在 ordinary NameSegment 校验之前按保留 logical entry 识别。
+- metadata `$info/$extend/$desc` 在 ordinary NameSegment 校验之前按保留 logical entry 识别；
+- 空 segment、重复 `/`、普通 route 的 trailing `/` 都视为 malformed path，返回 `400`；
+- 第一版不定义 query parameter；non-empty query component 返回 `400`；
+- fragment 不属于 HTTP request-target，因此不参与服务端 identity。
+
+服务端 MAY 接受语义等价但非 canonical 的 percent-encoding spelling；index lookup 永远基于 decoded + NFC canonical logical identity，而不是 raw URL bytes。
 
 这样：
 
 ```text
-filesystem identity
-↔ FSDB logical identity
-↔ decoded HTTP identity
+filesystem observed name
+→ NFC FSDB logical identity
+↔ decoded HTTP logical identity
 ```
 
-保持一一对应。
+保持唯一 logical namespace。
 
 ---
 
@@ -507,7 +531,7 @@ Allow: GET, HEAD
 | malformed URL / encoding / logical identity | `400` |
 | kind/table/key/metadata 不存在或组合不支持 | `404` |
 | 非 `GET` / `HEAD` | `405` |
-| `FsdbDatabase` 已 stale | `503` |
+| `FsdbDatabase` 为 `stale` 或 `closed` | `503` |
 | unexpected local implementation/service failure | `500` |
 
 第一版不建立复杂 error protocol。实现 MAY 返回很小的 JSON body，例如：
@@ -536,7 +560,9 @@ physical metadata filename
 
 ```text
 DatabaseName / TableName / Key / ResourceKey NameSegment rules
-NFC and UTF-8 byte limits
+physical-name → NFC logical-name canonicalization
+normalization collision
+UTF-8 byte limits after NFC
 recognized table directory type
 required metadata exists
 metadata syntax valid
@@ -592,7 +618,7 @@ no indexed symlink escape
 }
 ```
 
-索引器递归扫描合法非 dot-prefixed Resource 子目录，并将 physical hierarchy 转换成 `/` 分隔的 ResourceKey。
+索引器递归扫描合法非 dot-prefixed Resource 子目录，将 observed physical segment canonicalize 为 NFC，并转换成 `/` 分隔的 ResourceKey。
 
 子目录只参与 key，不形成 table 或 metadata scope。
 
@@ -627,6 +653,8 @@ GET /fsdb/v1/{kind}/{table}/keys
 
 > `FsdbDatabase` 处于 `open` 时，宿主不应修改其 FSDB source directory。修改内容需要关闭并重新 `openFsdb()`。
 
+每次成功 `openFsdb()` 生成新的、仅进程内使用的 `snapshotId`。`snapshotId` 不是 FSDB identity、不是 wire authority，也不写回磁盘；它只隔离本次打开实例的 cache validator namespace。
+
 逻辑状态：
 
 ```text
@@ -640,7 +668,8 @@ open → stale → closed
 scan
 → Well-formed validation
 → immutable logical index
-→ capture file fingerprints required for safe read/cache validation
+→ capture source fingerprints
+→ generate fresh snapshotId
 ```
 
 ### stale
@@ -675,25 +704,23 @@ close
 
 新增但未被初始 index 接受的文件不会在当前实例中突然出现；新 namespace 只能通过 reopen 建立。
 
-这一模型保证：
-
-```text
-immutable logical index
-+
-static-source contract
-+
-fail-closed drift handling
-```
-
-形成一致 snapshot 语义，而不需要 watch/replay/resync。
+宿主在 `open` 期间修改 source 本身违反 static-source contract。drift detection 是 fail-closed 防线，而不是 watch/hot-reload 机制。
 
 ---
 
 ## 15. ETag / Cache
 
-ETag 必须建立在第 14 节 source lifetime 上。
+ETag 建立在第 14 节 static-source snapshot 上。
 
-文件型 entry 第一版可使用 snapshot-local weak ETag，例如基于：
+文件型 entry 第一版使用 snapshot-local weak ETag，至少包含：
+
+```text
+snapshotId
++
+entry fingerprint
+```
+
+entry fingerprint 可基于：
 
 ```text
 size
@@ -701,20 +728,26 @@ mtime/mtimeNs
 以及实现可稳定获得的 file identity fields
 ```
 
-它不是跨 reopen 的永久 content hash，只在当前 static-source snapshot 语义下作为 HTTP validator。
+概念形式：
 
-请求前若 fingerprint 表明 source drift：
+```text
+W/"<snapshotId>-<entryFingerprint>"
+```
+
+这样即使 close/reopen 后物理文件恰好拥有相同 size/mtime，新的 `snapshotId` 也会阻止旧 validator 被错误复用。
+
+在比较 `If-None-Match` 并返回 `304` 之前，必须先完成当前 request 所需的 source-state/fingerprint 检查；检测到 drift 时应：
 
 ```text
 mark stale
 → 503
 ```
 
-而不是继续使用旧 ETag 返回内容。
+而不是返回旧 `304`。
 
-Database Descriptor 因内容很小且由 index 生成，应使用稳定 table 排序和 deterministic JSON serialization；其 ETag 可直接由生成后的 descriptor bytes 计算。
+Database Descriptor 由 immutable index 生成，使用稳定 table 排序和 deterministic JSON serialization；其 ETag 同样纳入当前 `snapshotId`，第一版不承诺跨 reopen cache continuity。
 
-未来 FSDB 若拥有 authoritative content hash，再优先使用该 authority。
+未来 FSDB 若拥有 authoritative content hash，再优先使用该 authority，并可重新评估跨 snapshot cache reuse。
 
 ---
 
@@ -748,7 +781,7 @@ Content API route
 ```text
 1. FSDB NameSegment / TableName / Key / ResourceKey types
 2. Well-formed validator
-3. scanner + immutable logical index
+3. scanner + NFC logical index
 4. symlink/path containment + source fingerprints
 5. hierarchical ResourceKey indexing
 6. raw URL split + percent-decode + logical resolver
@@ -756,7 +789,7 @@ Content API route
 8. raw JSON / JSONL / resource response
 9. metadata logical entry
 10. MIME + Content-Length
-11. OPEN / STALE / CLOSED lifecycle
+11. OPEN / STALE / CLOSED lifecycle + snapshotId
 12. ETag / If-None-Match
 13. malformed/not-found/stale/method tests
 14. real Unicode FSDB fixture + consumer smoke
@@ -795,16 +828,19 @@ open
 必须证明：
 
 ```text
-中文等 NFC Unicode key 可正常读取
-非 NFC / 非法 filename key 被拒绝
+中文等 Unicode key 可正常读取
+canonically equivalent physical spelling 收敛到同一 NFC logical identity
+normalization collision 被拒绝
 $ / . reserved namespace 不与业务 key 冲突
 Resource 子目录稳定映射为 hierarchical logical key
 扩展名不参与 Resource identity
 %2F 不能突破 HTTP segment boundary
+空 segment / trailing slash / query 不扩大 API surface
 无法通过 URL 读取 index 外文件
 无法 path traversal
 无法 symlink escape
 source drift 后进入 stale 且返回 503
+reopen 后旧 ETag 不会误命中新 snapshot
 无法写入 FSDB
 错误不泄露 physical path
 ```
