@@ -3,3 +3,5 @@ packages/*/dist/
 doc/.vitepress/cache/
 doc/.vitepress/dist/
 .DS_Store
+.local/
+tools/fixtures/essentials-v21.1/*.zip

@@ -153,16 +153,18 @@ node tools/fixtures/essentials-v21.1/import.mjs
 https://www.eeveeexpo.com/essentials/download
 ```
 
-该地址是 Eevee Expo Essentials 下载入口；importer MUST 允许正常 HTTP redirect，并把最终响应保存为 temporary ZIP。
+该地址是 Eevee Expo Essentials 下载入口；importer MUST 允许正常 HTTP redirect。只有最终成功响应明确为 ZIP/binary download 时，才能保存为 temporary ZIP。
 
 不得把当前 CDN/MediaFire 的瞬时直链写死为长期 authority。默认 acquisition authority 是上面的 Eevee Expo download endpoint。
+
+当前入口可能重定向到 MediaFire HTML 落地页，而不是 raw ZIP。Importer MUST NOT 抓取 HTML、执行页面脚本或从页面中固化临时 CDN URL。遇到 landing page / anti-bot response 时以 `DOWNLOAD_FAILURE` fail closed，并提示开发者手工下载后通过 `--source` 导入。这是外部 acquisition availability，不降低 local ZIP importer 的完整性。
 
 下载要求：
 
 ```text
 HTTPS request
 → follow bounded redirects
-→ require successful final response
+→ require successful final ZIP/binary response
 → stream to temporary file
 → validate archive shape
 → safely extract to temporary directory
@@ -383,6 +385,27 @@ pick one file from a ResourceKey collision
 ```
 
 如果真实 corpus 证明 adaptation 有必要，应作为后续明确设计，不在当前两个参数中偷偷加入额外模式。
+
+### 6.1 Essentials v21.1 已知兼容映射
+
+对 2023-07-30 官方分发包的真实扫描确认了一个 FSDB extension grammar 不兼容项：
+
+```text
+Graphics/UI/itemstorage_bg.PNG
+```
+
+Phase A 对这一项采用固定、显式且 fail-closed 的兼容映射：
+
+```text
+source: Graphics/UI/itemstorage_bg.PNG
+target: [resource]Graphics/UI/itemstorage_bg.png
+size:   1897 bytes
+sha256: a494acc6701661184a211b0de4651b79ed267cac33d1cc9097b0c84926213329
+```
+
+该映射只改变目标 physical extension，文件 bytes 必须保持不变。Importer MUST 同时匹配 source relative path、size 和 SHA-256；任一项不匹配都以 `INVALID_EXTENSION` 失败。成功应用时 MUST 在 import report 中输出 warning，不得静默处理。
+
+这不是通用的 lowercase-extension 规则，也不放宽 FSDB Extension authority。其他大写或非法 extension 仍按 strict semantics 失败，CLI 不增加 adaptation mode 参数。
 
 ---
 
@@ -764,7 +787,7 @@ Phase A importer 可以认为完成，当：
 CLI only has optional --source and --output inputs
 local directory source PASS
 local ZIP source PASS
-no-source automatic HTTPS download PASS
+no-source automatic HTTPS download PASS when authority yields a raw archive; landing page fails closed
 download redirects handled safely
 archive extraction traversal-safe
 borrowed source never modified

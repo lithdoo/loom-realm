@@ -7,12 +7,14 @@
   ],
   "scripts": {
     "build:packages": "npm run build --workspaces --if-present",
+    "test:fixtures": "npm run build -w @loomrealm/fsdb-http && node --test tools/fixtures/**/*.test.mjs",
     "docs:dev": "vitepress dev doc",
     "docs:build": "vitepress build doc",
     "docs:preview": "vitepress preview doc",
     "docs:check-links": "python3 scripts/check-doc-links.py"
   },
   "devDependencies": {
-    "vitepress": "1.6.4"
+    "vitepress": "1.6.4",
+    "yauzl": "3.2.0"
   }
 }
