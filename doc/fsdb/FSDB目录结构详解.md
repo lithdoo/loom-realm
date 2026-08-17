@@ -37,18 +37,20 @@ FSDB 定义一个统一的 `NameSegment`：
 
 > 一个可直接映射为单个物理文件名/目录名、适合人和 AI 阅读、同时具有跨平台安全边界的 Unicode 名称片段。
 
-`NameSegment` MUST 满足：
+`NameSegment` 的 **logical canonical form** MUST 满足：
 
 1. 必须是有效 Unicode 文本，并以 UTF-8 表示；
-2. 必须已经处于 Unicode NFC（Normalization Form C）；读取器不得静默 normalize 非 NFC 名称，而应将其视为 malformed；
-3. UTF-8 编码后长度必须在 `1..200` bytes；
+2. logical canonical form 必须是 Unicode NFC（Normalization Form C）；写入器 MUST 以 NFC 名称请求创建文件/目录；读取器从宿主文件系统取得 physical name 后 MUST 先转换为 NFC，再构造 FSDB logical identity；若多个 physical name 归一化为同一 logical identity，validation MUST 失败；
+3. NFC 后 UTF-8 编码长度必须在 `1..200` bytes；
 4. 不得以 Unicode White_Space 开头或结尾；内部空格允许；
 5. 不得以 `.` 开头；`.` 前缀保留给物理 metadata / auxiliary namespace；
 6. 不得以 `$` 开头；`$` 前缀保留给 FSDB 协议、服务接口及未来逻辑控制/元数据 namespace；
 7. 不得以 `.` 结尾；
 8. 不得包含 `/`、`\`、`<`、`>`、`:`、`"`、`|`、`?`、`*`；
 9. 不得包含 NUL、Unicode control character（General Category `Cc`）或无效 Unicode scalar value；
-10. 为保持常见桌面文件系统兼容性，名称中第一个 `.` 之前的部分不得以 ASCII case-insensitive 方式等于 `CON`、`PRN`、`AUX`、`NUL`、`COM1`..`COM9`、`LPT1`..`LPT9`。
+10. 为保持常见桌面文件系统兼容性，名称中第一个 `.` 之前的部分不得以 ASCII case-insensitive 方式等于 `CON`、`PRN`、`AUX`、`NUL`、`COM1`..`COM9`、`COM¹`..`COM³`、`LPT1`..`LPT9`、`LPT¹`..`LPT³`。
+
+第 2 条的 normalization 是 **physical filename → logical identity** 的 canonicalization，不表示 FSDB 可以存在两个 canonically equivalent 的不同 key。FSDB identity 始终只使用 NFC logical form。
 
 合法示例：
 
@@ -77,7 +79,7 @@ foo?bar          # non-portable filename character
 CON              # Windows reserved device basename
 ```
 
-FSDB logical identity **区分大小写**，实现不得自动 lowercase/uppercase、trim、collapse whitespace 或改变合法名称内容。为了跨大小写不敏感文件系统迁移，作者 SHOULD 避免仅通过大小写区分两个名称，例如 `Hero` 与 `hero`。
+FSDB logical identity **区分大小写**，实现不得自动 lowercase/uppercase、trim、collapse whitespace 或改变 NFC logical name 的合法内容。为了跨大小写不敏感文件系统迁移，作者 SHOULD 避免仅通过大小写区分两个名称，例如 `Hero` 与 `hero`。
 
 统一 logical type：
 
@@ -108,9 +110,9 @@ $foo   → logical protocol / service namespace
 
 表目录中的识别规则：
 
-- `[struct]` / `[extend]`：非 dot-prefixed regular file 以 `.json` 结尾时是 data entry candidate；去掉固定末尾 `.json` 后必须得到合法 `Key`；
-- `[group]`：非 dot-prefixed regular file 以 `.jsonl` 结尾时是 data entry candidate；去掉固定末尾 `.jsonl` 后必须得到合法 `Key`；
-- `[resource]`：递归扫描非 dot-prefixed 目录；目录名必须是合法 `NameSegment`。非 dot-prefixed regular file 是 resource candidate，必须具有非空最后扩展名并满足 5.3；
+- `[struct]` / `[extend]`：非 dot-prefixed regular file 以 `.json` 结尾时是 data entry candidate；去掉固定末尾 `.json` 后，经 NFC canonicalization 必须得到合法 `Key`；
+- `[group]`：非 dot-prefixed regular file 以 `.jsonl` 结尾时是 data entry candidate；去掉固定末尾 `.jsonl` 后，经 NFC canonicalization 必须得到合法 `Key`；
+- `[resource]`：递归扫描非 dot-prefixed 目录；目录名 canonicalize 为 NFC 后必须是合法 `NameSegment`。非 dot-prefixed regular file 是 resource candidate，必须具有非空最后扩展名并满足 5.3；
 - recognized candidate 若命名或内容 malformed，应使该 FSDB validation 失败，而不是静默忽略；
 - 不属于 candidate 的普通辅助文件可以忽略；
 - dot-prefixed 文件/目录默认不进入普通 data namespace；只有本规范明确声明的 `.info.meta`、`.extend.meta`、`.desc.meta` 具有 FSDB metadata 语义。
@@ -145,7 +147,7 @@ recognized FSDB object but malformed
 
 - **文件格式**：独立 JSON 文件；
 - **文件命名**：`{Key}.json`；
-- **Key 规则**：只去掉固定末尾 `.json`，其余部分完整作为 `Key`，并满足 1.2；
+- **Key 规则**：只去掉固定末尾 `.json`；文件名 stem 经 NFC canonicalization 后作为 `Key`，并满足 1.2；
 - **数据内容**：每条数据必须是 JSON object。
 
 例如：
@@ -190,7 +192,7 @@ recognized FSDB object but malformed
 
 - **文件格式**：独立 JSON 文件；
 - **文件命名**：`{Key}.json`；
-- **Key 规则**：只去掉固定末尾 `.json` 后得到 `Key`，并满足 1.2；
+- **Key 规则**：只去掉固定末尾 `.json`；文件名 stem 经 NFC canonicalization 后得到 `Key`，并满足 1.2；
 - **数据内容**：每条数据必须是 JSON object，其中部分字段可保存被引用基础表的 key。
 
 ### 3.4 元数据文件
@@ -240,7 +242,7 @@ recognized FSDB object but malformed
 
 - **文件格式**：JSONL；
 - **文件命名**：`{Key}.jsonl`；
-- **Key 规则**：只去掉固定末尾 `.jsonl` 后得到 `Key`，并满足 1.2；
+- **Key 规则**：只去掉固定末尾 `.jsonl`；文件名 stem 经 NFC canonicalization 后得到 `Key`，并满足 1.2；
 - **数据内容**：每个非空 JSONL record 必须是 JSON object，整文件表示该分组下对象序列。
 
 ### 4.4 元数据文件
@@ -294,18 +296,18 @@ physical:
     <NameSegment>/<NameSegment>/.../<LeafName>.<Extension>
 
 logical ResourceKey:
-    <NameSegment>/<NameSegment>/.../<LeafName>
+    <NFC NameSegment>/<NFC NameSegment>/.../<NFC LeafName>
 ```
 
 规则：
 
 - Resource 文件可以位于任意层级非 dot-prefixed 子目录；
-- 每个目录名和最终 `LeafName` 都必须是合法 `NameSegment`；
+- 每个 physical 目录名和最终 `LeafName` 都先 canonicalize 为 NFC，再验证为合法 `NameSegment`；
 - Logical ResourceKey 使用 `/` 作为 canonical separator，不受宿主 OS path separator 影响；
 - 扩展名取文件名最后一个 `.` 之后的部分；只移除最后一个扩展名，此前的 `.` 属于 `LeafName`；
 - `Extension` 必须是 `1..32` 个 lowercase ASCII `a-z`、`0-9`、`-`、`_`，且首字符必须是 `a-z` 或 `0-9`；
 - Extension 不属于 Resource identity；
-- 同一 Resource 表中完整 ResourceKey 必须唯一；同一 key 即使扩展名不同仍然冲突；
+- 同一 Resource 表中 NFC 后完整 ResourceKey 必须唯一；同一 key 即使扩展名不同仍然冲突；
 - unknown extension 仍然可以是合法 Resource；扩展名只描述物理格式，不限制业务类型。
 
 示例：
@@ -434,7 +436,7 @@ other explicitly declared business integrity constraints hold
 
 - 名称优先服务于人和 AI 的直接理解，不需要为了数据库习惯强制转换成 ASCII；
 - 中文等 Unicode 名称是正常用法，例如 `[struct]角色/皮卡丘.json`；
-- 写入器应在落盘前生成 NFC 名称，读取器不应静默修复 malformed 名称；
+- 写入器应请求创建 NFC 名称；读取器以 NFC canonical logical identity 进行索引，并拒绝 normalization collision；
 - 避免只通过大小写区分同一 namespace 中的名称；
 - `$` 前缀属于 logical reserved namespace；`.` 前缀属于 physical reserved/auxiliary namespace；
 - 内部空格允许，但避免产生难以肉眼区分的连续空白命名；
