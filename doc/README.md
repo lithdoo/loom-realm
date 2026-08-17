@@ -46,6 +46,9 @@ LoomRealm 文档按依赖顺序组织：
 20. [只读 Content API v1](./15-contracts/content-api-v1.md)
 21. [模块设计目录](./20-modules/README.md)
 22. [实施计划目录](./30-implementation/README.md)
+23. [独立分包与发布架构](./30-implementation/package-architecture.md)
+24. [仓库与目录方案](./30-implementation/repository-layout.md)
+25. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
 
 ## 当前核心协议图
 
@@ -94,20 +97,9 @@ Control负责 Runtime identity/lifecycle；`ready` 不携 Renderer Data endpoint
 
 Frame v1 exactly seven Requests，并冻结 Response-before-dependent-RPC、ACK-before-publication、timeout/loss ambiguous→Runtime failure、no retry、whole-suffix fixed-point unwind。
 
-Suspend语义直接在 Frame v1 主契约中：
-
-```text
-child-call suspension
-    → corresponding child outcome + fresh resume
-
-administrative frame.suspend
-    → no generic v1 resume
-    → close/failure cleanup only
-```
-
 ## Renderer / Data
 
-Renderer Control只复制 Main committed authority；实际 WebSocket endpoint/ticket/MessagePort由 Host implementation建立，不进入 Renderer Authority Snapshot。
+Renderer Control只复制 Main committed authority；实际 WebSocket/MessagePort carrier 由技术 Adapter + composition root 建立，不进入 Renderer Authority Snapshot。
 
 ```text
 Data loss != Runtime failure
@@ -115,7 +107,9 @@ Data loss != Frame unwind
 Data retire != authoritative Render Domain destroy
 ```
 
-## User Input v1
+## User Input / Render
+
+User Input：
 
 ```text
 Effective Channel
@@ -126,28 +120,44 @@ current Data Connection
 ∩ Producer availability
 ```
 
-标准 keyboard/pointer/gamepad canonical wire payload最终直接属于 User Input v1；不另建 Mapping Profile。DOM/OS/device adapter属于 Renderer实现。
+standard canonical payload 直接属于 User Input v1；DOM/OS/device mapping 属于 Renderer implementation。
 
-## Render Update v1
-
-唯一正式 v1：
+Render Update 唯一正式 v1：
 
 ```text
 render.domains
 render.snapshot(revision)
-render.patch(baseRevision, revision)  // exact R→R+1
+render.patch(baseRevision, revision)
 render.event
 ```
 
-Patch 使用 key-addressed `insert/remove/move/update`，whole Domain candidate原子验证/提交。`tag`只是 opaque string，不存在 Component Profile/unknown-tag 协议语义。
+`tag` 只是 opaque string；continuity failure 通过 fresh Data carrier + Registry/Snapshots 恢复，无 ACK/replay/resync RPC。
 
-continuity failure：retire Data carrier → fresh Registry/Snapshots；无 ACK/replay/resync RPC。
-
-## Content API v1
+## Content API
 
 Content API负责 logical readonly GET/HEAD、MIME/cache/version、request authorization、error/integrity。
 
-Host负责 Desktop credential issuance/injection/rotation；不再有 Content Access Profile。Range若支持直接使用标准 HTTP Range；deployment容量/并发/timeout是实现配置。
+filesystem/HTTP/Service Worker/OPFS 是技术 Adapter；credential delivery 留在 composition root/adapter，不另建 Content Access Profile。
+
+## 分包与发布
+
+实现层采用：
+
+```text
+能力一包
+角色一包
+技术 Adapter 一包
+平台只组合
+```
+
+并明确：
+
+```text
+Protocol boundary != npm package boundary != runtime process boundary != platform boundary
+npm package semver != protocol version
+```
+
+因此 Desktop/PWA 保留为运行拓扑与产品形态，但默认不是 `host-desktop` / `host-pwa` 万能公共包。详细规则见 [独立分包与发布架构](./30-implementation/package-architecture.md)。
 
 ## 当前状态
 
@@ -164,10 +174,12 @@ Render Update v1                        Closure Candidate
 Content API v1                          Evolving
 ```
 
+协议已经足够支撑进入开发；剩余 payload/limits/conformance 允许在真实实现中继续细化。
+
 ## 文档治理
 
 正式 Protocol/Profile 只用于独立实现必须共享、否则会破坏互操作/authority/identity/state/order/recovery/security 的规则。
 
-默认不协议化：组件映射、DOM/OS adapter、Host ticket/token/Port交付、队列具体容量/丢弃偏好、cache/index、部署容量，以及标准 HTTP 已有能力的重复 Profile。
+Package 则只为有明确能力、消费者和独立发布价值的边界创建；不会因为协议有独立文档或代码运行在某个平台就自动拆包。
 
 协议版本表示真实互操作边界，不表示设计稿次数。关键设计演变见 [ADR 目录](./decisions/README.md) 与 Git history。
