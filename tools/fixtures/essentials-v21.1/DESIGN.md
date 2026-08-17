@@ -1,8 +1,8 @@
 # Pokémon Essentials v21.1 → FSDB Fixture Importer 草案
 
 > 状态：Draft  
-> 目标：将开发者本地合法取得的 Pokémon Essentials v21.1 目录转换为本地 FSDB 测试语料，用于验证 `@loomrealm/fsdb-http` 的真实世界兼容性、规模和安全边界。  
-> 输出不得作为 LoomRealm 仓库或 npm package 的第三方素材分发渠道。
+> 目标：将 Pokémon Essentials v21.1 转换为本地 FSDB 测试语料，用于验证 `@loomrealm/fsdb-http` 的真实世界兼容性、规模和安全边界。  
+> 输出仅用于开发者本地测试，不得作为 LoomRealm 仓库或 npm package 的第三方素材分发渠道。
 
 ---
 
@@ -10,7 +10,7 @@
 
 本工具属于 development / fixture tooling，不属于 LoomRealm runtime，也不属于 `@loomrealm/fsdb-http` production package。
 
-建议位置：
+位置：
 
 ```text
 tools/
@@ -20,21 +20,23 @@ tools/
         └── import.mjs          # 后续实现
 ```
 
-本工具的第一阶段只负责：
+Phase A 只负责：
 
 ```text
-local Pokémon Essentials v21.1 directory
+local source OR default HTTPS download
+        ↓
+normalize to an extracted Essentials v21.1 source directory
         ↓
 strict FSDB compatibility preflight
         ↓
 FSDB Resource mirror
         ↓
-openFsdb(output)
+production openFsdb(output)
         ↓
 real-corpus integration / stress test
 ```
 
-它不是 Pokémon Essentials 语义转换器。
+它不是 Pokémon Essentials 业务语义转换器。
 
 ---
 
@@ -66,13 +68,9 @@ PBS/
 
 Resource 保持原始 bytes，不解析内容语义。
 
-每个 Resource table 自动生成根级：
+每个 Resource table 自动生成根级 `.desc.meta`。
 
-```text
-.desc.meta
-```
-
-`[struct]测试信息` 用于确保同一 fixture 同时覆盖 Struct + Resource：
+`[struct]测试信息` 用于确保同一真实 fixture 同时覆盖 Struct + Resource：
 
 ```text
 [struct]测试信息/
@@ -92,37 +90,230 @@ Pokémon/GameData schema 设计
 引用完整性转换
 素材编辑、压缩、格式转换
 运行 Pokémon Essentials 游戏
-下载或重新分发第三方素材
+长期缓存下载包
+向仓库/npm 发布第三方素材
 ```
 
-这些能力如果需要，分别进入后续 compatibility/importer 工作，不进入本 fixture importer。
+自动获取默认 Essentials v21.1 ZIP **属于 Phase A acquisition responsibility**，但只用于本地转换；下载产物和转换后的第三方素材都不是 LoomRealm distribution artifact。
 
 ---
 
-## 3. 输入与输出
+## 3. CLI：仅两个参数
 
-建议 CLI：
+v1 CLI 只暴露两个可选参数：
+
+```text
+--source <path>
+--output <directory>
+```
+
+没有 `--strict` 参数：**strict import 是 Phase A 固定语义**。
+
+典型调用：
 
 ```bash
+# 1. 两个参数都指定
 node tools/fixtures/essentials-v21.1/import.mjs \
   --source "/path/to/Pokemon Essentials v21.1" \
-  --output ".local/fixtures/[FSDB]Essentials v21.1"
+  --output ".local/fixtures"
+
+# 2. 只指定 source；输出创建在当前目录
+node tools/fixtures/essentials-v21.1/import.mjs \
+  --source "/path/to/Pokemon_Essentials_v21.1_2023-07-30.zip"
+
+# 3. 只指定 output；source 自动下载
+node tools/fixtures/essentials-v21.1/import.mjs \
+  --output ".local/fixtures"
+
+# 4. 两个都省略；自动下载，并在当前目录创建新的 FSDB 目录
+node tools/fixtures/essentials-v21.1/import.mjs
 ```
 
-约束：
+### 3.1 `--source <path>`
 
-- `--source` 必须是调用方本地已有目录；
-- importer 不负责网络下载；
-- importer 不修改 source；
-- output 必须位于本地 ignored workspace，推荐 `.local/fixtures/`；
-- `.local/` 应保持 Git ignored；
-- importer 不得将第三方原始素材写入 tracked repository path。
+`--source` 指定本地 source，可以是：
+
+```text
+1. 已解压的 Pokémon Essentials v21.1 根目录
+2. Pokémon Essentials v21.1 ZIP archive
+```
+
+本地 source MUST：
+
+- 不被 importer 修改；
+- 经 source-shape/version preflight 确认为目标 v21.1 corpus；
+- directory 直接作为 acquisition result；
+- ZIP 先解压到 importer-owned temporary directory，再进入相同 preflight。
+
+如果 **未提供 `--source`**，importer MUST 自动通过 HTTPS 获取默认 v21.1 archive。
+
+默认稳定入口：
+
+```text
+https://www.eeveeexpo.com/essentials/download
+```
+
+该地址是 Eevee Expo Essentials 下载入口；importer MUST 允许正常 HTTP redirect，并把最终响应保存为 temporary ZIP。
+
+不得把当前 CDN/MediaFire 的瞬时直链写死为长期 authority。默认 acquisition authority 是上面的 Eevee Expo download endpoint。
+
+下载要求：
+
+```text
+HTTPS request
+→ follow bounded redirects
+→ require successful final response
+→ stream to temporary file
+→ validate archive shape
+→ safely extract to temporary directory
+→ locate Essentials v21.1 root
+→ continue normal source preflight
+```
+
+下载/解压失败必须整体失败，不得回退到不明来源或 GitHub repository snapshot。Maruno 的 GitHub repository 不是完整 Essentials distribution，不能替代默认完整 corpus。
+
+### 3.2 `--output <directory>`
+
+`--output` 表示 **输出父目录**，不是最终 FSDB root 名本身。
+
+例如：
+
+```bash
+--output ".local/fixtures"
+```
+
+生成：
+
+```text
+.local/fixtures/[FSDB]Essentials v21.1/
+```
+
+如果 **未提供 `--output`**：
+
+```text
+output parent = process.cwd()
+```
+
+即在当前工作目录下自动创建一个新的 FSDB 目录。
+
+### 3.3 输出必须永远是新目录
+
+importer MUST NOT 覆盖已有目录。
+
+默认 logical basename：
+
+```text
+[FSDB]Essentials v21.1
+```
+
+如果已存在，依次尝试：
+
+```text
+[FSDB]Essentials v21.1 2
+[FSDB]Essentials v21.1 3
+[FSDB]Essentials v21.1 4
+...
+```
+
+直到以 exclusive-create 语义成功取得一个新的 staging/output name。
+
+因此：
+
+```text
+same command executed repeatedly
+→ creates separate fixtures
+→ never mutates previous successful fixture
+```
+
+`--output` 指定的父目录不存在时 importer MAY 创建它；如果存在但不是 directory 或不可写，则 import fail。
 
 ---
 
-## 4. 映射模型
+## 4. Source Acquisition Boundary
 
-### 4.1 Resource directory mapping
+无论 source 从哪里取得，后续 importer 只能面对一个统一模型：
+
+```text
+AcquiredSource {
+  root: physical directory
+  ownership: borrowed | temporary
+}
+```
+
+### 4.1 Local directory
+
+```text
+--source <directory>
+→ borrowed
+→ never delete / modify
+```
+
+### 4.2 Local ZIP
+
+```text
+--source <zip>
+→ extract into importer-owned temp
+→ temporary
+→ cleanup after success/failure
+```
+
+### 4.3 Automatic HTTPS download
+
+```text
+no --source
+→ Eevee Expo download endpoint
+→ temporary ZIP
+→ temporary extracted root
+→ cleanup after success/failure
+```
+
+只有 importer 自己创建的 temporary acquisition object 才能自动删除。
+
+### 4.4 Archive extraction safety
+
+ZIP extraction MUST fail closed：
+
+```text
+absolute archive path          → reject
+.. path traversal             → reject
+entry escaping extraction root → reject
+archive symlink/indirection   → reject
+ambiguous duplicate target    → reject
+unsupported/corrupt archive   → reject
+```
+
+ZIP 实现方式属于 tooling implementation detail，可以使用 tooling-only dependency；不得因此给 `@loomrealm/fsdb-http` 增加 runtime dependency。
+
+### 4.5 Source identity preflight
+
+Acquired directory 至少应证明自己看起来是完整的 Essentials v21.1 corpus，而不是仅 GitHub engine checkout。
+
+第一版建议要求：
+
+```text
+Graphics/
+Audio/
+Fonts/
+Data/
+PBS/
+mkxp.json
+```
+
+并检查 `mkxp.json` / source metadata 中存在明确的 Essentials `v21.1` 标识。
+
+若 source shape/version 不匹配：
+
+```text
+SOURCE_NOT_ESSENTIALS_V21_1
+```
+
+不得尝试“尽量导入”。
+
+---
+
+## 5. 映射模型
+
+### 5.1 Resource directory mapping
 
 源目录：
 
@@ -152,7 +343,7 @@ HTTP identity：
 
 最后 extension 不属于 ResourceKey。
 
-### 4.2 Opaque bytes
+### 5.2 Opaque bytes
 
 所有 Resource 文件：
 
@@ -170,19 +361,13 @@ recompress image/audio
 modify line endings
 ```
 
-文件名可以进行 FSDB compatibility validation，但默认不得静默改名。
+文件名进行 FSDB compatibility validation，但不得静默改名。
 
 ---
 
-## 5. Strict Import 原则
+## 6. Strict Import 原则
 
-Phase A 第一版只实现：
-
-```text
---strict
-```
-
-规则：
+Phase A 固定采用 strict semantics：
 
 > 任何源对象不能无歧义映射为当前 FSDB logical identity 时，整个 import 失败并生成明确报告；不得静默修复。
 
@@ -197,19 +382,13 @@ rename normalization collision
 pick one file from a ResourceKey collision
 ```
 
-未来若真实需求证明有价值，可以另加：
-
-```text
---adapt
-```
-
-但 adaptation 必须 deterministic，并输出完整 source → target mapping report；不属于 Phase A 首版。
+如果真实 corpus 证明 adaptation 有必要，应作为后续明确设计，不在当前两个参数中偷偷加入额外模式。
 
 ---
 
-## 6. Preflight
+## 7. Resource Preflight
 
-真正复制前 MUST 先完整扫描 source，并构造计划：
+真正复制前 MUST 先完整扫描 acquired source，并构造计划：
 
 ```ts
 interface PlannedResource {
@@ -224,17 +403,15 @@ interface PlannedResource {
 
 Preflight 至少检查：
 
-### 6.1 NameSegment / ResourceKey
+### 7.1 NameSegment / ResourceKey
 
-每个 table name、directory segment、leaf name 必须满足当前 FSDB `NameSegment` authority。
+每个 table name、directory segment、leaf name必须满足当前 FSDB `NameSegment` authority。
 
-### 6.2 UTF-8 / Unicode
+### 7.2 UTF-8 / Unicode
 
 物理名称必须能无损解释为有效 Unicode；logical identity 使用 NFC。
 
-### 6.3 Normalization collision
-
-例如：
+### 7.3 Normalization collision
 
 ```text
 é.png
@@ -243,7 +420,7 @@ é.png
 
 若 canonicalize 后 ResourceKey 相同 → import fail。
 
-### 6.4 Extension grammar
+### 7.4 Extension grammar
 
 当前 FSDB Extension：
 
@@ -258,18 +435,18 @@ foo.PNG
 foo
 ```
 
-在 strict 模式下若不能合法映射 → import fail。
+不能合法映射 → import fail。
 
-### 6.5 Cross-extension ResourceKey collision
+### 7.5 Cross-extension ResourceKey collision
 
-例如同 table：
+同 table：
 
 ```text
 foo.png
 foo.webp
 ```
 
-二者都映射为：
+均映射为：
 
 ```text
 ResourceKey = foo
@@ -277,9 +454,7 @@ ResourceKey = foo
 
 → import fail。
 
-### 6.6 Case portability warning
-
-例如：
+### 7.6 Case portability warning
 
 ```text
 Hero.png
@@ -288,58 +463,66 @@ hero.png
 
 当前 FSDB logical identity 区分大小写，因此不是 Core validation failure；importer SHOULD 输出 portability warning。
 
-### 6.7 Indirection
+### 7.7 Indirection
 
-source 中 symlink/junction/其他 filesystem indirection 默认不得 follow。
-
-Phase A 建议：
+source 中 symlink/junction/其他 filesystem indirection 不得 follow：
 
 ```text
 recognized source object is indirection
-    → import fail
+→ import fail
 ```
 
 避免导入结果依赖 source root 之外的文件。
 
 ---
 
-## 7. Copy Transaction
+## 8. Output Transaction
 
 不要边扫描边直接产生最终 output。
 
-建议：
+统一流程：
 
 ```text
-scan/preflight
+acquire source
+    ↓
+source identity preflight
+    ↓
+resource scan / compatibility preflight
     ↓ PASS
-create staging directory
+reserve unique output name
+    ↓
+create sibling staging directory
     ↓
 copy resources byte-for-byte
     ↓
 generate metadata
     ↓
-openFsdb(staging)
+production openFsdb(staging)
     ↓ PASS
-atomic-ish promote staging → output
+promote staging → reserved final output
+    ↓
+cleanup temporary acquisition
 ```
 
 若任意步骤失败：
 
 ```text
-remove staging
-leave existing successful output untouched
+remove importer-owned staging
+remove importer-owned download/extraction temp
+leave all previous successful outputs untouched
+never modify borrowed local source
 ```
 
-Phase A 不要求实现通用事务系统，只需要避免产生半完成、看起来像合法 fixture 的输出目录。
+Phase A 不要求实现通用事务系统，只要求不会留下一个半完成却看起来像成功 fixture 的最终目录。
 
 ---
 
-## 8. Generated Metadata
+## 9. Generated Metadata
 
 每个 Resource table 自动生成 `.desc.meta`，例如：
 
 ```md
-Imported from local Pokémon Essentials v21.1 `Graphics/`.
+Imported from Pokémon Essentials v21.1 `Graphics/`.
 
 Generated for local LoomRealm FSDB integration testing.
 Source assets are not owned or redistributed by LoomRealm.
@@ -351,7 +534,7 @@ Source assets are not owned or redistributed by LoomRealm.
 {"type":"object"}
 ```
 
-`[struct]测试信息/来源.json` 建议：
+`[struct]测试信息/来源.json`：
 
 ```json
 {
@@ -361,34 +544,50 @@ Source assets are not owned or redistributed by LoomRealm.
 }
 ```
 
-不得把开发者本机绝对路径写入 FSDB fixture，以免测试输出泄漏环境信息。
+可以记录 acquisition mode：
+
+```text
+local-directory
+local-zip
+auto-download
+```
+
+但不得把：
+
+```text
+开发者本机绝对路径
+临时下载路径
+MediaFire/CDN 临时 URL
+```
+
+写入最终 FSDB fixture。
 
 ---
 
-## 9. 最终验证
+## 10. 最终 FSDB 验证
 
-导入完成前 MUST 使用 production implementation 验证：
+导入完成前 MUST 使用 production implementation：
 
 ```ts
 const db = await openFsdb({ root: stagingRoot });
 await db.close();
 ```
 
-不得复制一套 importer-private FSDB validator 并以其结果代替 `openFsdb()`。
+不得复制一套 importer-private FSDB validator 并以其结果替代 `openFsdb()`。
 
-这形成：
+闭环：
 
 ```text
 real third-party corpus
 → importer
-→ FSDB output
+→ generated FSDB
 → production openFsdb()
 → PASS
 ```
 
 ---
 
-## 10. HTTP Integration Test
+## 11. HTTP Integration Test
 
 成功导入后可以启动：
 
@@ -409,16 +608,40 @@ nested ResourceKey verification
 ETag / 304 smoke
 ```
 
-对于随机抽样，测试报告必须记录 logical identity，不记录或输出绝对 filesystem path。
+测试报告只记录 logical identity，不输出本机绝对 filesystem path。
 
 ---
 
-## 11. Import Report
+## 12. Import Report
+
+开始时应明确打印 resolved execution plan：
+
+```text
+Source:
+  local: <user supplied path>
+```
+
+或：
+
+```text
+Source:
+  auto-download: Eevee Expo Essentials v21.1
+```
+
+以及：
+
+```text
+Output parent: <resolved parent>
+Output root:   <new generated FSDB directory name>
+```
 
 成功时建议输出：
 
 ```text
 Imported Pokémon Essentials v21.1
+
+Acquisition:
+  local-directory | local-zip | auto-download
 
 Tables:
   Graphics   <count> resources  <bytes>
@@ -435,11 +658,17 @@ Warnings:
   <count>
 
 FSDB validation: PASS
+Output: <output root>
 ```
 
-失败时报告应该使用稳定 problem category，而不是只抛 raw stack：
+失败使用稳定 development-tool category：
 
 ```text
+DOWNLOAD_FAILURE
+DOWNLOAD_REDIRECT_FAILURE
+ARCHIVE_INVALID
+ARCHIVE_PATH_ESCAPE
+SOURCE_NOT_ESSENTIALS_V21_1
 INVALID_UTF8_NAME
 INVALID_NAME_SEGMENT
 INVALID_EXTENSION
@@ -450,13 +679,13 @@ COPY_FAILURE
 FSDB_VALIDATION_FAILURE
 ```
 
-这些 category 属于 development tooling，不成为 FSDB 或 `fsdb-http` wire contract。
+这些 category 不成为 FSDB 或 `fsdb-http` wire contract。
 
 ---
 
-## 12. 测试目的
+## 13. 测试目的
 
-这个 fixture 的价值不是证明 Pokémon Essentials 能完整迁移到 LoomRealm，而是暴露 synthetic fixture 很难发现的问题：
+真实 fixture 用于暴露 synthetic fixture 很难发现的问题：
 
 ```text
 真实目录深度
@@ -487,11 +716,11 @@ import / implementation
 
 ---
 
-## 13. 后续阶段
+## 14. 后续阶段
 
 ### Phase B — PBS semantic importer
 
-在 Resource mirror 稳定后，另行设计：
+Resource mirror 稳定后另行设计：
 
 ```text
 PBS/*.txt
@@ -527,23 +756,32 @@ Data/MapXXX.rxdata
 
 ---
 
-## 14. Phase A 完成标准
+## 15. Phase A 完成标准
 
 Phase A importer 可以认为完成，当：
 
 ```text
-source never modified
-no network/download responsibility
-strict preflight implemented
+CLI only has optional --source and --output inputs
+local directory source PASS
+local ZIP source PASS
+no-source automatic HTTPS download PASS
+download redirects handled safely
+archive extraction traversal-safe
+borrowed source never modified
+temporary acquisition always cleaned up
+source identity/version preflight implemented
+strict FSDB compatibility preflight implemented
 all planned copies byte-for-byte
 no silent filename repair
+output always uses a newly created directory
+existing successful output never overwritten
 all generated metadata deterministic
-no host absolute path leaked
-staging failure leaves no partial output
+no host absolute path / temporary URL leaked
+staging failure leaves no partial final output
 production openFsdb(output) PASS
 representative HTTP GET/HEAD PASS
 byte-for-byte sampled resources PASS
 large real corpus statistics reported
 ```
 
-达到此状态后，再根据真实导入结果决定是否设计 `--adapt` 或进入 Phase B。
+达到此状态后，再根据真实导入结果决定是否进入 Phase B；不要在 Phase A CLI 上继续累积模式参数。
