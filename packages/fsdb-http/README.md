@@ -2,7 +2,7 @@
 
 Read-only HTTP adapter for filesystem-backed FSDB directories.
 
-> Status: **v1 implementation complete, with one Node RequestListener boundary decision pending before release candidate**. See “Known release boundary” below.
+> Status: **v1 Release Candidate**. The implementation and mandatory conformance suite track the frozen contract.
 
 The package opens a Well-formed FSDB directory, builds one safe immutable logical snapshot, and exposes FSDB logical objects through a small Node.js-native HTTP interface without leaking physical filesystem paths.
 
@@ -50,6 +50,6 @@ const service = await serveFsdb({
 
 The first implementation targets Node.js `>=20`, uses standard-library primitives, and keeps **0 runtime dependencies**. Internal implementation details may evolve only while the Frozen v1 observable contract and mandatory conformance suite remain satisfied.
 
-## Known release boundary
+## Node request boundary
 
-Node routes a valid `CONNECT` authority-form request to the server's `connect` event and does not invoke its `RequestListener`. `serveFsdb()` owns its server and returns the frozen `400` response for this form. A caller-composed `createServer(createFsdbHttpHandler(db))` cannot do so through the frozen `RequestListener` return type alone. The contract must explicitly scope origin-form enforcement to request-targets delivered to the listener, or expose a server-level binding, before release-candidate status.
+Node routes a valid `CONNECT` authority-form request to the server's `connect` event and does not invoke its `RequestListener`. `createFsdbHttpHandler()` owns requests delivered through Node's `request` event. `serveFsdb()` additionally owns its server-level `connect` policy and returns the frozen `400` response for CONNECT. A caller-composed Server retains ownership of its own `connect` event policy.

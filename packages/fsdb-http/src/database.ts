@@ -47,7 +47,7 @@ export class DatabaseImpl {
     return this.#drain;
   }
 
-  async openValidated(entry: FileEntry): Promise<{ handle: FileHandle; release: () => void }> {
+  async openValidated(entry: FileEntry, onFstat?: (handle: FileHandle) => void): Promise<{ handle: FileHandle; release: () => void }> {
     const release = this.acquire();
     if (!release) throw new SourceUnavailableError();
     let handle: FileHandle | undefined;
@@ -57,6 +57,7 @@ export class DatabaseImpl {
       const flags = platform() === "win32" ? constants.O_RDONLY : constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
       handle = await open(entry.path, flags);
       const handleStat = await handle.stat({ bigint: true });
+      onFstat?.(handle);
       if (!handleStat.isFile() || !sameFingerprint(entry.fingerprint, fingerprint(handleStat))) throw new SourceUnavailableError();
       return { handle, release };
     } catch (error) {

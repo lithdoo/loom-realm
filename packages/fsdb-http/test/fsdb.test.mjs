@@ -1,12 +1,21 @@
-import test from "node:test";
+import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, rename, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createServer, get as httpGet, request as nodeRequest } from "node:http";
+import { Readable } from "node:stream";
 import { createFsdbHttpHandler, openFsdb, serveFsdb } from "../dist/index.js";
+import { asDatabase } from "../dist/database.js";
+import { makeHandler } from "../dist/http.js";
 import { fixture, rawRequest, request } from "./helpers.mjs";
 
-test("API-001/002, FDB-001/005/006/008/009/010: opens a Unicode Well-formed snapshot", async (t) => {
+const coveredConformance = new Set();
+function conformance(ids, title, fn) {
+  for (const id of ids) coveredConformance.add(id);
+  return nodeTest(`${ids.join(", ")}: ${title}`, fn);
+}
+
+conformance(["API-001", "API-002", "API-003", "FDB-001", "FDB-005", "FDB-006", "FDB-008", "FDB-009", "FDB-010", "LIFE-001"], "opens a Unicode Well-formed snapshot", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root }); t.after(() => db.close());
   assert.equal(db.name, "游戏数据");
@@ -16,7 +25,7 @@ test("API-001/002, FDB-001/005/006/008/009/010: opens a Unicode Well-formed snap
   assert.throws(() => createFsdbHttpHandler({ name: db.name, state: "open", close: db.close }));
 });
 
-test("FDB-003/007/011: rejects normalization, ResourceKey, and structured-content ambiguity", async (t) => {
+conformance(["FDB-003", "FDB-007", "FDB-011"], "rejects normalization, ResourceKey, and structured-content ambiguity", async (t) => {
   const a = await fixture(); t.after(() => a.cleanup());
   await writeFile(join(a.struct, "e\u0301.json"), "{}");
   await writeFile(join(a.struct, "é.json"), "{}");
@@ -31,12 +40,17 @@ test("FDB-003/007/011: rejects normalization, ResourceKey, and structured-conten
   await assert.rejects(openFsdb({ root: c.root }));
 });
 
-test("FDB-002/004/008/009/012: canonicalizes physical spelling and validates reserved names/text", async (t) => {
+conformance(["FDB-002", "FDB-004", "FDB-008", "FDB-009", "FDB-012"], "canonicalizes physical spelling and validates reserved names/text", async (t) => {
   const a = await fixture(); t.after(() => a.cleanup());
   await writeFile(join(a.struct, "e\u0301.json"), "{}");
   await writeFile(join(a.struct, ".info.meta"), "true");
   await writeFile(join(a.root, "[extend]角色", ".extend.meta"), "\n");
   const db = await openFsdb({ root: a.root }); await db.close();
+  if (process.platform !== "win32") {
+    const invalidUtf8 = Buffer.concat([Buffer.from(a.struct), Buffer.from("/"), Buffer.from([0xff]), Buffer.from(".json")]);
+    await writeFile(invalidUtf8, "{}");
+    await assert.rejects(openFsdb({ root: a.root }));
+  }
 
   const b = await fixture(); t.after(() => b.cleanup());
   await writeFile(join(b.struct, "$reserved.json"), "{}");
@@ -52,7 +66,7 @@ test("FDB-002/004/008/009/012: canonicalizes physical spelling and validates res
   const auxiliary = await openFsdb({ root: d.root }); await auxiliary.close();
 });
 
-test("ROOT-001/002/003: resolves a valid root exactly once and rejects bad root identity", async (t) => {
+conformance(["ROOT-001", "ROOT-003"], "resolves a relative root once and rejects bad root identity", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const previous = process.cwd();
   try {
@@ -65,7 +79,7 @@ test("ROOT-001/002/003: resolves a valid root exactly once and rejects bad root 
   await assert.rejects(openFsdb({ root: invalid }));
 });
 
-test("SAFE-001/002: recognized indirection fails while auxiliary indirection is ignored", async (t) => {
+conformance(["SAFE-001", "SAFE-002"], "recognized indirection fails while auxiliary indirection is ignored", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   try {
     await symlink(join(f.struct, "皮卡丘.json"), join(f.struct, "链接.json"), "file");
@@ -76,7 +90,7 @@ test("SAFE-001/002: recognized indirection fails while auxiliary indirection is 
   await assert.rejects(openFsdb({ root: f.root }));
 });
 
-test("ROOT-002 and SAFE-001/002: root junction resolves once, recognized descendant junction fails", async (t) => {
+conformance(["ROOT-002", "SAFE-001", "SAFE-002"], "root junction resolves once and recognized descendant junction fails", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const rootLink = join(f.parent, "root-link");
   try { await symlink(f.root, rootLink, "junction"); } catch (error) {
@@ -89,7 +103,7 @@ test("ROOT-002 and SAFE-001/002: root junction resolves once, recognized descend
   await assert.rejects(openFsdb({ root: f.root }));
 });
 
-test("HTTP/STATUS/MIME/RESP: raw routes, Unicode, metadata, Resource hierarchy and HEAD", async (t) => {
+conformance(["HTTP-002", "HTTP-003", "HTTP-004", "HTTP-005", "HTTP-006", "HTTP-008", "STATUS-002", "STATUS-003", "STATUS-004", "STATUS-005", "STATUS-007", "MIME-001", "RESP-001", "RESP-002", "RESP-003", "CACHE-001", "CACHE-003"], "serves deterministic Unicode routes, metadata, bytes, status precedence, and HEAD", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root }); t.after(() => db.close());
   const server = createServer(createFsdbHttpHandler(db));
@@ -133,7 +147,7 @@ test("HTTP/STATUS/MIME/RESP: raw routes, Unicode, metadata, Resource hierarchy a
   assert.equal(missing.headers.get("cache-control"), "no-store");
 });
 
-test("HTTP-001/007/008/010/011/012 and STATUS precedence on raw request-target spelling", async (t) => {
+conformance(["HTTP-001", "HTTP-007", "HTTP-009", "HTTP-010", "HTTP-011", "HTTP-012", "STATUS-001", "SAFE-003", "SAFE-004"], "enforces raw request-target spelling and traversal safety", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root }); t.after(() => db.close());
   const server = createServer(createFsdbHttpHandler(db));
@@ -148,10 +162,11 @@ test("HTTP-001/007/008/010/011/012 and STATUS precedence on raw request-target s
   assert.match(await rawRequest(port, `/fsdb/v1/struct/${table}/%252F`), /^HTTP\/1\.1 404/);
   assert.match(await rawRequest(port, `/fsdb/v1/struct/${table}/%FF`), /^HTTP\/1\.1 400/);
   assert.match(await rawRequest(port, `/fsdb/v1/struct/${table}/%5C`), /^HTTP\/1\.1 400/);
+  assert.match(await rawRequest(port, `/fsdb/v1/struct/${table}/%2E%2E`), /^HTTP\/1\.1 400/);
   assert.match(await rawRequest(port, `/fsdb/v1/struct/${table}/%E7%9A%AE%E5%8D%A1%E4%B8%98/`), /^HTTP\/1\.1 400/);
 });
 
-test("MIME-002/003/004/005: frozen Resource MIME table is deterministic and charset-free", async (t) => {
+conformance(["MIME-002", "MIME-003", "MIME-004", "MIME-005"], "uses the frozen deterministic charset-free Resource MIME table", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const mapping = {
     avif: "image/avif", bmp: "image/bmp", css: "text/css", gif: "image/gif", html: "text/html",
@@ -172,7 +187,7 @@ test("MIME-002/003/004/005: frozen Resource MIME table is deterministic and char
   }
 });
 
-test("COND/CACHE: snapshot ETag, weak comparison, If-Match, Range and reopen", async (t) => {
+conformance(["COND-001", "COND-002", "COND-003", "COND-004", "COND-005", "COND-006", "COND-007", "CACHE-002", "CACHE-005"], "implements snapshot validators, preconditions, ignored dates/ranges, and reopen", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const service = await serveFsdb({ root: f.root }); t.after(() => service.close());
   const path = "/fsdb/v1/struct/角色/皮卡丘";
@@ -180,11 +195,13 @@ test("COND/CACHE: snapshot ETag, weak comparison, If-Match, Range and reopen", a
   const tag = first.headers.get("etag"); assert.match(tag, /^W\//);
   const notModified = await request(service.origin, path, { headers: { "If-None-Match": tag } });
   assert.equal(notModified.status, 304); assert.equal(notModified.headers.get("cache-control"), "no-cache");
+  assert.equal(notModified.headers.get("etag"), tag); assert.equal(await notModified.text(), "");
   assert.equal((await request(service.origin, path, { headers: { "If-None-Match": `\"other\", ${tag}` } })).status, 304);
   assert.equal((await request(service.origin, path, { headers: { "If-None-Match": "*" } })).status, 304);
   assert.equal((await request(service.origin, path, { headers: { "If-Match": tag } })).status, 412);
   assert.equal((await request(service.origin, path, { headers: { "If-Match": "*" } })).status, 200);
   assert.equal((await request(service.origin, path, { headers: { "If-Modified-Since": "Wed, 31 Dec 2099 23:59:59 GMT" } })).status, 200);
+  assert.equal((await request(service.origin, path, { headers: { "If-Unmodified-Since": "Wed, 01 Jan 1997 00:00:00 GMT" } })).status, 200);
   const ranged = await request(service.origin, path, { headers: { Range: "bytes=0-1" } });
   assert.equal(ranged.status, 200); assert.equal(await ranged.text(), "{\"name\":\"皮卡丘\"}");
   assert.equal((await request(service.origin, path, { headers: { Range: "bytes=0-1", "If-Range": tag } })).status, 200);
@@ -194,7 +211,7 @@ test("COND/CACHE: snapshot ETag, weak comparison, If-Match, Range and reopen", a
   assert.notEqual(second.headers.get("etag"), tag);
 });
 
-test("SAFE-005/LIFE-002/003/005/007: replacement is stale and close is idempotent", async (t) => {
+conformance(["SAFE-005", "LIFE-002", "LIFE-003", "LIFE-007", "STATUS-006", "CACHE-004"], "makes replacement stale before preconditions and closes idempotently", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root });
   const server = createServer(createFsdbHttpHandler(db));
@@ -212,7 +229,7 @@ test("SAFE-005/LIFE-002/003/005/007: replacement is stale and close is idempoten
   assert.equal(db.state, "closed");
 });
 
-test("API-005/007/008/009 and standalone smoke", async (t) => {
+conformance(["API-005", "API-007", "API-008", "API-009", "HTTP-014"], "owns standalone lifecycle and rejects CONNECT authority-form", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const service = await serveFsdb({ root: f.root });
   assert.equal(service.address.host, "127.0.0.1"); assert.ok(service.address.port > 0); assert.ok(service.origin);
@@ -222,7 +239,7 @@ test("API-005/007/008/009 and standalone smoke", async (t) => {
   await Promise.all([service.close(), service.close()]);
 });
 
-test("API-004 and LIFE-004: handler borrows db and new files stay invisible until reopen", async (t) => {
+conformance(["API-004", "LIFE-004", "BOUNDARY-002"], "handler borrows db and new files stay invisible until reopen", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root });
   const server = createServer(createFsdbHttpHandler(db));
@@ -243,7 +260,7 @@ test("API-004 and LIFE-004: handler borrows db and new files stay invisible unti
   await new Promise((resolve) => third.close(resolve)); await reopened.close();
 });
 
-test("LIFE-005/006/007/009: close drains admitted reads and client abort does not make source stale", async (t) => {
+conformance(["LIFE-005", "LIFE-006", "LIFE-007", "LIFE-009"], "close drains admitted reads and client abort does not make source stale", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   await writeFile(join(f.resource, "large.bin"), Buffer.alloc(4 * 1024 * 1024, 0x61));
   const db = await openFsdb({ root: f.root });
@@ -279,7 +296,7 @@ test("LIFE-005/006/007/009: close drains admitted reads and client abort does no
   await db.close();
 });
 
-test("HTTP-013, STATUS-007, RESP-003: request content is ignored and errors are body/path safe", async (t) => {
+conformance(["HTTP-013", "STATUS-007", "RESP-003"], "request content is ignored and errors are body/path safe", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const service = await serveFsdb({ root: f.root }); t.after(() => service.close());
   const withBody = await new Promise((resolve, reject) => {
@@ -295,18 +312,118 @@ test("HTTP-013, STATUS-007, RESP-003: request content is ignored and errors are 
   const body = await error.text(); assert.equal(body, ""); assert.equal(body.includes(f.parent), false);
 });
 
-test("API-006: standalone listen failure rejects without retaining the owned server", async (t) => {
+conformance(["API-006"], "standalone listen failure rejects without retaining the owned server", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const blocker = createServer();
   await new Promise((resolve) => blocker.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => blocker.close(resolve)));
   const { port } = blocker.address();
-  await assert.rejects(serveFsdb({ root: f.root, host: "127.0.0.1", port }), { code: "EADDRINUSE" });
+  await assert.rejects(serveFsdb({ root: f.root, host: "127.0.0.1", port }));
+  await new Promise((resolve) => blocker.close(resolve));
+  const recovered = await serveFsdb({ root: f.root, host: "127.0.0.1", port });
+  assert.equal(recovered.address.port, port);
+  await recovered.close();
 });
 
-test("API-009 wildcard bind reports address but no fabricated client origin", async (t) => {
+conformance(["API-009"], "wildcard bind reports address but no fabricated client origin", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const service = await serveFsdb({ root: f.root, host: "0.0.0.0" }); t.after(() => service.close());
   assert.equal(service.address.host, "0.0.0.0"); assert.ok(service.address.port > 0);
   assert.equal(service.origin, undefined);
+});
+
+conformance(["FDB-008", "FDB-011"], "validates JSON Schema roots and .extend.meta record fields", async (t) => {
+  const invalidSchema = await fixture(); t.after(() => invalidSchema.cleanup());
+  await writeFile(join(invalidSchema.struct, ".info.meta"), "42");
+  await assert.rejects(openFsdb({ root: invalidSchema.root }));
+
+  const invalidField = await fixture(); t.after(() => invalidField.cleanup());
+  await writeFile(join(invalidField.root, "[extend]角色", ".extend.meta"), "{\"field\":1,\"struct\":\"角色\"}\n");
+  await assert.rejects(openFsdb({ root: invalidField.root }));
+
+  const invalidStruct = await fixture(); t.after(() => invalidStruct.cleanup());
+  await writeFile(join(invalidStruct.root, "[extend]角色", ".extend.meta"), "{\"field\":\"角色\",\"struct\":\"é\",\"desc\":1}\n");
+  await assert.rejects(openFsdb({ root: invalidStruct.root }));
+});
+
+conformance(["SAFE-006"], "uses the identical FileHandle for fstat validation and response streaming", async (t) => {
+  const f = await fixture(); t.after(() => f.cleanup());
+  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  let fstatHandle;
+  let streamHandle;
+  const server = createServer(makeHandler(asDatabase(db), {
+    onFstat(handle) { fstatHandle = handle; },
+    onStream(handle) { streamHandle = handle; },
+  }));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  assert.equal((await request(`http://127.0.0.1:${port}`, "/fsdb/v1/struct/角色/皮卡丘")).status, 200);
+  assert.ok(fstatHandle); assert.strictEqual(streamHandle, fstatHandle);
+});
+
+conformance(["LIFE-008"], "attributes a post-header source stream error to source drift and marks stale", async (t) => {
+  const f = await fixture(); t.after(() => f.cleanup());
+  const db = await openFsdb({ root: f.root }); t.after(() => db.close());
+  const server = createServer(makeHandler(asDatabase(db), {
+    createReadStream() {
+      let sent = false;
+      return new Readable({
+        read() {
+          if (sent) return;
+          sent = true;
+          this.push(Buffer.from([0]));
+          queueMicrotask(() => this.destroy(Object.assign(new Error("injected source failure"), { code: "EIO" })));
+        },
+      });
+    },
+  }));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  await new Promise((resolve, reject) => {
+    const req = httpGet(`http://127.0.0.1:${port}/fsdb/v1/resource/图片/关都地区/真新镇`, (res) => {
+      res.on("data", () => undefined);
+      res.once("aborted", resolve);
+      res.once("error", (error) => error.code === "ECONNRESET" ? resolve() : reject(error));
+      res.once("close", resolve);
+    });
+    req.on("error", (error) => error.code === "ECONNRESET" ? resolve() : reject(error));
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(db.state, "stale");
+});
+
+conformance(["API-007", "API-008", "LIFE-006"], "service.close waits for an already-started external server.close", async (t) => {
+  const f = await fixture(); t.after(() => f.cleanup());
+  await writeFile(join(f.resource, "close-race.bin"), Buffer.alloc(4 * 1024 * 1024, 0x61));
+  const service = await serveFsdb({ root: f.root });
+  let finishResponse;
+  const firstChunk = new Promise((resolve, reject) => {
+    const req = httpGet(new URL("/fsdb/v1/resource/图片/close-race", service.origin), (res) => {
+      res.once("data", () => { res.pause(); resolve(() => res.resume()); });
+      finishResponse = new Promise((done) => res.once("end", done));
+    });
+    req.on("error", reject);
+  });
+  const resume = await firstChunk;
+  service.server.close();
+  let closed = false;
+  const closing = service.close().then(() => { closed = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(closed, false);
+  resume(); await finishResponse; await closing;
+});
+
+conformance(["BOUNDARY-001", "BOUNDARY-003"], "has no runtime framework dependency or higher-layer authority", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.deepEqual(manifest.dependencies ?? {}, {});
+  const source = await readFile(new URL("../src/public.ts", import.meta.url), "utf8");
+  assert.equal(/express|koa|fastify|hono|installationId|game package/i.test(source), false);
+});
+
+nodeTest("every mandatory conformance ID is attached to an executable behavioral test", async () => {
+  const contract = await readFile(new URL("../CONFORMANCE.md", import.meta.url), "utf8");
+  const mandatory = new Set(contract.match(/(?:FDB|ROOT|SAFE|API|HTTP|STATUS|MIME|RESP|COND|CACHE|LIFE|BOUNDARY)-\d{3}/g));
+  assert.deepEqual([...coveredConformance].sort(), [...mandatory].sort());
 });

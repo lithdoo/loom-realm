@@ -63,6 +63,7 @@ export async function serveFsdb(options: ServeFsdbOptions): Promise<FsdbHttpServ
   const dbPublic = await openFsdb(options);
   const db = asDatabase(dbPublic);
   const server = createServer(makeHandler(db));
+  const serverClosed = new Promise<void>((resolve) => server.once("close", resolve));
   server.on("connect", (_request, socket) => rejectAuthorityForm(socket));
   try {
     await listen(server, port, host);
@@ -86,8 +87,13 @@ export async function serveFsdb(options: ServeFsdbOptions): Promise<FsdbHttpServ
     close() {
       closing ??= (async () => {
         const dbClose = db.close();
-        await closeServer(server);
-        await dbClose;
+        const closeRequest = server.listening
+          ? new Promise<void>((resolve, reject) => server.close((error) => {
+              if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") reject(error);
+              else resolve();
+            }))
+          : Promise.resolve();
+        await Promise.all([closeRequest, serverClosed, dbClose]);
       })();
       return closing;
     },

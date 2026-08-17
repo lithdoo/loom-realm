@@ -14,9 +14,9 @@ export interface Fingerprint {
 
 export interface FileEntry {
   readonly type: "file";
-  readonly path: string;
+  readonly path: Buffer;
   readonly contentType: string;
-  readonly length: number;
+  readonly length: bigint;
   readonly fingerprint: Fingerprint;
   readonly fingerprintText: string;
 }
@@ -30,7 +30,7 @@ export interface TableIndex {
 
 export interface Snapshot {
   readonly name: string;
-  readonly root: string;
+  readonly root: Buffer;
   readonly snapshotId: string;
   readonly tables: ReadonlyMap<string, TableIndex>;
   readonly descriptor: Buffer;

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { open, lstat, readdir, realpath } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
 import { canonicalName, resourceExtension } from "./names.js";
@@ -7,6 +7,30 @@ import { JSONL_TYPE, JSON_TYPE, MARKDOWN_TYPE, SCHEMA_TYPE, resourceMime } from 
 import { tableId, type FileEntry, type Fingerprint, type MetadataName, type Snapshot, type TableIndex, type TableKind } from "./model.js";
 
 const TABLE = /^\[(struct|extend|group|resource)\](.*)$/;
+const PATH_SEPARATOR = Buffer.from(sep);
+
+function childPath(parent: Buffer, name: Buffer | string): Buffer {
+  return Buffer.concat([parent, PATH_SEPARATOR, typeof name === "string" ? Buffer.from(name) : name]);
+}
+
+function baseName(path: Buffer): Buffer {
+  const index = path.lastIndexOf(PATH_SEPARATOR[0]!);
+  return index < 0 ? path : path.subarray(index + 1);
+}
+
+function startsWithAscii(name: Buffer, prefix: string): boolean {
+  const bytes = Buffer.from(prefix);
+  return name.length >= bytes.length && name.subarray(0, bytes.length).equals(bytes);
+}
+
+function endsWithAscii(name: Buffer, suffix: string): boolean {
+  const bytes = Buffer.from(suffix);
+  return name.length >= bytes.length && name.subarray(name.length - bytes.length).equals(bytes);
+}
+
+function decodePhysicalName(bytes: Buffer): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
 
 function fingerprint(stat: BigIntStats): Fingerprint {
   return { dev: stat.dev, ino: stat.ino, mode: stat.mode, size: stat.size, mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
@@ -31,20 +55,35 @@ function assertObject(value: unknown): void {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("JSON record must be an object");
 }
 
-function validateJson(bytes: Buffer, requireObject: boolean): void {
-  const value: unknown = JSON.parse(decodeUtf8(bytes));
-  if (requireObject) assertObject(value);
+function parseJson(bytes: Buffer): unknown {
+  return JSON.parse(decodeUtf8(bytes));
 }
 
-function validateJsonl(bytes: Buffer): void {
+function validateJsonObject(bytes: Buffer): void {
+  assertObject(parseJson(bytes));
+}
+
+function validateInfoMeta(bytes: Buffer): void {
+  const schema = parseJson(bytes);
+  if (typeof schema !== "boolean") assertObject(schema);
+}
+
+function validateJsonl(bytes: Buffer, extendMetadata = false): void {
   const text = decodeUtf8(bytes);
   for (const line of text.split(/\r?\n/)) {
     if (line.trim() === "") continue;
-    assertObject(JSON.parse(line));
+    const record: unknown = JSON.parse(line);
+    assertObject(record);
+    if (extendMetadata) {
+      const value = record as Record<string, unknown>;
+      if (typeof value.field !== "string" || typeof value.struct !== "string") throw new Error("Invalid .extend.meta record");
+      if (value.desc !== undefined && typeof value.desc !== "string") throw new Error("Invalid .extend.meta desc");
+      if (canonicalName(value.struct) !== value.struct) throw new Error("Invalid .extend.meta struct name");
+    }
   }
 }
 
-async function scanFile(path: string, contentType: string, validation: "json-object" | "json" | "jsonl" | "jsonl-record" | "text" | "opaque"): Promise<FileEntry> {
+async function scanFile(path: Buffer, contentType: string, validation: "json-object" | "info-meta" | "jsonl" | "extend-meta" | "text" | "opaque"): Promise<FileEntry> {
   const before = await lstat(path, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink()) throw new Error("Recognized FSDB object is not a regular file");
   const handle = await open(path, "r");
@@ -53,28 +92,28 @@ async function scanFile(path: string, contentType: string, validation: "json-obj
     if (!stat.isFile()) throw new Error("Recognized FSDB object is not a regular file");
     const fp = fingerprint(stat);
     if (!sameFingerprint(fingerprint(before), fp)) throw new Error("FSDB changed while opening");
-    if (stat.size > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("FSDB file is too large");
     if (validation !== "opaque") {
       const bytes = await handle.readFile();
-      if (validation === "json-object") validateJson(bytes, true);
-      else if (validation === "json") validateJson(bytes, false);
-      else if (validation === "jsonl" || validation === "jsonl-record") validateJsonl(bytes);
+      if (validation === "json-object") validateJsonObject(bytes);
+      else if (validation === "info-meta") validateInfoMeta(bytes);
+      else if (validation === "jsonl") validateJsonl(bytes);
+      else if (validation === "extend-meta") validateJsonl(bytes, true);
       else decodeUtf8(bytes);
     }
-    return { type: "file", path, contentType, length: Number(stat.size), fingerprint: fp, fingerprintText: fingerprintText(fp) };
+    return { type: "file", path: Buffer.from(path), contentType, length: stat.size, fingerprint: fp, fingerprintText: fingerprintText(fp) };
   } finally {
     await handle.close();
   }
 }
 
-async function metadata(tablePath: string, kind: TableKind): Promise<Map<MetadataName, FileEntry>> {
+async function metadata(tablePath: Buffer, kind: TableKind): Promise<Map<MetadataName, FileEntry>> {
   const result = new Map<MetadataName, FileEntry>();
-  const specs: Array<[string, MetadataName, boolean, string, "json" | "jsonl-record" | "text"]> = [];
-  if (kind !== "resource") specs.push([".info.meta", "$info", true, SCHEMA_TYPE, "json"]);
-  if (kind === "extend" || kind === "group") specs.push([".extend.meta", "$extend", kind === "extend", JSONL_TYPE, "jsonl-record"]);
+  const specs: Array<[string, MetadataName, boolean, string, "info-meta" | "extend-meta" | "text"]> = [];
+  if (kind !== "resource") specs.push([".info.meta", "$info", true, SCHEMA_TYPE, "info-meta"]);
+  if (kind === "extend" || kind === "group") specs.push([".extend.meta", "$extend", kind === "extend", JSONL_TYPE, "extend-meta"]);
   specs.push([".desc.meta", "$desc", kind === "group" || kind === "resource", MARKDOWN_TYPE, "text"]);
   for (const [physical, logical, required, contentType, validation] of specs) {
-    const path = join(tablePath, physical);
+    const path = childPath(tablePath, physical);
     try {
       result.set(logical, await scanFile(path, contentType, validation));
     } catch (error) {
@@ -91,20 +130,21 @@ async function metadata(tablePath: string, kind: TableKind): Promise<Map<Metadat
   return result;
 }
 
-async function scanResourceDirectory(path: string, segments: readonly string[], entries: Map<string, FileEntry>, directories: Set<string>): Promise<void> {
-  for (const item of await readdir(path, { withFileTypes: true })) {
-    if (item.name.startsWith(".")) continue;
-    const physical = join(path, item.name);
+async function scanResourceDirectory(path: Buffer, segments: readonly string[], entries: Map<string, FileEntry>, directories: Set<string>): Promise<void> {
+  for (const item of await readdir(path, { withFileTypes: true, encoding: "buffer" })) {
+    if (item.name[0] === 0x2e) continue;
+    const physicalName = decodePhysicalName(item.name);
+    const physical = childPath(path, item.name);
     const stat = await lstat(physical);
     if (stat.isSymbolicLink()) throw new Error("Resource indirection is forbidden");
     if (stat.isDirectory()) {
-      const segment = canonicalName(item.name);
+      const segment = canonicalName(physicalName);
       const logicalDirectory = [...segments, segment].join("/");
       if (directories.has(logicalDirectory)) throw new Error("Duplicate logical resource directory");
       directories.add(logicalDirectory);
       await scanResourceDirectory(physical, [...segments, segment], entries, directories);
     } else if (stat.isFile()) {
-      const { leaf, extension } = resourceExtension(item.name);
+      const { leaf, extension } = resourceExtension(physicalName);
       const key = [...segments, leaf].join("/");
       if (entries.has(key)) throw new Error("Duplicate ResourceKey");
       entries.set(key, await scanFile(physical, resourceMime(extension), "opaque"));
@@ -114,19 +154,20 @@ async function scanResourceDirectory(path: string, segments: readonly string[], 
   }
 }
 
-async function scanTable(path: string, kind: TableKind, name: string): Promise<TableIndex> {
+async function scanTable(path: Buffer, kind: TableKind, name: string): Promise<TableIndex> {
   const entries = new Map<string, FileEntry>();
   const meta = await metadata(path, kind);
   if (kind === "resource") {
     await scanResourceDirectory(path, [], entries, new Set());
   } else {
     const suffix = kind === "group" ? ".jsonl" : ".json";
-    for (const item of await readdir(path, { withFileTypes: true })) {
-      if (item.name.startsWith(".") || !item.name.endsWith(suffix)) continue;
-      const physical = join(path, item.name);
+    for (const item of await readdir(path, { withFileTypes: true, encoding: "buffer" })) {
+      if (item.name[0] === 0x2e || !endsWithAscii(item.name, suffix)) continue;
+      const physicalName = decodePhysicalName(item.name);
+      const physical = childPath(path, item.name);
       const stat = await lstat(physical);
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Data candidate must be a regular file");
-      const key = canonicalName(item.name.slice(0, -suffix.length));
+      const key = canonicalName(physicalName.slice(0, -suffix.length));
       if (entries.has(key)) throw new Error("Duplicate logical key");
       entries.set(key, await scanFile(physical, kind === "group" ? JSONL_TYPE : JSON_TYPE, kind === "group" ? "jsonl" : "json-object"));
     }
@@ -137,19 +178,21 @@ async function scanTable(path: string, kind: TableKind, name: string): Promise<T
 export async function scanFsdb(rootInput: string): Promise<Snapshot> {
   if (typeof rootInput !== "string" || rootInput.length === 0) throw new Error("root is required");
   const supplied = isAbsolute(rootInput) ? rootInput : resolve(process.cwd(), rootInput);
-  const root = await realpath(supplied);
+  const root = await realpath(supplied, { encoding: "buffer" });
   const rootStat = await lstat(root);
   if (!rootStat.isDirectory()) throw new Error("FSDB root must be a directory");
-  const rootName = basename(root);
+  const rootName = decodePhysicalName(baseName(root));
   if (!rootName.startsWith("[FSDB]")) throw new Error("Invalid FSDB root name");
   const name = canonicalName(rootName.slice(6));
   const tables = new Map<string, TableIndex>();
-  for (const item of await readdir(root, { withFileTypes: true })) {
-    const match = TABLE.exec(item.name);
+  for (const item of await readdir(root, { withFileTypes: true, encoding: "buffer" })) {
+    if (!startsWithAscii(item.name, "[struct]") && !startsWithAscii(item.name, "[extend]") && !startsWithAscii(item.name, "[group]") && !startsWithAscii(item.name, "[resource]")) continue;
+    const physicalName = decodePhysicalName(item.name);
+    const match = TABLE.exec(physicalName);
     if (!match) continue;
     const kind = match[1] as TableKind;
     const tableName = canonicalName(match[2]!);
-    const path = join(root, item.name);
+    const path = childPath(root, item.name);
     const stat = await lstat(path);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Table candidate must be a real directory");
     const id = tableId(kind, tableName);

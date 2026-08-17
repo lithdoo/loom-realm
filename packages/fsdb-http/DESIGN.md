@@ -1,6 +1,6 @@
 # @loomrealm/fsdb-http v1 实现合同
 
-> 状态：**Frozen for Implementation — v1**  
+> 状态：**Implemented / Release Candidate — v1**
 > 最后冻结复核：2026-08-17  
 > 目标：把硬盘上的只读 FSDB 目录转换成稳定、安全、可独立使用的 Node.js HTTP 接口  
 > FSDB authority：[FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)  
@@ -59,6 +59,8 @@ implementation
 
 - **clarification**：不改变合法实现集合，可直接修正文档或增加测试；
 - **semantic change**：改变 public API、HTTP observable behavior、identity、lifecycle 或 security invariant，必须显式 unfreeze v1 或进入后续版本，不得静默修改。
+
+实现期 clarification：Node.js 对合法 `CONNECT` authority-form 不触发 `request` 事件，而触发 Server 的 `connect` 事件。因此 `createFsdbHttpHandler()` 的 request-target authority 限定为 Node 交付给 `RequestListener` 的请求；`serveFsdb()` 额外拥有并拒绝 server-level CONNECT。该澄清不扩大 public API，也不改变任何交付给 handler 的请求语义。
 
 ---
 
@@ -427,7 +429,19 @@ authority-form   host:port
 asterisk-form    *
 ```
 
-非 origin-form → `400`。
+对于 Node `request` 事件交付给 `createFsdbHttpHandler()` 的 request-target，非 origin-form → `400`。
+
+Node.js 将合法 `CONNECT` authority-form 交付给 Server 的 `connect` 事件，而不调用 `RequestListener`。因此：
+
+```text
+createFsdbHttpHandler()
+    owns request-targets delivered through Node "request"
+
+serveFsdb()
+    additionally owns server-level CONNECT rejection → 400
+```
+
+caller 自行执行 `createServer(createFsdbHttpHandler(db))` 时，server-level `connect` 事件不属于 borrowed handler ownership；若宿主需要在该组合中拒绝 CONNECT，必须在其自有 Server 上注册对应策略。
 
 Node binding MUST 基于 `IncomingMessage.url` 中实际 request URL spelling 解析，不得先通过 WHATWG URL/router 做全路径 decode/normalization。
 
@@ -966,7 +980,9 @@ v1 primary binding 是 Node `http.RequestListener`：
 createServer(createFsdbHttpHandler(db))
 ```
 
-必须完整可用。
+必须对 Node `request` 事件表面完整可用。
+
+Node 的 `CONNECT` authority-form 通过 Server `connect` 事件交付，不属于纯 `RequestListener` 能力。standalone `serveFsdb()` MUST 在其 owned Server 上拒绝 CONNECT 并返回 `400`；caller-composed Server 的 `connect` policy 由 caller 持有。
 
 v1 不提供 Express/Koa/Fastify/Hono adapter。未来 adapter 若存在，必须保留：
 
@@ -1024,6 +1040,6 @@ CLI/daemon
 
 v1 implementation 必须通过 [CONFORMANCE.md](./CONFORMANCE.md) 全部 mandatory cases。
 
-通过后才能从 **Frozen for Implementation** 推进到 implemented / release candidate。
+通过后才能保持 **Implemented / Release Candidate** 状态并推进发布。
 
 实现中若发现本文 contract 本身不可实现、互相矛盾或导致真实 interoperability/security 问题，必须按 0.3 的 frozen change rule 处理；不得通过 hidden special-case 绕过合同。

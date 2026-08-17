@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
+import type { FileHandle } from "node:fs/promises";
+import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { DatabaseImpl, SourceUnavailableError } from "./database.js";
 import { JSON_TYPE } from "./mime.js";
 import { tableId, type FileEntry } from "./model.js";
 import { BadTargetError, parseTarget, type Route } from "./router.js";
+
+export interface HandlerHooks {
+  readonly onFstat?: (handle: FileHandle) => void;
+  readonly onStream?: (handle: FileHandle) => void;
+  readonly createReadStream?: (handle: FileHandle) => Readable;
+}
 
 function errorResponse(res: ServerResponse, method: string | undefined, status: number, allow = false): void {
   res.statusCode = status;
@@ -34,8 +42,9 @@ function precondition(req: IncomingMessage, etag: string): 200 | 304 | 412 {
   const ifMatch = req.headers["if-match"];
   if (ifMatch !== undefined) {
     if (ifMatch.trim() !== "*") {
-      const tags = entityTags(ifMatch);
-      if (!tags?.some((tag) => !tag.weak && false)) return 412;
+      // The current v1 validator is weak, so no entity-tag can pass If-Match's
+      // required strong comparison. Only the existing-resource wildcard can.
+      return 412;
     }
   }
   const ifNone = req.headers["if-none-match"];
@@ -76,9 +85,9 @@ async function sendBuffer(req: IncomingMessage, res: ServerResponse, db: Databas
   res.end(req.method === "HEAD" ? undefined : bytes);
 }
 
-async function sendFile(req: IncomingMessage, res: ServerResponse, db: DatabaseImpl, entry: FileEntry): Promise<void> {
+async function sendFile(req: IncomingMessage, res: ServerResponse, db: DatabaseImpl, entry: FileEntry, hooks: HandlerHooks): Promise<void> {
   let opened: Awaited<ReturnType<DatabaseImpl["openValidated"]>>;
-  try { opened = await db.openValidated(entry); } catch (error) {
+  try { opened = await db.openValidated(entry, hooks.onFstat); } catch (error) {
     return errorResponse(res, req.method, error instanceof SourceUnavailableError ? 503 : 500);
   }
   const { handle, release } = opened;
@@ -94,19 +103,32 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, db: DatabaseI
     }
     res.statusCode = 200;
     res.setHeader("Content-Type", entry.contentType);
-    res.setHeader("Content-Length", entry.length);
+    res.setHeader("Content-Length", entry.length.toString());
     res.setHeader("ETag", currentEtag);
     res.setHeader("Cache-Control", "no-cache");
     if (req.method === "HEAD") {
       res.end();
       return;
     }
-    const stream = handle.createReadStream({ autoClose: false });
+    hooks.onStream?.(handle);
+    const stream = hooks.createReadStream?.(handle) ?? handle.createReadStream({ autoClose: false });
+    let clientCancelled = false;
+    let sourceFailed = false;
+    const onRequestAborted = () => { clientCancelled = true; };
+    const onResponseClose = () => { if (!res.writableFinished) clientCancelled = true; };
+    const onSourceError = () => { if (!clientCancelled) sourceFailed = true; };
+    req.once("aborted", onRequestAborted);
+    res.once("close", onResponseClose);
+    stream.once("error", onSourceError);
     try {
       await pipeline(stream, res);
     } catch {
-      if (!req.aborted && !res.destroyed) db.markStale();
+      if (sourceFailed) db.markStale();
       res.destroy();
+    } finally {
+      req.off("aborted", onRequestAborted);
+      res.off("close", onResponseClose);
+      stream.off("error", onSourceError);
     }
   } finally {
     await handle.close().catch(() => undefined);
@@ -114,7 +136,7 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, db: DatabaseI
   }
 }
 
-export function makeHandler(db: DatabaseImpl): RequestListener {
+export function makeHandler(db: DatabaseImpl, hooks: HandlerHooks = {}): RequestListener {
   return (req, res) => {
     req.resume();
     void (async () => {
@@ -128,7 +150,7 @@ export function makeHandler(db: DatabaseImpl): RequestListener {
       if (route.type === "descriptor") return sendBuffer(req, res, db, db.snapshot.descriptor);
       const entry = lookup(db, route);
       if (!entry) return errorResponse(res, req.method, 404);
-      await sendFile(req, res, db, entry);
+      await sendFile(req, res, db, entry, hooks);
     })().catch(() => {
       if (!res.headersSent) errorResponse(res, req.method, 500);
       else res.destroy();

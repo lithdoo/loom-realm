@@ -1,6 +1,6 @@
 # @loomrealm/fsdb-http v1 Conformance
 
-> 状态：**Frozen for Implementation — v1**  
+> 状态：**Implemented / Release Candidate — v1**
 > Contract：[DESIGN.md](./DESIGN.md)  
 > FSDB authority：[FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)
 
@@ -269,14 +269,27 @@ wildcard bind 必须给出 concrete bound port/address，但不得暴露 wildcar
 GET /fsdb/v1 HTTP/1.1
 ```
 
-以下 MUST `400`：
+以下由 Node `request` 事件交付给 handler 时 MUST `400`：
 
 ```text
 absolute-form
 asterisk-form
-authority-form
 literal # in request-target
 ```
+
+合法 `CONNECT` authority-form 由 Node Server 的 `connect` 事件交付，不属于纯 `RequestListener` 的事件表面，按 HTTP-014 验证 standalone binding。
+
+### HTTP-014 — standalone CONNECT authority rejection
+
+`serveFsdb()` 的 owned Server 收到合法 `CONNECT host:port` authority-form 时 MUST 返回：
+
+```text
+400
+Cache-Control: no-store
+no response body
+```
+
+caller-composed `createServer(createFsdbHttpHandler(db))` 的 server-level `connect` policy 不属于 borrowed handler ownership。
 
 ### HTTP-002 — descriptor
 
@@ -580,7 +593,7 @@ production dependency graph 不得因核心实现引入 Express/Koa/Fastify/Hono
 createServer(createFsdbHttpHandler(db))
 ```
 
-MUST 完整可用。
+MUST 对 Node `request` 事件表面完整可用。Node `connect` 事件不属于 `RequestListener`；`serveFsdb()` 的 owned Server 必须按 HTTP-014 处理该事件。
 
 ### BOUNDARY-003 — no higher-layer LoomRealm authority
 

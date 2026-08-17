@@ -1,0 +1,43 @@
+name: fsdb-http conformance
+
+on:
+  pull_request:
+    paths:
+      - "packages/fsdb-http/**"
+      - "package.json"
+      - ".github/workflows/fsdb-http.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/fsdb-http/**"
+      - "package.json"
+      - ".github/workflows/fsdb-http.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run fsdb-http mandatory conformance
+        run: npm test -w @loomrealm/fsdb-http
