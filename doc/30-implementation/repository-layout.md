@@ -1,360 +1,371 @@
-# 仓库与分包方案
+# 仓库与目录方案
 
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Experimental  
-> 主要定义：建议的代码分包、进程入口和依赖规则  
-> 依赖：[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-09
+> 主要定义：monorepo 的物理目录、workspace 分类、依赖方向与测试布局  
+> 依赖：[独立分包与发布架构](./package-architecture.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
+> 最近复核：2026-08-17
 
-本方案用于指导第一阶段落地，不是产品协议。包名可以调整，但职责边界必须遵守上层架构和契约。
+公开 package 的职责与发布边界以 [独立分包与发布架构](./package-architecture.md) 为权威来源。本文只回答：**代码在仓库里如何组织，以及不同 workspace 之间如何依赖。**
 
-## 1. 建议工作区
+```text
+Protocol boundary != npm package boundary != runtime process boundary != platform boundary
+```
+
+---
+
+## 1. 推荐顶层结构
 
 ```text
 packages/
-├── protocol-core/
-├── subsystem-control-protocol/
-├── runtime-control-profile/
-├── frame-call-protocol/
-├── renderer-control-protocol/
-├── renderer-subsystem-connection-protocol/
-├── user-input-protocol/
-├── render-update-protocol/
-├── content-api-contract/
-├── game-package-contract-v1/
-├── nodejs-launcher-profile-v1/
-├── main-system/
-├── subsystem-sdk/
-├── web-renderer/
+├── wire/
+├── runtime-control/
+├── renderer-control/
+├── data/
+├── content/
 ├── game-package/
-├── fsdb-content-service/
-├── map-subsystem/
-├── map-content-profile-pe/
-├── hostra-adapter/
-├── pwa-host/
-└── test-subsystems/
+│
+├── main/
+├── subsystem/
+├── renderer/
+├── content-service/
+│
+├── launcher-node/
+├── transport-websocket/
+├── transport-messageport/
+├── content-fs/
+├── content-http/
+├── content-service-worker/
+│
+├── map/
+└── map-essentials/
+
+apps/
+├── desktop/
+├── pwa/
+└── cli/
+
+tests/
+├── fixtures/
+├── subsystems/
+├── integration/
+└── e2e/
+
+scripts/
+doc/
 ```
 
-不为从未实现的历史协议建立 compatibility packages；当前包只实现 current contracts。
+这是一张**目标边界图**，不是要求一次性建立全部空目录。第一阶段按 vertical slice 实际需要逐步创建。
 
-## 2. `subsystem-control-protocol`
+---
 
-当前：
+## 2. `packages/`：可独立消费的能力
+
+`packages/` 默认用于满足至少一个条件的 workspace：
 
 ```text
-loomrealm.subsystem-control / 1
+可独立发布
+可独立被其他 workspace 消费
+有稳定 public API
+有独立 test/conformance surface
 ```
 
-至少包含：
+包按三类组织，但物理上不强制增加额外层级目录：
 
 ```text
-hello/status/shutdown schemas
-bootstrap credential validation helpers
-Runtime lifecycle validator
-semantic error codes
-wire limits
-Control v1 conformance fixtures
+contract/capability
+    wire / runtime-control / renderer-control / data / content / game-package
+
+runtime/role
+    main / subsystem / renderer / content-service
+
+technical adapter
+    launcher-node / transport-* / content-*
 ```
 
-不得增加 `ready.rendererDataEndpoint`、Data control methods或私有 dual-stack negotiation。
+业务 Subsystem/兼容层如 `map` 也可以是独立 package，但 Core 不得依赖它们。
 
-## 3. `runtime-control-profile`
+---
+
+## 3. `apps/`：Composition Root
+
+Desktop/PWA 默认不作为大而全公共 library package。
 
 ```text
-Runtime Control Application Profile v1
-=
-Subsystem Control v1
-+
-Frame / Call v1
+apps/desktop
+    选择 Node launcher / WebSocket / HTTP / filesystem 等实现
+    构造 Main / Renderer / Content Service
+    注入配置与 bootstrap material
+    负责产品 startup/shutdown
+
+apps/pwa
+    选择 Worker / MessagePort / Service Worker / OPFS 等实现
+    构造 Main / Renderer
+    注入浏览器环境能力
+    负责产品 startup/shutdown
 ```
 
-至少提供：
+App 可以包含很薄的平台 glue，但不得重新实现 protocol/domain semantics。
 
-```text
-shared Control dispatcher rules
-hello-before-frame gate
-shared sender-side Request ID policy
-no-Batch enforcement
-Control v1 + Frame v1 static binding
-integration fixtures
-```
+如果未来某段平台 glue 被多个产品真正复用，再根据 [分包判断标准](./package-architecture.md#2-拆包判断标准) 抽成独立 adapter package，而不是预先建立 `host-desktop` / `host-pwa` 万能包。
 
-不新增 Data methods。
+---
 
-## 4. `frame-call-protocol`
+## 4. `tests/`：不发布的系统验证
 
-Frame / Call v1保持 Active / Normative / Frozen。
-
-包提供：
-
-```text
-FrameLifecycleState
-FrameOutcome / FrameFailure
-exact seven JSON-RPC method schemas
-identity / Activation validator
-JSON/number/string/limit validator
-Request ID helper
-FrameCallDeadlineProfileV1 validator
-semantic error classifier
-transaction invariants
-Runtime failure unwind invariants
-conformance manifest / harness helpers
-```
-
-不得定义 `frame.cancel/frame.abort/frame.unwind/frame.version/frame.capabilities`、operation replay或 Runtime/Render lifecycle。
-
-当前 enclosing Runtime Profile是 v1。
-
-## 5. Frame v1 Limits/API Surface
-
-```text
-message <= 1 MiB compact JSON equivalent
-JSON depth <= 64
-business JsonValue <= 512 KiB
-JsonValue string <= 256 KiB UTF-8
-object key <= 256 UTF-8 bytes
-array/object member count <= 16,384
-frameId / activationId <= 128 UTF-8 bytes
-targetSubsystemKey <= 256 UTF-8 bytes
-FrameFailure code/message limits
-finite binary64 + safe integer
-valid Unicode scalar sequence
-no duplicate JSON object members
-```
-
-PWA与Desktop复用同一 logical validator；Structured Clone不能形成第二套 Frame type system。
-
-## 6. Request ID / Deadline Helpers
-
-```text
-ConnectionRequestIdAllocator
-    positive safe integer
-    sender-local
-    Connection lifetime no reuse
-    shared by Control + Frame for same sender/carrier
-
-FrameDeadlineProfileValidator
-    seven Frame methods
-    integer 1000..300000ms
-```
-
-使用 monotonic clock。Deadline不进入 wire、不由 Game Package/business input覆盖。
-
-## 7. `main-system`
-
-负责：
-
-```text
-Descriptor / Launcher
-Runtime Supervisor
-Control v1 Registry/Dispatcher
-Frame/Activation Registry
-Stack/Transaction/Failure Unwind
-Renderer Control Publisher
-DataAuthority Registry
-```
-
-Main不得 timeout后 retry，也不得用 Renderer/Data state修复 Frame Control ambiguity。
-
-## 8. `subsystem-sdk`
-
-至少提供：
-
-```text
-Desktop/PWA bootstrap adapter interfaces
-Subsystem Control v1
-Runtime Control Profile v1 dispatcher
-Frame RPC client/dispatcher/validator
-shared outbound Request ID allocator
-Frame Input Context Registry
-mutation gate/deadline/failure handler
-Data Connection adapter
-User Input adapter
-Render Update Snapshot/Patch/Event producer
-Content Client
-```
-
-Frame adapter：`onInitialize/onActivate/onSuspend/onResume/onClose/call/return`。
-
-SDK不实现 Stack unwind authority；terminal failed Runtime不选择 lower Frame resume。
-
-## 9. `renderer-control-protocol`
-
-提供 Main→Renderer full Authority Snapshot schema/validation：
-
-```text
-Session / revision
-Runtime projection
-Frame Stack / Activation
-InputTarget
-DataAuthority
-```
-
-不包含 endpoint/token/MessagePort。
-
-## 10. `renderer-subsystem-connection-protocol`
-
-```text
-identity = Session + current Renderer + subsystemKey + generation
-lifecycle = current → retired
-serialized installation
-one current connection per Subsystem/current Renderer
-```
-
-不提供 endpoint discovery/application handshake/heartbeat。
-
-Desktop/PWA carrier establishment属于 Host packages/Profile。
-
-## 11. `user-input-protocol`
-
-提供：
-
-```text
-Input Interest
-Effective Channel derivation
-State / Event / Reset schemas
-ordering/coalescing/recovery invariants
-Core conformance fixtures
-```
-
-Standard keyboard/pointer/gamepad mapping可由独立 Profile实现。
-
-## 12. `render-update-protocol`
-
-当前实现目标：
-
-```text
-Domain Registry
-Snapshot(revision)
-Patch(baseRevision=R, revision=R+1)
-Event
-```
-
-至少提供：
-
-```text
-recursive Node schema
-Domain/Node identity validation
-per-Domain revision state
-insert/remove/move/update schemas
-Patch candidate validator/applicator helpers
-Event barrier rules
-limits/conformance fixtures
-```
-
-业务 Subsystem应由 Projector/Diff Engine生成 Patch，而不是从业务 handler直接拼 wire mutation。
-
-## 13. `web-renderer`
-
-负责：
-
-```text
-Renderer Control mirror
-Data Connection Registry
-User Input producers/gates
-Render Domain Store + revision
-key/parent indexes
-Snapshot validator
-atomic Patch engine
-Component Registry / composition
-```
-
-Renderer不解析/发送 Frame RPC；Renderer reconnect不能取消 Runtime failure或推断 Frame unwind root。
-
-## 14. Desktop / PWA Host Packages
-
-Host只负责 platform binding：
-
-```text
-Runtime Control carrier establishment
-Renderer Control bootstrap
-Renderer⇄Subsystem Data endpoint/ticket/MessagePort establishment
-Content platform binding
-```
-
-不得把 transport bootstrap material塞入 Control `ready`或 Renderer Authority Snapshot。
-
-## 15. `map-subsystem`
-
-`loom.map`使用 SDK Control v1/Profile v1/Frame v1/User Input/Render Update adapters。
-
-Render Manager维护 desired recursive Domain Tree，与 last published state diff生成 Patch；大 diff/backpressure可 materialize Snapshot。
-
-## 16. `test-subsystems`
+仓库级测试不作为 npm package 发布。
 
 建议：
 
 ```text
-control-v1-valid
-same-subsystem-recursive
-runtime-multiple-frame-occurrence
-call-child-init-reject
-frame-rpc-timeout
-late-frame-response
-frame-state-divergence
-activation-divergence
-runtime-crash-on-close
-runtime-crash-on-resume
-request-id-reuse
-stale-activation
-input-producer-loss
-render-patch-stream
-render-invalid-patch
-render-event-barrier
+tests/fixtures
+    package/game/content samples
+    transport-independent traces
+
+tests/subsystems
+    test Runtime implementations
+    crash/divergence/late-response scenarios
+
+tests/integration
+    Main ⇄ Subsystem
+    Main ⇄ Renderer
+    Renderer ⇄ Subsystem
+
+tests/e2e
+    Desktop vertical slice
+    PWA vertical slice
 ```
 
-## 17. Conformance Layout
+协议自身可复用的 conformance fixture/helper 跟随最接近的 capability package，通过 `*/testing` subpath 暴露。
 
-Frame依据 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)。
+---
 
-其他协议各自维护独立 fixture corpus；建议统一：
+## 5. 推荐依赖方向
 
 ```text
-fixtureFormatVersion
-protocol
-protocolVersion
-fixtureSetRevision
-role
+wire
+  ↑
+contract/capability
+  ↑
+runtime/role
+  ↑
+technical adapter
+  ↑
+apps / product composition
 ```
 
-新增只验证既有语义的 fixture仅提升 fixtureSetRevision，不改变 protocolVersion。
-
-## 18. Version Binding
+典型：
 
 ```text
-Subsystem Control = 1
-Frame / Call      = 1
-Runtime Profile   = 1
+main
+    → runtime-control
+    → renderer-control
+    → game-package
+
+subsystem
+    → runtime-control
+    → data
+    → content
+
+renderer
+    → renderer-control
+    → data
+    → content
+
+map
+    → subsystem
+
+launcher-node / transport-* / content-*
+    → 最小必要 lower-level interface
+
+apps/*
+    → 选择并组合上述 packages
 ```
 
-版本空间独立；当前恰好都为1。
-
-`subsystem.hello.protocolVersions`只协商 Control；Frame v1由 Profile v1静态绑定。
-
-## 19. 依赖规则
+禁止形成：
 
 ```text
-protocol packages
-    do not depend on implementation packages
-
-main-system
-    → control / runtime-profile / frame / renderer-control / launcher / game-package
-
-subsystem-sdk
-    → control / runtime-profile / frame / connection / input / render / content
-
-web-renderer
-    → renderer-control / connection / input / render / content
-
-host packages
-    → protocol/profile contracts, but do not own protocol authority
+contract → role implementation
+main → desktop/pwa app
+subsystem → desktop/pwa adapter
+renderer-control → renderer
+runtime-control → main
+Core → map
 ```
 
-禁止 Main/SDK/Host adapter私自改变 Frozen/Current protocol semantics。
+---
 
-## 20. 发布策略
+## 6. Runtime Control 的包内边界
 
-第一阶段可保持 monorepo + unified implementation version，但 protocol version独立管理。
+以下协议不再一文档一包：
 
-只有通过适用 executable conformance fixtures后，包/角色才能声明对应 protocol/profile conformant。
+```text
+Subsystem Control v1
+Frame / Call v1
+Runtime Control Application Profile v1
+```
+
+统一由：
+
+```text
+@loomrealm/runtime-control
+```
+
+实现，但使用内部目录/subpath 保持语义隔离：
+
+```text
+src/control/
+src/frame/
+src/profile/
+src/testing/
+```
+
+共享 package 不代表共享 protocol version、authority 或 lifecycle。
+
+---
+
+## 7. Renderer ⇄ Subsystem Data 的包内边界
+
+以下能力统一位于：
+
+```text
+@loomrealm/data
+```
+
+```text
+src/connection/
+src/input/
+src/render/
+src/testing/
+```
+
+必须继续保持：
+
+```text
+Data Connection != User Input != Render Update
+```
+
+包合并只用于减少发布碎片和重复基础代码，不允许把 sequencing/recovery/lifecycle 合成一个协议。
+
+---
+
+## 8. Game Package
+
+不再建立：
+
+```text
+game-package-contract-v1
+game-package implementation
+```
+
+两套 package。
+
+统一为：
+
+```text
+@loomrealm/game-package
+```
+
+内部同时提供 schema/types/parser/validator/tooling-safe helpers。npm semver 与 Game Package protocol version 独立。
+
+---
+
+## 9. Platform Adapter
+
+平台差异按技术能力落到 adapter：
+
+```text
+Desktop
+    launcher-node
+    transport-websocket
+    content-fs
+    content-http
+
+PWA
+    transport-messageport
+    content-service-worker
+```
+
+这些包不得承担 Main authority，也不得把 transport bootstrap material塞回 Subsystem `ready`、Renderer Authority Snapshot 或业务 payload。
+
+---
+
+## 10. Package 内建议结构
+
+公开 TypeScript package 默认：
+
+```text
+packages/<name>/
+├── package.json
+├── tsconfig.json
+├── README.md
+├── src/
+├── test/
+└── dist/          // build output，不提交或按仓库策略处理
+```
+
+如存在 conformance：
+
+```text
+src/testing/
+test/conformance/
+```
+
+通过 `exports` 显式限制 public surface，禁止消费者依赖内部相对路径。
+
+---
+
+## 11. 构建与发布
+
+推荐 monorepo root 提供：
+
+```text
+依赖图构建
+changed-package test
+pack dry-run
+consumer smoke test
+independent publish eligibility
+```
+
+Package build 必须按照 workspace dependency graph，而不是用手写固定顺序维持隐含耦合。
+
+协议 version 独立于 package semver；只有 package 明确通过其支持版本的 conformance fixture 后，才声明 protocol/profile conformant。
+
+---
+
+## 12. 第一阶段创建顺序
+
+不需要先创建全部 package。优先按 vertical slice：
+
+```text
+wire
+→ game-package
+→ runtime-control
+→ main + subsystem
+→ launcher-node + transport-websocket
+→ renderer-control + data + renderer
+→ content + content-service + content-fs/http
+→ map
+→ desktop app
+
+随后补：
+transport-messageport + content-service-worker + pwa app
+```
+
+在实现中发现真正共享的 capability 后再抽包；不为预测性的复用创建空 adapter。
+
+---
+
+## 13. 关键规则
+
+1. package 按能力/消费者拆，不按协议文件数量拆；
+2. Desktop/PWA 是 composition root，不是默认公共万能包；
+3. 技术差异落在 `launcher-* / transport-* / content-*` adapter；
+4. Main/Subsystem/Renderer 是角色包，不依赖平台 App；
+5. `wire` 保持无业务 authority；
+6. `map` 等业务 Subsystem 只能向 Core 依赖，Core 不反向依赖；
+7. npm package semver 与 protocol version 分离；
+8. workspace 合包不得改变正式契约的 domain boundary；
+9. 测试用 Runtime/E2E 默认不发布；
+10. 新增包前先证明独立消费者、独立职责和独立发布价值。
