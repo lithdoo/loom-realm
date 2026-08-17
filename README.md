@@ -16,6 +16,7 @@ LoomRealm 是一个通过只读游戏包声明运行拓扑、由 Main 编排独�
 - [Runtime Control Application Profile v1](./doc/15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call Protocol v1](./doc/15-contracts/frame-call-protocol-v1.md)
 - [Frame / Call v1 Conformance Profile](./doc/15-contracts/frame-call-conformance-v1.md)
+- [独立分包与发布架构](./doc/30-implementation/package-architecture.md)
 - [实施计划目录](./doc/30-implementation/README.md)
 - [完整阅读指南](./doc/README.md)
 
@@ -54,11 +55,11 @@ Render Update v1                            Closure candidate
 Content API v1                              Active / Normative / Evolving
 ```
 
-协议版本表示真实 interoperability boundary，不作为设计稿迭代编号。首次 conformant implementation 前被修正的历史协议正文不保留在当前文档树；关键设计演变由 ADR 与 Git history 追溯。
+协议已足够支撑开发；剩余 payload/limits/conformance 在实现与 executable fixtures 中继续细化。
 
 ## Runtime Control Profile v1
 
-第一阶段同一 Main ⇄ Subsystem Control Connection静态组合：
+第一阶段同一 Main ⇄ Subsystem Control Connection 静态组合：
 
 ```text
 Subsystem Control v1
@@ -66,9 +67,9 @@ Subsystem Control v1
 Frame / Call v1
 ```
 
-`subsystem.hello.protocolVersions`只协商 Subsystem Control；Frame v1不增加独立 hello/version handshake。hello成功前无 Frame operation；Runtime在该 Profile下 `ready` 表示完整承担 Frame v1 Subsystem角色。
+`subsystem.hello.protocolVersions`只协商 Subsystem Control；Frame v1 不增加独立 hello/version handshake。`ready` 不包含 Renderer Data endpoint。
 
-`ready` 不包含 Renderer Data endpoint。DataAuthority由 Main⇄Renderer Control发布，实际 Desktop WebSocket / PWA MessagePort Data carrier由 Host/Platform Binding独立建立。
+实际 Desktop WebSocket / PWA MessagePort carrier 由技术 Adapter + composition root 建立，不进入 Runtime/Renderer authority snapshot。
 
 ## Frame / Call v1
 
@@ -85,21 +86,6 @@ no retry/replay
 lowest failed-runtime root → whole suffix fixed-point unwind
 accepted outcome preserved
 fresh surviving Caller resume
-```
-
-Completion profile：
-
-```text
-protocol = loomrealm.frame-call / 1
-no JSON-RPC Batch in Runtime Control Profile v1
-Request ID = positive safe integer; shared sender Connection lifetime no reuse
-max message = 1 MiB
-max JSON depth = 64
-max business JsonValue = 512 KiB
-frameId / activationId <= 128 UTF-8 bytes
-targetSubsystemKey <= 256 UTF-8 bytes
-sender-role Frame deadlines = 1s..5min monotonic
-Desktop WebSocket / PWA MessagePort use the same application semantics
 ```
 
 正式兼容要求见 [Frame / Call v1 Conformance Profile](./doc/15-contracts/frame-call-conformance-v1.md)。
@@ -121,7 +107,27 @@ Render Update
     Subsystem → Renderer: Registry / Snapshot / Patch / Event
 ```
 
-Data reconnect不能修复 Runtime failure或 Frame unwind；Frame lifecycle也不能推导 Render Domain lifecycle。
+Data reconnect 不能修复 Runtime failure 或 Frame unwind；Frame lifecycle 也不能推导 Render Domain lifecycle。
+
+## 分包与发布
+
+实现采用 monorepo + 独立能力包：
+
+```text
+能力一包
+角色一包
+技术 Adapter 一包
+平台只组合
+```
+
+```text
+Protocol boundary != npm package boundary != runtime process boundary != platform boundary
+npm package semver != protocol version
+```
+
+Desktop/PWA 作为 composition root，不默认发布 `host-desktop` / `host-pwa` 万能 library。WebSocket、MessagePort、Node launcher、filesystem/HTTP/Service Worker 等按技术能力独立拆分。
+
+详细规则见 [独立分包与发布架构](./doc/30-implementation/package-architecture.md)。
 
 ## Desktop Runtime 边界
 
@@ -129,7 +135,7 @@ Data reconnect不能修复 Runtime failure或 Frame unwind；Frame lifecycle也�
 spawn success != connected != identified != ready
 ```
 
-Desktop v1 使用 `nodejs` Launcher、Host-selected Node、`shell=false`、token-before-spawn、Runtime Supervisor；Subsystem Control v1 管 hello/status/shutdown/failed，`stopped`只来自实际 Runtime termination observation。当前不定义 automatic restart、same-attempt reconnect 或 application heartbeat。
+Desktop v1 使用 `nodejs` Launcher、Host-selected Node、`shell=false`、token-before-spawn、Runtime Supervisor；Subsystem Control v1 管 hello/status/shutdown/failed，`stopped` 只来自实际 Runtime termination observation。
 
 业务内容通过独立 Readonly Content API 获取。
 
