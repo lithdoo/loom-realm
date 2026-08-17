@@ -1,0 +1,44 @@
+name: Essentials fixture importer
+
+on:
+  pull_request:
+    paths:
+      - "tools/fixtures/essentials-v21.1/**"
+      - "packages/fsdb-http/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/essentials-fixture.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/fixtures/essentials-v21.1/**"
+      - "packages/fsdb-http/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/essentials-fixture.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Importer conformance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test fixture importer
+        run: npm run test:fixtures

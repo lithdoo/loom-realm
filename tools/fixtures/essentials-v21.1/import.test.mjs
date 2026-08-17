@@ -19,6 +19,12 @@ async function makeSource(parent, invalidExtension = false) {
     if (table === "Graphics") await mkdir(directory);
     await writeFile(join(directory, name), Buffer.from(`${table}\0fixture`));
   }
+  await mkdir(join(root, "Plugins"));
+  await writeFile(join(root, "Plugins", "sample.rb"), "plugin bytes");
+  const nfdDirectory = `caf${"é".normalize("NFD")}`;
+  const nfdFile = `r${"é".normalize("NFD")}.bin`;
+  await mkdir(join(root, "Graphics", nfdDirectory));
+  await writeFile(join(root, "Graphics", nfdDirectory, nfdFile), "NFC target");
   return root;
 }
 
@@ -48,6 +54,8 @@ test("local directory import is byte-preserving and never overwrites", async (t)
   assert.equal(second, join(output, "[FSDB]Essentials v21.1 2"));
   assert.deepEqual(await readFile(join(first, "[resource]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
   assert.deepEqual(await readFile(join(second, "[resource]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
+  assert.equal(await readFile(join(first, "[resource]Graphics", "café", "ré.bin"), "utf8"), "NFC target");
+  assert.equal(await readFile(join(first, "[resource]Plugins", "sample.rb"), "utf8"), "plugin bytes");
   const provenance = JSON.parse(await readFile(join(first, "[struct]测试信息", "来源.json"), "utf8"));
   assert.equal(provenance.acquisition, "local-directory");
 

@@ -1,6 +1,6 @@
 # Pokémon Essentials v21.1 → FSDB Implementation Roadmap
 
-> 状态：Draft  
+> 状态：Implemented / local official-corpus RC qualified
 > 本文是 `DESIGN.md` 的执行计划。`DESIGN.md` 定义最终架构、authority、completeness 与 invariants；本文只定义实现顺序、阶段边界、测试和退出条件。  
 > 原则：每个 Stage 都必须形成可运行、可验证、可提交的闭环；禁止跨多个 Stage 同时大范围改动。
 
@@ -123,6 +123,8 @@ interface CoverageReport {
 
 ## 3. Stage 1 — Refactor legacy baseline
 
+> 状态：Implemented
+
 ### Scope
 
 只拆当前 `import.mjs`，**不改变任何可观察行为，也不加入 PBS/Marshal 新功能**。
@@ -185,9 +187,23 @@ production openFsdb validation retained
 import.mjs contains no independent domain algorithm
 ```
 
+Qualification evidence：
+
+```text
+existing fixture tests PASS
+modular CLI / download / transaction cleanup tests PASS
+fixture regression GitHub Actions gate configured
+official v21.1 local ZIP import PASS
+production openFsdb validation PASS
+legacy vs modular output: 7598 physical files, path/size/SHA-256 diff = 0
+semantic behavior change = 0
+```
+
 ---
 
 ## 4. Stage 2 — SourceManifest + acquisition closure
+
+> 状态：Implemented
 
 ### Scope
 
@@ -237,6 +253,8 @@ raw byte-preservation test PASS
 ---
 
 ## 5. Stage 3 — VanillaRegistry + completeness accounting
+
+> 状态：Implemented
 
 ### Scope
 
@@ -290,6 +308,8 @@ coverage report deterministic
 
 ## 6. Stage 4 — Generic PBS substrate
 
+> 状态：Implemented
+
 ### Scope
 
 只实现 reusable PBS engine，不一次实现所有 GameData domain。
@@ -338,6 +358,8 @@ pbs.discardedProperties = 0
 ---
 
 ## 7. Stage 5 — Simple GameData + early Oracle
+
+> 状态：Implemented
 
 ### Scope
 
@@ -393,6 +415,8 @@ no direct FSDB dependency
 ---
 
 ## 8. Stage 6 — Hardcoded GameData + Species reference closure
+
+> 状态：Implemented
 
 ### Scope
 
@@ -452,6 +476,8 @@ Species Oracle unclassified diff = 0
 
 ## 9. Stage 7 — Full vanilla PBS coverage
 
+> 状态：Implemented
+
 ### Scope
 
 由 Registry 驱动逐项关闭剩余 PBS family，而不是再维护人工 TODO 列表。
@@ -489,6 +515,8 @@ all implemented canonical domains have Oracle classification
 ---
 
 ## 10. Stage 8 — Lossless Ruby Marshal core
+
+> 状态：Implemented
 
 ### Scope
 
@@ -530,6 +558,8 @@ unknown class can remain generic
 ---
 
 ## 11. Stage 9 — RMXP/RGSS structural layer
+
+> 状态：Implemented
 
 ### Scope
 
@@ -576,6 +606,8 @@ Map/Event structural round-trip comparison fixtures PASS
 
 ## 12. Stage 10 — Essentials compiler-derived / semantic layer
 
+> 状态：Implemented
+
 ### Scope
 
 在 canonical RMXP facts 之上实现：
@@ -611,6 +643,8 @@ no semantic classifier mutates canonical facts
 ---
 
 ## 13. Stage 11 — FSDB mapper + integrity closure
+
+> 状态：Implemented
 
 ### Scope
 
@@ -664,6 +698,8 @@ no full-corpus byte buffering requirement
 ---
 
 ## 14. Stage 12 — Full-corpus qualification / RC
+
+> 状态：RC qualified（本地官方 2023-07-30 corpus）
 
 ### Scope
 
@@ -778,28 +814,42 @@ boundary 是否变模糊
 
 ---
 
-## 17. 当前第一步
+## 17. 当前状态与 qualification evidence
 
-当前代码仍是 legacy 单文件 importer，因此立即开始：
-
-```text
-Stage 1 — Refactor legacy baseline
-```
-
-此阶段明确禁止顺手实现：
+12 个 Stage 已全部落地。最终本地 qualification 使用官方
+`Pokemon Essentials v21.1 2023-07-30.zip`，结果为：
 
 ```text
-PBS semantic parser
-Ruby Marshal
-Map/Event semantic
-new FSDB structured tables
+physical objects                 7677 / 7677 classified
+raw resources                    7591 files / 59,464,786 bytes
+VanillaRegistry PBS families     22 / 22
+compiled-data roots              22 registered / 15 additional domains materialized
+hardcoded domains                17 / 17
+compiler passes                  26 / 26 classified
+Marshal roots                    110 decoded
+Marshal unsupported tags         0
+Marshal invalid references       0
+Marshal discarded nodes          0
+RMXP encountered classes         49
+RMXP generic-preserved classes   34
+RMXP discarded ivars             0
+RMXP EventCommands               13,347 / 0 discarded
+structured tables                41
+structured objects               4,405
+known references                 112,714 / 0 broken
+Oracle fields                    79,212 compared / 0 unclassified differences
+production openFsdb()            PASS
+HTTP descriptor/struct/resource  PASS
 ```
 
-Stage 1 完成并建立稳定 commit 后，再进入：
+允许非零但显式报告的指标：
 
 ```text
-Stage 2 — SourceManifest
-Stage 3 — VanillaRegistry + CoverageReport
+semantic.opaqueRubyScripts        1,784
+semantic.unclassifiedEventMeaning 9,407
+rmxp.genericUnknownClasses        34
 ```
 
-只有 completeness authority 建立后，才开始大规模 semantic implementation。
+自动 acquisition 的 redirect/landing/CDN/integrity 流程由 hermetic test 覆盖；最终一次
+live probe 在当前执行环境发生网络级 `fetch failed`，因此不把外部站点可达性记为本地 RC
+成功条件。下载后的 archive identity 仍由固定 size + SHA-256 fail closed。
