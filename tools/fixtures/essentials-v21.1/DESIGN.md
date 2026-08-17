@@ -1,19 +1,14 @@
 # Pokémon Essentials v21.1 → FSDB 完整数据导入器草案
 
-> 状态：Draft / v2 architecture  
-> 目标：替换当前 `tools/fixtures/essentials-v21.1/import.mjs` 的单文件实现，将 Pokémon Essentials v21.1 的原始资源、PBS 结构化数据、RPG Maker XP / RGSS `rxdata` 数据尽可能完整地转换为可验证的 FSDB fixture。  
+> 状态：Draft / v3 architecture  
+> 目标：替换当前 `tools/fixtures/essentials-v21.1/import.mjs` 的单文件实现，将 **Pokémon Essentials v21.1 vanilla** 的可观测静态数据尽可能完整、可追溯、可验证地转换为 FSDB fixture。  
 > 本工具仅用于本地开发、兼容性验证和测试，不是 LoomRealm 对第三方 Pokémon 素材的分发渠道。
 
 ---
 
-## 1. 替代关系
+## 1. 设计结论
 
-本草案替代此前两份设计思路：
-
-- 仅把 `Graphics / Audio / Fonts / Data / PBS` 镜像为 FSDB Resource 的旧 importer 设计；
-- 在 Resource fixture 之上再单独运行 PBS `structure.mjs` 的二阶段设计。
-
-新的目标不再是：
+本版本不再采用：
 
 ```text
 Essentials source
@@ -23,110 +18,90 @@ Resource-only import
 第二个脚本再补部分 Struct
 ```
 
-而是一个统一的导入 pipeline：
+也不继续把所有能力堆进一个不断膨胀的 `import.mjs`。
+
+正式目标是一个统一但内部严格分层的导入 pipeline：
 
 ```text
 Pokémon Essentials v21.1 source
         ↓
-Acquisition / Source Validation
+Acquisition
         ↓
-Lossless Raw Preservation
+Source Manifest
         ↓
-┌───────────────────────────────┬──────────────────────────────┐
-│ PBS compiler-compatible path  │ Ruby Marshal / RMXP path     │
-│                               │                              │
-│ PBS text                      │ Data/*.rxdata / *.dat        │
-│   ↓                           │   ↓                          │
-│ lexical / CSV decode          │ lossless Marshal graph       │
-│   ↓                           │   ↓                          │
-│ v21.1 schema interpretation   │ RPG/RGSS object decode       │
-│   ↓                           │   ↓                          │
-│ Essentials normalization      │ Essentials map/event meaning │
-└───────────────┬───────────────┴──────────────┬───────────────┘
-                ↓                              ↓
-                     Canonical Import Plan
-                              ↓
-                        FSDB materialize
-                              ↓
-                     production openFsdb()
-                              ↓
-                         final output
+┌──────────────────────────────────────────────────────────────┐
+│ Raw authority                                               │
+│                                                              │
+│ resource bytes / PBS source / Data / Plugins / project data │
+└──────────────────────────────┬───────────────────────────────┘
+                               ↓
+              ┌────────────────┴────────────────┐
+              │                                 │
+              ▼                                 ▼
+          PBS pipeline                    Marshal / RMXP
+              │                                 │
+              ▼                                 ▼
+      v21.1 compiler passes              structural model
+              │                                 │
+              ├──────────────┬──────────────────┘
+              │              │
+              ▼              ▼
+       Hardcoded GameData   compiler-derived data
+              \              /
+               \            /
+                ▼          ▼
+             Canonical Dataset
+                    ↓
+          Derived Semantic Dataset
+                    ↓
+                 FSDB Plan
+                    ↓
+       identity + integrity validation
+                    ↓
+               transaction
+                    ↓
+             production FSDB
+                    ↓
+       ┌────────────┼─────────────┐
+       ▼            ▼             ▼
+    openFsdb     coverage      Oracle diff
+       └────────────┴─────────────┘
+                    ↓
+              qualification
 ```
 
-**当前 `import.mjs` 视为 legacy baseline，后续实现应替换其内部结构，而不是继续向这个文件追加 PBS、Marshal、RMXP 和 Essentials 业务解析逻辑。**
+**当前 `import.mjs` 视为 legacy baseline。后续实现必须替换它的内部结构，而不是继续向其中追加 PBS、Marshal、RMXP、地图、人物或 Essentials 业务解析算法。**
 
 ---
 
-## 2. 核心目标
+## 2. Compatibility Authority
 
-### 2.1 完整性的三个层级
-
-导入器分别追求三种 completeness：
-
-#### Physical completeness
-
-```text
-所有纳入 corpus 的源文件都进入 Source Manifest
-原始 Resource bytes 保留
-文件 hash / size 可验证
-不静默遗漏 recognised source object
-```
-
-#### Structural completeness
-
-```text
-PBS recognised syntax 100% 可表达
-Ruby Marshal recognised tag 100% 可解码
-Marshal shared references / object links 不丢失
-RPG/RGSS known object 的 ivar 不静默丢失
-EventCommand 不因 unknown code 而丢弃
-```
-
-#### Semantic completeness
-
-```text
-尽可能复现 Pokémon Essentials v21.1 自身：
-SCHEMA
-CSV cast rules
-default values
-compiler normalization
-cross-record references
-forms / evolutions / encounters / trainer semantics
-map / event semantics
-```
-
-Semantic 层允许存在 `unknown / opaque`，但不允许因为无法理解而丢弃原始信息。
-
-### 2.2 核心 invariant
-
-```text
-unknown != discarded
-```
-
-对于插件脚本、未知 RPG class、未知 Event Command 或无法可靠理解的 Ruby expression：
-
-```text
-能结构化理解     → raw representation + semantic representation
-暂时无法理解     → 保留 raw/opaque representation + diagnostic
-绝不             → 静默忽略
-```
-
-原始 `PBS`、`Data`、`Plugins` 等资源仍保留，因此任何 derived semantic data 都可以追溯到 raw authority。
-
----
-
-## 3. Compatibility Target
-
-第一版明确绑定：
+第一版明确只承诺：
 
 ```text
 Pokémon Essentials v21.1 vanilla
-official v21.1 behavior
 ```
 
-v21.1 的 compiler / `GameData` 源码是 semantic interpretation 的主要 executable specification。
+语义 authority 按优先级分为：
 
-不声称自动完整支持任意第三方 Plugin。Plugin 可以：
+```text
+1. Pokémon Essentials v21.1 官方源码行为
+2. v21.1 GameData / Compiler / RMXP runtime data shape
+3. 官方 v21.1 完整 distribution 的实际 corpus
+4. 本 importer 的兼容实现
+```
+
+开发时应固定参考版本：
+
+```text
+Maruno17/pokemon-essentials
+Tag: v21.1
+Commit: ea7b5d56d2436591160983c4e641a2ceee2d875a
+```
+
+不得通过“当前 master 看起来相同”替代 v21.1 authority。
+
+任意第三方 Plugin 不属于 v1 semantic completeness 承诺，因为 Plugin 可以：
 
 ```text
 新增 PBS schema
@@ -137,30 +112,102 @@ patch GameData
 改变地图运行时行为
 ```
 
-因此规则是：
+规则是：
 
 ```text
-vanilla v21.1 known behavior      → semantic support
-known plugin adapter              → 可扩展支持
-unknown plugin                    → raw preservation + diagnostic
+vanilla v21.1 known behavior  → semantic support
+known plugin adapter          → 可扩展支持
+unknown plugin                → raw preservation + diagnostic
 ```
 
-不得为了支持未知 Plugin 而执行任意 Ruby 代码。
+不得为了提高 semantic coverage 而执行任意项目 Ruby 代码。
 
 ---
 
-## 4. CLI 保持只有两个参数
+## 3. Completeness 模型
 
-顶层 CLI 继续只公开：
+“尽可能完整”不是一句描述，而是三个独立、可计量的目标。
+
+### 3.1 Physical completeness
+
+```text
+所有 recognised corpus object 进入 Source Manifest
+所有纳入 Resource 的原始 bytes 可验证
+所有 recognised physical object 都被 classify
+不静默跳过文件、目录或数据根
+```
+
+### 3.2 Structural completeness
+
+```text
+PBS recognised syntax 100% 可表达
+Marshal encountered tag 100% 有结构处理结果
+Marshal shared refs / cycles / object identity 不丢失
+known RPG/RGSS object 的额外 ivar 不丢失
+EventCommand 不因 unknown code 而丢弃
+unknown Ruby class 仍以 generic object 保留
+```
+
+### 3.3 Semantic completeness
+
+尽可能复现 v21.1 自身最终可观察语义：
+
+```text
+PBS compatibility rewrites
+SCHEMA
+CSV cast rules
+default values
+local normalization
+global compiler finalization
+cross-record references
+hardcoded GameData
+forms / evolutions / encounters / trainer semantics
+map / event semantics
+compiler-derived trainer event changes
+messages / localization extraction
+animation-related compiled data
+```
+
+Semantic 层允许存在 `unknown / opaque`，但必须显式计量。
+
+### 3.4 核心 invariant
+
+```text
+unknown != discarded
+```
+
+允许：
+
+```text
+无法理解 → raw/opaque preservation + diagnostic
+```
+
+禁止：
+
+```text
+无法理解 → 忽略
+```
+
+进一步冻结：
+
+```text
+discarded recognised data = 0
+```
+
+这是 RC 级硬约束。
+
+---
+
+## 4. 顶层 CLI：仍然只有两个参数
+
+CLI 保持：
 
 ```text
 --source <path>
 --output <directory>
 ```
 
-不因为内部能力增加而暴露一组 parser/debug/adaptation CLI flags。
-
-典型调用：
+不因为内部能力增加而暴露 parser/debug/adaptation 参数。
 
 ```bash
 node tools/fixtures/essentials-v21.1/import.mjs \
@@ -179,23 +226,17 @@ node tools/fixtures/essentials-v21.1/import.mjs \
 2. Pokémon Essentials v21.1 ZIP archive
 ```
 
-未指定时：
+未指定时自动 acquisition。
 
-```text
-通过固定的 Eevee Expo stable authority 自动获取 v21.1
-```
-
-下载、redirect、landing-page resolution、ZIP 保存和解压均属于 acquisition 模块；**不得继续写在 `import.mjs` 中。**
-
-### 4.2 自动下载
-
-默认 authority：
+默认 stable authority：
 
 ```text
 https://www.eeveeexpo.com/essentials/download
 ```
 
-下载实现必须：
+### 4.2 自动下载
+
+自动下载必须：
 
 ```text
 HTTPS only
@@ -208,21 +249,27 @@ archive type/shape validation
 safe cleanup
 ```
 
-若 stable authority 返回受支持的 HTML landing page，可由**authority-specific resolver**解析当前 HTTPS archive candidate；resolver 必须是显式、可测试、fail-closed 的实现，而不是通用网页 scraper。
+如果 stable authority 返回受支持的 landing page，可以由：
 
-不得把临时 CDN URL 当长期 authority 写死。
+```text
+acquisition/eevee-expo.mjs
+```
+
+进行 authority-specific、fail-closed 的 archive candidate resolution。
+
+它不是通用网页 scraper；不得把临时 CDN URL 当长期 authority 写死。
 
 ### 4.3 `--output`
 
-`--output` 仍表示输出父目录。
+`--output` 表示输出父目录。
 
-未指定时：
+未指定：
 
 ```text
 output parent = process.cwd()
 ```
 
-输出目录永远是新目录：
+最终 FSDB root 永远创建新目录：
 
 ```text
 [FSDB]Essentials v21.1
@@ -231,39 +278,42 @@ output parent = process.cwd()
 ...
 ```
 
-不得覆盖旧 fixture。
+不得覆盖已有 fixture。
 
 ---
 
-## 5. `import.mjs` 必须成为薄 composition root
+## 5. `import.mjs` 必须是薄 composition root
 
 新的 `import.mjs` 只负责：
 
 ```text
 parse CLI
-→ create importer dependencies
+→ create dependencies
 → invoke importEssentialsV21_1()
-→ print success/failure
+→ print result/failure
 → set exitCode
 ```
 
-目标上它不应该包含：
+它不得包含：
 
 ```text
-ZIP parsing
-HTTP redirect loop
+HTTP redirect algorithm
+landing-page resolver
+ZIP parser
 filesystem tree scanner
 PBS lexer
 CSV parser
 GameData schema
+compiler pass
 Ruby Marshal decoder
-RPG::Map decoder
-EventCommand semantics
-FSDB tree writer details
+RPG class decoder
+Event semantics
+FSDB writer details
+transaction cleanup algorithm
 SHA-256 copy loop
 ```
 
-建议控制在约 50–150 行量级；具体行数不是 contract，但出现多个独立 domain algorithm 就应继续拆分。
+目标量级约 50–150 行；行数不是 contract，但出现独立 domain algorithm 就应继续拆分。
 
 ---
 
@@ -272,44 +322,47 @@ SHA-256 copy loop
 ```text
 tools/fixtures/essentials-v21.1/
 ├── DESIGN.md
-├── import.mjs                         # CLI / composition root only
-├── import.test.mjs                    # top-level integration tests
+├── import.mjs
+├── import.test.mjs
 │
 ├── lib/
 │   ├── errors.mjs
 │   ├── cli.mjs
-│   ├── importer.mjs                   # pipeline orchestration
+│   ├── importer.mjs
 │   ├── report.mjs
 │   │
 │   ├── acquisition/
-│   │   ├── source.mjs                 # local dir / local zip / auto download
-│   │   ├── download.mjs               # bounded HTTPS download
-│   │   ├── eevee-expo.mjs             # stable authority resolver
-│   │   ├── zip.mjs                    # safe archive extraction
-│   │   └── temporary.mjs              # owned temp lifecycle
+│   │   ├── source.mjs
+│   │   ├── download.mjs
+│   │   ├── eevee-expo.mjs
+│   │   ├── zip.mjs
+│   │   └── temporary.mjs
 │   │
 │   ├── source/
-│   │   ├── identity.mjs               # v21.1 source-shape validation
-│   │   ├── manifest.mjs               # complete source inventory
-│   │   ├── names.mjs                  # physical UTF-8/NFC handling
-│   │   └── fingerprint.mjs            # size/hash/source-change checks
+│   │   ├── identity.mjs
+│   │   ├── manifest.mjs
+│   │   ├── names.mjs
+│   │   ├── fingerprint.mjs
+│   │   └── reader.mjs
 │   │
 │   ├── pbs/
-│   │   ├── lexer.mjs                  # section / key=value / comments / BOM
-│   │   ├── csv.mjs                    # Essentials-compatible CSV splitting
-│   │   ├── cast.mjs                   # i/u/v/f/e/... typed casting
-│   │   ├── parser.mjs                 # generic section parser
-│   │   └── provenance.mjs             # file / section / explicit fields
+│   │   ├── lexer.mjs
+│   │   ├── csv.mjs
+│   │   ├── cast.mjs
+│   │   ├── parser.mjs
+│   │   └── provenance.mjs
 │   │
 │   ├── marshal/
-│   │   ├── decoder.mjs                # Ruby Marshal format
-│   │   ├── reader.mjs                 # byte cursor / numeric primitives
-│   │   ├── graph.mjs                  # object/symbol refs, cycles
-│   │   └── types.mjs                  # neutral Marshal IR
+│   │   ├── reader.mjs
+│   │   ├── decoder.mjs
+│   │   ├── graph.mjs
+│   │   ├── tag-registry.mjs
+│   │   └── types.mjs
 │   │
 │   ├── rmxp/
-│   │   ├── decoder.mjs                # generic RPG/RGSS dispatch
-│   │   ├── table.mjs                  # RGSS Table user payload
+│   │   ├── decoder.mjs
+│   │   ├── class-registry.mjs
+│   │   ├── table.mjs
 │   │   ├── color.mjs
 │   │   ├── tone.mjs
 │   │   ├── audio-file.mjs
@@ -319,19 +372,30 @@ tools/fixtures/essentials-v21.1/
 │   │   ├── event-page.mjs
 │   │   ├── event-command.mjs
 │   │   ├── move-route.mjs
+│   │   ├── move-command.mjs
 │   │   ├── common-event.mjs
 │   │   ├── tileset.mjs
 │   │   └── system.mjs
 │   │
 │   ├── essentials/
 │   │   └── v21.1/
-│   │       ├── schema-registry.mjs     # PBS_BASE_FILENAME / SCHEMA mapping
-│   │       ├── compiler.mjs            # compile-like orchestration
-│   │       ├── defaults.mjs            # GameData runtime defaults
-│   │       ├── validation.mjs          # cross-record validation
-│   │       ├── references.mjs          # typed logical references
-│   │       ├── event-semantics.mjs     # known Essentials event/script forms
-│   │       ├── rxdata.mjs              # Essentials-specific RMXP mapping
+│   │       ├── vanilla-registry.mjs
+│   │       ├── schema-registry.mjs
+│   │       ├── hardcoded-data.mjs
+│   │       ├── references.mjs
+│   │       ├── rxdata.mjs
+│   │       ├── event-semantics.mjs
+│   │       ├── messages.mjs
+│   │       ├── animations.mjs
+│   │       ├── trainer-events.mjs
+│   │       ├── compiler/
+│   │       │   ├── index.mjs
+│   │       │   ├── precompile.mjs
+│   │       │   ├── schema-cast.mjs
+│   │       │   ├── normalize.mjs
+│   │       │   ├── defaults.mjs
+│   │       │   ├── resolve.mjs
+│   │       │   └── finalize.mjs
 │   │       └── schemas/
 │   │           ├── type.mjs
 │   │           ├── ability.mjs
@@ -350,34 +414,44 @@ tools/fixtures/essentials-v21.1/
 │   │           ├── town-map.mjs
 │   │           └── ...
 │   │
+│   ├── model/
+│   │   ├── raw-dataset.mjs
+│   │   ├── canonical-dataset.mjs
+│   │   └── semantic-dataset.mjs
+│   │
 │   └── fsdb/
-│       ├── names.mjs                   # shared FSDB naming authority adapter
-│       ├── plan.mjs                    # complete immutable output plan
-│       ├── raw-resources.mjs           # raw corpus → Resource plan
-│       ├── structured.mjs              # canonical model → table plan
-│       ├── schemas.mjs                 # generated .info.meta
-│       ├── writer.mjs                  # materialization only
-│       ├── transaction.mjs             # reserve/stage/promote/cleanup
-│       └── validate.mjs                # production openFsdb validation
+│       ├── names.mjs
+│       ├── mapper.mjs
+│       ├── plan.mjs
+│       ├── raw-resources.mjs
+│       ├── structured.mjs
+│       ├── schemas.mjs
+│       ├── integrity.mjs
+│       ├── writer.mjs
+│       ├── transaction.mjs
+│       └── validate.mjs
 │
 └── test/
     ├── acquisition.test.mjs
     ├── zip.test.mjs
+    ├── source-manifest.test.mjs
     ├── pbs.test.mjs
+    ├── compiler.test.mjs
     ├── marshal.test.mjs
     ├── rmxp.test.mjs
     ├── essentials.test.mjs
     ├── fsdb-plan.test.mjs
-    └── fixtures/                       # synthetic, redistributable only
+    ├── transaction.test.mjs
+    └── fixtures/
 ```
 
-目录可在实现时做小幅调整，但能力边界不应重新合并回一个大文件。
+目录可以在实现时小幅调整，但能力边界不得重新合并回一个大文件。
 
 ---
 
 ## 7. 依赖方向
 
-依赖保持单向：
+依赖必须单向：
 
 ```text
 cli
@@ -386,38 +460,106 @@ importer orchestration
  ↓
 acquisition / source
  ↓
-pbs      marshal
- ↓          ↓
-essentials  rmxp
-   \        /
-    canonical models
+pbs          marshal
+ ↓              ↓
+essentials    rmxp
+   \            /
+    canonical model
           ↓
-       fsdb plan
+   semantic model
           ↓
-       fsdb writer
+       fsdb mapper
           ↓
- production validator
+        fsdb plan
+          ↓
+ writer / validator
 ```
 
-特别禁止：
+禁止：
 
 ```text
 marshal → FSDB
 pbs lexer → FSDB writer
 rmxp → CLI
-fsdb writer → Essentials parser
+fsdb writer → Essentials compiler
 acquisition → semantic compiler
 ```
 
-物理解码、版本语义和 FSDB 表示必须解耦。
+物理解码、版本语义、业务推导和 FSDB 表示必须解耦。
 
 ---
 
-## 8. Source Manifest
+## 8. VanillaRegistry：完整性的 authority
 
-成功 acquisition 后第一步生成完整 `SourceManifest`。
+禁止通过人工维护的“常见数据类型列表”定义 coverage。
+
+新增：
+
+```text
+essentials/v21.1/vanilla-registry.mjs
+```
 
 概念模型：
+
+```ts
+interface VanillaRegistry {
+  readonly pbsFamilies: readonly PbsFamilyDefinition[];
+  readonly compiledData: readonly CompiledDataDefinition[];
+  readonly hardcodedDomains: readonly HardcodedDomainDefinition[];
+  readonly rmxpRoots: readonly RmxpRootDefinition[];
+  readonly compilerPasses: readonly CompilerPassDefinition[];
+}
+```
+
+Registry 必须从固定 v21.1 authority 人工校对生成，而不是运行项目 Ruby 动态发现。
+
+它至少覆盖 v21.1 自身的：
+
+```text
+GameData PBS_BASE_FILENAME registry
+Compiler.get_all_pbs_files_to_compile
+Compiler.compile_pbs_files
+GameData.get_all_data_filenames
+Compiler.compile_all
+RMXP Data roots
+hardcoded GameData definitions
+```
+
+已知非单纯 GameData generic path 也必须进入 Registry，例如：
+
+```text
+BattleFacility
+Connection / map_connections
+RegionalDex
+DungeonTileset
+DungeonParameters
+PhoneMessage
+trainer lists
+```
+
+核心闭环：
+
+```text
+expected vanilla data families
+-
+classified importer data families
+=
+∅
+```
+
+如果 Registry 新增条目而 importer 没有 handler：
+
+```text
+coverage failure
+```
+
+而不是静默忽略。
+
+---
+
+## 9. Source Manifest
+
+Acquisition 成功后，第一步生成完整 `SourceManifest`。
 
 ```ts
 interface SourceObject {
@@ -434,72 +576,151 @@ interface SourceManifest {
 }
 ```
 
-Manifest 至少负责：
+Manifest 负责：
 
 ```text
-所有 recognised corpus object 被记录
+完整 physical inventory
 valid UTF-8 physical name
 NFC logical identity
 no symlink/junction traversal
 source version identity
 source change detection
 extension / ResourceKey collision diagnostics
+classification status
 ```
 
-任何后续 parser 都从 Manifest / validated source abstraction 取数据，不重新无约束遍历 filesystem。
+任何后续 parser 只能通过 Manifest / validated source abstraction 读取，不允许重新无约束遍历 filesystem。
+
+Manifest 中每个 recognised source object 必须最终处于：
+
+```text
+raw-preserved
+parsed
+opaque-preserved
+explicitly excluded by frozen policy
+```
+
+不得存在无说明的 `unclassified`。
 
 ---
 
-## 9. Raw corpus 保留
+## 10. Raw authority preservation
 
-结构化解析不是 Raw Resource 的替代品。
+结构化解析不是 raw data 的替代品。
 
 第一版至少保留：
 
 ```text
-[resource]Graphics/
-[resource]Audio/
-[resource]Fonts/
-[resource]Data/
-[resource]PBS/
+[resource]Graphics
+[resource]Audio
+[resource]Fonts
+[resource]Data
+[resource]PBS
 ```
 
-如果完整 distribution 中存在 `Plugins/`，也应纳入：
+如果完整 distribution 存在：
 
 ```text
-[resource]Plugins/
+Plugins/
 ```
 
-是否纳入其他 root-level project files 由 Source Manifest 先报告，再明确映射；不得为了“完整”把无关 executable/tooling 文件未经设计全部塞进 FSDB。
+则保留：
 
-Resource bytes 必须保持不变，除已经显式冻结、内容哈希锁定的 physical-name compatibility adaptation 外不得静默改名或转码。
+```text
+[resource]Plugins
+```
 
-FSDB writer 创建 physical filename 时必须使用 NFC canonical spelling。
+其他 root-level project files 必须由 Source Manifest 分类；不因为“完整”而无设计地把 executable/tooling 全部塞进 FSDB。
+
+Resource bytes 必须保持不变。
+
+除显式冻结、内容哈希锁定的 compatibility adaptation 外：
+
+```text
+不得转码
+不得 lowercase filename
+不得 trim
+不得自动替换非法字符
+不得静默修复 normalization collision
+```
+
+FSDB writer 创建 physical filename 时必须请求 NFC canonical spelling。
 
 ---
 
-## 10. PBS：尽量复现 v21.1 compiler
+## 11. 数据模型分层
 
-### 10.1 不手写 ad-hoc parser
+正式冻结三层数据模型。
 
-PBS 解析应复现 Essentials 自身行为：
+### 11.1 RawDataset
+
+表达“源里实际存在什么”：
 
 ```text
-read file
-→ strip supported BOM
-→ comments / whitespace
-→ section grouping
-→ repeated properties
-→ Essentials CSV grammar
-→ SCHEMA-driven cast
-→ category-specific normalization
-→ defaults
-→ cross-record resolution
+PBS raw records
+raw Marshal graph
+raw Resource metadata
+raw project data
 ```
 
-### 10.2 Version-specific schema registry
+### 11.2 CanonicalDataset
 
-Generic PBS parser 不知道 Pokémon、Move、Item。
+表达“v21.1 compiler/runtime 将数据规范化后是什么”：
+
+```text
+schema cast
+compatibility migration
+defaults
+local normalization
+global compiler finalization
+resolved typed references
+RMXP typed structural model
+hardcoded GameData
+```
+
+### 11.3 DerivedSemanticDataset
+
+表达 importer 的高层业务推导：
+
+```text
+MapEvent classified as trainer
+known warp
+known item event
+known battle helper
+known message/choice semantics
+```
+
+规则：
+
+```text
+RPG::Event = canonical fact
+Trainer NPC = derived semantic interpretation
+```
+
+Derived 层错误不得破坏 Canonical 层事实。
+
+---
+
+## 12. PBS：复现 v21.1 compiler，而不是通用 INI parser
+
+### 12.1 Generic syntax layer
+
+PBS generic parser 只负责：
+
+```text
+UTF-8 / supported BOM
+comments
+whitespace
+section
+key=value
+repeated properties
+Essentials CSV grammar
+source provenance
+```
+
+它不知道 Pokémon、Move 或 Item。
+
+### 12.2 Schema registry
 
 v21.1 adapter 提供：
 
@@ -509,51 +730,107 @@ SCHEMA
 field target names
 cast grammar
 enum/reference targets
-repeated-field behavior
-post-processing
+repeated-field semantics
+compile order
 ```
-
-例如 `pokemon` 与 `pokemon_forms` 都属于 Species domain，但 schema/normalization 不完全相同；不能通过“通用 INI 转 JSON”获得完整语义。
-
-### 10.3 Provenance
-
-每个 structured record SHOULD 保留足够 provenance：
-
-```text
-source file
-section/key
-explicit fields
-```
-
-原始文本仍由 `[resource]PBS` 保存，因此 structured JSON 不必复制整个 source section。
-
-### 10.4 Defaults 与 normalized result
-
-目标 structured record 表达 Essentials 最终 canonical/runtime-facing value，而不是只表达 PBS 显式字段。
 
 例如：
 
 ```text
-missing PBS field
-    ↓
-Essentials-defined default
-    ↓
-resolved structured value
+pokemon
+pokemon_forms
 ```
 
-同时 provenance 的 `explicitFields` 可区分：
+都属于 Species domain，但 schema 和 post-processing 不完全相同。
+
+### 12.3 Precompile compatibility pass
+
+必须复现 v21.1 在正式 compile 前的 compatibility rewrite。
+
+已知示例：
 
 ```text
-source explicitly wrote value
-vs
-value came from v21.1 default/normalization
+VictoryME  → VictoryBGM
+BaseDamage → Power
 ```
 
-### 10.5 第一批完整覆盖对象
+Raw Resource 不修改；变换发生在 Canonical pipeline。
 
-不是只停在五张表；目标应逐步覆盖 v21.1 所有 vanilla PBS/GameData 类，包括但不限于：
+provenance 可记录：
+
+```ts
+interface FieldProvenance {
+  readonly sourceField: string;
+  readonly canonicalField: string;
+  readonly transformation?: string;
+}
+```
+
+### 12.4 Compiler pass pipeline
 
 ```text
+PBS Syntax IR
+    ↓
+Precompile Compatibility
+    ↓
+Schema Cast
+    ↓
+Local Normalize
+    ↓
+Defaults
+    ↓
+Cross-record Resolve
+    ↓
+Global Finalize
+    ↓
+Canonical GameData
+```
+
+这些 pass 分文件实现，不允许重新变成一个巨型 `compiler.mjs`。
+
+### 12.5 Provenance
+
+每个 canonical record 至少能追溯：
+
+```text
+source file
+section / record identity
+explicit fields
+compatibility-transformed fields
+```
+
+Raw PBS 已由 Resource 保存，因此 structured JSON 不必重复完整源文本。
+
+---
+
+## 13. PBS coverage 由 Registry 驱动
+
+实现顺序可以 vertical slice，但最终 coverage 不能通过人工列表判断。
+
+第一批可以：
+
+```text
+Type
+Ability
+Move
+Item
+Species
+```
+
+但完成条件是：
+
+```text
+VanillaRegistry.pbsFamilies
+→ every family classified
+→ every required family supported
+→ optional family absence explicitly represented
+```
+
+至少应包括 v21.1 官方 compiler 涉及的：
+
+```text
+TownMap
+Connection
 Type
 Ability
 Move
@@ -562,59 +839,108 @@ BerryPlant
 Species
 SpeciesForm
 SpeciesMetrics
+ShadowPokemon
+RegionalDex
 Ribbon
+Encounter
 TrainerType
 Trainer
-Encounter
+BattleFacility
 Metadata
 MapMetadata
-TownMap
-MapConnection
-RegionalDex
-ShadowPokemon
-BattleFacility data
+DungeonTileset
+DungeonParameters
+PhoneMessage
 ```
 
-实现顺序可以 vertical slice，但最终 coverage 由 v21.1 schema registry 驱动，而不是人工维护一个“常用表名单”。
+以及 Registry 中从固定 v21.1 source 审计得到的其他 vanilla family。
+
+文档中的列表是说明，不是 authority；`VanillaRegistry` 才是 authority。
 
 ---
 
-## 11. Ruby Marshal：先无损解码，再解释
+## 14. Hardcoded GameData 必须进入 Canonical Dataset
 
-`.rxdata` / 某些 `.dat` 的第一层不是 Map parser，而是 Ruby Marshal parser。
+Essentials 并非所有业务枚举都来自 PBS。
 
-### 11.1 Neutral Marshal IR
+v21.1 的 hardcoded data 至少包括类似：
 
-Decoder 必须能够表示：
+```text
+GrowthRate
+GenderRatio
+EggGroup
+BodyShape
+BodyColor
+Habitat
+Evolution
+Stat
+Nature
+...
+```
+
+这些数据会被 PBS schema、default、reference resolution 和 runtime logic 使用。
+
+因此不能只把它们当 importer 内部 magic constants。
+
+设计：
+
+```text
+vanilla-registry
+    ↓
+hardcoded-data
+    ↓
+CanonicalDataset
+```
+
+FSDB mapper SHOULD 对具有稳定业务 identity 的 hardcoded domain 生成结构化表，例如：
+
+```text
+[struct]GrowthRate
+[struct]GenderRatio
+[struct]EggGroup
+[struct]BodyShape
+[struct]BodyColor
+[struct]Habitat
+[struct]EvolutionMethod
+[struct]Stat
+[struct]Nature
+```
+
+这样 `Pokemon.growthRate`、`Pokemon.evolutions[].method` 等引用可以真正闭合在 FSDB 内，而不是依赖 importer 外部隐式知识。
+
+具体表名/字段以真实 consumer 和 FSDB identity 评审后冻结。
+
+---
+
+## 15. Ruby Marshal：先无损 graph decode
+
+`.rxdata` / `.dat` 首先进入 Ruby Marshal decoder，而不是直接进入 Map parser。
+
+### 15.1 Neutral graph IR
+
+Decoder 必须保留：
 
 ```text
 nil
 boolean
-integer / bignum where applicable
+fixnum / bignum where applicable
 float
-string + encoding/ivars
+string + ivars/encoding
 symbol
 array
 hash
+regexp where encountered
+struct where encountered
 object
 class/module refs
 instance variables
 object links
 symbol links
-user-defined/user-marshal payload
+extended object forms
+user-defined/user-class/user-marshal payload where encountered
 ```
 
-对象图必须保留：
-
-```text
-shared identity
-reference links
-cycles where format permits
-```
-
-不要先转成会破坏共享引用的普通递归 JSON tree。
-
-可使用内部 graph IR：
+内部模型应能表达 shared identity：
 
 ```ts
 interface MarshalGraph {
@@ -623,22 +949,50 @@ interface MarshalGraph {
 }
 ```
 
-### 11.2 Unknown Marshal object
+不要先转成会破坏共享引用或 cycles 的普通 JSON tree。
 
-未知 class 不是 decode failure，只要 Marshal 结构本身合法：
+### 15.2 TagRegistry
+
+Marshal support 不通过“我们记得有哪些 tag”证明完整。
+
+运行时记录：
 
 ```text
-known class   → typed decoder
-unknown class → generic className + ivars/payload
+encountered tags
+handled tags
+invalid tags
+unsupported encountered tags
 ```
 
-只有格式本身损坏、引用非法、越界等才是 structural failure。
+vanilla full corpus qualification 必须满足：
+
+```text
+unsupported encountered Marshal tags = 0
+invalid reference = 0
+discarded nodes = 0
+```
+
+### 15.3 Unknown class
+
+```text
+known class
+    → typed decoder + extra ivars
+
+unknown class
+    → GenericRubyObject { className, ivars/payload }
+```
+
+未知 class 本身不是 structural failure。
+
+只有无法保证 Marshal graph 无损时才 `MARSHAL_UNSUPPORTED` / `MARSHAL_INVALID`。
 
 ---
 
-## 12. RMXP / RGSS object layer
+## 16. RMXP / RGSS structural layer
 
-Marshal 之上再实现 RPG Maker XP / RGSS 类型：
+Marshal 之上实现 RPG Maker XP / RGSS typed views。
+
+候选包括：
 
 ```text
 RPG::Map
@@ -654,16 +1008,22 @@ RPG::AudioFile
 RPG::CommonEvent
 RPG::Tileset
 RPG::System
-...
-
 RGSS Table
 Color
 Tone
+...
 ```
 
-已知 class 的 decoder MUST 检查已知字段，但不得静默丢弃额外 ivar。
+同样，文档列表不是 completeness authority。
 
-推荐输出模型：
+最终要求：
+
+```text
+所有 official v21.1 corpus 中遇到的 class
+→ typed view 或 generic preservation
+```
+
+known class decoder 必须：
 
 ```text
 known fields
@@ -671,37 +1031,50 @@ known fields
 extra/unknown ivars
 ```
 
-这样插件或小版本差异仍可被保留和报告。
+不得因为 typed decoder 没声明某个 ivar 就把它丢掉。
+
+### 16.1 ClassRegistry
+
+```text
+rmxp/class-registry.mjs
+```
+
+负责 className → decoder 映射和 coverage accounting。
+
+Qualification 关键指标：
+
+```text
+discarded ivars = 0
+discarded EventCommand = 0
+```
 
 ---
 
-## 13. Map / Event 完整解析
+## 17. Map / Event 完整解析
 
-### 13.1 Map
+### 17.1 Map
 
-地图至少保留：
+Map 至少保留：
 
 ```text
-map id / map info
+map id / MapInfo
 width / height
 tileset id
 tile Table data
 autoplay flags
 BGM / BGS
 events
-all additional known RPG::Map fields
-unknown ivars
+all known RPG::Map fields
+extra ivars
 ```
 
-### 13.2 Event
-
-Map Event 不直接等于 NPC。
+### 17.2 Event
 
 ```text
-RPG::Event
+RPG::Event != NPC
 ```
 
-可能代表：
+Event 可能代表：
 
 ```text
 NPC
@@ -715,18 +1088,19 @@ Invisible trigger
 Script controller
 ```
 
-因此第一层 structured identity 应是 `MapEvent`。
+Canonical identity 首先是 `MapEvent`。
 
-每个 Event 必须保留：
+每个 Event：
 
 ```text
 id
 name
 x / y
 pages[]
+extra ivars
 ```
 
-每个 page 必须尽可能完整保留：
+Page：
 
 ```text
 conditions
@@ -734,15 +1108,15 @@ graphic
 movement settings
 move route
 animation flags
-priority/through/direction behavior
+priority / through / direction behavior
 trigger
 commands[]
 extra ivars
 ```
 
-### 13.3 EventCommand
+### 17.3 EventCommand
 
-所有 EventCommand 先结构化保存：
+所有 EventCommand 先保存 structural form：
 
 ```json
 {
@@ -752,15 +1126,13 @@ extra ivars
 }
 ```
 
-known command 可再增加 semantic view；unknown command 仍保留 code/parameters。
-
-不得只保留当前关注的 Trainer/Transfer/Text 命令。
+known command 可增加 semantic view；unknown code 仍必须保留。
 
 ---
 
-## 14. Essentials Event semantics
+## 18. Essentials Event semantics 是 Derived 层
 
-RMXP structural decode 完成后，可以识别 Pokémon Essentials v21.1 常见语义：
+RMXP structural decode 后，再识别 v21.1 known semantics：
 
 ```text
 trainer battle
@@ -773,63 +1145,111 @@ common event
 known Essentials helper calls
 ```
 
-对 Ruby Script event：
+Ruby Script event：
 
 ```text
-known, safely parseable call pattern
+known, safely parseable form
     → semantic extraction + raw script
 
 unknown/arbitrary Ruby
-    → raw script only + diagnostic
+    → raw script + opaque semantic diagnostic
 ```
 
-**不实现 Ruby interpreter，不执行项目脚本。**
+禁止实现“为了完整而执行脚本”。
 
-执行 arbitrary Ruby 会把 fixture importer 变成不可信代码执行环境，也无法形成稳定、可移植的解析 contract。
+不实现通用 Ruby interpreter。
+
+指标：
+
+```text
+semantic known
+semantic opaque
+semantic unclassified
+```
+
+可以非零，但必须可计量。
 
 ---
 
-## 15. Compiled `.dat` 与 Oracle 验证
+## 19. Compiler-derived data 不能遗漏
 
-如果 distribution 已包含由 PBS compiler 生成的 `Data/*.dat`，可以把它们作为：
+v21.1 的完整 static-data pipeline 不止 `PBS + 原始 MapXXX.rxdata`。
+
+官方 compile 主流程还包含类似：
 
 ```text
-additional structural corpus
-+
-semantic oracle candidate
+compile PBS
+compile animations
+compile trainer events
+collect script/event translatable text
+save/load message data
 ```
 
-但第一版 authority 仍应清楚区分：
+因此 v1 full-data importer 的 scope 必须包含对应的静态结果/语义：
+
+### 19.1 Trainer-event compiler effects
+
+需要区分：
+
+```text
+raw RMXP Event
+    ↓
+v21.1 compiler-normalized Event
+    ↓
+derived trainer/event semantics
+```
+
+不能把 compiler 会修改/规范化的 Event 直接当成原始对象语义。
+
+### 19.2 Messages / localization
+
+应识别并保留：
+
+```text
+PBS translatable fields
+script/event translatable text
+compiled message data where present
+```
+
+第一版可以不构建完整国际化 runtime，但不能把 message extraction 路径排除在 completeness accounting 之外。
+
+### 19.3 Animation-related data
+
+官方 compile pass 中涉及的 animation static data 必须进入 Registry 和 Source Manifest classification。
+
+如果 importer 暂时只做 structural preservation，必须在 coverage 中明确标记，而不是从“完整数据”口径里消失。
+
+---
+
+## 20. Compiled `.dat`：corpus + oracle candidate
+
+如果 distribution 包含由 Essentials compiler 生成的 `Data/*.dat`：
 
 ```text
 raw PBS source
 compiled GameData representation
-our resolved canonical model
+our CanonicalDataset
 ```
 
-不要混成一个不可追溯的数据来源。
+必须作为三个不同层次处理。
 
-开发验证中可设计：
+Compiled `.dat` 可以用于：
 
 ```text
-PBS
- ├→ our compiler-compatible parser → Canonical JSON
- └→ original Essentials v21.1      → Oracle export
-                                      ↓
-                                    diff
+Marshal structural coverage
+semantic cross-check
+Oracle candidate
 ```
 
-Original Essentials Oracle 是开发/验证工具，不应成为正式 importer 的 runtime dependency。
+但不得因为 `.dat` 已存在就跳过 PBS compiler-compatible parser，也不得因为 PBS 可解析就忽略 compiled data。
 
 ---
 
-## 16. FSDB mapping
+## 21. FSDB Mapping 原则
 
-最终 mapping 由 semantic model 决定，不为了覆盖 FSDB 类型而强拆。
+FSDB 表型由业务 identity 决定，不为了“覆盖四种类型”而强拆。
 
-### 16.1 Struct
-
-适合：
+### 21.1 Struct
 
 ```text
 one Key = one entity
@@ -838,53 +1258,49 @@ one Key = one entity
 候选：
 
 ```text
-[struct]Type
-[struct]Ability
-[struct]Move
-[struct]Item
-[struct]Pokemon
-[struct]TrainerType
-[struct]Trainer
-[struct]Map
-[struct]Tileset
-[struct]CommonEvent
-...
+Type
+Ability
+Move
+Item
+Pokemon
+TrainerType
+Trainer
+Map
+Tileset
+CommonEvent
+Hardcoded GameData domains
 ```
 
-### 16.2 Extend
+### 21.2 Extend
 
-仅在确实表达“依附于基础 Struct 的扩展实体”时使用。
-
-候选：
+只用于真正依附于基础 Struct 的扩展：
 
 ```text
-[extend]PokemonForm
-[extend]MapMetadata
+PokemonForm
+MapMetadata
 ```
 
-具体 identity 需要在实现真实 corpus 后冻结。
+具体 identity 必须通过真实 corpus/consumer 冻结。
 
-### 16.3 Group
-
-适合：
+### 21.3 Group
 
 ```text
-one Key = ordered collection of records
+one Key = ordered records
 ```
 
 候选：
 
 ```text
-[group]Encounter
-[group]MapEvent
-[group]MapConnection
+Encounter
+MapEvent
+MapConnection
 ```
 
-EventCommand 是嵌入 `MapEvent` 还是单独 Group，不在本草案提前冻结；应根据实际访问模式和数据规模决定。
+EventCommand 是嵌入 MapEvent 还是独立 Group，不提前冻结；按真实访问模式和数据规模决定。
 
-### 16.4 Resource
+### 21.4 Resource
 
-始终保存 raw authority：
+Raw authority 始终保留：
 
 ```text
 Graphics
@@ -897,161 +1313,311 @@ Plugins (if present)
 
 ---
 
-## 17. Canonical Import Plan
+## 22. Streaming-safe immutable FSDB Plan
 
-所有写盘之前构造完整计划。
+所有输出 identity 必须在写盘前确定，但不要求整个 corpus 的实际 bytes/JSON 一次性驻留内存。
 
-概念上：
+概念模型：
 
 ```ts
+interface PlannedObject {
+  readonly identity: FsdbIdentity;
+  readonly size?: bigint;
+  readonly digest?: string;
+  readonly references: readonly FsdbReference[];
+  readonly metadata: PlannedMetadata;
+  open(): AsyncIterable<Uint8Array>;
+}
+
 interface ImportPlan {
-  readonly resources: readonly PlannedResource[];
-  readonly structs: readonly PlannedStructTable[];
-  readonly extends: readonly PlannedExtendTable[];
-  readonly groups: readonly PlannedGroupTable[];
+  readonly objects: readonly PlannedObject[];
   readonly diagnostics: readonly Diagnostic[];
   readonly coverage: CoverageReport;
 }
 ```
 
-Plan 阶段完成：
+Plan 冻结：
 
 ```text
-identity collision check
-FSDB NameSegment validation
-ResourceKey collision check
-reference validation where possible
-schema generation
-output path calculation
-NFC writer spelling
-size/count limits
-coverage accounting
+identity
+output path
+metadata
+schema
+references
+size/hash where available
+content producer/spool reference
 ```
 
-Plan PASS 后才允许 materialize。
-
-这样可以避免：
+Plan 阶段必须完成：
 
 ```text
-写了一半 Struct
-→ 后面发现 Map collision
-→ staging 中留下难以推理的部分结果
+FSDB NameSegment validation
+TableIdentity uniqueness
+ResourceKey collision
+normalization collision
+reference validation where known
+schema consistency
+output path collision
+coverage hard-invariant validation
+```
+
+这样既保持：
+
+```text
+validate before materialize
+```
+
+又允许：
+
+```text
+large Resource → stream
+large Map/table → stream/spool
+JSONL → incremental encode
 ```
 
 ---
 
-## 18. Output transaction
+## 23. FSDB Integrity 是 mandatory gate
 
-沿用并模块化当前可靠的 staging 思路：
+旧的“optional integrity validation”不再适用于 full-data importer。
+
+成功输出必须满足：
+
+```text
+Plan validation PASS
++
+FSDB Well-formed PASS
++
+generated schema validation PASS
++
+known reference integrity PASS
+```
+
+对于无法理解的 opaque semantic 数据：
+
+```text
+不要伪造 reference
+```
+
+因此未知 Ruby 语义不会成为降低已知 FSDB integrity 的理由。
+
+Production `openFsdb()` 仍是最低 production adapter gate，但不等于完整 Integrity validation。
+
+---
+
+## 24. Output Transaction
+
+流程：
 
 ```text
 acquire
+→ source identity
 → manifest
-→ parse/decode
-→ build complete plan
-→ validate plan
-→ reserve unique output
+→ classify
+→ raw/semantic decode
+→ canonical dataset
+→ derived semantic dataset
+→ build immutable plan
+→ validate plan + coverage + integrity
+→ reserve output
 → create staging
 → materialize
 → production openFsdb(staging)
-→ optional integrity validation
+→ integrity validator
 → promote
 → cleanup
 ```
 
-失败时：
+失败：
 
 ```text
 remove importer-owned staging
-delete importer-owned temp/download/extraction
+remove importer-owned temp/download/extraction
 never mutate borrowed source
 never mutate previous successful fixture
 ```
 
-`transaction.mjs` 负责目录 ownership 和 promotion；业务 parser 不处理 cleanup。
+`transaction.mjs` 独占 ownership / reserve / promote / cleanup 逻辑。
+
+业务 parser 不删除目录。
 
 ---
 
-## 19. FSDB authority 复用
+## 25. CoverageReport：从统计升级为 contract
 
-Importer 不应复制一份逐渐漂移的 FSDB naming implementation。
-
-当前可以通过一个小 adapter 复用 production/shared authority：
-
-```text
-lib/fsdb/names.mjs
+```ts
+interface CoverageReport {
+  readonly physical: PhysicalCoverage;
+  readonly registry: RegistryCoverage;
+  readonly pbs: PbsCoverage;
+  readonly marshal: MarshalCoverage;
+  readonly rmxp: RmxpCoverage;
+  readonly semantic: SemanticCoverage;
+  readonly integrity: IntegrityCoverage;
+}
 ```
 
-如果后续出现第二个真实 consumer，应该把 FSDB naming/validation capability 抽成稳定共享包；不要让 fixture importer 长期 import `@loomrealm/fsdb-http/dist/...` 私有内部路径。
+### 25.1 Hard invariants
 
-这个抽包是 implementation follow-up，不要求为了本草案先制造新的协议或 Profile。
+以下必须为 0：
+
+```text
+physical.unclassifiedRecognisedObjects
+registry.unhandledRequiredFamilies
+pbs.unclassifiedVanillaFiles
+pbs.discardedProperties
+marshal.unsupportedEncounteredTags
+marshal.invalidReferences
+marshal.discardedNodes
+rmxp.discardedIvars
+rmxp.discardedEventCommands
+integrity.identityCollisions
+integrity.knownBrokenReferences
+```
+
+### 25.2 允许非零但必须报告
+
+```text
+rmxp.genericUnknownClasses
+semantic.opaqueRubyScripts
+semantic.unclassifiedEventMeaning
+semantic.knownPluginUnsupported
+```
+
+原则：
+
+> 允许不知道某段业务代码是什么意思；不允许不知道自己漏了什么，也不允许静默丢掉。
 
 ---
 
-## 20. Diagnostics 与 coverage
+## 26. Oracle Qualification：RC 必须执行
 
-成功报告不能只打印“多少文件/多少 bytes”。
+Oracle 不再只是 optional nice-to-have。
 
-建议至少输出：
+CI 与 full-corpus qualification 分开。
+
+### 26.1 Normal CI
+
+仓库内 synthetic fixture：
+
+```text
+mandatory
+redistributable
+small
+stable
+```
+
+### 26.2 Full-data RC qualification
+
+RC qualification 使用本地官方 v21.1 corpus：
+
+```text
+official v21.1 source
+ ├→ our importer → CanonicalDataset
+ └→ original v21.1 behavior → Oracle export
+                              ↓
+                            diff
+```
+
+比较对象是 canonical semantic result，不要求 FSDB physical layout 与原版一致。
+
+Oracle diff 分类：
+
+```text
+expected/intentional representation difference
+known opaque semantic
+known upstream oddity
+unclassified difference
+```
+
+RC gate：
+
+```text
+unclassified oracle diff = 0
+```
+
+Allowlist 必须显式、可审计、具体到 domain/path/reason。
+
+Oracle runner 是开发/qualification 工具，不是正式 importer runtime dependency。
+
+---
+
+## 27. Diagnostics / Report
+
+成功报告至少包含：
 
 ```text
 Source
   acquisition mode
   files / bytes
+  registry version
 
-Raw resources
-  copied files
+Raw
+  preserved files
   byte verification
+  explicitly excluded objects
 
 PBS
-  files discovered
-  sections parsed
-  records resolved
+  expected families
+  discovered files
+  sections/records
+  compatibility rewrites
   unsupported properties
   reference failures
 
+Hardcoded GameData
+  domains expected / materialized
+
 Marshal
   files decoded
-  nodes decoded
-  unknown tags
-  unknown classes
-  preserved extra ivars
+  nodes
+  encountered tags
+  unsupported tags
+  generic objects
 
 RMXP
-  maps
-  events
-  event pages
-  event commands
-  unknown command codes
+  classes encountered
+  typed classes
+  generic classes
+  maps/events/pages/commands
+  extra ivars preserved
+
+Compiler-derived
+  trainer-event transformations
+  messages
+  animation data status
 
 Semantic
-  known Essentials script commands
-  opaque Ruby scripts
-  unresolved references
+  known event semantics
+  opaque Ruby
+  unclassified meaning
 
 FSDB
-  struct tables / records
-  extend tables / records
-  group tables / records
-  resource tables / files
-  validation result
+  tables / records / resources
+  well-formed validation
+  integrity validation
+
+Oracle
+  compared domains
+  allowlisted diffs
+  unclassified diffs
 ```
 
-关键指标：
+报告应明确最终：
 
 ```text
-discarded recognised data = 0
+Physical completeness
+Structural completeness
+Semantic coverage
+Integrity status
+Oracle qualification status
 ```
-
-Semantic coverage 可以低于 100%，但必须显式报告。
 
 ---
 
-## 21. Failure categories
+## 28. Failure categories
 
-继续使用稳定 category，而不是让底层异常直接成为 CLI contract。
-
-建议分域：
+CLI 输出稳定 category，不暴露底层异常作为 contract。
 
 ```text
 INVALID_ARGUMENT
@@ -1066,10 +1632,16 @@ SOURCE_NOT_ESSENTIALS_V21_1
 SOURCE_INDIRECTION
 SOURCE_CHANGED
 INVALID_UTF8_NAME
+SOURCE_CLASSIFICATION_FAILURE
+
+REGISTRY_COVERAGE_FAILURE
 
 PBS_SYNTAX_FAILURE
 PBS_SCHEMA_FAILURE
 PBS_REFERENCE_FAILURE
+PBS_COMPATIBILITY_FAILURE
+
+HARDCODED_DATA_FAILURE
 
 MARSHAL_INVALID
 MARSHAL_UNSUPPORTED
@@ -1079,70 +1651,85 @@ ESSENTIALS_SEMANTIC_FAILURE
 FSDB_NAME_FAILURE
 FSDB_IDENTITY_COLLISION
 FSDB_PLAN_FAILURE
+FSDB_INTEGRITY_FAILURE
 COPY_FAILURE
 FSDB_VALIDATION_FAILURE
+
+ORACLE_MISMATCH
 ```
 
-`unknown semantic object` 一般应是 diagnostic，而不是 failure；只有无法保证结构无损或输出 identity 时才 fail closed。
+Unknown semantic object 通常是 diagnostic，不是 failure。
+
+只有无法保证结构无损、identity、已知 integrity 或 RC Oracle gate 时才 fail closed。
 
 ---
 
-## 22. 测试策略
+## 29. Test Strategy
 
-不要只有 `import.test.mjs` 一个集成测试。
-
-### 22.1 Unit tests
+### 29.1 Unit tests
 
 ```text
 CLI parsing
 redirect bounds
-landing page resolver
-ZIP traversal / duplicate target / symlink
+landing resolver
+ZIP traversal / duplicate / symlink
 UTF-8 filename handling
+SourceManifest classification
+VanillaRegistry completeness
 PBS comments/BOM/section/repeated fields
 Essentials CSV edge cases
-schema cast
-Marshal integer/string/symbol/ref/object graph
+precompile compatibility rewrite
+schema cast/default/normalize/finalize
+hardcoded GameData references
+Marshal tag matrix
+Marshal shared refs/cycles
 RGSS Table
-RPG::EventCommand
-FSDB plan collision
+RPG classes + extra ivars
+EventCommand
+semantic classifier
+FSDB plan collision/integrity
 transaction cleanup
 ```
 
-### 22.2 Synthetic integration fixture
+### 29.2 Synthetic integration corpus
 
-仓库内只提交自造、可再分发的小 corpus：
+仓库只提交自造、可再分发的 fixture：
 
 ```text
 PBS sample
 small synthetic Marshal/RMXP blobs
-fake Graphics/Audio files
+fake Graphics/Audio
 Map with multiple Event pages
 known + unknown EventCommand
-normalization collision cases
+unknown Ruby class
+extra ivars
+normalization collision
+reference failure
 ```
 
-### 22.3 Local full-corpus validation
+### 29.3 Local full corpus
 
-完整 Pokémon Essentials v21.1 distribution 只在本地使用：
+完整 Pokémon Essentials v21.1 distribution 本地验证：
 
 ```text
 full import
-→ coverage report
+→ hard coverage invariants
 → openFsdb PASS
+→ integrity PASS
 → HTTP fixture smoke test
-→ optional original-Essentials oracle diff
+→ original v21.1 Oracle diff
+→ unclassified diff = 0
 ```
 
-第三方素材本身不得进入仓库或 npm artifact。
+第三方素材不得进入 repo/npm artifact。
 
 ---
 
-## 23. 实现顺序
+## 30. 实现顺序
 
 不要一次重写所有能力。
 
-### Stage 1 — 拆旧 importer，不改变行为
+### Stage 1 — 拆旧 importer，行为等价
 
 ```text
 cli
@@ -1155,28 +1742,48 @@ writer
 report
 ```
 
-先把当前功能迁出 `import.mjs`，保证 existing tests 等价 PASS。
+先把现有逻辑迁出 `import.mjs`，existing tests 等价 PASS。
 
-### Stage 2 — Source Manifest + Raw coverage
+### Stage 2 — SourceManifest + acquisition closure
 
 ```text
-完整 inventory
+complete inventory
 hash/fingerprint
-NFC writer fix
+NFC writer
 Plugins detection
-coverage report
+classification
 ```
 
-### Stage 3 — PBS generic parser
+### Stage 3 — VanillaRegistry + completeness accounting
+
+在任何复杂 semantic parser 之前先冻结：
+
+```text
+expected PBS families
+compiled data roots
+hardcoded domains
+compiler passes
+RMXP roots
+```
+
+之后每个 Stage 都能报告：
+
+```text
+expected X
+implemented Y
+remaining Z
+```
+
+### Stage 4 — PBS syntax + compiler pipeline
 
 ```text
 lexer
 CSV
-cast grammar
+cast
 provenance
+precompile compatibility
+normalize/default/resolve/finalize
 ```
-
-### Stage 4 — v21.1 schema/compiler semantics
 
 先 vertical slice：
 
@@ -1188,13 +1795,17 @@ Item
 Species
 ```
 
-然后以 schema registry 扩展到全部 vanilla PBS data。
+再由 Registry 驱动覆盖全部 vanilla PBS family。
 
-### Stage 5 — Ruby Marshal decoder
+### Stage 5 — Hardcoded GameData + reference closure
 
-先做到 neutral graph structural completeness，再进入 RPG class。
+建立硬编码 domain，并让 PBS typed reference 可以闭合到 CanonicalDataset。
 
-### Stage 6 — RMXP Map/Event
+### Stage 6 — Lossless Ruby Marshal
+
+先完成 neutral graph structural completeness 和 tag coverage，再做 RPG typed class。
+
+### Stage 7 — RMXP/RGSS structural decode
 
 ```text
 Table
@@ -1204,48 +1815,77 @@ Event
 Page
 EventCommand
 MoveRoute
+MoveCommand
 CommonEvent
-Tileset/System
+Tileset
+System
+other encountered classes
 ```
 
-### Stage 7 — Essentials map/event semantics
-
-识别 known helper calls、trainer/wild battle、item/warp 等；unknown Ruby 保留 opaque。
-
-### Stage 8 — Oracle / conformance refinement
+### Stage 8 — Compiler-derived / Essentials semantics
 
 ```text
-our output
-vs
-original Essentials v21.1 resolved output
+trainer event compiler effects
+messages/localization
+animation static-data coverage
+known helper/event semantics
 ```
 
-以真实差异驱动最小修正。
+Unknown Ruby 保持 opaque。
+
+### Stage 9 — FSDB integrity + Oracle qualification
+
+```text
+streaming-safe plan
+full integrity validation
+official full corpus
+original v21.1 oracle
+zero unclassified diff
+```
 
 ---
 
-## 24. 完成标准
+## 31. RC 完成标准
 
-v1 full-data importer 可以进入 RC 的最低标准：
+v1 full-data importer 进入 RC 必须满足：
 
 ```text
 CLI 仍只有 --source / --output
-local dir / local ZIP / auto-download acquisition 可用
+local directory / local ZIP / auto-download 可用
 import.mjs 为薄 composition root
 raw corpus byte preservation 可验证
-source manifest 无 recognised omission
-PBS vanilla v21.1 schema coverage 明确并高覆盖
-Marshal decoder 无 recognised tag 丢失
+SourceManifest 无 recognised omission
+VanillaRegistry required family coverage = 100%
+PBS vanilla required family structural coverage = 100%
+Hardcoded GameData required domains materialized
+PBS compatibility/default/normalize/reference behavior经过 Oracle 对齐
+Marshal unsupported encountered tags = 0
+Marshal discarded nodes = 0
+RMXP discarded ivars = 0
+EventCommand discarded = 0
 Map/Event structural decode 完整
-unknown Event/Script 保留 raw
-FSDB plan 在写盘前完成 identity/reference validation
-staging/promote failure cleanup 正确
+unknown Ruby/Event semantics raw-preserved
+FSDB identity validation PASS
+FSDB Well-formed PASS
+FSDB Integrity PASS
 production openFsdb() PASS
-coverage report 明确 unknown / opaque / unresolved 数量
-CI synthetic tests PASS
-full third-party corpus 不进入 repo/npm
+coverage hard invariants PASS
+synthetic CI PASS
+official v21.1 full-corpus qualification PASS
+Oracle unclassified diff = 0
+third-party corpus 不进入 repo/npm
 ```
 
-目标不是宣称“执行层面 100% 复现任意 Essentials 游戏”，而是：
+Semantic 分类不要求任意 Ruby 行为达到 100%，但必须：
 
-> **对 vanilla Pokémon Essentials v21.1 的可观测静态数据尽可能完整结构化；对暂时无法解释的部分保持无损、可追溯、显式报告，而不是丢弃。**
+```text
+known
+opaque
+unclassified
+```
+
+三者可计量且 raw data 可追溯。
+
+最终目标定义为：
+
+> **对 vanilla Pokémon Essentials v21.1 的可观测静态数据尽可能完整结构化；所有 recognised 数据都有明确处理路径；所有未知部分无损保留并显式计量；所有已知结构和引用通过 FSDB integrity 验证；最终结果通过原版 v21.1 Oracle 对比证明没有未分类语义偏差。**
