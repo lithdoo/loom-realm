@@ -1,15 +1,71 @@
-# @loomrealm/fsdb-http 设计草案
+# @loomrealm/fsdb-http v1 实现合同
 
-> 状态：Draft  
-> 最近复核：2026-08-17  
+> 状态：**Frozen for Implementation — v1**  
+> 冻结日期：2026-08-17  
 > 目标：把硬盘上的只读 FSDB 目录转换成稳定、安全、可独立使用的 HTTP 接口  
-> 参考：[FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)
+> FSDB authority：[FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)  
+> Conformance：[CONFORMANCE.md](./CONFORMANCE.md)
 
-本文描述第一版实现方向，不是冻结协议。FSDB logical identity 以 FSDB 规范为 authority；HTTP 层只负责安全、可逆地暴露该 identity，不自行增加另一套 key 语义。
+本文冻结 `@loomrealm/fsdb-http` 第一版的**可观察行为、public API、ownership 与安全不变量**。实现可以自由调整内部模块、类、helper、数据结构和性能策略，只要不改变本文冻结的 observable contract。
 
 ---
 
-## 1. 包定位
+## 0. Frozen Contract
+
+### 0.1 冻结内容
+
+v1 冻结以下内容：
+
+```text
+FSDB logical identity 的继承方式
+HTTP routes / methods / status precedence
+Unicode URL encoding / decoding
+metadata logical namespace
+response MIME / cache / conditional semantics
+Well-formed validation boundary
+single-handle read invariant
+OPEN / STALE / CLOSED source lifetime
+read admission / close drain semantics
+Node.js public API
+handler / service ownership
+framework / Content API boundary
+```
+
+### 0.2 不冻结内容
+
+以下属于 implementation detail：
+
+```text
+src/ 内部目录结构
+class / function / helper 划分
+immutable index 的具体数据结构
+fingerprint 的内部编码与 hash 选择
+read lease 的具体实现方式
+stream.pipeline 等 Node API 选择
+内部 error class
+logging / diagnostics 结构
+性能优化与缓存内部实现
+```
+
+### 0.3 Frozen 后的变更规则
+
+文案澄清、例子、测试 fixture 和内部实现优化可以继续增加，只要不改变合法实现集合。
+
+如果实现或 conformance 暴露真实边界问题：
+
+```text
+implementation
+→ conformance test
+→ boundary issue
+→ classify
+```
+
+- **clarification**：不改变 observable contract，可直接修正文档；
+- **semantic change**：改变 public API / HTTP observable behavior / identity / lifecycle / security invariant，必须显式解除 v1 冻结或进入后续版本，不得静默修改。
+
+---
+
+## 1. 包定位与 Scope
 
 `@loomrealm/fsdb-http` 是独立技术能力包：
 
@@ -25,9 +81,7 @@ Node.js native HTTP handler
 FSDB logical HTTP interface
 ```
 
-它不依赖 LoomRealm Main、Subsystem、Renderer、Frame、Data Connection、Game Package 或 Content API。
-
-第一版目标：
+目标依赖关系：
 
 ```text
 Node.js stdlib
@@ -35,9 +89,45 @@ Node.js stdlib
 @loomrealm/fsdb-http
 ```
 
-尽量保持 **0 runtime dependencies**。Node.js 类型定义、TypeScript 等只属于 build/dev dependency。
+v1 目标为 **0 runtime dependencies**。
 
-核心原则：
+本包负责：
+
+```text
+打开一个 FSDB 根目录
+验证 Well-formed FSDB
+构建 immutable logical index
+按 FSDB logical identity 解析对象
+GET / HEAD 原始内容读取
+Unicode logical name ↔ HTTP path 可逆映射
+Content-Type / Content-Length
+ETag / If-None-Match / Cache-Control
+traversal / symlink escape 防护
+static-source snapshot 与 stale fail-closed
+Node.js stdlib RequestListener
+可选独立 node:http convenience service
+```
+
+本包不负责：
+
+```text
+写入 / 删除 / import
+filesystem watch / hot reload
+完整 Integrity-valid 检查
+automatic reference join
+query / filter / pagination
+ORM / business schema mapping
+key listing
+Range
+auth / rate limiting
+Express / Koa / Fastify / Hono dependency
+LoomRealm installation registry
+Game Package / Content API
+Main / Frame / Renderer authority
+CLI / daemon process management
+```
+
+核心 authority：
 
 ```text
 FSDB spec
@@ -55,91 +145,31 @@ serveFsdb
 
 ---
 
-## 2. Scope
+## 2. 继承的 FSDB Identity
 
-第一版负责：
+HTTP 层直接继承 FSDB 规范，不自行定义另一套 key 语义。
 
-```text
-打开一个 FSDB 根目录
-验证 Well-formed FSDB
-构建 immutable logical index
-按 FSDB logical identity 解析对象
-GET / HEAD 原始内容读取
-Unicode logical name ↔ HTTP path 可逆映射
-Content-Type / Content-Length
-ETag / If-None-Match / Cache-Control
-traversal / symlink escape 防护
-static-source snapshot 与 stale fail-closed
-Node.js stdlib RequestListener
-可选的独立 node:http convenience service
-```
-
-第一版不负责：
-
-```text
-写入 / 删除 / import
-filesystem watch / hot reload
-完整 Integrity-valid 检查
-自动 reference join
-query / filter / pagination
-ORM / business schema mapping
-key listing
-Range
-Express / Koa / Fastify / Hono framework dependency
-LoomRealm installation registry
-Game Package
-Content API authorization
-Bearer token
-Main / Frame / Renderer authority
-rate limiting policy
-跨进程 bootstrap
-CLI / daemon process management
-```
-
----
-
-## 3. 继承的 FSDB Identity
-
-HTTP 层直接继承 FSDB 规范。
-
-### 3.1 Table kind 与 TableIdentity
+### 2.1 TableIdentity
 
 ```text
 TableKind = struct | extend | group | resource
-```
-
-物理目录：
-
-```text
-[FSDB]<DatabaseName>/
-├── [struct]<TableName>/
-├── [extend]<TableName>/
-├── [group]<TableName>/
-└── [resource]<TableName>/
-```
-
-本包索引与 HTTP 层使用：
-
-```text
 TableIdentity = (TableKind, TableName)
 ```
 
-因此以下表可以共存：
+因此：
 
 ```text
 [struct]角色
 [resource]角色
 ```
 
-因为它们的 `TableKind` 不同。
+可以共存；同一 `(TableKind, TableName)` 不得重复。
 
-同一 `(TableKind, TableName)` 不得出现两个 logical table。
+### 2.2 Unicode NameSegment
 
-### 3.2 Unicode NameSegment
+`DatabaseName`、`TableName`、普通 `Key` 与 ResourceKey segment 均继承 FSDB `NameSegment`。
 
-FSDB 的 `DatabaseName`、`TableName`、普通 `Key` 与 ResourceKey segment 都基于同一个 `NameSegment`。
-
-FSDB logical canonical form 是 NFC；scanner 从 filesystem 获得 physical name 后：
+scanner：
 
 ```text
 physical Unicode name
@@ -148,24 +178,11 @@ physical Unicode name
 → logical identity
 ```
 
-若两个 physical name canonicalize 为同一个 NFC logical name，`openFsdb()` 必须因 logical identity collision 失败。
+如果两个 physical names canonicalize 为同一个 NFC logical identity，`openFsdb()` MUST 失败。
 
-除此之外，本包不得自行 ASCII 化、lowercase、trim、collapse whitespace 或改变合法 NFC logical name。
+本包不得自行 ASCII 化、lowercase、trim、collapse whitespace 或改变合法 NFC logical name。
 
-必须继承的关键约束包括：
-
-```text
-valid Unicode / UTF-8
-NFC logical canonical form
-1..200 UTF-8 bytes after NFC
-not starting with "." or "$"
-no leading/trailing Unicode whitespace
-no trailing "."
-no path separators / NUL / control chars / non-portable filename chars
-reserved device basename rejection
-```
-
-中文等人类可读名称是正常 identity：
+中文等可读 Unicode 是正常 identity：
 
 ```text
 [struct]角色/皮卡丘.json
@@ -173,9 +190,9 @@ reserved device basename rejection
 → key   = 皮卡丘
 ```
 
-### 3.3 保留命名空间
+### 2.3 保留命名空间
 
-FSDB 已规定普通 logical name 不得以 `$` 开头，因此 HTTP 可以安全使用：
+FSDB 已保留 `$` logical prefix 与 `.` physical prefix，因此 HTTP 使用：
 
 ```text
 $info
@@ -183,11 +200,9 @@ $extend
 $desc
 ```
 
-作为 metadata logical entry。
+不会侵占合法业务 key。
 
-`.` 前缀属于 FSDB physical metadata / auxiliary namespace，HTTP 不直接暴露物理 dot-file 名称。
-
-### 3.4 ResourceKey
+### 2.4 ResourceKey
 
 ```text
 ResourceKey = NameSegment ("/" NameSegment)*
@@ -196,32 +211,24 @@ ResourceKey = NameSegment ("/" NameSegment)*
 例如：
 
 ```text
-[resource]图片/皮卡丘.png
-→ 皮卡丘
-
 [resource]图片/关都地区/真新镇.png
-→ 关都地区/真新镇
-
-[resource]图片/UI/道具.large.webp
-→ UI/道具.large
+→ key = 关都地区/真新镇
 ```
 
-最后扩展名不属于 Resource identity。
-
-因此同一 Resource 表中：
+Resource 最后扩展名不属于 identity。同一 Resource 表中：
 
 ```text
 皮卡丘.png
 皮卡丘.webp
 ```
 
-产生相同 key `皮卡丘`，属于 duplicate logical key，`openFsdb()` 必须拒绝。
+产生相同 key，属于 duplicate logical key，`openFsdb()` MUST 拒绝。
 
 ---
 
-## 4. 核心安全与读取不变量
+## 3. 核心安全与读取不变量
 
-### 4.1 HTTP identity 不得直接变成 filesystem path
+### 3.1 URL identity 不得直接变成 filesystem path
 
 禁止：
 
@@ -231,7 +238,7 @@ request URL
 → read file
 ```
 
-目标模型：
+必须：
 
 ```text
 openFsdb(root)
@@ -244,18 +251,18 @@ request logical identity
 → safe file-handle read
 ```
 
-Index 中的 physical location 永不返回客户端。
+Index 中 physical location 不得返回客户端。
 
-第一版默认：
+v1：
 
 ```text
 不 follow symlink
 resolved object 不得逃逸 FSDB root
-不暴露任意未索引文件
-不暴露 absolute path / raw filesystem path
+不暴露 index 外对象
+不暴露 absolute/raw filesystem path
 ```
 
-FSDB object 分类遵循：
+对象分类：
 
 ```text
 unrecognized auxiliary object
@@ -265,11 +272,9 @@ recognized FSDB candidate but malformed
     → openFsdb() fails
 ```
 
-Resource 中 dot-prefixed 子目录/文件不进入普通 Resource namespace。
+### 3.2 Single-handle read invariant
 
-### 4.2 Single-handle read invariant
-
-文件型响应必须避免：
+文件型响应禁止：
 
 ```text
 stat(path)
@@ -278,9 +283,7 @@ stat(path)
 → stream
 ```
 
-因为这会在 validation 与 reopen 之间留下 path-level TOCTOU 窗口。
-
-第一版要求一次文件读取使用同一个已打开 file handle：
+必须使用同一个已打开 file handle：
 
 ```text
 index lookup
@@ -294,185 +297,49 @@ index lookup
 
 核心不变量：
 
-> **validation handle = streaming handle。**
+> **validation handle = streaming handle**
 
-如果 safe-open 或同一 handle 上的 `fstat` 发现文件已经不是当前 snapshot 接受的对象，则进入 `stale`，不得重新按 path 猜测或修复。
+safe-open 或 same-handle `fstat` 发现对象已不符合当前 snapshot 时，database MUST 进入 `stale`；不得按 pathname 自动 reindex、retry 或修复。
 
-该规则降低 pathname replacement / symlink replacement 的 TOCTOU 风险，但不把本包伪装成 filesystem transaction system。正确性仍建立在第 14 节 static-source contract 上：宿主在 database open 期间不得并发修改 source。
-
----
-
-## 5. 候选内部结构
-
-```text
-src/
-├── fsdb/
-│   ├── open.ts
-│   ├── scan.ts
-│   ├── validate.ts
-│   ├── index.ts
-│   ├── fingerprint.ts
-│   ├── read-handle.ts
-│   └── types.ts
-│
-├── http/
-│   ├── handler.ts
-│   ├── route.ts
-│   ├── url-segment.ts
-│   ├── conditional.ts
-│   ├── response.ts
-│   └── mime.ts
-│
-├── server/
-│   └── serve.ts
-│
-└── index.ts
-```
-
-职责：
-
-```text
-fsdb/
-    filesystem snapshot / validation / index / safe read lease
-
-http/
-    FSDB HTTP semantics + Node RequestListener
-
-server/
-    node:http createServer/listen/close convenience
-```
-
-第一阶段保持一个 package。只有出现第二个真实消费者时，再考虑抽出 `@loomrealm/fsdb`。
+static-source contract 仍是 correctness assumption；same-handle read 与 drift detection 是 fail-closed 防线，不承诺提供 filesystem transaction 或抵抗拥有并发写权限的恶意本地 writer。
 
 ---
 
-## 6. Node.js 落地形式与 Public API
+## 4. Frozen Node.js Public API
 
-第一版不以 Express、Koa 等 Web Framework plugin 为核心，也不把独立 daemon/process 当成协议实现本体。
-
-主落地形式：
-
-```text
-FsdbDatabase
-    ↓
-Node.js stdlib http.RequestListener
-    ↓
-node:http Server
-```
-
-原则：
-
-> **Node 原生 HTTP Handler 是核心能力；独立 HTTP Service 是 convenience composition；Framework middleware 只是未来可选 adapter。**
-
-### 6.1 `openFsdb()`：storage snapshot
+v1 package engine：Node.js `>=20`。
 
 ```ts
-const db = await openFsdb({
-  root: "/path/to/[FSDB]游戏数据",
-});
-```
+import type { RequestListener, Server } from "node:http";
 
-概念接口：
+export interface OpenFsdbOptions {
+  readonly root: string;
+}
 
-```ts
-interface FsdbDatabase {
+export type FsdbDatabaseState = "open" | "stale" | "closed";
+
+export interface FsdbDatabase {
   readonly name: string;
-  readonly state: "open" | "stale" | "closed";
+  readonly state: FsdbDatabaseState;
   close(): Promise<void>;
 }
-```
 
-`openFsdb()` 负责：
+export function openFsdb(
+  options: OpenFsdbOptions,
+): Promise<FsdbDatabase>;
 
-```text
-scan
-Well-formed validation
-logical index
-source fingerprints
-snapshotId
-read admission / active read leases
-snapshot lifetime
-```
-
-它本身不启动端口，也不拥有 HTTP server。
-
-#### close 语义
-
-`close()` 必须幂等。
-
-调用 `close()` 后：
-
-```text
-立即停止接纳新的 read lease
-public state 视为 closed
-已成功接纳的 in-flight read lease 允许完成
-close() Promise 等待这些 lease drain 后 resolve
-```
-
-不增加公开的 `closing` 状态。`closed` 表示“不再接纳新操作”；已 admitted 的内部 lease 可以在 close Promise resolve 前完成资源释放。
-
-### 6.2 `createFsdbHttpHandler()`：核心 HTTP 落地形式
-
-```ts
-import { createServer } from "node:http";
-
-const db = await openFsdb({ root });
-const handler = createFsdbHttpHandler(db);
-const server = createServer(handler);
-```
-
-第一版 public type：
-
-```ts
-import type { RequestListener } from "node:http";
-
-function createFsdbHttpHandler(
+export function createFsdbHttpHandler(
   db: FsdbDatabase,
 ): RequestListener;
-```
 
-核心 handler：
+export interface ServeFsdbOptions extends OpenFsdbOptions {
+  readonly host?: string;
+  readonly port?: number;
+}
 
-```text
-使用 IncomingMessage / ServerResponse
-直接处理 node:http 暴露的原始 URL spelling
-拥有本文定义的 route / encoding / status / cache 语义
-不依赖 Express / Koa / Fastify / Hono
-不启动端口
-不注册 signal handler
-不决定进程生命周期
-```
-
-`createFsdbHttpHandler(db)` **借用**调用方提供的 `FsdbDatabase`：
-
-```text
-handler creation does not own db
-handler/server close does not implicitly close db
-caller owns db.close()
-```
-
-第一版 handler 直接拥有 `/fsdb/v1` namespace。它不是 middleware，不提供 `next()`，也不支持 configurable mount path。
-
-### 6.3 `serveFsdb()`：独立 HTTP Service convenience
-
-```ts
-const service = await serveFsdb({
-  root: "/path/to/[FSDB]游戏数据",
-  host: "127.0.0.1",
-  port: 0,
-});
-
-console.log(service.origin?.href);
-
-await service.close();
-```
-
-概念返回值：
-
-```ts
-interface FsdbHttpService {
+export interface FsdbHttpService {
   readonly db: FsdbDatabase;
-  readonly server: import("node:http").Server;
+  readonly server: Server;
   readonly address: {
     readonly host: string;
     readonly port: number;
@@ -480,129 +347,13 @@ interface FsdbHttpService {
   readonly origin?: URL;
   close(): Promise<void>;
 }
+
+export function serveFsdb(
+  options: ServeFsdbOptions,
+): Promise<FsdbHttpService>;
 ```
 
-`serveFsdb()`：
-
-```text
-openFsdb(root)
-    ↓
-createFsdbHttpHandler(db)
-    ↓
-http.createServer(handler)
-    ↓
-listen(host, port)
-```
-
-ownership：
-
-```text
-serveFsdb()
-    owns the FsdbDatabase it creates
-    owns the http.Server it creates
-
-service.close()
-    block new database reads
-    stop accepting new HTTP connections
-    allow admitted in-flight responses to drain
-    close owned server
-    close owned database
-```
-
-`service.close()` 必须幂等，并在 owned server/database 都完成关闭后 resolve。
-
-默认：
-
-```text
-host = 127.0.0.1
-port = 0 allowed
-```
-
-`origin` 只在 bind host 可以表达为一个具体客户端 origin 时提供。对于 `0.0.0.0`、`::` 等 wildcard bind，`address` 仍然有效，但不把 wildcard address 假装成唯一 externally reachable origin。
-
-#### `server` escape hatch
-
-暴露 `service.server` 是为了 Node 用户可以做必要的 timeout、`unref()`、address inspection 等低层配置。
-
-但 ownership 不因此转移：
-
-```text
-service.close() remains the lifecycle owner
-caller SHOULD NOT use server.close() as a replacement for service.close()
-```
-
-即使调用方提前直接关闭了 `server`，后续 `service.close()` 仍必须安全、幂等地关闭 owned database。
-
-### 6.4 Framework adapter boundary
-
-第一版不直接提供：
-
-```text
-Express Router
-Koa Middleware
-Fastify Plugin
-Hono Middleware
-```
-
-原因：
-
-```text
-避免 runtime framework dependency
-避免把 HTTP semantics 绑定到某个 router lifecycle
-避免 framework 提前 decode / normalize path
-```
-
-未来 adapter MUST 保留本文 route、raw path、percent-decoding、status、cache、single-handle read 与 source-lifetime semantics。
-
-如果 framework 无法取得足够原始的 request-target/URL spelling 来执行第 7.4 节规则，则该 adapter 不应宣称完全等价。
-
-是否单独发布：
-
-```text
-@loomrealm/fsdb-http-express
-@loomrealm/fsdb-http-koa
-```
-
-必须等真实独立消费者出现后再决定。
-
-### 6.5 CLI / daemon boundary
-
-未来 CLI 只应是：
-
-```text
-config parsing
-process lifecycle
-logging
-signal handling
-        ↓
-serveFsdb()
-```
-
-守护、自动重启、systemd/service integration 不进入核心 HTTP contract。
-
-### 6.6 第一版不以 Fetch `Request → Response` 为主 API
-
-第一版问题域明确是：
-
-```text
-Node.js filesystem
-+
-Node.js local HTTP serving
-```
-
-并且需要控制：
-
-```text
-raw URL spelling
-file-handle streaming
-socket abort
-fstat/fingerprint
-node:http lifecycle
-```
-
-因此第一版以 `node:http` 为最小且直接的 implementation binding。未来出现真实的非 Node consumer 后，再考虑抽出 `@loomrealm/fsdb` 和 Fetch-compatible adapter。
-
-### 6.7 第一版主要 exports
+v1 primary exports：
 
 ```ts
 export {
@@ -612,51 +363,95 @@ export {
 };
 ```
 
-职责：
+### 4.1 `openFsdb()` ownership
+
+`openFsdb()` 建立 storage snapshot，不启动端口，也不拥有 HTTP server。
+
+`FsdbDatabase.close()` MUST 幂等：
 
 ```text
-openFsdb
-    storage snapshot semantics
-
-createFsdbHttpHandler
-    FSDB HTTP semantics
-
-serveFsdb
-    Node server convenience composition
+stop admitting new read leases
+→ public state becomes closed
+→ admitted leases may finish
+→ wait leases drain
+→ release remaining resources
+→ resolve Promise
 ```
 
-最终 TypeScript signature 在首个实现前仍可微调，但上述职责与 ownership boundary 应保持稳定。
+不增加公开 `closing` state。
+
+### 4.2 `createFsdbHttpHandler()` ownership
+
+`createFsdbHttpHandler(db)` **借用** caller-provided database：
+
+```text
+handler does not own db
+server close does not implicitly close db
+caller owns db.close()
+```
+
+handler 直接拥有 `/fsdb/v1` namespace；v1 不是 middleware，不提供 `next()`，不支持 configurable mount path。
+
+### 4.3 `serveFsdb()` ownership
+
+默认：
+
+```text
+host = 127.0.0.1
+port = 0 allowed
+```
+
+`serveFsdb()` owns 它创建的 database 与 `http.Server`。
+
+`service.close()` MUST 幂等：
+
+```text
+block new database reads
+→ stop accepting new HTTP connections
+→ allow admitted responses to drain
+→ close owned server
+→ close owned database
+→ resolve
+```
+
+`origin` 仅在 bind host 能表示具体 client origin 时提供。`0.0.0.0`、`::` 等 wildcard bind 只保证 `address`，不得伪造唯一 externally reachable origin。
+
+`service.server` 是 Node escape hatch，可用于 timeout、`unref()`、address inspection 等，但不转移 lifecycle ownership。caller SHOULD NOT 用 `server.close()` 替代 `service.close()`；即使提前关闭 server，后续 `service.close()` 仍必须安全关闭 owned database。
 
 ---
 
-## 7. HTTP Surface
+## 5. HTTP Surface
 
-第一版只有两个 route pattern：
+v1 只有两个 route patterns：
 
 ```text
 GET|HEAD /fsdb/v1
 GET|HEAD /fsdb/v1/{kind}/{table}/{entry...}
 ```
 
-其中：
+`kind`：
 
 ```text
-kind = struct | extend | group | resource
+struct | extend | group | resource
 ```
 
-`entry...`：
+普通 entry：
 
-- `struct` / `extend` / `group` 普通 key 只占一个 logical segment；
-- `resource` 普通 key 可占多个 logical segment；
-- `$info` / `$extend` / `$desc` 是 metadata entry。
+```text
+struct / extend / group
+    → one logical key segment
 
-### 7.1 Database Descriptor
+resource
+    → one or more ResourceKey segments
+```
+
+### 5.1 Database Descriptor
 
 ```text
 GET|HEAD /fsdb/v1
 ```
 
-概念响应：
+响应结构：
 
 ```json
 {
@@ -669,52 +464,35 @@ GET|HEAD /fsdb/v1
 }
 ```
 
-只列数据库 identity 与 table，不列 keys，不暴露 physical path。
+只列 database identity 与 tables，不列 keys，不暴露 physical path。
 
-`tables` 必须稳定排序：
+`tables` MUST 稳定排序：
 
 ```text
 kind lexical order
 then TableName Unicode code point order
 ```
 
-这样 descriptor bytes、测试与 ETag 不依赖 filesystem `readdir()` 顺序。
+`/fsdb/v1` 的 `v1` 是 HTTP API version，不是 FSDB format version。
 
-`/fsdb/v1` 中 `v1` 是 HTTP API version，不是 FSDB format version。
-
-### 7.2 Data Entry
+### 5.2 Data Entry
 
 ```text
-GET|HEAD /fsdb/v1/struct/{table}/{key}
-GET|HEAD /fsdb/v1/extend/{table}/{key}
-GET|HEAD /fsdb/v1/group/{table}/{key}
-GET|HEAD /fsdb/v1/resource/{table}/{resourceKey...}
+/fsdb/v1/struct/{table}/{key}
+/fsdb/v1/extend/{table}/{key}
+/fsdb/v1/group/{table}/{key}
+/fsdb/v1/resource/{table}/{resourceKey...}
 ```
 
-示例 logical URL：
+HTTP Resource URL 不携 physical extension。
 
-```text
-[struct]角色/皮卡丘.json
-→ /fsdb/v1/struct/角色/皮卡丘
-
-[group]地图事件/常磐森林.jsonl
-→ /fsdb/v1/group/地图事件/常磐森林
-
-[resource]图片/关都地区/真新镇.png
-→ /fsdb/v1/resource/图片/关都地区/真新镇
-```
-
-HTTP 不携 Resource extension。
-
-### 7.3 Metadata Entry
+### 5.3 Metadata Entry
 
 ```text
 .info.meta   ↔ $info
 .extend.meta ↔ $extend
 .desc.meta   ↔ $desc
 ```
-
-合法组合：
 
 | kind | 普通 key | `$info` | `$extend` | `$desc` |
 |---|---|---|---|---|
@@ -723,11 +501,11 @@ HTTP 不携 Resource extension。
 | `group` | yes | yes | optional | yes |
 | `resource` | yes | no | no | yes |
 
-允许但不存在的 optional metadata 返回 `404`。
+optional metadata 不存在返回 `404`。
 
-### 7.4 URL Segment 编码
+---
 
-FSDB logical identity 使用 Unicode；HTTP wire 对每个 logical segment 单独编码。
+## 6. URL Segment Encoding
 
 Canonical client encoding：
 
@@ -737,150 +515,192 @@ logical segment
 → RFC 3986 percent-encoding
 ```
 
-普通 segment 只保留 ASCII unreserved characters：
+普通 segment 仅保留 ASCII unreserved：
 
 ```text
 A-Z a-z 0-9 - . _ ~
 ```
 
-其他 UTF-8 bytes 使用 `%HH`，hex 使用 uppercase。metadata entry `$info/$extend/$desc` 可以直接使用其 ASCII spelling。
+其他 bytes 使用 uppercase `%HH`。metadata `$info/$extend/$desc` 可直接使用 ASCII spelling。
 
-服务端必须：
+服务端：
 
 ```text
-取 raw URL path spelling，不先做整体 decode
-→ 按 raw literal "/" 切分 segment
-→ 每个 segment percent-decode exactly once
+raw URL path spelling
+→ split by raw literal "/"
+→ percent-decode each segment exactly once
 → UTF-8 decode
 → NFC canonicalization / logical validation
 → index lookup
 ```
 
-规则：
+冻结规则：
 
-- `+` 在 path 中就是 `+`，不得按 form encoding 转为空格；
-- malformed percent encoding 返回 `400`；
-- invalid UTF-8 返回 `400`；
+- `+` 在 path 中就是 `+`，不得转为空格；
+- malformed percent encoding → `400`；
+- invalid UTF-8 → `400`；
 - decoded ordinary segment canonicalize 为 NFC 后必须满足 FSDB `NameSegment`；
-- decoded segment 中出现 `/`、`\\`、NUL 等禁止字符返回 `400`；因此 `%2F` 不能在单个 segment 内制造额外 Resource 层级；
-- metadata `$info/$extend/$desc` 在 ordinary NameSegment 校验之前识别；
-- 空 segment、重复 `/`、普通 route 的 trailing `/` 都返回 `400`；
-- 第一版不定义 query parameter；non-empty query component 返回 `400`；
-- fragment 不属于 HTTP request-target，因此不参与服务端 identity。
+- decoded `/`、`\\`、NUL 等禁止字符 → `400`，所以 `%2F` 不能制造 Resource 层级；
+- metadata `$...` 在 ordinary NameSegment 校验前识别；
+- 空 segment、重复 `/`、普通 route trailing `/` → `400`；
+- v1 不定义 query parameter，non-empty query → `400`；
+- fragment 不属于 HTTP request-target。
 
-服务端 MAY 接受语义等价但非 canonical 的 percent-encoding spelling；lookup 永远基于 decoded + NFC logical identity，而不是 raw URL bytes。
+服务端 MAY 接受语义等价但 non-canonical 的 percent spelling；lookup 永远基于 decoded + NFC logical identity。
 
 ---
 
-## 8. Response / Cache 原则
+## 7. Response、MIME 与 Cache
 
-文件型响应尽量发送磁盘原始 bytes，不 parse 后重新 serialize。
+文件型响应尽量返回磁盘原始 bytes，不 parse 后重新 serialize。
+
+固定类型：
 
 ```text
-struct key / extend key
-    → application/json; charset=utf-8
+struct / extend
+    application/json; charset=utf-8
 
-group key / $extend
-    → application/x-ndjson; charset=utf-8
+group / $extend
+    application/x-ndjson; charset=utf-8
 
 $info
-    → application/schema+json; charset=utf-8
-       若兼容性需要可退回 application/json; charset=utf-8
+    application/schema+json; charset=utf-8
 
 $desc
-    → text/markdown; charset=utf-8
+    text/markdown; charset=utf-8
 
-resource known extension
-    → MIME mapping
-
-resource unknown extension
-    → application/octet-stream
+database descriptor
+    application/json; charset=utf-8
 ```
 
-Database Descriptor：
+### 7.1 Resource MIME authority
+
+Resource MIME MUST 来自 package-owned deterministic mapping；不得依赖 OS registry、`/etc/mime.types` 或运行机器环境。
+
+v1 mapping：
+
+| Extension | Content-Type |
+|---|---|
+| `avif` | `image/avif` |
+| `bmp` | `image/bmp` |
+| `css` | `text/css; charset=utf-8` |
+| `gif` | `image/gif` |
+| `html` | `text/html; charset=utf-8` |
+| `ico` | `image/x-icon` |
+| `jpeg` / `jpg` | `image/jpeg` |
+| `js` / `mjs` | `text/javascript; charset=utf-8` |
+| `json` | `application/json; charset=utf-8` |
+| `md` | `text/markdown; charset=utf-8` |
+| `mp3` | `audio/mpeg` |
+| `mp4` | `video/mp4` |
+| `ogg` | `audio/ogg` |
+| `otf` | `font/otf` |
+| `png` | `image/png` |
+| `svg` | `image/svg+xml` |
+| `ttf` | `font/ttf` |
+| `txt` | `text/plain; charset=utf-8` |
+| `wasm` | `application/wasm` |
+| `wav` | `audio/wav` |
+| `webm` | `video/webm` |
+| `webp` | `image/webp` |
+| `woff` | `font/woff` |
+| `woff2` | `font/woff2` |
+
+其他合法 extension：
 
 ```text
-application/json; charset=utf-8
+application/octet-stream
 ```
 
-第一版成功表示统一使用：
+改变此 mapping 属于 observable behavior change，需按 Frozen change rule 处理。
+
+### 7.2 Representation headers
+
+成功 representation 支持：
+
+```text
+Content-Type
+Content-Length
+ETag
+Cache-Control: no-cache
+```
+
+所有可缓存成功 representation MUST 使用：
 
 ```http
 Cache-Control: no-cache
 ```
 
-含义是：缓存 MAY 保存响应，但在再次使用前必须向当前 service revalidate。
+这允许缓存保存 body，但再次使用前必须 revalidate。
 
-这样 snapshot-local ETag 才能真正控制 reopen 后的缓存复用：
+`HEAD` 与对应 `GET` 返回相同的可确定 representation headers，但不返回 body。
 
-```text
-cached body
-→ mandatory revalidation
-→ same snapshot + unchanged → 304
-→ new snapshot            → 200 new representation
-→ stale source            → 503
+### 7.3 Error body 非契约
+
+v1 **不定义 error body schema**。
+
+实现 MAY 返回空 body 或极小 JSON，例如：
+
+```json
+{ "error": "not_found" }
 ```
 
-第一版不使用 `no-store`，因为允许客户端保存 representation 并进行条件请求是有价值的。
+客户端 MUST NOT 依赖 error body、error JSON 字段或错误文本作为 v1 contract。
 
-支持：
+规范性的错误信息是 status、`Allow` 等本文明确冻结的 HTTP semantics。
+
+错误不得泄露：
 
 ```text
-Content-Length
-ETag
-If-None-Match
-304 Not Modified
-Cache-Control: no-cache
+absolute path
+user home
+internal stack
+raw filesystem error path
+physical metadata filename
 ```
 
-`HEAD` 与对应 `GET` 返回相同的可确定 representation headers，但没有 body。
+`HEAD` 错误响应不得包含 body。
 
 ---
 
-## 9. HTTP Methods / Conditional Request
+## 8. Methods、Conditional Request 与 Status Precedence
 
-### 9.1 Methods
+### 8.1 Methods
 
-第一版只允许：
+v1 只允许：
 
 ```text
 GET
 HEAD
 ```
 
-对于 syntactically valid 的 FSDB route shape，其他 method 返回：
+syntactically valid FSDB route 使用其他 method：
 
-```text
+```http
 405 Method Not Allowed
 Allow: GET, HEAD
 ```
 
-第一版不因为 `OPTIONS`、CORS 或 framework convention 自动增加额外 method。
+不自动增加 `OPTIONS`、CORS 或 framework method。
 
-### 9.2 `If-None-Match`
+### 8.2 `If-None-Match`
 
-`If-None-Match` 直接遵循标准 HTTP GET/HEAD conditional request 语义，不定义 FSDB 私有方言。
-
-实现必须支持标准语义，包括：
+直接采用标准 HTTP GET/HEAD conditional semantics，包括：
 
 ```text
 weak entity-tag comparison
-"*"
+*
 comma-separated entity-tag list
 ```
 
-返回 `304` 前必须先完成当前 snapshot 的 source-state / same-handle fingerprint 检查。不能因为 header 命中就跳过 stale detection。
+不得定义 FSDB 私有 conditional dialect。
 
----
-
-## 10. Route / Status / Error Boundary
-
-处理优先级固定为：
+### 8.3 固定处理顺序
 
 ```text
-1. 是否属于 /fsdb/v1 namespace
-2. URL / route syntax / encoding validation
-3. method validation
+1. /fsdb/v1 namespace
+2. URL / route syntax / encoding
+3. method
 4. GET/HEAD logical lookup / existence
 5. source-state / same-handle validation
 6. conditional request
@@ -888,25 +708,6 @@ comma-separated entity-tag list
 ```
 
 因此：
-
-```text
-outside /fsdb/v1 namespace
-    → 404
-
-inside namespace but malformed path/encoding
-    → 400
-
-syntactically valid FSDB route + unsupported method
-    → 405
-
-GET/HEAD valid route but kind/table/key/metadata not found
-    → 404
-
-FsdbDatabase stale/closed or drift detected
-    → 503
-```
-
-示例：
 
 ```text
 POST /other
@@ -922,56 +723,38 @@ GET /fsdb/v1/struct/角色/不存在
 → 404
 ```
 
-状态表：
+状态：
 
 | 情况 | Status |
 |---|---:|
 | `GET` / `HEAD` 命中 | `200` |
 | `If-None-Match` 命中 | `304` |
 | malformed URL / encoding / logical identity | `400` |
-| namespace 外或 GET/HEAD logical object 不存在 | `404` |
-| syntactically valid FSDB route 使用非 GET/HEAD | `405` |
-| `FsdbDatabase` stale / closed / source drift | `503` |
-| unexpected local implementation/service failure | `500` |
-
-第一版不建立复杂 error protocol。实现 MAY 返回很小的 JSON body，例如：
-
-```json
-{ "error": "not_found" }
-```
-
-错误不得泄露：
-
-```text
-absolute path
-user home
-internal stack
-raw filesystem error path
-physical metadata filename
-```
-
-`HEAD` 错误响应同样不得包含 body。
+| namespace 外或 GET/HEAD object 不存在 | `404` |
+| syntactically valid route + unsupported method | `405` |
+| database stale / closed / source drift | `503` |
+| unexpected implementation/service failure | `500` |
 
 ---
 
-## 11. Index / Validation
+## 9. Index / Validation Boundary
 
-`openFsdb()` 必须要求 **Well-formed FSDB**，但不默认要求完整 Integrity-valid。
+`openFsdb()` MUST 要求 **Well-formed FSDB**，但不默认要求完整 Integrity-valid。
 
-至少检查：
+至少验证：
 
 ```text
-DatabaseName / TableName / Key / ResourceKey NameSegment rules
-TableIdentity = (kind, TableName) uniqueness
+DatabaseName / TableName / Key / ResourceKey rules
+TableIdentity uniqueness
 physical-name → NFC logical-name canonicalization
 normalization collision
 UTF-8 byte limits after NFC
 recognized table directory type
 required metadata exists
-metadata syntax valid
+metadata syntax
 struct/extend entry is JSON object
 group JSONL record is JSON object
-logical key identity unique
+logical key uniqueness
 hierarchical ResourceKey mapping
 resource collision across extensions
 Resource Extension grammar
@@ -979,9 +762,9 @@ physical path containment
 no indexed symlink escape
 ```
 
-`.extend.meta` 自身的 JSONL shape 和 required field types 属于 Well-formed validation。
+`.extend.meta` JSONL shape 与 required field types 属于 Well-formed validation。
 
-以下属于更深的 Integrity validation，不默认阻塞 HTTP raw-read：
+不默认阻塞 raw-read 的 Integrity validation：
 
 ```text
 完整 JSON Schema record validation
@@ -989,46 +772,17 @@ no indexed symlink escape
 其他业务完整性约束
 ```
 
-`openFsdb()` 的语义是：
+`openFsdb()` 成功表示：
 
-> 这个目录可以安全、无歧义地解释为 FSDB logical namespace。
+> 当前目录可以安全、无歧义地解释为 FSDB logical namespace。
 
-而不是：
-
-> 所有业务数据关系已经被完整证明正确。
+不表示所有业务关系已经完整验证。
 
 ---
 
-## 12. Resource Index
+## 10. Discovery Boundary
 
-例如：
-
-```text
-[resource]图片/UI/道具.large.webp
-```
-
-概念索引：
-
-```ts
-{
-  kind: "resource",
-  table: "图片",
-  key: "UI/道具.large",
-  extension: ".webp",
-  mime: "image/webp",
-  // validated internal file identity + snapshot fingerprint
-}
-```
-
-索引器递归扫描合法非 dot-prefixed Resource 子目录，将 observed physical segment canonicalize 为 NFC，并转换成 `/` 分隔的 ResourceKey。
-
-子目录只参与 key，不形成 table 或 metadata scope。
-
----
-
-## 13. Discovery Boundary
-
-第一版只有：
+v1 只有：
 
 ```text
 GET|HEAD /fsdb/v1
@@ -1036,132 +790,118 @@ GET|HEAD /fsdb/v1
 
 做 table-level discovery。
 
-第一版不提供：
+v1 不提供：
 
 ```text
 GET /fsdb/v1/{kind}/{table}
 GET /fsdb/v1/{kind}/{table}/keys
 ```
 
-不做 key listing，从而避免提前引入排序、分页、大响应上限和 enumeration semantics。
+因此不提前引入 key enumeration、pagination、listing size 或 enumeration snapshot semantics。
 
 ---
 
-## 14. Source Lifetime
+## 11. Source Lifetime
 
-第一版把打开后的 FSDB 视为**静态 source**。
+v1 把打开后的 FSDB 视为**静态 source**。
 
 宿主 contract：
 
-> `FsdbDatabase` 处于 open snapshot 期间，宿主不得修改其 FSDB source directory。修改内容需要关闭并重新 `openFsdb()`。
+> `FsdbDatabase` open snapshot 期间不得修改其 source directory；修改内容需要 close + reopen。
 
-每次成功 `openFsdb()` 生成新的、仅进程内使用的 `snapshotId`。`snapshotId`：
+每次成功 `openFsdb()` 生成 fresh process-local `snapshotId`：
 
 ```text
-不是 FSDB identity
-不是 wire authority
-不写回磁盘
-只隔离本次 open instance 的 cache validator namespace
+not FSDB identity
+not wire authority
+not persisted
+only isolates cache validator namespace
 ```
 
-逻辑状态：
+状态：
 
 ```text
 open → stale → closed
   └──────────→ closed
 ```
 
-### 14.1 open
+### 11.1 open
 
 ```text
 scan
 → Well-formed validation
 → immutable logical index
 → capture source fingerprints
-→ generate fresh snapshotId
+→ generate snapshotId
 → admit read leases
 ```
 
-### 14.2 stale
+### 11.2 stale
 
-请求读取已索引 object 时，如果 same-handle validation 检测到：
+same-handle validation 检测到以下 drift 时，整个 database MUST 原子进入 stale：
 
 ```text
 indexed file disappeared / cannot be safely opened
 regular file type changed
 indexed file became symlink / unsafe target
-relevant file fingerprint changed
+relevant fingerprint changed
 indexed metadata became unreadable
 ```
 
-则整个 `FsdbDatabase` 原子进入 `stale`。
-
-进入 stale 后：
+stale 后：
 
 ```text
-停止接纳新 read lease
-不局部 reindex
-不 hot reload
-不继续混合 old/new snapshot
-后续 HTTP read 返回 503
+stop new read leases
+no reindex
+no hot reload
+no old/new snapshot mixing
+subsequent HTTP reads → 503
 ```
 
-已经在 drift 被发现前成功 admitted 的其他 read lease 不被主动回滚；它们基于各自已打开的 handle 完成或因本地 I/O 错误失败。第一版不尝试跨 request transaction。
+在 drift 被发现前已经 admitted 的其他 leases 不主动回滚；它们基于各自已打开 handle 完成，或因 I/O 错误失败。v1 不提供 cross-request transaction。
 
-恢复方式只有：
+如果已发送 headers 后发生 read I/O failure，不能重写 HTTP status；实现应终止该 response，并在能够判定 snapshot invariant 被破坏时 mark stale。
+
+恢复只有：
 
 ```text
 close
 → openFsdb(root)
 ```
 
-新增但未被初始 index 接受的文件不会在当前实例中突然出现；新 namespace 只能通过 reopen 建立。
+### 11.3 closed / drain
 
-static-source contract 是 correctness assumption；drift detection + same-handle read 是 fail-closed 防线，不是 watch/hot-reload 机制，也不承诺抵抗拥有并发写权限的恶意本地 writer。
-
-### 14.3 closed / drain
-
-调用 `db.close()`：
+`db.close()`：
 
 ```text
-atomically stop admitting new read leases
-→ public state becomes closed
-→ wait already admitted leases to finish
-→ release remaining snapshot resources
-→ resolve close Promise
+stop admitting reads
+→ public state = closed
+→ wait admitted leases
+→ release resources
+→ resolve
 ```
 
-因此关闭不会无理由截断一个已经成功接纳、正在发送大 Resource 的正常请求。
+正常关闭不得无理由截断已经 admitted 的大 Resource stream。
 
 ---
 
-## 15. ETag / Cache
+## 12. ETag / Cache Snapshot Semantics
 
-ETag 建立在第 14 节 static-source snapshot 上。
-
-文件型 entry 第一版使用 snapshot-local weak ETag，至少包含：
+文件型 entry 使用 snapshot-local weak ETag：
 
 ```text
-snapshotId
-+
-entry fingerprint
+snapshotId + entry fingerprint
 ```
 
-entry fingerprint 可基于：
-
-```text
-size
-mtime/mtimeNs
-以及实现可稳定获得的 file identity fields
-```
-
-概念形式：
+概念：
 
 ```text
 W/"<snapshotId>-<entryFingerprint>"
 ```
 
-文件型请求的决策顺序：
+`entryFingerprint` 的具体内部编码不冻结，但必须足以执行本文 same-snapshot drift check。
+
+文件型请求顺序：
 
 ```text
 safe open handle
@@ -1172,7 +912,7 @@ safe open handle
 → 304 or stream same handle
 ```
 
-不能：
+禁止：
 
 ```text
 compare old ETag first
@@ -1180,23 +920,39 @@ compare old ETag first
 → skip source validation
 ```
 
-所有可缓存成功 representation 使用：
+Database Descriptor 由 immutable index 以稳定排序和 deterministic JSON serialization 生成；descriptor ETag 同样纳入 current `snapshotId`。
 
-```http
-Cache-Control: no-cache
-```
-
-因此 close/reopen 后，即使 URL 相同，cache 也必须 revalidate；新的 `snapshotId` 会阻止旧 validator 误命中新 snapshot。
-
-Database Descriptor 由 immutable index 生成，使用稳定 table 排序和 deterministic JSON serialization；其 ETag 同样纳入当前 `snapshotId`，并使用相同 `Cache-Control: no-cache`。
-
-第一版不承诺跨 reopen cache continuity。
-
-未来 FSDB 若拥有 authoritative content hash，再优先使用该 authority，并可重新评估跨 snapshot cache reuse / max-age / immutable policy。
+v1 不承诺跨 reopen cache continuity。因为所有成功 representation 使用 `Cache-Control: no-cache`，reopen 后 cache 必须 revalidate，fresh `snapshotId` 会使旧 validator miss。
 
 ---
 
-## 16. 与 LoomRealm Content API 的关系
+## 13. Node / Framework / Content Boundary
+
+### 13.1 Framework adapter
+
+v1 不提供 Express/Koa/Fastify/Hono adapter。
+
+未来 adapter MUST 保留：
+
+```text
+raw URL spelling
+segment decode rules
+route/status semantics
+cache semantics
+single-handle read
+source lifetime
+ownership
+```
+
+如果 framework 无法提供足够原始 request-target/URL spelling，则 adapter 不应宣称完全等价。
+
+### 13.2 Fetch binding
+
+v1 不以 WHATWG `Request → Response` 为主 API。当前问题域是 Node filesystem + Node local HTTP serving。
+
+出现真实非 Node consumer 后，再考虑抽出 `@loomrealm/fsdb` 与 Fetch-compatible adapter。
+
+### 13.3 LoomRealm Content API
 
 ```text
 @loomrealm/fsdb-http
@@ -1207,39 +963,30 @@ LoomRealm Content API
     installation/game logical content semantics
 ```
 
-本包不加入：
-
-```text
-installationId
-Game Package
-Desktop Content bearer
-Renderer / Runtime identity
-Content API route
-```
-
-上层可以组合本包，但两层不强制一一映射。
+本包不加入 `installationId`、Game Package、Content bearer、Renderer/Runtime identity 或 Content API routes。
 
 ---
 
-## 17. 第一阶段实现顺序
+## 14. 实施顺序
+
+Frozen v1 建议按以下 vertical slices 实现：
 
 ```text
-1. FSDB NameSegment / TableIdentity / Key / ResourceKey types
+1. NameSegment / TableIdentity / Key / ResourceKey types
 2. Well-formed validator
 3. scanner + NFC logical index
 4. safe open + same-handle fstat + path containment
-5. source fingerprints + read lease primitive
+5. source fingerprints + read lease
 6. hierarchical ResourceKey indexing
 7. raw URL split + percent-decode + logical resolver
 8. Node RequestListener + route/method precedence
-9. raw JSON / JSONL / Resource streaming
+9. JSON / JSONL / Resource streaming
 10. metadata logical entry
-11. MIME + Content-Length
-12. OPEN / STALE / CLOSED lifecycle + snapshotId + drain
-13. ETag / standard If-None-Match / Cache-Control: no-cache
-14. serveFsdb() ownership / wildcard address / close tests
-15. malformed/not-found/stale/method/cache tests
-16. real Unicode FSDB fixture + embedded/standalone consumer smoke
+11. deterministic MIME + Content-Length
+12. OPEN / STALE / CLOSED + snapshotId + drain
+13. ETag / If-None-Match / Cache-Control
+14. serveFsdb ownership / wildcard address / close
+15. conformance fixtures + embedded/standalone smoke
 ```
 
 暂不实现：
@@ -1253,67 +1000,36 @@ query/filter
 reference expansion
 key listing
 full Integrity-valid checker
-Express/Koa/Fastify/Hono adapter
-CLI/daemon process management
+framework adapters
+CLI/daemon management
 ```
 
 ---
 
-## 18. 第一版完成标准
+## 15. Implementation Exit Gate
 
-给定静态 FSDB fixture，可以完成：
-
-```text
-open
-→ Well-formed validation/index
-→ createFsdbHttpHandler(db)
-→ attach to node:http createServer
-→ GET/HEAD struct/extend/group/resource
-→ GET/HEAD hierarchical ResourceKey
-→ GET/HEAD metadata
-→ Unicode NameSegment URL round-trip
-→ correct raw bytes / MIME / Content-Length / ETag / Cache-Control
-```
-
-同时：
+v1 implementation 完成必须通过 [CONFORMANCE.md](./CONFORMANCE.md) 的 mandatory cases，并证明至少以下 invariants：
 
 ```text
-serveFsdb({ root, host, port })
-→ starts standalone node:http service
-→ exposes concrete address
-→ service.close() blocks new reads, drains admitted requests,
-  closes owned server and database
-```
-
-必须证明：
-
-```text
-中文等 Unicode key 可正常读取
-canonically equivalent physical spelling 收敛到同一 NFC logical identity
-normalization collision 被拒绝
-TableIdentity = (kind, TableName) 无歧义
-$ / . reserved namespace 不与业务 key 冲突
-Resource 子目录稳定映射为 hierarchical logical key
-扩展名不参与 Resource identity
-%2F 不能突破 HTTP segment boundary
-空 segment / trailing slash / query 不扩大 API surface
-route / method / existence status precedence 固定
-无法通过 URL 读取 index 外文件
-无法 path traversal
-无法 symlink escape
-文件响应使用同一 handle 完成 fstat + validation + stream
-source drift 后进入 stale 且返回 503
-close 不接纳新请求但允许已 admitted stream drain
-If-None-Match 支持标准 weak/list/* 语义
-Cache-Control: no-cache 强制旧缓存 revalidate
-reopen 后旧 ETag 不会误命中新 snapshot
-createFsdbHttpHandler 不隐式拥有/关闭 caller-provided db
-serveFsdb 明确拥有并关闭其创建的 db/server
-wildcard bind 不伪造唯一 client origin
-service.server escape hatch 不改变 service.close ownership
+Unicode/NFC logical identity 稳定
+TableIdentity 无歧义
+$ / . namespaces 不冲突
+hierarchical ResourceKey 稳定
+extension 不参与 Resource identity
+URL percent decoding 无 traversal ambiguity
+route / method / status precedence 固定
+index 外文件不可读取
+symlink/path escape 被拒绝
+same handle 完成 fstat + conditional + stream
+source drift 单调进入 stale
+close 阻止新读并 drain admitted reads
+If-None-Match 标准语义
+Cache-Control: no-cache + snapshot ETag 闭环
+handler 不拥有 caller db
+serveFsdb 拥有并安全关闭 server/db
+MIME mapping deterministic
 核心 package 无 Web Framework runtime dependency
-无法写入 FSDB
 错误不泄露 physical path
 ```
 
-达到上述条件后，第一版设计即可进入实现。Range、完整 Integrity validation、framework adapter、CLI 或抽分 `@loomrealm/fsdb` 只在真实消费者需要时继续增加。
+通过该 gate 后，v1 可以从 **Frozen for Implementation** 推进到 implemented/release candidate；后续新增能力必须由真实消费者驱动。
