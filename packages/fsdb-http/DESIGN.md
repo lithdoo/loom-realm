@@ -115,11 +115,15 @@ rate limiting policy
 
 ### resource
 
+第一版按 flat resource identity 设计：
+
 ```text
 [resource]<name>/
 ├── {key}.{ext}
 └── .desc.meta       required
 ```
+
+resource 数据文件必须是 `[resource]<name>` 的直接子文件；第一版不递归解释资源子目录。
 
 HTTP 层只暴露上述 FSDB logical object，不提供目录浏览器或任意物理路径读取。
 
@@ -227,21 +231,66 @@ await serveFsdb({
 });
 ```
 
-最终 API 在实现前不冻结；优先保持小而可组合。
+最终 TypeScript API 在实现前不冻结；优先保持小而可组合。
 
 ---
 
-## 7. 候选 HTTP Route
+## 7. HTTP Surface
 
 HTTP API 直接表达 FSDB storage semantics，不表达 LoomRealm Content API semantics。
 
-Base：
+第一版只设计两个 route pattern：
 
 ```text
-/fsdb/v1
+GET|HEAD /fsdb/v1
+GET|HEAD /fsdb/v1/{kind}/{table}/{entry}
 ```
 
-候选数据路由：
+其中：
+
+```text
+kind = struct | extend | group | resource
+```
+
+`entry` 可以是普通 FSDB key，也可以是该 kind 支持的逻辑 metadata 名称。
+
+这样 router 不需要为每种数据建立一套独立 URL 结构；不同 FSDB 类型的差异由 index entry type 与合法组合校验表达。
+
+### 7.1 Database Descriptor
+
+```text
+GET|HEAD /fsdb/v1
+```
+
+根接口用于 discovery，但只列出数据库身份与表，不列出表内 keys。
+
+概念响应：
+
+```json
+{
+  "fsdbVersion": 1,
+  "name": "game",
+  "tables": [
+    { "kind": "struct", "name": "actor" },
+    { "kind": "group", "name": "map-event" },
+    { "kind": "resource", "name": "image" }
+  ]
+}
+```
+
+根 descriptor 的目标只回答：
+
+```text
+这是哪个 FSDB？
+有哪些逻辑表？
+每个表是什么 kind？
+```
+
+第一版不通过该接口暴露 physical directory、metadata filename、文件数量、绝对路径或 table 内 key 列表。
+
+### 7.2 Data Entry
+
+普通 key：
 
 ```text
 GET|HEAD /fsdb/v1/struct/{table}/{key}
@@ -258,9 +307,50 @@ GET|HEAD /fsdb/v1/resource/{table}/{key}
 
 [group]map-event/001.jsonl
 → /fsdb/v1/group/map-event/001
+
+[resource]image/hero.png
+→ /fsdb/v1/resource/image/hero
 ```
 
-Metadata 使用 logical route，而不是暴露 `.info.meta` 等物理名称：
+resource route 中的 key 不携扩展名。扩展名属于 indexed storage/MIME metadata，不属于 HTTP logical identity。
+
+因此同一个 resource table 中：
+
+```text
+hero.png
+hero.webp
+```
+
+会产生相同 logical key `hero`，第一版视为 index collision，`openFsdb()` 必须拒绝，而不是让 URL 通过扩展名区分两份资源。
+
+### 7.3 Metadata Entry
+
+Metadata 使用 logical name，而不是暴露物理 dot-file 名称：
+
+```text
+.info.meta
+    ↕
+$info
+
+.extend.meta
+    ↕
+$extend
+
+.desc.meta
+    ↕
+$desc
+```
+
+合法组合：
+
+| kind | 普通 key | `$info` | `$extend` | `$desc` |
+|---|---|---|---|---|
+| `struct` | yes | yes | no | optional |
+| `extend` | yes | yes | yes | optional |
+| `group` | yes | yes | optional | yes |
+| `resource` | yes | no | no | yes |
+
+示例：
 
 ```text
 /fsdb/v1/struct/actor/$info
@@ -277,7 +367,9 @@ Metadata 使用 logical route，而不是暴露 `.info.meta` 等物理名称：
 /fsdb/v1/resource/image/$desc
 ```
 
-Route 名称、`$` 保留字和是否需要 `/fsdb/v1` 前缀都属于实现阶段可调整项。
+如果某 metadata 在该 FSDB kind 中允许但当前表没有实际文件，例如 struct 的 optional `$desc`，请求返回 `404`。
+
+`$info`、`$extend`、`$desc` 是 HTTP route reserved entry。Index/route validation 必须保证普通 key 不会与保留 entry 产生歧义。
 
 ---
 
@@ -303,17 +395,27 @@ Content-Type: application/x-ndjson; charset=utf-8
 
 ### resource
 
-直接返回原始资源 bytes；MIME 由已验证扩展名 / resolver 决定。
+直接返回原始资源 bytes；MIME 由 immutable index 中已验证的扩展名/metadata 决定。
 
 ### metadata
 
+第一版倾向：
+
 ```text
-.info.meta   → application/schema+json 或 application/json
-.extend.meta → application/x-ndjson
-.desc.meta   → text/markdown; charset=utf-8
+$info    → application/schema+json; charset=utf-8
+$extend  → application/x-ndjson; charset=utf-8
+$desc    → text/markdown; charset=utf-8
 ```
 
-具体 MIME 在实现时根据兼容性确认。
+如果 `application/schema+json` 的兼容性在实现中带来实际问题，可以退回 `application/json; charset=utf-8`；这个细节在首个实现前收敛。
+
+### database descriptor
+
+```text
+Content-Type: application/json; charset=utf-8
+```
+
+Descriptor 是服务端根据 immutable index 生成的逻辑 JSON，不对应某个原始 FSDB 文件。
 
 ---
 
@@ -335,9 +437,44 @@ Allow: GET, HEAD
 
 包始终只读，即使宿主进程对目录具有写权限。
 
+`HEAD` 执行与对应 `GET` 相同的 route/index/existence 检查，并返回可确定的相同 headers，但不返回 body。
+
 ---
 
-## 10. Index / Validation
+## 10. HTTP Status / Error Boundary
+
+第一版状态语义保持最小：
+
+| 情况 | Status |
+|---|---:|
+| `GET` / `HEAD` 命中 | `200` |
+| `If-None-Match` 命中 | `304` |
+| URL / percent-encoding / logical identity 非法 | `400` |
+| kind/table/key/metadata 不存在或组合不支持 | `404` |
+| 非 `GET` / `HEAD` | `405` |
+| 已索引文件在服务期间异常不可读等本地故障 | `500` |
+
+第一版不建立复杂 error protocol。实现 MAY 返回一个很小的 JSON error body，例如：
+
+```json
+{ "error": "not_found" }
+```
+
+但客户端不应依赖详细内部错误文本。
+
+错误响应不得包含：
+
+```text
+absolute path
+user home
+internal stack
+raw filesystem error path
+physical metadata filename
+```
+
+---
+
+## 11. Index / Validation
 
 启动时扫描一次并生成 immutable index。
 
@@ -352,6 +489,7 @@ JSON valid
 JSONL line format valid
 logical table identity unique
 logical key identity unique
+resource key collision across extensions
 resolved file stays inside root
 no symlink escape
 reserved logical names do not collide
@@ -367,54 +505,71 @@ vs
 
 是否在 `openFsdb()` 时强制验证所有引用目标，暂不冻结；实现时根据启动成本和使用场景决定。
 
+### 11.1 Resource identity
+
+第一版采用：
+
+```text
+resource file MUST be direct child of [resource]<table>
+logical key = filename without final extension
+extension = indexed storage/MIME metadata
+```
+
+例如：
+
+```text
+[resource]image/hero.png
+```
+
+索引概念上记录：
+
+```ts
+{
+  kind: "resource",
+  table: "image",
+  key: "hero",
+  extension: ".png",
+  mime: "image/png",
+  // validated internal location
+}
+```
+
+未来若确实需要 hierarchical resource key，应先扩展 FSDB identity 规则，再调整 HTTP logical identity；实现不得自行把任意物理子目录静默变成 URL path。
+
 ---
 
-## 11. Resource key 的待定问题
+## 12. Discovery Boundary
 
-当前 FSDB 基础描述以：
-
-```text
-[resource]<name>/{key}.{ext}
-```
-
-表达 resource identity，但最佳实践中又允许大型资源进一步使用子目录。
-
-这会影响 HTTP logical identity，因此第一版实现前必须明确以下二选一：
-
-### A. flat resource v1
+第一版包含：
 
 ```text
-resource file MUST be direct child of [resource]<name>
-key = filename without extension
+GET|HEAD /fsdb/v1
 ```
 
-### B. hierarchical resource key
+只做 table-level discovery。
+
+第一版明确不提供：
 
 ```text
-sub/path/hero.png
-→ logical key has explicit hierarchical semantics
+GET /fsdb/v1/{kind}/{table}
+GET /fsdb/v1/{kind}/{table}/keys
 ```
 
-实现不得自行把未知目录层级静默转换成 HTTP path；这个问题应先回到 FSDB identity 规则中明确。
+即不提供 key listing。
 
-当前倾向先采用 A，保持第一版 identity 简单。
-
----
-
-## 12. Discovery
-
-候选但非 MVP 必需：
+原因是 key listing 会立即引入额外语义：
 
 ```text
-GET /fsdb/v1
-GET /fsdb/v1/{type}/{table}
+排序
+分页
+大量 key 的响应上限
+资源存在性暴露范围
+snapshot/stability semantics
 ```
 
-可用于列出 table / key。
+这些都不是“把已知 FSDB logical object 通过 HTTP 读取出来”的必要能力。
 
-第一版如果实际消费者都已知道 `{type, table, key}`，可以完全不实现 discovery。
-
-原则：不为了“像数据库服务”而增加不必要 API。
+如果未来出现真实消费者确实需要 key enumeration，再单独设计，不为了“像数据库服务”而提前增加 API。
 
 ---
 
@@ -437,31 +592,44 @@ If-None-Match
 Content-Length
 ```
 
+Database descriptor 的 ETag 可由 immutable index 的稳定摘要生成；具体算法是实现细节，只要同一打开实例的相同 descriptor 有稳定 validator。
+
 如果后续 FSDB 提供稳定 content hash，再优先使用该 authority，而不是重复计算。
 
 ---
 
-## 14. Error Boundary
+## 14. 明确不提供的 HTTP 能力
 
-候选最小状态：
-
-```text
-400 malformed logical identity / bad encoding
-404 table / key / metadata not found
-405 unsupported method
-500 unexpected local service failure
-```
-
-错误响应不得包含：
+第一版没有：
 
 ```text
-absolute path
-user home
-internal stack
-raw filesystem error path
+POST
+PUT
+PATCH
+DELETE
+
+/query
+/search
+/filter
+/join
+/resolve
+/references
+/batch
+/watch
+/events
 ```
 
-是否使用 `application/problem+json` 暂不冻结。
+也没有：
+
+```text
+任意 physical path 读取
+目录浏览
+key listing
+自动 extend reference expansion
+ORM-style transformed response
+```
+
+特别是 `[extend]` / `[group]` 的 `.extend.meta` 只作为可读取 metadata；HTTP 服务不会根据它自动 join/展开被引用的 struct。
 
 ---
 
@@ -499,25 +667,29 @@ Content API route
 1. FSDB path / identity types
 2. scanner + immutable index
 3. validator + symlink/path containment
-4. logical resolver
-5. GET / HEAD handler
-6. raw JSON / JSONL / resource response
-7. MIME + Content-Length
-8. ETag / If-None-Match
-9. malformed/not-found/method error tests
-10. real FSDB fixture + consumer smoke
+4. resource flat-key + extension collision validation
+5. logical resolver
+6. /fsdb/v1 database descriptor
+7. /fsdb/v1/{kind}/{table}/{entry} route parser
+8. GET / HEAD handler
+9. raw JSON / JSONL / resource / metadata response
+10. MIME + Content-Length
+11. ETag / If-None-Match / 304
+12. malformed/not-found/method error tests
+13. real FSDB fixture + consumer smoke
 ```
 
 暂不实现：
 
 ```text
-discovery
+key listing
 Range
 watch/hot reload
 auth
 write API
 query/filter
 reference expansion
+hierarchical resource key
 ```
 
 ---
@@ -530,18 +702,55 @@ reference expansion
 open
 → validate/index
 → start handler
+→ GET/HEAD /fsdb/v1 descriptor
 → GET/HEAD struct/extend/group/resource
+→ GET/HEAD supported metadata
 → 返回正确原始 bytes 与 MIME
 ```
 
 并能够证明：
 
 ```text
+resource logical key 不依赖文件扩展名
+同 resource key 多扩展名会在 open 时拒绝
 无法通过 URL 读取 index 外文件
 无法 path traversal
 无法 symlink escape
 无法写入 FSDB
 错误不泄露 physical path
+HEAD 不返回 body
+unsupported method 返回 405 + Allow
 ```
 
-达到上述条件后，再根据真实消费者需求决定是否增加 discovery、Range、层级 resource key 或拆分 `@loomrealm/fsdb`。
+达到上述条件后，再根据真实消费者需求决定是否增加 Range、key enumeration、层级 resource key 或拆分 `@loomrealm/fsdb`。
+
+---
+
+## 18. 当前 Draft HTTP 摘要
+
+```text
+GET|HEAD /fsdb/v1
+
+GET|HEAD /fsdb/v1/{kind}/{table}/{entry}
+
+kind:
+    struct | extend | group | resource
+
+entry:
+    ordinary key
+    $info
+    $extend
+    $desc
+```
+
+核心约束：
+
+```text
+HTTP logical identity ≠ physical path
+metadata logical name ≠ dot-file name
+resource key ≠ filename with extension
+root discovery lists tables, not keys
+GET/HEAD only
+raw stored bytes when serving FSDB entries
+no query/join/listing/write semantics
+```
