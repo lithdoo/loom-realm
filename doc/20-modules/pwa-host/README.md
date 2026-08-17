@@ -1,17 +1,20 @@
-# PWA 宿主模块设计
+# PWA Composition 设计
 
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Window、Main Worker、Subsystem Worker、MessagePort、Service Worker、OPFS 的平台实现  
+> 主要定义：Window、Main Worker、Subsystem Worker、MessagePort、Service Worker、OPFS 的平台组合与安全边界  
 > 依赖：[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[Subsystem Control v1](../../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)  
-> 最近复核：2026-08-09
+> 分包：[独立分包与发布架构](../../30-implementation/package-architecture.md)  
+> 最近复核：2026-08-17
+
+本文描述 **PWA 运行拓扑/composition**，不是 `@loomrealm/host-pwa` 公共包规范。PWA 默认在 `apps/pwa` 中组合可复用能力与浏览器 Adapter。
 
 ## 1. Authority / Topology
 
-Window只拥有浏览器 UI/gesture能力和 Web Renderer，不拥有 Frame Stack、Activation、failure unwind、Subsystem business state或 Render authority。
+Window 只拥有浏览器 UI/gesture 能力和 Web Renderer，不拥有 Frame Stack、Activation、failure unwind、Subsystem business state 或 Render authority。
 
-Main Runtime Worker拥有：
+Main Runtime Worker 拥有：
 
 ```text
 Session
@@ -23,15 +26,27 @@ Renderer Control authority
 DataAuthority
 ```
 
-每个 declared Subsystem一个 Dedicated Worker；一个 Worker可承载 `0..N` Frame/Input Context、`0..N` Render Domains、一个 Main Control carrier。
+每个 declared Subsystem 一个 Dedicated Worker；一个 Worker 可承载 `0..N` Frame/Input Context、`0..N` Render Domains、一个 Main Control carrier。
 
-Renderer对每个 Subsystem至多一条 current Data Connection。
+Renderer 对每个 Subsystem 至多一条 current Data Connection。
 
-## 2. PWA Host Bootstrap
+可能的实现组合：
 
-Descriptor→Worker script解析、bootstrap credential传递、Control MessagePort创建/转移是 **PWA Host implementation**，不是独立 LoomRealm application Profile。
+```text
+apps/pwa
+├── @loomrealm/main
+├── @loomrealm/renderer
+├── @loomrealm/transport-messageport
+└── @loomrealm/content-service-worker
+```
 
-Host 必须保证 Control carrier建立时已绑定预期 Runtime/Session bootstrap context；建立后 application semantics直接使用：
+实际 package 创建按实现需求推进。
+
+## 2. Worker / Control Bootstrap
+
+Descriptor→Worker script 解析、bootstrap credential 传递、Control MessagePort 创建/转移是 **PWA composition/adapter implementation**，不是独立 LoomRealm application Profile。
+
+Host/composition 必须保证 Control carrier 建立时已绑定预期 Runtime/Session bootstrap context；建立后 application semantics 直接使用：
 
 ```text
 Subsystem Control v1
@@ -41,21 +56,21 @@ Frame / Call v1
 Runtime Control Application Profile v1
 ```
 
-具体 Worker constructor options、MessageChannel创建顺序、Port transfer API、内部 bootstrap object结构可以调整，只要不改变上述协议行为与安全边界。
+具体 Worker constructor options、MessageChannel 创建顺序、Port transfer API、内部 bootstrap object 结构可以调整，只要不改变协议行为与安全边界。
 
-## 3. Subsystem Control Mapping
+## 3. Runtime Control MessagePort Adapter
 
-authenticated Control Port建立后：
+Authenticated Control Port 建立后：
 
 ```text
-port established by Host
+port established
 → subsystem.hello(protocolVersions includes 1)
 → identified
 → optional initializing
 → subsystem.status({state:"ready"})
 ```
 
-`ready`只表示 Runtime readiness，不携 Data Port/endpoint，也不表示 Renderer Data Connection存在。
+`ready` 只表示 Runtime readiness，不携 Data Port/endpoint，也不表示 Renderer Data Connection 存在。
 
 ```text
 one postMessage payload
@@ -63,53 +78,21 @@ one postMessage payload
 one JSON-RPC application message object
 ```
 
-Runtime Control Application Profile禁止 JSON-RPC Batch。
-
-## 4. Frame / Call Mapping
-
-```text
-Main → Subsystem
-    initialize / activate / suspend / resume / close
-Subsystem → Main
-    call / return
-```
-
-one `postMessage` plain JSON-compatible object = one Frame JSON-RPC application message。
-
-Structured Clone不得扩大 Frame value model，禁止依赖非 JSON capability/value。
-
-Control v1与 Frame v1共享 sender-side connection-lifetime Request ID namespace；Frame deadlines保持 sender-local monotonic `1000..300000ms`，adapter不 retry/replay。
+Structured Clone 不得扩大 Frame value model；adapter 不 retry/replay。
 
 必须保持：
 
 ```text
 frame.call Response before dependent Child initialize/activate
 frame.return Response before dependent close/resume
-ordinary call has no reverse frame.suspend
 activate/resume ACK before InputTarget publication
 ```
 
-Administrative `frame.suspend` 直接遵守 Frame v1主契约：无 generic reactivation；child-call suspended只通过对应 Child outcome + fresh resume恢复。
+failure unwind 只在 Main Worker；Window、Worker wrapper、MessagePort adapter、Data Connection 均不得修改 root/Stack/Activation。
 
-## 5. Runtime Failure
+## 4. Renderer Control
 
-failure unwind只在 Main Worker：
-
-```text
-failedRuntimeKeys
-→ lowest failed-runtime occurrence
-→ whole suffix
-→ Top→Bottom cleanup
-→ fixed-point expansion
-→ accepted outcome preserved
-→ fresh final Caller resume or Stack empty
-```
-
-Window、Worker wrapper、MessagePort adapter、Data Connection不得自行修改 root/Stack/Activation。
-
-## 6. Renderer Control
-
-Window/Web Renderer从 Main获得：
+Window/Web Renderer 从 Main 获得：
 
 ```text
 full Authority Snapshot
@@ -118,7 +101,7 @@ Frame Stack / Activation / InputTarget
 DataAuthority {subsystemKey, generation, connectionProfile}
 ```
 
-Renderer Control不携 Data MessagePort、endpoint或 bearer Data credential。
+Renderer Control 不携 Data MessagePort、endpoint 或 bearer Data credential。
 
 Control loss：
 
@@ -130,32 +113,32 @@ retire old Renderer⇄Subsystem Data Connections
 → current full Snapshot
 ```
 
-Renderer Control bootstrap token/Port如何由 PWA Host交付也是 Host implementation，不额外定义 bootstrap Profile。
+Renderer Control bootstrap token/Port 如何交付属于 composition/adapter implementation，不定义 bootstrap Profile。
 
-## 7. Renderer ⇄ Subsystem Data
+## 5. Renderer ⇄ Subsystem Data
 
-PWA Host建立 actual Data MessagePort：
+PWA 使用 MessagePort carrier adapter：
 
 ```text
 Main publishes DataAuthority(S,G)
-→ Host creates MessageChannel/Port
+→ composition creates MessageChannel/Port
 → securely binds carrier to Session/current Renderer/S/G
-→ transfers endpoints to participants
+→ transfers endpoints
 → installs at most one current Data Connection
 ```
 
-Port bootstrap不进入 Renderer Control Snapshot，也不进入 Subsystem `ready`。
+Port bootstrap 不进入 Renderer Control Snapshot，也不进入 Subsystem `ready`。
 
-同 generation仍授权时，旧 carrier retired后 MAY建立 fresh carrier。
+同 generation 仍授权时，旧 carrier retired 后 MAY 建立 fresh carrier。
 
 ```text
 Data loss != Runtime failure
 Data loss != Frame unwind
 ```
 
-Host Port creation/transfer schema不是 Data Connection wire surface；只需满足 Data Connection identity/cardinality/retirement requirements。
+MessagePort adapter 只负责 carrier semantics，不拥有 Data authority 或应用层 recovery。
 
-## 8. User Input
+## 6. User Input / Render
 
 ```text
 current Data Connection
@@ -164,19 +147,9 @@ current Data Connection
 ∩ Producer availability
 ```
 
-fresh Data Connection从 empty Interest开始；State重新 baseline；Event不 replay。
+fresh Data Connection 从 empty Interest 开始；State 重新 baseline；Event 不 replay。
 
-标准 keyboard/pointer/gamepad canonical payload由 User Input v1定义；浏览器 DOM/Gamepad API如何变换到 canonical payload由 Web Renderer implementation负责。
-
-## 9. Render
-
-Render由 Subsystem拥有，可以 zero Frame存在。
-
-```text
-Frame close/unwind != Render destroy
-Data Connection retire != Render destroy
-Renderer Control reconnect != Frame recovery
-```
+标准 keyboard/pointer/gamepad canonical payload 由 User Input v1 定义；DOM/Gamepad API 如何变换到 canonical payload由 Renderer implementation 负责。
 
 Render Update：
 
@@ -187,27 +160,50 @@ Patch(R→R+1)
 Event
 ```
 
-fresh Data carrier以 Registry + fresh Snapshots恢复，不以 cache继续 Patch。
+fresh Data carrier 以 Registry + fresh Snapshots 恢复；`tag` 只作为 opaque string 传输。
 
-`tag`只作为 opaque string传输；presentation mapping由 Renderer实现。
+## 7. Content Binding
 
-## 10. Content
+PWA Content 主要依赖：
+
+```text
+@loomrealm/content
+@loomrealm/content-service-worker
+```
+
+底层 MAY 使用：
 
 ```text
 same-origin Fetch
 Service Worker
-OPFS / Cache Storage
+OPFS
+Cache Storage
 ```
 
-PWA使用 same-origin authority，不需要复制 Desktop bearer distribution机制，也不存在 Content Access Profile。
+这些是技术实现；Content API logical route/cache/version/integrity semantics 保持一致。
 
-Service Worker不得承担 Frame Stack、Runtime Tick、Renderer Control或 Input authority。
+PWA 使用 same-origin authority，不需要复制 Desktop bearer distribution 机制，也不存在 Content Access Profile。
 
-Range如果实现，直接遵守标准 HTTP Range；deployment limits属于 implementation configuration。
+## 8. Package Boundary
 
-## 11. Cross-platform Semantic Equivalence
+平台差异优先落在单一能力 Adapter，例如：
 
-Desktop/PWA 对相同 abstract trace必须保持：
+```text
+transport-messageport
+content-service-worker
+```
+
+不默认建立：
+
+```text
+@loomrealm/host-pwa
+```
+
+Worker lifecycle、Port transfer、Service Worker registration 等 glue 默认留在 `apps/pwa` composition root；只有证明被多个独立产品复用时才抽成新包。
+
+## 9. Cross-platform Semantic Equivalence
+
+Desktop/PWA 对相同 abstract trace 必须保持：
 
 ```text
 Control Runtime lifecycle
@@ -219,18 +215,19 @@ Render authoritative recovery
 Content logical API semantics
 ```
 
-允许平台在 Worker/Port/WebSocket/token/ticket创建方式上不同。
+平台允许在 Worker/Port/WebSocket/token/ticket 创建方式上不同。
 
-## 12. Core Invariants
+## 10. Core Invariants
 
 - Phase 1 one Subsystem = one Dedicated Worker；
 - Runtime Control = Control v1 + Frame v1；
-- Control ready不携 Data endpoint/Port；
-- Structured Clone不能扩大协议 JSON value model；
+- Control ready 不携 Data endpoint/Port；
+- Structured Clone 不能扩大协议 JSON value model；
 - no Frame retry/replay；
-- fixed-point unwind只在 Main Worker；
-- Renderer Control只复制 logical authority；
-- Control/Data Port bootstrap都是 PWA Host implementation，不形成独立 application Profile；
-- Control loss撤销 Input/Data authority；
-- Data loss不等于 Runtime/Frame failure；
-- Frame lifecycle不控制 Render/Data lifecycle。
+- fixed-point unwind 只在 Main Worker；
+- Renderer Control 只复制 logical authority；
+- Control/Data Port bootstrap 是 composition/adapter implementation，不形成 application Profile；
+- Control loss 撤销 Input/Data authority；
+- Data loss 不等于 Runtime/Frame failure；
+- Frame lifecycle 不控制 Render/Data lifecycle；
+- PWA platform module 不等于公共万能 package。
