@@ -1,8 +1,12 @@
 {
-  "name": "loom-realm-docs",
+  "name": "loom-realm-monorepo",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
+    "build:packages": "npm run build --workspaces --if-present",
     "docs:dev": "vitepress dev doc",
     "docs:build": "vitepress build doc",
     "docs:preview": "vitepress preview doc",
