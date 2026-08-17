@@ -4,7 +4,7 @@ Read-only HTTP adapter for filesystem-backed FSDB directories.
 
 > Status: **Frozen for Implementation — v1**. Runtime implementation has not started yet.
 
-The package opens a Well-formed FSDB directory, builds a safe immutable logical index, and exposes FSDB logical objects through a small Node.js-native HTTP interface without leaking physical filesystem paths.
+The package opens a Well-formed FSDB directory, builds one safe immutable logical snapshot, and exposes FSDB logical objects through a small Node.js-native HTTP interface without leaking physical filesystem paths.
 
 ## Contracts
 
@@ -14,30 +14,38 @@ The package opens a Well-formed FSDB directory, builds a safe immutable logical 
 
 ## Package boundary
 
-This package is intentionally independent from LoomRealm Main, Renderer, Frame, Data Connection, Game Package and Content API.
-
 ```text
 filesystem FSDB directory
         ↓
 openFsdb()
         ↓
-FsdbDatabase
+opaque FsdbDatabase
         ↓
 createFsdbHttpHandler()
         ↓
 node:http RequestListener
 ```
 
-`serveFsdb()` is the convenience composition that owns a database plus a `node:http` server. Express, Koa, Fastify and Hono are not core dependencies or primary integration contracts.
+`FsdbDatabase` is an opaque package-owned handle rather than a user-constructible structural object.
 
-## Frozen v1 public shape
+`createFsdbHttpHandler(db)` borrows a caller-owned database; closing the HTTP server does not close that database.
+
+`serveFsdb()` is the standalone convenience composition. It owns an internal database plus a `node:http` server and exposes one lifecycle owner through `service.close()`; the internal database is intentionally not exposed as a service field.
+
+Express, Koa, Fastify and Hono are not core dependencies or primary integration contracts.
+
+## Frozen v1 public usage
 
 ```ts
 const db = await openFsdb({ root });
 const handler = createFsdbHttpHandler(db);
 
 // or
-const service = await serveFsdb({ root, host: "127.0.0.1", port: 0 });
+const service = await serveFsdb({
+  root,
+  host: "127.0.0.1",
+  port: 0,
+});
 ```
 
-The first implementation targets Node.js `>=20`, prefers standard-library primitives, and keeps **0 runtime dependencies**. Internal implementation details may evolve as long as the Frozen v1 observable contract and conformance suite remain satisfied.
+The first implementation targets Node.js `>=20`, uses standard-library primitives, and keeps **0 runtime dependencies**. Internal implementation details may evolve only while the Frozen v1 observable contract and mandatory conformance suite remain satisfied.
