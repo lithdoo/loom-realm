@@ -153,19 +153,21 @@ node tools/fixtures/essentials-v21.1/import.mjs
 https://www.eeveeexpo.com/essentials/download
 ```
 
-该地址是 Eevee Expo Essentials 下载入口；importer MUST 允许正常 HTTP redirect。只有最终成功响应明确为 ZIP/binary download 时，才能保存为 temporary ZIP。
+该地址是 Eevee Expo Essentials 下载入口；importer MUST 允许正常 HTTP redirect。当前入口会进入 MediaFire landing page，importer 从 HTML 中动态选择当前的 HTTPS ZIP download link，再获取 temporary ZIP。
 
 不得把当前 CDN/MediaFire 的瞬时直链写死为长期 authority。默认 acquisition authority 是上面的 Eevee Expo download endpoint。
 
-当前入口可能重定向到 MediaFire HTML 落地页，而不是 raw ZIP。Importer MUST NOT 抓取 HTML、执行页面脚本或从页面中固化临时 CDN URL。遇到 landing page / anti-bot response 时以 `DOWNLOAD_FAILURE` fail closed，并提示开发者手工下载后通过 `--source` 导入。这是外部 acquisition availability，不降低 local ZIP importer 的完整性。
+Landing page resolution MUST 不执行 JavaScript、不接受非 HTTPS link，并只接受 MediaFire authority 下唯一、无歧义的 `.zip` download link。第二个 HTML landing page、非 MediaFire link、多个候选或无法解析都以 `DOWNLOAD_FAILURE` fail closed。
 
 下载要求：
 
 ```text
 HTTPS request
 → follow bounded redirects
-→ require successful final ZIP/binary response
+→ parse bounded MediaFire landing page
+→ follow current HTTPS ZIP link
 → stream to temporary file
+→ verify pinned archive size + SHA-256
 → validate archive shape
 → safely extract to temporary directory
 → locate Essentials v21.1 root
@@ -264,6 +266,8 @@ AcquiredSource {
 ```text
 no --source
 → Eevee Expo download endpoint
+→ MediaFire landing page
+→ current HTTPS ZIP link
 → temporary ZIP
 → temporary extracted root
 → cleanup after success/failure
@@ -282,7 +286,20 @@ entry escaping extraction root → reject
 archive symlink/indirection   → reject
 ambiguous duplicate target    → reject
 unsupported/corrupt archive   → reject
+archive > 128 MiB             → reject
+entries > 10,000              → reject
+uncompressed > 128 MiB        → reject
+single entry > 32 MiB         → reject
 ```
+
+自动下载的 2023-07-30 官方 archive identity 固定为：
+
+```text
+size:   61987094 bytes
+sha256: da0a34ec81ed40a4346fe6101debd7d938cbeadd43ff0aad87c3e388392a1665
+```
+
+自动下载若不匹配必须以 `DOWNLOAD_INTEGRITY_FAILURE` 失败。Local directory/ZIP 仍以 source shape、版本和 strict resource preflight 判定，允许开发者使用内容等价的本地重打包。
 
 ZIP 实现方式属于 tooling implementation detail，可以使用 tooling-only dependency；不得因此给 `@loomrealm/fsdb-http` 增加 runtime dependency。
 
@@ -364,6 +381,8 @@ modify line endings
 ```
 
 文件名进行 FSDB compatibility validation，但不得静默改名。
+
+Target writer MUST 以每个 segment 的 NFC canonical spelling 请求创建目录和文件。Source physical spelling 只用于读取和诊断；target physical path 使用 canonical directory segments 与 canonical leaf name。该 NFC 写入是 FSDB writer invariant，不是业务命名修复；source bytes 仍保持不变。
 
 ---
 
@@ -689,6 +708,7 @@ Output: <output root>
 ```text
 DOWNLOAD_FAILURE
 DOWNLOAD_REDIRECT_FAILURE
+DOWNLOAD_INTEGRITY_FAILURE
 ARCHIVE_INVALID
 ARCHIVE_PATH_ESCAPE
 SOURCE_NOT_ESSENTIALS_V21_1
@@ -787,9 +807,11 @@ Phase A importer 可以认为完成，当：
 CLI only has optional --source and --output inputs
 local directory source PASS
 local ZIP source PASS
-no-source automatic HTTPS download PASS when authority yields a raw archive; landing page fails closed
+no-source Eevee Expo → MediaFire landing → current HTTPS ZIP download PASS
+automatic download size + SHA-256 pin enforced
 download redirects handled safely
 archive extraction traversal-safe
+archive compressed/uncompressed/entry-count limits enforced
 borrowed source never modified
 temporary acquisition always cleaned up
 source identity/version preflight implemented
@@ -805,6 +827,7 @@ production openFsdb(output) PASS
 representative HTTP GET/HEAD PASS
 byte-for-byte sampled resources PASS
 large real corpus statistics reported
+fixture tests run in GitHub Actions on relevant changes
 ```
 
 达到此状态后，再根据真实导入结果决定是否进入 Phase B；不要在 Phase A CLI 上继续累积模式参数。

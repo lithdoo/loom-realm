@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { serveFsdb } from "../../../packages/fsdb-http/dist/index.js";
-import { ImportFailure, parseArguments, run, validateArchivePath } from "./import.mjs";
+import { accountArchiveEntry, downloadArchive, ImportFailure, parseArguments, resolveMediaFireDownloadLink, run, validateArchivePath } from "./import.mjs";
 
 const TABLES = ["Graphics", "Audio", "Fonts", "Data", "PBS"];
 
@@ -19,6 +20,10 @@ async function makeSource(parent, invalidExtension = false) {
     if (table === "Graphics") await mkdir(directory);
     await writeFile(join(directory, name), Buffer.from(`${table}\0fixture`));
   }
+  const nfdDirectory = `caf${"é".normalize("NFD")}`;
+  const nfdFile = `r${"é".normalize("NFD")}.bin`;
+  await mkdir(join(root, "Graphics", nfdDirectory));
+  await writeFile(join(root, "Graphics", nfdDirectory, nfdFile), "NFC target");
   return root;
 }
 
@@ -36,6 +41,75 @@ test("archive paths fail closed", () => {
   }
 });
 
+test("archive budgets and MediaFire landing-page resolution fail closed", () => {
+  const budget = { entries: 0, uncompressedBytes: 0 };
+  accountArchiveEntry(budget, 1024);
+  assert.deepEqual(budget, { entries: 1, uncompressedBytes: 1024 });
+  assert.throws(
+    () => accountArchiveEntry(budget, 33 * 1024 * 1024),
+    (error) => error instanceof ImportFailure && error.category === "ARCHIVE_INVALID",
+  );
+
+  const landing = "https://www.mediafire.com/file/example/Pokemon_Essentials.zip/file";
+  const html = '<a id="downloadButton" href="https://download123.mediafire.com/token/file/Pokemon%2BEssentials.zip?x=1&amp;y=2">Download</a>';
+  assert.equal(
+    resolveMediaFireDownloadLink(html, landing).href,
+    "https://download123.mediafire.com/token/file/Pokemon%2BEssentials.zip?x=1&y=2",
+  );
+  assert.throws(
+    () => resolveMediaFireDownloadLink('<a id="downloadButton" href="https://example.com/file.zip">Download</a>', landing),
+    (error) => error instanceof ImportFailure && error.category === "DOWNLOAD_FAILURE",
+  );
+});
+
+test("automatic acquisition follows landing page and enforces archive identity", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "essentials-download-test-"));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const destination = join(temporary, "fixture.zip");
+  const payload = Buffer.from("pinned archive bytes");
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url.href);
+    if (calls.length === 1) {
+      return new Response(null, { status: 302, headers: { location: "https://www.mediafire.com/file/example/fixture.zip/file" } });
+    }
+    if (calls.length === 2) {
+      return new Response('<a id="downloadButton" href="https://download123.mediafire.com/token/fixture.zip">Download</a>', {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+    return new Response(payload, {
+      status: 200,
+      headers: { "content-length": String(payload.length), "content-type": "application/zip" },
+    });
+  };
+
+  await downloadArchive(destination, {
+    fetchImpl,
+    initialUrl: "https://www.eeveeexpo.com/essentials/download",
+    expectedArchive: { size: payload.length, sha256: createHash("sha256").update(payload).digest("hex") },
+  });
+  assert.deepEqual(calls, [
+    "https://www.eeveeexpo.com/essentials/download",
+    "https://www.mediafire.com/file/example/fixture.zip/file",
+    "https://download123.mediafire.com/token/fixture.zip",
+  ]);
+  assert.deepEqual(await readFile(destination), payload);
+
+  await assert.rejects(
+    downloadArchive(join(temporary, "wrong.zip"), {
+      fetchImpl: async () => new Response(payload, {
+        status: 200,
+        headers: { "content-length": String(payload.length), "content-type": "application/zip" },
+      }),
+      initialUrl: "https://www.eeveeexpo.com/essentials/download",
+      expectedArchive: { size: payload.length, sha256: "0".repeat(64) },
+    }),
+    (error) => error instanceof ImportFailure && error.category === "DOWNLOAD_INTEGRITY_FAILURE",
+  );
+});
+
 test("local directory import is byte-preserving and never overwrites", async (t) => {
   const temporary = await mkdtemp(join(tmpdir(), "essentials-import-test-"));
   t.after(() => rm(temporary, { recursive: true, force: true }));
@@ -48,6 +122,13 @@ test("local directory import is byte-preserving and never overwrites", async (t)
   assert.equal(second, join(output, "[FSDB]Essentials v21.1 2"));
   assert.deepEqual(await readFile(join(first, "[resource]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
   assert.deepEqual(await readFile(join(second, "[resource]Graphics", "nested", "sample.bin")), Buffer.from("Graphics\0fixture"));
+  const nfcDirectory = "café";
+  const nfcFile = "ré.bin";
+  assert.equal(nfcDirectory, nfcDirectory.normalize("NFC"));
+  assert.equal(nfcFile, nfcFile.normalize("NFC"));
+  assert.equal(await readFile(join(first, "[resource]Graphics", nfcDirectory, nfcFile), "utf8"), "NFC target");
+  assert((await readdir(join(first, "[resource]Graphics"))).includes(nfcDirectory));
+  assert((await readdir(join(first, "[resource]Graphics", nfcDirectory))).includes(nfcFile));
   const provenance = JSON.parse(await readFile(join(first, "[struct]测试信息", "来源.json"), "utf8"));
   assert.equal(provenance.acquisition, "local-directory");
 

@@ -13,12 +13,11 @@ import {
   realpath,
   rename,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { Readable } from "node:stream";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import yauzl from "yauzl";
@@ -28,7 +27,16 @@ const REPOSITORY_ROOT = resolve(HERE, "../../..");
 const TABLES = Object.freeze(["Graphics", "Audio", "Fonts", "Data", "PBS"]);
 const OUTPUT_BASENAME = "[FSDB]Essentials v21.1";
 const DEFAULT_DOWNLOAD = "https://www.eeveeexpo.com/essentials/download";
-const MAX_REDIRECTS = 8;
+const MAX_HTTP_HOPS = 10;
+const MAX_LANDING_PAGE_BYTES = 2 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 32 * 1024 * 1024;
+const EXPECTED_ARCHIVE = Object.freeze({
+  size: 61_987_094,
+  sha256: "da0a34ec81ed40a4346fe6101debd7d938cbeadd43ff0aad87c3e388392a1665",
+});
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 const COMPATIBILITY_ADAPTATIONS = new Map([
   ["Graphics/UI/itemstorage_bg.PNG", {
@@ -126,7 +134,23 @@ export function validateArchivePath(fileName, extractionRoot) {
   return target;
 }
 
+export function accountArchiveEntry(budget, uncompressedSize) {
+  budget.entries += 1;
+  budget.uncompressedBytes += uncompressedSize;
+  if (
+    budget.entries > MAX_ARCHIVE_ENTRIES ||
+    budget.uncompressedBytes > MAX_UNCOMPRESSED_BYTES ||
+    uncompressedSize > MAX_ENTRY_BYTES
+  ) {
+    fail("ARCHIVE_INVALID", "ZIP archive exceeds the configured extraction resource limits");
+  }
+}
+
 async function extractZip(zipPath, extractionRoot) {
+  const archiveStat = await lstat(zipPath);
+  if (!archiveStat.isFile() || archiveStat.isSymbolicLink() || archiveStat.size > MAX_ARCHIVE_BYTES) {
+    fail("ARCHIVE_INVALID", `ZIP archive exceeds the ${MAX_ARCHIVE_BYTES}-byte compressed size limit`);
+  }
   await mkdir(extractionRoot, { recursive: false });
   let zip;
   try {
@@ -135,6 +159,7 @@ async function extractZip(zipPath, extractionRoot) {
     fail("ARCHIVE_INVALID", `Cannot open ZIP archive: ${error.message}`);
   }
   const targets = new Set();
+  const budget = { entries: 0, uncompressedBytes: 0 };
   try {
     await new Promise((resolveExtraction, reject) => {
       const rejectOnce = (error) => {
@@ -145,6 +170,7 @@ async function extractZip(zipPath, extractionRoot) {
       zip.once("end", resolveExtraction);
       zip.on("entry", async (entry) => {
         try {
+          accountArchiveEntry(budget, entry.uncompressedSize);
           const target = validateArchivePath(entry.fileName, extractionRoot);
           const key = process.platform === "win32" ? target.toLocaleLowerCase("en-US") : target;
           if (targets.has(key)) fail("ARCHIVE_INVALID", `Duplicate archive target: ${entry.fileName}`);
@@ -175,32 +201,138 @@ async function extractZip(zipPath, extractionRoot) {
   }
 }
 
-async function downloadArchive(destination) {
-  let current = new URL(DEFAULT_DOWNLOAD);
-  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+function decodeHtmlAttribute(value) {
+  return value.replace(/&(?:amp|quot|apos|#39|#x27);/gi, (entity) => {
+    const normalized = entity.toLowerCase();
+    if (normalized === "&amp;") return "&";
+    if (normalized === "&quot;") return '"';
+    return "'";
+  });
+}
+
+function htmlAttribute(tag, name) {
+  const match = new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "is").exec(tag);
+  return match ? decodeHtmlAttribute(match[2]) : undefined;
+}
+
+function isMediaFireHost(hostname) {
+  const lower = hostname.toLowerCase();
+  return lower === "mediafire.com" || lower.endsWith(".mediafire.com");
+}
+
+export function resolveMediaFireDownloadLink(html, landingUrl) {
+  const landing = new URL(landingUrl);
+  if (landing.protocol !== "https:" || !isMediaFireHost(landing.hostname)) {
+    fail("DOWNLOAD_FAILURE", "Refusing to parse a non-MediaFire landing page");
+  }
+  const candidates = [];
+  for (const match of html.matchAll(/<a\b[^>]*>/gis)) {
+    const tag = match[0];
+    const href = htmlAttribute(tag, "href");
+    if (!href) continue;
+    let target;
+    try { target = new URL(href, landing); } catch { continue; }
+    let path;
+    try { path = decodeURIComponent(target.pathname); } catch { continue; }
+    if (target.protocol !== "https:" || !isMediaFireHost(target.hostname) || !path.toLowerCase().endsWith(".zip")) continue;
+    candidates.push({ url: target.href, preferred: htmlAttribute(tag, "id")?.toLowerCase() === "downloadbutton" });
+  }
+  const preferred = [...new Set(candidates.filter((item) => item.preferred).map((item) => item.url))];
+  const all = [...new Set(candidates.map((item) => item.url))];
+  const selected = preferred.length === 1 ? preferred[0] : all.length === 1 ? all[0] : undefined;
+  if (!selected) fail("DOWNLOAD_FAILURE", `MediaFire landing page exposed ${all.length} unambiguous HTTPS ZIP links`);
+  return new URL(selected);
+}
+
+async function readTextResponse(response) {
+  if (!response.body) fail("DOWNLOAD_FAILURE", "Landing page response has no body");
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of Readable.fromWeb(response.body)) {
+    length += chunk.length;
+    if (length > MAX_LANDING_PAGE_BYTES) fail("DOWNLOAD_FAILURE", "MediaFire landing page exceeds the size limit");
+    chunks.push(chunk);
+  }
+  try { return UTF8.decode(Buffer.concat(chunks, length)); } catch { fail("DOWNLOAD_FAILURE", "MediaFire landing page is not valid UTF-8"); }
+}
+
+async function saveVerifiedArchive(response, destination, expectedArchive) {
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength !== null && Number(declaredLength) !== expectedArchive.size) {
+    fail("DOWNLOAD_INTEGRITY_FAILURE", `Downloaded ZIP Content-Length is ${declaredLength}, expected ${expectedArchive.size}`);
+  }
+  const hash = createHash("sha256");
+  let length = 0;
+  const verifier = new Transform({
+    transform(chunk, _encoding, callback) {
+      length += chunk.length;
+      if (length > expectedArchive.size) {
+        callback(new ImportFailure("DOWNLOAD_INTEGRITY_FAILURE", "Downloaded ZIP exceeds the pinned size"));
+        return;
+      }
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+  });
+  try {
+    await pipeline(Readable.fromWeb(response.body), verifier, createWriteStream(destination, { flags: "wx" }));
+  } catch (error) {
+    if (error instanceof ImportFailure) throw error;
+    fail("DOWNLOAD_FAILURE", `Cannot save downloaded ZIP: ${error.message}`);
+  }
+  const digest = hash.digest("hex");
+  if (length !== expectedArchive.size || digest !== expectedArchive.sha256) {
+    fail("DOWNLOAD_INTEGRITY_FAILURE", `Downloaded ZIP identity mismatch (${length} bytes, SHA-256 ${digest})`);
+  }
+}
+
+export async function downloadArchive(destination, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const expectedArchive = options.expectedArchive ?? EXPECTED_ARCHIVE;
+  let current = new URL(options.initialUrl ?? DEFAULT_DOWNLOAD);
+  let referer;
+  let parsedLandingPage = false;
+  for (let hops = 0; hops <= MAX_HTTP_HOPS; hops += 1) {
     if (current.protocol !== "https:") fail("DOWNLOAD_REDIRECT_FAILURE", `Download URL is not HTTPS: ${current.origin}`);
+    if (parsedLandingPage && !isMediaFireHost(current.hostname)) {
+      fail("DOWNLOAD_REDIRECT_FAILURE", `MediaFire download redirected outside its HTTPS authority: ${current.origin}`);
+    }
     let response;
     try {
-      response = await fetch(current, { redirect: "manual", headers: { "user-agent": "LoomRealm fixture importer" } });
+      const headers = {
+        accept: parsedLandingPage ? "application/zip, application/octet-stream;q=0.9, */*;q=0.8" : "text/html,application/xhtml+xml,application/zip;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.8",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36 LoomRealmFixtureImporter/1.0",
+      };
+      if (referer) headers.referer = referer;
+      response = await fetchImpl(current, { redirect: "manual", headers });
     } catch (error) {
       fail("DOWNLOAD_FAILURE", `Download request failed: ${error.message}`);
     }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("location");
       if (!location) fail("DOWNLOAD_REDIRECT_FAILURE", "Download redirect has no Location header");
-      current = new URL(location, current);
+      try { current = new URL(location, current); } catch { fail("DOWNLOAD_REDIRECT_FAILURE", "Download redirect Location is invalid"); }
       continue;
     }
     if (!response.ok || !response.body) fail("DOWNLOAD_FAILURE", `Download failed with HTTP ${response.status}`);
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     const disposition = response.headers.get("content-disposition")?.toLowerCase() ?? "";
-    if (contentType.includes("text/html") || (!contentType.includes("zip") && !contentType.includes("octet-stream") && !disposition.includes(".zip"))) {
-      fail("DOWNLOAD_FAILURE", "Eevee Expo download endpoint did not return a ZIP archive; download it manually and pass --source");
+    if (contentType.includes("text/html")) {
+      if (parsedLandingPage) fail("DOWNLOAD_FAILURE", "Download link returned a second HTML landing page");
+      const html = await readTextResponse(response);
+      referer = current.href;
+      current = resolveMediaFireDownloadLink(html, current);
+      parsedLandingPage = true;
+      continue;
     }
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(destination, { flags: "wx" }));
+    if (!contentType.includes("zip") && !contentType.includes("octet-stream") && !disposition.includes(".zip")) {
+      fail("DOWNLOAD_FAILURE", `Download endpoint returned unsupported Content-Type: ${contentType || "missing"}`);
+    }
+    await saveVerifiedArchive(response, destination, expectedArchive);
     return;
   }
-  fail("DOWNLOAD_REDIRECT_FAILURE", `Download exceeded ${MAX_REDIRECTS} redirects`);
+  fail("DOWNLOAD_REDIRECT_FAILURE", `Download exceeded ${MAX_HTTP_HOPS} HTTP hops`);
 }
 
 async function locateArchiveRoot(extractionRoot) {
@@ -349,13 +481,13 @@ async function planResources(root) {
           const existing = logicalDirectories.get(logicalPath);
           if (existing !== undefined) issues.push(`NORMALIZATION_COLLISION ${existing} <> ${displayParent}/${physicalName}/`);
           else logicalDirectories.set(logicalPath, `${displayParent}/${physicalName}/`);
-          directories.push({ table, segments: [...physicalSegments, physicalName] });
+          directories.push({ table, segments: [...logicalSegments, logicalName] });
           await scan(physicalPath, [...physicalSegments, physicalName], [...logicalSegments, logicalName]);
           continue;
         }
 
         let parsed;
-        let targetName = physicalName;
+        let targetName;
         try { parsed = resourceExtension(physicalName); } catch (error) {
           const sourceRelative = `${table}/${[...physicalSegments, physicalName].join("/")}`;
           const adaptation = COMPATIBILITY_ADAPTATIONS.get(sourceRelative);
@@ -365,15 +497,16 @@ async function planResources(root) {
               issues.push(`INVALID_EXTENSION ${displayParent}/${physicalName} (known adaptation content mismatch)`);
               continue;
             }
-            targetName = adaptation.targetName;
-            parsed = resourceExtension(targetName);
-            warnings.push(`adapted ${sourceRelative} -> ${table}/${[...physicalSegments, targetName].join("/")}`);
+            parsed = resourceExtension(adaptation.targetName);
+            targetName = `${parsed.leaf}.${parsed.extension}`;
+            warnings.push(`adapted ${sourceRelative} -> ${table}/${[...logicalSegments, targetName].join("/")}`);
           } else {
             const category = /extension/i.test(error.message) ? "INVALID_EXTENSION" : "INVALID_NAME_SEGMENT";
             issues.push(`${category} ${displayParent}/${physicalName}`);
             continue;
           }
         }
+        targetName ??= `${parsed.leaf}.${parsed.extension}`;
         const key = [...logicalSegments, parsed.leaf].join("/");
         const display = `${displayParent}/${physicalName}`;
         const existing = keys.get(key);
@@ -387,7 +520,7 @@ async function planResources(root) {
           table,
           sourcePath: physicalPath,
           sourceRelativeSegments: [...physicalSegments, physicalName],
-          relativeSegments: [...physicalSegments, targetName],
+          relativeSegments: [...logicalSegments, targetName],
           resourceKey: key,
           extension: parsed.extension,
           size: BigInt(item.size),
