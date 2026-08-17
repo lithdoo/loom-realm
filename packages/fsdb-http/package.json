@@ -14,7 +14,8 @@
   "files": [
     "dist",
     "README.md",
-    "DESIGN.md"
+    "DESIGN.md",
+    "CONFORMANCE.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
