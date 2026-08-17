@@ -20,7 +20,7 @@ well-formed validation
         ↓
 safe immutable logical index
         ↓
-readonly HTTP handler
+Node.js native HTTP handler
         ↓
 FSDB logical HTTP interface
 ```
@@ -35,7 +35,7 @@ Node.js stdlib
 @loomrealm/fsdb-http
 ```
 
-尽量保持 0 runtime dependencies。
+尽量保持 0 runtime dependencies。Node.js 类型定义、TypeScript 等只属于 build/dev dependency，不改变 runtime dependency 目标。
 
 ---
 
@@ -53,7 +53,8 @@ Unicode logical name ↔ HTTP path 的安全可逆映射
 Content-Type / Content-Length / ETag
 traversal / symlink escape 防护
 静态 source lifetime 与 stale fail-closed
-可嵌入 Node HTTP handler
+Node.js stdlib RequestListener
+可选的独立 node:http convenience service
 ```
 
 第一版不负责：
@@ -66,6 +67,7 @@ filesystem watch / hot reload
 query / filter / pagination
 ORM / business schema mapping
 key listing
+Express / Koa / Fastify / Hono framework dependency
 LoomRealm installation registry
 Game Package
 Content API authorization
@@ -253,14 +255,48 @@ src/
 │   ├── response.ts
 │   └── mime.ts
 │
+├── server/
+│   └── serve.ts
+│
 └── index.ts
+```
+
+职责：
+
+```text
+fsdb/
+    filesystem snapshot / validation / index
+
+http/
+    FSDB HTTP semantics + Node RequestListener
+
+server/
+    node:http createServer/listen/close convenience
 ```
 
 第一阶段保持一个 package。只有出现第二个真实消费者时，再考虑抽出 `@loomrealm/fsdb`。
 
 ---
 
-## 6. 候选 Public API
+## 6. Node.js 落地形式与 Public API
+
+第一版不以 Express、Koa 等 Web Framework plugin 为核心落地形式，也不把独立 daemon/process 作为协议实现本体。
+
+主落地形式：
+
+```text
+FsdbDatabase
+    ↓
+Node.js stdlib http.RequestListener
+    ↓
+node:http Server
+```
+
+原则：
+
+> **Node 原生 HTTP Handler 是核心能力；独立 HTTP Service 是 convenience composition；Framework middleware 只是未来可选 adapter。**
+
+### 6.1 `openFsdb()`：storage snapshot
 
 ```ts
 const db = await openFsdb({
@@ -278,24 +314,219 @@ interface FsdbDatabase {
 }
 ```
 
-HTTP adapter：
+`openFsdb()` 负责 filesystem / FSDB 层：
 
-```ts
-const handler = createFsdbHttpHandler(db);
-createServer(handler);
+```text
+scan
+Well-formed validation
+logical index
+source fingerprint
+snapshot lifetime
 ```
 
-可选 convenience API：
+它本身不启动端口，也不拥有 HTTP server。
+
+### 6.2 `createFsdbHttpHandler()`：核心 HTTP 落地形式
 
 ```ts
-await serveFsdb({
-  root,
+import { createServer } from "node:http";
+
+const db = await openFsdb({ root });
+const handler = createFsdbHttpHandler(db);
+const server = createServer(handler);
+```
+
+第一版 public type 以 Node.js stdlib 为边界：
+
+```ts
+import type { RequestListener } from "node:http";
+
+function createFsdbHttpHandler(
+  db: FsdbDatabase,
+): RequestListener;
+```
+
+核心 handler：
+
+```text
+使用 IncomingMessage / ServerResponse
+直接读取原始 request URL / request-target
+拥有本文定义的 FSDB HTTP route / encoding / status / cache 语义
+不依赖 Express / Koa / Fastify / Hono
+不启动端口
+不注册 signal handler
+不决定进程生命周期
+```
+
+`createFsdbHttpHandler(db)` **借用**调用方提供的 `FsdbDatabase`：
+
+```text
+handler creation does not own db
+handler/server close does not implicitly close db
+caller owns db.close()
+```
+
+这使同一个 database snapshot 可以由宿主按明确生命周期组合，而不会把 storage ownership 隐藏进 HTTP callback。
+
+第一版 handler 直接拥有 `/fsdb/v1` HTTP namespace；如果把它作为一个完整 `node:http` server 的 listener，其他不属于该 namespace 的请求按本草案 route/error 规则处理，而不是调用 framework-style `next()`。
+
+### 6.3 `serveFsdb()`：独立 HTTP Service convenience
+
+最简单的使用方式可以是：
+
+```ts
+const service = await serveFsdb({
+  root: "/path/to/[FSDB]游戏数据",
   host: "127.0.0.1",
   port: 0,
 });
+
+console.log(service.origin.href);
+
+await service.close();
 ```
 
-最终 TypeScript API 在实现前不冻结；优先保持小而可组合。
+概念返回值：
+
+```ts
+interface FsdbHttpService {
+  readonly db: FsdbDatabase;
+  readonly server: import("node:http").Server;
+  readonly origin: URL;
+  close(): Promise<void>;
+}
+```
+
+`serveFsdb()` 是很薄的组合：
+
+```text
+openFsdb(root)
+    ↓
+createFsdbHttpHandler(db)
+    ↓
+http.createServer(handler)
+    ↓
+listen(host, port)
+```
+
+这里 ownership 与 6.2 不同：
+
+```text
+serveFsdb()
+    owns the FsdbDatabase it creates
+    owns the http.Server it creates
+
+service.close()
+    stop accepting HTTP connections
+    close server
+    close owned FsdbDatabase
+```
+
+关闭细节在实现时保持 fail-safe / idempotent，但不引入新的 wire semantics。
+
+因此“独立 HTTP 服务”只是本包提供的 convenience 运行形态，不是 FSDB HTTP contract 的唯一部署方式。
+
+### 6.4 Framework adapter boundary
+
+第一版不直接提供：
+
+```text
+Express Router
+Koa Middleware
+Fastify Plugin
+Hono Middleware
+```
+
+原因：
+
+```text
+避免 runtime framework dependency
+避免把 FSDB HTTP semantics 绑定到某个 router 生命周期
+避免 framework 提前 decode / normalize path 后破坏 7.4 的 raw URL 规则
+```
+
+如果未来出现真实消费者需要 framework integration，可以增加很薄的 adapter。Adapter MUST 保留本文定义的 route、raw path、percent-decoding、status、cache 与 source-lifetime semantics，不得因为框架不同而改变协议行为。
+
+Framework adapter 如果不能取得足够原始的 request-target 来执行本文的 URL 规则，则该 adapter 不应宣称与本实现等价。
+
+是否单独发布例如：
+
+```text
+@loomrealm/fsdb-http-express
+@loomrealm/fsdb-http-koa
+```
+
+必须等真实独立消费者出现后再决定，不为了对称性提前拆包。
+
+### 6.5 CLI / daemon boundary
+
+未来可以提供：
+
+```text
+fsdb-http ./[FSDB]游戏数据 --host 127.0.0.1 --port 8080
+```
+
+但 CLI / daemon 仍只是：
+
+```text
+config parsing
+process lifecycle
+logging
+signal handling
+        ↓
+serveFsdb()
+```
+
+进程管理、守护、自动重启、systemd/service integration 不进入 `createFsdbHttpHandler()` 或 FSDB HTTP wire contract。
+
+### 6.6 为什么第一版不以 Fetch `Request → Response` 为主 API
+
+WHATWG Fetch 形态未来可能适合 Service Worker、Bun、Deno 等环境，但本包第一版的明确问题域是：
+
+```text
+Node.js filesystem
++
+Node.js local HTTP serving
+```
+
+并且需要严格控制：
+
+```text
+raw request-target
+file streaming
+socket abort
+stat/fingerprint
+node:http lifecycle
+```
+
+因此第一版以 `node:http` 为最小且直接的实现 binding。未来如果出现真正的非 Node FSDB reader / HTTP consumer，再考虑抽出 `@loomrealm/fsdb` 并增加 Fetch-compatible adapter，而不是现在提前抽象。
+
+### 6.7 第一版主要 exports
+
+Public surface 优先保持：
+
+```ts
+export {
+  openFsdb,
+  createFsdbHttpHandler,
+  serveFsdb,
+};
+```
+
+概念分层：
+
+```text
+openFsdb
+    owns storage snapshot semantics
+
+createFsdbHttpHandler
+    owns FSDB HTTP semantics
+
+serveFsdb
+    owns Node server convenience composition
+```
+
+最终 TypeScript signature 在首个实现前仍可微调，但上述职责与 ownership boundary 应保持稳定。
 
 ---
 
@@ -785,14 +1016,15 @@ Content API route
 4. symlink/path containment + source fingerprints
 5. hierarchical ResourceKey indexing
 6. raw URL split + percent-decode + logical resolver
-7. GET / HEAD handler
+7. Node RequestListener + GET / HEAD handler
 8. raw JSON / JSONL / resource response
 9. metadata logical entry
 10. MIME + Content-Length
 11. OPEN / STALE / CLOSED lifecycle + snapshotId
 12. ETag / If-None-Match
-13. malformed/not-found/stale/method tests
-14. real Unicode FSDB fixture + consumer smoke
+13. serveFsdb() convenience service + ownership/close tests
+14. malformed/not-found/stale/method tests
+15. real Unicode FSDB fixture + embedded/standalone consumer smoke
 ```
 
 暂不实现：
@@ -806,6 +1038,8 @@ query/filter
 reference expansion
 key listing
 full Integrity-valid checker
+Express/Koa/Fastify/Hono adapter
+CLI/daemon process management
 ```
 
 ---
@@ -817,12 +1051,21 @@ full Integrity-valid checker
 ```text
 open
 → Well-formed validation/index
-→ start handler
+→ createFsdbHttpHandler(db)
+→ attach to node:http createServer
 → GET/HEAD struct/extend/group/resource
 → GET/HEAD hierarchical ResourceKey
 → GET/HEAD metadata
 → Unicode NameSegment URL round-trip
 → correct raw bytes / MIME / Content-Length / ETag
+```
+
+同时：
+
+```text
+serveFsdb({ root, host, port })
+→ starts standalone node:http service
+→ service.close() closes owned server and database
 ```
 
 必须证明：
@@ -841,8 +1084,11 @@ Resource 子目录稳定映射为 hierarchical logical key
 无法 symlink escape
 source drift 后进入 stale 且返回 503
 reopen 后旧 ETag 不会误命中新 snapshot
+createFsdbHttpHandler 不隐式拥有/关闭 caller-provided db
+serveFsdb 明确拥有并关闭其创建的 db/server
+核心 package 无 Web Framework runtime dependency
 无法写入 FSDB
 错误不泄露 physical path
 ```
 
-达到上述条件后，第一版设计即足够进入实现；Range、完整 Integrity validation 或抽分 `@loomrealm/fsdb` 只在真实消费者需要时继续增加。
+达到上述条件后，第一版设计即足够进入实现；Range、完整 Integrity validation、framework adapter、CLI 或抽分 `@loomrealm/fsdb` 只在真实消费者需要时继续增加。
