@@ -17,6 +17,29 @@ FSDB（File Store Database）是一种基于文件系统的轻量级数据存储
 
 其他目录或者文件将被忽略，不会被 FSDB 系统识别和管理。
 
+### 1.2 Key 与保留命名空间
+
+FSDB 中的 `key` 是表内数据的逻辑唯一标识符。
+
+统一约束：
+
+- `key` 必须非空；
+- 普通数据 `key` 不得以 `$` 开头；`$` 前缀保留给 FSDB 协议、服务接口或未来控制/元数据命名空间使用；
+- `[struct]`、`[extend]`、`[group]` 的 `key` 由数据文件名去掉固定扩展名得到；
+- `[resource]` 的 `key` 可以包含目录层级，具体规则见 5.3；
+- 对于分层 Resource Key，每一个路径段都视为 key segment，任何 segment 均不得为空、为 `.` / `..`，也不得以 `$` 开头；
+- 同一张表内，规范化后的 logical key 必须唯一。
+
+例如以下普通 key 非法：
+
+```text
+$info
+$meta
+$anything
+```
+
+这样可以保证实现层在不侵占合法业务 key 的前提下使用 `$...` 作为保留逻辑名称。
+
 ## 2. 基础表数据目录（[struct]）
 
 ### 2.1 定义与用途
@@ -38,6 +61,7 @@ FSDB（File Store Database）是一种基于文件系统的轻量级数据存储
 
 - **文件格式**：独立的 JSON 文件
 - **文件命名**：`{key}.json`，其中 `key` 是该条数据的唯一标识符
+- **Key 规则**：文件名去掉最后的 `.json` 后得到 logical key，并满足 1.2 的统一约束
 - **数据内容**：每条数据以 JSON 对象形式存储
 
 ### 2.4 元数据文件（.info.meta）
@@ -73,6 +97,7 @@ FSDB（File Store Database）是一种基于文件系统的轻量级数据存储
 
 - **文件格式**：独立的 JSON 文件
 - **文件命名**：`{key}.json`，其中 `key` 是该条数据的唯一标识符
+- **Key 规则**：文件名去掉最后的 `.json` 后得到 logical key，并满足 1.2 的统一约束
 - **数据内容**：每条数据以 JSON 对象形式存储，其中某些字段的值指向基础表的 `key`
 
 ### 3.4 元数据文件
@@ -125,6 +150,7 @@ FSDB（File Store Database）是一种基于文件系统的轻量级数据存储
 
 - **文件格式**：JSONL（JSON Lines）
 - **文件命名**：`{key}.jsonl`，其中 `key` 是该文件分组的唯一标识符（即文件名中的唯一键）
+- **Key 规则**：文件名去掉最后的 `.jsonl` 后得到 logical key，并满足 1.2 的统一约束
 - **数据内容**：每行一个 JSON 对象，整文件表示该分组下的对象数组
 
 ### 4.4 元数据文件
@@ -157,26 +183,74 @@ FSDB（File Store Database）是一种基于文件系统的轻量级数据存储
 
 ### 5.2 目录结构
 
+Resource 表允许使用子目录组织资源。子目录只参与 Resource Key，不形成新的 FSDB 表或独立元数据作用域。
+
 ```
 [resource]<数据名>/
 ├── {key1}.{ext1}
-├── {key2}.{ext2}
-├── {key3}.{ext3}
+├── {folder1}/
+│   ├── {key2}.{ext2}
+│   └── {folder2}/
+│       └── {key3}.{ext3}
 └── .desc.meta
 ```
 
-### 5.3 数据文件规范
+表级 `.desc.meta` 仍位于 `[resource]<数据名>` 根目录，并描述整张资源表。
 
-- **文件格式**：任意类型的文件（由扩展名决定）
-- **文件命名**：`{key}.{ext}`，其中：
-  - `key` 是该条数据的唯一标识符
-  - `ext` 是文件的扩展名，用于标识文件类型
+### 5.3 数据文件与 Resource Key 规范
+
+- **文件格式**：任意类型的文件（由最后一个扩展名决定）
+- **物理位置**：资源文件可以是 `[resource]<数据名>` 的直接子文件，也可以位于任意层级子目录中
+- **逻辑 Key**：Resource Key 等于“资源文件相对于 `[resource]<数据名>` 根目录的相对路径，去掉最后一个文件扩展名”
+- **路径分隔符**：Logical Resource Key 统一使用 `/`，不受宿主操作系统路径分隔符影响
+- **扩展名**：只移除文件名最后一个 `.` 之后的扩展名；此前的 `.` 属于 key 本身
+- **Key Segment**：每一个目录名以及最终文件名去扩展名后的部分都必须满足 1.2 的 key segment 约束
+- **唯一性**：同一 Resource 表中规范化后的完整 Resource Key 必须唯一
 - **数据内容**：可以是任何类型的文件内容
+
+示例：
+
+```text
+[resource]image/hero.png
+→ key = hero
+
+[resource]image/character/hero.png
+→ key = character/hero
+
+[resource]image/ui/icon/item.large.png
+→ key = ui/icon/item.large
+→ ext = png
+```
+
+因此以下两个资源可以共存：
+
+```text
+character/hero.png
+icon/hero.png
+```
+
+它们的 logical key 分别为：
+
+```text
+character/hero
+icon/hero
+```
+
+而以下资源在同一表中冲突：
+
+```text
+hero.png
+hero.webp
+```
+
+因为两者的 logical key 都是 `hero`。FSDB 实现必须将其视为重复 key，而不能把扩展名作为 identity 的一部分。
 
 ### 5.4 元数据文件（.desc.meta）
 
 `.desc.meta` 可用于描述目录下数据或资源的补充信息，格式为 Markdown。  
 对于 `[resource]` 与 `[group]` 目录，`.desc.meta` 为必填；对于 `[struct]` 和 `[extend]` 目录，`.desc.meta` 为可选。
+
+对于 Resource 表，只有表根目录的 `.desc.meta` 具有 FSDB 表级元数据语义；Resource 子目录本身不创建新的 `.desc.meta` 作用域。
 
 `.desc.meta` 文件通常包含以下内容：
 
@@ -210,7 +284,8 @@ FSDB 系统的目录层级关系如下：
 │   └── .extend.meta (可选)
 └── [resource]<资源表名1>/
     ├── {key1}.{ext1}
-    ├── {key2}.{ext2}
+    ├── {folder1}/
+    │   └── {key2}.{ext2}
     └── .desc.meta
 ```
 
@@ -242,9 +317,11 @@ FSDB 系统的目录层级关系如下：
 ### 8.1 命名规范
 
 - 使用有意义的名称命名数据表，避免使用无意义的字符
-- `key` 值应具有唯一性和可读性，生成策略不做约束，只要保证在表数据中唯一，并且可以作为文件名的字符串
+- `key` 值应具有唯一性和可读性，并满足 1.2 的统一约束
+- `$` 前缀属于保留命名空间，业务 key 与 Resource Key 的任一 segment 都不得以 `$` 开头
 - 分组数组表中 `{key}.jsonl` 的 `key` 应直接表达该文件的分组语义
-- 资源文件的扩展名应准确反映文件类型
+- Resource 子目录应直接表达资源分类；其目录层级会成为 Resource Key 的组成部分
+- 资源文件的最后一个扩展名应准确反映文件类型
 
 ### 8.2 元数据编写
 
@@ -256,5 +333,5 @@ FSDB 系统的目录层级关系如下：
 ### 8.3 数据组织
 
 - 相关的基础表、拓展表与分组数组表应组织在同一个 FSDB 目录下
-- 对于大型资源文件，建议按类型或日期进一步子目录分类
+- Resource 可以按类型、日期或其他业务分类使用子目录；目录结构本身即 Resource Key 的一部分
 - 定期清理无效的 `key` 和 orphaned 引用
