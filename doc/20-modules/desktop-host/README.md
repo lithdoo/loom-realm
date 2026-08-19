@@ -3,231 +3,278 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Hostra Desktop 对系统级 Platform Composition 的 realization：Node Runtime/Subsystem Runner、Hostra Window、WebSocket、HTTP/filesystem、Data Connection Broker 与安全边界  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Desktop Node.js Launcher / Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)  
+> 主要定义：Hostra Desktop Platform Composition realization：Node Runner、Hostra Window、WebSocket、Runner provisioning IPC、DataConnectionBroker、HTTP/filesystem 与安全边界  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Desktop Node.js Launcher / Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-19
 
 本文描述 Hostra Desktop Platform Composition realization，不是 `@loomrealm/platform-hostra` 包规范。
 
 ---
 
-## 1. Composition Boundary
+## 1. Composition
 
 ```text
 Game Package {key,module}
         ↓
-Hostra Desktop Platform
-├── Runtime Hosting / Supervision
-├── Node Subsystem Runner
-├── Runtime / Renderer Control binding
-├── Renderer Hosting
-├── Data Connection Broker
-└── Content Binding
+Hostra Desktop
+├── Node Runtime Hosting / Supervisor
+├── Host-owned Node Subsystem Runner
+├── Runtime Control WebSocket
+├── Runner Platform Provisioning IPC
+├── Hostra Renderer Hosting
+├── Renderer Control WebSocket
+├── DataConnectionBroker / Data WebSocket
+└── fs + localhost HTTP Content
         ↓
-platform-neutral LoomRealm roles
+platform-neutral Main / Renderer / Subsystem
 ```
 
-Hostra只拥有物理 topology，不拥有 Frame/Activation/InputTarget/DataAuthority/Render application authority。
+Hostra只拥有 physical topology，不拥有 Frame/Activation/InputTarget/DataAuthority/Render state。
 
 ---
 
-## 2. Desktop Mapping
+## 2. Runner Model
+
+Process entry：
 
 ```text
-Subsystem Definition Module
-    → same package-local .mjs declared by Game Package
-
-RuntimeHosting
-    → Host-selected Node child process
-
-SubsystemRunner
-    → Host-owned Node Runner process entry
-    → imports descriptor.module
-
-RuntimeControlBinding
-    → localhost WebSocket
-
-RendererHosting
-    → Hostra/Electron BrowserWindow
-
-RendererControlBinding
-    → localhost WebSocket
-
-DataConnectionBroker
-    → authenticated localhost carrier
-
-ContentBinding
-    → filesystem-backed service + localhost HTTP
+Host-owned Node Runner
 ```
 
-Game Package不选择 Node executable、process argv/env或 WebSocket。
+业务：
+
+```text
+descriptor.module = package-local .mjs Definition Module
+```
+
+Runner：
+
+```text
+parse Platform bootstrap
+→ import exact declared module
+→ validate default SubsystemDefinitionFactory
+→ construct RuntimeControlBinding
+→ construct SubsystemDataBinding
+→ construct ContentClient
+→ runSubsystem(...)
+```
+
+Game Package不选择 Node executable/argv/env/Runner/WebSocket。
 
 ---
 
-## 3. Host-owned Runner
-
-Desktop process entry永远是 Host-owned Runner，而不是业务 `descriptor.module`。
-
-```text
-Node process
-    Host-owned Runner
-        ↓ import
-    game-owned Definition Module
-        ↓
-    @loomrealm/subsystem host integration
-```
-
-Runner负责：
-
-```text
-parse Host bootstrap context
-load/validate exact declared .mjs module
-construct Subsystem-facing Platform Ports
-start Subsystem role
-```
-
-业务 module不得自己读取 Hostra bootstrap、建立 Control/Data WebSocket或选择平台实现。
-
----
-
-## 4. Hostra Shell / LoomRealm Protocol Separation
-
-Hostra Shell RPC 与 LoomRealm protocols保持独立：
+## 3. Hostra Shell Separation
 
 ```text
 Hostra Shell RPC
-    window/platform operations
+    window/platform shell operations
 
-Runtime Control
-    Subsystem Control + Frame/Call
+LoomRealm Runtime Control
+    Control + Frame
 
-Renderer Control
+LoomRealm Renderer Control
     Main committed authority
 
-Data
-    User Input + Render Update
+LoomRealm Renderer Data
+    Data Profile: Connection + Input + Render
+
+Platform Provisioning IPC
+    physical infrastructure material for Runner
 ```
 
-共享 WebSocket技术不等于共享 protocol namespace/authority。
+这些可以都由同一产品进程协调，但 protocol/authority domain完全不同。
 
 ---
 
-## 5. Runtime Bootstrap
+## 4. Runtime Bootstrap
 
 ```text
-validate Game Package Descriptor set
-→ resolve descriptor.module inside current installation
-→ create Launch Attempt/bootstrap auth
-→ spawn Host-owned Node Runner
-→ Runner imports module
-→ establish Runtime Control Binding
+validate descriptor/module
+→ Launch Attempt/token
+→ establish Runner provisioning capability
+→ spawn Host-owned Runner Process
+→ Runner loads module
+→ Runtime Control WS
 → subsystem.hello
 → identified
+→ initialize
 → ready
 ```
 
 ```text
-module valid != process spawned != connected != identified != ready
+module valid != spawned != connected != identified != ready
+ready != Data offer/carrier
 ```
 
-`ready` 不携 Renderer Data endpoint/ticket/generation。
-
-`stopped` 只来自实际 child process termination observation。
+`stopped` 只来自 process termination observation。
 
 ---
 
-## 6. Runtime Control
-
-同一 authenticated Control carrier承载：
+## 5. Runtime Control WebSocket
 
 ```text
-Subsystem Control v1
-Frame / Call v1
+one WebSocket text message
+= one UTF-8 JSON text string
+= one JSON-RPC message
 ```
 
-WebSocket adapter保持 one text message = one JSON-RPC application message、per-direction order、no Batch、no adapter retry/duplicate。
+no binary/no Batch/no adapter retry/duplicate。
 
-Frame transaction ordering不由 Platform改变。
+Frame transaction ordering保持 Response-before-dependent-RPC / ACK-before-publication。
 
 ---
 
-## 7. Renderer Hosting / Control
-
-Hostra BrowserWindow是 Renderer participant物理宿主。
+## 6. Renderer Hosting / Control
 
 ```text
 Main Renderer intent
-→ Platform opens/loads Renderer
+→ Hostra BrowserWindow/Web app
 → Renderer Control WebSocket
 → renderer.hello
 → full current Authority Snapshot
 ```
 
-Snapshot不携 Data endpoint/ticket或 Hostra Window identity作为 application authority。
-
----
-
-## 8. Data Connection Broker
+Snapshot：
 
 ```text
-Main current DataAuthority(S,G)
-→ Desktop DataConnectionBroker
-→ provision authenticated localhost endpoints/material
-→ bind Session/current Renderer/S/G
-→ deliver role-local connection capability to Renderer + target Subsystem Runner
-→ install at most one current Data Connection
+Runtime/Stack/Activation/InputTarget
+DataAuthority {S,G,dataProfile}
 ```
 
-Broker不拥有 generation。
+不携 Data endpoint/ticket/IPC/window identity。
+
+---
+
+## 7. DataConnectionBroker
+
+当前 authority：
 
 ```text
-Data loss != Runtime failure
-Data loss != Frame unwind
-Frame close != Data retire
-Data retire != Render Domain destroy
+DataAuthority(S,G,P)
 ```
 
-same generation仍授权时，old carrier retired后可建立 fresh carrier。
-
----
-
-## 9. Input / Render Recovery
-
-fresh Data carrier：
+Broker：
 
 ```text
-User Input
-    Frame Interest Registry = empty remotely
-    retained Input State = empty
-    Subsystem republishes current desired full registry
-
-Render Update
-    current Domain Registry
-    fresh Snapshot for current Domains
-    then Patch/Event
+bind current Session/Renderer/S/G/P
+→ create/provision authenticated Data WebSocket material
+→ supply Renderer side
+→ supply target Runner side through Platform Provisioning IPC
+→ at most one current Data carrier
 ```
 
-业务 InputListener/RenderDomain对象不因 carrier replacement重建。
+当前 P：
+
+```text
+loomrealm.renderer-data/1
+```
+
+Broker不拥有 G/P。
 
 ---
 
-## 10. Content
+## 8. Runner Provisioning IPC
 
-Desktop Content composition可以使用 filesystem + localhost HTTP；Content logical route/cache/version/integrity/error semantics遵守 Content API。
+Node Runner在 spawn 时获得 dedicated Host-owned provisioning channel；典型实现 child-process IPC。
 
-Content credential与 Runtime bootstrap credential分离；Definition Module executable capability不通过普通 Content API暴露。
+它只传 Platform infrastructure material，例如：
+
+```text
+fresh Data endpoint/ticket for current S/G/P
+revoke/supersede physical material
+```
+
+不传：
+
+```text
+Frame RPC
+Runtime status
+business command
+Input/Render message
+Main authority mutation
+```
+
+Runner收到 current Data offer后：
+
+```text
+validate own S/G/P
+→ connect authenticated Data WebSocket
+→ wrap MessageCarrier<string>
+→ SubsystemDataBinding yields {G,P,carrier}
+```
+
+same S/G/P reconnect使用 fresh one-time material。
 
 ---
 
-## 11. Composition Root / Package Boundary
+## 9. Provisioning Failure
 
-当前 realization root：
+```text
+expired/stale ticket
+Data WS connect failure
+provisioning IPC loss
+same-generation reconnect failure
+```
+
+本身：
+
+```text
+!= Runtime failure
+!= Frame unwind
+!= DataAuthority mutation
+```
+
+Data availability可暂时为 zero；Control/Frame可继续健康运行。
+
+---
+
+## 10. Data Application Mapping
+
+Renderer Data Profile v1：
+
+```text
+one Data WebSocket text message
+= one UTF-8 JSON text child-protocol object
+```
+
+one Data dispatcher demux：
+
+```text
+input.*
+render.*
+```
+
+fresh carrier：
+
+```text
+Input registry/state empty → republish/baseline
+Render registry → fresh snapshots
+```
+
+Data retire不销毁 authoritative Render Domain。
+
+---
+
+## 11. Content
+
+```text
+filesystem-backed Content Service
+→ localhost HTTP
+```
+
+Content bearer与 Runtime token/Data ticket相互独立；credential不进入 Frame/Render/business payload。
+
+---
+
+## 12. Composition Root
+
+当前：
 
 ```text
 apps/desktop
 ```
 
-可能组合：
+组合可能包括：
 
 ```text
 @loomrealm/main
@@ -236,49 +283,68 @@ apps/desktop
 @loomrealm/launcher-node
 @loomrealm/transport-websocket
 content adapters
-Hostra integration glue
-business Subsystem modules
+Hostra integration/Runner glue
+business modules
 ```
 
-如果 Node Subsystem Runner形成稳定复用边界，可按真实消费者抽成独立 technical integration package；Platform Architecture本身不要求大而全 `platform-hostra` 包。
+Node Runner若出现多个真实独立消费者，可再抽 technical integration package；不预建万能 platform package。
 
 ---
 
-## 12. Cross-platform Equivalence
+## 13. Cross-platform Equivalence
 
-Hostra Desktop 与 PWA 对相同：
-
-```text
-Game Package Descriptor {key,module}
-Subsystem Definition Module
-application trace
-```
-
-必须得到等价：
+与 PWA共享：
 
 ```text
-Runtime lifecycle
-Frame/Activation outcome/unwind
-Renderer authority
-Data identity/lifecycle
-User Input semantics
-Render authoritative state
-Content logical results
+same Game Package {key,module}
+same Definition Module
+same Runtime/Frame/Data/Input/Render/Content logical trace
 ```
 
-PID/WS URL/Hostra Window/HTTP port不需要相同。
+不要求：
+
+```text
+PID == Worker id
+IPC == Port transfer
+WS endpoint == MessagePort
+HTTP == Service Worker
+```
 
 ---
 
-## 13. Core Invariants
+## 14. Tests
 
-- Game Package只声明 `key + module`；
-- Node process entry是 Host-owned Runner，不是 business module；
-- same business `.mjs` module可供 PWA Runner加载；
-- Runner负责 Platform ports/bootstrap，business module只负责业务；
-- Hostra Shell RPC 与 LoomRealm protocols分离；
-- Runtime Control = Control v1 + Frame v1；
-- ready不携 Data endpoint；
-- Data Broker不拥有 generation；
-- Data loss不等于 Runtime/Frame failure；
-- Frame lifecycle不控制 Data/Render lifecycle。
+至少：
+
+```text
+Host-owned Runner is process entry
+business module loaded exactly
+Runtime Control JSON-text WS
+provisioning IPC distinct from application protocols
+Data offer S/G/P binding
+stale/duplicate offer rejected
+same-generation fresh offer
+provision failure does not fail Runtime/Frame
+Renderer Control has no physical Data material
+Data Profile JSON-text demux
+fresh input/render baseline
+actual process exit → stopped
+Hostra/PWA abstract-trace equivalence
+```
+
+---
+
+## 15. Final Invariants
+
+1. Hostra implements system Platform Composition，不拥有 Main authority；
+2. business Definition Module != process entry；
+3. Host-owned Node Runner是 process entry；
+4. Runtime Control与 provisioning IPC独立；
+5. ready不携/暗示 Data offer；
+6. Renderer Control只发布 S/G/dataProfile；
+7. Broker经 provisioning IPC给 Runner动态提供 Data material；
+8. Broker/provisioning不拥有 generation/profile；
+9. Data provisioning/loss不等于 Runtime failure/Frame unwind；
+10. Control/Data都使用 UTF-8 JSON text application unit；
+11. Frame/Data/Render lifecycles独立；
+12. Hostra/PWA logical application semantics等价。
