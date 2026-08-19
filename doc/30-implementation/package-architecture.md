@@ -3,23 +3,75 @@
 > 层级：实施计划  
 > 状态：Active Design / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：LoomRealm monorepo 中公开包、内部 workspace、技术 Adapter 与平台 Composition Root 的拆分原则  
-> 依赖：[正式契约目录](../15-contracts/README.md)、[模块设计目录](../20-modules/README.md)、[仓库与目录方案](./repository-layout.md)  
-> 最近复核：2026-08-17
+> 主要定义：公开包、role/capability package、technical adapter、Platform Composition Root 与可选 platform helper 的拆分原则  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[模块设计目录](../20-modules/README.md)、[仓库与目录方案](./repository-layout.md)  
+> 最近复核：2026-08-19
 
-本文是 **package boundary / publish boundary** 的当前权威来源。它不改变协议 authority，也不要求“一个协议文档 = 一个 npm 包”。
+本文是 **package boundary / publish boundary** 的当前权威来源。它不改变协议 authority，也不要求“一个协议文档 = 一个 npm 包”或“一个 Platform = 一个 npm 包”。
 
 核心原则：
 
-> **按稳定能力和消费者边界拆包；平台只负责组合能力。**
+> **按稳定能力和消费者边界拆包；Platform Architecture 定义系统职责，product composition root 选择并组合实现。**
 
 ```text
-Protocol boundary != npm package boundary != runtime process boundary != platform boundary
+Protocol boundary
+!= npm package boundary
+!= runtime process boundary
+!= platform boundary
 ```
 
 ---
 
-## 1. 为什么不按平台拆大包
+## 1. Platform Architecture vs Platform Package
+
+系统架构已经定义：
+
+```text
+Platform Composition
+    = complete physical Session realization
+```
+
+包括 Runtime Hosting、Control bindings、Renderer Hosting、Data Connection Broker、Content Binding 与 physical lifecycle。
+
+但这不意味着必须发布：
+
+```text
+@loomrealm/platform-hostra
+@loomrealm/platform-pwa
+```
+
+当前默认：
+
+```text
+apps/desktop
+apps/pwa
+    = product composition roots
+```
+
+它们选择 reusable role/capability/adapter packages 并编排 platform-local glue。
+
+只有某段 Platform glue 出现：
+
+```text
+multiple independent consumers
+stable public API
+independent replacement/versioning value
+independent release value
+```
+
+才抽成 `platform-*` helper package。
+
+因此：
+
+```text
+Platform Composition = architecture concept
+apps/*               = current composition root
+platform-* package   = optional future reusable artifact
+```
+
+---
+
+## 2. 为什么不按平台默认拆大包
 
 不采用以下方式作为主要公共包边界：
 
@@ -28,7 +80,7 @@ Protocol boundary != npm package boundary != runtime process boundary != platfor
 @loomrealm/host-pwa
 ```
 
-原因是平台包容易逐步吸收：
+因为平台全集包很容易吸收：
 
 ```text
 launcher
@@ -41,37 +93,36 @@ Renderer startup
 process/worker supervision
 ```
 
-最后职责只能描述成“Desktop/PWA 上需要的一切”，难以独立替换、测试和发布。
+最终职责只能描述成“这个平台需要的一切”。
 
-Desktop/PWA 仍然是重要的**运行拓扑与产品形态**，但默认作为 composition root，而不是大而全的 capability package。
+Hostra Desktop / PWA 仍然是重要**系统级 Platform realizations**，但默认不是大而全 library package。
 
 ---
 
-## 2. 拆包判断标准
+## 3. 拆包判断标准
 
-一个候选模块适合成为独立公开包，通常同时满足：
+一个候选公开 package 通常应满足：
 
 1. 单独安装后有明确用途；
 2. 有清晰且相对稳定的消费者集合；
-3. 可以独立升级/替换，而不要求相邻模块同步发布；
-4. 名称描述“它负责什么”，而不是仅描述“它运行在哪里”；
-5. public API 可以小于其内部实现，并能长期维持依赖方向。
+3. 可以独立升级/替换；
+4. 名称描述“负责什么”，而不是只描述“运行在哪里”；
+5. public API 可以长期维持依赖方向。
 
-仅满足以下条件不足以拆包：
+以下不足以拆包：
 
 ```text
-协议文档有独立章节
+协议有独立文档
 代码文件很多
 运行在独立进程
 属于 Desktop/PWA
-为了目录看起来对称
+Platform architecture里有一个概念 port
+为了目录对称
 ```
 
 ---
 
-## 3. 推荐的公开包
-
-### 3.1 Wire / Contract 能力
+## 4. Contract / Capability Packages
 
 ```text
 @loomrealm/wire
@@ -82,34 +133,20 @@ Desktop/PWA 仍然是重要的**运行拓扑与产品形态**，但默认作为 
 @loomrealm/game-package
 ```
 
-其中：
-
 | 包 | 主要职责 | 典型消费者 |
 |---|---|---|
-| `@loomrealm/wire` | JSON/JSON-RPC、safe integer、UTF-8/depth/closed-schema 等无业务语义 primitive | 其他 contract/runtime 包 |
-| `@loomrealm/runtime-control` | Subsystem Control v1 + Frame / Call v1 + Runtime Control Application Profile v1 的 schema、validator、dispatcher/conformance helper | Main、Subsystem |
-| `@loomrealm/renderer-control` | Main ⇄ Renderer authority snapshot schema、validator、conformance helper | Main、Renderer |
-| `@loomrealm/data` | Data Connection + User Input + Render Update 的 schema、validator、state/revision helper | Renderer、Subsystem |
-| `@loomrealm/content` | Content API contract、logical identity、client primitives | Renderer、Subsystem、Content Service |
-| `@loomrealm/game-package` | Game Package schema、parse/validate、descriptor/path helpers | Main、CLI、工具链 |
+| `wire` | JSON/JSON-RPC、安全整数、UTF-8/depth/closed-schema primitives | 其他 capability/runtime 包 |
+| `runtime-control` | Control v1 + Frame/Call v1 + Runtime Control Profile v1 implementation helpers | Main、Subsystem |
+| `renderer-control` | Main⇄Renderer authority snapshot schema/validator/testing | Main、Renderer |
+| `data` | Data Connection + User Input + Render Update helpers | Renderer、Subsystem |
+| `content` | Content API logical contract/client primitives | Renderer、Subsystem、Content Service |
+| `game-package` | Game Package parse/validate/descriptor helpers | Main、CLI、工具链 |
 
-协议身份仍然独立。例如 `@loomrealm/runtime-control` 同时实现三个独立 version space，并不把它们合并成一个协议。
+协议 identity/version 仍然独立；同 package 实现多个 protocol 不合并 authority/lifecycle。
 
-建议通过 subpath 保持领域边界：
+---
 
-```text
-@loomrealm/runtime-control/control
-@loomrealm/runtime-control/frame
-@loomrealm/runtime-control/profile
-@loomrealm/runtime-control/testing
-
-@loomrealm/data/connection
-@loomrealm/data/input
-@loomrealm/data/render
-@loomrealm/data/testing
-```
-
-### 3.2 Runtime / Role 能力
+## 5. Platform-neutral Role Packages
 
 ```text
 @loomrealm/main
@@ -118,24 +155,53 @@ Desktop/PWA 仍然是重要的**运行拓扑与产品形态**，但默认作为 
 @loomrealm/content-service
 ```
 
-| 包 | 主要职责 | 不应拥有 |
-|---|---|---|
-| `@loomrealm/main` | Session、Runtime Registry、Frame/Stack/Activation、failure unwind、Renderer/Data authority | Node spawn、WebSocket/MessagePort 具体实现、DOM、filesystem |
-| `@loomrealm/subsystem` | Subsystem author-facing SDK：Control/Frame/Data/Input/Render/Content adapters | Main Stack authority、Renderer presentation、Host bootstrap policy |
-| `@loomrealm/renderer` | Renderer Control mirror、Data Registry、Input gate、Render Store/Patch engine、presentation interfaces | Frame RPC、Main failure-unwind authority |
-| `@loomrealm/content-service` | Content API server/service core、trusted package index integration | Frame/Renderer authority、平台 UI lifecycle |
+这些包必须通过 abstractions/ports 消费平台基础设施，而不是直接绑定 Hostra/PWA。
 
-第三方 Subsystem 的默认入口应是：
+### Main
+
+消费类似：
 
 ```text
-npm install @loomrealm/subsystem
+RuntimeHosting
+RuntimeControlHost
+RendererHosting
+RendererControlHost
+DataConnectionBroker
+ContentServiceIntegration
 ```
 
-而不是要求业务作者直接组合全部底层协议包。
+这些可能由 app glue + multiple adapters 组合实现，并不要求存在单一 `platform` package。
 
-### 3.3 技术 Adapter 能力
+### Subsystem
 
-Adapter 以“技术能力”命名，不以“大平台”命名：
+消费 Subsystem-facing ports：
+
+```text
+RuntimeControlBinding
+RendererDataBinding
+ContentClient
+```
+
+这些只是 system Platform 在 Subsystem role 上的投影。
+
+### Renderer
+
+消费：
+
+```text
+RendererControlBinding
+RendererDataBinding
+ContentClient
+Presentation/Input environment
+```
+
+Role package 不自己寻找 WebSocket/MessagePort。
+
+---
+
+## 6. Technical Adapter Packages
+
+技术差异优先按单一 capability 拆：
 
 ```text
 @loomrealm/launcher-node
@@ -146,45 +212,51 @@ Adapter 以“技术能力”命名，不以“大平台”命名：
 @loomrealm/content-service-worker
 ```
 
-Adapter 只实现某个外部技术绑定，不获得上层 authority。
+Adapter 只实现外部技术 binding，不获得 application authority。
 
 例如：
 
 ```text
-Data Connection identity/lifecycle
-        @loomrealm/data
-             ↑
-             │ carrier interface
-             │
- @loomrealm/transport-websocket
- @loomrealm/transport-messageport
+System Platform DataConnectionBroker
+        composes
+           │
+           ├── transport-websocket   (Hostra Desktop)
+           └── transport-messageport (PWA)
 ```
 
-Transport 可以替换，但不能修改 Data Connection、Frame、Input 或 Render 的 application semantics。
+Transport package 本身不拥有 DataAuthority/generation，也不负责完整 Data broker lifecycle。
 
-### 3.4 业务 Subsystem / Compatibility 包
+同理：
+
+```text
+launcher-node != RuntimeHosting architecture
+transport-* != Platform
+content-http != Content semantics
+```
+
+---
+
+## 7. Business Packages
 
 ```text
 @loomrealm/map
-@loomrealm/map-essentials   // 名称可在实现时调整
+@loomrealm/map-essentials   // final name demand-driven
 ```
 
-`@loomrealm/map` 必须只是普通 Subsystem consumer：
+业务 Subsystem 的依赖应是：
 
 ```text
 @loomrealm/map
     → @loomrealm/subsystem
 ```
 
-Core/Renderer/Main 不得反向依赖 `loom.map`。
+不直接依赖 Desktop/PWA/Transport/Launcher package。
 
-Pokémon Essentials / RMXP 兼容逻辑与 Core 发布周期解耦；如果后续证明更适合按格式能力拆，可改为类似 `@loomrealm/rmxp-content`，不影响协议。
+同一个 map business implementation 由 `apps/desktop` 与 `apps/pwa` composition 运行。
 
 ---
 
-## 4. Platform 作为 Composition Root
-
-建议产品入口：
+## 8. Platform Composition Roots
 
 ```text
 apps/
@@ -193,42 +265,50 @@ apps/
 └── cli/
 ```
 
-这些入口主要负责：
+### `apps/desktop`
+
+实现 Hostra Desktop Platform Composition，可能组合：
 
 ```text
-选择 capability implementation
-构造依赖
-注入 config/credential
-建立 carrier
-启动/停止应用
+main
+renderer
+launcher-node
+transport-websocket
+content-service
+content-fs
+content-http
+business subsystems
+Hostra integration glue
 ```
 
-Desktop 可能组合：
+### `apps/pwa`
+
+实现 PWA Platform Composition，可能组合：
 
 ```text
-@loomrealm/main
-@loomrealm/launcher-node
-@loomrealm/transport-websocket
-@loomrealm/content-service
-@loomrealm/content-fs
-@loomrealm/content-http
-@loomrealm/renderer
+main
+renderer
+transport-messageport
+content-service-worker
+business subsystems
+Worker/Port/Service Worker glue
 ```
 
-PWA 可能组合：
+Composition root 负责：
 
 ```text
-@loomrealm/main
-@loomrealm/transport-messageport
-@loomrealm/content-service-worker
-@loomrealm/renderer
+select implementations
+construct role-facing platform ports
+inject config/bootstrap material
+establish physical topology
+start/stop product
 ```
 
-是否存在一个很薄的 platform bootstrap helper 可以在实现阶段决定；默认不建立“Desktop 功能全集”或“PWA 功能全集”公共包。
+但不得重新实现 protocol/domain semantics。
 
 ---
 
-## 5. 推荐 workspace
+## 9. 推荐 Workspace
 
 ```text
 packages/
@@ -262,14 +342,15 @@ apps/
 tests/
 ├── fixtures/
 ├── subsystems/
+├── integration/
 └── e2e/
 ```
 
-实际创建 package 应遵循需求驱动原则：**目录图是目标边界，不要求第一天创建所有空包。**
+这是目标边界图，不要求预创建全部空 package。
 
 ---
 
-## 6. 依赖方向
+## 10. Dependency Direction
 
 默认只允许向下依赖：
 
@@ -280,53 +361,53 @@ contract/capability packages
   ↑
 runtime/role packages
   ↑
-technical adapters
+technical adapters / integration helpers
   ↑
 composition roots / products
 ```
 
-更具体地：
+注意 technical adapter 可能实现 lower-level port interface；具体 code dependency 应通过最小 interface package/subpath 组织，不能为了图形顺序强迫 role core import adapter。
+
+关键禁止：
 
 ```text
-@loomrealm/main
-    → runtime-control
-    → renderer-control
-    → game-package
-
-@loomrealm/subsystem
-    → runtime-control
-    → data
-    → content
-
-@loomrealm/renderer
-    → renderer-control
-    → data
-    → content
-
-transport-* / launcher-* / content-*
-    → 最小必要 contract/interface
-    → 不得成为 Main/Frame/Render authority
-
-@loomrealm/map
-    → subsystem
-```
-
-禁止：
-
-```text
-wire → main/renderer/subsystem
-runtime-control → main
-renderer-control → renderer
-core package → map
 main → desktop/pwa app
-subsystem → platform adapter
+subsystem → WebSocket/MessagePort adapter
+renderer → Hostra/PWA adapter
+contract → role implementation
+core role → map
+map → platform adapter
+wire → domain authority
 ```
+
+Platform composition root 可以依赖所有需要组合的 lower-level packages。
 
 ---
 
-## 7. `@loomrealm/wire` 必须保持极薄
+## 11. Port Interface Placement
 
-`wire` 只允许没有 LoomRealm domain authority 的 primitive，例如：
+架构概念 port 不自动产生一个公共 package。
+
+优先规则：
+
+```text
+只有单一 role 消费
+    → interface 可放 role package 的 integration subpath
+
+多个 role/adapter 稳定共享
+    → 抽到最小 capability/interface package
+
+只有 app glue 使用
+    → 留在 composition root internal code
+```
+
+例如 `SubsystemPlatformPorts` 可以位于 `@loomrealm/subsystem` integration surface；DataConnectionBroker 的 system-level implementation boundary 不应被错误塞进 `@loomrealm/subsystem`。
+
+---
+
+## 12. `@loomrealm/wire` 保持极薄
+
+只允许无 LoomRealm domain authority primitives：
 
 ```text
 JsonValue / JsonObject
@@ -337,46 +418,23 @@ UTF-8 byte measurement
 JSON depth/member count primitive
 ```
 
-不得进入：
-
-```text
-Frame
-Runtime
-InputTarget
-DataAuthority
-Render Domain
-Game Package
-Content identity
-```
-
-如果一个底层包最终变成“所有模块都往里面放”，说明 package boundary 已失效。
+不得进入：Frame、Runtime、InputTarget、DataAuthority、Render Domain、Game Package、Content identity、Platform port。
 
 ---
 
-## 8. Package version 与 Protocol version 分离
+## 13. Package Semver != Protocol Version
 
 ```text
 npm package semver != protocol version
 ```
 
-例如：
-
-```text
-@loomrealm/runtime-control@0.8.3
-    implements Subsystem Control v1
-    implements Frame / Call v1
-    implements Runtime Control Profile v1
-```
-
-package 可因 bug fix、API ergonomics、performance、testing helper 等升级，而协议 version 不变。
-
-未来同一 package 也可以在需要时同时支持多个 protocol version；不得把 npm major 强绑定为 wire protocol major。
+package 可因 bug fix、API ergonomics、performance、testing helper 升级，而协议 version 不变。
 
 ---
 
-## 9. Conformance 与发布
+## 14. Conformance / Platform Equivalence
 
-Protocol/conformance fixture 跟随最接近的 capability package：
+Protocol fixtures 跟随最接近 capability package：
 
 ```text
 @loomrealm/runtime-control/testing
@@ -385,58 +443,55 @@ Protocol/conformance fixture 跟随最接近的 capability package：
 @loomrealm/content/testing
 ```
 
-仓库级 `tests/` 保存产品集成、fixture consumers、test Subsystems 与 E2E，不作为公共测试包发布。
-
-公开包只有通过其声明支持的 applicable conformance fixtures 后，才能声明 corresponding role/protocol conformant。
-
----
-
-## 10. 发布策略
-
-推荐：
+仓库级测试负责：
 
 ```text
-single monorepo
-+ independent public packages
-+ dependency-graph build/test
-+ per-package semver/release eligibility
+role integration
+port fake integration
+technical adapter contract
+Hostra Desktop E2E
+PWA E2E
+cross-platform abstract-trace equivalence
 ```
 
-是否阶段性使用 unified version 可以由发布工具决定，但 package boundary 不应因此退化成一个大包。
-
-顶层 `loomrealm` 如果存在，应优先作为 CLI/产品入口，而不是把 Main、Renderer、Subsystem、Desktop/PWA 全部 re-export 的万能 library。
+`platform-*` package 不是 semantic equivalence 的前提；apps 也可以直接完成这些验证。
 
 ---
 
-## 11. 何时新增一个包
+## 15. 何时新增 Platform Helper Package
 
-新增 package 前至少回答：
+例如未来考虑：
 
 ```text
-Who installs it?
-What capability do they get?
+@loomrealm/platform-hostra
+```
+
+必须回答：
+
+```text
+Who installs it besides apps/desktop?
+Which stable Platform ports does it implement?
 What does it intentionally NOT own?
-Can it version/release independently?
-Which lower-level packages may it depend on?
-Which higher-level packages must never be imported?
+Can Hostra-specific glue release independently?
+Can app/role packages avoid circular dependency?
 ```
 
-如果答案只能是“因为这是 Desktop/PWA 的一部分”或“因为协议有一份独立文档”，默认不新增包。
+如果只有一个 composition root 使用，默认保留 app-local。
 
 ---
 
-## 12. 当前结论
+## 16. 当前结论
 
-LoomRealm 的目标不是最少包，也不是最多包，而是：
-
-> **每个公开包都有一个稳定、可独立理解、可独立替换和可独立发布的能力边界。**
-
-因此当前默认组织方式是：
+LoomRealm 实现层采用：
 
 ```text
 能力一包
 角色一包
 技术 Adapter 一包
-平台只组合
+Platform 作为系统架构职责
+产品 App 作为当前 composition root
+可复用 platform helper 按需求抽取
 协议版本与包版本分离
 ```
+
+目标不是最少/最多包，而是让每个公开包都有稳定、独立可理解、可替换、可发布的 capability boundary，同时不让 package structure 反向定义系统架构。
