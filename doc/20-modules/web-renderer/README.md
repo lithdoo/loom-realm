@@ -3,252 +3,307 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Renderer Control、Data Connection、Frame-scoped User Input、Render Store/Presentation 与 Renderer-facing Platform ports  
-> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[平台组合系统](../../10-architecture/platform-composition-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
+> 主要定义：Renderer Control、Renderer Data Profile、Frame-scoped User Input、Render Store/Presentation 与 Renderer-facing Platform ports  
+> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
 > 最近复核：2026-08-19
 
-Renderer 不是 Frame / Call participant。它镜像 Main committed authority，并处理建立后的 Data application protocols。Renderer Core 保持平台无关；具体 BrowserWindow/Window、WebSocket/MessagePort、DOM/device integration 由 Platform/Presentation adapter 提供。
+Renderer 不是 Frame/Call participant。它镜像 Main committed authority，并在 Platform提供的 current Data carriers 上执行 Data Profile child protocols。
 
-## 1. 内部模块
+---
+
+## 1. Internal Modules
 
 ```text
 Web Renderer
-├── Renderer Control Binding Adapter
-├── Control State Store
+├── RendererControlBinding Adapter
+├── Control Store
+├── RendererDataBinding Adapter
 ├── Data Connection Registry
-├── Render Replication Manager
-├── local presentation mapping
-├── Global Domain Composer
+├── one Data dispatcher
+│   ├── Input Manager
+│   └── Render Replication Manager
 ├── Frame Interest Registry
 ├── Input Producer Registry
 ├── Effective Input Resolver
-├── User Input Router
+├── Render Domain Store / Composer
 ├── Content Client
-└── Presentation State
+└── Presentation Environment
 ```
 
-presentation mapping 可以内部使用 Component Registry、React/Vue/Web Component、DOM/Canvas/WebGL 等机制；这些不是 LoomRealm protocol surface。
+Presentation mapping可使用 DOM/Canvas/WebGL/framework internals；不是 LoomRealm protocol surface。
+
+---
 
 ## 2. Renderer-facing Platform Ports
-
-Renderer 消费 Platform Composition 的局部投影：
 
 ```text
 RendererControlBinding
     current Main ⇄ Renderer Control carrier
 
 RendererDataBinding
-    current/fresh per-Subsystem Data carriers
+    per-Subsystem current/fresh {generation,dataProfile,carrier}
 
-ContentBinding
-    platform Content transport
+ContentClient
+    logical Content API
 
 Presentation/Input Environment
-    local browser/device primitives
+    browser/device primitives
 ```
 
-这些 binding 不拥有 Renderer/Main authority。Renderer Core 不自行决定物理 endpoint，也不在没有 current DataAuthority 时建立 Data Connection。
+Renderer Core不自行发现 physical endpoint，也不在无 current DataAuthority时建立 Data Connection。
 
-## 3. Renderer Control Authority
+---
 
-Renderer 从 Main 获得：
+## 3. Renderer Control Store
+
+Main发布：
 
 ```text
 Runtime projection
 Frame Stack
 Activation
 InputTarget
-DataAuthority {subsystemKey, generation, connectionProfile}
+DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-Renderer 不得自行 create/recover Frame or Activation、modify Stack、compute Runtime failure unwind、从 DOM focus 创建 InputTarget、从 Render Domain 推导 input authority。
+当前 `dataProfile`：
 
-Control loss/replacement：
+```text
+loomrealm.renderer-data/1
+```
+
+Renderer不：
+
+```text
+create/recover Frame or Activation
+modify Stack
+compute Runtime failure unwind
+create InputTarget from DOM/Render/Interest
+```
+
+Control loss：
 
 ```text
 InputTarget := null
 stop ordinary input
-invalidate old DataAuthority usage
+invalidate DataAuthority
 retire old Data Connections
 ```
 
-随后 fresh Renderer Control hello + full Snapshot 恢复。
+---
 
-Renderer Control 与 Data Connection 没有 cross-connection total order。
+## 4. Data Connection Registry
 
-## 4. Data Connection
-
-Renderer 只依据 current DataAuthority 安装/持有：
+Current key：
 
 ```text
 Session + current Renderer + subsystemKey + generation
 ```
 
-每个 Subsystem 最多一条 current carrier。actual carrier 由 Platform Data Connection Broker 协调 Renderer 与 Subsystem 两端。
+且 bound `dataProfile` MUST匹配 current authority。
+
+每 Subsystem最多 one current carrier。
 
 ```text
-Data loss != Runtime failure
-Data loss != Frame unwind
+same S/G/P old retired → fresh carrier allowed
+profile change → fresh generation required
 ```
 
-same generation 仍授权时，old carrier retired 后可安装 fresh carrier。
+Data loss不失败 Runtime、不 unwind Frame。
 
-## 5. User Input：Frame Interest Registry
+---
+
+## 5. One Data Dispatcher
+
+Renderer只建立一个 connection-wide Data reader：
+
+```text
+MessageCarrier<string>
+        ↓
+JSON text parse
+        ↓
+Data Profile dispatcher
+   ┌────┴────┐
+ input.*   render.*
+```
+
+Input/Render Manager不得分别竞争读取 raw carrier。
+
+PWA/Hostra都使用 string application unit。
+
+---
+
+## 6. User Input
 
 ```text
 Effective(F,A,C)
 =
-current matching Data Connection
-∧ Main current InputTarget == (S,F,A)
-∧ mirrored Frame F active/current Activation A
+current matching Data S/G/P
+∧ Main InputTarget == (S,F,A)
+∧ mirrored F active/current A
 ∧ C ∈ Interest[F]
 ∧ Producer(C) available
 ```
 
-Renderer 维护：
+Renderer维护：
 
 ```text
 InterestRegistry = Map<frameId, Set<channel>>
 ```
 
-Subsystem 通过 Data Connection 发布 full Frame Interest Registry snapshot；每次 publication 原子替换整个 registry。
+Interest是 Frame-scoped config、无 activationId、不是 authority。
 
-```text
-Interest = Frame-scoped configuration
-Interest has no activationId
-Interest is not authority
-fresh Data Connection Interest Registry = empty
-```
+Renderer不解释 push/pop/call/return/unwind，只组合 current facts。
 
-Renderer 不解释 `push/pop/call/return/caller/child/unwind`，只组合 current Control authority、Interest Registry、Producer availability 与 current Data Connection。
+---
 
-## 6. Cross-plane Ordering
+## 7. Cross-plane Ordering
+
+Control 与 Data无 total order。
 
 ```text
 Interest first
-    → store registry atomically
-    → unknown/non-authoritative Frame entry inert
-    → later authority may make it effective
+    → store/inert until matching authority
 
 Authority first
-    → target exists but Interest[F] absent
-    → no ordinary input
-    → later Interest may make it effective
+    → no input until Interest[F]
 ```
 
-不需要 cross-plane ACK/barrier/revision join。stale Interest entry 不能创建 authority，且 frameId never reused。
+不需要 cross-plane ACK/barrier/revision join。
 
-## 7. Input Lifecycle
+stale unknown/closed Frame Interest可以暂存但永远不能创建 authority。
 
-新 child：
+---
 
-```text
-F2/A2 current target
-Interest[F2] absent
-    → no input
+## 8. Input Lifecycle
 
-later Interest[F2]
-    → input may become effective
-```
-
-caller suspension/resume，若同一 Data carrier 存活：
-
-```text
-F1/A1 suspended
-Interest[F1] retained
-
-F1 resumes with fresh A3
-Interest[F1] already present
-    → may become effective immediately
-```
-
-旧 A1 的 Input State/Event 不得被重解释为 A3 输入。
-
-fresh Data Connection：
+fresh Data carrier：
 
 ```text
 Interest Registry = empty
 retained Input State = empty
 ```
 
-Subsystem 重新发布 current full Frame Interest Registry。
+Subsystem重新发布 full current registry。
 
-## 8. State / Event / Reset
+fresh Activation：
 
-`.state` 每次 Effective false→true 建立 fresh self-contained current baseline。典型触发包括 Interest added、InputTarget switch、fresh Activation、fresh Data Connection、Producer restore。
+```text
+Interest[F] may remain
+old Activation State/Event MUST NOT remain
+```
 
-`.event` false→true future-only/no replay。
+`.state` 每次 Effective false→true fresh baseline；`.event` future-only；Reset只清当前 Activation-scoped State，不改 Interest。
 
-Reset scoped to `(frameId, activationId)`，清理 Activation-scoped retained state，不改变 Frame Interest。
+---
 
-## 9. Render Authority
+## 9. Render Replica
 
-Subsystem 是 Domain Registry / State / revision 唯一 authority；Renderer 是 read-only replica + presentation engine。
-
-`tag` 是 opaque string。Frame Stack 不充当 Render z-order，Domain/Node 不产生 Input authority。
+Subsystem拥有 Domain Registry/State/revision；Renderer只维护 authoritative replica + presentation。
 
 fresh Data carrier：
 
 ```text
-render.domains(current Registry)
-→ fresh render.snapshot every current Domain
-→ ordinary render.patch / render.event
+render.domains
+→ fresh snapshot each Domain
+→ patch/event
 ```
 
-baseline 后 Patch 严格按 revision chain 原子提交；Event transient，不修改 authoritative Store。
-
-## 10. Backpressure
+Patch严格 revision chain原子提交；Event transient/no replay。
 
 ```text
-small diff                 → Patch
-large/complex/backpressure → full Snapshot
-Event                       → bounded queue; may drop
+Frame close != Domain destroy
+Data retire != authoritative Domain destroy
 ```
 
-authoritative state progress 优先于 transient Event backlog。具体容量/heuristic 属于 implementation。
+---
+
+## 10. Renderer Reload
+
+```text
+fresh Renderer Control
+→ full Snapshot
+→ Broker/Platform provisions Data carriers for current S/G/P
+→ User Input empty registry then republish/baseline
+→ Render Registry + fresh Snapshots
+```
+
+不得恢复：
+
+```text
+old Activation
+old carrier Interest registry
+historical Input Event
+historical Render Patch/Event chain
+```
+
+---
 
 ## 11. Platform Realizations
 
 ```text
 Hostra Desktop
-    Renderer Hosting       Hostra/Electron BrowserWindow
-    Renderer Control       localhost WebSocket
-    Renderer Data          authenticated localhost carrier
-    Content                localhost HTTP
+    Control    WebSocket text
+    Data       authenticated WebSocket text
+    Hosting    BrowserWindow
+    Content    HTTP
 
 PWA
-    Renderer Hosting       browser Window
-    Renderer Control       MessagePort
-    Renderer Data          MessageChannel / transferred Port
-    Content                Fetch / Service Worker
+    Control    MessagePort postMessage(string)
+    Data       transferred MessagePort postMessage(string)
+    Hosting    Window
+    Content    Fetch/SW
 ```
 
-Renderer Core 对两者使用相同 Control/Data/Input/Render semantics。
+Port transfer是 Platform bootstrap；application payload仍 JSON text string。
 
-## 12. Renderer Reload
+---
+
+## 12. Backpressure
 
 ```text
-fresh Renderer Control
-→ full Authority Snapshot
-→ Platform/Broker establishes fresh Data Connections
-→ User Input registry empty → Subsystem republishes → fresh State baselines
-→ Render Registry → fresh Snapshots → Patch/Event
+Renderer Control → latest full Snapshot
+Input State      → latest coalescible baseline/state
+Input Event      → bounded ordered lossy queue
+Render commit    → protocol revision rules
+Render Event     → bounded transient queue
 ```
 
-不得恢复 old Activation、old carrier Interest Registry、historical Input Event 或 historical Render Patch/Event chain。
+不允许无界历史队列或 adapter retry。
 
-## 13. Core Invariants
+---
 
-- Renderer不是 Frame RPC participant；
-- Renderer Core platform-neutral；
-- Renderer只镜像 Main committed authority；
-- actual Data carrier由 Platform Data Connection Broker建立；
-- User Input Interest 是 Frame-scoped registry；
-- Interest不创建 Main authority；
-- Renderer不解释 push/pop/call/return/unwind；
-- fresh Data Connection Interest Registry empty；
-- fresh Activation可复用 Frame Interest，但不可复用旧 Input State/Event；
-- Domain/Node不产生 Input authority；
-- Render lifecycle independent of Frame/Data carrier；
-- Host carrier/bootstrap机制不进入 application protocol；
-- Hostra/PWA physical differences不改变 logical application trace。
+## 13. Tests
+
+至少：
+
+```text
+fake RendererControlBinding
+fake RendererDataBinding
+unknown/unsupported profile no current install
+single Data dispatcher demux
+Control/Data ordering independence
+Interest[F] gating
+fresh carrier empty input state
+fresh Activation no old state
+fresh Render baseline
+Control loss retires all Data
+Hostra/PWA same abstract Renderer trace
+```
+
+---
+
+## 14. Final Invariants
+
+1. Renderer不是 Frame RPC participant；
+2. Renderer Core platform-neutral；
+3. Renderer只镜像 Main committed authority；
+4. DataAuthority使用 S/G/dataProfile；
+5. Platform/Broker建立 actual Data carrier；
+6. one Data dispatcher统一 Input/Render demux；
+7. Interest Frame-scoped且不创建 authority；
+8. Control/Data无跨连接 total order；
+9. fresh Data Interest/State empty；
+10. fresh Activation可复用 Interest但不可复用 old State/Event；
+11. Render lifecycle independent from Frame/Data carrier；
+12. WebSocket/MessagePort application unit统一 JSON text string。
