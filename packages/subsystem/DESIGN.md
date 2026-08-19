@@ -1,98 +1,132 @@
 # `@loomrealm/subsystem` 设计草案
 
 > 状态：Draft  
-> 阶段：Package boundary / platform ports / author API / implementation planning  
+> 阶段：Package boundary / author API / host integration / implementation planning  
 > 最近复核：2026-08-19  
-> 目标：为 LoomRealm 业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author-facing SDK。  
+> 目标：为 LoomRealm 业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author SDK，并定义 Platform Runner 可消费的最小 host integration surface。  
 > 上层架构：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)  
-> 核心原则：**System Platform 提供 Subsystem role 所需的物理基础设施投影；SDK 建立长期协议 Plane 与 capability managers；业务只持有 Frame/Input/Render/Content capability。**
+> 正式语义：[Runtime Control Profile v1](../../doc/15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
+> 核心原则：**业务定义只表达业务；SDK 把正式协议映射成不可绕过的 capability/control-flow；Platform Runner 注入 role-local ports；physical carrier 与 capability lifetime 分离。**
 
 ---
 
 ## 1. Package Position
 
-`@loomrealm/subsystem` 是 platform-neutral **Subsystem role SDK**，不是 Desktop/PWA platform layer。
-
 ```text
-Business Subsystem
-    loom.map / battle / menu
-            │
-            ▼
-@loomrealm/subsystem
-            │
-     Subsystem Platform Ports
-            │
-            ▼
-System Platform Composition
-    ├── Hostra Desktop
-    └── PWA
+Subsystem Definition Module
+        │
+        ▼
+@loomrealm/subsystem        author surface
+        │
+        ▼
+@loomrealm/subsystem/host   integration surface
+        │
+        ▼
+Subsystem-facing Platform Ports
+        │
+        ▼
+Hostra Node Runner / PWA Worker Runner
 ```
 
-它理解 LoomRealm Runtime Control / Data / Content semantics，但 public author API 不暴露协议/平台机械细节。
+`@loomrealm/subsystem` 不是 Desktop/PWA platform layer，也不是 Runtime Control protocol package。
 
-业务 Subsystem SHOULD NOT 直接依赖：
+业务 Subsystem MUST NOT直接依赖：
 
 ```text
 @loomrealm/runtime-control
 @loomrealm/wire
-@loomrealm/transport-websocket
-@loomrealm/transport-messageport
-@loomrealm/launcher-node
-Hostra
-WebSocket
-MessagePort
-Worker / child_process
-```
-
----
-
-## 2. 为什么需要 Subsystem Platform Ports
-
-Runtime Control、User Input、Render Update 最终都依赖真实物理连接。
-
-仅有：
-
-```text
 MessageCarrier
+WebSocket / MessagePort
+child_process / Worker
+Hostra
+bootstrapToken
+Data generation/profile
 ```
-
-不够，因为 `MessageCarrier` 只表达：
-
-> 一条已经建立完成的双向消息管道如何收发。
-
-它不表达：
-
-```text
-什么时候有连接
-连接属于 Runtime Control 还是 Renderer Data
-Data carrier replacement
-same-generation reconnect
-bootstrap material 如何交付
-谁负责 physical establishment
-```
-
-如果这层缺失，SDK 很容易退化为：
-
-```text
-万能 runtime service locator
-module-global current Subsystem context
-Control/Data 共用一条 carrier
-Input/Render 自己找连接
-WebSocket/MessagePort 泄漏到业务
-```
-
-因此本包消费系统 Platform Composition 投影到 Subsystem role 的 **role-local ports**。
-
-这些 ports 不是整个跨平台架构，也不拥有物理 topology；完整 physical coordination 仍由 system Platform Composition 负责。
 
 ---
 
-## 3. Layering
+## 2. Public Surface Split
+
+### 2.1 Author surface
+
+```text
+@loomrealm/subsystem
+```
+
+只暴露业务概念：
+
+```text
+defineSubsystem
+SubsystemDefinitionFactory
+SubsystemScope
+Frame
+FrameOutcome / FrameFailure
+completed / cancelled / failed
+InputListener
+RenderDomain
+ContentClient
+business-safe local errors
+```
+
+### 2.2 Host integration surface
+
+```text
+@loomrealm/subsystem/host
+```
+
+供 trusted Runner / composition 使用：
+
+```text
+runSubsystem
+SubsystemPlatformPorts
+RuntimeControlBinding
+SubsystemDataBinding
+SubsystemLaunchContext
+```
+
+Host surface MAY引用 `MessageCarrier`；author root MUST NOT re-export它。
+
+---
+
+## 3. Subsystem Definition Module ABI
+
+Game Package v1 的 `descriptor.module` 指向一个 platform-neutral `.mjs` **Subsystem Definition Module**。
+
+规范形态：
+
+```ts
+import { defineSubsystem } from "@loomrealm/subsystem";
+
+export default defineSubsystem(scope => ({
+  async initialize() {},
+  async frame(frame) {
+    return completed(null);
+  },
+  async shutdown() {},
+}));
+```
+
+要求：
+
+```text
+default export = SubsystemDefinitionFactory
+module load != Runtime start
+module path != Runtime identity
+module MUST NOT probe Desktop/PWA
+module MUST NOT open Control/Data carrier
+module MUST NOT read Host bootstrap globals for portable semantics
+```
+
+Host-owned Node/Worker Runner负责加载 Module并验证 default export。
+
+---
+
+## 4. Layering
 
 ```text
 Business Author API
 ────────────────────────
-Frame
+Frame / FrameOutcome
 InputListener
 RenderDomain
 ContentClient
@@ -107,17 +141,17 @@ RenderManager
 Protocol Planes
 ────────────────────────
 RuntimeControlPlane
-RendererDataPlane
+DataPlane
 
 Subsystem Platform Ports
 ────────────────────────
 RuntimeControlBinding
-RendererDataBinding
-ContentBinding
+SubsystemDataBinding
+ContentClient
 
 Foundation
 ────────────────────────
-MessageCarrier
+MessageCarrier<string>
 ```
 
 必须保持：
@@ -126,18 +160,18 @@ MessageCarrier
 Protocol Plane != physical connection
 Capability lifetime != carrier lifetime
 Frame lifetime != Data Connection lifetime
-Input Interest lifetime != Activation lifetime
+Interest lifetime != Activation lifetime
 Render Domain lifetime != Frame lifetime
 ```
 
 ---
 
-## 4. `MessageCarrier` Boundary
+## 5. MessageCarrier Boundary
 
-底层通用 carrier 由 `@loomrealm/foundation` 提供：
+Host surface使用 `@loomrealm/foundation` 已建立 message carrier：
 
 ```ts
-export interface MessageCarrier {
+interface MessageCarrier {
   send(message: string): void | Promise<void>;
   messages(): AsyncIterable<string>;
   readonly closed: Promise<CarrierClosed>;
@@ -145,191 +179,136 @@ export interface MessageCarrier {
 }
 ```
 
-它不回答 connection identity/lifecycle/establishment。
+Carrier 表示一条**已经建立**的 string message pipe，不表达 establishment/identity/reconnect policy。
 
-WebSocket / MessagePort adapters 只把某一条已经正确建立的物理连接转换为 `MessageCarrier`。
+当前 Runtime Control 与 Renderer Data Profile 都把 application unit冻结为 UTF-8 JSON text string，因此 WebSocket/MessagePort adapter 对 Core 暴露相同 string carrier。
 
 ---
 
-## 5. Subsystem Platform Ports
+## 6. Subsystem-facing Platform Ports
 
-### 5.1 Runtime Control
+### 6.1 Runtime Control
 
-Runtime Control 对一次 Launch Attempt 是 one-shot connection lifetime；same-attempt Control reconnect 非法。
-
-候选：
+一次 Launch Attempt 的 Control one-shot：
 
 ```ts
-export interface RuntimeControlBinding {
+interface RuntimeControlBinding {
   acquire(signal?: AbortSignal): Promise<MessageCarrier>;
+}
+```
+
+同一 Subsystem instance MUST最多成功 acquire一次；Control loss进入 Runtime failure，无 same-attempt reconnect。
+
+### 6.2 Data
+
+Subsystem side port 命名为 `SubsystemDataBinding`，避免与 Renderer role 的 `RendererDataBinding` 混淆：
+
+```ts
+interface SubsystemDataConnection {
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly carrier: MessageCarrier;
+}
+
+interface SubsystemDataBinding {
+  connections(
+    signal?: AbortSignal
+  ): AsyncIterable<SubsystemDataConnection>;
 }
 ```
 
 语义：
 
-> 返回当前 Subsystem instance / Launch Attempt 唯一、已经正确绑定 bootstrap context 的 Runtime Control carrier。
-
-Core 不关心底层是：
-
 ```text
-Hostra Desktop WebSocket connect
-PWA transferred MessagePort
-in-memory test carrier
+Platform Broker/Runner adapter
+    establishes/provisions physical carrier
+        ↓
+SubsystemDataBinding
+    yields already-bound S/G/Profile carrier
+        ↓
+SDK DataPlane
 ```
 
-`acquire` 不等于“SDK 自己打开 WebSocket”。physical establishment policy 属于 Platform Composition。
+SDK 不创建 endpoint/ticket/Port，也不拥有 generation/profile。
 
-### 5.2 Renderer Data
+同 generation/profile MAY sequential reconnect；fresh carrier child state重新 baseline。
 
-Data Connection 可以在相同 generation 下顺序重建，因此需要 connection stream：
+### 6.3 Content
 
-```ts
-export interface RendererDataConnection {
-  readonly generation: number;
-  readonly carrier: MessageCarrier;
-}
-
-export interface RendererDataBinding {
-  connections(
-    signal?: AbortSignal
-  ): AsyncIterable<RendererDataConnection>;
-}
-```
-
-`generation` 必须进入 binding value；same-generation reconnect 与 generation replacement 不应被压成不可区分的 carrier stream。
-
-这个 binding 是 System Data Connection Broker 在 **Subsystem side** 的投影。
-
-Subsystem SDK 不创建 Renderer endpoint，也不拥有 generation。
-
-### 5.3 Content
-
-Content 可以由 platform-neutral `ContentClient` 直接注入；具体 HTTP/Fetch/Service Worker transport 已在更低层绑定。
+`ContentClient` 是 platform-neutral logical client；Hostra HTTP / PWA Fetch/SW 已在更低层绑定。
 
 ---
 
-## 6. Startup Boundary
+## 7. Launch Context / `runSubsystem`
 
-不再采用：
-
-```ts
-startSubsystem({ definition, carrier, bootstrap });
-```
-
-因为单一 `carrier` 会把 Runtime Control 与 Renderer Data 混在一起。
-
-候选：
+Host integration不使用单一 `{carrier}`。
 
 ```ts
-export interface SubsystemPlatformPorts {
+interface SubsystemLaunchContext {
+  readonly subsystemKey: string;
+  readonly bootstrapToken: string;
+  readonly controlProtocolVersions: readonly number[];
+}
+
+interface SubsystemPlatformPorts {
   readonly runtimeControl: RuntimeControlBinding;
-  readonly rendererData: RendererDataBinding;
+  readonly data: SubsystemDataBinding;
   readonly content: ContentClient;
 }
 
-export interface StartSubsystemOptions {
+interface RunSubsystemOptions {
   readonly definition: SubsystemDefinitionFactory;
   readonly platform: SubsystemPlatformPorts;
-  readonly bootstrap: SubsystemBootstrap;
+  readonly launch: SubsystemLaunchContext;
 }
 
-export function startSubsystem(
-  options: StartSubsystemOptions
+function runSubsystem(
+  options: RunSubsystemOptions
 ): Promise<void>;
 ```
 
-`bootstrap` 与 physical connection 分离：
-
-```text
-Platform Binding
-    supplies correct physical connection capability
-
-Bootstrap material
-    supplies protocol/application bootstrap facts
-```
-
-SDK 不探测 Desktop/PWA，也不读取 Hostra/PWA-specific globals。
+`controlEndpoint` / MessagePort / WebSocket / Runner provisioning handle不进入 `SubsystemLaunchContext`；它们已被 Platform adapter吸收到 bindings 中。
 
 ---
 
-## 7. Long-lived Protocol Planes
+## 8. Runtime Startup
 
-### 7.1 RuntimeControlPlane
-
-```text
-RuntimeControlBinding
-        ↓
-RuntimeControlPlane
-        ↓
-FrameRegistry / lifecycle
-```
-
-负责：
+逻辑顺序：
 
 ```text
-subsystem.hello
-subsystem.status
-subsystem.shutdown
-Frame / Call dispatcher
-shared request ID namespace
-Activation/context validation
-mutation gate
-Frame request deadlines
-Runtime fatal classification
+Runner validates Definition Module ABI
+→ create per-instance managers/scope
+→ invoke definition factory(scope)
+→ acquire Runtime Control carrier
+→ create RuntimeControlPlane
+→ subsystem.hello
+→ identified
+→ definition.initialize()
+→ establish all local capabilities required for Runtime Control Profile
+→ subsystem.status(ready)
+→ accept Frames
 ```
 
-Control carrier loss按 Runtime Control Profile 进入 Runtime failure；SDK 不重连 same Launch Attempt。
-
-### 7.2 RendererDataPlane
+关键规则：
 
 ```text
-RendererDataBinding
-        ↓
-RendererDataPlane
-       /              \
-      ▼                ▼
-InputManager       RenderManager
+ready != Data Connection exists
+ready != Renderer exists
+ready != Input/Render baseline published
 ```
 
-`RendererDataPlane` 的 lifetime 长于单条 Data carrier：
+`SubsystemDataBinding` / DataPlane 可以独立监听 connection stream；Data availability不是 Runtime readiness前置条件。
 
-```text
-DataPlane lifetime ───────────────────────────────>
-
-carrier A          ─────X
-                         carrier B ─────X
-                                      carrier C ───>
-```
-
-它负责 current/retired installation、generation observation、carrier demux/mux 与 fresh-connection notification。
-
-Input/Render capability 不直接持有某条 carrier。
+Definition factory / `initialize()` 在 ready 前失败时，SDK进入 Runtime bootstrap failure，不伪造 Frame outcome。
 
 ---
 
-## 8. Author Instance Scope
+## 9. Per-instance Author Scope
 
-业务需要 per-Subsystem-instance dependency scope，但不需要万能 `SubsystemRuntime` service locator。
-
-不推荐：
+不建立万能 `SubsystemRuntime` service locator，也不使用 module-global current runtime。
 
 ```ts
-runtime.input.createListener(...)
-runtime.render.domain(...)
-runtime.content.get(...)
-runtime.frames...
-```
-
-也不推荐 module-global：
-
-```ts
-createInputListener(...)
-```
-
-推荐通过 definition factory 注入 instance-bound closures：
-
-```ts
-export interface SubsystemScope {
+interface SubsystemScope {
   readonly createInputListener: (
     options: CreateInputListenerOptions
   ) => InputListener;
@@ -343,160 +322,301 @@ export interface SubsystemScope {
 }
 ```
 
-`SubsystemScope` 的含义只是：
+这些 factory/client只是同一 Subsystem instance 的 scoped dependencies，不表示 Runtime拥有 Input/Render/Content。
 
-> 这些 factory/client 属于同一个 Subsystem instance。
-
-不表示 Runtime “拥有” Input/Render/Content。
+`signal` 在 graceful shutdown intent 或 Runtime-fatal transition 时 abort，供业务取消长任务。
 
 ---
 
-## 9. `defineSubsystem`
+## 10. FrameOutcome：业务与协议一一对应
 
-候选：
+正式 Frame v1 outcome 直接成为 author-level业务结果：
 
 ```ts
-export interface SubsystemDefinition {
+type FrameOutcome<T extends JsonValue = JsonValue> =
+  | { readonly type: "completed"; readonly value: T }
+  | { readonly type: "cancelled" }
+  | { readonly type: "failed"; readonly error: FrameFailure };
+
+interface FrameFailure {
+  readonly code: string;
+  readonly message?: string;
+  readonly data?: JsonValue;
+}
+```
+
+纯 helper：
+
+```ts
+completed(value)
+cancelled()
+failed(error)
+```
+
+不增加第二套 SDK outcome model。
+
+---
+
+## 11. `defineSubsystem`
+
+```ts
+interface SubsystemDefinition {
   initialize?(): void | Promise<void>;
-  frame(frame: Frame): JsonValue | Promise<JsonValue>;
+
+  frame(
+    frame: Frame
+  ): FrameOutcome | Promise<FrameOutcome>;
+
   shutdown?(): void | Promise<void>;
   failed?(error: RuntimeFailure): void | Promise<void>;
 }
 
-export type SubsystemDefinitionFactory = (
+type SubsystemDefinitionFactory = (
   scope: SubsystemScope
 ) => SubsystemDefinition;
-
-export function defineSubsystem(
-  factory: SubsystemDefinitionFactory
-): SubsystemDefinitionFactory;
 ```
 
-业务：
+成功、取消、业务失败必须显式形成 Outcome：
 
 ```ts
-export default defineSubsystem(({
-  createInputListener,
-  createRenderDomain,
-  content,
-  signal,
-}) => ({
-  async initialize() {
-    // Runtime-level business initialization
-  },
+async frame(frame) {
+  const battle = await frame.call("loom.battle", {
+    enemy: "pikachu"
+  });
 
-  async frame(frame) {
-    const input = createInputListener({
-      frame,
-      channels: ["keyboard.event"]
-    });
-
-    const world = createRenderDomain({ name: "world" });
-
-    // business logic
-
-    return { completed: true };
-  },
-
-  async shutdown() {
-    // bounded cleanup
-  },
-}));
+  switch (battle.type) {
+    case "completed":
+      return completed(applyBattle(battle.value));
+    case "cancelled":
+      return cancelled();
+    case "failed":
+      return failed(battle.error);
+  }
+}
 ```
 
-同一个 definition 可被 Hostra Desktop / PWA composition 运行。
+这里的 verbosity 是 intentional：Frame terminal semantics 不再依赖 Promise resolve/reject 的隐式猜测。
 
 ---
 
-## 10. `Frame` Capability
-
-`Frame` 只表达 Main-owned control-flow context 的 author facade。
+## 12. Frame Capability
 
 ```ts
-export interface Frame<TParams extends JsonValue = JsonValue> {
+interface Frame<TParams extends JsonValue = JsonValue> {
   readonly id: string;
   readonly params: TParams;
+  readonly signal: AbortSignal;
 
   call<TResult extends JsonValue = JsonValue>(
     subsystem: string,
     params: JsonValue
-  ): Promise<TResult>;
+  ): Promise<FrameOutcome<TResult>>;
 }
 ```
 
-### 为什么叫 `params`，不叫 `input`
+`params` 对应 `frame.initialize.input` 的业务参数；不使用 `frame.input`，避免与 User Input冲突。
 
-`frame.initialize` 的业务参数不是 User Input。
+Author不见 `activationId`。
 
-因此 author API 不再使用：
+`frame.signal`：
 
-```ts
-frame.input
+```text
+survives normal child-call suspension/resume
+aborts on administrative suspend (v1 has no normal resume)
+aborts on frame.close/local terminalization
+aborts on Runtime shutdown/failure
 ```
 
-来承载业务初始化参数，避免和 keyboard/pointer/gamepad User Input 永久冲突。
-
-### 为什么不公开 `activationId`
-
-Activation 是协议 authority epoch，由 SDK 内部 Frame Context 管理。
-
-业务不得缓存/传递/恢复旧 Activation。
-
-### Frame completion
-
-普通 handler 正常 resolve 的 value 由 SDK 转换为 `frame.return`。
-
-这样 author 不需要：
-
-```ts
-await frame.return(value); // Promise<never> ergonomics
-```
-
-SDK 在 handler terminalization / outbound return 时统一建立 mutation gate，防止第二个 call/return 或 late ordinary input delivery。
+业务可以用它取消 Frame-owned background work，但 Frame protocol correctness不依赖业务主动响应 AbortSignal。
 
 ---
 
-## 11. `frame.call()`
+## 13. Frame Initialize / Activate Mapping
 
-业务：
+`frame.initialize` success只建立 local Frame/Input Context：
 
-```ts
-const result = await frame.call("loom.battle", params);
+```text
+validate/create local context
+store params
+create branded Frame capability
+DO NOT start business frame handler yet
 ```
 
-SDK/协议内部：
+业务 handler 只在首次 successful `frame.activate` 安装 fresh Activation后启动一次。
+
+这样业务永远不会在 `starting` Frame 上意外调用 `frame.call()` 或消费 ordinary input。
+
+`FRAME_INITIALIZE_REJECTED` 是 SDK/context establishment级 rejection，不作为普通 author control-flow feature暴露。Phase 1 SDK SHOULD对合法 JsonValue params和可用本地资源确定性建立 context；业务语义验证在 active handler中用 `failed(...)` 表达。
+
+---
+
+## 14. `frame.call()` 精确语义
+
+### 14.1 Child terminal outcome
+
+正常 accepted call：
 
 ```text
 frame.call Request
-→ Main acceptance
-→ caller suspension / old Activation revoked
-→ child Frame initialize/activate
-→ child returns
-→ child closes
-→ caller resume with fresh Activation
-→ SDK installs fresh local Activation
-→ frame.call Promise resolves
+→ Main acceptance commits caller suspension/revokes old Activation
+→ call Success(childFrameId)
+→ child initialize/activate
+→ child returns outcome
+→ child close
+→ caller resume(fresh Activation)
+→ SDK atomically installs fresh local Activation
+→ frame.call Promise resolves FrameOutcome
 ```
 
-业务不监听 `frame.resume`。
+Child：
 
-`frame.resume` 是 continuation primitive，不是默认 author event。
+```text
+completed
+cancelled
+failed
+```
+
+都属于**正常 Promise resolution value**，不是 JS exception。
+
+### 14.2 Recoverable pre-commit rejection
+
+正式协议明确 caller mutation未 commit 的：
+
+```text
+FRAME_CALL_TARGET_NOT_FOUND
+FRAME_CALL_TARGET_UNAVAILABLE
+```
+
+映射为：
+
+```ts
+FrameCallRejectedError
+```
+
+`frame.call()` MAY reject该 local/typed error；SDK确认旧 Activation仍 current后释放 mutation gate，业务 continuation可 `catch` 并继续。
+
+### 14.3 Runtime-fatal / ambiguous
+
+以下不能作为普通 Promise rejection交还业务：
+
+```text
+Control loss
+timeout with ambiguous commit
+divergence
+fatal protocol error
+Runtime terminal failure
+```
+
+固定规则：
+
+> **Runtime-fatal path MUST NOT re-enter the suspended business continuation.**
+
+SDK：
+
+```text
+enter terminal Runtime failure
+keep mutation gate closed
+abort instance/frame signals
+quarantine outstanding business Frame tasks
+frame.call Promise does not settle back into business code
+```
+
+禁止：
+
+```ts
+try {
+  await frame.call(...);
+} catch {
+  // continue mutating an Activation whose commit state is unknown
+}
+```
+
+这条规则保证 Frozen Frame v1 的 ambiguous/no-rollback语义不能被 JS `catch` 绕过。
 
 ---
 
-## 12. Mutation Gate
+## 15. Handler Completion / `frame.return`
 
-SDK 统一拥有 commit-sensitive gate：
+业务 handler返回一个 `FrameOutcome`。
+
+如果 Frame仍 active/current、Runtime healthy、mutation gate可进入 terminal return：
 
 ```text
-pending frame.call / handler terminal return
+handler resolves Outcome
+→ atomically terminalize local ordinary-mutation surface
 → hold mutation gate
-→ stop ordinary input dispatch for that Frame
-→ reject second mutation locally
-→ wait protocol result / Runtime failure
+→ send protocol frame.return(outcome)
 ```
 
-可暴露稳定 local usage errors：
+Author不直接调用 `frame.return()`。
+
+如果 `frame.return` explicit recoverable error理论上与本地 authority矛盾，按 Frozen protocol分类处理；ambiguous/fatal进入 Runtime failure，旧 Activation绝不恢复。
+
+重复 handler completion / second call/return 被本地 usage gate拒绝，不发 wire。
+
+---
+
+## 16. Uncaught Business Exception
+
+当 active Frame handler抛出未捕获 business exception，且 Runtime/Frame authority仍明确健康时，SDK把它转成 sanitized Frame business failure：
+
+```ts
+failed({
+  code: "UNHANDLED_BUSINESS_EXCEPTION",
+  message: safeMessage
+})
+```
+
+然后走正常 `frame.return(failed)`。
+
+区分：
+
+```text
+business exception
+    → Frame failed outcome
+
+protocol ambiguity / SDK invariant corruption / Control loss
+    → Runtime failure
+```
+
+不得把普通业务异常默认升级为整 Runtime fatal；也不得把 Runtime protocol corruption降级成 Frame failed outcome。
+
+---
+
+## 17. Administrative Suspend
+
+`frame.suspend` v1 是 administrative one-way suspension，无 generic normal resume。
+
+成功后 SDK：
+
+```text
+revoke local Activation
+close ordinary input/call/return gate
+abort frame.signal
+keep context only for later frame.close cleanup
+```
+
+若已经运行的业务 task忽略 AbortSignal后继续 resolve/throw，SDK MUST discard其 terminal attempt，不发送 `frame.return`。
+
+Child-call suspension不使用 `frame.suspend`，也不 abort `frame.signal`。
+
+---
+
+## 18. Mutation Gate
+
+每个 Frame Context由 SDK拥有 commit-sensitive mutation gate：
+
+```text
+pending outbound frame.call
+pending terminal frame.return
+administrative suspend
+closing/closed
+Runtime terminal
+```
+
+都会阻止新的 ordinary mutation/input delivery。
+
+可暴露 local usage errors：
 
 ```text
 FrameBusyError
@@ -508,414 +628,387 @@ FrameClosedError
 
 ---
 
-## 13. Input API
+## 19. Runtime Terminal Hooks
 
-Input 是独立 capability，不挂在 Runtime，也不挂成 `frame.input` namespace。
+一个 Subsystem instance只有一个 first terminal cause：
 
-但创建时应绑定 `Frame` object，而不是裸 `frameId`：
+```text
+gracious Main shutdown intent
+OR
+Runtime-fatal failure
+```
+
+SDK先 abort `scope.signal` 与 relevant frame signals，再进入 bounded terminal handling。
+
+Author hooks：
+
+```text
+shutdown()
+    first terminal cause = graceful shutdown
+
+failed(error)
+    first terminal cause = Runtime failure
+```
+
+同一 instance 不重复调用两个 terminal hook；terminal hook自身异常只进入 diagnostics/cleanup classification，不重新开放 Runtime。
+
+---
+
+## 20. Input API
+
+Input 是独立 capability，但通过 branded `Frame` capability绑定正确 owner/identity：
 
 ```ts
-export interface CreateInputListenerOptions {
+interface CreateInputListenerOptions {
   readonly frame: Frame;
   readonly channels: readonly InputChannel[];
 }
 
-export interface InputListener {
-  on<T>(
-    channel: InputChannel,
-    handler: (value: T) => void
-  ): Unsubscribe;
-
+interface InputListener {
+  on<T>(channel: InputChannel, handler: (value: T) => void): Unsubscribe;
   setChannels(channels: readonly InputChannel[]): void;
   close(): void;
 }
 ```
 
-这样：
+SDK SHOULD拒绝：
 
 ```text
-Frame object
-    supplies identity + Subsystem-instance owner binding
-
-InputListener
-    remains independent capability
+foreign Subsystem Frame capability
+already closed/administratively suspended Frame for new listener
+invalid channel
 ```
 
-无需 module-global current runtime，也不能把另一个 Subsystem instance 的 `frameId` 误传进来。
+协议对 stale/unknown Interest 的容忍是 cross-plane recovery rule，不代表 author API需要接受错误 local binding。
 
 ---
 
-## 14. InputManager / Interest Registry
+## 21. Input Interest Aggregation
 
-多个 listener 对同一 Frame 的 channel contribution 做 union：
+多个 listener对同一 Frame贡献 union：
 
 ```text
-Listener A: F1 → keyboard.event
-Listener B: F1 → pointer.state
-Listener C: F2 → gamepad.event
+A(F1): keyboard.event
+B(F1): pointer.state
+C(F2): gamepad.event
 
-local desired registry:
+DesiredRegistry:
 F1 → keyboard.event, pointer.state
 F2 → gamepad.event
 ```
 
-内部：
+内部保存 per-listener contribution + derived：
 
 ```text
 Map<frameId, Set<channel>>
 ```
 
-publication：
+每次 publication都是 full Frame Interest Registry Snapshot，不是 incremental subscribe/unsubscribe。
 
-```text
-full Frame Interest Registry snapshot
-```
+`setChannels`/`close` 必须先原子更新 local desired registry，再排 publication；因此 late removed-channel input被 receive gate直接 drop。
 
-不是 per-listener/per-channel subscribe patch。
-
-InputManager 必须先/原子更新 local desired registry，再发布 shrink snapshot，使 removed-channel in-flight input 能被 local receive gate drop。
+一个 listener关闭不能移除另一个 listener仍贡献的 channel。
 
 ---
 
-## 15. Input Lifecycle
+## 22. Input Lifecycle
 
-### Suspension / resume
+### Child-call suspension/resume
 
 ```text
-F1/A1 active
-listener(F1) alive
-Interest[F1] alive
-
-frame.call
-→ A1 revoked
-→ F1 suspended
-→ listener remains
-→ Interest[F1] remains
+F/A1 active + Interest[F]
+→ accepted child call
+→ F suspended / A1 revoked
+→ listeners + Interest[F] remain
 → ordinary delivery stops
-
-frame.resume(F1,A2)
-→ fresh A2 installed
-→ same listener reused
+→ fresh resume A2
+→ same listeners/config reused
 ```
 
-如果同一 Data carrier 存活，不需要重新发布 unchanged `Interest[F1]`。
-
-但旧 Activation retained State/Event 永远不能跨到 A2。
-
-### New Frame
-
-新 F2 没有自己的 `Interest[F2]` 时即使 active 也不收 ordinary input；创建 listener/更新 registry 后才可能 effective。
+old A1 Input State/Event永不跨到 A2；`.state` false→true重新 baseline。
 
 ### Frame close
 
-local Frame Context terminalize 时：
+local `frame.close` success成立前 MUST已经：
 
 ```text
+abort frame.signal
 close all listeners bound to F
-remove Interest[F]
-next full registry snapshot omits F
+remove local Interest[F]
+clear retained input state for F
 ```
 
-stale remote/cache Interest 不能创建 Main authority。
+wire publication可以稍后 coalesce/发送，但 local invariant必须先成立。
+
+### Fresh Data carrier
+
+业务 listener/local desired registry保留；remote registry从 empty开始；InputManager自动 republish current full registry。
 
 ---
 
-## 16. Data Reconnect
+## 23. Input Receive Gate
 
-old carrier retired：
-
-```text
-business InputListener remains
-local desired Interest Registry remains
-business RenderDomain remains
-local desired Render State remains
-
-wire child-protocol state discarded
-```
-
-fresh carrier：
-
-```text
-User Input
-    remote registry starts empty
-    InputManager republishes current full local registry
-
-Render
-    RenderManager publishes current Domain Registry
-    then fresh Snapshots
-```
-
-业务不参与 reconnect。
-
----
-
-## 17. Input Receive Gate
-
-收到 Renderer input 时 SDK 检查：
+收到普通 State/Event 时至少重新验证：
 
 ```text
 message belongs to current Data carrier
-local frameId exists
+local Frame exists
 Frame active
 activationId == current local Activation
 channel ∈ local Interest[frameId]
 mutation gate open
 ```
 
-否则 drop，不把 stale/in-flight ordinary input 转成 Runtime failure。
+否则 drop，不升级 Runtime failure。
 
 ---
 
-## 18. Render API
+## 24. Render API
 
-Render 是独立 presentation capability，不挂在 Frame，也不通过 `runtime.render` service locator 暴露。
+Render 是 independent presentation capability：
 
 ```ts
-export interface CreateRenderDomainOptions {
+interface CreateRenderDomainOptions {
   readonly name?: string;
   readonly zIndex?: number;
 }
 
-export interface RenderDomain {
+interface RenderDomain {
   set(state: RenderTree): void;
-  event(target: string, name: string, data?: JsonObject): void;
+  event(targetKey: string, name: string, data?: JsonObject): void;
   close(): void;
 }
 ```
 
-业务：
+SDK mint protocol `domainId`；author `name` 只是可选诊断/业务标签，不是 one-shot protocol identity。
 
-```ts
-const world = createRenderDomain({
-  name: "world",
-  zIndex: 0,
-});
-
-world.set(nextTree);
-```
-
-SDK SHOULD 自己 mint protocol `domainId`；业务 `name` 不默认等于 one-shot protocol identity。
+不同时提供没有明确不同语义的 `set()` / `update()`；业务表达 desired authoritative state，SDK决定 Snapshot/Patch。
 
 ---
 
-## 19. RenderManager / Data Lifetime
+## 25. Render / Data Lifetime
 
 ```text
 RenderDomain
     ↓
 RenderManager
     ↓
-RendererDataPlane
+DataPlane
     ↓
 current carrier
 ```
 
-Data reconnect 时 `RenderDomain` object 不变。
+Data carrier替换时业务 `RenderDomain` object和 desired state不变。
 
 fresh carrier：
 
 ```text
-current Domain Registry
-→ fresh Snapshot current Domains
-→ ordinary Patch/Event
+render.domains current full Registry
+→ fresh Snapshot each current Domain
+→ Patch/Event
 ```
 
-业务默认只表达 desired authoritative state：
+Frame close/suspend不自动 hide/destroy Domain。
 
-```ts
-world.set(nextTree);
-```
-
-不暴露 `world.patch()` 或要求业务手写 protocol revision。
+Runtime terminal时 SDK最终关闭本 instance所有 local RenderDomain resources，但这只是 local cleanup，不改写已定义协议 lifecycle。
 
 ---
 
-## 20. Frame / Input / Render Independence
+## 26. DataPlane
+
+Subsystem SDK只有一个 connection-wide DataPlane reader/writer：
 
 ```text
-Frame
-    control-flow capability
-
-InputListener
-    Frame-scoped input-flow capability
-
-RenderDomain
-    independent presentation-state capability
-
-ContentClient
-    logical readonly content capability
+SubsystemDataBinding
+        ↓
+DataPlane
+      /       \
+ InputManager RenderManager
 ```
 
-必须保持：
+DataPlane：
 
 ```text
-Frame close != RenderDomain close
-Frame suspend != Render hide
-Activation replacement != Interest deletion
-Data carrier replacement != capability recreation
+validates generation/profile/current installation
+owns one carrier reader
+JSON text parse
+Renderer Data Profile demux
+fresh-carrier notification
+retirement cleanup
 ```
 
-业务若希望某 Domain/Listener 与某业务 scope 同生共死，应显式 cleanup 或由 SDK 的确定性 local ownership helper 管理；不能把这种 policy 升级成 protocol lifecycle。
+InputManager/RenderManager MUST NOT分别竞争消费 `carrier.messages()`。
 
 ---
 
-## 21. Runtime Lifecycle Surface
-
-不建立大而全 `SubsystemRuntime` public object。
-
-真正 Runtime-scoped author concerns 保持很小：
-
-```text
-initialize hook
-shutdown hook
-failed hook/diagnostics
-instance AbortSignal
-shared business closure state
-```
-
-不重复同时提供：
-
-```text
-runtime.on("shutdown")
-+ definition.shutdown()
-```
-
-需要取消长任务时优先使用 scoped `AbortSignal`。
-
----
-
-## 22. Platform Independence
+## 27. Platform Independence / Runner Boundary
 
 Core package MUST NOT：
 
 ```text
 probe Desktop/PWA
-import WebSocket/MessagePort concrete API
-spawn process/Worker
+import concrete WebSocket/MessagePort
+spawn Process/Worker
 own DataConnectionBroker
 open Hostra window
-read platform-global current Subsystem
+read module-global current platform
 ```
 
-System Platform Composition 分别在 Hostra Desktop / PWA 上实现相同 Subsystem Platform Ports。
+Hostra Node Runner / PWA Worker Runner负责：
 
-同一个业务 definition 不修改即可跨平台运行。
+```text
+load Definition Module
+obtain platform bootstrap material
+construct RuntimeControlBinding
+construct SubsystemDataBinding
+construct ContentClient
+call runSubsystem(...)
+```
+
+同一个 Definition Module在两种 Runner下不修改即可运行。
 
 ---
 
-## 23. Internal Structure
+## 28. Desktop Dynamic Data Provisioning Boundary
 
-目标边界：
+Desktop DataAuthority通常在 Runtime启动之后才出现/替换，因此 Node Runner必须有 platform-internal provisioning source，用来实现 `SubsystemDataBinding`。
+
+概念链：
+
+```text
+Main DataAuthority(S,G,P)
+→ Desktop DataConnectionBroker
+→ platform-local Runner provisioning channel
+→ Node Runner receives one-time Data connection material
+→ transport-websocket establishes/binds carrier
+→ SubsystemDataBinding yields {G,P,carrier}
+→ SDK DataPlane installs current
+```
+
+该 provisioning channel：
+
+```text
+is Platform infrastructure
+is not Runtime Control
+is not Renderer Data application carrier
+is not author API
+```
+
+具体 Node IPC payload属于 Hostra composition/Runner implementation；不得把 endpoint/ticket塞入 `subsystem.status(ready)`、Frame params或 Renderer Control Snapshot。
+
+PWA 对应使用 Worker provisioning Port / transferred MessagePort实现相同 `SubsystemDataBinding` semantics。
+
+---
+
+## 29. Internal Structure
+
+目标：
 
 ```text
 packages/subsystem/
-├── DESIGN.md
 ├── src/
+│   ├── index.ts                 author exports
 │   ├── definition/
 │   ├── frame/
 │   │   ├── frame.ts
+│   │   ├── outcome.ts
 │   │   ├── context.ts
 │   │   ├── registry.ts
 │   │   └── mutation-gate.ts
 │   ├── input/
-│   │   ├── input-manager.ts
-│   │   ├── listener.ts
-│   │   ├── interest-registry.ts
-│   │   └── dispatcher.ts
 │   ├── render/
-│   │   ├── render-manager.ts
-│   │   ├── domain.ts
-│   │   └── desired-state.ts
 │   ├── content/
-│   ├── platform/
-│   │   └── ports.ts
+│   ├── host/
+│   │   ├── run-subsystem.ts
+│   │   └── platform-ports.ts
 │   └── internal/
 │       ├── runtime-control-plane.ts
-│       └── renderer-data-plane.ts
+│       └── data-plane.ts
 └── test/
 ```
 
-public exports 不应 re-export：
-
-```text
-RuntimeControlPeer
-JsonRpcMessage
-MessageCarrier
-wire validators
-activationId helpers
-Data generation manipulation
-```
-
-Host/composition side 可以从受控 integration subpath 获取必要 Platform Port types；author main entry 保持业务友好。
+Author root不 re-export host/internal types。
 
 ---
 
-## 24. Testing
+## 30. Testing
 
 至少覆盖：
 
 ```text
-Memory RuntimeControlBinding one-shot
-Control loss → Runtime failure
-Control+Frame shared request ID namespace
-Frame activation hidden from author
-frame.call suspend/fresh-resume continuation
-handler resolution → one frame.return
-mutation gate
+Definition Module default-export ABI
+per-instance scope / no global current context
+Runtime Control binding one-shot
+ready independent from Data connection
 
-multiple listeners same Frame union Interest
-new Frame waits own Interest
-suspended Frame retains Interest
-fresh Activation reuses Interest config
-fresh Activation does not reuse Input State/Event
-Frame close removes listeners/interest
-fresh Data carrier republish full registry
-stale/in-flight input receive gate
+frame.initialize-does-not-start-handler
+frame.activate-starts-handler-once
+child-completed/cancelled/failed-resolve-as-FrameOutcome
+recoverable-call-rejection-rejects-and-keeps-current-activation
+runtime-fatal-call-never-reenters-business-continuation
+handler-uncaught-exception-becomes-frame-failed
+administrative-suspend-aborts-frame-signal/discards-late-handler-result
+handler-result-sends-exactly-one-return
+mutation-gate
 
-RenderDomain survives Data reconnect
-fresh carrier Registry + Snapshots
-Frame close does not auto-close Domain
+multiple-listeners-union-interest
+listener-bound-to-local-frame-owner
+suspend-retains-interest
+fresh-activation-reuses-interest-config-not-state
+frame-close-removes-interest-before-local-close-success
+fresh-data-carrier-republishes-full-registry
+stale-input-receive-gate
 
-same business definition under
-    fake Hostra-like ports
-    fake PWA-like ports
-produces same abstract application trace
+one-data-reader-demuxes-input-render
+wrong-data-profile-not-installed
+render-domain-survives-data-reconnect
+fresh-render-registry-snapshots
+frame-close-does-not-auto-close-domain
+
+fake Hostra-like ports
+fake PWA-like ports
+same Definition Module → same abstract business trace
 ```
 
 ---
 
-## 25. Non-goals
+## 31. Non-goals
 
 当前不做：
 
 ```text
 万能 game framework
-platform-global service locator
+runtime.* service locator
+platform-global current Subsystem
 automatic Runtime restart
 business-visible activationId
-per-Frame Data Connection
-per-RenderDomain Data Connection
-Input subscription ACK/revision/tombstone
-Render history replay/resync RPC
+per-Frame/per-Domain Data Connection
+Input ACK/revision/subscription handshake
+Render history replay
 Hostra/PWA special business API
+SDK catchable Runtime-fatal continuation
 ```
 
 ---
 
-## 26. Final Invariants
+## 32. Final Invariants
 
-1. `@loomrealm/subsystem` 是 platform-neutral Subsystem role SDK；
-2. System Platform Composition 拥有完整物理 topology；本包只消费 Subsystem role-local ports；
-3. `MessageCarrier` 表示已建立 transport，不表示 establishment/lifecycle policy；
-4. Runtime Control 与 Renderer Data 使用独立 binding/lifetime；
-5. RuntimeControlPlane / RendererDataPlane 长期存在，capability 不直接绑某条 carrier；
-6. author API 不使用万能 `runtime.input/render/content` service locator；
-7. author factories 是 per-Subsystem-instance bound closures，不使用 module-global current context；
-8. Frame 只表达 control flow；初始化业务参数叫 `params`；
-9. handler 正常 completion 由 SDK 转成 `frame.return`；
-10. InputListener 独立但绑定 `Frame` capability，Interest 语义 Frame-scoped；
-11. fresh Activation 可复用 Frame Interest config，不复用旧 Input State/Event；
-12. fresh Data Connection child-protocol state重新 baseline，业务 capability object继续存在；
-13. RenderDomain 与 Frame/Data carrier lifecycle 独立；
-14. business code 不知道 Hostra/WebSocket/MessagePort/Worker；
-15. 同一个 Subsystem definition 应能在 Hostra Desktop 与 PWA Platform Composition 上运行。
+1. `@loomrealm/subsystem` 是 platform-neutral author SDK；
+2. `@loomrealm/subsystem/host` 是 trusted Runner integration surface；
+3. Game Package module默认导出同一个 `SubsystemDefinitionFactory`；
+4. Platform通过 `RuntimeControlBinding + SubsystemDataBinding + ContentClient` 注入基础设施；
+5. Runtime Control与 Data独立 connection/lifetime；
+6. author不见 carrier/bootstrap/generation/profile/activation；
+7. FrameOutcome与正式 Frame v1 `completed/cancelled/failed` 一一对应；
+8. child terminal outcome resolve `frame.call()`；pre-commit recoverable rejection才 reject；
+9. Runtime-fatal/ambiguous path永不重新进入业务 continuation；
+10. `frame.initialize`只建 Context，`frame.activate`后才启动 handler；
+11. uncaught business exception默认成为 Frame failed，不混同 Runtime protocol failure；
+12. InputListener绑定 branded Frame，Interest语义 Frame-scoped；
+13. Frame close local success前必须删除 listeners/Interest；
+14. fresh Activation复用 Interest config但不复用 Input State/Event；
+15. fresh Data carrier child state重新 baseline，business capability object继续存在；
+16. RenderDomain与 Frame/Data carrier lifecycle独立；
+17. 一个 DataPlane统一消费/分派 Data carrier；
+18. Desktop dynamic Data material经 Platform provisioning sideband进入 Runner，不污染 Runtime Control；
+19. 同一 Definition Module应在 Hostra Node Runner与 PWA Worker Runner下运行同一业务语义。
