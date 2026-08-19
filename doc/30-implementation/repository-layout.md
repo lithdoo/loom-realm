@@ -3,38 +3,35 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Experimental  
-> 主要定义：monorepo物理目录、workspace分类、Subsystem Definition Module/Runner placement、Platform Composition Root、依赖方向与测试布局  
+> 主要定义：monorepo物理目录、Subsystem author/host surface、Definition Module/Runner、Platform provisioning、测试布局  
 > 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)  
 > 最近复核：2026-08-19
 
-公开 package职责与发布边界以 [独立分包与发布架构](./package-architecture.md) 为权威来源。本文只回答代码放哪里。
+公开 package职责以 package architecture为权威；本文只回答“代码放哪里”。
 
 ---
 
-## 1. 推荐顶层结构
+## 1. Top-level
 
 ```text
 packages/
 ├── foundation/
 ├── wire/
+├── game-package/
 ├── runtime-control/
 ├── renderer-control/
 ├── data/
 ├── content/
-├── game-package/
-│
 ├── main/
 ├── subsystem/
 ├── renderer/
 ├── content-service/
-│
 ├── launcher-node/
 ├── transport-websocket/
 ├── transport-messageport/
 ├── content-fs/
 ├── content-http/
 ├── content-service-worker/
-│
 └── map/
 
 apps/
@@ -50,26 +47,23 @@ tests/
 └── e2e/
 ```
 
-目标图不要求一次创建所有目录。
+不要求一次创建所有目录。
 
 ---
 
-## 2. Package 分类
+## 2. Package Categories
 
 ```text
-foundation primitives
-    foundation
-
-wire primitives
-    wire
+low-level
+    foundation / wire
 
 contract/capability
-    runtime-control / renderer-control / data / content / game-package
+    game-package / runtime-control / renderer-control / data / content
 
-runtime/role
+role
     main / subsystem / renderer / content-service
 
-technical adapter/integration
+technical adapter
     launcher-node / transport-* / content-*
 
 business
@@ -78,188 +72,237 @@ business
 
 ---
 
-## 3. Subsystem Role Package
+## 3. `packages/subsystem`
 
-建议：
+目标：
 
 ```text
 packages/subsystem/
 ├── src/
+│   ├── index.ts                 author exports
 │   ├── definition/
 │   ├── frame/
 │   ├── input/
 │   ├── render/
 │   ├── content/
-│   ├── platform/
+│   ├── host/
+│   │   ├── run-subsystem.ts
+│   │   └── platform-ports.ts
 │   └── internal/
+│       ├── runtime-control-plane.ts
+│       └── data-plane.ts
 └── test/
 ```
 
-public author root：
+Exports：
 
 ```text
 @loomrealm/subsystem
-```
+    business author API
 
-只暴露 business capabilities。
-
-Host/composition integration可以使用受控 subpath：
-
-```text
 @loomrealm/subsystem/host
+    trusted Runner/integration API
 ```
 
-用于 `runSubsystem`、role-local Platform Port types等，不应被业务 package依赖。
+Business package不得 import `/host`。
 
 ---
 
-## 4. Business Definition Module Placement
-
-业务 package构建输出提供 Game Package v1声明的 `.mjs` Definition Module，例如：
+## 4. `packages/data`
 
 ```text
-packages/map/
-└── src/subsystem.ts
+packages/data/
+└── src/
+    ├── profile/
+    ├── connection/
+    ├── input/
+    ├── render/
+    ├── dispatcher/
+    └── testing/
+```
 
-build/package output:
+保持：
+
+```text
+Profile composition != child state-machine merge
+Connection != Input != Render
+one Data dispatcher consumes carrier
+```
+
+当前 Profile identity：`loomrealm.renderer-data/1`。
+
+---
+
+## 5. Business Definition Module
+
+业务 source：
+
+```text
+packages/map/src/subsystem.ts
+```
+
+安装/构建输出：
+
+```text
 subsystems/loom-map/subsystem.mjs
 ```
 
-该 `.mjs`：
+要求：
 
 ```text
 default export SubsystemDefinitionFactory
 platform-neutral
-not process/Worker entry glue
+not Process/Worker entry glue
 ```
-
-Desktop/PWA都加载同一业务 module ABI。
 
 ---
 
-## 5. Platform Runner Placement
+## 6. Runner Placement
 
-Runner与业务 module分离。
-
-当前不为了目录对称预创建两个 runner package。
+不预创建 Runner packages。
 
 ### Desktop
 
-Host-owned Node Subsystem Runner MAY先放：
+优先：
 
 ```text
 apps/desktop/src/subsystem-runner/
+├── entry.ts
+├── bootstrap.ts
+├── control-binding.ts
+├── provisioning.ts
+└── data-binding.ts
 ```
-
-如果出现独立复用价值，再抽入最小 technical integration package（可能与 `launcher-node` 合并或独立，按真实边界决定）。
 
 ### PWA
 
-Worker Subsystem Runner MAY先放：
+优先：
 
 ```text
 apps/pwa/src/subsystem-runner/
+├── worker-entry.ts
+├── bootstrap.ts
+├── control-binding.ts
+├── provisioning.ts
+└── data-binding.ts
 ```
 
-同样按真实复用决定是否抽包。
+两个 Runner都通过 `@loomrealm/subsystem/host`进入同一 Role Core。
 
-两个 Runner都通过 `@loomrealm/subsystem/host`进入同一 role core。
+出现多个真实消费者后才考虑抽 `subsystem-node/subsystem-worker` technical helper。
 
 ---
 
-## 6. Role-facing Platform Ports
+## 7. Role-facing Port Placement
 
 ```text
 packages/main/src/platform/
-packages/subsystem/src/platform/
+packages/subsystem/src/host/platform-ports.ts
 packages/renderer/src/platform/
 ```
 
-或 explicit subpath exports。
+典型命名：
 
-只有真实 composition/adapter需要的 types才公开；author entry不得 re-export MessageCarrier/bootstrap/generation等底层 mechanics。
+```text
+RendererDataBinding
+SubsystemDataBinding
+```
 
-System-level DataConnectionBroker不放入某个单一 role author surface。
+不要用一个角色含糊接口同时表示两端。
+
+System-level `DataConnectionBroker` 留在 composition/integration层或真实共享 capability，不进入任何 author surface。
 
 ---
 
-## 7. Apps = Platform Composition Roots
-
-### `apps/desktop`
+## 8. Desktop Composition Root
 
 ```text
-Node Runtime Hosting
-Host-owned Node Subsystem Runner
-Runtime/Renderer Control WebSocket bindings
-Hostra Renderer Hosting
-Desktop Data Broker
-filesystem/HTTP Content
+apps/desktop/
+├── Main/Renderer composition
+├── Hostra integration
+├── Node Runtime Hosting/Runner
+├── Runtime/Renderer Control WS binding
+├── Runner Platform Provisioning IPC
+├── DataConnectionBroker
+├── Data WebSocket provisioning
+└── Content HTTP/fs composition
 ```
 
-### `apps/pwa`
-
-```text
-DedicatedWorker Runtime Hosting
-Worker Subsystem Runner
-Runtime/Renderer Control MessagePort bindings
-Window Renderer Hosting
-MessageChannel Data Broker
-Service Worker/Fetch Content
-```
-
-App glue负责构造 Main/Renderer/Subsystem-facing ports并启动/停止产品，但不得复制协议语义。
+Runner provisioning必须和 Runtime Control/stdout/Data application carrier物理/逻辑分离。
 
 ---
 
-## 8. Technical Adapters
+## 9. PWA Composition Root
 
 ```text
-packages/launcher-node/
-packages/transport-websocket/
-packages/transport-messageport/
-packages/content-fs/
-packages/content-http/
-packages/content-service-worker/
+apps/pwa/
+├── Main/Renderer composition
+├── Worker Runtime Hosting/Runner
+├── Runtime/Renderer Control MessagePort binding
+├── Worker provisioning path
+├── DataConnectionBroker / MessageChannel transfer
+└── Content Service Worker/Fetch composition
 ```
 
-Adapter实现单一技术能力，不拥有完整 Platform topology。
-
-`launcher-node` 不等于 Game Package launcher declaration；Game Package现在只有 `{key,module}`。
+Control/Data carrier只发送 string application units；Port object只通过 provisioning/bootstrap transfer。
 
 ---
 
-## 9. Tests
+## 10. Technical Adapters
+
+```text
+launcher-node
+transport-websocket
+transport-messageport
+content-fs/http/service-worker
+```
+
+Adapter不拥有 Main DataAuthority/Frame recovery/complete Platform topology。
+
+`transport-messageport` 接受 already-provisioned Port并提供 `MessageCarrier<string>`；创建/transfer Port属于 Platform Broker/Runner integration。
+
+---
+
+## 11. Test Layout
 
 ```text
 tests/fixtures
     Game Package {key,module}
     Definition Modules
-    content samples
-    abstract traces
+    protocol abstract traces
+    content fixtures
 
 tests/subsystems
-    shared test Definition Modules
+    success/cancel/fail business Definitions
+    exception/long-running/signal fixtures
 
 tests/integration
-    role/package integration
-    fake Platform ports
+    Runtime Control / Frame
+    Renderer Control / Data Profile
+    Subsystem SDK author-host boundary
+    role-facing fake ports
 
-tests/platform
-    Desktop Node Runner
-    PWA Worker Runner
-    Data brokers/adapters
-    abstract-trace equivalence
+tests/platform/desktop
+    Node Runner
+    provisioning IPC
+    Data ticket/WS establishment
+
+tests/platform/pwa
+    Worker Runner
+    provisioning Port
+    MessageChannel transfer
+
+tests/platform/equivalence
+    same Definition Module abstract traces
 
 tests/e2e
-    Desktop
-    PWA
+    desktop/
+    pwa/
 ```
-
-可复用 protocol conformance fixture跟最近 capability package。
 
 ---
 
-## 10. Typical Dependencies
+## 12. Typical Dependencies
 
 ```text
 main
@@ -269,13 +312,13 @@ subsystem
     → runtime-control / data / content / foundation
 
 renderer
-    → renderer-control / data / content
+    → renderer-control / data / content / foundation as needed
 
 map
     → subsystem
 
 Desktop/PWA Runner
-    → subsystem/host + minimal platform adapters
+    → subsystem/host + minimal adapters
 
 apps/*
     → roles + adapters + business modules
@@ -284,45 +327,48 @@ apps/*
 禁止：
 
 ```text
-map → platform adapter/runner
-subsystem author core → WebSocket/MessagePort concrete API
+map → subsystem/host
+map → Platform/Runner adapter
+subsystem author root → concrete WebSocket/MessagePort
 main/renderer/subsystem → apps/*
 wire/foundation → domain authority
-business module → Hostra/PWA bootstrap
+runtime-control → author SDK
 ```
 
 ---
 
-## 11. First-stage Creation Order
+## 13. Creation Order
 
 ```text
 foundation + wire
-→ game-package {key,module}
+→ game-package
 → runtime-control
-→ subsystem host integration + main
-→ Desktop Node Runner + launcher-node + transport-websocket
+→ subsystem author/host + main
+→ Desktop Runner/Control adapter
 → Frame vertical slice
-→ renderer-control + data + renderer
-→ Desktop Data broker
-→ content stack
+→ renderer-control
+→ data Profile/Connection/dispatcher
+→ Desktop Broker/provisioning
+→ Input/Render
+→ Content
 → map Definition Module
-→ apps/desktop
-→ PWA Worker Runner + messageport/service-worker adapters
-→ apps/pwa
+→ Desktop E2E
+→ PWA Runner/adapters/provisioning
+→ PWA E2E
 → cross-platform equivalence
 ```
 
 ---
 
-## 12. Core Rules
+## 14. Final Rules
 
-1. repository layout实现 package architecture，不反向定义它；
-2. Game Package v1只声明 `{key,module}`；
-3. business Definition Module与 Platform Runner物理分离；
-4. same business `.mjs`用于 Desktop/PWA；
-5. Runner先 app-local，真实复用后再抽 package；
-6. foundation/wire是底层且无 domain/platform authority；
-7. role package通过 ports保持 platform-neutral；
-8. apps是当前 Platform composition roots；
-9. business package无平台分支；
-10. physical layout不同但 shared application trace必须等价。
+1. repository layout只实现 package architecture；
+2. author/host export surface物理分开；
+3. Definition Module与 Runner分开；
+4. RendererDataBinding/SubsystemDataBinding明确两端；
+5. Data Profile/Connection/Input/Render在 data package内分域；
+6. Runner/provisioning优先 app-local；
+7. Foundation/Wire低层正交；
+8. apps是最终 composition roots；
+9. business无 Platform分支；
+10. tests显式覆盖 Runtime-fatal continuation与 provisioning failure boundaries。
