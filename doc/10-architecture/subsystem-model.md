@@ -3,100 +3,113 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Subsystem 的职责、Runtime Control、Frame/Input Context、Frame-scoped Input Interest、Render Domain、错误收敛与 Platform-facing boundary  
-> 依赖：[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)  
-> 下层契约：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)  
+> 主要定义：Subsystem logical role、Definition Module、Runtime/Frame local context、FrameOutcome、Input Interest、Render Domain、错误收敛与 role-facing Platform boundary  
+> 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)  
+> 被以下文档使用：[运行时启动系统](./runtime-bootstrap-system.md)  
+> 正式化：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)  
+> 实现草案：[packages/subsystem/DESIGN.md](../../packages/subsystem/DESIGN.md)  
 > 最近复核：2026-08-19
 
-## 1. Subsystem 职责
+---
 
-Subsystem Runtime 负责：
+## 1. Role Boundary
+
+Subsystem Runtime负责：
 
 ```text
 business state
-Runtime lifecycle reporting
+Runtime status reporting
 local Frame/Input Context
-outbound Frame call/return
-Frame-scoped Input Interest configuration
+outbound Frame call/return role
+Frame-scoped Input Interest desired state
 ordinary input receive validation
-Render Domain Registry / authoritative state
+Render Domain authoritative state
 Content client usage
 ```
 
-它不负责建立整个系统的 Platform topology。
+Subsystem不建立完整 Platform topology，也不拥有 Main public Frame/Data authority。
 
-Hostra Desktop / PWA 通过 System Platform Composition 向 Subsystem role 提供所需 connection/content ports；Subsystem application semantics 保持一致。
+---
 
-当前 Runtime Control：
+## 2. Definition Module
+
+Game Package `descriptor.module` 加载一个 platform-neutral Subsystem Definition Module：
 
 ```text
-Subsystem Control v1
-+
-Frame / Call v1
-=
-Runtime Control Application Profile v1
+default export = SubsystemDefinitionFactory
+```
+
+同一 module由 Hostra Node Runner / PWA Worker Runner加载。
+
+Definition Module不：
+
+```text
+open WebSocket/MessagePort
+read platform bootstrap material
+spawn Process/Worker
+own DataConnectionBroker
 ```
 
 ---
 
-## 2. Authority Boundary
+## 3. Authority Boundary
 
 ```text
 Main
-    Runtime Registry / shutdown intent
-    Frame identity / caller / lifecycle / outcome
-    Stack / transaction / failure unwind
-    Activation / InputTarget
-    DataAuthority
+    Runtime public lifecycle/shutdown intent
+    Frame identity/caller/lifecycle/outcome/Stack
+    Activation/InputTarget
+    transaction/failure unwind
+    DataAuthority generation/profile
 
-Subsystem Runtime
-    Runtime status reporting
+Subsystem
     business state
+    Runtime-reported status
     local Frame/Input Context
     mutation gate
-    Frame Interest Registry desired state
-    Render Domain Registry / State
+    Interest[F]
+    Render Domain Registry/State
 
 Renderer
-    Main committed authority mirror
-    Data Connection replica endpoint
-    Input producer/enforcement state
-    Render replica / presentation
+    Main committed mirror
+    Data endpoint
+    Input producer/gate
+    Render replica/presentation
 
 Platform
-    physical Runtime/Renderer/connection/content topology
+    physical Runner/connection/content topology
+    bootstrap/provisioning
 ```
 
-Subsystem 不得创建公共 frameId/activationId、修改 Main Stack/Caller、维护第二份 public recovery authority，或从本地决定 lower Frame resume。
+Subsystem不得建立第二份 public Stack/recovery authority。
 
 ---
 
-## 3. Subsystem-facing Platform Boundary
+## 4. Subsystem-facing Platform Ports
 
-Subsystem logical role需要类似：
-
-```text
-Runtime Control connection source
-Renderer Data connection source
-Content client/binding
-```
-
-这些是 system Platform 在 Subsystem side 的 local projection。
-
-重要：
+Subsystem role消费：
 
 ```text
-role-local connection binding != whole Platform architecture
-MessageCarrier != connection establishment policy
+RuntimeControlBinding
+SubsystemDataBinding
+ContentClient
 ```
 
-Subsystem SDK 不应探测 Desktop/PWA，也不直接选择 WebSocket/MessagePort。
+这些只是 System Platform 在 Subsystem side 的投影。
+
+```text
+RuntimeControlBinding
+    one-shot per Launch Attempt
+
+SubsystemDataBinding
+    stream of already-bound {generation,dataProfile,carrier}
+```
+
+SDK不探测 Desktop/PWA或自行选择 transport。
 
 ---
 
-## 4. Runtime Lifecycle / Ready
-
-Subsystem 通过：
+## 5. Runtime Lifecycle / Ready
 
 ```text
 subsystem.hello
@@ -104,310 +117,326 @@ subsystem.status
 subsystem.shutdown
 ```
 
-参与 Runtime lifecycle。
-
 ```text
 launch != connected != identified != ready
 ```
 
-`ready` 只表示 required initialization 完成并能承担 Runtime Control Profile v1。
+`ready` 只表示 required initialization完成并能承担 Runtime Control Profile。
 
-`ready` 不表示：
+不表示：
 
 ```text
-Renderer connected
-Data Connection exists
-Frame exists
-Render Domain exists
-InputTarget exists
+Renderer exists
+DataAuthority/Data carrier exists
+Data provisioning occurred
+Frame/Render/InputTarget exists
 ```
-
-也不得携 Renderer Data endpoint/Port/ticket。
 
 ---
 
-## 5. Runtime Control / Frame
+## 6. Local Frame Context
 
-Frame lifecycle：
-
-```text
-starting / active / suspended / closing / closed
-```
-
-Activation：one-shot / never reused。
-
-RPC exactly seven：
+`frame.initialize`：
 
 ```text
-Main → Subsystem
-    initialize / activate / suspend / resume / close
-Subsystem → Main
-    call / return
+create local context
+store business params
+create branded Frame capability
+DO NOT start author frame handler
 ```
 
-同一 Control carrier 上 Control + Frame 共享 sender-side Request ID namespace；no JSON-RPC Batch。
+`frame.activate` successful 后：
 
-Desktop WebSocket / PWA MessagePort 建立后必须共享相同 application semantics。
+```text
+install fresh Activation
+mark active
+start author frame handler exactly once
+```
+
+这样业务不会在 `starting` context上执行 ordinary mutation/input。
 
 ---
 
-## 6. Local Frame Context / Mutation Gate
+## 7. FrameOutcome Mapping
 
-Subsystem SDK 内部维护：
-
-```text
-frameId
-business params
-lifecycle
-current Activation when active
-outbound mutation gate
-```
-
-业务 author 不需要接触 `activationId`。
-
-pending `frame.call` / return commit 时：
+业务直接使用正式三态：
 
 ```text
-hold mutation gate
-stop ordinary input delivery for Frame
-reject second ordinary mutation
+completed(value)
+cancelled
+failed(error)
 ```
 
-Success/Explicit Error/timeout 的处理服从 Frame v1；ambiguous timeout/loss 不恢复 old Activation，也不 retry。
+Author handler返回 `FrameOutcome`；SDK转成 protocol `frame.return`。
+
+Child `frame.call()`：
+
+```text
+child completed/cancelled/failed
+→ resolve Promise<FrameOutcome>
+```
+
+不是 JS reject。
+
+只有明确 pre-commit recoverable call rejection MAY reject typed `FrameCallRejectedError` 并继续当前 Activation。
 
 ---
 
-## 7. Frame Call Continuation
+## 8. Runtime-fatal Continuation Rule
 
-高层 SDK 可把：
-
-```text
-frame.call Request
-→ caller suspended
-→ child lifecycle
-→ child return/close
-→ caller resume(fresh Activation)
-```
-
-封装为普通 async continuation：
+以下：
 
 ```text
-await frame.call(...)
+Control loss
+ambiguous Frame timeout/loss
+divergence/fatal protocol error
+Runtime terminal failure
 ```
 
-只有 fresh resume 完成后 business continuation 才恢复。
+MUST NOT 作为可 catch 后继续的普通业务 rejection重新进入 suspended continuation。
 
-业务不需要监听 wire `frame.resume`，也不需要重建 Input configuration。
+SDK固定：
+
+```text
+keep mutation gate closed
+abort instance/frame signals
+quarantine outstanding business tasks
+no business continuation resume
+```
+
+这是 Frozen Frame commit semantics的 author-level投影。
 
 ---
 
-## 8. User Input Interest
+## 9. Business Exception Boundary
 
-Input configuration scope = Frame：
+active Frame handler未捕获 ordinary business exception：
+
+```text
+→ sanitized Frame failed outcome
+```
+
+而：
+
+```text
+protocol ambiguity
+SDK invariant corruption
+Control loss
+```
+
+→ Runtime failure。
+
+业务 bug 与协议/Runtime corruption不能混为一个 error domain。
+
+---
+
+## 10. Mutation Gate
+
+pending：
+
+```text
+frame.call
+frame.return terminalization
+administrative suspend
+closing/closed
+Runtime terminal
+```
+
+阻止新的 ordinary input/call/return。
+
+明确 recoverable pre-commit Error才释放 gate回到 same Activation。
+
+---
+
+## 11. Administrative Suspend
+
+`frame.suspend` success：
+
+```text
+revoke local Activation
+ordinary mutation/input gate closed
+abort Frame-scoped signal
+context waits later close cleanup
+```
+
+v1无 normal resume；late handler result不得发送 frame.return。
+
+Child-call suspension不是 `frame.suspend`，Frame task/Frame signal继续跨 fresh resume存在。
+
+---
+
+## 12. Input Interest
 
 ```text
 InterestRegistry = Map<frameId, Set<channel>>
 ```
 
-它是 Subsystem-owned desired configuration，不是 Main authority。
+Interest是 Subsystem-owned desired config，不是 Main authority。
 
 ```text
-Frame suspension
-    may retain Interest[F]
-
-fresh Activation on same Frame
-    may reuse Interest[F]
-
-Frame close
-    local Interest[F] should be removed
-
-fresh Data Connection
-    remote registry starts empty
-    Subsystem republishes current full registry
+child-call suspension → MAY retain Interest[F]
+fresh Activation      → MAY reuse Interest[F]
+Frame close            → MUST remove local Interest[F]
+fresh Data carrier     → remote registry empty; republish full desired registry
 ```
 
-Interest 不含 `activationId`，也不产生 InputTarget。
+Frame close local success成立前，listeners/Interest/retained input state必须已经清理。
 
 ---
 
-## 9. Ordinary Input Receive Gate
+## 13. Input Receive Gate
 
-收到 Renderer input 至少检查：
+至少：
 
 ```text
-message belongs to current Data Connection
-frameId exists locally
+current Data carrier
+local frame exists
 Frame active
-activationId == current local Activation
-channel ∈ local Interest[frameId]
+activationId current
+channel ∈ local Interest[F]
 mutation gate open
 ```
 
-否则 drop。
-
-旧 Activation 的 Input State/Event 不得跨 fresh Activation 重解释；fresh `.state` baseline由 User Input v1 保证。
+否则 drop；stale input不产生 Runtime failure。
 
 ---
 
-## 10. Render Domain Model
+## 14. DataPlane
 
-每个 Subsystem Runtime MAY拥有 `0..N` Render Domains：
+Subsystem side只有一个 DataPlane消费唯一 current Data carrier：
 
 ```text
-Subsystem Runtime
-├── Domain A
-├── Domain B
-└── ...
+SubsystemDataBinding
+        ↓
+DataPlane
+   ┌────┴────┐
+ Input     Render
 ```
 
-Domain 是 Subsystem-owned lifecycle/state/composition unit，不属于 Frame，也不由 Main维护。
+DataPlane负责 `dataProfile`/generation/current installation、JSON text parse、`input.*`/`render.*` demux、fresh carrier通知。
+
+Input/Render不得各自竞争读取 raw carrier。
+
+---
+
+## 15. Data Reconnect
+
+old carrier retired：
+
+```text
+business state remains
+Frame Context remains
+InputListener/local desired Interest remains
+RenderDomain/local desired state remains
+wire child state discarded
+```
+
+fresh carrier：
+
+```text
+Input → remote Interest/state empty; republish
+Render → domains + fresh snapshots
+```
+
+Data recovery不是 Frame recovery。
+
+---
+
+## 16. Render Domain
+
+```text
+0..N Domains per Runtime
+```
+
+Domain由 Subsystem拥有 independent lifecycle/state。
 
 ```text
 Frame close != Domain destroy
-Frame suspend != Domain hidden
+Frame suspend != Domain hide
 Activation change != Domain lifecycle
 Data retire != authoritative Domain destroy
 ```
 
-Subsystem 可以让多个 Frame共享同一 Domain，也可以让 zero-Frame Runtime继续拥有 Domain。
+---
+
+## 17. Platform Provisioning Boundary
+
+Desktop已经运行的 Node Runner通过独立 Platform Provisioning Channel取得 later Data physical material，并实现 `SubsystemDataBinding`。
+
+PWA通过 Worker provisioning/Port transfer实现相同 port semantics。
+
+Provisioning channel不是 Runtime Control/Data application/business API。
 
 ---
 
-## 11. Render / Presentation Boundary
+## 18. Runtime Terminal
 
-Render Update 只传 plain authoritative data：
-
-```text
-Domain Registry
-Snapshot
-Patch
-Event
-```
-
-Node `tag` 是 opaque string。协议/Subsystem Architecture 不定义：
+first terminal cause：
 
 ```text
-known/unknown component type
-Component Bootstrap/Profile
-DOM/Canvas/WebGL mapping
-executable object in Render State
+graceful Main shutdown
+OR
+Runtime failure
 ```
 
-具体 presentation mapping 属于 Renderer implementation。
+SDK先 abort scoped signals，再执行 bounded terminal hook：
+
+```text
+shutdown()
+OR
+failed(error)
+```
+
+同一 instance不重复触发两个 author terminal hooks。
+
+Runtime terminal后不自行恢复 old Activation/Frame stack。
 
 ---
 
-## 12. Data Connection Lifetime
+## 19. Business Author Boundary
 
-Subsystem-facing Data connection source 可以顺序提供 fresh carriers。
-
-同 generation reconnect：
+Author只看到：
 
 ```text
-old carrier retired
-→ new carrier current
-```
-
-不重建 Runtime/Frame/Render business objects。
-
-fresh carrier child state：
-
-```text
-User Input remote Interest Registry = empty
-Render replication needs Registry + fresh Snapshots
-```
-
-SDK 应自动根据 local desired Input/Render state恢复 publication，业务不参与 reconnect。
-
----
-
-## 13. Runtime Failure Trigger
-
-Subsystem自身 Frame timeout、Control divergence 或 protocol error：
-
-```text
-stop normal Frame processing
-keep ambiguous mutation gate closed
-report subsystem.status(failed) when Control usable
-```
-
-no retry/replay/idempotency journal。
-
-Runtime failure 后 Stack 如何收敛完全由 Main 决定。
-
-Subsystem MUST NOT：
-
-```text
-自行选择 lower Frame active
-自行恢复旧 Activation
-自行逐层 resume suspended Frame
-根据本地 Context猜 unwind root
-```
-
----
-
-## 14. Healthy / Failed Cleanup
-
-健康 Runtime 的 doomed Frame 可以接收 Main `frame.close` cleanup；local Frame/Input Context 删除，但 Render Domain/shared business state不由 close 隐式清理。
-
-Runtime terminal failed 后不发起新的 normal Frame operation；迟到 Frame Response 不恢复 terminal failure。
-
----
-
-## 15. Business Author Boundary
-
-推荐业务只看到：
-
-```text
-Frame
+SubsystemScope
+Frame / FrameOutcome
 InputListener
 RenderDomain
 ContentClient
-lifecycle hooks
+AbortSignal
 ```
 
 不看到：
 
 ```text
-WebSocket / MessagePort
 MessageCarrier
+WebSocket / MessagePort
 bootstrapToken
-requestId
+request ID
 activationId
-Data generation
+Data generation/profile
+Platform provisioning
 wire method names
 ```
 
-同一 business Subsystem definition 应可由 Hostra Desktop / PWA Platform Composition 运行。
-
 ---
 
-## 16. Conformance
-
-Subsystem role implementation必须通过：
-
-- Control v1 / Runtime Control Profile v1 applicable fixtures；
-- Frame / Call v1 Subsystem-role fixtures；
-- User Input receive/Interest/reconnect fixtures；
-- Render Update sender/reconnect fixtures；
-- role-facing platform port fake integration；
-- Hostra/PWA shared-business abstract-trace equivalence。
-
----
-
-## 17. 架构不变量
+## 20. Final Invariants
 
 1. Subsystem role platform-neutral；
-2. System Platform负责 physical topology，本角色只消费 local ports；
-3. Runtime Control Profile v1 = Control v1 + Frame v1；
-4. `ready`不携 Data endpoint；
-5. Frame/Stack/Activation/recovery authority = Main；
-6. exactly seven Frame RPC；
-7. call/return pending有 mutation gate；
-8. timeout/ambiguous不释放旧 Activation、不 retry；
-9. Input Interest 是 Frame-scoped configuration，不是 authority；
-10. fresh Activation可复用 Interest config，不可复用 old Input State/Event；
-11. fresh Data carrier remote Interest从 empty开始；
-12. Render Domain独立于 Frame/Data carrier lifecycle；
-13. terminal failed Runtime不尝试本地 Frame recovery；
-14. same business definition应可跨 Hostra Desktop/PWA运行。
+2. Definition Module与 Runner/Platform分离；
+3. role只消费 RuntimeControlBinding/SubsystemDataBinding/ContentClient；
+4. ready不携/暗示 Data；
+5. Frame public authority = Main；
+6. initialize只建 Context，activate后才启动 handler；
+7. FrameOutcome与 protocol三态一一对应；
+8. child Outcome resolve call，只有 pre-commit recoverable rejection可 reject；
+9. Runtime-fatal绝不重新进入业务 continuation；
+10. business exception→Frame failed，protocol corruption→Runtime failed；
+11. Interest Frame-scoped，可跨 Activation配置复用；
+12. Frame close local success前 MUST删除 Interest/listeners/state；
+13. fresh Data child state重新 baseline；
+14. one DataPlane统一 demux Input/Render；
+15. Render Domain独立于 Frame/Data carrier；
+16. Platform provisioning不污染 application protocols；
+17. same Definition Module可跨 Hostra/PWA运行。
