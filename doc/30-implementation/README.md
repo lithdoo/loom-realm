@@ -3,18 +3,20 @@
 > 层级：实施计划  
 > 状态：Tracking  
 > 稳定程度：Experimental  
-> 主要定义：当前分包、依赖、测试和第一阶段交付入口  
-> 依赖：[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-17
+> 主要定义：当前分包、Platform Composition 落地、测试和第一阶段交付入口  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
+> 最近复核：2026-08-19
 
-实施层描述如何落地当前协议；内部机制可以调整，但不得改变上层 authority/lifecycle/recovery 语义。
+实施层描述如何落地当前架构/契约；内部机制可以调整，但不得改变上层 authority/lifecycle/recovery 语义。
 
 ## 当前 Tracking 文档
 
-- [独立分包与发布架构](./package-architecture.md) — package/publish boundary 的权威来源
-- [仓库与目录方案](./repository-layout.md) — monorepo 物理布局与 workspace 依赖规则
-- [测试策略](./testing-strategy.md)
-- [第一阶段交付计划](./phase-1-delivery-plan.md)
+- [独立分包与发布架构](./package-architecture.md) — package/publish boundary 的权威来源；
+- [仓库与目录方案](./repository-layout.md) — monorepo、role platform ports 与 composition root 布局；
+- [测试策略](./testing-strategy.md) — protocol/role/adapter/platform equivalence；
+- [第一阶段交付计划](./phase-1-delivery-plan.md) — vertical slice 与 Hostra/PWA 推进顺序。
+
+---
 
 ## 当前实施前提
 
@@ -23,37 +25,78 @@ Game Package v1
 Desktop Node.js Launcher Profile v1
 Subsystem Control v1
 Runtime Control Application Profile v1
-Frame / Call v1
+Frame / Call v1 Frozen
 Renderer Control v1
 Data Connection v1
-User Input v1
+User Input v1 (Frame Interest Registry)
 Render Update v1
 Content API v1
+
+Platform Composition
+    Hostra Desktop realization
+    PWA realization
 ```
 
 没有 Renderer Component Profile、Standard Input Mapping Profile、Content Access Profile、Range Profile、Event FIFO Profile 或 Desktop/PWA Data Bootstrap application protocol。
 
-协议当前已足够支撑实现；剩余 payload/limits/conformance 允许在开发过程中由真实 use case 驱动继续细化，而不是阻塞 vertical slice。
+---
+
+## Platform 实施基线
+
+系统架构定义：
+
+```text
+Main / Renderer / Subsystem / Content
+    = platform-neutral roles
+
+Platform Composition
+    = complete physical Session realization
+```
+
+实施层默认：
+
+```text
+apps/desktop
+    Hostra Desktop composition root
+
+apps/pwa
+    PWA composition root
+```
+
+role packages 通过 role-facing Platform ports 消费基础设施；不自己寻找 Process/Worker/WebSocket/MessagePort。
+
+```text
+Subsystem-facing
+    RuntimeControlBinding
+    RendererDataBinding
+    ContentClient
+
+Renderer-facing
+    RendererControlBinding
+    RendererDataBinding
+    ContentClient
+
+Main-facing
+    RuntimeHosting
+    Control/Renderer hosting facilities
+    DataConnectionBroker
+    Content integration
+```
+
+这些 port names 是 implementation boundary；不要求一项对应一个 npm package。
+
+---
 
 ## 分包基线
-
-实施默认采用：
 
 ```text
 能力一包
 角色一包
 技术 Adapter 一包
-平台只组合
+Platform Architecture 与 package boundary 分离
+apps/desktop + apps/pwa 作为当前 composition roots
 协议版本与 package semver 分离
 ```
-
-关键边界：
-
-```text
-Protocol boundary != npm package boundary != runtime process boundary != platform boundary
-```
-
-因此不再采用“每份协议一个 npm package”，也不默认建立大而全的 `host-desktop` / `host-pwa` 公共包。
 
 当前目标包族：
 
@@ -90,28 +133,9 @@ composition roots
     apps/cli
 ```
 
-具体职责、依赖和发布原则见 [独立分包与发布架构](./package-architecture.md)。
+不因为 Platform Architecture 存在就预创建 `platform-hostra/platform-pwa` package；只有真实独立消费者出现才抽。
 
-## 协议设计成熟度与实施含义
-
-详细链路目的、成熟度和剩余协议工作以 [正式契约目录 · 链路协议设计进度](../15-contracts/README.md#11-链路协议设计进度) 为 source of truth。
-
-这里的百分比表示**协议设计成熟度**，不是代码实现完成度、测试覆盖率或发布进度。
-
-| 协议 | 设计成熟度 | 对实施阶段的含义 |
-|---|---:|---|
-| Game Package v1 | ≈95% | schema/topology 已稳定，可实现 validator/loader |
-| Desktop Node.js Launcher v1 | 100% / Frozen | 可直接实现 Launcher/Supervisor |
-| Subsystem Control v1 | ≈95% | wire/lifecycle 已基本稳定 |
-| Runtime Control Application Profile v1 | ≈95% | Control/Frame 组合规则可直接落地 |
-| Frame / Call v1 | 100% / Frozen | 核心调用栈实现不再等待设计 |
-| Main ⇄ Renderer Control v1 | ≈95% | authority snapshot 模型可实现并在实现中做 Frozen review |
-| Data Connection v1 | ≈95% | lifecycle/identity 已闭合 |
-| User Input v1 | ≈80–85% | Core 可实现；standard payload 随真实输入路径继续闭合 |
-| Render Update v1 | ≈85–90% | Registry/Snapshot/Patch/Event 可进入原型，limits 随实现收敛 |
-| Content API v1 | ≈85–90% | 核心 HTTP/Fetch 语义足够实现 |
-
-整体协议架构成熟度粗略 ≈90%。工作重心从“继续设计协议”转为“实现 + executable conformance + 实现驱动细化”。
+---
 
 ## Runtime / Frame
 
@@ -120,7 +144,7 @@ Runtime Control Application Profile v1
     = Subsystem Control v1 + Frame / Call v1
 ```
 
-关键约束：
+关键：
 
 ```text
 Control hello selects v1
@@ -132,105 +156,142 @@ no JSON-RPC Batch
 ready has no Data endpoint
 ```
 
-Frame v1 已直接包含 suspend provenance：child-call suspension 可通过对应 Child outcome + fresh `frame.resume` 恢复；administrative `frame.suspend` 没有 generic resume。
+Hostra Desktop 与 PWA 可以分别使用 WebSocket/MessagePort，但 role core 使用相同 RuntimeControlPlane semantics。
 
-## Renderer / Data / Input / Render
+`@loomrealm/subsystem` author API 隐藏 activation/RPC/mutation gate；`Frame.params` 表示 initialize business params，User Input 独立存在。
+
+---
+
+## Renderer / Data
 
 Renderer Control：Main 发布 full committed Authority Snapshot，不携 endpoint/ticket/MessagePort。
 
-Data Connection：
+actual Data carrier：
 
 ```text
-Renderer Control DataAuthority
-→ technical adapter establishes carrier
+Main current DataAuthority(S,G)
+→ Platform DataConnectionBroker
+→ matching Renderer + Subsystem endpoints
 → Data Connection current/retired
 ```
 
-Desktop/PWA 可分别选择 WebSocket/MessagePort adapter，但这些 adapter 只负责 carrier，不拥有 Data authority。
+Broker 不拥有 generation；Transport adapter 只负责具体 carrier mechanics。
 
-User Input：
+---
+
+## User Input
 
 ```text
-InputTarget/Activation
-∩ Interest
+Effective(F,A,C)
+=
+current Data Connection
+∩ Main InputTarget(S,F,A)
+∩ active/current Activation
+∩ Interest[F]
 ∩ Producer availability
 ```
 
-标准 keyboard/pointer/gamepad canonical payload 属于 User Input v1；DOM/OS/device adapter 属于 Renderer implementation。
+Interest publication：
 
-Render Update：
+```text
+full Frame Interest Registry snapshot
+fresh Data Connection registry empty
+no mandatory Interest handshake
+```
+
+Frame suspension/fresh Activation 可以复用 `Interest[F]` configuration；old Activation Input State/Event 不复用。
+
+Renderer 不解释 push/pop/call/return/unwind。
+
+---
+
+## Render
 
 ```text
 Registry
-Snapshot(revision)
-Patch(R→R+1, insert/remove/move/update)
+Snapshot
+Patch(R→R+1)
 Event
 ```
 
-`tag` 是 opaque string；Renderer 如何映射/呈现属于实现。
+`@loomrealm/subsystem` author surface 只表达 RenderDomain desired state/event/close；carrier/revision/reconnect publication 由 SDK 管理。
+
+Render Domain lifecycle 不从 Frame/Data carrier 推导。
+
+---
 
 ## Content
 
-Content API 只定义 logical readonly HTTP/Fetch semantics。
-
-具体 filesystem、HTTP、Service Worker/OPFS 能力通过 `content-*` adapter 实现；Desktop bearer 注入和 PWA same-origin wiring 留在 composition root/adapter，不形成新的 application protocol。
-
-## Conformance
-
-[测试策略](./testing-strategy.md) 覆盖 Control、Runtime Profile、Frame、Renderer Control、Data Connection、User Input、Render Update、Content。
-
-正式兼容判断只检查跨实现必须一致的行为，不检查：
+Content API 只定义 logical readonly semantics。
 
 ```text
-Component Factory/Registry
-DOM/OS mapping implementation
-Host token/ticket/Port delivery mechanism
-queue concrete capacity/drop preference
-Patch-vs-Snapshot heuristic
-cache/index implementation
+Hostra Desktop → filesystem + localhost HTTP
+PWA            → Fetch + Service Worker / OPFS
 ```
 
-可复用协议 fixture/helper 应跟随最接近的 capability package，通过 `*/testing` subpath 提供；仓库级 E2E/test Subsystem 不发布。
+technical/platform binding 不改变 Content logical results。
 
-## 实施原则
+---
 
-1. 先建立 package dependency graph 和最小 public surface，再实现 vertical slice；
-2. Current Contract 与实现并行推进，真实互操作缺口才回补 contract；
-3. 不为未实现历史设计保留 fallback/dual-stack；
-4. Launcher/Control/Frame/Renderer Control/Data/Input/Render/Content domain boundary 不因 package 合并而合并；
-5. Runtime `ready` 不得成为 Data endpoint discovery；
-6. Main RuntimeFailureUnwindCoordinator 是唯一 Stack recovery authority；
-7. Renderer/Transport 不得计算 unwind root 或恢复旧 Activation；
-8. technical adapter 只负责实际技术绑定，不成为 application authority；
-9. Desktop/PWA 作为 composition root，默认不成为大而全公共 package；
-10. npm semver 与 protocol version 分离；
-11. bounded implementation policy 不应为了统一数值被错误升级成协议；
-12. Tracking 文档不定义正式 wire 行为。
+## Business Portability
+
+```text
+@loomrealm/map
+    → @loomrealm/subsystem
+```
+
+业务 package 不依赖 transport/launcher/platform app；同一 business definition 由 `apps/desktop` / `apps/pwa` 运行。
+
+这是 Phase 1 跨平台验证的核心 consumer boundary。
+
+---
+
+## Conformance / Equivalence
+
+测试分三层：
+
+```text
+protocol conformance
+role/package + platform-port fakes
+Hostra/PWA composition semantic equivalence
+```
+
+Hostra Desktop / PWA 对相同 abstract application trace 比较：
+
+```text
+Runtime lifecycle
+Frame/Activation/outcomes
+failure unwind
+Renderer logical authority
+Data current/retired state
+User Input delivered messages
+Render authoritative state
+Content logical results
+```
+
+不比较 PID/Worker、WS URL/Port、HTTP/SW 等 physical trace。
+
+---
 
 ## 当前实施顺序
 
 ```text
 workspace / package skeleton
-    ↓
-wire + game-package
-    ↓
-runtime-control + main + subsystem
-    ↓
-launcher-node + WebSocket adapter
-    ↓
-Frame / Control vertical slice + conformance
-    ↓
-renderer-control + data + renderer
-    ↓
-content + content-service + Desktop content adapters
-    ↓
-loom.map
-    ↓
-apps/desktop vertical slice
-    ↓
-MessagePort / Service Worker adapters + apps/pwa
+→ wire + game-package
+→ runtime-control + main + subsystem + platform-port fakes
+→ launcher-node + WebSocket + Hostra Runtime vertical slice
+→ Frame / Control conformance
+→ subsystem author capability model
+→ renderer-control + data + renderer
+→ Desktop Data broker / Renderer vertical slice
+→ User Input Frame Interest Registry
+→ Render Update
+→ content + Desktop content adapters
+→ loom.map
+→ apps/desktop E2E
+→ MessagePort / Service Worker + PWA ports
+→ apps/pwa E2E
+→ Hostra/PWA abstract-trace equivalence
 ```
 
-协议 payload/limits 在对应实现落地时同步细化，不再作为启动开发的前置阻塞。
-
-治理原则：**只协议化必须互操作的事实；只拆分有独立能力、消费者和发布价值的 package。**
+治理原则：**只协议化必须互操作的事实；只拆分有独立能力、消费者和发布价值的 package；只让 Platform Composition 拥有物理 topology，不让 Platform 获得 application authority。**
