@@ -3,14 +3,17 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Experimental  
-> 主要定义：monorepo 的物理目录、workspace 分类、依赖方向与测试布局  
-> 依赖：[独立分包与发布架构](./package-architecture.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-17
+> 主要定义：monorepo 物理目录、workspace 分类、Platform Composition Root、依赖方向与测试布局  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
+> 最近复核：2026-08-19
 
-公开 package 的职责与发布边界以 [独立分包与发布架构](./package-architecture.md) 为权威来源。本文只回答：**代码在仓库里如何组织，以及不同 workspace 之间如何依赖。**
+公开 package 的职责与发布边界以 [独立分包与发布架构](./package-architecture.md) 为权威来源。本文只回答：**代码在仓库里如何组织。**
 
 ```text
-Protocol boundary != npm package boundary != runtime process boundary != platform boundary
+Protocol boundary
+!= npm package boundary
+!= runtime process boundary
+!= platform boundary
 ```
 
 ---
@@ -50,28 +53,29 @@ tests/
 ├── fixtures/
 ├── subsystems/
 ├── integration/
+├── platform/
 └── e2e/
 
 scripts/
 doc/
 ```
 
-这是一张**目标边界图**，不是要求一次性建立全部空目录。第一阶段按 vertical slice 实际需要逐步创建。
+这是目标边界图，不要求一次性创建全部空目录。
 
 ---
 
-## 2. `packages/`：可独立消费的能力
+## 2. `packages/`：可独立消费能力
 
-`packages/` 默认用于满足至少一个条件的 workspace：
+`packages/` 默认用于至少满足一项：
 
 ```text
 可独立发布
-可独立被其他 workspace 消费
+可被多个 workspace 消费
 有稳定 public API
 有独立 test/conformance surface
 ```
 
-包按三类组织，但物理上不强制增加额外层级目录：
+逻辑分类：
 
 ```text
 contract/capability
@@ -82,41 +86,164 @@ runtime/role
 
 technical adapter
     launcher-node / transport-* / content-*
+
+business
+    map / compatibility packages
 ```
 
-业务 Subsystem/兼容层如 `map` 也可以是独立 package，但 Core 不得依赖它们。
+物理上不强制再增加分类目录。
 
 ---
 
-## 3. `apps/`：Composition Root
+## 3. Role Package 的 Platform Port Surface
 
-Desktop/PWA 默认不作为大而全公共 library package。
+Main/Subsystem/Renderer 保持 platform-neutral，但需要消费 system Platform 的 role-local ports。
+
+建议按 package 自身职责放 integration surface，例如：
+
+```text
+packages/main/src/platform/
+packages/subsystem/src/platform/
+packages/renderer/src/platform/
+```
+
+或通过 explicit subpath export：
+
+```text
+@loomrealm/main/platform
+@loomrealm/subsystem/platform
+@loomrealm/renderer/platform
+```
+
+只有真实外部 adapter/composition 需要的 types 才公开；author-facing main entry 不应 re-export `MessageCarrier`、bootstrap mechanics 等底层细节。
+
+System-level `DataConnectionBroker` 等跨角色 coordination 不应被错误放进某个单一 role 的 author surface。
+
+---
+
+## 4. `apps/`：System Platform Composition Roots
+
+Desktop/PWA 是系统级 Platform realizations，而不是“大而全公共 library”。
+
+### `apps/desktop`
+
+实现 Hostra Desktop Platform Composition：
+
+```text
+Runtime Hosting       Node child process
+Runtime Control       localhost WebSocket
+Renderer Hosting      Hostra/Electron BrowserWindow
+Renderer Control      localhost WebSocket
+Data Broker           authenticated localhost carrier
+Content               filesystem + localhost HTTP
+```
+
+代码职责：
+
+```text
+select packages/adapters
+construct Main-facing/Renderer-facing/Subsystem-facing ports
+inject config/bootstrap material
+coordinate Data Connection endpoints
+start/stop product resources
+```
+
+### `apps/pwa`
+
+实现 PWA Platform Composition：
+
+```text
+Runtime Hosting       Dedicated Worker
+Runtime Control       MessagePort
+Renderer Hosting      browser Window
+Renderer Control      MessagePort
+Data Broker           MessageChannel / Port transfer
+Content               Fetch + Service Worker / OPFS
+```
+
+App glue 不得重新实现 Frame/Input/Render protocol semantics。
+
+---
+
+## 5. Optional Platform Helper
+
+不预创建：
+
+```text
+packages/platform-hostra/
+packages/platform-pwa/
+```
+
+如果以后同一 platform glue 被多个独立 product/app 消费，再按 package architecture 标准抽取。
+
+若抽取，apps 仍是最终 composition root：
 
 ```text
 apps/desktop
-    选择 Node launcher / WebSocket / HTTP / filesystem 等实现
-    构造 Main / Renderer / Content Service
-    注入配置与 bootstrap material
-    负责产品 startup/shutdown
-
-apps/pwa
-    选择 Worker / MessagePort / Service Worker / OPFS 等实现
-    构造 Main / Renderer
-    注入浏览器环境能力
-    负责产品 startup/shutdown
+    → optional platform-hostra helper
+    → role/capability/adapters
 ```
 
-App 可以包含很薄的平台 glue，但不得重新实现 protocol/domain semantics。
-
-如果未来某段平台 glue 被多个产品真正复用，再根据 [分包判断标准](./package-architecture.md#2-拆包判断标准) 抽成独立 adapter package，而不是预先建立 `host-desktop` / `host-pwa` 万能包。
+而不是让 Main/Renderer/Subsystem 直接依赖 platform helper。
 
 ---
 
-## 4. `tests/`：不发布的系统验证
+## 6. Technical Adapter Placement
 
-仓库级测试不作为 npm package 发布。
+```text
+packages/launcher-node/
+packages/transport-websocket/
+packages/transport-messageport/
+packages/content-fs/
+packages/content-http/
+packages/content-service-worker/
+```
 
-建议：
+Adapter 实现单一技术能力，不拥有完整 Platform topology。
+
+例如：
+
+```text
+transport-messageport
+    provides carrier mechanics
+
+apps/pwa Data broker glue
+    creates/transfers matching MessageChannel endpoints
+    binds current Session/Renderer/subsystem/generation
+```
+
+不要把 Data broker authority/coordination 全塞进 transport package。
+
+---
+
+## 7. Business Package Placement
+
+```text
+packages/map/
+```
+
+只依赖：
+
+```text
+@loomrealm/subsystem
+```
+
+不包含：
+
+```text
+Desktop entry
+PWA Worker entry
+WebSocket/MessagePort selection
+Hostra bootstrap
+```
+
+若产品需要 map-specific entry wrapper，应放在 `apps/*` 或极薄 app integration code。
+
+---
+
+## 8. `tests/`：系统验证
+
+仓库级测试不发布。
 
 ```text
 tests/fixtures
@@ -124,36 +251,30 @@ tests/fixtures
     transport-independent traces
 
 tests/subsystems
-    test Runtime implementations
+    test business Runtime definitions
     crash/divergence/late-response scenarios
 
 tests/integration
     Main ⇄ Subsystem
     Main ⇄ Renderer
     Renderer ⇄ Subsystem
+    role-facing port fakes
+
+tests/platform
+    Hostra/Desktop adapter/broker integration
+    PWA Worker/Port adapter/broker integration
+    abstract-trace equivalence harness
 
 tests/e2e
     Desktop vertical slice
     PWA vertical slice
 ```
 
-协议自身可复用的 conformance fixture/helper 跟随最接近的 capability package，通过 `*/testing` subpath 暴露。
+可复用 protocol conformance fixture/helper 跟随最接近 capability package。
 
 ---
 
-## 5. 推荐依赖方向
-
-```text
-wire
-  ↑
-contract/capability
-  ↑
-runtime/role
-  ↑
-technical adapter
-  ↑
-apps / product composition
-```
+## 9. Dependency Direction
 
 典型：
 
@@ -176,122 +297,64 @@ renderer
 map
     → subsystem
 
-launcher-node / transport-* / content-*
-    → 最小必要 lower-level interface
+technical adapters
+    → minimal required contract/interface
 
 apps/*
-    → 选择并组合上述 packages
+    → roles + adapters + business packages
 ```
 
-禁止形成：
+禁止：
 
 ```text
 contract → role implementation
-main → desktop/pwa app
-subsystem → desktop/pwa adapter
-renderer-control → renderer
+main → apps/desktop|pwa
+subsystem → transport-websocket|messageport
+renderer → Hostra/PWA composition
+map → platform adapter
 runtime-control → main
 Core → map
 ```
 
 ---
 
-## 6. Runtime Control 的包内边界
-
-以下协议不再一文档一包：
+## 10. Runtime Control 包内边界
 
 ```text
-Subsystem Control v1
-Frame / Call v1
-Runtime Control Application Profile v1
+packages/runtime-control/
+└── src/
+    ├── control/
+    ├── frame/
+    ├── profile/
+    └── testing/
 ```
 
-统一由：
-
-```text
-@loomrealm/runtime-control
-```
-
-实现，但使用内部目录/subpath 保持语义隔离：
-
-```text
-src/control/
-src/frame/
-src/profile/
-src/testing/
-```
-
-共享 package 不代表共享 protocol version、authority 或 lifecycle。
+共享 package 不代表共享 protocol version/authority/lifecycle。
 
 ---
 
-## 7. Renderer ⇄ Subsystem Data 的包内边界
-
-以下能力统一位于：
+## 11. Data 包内边界
 
 ```text
-@loomrealm/data
+packages/data/
+└── src/
+    ├── connection/
+    ├── input/
+    ├── render/
+    └── testing/
 ```
 
-```text
-src/connection/
-src/input/
-src/render/
-src/testing/
-```
-
-必须继续保持：
+必须保持：
 
 ```text
 Data Connection != User Input != Render Update
 ```
 
-包合并只用于减少发布碎片和重复基础代码，不允许把 sequencing/recovery/lifecycle 合成一个协议。
+User Input implementation 使用 Frame Interest Registry；connection/render/input state 不因为同 package 而合并生命周期。
 
 ---
 
-## 8. Game Package
-
-不再建立：
-
-```text
-game-package-contract-v1
-game-package implementation
-```
-
-两套 package。
-
-统一为：
-
-```text
-@loomrealm/game-package
-```
-
-内部同时提供 schema/types/parser/validator/tooling-safe helpers。npm semver 与 Game Package protocol version 独立。
-
----
-
-## 9. Platform Adapter
-
-平台差异按技术能力落到 adapter：
-
-```text
-Desktop
-    launcher-node
-    transport-websocket
-    content-fs
-    content-http
-
-PWA
-    transport-messageport
-    content-service-worker
-```
-
-这些包不得承担 Main authority，也不得把 transport bootstrap material塞回 Subsystem `ready`、Renderer Authority Snapshot 或业务 payload。
-
----
-
-## 10. Package 内建议结构
+## 12. Package 内建议结构
 
 公开 TypeScript package 默认：
 
@@ -302,41 +365,23 @@ packages/<name>/
 ├── README.md
 ├── src/
 ├── test/
-└── dist/          // build output，不提交或按仓库策略处理
+└── dist/
 ```
 
-如存在 conformance：
+role package 如果有 integration ports：
 
 ```text
-src/testing/
-test/conformance/
+src/platform/
+src/internal/
 ```
 
-通过 `exports` 显式限制 public surface，禁止消费者依赖内部相对路径。
+通过 `exports` 限制 public surface，禁止消费者依赖内部相对路径。
 
 ---
 
-## 11. 构建与发布
+## 13. 第一阶段创建顺序
 
-推荐 monorepo root 提供：
-
-```text
-依赖图构建
-changed-package test
-pack dry-run
-consumer smoke test
-independent publish eligibility
-```
-
-Package build 必须按照 workspace dependency graph，而不是用手写固定顺序维持隐含耦合。
-
-协议 version 独立于 package semver；只有 package 明确通过其支持版本的 conformance fixture 后，才声明 protocol/profile conformant。
-
----
-
-## 12. 第一阶段创建顺序
-
-不需要先创建全部 package。优先按 vertical slice：
+按 vertical slice 实际需要：
 
 ```text
 wire
@@ -344,28 +389,34 @@ wire
 → runtime-control
 → main + subsystem
 → launcher-node + transport-websocket
+→ desktop role-facing ports/fakes
 → renderer-control + data + renderer
+→ Desktop Data broker glue
 → content + content-service + content-fs/http
 → map
-→ desktop app
+→ apps/desktop vertical slice
 
-随后补：
-transport-messageport + content-service-worker + pwa app
+随后：
+transport-messageport + content-service-worker
+→ PWA role-facing port implementations
+→ PWA Data broker glue
+→ apps/pwa
+→ cross-platform abstract-trace equivalence
 ```
 
-在实现中发现真正共享的 capability 后再抽包；不为预测性的复用创建空 adapter。
+不为预测性复用创建空 adapter/platform package。
 
 ---
 
-## 13. 关键规则
+## 14. 关键规则
 
-1. package 按能力/消费者拆，不按协议文件数量拆；
-2. Desktop/PWA 是 composition root，不是默认公共万能包；
-3. 技术差异落在 `launcher-* / transport-* / content-*` adapter；
-4. Main/Subsystem/Renderer 是角色包，不依赖平台 App；
-5. `wire` 保持无业务 authority；
-6. `map` 等业务 Subsystem 只能向 Core 依赖，Core 不反向依赖；
-7. npm package semver 与 protocol version 分离；
-8. workspace 合包不得改变正式契约的 domain boundary；
-9. 测试用 Runtime/E2E 默认不发布；
-10. 新增包前先证明独立消费者、独立职责和独立发布价值。
+1. package 按 capability/consumer 拆，不按协议文件数量或平台拆；
+2. Platform Composition 是系统架构，`apps/desktop` / `apps/pwa` 是当前 realization roots；
+3. role packages 通过 role-facing ports 保持 platform-neutral；
+4. technical adapters 实现技术能力，不拥有完整 Platform authority/topology；
+5. business package 只依赖 platform-neutral role SDK；
+6. `wire` 保持无 domain authority；
+7. npm semver 与 protocol version 分离；
+8. workspace 合包不得改变正式 contract domain boundary；
+9. 新 package 前先证明独立消费者/职责/发布价值；
+10. Hostra/PWA physical layout不同但 application trace必须等价。
