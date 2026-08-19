@@ -4,175 +4,146 @@
 > 状态：Active / Normative  
 > Profile Version：1  
 > 稳定程度：Stabilizing  
-> 主要定义：Hostra Desktop 将已验证 platform-neutral Subsystem Descriptor 实现为受监督 Node.js Runtime Process，并通过 Host-owned Subsystem Runner 加载业务 Definition Module 的确定性语义  
-> 依赖：[Game Package v1](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
+> 主要定义：Hostra Desktop 将 platform-neutral Subsystem Descriptor 实现为受监督 Node.js Runner Process，并为 Runner 提供 Runtime Control 与动态 Data provisioning 的确定性平台边界  
+> 依赖：[Game Package v1](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)  
 > 最近复核：2026-08-19
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-> [!IMPORTANT]
-> 本次 v1 breaking reset supersede 旧模型：Node Launcher 不再直接执行 Game Package `launcher.entry`，Game Package 也不再声明 `launcher.type/env`。Desktop Host 始终执行 Host-owned Subsystem Runner，Runner 再加载 `descriptor.module`。
-
 核心原则：
 
-> **Game Package 选择业务 Definition Module；Desktop Platform 选择 Node Runtime 与 Runner。业务 module 不是 process entry，process entry 不是业务 identity。**
+> **Game Package 选择业务 Definition Module；Desktop Platform 选择 Node Runtime、Host-owned Runner 与物理 provisioning。业务 module 不是 process entry；Platform provisioning 不是 LoomRealm application protocol。**
 
 ---
 
 ## 1. Scope
 
-本 Profile 定义：
-
 ```text
 Validated SubsystemDescriptorV1 {key,module}
-→ Desktop executable-module resolution
+→ module resolution
 → Launch Attempt
 → bootstrap credential registration
-→ Host-owned Node Subsystem Runner process spawn
-→ Runner loads declared Definition Module
-→ Runtime Supervisor registration
+→ spawn Host-owned Node Subsystem Runner
+→ establish Runner Platform Provisioning Channel
+→ Runner imports declared Definition Module
+→ construct Subsystem-facing Platform Ports
 → Runtime Control bootstrap
+→ Runtime supervision
 ```
 
-Process spawn成功时公共 Runtime state仍为：
-
 ```text
-starting
-```
-
-以下属于后续 Control：
-
-```text
-Control connected
-subsystem.hello
-identified
-subsystem.status(ready)
-```
-
-因此：
-
-```text
-module valid != process spawned != connected != identified != ready
+module valid
+!= process spawned
+!= connected
+!= identified
+!= ready
+!= Data Connection exists
 ```
 
 ---
 
-## 2. Inputs / Ownership
+## 2. Ownership
 
-调用 Desktop Launcher 前，Main/Platform MUST 已有：
+Game Package owns only：
 
 ```text
-current Session
-validated installation
-validated complete Descriptor set
-Descriptor Registry
-Launch Attempt intent
-Main Control endpoint
+descriptor.key
+descriptor.module
 ```
 
-Descriptor：
+Desktop Platform owns：
 
-```ts
-interface SubsystemDescriptorV1 {
-  readonly key: string;
-  readonly module: string;
-}
+```text
+Node executable
+Runner entry
+Installation Root resolution
+process creation/supervision
+Control endpoint realization
+Platform Provisioning Channel
+Data endpoint/ticket provisioning
 ```
 
-Launcher MUST NOT 从 business name、PID、旧 Registry、filesystem scanning 或 platform-specific fallback 推导另一个业务 module。
+Main仍拥有 Runtime/Frame/DataAuthority application authority；Platform不得从物理资源反推 authority。
 
 ---
 
 ## 3. Definition Module Resolution
 
-`descriptor.module` 是 package-relative logical executable module path。
+`descriptor.module` 是 package-relative platform-neutral `.mjs` executable module path。
 
 Desktop resolver MUST：
 
 ```text
-validate logical module syntax
-→ resolve relative to trusted Installation Root
-→ inspect every path component
-→ reject symlink / junction / reparse redirect
-→ verify final target is regular file
-→ verify .mjs
+validate logical syntax
+→ resolve under trusted Installation Root
+→ reject symlink/junction/reparse redirect in path chain
+→ require regular file
+→ require .mjs
 → canonical containment verification
 → create host-private ResolvedSubsystemModule
 ```
-
-概念：
 
 ```ts
 interface ResolvedSubsystemModuleV1 {
   readonly installationId: string;
   readonly subsystemKey: string;
   readonly logicalModule: string;
-  readonly physicalModule: string; // host-private
+  readonly physicalModule: string; // Host-private
 }
 ```
 
-`physicalModule` MUST NOT：
-
-```text
-become Subsystem identity
-enter Game/Frame/Render/Data payload
-be published to Renderer
-replace descriptor.module in application state
-```
-
-Resolver failure MUST happen before the target Runtime can load business code.
+`physicalModule` 不进入业务 protocol/Renderer/Frame/Render/Data identity。
 
 ---
 
-## 4. Host-owned Subsystem Runner
+## 4. Host-owned Runner
 
-Desktop Host MUST select a trusted LoomRealm Node Subsystem Runner entry independently of Game Package content.
+Desktop Host MUST选择可信 Runner entry，Game Package不能替换。
 
 ```text
-Host-owned runner
-    owns Desktop runtime bootstrap glue
-    imports @loomrealm/subsystem host integration
-    obtains Desktop Subsystem-facing Platform Ports
-    loads exactly the declared business Definition Module
+Host-owned Runner
+    platform bootstrap/integration
+    loads @loomrealm/subsystem/host
+    imports exactly descriptor.module
+    validates Definition Module ABI
+    constructs RuntimeControlBinding
+    constructs SubsystemDataBinding
+    constructs ContentClient
+    calls runSubsystem(...)
 
 Game-owned Definition Module
-    owns business definition only
+    business definition only
 ```
 
-Game Package MUST NOT choose/replace Runner entry.
-
-Runner MUST NOT infer a different business module from argv/cwd/package metadata.
+Runner MUST NOT fallback 到 package main、directory index、CommonJS、另一个 module 或业务 argv。
 
 ---
 
 ## 5. Node Runtime Selection
 
-具体 Node executable MUST 由 Desktop Host选择。
+Node executable由 Desktop Host选择。
 
 Game Package/Definition Module MUST NOT指定：
 
 ```text
-Node executable
-Node CLI flags
---require
---loader
---inspect
+Node executable / flags
+--require / --loader / --inspect
 shell/interpreter
 process argv
 NODE_OPTIONS / NODE_PATH
 ```
 
-Node Runtime version/support policy属于 Host Runtime Policy。
+Host Runtime version/support policy不属于 Game Package。
 
 ---
 
-## 6. Launch Attempt
+## 6. Launch Attempt / Token
 
-每次启动 Subsystem 前 Main MUST 创建 fresh Launch Attempt：
+每次 Runtime创建 fresh Launch Attempt：
 
 ```ts
 interface LaunchAttemptV1 {
-  readonly launchId: string;          // Main-private
+  readonly launchId: string; // Main-private
   readonly subsystemKey: string;
   readonly installationId: string;
   readonly module: ResolvedSubsystemModuleV1;
@@ -180,27 +151,15 @@ interface LaunchAttemptV1 {
 }
 ```
 
-要求：
-
-```text
-one active Runtime Container per descriptor.key
-fresh Launch Attempt on every new Runtime
-PID/launchId/process handle never become protocol identity
-```
-
----
-
-## 7. Bootstrap Credential
-
-每个 Launch Attempt MUST产生 fresh `bootstrapToken`：
+`bootstrapToken`：
 
 ```text
 high entropy
 opaque
 bound to Launch Attempt + descriptor.key
-registered before process can execute
+registered before Runner executes
 one successful subsystem.hello consumption
-revoked if launch/bootstrap is abandoned
+revoked when launch/bootstrap abandoned
 not logged
 ```
 
@@ -208,17 +167,15 @@ not logged
 
 ```text
 create Launch Attempt
-→ generate token
-→ register token/key in Main Control auth state
-→ construct Runner bootstrap context
-→ spawn Runner process
+→ generate/register token
+→ construct Runner bootstrap material
+→ establish provisioning capability
+→ spawn Runner
 ```
-
-禁止 spawn 后再注册 token。
 
 ---
 
-## 8. Desktop Runner Bootstrap Context
+## 7. Runner Bootstrap Context
 
 保留环境变量：
 
@@ -232,8 +189,6 @@ LOOMREALM_BOOTSTRAP_CONTEXT
 Base64URL(no padding)(UTF-8 JSON)
 ```
 
-解码：
-
 ```ts
 interface LoomRealmNodeRunnerBootstrapContextV1 {
   readonly version: 1;
@@ -244,232 +199,300 @@ interface LoomRealmNodeRunnerBootstrapContextV1 {
 }
 ```
 
-其中：
-
-```text
-subsystemModule
-    = validated descriptor.module logical path
-```
-
-`version` 只表示本 Desktop Runner Bootstrap Context v1，不等于 Subsystem Control version。
-
 Context MUST NOT包含：
 
 ```text
 PID / launchId
-DataAuthority generation
+Data generation/profile
 Renderer Data endpoint/ticket
+Platform provisioning message
 frameId / activationId
 Render identity
 Content bearer
 business params
 ```
 
-Context 是 Host→Host-owned Runner 的 platform bootstrap material，不是 Game Package business configuration，也不是新的 application authority。
+`controlEndpoint` 是 Desktop Runner adapter建立 Runtime Control binding所需的 platform bootstrap material；身份仍只由 `subsystem.hello` 绑定。
 
 ---
 
-## 9. Child Environment
+## 8. Platform Provisioning Channel
 
-Runner process environment：
+Desktop Runner Process MUST拥有一条 Host-owned、与 stdout/stderr/Runtime Control/Data carrier独立的 **Platform Provisioning Channel**。
+
+典型实现：
+
+```text
+Node child_process IPC
+or equivalent Host-private process channel
+```
+
+它的架构职责只有：
+
+> **让 Platform 在 Runtime 已运行后，向 trusted Runner adapter 动态提供/撤销物理基础设施材料。**
+
+Phase 1 的首个真实消费者是 Renderer Data Connection provisioning。
+
+它不是：
+
+```text
+Subsystem Control
+Frame / Call
+Renderer Control
+Renderer Data application carrier
+business RPC
+```
+
+因此本 Profile不冻结一套 LoomRealm application JSON-RPC method namespace。
+
+Hostra app与 Host-owned Runner属于同一 Platform implementation，可自由选择内部 IPC encoding，只要满足本文可观察语义与安全约束。
+
+---
+
+## 9. Data Provisioning Semantics
+
+当 Main current authority为：
+
+```text
+DataAuthority(S,G,P)
+```
+
+Desktop DataConnectionBroker可以向目标 Runner provisioning source提供一次新的 Data connection offer。
+
+概念内部 value：
+
+```ts
+interface DesktopDataProvision {
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly endpoint: string;
+  readonly ticket: string;
+}
+```
+
+该 TypeScript shape只是 platform-internal semantic model，不是新的公开 application wire contract。
+
+Broker/Platform MUST在 offer 前保证：
+
+```text
+Session current
+Renderer participant current
+subsystemKey = target Runtime
+G/P = Main current DataAuthority
+endpoint/ticket bound to this offer
+```
+
+Runner adapter MUST：
+
+```text
+validate offer belongs to own subsystemKey
+→ use one-time material to establish physical Data carrier
+→ wrap as MessageCarrier<string>
+→ yield {generation:G,dataProfile:P,carrier} through SubsystemDataBinding
+```
+
+SDK/Data Connection current gate仍会再次验证 generation/profile/current installation事实。
+
+---
+
+## 10. Provision Replacement / Revocation
+
+同 generation/profile reconnect：
+
+```text
+old carrier retired/lost
+→ Broker MAY issue fresh one-time offer for same G/P
+→ Runner establishes fresh carrier
+→ SubsystemDataBinding yields next connection
+```
+
+Authority replacement/revocation：
+
+```text
+old pending offer/ticket MUST become unusable
+old current carrier MUST retire according to Data Connection semantics
+fresh generation/profile uses fresh material
+```
+
+Platform MAY通过 provisioning channel主动通知 revoke，或通过关闭对应 carrier/credential使其失效；无论机制如何，都必须及时满足 Data Connection current/retired semantics。
+
+stale/duplicate/consumed offer MUST NOT重新建立 current carrier。
+
+---
+
+## 11. Provisioning Failure Boundary
+
+Provisioning Channel或一次 Data establishment失败：
+
+```text
+MUST NOT by itself fail Runtime
+MUST NOT unwind Frame
+MUST NOT mutate DataAuthority
+```
+
+它只意味着当前/future Data carrier不可用，直到仍被授权的 authority获得 fresh successful provisioning。
+
+Runtime Control loss则仍按 Runtime Control Profile进入 Runtime failure；两者 failure domain明确分离。
+
+Provisioning Channel自身 loss后，Runner SHOULD终止 future `SubsystemDataBinding.connections()` availability并清理 pending material；已有 Data carrier是否继续到自然 retire由 Platform binding policy决定，但不得凭空创建新 authority。
+
+---
+
+## 12. Child Environment / Process Creation
+
+Environment：
 
 ```text
 Host-defined Safe Baseline
-+
-LoomRealm Reserved Environment
++ LoomRealm Reserved Environment
 ```
 
-Game Package v1 不再提供 `descriptor.env`。
+Game Package v1 不提供 `descriptor.env`；Host不得无条件继承完整 `process.env`。
 
-Host MUST NOT无条件继承 Main完整 `process.env`。Safe Baseline SHOULD避免泄露 cloud credential、developer token、proxy secret等无关敏感状态。
-
-Definition Module MUST NOT依赖任意 inherited process env形成 portable business semantics。
-
----
-
-## 10. Process Creation
-
-语义等价：
+Process creation语义：
 
 ```text
-executable:
-    Host-selected Node.js Runtime
-
-argv:
-    [Host-owned Subsystem Runner Entry]
-
-cwd:
-    Installation Root
-
-shell:
-    false
-
-detached:
-    false
-
-stdin:
-    closed / ignored
-
-stdout/stderr:
-    bounded diagnostic streams
+executable   Host-selected Node
+argv         [Host-owned Runner Entry]
+cwd          Installation Root
+shell        false
+detached     false
+stdin        closed/ignored
+stdout       bounded diagnostics
+stderr       bounded diagnostics
+provisioning dedicated Host-owned IPC capability
 ```
 
-**业务 `descriptor.module` MUST NOT作为 process argv entry。**
-
-Game Package不能追加 argv或 shell command。
+业务 `descriptor.module` MUST NOT作为 process argv entry。
 
 ---
 
-## 11. Runner Module Load
+## 13. Runner Module Load / Host Integration
 
-Runner开始后 MUST：
+Runner：
 
 ```text
 parse/validate bootstrap context
 → verify subsystemKey/module consistency
-→ resolve declared logical module against current trusted installation
-→ import exactly that .mjs module as ESM
-→ validate default export against Subsystem Definition Module ABI
-→ construct Desktop Subsystem-facing Platform Ports
-→ enter @loomrealm/subsystem host runtime
+→ resolve/import exact declared .mjs
+→ validate default export SubsystemDefinitionFactory
+→ build RuntimeControlBinding from Desktop Control adapter
+→ build SubsystemDataBinding from provisioning source + Data transport adapter
+→ build ContentClient
+→ runSubsystem({definition,platform,launch})
 ```
 
-Module load / ABI failure MUST：
+Module load/ABI failure：
 
 ```text
-prevent Runtime ready
-produce bounded diagnostic classification
-cause bootstrap failure
-terminate Runtime
+no Runtime ready
+bounded diagnostic error
+bootstrap failure
+Runtime terminates
 ```
 
-不得 fallback 到另一个 module、CommonJS、package main或 directory index。
+Definition Module本身不读取 endpoint/token或 provisioning channel。
 
 ---
 
-## 12. Runtime Control Bootstrap
-
-Definition Module本身不得读取 token/endpoint或打开 Control WebSocket。
-
-这些由 Runner/`@loomrealm/subsystem` host integration处理：
+## 14. Runtime Control Bootstrap
 
 ```text
-Runner obtains established/control binding
-→ Subsystem role sends subsystem.hello
-→ Main binds descriptor.key
+Runner/SDK obtains Control carrier
+→ subsystem.hello
 → identified
-→ initialization
+→ initialize
 → ready
 ```
 
-`ready` 不表示 Renderer Data Connection存在，也不携 Data material。
-
----
-
-## 13. stdout / stderr
-
-stdout/stderr只属于 diagnostic plane。
-
-MUST NOT作为：
+`ready` 只表示 Runtime Control Profile角色可用。
 
 ```text
-Control Protocol
-ready signal
-Frame/Call
-User Input
-Render Update
-Platform sideband
+ready != Data offer exists
+ready != Data carrier current
+ready != provisioning traffic occurred
 ```
-
-日志策略必须 bounded；credential应脱敏。
 
 ---
 
-## 14. Runtime Supervisor
+## 15. stdout / stderr
 
-每个 Runner process MUST对应 Supervisor Record，并至少观察：
+只属于 diagnostic plane，不作为：
+
+```text
+Control
+ready
+Frame
+Data
+User Input
+Render Update
+Platform provisioning
+```
+
+必须 bounded；secret脱敏。
+
+---
+
+## 16. Runtime Supervisor / Exit
+
+每个 Runner Process有 Supervisor Record，至少观察：
 
 ```text
 process creation error
-process exit
-exit code / signal
+exit code/signal
 Main-requested termination
 force termination result
 ```
 
-`stopped` 只来自实际 Runtime process termination observation。
+`stopped` 只来自 actual process termination observation。
 
-PID只用于物理监督。
+无 Main termination intent 的任何 bootstrap/ready后 unexpected exit（包括 code 0）→ Runtime failure。
 
----
-
-## 15. Exit Classification
-
-无 Main termination intent：
-
-```text
-spawn后、Control connect前 exit
-connected后、hello前 exit
-identified后、ready前 exit
-ready后任何 unexpected exit including code 0
-    → Runtime failure
-```
-
-有明确 termination intent 时，Supervisor再按当前 shutdown context分类 expected/failed。
-
-Runtime self-reported failed之后的 process exit不能恢复为 stopped-success语义。
+PID只用于监督，不是协议 identity。
 
 ---
 
-## 16. Automatic Restart
+## 17. Automatic Restart / Termination
 
-v1：
+v1 MUST NOT automatic restart failed Runtime。
 
-```text
-MUST NOT automatically restart failed Runtime
-```
+新 Runtime必须 fresh Launch Attempt + fresh token + fresh process/Control lifetime。
 
-未来 restart必须是 fresh Launch Attempt + fresh token + fresh Runtime/Control identity lifetime。
-
----
-
-## 17. Termination
-
-Desktop Platform必须提供最终有界的 process termination：
+正常 termination：
 
 ```text
-request graceful Runtime shutdown
-→ finite grace policy
-→ force terminate if still alive
+Main shutdown intent / subsystem.shutdown
+→ finite grace
+→ force terminate if needed
 → observe actual termination
 ```
 
-Platform MAY使用 process group/job object等机制收敛受管理 process tree。
-
-具体 OS API不进入 application protocol。
+Platform MAY使用 job object/process group收敛受管理 process tree。
 
 ---
 
 ## 18. Timeout Policy
 
-以下等待 MUST bounded：
+以下等待 bounded：
 
 ```text
-module resolution
+module resolution/load
 process creation
-Control connect
-hello
-ready
+Control connect/hello/ready
 shutdown/termination
+individual Data establishment attempt
 ```
 
-具体时间值属于 Desktop deployment policy；Game Package不得覆盖。
+具体时间属于 Desktop deployment policy；Game Package不得覆盖。
+
+Data establishment timeout只失败该 attempt，不自动失败 Runtime。
 
 ---
 
 ## 19. Error Categories
 
-至少保留：
+至少：
 
 ```text
 SUBSYSTEM_MODULE_INVALID
@@ -483,83 +506,68 @@ PROCESS_SPAWN_FAILED
 PROCESS_EXITED_DURING_BOOTSTRAP
 PROCESS_EXITED_UNEXPECTEDLY
 PROCESS_TERMINATION_FAILED
+PLATFORM_PROVISIONING_UNAVAILABLE
+DATA_PROVISION_INVALID
+DATA_ESTABLISHMENT_FAILED
 ```
 
-用户可见错误不得泄露 token、完整敏感 env、不必要的 absolute path或内部 stack。
+Data provisioning errors不得伪装成 Runtime Control semantic error。
+
+用户错误不得泄露 token/ticket、敏感 env、不必要 absolute path/internal stack。
 
 ---
 
-## 20. Game Bootstrap Failure
+## 20. Trust Boundary
 
-Phase 1 eager/all-required：任意 required Subsystem出现以下事实：
+Desktop Runner加载的 Definition Module是 trusted executable JavaScript；Profile只保证从 validated installation通过 Host-owned Runner加载指定 module，不提供完整 OS sandbox。
 
-```text
-Descriptor/module invalid
-module cannot resolve/load
-ABI invalid
-Node Runtime unavailable
-Runner spawn failure
-Control bootstrap failure
-cannot become ready
-```
-
-整个 Game Bootstrap MUST失败，并对已创建的其他 required Runtime进入统一 cleanup。
+Platform Provisioning Channel只连接 trusted Host与 trusted Runner，仍必须验证 stale/mismatched/duplicate material，不能因同机而跳过 identity binding。
 
 ---
 
-## 21. Trust Boundary
-
-Desktop Node Runner加载的业务 Definition Module是 trusted executable JavaScript。
-
-本 Profile保证：
-
-```text
-Host only loads validated installation module
-through Host-owned Runner
-without shell/argv/module fallback
-```
-
-不提供完整 OS sandbox。
-
----
-
-## 22. Conformance
+## 21. Conformance
 
 至少覆盖：
 
 ```text
-valid descriptor.module → resolved module
-absolute/traversal/url/backslash rejection
+valid module resolution
+absolute/traversal/url/backslash/symlink rejection
 .mjs only
-symlink/junction/reparse ancestor rejection
-installation containment
-Host-owned runner is process argv entry
-business module is not process argv entry
-bootstrap context contains logical module
-runner imports declared module exactly
-missing/invalid default export fails bootstrap
+Host-owned runner is argv entry
+business module is not argv entry
+runner imports exact module/default-export ABI
 no descriptor.env
+
 spawn != connected != identified != ready
-stopped only from supervisor
-unexpected code-0 exit fails Runtime
-no automatic restart
-zero shell
-bounded diagnostics
+ready-does-not-require-data-offer
+stopped-only-from-supervisor
+unexpected-code0-exit-fails-runtime
+no-auto-restart
+
+provisioning-channel-distinct-from-control/stdout/data
+data-offer-binds-own-subsystem-generation-profile
+stale/duplicate/consumed-offer-rejected
+same-generation-fresh-offer-after-retire
+authority-replacement-invalidates-old-material
+data-provision-failure-does-not-fail-runtime-or-unwind-frame
+runner-yields-subsystem-data-binding
 ```
 
 ---
 
-## 23. Core Invariants
+## 22. Final Invariants
 
-1. Game Package选择 `descriptor.module`，Desktop Host选择 Node/Runner；
-2. business Definition Module不是 process entry；
-3. Host-owned Runner是唯一 Node process entry；
-4. module固定 platform-neutral `.mjs` ESM ABI；
-5. Game Package不能注入 process env/argv/flags；
-6. Runtime identity仍是 `descriptor.key`，不是 module/path/PID；
-7. module resolve/load发生在 ready前；
-8. Runtime Control identity只由 `subsystem.hello`绑定；
-9. `ready`不携/暗示 Data endpoint；
-10. stopped只来自 actual process termination；
-11. no automatic restart；
-12. Desktop Runner realization不得改变 shared Subsystem business semantics。
+1. Game Package选择 business module；Desktop Host选择 Node/Runner；
+2. business module不是 process entry；
+3. Host-owned Runner是唯一 process entry；
+4. Runtime identity仍是 descriptor.key；
+5. Runtime Control identity只由 subsystem.hello绑定；
+6. Runner拥有独立 Platform Provisioning Channel；
+7. provisioning不是 Runtime Control/Data application/business protocol；
+8. Data offer只实现 current Main DataAuthority，不拥有 generation/profile；
+9. same-generation reconnect使用 fresh one-time physical material；
+10. Data provisioning failure不等于 Runtime/Frame failure；
+11. ready不携/暗示 Data endpoint或 offer；
+12. stopped只来自 actual process termination；
+13. no automatic restart；
+14. Desktop Runner realization不得改变 shared business/application semantics。
