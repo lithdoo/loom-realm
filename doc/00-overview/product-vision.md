@@ -2,143 +2,380 @@
 
 > 层级：产品总览  
 > 状态：Active / Normative  
-> 稳定程度：方向稳定，范围允许随阶段调整  
-> 主要定义：产品目标、适用范围、设计原则和发展方向  
-> 最近复核：2026-08-02
+> 稳定程度：方向稳定，当前 v1在首次实现冻结前允许直接收口  
+> 主要定义：产品目标、适用范围、跨平台原则、第一阶段验收方向  
+> 最近复核：2026-08-19
 
-本文档是 LoomRealm 产品设计的最高层入口。它说明 LoomRealm 为什么存在、准备解决什么问题，以及后续架构、协议、模块和实施文档必须遵守的方向。
+本文是 LoomRealm 最高层产品事实源。下层架构、协议、模块和实施文档不得通过实现便利反向改变这里的产品边界。
+
+---
 
 ## 1. 产品目标
 
-LoomRealm 是一个通过只读游戏包启动、由程序主系统组织模块子系统、并使用 Web 渲染端呈现子系统声明式 Render State 的运行平台。
+LoomRealm 是一个：
 
-它希望解决的问题是：
+> **由只读 Game Package 声明业务 Subsystem topology，以 platform-neutral Subsystem Definition Module 表达业务实现，由 Main 管理运行/Frame authority，并由 Hostra Desktop / PWA Platform Composition 在不同物理环境中运行同一业务语义的模块化游戏运行平台。**
 
-- 将地图、菜单、对话、战斗等游戏能力拆分为边界明确的模块子系统；
-- 让游戏入口显式声明当前会话需要的子系统及其受控启动方式；
-- 让子系统通过稳定协议协作，而不是依赖单一语言、进程内 ABI 或大型全局状态；
-- 让 Frame 只承担调用与用户输入路由语义，不被强制绑定到 Render 生命周期；
-- 让 Render 的创建、更新、排序、可见性和销毁由对应子系统控制；
-- 让渲染端只呈现声明式目标状态，不成为业务规则的权威来源；
-- 让内容包、运行平台、模块子系统和桌面宿主可以分别演进；
-- 通过一条可验证的纵向链路逐步形成通用运行架构。
+目标：
 
-总体链路：
+- 地图、菜单、对话、战斗等业务能力拆成边界明确的 Subsystem；
+- Game Package显式声明当前 Session完整 Subsystem集合；
+- 业务 Subsystem不依赖 Desktop/PWA/Transport；
+- Main拥有唯一 Session/Runtime/Frame/Activation/InputTarget/DataAuthority authority；
+- Frame只承担调用与 ordinary input authority，不拥有 Render lifecycle；
+- Subsystem拥有自身 business state、Input Interest与 Render Domain authoritative state；
+- Renderer只镜像 Main authority、生产输入、复制/呈现 Render State，不成为 business authority；
+- Platform负责 Process/Worker/Socket/Port/Window/Content/Provisioning physical topology，但不获得 application authority；
+- Hostra Desktop与 PWA 对同一个 Game Package + Definition Module得到等价 logical outcome；
+- 先通过可执行纵向链路证明边界，再扩展 Save、Sandbox、更多 Runtime等横向能力。
 
-```text
-只读游戏包
-→ 程序主系统读取入口和 Subsystem Descriptor
-→ Main 使用受控 Launcher 启动声明的 Subsystem
-→ Subsystem 主动连接 Main、完成身份绑定并报告 ready
-→ Main 管理 Frame / Stack / Input Target
-→ Subsystem 处理业务与输入
-→ Subsystem 独立发布 Render State
-→ Web 渲染端呈现
-```
+---
 
-## 2. 适用范围
-
-LoomRealm 适用于需要以下能力的本地游戏或交互内容：
-
-- 内容与运行时业务状态分离；
-- 多个业务系统按调用关系组合；
-- 子系统可以使用不同实现方式或运行时；
-- 游戏入口可以以受控 Descriptor 声明子系统启动入口；
-- 客户端需要可恢复、可校验的声明式状态；
-- 桌面模式与浏览器开发模式尽量保持相同协议语义。
-
-第一阶段使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` 子系统的纵向验证场景，但 Pokémon 地图格式不是 LoomRealm 平台的长期核心定义。
-
-## 3. 第一阶段目标
-
-第一阶段验证一条完整闭环：
+## 2. 总体链路
 
 ```text
-游戏包入口
-→ Subsystem Descriptor / Node.js Launcher
-→ 程序主系统
-→ loom.map 子系统进程
-→ 固定 Tick、移动、碰撞和 Portal
-→ Render State
-→ DOM / Canvas / WebGL 呈现
+Readonly Game Package
+    │
+    │ SubsystemDescriptor { key, module }
+    ▼
+LoomRealm Main
+    │ logical Runtime / Frame / Data authority
+    ▼
+Platform Composition
+    │
+    ├── Hostra Desktop → Node Subsystem Runner
+    └── PWA            → Worker Subsystem Runner
+                         │
+                         ▼
+              same Definition Module
+                         │
+                         ▼
+                @loomrealm/subsystem
+                         │
+             business / Input / Render / Content
 ```
 
-桌面 MVP 的 Subsystem Descriptor 使用稳定 `key`，当前唯一 Launcher Type 为 `nodejs`。Game Entry 一次性声明当前会话全部 Subsystem；Main 在 Bootstrap 阶段启动全部声明项，并在全部 Subsystem 成功进入 ready 后完成 Subsystem Bootstrap。
-
-同时验证一次通用嵌套调用：
+Renderer：
 
 ```text
-子系统 A 的 Frame
-→ 调用子系统 B
-→ B 的 Frame 接管普通输入
-→ B 返回结果
-→ A 的 Frame 恢复输入
+Main committed authority
+        ↓
+Web Renderer
+        ⇅ Data Profile
+Subsystem Runtime
 ```
 
-Render 是否随上述 Frame 生命周期变化完全由各子系统自己决定，不属于调用栈的隐式语义。
+---
 
-第一阶段的价值是验证平台边界，而不是实现完整 RPG 产品。
+## 3. Game Package / Business Artifact
 
-## 4. 长期设计原则
+Game Package v1只声明：
 
-1. **产品语义与实施结构分离**：包目录、文件数量和进程承载方式可以调整，但系统职责不能被实施细节反向定义。
-2. **主系统与业务子系统分离**：主系统管理会话、子系统运行拓扑、调用关系和输入目标，子系统管理自身业务状态与 Render。
-3. **协议是扩展边界**：跨进程或跨模块协作通过正式契约完成。
-4. **状态所有权明确**：每份权威状态必须有唯一拥有者。
-5. **Frame 与 Render 解耦**：Frame 不拥有 Render；平台不从 Frame 生命周期推导显示行为。
-6. **Render State 与 DOM 分离**：客户端目标状态可恢复，DOM / Canvas / WebGL 只是派生结果。
-7. **游戏包运行期间只读**：运行时状态不写回游戏包；受控 Launcher 读取明确声明的子系统入口不改变只读原则。
-8. **受控启动而非任意执行**：只有 Game Entry 明确声明、Launcher Profile 支持并通过校验的子系统入口可以被 Main 启动。
-9. **上层设计约束下层实现**：架构、契约、模块和实施文档形成单向依赖。
-10. **先验证纵向闭环，再扩展横向能力**：避免在核心协议未稳定前扩大业务范围。
+```ts
+interface SubsystemDescriptorV1 {
+  readonly key: string;
+  readonly module: string;
+}
+```
 
-## 5. 当前非目标
+```text
+key
+    logical Runtime identity
 
-当前不以以下能力为完成条件：
+module
+    package-local platform-neutral .mjs Subsystem Definition Module
+```
 
-- 完整菜单、对话、战斗、任务或 Pokémon 业务；
-- 游戏内容编辑器；
-- 未经 Game Entry 声明的任意脚本执行或通用插件沙箱；
-- 第一阶段除 `nodejs` 之外的 Shell / Native / 其他 Launcher Type；
-- 在线系统商店、签名和自动更新；
-- 多主调用栈、后台 Frame Graph 或多人同步；
+Game Package不声明：
+
+```text
+Node/Worker launcher type
+process argv/env
+WebSocket/MessagePort
+Platform provisioning
+Data endpoint/ticket
+```
+
+Definition Module default export `SubsystemDefinitionFactory`，只表达业务。
+
+---
+
+## 4. Platform / Runner
+
+Business module与 physical Runtime entry分离：
+
+```text
+same Definition Module
+    ├── Hostra Node Runner
+    └── PWA Worker Runner
+```
+
+Host-owned Runner负责：
+
+```text
+load/validate Definition Module
+construct role-local Platform Ports
+enter @loomrealm/subsystem host runtime
+```
+
+Platform差异停在 Runner/adapter/composition层，不传播到 business code。
+
+---
+
+## 5. Runtime / Frame Authority
+
+Main管理：
+
+```text
+Session
+Runtime public lifecycle
+Frame identity/caller/lifecycle/outcome/Stack
+Activation
+InputTarget
+Frame transaction/failure unwind
+DataAuthority
+```
+
+Runtime Control：
+
+```text
+Subsystem Control v1
++ Frame / Call v1
+= Runtime Control Profile v1
+```
+
+```text
+launch != connected != identified != ready
+ready != Data Connection exists
+```
+
+Frame transaction timeout/loss ambiguity不得 retry/rollback，而进入 Runtime failure。
+
+---
+
+## 6. Author SDK Boundary
+
+业务 author只使用：
+
+```text
+SubsystemScope
+Frame / FrameOutcome
+InputListener
+RenderDomain
+ContentClient
+AbortSignal
+```
+
+Frame outcome明确：
+
+```text
+completed
+cancelled
+failed
+```
+
+`frame.call()`只有明确 pre-commit recoverable rejection可以作为 catchable error继续 current Activation；Runtime-fatal/ambiguous path不能重新进入业务 continuation。
+
+这保证高层 ergonomics不会绕过底层 authority/commit semantics。
+
+---
+
+## 7. User Input
+
+ordinary input最终由以下交集产生：
+
+```text
+Main InputTarget(S,F,A)
+× Subsystem Interest[F]
+× Renderer Producer(C)
+× current matching Data Connection
+```
+
+Interest是 Frame-scoped configuration，不是 authority。
+
+```text
+fresh Activation
+    may reuse Interest config
+    never reuse old Input State/Event
+
+fresh Data carrier
+    remote Interest/State start empty
+    republish/rebaseline
+```
+
+---
+
+## 8. Render
+
+Subsystem拥有 `0..N Render Domains`。
+
+```text
+Frame create/close/suspend
+    does not create/destroy/hide Render Domain
+
+Data carrier replacement
+    does not destroy authoritative Domain
+```
+
+Renderer复制 declarative authoritative state并映射到 DOM/Canvas/WebGL等本地 presentation。
+
+---
+
+## 9. Renderer Data
+
+Main发布：
+
+```text
+DataAuthority {subsystemKey,generation,dataProfile}
+```
+
+当前：
+
+```text
+loomrealm.renderer-data/1
+= Data Connection v1 + User Input v1 + Render Update v1
+```
+
+Platform DataConnectionBroker建立实际 Renderer/Subsystem endpoints；endpoint/ticket/Port不是 authority。
+
+Runtime已经 ready 后的 Data material通过 Platform provisioning path动态交付，不污染 Runtime Control/Renderer Control/business payload。
+
+Data provisioning/loss本身不失败 Runtime、不 unwind Frame。
+
+---
+
+## 10. Cross-platform Messaging
+
+当前 message-oriented profiles统一：
+
+```text
+one application unit = one UTF-8 JSON text string
+```
+
+因此 WebSocket与 MessagePort拥有相同 application value model；Structured Clone只用于 Platform bootstrap/Port transfer。
+
+跨平台 equivalence比较 logical authority/outcome，而不是物理 trace。
+
+---
+
+## 11. Content / Execution Boundary
+
+Game Package运行期间只读。
+
+必须区分：
+
+```text
+Definition Module executable capability
+    trusted Runner加载已声明/验证 module
+
+Content API
+    readonly logical data/resource access
+```
+
+Content API不得提供任意 executable path/capability；Render/business payload不得携 physical path/credential。
+
+Desktop trusted executable JavaScript当前不等于 OS sandbox。
+
+---
+
+## 12. 第一阶段目标
+
+Phase 1必须跑通同一个 `loom.map` Definition Module：
+
+```text
+Game Package {key,module}
+→ required Runtime Runner ready
+→ initial Frame
+→ map Content load
+→ Frame-scoped input
+→ world movement/collision/Portal
+→ declarative Render
+→ nested Subsystem call/return
+→ Data reconnect
+→ Renderer reload
+→ shutdown
+```
+
+并分别在：
+
+```text
+Hostra Desktop
+PWA
+```
+
+得到等价 logical outcome。
+
+Pokémon Essentials v21.1 / RPG Maker XP兼容仅是 `loom.map` 的验证 corpus，不是 LoomRealm长期核心格式。
+
+---
+
+## 13. 长期设计原则
+
+1. **状态唯一权威**：每份 authoritative state只有一个 owner；
+2. **业务与 Platform分离**：Definition Module不探测运行平台；
+3. **Platform physical ownership不是 application authority**；
+4. **协议域分离**：Runtime Control / Renderer Control / Data / Input / Render / Content各自拥有 identity/lifecycle/recovery；
+5. **Frame 与 Render/Data 解耦**；
+6. **能力通过 ports注入，不通过 service locator/global context寻找**；
+7. **Business API隐藏 protocol mechanics，但不能弱化 protocol semantics**；
+8. **Game Package只读，execution capability与 ordinary Content capability分离**；
+9. **Protocol/package/process/platform boundary互不等价**；
+10. **主要定义依赖保持单向 DAG**；
+11. **先完成 cross-platform vertical slice，再扩横向能力**；
+12. **没有真实兼容义务时不为旧草案制造虚假版本负担；有真实兼容承诺后严格治理版本。**
+
+---
+
+## 14. 当前非目标
+
+- 完整 RPG/Pokémon产品功能；
+- Game content editor；
 - Save System；
-- 大型地图流式渲染和高级 GPU 优化。
+- untrusted executable sandbox / publisher trust；
+- automatic Runtime restart/checkpoint；
+- lazy/optional Subsystem；
+- multiple Runtime instances per key；
+- remote Runtime / multiple Renderer；
+- Frame replay/migration/caller-driven cancellation；
+- Render history replay/cross-Domain transaction；
+- arbitrary plugin execution；
+- 为预测性复用创建 platform/Runner mega-package。
 
-非目标可以在后续阶段重新评估，但必须先更新本层文档，再向下修改架构和实施方案。
+---
 
-## 6. 发展方向
+## 15. 发展方向
+
+当前主线：
 
 ```text
-明确产品边界
-→ 冻结系统职责
-→ 冻结跨系统契约
-→ 完成模块设计
-→ 制定分包和实施计划
-→ 通过纵向测试收敛
-→ 再扩展新子系统和 Launcher Profile
+architecture/contracts closed enough
+→ implement foundation/wire
+→ Definition Module + Subsystem SDK
+→ Runtime/Frame vertical slice
+→ Desktop Runner/Control
+→ Renderer/Data Profile/Broker
+→ Input/Render/Content
+→ loom.map
+→ Desktop E2E
+→ PWA Runner/provisioning
+→ PWA E2E
+→ abstract-trace equivalence
 ```
 
-未来可能扩展：
+未来能力只有在当前 vertical slice证明后按真实需求增加。
 
-- 更多内置或第三方模块子系统；
-- Shell、Native Executable 或其他受控 Launcher Profile；
-- 更完善的资源、存档和内容版本系统；
-- 子系统进程池或新的 Runtime Container Profile；
-- 更丰富的渲染后端；
-- 开发工具、诊断和追踪能力。
+---
 
-这些方向不自动进入当前阶段范围。
+## 16. 阅读顺序
 
-## 7. 文档阅读顺序
-
-1. 本文档；
+1. 本文；
 2. [文档分层与变更规则](./document-governance.md)；
 3. [系统架构总览](../10-architecture/system-overview.md)；
-4. [运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)；
-5. 各系统架构文章；
-6. [正式契约目录](../15-contracts/README.md)；
-7. [模块设计目录](../20-modules/README.md)；
-8. [实施计划目录](../30-implementation/README.md)。
+4. [平台组合系统](../10-architecture/platform-composition-system.md)；
+5. Runtime hosting / stack / communication / rendering / subsystem architecture；
+6. [运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)；
+7. [正式契约目录](../15-contracts/README.md)；
+8. [模块设计目录](../20-modules/README.md)；
+9. [实施计划目录](../30-implementation/README.md)。
 
-专题文档与本文档冲突时，应先修改本文档并明确范围变化，不能由下层实现文档隐式改变产品方向。
+专题文档与本文冲突时，必须先更新本层产品方向，再向下传播。
