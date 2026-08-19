@@ -1,59 +1,77 @@
 # ADR 0002：平台 Transport Binding
 
-> 状态：Accepted  
-> 日期：2026-08-01；当前协议模型复核：2026-08-09  
-> 影响范围：通信系统、Desktop/PWA Host、Control/Data Connection、Content API
+> 状态：Accepted；由 [ADR 0017](./0017-system-level-platform-composition.md) 扩展为 system Platform Composition，并由 [ADR 0018](./0018-preimplementation-v1-closure.md) 收口 Runner/Data Profile/JSON-text mapping  
+> 日期：2026-08-01  
+> 最近复核：2026-08-19  
+> 影响范围：通信系统、Desktop/PWA Platform、Control/Data Connection、Content API
 
 ## 背景
 
-Desktop 与 PWA 的物理通信能力不同：
+Desktop 与 PWA 物理能力不同：
 
 ```text
-Desktop
-    independent OS processes
-    localhost WebSocket / HTTP available
+Hostra Desktop
+    independent Process / WebSocket / HTTP / IPC
 
 PWA
-    Window / Dedicated Worker / Service Worker
-    MessagePort / Fetch available
-    no localhost process assumption
+    Window / DedicatedWorker / MessagePort / Fetch
 ```
 
-LoomRealm 需要保证 application semantics 跨平台一致，但没有理由强迫两个平台使用同一种 carrier，也没有理由把 endpoint/ticket/MessagePort creation 本身升级成新的 application protocol。
-
-当前 Runtime 粒度为每个 `descriptor.key` 一个 Subsystem Runtime Container；Frame、Input context、Render Domain 都在 Runtime/Data Connection 上逻辑多路复用，不创建 per-Frame transport。
+LoomRealm需要 application semantics跨平台一致，但不要求物理 carrier相同，也不把 endpoint/ticket/Port creation默认升级成 application protocol。
 
 ## 决策
 
-采用：
+> **Application semantics统一；物理 carrier/bootstrap/provisioning由 Platform realization建立。**
 
-> **Application semantics统一；物理 carrier由各平台 Host implementation建立。**
+当前典型映射：
 
-典型映射：
-
-| 逻辑链路 | Desktop implementation | PWA implementation |
+| 逻辑链路 | Hostra Desktop | PWA |
 |---|---|---|
-| Main ⇄ Subsystem Runtime Control | localhost WebSocket | Host-created Control MessagePort |
-| Main ⇄ Renderer Control | localhost WebSocket | Host-created Window/Main MessagePort 或等价受控通道 |
-| Renderer ⇄ Subsystem Data | per-Subsystem authenticated localhost carrier | per-Subsystem Host-created Data MessagePort |
-| Content API | localhost HTTP | same-origin Fetch + Service Worker |
+| Runtime Hosting | Node Subsystem Runner Process | Worker Subsystem Runner |
+| Main ⇄ Subsystem Control | localhost WebSocket | Control MessagePort |
+| Main ⇄ Renderer Control | localhost WebSocket | controlled MessagePort |
+| Renderer ⇄ Subsystem Data | authenticated Data WebSocket | transferred Data MessagePort |
+| late Subsystem Data provisioning | Runner IPC/equivalent | Worker provisioning path/Port transfer |
+| Content | localhost HTTP | same-origin Fetch + Service Worker |
 
-这些是平台 binding，不形成独立 LoomRealm `Transport Profile` wire version。
+Transport只是 Platform Composition的一部分。
 
-正式 application contracts继续独立：
+---
+
+## Application Profiles
+
+正式 application contracts独立：
 
 ```text
 Subsystem Control v1
 Runtime Control Application Profile v1
 Frame / Call v1
 Renderer Control v1
+Renderer Data Application Profile v1
 Data Connection v1
 User Input v1
 Render Update v1
 Content API v1
 ```
 
-## Data Connection 粒度
+当前 message-oriented profiles统一：
+
+```text
+one carrier unit = one UTF-8 JSON text string
+```
+
+因此：
+
+```text
+WebSocket   text message
+MessagePort postMessage(string)
+```
+
+Structured Clone只用于 Platform bootstrap/Port transfer，不扩大 application payload model。
+
+---
+
+## Data Authority / Cardinality
 
 对 current Renderer：
 
@@ -62,56 +80,93 @@ Content API v1
     → 0..1 current Data Connection
 ```
 
-一条 current Data Connection MAY承载：
+一条 current Data Connection可承载：
 
 ```text
 0..N Frame/Input contexts
 0..N Render Domains
 ```
 
-它不是 per-Frame/per-Activation/per-Domain carrier。
-
-Data Connection authority由：
+Main发布：
 
 ```text
-Session
-current Renderer participant
-subsystemKey
-Main-owned generation
+DataAuthority {
+  subsystemKey,
+  generation,
+  dataProfile
+}
 ```
 
-决定，而不是 URL/port/MessagePort identity决定。
+当前：
 
-## Host Binding Obligation
+```text
+dataProfile = loomrealm.renderer-data/1
+```
 
-Host 在 carrier 被安装为 current 前 MUST确保绑定到：
+Data connection physical URL/Port/ticket不是 authority identity。
+
+---
+
+## Platform Binding Obligation
+
+Platform DataConnectionBroker在 carrier安装为 current前 MUST建立以下绑定事实：
 
 ```text
 current Session
 current Renderer participant
 target subsystemKey
 current DataAuthority generation
+current DataAuthority dataProfile
 ```
 
-Host MAY使用：
+Broker不得 mint generation/profile。
+
+### Renderer side
+
+Renderer同时持有 Main Renderer Control mirror，因此可以把 `RendererDataBinding`给出的 S/G/P 与 current DataAuthority独立匹配。
+
+### Subsystem side
+
+Subsystem **不复制 Main Renderer Control authority**，也不增加第二条 Main→Subsystem DataAuthority协议。
+
+因此 Subsystem通过 trusted Platform projection：
 
 ```text
-Desktop endpoint + one-shot ticket
-PWA MessageChannel / MessagePort transfer
-other platform-safe internal mechanism
+SubsystemDataBinding
 ```
 
-具体 bootstrap material/schema/API只要不形成第三方互操作边界，就属于实现细节。
+取得 already-authority-bound `{generation,dataProfile,carrier}`。Subsystem SDK可以验证 shape、own Runtime binding、connection replacement/lifecycle与 stale local state，但 **Main current authority correspondence由 Platform Broker/Binding负责证明**。
 
-不得把 endpoint/ticket/Port：
+这不是降低安全要求，而是避免创建第二份 DataAuthority authority source。
+
+---
+
+## Late Provisioning
+
+Runtime `ready`与 Data provisioning独立。
 
 ```text
-放进 Subsystem Control ready
-放进 Renderer Authority Snapshot
-当作 DataAuthority identity
+Hostra
+    Broker → Runner provisioning IPC → endpoint/ticket → Data WS
+
+PWA
+    Broker → Worker provisioning path → transferred Data Port
 ```
 
-## Frame / Data / Render 生命周期
+Provisioning material不得：
+
+```text
+进入 subsystem.status(ready)
+进入 Renderer Authority Snapshot
+进入 Frame/Render/business payload
+成为 DataAuthority identity
+```
+
+Provisioning失败本身不失败 Runtime、不 unwind Frame、不修改 Main DataAuthority。
+
+---
+
+## Frame / Data / Render Independence
 
 ```text
 Frame create   != Data carrier create
@@ -123,48 +178,44 @@ Data loss      != Runtime failure
 Data reconnect != Frame recovery
 ```
 
-Frame / Call v1拥有自己的 transaction/recovery；Data Connection只恢复数据面。
+User Input与 Render Update共享 Data carrier，但保持独立 state/recovery semantics。
 
-User Input自己的 State/Event/Reset语义以及 Render Update自己的 Registry/Snapshot/Patch/Event语义在共享 carrier上独立存在，不需要 `Frame Stream sequence/resync` 层。
+---
 
-## Carrier 最低保证
+## Carrier Minimum Guarantees
 
-适配器必须向上层提供：
+适配器至少提供：
 
 ```text
 ordered delivery per direction
-preserved application-message boundaries
+preserved message boundaries
 observable close/loss
 bounded buffering
-no adapter-created application retry
+no adapter-created retry
 no adapter-created duplicate
 ```
 
-不要求两个方向 global total order。
+Foundation `MessageCarrier<string>` 不解释 JSON；具体 JSON-text mapping由 application Profile定义。
 
-Child protocol分别负责自己的 ordering/coalescing/recovery/backpressure，不建立统一 Frame Stream Router协议。
+---
 
 ## Content
 
-Desktop localhost HTTP 与 PWA same-origin Fetch 保持相同 Content API logical semantics。
+Desktop HTTP 与 PWA Fetch共享 Content API logical semantics；credential delivery/storage realization属于 Platform implementation。
 
-Range如果启用直接使用标准 HTTP Range；credential delivery与deployment容量属于 Host/implementation policy，不形成 Transport/Content Profile。
+---
 
-## 结果
+## Result
 
-- Desktop/PWA共享 application contracts，不共享物理 transport要求；
-- per-Subsystem Data Connection与 Runtime Container粒度一致；
-- Frame/Input/Render在一条 Data carrier上逻辑共存，但各自拥有独立语义；
-- Host bootstrap material不污染 Runtime `ready`、Renderer authority或 child protocol payload；
-- 不再存在旧 `frameId + activationId + sequence` Frame Stream层、逐 Frame Resync或统一公平调度协议要求；
-- 平台差异优先留在 `20-modules/*-host` implementation，而不是制造新的 `15-contracts` Profile。
+- Desktop/PWA共享 application contracts，不要求同一 physical transport；
+- Platform负责完整 physical establishment/provisioning；
+- DataAuthority包含 S/G/dataProfile，物理 endpoint不产生 authority；
+- RendererDataBinding与 SubsystemDataBinding是同一 Broker两端 projection；
+- Subsystem不需要第二条 Main DataAuthority mirror；
+- Frame/Input/Render/Data lifecycle相互独立；
+- current message-oriented profiles统一 JSON text string；
+- Platform bootstrap/provisioning默认不形成新的 application protocol。
 
-## 重新评估条件
+## Re-evaluation
 
-只有出现真实跨实现 interoperability requirement 时才考虑标准化某个平台 bootstrap wire，例如：
-
-- 独立第三方 Host 与独立第三方 Runtime/Renderer必须通过公开 bootstrap schema互操作；
-- 新 carrier需要应用层可观察的额外 ordering/recovery语义；
-- 当前 Data Connection identity/generation模型无法表达新的多 Renderer拓扑。
-
-仅仅“Desktop和PWA实现方式不同”不是创建新 Profile 的理由。
+只有出现真实独立实现 interoperability requirement时才考虑标准化 Platform provisioning wire，例如 third-party remote Runner/Host必须共享公开 schema。仅仅物理实现不同不足以增加 application protocol。
