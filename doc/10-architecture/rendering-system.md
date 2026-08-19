@@ -3,31 +3,32 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Subsystem-owned Render Domain、Domain Tree、Renderer Store、全局合成和输入边界  
-> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[模块子系统模型](./subsystem-model.md)  
-> 最近复核：2026-08-09
+> 主要定义：Subsystem-owned Render Domain、Renderer Store、presentation、Frame/Data independence 与 User Input boundary  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)、[模块子系统模型](./subsystem-model.md)  
+> 最近复核：2026-08-19
 
 ## 1. 设计目标
 
-渲染系统将各 Subsystem 发布的声明式 Render Domain State 呈现为 Web UI，同时保持业务状态、Frame/Input、物理 Transport 和本地表现状态之间的边界。
-
 ```text
-Subsystem business state / Render Manager
-→ Render Domain Registry / Domain Tree State
+Subsystem business state
+→ declarative Render Domain desired state
 → Render Update Protocol
 → Renderer Domain Store
-→ Renderer local presentation
-→ Render Scheduler
+→ local presentation mapping
 → DOM / Canvas / WebGL / other backend
 ```
 
-Renderer Store 是权威 Render state 的只读镜像；具体 UI 对象、缓存和绘制资源属于派生 presentation state。
+Renderer Store 是 authoritative Render state 的只读 replica；UI object、cache、animation、GPU/DOM resource 属于 derived presentation state。
+
+Platform 只提供 Renderer Hosting、Data carrier、Content/device/browser environment；不拥有 Render Domain authority。
+
+---
 
 ## 2. 核心原则
 
-> Render 完全由 Subsystem 控制。Main 不维护 Render Domain Registry，Frame 不拥有 Domain，Renderer 不从 Frame Stack 推导 Domain lifecycle。
+> Render 完全由 Subsystem 控制。Main 不维护 Render Domain Registry，Frame 不拥有 Domain，Renderer/Platform 不从 Frame Stack 推导 Domain lifecycle。
 
-平台级不存在：
+不存在平台级自动规则：
 
 ```text
 frame.activate → show Domain
@@ -35,13 +36,16 @@ frame.suspend  → hide Domain
 frame.resume   → restore Domain
 frame.close    → destroy Domain
 Frame failure unwind → destroy affected Domains
+Data carrier retire → destroy authoritative Domain
 ```
 
-Subsystem 可以内部根据 Frame/Runtime 事件改变 Domain，但必须通过自身 Render Manager + Render Update显式表达。
+Subsystem 可以因自身业务事件显式修改/关闭 Domain，但必须通过 Render capability + Render Update表达。
+
+---
 
 ## 3. Render Domain
 
-每个 Subsystem Runtime MAY 同时拥有 `0..N` Render Domains。
+每个 Subsystem Runtime MAY同时拥有 `0..N` Domains：
 
 ```text
 Subsystem
@@ -58,25 +62,13 @@ atomic authoritative-state unit
 Renderer global composition unit
 ```
 
-Domain 不是 Render Node，不具有 `tag/attrs/data/key`。
+Domain identity 在 current Subsystem/Data authority scope 内由 `domainId`标识；精确 lifecycle/one-shot 规则以 Render Update v1 为准。
 
-Domain identity 由 enclosing Data Connection 的 Subsystem identity + `domainId` 共同确定：
+Domain 不属于 Frame，也不要求存在 active Frame。
 
-```text
-(subsystemKey, domainId)
-```
+---
 
-不同 Subsystem MAY 重用相同 `domainId`。
-
-同一 DataAuthority generation 下，`domainId` 是 one-shot lifecycle identity：
-
-```text
-absent → present → absent
-```
-
-移除后同一 generation 内不得复用；fresh generation 开启新的 authority universe。
-
-## 4. Domain z-index / Global Composition
+## 4. Global Composition
 
 每个 Domain拥有 Subsystem-authoritative `zIndex`：
 
@@ -87,30 +79,13 @@ higher zIndex → above
 
 Frame Stack MUST NOT充当 Render z-order。
 
-不同 Subsystem可能选择相同 zIndex；equal-z tie-break必须 deterministic 且不可被业务依赖，不能使用 connection/reconnect arrival order。若相对覆盖顺序具有业务意义，应使用不同 zIndex。
+相同 zIndex tie-break只需 deterministic/non-semantic；不能使用 connection/reconnect arrival order作为业务语义。
 
-## 5. Domain Roots
+---
 
-一个 Domain拥有 `0..N` ordered top-level roots：
+## 5. Domain Tree
 
-```text
-Domain Host
-├── Root A
-├── Root B
-└── Root C
-```
-
-Domain Host是 Renderer基础设施 composition boundary，不是 Render Node。
-
-`roots=[]` 表示 Domain存在但 authoritative presentation tree为空。
-
-roots/children顺序属于 authoritative state；具体 DOM/Canvas/SceneGraph 呈现由 Renderer 实现决定。
-
-需要共享布局/裁剪/坐标语义时，Subsystem应创建真实 Node，而不是协议 fake root。
-
-## 6. Render Node Tree
-
-概念模型：
+概念：
 
 ```ts
 interface RenderNode {
@@ -122,170 +97,107 @@ interface RenderNode {
 }
 ```
 
-### `key`
+Domain拥有 `0..N` ordered roots；roots/children顺序属于 authoritative state。
 
-`key` 在一个 Domain lifecycle 内：
+### key
 
-```text
-unique across all current roots + descendants
-one-shot logical identity
-```
+stable logical identity，精确 uniqueness/one-shot 规则以 Render Update v1 为准。
 
-Renderer可通过：
+### tag
 
-```text
-(subsystemKey, domainId, key)
-```
-
-定位 current logical Node。
-
-同 key 的连续存在表示同一 logical Node lifetime；`tag` 在该 lifetime 内保持稳定。Node被移除后，如果 producer需要新的 logical lifetime，必须使用 fresh key。
-
-### `tag`
-
-`tag` 是协议携带的 opaque string。
-
-Render Core只关心：
+opaque string。Render Core 不定义：
 
 ```text
-string/wire validity
-bounded size
-same live key keeps the same tag
-```
-
-Render Core **不定义 `tag` 的具体含义**，也不定义：
-
-```text
-known / unknown tag
-(subsystemKey, tag) registry
-Component Factory
-module/component loading
+known/unknown tag
+Component Registry/Factory
+module loading
 per-tag schema discovery
 DOM/Canvas/WebGL mapping
 ```
 
-这些全部属于 Subsystem 与 Renderer 的具体实现约定。协议不需要对 tag 做 capability negotiation、声明或错误分类。
+这些属于 Subsystem/Renderer implementation agreement，不形成 application protocol。
 
-### `children`
+### attrs/data
 
-`children[]` 是 ordered child relation。协议冻结结构顺序，不替具体 tag规定布局语义。
+保持 plain data，不允许 Function、DOM object、Port、class instance、callback 等 executable/platform object。
 
-## 7. `attrs` / `data`
+---
 
-```text
-attrs : {[key:string]: string}
-data  : JSON object
-```
+## 6. Renderer Domain Store
 
-协议只冻结两者的数据类型和 plain-data 边界，不定义其业务含义。
-
-具体 Renderer 实现 MAY 将它们解释为属性、组件状态、绘制参数或其他本地 presentation input；这些解释不进入 Render Update wire contract。
-
-不得携 Function、DOM object、MessagePort、Blob、class instance、callback。
-
-当前 Patch设计只对 attrs/data 做 top-level map delta，不引入 generic JSON Pointer / JSON Patch path language。
-
-## 8. Renderer Domain Store
-
-Renderer按 `(subsystemKey, domainId)`维护 authoritative replica，并可内部维护：
+Renderer 按 `(subsystemKey, domainId)`维护 authoritative replica，可内部索引：
 
 ```text
 revision
 zIndex
-recursive roots/tree
-key → node index
-key → parent index
+roots/tree
+key → node
+key → parent
 ```
 
-Wire/业务模型保持递归 Tree；内部索引用于 O(1) Patch寻址和 reconciliation，不构成第二种协议数据模型。
+wire仍保持 recursive Tree；内部 index 不形成第二种协议模型。
 
-Renderer必须在暴露新 Domain state前完成完整 candidate validation，并以 Domain为单位 atomic commit。
+每次 authoritative update 必须完整 validate candidate 后 atomic commit。
 
-## 9. Render Update State Model
+---
 
-当前 closure candidate：
+## 7. Render Update State Model
 
 ```text
 render.domains
     full Domain Registry / lifecycle authority
 
 render.snapshot(revision)
-    full recursive tree baseline / full commit
+    full baseline / full commit
 
 render.patch(baseRevision, revision)
-    exact R → R+1 incremental authoritative commit
+    exact R→R+1 incremental commit
 
 render.event
     transient presentation impulse
 ```
 
-Snapshot保留自然的 recursive `roots[] / children[]` Tree。
+Patch 使用 stable key 寻址，不引入 generic JSON Patch/path language。
 
-Patch用 stable key寻址，operation algebra只包含：
+---
 
-```text
-insert subtree
-remove subtree
-move subtree
-update attrs/data
-```
+## 8. Revision / Recovery
 
-不增加 JSON Patch、path identity、appendChild/removeChild 等等价操作族。
+Domain revision 是 authoritative publication commit number，不是 transport sequence/replay cursor。
 
-## 10. Patch Atomicity / Revision
-
-Domain `revision` 表示已发布 authoritative commit 序号，不是业务 mutation count、transport sequence 或 replay cursor。
-
-fresh Data Connection首个 Snapshot建立当前 baseline `R`；之后每个 authoritative commit严格：
+baseline 后：
 
 ```text
 R → R+1
 ```
 
-Patch只有：
+Patch 只有在 exact base/revision chain上应用，并以 whole candidate atomic commit。
+
+fresh Data Connection：
 
 ```text
-baseRevision == current revision
-revision == baseRevision + 1
+current Domain Registry
+→ fresh Snapshot every current Domain
+→ ordinary Patch/Event
 ```
 
-时可应用。
+authoritative continuity failure通过 retire current Data carrier + fresh baseline恢复。
 
-一个 Patch：
+无 ACK/NACK、Patch history replay、resume cursor、Renderer→Subsystem resync RPC。
 
-```text
-current Domain Store
-→ isolated candidate
-→ apply ordered ops
-→ validate complete candidate
-→ atomic commit
-```
+---
 
-任何 authoritative continuity/validation failure都不能跳过继续；Renderer retire当前 Data carrier，以 fresh connection + Registry + Snapshots重新建立基线。
+## 9. Event / Presentation Ordering
 
-## 11. Event / Presentation Ordering
+`render.event` 是 transient presentation impulse，不修改 authoritative state。
 
-`render.event` 是 transient presentation impulse，不是 authoritative state。
+Event 与同 Domain authoritative publications 保持协议定义的顺序边界；Renderer 不要求等待 physical paint/vsync 才处理下一条 application message。
 
-Event与同 Domain Snapshot/Patch共享 publication order并形成 coalescing barrier：
+stale/missing target Event 可 soft drop，不等待 target重现、不 replay、不 retarget。
 
-```text
-Patch
-→ Event
-→ Patch
-```
+---
 
-Renderer保证 logical Store commit / local presentation dispatch 顺序，但不要求每个 Event前等待浏览器 physical paint。
-
-stale/missing target Event可以 soft drop，不排队等待 target重现、不 replay、不 retarget。
-
-Event 的业务解释属于 Renderer/Subsystem 实现，不由 Render Core定义。
-
-## 12. Backpressure / Recovery
-
-Subsystem sender维护 per-Domain publication cursor（例如 `lastEmittedRevision`），不是 ACK cursor。
-
-未 emitted 的 authoritative变化可以重新 diff或 materialize为 fresh full Snapshot；已 emitted message不能撤销/reorder。
+## 10. Backpressure
 
 ```text
 small diff          → Patch
@@ -295,91 +207,112 @@ Event backlog       → bounded; may drop
 
 Authoritative state progress优先于 transient Event backlog。
 
-fresh Data Connection：
+具体 Patch-vs-Snapshot threshold、Event queue capacity/drop preference 是 implementation choice。
+
+---
+
+## 11. Presentation / Platform Boundary
 
 ```text
-render.domains(current Registry)
-→ fresh Snapshot for every current Domain
-→ ordinary Patch/Event
+Renderer Core
+    authoritative Domain Store
+        ↓
+Presentation adapter
+    tag/attrs/data/children mapping
+        ↓
+Platform presentation environment
+    Hostra BrowserWindow / browser Window
+    DOM / Canvas / WebGL / device APIs
 ```
 
-不 replay历史 Patch/Event，不要求 ACK/NACK/resync RPC。
+Platform/Renderer Hosting 不改变 Render authoritative semantics。
 
-## 13. Render Scheduler / Presentation
+Hostra Desktop 与 PWA 可以使用不同 Window lifecycle / backend details，但对相同 Render Update trace 应得到同一 logical Renderer Store。
+
+---
+
+## 12. User Input Boundary
+
+Domain/Node/presentation object 不产生 ordinary InputTarget authority。
+
+Presentation MAY 提供 `x.*` Input Producer，但 effective ordinary input 始终是：
 
 ```text
-Render message
-→ Domain Store atomic commit / Event dispatch
-→ dirty Domain scheduling
-→ global zIndex composition
-→ requestAnimationFrame
-→ local presentation reconciliation
+Effective(F,A,C)
+=
+current matching Data Connection
+∧ Main current InputTarget == (S,F,A)
+∧ current active Frame/Activation
+∧ C ∈ Interest[F]
+∧ Producer(C) available
 ```
 
-Scheduler只决定何时呈现 current Store，不改变 authoritative state。
-
-Renderer 如何把 `tag/attrs/data/children` 映射到 DOM、Canvas、WebGL 或其他对象完全属于 implementation detail。
-
-v1无 cross-Domain transaction；强原子 presentation应优先建模在同一 Domain。
-
-## 14. User Input / Presentation 边界
-
-普通输入仍只发送到 Main授权的 Frame/Activation，不以 Domain/Node为 ordinary input authority。
-
-Renderer 实现 MAY 因某些本地 presentation 对象存在而提供 `x.*` Input Channel Producer，但 Producer 仍只通过 User Input Core参与：
+因此：
 
 ```text
-Main authority ∩ Interest ∩ Producer availability
+Render focus != InputTarget
+Node existence != input authority
+Domain zIndex != input routing
 ```
 
-Domain/Node/presentation object existence本身不授予 InputTarget。
+Frame-scoped Interest 与 Render Domain lifecycle 也互不拥有。
 
-Producer loss继续服从 User Input v1 teardown，而不是由 Render协议修改 Frame authority。
+---
 
-## 15. Data / Frame / Domain Independence
+## 13. Frame / Data / Domain Independence
 
 ```text
 Frame active != Domain visible
 Frame suspend != Domain hidden
 Frame close/unwind != Domain destroy
-Activation replacement != Domain lifecycle change
-Data Connection retire != Domain destroy
+Activation replacement != Domain lifecycle
+Data Connection retire != authoritative Domain destroy
 Domain destroy != Frame close
 ```
 
-Data loss期间 Renderer MAY保留最后合法 presentation cache，但 cache不是 fresh authority proof。fresh Data Connection后的 authoritative recovery只能由 Registry + fresh Snapshots重建。
+Data outage时 Renderer MAY保留最后合法 presentation cache，但 cache不是 fresh authority proof；fresh carrier上的 authoritative recovery只能由 current Registry + fresh Snapshots建立。
 
-## 16. Runtime Failure Boundary
+---
 
-Runtime terminal failure通常最终导致 Main撤销对应 DataAuthority，但 Frame unwind与 Render Domain cleanup仍是不同协议域。
+## 14. Runtime Failure Boundary
 
-healthy Runtime的 doomed Frame被 close后 MAY继续拥有/更新 Domains。
+Runtime terminal failure通常最终使 Main撤销相关 DataAuthority，但 Frame unwind、Data retire、Render Domain cleanup仍是不同 authority/lifecycle domain。
 
-failed Runtime旧 Data carrier退休不等于已收到 authoritative Domain destroy；stale presentation保留/清理策略由 Render/runtime teardown policy明确。
+Renderer/Platform 不得因 Runtime process/Worker事实直接修改 authoritative Render Store；应按照 Renderer Control/Data/Render各自边界收敛。
 
-## 17. 本地表现状态
+---
 
-DOM Element、UI object、Canvas/WebGL资源、CSS动画、图片缓存、焦点/滚动/Hover、设备瞬时状态、纯视觉插值等可以只留 Renderer，但不得改变业务规则、Frame Stack或 recovery authority。
+## 15. 本地表现状态
 
-stable Node key可用于连续 lifetime内保留合法 local presentation state；authoritative state始终来自最新合法 Domain commit。
+可以只留 Renderer：
 
-## 18. 当前渲染不变量
+```text
+DOM Element / component object
+Canvas/WebGL resources
+CSS animation
+image cache
+focus/scroll/hover
+visual interpolation
+```
+
+这些不得修改业务规则、Frame Stack、Main InputTarget 或 recovery authority。
+
+stable Node key可以用于连续 logical lifetime内保留合法 local presentation state；authoritative state始终来自 latest valid Domain commit。
+
+---
+
+## 16. 当前渲染不变量
 
 1. 每个 Subsystem Runtime拥有 `0..N` Render Domains；
-2. Domain identity=`subsystemKey + domainId`，同 generation内 domainId one-shot；
-3. Domain是 Render lifecycle、atomic state、global composition unit；
-4. Domain拥有 zIndex + `0..N` ordered roots；
-5. Domain Host不是 Render Node；
-6. Node=`key/tag/attrs/data/children` recursive declarative model；
-7. Node key Domain-lifecycle one-shot且 current tree全局唯一；
-8. roots/children保持 authoritative order；
-9. `tag` 是 opaque string，Render Core不定义其具体含义；
-10. attrs/data只冻结 plain-data类型边界，不冻结业务解释；
-11. Main不维护 Domain Registry；Frame不拥有 Domain；
-12. Snapshot是 full recovery baseline；Patch是 normal incremental authoritative commit；Event是 transient impulse；
-13. Domain revision在 baseline后严格 `R→R+1`；
-14. Patch按 key寻址、whole-candidate atomic validation/commit；
-15. invalid authoritative chain → retire Data carrier → fresh Registry/Snapshots；
-16. no ACK/NACK/Patch replay/resync RPC；
-17. Frame/Data/Domain lifecycle相互独立；
-18. Render Update的最终 limits/conformance仍在 closure阶段。
+2. Domain是 Render lifecycle、atomic state、global composition unit；
+3. Main/Frame/Platform不拥有 Domain lifecycle；
+4. Domain拥有 zIndex + ordered roots；
+5. Node=`key/tag/attrs/data/children` recursive plain-data model；
+6. `tag` 是 opaque string；presentation mapping属于 implementation；
+7. Snapshot是 recovery baseline；Patch是 incremental authoritative commit；Event是 transient impulse；
+8. baseline 后 revision严格连续，Patch whole-candidate atomic；
+9. continuity failure通过 fresh Data carrier + Registry/Snapshots恢复；
+10. no ACK/NACK/Patch replay/resync RPC；
+11. Frame/Data/Domain lifecycles相互独立；
+12. User Input使用 Main authority + Frame Interest + Producer gate，不从 Render state推导 authority；
+13. Hostra/PWA physical presentation差异不改变 logical Render Store semantics。
