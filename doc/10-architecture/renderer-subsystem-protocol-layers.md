@@ -3,29 +3,31 @@
 > 层级：系统架构  
 > 状态：Active Design / Conceptual  
 > 稳定程度：Evolving  
-> 主要定义：Renderer 与 Subsystem 数据面职责及其对 Main committed authority 的依赖  
-> 依赖：[通信系统](./communication-system.md)、[运行承载系统](./runtime-hosting-system.md)、[渲染系统](./rendering-system.md)、[Frame / Call Protocol v1](../15-contracts/frame-call-protocol-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)  
-> 最近复核：2026-08-09
+> 主要定义：Renderer 与 Subsystem 数据面职责、Frame-scoped User Input Interest，以及它们对 Main committed authority / Platform Data Broker 的依赖  
+> 依赖：[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)、[运行承载系统](./runtime-hosting-system.md)、[渲染系统](./rendering-system.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)  
+> 最近复核：2026-08-19
 
 本文只描述 Renderer ⇄ Subsystem 数据面的概念分层；正式 wire/limits/conformance 以 `15-contracts` 为准。
 
 ## 1. 基本拓扑
 
-每个 Subsystem Runtime 与 current Renderer之间最多一条 current Data Connection。
+每个 Subsystem Runtime 与 current Renderer 之间最多一条 current Data Connection：
 
 ```text
 (Session, current Renderer, subsystemKey)
     → 0..1 current Data Connection
 ```
 
-物理 carrier可由 Desktop WebSocket 或 PWA MessagePort承载，但 establishment属于 Host/Platform Binding；Connection Core只定义建立后的 authority/lifecycle。
-
-连接粒度=Subsystem，不是 Frame/Activation/Domain/Node。一条 current Data Connection MAY承载：
+连接粒度 = Subsystem，不是 Frame/Activation/Domain/Node。一条 current Data Connection MAY 承载：
 
 ```text
 0..N Frame/Input contexts
 0..N Render Domains
 ```
+
+actual carrier 由 system Platform Data Connection Broker 建立；Desktop 可使用 authenticated localhost carrier，PWA 可使用 MessagePort。
+
+---
 
 ## 2. 三个数据协议域
 
@@ -38,7 +40,7 @@ Data Connection v1
 
 User Input v1
     Subsystem → Renderer
-        Input Interest
+        full Frame Interest Registry snapshot
     Renderer → Subsystem
         State / Event / Reset
 
@@ -47,9 +49,11 @@ Render Update v1
         Domain Registry / Snapshot / Patch / Event
 ```
 
-三个域共享物理 carrier，但 authority、identity、ordering、recovery、backpressure与limits各自独立。
+三个域共享物理 carrier，但 authority、identity、ordering、recovery、backpressure 与 limits 各自独立。
 
-## 3. Control / Data 分离
+---
+
+## 3. Control / Data / Platform 分离
 
 ```text
 Main ⇄ Subsystem Control
@@ -63,17 +67,34 @@ Renderer ⇄ Subsystem Data
     Data Connection
     User Input
     Render Update
+
+Platform
+    establishes physical Control/Data carriers
 ```
 
-禁止通过 Data Plane发送 Frame RPC、重试 Frame operation、确认 ambiguous Frame commit、计算 unwind root或恢复 Frame authority。
+禁止通过 Data Plane：
+
+```text
+发送 Frame RPC
+重试 Frame operation
+确认 ambiguous Frame commit
+计算 unwind root
+恢复 Frame authority
+```
+
+Platform 也不得从 endpoint/Port 推导 Main authority。
+
+---
 
 ## 4. Data Connection
 
-Authority来自 Main：
+Authority 来自 Main：
 
 ```text
 DataAuthority(subsystemKey, generation, connectionProfile)
 ```
+
+Platform Data Connection Broker 据此建立 matching Renderer / Subsystem endpoints。
 
 Connection identity：
 
@@ -91,83 +112,202 @@ current → retired
 retired terminal
 ```
 
-Connection Core不负责 endpoint/Port discovery、bearer ticket、hello/ping/replay、Frame lifecycle、Render Domain lifecycle或 child-protocol payload。
+Connection Core 不负责 endpoint/ticket/Port discovery、Frame lifecycle、Render Domain lifecycle 或 child-protocol payload。
 
-同 generation仍授权时，可在旧 carrier retired后建立 fresh carrier；Data reconnect只恢复数据面，不能取消 Runtime failure或 Frame unwind。
+同 generation 仍授权时，可在旧 carrier retired 后建立 fresh carrier；Data reconnect 只恢复数据面，不能取消 Runtime failure 或 Frame unwind。
+
+---
 
 ## 5. User Input Authority
 
-Main仍是 ordinary input authority：
+Main 仍是 ordinary input authority：
 
 ```text
 Main
     InputTarget / Activation authority
 
 Renderer Core
-    trusted sender-side InputTarget enforcement point
+    trusted sender-side enforcement point
 
 Subsystem
-    local Frame/Activation + local Interest validation
+    local Frame/Activation + local Frame Interest validation
 ```
 
-User Input wire只携 `frameId + activationId` authority identity。Subsystem不能仅从 User Input wire独立证明 Main当前 `InputTarget`非空，因此 Renderer Core的 sender gate是 v1 trust boundary的一部分。
+User Input wire carrying `frameId + activationId` 不能独立证明 Main current `InputTarget`；Renderer Core sender gate 是 v1 trust boundary 的一部分。
 
-Renderer不得根据 DOM focus、Render focus、Interest或本地 presentation state自行生成 InputTarget。
+Renderer 不得根据 DOM focus、Render focus、Interest 或 local presentation state 自行生成 InputTarget。
 
-## 6. Input Interest / Effective Channel
+---
 
-fresh Data Connection默认：
+## 6. Frame Interest Registry
+
+User Input Interest 的**配置 scope = Frame**，publication scope = current Data Connection。
+
+概念状态：
 
 ```text
-Interest = empty
+InterestRegistry = Map<frameId, Set<channel>>
 ```
 
-Subsystem发布 full exact Interest。对 Channel `C`：
+Subsystem 发布整个 registry 的 full replacement snapshot：
 
 ```text
-Effective(C)
+F1 → keyboard.event, pointer.state
+F2 → gamepad.event, x.battle.action.event
+```
+
+规则：
+
+```text
+no activationId in Interest
+no subscribe/unsubscribe patch
+no ACK
+no Interest revision
+no wildcard
+frame absence = Interest[F] empty
+fresh Data Connection registry = empty
+```
+
+Interest 是 configuration，不是 authority；它只能缩小输入面，不能创建/扩展 Main InputTarget authority。
+
+---
+
+## 7. Effective Input
+
+对 Subsystem `S`、Frame `F`、Activation `A`、Channel `C`：
+
+```text
+Effective(F,A,C)
 =
-current matching Data Connection
-∧ Main current InputTarget matches this Subsystem
-∧ mirrored Frame active/current Activation matches
-∧ C in current Interest
+current matching Data Connection for S
+∧ Main current InputTarget == (S,F,A)
+∧ mirrored Frame F active/current Activation A
+∧ C ∈ Interest[F]
 ∧ Producer(C) available
 ```
 
-只有 Effective Channel产生 ordinary State/Event。
+只有 Effective Channel 产生 ordinary State/Event。
 
-## 7. State / Event / Reset
+Renderer 不解释：
+
+```text
+call / return / push / pop / caller / child / unwind
+```
+
+只对 current committed facts 做 conjunction。
+
+---
+
+## 8. Control / Interest Ordering
+
+Renderer Control 与 Data Connection 没有 cross-connection total order。
+
+### Interest first
+
+```text
+Interest snapshot arrives
+→ store full registry atomically
+→ unknown/non-authoritative Frame entries inert
+→ later Control authority may make matching entry effective
+```
+
+### Authority first
+
+```text
+InputTarget(F,A) arrives
+→ Interest[F] absent
+→ no ordinary input
+→ later Interest snapshot may make it effective
+```
+
+不需要 cross-plane ACK/barrier/sequence/revision join。
+
+stale Interest for closed/unknown Frame 不能产生 authority；frameId never reused，后续 full registry snapshot 自然收敛。
+
+---
+
+## 9. Frame / Activation Input Lifetime
+
+```text
+Frame = input configuration lifetime
+Activation = ordinary input authority epoch
+```
+
+Frame suspension 可以保留 `Interest[F]`；fresh Activation 可以继续使用同一 Frame Interest configuration。
+
+但是：
+
+```text
+old Activation Input State/Event
+    MUST NOT cross into fresh Activation
+```
+
+例如 caller F1/A1 suspend 后，F1 以 fresh A3 resume：
+
+```text
+Interest[F1] may already exist
+→ no new Interest publication required if same Data carrier survived
+→ .state establishes fresh current baseline for A3
+→ .event future-only
+```
+
+new child F2/A2 如果 `Interest[F2]` 不存在，则没有 ordinary input，直到 registry 包含 F2。
+
+fresh Data Connection 是例外：old registry 不继承，所有 live Frame Interest 需要重新由 Subsystem 发布 current full snapshot。
+
+---
+
+## 10. State / Event / Reset
 
 ```text
 .state
     self-contained current snapshot
     latest wins / may coalesce
-    every false→true transition establishes fresh baseline
+    every Effective false→true transition establishes fresh baseline
 
 .event
     ordered transient
-    no coalescing / no history/reconnect replay
+    no history/reconnect/Activation replay
 
 reset
-    clears all input State for frameId + activationId
-    ordering/coalescing barrier
+    clears retained input State for frameId + activationId
+    does not change Interest[F]
 ```
 
-InputTarget撤销后立即停止旧 ordinary input；旧 Data Connection仍 current时 best-effort Reset。
-
-Effective `.state` Producer loss时，Reset current Activation，并为剩余 Effective State Channels建立 fresh baselines。
-
-## 8. InputTarget One-Shot Lease
+典型 `.state` false→true 原因：
 
 ```text
-published InputTarget(frameId, activationId)
-→ revoked/removed/replaced
-→ same frameId + activationId never becomes InputTarget again
+Interest added
+InputTarget switch
+fresh Activation
+fresh Data Connection
+Producer restore
 ```
 
-未来 ordinary input grant使用 fresh Activation epoch。
+InputTarget revoke/replace 立即结束 old ordinary authority；Activation revoked/replaced 与 Frame leaves active 都是 implicit input-state teardown boundary。
 
-## 9. Render Domain Model
+---
+
+## 11. Subsystem Receive Gate
+
+Subsystem 不能只信任到达的 input message。
+
+收到 `(frameId, activationId, channel)` 时至少验证：
+
+```text
+message belongs to current Data Connection
+local frameId exists
+local Frame active
+activationId == current local Activation
+channel ∈ local Interest[frameId]
+local mutation gate allows delivery
+```
+
+否则 drop，不把 stale/in-flight ordinary input 解释成 Runtime failure。
+
+---
+
+## 12. Render Domain Model
 
 ```text
 Subsystem Runtime
@@ -175,113 +315,59 @@ Subsystem Runtime
     ├── domainId
     ├── zIndex
     └── 0..N ordered roots
-        └── Node
-            ├── key
-            ├── tag
-            ├── attrs
-            ├── data
-            └── ordered children[]
 ```
 
-Domain identity=`subsystemKey + domainId`。Domain是 Render lifecycle、atomic authoritative-state、global composition unit；Domain Host不是 Render Node。
+Domain 是 Render lifecycle / atomic authoritative-state / global composition unit。
 
-同 DataAuthority generation内 `domainId` one-shot。Node key在 Domain lifecycle内 one-shot并且 current tree全局唯一。
+Render Domain 与 Frame/Input Interest lifecycle 独立：
 
-## 10. Render Update Incremental Model
+```text
+Frame suspend != Domain hidden
+Frame close != Domain destroy
+Activation replacement != Domain lifecycle
+```
 
-当前 closure candidate：
+---
+
+## 13. Render Update / Recovery
 
 ```text
 render.domains
     full Domain Registry
 
 render.snapshot(revision)
-    full recursive Tree baseline / commit
+    full baseline / commit
 
 render.patch(baseRevision, revision)
     exact R→R+1 atomic commit
-    insert / remove / move / update by Node key
 
 render.event
     transient presentation impulse
 ```
 
-Wire继续使用 recursive Tree；Renderer内部 MAY维护 `key→node` / `key→parent` 索引用于 Patch与 reconciliation。
-
-Patch不是 generic JSON Patch：不使用 JSON Pointer/path identity，不定义 DOM mutation command family。
-
-## 11. Render Revision / Recovery
-
-Domain revision是 authoritative publication commit number，不是 transport sequence或 replay cursor。
-
 fresh Data Connection：
 
 ```text
 render.domains(current Registry)
-→ fresh Snapshot for every current Domain
+→ fresh Snapshot every current Domain
 → Patch/Event
 ```
 
-baseline之后 authoritative commit严格 `R→R+1`。
+无 ACK/NACK、Patch history replay、resume cursor 或 Renderer→Subsystem resync RPC。
 
-Patch base mismatch或 authoritative candidate invalid意味着 replication chain divergence：
+Data retire不销毁 authoritative Render Domain。
 
-```text
-retire current Data carrier
-→ establish fresh carrier
-→ Registry + fresh Snapshots
-```
+---
 
-无 ACK/NACK、Patch history replay、resume cursor或 Renderer→Subsystem resync RPC。
+## 14. Presentation Boundary
 
-## 12. Node / Presentation Boundary
+Render Core 只传 plain data；`tag` 是 opaque string。
 
-Render Core对 Node 字段只定义数据结构：
+协议不定义 Component Registry/Factory、code loading、DOM/Canvas/WebGL mapping 或 per-tag schema。
 
-```text
-key       stable Node identity
-tag       opaque string
-attrs     string→string map
-data      JSON object
-children  ordered structure
-```
+Presentation object 的存在不产生 ordinary input authority；Presentation MAY 提供 `x.*` producer，但仍通过 User Input conjunction gate。
 
-协议不定义 `tag` 的具体含义，也不定义：
-
-```text
-known / unknown tag
-Component Registry / Factory
-component code/bootstrap
-per-tag attrs/data schema
-DOM/Canvas/WebGL mapping
-```
-
-这些全部由具体 Subsystem 与 Renderer 实现掌控，不构成独立协议/Profile。
-
-本地 presentation 对象的存在也不产生 ordinary input authority。
-
-## 13. Domain Composition
-
-```text
-lower zIndex → below
-higher zIndex → above
-```
-
-Frame Stack order不能充当 Domain z-order。
-
-多个 Subsystem可以使用相同 zIndex；equal-z tie-break必须 deterministic/non-semantic，不得使用 connection/reconnect arrival order作为业务语义。
-
-## 14. Domain / Frame / Data Independence
-
-```text
-Activation replacement != Domain lifecycle change
-Frame suspended != Domain hidden
-Frame closed/unwound != Domain destroyed
-Data Connection retired != authoritative Domain destroyed
-Domain/Node != ordinary Input authority
-```
-
-Data outage期间 Renderer MAY保留最后合法 presentation cache，但 fresh connection上的 current authority必须由 Registry + fresh Snapshot重新证明。
+---
 
 ## 15. Frame Failure Boundary
 
@@ -291,28 +377,32 @@ Explicit Error → known not committed
 Timeout/loss   → ambiguous → Runtime failure
 ```
 
-Main按 Frozen Frame v1规则计算 whole-suffix unwind。Renderer/Data不得 replay Frame operation、推断 unwind root、恢复旧 Activation或覆盖 accepted outcome。
+Main 按 Frozen Frame v1 计算 failure unwind。Renderer/Data/Platform 不得 replay Frame operation、推断 unwind root、恢复旧 Activation 或覆盖 accepted outcome。
 
-## 16. Version / Limit Boundary
+---
 
-Frame / Call v1没有独立 runtime handshake。Data Connection/User Input/Render各自拥有自己的版本、limits、ordering和recovery规则。
-
-Frame message limits不自动成为 User Input/Render limits；共享 carrier不代表共享协议序列。
-
-## 17. Cancellation
-
-Renderer不能代表 suspended Caller发送 `frame.cancel`。UI cancel只是 current active Frame的 User Input Event，由 Subsystem业务逻辑决定是否 `frame.return({type:"cancelled"})`。
-
-## 18. 当前分层
+## 16. Current Layering
 
 ```text
 Renderer ⇄ Subsystem
 ├── Data Connection v1
 ├── User Input v1
+│   └── Frame Interest Registry
 └── Render Update v1
+
+System Platform Composition
+└── establishes physical Data carrier
 
 Renderer presentation implementation
 └── implementation-owned; no LoomRealm wire/Profile
 ```
 
-旧 Frame-scoped Data/Client-State模型已经从当前文档树移除；设计历史由 ADR 0004/0006 与 Git history保留。
+核心不变量：
+
+- Data Connection 是 per-Subsystem，不是 per-Frame；
+- Frame-scoped Interest 不改变 Data Connection cardinality；
+- Interest 可跨 Activation configuration lifetime，Input State/Event 不可跨 Activation；
+- Renderer 不解释 stack operation history；
+- Control/Data arrival order 任意但 conjunction 必须安全收敛；
+- User Input / Render Update sibling domains 不拥有彼此 lifecycle；
+- Platform 只建立 carrier，不成为 Data/Input/Render authority。
