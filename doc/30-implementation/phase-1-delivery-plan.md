@@ -3,436 +3,524 @@
 > 层级：实施计划  
 > 状态：Tracking  
 > 稳定程度：Evolving  
-> 主要定义：第一阶段实施顺序、Subsystem Definition Module/Runner、Platform ports/adapters、Hostra Desktop/PWA composition 与关闭条件  
+> 主要定义：第一阶段实现顺序、Definition Module/Runner、SDK outcome/control-flow、Renderer Data Profile、Platform provisioning、Desktop/PWA composition 与关闭条件  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
 > 最近复核：2026-08-19
 
-核心实施原则：
+核心原则：
 
 ```text
-platform-neutral business/module first
-→ platform-neutral role core
-→ role-facing Platform ports
-→ platform-specific Runner/technical adapters
-→ Hostra Desktop composition
-→ PWA composition
-→ shared abstract-trace equivalence
+lowest stable primitives
+→ formal protocol mechanics
+→ role SDK/ports
+→ Platform Runner/adapters
+→ Desktop vertical slice
+→ PWA vertical slice
+→ same Definition Module equivalence
 ```
+
+不做 v2 逃逸；当前 v1在冻结前允许 breaking 收口。
 
 ---
 
-## 里程碑 0：文档/契约基线
+## M0：文档与契约基线
 
-当前基线：
+当前必须一致：
 
 ```text
 Game Package v1
     Descriptor = {key,module}
-    module = package-local .mjs Subsystem Definition Module
 
-Desktop Node.js Launcher / Runner v1
-    Host-owned Runner process entry
-    Runner imports descriptor.module
-
-Subsystem Control v1
 Runtime Control Profile v1
-Frame / Call v1 Frozen
+    Control1 + Frame1
+
+Frame / Call v1
+    Frozen
+
 Renderer Control v1
-Data Connection v1
-Frame-scoped User Input v1
-Render Update v1
+    DataAuthority = {S,G,dataProfile}
+
+Renderer Data Profile v1
+    Connection1 + Input1 + Render1
+
 Content API v1
 ```
 
-Platform Architecture：
+跨平台：
 
 ```text
-Main / Renderer / Subsystem / Content = platform-neutral logical roles
-Platform = complete physical Session realization
-Transport != Platform
-Business module != Runtime process/Worker entry
+Definition Module shared
+Runner/physical provisioning platform-specific
+application semantics shared
 ```
+
+关闭：当前文档无旧 `launcher.entry/env`、`connectionProfile`、Runtime-global Interest、structured-object MessagePort application model。
 
 ---
 
-## 里程碑 1：Foundation + Wire + Game Package
+## M1：Foundation + Wire
 
-优先：
+实现：
 
 ```text
 @loomrealm/foundation
+    MessageCarrier<string>
+    CarrierClosed
+    deterministic MemoryCarrierPair
+
 @loomrealm/wire
-@loomrealm/game-package
-```
-
-实现最小：
-
-```text
-MessageCarrier / MemoryCarrierPair
-JSON / JSON-RPC wire primitives
-Game Package Descriptor {key,module}
-Definition Module logical path validation
-complete Descriptor set validation
+    JsonValue/JsonObject
+    JSON text parse/stringify
+    JSON-RPC envelope
+    exact keys/safe integer/UTF-8/depth primitives
 ```
 
 关闭：
 
 ```text
-closed descriptor schema
-key uniqueness
-initial target validation
-.mjs only
-absolute/traversal/url/backslash rejection
-zero Runtime side effect on descriptor-set failure
+foundation treats string opaque
+wire has no domain authority
+MemoryCarrier supports deterministic close/order tests
 ```
 
 ---
 
-## 里程碑 2：Runtime Control + Subsystem Host Integration
+## M2：Game Package v1 / Definition Module ABI
+
+实现：
+
+```text
+@loomrealm/game-package
+Descriptor {key,module}
+complete Descriptor-set validation
+module logical path validation
+```
+
+与 `@loomrealm/subsystem` 协作冻结：
+
+```text
+.mjs default export = SubsystemDefinitionFactory
+```
+
+关闭：
+
+```text
+no launcher/env legacy fields
+.mjs only
+same descriptor/module usable by Desktop/PWA fixtures
+zero Runtime side effect on validation failure
+```
+
+---
+
+## M3：Runtime Control Mechanics
 
 实现：
 
 ```text
 @loomrealm/runtime-control
-@loomrealm/subsystem host/integration surface
-Main/Subsystem role-facing Control ports
+Control schema/state
+Frame schema/mechanics
+Runtime Control session/dispatcher
+shared sender Request ID namespace
+finite deadlines
+conformance harness
 ```
 
-Control vertical slice：
+关闭：
 
 ```text
-hello selects Control v1
-shared Control+Frame sender request-id namespace
+one carrier reader
+one UTF-8 JSON text per JSON-RPC message
+hello-first
 no Batch
-Control loss classification
+no retry
+ambiguous Frame mutation classified Runtime-fatal
 ```
-
-role tests全部先跑 MemoryCarrier/fake ports。
 
 ---
 
-## 里程碑 3：Desktop Node Subsystem Runner
+## M4：Subsystem Host Surface + Frame SDK Semantics
 
-实现/接入 Desktop technical realization：
+实现：
 
 ```text
-validated descriptor.module resolver
-Host-owned Node Subsystem Runner
-Host-selected Node Runtime
+@loomrealm/subsystem
+@loomrealm/subsystem/host
+```
+
+Host surface：
+
+```text
+runSubsystem
+RuntimeControlBinding
+SubsystemDataBinding
+SubsystemLaunchContext
+```
+
+Author surface：
+
+```text
+defineSubsystem
+SubsystemScope
+Frame / FrameOutcome
+completed / cancelled / failed
+AbortSignal
+```
+
+必须先闭合：
+
+```text
+initialize creates Context only
+activate starts handler exactly once
+child completed/cancelled/failed resolve frame.call FrameOutcome
+pre-commit recoverable rejection may reject and preserve Activation
+Runtime-fatal/ambiguous never re-enters business continuation
+uncaught business exception → Frame failed outcome
+administrative suspend aborts frame task and discards late completion
+```
+
+没有这些测试通过，不进入真实平台实现。
+
+---
+
+## M5：Main Core + Frozen Frame Vertical Slice
+
+实现：
+
+```text
+@loomrealm/main
+Runtime Registry / Launch Attempt
+Frame/Activation Registry
+Stack mutation coordinator
+InputTarget
+Frame deadline/failure classifier
+fixed-point unwind
+```
+
+用 fake RuntimeHosting/Control ports先跑：
+
+```text
+initial frame
+nested same/different subsystem call
+return completed/cancelled/failed
+recoverable call rejection
+ambiguous failure unwind
+fresh final Caller resume
+```
+
+---
+
+## M6：Desktop Node Runner / Runtime Control
+
+在 `apps/desktop` 优先实现 app-local：
+
+```text
+Host-owned Node Runner
+module resolver
 process Supervisor
 Runtime Control WebSocket adapter
-Desktop Runner bootstrap context
+Platform Provisioning IPC capability
 ```
 
 流程：
 
 ```text
-apps/desktop
-→ resolve one test descriptor.module
-→ spawn Host-owned Runner
-→ Runner import Definition Module
-→ establish Control
-→ hello / ready
+{key,module}
+→ spawn Runner
+→ import exact Definition Module
+→ construct RuntimeControlBinding
+→ runSubsystem
+→ hello/ready
 → shutdown
-→ actual process exit → stopped
+→ actual exit/stopped
 ```
+
+此阶段 provisioning channel可先建立但不需要已有 Data offer。
 
 关闭：
 
 ```text
-business module is not process argv entry
-Game Package cannot select Node/env/argv
-invalid/missing default export fails bootstrap
-spawn != connected != identified != ready
+business module not argv entry
+ready without Data offer
+Control WS JSON text
+unexpected exit fails Runtime
 ```
 
 ---
 
-## 里程碑 4：Frame / Call v1 Vertical Slice
-
-实现 Frozen Frame v1：
-
-```text
-Main-owned Frame/Stack/Activation/InputTarget
-exact seven Requests
-commit barriers
-timeout/no-retry
-lowest-root fixed-point unwind
-accepted outcome preservation
-fresh final Caller resume
-```
-
-Subsystem author surface至少：
-
-```text
-Frame.id
-Frame.params
-Frame.call(...)
-```
-
-业务不见 activationId/RPC/mutation gate。
-
----
-
-## 里程碑 5：Subsystem Definition Module / Capability SDK
-
-冻结：
-
-```text
-defineSubsystem(factory)
-default-export SubsystemDefinitionFactory module ABI
-per-instance SubsystemScope
-Frame
-InputListener
-RenderDomain
-ContentClient
-AbortSignal/lifecycle hooks
-```
-
-目标 business module：
-
-```ts
-export default defineSubsystem(scope => ({ ... }));
-```
-
-关闭：
-
-```text
-no runtime.* service locator
-no module-global current Subsystem
-no Frame.input naming conflict
-no author WebSocket/MessagePort surface
-same Definition Module runs under two fake Platform-port realizations
-```
-
----
-
-## 里程碑 6：Main ⇄ Renderer Control + Renderer Ports
+## M7：Renderer Control
 
 实现：
 
 ```text
 @loomrealm/renderer-control
-@loomrealm/renderer
-Renderer-facing Control/Data/Content ports
+@loomrealm/renderer Control Store
+RendererControlBinding port
 ```
 
-full committed authority snapshot：
+Snapshot：
 
 ```text
-Runtime projection
-Frame Stack / Activation
-InputTarget
-DataAuthority
-```
-
-Renderer core只用 fake ports测试，不自己打开 WebSocket/MessagePort。
-
----
-
-## 里程碑 7：Data Connection Core + Broker Boundary
-
-实现：
-
-```text
-@loomrealm/data
-```
-
-Data Connection：
-
-```text
-identity = Session + current Renderer + subsystemKey + generation
-lifecycle = current → retired
-0..1 current per Subsystem
-same-generation sequential reconnect
-```
-
-System DataConnectionBroker负责把 matching role-local connection capability交给 Renderer 与 Subsystem Runner，但不拥有 generation。
-
----
-
-## 里程碑 8：Hostra Desktop Renderer/Data Vertical Slice
-
-组合：
-
-```text
-Hostra Renderer Hosting
-Renderer Control WebSocket
-Desktop Data Connection Broker
-Subsystem Runner-side Data provisioning
-```
-
-闭环：
-
-```text
-Renderer hello
-→ DataAuthority(S,G)
-→ broker provisions/binds carrier
-→ Renderer + target Subsystem Runner install current connection
-```
-
-验证 Data loss不失败 Runtime/不 unwind Frame。
-
----
-
-## 里程碑 9：User Input v1
-
-实现：
-
-```text
-Subsystem → Renderer full Frame Interest Registry
-Renderer → Subsystem State/Event/Reset with frameId+activationId
+Runtime/Stack/Activation/InputTarget
+DataAuthority {S,G,dataProfile}
 ```
 
 关闭：
 
 ```text
-fresh Data registry empty
-Interest-first/Authority-first converge
-new child waits own Interest
-caller resume reuses retained Interest
-fresh Activation no old Input State/Event
-state fresh baseline
-event future-only
-interest shrink drops late input
-renderer does not interpret push/pop
+full atomic snapshot
+revision rules
+InputTarget one-shot
+no physical Data material
+Control loss revokes Data use
+MessagePort/WS JSON-text equivalence
 ```
 
 ---
 
-## 里程碑 10：Render Update v1
+## M8：Renderer Data Profile + Data Connection Core
+
+实现 `@loomrealm/data` 基础：
+
+```text
+Renderer Data Profile v1
+Data Connection v1
+one Data dispatcher
+RendererDataBinding / SubsystemDataBinding integration helpers as justified
+```
+
+关闭：
+
+```text
+P = loomrealm.renderer-data/1
+Connection1 + Input1 + Render1 binding
+S/G/P current gate
+profile change requires fresh generation
+same S/G/P sequential reconnect
+one Data reader/demux
+```
+
+---
+
+## M9：Desktop DataConnectionBroker / Late Provisioning
 
 实现：
 
 ```text
-render.domains
-render.snapshot
-render.patch
-render.event
+Main DataAuthority(S,G,P)
+→ Desktop Broker
+→ Renderer physical endpoint/material
+→ Runner provisioning IPC
+→ Subsystem physical endpoint/ticket
+→ Data WS carriers
 ```
 
-Author API只表达 desired state/event/close；SDK维护 protocol domain identity/revision/publication/reconnect baseline。
+Runner：
+
+```text
+validate own S/G/P
+→ establish WS
+→ SubsystemDataBinding yields {G,P,carrier}
+```
+
+关闭：
+
+```text
+provisioning distinct from Control/stdout/Data application
+stale/duplicate ticket rejected
+same S/G/P fresh offer reconnect
+profile replacement invalidates old material
+provision/connect failure does not fail Runtime/unwind Frame
+```
 
 ---
 
-## 里程碑 11：Content + Desktop Content
+## M10：User Input v1 + InputManager
+
+实现：
+
+```text
+full Frame Interest Registry
+State/Event/Reset
+InputManager listener contributions/union
+receive gate
+```
+
+关闭：
+
+```text
+fresh Data registry/state empty
+Interest-first/Authority-first
+new child waits own Interest
+fresh resume reuses config not State/Event
+Frame close removes Interest before local success
+interest shrink local-first
+state fresh baseline / event future-only
+```
+
+标准 channel payload/hard limits在 User Input Frozen前同步关闭。
+
+---
+
+## M11：Render Update v1 + RenderManager
+
+实现：
+
+```text
+render.domains/snapshot/patch/event
+RenderDomain desired-state API
+SDK-minted domainId
+```
+
+关闭：
+
+```text
+fresh carrier Registry + Snapshots
+strict revision chain/atomic Patch
+Frame close not auto-destroy Domain
+Data reconnect hidden from business
+one Data dispatcher shared with Input
+```
+
+---
+
+## M12：Content
 
 实现：
 
 ```text
 @loomrealm/content
 @loomrealm/content-service
-filesystem/http adapters
+Desktop fs/http adapters
 ```
+
+业务只见 logical `ContentClient`。
 
 保持：
 
 ```text
 Definition Module executable capability != Content capability
+Runtime token != Content bearer != Data ticket
 ```
-
-业务/role使用统一 logical ContentClient。
 
 ---
 
-## 里程碑 12：`@loomrealm/map`
+## M13：`loom.map` Business Definition Module
 
-`loom.map` 只依赖：
-
-```text
-@loomrealm/map → @loomrealm/subsystem
-```
-
-交付一个真正的：
+交付同一：
 
 ```text
 subsystems/loom-map/subsystem.mjs
 ```
 
-或等价构建输出，default export统一 Definition Module ABI。
+只依赖 `@loomrealm/subsystem`。
 
-不包含 Desktop/PWA bootstrap分支。
+必须实际使用：
+
+```text
+explicit FrameOutcome
+Frame-bound InputListener
+RenderDomain desired state
+ContentClient
+```
+
+并证明 Runtime-fatal不会重新进入 map continuation。
 
 ---
 
-## 里程碑 13：Desktop E2E
+## M14：Desktop Full E2E
 
 ```text
 Game Package {key,module}
-→ Node Runner loads same business module
-→ required Runtime ready
-→ initial Frame
-→ map input/render/content
-→ nested call/return
-→ Data reconnect
+→ Node Runner/ready
+→ Renderer Control
+→ DataAuthority S/G/P
+→ Broker late provisioning
+→ Input/Render/Content
+→ nested Frame outcomes
+→ same-generation Data reconnect
 → Renderer reload
 → shutdown
 ```
 
+另跑 ambiguous Frame failure E2E。
+
 ---
 
-## 里程碑 14：PWA Worker Runner + Platform Adapters
+## M15：PWA Runner / Adapters / Provisioning
 
 实现：
 
 ```text
-Dedicated Worker Runtime Hosting
-PWA Worker Subsystem Runner
-MessagePort Runtime/Renderer Control
-MessageChannel Data Broker
-Service Worker/Fetch Content
+Worker Runner
+Runtime/Renderer Control MessagePort string adapters
+Worker provisioning path
+Data MessageChannel Broker
+Content Service Worker
 ```
 
-Worker Runner加载与 Desktop **同一个 descriptor.module / Definition Module ABI**。
+同一个 descriptor.module/Definition Module。
 
-不建立 Worker-specific Game Package Descriptor。
+关闭：
+
+```text
+postMessage(string) application model
+Data Port binds S/G/P
+provision failure != Runtime failure
+fresh Port reconnect same S/G/P
+```
 
 ---
 
-## 里程碑 15：PWA E2E + Cross-platform Equivalence
+## M16：PWA E2E + Cross-platform Equivalence
 
-同一：
+完全相同：
 
 ```text
-Game Package logical Descriptor set
-Subsystem Definition Modules
+Game Package
+Definition Module
 business inputs
 failure/reconnect scenario
 ```
 
-分别跑 Hostra/PWA，并比较：
+比较：
 
 ```text
 Runtime lifecycle
-Frame/Activation/outcomes
-failure unwind
-Renderer authority
-Data current/retired state
-User Input delivered logical messages
-Render authoritative state
-Content logical results
+Frame/Activation/Outcome/unwind
+Renderer S/G/P authority
+Data current/retired lifecycle
+Input delivered semantics
+Render authoritative replica
+Content logical response
+business observable state
 ```
 
-不比较 PID/Worker id、WS URL/MessagePort、HTTP/SW internals。
+不比较物理 Runner/IPC/Port/WS/HTTP trace。
 
 ---
 
-## Phase 1 Final Acceptance
+## Phase 1 Acceptance
 
-- Game Package v1只有 platform-neutral `{key,module}`；
-- same Definition Module可由 Node Runner与Worker Runner加载；
-- business module不是 Process/Worker bootstrap glue；
-- role packages platform-neutral；
-- Foundation/Wire边界稳定；
-- Control/Frame conformance通过；
-- Renderer/Data/Input/Render/Content闭环；
-- Platform broker/runner不获得 application authority；
-- `@loomrealm/map`无平台分支；
-- Desktop/PWA E2E通过；
-- shared abstract trace logical outcome等价。
+- Foundation/Wire职责单一；
+- Game Package v1只有 `{key,module}`；
+- same Definition Module跨 Node/Worker Runner；
+- author/host Subsystem surfaces分离；
+- FrameOutcome与 Frame v1一一对应；
+- Runtime-fatal没有 catch-and-continue逃逸；
+- Main Frame/Stack authority与 unwind闭合；
+- Renderer Control使用 S/G/dataProfile；
+- Renderer Data Profile v1绑定 Connection/Input/Render v1；
+- Desktop/PWA都有 late Data provisioning闭环；
+- provisioning失败不污染 Runtime/Frame failure domain；
+- Input Frame Interest/Activation/reconnect闭合；
+- Render independent lifecycle/reconnect闭合；
+- `loom.map`无平台分支；
+- Desktop/PWA same Definition Module abstract trace等价。
 
 ---
 
 ## Deferred
 
-Save、untrusted executable sandbox、automatic Runtime restart、lazy/optional Subsystem、multiple Runtime per key、remote Runtime、多 Renderer、Frame migration/replay、Render history replay、以及没有真实消费者的预测性 platform/helper package。
+Save、untrusted executable sandbox、automatic Runtime restart、lazy/optional Subsystem、multiple Runtime per key、remote Runtime、多 Renderer、Frame migration/replay、Render history replay、跨 Domain transaction，以及没有真实消费者的预测性 platform/runner helper package。
