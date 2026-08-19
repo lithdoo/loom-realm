@@ -3,45 +3,52 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：PWA 对系统级 Platform Composition 的 realization：Window、Main/Subsystem Worker、MessagePort/MessageChannel、Service Worker/OPFS 与安全边界  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[Subsystem Control v1](../../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)  
-> 分包：[独立分包与发布架构](../../30-implementation/package-architecture.md)  
+> 主要定义：PWA 对系统级 Platform Composition 的 realization：Window、Main/Subsystem Worker、Worker Subsystem Runner、MessagePort/MessageChannel、Service Worker/OPFS 与安全边界  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Subsystem Control v1](../../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)  
 > 最近复核：2026-08-19
 
-本文描述 **PWA Platform Composition realization**，不是 `@loomrealm/platform-pwa` 公共包规范。
+本文描述 PWA Platform Composition realization，不是 `@loomrealm/platform-pwa` 包规范。
 
 ---
 
 ## 1. Composition Boundary
 
 ```text
-                LoomRealm logical roles
-        Main / Renderer / Subsystem / Content
-                         │
-                    Platform Ports
-                         │
-                         ▼
-                         PWA
+Game Package {key,module}
+        ↓
+PWA Platform
+├── Runtime Hosting / Supervision
+├── Worker Subsystem Runner
+├── Runtime / Renderer Control binding
+├── Renderer Hosting
+├── Data Connection Broker
+└── Content Binding
+        ↓
+platform-neutral LoomRealm roles
 ```
 
-Window/Worker/Port/Service Worker 只负责物理承载和平台能力，不拥有 Frame Stack、Activation、failure unwind、Subsystem business state、DataAuthority 或 Render authority。
+Window/Worker/Port/Service Worker只负责物理承载，不拥有 Frame/Activation/InputTarget/DataAuthority/Render authority。
 
 ---
 
-## 2. PWA Platform Mapping
+## 2. PWA Mapping
 
 ```text
+Subsystem Definition Module
+    → same package-local .mjs declared by Game Package
+
 RuntimeHosting
     → per-Subsystem Dedicated Worker
 
-RuntimeSupervisor
-    → Worker error/termination observation
+SubsystemRunner
+    → PWA Worker runtime shell
+    → imports descriptor.module
 
 RuntimeControlBinding
     → transferred/authenticated MessagePort
 
 RendererHosting
-    → browser Window / Web application
+    → browser Window
 
 RendererControlBinding
     → controlled MessagePort
@@ -53,159 +60,130 @@ ContentBinding
     → same-origin Fetch + Service Worker / OPFS
 ```
 
-这些实现与 Hostra Desktop 相同的 system Platform ports。
+Game Package不需要 Worker-specific Descriptor。
 
 ---
 
-## 3. Runtime Hosting / Control Bootstrap
+## 3. Worker Subsystem Runner
 
-Descriptor→Worker script 解析、bootstrap credential 传递、Control MessagePort 创建/转移是 PWA composition/adapter implementation。
-
-逻辑流程仍然是：
+PWA Worker是 Platform Runtime Container；Worker内先运行 LoomRealm Subsystem Runner/bootstrap shell，再加载业务 Definition Module。
 
 ```text
-Platform launches Dedicated Worker
-→ Control Port available to Runtime
+Dedicated Worker
+    PWA Runner
+        ↓ import
+    game-owned descriptor.module
+        ↓
+    @loomrealm/subsystem host integration
+```
+
+Runner负责：
+
+```text
+receive/validate platform bootstrap
+resolve/import exact declared .mjs module
+validate Subsystem Definition Module ABI
+construct Subsystem-facing Platform Ports
+start Subsystem role
+```
+
+业务 module不得自己创建 Worker、寻找 MessagePort或分支 PWA业务逻辑。
+
+---
+
+## 4. Runtime Bootstrap / Control
+
+```text
+validate Game Package Descriptor set
+→ resolve descriptor.module in current installation
+→ create Launch Attempt/bootstrap auth
+→ create Dedicated Worker running PWA Runner
+→ Runner imports module
+→ Runtime Control Port available
 → subsystem.hello
 → identified
-→ optional initializing
-→ subsystem.status({state:"ready"})
+→ ready
 ```
 
-建立后 application semantics：
+`ready`不携 Data Port/endpoint，也不表示 Renderer Data Connection存在。
 
-```text
-Subsystem Control v1
-+
-Frame / Call v1
-=
-Runtime Control Application Profile v1
-```
-
-`ready` 只表示 Runtime readiness，不携 Data Port/endpoint，也不表示 Renderer Data Connection 存在。
-
-Structured Clone 不得扩大正式 Frame/User Input/Render JSON value model；adapter 不 retry/replay state-changing application operation。
+Structured Clone不能扩大正式 application payload数据模型。
 
 ---
 
-## 4. Renderer Hosting / Control
+## 5. Renderer Hosting / Control
 
-Window/Web Renderer 是 Renderer participant 的物理宿主，不拥有 Main authority。
+Window/Web Renderer是 Renderer participant的物理宿主。
 
 ```text
 Main Renderer intent
-→ PWA composition uses current Window/Web application
-→ establish Renderer Control Port
+→ current Window/Web application
+→ Renderer Control MessagePort
 → renderer.hello
-→ current full Authority Snapshot
+→ full current Authority Snapshot
 ```
 
-Renderer Control snapshot 只含 logical authority：
-
-```text
-Runtime projection
-Frame Stack / Activation / InputTarget
-DataAuthority {subsystemKey,generation,connectionProfile}
-```
-
-不携 Data MessagePort、endpoint、Port transfer object 或 platform credential。
+Snapshot不携 Data MessagePort或 platform credential。
 
 ---
 
-## 5. Data Connection Broker
-
-PWA Data establishment 是系统级 broker action：
+## 6. Data Connection Broker
 
 ```text
-Main publishes DataAuthority(S,G)
-→ composition creates MessageChannel
-→ bind both ports to Session/current Renderer/S/G
-→ transfer one endpoint to Renderer
-→ transfer one endpoint to target Subsystem Worker
+Main current DataAuthority(S,G)
+→ PWA DataConnectionBroker
+→ create MessageChannel
+→ bind both endpoints to Session/current Renderer/S/G
+→ transfer endpoint to Renderer
+→ transfer endpoint to target Subsystem Runner
 → install at most one current Data Connection
 ```
 
-Port bootstrap 不进入 Renderer Control Snapshot，也不进入 Subsystem `ready`。
+Port transfer/bootstrap不进入 Renderer Control Snapshot或 Runtime `ready`。
 
-同 generation 仍授权时，old carrier retired 后 MAY 建立 fresh carrier。
-
-```text
-Data loss != Runtime failure
-Data loss != Frame unwind
-```
-
-MessagePort adapter 只负责 carrier semantics，不拥有 Data authority 或 application recovery。
+same generation仍授权时，old carrier retired后可以建立 fresh carrier。
 
 ---
 
-## 6. User Input / Render
-
-User Input：
-
-```text
-Effective(F,A,C)
-=
-current Data Connection
-∧ Main current InputTarget == (S,F,A)
-∧ mirrored/local current Activation A
-∧ C ∈ Interest[F]
-∧ Producer(C) available
-```
+## 7. User Input / Render
 
 fresh Data Connection：
 
 ```text
-Frame Interest Registry = empty
-retained Input State = empty
+User Input
+    Frame Interest Registry = empty remotely
+    retained Input State = empty
+    Subsystem republishes desired full registry
+
+Render Update
+    current Domain Registry
+    fresh Snapshot per current Domain
 ```
 
-Subsystem 重新发布 current full Frame Interest Registry；`.state` fresh baseline；`.event` no replay。
-
-Frame suspension可保留 local/old-carrier Frame Interest configuration；fresh Activation不得复用 old Activation Input State/Event。
-
-Render Update fresh carrier：
-
-```text
-current Domain Registry
-→ fresh Snapshot every current Domain
-→ Patch/Event
-```
+Frame suspension可保留 Frame Interest configuration；fresh Activation不复用旧 Input State/Event。
 
 Frame lifecycle不控制 Render/Data lifecycle。
 
 ---
 
-## 7. Content Binding
+## 8. Content
 
-PWA Content 主要组合：
+PWA Content可组合 same-origin Fetch、Service Worker、OPFS/Cache Storage，但 logical Content API语义与 Desktop一致。
 
-```text
-@loomrealm/content
-@loomrealm/content-service-worker
-```
-
-底层 MAY 使用：
-
-```text
-same-origin Fetch
-Service Worker
-OPFS
-Cache Storage
-```
-
-这些是 Platform realization；Content API logical route/cache/version/integrity/error semantics 与 Desktop 保持一致。
+Definition Module executable loading属于 Platform Runner capability，不通过 ordinary Content API赋予业务任意 executable access。
 
 ---
 
-## 8. Browser / Worker Boundary
+## 9. Browser / Worker Boundary
 
-PWA composition 可以自由调整：
+PWA implementation可以改变：
 
 ```text
 Worker constructor options
-startup message object
+startup message shape
 MessageChannel creation order
 Port transfer mechanics
+module URL materialization
 Service Worker registration
 OPFS/cache implementation
 ```
@@ -213,22 +191,23 @@ OPFS/cache implementation
 只要不改变：
 
 ```text
+same descriptor.module identity
+Subsystem Definition Module ABI
 Runtime identity/lifecycle
 Frame transaction/recovery
-Renderer authority
-Data identity/current-retired semantics
-User Input canonical semantics
-Render authoritative recovery
+Renderer/Data authority
+User Input semantics
+Render recovery
 Content logical API
 ```
 
-这些平台机制默认不形成新的 application Profile。
+这些 platform bootstrap mechanisms默认不形成 application Protocol。
 
 ---
 
-## 9. Composition Root / Package Boundary
+## 10. Composition Root / Package Boundary
 
-当前推荐实现位置：
+当前实现位置：
 
 ```text
 apps/pwa
@@ -238,52 +217,53 @@ apps/pwa
 
 ```text
 @loomrealm/main
+@loomrealm/subsystem
 @loomrealm/renderer
-@loomrealm/subsystem consumers
 @loomrealm/transport-messageport
 @loomrealm/content-service-worker
+Worker/Port integration glue
+business Subsystem modules
 ```
 
-Platform Architecture 不要求立即建立：
-
-```text
-@loomrealm/platform-pwa
-```
-
-只有 PWA composition glue 出现多个独立消费者、稳定 API 与独立发布价值时才抽包。
+若 Worker Subsystem Runner出现稳定复用价值，可按真实消费者抽成 technical integration package；不因为平台存在就创建大而全 `platform-pwa` 包。
 
 ---
 
-## 10. Cross-platform Semantic Equivalence
+## 11. Cross-platform Equivalence
 
-Hostra Desktop/PWA 对相同 abstract trace 必须保持：
+Hostra Desktop/PWA必须使用相同：
 
 ```text
-Control Runtime lifecycle
+Game Package logical Descriptor {key,module}
+Subsystem Definition Module
+business trace
+```
+
+并保持：
+
+```text
+Runtime lifecycle
 Frame authority/outcome/unwind
-Renderer Control authority
-Data Connection current/retired identity
-Frame-scoped User Input semantics/recovery
-Render authoritative recovery
-Content logical API semantics
+Renderer authority
+Data current/retired identity
+Frame-scoped Input semantics
+Render recovery
+Content logical semantics
 ```
 
-允许 Worker/Port/WebSocket/token/ticket/HTTP/Service Worker creation sequence 不同。
+允许 Worker/Port/WS/HTTP等 physical trace不同。
 
 ---
 
-## 11. Core Invariants
+## 12. Core Invariants
 
-- PWA implements Platform Composition，不拥有 Main authority；
-- Phase 1 one Subsystem = one Dedicated Worker；
+- Game Package只声明 `key + module`；
+- PWA Worker Runner加载同一 platform-neutral `.mjs` business module；
+- no Worker-specific business Descriptor；
+- Runner拥有 bootstrap/ports，business module不拥有平台 mechanics；
 - Runtime Control = Control v1 + Frame v1；
-- Control ready 不携 Data endpoint/Port；
-- Structured Clone 不能扩大 protocol JSON model；
-- no Frame retry/replay；
-- fixed-point unwind 只在 Main；
-- Renderer Control只复制 logical authority；
-- Data Connection Broker协调两端 Port，不拥有 generation；
-- fresh Data Input Interest Registry empty；
+- ready不携 Data endpoint/Port；
+- Data Broker协调两端 Port但不拥有 generation；
 - Data loss不等于 Runtime/Frame failure；
-- Frame lifecycle不控制 Render/Data lifecycle；
-- PWA Platform Architecture 不自动意味着公共万能 package。
+- Structured Clone不扩大 application payload模型；
+- PWA与Hostra共享同一 business Definition Module ABI。
