@@ -1,49 +1,25 @@
 # ADR 0015：冻结 Frame / Call Protocol v1 Batch F
 
-> 状态：Accepted  
+> 状态：Accepted；**原 §5/§7 的 PWA structured-object transport mapping 已由 [ADR 0018](./0018-preimplementation-v1-closure.md) 在首次实现前直接修正**  
 > 日期：2026-08-05  
-> 决策范围：Frame / Call Protocol v1 limits、deadline profile、transport mapping、version binding 与 conformance completion
+> 决策范围：Frame / Call Protocol v1 limits、deadline、transport/version binding、conformance completion  
+> 当前规范：[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Conformance v1](../15-contracts/frame-call-conformance-v1.md)
 
 ## 背景
 
-Batch A-E 已冻结 Frame identity/lifecycle/Activation、七方法 wire、正常 transaction/commit barrier、error/timeout/no-retry 与 Runtime failure fixed-point unwind。
+Batch A-E 已冻结 Frame identity/lifecycle/Activation、七方法、transaction/commit barrier、error/timeout/no-retry 与 Runtime failure fixed-point unwind。Batch F补齐 wire limits、deadline、transport/version binding 与 executable conformance。
 
-剩余风险不再来自业务语义，而来自不同实现对“同一个 v1”的边界理解不一致，例如：
+这些核心冻结结论继续有效。
 
-- Desktop WebSocket 与 PWA MessagePort 接受不同的数据类型或消息大小；
-- timeout deadline 没有统一约束，甚至可能被配置为无限；
-- JSON-RPC Request ID 重用导致 timeout 后迟到 Response 与新 Request 冲突；
-- PWA Structured Clone 扩大 Frame / Call 的数据类型；
-- Runtime 声称支持 v1，但只实现部分 RPC / failure behavior；
-- `subsystem.hello.protocolVersions` 被错误扩展成 Frame version negotiation；
-- “Batch A-E compatible” 被当成正式 v1 兼容声明。
+---
 
-Batch F 必须在不改变 A-E 语义的前提下完成协议封口。
-
-## 决策
-
-### 1. 整体协议状态
-
-Batch F 冻结后：
-
-```text
-Frame / Call Protocol v1
-    Status: Active / Normative
-    Stability: Frozen
-    Protocol version: 1
-```
-
-Batch A-F 只保留为设计溯源，不是独立兼容等级。
-
-### 2. Protocol identity 与 exact surface
-
-正式协议 identity：
+## 1. Protocol Identity / Exact Surface
 
 ```text
 loomrealm.frame-call / 1
 ```
 
-v1 仍 exactly seven JSON-RPC 2.0 Requests：
+Exactly seven JSON-RPC Requests：
 
 ```text
 Main → Subsystem
@@ -58,119 +34,111 @@ Subsystem → Main
     frame.return
 ```
 
-不新增 `frame.hello / frame.version / frame.capabilities / frame.cancel / frame.abort / frame.unwind / frame.sync`。
+不新增 frame hello/version/capability/cancel/abort/unwind/sync。
 
-### 3. JSON-RPC envelope / Request ID profile
+---
 
-Frame / Call v1：
-
-- 不使用 JSON-RPC Batch；
-- JSON-RPC top-level envelope不得依赖非标准扩展成员改变 Frame语义；
-- Request ID 必须是 `1..2^53-1` 的正安全整数；
-- 同一发送方在同一 Control Connection 生命周期内不得复用任何 outbound JSON-RPC Request ID；
-- 两个方向的 ID namespace 相互独立；
-- Frame / Call 与 Subsystem Control 共享一条 Connection 时，同一发送方不得产生 pending ID collision，推荐 connection-wide monotonic allocator；
-- ID allocator耗尽时 MUST NOT wrap/reuse；实现必须终止/替换该 Connection 或进入明确 failure path。
-
-Request ID 只做 correlation，不是 operationId / idempotency key。
-
-### 4. JSON model 与 wire limits
-
-Frame / Call 仍只接受 plain JSON value。PWA Structured Clone 不得引入 BigInt、ArrayBuffer、MessagePort、Blob 或其他 Host object。
-
-统一限制：
+## 2. Request ID
 
 ```text
-max application message                 1 MiB
-max JSON container nesting depth        64
-max standalone business JsonValue       512 KiB compact JSON equivalent
-max JsonValue string                    256 KiB UTF-8
-max JSON object key                     256 UTF-8 bytes
-max array elements                      16,384
-max object members                      16,384
-frameId                                 1..128 UTF-8 bytes
-activationId                            1..128 UTF-8 bytes
-targetSubsystemKey                      1..256 UTF-8 bytes
-FrameFailure.code                       1..128 ASCII chars
-FrameFailure.message                    0..4096 UTF-8 bytes
+positive safe integer 1..2^53-1
+sender-local
+same Control Connection lifetime never reused
+Control+Frame same sender avoids collision
+no wrap/reuse
 ```
 
-JSON number 必须 finite IEEE-754 binary64；整数值必须在 JavaScript safe-integer 范围。Decoded string 必须是合法 Unicode scalar sequence；比较不做 Unicode normalization / locale folding。
+Request ID只做 correlation，不是 operation/idempotency identity。
 
-### 5. Reference Compact JSON Encoding / carrier hard cap
+---
 
-v1 定义 reference compact JSON encoding：plain validated JSON value → 无 BOM、无多余空白的 compact JSON → UTF-8。
+## 3. JSON / Limits
 
-用途：
+Frame只接受 plain JSON-compatible values；禁止 Structured Clone扩展类型。
 
-- standalone business `JsonValue` size；
-- PWA MessagePort 等非文本 carrier 的 Frame application-message equivalent size；
-- transport-independent golden/limit fixture。
-
-Conforming JSON text sender SHOULD/MUST emit compact JSON；但 Desktop/WebSocket receiver还必须对**实际收到的完整 text message UTF-8 bytes**执行 `<=1 MiB`硬上限，并在完整 JSON parse/materialization造成不必要资源开销前尽早拒绝超限消息。
-
-因此 text carrier同时满足：
+当前主协议冻结：
 
 ```text
-actual encoded application message <= 1 MiB
-reference compact equivalent        <= 1 MiB
+max application message              1 MiB UTF-8 JSON text
+max JSON container depth             64
+max standalone business JsonValue    512 KiB compact JSON
+max JsonValue string                 256 KiB UTF-8
+max object key                       256 UTF-8 bytes
+max array elements                   16,384
+max object members                   16,384
+frameId / activationId               1..128 UTF-8 bytes
+targetSubsystemKey                   1..256 UTF-8 bytes
+FrameFailure.code                    1..128 ASCII
+FrameFailure.message                 0..4096 UTF-8 bytes
 ```
 
-PWA plain object没有原始 JSON text bytes，因此使用 reference compact equivalent `<=1 MiB`。
+Number finite；integer safe；strings有效 Unicode scalar sequence。
 
-### 6. Deadline profile
+---
 
-七个 Frame Request 都必须由其**发送角色**使用 sender-local finite monotonic deadline。
+## 4. Deadline
 
-Normative role requirement：
+七个 Request由发送角色使用 finite sender-local monotonic deadline：
 
 ```text
-Main outbound
-    frame.initialize
-    frame.activate
-    frame.suspend
-    frame.resume
-    frame.close
-
-Subsystem outbound
-    frame.call
-    frame.return
+1000..300000 ms
+integer
+stable for one Control Connection
+not in RPC params
+not business/Game Package controlled
 ```
 
-每个适用方法的 deadline 是 `1,000..300,000` ms 整数，在 Connection 生命周期内稳定，不进入 RPC params、不由 Game Package / business input覆盖、不进行 per-request negotiation。
+Timeout仍是：
 
-实现 MAY 使用一个包含七个字段的共享配置结构方便统一配置，但协议不要求 Main 配置自己不会发送的 call/return，也不要求 Subsystem配置自己不会发送的五个 Main→Subsystem方法。
+```text
+ambiguous → Runtime failure → no retry
+```
 
-具体值可以因 Host/Profile/角色不同而不同；Batch D 的 `timeout → ambiguous → Runtime failure / no retry` 语义不可改变。
+---
 
-### 7. Transport mapping
+## 5. Current Transport Mapping
 
-Desktop：one complete WebSocket text message = one JSON-RPC application message，并执行 actual UTF-8 text hard cap。
+ADR 0015最初为了“Desktop/PWA application model一致”禁止 Structured Clone扩大 Frame值域，这个目标仍有效；但最初选择的 PWA `postMessage(plain object)` 仍留下“双 carrier representation / reference compact size”的不必要复杂度。
 
-PWA：在 Control MessagePort 已由独立 PWA Bootstrap/Control Profile 建立后，one `postMessage` plain JSON-compatible object = one JSON-RPC application message；Frame / Call message不得依赖 Transferable，并按 reference compact equivalent验证 size。
+首次实现前，经 ADR 0018直接把当前 v1收敛为：
 
-两个 adapter 必须保持相同 Schema、semantic limits、ordering、deadline/failure semantics 和 A-E golden trace；Transport 不得 batch/coalesce/retry/replay Frame operation。
+```text
+one carrier application unit
+= one UTF-8 JSON text string
+= one JSON-RPC message object
+```
 
-### 8. Version binding
+因此：
 
-`subsystem.hello.protocolVersions` 继续只协商 Subsystem Control Protocol，不改变 ADR 0009 / Subsystem Control v1。
+```text
+Desktop WebSocket
+    one text message = one JSON text application unit
 
-Frame / Call v1 不增加独立 runtime handshake。Frame version 由部署/Host Runtime Control Profile 静态绑定；在声明使用 Frame / Call v1 的 Profile 中，Runtime `ready` 表示它完整支持自己角色所需的 v1，而不是“部分方法兼容”。
+PWA MessagePort
+    postMessage(string) = one JSON text application unit
+```
 
-v1 不支持 Frame version runtime downgrade。未来动态多协议协商必须通过新的 enclosing Profile 或新的 Subsystem Control 版本显式引入。
+所有平台直接对实际 UTF-8 JSON text执行相同 hard cap；不再存在 PWA object/reference-equivalent独立计量模型。
 
-### 9. Conformance
+Structured Clone仍只用于 Platform bootstrap/Port transfer。
 
-发布独立 [Frame / Call v1 Conformance Profile](../15-contracts/frame-call-conformance-v1.md)，冻结：
+这是 ADR 0018记录的**一次性 preimplementation v1 correction**，不是允许未来任意修改 Frozen v1。
 
-- fixture format / protocol identity；
-- normalized authority state；
-- fault injection vocabulary；
-- A-F required fixture catalog；
-- Desktop/PWA transport equivalence；
-- conformance claim规则。
+---
 
-只有通过全部适用 v1 fixture 的实现才能声明：
+## 6. Version Binding
+
+`subsystem.hello.protocolVersions`只协商 Subsystem Control。
+
+Frame版本由 Runtime Control Application Profile静态绑定；v1无 Frame hello/downgrade/partial capability negotiation。
+
+Runtime `ready` 表示完整支持其角色所需 Frame v1。
+
+---
+
+## 7. Conformance
+
+正式兼容声明：
 
 ```text
 Frame / Call v1 Main Conformant
@@ -178,42 +146,63 @@ Frame / Call v1 Subsystem Conformant
 Frame / Call v1 Transport Adapter Conformant
 ```
 
-正式 conformance report MUST 记录其使用的 `fixtureSetRevision`，避免“通过旧 fixture corpus”与“通过当前 corpus”混为一谈。
+必须通过当前 applicable fixtureSetRevision，并记录 revision。
 
-不允许“v1 except recovery”“Batch C compatible”等正式部分兼容声明。
+2026-08-19 transport reset要求新的 fixture revision验证：
 
-Fixture coverage revision 可以增长而不改变 protocol version，只要新增 fixture 只验证已经冻结的 v1 语义。
+```text
+WebSocket text
+MessagePort postMessage(string)
+same actual UTF-8 byte limits
+same Frame authority/outcome/failure trace
+```
 
-## 结果
+旧 object-carrier fixture revision不能代表 current v1 transport conformance。
 
-- Frame / Call v1 从 Draft 转为 Active / Normative / Frozen；
-- A-F 不再作为独立兼容等级；
-- Desktop/PWA 的差异只剩 carrier/bootstrap，不再允许应用层差异；
-- Message/JSON/ID/deadline边界可被统一实现和测试；
-- Frame version 不污染 Subsystem Control v1 hello；
-- 协议兼容性可以通过统一 fixture/golden trace 判定。
+---
 
-## 明确未改变
+## 8. 明确未改变
 
-ADR 0015 不改变：
+ADR 0018 transport reset **不改变**：
 
-- A 的 identity/lifecycle/Activation；
-- B 的七方法、字段与 FrameOutcome；
-- C 的 acceptance/commit/publication barrier；
-- D 的 Success/Error/Ambiguous、no-retry 与 cancellation scope；
-- E 的 failed-set/lowest-root/fixed-point unwind；
-- Render/Data/Runtime lifecycle independence。
+```text
+Frame identity/lifecycle/Activation
+seven methods/fields/FrameOutcome
+acceptance/commit/publication barriers
+Success/Error/Ambiguous classification
+no retry
+administrative vs child-call suspension
+failed-set/lowest-root/fixed-point unwind
+outcome preservation
+Render/Data/Runtime lifecycle independence
+finite deadlines
+```
 
-## 未来变更规则
+这些继续 Frozen。
 
-以下变化属于 Frame / Call v2 或新的明确兼容版本：
+---
 
-- 增删/重命名 Frame method 或字段；
-- 改变字段语义/identity ownership；
-- 改变 commit point / causal ordering；
-- 改变 timeout/no-retry 或 error classification；
-- 改变 failure unwind root/outcome preservation；
-- 改变 Frozen limits / ID / transport application mapping的兼容边界；
-- 让当前 invalid v1 wire变成有不同语义的扩展 wire。
+## 9. Future Change Rule
 
-纯文档澄清、实现修复、或新增验证既有语义的 fixture 不要求提升协议版本。
+ADR 0018的特例只因为当前没有 conformant deployed v1兼容义务。
+
+从当前 first implementation baseline起，以下变化重新需要正式版本/冻结治理：
+
+```text
+method/field/schema
+identity ownership
+commit/causal ordering
+error/timeout/no-retry
+failure unwind
+Outcome semantics
+limits
+current JSON-text application mapping
+```
+
+纯澄清、bug fix、或新增验证当前语义的 fixture可只提升 fixtureSetRevision。
+
+---
+
+## 10. Result
+
+Frame / Call v1仍是 Active / Normative / Frozen；A-F只做设计溯源。当前唯一可实现/可测试的 v1 transport baseline是 Runtime Control Profile规定的 UTF-8 JSON text carrier model。
