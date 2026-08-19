@@ -3,33 +3,31 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Game Package 进入 Session 后 Runtime/Renderer 的逻辑启动顺序、Subsystem Definition Module、Platform Runner、Control/Data carrier 建立关系  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)  
-> 下层契约：[Game Package v1](../15-contracts/game-package-v1.md)、[Desktop Node.js Launcher / Runner Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)  
+> 主要定义：Game Package 进入 Session 后 Runtime Runner / Renderer 的逻辑启动顺序、Control/Data 建立关系与 Platform provisioning  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)  
+> 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
+> 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Node Runner Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-19
-
-## 1. 设计目标
-
-Main 是 Session / logical authority 编排者；Platform Composition 是物理 Runtime/Renderer/Connection/Content topology 的建立者。
-
-```text
-Game Package
-    declares logical Subsystem topology + Definition Module
-
-Main
-    owns logical Session / Runtime / Frame / Data authority
-
-Platform Composition
-    realizes Process / Worker / Window / carrier / Runner / Content topology
-```
-
-业务 Subsystem Definition Module 不自己创建 Runtime、WebSocket、MessagePort 或 Worker。
 
 ---
 
-## 2. Platform-neutral Subsystem Bootstrap
+## 1. Main vs Platform
 
-Game Package v1 Descriptor：
+```text
+Main
+    declares logical Session intent/authority
+
+Platform
+    realizes physical Runner/Renderer/connection/content topology
+```
+
+Main不直接依赖 Node/Worker/WebSocket/MessagePort；Platform不获得 Frame/DataAuthority application ownership。
+
+---
+
+## 2. Game Package Input
+
+Game Package v1：
 
 ```ts
 interface SubsystemDescriptorV1 {
@@ -38,156 +36,129 @@ interface SubsystemDescriptorV1 {
 }
 ```
 
-其中：
+完整 Descriptor set在任何 business Runtime side effect前校验。
 
 ```text
-key     = application Subsystem identity
-module  = package-local .mjs Subsystem Definition Module
+key    = logical Runtime identity
+module = platform-neutral Definition Module
 ```
 
-`module` 不是 Node argv entry，也不是 Worker URL。
+Platform Runner realization不是 Descriptor字段。
 
-逻辑启动：
+---
+
+## 3. Logical Runtime Bootstrap
+
+每个 required Subsystem：
 
 ```text
-validate complete Descriptor set
-→ resolve each declared Definition Module for current installation/platform
-→ create Launch Attempt
-→ register bootstrap credential
-→ Platform Runtime Hosting creates Runtime Container
-→ Platform Subsystem Runner starts
-→ Runner loads exactly descriptor.module
-→ Runner obtains Subsystem-facing Platform Ports
-→ Runtime Control carrier becomes available
+Main creates Launch Attempt
+→ generate/register bootstrapToken for key
+→ Platform RuntimeHosting creates Host-owned Runner Container
+→ Runner loads exact descriptor.module
+→ Runner constructs Subsystem-facing Platform Ports
+→ Runtime Control carrier obtained
 → subsystem.hello
+→ Main binds connection to key
 → identified
-→ initialize
-→ ready
+→ optional initializing
+→ definition.initialize
+→ status(ready)
 ```
 
 ```text
-module resolved != Runtime created != connected != identified != ready
+module loaded != process/Worker created != connected != identified != ready
 ```
 
 ---
 
-## 3. Runner Boundary
+## 4. Runner Boundary
 
-Platform-specific Runner 是业务 Definition Module 与物理 Runtime Container 之间的唯一 bootstrap integration layer。
-
-```text
-                     same Definition Module
-                            │
-                 ┌──────────┴──────────┐
-                 ▼                     ▼
-        Desktop Node Runner      PWA Worker Runner
-                 │                     │
-          Node child process      Dedicated Worker
-```
-
-Runner负责：
+Runner是 Platform→Subsystem role 的 executable adapter：
 
 ```text
-platform bootstrap material
-Subsystem-facing Platform Ports
-loading/validating Definition Module ABI
-entering @loomrealm/subsystem host integration
+Hostra Node Runner
+PWA Worker Runner
+        │
+        ▼
+RuntimeControlBinding
+SubsystemDataBinding
+ContentClient
+        │
+        ▼
+@loomrealm/subsystem/host
+        │
+        ▼
+Definition Module
 ```
 
-业务 module 负责：
-
-```text
-business state
-Frame handlers
-Input/Render/Content usage
-```
-
-禁止业务 module 把 Platform Runner mechanics 当成业务 API。
+Definition Module不读取 physical bootstrap material。
 
 ---
 
-## 4. Descriptor Validation / Module Resolution
+## 5. Runtime `ready`
 
-Main/Game Package Validator 在任何 Runtime side effect 前完成：
-
-```text
-closed Descriptor schema
-key uniqueness
-initial target reference
-module logical syntax / .mjs
-```
-
-当前 Platform 在业务代码执行前完成：
-
-```text
-module exists
-belongs to selected installation
-cannot escape installation namespace
-can be loaded as ESM
-```
-
-Module load/default-export ABI failure属于 required Runtime bootstrap failure。
-
----
-
-## 5. Runtime `ready` Boundary
-
-`subsystem.status({state:"ready"})` 只表示 Runtime required initialization 已完成并能够承担 enclosing Runtime Control Profile。
+`ready` 只证明 Runtime required initialization完成并能承担 Runtime Control Profile角色。
 
 不得推导：
 
 ```text
-Renderer participant exists
+Renderer exists
 DataAuthority exists
-Data Connection exists
-Frame exists
-Render Domain exists
-InputTarget exists
+Data Profile material exists
+Data carrier current
+Data provisioning offer happened
+Frame/Render/InputTarget exists
 ```
 
-`ready` 不携 Data endpoint/ticket/Port。
+Platform provisioning capability可以已安装，但“当前没有 Data offer”完全合法。
 
 ---
 
-## 6. Main / Platform Supervisor Boundary
-
-Main public Runtime state：
+## 6. Runtime State Sources
 
 ```text
-declared → starting → connected → identified → ready → stopping → stopped
-                                  \→ failed
+starting
+    Main Launch Attempt + Platform launch intent
+
+connected
+    Main accepts Control carrier
+
+identified
+    successful subsystem.hello
+
+ready
+    valid subsystem.status(ready)
+
+stopping
+    Main shutdown intent
+
+stopped
+    Platform/Supervisor observed actual Runtime termination
+
+failed
+    Control/Runtime failure classification
 ```
 
-来源：
-
-```text
-starting    Main Launch Attempt + Platform launch intent
-connected   Main accepted Control carrier
-identified  subsystem.hello success
-ready       subsystem.status(ready)
-stopped     Supervisor observed actual Runtime termination
-failed      Control/Runtime failure classification
-```
-
-PID/Worker handle/module path 都不是 Runtime identity。
+PID/Worker handle/launchId不是 protocol identity。
 
 ---
 
-## 7. Failure / Restart
+## 7. Bootstrap Failure / Restart
 
-以下均可导致 bootstrap failure：
+以下任一使 required Runtime bootstrap失败：
 
 ```text
-module resolve failure
+module resolve/load/ABI failure
 Runner creation failure
-module import/ABI validation failure
-Runtime exits before ready
-Control bootstrap failure
+Control carrier/hello failure
+Runtime cannot become ready
+unexpected Runtime termination
 ```
 
-ready 后无 termination intent 的 Runtime exit/Control loss进入 Runtime failure。
+Phase 1 all-required → whole Game Bootstrap失败并统一 cleanup。
 
-当前不允许 Platform automatic restart；restart 必须是 fresh Launch Attempt + fresh Runtime + fresh bootstrap credential。
+Platform MUST NOT automatic restart。新 Runtime必须 fresh Launch Attempt/token/Runner/Control lifetime。
 
 ---
 
@@ -195,205 +166,233 @@ ready 后无 termination intent 的 Runtime exit/Control loss进入 Runtime fail
 
 ```text
 Main establishes Renderer intent
-→ Platform Renderer Hosting realizes current Renderer participant
-→ Renderer Control carrier established
+→ Platform RendererHosting realizes current participant
+→ RendererControlBinding supplies carrier
 → renderer.hello
 → current full Authority Snapshot
 ```
 
-Snapshot 只含 logical authority：
+Snapshot：
 
 ```text
 Runtime projection
 Frame Stack / Activation
 InputTarget
-DataAuthority
+DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-不携 Data endpoint/ticket/Port/Hostra Window identity。
+不携 endpoint/ticket/Port/provisioning handle。
 
 ---
 
-## 9. Renderer ⇄ Subsystem Data Establishment
+## 9. DataAuthority / Profile
 
-Main publishes：
+当前 Main 可发布：
 
 ```text
-DataAuthority(S,G,P)
+DataAuthority(S,G,"loomrealm.renderer-data/1")
 ```
 
-Platform Data Connection Broker：
+Data Profile v1：
 
 ```text
-current authority
-→ provision matching physical endpoints
-→ bind Session/current Renderer/S/G
-→ deliver role-local connection capability to Renderer + Subsystem Runner
+Connection 1 + User Input 1 + Render Update 1
+```
+
+Profile改变是 authority replacement，必须 fresh generation。
+
+```text
+DataAuthority exists != Data carrier current
+```
+
+---
+
+## 10. Data Broker Establishment
+
+```text
+Main current DataAuthority(S,G,P)
+→ Platform DataConnectionBroker
+→ provision matching Renderer + Subsystem endpoints
+→ bind both to current Session/Renderer/S/G/P
 → install at most one current Data Connection
 ```
 
-Endpoint/ticket/MessagePort 属于 Platform bootstrap material，不属于 `ready` 或 DataAuthority identity。
-
-same generation 仍授权时可在 old carrier retired 后建立 fresh carrier。
+Broker不拥有 G/P。
 
 ---
 
-## 10. Data Child-protocol Baseline
+## 11. Hostra Late Data Provisioning
 
-fresh Data Connection：
+Node Runtime可能已经 `ready` 很久后才获得 DataAuthority。
+
+因此 Desktop：
+
+```text
+Broker
+→ Host-owned Runner Provisioning Channel
+→ one-time Data endpoint/ticket for S/G/P
+→ Runner establishes Data WebSocket
+→ SubsystemDataBinding yields {G,P,carrier}
+→ SDK DataPlane installs current
+```
+
+Provisioning channel在 process spawn时作为 Platform capability建立，但 Data offer可以任意晚到。
+
+```text
+Provisioning != Runtime Control
+Provisioning != ready payload
+```
+
+---
+
+## 12. PWA Late Data Provisioning
+
+```text
+Broker creates MessageChannel
+→ bind S/G/P
+→ transfer one Port to Renderer
+→ transfer one Port through Worker provisioning path
+→ RendererDataBinding / SubsystemDataBinding install current carrier
+```
+
+Port transfer是 Platform mechanism；current Data application unit仍是 JSON text string。
+
+---
+
+## 13. Data Reconnect
+
+同一 `S/G/P`：
+
+```text
+carrier A current
+→ lost/retired
+→ authority still current
+→ Broker MAY provision fresh carrier B
+→ B current
+```
+
+不：
+
+```text
+restart Runtime
+resume Frame
+reuse old Input state
+reuse old Render patch base
+```
+
+---
+
+## 14. Fresh Data Baseline
+
+fresh carrier：
 
 ```text
 User Input
-    Interest Registry = empty
-    retained Input State = empty
-    Subsystem republishes current desired full registry
+    remote Interest Registry empty
+    retained Input State empty
+    Subsystem republishes full desired Registry
+    State fresh baseline / Event future-only
 
-Render Update
+Render
     current Domain Registry
-    fresh Snapshot for each current Domain
+    fresh Snapshot each current Domain
+    then Patch/Event
 ```
 
-Data reconnect 不重建 business Runtime/Frame/Render objects。
+Data reconnect不重建 business capability objects。
 
 ---
 
-## 11. Frame/Input / Render Independence
+## 15. Frame Startup Remains Independent
+
+Initial Frame：
 
 ```text
-Frame / Activation / InputTarget
-    Main authority
-
-Frame Input Interest
-    Subsystem-owned configuration
-
-Render Domain
-    Subsystem-owned lifecycle/state
-
-Data Connection
-    independent carrier authority/lifecycle
+Main allocates starting Frame
+→ frame.initialize ACK
+→ fresh Activation
+→ frame.activate ACK
+→ commit active
+→ publish InputTarget
 ```
 
-禁止从任一 lifecycle 隐式推导另一域 lifecycle。
+Subsystem SDK仅在 activate后启动 author frame handler。
+
+Data current不是 Frame activate的前置条件；active Frame + no Data/Interest可以合法地暂时没有 ordinary input。
 
 ---
 
-## 12. Hostra Desktop Realization
+## 16. Renderer Reload
 
 ```text
-Definition Module
-    same package-local .mjs business module
-
-Runtime Hosting
-    Host-selected Node.js child process
-
-Subsystem Runner
-    Host-owned Node Runner process entry
-    imports descriptor.module
-
-Runtime Control
-    localhost WebSocket
-
-Renderer Hosting
-    Hostra/Electron BrowserWindow
-
-Renderer Control
-    localhost WebSocket
-
-Renderer⇄Subsystem Data
-    Platform-brokered authenticated localhost carrier
-
-Content
-    filesystem-backed service + localhost HTTP
+Renderer Control lost
+→ local InputTarget/DataAuthority invalid
+→ old Data connections retired
+→ fresh Renderer Control bootstrap
+→ hello + current full Snapshot
+→ Broker establishes current S/G/P carriers
+→ Input/Render fresh baselines
 ```
 
-Desktop Game Package 不再声明 Node launcher type/env/argv。
+Frame/Render authoritative lifecycles不由 reload推导。
 
 ---
 
-## 13. PWA Realization
+## 17. Shutdown
 
 ```text
-Definition Module
-    same package-local .mjs business module
-
-Runtime Hosting
-    per-Subsystem Dedicated Worker
-
-Subsystem Runner
-    Worker bootstrap/runtime shell
-    imports descriptor.module
-
-Runtime Control
-    MessagePort
-
-Renderer Hosting
-    browser Window
-
-Renderer Control
-    MessagePort
-
-Renderer⇄Subsystem Data
-    MessageChannel + Port transfer
-
-Content
-    Fetch + Service Worker / OPFS
+Main establishes shutdown intent
+→ subsystem.shutdown
+→ SDK aborts instance/frame signals and runs bounded shutdown hook
+→ Platform terminates Runner if needed
+→ Supervisor observes actual termination
+→ stopped
 ```
 
-PWA 不需要第二份 platform-specific business Descriptor。
+如果 Runtime先进入 fatal failure，则走 failure terminal path；不恢复成 graceful business state。
 
 ---
 
-## 14. Renderer Reload
-
-Renderer reload只重建 Renderer participant/control/data physical realization；不重新解释 Game Package Subsystem module或重启健康 Runtime。
-
-Data fresh-baseline规则继续独立执行。
-
----
-
-## 15. Trust Boundary
+## 18. Recommended Session Sequence
 
 ```text
-validated module identity
-!= executable sandbox
+1  create Session
+2  initialize Platform facilities
+3  load/validate Game Package complete descriptors
+4  resolve Definition Modules
+5  create Launch Attempts/tokens
+6  launch required Runner Containers
+7  load Definition Modules / construct role ports
+8  establish Runtime Control
+9  hello → identified → ready
+10 realize Renderer
+11 Renderer Control hello + Snapshot
+12 Main publishes DataAuthority(S,G,P) by policy
+13 Broker provisions Data endpoints through Platform paths
+14 Data Profile fresh child baselines
+15 Main starts/continues Frame authority independently
+16 shutdown/termination converges through Supervisor
 ```
 
-Desktop Node业务 module是 trusted executable code；PWA Worker提供不同物理隔离。签名/Publisher Trust/不可信 executable sandbox另行设计。
+具体 physical creation order可不同，只要满足这些 causal/authority边界。
 
 ---
 
-## 16. Recommended Session Startup
+## 19. Final Invariants
 
-```text
-1. create Session
-2. initialize Platform facilities
-3. read + validate Game Package Descriptor set
-4. resolve required Definition Modules
-5. create Launch Attempts + bootstrap auth
-6. Platform Runtime Hosting starts per-Subsystem Runner containers
-7. each Runner loads declared Definition Module
-8. establish Runtime Control
-9. hello → identified → ready
-10. realize Renderer + Renderer Control
-11. Main publishes DataAuthority
-12. Platform Broker provisions Data connections
-13. Input/Render fresh baselines
-14. Main drives Frame lifecycle; Subsystem drives Render lifecycle
-```
-
----
-
-## 17. Core Invariants
-
-1. Game Package声明 logical Subsystem + Definition Module，不声明物理 Runtime technology；
-2. same Descriptor/module用于 Hostra Desktop 与 PWA；
-3. Platform Runner是 Definition Module与物理 Runtime之间的 bootstrap layer；
-4. business module不自己探测/创建平台资源；
-5. `module resolved != Runtime created != connected != identified != ready`；
-6. Runtime identity由 `descriptor.key` + `subsystem.hello`绑定；
-7. `ready`不携 Data material；
-8. stopped只来自 actual Runtime termination；
-9. no automatic restart；
-10. Data Connection Broker负责 actual Data carrier establishment；
-11. Data loss不等于 Runtime/Frame failure；
-12. Desktop/PWA physical bootstrap不同，但同一 business Definition Module产生等价 application semantics。
+1. Game Package声明 `{key,module}`，Runner由 Platform选择；
+2. Main逻辑 authority与 Platform physical realization分离；
+3. launch != connected != identified != ready；
+4. ready不要求/携带 Data；
+5. Runtime identity由 `subsystem.hello`绑定；
+6. stopped只来自 actual termination；
+7. no automatic restart；
+8. Renderer Control只发布 logical S/G/dataProfile；
+9. Broker负责 actual carrier；
+10. Desktop/PWA都有独立 late provisioning path；
+11. provisioning不污染 Runtime/Renderer Control；
+12. same S/G/P可以 sequential reconnect；
+13. Data failure不等于 Runtime/Frame failure；
+14. fresh Data child state重新 baseline；
+15. Frame/Input/Render/Data lifecycles互相独立；
+16. Hostra/PWA application trace语义等价。
