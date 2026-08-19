@@ -3,11 +3,12 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：顶层系统划分、状态所有权、运行承载、启动拓扑和系统关系  
+> 主要定义：顶层系统划分、状态所有权、运行承载、平台组合和系统关系  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)  
-> 最近复核：2026-08-09
+> 被以下文档细化：[平台组合系统](./platform-composition-system.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)  
+> 最近复核：2026-08-19
 
-本文描述系统职责与协作关系；精确 wire、transaction、error、failure-unwind、limit 与 conformance semantics由 `15-contracts`定义。
+本文描述系统职责与协作关系；精确 wire、transaction、error、failure-unwind、limit 与 conformance semantics 由 `15-contracts` 定义。
 
 ## 1. 顶层结构
 
@@ -21,39 +22,86 @@ LoomRealm Main
 ├── InputTarget / Renderer Control Authority
 └── DataAuthority
     │
-    │ Control Plane
-    ▼
+    ├──── Main ⇄ Subsystem Runtime Control
+    │
+    └──── Main ⇄ Renderer Control
+
 Subsystem Runtime Container
 ├── authoritative business state
 ├── 0..N Frame/Input Context
 ├── 0..N Render Domains
 └── one Main Control carrier
-    │
-    ├── Control v1 + Frame v1
-    │
-    └──────────────┐
-                   │ Host/Platform establishes Data carrier
-                   ▼
-             Web Renderer
+
+Web Renderer
+├── read-only Main authority mirror
+├── User Input producer/gate
+└── Render replica / presentation
+
+Readonly Content Service
 ```
 
-另有独立 Readonly Content Service。
+Renderer ⇄ Subsystem 另有独立 Data Connection，承载 User Input 与 Render Update。
 
-Subsystem Runtime不通过 `ready`发布 Renderer Data Endpoint。Main只发布逻辑 DataAuthority；具体 WebSocket/MessagePort由 Host/Platform Binding建立。
+这些是 **platform-neutral logical roles**。真实 Process/Worker、WebSocket/MessagePort、BrowserWindow/Window、HTTP/Service Worker 由 Platform Composition 实现。
 
-## 2. 核心对象
+---
 
-Subsystem identity=`descriptor.key`。每 Subsystem同时最多一个 active Runtime Container：Desktop Process / PWA Dedicated Worker。
+## 2. Platform Composition
 
-Frame是 Main-owned call/ordinary-input Context：frameId Session unique/never reused，永久绑定 key，caller Main-owned immutable；lifecycle=`starting/active/suspended/closing/closed`；outcome=`completed/cancelled/failed`。
+LoomRealm 不把 Desktop/PWA 差异塞进 Main、Renderer 或 Subsystem。
+
+```text
+                  Platform-neutral LoomRealm
+        Main / Renderer / Subsystem / Content
+                         │
+                    Platform Ports
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+   Hostra Desktop Platform          PWA Platform
+```
+
+Platform 负责完整物理 Session realization：
+
+```text
+Runtime Hosting / Supervision
+Main ⇄ Subsystem Control binding
+Renderer Hosting
+Main ⇄ Renderer Control binding
+Renderer ⇄ Subsystem Data Connection Broker
+Content Binding
+physical startup / shutdown
+```
+
+Platform 不拥有 Frame/Activation/InputTarget/DataAuthority/Render Domain 等 application authority。
+
+详细边界见 [平台组合系统](./platform-composition-system.md)。
+
+---
+
+## 3. 核心对象
+
+Subsystem identity = `descriptor.key`。每 Subsystem 同时最多一个 active Runtime Container：Desktop Process / PWA Dedicated Worker。
+
+Frame 是 Main-owned call / ordinary-input Context：
+
+```text
+frameId Session-unique / never reused
+permanently bound subsystemKey
+caller Main-owned immutable
+lifecycle starting/active/suspended/closing/closed
+outcome completed/cancelled/failed
+```
 
 Activation one-shot、never reused/resumed/rolled back。
 
-Render由 Subsystem拥有：一个 Runtime可拥有 `0..N Render Domains`，Domain有独立 lifecycle/zIndex/tree state，不从 Frame Stack推导 ownership/lifecycle。
+Render 由 Subsystem 拥有：一个 Runtime 可拥有 `0..N Render Domains`，Domain 有独立 lifecycle/zIndex/tree state，不从 Frame Stack 推导 ownership/lifecycle。
 
-## 3. Runtime Bootstrap / Shutdown
+---
 
-当前 Control主线：
+## 4. Runtime Bootstrap / Shutdown
+
+当前 Runtime Control 主线：
 
 ```text
 Subsystem Control v1
@@ -61,31 +109,35 @@ Runtime Control Application Profile v1
     = Control v1 + Frame / Call v1
 ```
 
-启动：
+逻辑启动：
 
 ```text
 validate descriptors
 → Launch Attempt / bootstrapToken
-→ spawn + Supervisor
-→ Control carrier connect
-→ subsystem.hello(protocolVersions includes 1)
+→ Platform Runtime Hosting launches container
+→ Control carrier established
+→ subsystem.hello
 → identified
 → optional initializing
 → subsystem.status({state:"ready"})
 ```
 
 ```text
-spawn success != connected != identified != ready
+launch success != connected != identified != ready
 ready != Data Connection exists
 ```
 
-`ready`不携 Data endpoint。
+`ready` 不携 Data endpoint。
 
-正常结束：Main shutdown intent→`subsystem.shutdown`→Supervisor confirms exit→stopped。无 shutdown intent的 exit/Control loss或 Runtime-reported failed进入 terminal failure。
+正常结束：Main shutdown intent → `subsystem.shutdown` → Platform/Supervisor confirms actual Runtime termination → stopped。
 
-## 4. Frame / Call v1
+无 shutdown intent 的 Runtime exit / Control loss，或 Runtime-reported failed，进入 terminal Runtime failure。
 
-Frame / Call Protocol v1 已整体冻结：
+---
+
+## 5. Frame / Call v1
+
+Frame / Call Protocol v1：
 
 ```text
 Protocol   loomrealm.frame-call / 1
@@ -98,42 +150,49 @@ Wire exactly seven Requests：
 ```text
 Main → Subsystem
     initialize / activate / suspend / resume / close
+
 Subsystem → Main
     call / return
 ```
 
-Subsystem Control v1与 Frame / Call v1是独立协议版本空间；Runtime Control Profile v1静态绑定二者。
+Subsystem Control v1 与 Frame / Call v1 是独立协议版本空间；Runtime Control Profile v1 静态绑定二者。
 
-## 5. Normal Frame Transaction
-
-Call：
+Normal Call：
 
 ```text
 Caller active
 → Call Acceptance Commit
-   Caller suspended / old Activation revoked
-   Child starting+push / InputTarget=null
+   revoke old Activation
+   Caller suspended
+   Child starting + push
+   InputTarget=null
 → call Success
 → Child initialize/activate
 → activate ACK
 → publish Child InputTarget
 ```
 
-Return：
+Normal Return：
 
 ```text
 Return Acceptance Commit
-   outcome terminal / old Activation revoked
-   Child closing / InputTarget=null
+   store outcome
+   revoke old Activation
+   Child closing
+   InputTarget=null
 → return Success
-→ close ACK/pop
+→ close ACK / pop
 → Caller resume(fresh Activation) ACK
 → publish Caller InputTarget
 ```
 
-ordinary call无 reverse suspend；call/return Response先于 dependent reverse RPC；activate/resume ACK先于 publication。
+Response-before-dependent-RPC；ACK-before-publication。
 
-## 6. Error / Timeout Model
+---
+
+## 6. Error / Runtime Failure
+
+Frame Request：
 
 ```text
 Success        → known committed
@@ -141,58 +200,31 @@ Explicit Error → known not committed
 Timeout/loss   → ambiguous → Runtime failure
 ```
 
-Frame v1 no automatic retry/replay。Recoverable只有 call target not-found/unavailable 与 `FRAME_INITIALIZE_REJECTED`；Frame control divergence/protocol error Runtime-fatal。`cancelled`只表示 active Frame自行 return；无 caller remote cancel。
+Frame v1 no automatic retry/replay。
 
-## 7. Runtime Failure Unwind
+Runtime failure unwind：
 
 ```text
 failedRuntimeKeys
 → lowest live failed-runtime Frame = root
 → root..top whole suffix doomed
 → cleanup Top→Bottom
-→ failed Runtime Frames logical retire without Frame RPC
+→ failed Runtime Frames logical retire
 → healthy descendants best-effort frame.close
 → cleanup failure may expand failed set/root
 → repeat to fixed point
-→ preserve accepted root outcome or failed(SUBSYSTEM_RUNTIME_FAILED)
+→ preserve accepted root outcome or SUBSYSTEM_RUNTIME_FAILED
 → fresh-resume direct healthy Caller or Stack empty
 ```
 
-同一 Runtime在 Stack出现多次时取最低 occurrence。
+同一 Runtime 在 Stack 出现多次时取最低 occurrence。
 
-## 8. Frame v1 Interop Boundary
+---
 
-Frame / Call v1冻结：
-
-```text
-one JSON-RPC application message per transport unit
-no JSON-RPC Batch
-Request ID = positive safe integer
-sender-side Connection lifetime no Request ID reuse
-max message = 1 MiB
-max JSON depth = 64
-max business JsonValue = 512 KiB
-frameId/activationId <= 128 UTF-8 bytes
-targetSubsystemKey <= 256 UTF-8 bytes
-all seven method deadlines = 1s..5min sender-local monotonic profile
-```
-
-PWA Structured Clone不能扩大 Frame JSON type model。Desktop WebSocket与PWA MessagePort必须保持同一 application semantics和 conformance trace。
-
-`subsystem.hello.protocolVersions`只协商 Subsystem Control v1；Frame version由 Runtime Control Profile v1静态绑定。
-
-## 9. Failure Recovery Safety
-
-Failure barrier建立后 affected InputTarget清空；Renderer不得恢复旧 Activation。
-
-accepted terminal outcome不可被 Runtime crash覆盖。surviving Caller只获得 fresh Activation，resume ACK后才可发布。Resume失败会让 Caller Runtime也进入 failed set并重新计算 root。
-
-failed Runtime Frame可无 `frame.close ACK` logical retire；healthy Runtime Frame仍 best-effort close。Recovery不新增 `frame.abort/frame.unwind/replay/resync`。
-
-## 10. Runtime / Frame / Render / Connection 承载
+## 7. Runtime / Frame / Render / Connection 承载
 
 ```text
-one Subsystem → one Runtime Container
+one Subsystem → one active Runtime Container
 one Runtime   → 0..N Frame/Input Context
               → 0..N Render Domains
               → one Main Control carrier
@@ -201,29 +233,37 @@ one Runtime   → 0..N Frame/Input Context
               → 0..1 current Data Connection
 ```
 
-Frame transaction/unwind不隐式 create/destroy Runtime/Data Connection/Render Domain。
+Frame transaction/unwind 不隐式 create/destroy Runtime、Data Connection 或 Render Domain。
 
-## 11. 通信平面
+Capability lifetime 也不等于 physical carrier lifetime：Data carrier 可重建，而 Render Domain / business state 可继续存在。
+
+---
+
+## 8. 三类通信平面
 
 ```text
-Subsystem ⇄ Main Control
-    Subsystem Control v1
-    Frame / Call v1
-    Runtime Control Profile v1
+Control Plane
+    Subsystem ⇄ Main
+        Subsystem Control v1
+        Frame / Call v1
+        Runtime Control Profile v1
 
-Renderer ⇄ Main Control
-    Renderer Control v1
-    committed authority snapshots
+    Renderer ⇄ Main
+        Renderer Control v1
 
-Subsystem ⇄ Renderer Data
-    Data Connection v1
-    User Input v1
-    Render Update v1
+System Data Plane
+    Renderer ⇄ Subsystem
+        Data Connection v1
+        User Input v1
+        Render Update v1
+
+Content Plane
+    Runtime / Renderer ⇄ Readonly Content Service
 ```
 
-Renderer不是 Frame RPC participant。
+Renderer 不是 Frame RPC participant。
 
-DataAuthority只包含逻辑：
+DataAuthority 只包含逻辑 authority：
 
 ```text
 subsystemKey
@@ -233,54 +273,33 @@ connectionProfile
 
 不包含 endpoint/ticket/MessagePort。
 
-## 12. 状态所有权
+---
 
-```text
-Main
-    Runtime Registry / Supervisor / shutdown intent
-    Frame identity / caller / lifecycle / outcome / Stack
-    transaction / error classification / failure unwind
-    Activation / InputTarget
-    DataAuthority
+## 9. Data Connection Authority
 
-Subsystem
-    business state
-    Runtime-reported lifecycle status
-    Frame/Input Context + mutation gate
-    Render Domain Registry / State
-
-Renderer
-    read-only committed Main control mirror
-    current Data carriers
-    User Input producer/gating state
-    Render replica / presentation state
-```
-
-## 13. Data Connection Authority
-
-Renderer Control发布：
+Renderer Control 发布：
 
 ```text
 DataAuthority(S, generation=G, connectionProfile=P)
 ```
 
-Host/Platform Binding负责建立carrier并绑定到：
+Platform Data Connection Broker 依据该 authority 建立实际 carrier，并在安装前绑定：
 
 ```text
-Session
+current Session
 current Renderer participant
 S
 G
 ```
 
-Data Connection Core定义：
+Data Connection Core：
 
 ```text
 current → retired
 retired terminal
 ```
 
-同 generation仍授权时允许在旧 carrier retired后重新建立 fresh carrier。
+同 generation 仍授权时，旧 carrier retired 后允许建立 fresh carrier。
 
 ```text
 Data loss != Runtime failure
@@ -288,65 +307,183 @@ Data loss != Frame unwind
 Data retire != Render destroy
 ```
 
-## 14. Render / User Input
+---
+
+## 10. User Input
 
 User Input ordinary authority：
 
 ```text
-Main InputTarget/Activation
-∩ current Data Connection
-∩ Subsystem Input Interest
-∩ Producer availability
+Effective(F,A,C)
+=
+current matching Data Connection
+∧ Main current InputTarget == (S,F,A)
+∧ mirrored Frame F active/current Activation A
+∧ C ∈ Interest[F]
+∧ Producer(C) available
 ```
 
-Render Update方向：
+Interest 是 Subsystem-owned、Frame-scoped configuration，不是 authority。
 
 ```text
-Subsystem → Renderer only
+Frame suspension / fresh Activation
+    may retain Interest[F]
+
+fresh Data Connection
+    Interest Registry starts empty
+    Subsystem republishes current full registry
+
+fresh Activation
+    never reuses old Activation input state/event
 ```
 
-当前增量设计使用 Domain Registry + Snapshot + atomic Patch + transient Event；Render revision与 Renderer Control revision独立。
+Renderer 不通过 `push/pop/call/return/unwind` 推导 input；只组合当前 committed authority、Interest Registry 与 Producer availability。
 
-## 15. Desktop / PWA
+---
 
-Desktop：
+## 11. Render
+
+Render Update 方向固定：
 
 ```text
-Subsystem Control v1      localhost WebSocket Host binding
-Frame / Call v1           same Control carrier
-Renderer Control v1       localhost WebSocket
-Renderer⇄Subsystem Data   Host-established carrier
-Content                    localhost HTTP
+Subsystem → Renderer
 ```
 
-PWA：
+Render Domain 生命周期由 Subsystem 控制；Frame Stack 不决定 Render ownership/z-order/lifecycle。
+
+当前模型使用：
 
 ```text
-Subsystem Control v1      authenticated MessagePort
-Frame / Call v1           same application semantics
-Renderer Control v1       authenticated Control Port
-Renderer⇄Subsystem Data   Host-established MessagePort
-Content                    same-origin Fetch / Service Worker
+Domain Registry
+Snapshot
+Patch
+Event
 ```
 
-Transport/bootstrap机制可不同，但建立后的 application identity/lifecycle/ordering/recovery不能不同。
+fresh Data Connection 通过 current Registry + fresh Snapshots 重建 authoritative baseline。
+
+---
+
+## 12. 状态所有权
+
+```text
+Main
+    Runtime Registry / shutdown intent
+    Frame identity / caller / lifecycle / outcome / Stack
+    transaction / failure unwind
+    Activation / InputTarget
+    DataAuthority
+
+Subsystem
+    business state
+    Runtime-reported lifecycle status
+    local Frame/Input Context + mutation gate
+    Input Interest configuration
+    Render Domain Registry / State
+
+Renderer
+    read-only committed Main control mirror
+    current Data carriers
+    User Input producer/gating state
+    Render replica / presentation state
+
+Platform
+    physical process/worker/window/port/socket/content topology
+    bootstrap material delivery
+    physical resource supervision/cleanup
+```
+
+Platform 的物理 ownership 不提升为 application authority。
+
+---
+
+## 13. Hostra Desktop / PWA
+
+Hostra Desktop realization：
+
+```text
+Subsystem Runtime        Node child process
+Runtime Control          localhost WebSocket
+Renderer Hosting         Hostra/Electron BrowserWindow
+Renderer Control         localhost WebSocket
+Renderer⇄Subsystem Data authenticated localhost carrier
+Content                  filesystem + localhost HTTP
+```
+
+PWA realization：
+
+```text
+Subsystem Runtime        Dedicated Worker
+Runtime Control          MessagePort
+Renderer Hosting         browser Window
+Renderer Control         MessagePort
+Renderer⇄Subsystem Data MessageChannel / transferred Port
+Content                  Fetch + Service Worker / OPFS
+```
+
+Transport/bootstrap 机制可不同，但建立后的 application identity/lifecycle/ordering/recovery 必须等价。
+
+---
+
+## 14. Business Portability
+
+业务 Subsystem 依赖 platform-neutral author SDK：
+
+```text
+@loomrealm/map
+    → @loomrealm/subsystem
+```
+
+Desktop/PWA composition 选择不同基础设施运行同一业务 definition。
+
+```text
+business semantics = shared
+platform entry/bootstrap = platform-specific
+```
+
+业务代码不得自己判断 Desktop/PWA 并创建 WebSocket/MessagePort。
+
+---
+
+## 15. Package Boundary
+
+```text
+Protocol boundary
+!= npm package boundary
+!= runtime process boundary
+!= platform boundary
+```
+
+Platform Composition 是架构概念。当前实现默认由：
+
+```text
+apps/desktop
+apps/pwa
+```
+
+组合 role packages 与 technical adapters；是否将重复 glue 抽成 `platform-*` package 由真实消费者和发布价值决定。
+
+---
 
 ## 16. 核心不变量
 
-1. Process/Worker isolation granularity=Subsystem；
-2. Subsystem Control v1 是 Runtime identity/lifecycle协议；
-3. Runtime Control Profile v1 = Control v1 + Frame v1；
-4. Runtime `ready`不携/暗示 Data endpoint；
-5. Frame=Main-owned call/input Context；
-6. identity/Activation不复用；
-7. Caller/Stack/transaction/recovery authority=Main；
-8. Frame v1 exactly seven Requests；
-9. Response-before-dependent-RPC；ACK-before-publication；
-10. ambiguous/divergence/protocol error Runtime-fatal/no retry；
-11. Runtime failure取 lowest occurrence并 unwind whole suffix；
-12. accepted outcome不覆盖；surviving Caller fresh resume；
-13. Renderer Control只发布逻辑 DataAuthority；
-14. Host/Platform Binding负责 endpoint/ticket/Port；
-15. Data loss不等于 Runtime failure/Frame unwind；
-16. Render lifecycle完全由 Subsystem控制；
-17. stopped只来自 actual Runtime termination observation。
+1. Main / Renderer / Subsystem / Content 是 platform-neutral logical roles；
+2. Platform Composition 负责完整物理 Session，而不是只负责 Transport；
+3. Process/Worker isolation granularity = Subsystem；
+4. Subsystem Control v1 只管理 Runtime identity/lifecycle；
+5. Runtime Control Profile v1 = Control v1 + Frame v1；
+6. Runtime `ready` 不携/暗示 Data endpoint；
+7. Frame identity/Activation 不复用；
+8. Caller/Stack/transaction/recovery authority = Main；
+9. Frame v1 exactly seven Requests；
+10. Response-before-dependent-RPC；ACK-before-publication；
+11. ambiguous/divergence/protocol error Runtime-fatal/no retry；
+12. Runtime failure按 lowest occurrence unwind whole suffix；
+13. accepted outcome不可覆盖；surviving Caller fresh resume；
+14. Renderer Control只发布逻辑 DataAuthority；
+15. Platform Data Connection Broker负责 actual carrier establishment，但不拥有 generation；
+16. Data loss不等于 Runtime failure/Frame unwind；
+17. Input Interest 是 Frame-scoped configuration，只能缩小、不能创建 Main authority；
+18. Render lifecycle完全由 Subsystem控制；
+19. stopped只来自 actual Runtime termination observation；
+20. Desktop/PWA 对相同 abstract application trace 必须保持语义等价。
