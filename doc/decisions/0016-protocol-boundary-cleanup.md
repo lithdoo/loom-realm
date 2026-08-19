@@ -1,103 +1,153 @@
 # ADR 0016：协议边界清理与 Data Authority 方向
 
-> 状态：Accepted  
-> 日期：2026-08-08；协议最小化复核：2026-08-09  
-> 影响范围：Subsystem Control、Renderer Control、Renderer⇄Subsystem Data、Content、Frame、Render/Input boundary
+> 状态：Accepted；由 [ADR 0017](./0017-system-level-platform-composition.md) 扩展 Platform boundary，并由 [ADR 0018](./0018-preimplementation-v1-closure.md) 收口 current v1 字段/Profile/Runner 关系  
+> 日期：2026-08-08  
+> 最近复核：2026-08-19  
+> 影响范围：Subsystem Control、Renderer Control、Renderer Data、Content、Frame、Render/Input boundary
 
 ## 背景
 
-Frame / Call v1 形成清晰的 Main-owned Frame/Activation authority 后，Renderer/Data/Content 设计暴露出几个跨域接缝：
+Frame / Call v1形成 Main-owned Frame/Activation authority 后，Renderer/Data/Content设计需要回答：
 
-1. 早期 Control 草案把 Renderer Data endpoint 放入 Runtime `ready`，错误绑定 Runtime readiness 与 Data transport discovery；
-2. Renderer Control 草案曾混合 logical Data authority、endpoint 与 bearer token；
-3. Renderer Control loss 后既有 Data Connection authority需要闭合；
-4. Content API 的 request semantics 与 Host credential plumbing 需要分离；
-5. Frame v1 显式 `frame.suspend` 的恢复边界需要闭合；
-6. 后续设计又暴露出一种新的过度设计风险：把 component mapping、device mapping、Host bootstrap、Range、queue sizing 等 implementation choice升级成额外 Profile。
+```text
+Runtime ready 与 Data physical provisioning 是否耦合？
+Renderer Control 应发布 logical authority还是 endpoint/credential？
+Data carrier loss/replace如何和 Runtime/Frame failure分离？
+User Input / Render sharing one carrier时如何保持独立 semantics？
+哪些 Host/Platform details真的需要标准化成 application Profile？
+```
 
-## 决策原则
+原则：
 
-协议按 authority / lifecycle ownership 拆分，但**不是越多 Protocol/Profile 越好**。
+> **按 authority/lifecycle 拆协议；只标准化独立实现若不共享就会无法互操作或破坏安全的事实。**
 
 ```text
 Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
 ```
 
-一个规则只有在以下情况才进入正式 Contract/Profile：
+---
 
-> 两个独立实现若不共享该规则，就会无法互操作、产生 authority/identity/state/order/recovery 分歧，或破坏安全边界。
+## 决策 1：Subsystem Control 只管理 Runtime Lifecycle
 
-共享物理 Transport 不代表共享 protocol identity/lifecycle/revision/error/recovery；反过来，纯 Host glue、presentation mapping、deployment policy 也不因为跨模块存在就自动成为协议。
-
-## 决策 1：Subsystem Control v1 只管理 Runtime lifecycle
-
-[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md) 只负责：
-
-```text
-bootstrap authentication
-Runtime identity
-initializing / ready / failed
-Main-owned shutdown
-Control-loss lifecycle
-```
-
-`ready`：
+`subsystem.status({state:"ready"})`：
 
 ```json
 {"state":"ready"}
 ```
 
-不携 Renderer Data endpoint、MessagePort、Data credential 或 generation。
+只表示 Runtime required initialization完成并承担 Runtime Control Profile角色。
 
-endpoint-in-ready 从未形成 conformant implementation，因此 first implementation contract直接使用 lifecycle-only v1，不保留预实现草稿版本。
-
-Runtime Control Application Profile v1：
+不携/不暗示：
 
 ```text
-Subsystem Control v1
-+
-Frame / Call v1
+Renderer Data endpoint
+Data ticket/MessagePort
+Data generation/dataProfile
+Platform provisioning offer
+Frame / Render / InputTarget
 ```
 
-## 决策 2：Renderer Control 只复制逻辑 authority
+Data physical provisioning完全独立。
 
-Renderer Control Snapshot 只包含 Main-owned committed authority：
+---
+
+## 决策 2：Renderer Control 只复制 Main Logical Authority
+
+Renderer Control Snapshot包含：
 
 ```text
 Runtime projection
 Frame Stack
 Activation
 InputTarget
-DataAuthority {subsystemKey, generation, connectionProfile}
+DataAuthority {
+  subsystemKey,
+  generation,
+  dataProfile
+}
 ```
 
-不得长期复制：
+当前：
+
+```text
+dataProfile = loomrealm.renderer-data/1
+```
+
+不包含：
 
 ```text
 WebSocket URL
 MessagePort
-bearer connection token
-transport bootstrap material
+bearer ticket
+Platform provisioning handle
+Interest Registry
+Render State
 ```
 
-这些是 Host/Platform implementation material，不是 Renderer Control authority state。
+旧字段名 `connectionProfile` 已由 ADR 0018直接从 current v1删除；`dataProfile` 明确表示完整 Data application stack，而不是 connection technology。
 
-## 决策 3：Data authority 使用 generation 模型
+---
 
-Main 是每个 Subsystem Data Connection authority。
+## 决策 3：Generation + Data Profile Model
+
+Main是 DataAuthority唯一公共 authority。
 
 ```text
-DataAuthority generation N
-    = Main 当前允许 current Renderer 建立/持有该 Subsystem 第 N 代 Data Connection
+DataAuthority(S,G,P)
 ```
 
-`generation` Session-local、Subsystem-scoped、positive safe integer、never reused。
+含义：current Renderer participant被允许为 Subsystem `S` 持有 generation `G`、Data Profile `P` 的 current Data Connection。
 
-Data Connection Contract定义建立后的 identity/current→retired/cardinality/revocation/reconnect semantics。
+`generation`：
 
-Desktop/PWA 可以使用不同 WebSocket/ticket/MessagePort 建立机制；这些机制是 Host implementation，不要求再定义 Data Bootstrap application protocol。Host只必须证明 carrier安装前正确绑定 current Session/Renderer/subsystem/generation。
+```text
+positive safe integer
+Subsystem-scoped within Session
+never reused
+strictly increases on authority replacement
+```
 
-## 决策 4：Renderer Control 是 Data authority 的父级 authority
+`dataProfile`：
+
+```text
+complete Data application stack identity
+immutable within one generation
+not transport
+not credential
+```
+
+Profile改变必须 fresh generation。
+
+---
+
+## 决策 4：Renderer Data Application Profile v1
+
+Current Profile：
+
+```text
+loomrealm.renderer-data/1
+= Data Connection v1
++ User Input v1
++ Render Update v1
+```
+
+它冻结：
+
+```text
+child protocol version binding
+one UTF-8 JSON text carrier unit
+one connection-wide Data dispatcher
+input.* / render.* demux
+fresh-carrier child baseline
+```
+
+Profile不增加 Data hello/RPC/ACK。
+
+这解决了“Connection/Input/Render以后如何版本组合”的问题，而不把 Platform bootstrap wire误升成 application protocol。
+
+---
+
+## 决策 5：Renderer Control 是 DataAuthority 的父级 Authority
 
 Renderer失去 current Main Control authority：
 
@@ -105,153 +155,266 @@ Renderer失去 current Main Control authority：
 stop ordinary input
 invalidate InputTarget
 invalidate DataAuthority
-retire old Renderer⇄Subsystem Data Connections
-reconnect Main
-obtain fresh full Authority Snapshot
-Host re-establishes current Data carriers
+retire old Renderer Data Connections
+fresh Renderer Control hello
+obtain current full Snapshot
+Platform re-establishes authorized Data carriers
 ```
 
-Render presentation cache MAY保留最后合法状态；Data carrier retire不等于 Render Domain destroy。
+Renderer具有 Control mirror，因此可独立校验 `RendererDataBinding`给出的 S/G/P是否匹配 current authority。
 
-## 决策 5：Renderer Control 使用 full snapshot
+---
 
-Renderer Control v1：
+## 决策 6：Subsystem 不复制第二份 Main DataAuthority
+
+Subsystem没有 Renderer Control mirror，也不增加新的 Main→Subsystem DataAuthority application protocol。
+
+System Platform DataConnectionBroker负责在 Subsystem side产出：
+
+```text
+SubsystemDataBinding
+    → already authority-bound {generation,dataProfile,carrier}
+```
+
+Platform必须在安装/交付前证明：
+
+```text
+current Session
+current Renderer
+own subsystemKey
+current generation
+current dataProfile
+```
+
+Subsystem SDK仍验证 local owner、shape、current carrier replacement、staleness等 local invariants，但不通过第二份 Main authority source重复签发 DataAuthority。
+
+这样保持 Main单一 authority，而不是为了“多验证一次”制造双权威。
+
+---
+
+## 决策 7：Data Physical Provisioning 属于 Platform
+
+典型：
+
+```text
+Hostra
+    DataConnectionBroker
+    → Runner provisioning IPC
+    → endpoint/ticket
+    → Data WebSocket
+
+PWA
+    DataConnectionBroker
+    → Worker provisioning path
+    → transferred MessagePort
+```
+
+这些 material/schema/API默认属于 Platform implementation。
+
+Provisioning：
+
+```text
+!= Runtime Control
+!= Renderer Control
+!= Renderer Data application payload
+!= business API
+```
+
+Provisioning/Data establishment failure本身：
+
+```text
+!= Runtime failure
+!= Frame unwind
+!= DataAuthority mutation
+```
+
+仍授权时可以 later fresh establishment。
+
+---
+
+## 决策 8：Data Connection Lifecycle 独立
+
+```text
+current → retired
+```
+
+每 Subsystem / current Renderer最多 one current Data Connection。
+
+同一 `S/G/P`允许：
+
+```text
+carrier A current
+→ retired/lost
+→ carrier B fresh current
+```
+
+这不是新的 generation，也不是 Runtime/Frame recovery。
+
+```text
+Frame close != Data retire
+Data loss != Runtime failure
+Data reconnect != Frame recovery
+Data retire != Render Domain destroy
+```
+
+---
+
+## 决策 9：Renderer Control Full Snapshot
+
+Renderer Control v1继续：
 
 ```text
 full Authority Snapshot
 monotonic Session-local revision
 revision gap allowed
-publication coalescing allowed
+latest-state coalescing
 no historical replay
 reconnect = current snapshot
 ```
 
-Topology/message size必须 bounded；慢 Renderer使用 latest-state coalescing，不无界保留历史 snapshot。
+不建立 delta/resync log作为另一 authority source。
 
-## 决策 6：Frame suspend 语义属于 Frame v1 主契约
+---
 
-不修改七方法 wire。
+## 决策 10：Frame Suspend 语义留在 Frame v1
 
 ```text
 child-call suspension
-    → corresponding child terminal outcome
-    → frame.resume(...returnedFrameId,result,freshActivation)
+    → corresponding Child terminal Outcome
+    → frame.resume(...freshActivation)
 
 administrative frame.suspend
-    → no generic v1 resume
-    → closing/closed or failure cleanup
+    → no generic normal resume
+    → later close/failure cleanup
 ```
 
-不得伪造 child outcome。该语义已经直接并入 Frame / Call v1 与其 Conformance，不再保留独立 clarification 事实来源。
+不增加另一个 suspend clarification protocol。
 
-## 决策 7：Content API 与 Host credential plumbing 分离
+---
 
-Content API定义：
+## 决策 11：Content API 与 Platform Credential Plumbing 分离
+
+Content API定义 logical readonly route/cache/error/integrity/request-authorization semantics。
+
+Desktop bearer issuance/injection/rotation与 PWA same-origin Service Worker authority属于 Platform implementation。
 
 ```text
-logical readonly routes
-MIME/cache/version
-errors/integrity
-request authorization semantics
+no Content Access Bootstrap application Profile
+no credential in Frame/Render/business payload
 ```
 
-Desktop Host如何签发、保存、注入、轮换 scoped bearer是 Host implementation responsibility；PWA使用 same-origin Service Worker authority。
+只有真实第三方 interoperable credential-delivery wire出现后才重新评估。
 
-因此：
+---
+
+## 决策 12：Render `tag` / Presentation 不形成 Component Profile
+
+Render Core复制：
 
 ```text
-no Content Access Bootstrap/Profile
-no credential in Frame / Render / URL query / ordinary business payload
+key / tag / attrs / data / children
 ```
 
-如果未来真的出现独立 Host 与独立 Content client之间需要标准化的 credential-delivery wire，再基于真实 interoperability requirement设计，而不是预先制造 Profile。
+`tag` opaque。
 
-## 决策 8：Render tag / presentation 不形成 Component Profile
-
-Render Update只复制：
+不定义：
 
 ```text
-key
-tag
-attrs
-data
-children
-```
-
-其中 `tag` 是 opaque string。Render Core不定义：
-
-```text
-known/unknown tag
 Component Registry/Factory
-component/module loading
+known/unknown tag
+component module loading
 per-tag schema
 DOM/Canvas/WebGL mapping
 ```
 
-这些由 Subsystem/Renderer实现掌控。合法 Render authoritative state不依赖某个本地 Component Factory是否存在。
+这些是 Renderer/product implementation。
 
-## 决策 9：Standard Input payload留在 User Input v1
+---
 
-跨 wire双方必须共同理解的 keyboard/pointer/gamepad canonical payload schema直接属于 User Input v1。
+## 决策 13：Standard Input Payload 属于 User Input v1
 
-以下不形成 Standard Input Mapping Profile：
+keyboard/pointer/gamepad canonical payload若影响双方 wire解释，就直接冻结在 User Input v1。
 
-```text
-DOM/OS/device event adapter
-polling cadence
-internal lookup table
-platform compatibility code
-```
+DOM/OS/device adapter、poll cadence、lookup table不形成 Standard Input Mapping Profile。
 
-若某 identifier/coordinate/button语义影响 wire解释，则与 payload schema一起冻结在 User Input v1。
+---
 
-## 决策 10：不要为实现参数制造 Profile
+## 决策 14：不要为 Implementation Parameters 制造 Profile
 
-以下默认不是独立协议/Profile：
+默认不单独协议化：
 
 ```text
 HTTP Range support
-Event FIFO concrete capacity
-Event drop-oldest/drop-newest preference
-Content resource/concurrency/rate/timeouts
+Event queue concrete capacity/drop policy
+Content deployment size/concurrency/rate/timeouts
 Patch-vs-Snapshot heuristic
 cache/index/scheduler size
-Host token/ticket/MessagePort delivery mechanism
+Runner provisioning internal payload
+Host token/ticket/MessagePort delivery shape
 ```
 
-Range若支持直接遵守标准 HTTP semantics；队列/部署参数只冻结 correctness所需的 bounded/error行为。
+只冻结 correctness所需的 observable semantics和 bounds。
+
+---
+
+## 决策 15：Current Message-oriented Profiles 统一 JSON Text
+
+依据 ADR 0018，current Runtime Control / Renderer Control / Renderer Data Profiles统一：
+
+```text
+one carrier application unit
+= one UTF-8 JSON text string
+```
+
+```text
+WebSocket   text message
+MessagePort postMessage(string)
+```
+
+Structured Clone只用于 Platform bootstrap/Port transfer。
+
+Foundation仍把 carrier string视为 opaque；JSON semantics在 wire/Profile层。
+
+---
 
 ## 当前协议主线
 
 ```text
 Game Package v1
-Desktop Node.js Launcher v1
+Desktop Node.js Launcher / Subsystem Runner Profile v1
 Subsystem Control v1
 Runtime Control Application Profile v1
 Frame / Call v1 + Conformance
 Main ⇄ Renderer Control v1
+Renderer Data Application Profile v1
 Renderer ⇄ Subsystem Data Connection v1
 User Input v1
 Render Update v1
 Content API v1
 ```
 
-其中 Launcher Profile 和 Runtime Control Application Profile 保留，是因为它们分别定义真实的 launcher interoperability boundary 与 Control+Frame composition boundary，而不是单纯实现策略。
+其中 Node Runner Profile定义真实 Desktop Runtime integration boundary；Runtime/Data Application Profiles定义真正的 protocol composition/version binding，而不是单纯 Host glue。
+
+---
 
 ## 结果
 
-每个正式协议只回答一个真正跨角色的问题：
+每个正式边界只回答自己的问题：
 
 ```text
+Game Package       → 哪些 business Subsystem/module？
+Node Runner Profile→ Desktop 如何受控加载该 module并监督 Runtime？
 Subsystem Control  → Runtime是谁、是否ready、如何停止？
-Frame / Call       → 谁调用谁、Frame/Activation如何提交与失败收敛？
-Renderer Control   → Main当前公开给Renderer的authority是什么？
-Data Connection    → 当前Data carrier是否具有合法authority？
-User Input         → 当前Activation下 canonical input如何传递？
-Render Update      → Subsystem authoritative Render state如何复制？
+Frame / Call       → Frame/Activation如何提交与失败收敛？
+Renderer Control   → Main当前公开 authority是什么？
+Data Profile       → current Data carrier运行哪套 child stack？
+Data Connection    → carrier是否 current/合法？
+User Input         → ordinary input如何受 authority/Interest约束？
+Render Update      → authoritative Render如何复制？
 Content API        → logical readonly content如何读取？
+Platform           → physical Runner/carrier/provisioning如何实现？
 ```
 
-最终目标不是“协议越少”或“协议越多”，而是：
+最终目标：
 
-> **单一 authority、闭合 lifecycle、最小 wire surface，并且只标准化真正需要互操作的事实。**
+> **单一 authority、闭合 lifecycle、最小 wire surface、明确 version composition，并且只标准化真正影响 interoperability 的事实。**
