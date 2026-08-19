@@ -3,9 +3,9 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Control Plane、System Data Plane、Content Plane、协议职责域、authority/recovery 与 Transport binding  
-> 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
-> 最近复核：2026-08-09
+> 主要定义：Control Plane、System Data Plane、Content Plane、authority/recovery 与 communication-facing Platform Binding  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
+> 最近复核：2026-08-19
 
 ## 1. 三类通信平面
 
@@ -36,9 +36,13 @@ shared Transport != shared protocol domain
 Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
 ```
 
+实际 carrier 的创建属于 Platform Composition；本文件只定义通信相关的 role/authority 边界。
+
+---
+
 ## 2. Main ⇄ Subsystem Runtime Control
 
-[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md) 只拥有 Runtime identity/lifecycle：
+Subsystem Control v1 只拥有 Runtime identity/lifecycle：
 
 ```text
 Subsystem → Main
@@ -50,11 +54,11 @@ Main → Subsystem
 ```
 
 ```text
-spawn != connected != identified != ready
+launch != connected != identified != ready
 ready != Data Connection established
 ```
 
-`ready`不携 Data endpoint、MessagePort、Data credential 或 DataAuthority。
+`ready` 不携 Data endpoint、MessagePort、Data credential 或 DataAuthority。
 
 当前组合：
 
@@ -66,9 +70,11 @@ Subsystem Control v1
 Frame / Call v1
 ```
 
-同一 sender跨 Control + Frame 共享 Connection-lifetime Request-ID namespace；one JSON-RPC message per transport unit；no JSON-RPC Batch。
+同一 sender 跨 Control + Frame 共享 Connection-lifetime Request-ID namespace；one JSON-RPC message per transport unit；no JSON-RPC Batch。
 
-`subsystem.hello.protocolVersions`只协商 Control v1；Frame v1由 Profile静态绑定。
+物理 Control carrier 由 Platform Runtime Control Binding 建立；建立后 WebSocket/MessagePort 不改变 application semantics。
+
+---
 
 ## 3. Frame Failure Boundary
 
@@ -80,30 +86,13 @@ Timeout/loss   → ambiguous → Runtime failure
 
 Frame v1 no retry/replay。
 
-Runtime failure：
+Runtime failure unwind authority只在 Main；Data/Renderer/Transport/Platform reconnect不得计算、确认或取消 unwind root。
 
-```text
-failedRuntimeKeys
-→ lowest failed-runtime Frame
-→ whole suffix Top→Bottom
-→ failed logical retire / healthy close
-→ fixed-point expansion
-→ accepted outcome preserved
-→ fresh final Caller resume or Stack empty
-```
-
-Data/Renderer/Render reconnect不得计算、确认或取消 unwind root。
+---
 
 ## 4. Main ⇄ Renderer Control v1
 
-Renderer Control复制 Main committed authority：
-
-```text
-renderer.hello
-renderer.state(full Snapshot)
-```
-
-Snapshot包含：
+Renderer Control 复制 Main committed authority：
 
 ```text
 Runtime projection
@@ -121,22 +110,15 @@ Render State
 Content Grant
 ```
 
-恢复：
+恢复使用 full current Snapshot；Control loss/replacement 撤销 old InputTarget/DataAuthority 使用并 retire old Data Connections。
 
-```text
-full Snapshot
-Session-local monotonic revision
-revision gap allowed
-latest-state coalescing
-no replay/patch
-Control loss → revoke InputTarget/DataAuthority → retire Data Connections
-```
+Renderer Control 与 Renderer⇄Subsystem Data 没有 cross-connection total order；User Input 只组合各自当前状态，不要求跨通道 barrier/ACK。
 
-InputTarget是 one-shot lease；撤销后 same `frameId + activationId`不得重新成为 ordinary input target。
+---
 
 ## 5. Data Authority
 
-Main是 Renderer⇄Subsystem Data authority。
+Main 是 Renderer⇄Subsystem Data authority。
 
 ```text
 DataAuthority {
@@ -155,31 +137,44 @@ never reused
 != transport reconnect counter
 ```
 
-Renderer Control只发布逻辑 authority；Host/Platform carrier establishment不进入 Authority Snapshot，也不进入 Runtime `ready`。
+Renderer Control 只发布逻辑 authority；实际 carrier establishment 属于 Platform Data Connection Broker。
 
-## 6. Renderer ⇄ Subsystem Data Connection v1
+---
 
-[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md) 的 Core没有 application methods，只定义 current carrier authority。
+## 6. Data Connection Broker 与 Data Connection v1
 
-Identity：
-
-```text
-Session
-+ current Renderer participant
-+ subsystemKey
-+ generation
-```
-
-Lifecycle：
+系统级物理协调：
 
 ```text
-current → retired
-retired terminal
+Main current DataAuthority(S,G)
+        ↓
+Platform Data Connection Broker
+       / \
+      ▼   ▼
+Renderer Subsystem
 ```
 
-每个 `(Session, current Renderer participant, subsystemKey)`同时最多一条 current carrier；installation必须 serialized。
+Broker 在 carrier 安装为 current 前必须绑定：
 
-同 generation仍授权时，旧 carrier retired后 MAY establish fresh carrier。
+```text
+current Session
+current Renderer participant
+subsystemKey
+generation
+```
+
+Broker 不拥有 generation，也不能把 endpoint/ticket/Port 当作 DataAuthority identity。
+
+Data Connection v1 本身只定义建立后的合法 carrier：
+
+```text
+identity = Session + current Renderer + subsystemKey + generation
+lifecycle = current → retired
+```
+
+每个 `(Session, current Renderer, subsystemKey)` 同时最多一条 current carrier；installation serialized。
+
+同 generation 仍授权时，旧 carrier retired 后 MAY establish fresh carrier。
 
 ```text
 Data loss != Runtime failure
@@ -189,94 +184,91 @@ Activation replacement != Data generation replacement
 Data retire != Render Domain destroy
 ```
 
-## 7. Host / Platform Binding
+---
 
-实际 carrier建立属于 Host/Platform Profile：
+## 7. Communication-facing Platform Bindings
+
+完整 Platform architecture 见 [平台组合系统](./platform-composition-system.md)。通信面只需要这些投影：
 
 ```text
-Desktop
-    Control: localhost WebSocket
-    Data: endpoint/ticket chosen by Desktop Host binding
+Runtime Control Binding
+Renderer Control Binding
+Data Connection Broker
+Content Binding
+```
+
+典型实现：
+
+```text
+Hostra Desktop
+    Runtime Control      localhost WebSocket
+    Renderer Control     localhost WebSocket
+    Data                 authenticated localhost carrier
+    Content              localhost HTTP
 
 PWA
-    Control: authenticated MessagePort
-    Data: Host-created/transferred MessagePort
+    Runtime Control      MessagePort
+    Renderer Control     MessagePort
+    Data                 MessageChannel / transferred Port
+    Content              same-origin Fetch / Service Worker
 ```
 
-Binding安装 current carrier前必须安全绑定：
+Endpoint、ticket、Port、Worker startup message 都是 platform/bootstrap material，不是 application authority。
 
-```text
-current Session
-current Renderer participant
-subsystemKey
-current generation
-```
-
-Endpoint、ticket、Port都不是 DataAuthority，也不是 Runtime readiness。
+---
 
 ## 8. Data Application Domains
 
-current Data Connection承载两个独立 application domains：
+current Data Connection 承载两个 sibling domains：
 
 ```text
 User Input
-    Subsystem → Renderer: Input Interest
+    Subsystem → Renderer: Frame Interest Registry snapshot
     Renderer → Subsystem: State / Event / Reset
 
 Render Update
     Subsystem → Renderer: Domain Registry / Snapshot / Patch / Event
 ```
 
-两者共享 carrier，但独立定义 payload、ordering、backpressure、recovery 与 limits。
+两者共享 carrier，但独立定义 payload、ordering、backpressure、recovery 与 lifecycle。
+
+---
 
 ## 9. User Input v1
 
-[User Input v1](../15-contracts/user-input-v1.md) 的 authority：
-
 ```text
-Main InputTarget / Activation
-∩ current matching Data Connection
-∩ current Subsystem Input Interest
-∩ Renderer Producer availability
+Effective(F,A,C)
 =
-Effective Channel
+current matching Data Connection
+∧ Main current InputTarget == (S,F,A)
+∧ mirrored Frame F active/current Activation A
+∧ C ∈ Interest[F]
+∧ Producer(C) available
 ```
 
-Interest：
+Interest 是 Subsystem-owned Frame-scoped configuration：
 
 ```text
-Subsystem → Renderer
-full replacement exact set
-fresh Data Connection default empty
+full Frame Interest Registry replacement
+fresh Data Connection registry empty
+no ACK/revision/patch/wildcard
 not authority
 ```
 
-`.state` 每次 non-effective→effective 建立 fresh current snapshot；`.event`只发送 future transient events；Reset清理当前 Frame+Activation input state并形成 ordering barrier。
-
-fresh Data Connection：Interest从 empty重建，Event不重放，State重新 baseline。
-
-## 10. Render Update / Domain Tree
-
-当前模型：
+Control authority 与 Interest snapshot 可任意顺序到达：
 
 ```text
-Subsystem Runtime
-    0..N Render Domains
-
-Domain
-    domainId
-    zIndex
-    0..N ordered roots
-
-Node
-    key
-    tag
-    attrs : string→string
-    data  : JSON object
-    children[] ordered
+Interest first  → store; inert until authority
+Authority first → no input until Interest[F]
 ```
 
-Domain是 Render lifecycle / atomic-state / global-composition unit；Domain Host不是 Render Node。
+Renderer 不解释 call/return/push/pop/unwind，只对 current facts 做 conjunction。
+
+`.state` 每次 non-effective→effective 建 fresh current self-contained baseline；`.event` future-only/no replay。Activation replacement不复用旧 Input State/Event；Reset清理 Activation-scoped state，不修改 Frame Interest。
+
+---
+
+## 10. Render Update
 
 方向固定：
 
@@ -284,90 +276,83 @@ Domain是 Render lifecycle / atomic-state / global-composition unit；Domain Hos
 Subsystem → Renderer only
 ```
 
-当前 incremental closure candidate：
+当前模型：
 
 ```text
 render.domains
-    full Domain Registry / lifecycle authority
-
 render.snapshot(revision)
-    fresh baseline / full commit
-
 render.patch(baseRevision, revision)
-    exact R→R+1 atomic incremental commit
-    insert / remove / move / update by stable key
-
 render.event
-    transient presentation impulse
 ```
 
-Recovery：
+fresh Data Connection：
 
 ```text
-fresh Data Connection
-→ current Registry
-→ fresh Snapshot for every current Domain
+current Registry
+→ fresh Snapshot every current Domain
 → ordinary Patch/Event
 ```
 
 无 ACK/NACK、Patch history replay、resume cursor、Renderer→Subsystem resync RPC。
 
-## 11. Backpressure
+Render lifecycle 不由 Frame lifecycle 或 Platform carrier lifecycle拥有。
 
-Renderer Control：bounded latest-state full-Snapshot coalescing；持续无法 drain 时关闭 Control Connection，以 fresh Snapshot恢复。
+---
 
-Render：authoritative state progress优先于 transient Event backlog。
+## 11. Backpressure / Carrier Minimum
+
+Transport adapter向上至少提供：
 
 ```text
-small desired-state diff   → Patch
-large/complex backlog      → full Snapshot
-continuity failure         → retire carrier → fresh Registry + Snapshots
+ordered delivery per direction
+application-message boundary
+observable close/loss
+bounded buffering
+no adapter-created application retry/duplicate
 ```
 
-Event bounded FIFO可以丢；Event loss不破坏 authoritative convergence。
+不要求两个方向 global total order。
+
+各 child protocol 自己定义 coalescing/recovery/backpressure；Platform 不增加统一 replay/resync router。
+
+---
 
 ## 12. Content Plane
 
-Readonly Content API定义 logical manifest/record/group/resource access。
+Readonly Content API 定义 logical access、cache/version/error/integrity/authorization semantics。
 
 ```text
-Content API
-    request/response/cache/version/error/integrity
-
-Content Access Bootstrap/Profile
-    capability distribution/rotation
+Desktop → filesystem + localhost HTTP
+PWA     → Fetch + Service Worker / OPFS
 ```
 
-Content credential不得进入 Frame、Renderer Authority Snapshot或 Render State。
+这些是 Platform/Adapter realization；credential/bootstrap plumbing 不进入 Frame、Renderer Authority Snapshot、Render State 或 ordinary business payload。
+
+---
 
 ## 13. Security / Fail Closed
 
-- wire视为不可信；
-- Main是 Frame/Input/Data authority；
-- Subsystem Control只拥有 Runtime identity/lifecycle；
-- Runtime `ready`不得传 Data endpoint/credential；
-- Renderer Core是 ordinary InputTarget sender-side trusted enforcement point；
+- wire 视为不可信；
+- Main 是 Frame/Input/Data authority；
 - Input Interest/Producer availability只能过滤，不能授予 authority；
-- InputTarget lease撤销后 same `frameId + activationId`不 re-grant；
-- Renderer Control不携 Data bootstrap secret；
-- Control loss/replacement撤销 Renderer input/Data authority；
+- Renderer Control loss/replacement撤销 old ordinary input/Data authority usage；
 - stale Activation input必须拒绝；
-- Render tag/data不得成为 executable/DOM command注入面；
-- transport不能成为 Runtime/Frame recovery authority。
+- Renderer Control不携 Data bootstrap secret；
+- Runtime `ready` 不传 Data endpoint/credential；
+- Platform/Transport不能成为 Runtime/Frame recovery authority；
+- Platform bootstrap material默认不升级为 application protocol。
 
-## 14. 当前推进状态
+---
 
-```text
-Game Package v1 / Desktop Launcher v1      current bootstrap baseline
-Subsystem Control v1                       Stabilizing
-Runtime Control Profile v1                 Stabilizing
-Frame / Call v1 + Conformance              Frozen
-Renderer Control v1                        Draft / near closure
-Data Connection v1                         Draft / lifecycle closed
-User Input v1                              Core semantic closure reviewed
-Render Update incremental design           Closure Candidate
-    ↓
-Renderer Component / Input Mapping Profiles
-Host Bootstrap / Data Binding Profiles
-Content Access Profile
-```
+## 14. 核心不变量
+
+1. Control/Data/Content 是独立通信平面；
+2. physical carrier establishment 属于 Platform Composition；
+3. Runtime Control application semantics不随 WebSocket/MessagePort改变；
+4. Renderer Control只复制逻辑 authority；
+5. Data Connection Broker不拥有 Main DataAuthority；
+6. Data loss不等于 Runtime failure/Frame unwind；
+7. User Input Interest 是 Frame-scoped configuration；
+8. User Input 不解释 Frame stack operation history；
+9. Render 与 User Input 是 Data Connection sibling domains；
+10. Content logical semantics 不受平台 adapter 选择影响。
