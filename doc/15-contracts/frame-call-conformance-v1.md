@@ -4,15 +4,19 @@
 > 状态：Active / Normative / Frozen  
 > Profile 版本：1  
 > 适用协议：`loomrealm.frame-call / 1`  
-> 依赖：[Frame / Call Protocol v1](./frame-call-protocol-v1.md)  
-> 决策记录：[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)  
-> 最近复核：2026-08-09
+> 依赖：[Frame / Call Protocol v1](./frame-call-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)  
+> 决策记录：[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)、[ADR 0018](../decisions/0018-preimplementation-v1-closure.md)  
+> 最近复核：2026-08-19
 
-本文只定义如何验证 Frame / Call v1；不新增业务语义。与主协议冲突时，以 [Frame / Call v1](./frame-call-protocol-v1.md) 为准。
+本文只定义如何验证 Frame / Call v1；与主协议冲突时以主协议为准。
+
+2026-08-19 首次实现前的 transport mapping reset 将 PWA fixture从 structured object carrier改为 `postMessage(string)`；Frame transaction/wire method semantics不变。
+
+---
 
 ## 1. Conformance Claim
 
-正式声明只能使用：
+只能声明：
 
 ```text
 LoomRealm Frame / Call v1 Main Conformant
@@ -20,7 +24,7 @@ LoomRealm Frame / Call v1 Subsystem Conformant
 LoomRealm Frame / Call v1 Transport Adapter Conformant
 ```
 
-Report 至少记录：
+Report至少：
 
 ```text
 protocol = loomrealm.frame-call
@@ -30,7 +34,9 @@ role = main | subsystem | transport
 result = pass
 ```
 
-不得声明 partial compatibility，例如 `v1 except recovery`、`Batch C compatible`、`v1 with retry extension`。
+不得声明 partial compatibility。
+
+---
 
 ## 2. Fixture Manifest
 
@@ -57,13 +63,13 @@ interface FrameCallFixtureDescriptorV1 {
 }
 ```
 
-`fixtureSetRevision` 只表示覆盖增加，不改变 protocol version。
+fixture revision只表示覆盖增加/当前 v1 preimplementation correction，不成为业务协议协商字段。
 
-Behavioral fixture 至少表达：initial normalized state、ordered inputs/events、expected outbound wire/commit、fault injection、forbidden outputs、final normalized state。
+---
 
 ## 3. Normalized State / Faults
 
-Main trace 至少归一化：
+Main trace至少：
 
 ```text
 Stack bottom→top
@@ -74,7 +80,7 @@ failedRuntimeKeys
 pending Request/fault when relevant
 ```
 
-Harness 至少支持：
+Harness至少支持：
 
 ```text
 timeout
@@ -87,9 +93,11 @@ protocol-error
 late-response
 ```
 
-Timeout SHOULD 使用 virtual/injectable monotonic clock。
+Timeout SHOULD使用 virtual/injectable monotonic clock。
 
-## 4. Identity / Lifecycle Required Fixtures
+---
+
+## 4. Identity / Lifecycle
 
 ```text
 frame-id-session-unique
@@ -107,12 +115,12 @@ no-two-inputtargets
 frame-render-data-independence
 ```
 
-### Suspension provenance
+Suspension：
 
 ```text
 explicit-suspend-revokes-activation
 explicit-suspend-disables-input
-explicit-suspend-produces-administrative-suspended-state
+explicit-suspend-administrative-state
 explicit-suspend-no-generic-resume
 explicit-suspend-may-close
 explicit-suspend-timeout-runtime-fatal
@@ -122,9 +130,9 @@ administrative-suspend-cannot-forge-returned-child
 administrative-suspend-cannot-reuse-old-activation
 ```
 
-这些 fixture 已并入主协议，不再依赖独立 clarification 文档。
+---
 
-## 5. Wire Schema Required Fixtures
+## 5. Wire Schema
 
 ```text
 exact-seven-methods
@@ -144,7 +152,9 @@ no-frame-reactivate
 extra-field-invalid-params
 ```
 
-## 6. Transaction Required Fixtures
+---
+
+## 6. Transactions
 
 ```text
 initial-initialize-before-activate
@@ -168,7 +178,9 @@ postcommit-no-activation-rollback
 accepted-outcome-terminal
 ```
 
-## 7. Errors / Timeout Required Fixtures
+---
+
+## 7. Error / Timeout
 
 ```text
 success-known-commit
@@ -192,7 +204,9 @@ protocol-error-fatal
 no-caller-driven-cancel
 ```
 
-## 8. Runtime Failure Required Fixtures
+---
+
+## 8. Runtime Failure
 
 ```text
 lowest-failed-runtime-occurrence-root
@@ -221,13 +235,14 @@ zero-frame-runtime-failure-keeps-stack
 session-termination-no-forced-resume
 ```
 
-## 9. Hard Limit Fixtures
+---
 
-每个限制覆盖 exactly-at-limit 与 one-over-limit：
+## 9. Hard Limits
+
+每项 exactly-at-limit / one-over-limit：
 
 ```text
-reference-message-1mib
-websocket-actual-text-1mib
+actual-json-text-message-1mib
 json-depth-64
 business-jsonvalue-512kib
 json-string-256kib
@@ -243,7 +258,7 @@ request-id-max-safe-integer
 request-id-reuse-rejected
 ```
 
-还必须：
+共同：
 
 ```text
 nan-rejected
@@ -256,11 +271,13 @@ jsonrpc-batch-rejected
 invalid-response-is-protocol-fatal
 ```
 
-Desktop 同时验证 actual complete WebSocket text bytes 与 reference compact equivalent；PWA object carrier验证 reference compact equivalent。
+所有 transport都直接验证实际 UTF-8 JSON text carrier unit；不存在 PWA object/reference-equivalent独立计量规则。
 
-## 10. Deadline Fixtures
+---
 
-Main role：
+## 10. Deadlines
+
+Main：
 
 ```text
 main-initialize-deadline-present
@@ -270,14 +287,14 @@ main-resume-deadline-present
 main-close-deadline-present
 ```
 
-Subsystem role：
+Subsystem：
 
 ```text
 subsystem-call-deadline-present
 subsystem-return-deadline-present
 ```
 
-共同验证：
+共同：
 
 ```text
 deadline-min-1000ms
@@ -290,69 +307,68 @@ deadline-uses-monotonic-clock
 timeout-remains-ambiguous-no-retry
 ```
 
-## 11. Request ID Fixtures
+---
+
+## 11. Request ID
 
 同一 sender / Control Connection：
 
 ```text
 positive-safe-integer-only
-zero-rejected
-negative-rejected
-fraction-rejected
-string-id-rejected
-null-id-rejected
+zero/negative/fraction/string/null-rejected
 lifetime-reuse-rejected
 pending-collision-across-control-domains-rejected
 late-response-cannot-match-new-operation
 allocator-exhaustion-does-not-wrap
 ```
 
-两个方向 sender namespace 独立。
+两个 sender方向 namespace独立。
 
-## 12. Desktop WebSocket Transport Fixtures
+---
+
+## 12. Desktop WebSocket Transport
 
 ```text
 websocket-text-message-only
-one-rpc-per-complete-websocket-message
+one-json-text-rpc-per-complete-message
 ordered-per-direction
 no-adapter-duplicate
 no-adapter-retry
 no-jsonrpc-batch
 sender-emits-compact-json
 actual-text-byte-hard-limit
-reference-compact-semantic-limit
-whitespace-cannot-bypass-actual-byte-limit
 oversize-protocol-failure
 connection-loss-propagated
 ```
 
-WebSocket fragmentation 不改变 complete-message application boundary。
+WebSocket fragmentation不改变 complete-message boundary。
 
-## 13. PWA MessagePort Transport Fixtures
+---
 
-在 Host 已建立 Control MessagePort 的前提下：
+## 13. PWA MessagePort Transport
+
+在 Platform已 provisioning Control MessagePort前提：
 
 ```text
-one-postmessage-one-rpc-object
-plain-json-compatible-only
-no-transferable-dependency
-undefined-rejected
-bigint-rejected
-arraybuffer-rejected
-messageport-rejected
-blob-rejected
-reference-compact-json-size-limit
+postmessage-payload-is-string
+one-json-text-rpc-per-postmessage
 ordered-per-direction
 no-adapter-duplicate
 no-adapter-retry
+no-jsonrpc-batch
+actual-utf8-text-byte-hard-limit
+structured-object-payload-rejected
+undefined/bigint/application-host-object-not-representable
 connection-loss-propagated
 ```
 
-Worker/MessagePort 如何建立属于 Host implementation，不属于 Frame conformance。
+MessagePort/Worker如何创建转移属于 Platform implementation，不属于 Frame conformance。
+
+---
 
 ## 14. Cross-transport Equivalence
 
-Desktop 与 PWA adapter 对同一 abstract trace MUST 产生相同 Frame authority结果：
+相同 abstract trace：
 
 ```text
 initial-frame-success
@@ -368,9 +384,13 @@ accepted-outcome-then-crash
 recovery-resume-failure
 ```
 
-允许差异只有 carrier/bootstrap/platform lifecycle integration；不允许差异包括 Frame schema、commit point、timeout含义、retry、suspend provenance、unwind root、outcome与 Activation。
+Desktop/PWA MUST产生相同 Frame authority/outcome/Activation/unwind结果。
 
-## 15. Version / Binding Fixtures
+允许差异只有 carrier/bootstrap/platform lifecycle integration。
+
+---
+
+## 15. Version / Binding
 
 ```text
 protocol-id-is-loomrealm-frame-call
@@ -383,25 +403,30 @@ no-runtime-frame-version-downgrade
 partial-method-implementation-not-conformant
 custom-retry-extension-not-conformant
 closed-schema-extension-not-conformant
+runtime-control-profile-uses-json-text-carrier
 ```
+
+---
 
 ## 16. Fixture Revision Rule
 
-新增 fixture MAY 增加 `fixtureSetRevision` 而保持 protocolVersion=1，只要它验证已经由 Frozen Contract 决定的行为。
+新增 fixture MAY增加 `fixtureSetRevision` 而保持 protocolVersion=1，只要验证当前 Frozen Contract已经决定的行为。
 
-如果 fixture 要求改变合法 wire、字段语义、commit point、suspend provenance、error classification、timeout/no-retry、failure unwind或 Frozen limits，则不能只升级 fixture revision，必须走新的协议版本决策。
+ADR 0018记录的首次实现前 transport-mapping correction需要新的 fixtureSetRevision，旧 revision不能自动声明通过当前 revision。
 
-正式 report MUST记录 tested `fixtureSetRevision`；旧 revision pass 不能自动声明通过更高 revision。
+后续若要改变 method/field/authority/commit/suspend/error/timeout/unwind/limit semantics，则必须重新经过协议版本/冻结治理；ADR 0018的 preimplementation特例不能无限延伸。
+
+---
 
 ## 17. Final Rule
 
-Frame / Call v1 conformance =：
-
 ```text
-Frozen Frame / Call v1 Contract
+Frame / Call v1 conformance
+=
+current Frozen Frame / Call v1
 + applicable fixture catalog
 + explicit fixtureSetRevision
 + same fault → same authority outcome
 ```
 
-内部 class/thread/queue/transport convenience 不属于兼容性依据。
+内部 class/thread/queue/transport convenience不属于 compatibility依据。
