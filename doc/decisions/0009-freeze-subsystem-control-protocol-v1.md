@@ -1,13 +1,15 @@
 # ADR 0009：Subsystem Control Protocol v1
 
 > 状态：Accepted  
-> 日期：2026-08-03；边界修订复核：2026-08-09  
-> 影响范围：Main ⇄ Subsystem Control Connection、Runtime Lifecycle、Runtime Supervisor、Desktop/PWA Bootstrap  
-> 当前契约：[Main ⇄ Subsystem Control Protocol v1](../15-contracts/subsystem-control-protocol-v1.md)
+> 日期：2026-08-03  
+> 最近复核：2026-08-19  
+> 影响范围：Main ⇄ Subsystem Control、Runtime lifecycle、Supervisor、Platform Runtime bootstrap  
+> 当前契约：[Main ⇄ Subsystem Control Protocol v1](../15-contracts/subsystem-control-protocol-v1.md)  
+> 当前组合：[Runtime Control Application Profile v1](../15-contracts/runtime-control-profile-v1.md)
 
 ## 背景
 
-Subsystem Runtime 需要独立于 Frame / Render / Data Plane 的最小 Control 协议，用于：
+Subsystem Runtime 需要独立于 Frame / Renderer Data / Render / Content 的最小 Control protocol：
 
 ```text
 bootstrap authentication
@@ -17,15 +19,13 @@ Main-owned graceful shutdown
 Control-loss lifecycle mapping
 ```
 
-设计过程中一度尝试把 Desktop Renderer Data endpoint 放入 `subsystem.status({state:"ready"})`。在任何 conformant implementation 出现之前，协议边界复核确认这会把 Runtime readiness 与 Renderer⇄Subsystem Data transport/bootstrap 错误绑定，因此该字段被从 first implementation contract 中直接移除。
+早期草案曾把 Renderer Data endpoint放入 `subsystem.status({state:"ready"})`。首次 conformant implementation前的边界复核确认这会错误绑定 Runtime readiness与 Data physical provisioning，因此直接从 current v1删除，不保留历史兼容字段。
 
-协议版本表示真实 interoperability boundary，不表示设计稿迭代次数；因此最终第一版实现契约仍为 v1。
+## 决策
 
-## 决定
+Subsystem Control v1只管理 Runtime Container identity/lifecycle。
 
-冻结/收敛 **Subsystem Control Protocol v1**，只管理 Runtime Container identity 与 lifecycle。
-
-Wire surface：
+Wire surface固定：
 
 ```text
 Subsystem → Main
@@ -36,16 +36,20 @@ Main → Subsystem
     subsystem.shutdown   Request
 ```
 
-### Identity
+---
 
-- `subsystem.hello` 是新 Control carrier 第一条 LoomRealm application message；
-- hello 成功后 Connection 永久绑定 `descriptor.key`；
-- Bootstrap Token 绑定一次 Launch Attempt，只能成功消费一次；
-- PID、端口、launchId、Runtime metadata 都不是协议 identity。
+## Identity
 
-### Runtime lifecycle
+- `subsystem.hello` 是新 Control carrier第一条 LoomRealm application message；
+- hello成功后 Connection永久绑定 `descriptor.key`；
+- bootstrapToken绑定一次 Launch Attempt，只能成功消费一次；
+- PID、Port、launchId、Runner/process identity都不是 Runtime protocol identity。
 
-Runtime 自报告：
+---
+
+## Runtime Lifecycle
+
+Runtime自报告：
 
 ```text
 initializing
@@ -54,7 +58,7 @@ stopping
 failed
 ```
 
-Main 观察：
+Main观察：
 
 ```text
 declared
@@ -67,52 +71,87 @@ stopped
 failed
 ```
 
-两套状态来源必须分离；`stopped` 只能由 Supervisor / Host 确认 Runtime 实际已退出。
+两套状态来源分离；`stopped`只能来自 Platform/Supervisor观察 actual Runtime termination。
 
-### `ready`
+---
 
-`ready` 的 closed schema：
+## `ready`
+
+Closed schema：
 
 ```json
 {"state":"ready"}
 ```
 
-只表示 Runtime required initialization 完成并能够承担 enclosing Runtime Control Profile 声明的角色。
+只表示 Runtime required initialization完成并能够承担 enclosing Runtime Control Profile声明的角色。
 
 不得携带或暗示：
 
 ```text
 Renderer Data endpoint
 MessagePort
-Data credential / DataAuthority
+Data ticket/credential
+Data generation/dataProfile
+Platform provisioning offer
 Frame / Activation / InputTarget
 Render State
 Content capability
 ```
 
-### Shutdown ownership
+因此：
 
-Main 拥有正常 Runtime shutdown intent。
+```text
+ready != DataAuthority exists
+ready != Data Connection exists
+ready != Platform provisioning occurred
+```
 
-`subsystem.status(state="stopping")` 只有在 Main 已进入 shutdown intent 后才合法。`subsystem.shutdown` Success 只表示 graceful shutdown 被接受，不表示 Runtime 已退出；最终 `stopped` 仍由 Supervisor observation 决定。
+---
 
-### Failure / reconnect
+## Shutdown Ownership
 
-- 无 shutdown intent 的 Control loss 或 Runtime exit → terminal Runtime failure；
-- exit code 0 不自动表示 expected stop；
-- v1 不支持 same-attempt Control reconnect / resume；
-- v1 不自动 restart。
+Main拥有正常 Runtime shutdown intent。
 
-### Error model
+`subsystem.status({state:"stopping"})` 只有 Main已进入 shutdown intent后合法。
 
-LoomRealm semantic error 使用：
+`subsystem.shutdown` Success只表示 graceful shutdown accepted；最终 `stopped`仍由 Supervisor actual termination observation决定。
+
+---
+
+## Failure / Reconnect
+
+```text
+unexpected Control loss without shutdown intent
+→ Runtime failed
+
+unexpected Runtime exit without shutdown intent
+→ Runtime failed
+```
+
+exit code 0不自动成为 expected stop。
+
+v1：
+
+```text
+no same-attempt Control reconnect
+no Runtime resume
+no automatic restart
+```
+
+新 Runtime必须 fresh Launch Attempt / token / Runner / Control lifetime。
+
+---
+
+## Error Model
+
+LoomRealm semantic error：
 
 ```text
 JSON-RPC error.code = -32000
-error.data.code = stable LoomRealm semantic code
+error.data.code = stable code
 ```
 
-v1 codes：
+当前：
 
 ```text
 BOOTSTRAP_AUTHENTICATION_FAILED
@@ -121,39 +160,83 @@ DUPLICATE_CONTROL_CONNECTION
 PROTOCOL_STATE_ERROR
 ```
 
-### Health / retry
+---
 
-v1 不定义 application heartbeat / health RPC，也不对 state-changing Control operation进行 application retry/replay。
+## Health / Retry
 
-Host MAY 使用 WebSocket ping/pong、MessagePort lifecycle、Process Supervisor 与 Host-defined deadline检测可用性。
+v1不定义 application heartbeat/health RPC，也不对 state-changing Control operation进行 application retry/replay。
+
+Platform MAY使用 WebSocket ping/pong、MessagePort lifecycle、Process/Worker Supervisor与 deployment deadline观察物理可用性；这些不形成新的 Control method。
+
+---
 
 ## Runtime Control Profile
 
-当前组合：
+当前：
 
 ```text
 Runtime Control Application Profile v1
-=
-Subsystem Control v1
-+
-Frame / Call v1
+= Subsystem Control v1
++ Frame / Call v1
 ```
 
-Control 和 Frame 保持独立状态机/版本空间；Data/User Input/Render 不进入 Runtime Control Profile。
+Control与 Frame保持独立 state machine/version/error semantics。
+
+Profile统一当前 carrier application mapping：
+
+```text
+one carrier unit
+= one UTF-8 JSON text string
+= one JSON-RPC message object
+```
+
+Desktop WebSocket / PWA MessagePort物理不同，但 application semantics相同。
+
+---
+
+## Data / Platform Provisioning Boundary
+
+Data/User Input/Render不进入 Runtime Control Profile。
+
+当前完整 Data路径已经由系统级 Platform Composition闭合：
+
+```text
+Main DataAuthority(S,G,dataProfile)
+→ Platform DataConnectionBroker
+→ RendererDataBinding / SubsystemDataBinding
+```
+
+Hostra可通过 Runner provisioning IPC交付 Data endpoint/ticket；PWA可通过 Worker provisioning path转移 MessagePort。
+
+这些是 Platform implementation material，不需要再设计一个“Renderer Data Connection Host binding / authentication application Profile”。
+
+只有未来第三方独立 Host/Runner之间确实需要公开 provisioning wire互操作时，才重新评估是否标准化该边界。
+
+---
 
 ## 结果
 
-- `spawn success != connected != identified != ready`；
-- Runtime lifecycle 与 Renderer Data bootstrap 解耦；
-- Desktop WebSocket Control 与 PWA MessagePort Control 可以共享同一 application schema；
-- Control v1 成为第一版实际实现目标；
-- Git history 保存早期 endpoint-in-ready 设计，不为其保留额外协议版本。
+- `launch != connected != identified != ready`；
+- Runtime lifecycle与 Renderer Data provisioning彻底解耦；
+- `ready`不携任何 Data material；
+- Control loss与 Data loss属于不同 failure domain；
+- WebSocket/MessagePort共享同一 JSON-text Control application model；
+- Platform provisioning不污染 Control wire；
+- current v1只有一个 first implementation model。
 
-## 暂缓
+---
 
-- application heartbeat / health probe；
-- Runtime restart / resume / checkpoint；
-- same-attempt reconnect；
-- Host timeout 默认秒数；
-- Bootstrap Token 精确熵与生成算法；
-- Renderer Data Connection Host binding / authentication Profile。
+## Deferred
+
+仍暂缓：
+
+```text
+application heartbeat / health probe
+Runtime restart / checkpoint
+same-attempt reconnect
+Host deployment timeout defaults
+bootstrapToken exact entropy/random algorithm
+third-party public Platform provisioning wire
+```
+
+其中最后一项只有出现真实跨实现 interoperability requirement时才进入正式协议设计。
