@@ -1,99 +1,79 @@
-# ADR 0005：Game Entry 声明 Subsystem Launcher
+# ADR 0005：Game Entry 声明 Subsystem Topology
 
-> 状态：Accepted；字段细节已由 ADR 0007/0008/0009 收敛  
+> 状态：Accepted（核心 topology/active Control bootstrap 方向保留；Launcher declaration 部分已由 [ADR 0018](./0018-preimplementation-v1-closure.md) 取代）  
 > 日期：2026-08-02  
-> 影响范围：Game Package、LoomRealm Main、Runtime Bootstrap、Desktop Subsystem Process、PWA Worker  
-> 后续收敛：[ADR 0007](./0007-subsystem-descriptor-mvp.md)、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md)、[ADR 0009](./0009-freeze-subsystem-control-protocol-v1.md)
+> 影响范围：Game Package、Main、Runtime Bootstrap、Desktop/PWA Runtime  
+> 历史后续：[ADR 0007](./0007-subsystem-descriptor-mvp.md)、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md)、[ADR 0009](./0009-freeze-subsystem-control-protocol-v1.md)、[ADR 0018](./0018-preimplementation-v1-closure.md)
 
 ## 背景
 
-更早的设计由运行平台提供固定 System Registry，Game Entry只声明初始 `systemId + params`，并禁止游戏包声明可执行 Subsystem。
+早期系统由平台固定 Registry 决定 Subsystem，Game Entry只声明初始系统。这样游戏包无法自描述当前 Session需要哪些 Subsystem，也无法让 Main建立完整 Runtime topology。
 
-该模型无法自描述游戏需要哪些 Subsystem、每个 Subsystem如何启动，也使 Main无法从 Game Entry重建完整 Runtime拓扑。
+## 仍然有效的核心决策
 
-同时，Main⇄Subsystem Control Bootstrap方向尚未冻结：可以由 Main反向连接子进程，也可以由 Main先开放统一 Control Endpoint、Subsystem主动连接。
+Game Entry必须声明当前 Session的完整 Subsystem topology，并在启动任何 business Runtime前形成完整 Descriptor Registry。
 
-## 核心决策
-
-采用：
+当前收口后的表达是：
 
 ```text
 Game Entry
 ├── initial target
-└── subsystem descriptors
-    ├── stable identity
-    ├── launcher declaration
-    └── optional launcher environment
+└── subsystems[]
+    └── { key, module }
 ```
 
-Main在 Session Bootstrap读取完整 Descriptor集合，并且只有声明过的 Subsystem可以由 Launcher启动。
+Main仍负责 logical launch intent；Platform Runtime Hosting实现物理 Runtime。
 
-Control bootstrap采用：
+Runtime Control bootstrap方向仍保持：
 
 ```text
-Main prepares Control endpoint/authentication state
-→ Main launches Runtime
-→ Subsystem actively connects Main Control carrier
-→ authenticated hello binds Runtime identity
-→ later status(ready)
+Main creates Launch Attempt/auth state
+→ Platform launches Runtime Runner
+→ Subsystem side obtains/establishes Control carrier
+→ subsystem.hello binds descriptor.key
+→ later subsystem.status(ready)
 ```
-
-Control connection成功不等于 Runtime ready。
-
-## 后续收敛
-
-本 ADR只保留“**Game Entry声明 Runtime topology + Main拥有 Launcher + Subsystem主动连接 Main**”这一架构决策。
-
-早期示例中的以下细节已经被后续 ADR替代，不是当前 contract：
 
 ```text
-id + name 双 identity
-launcher.type = javascript
-systemId
-ready(systemId)
-Game Package 必须因此保留第二个文档版本号
+launch != connected != identified != ready
 ```
 
-当前 first implementation contract由以下文档定义：
+这些结论继续有效。
+
+## 已被取代的历史部分
+
+本 ADR最初把 Descriptor设计为“stable identity + launcher declaration + optional launcher environment”。这部分已经由 ADR 0018/current Game Package v1直接重置。
+
+以下不再是 current v1：
 
 ```text
-Game Package v1
-    descriptor.key
-    launcher.type = nodejs
-    launcher.entry
-    env?
-
-Desktop Node.js Launcher Profile v1
-    validated entry / token-before-spawn / Supervisor
-
-Subsystem Control v1
-    subsystem.hello binds descriptor.key
-    subsystem.status({state:"ready"})
+launcher.type
+launcher.entry
+descriptor.env
+Game Package选择 Node/Worker technology
+business module直接作为 physical Runtime entry
 ```
 
-这些修订都发生在任何 conformant implementation前，因此最终第一版实现协议直接归一为 v1，不存在旧 Game Package/Control版本兼容义务。
+Current v1只声明：
 
-## 结果
+```ts
+interface SubsystemDescriptorV1 {
+  readonly key: string;
+  readonly module: string;
+}
+```
 
-- Game Entry成为当前 Session Subsystem topology的声明来源；
-- Main拥有受控 Launcher capability；
-- Runtime主动连接 Main Control carrier；
-- `spawn / connected / identified / ready`保持不同阶段；
-- Content API继续是只读数据能力，Launcher是独立 Main特权能力；
-- Desktop/PWA可以有不同 Launcher/Host Profile，但不能改变建立后的 Runtime identity/lifecycle semantics。
+`module` 是 platform-neutral Subsystem Definition Module；Platform Runner决定 Process/Worker realization。
 
-## 安全要求
+## 保留的结果
 
-- 只有 Game Entry声明的 Subsystem可以被 Launcher启动；
-- Launcher Entry必须经过 Installation Root边界校验；
-- Descriptor env不能覆盖 LoomRealm保留 Bootstrap字段；
-- Runtime identity只能由 authenticated `subsystem.hello`绑定；
-- 允许受控 Launcher不意味着 Renderer或普通 Content client获得任意文件执行能力。
+- Game Entry是 Session Subsystem topology声明源；
+- Main只允许启动声明过的 Subsystem；
+- descriptor.key是 Runtime protocol identity；
+- physical launch/connected/identified/ready保持不同阶段；
+- Launcher/Runner executable capability与 ordinary Content capability分离；
+- Desktop/PWA physical realization可不同，但建立后的 application semantics必须一致。
 
-## 重新评估条件
+## 历史说明
 
-- lazy/optional Subsystem；
-- Subsystem Package Manager / signing；
-- remote Subsystem；
-- PWA与Desktop需要不同 Descriptor schema而非不同 Profile；
-- one key → multiple Runtime instances。
+本 ADR的旧 launcher字段示例仅用于理解设计演进，不再形成 current contract或 compatibility obligation。首次 conformant implementation前的 breaking reset由 ADR 0018记录。
