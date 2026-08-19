@@ -3,49 +3,44 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：LoomRealm Main 内部 authority/transaction/recovery 模块，以及 Main-facing Platform ports  
-> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动与连接建立系统](../../10-architecture/runtime-bootstrap-system.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call Protocol v1](../../15-contracts/frame-call-protocol-v1.md)  
+> 主要定义：Main 内部 authority/transaction/recovery 模块，以及 Main-facing Platform ports  
+> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-19
 
-Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority 的 application authority，但不直接等于某个平台的 Process/Worker/WebSocket 实现。
+Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority，但不直接等于 Process/Worker/WebSocket/MessagePort realization。
 
-## 1. 建议模块
+---
+
+## 1. Internal Modules
 
 ```text
 Main System
 ├── Game Package Bootstrap
-├── Subsystem Descriptor Registry
+├── Descriptor Registry {key,module}
 ├── Launch Attempt Registry
-├── Runtime Container Registry
-├── Runtime Supervisor Coordinator
-├── Control Connection Registry
-├── Control Request ID Allocator
-├── Frame Registry / Activation Registry
-├── Frame Stack / Mutation Coordinator
-├── Frame Protocol Validator
-├── Frame RPC Deadline / Failure Classifier
+├── Runtime Registry / Supervisor Coordinator
+├── Runtime Control Registry / Dispatcher integration
+├── Frame / Activation Registry
+├── Stack Mutation Coordinator
+├── Frame Deadline / Failure Classifier
 ├── Runtime Failure Unwind Coordinator
 ├── Renderer Control Publisher
 ├── DataAuthority Registry
-└── Platform Port Adapters
+└── Platform Port Coordination
 ```
 
-Main 的纯 application logic 不直接 import `child_process`、`Worker`、`WebSocket`、`MessagePort`、Hostra API 或 filesystem/HTTP implementation。
+Core不 import Hostra/child_process/Worker/WebSocket/MessagePort/filesystem implementation。
 
 ---
 
 ## 2. Main-facing Platform Ports
 
-Main 需要 Platform Composition 提供以下逻辑能力：
-
 ```text
 RuntimeHosting
-    launch physical Runtime Container
-    observe termination
-    bounded cleanup/force termination
+    create/supervise Host-owned Runner Runtime
 
 RuntimeControlHost
-    provide/accept Control carrier binding for Launch Attempt
+    establish current Launch Attempt Control carrier
 
 RendererHosting
     realize current Renderer participant
@@ -54,261 +49,282 @@ RendererControlHost
     establish Renderer Control carrier
 
 DataConnectionBroker
-    establish physical Renderer⇄Subsystem carrier for current DataAuthority
+    realize current DataAuthority on Renderer + Subsystem sides
 
 ContentServiceIntegration
-    expose current platform Content implementation
+    expose platform Content implementation
 ```
 
-这些名称是模块边界，不要求一项对应一个 public npm package。
-
-Platform port 只提供物理事实/连接；Main 仍拥有 application authority。
+Port只提供 physical capability/facts；Main仍拥有 application authority。
 
 ---
 
-## 3. Runtime Bootstrap / Control
+## 3. Game Package / Runner Bootstrap
 
-Main 的逻辑 bootstrap：
+Descriptor：
 
-```text
-validate Game Package / descriptors
-→ create Launch Attempt + bootstrap auth state
-→ ask RuntimeHosting to launch
-→ Runtime Control carrier established
-→ subsystem.hello
-→ identified
-→ subsystem.status(ready)
+```ts
+{ key, module }
 ```
 
-```text
-physical launch success != connected != identified != ready
-ready != Data Connection exists
-```
-
-`ready` 不携 Renderer Data endpoint。
-
-Runtime Control：
+Main：
 
 ```text
-Subsystem Control v1
-+
-Frame / Call v1
-=
-Runtime Control Application Profile v1
+validate complete descriptors
+→ create Launch Attempt/token
+→ ask RuntimeHosting to launch Runner for module
+→ accept Control carrier
+→ hello/identified/ready
 ```
 
-Hostra Desktop 可用 Node process + WebSocket；PWA 可用 Worker + MessagePort，但 Main protocol logic 相同。
+Platform决定 Node Runner / Worker Runner；Main不把 `module` 当 process API。
+
+```text
+launch != connected != identified != ready
+ready != Data current
+```
 
 ---
 
-## 4. Frame / Activation Registry
+## 4. Runtime Control
 
-Frame Registry 保证：
+```text
+Control v1 + Frame v1 = Runtime Control Profile v1
+```
+
+Main-side integration保持：
+
+```text
+one Control carrier reader/dispatcher
+shared sender Request ID namespace
+one UTF-8 JSON text per JSON-RPC message
+no Batch
+```
+
+Control loss/ambiguity进入 Runtime failure，无 same-attempt reconnect。
+
+---
+
+## 5. Frame / Activation Registry
+
+保证：
 
 ```text
 frameId never reused
 subsystemKey permanent
 caller immutable
 only active Frame has current Activation
+Activation never reused
 outcome/lifecycle separate
 ```
 
-Main 是 Activation 唯一签发方。每次 activate/resume 使用 fresh Activation；离开 active 即 revoke；revoked never valid again。
-
----
-
-## 5. Shared Control Dispatcher
-
-Runtime Control Profile v1 允许同一 authenticated carrier 承载：
-
-```text
-Subsystem Control v1
-Frame / Call v1
-```
-
-要求：
-
-```text
-one transport unit = one JSON-RPC message
-no JSON-RPC Batch
-hello success before Frame operation
-shared sender-side Request ID namespace
-```
-
-Transport/Platform 不得改变这些规则。
+Main唯一签发/revoke Activation。
 
 ---
 
 ## 6. Stack Mutation Coordinator
 
-normal transaction 与 Runtime failure recovery 共用单一 serial coordinator。
+normal transaction和 failure recovery共享 serial authority。
 
 ```text
 Initial
-initialize ACK → activate(fresh A) ACK → publish
+initialize ACK → activate fresh A ACK → publish target
 
 Call
-Call Acceptance Commit
-→ call Success
-→ Child initialize/activate
-→ activate ACK → publish
+accept/revoke/suspend/push/null target
+→ call Response
+→ child initialize/activate
+→ ACK → publish child target
 
 Return
-Return Acceptance Commit
-→ return Success
-→ close ACK/pop
-→ resume Caller(fresh Activation) ACK → publish
+accept outcome/revoke/closing/null target
+→ return Response
+→ close/pop
+→ fresh resume Caller ACK
+→ publish caller target
 ```
 
 Response-before-dependent-RPC；ACK-before-publication。
 
 ---
 
-## 7. Deadline / Runtime Failure
+## 7. Failure Classifier / Unwind
 
 ```text
 Success        → known commit
-Explicit Error → known no-commit
+Explicit Error → protocol-defined known no-commit/fatal
 Timeout/loss   → ambiguous
 ```
 
-ambiguous/divergence/protocol failure 进入 Runtime failure；no retry/replay；late response 不恢复 terminal failure。
+ambiguous/divergence/protocol failure → Runtime failed；no retry/replay。
 
-Runtime Failure Unwind：
+Unwind：
 
 ```text
 failedRuntimeKeys
-→ lowest live failed-runtime Frame
+→ lowest live failed-runtime occurrence
 → whole suffix doomed
 → cleanup Top→Bottom
 → fixed-point expansion
-→ accepted outcome preserved
-→ fresh final Caller resume or empty Stack
+→ preserve accepted outcome
+→ fresh healthy Caller resume or empty Stack
 ```
 
-Platform Supervisor 只能报告实际 Runtime termination，不能选择 unwind root 或修改 Stack。
+Platform Supervisor不能选择 unwind root。
 
 ---
 
 ## 8. Renderer Control Publisher
 
-Publisher 只发布 Main 已 commit state：
+只发布 committed：
 
 ```text
 Runtime projection
-Frame Stack
-Activation
+Frame Stack / Activation
 InputTarget
-DataAuthority
+DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-Snapshot 不携：
+不携：
 
 ```text
-Data endpoint / ticket / MessagePort
+Data endpoint/ticket/Port
+Platform provisioning handle
+Interest Registry
 Render State
 Content Grant
 ```
 
-Renderer Control carrier 由 Platform RendererControlHost 建立；authority 内容由 Main 决定。
-
 ---
 
-## 9. DataAuthority / Data Connection Broker
+## 9. DataAuthority Registry
 
-```text
-DataAuthority {
-  subsystemKey,
-  generation,
-  connectionProfile
+```ts
+interface DataAuthority {
+  subsystemKey: string;
+  generation: number;
+  dataProfile: string;
 }
 ```
 
-Main 负责 generation replacement/revocation。
-
-实际 carrier：
+当前 Profile：
 
 ```text
-Main current DataAuthority(S,G)
-→ Platform DataConnectionBroker
-→ Renderer + Subsystem matching endpoints
+loomrealm.renderer-data/1
 ```
 
-Broker 不拥有 generation，也不能从 endpoint/Port 推导 authority。
+Main负责：
 
 ```text
-Runtime ready != DataAuthority necessarily present
-DataAuthority present != carrier established
-Data loss != Runtime failure / Frame unwind
+mint/increment generation
+select dataProfile
+replace/revoke authority
+publish through Renderer Control
+```
+
+Profile改变 MUST fresh generation。
+
+---
+
+## 10. DataConnectionBroker Coordination
+
+```text
+Main current DataAuthority(S,G,P)
+→ Platform DataConnectionBroker
+→ matching RendererDataBinding side
+→ matching SubsystemDataBinding side
+```
+
+Broker不拥有 G/P。
+
+Hostra可通过 Runner provisioning IPC给已运行 Subsystem提供 endpoint/ticket；PWA可 transfer MessagePort。
+
+这些 physical mechanisms不进入 Main authority model。
+
+```text
+DataAuthority exists != carrier current
+Data loss/provision failure != Runtime failure/Frame unwind
 ```
 
 ---
 
-## 10. Input / Render Boundary
+## 11. Input / Render Boundary
 
-Main 不代理 ordinary User Input / Render Update，也不拥有 Render Domain State。
-
-Main 只拥有：
+Main只拥有：
 
 ```text
 Frame / Activation / InputTarget
 DataAuthority
 ```
 
-Input Interest 是 Subsystem-owned Frame-scoped configuration；Renderer Core执行 sender-side conjunction gate。
+不拥有：
 
-Render Domain lifecycle 完全由 Subsystem 控制。
+```text
+Interest[F]
+Input Producer
+Render Domain State
+```
+
+Renderer ordinary input gate = Main authority × Frame Interest × Producer × current Data。
+
+Render Domain lifecycle由 Subsystem控制。
 
 ---
 
-## 11. Hostra Desktop / PWA
+## 12. Platform Realizations
 
 ```text
 Hostra Desktop
-    RuntimeHosting        Node child process
-    RuntimeControlHost    localhost WebSocket
-    RendererHosting       Hostra/Electron BrowserWindow
-    RendererControlHost   localhost WebSocket
-    DataConnectionBroker authenticated localhost carrier
+    RuntimeHosting        Node Runner Process
+    RuntimeControlHost    WebSocket
+    RendererHosting       BrowserWindow
+    RendererControlHost   WebSocket
+    DataConnectionBroker Data WS + Runner provisioning IPC
 
 PWA
-    RuntimeHosting        Dedicated Worker
+    RuntimeHosting        Worker Runner
     RuntimeControlHost    MessagePort
-    RendererHosting       browser Window
+    RendererHosting       Window
     RendererControlHost   MessagePort
-    DataConnectionBroker MessageChannel / transferred Port
+    DataConnectionBroker MessageChannel / Port transfer
 ```
 
-Main-facing ports 相同，physical implementation 不同。
+Main-facing logical ports相同。
 
 ---
 
-## 12. Conformance
+## 13. Tests
 
-Main 至少需要：
+至少：
 
-- Subsystem Control v1 fixtures；
-- Runtime Control Profile v1 integration fixtures；
-- Frame / Call v1 Main-role fixtures；
-- Renderer Control / Data Connection applicable fixtures；
-- Platform port fake/in-memory integration；
-- Hostra/PWA semantic-equivalence E2E。
+```text
+Descriptor {key,module} bootstrap
+fake RuntimeHosting/Runner
+Control Profile fixtures
+Frame Main-role conformance
+failure unwind golden traces
+Renderer Control snapshot/dataProfile
+profile-change-fresh-generation
+fake DataConnectionBroker does not mint authority
+data provisioning/loss does not mutate Runtime/Frame authority
+Hostra/PWA abstract-trace equivalence
+```
 
 ---
 
-## 13. 核心不变量
+## 14. Final Invariants
 
-- Main application core platform-neutral；
-- Platform port 不获得 Main authority；
-- Runtime Control = Control v1 + Frame v1；
-- ready 不携 Data endpoint；
-- Frame / Call v1 exact seven Requests；
-- Stack mutation serial；
-- Response-before-dependent-RPC；ACK-before-publication；
-- revoked Activation 永久失效；accepted outcome 不可撤销；
-- ambiguous/divergence/protocol error Runtime-fatal/no retry；
-- Runtime failure lowest-root whole-suffix fixed-point unwind；
-- DataAuthority 与 physical carrier/bootstrap 分离；
-- Data Connection Broker 不拥有 generation；
-- Data loss不等于 Runtime/Frame failure；
-- Main 不拥有 Render Domain lifecycle/state。
+1. Main core platform-neutral；
+2. Platform ports不获得 Main authority；
+3. Game Package module与 physical Runner分离；
+4. Runtime Control = Control1 + Frame1；
+5. ready不携 Data；
+6. Frame/Stack mutation serial；
+7. Response-before-dependent-RPC / ACK-before-publication；
+8. ambiguous Runtime-fatal/no retry；
+9. failure unwind Main-only；
+10. DataAuthority = S/G/dataProfile；
+11. profile change需要 fresh generation；
+12. Broker/provisioning只实现 physical carrier，不拥有 authority；
+13. Data loss/provision failure不等于 Runtime/Frame failure；
+14. Main不拥有 Interest/Render Domain。
