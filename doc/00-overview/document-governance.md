@@ -2,232 +2,332 @@
 
 > 层级：产品总览  
 > 状态：Active / Normative  
-> 稳定程度：稳定  
-> 主要定义：文档层级、依赖方向、状态、协议兼容边界和迁移规则  
-> 最近复核：2026-08-09
+> 稳定程度：Stable  
+> 主要定义：文档层级、主要定义依赖、设计稳定状态、真实 compatibility boundary、首次实现前 v1 收口与版本治理  
+> 最近复核：2026-08-19
 
-LoomRealm 仍处于早期设计/首次实现阶段。文档需要允许设计收敛，同时避免把“设计稿迭代”误当成“协议版本历史”。
+LoomRealm仍处于首次实现阶段。治理目标同时满足：
+
+```text
+允许在没有真实消费者时修正错误设计
+AND
+不让 Frozen/Normative 变成可以随意改写的空标签
+```
+
+---
 
 ## 1. 文档层级
 
 ```text
 00-overview
-    产品目标、范围、原则和文档治理
+    产品目标 / 治理
         ↓
 10-architecture
-    系统设计思想、职责和关系
+    authority / responsibility / topology
         ↓
 15-contracts
-    跨系统/对外互操作正式契约
+    interoperable application contracts/profiles
         ↓
 20-modules
-    系统内部模块设计
+    role/module realization
         ↓
 30-implementation
-    分包、测试和交付计划
+    packages/tests/delivery
 ```
 
-### 00-overview
+下层细化上层，不得反向定义上层。
 
-回答“为什么做、适用于什么、当前做什么、长期原则是什么”。
+---
 
-### 10-architecture
+## 2. 主要定义依赖必须是 DAG
 
-回答“系统如何划分、authority 归谁、系统之间如何协作”。示例流程不是正式 wire 契约。
-
-### 15-contracts
-
-回答“独立实现如何互操作”。应覆盖 Schema、identity、state、ordering、error、recovery、limits、version/Profile 与兼容性。
-
-### 20-modules
-
-回答“一个系统内部如何拆分与实现”。模块设计不得扩大系统职责或改写协议。
-
-### 30-implementation
-
-回答“当前仓库如何落地、如何测试和发布”。实现结构可以变化，但必须遵守上层架构/契约。
-
-## 2. 单向依赖
+文档 metadata区分：
 
 ```text
-Overview → Architecture → Contracts → Modules → Implementation
+依赖
+    本文的定义建立在该文档之上
+
+正式化
+    下层 Contract formalizes本文
+
+被细化
+    下层 Architecture进一步展开本文
+
+被实现
+    Module/Implementation realization
+
+相关
+    横向参考，不构成主要定义 dependency
 ```
 
-规则：
+不得让两个 Current 文档互相写“依赖”从而形成双事实源。
 
-1. 下层可以细化上层，不能悄悄改变上层；
-2. 下层发现设计问题时先修改主要定义位置；
-3. 实施包结构不能反向成为产品架构；
-4. 路线图/待办不能替代正式设计；
-5. 同一结论只保留一个当前主要定义位置；
-6. 上层变化必须检查直接依赖文档；
-7. 已形成真实 compatibility boundary 的契约发生不兼容变化时必须提升协议版本或定义明确迁移；
-8. 尚未形成真实 compatibility boundary 的设计可以直接修订、重编号或删除，不为从未实现的草案制造兼容层。
+默认大方向：
 
-## 3. 文档状态
+```text
+Overview
+→ Architecture DAG
+→ Contracts
+→ Modules
+→ Implementation
+```
+
+---
+
+## 3. Document Status
 
 | 状态 | 含义 |
 |---|---|
-| **Normative** | 当前实现/设计必须遵守的正式范围或协议。 |
-| **Active Design** | 当前有效设计，仍允许演进。 |
-| **Draft** | 正在形成，不能作为稳定兼容承诺。 |
-| **Reference** | 背景、来源格式或外部资料。 |
-| **Tracking** | 待办、开放问题和交付追踪。 |
-| **Superseded** | 已被后续决定/契约替代，只保留决策历史。 |
+| Normative | 当前实现/设计必须遵守 |
+| Active Design | 当前有效但仍允许演进 |
+| Draft | 尚未形成稳定实现承诺 |
+| Reference | 背景/外部格式资料 |
+| Tracking | 实施/开放问题追踪 |
+| Superseded | 已被后续决策取代，仅保留历史 |
 
-当前文档树原则上不长期保留完整的 Legacy/Superseded 协议正文；已替代方案通过 ADR 与 Git history 追溯。
+Normative表示“当前 first implementation 应遵守”，**不自动等于已经存在外部 compatibility obligation**。
 
-## 4. 稳定程度
+---
 
-状态描述用途，稳定程度描述预计变化频率：
+## 4. Stability vs Compatibility Boundary
 
-- **Stable/Frozen**：已经承诺当前 compatibility boundary；不兼容变化需新版本/明确迁移；
-- **Stabilizing**：核心语义已闭合，正在完成 limits/conformance/implementation validation；
-- **Evolving**：方向明确，字段和流程仍可能调整；
-- **Experimental**：用于验证，允许较大重构。
+这两个概念必须分离。
 
-早期阶段允许 `Normative + Evolving/Stabilizing`：表示当前主线必须遵守，但尚未承诺长期 wire compatibility。
+### Stability
 
-## 5. 什么才算真实协议兼容边界
+描述设计团队预期变化频率：
 
-协议版本不是文档草稿编号。
+```text
+Frozen / Stable
+    semantic design closed by default
 
-以下任一事实通常意味着 compatibility boundary 已形成：
+Stabilizing
+    core closed; completing limits/conformance/implementation validation
+
+Evolving
+    direction clear; fields/process may change
+
+Experimental
+    validation stage; large redesign expected
+```
+
+### Real compatibility boundary
+
+表示“改变会破坏真实消费者/互操作/持久数据”。只有它直接产生版本迁移义务。
+
+因此：
+
+```text
+Frozen design
+    != automatically shipped compatibility boundary
+```
+
+但 Frozen仍比 Stabilizing更严格：不得无 ADR静默做 incompatible correction。
+
+---
+
+## 5. 什么形成真实 Compatibility Boundary
+
+至少出现一种：
 
 ```text
 conformant implementation shipped/used
 multiple independent implementations interoperate
-third-party implementation depends on the wire
+third-party implementation relies on wire
 persisted/on-disk/network data requires compatibility
-public release explicitly promises that protocol version
+public release explicitly promises protocol version
 ```
 
 形成后：
 
 ```text
-incompatible schema/identity/state/order/error/recovery/limit change
-→ new protocol/profile version or explicit migration
+incompatible schema/identity/state/order/error/recovery/limit/encoding change
+→ new version OR explicit migration/compatibility mechanism
 ```
 
-形成前：
+不能用“文档还可以改”绕过。
+
+---
+
+## 6. First Implementation Rule
+
+真实 compatibility boundary形成前：
 
 ```text
 design correction
 → update current first-version contract directly
-→ update dependent docs
-→ keep provenance in ADR / Git history
+→ do not manufacture unused v1/v2 dual track
+→ update all dependent Current docs/tests/navigation
+→ preserve provenance in ADR/Git
 ```
 
-例如 Subsystem Control 与 Game Package 都在首次 conformant implementation 前完成了边界修订，因此当前真正的 first implementation contract 直接命名为 v1，而不是保留没有消费者的历史 v1/v2 双轨。
+这适用于 Normative + Stabilizing/Evolving 文档。
 
-## 6. Frozen 的含义
+对于 Frozen 文档，额外要求见下一节。
 
-Frozen 保护的是 **wire/semantic compatibility**，不是每一个文档句子或链接路径。
+---
 
-Frozen protocol 可以做不改变兼容性的 clarification/editorial update，例如：
+## 7. Frozen Preimplementation Correction
+
+Frozen意味着：
+
+> **默认不再改变 semantic/wire compatibility；任何 incompatible correction必须被显式证明为“首次实现前纠错”，而不是普通编辑。**
+
+在**尚无真实 compatibility boundary**时，Frozen文档仍可进行一次明确的 incompatible correction，但必须同时满足：
 
 ```text
-current enclosing Profile reference
-superseded architecture link
+1. Accepted ADR明确说明为什么 current v1错误/不闭环
+2. ADR明确声明没有真实 compatibility obligation
+3. correction scope最小且列出什么没有改变
+4. current Contract直接更新，不保留 deprecated dual model
+5. Conformance fixtureSetRevision更新/旧 fixture不能冒充 current
+6. 所有 dependent Current docs同步传播
+7. 导航/ADR明确历史决策已 superseded/updated
+```
+
+ADR 0018对 Frame v1 PWA transport mapping的 correction就是该机制的当前实例。
+
+一旦 first conformant implementation baseline形成，Frozen incompatible change回到正常 version/migration规则，不能再次引用 ADR 0018作为通用豁免。
+
+---
+
+## 8. Frozen 允许的普通修改
+
+不改变兼容性的：
+
+```text
+editorial clarification
+correct link/current Profile reference
 historical ADR relationship
-editorial ambiguity
+non-semantic example cleanup
+additional conformance fixture verifying already-defined behavior
 ```
 
-但不得静默改变：
+可以直接修改。
+
+默认不允许：
 
 ```text
-legal wire
+method/field legality
 identity/lifecycle
-commit point
+commit/causal order
 error/recovery
-limits/version semantics
+limits
+encoding/mapping
+version binding
 ```
 
-## 7. 文档头部
+除非满足 §7 preimplementation correction 或正常新版本治理。
 
-新增设计文档应声明：
+---
+
+## 9. Change Propagation
+
+Overview变更：
 
 ```text
-层级：
-状态：
-稳定程度：
-主要定义：
-依赖：
-被以下文档实现：
-最近复核：
+Overview
+→ Architecture
+→ Contracts
+→ Modules
+→ Implementation/Tests/Navigation
 ```
 
-不适用字段可以省略。
-
-## 8. 变更传播
-
-修改产品/治理层：
+Contract/Profile变更：
 
 ```text
-更新 Overview
-→ 检查 Architecture
-→ 检查 Contracts
-→ 更新 Modules
-→ 更新 Implementation / Tests / Navigation
+ADR when major
+→ current Contract
+→ contract index/enclosing Profile
+→ Architecture projection
+→ Modules
+→ package/roadmap/tests
+→ navigation
 ```
 
-修改协议主线/版本关系：
+不能只改一个协议文件留下其他 Current source继续旧模型。
+
+---
+
+## 10. Conflict Resolution
+
+优先判断“这个主题的主要定义源”，而不是简单按最近 commit。
+
+大致：
 
 ```text
-ADR / current Contract
-→ contract index
-→ enclosing Profiles
-→ architecture diagrams
-→ module dependencies
-→ implementation roadmap
-→ test/conformance plan
-→ documentation navigation
+Product scope/governance
+→ topic Architecture
+→ Current Normative Contract / Accepted current ADR
+→ Modules
+→ Implementation
 ```
 
-不能只修改某一个协议文件后留下其他 Current 文档继续指向旧版本。
+`Superseded` ADR/Git history不能覆盖 Current Contract。
 
-## 9. 冲突解决
+如果高层与 Contract冲突，应修正主要定义链，而不是选择对自己方便的一份。
 
-冲突处理优先级：
+---
 
-1. 产品范围/长期原则；
-2. 主题对应架构；
-3. 当前 Normative 正式契约/Accepted ADR；
-4. 模块设计；
-5. 实施计划。
+## 11. ADR Governance
 
-被 Superseded 的决策或 Git 历史不能覆盖 Current Contract。
-
-如果 Current 高层文档与 Current Contract 冲突，应修正文档，而不是依赖“哪个提交更新”。
-
-## 10. ADR 治理
-
-重大决策记录：背景、方案、决定、原因/代价、重新评估条件。
-
-ADR 保存“为什么形成当前设计”，不是另一个协议正文副本。
-
-后续变化应明确：
+ADR记录：
 
 ```text
-supersedes
-updates
-clarifies
+why
+what changed
+which old decision is superseded/updated/clarified
+what remains unchanged
+re-evaluation conditions
 ```
 
-已经失去独立决策价值、只为短暂文档编号迁移产生的 ADR 可以在首次实现前清理；真正的架构决策应保留。
+重大 breaking preimplementation correction必须有 ADR。
 
-## 11. 旧文档清理
+ADR不是另一个协议正文；Current Contract仍是实现依据。
 
-当新分层已经完整接管内容后：
+被取代 ADR应明确标记 `Superseded` 或“某部分由 ADR xxxx更新”。
 
-1. 更新所有 Current 入口与交叉引用；
-2. 删除被替代的完整旧协议/架构正文；
-3. 不在站点导航中暴露旧协议作为可实现入口；
-4. ADR 保存关键设计演变；
-5. Git history 保存被删除文档全文；
-6. 参考资料只有在仍具有独立价值时保留。
+---
 
-当前权威目录固定为：
+## 12. Current v1 Reset Policy
+
+当前项目已经通过 ADR 0018直接收口：
+
+```text
+Game Package v1
+Desktop Node Runner Profile v1
+Renderer Control/Data Profile v1
+Subsystem SDK author mapping
+Frame v1 transport mapping one-time correction
+```
+
+规则是：
+
+```text
+no v2 solely to preserve never-implemented draft
+no deprecated alias
+no dual parser
+one current first implementation model
+```
+
+这不是未来破坏 compatibility的永久许可证。
+
+---
+
+## 13. Superseded Cleanup
+
+新模型接管后：
+
+1. Current入口/交叉引用全部更新；
+2. 旧完整协议正文不作为可实现入口长期并列；
+3. ADR保留真实设计演进；
+4. Superseded状态必须显式；
+5. Git history保留旧全文；
+6. 导航不能把已取代协议伪装成 current contract。
+
+---
+
+## 14. Current Authoritative Tree
 
 ```text
 00-overview
@@ -237,4 +337,33 @@ clarifies
 30-implementation
 ```
 
-`decisions/` 保存 ADR；`fsdb/` 等外部格式参考可独立保留。
+`decisions/` 保存 ADR；外部格式资料可放独立 reference tree。
+
+当前主架构 DAG目标：
+
+```text
+product/governance
+→ system overview
+→ platform composition
+→ runtime hosting
+→ stack / communication
+→ rendering
+→ subsystem model
+→ runtime bootstrap synthesis
+→ contracts
+→ modules
+→ implementation
+```
+
+---
+
+## 15. Final Rules
+
+1. Current first implementation只有一个模型；
+2. 无真实 compatibility boundary时不制造虚假版本；
+3. Frozen是设计关闭承诺，但真实 compatibility boundary才直接产生版本升级义务；
+4. Frozen incompatible preimplementation correction必须走显式 ADR + conformance revision + 全树传播；
+5. 有真实 compatibility obligation后 incompatible change必须 version/migrate；
+6. 主要定义 dependency必须 DAG；
+7. Superseded history不能覆盖 Current Contract；
+8. 下层实现不得反向重写上层 authority。
