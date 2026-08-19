@@ -3,80 +3,70 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：第一阶段地图 Subsystem 的 business/runtime 模块；作为 `@loomrealm/subsystem` 的普通 platform-neutral consumer  
-> 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[平台组合系统](../../10-architecture/platform-composition-system.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
+> 主要定义：Phase 1 地图 Subsystem business module；作为 `@loomrealm/subsystem` 的普通 platform-neutral Definition Module consumer  
+> 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
 > 最近复核：2026-08-19
-
-`loom.map` 是 Phase 1 vertical slice，但它不实现自己的 LoomRealm Control/Data transport stack。
 
 核心原则：
 
-```text
-loom.map business
-    → @loomrealm/subsystem
-    → platform-neutral role capabilities
-
-Hostra Desktop / PWA
-    → composition root provides physical infrastructure
-```
-
-同一份 map business definition 应可以在 Hostra Desktop 与 PWA 上运行，而不出现 WebSocket/MessagePort/Process/Worker 分支。
+> **`loom.map` 只实现地图业务；同一个 `.mjs` Subsystem Definition Module 由 Hostra Node Runner 与 PWA Worker Runner加载，不含任何平台/协议机械分支。**
 
 ---
 
-## 1. 模块结构
-
-目标结构：
+## 1. Module Shape
 
 ```text
 loom.map
-├── Subsystem Definition
-├── Frame Handlers / Session Coordinator
-├── Game Catalog / Repositories
-├── Runtime Loop / World State
-├── Input Consumers
-├── Render Projectors
-│   ├── desired Domain state
-│   ├── stable logical keys
-│   └── presentation events
-└── Pokémon Essentials Compatibility Compiler
+├── default SubsystemDefinitionFactory export
+├── Runtime-level business state
+├── Frame handlers / coordinators
+├── Catalog / Repositories
+├── World state
+├── Input consumers
+├── Render projectors
+└── Pokémon Essentials compatibility compiler
 ```
 
-以下机制不应继续由 `loom.map` 自己实现：
+不实现：
 
 ```text
-Subsystem Control bootstrap
-JSON-RPC dispatcher / request IDs
-Frame activation bookkeeping
-Frame mutation gate
-Control/Frame deadlines
-Data Connection reconnect
-Frame Interest Registry wire publication
-Render Registry/Snapshot/Patch wire publication
-WebSocket / MessagePort
-platform bootstrap
+Control/Data carrier
+JSON-RPC dispatcher/request id
+Activation bookkeeping
+mutation gate
+timeout/failure ambiguity
+Platform provisioning
+Interest wire publication
+Render wire publication
+WebSocket/MessagePort
+Process/Worker bootstrap
 ```
-
-这些属于 `@loomrealm/subsystem`、protocol capability packages 与 Platform Composition。
 
 ---
 
-## 2. Author-facing Runtime / Frame
-
-业务通过 `@loomrealm/subsystem` 获得已经绑定本地 Frame Context 的 capability。
-
-概念代码：
+## 2. Definition Module ABI
 
 ```ts
-export default defineSubsystem((scope) => ({
+import {
+  defineSubsystem,
+  completed,
+  cancelled,
+  failed,
+} from "@loomrealm/subsystem";
+
+export default defineSubsystem(({
+  createInputListener,
+  createRenderDomain,
+  content,
+  signal,
+}) => ({
   async initialize() {
-    // map Runtime-level business initialization
+    // load map-level shared business state
   },
 
   async frame(frame) {
-    // frame.params = initialize business params
-    // await frame.call(...)
-    // normal handler completion becomes Frame outcome
+    // business logic
+    return completed(null);
   },
 
   async shutdown() {
@@ -85,17 +75,100 @@ export default defineSubsystem((scope) => ({
 }));
 ```
 
-业务不持有 `activationId`，不管理 `frame.activate/resume`，不自行恢复 suspended Frame。
+Default export就是 Game Package `descriptor.module` 所声明 Definition Module 的 ABI。
 
-Frame handler 可以跨 `await frame.call(...)` 继续运行；SDK 在底层安装 fresh Activation 后才恢复 continuation。
+Definition Module加载本身不启动 Runtime，也不读取 Platform bootstrap。
 
 ---
 
-## 3. User Input Consumer
+## 3. Frame Params / Outcome
 
-`loom.map` 使用 SDK 提供的 Frame-bound InputListener，而不是直接读 Data message。
+业务参数：
 
-概念：
+```text
+frame.params
+```
+
+不是 User Input。
+
+Frame handler必须显式返回：
+
+```text
+completed(value)
+cancelled()
+failed(error)
+```
+
+而不是依赖“普通 JS resolve/reject自动猜 terminal meaning”。
+
+例如：
+
+```ts
+async frame(frame) {
+  const battle = await frame.call("loom.battle", {
+    enemy: "pikachu",
+  });
+
+  switch (battle.type) {
+    case "completed":
+      applyBattleResult(battle.value);
+      return completed(null);
+
+    case "cancelled":
+      return cancelled();
+
+    case "failed":
+      return failed(battle.error);
+  }
+}
+```
+
+Child `cancelled/failed` 是业务 Outcome，`frame.call()` 正常 resolve它们。
+
+---
+
+## 4. Call Error Boundary
+
+业务 MAY捕获的 call rejection只代表明确 **pre-commit** 可恢复失败，例如目标不存在/当前不可用：
+
+```ts
+try {
+  const outcome = await frame.call(...);
+} catch (error) {
+  // only typed recoverable call rejection
+  // current Frame/Activation still valid
+}
+```
+
+Runtime-fatal/ambiguous：
+
+```text
+Control loss
+Frame request timeout/loss with unknown commit
+divergence/protocol fatal
+```
+
+不会作为普通 catchable rejection重新进入 map continuation。
+
+因此地图业务永远不会在“旧 Activation是否已撤销未知”的情况下继续修改 world state。
+
+---
+
+## 5. Business Exception
+
+地图 Frame handler普通未捕获异常，在 Runtime/Frame authority仍明确健康时由 SDK sanitize为：
+
+```text
+FrameOutcome.failed
+```
+
+协议 corruption/Control ambiguity则是 Runtime failure。
+
+所以业务可以把“地图脚本失败”和“Runtime控制面已经不可证明”视为两个不同 failure domain。
+
+---
+
+## 6. Input Consumer
 
 ```ts
 const input = createInputListener({
@@ -108,63 +181,71 @@ const input = createInputListener({
 });
 ```
 
-SDK 内部负责：
+SDK内部：
 
 ```text
-local Frame exists/active
-current Activation match
-channel ∈ local Interest[frameId]
+Frame owner validation
+Interest[F] aggregation/publication
+current Activation receive gate
 mutation gate
-current Data Connection
-full Frame Interest Registry publication
+current Data carrier/profile
 fresh carrier republish
 stale/in-flight input drop
 ```
 
 业务不接触 `frameId + activationId` wire gate。
 
-### Frame / Activation behavior
+---
+
+## 7. Input Across Call/Resume
 
 ```text
-Frame suspension
-    InputListener may remain alive
-    Frame Interest configuration may remain
-    ordinary delivery stops
-
-same Frame fresh Activation resume
-    same InputListener reused
-    Interest configuration reused if same Data carrier survived
-    old Activation Input State/Event never reused
-
-fresh Data Connection
-    wire Interest Registry starts empty
-    SDK republishes current local Frame Interest Registry
+F/A1 active
+Interest[F] registered
+→ accepted child call
+→ F suspended / A1 revoked
+→ listener + Interest[F] remain
+→ child completes
+→ F resumes fresh A2
+→ same listener/config can become effective
 ```
 
-因此业务代码不需要在 child return 后重新订阅输入。
+旧 A1 Input State/Event绝不迁移到 A2。
+
+fresh Data carrier：
+
+```text
+remote Interest Registry empty
+SDK republishes current local desired registry
+```
+
+业务不重新 subscribe。
 
 ---
 
-## 4. Custom Map Input
+## 8. Custom Map Input
 
-地图专用 channel 可以使用 `x.*`：
+可使用：
 
 ```text
 x.map.interact.event
 x.map.pointer-tile.state
 ```
 
-它们仍是 Frame-scoped Interest，仍受 Main InputTarget/Activation + current Data Connection + Producer availability gate。
+仍满足：
 
-平台特定 DOM/OS/device mapping 属于 Renderer/Platform implementation，不进入 map Runtime。
+```text
+Main InputTarget
+× Interest[F]
+× Producer
+× current matching Data
+```
+
+DOM/OS/device mapping属于 Renderer/Platform implementation。
 
 ---
 
-## 5. Render Domain Model
-
-地图业务表达 declarative desired presentation，不直接拼 Render Update wire。
-
-概念：
+## 9. Render Domains
 
 ```ts
 const world = createRenderDomain({ name: "world", zIndex: 0 });
@@ -174,65 +255,37 @@ world.set(buildWorldState());
 hud.set(buildHudState());
 ```
 
-SDK 自己 mint protocol domain identity；业务 `name` 不等于可复用 protocol `domainId`。
-
-候选 map domains：
-
-```text
-world   zIndex=0
-hud     zIndex=100
-loading zIndex=200
-debug   zIndex=1000
-```
-
-这些名字/zIndex 是 map implementation choices，不是公共标准。
-
----
-
-## 6. Render Publication Boundary
+SDK mint protocol `domainId`；业务 `name`不是 protocol lifecycle identity。
 
 业务只表达：
 
 ```text
 desired authoritative tree
 transient presentation event
-Domain create/close
+explicit Domain close
 ```
 
-SDK/Render manager 负责转换为：
-
-```text
-render.domains
-render.snapshot
-render.patch
-render.event
-```
-
-因此 `loom.map` 不应维护 protocol publication revision、carrier-local baseline、ACK/reconnect mechanics。
-
-业务 Projector 可以维护 stable logical node keys，方便 SDK/Render capability 计算 Patch；但 wire heuristic 不属于 map public API。
+SDK负责 Registry/Snapshot/Patch/Event、revision、fresh-carrier baseline。
 
 ---
 
-## 7. Render / Frame / Data Independence
+## 10. Frame / Render / Data Independence
 
 ```text
 Frame close != Domain destroy
-Frame suspend != Domain hidden
+Frame suspend != Domain hide
 Activation change != Domain lifecycle
-Runtime ready != Data Connection exists
+Runtime ready != Data current
 Data retire != authoritative Domain destroy
 ```
 
-如果某个 map RenderDomain 应与某 Frame 同生共死，应由 map business 显式 `close()`，而不是 SDK/协议根据 Frame lifecycle 自动推导。
-
-Data reconnect 时业务 RenderDomain object/desired state 继续存在；SDK 在 fresh carrier 上恢复 Registry + Snapshots。
+如果 world/hud应与某业务 scope同生共死，由 map显式 close，不由 Frame protocol猜测。
 
 ---
 
-## 8. Content
+## 11. Content
 
-地图通过 `@loomrealm/subsystem` 注入的 platform-neutral Content client 读取 logical content：
+地图只使用 logical ContentClient读取：
 
 ```text
 maps
@@ -242,20 +295,25 @@ autotiles
 metadata/resources
 ```
 
-业务不得知道当前底层是：
+不知道底层是 Desktop HTTP/filesystem还是 PWA Fetch/SW/OPFS。
 
-```text
-Desktop filesystem/localhost HTTP
-PWA Fetch/Service Worker/OPFS
-```
-
-Pokémon Essentials / RMXP compatibility compiler 负责把来源格式解释为 map business 可消费的 logical data，不改变 Content API/Platform boundary。
+Compatibility compiler只负责来源格式→map logical data，不改变 Content/Platform boundary。
 
 ---
 
-## 9. Platform Independence
+## 12. Cancellation / Signals
 
-`loom.map` package 依赖方向：
+`scope.signal` 用于 Runtime-level task；`frame.signal` 用于 Frame-scoped task。
+
+normal child-call suspension不会 abort `frame.signal`；administrative suspend/close/Runtime terminal会 abort。
+
+业务 SHOULD用 signal取消 timer/async work，但 correctness不依赖业务及时响应；SDK会阻止 terminal Frame上的 late return/mutation进入 wire。
+
+---
+
+## 13. Platform Independence
+
+依赖：
 
 ```text
 @loomrealm/map
@@ -265,63 +323,75 @@ Pokémon Essentials / RMXP compatibility compiler 负责把来源格式解释为
 不直接依赖：
 
 ```text
-@loomrealm/transport-websocket
-@loomrealm/transport-messageport
-@loomrealm/launcher-node
-Hostra
-Worker/MessagePort APIs
+@loomrealm/subsystem/host
+runtime-control/data internals
+transport-websocket/messageport
+launcher/Runner package
+Hostra/Worker APIs
 ```
 
-Hostra Desktop 与 PWA 的 entry/composition 位于产品 composition root，而不是 map business package。
+同一 module：
 
 ```text
-same map business definition
-        │
-        ├── apps/desktop composition
-        └── apps/pwa composition
+apps/desktop Runner ─┐
+                     ├→ descriptor.module
+apps/pwa Runner ─────┘
 ```
 
 ---
 
-## 10. Tests
+## 14. Tests
 
-除了适用的 `@loomrealm/subsystem` conformance/integration fixture，map business 至少覆盖：
+至少：
 
 ```text
-frame-handler-initialize
-nested-call-return-business-continuation
-input-listener-survives-suspend-resume
-fresh-activation-does-not-reuse-input-state
-new-frame-waits-for-own-interest
+definition-module-default-export
+frame-params
+completed/cancelled/failed-outcomes
+nested-call-completed-continuation
+nested-call-cancelled-business-path
+nested-call-failed-business-path
+recoverable-call-rejection-can-be-handled
+runtime-fatal-does-not-reenter-map-continuation
+business-exception-becomes-frame-failed
+
+input-listener-survives-child-call-resume
+fresh-activation-no-old-input-state
+new-frame-waits-own-interest
 custom-channel-frame-scope
 fresh-data-reconnect-hidden-from-business
+
 zero-frame-render-domain
 multi-domain-map-render
 frame-close-does-not-destroy-unrelated-domain
-render-domain-reconnect-hidden-from-business
-content-logical-results-platform-independent
-same-business-trace-hostra-pwa
+render-reconnect-hidden-from-business
+content-results-platform-independent
+same-definition-trace-hostra-pwa
 ```
 
-协议 wire correctness 由对应 capability package conformance 测试，不在 map 里复制整套协议测试。
+协议 conformance由 capability packages负责，不在 map复制。
 
 ---
 
-## 11. 不得恢复的旧模型
+## 15. Forbidden Old Models
 
 ```text
-loom.map 自己实现 Control/Frame JSON-RPC adapter
-loom.map 自己建立 WebSocket/MessagePort
-runtime.input / runtime.render 万能 service locator
-Frame.input 同时表示 business params 与 User Input
+map implements Control/Frame JSON-RPC
+map opens WebSocket/MessagePort
+map sees Platform provisioning
+runtime.input/runtime.render service locator
+Frame.input used for business params
 Runtime-global Input Interest
+frame.call returns raw child value without Outcome
+catchable Runtime-fatal continuation
 Activation reuse
-per-Frame mandatory Render ownership
 Frame close = Render destroy
 Data reconnect = Frame recovery
-platform-specific map business branches
+platform-specific business branches
 ```
 
-核心目标：
+---
 
-> **`loom.map` 只证明一件事：一个普通业务 Subsystem 可以通过统一的 `@loomrealm/subsystem` author API，在 Hostra Desktop 与 PWA 两个 Platform Composition 上运行同一套核心业务。**
+## 16. Final Goal
+
+> **`loom.map` 证明一个真正普通的业务 Subsystem：只依赖统一 author SDK，同一个 Definition Module 在 Hostra Desktop 与 PWA 上得到相同业务语义，而所有 Frame authority、Data reconnect、Platform provisioning 和 wire mechanics 都留在正确的下层。**
