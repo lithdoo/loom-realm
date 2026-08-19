@@ -1,47 +1,49 @@
-# Desktop Node.js Launcher Profile v1
+# Desktop Node.js Launcher / Subsystem Runner Profile v1
 
-> 层级：正式契约  
+> 层级：正式契约 / Desktop Platform Profile  
 > 状态：Active / Normative  
 > Profile Version：1  
-> 稳定程度：Frozen  
-> 主要定义：Main 将已验证 Subsystem Descriptor 转换为受监督 Node.js Runtime Process 的确定性启动语义  
-> 依赖：[Game Package v1 Bootstrap / Descriptor Contract](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
-> 最近复核：2026-08-09
+> 稳定程度：Stabilizing  
+> 主要定义：Hostra Desktop 将已验证 platform-neutral Subsystem Descriptor 实现为受监督 Node.js Runtime Process，并通过 Host-owned Subsystem Runner 加载业务 Definition Module 的确定性语义  
+> 依赖：[Game Package v1](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
+> 最近复核：2026-08-19
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-> [!NOTE]
-> **Launcher Profile v1**、`LoomRealmBootstrapContextV1.version = 1` 与 **Subsystem Control v1** 是三个独立版本空间；当前它们恰好都使用版本 1，不能据此推导未来必须同步升级。
+> [!IMPORTANT]
+> 本次 v1 breaking reset supersede 旧模型：Node Launcher 不再直接执行 Game Package `launcher.entry`，Game Package 也不再声明 `launcher.type/env`。Desktop Host 始终执行 Host-owned Subsystem Runner，Runner 再加载 `descriptor.module`。
 
-## 1. 范围与链路边界
+核心原则：
 
-本 Profile 定义链路：
+> **Game Package 选择业务 Definition Module；Desktop Platform 选择 Node Runtime 与 Runner。业务 module 不是 process entry，process entry 不是业务 identity。**
+
+---
+
+## 1. Scope
+
+本 Profile 定义：
 
 ```text
-Validated Subsystem Descriptor
-→ Launcher Target Resolution
+Validated SubsystemDescriptorV1 {key,module}
+→ Desktop executable-module resolution
 → Launch Attempt
-→ Bootstrap Context
-→ Node.js Process Spawn
-→ Runtime Supervisor Registration
+→ bootstrap credential registration
+→ Host-owned Node Subsystem Runner process spawn
+→ Runner loads declared Definition Module
+→ Runtime Supervisor registration
+→ Runtime Control bootstrap
 ```
 
-链路 1 完成条件固定为：
+Process spawn成功时公共 Runtime state仍为：
 
 ```text
-OS Process creation accepted
-+
-Main obtained a valid supervision handle
-+
-Supervisor record installed
+starting
 ```
 
-链路 1 完成时公共 Runtime 状态仍为 `starting`。
-
-以下均属于后续 Main ⇄ Subsystem Control 链路，不由本 Profile 判定成功：
+以下属于后续 Control：
 
 ```text
-Control Transport connected
+Control connected
 subsystem.hello
 identified
 subsystem.status(ready)
@@ -50,74 +52,104 @@ subsystem.status(ready)
 因此：
 
 ```text
-spawn success != connected != identified != ready
+module valid != process spawned != connected != identified != ready
 ```
 
-## 2. 前置条件
+---
 
-调用 Node.js Launcher 前，Main MUST 已经：
+## 2. Inputs / Ownership
+
+调用 Desktop Launcher 前，Main/Platform MUST 已有：
 
 ```text
-Session created
-→ Main Control Endpoint ready
-→ complete Descriptor set loaded
-→ complete Descriptor set validated
-→ Descriptor Registry installed
+current Session
+validated installation
+validated complete Descriptor set
+Descriptor Registry
+Launch Attempt intent
+Main Control endpoint
 ```
 
-调用方 MUST 提供已经通过 Game Package v1 校验的 `SubsystemDescriptor`。
-
-Node.js Launcher MUST NOT 再从业务名称、旧 `systemId` 或平台固定 Registry 推导可执行实现。
-
-## 3. Launcher Target Resolution
-
-Launcher MUST 将 `launcher.entry` 相对于可信 Installation Root 解析为内部 `ResolvedLauncherTarget`。
-
-概念结构：
+Descriptor：
 
 ```ts
-interface ResolvedLauncherTarget {
-  readonly installationId: string;
-  readonly subsystemKey: string;
-  readonly logicalEntry: string;
-
-  // Host-private; never serialized to business protocols.
-  readonly physicalEntry: string;
+interface SubsystemDescriptorV1 {
+  readonly key: string;
+  readonly module: string;
 }
 ```
 
-解析 MUST：
+Launcher MUST NOT 从 business name、PID、旧 Registry、filesystem scanning 或 platform-specific fallback 推导另一个业务 module。
+
+---
+
+## 3. Definition Module Resolution
+
+`descriptor.module` 是 package-relative logical executable module path。
+
+Desktop resolver MUST：
 
 ```text
-validate logical Entry syntax
-→ resolve relative to Installation Root
+validate logical module syntax
+→ resolve relative to trusted Installation Root
 → inspect every path component
 → reject symlink / junction / reparse redirect
-→ verify final target is a regular file
+→ verify final target is regular file
+→ verify .mjs
 → canonical containment verification
-→ create ResolvedLauncherTarget
+→ create host-private ResolvedSubsystemModule
 ```
 
-未验证的 Descriptor string MUST NOT 直接传给 Process Creation API。
+概念：
 
-`physicalEntry` MUST NOT：
+```ts
+interface ResolvedSubsystemModuleV1 {
+  readonly installationId: string;
+  readonly subsystemKey: string;
+  readonly logicalModule: string;
+  readonly physicalModule: string; // host-private
+}
+```
 
-- 进入业务 wire protocol；
-- 发送给 Renderer；
-- 进入 Render State；
-- 成为 Subsystem identity。
-
-## 4. Node.js Runtime Selection
-
-Descriptor 只选择：
+`physicalModule` MUST NOT：
 
 ```text
-launcher.type = nodejs
+become Subsystem identity
+enter Game/Frame/Render/Data payload
+be published to Renderer
+replace descriptor.module in application state
 ```
 
-具体 Node executable MUST 由 LoomRealm Desktop Host Profile 选择。
+Resolver failure MUST happen before the target Runtime can load business code.
 
-Game Package MUST NOT 指定：
+---
+
+## 4. Host-owned Subsystem Runner
+
+Desktop Host MUST select a trusted LoomRealm Node Subsystem Runner entry independently of Game Package content.
+
+```text
+Host-owned runner
+    owns Desktop runtime bootstrap glue
+    imports @loomrealm/subsystem host integration
+    obtains Desktop Subsystem-facing Platform Ports
+    loads exactly the declared business Definition Module
+
+Game-owned Definition Module
+    owns business definition only
+```
+
+Game Package MUST NOT choose/replace Runner entry.
+
+Runner MUST NOT infer a different business module from argv/cwd/package metadata.
+
+---
+
+## 5. Node Runtime Selection
+
+具体 Node executable MUST 由 Desktop Host选择。
+
+Game Package/Definition Module MUST NOT指定：
 
 ```text
 Node executable
@@ -125,173 +157,146 @@ Node CLI flags
 --require
 --loader
 --inspect
-shell
-interpreter
-argv
+shell/interpreter
+process argv
+NODE_OPTIONS / NODE_PATH
 ```
 
-Launcher MUST NOT 通过 Descriptor、用户 Shell 或用户 PATH 重新解释应该运行哪个 Node Runtime。
+Node Runtime version/support policy属于 Host Runtime Policy。
 
-Node Runtime 的安装、版本支持与升级属于 LoomRealm Host Runtime Policy。
+---
 
-## 5. Launch Attempt
+## 6. Launch Attempt
 
-每次启动 Subsystem 前 Main MUST 创建新的 Launch Attempt。
-
-概念内部模型：
+每次启动 Subsystem 前 Main MUST 创建 fresh Launch Attempt：
 
 ```ts
-interface LaunchAttempt {
-  readonly launchId: string;
+interface LaunchAttemptV1 {
+  readonly launchId: string;          // Main-private
   readonly subsystemKey: string;
   readonly installationId: string;
-  readonly target: ResolvedLauncherTarget;
+  readonly module: ResolvedSubsystemModuleV1;
   readonly bootstrapToken: string;
-
-  state:
-    | "prepared"
-    | "spawning"
-    | "supervised"
-    | "exited"
-    | "failed";
 }
 ```
 
-`launchId`、PID、Process Handle 都属于 Main 内部监督状态，MUST NOT 成为协议 identity。
-
-同一 Session 中一个 `descriptor.key` 同时最多对应一个 active Runtime Container。
-
-本 Launcher Profile v1 MUST NOT 并发创建两个有效 Runtime 来竞争同一 Subsystem identity。
-
-## 6. Bootstrap Credential
-
-每个 Launch Attempt MUST 生成新的 `bootstrapToken`。
-
 要求：
 
-- MUST 绑定单一 Launch Attempt 与 `descriptor.key`；
-- MUST 是高熵、opaque credential；
-- MUST 只允许成功消费一次；
-- MUST NOT 由 PID、端口、路径或时间戳推导；
-- SHOULD NOT 出现在普通日志或用户可见错误中。
-
-Token 的字节数、编码与随机算法由安全实现 Profile 决定，不在本 Launcher Profile 版本冻结。
-
-### 6.1 顺序保证
-
-启动顺序 MUST 为：
-
 ```text
-Create Launch Attempt
-→ Generate Bootstrap Token
-→ Register token + key in Main Control authentication state
-→ Construct child environment
-→ Spawn Process
+one active Runtime Container per descriptor.key
+fresh Launch Attempt on every new Runtime
+PID/launchId/process handle never become protocol identity
 ```
 
-MUST NOT：
+---
+
+## 7. Bootstrap Credential
+
+每个 Launch Attempt MUST产生 fresh `bootstrapToken`：
 
 ```text
-Spawn Process
-→ register Bootstrap Token later
+high entropy
+opaque
+bound to Launch Attempt + descriptor.key
+registered before process can execute
+one successful subsystem.hello consumption
+revoked if launch/bootstrap is abandoned
+not logged
 ```
 
-在 Process 可观察地开始执行前，相应 Control authentication state MUST 已经存在。
+顺序：
 
-### 6.2 Revoke
+```text
+create Launch Attempt
+→ generate token
+→ register token/key in Main Control auth state
+→ construct Runner bootstrap context
+→ spawn Runner process
+```
 
-以下情况 MUST revoke 未 consumed Token：
+禁止 spawn 后再注册 token。
 
-- spawn 失败；
-- Process 在 `subsystem.hello` 成功前退出；
-- Launch Attempt 被取消；
-- Game Bootstrap 被取消；
-- Session termination。
+---
 
-Token 成功消费后的身份绑定与重放规则由 **Subsystem Control v1** 管理。
+## 8. Desktop Runner Bootstrap Context
 
-## 7. Bootstrap Context
-
-Desktop Node.js Profile v1 冻结单一保留环境变量：
+保留环境变量：
 
 ```text
 LOOMREALM_BOOTSTRAP_CONTEXT
 ```
 
-其值 MUST 为：
+值：
 
 ```text
 Base64URL(no padding)(UTF-8 JSON)
 ```
 
-解码后：
+解码：
 
 ```ts
-interface LoomRealmBootstrapContextV1 {
+interface LoomRealmNodeRunnerBootstrapContextV1 {
   readonly version: 1;
   readonly subsystemKey: string;
+  readonly subsystemModule: string;
   readonly controlEndpoint: string;
   readonly bootstrapToken: string;
 }
 ```
 
-这里的 `version: 1` 只表示 **Desktop Launcher Bootstrap Context v1**。Runtime 随后通过 `subsystem.hello.protocolVersions` 协商 Subsystem Control v1；两个版本空间独立。
-
-Bootstrap Context MUST NOT 包含：
+其中：
 
 ```text
-PID
-launchId
-physicalEntry
-Renderer Data Endpoint
-DataAuthority generation
-Data ticket / bearer credential
-MessagePort
-frameId
-activationId
-Render identity
+subsystemModule
+    = validated descriptor.module logical path
 ```
 
-Bootstrap Context 只提供发起 Control Bootstrap 所必需的信息；它本身不完成 Subsystem identity binding，也不建立 Renderer⇄Subsystem Data Connection。
+`version` 只表示本 Desktop Runner Bootstrap Context v1，不等于 Subsystem Control version。
 
-唯一的 Control identity binding 仍由 `subsystem.hello` 完成。
+Context MUST NOT包含：
 
-## 8. Child Environment
+```text
+PID / launchId
+DataAuthority generation
+Renderer Data endpoint/ticket
+frameId / activationId
+Render identity
+Content bearer
+business params
+```
 
-Child environment MUST 按以下模型显式构造：
+Context 是 Host→Host-owned Runner 的 platform bootstrap material，不是 Game Package business configuration，也不是新的 application authority。
+
+---
+
+## 9. Child Environment
+
+Runner process environment：
 
 ```text
 Host-defined Safe Baseline
 +
-validated descriptor.env
-+
 LoomRealm Reserved Environment
 ```
 
-Launcher MUST NOT 无条件继承 Main 的完整 `process.env`。
+Game Package v1 不再提供 `descriptor.env`。
 
-Safe Baseline MAY 包含 Node/OS 正常运行所需的最小平台字段，但 SHOULD 避免向 Subsystem 泄露 Main 的云凭证、开发者 Token、代理 Secret 或其他无关敏感环境。
+Host MUST NOT无条件继承 Main完整 `process.env`。Safe Baseline SHOULD避免泄露 cloud credential、developer token、proxy secret等无关敏感状态。
 
-Game Package v1 已保留：
+Definition Module MUST NOT依赖任意 inherited process env形成 portable business semantics。
 
-```text
-LOOMREALM_*
-NODE_OPTIONS
-NODE_PATH
-```
+---
 
-Launcher MUST 在 spawn 前再次拒绝任何未经过 Descriptor Validator 的保留字段冲突，而不能假设上层永远正确。
+## 10. Process Creation
 
-## 9. Process Creation
-
-Node.js Launcher Profile v1 Process Creation 语义等价于：
+语义等价：
 
 ```text
 executable:
     Host-selected Node.js Runtime
 
 argv:
-    [ResolvedLauncherTarget.physicalEntry]
+    [Host-owned Subsystem Runner Entry]
 
 cwd:
     Installation Root
@@ -305,234 +310,174 @@ detached:
 stdin:
     closed / ignored
 
-stdout:
-    captured diagnostic stream
-
-stderr:
-    captured diagnostic stream
-
-extra process IPC:
-    none required by this Launcher Profile
+stdout/stderr:
+    bounded diagnostic streams
 ```
 
-Game Package MUST NOT 追加 argv。
+**业务 `descriptor.module` MUST NOT作为 process argv entry。**
 
-### 9.1 Shell 禁止
+Game Package不能追加 argv或 shell command。
 
-Entry MUST NOT：
+---
 
-- 经过 Shell 解释；
-- 通过命令字符串拼接；
-- 使用 `exec("node ...")` 或平台等价 Shell API 启动。
+## 11. Runner Module Load
 
-Launcher MUST 使用参数化 Process Creation API。
-
-### 9.2 Working Directory
-
-Launcher Profile v1 固定：
+Runner开始后 MUST：
 
 ```text
-cwd = Installation Root
+parse/validate bootstrap context
+→ verify subsystemKey/module consistency
+→ resolve declared logical module against current trusted installation
+→ import exactly that .mjs module as ESM
+→ validate default export against Subsystem Definition Module ABI
+→ construct Desktop Subsystem-facing Platform Ports
+→ enter @loomrealm/subsystem host runtime
 ```
 
-`cwd` 是 Runtime compatibility 行为，不是业务 Content API。
+Module load / ABI failure MUST：
 
-Subsystem 的普通游戏内容读取仍 SHOULD 使用 Readonly Content API。
+```text
+prevent Runtime ready
+produce bounded diagnostic classification
+cause bootstrap failure
+terminate Runtime
+```
 
-## 10. stdout / stderr
+不得 fallback 到另一个 module、CommonJS、package main或 directory index。
 
-stdout 与 stderr 只属于 diagnostic plane。
+---
 
-MUST NOT 作为：
+## 12. Runtime Control Bootstrap
+
+Definition Module本身不得读取 token/endpoint或打开 Control WebSocket。
+
+这些由 Runner/`@loomrealm/subsystem` host integration处理：
+
+```text
+Runner obtains established/control binding
+→ Subsystem role sends subsystem.hello
+→ Main binds descriptor.key
+→ identified
+→ initialization
+→ ready
+```
+
+`ready` 不表示 Renderer Data Connection存在，也不携 Data material。
+
+---
+
+## 13. stdout / stderr
+
+stdout/stderr只属于 diagnostic plane。
+
+MUST NOT作为：
 
 ```text
 Control Protocol
 ready signal
-Frame / Call Protocol
-Render Update Protocol
-User Input Protocol
+Frame/Call
+User Input
+Render Update
+Platform sideband
 ```
 
-Main MUST 使用有界日志策略；Subsystem 日志洪泛 MUST NOT 导致 Main 无限内存增长。
+日志策略必须 bounded；credential应脱敏。
 
-Credential、完整敏感环境和其他 Secret SHOULD NOT 被记录。
+---
 
-## 11. Spawn Success 与公共状态
+## 14. Runtime Supervisor
 
-`spawn success` 仅表示：
-
-```text
-OS process creation accepted
-+
-Main owns the supervision handle
-```
-
-它不表示：
-
-```text
-entry successfully initialized
-Control Connection exists
-Subsystem identified
-Subsystem ready
-```
-
-Process 创建成功后，公共 Runtime Container 状态 MUST 保持：
-
-```text
-starting
-```
-
-Launcher Profile v1 MUST NOT 因 Launcher 内部状态增加新的跨实现公共状态：
-
-```text
-spawned
-running
-```
-
-之后只有 Control carrier 被 Main 接受时才进入 `connected`。
-
-## 12. Runtime Supervisor
-
-每个 Subsystem Runtime MUST 对应一个 Supervisor Record。
-
-Supervisor 至少 MUST 观察：
+每个 Runner process MUST对应 Supervisor Record，并至少观察：
 
 ```text
 process creation error
 process exit
-exit code
-termination signal / platform exit reason
+exit code / signal
 Main-requested termination
+force termination result
 ```
 
-Supervisor MUST 将 OS Process observation 与 Runtime self-reported status 分离。
+`stopped` 只来自实际 Runtime process termination observation。
 
-因此：
+PID只用于物理监督。
+
+---
+
+## 15. Exit Classification
+
+无 Main termination intent：
 
 ```text
-subsystem.status(stopping) != stopped
+spawn后、Control connect前 exit
+connected后、hello前 exit
+identified后、ready前 exit
+ready后任何 unexpected exit including code 0
+    → Runtime failure
 ```
 
-`stopped` 只能由 Supervisor 观察实际 Runtime 已退出后产生。
+有明确 termination intent 时，Supervisor再按当前 shutdown context分类 expected/failed。
 
-PID 仅用于 OS Process 管理，MUST NOT 用于 Control Authentication 或任何业务 identity。
+Runtime self-reported failed之后的 process exit不能恢复为 stopped-success语义。
 
-## 13. Exit Classification
+---
 
-Process exit MUST 被 Main 分类为：
+## 16. Automatic Restart
+
+v1：
 
 ```text
-expected
-unexpected
+MUST NOT automatically restart failed Runtime
 ```
 
-分类由 Main 当前生命周期上下文决定，MUST NOT 仅依据 exit code。
+未来 restart必须是 fresh Launch Attempt + fresh token + fresh Runtime/Control identity lifetime。
 
-### 13.1 Bootstrap 期间退出
+---
 
-以下阶段 Process 退出均属于 `unexpected bootstrap termination`：
+## 17. Termination
 
-```text
-spawn 后、Control connect 前
-connected 后、hello 成功前
-identified 后、ready 前
-```
-
-结果：
+Desktop Platform必须提供最终有界的 process termination：
 
 ```text
-PROCESS_EXITED_DURING_BOOTSTRAP
-→ Runtime Bootstrap failure
-→ Game Bootstrap failure (all-required MVP)
-```
-
-### 13.2 Ready 后退出
-
-Subsystem 已 `ready` 后，如果 Main 没有开始 Runtime/Session termination，则任意 Process exit 都属于 `unexpected runtime termination`，包括：
-
-```text
-exit code = 0
-```
-
-结果：
-
-```text
-PROCESS_EXITED_UNEXPECTEDLY
-→ Runtime failure
-→ revoke affected current authority/connections
-→ upper Main lifecycle handles affected Frames
-```
-
-### 13.3 Expected Exit
-
-只有 Main 已明确进入 Runtime termination 流程时，Process exit 才 MAY 被分类为 expected。
-
-## 14. Automatic Restart
-
-Desktop Node.js Launcher Profile v1：
-
-```text
-MUST NOT automatically restart a failed Subsystem.
-```
-
-Unexpected exit 必须暴露为 Runtime failure。
-
-如果未来引入 restart，每个新 Runtime MUST 是新的显式 Launch Attempt，并使用新的 Bootstrap Credential；Runtime/Data authority、Frame recovery、Render recovery 与 Data Connection replacement 必须由新契约同时定义。
-
-## 15. Termination
-
-Launcher/Supervisor MUST 提供最终可收敛的 Process termination capability。
-
-上层 Main 开始 termination 后：
-
-```text
-request graceful termination
-→ wait finite Host-defined grace period
+request graceful Runtime shutdown
+→ finite grace policy
 → force terminate if still alive
+→ observe actual termination
 ```
 
-graceful shutdown 的 Main → Subsystem wire method 由 Subsystem Control v1 定义，不属于本 Launcher Profile。
+Platform MAY使用 process group/job object等机制收敛受管理 process tree。
 
-本 Profile 只冻结：
+具体 OS API不进入 application protocol。
 
-> Runtime / Session termination 最终 MUST 在有限时间内收敛到受管理 Runtime Process 不再运行。
+---
 
-Host SHOULD 使用平台提供的 process group / job object / 等价监督能力，避免只终止根 PID 而遗留由 Runtime 创建的受管理子进程树。
+## 18. Timeout Policy
 
-具体 OS 实现属于 Host Adapter，不是跨平台 wire contract。
-
-## 16. Timeout Policy
-
-以下等待 MUST 有有限期限：
+以下等待 MUST bounded：
 
 ```text
+module resolution
 process creation
 Control connect
 hello
 ready
-shutdown
+shutdown/termination
 ```
 
-具体默认秒数由 Desktop Runtime Policy 决定，不进入 Game Package 或业务 wire schema。
+具体时间值属于 Desktop deployment policy；Game Package不得覆盖。
 
-Game Package MUST NOT 覆盖这些 timeout。
+---
 
-## 17. Error Model
+## 19. Error Categories
 
-Launcher Profile v1 冻结以下机器可识别错误类别：
+至少保留：
 
 ```text
-LAUNCHER_TYPE_UNSUPPORTED
-
-LAUNCH_ENTRY_INVALID
-LAUNCH_ENTRY_NOT_FOUND
-LAUNCH_ENTRY_TYPE_UNSUPPORTED
-LAUNCH_ENTRY_REDIRECTED
-LAUNCH_ENTRY_OUTSIDE_INSTALLATION
-
-LAUNCH_ENV_INVALID
-LAUNCH_ENV_RESERVED
-
+SUBSYSTEM_MODULE_INVALID
+SUBSYSTEM_MODULE_NOT_FOUND
+SUBSYSTEM_MODULE_TYPE_UNSUPPORTED
+SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION
+SUBSYSTEM_MODULE_LOAD_FAILED
+SUBSYSTEM_MODULE_ABI_INVALID
 LAUNCH_RUNTIME_UNAVAILABLE
 PROCESS_SPAWN_FAILED
 PROCESS_EXITED_DURING_BOOTSTRAP
@@ -540,211 +485,81 @@ PROCESS_EXITED_UNEXPECTEDLY
 PROCESS_TERMINATION_FAILED
 ```
 
-概念错误结构：
+用户可见错误不得泄露 token、完整敏感 env、不必要的 absolute path或内部 stack。
 
-```ts
-interface LauncherError {
-  readonly code: LauncherErrorCode;
-  readonly message?: string;
-}
-```
+---
 
-普通用户可见错误 MUST NOT 包含：
+## 20. Game Bootstrap Failure
 
-- `bootstrapToken`；
-- 完整敏感环境；
-- 不必要的用户 Home 路径；
-- 不必要的宿主内部绝对路径。
-
-详细路径 MAY 进入受保护的开发者诊断日志，但不是稳定协议数据。
-
-## 18. Game Bootstrap Failure
-
-当前 MVP 为 eager / all-required。
-
-因此任意 Subsystem 出现：
+Phase 1 eager/all-required：任意 required Subsystem出现以下事实：
 
 ```text
-Descriptor invalid
-Launcher unsupported
-Entry invalid
-Runtime unavailable
-spawn failure
-Control Bootstrap failure
-early process exit
+Descriptor/module invalid
+module cannot resolve/load
+ABI invalid
+Node Runtime unavailable
+Runner spawn failure
+Control bootstrap failure
 cannot become ready
 ```
 
-整个 Game Bootstrap MUST 失败。
+整个 Game Bootstrap MUST失败，并对已创建的其他 required Runtime进入统一 cleanup。
 
-Main MUST 对已经启动的其他 required Runtime 进入统一 termination/cleanup 流程，Session MUST NOT 进入正常运行阶段。
+---
 
-## 19. Trust Model
+## 21. Trust Boundary
 
-Desktop `nodejs` Profile 中，被执行的 Subsystem JavaScript 是 **trusted executable code**。
+Desktop Node Runner加载的业务 Definition Module是 trusted executable JavaScript。
 
-本 Profile 保证的是：
-
-```text
-Main only executes a Descriptor-declared, validated Entry inside the Installation.
-```
-
-本 Profile不保证：
+本 Profile保证：
 
 ```text
-Node Process is OS-sandboxed
-no filesystem access
-no network access
-no child_process access
+Host only loads validated installation module
+through Host-owned Runner
+without shell/argv/module fallback
 ```
 
-因此：
+不提供完整 OS sandbox。
+
+---
+
+## 22. Conformance
+
+至少覆盖：
 
 ```text
-safe launcher.entry != sandboxed Node.js process
+valid descriptor.module → resolved module
+absolute/traversal/url/backslash rejection
+.mjs only
+symlink/junction/reparse ancestor rejection
+installation containment
+Host-owned runner is process argv entry
+business module is not process argv entry
+bootstrap context contains logical module
+runner imports declared module exactly
+missing/invalid default export fails bootstrap
+no descriptor.env
+spawn != connected != identified != ready
+stopped only from supervisor
+unexpected code-0 exit fails Runtime
+no automatic restart
+zero shell
+bounded diagnostics
 ```
 
-Renderer/Content API 的能力限制与 Node Process 的 OS 权限是不同安全边界，不得混写。
+---
 
-第三方不可信可执行代码 Sandbox 属于暂缓项。
+## 23. Core Invariants
 
-## 20. State Model
-
-Launcher 内部：
-
-```text
-prepared
-   │
-   ▼
-spawning
-   ├── spawn failure ─────▶ failed
-   │
-   ▼
-supervised
-   ├── unexpected exit ───▶ exited / failure observation
-   │
-   ▼
-chain 1 complete
-```
-
-公共 Runtime Container：
-
-```text
-declared
-   │
-   ▼
-starting      ← chain 1 completes inside this state
-   │
-   ▼
-connected
-   │
-   ▼
-identified
-   │
-   ▼
-ready
-   │
-   ▼
-stopping
-   │
-   ▼
-stopped
-
-legal stages ─────────────▶ failed
-```
-
-Launcher MUST NOT 创建第二套公共 Runtime lifecycle。
-
-## 21. Conformance Tests
-
-符合 Launcher Profile v1 的实现至少 MUST 验证：
-
-```text
-valid package-relative Entry launches
-absolute path rejected
-parent traversal rejected
-backslash path rejected
-URL-like Entry rejected
-unsupported extension rejected
-missing Entry rejected
-directory-as-Entry rejected
-symlink Entry rejected
-symlink ancestor rejected
-Installation escape rejected
-case-collision installation rejected
-
-reserved LOOMREALM_* env rejected
-NODE_OPTIONS rejected
-NODE_PATH rejected
-invalid env key/value rejected
-
-Bootstrap Token registered before spawn
-new Launch Attempt gets new Token
-spawn failure revokes Token
-early exit revokes unconsumed Token
-bootstrap-context-version-independent-from-control-version
-
-shell interpretation impossible
-Game Package cannot supply Node flags
-cwd equals Installation Root
-stdout/stderr are diagnostic only
-
-spawn success leaves public state at starting
-Control v1 hello selects version 1
-exit before connect fails bootstrap
-exit after connect before hello fails bootstrap
-exit after identified before ready fails bootstrap
-exit code 0 after ready without termination request is failure
-no automatic restart occurs
-non-responsive Runtime is eventually force-terminated
-```
-
-## 22. 暂缓项
-
-以下项目明确不属于 Launcher Profile v1，MUST NOT 阻塞本 Profile，也不得由实现自行发明隐式行为：
-
-```text
-PWA Descriptor → Worker Script Profile
-second Launcher Type
-untrusted executable sandbox
-OS permission/capability sandbox
-Game Package signing / Publisher Trust
-automatic Runtime restart
-checkpoint / crash recovery
-idle recycle
-lazy Subsystem startup
-one key → multiple Runtime instances
-remote Subsystem
-Game-supplied Node executable
-Game-supplied Node flags / argv
-Node version negotiation in Game Entry
-default timeout numeric values
-OS-specific process-group/job-object API
-Bootstrap Token final byte length/encoding
-executable integrity/signature verification
-```
-
-Data endpoint/ticket/MessagePort establishment不属于本 Launcher Profile，也不通过 Control `ready`补回。
-
-## 23. 核心不变量
-
-```text
-Main is the only privileged Subsystem Launcher.
-One descriptor.key has at most one active Runtime Container.
-Desktop Launcher Profile v1 launches nodejs only.
-Entry is Installation-relative and validated before spawn.
-Launcher never invokes a shell.
-Node executable is selected by LoomRealm Host.
-Game Package cannot inject Node CLI semantics.
-Bootstrap authentication state exists before process execution.
-Bootstrap Context v1 and Subsystem Control v1 are independent version spaces.
-Child environment is explicitly constructed.
-PID / launchId / Process Handle are not protocol identity.
-Spawn success does not mean connected / identified / ready.
-Current Control protocol is v1.
-Runtime ready does not carry Data endpoint.
-Supervisor is authoritative for actual Process exit.
-Unexpected exit is failure even when exit code is zero.
-Launcher Profile v1 never performs implicit automatic restart.
-Node.js executable code is trusted code, not sandboxed code.
-```
+1. Game Package选择 `descriptor.module`，Desktop Host选择 Node/Runner；
+2. business Definition Module不是 process entry；
+3. Host-owned Runner是唯一 Node process entry；
+4. module固定 platform-neutral `.mjs` ESM ABI；
+5. Game Package不能注入 process env/argv/flags；
+6. Runtime identity仍是 `descriptor.key`，不是 module/path/PID；
+7. module resolve/load发生在 ready前；
+8. Runtime Control identity只由 `subsystem.hello`绑定；
+9. `ready`不携/暗示 Data endpoint；
+10. stopped只来自 actual process termination；
+11. no automatic restart；
+12. Desktop Runner realization不得改变 shared Subsystem business semantics。
