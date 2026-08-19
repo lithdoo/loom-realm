@@ -4,7 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：LoomRealm 跨平台 composition boundary、平台职责、role-facing platform ports，以及 Hostra Desktop / PWA 对同一逻辑 Session 的物理实现关系  
-> 依赖：[系统架构总览](./system-overview.md)、[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[运行承载系统](./runtime-hosting-system.md)、[通信系统](./communication-system.md)、[ADR 0002](../decisions/0002-platform-transport-profiles.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[ADR 0002](../decisions/0002-platform-transport-profiles.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)  
+> 被以下文档细化：[运行时启动与连接建立系统](./runtime-bootstrap-system.md)、[运行承载系统](./runtime-hosting-system.md)、[通信系统](./communication-system.md)  
 > 被以下文档实现：[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
 > 最近复核：2026-08-19
 
