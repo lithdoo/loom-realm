@@ -2,42 +2,66 @@
 
 > 状态：Accepted  
 > 日期：2026-08-19  
-> 影响范围：Game Package v1、Desktop Node Runner Profile v1、Subsystem SDK、Renderer Control/Data、Platform provisioning、package/document governance  
-> 取代/修正：[ADR 0005](./0005-game-entry-subsystem-launchers.md) 的 launcher declaration 部分、[ADR 0007](./0007-subsystem-descriptor-mvp.md)、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md)  
+> 影响范围：Game Package v1、Desktop Node Runner Profile v1、Subsystem SDK、Renderer Control/Data、Platform provisioning、Frame v1 transport mapping、package/document governance  
+> 取代/修正：[ADR 0005](./0005-game-entry-subsystem-launchers.md) launcher declaration 部分、[ADR 0007](./0007-subsystem-descriptor-mvp.md)、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md)、[ADR 0015](./0015-freeze-frame-call-protocol-v1-batch-f.md) 的旧 PWA structured-object transport mapping  
 > 延续：[ADR 0017](./0017-system-level-platform-composition.md)
 
 ## 背景
 
-LoomRealm 尚未有需要兼容的 conformant v1 implementation。随着 Platform Composition、Subsystem SDK、Renderer Data 与 PWA realization继续闭合，早期 Desktop-first设计暴露出四个根因级断点：
+LoomRealm 尚无需要兼容的 conformant deployed v1 implementation。继续保留早期 Desktop-first形状会制造虚假的 dual model与兼容义务。
+
+发现的根因级断点：
 
 ```text
-Game Package把 business topology 与 Node launcher technology耦合
-Business Definition 到 physical Runtime entry之间缺少 Runner层
-Runtime已启动后没有优雅的 late Data provisioning路径
-Frame protocol failure/outcome没有完整映射到 author control-flow
+Game Package business topology耦合 Node launcher technology
+Business Definition → physical Runtime 缺 Runner层
+Runtime ready之后缺 late Data provisioning路径
+Frame protocol outcome/failure缺完整 author control-flow映射
+Control/Data在 WebSocket/MessagePort上存在两套 application representation
 ```
 
-如果为了保留尚未实现的旧文档而创建 v2，会人为制造不存在的兼容义务和双模型。
-
-因此当前阶段明确允许直接重置现行 v1。
+因此当前阶段直接修正现行 v1，而不是创建 v2。
 
 ---
 
-## 决策 1：不创建 v2，只保留一个当前 v1
+## 1. Preimplementation v1 Reset Rule
 
-在首次 conformant implementation/公开兼容承诺前：
+在首次 conformant implementation / public compatibility commitment前：
 
-> **当前 v1文档可以进行 breaking reset，以得到唯一、完整、可实现的 first implementation contract。**
+> **Current v1 MAY receive breaking corrections required to produce one coherent first implementation contract.**
 
-旧形状只留在 Git/ADR历史，不保留 deprecated alias/dual parser/compatibility mode。
+旧形状只留 Git/ADR历史；不保留 deprecated alias、dual parser、compatibility mode。
 
-一旦某协议标记 Frozen且已有真实兼容承诺，则遵守对应冻结治理；本 ADR不授权修改已经 Frozen 的 Frame / Call v1 wire semantics。
+### Frame Frozen 特例边界
+
+Frame / Call v1已经 Frozen。此次只授权一次 preimplementation correction：
+
+```text
+PWA postMessage(plain object)
+→ postMessage(string UTF-8 JSON text)
+```
+
+以及对应 size/conformance wording。
+
+**不授权改变**：
+
+```text
+seven methods / fields
+FrameOutcome
+identity/lifecycle/Activation
+commit points / causal barriers
+error/timeout/no-retry
+failure unwind
+business wire limits/deadlines
+```
+
+当前 correction完成后，Frame v1继续 Frozen；未来不能用本 ADR绕过版本治理。
 
 ---
 
-## 决策 2：Game Package v1 只声明 platform-neutral Module
+## 2. Game Package v1
 
-采用：
+Current：
 
 ```ts
 interface SubsystemDescriptorV1 {
@@ -46,7 +70,7 @@ interface SubsystemDescriptorV1 {
 }
 ```
 
-删除旧：
+删除：
 
 ```text
 launcher.type
@@ -54,36 +78,29 @@ launcher.entry
 descriptor.env
 ```
 
-`module` 是 package-local `.mjs` Subsystem Definition Module，default export `SubsystemDefinitionFactory`。
+`module` = package-local `.mjs` Subsystem Definition Module，default export `SubsystemDefinitionFactory`。
 
-Game Package声明：
+Game Package回答：
 
 ```text
 who = key
-what business implementation = module
+what business module = module
 ```
 
-Platform决定：
-
-```text
-how to host/run it
-```
+Platform回答 how to host/run。
 
 ---
 
-## 决策 3：Business Definition Module 与 Platform Runner 分离
+## 3. Definition Module / Runner
 
 ```text
 same Definition Module
         │
    ┌────┴────┐
-   ▼         ▼
 Node Runner Worker Runner
 ```
 
-Host-owned Runner是 Process/Worker entry；business module不是 Runtime entry policy。
-
-Runner负责：
+Host-owned Runner是 Process/Worker entry，负责：
 
 ```text
 load/validate Definition Module ABI
@@ -91,19 +108,21 @@ construct role-local Platform Ports
 call @loomrealm/subsystem/host runSubsystem
 ```
 
+Business module不是 physical Runtime entry policy。
+
 ---
 
-## 决策 4：Subsystem SDK 分 author / host surface
+## 4. Subsystem Author / Host Surface
 
 ```text
 @loomrealm/subsystem
-    business author API
+    author API
 
 @loomrealm/subsystem/host
-    trusted Runner integration API
+    trusted Runner integration
 ```
 
-Author不见 carrier/bootstrap/generation/profile/Platform provisioning。
+Author不见 carrier/bootstrap/generation/profile/provisioning。
 
 Host surface提供：
 
@@ -114,13 +133,13 @@ SubsystemDataBinding
 ContentClient integration
 ```
 
-不建立 Runtime service locator或 module-global current context。
+无 Runtime service locator / module-global current context。
 
 ---
 
-## 决策 5：FrameOutcome 显式映射 Frozen Frame v1
+## 5. FrameOutcome / Business Control-flow
 
-Author outcome：
+Author结果直接映射 Frozen Frame outcome：
 
 ```text
 completed(value)
@@ -135,21 +154,19 @@ child completed/cancelled/failed
     → resolve FrameOutcome
 
 明确 pre-commit recoverable rejection
-    → typed rejection; current Activation remains valid
+    → typed reject; current Activation remains valid
 
 Runtime-fatal/ambiguous
     → MUST NOT re-enter business continuation
 ```
 
-普通 uncaught business exception在 authority仍健康时转换为 Frame failed outcome；protocol ambiguity/invariant corruption属于 Runtime failure。
-
-这确保 SDK ergonomics不能绕过 Frame v1 commit/Activation semantics。
+ordinary uncaught business exception在 authority明确健康时 → Frame failed outcome；protocol ambiguity/invariant corruption → Runtime failure。
 
 ---
 
-## 决策 6：DataAuthority 选择完整 Data Application Profile
+## 6. DataAuthority / Renderer Data Profile
 
-Renderer Control使用：
+Renderer Control：
 
 ```text
 DataAuthority {
@@ -159,7 +176,7 @@ DataAuthority {
 }
 ```
 
-当前：
+Current：
 
 ```text
 loomrealm.renderer-data/1
@@ -168,13 +185,15 @@ loomrealm.renderer-data/1
 + Render Update v1
 ```
 
-旧 `connectionProfile` 名称删除。
+删除旧 `connectionProfile`。
 
 `dataProfile` 是 complete application stack identity；同 generation immutable；Profile改变必须 fresh generation。
 
 ---
 
-## 决策 7：所有 current message-oriented profiles统一 JSON text carrier unit
+## 7. Unified JSON Text Carrier Model
+
+Current message-oriented Runtime Control / Renderer Control / Renderer Data Profiles全部：
 
 ```text
 one carrier application unit
@@ -187,15 +206,17 @@ MessagePort postMessage(string)
 Memory      string
 ```
 
-Structured Clone只用于 Platform bootstrap/Port transfer，不形成第二套 application value model。
+Structured Clone只用于 Platform bootstrap/Port transfer。
 
-Foundation仍把 carrier string视为 opaque；JSON语义属于 wire/Profile。
+Foundation把 string视为 opaque；JSON interpretation属于 wire/Profile。
+
+这同时修正 Frame v1旧 PWA object-carrier mapping；详见 ADR 0015当前说明。
 
 ---
 
-## 决策 8：Late Data provisioning 是独立 Platform infrastructure
+## 8. Late Data Provisioning
 
-Runtime `ready` 不携 Data material。
+Runtime `ready`不携 Data material。
 
 Hostra：
 
@@ -229,35 +250,32 @@ Provisioning/Data establishment failure本身不失败 Runtime、不 unwind Fram
 
 ---
 
-## 决策 9：Role-local Data ports 明确两端命名
+## 9. Role-local Data Port Names
 
 ```text
 RendererDataBinding
 SubsystemDataBinding
 ```
 
-它们是同一 DataConnectionBroker 的两个 role-local projections，不用同名接口隐藏 owner。
+它们是同一 DataConnectionBroker的两个 role-local projections；不使用含糊同名接口隐藏 owner。
 
 ---
 
-## 决策 10：文档主要定义依赖必须是 DAG
+## 10. Document Dependency Governance
 
-文档 metadata区分：
+主要定义依赖必须是 DAG。
+
+Metadata区分：
 
 ```text
-依赖
-    true definition dependency
-
-正式化 / 被细化 / 被实现
-    downward realization relation
-
-相关
-    cross reference only
+依赖       true definition dependency
+正式化     contract realization
+被细化     architecture refinement
+被实现     module/implementation realization
+相关       cross-reference only
 ```
 
-不得用互相“依赖”制造双事实源。
-
-当前主架构定义顺序收敛为：
+当前主架构顺序：
 
 ```text
 system overview
@@ -272,9 +290,9 @@ system overview
 
 ---
 
-## 结果
+## 11. Resulting Closed Loops
 
-系统现在拥有两条完整且方向清楚的链：
+Downward：
 
 ```text
 Business Definition
@@ -282,48 +300,59 @@ Business Definition
 → Role Core
 → Role-local Platform Ports
 → Platform Runner/Broker
-→ physical Process/Worker/WS/Port
+→ Process/Worker/WS/Port
 ```
 
-以及：
+Upward：
 
 ```text
-Formal Protocol facts
+Formal protocol authority/outcome/failure
 → SDK capability/control-flow
-→ business-observable Outcome
+→ business-observable semantics
 ```
 
-任何一层都不需要 service locator、ambient platform context、隐式 Activation恢复或 magic carrier。
+无需：
+
+```text
+runtime service locator
+ambient platform context
+magic carrier
+implicit Activation recovery
+platform branch in business
+```
 
 ---
 
-## 被取代的旧结论
+## 12. Superseded Current-v1 Shapes
 
-以下不再是 current v1：
+以下不再有效：
 
 ```text
-Game Package launcher.type=nodejs
-Game Package launcher.entry
-descriptor.env
+Game Package launcher.type / launcher.entry / env
 business module direct Node argv entry
-PWA需要另一套 business Descriptor
+PWA-specific business Descriptor
 connectionProfile
 MessagePort structured application object
-runtime.input/runtime.render author service locator
-raw child return value without FrameOutcome
+PWA reference-compact-only carrier sizing
+runtime.input/runtime.render service locator
+raw child return without FrameOutcome
 Runtime-fatal as catchable business rejection
 ```
 
-历史只用于理解演进，不形成兼容要求。
+历史只用于理解演进，不形成 compatibility obligation。
 
 ---
 
-## 重新评估条件
+## 13. Re-evaluation
 
-- 已发布/部署的 conformant v1产生真实兼容义务；
-- remote/third-party Runner要求公开 Platform provisioning wire；
-- multiple Renderer或 remote Runtime改变 Data broker topology；
-- 新 Data child protocol组合需要新的 Data Profile identity；
-- Runtime restart/checkpoint要求跨 Runtime保存新的 authority state。
+需要重新版本/架构评估的条件：
 
-在这些条件出现前，不为预测性兼容引入 v2/兼容壳。
+```text
+conformant v1已经产生真实兼容义务
+third-party/remote Runner需要公开 provisioning wire
+multiple Renderer / remote Runtime改变 topology
+新的 Data child protocol组合
+Runtime restart/checkpoint要求跨 Runtime authority
+```
+
+从当前 first implementation baseline起，不再因为“实现还方便”而直接破坏 Frozen/Normative compatibility boundary。
