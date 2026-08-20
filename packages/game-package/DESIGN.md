@@ -30,11 +30,34 @@ platform launcher manifest
 Platform Launch Planner
 ```
 
-`@loomrealm/game-package` 是 contract/capability package，不是 filesystem loader、Node launcher、Worker launcher或 Platform Composition。
+`@loomrealm/game-package` 是 contract/capability package，不是 filesystem loader、Node launcher、Worker launcher、Content Repository或 Platform Composition。
 
 ---
 
-## 2. Public Model
+## 2. Low-level Dependency
+
+本包 MAY依赖：
+
+```text
+@loomrealm/wire
+    JsonValue / JsonObject
+    JSON text parsing primitives
+    closed-object / exact-key validation helpers
+```
+
+依赖方向：
+
+```text
+wire
+  ↑
+game-package
+```
+
+`game-package` 不自行建立第二套 JSON value model，也不依赖 `foundation` carrier、role package或 platform launcher。
+
+---
+
+## 3. Public Model
 
 候选：
 
@@ -55,18 +78,20 @@ Validated value SHOULD使用 branded/opaque boundary，避免 consumer重新把 
 
 ---
 
-## 3. Public API
+## 4. Public API
 
 候选：
 
 ```ts
-parseGameEntryV1(text: string): GameEntryV1
+parseGameEntryV1(text: string): ValidatedGameEntryV1
 validateGameEntryV1(value: unknown): ValidatedGameEntryV1
 getSubsystemKeys(game): readonly string[]
 getInitialTarget(game): { subsystem: string; input: JsonValue }
 ```
 
-可合并 parse + validate，但必须保持：
+`parseGameEntryV1` 不应返回“看似 typed 但尚未 validation”的公开对象；parse boundary要么成功产出 validated value，要么失败。
+
+所有 API必须保持：
 
 ```text
 pure/deterministic
@@ -78,7 +103,7 @@ no Runtime side effect
 
 ---
 
-## 4. Validation
+## 5. Validation
 
 负责：
 
@@ -107,7 +132,7 @@ Process/Worker creation
 
 ---
 
-## 5. Authority Boundary
+## 6. Authority Boundary
 
 本包可以知道：
 
@@ -134,9 +159,9 @@ Data generation/profile
 
 ---
 
-## 6. Platform Join
+## 7. Platform Join
 
-本包只向 launcher提供已经验证的 key set。
+本包只向 launcher提供已经验证的 logical key set。
 
 ```text
 ValidatedGameEntryV1
@@ -153,11 +178,11 @@ resolve own executable bindings
 build own immutable LaunchPlan
 ```
 
-本包不提供 `resolveModule()` 或 `createRuntime()`。
+本包不提供 `resolveModule()`、`PlatformLaunchOptions` 或 `createRuntime()`。
 
 ---
 
-## 7. Error Surface
+## 8. Error Surface
 
 稳定 error categories至少：
 
@@ -174,7 +199,7 @@ Platform binding/module/runtime errors不得混入本包。
 
 ---
 
-## 8. Tests
+## 9. Tests
 
 至少：
 
@@ -188,13 +213,15 @@ case-sensitive key
 undeclared initial target
 module/launcher/env fields rejected
 pure validation has no I/O
+parse returns validated-or-error, not unchecked public model
+wire JsonValue semantics reused
 stable key iteration/order semantics as documented
 same validated entry can feed Hostra/PWA planners
 ```
 
 ---
 
-## 9. Explicit Non-goals
+## 10. Explicit Non-goals
 
 ```text
 generic manifest framework
@@ -211,11 +238,29 @@ cross-platform executable abstraction
 
 ---
 
-## 10. Implementation Stages
+## 11. Module Design != npm Package Boundary
+
+`doc/20-modules/game-package/` 可以讨论更宽的 Game Installation/Catalog/Repository 协作，但公开 npm package职责以本文件和 `package-architecture.md` 为准。
+
+因此：
+
+```text
+Game Package system/module concern
+    MAY coordinate catalog/repository concepts
+
+@loomrealm/game-package
+    MUST stay focused on common Game Entry model + validation
+```
+
+不要因为上层模块文档提到 Catalog/Repository就把这些能力全部塞入 `@loomrealm/game-package`。
+
+---
+
+## 12. Implementation Stages
 
 ### Stage 1
 
-实现 types + parse/validate + fixtures。
+实现 types + parse/validate + fixtures，复用 `@loomrealm/wire` JSON primitives。
 
 ### Stage 2
 
@@ -231,13 +276,16 @@ cross-platform executable abstraction
 
 ---
 
-## 11. Final Invariants
+## 13. Final Invariants
 
 1. Descriptor v1只有 `{key}`；
 2. Game Entry只表达 logical topology + initial business input；
-3. parse/validate纯且零 Runtime side effect；
-4. module/platform/runner不进入本包；
-5. Platform manifest exact-set join属于对应 launcher；
-6. Main消费 logical key，不消费 executable binding；
-7. 不为两个平台当前相似字段抽“万能 launcher config”；
-8. 当前 v1直接实现新模型，不保留旧 `{key,module}` parser。
+3. JsonValue/JSON representation复用 `@loomrealm/wire`，不建立第二套 model；
+4. parse/validate纯且零 Runtime side effect；
+5. public parse boundary产出 validated value或 error；
+6. module/platform/runner不进入本包；
+7. Platform manifest exact-set join属于对应 launcher；
+8. Main消费 logical key，不消费 executable binding；
+9. Catalog/Repository等上层 module concern不自动扩大 npm package职责；
+10. 不为两个平台当前相似字段抽“万能 launcher config”；
+11. 当前 v1直接实现新模型，不保留旧 `{key,module}` parser。

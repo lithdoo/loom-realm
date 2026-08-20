@@ -4,7 +4,7 @@
 > 日期：2026-08-20  
 > 影响范围：Game Package v1、Hostra/PWA Launcher、Runtime Hosting、Main bootstrap、Definition Module、package architecture、cross-platform conformance  
 > 直接更新：current Game Package v1 / current Hostra Launcher v1；新增 current PWA Launcher v1，不创建 v2  
-> 取代/修正：[ADR 0005](./0005-game-entry-subsystem-launchers.md) 当前 `{key,module}` 表达、[ADR 0007](./0007-subsystem-descriptor-mvp.md) 的 current-shape说明、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md) 的 current-shape说明、[ADR 0018](./0018-preimplementation-v1-closure.md) 第 2–3 节 Game Package/“same Definition Module” 结论  
+> 取代/修正：[ADR 0005](./0005-game-entry-subsystem-launchers.md) 当前 `{key,module}` 表达、[ADR 0007](./0007-subsystem-descriptor-mvp.md) 的 current-shape说明、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md) 的 current-shape说明、[ADR 0018](./0018-preimplementation-v1-closure.md) 原 Game Package/“same Definition Module” 结论  
 > 延续：[ADR 0017](./0017-system-level-platform-composition.md) Platform Composition ownership 与 [ADR 0018](./0018-preimplementation-v1-closure.md) preimplementation direct-v1 reset policy
 
 ## 背景
@@ -159,7 +159,7 @@ Game/platform launch manifest不能替换 trusted Runner、credential或 Host se
 
 ```text
 .mjs ESM
-SubystemDefinitionFactory default export
+SubsystemDefinitionFactory default export
 same author-facing capability semantics
 same formal protocol outcomes/failure mapping
 same business-observable behavior for same logical scenario
