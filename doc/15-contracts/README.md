@@ -3,13 +3,14 @@
 > 层级：正式契约  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：当前跨角色协议/Profile、Game logical topology、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)  
+> 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > 最近复核：2026-08-20
 
-契约层只保留**跨角色/跨实现必须一致的可观察语义**。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。
+契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
 
 ```text
+Game Entry document != Main bootstrap model
 Game topology != Platform executable binding
 Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
 ```
@@ -20,21 +21,26 @@ Runtime != Frame != Renderer Control != Data Connection != User Input != Render 
 
 ```text
 Game Package v1
-    Game Entry
+    Game Entry document
     Descriptor {key}
     initial target/input
+        ↓ consumed by matching launcher
 
     ├── Hostra Game Launcher / Node Runner Profile v1
-    │       launch.hostra.json
-    │       → exact key-set join
+    │       Game validation via @loomrealm/game-package
+    │       + launch.hostra.json
+    │       → exact join / full PREPARE
     │       → HostraLaunchPlan
-    │       → Host-owned Node Runner
+    │       → LogicalGameBootstrap projection
+    │       → plan-bound RuntimeHosting
     │
     └── PWA Game Launcher / Worker Runner Profile v1
-            launch.pwa.json
-            → exact key-set join
+            Game validation via @loomrealm/game-package
+            + launch.pwa.json
+            → exact join / full PREPARE
             → PwaLaunchPlan
-            → Host-owned Worker Runner
+            → LogicalGameBootstrap projection
+            → plan-bound RuntimeHosting
 
 Subsystem Control v1
     ↓
@@ -61,28 +67,39 @@ Readonly Content API v1                 Active / Normative / Evolving
 
 ## 2. Game Package v1
 
-[Game Package v1](./game-package-v1.md) 当前形状：
+[Game Package v1](./game-package-v1.md)：
 
 ```ts
-interface SubsystemDescriptorV1 {
-  readonly key: string;
+interface GameEntryV1 {
+  readonly formatVersion: 1;
+  readonly initial: {
+    readonly subsystem: string;
+    readonly input: JsonValue;
+  };
+  readonly subsystems: readonly {
+    readonly key: string;
+  }[];
 }
 ```
 
-Game Entry还包含：
+Game Package：
 
 ```text
-formatVersion
-initial.subsystem
-initial.input
-complete required subsystem key set
+logical topology/business initial input only
+closed schema
+validated detached immutable snapshot
+no executable/Platform authority
 ```
 
-Game Package只声明 logical topology/business initial input，不声明 executable module、Node/Worker、Transport、env或 provisioning。
+Runtime-product primary consumers 是 matching Platform Launchers。Main 不解析/依赖 Game Entry document model。
 
-`key` 是 Main/Runtime/Frame/Data 使用的 Subsystem application identity。
+Current v1：
 
-本次直接更新 current v1：没有 v2、legacy `{key,module}` parser或 compatibility alias。
+```text
+no v2
+no legacy {key,module} parser
+no compatibility alias
+```
 
 ---
 
@@ -91,12 +108,13 @@ Game Package只声明 logical topology/business initial input，不声明 execut
 [Hostra Game Launcher / Node Runner Profile v1](./nodejs-launcher-profile-v1.md)：
 
 ```text
-launch.hostra.json
-→ key → Hostra Definition Module binding
-→ exact Game key-set join
+Game source
+→ Game validation
++ launch.hostra.json
+→ exact Game↔Hostra key-set join
 → filesystem/install security resolution
-→ immutable HostraLaunchPlan
-→ Main launch(key)
+→ HostraLaunchPlan
+→ LogicalGameBootstrap
 → plan-bound RuntimeHosting
 → Host-owned Node Runner
 ```
@@ -104,59 +122,67 @@ launch.hostra.json
 [PWA Game Launcher / Worker Runner Profile v1](./pwa-launcher-profile-v1.md)：
 
 ```text
-launch.pwa.json
-→ key → PWA Definition Module binding
-→ exact Game key-set join
+Game source
+→ Game validation
++ launch.pwa.json
+→ exact Game↔PWA key-set join
 → installation/same-origin resolution
-→ immutable PwaLaunchPlan
-→ Main launch(key)
+→ PwaLaunchPlan
+→ LogicalGameBootstrap
 → plan-bound RuntimeHosting
 → Host-owned Worker Runner
 ```
 
-两 profile独立拥有各自 platform config schema/validation/security policy；不建立 universal launcher schema/options bag。
+两 profile 独立拥有各自 Platform config/schema/validation/security policy；不建立 universal launcher schema/options bag。
 
 共同 hard invariant：
 
-> **Game validation + current Platform manifest validation + exact join + all required executable resolution + hosting/security preflight MUST complete before the first business Runtime side effect.**
+> **Game validation + current Platform manifest validation + exact join + all executable resolution + hosting/security preflight + plan/bootstrap projection MUST complete before the first business Runtime side effect.**
+
+PREPARE failure：
 
 ```text
-preflight failure
-→ Process/Worker create count = 0
-→ business module import count = 0
-→ Runtime Control establish count = 0
+Process/Worker create count = 0
+business module import count = 0
+Runtime Control establish count = 0
 ```
-
-Definition Module actual import/default-export ABI validation MAY在 Runner中发生，并按 required Runtime bootstrap failure处理。
 
 ---
 
-## 4. Main / Runner Boundary
+## 4. Main / Game / Runner Boundary
 
-Main只消费 logical topology与 `subsystemKey`；普通 Runtime launch request不携：
-
-```text
-module
-filesystem path / URL
-Node executable/argv/env
-Worker entry/options
-Control endpoint/Port
-```
-
-Host-owned Runner是 Process/Worker physical entry，并按 frozen PlatformLaunchPlan加载 selected Definition Module。
-
-Definition Module ABI统一为 `@loomrealm/subsystem` 的 `SubsystemDefinitionFactory`。
-
-跨平台要求：
+Main consumes：
 
 ```text
-same logical key
-same author ABI
-same formal protocol semantics
-same logical scenario → equivalent business-observable result
+LogicalGameBootstrap
+    subsystemKeys
+    initial subsystemKey/input
+
+plan-bound RuntimeHosting port
 ```
 
-不要求 same module path/bytes/build artifact。
+Main does not consume：
+
+```text
+GameEntryV1 / ValidatedGameEntryV1
+formatVersion
+Platform Launch Manifest / PlatformLaunchPlan
+module/path/URL
+Node/Worker options
+```
+
+Runtime launch：
+
+```text
+Main launch(subsystemKey)
+→ RuntimeHosting lookup frozen plan
+→ Host-owned Runner
+→ selected Definition Module
+```
+
+Definition Module ABI 统一为 `@loomrealm/subsystem` 的 `SubsystemDefinitionFactory`。
+
+跨平台要求：same logical key / author ABI / formal semantics / business-observable result；不要求 same artifact/path/bytes。
 
 ---
 
@@ -182,15 +208,7 @@ one UTF-8 JSON text unit per JSON-RPC message
 no Batch
 ```
 
-`ready` 不携：
-
-```text
-Data endpoint/profile/ticket/Port
-Platform LaunchPlan/module material
-Renderer existence
-```
-
-same-attempt Control reconnect不存在。
+`ready` 不携 Data/Platform executable material；same-attempt Control reconnect不存在。
 
 ---
 
@@ -225,9 +243,7 @@ accepted outcome preserved
 fresh surviving Caller resume
 ```
 
-SDK ergonomics不得改变这些事实。
-
-本次 Game/Launcher reset不改变 Frame wire/transaction/failure semantics。
+Game/Launcher boundary调整不改变 Frame semantics。
 
 ---
 
@@ -239,26 +255,10 @@ SDK ergonomics不得改变这些事实。
 Runtime projection
 Frame Stack / Activation
 InputTarget
-DataAuthority {
-  subsystemKey,
-  generation,
-  dataProfile
-}
+DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-不携：
-
-```text
-Data endpoint/ticket/MessagePort
-Platform executable binding
-Interest Registry
-Render State
-Content credential
-```
-
-Control/Data无跨连接 total order。
-
-Control loss使 Renderer失去 current Main authority，并 retire旧 Data connections。
+不携 Data endpoint/ticket/Port、Platform executable binding、Interest Registry、Render State、Content credential。
 
 ---
 
@@ -268,25 +268,12 @@ Control loss使 Renderer失去 current Main authority，并 retire旧 Data conne
 
 ```text
 Profile identity = loomrealm.renderer-data/1
-
-Connection v1
-+ User Input v1
-+ Render Update v1
+Connection v1 + User Input v1 + Render Update v1
 ```
 
-Profile负责：
-
-```text
-child protocol version binding
-one UTF-8 JSON text string per carrier unit
-one connection-wide Data dispatcher
-input.* / render.* demux
-fresh-carrier child baseline
-```
+Profile负责 static child binding / one JSON-text carrier unit / one Data dispatcher / fresh-carrier baselines。
 
 Profile改变必须 fresh Data generation。
-
-Connection/Input/Render仍保留各自 identity/lifecycle/authority；Profile只是静态 application-stack binding。
 
 ---
 
@@ -296,15 +283,13 @@ Connection/Input/Render仍保留各自 identity/lifecycle/authority；Profile只
 
 ```text
 identity = Session + current Renderer + subsystemKey + generation
-attribute = immutable dataProfile for that authority epoch
+attribute = immutable dataProfile
 lifecycle = current → retired
 0..1 current per Subsystem
 same S/G/profile sequential reconnect allowed
 ```
 
-Connection Core zero application messages。
-
-Platform DataConnectionBroker只实现 current logical authority的 physical carrier；不 mint generation/profile，也不能从 endpoint/ticket/Port推导 authority。
+Platform Broker只实现 physical carrier；不 mint generation/profile。
 
 ```text
 Data loss/provisioning failure
@@ -321,27 +306,15 @@ Data loss/provisioning failure
 
 ```text
 Subsystem → Renderer
-    full Frame Interest Registry Snapshot
+    full Frame Interest Registry
 
 Renderer → Subsystem
     State / Event / Reset
 ```
 
-普通 input：
+Effective input = current Data × Main InputTarget/current Activation × Interest[F] × Producer。
 
-```text
-Effective(F,A,C)
-=
-current matching Data
-∧ Main InputTarget(S,F,A)
-∧ current active Activation
-∧ C ∈ Interest[F]
-∧ Producer(C)
-```
-
-Interest Frame-scoped、无 Activation；fresh Activation可复用 config但不可复用 old Input State/Event；fresh Data registry/state empty并需 republish/rebaseline。
-
-标准 channel payload/hard limits仍是 Frozen前 closure work。
+fresh Activation可复用 Interest config但不复用 old State/Event；fresh Data registry/state empty。
 
 ---
 
@@ -356,35 +329,17 @@ render.patch
 render.event
 ```
 
-Domain lifecycle independent from Frame/Data carrier。
+Render Domain lifecycle independent from Frame/Data carrier。
 
-fresh carrier：
-
-```text
-current Domain Registry
-→ fresh Snapshot each current Domain
-→ Patch/Event
-```
-
-Data loss只丢 Renderer replica transport baseline，不销毁 Subsystem authoritative Domain。
+fresh carrier：current Registry → fresh Snapshot each Domain → Patch/Event。
 
 ---
 
 ## 12. Content API v1
 
-[Content API v1](./content-api-v1.md)：
+[Content API v1](./content-api-v1.md) 提供 readonly logical content access。
 
-```text
-readonly GET/HEAD logical identity
-Desktop HTTP bearer semantics
-PWA same-origin Service Worker authority
-```
-
-Host credential distribution是 Platform implementation responsibility；不建立 Content Access Bootstrap Protocol。
-
-Executable module capability现在由 Platform Launch Profile + trusted Runner拥有，更不能通过 Content API获得 arbitrary executable access。
-
-必须相互独立：
+必须区分：
 
 ```text
 Runtime bootstrap token
@@ -393,6 +348,8 @@ Data ticket/Port authority
 Content credential
 ```
 
+Content API 不得成为 arbitrary executable path/capability。
+
 ---
 
 ## 13. Platform Boundary
@@ -400,6 +357,7 @@ Content credential
 以下默认不是 application protocol：
 
 ```text
+Game Entry physical location/acquisition
 Hostra/PWA Launch Manifest physical location
 Node child IPC provisioning payload
 Worker bootstrap/provisioning Port transfer object
@@ -409,23 +367,19 @@ Content credential injection
 Hostra Shell RPC
 ```
 
-Platform Launch Manifest本身是对应 Platform Profile 的 installation/launch contract；两个平台不因此共享 universal wire/schema。
-
-只有未来出现独立第三方实现必须共享且影响 interoperability/security 的新 wire boundary时，才升级为正式 Contract/Profile。
+只有出现独立第三方 interoperability/security boundary 时才升级 formal Contract/Profile。
 
 ---
 
 ## 14. Unified Carrier Policy
 
-当前 message-oriented profiles统一：
+Current message-oriented profiles统一：
 
 ```text
 one carrier unit = one UTF-8 JSON text string
 ```
 
-因此 WebSocket/MessagePort/MemoryCarrier共享同一 application value model；Structured Clone不扩大协议 payload。
-
-Transport Adapter不得创建 application retry/duplicate。
+WebSocket / MessagePort / MemoryCarrier 共享 application value model；Structured Clone不扩大协议 payload。
 
 ---
 
@@ -433,10 +387,18 @@ Transport Adapter不得创建 application retry/duplicate。
 
 ```text
 Game Package
-    logical topology + initial business input
+    Game Entry document validation capability
+
+Platform Launcher
+    primary Runtime-product Game consumer
+    Game + Platform PREPARE
+    PlatformLaunchPlan
+    LogicalGameBootstrap projection
+    plan-bound RuntimeHosting / Runner integration
 
 Main
     Runtime/Frame/Activation/InputTarget/DataAuthority
+    no Game document dependency
 
 Subsystem
     business state / Interest[F] / Render Domains
@@ -444,48 +406,40 @@ Subsystem
 Renderer
     read-only Main mirror / Producers / Render replica
 
-Platform Launcher
-    current-platform executable binding
-    exact join / preflight LaunchPlan
-    RuntimeHosting / Runner launch integration
-
 Platform Composition
     complete physical topology/bootstrap/provisioning
 ```
-
-共享 carrier/package不改变 authority owner。
 
 ---
 
 ## 16. Current Closure Priorities
 
-Frozen：
+Implemented Baseline：
 
 ```text
-Frame / Call v1
+@loomrealm/foundation
+@loomrealm/wire
 ```
 
-Stabilizing / closure：
+Next：
 
 ```text
-Game Package v1 implementation validation
-Hostra/PWA Launcher Profiles
-Subsystem Control
-Runtime Control Profile
-Renderer Data Profile
-User Input
-Render Update
+M2 Game Package local implementation
+M3 Runtime Control
+M4 Subsystem author/host
+M5 Main logical bootstrap + fake RuntimeHosting
+M6 Hostra Launcher = first real Game Package runtime-product consumer
+...
+M15 PWA Launcher = second real Game Package runtime-product consumer
 ```
 
-实施期间必须优先验证：
+Implementation期间优先证明：
 
 ```text
-Game Entry → Platform manifest → exact join → zero-side-effect LaunchPlan
-Main launch(key) → plan-bound RuntimeHosting → Host-owned Runner
+Game source → matching Launcher → full zero-side-effect PREPARE
+Prepared result → Main logical facts + plan-bound RuntimeHosting
 business Definition → Author SDK → Role Core/Ports
-Frame protocol → SDK FrameOutcome/control-flow
-DataAuthority → Broker → Renderer/Subsystem current carrier
-Hostra/PWA same abstract trace across platform-specific executable bindings
+formal protocol outcome → SDK control-flow
+DataAuthority → Broker → current carrier
+Hostra/PWA same abstract trace across platform-specific artifacts
 ```
-
-这些闭合后再扩展 deferred capabilities。

@@ -3,11 +3,11 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Main 内部 authority/transaction/recovery 模块，以及 plan-bound Main-facing Platform ports  
-> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input，以及 plan-bound Main-facing Platform ports  
+> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-20
 
-Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority，但不拥有 Platform executable binding，也不直接等于 Process/Worker/WebSocket/MessagePort realization。
+Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority。它不拥有 Game Entry document contract、Platform executable binding，也不等于 Process/Worker/WebSocket/MessagePort realization。
 
 ---
 
@@ -15,7 +15,7 @@ Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority ap
 
 ```text
 Main System
-├── Game Logical Topology Bootstrap
+├── LogicalGameBootstrap Installer
 ├── Subsystem Registry {key}
 ├── Initial Target/Input
 ├── Launch Attempt Registry
@@ -30,20 +30,70 @@ Main System
 └── Platform Port Coordination
 ```
 
-Core不 import：
+Core MUST NOT import：
 
 ```text
+@loomrealm/game-package
+GameEntryV1 / ValidatedGameEntryV1
 @loomrealm/game-launcher-hostra/pwa
-Hostra
+raw game.json parser
+raw Platform Launch Manifest
+filesystem/module resolver
 child_process / Worker
 WebSocket / MessagePort
-filesystem/module resolver
-raw Platform Launch Manifest
 ```
 
 ---
 
-## 2. Main-facing Platform Ports
+## 2. Main Bootstrap Input
+
+Main receives immutable logical facts only：
+
+```ts
+interface LogicalGameBootstrap {
+  readonly subsystemKeys: readonly string[];
+  readonly initial: {
+    readonly subsystemKey: string;
+    readonly input: JsonValue;
+  };
+}
+```
+
+Main MUST validate only its own bootstrap invariants（例如 internal duplicate/declared-target defensive assertions if justified），但 MUST NOT重新执行 GameEntryV1 document validation or depend on `formatVersion`。
+
+The bootstrap contains no executable capability。
+
+---
+
+## 3. Prepared Platform Boundary
+
+Before Main physical Runtime bootstrap, matching Platform Launcher/Composition has already completed：
+
+```text
+Game Entry validation
+→ Platform Launch Manifest validation
+→ exact key-set join
+→ all executable resolution
+→ hosting/security capability preflight
+→ immutable PlatformLaunchPlan
+→ immutable LogicalGameBootstrap
+```
+
+Main starts from：
+
+```text
+LogicalGameBootstrap
++
+plan-bound RuntimeHosting
++
+remaining platform ports
+```
+
+not from raw documents。
+
+---
+
+## 4. Main-facing Platform Ports
 
 ```text
 RuntimeHosting
@@ -65,43 +115,34 @@ ContentServiceIntegration
     expose platform Content implementation
 ```
 
-Port只提供 physical capability/facts；Main仍拥有 application authority。
+Ports provide physical capability/facts；Main仍拥有 application authority。
 
-`RuntimeHosting`在 Platform composition中已经绑定 immutable PlatformLaunchPlan；Main不需要 module resolver API。
+`RuntimeHosting` 已绑定 immutable PlatformLaunchPlan；Main不需要 module resolver API。
 
 ---
 
-## 3. Game Package / Platform Launch Boundary
+## 5. Logical Registry / Launch Boundary
 
-Game Package：
-
-```ts
-{ key }
-```
-
-并提供 `initial {subsystem,input}`。
-
-Current Platform在 Main开始 physical Runtime bootstrap前已经完成：
+Main installation：
 
 ```text
-Platform Launch Manifest
-→ exact Game key-set join
-→ all required executable resolution
-→ hosting/security capability preflight
-→ immutable PlatformLaunchPlan
+LogicalGameBootstrap.subsystemKeys
+→ complete Subsystem Registry
+
+LogicalGameBootstrap.initial
+→ initial logical target/input
 ```
 
-Main：
+Then：
 
 ```text
-install complete logical key registry
-→ create Launch Attempt/token
-→ ask RuntimeHosting.launch(key)
+create Launch Attempt/token
+→ RuntimeHosting.launch(key)
 → accept Control carrier
 → hello/identified/ready
 ```
 
-Main MUST NOT把 module/path/URL/Node/Worker options放进 Launch Attempt application model。
+Main MUST NOT put module/path/URL/Node/Worker options into Launch Attempt application model。
 
 ```text
 launch != module loaded != connected != identified != ready
@@ -110,13 +151,13 @@ ready != Data current
 
 ---
 
-## 4. Runtime Control
+## 6. Runtime Control
 
 ```text
 Control v1 + Frame v1 = Runtime Control Profile v1
 ```
 
-Main-side integration保持：
+Main-side integration：
 
 ```text
 one Control carrier reader/dispatcher
@@ -129,9 +170,9 @@ Control loss/ambiguity进入 Runtime failure，无 same-attempt reconnect。
 
 ---
 
-## 5. Frame / Activation Registry
+## 7. Frame / Activation Registry
 
-保证：
+Guarantees：
 
 ```text
 frameId never reused
@@ -142,15 +183,15 @@ Activation never reused
 outcome/lifecycle separate
 ```
 
-Main唯一签发/revoke Activation。
+Main唯一 mint/revoke Activation。
 
-Executable module或 Runtime physical handle不参与 Frame identity。
+Executable module或 physical Runtime handle不参与 Frame identity。
 
 ---
 
-## 6. Stack Mutation Coordinator
+## 8. Stack Mutation Coordinator
 
-normal transaction和 failure recovery共享 serial authority。
+Normal transactions与 failure recovery共享 serial authority。
 
 ```text
 Initial
@@ -172,11 +213,9 @@ accept outcome/revoke/closing/null target
 
 Response-before-dependent-RPC；ACK-before-publication。
 
-Platform physical launch/material不能绕过这些 causal barriers。
-
 ---
 
-## 7. Failure Classifier / Unwind
+## 9. Failure Classifier / Unwind
 
 ```text
 Success        → known commit
@@ -184,7 +223,7 @@ Explicit Error → protocol-defined known no-commit/fatal
 Timeout/loss   → ambiguous
 ```
 
-ambiguous/divergence/protocol failure → Runtime failed；no retry/replay。
+Ambiguous/divergence/protocol failure → Runtime failed；no retry/replay。
 
 Unwind：
 
@@ -202,9 +241,9 @@ Platform Supervisor只能报告 physical facts，不能选择 unwind root。
 
 ---
 
-## 8. Runtime Hosting / Supervisor Facts
+## 10. Runtime Hosting / Supervisor Facts
 
-RuntimeHosting可以报告：
+RuntimeHosting/Supervisor MAY report：
 
 ```text
 container create success/failure
@@ -213,17 +252,17 @@ exit code/signal/reason
 termination request/result
 ```
 
-Main解释这些 facts为 public Runtime lifecycle。
+Main解释为 public Runtime lifecycle。
 
-`stopped`只来自 actual termination observation；unexpected exit即使 code 0也可成为 Runtime failure。
+`stopped` only from actual termination observation；unexpected exit即使 code 0 也可成为 Runtime failure。
 
 No automatic restart；新 Runtime必须 fresh Launch Attempt。
 
 ---
 
-## 9. Renderer Control Publisher
+## 11. Renderer Control Publisher
 
-只发布 committed：
+Only committed：
 
 ```text
 Runtime projection
@@ -232,9 +271,10 @@ InputTarget
 DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-不携：
+Never：
 
 ```text
+GameEntryV1 / formatVersion
 Data endpoint/ticket/Port
 Platform provisioning handle
 PlatformLaunchPlan/module/path/URL
@@ -245,7 +285,7 @@ Content Grant
 
 ---
 
-## 10. DataAuthority Registry
+## 12. DataAuthority Registry
 
 ```ts
 interface DataAuthority {
@@ -255,39 +295,30 @@ interface DataAuthority {
 }
 ```
 
-当前 Profile：
+Current Profile：
 
 ```text
 loomrealm.renderer-data/1
 ```
 
-Main负责：
+Main负责 mint/increment generation、select profile、replace/revoke authority、publish through Renderer Control。
 
-```text
-mint/increment generation
-select dataProfile
-replace/revoke authority
-publish through Renderer Control
-```
-
-Profile改变 MUST fresh generation。
+Profile change MUST fresh generation。
 
 ---
 
-## 11. DataConnectionBroker Coordination
+## 13. DataConnectionBroker Coordination
 
 ```text
 Main current DataAuthority(S,G,P)
 → Platform DataConnectionBroker
-→ matching RendererDataBinding side
-→ matching SubsystemDataBinding side
+→ matching RendererDataBinding
+→ matching SubsystemDataBinding
 ```
 
-Broker不拥有 G/P。
+Broker不拥有 generation/profile。
 
-Hostra可通过 Runner provisioning IPC给已运行 Subsystem提供 endpoint/ticket；PWA可 transfer MessagePort。
-
-这些 physical mechanisms不进入 Main authority model。
+Hostra可通过 Runner provisioning IPC；PWA可 transfer MessagePort。
 
 ```text
 DataAuthority exists != carrier current
@@ -296,16 +327,16 @@ Data loss/provision failure != Runtime failure/Frame unwind
 
 ---
 
-## 12. Input / Render Boundary
+## 14. Input / Render Boundary
 
-Main只拥有：
+Main only owns：
 
 ```text
 Frame / Activation / InputTarget
 DataAuthority
 ```
 
-不拥有：
+Does not own：
 
 ```text
 Interest[F]
@@ -319,11 +350,11 @@ Render Domain lifecycle由 Subsystem控制。
 
 ---
 
-## 13. Platform Realizations
+## 15. Platform Realizations
 
 ```text
 Hostra Desktop
-    RuntimeHosting        HostraLaunchPlan → Node Runner Process
+    RuntimeHosting        HostraLaunchPlan → Node Runner
     RuntimeControlHost    WebSocket
     RendererHosting       BrowserWindow
     RendererControlHost   WebSocket
@@ -337,50 +368,52 @@ PWA
     DataConnectionBroker  MessageChannel / Port transfer
 ```
 
-Main-facing logical ports相同；Platform module artifact可以不同。
+Main-facing logical ports相同；Platform module artifact可不同。
 
 ---
 
-## 14. Tests
+## 16. Tests
 
-至少：
+Main local tests MUST use `LogicalGameBootstrap` fixtures directly，不通过 Game Package parser。
+
+At least：
 
 ```text
-Game logical Descriptor {key} bootstrap
+bootstrap logical key registry
 initial target/input
-fake RuntimeHosting bound to immutable plan
+no formatVersion/GameEntry type in Main API
+package-boundary no @loomrealm/game-package dependency
+fake RuntimeHosting already plan-bound
 Main launch request contains key but no module/path/url
-undeclared key cannot launch
-physical launch facts do not mutate authority without Main decision
-Control Profile fixtures
-Frame Main-role conformance
+undeclared logical key cannot launch
+physical facts do not mutate authority without Main decision
+Control/Frame conformance
 failure unwind golden traces
 Renderer Control snapshot/dataProfile
 profile-change-fresh-generation
 fake DataConnectionBroker does not mint authority
-data provisioning/loss does not mutate Runtime/Frame authority
-Hostra/PWA platform-specific bindings produce equivalent abstract trace
+Data provisioning/loss does not mutate Runtime/Frame authority
+Hostra/PWA platform bindings produce equivalent abstract trace
 ```
 
 ---
 
-## 15. Final Invariants
+## 17. Final Invariants
 
 1. Main core platform-neutral；
-2. Main只拥有 Game logical key registry，不拥有 executable binding；
-3. Platform ports不获得 Main authority；
-4. RuntimeHosting封闭绑定 PlatformLaunchPlan，Main launch只使用 key；
-5. Game/Platform preflight在 Main physical Runtime bootstrap前闭合；
-6. Runtime Control = Control1 + Frame1；
-7. ready不携 Data或 executable material；
-8. Frame/Stack mutation serial；
-9. Response-before-dependent-RPC / ACK-before-publication；
+2. Main consumes `LogicalGameBootstrap`, not GameEntry/ValidatedGameEntry；
+3. Main has no `@loomrealm/game-package` or concrete launcher dependency；
+4. Main owns logical key registry, not executable binding；
+5. RuntimeHosting封闭绑定 PlatformLaunchPlan，Main launch只用 key；
+6. full Platform PREPARE在 Main physical Runtime bootstrap前闭合；
+7. Runtime Control = Control1 + Frame1；
+8. ready不携 Data/executable material；
+9. Frame/Stack mutation serial；
 10. ambiguous Runtime-fatal/no retry；
 11. failure unwind Main-only；
-12. stopped只来自 actual physical termination；
+12. stopped只来自 actual termination；
 13. DataAuthority = S/G/dataProfile；
-14. profile change需要 fresh generation；
-15. Broker/provisioning只实现 physical carrier，不拥有 authority；
-16. Data loss/provision failure不等于 Runtime/Frame failure；
-17. Main不拥有 Interest/Render Domain；
-18. Hostra/PWA module/path/Runner差异不进入 Main state。
+14. Broker/provisioning只实现 physical carrier；
+15. Data loss/provision failure不等于 Runtime/Frame failure；
+16. Main不拥有 Interest/Render Domain；
+17. Hostra/PWA document/module/Runner差异不进入 Main state。

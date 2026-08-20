@@ -1,36 +1,39 @@
-# `@loomrealm/game-launcher-pwa` 设计草案
+# `@loomrealm/game-launcher-pwa` 设计
 
-> 状态：Draft  
-> 阶段：Package boundary / PWA launch planning / RuntimeHosting / Worker Runner integration  
+> 状态：Implementation Planning / Boundary Frozen  
+> 阶段：M15 PWA launch planning / RuntimeHosting / Worker Runner integration  
 > 最近复核：2026-08-20  
-> 目标：拥有 PWA 的 Game Launch Manifest、preflight LaunchPlan 与 Worker Subsystem Runtime launch/supervision 实现，同时保持 Main 与业务 Subsystem platform-neutral。  
-> 正式契约：[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../doc/15-contracts/pwa-launcher-profile-v1.md)
+> 目标：成为 PWA Runtime-product Game bootstrap entry：内部消费 `@loomrealm/game-package`，完成 PWA Game + Platform PREPARE，产出 Main-facing logical bootstrap 与 plan-bound RuntimeHosting，同时保持 Main/业务 platform-neutral。  
+> 正式契约：[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../doc/15-contracts/pwa-launcher-profile-v1.md)  
+> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)
 
 核心原则：
 
-> **这是 PWA Subsystem Runtime launch capability package，不是 PWA Platform mega-package。它拥有 PWA 如何绑定并启动 Subsystem，但不拥有 Renderer/DataAuthority/Content application semantics。**
+> **这是 PWA Subsystem Runtime launch capability package，不是 PWA Platform mega-package。Product bootstrap caller 调本包；本包内部调 `@loomrealm/game-package`。Main 不调本包，也不调 Game Package。**
 
 ---
 
 ## 1. Package Position
 
 ```text
-ValidatedGameEntryV1
-        +
-launch.pwa.json
+PWA game source / installation
         ↓
 @loomrealm/game-launcher-pwa
-    manifest validator
-    key-set join
-    installation module resolver
-    PwaLaunchPlan
-    RuntimeHosting
-    Worker Runner integration
+    ├── @loomrealm/game-package parse/validate
+    ├── PWA manifest validator
+    ├── exact key-set join
+    ├── installation/origin resolver/security preflight
+    ├── immutable PwaLaunchPlan
+    ├── LogicalGameBootstrap projection
+    ├── RuntimeHosting
+    └── Worker Runner/supervision integration
         ↓
-@loomrealm/subsystem/host
+PreparedPwaGame
+        ↓
+apps/pwa composition
 ```
 
-可消费：
+Dependencies MAY include：
 
 ```text
 @loomrealm/game-package
@@ -39,7 +42,7 @@ launch.pwa.json
 @loomrealm/transport-messageport
 ```
 
-不得被 `@loomrealm/main` 或 business package反向依赖。
+MUST NOT be depended on by `@loomrealm/main` or business packages。
 
 ---
 
@@ -48,11 +51,13 @@ launch.pwa.json
 本包拥有：
 
 ```text
+PWA Game Entry consumption orchestration
 PwaLaunchManifestV1 schema/parser
 PWA executable logical module syntax
 installation registry / same-origin module resolution
 exact Game↔PWA key join
 immutable PwaLaunchPlan
+Main-facing LogicalGameBootstrap projection
 Main-facing RuntimeHosting implementation
 Host-owned Worker Runner/bootstrap integration
 Worker supervision adapter
@@ -62,18 +67,50 @@ Runner provisioning integration surface
 不拥有：
 
 ```text
-Game logical topology
+Game Entry common schema authority
 Main Frame/Runtime authority
 DataAuthority generation/profile
-DataConnectionBroker policy
+full DataConnectionBroker policy
 Renderer Hosting
 Content semantics
 business Definition behavior
 ```
 
+Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主要 Runtime-product consumer。
+
 ---
 
-## 3. Manifest
+## 3. Public Bootstrap Shape
+
+调用者不应被迫先构造 `ValidatedGameEntryV1`。
+
+首批 API方向：
+
+```ts
+interface PreparedPwaGame {
+  readonly logicalBootstrap: LogicalGameBootstrap;
+  readonly runtimeHosting: RuntimeHosting;
+}
+
+async function preparePwaGame(
+  options: PwaPrepareOptions,
+): Promise<PreparedPwaGame>;
+```
+
+`preparePwaGame` exact Game acquisition/installation shape在 M15 随真实 PWA installation integration 冻结；现在冻结的是：
+
+```text
+caller supplies PWA source/installation capability
+launcher obtains Game Entry
+launcher invokes @loomrealm/game-package
+caller does not orchestrate common validation manually
+```
+
+不得为了 Hostra/PWA相似预建 universal `GameSource` / `PreparedPlatformGame` package。
+
+---
+
+## 4. Manifest
 
 ```ts
 interface PwaLaunchManifestV1 {
@@ -85,7 +122,7 @@ interface PwaLaunchManifestV1 {
 }
 ```
 
-`module` 只能选择当前 validated installation 内的 PWA business implementation artifact。
+`module` 只能选择 selected installation 内 PWA business artifact。
 
 禁止配置：
 
@@ -101,27 +138,23 @@ external executable URL
 
 ---
 
-## 4. Parse → Plan → Commit
+## 5. PREPARE → COMMIT
 
-固定：
+### PREPARE
 
 ```text
-PREPARE
-Game validate
+obtain Game Entry
+→ @loomrealm/game-package validate
 → PWA manifest validate
 → exact key join
 → resolve all installation modules
-→ validate Worker/MessageChannel capabilities
+→ validate origin/security/Worker capability
 → freeze PwaLaunchPlan
-
-COMMIT
-Main launch(subsystemKey)
-→ RuntimeHosting plan lookup
-→ Launch Attempt
-→ create Host-owned Worker Runner
+→ project/freeze LogicalGameBootstrap
+→ return PreparedPwaGame
 ```
 
-任何 PREPARE failure：
+PREPARE failure：
 
 ```text
 zero business Runtime Worker
@@ -129,38 +162,71 @@ zero Definition Module import
 zero Runtime Control
 ```
 
----
+### COMMIT
 
-## 5. RuntimeHosting
-
-候选：
-
-```ts
-createPwaRuntimeHosting({
-  game,
-  launchManifest,
-  installation,
-  workerPolicy,
-  runnerEntry,
-  controlHost,
-  provisioningHost,
-})
+```text
+apps/pwa installs Main(logicalBootstrap, runtimeHosting, other ports)
+→ Main launch(subsystemKey)
+→ RuntimeHosting plan lookup
+→ Launch Attempt
+→ create Host-owned Worker Runner
 ```
 
-构造/prepare阶段持有 immutable plan；Main-facing launch只接受 `subsystemKey` 与 Launch Attempt material。
+---
 
-Main不见 module URL/Worker options/Port。
+## 6. `LogicalGameBootstrap`
+
+Main-facing projection仅含：
+
+```text
+subsystemKeys
+initial {subsystemKey,input}
+```
+
+MUST NOT contain：
+
+```text
+GameEntryV1 / ValidatedGameEntryV1
+formatVersion
+PwaLaunchPlan
+module/moduleUrl
+Worker/Runner/Port data
+```
+
+Projection应 immutable，保持 exact key与 business input semantics。
 
 ---
 
-## 6. Runner
+## 7. RuntimeHosting
 
-Host-owned Worker Runner是 Dedicated Worker constructor entry。
+PWA RuntimeHosting在 prepare 时已绑定 frozen plan。
 
-Runner：
+Main-facing launch只接受：
+
+```text
+subsystemKey
+Launch Attempt material
+```
+
+不得让 Main传：
+
+```text
+game
+manifest
+module URL
+Worker options
+MessagePort
+```
+
+---
+
+## 8. Worker Runner
+
+Host-owned Worker Runner 是 Dedicated Worker constructor entry。
 
 ```text
 bootstrap validation
+→ verify planned key/binding
 → import exact planned module
 → validate SubsystemDefinitionFactory
 → RuntimeControlBinding
@@ -169,52 +235,53 @@ bootstrap validation
 → runSubsystem
 ```
 
-业务 module不是 Worker entry，也不寻找 platform Port。
+Business Definition Module 不是 Worker entry，也不寻找 bootstrap Port。
 
 ---
 
-## 7. MessagePort Boundary
+## 9. MessagePort Boundary
 
-Runtime Control/Data建立后统一暴露：
+Runtime Control/Data 建立后统一暴露：
 
 ```text
 MessageCarrier
 ```
 
-application unit：
+Application unit：
 
 ```text
 postMessage(string)
 = one UTF-8 JSON text string
 ```
 
-Structured Clone只用于 bootstrap/provisioning/Port transfer。
+Structured Clone 只用于 bootstrap/provisioning/Port transfer。
 
 ---
 
-## 8. Provisioning Integration
+## 10. Provisioning Integration
 
 DataConnectionBroker仍由 PWA composition协调。
 
-本包提供 target Worker Runner 的 provisioning path，使 composition可：
+本包只提供 target Worker provisioning path：
 
 ```text
 Broker current S/G/P
 → create MessageChannel
-→ transfer one endpoint through Runner provisioning
+→ transfer endpoint through Runner provisioning
 → SubsystemDataBinding
 ```
 
-本包不 mint G/P，不把 transfer failure解释成 Runtime/Frame failure。
+本包不 mint generation/profile，不把 transfer failure解释成 Runtime/Frame failure。
 
 ---
 
-## 9. Error Domains
+## 11. Error Domains
 
 至少区分：
 
 ```text
-manifest/join/preflight
+GamePackageError
+PWA manifest/join/preflight error
 module resolution/security policy
 Worker creation/supervision
 module load/ABI
@@ -222,19 +289,23 @@ Runtime Control bootstrap
 platform provisioning
 ```
 
-不得折叠成 `GAME_PACKAGE_INVALID`。
+Common Game error可作为 Launcher PREPARE failure的 cause/typed domain暴露，但不得折叠成 PWA module error。
 
 ---
 
-## 10. Tests
+## 12. Tests
 
 ```text
+prepare accepts PWA Game source without caller Game Package step
+Game validation failure occurs before Worker side effect
 manifest closed schema
 exact key-set join
 all modules resolved before Worker creation
 external URL/traversal rejection
 same-origin/installation resolution
 host policy not game-controlled
+logicalBootstrap has no formatVersion/module/Port
+Main package not required to import launcher/game-package
 Main launch has no module
 Host-owned Worker Runner is constructor entry
 planned module imported exactly
@@ -245,9 +316,11 @@ provisioning distinct from Runtime Control/Data
 Data transfer failure domain
 ```
 
+M15 是 `@loomrealm/game-package` 第二个真实 Runtime-product consumer qualification。
+
 ---
 
-## 11. Package Boundary Guard
+## 13. Package Boundary Guard
 
 MUST NOT扩张为：
 
@@ -257,20 +330,23 @@ PWA DataAuthority owner
 PWA Content product
 Service Worker abstraction总包
 all-platform launcher registry
+universal Game source abstraction
 ```
 
-全产品仍由 `apps/pwa` composition root组装。
+完整产品仍由 `apps/pwa` composition root组装。
 
 ---
 
-## 12. Final Invariants
+## 14. Final Invariants
 
-1. PWA manifest独立于 common Game Entry；
-2. Game/PWA key set严格 join；
-3. LaunchPlan先完整闭合再产生 Worker side effect；
-4. Main只传 subsystemKey；
-5. Host policy不可由 game config覆盖；
-6. Worker Runner是 constructor entry，business module由 Runner import；
-7. provisioning与 application protocol分离；
-8. package不拥有 Main/DataAuthority/Renderer/Content application semantics；
-9. 与 Hostra launcher只共享 logical identity/ports，不共享万能配置 schema。
+1. Product bootstrap caller调用 PWA Launcher，不手动编排 Game Package；
+2. PWA Launcher内部消费 `@loomrealm/game-package`；
+3. Game/PWA key set严格 join；
+4. PwaLaunchPlan + LogicalGameBootstrap在 first Worker side effect前闭合；
+5. Main不依赖 Game Package/concrete Launcher；
+6. Main只传 subsystemKey；
+7. Host policy不可由 Game/Platform config覆盖；
+8. Worker Runner是 constructor entry，business module由 Runner import；
+9. provisioning与 application protocol分离；
+10. package不拥有 Main/DataAuthority/Renderer/Content semantics；
+11. 与 Hostra launcher只共享 logical contracts/ports，不共享万能 config/prepared schema。

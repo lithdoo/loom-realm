@@ -2,10 +2,10 @@
 
 > 层级：设计决策记录  
 > 状态：Active  
-> 主要定义：重大架构决策的背景、取舍、替代关系、current-v1 映射与重新评估条件  
+> 主要定义：重大架构决策背景、取舍、替代关系、current-v1 映射与重新评估条件  
 > 最近复核：2026-08-20
 
-ADR记录“为什么这样设计”；current可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR保留完整历史，但不形成第二份 current contract。
+ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR 保留完整历史，但不形成第二份 current contract。
 
 ---
 
@@ -30,6 +30,7 @@ ADR记录“为什么这样设计”；current可实现事实以 `00-overview`�
 17. [ADR 0017：平台是系统级 Composition Boundary](./0017-system-level-platform-composition.md)
 18. [ADR 0018：首次实现前直接收口 current v1](./0018-preimplementation-v1-closure.md)
 19. [ADR 0019：Game Logical Topology 与 Platform Launch Manifest 分离](./0019-platform-launch-manifest-boundary.md)
+20. [ADR 0020：Game Entry 消费边界归 Platform Launcher，Main 只接收 LogicalGameBootstrap](./0020-game-entry-consumer-boundary.md)
 
 ---
 
@@ -40,8 +41,8 @@ ADR 0004
     → ADR 0006 supersedes Frame-owned Render lifetime assumption
 
 ADR 0005
-    → Game Entry declares Subsystem topology仍保留
-    → old launcher/module declaration被后续 0018/0019继续收口
+    → Game Entry declares Subsystem topology remains
+    → old launcher/module declaration later narrowed by 0018/0019
 
 ADR 0007
     → Superseded by later current-v1 Descriptor closure
@@ -51,33 +52,39 @@ ADR 0008
 
 ADR 0009
     → current Control lifecycle-only decision
-    → Data provisioning明确留在 Control之外
+    → Data provisioning stays outside Control
 
 ADR 0010–0015
     → Frame / Call v1 semantic freeze
 
 ADR 0015 old PWA structured-object transport mapping
-    → one-time preimplementation correction by ADR 0018
-    → current mapping = UTF-8 JSON text string
+    → corrected by ADR 0018
+    → current = UTF-8 JSON text string
 
 ADR 0016
-    → current DataAuthority / Data Profile / protocol-minimization direction
+    → current DataAuthority / Data Profile / protocol minimization
 
 ADR 0017
     → Platform owns complete physical Session composition
 
 ADR 0018
     → direct-current-v1 governance precedent
-    → Frame/Data/SDK/late provisioning closure
-    → original Game {key,module}/same-artifact part later superseded by ADR 0019
+    → original Game {key,module}/same-artifact part superseded by ADR 0019
 
 ADR 0019
     → Game Descriptor = {key}
-    → Hostra/PWA independent Launch Manifests/Profiles
+    → independent Hostra/PWA Launch Manifests
     → exact Game↔Platform key-set join
-    → full zero-side-effect PlatformLaunchPlan preflight
+    → full zero-side-effect executable PREPARE
     → Main launch(key) / plan-bound RuntimeHosting
     → same ABI/semantics; same artifact not required
+
+ADR 0020
+    → Game Package = document validation capability, not Runtime role
+    → matching Platform Launcher owns Runtime-product Game Entry consumption
+    → GameEntryV1 != Main bootstrap model
+    → Main has no Game Package/concrete Launcher dependency
+    → Main consumes immutable LogicalGameBootstrap only
 ```
 
 ---
@@ -85,23 +92,24 @@ ADR 0019
 ## Current v1 Game / Runtime Model
 
 ```text
-Game Package v1
-    Game Entry
-    Descriptor {key}
-    initial target/input
-        │
-        ├──────────────► Main logical topology
-        │
-        └──────────────► Current Platform Launch Manifest
-                              ├── Hostra: launch.hostra.json
-                              └── PWA:    launch.pwa.json
-                                      ↓
-                              exact key-set join
-                              full executable resolution
-                              hosting/security preflight
-                                      ↓
-                            immutable PlatformLaunchPlan
-                                      ↓
+Game installation / source
+        ↓
+Current Platform Launcher PREPARE
+    ├── @loomrealm/game-package
+    │       Game Entry {key...} + initial validation
+    ├── Current Platform Launch Manifest
+    │       Hostra: launch.hostra.json
+    │       PWA:    launch.pwa.json
+    ├── exact key-set join
+    ├── full executable resolution
+    └── hosting/security preflight
+        ↓
+immutable PlatformLaunchPlan
++
+immutable LogicalGameBootstrap
+        ↓
+apps/* installs Main
+        ↓
 Main launch(key) ─────────────► plan-bound RuntimeHosting
                                       ↓
                               Host-owned Runner
@@ -111,7 +119,9 @@ Main launch(key) ─────────────► plan-bound RuntimeHo
 
 Current Game Package不包含 `module`。
 
-Hostra/PWA Launch Manifest/Profile独立；不建立 universal launcher schema，也不要求 same module path/bytes/build artifact。
+Main不解析 Game Entry、不持有 `formatVersion` / `ValidatedGameEntryV1` / module material。
+
+Hostra/PWA Launch Manifest/Profile独立；不建立 universal launcher schema，也不要求 same artifact。
 
 ---
 
@@ -123,7 +133,7 @@ Runtime Control Application Profile v1
 + Frame / Call v1
 ```
 
-Frame v1保持 Frozen：
+Frame v1 remains Frozen：
 
 ```text
 exact seven Requests
@@ -135,19 +145,19 @@ no retry/replay
 whole-suffix fixed-point unwind
 ```
 
-ADR 0019不改变 Frame semantics。
+ADR 0019/0020 do not change Frame semantics。
 
 ---
 
 ## Current Renderer Data
 
-Renderer Control发布：
+Renderer Control publishes：
 
 ```text
 DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-当前：
+Current：
 
 ```text
 loomrealm.renderer-data/1
@@ -156,7 +166,7 @@ loomrealm.renderer-data/1
 + Render Update v1
 ```
 
-Platform DataConnectionBroker只实现 physical carrier；不拥有 generation/profile。
+Platform DataConnectionBroker realizes physical carrier only；does not own generation/profile。
 
 ```text
 Data provisioning/loss != Runtime failure / Frame unwind
@@ -165,8 +175,6 @@ Data provisioning/loss != Runtime failure / Frame unwind
 ---
 
 ## Current Carrier Rule
-
-当前 message-oriented Control/Data Profiles统一：
 
 ```text
 one carrier application unit
@@ -179,56 +187,60 @@ MessagePort postMessage(string)
 Memory      string
 ```
 
-Structured Clone只用于 Platform bootstrap/Port transfer。
+Structured Clone only for Platform bootstrap/Port transfer。
 
 ---
 
 ## Platform / Package Boundary
 
 ```text
-Platform Composition
-    = architecture responsibility for complete physical Session
+@loomrealm/game-package
+    Game Entry document validation
 
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
-    = narrow Runtime launch integration packages
+    narrow Runtime-product Game PREPARE + launch integration
+
+@loomrealm/main
+    application authority; no Game Package/Launcher dependency
 
 apps/desktop
 apps/pwa
-    = current full composition roots
+    current full composition roots
 ```
 
-因此 ADR 0019建立 launcher packages不推翻 ADR 0017“不要默认创建 platform mega-package”的决策。
+Launcher owns Game Entry consumption orchestration but still does not become Platform mega-package。
 
 ---
 
 ## Compatibility Governance
 
-当前 Game/Launcher reset发生在 first conformant baseline前，因此：
+Current Game/Launcher/Main consumer-boundary reset occurs before real conformant compatibility boundary：
 
 ```text
 update current v1 directly
 no v2
 no legacy Game {key,module} parser
-no deprecated module alias
+no deprecated alias
+no Main compatibility adapter
 no dual model
 ```
 
-Frame / Call v1 Frozen semantics不受 ADR 0019影响；其 earlier transport correction仍由 ADR 0018的 Frozen preimplementation rule解释。
+Frame / Call v1 Frozen semantics are unaffected。
 
-一旦真实 compatibility boundary形成，future incompatible changes必须按正常 version/migration治理，不能继续引用 0018/0019作为永久豁免。
+Once real compatibility obligation forms, future incompatible changes require version/migration；0018/0019/0020 are not permanent exemptions。
 
 ---
 
 ## 重新评估信号
 
-以下情况需要新 ADR/版本评估，而不是静默扩展 current model：
-
 ```text
-lazy/optional Subsystem改变 exact key-set关系
-multiple Runtime implementations per key需要 application negotiation
-third-party/remote Runtime需要公开 launch/provisioning wire
-multiple Renderer改变 Platform coordination topology
-executable signing/sandbox形成独立 trust contract
-real deployed compatibility boundary已经形成
+lazy/optional Subsystem changes exact key-set relation
+multiple Runtime implementations per key require application negotiation
+third-party/remote Runtime requires public launch/provisioning wire
+third-party Launcher requires stable prepared-result interoperability
+LogicalGameBootstrap expands enough to justify independent shared package
+multiple Renderer changes Platform coordination topology
+executable signing/sandbox forms independent trust contract
+real deployed compatibility boundary already exists
 ```

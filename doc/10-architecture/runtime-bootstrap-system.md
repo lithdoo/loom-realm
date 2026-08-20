@@ -3,8 +3,8 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Game Entry + Platform Launch Manifest preflight、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data 建立关系与 Platform provisioning  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)  
+> 主要定义：Launcher-owned Game/Platform PREPARE、LogicalGameBootstrap 安装、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data 建立关系与 Platform provisioning  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
 > 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-20
@@ -15,36 +15,42 @@
 
 ```text
 Main
-    declares logical Session intent/authority
+    owns logical Session/Runtime/Frame/Data authority
 
-Platform
-    validates current executable binding
+Matching Platform Launcher
+    owns Game Entry consumption + current executable PREPARE
+
+Platform Composition
     realizes physical Runner/Renderer/connection/content topology
 ```
 
-Main不直接依赖 Node/Worker/WebSocket/MessagePort/module resolver；Platform不获得 Frame/DataAuthority application ownership。
+Main 不直接依赖 Node/Worker/WebSocket/MessagePort/module resolver，也不依赖 `@loomrealm/game-package` 或 concrete launcher。
 
 ---
 
-## 2. Game Package Input
+## 2. Launcher-owned Game Entry Preparation
 
-Game Package v1：
+Main 不读取 Game Entry。
 
-```ts
-interface SubsystemDescriptorV1 {
-  readonly key: string;
-}
+Runtime-product bootstrap 固定：
+
+```text
+Game source / installation
+→ matching Platform Launcher
+    → @loomrealm/game-package parse/validate
+    → current Platform Launch Manifest parse/validate
 ```
 
-还包含：
+Game Entry v1 common facts：
 
 ```text
 formatVersion
 initial.subsystem
 initial.input
+subsystems[] {key}
 ```
 
-完整 logical key set在任何 executable planning/Runtime side effect前校验。
+完整 key set 在任何 executable planning/Runtime side effect前校验。
 
 ```text
 key = logical Runtime/application identity
@@ -54,35 +60,21 @@ Game Entry不声明 executable module。
 
 ---
 
-## 3. Platform Launch Input
+## 3. Complete PREPARE Closure
 
-当前 Platform独立读取：
-
-```text
-Hostra → launch.hostra.json
-PWA    → launch.pwa.json
-```
-
-当前两个 profile都将 Game key绑定到 platform-local `.mjs` Definition Module，但 schema/validation/resolution authority互相独立。
-
-Game Package不解析这些 manifest；Main也不持有 raw platform config。
-
----
-
-## 4. Complete Preflight Closure
-
-Session physical bootstrap前固定：
+Session physical bootstrap前 matching Launcher MUST 完成：
 
 ```text
-read/validate Game Entry
-→ read/validate current Platform Launch Manifest
+Game Entry validation
+→ current Platform Launch Manifest validation
 → exact Game↔Platform key-set join
 → resolve every required platform implementation
 → validate current Platform hosting/security capability
 → freeze immutable PlatformLaunchPlan
+→ project/freeze LogicalGameBootstrap
 ```
 
-任何此阶段错误：
+任何 PREPARE error：
 
 ```text
 MUST NOT create business Runtime Container
@@ -94,13 +86,47 @@ Phase 1 all declared Subsystems eager + required。
 
 ---
 
+## 4. Prepared Bootstrap Installation
+
+Prepared current-platform result 概念上包含两个正交 projection：
+
+```text
+LogicalGameBootstrap
+    → Main-visible logical facts
+
+plan-bound RuntimeHosting
+    → Main-facing launch capability
+```
+
+Main 安装：
+
+```text
+LogicalGameBootstrap.subsystemKeys
+→ complete logical Subsystem Registry
+
+LogicalGameBootstrap.initial
+→ initial Frame target/input source
+```
+
+Main 不接收：
+
+```text
+GameEntryV1 / ValidatedGameEntryV1
+formatVersion
+PlatformLaunchPlan
+module/path/URL
+raw Platform manifest
+```
+
+---
+
 ## 5. Logical Runtime Bootstrap
 
 每个 required Subsystem：
 
 ```text
 Main creates Launch Attempt
-→ generate/register bootstrapToken for key
+→ generate/register bootstrap credential for key
 → RuntimeHosting lookup frozen PlatformLaunchPlan[key]
 → Platform creates Host-owned Runner Container
 → Runner loads exact planned Definition Module
@@ -115,7 +141,7 @@ Main creates Launch Attempt
 ```
 
 ```text
-plan valid
+PREPARE valid
 != process/Worker created
 != module loaded
 != connected
@@ -123,13 +149,11 @@ plan valid
 != ready
 ```
 
-Module load/default-export ABI validation发生在 trusted Runner中；失败使 required bootstrap失败并统一 cleanup，但不改变 executable authority owner。
+Definition Module actual import/default-export ABI validation可发生在 trusted Runner；失败使 required bootstrap失败并统一 cleanup。
 
 ---
 
 ## 6. Runner Boundary
-
-Runner是 Platform→Subsystem role 的 executable adapter：
 
 ```text
 Hostra Node Runner / PWA Worker Runner
@@ -146,20 +170,19 @@ ContentClient
 Platform-planned Definition Module
 ```
 
-Definition Module不读取 physical bootstrap material、Launch Manifest或 platform-private resolved target。
+Definition Module 不读取 Game Entry/Launch Manifest，不接触 physical bootstrap material，也不创建第二 Runtime。
 
 ---
 
 ## 7. Runtime `ready`
 
-`ready`只证明 Runtime required initialization完成并能承担 Runtime Control Profile角色。
+`ready` 只证明 Runtime required initialization完成并能承担 Runtime Control Profile角色。
 
 不得推导：
 
 ```text
 Renderer exists
 DataAuthority exists
-Data Profile material exists
 Data carrier current
 Data provisioning offer happened
 Frame/Render/InputTarget exists
@@ -271,13 +294,13 @@ Main current DataAuthority(S,G,P)
 → install at most one current Data Connection
 ```
 
-Broker不拥有 G/P。
+Broker不拥有 generation/profile。
 
 ---
 
 ## 13. Hostra Late Data Provisioning
 
-Node Runtime可能 ready很久后才获得 DataAuthority。
+Node Runtime 可能 ready 很久后才获得 DataAuthority。
 
 ```text
 Broker
@@ -287,8 +310,6 @@ Broker
 → SubsystemDataBinding yields {G,P,carrier}
 → SDK DataPlane installs current
 ```
-
-Provisioning capability在 process spawn时建立，但 Data offer可以任意晚到。
 
 ```text
 Provisioning != Runtime Control
@@ -307,7 +328,7 @@ Broker creates MessageChannel
 → RendererDataBinding / SubsystemDataBinding install current carrier
 ```
 
-Port transfer是 Platform mechanism；current Data application unit仍是 JSON text string。
+Port transfer 是 Platform mechanism；Data application unit仍是 JSON text string。
 
 ---
 
@@ -355,12 +376,12 @@ Data reconnect不重建 business capability objects。
 
 ---
 
-## 17. Frame Startup Remains Independent
+## 17. Initial Frame Startup
 
-Initial Frame：
+Initial Frame source来自已安装的 `LogicalGameBootstrap.initial`：
 
 ```text
-Main reads Game Entry initial target/input
+Main reads LogicalGameBootstrap initial target/input
 → allocates starting Frame
 → frame.initialize ACK
 → fresh Activation
@@ -369,9 +390,9 @@ Main reads Game Entry initial target/input
 → publish InputTarget
 ```
 
-Subsystem SDK仅在 activate后启动 author frame handler。
+Main 不回读 Game Entry document。
 
-Data current不是 Frame activate前置条件；active Frame + no Data/Interest可以合法暂时没有 ordinary input。
+Data current不是 Frame activate前置条件；active Frame + no Data/Interest 可以合法暂时没有 ordinary input。
 
 ---
 
@@ -402,60 +423,60 @@ Main establishes shutdown intent
 → stopped
 ```
 
-如果 Runtime先进入 fatal failure，则走 failure terminal path；不恢复成 graceful business state。
+如果 Runtime先进入 fatal failure，则走 failure terminal path。
 
 ---
 
 ## 20. Recommended Session Sequence
 
 ```text
-1  read/validate Game Entry
-2  select current Platform realization
-3  read/validate current Platform Launch Manifest
+1  select current Platform launcher / installation source
+2  launcher obtains Game Entry and validates via @loomrealm/game-package
+3  launcher validates current Platform Launch Manifest
 4  exact Game↔Platform key-set join
 5  resolve all required executable bindings
 6  validate hosting/security capabilities
 7  freeze immutable PlatformLaunchPlan
-8  create logical Session / install Game topology
-9  initialize Platform facilities
-10 create Launch Attempts/tokens
-11 RuntimeHosting launches required Runners by key
-12 Runners load planned Definitions / construct role ports
-13 establish Runtime Control
-14 hello → identified → ready
-15 realize Renderer
-16 Renderer Control hello + Snapshot
-17 Main publishes DataAuthority(S,G,P) by policy
-18 Broker provisions Data endpoints through Platform paths
-19 Data Profile fresh child baselines
-20 Main starts/continues Frame authority independently
-21 shutdown/termination converges through Supervisor
+8  project/freeze LogicalGameBootstrap
+9  release PreparedCurrentPlatformGame
+10 apps/* construct Main with LogicalGameBootstrap + plan-bound RuntimeHosting + other ports
+11 Main creates Launch Attempts/tokens
+12 RuntimeHosting launches required Runners by key
+13 Runners load planned Definitions / construct role ports
+14 establish Runtime Control
+15 hello → identified → ready
+16 realize Renderer
+17 Renderer Control hello + Snapshot
+18 Main publishes DataAuthority(S,G,P) by policy
+19 Broker provisions Data endpoints through Platform paths
+20 Data Profile fresh child baselines
+21 Main starts/continues Frame authority independently
+22 shutdown/termination converges through Supervisor
 ```
 
-具体 physical creation order可不同，只要满足 causal/authority/preflight边界。
+具体 physical creation order 可不同，只要满足 causal/authority/PREPARE boundary。
 
 ---
 
 ## 21. Final Invariants
 
-1. Game Package声明 `{key}` + initial logical input；
-2. executable binding由 current Platform Launch Manifest拥有；
-3. Game/current-platform key set Phase 1严格相等；
-4. complete PlatformLaunchPlan在 Runtime side effect前闭合；
-5. Main logical authority与 Platform physical realization分离；
-6. Main launch不携 module/path/URL；
-7. Host-owned Runner加载 plan-selected Definition Module；
-8. launch != loaded != connected != identified != ready；
-9. ready不要求/携带 Data；
-10. Runtime identity由 `subsystem.hello` key绑定；
-11. stopped只来自 actual termination；
-12. no automatic restart；
-13. Renderer Control只发布 logical S/G/dataProfile；
-14. Broker负责 actual carrier；
-15. Hostra/PWA都有独立 late provisioning path；
-16. provisioning不污染 Runtime/Renderer Control；
-17. same S/G/P可以 sequential reconnect；
-18. Data failure不等于 Runtime/Frame failure；
-19. fresh Data child state重新 baseline；
-20. Frame/Input/Render/Data lifecycles互相独立；
-21. Hostra/PWA Definition artifact和 physical mechanism可不同，但 application trace必须语义等价。
+1. Game Package validation由 matching Launcher在 Runtime-product path 内调用；
+2. Main不读取 Game Entry、不依赖 Game Package；
+3. Main接收 immutable LogicalGameBootstrap；
+4. executable binding由 current Platform Launch Manifest拥有；
+5. Game/current-platform key set Phase 1严格相等；
+6. complete PlatformLaunchPlan + LogicalGameBootstrap在 Runtime side effect前闭合；
+7. Main launch不携 module/path/URL；
+8. Host-owned Runner加载 plan-selected Definition Module；
+9. launch != loaded != connected != identified != ready；
+10. ready不要求/携带 Data；
+11. Runtime identity由 `subsystem.hello` key绑定；
+12. stopped只来自 actual termination；
+13. no automatic restart；
+14. Broker负责 actual Data carrier；
+15. provisioning不污染 Runtime/Renderer Control；
+16. same S/G/P可以 sequential reconnect；
+17. Data failure不等于 Runtime/Frame failure；
+18. fresh Data child state重新 baseline；
+19. Frame/Input/Render/Data lifecycles互相独立；
+20. Hostra/PWA Definition artifact/physical mechanism可不同，但 application trace语义等价。

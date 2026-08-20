@@ -3,36 +3,70 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Game Entry / logical Descriptor Loader、Catalog、Repository、资源与 common Validator 的模块边界，以及与 Platform Launch Planner 的连接边界  
-> 依赖：[存储与内容系统](../../10-architecture/storage-system.md)、[Game Package v1](../../15-contracts/game-package-v1.md)  
+> 主要定义：Game Entry document validator、broader Game Installation/Catalog/Repository concern，以及与 matching Platform Launcher 的连接边界  
+> 依赖：[Game Package v1](../../15-contracts/game-package-v1.md)、[平台组合系统](../../10-architecture/platform-composition-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[存储与内容系统](../../10-architecture/storage-system.md)  
 > Hostra realization：[Hostra Game Launcher / Node Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)  
 > PWA realization：[PWA Game Launcher / Worker Runner Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)  
 > 最近复核：2026-08-20
 
 > [!NOTE]
-> 本文描述较宽的 **Game Installation / Package 模块协作**；它不等于单个 npm package 边界。`@loomrealm/game-package` 的公开职责以 [`packages/game-package/DESIGN.md`](../../../packages/game-package/DESIGN.md) 与 [独立分包与发布架构](../../30-implementation/package-architecture.md) 为准，当前只包含 common Game Entry model/parse/validation。
-
-## 1. 建议模块
-
-```text
-Game Installation / Package concern
-├── Common Game Entry Loader / Validator
-├── Logical Topology Registry Builder
-├── Catalog Builder
-├── Repository Toolkit
-├── Resource Metadata Service
-└── Package-level Validation Coordination
-```
-
-Executable Definition Module Resolver不属于 common Game Package；它分别由 current Platform Launcher/Profile拥有。
-
-Game Package模块不创建 Process/Worker，不打开 Control/Data连接，也不选择 Hostra/PWA Runner。
+> 本文描述较宽的 Game Installation / Package module concern；它不等于 `@loomrealm/game-package` npm package。该 npm package 的 exact implementation boundary 以 [`packages/game-package/DESIGN.md`](../../../packages/game-package/DESIGN.md) 为准。
 
 ---
 
-## 2. Game Entry / Descriptor Model
+## 1. Concern Map
 
-Game Package v1：
+```text
+Game Installation / Package concern
+├── Common Game Entry Validator
+├── installation/source acquisition
+├── Catalog Builder
+├── Repository Toolkit
+├── Resource Metadata Service
+└── package-level validation coordination
+```
+
+其中只有第一项当前明确落在：
+
+```text
+@loomrealm/game-package
+```
+
+Executable Definition Module resolver 不属于 common Game Package；分别由 matching Platform Launcher/Profile 拥有。
+
+---
+
+## 2. `@loomrealm/game-package`
+
+只处理：
+
+```text
+GameEntryV1 document model
+formatVersion
+Descriptor {key}
+initial target/input
+closed schema
+key-set validation
+validated detached immutable snapshot
+```
+
+不处理：
+
+```text
+filesystem/Fetch Game source lifecycle
+Platform Launch Manifest
+module resolution
+Definition Module ABI
+RuntimeHosting
+Main bootstrap state
+Process/Worker
+```
+
+它不是 Runtime role，也不是 application orchestration API。
+
+---
+
+## 3. Game Entry Model
 
 ```ts
 interface GameEntryV1 {
@@ -41,15 +75,11 @@ interface GameEntryV1 {
     readonly subsystem: string;
     readonly input: JsonValue;
   };
-  readonly subsystems: readonly SubsystemDescriptorV1[];
-}
-
-interface SubsystemDescriptorV1 {
-  readonly key: string;
+  readonly subsystems: readonly {
+    readonly key: string;
+  }[];
 }
 ```
-
-其中：
 
 ```text
 key
@@ -59,119 +89,158 @@ initial.subsystem
     initial Frame logical target
 
 initial.input
-    platform-neutral initial business input
+    opaque platform-neutral business JsonValue
 ```
 
-以下已从 common Game Package移出：
+以下不属于 common Game Entry：
 
 ```text
 module
-launcher.type
-launcher.entry
-env
+launcher.type/entry
+env/argv
 Node/Worker options
 Transport/bootstrap material
 ```
 
 ---
 
-## 3. Common Validator
+## 4. Common Validator
 
 负责：
 
 ```text
-JSON/common value validation
+Wire JsonValue representation
 closed Game Entry schema
-formatVersion == 1
-closed initial schema
+formatVersion current version
+closed initial/descriptor schema
 initial.input JsonValue
-closed Descriptor schema
-key validity / uniqueness
+key exact non-empty / uniqueness
 initial target reference
+detached immutable snapshot
 ```
 
-Game common validation必须：
+Key 不 trim/case-fold/Unicode-normalize。
+
+`initial.input` 业务 member name 完全 opaque；其中出现 `module`、`env`、`platform`、`__proto__` 等字段不构成 Platform config。
+
+Common validation必须：
 
 ```text
 pure/deterministic
-no filesystem module lookup
-no Fetch module lookup
-no business module import
+no filesystem/Fetch
+no module import
 no Runtime side effect
-```
-
-不负责：
-
-```text
-Hostra/PWA binding completeness
-module path syntax/existence/containment
-Definition Module ABI
-Node executable
-Worker constructor
-Process/Worker creation
-Runtime bootstrap token
-Control/Data carrier
+no caller-input mutation/freeze
 ```
 
 ---
 
-## 4. Platform Launch Planner Boundary
+## 5. Runtime-product Consumer Boundary
 
-Common Game Package输出：
+Matching Platform Launcher 是主要 Runtime-product consumer：
+
+```text
+Hostra game source
+→ @loomrealm/game-launcher-hostra
+    → @loomrealm/game-package
+
+PWA game source
+→ @loomrealm/game-launcher-pwa
+    → @loomrealm/game-package
+```
+
+Product application不需要：
+
+```text
+parseGameEntryV1(...)
+→ pass ValidatedGameEntryV1 to launcher
+```
+
+而是调用 matching launcher 的 prepare/bootstrap API。
+
+Tooling/validator/editor MAY 直接消费 `@loomrealm/game-package`。
+
+---
+
+## 6. Platform Launch Planner Boundary
+
+Launcher内部：
 
 ```text
 ValidatedGameEntryV1
++
+Validated current Platform Launch Manifest
+        ↓
+exact key-set join
+all executable resolution
+security/hosting capability preflight
+        ↓
+immutable PlatformLaunchPlan
++
+immutable LogicalGameBootstrap
 ```
 
-随后 current Platform各自处理：
+Common Game Package不提供：
 
 ```text
-Hostra
-    ValidatedGameEntry
-    + launch.hostra.json
-    → exact key-set join
-    → safe filesystem module resolution
-    → HostraLaunchPlan
-
-PWA
-    ValidatedGameEntry
-    + launch.pwa.json
-    → exact key-set join
-    → installation/same-origin module resolution
-    → PwaLaunchPlan
+resolveModule()
+createRuntime()
+PlatformLaunchOptions
+LogicalGameBootstrap constructor for Main
 ```
-
-Common Game Package不提供 `resolveModule()` / `createRuntime()` / universal `PlatformLaunchOptions`。
 
 ---
 
-## 5. Zero-side-effect Closure
+## 7. Main Boundary
 
-完整 Session preflight由 Platform Composition协调：
+Main 不直接消费：
 
 ```text
-Game common validation
-→ current Platform manifest validation
+GameEntryV1
+ValidatedGameEntryV1
+formatVersion
+GamePackageError
+```
+
+Matching Launcher/Composition 在 full PREPARE 后向 Main 投影：
+
+```text
+LogicalGameBootstrap
+    subsystemKeys
+    initial {subsystemKey,input}
+```
+
+因此：
+
+```text
+Game Entry document model != Main application bootstrap model
+```
+
+---
+
+## 8. Zero-side-effect Closure
+
+Full Session PREPARE：
+
+```text
+Launcher obtains Game Entry
+→ common validation
+→ Platform manifest validation
 → exact key join
 → all executable resolution/capability checks
 → immutable PlatformLaunchPlan
+→ immutable LogicalGameBootstrap
 ────────────────────────────────────────
 first Runtime side effect
 ```
 
-Game common validation失败时零 Runtime side effect；Platform preflight failure也必须零 Runtime side effect。
-
-不能通过“边读 Descriptor边启动 Runtime”破坏该 invariant。
+不能边读 Descriptor边启动 Runtime。
 
 ---
 
-## 6. Definition Module ABI Boundary
+## 9. Definition Module ABI Boundary
 
-Definition Module不再是 Game Package identity字段。
-
-每个 Platform LaunchPlan选定的 `.mjs` module必须由 Host-owned Runner加载，并 default export `@loomrealm/subsystem` 可接受的 `SubsystemDefinitionFactory`。
-
-Game Package只知道 logical key，不验证 Definition Module ABI。
+Definition Module不是 Game Package identity field。
 
 ```text
 same key
@@ -179,171 +248,80 @@ same key
     PWA    → artifact B
 ```
 
-A/B可以相同也可以不同，但必须满足统一 Subsystem author/host contract和 observable semantics。
+A/B MAY不同，但必须满足统一 `SubsystemDefinitionFactory` author/host contract与 equivalent observable semantics。
 
 ---
 
-## 7. Safe Installation Namespace
+## 10. Catalog / Repository
 
-安全 executable module resolution与 ordinary Content path policy是不同能力：
+Catalog/Repository属于 broader Game Installation/Content concern，不自动进入 `@loomrealm/game-package`。
+
+可能职责：
 
 ```text
-Platform Executable Module Resolver
-    may resolve selected business executable module
+logical installation/catalog identity
+async readonly acquisition
+same-ID concurrent dedup
+immutable cache
+close/cancel
+resource metadata
+```
+
+它们仍不得承担 Subsystem executable resolution，除非未来明确拆出新的 trusted Platform capability。
+
+---
+
+## 11. Content / Execution Separation
+
+```text
+Platform executable resolver
+    selected business executable module
 
 Readonly Content API
-    reads logical content only
+    logical content only
 ```
 
-可以复用底层 safe installation/path primitive，但不得因为 Platform可执行 module就扩大 Content客户端权限。
-
-Executable path/URL只允许存在于 Platform-private LaunchPlan/Runner realization，不进入 Game Descriptor或业务状态。
+可以复用底层 safe path/install primitives，但不得把 executable capability暴露给 ordinary Content client。
 
 ---
 
-## 8. Manifest / Entry Loader
+## 12. Tests
 
-Game Entry Loader负责读取/校验真正跨平台的 common fields：
+Common package/module tests：
 
 ```text
+valid/invalid Game Entry
 formatVersion
-initial target/input
-complete subsystems[] key set
+closed top-level/initial/descriptor
+exact key semantics
+initial JsonValue opaque business fields
+validated snapshot detached/immutable
+no I/O/module import/Runtime side effect
 ```
 
-它不解释 map/battle等业务私有结构，不解析 Hostra/PWA launch manifest，不创建 Runtime。
-
-文件 `game.json`是当前 installation convention；`@loomrealm/game-package` API应可以对 JSON text/value工作，不把 filesystem当成 contract authority。
-
----
-
-## 9. Catalog / Repository
-
-Catalog建立 logical ID → validated content location index；Repository提供 async readonly fetch、parse/local validation、same-ID concurrent dedup、immutable cache、close/cancel。
-
-这些是 broader Game Installation/Content concern，不自动意味着它们属于 `@loomrealm/game-package` npm package。
-
-它们无论最终落在哪个 package，都不得承担 Subsystem executable module resolution。
-
----
-
-## 10. Resource Metadata
-
-只处理 logical resource metadata、MIME、Content Version、Package Index。资源 body由 Content API交付。
-
-Render State只携 logical resource reference，不携 physical module/content path。
-
----
-
-## 11. Package Validator Coordination
-
-Common portion：
+Cross-package：
 
 ```text
-Game Entry
-→ closed schema
-→ format version
-→ duplicate/invalid key
-→ initial target/input
-→ content/catalog common validation as applicable
+same Game Entry source
+→ Hostra launcher prepare
+→ PWA launcher prepare
+→ equivalent LogicalGameBootstrap
 ```
 
-Platform-specific executable portion：
-
-```text
-Platform Launch Manifest
-→ exact Game key join
-→ current-platform module validation/resolution
-→ hosting capability checks
-```
-
-两个阶段由 Platform Composition在 Session bootstrap前串成完整 preflight，但 authority owner明确分开。
+不要把“application手动传同一个 ValidatedGameEntry 给两个 planner”当作目标 API。
 
 ---
 
-## 12. Cross-platform Boundary
+## 13. Core Invariants
 
-同一 common Game Entry：
-
-```json
-{
-  "formatVersion": 1,
-  "initial": {
-    "subsystem": "loom.map",
-    "input": null
-  },
-  "subsystems": [
-    { "key": "loom.map" }
-  ]
-}
-```
-
-可以同时作为：
-
-```text
-Hostra Launch Planner input
-PWA Launch Planner input
-```
-
-但两个平台的 executable manifest和 Definition Module artifact可以不同。
-
-Game Package不维护 Desktop/PWA两套 logical Descriptor。
-
----
-
-## 13. Trust Boundary
-
-```text
-validated Game key
-!= executable capability
-
-validated Platform module resolution
-!= executable sandbox
-```
-
-Desktop Node业务 module仍属于 trusted executable code；PWA Worker有不同物理隔离。签名/Publisher Trust/untrusted sandbox不在 Phase 1。
-
-Game common config无法通过 module/path/URL字段获得任意执行能力。
-
----
-
-## 14. Tests
-
-至少覆盖：
-
-```text
-manifest/entry valid-invalid
-formatVersion
-initial JsonValue
-duplicate/empty descriptor key
-undeclared initial target
-closed descriptor schema
-module/launcher/env/platform fields rejected from common Game Entry
-common validation no I/O/module import
-same ValidatedGameEntry feeds Hostra/PWA planners
-platform missing/extra key rejected by platform join
-full preflight failure has zero Runtime side effects
-catalog does not eagerly read large bodies
-repository concurrent dedup
-validate aggregates common errors
-executable module cannot be fetched as arbitrary Content capability
-```
-
----
-
-## 15. Core Invariants
-
-- Game Entry一次性声明完整 logical Subsystem key set；
-- Descriptor identity=`key`；
-- Descriptor v1精确=`{key}`；
-- common Game Entry包含 initial target/input，不含 executable binding；
-- `module`属于 current Platform Launch Manifest，不属于 Game Package；
-- `@loomrealm/game-package`只实现 common model/parse/validation，不自动吞入 Catalog/Repository；
-- Game Package不声明 Node/Worker/env/argv/transport；
-- common package不执行 Definition Module ABI/module resolution；
-- full Game+Platform preflight先于任何 Runtime side effect；
-- Main launch只使用 logical key；
-- Definition Module与 Host-owned Runtime Runner分离；
-- Module executable capability与 Content capability分离；
-- physical target不进入业务协议；
-- Hostra/PWA可以为同一 key选择不同 artifact，但必须实现统一 Subsystem ABI/semantics。
+1. Game Entry一次性声明完整 logical key set；
+2. Descriptor v1精确 `{key}`；
+3. `@loomrealm/game-package` 只实现 common document model/parse/validation/snapshot；
+4. matching Platform Launchers 是 Runtime-product consumers；
+5. Main/业务不直接依赖 Game Package；
+6. full Game+Platform PREPARE先于任何 Runtime side effect；
+7. module属于 current Platform Launch Manifest；
+8. Definition Module与 Host-owned Runner分离；
+9. executable capability与 Content capability分离；
+10. broader Catalog/Repository concern不自动扩大 npm package职责；
+11. Hostra/PWA可以为同一 key选择不同 artifact，但必须实现统一 ABI/semantics。

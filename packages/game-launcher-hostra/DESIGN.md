@@ -1,46 +1,49 @@
-# `@loomrealm/game-launcher-hostra` 设计草案
+# `@loomrealm/game-launcher-hostra` 设计
 
-> 状态：Draft  
-> 阶段：Package boundary / Hostra launch planning / RuntimeHosting / Runner integration  
+> 状态：Implementation Planning / Boundary Frozen  
+> 阶段：M6 Hostra launch planning / RuntimeHosting / Runner integration  
 > 最近复核：2026-08-20  
-> 目标：拥有 Hostra 的 Game Launch Manifest、preflight LaunchPlan 与 Node Subsystem Runtime launch/supervision 实现，同时保持 Main 与业务 Subsystem platform-neutral。  
-> 正式契约：[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../doc/15-contracts/nodejs-launcher-profile-v1.md)
+> 目标：成为 Hostra Runtime-product Game bootstrap entry：内部消费 `@loomrealm/game-package`，完成 Hostra Game + Platform PREPARE，产出 Main-facing logical bootstrap 与 plan-bound RuntimeHosting，同时保持 Main/业务 platform-neutral。  
+> 正式契约：[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../doc/15-contracts/nodejs-launcher-profile-v1.md)  
+> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)
 
 核心原则：
 
-> **这是“Subsystem Runtime launch capability package”，不是 Hostra Platform mega-package。它拥有 Hostra 如何绑定并启动 Subsystem，但不拥有 Renderer/DataAuthority/Content application semantics。**
+> **这是 Hostra Subsystem Runtime launch capability package，不是 Hostra Platform mega-package。Product bootstrap caller 调本包；本包内部调 `@loomrealm/game-package`。Main 不调本包，也不调 Game Package。**
 
 ---
 
 ## 1. Package Position
 
 ```text
-ValidatedGameEntryV1
-        +
-launch.hostra.json
+Hostra game source / installation
         ↓
 @loomrealm/game-launcher-hostra
-    manifest validator
-    key-set join
-    module resolver
-    LaunchPlan
-    RuntimeHosting
-    Node Runner integration
+    ├── @loomrealm/game-package parse/validate
+    ├── Hostra manifest validator
+    ├── exact key-set join
+    ├── module resolver/security preflight
+    ├── immutable HostraLaunchPlan
+    ├── LogicalGameBootstrap projection
+    ├── RuntimeHosting
+    └── Node Runner/supervision integration
         ↓
-@loomrealm/subsystem/host
+PreparedHostraGame
+        ↓
+apps/desktop composition
 ```
 
-它可以消费：
+Dependencies MAY include：
 
 ```text
 @loomrealm/game-package
 @loomrealm/subsystem/host
 @loomrealm/foundation
-@loomrealm/launcher-node          when implemented
+@loomrealm/launcher-node          when justified
 @loomrealm/transport-websocket   as required
 ```
 
-不得被 `@loomrealm/main` / business package反向依赖。
+MUST NOT be depended on by `@loomrealm/main` or business packages。
 
 ---
 
@@ -49,13 +52,15 @@ launch.hostra.json
 本包拥有：
 
 ```text
+Hostra Game Entry consumption orchestration
 HostraLaunchManifestV1 schema/parser
 Hostra module logical syntax
-Installation Root executable resolution
+installation executable resolution
 exact Game↔Hostra key join
 immutable HostraLaunchPlan
+Main-facing LogicalGameBootstrap projection
 Main-facing RuntimeHosting implementation
-Node Runner entry/bootstrap integration
+Node Runner/bootstrap integration
 process supervision adapter
 Runner provisioning integration surface
 ```
@@ -63,18 +68,55 @@ Runner provisioning integration surface
 不拥有：
 
 ```text
-Game logical topology
+Game Entry common schema authority
 Main Frame/Runtime authority
 DataAuthority generation/profile
-DataConnectionBroker policy
+full DataConnectionBroker policy
 Renderer Hosting
 Content semantics
 business Definition behavior
 ```
 
+Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主要 Runtime-product consumer。
+
 ---
 
-## 3. Manifest
+## 3. Public Bootstrap Shape
+
+调用者不应被迫先构造 `ValidatedGameEntryV1`。
+
+首批 API方向：
+
+```ts
+interface HostraGameSource {
+  // exact acquisition representation is installation/product integration,
+  // not a universal Game Package source abstraction.
+}
+
+interface PreparedHostraGame {
+  readonly logicalBootstrap: LogicalGameBootstrap;
+  readonly runtimeHosting: RuntimeHosting;
+}
+
+async function prepareHostraGame(
+  options: HostraPrepareOptions,
+): Promise<PreparedHostraGame>;
+```
+
+`prepareHostraGame` exact source/acquisition details在 M6 随真实 Desktop installation integration 冻结；现在冻结的是 responsibility：
+
+```text
+caller supplies Hostra source/installation capability
+launcher obtains Game Entry
+launcher invokes @loomrealm/game-package
+caller does not orchestrate common validation manually
+```
+
+不得为了 Hostra/PWA相似而预建 universal `GameSource` / `PreparedPlatformGame` package。
+
+---
+
+## 4. Manifest
 
 ```ts
 interface HostraLaunchManifestV1 {
@@ -86,9 +128,9 @@ interface HostraLaunchManifestV1 {
 }
 ```
 
-配置只允许选择 installation 内 Hostra business implementation artifact。
+Manifest 只选择 installation 内 Hostra business implementation artifact。
 
-禁止从 game-supplied manifest配置：
+MUST NOT configure：
 
 ```text
 Node executable
@@ -100,31 +142,27 @@ Control endpoint
 Data ticket
 ```
 
-这些通过 Host-owned policy/dependencies注入。
+Host-owned policy通过 trusted dependencies/options注入。
 
 ---
 
-## 4. Parse → Plan → Commit
+## 5. PREPARE → COMMIT
 
-固定两阶段：
+### PREPARE
 
 ```text
-PREPARE
-Game validate
+obtain Game Entry
+→ @loomrealm/game-package validate
 → Hostra manifest validate
 → exact key join
-→ resolve all modules
-→ validate Hostra capability
+→ resolve all modules / containment
+→ validate Hostra runtime capability
 → freeze HostraLaunchPlan
-
-COMMIT
-Main launch(subsystemKey)
-→ RuntimeHosting plan lookup
-→ Launch Attempt
-→ spawn Runner
+→ project/freeze LogicalGameBootstrap
+→ return PreparedHostraGame
 ```
 
-任何 PREPARE failure：
+PREPARE failure：
 
 ```text
 zero business Runtime process
@@ -132,41 +170,72 @@ zero Definition Module import
 zero Runtime Control
 ```
 
-这是 package最重要的 transaction boundary。
+### COMMIT
 
----
-
-## 5. RuntimeHosting
-
-候选构造：
-
-```ts
-createHostraRuntimeHosting({
-  game,
-  launchManifest,
-  installation,
-  nodePolicy,
-  runnerEntry,
-  controlHost,
-  provisioningHost,
-})
+```text
+apps/desktop installs Main(logicalBootstrap, runtimeHosting, other ports)
+→ Main launch(subsystemKey)
+→ RuntimeHosting plan lookup
+→ Launch Attempt
+→ spawn Runner
 ```
 
-构造期间完成 preflight并持有 immutable plan；Main-facing launch API只接受 subsystemKey/Launch Attempt material。
+---
 
-不得让 Main传 `module`。
+## 6. `LogicalGameBootstrap`
+
+Main-facing projection仅含：
+
+```text
+subsystemKeys
+initial {subsystemKey,input}
+```
+
+MUST NOT contain：
+
+```text
+GameEntryV1 / ValidatedGameEntryV1
+formatVersion
+HostraLaunchPlan
+module/path
+Node/Runner/process data
+```
+
+Projection应 immutable，保持 exact key与 business input semantics。
 
 ---
 
-## 6. Runner
+## 7. RuntimeHosting
+
+Hostra RuntimeHosting在构造/prepare时已绑定 frozen plan。
+
+Main-facing launch只接受：
+
+```text
+subsystemKey
+Launch Attempt material
+```
+
+不得让 Main传：
+
+```text
+game
+manifest
+module
+physical path
+Node flags
+```
+
+---
+
+## 8. Runner
 
 Host-owned Runner是 Node process唯一 argv entry。
 
-Runner内部：
-
 ```text
 bootstrap validation
-→ import planned module
+→ verify planned key/binding
+→ import exact planned module
 → validate SubsystemDefinitionFactory
 → RuntimeControlBinding
 → SubsystemDataBinding
@@ -174,15 +243,15 @@ bootstrap validation
 → runSubsystem
 ```
 
-Definition Module是 business implementation，不是 launcher implementation。
+Business Definition Module不是 launcher/entry policy。
 
 ---
 
-## 7. Provisioning Integration
+## 9. Provisioning Integration
 
 DataConnectionBroker仍属于 Platform Composition。
 
-本包只提供目标 Runner 的 Platform-local provisioning sink/source，使 composition可以：
+本包只提供 target Runner provisioning integration，使 composition可以：
 
 ```text
 Broker current S/G/P
@@ -192,16 +261,17 @@ Broker current S/G/P
 → SubsystemDataBinding
 ```
 
-本包 MUST NOT mint G/P，也不得把 provisioning failure升级为 Frame failure。
+本包 MUST NOT mint generation/profile，也不得把 provisioning failure升级为 Frame failure。
 
 ---
 
-## 8. Error Domains
+## 10. Error Domains
 
 至少区分：
 
 ```text
-manifest/join/preflight error
+GamePackageError
+Hostra manifest/join/preflight error
 module resolution error
 process launch/supervision error
 module load/ABI error
@@ -209,18 +279,22 @@ Runtime Control bootstrap error
 platform provisioning error
 ```
 
-不要把它们折叠成一个 `GAME_PACKAGE_INVALID`。
+Common Game error可作为 Launcher PREPARE failure的 cause/typed domain暴露，但不得被误映射成 Platform module error。
 
 ---
 
-## 9. Tests
+## 11. Tests
 
 ```text
+prepare accepts raw/current Hostra Game source without caller Game Package step
+Game validation failure occurs before Hostra side effect
 manifest closed schema
 exact key-set join
 all modules resolved before spawn
 symlink/containment rejection
 host policy not game-controlled
+logicalBootstrap has no formatVersion/module
+Main package not required to import launcher/game-package
 Main launch has no module
 Runner is process entry
 planned module imported exactly
@@ -230,13 +304,13 @@ provisioning distinct from Runtime Control
 Data provision failure domain
 ```
 
+M6 是 `@loomrealm/game-package` 第一个真实 Runtime-product consumer qualification。
+
 ---
 
-## 10. Package Boundary Guard
+## 12. Package Boundary Guard
 
-本包存在的理由是 Hostra launch config + startup semantics本身是稳定、独立、可测试 capability。
-
-它 MUST NOT扩张为：
+MUST NOT扩张为：
 
 ```text
 Hostra Renderer mega-package
@@ -244,20 +318,23 @@ Hostra DataConnectionBroker authority
 Hostra Content product
 Hostra Shell abstraction
 all-platform launcher registry
+universal Game source abstraction
 ```
 
-全产品仍由 `apps/desktop` composition root组装。
+完整产品仍由 `apps/desktop` composition root组装。
 
 ---
 
-## 11. Final Invariants
+## 13. Final Invariants
 
-1. Hostra manifest独立于 common Game Entry；
-2. Game/Hostra key set严格 join；
-3. LaunchPlan先完整闭合再产生 Runtime side effect；
-4. Main只传 subsystemKey；
-5. Host policy不可由 game config覆盖；
-6. Runner是 process entry，business module由 Runner import；
-7. provisioning capability与 application protocols分离；
-8. package不拥有 Main/DataAuthority/Renderer/Content application semantics；
-9. 与 PWA launcher只共享 logical ports/identity，不共享万能配置 schema。
+1. Product bootstrap caller调用 Hostra Launcher，不手动编排 Game Package；
+2. Hostra Launcher内部消费 `@loomrealm/game-package`；
+3. Game/Hostra key set严格 join；
+4. HostraLaunchPlan + LogicalGameBootstrap在 first Runtime side effect前闭合；
+5. Main不依赖 Game Package/concrete Launcher；
+6. Main只传 subsystemKey；
+7. Host policy不可由 Game/Platform config覆盖；
+8. Runner是 process entry，business module由 Runner import；
+9. provisioning capability与 application protocols分离；
+10. package不拥有 Main/DataAuthority/Renderer/Content semantics；
+11. 与 PWA launcher只共享 logical contracts/ports，不共享万能 config/prepared schema。

@@ -3,47 +3,51 @@
 > 层级：实施计划  
 > 状态：Tracking  
 > 稳定程度：Evolving  
-> 主要定义：第一阶段实现顺序、Game/Platform launch boundary、Definition Module/Runner、SDK outcome/control-flow、Renderer Data Profile、Platform provisioning、Desktop/PWA composition 与关闭条件  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
+> 主要定义：M0..M16 实现顺序、Game/Launcher/Main bootstrap boundary、Definition Module/Runner、SDK outcome/control-flow、Renderer Data、Platform provisioning、Desktop/PWA composition 与关闭条件  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[正式契约目录](../15-contracts/README.md)  
 > 最近复核：2026-08-20
 
-核心原则：
+核心顺序：
 
 ```text
 lowest stable primitives
-→ common logical Game topology
+→ common Game document validation
 → formal protocol mechanics
 → role SDK/ports
-→ Hostra launch planner/Runner
+→ Main logical bootstrap
+→ Hostra Launcher as first real Game Package consumer
 → Desktop vertical slice
 → Renderer/Data/Input/Render/Content
-→ PWA launch planner/Runner
+→ PWA Launcher as second consumer
 → PWA vertical slice
 → abstract-trace equivalence
 ```
 
-本次直接修改 current v1；不做 v2、不保留 `{key,module}` legacy parser。
+Current v1直接收口；不做 fake v2、不保留 `{key,module}` legacy parser。
 
 ---
 
 ## M0：文档与契约基线
 
-当前必须一致：
+Current必须一致：
 
 ```text
 Game Package v1
     GameEntry {formatVersion, initial, subsystems[]}
     Descriptor = {key}
+    document contract, not Main state
+
+ADR 0020
+    matching Launcher consumes Game Entry
+    Main consumes LogicalGameBootstrap only
 
 Hostra Launcher Profile v1
     launch.hostra.json
-    → exact key join
-    → HostraLaunchPlan
+    → full PREPARE
 
 PWA Launcher Profile v1
     launch.pwa.json
-    → exact key join
-    → PwaLaunchPlan
+    → full PREPARE
 
 Runtime Control Profile v1
     Control1 + Frame1
@@ -51,31 +55,24 @@ Runtime Control Profile v1
 Frame / Call v1
     Frozen
 
-Renderer Control v1
-    DataAuthority = {S,G,dataProfile}
-
-Renderer Data Profile v1
-    Connection1 + Input1 + Render1
-
-Content API v1
+Renderer/Data/Content contracts
 ```
 
-跨平台：
+关闭：
 
 ```text
-Game logical topology shared
-SubsystemDefinitionFactory ABI shared
-logical scenario/application semantics shared
-Platform Launch Manifest/artifact/Runner/provisioning platform-specific
+no Main → game-package dependency
+no application-required manual Game Package step
+no Game Descriptor.module
+no universal launcher options/prepared schema
+no same-artifact cross-platform requirement
 ```
-
-关闭：当前文档无 current Game `{key,module}`、无 old launcher.entry/env、无 `connectionProfile`、无 Runtime-global Interest、无 structured-object MessagePort application model、无 same-artifact强约束。
 
 ---
 
-## M1：Foundation + Wire
+## M1：Foundation + Wire ✅
 
-实现：
+Implemented Baseline：
 
 ```text
 @loomrealm/foundation
@@ -90,17 +87,11 @@ Platform Launch Manifest/artifact/Runner/provisioning platform-specific
     exact keys/safe integer/UTF-8/depth primitives
 ```
 
-关闭：
-
-```text
-foundation treats string opaque
-wire has no domain authority
-MemoryCarrier supports deterministic close/order/fault tests
-```
+关闭：Foundation treats string opaque；Wire has no domain authority；core CI baseline exists。
 
 ---
 
-## M2：Game Package v1 Logical Topology
+## M2：Game Package v1 Document Validation
 
 实现：
 
@@ -109,25 +100,39 @@ MemoryCarrier supports deterministic close/order/fault tests
 GameEntryV1
 Descriptor {key}
 initial {subsystem,input}
-complete key-set validation
-closed schema
+closed schema / key-set validation
+GamePackageError
+ValidatedGameEntryV1 detached immutable snapshot
+```
+
+依赖：
+
+```text
+@loomrealm/wire only
 ```
 
 关闭：
 
 ```text
+exact public API
 formatVersion exact
-key unique/case-sensitive
+key non-empty / unique / case-sensitive
+no trim/case-fold/Unicode normalization
 initial target declared
-initial input JsonValue
-module/launcher/env/platform fields rejected
-pure deterministic validation
+initial input opaque JsonValue
+schema-level module/launcher/env/platform rejected
+same names inside initial.input accepted
+stable error class/code/path
+source mutation cannot alter validated result
+validated result deeply immutable
+deep-input-safe snapshot
 no filesystem/Fetch/module import
-zero Runtime side effect on failure
-same ValidatedGameEntry usable by Hostra/PWA planners
+zero Runtime side effect
+no Main dependency
+package dry-run/boundary tests
 ```
 
-Definition Module ABI不由 Game Package定义；它在 `@loomrealm/subsystem` author/host contract中统一。
+M2 local close不伪造 Hostra/PWA consumer；真实 consumer qualification留给 M6/M15。
 
 ---
 
@@ -153,7 +158,7 @@ one UTF-8 JSON text per JSON-RPC message
 hello-first
 no Batch
 no retry
-ambiguous Frame mutation classified Runtime-fatal
+ambiguous Frame mutation Runtime-fatal
 ```
 
 ---
@@ -167,7 +172,19 @@ ambiguous Frame mutation classified Runtime-fatal
 @loomrealm/subsystem/host
 ```
 
-Host surface：
+Author：
+
+```text
+defineSubsystem
+SubsystemScope
+Frame / FrameOutcome
+InputListener
+RenderDomain
+ContentClient
+AbortSignal
+```
+
+Host：
 
 ```text
 runSubsystem
@@ -176,42 +193,30 @@ SubsystemDataBinding
 SubsystemLaunchContext
 ```
 
-Author surface：
-
-```text
-defineSubsystem
-SubsystemScope
-Frame / FrameOutcome
-completed / cancelled / failed
-InputListener / RenderDomain / ContentClient
-AbortSignal
-```
-
-必须先闭合：
+关闭：
 
 ```text
 Definition Module default-export ABI
 initialize creates Context only
 activate starts handler exactly once
-child completed/cancelled/failed resolve frame.call FrameOutcome
-pre-commit recoverable rejection may reject and preserve Activation
+child terminal outcome → FrameOutcome
+pre-commit recoverable rejection preserves Activation
 Runtime-fatal/ambiguous never re-enters business continuation
-uncaught business exception → Frame failed outcome
-administrative suspend aborts frame task and discards late completion
-Game/Platform launch material hidden from author surface
+uncaught business exception → failed outcome
+administrative suspend aborts/discards late completion
+business author surface has no Game Package/Launcher/host dependency
 ```
-
-没有这些测试通过，不进入真实平台实现。
 
 ---
 
-## M5：Main Core + Frozen Frame Vertical Slice
+## M5：Main Core + LogicalGameBootstrap + Frozen Frame Slice
 
 实现：
 
 ```text
 @loomrealm/main
-Logical Subsystem Registry {key}
+LogicalGameBootstrap input surface
+Subsystem Registry {key}
 Runtime Registry / Launch Attempt
 Frame/Activation Registry
 Stack mutation coordinator
@@ -220,82 +225,93 @@ Frame deadline/failure classifier
 fixed-point unwind
 ```
 
-Main-facing fake RuntimeHosting：
+Main-facing fake Platform ports：
 
 ```text
-launch(subsystemKey, launchAttemptMaterial)
+RuntimeHosting.launch(subsystemKey, LaunchAttemptMaterial)
 terminate(...)
 Supervisor facts
 ```
 
-禁止 Main传 module/path/URL。
-
-Fake ports先跑：
+关键 dependency closure：
 
 ```text
-initial frame
+Main MUST NOT depend on @loomrealm/game-package
+Main MUST NOT depend on concrete game-launcher-*
+Main tests use LogicalGameBootstrap fixtures directly
+```
+
+Fake RuntimeHosting is assumed already plan-bound；M5 不实现 Game/Platform manifest/preflight。
+
+关闭 vertical slice：
+
+```text
+initial frame from LogicalGameBootstrap.initial
 nested same/different subsystem call
-return completed/cancelled/failed
+completed/cancelled/failed outcomes
 recoverable call rejection
 ambiguous failure unwind
 fresh final Caller resume
+Main launch has no module/path/URL
 ```
 
 ---
 
-## M6：Hostra Game Launcher / Node Runner / Runtime Control
+## M6：Hostra Game Launcher / Node Runner / First Game Package Consumer
 
 实现：
 
 ```text
 @loomrealm/game-launcher-hostra
+Hostra Game source/installation integration boundary
+internal @loomrealm/game-package consumption
 HostraLaunchManifestV1 parser/validator
 exact Game↔Hostra key-set join
 safe installation module resolver
 HostraLaunchPlan
+LogicalGameBootstrap projection
 plan-bound RuntimeHosting
 Host-owned Node Runner
 process Supervisor
 Runtime Control WebSocket adapter
-Platform Provisioning IPC capability
+Runner provisioning integration
 ```
 
-Preflight hard gate：
+PREPARE hard gate：
 
 ```text
-validate Game
+obtain Game Entry
+→ @loomrealm/game-package validate
 → validate launch.hostra.json
 → exact join
 → resolve ALL modules / containment
 → validate Node/Runner capability
-→ freeze plan
+→ freeze HostraLaunchPlan
+→ freeze LogicalGameBootstrap
+→ return PreparedHostraGame
 ```
 
-任一 failure：process/import/Runtime Control count = 0。
-
-Runtime流程：
+任一 PREPARE failure：
 
 ```text
-Main launch(key)
-→ plan lookup
-→ fresh Launch Attempt/token
-→ spawn Host-owned Runner
-→ Runner imports exact selected Definition Module
-→ construct RuntimeControlBinding
-→ runSubsystem
-→ hello/identified/ready
-→ shutdown
-→ actual exit/stopped
+process/import/Runtime Control count = 0
 ```
 
-关闭：
+Consumer qualification：
+
+```text
+M6 = @loomrealm/game-package first real Runtime-product consumer
+product caller does not manually call Game Package
+Main receives logical projection only
+```
+
+Runtime关闭：
 
 ```text
 business module not argv entry
 manifest cannot choose Node/Runner/unsafe argv-env/token
 Main launch no module
-ready without Data offer
-Control WS JSON text
+ready independent from Data offer
 unexpected exit fails Runtime
 no auto restart
 ```
@@ -309,26 +325,10 @@ no auto restart
 ```text
 @loomrealm/renderer-control
 @loomrealm/renderer Control Store
-RendererControlBinding port
+RendererControlBinding
 ```
 
-Snapshot：
-
-```text
-Runtime/Stack/Activation/InputTarget
-DataAuthority {S,G,dataProfile}
-```
-
-关闭：
-
-```text
-full atomic snapshot
-revision rules
-InputTarget one-shot
-no physical Data/executable material
-Control loss revokes Data use
-MessagePort/WS JSON-text equivalence
-```
+关闭：full atomic snapshot/revision/InputTarget one-shot/no physical Data/executable material/Control loss revokes Data use/WS-MessagePort JSON-text equivalence。
 
 ---
 
@@ -358,61 +358,24 @@ one Data reader/demux
 
 ## M9：Desktop DataConnectionBroker / Late Provisioning
 
-实现：
-
 ```text
 Main DataAuthority(S,G,P)
 → Desktop Broker
-→ Renderer physical endpoint/material
+→ Renderer material
 → Runner provisioning IPC
 → Subsystem endpoint/ticket
 → Data WS carriers
 ```
 
-Runner：
-
-```text
-validate own S/G/P
-→ establish WS
-→ SubsystemDataBinding yields {G,P,carrier}
-```
-
-关闭：
-
-```text
-provisioning distinct from Control/stdout/Data application
-stale/duplicate ticket rejected
-same S/G/P fresh offer reconnect
-profile replacement invalidates old material
-provision/connect failure does not fail Runtime/unwind Frame
-```
+关闭：provisioning distinct from Control/stdout/Data application；stale/duplicate ticket rejected；same S/G/P reconnect；provision failure != Runtime/Frame failure。
 
 ---
 
 ## M10：User Input v1 + InputManager
 
-实现：
+实现 full Frame Interest Registry + State/Event/Reset + receive gate。
 
-```text
-full Frame Interest Registry
-State/Event/Reset
-InputManager listener contributions/union
-receive gate
-```
-
-关闭：
-
-```text
-fresh Data registry/state empty
-Interest-first/Authority-first convergence
-new child waits own Interest
-fresh resume reuses config not State/Event
-Frame close removes Interest before local success
-interest shrink local-first
-state fresh baseline / event future-only
-```
-
-标准 channel payload/hard limits在 User Input Frozen前同步关闭。
+关闭：fresh Data registry/state empty；Interest-first/Authority-first convergence；fresh Activation reuses config not State/Event；Frame close local-first interest removal；state baseline/event future-only。
 
 ---
 
@@ -426,15 +389,7 @@ RenderDomain desired-state API
 SDK-minted domainId
 ```
 
-关闭：
-
-```text
-fresh carrier Registry + Snapshots
-strict revision chain/atomic Patch
-Frame close not auto-destroy Domain
-Data reconnect hidden from business
-one Data dispatcher shared with Input
-```
+关闭：fresh carrier Registry + Snapshots；strict revision chain；Frame close not auto-destroy Domain；one Data dispatcher shared with Input。
 
 ---
 
@@ -448,8 +403,6 @@ one Data dispatcher shared with Input
 Desktop fs/http adapters
 ```
 
-业务只见 logical `ContentClient`。
-
 保持：
 
 ```text
@@ -462,149 +415,116 @@ physical module path/URL not exposed by Content API
 
 ## M13：`loom.map` Business Definition
 
-业务 source只依赖：
+Business source only：
 
 ```text
 @loomrealm/map → @loomrealm/subsystem
 ```
 
-必须实际使用：
+MUST use FrameOutcome / Frame-bound InputListener / RenderDomain / ContentClient。
 
-```text
-explicit FrameOutcome
-Frame-bound InputListener
-RenderDomain desired state
-ContentClient
-```
+MUST NOT import Game Package/Launcher or inspect platform。
 
-Build可产生：
-
-```text
-subsystems/hostra/loom-map/subsystem.mjs
-subsystems/pwa/loom-map/subsystem.mjs
-```
-
-也可两个 manifest指向同一 portable artifact。
-
-关闭：business source不读取 launch manifest、不 import launcher、无 `if platform` 业务分支；Runtime-fatal不会重新进入 map continuation。
+Build MAY produce Hostra/PWA-specific artifacts from same business source。
 
 ---
 
 ## M14：Desktop Full E2E
 
 ```text
-Game Entry {key...} + initial
-+ launch.hostra.json
-→ Hostra exact join/full preflight
-→ Node Runner/ready
+Hostra game source
+→ Hostra Launcher PREPARE
+→ LogicalGameBootstrap + plan-bound RuntimeHosting
+→ Main / Node Runner ready
 → Renderer Control
-→ DataAuthority S/G/P
-→ Broker late provisioning
+→ DataAuthority / Broker
 → Input/Render/Content
 → nested Frame outcomes
-→ same-generation Data reconnect
+→ Data reconnect
 → Renderer reload
 → shutdown
 ```
 
-另跑 ambiguous Frame failure E2E。
-
-关闭：所有 preflight negative case证明 zero Runtime side effect；Desktop完整 logical trace稳定。
+Negative PREPARE cases prove zero Runtime side effect。
 
 ---
 
-## M15：PWA Game Launcher / Runner / Adapters / Provisioning
+## M15：PWA Game Launcher / Runner / Second Game Package Consumer
 
 实现：
 
 ```text
 @loomrealm/game-launcher-pwa
+PWA Game source/installation integration boundary
+internal @loomrealm/game-package consumption
 PwaLaunchManifestV1 parser/validator
 exact Game↔PWA key-set join
-installation/same-origin module resolver
+installation/same-origin resolver
 PwaLaunchPlan
+LogicalGameBootstrap projection
 plan-bound RuntimeHosting
 Host-owned Worker Runner
-Runtime/Renderer Control MessagePort string adapters
+Runtime/Renderer Control MessagePort adapters
 Worker provisioning path
-Data MessageChannel Broker integration
-Content Service Worker
 ```
 
-Preflight hard gate：全部 binding resolution/security/capability验证在 first Worker creation前完成。
+PREPARE hard gate：full binding/security/capability validation before first Worker creation。
 
-关闭：
+Consumer qualification：
 
 ```text
-Main launch no module
-Host-owned Worker Runner is constructor entry
-business module imported by Runner
-postMessage(string) application model
-Data Port binds S/G/P
-provision failure != Runtime failure
-fresh Port reconnect same S/G/P
-no auto restart
+M15 = @loomrealm/game-package second real Runtime-product consumer
+same common Game Entry source
+→ Hostra/PWA prepared LogicalGameBootstrap semantically equivalent
 ```
+
+关闭：Main launch no module；Host-owned Worker Runner entry；postMessage(string)；Data Port binds S/G/P；provision failure != Runtime failure；no auto restart。
 
 ---
 
 ## M16：PWA E2E + Cross-platform Equivalence
 
-共享：
+Shared：
 
 ```text
-same Game Entry logical topology
+same Game Entry logical topology/source fixture
+same resulting LogicalGameBootstrap semantics
 same subsystem keys
-same business inputs/logical scenario
+same business inputs/scenario
 same protocol/profile semantics
 same Content fixture/expected business result
-same failure/reconnect scenario
 ```
 
-允许：
+Allowed：
 
 ```text
-Hostra launch manifest != PWA launch manifest
-Hostra Definition artifact != PWA Definition artifact
+Hostra manifest != PWA manifest
+Hostra artifact != PWA artifact
 ```
 
-比较：
-
-```text
-Runtime lifecycle
-Frame/Activation/Outcome/unwind
-Renderer S/G/P authority
-Data current/retired lifecycle
-Input delivered semantics
-Render authoritative replica
-Content logical response
-business observable state
-```
-
-不比较：module path/bytes、Runner/IPC/Port/WS/HTTP physical trace。
+Compare logical Runtime/Frame/Renderer/Data/Input/Render/Content/business trace；do not compare module path/bytes、Runner/IPC/Port/WS/HTTP physical trace。
 
 ---
 
 ## Phase 1 Acceptance
 
 - Foundation/Wire职责单一；
-- Game Package v1 Descriptor只有 `{key}`；
-- Game common manifest有完整 initial target/input与 closed validation；
+- Game Package是 document validation capability，Descriptor只有 `{key}`；
+- validated Game snapshot detached/immutable；
+- matching Launchers internally consume Game Package；
+- Product application不需要手动 Game Package step；
+- Main不依赖 Game Package/concrete Launcher；
+- Main consumes `LogicalGameBootstrap` only；
 - Hostra/PWA各自拥有 launch config/schema/planner/resolver；
-- 两个平台不共享万能 launcher option schema；
 - Game↔current Platform exact key-set join；
-- full executable/capability preflight先于任何 Runtime side effect；
-- Main launch intent无 module/path/URL；
+- full PREPARE + logical projection先于 Runtime side effect；
 - Host-owned Runner是 Process/Worker entry；
-- platform manifest不能覆盖 Host security/runtime policy；
 - Definition Module ABI统一，artifact不要求跨平台相同；
-- Subsystem author/host surfaces分离；
-- FrameOutcome与 Frozen Frame一一对应；
-- Runtime-fatal无 catch-and-continue；
-- Main Frame/Stack/unwind闭合；
-- Renderer/Data/Input/Render/Content既有边界闭合；
+- Subsystem author/host surface分离；
+- Frame Frozen transaction/recovery闭合；
+- Renderer/Data/Input/Render/Content边界闭合；
 - Desktop/PWA late Data provisioning完整；
-- `loom.map`业务 source无 Platform launch分支；
+- `loom.map` business source无 Game/Platform launch dependency；
 - Hostra/PWA abstract application trace等价。
 
 ---
@@ -621,6 +541,6 @@ remote Runtime
 multiple Renderer
 runtime implementation negotiation
 universal multi-platform launcher schema
-predictive platform mega-package
+universal PreparedPlatformGame/GameSource abstraction
 Render history replay
 ```

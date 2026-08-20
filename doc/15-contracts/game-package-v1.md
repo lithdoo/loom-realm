@@ -4,8 +4,8 @@
 > 状态：Active / Normative  
 > 契约版本：1  
 > 稳定程度：Stabilizing  
-> 主要定义：Game Entry 的 platform-neutral 公共字段、Subsystem logical topology、初始 Frame target、集合级校验与 Platform Launch Manifest 连接边界  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)  
+> 主要定义：Game Entry platform-neutral document shape、Subsystem logical topology、初始 Frame target、集合级校验、validated snapshot 与 Platform Launcher consumption boundary  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > Hostra realization：[Hostra Game Launcher / Node Subsystem Runner Profile v1](./nodejs-launcher-profile-v1.md)  
 > PWA realization：[PWA Game Launcher / Worker Subsystem Runner Profile v1](./pwa-launcher-profile-v1.md)  
 > 最近复核：2026-08-20
@@ -13,17 +13,17 @@
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 > [!IMPORTANT]
-> 当前 v1 直接移除旧 `SubsystemDescriptor {key,module}`。不存在 v2、兼容 alias 或 dual parser。Game Package v1 从现在起只声明 **游戏逻辑 topology 与平台无关初始输入**；可执行实现、module resolution 与 Runtime 创建全部由当前 Platform 的 Game Launcher/Profile 拥有。
+> Current v1 直接使用 `{key}` Descriptor；不存在 v2、旧 `{key,module}` parser、deprecated alias 或 dual model。Game Entry 是 installation/document contract，不是 Main application state model。
 
 核心原则：
 
-> **Game Package 回答“这个游戏由哪些 logical Subsystem 组成、从哪里开始”；Platform Launch Manifest 回答“当前平台用什么实现这些 key”；RuntimeHosting 回答“当前平台如何真正运行它们”。**
+> **Game Package 回答“这个 common Game Entry 是否成立、游戏由哪些 logical Subsystem 组成、从哪里开始”；matching Platform Launcher 回答“当前平台如何完整准备并实现这些 key”；Main 只接收 prepared logical projection，不解析 Game Entry。**
 
 ---
 
 ## 1. Game Entry
 
-当前标准公共 Game Entry 是一个 JSON document。安装布局 MAY 将其保存为 `game.json`；`@loomrealm/game-package` 的核心 API 只依赖 document bytes/value，不依赖 filesystem、Fetch 或某一物理路径 API。
+当前标准 Game Entry 是 JSON document。安装布局 MAY 保存为 `game.json`；core validation API 只依赖 JSON text/value，不依赖 filesystem、Fetch 或物理路径。
 
 Normative model：
 
@@ -60,7 +60,7 @@ interface SubsystemDescriptorV1 {
 }
 ```
 
-Game Entry MUST NOT包含任何 executable/platform binding。
+Game Entry MUST NOT包含 executable/platform binding。
 
 ---
 
@@ -74,59 +74,65 @@ interface SubsystemDescriptorV1 {
 }
 ```
 
-`key` 是当前 Session 中稳定的 Subsystem application identity。
+`key` 是 Session 中稳定的 Subsystem application identity。
 
 要求：
 
 - MUST 是非空字符串；
-- MUST 在同一 Game Entry 的 `subsystems[]` 中唯一；
-- 比较 MUST 大小写敏感、逐字符精确；
-- Main、Runtime bootstrap、Subsystem Control、Frame target 与 DataAuthority MUST 使用同一个 key；
-- PID、Worker ID、module path、URL、Launch Attempt ID、Port MUST NOT 代替 key。
+- MUST 在同一 `subsystems[]` 中唯一；
+- 比较 MUST 大小写敏感、按字符串 exact equality；
+- validator MUST NOT trim、case-fold 或 Unicode-normalize key；
+- Main、Runtime bootstrap、Subsystem Control、Frame target 与 DataAuthority MUST 使用同一个 logical key；
+- PID、Worker ID、module path、URL、Launch Attempt ID、Port MUST NOT 替代 key。
 
-Game Package 不再拥有：
-
-```text
-module
-launcher.type
-launcher.entry
-env
-Node/Worker selection
-process argv/flags
-Worker options
-WebSocket URL / MessagePort
-bootstrap token
-Data endpoint/ticket
-platform switch
-```
+Current v1 不额外冻结 ASCII/regex/prefix grammar。若未来收紧 key syntax，应修改本 formal contract，而不是实现私自 normalize。
 
 ---
 
 ## 3. Initial Frame Target
 
-`initial.subsystem` MUST 引用 `subsystems[]` 中已声明的 key。
+`initial.subsystem` MUST 引用 `subsystems[]` 中已声明的 exact key。
 
-`initial.input` MUST 是合法 `JsonValue`，并成为 Session bootstrap 创建 initial Frame 时的业务输入。
+`initial.input` MUST 是合法 `JsonValue`，并成为 Session bootstrap 创建 initial Frame 时的 business input。
 
-它不是：
+`initial.input` 对 Game Package MUST otherwise opaque。
+
+因此业务 input 内出现：
 
 ```text
-Platform bootstrap object
-process env
-Worker bootstrap material
-Content credential
-Runtime Control payload
+module
+env
+platform
+launcher
+__proto__
 ```
 
-因此相同 Game Entry 可在不同 Platform Launch realization 中使用相同初始业务语义。
+等 JSON member name 本身不构成 Game/Platform configuration，也不得被递归 blacklist。
+
+```text
+closed Game schema
+!=
+recursive reserved business JSON names
+```
 
 ---
 
 ## 4. Closed Schema
 
-Game Entry、InitialFrameTarget 与 SubsystemDescriptor 都是 closed schema。
+Game Entry、InitialFrameTarget、SubsystemDescriptor 都是 closed schema：
 
-以下字段出现即 MUST reject：
+```text
+GameEntry
+    exactly formatVersion / initial / subsystems
+
+InitialFrameTarget
+    exactly subsystem / input
+
+SubsystemDescriptor
+    exactly key
+```
+
+因此在这些 schema 层出现额外字段即 MUST reject，例如：
 
 ```text
 module
@@ -144,7 +150,7 @@ url
 bootstrapToken
 ```
 
-若未来确实出现 platform-neutral game-level 字段，应直接修改 current Game Package contract；不得把任意 platform option bag 塞入 common manifest。
+若未来出现真正 platform-neutral game-level field，应直接修改 current Game Package contract；不得加入 arbitrary platform option bag。
 
 ---
 
@@ -166,43 +172,133 @@ runtime implementation negotiation
 remote Runtime
 ```
 
-Game Entry 一次性声明本次 Session 的完整 logical Subsystem key set。
+Game Entry 一次性声明本次 Session 完整 logical Subsystem key set。
+
+`subsystems[]` declaration order MUST 在 validated representation 中保留，但：
+
+```text
+order != launch order
+order != dependency order
+order != startup/shutdown priority
+```
+
+Topology authority 是 exact key set。
 
 ---
 
-## 6. Game Package Validation
+## 6. Validation
 
-`@loomrealm/game-package` / Game Package Validator MUST 在任何 Platform launch planning 或 business Runtime side effect 前完成：
+`@loomrealm/game-package` MUST 在任何 Platform launch planning 或 business Runtime side effect前完成 common validation：
 
 ```text
-JSON parse
+JSON representation validation
 closed top-level schema
-formatVersion == 1
+formatVersion exact current version
 initial closed schema
 initial.input JsonValue validation
-subsystems[] closed schema
-key non-empty / uniqueness
+subsystems[] / descriptor closed schema
+key non-empty / exact uniqueness
 initial.subsystem declared
 ```
 
 Game Package validation MUST NOT：
 
 ```text
+read Platform Launch Manifest
 resolve executable module
 import Definition Module
 create Process/Worker
 open Control/Data carrier
-read Platform Launch Manifest
 select Hostra/PWA
 ```
 
-输出是 platform-neutral `ValidatedGameEntryV1` / logical topology。
+输出是 `ValidatedGameEntryV1` document snapshot。
 
 ---
 
-## 7. Platform Launch Join Boundary
+## 7. Validated Snapshot
 
-每个平台拥有自己的 Launch Manifest 与 validator：
+Successful validation MUST produce a trusted snapshot rather than merely retyping caller-owned mutable input。
+
+实现 MUST：
+
+```text
+construct detached representation
+recursively freeze returned containers
+preserve JsonValue semantic value
+preserve subsystem declaration order
+```
+
+实现 MUST NOT：
+
+```text
+mutate caller-owned input
+freeze caller-owned input
+retain mutable caller-owned containers
+invoke user getter/toJSON as part of snapshot construction
+```
+
+因此 caller 后续 mutation MUST NOT alter the validated snapshot。
+
+Snapshot construction SHOULD be deep-input safe and MUST NOT require recursion proportional to JSON nesting depth as correctness behavior。
+
+Object member names such as `__proto__` MUST remain ordinary JSON data, not prototype authority。
+
+---
+
+## 8. Consumer Boundary
+
+`GameEntryV1` / `ValidatedGameEntryV1` 是 document-layer types。
+
+Runtime-product path 的 primary consumers MUST 是 matching Platform Launcher/Profile：
+
+```text
+Game source
+→ matching Platform Launcher
+    → @loomrealm/game-package validation
+    → own Platform manifest validation
+    → exact join / executable preflight
+```
+
+Product application/composition MUST NOT be required to call Game Package manually before invoking the matching launcher。
+
+Tooling MAY directly consume Game Package。
+
+---
+
+## 9. Main-facing Projection
+
+Main MUST NOT：
+
+```text
+parse game.json
+validate GameEntryV1
+import @loomrealm/game-package as a Runtime role dependency
+receive formatVersion / validated document brand
+receive Platform executable fields
+```
+
+After full Platform PREPARE，Launcher/Composition projects only Main-required logical facts：
+
+```ts
+interface LogicalGameBootstrap {
+  readonly subsystemKeys: readonly string[];
+  readonly initial: {
+    readonly subsystemKey: string;
+    readonly input: JsonValue;
+  };
+}
+```
+
+这只是 conceptual Main-facing bootstrap shape，不是新的 Game file format，也不是 universal Platform launcher schema。
+
+`LogicalGameBootstrap` MUST be immutable and MUST NOT contain executable/Platform material。
+
+---
+
+## 10. Platform Launch Join Boundary
+
+每个平台拥有自己的 Launch Manifest/validator/planner：
 
 ```text
 ValidatedGameEntryV1
@@ -214,7 +310,7 @@ Platform Launch Planner
 immutable PlatformLaunchPlan
 ```
 
-Phase 1 MUST满足：
+Phase 1 MUST：
 
 ```text
 keys(GameEntry.subsystems)
@@ -222,118 +318,85 @@ keys(GameEntry.subsystems)
 keys(CurrentPlatformLaunchManifest.subsystems)
 ```
 
-因此：
+Missing/extra binding MUST fail before Runtime side effects。
 
-```text
-missing platform binding
-    → bootstrap rejected before Runtime side effect
-
-platform binding for undeclared key
-    → bootstrap rejected before Runtime side effect
-```
-
-Game Package package本身不解析 Hostra/PWA manifest；exact-set join由对应 Platform Launcher/Profile负责。
+Game Package 本身不解析 Hostra/PWA manifest；exact-set join由对应 Launcher/Profile负责。
 
 ---
 
-## 8. Zero-side-effect Preflight Invariant
+## 11. Zero-side-effect PREPARE Invariant
 
-启动边界固定为：
+启动边界：
 
 ```text
-read/validate Game Entry
-→ read/validate current Platform Launch Manifest
-→ exact key-set join
-→ resolve every required platform implementation
-→ validate current Platform hosting capability
-→ freeze immutable LaunchPlan
-────────────────────────────────────────────
+read/obtain Game Entry
+→ Game Package validation
+→ current Platform manifest validation
+→ exact key join
+→ all executable resolution
+→ hosting/security capability preflight
+→ freeze PlatformLaunchPlan
+→ project LogicalGameBootstrap
+────────────────────────────────────────
 first business Runtime side effect may begin
 ```
 
-配置、集合 join、module syntax、module existence/containment 或当前 Platform capability 的任何 preflight failure：
+任一 config/join/resolution/capability PREPARE failure：
 
 ```text
-MUST NOT create any business Runtime Container
+MUST NOT create business Runtime Container
+MUST NOT import business Definition Module
+MUST NOT establish Runtime Control
 ```
 
-Definition Module 的 actual ESM import/default-export ABI validation MAY 需要在 Host-owned Runner 中执行；此类 launch-time failure使 all-required Game Bootstrap失败并统一 cleanup，但不削弱 preflight 的零副作用保证。
+Definition Module actual ESM import/default-export ABI validation MAY 发生在 Host-owned Runner；此类 launch-time failure使 all-required bootstrap失败并 cleanup，但不改变 PREPARE owner。
 
 ---
 
-## 9. Definition Module Is Not Game Package Authority
+## 12. Definition Module Is Not Game Package Authority
 
-Subsystem Definition Module 仍使用 `@loomrealm/subsystem` 定义的业务 ABI：
+Definition Module 使用 `@loomrealm/subsystem` 定义的 business ABI，但**哪个 module 实现哪个 key**由 current Platform Launch Manifest决定。
 
-```text
-.mjs ESM
-default export = SubsystemDefinitionFactory
-```
-
-但 **哪个 module 实现哪个 key** 不再由 Game Package 声明，而由当前 Platform Launch Manifest 声明。
-
-因此允许：
+允许：
 
 ```text
 same logical key
-    Hostra → hostra-specific build artifact
-    PWA    → pwa-specific build artifact
+    Hostra → artifact A
+    PWA    → artifact B
 ```
 
-两个 artifact MUST遵守同一 Subsystem author/host contract，并满足产品要求的 observable semantics。
+A/B MUST 遵守相同 author/host contract，并在同一 logical scenario 下满足等价 observable semantics。
 
-共享同一 source/module仍是良好优化，但不是 Game Package v1 identity 或 compatibility invariant。
+Same artifact/path/bytes 不是 Game Package compatibility invariant。
 
 ---
 
-## 10. Main Boundary
+## 13. Main Boundary
 
-Main 只消费 logical topology：
+Main 拥有 logical Subsystem Registry / Runtime/Frame authority，但不拥有 Game document/executable binding。
+
+Prepared RuntimeHosting 的 Main-facing request：
 
 ```text
-subsystemKey
-initial target/input
+launch(subsystemKey, LaunchAttemptMaterial)
 ```
 
-Main MUST NOT 接收普通 application authority 中的：
+Main MUST NOT 传入：
 
 ```text
-module path
+GameEntryV1
+module path / URL
 resolved filesystem path
-module URL
 Node executable
-Worker entry
-platform launch options
+Worker entry/options
+PlatformLaunchPlan
 ```
 
-Main 创建 logical Launch Attempt 后，通过 Main-facing `RuntimeHosting` 请求：
-
-```text
-launch(subsystemKey, launch-attempt material)
-```
-
-RuntimeHosting 在其封闭的 PlatformLaunchPlan 中查找 executable binding。
+RuntimeHosting 在封闭的 PlatformLaunchPlan 中 lookup binding。
 
 ---
 
-## 11. Business Configuration Boundary
-
-跨平台业务配置使用 platform-neutral mechanism：
-
-```text
-Game Entry initial.input
-Frame params
-Readonly Content
-Subsystem-owned business data
-```
-
-Platform Launch Manifest MUST NOT 被业务代码当作普通配置读取入口。
-
-Platform/Runner 自己需要的环境变量、Worker options、bootstrap credentials、timeouts 与 resource policy 属于 Host-owned deployment policy，不属于 Game Package。
-
----
-
-## 12. Error Categories
+## 14. Error Categories
 
 Game Package v1 至少冻结：
 
@@ -346,7 +409,9 @@ INITIAL_TARGET_UNDECLARED
 INITIAL_INPUT_INVALID
 ```
 
-以下错误已经移出 Game Package，归对应 Platform Launcher/Profile：
+Implementation-facing public error SHOULD expose stable category + structural path；human message 不形成 compatibility contract。
+
+以下错误归 Platform Launcher/Profile：
 
 ```text
 PLATFORM_LAUNCH_MANIFEST_INVALID
@@ -362,9 +427,9 @@ PLATFORM_RUNTIME_UNSUPPORTED
 
 ---
 
-## 13. Trust Model
+## 15. Trust Model
 
-Game Entry 是声明性 logical topology，不授予 executable capability。
+Game Entry 是 declarative logical topology，不授予 executable capability：
 
 ```text
 Game declares key
@@ -372,42 +437,51 @@ Game declares key
 Game may execute arbitrary path/URL
 ```
 
-Executable trust、module containment、Runner ownership、Node/Worker policy由 Platform Launcher/Profile承担。Publisher Trust、签名与 untrusted executable sandbox仍是后续能力。
+Executable trust、module containment、Runner ownership、Node/Worker policy由 Platform Launcher/Profile承担。
+
+Publisher Trust / signing / untrusted executable sandbox仍是后续能力。
 
 ---
 
-## 14. Conformance Requirements
+## 16. Conformance Requirements
 
 至少 MUST 覆盖：
 
 ```text
-valid minimal game entry
+valid minimal Game Entry
 closed top-level/initial/descriptor schema
 unsupported formatVersion
-empty/duplicate key
+empty/duplicate exact key
+case-sensitive no-normalization key semantics
 undeclared initial target
 invalid initial JsonValue
-module/launcher/env/platform field rejected from common descriptor
-common validation performs no executable resolution
-common validation performs no Runtime side effect
-same Game Entry accepted by Hostra/PWA launch planners
-missing/extra platform key rejected by platform join
-all preflight failures occur before Runtime creation
+reserved-looking member names allowed inside initial.input
+module/launcher/env/platform field rejected from schema layers
+validated snapshot detached + immutable
+source mutation cannot change validated result
+common validation performs no I/O/module import/Runtime side effect
+Hostra/PWA launcher prepare consume the same common Game Entry
+Main package has no Game Package document dependency
+missing/extra Platform key rejected by Platform join
+all PREPARE failures before Runtime creation
 ```
 
 ---
 
-## 15. Core Invariants
+## 17. Core Invariants
 
-1. Game Package v1 只拥有 platform-neutral logical topology 与 initial business input；
-2. Descriptor v1 精确为 `{key}`；
-3. `key` 是唯一跨 Main/Runtime/Frame/Data 使用的 Subsystem application identity；
-4. Game Package 不拥有 executable module identity、Runner、Process/Worker 或 Transport；
-5. Platform Launch Manifest 独立绑定 key → current-platform implementation；
-6. Phase 1 Game key set 与 current Platform binding key set必须严格相等；
-7. 完整 Platform LaunchPlan 在任何 business Runtime side effect前闭合；
-8. Main只发出 logical launch intent，不携 executable material；
-9. Definition Module ABI由 `@loomrealm/subsystem` 统一，具体 artifact可按平台不同；
-10. Game Package validation failure与 Platform preflight failure均零 Runtime side effect；
-11. Host policy/credential/resource options不得由 Game common manifest注入；
-12. 本次是 current v1直接 reset，不存在 v2或旧 `{key,module}` compatibility path。
+1. Game Package v1 只拥有 platform-neutral Game Entry document、logical topology 与 initial business input；
+2. Descriptor v1 精确 `{key}`；
+3. key non-empty、case-sensitive exact，不由实现 trim/normalize；
+4. initial.input 是 opaque JsonValue；
+5. successful validation产出 detached immutable snapshot；
+6. Game Package不是 Runtime role；
+7. matching Platform Launcher是 Runtime-product Game Entry consumer；
+8. Main不依赖/解析 Game Package document model；
+9. Main只接收 immutable LogicalGameBootstrap projection；
+10. Platform Launch Manifest独立绑定 key → current-platform implementation；
+11. Phase 1 Game key set与 current Platform key set严格相等；
+12. complete PlatformLaunchPlan + logical projection 在任何 business Runtime side effect前闭合；
+13. Definition Module ABI统一，artifact可按平台不同；
+14. Host policy/credential/resource options不得由 Game common manifest注入；
+15. current v1直接实现该模型，不存在 v2/legacy `{key,module}` compatibility path。

@@ -3,55 +3,57 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：跨平台 composition boundary、Platform Launch Manifest/Plan、Runtime Runner、role-facing ports、DataConnectionBroker/provisioning，以及 Hostra/PWA 对同一 logical Session 的 realization  
-> 依赖：[系统架构总览](./system-overview.md)、[ADR 0002](../decisions/0002-platform-transport-profiles.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)  
-> 被以下文档细化：[运行承载系统](./runtime-hosting-system.md)、[通信系统](./communication-system.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
+> 主要定义：跨平台 composition boundary、Launcher-owned Game Entry PREPARE、Platform Launch Manifest/Plan、Runtime Runner、role-facing ports、DataConnectionBroker/provisioning，以及 Hostra/PWA 对同一 logical Session 的 realization  
+> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 被以下文档细化：[运行承载系统](./runtime-hosting-system.md)、[运行时启动系统](./runtime-bootstrap-system.md)、[通信系统](./communication-system.md)  
 > 被以下文档实现：[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
 > 最近复核：2026-08-20
 
-本文回答：**同一套 LoomRealm application semantics 如何在不同物理平台上被完整规划、组合并运行。**
-
-它不新增 application protocol，也不要求存在一个大而全 `platform-*` npm package。
+本文回答：**同一套 LoomRealm application semantics 如何在不同物理平台上被完整准备、组合并运行。**
 
 ---
 
 ## 1. Core Boundary
 
 ```text
-                  Platform-neutral LoomRealm
-┌────────────────────────────────────────────────────────────┐
-│ Game logical topology   Main   Renderer   Subsystem Content│
-│             └──── formal contracts / role APIs ──────────┘ │
-└────────────────────────────────────────────────────────────┘
-                              │
-                         Platform Ports
-                              │
-               ┌──────────────┴──────────────┐
-               ▼                             ▼
-          Hostra Desktop                    PWA
+             Platform-neutral application roles
+┌──────────────────────────────────────────────────────┐
+│ Main      Renderer      Subsystem      Content       │
+└──────────────────────────────────────────────────────┘
+                         ▲
+                    role-facing ports
+                         │
+        ┌────────────────┴────────────────┐
+        │                                 │
+     Hostra                             PWA
+```
+
+Bootstrap 前还有一个独立 document/launch boundary：
+
+```text
+Game source
+→ matching Platform Launcher PREPARE
+→ LogicalGameBootstrap + plan-bound RuntimeHosting
+→ Main
 ```
 
 必须保持：
 
 ```text
-Platform != Main
-Platform != Renderer
-Platform != Subsystem
-Platform != Transport
+Game Package != Runtime role
+Platform != Main/Renderer/Subsystem
 Platform != Protocol
 Platform architecture != one mega package
 ```
-
-Platform建立物理 topology并注入 capability；application authority仍属于对应 logical role。
 
 ---
 
 ## 2. Why System-level Composition
 
-一个完整 Session同时需要：
+一个完整 Session 同时需要：
 
 ```text
-Game logical topology validation
+Game Entry acquisition/validation
 current-platform executable binding/preflight
 Runtime Runner hosting/supervision
 Main ⇄ Subsystem Control
@@ -68,25 +70,45 @@ physical startup/shutdown
 
 因此：
 
-> **Platform Composition owns physical topology; roles consume projections of that topology.**
-
-ADR 0019进一步明确：executable binding本身也是 Platform realization，而不是 Game logical identity。
+> **Platform Composition owns physical topology; matching Launcher owns Game + executable PREPARE; roles consume only projections/ports.**
 
 ---
 
-## 3. Game Logical Topology vs Platform Launch Binding
+## 3. Launcher-owned Game Entry Consumption
 
-Game Package v1只声明：
+Runtime-product path：
 
-```ts
-interface SubsystemDescriptorV1 {
-  readonly key: string;
-}
+```text
+Hostra product
+→ @loomrealm/game-launcher-hostra
+    → @loomrealm/game-package
+    → launch.hostra.json
+
+PWA product
+→ @loomrealm/game-launcher-pwa
+    → @loomrealm/game-package
+    → launch.pwa.json
 ```
 
-以及 `initial {subsystem,input}`。
+Application/composition 不需要先显式调用 `@loomrealm/game-package`。
 
-Platform独立声明 executable binding：
+Main 不解析 Game Entry、不读取 `formatVersion`、不持有 `ValidatedGameEntryV1`。
+
+Tooling MAY 直接消费 Game Package，但不改变 Runtime-product ownership。
+
+---
+
+## 4. Game Logical Topology vs Platform Binding
+
+Game Entry v1：
+
+```text
+formatVersion
+initial {subsystem,input}
+subsystems[] = {key}
+```
+
+Platform 独立声明 executable binding：
 
 ```text
 Hostra
@@ -98,31 +120,35 @@ PWA
     key → PWA Definition Module
 ```
 
-两个 manifest当前可以都有 `{key,module}`，但它们不是同一个 schema/profile。未来字段、resolution/security policy可独立演化。
+两个 Platform manifest 可暂时都有 `{key,module}`，但它们不是同一 schema/profile。
 
-禁止把平台差异重新塞回：
+禁止 common：
 
 ```text
 game.json launcher.type
-platformOptions:any
 module in common Descriptor
+PlatformLaunchOptions
+options:any
 ```
 
 ---
 
-## 4. Parse → Plan → Commit
+## 5. PREPARE → COMMIT
 
-完整 Session在任何 business Runtime side effect前先完成：
+### PREPARE
+
+Matching Launcher MUST 在任何 business Runtime side effect前完成：
 
 ```text
-read/validate Game Entry
-→ read/validate current Platform Launch Manifest
+obtain Game Entry
+→ @loomrealm/game-package parse/validate
+→ validate own Platform Launch Manifest
 → exact key-set join
 → resolve every required executable binding
-→ validate current Platform hosting/security capabilities
+→ validate installation/security/hosting capability
 → freeze immutable PlatformLaunchPlan
-────────────────────────────────────────────
-first business Runtime side effect may begin
+→ project immutable LogicalGameBootstrap
+→ release PreparedCurrentPlatformGame
 ```
 
 Phase 1：
@@ -133,45 +159,74 @@ keys(GameEntry.subsystems)
 keys(CurrentPlatformLaunchManifest.subsystems)
 ```
 
-任何 missing/extra binding、invalid module、resolution/containment/security/capability preflight failure：
+PREPARE failure：
 
 ```text
-process/Worker create count = 0
-business module import count = 0
+Process/Worker create count = 0
+business Definition import count = 0
 Runtime Control establish count = 0
+```
+
+### COMMIT
+
+Composition 安装：
+
+```text
+LogicalGameBootstrap
++ plan-bound RuntimeHosting
++ remaining platform ports
+→ Main / Renderer / Content composition
+```
+
+随后 Main 才可：
+
+```text
+launch(subsystemKey)
 ```
 
 普通 Runtime launch path只 lookup frozen plan，不重新解释 raw config。
 
 ---
 
-## 5. Business Module vs Runtime Runner
+## 6. LogicalGameBootstrap vs PlatformLaunchPlan
 
-PlatformLaunchPlan为每个 logical key选择 current-platform Definition Module。
+两者正交：
 
 ```text
-Hostra binding
-    → Hostra-selected .mjs
+LogicalGameBootstrap
+    complete subsystem keys
+    initial subsystemKey/input
+    → Main-visible
 
-PWA binding
-    → PWA-selected .mjs
+PlatformLaunchPlan
+    resolved executable bindings
+    hosting/security preflight facts
+    → Platform-private
 ```
 
-Host-owned Runner才是 Runtime physical entry：
+Main 不需要看到 plan；RuntimeHosting 在内部绑定 plan。
+
+不要创建同时暴露 logical + physical material 的万能 DTO。
+
+---
+
+## 7. Business Module vs Runtime Runner
+
+PlatformLaunchPlan 为每个 logical key 选择 current-platform Definition Module。
+
+Host-owned Runner 才是 physical entry：
 
 ```text
-Hostra Desktop
-    Host-owned Node Runner
-        → import planned Definition Module
+Hostra
+    Node Runner Process
+        → selected Hostra Definition Module
 
 PWA
-    Host-owned Worker Runner
-        → import planned Definition Module
+    Dedicated Worker Runner
+        → selected PWA Definition Module
 ```
 
-业务 Definition Module不是 process/Worker entry policy。
-
-跨平台 requirement变为：
+共享 requirement：
 
 ```text
 same logical subsystem key
@@ -184,9 +239,9 @@ same business-observable result for same logical scenario
 
 ---
 
-## 6. Host Policy Boundary
+## 8. Host Policy Boundary
 
-Platform Launch Manifest只可选择 installation 内业务 implementation artifact；不能控制 Host-owned infrastructure/security policy：
+Platform Launch Manifest MAY 选择 installation 内 business artifact；不能覆盖 Host-owned policy：
 
 ```text
 Node executable
@@ -200,19 +255,17 @@ CSP/same-origin/security policy
 Supervisor/resource/timeouts
 ```
 
-Game-supplied config不能把 executable binding升级成任意 Host code execution authority。
+Game-supplied config 不能升级为 arbitrary Host code execution authority。
 
 ---
 
-## 7. Platform Capabilities
-
-### 7.1 Runtime Hosting
+## 9. Main-facing RuntimeHosting
 
 ```text
-Main logical launch(subsystemKey)
+Main launch(subsystemKey, LaunchAttemptMaterial)
 → RuntimeHosting lookup frozen PlatformLaunchPlan
-→ create physical Runner Runtime
-→ provide supervision facts
+→ physical Runner Runtime
+→ supervision facts
 ```
 
 ```text
@@ -220,64 +273,11 @@ Hostra → Node child process
 PWA     → Dedicated Worker
 ```
 
-RuntimeHosting不拥有 public Runtime lifecycle/Frame authority。
-
-### 7.2 Runtime Control Binding
-
-为 Main/Subsystem提供同一 Launch Attempt 的 current Control carrier。
-
-建立后只遵守：
-
-```text
-Subsystem Control v1
-+ Frame / Call v1
-= Runtime Control Application Profile v1
-```
-
-### 7.3 Renderer Hosting
-
-```text
-Hostra → BrowserWindow/Web application
-PWA    → browser Window/Web application
-```
-
-不拥有 Main authority或 Render Domain state。
-
-### 7.4 Renderer Control Binding
-
-建立 Main ⇄ current Renderer carrier；Snapshot/Revision/authority由 Renderer Control v1定义。
-
-### 7.5 Data Connection Broker
-
-```text
-Main DataAuthority(S,G,P)
-          │
-          ▼
-DataConnectionBroker
-      /              \
- Renderer side      Subsystem side
-```
-
-Broker在安装前绑定 current Session/current Renderer/S/G/P，但不 mint generation/profile，也不从 endpoint/Port/ticket推导 authority。
-
-### 7.6 Content Binding
-
-```text
-Desktop → fs-backed localhost HTTP
-PWA     → same-origin Fetch + Service Worker / OPFS
-```
-
-不得改变 Content API logical semantics。
-
-### 7.7 Platform Lifecycle
-
-负责 process/Worker/window/socket/Port/HTTP/SW 等 physical resource 的 bounded startup/shutdown。
-
-Physical cleanup不自动等价 Frame/Data/Render application lifecycle。
+RuntimeHosting 不拥有 public Runtime lifecycle/Frame/Data authority。
 
 ---
 
-## 8. Role-facing Ports
+## 10. Role-facing Ports
 
 ```text
 System Platform
@@ -300,15 +300,13 @@ System Platform
     └── ContentClient
 ```
 
-这些只是 Platform在每个 role 的 local projection。
+这些只是 Platform 在每个 role 的 local projection。
 
-`RendererDataBinding != SubsystemDataBinding`；两者是同一 Broker建立的两端。
-
-Launcher package可实现 Main-facing RuntimeHosting和 Runner integration，但不能因此吞并其他 ports/application authority。
+Launcher package 可以实现 Main-facing RuntimeHosting / Runner integration，但不能因此吞并其他 ports/application authority。
 
 ---
 
-## 9. Already-connected Carrier
+## 11. Already-connected Carrier
 
 Foundation：
 
@@ -318,80 +316,47 @@ MessageCarrier
 
 只表示已经建立的 message pipe。
 
-当前 Control/Data Profiles统一：
+当前 Control/Data profiles：
 
 ```text
 one carrier application unit
 = one UTF-8 JSON text string
 ```
 
-Transport Adapter只负责 message boundary、per-direction order、observable close/loss、避免无界物理 buffering、no application retry/duplicate；具体 threshold/config 不属于 Foundation contract。
-
-Transport不负责 connection authority、reconnect policy或 Platform topology。
+Transport Adapter负责 boundary/order/close/loss/no duplicate；不拥有 connection authority/recovery policy。
 
 ---
 
-## 10. Capability Lifetime vs Carrier Lifetime
+## 12. Dynamic Data Provisioning
 
-```text
-Runtime Control carrier loss
-    → Runtime failure
+Runtime ready 后 DataAuthority 才可能出现或替换，因此 Platform 必须向已运行 Runner 动态交付 fresh physical Data material。
 
-Renderer Data carrier loss
-    → current carrier retired
-    → Runtime/Frame do not fail
-    → same S/G/P may receive fresh carrier
-
-InputListener/Interest desired state
-    → may survive Data carrier locally
-
-RenderDomain/desired state
-    → may survive Data carrier
-```
-
-因此 Input/Render capability不得直接持有某条 physical carrier作为 lifetime owner。
-
----
-
-## 11. Dynamic Data Provisioning
-
-DataAuthority通常在 Runtime启动后才建立、替换或 reconnect，因此 Platform必须向已运行 Runner动态交付 fresh physical Data material。
-
-这属于：
-
-```text
-Platform provisioning
-```
-
-不是 Runtime Control、Renderer Control、Renderer Data application payload或 business API。
-
-### Hostra Desktop
+Hostra：
 
 ```text
 Main DataAuthority(S,G,P)
 → Desktop Broker
-→ Host-owned Runner provisioning IPC
+→ Runner provisioning IPC
 → one-time endpoint/ticket
-→ Runner establishes authenticated Data WebSocket
-→ MessageCarrier
-→ SubsystemDataBinding yields {G,P,carrier}
+→ Data WebSocket
+→ SubsystemDataBinding
 ```
 
-### PWA
+PWA：
 
 ```text
 Main DataAuthority(S,G,P)
 → PWA Broker creates MessageChannel
 → transfer Renderer endpoint
-→ transfer Subsystem endpoint through Worker provisioning path
-→ role-local bindings install {G,P,carrier}
+→ transfer Subsystem endpoint through Worker provisioning
+→ role-local bindings
 ```
 
-两平台 provisioning wire无需相同；建立后的 Data identity/profile/lifecycle必须相同。
+Provisioning 不是 Runtime Control / Renderer Control / business payload。
 
 ---
 
-## 12. Provisioning Failure Domain
+## 13. Provisioning Failure Domain
 
 以下不自动失败 Runtime：
 
@@ -399,184 +364,140 @@ Main DataAuthority(S,G,P)
 Data offer/ticket expired
 Data WebSocket connect failure
 MessagePort transfer/install failure
-provisioning source temporarily unavailable
 same-generation reconnect failure
 ```
 
-结果只是 current Data unavailable，直到仍授权的 authority获得 fresh carrier。
+结果只是 current Data unavailable。
 
-Control loss/Runtime exit才由 Runtime Control/Supervisor解释为 Runtime failure。
+Control loss / Runtime exit 才进入 Runtime failure domain。
 
 ---
 
-## 13. Hostra Desktop Realization
+## 14. Platform Realizations
+
+Hostra：
 
 ```text
-Hostra Desktop
-├── launch.hostra.json
-├── @loomrealm/game-launcher-hostra / HostraLaunchPlan
-├── Node Subsystem Runner Process
-├── Process Supervisor
-├── Runtime Control WebSocket
-├── Runner Platform Provisioning IPC
-├── Hostra BrowserWindow
-├── Renderer Control WebSocket
-├── Data Broker / authenticated Data WebSocket
-└── fs + localhost HTTP Content
+launch.hostra.json
+@loomrealm/game-launcher-hostra / HostraLaunchPlan
+Node Runner Process
+Runtime Control WebSocket
+Runner provisioning IPC
+BrowserWindow
+Renderer Control WebSocket
+Data Broker / Data WebSocket
+fs + HTTP Content
 ```
 
-Hostra Shell RPC与 LoomRealm application protocols保持独立。
-
----
-
-## 14. PWA Realization
+PWA：
 
 ```text
-PWA
-├── launch.pwa.json
-├── @loomrealm/game-launcher-pwa / PwaLaunchPlan
-├── Worker Subsystem Runner
-├── Worker lifecycle supervision
-├── Runtime Control MessagePort
-├── Worker provisioning Port/path
-├── browser Window Renderer
-├── Renderer Control MessagePort
-├── Data Broker MessageChannel/Port transfer
-└── Fetch + Service Worker / OPFS Content
+launch.pwa.json
+@loomrealm/game-launcher-pwa / PwaLaunchPlan
+Worker Runner
+Runtime Control MessagePort
+Worker provisioning path
+browser Window
+Renderer Control MessagePort
+Data Broker / MessageChannel
+Fetch + Service Worker / OPFS Content
 ```
 
-Structured Clone只用于 Platform bootstrap/Port transfer；进入 Control/Data carrier后 application unit仍为 JSON text string。
+Structured Clone 只用于 Platform bootstrap/Port transfer；application carrier仍发送 string。
 
 ---
 
-## 15. Cross-platform Mapping
-
-| Capability | Hostra Desktop | PWA |
-|---|---|---|
-| Launch config | `launch.hostra.json` | `launch.pwa.json` |
-| Launch planner | HostraLaunchPlan | PwaLaunchPlan |
-| Subsystem Runtime | Node Runner Process | Worker Runner |
-| Runtime supervision | process exit | Worker termination/error |
-| Runtime Control | WebSocket text | MessagePort string |
-| Renderer Hosting | BrowserWindow | browser Window |
-| Renderer Control | WebSocket text | MessagePort string |
-| Data provisioning | Runner IPC + endpoint/ticket | Worker Port + transferred Port |
-| Data carrier | authenticated WebSocket | MessagePort string |
-| Content | fs + HTTP | Fetch + SW / OPFS |
-
-Application authority/identity/order/recovery必须等价。
-
----
-
-## 16. Business Portability
+## 15. Business Portability
 
 ```text
 @loomrealm/map
     → @loomrealm/subsystem
 ```
 
-业务 source不依赖 `/host`、launcher、transport或 Platform composition。
+业务 source 不依赖：
 
 ```text
-business semantics / Subsystem ABI = shared
-Platform Launch Manifest / Runner / bootstrap / provisioning = platform-specific
+@loomrealm/game-package
+game-launcher-*
+/host
+transport
+Platform composition
 ```
 
-Platform-specific build artifact MAY不同；业务不得通过 runtime platform detection改变 business semantics。
+Platform-specific artifact MAY 不同；业务不得通过 runtime platform detection 改变 business semantics。
 
 ---
 
-## 17. Platform Architecture != Platform Mega-package
+## 16. Platform Architecture != Platform Mega-package
 
-完整 Platform Composition仍是 architecture responsibility，当前 final composition roots：
+完整 Platform Composition：
 
 ```text
 apps/desktop
 apps/pwa
 ```
 
-ADR 0019明确允许窄能力：
+窄 Runtime launch packages：
 
 ```text
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
 ```
 
-它们只处理 Subsystem Runtime manifest/planning/hosting/Runner integration；Renderer/DataBroker/Content/Shell仍由其他 capability/adapters/composition组装。
+Launcher 新增 Game Entry consumption orchestration 后仍然只解决 Subsystem Runtime PREPARE/launch，不拥有 Renderer/DataBroker/Content product。
 
 ---
 
-## 18. Cross-platform Equivalence
+## 17. Cross-platform Equivalence
 
-相同 abstract application trace必须比较：
+共享：
+
+```text
+same Game Entry logical topology
+same LogicalGameBootstrap semantics
+same logical scenario/business input
+same formal contracts
+```
+
+比较：
 
 ```text
 Runtime lifecycle
 Frame/Activation/outcome/unwind
 Renderer authority
-Data S/G/Profile current/retired state
-User Input delivered semantics
+Data S/G/Profile lifecycle
+Input delivered semantics
 Render authoritative replica
 Content logical response
 business observable state
 ```
 
-共享输入：
-
-```text
-same Game Entry logical topology
-same subsystem keys
-same logical scenario/business input
-same formal contracts
-```
-
 不比较：
 
 ```text
-Hostra/PWA module path/bytes
+module path/bytes
 PID vs Worker
 WS URL vs MessagePort
 IPC payload vs transfer object
-HTTP port vs Service Worker internal
+HTTP vs Service Worker internals
 ```
 
 ---
 
-## 19. Security / Authority Boundary
+## 18. Final Invariants
 
-Platform/Launcher MUST NOT：
-
-```text
-mint/restore Activation
-mutate Stack/InputTarget
-choose failure unwind root
-mint Data generation/profile independently
-turn endpoint/ticket/Port into DataAuthority
-put Data physical material in Runtime ready/Frame/Render payload
-retry ambiguous Frame operation
-widen application values with Structured Clone
-let game config replace Host-owned Runner/security credential policy
-```
-
-Platform MAY生成 bootstrap token/ticket/Port，只用于建立正确 physical capability。
-
----
-
-## 20. Final Invariants
-
-1. Platform是完整 physical Session composition boundary；
-2. Game Package声明 logical topology，Platform Launcher声明 executable binding；
-3. Game/current-platform key set Phase 1严格相等；
-4. complete immutable PlatformLaunchPlan在 first Runtime side effect前冻结；
-5. Main只发 logical `launch(subsystemKey)`，不持有 module/path/URL；
-6. Host-owned Runner与 business Definition Module分离；
-7. Hostra/PWA Launch Manifest各自演化，不建立万能 launcher schema；
-8. role-local ports是 Platform projection，不是完整 Platform；
-9. RuntimeControlBinding / RendererDataBinding / SubsystemDataBinding职责明确；
-10. DataConnectionBroker实现 current Main S/G/Profile authority但不拥有它；
-11. late Data provisioning通过独立 Platform path到达已运行 Runner；
-12. provisioning不是 application protocol；
+1. Platform 是 complete physical Session composition boundary；
+2. matching Launcher 是 Runtime-product Game Entry consumer；
+3. Game Package 是 document validation capability，不是 Runtime role；
+4. Game/current-platform key set Phase 1严格相等；
+5. PlatformLaunchPlan + LogicalGameBootstrap 在 first Runtime side effect前闭合；
+6. Main 不解析 Game Entry、不依赖 Game Package/concrete Launcher；
+7. Main 只发 logical `launch(subsystemKey)`；
+8. Host-owned Runner 与 business Definition Module 分离；
+9. Hostra/PWA manifest 独立演化；
+10. Launcher package 不扩张为 Platform mega-package；
+11. DataConnectionBroker实现 physical carrier但不拥有 Main authority；
+12. provisioning独立于 application protocols；
 13. Data provisioning failure不等于 Runtime/Frame failure；
-14. capability lifetime与 carrier lifetime分离；
-15. Control/Data application units统一 UTF-8 JSON text；
-16. Hostra/PWA physical机制和 Definition artifact可不同，但 logical application trace必须等价。
+14. Control/Data application units统一 UTF-8 JSON text；
+15. Hostra/PWA physical mechanism/artifact可不同，但 logical application trace必须等价。

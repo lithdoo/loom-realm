@@ -3,42 +3,41 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：Game/Platform launch preflight、protocol conformance、Role/SDK control-flow、Runner/Platform provisioning、Hostra/PWA semantic equivalence 与 E2E  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> 主要定义：Game/Platform PREPARE、Game Package snapshot、Main logical bootstrap、protocol conformance、Role/SDK control-flow、Runner/provisioning、Hostra/PWA semantic equivalence 与 E2E  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-20
 
-测试目标不只是“消息能通”，而是验证每一层不能绕过上层 authority/failure/lifecycle/preflight invariant。
+测试目标不是“消息能通”，而是证明每一层不能绕过 authority/failure/lifecycle/PREPARE invariant。
 
 ---
 
 ## 1. Test Layers
 
 ```text
-Game common manifest
+Game Entry document representation
+→ Game Package validation/snapshot
+→ matching Launcher Game consumption
 → Platform launch manifest
-→ exact join / executable preflight
+→ exact join / executable PREPARE
+→ LogicalGameBootstrap projection
+→ Main logical bootstrap
 → Wire primitive
 → Protocol schema/state machine
 → Application Profile composition
-→ Transaction golden traces
-→ Failure/ambiguity/recovery
-→ Capability package unit
 → Role/SDK control-flow
-→ Platform-port fake integration
 → RuntimeHosting/Runner/provisioning integration
-→ Technical adapter contract
 → Platform composition
 → Hostra/PWA abstract-trace equivalence
 → E2E
 ```
 
-可复用 fixtures跟最近 capability package；Platform/E2E fixtures留在仓库级 tests。
+可复用 fixture跟最近 capability package；Platform/E2E fixture留仓库级 tests。
 
 ---
 
 ## 2. Unified Carrier Model
 
-所有 message-oriented profile必须共享：
+所有 message-oriented profiles共享：
 
 ```text
 one carrier unit = one UTF-8 JSON text string
@@ -56,38 +55,150 @@ no-application-retry-or-duplicate
 per-direction-order
 observable-close/loss
 production-adapter-no-unbounded-physical-buffering
-memory-carrier-unbounded-test-queue-allowed
 ```
 
 ---
 
-## 3. Game Package v1
+## 3. `@loomrealm/game-package`
+
+### Representation / schema
 
 ```text
 valid-minimal-game-entry
+malformed-json
 formatVersion-exact-1
 closed-top-level-schema
 closed-initial-schema
 closed-descriptor-schema
 Descriptor-exactly-key
-key-non-empty
-key-uniqueness-case-sensitive
-initial-target-declared
-initial-input-JsonValue
-module-field-rejected
-launcher/env/platform-field-rejected
-common-validation-no-filesystem-fetch
-common-validation-no-module-import
-common-validation-zero-runtime-side-effect
+invalid-direct-JsonValue
 ```
 
-同一个 `ValidatedGameEntryV1`必须可输入 Hostra/PWA planner，而不携 executable binding。
+### Key semantics
+
+```text
+key-non-empty
+whitespace-only-follows-current-formal-contract
+key-uniqueness-case-sensitive
+no-trim
+no-case-fold
+no-unicode-normalization
+duplicate-error-points-to-later-occurrence
+declaration-order-preserved
+```
+
+### Initial input opacity
+
+Schema-level platform-looking fields are rejected：
+
+```text
+GameEntry.module
+Descriptor.launcher
+Initial.env (outside input)
+```
+
+But inside `initial.input` these ordinary business JSON member names MUST be accepted：
+
+```text
+module
+env
+platform
+launcher
+__proto__
+constructor
+```
+
+```text
+closed Game schema != recursive JSON-key blacklist
+```
+
+### Validated snapshot
+
+```text
+validated-result-detached-from-source
+source-mutation-after-validation-no-effect
+returned-containers-deeply-frozen
+nested-input-deeply-frozen
+caller-input-not-mutated
+caller-input-not-frozen
+deep-input-no-call-stack-overflow
+shared-acyclic-graph-no-exponential-copy
+proto-key-remains-data
+no-getter-toJSON-invocation
+```
+
+### Errors
+
+```text
+GamePackageError-class-stable
+code-stable
+path-stable
+human-message-not-compatibility-contract
+Wire-error-not-required-by-consumer
+malformed-json-mapped-to-GAME_ENTRY_INVALID
+unsupported-version-category
+initial-input-category
+```
+
+### Package boundary
+
+```text
+runtime-dependency-only-wire
+no-foundation
+no-main
+no-launcher
+no-node-platform-api
+no-filesystem-fetch
+root-export-only
+npm-pack-dry-run
+```
 
 ---
 
-## 4. Hostra Launch Manifest / Preflight
+## 4. Consumer Boundary Tests
+
+必须防止架构回退：
 
 ```text
+main-package-has-no-game-package-dependency
+main-bootstrap-fixture-does-not-use-GameEntryV1
+business-package-has-no-game-package-or-launcher-dependency
+```
+
+Hostra/PWA launcher：
+
+```text
+launcher-prepare-consumes-Game-source-without-manual-game-package-step
+Game-validation-failure-happens-inside-launcher-PREPARE
+prepared-result-not-released-before-full-PREPARE
+logical-bootstrap-contains-only-keys-and-initial
+logical-bootstrap-has-no-formatVersion/brand/module/path/URL
+```
+
+This is a package/consumer invariant, not merely documentation wording。
+
+---
+
+## 5. Main Logical Bootstrap
+
+Main local tests SHOULD use hand-built/fake `LogicalGameBootstrap` directly：
+
+```text
+complete-key-registry-install
+initial-target/input-install
+no-formatVersion/document-metadata
+no-GamePackageError-handling
+no-GameEntry-parser
+```
+
+Defensive Main assertions MUST NOT recreate a second GameEntryV1 validator。
+
+---
+
+## 6. Hostra Launcher PREPARE
+
+```text
+raw/common-Game-entry-consumed-by-Hostra-launcher
 valid-launch-hostra-json
 closed-hostra-schema
 format-version
@@ -107,15 +218,23 @@ manifest-cannot-select-node-executable
 manifest-cannot-select-runner-entry
 manifest-cannot-inject-arbitrary-argv-env-token-endpoint
 immutable-plan-lookup-by-key
+logical-bootstrap-projection
 ```
 
-Main-facing launch request必须不含 module/path/URL。
+Every PREPARE negative case proves：
+
+```text
+process spawn count = 0
+business module import count = 0
+Runtime Control establish count = 0
+```
 
 ---
 
-## 5. PWA Launch Manifest / Preflight
+## 7. PWA Launcher PREPARE
 
 ```text
+raw/common-Game-entry-consumed-by-PWA-launcher
 valid-launch-pwa-json
 closed-pwa-schema
 format-version
@@ -129,522 +248,237 @@ installation-registry-resolution
 same-origin/trusted-installation-policy
 all-required-modules-resolved-before-first-worker
 worker-runner-capability-preflight
-messagechannel-capability-preflight
-manifest-cannot-select-worker-runner-or-ports
-manifest-cannot-override-csp-credential-policy
+manifest-cannot-select-runner/ports/credentials/CSP
 immutable-plan-lookup-by-key
+logical-bootstrap-projection
+```
+
+Every PREPARE negative case proves：
+
+```text
+Worker creation count = 0
+business module import count = 0
+Runtime Control establish count = 0
 ```
 
 ---
 
-## 6. Zero-side-effect Launch Transaction
+## 8. Runtime Control / Frame
 
-逐步 fault-inject：
-
-```text
-Game JSON parse
-Game schema validation
-Platform manifest parse
-Platform schema validation
-exact key-set join
-Nth module syntax validation
-Nth module physical/registry resolution
-containment/same-origin check
-hosting capability validation
-plan freeze
-```
-
-每个 failure都必须断言：
+Runtime Control：
 
 ```text
-process/Worker creation count = 0
-business Definition Module import count = 0
-Runtime Control establishment count = 0
-Launch Attempt physical resource count = 0
-```
-
-这是新的 bootstrap hard gate。
-
-Definition Module actual import/default-export ABI failure发生在 Runner中时允许已有单个 physical Runtime Container；此时测试要求 all-required bootstrap失败并对已启动 sibling Runtime统一 cleanup，不能把它伪装成 preflight error。
-
----
-
-## 7. Subsystem Control / Runtime Control Profile
-
-```text
+one-carrier-reader
+one-UTF8-JSON-text-per-message
 hello-first
-bootstrap token valid/invalid/consumed
-connection-bound subsystem key
-launch != connected != identified != ready
-ready has no endpoint/dataProfile/ticket/Port/module
-ready independent from Data carrier/provisioning
-stopping requires Main intent
-stopped only actual supervisor termination
-unexpected Control loss fails Runtime
-unexpected code-0 exit fails Runtime
-no same-attempt reconnect/restart
-
-Control+Frame one dispatcher
-shared sender Request ID namespace
-no Batch
-JSON-text application unit
+shared-sender-request-id-namespace
+no-Batch
+no-retry
+finite-deadlines
+same-attempt-control-reconnect-rejected
 ```
 
----
-
-## 8. Frame / Call v1
+Frame Frozen conformance：
 
 ```text
-identity/Activation never reused
-exact seven Requests
-closed schemas
+exact-seven-RPC
 Response-before-dependent-RPC
-activate/resume ACK-before-publication
-post-commit no rollback
-same-Subsystem recursion
-Success/Explicit Error/ambiguous classification
-no retry / late response no recovery
-lowest failed-runtime occurrence
-whole-suffix fixed-point unwind
-accepted outcome preservation
-fresh final Caller resume
-```
-
-Game/Launcher reset不得改变任何 Frozen Frame fixture。
-
----
-
-## 9. Subsystem SDK Frame Projection
-
-### Context/activation
-
-```text
-frame.initialize-does-not-start-business-handler
-frame.activate-starts-handler-exactly-once
-business-never-mutates-starting-frame
-activationId-hidden-from-author
-```
-
-### Outcomes
-
-```text
-handler-completed-outcome-sends-completed-return
-handler-cancelled-outcome-sends-cancelled-return
-handler-failed-outcome-sends-failed-return
-child-completed-resolves-frame-call-outcome
-child-cancelled-resolves-frame-call-outcome
-child-failed-resolves-frame-call-outcome
-```
-
-Child `cancelled/failed` MUST NOT become JS rejection。
-
-### Recoverable pre-commit rejection
-
-```text
-target-not-found-rejects-typed-call-error
-target-unavailable-rejects-typed-call-error
-recoverable-rejection-preserves-current-activation
-recoverable-rejection-releases-mutation-gate
-business-may-catch-and-continue
-```
-
-### Runtime-fatal negative invariant
-
-```text
-call-timeout-does-not-reenter-business-continuation
-control-loss-does-not-reenter-business-continuation
-divergence-does-not-reenter-business-continuation
-fatal-protocol-error-does-not-reenter-business-continuation
-runtime-fatal-keeps-mutation-gate-closed
-runtime-fatal-aborts-frame-and-instance-signals
-late-response-after-runtime-fatal-never-resumes-business
-```
-
-必须构造：
-
-```ts
-try {
-  await frame.call(...);
-} catch {
-  mutate();
-}
-```
-
-并证明 Runtime-fatal 场景下 `catch` 永不获得执行机会。
-
-### Business exception
-
-```text
-uncaught-business-exception-becomes-frame-failed
-business-exception-does-not-fail-runtime-by-default
-sdk-invariant-corruption-does-fail-runtime
-```
-
-### Administrative suspend
-
-```text
-administrative-suspend-aborts-frame-signal
-administrative-suspend-closes-ordinary-mutation-gate
-late-handler-resolution-after-admin-suspend-discarded
-child-call-suspension-does-not-abort-frame-signal
+ACK-before-publication
+post-commit-no-rollback
+accepted-outcome-preserved
+ambiguous-mutation-Runtime-fatal
+whole-suffix-fixed-point-unwind
+fresh-surviving-Caller-resume
 ```
 
 ---
 
-## 10. Definition Module / Author Surface Isolation
+## 9. Subsystem Author / Host SDK
 
 ```text
-platform-selected-module-default-export-accepted
-Game/Platform launch config unavailable from author root
-module-path-unavailable-from-SubsystemLaunchContext
-Hostra/PWA selected artifact enters same SubsystemDefinitionFactory ABI
-business cannot import game-launcher-hostra/pwa
-business cannot import subsystem/host
-business source contains no platform branch
-```
-
-Cross-platform不同 build artifact不能成为不同 author API。
-
----
-
-## 11. Renderer Control
-
-```text
-hello/token/version
-full atomic snapshot
-session/revision monotonic + gaps
-InputTarget references active/current Activation
-InputTarget one-shot no regrant
-DataAuthority = S/G/dataProfile
-dataProfile not endpoint/credential
-dataProfile change requires fresh generation
-endpoint/ticket/Port/module absent from snapshot
-control loss clears InputTarget/DataAuthority and retires Data
-bounded latest snapshot
-WebSocket/MessagePort JSON-text equivalence
-```
-
-Renderer不计算 unwind。
-
----
-
-## 12. Renderer Data Profile
-
-```text
-profile-id-exact-loomrealm-renderer-data-1
-profile-binds-connection1-input1-render1
-unsupported-profile-no-current-install
-profile-change-requires-fresh-generation
-single-data-dispatcher
-input-type-demux
-render-type-demux
-unknown-type-fail-closed
-one-json-text-object-per-unit
-no-structured-clone-application-object
-fresh-input-baseline
-fresh-render-baseline
-input-render-state-independent
+initialize-does-not-start-handler
+activate-starts-handler-exactly-once
+child-completed/cancelled/failed-resolves-FrameOutcome
+pre-commit-recoverable-rejection-preserves-Activation
+Runtime-fatal-never-reenters-business-continuation
+uncaught-business-exception-maps-to-frame-failed-when-authority-healthy
+administrative-suspend-aborts-and-discards-late-completion
+business-author-surface-has-no-game-package/launcher/host-import
 ```
 
 ---
 
-## 13. Data Connection Core / Broker
-
-Core：
+## 10. Main Authority / Fake Platform Ports
 
 ```text
-current S/G/P establish
-wrong session/renderer/subsystem/generation/profile not current
-one current per Subsystem
-serialized replacement
-retired never current again
-same S/G/P sequential reconnect
-authority replacement retires old
-control loss retires all
-data loss does not fail Runtime/unwind Frame
-Frame close does not retire Data
-```
-
-Broker：
-
-```text
-binds current Session
-binds current Renderer
-binds S/G/P
-never mints generation/profile
-never installs two current carriers
-old retired before same-authority replacement
-physical endpoint cannot create authority
+logical-key-registry
+fake-plan-bound-RuntimeHosting
+launch-request-key-only
+physical-facts-do-not-self-mutate-authority
+Runtime lifecycle
+Frame/Activation Registry
+failure classifier/unwind golden traces
+Renderer Control snapshot
+DataAuthority generation/profile
+fake Broker does not mint authority
+Data provisioning/loss does not fail Runtime/Frame
 ```
 
 ---
 
-## 14. Platform Provisioning
+## 11. Runner / Supervision
 
-### Hostra
+Hostra：
 
 ```text
-Node Runner has dedicated provisioning channel
-provisioning channel != Runtime Control
-provisioning channel != stdout/stderr
-provisioning channel != Data carrier
-Data offer binds own S/G/P
-one-time ticket/material
-stale/duplicate/consumed offer rejected
-same S/G/P reconnect gets fresh offer
-authority replacement invalidates old material
-provisioning failure does not fail Runtime
-provisioning failure does not unwind Frame
-ready does not wait for Data offer
+Host-owned-Runner-is-process-entry
+business-module-not-argv-entry
+exact-planned-module-imported
+safe-env/shell-false
+spawned/connected/identified/ready-distinct
+unexpected-code0-exit-fails-Runtime
+actual-termination-produces-stopped
+no-auto-restart
 ```
 
-### PWA
+PWA：
 
 ```text
-Worker has dedicated provisioning path
-transferred Data Port binds own S/G/P
-stale/duplicate Port not installed
-same S/G/P fresh MessageChannel reconnect
-profile change fresh generation
-transfer/install failure does not fail Runtime/Frame
-```
-
-两平台不要求 provisioning wire相同，只要求最终 role-port semantics等价。
-
----
-
-## 15. User Input v1 / SDK
-
-Protocol：
-
-```text
-fresh connection Interest Registry empty
-full registry replacement
-Interest-first / Authority-first convergence
-new child waits own Interest
-suspended caller Interest retained
-fresh Activation reuses config not old State/Event
-state false→true fresh baseline
-event future-only
-interest shrink drops late input
-renderer does not interpret stack ops
-```
-
-SDK：
-
-```text
-listener branded Frame owner check
-multiple-listeners union/ref-count contributions
-listener close does not remove other's channel
-setChannels local-first shrink
-frame-close removes listeners/Interest/state before local close success
-fresh Data republish full desired registry
-stale Activation/removed channel/mutation gate input drop
+Host-owned-Worker-Runner-is-constructor-entry
+business-module-not-Worker-entry
+exact-planned-module-imported
+created/connected/identified/ready-distinct
+unexpected-termination-fails-Runtime
+actual-termination-produces-stopped
+no-auto-restart
 ```
 
 ---
 
-## 16. Render Update / SDK
-
-Protocol：
+## 12. Data / Provisioning
 
 ```text
-fresh carrier render.domains first
-fresh snapshot each current Domain
-strict revision chain
-atomic Patch
-node-key one-shot
-stable live tag
-Event transient/no replay
+DataAuthority-S/G/P-current-gate
+profile-change-fresh-generation
+one-Data-dispatcher
+same-S/G/P-sequential-reconnect
+stale/duplicate-provisioning-material-rejected
+fresh-carrier-Input-registry/state-empty
+fresh-carrier-Render-registry/snapshot-baseline
 ```
 
-SDK：
+Provisioning failure：
 
 ```text
-SDK mints domainId
-business name != domainId
-RenderDomain survives Data reconnect
-fresh carrier Registry + Snapshots
-Frame close does not auto-close Domain
-one Data dispatcher, no competing reader
+!= Runtime failure
+!= Frame unwind
+!= DataAuthority mutation
+```
+
+Hostra tests Runner IPC + ticket/Data WS；PWA tests Port transfer/MessageChannel。
+
+---
+
+## 13. Content / Execution Boundary
+
+```text
+business-content-client-logical-only
+Content-capability-cannot-fetch-arbitrary-executable-target
+Runtime-token/Data-ticket/Content-credential-separated
+Platform-executable-resolver-not-exposed-as-ordinary-Content
 ```
 
 ---
 
-## 17. Main / Renderer / Subsystem Role Ports
+## 14. Cross-platform Equivalence
 
-Main fake ports：
+Shared input：
 
 ```text
-RuntimeHosting launch/terminate
-launch accepts subsystemKey, not module
-RuntimeHosting internally bound to immutable plan
-RuntimeControlHost
-RendererHosting/ControlHost
-DataConnectionBroker
-physical facts never mutate authority without Main decision
+same Game Entry source/logical content
+same logical scenario/business input
+same formal contracts
+same Content fixture/expectation
 ```
 
-Renderer fake ports：
+Platform-specific：
 
 ```text
-RendererControlBinding
-RendererDataBinding
-profile mismatch no install
-carrier replacement preserves child boundaries
+Hostra manifest/artifact
+PWA manifest/artifact
+physical carriers/provisioning
 ```
 
-Subsystem fake ports：
+Before Runtime E2E，assert：
 
 ```text
-RuntimeControlBinding one-shot
-SubsystemDataBinding connection stream
-Data availability independent from ready
+Hostra prepared LogicalGameBootstrap
+== semantic PWA prepared LogicalGameBootstrap
 ```
 
----
-
-## 18. RuntimeHosting / Runner Integration
-
-### Hostra
+Compare abstract trace：
 
 ```text
-Main launch(key) → exact frozen Hostra plan lookup
-Host-owned Runner is argv entry
-business module is not argv entry
-planned module imported exactly
-Host-selected Node / safe env / shell=false
-spawn != connected != identified != ready
-unexpected exit code 0 fails Runtime
-no auto restart
-```
-
-### PWA
-
-```text
-Main launch(key) → exact frozen PWA plan lookup
-Host-owned Worker Runner is constructor target
-business module imported by Runner
-Runtime Control postMessage(string)
-Worker created != connected != identified != ready
-unexpected Worker termination fails Runtime
-no auto restart
-```
-
----
-
-## 19. Public Surface / Dependency Tests
-
-自动检查：
-
-```text
-business packages import @loomrealm/subsystem only
-business cannot import @loomrealm/subsystem/host
-business cannot import game-launcher-*
-main cannot import game-launcher-*
-game-package cannot import platform launcher/module resolver
-subsystem author root does not export MessageCarrier/bootstrap/generation/profile/module
-runtime-control does not define author SDK
-wire/foundation contain no domain authority
-game-launcher-hostra contains no PWA schema
-game-launcher-pwa contains no Hostra schema
-role core does not import apps/* or concrete Platform adapters
-apps may depend on roles/launchers/adapters/business
-```
-
----
-
-## 20. Cross-platform Abstract Trace
-
-共享：
-
-```text
-same Game Entry logical topology
-same Subsystem keys
-same logical initial/frame/input scenario
-same Content fixture/business expectations
-same formal protocol/profile semantics
-same failure/reconnect scenario
-```
-
-允许：
-
-```text
-Hostra Launch Manifest != PWA Launch Manifest
-Hostra Definition artifact/path != PWA Definition artifact/path
-```
-
-分别跑 Hostra/PWA，比较：
-
-```text
-Runtime public lifecycle
-Frame Stack/Activation/Outcome
-failure unwind result
-Renderer logical authority S/G/P
-Data current/retired state
-User Input delivered logical messages
+Runtime lifecycle
+Frame/Activation/Outcome/unwind
+Renderer authority
+Data S/G/P lifecycle
+Input delivered semantics
 Render authoritative replica
 Content logical response
-business Definition observable state
+business observable state
 ```
 
-不比较：
-
-```text
-module path/bytes
-PID/Worker id
-IPC/ticket vs Port transfer
-WS URL vs MessagePort
-HTTP port vs Service Worker internals
-bootstrap/provisioning message sequence
-```
+Do not compare module path/bytes、PID/Worker id、IPC/Port/WS/HTTP physical trace。
 
 ---
 
-## 21. E2E
+## 15. E2E PREPARE Gate
 
-共同 scenario：
-
-```text
-Game common bootstrap
-current Platform launch preflight
-all required Runtime ready before/without mandatory Data
-initial Frame
-nested call: completed/cancelled/failed variants
-recoverable call rejection
-Data establishment
-Input/Render/Content
-same-generation Data reconnect
-Renderer reload
-shutdown
-```
-
-另有 failure E2E：
+Every full E2E suite MUST include negative PREPARE cases：
 
 ```text
-ambiguous Frame mutation
-→ Runtime failure
-→ no business continuation reentry
-→ Main unwind converges
+invalid Game Entry
+invalid Platform Launch Manifest
+missing/extra binding
+invalid/outside module
+hosting capability unavailable
 ```
+
+All MUST prove no business Runtime side effect before failure。
 
 ---
 
-## 22. Done Criteria
+## 16. Test Ownership Rule
 
 ```text
-Game common manifest tests pass
-Hostra/PWA manifest + exact-join tests pass
-all preflight negative cases prove zero Runtime side effect
-protocol/profile fixtures pass
-SDK control-flow negative invariants pass
-role ports/fakes pass
-Runner/provisioning tests pass
-adapter contracts pass
-Desktop E2E pass
-PWA E2E pass
-platform-specific Definition artifacts produce equivalent abstract trace
-business contains no platform launch branch
-no Runtime-fatal continuation escape hatch
-no physical executable/Data material leaks into Main/application protocols
+package-local semantic contract
+    → package tests
+
+role authority/control-flow
+    → role package tests
+
+platform integration
+    → platform tests
+
+same abstract semantics across platforms
+    → repository equivalence tests
+
+full user-visible chain
+    → E2E
 ```
+
+Do not use fake Hostra/PWA planner inside M2 to claim real consumer qualification；M6/M15 provide it。
+
+---
+
+## 17. Final Test Invariants
+
+1. Game Package tests document validation/snapshot, not Platform launch；
+2. Main tests logical bootstrap without Game Package parser；
+3. Launcher tests begin from Game source/common document and own Game Package invocation；
+4. PREPARE negative tests prove zero Runtime side effect；
+5. Role/business dependency guards prevent Game/Launcher leakage；
+6. Frame Frozen semantics remain independently conformant；
+7. Provisioning failure domain remains distinct；
+8. Cross-platform equivalence compares logical facts/outcomes, including prepared `LogicalGameBootstrap` semantics。
