@@ -7,6 +7,8 @@
   ],
   "scripts": {
     "build:packages": "npm run build --workspaces --if-present",
+    "test:packages": "npm test --workspaces --if-present",
+    "test:core-packages": "npm test -w @loomrealm/foundation -w @loomrealm/wire",
     "test:fixtures": "npm run build -w @loomrealm/fsdb-http && node --test tools/fixtures/**/*.test.mjs",
     "docs:dev": "vitepress dev doc",
     "docs:build": "vitepress build doc",

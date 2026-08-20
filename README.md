@@ -285,9 +285,25 @@ no automatic Runtime restart in v1
 
 ## 当前实现资产 / 实施位置
 
-当前仓库已经存在两条较成熟的实现资产：
+当前仓库的实现状态：
 
 ```text
+@loomrealm/foundation
+    Implemented Baseline / Core Contract Frozen
+
+@loomrealm/wire
+    Implemented Baseline / Core Contract Frozen
+    M2 Game Package / M3 Runtime Control consumer qualification pending
+
+@loomrealm/game-package
+    implementation pending
+
+@loomrealm/runtime-control
+    implementation pending
+
+@loomrealm/subsystem
+    implementation pending
+
 @loomrealm/fsdb-http
     v1 Release Candidate implementation + tests
 
@@ -295,7 +311,7 @@ Pokémon Essentials v21.1 → FSDB fixture importer
     implemented / local official-corpus RC qualified
 ```
 
-核心 Runtime vertical slice仍按 `M0..M16` 交付计划推进；`foundation`、`wire`、`runtime-control`、`subsystem` 等当前主要仍是设计/实施准备状态。
+核心 Runtime vertical slice仍按 `M0..M16` 交付计划推进。Foundation/Wire的本地实现基线已关闭；下一实现门是 M2 Game Package，随后由 M3 Runtime Control完成 Wire Stage F 的第二个真实消费者验证。
 
 本次 launch-boundary reset直接更新 M0/M2/M6/M15 等实施前提：Game Package只产出 logical topology，Hostra/PWA各自负责 executable binding/preflight/Runner。
 

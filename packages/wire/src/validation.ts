@@ -4,7 +4,7 @@ import type { JsonArray, JsonObject, JsonValue } from "./json-value.js";
 interface VisitFrame {
   readonly kind: "visit";
   readonly value: unknown;
-  readonly path: readonly WirePathSegment[];
+  readonly path: PathNode | null;
 }
 
 interface LeaveFrame {
@@ -14,13 +14,37 @@ interface LeaveFrame {
 
 type ValidationFrame = VisitFrame | LeaveFrame;
 
-function fail(message: string, path: readonly WirePathSegment[]): never {
-  throw new WireValidationError(message, path);
+interface PathNode {
+  readonly parent: PathNode | null;
+  readonly segment: WirePathSegment;
+}
+
+function pathFromSegments(segments: readonly WirePathSegment[]): PathNode | null {
+  let path: PathNode | null = null;
+  for (const segment of segments) path = { parent: path, segment };
+  return path;
+}
+
+function childPath(parent: PathNode | null, segment: WirePathSegment): PathNode {
+  return { parent, segment };
+}
+
+function materializePath(path: PathNode | null): WirePathSegment[] {
+  const reversed: WirePathSegment[] = [];
+  for (let cursor = path; cursor !== null; cursor = cursor.parent) {
+    reversed.push(cursor.segment);
+  }
+  reversed.reverse();
+  return reversed;
+}
+
+function fail(message: string, path: PathNode | null): never {
+  throw new WireValidationError(message, materializePath(path));
 }
 
 function inspectObject(
   value: object,
-  path: readonly WirePathSegment[],
+  path: PathNode | null,
 ): { readonly array: boolean; readonly descriptors: PropertyDescriptorMap } {
   try {
     const array = Array.isArray(value);
@@ -48,7 +72,9 @@ function arrayIndex(key: string): number | null {
 
 function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[]): void {
   const activeAncestors = new WeakSet<object>();
-  const stack: ValidationFrame[] = [{ kind: "visit", value, path: rootPath }];
+  const stack: ValidationFrame[] = [
+    { kind: "visit", value, path: pathFromSegments(rootPath) },
+  ];
 
   while (stack.length > 0) {
     const frame = stack.pop();
@@ -97,8 +123,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
         if (key === "length") continue;
 
         const index = arrayIndex(key);
-        const propertyPath =
-          index === null ? [...frame.path, key] : [...frame.path, index];
+        const propertyPath = childPath(frame.path, index === null ? key : index);
         if (index === null || index >= length) {
           fail("JSON arrays cannot have extra properties", propertyPath);
         }
@@ -118,7 +143,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
         let missing = 0;
         const present = new Set(elements.map(({ index }) => index));
         while (missing < length && present.has(missing)) missing += 1;
-        fail("Sparse JSON arrays are not supported", [...frame.path, missing]);
+        fail("Sparse JSON arrays are not supported", childPath(frame.path, missing));
       }
 
       elements.sort((left, right) => right.index - left.index);
@@ -126,7 +151,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
         stack.push({
           kind: "visit",
           value: element.value,
-          path: [...frame.path, element.index],
+          path: childPath(frame.path, element.index),
         });
       }
       continue;
@@ -139,7 +164,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
       }
 
       const descriptor = descriptors[key];
-      const propertyPath = [...frame.path, key];
+      const propertyPath = childPath(frame.path, key);
       if (
         descriptor === undefined ||
         !descriptor.enumerable ||
@@ -156,7 +181,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
       stack.push({
         kind: "visit",
         value: member.value,
-        path: [...frame.path, member.key],
+        path: childPath(frame.path, member.key),
       });
     }
   }
@@ -180,7 +205,7 @@ export function assertJsonObjectAt(
 ): asserts value is JsonObject {
   assertJsonValueAt(value, path);
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    fail("Expected a JSON object", path);
+    fail("Expected a JSON object", pathFromSegments(path));
   }
 }
 
@@ -189,7 +214,7 @@ export function assertJsonArrayAt(
   path: readonly WirePathSegment[],
 ): asserts value is JsonArray {
   assertJsonValueAt(value, path);
-  if (!Array.isArray(value)) fail("Expected a JSON array", path);
+  if (!Array.isArray(value)) fail("Expected a JSON array", pathFromSegments(path));
 }
 
 export function isJsonValue(value: unknown): value is JsonValue {
@@ -232,19 +257,19 @@ export function assertJsonObject(value: unknown): asserts value is JsonObject {
 }
 
 export function assertString(value: unknown): asserts value is string {
-  if (typeof value !== "string") fail("Expected a string", []);
+  if (typeof value !== "string") fail("Expected a string", null);
 }
 
 export function assertBoolean(value: unknown): asserts value is boolean {
-  if (typeof value !== "boolean") fail("Expected a boolean", []);
+  if (typeof value !== "boolean") fail("Expected a boolean", null);
 }
 
 export function assertFiniteNumber(value: unknown): asserts value is number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    fail("Expected a finite number", []);
+    fail("Expected a finite number", null);
   }
 }
 
 export function assertSafeInteger(value: unknown): asserts value is number {
-  if (!Number.isSafeInteger(value)) fail("Expected a safe integer", []);
+  if (!Number.isSafeInteger(value)) fail("Expected a safe integer", null);
 }

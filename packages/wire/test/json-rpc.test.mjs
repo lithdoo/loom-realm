@@ -92,3 +92,25 @@ test("single-message decoder rejects JSON-RPC Batch arrays", () => {
     WireValidationError,
   );
 });
+
+test("missing own jsonrpc never executes an inherited getter", (t) => {
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, "jsonrpc");
+  let reads = 0;
+  t.after(() => {
+    if (previous === undefined) delete Object.prototype.jsonrpc;
+    else Object.defineProperty(Object.prototype, "jsonrpc", previous);
+  });
+  Object.defineProperty(Object.prototype, "jsonrpc", {
+    configurable: true,
+    get() {
+      reads += 1;
+      return "2.0";
+    },
+  });
+
+  assert.throws(
+    () => decodeJsonRpcMessage({ method: "x", id: 1 }),
+    WireValidationError,
+  );
+  assert.equal(reads, 0);
+});

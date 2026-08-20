@@ -101,9 +101,9 @@ test("rejects cycles at the precise nested path but accepts shared children", ()
   assert.equal(isJsonValue({ left: child, right: child }), true);
 });
 
-test("validation is iterative for very deep values", () => {
+test("validation keeps deep successful traversal near-linear", { timeout: 5_000 }, () => {
   let value = null;
-  for (let index = 0; index < 20_000; index += 1) value = [value];
+  for (let index = 0; index < 50_000; index += 1) value = [value];
   assert.doesNotThrow(() => assertJsonValue(value));
 });
 

@@ -51,17 +51,36 @@ function hasOwn(object: JsonObject, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(object, key);
 }
 
+function ownDataValue(
+  object: JsonObject,
+  key: string,
+  path: readonly WirePathSegment[],
+): JsonValue {
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  if (descriptor === undefined || !("value" in descriptor)) {
+    fail("Expected an own data member", path);
+  }
+  return descriptor.value as JsonValue;
+}
+
 function assertVersion(object: JsonObject): void {
-  if (object.jsonrpc !== "2.0") fail("Expected JSON-RPC version 2.0", ["jsonrpc"]);
+  if (
+    !hasOwn(object, "jsonrpc") ||
+    ownDataValue(object, "jsonrpc", ["jsonrpc"]) !== "2.0"
+  ) {
+    fail("Expected JSON-RPC version 2.0", ["jsonrpc"]);
+  }
 }
 
 function assertMethod(object: JsonObject): void {
-  if (typeof object.method !== "string") fail("Expected method string", ["method"]);
+  if (typeof ownDataValue(object, "method", ["method"]) !== "string") {
+    fail("Expected method string", ["method"]);
+  }
 }
 
 function assertParams(object: JsonObject): void {
   if (!hasOwn(object, "params")) return;
-  const params = object.params;
+  const params = ownDataValue(object, "params", ["params"]);
   if (params === null || typeof params !== "object") {
     fail("Expected object or array params", ["params"]);
   }
@@ -83,7 +102,7 @@ export function decodeJsonRpcMessage(value: JsonValue): JsonRpcMessage {
       assertExactKeysAt(object, ["jsonrpc", "method", "id"], ["params"]);
       assertMethod(object);
       assertParams(object);
-      assertId(object.id as JsonValue, ["id"]);
+      assertId(ownDataValue(object, "id", ["id"]), ["id"]);
       return object as unknown as JsonRpcRequest;
     }
 
@@ -94,7 +113,7 @@ export function decodeJsonRpcMessage(value: JsonValue): JsonRpcMessage {
   }
 
   if (!hasOwn(object, "id")) fail("Missing response id", ["id"]);
-  assertId(object.id as JsonValue, ["id"]);
+  assertId(ownDataValue(object, "id", ["id"]), ["id"]);
   const hasResult = hasOwn(object, "result");
   const hasError = hasOwn(object, "error");
 
@@ -105,13 +124,13 @@ export function decodeJsonRpcMessage(value: JsonValue): JsonRpcMessage {
 
   if (hasError && !hasResult) {
     assertExactKeysAt(object, ["jsonrpc", "id", "error"]);
-    const error = object.error;
+    const error = ownDataValue(object, "error", ["error"]);
     assertJsonObjectAt(error, ["error"]);
     assertExactKeysAt(error, ["code", "message"], ["data"], ["error"]);
-    if (!Number.isSafeInteger(error.code)) {
+    if (!Number.isSafeInteger(ownDataValue(error, "code", ["error", "code"]))) {
       fail("Expected a safe integer error code", ["error", "code"]);
     }
-    if (typeof error.message !== "string") {
+    if (typeof ownDataValue(error, "message", ["error", "message"]) !== "string") {
       fail("Expected an error message string", ["error", "message"]);
     }
     return object as unknown as JsonRpcErrorResponse;
