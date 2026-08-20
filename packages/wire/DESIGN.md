@@ -1,7 +1,7 @@
 # `@loomrealm/wire` 设计闭合稿
 
-> 状态：Implementation Ready / Core Contract Frozen  
-> 阶段：M1 Wire first implementation baseline  
+> 状态：Implemented Baseline / Core Contract Frozen<br>
+> 阶段：M1 Wire Stage A–E code-complete；consumer qualification follows M2/M3<br>
 > 最近复核：2026-08-20  
 > 目标：为 LoomRealm 各协议提供最小、统一、无业务 authority 的 JSON / JSON-RPC representation 与 validation primitive，并把首批 public/error/resource/test contract 收口到可以直接实现、直接测试、直接被 Game Package / Runtime Control 消费的程度。  
 > 冻结范围：本文 §§4–18 的首批 public contract、§§20–24 的第一实现基线与关闭条件。  
@@ -125,6 +125,8 @@ no normalization / sanitization / cloning / freezing
 Wire MUST NOT主动调用 user getter / `toJSON()` 来决定一个对象是否有效；accessor-backed properties 本身不属于首批 JSON object model。
 
 `Proxy` / exotic host object 不属于支持模型。实现不需要为任意 Proxy trap 提供稳定副作用或异常语义，但 MUST fail closed，不得把无法可靠检查的 exotic object 当作 `JsonObject`。
+
+ECMAScript 没有平台中立、无副作用地识别透明 `Proxy` 的标准 primitive；因此这里的 fail closed 精确定义为：任何 prototype/own-key/descriptor 检查抛出异常或产生无法满足 ordinary object invariant 的结果时必须拒绝。行为与 ordinary object 完全不可区分的透明 Proxy 不形成“必须被识别”的额外承诺；不得为识别它引入 Node/platform API。
 
 ---
 
@@ -1401,6 +1403,8 @@ Platform transport behavior
 ---
 
 ## 23. Implementation Stages
+
+实现状态（2026-08-20）：Stage A–E 已由本包源码、§22 自动化测试、workspace build/test 与 package dry-run 关闭；Stage F 随 M2/M3 使用真实 Game Package / Runtime Control 消费者执行，不以 Wire 内部 mock 冒充完成。
 
 ### Stage A — Package skeleton
 
