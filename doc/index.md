@@ -28,7 +28,7 @@ hero:
 
 features:
   - title: Platform-neutral Business
-    details: Game Package 只声明 {key,module}；同一个 Definition Module 由 Desktop/PWA Runner 加载，业务不接触 Process、Worker、WebSocket 或 MessagePort。
+    details: Game Package 只声明 logical {key}；Hostra/PWA 可为同一 key 绑定不同 Definition artifact，业务不接触 Process、Worker、WebSocket 或 MessagePort。
   - title: Authority Closed Loop
     details: Main 拥有 Frame/Activation/InputTarget/DataAuthority；Subsystem 拥有 Interest 与 Render；Platform 只实现物理 topology/provisioning。
   - title: Protocol → SDK 不可绕过

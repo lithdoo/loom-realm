@@ -101,6 +101,27 @@ test("rejects cycles at the precise nested path but accepts shared children", ()
   assert.equal(isJsonValue({ left: child, right: child }), true);
 });
 
+test("validates a shared acyclic subgraph only once", () => {
+  let inspections = 0;
+  const shared = new Proxy(
+    { value: 1 },
+    {
+      getPrototypeOf(target) {
+        inspections += 1;
+        return Reflect.getPrototypeOf(target);
+      },
+    },
+  );
+
+  let value = shared;
+  for (let index = 0; index < 20; index += 1) {
+    value = { left: value, right: value };
+  }
+
+  assert.doesNotThrow(() => assertJsonValue(value));
+  assert.equal(inspections, 1);
+});
+
 test("validation keeps deep successful traversal near-linear", { timeout: 5_000 }, () => {
   let value = null;
   for (let index = 0; index < 50_000; index += 1) value = [value];

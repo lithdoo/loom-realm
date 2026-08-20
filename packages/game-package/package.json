@@ -1,0 +1,44 @@
+{
+  "name": "@loomrealm/game-package",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "description": "Platform-neutral LoomRealm Game Entry validation and immutable snapshots.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "DESIGN.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@loomrealm/wire": "0.1.0-alpha.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lithdoo/loom-realm.git",
+    "directory": "packages/game-package"
+  },
+  "bugs": {
+    "url": "https://github.com/lithdoo/loom-realm/issues"
+  },
+  "homepage": "https://github.com/lithdoo/loom-realm/tree/main/packages/game-package#readme"
+}

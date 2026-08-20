@@ -91,7 +91,7 @@ Implemented Baseline：
 
 ---
 
-## M2：Game Package v1 Document Validation
+## M2：Game Package v1 Document Validation ✅
 
 实现：
 
@@ -132,7 +132,7 @@ no Main dependency
 package dry-run/boundary tests
 ```
 
-M2 local close不伪造 Hostra/PWA consumer；真实 consumer qualification留给 M6/M15。
+M2 local close已完成；不伪造 Hostra/PWA consumer，真实 consumer qualification留给 M6/M15。
 
 ---
 

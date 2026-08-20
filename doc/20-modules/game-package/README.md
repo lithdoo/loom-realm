@@ -10,7 +10,7 @@
 > 最近复核：2026-08-20
 
 > [!NOTE]
-> 本文描述较宽的 Game Installation / Package module concern；它不等于 `@loomrealm/game-package` npm package。该 npm package 的 exact implementation boundary 以 [`packages/game-package/DESIGN.md`](../../../packages/game-package/DESIGN.md) 为准。
+> 本文描述较宽的 Game Installation / Package module concern；它不等于 `@loomrealm/game-package` npm package。该 npm package 的 exact implementation boundary 以 [package design source](https://github.com/lithdoo/loom-realm/blob/main/packages/game-package/DESIGN.md) 为准。
 
 ---
 

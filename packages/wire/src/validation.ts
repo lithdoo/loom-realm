@@ -72,6 +72,7 @@ function arrayIndex(key: string): number | null {
 
 function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[]): void {
   const activeAncestors = new WeakSet<object>();
+  const completed = new WeakSet<object>();
   const stack: ValidationFrame[] = [
     { kind: "visit", value, path: pathFromSegments(rootPath) },
   ];
@@ -82,6 +83,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
 
     if (frame.kind === "leave") {
       activeAncestors.delete(frame.value);
+      completed.add(frame.value);
       continue;
     }
 
@@ -106,6 +108,7 @@ function validateJsonValueAt(value: unknown, rootPath: readonly WirePathSegment[
     if (activeAncestors.has(current)) {
       fail("Cyclic JSON value", frame.path);
     }
+    if (completed.has(current)) continue;
 
     const { array, descriptors } = inspectObject(current, frame.path);
     const keys = Reflect.ownKeys(descriptors);

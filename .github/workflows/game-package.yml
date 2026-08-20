@@ -1,0 +1,51 @@
+name: Game Package conformance
+
+on:
+  pull_request:
+    paths:
+      - "packages/game-package/**"
+      - "packages/wire/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/game-package.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/game-package/**"
+      - "packages/wire/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/game-package.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Wire and Game Package conformance
+        run: npm run test:game-package
+
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/game-package --dry-run

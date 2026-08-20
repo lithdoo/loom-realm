@@ -6,6 +6,7 @@ on:
       - "doc/**"
       - "package.json"
       - "scripts/check-doc-links.py"
+      - "scripts/run-python.mjs"
       - ".github/workflows/docs.yml"
       - ".github/workflows/deploy-pages.yml"
   push:
@@ -15,6 +16,7 @@ on:
       - "doc/**"
       - "package.json"
       - "scripts/check-doc-links.py"
+      - "scripts/run-python.mjs"
       - ".github/workflows/docs.yml"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:

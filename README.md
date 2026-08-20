@@ -292,8 +292,8 @@ business → launcher
     Implemented Baseline / Core Contract Frozen
 
 @loomrealm/game-package
-    Implementation Ready / Core Contract Frozen
-    implementation pending
+    Implemented Baseline / Core Contract Frozen
+    M2 local closure complete
     M6/M15 real launcher consumer qualification pending
 
 @loomrealm/runtime-control
@@ -318,14 +318,13 @@ business → launcher
 下一实现门：
 
 ```text
-M2 @loomrealm/game-package
+M3 @loomrealm/runtime-control
 ```
 
 之后：
 
 ```text
-M3 Runtime Control
-→ M4 Subsystem author/host
+M4 Subsystem author/host
 → M5 Main LogicalGameBootstrap + fake RuntimeHosting
 → M6 Hostra Launcher (first real Game Package runtime-product consumer)
 ...

@@ -1,6 +1,6 @@
 # `@loomrealm/game-package` 设计
 
-> 状态：Implementation Ready / Core Contract Frozen  
+> 状态：Implemented Baseline / Core Contract Frozen
 > 阶段：M2 Game Package first implementation baseline  
 > 最近复核：2026-08-20  
 > 目标：把不可信 Game Entry JSON text/value 收敛成 detached、deeply immutable、platform-neutral `ValidatedGameEntryV1`，供 Platform Launcher / tooling 使用；不建立 Main Runtime authority、不读取 Platform Launch Manifest、不解析 executable binding。  
@@ -770,12 +770,12 @@ Package boundary
 ## 18. Implementation Stages
 
 ```text
-Stage A  package skeleton / metadata / root export
-Stage B  public model + GamePackageError runtime contract
-Stage C  representation reuse + own-member-safe schema validation
-Stage D  total error mapping / precedence
-Stage E  detached deep-frozen snapshot
-Stage F  package conformance / boundary qualification
+Stage A  package skeleton / metadata / root export                 ✅
+Stage B  public model + GamePackageError runtime contract          ✅
+Stage C  representation reuse + own-member-safe schema validation ✅
+Stage D  total error mapping / precedence                          ✅
+Stage E  detached deep-frozen snapshot                             ✅
+Stage F  package conformance / boundary qualification              ✅
 Stage G  real downstream consumer qualification (M6 / M15)
 ```
 
@@ -813,7 +813,7 @@ launcher registry
 
 ## 20. Closure Criteria / Final Invariants
 
-Game Package 达到 implementation-ready 的定义：
+Game Package local implementation closure 的定义：
 
 > **实现者只需要选择 internal algorithm / file-private helper；不再需要自行决定 public API、key semantics、schema access safety、error category/path/precedence、snapshot semantics、dependency boundary或 consumer ownership。**
 
