@@ -458,7 +458,7 @@ Hostra DataConnectionBroker
 → one-time endpoint/ticket for S/G/P
 → target Runner validates own S/G/P
 → Data WebSocket
-→ MessageCarrier<string>
+→ MessageCarrier
 → SubsystemDataBinding yields {G,P,carrier}
 ```
 

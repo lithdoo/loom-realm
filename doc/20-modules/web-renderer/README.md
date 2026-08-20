@@ -118,7 +118,7 @@ Data loss不失败 Runtime、不 unwind Frame。
 Renderer只建立一个 connection-wide Data reader：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
         ↓
 JSON text parse
         ↓

@@ -493,7 +493,7 @@ message-oriented
 ordered per direction
 application-message boundary preserved
 observable close/loss
-bounded buffering
+production adapter avoids unbounded physical buffering
 no adapter-created retry
 no adapter-created duplicate
 ```

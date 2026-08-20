@@ -99,7 +99,7 @@ business Subsystem
     JSON / JSON-RPC / safe integer / closed object / limits primitives
 
 @loomrealm/foundation
-    MessageCarrier<string>
+    MessageCarrier
     Clock / timeout / small lifecycle primitives when real demand exists
 ```
 
@@ -295,7 +295,7 @@ Main 与 Subsystem方向 namespace独立。
 本包只消费 already-established：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
 ```
 
 Runtime Control Profile v1 固定：

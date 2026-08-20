@@ -190,12 +190,12 @@ User Input与 Render Update共享 Data carrier，但保持独立 state/recovery 
 ordered delivery per direction
 preserved message boundaries
 observable close/loss
-bounded buffering
+production adapter avoids unbounded physical buffering
 no adapter-created retry
 no adapter-created duplicate
 ```
 
-Foundation `MessageCarrier<string>` 不解释 JSON；具体 JSON-text mapping由 application Profile定义。
+Foundation `MessageCarrier` 的 payload 固定为 `string`，但不解释 JSON；具体 JSON-text mapping由 application Profile定义。
 
 ---
 

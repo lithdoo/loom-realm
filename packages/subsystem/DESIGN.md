@@ -163,7 +163,7 @@ ContentClient
 
 Foundation
 ────────────────────────
-MessageCarrier<string>
+MessageCarrier（payload 固定为 string）
 ```
 
 必须保持：
@@ -184,10 +184,10 @@ Host surface使用 `@loomrealm/foundation` 已建立 message carrier：
 
 ```ts
 interface MessageCarrier {
-  send(message: string): void | Promise<void>;
+  send(message: string): Promise<void>;
   messages(): AsyncIterable<string>;
   readonly closed: Promise<CarrierClosed>;
-  close(): void | Promise<void>;
+  close(): Promise<void>;
 }
 ```
 

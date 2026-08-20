@@ -41,7 +41,7 @@ Business package只依赖最接近的 author-facing role SDK。
 
 ```text
 @loomrealm/foundation
-    MessageCarrier<string>
+    MessageCarrier
     deterministic memory carrier
     small generic async/lifecycle primitives
     no JSON/domain/platform semantics

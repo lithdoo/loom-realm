@@ -1,7 +1,7 @@
 # `@loomrealm/foundation` 设计闭合稿
 
-> 状态：Implementation Ready / Core Contract Frozen  
-> 阶段：M1 first implementation baseline  
+> 状态：Implemented Baseline / Core Contract Frozen<br>
+> 阶段：M1 Stage A/B code-complete；cross-package qualification follows M3/M6/M8/M15<br>
 > 最近复核：2026-08-20  
 > 目标：为多个独立 capability 提供少量、无 LoomRealm authority、无平台绑定的运行 primitive，并把首批 `MessageCarrier` / terminal / deterministic memory testing contract 收口到可以直接实现、直接测试、直接被 Runtime Control 消费的程度。  
 > 冻结范围：本文 §§4–18 的首批 public/testing contract、§§22–27 的第一实现基线与关闭条件。  
@@ -11,7 +11,7 @@
 
 核心原则：
 
-> **Foundation 只提供可脱离 LoomRealm domain 独立解释的运行机制。首批冻结能力只有 already-connected、message-oriented、duplex `MessageCarrier<string>` 及其确定性内存测试实现；它不解释 message、不建立连接、不决定任何 Runtime/Data failure semantics。**
+> **Foundation 只提供可脱离 LoomRealm domain 独立解释的运行机制。首批冻结能力只有 already-connected、message-oriented、duplex `MessageCarrier`（payload 固定为 `string`）及其确定性内存测试实现；它不解释 message、不建立连接、不决定任何 Runtime/Data failure semantics。**
 
 ---
 
@@ -1358,6 +1358,8 @@ MessagePort adapter
 ---
 
 ## 30. Implementation Stages
+
+实现状态（2026-08-20）：Stage A/B 已由本包源码与 §28 自动化测试关闭；Stage C–E 是随上层里程碑执行的真实消费者/生产 adapter qualification，不以本包内部 mock 提前冒充完成。
 
 ### Stage A — Package skeleton
 

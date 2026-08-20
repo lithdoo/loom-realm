@@ -338,7 +338,7 @@ PWA DataConnectionBroker
 → transfer one endpoint to Renderer
 → transfer one endpoint through Worker provisioning path
 → Runner validates own S/G/P
-→ MessageCarrier<string>
+→ MessageCarrier
 → SubsystemDataBinding yields {G,P,carrier}
 ```
 

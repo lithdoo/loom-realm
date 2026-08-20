@@ -299,7 +299,7 @@ Data loss != RuntimeHosting failure
 Current message-oriented profiles统一：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
 one carrier unit = one UTF-8 JSON text string
 ```
 

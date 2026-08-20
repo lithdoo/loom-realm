@@ -274,7 +274,7 @@ Runner收到 current Data offer/Port：
 ```text
 validate own subsystem + generation + dataProfile
 → accept transferred MessagePort
-→ wrap MessageCarrier<string>
+→ wrap MessageCarrier
 → SubsystemDataBinding yields {G,P,carrier}
 → SDK DataPlane installs current
 ```

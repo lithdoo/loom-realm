@@ -55,7 +55,8 @@ no-binary-websocket-for-current-profiles
 no-application-retry-or-duplicate
 per-direction-order
 observable-close/loss
-bounded-buffering
+production-adapter-no-unbounded-physical-buffering
+memory-carrier-unbounded-test-queue-allowed
 ```
 
 ---

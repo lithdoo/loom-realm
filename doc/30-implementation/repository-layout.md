@@ -343,7 +343,7 @@ content-fs/http/service-worker
 
 Adapter不拥有 Main DataAuthority/Frame recovery/complete Platform topology。
 
-`transport-messageport` 接受 already-provisioned Port并提供 `MessageCarrier<string>`；创建/transfer Port属于 Platform Broker/Runner integration。
+`transport-messageport` 接受 already-provisioned Port并提供 payload 固定为 `string` 的 `MessageCarrier`；创建/transfer Port属于 Platform Broker/Runner integration。
 
 ---
 

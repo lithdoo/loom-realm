@@ -43,7 +43,7 @@ Content Plane
 所有 message-oriented Control/Data role implementation消费：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
 ```
 
 Carrier只保证：
@@ -52,7 +52,7 @@ Carrier只保证：
 message boundary
 per-direction order
 observable close/loss
-bounded buffering
+production adapter avoids unbounded physical buffering（threshold/config 不属于 Foundation contract）
 no adapter-created duplicate/retry
 ```
 

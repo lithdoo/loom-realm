@@ -313,7 +313,7 @@ Launcher package可实现 Main-facing RuntimeHosting和 Runner integration，但
 Foundation：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
 ```
 
 只表示已经建立的 message pipe。
@@ -325,7 +325,7 @@ one carrier application unit
 = one UTF-8 JSON text string
 ```
 
-Transport Adapter只负责 message boundary、per-direction order、observable close/loss、bounded buffering、no application retry/duplicate。
+Transport Adapter只负责 message boundary、per-direction order、observable close/loss、避免无界物理 buffering、no application retry/duplicate；具体 threshold/config 不属于 Foundation contract。
 
 Transport不负责 connection authority、reconnect policy或 Platform topology。
 
@@ -373,7 +373,7 @@ Main DataAuthority(S,G,P)
 → Host-owned Runner provisioning IPC
 → one-time endpoint/ticket
 → Runner establishes authenticated Data WebSocket
-→ MessageCarrier<string>
+→ MessageCarrier
 → SubsystemDataBinding yields {G,P,carrier}
 ```
 

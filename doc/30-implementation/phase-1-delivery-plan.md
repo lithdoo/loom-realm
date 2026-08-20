@@ -79,7 +79,7 @@ Platform Launch Manifest/artifact/Runner/provisioning platform-specific
 
 ```text
 @loomrealm/foundation
-    MessageCarrier<string>
+    MessageCarrier
     CarrierClosed
     deterministic MemoryCarrierPair
 

@@ -301,7 +301,7 @@ Runner收到 current Data offer后：
 ```text
 validate own S/G/P
 → connect authenticated Data WebSocket
-→ wrap MessageCarrier<string>
+→ wrap MessageCarrier
 → SubsystemDataBinding yields {G,P,carrier}
 ```
 

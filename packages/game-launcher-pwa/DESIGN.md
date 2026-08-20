@@ -178,7 +178,7 @@ bootstrap validation
 Runtime Control/Data建立后统一暴露：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
 ```
 
 application unit：

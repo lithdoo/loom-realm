@@ -138,7 +138,7 @@ Structured Clone / Transferable只用于 Platform bootstrap，不能扩大 Runti
 Control + Frame MUST由同一个 connection-wide dispatcher消费唯一 inbound stream：
 
 ```text
-MessageCarrier<string>
+MessageCarrier
         ↓
 RuntimeControlDispatcher
      ┌──┴──┐
