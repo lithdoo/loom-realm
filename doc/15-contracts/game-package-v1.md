@@ -1,489 +1,413 @@
-# LoomRealm Game Package v1 Bootstrap / Descriptor Contract
+# LoomRealm Game Package v1 Logical Topology Contract
 
 > 层级：正式契约  
 > 状态：Active / Normative  
 > 契约版本：1  
 > 稳定程度：Stabilizing  
-> 主要定义：Game Entry 中 platform-neutral Subsystem Descriptor、Subsystem Definition Module identity、Descriptor 集合校验与 Session bootstrap 声明语义  
-> 依赖：[运行时启动与连接建立系统](../10-architecture/runtime-bootstrap-system.md)  
-> Desktop realization：[Desktop Node.js Launcher / Subsystem Runner Profile v1](./nodejs-launcher-profile-v1.md)  
-> 最近复核：2026-08-19
+> 主要定义：Game Entry 的 platform-neutral 公共字段、Subsystem logical topology、初始 Frame target、集合级校验与 Platform Launch Manifest 连接边界  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)  
+> Hostra realization：[Hostra Game Launcher / Node Subsystem Runner Profile v1](./nodejs-launcher-profile-v1.md)  
+> PWA realization：[PWA Game Launcher / Worker Subsystem Runner Profile v1](./pwa-launcher-profile-v1.md)  
+> 最近复核：2026-08-20
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 > [!IMPORTANT]
-> 当前 v1 仍处于产品实现前的规范收口期。本次复核直接以 breaking reset 替换此前 Desktop-only `launcher:{type:"nodejs",entry}` / `env` Descriptor；不保留兼容 alias。Game Package v1 从现在起声明 **业务 Subsystem 模块是什么**，不声明 **平台如何创建 Runtime Container**。
+> 当前 v1 直接移除旧 `SubsystemDescriptor {key,module}`。不存在 v2、兼容 alias 或 dual parser。Game Package v1 从现在起只声明 **游戏逻辑 topology 与平台无关初始输入**；可执行实现、module resolution 与 Runtime 创建全部由当前 Platform 的 Game Launcher/Profile 拥有。
 
 核心原则：
 
-> **Game Package 声明 platform-neutral logical Subsystem topology；Platform Composition 选择 Process/Worker、Runner、Transport 与 bootstrap realization。**
+> **Game Package 回答“这个游戏由哪些 logical Subsystem 组成、从哪里开始”；Platform Launch Manifest 回答“当前平台用什么实现这些 key”；RuntimeHosting 回答“当前平台如何真正运行它们”。**
 
 ---
 
-## 1. 核心模型
+## 1. Game Entry
 
-Game Entry MUST 在任何业务 Subsystem Runtime 启动前一次性声明本次 Session 的完整 Subsystem 集合：
+当前标准公共 Game Entry 是一个 JSON document。安装布局 MAY 将其保存为 `game.json`；`@loomrealm/game-package` 的核心 API 只依赖 document bytes/value，不依赖 filesystem、Fetch 或某一物理路径 API。
 
-```text
-Game Entry
-├── initial target
-└── subsystems[]
-    └── SubsystemDescriptorV1
-        ├── key
-        └── module
+Normative model：
+
+```ts
+interface GameEntryV1 {
+  readonly formatVersion: 1;
+  readonly initial: InitialFrameTargetV1;
+  readonly subsystems: readonly SubsystemDescriptorV1[];
+}
+
+interface InitialFrameTargetV1 {
+  readonly subsystem: string;
+  readonly input: JsonValue;
+}
+
+interface SubsystemDescriptorV1 {
+  readonly key: string;
+}
 ```
 
-当前 Phase 1：
+概念示例：
 
-```text
-all declared Subsystems = eager + required
+```json
+{
+  "formatVersion": 1,
+  "initial": {
+    "subsystem": "loom.map",
+    "input": null
+  },
+  "subsystems": [
+    { "key": "loom.map" },
+    { "key": "loom.battle" }
+  ]
+}
 ```
 
-v1 不定义 `lazy`、optional Subsystem、首次调用时启动或一个 key 多 Runtime instance。
+Game Entry MUST NOT包含任何 executable/platform binding。
 
 ---
 
-## 2. Subsystem Descriptor
+## 2. `SubsystemDescriptorV1`
 
-Normative shape：
+Descriptor v1 精确只有：
 
 ```ts
 interface SubsystemDescriptorV1 {
   readonly key: string;
-  readonly module: string;
 }
 ```
-
-Descriptor 只回答两件事：
-
-```text
-key
-    this Subsystem is who
-
-module
-    which package-local Subsystem Definition Module implements it
-```
-
-Descriptor MUST NOT 声明：
-
-```text
-launcher.type
-Node executable
-Worker constructor
-process argv / flags
-process env
-WebSocket URL
-MessagePort
-bootstrap token
-Data endpoint / ticket
-desktop/pwa switch
-```
-
-这些都是 Platform Composition / Runner / bootstrap implementation responsibility。
-
----
-
-## 3. `key`
 
 `key` 是当前 Session 中稳定的 Subsystem application identity。
 
 要求：
 
 - MUST 是非空字符串；
-- MUST 在同一个 Game Entry 的 `subsystems[]` 中唯一；
+- MUST 在同一 Game Entry 的 `subsystems[]` 中唯一；
 - 比较 MUST 大小写敏感、逐字符精确；
-- initial target MUST 引用已声明的 `key`；
-- Main、Runtime bootstrap、Subsystem Control 与 Data authority MUST 使用同一个 `key`；
-- PID、Worker ID、Launch Attempt ID、Port、URL、module path MUST NOT 代替 `key`。
+- Main、Runtime bootstrap、Subsystem Control、Frame target 与 DataAuthority MUST 使用同一个 key；
+- PID、Worker ID、module path、URL、Launch Attempt ID、Port MUST NOT 代替 key。
 
-显示名称、本地化标签等元数据不得成为第二身份来源。
-
----
-
-## 4. `module`
-
-`module` 是相对于当前 Installation Root / installation namespace 的 **package-relative executable logical module path**。
-
-例如：
-
-```json
-{
-  "key": "loom.map",
-  "module": "subsystems/loom-map/subsystem.mjs"
-}
-```
-
-它表示：
-
-> 该模块实现一个 LoomRealm Subsystem Definition Module，可由当前 Platform 的 Subsystem Runner 加载。
-
-它不表示：
+Game Package 不再拥有：
 
 ```text
-Node process argv entry
-Worker URL
-Content API Resource
-physical filesystem path
-HTTP URL
-transport endpoint
-```
-
-### 4.1 Logical path syntax
-
-`module` MUST：
-
-1. 非空；
-2. 使用 ASCII 字符；
-3. 使用 `/` 作为唯一目录分隔符；
-4. 不以 `/` 开头或结尾；
-5. 不包含空 segment；
-6. 不包含 `.` 或 `..` segment；
-7. 不包含 `\\`；
-8. 不包含 `:`；
-9. 不包含 NUL 或控制字符；
-10. UTF-8 编码长度不超过 512 bytes；
-11. 以 `.mjs` 结尾。
-
-每个 segment MUST 匹配：
-
-```text
-^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
-```
-
-以下 MUST 拒绝：
-
-```text
-../subsystem.mjs
-./subsystem.mjs
-/subsystem.mjs
-C:/game/subsystem.mjs
-file:///subsystem.mjs
-https://example/subsystem.mjs
-foo\\subsystem.mjs
-foo//subsystem.mjs
-foo/subsystem.js
-foo/subsystem.cjs
-```
-
-### 4.2 Why `.mjs`
-
-v1 只允许 ECMAScript Module：
-
-```text
-.mjs
-```
-
-原因：同一业务 Definition Module 必须可由 Desktop Node Runner 与 PWA Worker Runner 使用一致的 ESM import/export 语义加载。
-
-v1 不允许依赖：
-
-```text
-package.json.type
-CommonJS require/module.exports
-Node-only loader hooks
-TypeScript runtime transpilation
-Shell/shebang interpreter discovery
+module
+launcher.type
+launcher.entry
+env
+Node/Worker selection
+process argv/flags
+Worker options
+WebSocket URL / MessagePort
+bootstrap token
+Data endpoint/ticket
+platform switch
 ```
 
 ---
 
-## 5. Subsystem Definition Module ABI
+## 3. Initial Frame Target
 
-`module` 指向的 ESM MUST：
+`initial.subsystem` MUST 引用 `subsystems[]` 中已声明的 key。
 
-```text
-load successfully
-AND
-have exactly one LoomRealm business entry through default export
-AND
-default export be a SubsystemDefinitionFactory accepted by @loomrealm/subsystem
-```
+`initial.input` MUST 是合法 `JsonValue`，并成为 Session bootstrap 创建 initial Frame 时的业务输入。
 
-概念示例：
-
-```ts
-import { defineSubsystem } from "@loomrealm/subsystem";
-
-export default defineSubsystem(scope => ({
-  async initialize() {
-    // runtime-level business initialization
-  },
-
-  async frame(frame) {
-    // business logic
-  },
-
-  async shutdown() {
-    // bounded business cleanup
-  },
-}));
-```
-
-Definition Module MUST NOT 作为 module-load side effect：
+它不是：
 
 ```text
-open WebSocket
-create MessagePort/Worker
-spawn process
-read Hostra globals
-read LoomRealm bootstrap token
-start a second Runtime
-probe desktop/pwa and branch business semantics
+Platform bootstrap object
+process env
+Worker bootstrap material
+Content credential
+Runtime Control payload
 ```
 
-Platform-specific Runtime creation与 role-local Platform Ports 由 Runner / Composition 注入。
-
-Module 的具体 TypeScript author API 由 `@loomrealm/subsystem` package design/public API 冻结；Game Package 只冻结该 default-export module boundary。
+因此相同 Game Entry 可在不同 Platform Launch realization 中使用相同初始业务语义。
 
 ---
 
-## 6. Module Resolution / Installation Safety
+## 4. Closed Schema
 
-`module` 是 logical executable identity，不直接等于 physical path/URL。
+Game Entry、InitialFrameTarget 与 SubsystemDescriptor 都是 closed schema。
 
-每个平台 MUST 在 Runtime execution 前把它解析为受信任 installation 内的可加载目标：
-
-```text
-logical module
-→ validated installation resolver
-→ platform-local executable module target
-→ Subsystem Runner import
-```
-
-共同要求：
+以下字段出现即 MUST reject：
 
 ```text
-target exists
-belongs to current validated installation
-cannot escape installation namespace
-cannot be replaced by unvalidated external URL/path
-module bytes are from the selected installation
+module
+implementation
+launcher
+runtime
+hostra
+pwa
+env
+argv
+worker
+node
+endpoint
+url
+bootstrapToken
 ```
 
-Desktop filesystem 的 symlink/junction/reparse/containment 细节由 Desktop Node.js Launcher / Runner Profile v1 冻结。
-
-PWA 的 same-origin/module URL/installation registry resolution 属于 PWA Platform realization，但 MUST 保持相同 logical `module` identity。
-
-Platform resolver 产生的 absolute path、file URL、blob URL、HTTP URL 都是 host-private implementation material，不得成为 Subsystem identity或普通业务 payload。
+若未来确实出现 platform-neutral game-level 字段，应直接修改 current Game Package contract；不得把任意 platform option bag 塞入 common manifest。
 
 ---
 
-## 7. Descriptor Set Validation
+## 5. Phase 1 Topology
 
-Main / Game Package Validator MUST 在启动任何业务 Subsystem Runtime 前完成全部 Descriptor 的结构与集合级校验，至少包括：
+Phase 1：
 
 ```text
-Descriptor closed schema
-key validity / uniqueness
-initial target reference
-module syntax
-module .mjs type
-module logical-path bounds
+all declared Subsystems = eager + required
 ```
 
-任何上述错误发生时：
+v1 当前不定义：
+
+```text
+lazy Subsystem
+optional Subsystem
+multiple Runtime instances per key
+runtime implementation negotiation
+remote Runtime
+```
+
+Game Entry 一次性声明本次 Session 的完整 logical Subsystem key set。
+
+---
+
+## 6. Game Package Validation
+
+`@loomrealm/game-package` / Game Package Validator MUST 在任何 Platform launch planning 或 business Runtime side effect 前完成：
+
+```text
+JSON parse
+closed top-level schema
+formatVersion == 1
+initial closed schema
+initial.input JsonValue validation
+subsystems[] closed schema
+key non-empty / uniqueness
+initial.subsystem declared
+```
+
+Game Package validation MUST NOT：
+
+```text
+resolve executable module
+import Definition Module
+create Process/Worker
+open Control/Data carrier
+read Platform Launch Manifest
+select Hostra/PWA
+```
+
+输出是 platform-neutral `ValidatedGameEntryV1` / logical topology。
+
+---
+
+## 7. Platform Launch Join Boundary
+
+每个平台拥有自己的 Launch Manifest 与 validator：
+
+```text
+ValidatedGameEntryV1
+        +
+ValidatedPlatformLaunchManifest
+        ↓ exact key-set join
+Platform Launch Planner
+        ↓
+immutable PlatformLaunchPlan
+```
+
+Phase 1 MUST满足：
+
+```text
+keys(GameEntry.subsystems)
+=
+keys(CurrentPlatformLaunchManifest.subsystems)
+```
+
+因此：
+
+```text
+missing platform binding
+    → bootstrap rejected before Runtime side effect
+
+platform binding for undeclared key
+    → bootstrap rejected before Runtime side effect
+```
+
+Game Package package本身不解析 Hostra/PWA manifest；exact-set join由对应 Platform Launcher/Profile负责。
+
+---
+
+## 8. Zero-side-effect Preflight Invariant
+
+启动边界固定为：
+
+```text
+read/validate Game Entry
+→ read/validate current Platform Launch Manifest
+→ exact key-set join
+→ resolve every required platform implementation
+→ validate current Platform hosting capability
+→ freeze immutable LaunchPlan
+────────────────────────────────────────────
+first business Runtime side effect may begin
+```
+
+配置、集合 join、module syntax、module existence/containment 或当前 Platform capability 的任何 preflight failure：
 
 ```text
 MUST NOT create any business Runtime Container
 ```
 
-需要访问安装存储的 existence / containment / integrity 校验 MAY 由 Game Package Validator 或 Platform executable-module resolver 执行，但 MUST 在对应 Runtime 开始加载业务模块前完成。
+Definition Module 的 actual ESM import/default-export ABI validation MAY 需要在 Host-owned Runner 中执行；此类 launch-time failure使 all-required Game Bootstrap失败并统一 cleanup，但不削弱 preflight 的零副作用保证。
 
 ---
 
-## 8. Eager / All-required Bootstrap
+## 9. Definition Module Is Not Game Package Authority
 
-Phase 1：
+Subsystem Definition Module 仍使用 `@loomrealm/subsystem` 定义的业务 ABI：
 
 ```text
-read all descriptors
-→ validate complete descriptor set
-→ resolve all required Subsystem modules for current Platform
-→ create all required Runtime Containers through Platform Runtime Hosting
-→ each Runtime loads its declared Definition Module through the Platform Runner
-→ wait until all declared Subsystems are ready
-→ bootstrap complete
+.mjs ESM
+default export = SubsystemDefinitionFactory
 ```
 
-Main MAY 并行启动多个 Subsystem。
+但 **哪个 module 实现哪个 key** 不再由 Game Package 声明，而由当前 Platform Launch Manifest 声明。
 
-任意 required Subsystem 的 module 无效、Platform 无法承载、Runtime launch 失败、module load/ABI validation 失败、Control Bootstrap 失败或无法进入 `ready`，都 MUST 使整个 Game Bootstrap 失败并进入统一 cleanup。
+因此允许：
+
+```text
+same logical key
+    Hostra → hostra-specific build artifact
+    PWA    → pwa-specific build artifact
+```
+
+两个 artifact MUST遵守同一 Subsystem author/host contract，并满足产品要求的 observable semantics。
+
+共享同一 source/module仍是良好优化，但不是 Game Package v1 identity 或 compatibility invariant。
 
 ---
 
-## 9. Business Configuration Boundary
+## 10. Main Boundary
 
-旧 Descriptor `env` 从 Game Package v1 删除。
-
-跨平台业务配置必须使用 platform-neutral mechanism，例如：
+Main 只消费 logical topology：
 
 ```text
-Game Entry / Frame params
+subsystemKey
+initial target/input
+```
+
+Main MUST NOT 接收普通 application authority 中的：
+
+```text
+module path
+resolved filesystem path
+module URL
+Node executable
+Worker entry
+platform launch options
+```
+
+Main 创建 logical Launch Attempt 后，通过 Main-facing `RuntimeHosting` 请求：
+
+```text
+launch(subsystemKey, launch-attempt material)
+```
+
+RuntimeHosting 在其封闭的 PlatformLaunchPlan 中查找 executable binding。
+
+---
+
+## 11. Business Configuration Boundary
+
+跨平台业务配置使用 platform-neutral mechanism：
+
+```text
+Game Entry initial.input
+Frame params
 Readonly Content
 Subsystem-owned business data
 ```
 
-Platform/Runner 自己需要的环境变量、Worker options、bootstrap credentials 或 process configuration属于 Platform implementation，不能由 Game Package 业务 Descriptor任意注入。
+Platform Launch Manifest MUST NOT 被业务代码当作普通配置读取入口。
 
-因此业务不能依赖：
-
-```text
-process.env
-Worker globals
-Hostra-specific values
-```
-
-获得跨平台可移植语义。
-
----
-
-## 10. Launcher / Runner 与 Content 能力分离
-
-Subsystem Definition Module 是可执行能力，不是普通 Content API Resource。
-
-因此：
-
-- Renderer MUST NOT 通过 Content API执行 Definition Module；
-- Subsystem MUST NOT 通过 Content API请求启动另一个 Runtime；
-- Render State MUST NOT携带 module physical path/URL；
-- Runtime bootstrap credential MUST NOT与 Content credential复用；
-- Platform Runner MAY通过 host-private executable-module resolver加载 module，但这不扩大 ordinary Content API权限。
-
-```text
-allowed to read content
-!=
-allowed to execute Subsystem module
-```
-
----
-
-## 11. Platform Realization
-
-同一个 Descriptor：
-
-```json
-{
-  "key": "loom.map",
-  "module": "subsystems/loom-map/subsystem.mjs"
-}
-```
-
-Hostra Desktop MAY realize 为：
-
-```text
-Host-selected Node.js
-→ Host-owned Node Subsystem Runner
-→ resolve/import declared module
-→ @loomrealm/subsystem host integration
-```
-
-PWA MAY realize 为：
-
-```text
-Dedicated Worker
-→ PWA Worker Subsystem Runner
-→ resolve/import same declared module
-→ @loomrealm/subsystem host integration
-```
-
-Game Package 不存在 Desktop/PWA 两份 Descriptor，也不要求业务模块内平台分支。
+Platform/Runner 自己需要的环境变量、Worker options、bootstrap credentials、timeouts 与 resource policy 属于 Host-owned deployment policy，不属于 Game Package。
 
 ---
 
 ## 12. Error Categories
 
-Game Package v1 冻结 Descriptor/module declaration 相关错误类别：
+Game Package v1 至少冻结：
 
 ```text
-DESCRIPTOR_INVALID
-DESCRIPTOR_KEY_DUPLICATE
+GAME_ENTRY_INVALID
+GAME_ENTRY_VERSION_UNSUPPORTED
+SUBSYSTEM_KEY_INVALID
+SUBSYSTEM_KEY_DUPLICATE
 INITIAL_TARGET_UNDECLARED
+INITIAL_INPUT_INVALID
+```
+
+以下错误已经移出 Game Package，归对应 Platform Launcher/Profile：
+
+```text
+PLATFORM_LAUNCH_MANIFEST_INVALID
+PLATFORM_BINDING_MISSING
+PLATFORM_BINDING_UNDECLARED
 SUBSYSTEM_MODULE_INVALID
 SUBSYSTEM_MODULE_NOT_FOUND
-SUBSYSTEM_MODULE_TYPE_UNSUPPORTED
 SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION
 SUBSYSTEM_MODULE_LOAD_FAILED
 SUBSYSTEM_MODULE_ABI_INVALID
 PLATFORM_RUNTIME_UNSUPPORTED
 ```
 
-Platform-specific Runner/Hosting 可以定义更具体的 local diagnostic classification，但跨实现必须保留可映射到上述稳定语义类别。
-
-用户可见错误不得泄露 bootstrap credential、host-private absolute path/URL 或内部 stack。
-
 ---
 
 ## 13. Trust Model
 
-Game Package module path约束保证 Platform 只加载当前 validated installation 声明的 Subsystem Definition Module；它不自动构成 executable-code sandbox。
-
-Hostra Desktop Node realization 中业务 module 仍是 trusted executable JavaScript；PWA Worker isolation提供不同物理能力边界。
+Game Entry 是声明性 logical topology，不授予 executable capability。
 
 ```text
-safe module resolution
+Game declares key
 !=
-sandboxed business code
+Game may execute arbitrary path/URL
 ```
 
-Publisher Trust、签名、第三方不可信 executable sandbox 属于后续能力。
+Executable trust、module containment、Runner ownership、Node/Worker policy由 Platform Launcher/Profile承担。Publisher Trust、签名与 untrusted executable sandbox仍是后续能力。
 
 ---
 
-## 14. Deferred
-
-v1 当前不定义：
-
-```text
-lazy / optional Subsystem
-multiple Runtime instances per key
-remote Subsystem
-runtime implementation negotiation
-multiple alternative modules per platform
-business-supplied process env/argv/flags
-CommonJS Subsystem Definition Module
-runtime TypeScript transpilation
-untrusted executable sandbox
-Game Package signing / Publisher Trust
-remote executable module URL
-```
-
-如果新平台不能加载同一 Definition Module ABI，应重新评估 Platform Runner boundary；不得把 platform-specific launcher字段重新塞回业务 Descriptor。
-
----
-
-## 15. Conformance Requirements
+## 14. Conformance Requirements
 
 至少 MUST 覆盖：
 
 ```text
-duplicate key
+valid minimal game entry
+closed top-level/initial/descriptor schema
+unsupported formatVersion
+empty/duplicate key
 undeclared initial target
-closed descriptor schema
-missing/empty module
-absolute / traversal / URL / backslash module
-valid .mjs module
-.js/.cjs rejection
-module not found
-module outside installation
-module default export missing/invalid
-complete descriptor-set failure has zero Runtime side effects
-same descriptor/module is accepted by Hostra and PWA module resolvers
-business module contains no required platform bootstrap surface
+invalid initial JsonValue
+module/launcher/env/platform field rejected from common descriptor
+common validation performs no executable resolution
+common validation performs no Runtime side effect
+same Game Entry accepted by Hostra/PWA launch planners
+missing/extra platform key rejected by platform join
+all preflight failures occur before Runtime creation
 ```
 
 ---
 
-## 16. Core Invariants
+## 15. Core Invariants
 
-1. Game Entry一次性声明当前 Session完整 required Subsystem topology；
-2. `descriptor.key` 是 application Runtime identity；
-3. Descriptor v1只有 `key + module`；
-4. `module` 是 platform-neutral package-local ESM Definition Module identity，不是 process/Worker entry；
-5. Definition Module固定 `.mjs` + default `SubsystemDefinitionFactory`；
-6. Game Package不声明 Node/Worker/WebSocket/MessagePort/env；
-7. Platform Runtime Hosting选择物理 Runtime Container；
-8. Platform Runner加载同一 Definition Module并注入 role-local Platform Ports；
-9. Hostra/PWA使用同一业务 Descriptor和同一 Definition Module ABI；
-10. module executable capability与 ordinary Content capability分离；
-11. Descriptor集合级失败在业务 Runtime side effect前收敛；
-12. safe module resolution不等于 executable sandbox。
+1. Game Package v1 只拥有 platform-neutral logical topology 与 initial business input；
+2. Descriptor v1 精确为 `{key}`；
+3. `key` 是唯一跨 Main/Runtime/Frame/Data 使用的 Subsystem application identity；
+4. Game Package 不拥有 executable module identity、Runner、Process/Worker 或 Transport；
+5. Platform Launch Manifest 独立绑定 key → current-platform implementation；
+6. Phase 1 Game key set 与 current Platform binding key set必须严格相等；
+7. 完整 Platform LaunchPlan 在任何 business Runtime side effect前闭合；
+8. Main只发出 logical launch intent，不携 executable material；
+9. Definition Module ABI由 `@loomrealm/subsystem` 统一，具体 artifact可按平台不同；
+10. Game Package validation failure与 Platform preflight failure均零 Runtime side effect；
+11. Host policy/credential/resource options不得由 Game common manifest注入；
+12. 本次是 current v1直接 reset，不存在 v2或旧 `{key,module}` compatibility path。

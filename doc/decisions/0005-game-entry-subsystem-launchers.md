@@ -1,79 +1,60 @@
 # ADR 0005：Game Entry 声明 Subsystem Topology
 
-> 状态：Accepted（核心 topology/active Control bootstrap 方向保留；Launcher declaration 部分已由 [ADR 0018](./0018-preimplementation-v1-closure.md) 取代）  
+> 状态：Accepted（topology核心保留；launcher/module current shape已由 [ADR 0019](./0019-platform-launch-manifest-boundary.md) 取代）  
 > 日期：2026-08-02  
 > 影响范围：Game Package、Main、Runtime Bootstrap、Desktop/PWA Runtime  
-> 历史后续：[ADR 0007](./0007-subsystem-descriptor-mvp.md)、[ADR 0008](./0008-desktop-nodejs-launcher-profile-v1.md)、[ADR 0009](./0009-freeze-subsystem-control-protocol-v1.md)、[ADR 0018](./0018-preimplementation-v1-closure.md)
+> 当前规范：[Game Package v1](../15-contracts/game-package-v1.md)
 
 ## 背景
 
-早期系统由平台固定 Registry 决定 Subsystem，Game Entry只声明初始系统。这样游戏包无法自描述当前 Session需要哪些 Subsystem，也无法让 Main建立完整 Runtime topology。
+早期系统由平台固定 Registry决定 Subsystem，Game Entry只声明初始系统。这样游戏包无法自描述当前 Session需要哪些 logical Subsystem，也无法让 Main建立完整 Runtime topology。
 
 ## 仍然有效的核心决策
 
-Game Entry必须声明当前 Session的完整 Subsystem topology，并在启动任何 business Runtime前形成完整 Descriptor Registry。
+Game Entry必须声明当前 Session完整 logical Subsystem topology，并在启动任何 business Runtime前形成完整 key registry。
 
-当前收口后的表达是：
+Current表达：
 
 ```text
 Game Entry
-├── initial target
+├── initial target/input
 └── subsystems[]
-    └── { key, module }
+    └── { key }
 ```
 
-Main仍负责 logical launch intent；Platform Runtime Hosting实现物理 Runtime。
-
-Runtime Control bootstrap方向仍保持：
+Main负责 logical launch intent；Platform RuntimeHosting实现物理 Runtime。
 
 ```text
-Main creates Launch Attempt/auth state
-→ Platform launches Runtime Runner
-→ Subsystem side obtains/establishes Control carrier
-→ subsystem.hello binds descriptor.key
-→ later subsystem.status(ready)
+Main Launch Attempt
+→ Platform launch(key)
+→ Runner Runtime
+→ Control
+→ subsystem.hello binds key
+→ ready
 ```
 
-```text
-launch != connected != identified != ready
-```
-
-这些结论继续有效。
+`launch != connected != identified != ready`。
 
 ## 已被取代的历史部分
 
-本 ADR最初把 Descriptor设计为“stable identity + launcher declaration + optional launcher environment”。这部分已经由 ADR 0018/current Game Package v1直接重置。
+本 ADR最初曾包含 launcher declaration；ADR 0018又一度把 current Game Descriptor收口成 `{key,module}`。ADR 0019进一步把 executable binding完整移到 Platform Launch Manifest。
 
-以下不再是 current v1：
+以下都不是 current Game Package v1：
 
 ```text
 launcher.type
 launcher.entry
-descriptor.env
-Game Package选择 Node/Worker technology
-business module直接作为 physical Runtime entry
+env
+module
+Game Package选择 Node/Worker/executable artifact
 ```
 
-Current v1只声明：
+## 当前结果
 
-```ts
-interface SubsystemDescriptorV1 {
-  readonly key: string;
-  readonly module: string;
-}
-```
-
-`module` 是 platform-neutral Subsystem Definition Module；Platform Runner决定 Process/Worker realization。
-
-## 保留的结果
-
-- Game Entry是 Session Subsystem topology声明源；
-- Main只允许启动声明过的 Subsystem；
-- descriptor.key是 Runtime protocol identity；
-- physical launch/connected/identified/ready保持不同阶段；
-- Launcher/Runner executable capability与 ordinary Content capability分离；
-- Desktop/PWA physical realization可不同，但建立后的 application semantics必须一致。
-
-## 历史说明
-
-本 ADR的旧 launcher字段示例仅用于理解设计演进，不再形成 current contract或 compatibility obligation。首次 conformant implementation前的 breaking reset由 ADR 0018记录。
+- Game Entry是 logical Session Subsystem topology声明源；
+- `key`是 Runtime protocol/application identity；
+- Main只允许启动已声明 key；
+- Phase 1 all declared keys eager + required；
+- Platform-specific executable binding由对应 launch manifest/profile拥有；
+- complete game+platform preflight在 Runtime side effect前闭合；
+- Desktop/PWA physical realization可不同，application semantics必须等价。

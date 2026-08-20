@@ -3,9 +3,9 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策的背景、取舍、替代关系与重新评估条件  
-> 最近复核：2026-08-19
+> 最近复核：2026-08-20
 
-ADR记录“为什么这样设计”；当前可实现事实仍以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR只保留历史，不形成第二份 current contract。
+ADR记录“为什么”；current可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR只保留历史。
 
 ---
 
@@ -28,117 +28,64 @@ ADR记录“为什么这样设计”；当前可实现事实仍以 `00-overview`
 15. [ADR 0015：Frame / Call v1 Batch F / Freeze](./0015-freeze-frame-call-protocol-v1-batch-f.md)
 16. [ADR 0016：协议边界清理与 Data Authority](./0016-protocol-boundary-cleanup.md)
 17. [ADR 0017：平台是系统级 Composition Boundary](./0017-system-level-platform-composition.md)
-18. [ADR 0018：首次实现前直接收口当前 v1](./0018-preimplementation-v1-closure.md)
+18. [ADR 0018：首次实现前直接收口 current v1](./0018-preimplementation-v1-closure.md)
+19. [ADR 0019：Game Logical Topology 与 Platform Launch Manifest 分离](./0019-platform-launch-manifest-boundary.md)
 
 ---
 
 ## 当前替代 / 修正关系
 
 ```text
-ADR 0004 Render lifetime assumption
-    → ADR 0006 supersedes Frame-owned Render lifecycle
-
-ADR 0005
-    → retains Game Entry topology declaration
-    → old launcher declaration portion updated by ADR 0018
-
-ADR 0007
-    → Superseded by ADR 0018
-
-ADR 0008
-    → Superseded by ADR 0018
-
-ADR 0009
-    → current Control lifecycle-only decision
-    → Data provisioning explicitly remains outside Control
-
-ADR 0010–0015
-    → Frame / Call v1 semantic freeze
-
-ADR 0015 old PWA structured-object transport mapping
-    → one-time preimplementation correction by ADR 0018
-    → current mapping = UTF-8 JSON text string
-
-ADR 0016
-    → current DataAuthority / Data Profile / protocol-minimization direction
-
-ADR 0017
-    → Platform owns complete physical Session composition
-
-ADR 0018
-    → records direct current-v1 closure before first conformant implementation
+ADR 0004 → ADR 0006 supersedes Frame-owned Render lifetime
+ADR 0005 → topology核心保留；current Descriptor shape由 ADR 0019收口为 {key}
+ADR 0007 / 0008 → Superseded history
+ADR 0009 → Runtime identity/lifecycle-only Control
+ADR 0010–0015 → Frame / Call v1 semantic freeze
+ADR 0016 → DataAuthority / protocol minimization
+ADR 0017 → Platform owns complete physical Session composition
+ADR 0018 → preimplementation direct-current-v1 policy；Frame/Data/SDK closure有效
+ADR 0019 → Game {key} + platform manifests + preflight LaunchPlan + Main launch(key)
 ```
+
+ADR 0019只 supersede ADR 0018的 Game `{key,module}` / same Definition artifact部分，不改变其 Frame/Data/SDK结论。
 
 ---
 
-## Current v1 Model
-
-### Game / Runtime
+## Current v1 Game / Runtime Model
 
 ```text
 Game Package v1
-    Descriptor {key,module}
-        ↓
-Host-owned Platform Runner
-    Node Runner / Worker Runner
-        ↓
-Subsystem Definition Module
+    Game Entry {key...} + initial
+        │
+        ├── Main logical topology
+        │
+        └── current Platform Launch Manifest
+                ↓ exact join / full resolution
+           PlatformLaunchPlan
+                ↓
+Main launch(key) → RuntimeHosting
+                ↓
+        Host-owned Runner
+                ↓
+ platform-selected Definition Module
 ```
 
-Business module不是 Process/Worker entry policy。
-
-### Runtime Control
-
-```text
-Runtime Control Application Profile v1
-= Subsystem Control v1
-+ Frame / Call v1
-```
-
-Frame / Call v1仍 Active / Normative / Frozen；ADR 0018只修正首次实现前 PWA carrier representation，不改变七方法/transaction/authority/error/unwind semantics。
-
-### Renderer Data
-
-```text
-Renderer Control
-    DataAuthority {subsystemKey,generation,dataProfile}
-        ↓
-Renderer Data Application Profile v1
-    loomrealm.renderer-data/1
-    = Data Connection v1
-    + User Input v1
-    + Render Update v1
-```
-
-`connectionProfile` 不再是 current字段。
-
-### Platform Provisioning
-
-```text
-Hostra
-    Broker → Runner provisioning IPC → Data WebSocket
-
-PWA
-    Broker → Worker provisioning path → transferred MessagePort
-```
-
-Provisioning不是 Runtime/Renderer/Data application protocol；失败不自动失败 Runtime或 unwind Frame。
+Hostra/PWA Launch Manifest/Profile独立；不要求 same module path/bytes。
 
 ---
 
-## Current Carrier Rule
+## Runtime / Renderer Data
 
-Current message-oriented Profiles统一：
+Runtime Control = Subsystem Control1 + Frozen Frame1。Renderer Control发布 `DataAuthority {subsystemKey,generation,dataProfile}`。Renderer Data Profile v1 = Connection1 + Input1 + Render1。
+
+Provisioning是 Platform infrastructure，不是 application protocol；failure不自动失败 Runtime/Frame。
+
+---
+
+## Carrier Rule
 
 ```text
-one carrier application unit
-= one UTF-8 JSON text string
-```
-
-```text
-WebSocket   text message
-MessagePort postMessage(string)
-Memory      string
+one carrier application unit = one UTF-8 JSON text string
 ```
 
 Structured Clone只用于 Platform bootstrap/Port transfer。
@@ -147,69 +94,4 @@ Structured Clone只用于 Platform bootstrap/Port transfer。
 
 ## Compatibility Governance
 
-当前治理依据：[文档分层与变更规则](../00-overview/document-governance.md)。
-
-关键区分：
-
-```text
-Frozen design
-    = semantic design closed by default
-
-real compatibility boundary
-    = shipped/independent/persisted interoperability obligation
-```
-
-没有真实 compatibility boundary时，不为从未实现的旧草案制造 v1/v2 dual track。
-
-Frozen incompatible preimplementation correction必须经过：
-
-```text
-explicit Accepted ADR
-minimal scope
-statement of unchanged semantics
-current Contract direct update
-new conformance fixtureSetRevision
-full dependent-doc propagation
-```
-
-ADR 0018是一次性当前实例；first conformant baseline形成后不能继续把它当通用 breaking-change豁免。
-
----
-
-## Platform Relation
-
-```text
-platform-neutral roles
-    Main / Renderer / Subsystem / Content
-              │
-         Platform Ports
-              │
-     ┌────────┴────────┐
-     ▼                 ▼
-Hostra Desktop        PWA
-```
-
-```text
-ADR 0002
-    transport/binding can differ
-
-ADR 0017
-    complete physical Session composition belongs to Platform
-
-ADR 0018
-    Definition Module / Runner / provisioning / Data Profile / SDK projection closed before first implementation
-```
-
-Platform architecture不自动产生 `platform-*` npm package。
-
----
-
-## Maintenance Rules
-
-- ADR不复制完整协议正文；
-- Current Contract覆盖 Superseded/历史 ADR字段示例；
-- Superseded状态必须显式；
-- protocol/profile version表示真实 interoperability boundary，不表示设计稿迭代次数；
-- first conformant baseline之后，incompatible change遵守正常 version/migration治理；
-- Platform/Transport不得覆盖 application authority/transaction/error/recovery；
-- Conformance fixture可增加既有语义覆盖；incompatible Frozen correction必须遵守治理规则。
+当前 Game/Launcher reset发生在 first conformant baseline前，因此直接更新 current v1，不创建 v2/compat layer。Frame / Call v1 Frozen semantics不受 ADR 0019影响。

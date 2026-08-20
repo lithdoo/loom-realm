@@ -3,9 +3,9 @@
 > 层级：实施计划  
 > 状态：Tracking  
 > 稳定程度：Experimental  
-> 主要定义：当前分包、Runner/Platform ports、Data Profile/provisioning、测试和第一阶段交付入口  
+> 主要定义：当前分包、Game/Platform launch planning、Runner/Platform ports、Data provisioning、测试和第一阶段交付入口  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-19
+> 最近复核：2026-08-20
 
 实施层只落地当前 architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。
 
@@ -13,10 +13,10 @@
 
 ## Tracking 文档
 
-- [独立分包与发布架构](./package-architecture.md) — package/publish boundary 主要事实源；
-- [仓库与目录方案](./repository-layout.md) — monorepo、author/host surface、Runner/provisioning placement；
-- [测试策略](./testing-strategy.md) — protocol、SDK control-flow、Runner/provisioning、跨平台 equivalence；
-- [第一阶段交付计划](./phase-1-delivery-plan.md) — vertical slice 实施顺序。
+- [独立分包与发布架构](./package-architecture.md)
+- [仓库与目录方案](./repository-layout.md)
+- [测试策略](./testing-strategy.md)
+- [第一阶段交付计划](./phase-1-delivery-plan.md)
 
 ---
 
@@ -24,9 +24,10 @@
 
 ```text
 Game Package v1
-    {key,module}
+    Game Entry {key...} + initial
 
-Desktop Node Runner Profile v1
+Hostra Game Launcher / Node Runner Profile v1
+PWA Game Launcher / Worker Runner Profile v1
 Subsystem Control v1
 Runtime Control Profile v1
 Frame / Call v1 Frozen
@@ -38,64 +39,34 @@ Render Update v1
 Content API v1
 ```
 
-当前不建立第二套 Desktop/PWA application protocol；Platform provisioning保持 implementation boundary。
-
 ---
 
-## Platform / Runner Baseline
+## Launch Baseline
 
 ```text
-Main / Renderer / Subsystem / Content
-    = platform-neutral roles
-
-Platform Composition
-    = complete physical Session realization
-
-Subsystem Definition Module
-    = platform-neutral business artifact
-
+Game Entry
+    logical topology only
+        +
+current Platform Launch Manifest
+        ↓
+exact key-set join
+all executable resolution
+hosting capability preflight
+        ↓
+immutable PlatformLaunchPlan
+        ↓
+Main launch(subsystemKey)
+        ↓
+plan-bound RuntimeHosting
+        ↓
 Host-owned Runner
-    = physical Runtime entry + role-port adapter
 ```
 
-```text
-Hostra
-    Node Runner + WebSocket + provisioning IPC
-
-PWA
-    Worker Runner + MessagePort + provisioning path
-```
-
-同一 Definition Module跨平台运行。
+Game common manifest不包含 module；Main不携 executable material。
 
 ---
 
-## Role-facing Ports
-
-```text
-Subsystem-facing
-    RuntimeControlBinding
-    SubsystemDataBinding
-    ContentClient
-
-Renderer-facing
-    RendererControlBinding
-    RendererDataBinding
-    ContentClient
-
-Main-facing
-    RuntimeHosting/Supervisor
-    RuntimeControlHost
-    RendererHosting/ControlHost
-    DataConnectionBroker
-    Content integration
-```
-
-这些是 implementation boundaries，不要求一 port 一 package。
-
----
-
-## Low-level / Packages
+## Packages
 
 ```text
 low-level
@@ -115,10 +86,13 @@ role
     @loomrealm/renderer
     @loomrealm/content-service
 
+runtime launch integration
+    @loomrealm/game-launcher-hostra
+    @loomrealm/game-launcher-pwa
+
 technical adapters
-    launcher-node
-    transport-websocket
-    transport-messageport
+    @loomrealm/launcher-node
+    transport-websocket/messageport
     content-fs/http/service-worker
 
 business
@@ -130,120 +104,50 @@ composition roots
     apps/cli
 ```
 
-Platform Architecture不自动生成 `platform-*` mega-package。
+Launcher packages是窄 Runtime launch capability，不是 platform mega-package。
 
 ---
 
-## Subsystem Author / Host Split
+## Platform-specific Config
 
 ```text
-@loomrealm/subsystem
-    defineSubsystem
-    Frame / FrameOutcome
-    InputListener
-    RenderDomain
-    ContentClient
+Game common
+    game.json
 
-@loomrealm/subsystem/host
-    runSubsystem
-    RuntimeControlBinding
-    SubsystemDataBinding
-    launch integration
+Hostra
+    launch.hostra.json
+
+PWA
+    launch.pwa.json
 ```
 
-Business package不得依赖 `/host`。
+两个 platform manifest各自拥有 schema/version/policy；不要建立共享 `launcher.options:any`。
+
+Phase 1要求 current Platform bindings严格覆盖 Game key set。
 
 ---
 
-## Frame SDK Closure
+## Role-facing Ports / SDK
 
-Author-facing：
+Subsystem author/host split、FrameOutcome control-flow、RendererDataBinding/SubsystemDataBinding、DataConnectionBroker authority边界保持原设计。
 
-```text
-FrameOutcome
-    completed / cancelled / failed
-```
-
-`frame.call()`：
-
-```text
-child Outcome → resolve
-pre-commit recoverable rejection → typed reject
-Runtime-fatal/ambiguous → no business continuation re-entry
-```
-
-这条是 implementation hard invariant，不是 ergonomics choice。
-
----
-
-## Renderer Data Closure
-
-```text
-DataAuthority {S,G,dataProfile}
-
-loomrealm.renderer-data/1
-= Connection1 + Input1 + Render1
-```
-
-Profile改变必须 fresh generation。
-
-```text
-Main authority
-→ DataConnectionBroker
-→ RendererDataBinding + SubsystemDataBinding
-```
-
-Desktop late provisioning走 Runner IPC；PWA走 Worker provisioning/Port transfer。
-
-```text
-provisioning failure != Runtime failure / Frame unwind
-```
-
----
-
-## Unified Message Unit
-
-Current message-oriented profiles统一：
-
-```text
-MessageCarrier<string>
-one carrier unit = one UTF-8 JSON text string
-```
-
-Foundation把 string当 opaque；Profile/wire负责 JSON semantics。
-
----
-
-## User Input / Render
-
-Input：
-
-```text
-Effective(F,A,C)
-= Data × Main InputTarget × current Activation × Interest[F] × Producer
-```
-
-Render：
-
-```text
-Domain Registry / Snapshot / Patch / Event
-```
-
-Frame/Input Interest/Render/Data carrier各自保持独立 lifecycle。
+Runtime-fatal/ambiguous仍不得重新进入 business continuation。
 
 ---
 
 ## Phase 1 验收方向
 
-必须证明两条闭环：
+必须证明：
 
 ```text
-Business Definition
-→ Author SDK
-→ Role Core
+Game logical topology
+→ Platform manifest
+→ preflight plan
+→ RuntimeHosting
+→ Runner
 → Role Ports
-→ Runner/Broker
-→ physical platform
+→ Role Core
+→ Business Definition
 ```
 
 以及：
@@ -254,4 +158,4 @@ Formal protocol outcome/failure
 → business-observable behavior
 ```
 
-最终 Hostra/PWA使用完全相同 Game Package + Definition Module + logical scenario，并得到等价 Runtime/Frame/Input/Render/Content结果。
+最终 Hostra/PWA使用相同 Game logical topology和 logical scenario，可以使用不同 platform Definition artifact，并得到等价 Runtime/Frame/Input/Render/Content/business结果。
