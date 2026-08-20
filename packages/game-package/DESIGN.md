@@ -11,7 +11,7 @@
 
 核心原则：
 
-> **`@loomrealm/game-package` 是 Game Entry document validation capability，不是 Runtime role、不是 Main bootstrap API。它只回答“这个 common Game Entry 是否成立、其 logical topology/initial input 是什么”；matching Platform Launcher 负责把它与 current Platform Launch Manifest 一起完成 PREPARE，并向 Main 投影纯 logical bootstrap facts。**
+> **`@loomrealm/game-package` 是 Game Entry document validation capability，不是 Runtime role、不是 Main bootstrap API。它只回答 common Game Entry 是否成立、logical topology/initial input 是什么；matching Platform Launcher 负责把它与 current Platform Launch Manifest 一起完成 PREPARE，并向 Main 投影纯 logical bootstrap facts。**
 
 ---
 
@@ -29,21 +29,14 @@ untrusted Game Entry JSON text / unknown JS value
 Hostra PREPARE             PWA PREPARE
 ```
 
-Runtime-product primary consumers：
+Primary Runtime-product consumers：
 
 ```text
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
 ```
 
-Possible direct tooling consumers：
-
-```text
-validator CLI
-editor
-catalog ingestion
-publisher tooling
-```
+Possible direct tooling consumers：validator CLI、editor、catalog ingestion、publisher tooling。
 
 Explicit non-consumers：
 
@@ -54,13 +47,13 @@ Renderer
 Runtime Control
 ```
 
-Main 不解析 `game.json`，不 import `@loomrealm/game-package`。Main 只消费 Platform Launcher/Composition 在 full preflight 后投影的 `LogicalGameBootstrap`。
+Main 不解析 `game.json`，不 import `@loomrealm/game-package`。Main 只消费 full Platform PREPARE 后投影的 `LogicalGameBootstrap`。
 
 ---
 
-## 2. Authority Boundary
+## 2. Authority / Dependency Boundary
 
-本包可以知道：
+本包只拥有：
 
 ```text
 Game Entry v1 document shape
@@ -69,17 +62,17 @@ Subsystem logical key
 initial logical target
 initial business JsonValue
 complete declared key set
+validated immutable snapshot
 ```
 
-本包不得知道：
+本包不得拥有：
 
 ```text
 Hostra / PWA
 Platform Launch Manifest
 module/path/URL
 Definition Module ABI
-Node / Worker
-Runner
+Node / Worker / Runner
 RuntimeHosting
 Process/Worker creation
 WebSocket/MessagePort
@@ -87,22 +80,6 @@ bootstrap token
 DataAuthority / generation / profile
 Content physical location
 Main Session/Frame authority
-```
-
-判断规则：
-
-> 如果一个 API 需要理解 current Platform executable binding、Runtime lifecycle 或 application authority 才能解释，它不属于 `@loomrealm/game-package`。
-
----
-
-## 3. Dependency / Purity Boundary
-
-首批实现：
-
-```text
-@loomrealm/wire
-        ↓
-@loomrealm/game-package
 ```
 
 唯一 runtime dependency：
@@ -120,7 +97,6 @@ MUST NOT 依赖：
 @loomrealm/runtime-control
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
-
 node:*
 filesystem
 Fetch
@@ -130,21 +106,11 @@ MessagePort
 dynamic module import
 ```
 
-所有 parse/validate/snapshot operation 必须：
-
-```text
-deterministic
-synchronous
-no filesystem
-no network
-no module loading
-no Runtime side effect
-no mutation/freeze of caller-owned input
-```
+所有 parse/validate/snapshot operation MUST 是 deterministic、synchronous，并且没有 filesystem/network/module-load/Runtime side effect，也不得 mutate/freeze caller-owned input。
 
 ---
 
-## 4. Exact Public Surface
+## 3. Exact Public Surface
 
 首批 root export 冻结为：
 
@@ -185,6 +151,12 @@ export class GamePackageError extends Error {
   readonly code: GamePackageErrorCode;
   readonly path: readonly WirePathSegment[];
   readonly cause?: unknown;
+
+  constructor(
+    code: GamePackageErrorCode,
+    path?: readonly WirePathSegment[],
+    options?: { readonly cause?: unknown },
+  );
 }
 
 export function parseGameEntryV1(
@@ -214,11 +186,13 @@ PlatformLaunchOptions
 
 无真实独立消费者价值的 convenience/helper 不进入冻结 surface。
 
-Brand 只作为 TypeScript trust marker；实现不要求给 runtime snapshot 增加 symbol own property。返回值仍应保持普通 JSON-compatible representation。
+Brand 只作为 TypeScript trust marker；runtime snapshot 不需要 symbol brand own property，仍保持 JSON-compatible representation。
 
 ---
 
-## 5. Game Entry v1 Model
+## 4. Game Entry v1 / Closed Schema
+
+Normative shape：
 
 ```ts
 interface GameEntryV1 {
@@ -233,36 +207,29 @@ interface GameEntryV1 {
 }
 ```
 
-Descriptor v1 精确：
+Closed schema 精确为：
 
 ```text
-{ key }
+GameEntry
+    required = formatVersion, initial, subsystems
+    optional = none
+
+InitialFrameTarget
+    required = subsystem, input
+    optional = none
+
+SubsystemDescriptor
+    required = key
+    optional = none
 ```
 
-不存在：
+因此 `module / implementation / launcher / runtime / hostra / pwa / env / argv / worker / node / endpoint / url / bootstrapToken` 若出现在上述 schema 层均 MUST reject。
 
-```text
-module
-implementation
-launcher
-runtime
-hostra
-pwa
-env
-argv
-worker
-node
-endpoint
-url
-bootstrapToken
-platform option bag
-```
-
-这些若出现在 GameEntry / Initial / Descriptor schema 层即 unknown member rejection。
+Game Package 不维护 platform-field blacklist；这些 case 只是 exact-schema regression tests。
 
 ---
 
-## 6. Subsystem Key Exact Semantics
+## 5. Subsystem Key Exact Semantics
 
 Key 有效条件：
 
@@ -298,41 +265,46 @@ platform-name blacklist
 " loom.map" != "loom.map"
 ```
 
-当前 formal contract 只要求 non-empty，因此 whitespace-only string 仍按 current v1 接受。
+当前 formal contract 只要求 non-empty，因此 whitespace-only string 仍按 current v1 接受。未来若收紧 syntax，必须修改 formal contract，validator 不得私自 normalize。
 
-如果未来认为 whitespace-only / Unicode normalization 必须收紧，应修改 formal Game Package contract；实现不得自行增加 policy。
+`subsystems` declaration order MUST 保留，但：
+
+```text
+order != Runtime launch order
+order != dependency order
+order != startup/shutdown priority
+order != Platform binding order
+```
+
+Topology authority 是 exact key set；duplicate MUST reject，禁止 silent dedupe/sort。
 
 ---
 
-## 7. Initial Target / Opaque Business Input
+## 6. Initial Target / Opaque Business Input
 
 `initial.subsystem`：
 
 ```text
-MUST be a string
-MUST exactly equal one declared subsystem key
+MUST be string
+MUST exactly equal one declared key
 ```
 
 `initial.input`：
 
 ```text
-MUST be a JsonValue
-MUST otherwise be opaque to Game Package
+MUST be JsonValue
+MUST otherwise remain opaque to Game Package
 ```
 
-Game Package 不得把业务 JSON member name 解释成 Platform 配置。
+因此业务 input 内出现以下 member name 本身合法：
 
-例如以下 input 合法：
-
-```json
-{
-  "module": "business-data",
-  "env": "forest",
-  "platform": "ancient-temple",
-  "__proto__": {
-    "kind": "business-value"
-  }
-}
+```text
+module
+env
+platform
+launcher
+__proto__
+constructor
 ```
 
 核心：
@@ -340,55 +312,19 @@ Game Package 不得把业务 JSON member name 解释成 Platform 配置。
 ```text
 closed Game schema
 !=
-recursively reserved JSON member names
+recursive reserved business JSON names
 ```
 
-Game Package 只对：
-
-```text
-GameEntry
-InitialFrameTarget
-SubsystemDescriptor
-```
-
-应用 exact schema。
+Game Package 只解释 GameEntry / InitialFrameTarget / SubsystemDescriptor 的字段，不解释 `initial.input` 的业务结构。
 
 ---
 
-## 8. Closed Schema
+## 7. Validation Pipeline / Precedence
 
-固定：
-
-```text
-GameEntry
-    required = formatVersion, initial, subsystems
-    optional = none
-
-InitialFrameTarget
-    required = subsystem, input
-    optional = none
-
-SubsystemDescriptor
-    required = key
-    optional = none
-```
-
-任何 unknown own member：
+### `parseGameEntryV1(text)`
 
 ```text
-→ GAME_ENTRY_INVALID
-```
-
-不维护 platform-field blacklist 作为实现机制；`module`/`launcher`/`env` 等测试只是证明 exact schema 已关闭。
-
----
-
-## 9. Validation Pipeline
-
-### 9.1 `parseGameEntryV1(text)`
-
-```text
-assert text string
+runtime string check
 ↓
 @loomrealm/wire.parseJsonText
 ↓
@@ -397,166 +333,206 @@ Game Entry validation pipeline
 detached immutable snapshot
 ```
 
-### 9.2 `validateGameEntryV1(value)`
+### `validateGameEntryV1(value)`
 
 固定 observable precedence：
 
 ```text
-1. Wire representation validation
-2. top-level JsonObject / exact keys
-3. formatVersion
-4. initial exact shape
-5. subsystems array / descriptor exact shapes
-6. key validity
-7. key uniqueness
-8. initial target membership
-9. detached immutable snapshot construction
+1. Wire representation validation over the whole value graph
+2. top-level JsonObject + exact keys
+3. formatVersion classification
+4. initial exact shape + initial.subsystem type
+5. subsystems array + descriptor exact shapes + key validity
+6. key uniqueness
+7. initial target membership
+8. detached immutable snapshot construction
 ```
 
-Representation validity 故意先于 Game schema/domain semantics。
+Representation validity 故意先于 schema/domain semantics。因此 unsupported JS value、exotic/accessor/sparse/cyclic graph 先在 Wire boundary fail closed，Game Package 不建立第二套 JSON representation validator。
 
-这保证：
+### Closed-object defect precedence
+
+若同一 closed object 同时存在多个 schema defect：
 
 ```text
-unsupported JS/exotic/accessor/sparse/cyclic input
-→ fail at representation boundary
+required-member presence
+    checked first in normative field order
+
+unknown own members
+    checked only after all required members exist
+    first failure follows ECMAScript Object.keys order
 ```
 
-而不是让 Game Package 建立第二套 JSON object validator。
+Required-member order 固定：
+
+```text
+GameEntry:            formatVersion → initial → subsystems
+InitialFrameTarget:   subsystem → input
+SubsystemDescriptor:  key
+```
+
+Descriptor traversal 按 declaration order；duplicate detection 完成后才检查 initial membership。
 
 ---
 
-## 10. Format Version
+## 8. Own-member / Prototype Safety
 
-规则：
+Wire representation validation保证 supported JsonObject own properties是 enumerable data properties；但 Game Package schema logic仍 MUST NOT通过 prototype chain读取缺失成员。
+
+所有 required-member presence/read MUST等价于：
+
+```ts
+hasOwn(object, key)
+Object.getOwnPropertyDescriptor(object, key)
+```
+
+并且只读取 descriptor 的 own data `value`。
+
+禁止在确认 own member存在前使用：
+
+```ts
+object[key]
+object.formatVersion
+object.initial
+object.subsystems
+```
+
+原因：普通 plain object 允许继承 `Object.prototype`；缺失 own member时，直接属性访问可能执行 inherited getter。
+
+Regression MUST证明给 `Object.prototype` 临时安装 `formatVersion / initial / subsystems / subsystem / input / key` getter时，缺失 own member 的 validation：
+
+```text
+inherited getter read count = 0
+```
+
+Game Package 不把 prototype member 当作 document member。
+
+---
+
+## 9. Format Version
 
 ```text
 missing formatVersion
     → GAME_ENTRY_INVALID
 
-present but not a number / not expected scalar
+present but non-number
     → GAME_ENTRY_INVALID
 
-numeric value === 1
+finite number === 1
     → current v1
 
-numeric value !== 1
+finite number !== 1
     → GAME_ENTRY_VERSION_UNSUPPORTED
 ```
 
-首批不做：
+非 finite number 在更早的 Wire representation stage 已经 invalid，因此属于 `GAME_ENTRY_INVALID`，不是 unsupported-version。
 
-```text
-string "1" coercion
-version fallback
-migration
-legacy parser
-dual model
-```
+首批无 coercion、fallback、migration、legacy parser、dual model。
 
 ---
 
-## 11. Key-set Validation
+## 10. Error Contract
 
-遍历 `subsystems` declaration order。
-
-每个 Descriptor：
-
-```text
-exact object {key}
-↓
-key string
-↓
-key.length > 0
-↓
-first occurrence inserts into Set
-↓
-later exact-equal occurrence fails
-```
-
-Duplicate error path 指向：
-
-```text
-second/subsequent occurrence
-["subsystems", index, "key"]
-```
-
-禁止：
-
-```text
-silent dedupe
-sort-before-validation
-case folding
-normalization
-```
-
-`initial.subsystem` membership 只在完整 descriptor/key validation 完成后判断。
-
----
-
-## 12. Error Model
-
-### 12.1 Stable
-
-稳定 public facts：
+Stable public facts：
 
 ```text
 GamePackageError class
+constructor signature
 error.code
 error.path
 ```
 
-### 12.2 Not stable
-
-不冻结：
+Not stable：
 
 ```text
-English/human message
+human Error.message
 stack wording
-underlying engine syntax wording
+engine syntax wording
 Wire internal message
 cause concrete type
 ```
 
-`cause` MAY 保留诊断信息，但消费者不得依赖它做 compatibility branching。
+`cause` MAY保留 diagnostics，但 compatibility branching MUST只依赖 class/code/path。
 
-### 12.3 Mapping
+### Runtime construction
+
+Constructor MUST：
 
 ```text
-malformed JSON
+copy supplied path
+→ Object.freeze(copied path)
+→ expose copied frozen array as error.path
+```
+
+Caller 后续修改 constructor input array MUST NOT影响 `error.path`；普通 JS mutation也 MUST NOT改写已发布 path。
+
+### Total expected-error mapping
+
+所有 expected invalid input MUST收敛为 `GamePackageError`；`WireValidationError` / `JsonTextSyntaxError` 不得成为 expected consumer surface。
+
+```text
+parseGameEntryV1 runtime non-string
 → GAME_ENTRY_INVALID []
+
+malformed JSON text
+→ GAME_ENTRY_INVALID []
+
+Wire representation failure under ["initial","input",...]
+→ INITIAL_INPUT_INVALID
+→ preserve full path
+
+Wire representation failure at/past ["subsystems",i,"key",...]
+→ SUBSYSTEM_KEY_INVALID
+→ preserve full path
+
+all other Wire representation failures
+→ GAME_ENTRY_INVALID
+→ preserve Wire path
 
 top-level non-object
 → GAME_ENTRY_INVALID []
 
 missing/unknown top-level member
-→ GAME_ENTRY_INVALID at member path
+→ GAME_ENTRY_INVALID [member]
 
-numeric formatVersion != 1
-→ GAME_ENTRY_VERSION_UNSUPPORTED ["formatVersion"]
+initial non-object
+→ GAME_ENTRY_INVALID ["initial"]
+
+missing/unknown initial member
+→ GAME_ENTRY_INVALID ["initial", member]
+
+initial.subsystem non-string
+→ GAME_ENTRY_INVALID ["initial","subsystem"]
+
+subsystems non-array
+→ GAME_ENTRY_INVALID ["subsystems"]
+
+subsystem descriptor non-object
+→ GAME_ENTRY_INVALID ["subsystems",i]
+
+missing/unknown descriptor member
+→ GAME_ENTRY_INVALID ["subsystems",i,member]
 
 descriptor key non-string/empty
-→ SUBSYSTEM_KEY_INVALID ["subsystems", i, "key"]
+→ SUBSYSTEM_KEY_INVALID ["subsystems",i,"key"]
+
+finite numeric formatVersion != 1
+→ GAME_ENTRY_VERSION_UNSUPPORTED ["formatVersion"]
 
 duplicate key
-→ SUBSYSTEM_KEY_DUPLICATE ["subsystems", laterIndex, "key"]
+→ SUBSYSTEM_KEY_DUPLICATE ["subsystems",laterIndex,"key"]
 
 initial subsystem string not declared
-→ INITIAL_TARGET_UNDECLARED ["initial", "subsystem"]
-
-invalid direct-value JsonValue under initial.input
-→ INITIAL_INPUT_INVALID ["initial", "input", ...]
+→ INITIAL_TARGET_UNDECLARED ["initial","subsystem"]
 ```
 
-`WireValidationError` / `JsonTextSyntaxError` 是 implementation dependency error，不是 expected Game Package consumer branching surface。
+When multiple defects exist, §7 precedence decides the unique reported failure.
 
 ---
 
-## 13. `ValidatedGameEntryV1` Trust Boundary
+## 11. `ValidatedGameEntryV1` Trust Boundary
 
-Validation success 不等于“给 caller object 加类型”。
-
-必须：
+Validation success不是“给 caller object 加类型”。成功必须：
 
 ```text
 validate
@@ -574,46 +550,31 @@ freeze caller input
 retain mutable caller-owned nested containers
 ```
 
-因此：
+因此 source mutation after validation MUST NOT改变 validated result，且 returned topology/input 的普通 JS mutation不能改变其状态。
 
-```text
-source mutation after validation
-    cannot change validated result
-
-ordinary mutation of validated result
-    cannot change topology/input
-```
-
-`parseGameEntryV1` 与 `validateGameEntryV1` 应具有同样的 validated snapshot semantics。
+`parseGameEntryV1` 与 `validateGameEntryV1` 具有相同 snapshot semantics。
 
 ---
 
-## 14. Snapshot Semantics
+## 12. Snapshot Semantics / Safety
 
-Snapshot 必须保留：
+Snapshot MUST保留：
 
 ```text
 JsonValue semantic value
 subsystems declaration order
 exact key strings
-negative-zero number semantics where present in direct value input
+negative-zero semantics where present in direct-value input
 all business JSON member names
 ```
 
-Snapshot 不得调用：
+Snapshot MUST NOT调用 getter / `toJSON()` / custom normalization / business parser。
 
-```text
-getter
-toJSON
-custom normalization
-business parser
-```
+`__proto__` / `constructor` 等 MUST作为 ordinary JSON data member处理，不得获得 prototype authority。Object member construction MUST使用安全 data-property semantics，不能让 `target[key] = value` 把 `"__proto__"` 解释成 prototype mutation。
 
-`__proto__` / `constructor` 等必须按 ordinary JSON data member 处理，不得成为 prototype authority。
+Prototype identity与 shared-reference identity不是 public semantic contract；JsonValue semantic value才是。
 
-实现应使用安全 data-property construction，避免 `target[key] = ...` 把 `"__proto__"` 解释成 prototype mutation。
-
-### 14.1 Deep safety
+### Deep safety
 
 Snapshot construction MUST：
 
@@ -622,49 +583,13 @@ avoid recursion proportional to JSON nesting depth
 avoid exponential expansion of shared acyclic graphs
 ```
 
-推荐：
-
-```text
-explicit work stack
-WeakMap input container → output container
-freeze after children complete
-```
-
-Shared-reference identity 是否保留不是 public contract；JsonValue semantic value 才是。
+推荐 internal strategy：explicit work stack + WeakMap memo + children-complete freeze。算法选择不形成 public API。
 
 ---
 
-## 15. Ordering Semantics
+## 13. JSON Text Boundary
 
-`ValidatedGameEntryV1.subsystems`：
-
-```text
-MUST preserve declaration order
-```
-
-但 declaration order：
-
-```text
-!= Runtime launch order
-!= dependency order
-!= startup priority
-!= shutdown order
-!= Platform binding order
-```
-
-Phase 1 topology authority 仍是 exact key set。
-
-Launcher exact join 必须按 set semantics 判断 completeness，而不能把数组位置当成 binding identity。
-
----
-
-## 16. JSON Text Boundary
-
-`parseGameEntryV1` 复用：
-
-```text
-@loomrealm/wire.parseJsonText
-```
+`parseGameEntryV1` 复用 `@loomrealm/wire.parseJsonText` observable semantics。
 
 Game Package 不建立：
 
@@ -677,15 +602,13 @@ UTF-8 decoder
 JSON-RPC
 ```
 
-当前 duplicate JSON source member observable behavior 跟随冻结的 Wire JSON text semantics。
-
-若未来需要 source-level duplicate member hard rejection，应先回到 Wire/parser closure review，不得在 Game Package 内部私藏第二解析器。
+Duplicate JSON source member 行为跟随冻结的 Wire / ECMAScript `JSON.parse` semantics。若未来要求 source-level duplicate rejection，应回到 Wire/parser contract重新评估，不得在 Game Package 私藏第二解析器。
 
 ---
 
-## 17. Resource / Complexity Boundary
+## 14. Resource / Complexity Boundary
 
-Game Package v1 当前不冻结：
+Current Game Package v1 不冻结：
 
 ```text
 MAX_GAME_ENTRY_BYTES
@@ -695,30 +618,22 @@ MAX_KEY_BYTES
 MAX_INITIAL_INPUT_BYTES
 ```
 
-因为 formal Game Package contract 尚无这些 hard policy。
+这些属于未来 formal policy；Host/product 可在 raw document acquisition阶段施加自己的资源限制，但不得偷偷改变 Game Entry semantic contract。
 
-但实现算法必须：
-
-```text
-deep-input safe
-no call-stack-overflow-defined behavior
-near-linear traversal in visited representation size where practical
-```
-
-外层 installation/product 若需要文件大小或 resource hard limit，可在读取/接收 raw document 阶段施加 Host/product policy；不得偷偷改变 Game Entry semantic contract。
+本包算法本身 MUST deep-input safe，并在正常 supported input上保持接近 visited representation size 的线性 traversal；不得重新引入 recursion-stack 或 per-depth path-copying 的平方退化。
 
 ---
 
-## 18. Launcher Consumption Boundary
+## 15. Launcher Consumption Boundary
 
-Runtime-product 路径固定：
+Runtime-product path 固定：
 
 ```text
 Game source
 → matching Platform Launcher
     → @loomrealm/game-package
     → own Platform manifest validator
-    → exact Game↔Platform join
+    → exact Game↔Platform key-set join
     → executable resolution/security/capability preflight
     → immutable PlatformLaunchPlan
     → Main-facing LogicalGameBootstrap projection
@@ -734,15 +649,21 @@ GamePackageError
 raw game.json
 ```
 
-Main 只接收 Launcher/Composition 已经投影的 logical facts。
+Game Package 不提供 `LogicalGameBootstrap` constructor 给 Main；该 projection属于 Platform Launcher / Main bootstrap integration boundary。
 
-Game Package 不提供 `LogicalGameBootstrap` constructor 给 Main；该 projection 属于 Platform Launcher / Main bootstrap integration boundary。
+M2 不用 fake planner 冒充真实 consumer qualification：
+
+```text
+M6  Hostra Launcher = first Runtime-product consumer
+M15 PWA Launcher    = second Runtime-product consumer
+M5  Main            = explicit non-consumer
+```
 
 ---
 
-## 19. Package / Build Shape
+## 16. Package / Build Shape
 
-第一实现布局：
+第一实现：
 
 ```text
 packages/game-package/
@@ -764,7 +685,7 @@ packages/game-package/
     └── package-boundary.test.mjs
 ```
 
-Package metadata baseline：
+Metadata baseline：
 
 ```text
 name = @loomrealm/game-package
@@ -778,190 +699,100 @@ TypeScript declarations
 runtime dependency = @loomrealm/wire
 ```
 
-不建立 `/testing` export；首批行为都是 deterministic pure document operations。
+不建立 `/testing` export。
 
 ---
 
-## 20. Automated Test Matrix
+## 17. Automated Closure Matrix
 
-### 20.1 Representation / parse
-
-```text
-valid-minimal-text
-malformed-json
-top-level-object-required
-direct-unknown-non-json-rejected
-wire-error-mapped
-```
-
-### 20.2 Closed schema
+Implementation baseline MUST覆盖：
 
 ```text
-exact-top-level
-exact-initial
-exact-descriptor
-unknown-top-level-rejected
-unknown-initial-rejected
-unknown-descriptor-rejected
-module-launcher-env-platform-rejected-at-schema-level
-same-reserved-looking-keys-allowed-inside-initial-input
-```
+Representation / parse
+    valid minimal text
+    malformed JSON
+    runtime non-string parse input mapped
+    top-level object required
+    unsupported JS/exotic/accessor/sparse/cyclic rejected
+    Wire failure under initial.input → INITIAL_INPUT_INVALID
+    Wire failure under subsystem key → SUBSYSTEM_KEY_INVALID
+    other Wire failure → GAME_ENTRY_INVALID
+    duplicate source member follows Wire semantics
 
-### 20.3 Version
+Closed schema / prototype safety
+    exact top-level / initial / descriptor
+    missing required member exact path
+    unknown member exact path
+    module/launcher/env/platform rejected at schema layer
+    same names allowed inside initial.input
+    inherited Object.prototype getters never executed
+    inherited properties never satisfy required members
 
-```text
-numeric-1-accepted
-missing-version-invalid
-string-1-invalid
-numeric-other-version-unsupported
-```
+Version / keys / initial
+    numeric 1 accepted
+    string 1 invalid
+    other finite numeric version unsupported
+    non-finite version representation-invalid
+    empty key rejected
+    whitespace-only follows current contract
+    case-sensitive / no trim / no normalization
+    duplicate points to later occurrence
+    declaration order preserved
+    initial target must be declared
+    arbitrary JsonValue input
 
-### 20.4 Keys
+Snapshot
+    detached from source
+    source mutation no effect
+    deeply frozen including nested input
+    deep input no call-stack overflow
+    shared DAG no exponential copy
+    __proto__ remains data
+    no getter/toJSON execution
 
-```text
-non-empty
-empty-rejected
-whitespace-only-follows-current-contract
-case-sensitive
-no-trim
-no-unicode-normalization
-duplicate-later-path
-declaration-order-preserved
-```
+Errors
+    stable GamePackageError class/constructor/code/path
+    path copied + frozen
+    total mapping / error precedence
+    message not used for branching
+    expected Wire/JSON syntax errors do not leak
 
-### 20.5 Initial
-
-```text
-initial-subsystem-string
-initial-target-declared
-undeclared-target-category
-arbitrary-json-value-input
-invalid-direct-input-category
-```
-
-### 20.6 Snapshot
-
-```text
-detached-from-source
-source-mutation-no-effect
-deeply-frozen
-nested-input-frozen
-deep-input-no-call-stack-overflow
-shared-dag-no-exponential-copy
-proto-key-remains-data
-no-getter-tojson-execution
-```
-
-### 20.7 Errors
-
-```text
-stable-game-package-error-class
-stable-code
-stable-path
-human-message-not-used-for-branching
-wire-error-not-required-by-consumer
-```
-
-### 20.8 Package boundary
-
-```text
-only-runtime-dependency-wire
-no-foundation
-no-main
-no-launcher
-no-fs-fetch-platform-api
-root-export-only
-npm-pack-dry-run
+Package boundary
+    only runtime dependency = wire
+    no foundation/main/launcher/platform API
+    root export only
+    workspace build/test
+    npm pack --dry-run
 ```
 
 ---
 
-## 21. Implementation Stages
-
-### Stage A — Package skeleton
-
-关闭：
+## 18. Implementation Stages
 
 ```text
-package metadata
-build
-root export
-wire dependency only
+Stage A  package skeleton / metadata / root export
+Stage B  public model + GamePackageError runtime contract
+Stage C  representation reuse + own-member-safe schema validation
+Stage D  total error mapping / precedence
+Stage E  detached deep-frozen snapshot
+Stage F  package conformance / boundary qualification
+Stage G  real downstream consumer qualification (M6 / M15)
 ```
 
-### Stage B — Model / Error contract
-
-关闭：
-
-```text
-exact public types
-GamePackageError class/code/path
-no convenience API expansion
-```
-
-### Stage C — Parse / Validation
-
-关闭：
-
-```text
-Wire representation reuse
-closed schemas
-version/key/initial semantics
-stable precedence
-```
-
-### Stage D — Immutable snapshot
-
-关闭：
-
-```text
-detached
-deep frozen
-deep-safe
-shared-DAG-safe
-proto-data-safe
-```
-
-### Stage E — Package qualification
-
-关闭：
-
-```text
-full automated matrix
-workspace build/test
-package dry-run
-boundary checks
-```
-
-A–E 完成后：
+Stages A–F完成后：
 
 ```text
 Implemented Baseline / Core Contract Frozen
 ```
 
-### Stage F — Real downstream consumers
-
-不在 M2 用 fake planner 冒充。
-
-真实 qualification：
-
-```text
-M6  @loomrealm/game-launcher-hostra
-    first runtime-product consumer
-
-M15 @loomrealm/game-launcher-pwa
-    second runtime-product consumer
-```
-
-M5 `@loomrealm/main` 明确不是本包消费者。
+Stage G 不阻塞 M2 local implementation closure，但决定 downstream consumer proof。
 
 ---
 
-## 22. Explicit Non-goals
+## 19. Explicit Non-goals
 
 ```text
-filesystem Game loader
-Fetch Game loader
+filesystem/Fetch Game loader
 installation/catalog lifecycle
 Platform Launch Manifest
 exact Platform binding join
@@ -970,58 +801,52 @@ Definition Module ABI
 RuntimeHosting
 Main bootstrap model
 Runtime/Frame/Data authority
-generic manifest framework
+generic manifest/schema framework
 schema DSL
 canonical JSON
+custom duplicate-key parser
 cross-platform universal launcher config
 launcher registry
 ```
 
 ---
 
-## 23. Closure Criteria
+## 20. Closure Criteria / Final Invariants
 
-Game Package 文档达到 implementation-ready 的定义：
+Game Package 达到 implementation-ready 的定义：
 
-> 实现者只需要选择内部 algorithm/file-private helper；不再需要自行决定 public API、key semantics、snapshot semantics、error category/path、validation precedence、dependency boundary 或 consumer ownership。
+> **实现者只需要选择 internal algorithm / file-private helper；不再需要自行决定 public API、key semantics、schema access safety、error category/path/precedence、snapshot semantics、dependency boundary或 consumer ownership。**
 
 M2 local close 必须证明：
 
 ```text
 untrusted text/value
-→ deterministic Game validation
-→ detached immutable ValidatedGameEntryV1
+→ deterministic own-member-safe validation
+→ detached deeply immutable ValidatedGameEntryV1
 
 failure
-→ stable GamePackageError
-→ filesystem = 0
-→ module import = 0
-→ Runtime side effect = 0
+→ stable GamePackageError constructor/code/frozen-path
+→ total expected-error mapping
+→ zero Wire/syntax error leakage
+→ filesystem/module import/Runtime side effect = 0
 ```
 
-Cross-package close 由 M6/M15 真实 launcher consumer 继续证明。
+最终 invariants：
 
----
-
-## 24. Final Invariants
-
-1. Game Entry v1 Descriptor 精确只有 `{key}`；
-2. Game Package 只拥有 common document representation/validation；
-3. Game Package 不是 Runtime/application role；
-4. Runtime-product primary consumers 是 matching Platform Launchers；
-5. Main 不依赖 `@loomrealm/game-package`；
-6. Business Subsystem 不依赖 Game Package/Launcher；
-7. JsonValue 语义直接复用 `@loomrealm/wire`；
-8. closed schema 只约束 GameEntry/Initial/Descriptor，不解释 `initial.input` business member name；
-9. key 只按 current formal contract 执行 non-empty + exact/case-sensitive equality，不 trim/normalize；
-10. duplicate 必须 reject，不 dedupe；
-11. declaration order 保留，但不形成 launch/dependency authority；
-12. successful validation 返回 detached deeply immutable snapshot；
-13. caller input 永不被 mutate/freeze；
-14. snapshot/deep validation 不得重新引入递归栈/平方路径问题；
-15. expected invalid input 统一为 stable `GamePackageError` class/code/path；
-16. Game Package 不解析 Platform manifest、不 resolve module、不创建 Runtime；
-17. matching Launcher 完成 Game + Platform full PREPARE 后才向 Main 投影 logical bootstrap；
-18. current v1 直接实现新边界，不保留旧 `{key,module}` parser/alias；
-19. 不为 Hostra/PWA 当前相似需求抽 universal launcher schema；
-20. 新 public primitive/API 只有真实消费者证明必要时才进入下一轮 closure review。
+1. Descriptor v1精确只有 `{key}`；
+2. Game Package只拥有 common document representation/validation，不是 Runtime/application role；
+3. Runtime-product primary consumers是 matching Platform Launchers；Main与 business不是消费者；
+4. JsonValue semantics直接复用 `@loomrealm/wire`；
+5. closed schema只约束 GameEntry/Initial/Descriptor，`initial.input`保持 opaque；
+6. key只执行 non-empty + exact/case-sensitive equality，不 trim/normalize；
+7. duplicate必须 reject，declaration order保留但不形成 launch/dependency authority；
+8. schema logic只读 own data members，缺失成员不得触发/接受 inherited getter/property；
+9. successful validation返回 detached deeply immutable snapshot，caller input永不被 mutate/freeze；
+10. snapshot/deep validation不得重新引入递归栈、平方 path-copy 或 shared-DAG 指数展开；
+11. expected invalid input统一为 stable `GamePackageError` constructor/class/code/path，path copy+freeze；
+12. all expected Wire/syntax failures按 total mapping收敛，不泄漏 dependency error；
+13. Game Package不解析 Platform manifest、不 resolve module、不创建 Runtime；
+14. matching Launcher完成 Game + Platform full PREPARE后才向 Main投影 logical bootstrap；
+15. current v1直接实现该模型，不保留旧 `{key,module}` parser/alias；
+16. 不为 Hostra/PWA当前相似需求抽 universal launcher schema；
+17. 新 public primitive/API只有真实消费者证明必要时才进入下一轮 closure review。
