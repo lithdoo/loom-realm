@@ -3,9 +3,9 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Evolving  
-> 主要定义：Game/Platform PREPARE、Game Package snapshot、Main logical bootstrap、protocol conformance、Role/SDK control-flow、Runner/provisioning、Hostra/PWA semantic equivalence 与 E2E  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> 主要定义：Game/Platform PREPARE、Game Package snapshot、Runtime Control mechanics、Main logical bootstrap、protocol conformance、Role/SDK control-flow、Runner/provisioning、Hostra/PWA semantic equivalence 与 E2E  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-08-21
 
 测试目标不是“消息能通”，而是证明每一层不能绕过 authority/failure/lifecycle/PREPARE invariant。
 
@@ -17,33 +17,37 @@
 Game Entry document representation
 → Game Package validation/snapshot
 → matching Launcher Game consumption
-→ Platform launch manifest
-→ exact join / executable PREPARE
+→ Platform launch manifest / exact join / PREPARE
 → LogicalGameBootstrap projection
 → Main logical bootstrap
-→ Wire primitive
-→ Protocol schema/state machine
-→ Application Profile composition
-→ Role/SDK control-flow
+
+Foundation MessageCarrier + Wire primitives
+→ Runtime Control profile limits
+→ one reader/dispatcher + one writer
+→ Control/Frame protocol state/correlation
+→ role-specific peers
+→ Main/Subsystem Host authority/control-flow mapping
+
+Renderer/Data/Content protocols
 → RuntimeHosting/Runner/provisioning integration
 → Platform composition
 → Hostra/PWA abstract-trace equivalence
 → E2E
 ```
 
-可复用 fixture跟最近 capability package；Platform/E2E fixture留仓库级 tests。
+Package-local fixture stays with nearest capability；Platform/E2E fixture stays repository-level。
 
 ---
 
 ## 2. Unified Carrier Model
 
-所有 message-oriented profiles共享：
+All message-oriented profiles share：
 
 ```text
 one carrier unit = one UTF-8 JSON text string
 ```
 
-测试：
+Tests：
 
 ```text
 websocket-text-unit
@@ -56,6 +60,8 @@ per-direction-order
 observable-close/loss
 production-adapter-no-unbounded-physical-buffering
 ```
+
+Foundation tests only opaque message/order/terminal facts；domain package tests JSON/protocol semantics。
 
 ---
 
@@ -89,28 +95,7 @@ declaration-order-preserved
 
 ### Initial input opacity
 
-Schema-level platform-looking fields are rejected：
-
-```text
-GameEntry.module
-Descriptor.launcher
-Initial.env (outside input)
-```
-
-But inside `initial.input` these ordinary business JSON member names MUST be accepted：
-
-```text
-module
-env
-platform
-launcher
-__proto__
-constructor
-```
-
-```text
-closed Game schema != recursive JSON-key blacklist
-```
+Schema-level platform-looking fields rejected；same names inside `initial.input` accepted including `module/env/platform/launcher/__proto__/constructor`。
 
 ### Validated snapshot
 
@@ -119,36 +104,21 @@ validated-result-detached-from-source
 source-mutation-after-validation-no-effect
 returned-containers-deeply-frozen
 nested-input-deeply-frozen
-caller-input-not-mutated
-caller-input-not-frozen
+caller-input-not-mutated/frozen
 deep-input-no-call-stack-overflow
 shared-acyclic-graph-no-exponential-copy
 proto-key-remains-data
 no-getter-toJSON-invocation
 ```
 
-### Errors
+### Errors / boundary
 
 ```text
-GamePackageError-class-stable
-code-stable
-path-stable
-human-message-not-compatibility-contract
+GamePackageError-class-code-path-stable
 Wire-error-not-required-by-consumer
-malformed-json-mapped-to-GAME_ENTRY_INVALID
-unsupported-version-category
-initial-input-category
-```
-
-### Package boundary
-
-```text
+malformed-json-mapped
 runtime-dependency-only-wire
-no-foundation
-no-main
-no-launcher
-no-node-platform-api
-no-filesystem-fetch
+no-main/launcher/node/filesystem/fetch
 root-export-only
 npm-pack-dry-run
 ```
@@ -157,12 +127,13 @@ npm-pack-dry-run
 
 ## 4. Consumer Boundary Tests
 
-必须防止架构回退：
+Prevent architecture regression：
 
 ```text
 main-package-has-no-game-package-dependency
 main-bootstrap-fixture-does-not-use-GameEntryV1
 business-package-has-no-game-package-or-launcher-dependency
+business-package-has-no-runtime-control-direct-dependency
 ```
 
 Hostra/PWA launcher：
@@ -172,39 +143,35 @@ launcher-prepare-consumes-Game-source-without-manual-game-package-step
 Game-validation-failure-happens-inside-launcher-PREPARE
 prepared-result-not-released-before-full-PREPARE
 logical-bootstrap-contains-only-keys-and-initial
-logical-bootstrap-has-no-formatVersion/brand/module/path/URL
+logical-bootstrap-has-no-formatVersion-brand-module-path-url
 ```
-
-This is a package/consumer invariant, not merely documentation wording。
 
 ---
 
 ## 5. Main Logical Bootstrap
 
-Main local tests SHOULD use hand-built/fake `LogicalGameBootstrap` directly：
+Main local tests use hand-built/fake `LogicalGameBootstrap` directly：
 
 ```text
 complete-key-registry-install
-initial-target/input-install
-no-formatVersion/document-metadata
+initial-target-input-install
+no-formatVersion-document-metadata
 no-GamePackageError-handling
 no-GameEntry-parser
 ```
 
-Defensive Main assertions MUST NOT recreate a second GameEntryV1 validator。
+Defensive Main assertions MUST NOT recreate GameEntryV1 validator。
 
 ---
 
 ## 6. Hostra Launcher PREPARE
 
 ```text
-raw/common-Game-entry-consumed-by-Hostra-launcher
+raw-common-Game-entry-consumed-by-Hostra-launcher
 valid-launch-hostra-json
 closed-hostra-schema
 format-version
-binding-key-duplicate
-binding-key-missing
-binding-key-undeclared
+binding-key-duplicate/missing/undeclared
 exact-game-hostra-key-set
 module-mjs-only
 absolute-traversal-url-backslash-rejection
@@ -214,14 +181,12 @@ regular-file-required
 all-required-modules-resolved-before-first-spawn
 node-runtime-capability-preflight
 host-runner-entry-capability-preflight
-manifest-cannot-select-node-executable
-manifest-cannot-select-runner-entry
-manifest-cannot-inject-arbitrary-argv-env-token-endpoint
+manifest-cannot-select-node-runner-argv-env-token-endpoint
 immutable-plan-lookup-by-key
 logical-bootstrap-projection
 ```
 
-Every PREPARE negative case proves：
+Every PREPARE negative case：
 
 ```text
 process spawn count = 0
@@ -234,26 +199,24 @@ Runtime Control establish count = 0
 ## 7. PWA Launcher PREPARE
 
 ```text
-raw/common-Game-entry-consumed-by-PWA-launcher
+raw-common-Game-entry-consumed-by-PWA-launcher
 valid-launch-pwa-json
 closed-pwa-schema
 format-version
-binding-key-duplicate
-binding-key-missing
-binding-key-undeclared
+binding-key-duplicate/missing/undeclared
 exact-game-pwa-key-set
 module-mjs-only
 absolute-traversal-external-url-backslash-rejection
 installation-registry-resolution
-same-origin/trusted-installation-policy
+same-origin-trusted-installation-policy
 all-required-modules-resolved-before-first-worker
 worker-runner-capability-preflight
-manifest-cannot-select-runner/ports/credentials/CSP
+manifest-cannot-select-runner-ports-credentials-CSP
 immutable-plan-lookup-by-key
 logical-bootstrap-projection
 ```
 
-Every PREPARE negative case proves：
+Every PREPARE negative case：
 
 ```text
 Worker creation count = 0
@@ -263,22 +226,257 @@ Runtime Control establish count = 0
 
 ---
 
-## 8. Runtime Control / Frame
+## 8. `@loomrealm/runtime-control` — Representation / Limits
 
-Runtime Control：
+M3 package tests MUST begin from deterministic `MessageCarrier`，not WebSocket/MessagePort implementations。
 
 ```text
-one-carrier-reader
-one-UTF8-JSON-text-per-message
-hello-first
-shared-sender-request-id-namespace
-no-Batch
-no-retry
-finite-deadlines
-same-attempt-control-reconnect-rejected
+actual-utf8-message-1mib-exact-and-over
+json-depth-64-exact-and-over
+no-jsonrpc-batch
+malformed-json-protocol-fatal
+invalid-jsonrpc-envelope-protocol-fatal
+unpaired-surrogate-rejected
+control-token-version-error-limits
+frame-business-string-key-member-array-identity-limits
+invalid-response-protocol-fatal
+unknown-semantic-code-protocol-fatal
 ```
 
-Frame Frozen conformance：
+Wire alignment：
+
+```text
+duplicate-json-source-follows-wire-json-parse
+parsed-result-still-closed-schema
+runtime-control-does-not-add-private-json-parser
+```
+
+Outbound resource safety：
+
+```text
+bounded-size-measurement-stops-over-limit
+shared-dag-wire-expansion-counted-per-occurrence
+no-arbitrarily-large-stringify-before-limit-check
+```
+
+---
+
+## 9. Runtime Control — Reader / Dispatcher / Writer
+
+```text
+exactly-one-code-path-iterates-carrier-messages
+control-frame-share-one-dispatcher
+responses-correlate-connection-wide
+response-correlation-not-blocked-by-long-role-handler
+request-notification-dispatch-preserves-inbound-order
+one-serialized-outbound-writer
+concurrent-high-level-sends-preserve-writer-order
+```
+
+Critical deadlock regression：
+
+```text
+handler A remains pending
+→ later carrier unit is Response to local outbound Request
+→ reader correlates Response without waiting handler A
+```
+
+This proves `single reader != blocking handler loop`。
+
+---
+
+## 10. Runtime Control — Request IDs
+
+Same sender/connection：
+
+```text
+positive-safe-integer-only
+local-allocation-1-2-3
+strict-monotonic-increase
+control-frame-share-one-namespace
+remote-id-equal-last-rejected
+remote-id-lower-than-last-rejected
+allocated-id-never-reused-after-send-error
+allocated-id-never-reused-after-timeout
+late-response-cannot-match-new-operation
+max-safe-integer-allowed
+allocator-exhaustion-no-wrap
+```
+
+Two sender directions remain independent。
+
+No connection-lifetime all-seen ID Set should be required by conformance；O(1) last-remote-ID validation is sufficient under current contract。
+
+---
+
+## 11. Runtime Control — Hello / Control State
+
+```text
+hello-first
+hello-one-shot
+hello-request-only
+protocol-version-list-1..16
+protocol-version-entry-positive-safe-integer
+protocol-version-no-duplicate
+select-control-1
+unsupported-version-semantic-error
+```
+
+Authentication ownership：
+
+```text
+auth-callback-invoked-only-after-wire-schema-version-valid
+auth-callback-receives-key-token-material
+runtime-control-does-not-own-token-registry
+invalid-key-token-consumed-mismatch-map-generic-auth-failure
+duplicate-control-connection-separate-code
+accepted-auth-binds-connection-key
+```
+
+Control legality：
+
+```text
+status-before-hello-fatal
+frame-before-hello-fatal
+identified-initializing-ready-legal
+identified-ready-legal
+repeated-status-fatal
+ready-to-initializing-fatal
+stopping-to-ready-fatal
+stopping-requires-main-shutdown-intent
+failed-blocks-normal-operation
+stopped-never-produced-by-runtime-control
+```
+
+---
+
+## 12. Runtime Control — Frame Surface / Response Barrier
+
+```text
+exact-seven-frame-requests
+exact-method-directions
+closed-params-results-outcome-error-data
+no-extra-frame-method
+recoverable-frame-semantic-codes-classified
+fatal-divergence-codes-classified
+```
+
+Response barrier：
+
+```text
+handler-success-result-encoded-before-afterResponse
+handler-semantic-error-encoded-before-afterResponse
+carrier-send-response-resolves-before-afterResponse-starts
+frame-call-response-before-child-initialize
+frame-call-response-before-child-activate
+frame-return-response-before-close
+frame-return-response-before-resume
+afterResponse-not-run-if-response-send-terminally-fails
+```
+
+Main/Subsystem authority mutation itself is tested in role packages；M3 only proves causal mechanics。
+
+---
+
+## 13. Runtime Control — Call/Return Mutation Gate
+
+Protocol-side：
+
+```text
+first-call-pending
+second-call-rejected-locally
+return-while-call-pending-rejected-locally
+call-while-return-pending-rejected-locally
+recoverable-precommit-error-releases-gate
+timeout-terminal-does-not-release-old-activation-for-normal-use
+fatal-semantic-error-terminal
+```
+
+M4 Subsystem Host separately proves pending mutation also stops ordinary input dispatch/business continuation。
+
+---
+
+## 14. Runtime Control — Deadlines
+
+Use deterministic injected scheduler；do not rely only on wall-clock sleep。
+
+Frame：
+
+```text
+frame-deadline-min-1000
+frame-deadline-max-300000
+fraction-zero-negative-over-max-rejected
+frame-deadline-stable-per-connection
+frame-deadline-not-in-rpc-params
+```
+
+Control：
+
+```text
+hello-deadline-finite-positive
+shutdown-deadline-finite-positive
+hello-shutdown-values-independent-from-frame
+```
+
+Lifecycle/race：
+
+```text
+deadline-armed-before-first-carrier-send
+deadline-covers-send-stall-and-response-wait
+response-settlement-first-cancels-deadline
+timeout-settlement-first-wins
+request-id-remains-consumed-after-timeout
+late-response-diagnostics-only
+no-retry-replay-after-timeout
+shutdown-timeout-does-not-fabricate-stopped
+```
+
+---
+
+## 15. Runtime Control — Terminal
+
+```text
+carrier-closed-terminal
+carrier-lost-terminal
+protocol-fatal-terminal
+request-timeout-terminal
+local-handler-throw-local-fatal
+terminal-first-wins
+terminal-immutable
+pending-requests-settle-exactly-once
+all-deadline-handles-retired
+no-new-normal-send-after-terminal
+close-idempotent
+late-response-cannot-recover-terminal
+no-same-attempt-control-reconnect
+```
+
+Role-specific mapping of terminal to Runtime failure/stopped is tested in Main/Supervisor later；M3 tests only typed connection fact。
+
+---
+
+## 16. Runtime Control — Package Boundary
+
+```text
+root-export-only
+no-control-frame-profile-testing-subpath
+runtime-dependencies-exactly-foundation-wire
+foundation-used-for-messagecarrier-only
+wire-used-for-generic-json-jsonrpc
+no-main-subsystem-game-package-launcher-dependency
+no-node-websocket-messageport-worker-fetch-filesystem
+no-generic-rpc-public-framework
+no-schema-dsl-public-framework
+npm-pack-dry-run
+```
+
+Declaration/API tests SHOULD fail if internal dispatcher/request allocator/pending table becomes public accidentally。
+
+---
+
+## 17. Frozen Frame Authority Conformance
+
+Frame role/authority tests remain independently required：
 
 ```text
 exact-seven-RPC
@@ -291,42 +489,54 @@ whole-suffix-fixed-point-unwind
 fresh-surviving-Caller-resume
 ```
 
+ADR 0021 does not reopen these semantics。
+
 ---
 
-## 9. Subsystem Author / Host SDK
+## 18. Subsystem Author / Host SDK
+
+M4 real consumer qualification：
 
 ```text
+subsystem-host-uses-SubsystemRuntimeControlPeer
+business-author-root-does-not-import-runtime-control
 initialize-does-not-start-handler
 activate-starts-handler-exactly-once
-child-completed/cancelled/failed-resolves-FrameOutcome
-pre-commit-recoverable-rejection-preserves-Activation
+pending-call-return-gates-ordinary-input
+child-completed-cancelled-failed-resolves-FrameOutcome
+precommit-recoverable-rejection-preserves-Activation
 Runtime-fatal-never-reenters-business-continuation
 uncaught-business-exception-maps-to-frame-failed-when-authority-healthy
 administrative-suspend-aborts-and-discards-late-completion
-business-author-surface-has-no-game-package/launcher/host-import
 ```
+
+M3 does not build fake author SDK to claim this closure。
 
 ---
 
-## 10. Main Authority / Fake Platform Ports
+## 19. Main Authority / Fake Platform Ports
+
+M5 real consumer qualification：
 
 ```text
+main-uses-MainRuntimeControlPeer
 logical-key-registry
 fake-plan-bound-RuntimeHosting
 launch-request-key-only
-physical-facts-do-not-self-mutate-authority
+hello-auth-callback-owns-LaunchAttempt-token
 Runtime lifecycle
-Frame/Activation Registry
-failure classifier/unwind golden traces
-Renderer Control snapshot
-DataAuthority generation/profile
-fake Broker does not mint authority
-Data provisioning/loss does not fail Runtime/Frame
+Frame-Activation-Registry
+Response-afterResponse-maps-to-real-Main-causal-operation
+failure-classifier-unwind-golden-traces
+Renderer-Control-snapshot
+DataAuthority-generation-profile
 ```
+
+Runtime Control terminal/fatal facts cannot self-mutate Main authority；Main performs authority commit/recovery。
 
 ---
 
-## 11. Runner / Supervision
+## 20. Runner / Supervision
 
 Hostra：
 
@@ -334,132 +544,84 @@ Hostra：
 Host-owned-Runner-is-process-entry
 business-module-not-argv-entry
 exact-planned-module-imported
-safe-env/shell-false
-spawned/connected/identified/ready-distinct
+safe-env-shell-false
+spawned-connected-identified-ready-distinct
 unexpected-code0-exit-fails-Runtime
 actual-termination-produces-stopped
 no-auto-restart
 ```
 
-PWA：
+PWA equivalent with Worker Runner。
 
-```text
-Host-owned-Worker-Runner-is-constructor-entry
-business-module-not-Worker-entry
-exact-planned-module-imported
-created/connected/identified/ready-distinct
-unexpected-termination-fails-Runtime
-actual-termination-produces-stopped
-no-auto-restart
-```
+Transport adapter tests additionally prove WebSocket/MessagePort both deliver only string units to Runtime Control and never reimplement JSON-RPC semantics/retry。
 
 ---
 
-## 12. Data / Provisioning
+## 21. Data / Provisioning
 
 ```text
-DataAuthority-S/G/P-current-gate
+DataAuthority-S-G-P-current-gate
 profile-change-fresh-generation
 one-Data-dispatcher
-same-S/G/P-sequential-reconnect
-stale/duplicate-provisioning-material-rejected
-fresh-carrier-Input-registry/state-empty
-fresh-carrier-Render-registry/snapshot-baseline
+same-S-G-P-sequential-reconnect
+stale-duplicate-provisioning-material-rejected
+fresh-carrier-Input-registry-state-empty
+fresh-carrier-Render-registry-snapshot-baseline
 ```
 
-Provisioning failure：
-
-```text
-!= Runtime failure
-!= Frame unwind
-!= DataAuthority mutation
-```
-
-Hostra tests Runner IPC + ticket/Data WS；PWA tests Port transfer/MessageChannel。
+Provisioning failure remains distinct from Runtime/Frame failure and DataAuthority mutation。
 
 ---
 
-## 13. Content / Execution Boundary
+## 22. Content / Execution Boundary
 
 ```text
 business-content-client-logical-only
 Content-capability-cannot-fetch-arbitrary-executable-target
-Runtime-token/Data-ticket/Content-credential-separated
+Runtime-token-Data-ticket-Content-credential-separated
 Platform-executable-resolver-not-exposed-as-ordinary-Content
 ```
 
 ---
 
-## 14. Cross-platform Equivalence
+## 23. Cross-platform Equivalence
 
-Shared input：
+Shared：same Game logical content/scenario/formal contracts/Content fixture。
 
-```text
-same Game Entry source/logical content
-same logical scenario/business input
-same formal contracts
-same Content fixture/expectation
-```
+Before Runtime E2E：Hostra/PWA prepared `LogicalGameBootstrap` semantically equivalent。
 
-Platform-specific：
+Runtime Control transport equivalence uses same abstract traces through：
 
 ```text
-Hostra manifest/artifact
-PWA manifest/artifact
-physical carriers/provisioning
+Memory reference trace
+Hostra WebSocket string adapter
+PWA MessagePort string adapter
 ```
 
-Before Runtime E2E，assert：
-
-```text
-Hostra prepared LogicalGameBootstrap
-== semantic PWA prepared LogicalGameBootstrap
-```
-
-Compare abstract trace：
-
-```text
-Runtime lifecycle
-Frame/Activation/Outcome/unwind
-Renderer authority
-Data S/G/P lifecycle
-Input delivered semantics
-Render authoritative replica
-Content logical response
-business observable state
-```
-
-Do not compare module path/bytes、PID/Worker id、IPC/Port/WS/HTTP physical trace。
+Compare protocol outcomes/authority facts，not physical PID/Worker/Port/WS traces。
 
 ---
 
-## 15. E2E PREPARE Gate
+## 24. E2E PREPARE Gate
 
-Every full E2E suite MUST include negative PREPARE cases：
-
-```text
-invalid Game Entry
-invalid Platform Launch Manifest
-missing/extra binding
-invalid/outside module
-hosting capability unavailable
-```
-
-All MUST prove no business Runtime side effect before failure。
+Every full E2E includes invalid Game/Platform binding/module/capability cases and proves no business Runtime side effect before PREPARE failure。
 
 ---
 
-## 16. Test Ownership Rule
+## 25. Test Ownership Rule
 
 ```text
-package-local semantic contract
-    → package tests
+low-level carrier/JSON representation
+    → Foundation / Wire
+
+Runtime Control protocol mechanics
+    → runtime-control package tests
 
 role authority/control-flow
-    → role package tests
+    → Main / Subsystem Host tests
 
-platform integration
-    → platform tests
+platform carrier establishment
+    → adapter/platform tests
 
 same abstract semantics across platforms
     → repository equivalence tests
@@ -468,17 +630,21 @@ full user-visible chain
     → E2E
 ```
 
-Do not use fake Hostra/PWA planner inside M2 to claim real consumer qualification；M6/M15 provide it。
+Do not duplicate role authority inside Runtime Control fixtures merely to make M3 look end-to-end。
 
 ---
 
-## 17. Final Test Invariants
+## 26. Final Test Invariants
 
-1. Game Package tests document validation/snapshot, not Platform launch；
-2. Main tests logical bootstrap without Game Package parser；
-3. Launcher tests begin from Game source/common document and own Game Package invocation；
-4. PREPARE negative tests prove zero Runtime side effect；
-5. Role/business dependency guards prevent Game/Launcher leakage；
-6. Frame Frozen semantics remain independently conformant；
-7. Provisioning failure domain remains distinct；
-8. Cross-platform equivalence compares logical facts/outcomes, including prepared `LogicalGameBootstrap` semantics。
+1. Game Package tests document validation/snapshot，not Platform launch；
+2. Runtime Control tests protocol mechanics，not Main/Subsystem authority；
+3. one reader/dispatcher + one writer is directly regression-tested；
+4. same-sender Request IDs strict monotonic and shared across Control/Frame；
+5. duplicate JSON source semantics match Wire，no private parser；
+6. response barrier/deadline/terminal races are deterministic with injected scheduler；
+7. Main/Subsystem Host provide real downstream qualification in M5/M4；
+8. Launcher PREPARE negative tests prove zero Runtime side effect；
+9. Role/business dependency guards prevent Game/Launcher/Runtime Control leakage；
+10. Frame Frozen authority semantics remain independently conformant；
+11. Provisioning failure domain remains distinct；
+12. Cross-platform equivalence compares logical/protocol/application outcomes，not physical artifacts。

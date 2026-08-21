@@ -8,15 +8,15 @@
 > 依赖：[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[栈式运行系统](../10-architecture/stack-runtime-system.md)  
 > 组合 Profile：[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
 > Conformance：[Frame / Call v1 Conformance](./frame-call-conformance-v1.md)  
-> 决策记录：[ADR 0010](../decisions/0010-freeze-frame-call-protocol-v1-batch-a.md)–[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)、[ADR 0018](../decisions/0018-preimplementation-v1-closure.md)  
-> 最近复核：2026-08-19
+> 决策记录：[ADR 0010](../decisions/0010-freeze-frame-call-protocol-v1-batch-a.md)–[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)、[ADR 0018](../decisions/0018-preimplementation-v1-closure.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 最近复核：2026-08-21
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 > **Main 是 Frame / Stack / Activation / InputTarget 的唯一公共 authority。Frame mutation 使用 commit barrier；已提交事实不回滚。Timeout/loss 对 state-changing Request 是 ambiguous，因此进入 Runtime failure，而不是 retry/resync。**
 
 > [!IMPORTANT]
-> 2026-08-19 在首次 conformant implementation 前，依据 ADR 0018 直接收口当前 v1 的 **transport mapping**：PWA Control MessagePort 由 structured application object 改为 `postMessage(string)`，与 Runtime Control Profile 的 UTF-8 JSON text carrier model一致。七方法、schema、transaction、authority、error、deadline、unwind semantics不变。
+> 首次 conformant implementation 前的 current-v1 corrections：ADR 0018 将 PWA Control carrier 收口为 `postMessage(string)`；ADR 0021 进一步把 same-sender Request ID 收紧为 strict monotonic，并使 source-level duplicate JSON member semantics 与 frozen Wire / ECMAScript `JSON.parse` 对齐。七方法、schema、Frame authority、transaction/commit、Outcome、error recoverability、deadline range与 failure unwind semantics均不改变。
 
 ---
 
@@ -337,6 +337,8 @@ block second call/return
 
 只有明确 recoverable pre-commit Error才释放 gate继续 current Activation。Fatal/ambiguous不恢复旧 Activation。
 
+Runtime Control package MAY enforce protocol-side single pending call/return mutation；ordinary input dispatch gate仍由 Subsystem Host/SDK实现。
+
 Main对单一 Stack的 commit-sensitive mutation MUST串行；normal transaction与 failure unwind共享 serialization authority。
 
 ---
@@ -353,9 +355,11 @@ while Main → same Subsystem dependent Request and waits
 Main MUST：
 
 ```text
-complete frame.call Response before Child initialize/activate
-complete frame.return Response before close/resume
+complete frame.call Success/Error Response send acceptance before Child initialize/activate
+complete frame.return Success/Error Response send acceptance before close/resume
 ```
+
+Runtime Control Profile提供 Response causal barrier；Main仍拥有 call/return application commit。
 
 same-Subsystem recursion不要求 nested reverse-request reentrancy。
 
@@ -399,7 +403,7 @@ push F2
 InputTarget=null
 ```
 
-Main返回 `{childFrameId:F2}` 后才：
+Main完成 `{childFrameId:F2}` Response send barrier 后才：
 
 ```text
 frame.initialize(F2,input) → ACK
@@ -429,7 +433,7 @@ F2→closing
 InputTarget=null
 ```
 
-Main先返回 `{}`，之后 healthy path：
+Main先完成 `{}` Response send barrier，之后 healthy path：
 
 ```text
 frame.close(F2) → ACK
@@ -541,7 +545,9 @@ FRAME_CONTROL_DIVERGENCE
 FRAME_CONTROL_PROTOCOL_ERROR
 ```
 
-Late Response在 failure commit后只用于 diagnostics，不恢复 authority/outcome。
+Unknown/malformed LoomRealm semantic error data is protocol-fatal；不得转为 ordinary FrameFailure。
+
+Late Response在 timeout/terminal failure commit后只用于 diagnostics，不恢复 authority/outcome。
 
 v1无 caller-driven `frame.cancel`；`cancelled`只由 current active Frame自身作为 `frame.return` outcome表达。
 
@@ -646,20 +652,30 @@ Failure unwind不控制 Render/Data lifecycle。
 
 Frame/Call message是 exactly one JSON-RPC Request/Response；Runtime Control Profile禁止 Batch。
 
-Request ID：
+Same sender / same Control Connection Request ID：
 
 ```text
 positive safe integer
 1..2^53-1
-sender-local
-Control-Connection-lifetime no reuse
+strictly monotonically increasing
+Control + Frame shared namespace
+never reused
+never wrap
 ```
 
-两个方向 namespace独立；同 sender因 Control+Frame共享 Connection，必须避免跨 domain collision。推荐 connection-wide monotonic allocator；耗尽不得 wrap/reuse。
+两个 sender direction namespace独立。
+
+Receiver MUST treat：
+
+```text
+incoming Request id <= lastRemoteRequestId
+```
+
+as protocol-fatal。
 
 Request ID只做 correlation，不是 operation identity。
 
-Plain JSON禁止：
+Plain JSON application representation禁止：
 
 ```text
 undefined
@@ -672,8 +688,9 @@ Blob / File / MessagePort
 DOM / Process / Host handle
 custom prototype object
 unpaired surrogate
-duplicate object member
 ```
+
+Source-level duplicate object members are not independently detectable after frozen Wire parsing；their observable semantics follow Runtime Control Profile / Wire / ECMAScript `JSON.parse`。Parsed params/results/error data仍必须满足 closed schema。
 
 整数必须 safe integer；更大整数用 string。
 
@@ -710,9 +727,11 @@ FrameFailure.message                 0..4096 UTF-8 bytes
 ^[A-Za-z][A-Za-z0-9._:-]{0,127}$
 ```
 
-所有平台都直接对**实际 carrier UTF-8 JSON text application unit**执行相同 byte limit；不再存在 PWA structured-object/reference-equivalent双重计量模型。
+All platforms enforce same limits over actual carrier UTF-8 JSON text application unit；no PWA structured-object/reference-equivalent sizing。
 
-Sender MUST outbound preflight；malformed/oversize/invalid Response按 protocol-fatal处理。
+Sender MUST perform bounded outbound preflight；it MUST NOT first materialize an arbitrarily expanding serialized value and only then discover the 1 MiB violation。
+
+Malformed/oversize/invalid Response is protocol-fatal。
 
 ---
 
@@ -725,12 +744,34 @@ Sender MUST outbound preflight；malformed/oversize/invalid Response按 protocol
 integer ms
 sender-local
 stable for one Control Connection
-monotonic elapsed-time source
+relative elapsed-time source
 not in RPC params
 not negotiated per request
 ```
 
-Main负责 initialize/activate/suspend/resume/close；Subsystem负责 call/return。双方可不同 deadline。
+Request lifecycle：
+
+```text
+preflight
+→ allocate/consume Request ID
+→ insert pending correlation
+→ arm deadline
+→ serialized carrier.send
+→ await correlated Response / timeout / terminal
+```
+
+Deadline therefore covers local send wait and remote response wait。
+
+Race：
+
+```text
+pending settlement first-wins
+```
+
+Response settles first → cancel/retire deadline。  
+Deadline settles first → timeout ambiguous；later Response diagnostics only；ID never reused。
+
+Main负责 initialize/activate/suspend/resume/close；Subsystem负责 call/return。双方可配置不同 stable Frame deadline。
 
 Timeout = ambiguous → Runtime failure；no retry。
 
@@ -738,7 +779,7 @@ Timeout = ambiguous → Runtime failure；no retry。
 
 ## 19. Transport Mapping
 
-本协议的 carrier mapping由 Runtime Control Application Profile v1统一：
+Carrier mapping由 Runtime Control Application Profile v1统一：
 
 ```text
 one carrier application unit
@@ -792,7 +833,9 @@ frame.capabilities
 
 Frame版本由 Runtime Control Profile v1静态绑定。Runtime `ready`必须完整支持其角色所需 Frame v1。
 
-v1无 minor wire version/downgrade/private compatibility extension。不兼容 method/field/authority/commit/error/unwind/ordering/limit变化通常需要新协议版本；本次首次实现前 transport-mapping reset由 ADR 0018特例记录。
+v1无 minor wire version/downgrade/private compatibility extension。
+
+ADR 0018/0021 only cover first-implementation corrections already recorded；after conformant compatibility obligation exists, incompatible method/field/authority/commit/error/unwind/ordering/limit changes require normal version/migration governance。
 
 ---
 
@@ -803,7 +846,7 @@ v1无 minor wire version/downgrade/private compatibility extension。不兼容 m
 3. lifecycle only starting/active/suspended/closing/closed，Outcome独立；
 4. frameId/activationId Session unique、never reused；
 5. exactly seven JSON-RPC Requests；closed schema；
-6. call/return Response先于 dependent reverse RPC；ordinary call不用 reverse suspend；
+6. call/return Response send barrier先于 dependent reverse RPC；ordinary call不用 reverse suspend；
 7. child-call suspension通过对应 Child Outcome + fresh resume恢复；administrative suspend无 generic resume；
 8. activate/resume ACK-before-InputTarget publication；
 9. post-commit facts不 rollback；accepted outcome不可撤销；
@@ -813,8 +856,10 @@ v1无 minor wire version/downgrade/private compatibility extension。不兼容 m
 13. failed Runtime Frame可 logical retire；healthy doomed Frame best-effort close；
 14. accepted outcome preserved；surviving Caller只 fresh Activation resume；
 15. failure unwind不控制 Render/Data lifecycle；
-16. Request ID positive safe integer、sender connection lifetime不复用；
-17. plain JSON + Frozen wire limits + finite sender-local deadlines；
-18. current Desktop/PWA mapping统一 UTF-8 JSON text string；
-19. Frame v1无独立 handshake/downgrade；
-20. 兼容判断以主协议 + Conformance Profile适用 fixtures为准。
+16. same-sender Request ID strict monotonically increasing、positive safe integer、connection lifetime never reused/wrapped；
+17. source duplicate JSON member semantics跟随 Runtime Control Profile/Wire；closed parsed schemas仍强制；
+18. plain JSON + Frozen wire limits + bounded outbound preflight + finite sender-local deadlines；
+19. Frame Request deadline覆盖 send + response，pending settlement first-wins；late Response无恢复作用；
+20. current Desktop/PWA mapping统一 UTF-8 JSON text string；
+21. Frame v1无独立 handshake/downgrade；
+22. 兼容判断以主协议 + Conformance Profile适用 fixtures为准。

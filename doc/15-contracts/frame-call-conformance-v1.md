@@ -5,18 +5,36 @@
 > Profile 版本：1  
 > 适用协议：`loomrealm.frame-call / 1`  
 > 依赖：[Frame / Call Protocol v1](./frame-call-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)  
-> 决策记录：[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)、[ADR 0018](../decisions/0018-preimplementation-v1-closure.md)  
-> 最近复核：2026-08-19
+> 决策记录：[ADR 0015](../decisions/0015-freeze-frame-call-protocol-v1-batch-f.md)、[ADR 0018](../decisions/0018-preimplementation-v1-closure.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 最近复核：2026-08-21
 
 本文只定义如何验证 Frame / Call v1；与主协议冲突时以主协议为准。
 
-2026-08-19 首次实现前的 transport mapping reset 将 PWA fixture从 structured object carrier改为 `postMessage(string)`；Frame transaction/wire method semantics不变。
+Current first-implementation corrections：
+
+```text
+ADR 0018
+    PWA structured application object
+    → postMessage(string)
+
+ADR 0021
+    same-sender Request ID
+    → strict monotonic
+
+    duplicate JSON source member fixture
+    → follow frozen Wire / ECMAScript JSON.parse observable semantics
+
+    deadline / Response barrier / terminal mechanics
+    → explicit implementation-level conformance
+```
+
+Frame transaction/authority/Outcome/unwind semantics不变。
 
 ---
 
 ## 1. Conformance Claim
 
-只能声明：
+Only：
 
 ```text
 LoomRealm Frame / Call v1 Main Conformant
@@ -24,7 +42,7 @@ LoomRealm Frame / Call v1 Subsystem Conformant
 LoomRealm Frame / Call v1 Transport Adapter Conformant
 ```
 
-Report至少：
+Report at minimum：
 
 ```text
 protocol = loomrealm.frame-call
@@ -34,7 +52,7 @@ role = main | subsystem | transport
 result = pass
 ```
 
-不得声明 partial compatibility。
+No partial compatibility claim。
 
 ---
 
@@ -63,13 +81,13 @@ interface FrameCallFixtureDescriptorV1 {
 }
 ```
 
-fixture revision只表示覆盖增加/当前 v1 preimplementation correction，不成为业务协议协商字段。
+fixture revision only records coverage/current-v1 preimplementation corrections；not a business protocol negotiation field。
 
 ---
 
 ## 3. Normalized State / Faults
 
-Main trace至少：
+Main trace at minimum：
 
 ```text
 Stack bottom→top
@@ -80,7 +98,7 @@ failedRuntimeKeys
 pending Request/fault when relevant
 ```
 
-Harness至少支持：
+Harness supports：
 
 ```text
 timeout
@@ -93,7 +111,7 @@ protocol-error
 late-response
 ```
 
-Timeout SHOULD使用 virtual/injectable monotonic clock。
+Timeout fixtures MUST use deterministic injectable relative scheduler or equivalent virtual elapsed-time source；wall-clock sleeping alone cannot be the only conformance proof。
 
 ---
 
@@ -154,7 +172,7 @@ extra-field-invalid-params
 
 ---
 
-## 6. Transactions
+## 6. Transactions / Response Barrier
 
 ```text
 initial-initialize-before-activate
@@ -162,12 +180,14 @@ initial-activate-ack-before-publish
 call-accept-suspends-caller
 call-accept-revokes-old-activation
 call-success-before-child-initialize
+call-response-send-accepted-before-child-initialize
 ordinary-call-no-reverse-suspend
 call-gap-inputtarget-null
 child-activate-ack-before-publish
 return-accept-stores-outcome
 return-accept-revokes-old-activation
 return-success-before-close
+return-response-send-accepted-before-close
 return-success-not-caller-resumed
 close-before-resume
 resume-ack-before-publish
@@ -177,6 +197,8 @@ precommit-recoverable-abort
 postcommit-no-activation-rollback
 accepted-outcome-terminal
 ```
+
+Response barrier fixture MUST prove dependent `afterResponse`/reverse RPC starts only after the corresponding Response has been accepted by the local `MessageCarrier.send()` ordering boundary。
 
 ---
 
@@ -200,6 +222,7 @@ frame-state-divergence-fatal
 activation-divergence-fatal
 stack-divergence-fatal
 ownership-divergence-fatal
+unknown-semantic-error-code-fatal
 protocol-error-fatal
 no-caller-driven-cancel
 ```
@@ -239,7 +262,7 @@ session-termination-no-forced-resume
 
 ## 9. Hard Limits
 
-每项 exactly-at-limit / one-over-limit：
+Each exactly-at-limit / one-over-limit：
 
 ```text
 actual-json-text-message-1mib
@@ -255,10 +278,9 @@ target-subsystem-key-256-bytes
 frame-failure-code-128
 frame-failure-message-4096
 request-id-max-safe-integer
-request-id-reuse-rejected
 ```
 
-共同：
+Common representation/profile：
 
 ```text
 nan-rejected
@@ -266,12 +288,22 @@ positive-infinity-rejected
 negative-infinity-rejected
 unsafe-integer-rejected
 unpaired-surrogate-rejected
-duplicate-json-object-member-rejected
 jsonrpc-batch-rejected
 invalid-response-is-protocol-fatal
+outbound-shared-dag-size-preflight-bounded
 ```
 
-所有 transport都直接验证实际 UTF-8 JSON text carrier unit；不存在 PWA object/reference-equivalent独立计量规则。
+Source duplicate-member correction：
+
+```text
+duplicate-json-source-follows-wire-json-parse
+parsed-result-still-closed-schema
+no-private-duplicate-member-parser
+```
+
+A valid fixture SHOULD demonstrate last parsed member semantics using the current Wire parser；it MUST NOT require lexical duplicate rejection that `parseJsonText` cannot observe。
+
+All transports validate actual UTF-8 JSON text carrier unit；no PWA object/reference-equivalent sizing rule。
 
 ---
 
@@ -294,7 +326,7 @@ subsystem-call-deadline-present
 subsystem-return-deadline-present
 ```
 
-共同：
+Common：
 
 ```text
 deadline-min-1000ms
@@ -303,30 +335,65 @@ deadline-integer-only
 deadline-stable-for-connection
 deadline-not-in-rpc-params
 deadline-not-game-package-controlled
-deadline-uses-monotonic-clock
+deadline-uses-relative-monotonic-scheduler
+deadline-armed-before-first-carrier-send
+deadline-covers-send-and-response
+response-before-timeout-cancels-deadline
+timeout-before-response-wins-settlement
 timeout-remains-ambiguous-no-retry
 ```
+
+Late response after timeout MUST NOT settle the same operation twice or restore Frame/Activation authority。
 
 ---
 
 ## 11. Request ID
 
-同一 sender / Control Connection：
+Same sender / Control Connection：
 
 ```text
 positive-safe-integer-only
-zero/negative/fraction/string/null-rejected
-lifetime-reuse-rejected
-pending-collision-across-control-domains-rejected
+zero-negative-fraction-string-null-rejected
+strict-monotonic-increase
+control-frame-shared-namespace
+remote-id-regression-rejected
+remote-id-reuse-rejected
+pending-collision-across-control-domains-impossible-with-allocator
 late-response-cannot-match-new-operation
 allocator-exhaustion-does-not-wrap
 ```
 
-两个 sender方向 namespace独立。
+Two sender direction namespaces independent。
+
+Expected local allocator trace：
+
+```text
+1, 2, 3, ... Number.MAX_SAFE_INTEGER
+```
+
+Gaps MAY occur only if an allocated ID is consumed by a failed/pre-send/terminal attempt；an allocated value MUST never be reused and future IDs remain greater。
 
 ---
 
-## 12. Desktop WebSocket Transport
+## 12. Runtime Control Dispatcher Mechanics
+
+Conformance fixtures for the enclosing shared Control Connection：
+
+```text
+single-carrier-reader
+control-frame-share-dispatcher
+response-correlation-not-blocked-by-long-handler
+inbound-request-notification-order-preserved
+single-serialized-writer
+pending-response-correlated-connection-wide
+terminal-settles-pending-once
+```
+
+This section verifies Frame operates correctly inside Runtime Control Profile；it does not create a separate Frame dispatcher contract。
+
+---
+
+## 13. Desktop WebSocket Transport
 
 ```text
 websocket-text-message-only
@@ -341,13 +408,13 @@ oversize-protocol-failure
 connection-loss-propagated
 ```
 
-WebSocket fragmentation不改变 complete-message boundary。
+WebSocket fragmentation does not change complete-message boundary。
 
 ---
 
-## 13. PWA MessagePort Transport
+## 14. PWA MessagePort Transport
 
-在 Platform已 provisioning Control MessagePort前提：
+With Platform already provisioning Control MessagePort：
 
 ```text
 postmessage-payload-is-string
@@ -358,17 +425,17 @@ no-adapter-retry
 no-jsonrpc-batch
 actual-utf8-text-byte-hard-limit
 structured-object-payload-rejected
-undefined/bigint/application-host-object-not-representable
+undefined-bigint-application-host-object-not-representable
 connection-loss-propagated
 ```
 
-MessagePort/Worker如何创建转移属于 Platform implementation，不属于 Frame conformance。
+MessagePort/Worker creation/transfer belongs to Platform implementation，not Frame conformance。
 
 ---
 
-## 14. Cross-transport Equivalence
+## 15. Cross-transport Equivalence
 
-相同 abstract trace：
+Same abstract trace：
 
 ```text
 initial-frame-success
@@ -384,13 +451,13 @@ accepted-outcome-then-crash
 recovery-resume-failure
 ```
 
-Desktop/PWA MUST产生相同 Frame authority/outcome/Activation/unwind结果。
+Desktop/PWA MUST produce same Frame authority/outcome/Activation/unwind results。
 
-允许差异只有 carrier/bootstrap/platform lifecycle integration。
+Allowed differences only carrier/bootstrap/platform lifecycle integration。
 
 ---
 
-## 15. Version / Binding
+## 16. Version / Binding
 
 ```text
 protocol-id-is-loomrealm-frame-call
@@ -404,29 +471,31 @@ partial-method-implementation-not-conformant
 custom-retry-extension-not-conformant
 closed-schema-extension-not-conformant
 runtime-control-profile-uses-json-text-carrier
+runtime-control-request-id-is-strict-monotonic
 ```
 
 ---
 
-## 16. Fixture Revision Rule
+## 17. Fixture Revision Rule
 
-新增 fixture MAY增加 `fixtureSetRevision` 而保持 protocolVersion=1，只要验证当前 Frozen Contract已经决定的行为。
+Adding fixtures MAY increase `fixtureSetRevision` while `protocolVersion=1` when they verify semantics already fixed by current Frozen Contract/current preimplementation correction。
 
-ADR 0018记录的首次实现前 transport-mapping correction需要新的 fixtureSetRevision，旧 revision不能自动声明通过当前 revision。
+ADR 0018 and ADR 0021 corrections require a fixture revision that includes their current transport/request-ID/Wire-alignment/mechanics fixtures；older revision cannot automatically claim current conformance。
 
-后续若要改变 method/field/authority/commit/suspend/error/timeout/unwind/limit semantics，则必须重新经过协议版本/冻结治理；ADR 0018的 preimplementation特例不能无限延伸。
+After first conformant compatibility obligation exists, changes to method/field/authority/commit/suspend/error/timeout/unwind/limit semantics require normal protocol version/freeze governance；ADR 0018/0021 are not permanent exemptions。
 
 ---
 
-## 17. Final Rule
+## 18. Final Rule
 
 ```text
 Frame / Call v1 conformance
 =
 current Frozen Frame / Call v1
++ current Runtime Control Profile mechanics where applicable
 + applicable fixture catalog
 + explicit fixtureSetRevision
 + same fault → same authority outcome
 ```
 
-内部 class/thread/queue/transport convenience不属于 compatibility依据。
+Internal class/thread/queue/transport convenience is not compatibility evidence。

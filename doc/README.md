@@ -54,48 +54,48 @@
 36. [测试策略](./30-implementation/testing-strategy.md)
 37. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
 38. [ADR 索引](./decisions/README.md)
-39. [ADR 0019：Game Logical Topology 与 Platform Launch Manifest 分离](./decisions/0019-platform-launch-manifest-boundary.md)
+39. [ADR 0020：Game Entry 消费边界归 Platform Launcher](./decisions/0020-game-entry-consumer-boundary.md)
+40. [ADR 0021：Runtime Control 首次实现前收口 current v1 mechanics](./decisions/0021-runtime-control-preimplementation-closure.md)
 
 ---
 
 ## 当前 Game / Launch 闭环
 
 ```text
-Game Entry {key...} + initial
+Game installation / source
         ↓
-@loomrealm/game-package
-        ↓
-Validated logical topology
-        +
-current Platform Launch Manifest
-        ↓
-exact key-set join
-all required executable resolution
-installation/security containment
-hosting capability validation
+matching Platform Launcher PREPARE
+    ├── @loomrealm/game-package
+    │       Game Entry {key...} + initial validation
+    ├── current Platform Launch Manifest
+    ├── exact Game↔Platform key-set join
+    ├── all required executable resolution
+    └── installation/security/hosting preflight
         ↓
 immutable PlatformLaunchPlan
++
+immutable LogicalGameBootstrap
 ────────────────────────────────────
 first business Runtime side effect
         ↓
+apps/* installs Main
+        ↓
 Main launch(key)
         ↓
-Platform RuntimeHosting
+plan-bound RuntimeHosting
         ↓
 Host-owned Runner
         ↓
 platform-selected Subsystem Definition Module
         ↓
 @loomrealm/subsystem/host
-        ↓
-business role
 ```
 
 Hostra使用 `launch.hostra.json`；PWA使用 `launch.pwa.json`。
 
-两个配置 schema独立，不建立 universal launcher option bag。
+Game Package是 Launcher共享的 document validation capability；Main不解析 Game Entry，也不持有 `formatVersion`/module/path/URL。
 
-Phase 1 Game key set与 current Platform binding key set严格相等。
+两个 Platform config schema独立，不建立 universal launcher option bag；Hostra/PWA Definition artifact MAY不同，只要求 same logical key / author ABI / formal semantics / business-observable result。
 
 ---
 
@@ -103,10 +103,16 @@ Phase 1 Game key set与 current Platform binding key set严格相等。
 
 ```text
 Game Package
-    logical topology + initial input
+    Game Entry document validation only
+
+Runtime Control
+    Control/Frame protocol mechanics
+    connection-local state/correlation/deadlines/terminal
 
 Main
+    Launch Attempt/bootstrap credential authority
     Runtime/Frame/Activation/InputTarget/DataAuthority
+    Runtime failure unwind
 
 Platform Launcher
     executable binding
@@ -116,10 +122,14 @@ Platform Launcher
 
 Platform Composition
     complete physical Session
+    carrier establishment
     Renderer/Data/Content/provisioning coordination
 
-Subsystem
-    business/Interest/Render authority
+Subsystem Host
+    local Frame/Input state + protocol/business mapping
+
+Subsystem business
+    business/Interest/Render authority through author SDK
 
 Renderer
     read-only Main mirror + producer/replica
@@ -129,35 +139,63 @@ Module path、resolved path/URL、Node/Worker选项不进入 Main/application pr
 
 ---
 
-## Runtime / Frame
+## Runtime Control / Frame
 
 ```text
 Runtime Control Profile v1
 = Subsystem Control v1 + Frame / Call v1
 ```
 
-Frame v1：
+Current M3 mechanics：
+
+```text
+MessageCarrier<string>
+→ bounded UTF-8 JSON/Profile validation
+→ one connection-wide reader/dispatcher
+→ role-specific Main / Subsystem Host peers
+```
+
+Connection invariants：
+
+```text
+one inbound reader
+Response correlation not blocked by role handler
+one serialized outbound writer
+Control + Frame same-sender Request IDs strictly monotonic
+finite deadlines
+pending/terminal settlement first-wins
+late Response diagnostics only
+no retry/replay/reconnect
+```
+
+Response causal barrier：
+
+```text
+frame.call Response send accepted
+→ Child initialize / activate
+
+frame.return Response send accepted
+→ close / resume
+```
+
+Runtime Control提供 barrier/mechanics，不拥有 Main Stack application commit。
+
+JSON source duplicate members follow frozen `@loomrealm/wire` / ECMAScript `JSON.parse` observable semantics；Runtime Control不建立第二套 parser。Parsed object仍必须满足 exact closed schema。
+
+Frame v1 authority semantics remain Frozen：
 
 ```text
 exact seven Requests
 Main-owned Stack/Activation/InputTarget
-Response-before-dependent-RPC
 ACK-before-publication
 Success = known commit
-Explicit Error = known no-commit/fatal
+recoverable Explicit Error = known no-commit
 timeout/loss ambiguous → Runtime failure
 no retry / post-commit no rollback
-fixed-point failure unwind
+whole-suffix fixed-point failure unwind
 ```
 
-`@loomrealm/subsystem` author projection进一步保证：
-
-```text
-FrameOutcome = completed / cancelled / failed
-child Outcome resolves frame.call()
-only pre-commit recoverable rejection may reject
-Runtime-fatal/ambiguous never re-enters business continuation
-```
+`@loomrealm/subsystem/host` 在 M4 将 typed Runtime Control outcome/pending state映射成 local Frame/Input/business control-flow；business author root不直接依赖 Runtime Control。
 
 ---
 
@@ -208,6 +246,8 @@ WebSocket   text message
 MessagePort postMessage(string)
 Memory      string
 ```
+
+Foundation treats string opaque；Wire owns generic JSON representation；profile/capability package owns domain limits/state semantics。
 
 Structured Clone只用于 Platform bootstrap/Port transfer。
 
@@ -271,11 +311,12 @@ Readonly Content API
 @loomrealm/map → @loomrealm/subsystem
 ```
 
-业务不得依赖：
+Business MUST NOT depend on：
 
 ```text
 @loomrealm/subsystem/host
-game-launcher-hostra/pwa
+@loomrealm/runtime-control
+game-package / game-launcher-hostra/pwa
 WebSocket/MessagePort
 Node/Worker Runner
 Platform provisioning
@@ -297,12 +338,14 @@ Protocol boundary
 
 ```text
 foundation/wire             low-level primitives
-contract/capability         protocol/data/game mechanics
+game/runtime/data capability document/protocol mechanics
 role packages               platform-neutral role APIs
 runtime launch integration  game-launcher-hostra/pwa
 technical adapters          transport/launcher-node/content mechanisms
 apps/desktop|pwa            final Platform composition roots
 ```
+
+`@loomrealm/runtime-control` first publish surface root-only，runtime dependencies exactly Foundation + Wire；不发布 generic RPC/schema framework。
 
 Platform Architecture不自动产生 `platform-*` 大包；两个 `game-launcher-*` 只承担窄 Runtime launch capability。
 
@@ -310,42 +353,71 @@ Platform Architecture不自动产生 `platform-*` 大包；两个 `game-launcher
 
 ## Current Reset / Governance
 
-ADR 0018建立 preimplementation direct-current-v1治理与 Frame/Data/SDK closure。
+ADR 0018 establishes preimplementation direct-current-v1 governance。
 
-ADR 0019继续按该治理规则直接收口：
+ADR 0019/0020 close Game topology / Platform binding / Game consumer boundary：
 
 ```text
 Game Descriptor {key,module}
 → Game Descriptor {key}
 + platform-specific Launch Manifest
-+ exact join / full preflight LaunchPlan
++ matching Launcher PREPARE
++ LogicalGameBootstrap
 ```
 
-没有 v2、deprecated alias或 dual parser。
+ADR 0021 closes M3 Runtime Control mechanics before first conformant implementation：
 
-ADR 0019只 supersede ADR 0018 的 Game `{key,module}` / same-artifact结论；Frame/Data/SDK/carrier/governance继续有效。
+```text
+candidate/dynamic session surface
+→ root-only role-specific peers
+
+never-reuse Request IDs
+→ strict-monotonic same-sender namespace
+
+blocking-single-reader ambiguity
+→ one reader with immediate Response correlation
+
+implicit response ordering
+→ serialized writer + Response causal barrier
+
+unspecified deadline/terminal races
+→ finite deadlines + first-settlement/terminal-first-wins
+
+source duplicate-member rejection text
+→ frozen Wire / JSON.parse observable semantics
+```
+
+No Runtime Control v2 or compatibility parser is created。ADR 0021 does not reopen Frame seven methods/authority/Outcome/commit/unwind semantics。
+
+Once real conformant compatibility obligation forms, future incompatible changes require normal version/migration governance。
 
 ---
 
 ## 当前状态
 
 ```text
-Game Package v1                         Active / Normative / Stabilizing
-Hostra Launcher / Node Runner v1        Active / Normative / Stabilizing
-PWA Launcher / Worker Runner v1         Active / Normative / Stabilizing
-Subsystem Control v1                    Stabilizing
-Runtime Control Profile v1              Stabilizing
-Frame / Call v1                         Active / Normative / Frozen
-Renderer Control v1                     Active Design / Draft
-Renderer Data Profile v1                Active Design / Draft / Stabilizing
-Data Connection v1                      Active Design / Draft
-User Input v1                           Core Closure Candidate / Stabilizing
-Render Update v1                        Closure Candidate / Stabilizing
-Content API v1                          Active / Normative / Evolving
-Platform Composition                    Active Design / Evolving
+Foundation / Wire                        Implemented Baseline / Core Contract Frozen
+Game Package                             Implemented Baseline / Core Contract Frozen
+Runtime Control Profile / package design Implementation Ready / Core Contract Frozen
+Frame / Call v1                          Active / Normative / Frozen
+Hostra Launcher / Node Runner v1         Active / Normative / Stabilizing
+PWA Launcher / Worker Runner v1          Active / Normative / Stabilizing
+Renderer Control v1                      Active Design / Draft
+Renderer Data Profile v1                 Active Design / Draft / Stabilizing
+Data Connection v1                       Active Design / Draft
+User Input v1                            Core Closure Candidate / Stabilizing
+Render Update v1                         Closure Candidate / Stabilizing
+Content API v1                           Active / Normative / Evolving
+Platform Composition                     Active Design / Evolving
 ```
 
-当前设计重点已经从扩大协议面转为 implementation/conformance：证明 Game→Platform preflight→Runner、Definition→Author SDK→Role Ports→Physical Platform，以及 Protocol→SDK control-flow 三个方向都不能绕过 authority/failure invariants。
+下一实现门：
+
+```text
+M3 @loomrealm/runtime-control
+```
+
+之后 M4 Subsystem Host 与 M5 Main 分别提供真实 role-consumer qualification。
 
 ---
 
@@ -356,3 +428,5 @@ Platform Composition                    Active Design / Evolving
 - [ADR 0017：平台是系统级 Composition Boundary](./decisions/0017-system-level-platform-composition.md)
 - [ADR 0018：首次实现前直接收口 current v1](./decisions/0018-preimplementation-v1-closure.md)
 - [ADR 0019：Game Logical Topology 与 Platform Launch Manifest 分离](./decisions/0019-platform-launch-manifest-boundary.md)
+- [ADR 0020：Game Entry 消费边界归 Platform Launcher](./decisions/0020-game-entry-consumer-boundary.md)
+- [ADR 0021：Runtime Control 首次实现前收口 current v1 mechanics](./decisions/0021-runtime-control-preimplementation-closure.md)

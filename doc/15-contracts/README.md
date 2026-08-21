@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
-> 最近复核：2026-08-20
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 最近复核：2026-08-21
 
 契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
 
@@ -46,6 +46,7 @@ Subsystem Control v1
     ↓
 Runtime Control Application Profile v1
     = Control v1 + Frame / Call v1
+    = one reader + one writer + shared strict-monotonic sender IDs
 
 Frame / Call v1                         Active / Normative / Frozen
     + Conformance v1
@@ -196,17 +197,55 @@ subsystem.status
 subsystem.shutdown
 ```
 
-只拥有 Runtime identity/lifecycle。
+只拥有 Runtime identity/lifecycle protocol semantics；Launch Attempt/token authority仍属于 Main。
 
 [Runtime Control Profile v1](./runtime-control-profile-v1.md)：
 
 ```text
 Control 1 + Frame 1
-one connection-wide dispatcher
-shared sender Request ID namespace
-one UTF-8 JSON text unit per JSON-RPC message
-no Batch
+one UTF-8 JSON text unit per JSON-RPC object
+one connection-wide inbound reader/dispatcher
+one serialized outbound writer
+same-sender Control+Frame Request IDs strict monotonic
+finite deadlines
+terminal/pending settlement first-wins
+no Batch / retry / replay / reconnect
 ```
+
+Runtime Control implementation boundary：
+
+```text
+Foundation MessageCarrier
+        ↓
+Wire parse/decode
+        ↓
+Runtime Control profile limits/state/correlation
+        ↓
+role-specific Main / Subsystem Host peers
+```
+
+Reader MUST remain able to correlate Response while role handler is awaiting；single reader不得退化为 blocking handler loop。
+
+Response causal barrier：
+
+```text
+handler reply
+→ Response carrier.send accepted
+→ dependent afterResponse action
+```
+
+This realizes Frozen Frame call/return Response-before-dependent-RPC without moving Main Stack authority into Runtime Control。
+
+Request IDs：
+
+```text
+positive safe integer
+strict monotonically increasing per sender/connection
+Control + Frame shared same-sender namespace
+never reuse / never wrap
+```
+
+JSON source duplicate members follow frozen Wire / ECMAScript `JSON.parse` observable semantics；Runtime Control MUST NOT add a second duplicate-member parser。Parsed result仍 exact closed schema。
 
 `ready` 不携 Data/Platform executable material；same-attempt Control reconnect不存在。
 
@@ -231,7 +270,7 @@ Subsystem → Main
 ```text
 Main authority
 one-shot Activation
-Response-before-dependent-RPC
+Response send barrier before dependent RPC
 ACK-before-publication
 post-commit no rollback
 Success = known commit
@@ -243,7 +282,7 @@ accepted outcome preserved
 fresh surviving Caller resume
 ```
 
-Game/Launcher boundary调整不改变 Frame semantics。
+ADR 0021 only closes Runtime Control mechanics/Wire alignment；does not reopen Frame semantic freeze。
 
 ---
 
@@ -381,6 +420,8 @@ one carrier unit = one UTF-8 JSON text string
 
 WebSocket / MessagePort / MemoryCarrier 共享 application value model；Structured Clone不扩大协议 payload。
 
+Foundation treats string opaque；Wire owns generic JSON representation；profile package owns domain limits/state mechanics。
+
 ---
 
 ## 15. Authority Summary
@@ -396,12 +437,18 @@ Platform Launcher
     LogicalGameBootstrap projection
     plan-bound RuntimeHosting / Runner integration
 
+Runtime Control
+    Control/Frame protocol mechanics
+    connection-local protocol state/correlation/deadlines
+    no Main/Subsystem business authority
+
 Main
     Runtime/Frame/Activation/InputTarget/DataAuthority
+    Launch Attempt/bootstrap credential authority
     no Game document dependency
 
 Subsystem
-    business state / Interest[F] / Render Domains
+    business/local Frame/Input state / Interest[F] / Render Domains
 
 Renderer
     read-only Main mirror / Producers / Render replica
@@ -419,27 +466,32 @@ Implemented Baseline：
 ```text
 @loomrealm/foundation
 @loomrealm/wire
+@loomrealm/game-package
 ```
 
-Next：
+Current next implementation gate：
 
 ```text
-M2 Game Package local implementation
-M3 Runtime Control
-M4 Subsystem author/host
-M5 Main logical bootstrap + fake RuntimeHosting
+M3 @loomrealm/runtime-control
+    DESIGN / current contracts implementation-ready
+```
+
+Then：
+
+```text
+M4 Subsystem author/host = first real role consumer
+M5 Main = second real role consumer + authority vertical slice
 M6 Hostra Launcher = first real Game Package runtime-product consumer
 ...
-M15 PWA Launcher = second real Game Package runtime-product consumer
+M15 PWA Launcher = second Game Package consumer
 ```
 
-Implementation期间优先证明：
+Implementation priority：
 
 ```text
-Game source → matching Launcher → full zero-side-effect PREPARE
-Prepared result → Main logical facts + plan-bound RuntimeHosting
-business Definition → Author SDK → Role Core/Ports
-formal protocol outcome → SDK control-flow
-DataAuthority → Broker → current carrier
-Hostra/PWA same abstract trace across platform-specific artifacts
+established carrier
+→ bounded Runtime Control mechanics
+→ role-specific peers
+→ Subsystem Host/Main real consumer qualification
+→ RuntimeHosting/Runner integration
 ```

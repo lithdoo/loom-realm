@@ -4,9 +4,9 @@
 > 状态：Active Design / Tracking  
 > 稳定程度：Evolving  
 > 主要定义：primitive、document/contract capability、role、platform launch integration、technical adapter/Runner integration、composition root 与 business package 的拆分原则  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[模块设计目录](../20-modules/README.md)  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[模块设计目录](../20-modules/README.md)  
 > 被实现：[仓库与目录方案](./repository-layout.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-08-21
 
 本文是 package/publish boundary 的主要事实源；repository layout只实现本文，不反向定义它。
 
@@ -21,20 +21,26 @@ Protocol boundary
 
 ## 1. Dependency Layers
 
-当前依赖方向不是一条简单线，而是两个低层 primitive 向不同 capability 分支：
+Current low-level primitives feed multiple independent capability branches：
 
 ```text
-             @loomrealm/wire
-             /             \
-            ↓               ↓
- @loomrealm/game-package   protocol/domain capability packages
-            ↓               ↓
- matching game-launcher-*  platform-neutral roles
-            ↓               ↑
-        apps/* composition ─┘
+@loomrealm/foundation        @loomrealm/wire
+        \                         /
+         \                       /
+          └── @loomrealm/runtime-control
+                     ↓
+              Main / Subsystem Host
+
+@loomrealm/wire
+        ↓
+@loomrealm/game-package
+        ↓
+matching game-launcher-*
+        ↓
+apps/* composition
 ```
 
-Business package只依赖最接近的 author-facing role SDK。
+Business package only depends on the nearest author-facing role SDK。
 
 ---
 
@@ -42,18 +48,20 @@ Business package只依赖最接近的 author-facing role SDK。
 
 ```text
 @loomrealm/foundation
-    MessageCarrier
+    MessageCarrier / CarrierClosed
     deterministic memory carrier
-    generic async/lifecycle primitives
+    generic low-level lifecycle primitives only when independently justified
     no JSON/domain/platform semantics
 
 @loomrealm/wire
     JSON / JSON-RPC representation
-    closed object / safe integer / UTF-8/depth primitives
+    exact keys / safe integer / UTF-8/depth primitives
     no carrier/lifecycle/domain authority
 ```
 
-两者正交，不合并成 `common/utils`。
+Foundation/Wire remain orthogonal；do not merge into `common/utils`。
+
+Wire source parsing follows its frozen JSON semantics；domain package MUST NOT silently introduce a second parser to compensate for profile wording。
 
 ---
 
@@ -69,9 +77,7 @@ Business package只依赖最接近的 author-facing role SDK。
 
 ### `game-package`
 
-定位：platform-neutral Game Entry document validation capability。
-
-只处理：
+Platform-neutral Game Entry document validation capability：
 
 ```text
 GameEntryV1
@@ -82,30 +88,54 @@ complete logical key-set validation
 validated detached immutable snapshot
 ```
 
-主要 Runtime-product consumers：
+Primary Runtime-product consumers：
 
 ```text
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
 ```
 
-明确不是：
-
-```text
-Main role dependency
-business author dependency
-filesystem loader
-Platform manifest parser
-RuntimeHosting
-```
+Not：Main role dependency / business dependency / loader / Platform manifest / RuntimeHosting。
 
 ### `runtime-control`
 
+Position：platform-neutral Runtime Control protocol mechanics capability。
+
+Owns：
+
 ```text
 Subsystem Control v1
-Frame / Call v1
+Frame / Call v1 protocol-facing representation/mechanics
 Runtime Control Profile v1
+one connection-wide reader/dispatcher
+one serialized writer
+shared strict-monotonic sender Request ID namespace
+profile limits / pending correlation / deadlines / terminal
+Response causal barrier
+role-specific typed peers
 ```
+
+Does not own：
+
+```text
+Main Runtime/Frame/Stack authority
+Launch Attempt/token storage
+Subsystem business SDK/input dispatch
+Runtime failure unwind commit
+WebSocket/MessagePort establishment
+Platform provisioning
+```
+
+Runtime dependencies exactly：
+
+```text
+@loomrealm/foundation
+@loomrealm/wire
+```
+
+First package surface：root export only；no `/control` `/frame` `/profile` `/testing` subpaths。
+
+M3 scheduler stays a package-local injected port；do not expand Foundation Clock for one consumer。
 
 ### `data`
 
@@ -116,7 +146,7 @@ User Input v1
 Render Update v1
 ```
 
-Profile composition不合并 child identity/lifecycle/authority。
+Profile composition does not merge child identity/lifecycle/authority。
 
 ---
 
@@ -129,7 +159,7 @@ Profile composition不合并 child identity/lifecycle/authority。
 @loomrealm/content-service
 ```
 
-Role通过 ports消费 Platform，不 import concrete Hostra/PWA API。
+Role packages consume capability packages/ports and never import concrete Hostra/PWA composition APIs。
 
 ### Main
 
@@ -137,8 +167,19 @@ Main consumes：
 
 ```text
 LogicalGameBootstrap
-runtime-control / renderer-control
+@loomrealm/runtime-control
+@loomrealm/renderer-control
 Main-facing Platform ports
+```
+
+Main owns：
+
+```text
+Runtime Registry / Launch Attempt authority
+bootstrap credential authority
+Frame/Stack/Activation/InputTarget
+DataAuthority
+Runtime failure unwind
 ```
 
 Main MUST NOT depend on：
@@ -148,7 +189,7 @@ Main MUST NOT depend on：
 @loomrealm/game-launcher-hostra/pwa
 ```
 
-`LogicalGameBootstrap` 是 Main-facing logical input，不是 Game Entry document model。
+`LogicalGameBootstrap` is Main-facing logical input，not Game Entry document model。
 
 ### Subsystem dual surface
 
@@ -173,23 +214,23 @@ Trusted integration：
     SubsystemLaunchContext
 ```
 
-Business package MUST NOT depend on `/host`、Game Package 或 Launcher。
+`@loomrealm/subsystem/host` is the first real Subsystem-side consumer of Runtime Control typed peer；it maps protocol mutation-pending state into ordinary-input gating/business control flow。
+
+Business package MUST NOT depend on `/host`、Game Package、Launcher、Runtime Control directly。
 
 ---
 
 ## 5. Platform Launch Integration Packages
-
-当前两个窄 capability：
 
 ```text
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
 ```
 
-各自拥有：
+Each owns：
 
 ```text
-Game Entry consumption orchestration via @loomrealm/game-package
+Game Entry consumption via @loomrealm/game-package
 own Platform Launch Manifest schema/parser
 Game↔Platform exact key-set join
 platform executable resolution/security preflight
@@ -200,41 +241,27 @@ Host-owned Runner/bootstrap/supervision integration
 Runner provisioning integration point
 ```
 
-它们只解决 **Subsystem Runtime Game PREPARE + launch**。
+They solve only Subsystem Runtime Game PREPARE + launch capability。
 
-不得扩大为：
-
-```text
-Renderer platform implementation
-Main DataAuthority owner
-full DataConnectionBroker
-Content product
-Hostra Shell/PWA browser mega abstraction
-all-platform launcher registry
-universal Game source/prepared schema
-```
+Must not expand into Renderer/DataBroker/Content/Platform mega-package/universal launcher registry。
 
 ---
 
-## 6. No Universal Launcher Schema
+## 6. No Universal Launcher / RPC Schema
 
-虽然两个 Platform manifest当前都可能出现：
-
-```text
-{key,module}
-```
-
-仍禁止抽成 common：
+Do not generalize current similarity into：
 
 ```text
 PlatformLaunchOptions
 launcher.type
 options:any
+PreparedPlatformGame universal DTO
+GenericRpcPeer
+GenericSchemaCodec
+UniversalProtocolSession
 ```
 
-同样，不因为两个 launcher 都返回“logical bootstrap + RuntimeHosting”就立即建立跨平台 `PreparedPlatformGame` npm package。
-
-共享的是 semantics/ports，不是预测性的 universal DTO。
+Runtime Control may have internal dispatcher/schema helpers，but M3 MUST NOT publish a generic JSON-RPC framework。Shared semantics are specific protocol/profile mechanics, not a prediction that Renderer/Data use identical application APIs。
 
 ---
 
@@ -247,7 +274,7 @@ Business Definition Module
     author-level business implementation
 
 Host-owned Runner
-    physical entry
+    physical Process/Worker entry
     imports exact plan-selected module
     constructs role-local ports
 ```
@@ -257,13 +284,13 @@ business module != Node process entry
 business module != Worker constructor entry
 ```
 
-Hostra/PWA artifacts可不同；ABI/formal semantics/business-observable result必须等价。
+Hostra/PWA artifacts MAY differ；ABI/formal semantics/business-observable result must be equivalent。
 
 ---
 
 ## 8. Host Policy Injection
 
-Game/platform config MAY select installation business artifact；Host policy注入：
+Game/platform config MAY select installation business artifact；Host policy injects：
 
 ```text
 Node executable / Worker Runner entry
@@ -274,7 +301,9 @@ Control/provisioning facilities
 CSP/same-origin policy
 ```
 
-Manifest不能覆盖 trusted Runner/security boundary。
+Runtime Control receives already-established `MessageCarrier` and injected finite scheduler/deadline values；it does not decide executable/transport establishment policy。
+
+Manifest cannot override trusted Runner/security boundary。
 
 ---
 
@@ -294,18 +323,19 @@ Candidates：
 Single capability only：
 
 ```text
+transport-* != Runtime Control protocol
 transport-* != DataConnectionBroker
 launcher-node != Game Package/Hostra Game Launcher
 content-http != Content semantics
 ```
 
-Adapter不拥有 complete Platform topology/application authority。
+Adapters establish/deliver `MessageCarrier` and physical facts；they do not parse Runtime Control domain methods or implement retry/recovery。
 
 ---
 
 ## 10. Platform Provisioning Placement
 
-System DataConnectionBroker负责 current Main `S/G/dataProfile` 的 physical realization。
+System DataConnectionBroker realizes current Main `S/G/dataProfile` physical carrier。
 
 ```text
 Hostra
@@ -315,21 +345,23 @@ PWA
     Broker + Worker provisioning + transport-messageport
 ```
 
-Provisioning interface/encoding如果只有 app-local consumers，就留在 `apps/*` internal code。
+Provisioning interface/encoding stays app-local unless a real independent interoperability boundary appears。
 
-不得放入 Runtime Control、Subsystem author API、Renderer Control Snapshot、Game Package、Wire/Foundation。
+Never place provisioning into Runtime Control、Subsystem author API、Renderer Control Snapshot、Game Package、Wire/Foundation。
 
-Launcher package可持有 Runner-side provisioning integration point，但不是 DataAuthority owner/full Broker。
+Launcher package may hold Runner-side provisioning integration point，not DataAuthority/full Broker。
 
 ---
 
 ## 11. Business Packages
 
+Example：
+
 ```text
 @loomrealm/map
 ```
 
-依赖固定：
+Dependency fixed：
 
 ```text
 map → @loomrealm/subsystem
@@ -341,10 +373,11 @@ MUST NOT：
 map → game-package
 map → game-launcher-*
 map → subsystem/host
+map → runtime-control
 map → platform adapter
 ```
 
-Build artifact MAY按平台不同；path/bytes不是 application identity。
+Build artifact MAY vary by platform；path/bytes are not application identity。
 
 ---
 
@@ -361,7 +394,7 @@ Desktop：
 ```text
 Hostra Launcher prepare
 Main/Renderer roles
-Runtime/Renderer Control WS
+Runtime/Renderer Control WS adapters
 Runner provisioning IPC
 Data Broker/Data WS
 fs/HTTP Content
@@ -373,14 +406,14 @@ PWA：
 ```text
 PWA Launcher prepare
 Main/Renderer roles
-Runtime/Renderer Control MessagePort
+Runtime/Renderer Control MessagePort adapters
 Worker provisioning
 Data Broker/MessageChannel
 SW/Fetch Content
 business artifacts
 ```
 
-Composition root MAY depend on all lower-level packages but MUST NOT duplicate domain/protocol/Game/Launcher validation semantics。
+Composition root MAY depend on all lower-level packages but MUST NOT duplicate Game/Launcher/protocol/domain validation semantics。
 
 ---
 
@@ -391,63 +424,66 @@ single role consumes
     → role package integration surface
 
 multiple stable independent consumers
-    → smallest shared interface/capability package
+    → smallest shared capability package
 
 only one app glue consumes
     → app internal
 ```
 
-因此：
+Thus：
 
-- `SubsystemDataBinding` 可在 subsystem host surface；
-- `RendererDataBinding` 可在 renderer integration surface；
-- `DataConnectionBroker` 不塞入 subsystem；
-- RuntimeHosting concrete implementations在 matching launcher；
-- Main只依赖 abstract port；
-- `LogicalGameBootstrap` exact type placement在 M5/M6真实 integration时放在最小 Main-facing surface，不放回 Game Package。
+- Runtime Control scheduler remains local M3 port while only Runtime Control needs it；
+- `SubsystemDataBinding` may live in subsystem host surface；
+- `RendererDataBinding` may live in renderer integration surface；
+- `DataConnectionBroker` stays outside subsystem；
+- RuntimeHosting concrete implementation lives in matching launcher；
+- Main only sees abstract RuntimeHosting port；
+- `LogicalGameBootstrap` exact type placement waits for M5/M6 smallest Main-facing surface。
 
 ---
 
 ## 14. Dependency Graph
 
 ```text
-@loomrealm/wire
-    ↓
-@loomrealm/game-package
-    ↓
-┌──────────────────────────────┐
-│ game-launcher-hostra         │
-│ game-launcher-pwa            │
-└──────────────────────────────┘
-    ↓
-apps/*
+foundation ───────────────┐
+                          ↓
+wire ─────────────→ runtime-control
+ │                        ↓
+ │               main / subsystem-host
+ │
+ └→ game-package
+        ↓
+   game-launcher-hostra / game-launcher-pwa
+        ↓
+      apps/*
 
-@loomrealm/main
+main
     → runtime-control / renderer-control / wire as required
 
-@loomrealm/subsystem
-    → runtime-control / data / content / foundation
+subsystem
+    author root → data/content/foundation as exposed by SDK
+    host        → runtime-control + role-local integrations
 
-@loomrealm/renderer
+renderer
     → renderer-control / data / content / foundation as required
 
-@loomrealm/map
-    → subsystem
+map
+    → subsystem author root
 ```
 
-禁止：
+Forbidden：
 
 ```text
 main → game-package
 main → game-launcher-*
-map/business → game-package
-map/business → game-launcher-*
-game-package → launcher/Main
-subsystem core → concrete WebSocket/MessagePort
+map/business → game-package / launcher / runtime-control
+runtime-control → main/subsystem implementation
+runtime-control → WebSocket/MessagePort/Worker
+runtime-control → Game Package/Launcher
+wire/foundation → domain authority
+subsystem author root → concrete transport
 main/renderer/subsystem → apps/*
 contract → role implementation
-wire/foundation → domain authority
-runtime-control → author API
 ```
 
 ---
@@ -485,7 +521,7 @@ apps/
 └── cli/
 ```
 
-不为了目标图预建无真实 consumer 的 package。
+Do not pre-create package only because target graph imagines it。
 
 ---
 
@@ -495,9 +531,9 @@ apps/
 npm semver != protocol/profile version
 ```
 
-Game/Launcher consumer-boundary correction仍发生在 real compatibility boundary前，current v1直接更新；不创建 fake v2/adapter。
+ADR 0021 occurs before first conformant Runtime Control compatibility obligation，therefore current v1 is directly corrected；no fake Runtime Control v2/compat parser。
 
-一旦真实 compatibility obligation形成，incompatible change必须 version/migrate。
+After real compatibility obligation exists，incompatible wire/application semantics require normal protocol/profile version/migration。
 
 ---
 
@@ -507,35 +543,45 @@ Game/Launcher consumer-boundary correction仍发生在 real compatibility bounda
 game-package tests
     common Game Entry/document snapshot
 
-game-launcher-hostra tests
-    Hostra Game consumption + manifest/join/preflight/Runner hosting
+runtime-control tests
+    Control/Frame protocol mechanics
+    bounded profile validation
+    one reader/writer
+    strict-monotonic IDs
+    deadline/terminal/Response barrier
+    no role authority implementation
 
-game-launcher-pwa tests
-    PWA Game consumption + manifest/join/preflight/Worker hosting
+subsystem host tests
+    protocol outcome → local Frame/input/business control-flow mapping
 
 main tests
-    LogicalGameBootstrap + authority/transactions
-    no Game document parser dependency
+    Runtime/Frame authority transactions/unwind
+    protocol outcome → Main authority commit mapping
+
+game-launcher-hostra/pwa tests
+    platform Game PREPARE + RuntimeHosting/Runner integration
 ```
 
-Repository-level：Role SDK semantics、Runner/provisioning integration、Platform E2E、same Game/scenario cross-platform equivalence。
+Repository-level：transport binding equivalence、Runner/provisioning integration、Platform E2E、cross-platform abstract trace。
 
 ---
 
 ## 18. Core Rules
 
-1. Foundation/Wire保持低层正交；
-2. Game Package是 document validation capability，不是 Runtime role；
-3. Runtime-product Game consumers是 matching Platform Launchers；
-4. Main不依赖 Game Package/concrete Launcher；
-5. Hostra/PWA executable config分属两个 launcher package；
-6. full PREPARE先于 first Runtime side effect；
-7. Main只消费 LogicalGameBootstrap并发 logical launch intent；
-8. Host-owned Runner与 Definition Module分离；
-9. launcher package保持窄 Runtime launch capability；
-10. Subsystem author/host surface分离；
-11. Platform provisioning留在正确 integration层；
-12. apps是 current composition roots；
-13. package只因真实消费者/替换/发布价值拆分；
-14. business只依赖 author SDK；
-15. Hostra/PWA equivalence比较 logical outcome/semantics，不要求 same artifact。
+1. Foundation/Wire remain low-level orthogonal primitives；
+2. Game Package is document validation capability，not Runtime role；
+3. Runtime Control is protocol mechanics capability，not Main/Subsystem authority；
+4. Runtime Control depends exactly on Foundation + Wire and publishes root-only first surface；
+5. one Runtime Control connection = one reader/dispatcher + one serialized writer；
+6. same-sender Control+Frame Request IDs strict monotonic and never reused/wrapped；
+7. source duplicate JSON semantics follow Wire；domain package must not create second parser；
+8. Response causal barrier belongs to Runtime Control mechanics，application commit remains role-owned；
+9. M3 scheduler stays package-local until real reuse justifies promotion；
+10. Runtime-product Game consumers are matching Platform Launchers；
+11. Main does not depend on Game Package/concrete Launcher；
+12. Host-owned Runner and Definition Module remain distinct；
+13. Subsystem author/host surface remain distinct；business never imports Runtime Control directly；
+14. Platform provisioning stays in correct integration layer；
+15. apps are complete composition roots；
+16. packages split only for real consumer/replacement/publish value；
+17. Hostra/PWA equivalence compares logical/semantic outcome，not artifact identity。

@@ -3,9 +3,9 @@
 > 层级：实施计划  
 > 状态：Tracking  
 > 稳定程度：Experimental  
-> 主要定义：current 分包、Game/Launcher/Main bootstrap planning、Runner/Platform ports、Data Profile/provisioning、测试和第一阶段交付入口  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
-> 最近复核：2026-08-20
+> 主要定义：current 分包、Game/Launcher/Main bootstrap planning、Runtime Control mechanics、Runner/Platform ports、Data Profile/provisioning、测试和第一阶段交付入口  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 最近复核：2026-08-21
 
 实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。
 
@@ -14,8 +14,8 @@
 ## Tracking 文档
 
 - [独立分包与发布架构](./package-architecture.md) — package/publish boundary 主要事实源；
-- [仓库与目录方案](./repository-layout.md) — monorepo、Game/Launcher/Main bootstrap、Runner/provisioning placement；
-- [测试策略](./testing-strategy.md) — Game snapshot、consumer boundary、protocol、preflight、Runner/provisioning、跨平台 equivalence；
+- [仓库与目录方案](./repository-layout.md) — monorepo、Runtime Control、Game/Launcher/Main bootstrap、Runner/provisioning placement；
+- [测试策略](./testing-strategy.md) — Game snapshot、Runtime Control、consumer boundary、preflight、Role/SDK、跨平台 equivalence；
 - [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 vertical slice 实施顺序。
 
 ---
@@ -23,35 +23,119 @@
 ## 当前实施前提
 
 ```text
-Game Package v1
-    Game Entry document {key...} + initial
-    document validation capability
+Foundation / Wire              Implemented Baseline
+Game Package v1                Implemented Baseline / M2 closed
 
 ADR 0020
     matching Platform Launcher consumes Game Entry
     Main consumes LogicalGameBootstrap only
 
-Hostra Game Launcher / Node Runner Profile v1
-PWA Game Launcher / Worker Runner Profile v1
-Subsystem Control v1
+ADR 0021
+    Runtime Control first-implementation mechanics closure
+
 Runtime Control Profile v1
-Frame / Call v1 Frozen
-Renderer Control v1
-Renderer Data Profile v1
-Data Connection v1
-User Input v1
-Render Update v1
-Content API v1
+    Control1 + Frame1
+    one reader/dispatcher
+    one serialized writer
+    strict-monotonic same-sender Request IDs
+    finite deadline / terminal settlement
+    Wire duplicate-source alignment
+
+Frame / Call v1
+    semantic authority/transaction/unwind Frozen
 ```
 
-Current first implementation：
+Current next implementation gate：
 
 ```text
-no Game Descriptor.module
-no Main → game-package dependency
-no application-required manual Game Package step
-no v2 / legacy parser
-no universal launcher/prepared options bag
+M3 @loomrealm/runtime-control
+```
+
+---
+
+## Runtime Control Baseline
+
+Target package：
+
+```text
+@loomrealm/runtime-control
+```
+
+Dependencies exactly：
+
+```text
+@loomrealm/foundation
+@loomrealm/wire
+```
+
+First public package surface is root-only；no `/control` `/frame` `/profile` `/testing`。
+
+Pipeline：
+
+```text
+already-established MessageCarrier<string>
+        ↓
+actual UTF-8 1 MiB gate
+        ↓
+Wire parseJsonText
+        ↓
+depth/profile limits
+        ↓
+Wire JSON-RPC decode
+        ↓
+strict-monotonic Request ID / method direction / exact schema
+        ↓
+Control state + Frame mechanics
+        ↓
+role-specific Main / Subsystem peers
+```
+
+Connection mechanics：
+
+```text
+exactly one inbound reader
+Response correlation not blocked by role handler
+Control + Frame share dispatcher/pending table
+all outbound messages use one serialized writer
+```
+
+Response barrier：
+
+```text
+handler reply
+→ Response carrier.send accepted
+→ afterResponse dependent action
+```
+
+Deadline/terminal：
+
+```text
+finite relative scheduler
+Frame 1000..300000 ms stable per connection
+hello/shutdown own finite policy
+deadline covers send + response
+pending settlement first-wins
+terminal first-wins
+late Response diagnostics only
+no retry/replay/reconnect
+```
+
+JSON source duplicate members follow frozen Wire / ECMAScript `JSON.parse` observable semantics；Runtime Control does not create a second parser。
+
+Authority split：
+
+```text
+Runtime Control
+    protocol mechanics / connection-local state
+
+Main
+    Launch Attempt/token + Runtime/Frame/Stack authority
+
+Subsystem Host
+    local Frame/Input/business control-flow mapping
+
+Platform
+    carrier establishment / Process/Worker lifecycle
 ```
 
 ---
@@ -63,11 +147,9 @@ Game source / installation
         ↓
 matching Platform Launcher PREPARE
     ├── @loomrealm/game-package
-    │       common Game Entry validation
     ├── current Platform Launch Manifest
     ├── exact key-set join
-    ├── all executable resolution
-    ├── installation/security containment
+    ├── all executable/security resolution
     └── hosting capability preflight
         ↓
 immutable PlatformLaunchPlan
@@ -83,46 +165,27 @@ Main launch(subsystemKey)
 plan-bound RuntimeHosting
         ↓
 Host-owned Runner
-        ↓
-platform-selected Definition Module
 ```
 
-Game common document不包含 module；Main不携 executable/document material。
+Game common document no module；Main no executable/document material。
 
 ---
 
 ## Game Package Baseline
 
-`@loomrealm/game-package`：
-
 ```text
 untrusted JSON text/value
 → Wire representation
 → closed GameEntryV1 validation
-→ exact key-set / initial target validation
+→ key-set/initial validation
 → detached deeply immutable ValidatedGameEntryV1
 ```
 
-Runtime dependency：
-
-```text
-@loomrealm/wire only
-```
-
-Primary Runtime-product consumers：
-
-```text
-@loomrealm/game-launcher-hostra
-@loomrealm/game-launcher-pwa
-```
-
-Not Main/business。
+Runtime dependency：Wire only。Primary Runtime-product consumers：Hostra/PWA Launchers。Not Main/business。
 
 ---
 
 ## Main Bootstrap Baseline
-
-Main-facing logical input：
 
 ```text
 LogicalGameBootstrap
@@ -130,16 +193,9 @@ LogicalGameBootstrap
     initial {subsystemKey,input}
 ```
 
-Main MUST NOT receive：
+Main MUST NOT receive GameEntry/formatVersion/PlatformLaunchPlan/module/path/URL。
 
-```text
-GameEntryV1 / ValidatedGameEntryV1
-formatVersion
-PlatformLaunchPlan
-module/path/URL
-```
-
-Main local tests use logical fixtures directly；Game Package document validation不在 Main重复实现。
+M5 Main also becomes real Main-side Runtime Control consumer：authentication callback owns Launch Attempt/token decision，Runtime Control typed terminal/outcome feeds Main authority classifier。
 
 ---
 
@@ -152,11 +208,11 @@ Main / Renderer / Subsystem / Content
 Game Package
     = platform-neutral document validation capability
 
+Runtime Control
+    = platform-neutral protocol mechanics capability
+
 Platform Launcher
-    = Runtime-product Game consumer
-      + current-platform executable PREPARE
-      + LogicalGameBootstrap projection
-      + RuntimeHosting/Runner integration
+    = Runtime-product Game PREPARE + RuntimeHosting/Runner integration
 
 Platform Composition
     = complete physical Session realization
@@ -165,38 +221,45 @@ Host-owned Runner
     = physical Runtime entry + role-port adapter
 
 Business Definition Module
-    = selected author-level business implementation
+    = selected author-level implementation
 ```
 
-Hostra：`launch.hostra.json` + Node Runner + WebSocket + provisioning IPC。  
-PWA：`launch.pwa.json` + Worker Runner + MessagePort + provisioning path。
+Hostra carrier binding：WebSocket MessageCarrier。  
+PWA carrier binding：MessagePort MessageCarrier。
 
-Launcher package仍是 narrow Runtime launch capability，不是 Platform mega-package。
+Adapters only establish/translate string carrier units；they do not parse Runtime Control methods or retry application mutations。
 
 ---
 
 ## Role-facing Ports
 
+Subsystem-facing：
+
 ```text
-Subsystem-facing
-    RuntimeControlBinding
-    SubsystemDataBinding
-    ContentClient
-
-Renderer-facing
-    RendererControlBinding
-    RendererDataBinding
-    ContentClient
-
-Main-facing
-    RuntimeHosting/Supervisor
-    RuntimeControlHost
-    RendererHosting/ControlHost
-    DataConnectionBroker
-    Content integration
+RuntimeControlBinding
+SubsystemDataBinding
+ContentClient
 ```
 
-`RuntimeHosting.launch` only accepts logical key/Launch Attempt material；内部 lookup frozen plan。
+Renderer-facing：
+
+```text
+RendererControlBinding
+RendererDataBinding
+ContentClient
+```
+
+Main-facing：
+
+```text
+RuntimeHosting/Supervisor
+Runtime Control peer/binding
+RendererHosting/ControlHost
+DataConnectionBroker
+Content integration
+```
+
+Runtime Control scheduler is a narrow protocol-mechanics constructor port，not Game/Platform manifest configuration。
 
 ---
 
@@ -207,14 +270,14 @@ low-level
     @loomrealm/foundation
     @loomrealm/wire
 
-document/contract capability
+contract capabilities
     @loomrealm/game-package
     @loomrealm/runtime-control
     @loomrealm/renderer-control
     @loomrealm/data
     @loomrealm/content
 
-role
+roles
     @loomrealm/main
     @loomrealm/subsystem
     @loomrealm/renderer
@@ -234,9 +297,7 @@ business
     @loomrealm/map
 
 composition roots
-    apps/desktop
-    apps/pwa
-    apps/cli
+    apps/desktop / apps/pwa / apps/cli
 ```
 
 ---
@@ -244,29 +305,23 @@ composition roots
 ## Dependency Baseline
 
 ```text
-wire
-  ↓
-game-package
-  ↓
-game-launcher-hostra / game-launcher-pwa
-  ↓
-apps/*
+foundation ──┐
+             ↓
+wire ─────→ runtime-control → main / subsystem-host
+ │
+ └→ game-package → game-launcher-* → apps/*
 
-main
-  → runtime-control / renderer-control / wire as required
-
-map
-  → subsystem
+map → subsystem author root
 ```
 
 Forbidden：
 
 ```text
-main → game-package
-main → concrete launcher
-business → game-package
-business → launcher
-game-package → Main/launcher
+runtime-control → main/subsystem implementation
+runtime-control → WebSocket/MessagePort/Worker
+runtime-control → game-package/launcher
+main → game-package / concrete launcher
+business → game-package / launcher / runtime-control
 ```
 
 ---
@@ -274,26 +329,12 @@ game-package → Main/launcher
 ## Platform-specific Config
 
 ```text
-Game common
-    game.json
-
-Hostra
-    launch.hostra.json
-
-PWA
-    launch.pwa.json
+Game common       game.json
+Hostra            launch.hostra.json
+PWA               launch.pwa.json
 ```
 
-两个 Platform manifests各自拥有 schema/version/security policy；不要建立 shared：
-
-```text
-launcher.type
-PlatformLaunchOptions
-options:any
-universal PreparedPlatformGame
-```
-
-Current unique join identity：`subsystemKey`。
+Runtime Control protocol limits/Request IDs/deadline fields are not business Game config and are not placed in universal launcher options。
 
 ---
 
@@ -301,36 +342,33 @@ Current unique join identity：`subsystemKey`。
 
 ```text
 @loomrealm/subsystem
-    defineSubsystem
-    Frame / FrameOutcome
-    InputListener
-    RenderDomain
-    ContentClient
+    business author API
 
 @loomrealm/subsystem/host
-    runSubsystem
-    RuntimeControlBinding
-    SubsystemDataBinding
-    launch integration context
+    trusted Runner/integration API
+    consumes SubsystemRuntimeControlPeer
 ```
 
-Business package不得依赖 `/host`、Game Package 或 Launcher。
+Business author does not import Runtime Control directly。
+
+M4 maps protocol pending call/return into ordinary-input gating and typed FrameOutcome/business continuation semantics。
 
 ---
 
 ## Frame SDK Closure
 
-Author-facing `FrameOutcome`：completed / cancelled / failed。
-
-`frame.call()`：
+Frozen：
 
 ```text
-child Outcome → resolve
-pre-commit recoverable rejection → typed reject
-Runtime-fatal/ambiguous → no business continuation re-entry
+exact seven Requests
+Response send barrier before dependent reverse RPC
+ACK-before-publication
+post-commit no rollback
+timeout/loss ambiguous
+whole-suffix fixed-point unwind
 ```
 
-Implementation hard invariants：initialize does not start handler；activate starts once；administrative suspend aborts/discards late completion；uncaught business exception maps to failed outcome when authority healthy。
+Runtime Control implements mechanics/barrier/deadline/correlation；Main/Subsystem Host implement authority/control-flow。
 
 ---
 
@@ -338,24 +376,10 @@ Implementation hard invariants：initialize does not start handler；activate st
 
 ```text
 DataAuthority {S,G,dataProfile}
-loomrealm.renderer-data/1
-= Connection1 + Input1 + Render1
+loomrealm.renderer-data/1 = Connection1 + Input1 + Render1
 ```
 
-Profile change requires fresh generation。
-
-```text
-Main authority
-→ DataConnectionBroker
-→ RendererDataBinding + SubsystemDataBinding
-```
-
-Desktop late provisioning via Runner IPC；PWA via Worker provisioning/Port transfer。
-
-```text
-provisioning failure != Runtime failure / Frame unwind
-Data loss != RuntimeHosting failure
-```
+Profile change requires fresh generation。Desktop/PWA late provisioning remains outside Runtime Control。
 
 ---
 
@@ -366,38 +390,54 @@ MessageCarrier
 one carrier unit = one UTF-8 JSON text string
 ```
 
-Foundation treats string opaque；profile/wire负责 JSON semantics。
+Foundation treats string opaque；Wire owns generic JSON；profile packages own domain limits/semantics。
 
-Structured Clone只用于 Platform bootstrap/Port transfer。
+Structured Clone only for Platform bootstrap/Port transfer。
+
+---
+
+## Current Implementation Order
+
+```text
+Foundation ✅
+Wire ✅
+Game Package ✅
+↓
+M3 Runtime Control
+↓
+M4 Subsystem author/host
+↓
+M5 Main + LogicalGameBootstrap + fake RuntimeHosting
+↓
+M6 Hostra Launcher
+↓
+Desktop vertical slice
+...
+M15 PWA Launcher
+M16 cross-platform equivalence
+```
+
+M3 package-local close must not fake M4/M5 real role consumers。
 
 ---
 
 ## Phase 1 Acceptance Direction
 
-必须证明：
+Must prove all three loops：
 
 ```text
 Game source
-→ matching Launcher internal Game validation
-→ current Platform manifest
-→ exact join / zero-side-effect PREPARE
-→ PlatformLaunchPlan + LogicalGameBootstrap
-→ Main + RuntimeHosting
-→ Runner
+→ matching Launcher PREPARE
+→ LogicalGameBootstrap + RuntimeHosting
+→ Main / Runner
 ```
-
-以及：
 
 ```text
-Business Definition
-→ Author SDK
-→ Role Core
-→ Role Ports
-→ Runner/Broker
-→ physical platform
+MessageCarrier
+→ Runtime Control mechanics
+→ role-specific peer
+→ Main/Subsystem Host authority/control-flow
 ```
-
-以及：
 
 ```text
 Formal protocol outcome/failure
@@ -405,4 +445,4 @@ Formal protocol outcome/failure
 → business-observable behavior
 ```
 
-最终 Hostra/PWA 使用 same Game logical topology/scenario/contracts，允许 platform-specific executable artifacts，并得到等价 logical outcome。
+Hostra/PWA use same logical Game/scenario/contracts，allow platform-specific artifacts/carriers，and produce equivalent logical/protocol/business outcome。

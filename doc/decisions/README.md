@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、替代关系、current-v1 映射与重新评估条件  
-> 最近复核：2026-08-20
+> 最近复核：2026-08-21
 
 ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR 保留完整历史，但不形成第二份 current contract。
 
@@ -31,6 +31,7 @@ ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`
 18. [ADR 0018：首次实现前直接收口 current v1](./0018-preimplementation-v1-closure.md)
 19. [ADR 0019：Game Logical Topology 与 Platform Launch Manifest 分离](./0019-platform-launch-manifest-boundary.md)
 20. [ADR 0020：Game Entry 消费边界归 Platform Launcher，Main 只接收 LogicalGameBootstrap](./0020-game-entry-consumer-boundary.md)
+21. [ADR 0021：Runtime Control 首次实现前收口 current v1 mechanics](./0021-runtime-control-preimplementation-closure.md)
 
 ---
 
@@ -85,6 +86,15 @@ ADR 0020
     → GameEntryV1 != Main bootstrap model
     → Main has no Game Package/concrete Launcher dependency
     → Main consumes immutable LogicalGameBootstrap only
+
+ADR 0021
+    → Runtime Control package root-only + role-specific peers
+    → one reader that never blocks Response correlation
+    → one serialized writer + Response causal barrier
+    → same-sender Control+Frame Request IDs strict monotonic
+    → finite deadline/terminal settlement first-wins
+    → duplicate JSON source semantics follow frozen Wire/JSON.parse
+    → no second JSON parser
 ```
 
 ---
@@ -133,19 +143,63 @@ Runtime Control Application Profile v1
 + Frame / Call v1
 ```
 
+Current connection mechanics：
+
+```text
+one UTF-8 JSON text unit
+→ frozen Wire parse/decode
+→ profile limits
+→ one connection-wide reader/dispatcher
+→ Control / Frame role dispatch
+```
+
+Same sender / same connection：
+
+```text
+Request IDs = positive safe integer
+strictly monotonically increasing
+Control + Frame shared namespace
+never reuse / never wrap
+```
+
+Dispatcher/writer：
+
+```text
+one inbound reader
+Response correlation is never blocked by role handler
+one serialized outbound writer
+Response send acceptance before dependent afterResponse action
+```
+
+Deadline/terminal：
+
+```text
+finite Request deadline covers send + Response wait
+pending settlement first-wins
+timeout/loss ambiguous for Frame mutation
+late Response diagnostics only
+terminal first-wins
+no retry/replay/reconnect
+```
+
+JSON source duplicate members：
+
+```text
+follow frozen @loomrealm/wire / ECMAScript JSON.parse semantics
+parsed object still exact closed schema
+no private Runtime Control duplicate-member parser
+```
+
 Frame v1 remains Frozen：
 
 ```text
 exact seven Requests
-Response-before-dependent-RPC
 ACK-before-publication
 post-commit no rollback
-timeout/loss ambiguous → Runtime failure
-no retry/replay
 whole-suffix fixed-point unwind
 ```
 
-ADR 0019/0020 do not change Frame semantics。
+ADR 0021 does not change Frame authority/Outcome/unwind semantics。
 
 ---
 
@@ -197,6 +251,11 @@ Structured Clone only for Platform bootstrap/Port transfer。
 @loomrealm/game-package
     Game Entry document validation
 
+@loomrealm/runtime-control
+    Control + Frame application protocol mechanics
+    Foundation MessageCarrier + Wire consumer
+    no Main/Subsystem authority
+
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
     narrow Runtime-product Game PREPARE + launch integration
@@ -209,26 +268,28 @@ apps/pwa
     current full composition roots
 ```
 
-Launcher owns Game Entry consumption orchestration but still does not become Platform mega-package。
+Runtime Control business author surface remains behind `@loomrealm/subsystem`。
 
 ---
 
 ## Compatibility Governance
 
-Current Game/Launcher/Main consumer-boundary reset occurs before real conformant compatibility boundary：
+Game/Launcher/Main and M3 Runtime Control mechanics corrections still occur before a real conformant/deployed compatibility boundary：
 
 ```text
 update current v1 directly
-no v2
+no fake v2
 no legacy Game {key,module} parser
+no Runtime Control compatibility parser
+no second duplicate-member JSON parser
 no deprecated alias
-no Main compatibility adapter
-no dual model
 ```
 
-Frame / Call v1 Frozen semantics are unaffected。
+ADR 0021 is intentionally narrow：it does not reopen Frame seven methods/authority/Outcome/commit/unwind/hard business limit semantics。
 
-Once real compatibility obligation forms, future incompatible changes require version/migration；0018/0019/0020 are not permanent exemptions。
+History/provenance remains in ADR/Git；current docs stay single-source。
+
+Once first real compatibility obligation forms, future incompatible changes require normal version/migration；ADR 0018/0019/0020/0021 are not permanent exemptions。
 
 ---
 
@@ -237,10 +298,13 @@ Once real compatibility obligation forms, future incompatible changes require ve
 ```text
 lazy/optional Subsystem changes exact key-set relation
 multiple Runtime implementations per key require application negotiation
-third-party/remote Runtime requires public launch/provisioning wire
+third-party/remote Runtime requires public launch/provisioning/control interoperability
 third-party Launcher requires stable prepared-result interoperability
 LogicalGameBootstrap expands enough to justify independent shared package
 multiple Renderer changes Platform coordination topology
+source-level duplicate JSON detection becomes mandatory security boundary
+Request ID generation needs distributed/multi-writer semantics
+reconnect/resume/checkpoint changes Control connection lifetime
 executable signing/sandbox forms independent trust contract
 real deployed compatibility boundary already exists
 ```

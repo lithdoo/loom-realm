@@ -3,11 +3,11 @@
 > 层级：实施计划  
 > 状态：Draft / Tracking  
 > 稳定程度：Experimental  
-> 主要定义：monorepo 物理目录、Game Package document capability、Game/Platform launcher packages、Main-facing bootstrap surface、Subsystem author/host、Runner/provisioning与测试布局  
-> 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
-> 最近复核：2026-08-20
+> 主要定义：monorepo 物理目录、Game Package、Runtime Control、Game/Platform launcher packages、Main-facing bootstrap surface、Subsystem author/host、Runner/provisioning与测试布局  
+> 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 最近复核：2026-08-21
 
-公开 package职责以 package architecture为权威；本文只回答“代码放哪里”。
+公开 package 职责以 package architecture为权威；本文只回答“代码放哪里”。
 
 ---
 
@@ -79,7 +79,7 @@ business
 
 ## 3. `packages/game-package`
 
-Target：
+Current implemented layout：
 
 ```text
 packages/game-package/
@@ -101,29 +101,101 @@ packages/game-package/
     └── package-boundary.test.mjs
 ```
 
-Only：
-
-```text
-GameEntryV1 document
-Descriptor {key}
-initial target/input
-closed validation
-validated detached immutable snapshot
-```
-
-Runtime dependency：
-
-```text
-@loomrealm/wire
-```
-
-No filesystem/Fetch/module resolution/Runtime side effect。
-
-Primary Runtime-product consumers：`game-launcher-hostra/pwa`。
+Runtime dependency：`@loomrealm/wire` only。Primary Runtime-product consumers：`game-launcher-hostra/pwa`。
 
 ---
 
-## 4. `packages/game-launcher-hostra`
+## 4. `packages/runtime-control`
+
+M3 target first implementation：
+
+```text
+packages/runtime-control/
+├── DESIGN.md
+├── package.json
+├── tsconfig.json
+├── src/
+│   ├── index.ts
+│   ├── scheduler.ts
+│   ├── terminal.ts
+│   ├── limits.ts
+│   ├── encoding.ts
+│   ├── dispatcher.ts
+│   ├── writer.ts
+│   ├── request-ids.ts
+│   ├── pending.ts
+│   ├── control/
+│   │   ├── model.ts
+│   │   ├── schema.ts
+│   │   └── state.ts
+│   ├── frame/
+│   │   ├── model.ts
+│   │   ├── schema.ts
+│   │   └── errors.ts
+│   ├── main-peer.ts
+│   └── subsystem-peer.ts
+└── test/
+    ├── encoding.test.mjs
+    ├── dispatcher.test.mjs
+    ├── request-ids.test.mjs
+    ├── control.test.mjs
+    ├── frame.test.mjs
+    ├── deadline.test.mjs
+    ├── terminal.test.mjs
+    └── package-boundary.test.mjs
+```
+
+Runtime dependencies exactly：
+
+```text
+@loomrealm/foundation
+@loomrealm/wire
+```
+
+Public package surface：
+
+```text
+@loomrealm/runtime-control
+```
+
+No first-release subpaths：
+
+```text
+/control
+/frame
+/profile
+/testing
+/internal
+/node
+/browser
+```
+
+Internal layout rules：
+
+```text
+one file/module owns carrier.messages() iteration
+one dispatcher demuxes Control + Frame
+one writer serializes all carrier.send calls
+request-ids/pending are connection-wide
+control/state owns only connection-local protocol legality
+main-peer/subsystem-peer expose role-specific direction
+```
+
+MUST NOT create：
+
+```text
+generic-rpc/
+schema-dsl/
+transport/
+Main authority implementation
+Subsystem author API
+```
+
+`RuntimeControlScheduler` remains a package-local injected port；no generic Foundation Clock until independent reuse exists。
+
+---
+
+## 5. `packages/game-launcher-hostra`
 
 Target：
 
@@ -148,23 +220,13 @@ packages/game-launcher-hostra/
 └── test/
 ```
 
-Owns：
+Owns Game Entry consumption via Game Package、Hostra manifest/join/resolution/LaunchPlan、LogicalGameBootstrap projection、RuntimeHosting/Runner/supervision integration。
 
-```text
-Game Entry consumption via @loomrealm/game-package
-launch.hostra.json
-exact Game key join
-safe filesystem/install resolution
-HostraLaunchPlan
-LogicalGameBootstrap projection
-RuntimeHosting / Node Runner / supervision integration
-```
-
-不包含 Renderer/DataBroker/Content完整 composition。
+Does not contain complete Renderer/DataBroker/Content composition。
 
 ---
 
-## 5. `packages/game-launcher-pwa`
+## 6. `packages/game-launcher-pwa`
 
 Target：
 
@@ -191,13 +253,13 @@ packages/game-launcher-pwa/
 
 Owns PWA Game Entry consumption + manifest/preflight/Worker Runtime launch integration。
 
-Renderer/SW/Data Broker仍在 composition/adapters。
+Renderer/SW/Data Broker stay composition/adapters。
 
 ---
 
-## 6. `packages/main`
+## 7. `packages/main`
 
-Main source should contain a logical bootstrap input surface, but no Game Entry parser：
+Main source contains logical bootstrap/authority，but no Game parser：
 
 ```text
 packages/main/src/
@@ -210,25 +272,20 @@ packages/main/src/
 └── platform/
 ```
 
-`logical-game-bootstrap.ts` represents Main-facing facts only：
+M5 Main consumes Runtime Control through `MainRuntimeControlPeer`/binding adapter；Runtime Control package never imports Main implementation。
+
+`logical-game-bootstrap.ts` contains only：
 
 ```text
 subsystemKeys
 initial {subsystemKey,input}
 ```
 
-MUST NOT import：
-
-```text
-@loomrealm/game-package
-@loomrealm/game-launcher-*
-```
-
-Exact type placement MAY be adjusted during M5/M6 if a smaller shared Main-facing surface is justified；it MUST NOT be placed back into Game Package merely for reuse。
+MUST NOT import Game Package/concrete Launcher。
 
 ---
 
-## 7. `packages/subsystem`
+## 8. `packages/subsystem`
 
 ```text
 packages/subsystem/
@@ -241,6 +298,7 @@ packages/subsystem/
 │   ├── content/
 │   ├── host/
 │   │   ├── run-subsystem.ts
+│   │   ├── runtime-control-binding.ts
 │   │   └── platform-ports.ts
 │   └── internal/
 └── test/
@@ -256,11 +314,13 @@ Exports：
     trusted Runner/integration API
 ```
 
-Business package不得 import `/host`、Game Package、Launcher。
+M4 `runtime-control-binding.ts` is the first real Subsystem-side consumer of `SubsystemRuntimeControlPeer`；it maps protocol call/return pending state to ordinary-input gating and maps typed outcomes into Frame business control flow。
+
+Business package never imports `/host`、Runtime Control、Game Package、Launcher。
 
 ---
 
-## 8. `packages/data`
+## 9. `packages/data`
 
 ```text
 packages/data/src/
@@ -282,7 +342,7 @@ Current profile：`loomrealm.renderer-data/1`。
 
 ---
 
-## 9. Business Definition Build
+## 10. Business Definition Build
 
 Source：
 
@@ -297,31 +357,26 @@ subsystems/hostra/loom-map/subsystem.mjs
 subsystems/pwa/loom-map/subsystem.mjs
 ```
 
-MUST：
-
-```text
-default export SubsystemDefinitionFactory
-business source platform-neutral
-not Process/Worker entry glue
-not dependent on Game Entry/Launch manifest
-```
+MUST default-export `SubsystemDefinitionFactory`；business source remains platform-neutral and not Process/Worker entry glue。
 
 ---
 
-## 10. Runner Placement
+## 11. Runner Placement
 
-Current launcher packages own Runtime launch integration；Runner code colocates there：
+Current launcher packages own Runtime launch integration；Runner colocates there：
 
 ```text
 packages/game-launcher-hostra/src/runner/
 packages/game-launcher-pwa/src/runner/
 ```
 
+Runner establishes/delivers physical Runtime Control carrier through platform adapter then hands it to role integration；Runner does not reimplement Runtime Control JSON-RPC/state semantics。
+
 Do not pre-create universal `subsystem-node/subsystem-worker` without real independent reuse。
 
 ---
 
-## 11. Role-facing Port Placement
+## 12. Role-facing Port Placement
 
 ```text
 packages/main/src/platform/
@@ -337,48 +392,50 @@ RendererDataBinding
 SubsystemDataBinding
 ```
 
-System-level `DataConnectionBroker` stays composition/integration unless real shared capability emerges。
+Runtime Control scheduler/deadlines are protocol-mechanics constructor inputs, not Main application authority or Platform launch manifest fields。
 
-Concrete RuntimeHosting lives in matching launcher；Main only sees abstract port。
+System-level `DataConnectionBroker` stays composition/integration unless real shared capability emerges。
 
 ---
 
-## 12. Desktop Composition Root
+## 13. Desktop Composition Root
 
 ```text
 apps/desktop/
 ├── Hostra game source/installation integration
 ├── @loomrealm/game-launcher-hostra prepare
 ├── Main/Renderer composition
-├── Runtime/Renderer Control WS binding
+├── Runtime/Renderer Control WebSocket carrier adapters
 ├── DataConnectionBroker
 ├── Data WebSocket provisioning
 ├── Runner provisioning IPC coordination
 └── Content HTTP/fs composition
 ```
 
-`apps/desktop` MUST NOT reimplement Game Entry validator、Hostra manifest validator、exact join or Runner contract semantics。
+`apps/desktop` MUST NOT reimplement Game validation、Hostra manifest/join、Runtime Control schema/IDs/deadlines/dispatcher semantics。
 
 ---
 
-## 13. PWA Composition Root
+## 14. PWA Composition Root
 
 ```text
 apps/pwa/
 ├── PWA game source/installation integration
 ├── @loomrealm/game-launcher-pwa prepare
 ├── Main/Renderer composition
-├── Runtime/Renderer Control MessagePort binding
+├── Runtime/Renderer Control MessagePort carrier adapters
 ├── DataConnectionBroker / MessageChannel transfer
 ├── Worker provisioning coordination
 └── Content Service Worker/Fetch composition
 ```
 
-Control/Data carrier只发送 string application units；Port object仅通过 bootstrap/provisioning transfer。
+Control/Data carrier only sends string application units；Port object only travels bootstrap/provisioning transfer。
+
+PWA adapter does not create alternate structured Runtime Control application model。
 
 ---
 
-## 14. Platform Config Placement
+## 15. Platform Config Placement
 
 ```text
 Game common
@@ -391,148 +448,131 @@ PWA
     launch.pwa.json
 ```
 
-两个 Platform manifest可随 installation分发，但 parser/schema分别归 matching launcher。
+Platform manifests never configure Runtime Control wire semantics/Request ID/deadline fields per business Game document。
 
-禁止：
-
-```text
-one universal launch.json
-launcher.type switch
-options:any
-```
+No universal `launch.json` / `launcher.type` / `options:any`。
 
 ---
 
-## 15. Test Layout
+## 16. Test Layout
 
 ```text
 tests/fixtures
-    raw Game Entries
-    Hostra/PWA Launch Manifests
-    Definition Modules/artifacts
-    logical bootstrap expectations
-    protocol traces/content fixtures
+    Game Entries / Launch Manifests / Definition artifacts
+    Runtime Control abstract traces
+    logical bootstrap/content expectations
 
 tests/integration
     Game Package
+    Runtime Control role-peer integration
     Main LogicalGameBootstrap
-    Runtime Control / Frame
     role-facing fake ports
 
 tests/platform/hostra
-    launcher prepare from Game source
-    manifest/join/preflight
+    launcher PREPARE
     Node Runner/Supervision
+    Runtime Control WebSocket carrier binding
     provisioning IPC/Data WS
 
 tests/platform/pwa
-    launcher prepare from Game source
-    manifest/join/preflight
+    launcher PREPARE
     Worker Runner/Supervision
+    Runtime Control MessagePort carrier binding
     provisioning/MessageChannel
 
 tests/platform/equivalence
-    same Game source
-    equivalent LogicalGameBootstrap
-    platform-specific bindings
+    same logical Game + Runtime Control abstract trace
 
 tests/e2e
     desktop/
     pwa/
 ```
 
-Critical PREPARE fault injection：
-
-```text
-invalid Game Entry
-invalid Platform manifest
-missing/extra key
-invalid/outside module
-hosting capability unavailable
-```
-
-Each proves：
-
-```text
-Process/Worker creation = 0
-business module import = 0
-Runtime Control establishment = 0
-```
+M3 conformance is package-local；Hostra/PWA transport equivalence is later integration proof。
 
 ---
 
-## 16. Typical Dependencies
+## 17. Typical Dependencies
 
 ```text
+runtime-control
+    → foundation + wire
+
 main
     → runtime-control / renderer-control / wire as required
 
-subsystem
-    → runtime-control / data / content / foundation
+subsystem author root
+    → data / content / foundation as exposed
+
+subsystem host
+    → runtime-control + role-local integrations
 
 renderer
     → renderer-control / data / content / foundation as needed
 
 map
-    → subsystem
+    → subsystem author root
 
 game-launcher-hostra
     → game-package + subsystem/host + launcher-node + required adapters
 
 game-launcher-pwa
-    → game-package + subsystem/host + required Worker/MessagePort integration
+    → game-package + subsystem/host + Worker/MessagePort integration
 
 apps/*
     → roles + matching launcher + adapters + business
 ```
 
-禁止：
+Forbidden：
 
 ```text
-main → game-package
-main → game-launcher-*
-map/business → game-package
-map/business → game-launcher-*
+runtime-control → main/subsystem implementation
+runtime-control → Game Package/Launcher
+runtime-control → WebSocket/MessagePort/Worker/node:*
+main → game-package / game-launcher-*
+map/business → runtime-control / game-package / launcher
 map → subsystem/host
 subsystem author root → concrete transport
-apps/* duplicating Game/Launcher validation semantics
+apps/* duplicating Game/Launcher/Runtime Control semantics
 wire/foundation → domain authority
 ```
 
 ---
 
-## 17. Creation Order
+## 18. Creation Order
 
 ```text
 foundation + wire ✅
-→ game-package
-→ runtime-control
+→ game-package ✅
+→ runtime-control       ← M3 current
 → subsystem author/host
 → main LogicalGameBootstrap + fake RuntimeHosting
-→ game-launcher-hostra (first Game Package runtime-product consumer)
+→ game-launcher-hostra
 → Desktop Frame vertical slice
 → renderer-control / data / Broker / Input / Render / Content
 → map / Desktop E2E
-→ game-launcher-pwa (second Game Package runtime-product consumer)
+→ game-launcher-pwa
 → PWA adapters/provisioning/E2E
 → cross-platform equivalence
 ```
 
 ---
 
-## 18. Final Rules
+## 19. Final Rules
 
-1. repository layout只实现 package architecture；
-2. Game Package是 document validation capability；
-3. matching Launchers own Runtime-product Game Entry consumption；
-4. Main不依赖 Game Package/concrete Launcher；
-5. Game common config与 Platform executable config分离；
-6. launcher packages各自拥有 schema/planner/resolver/RuntimeHosting/Runner integration；
-7. apps是最终 composition roots且不重复 lower-level semantics；
-8. author/host export surface分离；
-9. Definition Module与 Host-owned Runner分离；
-10. Data Broker仍在 composition/integration；
-11. Foundation/Wire低层正交；
-12. business无 Game/Platform launch依赖；
-13. tests显式覆盖 zero-side-effect PREPARE与 logical bootstrap projection；
-14. cross-platform equivalence不要求 same Definition artifact。
+1. repository layout only realizes package architecture；
+2. Game Package is document validation capability；
+3. Runtime Control is root-only protocol mechanics capability depending on Foundation + Wire；
+4. Runtime Control internal layout has one reader/dispatcher + one serialized writer + connection-wide IDs/pending；
+5. role-specific peer files do not contain Main/Subsystem application authority；
+6. matching Launchers own Runtime-product Game Entry consumption；
+7. Main does not depend on Game Package/concrete Launcher；
+8. Game common config and Platform executable config stay separate；
+9. launcher packages own schema/planner/resolver/RuntimeHosting/Runner integration；
+10. apps are final composition roots and do not duplicate lower-level semantics；
+11. author/host export surface is split；business never imports Runtime Control directly；
+12. Definition Module and Host-owned Runner are separate；
+13. Data Broker stays composition/integration；
+14. Foundation/Wire remain low-level orthogonal；
+15. tests explicitly cover Runtime Control single reader/writer/ID/deadline/terminal mechanics and Game PREPARE zero-side-effect；
+16. cross-platform equivalence does not require same artifact。

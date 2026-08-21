@@ -8,7 +8,7 @@ titleTemplate: false
 hero:
   name: LoomRealm
   text: 分层、跨平台的模块子系统运行平台
-  tagline: 同一 Subsystem Definition Module，通过 Hostra Node Runner 与 PWA Worker Runner 运行；协议 authority 与 physical Platform topology 严格分离。
+  tagline: 同一 logical Subsystem key / author ABI / formal semantics，可由 Hostra 与 PWA 绑定各自 platform-selected Definition artifact；协议 authority 与 physical Platform topology 严格分离。
   actions:
     - theme: brand
       text: 产品设计总览
@@ -30,11 +30,11 @@ features:
   - title: Platform-neutral Business
     details: Game Package 只声明 logical {key}；Hostra/PWA 可为同一 key 绑定不同 Definition artifact，业务不接触 Process、Worker、WebSocket 或 MessagePort。
   - title: Authority Closed Loop
-    details: Main 拥有 Frame/Activation/InputTarget/DataAuthority；Subsystem 拥有 Interest 与 Render；Platform 只实现物理 topology/provisioning。
-  - title: Protocol → SDK 不可绕过
-    details: FrameOutcome 与正式协议一一对应；Runtime-fatal/ambiguous 路径不会作为可 catch 后继续的普通业务异常重新进入 continuation。
+    details: Main 拥有 Runtime/Frame/Activation/InputTarget/DataAuthority；Runtime Control 只拥有 connection-local protocol mechanics；Platform 只实现物理 topology/provisioning。
+  - title: Protocol → Role 不可绕过
+    details: Runtime Control 用 one reader/dispatcher、one writer、strict-monotonic Request IDs 与 finite deadlines 实现协议 mechanics；Main/Subsystem Host 继续拥有真实 authority/control-flow。
   - title: Cross-platform Equivalence
-    details: WebSocket 与 MessagePort 都映射为 UTF-8 JSON text carrier unit；Hostra/PWA 不同 physical trace 必须得到相同 logical outcome。
+    details: WebSocket 与 MessagePort 都映射为 UTF-8 JSON text carrier unit；Hostra/PWA 不同 physical trace 必须得到相同 logical/protocol/business outcome。
 ---
 
 ## 推荐阅读
@@ -47,7 +47,10 @@ features:
 6. [Subsystem 模型](./10-architecture/subsystem-model.md)
 7. [运行时启动与连接建立系统](./10-architecture/runtime-bootstrap-system.md)
 8. [正式契约目录](./15-contracts/README.md)
-9. [Renderer Data Application Profile v1](./15-contracts/renderer-data-profile-v1.md)
-10. [模块设计目录](./20-modules/README.md)
-11. [测试策略](./30-implementation/testing-strategy.md)
-12. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
+9. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
+10. [Frame / Call v1](./15-contracts/frame-call-protocol-v1.md)
+11. [Renderer Data Application Profile v1](./15-contracts/renderer-data-profile-v1.md)
+12. [模块设计目录](./20-modules/README.md)
+13. [测试策略](./30-implementation/testing-strategy.md)
+14. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
+15. [ADR 0021：Runtime Control 首次实现前收口](./decisions/0021-runtime-control-preimplementation-closure.md)

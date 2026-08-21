@@ -18,12 +18,14 @@ LoomRealm 是一个通过只读 Game Entry 声明 **platform-neutral logical Sub
 - [运行时启动与连接建立系统](./doc/10-architecture/runtime-bootstrap-system.md)
 - [正式契约目录](./doc/15-contracts/README.md)
 - [Game Package v1](./doc/15-contracts/game-package-v1.md)
+- [Runtime Control Application Profile v1](./doc/15-contracts/runtime-control-profile-v1.md)
+- [Frame / Call v1](./doc/15-contracts/frame-call-protocol-v1.md)
 - [Hostra Game Launcher / Node Runner Profile v1](./doc/15-contracts/nodejs-launcher-profile-v1.md)
 - [PWA Game Launcher / Worker Runner Profile v1](./doc/15-contracts/pwa-launcher-profile-v1.md)
-- [Frame / Call v1](./doc/15-contracts/frame-call-protocol-v1.md)
 - [独立分包与发布架构](./doc/30-implementation/package-architecture.md)
 - [第一阶段交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [ADR 0020：Game Entry 消费边界归 Platform Launcher](./doc/decisions/0020-game-entry-consumer-boundary.md)
+- [ADR 0021：Runtime Control 首次实现前收口](./doc/decisions/0021-runtime-control-preimplementation-closure.md)
 - [完整阅读指南](./doc/README.md)
 
 ---
@@ -185,7 +187,7 @@ Runtime Control establishment = 0
 
 ---
 
-## Runtime / Frame / Data
+## Runtime Control / Frame / Data
 
 Runtime Control：
 
@@ -195,14 +197,57 @@ Subsystem Control v1
 = Runtime Control Application Profile v1
 ```
 
+M3 current mechanics：
+
+```text
+already-established MessageCarrier<string>
+→ bounded Wire/Profile decode
+→ exactly one connection-wide reader/dispatcher
+→ Control + Frame role dispatch
+
+all outbound messages
+→ one serialized writer
+```
+
+Same sender / same Control Connection：
+
+```text
+Request IDs positive safe integer
+strictly monotonically increasing
+Control + Frame shared namespace
+never reuse / never wrap
+```
+
+Deadline / terminal：
+
+```text
+finite deadline covers send + Response wait
+pending settlement first-wins
+terminal first-wins
+late Response diagnostics only
+no retry/replay/reconnect
+```
+
+Frame causal barrier：
+
+```text
+frame.call Response send accepted
+→ Child initialize / activate
+
+frame.return Response send accepted
+→ close / resume
+```
+
+Runtime Control owns this protocol mechanics but not Main Stack authority。
+
+Source duplicate JSON members follow frozen `@loomrealm/wire` / ECMAScript `JSON.parse` observable semantics；Runtime Control does not add a second JSON parser。
+
 Frame / Call v1 remains Frozen：
 
 ```text
-Response-before-dependent-RPC
 ACK-before-publication
 post-commit no rollback
 Timeout/loss ambiguous → Runtime failure
-no retry/replay
 whole-suffix fixed-point unwind
 ```
 
@@ -249,23 +294,30 @@ Runtime bootstrap token、Runner bootstrap、Data ticket/Port、Content credenti
 ## 分包与依赖
 
 ```text
-@loomrealm/wire
-    ↓
-@loomrealm/game-package
-    ↓
+@loomrealm/foundation ────────┐
+                              ↓
+@loomrealm/wire ───────→ @loomrealm/runtime-control
+       │                      ↓
+       │             Main / Subsystem Host
+       │
+       └→ @loomrealm/game-package
+               ↓
 @loomrealm/game-launcher-hostra / @loomrealm/game-launcher-pwa
-    ↓
-apps/desktop / apps/pwa
+               ↓
+       apps/desktop / apps/pwa
 ```
 
-Parallel role graph：
+Role graph：
 
 ```text
 @loomrealm/main
     → runtime-control / renderer-control / wire as required
 
+@loomrealm/subsystem/host
+    → runtime-control + role-local integrations
+
 @loomrealm/subsystem
-    → runtime-control / data / content / foundation
+    → author-facing data/content/foundation capabilities
 
 @loomrealm/map
     → @loomrealm/subsystem
@@ -274,10 +326,10 @@ Parallel role graph：
 Forbidden：
 
 ```text
-main → game-package
-main → concrete launcher
-business → game-package
-business → launcher
+runtime-control → Main/Subsystem implementation
+runtime-control → WebSocket/MessagePort/Worker
+main → game-package / concrete launcher
+business → game-package / launcher / runtime-control
 ```
 
 ---
@@ -297,7 +349,8 @@ business → launcher
     M6/M15 real launcher consumer qualification pending
 
 @loomrealm/runtime-control
-    implementation pending
+    Implementation Ready / Core Contract Frozen
+    M3 implementation pending
 
 @loomrealm/subsystem
     implementation pending
@@ -324,11 +377,11 @@ M3 @loomrealm/runtime-control
 之后：
 
 ```text
-M4 Subsystem author/host
-→ M5 Main LogicalGameBootstrap + fake RuntimeHosting
+M4 Subsystem author/host = first real Subsystem-side Runtime Control consumer
+→ M5 Main = real Main-side Runtime Control consumer + authority slice
 → M6 Hostra Launcher (first real Game Package runtime-product consumer)
 ...
-→ M15 PWA Launcher (second real consumer)
+→ M15 PWA Launcher (second real Game Package consumer)
 ```
 
 ---
@@ -342,7 +395,7 @@ same Game Entry logical topology
 same resulting LogicalGameBootstrap semantics
 same subsystem keys
 same SubsystemDefinitionFactory ABI
-same formal protocol/profile semantics
+same Runtime Control / Frame formal semantics
 same logical scenario/business input
 same business-observable result
 ```
@@ -362,17 +415,21 @@ HTTP vs Service Worker internals
 
 ## Current v1 Governance
 
-这次 Game/Launcher/Main consumer-boundary closure 仍发生在 real conformant compatibility boundary 前，因此直接更新 current v1：
+First conformant compatibility obligation has not yet formed for the Game/Launcher reset or M3 Runtime Control implementation mechanics，so current v1 is corrected directly with ADR provenance：
 
 ```text
-no v2
+no fake v2
 no legacy {key,module} Game parser
 no deprecated module alias
 no Main compatibility adapter
 no universal launcher options/prepared bag
+no Runtime Control second JSON parser
+no legacy non-monotonic Request-ID compatibility mode
 ```
 
-History/provenance留在 ADR/Git；current docs保持单一事实源。
+ADR 0021 does not reopen Frame seven methods/authority/Outcome/commit/unwind semantics。
+
+History/provenance留在 ADR/Git；current docs保持单一事实源。Real compatibility obligation形成后，incompatible changes return to normal version/migration governance。
 
 ---
 

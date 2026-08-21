@@ -9,7 +9,8 @@
 > 依赖：[Game Package v1](./game-package-v1.md)  
 > Desktop realization：[Desktop Node.js Launcher / Subsystem Runner Profile v1](./nodejs-launcher-profile-v1.md)  
 > 组合 Profile：[Runtime Control Application Profile v1](./runtime-control-profile-v1.md)  
-> 最近复核：2026-08-19
+> 实现收口：[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 最近复核：2026-08-21
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -59,7 +60,7 @@ heartbeat
 
 Control application semantics不固定物理 carrier。
 
-典型 realization：
+Typical realization：
 
 ```text
 Hostra Desktop → localhost WebSocket
@@ -74,17 +75,17 @@ one carrier unit
 = one JSON-RPC message object
 ```
 
-Platform负责建立/交付 carrier，但不得改变 identity/lifecycle semantics。
+Platform负责建立/交付 carrier，但不得改变 identity/lifecycle semantics。这些是 Platform Binding，不是额外 Host application protocol。
 
-这些是 Platform Binding，不是额外 Host application protocol。
+Source-level duplicate JSON member observable semantics由 enclosing Runtime Control Profile/Wire定义；Control v1不建立第二 parser。
 
 ---
 
 ## 3. Connection Bootstrap
 
-新 Control Connection第一条 LoomRealm application message MUST是 `subsystem.hello`。
+新 Control Connection 第一条 LoomRealm application message MUST是 `subsystem.hello` Request。
 
-hello成功前：
+hello Success 前：
 
 ```text
 no bound subsystem identity
@@ -94,6 +95,8 @@ no Data control operation
 ```
 
 第一条 message不是合法 hello → Main MUST fail closed。
+
+同一 connection 第二个 hello → fatal protocol state error。
 
 ---
 
@@ -108,18 +111,28 @@ bind unique Launch Attempt + descriptor.key
 fresh each Launch Attempt
 registered before Runtime can execute
 one successful consumption
-consumed immediately on successful hello
+consumed atomically as part of successful hello authority decision
 not derived from PID/port/path/launchId
 not logged
 ```
 
-认证失败统一：
+Authentication failure externally unified：
 
 ```text
 BOOTSTRAP_AUTHENTICATION_FAILED
 ```
 
-不得区分 unknown key / bad token / consumed token / mismatch。
+不得区分：
+
+```text
+unknown key
+bad token
+consumed token
+key/token mismatch
+inactive Launch Attempt
+```
+
+`DUPLICATE_CONTROL_CONNECTION` remains a separate semantic failure because it expresses a connection-state conflict rather than credential detail。
 
 ---
 
@@ -143,32 +156,72 @@ interface SubsystemHelloResultV1 {
 }
 ```
 
-Main验证：
+Exact schema；no optional/extension fields。
+
+Main authority validates：
 
 ```text
-key exists in current Descriptor Registry
+key exists in current logical Subsystem Registry
 active Launch Attempt exists for key
 token belongs to attempt
 token unconsumed
+no already-successful Control Connection for same attempt
 ```
 
-`key` 大小写敏感、逐字符精确。
+`key` case-sensitive/exact string identity，与 Game/Runtime subsystem key一致。
 
 ---
 
-## 6. Version Negotiation
+## 6. Mechanics vs Authority Ownership
 
-`protocolVersions` 只协商 `loomrealm.subsystem-control`。
+`@loomrealm/runtime-control` mechanics owns：
 
 ```text
-1..16 positive integer entries
-no duplicates
-selected = max(intersection)
+hello wire/schema validation
+hello-first / hello-one-shot
+protocolVersions limits/duplicates
+Control version selection
+state gating
+connection-local bound key after accepted hello
+JSON-RPC Response/error mechanics
 ```
 
-当前 Runtime MUST advertise `1`。
+Main owns：
 
-不协商：
+```text
+Subsystem Registry
+Launch Attempt Registry
+bootstrapToken creation/storage/consumption
+connection authority conflict decision
+Runtime observed authority state outside connection-local mechanics
+```
+
+Runtime Control implementation MUST request an injected Main authentication decision；不得自行 mint/store Launch Attempt credentials。
+
+Token consumption / successful authority decision MUST happen before a hello Success is emitted。If the Success Response later cannot be delivered due carrier failure, token/attempt authority MUST NOT roll back；Main handles resulting Runtime failure according to lifecycle policy。
+
+---
+
+## 7. Version Negotiation
+
+`protocolVersions` only negotiates `loomrealm.subsystem-control`。
+
+```text
+array length 1..16
+entries positive safe integers
+no duplicates
+selected = max(intersection(peerVersions, supportedVersions))
+```
+
+Current conformant Runtime MUST advertise `1`；current Main MUST support `1`。
+
+No intersection：
+
+```text
+CONTROL_PROTOCOL_UNSUPPORTED
+```
+
+Not negotiated here：
 
 ```text
 Frame / Call
@@ -179,31 +232,32 @@ Render Update
 Content API
 ```
 
-Frame v1由 Runtime Control Profile v1静态绑定。
+Frame v1 is statically bound by Runtime Control Profile v1。
 
 ---
 
-## 7. Identity Binding
+## 8. Identity Binding
 
-hello成功：
+Accepted hello authority：
 
 ```text
-consume token
+consume token / commit Main auth decision
 → permanently bind Control Connection to descriptor.key
-→ Main observed state = identified
+→ emit hello Success
+→ connection becomes usable as identified
 ```
 
-同一 Connection identity不可改变。
+Connection identity never changes。
 
-后续消息依赖 connection-bound identity，不重复 key。
+Subsequent Control/Frame messages use connection-bound identity；they do not repeat key except where Frame business method explicitly references a target subsystem key。
 
-同一 Launch Attempt最多一个成功 identified Control Connection。
+Same Launch Attempt has at most one successful identified Control Connection。
 
 ---
 
-## 8. Runtime State Model
+## 9. Runtime State Model
 
-Main observed：
+Main observed product state may contain：
 
 ```ts
 type MainObservedSubsystemStateV1 =
@@ -217,7 +271,7 @@ type MainObservedSubsystemStateV1 =
   | "failed";
 ```
 
-Runtime-reported：
+Runtime-reported Control status：
 
 ```ts
 type SubsystemRuntimeStatusV1 =
@@ -235,11 +289,13 @@ interface SubsystemRuntimeErrorV1 {
 }
 ```
 
-`stopped` 只来自 Platform/Supervisor actual Runtime existence observation。
+Connection-local protocol state only projects the report legality needed to enforce v1。`declared/starting/connected/stopped` contain Main/Platform facts outside this protocol mechanics。
+
+`stopped` only comes from Platform/Supervisor actual Runtime termination observation；Subsystem MUST NOT report it through `subsystem.status`。
 
 ---
 
-## 9. `subsystem.status`
+## 10. `subsystem.status`
 
 ```text
 Method:    subsystem.status
@@ -247,7 +303,7 @@ Type:      JSON-RPC Notification
 Direction: Subsystem → Main
 ```
 
-closed union：
+Closed union：
 
 ```json
 {"state":"initializing"}
@@ -256,7 +312,9 @@ closed union：
 {"state":"failed","error":{"code":"..."}}
 ```
 
-不得增加：
+Failed MAY include `message` as specified by limits。
+
+MUST NOT add：
 
 ```text
 rendererDataEndpoint
@@ -268,51 +326,59 @@ statusRevision
 arbitrary metadata
 ```
 
+Since this is a Notification, invalid schema/state receives no JSON-RPC Response and is protocol-fatal for the connection。
+
 ---
 
-## 10. `ready`
+## 11. `ready`
 
-只表示：
+`ready` means only：
 
-> Runtime required initialization完成，并能承担 enclosing Runtime Control Application Profile声明的后续 Runtime role。
+> Runtime required initialization completed and Runtime can fully perform the Subsystem role required by enclosing Runtime Control Application Profile。
 
-当前包括完整 Frame / Call v1 Subsystem role。
+Current includes complete Frame / Call v1 Subsystem role。
 
-`ready` MUST NOT表示：
+`ready` MUST NOT imply：
 
 ```text
 Renderer connected
 DataAuthority exists
-Data profile supported remotely
+Data profile available remotely
 Data carrier exists
 Data provisioning offer exists
 Frame/Render/InputTarget exists
-Content预载
+Content preloaded
 ```
 
-Platform provisioning channel存在与否、Data endpoint/ticket如何交付都不进入 `ready` wire。
+Platform provisioning channel existence and Data endpoint/ticket delivery stay outside Control wire。
 
 ---
 
-## 11. `failed`
+## 12. `failed`
 
-`status(failed)` 是 Runtime self-reported terminal failure。
+`status(failed)` is Runtime self-reported terminal protocol state。
 
-发送后 Runtime：
+After sending it, Runtime：
 
 ```text
-MUST NOT start new normal Control operation
-SHOULD perform bounded cleanup
+MUST NOT start any new normal Control/Frame operation
+SHOULD perform bounded local cleanup
 SHOULD terminate promptly
 ```
 
-恢复必须 fresh Launch Attempt + token + Runtime + Control Connection。
+No：
 
-无 failed→ready。
+```text
+failed → ready
+failed → initializing
+failed → stopping as normal recovery
+```
+
+Recovery requires fresh Launch Attempt + token + Runtime + Control Connection。
 
 ---
 
-## 12. `subsystem.shutdown`
+## 13. `subsystem.shutdown`
 
 ```text
 Method:    subsystem.shutdown
@@ -330,15 +396,25 @@ interface SubsystemShutdownParamsV1 {
 interface SubsystemShutdownResultV1 {}
 ```
 
-Success只表示 graceful shutdown accepted，不表示 Runtime已经退出。
+Success means graceful shutdown intent accepted；it does NOT mean physical Runtime has exited。
 
-Main发送前 MUST建立 shutdown intent并进入 observed `stopping`。
+Before Main sends shutdown：
+
+```text
+Main commits shutdown intent
+→ connection protocol state allows stopping
+→ subsystem.shutdown Request
+```
+
+Subsystem handling shutdown MAY then report `status({state:"stopping"})`。
+
+Shutdown timeout/loss MUST NOT synthesize `stopped`；Supervisor/Platform decides physical escalation and observes termination。
 
 ---
 
-## 13. Lifecycle Transitions
+## 14. Lifecycle Transition Legality
 
-无 shutdown intent：
+Without shutdown intent：
 
 ```text
 identified → initializing / ready / failed
@@ -346,55 +422,67 @@ initializing → ready / failed
 ready → failed
 ```
 
-有 shutdown intent额外：
+With Main shutdown intent：
 
 ```text
-identified/initializing/ready → stopping
+identified / initializing / ready → stopping
 stopping → failed
 ```
 
-重复 status、ready→initializing、stopping→ready、failed→anything都是 fatal protocol state error。
+Fatal protocol state error：
+
+```text
+status before hello
+second hello
+repeated identical status
+ready → initializing
+stopping → ready
+failed → any normal Control/Frame operation
+stopping without Main shutdown intent
+```
+
+Connection mechanics MUST enforce these transitions；not optional helper behavior。
 
 ---
 
-## 14. Control Loss / Runtime Exit
+## 15. Control Loss / Runtime Exit
 
-无 shutdown intent：
+Without shutdown intent：
 
 ```text
-unexpected Control loss → failed
-unexpected Runtime exit → failed
+unexpected Control closed/lost → Runtime failed
+unexpected Runtime exit        → Runtime failed
 ```
 
-exit code 0不改变分类。
+Exit code 0 does not change this classification。
 
-有 shutdown intent时由 Main/Supervisor根据 termination context判定 stopped/failed。
+With shutdown intent, Main/Supervisor uses actual termination context to decide final stopped/failed outcome。
 
-Runtime已 failed后不能因后续 exit恢复为 stopped-success。
+If Runtime already failed, later exit MUST NOT rewrite it as successful stopped recovery。
 
-v1无 same-attempt Control reconnect。
+v1 has no same-attempt Control reconnect/resume。
 
 ---
 
-## 15. Error Model
+## 16. Error Model
 
-标准 JSON-RPC：
+Standard JSON-RPC mechanics are defined by Runtime Control Profile：
 
 ```text
--32700
--32600
--32601
--32602
+-32700 Parse error
+-32600 Invalid Request
+-32601 Method not found
+-32602 Invalid params
 ```
 
-semantic：
+LoomRealm semantic envelope：
 
 ```text
 error.code = -32000
 error.data.code = stable code
 ```
 
-v1：
+Control v1 semantic codes exactly：
 
 ```text
 BOOTSTRAP_AUTHENTICATION_FAILED
@@ -403,47 +491,81 @@ DUPLICATE_CONTROL_CONNECTION
 PROTOCOL_STATE_ERROR
 ```
 
+Authentication detail MUST NOT be exposed through different code/message/data shape。
+
+Unexpected local handler/authority callback exception is local implementation fatal，not a Control semantic error。
+
 ---
 
-## 16. Request ID / Limits
+## 17. Request ID / Limits
 
-Request ID：
+Request IDs follow enclosing Runtime Control Profile strict sender rule：
 
 ```text
 positive safe integer
-sender-side connection lifetime never reused
+strictly monotonically increasing per sender/connection
+Control + Frame shared same-sender namespace
+never reused
+never wrap
 ```
 
-共享 Frame carrier时，Runtime Control Profile定义跨 domain shared sender namespace。
+Two sender directions are independent。
 
-Core limits：
+Core Control limits：
 
 ```text
-max application message           1 MiB
-max JSON nesting depth             64
-protocolVersions entries           1..16
-bootstrapToken                     1..4096 UTF-8 bytes
-SubsystemRuntimeError.code         1..128 ASCII chars
-SubsystemRuntimeError.message      0..4096 UTF-8 bytes
+max application message           1,048,576 UTF-8 bytes
+max JSON nesting depth            64
+protocolVersions entries          1..16
+bootstrapToken                    1..4096 UTF-8 bytes
+SubsystemRuntimeError.code        1..128 ASCII chars
+SubsystemRuntimeError.message     0..4096 UTF-8 bytes
 ```
 
-plain JSON-compatible values；closed schema；no Batch。
+`SubsystemRuntimeError.code` MUST be non-empty ASCII protocol/business diagnostic code；message is optional human diagnostic and not compatibility branching contract。
+
+Plain JSON-compatible parsed values；closed schema；no Batch；unpaired surrogate rejected by enclosing profile validation。
 
 ---
 
-## 17. Security
+## 18. Control Deadlines
 
-- bootstrapToken按 secret处理；
-- Platform限制 Control carrier到认可 boundary；
-- hello error不泄露 token/key匹配细节；
-- logs脱敏；
-- connection-bound key是唯一 Runtime protocol identity；
-- Data credential/profile不通过 ready传输；
-- executable trust/sandbox属于 Platform/Runner realization。
+Control timeout policy remains independent from Frame deadline。
+
+Required finite policy domains：
+
+```text
+Subsystem hello Request deadline
+Main shutdown Request deadline
+```
+
+Exact values are Host/role policy，but MUST be positive finite integer milliseconds and use the enclosing Runtime Control relative scheduler mechanics。
+
+Timeout：
+
+```text
+hello timeout      → bootstrap/connection terminal
+shutdown timeout   → connection/request terminal; no fabricated stopped
+```
+
+No automatic retry/replay/reconnect。
 
 ---
 
-## 18. Frame Composition / Data Independence
+## 19. Security
+
+- `bootstrapToken` is secret bearer material；
+- Platform limits Control carrier to accepted trust boundary；
+- auth failure does not reveal key/token matching detail；
+- logs redact token and sensitive bootstrap material；
+- connection-bound key is Runtime protocol identity；
+- Data credential/profile never travels in ready/status；
+- executable trust/sandbox stays Platform/Runner realization；
+- malformed/protocol-corrupt input MUST fail closed。
+
+---
+
+## 20. Frame Composition / Data Independence
 
 Runtime Control Profile：
 
@@ -452,47 +574,66 @@ Subsystem Control v1
 + Frame / Call v1
 ```
 
-MUST NOT顺带加入 Data lease/provisioning methods。
+Control MUST NOT absorb：
 
-DataAuthority/dataProfile、Data bootstrap、User Input、Render Update均属于独立域。
+```text
+Data lease/provisioning methods
+Frame lifecycle status messages
+Renderer authority
+Input/Render application messages
+```
+
+DataAuthority/dataProfile、Data bootstrap、User Input、Render Update remain separate protocol domains。
 
 ---
 
-## 19. Conformance
+## 21. Conformance
 
-至少：
+At minimum：
 
 ```text
 hello-first-message
-valid/invalid/consumed bootstrap credential
+hello-one-shot
+valid-invalid-consumed-bootstrap-credential
+auth-failure-detail-not-leaked
 version-selection-1
+version-list-1..16-no-duplicate
 connection-key-binding
-ready-has-no-data-endpoint/profile/ticket
+ready-has-no-data-endpoint-profile-ticket
 ready-does-not-imply-data-connection
 stopping-requires-main-intent
+repeated-status-fatal
+retrograde-status-fatal
+failed-blocks-normal-operation
 stopped-only-from-supervisor
 unexpected-control-loss-fails-runtime
 unexpected-exit-code-zero-fails-runtime
+shutdown-timeout-does-not-produce-stopped
 no-same-attempt-reconnect
 closed-status-schema
-wire-limits
-websocket/messageport-json-text-equivalence
+strict-monotonic-request-id-via-profile
+wire-profile-limits
+websocket-messageport-json-text-equivalence
 ```
 
 ---
 
-## 20. Final Invariants
+## 22. Final Invariants
 
-1. Control只拥有 Runtime identity/lifecycle；
-2. descriptor.key是唯一 Runtime identity；
-3. hello前无 authenticated operation；
-4. bootstrapToken一次性；
-5. launch != connected != identified != ready；
-6. ready不包含/暗示 Data endpoint/profile/provisioning；
-7. Data Connection/auth/profile属于独立域；
-8. Main拥有正常 shutdown intent；
-9. stopped只来自 actual Runtime termination；
-10. 无 shutdown intent的 Control loss/Runtime exit是 failure；
-11. no reconnect/resume/restart/heartbeat in v1；
-12. Frame / Call保持独立协议域；
-13. Platform Binding差异不得改变 Control semantics。
+1. Control only owns Runtime identity/lifecycle protocol semantics；
+2. descriptor.key is exact connection-bound Runtime identity；
+3. hello is first and one-shot；before hello no status/Frame；
+4. bootstrapToken is one-time and Main-owned authority material；
+5. Runtime Control package owns hello mechanics，Main owns Launch Attempt/token decision；
+6. launch != connected != identified != ready；
+7. ready carries/implies no Data/Renderer/Frame existence material；
+8. status transitions are closed and enforced；repeated/retrograde status fatal；
+9. Main owns normal shutdown intent；
+10. stopped only comes from actual Runtime termination observation；
+11. without shutdown intent Control loss/Runtime exit is failure；
+12. shutdown Success is acceptance，not termination；timeout does not fabricate stopped；
+13. Request IDs are strict monotonic same-sender connection lifetime and share namespace with Frame；
+14. current carrier unit is UTF-8 JSON text；no Batch/second parser；
+15. no reconnect/restart/heartbeat in v1；
+16. Frame / Call remains separate application protocol domain；
+17. Platform Binding differences MUST NOT change Control semantics。
