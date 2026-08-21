@@ -15,13 +15,16 @@ Protocol boundary
 != npm package boundary
 != Runtime process boundary
 != Platform boundary
+!= implementation milestone boundary
 ```
+
+Milestone只描述 capability 的实现顺序与阶段性 closure。**不得根据某个 milestone 首次写到某 package，就推导该 milestone 已覆盖该 package 的全部职责。** 一个 role package MAY跨多个 milestone逐步实现，只要 package ownership 与 public boundary保持一致。
 
 ---
 
 ## 1. Dependency Layers
 
-Current low-level primitives feed multiple independent capability branches：
+Current low-level primitives feed multiple independent capability branches。以下第一张图只描述 Runtime/Game 的低层主干，不应被解释为完整 Role dependency graph：
 
 ```text
 @loomrealm/foundation        @loomrealm/wire
@@ -39,6 +42,27 @@ matching game-launcher-*
         ↓
 apps/* composition
 ```
+
+对 `@loomrealm/subsystem` 必须同时观察 Runtime、Data、Content 等 capability branch：
+
+```text
+Runtime branch                     Data / presentation branch
+──────────────                     ──────────────────────────
+foundation + wire                  wire/foundation as required
+        ↓                                   ↓
+runtime-control                           data
+        ↓                              ┌─────┴─────┐
+subsystem/host                        input       render
+        \                              /           /
+         \                            /           /
+          └──────── @loomrealm/subsystem ────────┘
+                         ↑
+                      content
+                         ↓
+                  business packages
+```
+
+这里的 `subsystem/host` 是 Runtime Control 的真实 consumer boundary；它不是整个 Subsystem role package 的同义词。
 
 Business package only depends on the nearest author-facing role SDK。
 
@@ -193,6 +217,8 @@ Main MUST NOT depend on：
 
 ### Subsystem dual surface
 
+`@loomrealm/subsystem` 是完整 platform-neutral Subsystem role SDK，不是 Runtime Control wrapper，也不等同于 Subsystem Runtime host mechanics。
+
 Author：
 
 ```text
@@ -217,6 +243,28 @@ Trusted integration：
 `@loomrealm/subsystem/host` is the first real Subsystem-side consumer of Runtime Control typed peer；it maps protocol mutation-pending state into ordinary-input gating/business control flow。
 
 Business package MUST NOT depend on `/host`、Game Package、Launcher、Runtime Control directly。
+
+#### Subsystem package implementation spans milestones
+
+Package responsibility 与 implementation readiness 分离：
+
+| Subsystem responsibility | Primary capability dependency | Phase 1 implementation gate |
+| --- | --- | --- |
+| Definition/lifecycle + Frame/Outcome | Runtime Control / Frame v1 | M4 |
+| Host Runtime Control role mapping | Runtime Control v1 | M4 |
+| DataPlane + `SubsystemDataBinding` application integration | Renderer Data Profile | M8 |
+| `InputListener` / InputManager | User Input v1 | M10 |
+| `RenderDomain` / RenderManager | Render Update v1 | M11 |
+| `ContentClient` author mapping | Content capability/contracts | M12 |
+
+因此：
+
+```text
+M4 closes a Subsystem Runtime/Frame slice
+M4 != full @loomrealm/subsystem package closure
+```
+
+M8/M10/M11/M12继续修改/实现同一个 role package，不因为 milestone 不同而拆出新的 Subsystem ownership。
 
 ---
 
@@ -444,12 +492,23 @@ Thus：
 
 ## 14. Dependency Graph
 
+完整图必须同时显示 capability package 与 role package 的多分支关系：
+
 ```text
 foundation ───────────────┐
                           ↓
 wire ─────────────→ runtime-control
  │                        ↓
- │               main / subsystem-host
+ │                main / subsystem-host
+ │                        │
+ │                        └──────────────┐
+ │                                       │
+ ├──────────────→ data ─────────────→ subsystem
+ │                    │                  ↑
+ │                    ├─ input slice ────┤
+ │                    └─ render slice ───┤
+ │                                       │
+ ├────────────→ content ─────────────────┘
  │
  └→ game-package
         ↓
@@ -470,6 +529,8 @@ renderer
 map
     → subsystem author root
 ```
+
+这张图表达的是 ownership/dependency，不表达 milestone completion。比如 `subsystem-host → runtime-control` 在 M4首先落地，但 `subsystem → data/content` 的实现会在后续 milestone继续完成。
 
 Forbidden：
 
@@ -551,8 +612,15 @@ runtime-control tests
     deadline/terminal/Response barrier
     no role authority implementation
 
-subsystem host tests
-    protocol outcome → local Frame/input/business control-flow mapping
+subsystem host/runtime-frame tests (M4)
+    protocol outcome → local Frame/business control-flow mapping
+    Runtime Control binding/terminal/mutation-gate behavior
+
+subsystem data/input/render/content tests (M8/M10/M11/M12)
+    DataPlane current/fresh-carrier behavior
+    Frame-scoped input interest/receive gate
+    Render Domain publication/lifetime
+    ContentClient role mapping
 
 main tests
     Runtime/Frame authority transactions/unwind
@@ -581,7 +649,10 @@ Repository-level：transport binding equivalence、Runner/provisioning integrati
 11. Main does not depend on Game Package/concrete Launcher；
 12. Host-owned Runner and Definition Module remain distinct；
 13. Subsystem author/host surface remain distinct；business never imports Runtime Control directly；
-14. Platform provisioning stays in correct integration layer；
-15. apps are complete composition roots；
-16. packages split only for real consumer/replacement/publish value；
-17. Hostra/PWA equivalence compares logical/semantic outcome，not artifact identity。
+14. `@loomrealm/subsystem` is a complete role SDK boundary, not a Runtime Control wrapper；
+15. milestone grouping describes implementation slices and MUST NOT redefine package responsibility；
+16. M4 closes the Subsystem Runtime/Frame slice；M8/M10/M11/M12 continue Data/Input/Render/Content implementation in the same role package；
+17. Platform provisioning stays in correct integration layer；
+18. apps are complete composition roots；
+19. packages split only for real consumer/replacement/publish value；
+20. Hostra/PWA equivalence compares logical/semantic outcome，not artifact identity。
