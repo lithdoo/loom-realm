@@ -10,6 +10,7 @@
     "test:packages": "npm test --workspaces --if-present",
     "test:core-packages": "npm test -w @loomrealm/foundation -w @loomrealm/wire",
     "test:game-package": "npm test -w @loomrealm/wire -w @loomrealm/game-package",
+    "test:runtime-control": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/runtime-control",
     "test:fixtures": "npm run build -w @loomrealm/fsdb-http && node --test tools/fixtures/**/*.test.mjs",
     "docs:dev": "vitepress dev doc",
     "docs:build": "vitepress build doc",

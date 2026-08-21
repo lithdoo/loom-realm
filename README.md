@@ -349,8 +349,9 @@ business → game-package / launcher / runtime-control
     M6/M15 real launcher consumer qualification pending
 
 @loomrealm/runtime-control
-    Implementation Ready / Core Contract Frozen
-    M3 implementation pending
+    Implemented Baseline / Core Contract Frozen
+    M3 local closure complete
+    M4/M5 real role-consumer qualification pending
 
 @loomrealm/subsystem
     implementation pending
@@ -371,7 +372,7 @@ business → game-package / launcher / runtime-control
 下一实现门：
 
 ```text
-M3 @loomrealm/runtime-control
+M4 @loomrealm/subsystem/host
 ```
 
 之后：

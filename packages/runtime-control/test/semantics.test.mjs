@@ -1,0 +1,200 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
+import {
+  connectSubsystemRuntimeControl,
+  createMainRuntimeControlPeer,
+} from "../dist/index.js";
+
+const scheduler = {
+  schedule(ms, callback) {
+    const timer = setTimeout(callback, ms);
+    return () => clearTimeout(timer);
+  },
+};
+const success = () => ({ kind: "success", result: {} });
+
+async function connect(mainHandlers, subsystemHandlers) {
+  const pair = createMemoryCarrierPair();
+  const main = createMainRuntimeControlPeer({
+    carrier: pair.left,
+    scheduler,
+    frameDeadlineMs: 1000,
+    shutdownDeadlineMs: 1000,
+    authenticateHello: () => ({ kind: "accepted" }),
+    handlers: mainHandlers,
+  });
+  const outcome = await connectSubsystemRuntimeControl({
+    carrier: pair.right,
+    scheduler,
+    helloDeadlineMs: 1000,
+    frameDeadlineMs: 1000,
+    hello: { key: "s", bootstrapToken: "t", protocolVersions: [1] },
+    handlers: subsystemHandlers,
+  });
+  assert.equal(outcome.kind, "connected");
+  await main.identified;
+  return { main, subsystem: outcome.peer };
+}
+
+test("all seven frozen Frame methods route only to their owning role", async () => {
+  const seen = [];
+  const { main, subsystem } = await connect(
+    {
+      onStatus() {},
+      onFrameCall() {
+        seen.push("call");
+        return { kind: "success", result: { childFrameId: "child" } };
+      },
+      onFrameReturn() {
+        seen.push("return");
+        return success();
+      },
+    },
+    {
+      onShutdown: success,
+      onFrameInitialize() {
+        seen.push("initialize");
+        return success();
+      },
+      onFrameActivate() {
+        seen.push("activate");
+        return success();
+      },
+      onFrameSuspend() {
+        seen.push("suspend");
+        return success();
+      },
+      onFrameResume() {
+        seen.push("resume");
+        return success();
+      },
+      onFrameClose() {
+        seen.push("close");
+        return success();
+      },
+    },
+  );
+  await main.frame.initialize({ frameId: "f", input: null });
+  await main.frame.activate({ frameId: "f", activationId: "a" });
+  await main.frame.suspend({ frameId: "f", activationId: "a" });
+  await main.frame.resume({
+    frameId: "f",
+    activationId: "a",
+    returnedFrameId: "child",
+    result: { type: "cancelled" },
+  });
+  await main.frame.closeFrame({ frameId: "f" });
+  await subsystem.frame.call({
+    frameId: "f",
+    activationId: "a",
+    targetSubsystemKey: "target",
+    input: null,
+  });
+  await subsystem.frame.returnFrame({
+    frameId: "f",
+    activationId: "a",
+    result: { type: "completed", value: null },
+  });
+  assert.deepEqual(seen, [
+    "initialize",
+    "activate",
+    "suspend",
+    "resume",
+    "close",
+    "call",
+    "return",
+  ]);
+  await main.close();
+});
+
+test("recoverable Frame errors release the mutation gate", async () => {
+  let calls = 0;
+  const { main, subsystem } = await connect(
+    {
+      onStatus() {},
+      onFrameCall() {
+        calls += 1;
+        return calls === 1
+          ? {
+              kind: "semantic-error",
+              error: { code: "FRAME_CALL_TARGET_NOT_FOUND" },
+            }
+          : { kind: "success", result: { childFrameId: "child" } };
+      },
+      onFrameReturn: success,
+    },
+    {
+      onShutdown: success,
+      onFrameInitialize: success,
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  const params = {
+    frameId: "f",
+    activationId: "a",
+    targetSubsystemKey: "missing",
+    input: null,
+  };
+  assert.deepEqual(await subsystem.frame.call(params), {
+    kind: "semantic-error",
+    error: { code: "FRAME_CALL_TARGET_NOT_FOUND" },
+    classification: "recoverable",
+  });
+  assert.deepEqual(await subsystem.frame.call(params), {
+    kind: "success",
+    result: { childFrameId: "child" },
+  });
+  await main.close();
+});
+
+test("fatal Frame semantics terminate and stopping requires shutdown authority", async () => {
+  const first = await connect(
+    {
+      onStatus() {},
+      onFrameCall: () => ({ kind: "success", result: { childFrameId: "x" } }),
+      onFrameReturn: () => ({
+        kind: "semantic-error",
+        error: { code: "FRAME_NOT_FOUND" },
+      }),
+    },
+    {
+      onShutdown: success,
+      onFrameInitialize: success,
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  const fatal = await first.subsystem.frame.returnFrame({
+    frameId: "f",
+    activationId: "a",
+    result: { type: "cancelled" },
+  });
+  assert.equal(fatal.kind, "semantic-error");
+  assert.equal(fatal.classification, "fatal");
+  assert.equal((await first.subsystem.terminal).kind, "protocol-fatal");
+
+  const second = await connect(
+    {
+      onStatus() {},
+      onFrameCall: () => ({ kind: "success", result: { childFrameId: "x" } }),
+      onFrameReturn: success,
+    },
+    {
+      onShutdown: success,
+      onFrameInitialize: success,
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  const stopping = await second.subsystem.control.status({ state: "stopping" });
+  assert.equal(stopping.kind, "terminal");
+  assert.equal(stopping.terminal.kind, "local-fatal");
+});

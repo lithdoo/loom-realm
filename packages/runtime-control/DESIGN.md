@@ -1,6 +1,6 @@
 # `@loomrealm/runtime-control` 设计
 
-> 状态：Implementation Ready / Core Contract Frozen  
+> 状态：Implemented Baseline / Core Contract Frozen（Stage A–I local closure complete）
 > 阶段：M3 Runtime Control first implementation baseline  
 > 最近复核：2026-08-21  
 > 目标：把 Subsystem Control v1、Frame / Call v1 与 Runtime Control Application Profile v1 落成可执行、可测试、transport-independent 的协议 mechanics；不拥有 Main Frame/Stack authority，也不拥有 Subsystem business authority。  

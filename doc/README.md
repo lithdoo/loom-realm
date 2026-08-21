@@ -398,7 +398,7 @@ Once real conformant compatibility obligation forms, future incompatible changes
 ```text
 Foundation / Wire                        Implemented Baseline / Core Contract Frozen
 Game Package                             Implemented Baseline / Core Contract Frozen
-Runtime Control Profile / package design Implementation Ready / Core Contract Frozen
+Runtime Control Profile / package        Implemented Baseline / Core Contract Frozen
 Frame / Call v1                          Active / Normative / Frozen
 Hostra Launcher / Node Runner v1         Active / Normative / Stabilizing
 PWA Launcher / Worker Runner v1          Active / Normative / Stabilizing
@@ -414,7 +414,7 @@ Platform Composition                     Active Design / Evolving
 下一实现门：
 
 ```text
-M3 @loomrealm/runtime-control
+M4 @loomrealm/subsystem/host
 ```
 
 之后 M4 Subsystem Host 与 M5 Main 分别提供真实 role-consumer qualification。
