@@ -13,15 +13,42 @@
 lowest stable primitives
 → common Game document validation
 → Runtime Control protocol mechanics
-→ Subsystem Host role mapping
+→ Subsystem Runtime/Frame role slice
 → Main logical bootstrap + authority
-→ Hostra Launcher / Desktop vertical slice
-→ Renderer/Data/Input/Render/Content
+→ Hostra Launcher / Desktop Runtime vertical slice
+→ Renderer/Data/Input/Render/Content capability slices
 → PWA Launcher / PWA vertical slice
 → abstract-trace equivalence
 ```
 
 Current first implementation直接收口；不做 fake v2 / compatibility parser。
+
+### Milestone interpretation rule
+
+本文件描述的是 **implementation order / capability closure**，不是完整 package responsibility 的重新定义。
+
+```text
+Package Scope
+!= Current Implementable Slice
+!= Milestone Closure
+```
+
+必须按以下优先级解释：
+
+```text
+system architecture
+→ package/publish boundary
+→ milestone implementation slice
+```
+
+因此：
+
+- 一个 package MAY 跨多个 milestone 渐进实现；
+- 某 milestone 写到 package 名称，不代表该 milestone关闭该 package 的完整 public surface；
+- package ownership 以系统架构与 `package-architecture.md` 为事实源；
+- milestone 只说明当前哪些 capability 已具备实现前提并需要被验证。
+
+`@loomrealm/subsystem` 是典型 multi-milestone role package：M4关闭 Runtime/Frame core slice；M8/M10/M11/M12继续在同一 role package 内完成 Data/Input/Render/Content capability integration。M4 closure MUST NOT被解释为完整 `@loomrealm/subsystem` package closure。
 
 ---
 
@@ -260,47 +287,77 @@ When package-local stages complete：
 
 ---
 
-## M4：Subsystem Host Surface + Frame SDK Semantics
+## M4：Subsystem Runtime/Frame Core + Host Runtime Control Qualification
+
+M4实现的是 `@loomrealm/subsystem` / `@loomrealm/subsystem/host` 的 **Runtime/Frame implementation slice**，不是完整 Subsystem role package closure。
+
+### Author Runtime/Frame slice
+
+Implement current-ready author semantics：
+
+```text
+defineSubsystem
+SubsystemDefinitionFactory
+SubsystemScope lifecycle/signal baseline
+Frame / FrameOutcome
+completed / cancelled / failed
+AbortSignal integration
+business-safe Runtime/Frame local errors
+```
+
+M4 不以实现以下 author capability 为 closure 条件：
+
+```text
+InputListener       → M10
+RenderDomain        → M11
+ContentClient       → M12
+```
+
+这些名称属于完整 `@loomrealm/subsystem` package responsibility，但其真正 behavior/API closure由对应 capability contract 与后续 milestone完成。
+
+### Host Runtime slice
 
 Implement：
 
 ```text
-@loomrealm/subsystem
-@loomrealm/subsystem/host
-```
-
-Author：
-
-```text
-defineSubsystem
-SubsystemScope
-Frame / FrameOutcome
-InputListener
-RenderDomain
-ContentClient
-AbortSignal
-```
-
-Host：
-
-```text
 runSubsystem
 RuntimeControlBinding using SubsystemRuntimeControlPeer
-SubsystemDataBinding
 SubsystemLaunchContext
+Runtime Control role mapping
 ```
 
-M4 Runtime Control consumer qualification：
+`SubsystemDataBinding` 可作为完整 host boundary 的 port shape 被定义/保留，但 M4 MUST NOT通过 fake DataPlane/Input/Render behavior宣称其 application semantics 已关闭；真正 Data application integration从 M8开始。
+
+### Runtime Control consumer qualification
 
 ```text
 connectSubsystemRuntimeControl hidden behind host surface
 business author never imports runtime-control
-pending frame.call/frame.return gates ordinary input
+pending frame.call/frame.return gates ordinary mutation/input surface
 recoverable semantic rejection may resume current Activation
 fatal/timeout/terminal never re-enter old business continuation
 ```
 
 Other closure：initialize creates Context only；activate starts handler once；Outcome mapping；administrative suspend abort/discard late completion；business exception handling。
+
+### M4 closure statement
+
+M4完成后允许表述：
+
+```text
+Subsystem Runtime/Frame Core Implemented
+Subsystem Host Runtime Control consumer qualified
+```
+
+M4完成后不得表述：
+
+```text
+@loomrealm/subsystem full package implemented
+Subsystem Input implemented
+Subsystem Render implemented
+Subsystem Content implemented
+Subsystem DataPlane complete
+```
 
 ---
 
@@ -373,7 +430,23 @@ Close atomic snapshot/revision/InputTarget/no physical Data/executable material/
 
 ## M8：Renderer Data Profile + Data Connection Core
 
-Implement `@loomrealm/data` Connection1 + Input1 + Render1 profile composition / one Data dispatcher / S-G-P current gate。
+Implement：
+
+```text
+@loomrealm/data
+    Connection1
+    Input1 + Render1 profile composition
+    one Data dispatcher
+    S-G-P current gate
+
+@loomrealm/subsystem
+    DataPlane integration slice
+
+@loomrealm/subsystem/host
+    SubsystemDataBinding behavior qualification
+```
+
+M8 establishes the shared Data application plane needed by later Input/Render managers；它继续实现同一个 Subsystem role package，不创建第二个 Subsystem runtime package。
 
 ---
 
@@ -396,17 +469,40 @@ Provision failure remains distinct from Runtime/Frame failure。
 
 Implement Frame Interest Registry + State/Event/Reset + receive gate；fresh Data/Activation semantics as formal contracts。
 
+Subsystem-side closure includes：
+
+```text
+@loomrealm/subsystem InputListener
+InputManager
+Frame-scoped Interest aggregation
+fresh carrier republish
+stale input receive gate
+```
+
+这属于 `@loomrealm/subsystem` 后续 capability slice，不改变 M4 Runtime/Frame closure。
+
 ---
 
 ## M11：Render Update v1 + RenderManager
 
 Implement render domains/snapshot/patch/event；fresh carrier baseline；Frame close not auto-destroy Domain；one Data dispatcher shared with Input。
 
+Subsystem-side closure includes：
+
+```text
+@loomrealm/subsystem RenderDomain
+RenderManager
+Domain desired authoritative state
+fresh carrier registry/snapshot baseline
+```
+
 ---
 
 ## M12：Content
 
 Implement `@loomrealm/content` / content-service / Desktop fs/http adapters；keep executable/Data/Content capability separation。
+
+Subsystem-side closure includes platform-neutral `ContentClient` author mapping/injection。完成 M12 后，Phase 1 所需的 Subsystem author capability surface 才具备 Runtime/Frame + Input + Render + Content 的完整实现基础。
 
 ---
 
@@ -417,6 +513,8 @@ Implement `@loomrealm/content` / content-service / Desktop fs/http adapters；ke
 ```
 
 Business uses FrameOutcome/InputListener/RenderDomain/ContentClient；no Game/Launcher/Runtime Control/platform import。
+
+M13 是完整 author SDK 的第一个业务侧组合验证，不反向定义 `@loomrealm/subsystem` package boundary。
 
 ---
 
@@ -474,6 +572,8 @@ Compare logical Runtime/Frame/Renderer/Data/Input/Render/Content/business trace�
 - finite deadline/terminal/late-response mechanics deterministic；
 - Response causal barrier implements Frozen Frame ordering without moving Main authority；
 - Subsystem Host and Main provide real Runtime Control consumer qualification；
+- M4 is interpreted as Subsystem Runtime/Frame slice closure, not full `@loomrealm/subsystem` package closure；
+- M8/M10/M11/M12 complete Subsystem Data/Input/Render/Content capability slices in the same role package；
 - matching Launchers internally consume Game Package；
 - full Game/Platform PREPARE precedes Runtime side effect；
 - Host-owned Runner / Definition Module separated；
