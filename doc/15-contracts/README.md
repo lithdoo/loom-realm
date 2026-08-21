@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)  
 > 最近复核：2026-08-21
 
 契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
@@ -59,7 +59,8 @@ Renderer Data Application Profile v1    Active Design / Draft
     + Render Update v1
 
 Renderer ⇄ Subsystem Data Connection v1 Active Design / Draft
-User Input v1                           Active Design / Core Closure Candidate
+User Input v1                           Active / Normative / Frozen
+    + Conformance v1 fixtureSetRevision 1
 Render Update v1                        Active / Normative / Frozen
     + Conformance v1 fixtureSetRevision 1
 Readonly Content API v1                 Active / Normative / Evolving
@@ -311,6 +312,8 @@ Profile identity = loomrealm.renderer-data/1
 Connection v1 + User Input v1 + Render Update v1
 ```
 
+其中 User Input v1 与 Render Update v1 已 Frozen；Profile仍保持 Draft，直到 Data Connection/Profile 自身的组合与 current-gate closure 完成。
+
 Profile负责 static child binding / one JSON-text carrier unit / one Data dispatcher / fresh-carrier baselines。
 
 Profile改变必须 fresh Data generation。
@@ -342,19 +345,36 @@ Data loss/provisioning failure
 
 ## 10. User Input v1
 
-[User Input v1](./user-input-v1.md)：
+[User Input v1](./user-input-v1.md) Frozen：
 
 ```text
 Subsystem → Renderer
-    full Frame Interest Registry
+    input.interest full Frame Registry
 
 Renderer → Subsystem
-    State / Event / Reset
+    input.state / input.event / input.reset
 ```
 
-Effective input = current Data × Main InputTarget/current Activation × Interest[F] × Producer。
+统一 lifetime：
 
-fresh Activation可复用 Interest config但不复用 old State/Event；fresh Data registry/state empty。
+```text
+Desired Interest = Frame-scoped
+Input Lease      = Activation-scoped InputTarget(F,A)
+Wire State       = current Data carrier scoped
+```
+
+Effective：
+
+```text
+current Data
+∩ Main InputTarget/current Activation
+∩ Interest[F]
+∩ Producer(C)
+```
+
+标准 `keyboard.* / pointer.* / gamepad.*` canonical payload、custom `x.*` grammar、State/Event causal ordering、Reset/producer-loss teardown、hard limits与failure taxonomy均在 v1内冻结。
+
+fresh Activation可复用 Desired Interest但不复用 old State/Event；fresh carrier remote Interest/State/Event history从 empty开始并重新 baseline。
 
 ---
 
