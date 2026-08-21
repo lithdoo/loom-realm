@@ -53,6 +53,14 @@ export function asciiCode(value: unknown, name: string): string {
   return text;
 }
 
+export function frameFailureCode(value: unknown): string {
+  const text = asciiCode(value, "FrameFailure.code");
+  if (!/^[A-Za-z][A-Za-z0-9._:-]{0,127}$/.test(text)) {
+    fail("Invalid FrameFailure.code");
+  }
+  return text;
+}
+
 export function objectValue(
   value: unknown,
   name = "object",

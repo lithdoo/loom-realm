@@ -198,3 +198,69 @@ test("fatal Frame semantics terminate and stopping requires shutdown authority",
   assert.equal(stopping.kind, "terminal");
   assert.equal(stopping.terminal.kind, "local-fatal");
 });
+
+test("failed status prevents every later subsystem Frame send", async () => {
+  let calls = 0;
+  const { main, subsystem } = await connect(
+    {
+      onStatus() {},
+      onFrameCall() {
+        calls += 1;
+        return { kind: "success", result: { childFrameId: "x" } };
+      },
+      onFrameReturn: success,
+    },
+    {
+      onShutdown: success,
+      onFrameInitialize: success,
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  assert.deepEqual(
+    await subsystem.control.status({
+      state: "failed",
+      error: { code: "BOOM" },
+    }),
+    { kind: "sent" },
+  );
+  const outcome = await subsystem.frame.call({
+    frameId: "f",
+    activationId: "a",
+    targetSubsystemKey: "target",
+    input: null,
+  });
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.terminal.kind, "local-fatal");
+  assert.equal(calls, 0);
+  assert.equal((await main.terminal).kind, "carrier-closed");
+});
+
+test("FrameFailure.code follows the frozen Frame v1 grammar", async () => {
+  const { main } = await connect(
+    {
+      onStatus() {},
+      onFrameCall: () => ({ kind: "success", result: { childFrameId: "x" } }),
+      onFrameReturn: success,
+    },
+    {
+      onShutdown: success,
+      onFrameInitialize: () => ({
+        kind: "semantic-error",
+        error: {
+          code: "FRAME_INITIALIZE_REJECTED",
+          failure: { code: "123" },
+        },
+      }),
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  const outcome = await main.frame.initialize({ frameId: "f", input: null });
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.terminal.kind, "carrier-closed");
+});

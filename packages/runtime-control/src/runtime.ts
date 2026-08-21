@@ -17,11 +17,17 @@ import type {
 
 export class StateError extends Error {}
 
+export const afterResponseAcceptance = Symbol("afterResponseAcceptance");
+
+type InternalHandlerReply = RuntimeControlHandlerReply<unknown, unknown> & {
+  readonly [afterResponseAcceptance]?: () => void | Promise<void>;
+};
+
 type Dispatch = {
   request(
     method: RuntimeControlRequestMethod,
     params: unknown,
-  ): Promise<RuntimeControlHandlerReply<unknown, unknown>>;
+  ): Promise<InternalHandlerReply>;
   notification(method: "subsystem.status", params: unknown): Promise<void>;
 };
 type Pending = {
@@ -372,6 +378,8 @@ export class Connection {
         this.commit({ kind: "carrier-lost", cause });
         return;
       }
+      await reply[afterResponseAcceptance]?.();
+      if (this.terminalValue !== undefined) return;
       if (reply.afterResponse) await reply.afterResponse();
     } catch (cause) {
       if (cause instanceof StateError)
@@ -399,11 +407,11 @@ export class Connection {
       this.protocolFatal(new Error("Unsolicited response"));
       return;
     }
-    this.pending.delete(id);
-    pending.cancel();
     try {
       if ("result" in message) {
         const result = S.resultFor(pending.method, message.result);
+        this.pending.delete(id);
+        pending.cancel();
         pending.settle({ kind: "success", result });
         return;
       }
@@ -414,9 +422,23 @@ export class Connection {
       )
         throw new ProfileError("Invalid Runtime Control error response");
       const semantic = S.semantic(pending.method, message.error.data);
-      pending.settle({ kind: "semantic-error", ...semantic });
-      if (semantic.classification === "fatal")
+      if (semantic.profileState && pending.method !== "subsystem.shutdown") {
         this.commit({ kind: "protocol-fatal", cause: message.error.data });
+        return;
+      }
+      this.pending.delete(id);
+      pending.cancel();
+      const { profileState: _profileState, ...outcome } = semantic;
+      pending.settle({ kind: "semantic-error", ...outcome });
+      if (semantic.classification === "fatal") {
+        this.commit(
+          { kind: "protocol-fatal", cause: message.error.data },
+          false,
+        );
+        void Promise.resolve()
+          .then(() => this.carrier.close())
+          .catch(() => {});
+      }
     } catch (cause) {
       this.protocolFatal(cause);
     }

@@ -99,6 +99,12 @@ export async function connectSubsystemRuntimeControl(
     method: M.RuntimeControlRequestMethod,
     params: unknown,
   ): Promise<M.RuntimeControlRequestOutcome<R, M.FrameRpcErrorData>> => {
+    if (statusState === "stopping" || statusState === "failed")
+      return Promise.resolve(
+        connection.failLocal(
+          new StateError("Frame operation after terminal runtime status"),
+        ),
+      );
     if (mutation)
       return Promise.resolve(
         connection.failLocal(

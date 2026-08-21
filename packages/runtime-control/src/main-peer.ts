@@ -1,5 +1,6 @@
 import {
   Connection,
+  afterResponseAcceptance,
   deadline,
   StateError,
   validateInfrastructure,
@@ -47,18 +48,20 @@ export function createMainRuntimeControlPeer(
   let connection: Connection;
   const reject = (
     error: M.SubsystemHelloErrorDataV1,
-  ): M.RuntimeControlHandlerReply<never, M.SubsystemHelloErrorDataV1> => {
+  ): M.RuntimeControlHandlerReply<never, M.SubsystemHelloErrorDataV1> & {
+    readonly [afterResponseAcceptance]: () => void;
+  } => {
     return {
       kind: "semantic-error",
       error,
-      afterResponse: () => {
+      [afterResponseAcceptance]: () => {
         phase = "failed";
         if (!identificationDone) {
           identificationDone = true;
           identified.resolve(Object.freeze({ kind: "rejected", error }));
         }
-        void Promise.resolve().then(() => connection.close());
       },
+      afterResponse: () => connection.close(),
     };
   };
   connection = new Connection(options.carrier, options.scheduler, "main", {

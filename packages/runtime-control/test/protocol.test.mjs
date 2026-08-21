@@ -33,6 +33,23 @@ const mainOptions = (carrier) => ({
   },
 });
 
+async function rawMainSession() {
+  const pair = createMemoryCarrierPair();
+  const incoming = pair.right.messages()[Symbol.asyncIterator]();
+  const main = createMainRuntimeControlPeer(mainOptions(pair.left));
+  await pair.right.send(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "subsystem.hello",
+      params: { key: "s", bootstrapToken: "t", protocolVersions: [1] },
+      id: 1,
+    }),
+  );
+  await incoming.next();
+  await main.identified;
+  return { pair, incoming, main };
+}
+
 test("syntax and envelope failures map to distinct fatal diagnostics", async () => {
   for (const [text, code] of [
     ["{", -32700],
@@ -216,4 +233,122 @@ test("remote request IDs are positive and strictly increasing", async () => {
   const diagnostic = JSON.parse((await incoming.next()).value);
   assert.equal(diagnostic.error.code, -32600);
   assert.equal((await main.terminal).kind, "protocol-fatal");
+});
+
+test("invalid correlated response remains pending until terminal cleanup settles it", async () => {
+  const { pair, incoming, main } = await rawMainSession();
+  const request = main.frame.initialize({ frameId: "f", input: null });
+  const outbound = JSON.parse((await incoming.next()).value);
+  await pair.right.send(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: outbound.id,
+      result: { unexpected: true },
+    }),
+  );
+  const outcome = await request;
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.terminal.kind, "protocol-fatal");
+});
+
+test("Frame profile-state errors settle as terminal, never as FrameRpcErrorData", async () => {
+  const { pair, incoming, main } = await rawMainSession();
+  const request = main.frame.initialize({ frameId: "f", input: null });
+  const outbound = JSON.parse((await incoming.next()).value);
+  await pair.right.send(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: outbound.id,
+      error: {
+        code: -32000,
+        message: "Protocol state error",
+        data: { code: "PROTOCOL_STATE_ERROR" },
+      },
+    }),
+  );
+  const outcome = await request;
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.terminal.kind, "protocol-fatal");
+});
+
+test("terminal between Response acceptance and continuation skips afterResponse", async () => {
+  let closeConnection;
+  let resolveNext;
+  const queued = [];
+  const closed = new Promise((resolve) => {
+    closeConnection = resolve;
+  });
+  const push = (message) => {
+    if (resolveNext) {
+      const resolve = resolveNext;
+      resolveNext = undefined;
+      resolve({ done: false, value: message });
+    } else queued.push(message);
+  };
+  const carrier = {
+    closed,
+    messages() {
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              const value = queued.shift();
+              if (value !== undefined)
+                return Promise.resolve({ done: false, value });
+              return new Promise((resolve) => {
+                resolveNext = resolve;
+              });
+            },
+          };
+        },
+      };
+    },
+    async send(text) {
+      const message = JSON.parse(text);
+      if (message.method === "subsystem.hello") {
+        push(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { protocolVersion: 1 },
+          }),
+        );
+      } else if (message.id === 7 && "result" in message) {
+        closeConnection({ kind: "lost", cause: new Error("race") });
+      }
+    },
+    async close() {
+      closeConnection({ kind: "closed" });
+    },
+  };
+  let afterResponseCalls = 0;
+  const connected = await connectSubsystemRuntimeControl({
+    carrier,
+    scheduler,
+    helloDeadlineMs: 1000,
+    frameDeadlineMs: 1000,
+    hello: { key: "s", bootstrapToken: "t", protocolVersions: [1] },
+    handlers: {
+      ...handlers,
+      onFrameInitialize: () => ({
+        kind: "success",
+        result: {},
+        afterResponse() {
+          afterResponseCalls += 1;
+        },
+      }),
+    },
+  });
+  assert.equal(connected.kind, "connected");
+  push(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "frame.initialize",
+      params: { frameId: "f", input: null },
+      id: 7,
+    }),
+  );
+  assert.equal((await connected.peer.terminal).kind, "carrier-lost");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(afterResponseCalls, 0);
 });

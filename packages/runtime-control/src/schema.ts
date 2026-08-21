@@ -3,6 +3,7 @@ import {
   asciiCode,
   businessValue,
   exact,
+  frameFailureCode,
   member,
   objectValue,
   ProfileError,
@@ -102,7 +103,7 @@ function failure(value: unknown): M.FrameFailure {
     ? businessValue(member(o, "data"))
     : undefined;
   return {
-    code: asciiCode(member(o, "code"), "code"),
+    code: frameFailureCode(member(o, "code")),
     ...(message === undefined ? {} : { message }),
     ...(data === undefined ? {} : { data }),
   };
@@ -213,6 +214,7 @@ export function semantic(
 ): {
   error: unknown;
   classification: M.RuntimeControlSemanticErrorClassification;
+  profileState: boolean;
 } {
   const o = objectValue(value, "error data");
   const code = member(o, "code");
@@ -231,11 +233,12 @@ export function semantic(
         ),
       },
       classification: "fatal",
+      profileState: false,
     };
   }
   if (code === "PROTOCOL_STATE_ERROR") {
     exact(o, ["code"]);
-    return { error: { code }, classification: "fatal" };
+    return { error: { code }, classification: "fatal", profileState: true };
   }
   if (method === "subsystem.shutdown")
     throw new ProfileError("Invalid shutdown semantic error");
@@ -245,6 +248,7 @@ export function semantic(
     return {
       error: { code: c, failure: failure(member(o, "failure")) },
       classification: "recoverable",
+      profileState: false,
     };
   }
   exact(o, ["code"]);
@@ -255,6 +259,7 @@ export function semantic(
       c === "FRAME_CALL_TARGET_UNAVAILABLE"
         ? "recoverable"
         : "fatal",
+    profileState: false,
   };
 }
 export function reply(
