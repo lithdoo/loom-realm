@@ -352,3 +352,28 @@ test("terminal between Response acceptance and continuation skips afterResponse"
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(afterResponseCalls, 0);
 });
+
+test("main shutdown intent rejects inbound Frame before stopping status", async () => {
+  const { pair, incoming, main } = await rawMainSession();
+  const shutdown = main.control.shutdown({ reason: "session-end" });
+  await incoming.next();
+  await pair.right.send(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: "frame.call",
+      params: {
+        frameId: "f",
+        activationId: "a",
+        targetSubsystemKey: "target",
+        input: null,
+      },
+      id: 2,
+    }),
+  );
+  const response = JSON.parse((await incoming.next()).value);
+  assert.equal(response.id, 2);
+  assert.equal(response.error.code, -32000);
+  assert.deepEqual(response.error.data, { code: "PROTOCOL_STATE_ERROR" });
+  assert.equal((await shutdown).kind, "terminal");
+  assert.equal((await main.terminal).kind, "protocol-fatal");
+});

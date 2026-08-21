@@ -46,15 +46,17 @@ export async function connectSubsystemRuntimeControl(
     {
       async request(method, params) {
         if (!connected) throw new StateError("Request before hello completes");
+        if (shutdownReceived)
+          throw new StateError("Request after shutdown intent");
         switch (method) {
           case "subsystem.shutdown": {
+            shutdownReceived = true;
             const reply = await h.onShutdown(
               params as M.SubsystemShutdownParamsV1,
             );
             return {
               ...reply,
               afterResponse: async () => {
-                shutdownReceived = true;
                 await reply.afterResponse?.();
               },
             };
@@ -99,7 +101,11 @@ export async function connectSubsystemRuntimeControl(
     method: M.RuntimeControlRequestMethod,
     params: unknown,
   ): Promise<M.RuntimeControlRequestOutcome<R, M.FrameRpcErrorData>> => {
-    if (statusState === "stopping" || statusState === "failed")
+    if (
+      shutdownReceived ||
+      statusState === "stopping" ||
+      statusState === "failed"
+    )
       return Promise.resolve(
         connection.failLocal(
           new StateError("Frame operation after terminal runtime status"),

@@ -264,3 +264,79 @@ test("FrameFailure.code follows the frozen Frame v1 grammar", async () => {
   assert.equal(outcome.kind, "terminal");
   assert.equal(outcome.terminal.kind, "carrier-closed");
 });
+
+test("main shutdown intent blocks new Frame before stopping status", async () => {
+  let releaseShutdown;
+  let enterShutdown;
+  const shutdownEntered = new Promise((resolve) => {
+    enterShutdown = resolve;
+  });
+  const shutdownBlocked = new Promise((resolve) => {
+    releaseShutdown = resolve;
+  });
+  let initializeCalls = 0;
+  const { main } = await connect(
+    {
+      onStatus() {},
+      onFrameCall: () => ({ kind: "success", result: { childFrameId: "x" } }),
+      onFrameReturn: success,
+    },
+    {
+      async onShutdown() {
+        enterShutdown();
+        await shutdownBlocked;
+        return success();
+      },
+      onFrameInitialize() {
+        initializeCalls += 1;
+        return success();
+      },
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  const shutdown = main.control.shutdown({ reason: "session-end" });
+  await shutdownEntered;
+  const frame = await main.frame.initialize({ frameId: "f", input: null });
+  assert.equal(frame.kind, "terminal");
+  assert.equal(frame.terminal.kind, "local-fatal");
+  assert.equal(initializeCalls, 0);
+  releaseShutdown();
+  assert.equal((await shutdown).kind, "terminal");
+});
+
+test("onShutdown handler may report stopping before its Response", async () => {
+  const statuses = [];
+  let subsystem;
+  let stoppingOutcome;
+  const connected = await connect(
+    {
+      onStatus(status) {
+        statuses.push(status.state);
+      },
+      onFrameCall: () => ({ kind: "success", result: { childFrameId: "x" } }),
+      onFrameReturn: success,
+    },
+    {
+      async onShutdown() {
+        stoppingOutcome = await subsystem.control.status({ state: "stopping" });
+        return success();
+      },
+      onFrameInitialize: success,
+      onFrameActivate: success,
+      onFrameSuspend: success,
+      onFrameResume: success,
+      onFrameClose: success,
+    },
+  );
+  subsystem = connected.subsystem;
+  assert.deepEqual(
+    await connected.main.control.shutdown({ reason: "session-end" }),
+    { kind: "success", result: {} },
+  );
+  assert.deepEqual(stoppingOutcome, { kind: "sent" });
+  assert.deepEqual(statuses, ["stopping"]);
+  await connected.main.close();
+});

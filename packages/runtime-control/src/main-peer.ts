@@ -102,7 +102,12 @@ export function createMainRuntimeControlPeer(
           throw new TypeError("Invalid authentication decision");
         return reject({ code });
       }
-      if (phase === "awaiting" || phase === "stopping" || phase === "failed")
+      if (
+        shutdownIntent ||
+        phase === "awaiting" ||
+        phase === "stopping" ||
+        phase === "failed"
+      )
         throw new StateError("Request before identification or after failure");
       if (method === "frame.call")
         return h.onFrameCall(params as M.FrameCallParams);
@@ -157,7 +162,10 @@ export function createMainRuntimeControlPeer(
     method: M.RuntimeControlRequestMethod,
     params: unknown,
   ): Promise<M.RuntimeControlRequestOutcome<R, M.FrameRpcErrorData>> =>
-    phase === "awaiting" || phase === "stopping" || phase === "failed"
+    shutdownIntent ||
+    phase === "awaiting" ||
+    phase === "stopping" ||
+    phase === "failed"
       ? Promise.resolve(
           connection.failLocal(new StateError("Invalid frame request state")),
         )
@@ -173,7 +181,12 @@ export function createMainRuntimeControlPeer(
           M.RuntimeControlProtocolStateErrorDataV1
         >
       > {
-        if (phase === "awaiting" || phase === "failed" || phase === "stopping")
+        if (
+          shutdownIntent ||
+          phase === "awaiting" ||
+          phase === "failed" ||
+          phase === "stopping"
+        )
           return Promise.resolve(
             connection.failLocal(new StateError("Invalid shutdown state")),
           );
