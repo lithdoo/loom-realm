@@ -25,10 +25,11 @@ already-established MessageCarrier<string>
                 │
                 ├── bounded JSON/Profile validation
                 ├── one connection-wide reader/dispatcher
+                ├── one serialized writer
                 ├── shared strict-monotonic Request IDs
                 ├── Subsystem Control protocol state
                 ├── Frame protocol mechanics
-                ├── typed semantic replies/outcomes
+                ├── typed semantic outcomes
                 ├── Response causal barrier
                 ├── finite deadline machinery
                 └── terminal / late-response classification
@@ -40,7 +41,7 @@ already-established MessageCarrier<string>
       authority          local role state
 ```
 
-Runtime Control Profile v1 静态组合：
+Runtime Control Profile v1 statically binds：
 
 ```text
 Subsystem Control v1
@@ -48,31 +49,32 @@ Subsystem Control v1
 Frame / Call v1
 ```
 
-共享：
+Shared connection mechanics：
 
 ```text
-Control carrier
+one carrier
 one inbound reader
 one dispatcher
+one outbound writer
 same-sender Request ID namespace
 profile message/depth limits
-terminal connection fact
+pending/terminal state
 ```
 
-不共享：
+Not shared/owned by this package：
 
 ```text
-Control lifecycle state machine
-Frame/Call application authority
-Main Stack mutation
+Main Frame/Stack/Activation authority
+Runtime failure unwind commit
 Subsystem business continuation
+Renderer/Data/Input/Render/Content authority
 ```
 
 ---
 
-## 2. Authority Boundary
+## 2. Authority / Dependency Boundary
 
-本包 MUST 拥有：
+### Runtime Control owns
 
 ```text
 Control/Frame wire schema validation
@@ -89,15 +91,15 @@ late-response classification
 Response-before-afterResponse causal barrier
 carrier terminal observation
 connection terminal first-wins
-protocol-fatal classification
+protocol/local-fatal classification
 ```
 
-本包 MUST NOT 拥有：
+### Runtime Control does not own
 
 ```text
 Main Runtime Registry / Supervisor
 Launch Attempt Registry
-bootstrap token storage
+bootstrap token storage/minting
 Main Frame Registry / Stack / Activation allocation
 InputTarget publication
 Runtime failure unwind authority commit
@@ -122,27 +124,14 @@ transport establishment             → Platform adapter/composition
 Runtime failure unwind              → Main
 ```
 
----
-
-## 3. Dependency Boundary
-
 Runtime dependencies exactly：
 
 ```text
 @loomrealm/foundation
-    MessageCarrier / CarrierClosed only
+    MessageCarrier / CarrierClosed
 
 @loomrealm/wire
     JsonValue / JSON text / JSON-RPC representation primitives
-```
-
-```text
-foundation       wire
-      \           /
-       \         /
-     runtime-control
-         ↑     ↑
-       Main   Subsystem Host
 ```
 
 MUST NOT depend on：
@@ -158,11 +147,11 @@ filesystem
 Fetch
 ```
 
-Foundation 当前不增加通用 Clock。M3 的真实 deadline 需求由本包自己的最小 scheduler port 承担；只有出现第二个独立稳定消费者后才重新评估是否提升到 Foundation。
+Foundation current baseline不增加通用 Clock。M3 deadline由本包自己的 narrow scheduler port承担；只有出现第二个独立稳定消费者后才重新评估提升到 Foundation。
 
 ---
 
-## 4. Package / Publish Surface
+## 3. Package / Publish Surface
 
 首批只发布：
 
@@ -182,8 +171,6 @@ Foundation 当前不增加通用 Clock。M3 的真实 deadline 需求由本包�
 /browser
 ```
 
-Source directory MAY 按 protocol 分层，但 source directory 不自动成为 npm subpath contract。
-
 Package metadata baseline：
 
 ```text
@@ -197,39 +184,171 @@ root export only
 runtime dependencies = foundation + wire
 ```
 
+Source directory MAY按 Control/Frame/Profile 分层；source layout不是 npm subpath contract。
+
 ---
 
-## 5. Exact Root API Shape
+## 4. Exact Wire-model Exports
 
-首批 root surface 只包含以下 protocol-facing categories：
-
-```text
-Control/Frame v1 params/results/status/outcome/error-data types
-RuntimeControlScheduler
-RuntimeControlHandlerReply
-RuntimeControlRequestOutcome
-RuntimeControlTerminal
-MainRuntimeControlHandlers / Options / Peer
-SubsystemRuntimeControlHandlers / ConnectOptions / Peer
-createMainRuntimeControlPeer
-connectSubsystemRuntimeControl
-```
-
-不导出：
-
-```text
-RuntimeControlDispatcher
-RequestIdAllocator
-PendingTable
-bounded encoder internals
-schema helper internals
-terminal controller
-state-machine mutable implementation
-```
-
-Conceptual public mechanics：
+以下 public types field-for-field 对应 formal Control/Frame v1；实现不得增加 extension bag 或 optional metadata。
 
 ```ts
+import type { MessageCarrier } from "@loomrealm/foundation";
+import type { JsonValue } from "@loomrealm/wire";
+
+export interface SubsystemHelloParamsV1 {
+  readonly key: string;
+  readonly bootstrapToken: string;
+  readonly protocolVersions: readonly number[];
+}
+
+export interface SubsystemHelloResultV1 {
+  readonly protocolVersion: 1;
+}
+
+export interface SubsystemRuntimeErrorV1 {
+  readonly code: string;
+  readonly message?: string;
+}
+
+export type SubsystemRuntimeStatusV1 =
+  | { readonly state: "initializing" }
+  | { readonly state: "ready" }
+  | { readonly state: "stopping" }
+  | {
+      readonly state: "failed";
+      readonly error: SubsystemRuntimeErrorV1;
+    };
+
+export type SubsystemShutdownReasonV1 =
+  | "session-end"
+  | "bootstrap-abort";
+
+export interface SubsystemShutdownParamsV1 {
+  readonly reason: SubsystemShutdownReasonV1;
+}
+
+export interface SubsystemShutdownResultV1 {}
+
+export interface FrameFailure {
+  readonly code: string;
+  readonly message?: string;
+  readonly data?: JsonValue;
+}
+
+export type FrameOutcome =
+  | { readonly type: "completed"; readonly value: JsonValue }
+  | { readonly type: "cancelled" }
+  | { readonly type: "failed"; readonly error: FrameFailure };
+
+export interface FrameInitializeParams {
+  readonly frameId: string;
+  readonly input: JsonValue;
+}
+export interface FrameInitializeResult {}
+
+export interface FrameActivateParams {
+  readonly frameId: string;
+  readonly activationId: string;
+}
+export interface FrameActivateResult {}
+
+export interface FrameSuspendParams {
+  readonly frameId: string;
+  readonly activationId: string;
+}
+export interface FrameSuspendResult {}
+
+export interface FrameResumeParams {
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly returnedFrameId: string;
+  readonly result: FrameOutcome;
+}
+export interface FrameResumeResult {}
+
+export interface FrameCloseParams {
+  readonly frameId: string;
+}
+export interface FrameCloseResult {}
+
+export interface FrameCallParams {
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly targetSubsystemKey: string;
+  readonly input: JsonValue;
+}
+export interface FrameCallResult {
+  readonly childFrameId: string;
+}
+
+export interface FrameReturnParams {
+  readonly frameId: string;
+  readonly activationId: string;
+  readonly result: FrameOutcome;
+}
+export interface FrameReturnResult {}
+```
+
+Semantic data exports：
+
+```ts
+export type SubsystemHelloErrorDataV1 =
+  | { readonly code: "BOOTSTRAP_AUTHENTICATION_FAILED" }
+  | { readonly code: "CONTROL_PROTOCOL_UNSUPPORTED" }
+  | { readonly code: "DUPLICATE_CONTROL_CONNECTION" };
+
+export type RuntimeControlProtocolStateErrorDataV1 = {
+  readonly code: "PROTOCOL_STATE_ERROR";
+};
+
+export type FrameRpcErrorData =
+  | { readonly code: "FRAME_CALL_TARGET_NOT_FOUND" }
+  | { readonly code: "FRAME_CALL_TARGET_UNAVAILABLE" }
+  | {
+      readonly code: "FRAME_INITIALIZE_REJECTED";
+      readonly failure: FrameFailure;
+    }
+  | { readonly code: "FRAME_NOT_FOUND" }
+  | { readonly code: "FRAME_STATE_MISMATCH" }
+  | { readonly code: "ACTIVATION_MISMATCH" }
+  | { readonly code: "FRAME_STACK_MISMATCH" }
+  | { readonly code: "FRAME_OWNERSHIP_MISMATCH" };
+
+export type FrameRecoverableRpcErrorData = Extract<
+  FrameRpcErrorData,
+  {
+    readonly code:
+      | "FRAME_CALL_TARGET_NOT_FOUND"
+      | "FRAME_CALL_TARGET_UNAVAILABLE"
+      | "FRAME_INITIALIZE_REJECTED";
+  }
+>;
+
+export type FrameFatalRpcErrorData = Exclude<
+  FrameRpcErrorData,
+  FrameRecoverableRpcErrorData
+>;
+```
+
+`FrameRpcErrorData` remains the Frozen Frame exhaustive semantic union；Runtime Control does not invent additional Frame business codes。
+
+---
+
+## 5. Exact Mechanics Exports
+
+```ts
+export type RuntimeControlRequestMethod =
+  | "subsystem.hello"
+  | "subsystem.shutdown"
+  | "frame.initialize"
+  | "frame.activate"
+  | "frame.suspend"
+  | "frame.resume"
+  | "frame.close"
+  | "frame.call"
+  | "frame.return";
+
 export interface RuntimeControlScheduler {
   schedule(delayMs: number, callback: () => void): () => void;
 }
@@ -246,10 +365,22 @@ export type RuntimeControlHandlerReply<Result, SemanticError> =
       readonly afterResponse?: () => void | Promise<void>;
     };
 
+export type RuntimeControlSemanticErrorClassification =
+  | "recoverable"
+  | "fatal";
+
 export type RuntimeControlRequestOutcome<Result, SemanticError> =
   | { readonly kind: "success"; readonly result: Result }
-  | { readonly kind: "semantic-error"; readonly error: SemanticError }
+  | {
+      readonly kind: "semantic-error";
+      readonly error: SemanticError;
+      readonly classification: RuntimeControlSemanticErrorClassification;
+    }
   | { readonly kind: "timeout" }
+  | { readonly kind: "terminal"; readonly terminal: RuntimeControlTerminal };
+
+export type RuntimeControlNotificationOutcome =
+  | { readonly kind: "sent" }
   | { readonly kind: "terminal"; readonly terminal: RuntimeControlTerminal };
 
 export type RuntimeControlTerminal =
@@ -264,81 +395,275 @@ export type RuntimeControlTerminal =
   | { readonly kind: "local-fatal"; readonly cause: unknown };
 ```
 
-`message`/diagnostic wording不形成 compatibility contract；role code只按 typed outcome/terminal kind 分支。
+Stable compatibility facts：union `kind`、semantic error code/data、Request method、terminal category。  
+Non-contractual diagnostics：human message、stack wording、`cause` concrete type/text。
+
+`RuntimeControlScheduler.schedule()` cancel function MUST be idempotent；callback executes at most once unless cancelled first。
 
 ---
 
-## 6. Role-specific Peers
+## 6. Exact Main-side Public API
 
-禁止动态：
-
-```ts
-createRuntimeControlSession({ role: "main" | "subsystem" })
-```
-
-首批使用 role-specific constructors，使错误方向 API 在类型层不存在。
-
-### Main
+Authentication decision：
 
 ```ts
-createMainRuntimeControlPeer(options): MainRuntimeControlPeer
+export type MainHelloAuthenticationDecisionV1 =
+  | { readonly kind: "accepted" }
+  | {
+      readonly kind: "rejected";
+      readonly code:
+        | "BOOTSTRAP_AUTHENTICATION_FAILED"
+        | "DUPLICATE_CONTROL_CONNECTION";
+    };
+
+export type MainRuntimeControlIdentificationOutcome =
+  | {
+      readonly kind: "identified";
+      readonly key: string;
+      readonly protocolVersion: 1;
+    }
+  | {
+      readonly kind: "rejected";
+      readonly error: SubsystemHelloErrorDataV1;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly terminal: RuntimeControlTerminal;
+    };
 ```
 
-Main peer protocol surface：
-
-```text
-receives
-    subsystem.hello
-    subsystem.status
-    frame.call
-    frame.return
-
-sends
-    subsystem.shutdown
-    frame.initialize
-    frame.activate
-    frame.suspend
-    frame.resume
-    frame.close
-```
-
-### Subsystem
+Main inbound handlers：
 
 ```ts
-await connectSubsystemRuntimeControl(options)
-    → SubsystemRuntimeControlPeer
+export interface MainRuntimeControlHandlers {
+  onStatus(
+    status: SubsystemRuntimeStatusV1,
+  ): void | Promise<void>;
+
+  onFrameCall(
+    params: FrameCallParams,
+  ):
+    | RuntimeControlHandlerReply<FrameCallResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameCallResult, FrameRpcErrorData>>;
+
+  onFrameReturn(
+    params: FrameReturnParams,
+  ):
+    | RuntimeControlHandlerReply<FrameReturnResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameReturnResult, FrameRpcErrorData>>;
+}
+
+export interface MainRuntimeControlPeerOptions {
+  readonly carrier: MessageCarrier;
+  readonly scheduler: RuntimeControlScheduler;
+  readonly frameDeadlineMs: number;
+  readonly shutdownDeadlineMs: number;
+  readonly handlers: MainRuntimeControlHandlers;
+  authenticateHello(
+    params: SubsystemHelloParamsV1,
+  ):
+    | MainHelloAuthenticationDecisionV1
+    | Promise<MainHelloAuthenticationDecisionV1>;
+}
 ```
 
-`connectSubsystemRuntimeControl` 内部发送 `subsystem.hello`，只有 hello Success 后才返回 usable peer。
+Main outbound surfaces：
 
-Subsystem peer protocol surface：
+```ts
+export interface MainSubsystemControlPeer {
+  shutdown(
+    params: SubsystemShutdownParamsV1,
+  ): Promise<
+    RuntimeControlRequestOutcome<
+      SubsystemShutdownResultV1,
+      RuntimeControlProtocolStateErrorDataV1
+    >
+  >;
+}
 
-```text
-sends
-    subsystem.status
-    frame.call
-    frame.return
+export interface MainFrameControlPeer {
+  initialize(
+    params: FrameInitializeParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameInitializeResult, FrameRpcErrorData>>;
 
-receives
-    subsystem.shutdown
-    frame.initialize
-    frame.activate
-    frame.suspend
-    frame.resume
-    frame.close
+  activate(
+    params: FrameActivateParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameActivateResult, FrameRpcErrorData>>;
+
+  suspend(
+    params: FrameSuspendParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameSuspendResult, FrameRpcErrorData>>;
+
+  resume(
+    params: FrameResumeParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameResumeResult, FrameRpcErrorData>>;
+
+  closeFrame(
+    params: FrameCloseParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameCloseResult, FrameRpcErrorData>>;
+}
+
+export interface MainRuntimeControlPeer {
+  readonly identified: Promise<MainRuntimeControlIdentificationOutcome>;
+  readonly control: MainSubsystemControlPeer;
+  readonly frame: MainFrameControlPeer;
+  readonly terminal: Promise<RuntimeControlTerminal>;
+  close(): Promise<void>;
+}
+
+export function createMainRuntimeControlPeer(
+  options: MainRuntimeControlPeerOptions,
+): MainRuntimeControlPeer;
 ```
 
-因此：
-
-```text
-hello-before-status/frame
-```
-
-成为 construction invariant，而不是 business caller 自己维护的布尔 flag。
+`closeFrame` is intentionally distinct from peer `close()`：the former sends `frame.close`; the latter locally closes the Runtime Control connection/carrier。
 
 ---
 
-## 7. Hello / Authentication Ownership
+## 7. Exact Subsystem-side Public API
+
+Subsystem inbound handlers：
+
+```ts
+export interface SubsystemRuntimeControlHandlers {
+  onShutdown(
+    params: SubsystemShutdownParamsV1,
+  ):
+    | RuntimeControlHandlerReply<SubsystemShutdownResultV1, never>
+    | Promise<RuntimeControlHandlerReply<SubsystemShutdownResultV1, never>>;
+
+  onFrameInitialize(
+    params: FrameInitializeParams,
+  ):
+    | RuntimeControlHandlerReply<FrameInitializeResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameInitializeResult, FrameRpcErrorData>>;
+
+  onFrameActivate(
+    params: FrameActivateParams,
+  ):
+    | RuntimeControlHandlerReply<FrameActivateResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameActivateResult, FrameRpcErrorData>>;
+
+  onFrameSuspend(
+    params: FrameSuspendParams,
+  ):
+    | RuntimeControlHandlerReply<FrameSuspendResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameSuspendResult, FrameRpcErrorData>>;
+
+  onFrameResume(
+    params: FrameResumeParams,
+  ):
+    | RuntimeControlHandlerReply<FrameResumeResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameResumeResult, FrameRpcErrorData>>;
+
+  onFrameClose(
+    params: FrameCloseParams,
+  ):
+    | RuntimeControlHandlerReply<FrameCloseResult, FrameRpcErrorData>
+    | Promise<RuntimeControlHandlerReply<FrameCloseResult, FrameRpcErrorData>>;
+}
+
+export interface SubsystemRuntimeControlConnectOptions {
+  readonly carrier: MessageCarrier;
+  readonly scheduler: RuntimeControlScheduler;
+  readonly helloDeadlineMs: number;
+  readonly frameDeadlineMs: number;
+  readonly hello: SubsystemHelloParamsV1;
+  readonly handlers: SubsystemRuntimeControlHandlers;
+}
+
+export interface SubsystemControlPeer {
+  status(
+    status: SubsystemRuntimeStatusV1,
+  ): Promise<RuntimeControlNotificationOutcome>;
+}
+
+export interface SubsystemFrameControlPeer {
+  call(
+    params: FrameCallParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameCallResult, FrameRpcErrorData>>;
+
+  returnFrame(
+    params: FrameReturnParams,
+  ): Promise<RuntimeControlRequestOutcome<FrameReturnResult, FrameRpcErrorData>>;
+}
+
+export interface SubsystemRuntimeControlPeer {
+  readonly control: SubsystemControlPeer;
+  readonly frame: SubsystemFrameControlPeer;
+  readonly terminal: Promise<RuntimeControlTerminal>;
+  close(): Promise<void>;
+}
+
+export type SubsystemRuntimeControlConnectOutcome =
+  | {
+      readonly kind: "connected";
+      readonly peer: SubsystemRuntimeControlPeer;
+    }
+  | {
+      readonly kind: "rejected";
+      readonly error: SubsystemHelloErrorDataV1;
+    }
+  | { readonly kind: "timeout" }
+  | { readonly kind: "terminal"; readonly terminal: RuntimeControlTerminal };
+
+export function connectSubsystemRuntimeControl(
+  options: SubsystemRuntimeControlConnectOptions,
+): Promise<SubsystemRuntimeControlConnectOutcome>;
+```
+
+`returnFrame` is intentionally distinct from JavaScript keyword-ish/general `return` naming and maps exactly to wire method `frame.return`。
+
+No business `Frame`/InputListener/RenderDomain/ContentClient type enters this root API。
+
+---
+
+## 8. Public API Error Discipline
+
+Before a peer exists, invalid constructor/config values are trusted-integration programming errors：
+
+```text
+invalid scheduler/deadline/options
+→ TypeError
+→ no carrier read/send side effect before validation completes
+```
+
+After a peer starts：
+
+```text
+expected remote semantic result
+→ typed RuntimeControlRequestOutcome
+
+notification local send terminal
+→ RuntimeControlNotificationOutcome
+
+network/protocol timeout
+→ typed timeout + connection terminal where contract requires
+
+carrier/protocol/local fatal
+→ typed terminal
+```
+
+Normal peer methods MUST NOT require consumers to inspect English `Error.message` or Wire error classes。
+
+Unexpected handler / `afterResponse` throw：
+
+```text
+→ local-fatal terminal
+→ MUST NOT be serialized as LoomRealm semantic/business error
+```
+
+Local caller attempts an outbound operation illegal in current protocol state：
+
+```text
+invalid message is NOT sent
+→ local-fatal terminal
+→ current operation settles terminal
+```
+
+---
+
+## 9. Hello / Authentication Ownership
 
 Runtime Control owns：
 
@@ -357,26 +682,35 @@ Main owns：
 
 ```text
 key exists in current logical registry?
-active Launch Attempt exists?
+active Launch Attempt exists for key?
 bootstrapToken matches attempt?
 token unconsumed?
 duplicate successful Control connection?
 atomic token consumption / Launch Attempt authority
 ```
 
-Main injects an authentication callback; Runtime Control MUST NOT store or mint bootstrap credentials。
+`authenticateHello()` is invoked only after hello representation/schema/version-list validation。Runtime Control MUST NOT store/mint bootstrap credentials。
 
-Authentication rejection externally remains generic `BOOTSTRAP_AUTHENTICATION_FAILED` except the separately defined `DUPLICATE_CONTROL_CONNECTION` semantic error；unknown-key/bad-token/consumed-token/mismatch不得被细分泄露。
+`CONTROL_PROTOCOL_UNSUPPORTED` is decided by Runtime Control before authentication callback。
 
-`CONTROL_PROTOCOL_UNSUPPORTED` 由 Runtime Control 根据 `protocolVersions ∩ {1}` 直接决定，不委托 Main business authority。
+Rejected hello：
+
+```text
+send typed hello semantic Error when possible
+→ identification/connect outcome = rejected
+→ connection becomes unusable for normal operations
+→ local close/terminal cleanup
+```
+
+Unknown-key/bad-token/consumed-token/mismatch remain externally indistinguishable as `BOOTSTRAP_AUTHENTICATION_FAILED`。
 
 ---
 
-## 8. Control Protocol State
+## 10. Control Protocol State
 
-Runtime Control MUST implement connection-local protocol legality；不再是 optional helper。
+Runtime Control MUST enforce connection-local legality；not optional helper。
 
-Main-side protocol projection：
+Main-side projection：
 
 ```text
 awaiting-hello
@@ -386,7 +720,7 @@ identified
 initializing
     ↓ status(ready)
 ready
-    ↓ Main shutdown intent
+    ↓ Main shutdown intent committed before shutdown send
 stopping
 
 identified/initializing/ready/stopping
@@ -394,9 +728,7 @@ identified/initializing/ready/stopping
     → failed
 ```
 
-Subsystem-side protocol projection mirrors the legal report/request sequence。
-
-Fatal protocol state cases include：
+Fatal inbound cases：
 
 ```text
 second hello
@@ -409,11 +741,22 @@ failed → any normal operation
 status(stopping) without Main shutdown intent
 ```
 
-`stopped` MUST NOT be synthesized by this package；它只来自 Platform/Supervisor actual Runtime termination observation。
+For a structurally valid Request rejected solely by connection/profile state：
+
+```text
+best-effort -32000 {code:"PROTOCOL_STATE_ERROR"}
+→ protocol-fatal terminal
+```
+
+This profile-level fatal code may be sent in response to a Frame Request before method-specific Frame semantics are reached；it is NOT a `FrameRpcErrorData` recoverable/fatal application result。The requester classifies it as terminal/profile-fatal。
+
+For an invalid-state Notification：no Response，protocol-fatal。
+
+`stopped` MUST NOT be synthesized by Runtime Control；only Platform/Supervisor actual Runtime termination observation produces it。
 
 ---
 
-## 9. Frozen Frame Surface
+## 11. Frozen Frame Boundary
 
 Exactly seven Requests：
 
@@ -430,39 +773,36 @@ Subsystem → Main
     frame.return
 ```
 
-本包拥有：
+Runtime Control owns：schema/direction/limits/error-envelope/correlation/deadline/late-response/protocol-side call-return mutation gate。
+
+Runtime Control does NOT own：Frame/Activation allocation、Main Stack、InputTarget、call/return acceptance transaction、failure unwind、ordinary input dispatch/business continuation。
+
+Semantic classification：
 
 ```text
-exact params/results/outcome/failure representation
-method direction
-closed schema
-profile limits
-semantic error envelope/data validation
-request/response correlation
-deadline/late-response mechanics
-protocol-side call/return mutation gate
+FRAME_CALL_TARGET_NOT_FOUND       recoverable
+FRAME_CALL_TARGET_UNAVAILABLE     recoverable
+FRAME_INITIALIZE_REJECTED         recoverable
+
+FRAME_NOT_FOUND                   fatal
+FRAME_STATE_MISMATCH              fatal
+ACTIVATION_MISMATCH               fatal
+FRAME_STACK_MISMATCH              fatal
+FRAME_OWNERSHIP_MISMATCH          fatal
 ```
 
-本包不拥有：
+When a fatal `FrameRpcErrorData` is received：
 
 ```text
-Frame/Activation ID allocation
-Main Stack
-InputTarget
-call acceptance transaction
-return acceptance transaction
-failure unwind commit
-ordinary input dispatch
-business continuation
+request outcome = semantic-error(classification:"fatal")
+connection terminal commits before any subsequent normal send
 ```
 
-Frame semantic error data 以 Frozen Frame / Call v1 的 exhaustive union 为准。Unknown `-32000 error.data.code` MUST be protocol-fatal，不允许降级成 generic business failure。
+Unknown/malformed `-32000 error.data` is protocol-fatal，not a business Frame failure。
 
 ---
 
-## 10. One Reader / Dispatcher
-
-同一 Control Connection：
+## 12. One Reader / Dispatcher
 
 ```text
 MessageCarrier.messages()
@@ -470,50 +810,49 @@ MessageCarrier.messages()
 bounded decode / classify
         ├── Response
         │      → pending correlation immediately
-        │
         └── Request / Notification
-               → role dispatch lane
+               → ordered role dispatch lane
 ```
 
-必须同时满足：
+MUST：
 
 ```text
 exactly one code path iterates carrier.messages()
-Control + Frame share one dispatcher
-pending table connection-wide
-Responses cannot be hidden behind a second reader
+Control + Frame share dispatcher/pending table
+Response is correlated even while prior role handler awaits
+Request/Notification handlers start in inbound carrier order
 ```
 
-关键规则：
+Key rule：
 
-> **single reader != single blocking handler loop。reader MUST NOT await role handler completion when that would prevent a later Response from reaching pending correlation。**
+> **single reader != single blocking handler loop。**
 
-Request/Notification 的 application dispatch 顺序 MUST preserve inbound carrier order；具体内部 queue/task strategy不是 public API。
+Role dispatch MAY serialize handler completion；whatever internal strategy is chosen MUST NOT block Response correlation。
 
 ---
 
-## 11. Serialized Writer
+## 13. One Serialized Writer
 
-所有 outbound JSON-RPC message 通过同一个 connection writer 串行进入 `carrier.send()`。
+All outbound JSON-RPC messages use one connection writer and one `carrier.send()` serialization lane。
 
-原因：
+Writer order is authoritative for：
 
 ```text
-Request ID issue order
-Response causal barriers
+Request-ID send order
 Control/Frame shared carrier order
-terminal error reply ordering
+Response causal barrier
+terminal diagnostic reply ordering
 ```
 
-不得让多个 role helper 直接并发调用 carrier.send 并依赖 scheduler timing 猜顺序。
+High-level APIs MUST NOT call `carrier.send()` concurrently outside writer。
 
-Foundation `send()` resolution 只表示 local adapter acceptance/order，不表示 remote business commit。
+Foundation `send()` resolve = local adapter acceptance/order only，not remote business commit。
 
 ---
 
-## 12. Request ID Namespace
+## 14. Request ID Namespace
 
-ADR 0021 收紧 current v1：同一 sender / same Control Connection：
+Same sender / same Control Connection：
 
 ```text
 positive safe integer 1..Number.MAX_SAFE_INTEGER
@@ -523,129 +862,101 @@ never reused
 never wrap
 ```
 
-两个 sender 方向 namespace 独立。
+Two directions independent。
 
-首批 allocator：
+Local allocator baseline：
 
 ```text
 1, 2, 3, ... Number.MAX_SAFE_INTEGER
 ```
 
-耗尽：
+An allocated ID is permanently consumed even if local send later fails/times out/terminates。
+
+Receiver：
 
 ```text
-no wrap
-no reuse
-→ local fatal / connection unusable for new Request
+incoming Request id <= lastRemoteRequestId
+→ protocol-fatal
 ```
 
-Receiver 保存 `lastRemoteRequestId` 即可；incoming Request：
+Allocator exhaustion：local-fatal；no wrap/reuse。
 
-```text
-id <= lastRemoteRequestId
-→ protocol fatal
-```
-
-Request ID 只做 correlation，不是 operation identity/idempotency token。
+Request ID is correlation only，not operation identity/idempotency key。
 
 ---
 
-## 13. Inbound Pipeline
+## 15. Inbound Pipeline / Profile Limits
 
-唯一顺序：
+Exact order：
 
 ```text
-MessageCarrier.messages(): string
+carrier string
 ↓
-actual UTF-8 bytes <= 1 MiB
+actual UTF-8 bytes <= 1,048,576
 ↓
-@loomrealm/wire.parseJsonText
+Wire parseJsonText
 ↓
-JSON depth <= 64
+JSON container depth <= 64
 ↓
-Runtime Control profile limits
+Runtime Control profile/domain limits
 ↓
-@loomrealm/wire.decodeJsonRpcMessage
+Wire decodeJsonRpcMessage
 ↓
-Runtime Control Request-ID rules
+strict remote Request-ID rule
 ↓
 direction / method
 ↓
-method exact schema
+exact method schema
 ↓
 protocol state gate
 ↓
 typed role handler
 ```
 
-Runtime Control Profile owns the resource/schema limits above Wire representation；Wire不因此获得 Runtime/Frame domain authority。
+Profile hard limits：
 
-Source-level duplicate JSON member 不在 M3 建第二 parser：observable semantics 跟随 frozen Wire / ECMAScript `JSON.parse`。Parsed object 仍必须满足 closed schema。
+```text
+Control
+    protocolVersions entries         1..16
+    bootstrapToken                   1..4096 UTF-8 bytes
+    SubsystemRuntimeError.code       1..128 ASCII chars
+    SubsystemRuntimeError.message    0..4096 UTF-8 bytes
+
+Frame
+    business JsonValue               <= 524,288 bytes
+    JsonValue string                 <= 262,144 UTF-8 bytes
+    object key                       <= 256 UTF-8 bytes
+    array elements                   <= 16,384
+    object members                   <= 16,384
+    frameId / activationId           1..128 UTF-8 bytes
+    targetSubsystemKey               1..256 UTF-8 bytes
+    FrameFailure.code                1..128 ASCII chars
+    FrameFailure.message             0..4096 UTF-8 bytes
+```
+
+Unpaired surrogate rejects at Runtime Control profile layer。
+
+Source-level duplicate JSON member observable semantics follow frozen Wire / ECMAScript `JSON.parse`。Parsed object still exact closed schema。M3 MUST NOT create a second parser/tokenizer。
 
 ---
 
-## 14. Profile Limits
-
-Connection-wide hard入口：
-
-```text
-max application message          1,048,576 UTF-8 bytes
-max JSON container depth         64
-```
-
-Control 继续满足：
-
-```text
-protocolVersions entries         1..16
-bootstrapToken                   1..4096 UTF-8 bytes
-SubsystemRuntimeError.code       1..128 ASCII chars
-SubsystemRuntimeError.message    0..4096 UTF-8 bytes
-```
-
-Frame 继续满足 Frozen limits：
-
-```text
-business JsonValue               <= 524,288 bytes
-JsonValue string                 <= 262,144 UTF-8 bytes
-object key                       <= 256 UTF-8 bytes
-array elements                   <= 16,384
-object members                   <= 16,384
-frameId / activationId           1..128 UTF-8 bytes
-targetSubsystemKey               1..256 UTF-8 bytes
-FrameFailure.code                1..128 ASCII chars
-FrameFailure.message             0..4096 UTF-8 bytes
-```
-
-Unpaired surrogate MUST reject at Runtime Control profile validation even though generic Wire representation can carry a JS string containing it。
-
----
-
-## 15. Outbound Preflight / Bounded Encoding
-
-Outbound path：
+## 16. Outbound Bounded Preflight
 
 ```text
 typed method value
 ↓
 method/profile schema validation
 ↓
-bounded serialized-size measurement
+bounded serialized UTF-8 size measurement
 ↓
-@loomrealm/wire.stringifyJson
+Wire stringifyJson
 ↓
 serialized writer
 ```
 
-MUST NOT：
+MUST NOT stringify an arbitrarily expanding shared DAG first and only then check 1 MiB。
 
-```text
-stringify an arbitrarily expanding shared DAG
-then discover it exceeds 1 MiB
-```
-
-Internal bounded measurement MUST count JSON wire expansion per occurrence and stop as soon as a hard limit is exceeded。只有证明 serialized result <= hard limit 后才调用 Wire stringify。
-
-这不是第二套 JSON semantics：
+Bounded measurement counts JSON wire expansion per occurrence and stops once a hard limit is exceeded。
 
 ```text
 Wire owns JsonValue validity/serialization semantics
@@ -654,49 +965,32 @@ Runtime Control owns profile resource budget
 
 ---
 
-## 16. JSON-RPC Error / Fatal Table
-
-Expected behavior 冻结为：
+## 17. JSON-RPC Error / Fatal Table
 
 | inbound fact | wire behavior | local classification |
 |---|---|---|
-| malformed JSON text | best-effort `-32700`, `id:null` | protocol-fatal |
-| JSON-RPC Batch / invalid envelope | best-effort `-32600`, `id:null` | protocol-fatal |
-| unknown or wrong-direction Request method | `-32601` for trusted Request id | protocol-fatal |
-| known Request with invalid params | `-32602` | protocol-fatal |
+| malformed JSON | best-effort `-32700`, `id:null` | protocol-fatal |
+| Batch / invalid envelope | best-effort `-32600`, `id:null` | protocol-fatal |
+| unknown / wrong-direction Request | `-32601` with trusted id | protocol-fatal |
+| known Request invalid params | `-32602` | protocol-fatal |
+| valid Request invalid only by profile state | `-32000 PROTOCOL_STATE_ERROR` | protocol-fatal |
 | invalid Notification | no Response | protocol-fatal |
-| valid LoomRealm semantic rejection | `-32000` + typed `error.data` | code-specific recoverable/fatal |
-| invalid/unsolicited/late-after-nonterminal Response | no Response | protocol-fatal |
-| non-monotonic/reused remote Request id | protocol error reply when safely addressable | protocol-fatal |
-| unexpected role handler throw | MUST NOT masquerade as semantic error | local-fatal |
+| valid LoomRealm semantic rejection | `-32000` typed data | recoverable/fatal by code |
+| invalid/unsolicited Response | no Response | protocol-fatal |
+| non-monotonic/reused Request ID | best-effort fatal reply when safely addressable | protocol-fatal |
+| unexpected handler/afterResponse throw | no semantic masquerade | local-fatal |
 
-Fatal error reply is diagnostic/best-effort；session terminal fact first-wins，send failure不得恢复 session。
+Fatal diagnostic reply is best-effort；terminal state first-wins and does not depend on reply delivery。
 
-Protocol corruption MUST NOT 被转成 `FrameFailure` business outcome。
+Protocol corruption MUST NOT become `FrameFailure` business outcome。
 
 ---
 
-## 17. Response Causal Barrier
+## 18. Response Causal Barrier
 
-Frozen Frame 要求：
+Inbound Request handler returns `RuntimeControlHandlerReply`。
 
-```text
-frame.call Response
-    happens-before
-Child initialize / activate
-
-frame.return Response
-    happens-before
-close / resume
-```
-
-因此 inbound Request handler 可以返回：
-
-```text
-reply + optional afterResponse
-```
-
-Runtime Control 固定执行：
+Runtime Control sequence：
 
 ```text
 handler returns success/semantic-error reply
@@ -705,21 +999,36 @@ encode / outbound preflight
 ↓
 serialized carrier.send(Response)
 ↓ await local send acceptance/order
-afterResponse()
+if connection remains usable:
+    afterResponse()
 ```
 
-`afterResponse` MUST NOT 在 Response `carrier.send()` resolve 前执行。
+`afterResponse` MUST NOT start before Response send resolves。
 
-Main 在 `frame.call`/`frame.return` 的 application commit 仍发生在 Main；Runtime Control 只提供 causal barrier，不拥有 Stack authority。
+If Response send terminally fails：`afterResponse` MUST NOT run。
+
+If `afterResponse` unexpectedly throws：local-fatal terminal。
+
+Frozen Frame causality：
+
+```text
+frame.call Response send accepted
+→ Child initialize / activate
+
+frame.return Response send accepted
+→ close / resume
+```
+
+Main/Subsystem Host application commit remains outside Runtime Control。
 
 ---
 
-## 18. Outbound Request Lifecycle
+## 19. Outbound Request Lifecycle / Deadlines
 
-唯一顺序：
+Exact lifecycle：
 
 ```text
-validate params
+validate params/options/state
 ↓
 bounded encode/preflight
 ↓
@@ -729,29 +1038,28 @@ insert pending correlation
 ↓
 arm finite relative deadline
 ↓
-serialized carrier.send(Request)
+enqueue/send through serialized writer
 ↓
-wait for terminal Response / timeout / connection terminal
+wait for Response / timeout / terminal
 ```
 
-Deadline covers local send wait + remote response wait；MUST NOT 因 local send stalled 而形成无界 Request。
+Deadline covers local writer/send wait + remote Response wait；local send stall cannot create an unbounded Request。
 
-Race rule：
+Pending settlement：first-wins。
 
 ```text
-pending settlement first-wins
+valid correlated Response first
+    → cancel/retire deadline
+    → settle request outcome
+
+deadline first
+    → settle timeout
+    → commit request-timeout terminal where profile requires
+    → ID stays consumed
+    → later Response diagnostics only
 ```
 
-如果 valid correlated Response 先 settle：cancel deadline。  
-如果 deadline callback 先 settle：Request becomes timeout；后续 Response 是 late diagnostics only。
-
-ID 一经分配即永久 consumed，不因 pre-send failure/timeout/semantic error而复用。
-
----
-
-## 19. Deadline Domains
-
-Frame seven Requests：
+Frame deadline：
 
 ```text
 1000 <= frameDeadlineMs <= 300000
@@ -759,86 +1067,47 @@ integer milliseconds
 sender-local
 stable for one Control Connection
 finite
-relative elapsed-time scheduler
 not in RPC params
 not negotiated per Request
 ```
 
-Control deadlines 独立：
+Control deadlines：
 
 ```text
-hello deadline
-shutdown deadline
+helloDeadlineMs     finite positive integer
+shutdownDeadlineMs  finite positive integer
 ```
 
-Control deadline 是 Host/role policy，但 MUST finite positive integer。
-
-不得：
-
-```text
-use frameDeadlineMs as shutdown deadline implicitly
-put deadlineMs in wire params
-retry after timeout
-```
-
-`RuntimeControlScheduler.schedule(delayMs, callback)` 是 relative-time port；production adapter 与 deterministic fake 都必须保持 once-or-cancel semantics。returned cancel function MUST be idempotent。
-
----
-
-## 20. Timeout / Commit Classification
-
-Frame Request：
-
-```text
-Success
-    → known committed postcondition
-
-explicit recoverable semantic Error
-    → known not committed where Frozen protocol says so
-
-divergence / protocol Error
-    → fatal
-
-timeout / carrier loss
-    → applied-or-not unknown
-    → ambiguous
-    → connection terminal / Runtime-fatal mapping by role
-```
+Control values independent from Frame deadline；no implicit reuse。
 
 No application retry/replay/resync。
 
-Hello timeout：bootstrap/session terminal。  
-Shutdown timeout：does NOT manufacture `stopped`；Supervisor/Platform decides escalation/actual termination。
+Shutdown timeout MUST NOT manufacture `stopped`。
 
 ---
 
-## 21. Call / Return Mutation Gate Boundary
+## 20. Call / Return Mutation Gate
 
-Runtime Control protocol-side guarantee：
+Subsystem peer protocol-side rule：
 
 ```text
 while one outbound frame.call/frame.return is pending
-    second outbound frame.call/frame.return MUST be rejected locally
+    no second frame.call/frame.return may start
 ```
 
-Only recoverable pre-commit semantic rejection releases the protocol-side gate for the still-current Activation。
+A local second mutation attempt is not sent and is a trusted-integration state violation；Subsystem Host should prevent this through its business gate。If reached, Runtime Control closes via local-fatal to avoid ambiguous continuation。
 
-Runtime Control cannot gate ordinary input because it does not own input dispatch。
+Only recoverable pre-commit semantic error leaves the old Activation potentially usable according to Frozen Frame semantics。
 
-`@loomrealm/subsystem/host` M4 MUST map this pending mutation fact to：
+Runtime Control cannot stop ordinary input dispatch；M4 `@loomrealm/subsystem/host` maps mutation pending into input/business continuation gating。
 
-```text
-stop ordinary input dispatch
-no second business call/return
-```
-
-Fatal/ambiguous outcome MUST NOT re-enter old business continuation。
+Fatal/timeout/terminal MUST NOT re-enter old business continuation。
 
 ---
 
-## 22. Terminal Model
+## 21. Terminal Model
 
-Connection terminal first-wins：
+Terminal sources：
 
 ```text
 carrier closed
@@ -851,66 +1120,26 @@ local fatal
 MUST：
 
 ```text
-terminal immutable
+first-wins
+immutable terminal value
 terminal Promise settles once
 all pending Requests settle exactly once
-all deadline handles cancelled/retired
-no new normal send after terminal
+all deadlines retired/cancelled
+no new normal sends
 close() idempotent
 no same-attempt reconnect/reuse
 late Response cannot restore authority/outcome
 ```
 
-Runtime Control reports connection fact；Main/Supervisor decides whether physical Runtime is `failed` or later `stopped` according to shutdown intent/termination observation。
+`close()` initiates local carrier close and waits for the same terminal cleanup path；it does not send `subsystem.shutdown`。
+
+Runtime Control reports connection fact；Main/Supervisor decides physical Runtime `failed`/shutdown escalation/actual `stopped` from shutdown intent + termination observation。
 
 ---
 
-## 23. Semantic Error Envelope
+## 22. File Layout
 
-LoomRealm semantic error：
-
-```text
-JSON-RPC error.code = -32000
-error.data.code = stable semantic code
-```
-
-Control v1：
-
-```text
-BOOTSTRAP_AUTHENTICATION_FAILED
-CONTROL_PROTOCOL_UNSUPPORTED
-DUPLICATE_CONTROL_CONNECTION
-PROTOCOL_STATE_ERROR
-```
-
-Frame v1 exhaustive union：
-
-```text
-FRAME_CALL_TARGET_NOT_FOUND
-FRAME_CALL_TARGET_UNAVAILABLE
-FRAME_INITIALIZE_REJECTED
-FRAME_NOT_FOUND
-FRAME_STATE_MISMATCH
-ACTIVATION_MISMATCH
-FRAME_STACK_MISMATCH
-FRAME_OWNERSHIP_MISMATCH
-```
-
-Recoverable Frame codes only：
-
-```text
-FRAME_CALL_TARGET_NOT_FOUND
-FRAME_CALL_TARGET_UNAVAILABLE
-FRAME_INITIALIZE_REJECTED
-```
-
-Unknown/malformed semantic error data = protocol-fatal。
-
----
-
-## 24. File Layout
-
-Target first implementation：
+Target implementation：
 
 ```text
 packages/runtime-control/
@@ -938,6 +1167,7 @@ packages/runtime-control/
 │   ├── main-peer.ts
 │   └── subsystem-peer.ts
 └── test/
+    ├── exports.test.mjs
     ├── encoding.test.mjs
     ├── dispatcher.test.mjs
     ├── request-ids.test.mjs
@@ -948,7 +1178,7 @@ packages/runtime-control/
     └── package-boundary.test.mjs
 ```
 
-不建立：
+Do not create：
 
 ```text
 generic-rpc/
@@ -961,27 +1191,38 @@ browser/
 
 ---
 
-## 25. Automated Closure Matrix
+## 23. Automated Closure Matrix
 
 ```text
+public-surface
+    exact-runtime-root-runtime-exports
+    exact-declaration-type-export-list
+    main-peer-exact-methods
+    subsystem-peer-exact-methods
+    no-internal-dispatcher-id-pending-exports
+
 representation/profile
     actual-utf8-message-1mib
     json-depth-64
     no-batch
     malformed-json
     unpaired-surrogate
-    string/key/member/array/frame/control limits
+    control/frame limits
     duplicate-json-source-follows-wire-json-parse
+    bounded-shared-dag-outbound-size
 
 reader/dispatcher
     exactly-one-carrier-reader
     control-frame-same-dispatcher
     response-correlation-not-blocked-by-handler
-    inbound-request-order-preserved
+    inbound-request-notification-order-preserved
 
 writer/barrier
     one-serialized-writer
+    request-id-send-order
     response-send-accepted-before-afterResponse
+    no-afterResponse-after-send-terminal
+    afterResponse-throw-local-fatal
     frame-call-response-before-child-rpc
     frame-return-response-before-close-resume
 
@@ -989,7 +1230,8 @@ request-id
     positive-safe-integer
     strict-monotonic-local-allocation
     shared-control-frame-namespace
-    remote-nonmonotonic-rejected
+    remote-equal/lower-id-fatal
+    allocated-id-not-reused-after-failure
     exhaustion-no-wrap
     late-response-never-recorrelates
 
@@ -997,11 +1239,13 @@ hello/control
     hello-first
     hello-one-shot
     version-list-1..16-no-duplicate
-    select-control-1
+    unsupported-before-auth-callback
     generic-auth-failure
     auth-callback-main-owned
+    identification-connected-rejected-terminal-outcomes
     status-frame-before-hello-fatal
-    legal-state-transitions
+    profile-state-request-PROTOCOL_STATE_ERROR-then-fatal
+    invalid-state-notification-no-response-fatal
     repeated/retrograde-state-fatal
     stopping-requires-shutdown-intent
     stopped-never-fabricated
@@ -1010,16 +1254,18 @@ frame
     exact-seven-methods
     exact-directions
     closed-params-results
-    semantic-error-union
+    three-recoverable-five-fatal-semantic-codes
+    fatal-semantic-error-terminates-before-next-send
     unknown-semantic-code-fatal
-    second-call-return-pending-rejected
+    second-call-return-pending-not-sent
 
 deadline
     deterministic-injected-scheduler
     frame-1000-300000-bounds
+    hello-shutdown-positive-finite
     stable-per-connection
     deadline-not-in-wire
-    deadline-covers-send-and-response
+    deadline-covers-writer-send-response
     first-settlement-wins
     timeout-ambiguous-no-retry
     late-response-diagnostics-only
@@ -1029,55 +1275,56 @@ terminal
     pending-settled-once
     carrier-closed/lost
     protocol-fatal
-    local-handler-throw
+    local-handler-afterResponse-throw
     request-timeout
     idempotent-close
+    no-new-send-after-terminal
     no-same-attempt-reconnect
 
 package
-    root-export-only
     foundation-wire-only
-    no-node-websocket-messageport
+    no-node-websocket-messageport-worker
+    root-export-only
     npm-pack-dry-run
 ```
 
-Transport adapter abstract-trace equivalence is later integration qualification；M3 package tests use deterministic `MessageCarrier` fixtures。
+M3 package tests use deterministic `MessageCarrier` fixtures。Hostra/PWA transport equivalence belongs later integration qualification。
 
 ---
 
-## 26. Implementation Stages
+## 24. Implementation Stages
 
 ```text
-Stage A  package skeleton / metadata / root export
-Stage B  Control + Frame wire models / semantic data
+Stage A  package skeleton / metadata / exact root exports
+Stage B  Control + Frame public wire model / semantic data
 Stage C  profile limits / bounded encode + decode
 Stage D  request IDs / pending table / serialized writer
 Stage E  single-reader dispatcher / terminal controller
-Stage F  hello + Control state
-Stage G  Frame typed peers / Response barrier / mutation gate
-Stage H  scheduler / finite deadlines / late-response
+Stage F  hello/auth mechanics + Control state
+Stage G  exact role peers / Frame semantics / Response barrier / mutation gate
+Stage H  scheduler / deadlines / race / late-response
 Stage I  conformance + package boundary + CI
 Stage J  real role-consumer qualification
 ```
 
-A–I 完成后：
+A–I complete：
 
 ```text
 Implemented Baseline / Core Contract Frozen
 ```
 
-Real downstream qualification：
+Real consumers：
 
 ```text
 M4 @loomrealm/subsystem/host
 M5 @loomrealm/main
 ```
 
-M3 不构造假的 Subsystem/Main authority 实现来冒充 real consumer qualification。
+M3 does not build fake role authority to claim M4/M5 qualification。
 
 ---
 
-## 27. Explicit Non-goals
+## 25. Explicit Non-goals
 
 ```text
 Main Runtime Registry / Supervisor
@@ -1099,18 +1346,18 @@ reconnect/resume/retry/idempotency journal
 
 ---
 
-## 28. Closure Criteria
+## 26. Closure Criteria
 
-Runtime Control DESIGN 达到 implementation-ready 的定义：
+Implementation-ready means：
 
-> **实现者只需要选择 internal data structures / private helper / scheduling mechanics；不再需要自行决定 public package surface、role direction、hello ownership、reader/dispatcher model、Request ID semantics、profile limits、Response causal barrier、deadline start/settlement、semantic/fatal mapping、terminal behavior或 consumer ownership。**
+> **实现者只需要选择 internal data structures / private algorithms / queue implementation；不再需要自行决定 public export names/signatures、role direction、hello ownership、reader/writer model、Request ID semantics、profile limits、Response barrier、deadline race、semantic/fatal classification、terminal behavior或 consumer ownership。**
 
-M3 local closure 必须证明：
+M3 local closure：
 
 ```text
 established MessageCarrier
 → bounded Runtime Control protocol mechanics
-→ role-specific typed peer
+→ exact role-specific typed peer
 
 all expected protocol inputs
 → deterministic typed outcome / terminal
@@ -1123,29 +1370,31 @@ failure
 
 ---
 
-## 29. Final Invariants
+## 27. Final Invariants
 
-1. Runtime Control = protocol mechanics / connection-local protocol state，不是 product authority；
-2. Control v1 与 Frame v1 保持独立 protocol semantics，Profile只组合 carrier/dispatcher/ID/limits；
-3. root export only；不预建 `/control` `/frame` `/testing`；
-4. runtime dependencies exactly Foundation + Wire；
-5. one Control carrier exactly one inbound reader + one connection dispatcher；
-6. single reader不被 blocking role handler阻断 Response correlation；
-7. outbound 使用 one serialized writer；
-8. same sender Control+Frame Request ID strict monotonically increasing、never reuse/wrap；
-9. one carrier unit = one UTF-8 JSON text JSON-RPC object；no Batch；
-10. duplicate JSON source member semantics跟随 frozen Wire/JSON.parse，不建立第二 parser；
-11. profile limits属于 Runtime Control；Wire只拥有 generic representation；
-12. hello auth mechanics属于 Runtime Control，credential/Launch Attempt authority属于 Main；
-13. hello成功前无 status/Frame；second hello fatal；
-14. stopped只来自 actual termination observation；
-15. exactly seven Frame Requests，不新增 Runtime/Frame method；
-16. Runtime Control提供 Response causal barrier，但不拥有 Main Stack commit；
-17. Frame Request finite deadline；timeout/loss ambiguous；no retry；
-18. deadline覆盖 send + response，pending settlement first-wins；
-19. late Response只用于 diagnostics，不能恢复 authority/outcome；
-20. call/return pending期间 protocol-side second mutation被拒绝；ordinary input gate属于 Subsystem Host；
-21. terminal first-wins、immutable、pending settle exactly once；
-22. protocol corruption不能伪装成 business Frame failure；
-23. Main/Subsystem Host是本包 role consumers；business author只依赖 `@loomrealm/subsystem`；
-24. current v1 的 M3 preimplementation correction 不创建 v2/compat parser；后续真实 compatibility obligation形成后遵守正常 version/migration 治理。
+1. Runtime Control is protocol mechanics / connection-local state，not product authority；
+2. root package surface and role peer method signatures are exact/frozen；
+3. runtime dependencies exactly Foundation + Wire；
+4. Control and Frame share carrier/dispatcher/writer/ID mechanics but not application authority；
+5. one Control carrier exactly one inbound reader，and reader never blocks Response correlation behind role handler；
+6. all outbound messages use one serialized writer；
+7. same-sender Control+Frame Request IDs strict monotonic、positive safe integer、never reuse/wrap；
+8. one carrier unit = one UTF-8 JSON text JSON-RPC object；Batch forbidden；
+9. source duplicate JSON semantics follow frozen Wire/JSON.parse；no second parser；
+10. profile limits belong Runtime Control；Wire retains generic representation authority；
+11. bounded outbound size preflight precedes full stringify materialization；
+12. hello mechanics/version/state belong Runtime Control；Launch Attempt/token authority belongs Main；
+13. hello Success before usable Subsystem peer；status/Frame before hello fatal；
+14. `stopped` only from actual physical termination observation；
+15. exactly seven Frame Requests；no new Runtime/Frame methods；
+16. three Frame semantic codes recoverable，five divergence codes fatal；
+17. profile state violation Request gets best-effort `PROTOCOL_STATE_ERROR` then fatal；
+18. Response send acceptance precedes `afterResponse` and dependent reverse RPC；
+19. afterResponse/handler unexpected throw is local-fatal，never semantic/business error；
+20. finite deadline covers writer/send + Response wait；pending settlement first-wins；
+21. timeout/loss ambiguous for Frame mutation；no retry；late Response diagnostics only；
+22. call/return pending gate is protocol-side；ordinary input/business gate belongs Subsystem Host；
+23. terminal first-wins、immutable、pending settle once、close idempotent；
+24. protocol corruption cannot become business FrameFailure；
+25. Main/Subsystem Host are role consumers；business author only imports `@loomrealm/subsystem`；
+26. current-v1 M3 correction creates no v2/compat parser；future real compatibility changes use normal version/migration governance。
