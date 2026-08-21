@@ -1,21 +1,20 @@
 # Render Update Protocol v1 Conformance Profile
 
 > 层级：正式契约 / Conformance Profile  
-> 状态：Active Design / Closure Candidate  
+> 状态：Active / Normative / Frozen  
 > Profile 版本：1  
+> fixtureSetRevision：1  
 > 适用协议：`loomrealm.render-update / 1`  
 > 依赖：[Render Update Protocol v1](./render-update-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)  
 > 最近复核：2026-08-21
 
-本文定义 Render Update v1 如何被独立实现验证；与主协议冲突时以主协议为准。
-
-在 ADR 0022 Accepted 且对应 hard limits 写回主协议前，本文中的数值边界属于 **freeze candidate**，不能单独用于宣称 `Frozen` conformance。
+本文定义 Frozen Render Update v1 如何被独立实现验证；与主协议冲突时以主协议为准。
 
 ---
 
 ## 1. Conformance Claim
 
-最终只允许完整角色声明：
+只允许完整角色声明：
 
 ```text
 LoomRealm Render Update v1 Subsystem Sender Conformant
@@ -28,32 +27,33 @@ LoomRealm Render Update v1 Transport Mapping Conformant
 ```text
 protocol = loomrealm.render-update
 protocolVersion = 1
-fixtureSetRevision = <tested revision>
+fixtureSetRevision = 1
 role = subsystem-sender | renderer-receiver | transport
 result = pass
 ```
 
-不建立：
+不建立 partial compatibility：
 
 ```text
-snapshot-only compatible
-patch-lite compatible
-no-event compatible
-known-tag compatible
+snapshot-only
+patch-lite
+no-event
+known-tag-only
+reconnect-without-history
 ```
-
-声明支持 v1 就必须支持四种 message kind 与全部冻结语义。
 
 ---
 
-## 2. Fixture Manifest
+## 2. Fixture Manifest Contract
+
+概念 manifest：
 
 ```ts
 interface RenderUpdateFixtureManifestV1 {
   readonly fixtureFormatVersion: 1;
   readonly protocol: "loomrealm.render-update";
   readonly protocolVersion: 1;
-  readonly fixtureSetRevision: number;
+  readonly fixtureSetRevision: 1;
   readonly fixtures: readonly RenderUpdateFixtureDescriptorV1[];
 }
 
@@ -67,6 +67,7 @@ interface RenderUpdateFixtureDescriptorV1 {
     | "wire-schema"
     | "limits"
     | "registry-lifecycle"
+    | "baseline-revision"
     | "snapshot"
     | "patch"
     | "event"
@@ -76,41 +77,40 @@ interface RenderUpdateFixtureDescriptorV1 {
 }
 ```
 
-`fixtureSetRevision` 只描述 conformance corpus 版本，不进入 Render wire，也不是 replay/resume cursor。
+未来 executable corpus 可以采用 JSON fixtures + deterministic generators；不得改变本 revision 规定的 expected accept/reject/drop/retire/state outcome。
 
 ---
 
-## 3. Normalized Receiver State
+## 3. Normalized Observable State
 
-Renderer harness 至少能够观察：
+Renderer harness 至少可观察：
 
 ```text
-current Data Connection identity / retired
+current Data carrier current|retired
+current generation
 current Domain Registry
+per-domain publication state unbaselined|baselined
 per-domain current revision
-per-domain current zIndex
-per-domain authoritative roots/tree
-per-domain seen domainId lifetime
-per-domain seen Node key lifetime
-presentation-delivered Event trace
-continuity-failure reason class
+per-domain zIndex
+per-domain roots/tree
+observed one-shot Domain/Node history when available
+logical Event delivery trace
+continuity/protocol failure class
+stale-presentation-cache marker after Data retirement
 ```
 
-测试只比较协议可观察结果，不要求实现暴露真实内部 Map/tree/index 结构。
+不要求实现暴露真实内部 Map/tree/index。
 
-Patch 测试必须证明：
+Patch case 必须证明：
 
 ```text
-candidate isolated
-failure => old committed state unchanged
-success => exactly one atomic authoritative commit
+failure → previous committed state unchanged
+success → one atomic authoritative commit
 ```
 
 ---
 
-## 4. Candidate Hard Limits
-
-在 ADR 0022 promotion 前，本节为 freeze candidate。目标值：
+## 4. Frozen Hard Limits
 
 ```text
 application message UTF-8 bytes        <= 1,048,576
@@ -122,47 +122,42 @@ Patch operations                       <= 4,096
 attrs members / Node                   <= 256
 Render data array elements             <= 16,384
 Render data object members             <= 16,384
-Render data/event-data serialized size <= 262,144 bytes
+Render data/event-data compact size    <= 262,144 UTF-8 bytes
 Render data relative container depth   <= 32
 ```
 
-String/identifier candidate：
+Strings：
 
 ```text
 domainId            1..128 UTF-8 bytes
-Node key            1..128 UTF-8 bytes
-tag                 1..256 UTF-8 bytes
-Event name          1..128 UTF-8 bytes
-attrs member key    1..128 UTF-8 bytes
-attrs member value  0..4096 UTF-8 bytes
-JSON object key     1..256 UTF-8 bytes unless specialized above
+Node key            1..128
+tag                 1..256
+Event name          1..128
+attrs member key    1..128
+attrs member value  0..4096
+generic data key    0..256
 ```
 
-`zIndex` candidate：
+`zIndex`：
 
 ```text
-safe integer
 -2,147,483,648 .. 2,147,483,647
 ```
 
-每个 hard limit 必须有 exactly-at 与 one-over fixture。
+每个 hard boundary至少验证：
+
+```text
+exactly-at → ACCEPT
+one-over   → REJECT + retire when inbound protocol message
+```
+
+UTF-8 fixtures必须覆盖多字节字符，防止 UTF-16 `.length` 实现错误。
 
 ---
 
 ## 5. Wire / Closed Schema
 
-基础：
-
-```text
-one carrier unit = one UTF-8 JSON text string
-plain JSON-compatible values
-no JSON-RPC wrapper
-no Batch
-no multiple Render messages in one carrier unit
-unpaired surrogate rejected
-```
-
-Required fixture IDs：
+Required：
 
 ```text
 wire-valid-domains
@@ -180,155 +175,166 @@ wire-message-exact-byte-limit
 wire-message-one-byte-over
 wire-json-depth-exact-limit
 wire-json-depth-one-over
+wire-duplicate-source-member-follows-wire-jsonparse
 ```
 
 Exact schemas：
 
 ```text
-render.domains
-    {type, domains}
-
-render.snapshot
-    {type, domainId, revision, zIndex, roots}
-
-render.patch
-    {type, domainId, baseRevision, revision, ops, zIndex?}
-
-render.event
-    {type, domainId, targetKey, name, data}
-
-RenderNode
-    {key, tag, attrs, data, children}
-
-insert
-    {op, parentKey, beforeKey, node}
-
-remove
-    {op, key}
-
-move
-    {op, key, parentKey, beforeKey}
-
-update
-    {op, key, attrs?, data?}
-
-StringMapDelta / JsonObjectDelta
-    {set?, remove?}
+render.domains   {type, domains}
+render.snapshot  {type, domainId, revision, zIndex, roots}
+render.patch     {type, domainId, baseRevision, revision, ops, zIndex?}
+render.event     {type, domainId, targetKey, name, data}
+RenderNode       {key, tag, attrs, data, children}
+insert           {op, parentKey, beforeKey, node}
+remove           {op, key}
+move             {op, key, parentKey, beforeKey}
+update           {op, key, attrs?, data?}
+Delta            {set?, remove?}
 ```
 
-Unknown field 必须 fail closed；不得 silently ignore。
+Source-level duplicate member不要求 second tokenizer；observable result跟随 frozen Wire/ECMAScript `JSON.parse`。
 
 ---
 
-## 6. Identifier / UTF-8 Boundary
-
-Fixture 必须同时覆盖 ASCII 与多字节 UTF-8。
-
-至少：
-
-```text
-domain-id-exact-byte-limit
-domain-id-one-byte-over
-domain-id-empty-rejected
-node-key-exact-byte-limit
-node-key-one-byte-over
-node-key-empty-rejected
-tag-exact-byte-limit
-tag-one-byte-over
-event-name-exact-byte-limit
-event-name-one-byte-over
-attrs-key-exact-byte-limit
-attrs-key-one-byte-over
-attrs-value-exact-byte-limit
-attrs-value-one-byte-over
-utf8-multibyte-byte-count-not-js-length
-```
-
-Conformance harness MUST 按 encoded UTF-8 bytes 计算，不得按 UTF-16 code unit 数。
-
----
-
-## 7. Domain Registry / Lifecycle
+## 6. Wire Domain Lifetime / Generation
 
 Required：
 
 ```text
-fresh-connection-first-render-message-domains
+same-generation-reconnect-preserves-wire-domain-lifetime
+same-generation-reconnect-preserves-node-one-shot-history-at-sender
+fresh-generation-creates-new-render-wire-universe
+fresh-generation-may-reexport-surviving-business-domain
+same-string-domain-id-new-generation-is-fresh-wire-identity
+same-string-node-key-new-generation-is-fresh-wire-identity
+```
+
+不得把 ordinary same-generation carrier replacement解释为 Domain recreation。
+
+---
+
+## 7. Registry / Lifecycle
+
+Required：
+
+```text
+fresh-carrier-first-render-message-domains
 registry-empty-valid
-registry-full-replacement
+registry-full-replacement-atomic
 registry-duplicate-domain-rejected
 registry-exact-count-limit
 registry-one-over-count-limit
 domain-absent-present-absent
-domain-id-one-shot-within-generation
-removed-domain-never-reintroduced
-message-before-domain-published-rejected
+domain-present-present-same-lifetime
+emitted-domain-id-one-shot-within-generation
+removed-domain-id-reintroduced-same-generation-rejected
+unemitted-coalesced-domain-does-not-consume-wire-id
+registry-removal-retires-authoritative-replica
 pending-domain-messages-discarded-after-removal
-registry-coalesce-preserves-publication-barrier
+registry-order-does-not-affect-stacking
 ```
-
-Registry array order无 presentation 意义；fixture 不得要求特定排序副作用。
 
 ---
 
-## 8. Snapshot
+## 8. Per-Domain Baseline / Revision
 
 Required：
 
 ```text
-snapshot-fresh-baseline-arbitrary-positive-revision
+registry-add-domain-starts-unbaselined
+unbaselined-first-authoritative-message-snapshot
+patch-before-baseline-retires-data
+wellformed-event-before-baseline-drops
+registry-may-change-before-all-domains-baselined
+newly-added-domain-baselines-independently
+removed-unbaselined-domain-needs-no-snapshot
+fresh-snapshot-arbitrary-positive-revision
+fresh-snapshot-not-compared-with-old-carrier-revision
+fresh-snapshot-same-numeric-revision-different-carrier-valid
+post-baseline-snapshot-exact-plus-one
+post-baseline-snapshot-stale-rejected
+post-baseline-snapshot-gap-rejected
+patch-base-matches-current
+patch-revision-exactly-plus-one
+patch-base-mismatch-rejected
+patch-gap-revision-rejected
+revision-never-wraps
+```
+
+---
+
+## 9. Snapshot / Identity History
+
+Required：
+
+```text
 snapshot-zero-root-domain
 snapshot-multiple-roots-preserve-order
 snapshot-atomic-replacement
 snapshot-node-key-domain-wide-unique
 snapshot-node-key-duplicate-rejected
-snapshot-same-live-key-tag-stable
+snapshot-live-key-tag-stable
+snapshot-live-key-tag-change-rejected
+snapshot-fresh-key-introduced
+snapshot-previously-removed-key-reintroduced-rejected
+snapshot-removal-consumes-key
+same-generation-fresh-baseline-can-contain-still-live-key
 snapshot-invalid-tree-no-partial-commit
 snapshot-exact-node-count-limit
 snapshot-one-over-node-count-limit
 snapshot-exact-tree-depth-limit
 snapshot-one-over-tree-depth-limit
-snapshot-zindex-min
-snapshot-zindex-max
-snapshot-zindex-below-min
-snapshot-zindex-above-max
-post-baseline-snapshot-exact-plus-one
-post-baseline-snapshot-stale-rejected
-post-baseline-snapshot-gap-rejected
 ```
-
-fresh carrier 不能以旧 presentation cache 作为 authoritative Patch base。
 
 ---
 
-## 9. Patch Revision / Atomicity
+## 10. zIndex / Logical Domain Order
 
 Required：
 
 ```text
-patch-base-matches-current
-patch-revision-exactly-plus-one
-patch-base-mismatch-rejected
-patch-gap-revision-rejected
+zindex-min
+zindex-max
+zindex-below-min
+zindex-above-max
+higher-zindex-above-lower
+same-zindex-domainid-utf8-lexical-tiebreak
+registry-order-not-stacking-order
+```
+
+Conformance只比较 logical ordering，不比较 DOM/CSS implementation details。
+
+---
+
+## 11. Patch Shape / Atomicity
+
+Required：
+
+```text
 patch-no-partial-apply
 patch-exact-op-count-limit
 patch-one-over-op-count-limit
+patch-empty-ops-without-zindex-rejected
+patch-empty-ops-with-zindex-valid
 patch-zindex-only-commit
 patch-zindex-and-ops-one-atomic-commit
+semantic-noop-not-required-to-reject
 ```
 
-任何失败 Patch 后：
+失败后：
 
 ```text
 revision unchanged
 zIndex unchanged
 tree unchanged
-no partial presentation authority
 ```
+
+每个 op 后的 intermediate candidate也必须满足 hard structural limits。
 
 ---
 
-## 10. Patch Insert
+## 12. Insert
 
 Required：
 
@@ -341,16 +347,15 @@ insert-subtree
 insert-duplicate-key-rejected
 insert-key-seen-earlier-in-domain-lifetime-rejected
 insert-subtree-internal-duplicate-key-rejected
-insert-over-final-node-count-rejected
-insert-over-final-tree-depth-rejected
+insert-before-key-not-destination-sibling-rejected
+insert-over-intermediate-node-count-rejected
+insert-over-intermediate-tree-depth-rejected
 insert-then-later-op-targets-new-key
 ```
 
-inserted subtree 的全部 key 都必须 fresh。
-
 ---
 
-## 11. Patch Remove / Tombstone
+## 13. Remove / Tombstone
 
 Required：
 
@@ -358,6 +363,7 @@ Required：
 remove-leaf
 remove-subtree-cascade
 remove-missing-key-rejected
+remove-descendants-become-domain-lifetime-consumed
 remove-then-reinsert-same-patch-rejected
 remove-then-update-same-patch-rejected
 remove-then-move-same-patch-rejected
@@ -366,11 +372,9 @@ remove-then-use-as-before-key-rejected
 move-child-before-remove-parent-preserves-child
 ```
 
-Patch-local tombstone 只服务当前 Patch validation；Domain-lifetime one-shot key rule跨 Patch 保持。
-
 ---
 
-## 12. Patch Move
+## 14. Move
 
 Required：
 
@@ -388,11 +392,9 @@ move-missing-before-key-rejected
 move-before-key-not-destination-sibling-rejected
 ```
 
-Harness 必须按 detach → resolve destination → insert 的协议顺序验证。
-
 ---
 
-## 13. Patch Update / attrs / data
+## 15. Update / Delta
 
 Required：
 
@@ -401,6 +403,11 @@ update-attrs-set
 update-attrs-remove
 update-data-set
 update-data-remove
+update-missing-attrs-and-data-rejected
+update-empty-attrs-delta-rejected
+update-empty-data-delta-rejected
+update-empty-set-rejected
+update-empty-remove-rejected
 update-set-remove-same-member-rejected
 update-remove-missing-member-rejected
 update-key-not-allowed
@@ -416,111 +423,125 @@ data-array-exact-count-limit
 data-array-one-over-count-limit
 data-object-exact-member-count-limit
 data-object-one-over-member-count-limit
+generic-data-empty-key-valid
+generic-data-key-one-over-limit
 ```
-
-嵌套 object 修改通过 top-level value replacement 表达；不引入 JSON Pointer/JSON Patch。
 
 ---
 
-## 14. Event
+## 16. Event / Barrier
 
 Required：
 
 ```text
 event-after-baseline-current-target-delivered
 event-before-baseline-dropped
-event-stale-target-dropped
-event-unknown-domain-rejected-or-stream-fatal-per-main-contract
-event-after-domain-removal-not-delivered
+wellformed-event-unknown-domain-dropped
+wellformed-event-after-domain-removal-dropped
+wellformed-event-stale-target-dropped
+malformed-event-retires-data
+oversize-event-retires-data
 patch-insert-then-event-targets-new-lifetime
 event-before-remove-targets-old-lifetime
 event-order-preserved
 event-not-coalesced
 event-loss-not-replayed
 event-overflow-does-not-block-authoritative-progress
-event-data-exact-size-limit
-event-data-one-byte-over-size-limit
+retained-event-blocks-authoritative-coalesce-across-barrier
+dropped-unemitted-event-releases-coalescing-barrier
 ```
 
-Event 不修改 authoritative revision/store。
+Protocol logical delivery不要求 physical paint/vsync。
 
 ---
 
-## 15. Fresh Carrier / Reconnect
+## 17. Backpressure / Emitted Boundary
 
 Required：
 
 ```text
-fresh-carrier-old-publication-cursor-discarded
+emitted-means-current-carrier-ordered-send-accepted
+emitted-authoritative-message-never-retracted
+send-accepted-then-loss-no-retry
+unsent-desired-state-may-rediff
+snapshot-fallback-uses-next-revision
+registry-unsent-latest-state-coalescing
+retained-event-preserves-causal-wire-position
+domain-removal-discards-pending-unsent-domain-messages
+```
+
+---
+
+## 18. Carrier Loss / Recovery
+
+Required：
+
+```text
+carrier-loss-ends-current-render-stream
+old-store-becomes-stale-presentation-cache
+old-store-not-patch-base
+old-store-not-input-or-data-authority
 fresh-carrier-registry-first
 fresh-carrier-snapshot-each-current-domain
-fresh-carrier-no-patch-before-domain-snapshot
-same-generation-reconnect-fresh-baseline
-same-generation-reconnect-preserves-business-domain-lifetime
+same-generation-reconnect-fresh-publication-baseline
+same-generation-reconnect-does-not-recreate-wire-domain
 reconnect-does-not-replay-event
 reconnect-does-not-fail-runtime
 reconnect-does-not-unwind-frame
 ```
 
-新的 carrier publication baseline 不表示新的 RenderDomain business lifetime。
-
 ---
 
-## 16. Continuity Failure / Recovery
+## 19. Failure Classification
 
 Required：
 
 ```text
+protocol-invalid-json-retires-data
+protocol-unknown-type-retires-data
+protocol-closed-schema-violation-retires-data
+protocol-hard-limit-violation-retires-data
+continuity-domain-lifecycle-violation-retires-data
+continuity-patch-before-baseline-retires-data
 continuity-patch-base-mismatch-retires-data
 continuity-patch-precondition-failure-retires-data
 continuity-invalid-final-tree-retires-data
-continuity-invalid-post-baseline-snapshot-retires-data
-continuity-hard-limit-violation-retires-data
-continuity-unknown-authoritative-message-fail-closed
 continuity-no-later-patch-applied-on-old-carrier
-continuity-no-runtime-failure
-continuity-no-frame-unwind
-continuity-fresh-carrier-recovers-with-registry-snapshots
+event-applicability-miss-drop-only
+presentation-local-failure-does-not-mutate-authoritative-store
+render-failure-does-not-fail-runtime
+render-failure-does-not-unwind-frame
+fresh-carrier-recovers-with-registry-snapshots
 ```
-
-不允许 harness 通过：
-
-```text
-skip bad commit
-invent missing state
-request snapshot via new RPC
-replay patch history
-```
-
-来修复 trace。
 
 ---
 
-## 17. Sender Conformance
+## 20. Sender Conformance
 
-Subsystem sender 必须证明：
+Subsystem sender必须证明：
 
 ```text
 registry-before-domain-state
 fresh-carrier-snapshot-before-patch
+fresh-carrier-snapshot-before-retained-event-targeting-domain
 revision-strict-plus-one-after-baseline
 lastEmittedRevision-reset-per-carrier
+same-generation-one-shot-history-retained
 unsent-desired-state-may-rediff
 emitted-authoritative-message-never-retracted
 snapshot-fallback-uses-next-revision
 domain-removal-discards-pending-unsent-domain-messages
+retained-event-is-coalescing-barrier
 no-ack-wait
 no-event-replay
 outbound-preflight-before-send
 ```
 
-Sender 本地生成非法 v1 message 是 implementation/programming failure，不得依赖 Renderer 宽容接收。
+Sender 本地产生非法 v1 message 是 implementation/programming failure；不得依赖 Renderer 宽容解析。
 
 ---
 
-## 18. Transport Mapping Equivalence
-
-Transport role 只验证 application mapping：
+## 21. Transport Mapping Equivalence
 
 ```text
 Desktop WebSocket
@@ -549,32 +570,24 @@ hostra-pwa-same-render-application-trace
 
 ---
 
-## 19. Freeze Gate
+## 22. Frozen Compatibility Boundary
 
-Render Update v1 只有在以下全部完成后才可从 `Closure Candidate / Stabilizing` 提升为 `Active / Normative / Frozen`：
+任何实现声明 Render Update v1 conformant，必须满足 fixtureSetRevision 1 的全部 relevant role obligations。
 
-```text
-ADR 0022 Accepted
-hard limits copied into primary Render Update v1 contract
-closed schema + validation order copied into primary contract
-fixtureSetRevision 1 manifest fixed
-all required exact-at/one-over fixtures materialized
-independent sender/receiver implementation can consume corpus
-fresh-carrier / continuity recovery traces pass
-contract index updated
-Remaining Closure Work = none
-```
-
-Frozen 后以下变化均属于 protocol compatibility change：
+以下 protocol change 必须新版本：
 
 ```text
 message kind/schema
-identifier grammar/limits
-hard resource limits
-revision rules
-Patch algebra/preconditions
-Domain/Node lifecycle identity
-fresh-carrier recovery
-continuity-failure behavior
+wire Domain identity/lifetime scope
+Registry/baseline rules
+revision continuity scope
+Snapshot one-shot semantics
+Patch algebra/atomicity/no-op rules
+Event barrier/drop behavior
+zIndex order
+hard limits
 application-unit encoding
+failure/recovery
 ```
+
+fixtureSetRevision 后续 MAY只增加“证明既有 Frozen v1 事实”的 coverage；不得借 fixture revision 改变 v1 semantics。

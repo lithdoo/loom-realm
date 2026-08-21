@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)  
 > 最近复核：2026-08-21
 
 契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
@@ -60,7 +60,8 @@ Renderer Data Application Profile v1    Active Design / Draft
 
 Renderer ⇄ Subsystem Data Connection v1 Active Design / Draft
 User Input v1                           Active Design / Core Closure Candidate
-Render Update v1                        Active Design / Closure Candidate
+Render Update v1                        Active / Normative / Frozen
+    + Conformance v1 fixtureSetRevision 1
 Readonly Content API v1                 Active / Normative / Evolving
 ```
 
@@ -359,7 +360,7 @@ fresh Activation可复用 Interest config但不复用 old State/Event；fresh Da
 
 ## 11. Render Update v1
 
-[Render Update v1](./render-update-v1.md)：
+[Render Update v1](./render-update-v1.md) Frozen：
 
 ```text
 render.domains
@@ -368,9 +369,34 @@ render.patch
 render.event
 ```
 
-Render Domain lifecycle independent from Frame/Data carrier。
+核心 identity / recovery：
 
-fresh carrier：current Registry → fresh Snapshot each Domain → Patch/Event。
+```text
+wire Domain identity
+= Session + subsystemKey + DataAuthority generation + domainId
+
+same-generation reconnect
+= same wire Domain lifetime + fresh publication baseline
+
+fresh generation
+= fresh Render wire universe
+```
+
+fresh carrier：
+
+```text
+first Render message = Registry
+→ each Domain independently unbaselined
+→ fresh Snapshot
+→ carrier-local strict R→R+1 Patch/Snapshot commits
+→ Event
+```
+
+Event 是 transient/no-replay，同时是 retained sender-side coalescing barrier；well-formed stale Event drop-only。Registry/Snapshot/Patch authoritative continuity error或任何 schema/hard-limit invalid message retire current Data carrier。
+
+logical Domain stacking：higher `zIndex` above；tie 用 `domainId` UTF-8 lexical order。
+
+Render failure不等于 Runtime failure/Frame unwind；Data loss后旧 Render Store最多是 stale presentation cache，不是 fresh Patch base。
 
 ---
 

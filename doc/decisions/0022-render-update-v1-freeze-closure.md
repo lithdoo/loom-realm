@@ -1,350 +1,362 @@
-# ADR 0022：Render Update v1 freeze closure baseline
+# ADR 0022：Render Update v1 freeze closure
 
-> 状态：Proposed  
+> 状态：Accepted  
 > 日期：2026-08-21  
-> 影响范围：Render Update Protocol v1、未来 `@loomrealm/data` Render codec/validator、Subsystem RenderManager、Renderer Render Store、M8/M11 conformance  
+> 影响范围：Render Update Protocol v1、Render Update Conformance v1、未来 `@loomrealm/data` Render codec/validator、Subsystem RenderManager、Renderer Render Store、M8/M11 qualification  
 > 依赖：[Render Update Protocol v1](../15-contracts/render-update-v1.md)、[Renderer Data Application Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Wire package design](../../packages/wire/DESIGN.md)  
-> 不改变：四种 Render message kind、Domain/Node one-shot identity、Snapshot/Patch/Event 语义、Patch algebra、fresh-carrier recovery、Frame/Input/Data authority boundary
+> 不改变：四种 Render message kind、Subsystem-owned Render authority、Frame/Input/Content boundary、无 ACK/NACK/replay/resync 的方向
 
 ## 背景
 
-Render Update v1 已经进入 `Active Design / Closure Candidate`。当前核心语义已经闭合：
+Render Update v1 的主干语义已经稳定，但在首次实现前仍存在会迫使两端自行选择的边缘事实：
 
 ```text
-Subsystem → Renderer only
+Data generation 与 Render Domain wire lifetime 的关系
+fresh carrier 上每个 Domain 何时可接 Patch/Event
+revision 是否跨 carrier 比较
+Event 是否构成 pending authoritative state 的 ordering barrier
+stale Event 应 drop 还是 retire stream
+Snapshot 如何约束 one-shot key history
+empty Patch / empty Update 是否允许
+zIndex tie 是否确定
+hard limits / exact schema / validation order
+```
+
+这些不是 implementation tuning；它们会改变跨实现 observable behavior，因此必须在 v1 freeze 前关闭。
+
+本 ADR 接受最终 closure；主协议是 normative source of truth。本文记录为什么这样关闭，不取代主协议正文。
+
+---
+
+## 决策 1：current v1 直接闭合并 Frozen
+
+当前不存在已部署第三方 Render v1 compatibility obligation，因此：
+
+```text
+close current v1 directly
+no fake v2
+no legacy compatibility alias
+```
+
+Frozen v1 保持只有：
+
+```text
 render.domains
 render.snapshot
 render.patch
 render.event
-
-Domain Registry owns lifecycle
-Snapshot owns full authoritative baseline/commit
-Patch owns strict R→R+1 atomic incremental commit
-Event owns transient presentation impulse
 ```
 
-当前正式契约仍明确剩余：
-
-```text
-hard wire/tree numeric limits
-identifier byte limits/grammar
-zIndex range
-closed-schema encoding details
-Snapshot/Patch/Event/Registry fixture matrix
-```
-
-如果这些边界不在首次实现前写死，Desktop/PWA、Subsystem/Renderer 两端会被迫自行选择大小、depth、identifier、schema rejection 和 validation order，最终会形成不可证明的“看起来兼容”。
-
-本 ADR 的目标不是重新设计 Render，而是给 current v1 建立 freeze closure baseline。
+不加入 ACK/NACK/resync RPC、Component Profile、tag semantic grammar 或第五种消息。
 
 ---
 
-## 决策 1：继续直接收口 current v1，不创建 fake v2
+## 决策 2：区分 business Domain 与 generation-scoped wire Domain
 
-当前不存在已部署的第三方 Render Update v1 compatibility obligation。
+Subsystem business Render Domain lifetime 不由 Data carrier拥有。
 
-因此本次 closure：
+Render wire identity 固定为：
 
 ```text
-update current v1 directly
-no Render Update v2
-no compatibility alias
-no fifth Render message kind
-no ACK/NACK/resync RPC
-no Component Profile
-no tag semantic grammar
+(Session, subsystemKey, DataAuthority generation, domainId)
 ```
 
-后续一旦 v1 正式 Frozen，任何不兼容 wire/application semantics 变化必须走正常版本演进。
+因此：
+
+```text
+same-generation carrier reconnect
+    → same wire Domain/Node lifetime
+    → fresh publication baseline only
+
+fresh DataAuthority generation
+    → fresh Render wire universe
+    → business Domain MAY survive and be re-exported
+```
+
+这同时满足：
+
+```text
+Data carrier retire != business Domain destroy
+fresh generation = fresh Data application authority epoch
+```
+
+Node one-shot history与 wire Domain lifetime一致。
 
 ---
 
-## 决策 2：统一 application-unit 与 representation baseline
+## 决策 3：fresh carrier 使用 per-Domain baseline state
 
-Render Update v1 application unit：
-
-```text
-one carrier application unit
-= one UTF-8 JSON text string
-= exactly one Render Update message object
-```
-
-Connection-wide hard gate：
+每个 current carrier + Domain：
 
 ```text
-max application message UTF-8 bytes    1,048,576
-max JSON container nesting depth       64
+unbaselined → baselined(R)
 ```
 
-所有字符串必须是有效 Unicode scalar sequence；unpaired surrogate 必须拒绝。
+fresh carrier 第一条 Render message MUST 是 current `render.domains`。
 
-Render Update 不增加第二套 JSON tokenizer/parser。解析沿用 Wire：
+Registry 中每个 Domain独立从 unbaselined 开始：
 
 ```text
-raw string
-→ @loomrealm/wire parseJsonText semantics
-→ parsed JsonValue
-→ Render Update closed-schema/domain validation
+first authoritative state = Snapshot
+Patch before Snapshot       = protocol-fatal
+well-formed Event before baseline = drop
 ```
+
+不存在 global Render ready/baseline-complete message。Registry 可在 baseline 过程中继续变化。
 
 ---
 
-## 决策 3：identifier 与 label limits
+## 决策 4：revision continuity 是 carrier-local
 
-Current v1 freeze candidate：
+fresh carrier baseline Snapshot 的 revision 可为任意 positive safe integer。
 
-```text
-domainId            1..128 UTF-8 bytes
-Node key            1..128 UTF-8 bytes
-tag                 1..256 UTF-8 bytes
-Event name          1..128 UTF-8 bytes
-attrs member key    1..128 UTF-8 bytes
-attrs member value  0..4096 UTF-8 bytes
-JSON object key     1..256 UTF-8 bytes where not otherwise specialized
-```
-
-语义：
+同一 carrier baseline 后：
 
 ```text
-domainId/key
-    non-empty opaque identity strings
-    no semantic grammar
-    no normalization
-    one-shot lifecycle rules remain owned by Render protocol
-
-tag
-    opaque label only
-    no known-tag registry
-    no component discovery/loading semantics
-
-Event name
-    opaque presentation-event name
-    no global registry
+next authoritative commit = currentRevision + 1
 ```
 
-这些字段按 actual UTF-8 byte count 验证，不按 JavaScript UTF-16 `.length`。
+Receiver不得把旧 carrier曾观察的 numeric revision作为 fresh carrier acceptance gate。Numeric equality没有跨 carrier state-equality语义；full Snapshot才是 fresh carrier authority。
+
+revision 到 `Number.MAX_SAFE_INTEGER` 后不得 wrap/reuse。
 
 ---
 
-## 决策 4：structural hard limits
+## 决策 5：明确 emitted boundary
 
-Current v1 freeze candidate：
+`emitted` 固定指：
+
+> application unit 已被 current carrier 的 ordered send boundary 成功接受。
+
+一旦 emitted：
 
 ```text
-max domains in one render.domains Registry     256
-max RenderNode count in one Domain State       16,384
-max Render tree depth                           30
-max Patch operations                            4,096
-max attrs members per Node                      256
-max array elements inside Render data           16,384
-max object members inside Render data object    16,384
-max Render data/event-data serialized bytes     262,144
-max Render data relative container depth        32
+no retract
+no reorder
+no adapter/application retry
 ```
 
-`Render tree depth`：root Node depth = 1；沿 `children` 每下降一层 +1。
-
-Node count 计算整个 `roots[]` forest 的全部 live Node；inserted subtree 也必须在 candidate/final validation 中计入。
-
-`data` / Event `data` 的 size 是该 JSON object 自身按 Render/Wire mapping 序列化后的 UTF-8 bytes；同时仍受整条 application message 1 MiB 上限约束。
-
-这些是 interoperability/resource-safety limits，不是 Renderer implementation capacity 目标。实现可以内部使用更高容量，但不能拒绝处于 v1 合法 hard boundary 内的消息。
+remote delivery ambiguity由 carrier loss + fresh baseline恢复，不使用 ACK。
 
 ---
 
-## 决策 5：`zIndex` 冻结为 signed 32-bit integer range
+## 决策 6：Event 是 transient message，也是 ordering/coalescing barrier
+
+Event 本身：
 
 ```text
-zIndex MUST be safe integer
--2,147,483,648 <= zIndex <= 2,147,483,647
+ordered
+transient
+non-authoritative
+no replay
+may be lost
 ```
 
-协议只定义 Domain ordering input value，不定义 CSS/DOM/Canvas/WebGL 的具体映射。
+如果 Event 被保留等待发送，sender MUST确保 Event wire position 之前已经 emitted 足够 authoritative state，使 target lifetime 在该位置成立。
 
-Renderer implementation 可以使用任意内部 presentation strategy，但不能对合法 v1 zIndex 再施加 platform-specific protocol rejection。
+因此 retained Event 是 pending authoritative coalescing barrier：不得把它依赖的 commit 移到 Event 后或 coalesce away。
+
+如果 Event 尚未 emitted，sender MAY按 bounded-backpressure policy丢弃；丢弃后 barrier消失。
 
 ---
 
-## 决策 6：closed schema 必须 exact
+## 决策 7：失败明确分三类
 
-所有 v1 protocol objects 都是 closed schema。
+### Protocol-fatal
 
-Exact key set：
+任何 message 的 representation/schema/hard-limit 错误：
 
 ```text
-render.domains
-    type, domains
-
-render.snapshot
-    type, domainId, revision, zIndex, roots
-
-render.patch
-    type, domainId, baseRevision, revision, ops
-    optional: zIndex
-
-render.event
-    type, domainId, targetKey, name, data
-
-RenderNode
-    key, tag, attrs, data, children
-
-insert
-    op, parentKey, beforeKey, node
-
-remove
-    op, key
-
-move
-    op, key, parentKey, beforeKey
-
-update
-    op, key
-    optional: attrs, data
-
-StringMapDelta / JsonObjectDelta
-    optional: set, remove
+→ retire current Data Connection
 ```
 
-未知 member、missing required member、wrong primitive/container type 都必须拒绝；不得忽略 unknown fields 以实现“向前兼容”。
+### Authoritative continuity failure
 
-`undefined` 不存在于 application model；optional 表示 member absence。
+Registry/Snapshot/Patch 的 lifecycle/revision/precondition/candidate 错误：
+
+```text
+→ retire current Data Connection
+```
+
+### Transient Event applicability miss
+
+合法 Event 但：
+
+```text
+Domain absent
+Domain unbaselined
+target missing/stale
+```
+
+```text
+→ drop only
+```
+
+presentation-local component/DOM/Canvas/WebGL failure不改变 authoritative Render validity，也不得伪造成 Runtime/Frame failure。
 
 ---
 
-## 决策 7：validation order 固定
+## 决策 8：Snapshot 与 one-shot key history
 
-Inbound receiver baseline：
+Snapshot 是 full replacement，但不是 identity reset。
 
-```text
-carrier string
-→ actual UTF-8 byte gate
-→ Wire parseJsonText
-→ generic JSON representation/depth gate
-→ top-level type discrimination
-→ exact message schema
-→ field/identifier/count/size limits
-→ current Domain/lifecycle publication barrier
-→ revision continuity
-→ message-specific semantic/precondition validation
-→ isolated candidate mutation when applicable
-→ final candidate structural/one-shot/tag-stability validation
-→ atomic commit/delivery
-```
-
-目的：
+同一 wire Domain lifetime：
 
 ```text
-representation invalid data never reaches Render authority logic
-schema-invalid data never partially mutates store
-Patch precondition failure never partially applies
-final invalid candidate never becomes presentation authority
+live→live key keeps tag
+absent→present key must be never-published-fresh
+present→absent key becomes permanently consumed
 ```
 
-不冻结 human-readable error wording；冻结 accept/reject/retire behavior 与 authoritative state outcome。
+same-generation fresh carrier baseline 可以再次包含此前仍 live 的 keys；fresh generation 才重置 wire identity universe。
 
 ---
 
-## 决策 8：continuity failure 仍只退役 Data stream
+## 决策 9：禁止结构性 empty mutation
 
-以下继续属于 Render authoritative continuity failure：
-
-```text
-revision mismatch/gap
-Patch precondition failure
-invalid final candidate
-hard schema/size/depth/identifier/structural-limit violation
-malformed authoritative Render message
-```
-
-恢复保持：
+Patch：
 
 ```text
-retire current Data Connection
-→ if DataAuthority still current, establish fresh carrier
-→ render.domains(current Registry)
-→ fresh Snapshot for each current Domain
-→ ordinary Patch/Event
+ops.length > 0 OR zIndex present
 ```
 
-不得升级为：
+因此 empty ops + no zIndex非法。
 
-```text
-Runtime terminal failure
-Frame unwind
-Render ACK/NACK/replay protocol
-```
+Update 必须包含 attrs/data 至少一个；每个提供的 Delta 必须至少有 non-empty set/remove 之一。
+
+协议不要求检测 semantic no-op；写回相同值仍可形成 commit。
 
 ---
 
-## 决策 9：fixture closure 必须验证 exact-at / one-over
-
-所有 hard limit 必须至少有：
+## 决策 10：zIndex logical order完全确定
 
 ```text
-exactly-at-limit → ACCEPT
-one-over-limit   → REJECT / retire current Render Data stream
+higher zIndex = logically above
 ```
 
-UTF-8 byte boundary fixture必须包含多字节字符，防止实现错误使用 UTF-16 code unit count。
-
-Fixture corpus 至少覆盖：
+同值 tie-break：
 
 ```text
-wire/schema
-identifier-byte-boundary
-message-byte-boundary
-JSON-depth-boundary
-registry-count-boundary
-node-count-boundary
-tree-depth-boundary
-patch-op-boundary
-attrs-boundary
-data-size/depth-boundary
-zIndex min/max/over-boundary
-fresh-carrier baseline
-revision continuity
-Patch atomicity
-one-shot identity
-Event ordering/drop
-continuity failure → fresh-carrier recovery
+UTF-8 byte lexical(domainId)
+smaller below larger
+```
+
+Registry order不参与 stacking。协议只冻结 logical order，不规定 DOM/CSS/Canvas 实现。
+
+---
+
+## 决策 11：Wire / exact schema / hard limits Frozen
+
+Application unit：
+
+```text
+one UTF-8 JSON text string
+= exactly one Render message object
+```
+
+解析沿用 frozen Wire / ECMAScript `JSON.parse` observable semantics，不增加 duplicate-member tokenizer。Parse 后 protocol object仍 exact closed schema。
+
+Connection-wide：
+
+```text
+message bytes                  <= 1,048,576
+JSON container depth           <= 64
+```
+
+Identity/labels：
+
+```text
+domainId             1..128 UTF-8 bytes
+Node key             1..128
+tag                  1..256
+Event name           1..128
+attrs key            1..128
+attrs value          0..4096
+generic data key     0..256
+```
+
+Structural：
+
+```text
+Domains / Registry             <= 256
+Nodes / Domain                 <= 16,384
+tree depth                     <= 30
+Patch ops                      <= 4,096
+attrs / Node                   <= 256
+data array elements            <= 16,384
+data object members            <= 16,384
+data/event-data compact bytes  <= 262,144
+data relative depth            <= 32
+zIndex                         signed 32-bit integer
+```
+
+Patch intermediate candidate after every op也必须处于 hard structural bounds 内。
+
+---
+
+## 决策 12：Data loss 后旧 Store 只是 presentation cache
+
+Data stream不再 current 时：
+
+```text
+last valid Render Store MAY remain visually
+BUT
+it is not current authoritative replica
+it is not fresh Patch base
+it does not create Input/Data authority
+```
+
+恢复统一：
+
+```text
+fresh current carrier
+→ Registry
+→ fresh Snapshot each current Domain
+→ Patch/Event
 ```
 
 ---
 
-## 决策 10：不冻结 implementation tuning
+## 决策 13：Conformance matrix 属于 Frozen design，执行实现属于 qualification
 
-继续不协议化：
+`render-update-conformance-v1.md` 冻结 `fixtureSetRevision = 1` 的 required scenario matrix。
+
+这份 matrix 本身属于协议设计闭环；未来 `@loomrealm/data` / Subsystem / Renderer 实现必须把它 materialize 为 executable tests 才能声明实现 conformant，但“尚未写实现测试代码”不再阻止 v1 semantic freeze。
+
+这与 Frame / Call v1 的治理方式一致：协议先冻结可观察事实与 conformance obligations，实现随后证明自己满足它们。
+
+---
+
+## 结果
+
+Render Update v1 自本 ADR Accepted 起进入：
 
 ```text
-Event FIFO concrete capacity
-Event drop-oldest/drop-newest policy
-Patch-vs-Snapshot cost threshold
+Active / Normative / Frozen
+```
+
+以后以下变化必须新 protocol version：
+
+```text
+message kinds/schema
+wire Domain identity/lifetime scope
+Registry/baseline semantics
+revision continuity scope
+Patch algebra/atomicity
+Node one-shot/tag rules
+Event barrier/drop semantics
+zIndex logical ordering
+hard limits
+encoding/validation/failure/recovery
+```
+
+implementation tuning 仍不冻结：
+
+```text
+Event queue concrete capacity/drop preference
+Patch-vs-Snapshot heuristic
 internal tree/index representation
-copy-on-write/persistent-tree strategy
-presentation scheduler
-paint/vsync timing
+presentation scheduler/paint cadence
 DOM/Canvas/WebGL mapping
-component factory/registry
+component implementation
 ```
-
-这些选择不能改变 v1 wire acceptance、authoritative state、ordering/recovery observable semantics。
-
----
-
-## 推进门槛
-
-本 ADR 合并后仍不自动把 Render Update v1 标为 Frozen。
-
-Promotion checklist：
-
-```text
-1. 把本 ADR 的 accepted hard limits/validation order写入 render-update-v1.md
-2. 建立 Render Update v1 Conformance Profile / fixture manifest
-3. 为每个 hard boundary建立 exact-at / one-over fixtures
-4. 审核四种 message schema + Patch op schema 无开放字段
-5. 审核 fresh-carrier / continuity failure traces
-6. render-update-v1.md Remaining Closure Work 清零
-7. contract index 更新为 Active / Normative / Frozen
-```
-
-在上述步骤完成前，协议仍保持 `Closure Candidate / Stabilizing`。
