@@ -2,11 +2,54 @@
 
 > 状态：Draft  
 > 阶段：Package boundary / author API / host integration / implementation planning  
-> 最近复核：2026-08-20  
+> 最近复核：2026-08-21  
 > 目标：为 LoomRealm 业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author SDK，并定义 Platform Runner 可消费的最小 host integration surface。  
 > 上层架构：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[Subsystem 模型](../../doc/10-architecture/subsystem-model.md)  
 > 正式语义：[Runtime Control Profile v1](../../doc/15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
 > 核心原则：**业务定义只表达业务；SDK 把正式协议映射成不可绕过的 capability/control-flow；Platform Runner 注入 role-local ports；Game/Platform launch config、physical carrier 与 capability lifetime分离。**
+
+---
+
+## 0. Document Scope / Capability Readiness
+
+本文描述的是 `@loomrealm/subsystem` **完整目标 package boundary**。它不是某一个 milestone 的实现清单，也不表示本文所有 capability 已经同时具备实现前提。
+
+必须区分：
+
+```text
+Package Scope
+!= Current Implementable Slice
+!= Milestone Closure
+```
+
+`@loomrealm/subsystem` 是一个 platform-neutral Subsystem role SDK；Runtime/Frame、Data、Input、Render、Content 都属于同一 role boundary，但它们依赖的正式契约成熟度与 implementation gate 不同。
+
+### Phase 1 capability readiness
+
+| Capability slice | Primary contract/capability dependency | Current implementation meaning | Phase 1 gate |
+| --- | --- | --- | --- |
+| Definition/lifecycle + Frame/Outcome | Runtime Control Profile v1 + Frame/Call v1 | Runtime/Frame core may be implemented and qualified | M4 |
+| Host Runtime Control mapping | `@loomrealm/runtime-control` typed Subsystem peer | first real Subsystem-side Runtime Control consumer | M4 |
+| DataPlane + `SubsystemDataBinding` application integration | Renderer Data Profile v1 | waits for Data application profile/core implementation | M8 |
+| `InputListener` + InputManager | User Input v1 | author/input behavior closes with Input protocol implementation | M10 |
+| `RenderDomain` + RenderManager | Render Update v1 | author/render behavior closes with Render protocol implementation | M11 |
+| `ContentClient` author mapping | Content capability/contracts | closes with Content implementation | M12 |
+
+因此，M4完成后允许声明：
+
+```text
+Subsystem Runtime/Frame Core Implemented
+Subsystem Host Runtime Control consumer qualified
+```
+
+但不得声明：
+
+```text
+@loomrealm/subsystem full package implemented
+Subsystem Data/Input/Render/Content complete
+```
+
+后续 M8/M10/M11/M12 继续在**同一个 `@loomrealm/subsystem` role package** 中实现对应 capability；milestone split 不产生新的 Subsystem ownership，也不缩小本文定义的最终 package responsibility。
 
 ---
 
@@ -965,15 +1008,20 @@ packages/subsystem/
 └── test/
 ```
 
+这是 **eventual package structure**，不是 M4 必须一次生成的文件清单。目录按 capability 的真实 implementation gate demand-driven 落地：M4优先 definition/frame/host/runtime-control plane；Data/Input/Render/Content 目录随 M8/M10/M11/M12 实现。
+
 Author root不 re-export host/internal types。
 
 ---
 
 ## 30. Testing
 
+测试同样按 capability slice 渐进落地；以下是完整 Phase 1 target corpus，不是 M4 单 milestone 的验收清单。
+
 至少覆盖：
 
 ```text
+[M4 Runtime/Frame]
 Definition Module default-export ABI
 per-instance scope / no global current context
 Runtime Control binding one-shot
@@ -991,6 +1039,7 @@ administrative-suspend-aborts-frame-signal/discards-late-handler-result
 handler-result-sends-exactly-one-return
 mutation-gate
 
+[M8/M10 Data/Input]
 multiple-listeners-union-interest
 listener-bound-to-local-frame-owner
 suspend-retains-interest
@@ -999,12 +1048,14 @@ frame-close-removes-interest-before-local-close-success
 fresh-data-carrier-republishes-full-registry
 stale-input-receive-gate
 
+[M8/M11 Data/Render]
 one-data-reader-demuxes-input-render
 wrong-data-profile-not-installed
 render-domain-survives-data-reconnect
 fresh-render-registry-snapshots
 frame-close-does-not-auto-close-domain
 
+[Cross-platform integration]
 fake Hostra-like ports
 fake PWA-like ports
 platform-specific Definition artifacts → same abstract business trace
@@ -1053,4 +1104,5 @@ SDK catchable Runtime-fatal continuation
 17. RenderDomain与 Frame/Data carrier lifecycle独立；
 18. 一个 DataPlane统一消费/分派 Data carrier；
 19. dynamic Data material经 Platform provisioning sideband进入 Runner，不污染 Runtime Control；
-20. Hostra/PWA Definition artifact可不同，但必须产生等价 author/business observable semantics。
+20. Hostra/PWA Definition artifact可不同，但必须产生等价 author/business observable semantics；
+21. package responsibility 与 milestone implementation slice 分离；M4只关闭 Runtime/Frame core，M8/M10/M11/M12继续完成同一 `@loomrealm/subsystem` 的 Data/Input/Render/Content capability。
