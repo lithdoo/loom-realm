@@ -6,7 +6,7 @@
 > 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update 与 Platform Broker 的分层关系  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)  
 > 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-08-26
 
 ---
 
@@ -25,9 +25,9 @@ Renderer
  │
  ▼
 Renderer Data Application Profile v1
-├── Data Connection v1
-├── User Input v1      Frozen
-└── Render Update v1   Frozen
+├── Data Connection v1  Frozen
+├── User Input v1       Frozen
+└── Render Update v1    Frozen
  │
  ▼
 Subsystem
@@ -136,7 +136,7 @@ input.* / render.* demux
 fresh-carrier child baseline
 ```
 
-User Input v1 / Render Update v1 已 Frozen；Data Profile本身仍可因 Data Connection/current-gate组合 closure保持 Draft，不能反向重新解释两个 Frozen child protocol。
+Data Connection v1、User Input v1、Render Update v1 均已 Frozen；Data Profile本身仍保持 Draft，剩余自由度只属于 Profile 级组合、dispatcher/application mapping 与 profile-level conformance closure，不能反向重新解释三个已 Frozen 的组成契约/协议。
 
 Profile改变必须 fresh Data generation。
 
@@ -438,7 +438,7 @@ Provisioning material不是 Data application payload，也不拥有 Input/Render
 
 1. Main Control authority、Subsystem desired state、Renderer local producer/replica、Platform physical topology分离；
 2. DataAuthority使用 `(S,G,dataProfile)`，physical carrier不拥有 generation/profile；
-3. current Profile v1 = Connection1 + Frozen Input1 + Frozen Render1；
+3. current Profile v1 = Frozen Connection1 + Frozen Input1 + Frozen Render1；Profile composition 自身仍 Draft；
 4. Data connection per-Subsystem，不 per-Frame/Activation/Domain；
 5. User Input = current Data × Main InputTarget × Interest[F] × Producer；
 6. Desired Interest、Activation input lease、carrier publication state是三个独立 lifetime；
