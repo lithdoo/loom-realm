@@ -7,16 +7,19 @@ on:
       - "packages/fsdb-http/**"
       - "package.json"
       - "package-lock.json"
+      - ".npmrc"
       - ".github/workflows/essentials-fixture.yml"
+      - ".github/actions/setup-workspace/**"
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - "tools/fixtures/essentials-v21.1/**"
       - "packages/fsdb-http/**"
       - "package.json"
       - "package-lock.json"
+      - ".npmrc"
       - ".github/workflows/essentials-fixture.yml"
+      - ".github/actions/setup-workspace/**"
   workflow_dispatch:
 
 permissions:
@@ -31,14 +34,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
           node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
 
       - name: Test fixture importer
         run: npm run test:fixtures

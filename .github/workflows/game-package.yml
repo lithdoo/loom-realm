@@ -7,16 +7,19 @@ on:
       - "packages/wire/**"
       - "package.json"
       - "package-lock.json"
+      - ".npmrc"
       - ".github/workflows/game-package.yml"
+      - ".github/actions/setup-workspace/**"
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - "packages/game-package/**"
       - "packages/wire/**"
       - "package.json"
       - "package-lock.json"
+      - ".npmrc"
       - ".github/workflows/game-package.yml"
+      - ".github/actions/setup-workspace/**"
   workflow_dispatch:
 
 permissions:
@@ -30,22 +33,14 @@ jobs:
       fail-fast: false
       matrix:
         node: [20, 24]
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
       - name: Run Wire and Game Package conformance
         run: npm run test:game-package
-
       - name: Verify publishable package surface
         run: npm pack -w @loomrealm/game-package --dry-run

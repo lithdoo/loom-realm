@@ -50,7 +50,23 @@ export interface InputResetV1 {
 }
 export type UserInputMessageV1 = InputInterestV1 | InputStateV1 | InputEventV1 | InputResetV1;
 
-export type KeyboardCodeV1 = string;
+export const KEYBOARD_CODES_V1 = [
+  "KeyA", "KeyB", "KeyC", "KeyD", "KeyE", "KeyF", "KeyG", "KeyH", "KeyI", "KeyJ",
+  "KeyK", "KeyL", "KeyM", "KeyN", "KeyO", "KeyP", "KeyQ", "KeyR", "KeyS", "KeyT",
+  "KeyU", "KeyV", "KeyW", "KeyX", "KeyY", "KeyZ",
+  "Digit0", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9",
+  "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+  "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
+  "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9",
+  "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+  "Space", "Enter", "Escape", "Tab", "Backspace",
+  "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight", "CapsLock",
+  "Insert", "Delete", "Home", "End", "PageUp", "PageDown",
+  "Minus", "Equal", "BracketLeft", "BracketRight", "Backslash",
+  "Semicolon", "Quote", "Backquote", "Comma", "Period", "Slash",
+  "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide", "NumpadDecimal", "NumpadEnter",
+] as const;
+export type KeyboardCodeV1 = typeof KEYBOARD_CODES_V1[number];
 export interface KeyboardStatePayloadV1 { readonly down: readonly KeyboardCodeV1[]; }
 export interface KeyboardEventPayloadV1 { readonly action: "down" | "up"; readonly code: KeyboardCodeV1; readonly repeat: boolean; }
 export type PointerKindV1 = "mouse" | "touch" | "pen";

@@ -353,6 +353,11 @@ business → game-package / launcher / runtime-control
     M3 local closure complete
     M4/M5 real role-consumer qualification pending
 
+@loomrealm/data
+    Package-local Core Baseline Implemented
+    M8 role integration pending
+    Full Profile conformance pending
+
 @loomrealm/subsystem
     implementation pending
 

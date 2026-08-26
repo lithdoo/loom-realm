@@ -7,7 +7,8 @@ import type {
   DataTerminal,
   RendererDataMessageV1,
 } from "./model.js";
-import { DataProtocolError, decodeForRole, encodeForRole, type DataRole } from "./validation.js";
+import { DataProtocolError } from "./validation-common.js";
+import { decodeForRole, encodeForRole, type DataRole } from "./profile-codec.js";
 
 const MAX_PENDING_SENDS = 1024;
 type Handler = (message: RendererDataMessageV1) => DataInboundDisposition | Promise<DataInboundDisposition>;
@@ -80,7 +81,6 @@ export class DataRuntime {
     try {
       await operation;
       this.pendingSends -= 1;
-      if (this.terminalValue) return freeze({ kind: "terminal", terminal: this.terminalValue });
       return freeze({ kind: "sent" });
     } catch (cause) {
       this.pendingSends -= 1;
