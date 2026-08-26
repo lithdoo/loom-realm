@@ -1,24 +1,26 @@
 # Renderer ⇄ Subsystem Data Application Profile v1
 
 > 层级：正式契约 / Application Profile  
-> 状态：Active Design / Draft  
+> 状态：Active / Normative / Frozen  
 > Profile 版本：1  
 > Profile 标识：`loomrealm.renderer-data/1`  
-> 稳定程度：Stabilizing  
-> 主要定义：Renderer ⇄ Subsystem current Data Connection 上 Data Connection v1、User Input v1 与 Render Update v1 的版本绑定、message mapping、demux 与 fresh-carrier 组合规则  
+> 稳定程度：Frozen  
+> 主要定义：Renderer ⇄ Subsystem current Data Connection 上 Data Connection v1、User Input v1 与 Render Update v1 的固定版本组合、application-unit mapping、单 reader/dispatcher、单 writer、方向约束、fresh-carrier 组合与 Data-local terminal boundary  
 > 依赖：[Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)、[User Input v1](./user-input-v1.md)、[Render Update v1](./render-update-v1.md)  
 > 上游 authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)  
-> 最近复核：2026-08-19
+> Conformance：[Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md)  
+> 决策：[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
+> 最近复核：2026-08-26
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 核心原则：
 
-> **DataAuthority 选择一套完整 Data Application Profile；Profile v1 静态绑定 Connection v1 + User Input v1 + Render Update v1。它不增加握手、ACK、RPC 或新的业务 authority。**
+> **DataAuthority 选择一套完整 Data Application Profile；Profile v1 静态绑定 Connection 1 + User Input 1 + Render Update 1。一个 current carrier 只有一个 inbound reader/dispatcher 与一个 outbound serialized writer；共享 carrier 只共享 application-unit ordering 与 terminal boundary，不创建跨 child protocol authority、revision、transaction、ACK 或 replay。**
 
 ---
 
-## 1. Composition
+## 1. Composition / Identity
 
 ```text
 Renderer Data Application Profile v1
@@ -35,19 +37,27 @@ User Input      = 1
 Render Update   = 1
 ```
 
-Profile 标识固定为：
+Profile 标识固定：
 
 ```text
 loomrealm.renderer-data/1
 ```
 
-任何实现声明支持本 Profile，MUST 完整支持上述三者；不得只支持其中一部分后仍宣称支持 `loomrealm.renderer-data/1`。
+任何实现声明支持本 Profile，MUST完整支持三个 frozen component；不得只支持其中一部分仍宣称 `loomrealm.renderer-data/1`。
+
+```text
+npm package semver
+!=
+Data Profile version
+!=
+child protocol version
+```
 
 ---
 
-## 2. Profile Selection
+## 2. Selection / Authority Boundary
 
-Main 通过 Renderer Control 的逻辑 authority 发布：
+Main 通过 Renderer Control 发布：
 
 ```ts
 interface RendererDataAuthorityV1 {
@@ -57,17 +67,30 @@ interface RendererDataAuthorityV1 {
 }
 ```
 
-`dataProfile` 是完整 Data application stack identity，不是 transport 名称，也不是 credential。
+`dataProfile` 是 complete application-stack identity，不是 transport、endpoint 或 credential。
 
 ```text
 dataProfile != websocket
 dataProfile != messageport
-dataProfile != endpoint/ticket
+dataProfile != endpoint/ticket/Port
 ```
 
-v1 不定义 Data-side hello/version negotiation。Platform Data Connection Broker 只有在 Renderer 与目标 Subsystem 都能承担该 `dataProfile` 时，才可把 carrier 安装为 current。
+Profile不 mint / mutate：
 
-如果当前 authority 的 `dataProfile` 无法实现：
+```text
+Session
+Renderer participant
+subsystemKey
+generation
+dataProfile
+InputTarget
+Frame/Activation
+Render Domain business authority
+```
+
+只有 Platform DataConnectionBroker 完成 paired installation、并且 exact current `S/G/P` authority 仍成立后，该 carrier 才能交给 Profile mechanics 作为 current application carrier。
+
+如果当前 `dataProfile` 无法由两端实现：
 
 ```text
 Data Connection remains absent
@@ -75,13 +98,19 @@ Data Connection remains absent
 
 这本身不等于 Runtime failure，也不改变 Frame authority。
 
-若 Main 要把同一 Subsystem 的 current Data stack 换成不同 Profile，MUST 作为 DataAuthority replacement 处理并使用 fresh generation；不得在同 generation 中静默改变 Profile semantics。
+Profile replacement：
+
+```text
+P1 → P2
+```
+
+MUST 作为 DataAuthority replacement，并使用 fresh generation；不得同 generation 静默换 application semantics。
 
 ---
 
-## 3. Application Unit / Encoding
+## 3. Application Unit / Common Preflight
 
-所有 LoomRealm message-oriented carrier 的本 Profile mapping 固定为：
+每个 current carrier application unit 固定为：
 
 ```text
 one carrier application unit
@@ -91,31 +120,52 @@ one UTF-8 JSON text string
 one child-protocol message object
 ```
 
-因此：
-
-### Desktop WebSocket
+### Hostra / WebSocket
 
 ```text
 one complete WebSocket text message
 =
-one UTF-8 JSON text application unit
+one application unit
 ```
 
-binary frame MUST NOT承载本 Profile application message。
+binary message不得承载本 Profile application traffic。
 
-### PWA MessagePort
+### PWA / MessagePort
 
 ```text
 postMessage(string)
 =
-one UTF-8 JSON text application unit
+one application unit
 ```
 
-PWA MUST NOT直接 postMessage structured application object 来扩大 value model。
+不得直接 `postMessage(object)` 扩大 application value model；Structured Clone / Transferable 只用于 Platform bootstrap/provisioning，例如转移 `MessagePort` 本身。
 
-Structured Clone / Transferable 只可用于 Platform bootstrap，例如转移 `MessagePort` 本身；进入 current Data carrier 后的 application payload 仍是 JSON text。
+### Common hard gate
 
-禁止：
+User Input v1 与 Render Update v1 已共同冻结：
+
+```text
+max application unit UTF-8 bytes      1,048,576
+max JSON container nesting depth      64
+```
+
+因此 Profile receiver MUST在 child semantic handling 前统一执行：
+
+```text
+carrier unit is string
+→ actual UTF-8 bytes <= 1 MiB
+→ Wire parseJsonText
+→ Wire representation validation
+→ JSON container depth <= 64
+→ top-level type discrimination
+→ child exact validation
+```
+
+不得先无界 buffer/parse 后再拒绝。
+
+其余 identifier/count/payload/structural limits继续由对应 frozen child protocol拥有；Profile不建立第二套相互冲突的业务 limits。
+
+禁止 application model：
 
 ```text
 undefined
@@ -128,77 +178,196 @@ JSON-RPC Batch
 multiple application messages in one carrier unit
 ```
 
-每条消息在进入 child-protocol parser 前必须先满足共同 JSON/wire 基础约束；具体 schema/limits 继续由所属 child protocol定义。
+source duplicate JSON members继续遵循 frozen Wire / ECMAScript `JSON.parse` observable semantics；Profile不得增加第二 tokenizer/parser。
 
 ---
 
-## 4. Message Demultiplexing
+## 4. Exact Namespace / Direction Surface
 
-Connection Core v1 本身定义 zero application messages。
-
-Profile v1 的 Data application message 只有两个 namespace：
+Profile v1 只有两个 application namespace：
 
 ```text
 input.*   → User Input v1
 render.*  → Render Update v1
 ```
 
-当前类型族：
+exact message kinds：
 
 ```text
-User Input
+Subsystem → Renderer
     input.interest
-    input.state
-    input.event
-    input.reset
-
-Render Update
     render.domains
     render.snapshot
     render.patch
     render.event
+
+Renderer → Subsystem
+    input.state
+    input.event
+    input.reset
 ```
 
-实现 MUST 由一个 connection-wide Data dispatcher 消费唯一 inbound stream，再按 `type` 分派到 child protocol；不得让 Input/Render 两个独立 reader 竞争消费同一 carrier。
+以下均为 protocol-invalid / Data-fatal：
 
-unknown `type`、跨 namespace schema mismatch 或 malformed JSON 按所属 Profile/child protocol的 fail-closed policy处理；不得猜测或降级解释。
+```text
+unknown top-level type
+known type in wrong role direction
+cross-namespace shape masquerading as another type
+malformed JSON
+child exact-schema/representation/limit invalid
+```
+
+不得猜测、downgrade、ignore 为“未知扩展”。
+
+未来增加第三 namespace、第五 Render message、第五 Input message，或改变方向，都需要新的 child protocol/Profile combination。
 
 ---
 
-## 5. Ordering Boundary
+## 5. One Connection-wide Reader / Dispatcher
 
-Data carrier MUST保持 per-direction application-unit order。
+每个 current Data carrier MUST恰有一个 logical inbound reader：
 
-因此同方向已 emitted 的 Input/Render message 在物理上有明确顺序，但 Profile **不创建跨 child protocol transaction 或 shared revision space**。
+```text
+carrier.messages()
+        ↓
+one reader
+        ↓
+common preflight / parse
+        ↓
+type discrimination
+       / \
+ input.* render.*
+```
+
+Input 与 Render 实现 MUST NOT各自调用 `carrier.messages()` 竞争消费同一 stream。
+
+Dispatcher 固定：
+
+```text
+input.interest/state/event/reset
+    → User Input role handler
+
+render.domains/snapshot/patch/event
+    → Render role handler
+```
+
+Response/RPC correlation 不存在；Data Profile不是 JSON-RPC profile。
+
+child role handler可以维护自己的 authority/state machine，但不能绕过 shared reader 重新读取 carrier。
+
+---
+
+## 6. One Connection-wide Serialized Writer
+
+每个 current Data carrier MUST恰有一个 logical outbound serialized writer。
+
+所有 outbound Input/Render units：
+
+```text
+child message validated/materialized
+→ shared writer queue
+→ carrier.send(string)
+```
+
+要求：
+
+```text
+at most one carrier.send pending from Profile writer at a time
+accepted send order == writer dequeue order
+no adapter/profile-created retry
+no duplicate send
+no verbatim migration to a fresh carrier
+```
+
+此 single writer 的目的仅是稳定 shared carrier ordering 和 bounded terminal behavior；它 **不创建**：
+
+```text
+shared Input/Render revision
+cross-child transaction
+cross-child atomic commit
+cross-child ACK
+cross-child replay cursor
+```
+
+Child protocol自己的 barrier/coalescing规则仍由 child sender mechanics拥有，例如 Input State/Event/Reset barrier、Render Event/authoritative-state barrier。Profile writer不得打乱 child 已决定的 emission order。
+
+---
+
+## 7. Child Semantic Outcome Boundary
+
+Profile负责 representation、namespace/direction、shared dispatch/writer 与 Data-local terminal mechanics。
+
+Child protocol继续拥有自己的 stateful semantics：
+
+```text
+User Input
+    Interest/Activation/current-gate applicability
+    State/Event/Reset semantics
+    stale input drop
+
+Render Update
+    Domain registry/baseline/revision continuity
+    Patch atomicity/one-shot identity
+    stale Event drop
+```
+
+因此 child handler对一个**已通过 Profile/static child validation**的 message有两类显式结果：
+
+```text
+accepted / handled
+    includes well-formed stale/inapplicable drop when child contract says drop
+
+protocol-fatal
+    stateful child semantic violation that frozen child contract says must retire Data
+```
+
+普通 business/presentation handler exception不是“远端协议无效”的证据；不得自动伪造成 protocol-invalid peer input。Role implementation应在 child protocol boundary内按其本地 policy处理。
+
+---
+
+## 8. Ordering Boundary
+
+Data carrier每方向保持 application-unit order。
+
+同方向已 emitted Input/Render message具有物理顺序，但 Profile不赋予跨 child application meaning。
 
 ```text
 User Input ordering/recovery
-    owned by User Input v1
+    → User Input v1 owns
 
 Render ordering/recovery
-    owned by Render Update v1
+    → Render Update v1 owns
 ```
 
-不得因为共享 carrier 引入：
+不得引入：
 
 ```text
 shared Data revision
 Input↔Render ACK join
-cross-domain atomic commit
-cross-domain replay cursor
+cross-domain transaction
+resume-from-revision
+Control/Data barrier RPC
 ```
 
-Renderer Control Connection 与 Data Connection仍然不存在跨连接 total order。
+Renderer Control Connection 与 Data Connection依旧没有 global total order。
 
 ---
 
-## 6. Fresh Carrier Baseline
+## 9. Fresh Current Carrier Boundary
 
-每条 fresh current carrier 都是新的 child-protocol publication boundary。
+每个 newly installed current Connection instance都是 fresh Profile publication boundary。
 
-### User Input
+旧 carrier retired 后：
 
-固定从：
+```text
+stop reader
+stop trusting inbound traffic
+stop accepting new outbound child sends
+pending not-yet-emitted old-carrier units become obsolete
+no replay / no migration onto fresh carrier
+```
+
+### User Input fresh baseline
 
 ```text
 remote Frame Interest Registry = empty
@@ -206,158 +375,152 @@ retained Input State = empty
 Event history = empty
 ```
 
-开始。
+Subsystem如仍有 Desired Interest，重新发布 current full Registry；重新 Effective 的 `.state` 建 fresh baseline；`.event` future-only。
 
-Subsystem 如仍希望 live Frames 接收输入，重新发布 current full Frame Interest Registry；`.state` 重新建立 fresh baseline，`.event` future-only。
-
-### Render Update
-
-fresh carrier：
+### Render fresh baseline
 
 ```text
 first Render message = current render.domains
-→ fresh render.snapshot for each current Domain before Patch/Event
+→ fresh render.snapshot for each current Domain
+→ ordinary Patch/Event
 ```
 
-旧 carrier publication cursor/revision base不能作为 fresh carrier authority。
+same-generation reconnect不得继承 old carrier publication cursor/revision base作为 fresh authority。
 
 ### Independence
 
 ```text
-Input fresh baseline != Render Domain recreation
-Render fresh baseline != Frame recovery
-Data reconnect       != Runtime restart
+fresh Input publication != fresh Frame lifetime
+fresh Render publication != business Domain recreation
+same-generation reconnect != Runtime restart
+fresh Data generation != automatic Activation replacement
 ```
 
 ---
 
-## 7. Connection / Profile Identity
+## 10. Terminal / Failure Boundary
 
-Data Connection Core identity仍是：
-
-```text
-Session
-+ current Renderer participant
-+ subsystemKey
-+ generation
-```
-
-但 current gate 还必须满足：
+Profile application mechanics一旦发生以下任一事实，当前 Profile peer MUST进入 terminal，停止继续处理该 carrier：
 
 ```text
-bound dataProfile == Main current DataAuthority.dataProfile
+carrier closed/lost
+common preflight/JSON/profile namespace violation
+child static schema/representation/limit invalid
+child explicit stateful protocol-fatal result
+writer send terminal/failure
+local profile mechanics fatal
 ```
 
-`dataProfile` 是该 generation 的 immutable profile attribute。Profile mismatch 的 carrier不得成为 current。
+实现 MUST：
+
+```text
+terminal first-wins
+stop accepting ordinary child operations
+settle pending writer work exactly once
+best-effort close current carrier when locally detecting protocol/local fatal
+never parse/send further current traffic after terminal
+```
+
+Profile terminal只说明：
+
+```text
+this Data application binding is unusable
+```
+
+它不得直接提交：
+
+```text
+Runtime terminal
+Frame unwind
+InputTarget mutation
+DataAuthority replacement
+Renderer participant failure
+```
+
+这些属于 Main/Supervisor/Platform更高层 authority/policy。
+
+当前 Connection Core最终把当前 carrier视为 retired；如果 `S/G/P` authority仍 current，Platform可建立 same-generation fresh current carrier。
 
 ---
 
-## 8. Failure Boundary
+## 11. Bounded Backpressure
 
-以下只 retire / prevent current Data Connection，不直接导致 Runtime failure：
+Profile writer queue与 child sender queues MUST bounded。
+
+Profile不规定一个跨 child 的固定 queue capacity，但必须保证：
 
 ```text
-unsupported dataProfile
-Data carrier loss
-Data carrier establishment failure
-same-generation reconnect failure
-Renderer reload
-Data child-protocol connection-local state loss
+no unbounded accumulation
+terminal/authority teardown cannot be permanently blocked by backlog
+no Profile-created retry/replay
+child-prescribed priority/barrier remains enforceable
 ```
 
-Runtime failure仍只由 Runtime Control / Supervisor authority决定。
-
-Child protocol收到 malformed/invalid application message时，至少 MUST停止使用该 current Data carrier；是否还触发 Renderer participant failure等更高层 policy由对应 role/Platform决定，但不得把 Data-plane错误伪造成 Frame RPC commit/recovery。
+Input/Render child contract可以在 emitted 前按各自规则 coalesce/drop；一旦 `carrier.send()` accepted，该 unit属于当前 carrier history，不得 retract/reorder/migrate。
 
 ---
 
-## 9. Limits
-
-本 Profile不建立第二套与 child protocol冲突的业务 limits。
-
-共同要求：
-
-```text
-UTF-8 JSON text
-plain JSON-compatible values
-closed child-protocol schema
-finite/safe-integer semantics where specified
-bounded receiver queues
-```
-
-message size/depth/count的 hard values由 User Input v1 / Render Update v1各自冻结；同一 carrier implementation必须能够在接收前执行适用的统一 hard cap，不得先无界 parse/buffer 后再拒绝。
-
-如果未来需要一个跨所有 Data child protocol统一的更严格 hard cap，应直接修订本 Profile v1 当前规范（在冻结前）或发布明确的新 Profile；不得由 Desktop/PWA各自默默选择不兼容值。
-
----
-
-## 10. Version Evolution
+## 12. Version Evolution
 
 以下任一改变都不能在 `loomrealm.renderer-data/1` 下静默发生：
 
 ```text
-Data Connection protocol version
-User Input protocol version
-Render Update protocol version
+Data Connection version
+User Input version
+Render Update version
 application-unit encoding/mapping
-message namespace ownership
+namespace ownership/direction
+one-reader dispatcher requirement
+one-writer serialization requirement
+fresh-carrier composition
+common terminal/fail-closed behavior
 ```
 
-未来不同组合必须使用明确的新 Data Profile identity。
-
-例如不能让：
-
-```text
-loomrealm.renderer-data/1
-```
-
-在某个部署解释为 `Input v2 + Render v1`，另一个部署仍解释为 `Input v1 + Render v1`。
+不同组合必须使用明确的新 Data Profile identity。
 
 ---
 
-## 11. Conformance
+## 13. Conformance
 
-至少覆盖：
+Normative qualification由 [Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md) `fixtureSetRevision = 1` 固定。
+
+至少证明：
 
 ```text
-data-profile-exact-identity
-profile-binds-connection1-input1-render1
-unsupported-profile-no-current-connection
-profile-change-requires-fresh-generation
-
-websocket-text-application-unit
-messageport-string-application-unit
-structured-clone-does-not-widen-payload
-one-json-message-per-unit
-no-jsonrpc-batch
-
-single-data-dispatcher
-input-type-routes-to-input
-render-type-routes-to-render
+profile-exact-identity-and-version-binding
+one-json-text-unit
+common-1mib-depth64-preflight
+single-reader-dispatcher
+single-serialized-writer
+exact-role-direction
+input-render-type-routing
 unknown-type-fail-closed
-
-fresh-carrier-input-empty-baseline
-fresh-carrier-render-registry-snapshot-baseline
-input-render-state-independent
+child-protocol-fatal-retires-profile-peer
+fresh-carrier-child-baselines
+old-unsent-not-migrated
+terminal-first-wins
+no-profile-retry-replay
 control-data-no-total-order
-
-data-loss-does-not-fail-runtime
-hostra-pwa-same-data-application-trace
+hostra-pwa-same-data-profile-trace
 ```
+
+Executable fixture materialization属于 M8 implementation qualification；不得改变本 Frozen observable contract。
 
 ---
 
-## 12. Final Invariants
+## 14. Final Invariants
 
-1. `loomrealm.renderer-data/1` = Connection v1 + User Input v1 + Render Update v1；
-2. Profile不新增 Data handshake/RPC/ACK；
-3. DataAuthority 使用 `dataProfile` 选择完整 stack；
-4. `dataProfile` 不是 transport/credential；
-5. Profile改变必须伴随 fresh DataAuthority generation；
-6. application unit统一为一条 UTF-8 JSON text string；
-7. WebSocket/MessagePort不得产生不同 application value model；
-8. one connection-wide dispatcher负责 Input/Render demux；
-9. User Input 与 Render保持独立 state/revision/recovery；
-10. fresh carrier分别建立 child-protocol fresh baseline；
-11. Control/Data无跨连接 total order；
-12. Data-plane failure不等于 Runtime/Frame failure。
+1. `loomrealm.renderer-data/1` = Connection1 + Input1 + Render1；
+2. Profile不新增 Data handshake/RPC/ACK/revision；
+3. `dataProfile` 是 complete application stack identity，不是 transport/credential；
+4. Profile change必须 fresh Data generation；
+5. one carrier unit = one UTF-8 JSON text string；
+6. common preflight = 1 MiB + depth 64 + frozen Wire parse/representation；
+7. exactly one connection-wide reader/dispatcher；
+8. exactly one connection-wide serialized writer；
+9. direction fixed：Subsystem 发 Interest+Render，Renderer 发 ordinary Input；
+10. User Input 与 Render保持独立 authority/state/recovery；
+11. fresh current carrier重建两个 child publication baseline，不 replay/migrate旧 carrier traffic；
+12. Data/Profile terminal不等于 Runtime/Frame failure；
+13. Platform Broker拥有 physical candidate/paired installation，Profile mechanics只消费 already-current carrier；
+14. incompatible observable change需要新 Profile/child protocol version。

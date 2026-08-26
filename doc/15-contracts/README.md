@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)、[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)、[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)、[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
 > 最近复核：2026-08-26
 
 契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
@@ -53,10 +53,10 @@ Frame / Call v1                         Active / Normative / Frozen
 
 Main ⇄ Renderer Control v1              Active Design / Draft
     ↓ DataAuthority {S,G,dataProfile}
-Renderer Data Application Profile v1    Active Design / Draft
-    = Data Connection v1
-    + User Input v1
-    + Render Update v1
+Renderer Data Application Profile v1    Active / Normative / Frozen
+    = Data Connection v1 + User Input v1 + Render Update v1
+    = one reader + one serialized writer
+    + Conformance v1 fixtureSetRevision 1
 
 Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
     + Conformance v1 fixtureSetRevision 1
@@ -306,18 +306,31 @@ DataAuthority {subsystemKey,generation,dataProfile}
 
 ## 8. Renderer Data Application Profile v1
 
-[Renderer Data Profile v1](./renderer-data-profile-v1.md)：
+[Renderer Data Profile v1](./renderer-data-profile-v1.md) Frozen：
 
 ```text
 Profile identity = loomrealm.renderer-data/1
 Connection v1 + User Input v1 + Render Update v1
 ```
 
-Data Connection v1、User Input v1、Render Update v1 均已 Frozen。Profile本身仍保持 Draft；剩余 closure 只允许处理 Profile 级 static binding、application-unit mapping、single dispatcher/demux、fresh-carrier composition 与 profile-level conformance，不能反向重新解释三个已 Frozen 的组成契约/协议。
+Profile固定 shared carrier mechanics：
 
-Profile负责 static child binding / one JSON-text carrier unit / one Data dispatcher / fresh-carrier baselines。
+```text
+one JSON-text application unit
+common 1 MiB / depth-64 preflight
+one connection-wide ordered reader/dispatcher
+one connection-wide serialized writer
+exact role direction / input.* + render.* routing
+fresh-carrier child baselines
+terminal first-wins
+no profile-created retry/replay/old-queue migration
+```
+
+共享 writer 只稳定 physical application-unit ordering；不建立 Input/Render shared revision、transaction、ACK 或 replay cursor。
 
 Profile改变必须 fresh Data generation。
+
+Conformance 由 [Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md) `fixtureSetRevision = 1` 固定。
 
 ---
 
@@ -491,6 +504,11 @@ Runtime Control
     connection-local protocol state/correlation/deadlines
     no Main/Subsystem business authority
 
+Data Profile / @loomrealm/data
+    Data Profile shared carrier mechanics
+    static Input/Render wire validation + typed routing
+    no Main/Subsystem/Renderer business authority
+
 Main
     Runtime/Frame/Activation/InputTarget/DataAuthority
     Launch Attempt/bootstrap credential authority
@@ -516,31 +534,37 @@ Implemented Baseline：
 @loomrealm/foundation
 @loomrealm/wire
 @loomrealm/game-package
+@loomrealm/runtime-control
 ```
 
 Current next implementation gate：
 
 ```text
-M3 @loomrealm/runtime-control
-    DESIGN / current contracts implementation-ready
+M4 @loomrealm/subsystem
+    Runtime/Frame author core
+    @loomrealm/subsystem/host Runtime Control consumer qualification
 ```
 
 Then：
 
 ```text
-M4 Subsystem author/host = first real role consumer
-M5 Main = second real role consumer + authority vertical slice
-M6 Hostra Launcher = first real Game Package runtime-product consumer
+M5 Main = second real Runtime Control consumer + authority vertical slice
+M6 Hostra Launcher = first runnable Runtime vertical slice
+M7 Renderer Control
+M8 @loomrealm/data = Frozen Data Profile mechanics implementation
+M9 Desktop DataConnectionBroker
+M10 User Input role managers
+M11 Render role managers
 ...
-M15 PWA Launcher = second Game Package consumer
+M15 PWA Launcher
 ```
 
 Implementation priority：
 
 ```text
-established carrier
-→ bounded Runtime Control mechanics
-→ role-specific peers
-→ Subsystem Host/Main real consumer qualification
-→ RuntimeHosting/Runner integration
+M4/M5/M6 first runnable Runtime vertical slice
+→ M7 authority mirror
+→ M8 shared Data profile mechanics
+→ M9 physical Data provisioning
+→ M10/M11 Input/Render role consumers
 ```
