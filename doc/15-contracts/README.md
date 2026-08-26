@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)  
-> 最近复核：2026-08-21
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)、[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)  
+> 最近复核：2026-08-26
 
 契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
 
@@ -58,7 +58,8 @@ Renderer Data Application Profile v1    Active Design / Draft
     + User Input v1
     + Render Update v1
 
-Renderer ⇄ Subsystem Data Connection v1 Active Design / Draft
+Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
+    + Conformance v1 fixtureSetRevision 1
 User Input v1                           Active / Normative / Frozen
     + Conformance v1 fixtureSetRevision 1
 Render Update v1                        Active / Normative / Frozen
@@ -312,7 +313,7 @@ Profile identity = loomrealm.renderer-data/1
 Connection v1 + User Input v1 + Render Update v1
 ```
 
-其中 User Input v1 与 Render Update v1 已 Frozen；Profile仍保持 Draft，直到 Data Connection/Profile 自身的组合与 current-gate closure 完成。
+Data Connection v1、User Input v1、Render Update v1 均已 Frozen。Profile本身仍保持 Draft；剩余 closure 只允许处理 Profile 级 static binding、application-unit mapping、single dispatcher/demux、fresh-carrier composition 与 profile-level conformance，不能反向重新解释三个已 Frozen 的组成契约/协议。
 
 Profile负责 static child binding / one JSON-text carrier unit / one Data dispatcher / fresh-carrier baselines。
 
@@ -322,7 +323,7 @@ Profile改变必须 fresh Data generation。
 
 ## 9. Data Connection v1
 
-[Data Connection v1](./renderer-subsystem-data-connection-v1.md)：
+[Data Connection v1](./renderer-subsystem-data-connection-v1.md) Frozen：
 
 ```text
 identity = Session + current Renderer + subsystemKey + generation
@@ -340,6 +341,8 @@ Data loss/provisioning failure
     != Frame unwind
     != DataAuthority mutation
 ```
+
+Conformance 由 [Data Connection v1 Conformance Profile](./renderer-subsystem-data-connection-conformance-v1.md) `fixtureSetRevision = 1` 固定。
 
 ---
 
