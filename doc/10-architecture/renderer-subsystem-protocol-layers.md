@@ -24,10 +24,10 @@ Renderer
  │ Platform DataConnectionBroker realizes current authority
  │
  ▼
-Renderer Data Application Profile v1
-├── Data Connection v1  Frozen
-├── User Input v1       Frozen
-└── Render Update v1    Frozen
+Renderer Data Application Profile v1  Frozen
+├── Data Connection v1                 Frozen
+├── User Input v1                      Frozen
+└── Render Update v1                   Frozen
  │
  ▼
 Subsystem
@@ -127,16 +127,19 @@ loomrealm.renderer-data/1
 + Render Update v1
 ```
 
-Profile还固定：
+Profile固定 shared carrier mechanics：
 
 ```text
 one carrier unit = one UTF-8 JSON text string
-one connection-wide Data dispatcher
-input.* / render.* demux
+common 1 MiB / depth-64 preflight
+one connection-wide inbound reader / ordered dispatcher
+one connection-wide outbound serialized writer
+input.* / render.* exact direction + demux
 fresh-carrier child baseline
+terminal first-wins / no retry-replay-migration
 ```
 
-Data Connection v1、User Input v1、Render Update v1 均已 Frozen；Data Profile本身仍保持 Draft，剩余自由度只属于 Profile 级组合、dispatcher/application mapping 与 profile-level conformance closure，不能反向重新解释三个已 Frozen 的组成契约/协议。
+Data Connection v1、User Input v1、Render Update v1 与 Data Profile v1 均已 Frozen。后续实现只能证明这些 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。
 
 Profile改变必须 fresh Data generation。
 
@@ -438,14 +441,15 @@ Provisioning material不是 Data application payload，也不拥有 Input/Render
 
 1. Main Control authority、Subsystem desired state、Renderer local producer/replica、Platform physical topology分离；
 2. DataAuthority使用 `(S,G,dataProfile)`，physical carrier不拥有 generation/profile；
-3. current Profile v1 = Frozen Connection1 + Frozen Input1 + Frozen Render1；Profile composition 自身仍 Draft；
+3. current Profile v1 = Frozen Connection1 + Frozen Input1 + Frozen Render1；Profile composition/mechanics 也已 Frozen；
 4. Data connection per-Subsystem，不 per-Frame/Activation/Domain；
 5. User Input = current Data × Main InputTarget × Interest[F] × Producer；
 6. Desired Interest、Activation input lease、carrier publication state是三个独立 lifetime；
 7. Control/Data无跨连接 total order；Interest-first/Authority-first都安全收敛；
 8. fresh Activation可复用 Desired Interest但不复用 State/Event；
 9. fresh Data carrier重新建立 Input/Render publication baseline；
-10. standard stateful Input遵循 post-transition State-before-Event；
-11. protocol-invalid Input retire Data，well-formed stale Input drop-only；
-12. Frame/Input/Data/Render authority与lifecycle相互不拥有彼此；
-13. Platform provisioning只建立 physical carrier，不拥有 application authority。
+10. Data Profile使用 one ordered reader/dispatcher + one serialized writer，但不创建 shared child revision/transaction；
+11. standard stateful Input遵循 post-transition State-before-Event；
+12. protocol-invalid Input/Render/Profile retire Data，well-formed stale child input/event按各自 contract drop-only；
+13. Frame/Input/Data/Render authority与lifecycle相互不拥有彼此；
+14. Platform provisioning只建立 physical carrier，不拥有 application authority。
