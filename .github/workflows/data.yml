@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   conformance:
@@ -32,14 +32,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - name: Synchronize workspace lockfile
+      - name: Normalize npm lock view
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -47,15 +45,3 @@ jobs:
         run: npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/data
       - name: Verify publishable package surface
         run: npm pack -w @loomrealm/data --dry-run
-      - name: Commit lockfile synchronization
-        if: github.event_name == 'pull_request' && matrix.node == 20
-        shell: bash
-        run: |
-          if git diff --quiet -- package-lock.json; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git commit -m "chore(data): sync workspace lockfile"
-          git push origin HEAD:${{ github.head_ref }}
