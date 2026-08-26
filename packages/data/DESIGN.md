@@ -50,14 +50,6 @@ Platform DataConnectionBroker
     InputMgr RenderMgr
 ```
 
-Profile v1 statically binds：
-
-```text
-Connection 1
-+ Input 1
-+ Render 1
-```
-
 Shared carrier mechanics：
 
 ```text
@@ -228,18 +220,18 @@ export interface DataCurrentBindingV1 {
 }
 ```
 
-Validation：
+`subsystemKey` 的 grammar/limit 属于 upstream logical key/DataAuthority contract；本包不创建第二套 key grammar。它只验证 trusted binding 的基础 representation，并要求 surrounding paired installation 已经把该 logical key 绑定到正确 target Runtime。
+
+本包本地必须验证：
 
 ```text
-subsystemKey = 1..128 UTF-8 bytes
-no Unicode normalization
-case-sensitive
-generation = positive safe integer
-dataProfile exact constant
-carrier must expose MessageCarrier contract
+subsystemKey is string and non-empty
+generation is positive safe integer
+dataProfile is exact "loomrealm.renderer-data/1"
+carrier satisfies MessageCarrier integration contract
 ```
 
-`DataCurrentBindingV1` 不重复 Session/Renderer participant/Runtime instance identity；这些已由 trusted paired installation surrounding binding保证。
+`DataCurrentBindingV1` 不重复 Session/Renderer participant/Runtime instance identity；这些由 trusted paired installation surrounding binding保证。
 
 Constructor/binding validation必须在第一次 `carrier.messages()` / `carrier.send()` 副作用前完成。invalid trusted integration config：
 
@@ -252,53 +244,19 @@ Constructor/binding validation必须在第一次 `carrier.messages()` / `carrier
 
 ## 5. Frozen Wire-model Exports
 
-本包 public wire-model types field-for-field 对应 formal child contracts；不得加 `metadata` / extension bag / platform object。
+Public wire-model types必须 **field-for-field** 对应 Frozen child contracts；不得加 `metadata`、extension bag、platform object，也不得用更宽的 `unknown/string` 类型冒充 closed protocol domain。
 
-User Input exports至少：
-
-```ts
-export type InputChannelV1 = string;
-export type InputStateChannelV1 = string;
-export type InputEventChannelV1 = string;
-
-export interface FrameInputInterestV1 {
-  readonly frameId: string;
-  readonly channels: readonly InputChannelV1[];
-}
-
-export interface InputInterestV1 {
-  readonly type: "input.interest";
-  readonly frames: readonly FrameInputInterestV1[];
-}
-
-export interface InputStateV1 {
-  readonly type: "input.state";
-  readonly frameId: string;
-  readonly activationId: string;
-  readonly channel: InputStateChannelV1;
-  readonly payload: Readonly<Record<string, unknown>>;
-}
-
-export interface InputEventV1 {
-  readonly type: "input.event";
-  readonly frameId: string;
-  readonly activationId: string;
-  readonly channel: InputEventChannelV1;
-  readonly payload: Readonly<Record<string, unknown>>;
-}
-
-export interface InputResetV1 {
-  readonly type: "input.reset";
-  readonly frameId: string;
-  readonly activationId: string;
-}
-```
-
-实际 TypeScript implementation MUST使用 `@loomrealm/wire` 的 JSON-compatible object/value types，而不是让 `unknown` 扩大 wire value model；上面只简化展示 public shape。
-
-同时导出 Frozen standard payload types：
+User Input exports：
 
 ```text
+InputChannelV1
+InputStateChannelV1
+InputEventChannelV1
+FrameInputInterestV1
+InputInterestV1
+InputStateV1
+InputEventV1
+InputResetV1
 KeyboardCodeV1
 KeyboardStatePayloadV1
 KeyboardEventPayloadV1
@@ -316,7 +274,7 @@ GamepadEventPayloadV1
 UserInputMessageV1
 ```
 
-Render exports至少：
+Render exports：
 
 ```text
 RenderDomainsV1
@@ -334,7 +292,11 @@ JsonObjectDeltaV1
 RenderUpdateMessageV1
 ```
 
-具体 field、optional member、enum、hard limit 的 normative source 是 Frozen User Input v1 / Render Update v1；package tests必须逐字段锁定，无 compatibility alias。
+Exact field types使用 `@loomrealm/wire` 的 `JsonValue` / `JsonObject` 等 frozen JSON-compatible representation primitive。Channel grammar、standard payload finite set、optional member、numeric/count/UTF-8 limits继续以 User Input v1 / Render Update v1 为唯一 normative source。
+
+TypeScript 类型不能静态表达的 grammar/byte/depth constraints必须由 runtime validator强制；不得因为 TS type较宽就扩大 wire acceptance。
+
+Package tests必须逐字段锁定 exact closed schema，无 compatibility alias。
 
 ---
 
@@ -505,7 +467,7 @@ export function createRendererDataPeer(
 ): RendererDataPeer;
 ```
 
-Renderer没有 Render outbound API；Subsystem没有 ordinary Input outbound API以外的 Renderer-only direction。
+Renderer没有 Render outbound API；Subsystem没有 Renderer-only ordinary Input send surface。
 
 ---
 
