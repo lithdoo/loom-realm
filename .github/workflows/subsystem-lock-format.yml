@@ -1,0 +1,36 @@
+name: Subsystem lock format fix
+
+on:
+  push:
+    branches:
+      - feat/subsystem-m4
+    paths:
+      - ".github/workflows/subsystem-lock-format.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/subsystem-m4
+      - name: Fix lockfile formatting only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("package-lock.json")
+          text = path.read_text()
+          text = text.replace('      ]\n,      "libc": [', '      ],\n      "libc": [')
+          path.write_text(text)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(subsystem): normalize lockfile formatting"
+          git push origin HEAD:feat/subsystem-m4
