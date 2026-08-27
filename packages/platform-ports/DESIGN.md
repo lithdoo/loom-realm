@@ -365,7 +365,7 @@ subsystem business SDK
 当前 package-level CI 最低要求：
 
 ```text
-npm run build -w @loomrealm/platform-ports
+npm run build -w @loomrealm/foundation -w @loomrealm/platform-ports
 npm pack -w @loomrealm/platform-ports --dry-run
 ```
 
