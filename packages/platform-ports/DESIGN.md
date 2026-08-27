@@ -78,7 +78,7 @@ Platform package boundary != process boundary
 
 一个 public port 必须同时满足：
 
-1. 已有真实 platform-neutral Core consumer；
+1. 已有冻结的 current-milestone platform-neutral Core consumer use-site，且 exact shape 已被该 milestone implementation gate 证明需要；真实 consumer qualification 必须在对应 milestone closure 前完成；
 2. Hostra/PWA 物理实现可不同但 abstract semantics 相同；
 3. 表达 capability/fact，而不是 Core authority；
 4. 不是 protocol mechanics 的重复 facade；
@@ -357,7 +357,7 @@ subsystem business SDK
 4. no runtime implementation
 5. Node 20 + 24 build
 6. npm pack --dry-run
-7. M4 subsystem/host consumes them
+7. M4 subsystem/host real consumer qualification pending
 ```
 
 本包是 type-contract package，不 fake Hostra/PWA runtime conformance。真实替换性在 consumer/platform integration 验证：不同 physical implementation 必须满足同一 abstract port semantics。
@@ -404,6 +404,7 @@ future subpath layout
     Core Boundary Frozen
     M4 Port Slice Frozen
     Implemented Baseline
+    M4 Subsystem real consumer qualification pending
 ```
 
 仍不得表述：

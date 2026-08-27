@@ -6,7 +6,7 @@
 > 主要定义：primitive、document/contract capability、role、platform launch integration、technical adapter/Runner integration、composition root 与 business package 的拆分原则  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[模块设计目录](../20-modules/README.md)  
 > 被实现：[仓库与目录方案](./repository-layout.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-08-27
 
 本文是 package/publish boundary 的主要事实源；repository layout只实现本文，不反向定义它。
 
@@ -89,7 +89,7 @@ Wire source parsing follows its frozen JSON semantics；domain package MUST NOT 
 
 ---
 
-## 3. Document / Contract Capability Packages
+## 3. Contract Capability Packages
 
 ```text
 @loomrealm/game-package
@@ -97,6 +97,7 @@ Wire source parsing follows its frozen JSON semantics；domain package MUST NOT 
 @loomrealm/renderer-control
 @loomrealm/data
 @loomrealm/content
+@loomrealm/platform-ports
 ```
 
 ### `game-package`
@@ -172,6 +173,27 @@ Render Update v1
 
 Profile composition does not merge child identity/lifecycle/authority。
 
+### `platform-ports`
+
+Position：platform-neutral Core ↔ Platform capability contract boundary；它定义 Core 需要平台提供的窄 capability/fact，不拥有 Core authority、role policy、protocol mechanics 或 concrete Hostra/PWA implementation。
+
+M4 frozen root surface exactly：
+
+```text
+DeadlineScheduler
+RuntimeControlBinding
+```
+
+Runtime dependency exactly：
+
+```text
+@loomrealm/foundation
+```
+
+`DeadlineScheduler` 与 Runtime Control scheduler structural-compatible，但 `platform-ports` MUST NOT依赖 `@loomrealm/runtime-control`。`RuntimeControlBinding` 是 one-Launch-Attempt / single-use / no-reconnect establishment capability。
+
+M5+ Main/Renderer/Data/Content ports 只在对应 real consumer closure 时增长；不得提前建立万能 `Platform` object、service locator 或 future port inventory。
+
 ---
 
 ## 4. Platform-neutral Role Packages
@@ -235,12 +257,18 @@ Trusted integration：
 ```text
 @loomrealm/subsystem/host
     runSubsystem
-    RuntimeControlBinding
-    SubsystemDataBinding
     SubsystemLaunchContext
+    SubsystemRuntimeControlPolicy
 ```
 
-`@loomrealm/subsystem/host` is the first real Subsystem-side consumer of Runtime Control typed peer；it maps protocol mutation-pending state into ordinary-input gating/business control flow。
+M4 Platform capability contract 由 `@loomrealm/platform-ports` 唯一拥有：
+
+```text
+DeadlineScheduler
+RuntimeControlBinding
+```
+
+`@loomrealm/subsystem/host` consumes these ports and is the first real Subsystem-side consumer of Runtime Control typed peer；it owns role-local deadline policy and maps protocol mutation-pending state into ordinary-input gating/business control flow。`SubsystemDataBinding` exact Platform contract deferred to M8；M4 MUST NOT预定义 fake Data port。
 
 Business package MUST NOT depend on `/host`、Game Package、Launcher、Runtime Control directly。
 
@@ -251,8 +279,8 @@ Package responsibility 与 implementation readiness 分离：
 | Subsystem responsibility | Primary capability dependency | Phase 1 implementation gate |
 | --- | --- | --- |
 | Definition/lifecycle + Frame/Outcome | Runtime Control / Frame v1 | M4 |
-| Host Runtime Control role mapping | Runtime Control v1 | M4 |
-| DataPlane + `SubsystemDataBinding` application integration | Renderer Data Profile | M8 |
+| Host Runtime Control role mapping | `@loomrealm/platform-ports` M4 slice + Runtime Control v1 | M4 |
+| DataPlane + future Subsystem Data binding application integration | Renderer Data Profile + M8 Platform port closure | M8 |
 | `InputListener` / InputManager | User Input v1 | M10 |
 | `RenderDomain` / RenderManager | Render Update v1 | M11 |
 | `ContentClient` author mapping | Content capability/contracts | M12 |
@@ -480,9 +508,10 @@ only one app glue consumes
 
 Thus：
 
-- Runtime Control scheduler remains local M3 port while only Runtime Control needs it；
-- `SubsystemDataBinding` may live in subsystem host surface；
-- `RendererDataBinding` may live in renderer integration surface；
+- M4 `DeadlineScheduler` / `RuntimeControlBinding` live in `@loomrealm/platform-ports` because Core consumes them while Hostra/PWA may realize them differently；
+- Runtime Control keeps its own structural scheduler type and does not become a dependency of `platform-ports`；
+- `SubsystemDataBinding` exact Platform contract is deferred to M8 and is not an M4 host-owned placeholder；
+- `RendererDataBinding` exact placement waits for its real consumer closure；
 - `DataConnectionBroker` stays outside subsystem；
 - RuntimeHosting concrete implementation lives in matching launcher；
 - Main only sees abstract RuntimeHosting port；
@@ -495,8 +524,10 @@ Thus：
 完整图必须同时显示 capability package 与 role package 的多分支关系：
 
 ```text
-foundation ───────────────┐
-                          ↓
+foundation ─────→ platform-ports ─────→ main / subsystem-host
+ │
+ ├───────────────────────┐
+ │                       ↓
 wire ─────────────→ runtime-control
  │                        ↓
  │                main / subsystem-host
@@ -521,7 +552,7 @@ main
 
 subsystem
     author root → data/content/foundation as exposed by SDK
-    host        → runtime-control + role-local integrations
+    host        → platform-ports + runtime-control + role-local policy/integrations
 
 renderer
     → renderer-control / data / content / foundation as required
@@ -556,6 +587,7 @@ Demand-driven：
 ```text
 packages/
 ├── foundation/
+├── platform-ports/
 ├── wire/
 ├── game-package/
 ├── game-launcher-hostra/
