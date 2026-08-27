@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：M0..M16 实现顺序、Game/Launcher/Main bootstrap boundary、Runtime Control mechanics、Definition Module/Runner、SDK outcome/control-flow、Renderer Data、Platform provisioning、Desktop/PWA composition 与关闭条件  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-08-27
 
 核心顺序：
 
@@ -317,16 +317,25 @@ ContentClient       → M12
 
 ### Host Runtime slice
 
-Implement：
+M4 Platform capability contract baseline（已由 `@loomrealm/platform-ports` package-local implementation 提供，real consumer qualification 在本 milestone 关闭）：
 
 ```text
-runSubsystem
-RuntimeControlBinding using SubsystemRuntimeControlPeer
-SubsystemLaunchContext
-Runtime Control role mapping
+@loomrealm/platform-ports
+    DeadlineScheduler
+    RuntimeControlBinding
 ```
 
-`SubsystemDataBinding` 可作为完整 host boundary 的 port shape 被定义/保留，但 M4 MUST NOT通过 fake DataPlane/Input/Render behavior宣称其 application semantics 已关闭；真正 Data application integration从 M8开始。
+Implement Subsystem host consumer：
+
+```text
+@loomrealm/subsystem/host
+    runSubsystem
+    SubsystemLaunchContext
+    SubsystemRuntimeControlPolicy
+    Runtime Control role mapping using SubsystemRuntimeControlPeer
+```
+
+`DeadlineScheduler` 是 Platform capability；`helloDeadlineMs` / `frameDeadlineMs` 是 Subsystem Host role policy。M4 MUST NOT定义或保留 fake `SubsystemDataBinding` placeholder；其 exact Platform contract 与真实 Data application integration统一在 M8关闭。
 
 ### Runtime Control consumer qualification
 
@@ -345,6 +354,7 @@ Other closure：initialize creates Context only；activate starts handler once�
 M4完成后允许表述：
 
 ```text
+Platform Ports M4 contract real consumer qualified
 Subsystem Runtime/Frame Core Implemented
 Subsystem Host Runtime Control consumer qualified
 ```

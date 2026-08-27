@@ -294,8 +294,10 @@ Runtime bootstrap token、Runner bootstrap、Data ticket/Port、Content credenti
 ## 分包与依赖
 
 ```text
-@loomrealm/foundation ────────┐
-                              ↓
+@loomrealm/foundation ─────→ @loomrealm/platform-ports ─────→ Main / Subsystem Host
+       │
+       ├──────────────────────┐
+       │                      ↓
 @loomrealm/wire ───────→ @loomrealm/runtime-control
        │                      ↓
        │             Main / Subsystem Host
@@ -314,7 +316,7 @@ Role graph：
     → runtime-control / renderer-control / wire as required
 
 @loomrealm/subsystem/host
-    → runtime-control + role-local integrations
+    → platform-ports + runtime-control + role-local policy/integrations
 
 @loomrealm/subsystem
     → author-facing data/content/foundation capabilities
@@ -352,6 +354,11 @@ business → game-package / launcher / runtime-control
     Implemented Baseline / Core Contract Frozen
     M3 local closure complete
     M4/M5 real role-consumer qualification pending
+
+@loomrealm/platform-ports
+    Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen
+    M4 Subsystem real consumer qualification pending
+    M5+ exact ports Evolving
 
 @loomrealm/data
     Package-local Core Baseline Implemented

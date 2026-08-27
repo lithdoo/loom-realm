@@ -1,9 +1,9 @@
 # `@loomrealm/platform-ports` 设计
 
-> 状态：**Implementation Ready / Core Boundary Frozen / M4 Slice Frozen**  
-> 阶段：M4 前 Platform Capability Contract foundation  
+> 状态：**Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen**  
+> 阶段：M4 Platform Capability Contract baseline  
 > 最近复核：2026-08-27  
-> 当前代码：空公共 API；首个 implementation PR 只落地本文冻结的 M4 symbols。  
+> 当前代码：M4 public slice 已落地；root export 仅 `DeadlineScheduler` / `RuntimeControlBinding`。  
 > 上层事实源：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[运行承载系统](../../doc/10-architecture/runtime-hosting-system.md)、[运行时启动系统](../../doc/10-architecture/runtime-bootstrap-system.md)  
 > 首个消费者：`@loomrealm/subsystem/host`（M4）；M5+ exact ports 尚未冻结。
 
@@ -78,7 +78,7 @@ Platform package boundary != process boundary
 
 一个 public port 必须同时满足：
 
-1. 已有真实 platform-neutral Core consumer；
+1. 已有冻结的 current-milestone platform-neutral Core consumer use-site，且 exact shape 已被该 milestone implementation gate 证明需要；真实 consumer qualification 必须在对应 milestone closure 前完成；
 2. Hostra/PWA 物理实现可不同但 abstract semantics 相同；
 3. 表达 capability/fact，而不是 Core authority；
 4. 不是 protocol mechanics 的重复 facade；
@@ -348,7 +348,7 @@ subsystem business SDK
 
 ## 8. Implementation / CI
 
-本文冻结后，首个 implementation PR 是机械落地：
+当前 M4 baseline 已按冻结 contract 机械落地：
 
 ```text
 1. package.json add @loomrealm/foundation dependency
@@ -357,7 +357,7 @@ subsystem business SDK
 4. no runtime implementation
 5. Node 20 + 24 build
 6. npm pack --dry-run
-7. M4 subsystem/host consumes them
+7. M4 subsystem/host real consumer qualification pending
 ```
 
 本包是 type-contract package，不 fake Hostra/PWA runtime conformance。真实替换性在 consumer/platform integration 验证：不同 physical implementation 必须满足同一 abstract port semantics。
@@ -365,7 +365,7 @@ subsystem business SDK
 当前 package-level CI 最低要求：
 
 ```text
-npm run build -w @loomrealm/platform-ports
+npm run build -w @loomrealm/foundation -w @loomrealm/platform-ports
 npm pack -w @loomrealm/platform-ports --dry-run
 ```
 
@@ -403,7 +403,8 @@ future subpath layout
 @loomrealm/platform-ports
     Core Boundary Frozen
     M4 Port Slice Frozen
-    Implementation Ready
+    Implemented Baseline
+    M4 Subsystem real consumer qualification pending
 ```
 
 仍不得表述：

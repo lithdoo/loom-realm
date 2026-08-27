@@ -5,7 +5,7 @@
 > 稳定程度：Experimental  
 > 主要定义：monorepo 物理目录、Game Package、Runtime Control、Game/Platform launcher packages、Main-facing bootstrap surface、Subsystem author/host、Runner/provisioning与测试布局  
 > 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
-> 最近复核：2026-08-21
+> 最近复核：2026-08-27
 
 公开 package 职责以 package architecture为权威；本文只回答“代码放哪里”。
 
@@ -16,6 +16,7 @@
 ```text
 packages/
 ├── foundation/
+├── platform-ports/
 ├── wire/
 ├── game-package/
 ├── game-launcher-hostra/
@@ -59,6 +60,9 @@ tests/
 low-level
     foundation / wire
 
+platform capability contract
+    platform-ports
+
 document/contract capability
     game-package / runtime-control / renderer-control / data / content
 
@@ -74,6 +78,28 @@ technical adapter
 business
     map / compatibility packages
 ```
+
+### `packages/platform-ports`
+
+M4 current layout：
+
+```text
+packages/platform-ports/
+├── DESIGN.md
+├── package.json
+├── tsconfig.json
+└── src/
+    └── index.ts
+```
+
+M4 root export exactly：
+
+```text
+DeadlineScheduler
+RuntimeControlBinding
+```
+
+Runtime dependency exactly `@loomrealm/foundation`。它是 Platform capability contract owner，不包含 Hostra/PWA implementation、role policy、protocol mechanics 或万能 Platform object。
 
 ---
 
@@ -191,7 +217,7 @@ Main authority implementation
 Subsystem author API
 ```
 
-`RuntimeControlScheduler` remains a package-local injected port；no generic Foundation Clock until independent reuse exists。
+`RuntimeControlScheduler` remains Runtime Control-owned；`@loomrealm/platform-ports` separately exposes the structural-compatible M4 `DeadlineScheduler` for Core↔Platform injection。No generic Foundation Clock。
 
 ---
 
@@ -298,8 +324,8 @@ packages/subsystem/
 │   ├── content/
 │   ├── host/
 │   │   ├── run-subsystem.ts
-│   │   ├── runtime-control-binding.ts
-│   │   └── platform-ports.ts
+│   │   ├── runtime-control-plane.ts
+│   │   └── runtime-policy.ts
 │   └── internal/
 └── test/
 ```
@@ -314,7 +340,7 @@ Exports：
     trusted Runner/integration API
 ```
 
-M4 `runtime-control-binding.ts` is the first real Subsystem-side consumer of `SubsystemRuntimeControlPeer`；it maps protocol call/return pending state to ordinary-input gating and maps typed outcomes into Frame business control flow。
+M4 host implementation imports `DeadlineScheduler` / `RuntimeControlBinding` from `@loomrealm/platform-ports` and consumes `SubsystemRuntimeControlPeer` internally；Subsystem owns only host orchestration / role policy / protocol-to-business mapping，不在本地重复定义 Platform port contract。
 
 Business package never imports `/host`、Runtime Control、Game Package、Launcher。
 
@@ -378,23 +404,29 @@ Do not pre-create universal `subsystem-node/subsystem-worker` without real indep
 
 ## 12. Role-facing Port Placement
 
-```text
-packages/main/src/platform/
-packages/subsystem/src/host/platform-ports.ts
-packages/renderer/src/platform/
-```
-
-Typical：
+Shared Core↔Platform capability contracts live only in：
 
 ```text
-RuntimeHosting
-RendererDataBinding
-SubsystemDataBinding
+packages/platform-ports/src/index.ts
 ```
 
-Runtime Control scheduler/deadlines are protocol-mechanics constructor inputs, not Main application authority or Platform launch manifest fields。
+Role packages contain consumer-side orchestration/policy, not duplicate Platform contract owners：
 
-System-level `DataConnectionBroker` stays composition/integration unless real shared capability emerges。
+```text
+packages/main/src/platform/       # M5+ consumer-side integration as frozen
+packages/subsystem/src/host/      # M4 consumer-side orchestration/policy
+packages/renderer/src/platform/   # future consumer-side integration as frozen
+```
+
+M4 frozen：
+
+```text
+platform-ports owns DeadlineScheduler / RuntimeControlBinding
+subsystem/host consumes them
+subsystem/host owns SubsystemRuntimeControlPolicy
+```
+
+Future `RuntimeHosting` / Renderer Data binding / Subsystem Data binding exact shapes are added only at their real milestone closure；M4 MUST NOT create role-local placeholder contracts。System-level `DataConnectionBroker` stays composition/integration unless a later frozen Platform port requires a shared contract。
 
 ---
 

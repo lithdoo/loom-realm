@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "packages/platform-ports/**"
+      - "packages/foundation/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - "packages/platform-ports/**"
+      - "packages/foundation/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -42,8 +44,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Build Platform Ports
-        run: npm run build -w @loomrealm/platform-ports
+      - name: Build Foundation and Platform Ports
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/platform-ports
 
       - name: Verify publishable package surface
         run: npm pack -w @loomrealm/platform-ports --dry-run
