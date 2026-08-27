@@ -1,0 +1,39 @@
+name: Finalize platform-ports doc once
+on:
+  push:
+    branches: [feat/platform-ports-m4]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/platform-ports-m4
+          fetch-depth: 0
+      - name: Sync implementation status and remove this workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('packages/platform-ports/DESIGN.md')
+          s = p.read_text()
+          replacements = {
+            '> 状态：**Implementation Ready / Core Boundary Frozen / M4 Slice Frozen**  ': '> 状态：**Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen**  ',
+            '> 阶段：M4 前 Platform Capability Contract foundation  ': '> 阶段：M4 Platform Capability Contract baseline  ',
+            '> 当前代码：空公共 API；首个 implementation PR 只落地本文冻结的 M4 symbols。  ': '> 当前代码：M4 public slice 已落地；root export 仅 `DeadlineScheduler` / `RuntimeControlBinding`。  ',
+            '本文冻结后，首个 implementation PR 是机械落地：': '当前 M4 baseline 已按冻结 contract 机械落地：',
+            '    Implementation Ready\n': '    Implemented Baseline\n',
+          }
+          for old, new in replacements.items():
+            if old not in s:
+              raise SystemExit(f'missing expected text: {old!r}')
+            s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          git rm .github/workflows/finalize-platform-ports-doc-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/platform-ports/DESIGN.md
+          git commit -m 'docs(platform-ports): mark M4 contract baseline implemented'
+          git push origin HEAD:feat/platform-ports-m4
