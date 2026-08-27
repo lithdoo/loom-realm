@@ -1,9 +1,9 @@
 # `@loomrealm/platform-ports` 设计
 
-> 状态：**Implementation Ready / Core Boundary Frozen / M4 Slice Frozen**  
-> 阶段：M4 前 Platform Capability Contract foundation  
+> 状态：**Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen**  
+> 阶段：M4 Platform Capability Contract baseline  
 > 最近复核：2026-08-27  
-> 当前代码：空公共 API；首个 implementation PR 只落地本文冻结的 M4 symbols。  
+> 当前代码：M4 public slice 已落地；root export 仅 `DeadlineScheduler` / `RuntimeControlBinding`。  
 > 上层事实源：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[运行承载系统](../../doc/10-architecture/runtime-hosting-system.md)、[运行时启动系统](../../doc/10-architecture/runtime-bootstrap-system.md)  
 > 首个消费者：`@loomrealm/subsystem/host`（M4）；M5+ exact ports 尚未冻结。
 
@@ -348,7 +348,7 @@ subsystem business SDK
 
 ## 8. Implementation / CI
 
-本文冻结后，首个 implementation PR 是机械落地：
+当前 M4 baseline 已按冻结 contract 机械落地：
 
 ```text
 1. package.json add @loomrealm/foundation dependency
@@ -403,7 +403,7 @@ future subpath layout
 @loomrealm/platform-ports
     Core Boundary Frozen
     M4 Port Slice Frozen
-    Implementation Ready
+    Implemented Baseline
 ```
 
 仍不得表述：
