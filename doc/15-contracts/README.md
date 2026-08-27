@@ -535,6 +535,9 @@ Implemented Baseline：
 @loomrealm/wire
 @loomrealm/game-package
 @loomrealm/runtime-control
+@loomrealm/data
+    Package-local Core Baseline Implemented
+    != M8 milestone closed
 ```
 
 Current next implementation gate：
@@ -551,7 +554,8 @@ Then：
 M5 Main = second real Runtime Control consumer + authority vertical slice
 M6 Hostra Launcher = first runnable Runtime vertical slice
 M7 Renderer Control
-M8 @loomrealm/data = Frozen Data Profile mechanics implementation
+M8 integration of existing Data baseline
+    Subsystem DataPlane + Renderer binding/current authority
 M9 Desktop DataConnectionBroker
 M10 User Input role managers
 M11 Render role managers
@@ -564,7 +568,7 @@ Implementation priority：
 ```text
 M4/M5/M6 first runnable Runtime vertical slice
 → M7 authority mirror
-→ M8 shared Data profile mechanics
+→ M8 shared Data profile mechanics integration
 → M9 physical Data provisioning
 → M10/M11 Input/Render role consumers
 ```

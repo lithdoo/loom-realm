@@ -25,6 +25,9 @@
 ```text
 Foundation / Wire              Implemented Baseline
 Game Package v1                Implemented Baseline / M2 closed
+Runtime Control                Implemented Baseline / M3 closed
+@loomrealm/data                Package-local Core Baseline Implemented
+                               != M8 milestone closed
 
 ADR 0020
     matching Platform Launcher consumes Game Entry
@@ -48,7 +51,9 @@ Frame / Call v1
 Current next implementation gate：
 
 ```text
-M3 @loomrealm/runtime-control
+M4 @loomrealm/subsystem
+    Runtime/Frame author core
+    @loomrealm/subsystem/host Runtime Control consumer qualification
 ```
 
 ---

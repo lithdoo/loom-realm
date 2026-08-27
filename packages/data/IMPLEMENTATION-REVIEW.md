@@ -1,10 +1,24 @@
 # `@loomrealm/data` 实现评审：简洁、优雅、闭环
 
-> 状态：Archived Review / Actionable  
+> 状态：Archived Review / Step A Implemented  
 > 评审基线：`main` / PR #21 merge `03acf4cdaab7e67a5b5f80a390ea361820a765ad`  
 > 评审日期：2026-08-26  
+> 落地：`fix/data-implementation-review-closure` / 2026-08-26  
 > 范围：`@loomrealm/data` package-local M8 core baseline；不评判 M10 InputManager / M11 RenderManager 的业务状态机  
 > 目标：确保实现复杂度与问题规模匹配，保持一处事实源、直接可读、可证明，并避免把尚无真实 consumer 需求的复杂度提前固化。
+
+Step A 已关闭：
+
+```text
+P0 emitted send / terminal race
+P1 input.interest canonical ordering
+P1 KeyboardCode single source
+P1 validator readability split
+package-local mechanics tests
+status wording / repo-wide npm lockfile policy
+```
+
+Data package 进入 maintenance/fix-only。完整 M8 仍待真实 Subsystem/Renderer consumer。
 
 ---
 

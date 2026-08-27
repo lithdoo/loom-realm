@@ -1,7 +1,7 @@
 # `@loomrealm/data` 设计
 
-> 状态：Implementation Ready / Core Package Contract Frozen  
-> 阶段：M8 Renderer Data Profile + Data Connection Core preimplementation closure  
+> 状态：Package-local Core Baseline Implemented / Maintenance  
+> 阶段：M8 package-local core baseline / maintenance; real M8 role integration pending  
 > 最近复核：2026-08-26  
 > 目标：把 Frozen Data Connection v1、User Input v1、Render Update v1 与 Renderer Data Profile v1 落成 transport-independent、role-typed、可测试的 shared Data application mechanics；不建立 physical connection，不拥有 Main/Subsystem/Renderer application authority。  
 > 正式 Profile：[Renderer Data Application Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
@@ -10,6 +10,7 @@
 > Input：[User Input v1](../../doc/15-contracts/user-input-v1.md)  
 > Render：[Render Update v1](../../doc/15-contracts/render-update-v1.md)  
 > 首次实现前收口：[ADR 0025](../../doc/decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
+> 实现评审：[IMPLEMENTATION-REVIEW.md](./IMPLEMENTATION-REVIEW.md)  
 > 实施：[第一阶段交付计划](../../doc/30-implementation/phase-1-delivery-plan.md)
 
 核心原则：
@@ -188,13 +189,13 @@ source layout MAY内部拆分：
 
 ```text
 src/
-├── profile.ts
+├── validation-common.ts
 ├── input-codec.ts
 ├── render-codec.ts
-├── reader.ts
-├── writer.ts
-├── subsystem-peer.ts
-├── renderer-peer.ts
+├── profile-codec.ts
+├── runtime.ts
+├── peers.ts
+├── model.ts
 └── index.ts
 ```
 
@@ -795,9 +796,10 @@ Stage I  M8 Subsystem/Renderer real binding consumers
 M8 package-local closure完成后允许表述：
 
 ```text
-@loomrealm/data Implemented Baseline / Data Profile Core Frozen
-Renderer Data Profile mechanics qualified
+@loomrealm/data Package-local Core Baseline Implemented
 ```
+
+该声明不等于 M8 milestone closed，也不等于 full Profile conformance。
 
 M8不得表述：
 

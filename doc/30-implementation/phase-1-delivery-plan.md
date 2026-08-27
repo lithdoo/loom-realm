@@ -430,23 +430,27 @@ Close atomic snapshot/revision/InputTarget/no physical Data/executable material/
 
 ## M8：Renderer Data Profile + Data Connection Core
 
-Implement：
+`@loomrealm/data` package-local baseline MAY land early. That does not close M8.
 
 ```text
-@loomrealm/data
-    Connection1
-    Input1 + Render1 profile composition
-    one Data dispatcher
-    S-G-P current gate
+M8 package-local baseline implemented early
+!= M8 milestone closed
+```
 
+M8 still requires real：
+
+```text
 @loomrealm/subsystem
     DataPlane integration slice
 
 @loomrealm/subsystem/host
     SubsystemDataBinding behavior qualification
+
+@loomrealm/renderer
+    Renderer Data binding / current authority integration
 ```
 
-M8 establishes the shared Data application plane needed by later Input/Render managers；它继续实现同一个 Subsystem role package，不创建第二个 Subsystem runtime package。
+M8 establishes the shared Data application plane needed by later Input/Render managers；它继续实现同一个 Subsystem role package，不创建第二个 Subsystem runtime package。Data package 在 M4/M5/M6/M7 期间保持 maintenance/fix-only。
 
 ---
 

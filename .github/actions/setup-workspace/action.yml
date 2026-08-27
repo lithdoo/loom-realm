@@ -1,0 +1,30 @@
+name: Setup Node and lockfile install
+description: Enable the repo-pinned npm via Corepack and install from package-lock.json.
+inputs:
+  node-version:
+    required: true
+    description: Node.js version to install.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+    - name: Enable Corepack npm shim
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      run: corepack enable npm
+    - name: Verify npm version
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      run: test "$(npm --version)" = "10.9.2"
+    - name: Install dependencies
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      run: npm ci --no-audit --no-fund
