@@ -2,9 +2,10 @@
 
 > 状态：Draft  
 > 阶段：Package boundary / author API / host integration / implementation planning  
-> 最近复核：2026-08-21  
+> 最近复核：2026-08-27  
 > 目标：为 LoomRealm 业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author SDK，并定义 Platform Runner 可消费的最小 host integration surface。  
 > 上层架构：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[Subsystem 模型](../../doc/10-architecture/subsystem-model.md)  
+> 平台能力契约：[`@loomrealm/platform-ports`](../platform-ports/DESIGN.md)  
 > 正式语义：[Runtime Control Profile v1](../../doc/15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
 > 核心原则：**业务定义只表达业务；SDK 把正式协议映射成不可绕过的 capability/control-flow；Platform Runner 注入 role-local ports；Game/Platform launch config、physical carrier 与 capability lifetime分离。**
 
@@ -29,7 +30,7 @@ Package Scope
 | Capability slice | Primary contract/capability dependency | Current implementation meaning | Phase 1 gate |
 | --- | --- | --- | --- |
 | Definition/lifecycle + Frame/Outcome | Runtime Control Profile v1 + Frame/Call v1 | Runtime/Frame core may be implemented and qualified | M4 |
-| Host Runtime Control mapping | `@loomrealm/runtime-control` typed Subsystem peer | first real Subsystem-side Runtime Control consumer | M4 |
+| Host Runtime Control mapping | `@loomrealm/platform-ports` M4 slice + `@loomrealm/runtime-control` typed Subsystem peer | first real Subsystem-side Platform Port / Runtime Control consumer | M4 |
 | DataPlane + `SubsystemDataBinding` application integration | Renderer Data Profile v1 | waits for Data application profile/core implementation | M8 |
 | `InputListener` + InputManager | User Input v1 | author/input behavior closes with Input protocol implementation | M10 |
 | `RenderDomain` + RenderManager | Render Update v1 | author/render behavior closes with Render protocol implementation | M11 |
@@ -66,6 +67,8 @@ Platform LaunchPlan
         ▼
 Host-owned Node/Worker Runner
         │
+        ├── implements @loomrealm/platform-ports
+        │
         ▼
 @loomrealm/subsystem/host   integration surface
         │
@@ -82,6 +85,7 @@ Business Definition
 
 ```text
 @loomrealm/runtime-control
+@loomrealm/platform-ports
 @loomrealm/wire
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
@@ -94,6 +98,8 @@ Data generation/profile
 module physical/logical path
 Platform Launch Manifest
 ```
+
+`@loomrealm/subsystem/host` 是 trusted integration surface，M4 MAY依赖 `@loomrealm/platform-ports` 与 `@loomrealm/runtime-control`；author root MUST NOT re-export它们。
 
 ---
 
@@ -126,17 +132,25 @@ business-safe local errors
 @loomrealm/subsystem/host
 ```
 
-供 trusted Runner / composition 使用：
+供 trusted Runner / composition 使用。
+
+M4 slice：
 
 ```text
 runSubsystem
-SubsystemPlatformPorts
-RuntimeControlBinding
-SubsystemDataBinding
 SubsystemLaunchContext
+SubsystemRuntimeControlPolicy
 ```
 
-Host surface MAY引用 `MessageCarrier`；author root MUST NOT re-export它。
+M4 Platform capability types不在这里重复定义；直接消费：
+
+```text
+@loomrealm/platform-ports
+    DeadlineScheduler
+    RuntimeControlBinding
+```
+
+后续 Data/Content host integration 由 M8/M12 再按真实 capability contract 落地，不是 M4 public surface 的 closure 条件。
 
 ---
 
@@ -198,11 +212,17 @@ Protocol Planes
 RuntimeControlPlane
 DataPlane
 
-Subsystem Platform Ports
+Role Host Orchestration
 ────────────────────────
+runSubsystem
+SubsystemRuntimeControlPolicy
+
+Platform Capability Contracts
+────────────────────────
+@loomrealm/platform-ports
+DeadlineScheduler
 RuntimeControlBinding
-SubsystemDataBinding
-ContentClient
+(future ports land only at their milestone)
 
 Foundation
 ────────────────────────
@@ -223,80 +243,81 @@ Render Domain lifetime != Frame lifetime
 
 ## 5. MessageCarrier Boundary
 
-Host surface使用 `@loomrealm/foundation` 已建立 message carrier：
-
-```ts
-interface MessageCarrier {
-  send(message: string): Promise<void>;
-  messages(): AsyncIterable<string>;
-  readonly closed: Promise<CarrierClosed>;
-  close(): Promise<void>;
-}
-```
+Host Runtime Control path消费 `@loomrealm/platform-ports` 提供的 `RuntimeControlBinding`，其 successful acquire result 是 `@loomrealm/foundation` 已建立的 `MessageCarrier<string>`。
 
 Carrier 表示一条**已经建立**的 string message pipe，不表达 establishment/identity/reconnect policy。
 
 当前 Runtime Control 与 Renderer Data Profile 都把 application unit冻结为 UTF-8 JSON text string，因此 WebSocket/MessagePort adapter 对 Core 暴露相同 string carrier。
 
+Author root不引用/导出 `MessageCarrier`。
+
 ---
 
-## 6. Subsystem-facing Platform Ports
+## 6. Subsystem-facing Platform Capability Ownership
 
-### 6.1 Runtime Control
+### 6.1 M4 Runtime Control
 
-一次 Launch Attempt 的 Control one-shot：
-
-```ts
-interface RuntimeControlBinding {
-  acquire(signal?: AbortSignal): Promise<MessageCarrier>;
-}
-```
-
-同一 Subsystem instance MUST最多成功 acquire一次；Control loss进入 Runtime failure，无 same-attempt reconnect。
-
-### 6.2 Data
-
-Subsystem side port 命名为 `SubsystemDataBinding`，避免与 Renderer role 的 `RendererDataBinding` 混淆：
-
-```ts
-interface SubsystemDataConnection {
-  readonly generation: number;
-  readonly dataProfile: string;
-  readonly carrier: MessageCarrier;
-}
-
-interface SubsystemDataBinding {
-  connections(
-    signal?: AbortSignal
-  ): AsyncIterable<SubsystemDataConnection>;
-}
-```
-
-语义：
+M4 的 Platform capability 唯一事实源是：
 
 ```text
-Platform Broker/Runner adapter
-    establishes/provisions physical carrier
-        ↓
-SubsystemDataBinding
-    yields already-bound S/G/Profile carrier
-        ↓
-SDK DataPlane
+@loomrealm/platform-ports
 ```
 
-SDK 不创建 endpoint/ticket/Port，也不拥有 generation/profile。
+冻结：
 
-同 generation/profile MAY sequential reconnect；fresh carrier child state重新 baseline。
+```ts
+interface DeadlineScheduler {
+  schedule(delayMs: number, callback: () => void): () => void;
+}
 
-### 6.3 Content
+interface RuntimeControlBinding {
+  acquire(signal: AbortSignal): Promise<MessageCarrier>;
+}
+```
 
-`ContentClient` 是 platform-neutral logical client；Hostra HTTP / PWA Fetch/SW 已在更低层绑定。
+本文件不再拥有第二份 `RuntimeControlBinding` contract；若旧草案描述与 `packages/platform-ports/DESIGN.md` 冲突，以后者 frozen M4 slice 为准。
+
+同一 Launch Attempt 的 binding 是 single-use；Host MUST exactly-once consume acquisition path，不做 same-attempt reconnect。
+
+### 6.2 Role-specific Runtime policy
+
+Deadline 数值属于 Subsystem Host policy，不属于 Platform capability：
+
+```ts
+interface SubsystemRuntimeControlPolicy {
+  readonly scheduler: DeadlineScheduler;
+  readonly helloDeadlineMs: number;
+  readonly frameDeadlineMs: number;
+}
+```
+
+关系：
+
+```text
+Platform Ports     how to schedule / how to establish carrier
+Subsystem Host     which deadlines apply to this role instance
+Runtime Control    how timeout/protocol mechanics settle
+```
+
+### 6.3 Data / Content later slices
+
+`SubsystemDataBinding` 与 Content physical binding 是完整 Subsystem role 的未来 Platform-facing needs，但 exact Platform contract 不在 M4 冻结。
+
+M8/M12 时必须遵循同一 ownership：
+
+```text
+@loomrealm/platform-ports owns reusable platform capability contract
+@loomrealm/subsystem/host consumes it
+Subsystem SDK owns Data/Input/Render/Content role semantics
+```
+
+M4 MUST NOT定义 fake Data/Content ports 或 stub behavior。
 
 ---
 
-## 7. Launch Context / `runSubsystem`
+## 7. Launch Context / `runSubsystem` M4 Slice
 
-Host integration不使用单一 `{carrier}`。
+M4 host integration只注入当前真实需要的 Runtime Control capability/policy。
 
 ```ts
 interface SubsystemLaunchContext {
@@ -305,15 +326,10 @@ interface SubsystemLaunchContext {
   readonly controlProtocolVersions: readonly number[];
 }
 
-interface SubsystemPlatformPorts {
-  readonly runtimeControl: RuntimeControlBinding;
-  readonly data: SubsystemDataBinding;
-  readonly content: ContentClient;
-}
-
 interface RunSubsystemOptions {
   readonly definition: SubsystemDefinitionFactory;
-  readonly platform: SubsystemPlatformPorts;
+  readonly runtimeControl: RuntimeControlBinding;
+  readonly runtimePolicy: SubsystemRuntimeControlPolicy;
   readonly launch: SubsystemLaunchContext;
 }
 
@@ -322,7 +338,17 @@ function runSubsystem(
 ): Promise<void>;
 ```
 
-`controlEndpoint` / MessagePort / WebSocket / Runner provisioning handle不进入 `SubsystemLaunchContext`；它们已被 Platform adapter吸收到 bindings 中。
+M4 不使用要求 future fake capability 的：
+
+```ts
+interface SubsystemPlatformPorts {
+  data: ...;
+  content: ...;
+  // ...
+}
+```
+
+`controlEndpoint` / MessagePort / WebSocket / Runner provisioning handle不进入 `SubsystemLaunchContext`；它们由 Platform adapter吸收到 capability implementation 中。
 
 同样不得进入 `SubsystemLaunchContext`：
 
@@ -336,24 +362,25 @@ Node/Worker policy
 
 这些已经由 Platform Launcher/RuntimeHosting/Runner在更外层解析和持有。
 
+后续 capability injection 只在对应 milestone 有真实 consumer 时扩展；M4 不提前决定 M8/M12 exact host option shape。
+
 ---
 
 ## 8. Runtime Startup
 
-逻辑顺序：
+M4逻辑顺序：
 
 ```text
 Platform RuntimeHosting looks up frozen LaunchPlan
 → Host-owned Runner loads selected Definition Module
 → Runner validates Definition Module ABI
-→ create per-instance managers/scope
+→ create per-instance Runtime/Frame managers + scope
 → invoke definition factory(scope)
-→ acquire Runtime Control carrier
-→ create RuntimeControlPlane
+→ RuntimeControlBinding.acquire(instance signal)
+→ connect @loomrealm/runtime-control Subsystem peer
 → subsystem.hello
 → identified
 → definition.initialize()
-→ establish all local capabilities required for Runtime Control Profile
 → subsystem.status(ready)
 → accept Frames
 ```
@@ -366,9 +393,9 @@ ready != Renderer exists
 ready != Input/Render baseline published
 ```
 
-`SubsystemDataBinding` / DataPlane 可以独立监听 connection stream；Data availability不是 Runtime readiness前置条件。
+M4 不启动 DataPlane，不要求 `SubsystemDataBinding`，也不因为未来 Data capability 尚未实现而阻塞 Runtime ready。
 
-Definition module load/ABI failure、definition factory / `initialize()` 在 ready 前失败时，均进入 Runtime bootstrap failure，不伪造 Frame outcome。
+Definition module load/ABI failure、Control acquire/hello failure、definition factory / `initialize()` 在 ready 前失败时，均进入 Runtime bootstrap failure，不伪造 Frame outcome。
 
 ---
 
@@ -376,22 +403,23 @@ Definition module load/ABI failure、definition factory / `initialize()` 在 rea
 
 不建立万能 `SubsystemRuntime` service locator，也不使用 module-global current runtime。
 
+M4 current-ready slice：
+
 ```ts
 interface SubsystemScope {
-  readonly createInputListener: (
-    options: CreateInputListenerOptions
-  ) => InputListener;
-
-  readonly createRenderDomain: (
-    options?: CreateRenderDomainOptions
-  ) => RenderDomain;
-
-  readonly content: ContentClient;
   readonly signal: AbortSignal;
 }
 ```
 
-这些 factory/client只是同一 Subsystem instance 的 scoped dependencies，不表示 Runtime拥有 Input/Render/Content。
+未来随着真实 capability milestone 扩展同一个 scope：
+
+```text
+M10 createInputListener
+M11 createRenderDomain
+M12 content
+```
+
+M4 MUST NOT 用 throw-not-implemented/fake object 提前暴露这些 capability。
 
 `signal` 在 graceful shutdown intent 或 Runtime-fatal transition 时 abort，供业务取消长任务。
 
@@ -502,7 +530,7 @@ aborts on Runtime shutdown/failure
 
 ## 13. Frame Initialize / Activate Mapping
 
-`frame.initialize` success只建立 local Frame/Input Context：
+`frame.initialize` success只建立 local Frame Context：
 
 ```text
 validate/create local context
@@ -513,7 +541,7 @@ DO NOT start business frame handler yet
 
 业务 handler 只在首次 successful `frame.activate` 安装 fresh Activation后启动一次。
 
-这样业务永远不会在 `starting` Frame 上意外调用 `frame.call()` 或消费 ordinary input。
+这样业务永远不会在 `starting` Frame 上意外调用 `frame.call()`。
 
 `FRAME_INITIALIZE_REJECTED` 是 SDK/context establishment级 rejection，不作为普通 author control-flow feature暴露。Phase 1 SDK SHOULD对合法 JsonValue params和可用本地资源确定性建立 context；业务语义验证在 active handler中用 `failed(...)` 表达。
 
@@ -660,7 +688,7 @@ protocol ambiguity / SDK invariant corruption / Control loss
 
 ```text
 revoke local Activation
-close ordinary input/call/return gate
+close ordinary call/return gate
 abort frame.signal
 keep context only for later frame.close cleanup
 ```
@@ -683,7 +711,7 @@ closing/closed
 Runtime terminal
 ```
 
-都会阻止新的 ordinary mutation/input delivery。
+都会阻止新的 ordinary mutation；M10 Input delivery 接入后也必须服从同一个 gate。
 
 可暴露 local usage errors：
 
@@ -697,7 +725,7 @@ FrameClosedError
 
 ---
 
-## 19. Runtime Terminal Hooks
+## 19. Runtime Terminal Hooks / `runSubsystem` Settlement
 
 一个 Subsystem instance只有一个 first terminal cause：
 
@@ -719,13 +747,36 @@ failed(error)
     first terminal cause = Runtime failure
 ```
 
-同一 instance 不重复调用两个 terminal hook；terminal hook自身异常只进入 diagnostics/cleanup classification，不重新开放 Runtime。
+同一 instance 不重复调用两个 terminal hook；terminal hook自身异常只进入 diagnostics/cleanup classification，不重新开放 Runtime，也不覆盖 primary terminal cause。
+
+M4 `runSubsystem()` settlement 冻结到行为，不在本次 Platform Ports closure 中额外冻结新的 public fatal-error class：
+
+```text
+graceful Main shutdown
+→ abort signals
+→ invoke shutdown() at most once
+→ bounded local cleanup
+→ close Runtime Control peer
+→ resolve
+
+bootstrap / Runtime fatal
+→ latch first RuntimeFailure
+→ abort signals
+→ invoke failed(primary) at most once
+→ bounded local cleanup
+→ close Runtime Control peer
+→ reject with a business-safe host error preserving the primary Runtime failure
+```
+
+该 rejection 的 exact exported error shape 在 M4 Subsystem implementation closure 中定稿；terminal hook/cleanup error MUST NOT覆盖 primary failure。
+
+Control acquisition rejection、hello rejection/timeout、unexpected Control terminal、fatal Frame ambiguity 都进入 Runtime bootstrap/fatal path；不得返回旧 business continuation。
 
 ---
 
-## 20. Input API
+## 20. Input API (M10 target; not M4 surface)
 
-Input 是独立 capability，但通过 branded `Frame` capability绑定正确 owner/identity：
+Input 是后续独立 capability，但通过 branded `Frame` capability绑定正确 owner/identity：
 
 ```ts
 interface CreateInputListenerOptions {
@@ -740,19 +791,11 @@ interface InputListener {
 }
 ```
 
-SDK SHOULD拒绝：
-
-```text
-foreign Subsystem Frame capability
-already closed/administratively suspended Frame for new listener
-invalid channel
-```
-
-协议对 stale/unknown Interest 的容忍是 cross-plane recovery rule，不代表 author API需要接受错误 local binding。
+这些 API 在 M10 前不是 M4 public implementation requirement，也不得以 fake behavior 提前导出。
 
 ---
 
-## 21. Input Interest Aggregation
+## 21. Input Interest Aggregation (M10 target)
 
 多个 listener对同一 Frame贡献 union：
 
@@ -780,7 +823,7 @@ Map<frameId, Set<channel>>
 
 ---
 
-## 22. Input Lifecycle
+## 22. Input Lifecycle (M10 target)
 
 ### Child-call suspension/resume
 
@@ -815,7 +858,7 @@ wire publication可以稍后 coalesce/发送，但 local invariant必须先成�
 
 ---
 
-## 23. Input Receive Gate
+## 23. Input Receive Gate (M10 target)
 
 收到普通 State/Event 时至少重新验证：
 
@@ -832,7 +875,7 @@ mutation gate open
 
 ---
 
-## 24. Render API
+## 24. Render API (M11 target; not M4 surface)
 
 Render 是 independent presentation capability：
 
@@ -855,7 +898,7 @@ SDK mint protocol `domainId`；author `name` 只是可选诊断/业务标签，�
 
 ---
 
-## 25. Render / Data Lifetime
+## 25. Render / Data Lifetime (M8/M11 target)
 
 ```text
 RenderDomain
@@ -883,12 +926,12 @@ Runtime terminal时 SDK最终关闭本 instance所有 local RenderDomain resourc
 
 ---
 
-## 26. DataPlane
+## 26. DataPlane (M8 target)
 
 Subsystem SDK只有一个 connection-wide DataPlane reader/writer：
 
 ```text
-SubsystemDataBinding
+future SubsystemDataBinding platform port
         ↓
 DataPlane
       /       \
@@ -907,6 +950,8 @@ retirement cleanup
 ```
 
 InputManager/RenderManager MUST NOT分别竞争消费 `carrier.messages()`。
+
+M8 具体 binding contract 以届时 `@loomrealm/platform-ports` frozen slice 为唯一事实源。
 
 ---
 
@@ -931,19 +976,26 @@ Hostra Node Runner / PWA Worker Runner负责：
 receive PlatformLaunchPlan-selected Definition Module
 obtain platform bootstrap material
 load/validate exact selected Definition Module
-construct RuntimeControlBinding
-construct SubsystemDataBinding
-construct ContentClient
+implement/provide @loomrealm/platform-ports capabilities
 call runSubsystem(...)
 ```
+
+M4 only：
+
+```text
+DeadlineScheduler
+RuntimeControlBinding
+```
+
+后续 Data/Content capability 在各自 milestone 增加。
 
 两个平台选择的 artifact MAY不同；author surface和 Role semantics不得因此改变。
 
 ---
 
-## 28. Dynamic Data Provisioning Boundary
+## 28. Dynamic Data Provisioning Boundary (M8/M9 target)
 
-DataAuthority通常在 Runtime启动之后才出现/替换，因此 Runner必须有 platform-internal provisioning source，用来实现 `SubsystemDataBinding`。
+DataAuthority通常在 Runtime启动之后才出现/替换，因此 Runner必须有 platform-internal provisioning source，用来实现未来的 Subsystem Data binding port。
 
 Hostra：
 
@@ -953,7 +1005,7 @@ Main DataAuthority(S,G,P)
 → platform-local Runner provisioning channel
 → Node Runner receives one-time Data connection material
 → transport-websocket establishes/binds carrier
-→ SubsystemDataBinding yields {G,P,carrier}
+→ future Subsystem Data port yields {G,P,carrier}
 → SDK DataPlane installs current
 ```
 
@@ -964,7 +1016,7 @@ Main DataAuthority(S,G,P)
 → PWA DataConnectionBroker
 → Worker provisioning Port/path
 → transferred matching MessagePort
-→ SubsystemDataBinding yields {G,P,carrier}
+→ future Subsystem Data port yields {G,P,carrier}
 → SDK DataPlane installs current
 ```
 
@@ -996,21 +1048,23 @@ packages/subsystem/
 │   │   ├── context.ts
 │   │   ├── registry.ts
 │   │   └── mutation-gate.ts
-│   ├── input/
-│   ├── render/
-│   ├── content/
+│   ├── input/                   M10
+│   ├── render/                  M11
+│   ├── content/                 M12
 │   ├── host/
 │   │   ├── run-subsystem.ts
-│   │   └── platform-ports.ts
+│   │   └── runtime-policy.ts
 │   └── internal/
 │       ├── runtime-control-plane.ts
-│       └── data-plane.ts
+│       └── data-plane.ts        M8
 └── test/
 ```
 
-这是 **eventual package structure**，不是 M4 必须一次生成的文件清单。目录按 capability 的真实 implementation gate demand-driven 落地：M4优先 definition/frame/host/runtime-control plane；Data/Input/Render/Content 目录随 M8/M10/M11/M12 实现。
+`platform-ports.ts` 不再由 Subsystem 自己维护；共享 Platform capability contract 来自 `@loomrealm/platform-ports`。
 
-Author root不 re-export host/internal types。
+目录按 capability 的真实 implementation gate demand-driven 落地：M4优先 definition/frame/host/runtime-control plane；Data/Input/Render/Content 随 M8/M10/M11/M12 实现。
+
+Author root不 re-export host/internal/platform port types。
 
 ---
 
@@ -1024,10 +1078,11 @@ Author root不 re-export host/internal types。
 [M4 Runtime/Frame]
 Definition Module default-export ABI
 per-instance scope / no global current context
-Runtime Control binding one-shot
+RuntimeControlBinding acquisition exactly once
+acquire abort never publishes late carrier
 ready independent from Data connection
 Game/Platform launch config absent from author surface
-Hostra/PWA selected artifacts accepted through same ABI
+Hostra/PWA-like RuntimeControlBinding accepted through same contract
 
 frame.initialize-does-not-start-handler
 frame.activate-starts-handler-once
@@ -1038,6 +1093,9 @@ handler-uncaught-exception-becomes-frame-failed
 administrative-suspend-aborts-frame-signal/discards-late-handler-result
 handler-result-sends-exactly-one-return
 mutation-gate
+runSubsystem-graceful-resolves
+runSubsystem-runtime-fatal-rejects-primary-cause
+terminal-hook-error-does-not-replace-primary-cause
 
 [M8/M10 Data/Input]
 multiple-listeners-union-interest
@@ -1079,6 +1137,8 @@ Input ACK/revision/subscription handshake
 Render history replay
 Hostra/PWA special business API
 SDK catchable Runtime-fatal continuation
+Subsystem-owned duplicate Platform port contracts
+future capability stubs in M4
 ```
 
 ---
@@ -1086,23 +1146,23 @@ SDK catchable Runtime-fatal continuation
 ## 32. Final Invariants
 
 1. `@loomrealm/subsystem` 是 platform-neutral author SDK；
-2. `@loomrealm/subsystem/host` 是 trusted Runner integration surface；
-3. Game Package只声明 logical key；Platform LaunchPlan选择 Definition Module；
-4. 所有 platform-selected Definition Module都必须导出同一 `SubsystemDefinitionFactory` ABI；
-5. Platform通过 `RuntimeControlBinding + SubsystemDataBinding + ContentClient` 注入基础设施；
-6. Runtime Control与 Data独立 connection/lifetime；
-7. author不见 carrier/bootstrap/generation/profile/activation/launch manifest/module path；
-8. FrameOutcome与正式 Frame v1 `completed/cancelled/failed` 一一对应；
-9. child terminal outcome resolve `frame.call()`；pre-commit recoverable rejection才 reject；
-10. Runtime-fatal/ambiguous path永不重新进入业务 continuation；
-11. `frame.initialize`只建 Context，`frame.activate`后才启动 handler；
-12. uncaught business exception默认成为 Frame failed，不混同 Runtime protocol failure；
-13. InputListener绑定 branded Frame，Interest语义 Frame-scoped；
-14. Frame close local success前必须删除 listeners/Interest；
-15. fresh Activation复用 Interest config但不复用 Input State/Event；
-16. fresh Data carrier child state重新 baseline，business capability object继续存在；
-17. RenderDomain与 Frame/Data carrier lifecycle独立；
-18. 一个 DataPlane统一消费/分派 Data carrier；
+2. `@loomrealm/subsystem/host` 是 trusted Runner integration/orchestration surface；
+3. reusable Platform capability contract 的唯一事实源是 `@loomrealm/platform-ports`；
+4. M4 Subsystem Host只消费 `DeadlineScheduler + RuntimeControlBinding`；
+5. deadline values由 `SubsystemRuntimeControlPolicy` 拥有，不属于 Platform Ports；
+6. Game Package只声明 logical key；Platform LaunchPlan选择 Definition Module；
+7. 所有 platform-selected Definition Module都必须导出同一 `SubsystemDefinitionFactory` ABI；
+8. author不见 carrier/bootstrap/deadline/platform-port/generation/profile/activation/launch manifest/module path；
+9. Runtime Control与未来 Data独立 connection/lifetime；
+10. FrameOutcome与正式 Frame v1 `completed/cancelled/failed` 一一对应；
+11. child terminal outcome resolve `frame.call()`；pre-commit recoverable rejection才 reject；
+12. Runtime-fatal/ambiguous path永不重新进入业务 continuation；
+13. `frame.initialize`只建 Context，`frame.activate`后才启动 handler；
+14. uncaught business exception默认成为 Frame failed，不混同 Runtime protocol failure；
+15. M4 `SubsystemScope` 只含 current-ready capability，不 fake Input/Render/Content；
+16. `runSubsystem` graceful resolve，Runtime/bootstrap fatal reject，terminal hook failure不覆盖 primary cause；
+17. InputListener/RenderDomain/DataPlane 分别由 M10/M11/M8 完成，不是 M4 closure 条件；
+18. fresh Activation/Input 与 fresh Data/Render baseline semantics 继续服从各自正式协议；
 19. dynamic Data material经 Platform provisioning sideband进入 Runner，不污染 Runtime Control；
-20. Hostra/PWA Definition artifact可不同，但必须产生等价 author/business observable semantics；
+20. Hostra/PWA physical implementation/artifact可不同，但 frozen Platform Port 与 author/business observable semantics必须等价；
 21. package responsibility 与 milestone implementation slice 分离；M4只关闭 Runtime/Frame core，M8/M10/M11/M12继续完成同一 `@loomrealm/subsystem` 的 Data/Input/Render/Content capability。
