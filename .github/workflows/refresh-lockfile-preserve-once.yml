@@ -1,0 +1,47 @@
+name: Refresh lockfile preserve versions once
+
+on:
+  push:
+    branches:
+      - fix/data-implementation-review-closure
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          ref: fix/data-implementation-review-closure
+          fetch-depth: 0
+      - name: Restore pre-refresh lockfile
+        run: git checkout 5a1bc40096eba2d9974fb6370eed98d49048786a -- package-lock.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Enable pinned npm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable npm
+          test "$(npm --version)" = "10.9.2"
+      - name: Refresh lock metadata without deleting the lockfile
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then
+            echo "No lockfile change"
+            exit 0
+          fi
+          git commit -m "chore: refresh root lockfile with pinned npm"
+          git push origin HEAD:fix/data-implementation-review-closure
