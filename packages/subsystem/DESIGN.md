@@ -749,7 +749,7 @@ failed(error)
 
 同一 instance 不重复调用两个 terminal hook；terminal hook自身异常只进入 diagnostics/cleanup classification，不重新开放 Runtime，也不覆盖 primary terminal cause。
 
-M4 `runSubsystem()` settlement 冻结：
+M4 `runSubsystem()` settlement 冻结到行为，不在本次 Platform Ports closure 中额外冻结新的 public fatal-error class：
 
 ```text
 graceful Main shutdown
@@ -765,8 +765,10 @@ bootstrap / Runtime fatal
 → invoke failed(primary) at most once
 → bounded local cleanup
 → close Runtime Control peer
-→ reject SubsystemRuntimeFatalError carrying/summarizing primary cause
+→ reject with a business-safe host error preserving the primary Runtime failure
 ```
+
+该 rejection 的 exact exported error shape 在 M4 Subsystem implementation closure 中定稿；terminal hook/cleanup error MUST NOT覆盖 primary failure。
 
 Control acquisition rejection、hello rejection/timeout、unexpected Control terminal、fatal Frame ambiguity 都进入 Runtime bootstrap/fatal path；不得返回旧 business continuation。
 
