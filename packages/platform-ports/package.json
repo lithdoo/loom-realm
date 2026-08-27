@@ -19,6 +19,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@loomrealm/foundation": "0.1.0-alpha.0"
+  },
   "devDependencies": {
     "typescript": "^5.5.0"
   },
