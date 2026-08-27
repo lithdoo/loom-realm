@@ -13,9 +13,18 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
         cache: npm
-    - name: Enable Corepack
+    - name: Enable Corepack npm shim
       shell: bash
-      run: corepack enable
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      run: corepack enable npm
+    - name: Verify npm version
+      shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      run: test "$(npm --version)" = "10.9.2"
     - name: Install dependencies
       shell: bash
+      env:
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
       run: npm ci --no-audit --no-fund

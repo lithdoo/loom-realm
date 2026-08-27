@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   createRendererDataPeer,
   createSubsystemDataPeer,
-  KEYBOARD_CODES_V1,
   RENDERER_DATA_PROFILE_V1,
 } from "../dist/index.js";
 
@@ -116,10 +115,7 @@ test("canonical interest order is accepted", async () => {
   await subsystem.close();
 });
 
-test("KeyboardCode type and runtime acceptance share one frozen set", async () => {
-  assert.equal(new Set(KEYBOARD_CODES_V1).size, KEYBOARD_CODES_V1.length);
-  assert.ok(KEYBOARD_CODES_V1.includes("KeyA"));
-  assert.ok(KEYBOARD_CODES_V1.includes("NumpadEnter"));
+test("KeyboardCode runtime acceptance uses the frozen finite set", async () => {
   const carrier = hangingCarrier();
   const renderer = createRendererDataPeer({
     binding: binding(carrier),

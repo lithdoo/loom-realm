@@ -1,5 +1,5 @@
 export { createSubsystemDataPeer, createRendererDataPeer } from "./peers.js";
-export { RENDERER_DATA_PROFILE_V1, KEYBOARD_CODES_V1 } from "./model.js";
+export { RENDERER_DATA_PROFILE_V1 } from "./model.js";
 export type {
   RendererDataProfileV1, DataCurrentBindingV1, DataBindingViewV1,
   InputChannelV1, InputStateChannelV1, InputEventChannelV1, FrameInputInterestV1,

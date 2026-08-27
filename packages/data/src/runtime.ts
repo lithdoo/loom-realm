@@ -84,7 +84,10 @@ export class DataRuntime {
       return freeze({ kind: "sent" });
     } catch (cause) {
       this.pendingSends -= 1;
-      const terminal = this.isTerminal(cause) ? cause : this.commit({ kind: "carrier-lost", cause });
+      const terminal =
+        cause === this.terminalValue && this.terminalValue !== undefined
+          ? this.terminalValue
+          : this.commit({ kind: "carrier-lost", cause });
       return freeze({ kind: "terminal", terminal });
     }
   }
@@ -95,10 +98,6 @@ export class DataRuntime {
       catch (cause) { this.commit({ kind: "carrier-lost", cause }, false); }
     }
     await this.terminal;
-  }
-
-  private isTerminal(value: unknown): value is DataTerminal {
-    return value !== null && typeof value === "object" && "kind" in value;
   }
 
   private async readLoop(): Promise<void> {

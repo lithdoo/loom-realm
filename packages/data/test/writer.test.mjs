@@ -151,3 +151,32 @@ test("writer pending operations settle exactly once on terminal", async () => {
   assert.equal(carrier.sent.length, 1);
   assert.equal(results.filter((result) => result.kind === "terminal").length, 2);
 });
+
+test("carrier.send reject with a kind object is carrier-lost and matches peer.terminal", async () => {
+  let resolveClosed;
+  const closed = new Promise((resolve) => {
+    resolveClosed = resolve;
+  });
+  const cause = { kind: "closed" };
+  const carrier = {
+    closed,
+    async send() {
+      throw cause;
+    },
+    async *messages() {
+      await closed;
+    },
+    async close() {
+      resolveClosed({ kind: "closed" });
+    },
+  };
+  const subsystem = createSubsystemDataPeer({
+    binding: binding(carrier),
+    handlers,
+  });
+  const result = await subsystem.render.sendDomains({ type: "render.domains", domains: [] });
+  assert.equal(result.kind, "terminal");
+  assert.equal(result.terminal.kind, "carrier-lost");
+  assert.equal(result.terminal.cause, cause);
+  assert.equal(result.terminal, await subsystem.terminal);
+});

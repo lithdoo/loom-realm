@@ -1,7 +1,7 @@
 # `@loomrealm/data` 设计
 
 > 状态：Package-local Core Baseline Implemented / Maintenance  
-> 阶段：M8 Renderer Data Profile + Data Connection Core preimplementation closure  
+> 阶段：M8 package-local core baseline / maintenance; real M8 role integration pending  
 > 最近复核：2026-08-26  
 > 目标：把 Frozen Data Connection v1、User Input v1、Render Update v1 与 Renderer Data Profile v1 落成 transport-independent、role-typed、可测试的 shared Data application mechanics；不建立 physical connection，不拥有 Main/Subsystem/Renderer application authority。  
 > 正式 Profile：[Renderer Data Application Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
@@ -259,7 +259,6 @@ InputStateV1
 InputEventV1
 InputResetV1
 KeyboardCodeV1
-KEYBOARD_CODES_V1
 KeyboardStatePayloadV1
 KeyboardEventPayloadV1
 PointerKindV1
