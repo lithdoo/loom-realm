@@ -342,7 +342,7 @@ runtime-control mechanics
 subsystem business SDK
 ```
 
-`packages/subsystem/DESIGN.md` 的 M4 Runtime Control path 必须消费本文契约，不再维护第二份 `RuntimeControlBinding` owner。
+`packages/subsystem/DESIGN.md` 已改为消费本文 M4 slice；本文是 `DeadlineScheduler` / `RuntimeControlBinding` 的唯一 Platform contract owner。
 
 ---
 
