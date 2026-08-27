@@ -21,10 +21,16 @@ jobs:
         with:
           ref: feat/subsystem-m4
 
-      - name: Setup workspace
-        uses: ./.github/actions/setup-workspace
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Enable Corepack npm shim
+        run: corepack enable npm
+
+      - name: Verify npm version
+        run: test "$(npm --version)" = "10.9.2"
 
       - name: Refresh workspace lock metadata
         run: npm install --package-lock-only --ignore-scripts
@@ -41,7 +47,8 @@ jobs:
           block = text[start:end]
           if '"libc"' not in block:
               needle = '      "os": [\n        "linux"\n      ]\n'
-              block = block.replace(needle, needle + ',      "libc": [\n        "glibc"\n      ]\n'.replace('],      ', '],\n      '), 1)
+              replacement = needle + ',      "libc": [\n        "glibc"\n      ]\n'.replace('],      ', '],\n      ')
+              block = block.replace(needle, replacement, 1)
               text = text[:start] + block + text[end:]
               path.write_text(text)
 
