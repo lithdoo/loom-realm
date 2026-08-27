@@ -217,7 +217,7 @@ Main authority implementation
 Subsystem author API
 ```
 
-`RuntimeControlScheduler` remains a package-local injected port；no generic Foundation Clock until independent reuse exists。
+`RuntimeControlScheduler` remains Runtime Control-owned；`@loomrealm/platform-ports` separately exposes the structural-compatible M4 `DeadlineScheduler` for Core↔Platform injection。No generic Foundation Clock。
 
 ---
 
@@ -404,23 +404,29 @@ Do not pre-create universal `subsystem-node/subsystem-worker` without real indep
 
 ## 12. Role-facing Port Placement
 
-```text
-packages/main/src/platform/
-packages/subsystem/src/host/platform-ports.ts
-packages/renderer/src/platform/
-```
-
-Typical：
+Shared Core↔Platform capability contracts live only in：
 
 ```text
-RuntimeHosting
-RendererDataBinding
-SubsystemDataBinding
+packages/platform-ports/src/index.ts
 ```
 
-Runtime Control scheduler/deadlines are protocol-mechanics constructor inputs, not Main application authority or Platform launch manifest fields。
+Role packages contain consumer-side orchestration/policy, not duplicate Platform contract owners：
 
-System-level `DataConnectionBroker` stays composition/integration unless real shared capability emerges。
+```text
+packages/main/src/platform/       # M5+ consumer-side integration as frozen
+packages/subsystem/src/host/      # M4 consumer-side orchestration/policy
+packages/renderer/src/platform/   # future consumer-side integration as frozen
+```
+
+M4 frozen：
+
+```text
+platform-ports owns DeadlineScheduler / RuntimeControlBinding
+subsystem/host consumes them
+subsystem/host owns SubsystemRuntimeControlPolicy
+```
+
+Future `RuntimeHosting` / Renderer Data binding / Subsystem Data binding exact shapes are added only at their real milestone closure；M4 MUST NOT create role-local placeholder contracts。System-level `DataConnectionBroker` stays composition/integration unless a later frozen Platform port requires a shared contract。
 
 ---
 

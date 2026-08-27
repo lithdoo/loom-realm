@@ -27,14 +27,13 @@ Milestone只描述 capability 的实现顺序与阶段性 closure。**不得根�
 Current low-level primitives feed multiple independent capability branches。以下第一张图只描述 Runtime/Game 的低层主干，不应被解释为完整 Role dependency graph：
 
 ```text
-@loomrealm/foundation        @loomrealm/wire
-        \                         /
-         \                       /
-          └── @loomrealm/runtime-control
-                     ↓
-              Main / Subsystem Host
-
-@loomrealm/wire
+@loomrealm/foundation ─────→ @loomrealm/platform-ports
+        │                           ↓
+        ├──────────────┐     Core role integrations
+        │              ↓
+@loomrealm/wire ─→ @loomrealm/runtime-control
+        │              ↓
+        │       Main / Subsystem Host
         ↓
 @loomrealm/game-package
         ↓
@@ -160,7 +159,7 @@ Runtime dependencies exactly：
 
 First package surface：root export only；no `/control` `/frame` `/profile` `/testing` subpaths。
 
-M3 scheduler stays a package-local injected port；do not expand Foundation Clock for one consumer。
+M3 `RuntimeControlScheduler` remains a Runtime Control-owned structural constructor input；M4 `DeadlineScheduler` independently defines the Core↔Platform deadline capability with the same shape。Neither requires a generic Foundation Clock。
 
 ### `data`
 
@@ -496,15 +495,21 @@ Composition root MAY depend on all lower-level packages but MUST NOT duplicate G
 ## 13. Port Placement Rule
 
 ```text
-single role consumes
-    → role package integration surface
+protocol-specific mechanics/input
+    → owning protocol package
 
-multiple stable independent consumers
-    → smallest shared capability package
+Core ↔ Platform capability/fact
+with stable platform-neutral semantics
+    → @loomrealm/platform-ports
+
+role-specific policy/orchestration
+    → owning role integration surface
 
 only one app glue consumes
     → app internal
 ```
+
+A single Core role consumer does not by itself make a cross-Platform capability role-owned；ownership follows the semantic boundary, not consumer count alone。
 
 Thus：
 
