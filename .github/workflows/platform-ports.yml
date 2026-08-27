@@ -1,0 +1,49 @@
+name: Platform Ports package
+
+on:
+  pull_request:
+    paths:
+      - "packages/platform-ports/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".npmrc"
+      - ".github/workflows/platform-ports.yml"
+      - ".github/actions/setup-workspace/**"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/platform-ports/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".npmrc"
+      - ".github/workflows/platform-ports.yml"
+      - ".github/actions/setup-workspace/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Build Platform Ports
+        run: npm run build -w @loomrealm/platform-ports
+
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/platform-ports --dry-run
