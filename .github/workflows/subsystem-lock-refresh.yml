@@ -1,0 +1,58 @@
+name: Subsystem lock refresh
+
+on:
+  push:
+    branches:
+      - feat/subsystem-m4
+    paths:
+      - "packages/subsystem/package.json"
+      - ".github/workflows/subsystem-lock-refresh.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v6
+        with:
+          ref: feat/subsystem-m4
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 20
+
+      - name: Refresh workspace lock metadata
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Preserve existing Rollup libc metadata
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("package-lock.json")
+          text = path.read_text()
+          marker = '    "node_modules/@rollup/rollup-linux-x64-gnu": {'
+          start = text.index(marker)
+          end = text.index('    "node_modules/@rollup/rollup-win32-x64-gnu": {', start)
+          block = text[start:end]
+          if '"libc"' not in block:
+              needle = '      "os": [\n        "linux"\n      ]\n'
+              block = block.replace(needle, needle + ',      "libc": [\n        "glibc"\n      ]\n'.replace('],      ', '],\n      '), 1)
+              text = text[:start] + block + text[end:]
+              path.write_text(text)
+
+      - name: Remove one-shot workflow
+        run: git rm .github/workflows/subsystem-lock-refresh.yml
+
+      - name: Commit lockfile refresh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json .github/workflows/subsystem-lock-refresh.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore(subsystem): sync workspace lock metadata"
+          git push origin HEAD:feat/subsystem-m4
