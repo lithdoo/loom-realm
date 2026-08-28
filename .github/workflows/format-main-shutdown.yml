@@ -1,0 +1,106 @@
+name: Normalize Main shutdown fix formatting
+
+on:
+  push:
+    branches:
+      - feat/main-m5
+    paths:
+      - ".github/workflows/format-main-shutdown.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+      - name: Normalize cleanupRuntime formatting
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("packages/main/src/internal/main-session.ts")
+          text = path.read_text()
+          start = text.index("  private async cleanupRuntime(")
+          end_marker = "\n}\n\nexport function runMainInternal"
+          end = text.index(end_marker, start)
+          raw = '''private async cleanupRuntime(
+  record: RuntimeRecord,
+  reason: "session-end" | "bootstrap-abort",
+): Promise<void> {
+  record.expectedTermination = true;
+
+  let gracefulShutdownAccepted = false;
+  const peer = record.peer;
+  if (
+    peer !== null &&
+    record.identified &&
+    !record.failed &&
+    !record.shutdownRequested
+  ) {
+    record.shutdownRequested = true;
+    record.phase = "stopping";
+    try {
+      const outcome = await peer.control.shutdown({ reason });
+      gracefulShutdownAccepted = outcome.kind === "success";
+    } catch {
+      // Session terminal fact already owns settlement.
+    }
+  } else if (peer !== null && !record.identified) {
+    await settleWithin(
+      this.options.platform.scheduler,
+      this.options.policy.terminationDeadlineMs,
+      peer.close(),
+    );
+  }
+
+  const hosted = record.hosted;
+  if (hosted === null || record.physicallyTerminated) return;
+
+  // A successful protocol shutdown only means the Runtime accepted the
+  // graceful intent. Give that Runtime a bounded opportunity to finish
+  // its own shutdown hook and terminate naturally before escalating to
+  // a physical termination request.
+  if (gracefulShutdownAccepted) {
+    const terminatedNaturally = await settleWithin(
+      this.options.platform.scheduler,
+      this.options.policy.terminationDeadlineMs,
+      hosted.terminated,
+    );
+    if (terminatedNaturally) return;
+  }
+
+  if (!record.terminationRequested) {
+    record.terminationRequested = true;
+    try {
+      await runWithDeadline(
+        this.options.platform.scheduler,
+        this.options.policy.terminationDeadlineMs,
+        [],
+        (signal) => hosted.requestTermination(signal),
+      );
+    } catch {
+      // Bounded physical cleanup does not replace the primary Session terminal.
+    }
+  }
+
+  await settleWithin(
+    this.options.platform.scheduler,
+    this.options.policy.terminationDeadlineMs,
+    hosted.terminated,
+  );
+}'''
+          replacement = "\n".join(("  " + line) if line else "" for line in raw.splitlines())
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+      - name: Remove one-shot workflow and commit formatting
+        run: |
+          rm .github/workflows/format-main-shutdown.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/main/src/internal/main-session.ts .github/workflows/format-main-shutdown.yml
+          git commit -m "style(main): normalize shutdown cleanup formatting"
+          git push origin HEAD:feat/main-m5
