@@ -19,6 +19,10 @@ jobs:
           ref: feat/main-m5
       - name: Apply review closure
         run: python3 tools/patch-main-m5-review.py
+      - name: Finish dead Session phase cleanup
+        run: |
+          sed -i '/if (this\.terminal === null) this\.phase = "running";/d' packages/main/src/internal/main-session.ts
+          ! grep -q 'this\.phase' packages/main/src/internal/main-session.ts
       - uses: ./.github/actions/setup-workspace
         with:
           node-version: 20
