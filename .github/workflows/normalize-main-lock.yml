@@ -1,0 +1,39 @@
+name: Normalize Main lockfile
+
+on:
+  push:
+    branches:
+      - feat/main-m5
+    paths:
+      - ".github/workflows/normalize-main-lock.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Use repository npm version
+        run: npm install --global npm@10.9.2
+      - name: Rebuild lockfile from stacked base
+        shell: bash
+        run: |
+          git checkout origin/feat/platform-ports-m5 -- package-lock.json
+          npm install --package-lock-only --ignore-scripts
+      - name: Commit normalized lockfile and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/normalize-main-lock.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json .github/workflows/normalize-main-lock.yml
+          git commit -m "chore(main): normalize workspace lockfile"
+          git push origin HEAD:feat/main-m5
