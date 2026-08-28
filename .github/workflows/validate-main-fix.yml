@@ -1,0 +1,49 @@
+name: Validate Main shutdown fix
+
+on:
+  push:
+    branches:
+      - feat/main-m5
+    paths:
+      - ".github/workflows/validate-main-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build Main dependencies
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/subsystem
+      - name: Test Main
+        run: npm test -w @loomrealm/main
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/main --dry-run
+
+  cleanup:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+      - name: Remove one-shot validation workflow
+        run: |
+          rm .github/workflows/validate-main-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/validate-main-fix.yml
+          git commit -m "chore: remove Main fix validation workflow"
+          git push origin HEAD:feat/main-m5
