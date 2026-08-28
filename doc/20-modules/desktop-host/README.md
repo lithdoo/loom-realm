@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：Hostra Desktop Platform Composition realization：Hostra Launcher-owned Game PREPARE、Node Runner、Hostra Window、WebSocket、Runner provisioning IPC、DataConnectionBroker、HTTP/filesystem 与安全边界  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-08-28
 
 本文描述完整 Hostra Desktop Platform Composition realization，不是 `@loomrealm/platform-hostra` package spec。`@loomrealm/game-launcher-hostra` 只抽出 Game Entry consumption + Subsystem Runtime launch planning/hosting/Runner integration；Renderer/Data Broker/Content/Shell 仍由完整 composition 负责。
 
@@ -14,20 +14,24 @@
 ## 1. Composition
 
 ```text
-Hostra game installation/source
+apps/desktop / product entry
         ↓
-@loomrealm/game-launcher-hostra PREPARE
+create session-scoped HostraPlatform
+        ↓
+HostraPlatform.prepareGame(installation/source)
+        ↓
+@loomrealm/game-launcher-hostra PREPARE component
     ├── @loomrealm/game-package validates Game Entry
     ├── validates launch.hostra.json
     ├── exact key-set join
     ├── full executable/security preflight
-    ├── immutable HostraLaunchPlan
-    └── immutable LogicalGameBootstrap
+    ├── immutable HostraLaunchPlan → installed privately in HostraPlatform
+    └── immutable LogicalGameBootstrap → returned to composition
         ↓
-PreparedHostraGame
+runMain({ bootstrap: logicalBootstrap, platform: same HostraPlatform })
         ↓
-apps/desktop
-├── installs Main(logicalBootstrap + plan-bound RuntimeHosting)
+HostraPlatform
+├── Main-facing RuntimeHosting / scheduler
 ├── Node RuntimeHosting / Supervisor
 ├── Host-owned Node Subsystem Runner
 ├── Runtime Control WebSocket
@@ -46,7 +50,7 @@ Hostra只拥有 physical topology和 Hostra executable realization，不拥有 M
 
 ## 2. Hostra PREPARE
 
-Product bootstrap caller调用 Hostra Launcher，而不是：
+Product bootstrap caller调用 `HostraPlatform.prepareGame(...)`；HostraPlatform 内部调用 Hostra Launcher component，而不是让 product caller：
 
 ```text
 parse Game Entry manually
@@ -88,7 +92,8 @@ LogicalGameBootstrap
     subsystemKeys
     initial {subsystemKey,input}
 
-plan-bound RuntimeHosting
+Main-facing capability view
+    structurally satisfied by the same prepared HostraPlatform instance
 ```
 
 Main does not receive：
@@ -102,7 +107,7 @@ module/path
 Node/Runner/process details
 ```
 
-`apps/desktop` 可以持有 prepared Hostra result，但 MUST NOT重新解释 raw config。
+`HostraPlatform` 持有 frozen HostraLaunchPlan；`apps/desktop` 只负责编排 `prepareGame()` 与 `runMain()`，MUST NOT重新解释 raw config。Main 不读取 HostraLaunchPlan。
 
 ---
 
@@ -129,9 +134,9 @@ parse/validate Platform bootstrap
 → import exact planned module
 → validate default SubsystemDefinitionFactory
 → construct RuntimeControlBinding
-→ construct SubsystemDataBinding
-→ construct ContentClient
-→ runSubsystem(...)
+→ M8+ construct SubsystemDataBinding
+→ M12+ construct ContentClient
+→ runSubsystem(...) with current-milestone capabilities
 ```
 
 Game common document不选择 module；Hostra launch manifest不选择 Node executable/Runner entry/arbitrary argv-env/WebSocket credential。

@@ -2,35 +2,38 @@
 
 > 状态：Implementation Planning / Boundary Frozen  
 > 阶段：M6 Hostra launch planning / RuntimeHosting / Runner integration  
-> 最近复核：2026-08-20  
-> 目标：成为 Hostra Runtime-product Game bootstrap entry：内部消费 `@loomrealm/game-package`，完成 Hostra Game + Platform PREPARE，产出 Main-facing logical bootstrap 与 plan-bound RuntimeHosting，同时保持 Main/业务 platform-neutral。  
+> 最近复核：2026-08-28  
+> 目标：成为 concrete Hostra Platform 内部的 Game PREPARE / Runner integration component：内部消费 `@loomrealm/game-package`，闭合 Hostra Game + executable PREPARE，产出 immutable `HostraLaunchPlan` + Main-facing logical bootstrap；long-lived Main-facing capabilities 由 session-scoped HostraPlatform instance 暴露。  
 > 正式契约：[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../doc/15-contracts/nodejs-launcher-profile-v1.md)  
-> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)
+> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../doc/decisions/0026-session-scoped-platform-instance.md)
 
 核心原则：
 
-> **这是 Hostra Subsystem Runtime launch capability package，不是 Hostra Platform mega-package。Product bootstrap caller 调本包；本包内部调 `@loomrealm/game-package`。Main 不调本包，也不调 Game Package。**
+> **这是 HostraPlatform 的 Game PREPARE / Runner integration component，不是 Hostra Platform 本身。Product bootstrap caller 面向 session-scoped HostraPlatform；HostraPlatform 内部调用本包，本包内部调用 `@loomrealm/game-package`。Main 不调本包，也不调 Game Package。**
 
 ---
 
 ## 1. Package Position
 
 ```text
-Hostra game source / installation
+apps/desktop / product entry
         ↓
-@loomrealm/game-launcher-hostra
+HostraPlatform.prepareGame(source)
+        ↓
+@loomrealm/game-launcher-hostra component
     ├── @loomrealm/game-package parse/validate
     ├── Hostra manifest validator
     ├── exact key-set join
     ├── module resolver/security preflight
     ├── immutable HostraLaunchPlan
     ├── LogicalGameBootstrap projection
-    ├── RuntimeHosting
-    └── Node Runner/supervision integration
+    └── Node Runner/supervision integration primitives
         ↓
-PreparedHostraGame
+PreparedHostraGame { logicalBootstrap, launchPlan }
         ↓
-apps/desktop composition
+HostraPlatform.prepareGame installs plan
+        ↓
+apps/desktop passes the same HostraPlatform to Main
 ```
 
 Dependencies MAY include：
@@ -59,7 +62,7 @@ installation executable resolution
 exact Game↔Hostra key join
 immutable HostraLaunchPlan
 Main-facing LogicalGameBootstrap projection
-Main-facing RuntimeHosting implementation
+HostraLaunchPlan production + plan-consumer primitives for concrete HostraPlatform RuntimeHosting
 Node Runner/bootstrap integration
 process supervision adapter
 Runner provisioning integration surface
@@ -83,7 +86,7 @@ Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主�
 
 ## 3. Public Bootstrap Shape
 
-调用者不应被迫先构造 `ValidatedGameEntryV1`。
+标准 Runtime-product caller 面向 `HostraPlatform.prepareGame(...)`，不应被迫先构造 `ValidatedGameEntryV1`。下列 low-level Launcher API 是 `HostraPlatform` 内部 integration surface，也可用于 tooling/test。
 
 首批 API方向：
 
@@ -95,7 +98,7 @@ interface HostraGameSource {
 
 interface PreparedHostraGame {
   readonly logicalBootstrap: LogicalGameBootstrap;
-  readonly runtimeHosting: RuntimeHosting;
+  readonly launchPlan: HostraLaunchPlan;
 }
 
 async function prepareHostraGame(
@@ -103,13 +106,15 @@ async function prepareHostraGame(
 ): Promise<PreparedHostraGame>;
 ```
 
+`PreparedHostraGame` 是 `HostraPlatform` 内部的 PREPARE integration value，不是 Main-facing DTO；`HostraLaunchPlan` MUST 在 `prepareGame()` 成功时被 Platform instance 安装并保持 private。
+
 `prepareHostraGame` exact source/acquisition details在 M6 随真实 Desktop installation integration 冻结；现在冻结的是 responsibility：
 
 ```text
-caller supplies Hostra source/installation capability
+HostraPlatform supplies Hostra source/installation capability to Launcher component
 launcher obtains Game Entry
 launcher invokes @loomrealm/game-package
-caller does not orchestrate common validation manually
+product caller does not orchestrate common validation or call Game Package manually
 ```
 
 不得为了 Hostra/PWA相似而预建 universal `GameSource` / `PreparedPlatformGame` package。
@@ -159,7 +164,7 @@ obtain Game Entry
 → validate Hostra runtime capability
 → freeze HostraLaunchPlan
 → project/freeze LogicalGameBootstrap
-→ return PreparedHostraGame
+→ return PreparedHostraGame to HostraPlatform
 ```
 
 PREPARE failure：
@@ -173,9 +178,12 @@ zero Runtime Control
 ### COMMIT
 
 ```text
-apps/desktop installs Main(logicalBootstrap, runtimeHosting, other ports)
-→ Main launch(subsystemKey)
-→ RuntimeHosting plan lookup
+apps/desktop creates one HostraPlatform
+→ HostraPlatform.prepareGame(source) delegates PREPARE to this package
+→ HostraPlatform installs immutable HostraLaunchPlan
+→ apps/desktop runs Main(logicalBootstrap, same HostraPlatform)
+→ Main launch(subsystemKey) through HostraPlatform.runtimeHosting
+→ plan lookup
 → Launch Attempt
 → spawn Runner
 ```
@@ -207,7 +215,7 @@ Projection应 immutable，保持 exact key与 business input semantics。
 
 ## 7. RuntimeHosting
 
-Hostra RuntimeHosting在构造/prepare时已绑定 frozen plan。
+Main-facing Hostra RuntimeHosting 由 session-scoped HostraPlatform 暴露，并消费该 Platform instance 在 `prepareGame()` 时安装的 frozen plan。`PreparedHostraGame` 不再携带独立 long-lived RuntimeHosting object。
 
 Main-facing launch只接受：
 
@@ -237,10 +245,10 @@ bootstrap validation
 → verify planned key/binding
 → import exact planned module
 → validate SubsystemDefinitionFactory
-→ RuntimeControlBinding
-→ SubsystemDataBinding
-→ ContentClient
-→ runSubsystem
+→ M6 RuntimeControlBinding
+→ M8+ SubsystemDataBinding
+→ M12+ ContentClient
+→ runSubsystem with current-milestone capabilities
 ```
 
 Business Definition Module不是 launcher/entry policy。
@@ -327,11 +335,11 @@ universal Game source abstraction
 
 ## 13. Final Invariants
 
-1. Product bootstrap caller调用 Hostra Launcher，不手动编排 Game Package；
-2. Hostra Launcher内部消费 `@loomrealm/game-package`；
+1. Product bootstrap caller创建并调用 session-scoped HostraPlatform，不手动编排 Game Package；
+2. HostraPlatform内部使用 Hostra Launcher component；Launcher内部消费 `@loomrealm/game-package`；
 3. Game/Hostra key set严格 join；
 4. HostraLaunchPlan + LogicalGameBootstrap在 first Runtime side effect前闭合；
-5. Main不依赖 Game Package/concrete Launcher；
+5. Main不依赖 Game Package/concrete Launcher；Main 只消费 HostraPlatform 的 Main-facing narrow view；
 6. Main只传 subsystemKey；
 7. Host policy不可由 Game/Platform config覆盖；
 8. Runner是 process entry，business module由 Runner import；

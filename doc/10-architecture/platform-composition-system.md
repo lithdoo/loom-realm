@@ -4,10 +4,10 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：跨平台 composition boundary、Launcher-owned Game Entry PREPARE、Platform Launch Manifest/Plan、Runtime Runner、role-facing ports、DataConnectionBroker/provisioning，以及 Hostra/PWA 对同一 logical Session 的 realization  
-> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档细化：[运行承载系统](./runtime-hosting-system.md)、[运行时启动系统](./runtime-bootstrap-system.md)、[通信系统](./communication-system.md)  
 > 被以下文档实现：[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-08-28
 
 本文回答：**同一套 LoomRealm application semantics 如何在不同物理平台上被完整准备、组合并运行。**
 
@@ -32,9 +32,11 @@ Bootstrap 前还有一个独立 document/launch boundary：
 
 ```text
 Game source
-→ matching Platform Launcher PREPARE
-→ LogicalGameBootstrap + plan-bound RuntimeHosting
-→ Main
+→ session-scoped concrete Platform instance
+    → matching Launcher component PREPARE
+    → install immutable PlatformLaunchPlan internally
+    → return LogicalGameBootstrap
+→ Main receives LogicalGameBootstrap + Main-facing Platform view
 ```
 
 必须保持：
@@ -70,7 +72,7 @@ physical startup/shutdown
 
 因此：
 
-> **Platform Composition owns physical topology; matching Launcher owns Game + executable PREPARE; roles consume only projections/ports.**
+> **Concrete Platform instance is the product composition object; matching Launcher is its Game + executable PREPARE component; roles consume only logical projections and narrow role-facing capability views.**
 
 ---
 
@@ -80,14 +82,16 @@ Runtime-product path：
 
 ```text
 Hostra product
-→ @loomrealm/game-launcher-hostra
-    → @loomrealm/game-package
-    → launch.hostra.json
+→ HostraPlatform.prepareGame(...)
+    → @loomrealm/game-launcher-hostra component
+        → @loomrealm/game-package
+        → launch.hostra.json
 
 PWA product
-→ @loomrealm/game-launcher-pwa
-    → @loomrealm/game-package
-    → launch.pwa.json
+→ PwaPlatform.prepareGame(...)
+    → @loomrealm/game-launcher-pwa component
+        → @loomrealm/game-package
+        → launch.pwa.json
 ```
 
 Application/composition 不需要先显式调用 `@loomrealm/game-package`。
@@ -137,18 +141,22 @@ options:any
 
 ### PREPARE
 
-Matching Launcher MUST 在任何 business Runtime side effect前完成：
+Concrete Platform 的 `prepareGame()` MUST 在任何 business Runtime side effect前，通过 matching Launcher component 完成：
 
 ```text
-obtain Game Entry
-→ @loomrealm/game-package parse/validate
-→ validate own Platform Launch Manifest
-→ exact key-set join
-→ resolve every required executable binding
-→ validate installation/security/hosting capability
-→ freeze immutable PlatformLaunchPlan
-→ project immutable LogicalGameBootstrap
-→ release PreparedCurrentPlatformGame
+Launcher component
+    obtain Game Entry
+    → @loomrealm/game-package parse/validate
+    → validate own Platform Launch Manifest
+    → exact key-set join
+    → resolve every required executable binding
+    → validate installation/security/hosting capability
+    → freeze immutable PlatformLaunchPlan
+    → project immutable LogicalGameBootstrap
+
+Concrete Platform.prepareGame(...)
+    → install/freeze PlatformLaunchPlan internally
+    → return LogicalGameBootstrap to composition
 ```
 
 Phase 1：
@@ -172,10 +180,11 @@ Runtime Control establish count = 0
 Composition 安装：
 
 ```text
-LogicalGameBootstrap
-+ plan-bound RuntimeHosting
-+ remaining platform ports
+same prepared concrete Platform instance
++ LogicalGameBootstrap
 → Main / Renderer / Content composition
+
+Main receives only the role-local capability view it needs; the concrete Platform object may structurally satisfy several role views without becoming a universal Core service locator.
 ```
 
 随后 Main 才可：
@@ -204,7 +213,7 @@ PlatformLaunchPlan
     → Platform-private
 ```
 
-Main 不需要看到 plan；RuntimeHosting 在内部绑定 plan。
+Main 不需要看到 plan；session-scoped concrete Platform instance 持有 plan，并通过其 Main-facing `RuntimeHosting` capability 使用该 plan。`RuntimeHosting` 不再作为 Launcher prepared-result 中漂移的独立长生命周期对象。
 
 不要创建同时暴露 logical + physical material 的万能 DTO。
 
@@ -300,9 +309,11 @@ System Platform
     └── ContentClient
 ```
 
-这些只是 Platform 在每个 role 的 local projection。
+这些只是 Platform 在每个 role 的 conceptual local projection；该列表不是一个必须整体出现的 TypeScript interface，也不表示 M5 需要一次冻结全部 ports。M5 exact Runtime hosting/control/supervision shape 由真实 Main consumer closure 决定，例如可由 `RuntimeHosting` 返回 attempt-scoped `HostedRuntime` 来自然绑定 Control 与 termination facts，而不是强制三个独立 registry/ports。
 
-Launcher package 可以实现 Main-facing RuntimeHosting / Runner integration，但不能因此吞并其他 ports/application authority。
+Concrete `HostraPlatform` / `PwaPlatform` object MAY 同时实现多个 role-local capability view；这属于 composition convenience，不等于 `@loomrealm/platform-ports` 定义一个万能 `Platform` contract。Core role 只依赖自己需要的窄 view。
+
+Launcher package 是 concrete Platform 的 PREPARE / Runner integration component；它可以提供 RuntimeHosting 的内部实现材料，但不能因此吞并 Renderer/Data/Content ports 或 application authority。
 
 ---
 
@@ -434,8 +445,13 @@ Platform-specific artifact MAY 不同；业务不得通过 runtime platform dete
 
 ```text
 apps/desktop
+    → create HostraPlatform for one Session
+
 apps/pwa
+    → create PwaPlatform for one Session
 ```
+
+Concrete Platform object MAY aggregate current-platform capabilities, but package ownership remains modular. Phase 1 推荐 one Platform instance → one prepared Game → one Main Session；切换 Game / 新 Session 创建 fresh Platform instance。
 
 窄 Runtime launch packages：
 
@@ -486,18 +502,19 @@ HTTP vs Service Worker internals
 
 ## 18. Final Invariants
 
-1. Platform 是 complete physical Session composition boundary；
-2. matching Launcher 是 Runtime-product Game Entry consumer；
+1. session-scoped concrete Platform instance 是 complete physical Session composition object；Platform architecture / package boundary 仍保持模块化；
+2. matching Launcher 是 concrete Platform 内部的 Game PREPARE component / Runtime-product Game Entry consumer；
 3. Game Package 是 document validation capability，不是 Runtime role；
 4. Game/current-platform key set Phase 1严格相等；
 5. PlatformLaunchPlan + LogicalGameBootstrap 在 first Runtime side effect前闭合；
 6. Main 不解析 Game Entry、不依赖 Game Package/concrete Launcher；
-7. Main 只发 logical `launch(subsystemKey)`；
-8. Host-owned Runner 与 business Definition Module 分离；
-9. Hostra/PWA manifest 独立演化；
-10. Launcher package 不扩张为 Platform mega-package；
-11. DataConnectionBroker实现 physical carrier但不拥有 Main authority；
-12. provisioning独立于 application protocols；
-13. Data provisioning failure不等于 Runtime/Frame failure；
-14. Control/Data application units统一 UTF-8 JSON text；
-15. Hostra/PWA physical mechanism/artifact可不同，但 logical application trace必须等价。
+7. Main 接收 `LogicalGameBootstrap` + Main-facing Platform capability view；具体 Hostra/PWA object 可 structural-satisfy 该 view；
+8. Main 只发 logical `launch(subsystemKey)`；
+9. Host-owned Runner 与 business Definition Module 分离；
+10. Hostra/PWA manifest 独立演化；
+11. Launcher package 不扩张为 Platform mega-package；
+12. DataConnectionBroker实现 physical carrier但不拥有 Main authority；
+13. provisioning独立于 application protocols；
+14. Data provisioning failure不等于 Runtime/Frame failure；
+15. Control/Data application units统一 UTF-8 JSON text；
+16. Hostra/PWA physical mechanism/artifact可不同，但 logical application trace必须等价。

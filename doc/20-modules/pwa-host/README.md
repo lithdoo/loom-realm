@@ -4,8 +4,8 @@
 > 状态：Active Design  
 > 稳定程度：Experimental  
 > 主要定义：PWA Platform Composition realization：PWA Launcher-owned Game PREPARE、Window、Worker Runner、MessagePort/MessageChannel、Worker provisioning、Service Worker/OPFS 与安全边界  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-08-28
 
 本文描述完整 PWA Platform Composition realization，不是 `@loomrealm/platform-pwa` mega-package。`@loomrealm/game-launcher-pwa` 只抽出 Game Entry consumption + Subsystem Runtime launch planning/hosting/Runner integration；Renderer/Data Broker/Content/SW integration 仍由完整 composition负责。
 
@@ -14,20 +14,24 @@
 ## 1. Composition
 
 ```text
-PWA game installation/source
+apps/pwa / product entry
         ↓
-@loomrealm/game-launcher-pwa PREPARE
+create session-scoped PwaPlatform
+        ↓
+PwaPlatform.prepareGame(installation/source)
+        ↓
+@loomrealm/game-launcher-pwa PREPARE component
     ├── @loomrealm/game-package validates Game Entry
     ├── validates launch.pwa.json
     ├── exact key-set join
     ├── full installation/origin/security preflight
-    ├── immutable PwaLaunchPlan
-    └── immutable LogicalGameBootstrap
+    ├── immutable PwaLaunchPlan → installed privately in PwaPlatform
+    └── immutable LogicalGameBootstrap → returned to composition
         ↓
-PreparedPwaGame
+runMain({ bootstrap: logicalBootstrap, platform: same PwaPlatform })
         ↓
-apps/pwa
-├── installs Main(logicalBootstrap + plan-bound RuntimeHosting)
+PwaPlatform
+├── Main-facing RuntimeHosting / scheduler
 ├── Worker RuntimeHosting / Supervision
 ├── Host-owned Worker Subsystem Runner
 ├── Runtime Control MessagePort
@@ -46,7 +50,7 @@ Window/Worker/Port/Service Worker 只负责 physical realization，不拥有 Fra
 
 ## 2. PWA PREPARE
 
-Product bootstrap caller 调 PWA Launcher，而不是：
+Product bootstrap caller 调 `PwaPlatform.prepareGame(...)`；PwaPlatform 内部调用 PWA Launcher component，而不是让 product caller：
 
 ```text
 parse Game Entry manually
@@ -88,7 +92,8 @@ LogicalGameBootstrap
     subsystemKeys
     initial {subsystemKey,input}
 
-plan-bound RuntimeHosting
+Main-facing capability view
+    structurally satisfied by the same prepared PwaPlatform instance
 ```
 
 Main does not receive：
@@ -102,7 +107,7 @@ module/moduleUrl
 Worker/Runner/Port details
 ```
 
-`apps/pwa` MAY hold prepared result but MUST NOT re-interpret raw config。
+`PwaPlatform` 持有 frozen PwaLaunchPlan；`apps/pwa` 只负责编排 `prepareGame()` 与 `runMain()`，MUST NOT re-interpret raw config。Main 不读取 PwaLaunchPlan。
 
 ---
 
@@ -129,9 +134,9 @@ receive/validate Platform bootstrap
 → resolve/import exact planned module
 → validate default SubsystemDefinitionFactory
 → construct RuntimeControlBinding
-→ construct SubsystemDataBinding
-→ construct ContentClient
-→ runSubsystem(...)
+→ M8+ construct SubsystemDataBinding
+→ M12+ construct ContentClient
+→ runSubsystem(...) with current-milestone capabilities
 ```
 
 Business module不得创建 Worker、寻找 bootstrap Port、读取 launch manifest或分支 PWA business semantics。

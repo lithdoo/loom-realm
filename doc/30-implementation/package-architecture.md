@@ -4,9 +4,9 @@
 > 状态：Active Design / Tracking  
 > 稳定程度：Evolving  
 > 主要定义：primitive、document/contract capability、role、platform launch integration、technical adapter/Runner integration、composition root 与 business package 的拆分原则  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[模块设计目录](../20-modules/README.md)  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[模块设计目录](../20-modules/README.md)  
 > 被实现：[仓库与目录方案](./repository-layout.md)  
-> 最近复核：2026-08-27
+> 最近复核：2026-08-28
 
 本文是 package/publish boundary 的主要事实源；repository layout只实现本文，不反向定义它。
 
@@ -37,9 +37,11 @@ Current low-level primitives feed multiple independent capability branches。以
         ↓
 @loomrealm/game-package
         ↓
-matching game-launcher-*
+matching game-launcher-* component
         ↓
-apps/* composition
+session-scoped concrete Platform composition
+        ↓
+apps/* product entry
 ```
 
 对 `@loomrealm/subsystem` 必须同时观察 Runtime、Data、Content 等 capability branch：
@@ -191,7 +193,7 @@ Runtime dependency exactly：
 
 `DeadlineScheduler` 与 Runtime Control scheduler structural-compatible，但 `platform-ports` MUST NOT依赖 `@loomrealm/runtime-control`。`RuntimeControlBinding` 是 one-Launch-Attempt / single-use / no-reconnect establishment capability。
 
-M5+ Main/Renderer/Data/Content ports 只在对应 real consumer closure 时增长；不得提前建立万能 `Platform` object、service locator 或 future port inventory。
+M5+ Main/Renderer/Data/Content ports 只在对应 real consumer closure 时增长；不得提前建立 universal Core `Platform` contract、service locator 或 future port inventory。Product composition MAY 创建 session-scoped concrete `HostraPlatform` / `PwaPlatform` object 来聚合真实实现；Core role 只依赖自己的 narrow capability view。
 
 ---
 

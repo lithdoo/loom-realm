@@ -3,9 +3,9 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input，以及 plan-bound Main-facing Platform ports  
-> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input、session-scoped concrete Platform composition，以及 Main-facing narrow capability view  
+> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-08-28
 
 Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority。它不拥有 Game Entry document contract、Platform executable binding，也不等于 Process/Worker/WebSocket/MessagePort realization。
 
@@ -84,40 +84,64 @@ Main starts from：
 ```text
 LogicalGameBootstrap
 +
-plan-bound RuntimeHosting
-+
-remaining platform ports
+session-scoped prepared concrete Platform instance
+    exposed through Main's narrow capability view
 ```
 
 not from raw documents。
+
+Composition model：
+
+```ts
+const platform = createPwaPlatform(/* current environment/policy */);
+const prepared = await platform.prepareGame(source);
+
+await runMain({
+  bootstrap: prepared.logicalBootstrap,
+  platform,
+});
+```
+
+Main MUST NOT call `prepareGame()`；PREPARE belongs to product composition / concrete Platform before Main starts.
 
 ---
 
 ## 4. Main-facing Platform Ports
 
-```text
-RuntimeHosting
-    launch/supervise Host-owned Runner Runtime by logical subsystemKey
+M5 建议先形成一个 consumer-owned role-local view：
 
-RuntimeControlHost
-    establish current Launch Attempt Control carrier
-
-RendererHosting
-    realize current Renderer participant
-
-RendererControlHost
-    establish Renderer Control carrier
-
-DataConnectionBroker
-    realize current DataAuthority on Renderer + Subsystem sides
-
-ContentServiceIntegration
-    expose platform Content implementation
+```ts
+interface MainPlatform {
+  readonly scheduler: DeadlineScheduler;
+  readonly runtimeHosting: RuntimeHosting;
+}
 ```
+
+`MainPlatform` 是 Main 当前需要的 capability bundle，不是 universal LoomRealm Platform contract。Concrete `HostraPlatform` / `PwaPlatform` MAY 是更大的 composition object，并 structural-satisfy 这个 view；`@loomrealm/main` 不依赖 concrete type。
+
+Capability 按 milestone 增长：
+
+```text
+M5
+    DeadlineScheduler
+    RuntimeHosting
+        → HostedRuntime
+            → Main-side Runtime Control establishment
+            → physical termination fact
+            → termination request capability
+
+M7
+    RendererHosting / Renderer Control binding
+
+M8/M9
+    DataConnectionBroker
+```
+
+Content 若没有 Main-owned Session-level authority，则不穿过 Main；它应由具体 Platform 直接投影到真实 role consumer。
 
 Ports provide physical capability/facts；Main仍拥有 application authority。
 
-`RuntimeHosting` 已绑定 immutable PlatformLaunchPlan；Main不需要 module resolver API。
+Concrete Platform instance 已绑定 immutable PlatformLaunchPlan；其 `RuntimeHosting` capability 内部读取该 plan。Main 不需要 module resolver API。
 
 ---
 

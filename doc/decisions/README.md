@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、替代关系、current-v1 映射与重新评估条件  
-> 最近复核：2026-08-21
+> 最近复核：2026-08-28
 
 ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR 保留完整历史，但不形成第二份 current contract。
 
@@ -32,6 +32,11 @@ ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`
 19. [ADR 0019：Game Logical Topology 与 Platform Launch Manifest 分离](./0019-platform-launch-manifest-boundary.md)
 20. [ADR 0020：Game Entry 消费边界归 Platform Launcher，Main 只接收 LogicalGameBootstrap](./0020-game-entry-consumer-boundary.md)
 21. [ADR 0021：Runtime Control 首次实现前收口 current v1 mechanics](./0021-runtime-control-preimplementation-closure.md)
+22. [ADR 0022：Render Update v1 freeze closure](./0022-render-update-v1-freeze-closure.md)
+23. [ADR 0023：User Input v1 semantic closure](./0023-user-input-v1-semantic-closure.md)
+24. [ADR 0024：Renderer ⇄ Subsystem Data Connection v1 semantic closure](./0024-renderer-subsystem-data-connection-v1-semantic-closure.md)
+25. [ADR 0025：Renderer Data Profile v1 preimplementation closure](./0025-renderer-data-profile-v1-preimplementation-closure.md)
+26. [ADR 0026：Concrete Platform 是 Session Composition Object，Launcher 是 Platform 内部 PREPARE Component](./0026-session-scoped-platform-instance.md)
 
 ---
 
@@ -86,6 +91,7 @@ ADR 0020
     → GameEntryV1 != Main bootstrap model
     → Main has no Game Package/concrete Launcher dependency
     → Main consumes immutable LogicalGameBootstrap only
+    → prepared-result `LogicalGameBootstrap + RuntimeHosting` shape clarified/superseded by ADR 0026
 
 ADR 0021
     → Runtime Control package root-only + role-specific peers
@@ -95,6 +101,13 @@ ADR 0021
     → finite deadline/terminal settlement first-wins
     → duplicate JSON source semantics follow frozen Wire/JSON.parse
     → no second JSON parser
+
+ADR 0026
+    → concrete Platform is session-scoped product composition object
+    → Launcher is Platform-internal PREPARE component
+    → PlatformLaunchPlan installed privately in concrete Platform
+    → Main receives LogicalGameBootstrap + Main-facing narrow Platform view
+    → concrete Platform object does not create universal Core Platform contract/mega-package
 ```
 
 ---
@@ -104,7 +117,9 @@ ADR 0021
 ```text
 Game installation / source
         ↓
-Current Platform Launcher PREPARE
+Session-scoped Concrete Platform.prepareGame(...)
+        ↓
+Current Platform Launcher component PREPARE
     ├── @loomrealm/game-package
     │       Game Entry {key...} + initial validation
     ├── Current Platform Launch Manifest
@@ -114,13 +129,12 @@ Current Platform Launcher PREPARE
     ├── full executable resolution
     └── hosting/security preflight
         ↓
-immutable PlatformLaunchPlan
-+
-immutable LogicalGameBootstrap
+immutable PlatformLaunchPlan → installed privately in Platform
+immutable LogicalGameBootstrap → returned to composition
         ↓
-apps/* installs Main
+apps/* runs Main({ bootstrap, platform })
         ↓
-Main launch(key) ─────────────► plan-bound RuntimeHosting
+Main launch(key) ─────────────► Platform.runtimeHosting
                                       ↓
                               Host-owned Runner
                                       ↓

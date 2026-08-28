@@ -4,10 +4,10 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：Subsystem Runtime Container、PlatformLaunchPlan、Runner、Control/Frame/Input/Render 的承载粒度，以及 plan-bound RuntimeHosting / Supervisor 边界  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档细化：[运行时启动系统](./runtime-bootstrap-system.md)、[栈式运行系统](./stack-runtime-system.md)、[Subsystem 模型](./subsystem-model.md)  
 > 正式化：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-08-28
 
 本文只定义 Runtime physical hosting 边界。Game Entry document validation、Launcher PREPARE、Main authority、Frame authority与 Data authority分别由各自事实源拥有。
 
@@ -45,7 +45,7 @@ Platform Launch Manifest
 
 Main 也不解析/接收这些 document types。
 
-在任何 business Runtime side effect 前，matching Platform Launcher MUST 已完成：
+在任何 business Runtime side effect 前，current concrete Platform `prepareGame()` MUST 已通过 matching Launcher component 完成：
 
 ```text
 Game Entry validation via @loomrealm/game-package
@@ -56,6 +56,7 @@ Game Entry validation via @loomrealm/game-package
 → current hosting capability preflight
 → freeze immutable PlatformLaunchPlan
 → project immutable LogicalGameBootstrap
+→ concrete Platform installs the plan privately
 ```
 
 任一 PREPARE failure：
@@ -82,7 +83,7 @@ PlatformLaunchPlan
     → Map<subsystemKey, ResolvedPlatformImplementation>
 ```
 
-Main 不得通过 bootstrap 获得 executable material；RuntimeHosting 不得要求 Main重新传 Game Entry/manifest。
+Main 不得通过 bootstrap 获得 executable material；session-scoped concrete Platform instance 持有 immutable PlatformLaunchPlan，并通过其 Main-facing RuntimeHosting capability 使用该 plan。RuntimeHosting 不得要求 Main重新传 Game Entry/manifest。
 
 ---
 
@@ -143,10 +144,10 @@ Runner负责：
 verify own planned subsystemKey/binding
 load exact plan-selected Definition Module
 validate default SubsystemDefinitionFactory ABI
-construct RuntimeControlBinding
-construct SubsystemDataBinding
-construct ContentClient
-invoke runSubsystem(...)
+M6 construct RuntimeControlBinding
+M8+ construct SubsystemDataBinding when Data slice lands
+M12+ construct ContentClient when Content slice lands
+invoke runSubsystem(...) with only capabilities implemented by the current milestone
 platform-local diagnostics/cleanup
 ```
 
@@ -156,7 +157,7 @@ Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也�
 
 ## 6. Main-facing RuntimeHosting
 
-RuntimeHosting 是 logical launch port，而不是 module loader API。
+RuntimeHosting 是 prepared concrete Platform instance 对 Main 暴露的 logical launch capability，而不是 module loader API。其 exact M5 TypeScript shape 由 `@loomrealm/platform-ports` 的 M5 consumer closure 冻结；本文只冻结 responsibility。
 
 概念：
 

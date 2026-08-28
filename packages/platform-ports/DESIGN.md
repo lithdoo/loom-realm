@@ -2,7 +2,7 @@
 
 > 状态：**Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen**  
 > 阶段：M4 Platform Capability Contract baseline  
-> 最近复核：2026-08-27  
+> 最近复核：2026-08-28  
 > 当前代码：M4 public slice 已落地；root export 仅 `DeadlineScheduler` / `RuntimeControlBinding`。  
 > 上层事实源：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[运行承载系统](../../doc/10-architecture/runtime-hosting-system.md)、[运行时启动系统](../../doc/10-architecture/runtime-bootstrap-system.md)  
 > 首个消费者：`@loomrealm/subsystem/host`（M4）；M5+ exact ports 尚未冻结。
@@ -108,7 +108,22 @@ interface Platform {
 
 也禁止：service locator、DI container、generic event bus、transport registry、generic lifecycle framework、generic Clock、platform detection API。
 
-每个 capability 独立定义、独立注入、独立 lifetime。
+这条规则 **不禁止 product composition 创建 concrete `HostraPlatform` / `PwaPlatform` object**，也不禁止 consumer package 定义只聚合当前所需 ports 的 role-local view（例如 M5 `@loomrealm/main` 的 `MainPlatform`）。区别固定为：
+
+```text
+Concrete Platform object
+    composition convenience / physical implementation aggregate
+
+consumer-owned role view
+    narrow capability bundle for one Core role
+
+@loomrealm/platform-ports
+    individual cross-boundary capability contracts only
+```
+
+Concrete Platform MAY structural-satisfy 多个 role view；Core MUST NOT依赖其 concrete type。
+
+每个 capability 仍独立定义、独立 lifetime；role-local bundle 不获得额外 authority。
 
 ---
 
@@ -252,14 +267,19 @@ M5 确实需要 Main-facing physical capabilities，但 exact API 现在不冻�
 M5 preimplementation closure 先闭合：
 
 ```text
+session-scoped concrete Platform instance
+    already prepared with immutable PlatformLaunchPlan
+        ↓
 Main-owned Launch Attempt
         ↓
 Platform Runtime creation
         ↓
-Control connection
+Control connection + physical termination facts
         ↓
 Main correlation
 ```
+
+M5 exact individual ports 仍由本包冻结；若 Main 为调用 ergonomics 定义 `MainPlatform` bundle，该 bundle 属于 Main consumer surface，而不是本包的 universal Platform API。
 
 再决定：
 

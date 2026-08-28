@@ -2,35 +2,38 @@
 
 > 状态：Implementation Planning / Boundary Frozen  
 > 阶段：M15 PWA launch planning / RuntimeHosting / Worker Runner integration  
-> 最近复核：2026-08-20  
-> 目标：成为 PWA Runtime-product Game bootstrap entry：内部消费 `@loomrealm/game-package`，完成 PWA Game + Platform PREPARE，产出 Main-facing logical bootstrap 与 plan-bound RuntimeHosting，同时保持 Main/业务 platform-neutral。  
+> 最近复核：2026-08-28  
+> 目标：成为 concrete PWA Platform 内部的 Game PREPARE / Worker Runner integration component：内部消费 `@loomrealm/game-package`，闭合 PWA Game + executable PREPARE，产出 immutable `PwaLaunchPlan` + Main-facing logical bootstrap；long-lived Main-facing capabilities 由 session-scoped PwaPlatform instance 暴露。  
 > 正式契约：[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../doc/15-contracts/pwa-launcher-profile-v1.md)  
-> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)
+> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../doc/decisions/0026-session-scoped-platform-instance.md)
 
 核心原则：
 
-> **这是 PWA Subsystem Runtime launch capability package，不是 PWA Platform mega-package。Product bootstrap caller 调本包；本包内部调 `@loomrealm/game-package`。Main 不调本包，也不调 Game Package。**
+> **这是 PwaPlatform 的 Game PREPARE / Worker Runner integration component，不是 PWA Platform 本身。Product bootstrap caller 面向 session-scoped PwaPlatform；PwaPlatform 内部调用本包，本包内部调用 `@loomrealm/game-package`。Main 不调本包，也不调 Game Package。**
 
 ---
 
 ## 1. Package Position
 
 ```text
-PWA game source / installation
+apps/pwa / product entry
         ↓
-@loomrealm/game-launcher-pwa
+PwaPlatform.prepareGame(source)
+        ↓
+@loomrealm/game-launcher-pwa component
     ├── @loomrealm/game-package parse/validate
     ├── PWA manifest validator
     ├── exact key-set join
     ├── installation/origin resolver/security preflight
     ├── immutable PwaLaunchPlan
     ├── LogicalGameBootstrap projection
-    ├── RuntimeHosting
-    └── Worker Runner/supervision integration
+    └── Worker Runner/supervision integration primitives
         ↓
-PreparedPwaGame
+PreparedPwaGame { logicalBootstrap, launchPlan }
         ↓
-apps/pwa composition
+PwaPlatform.prepareGame installs plan
+        ↓
+apps/pwa passes the same PwaPlatform to Main
 ```
 
 Dependencies MAY include：
@@ -58,7 +61,7 @@ installation registry / same-origin module resolution
 exact Game↔PWA key join
 immutable PwaLaunchPlan
 Main-facing LogicalGameBootstrap projection
-Main-facing RuntimeHosting implementation
+PwaLaunchPlan production + plan-consumer primitives for concrete PwaPlatform RuntimeHosting
 Host-owned Worker Runner/bootstrap integration
 Worker supervision adapter
 Runner provisioning integration surface
@@ -82,14 +85,14 @@ Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主�
 
 ## 3. Public Bootstrap Shape
 
-调用者不应被迫先构造 `ValidatedGameEntryV1`。
+标准 Runtime-product caller 面向 `PwaPlatform.prepareGame(...)`，不应被迫先构造 `ValidatedGameEntryV1`。下列 low-level Launcher API 是 `PwaPlatform` 内部 integration surface，也可用于 tooling/test。
 
 首批 API方向：
 
 ```ts
 interface PreparedPwaGame {
   readonly logicalBootstrap: LogicalGameBootstrap;
-  readonly runtimeHosting: RuntimeHosting;
+  readonly launchPlan: PwaLaunchPlan;
 }
 
 async function preparePwaGame(
@@ -100,10 +103,10 @@ async function preparePwaGame(
 `preparePwaGame` exact Game acquisition/installation shape在 M15 随真实 PWA installation integration 冻结；现在冻结的是：
 
 ```text
-caller supplies PWA source/installation capability
+PwaPlatform supplies PWA source/installation capability to Launcher component
 launcher obtains Game Entry
 launcher invokes @loomrealm/game-package
-caller does not orchestrate common validation manually
+product caller does not orchestrate common validation or call Game Package manually
 ```
 
 不得为了 Hostra/PWA相似预建 universal `GameSource` / `PreparedPlatformGame` package。
@@ -151,7 +154,7 @@ obtain Game Entry
 → validate origin/security/Worker capability
 → freeze PwaLaunchPlan
 → project/freeze LogicalGameBootstrap
-→ return PreparedPwaGame
+→ return PreparedPwaGame to PwaPlatform
 ```
 
 PREPARE failure：
@@ -165,9 +168,12 @@ zero Runtime Control
 ### COMMIT
 
 ```text
-apps/pwa installs Main(logicalBootstrap, runtimeHosting, other ports)
-→ Main launch(subsystemKey)
-→ RuntimeHosting plan lookup
+apps/pwa creates one PwaPlatform
+→ PwaPlatform.prepareGame(source) delegates PREPARE to this package
+→ PwaPlatform installs immutable PwaLaunchPlan
+→ apps/pwa runs Main(logicalBootstrap, same PwaPlatform)
+→ Main launch(subsystemKey) through PwaPlatform.runtimeHosting
+→ plan lookup
 → Launch Attempt
 → create Host-owned Worker Runner
 ```
@@ -199,7 +205,7 @@ Projection应 immutable，保持 exact key与 business input semantics。
 
 ## 7. RuntimeHosting
 
-PWA RuntimeHosting在 prepare 时已绑定 frozen plan。
+Main-facing PWA RuntimeHosting 由 session-scoped PwaPlatform 暴露，并消费该 Platform instance 在 `prepareGame()` 时安装的 frozen plan。`PreparedPwaGame` 不再携带独立 long-lived RuntimeHosting object。
 
 Main-facing launch只接受：
 
@@ -229,10 +235,10 @@ bootstrap validation
 → verify planned key/binding
 → import exact planned module
 → validate SubsystemDefinitionFactory
-→ RuntimeControlBinding
-→ SubsystemDataBinding
-→ ContentClient
-→ runSubsystem
+→ M6 RuntimeControlBinding
+→ M8+ SubsystemDataBinding
+→ M12+ ContentClient
+→ runSubsystem with current-milestone capabilities
 ```
 
 Business Definition Module 不是 Worker entry，也不寻找 bootstrap Port。
@@ -339,11 +345,11 @@ universal Game source abstraction
 
 ## 14. Final Invariants
 
-1. Product bootstrap caller调用 PWA Launcher，不手动编排 Game Package；
-2. PWA Launcher内部消费 `@loomrealm/game-package`；
+1. Product bootstrap caller创建并调用 session-scoped PwaPlatform，不手动编排 Game Package；
+2. PwaPlatform内部使用 PWA Launcher component；Launcher内部消费 `@loomrealm/game-package`；
 3. Game/PWA key set严格 join；
 4. PwaLaunchPlan + LogicalGameBootstrap在 first Worker side effect前闭合；
-5. Main不依赖 Game Package/concrete Launcher；
+5. Main不依赖 Game Package/concrete Launcher；Main 只消费 PwaPlatform 的 Main-facing narrow view；
 6. Main只传 subsystemKey；
 7. Host policy不可由 Game/Platform config覆盖；
 8. Worker Runner是 constructor entry，business module由 Runner import；

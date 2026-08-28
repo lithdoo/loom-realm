@@ -3,7 +3,8 @@
 > 状态：Accepted  
 > 日期：2026-08-20  
 > 影响范围：Game Package、Hostra/PWA Launcher、Main bootstrap、Platform Composition、package dependency graph、M2/M5/M6/M15  
-> 延续：[ADR 0017](./0017-system-level-platform-composition.md) Platform Composition ownership、[ADR 0019](./0019-platform-launch-manifest-boundary.md) Game topology / Platform executable binding 分离
+> 延续：[ADR 0017](./0017-system-level-platform-composition.md) Platform Composition ownership、[ADR 0019](./0019-platform-launch-manifest-boundary.md) Game topology / Platform executable binding 分离  
+> 后续澄清：[ADR 0026](./0026-session-scoped-platform-instance.md) 将本 ADR 决策 5 中过度具体的 `LogicalGameBootstrap + plan-bound RuntimeHosting` prepared-result 形态收敛为 session-scoped concrete Platform instance；本 ADR 的 Game Entry consumer boundary 与 Main logical-only boundary 保持不变。
 
 ## 背景
 
