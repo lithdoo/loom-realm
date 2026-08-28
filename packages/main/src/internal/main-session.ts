@@ -1273,7 +1273,7 @@ export class MainSessionRuntime {
     reason: "session-end" | "bootstrap-abort",
   ): Promise<void> {
     record.expectedTermination = true;
-  
+
     let gracefulShutdownAccepted = false;
     const peer = record.peer;
     if (
@@ -1297,10 +1297,10 @@ export class MainSessionRuntime {
         peer.close(),
       );
     }
-  
+
     const hosted = record.hosted;
     if (hosted === null || record.physicallyTerminated) return;
-  
+
     // A successful protocol shutdown only means the Runtime accepted the
     // graceful intent. Give that Runtime a bounded opportunity to finish
     // its own shutdown hook and terminate naturally before escalating to
@@ -1313,7 +1313,7 @@ export class MainSessionRuntime {
       );
       if (terminatedNaturally) return;
     }
-  
+
     if (!record.terminationRequested) {
       record.terminationRequested = true;
       try {
@@ -1327,7 +1327,7 @@ export class MainSessionRuntime {
         // Bounded physical cleanup does not replace the primary Session terminal.
       }
     }
-  
+
     await settleWithin(
       this.options.platform.scheduler,
       this.options.policy.terminationDeadlineMs,
