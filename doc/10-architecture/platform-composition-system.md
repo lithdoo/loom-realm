@@ -4,10 +4,10 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：跨平台 composition boundary、Launcher-owned Game Entry PREPARE、Platform Launch Manifest/Plan、Runtime Runner、role-facing ports、DataConnectionBroker/provisioning，以及 Hostra/PWA 对同一 logical Session 的 realization  
-> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-session-scoped-platform-instance.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档细化：[运行承载系统](./runtime-hosting-system.md)、[运行时启动系统](./runtime-bootstrap-system.md)、[通信系统](./communication-system.md)  
 > 被以下文档实现：[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-08-28
 
 本文回答：**同一套 LoomRealm application semantics 如何在不同物理平台上被完整准备、组合并运行。**
 
@@ -82,14 +82,16 @@ Runtime-product path：
 
 ```text
 Hostra product
-→ @loomrealm/game-launcher-hostra
-    → @loomrealm/game-package
-    → launch.hostra.json
+→ HostraPlatform.prepareGame(...)
+    → @loomrealm/game-launcher-hostra component
+        → @loomrealm/game-package
+        → launch.hostra.json
 
 PWA product
-→ @loomrealm/game-launcher-pwa
-    → @loomrealm/game-package
-    → launch.pwa.json
+→ PwaPlatform.prepareGame(...)
+    → @loomrealm/game-launcher-pwa component
+        → @loomrealm/game-package
+        → launch.pwa.json
 ```
 
 Application/composition 不需要先显式调用 `@loomrealm/game-package`。
@@ -139,19 +141,22 @@ options:any
 
 ### PREPARE
 
-Matching Launcher MUST 在任何 business Runtime side effect前完成：
+Concrete Platform 的 `prepareGame()` MUST 在任何 business Runtime side effect前，通过 matching Launcher component 完成：
 
 ```text
-obtain Game Entry
-→ @loomrealm/game-package parse/validate
-→ validate own Platform Launch Manifest
-→ exact key-set join
-→ resolve every required executable binding
-→ validate installation/security/hosting capability
-→ freeze immutable PlatformLaunchPlan
-→ install that plan into the current session-scoped concrete Platform instance
-→ project immutable LogicalGameBootstrap
-→ return the logical bootstrap to composition
+Launcher component
+    obtain Game Entry
+    → @loomrealm/game-package parse/validate
+    → validate own Platform Launch Manifest
+    → exact key-set join
+    → resolve every required executable binding
+    → validate installation/security/hosting capability
+    → freeze immutable PlatformLaunchPlan
+    → project immutable LogicalGameBootstrap
+
+Concrete Platform.prepareGame(...)
+    → install/freeze PlatformLaunchPlan internally
+    → return LogicalGameBootstrap to composition
 ```
 
 Phase 1：

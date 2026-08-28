@@ -2,10 +2,10 @@
 
 > 状态：Implementation Planning / Boundary Frozen  
 > 阶段：M6 Hostra launch planning / RuntimeHosting / Runner integration  
-> 最近复核：2026-08-20  
+> 最近复核：2026-08-28  
 > 目标：成为 concrete Hostra Platform 内部的 Game PREPARE / Runner integration component：内部消费 `@loomrealm/game-package`，闭合 Hostra Game + executable PREPARE，产出 immutable `HostraLaunchPlan` + Main-facing logical bootstrap；long-lived Main-facing capabilities 由 session-scoped HostraPlatform instance 暴露。  
 > 正式契约：[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../doc/15-contracts/nodejs-launcher-profile-v1.md)  
-> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)
+> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../doc/decisions/0026-session-scoped-platform-instance.md)
 
 核心原则：
 
@@ -16,16 +16,17 @@
 ## 1. Package Position
 
 ```text
-Hostra game source / installation
+apps/desktop / product entry
         ↓
-@loomrealm/game-launcher-hostra
+HostraPlatform.prepareGame(source)
+        ↓
+@loomrealm/game-launcher-hostra component
     ├── @loomrealm/game-package parse/validate
     ├── Hostra manifest validator
     ├── exact key-set join
     ├── module resolver/security preflight
     ├── immutable HostraLaunchPlan
     ├── LogicalGameBootstrap projection
-    ├── immutable HostraLaunchPlan
     └── Node Runner/supervision integration primitives
         ↓
 PreparedHostraGame { logicalBootstrap, launchPlan }
@@ -85,7 +86,7 @@ Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主�
 
 ## 3. Public Bootstrap Shape
 
-调用者不应被迫先构造 `ValidatedGameEntryV1`。
+标准 Runtime-product caller 面向 `HostraPlatform.prepareGame(...)`，不应被迫先构造 `ValidatedGameEntryV1`。下列 low-level Launcher API 是 `HostraPlatform` 内部 integration surface，也可用于 tooling/test。
 
 首批 API方向：
 
@@ -105,13 +106,15 @@ async function prepareHostraGame(
 ): Promise<PreparedHostraGame>;
 ```
 
+`PreparedHostraGame` 是 `HostraPlatform` 内部的 PREPARE integration value，不是 Main-facing DTO；`HostraLaunchPlan` MUST 在 `prepareGame()` 成功时被 Platform instance 安装并保持 private。
+
 `prepareHostraGame` exact source/acquisition details在 M6 随真实 Desktop installation integration 冻结；现在冻结的是 responsibility：
 
 ```text
-caller supplies Hostra source/installation capability
+HostraPlatform supplies Hostra source/installation capability to Launcher component
 launcher obtains Game Entry
 launcher invokes @loomrealm/game-package
-caller does not orchestrate common validation manually
+product caller does not orchestrate common validation or call Game Package manually
 ```
 
 不得为了 Hostra/PWA相似而预建 universal `GameSource` / `PreparedPlatformGame` package。

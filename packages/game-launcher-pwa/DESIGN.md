@@ -2,10 +2,10 @@
 
 > 状态：Implementation Planning / Boundary Frozen  
 > 阶段：M15 PWA launch planning / RuntimeHosting / Worker Runner integration  
-> 最近复核：2026-08-20  
+> 最近复核：2026-08-28  
 > 目标：成为 concrete PWA Platform 内部的 Game PREPARE / Worker Runner integration component：内部消费 `@loomrealm/game-package`，闭合 PWA Game + executable PREPARE，产出 immutable `PwaLaunchPlan` + Main-facing logical bootstrap；long-lived Main-facing capabilities 由 session-scoped PwaPlatform instance 暴露。  
 > 正式契约：[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../doc/15-contracts/pwa-launcher-profile-v1.md)  
-> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)
+> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../doc/decisions/0026-session-scoped-platform-instance.md)
 
 核心原则：
 
@@ -16,16 +16,17 @@
 ## 1. Package Position
 
 ```text
-PWA game source / installation
+apps/pwa / product entry
         ↓
-@loomrealm/game-launcher-pwa
+PwaPlatform.prepareGame(source)
+        ↓
+@loomrealm/game-launcher-pwa component
     ├── @loomrealm/game-package parse/validate
     ├── PWA manifest validator
     ├── exact key-set join
     ├── installation/origin resolver/security preflight
     ├── immutable PwaLaunchPlan
     ├── LogicalGameBootstrap projection
-    ├── immutable PwaLaunchPlan
     └── Worker Runner/supervision integration primitives
         ↓
 PreparedPwaGame { logicalBootstrap, launchPlan }
@@ -84,7 +85,7 @@ Common Game schema仍由 `@loomrealm/game-package` 定义；本包只是其主�
 
 ## 3. Public Bootstrap Shape
 
-调用者不应被迫先构造 `ValidatedGameEntryV1`。
+标准 Runtime-product caller 面向 `PwaPlatform.prepareGame(...)`，不应被迫先构造 `ValidatedGameEntryV1`。下列 low-level Launcher API 是 `PwaPlatform` 内部 integration surface，也可用于 tooling/test。
 
 首批 API方向：
 
@@ -102,10 +103,10 @@ async function preparePwaGame(
 `preparePwaGame` exact Game acquisition/installation shape在 M15 随真实 PWA installation integration 冻结；现在冻结的是：
 
 ```text
-caller supplies PWA source/installation capability
+PwaPlatform supplies PWA source/installation capability to Launcher component
 launcher obtains Game Entry
 launcher invokes @loomrealm/game-package
-caller does not orchestrate common validation manually
+product caller does not orchestrate common validation or call Game Package manually
 ```
 
 不得为了 Hostra/PWA相似预建 universal `GameSource` / `PreparedPlatformGame` package。

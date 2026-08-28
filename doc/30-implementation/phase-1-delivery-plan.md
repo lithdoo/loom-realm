@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：M0..M16 实现顺序、Game/Launcher/Main bootstrap boundary、Runtime Control mechanics、Definition Module/Runner、SDK outcome/control-flow、Renderer Data、Platform provisioning、Desktop/PWA composition 与关闭条件  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-08-27
+> 最近复核：2026-08-28
 
 核心顺序：
 
@@ -396,9 +396,9 @@ Response afterResponse barrier triggers dependent child/close/resume operations
 Runtime Control terminal facts are inputs to Main authority mapping, not self-mutating authority
 ```
 
-Main MUST NOT depend on Game Package/concrete Launcher。
+Main MUST NOT depend on Game Package/concrete Launcher。M5 同时冻结 Main-facing narrow capability view（概念 `MainPlatform`），由 Fake Platform structural-satisfy；不得把 concrete Hostra/PWA type引入 Main。
 
-Fake RuntimeHosting is already plan-bound；M5 does not implement Game/Platform PREPARE。
+Fake concrete Platform is already logically prepared / plan-bound and exposes RuntimeHosting；M5 does not implement Game/Platform PREPARE。
 
 Vertical slice：initial frame、nested calls、Outcome、recoverable reject、ambiguous failure unwind、fresh final Caller resume。
 
@@ -409,20 +409,25 @@ Vertical slice：initial frame、nested calls、Outcome、recoverable reject、a
 Implement：
 
 ```text
-@loomrealm/game-launcher-hostra
-Hostra Game source integration
-internal Game Package consumption
-Hostra manifest/join/resolver/preflight
-HostraLaunchPlan
-LogicalGameBootstrap projection
-plan-bound RuntimeHosting
+session-scoped HostraPlatform composition object
+    prepareGame(source)
+    Main-facing RuntimeHosting / scheduler view
+
+@loomrealm/game-launcher-hostra component
+    Hostra Game source integration
+    internal Game Package consumption
+    Hostra manifest/join/resolver/preflight
+    HostraLaunchPlan
+    LogicalGameBootstrap projection
+    Runner/RuntimeHosting implementation primitives
+
 Host-owned Node Runner
 process Supervisor
 Runtime Control WebSocket MessageCarrier adapter
 Runner provisioning integration
 ```
 
-PREPARE hard gate completes before first process/import/Runtime Control side effect。
+HostraPlatform `prepareGame()` delegates PREPARE to Launcher component, installs the immutable HostraLaunchPlan privately, then composition calls Main with `{bootstrap, platform}`. PREPARE hard gate completes before first process/import/Runtime Control side effect。
 
 Runtime Control adapter only establishes/delivers string MessageCarrier；it MUST NOT reimplement JSON-RPC/parser/retry/deadline semantics。
 

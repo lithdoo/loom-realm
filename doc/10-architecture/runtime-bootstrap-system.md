@@ -4,10 +4,10 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：Launcher-owned Game/Platform PREPARE、LogicalGameBootstrap 安装、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data 建立关系与 Platform provisioning  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-session-scoped-platform-instance.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
 > 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-08-28
 
 ---
 
@@ -37,9 +37,10 @@ Runtime-product bootstrap 固定：
 
 ```text
 Game source / installation
-→ matching Platform Launcher
-    → @loomrealm/game-package parse/validate
-    → current Platform Launch Manifest parse/validate
+→ session-scoped concrete Platform.prepareGame(...)
+    → matching Launcher component
+        → @loomrealm/game-package parse/validate
+        → current Platform Launch Manifest parse/validate
 ```
 
 Game Entry v1 common facts：
@@ -63,17 +64,20 @@ Game Entry不声明 executable module。
 
 ## 3. Complete PREPARE Closure
 
-Session physical bootstrap前 matching Launcher MUST 完成：
+Session physical bootstrap前，concrete Platform `prepareGame()` MUST 已通过 matching Launcher component 完成：
 
 ```text
-Game Entry validation
-→ current Platform Launch Manifest validation
-→ exact Game↔Platform key-set join
-→ resolve every required platform implementation
-→ validate current Platform hosting/security capability
-→ freeze immutable PlatformLaunchPlan
-→ install/freeze that plan in the current concrete Platform instance
-→ project/freeze LogicalGameBootstrap
+Launcher component
+    Game Entry validation
+    → current Platform Launch Manifest validation
+    → exact Game↔Platform key-set join
+    → resolve every required platform implementation
+    → validate current Platform hosting/security capability
+    → freeze immutable PlatformLaunchPlan
+    → project/freeze LogicalGameBootstrap
+
+Concrete Platform
+    → install/freeze PlatformLaunchPlan internally
 ```
 
 任何 PREPARE error：

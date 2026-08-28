@@ -3,9 +3,9 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Experimental  
-> 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input，以及 plan-bound Main-facing Platform ports  
-> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../../decisions/0021-session-scoped-platform-instance.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input、session-scoped concrete Platform composition，以及 Main-facing narrow capability view  
+> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-08-28
 
 Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority。它不拥有 Game Entry document contract、Platform executable binding，也不等于 Process/Worker/WebSocket/MessagePort realization。
 

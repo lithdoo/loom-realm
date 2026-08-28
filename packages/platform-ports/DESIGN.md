@@ -2,7 +2,7 @@
 
 > 状态：**Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen**  
 > 阶段：M4 Platform Capability Contract baseline  
-> 最近复核：2026-08-27  
+> 最近复核：2026-08-28  
 > 当前代码：M4 public slice 已落地；root export 仅 `DeadlineScheduler` / `RuntimeControlBinding`。  
 > 上层事实源：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[运行承载系统](../../doc/10-architecture/runtime-hosting-system.md)、[运行时启动系统](../../doc/10-architecture/runtime-bootstrap-system.md)  
 > 首个消费者：`@loomrealm/subsystem/host`（M4）；M5+ exact ports 尚未冻结。
