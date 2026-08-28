@@ -1269,71 +1269,71 @@ export class MainSessionRuntime {
   }
 
   private async cleanupRuntime(
-  record: RuntimeRecord,
-  reason: "session-end" | "bootstrap-abort",
-): Promise<void> {
-  record.expectedTermination = true;
-
-  let gracefulShutdownAccepted = false;
-  const peer = record.peer;
-  if (
-    peer !== null &&
-    record.identified &&
-    !record.failed &&
-    !record.shutdownRequested
-  ) {
-    record.shutdownRequested = true;
-    record.phase = "stopping";
-    try {
-      const outcome = await peer.control.shutdown({ reason });
-      gracefulShutdownAccepted = outcome.kind === "success";
-    } catch {
-      // Session terminal fact already owns settlement.
+    record: RuntimeRecord,
+    reason: "session-end" | "bootstrap-abort",
+  ): Promise<void> {
+    record.expectedTermination = true;
+  
+    let gracefulShutdownAccepted = false;
+    const peer = record.peer;
+    if (
+      peer !== null &&
+      record.identified &&
+      !record.failed &&
+      !record.shutdownRequested
+    ) {
+      record.shutdownRequested = true;
+      record.phase = "stopping";
+      try {
+        const outcome = await peer.control.shutdown({ reason });
+        gracefulShutdownAccepted = outcome.kind === "success";
+      } catch {
+        // Session terminal fact already owns settlement.
+      }
+    } else if (peer !== null && !record.identified) {
+      await settleWithin(
+        this.options.platform.scheduler,
+        this.options.policy.terminationDeadlineMs,
+        peer.close(),
+      );
     }
-  } else if (peer !== null && !record.identified) {
+  
+    const hosted = record.hosted;
+    if (hosted === null || record.physicallyTerminated) return;
+  
+    // A successful protocol shutdown only means the Runtime accepted the
+    // graceful intent. Give that Runtime a bounded opportunity to finish
+    // its own shutdown hook and terminate naturally before escalating to
+    // a physical termination request.
+    if (gracefulShutdownAccepted) {
+      const terminatedNaturally = await settleWithin(
+        this.options.platform.scheduler,
+        this.options.policy.terminationDeadlineMs,
+        hosted.terminated,
+      );
+      if (terminatedNaturally) return;
+    }
+  
+    if (!record.terminationRequested) {
+      record.terminationRequested = true;
+      try {
+        await runWithDeadline(
+          this.options.platform.scheduler,
+          this.options.policy.terminationDeadlineMs,
+          [],
+          (signal) => hosted.requestTermination(signal),
+        );
+      } catch {
+        // Bounded physical cleanup does not replace the primary Session terminal.
+      }
+    }
+  
     await settleWithin(
-      this.options.platform.scheduler,
-      this.options.policy.terminationDeadlineMs,
-      peer.close(),
-    );
-  }
-
-  const hosted = record.hosted;
-  if (hosted === null || record.physicallyTerminated) return;
-
-  // A successful protocol shutdown only means the Runtime accepted the
-  // graceful intent. Give that Runtime a bounded opportunity to finish
-  // its own shutdown hook and terminate naturally before escalating to
-  // a physical termination request.
-  if (gracefulShutdownAccepted) {
-    const terminatedNaturally = await settleWithin(
       this.options.platform.scheduler,
       this.options.policy.terminationDeadlineMs,
       hosted.terminated,
     );
-    if (terminatedNaturally) return;
   }
-
-  if (!record.terminationRequested) {
-    record.terminationRequested = true;
-    try {
-      await runWithDeadline(
-        this.options.platform.scheduler,
-        this.options.policy.terminationDeadlineMs,
-        [],
-        (signal) => hosted.requestTermination(signal),
-      );
-    } catch {
-      // Bounded physical cleanup does not replace the primary Session terminal.
-    }
-  }
-
-  await settleWithin(
-    this.options.platform.scheduler,
-    this.options.policy.terminationDeadlineMs,
-    hosted.terminated,
-  );
-}
 }
 
 export function runMainInternal(options: RunMainOptions): Promise<MainSessionResult> {
