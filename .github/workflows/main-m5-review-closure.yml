@@ -1,0 +1,59 @@
+name: Main M5 review closure
+
+on:
+  push:
+    branches:
+      - feat/main-m5
+    paths:
+      - ".github/workflows/main-m5-review-closure.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-node20:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+      - name: Apply review closure
+        run: python3 tools/patch-main-m5-review.py
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 20
+      - name: Build Main dependencies
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/subsystem
+      - name: Test Main
+        run: npm test -w @loomrealm/main
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/main --dry-run
+      - name: Validate documentation
+        run: |
+          npm run docs:check-links
+          npm run docs:build
+      - name: Commit reviewed code and fact sources
+        run: |
+          rm tools/patch-main-m5-review.py .github/workflows/main-m5-review-closure.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs(main): close M5 implementation review"
+          git push origin HEAD:feat/main-m5
+
+  node24:
+    needs: patch-and-node20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Build Main dependencies
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/subsystem
+      - name: Test Main
+        run: npm test -w @loomrealm/main
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/main --dry-run
