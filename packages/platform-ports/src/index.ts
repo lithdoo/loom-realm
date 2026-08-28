@@ -14,6 +14,15 @@ export interface RuntimeControlBinding {
 }
 
 /**
+ * Supplies fresh high-entropy opaque bootstrap token material when Main asks
+ * to create a Launch Attempt credential. The generator owns no token
+ * authority: it must not register, bind, consume, or interpret the result.
+ */
+export interface BootstrapTokenGenerator {
+  generate(): string;
+}
+
+/**
  * Narrow projection of one Main-owned Launch Attempt into physical Runtime
  * hosting. It intentionally contains no executable or platform-specific data.
  */
