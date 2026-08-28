@@ -5,7 +5,7 @@
 > 最近复核：2026-08-28  
 > 当前 root export：`DeadlineScheduler` / `RuntimeControlBinding` / `BootstrapTokenGenerator` / `RuntimeLaunchRequest` / `MainRuntimeControlBinding` / `HostedRuntime` / `RuntimeHosting`  
 > 上层事实源：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[运行承载系统](../../doc/10-architecture/runtime-hosting-system.md)、[运行时启动系统](../../doc/10-architecture/runtime-bootstrap-system.md)  
-> 真实消费者：M4 `@loomrealm/subsystem/host` 已 qualification；M5 `@loomrealm/main` consumer qualification pending。
+> 真实消费者：M4 `@loomrealm/subsystem/host`、M5 `@loomrealm/main` 均已通过真实 role consumer qualification。
 
 > **本包只定义 platform-neutral Core 需要的窄 capability / physical fact contract；不拥有 Core authority、不拥有 role policy、不实现 protocol mechanics、不实现 Hostra/PWA physical mechanism。**
 
@@ -255,12 +255,13 @@ Pending abort prevents late live-carrier delivery.
 
 ### `terminated`
 
-`HostedRuntime.terminated` resolves only after the physical Runtime has actually terminated.
+`HostedRuntime.terminated` resolves only after the physical Runtime has actually terminated. Promise rejection/observation failure is **not** termination proof.
 
 ```text
 termination request resolved != terminated
 Control lost != terminated
 Runtime failed != terminated
+termination observation rejected != terminated
 ```
 
 Only this physical fact can support Main committing `stopped`.
@@ -291,14 +292,21 @@ Main creates LaunchAttempt L for subsystem S
 → status(ready)
 ```
 
-Terminal cleanup:
+Terminal cleanup separates graceful role shutdown from physical escalation:
 
 ```text
-Main shutdown/failure intent
-→ H.requestTermination(...)
-→ await H.terminated
-→ only then physical stopped fact exists
+graceful Session terminal
+→ Runtime Control shutdown accepted
+→ bounded await H.terminated
+→ if no successful termination observation: H.requestTermination(...)
+→ bounded await H.terminated
+
+Runtime failure / bootstrap abort
+→ H.requestTermination(...) as needed
+→ bounded await H.terminated
 ```
+
+`requestTermination()` is escalation capability, not the default first step after a successful graceful shutdown.
 
 One `launch()` result naturally carries one Control establishment capability and one termination lifetime; no second global correlation contract is needed.
 
@@ -370,7 +378,7 @@ M4 @loomrealm/subsystem/host
     ✅ real consumer qualified
 
 M5 @loomrealm/main
-    pending real consumer qualification
+    ✅ real consumer qualified
 
 M6 HostraPlatform
     pending physical implementation
@@ -414,7 +422,7 @@ Current valid claim:
     Core Boundary Frozen
     M4 Slice Frozen + Consumer Qualified
     M5 Main Slice Frozen / Contract Baseline Implemented
-    M5 Main consumer qualification pending
+    M5 Main consumer qualified
 ```
 
 Not valid:

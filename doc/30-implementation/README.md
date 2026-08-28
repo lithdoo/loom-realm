@@ -51,9 +51,8 @@ Frame / Call v1
 Current next implementation gate：
 
 ```text
-M4 @loomrealm/subsystem
-    Runtime/Frame author core
-    @loomrealm/subsystem/host Runtime Control consumer qualification
+M6 Hostra Platform vertical
+    HostraPlatform + Launcher PREPARE + Node Runner + RuntimeHosting
 ```
 
 ---
@@ -150,29 +149,25 @@ Platform
 ```text
 Game source / installation
         ↓
-matching Platform Launcher PREPARE
-    ├── @loomrealm/game-package
-    ├── current Platform Launch Manifest
-    ├── exact key-set join
-    ├── all executable/security resolution
-    └── hosting capability preflight
+session-scoped concrete Platform.prepareGame()
+    → matching Launcher component
+    → @loomrealm/game-package + current Platform manifest
+    → exact join / executable-security preflight
+    → immutable PlatformLaunchPlan
         ↓
-immutable PlatformLaunchPlan
-+
-immutable LogicalGameBootstrap
+Platform installs LaunchPlan privately
++ returns LogicalGameBootstrap
 ────────────────────────────────────────
 first business Runtime side effect allowed
         ↓
-apps/* installs Main
+runMain({bootstrap, platform, policy})
         ↓
-Main launch(subsystemKey)
-        ↓
-plan-bound RuntimeHosting
+RuntimeHosting.launch({subsystemKey,bootstrapToken})
         ↓
 Host-owned Runner
 ```
 
-Game common document no module；Main no executable/document material。
+Game common document has no module；Main sees no executable/document material。
 
 ---
 
@@ -200,7 +195,7 @@ LogicalGameBootstrap
 
 Main MUST NOT receive GameEntry/formatVersion/PlatformLaunchPlan/module/path/URL。
 
-M5 Main also becomes real Main-side Runtime Control consumer：authentication callback owns Launch Attempt/token decision，Runtime Control typed terminal/outcome feeds Main authority classifier。
+M5 Main is now a qualified real Main-side Runtime Control consumer：`MainPlatform = {scheduler, bootstrapTokens, runtimeHosting}`；authentication callback owns Launch Attempt/token decision，Runtime Control typed terminal/outcome feeds Main first-wins failure authority。
 
 ---
 
@@ -254,15 +249,18 @@ RendererDataBinding
 ContentClient
 ```
 
-Main-facing：
+Main-facing current M5：
 
 ```text
-RuntimeHosting/Supervisor
-Runtime Control peer/binding
-RendererHosting/ControlHost
-DataConnectionBroker
-Content integration
+DeadlineScheduler
+BootstrapTokenGenerator
+RuntimeHosting → HostedRuntime
+    ├── MainRuntimeControlBinding
+    ├── terminated
+    └── requestTermination
 ```
+
+M7+ Renderer/Data ports grow only with real consumers；Content does not automatically pass through Main.
 
 Runtime Control scheduler is a narrow protocol-mechanics constructor port，not Game/Platform manifest configuration。
 
@@ -407,22 +405,19 @@ Structured Clone only for Platform bootstrap/Port transfer。
 Foundation ✅
 Wire ✅
 Game Package ✅
-↓
 M3 Runtime Control ✅
+M4 Subsystem Runtime/Frame author+host ✅
+M5 Main Runtime/Frame authority ✅
 ↓
-M4 Subsystem author/host
+M6 Hostra Platform vertical
 ↓
-M5 Main + LogicalGameBootstrap + fake RuntimeHosting
+M7 Renderer Control
 ↓
-M6 Hostra Launcher
-↓
-Desktop vertical slice
+M8+ Data/Input/Render/Content slices
 ...
-M15 PWA Launcher
+M15 PWA Platform vertical
 M16 cross-platform equivalence
 ```
-
-M3 package-local close must not fake M4/M5 real role consumers。
 
 ---
 
@@ -432,9 +427,9 @@ Must prove all three loops：
 
 ```text
 Game source
-→ matching Launcher PREPARE
-→ LogicalGameBootstrap + RuntimeHosting
-→ Main / Runner
+→ concrete Platform.prepareGame() / matching Launcher PREPARE
+→ LogicalGameBootstrap + prepared Platform instance
+→ runMain({bootstrap, platform}) / Runner
 ```
 
 ```text

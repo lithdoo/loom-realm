@@ -111,7 +111,13 @@ function createFakePlatform(definitions, options = {}) {
               return pair.left;
             },
           }),
-          terminated: terminatedGate.promise,
+          terminated: options.rejectTerminationObservation?.(request.subsystemKey)
+            ? terminatedGate.promise.then(() => {
+                throw new Error(
+                  `termination observation failed ${request.subsystemKey}`,
+                );
+              })
+            : terminatedGate.promise,
           async requestTermination(terminationSignal) {
             record.terminationRequests += 1;
             if (terminationSignal.aborted) {
@@ -385,4 +391,33 @@ test("external abort produces graceful Session shutdown and bounded Runtime clea
   assert.deepEqual(await resultPromise, { kind: "shutdown" });
   assert.equal(shutdownCalls, 1);
   assert.equal(fake.runtimes.get("root").terminationRequests, 0);
+});
+
+
+test("termination observation rejection is not accepted as physical termination proof", async () => {
+  let shutdownCalls = 0;
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem(() => ({
+        frame: () => completed("done"),
+        shutdown() {
+          shutdownCalls += 1;
+        },
+      })),
+    },
+    { rejectTerminationObservation: (key) => key === "root" },
+  );
+
+  const result = await runMain({
+    bootstrap: bootstrap(["root"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+
+  assert.deepEqual(result, {
+    kind: "root-outcome",
+    outcome: { type: "completed", value: "done" },
+  });
+  assert.equal(shutdownCalls, 1);
+  assert.equal(fake.runtimes.get("root").terminationRequests, 1);
 });

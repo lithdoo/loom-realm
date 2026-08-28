@@ -33,11 +33,10 @@ import {
   OperationAbortedError,
   OperationTimeoutError,
   runWithDeadline,
-  settleWithin,
+  resolvesWithin,
   toMainOutcome,
 } from "./primitives.js";
 
-type SessionPhase = "starting" | "running" | "stopping" | "closed";
 type RuntimePhase =
   | "starting"
   | "connected"
@@ -56,7 +55,6 @@ type SessionTerminal =
 
 interface RuntimeRecord {
   readonly key: string;
-  readonly attemptId: string;
   readonly bootstrapToken: string;
   readonly ready: Deferred<"ready" | "failed">;
   bootstrapTokenConsumed: boolean;
@@ -64,7 +62,7 @@ interface RuntimeRecord {
   hosted: HostedRuntime | null;
   peer: MainRuntimeControlPeer | null;
   identified: boolean;
-  failed: boolean;
+  failure: MainRuntimeFailure | null;
   expectedTermination: boolean;
   terminationRequested: boolean;
   physicallyTerminated: boolean;
@@ -229,20 +227,17 @@ function runtimeTerminalMessage(terminal: RuntimeControlTerminal): string {
   }
 }
 
-export class MainSessionRuntime {
+class MainSessionRuntime {
   private readonly bootstrap: LogicalGameBootstrap;
   private readonly sessionController = new AbortController();
   private readonly done = deferred<MainSessionResult>();
   private readonly runtimes = new Map<string, RuntimeRecord>();
   private readonly frames = new Map<string, FrameRecord>();
   private readonly stack: FrameRecord[] = [];
-  private readonly failedRuntimeKeys = new Set<string>();
   private readonly issuedTokens = new Set<string>();
 
-  private phase: SessionPhase = "starting";
   private terminal: SessionTerminal | null = null;
   private frameAuthorityStarted = false;
-  private nextAttempt = 1;
   private nextFrame = 1;
   private nextActivation = 1;
   private mutationTail: Promise<void> = Promise.resolve();
@@ -279,7 +274,6 @@ export class MainSessionRuntime {
 
       this.frameAuthorityStarted = true;
       await this.mutate(() => this.startInitialFrame());
-      if (this.terminal === null) this.phase = "running";
     } catch (error) {
       if (this.terminal !== null) return;
       if (
@@ -338,14 +332,13 @@ export class MainSessionRuntime {
 
     const record: RuntimeRecord = {
       key,
-      attemptId: `l:${this.nextAttempt++}`,
       bootstrapToken: token,
       bootstrapTokenConsumed: false,
       phase: "starting",
       hosted: null,
       peer: null,
       identified: false,
-      failed: false,
+      failure: null,
       expectedTermination: false,
       terminationRequested: false,
       physicallyTerminated: false,
@@ -432,7 +425,7 @@ export class MainSessionRuntime {
         if (record.phase === "connected") record.phase = "identified";
 
         const ready = await record.ready.promise;
-        if (ready !== "ready" || record.failed) {
+        if (ready !== "ready" || record.failure !== null) {
           throw new BootstrapError(
             "MAIN_RUNTIME_READY_FAILED",
             "Required Runtime failed before becoming ready",
@@ -455,7 +448,7 @@ export class MainSessionRuntime {
           | "DUPLICATE_CONTROL_CONNECTION";
       } {
     if (
-      record.failed ||
+      record.failure !== null ||
       record.bootstrapTokenConsumed ||
       params.key !== record.key ||
       params.bootstrapToken !== record.bootstrapToken
@@ -476,16 +469,16 @@ export class MainSessionRuntime {
     return this.mutate(async () => {
       switch (status.state) {
         case "initializing":
-          if (!record.failed) record.phase = "initializing";
+          if (record.failure === null) record.phase = "initializing";
           return;
         case "ready":
-          if (!record.failed) {
+          if (record.failure === null) {
             record.phase = "ready";
             record.ready.resolve("ready");
           }
           return;
         case "stopping":
-          if (!record.failed) record.phase = "stopping";
+          if (record.failure === null) record.phase = "stopping";
           return;
         case "failed": {
           const first = this.markRuntimeFailed(
@@ -542,7 +535,7 @@ export class MainSessionRuntime {
           record.physicallyTerminated = true;
           if (
             record.expectedTermination ||
-            record.failed ||
+            record.failure !== null ||
             this.terminal !== null
           ) {
             return;
@@ -593,15 +586,14 @@ export class MainSessionRuntime {
 
   private markRuntimeFailed(
     record: RuntimeRecord,
-    _code: string,
-    _message: string,
+    code: string,
+    message: string,
   ): boolean {
-    if (record.failed) return false;
-    record.failed = true;
+    if (record.failure !== null) return false;
+    record.failure = failure(code, message, record.key);
     record.phase = "failed";
     record.ready.resolve("failed");
     record.expectedTermination = true;
-    this.failedRuntimeKeys.add(record.key);
     void this.ensureFailedRuntimeTermination(record);
     return true;
   }
@@ -776,6 +768,7 @@ export class MainSessionRuntime {
       });
       frame.lifecycle = "closed";
       this.stack.pop();
+      this.frames.delete(frame.id);
       this.beginRootOutcome(frame.outcome);
       return;
     }
@@ -858,6 +851,7 @@ export class MainSessionRuntime {
         return;
       }
       this.stack.pop();
+      this.frames.delete(child.id);
       if (!(await this.tryResumeCaller(child, outcome))) {
         await this.unwindFailures();
       }
@@ -904,8 +898,8 @@ export class MainSessionRuntime {
     }
 
     const runtime = this.runtimes.get(frame.subsystemKey);
-    if (runtime === undefined || runtime.failed || runtime.peer === null) {
-      if (runtime !== undefined && !runtime.failed) {
+    if (runtime === undefined || runtime.failure !== null || runtime.peer === null) {
+      if (runtime !== undefined && runtime.failure === null) {
         this.markRuntimeFailed(
           runtime,
           "FRAME_CONTROL_UNAVAILABLE",
@@ -930,6 +924,7 @@ export class MainSessionRuntime {
     frame.contextKnown = false;
     frame.lifecycle = "closed";
     this.stack.pop();
+    this.frames.delete(frame.id);
     if (!(await this.tryResumeCaller(frame, frame.outcome))) {
       await this.unwindFailures();
     }
@@ -1032,7 +1027,7 @@ export class MainSessionRuntime {
           return;
         }
 
-        if (!runtime.failed && frame.contextKnown) {
+        if (runtime.failure === null && frame.contextKnown) {
           if (frame.closeAttempted) {
             this.beginFatal(
               failure(
@@ -1057,6 +1052,7 @@ export class MainSessionRuntime {
 
         frame.lifecycle = "closed";
         this.stack.pop();
+        this.frames.delete(frame.id);
       }
 
       if (expanded) continue;
@@ -1079,16 +1075,15 @@ export class MainSessionRuntime {
       }
 
       if (await this.tryResumeCaller(root, rootOutcome)) return;
-      // Resume failure adds the Caller Runtime to failedRuntimeKeys. Recompute
-      // the lowest failed occurrence over the remaining Stack.
+      // Resume failure marks the Caller Runtime failed. Recompute the
+      // lowest failed occurrence over the remaining Stack.
     }
   }
 
   private lowestFailedFrameIndex(): number {
     for (let index = 0; index < this.stack.length; index += 1) {
-      if (this.failedRuntimeKeys.has(this.stack[index]!.subsystemKey)) {
-        return index;
-      }
+      const runtime = this.runtimes.get(this.stack[index]!.subsystemKey);
+      if (runtime !== undefined && runtime.failure !== null) return index;
     }
     return -1;
   }
@@ -1100,8 +1095,8 @@ export class MainSessionRuntime {
     ) => Promise<RuntimeControlRequestOutcome<R, FrameRpcErrorData>>,
   ): Promise<RuntimeControlRequestOutcome<R, FrameRpcErrorData> | null> {
     const peer = runtime.peer;
-    if (peer === null || runtime.failed) {
-      if (!runtime.failed) {
+    if (peer === null || runtime.failure !== null) {
+      if (runtime.failure === null) {
         this.markRuntimeFailed(
           runtime,
           "FRAME_CONTROL_UNAVAILABLE",
@@ -1193,7 +1188,7 @@ export class MainSessionRuntime {
   }
 
   private runtimeReady(record: RuntimeRecord): boolean {
-    return !record.failed && record.phase === "ready" && record.peer !== null;
+    return record.failure === null && record.phase === "ready" && record.peer !== null;
   }
 
   private mutate<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -1209,7 +1204,6 @@ export class MainSessionRuntime {
     if (this.terminal !== null) return;
     const frozen = cloneControlOutcome(outcome);
     this.terminal = Object.freeze({ kind: "root", outcome: frozen });
-    this.phase = "stopping";
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1217,7 +1211,6 @@ export class MainSessionRuntime {
   private beginShutdown(): void {
     if (this.terminal !== null) return;
     this.terminal = Object.freeze({ kind: "shutdown" });
-    this.phase = "stopping";
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1230,7 +1223,6 @@ export class MainSessionRuntime {
       runtimeFailure.subsystemKey,
     );
     this.terminal = Object.freeze({ kind: "fatal", failure: primary });
-    this.phase = "stopping";
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1239,7 +1231,6 @@ export class MainSessionRuntime {
     await this.cleanupAll(
       terminal.kind === "fatal" ? "bootstrap-abort" : "session-end",
     );
-    this.phase = "closed";
     this.detachExternalAbort();
 
     if (terminal.kind === "fatal") {
@@ -1279,7 +1270,7 @@ export class MainSessionRuntime {
     if (
       peer !== null &&
       record.identified &&
-      !record.failed &&
+      record.failure === null &&
       !record.shutdownRequested
     ) {
       record.shutdownRequested = true;
@@ -1291,7 +1282,7 @@ export class MainSessionRuntime {
         // Session terminal fact already owns settlement.
       }
     } else if (peer !== null && !record.identified) {
-      await settleWithin(
+      await resolvesWithin(
         this.options.platform.scheduler,
         this.options.policy.terminationDeadlineMs,
         peer.close(),
@@ -1306,7 +1297,7 @@ export class MainSessionRuntime {
     // its own shutdown hook and terminate naturally before escalating to
     // a physical termination request.
     if (gracefulShutdownAccepted) {
-      const terminatedNaturally = await settleWithin(
+      const terminatedNaturally = await resolvesWithin(
         this.options.platform.scheduler,
         this.options.policy.terminationDeadlineMs,
         hosted.terminated,
@@ -1328,7 +1319,7 @@ export class MainSessionRuntime {
       }
     }
 
-    await settleWithin(
+    await resolvesWithin(
       this.options.platform.scheduler,
       this.options.policy.terminationDeadlineMs,
       hosted.terminated,

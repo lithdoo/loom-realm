@@ -145,8 +145,10 @@ raw Platform manifest
 每个 required Subsystem：
 
 ```text
-Main creates Launch Attempt
-→ generate/register bootstrap credential for key
+Main creates current Launch Attempt for key
+→ BootstrapTokenGenerator.generate()
+→ Main validates/registers fresh bootstrap credential
+→ RuntimeHosting.launch({subsystemKey:key, bootstrapToken})
 → RuntimeHosting lookup frozen PlatformLaunchPlan[key]
 → Platform creates Host-owned Runner Container
 → Runner loads exact planned Definition Module
@@ -438,9 +440,9 @@ Frame/Render authoritative lifecycles不由 reload推导。
 Main establishes shutdown intent
 → subsystem.shutdown
 → SDK aborts instance/frame signals and runs bounded shutdown hook
-→ Platform terminates Runner if needed
-→ Supervisor observes actual termination
-→ stopped
+→ if shutdown accepted: bounded wait HostedRuntime.terminated
+→ if no successful termination observation: requestTermination()
+→ only HostedRuntime.terminated resolution is physical stopped evidence
 ```
 
 如果 Runtime先进入 fatal failure，则走 failure terminal path。
@@ -450,28 +452,26 @@ Main establishes shutdown intent
 ## 20. Recommended Session Sequence
 
 ```text
-1  select current Platform launcher / installation source
-2  launcher obtains Game Entry and validates via @loomrealm/game-package
-3  launcher validates current Platform Launch Manifest
-4  exact Game↔Platform key-set join
-5  resolve all required executable bindings
-6  validate hosting/security capabilities
+1  create session-scoped concrete HostraPlatform / PwaPlatform
+2  platform.prepareGame(source) delegates to matching Launcher component
+3  Launcher validates Game Entry via @loomrealm/game-package
+4  validate current Platform Launch Manifest
+5  exact Game↔Platform key-set join
+6  resolve/preflight all required executable/security capabilities
 7  freeze immutable PlatformLaunchPlan
-8  project/freeze LogicalGameBootstrap
-9  release PreparedCurrentPlatformGame
-10 apps/* construct Main with LogicalGameBootstrap + plan-bound RuntimeHosting + other ports
-11 Main creates Launch Attempts/tokens
-12 RuntimeHosting launches required Runners by key
-13 Runners load planned Definitions / construct role ports
-14 establish Runtime Control
-15 hello → identified → ready
-16 realize Renderer
-17 Renderer Control hello + Snapshot
-18 Main publishes DataAuthority(S,G,P) by policy
-19 Broker provisions Data endpoints through Platform paths
-20 Data Profile fresh child baselines
-21 Main starts/continues Frame authority independently
-22 shutdown/termination converges through Supervisor
+8  platform installs PlatformLaunchPlan privately
+9  return immutable LogicalGameBootstrap
+10 runMain({bootstrap, platform, policy})
+11 Main installs logical registry / initial input
+12 for each required key: generator produces token; Main registers it
+13 RuntimeHosting.launch({subsystemKey,bootstrapToken}) creates Runner lifetime
+14 HostedRuntime.runtimeControl.acquire() establishes Main carrier
+15 hello authentication → identified → ready
+16 Main starts initial Frame independently from Data
+17 M7+ realize Renderer and publish Renderer Control authority
+18 M8/M9+ publish DataAuthority / provision Data carriers
+19 M10/M11+ establish Input/Render fresh baselines
+20 Session terminal performs graceful shutdown then physical escalation if needed
 ```
 
 具体 physical creation order 可不同，只要满足 causal/authority/PREPARE boundary。
@@ -486,7 +486,7 @@ Main establishes shutdown intent
 4. executable binding由 current Platform Launch Manifest拥有；
 5. Game/current-platform key set Phase 1严格相等；
 6. complete PlatformLaunchPlan + LogicalGameBootstrap在 Runtime side effect前闭合；
-7. Main launch不携 module/path/URL；
+7. Main Runtime launch request只携 logical key + bootstrapToken，不携 module/path/URL；
 8. Host-owned Runner加载 plan-selected Definition Module；
 9. launch != loaded != connected != identified != ready；
 10. ready不要求/携带 Data；

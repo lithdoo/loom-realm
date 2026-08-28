@@ -1,13 +1,15 @@
 # 程序主系统模块设计
 
 > 层级：模块设计  
-> 状态：Active Design  
-> 稳定程度：Experimental  
+> 状态：M5 Implemented Baseline / M7+ Active Design  
+> 稳定程度：M5 Frozen Baseline / Later Slices Evolving  
 > 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input、session-scoped concrete Platform composition，以及 Main-facing narrow capability view  
 > 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-28
 
 Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority。它不拥有 Game Entry document contract、Platform executable binding，也不等于 Process/Worker/WebSocket/MessagePort realization。
+
+当前 M5 已实现 Session/Runtime/Frame/Activation/InputTarget 与 failure unwind；Renderer Control/DataAuthority 属于后续 M7+ slice，不作为 M5 closure 条件。
 
 ---
 
@@ -108,11 +110,12 @@ Main MUST NOT call `prepareGame()`；PREPARE belongs to product composition / co
 
 ## 4. Main-facing Platform Ports
 
-M5 建议先形成一个 consumer-owned role-local view：
+M5 已冻结并由真实 Main consumer 验证的 consumer-owned role-local view：
 
 ```ts
 interface MainPlatform {
   readonly scheduler: DeadlineScheduler;
+  readonly bootstrapTokens: BootstrapTokenGenerator;
   readonly runtimeHosting: RuntimeHosting;
 }
 ```
@@ -160,8 +163,10 @@ LogicalGameBootstrap.initial
 Then：
 
 ```text
-create Launch Attempt/token
-→ RuntimeHosting.launch(key)
+create current Launch Attempt
+→ BootstrapTokenGenerator.generate()
+→ Main validates/registers token against key/attempt
+→ RuntimeHosting.launch({subsystemKey:key, bootstrapToken})
 → accept Control carrier
 → hello/identified/ready
 ```
@@ -265,22 +270,23 @@ Platform Supervisor只能报告 physical facts，不能选择 unwind root。
 
 ---
 
-## 10. Runtime Hosting / Supervisor Facts
+## 10. HostedRuntime / Physical Facts
 
-RuntimeHosting/Supervisor MAY report：
+M5 `RuntimeHosting.launch({subsystemKey,bootstrapToken}, signal)` 返回一个 `HostedRuntime`，把同一 physical Runtime lifetime 的：
 
 ```text
-container create success/failure
-alive/exited
-exit code/signal/reason
-termination request/result
+Main-side Runtime Control establishment
+requestTermination()
+terminated Promise
 ```
 
-Main解释为 public Runtime lifecycle。
+自然关联在一起，不再需要平行 RuntimeControlHost/Supervisor handle registry。
 
-`stopped` only from actual termination observation；unexpected exit即使 code 0 也可成为 Runtime failure。
+`terminated` 只有 **resolve** 才是 actual physical termination fact；rejection/observation failure 不得被解释为 stopped。`requestTermination()` 只请求终止，也不等于 stopped。
 
-No automatic restart；新 Runtime必须 fresh Launch Attempt。
+M5 public port 暂不暴露 PID/Worker/exit code/signal 等 diagnostics；这些保持 Platform-local，直到真实 portable consumer 证明需要。
+
+No automatic restart；新 Runtime必须 fresh Launch Attempt/token/HostedRuntime/Control lifetime。
 
 ---
 
@@ -398,27 +404,23 @@ Main-facing logical ports相同；Platform module artifact可不同。
 
 ## 16. Tests
 
-Main local tests MUST use `LogicalGameBootstrap` fixtures directly，不通过 Game Package parser。
-
-At least：
+M5 executable qualification 已使用 fake physical Platform + real Runtime Control + real Subsystem Host 验证：
 
 ```text
-bootstrap logical key registry
-initial target/input
-no formatVersion/GameEntry type in Main API
-package-boundary no @loomrealm/game-package dependency
-fake RuntimeHosting already plan-bound
-Main launch request contains key but no module/path/url
-undeclared logical key cannot launch
-physical facts do not mutate authority without Main decision
-Control/Frame conformance
-failure unwind golden traces
-Renderer Control snapshot/dataProfile
-profile-change-fresh-generation
-fake DataConnectionBroker does not mint authority
-Data provisioning/loss does not mutate Runtime/Frame authority
-Hostra/PWA platform bindings produce equivalent abstract trace
+LogicalGameBootstrap defensive install
+Main public boundary has no Game Package/launcher/concrete Platform dependency
+required Runtime hello/identified/ready
+cross-Subsystem nested Frame call/return
+same-Subsystem recursion without reentrant deadlock
+recoverable undeclared target preserves current Activation
+child Runtime failure fixed-point unwind + fresh healthy Caller resume
+root Runtime loss does not re-enter stale business continuation
+duplicate bootstrap token fails closed
+root outcome / external abort graceful shutdown
+termination observation rejection is not physical termination proof
 ```
+
+M7+ Renderer/Data tests remain future milestone gates and MUST NOT be used to weaken or reinterpret M5 closure.
 
 ---
 
@@ -428,7 +430,7 @@ Hostra/PWA platform bindings produce equivalent abstract trace
 2. Main consumes `LogicalGameBootstrap`, not GameEntry/ValidatedGameEntry；
 3. Main has no `@loomrealm/game-package` or concrete launcher dependency；
 4. Main owns logical key registry, not executable binding；
-5. RuntimeHosting封闭绑定 PlatformLaunchPlan，Main launch只用 key；
+5. RuntimeHosting封闭绑定 PlatformLaunchPlan，Main launch request只投影 key + bootstrapToken；
 6. full Platform PREPARE在 Main physical Runtime bootstrap前闭合；
 7. Runtime Control = Control1 + Frame1；
 8. ready不携 Data/executable material；

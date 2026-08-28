@@ -81,7 +81,7 @@ business
 
 ### `packages/platform-ports`
 
-M4 current layout：
+Current implemented layout through M5：
 
 ```text
 packages/platform-ports/
@@ -92,11 +92,18 @@ packages/platform-ports/
     └── index.ts
 ```
 
-M4 root export exactly：
+Current root export：
 
 ```text
-DeadlineScheduler
-RuntimeControlBinding
+M4
+    DeadlineScheduler
+    RuntimeControlBinding
+M5
+    BootstrapTokenGenerator
+    RuntimeLaunchRequest
+    MainRuntimeControlBinding
+    HostedRuntime
+    RuntimeHosting
 ```
 
 Runtime dependency exactly `@loomrealm/foundation`。它是 Platform capability contract owner，不包含 Hostra/PWA implementation、role policy、protocol mechanics 或万能 Platform object。
@@ -285,29 +292,36 @@ Renderer/SW/Data Broker stay composition/adapters。
 
 ## 7. `packages/main`
 
-Main source contains logical bootstrap/authority，but no Game parser：
+M5 current implemented layout：
 
 ```text
-packages/main/src/
-├── bootstrap/
-│   └── logical-game-bootstrap.ts
-├── runtime/
-├── frame/
-├── renderer-control/
-├── data-authority/
-└── platform/
+packages/main/
+├── DESIGN.md
+├── package.json
+├── tsconfig.json
+├── src/
+│   ├── index.ts
+│   ├── model.ts
+│   ├── errors.ts
+│   └── internal/
+│       ├── main-session.ts
+│       └── primitives.ts
+└── test/
+    ├── boundary.test.mjs
+    └── runtime.test.mjs
 ```
 
-M5 Main consumes Runtime Control through `MainRuntimeControlPeer`/binding adapter；Runtime Control package never imports Main implementation。
+`main-session.ts` deliberately remains the single mutable M5 authority coordinator for Runtime/Frame/Stack/failure/unwind. Pure deadline/clone/deferred mechanics live in `primitives.ts`; future splits MUST NOT create independent stateful registries solely to reduce file length.
 
-`logical-game-bootstrap.ts` contains only：
+M5 runtime dependencies：
 
 ```text
-subsystemKeys
-initial {subsystemKey,input}
+@loomrealm/platform-ports
+@loomrealm/runtime-control
+@loomrealm/wire
 ```
 
-MUST NOT import Game Package/concrete Launcher。
+Main consumes `LogicalGameBootstrap` directly and MUST NOT import Game Package/concrete Launcher。Renderer/Data directories are not pre-created before their M7+ consumer slices.
 
 ---
 
@@ -418,15 +432,19 @@ packages/subsystem/src/host/      # M4 consumer-side orchestration/policy
 packages/renderer/src/platform/   # future consumer-side integration as frozen
 ```
 
-M4 frozen：
+Frozen through M5：
 
 ```text
-platform-ports owns DeadlineScheduler / RuntimeControlBinding
-subsystem/host consumes them
-subsystem/host owns SubsystemRuntimeControlPolicy
+M4
+    platform-ports owns DeadlineScheduler / RuntimeControlBinding
+    subsystem/host consumes them
+
+M5
+    platform-ports owns BootstrapTokenGenerator / RuntimeHosting / HostedRuntime / MainRuntimeControlBinding
+    main consumes them through MainPlatform
 ```
 
-Future `RuntimeHosting` / Renderer Data binding / Subsystem Data binding exact shapes are added only at their real milestone closure；M4 MUST NOT create role-local placeholder contracts。System-level `DataConnectionBroker` stays composition/integration unless a later frozen Platform port requires a shared contract。
+Future Renderer Data binding / Subsystem Data binding exact shapes are added only at their real milestone closure；M4 MUST NOT create role-local placeholder contracts。System-level `DataConnectionBroker` stays composition/integration unless a later frozen Platform port requires a shared contract。
 
 ---
 
@@ -530,8 +548,11 @@ M3 conformance is package-local；Hostra/PWA transport equivalence is later inte
 runtime-control
     → foundation + wire
 
-main
-    → runtime-control / renderer-control / wire as required
+main M5
+    → platform-ports + runtime-control + wire
+
+main M7+
+    → renderer-control / later capability packages as required
 
 subsystem author root
     → data / content / foundation as exposed
@@ -576,10 +597,10 @@ wire/foundation → domain authority
 ```text
 foundation + wire ✅
 → game-package ✅
-→ runtime-control       ← M3 current
-→ subsystem author/host
-→ main LogicalGameBootstrap + fake RuntimeHosting
-→ game-launcher-hostra
+→ runtime-control ✅
+→ subsystem author/host M4 ✅
+→ main LogicalGameBootstrap + fake physical Platform M5 ✅
+→ HostraPlatform / game-launcher-hostra M6
 → Desktop Frame vertical slice
 → renderer-control / data / Broker / Input / Render / Content
 → map / Desktop E2E
@@ -600,7 +621,7 @@ foundation + wire ✅
 6. matching Launchers own Runtime-product Game Entry consumption；
 7. Main does not depend on Game Package/concrete Launcher；
 8. Game common config and Platform executable config stay separate；
-9. launcher packages own schema/planner/resolver/RuntimeHosting/Runner integration；
+9. launcher packages own schema/planner/resolver and RuntimeHosting/Runner implementation primitives；session-scoped concrete Platform exposes the Main-facing capability；
 10. apps are final composition roots and do not duplicate lower-level semantics；
 11. author/host export surface is split；business never imports Runtime Control directly；
 12. Definition Module and Host-owned Runner are separate；

@@ -106,14 +106,14 @@ export async function runWithDeadline<T>(
   }
 }
 
-export async function settleWithin(
+export async function resolvesWithin(
   scheduler: DeadlineScheduler,
   delayMs: number,
   task: Promise<unknown>,
 ): Promise<boolean> {
   const observed = Promise.resolve(task).then(
     () => true,
-    () => true,
+    () => false,
   );
   let cancel: (() => void) | undefined;
   const timedOut = new Promise<boolean>((resolve) => {
