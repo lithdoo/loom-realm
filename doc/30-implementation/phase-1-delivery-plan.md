@@ -404,7 +404,7 @@ Vertical slice：initial frame、nested calls、Outcome、recoverable reject、a
 
 ---
 
-## M6：Hostra Game Launcher / Node Runner / First Game Package Consumer
+## M6：Hostra Platform Vertical / Launcher Component / Node Runner
 
 Implement：
 

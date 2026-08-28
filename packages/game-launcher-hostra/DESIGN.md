@@ -245,10 +245,10 @@ bootstrap validation
 → verify planned key/binding
 → import exact planned module
 → validate SubsystemDefinitionFactory
-→ RuntimeControlBinding
-→ SubsystemDataBinding
-→ ContentClient
-→ runSubsystem
+→ M6 RuntimeControlBinding
+→ M8+ SubsystemDataBinding
+→ M12+ ContentClient
+→ runSubsystem with current-milestone capabilities
 ```
 
 Business Definition Module不是 launcher/entry policy。

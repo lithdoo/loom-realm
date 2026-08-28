@@ -309,7 +309,7 @@ System Platform
     └── ContentClient
 ```
 
-这些只是 Platform 在每个 role 的 local projection。
+这些只是 Platform 在每个 role 的 conceptual local projection；该列表不是一个必须整体出现的 TypeScript interface，也不表示 M5 需要一次冻结全部 ports。M5 exact Runtime hosting/control/supervision shape 由真实 Main consumer closure 决定，例如可由 `RuntimeHosting` 返回 attempt-scoped `HostedRuntime` 来自然绑定 Control 与 termination facts，而不是强制三个独立 registry/ports。
 
 Concrete `HostraPlatform` / `PwaPlatform` object MAY 同时实现多个 role-local capability view；这属于 composition convenience，不等于 `@loomrealm/platform-ports` 定义一个万能 `Platform` contract。Core role 只依赖自己需要的窄 view。
 

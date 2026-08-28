@@ -235,10 +235,10 @@ bootstrap validation
 → verify planned key/binding
 → import exact planned module
 → validate SubsystemDefinitionFactory
-→ RuntimeControlBinding
-→ SubsystemDataBinding
-→ ContentClient
-→ runSubsystem
+→ M6 RuntimeControlBinding
+→ M8+ SubsystemDataBinding
+→ M12+ ContentClient
+→ runSubsystem with current-milestone capabilities
 ```
 
 Business Definition Module 不是 Worker entry，也不寻找 bootstrap Port。
