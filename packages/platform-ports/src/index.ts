@@ -5,7 +5,48 @@ export interface DeadlineScheduler {
   schedule(delayMs: number, callback: () => void): () => void;
 }
 
-/** Single-use Runtime Control establishment capability for one Launch Attempt. */
+/**
+ * Subsystem-side, single-use Runtime Control establishment capability for one
+ * Launch Attempt.
+ */
 export interface RuntimeControlBinding {
   acquire(signal: AbortSignal): Promise<MessageCarrier>;
+}
+
+/**
+ * Narrow projection of one Main-owned Launch Attempt into physical Runtime
+ * hosting. It intentionally contains no executable or platform-specific data.
+ */
+export interface RuntimeLaunchRequest {
+  readonly subsystemKey: string;
+  readonly bootstrapToken: string;
+}
+
+/**
+ * Main-side, single-use Runtime Control establishment capability for exactly
+ * one HostedRuntime lifetime.
+ */
+export interface MainRuntimeControlBinding {
+  acquire(signal: AbortSignal): Promise<MessageCarrier>;
+}
+
+/**
+ * Capabilities and facts that belong to one already-created physical Runtime.
+ */
+export interface HostedRuntime {
+  readonly runtimeControl: MainRuntimeControlBinding;
+
+  /** Resolves only after the physical Runtime has actually terminated. */
+  readonly terminated: Promise<void>;
+
+  /** Requests physical termination; resolution does not itself mean stopped. */
+  requestTermination(signal: AbortSignal): Promise<void>;
+}
+
+/** Physical Runtime creation capability exposed by a prepared Platform. */
+export interface RuntimeHosting {
+  launch(
+    request: RuntimeLaunchRequest,
+    signal: AbortSignal,
+  ): Promise<HostedRuntime>;
 }
