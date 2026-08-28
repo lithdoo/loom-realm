@@ -4,7 +4,7 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：Launcher-owned Game/Platform PREPARE、LogicalGameBootstrap 安装、Runtime Runner / Renderer 的逻辑启动顺序、Control/Data 建立关系与 Platform provisioning  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-session-scoped-platform-instance.md)  
 > 被以下文档实现：[程序主系统模块](../20-modules/main-system/README.md)、[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
 > 正式化：[Game Package v1](../15-contracts/game-package-v1.md)、[Hostra Launcher Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)、[PWA Launcher Profile v1](../15-contracts/pwa-launcher-profile-v1.md)、[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > 最近复核：2026-08-20
@@ -21,7 +21,8 @@ Matching Platform Launcher
     owns Game Entry consumption + current executable PREPARE
 
 Platform Composition
-    realizes physical Runner/Renderer/connection/content topology
+    creates one session-scoped concrete Platform instance
+    which realizes physical Runner/Renderer/connection/content topology
 ```
 
 Main 不直接依赖 Node/Worker/WebSocket/MessagePort/module resolver，也不依赖 `@loomrealm/game-package` 或 concrete launcher。
@@ -71,6 +72,7 @@ Game Entry validation
 → resolve every required platform implementation
 → validate current Platform hosting/security capability
 → freeze immutable PlatformLaunchPlan
+→ install/freeze that plan in the current concrete Platform instance
 → project/freeze LogicalGameBootstrap
 ```
 
@@ -94,9 +96,23 @@ Prepared current-platform result 概念上包含两个正交 projection：
 LogicalGameBootstrap
     → Main-visible logical facts
 
-plan-bound RuntimeHosting
-    → Main-facing launch capability
+prepared concrete Platform instance
+    → owns PlatformLaunchPlan privately
+    → exposes the narrow Main-facing capability view
 ```
+
+Composition 在调用 Main 前已经完成：
+
+```text
+platform.prepareGame(source)
+→ Launcher PREPARE
+→ platform installs immutable PlatformLaunchPlan
+→ returns LogicalGameBootstrap
+
+runMain({ bootstrap, platform })
+```
+
+Main 不调用 `prepareGame()`；Main 只消费当前 Platform 对 Main 暴露的窄 capability view。
 
 Main 安装：
 
@@ -159,9 +175,9 @@ Definition Module actual import/default-export ABI validation可发生在 truste
 Hostra Node Runner / PWA Worker Runner
         │
         ▼
-RuntimeControlBinding
-SubsystemDataBinding
-ContentClient
+M6 RuntimeControlBinding
+M8+ SubsystemDataBinding
+M12+ ContentClient
         │
         ▼
 @loomrealm/subsystem/host
