@@ -194,6 +194,8 @@ test("Main boots required Runtimes and drives a nested cross-Subsystem Frame to 
   assert.equal(childShutdown, 1);
   assert.equal(fake.runtimes.get("root").acquireCount, 1);
   assert.equal(fake.runtimes.get("child").acquireCount, 1);
+  assert.equal(fake.runtimes.get("root").terminationRequests, 0);
+  assert.equal(fake.runtimes.get("child").terminationRequests, 0);
 });
 
 test("same-Subsystem recursion closes through Response-before-dependent-RPC without reentrant deadlock", async () => {
@@ -382,4 +384,5 @@ test("external abort produces graceful Session shutdown and bounded Runtime clea
 
   assert.deepEqual(await resultPromise, { kind: "shutdown" });
   assert.equal(shutdownCalls, 1);
+  assert.equal(fake.runtimes.get("root").terminationRequests, 0);
 });
