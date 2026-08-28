@@ -1,0 +1,42 @@
+name: Normalize Main shutdown fix formatting
+
+on:
+  push:
+    branches:
+      - feat/main-m5
+    paths:
+      - ".github/workflows/format-main-shutdown.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/main-m5
+      - name: Normalize cleanupRuntime formatting
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("packages/main/src/internal/main-session.ts")
+          text = path.read_text()
+          start = text.index("  private async cleanupRuntime(")
+          end_marker = "\n}\n}\n\nexport function runMainInternal"
+          end = text.index(end_marker, start) + len("\n}")
+          lines = text[start:end].splitlines()
+          if len(lines) < 2:
+              raise SystemExit("cleanupRuntime block not found")
+          formatted = "\n".join([lines[0], *[("  " + line) for line in lines[1:]]])
+          path.write_text(text[:start] + formatted + text[end:])
+          PY
+      - name: Remove one-shot workflow and commit formatting
+        run: |
+          rm .github/workflows/format-main-shutdown.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/main/src/internal/main-session.ts .github/workflows/format-main-shutdown.yml
+          git commit -m "style(main): normalize shutdown cleanup formatting"
+          git push origin HEAD:feat/main-m5
