@@ -1,8 +1,8 @@
-# `@loomrealm/subsystem` 设计草案
+# `@loomrealm/subsystem`
 
-> 状态：Draft  
-> 阶段：Package boundary / author API / host integration / implementation planning  
-> 最近复核：2026-08-27  
+> 状态：M4 Runtime/Frame Implemented Baseline / Full Package Evolving  
+> 阶段：M4 Runtime/Frame + Host Runtime Control closure；M8/M10/M11/M12 capability slices pending  
+> 最近复核：2026-08-28  
 > 目标：为 LoomRealm 业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author SDK，并定义 Platform Runner 可消费的最小 host integration surface。  
 > 上层架构：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[Subsystem 模型](../../doc/10-architecture/subsystem-model.md)  
 > 平台能力契约：[`@loomrealm/platform-ports`](../platform-ports/DESIGN.md)  
@@ -29,8 +29,8 @@ Package Scope
 
 | Capability slice | Primary contract/capability dependency | Current implementation meaning | Phase 1 gate |
 | --- | --- | --- | --- |
-| Definition/lifecycle + Frame/Outcome | Runtime Control Profile v1 + Frame/Call v1 | Runtime/Frame core may be implemented and qualified | M4 |
-| Host Runtime Control mapping | `@loomrealm/platform-ports` M4 slice + `@loomrealm/runtime-control` typed Subsystem peer | first real Subsystem-side Platform Port / Runtime Control consumer | M4 |
+| Definition/lifecycle + Frame/Outcome | Runtime Control Profile v1 + Frame/Call v1 | Implemented Baseline / executable semantics qualified | M4 |
+| Host Runtime Control mapping | `@loomrealm/platform-ports` M4 slice + `@loomrealm/runtime-control` typed Subsystem peer | real Subsystem-side Platform Port / Runtime Control consumer qualified | M4 |
 | DataPlane + `SubsystemDataBinding` application integration | Renderer Data Profile v1 | waits for Data application profile/core implementation | M8 |
 | `InputListener` + InputManager | User Input v1 | author/input behavior closes with Input protocol implementation | M10 |
 | `RenderDomain` + RenderManager | Render Update v1 | author/render behavior closes with Render protocol implementation | M11 |
@@ -126,6 +126,19 @@ ContentClient
 business-safe local errors
 ```
 
+M4 actual published root is intentionally narrower and exactly contains：
+
+```text
+defineSubsystem
+completed / cancelled / failed
+FrameCallRejectedError / FrameBusyError / FrameInactiveError / FrameClosedError
+Frame / FrameFailure / FrameOutcome
+RuntimeFailure
+SubsystemDefinition / SubsystemDefinitionFactory / SubsystemScope
+```
+
+Input/Render/Content symbols remain target package responsibility but are not published before M10/M11/M12。
+
 ### 2.2 Host integration surface
 
 ```text
@@ -134,10 +147,12 @@ business-safe local errors
 
 供 trusted Runner / composition 使用。
 
-M4 slice：
+M4 published host slice：
 
 ```text
 runSubsystem
+SubsystemRuntimeFatalError
+RunSubsystemOptions
 SubsystemLaunchContext
 SubsystemRuntimeControlPolicy
 ```
@@ -288,6 +303,7 @@ interface SubsystemRuntimeControlPolicy {
   readonly scheduler: DeadlineScheduler;
   readonly helloDeadlineMs: number;
   readonly frameDeadlineMs: number;
+  readonly terminalCleanupDeadlineMs: number;
 }
 ```
 
@@ -749,7 +765,13 @@ failed(error)
 
 同一 instance 不重复调用两个 terminal hook；terminal hook自身异常只进入 diagnostics/cleanup classification，不重新开放 Runtime，也不覆盖 primary terminal cause。
 
-M4 `runSubsystem()` settlement 冻结到行为，不在本次 Platform Ports closure 中额外冻结新的 public fatal-error class：
+M4 `runSubsystem()` settlement 与 host-facing fatal error shape 已在 implementation baseline 中冻结：
+
+```ts
+class SubsystemRuntimeFatalError extends Error {
+  readonly failure: RuntimeFailure;
+}
+```
 
 ```text
 graceful Main shutdown
@@ -771,6 +793,8 @@ bootstrap / Runtime fatal
 该 rejection 的 exact exported error shape 在 M4 Subsystem implementation closure 中定稿；terminal hook/cleanup error MUST NOT覆盖 primary failure。
 
 Control acquisition rejection、hello rejection/timeout、unexpected Control terminal、fatal Frame ambiguity 都进入 Runtime bootstrap/fatal path；不得返回旧 business continuation。
+
+Runtime Control terminal classification has exactly one owner：`SubsystemHost` maps immutable `RuntimeControlTerminal` to the business-safe `RuntimeFailure`。`FrameRuntime` only quarantines the old continuation；it MUST NOT synthesize a competing terminal code from the same terminal/timeout/fatal semantic outcome。This prevents observable failure codes from depending on Promise/microtask race order。
 
 ---
 
