@@ -344,14 +344,20 @@ export class FrameRuntime {
       throw new FrameCallRejectedError(outcome.error.code);
     }
 
+    if (
+      outcome.kind === "timeout" ||
+      outcome.kind === "terminal" ||
+      (outcome.kind === "semantic-error" && outcome.classification === "fatal")
+    ) {
+      // Runtime Control has already committed the connection terminal.
+      // SubsystemHost is the single terminal -> RuntimeFailure mapper.
+      return NEVER;
+    }
+
     this.failRuntime(
       runtimeFailure(
-        outcome.kind === "timeout"
-          ? "RUNTIME_CONTROL_FRAME_TIMEOUT"
-          : outcome.kind === "terminal"
-            ? "RUNTIME_CONTROL_FRAME_TERMINAL"
-            : "RUNTIME_CONTROL_FRAME_DIVERGENCE",
-        "Runtime Control frame.call could not establish a safe continuation",
+        "RUNTIME_CONTROL_FRAME_DIVERGENCE",
+        "Runtime Control frame.call returned an impossible recoverable outcome",
       ),
     );
     return NEVER;
@@ -431,18 +437,21 @@ export class FrameRuntime {
       return;
     }
 
-    if (!this.canAcceptFrames()) return;
-    if (result.kind !== "success") {
-      this.failRuntime(
-        runtimeFailure(
-          result.kind === "timeout"
-            ? "RUNTIME_CONTROL_FRAME_TIMEOUT"
-            : result.kind === "terminal"
-              ? "RUNTIME_CONTROL_FRAME_TERMINAL"
-              : "RUNTIME_CONTROL_FRAME_DIVERGENCE",
-          "Runtime Control frame.return could not be committed safely",
-        ),
-      );
+    if (!this.canAcceptFrames() || result.kind === "success") return;
+    if (
+      result.kind === "timeout" ||
+      result.kind === "terminal" ||
+      (result.kind === "semantic-error" && result.classification === "fatal")
+    ) {
+      // The Runtime Control terminal watcher owns fatal classification.
+      return;
     }
+
+    this.failRuntime(
+      runtimeFailure(
+        "RUNTIME_CONTROL_FRAME_DIVERGENCE",
+        "Runtime Control frame.return returned an impossible recoverable outcome",
+      ),
+    );
   }
 }

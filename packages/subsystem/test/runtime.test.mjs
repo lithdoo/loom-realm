@@ -309,6 +309,39 @@ test("Runtime-fatal call never re-enters the business continuation", async () =>
   assert.equal(frameSignal.aborted, true);
 });
 
+test("Runtime Control request timeout has one Host-owned failure classification", async () => {
+  const never = new Promise(() => {});
+  let failedValue;
+  const session = await createSession(
+    defineSubsystem(() => ({
+      async frame(frame) {
+        await frame.call("blocked", null);
+        return completed(null);
+      },
+      failed(error) {
+        failedValue = error;
+      },
+    })),
+    {
+      async onFrameCall() {
+        await never;
+      },
+    },
+  );
+
+  await session.main.frame.initialize({ frameId: "root", input: null });
+  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
+  await waitFor(() => session.calls.length === 1, "pending frame.call");
+
+  await assert.rejects(
+    session.runtime,
+    (error) =>
+      error instanceof SubsystemRuntimeFatalError &&
+      error.failure.code === "RUNTIME_CONTROL_REQUEST_TIMEOUT",
+  );
+  assert.equal(failedValue.code, "RUNTIME_CONTROL_REQUEST_TIMEOUT");
+});
+
 test("administrative suspend aborts the Frame and discards a late handler result", async () => {
   const handlerGate = deferred();
   let frameSignal;
