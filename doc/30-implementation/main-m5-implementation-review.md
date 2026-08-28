@@ -25,14 +25,15 @@ Accepted extraction rule：extract pure helpers/value validation/protocol adapte
 
 ## Closure evidence
 
-Node 20 and Node 24 must pass：
+Review validation run `33156706689` passed on Node 20 and Node 24：
 
 ```text
-Foundation/Wire/Platform Ports/Runtime Control/Subsystem dependency build
-@loomrealm/main build
-Main integration tests
-npm pack --dry-run
-docs link/build checks
+Foundation/Wire/Platform Ports/Runtime Control/Subsystem dependency build   PASS
+@loomrealm/main TypeScript build                                           PASS
+Main integration tests                                                     10/10 PASS
+npm pack --dry-run                                                         PASS
+Markdown link validation                                                   PASS
+VitePress docs build                                                       PASS
 ```
 
 Integration uses fake physical Platform only and real：
@@ -40,6 +41,8 @@ Integration uses fake physical Platform only and real：
 ```text
 Main ↔ Runtime Control ↔ MemoryCarrier ↔ Subsystem Host ↔ Business Definition
 ```
+
+The added termination-observation regression proves that `HostedRuntime.terminated` rejection is not accepted as physical termination evidence and therefore cannot suppress `requestTermination()` escalation.
 
 ## Verdict
 
