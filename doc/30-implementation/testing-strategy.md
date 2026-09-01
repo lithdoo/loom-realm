@@ -516,23 +516,30 @@ M3 does not build fake author SDK to claim this closure。
 
 ## 19. Main Authority / Fake Platform Ports
 
-M5 real consumer qualification：
+M5 real consumer qualification implemented：
 
 ```text
-main-uses-MainRuntimeControlPeer
-logical-key-registry
-fake-plan-bound-RuntimeHosting
-launch-request-key-only
-hello-auth-callback-owns-LaunchAttempt-token
-Runtime lifecycle
-Frame-Activation-Registry
-Response-afterResponse-maps-to-real-Main-causal-operation
-failure-classifier-unwind-golden-traces
-Renderer-Control-snapshot
-DataAuthority-generation-profile
+main-root-public-boundary
+logical-bootstrap-defensive-install
+MainPlatform-scheduler-bootstrapTokens-runtimeHosting-only
+bootstrap-token-freshness-and-duplicate-fail-closed
+RuntimeHosting-launch-request-key-plus-token-only
+main-uses-real-MainRuntimeControlPeer
+hello-auth-callback-owns-token-registration-consumption
+required-runtime-identified-ready-gate
+initial-frame-activate-ACK-before-publication
+cross-subsystem-nested-call-return
+same-subsystem-recursion-no-reentrant-deadlock
+recoverable-target-rejection-preserves-Activation
+child-runtime-loss-whole-suffix-unwind-fresh-caller-resume
+root-runtime-loss-no-stale-business-continuation
+root-outcome-and-external-abort-graceful-shutdown
+shutdown-success-waits-natural-termination-before-escalation
+termination-observation-rejection-not-treated-as-terminated
+npm-pack-dry-run
 ```
 
-Runtime Control terminal/fatal facts cannot self-mutate Main authority；Main performs authority commit/recovery。
+Fake Platform replaces physical hosting only；test path still uses real Runtime Control peers + MemoryCarrier + `@loomrealm/subsystem/host` business Definitions. Renderer Control/DataAuthority tests remain M7/M8 gates, not M5 requirements.
 
 ---
 

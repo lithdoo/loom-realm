@@ -157,47 +157,42 @@ Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也�
 
 ## 6. Main-facing RuntimeHosting
 
-RuntimeHosting 是 prepared concrete Platform instance 对 Main 暴露的 logical launch capability，而不是 module loader API。其 exact M5 TypeScript shape 由 `@loomrealm/platform-ports` 的 M5 consumer closure 冻结；本文只冻结 responsibility。
+RuntimeHosting 是 prepared concrete Platform instance 对 Main 暴露的 logical launch capability，而不是 module loader API。M5 exact contract 已由 `@loomrealm/platform-ports` 冻结：
 
-概念：
+```ts
+interface RuntimeLaunchRequest {
+  readonly subsystemKey: string;
+  readonly bootstrapToken: string;
+}
 
-```text
-launch(subsystemKey, LaunchAttemptMaterial)
-terminate(handle/key)
-observe supervision facts
+interface MainRuntimeControlBinding {
+  acquire(signal: AbortSignal): Promise<MessageCarrier>;
+}
+
+interface HostedRuntime {
+  readonly runtimeControl: MainRuntimeControlBinding;
+  readonly terminated: Promise<void>;
+  requestTermination(signal: AbortSignal): Promise<void>;
+}
+
+interface RuntimeHosting {
+  launch(request: RuntimeLaunchRequest, signal: AbortSignal): Promise<HostedRuntime>;
+}
 ```
 
-负责：
+`RuntimeLaunchRequest` 是 Main-owned Launch Attempt 的窄 projection；只含 logical key + already-registered bootstrap token。
 
 ```text
-lookup immutable PlatformLaunchPlan by subsystemKey
-create Host-owned Runner Container
-provide launch bootstrap material
-provide supervision handle
-provide bounded terminate capability
+launch({subsystemKey,bootstrapToken})
+→ lookup immutable PlatformLaunchPlan[subsystemKey]
+→ create exact Host-owned Runner Container
+→ inject key/token
+→ return one HostedRuntime lifetime
 ```
 
-Main MUST NOT传：
+`HostedRuntime` 自然关联该 physical Runtime 的 Main-side Control establishment、termination request capability 与 actual termination fact；不需要为了 correlation 再暴露平行 `RuntimeControlHost` / `RuntimeSupervisor` registry。
 
-```text
-GameEntryV1 / ValidatedGameEntryV1
-module path / module URL
-Node executable / argv / env
-Worker target/options
-Runner entry
-Control endpoint / MessagePort
-```
-
-RuntimeHosting不负责：
-
-```text
-mark ready by itself
-create Frame
-mint Activation
-choose InputTarget
-mint Data generation/profile
-run failure unwind
-```
+Main MUST NOT传 Game Entry、PlatformLaunchPlan、module/path/URL、Node/Worker options、Control endpoint/Port、Renderer/Data/Content material。RuntimeHosting不负责 ready/Frame/Activation/InputTarget/DataAuthority/failure unwind。
 
 ---
 
@@ -225,28 +220,22 @@ arbitrary host-code execution authority
 
 ---
 
-## 8. Supervisor Boundary
+## 8. Physical Termination Fact Boundary
 
-Supervisor只报告 physical facts：
-
-```text
-container creation success/failure
-container alive/exited
-exit code/signal/reason
-termination request/result
-```
-
-Main解释这些 facts为 public Runtime lifecycle。
+M5 shared port只冻结最小 portable fact：
 
 ```text
-spawn/Worker creation success != connected
-connected != identified
-identified != ready
+HostedRuntime.terminated resolves
+    = actual physical Runtime termination observed
+
+HostedRuntime.terminated rejects
+    = termination observation failed
+    != stopped proof
 ```
 
-`stopped` 只来自 actual physical termination observation。
+`requestTermination()` 只请求 physical termination；resolution 不等于 actual terminated。PID/Worker/exit code/signal/reason 等 richer diagnostics MAY 保持 concrete Platform-local，直到独立 portable consumer 证明需要才进入 shared port。
 
-Supervisor不能选择 Frame unwind root、Data generation或 application recovery。
+Main解释 physical facts为 Runtime lifecycle；Platform不能选择 Frame unwind root、Data generation或 application recovery。
 
 ---
 
@@ -336,10 +325,10 @@ Data loss != Frame unwind
 ```text
 Main shutdown intent
 → subsystem.shutdown
-→ bounded Runner/business cleanup
-→ Platform terminate if needed
-→ Supervisor observes actual termination
-→ stopped
+→ if shutdown accepted: bounded wait HostedRuntime.terminated
+→ if no successful termination observation: requestTermination()
+→ bounded wait HostedRuntime.terminated
+→ only resolved termination fact can support stopped
 ```
 
 异常：
@@ -388,7 +377,7 @@ PWA
 3. PlatformLaunchPlan + LogicalGameBootstrap 在 first Runtime side effect前完整闭合；
 4. Runtime Container承载 Host-owned Runner + one selected business Definition instance；
 5. Host-owned Runner是 physical entry；
-6. Main-facing RuntimeHosting只接受 logical key/Launch Attempt material；
+6. Main-facing RuntimeHosting只接受 `{subsystemKey, bootstrapToken}` Launch Attempt projection；
 7. Host policy/credential/security不能被 Game/Platform manifest任意覆盖；
 8. Runtime最多 `0..1 current` Control carrier，same-attempt不 reconnect；
 9. Supervisor只报告 physical facts，`stopped`只来自 actual termination；

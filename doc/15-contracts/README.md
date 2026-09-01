@@ -32,7 +32,7 @@ Game Package v1
     │       → exact join / full PREPARE
     │       → HostraLaunchPlan
     │       → LogicalGameBootstrap projection
-    │       → plan-bound RuntimeHosting
+    │       → concrete Platform installs plan / exposes RuntimeHosting
     │
     └── PWA Game Launcher / Worker Runner Profile v1
             Game validation via @loomrealm/game-package
@@ -40,7 +40,7 @@ Game Package v1
             → exact join / full PREPARE
             → PwaLaunchPlan
             → LogicalGameBootstrap projection
-            → plan-bound RuntimeHosting
+            → concrete Platform installs plan / exposes RuntimeHosting
 
 Subsystem Control v1
     ↓
@@ -162,7 +162,10 @@ LogicalGameBootstrap
     subsystemKeys
     initial subsystemKey/input
 
-plan-bound RuntimeHosting port
+MainPlatform narrow capability view
+    DeadlineScheduler
+    BootstrapTokenGenerator
+    RuntimeHosting
 ```
 
 Main does not consume：
@@ -178,7 +181,8 @@ Node/Worker options
 Runtime launch：
 
 ```text
-Main launch(subsystemKey)
+Main registers bootstrap token
+→ RuntimeHosting.launch({subsystemKey,bootstrapToken})
 → RuntimeHosting lookup frozen plan
 → Host-owned Runner
 → selected Definition Module
@@ -494,10 +498,12 @@ Game Package
 
 Platform Launcher
     primary Runtime-product Game consumer
-    Game + Platform PREPARE
-    PlatformLaunchPlan
-    LogicalGameBootstrap projection
-    plan-bound RuntimeHosting / Runner integration
+    Game + Platform PREPARE component
+    PlatformLaunchPlan + LogicalGameBootstrap projection
+
+Concrete Platform
+    installs PlatformLaunchPlan privately
+    exposes Main-facing RuntimeHosting / scheduler / bootstrap token capability
 
 Runtime Control
     Control/Frame protocol mechanics
@@ -535,6 +541,12 @@ Implemented Baseline：
 @loomrealm/wire
 @loomrealm/game-package
 @loomrealm/runtime-control
+@loomrealm/platform-ports
+    M4 Subsystem + M5 Main consumer qualified
+@loomrealm/subsystem
+    M4 Runtime/Frame slice implemented
+@loomrealm/main
+    M5 Runtime/Frame authority slice implemented
 @loomrealm/data
     Package-local Core Baseline Implemented
     != M8 milestone closed
@@ -543,32 +555,30 @@ Implemented Baseline：
 Current next implementation gate：
 
 ```text
-M4 @loomrealm/subsystem
-    Runtime/Frame author core
-    @loomrealm/subsystem/host Runtime Control consumer qualification
+M6 Hostra Platform vertical
+    concrete HostraPlatform
+    Launcher PREPARE component
+    Node Runner / RuntimeHosting / Control carrier realization
 ```
 
 Then：
 
 ```text
-M5 Main = second real Runtime Control consumer + authority vertical slice
-M6 Hostra Launcher = first runnable Runtime vertical slice
 M7 Renderer Control
 M8 integration of existing Data baseline
-    Subsystem DataPlane + Renderer binding/current authority
 M9 Desktop DataConnectionBroker
 M10 User Input role managers
 M11 Render role managers
 ...
-M15 PWA Launcher
+M15 PWA Platform vertical
 ```
 
 Implementation priority：
 
 ```text
-M4/M5/M6 first runnable Runtime vertical slice
+M6 first runnable physical Runtime vertical
 → M7 authority mirror
-→ M8 shared Data profile mechanics integration
+→ M8 shared Data integration
 → M9 physical Data provisioning
 → M10/M11 Input/Render role consumers
 ```

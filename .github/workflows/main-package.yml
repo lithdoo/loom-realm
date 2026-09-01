@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - "packages/main/**"
+      - "packages/foundation/**"
+      - "packages/wire/**"
+      - "packages/platform-ports/**"
+      - "packages/runtime-control/**"
+      - "packages/subsystem/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -14,6 +19,11 @@ on:
       - main
     paths:
       - "packages/main/**"
+      - "packages/foundation/**"
+      - "packages/wire/**"
+      - "packages/platform-ports/**"
+      - "packages/runtime-control/**"
+      - "packages/subsystem/**"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
@@ -42,8 +52,17 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Build Main package
-        run: npm run build -w @loomrealm/main
+      - name: Build Main dependencies
+        run: >-
+          npm run build
+          -w @loomrealm/foundation
+          -w @loomrealm/wire
+          -w @loomrealm/platform-ports
+          -w @loomrealm/runtime-control
+          -w @loomrealm/subsystem
+
+      - name: Test Main
+        run: npm test -w @loomrealm/main
 
       - name: Verify publishable package surface
         run: npm pack -w @loomrealm/main --dry-run

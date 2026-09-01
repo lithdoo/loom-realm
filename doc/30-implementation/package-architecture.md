@@ -178,11 +178,19 @@ Profile composition does not merge child identity/lifecycle/authority。
 
 Position：platform-neutral Core ↔ Platform capability contract boundary；它定义 Core 需要平台提供的窄 capability/fact，不拥有 Core authority、role policy、protocol mechanics 或 concrete Hostra/PWA implementation。
 
-M4 frozen root surface exactly：
+Frozen root surface through M5：
 
 ```text
-DeadlineScheduler
-RuntimeControlBinding
+M4
+    DeadlineScheduler
+    RuntimeControlBinding
+
+M5
+    BootstrapTokenGenerator
+    RuntimeLaunchRequest
+    MainRuntimeControlBinding
+    HostedRuntime
+    RuntimeHosting
 ```
 
 Runtime dependency exactly：
@@ -193,7 +201,7 @@ Runtime dependency exactly：
 
 `DeadlineScheduler` 与 Runtime Control scheduler structural-compatible，但 `platform-ports` MUST NOT依赖 `@loomrealm/runtime-control`。`RuntimeControlBinding` 是 one-Launch-Attempt / single-use / no-reconnect establishment capability。
 
-M5+ Main/Renderer/Data/Content ports 只在对应 real consumer closure 时增长；不得提前建立 universal Core `Platform` contract、service locator 或 future port inventory。Product composition MAY 创建 session-scoped concrete `HostraPlatform` / `PwaPlatform` object 来聚合真实实现；Core role 只依赖自己的 narrow capability view。
+M5 Main ports 已由真实 consumer closure；M7+ Renderer/Data/Content ports 仍只在对应 real consumer closure 时增长；不得提前建立 universal Core `Platform` contract、service locator 或 future port inventory。Product composition MAY 创建 session-scoped concrete `HostraPlatform` / `PwaPlatform` object 来聚合真实实现；Core role 只依赖自己的 narrow capability view。
 
 ---
 
@@ -210,14 +218,16 @@ Role packages consume capability packages/ports and never import concrete Hostra
 
 ### Main
 
-Main consumes：
+M5 Main consumes：
 
 ```text
 LogicalGameBootstrap
 @loomrealm/runtime-control
-@loomrealm/renderer-control
-Main-facing Platform ports
+@loomrealm/platform-ports M5 slice
+@loomrealm/wire
 ```
+
+`@loomrealm/renderer-control` 从 M7 才进入 Main runtime dependency。
 
 Main owns：
 
@@ -313,7 +323,7 @@ Game↔Platform exact key-set join
 platform executable resolution/security preflight
 immutable PlatformLaunchPlan
 Main-facing LogicalGameBootstrap projection
-Main-facing RuntimeHosting implementation
+RuntimeHosting implementation primitives installed/exposed by the concrete Platform
 Host-owned Runner/bootstrap/supervision integration
 Runner provisioning integration point
 ```
@@ -522,7 +532,7 @@ Thus：
 - `DataConnectionBroker` stays outside subsystem；
 - RuntimeHosting concrete implementation lives in matching launcher；
 - Main only sees abstract RuntimeHosting port；
-- `LogicalGameBootstrap` exact type placement waits for M5/M6 smallest Main-facing surface。
+- `LogicalGameBootstrap` exact type 已由 M5 `@loomrealm/main` root surface 拥有；
 
 ---
 
