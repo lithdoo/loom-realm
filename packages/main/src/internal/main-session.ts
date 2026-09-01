@@ -13,11 +13,7 @@ import {
   type RuntimeControlTerminal,
   type SubsystemRuntimeStatusV1,
 } from "@loomrealm/runtime-control";
-import {
-  assertJsonValue,
-  utf8ByteLength,
-  type JsonValue,
-} from "@loomrealm/wire";
+import { assertJsonValue, type JsonValue } from "@loomrealm/wire";
 import { MainRuntimeFatalError } from "../errors.js";
 import type {
   LogicalGameBootstrap,
@@ -35,6 +31,7 @@ import {
   runWithDeadline,
   resolvesWithin,
   toMainOutcome,
+  validProtocolString,
 } from "./primitives.js";
 
 type RuntimePhase =
@@ -64,7 +61,7 @@ interface RuntimeRecord {
   identified: boolean;
   failure: MainRuntimeFailure | null;
   expectedTermination: boolean;
-  terminationRequested: boolean;
+  terminationAttempt: Promise<void> | null;
   physicallyTerminated: boolean;
   shutdownRequested: boolean;
 }
@@ -180,12 +177,7 @@ function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const key of bootstrap.subsystemKeys) {
-    if (
-      typeof key !== "string" ||
-      key.length === 0 ||
-      utf8ByteLength(key) > 256 ||
-      seen.has(key)
-    ) {
+    if (!validProtocolString(key, 256) || seen.has(key)) {
       throw new TypeError("Invalid LogicalGameBootstrap subsystem key set");
     }
     seen.add(key);
@@ -237,6 +229,7 @@ class MainSessionRuntime {
   private readonly issuedTokens = new Set<string>();
 
   private terminal: SessionTerminal | null = null;
+  private stopRequested = false;
   private frameAuthorityStarted = false;
   private nextFrame = 1;
   private nextActivation = 1;
@@ -250,9 +243,9 @@ class MainSessionRuntime {
   run(): Promise<MainSessionResult> {
     const external = this.options.signal;
     if (external !== undefined) {
-      const onAbort = () => this.beginShutdown();
+      const onAbort = () => this.requestShutdown();
       if (external.aborted) {
-        this.beginShutdown();
+        this.requestShutdown();
       } else {
         external.addEventListener("abort", onAbort, { once: true });
         this.detachExternalAbort = () =>
@@ -260,17 +253,17 @@ class MainSessionRuntime {
       }
     }
 
-    if (this.terminal === null) void this.bootstrapSession();
+    if (!this.stopRequested && this.terminal === null) void this.bootstrapSession();
     return this.done.promise;
   }
 
   private async bootstrapSession(): Promise<void> {
     try {
       for (const key of this.bootstrap.subsystemKeys) {
-        if (this.terminal !== null) return;
+        if (this.stopRequested || this.terminal !== null) return;
         await this.bootstrapRuntime(key);
       }
-      if (this.terminal !== null) return;
+      if (this.stopRequested || this.terminal !== null) return;
 
       this.frameAuthorityStarted = true;
       await this.mutate(() => this.startInitialFrame());
@@ -280,7 +273,7 @@ class MainSessionRuntime {
         error instanceof OperationAbortedError &&
         this.options.signal?.aborted
       ) {
-        this.beginShutdown();
+        this.requestShutdown();
         return;
       }
       if (error instanceof OperationTimeoutError) {
@@ -316,12 +309,7 @@ class MainSessionRuntime {
         key,
       );
     }
-    if (
-      typeof token !== "string" ||
-      token.length === 0 ||
-      utf8ByteLength(token) > 4096 ||
-      this.issuedTokens.has(token)
-    ) {
+    if (!validProtocolString(token, 4096) || this.issuedTokens.has(token)) {
       throw new BootstrapError(
         "MAIN_BOOTSTRAP_TOKEN_INVALID",
         "Bootstrap token generator returned invalid or reused token material",
@@ -340,7 +328,7 @@ class MainSessionRuntime {
       identified: false,
       failure: null,
       expectedTermination: false,
-      terminationRequested: false,
+      terminationAttempt: null,
       physicallyTerminated: false,
       shutdownRequested: false,
       ready: deferred<"ready" | "failed">(),
@@ -495,7 +483,7 @@ class MainSessionRuntime {
                 record.key,
               ),
             );
-          } else {
+          } else if (!this.stopRequested) {
             await this.unwindFailures();
           }
         }
@@ -521,7 +509,7 @@ class MainSessionRuntime {
               record.key,
             ),
           );
-        } else {
+        } else if (!this.stopRequested) {
           await this.unwindFailures();
         }
       });
@@ -554,7 +542,7 @@ class MainSessionRuntime {
                 record.key,
               ),
             );
-          } else {
+          } else if (!this.stopRequested) {
             await this.unwindFailures();
           }
         });
@@ -576,7 +564,7 @@ class MainSessionRuntime {
                 record.key,
               ),
             );
-          } else {
+          } else if (!this.stopRequested) {
             await this.unwindFailures();
           }
         });
@@ -598,23 +586,36 @@ class MainSessionRuntime {
     return true;
   }
 
-  private async ensureFailedRuntimeTermination(record: RuntimeRecord): Promise<void> {
+  private requestRuntimeTermination(record: RuntimeRecord): Promise<void> {
     const hosted = record.hosted;
-    if (
-      hosted === null ||
-      record.terminationRequested ||
-      record.physicallyTerminated
-    ) {
-      return;
+    if (hosted === null || record.physicallyTerminated) {
+      return Promise.resolve();
     }
-    record.terminationRequested = true;
+    if (record.terminationAttempt !== null) {
+      return record.terminationAttempt;
+    }
+
+    const attempt = runWithDeadline(
+      this.options.platform.scheduler,
+      this.options.policy.terminationDeadlineMs,
+      [],
+      (signal) => hosted.requestTermination(signal),
+    );
+    record.terminationAttempt = attempt;
+    void attempt.then(
+      () => {
+        if (record.terminationAttempt === attempt) record.terminationAttempt = null;
+      },
+      () => {
+        if (record.terminationAttempt === attempt) record.terminationAttempt = null;
+      },
+    );
+    return attempt;
+  }
+
+  private async ensureFailedRuntimeTermination(record: RuntimeRecord): Promise<void> {
     try {
-      await runWithDeadline(
-        this.options.platform.scheduler,
-        this.options.policy.terminationDeadlineMs,
-        [],
-        (signal) => hosted.requestTermination(signal),
-      );
+      await this.requestRuntimeTermination(record);
     } catch {
       // Runtime failure is already the primary fact; termination effort is secondary.
     }
@@ -625,7 +626,7 @@ class MainSessionRuntime {
     params: FrameCallParams,
   ): Promise<RuntimeControlHandlerReply<FrameCallResult, FrameRpcErrorData>> {
     return this.mutate(async () => {
-      if (this.terminal !== null) {
+      if (this.stopRequested || this.terminal !== null) {
         return semantic<FrameCallResult>({ code: "FRAME_STATE_MISMATCH" });
       }
 
@@ -671,7 +672,7 @@ class MainSessionRuntime {
     params: FrameReturnParams,
   ): Promise<RuntimeControlHandlerReply<FrameReturnResult, FrameRpcErrorData>> {
     return this.mutate(async () => {
-      if (this.terminal !== null) {
+      if (this.stopRequested || this.terminal !== null) {
         return semantic<FrameReturnResult>({ code: "FRAME_STATE_MISMATCH" });
       }
 
@@ -730,7 +731,7 @@ class MainSessionRuntime {
   }
 
   private async startInitialFrame(): Promise<void> {
-    if (this.terminal !== null) return;
+    if (this.stopRequested || this.terminal !== null) return;
     const runtime = this.runtimes.get(this.bootstrap.initial.subsystemKey);
     if (runtime === undefined || !this.runtimeReady(runtime)) {
       this.beginFatal(
@@ -754,6 +755,7 @@ class MainSessionRuntime {
       runtime,
       (peer) => peer.frame.initialize({ frameId: frame.id, input: frame.input }),
     );
+    if (this.stopRequested) return;
     if (initialized === null) {
       await this.unwindFailures();
       return;
@@ -779,10 +781,12 @@ class MainSessionRuntime {
     }
     frame.contextKnown = true;
 
+    if (this.stopRequested) return;
     const activationId = this.mintActivation();
     const activated = await this.invokeFrame(runtime, (peer) =>
       peer.frame.activate({ frameId: frame.id, activationId }),
     );
+    if (this.stopRequested) return;
     if (activated === null || activated.kind !== "success") {
       if (activated !== null)
         this.markUnsafeFrameOutcome(runtime, activated, "frame.activate");
@@ -796,6 +800,7 @@ class MainSessionRuntime {
 
   private async startAcceptedChild(child: FrameRecord): Promise<void> {
     if (
+      this.stopRequested ||
       this.terminal !== null ||
       child.lifecycle !== "starting" ||
       this.stack.at(-1)?.id !== child.id
@@ -820,13 +825,14 @@ class MainSessionRuntime {
         );
         return;
       }
-      await this.unwindFailures();
+      if (!this.stopRequested) await this.unwindFailures();
       return;
     }
 
     const initialized = await this.invokeFrame(runtime, (peer) =>
       peer.frame.initialize({ frameId: child.id, input: child.input }),
     );
+    if (this.stopRequested) return;
     if (initialized === null) {
       await this.unwindFailures();
       return;
@@ -864,10 +870,12 @@ class MainSessionRuntime {
     }
     child.contextKnown = true;
 
+    if (this.stopRequested) return;
     const activationId = this.mintActivation();
     const activated = await this.invokeFrame(runtime, (peer) =>
       peer.frame.activate({ frameId: child.id, activationId }),
     );
+    if (this.stopRequested) return;
     if (activated === null || activated.kind !== "success") {
       if (activated !== null)
         this.markUnsafeFrameOutcome(runtime, activated, "frame.activate");
@@ -881,6 +889,7 @@ class MainSessionRuntime {
 
   private async finalizeAcceptedReturn(frame: FrameRecord): Promise<void> {
     if (
+      this.stopRequested ||
       this.terminal !== null ||
       frame.lifecycle === "closed" ||
       this.stack.at(-1)?.id !== frame.id
@@ -906,7 +915,7 @@ class MainSessionRuntime {
           "Frame close could not be issued to the owning Runtime",
         );
       }
-      await this.unwindFailures();
+      if (!this.stopRequested) await this.unwindFailures();
       return;
     }
 
@@ -914,6 +923,7 @@ class MainSessionRuntime {
     const closed = await this.invokeFrame(runtime, (peer) =>
       peer.frame.closeFrame({ frameId: frame.id }),
     );
+    if (this.stopRequested) return;
     if (closed === null || closed.kind !== "success") {
       if (closed !== null)
         this.markUnsafeFrameOutcome(runtime, closed, "frame.close");
@@ -934,6 +944,7 @@ class MainSessionRuntime {
     returnedFrame: FrameRecord,
     outcome: ControlFrameOutcome,
   ): Promise<boolean> {
+    if (this.stopRequested) return true;
     if (returnedFrame.callerFrameId === null) {
       this.beginRootOutcome(outcome);
       return true;
@@ -983,6 +994,7 @@ class MainSessionRuntime {
         result: outcome,
       }),
     );
+    if (this.stopRequested) return true;
     if (resumed === null || resumed.kind !== "success") {
       if (resumed !== null)
         this.markUnsafeFrameOutcome(runtime, resumed, "frame.resume");
@@ -996,7 +1008,7 @@ class MainSessionRuntime {
   }
 
   private async unwindFailures(): Promise<void> {
-    while (this.terminal === null) {
+    while (!this.stopRequested && this.terminal === null) {
       const rootIndex = this.lowestFailedFrameIndex();
       if (rootIndex < 0) return;
 
@@ -1010,7 +1022,7 @@ class MainSessionRuntime {
       const survivingCallerId = root.callerFrameId;
       let expanded = false;
 
-      while (this.stack.length > rootIndex) {
+      while (!this.stopRequested && this.stack.length > rootIndex) {
         const frame = this.stack.at(-1)!;
         frame.currentActivationId = null;
         frame.lifecycle = "closing";
@@ -1041,6 +1053,7 @@ class MainSessionRuntime {
           const closed = await this.invokeFrame(runtime, (peer) =>
             peer.frame.closeFrame({ frameId: frame.id }),
           );
+          if (this.stopRequested) return;
           if (closed === null || closed.kind !== "success") {
             if (closed !== null)
               this.markUnsafeFrameOutcome(runtime, closed, "frame.close");
@@ -1055,6 +1068,7 @@ class MainSessionRuntime {
         this.frames.delete(frame.id);
       }
 
+      if (this.stopRequested) return;
       if (expanded) continue;
       if (this.terminal !== null) return;
 
@@ -1208,6 +1222,13 @@ class MainSessionRuntime {
     void this.finishTerminal(this.terminal);
   }
 
+  private requestShutdown(): void {
+    if (this.stopRequested || this.terminal !== null) return;
+    this.stopRequested = true;
+    this.sessionController.abort();
+    void this.mutate(() => this.beginShutdown());
+  }
+
   private beginShutdown(): void {
     if (this.terminal !== null) return;
     this.terminal = Object.freeze({ kind: "shutdown" });
@@ -1305,18 +1326,10 @@ class MainSessionRuntime {
       if (terminatedNaturally) return;
     }
 
-    if (!record.terminationRequested) {
-      record.terminationRequested = true;
-      try {
-        await runWithDeadline(
-          this.options.platform.scheduler,
-          this.options.policy.terminationDeadlineMs,
-          [],
-          (signal) => hosted.requestTermination(signal),
-        );
-      } catch {
-        // Bounded physical cleanup does not replace the primary Session terminal.
-      }
+    try {
+      await this.requestRuntimeTermination(record);
+    } catch {
+      // Bounded physical cleanup does not replace the primary Session terminal.
     }
 
     await resolvesWithin(
