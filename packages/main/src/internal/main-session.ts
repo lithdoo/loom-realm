@@ -595,12 +595,17 @@ class MainSessionRuntime {
       return record.terminationAttempt;
     }
 
-    const attempt = runWithDeadline(
-      this.options.platform.scheduler,
-      this.options.policy.terminationDeadlineMs,
-      [],
-      (signal) => hosted.requestTermination(signal),
-    );
+    const requestOnce = () =>
+      runWithDeadline(
+        this.options.platform.scheduler,
+        this.options.policy.terminationDeadlineMs,
+        [],
+        (signal) => hosted.requestTermination(signal),
+      );
+    const attempt = requestOnce().catch(async () => {
+      if (record.physicallyTerminated) return;
+      await requestOnce();
+    });
     record.terminationAttempt = attempt;
     void attempt.then(
       () => {
