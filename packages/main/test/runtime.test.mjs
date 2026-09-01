@@ -432,6 +432,193 @@ test("ill-formed bootstrap token fails closed before any Runtime launch", async 
   assert.deepEqual(fake.launches, []);
 });
 
+test("bootstrap token generation failure is attributed to the required Runtime", async () => {
+  const fake = createFakePlatform(
+    { root: defineSubsystem(() => ({ frame: () => completed(null) })) },
+    { generateToken: () => { throw new Error("entropy unavailable"); } },
+  );
+
+  await assert.rejects(
+    runMain({
+      bootstrap: bootstrap(["root"], "root"),
+      platform: fake.platform,
+      policy,
+    }),
+    (error) => {
+      assert.ok(error instanceof MainRuntimeFatalError);
+      assert.equal(error.failure.code, "MAIN_BOOTSTRAP_TOKEN_GENERATION_FAILED");
+      assert.equal(error.failure.subsystemKey, "root");
+      return true;
+    },
+  );
+  assert.deepEqual(fake.launches, []);
+});
+
+test("later Runtime launch failure gracefully cleans an already-ready Runtime", async () => {
+  let shutdownCalls = 0;
+  const fake = createFakePlatform({
+    first: defineSubsystem(() => ({
+      frame: () => completed(null),
+      shutdown() {
+        shutdownCalls += 1;
+      },
+    })),
+  });
+
+  await assert.rejects(
+    runMain({
+      bootstrap: bootstrap(["first", "missing"], "first"),
+      platform: fake.platform,
+      policy,
+    }),
+    (error) => {
+      assert.ok(error instanceof MainRuntimeFatalError);
+      assert.equal(error.failure.code, "MAIN_RUNTIME_LAUNCH_FAILED");
+      assert.equal(error.failure.subsystemKey, "missing");
+      return true;
+    },
+  );
+  assert.deepEqual(fake.launches.map(({ subsystemKey }) => subsystemKey), ["first"]);
+  assert.equal(shutdownCalls, 1);
+  assert.equal(fake.runtimes.get("first").terminationRequests, 0);
+});
+
+test("declared but failed call target is recoverable as unavailable", async () => {
+  const rootStarted = deferred();
+  const continueRoot = deferred();
+  let rejectedCode;
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({
+      async frame(frame) {
+        rootStarted.resolve();
+        await continueRoot.promise;
+        try {
+          await frame.call("child", null);
+        } catch (error) {
+          assert.ok(error instanceof FrameCallRejectedError);
+          rejectedCode = error.code;
+        }
+        return completed("recovered");
+      },
+    })),
+    child: defineSubsystem(() => ({ frame: () => completed(null) })),
+  });
+
+  const resultPromise = runMain({
+    bootstrap: bootstrap(["root", "child"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await rootStarted.promise;
+  fake.lose("child");
+  continueRoot.resolve();
+
+  assert.deepEqual(await resultPromise, {
+    kind: "root-outcome",
+    outcome: { type: "completed", value: "recovered" },
+  });
+  assert.equal(rejectedCode, "FRAME_CALL_TARGET_UNAVAILABLE");
+});
+
+test("middle Runtime failure closes a healthy descendant and resumes the root", async () => {
+  const leafStarted = deferred();
+  const never = new Promise(() => {});
+  let leafAborted = false;
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({
+      async frame(frame) {
+        const middle = await frame.call("middle", null);
+        return completed({
+          type: middle.type,
+          code: middle.type === "failed" ? middle.error.code : null,
+        });
+      },
+    })),
+    middle: defineSubsystem(() => ({
+      async frame(frame) {
+        await frame.call("leaf", null);
+        return completed("unreachable");
+      },
+    })),
+    leaf: defineSubsystem(() => ({
+      async frame(frame) {
+        frame.signal.addEventListener("abort", () => { leafAborted = true; }, { once: true });
+        leafStarted.resolve();
+        await never;
+        return completed(null);
+      },
+    })),
+  });
+
+  const resultPromise = runMain({
+    bootstrap: bootstrap(["root", "middle", "leaf"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await leafStarted.promise;
+  fake.lose("middle");
+
+  assert.deepEqual(await resultPromise, {
+    kind: "root-outcome",
+    outcome: {
+      type: "completed",
+      value: { type: "failed", code: "SUBSYSTEM_RUNTIME_FAILED" },
+    },
+  });
+  assert.equal(leafAborted, true);
+});
+
+test("runMain rejects invalid policy and LogicalGameBootstrap before side effects", async () => {
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({ frame: () => completed(null) })),
+  });
+  const invalidCases = [
+    { bootstrap: bootstrap([], "root"), policy },
+    { bootstrap: bootstrap(["root", "root"], "root"), policy },
+    { bootstrap: bootstrap(["root"], "missing"), policy },
+    { bootstrap: bootstrap(["\ud800"], "\ud800"), policy },
+    { bootstrap: bootstrap(["root"], "root"), policy: { ...policy, runtimeBootstrapDeadlineMs: 0 } },
+    { bootstrap: bootstrap(["root"], "root"), policy: { ...policy, frameDeadlineMs: -1 } },
+  ];
+
+  for (const invalid of invalidCases) {
+    await assert.rejects(
+      runMain({ ...invalid, platform: fake.platform }),
+      TypeError,
+    );
+  }
+  assert.deepEqual(fake.launches, []);
+});
+
+test("Runtime launch that never settles is bounded by the bootstrap deadline", async () => {
+  const never = new Promise(() => {});
+  let launchSignal;
+  const platform = {
+    scheduler,
+    bootstrapTokens: { generate: () => `timeout-${"x".repeat(48)}` },
+    runtimeHosting: {
+      launch(_request, signal) {
+        launchSignal = signal;
+        return never;
+      },
+    },
+  };
+
+  await assert.rejects(
+    runMain({
+      bootstrap: bootstrap(["root"], "root"),
+      platform,
+      policy: { ...policy, runtimeBootstrapDeadlineMs: 10 },
+    }),
+    (error) => {
+      assert.ok(error instanceof MainRuntimeFatalError);
+      assert.equal(error.failure.code, "MAIN_RUNTIME_BOOTSTRAP_TIMEOUT");
+      return true;
+    },
+  );
+  assert.equal(launchSignal.aborted, true);
+});
+
 test("already-aborted Session never launches a Runtime", async () => {
   const fake = createFakePlatform({
     root: defineSubsystem(() => ({ frame: () => completed(null) })),
