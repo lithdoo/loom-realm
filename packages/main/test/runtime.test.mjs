@@ -69,6 +69,9 @@ function createFakePlatform(definitions, options = {}) {
           acquireCount: 0,
           terminationRequests: 0,
           terminated: false,
+          releaseTerminationObservation() {
+            terminatedGate.resolve();
+          },
         };
         runtimes.set(request.subsystemKey, record);
 
@@ -95,11 +98,15 @@ function createFakePlatform(definitions, options = {}) {
         void runtime.then(
           () => {
             record.terminated = true;
-            terminatedGate.resolve();
+            if (!options.holdTerminationObservation?.(request.subsystemKey)) {
+              terminatedGate.resolve();
+            }
           },
           () => {
             record.terminated = true;
-            terminatedGate.resolve();
+            if (!options.holdTerminationObservation?.(request.subsystemKey)) {
+              terminatedGate.resolve();
+            }
           },
         );
 
@@ -122,6 +129,17 @@ function createFakePlatform(definitions, options = {}) {
             record.terminationRequests += 1;
             if (terminationSignal.aborted) {
               throw new Error("Termination request aborted");
+            }
+            if (options.requestTermination) {
+              await options.requestTermination({
+                request,
+                record,
+                signal: terminationSignal,
+                async close() {
+                  await pair.left.close();
+                },
+              });
+              return;
             }
             await pair.left.close();
           },
@@ -202,6 +220,37 @@ test("Main boots required Runtimes and drives a nested cross-Subsystem Frame to 
   assert.equal(fake.runtimes.get("child").acquireCount, 1);
   assert.equal(fake.runtimes.get("root").terminationRequests, 0);
   assert.equal(fake.runtimes.get("child").terminationRequests, 0);
+});
+
+test("Main preserves __proto__ as ordinary business JSON data", async () => {
+  const input = JSON.parse('{"__proto__":{"safe":true}}');
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({
+      frame(frame) {
+        assert.equal(Object.prototype.hasOwnProperty.call(frame.params, "__proto__"), true);
+        assert.equal(Object.getPrototypeOf(frame.params), Object.prototype);
+        return completed(frame.params);
+      },
+    })),
+  });
+
+  const result = await runMain({
+    bootstrap: bootstrap(["root"], "root", input),
+    platform: fake.platform,
+    policy,
+  });
+
+  assert.equal(result.kind, "root-outcome");
+  assert.equal(result.outcome.type, "completed");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(result.outcome.value, "__proto__"),
+    true,
+  );
+  assert.equal(Object.getPrototypeOf(result.outcome.value), Object.prototype);
+  assert.deepEqual(
+    Object.getOwnPropertyDescriptor(result.outcome.value, "__proto__").value,
+    { safe: true },
+  );
 });
 
 test("same-Subsystem recursion closes through Response-before-dependent-RPC without reentrant deadlock", async () => {
@@ -361,6 +410,47 @@ test("duplicate bootstrap token material fails closed before launching the secon
   assert.deepEqual(fake.launches.map(({ subsystemKey }) => subsystemKey), ["a"]);
 });
 
+test("ill-formed bootstrap token fails closed before any Runtime launch", async () => {
+  const fake = createFakePlatform(
+    { root: defineSubsystem(() => ({ frame: () => completed(null) })) },
+    { generateToken: () => "\ud800" },
+  );
+
+  await assert.rejects(
+    runMain({
+      bootstrap: bootstrap(["root"], "root"),
+      platform: fake.platform,
+      policy,
+    }),
+    (error) => {
+      assert.ok(error instanceof MainRuntimeFatalError);
+      assert.equal(error.failure.code, "MAIN_BOOTSTRAP_TOKEN_INVALID");
+      assert.equal(error.failure.subsystemKey, "root");
+      return true;
+    },
+  );
+  assert.deepEqual(fake.launches, []);
+});
+
+test("already-aborted Session never launches a Runtime", async () => {
+  const fake = createFakePlatform({
+    root: defineSubsystem(() => ({ frame: () => completed(null) })),
+  });
+  const controller = new AbortController();
+  controller.abort();
+
+  assert.deepEqual(
+    await runMain({
+      bootstrap: bootstrap(["root"], "root"),
+      platform: fake.platform,
+      policy,
+      signal: controller.signal,
+    }),
+    { kind: "shutdown" },
+  );
+  assert.deepEqual(fake.launches, []);
+});
+
 test("external abort produces graceful Session shutdown and bounded Runtime cleanup", async () => {
   const started = deferred();
   const never = new Promise(() => {});
@@ -393,6 +483,48 @@ test("external abort produces graceful Session shutdown and bounded Runtime clea
   assert.equal(fake.runtimes.get("root").terminationRequests, 0);
 });
 
+test("failed Runtime termination request can be retried by terminal cleanup", async () => {
+  const started = deferred();
+  const never = new Promise(() => {});
+  let attempt = 0;
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem(() => ({
+        async frame() {
+          started.resolve();
+          await never;
+          return completed(null);
+        },
+      })),
+    },
+    {
+      holdTerminationObservation: (key) => key === "root",
+      async requestTermination({ record, close }) {
+        attempt += 1;
+        if (attempt === 1) throw new Error("first termination request failed");
+        await close();
+        record.releaseTerminationObservation();
+      },
+    },
+  );
+
+  const resultPromise = runMain({
+    bootstrap: bootstrap(["root"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await started.promise;
+  fake.lose("root");
+
+  assert.deepEqual(await resultPromise, {
+    kind: "root-outcome",
+    outcome: {
+      type: "failed",
+      error: { code: "SUBSYSTEM_RUNTIME_FAILED" },
+    },
+  });
+  assert.equal(fake.runtimes.get("root").terminationRequests, 2);
+});
 
 test("termination observation rejection is not accepted as physical termination proof", async () => {
   let shutdownCalls = 0;
