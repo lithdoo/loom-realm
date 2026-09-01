@@ -371,36 +371,62 @@ Subsystem DataPlane complete
 
 ---
 
-## M5：Main Core + LogicalGameBootstrap + Frozen Frame Slice
+## M5：Main Core + LogicalGameBootstrap + Frozen Frame Slice ✅
 
-Implement：
+Implemented Baseline：
 
 ```text
 @loomrealm/main
-LogicalGameBootstrap input surface
-Subsystem Registry {key}
-Runtime Registry / Launch Attempt
-bootstrap credential authority
-Frame/Activation Registry
-Stack mutation coordinator
-InputTarget
-failure classifier / fixed-point unwind
+    LogicalGameBootstrap
+    MainPlatform narrow capability view
+    MainPolicy / runMain / MainSessionResult
+    Runtime Registry / current Launch Attempt lifetime
+    Main-owned bootstrap credential registration/consumption
+    Frame / Activation / Stack authority
+    derived InputTarget
+    serialized mutation lane
+    first-wins Runtime failure cause
+    fixed-point failure unwind
+    graceful Session shutdown + physical termination escalation
 ```
 
-M5 Runtime Control consumer qualification：
+M5 `@loomrealm/platform-ports` slice frozen and real-consumer qualified：
 
 ```text
-Main uses MainRuntimeControlPeer
-Main authentication callback owns key/attempt/token decision
-Response afterResponse barrier triggers dependent child/close/resume operations
-Runtime Control terminal facts are inputs to Main authority mapping, not self-mutating authority
+BootstrapTokenGenerator
+RuntimeLaunchRequest {subsystemKey,bootstrapToken}
+MainRuntimeControlBinding
+HostedRuntime {runtimeControl,terminated,requestTermination}
+RuntimeHosting
 ```
 
-Main MUST NOT depend on Game Package/concrete Launcher。M5 同时冻结 Main-facing narrow capability view（概念 `MainPlatform`），由 Fake Platform structural-satisfy；不得把 concrete Hostra/PWA type引入 Main。
+Runtime Control consumer qualification：
 
-Fake concrete Platform is already logically prepared / plan-bound and exposes RuntimeHosting；M5 does not implement Game/Platform PREPARE。
+```text
+Main uses real MainRuntimeControlPeer
+Main authentication owns key/attempt/token decision
+Response afterResponse barrier drives dependent child/close/resume operations
+Runtime Control terminal/ambiguous request outcomes feed Main failure authority
+no same-attempt reconnect/retry/replay
+```
 
-Vertical slice：initial frame、nested calls、Outcome、recoverable reject、ambiguous failure unwind、fresh final Caller resume。
+Executable evidence uses fake physical Platform only; real chain is：
+
+```text
+Main ↔ runtime-control ↔ MemoryCarrier ↔ subsystem/host ↔ business Definition
+```
+
+Closed behavior includes initial Frame, cross/same-Subsystem nesting, recoverable target rejection, accepted outcome preservation, child/root Runtime loss, whole-suffix unwind, fresh Caller resume, duplicate token fail-closed, graceful shutdown, and termination-observation rejection handling.
+
+M5 closure allows：
+
+```text
+Main M5 Runtime/Frame Authority Implemented Baseline
+Main Runtime Control real consumer qualified
+Platform Ports M5 Main slice real consumer qualified
+```
+
+M5 does not implement Renderer Control/Data/Input/Render/Content or Hostra/PWA physical hosting.
 
 ---
 
@@ -540,9 +566,9 @@ M13 是完整 author SDK 的第一个业务侧组合验证，不反向定义 `@l
 ## M14：Desktop Full E2E
 
 ```text
-Hostra Launcher PREPARE
-→ LogicalGameBootstrap + RuntimeHosting
-→ Main / Node Runner / Runtime Control
+HostraPlatform.prepareGame() / Launcher PREPARE
+→ LogicalGameBootstrap + prepared HostraPlatform
+→ runMain({bootstrap, platform}) / Node Runner / Runtime Control
 → Renderer Control/Data/Input/Render/Content
 → nested Frame outcomes
 → reconnect/reload/shutdown

@@ -35,28 +35,25 @@ LoomRealm 是一个通过只读 Game Entry 声明 **platform-neutral logical Sub
 ```text
 Game installation / source
         ↓
-Current Platform Game Launcher PREPARE
-    ├── @loomrealm/game-package
-    │       Game Entry parse / validate
-    ├── current Platform Launch Manifest
-    │       ├── Hostra: launch.hostra.json
-    │       └── PWA:    launch.pwa.json
-    ├── exact Game↔Platform key-set join
-    ├── full executable resolution
-    ├── installation/security containment
-    └── hosting capability preflight
+create HostraPlatform / PwaPlatform
         ↓
-immutable PlatformLaunchPlan
-+
-immutable LogicalGameBootstrap
+platform.prepareGame(source)
+    → matching game-launcher-* component
+    → @loomrealm/game-package validation
+    → current Platform Launch Manifest
+    → exact key-set join / executable resolution / security preflight
+    → immutable PlatformLaunchPlan
         ↓
-apps/* composition installs Main
+concrete Platform installs LaunchPlan privately
++ returns immutable LogicalGameBootstrap
         ↓
-Main launch(subsystemKey)
+runMain({bootstrap, platform, policy})
         ↓
-plan-bound RuntimeHosting
+Main generates/registers bootstrap token
         ↓
-Host-owned Runner
+platform.runtimeHosting.launch({subsystemKey, bootstrapToken})
+        ↓
+HostedRuntime / Host-owned Runner
         ↓
 platform-selected Definition Module
         ↓
@@ -117,7 +114,7 @@ Tooling MAY直接消费；Main/Business不直接消费。
 
 ## Main-facing Logical Bootstrap
 
-Matching Launcher 在 full PREPARE 后只向 Main投影：
+Concrete Platform 的 `prepareGame()` 通过 matching Launcher 完成 full PREPARE 后，只向 Main投影：
 
 ```ts
 interface LogicalGameBootstrap {
@@ -148,26 +145,26 @@ PlatformLaunchPlan 保持 Platform-private；Main 通过 plan-bound `RuntimeHost
 Hostra：
 
 ```text
-@loomrealm/game-launcher-hostra
-→ game-package validation
-+ launch.hostra.json
+HostraPlatform.prepareGame()
+→ @loomrealm/game-launcher-hostra component
+→ game-package validation + launch.hostra.json
 → exact join / safe filesystem resolution
-→ HostraLaunchPlan + LogicalGameBootstrap
-→ Node Runner RuntimeHosting
+→ HostraLaunchPlan installed privately + LogicalGameBootstrap returned
+→ HostraPlatform exposes Node Runner RuntimeHosting
 ```
 
 PWA：
 
 ```text
-@loomrealm/game-launcher-pwa
-→ game-package validation
-+ launch.pwa.json
+PwaPlatform.prepareGame()
+→ @loomrealm/game-launcher-pwa component
+→ game-package validation + launch.pwa.json
 → exact join / installation + same-origin resolution
-→ PwaLaunchPlan + LogicalGameBootstrap
-→ Worker Runner RuntimeHosting
+→ PwaLaunchPlan installed privately + LogicalGameBootstrap returned
+→ PwaPlatform exposes Worker Runner RuntimeHosting
 ```
 
-两个 launcher package 是窄 Subsystem Runtime launch capabilities，不是 Renderer/DataBroker/Content Platform mega-package。
+两个 launcher package 是 concrete Platform 内部的窄 Game PREPARE / Runner integration components，不是完整 Platform object，更不是 Renderer/DataBroker/Content mega-package。
 
 Phase 1：
 
@@ -353,29 +350,33 @@ business → game-package / launcher / runtime-control
 @loomrealm/runtime-control
     Implemented Baseline / Core Contract Frozen
     M3 local closure complete
-    M4/M5 real role-consumer qualification pending
+    M4 Subsystem + M5 Main real role consumers qualified
 
 @loomrealm/platform-ports
-    Implemented Baseline / Core Boundary Frozen / M4 Slice Frozen
-    M4 Subsystem real consumer qualification pending
-    M5+ exact ports Evolving
+    Implemented Baseline / Core Boundary Frozen
+    M4 Slice Frozen + Subsystem consumer qualified
+    M5 Main Slice Frozen + Main consumer qualified
+    M7+ Evolving
+
+@loomrealm/subsystem
+    M4 Runtime/Frame Core Implemented
+    M4 Host Runtime Control consumer qualified
+    M8/M10/M11/M12 later capability slices pending
+
+@loomrealm/main
+    M5 Runtime/Frame Authority Implemented Baseline
+    Main Runtime Control consumer qualified
+    M7+ Renderer/Data slices pending
 
 @loomrealm/data
     Package-local Core Baseline Implemented
     M8 role integration pending
-    Full Profile conformance pending
-
-@loomrealm/subsystem
-    implementation pending
-
-@loomrealm/main
-    implementation pending
 
 @loomrealm/game-launcher-hostra
-    implementation pending
+    design/PREPARE component ready; M6 implementation pending
 
 @loomrealm/game-launcher-pwa
-    implementation pending
+    design/PREPARE component ready; M15 implementation pending
 
 @loomrealm/fsdb-http
     v1 Release Candidate implementation + tests
@@ -384,17 +385,9 @@ business → game-package / launcher / runtime-control
 下一实现门：
 
 ```text
-M4 @loomrealm/subsystem/host
-```
-
-之后：
-
-```text
-M4 Subsystem author/host = first real Subsystem-side Runtime Control consumer
-→ M5 Main = real Main-side Runtime Control consumer + authority slice
-→ M6 Hostra Launcher (first real Game Package runtime-product consumer)
-...
-→ M15 PWA Launcher (second real Game Package consumer)
+M6 Hostra Platform Vertical
+    HostraPlatform + Launcher PREPARE + Node Runner + RuntimeHosting
+    first runnable Main ↔ Runtime Control ↔ Subsystem product vertical
 ```
 
 ---

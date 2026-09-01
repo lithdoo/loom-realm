@@ -8,7 +8,7 @@
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
 > Hostra realization：[Hostra Game Launcher / Node Subsystem Runner Profile v1](./nodejs-launcher-profile-v1.md)  
 > PWA realization：[PWA Game Launcher / Worker Subsystem Runner Profile v1](./pwa-launcher-profile-v1.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-09-01
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -78,14 +78,14 @@ interface SubsystemDescriptorV1 {
 
 要求：
 
-- MUST 是非空字符串；
+- MUST 是 well-formed Unicode 非空字符串，UTF-8 编码长度为 `1..256` bytes；
 - MUST 在同一 `subsystems[]` 中唯一；
 - 比较 MUST 大小写敏感、按字符串 exact equality；
 - validator MUST NOT trim、case-fold 或 Unicode-normalize key；
 - Main、Runtime bootstrap、Subsystem Control、Frame target 与 DataAuthority MUST 使用同一个 logical key；
 - PID、Worker ID、module path、URL、Launch Attempt ID、Port MUST NOT 替代 key。
 
-Current v1 不额外冻结 ASCII/regex/prefix grammar。若未来收紧 key syntax，应修改本 formal contract，而不是实现私自 normalize。
+Current v1 只冻结 `1..256` UTF-8 bytes 的 representation bound，不额外冻结 ASCII/regex/prefix grammar。若未来进一步收紧 key syntax，应修改本 formal contract，而不是实现私自 normalize。
 
 ---
 
@@ -197,7 +197,7 @@ formatVersion exact current version
 initial closed schema
 initial.input JsonValue validation
 subsystems[] / descriptor closed schema
-key non-empty / exact uniqueness
+key well-formed Unicode / 1..256 UTF-8 bytes / exact uniqueness
 initial.subsystem declared
 ```
 
@@ -451,7 +451,7 @@ Publisher Trust / signing / untrusted executable sandbox仍是后续能力。
 valid minimal Game Entry
 closed top-level/initial/descriptor schema
 unsupported formatVersion
-empty/duplicate exact key
+empty/oversized/ill-formed-Unicode/duplicate exact key
 case-sensitive no-normalization key semantics
 undeclared initial target
 invalid initial JsonValue
@@ -472,7 +472,7 @@ all PREPARE failures before Runtime creation
 
 1. Game Package v1 只拥有 platform-neutral Game Entry document、logical topology 与 initial business input；
 2. Descriptor v1 精确 `{key}`；
-3. key non-empty、case-sensitive exact，不由实现 trim/normalize；
+3. key 是 well-formed Unicode、`1..256` UTF-8 bytes、case-sensitive exact，不由实现 trim/normalize；
 4. initial.input 是 opaque JsonValue；
 5. successful validation产出 detached immutable snapshot；
 6. Game Package不是 Runtime role；

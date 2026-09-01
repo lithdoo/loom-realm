@@ -25,13 +25,43 @@ test("accepts exact non-empty keys without normalization and preserves order", (
   assert.deepEqual(result.subsystems.map(({ key }) => key), keys);
 });
 
-test("rejects empty and non-string keys", () => {
+test("accepts the 256-byte key boundary", () => {
+  const keys = ["x".repeat(256), "é".repeat(128), "😀".repeat(64)];
+  const result = validateGameEntryV1(entry(keys));
+  assert.deepEqual(result.subsystems.map(({ key }) => key), keys);
+});
+
+test("rejects empty, non-string, oversized, and ill-formed Unicode keys", () => {
   assert.throws(
     () => validateGameEntryV1(entry([""])),
     expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
   );
   assert.throws(
     () => validateGameEntryV1(entry([1], "missing")),
+    expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
+  );
+  assert.throws(
+    () => validateGameEntryV1(entry(["x".repeat(257)])),
+    expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
+  );
+  assert.throws(
+    () => validateGameEntryV1(entry(["é".repeat(129)])),
+    expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
+  );
+  assert.throws(
+    () => validateGameEntryV1(entry(["😀".repeat(65)])),
+    expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
+  );
+  assert.throws(
+    () => validateGameEntryV1(entry(["\ud800"])),
+    expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
+  );
+  assert.throws(
+    () => validateGameEntryV1(entry(["\udc00"])),
+    expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
+  );
+  assert.throws(
+    () => validateGameEntryV1(entry(["\ud800x"])),
     expectError("SUBSYSTEM_KEY_INVALID", ["subsystems", 0, "key"]),
   );
 });

@@ -2,7 +2,7 @@
   "name": "@loomrealm/main",
   "version": "0.1.0-alpha.0",
   "type": "module",
-  "description": "Platform-neutral LoomRealm Main runtime coordination package.",
+  "description": "Platform-neutral LoomRealm Main application authority runtime.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
@@ -17,9 +17,17 @@
     "DESIGN.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@loomrealm/platform-ports": "0.1.0-alpha.0",
+    "@loomrealm/runtime-control": "0.1.0-alpha.0",
+    "@loomrealm/wire": "0.1.0-alpha.0"
   },
   "devDependencies": {
+    "@loomrealm/foundation": "0.1.0-alpha.0",
+    "@loomrealm/subsystem": "0.1.0-alpha.0",
     "typescript": "^5.5.0"
   },
   "engines": {
