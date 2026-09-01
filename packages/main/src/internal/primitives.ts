@@ -1,6 +1,10 @@
 import type { DeadlineScheduler } from "@loomrealm/platform-ports";
 import type { FrameOutcome as ControlFrameOutcome } from "@loomrealm/runtime-control";
-import type { JsonValue } from "@loomrealm/wire";
+import {
+  utf8ByteLength,
+  type JsonObject,
+  type JsonValue,
+} from "@loomrealm/wire";
 import type { MainFrameOutcome } from "../model.js";
 
 export interface Deferred<T> {
@@ -132,14 +136,94 @@ export async function resolvesWithin(
   return settled;
 }
 
+export function validProtocolString(value: unknown, maxBytes: number): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return utf8ByteLength(value) <= maxBytes;
+}
+
+interface CloneFrame {
+  readonly source: JsonObject | readonly JsonValue[];
+  readonly target: JsonObject | JsonValue[];
+}
+
+type CloneTask =
+  | { readonly kind: "clone"; readonly frame: CloneFrame }
+  | { readonly kind: "freeze"; readonly target: JsonObject | JsonValue[] };
+
+function createCloneTarget(
+  source: JsonObject | readonly JsonValue[],
+): JsonObject | JsonValue[] {
+  return Array.isArray(source) ? new Array<JsonValue>(source.length) : {};
+}
+
+function defineCloneMember(target: object, key: string, value: JsonValue): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 export function cloneJson(value: JsonValue): JsonValue {
   if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map((entry) => cloneJson(entry))) as JsonValue;
+
+  const root = createCloneTarget(value);
+  const memo = new WeakMap<object, JsonObject | JsonValue[]>([[value, root]]);
+  const stack: CloneTask[] = [
+    { kind: "clone", frame: { source: value, target: root } },
+  ];
+
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (task === undefined) break;
+    if (task.kind === "freeze") {
+      Object.freeze(task.target);
+      continue;
+    }
+
+    const { source, target } = task.frame;
+    stack.push({ kind: "freeze", target });
+    const keys = Array.isArray(source)
+      ? Array.from({ length: source.length }, (_, index) => String(index))
+      : Object.keys(source);
+
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(source, key);
+      if (descriptor === undefined || !("value" in descriptor)) {
+        throw new TypeError("Validated JSON value changed during snapshot construction");
+      }
+
+      const child = descriptor.value as JsonValue;
+      if (child === null || typeof child !== "object") {
+        defineCloneMember(target, key, child);
+        continue;
+      }
+
+      let childTarget = memo.get(child);
+      if (childTarget === undefined) {
+        childTarget = createCloneTarget(child);
+        memo.set(child, childTarget);
+        stack.push({
+          kind: "clone",
+          frame: { source: child, target: childTarget },
+        });
+      }
+      defineCloneMember(target, key, childTarget);
+    }
   }
-  const copy: Record<string, JsonValue> = {};
-  for (const [key, entry] of Object.entries(value)) copy[key] = cloneJson(entry);
-  return Object.freeze(copy) as JsonValue;
+
+  return root;
 }
 
 export function cloneControlOutcome(
