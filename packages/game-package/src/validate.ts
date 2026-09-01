@@ -3,6 +3,7 @@ import {
   WireValidationError,
   assertJsonValue,
   parseJsonText,
+  utf8ByteLength,
   type JsonObject,
   type JsonValue,
   type WirePathSegment,
@@ -14,6 +15,7 @@ import { createValidatedGameEntrySnapshot } from "./snapshot.js";
 const TOP_LEVEL_KEYS = ["formatVersion", "initial", "subsystems"] as const;
 const INITIAL_KEYS = ["subsystem", "input"] as const;
 const DESCRIPTOR_KEYS = ["key"] as const;
+const SUBSYSTEM_KEY_MAX_BYTES = 256;
 
 function fail(
   code: GamePackageErrorCode,
@@ -46,6 +48,21 @@ function validateRepresentation(value: unknown): asserts value is JsonValue {
     }
     throw error;
   }
+}
+
+function validSubsystemKey(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return utf8ByteLength(value) <= SUBSYSTEM_KEY_MAX_BYTES;
 }
 
 function ownValue(object: JsonObject, key: string): JsonValue {
@@ -120,7 +137,7 @@ export function validateGameEntryV1(value: unknown): ValidatedGameEntryV1 {
       ["subsystems", index],
     );
     const key = member(descriptor, "key", ["subsystems", index]);
-    if (typeof key !== "string" || key.length === 0) {
+    if (!validSubsystemKey(key)) {
       fail("SUBSYSTEM_KEY_INVALID", ["subsystems", index, "key"]);
     }
     if (seen.has(key) && duplicateIndex === undefined) duplicateIndex = index;
