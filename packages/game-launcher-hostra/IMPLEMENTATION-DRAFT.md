@@ -858,3 +858,558 @@ WS carrier
 ```
 
 如果实现过程中开始需要 Platform mega-object、generic supervisor、generic RPC/transport framework，优先判断为 scope drift，而不是默认新增抽象。
+
+---
+
+## 17. Closure-oriented Implementation Discipline
+
+实现顺序 MUST 优先保持失败域可分离，而不是优先把 happy path 一次跑通。
+
+推荐依赖方向：
+
+```text
+raw source / filesystem
+        ↓
+manifest + module validation
+        ↓
+immutable prepared facts
+        ↓
+RuntimeHosting attempt
+        ↓
+Runner physical bootstrap
+        ↓
+existing role/protocol packages
+```
+
+禁止反向依赖：
+
+```text
+Runner → game.json / launch.hostra.json
+RuntimeHosting.launch() → raw source重新解释
+Main → HostraLaunchPlan/module/path
+WS adapter → Runtime Control schema
+```
+
+在写 RuntimeHosting 之前，PREPARE 应先达到 package-local qualification：
+
+```text
+valid input → deterministic immutable plan/bootstrap
+invalid input → deterministic typed failure + zero Runtime side effect
+```
+
+这保证后续 Runtime 问题不会与文档/路径/preflight 问题混在同一调试域。
+
+---
+
+## 18. Attempt-local Runtime State and Connection Authority
+
+每次 `RuntimeHosting.launch()` 自成一个 attempt-local closure；不得建立 package-wide mutable Runtime registry。
+
+概念状态：
+
+```ts
+{
+  child,
+  controlServer,
+  controlCarrier,
+  controlAcquired,
+  terminationStage,
+  terminated,
+  terminal
+}
+```
+
+一条 Launch Attempt 只允许：
+
+```text
+one child process
+one attempt-local WS capability
+one accepted Runtime Control connection
+one MainRuntimeControlBinding.acquire()
+one terminal process fact
+```
+
+### 18.1 Transport capability != Runtime identity
+
+WS MAY 使用：
+
+```text
+127.0.0.1
+OS ephemeral port
+high-entropy attempt-local path
+```
+
+该 path 只是降低无关本地连接抢占 one-shot listener 的 transport capability，不是 Runtime authentication authority。
+
+不得增加第二套：
+
+```text
+?token=
+Authorization header
+custom WS hello
+```
+
+真正的 Launch Attempt identity/authentication 继续由现有 Runtime Control hello 中的：
+
+```text
+subsystemKey
+bootstrapToken
+```
+
+及 Main authority负责。
+
+因此：
+
+```text
+WS capability
+!= bootstrapToken
+!= Runtime identity
+```
+
+### 18.2 Single-use acquire
+
+`runtimeControl.acquire(signal)` MUST：
+
+```text
+first call
+→ wait for first accepted WS connection
+→ close/disable listener acceptance
+→ return carrier
+
+second call
+→ reject
+
+carrier lost after acquisition
+→ no same-attempt reconnect
+```
+
+连接建立、Control identified、Runtime ready 必须继续保持三件不同的事实。
+
+---
+
+## 19. Runner Environment and Executable Policy
+
+Runner child environment MUST 从显式 allowlist 构造，而不是复制父进程完整环境。
+
+概念：
+
+```ts
+createRunnerEnvironment(process.env, encodedBootstrap)
+→ platform-required baseline
++ LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP
+```
+
+Linux/Windows qualification 应冻结实际 required baseline；典型候选包括：
+
+```text
+PATH
+HOME
+TMPDIR
+TMP
+TEMP
+SystemRoot
+WINDIR
+```
+
+但最终只保留真实运行所需值。
+
+MUST NOT 无条件继承：
+
+```text
+NODE_OPTIONS
+NODE_PATH
+npm_*
+HOSTRA_RPC_TOKEN
+application credentials
+arbitrary parent secrets
+```
+
+Game Entry / `launch.hostra.json` MUST NOT 有任何渠道追加：
+
+```text
+env
+argv
+Node flags
+Runner entry
+shell
+```
+
+Runner executable policy固定为：
+
+```text
+nodeExecutable = Host-selected trusted executable
+argv[0]        = package-owned Runner entry
+shell          = false
+cwd            = canonical installation root
+```
+
+---
+
+## 20. Qualification Layers and Fixture Strategy
+
+不要依赖一个 full E2E 覆盖所有语义。M6 qualification 分四层。
+
+### 20.1 Pure contract tests
+
+覆盖：
+
+```text
+manifest closed schema
+module grammar
+exact key-set join
+LogicalGameBootstrap projection
+HostraLaunchPlan immutability
+error code mapping
+```
+
+特点：无 child、无 WS、尽量无真实 filesystem。
+
+### 20.2 Real filesystem PREPARE tests
+
+使用真实 temp directory，而不是 mock `fs`：
+
+```text
+regular .mjs
+missing file
+directory
+symlink/junction/reparse behavior
+canonical containment
+ordering-independent exact key set
+```
+
+目标：证明 security/preflight 对实际平台 filesystem 成立。
+
+### 20.3 RuntimeHosting integration tests
+
+使用真实：
+
+```text
+child_process
+loopback WebSocket
+package-owned Runner
+```
+
+但不强制经过 Main，用于精确验证：
+
+```text
+listener-before-spawn
+single-use acquire
+text carrier
+spawn failure
+exit-before-acquire
+actual terminated fact
+graceful/force termination
+abort cleanup
+```
+
+### 20.4 Full Main ↔ Runner vertical
+
+最终才验证完整链：
+
+```text
+prepareHostraGame
+→ createHostraRuntimeHosting
+→ existing runMain
+→ real Node Runner
+→ real Runtime Control WS
+→ existing runSubsystem
+→ business Definition
+→ Frame outcome
+→ shutdown
+→ actual child exit
+```
+
+第一组 fixture SHOULD 保持极小：
+
+```text
+fixture/
+├─ game.json
+├─ launch.hostra.json
+└─ subsystems/
+   ├─ root.mjs
+   └─ child.mjs
+```
+
+happy-path scenario 优先复用 M5 已验证的 logical trace：
+
+```text
+root Frame
+→ frame.call(child)
+→ child completed
+→ root completed
+```
+
+M6 的变量只应是：
+
+```text
+MemoryCarrier/fake physical Platform
+        ↓ replace with
+Node child + WebSocket + real Runner
+```
+
+observable application outcome SHOULD 与 M5 等价。
+
+### 20.5 Required negative verticals
+
+至少增加：
+
+```text
+module/bootstrap failure
+→ Runner nonzero exit
+→ existing Main required-Runtime failure path
+→ cleanup
+
+unexpected Runner exit (including code 0 without Main intent)
+→ Runtime failure
+
+first termination request fails/times out
+→ Main invokes second request
+→ platform force convergence
+→ actual exit
+```
+
+---
+
+## 21. Package Artifact and CI Qualification
+
+Runner 是 package-owned executable artifact，因此 M6 closure 不只验证 monorepo source tree。
+
+MUST 执行：
+
+```text
+npm pack --dry-run
+```
+
+并确认发布 artifact 含实际 Runner entry，例如：
+
+```text
+dist/runner/entry.js
+```
+
+RuntimeHosting 查找 Runner MUST 以 package runtime location 为基准，例如：
+
+```ts
+new URL("./runner/entry.js", import.meta.url)
+```
+
+不得依赖：
+
+```text
+repository root
+packages/game-launcher-hostra/src
+current test working directory
+```
+
+CI 从 RuntimeHosting 开始就覆盖：
+
+```text
+ubuntu-latest
+windows-latest
+```
+
+最小 gate：
+
+```text
+build
+unit tests
+filesystem PREPARE tests
+RuntimeHosting integration
+full vertical E2E
+npm pack --dry-run
+```
+
+跨平台重点观察：
+
+```text
+path/canonicalization
+symlink/junction behavior
+child process spawn
+safe env
+process termination
+loopback WS
+```
+
+---
+
+## 22. Public Surface Minimization
+
+第一版 package root SHOULD 尽可能只暴露 composition integration 所需内容。
+
+候选：
+
+```text
+HostraGameSource
+PreparedHostraGame
+HostraLaunchPlan (type/integration value only)
+HostraLauncherError
+prepareHostraGame
+createHostraRuntimeHosting
+```
+
+以下 SHOULD 保持 internal：
+
+```text
+parseHostraLaunchManifest
+resolveHostraModule
+RunnerBootstrapV1
+createWebSocketCarrier
+spawnRunner
+attempt state
+process termination helpers
+```
+
+避免把一次实现细节升级为长期 public compatibility obligation。
+
+---
+
+## 23. Stop Conditions / Design Reopen Gate
+
+实现过程中若发现以下任一项成为“必须条件”，先停止实现并重新检查设计假设，而不是用 optional field / adapter / compatibility path 继续补丁：
+
+```text
+必须修改 @loomrealm/main public contract
+必须修改 RuntimeHosting / HostedRuntime port
+必须修改 runSubsystem public API
+必须修改 Runtime Control protocol
+必须让 Hostra RPC 创建 Subsystem Runtime
+必须新建通用 process supervisor package
+必须新建通用 WebSocket transport package才能完成 M6
+必须让 RuntimeHosting重新读取 Game/manifest
+```
+
+这些都与当前 M5/M6 boundary 的预期相冲突。
+
+只有真实 consumer 证明 frozen contract 不足时才允许 reopen，并需要明确 provenance；不得因为实现便利而扩大既有 Core contract。
+
+---
+
+## 24. Reviewable Commit Sequence
+
+推荐把实现拆成可独立 review / revert 的小闭环：
+
+```text
+1. feat(hostra-launcher): implement manifest and launch plan preparation
+
+2. feat(hostra-launcher): add canonical module preflight
+
+3. feat(hostra-launcher): add websocket message carrier
+
+4. feat(hostra-launcher): add node subsystem runner
+
+5. feat(hostra-launcher): implement runtime hosting and supervision
+
+6. test(hostra-launcher): qualify real main-to-runner vertical
+
+7. docs(hostra-launcher): freeze M6 implemented baseline
+```
+
+每一步原则：
+
+```text
+behavior introduced
+→ focused tests introduced in same step
+→ previous layers remain green
+```
+
+避免一个大提交同时混合：
+
+```text
+manifest parser + filesystem security + WS + spawn + Runner + Main E2E
+```
+
+否则无法判断哪个物理边界真正导致失败。
+
+---
+
+## 25. Final Definition of Done
+
+只有以下全部成立，才允许把 M6 从 Implementation Draft 推进到：
+
+```text
+@loomrealm/game-launcher-hostra
+Implemented / Qualified Baseline
+```
+
+完整 DoD：
+
+```text
+PREPARE
+[ ] raw Game source由 Launcher内部交给 @loomrealm/game-package
+[ ] Hostra manifest closed validation
+[ ] exact Game ↔ Hostra key-set equality
+[ ] all required modules在 first Runtime side effect前安全 resolve
+[ ] symlink/junction/reparse escape按平台测试关闭
+[ ] HostraLaunchPlan deeply immutable
+[ ] LogicalGameBootstrap不含 document/executable material
+[ ] every PREPARE failure保持 spawn/import/WS = 0
+
+BOUNDARY
+[ ] @loomrealm/main public contract unchanged
+[ ] @loomrealm/platform-ports M5 contract unchanged
+[ ] @loomrealm/subsystem/host public contract unchanged
+[ ] @loomrealm/runtime-control protocol unchanged
+[ ] business Definition依赖边界 unchanged
+
+RUNTIME
+[ ] one launch = one attempt-local closure
+[ ] loopback WS ready before child spawn
+[ ] endpoint uses OS ephemeral port + attempt-local capability
+[ ] MainRuntimeControlBinding single-use
+[ ] no same-attempt Control reconnect
+[ ] package-owned Runner is sole argv entry
+[ ] business module imported exactly by Runner
+[ ] safe environment allowlist qualified
+[ ] actual child exit is sole successful terminated fact
+[ ] graceful → forced physical convergence works
+[ ] no automatic Runtime restart
+
+TRANSPORT
+[ ] WS adapter只实现 MessageCarrier<string>
+[ ] binary rejected
+[ ] order / close / loss semantics qualified
+[ ] no JSON-RPC/parser/deadline/retry/reconnect logic in adapter
+
+QUALIFICATION
+[ ] pure contract tests green
+[ ] real filesystem PREPARE tests green
+[ ] real child + WS integration green
+[ ] real Main ↔ Runner ↔ Subsystem happy vertical green
+[ ] nested 2-Subsystem Frame vertical green
+[ ] bootstrap/module failure vertical green
+[ ] unexpected code-0 exit vertical green
+[ ] forced termination vertical green
+[ ] Linux green
+[ ] Windows green
+[ ] npm pack --dry-run green and Runner artifact present
+```
+
+最终闭环：
+
+```text
+Hostra installation
+→ deterministic PREPARE
+→ immutable HostraLaunchPlan + LogicalGameBootstrap
+→ existing Main contract
+→ attempt-local RuntimeHosting
+→ package-owned Node Runner
+→ WS MessageCarrier<string>
+→ existing Runtime Control
+→ existing Subsystem Host
+→ business Frame outcome
+→ bounded shutdown
+→ actual process exit
+```
+
+不存在旁路：
+
+```text
+Main → Game/manifest/module/path          ✗
+Runner → Game/manifest重新解释            ✗
+business → bootstrapToken/physical path   ✗
+WS adapter → Runtime Control semantics    ✗
+Hostra shell → LoomRealm Runtime authority ✗
+```
+
+M6 的优雅闭环标准不是“代码足够多”，而是：
+
+> **真实物理 Hostra/Node/WS vertical 替换 M5 fake Platform 后，既有 logical contracts 与 business-observable semantics 完全不需要改动；新增复杂性只存在于当前 Platform 的物理边界，并且每个失败域、资源和终止事实都能独立收敛。**
