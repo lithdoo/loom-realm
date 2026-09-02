@@ -3,64 +3,95 @@
 > 层级：正式契约 / Hostra Platform Profile  
 > 状态：Active / Normative  
 > Profile Version：1  
-> 稳定程度：Stabilizing  
-> 主要定义：Hostra Launcher-owned Game Entry consumption、Hostra Launch Manifest、完整 PREPARE LaunchPlan/LogicalGameBootstrap、Node RuntimeHosting、Host-owned Runner、Runtime Control 与动态 Data provisioning  
-> 依赖：[Game Package v1](./game-package-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)  
-> 最近复核：2026-08-20
+> M6 Runtime Slice：Frozen / Ready for Implementation  
+> M8+ Data / M12+ Content slices：Staged / Stabilizing  
+> M6 冻结日期：2026-09-02  
+> 依赖：[Game Package v1](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 核心原则：
 
-> **Hostra Launcher 是 Hostra Runtime-product Game Entry consumer：它内部使用 `@loomrealm/game-package` 验证 common Game Entry，再与 `launch.hostra.json` 完成 exact join / executable preflight；只有 immutable HostraLaunchPlan + Main-facing LogicalGameBootstrap 同时闭合后，才允许 Runtime side effect。Host-owned Node Runner 才是 process entry。**
+> **Hostra Launcher 是 Hostra Runtime-product Game Entry consumer。它在任何 Subsystem Runtime side effect 前完成 common Game validation、Hostra executable binding、安全 preflight、immutable HostraLaunchPlan 与 LogicalGameBootstrap。Host-owned Node Runner 是唯一 process entry。**
 
 ---
 
-## 1. Scope
+## 1. Milestone Applicability
+
+Profile v1 是跨 milestone 累积契约，不要求 M6 创建尚无消费者的未来 capability。
 
 ```text
-Hostra game source / installation
+M6
+    Game PREPARE
+    HostraLaunchPlan
+    LogicalGameBootstrap
+    Node RuntimeHosting
+    Node Runner
+    Runtime Control WebSocket
+    physical Runtime supervision/termination
+
+M8+
+    Runner provisioning capability
+    Subsystem Data binding/provisioning
+
+M12+
+    ContentClient / Content integration
+```
+
+因此：
+
+```text
+M6 MUST NOT create dormant provisioning IPC merely for future conformance
+M6 Runtime slice conformance != full future Profile v1 capability completion
+```
+
+Sections explicitly marked M8+/M12+ do not apply to M6 implementation qualification。
+
+---
+
+## 2. M6 Runtime Product Flow
+
+```text
+Hostra installation
         ↓
 Hostra Launcher PREPARE
     ├── @loomrealm/game-package
-    │       parse/validate Game Entry
-    ├── launch.hostra.json validation
+    ├── launch.hostra.json
     ├── exact key-set join
-    ├── resolve all Hostra modules
-    ├── Hostra hosting/security preflight
+    ├── all module/security preflight
+    ├── current trusted Node/Runner preflight
     ├── immutable HostraLaunchPlan
     └── immutable LogicalGameBootstrap
         ↓
 PreparedHostraGame
         ↓
-apps/desktop installs Main
+session-scoped HostraPlatform installs plan
         ↓
-Main launch(subsystemKey)
+existing Main launch({subsystemKey, bootstrapToken})
         ↓
-plan-bound Hostra RuntimeHosting
+plan-bound RuntimeHosting
         ↓
-Host-owned Node Runner
+attempt-local WS + Host-owned Node Runner
         ↓
 selected Definition Module
 ```
 
 ```text
 PREPARE valid
-!= process spawned
-!= module imported
+!= Runner spawned
+!= business module imported
 != connected
 != identified
 != ready
-!= Data Connection exists
 ```
 
-Product application MUST NOT be required to call `@loomrealm/game-package` before invoking Hostra Launcher。
+Product application MUST NOT be required to call `@loomrealm/game-package` before Hostra Launcher。
 
 ---
 
-## 2. Hostra Launch Manifest
+## 3. Hostra Launch Manifest
 
-Current installation convention：
+Installation convention：
 
 ```text
 launch.hostra.json
@@ -80,51 +111,23 @@ interface HostraSubsystemBindingV1 {
 }
 ```
 
-示例：
+The manifest only selects installation-local Hostra business implementation artifacts。
 
-```json
-{
-  "formatVersion": 1,
-  "subsystems": [
-    {
-      "key": "loom.map",
-      "module": "subsystems/hostra/loom-map/subsystem.mjs"
-    },
-    {
-      "key": "loom.battle",
-      "module": "subsystems/hostra/loom-battle/subsystem.mjs"
-    }
-  ]
-}
-```
-
-该 manifest 是 Hostra executable binding，不是 Game logical topology，也不是普通 business configuration。
-
----
-
-## 3. Manifest Authority Boundary
-
-Hostra Launch Manifest MAY 声明：
-
-```text
-subsystem key → package-local Hostra Definition Module
-```
-
-MUST NOT 声明/替换 Host-owned policy：
+MUST NOT configure/replace Host policy：
 
 ```text
 Node executable
-Host-owned Runner entry
+Runner entry
 shell
 arbitrary argv/flags
+env
 NODE_OPTIONS / NODE_PATH
-process env injection
 Control endpoint
 bootstrap token
 Data endpoint/ticket
-provisioning IPC handle
+Content credential
 Supervisor policy
-absolute filesystem path
+absolute path
 external URL
 ```
 
@@ -132,29 +135,37 @@ external URL
 
 ## 4. Game Entry Consumption
 
-Hostra Launcher MUST own Runtime-product common Game validation：
+Launcher MUST own Runtime-product common Game validation：
 
 ```text
-obtain Game Entry text/value from Hostra installation/source abstraction
-→ @loomrealm/game-package parseGameEntryV1 / validateGameEntryV1 semantics
-→ ValidatedGameEntryV1 internal PREPARE fact
+read <installationRoot>/game.json
+→ @loomrealm/game-package parse/validate
+→ internal validated Game fact
 ```
 
-`ValidatedGameEntryV1` MAY exist inside Launcher implementation but MUST NOT be required as product application input and MUST NOT be passed to Main。
+Validated Game representation MUST NOT be required from product caller and MUST NOT be passed to Main。
 
-Game Entry acquisition mechanism itself（filesystem/install repository）is Platform/product input plumbing，不改变 Game Package schema authority。
+M6 Hostra source representation is exactly：
+
+```text
+HostraGameSource { installationRoot }
+```
+
+No universal cross-platform GameSource abstraction is required by v1。
 
 ---
 
-## 5. Key-set Join
+## 5. Exact Key-set Join
 
-Before any process/Runner creation：
+Before HostraLaunchPlan construction：
 
 ```text
 keys(GameEntry.subsystems)
 =
 keys(HostraLaunchManifest.subsystems)
 ```
+
+Errors：
 
 ```text
 Game key missing Hostra binding
@@ -167,30 +178,28 @@ duplicate Hostra binding key
     → PLATFORM_LAUNCH_MANIFEST_INVALID
 ```
 
-Runtime identity始终来自 logical `key`；module path不得成为第二 identity。
+Ordering MAY differ。Runtime identity always comes from logical key；module path is never a second identity。
 
 ---
 
-## 6. Hostra `module`
+## 6. Hostra `module` Grammar
 
-`module` 是相对于 trusted Installation Root 的 Hostra executable logical module path。
+`module` is relative to trusted Installation Root and MUST：
 
-MUST：
+1. be non-empty；
+2. be ASCII；
+3. use `/` as the only directory separator；
+4. not start/end with `/`；
+5. contain no empty segment；
+6. contain no `.` / `..` segment；
+7. contain no `\\`；
+8. contain no `:`；
+9. contain no NUL/control char；
+10. have UTF-8 length ≤ 512 bytes；
+11. have `.mjs` suffix；
+12. each segment matches `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`。
 
-1. non-empty；
-2. ASCII；
-3. `/` 唯一目录分隔符；
-4. 不以 `/` 开头/结尾；
-5. 无空 segment；
-6. 无 `.` / `..` segment；
-7. 无 `\\`；
-8. 无 `:`；
-9. 无 NUL/control char；
-10. UTF-8 length ≤ 512 bytes；
-11. `.mjs` suffix；
-12. 每 segment 匹配 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`。
-
-Reject：
+Reject examples：
 
 ```text
 ../subsystem.mjs
@@ -207,74 +216,136 @@ foo/subsystem.cjs
 
 ---
 
-## 7. Preflight Resolution
+## 7. Module Resolution and Installation Stability
 
-Hostra resolver MUST：
+Launcher MUST：
 
 ```text
 validate logical module syntax
-→ resolve under trusted Installation Root
+→ resolve under canonical Installation Root
 → reject symlink/junction/reparse escape in path chain
+→ canonical containment verification
 → require regular file
 → require .mjs
-→ canonical containment verification
-→ create host-private ResolvedHostraSubsystemModule
+→ create host-private resolved module fact
 ```
 
-Conceptual：
+Conceptual M6 resolved fact：
 
 ```ts
 interface ResolvedHostraSubsystemModuleV1 {
-  readonly installationId: string;
   readonly subsystemKey: string;
   readonly logicalModule: string;
-  readonly physicalModule: string; // host-private
+  readonly physicalModule: string; // Hostra Platform-private
 }
 ```
 
-`physicalModule` MUST NOT enter Game Entry、LogicalGameBootstrap、Main authority、Renderer、Frame、Render、Data 或 business payload。
+`physicalModule` MUST NOT enter Game Entry、LogicalGameBootstrap、Main authority、Renderer、Frame、Data、Render or business payload。
+
+M6 freezes：
+
+> **Prepared installation MUST remain stable for the lifetime of the prepared Platform Session.**
+
+Installation update/replacement/switch requires a new Session + new PREPARE。Live executable mutation/content-addressed executable identity is outside M6。
 
 ---
 
-## 8. Immutable HostraLaunchPlan
+## 8. M6 Node Runtime and Runner Policy
 
-只有以下全部完成才能 freeze：
+M6 intentionally uses the already-running trusted composition process Node：
+
+```text
+Node executable = process.execPath
+supported Node  = major >= 20
+Runner entry    = package-owned dist/runner/entry.js
+```
+
+M6 does not expose arbitrary Node executable selection。
+
+PREPARE MUST statically verify：
+
+```text
+process.versions.node major >= 20
+process.execPath canonical regular file
+POSIX executable access
+package-owned Runner entry canonical regular file
+```
+
+No Runner/business execution is permitted for this preflight。
+
+Frozen Runner policy：
+
+```ts
+interface HostraRunnerPolicyV1 {
+  readonly helloDeadlineMs: number;
+  readonly frameDeadlineMs: number;
+  readonly terminalCleanupDeadlineMs: number;
+  readonly terminationGraceMs: number;
+}
+```
+
+Every value MUST be an integer in `[1, 2_147_483_647]`。
+
+M6 Control protocol versions are fixed：
+
+```text
+[1]
+```
+
+No protocol-version configuration surface is introduced。
+
+Product composition MUST ensure：
+
+```text
+terminationGraceMs < Main terminationDeadlineMs
+```
+
+---
+
+## 9. Immutable HostraLaunchPlan
+
+Plan MAY freeze only after：
 
 ```text
 Game Entry valid
 Hostra manifest valid
 exact key-set join valid
-all module logical paths valid
-all modules safely resolve inside installation
-Host-selected Node Runtime available
-Host-owned Runner entry available
-required Hostra runtime capability available
+all logical module paths valid
+all modules safely resolved
+M6 Node runtime supported
+package-owned Runner entry available
+Runner policy valid
 ```
 
-Conceptual：
+Conceptual M6 model：
 
 ```ts
 interface HostraLaunchPlanV1 {
-  readonly installationId: string;
-  readonly runtimes: ReadonlyMap<string, ResolvedHostraSubsystemModuleV1>;
+  readonly canonicalInstallationRoot: string;
+  readonly canonicalNodeExecutable: string;
+  readonly runnerEntry: string;
+  readonly runnerPolicy: HostraRunnerPolicyV1;
+  readonly runtimes: readonly ResolvedHostraSubsystemModuleV1[];
 }
 ```
 
-Freeze前：
+Plan MUST be deeply immutable plain data。A frozen `Map` alone is not an immutable representation because `.set()` remains possible。
+
+Before plan + logical projection are complete：
 
 ```text
-MUST NOT spawn business Runtime process
-MUST NOT import business Definition Module
-MUST NOT establish Runtime Control
+MUST NOT spawn Subsystem Runner
+MUST NOT import Definition Module
+MUST NOT establish Runtime Control WS
 ```
 
-普通 launch path MUST NOT 重新解释 Game Entry/manifest，只按 key lookup frozen plan。
+Ordinary launch MUST NOT re-read Game/manifest or re-resolve selected module policy。
 
 ---
 
-## 9. LogicalGameBootstrap Projection
+## 10. LogicalGameBootstrap Projection
 
-Full PREPARE MUST also construct immutable Main-facing logical projection：
+M6 Main-facing projection：
 
 ```ts
 interface LogicalGameBootstrap {
@@ -286,73 +357,253 @@ interface LogicalGameBootstrap {
 }
 ```
 
-Projection MUST preserve exact Game logical semantics and MUST NOT contain：
+MUST preserve exact Game logical semantics and MUST NOT contain：
 
 ```text
 formatVersion
-ValidatedGameEntryV1 brand
+validated Game brand/model
 module/logicalModule/physicalModule
 HostraLaunchPlan
 Node/Runner/process material
 ```
 
-Prepared Hostra result MUST NOT be released for Runtime bootstrap until both plan and logical projection are complete。
+Prepared result MUST NOT be released until both HostraLaunchPlan and LogicalGameBootstrap are complete and immutable。
 
 ---
 
-## 10. RuntimeHosting Boundary
+## 11. RuntimeHosting Boundary
 
-Main-facing request：
-
-```text
-launch(subsystemKey, LaunchAttemptMaterial)
-```
-
-Hostra RuntimeHosting：
+Existing M5 platform port remains authoritative：
 
 ```text
-lookup subsystemKey in HostraLaunchPlan
-→ create supervision record
-→ prepare bootstrap/provisioning capability
-→ spawn Host-owned Node Runner
+launch({subsystemKey, bootstrapToken}, signal)
+→ HostedRuntime
 ```
 
-Main MUST NOT pass GameEntry/module/physical path/Node flags。
+Main MUST NOT pass GameEntry、manifest、module/path、Node flags or Hostra material。
 
-RuntimeHosting不拥有 Frame/Activation/InputTarget/Runtime ready/failure unwind/Data generation/profile authority。
+No public `launchId` is required by M6。A Hostra implementation MAY create an internal attempt id for diagnostics, but：
+
+```text
+launchId is not Runtime identity
+launchId is not protocol material
+launchId is not required in RuntimeLaunchRequest
+```
+
+RuntimeHosting owns physical creation facts only；it does not own Frame/Activation/InputTarget/Runtime ready/failure unwind authority。
 
 ---
 
-## 11. Host-owned Node Runner
+## 12. Attempt-local Runtime Establishment
 
-唯一 process entry：
+Each launch owns exactly：
 
 ```text
-Host-selected Node
-argv = [Host-owned Runner Entry]
+one child process
+one 127.0.0.1:0 WebSocket listener
+one base64url(randomBytes(32)) path capability
+one valid accepted Control connection
+one single-use MainRuntimeControlBinding.acquire()
+one terminal child exit fact
+```
+
+WS listener MUST be listening before Runner spawn。
+
+Only exact attempt path may upgrade。Wrong paths MUST be rejected without consuming the valid connection slot。
+
+Transport capability is not authentication：
+
+```text
+WS capability != bootstrapToken != Runtime identity
+```
+
+MUST NOT add query-token、Authorization or custom transport hello。Existing Runtime Control `subsystemKey + bootstrapToken` owns identification/authentication。
+
+---
+
+## 13. Child Event Ordering and Launch Abort
+
+Frozen creation sequence：
+
+```text
+child = spawn(process.execPath, [RunnerEntry], shell=false)
+→ synchronously install spawn/error/exit observers
+→ only then await spawn-or-error
+```
+
+Canonical facts：
+
+```text
+spawn event = OS process creation succeeded
+exit event  = actual process termination authority
+close event = stdio/resource closure diagnostic only
+```
+
+If `error` occurs before spawn：
+
+```text
+PROCESS_SPAWN_FAILED
+```
+
+If child exits before HostedRuntime ownership transfer：
+
+```text
+PROCESS_EXITED_DURING_BOOTSTRAP
+```
+
+Launch AbortSignal owns the physical attempt only before ownership transfer：
+
+```text
+abort while pending
+→ mark attempt abandoned first-wins
+→ close WS server
+→ force-converge any spawned child
+→ retain internal exit observation until actual exit
+→ never return HostedRuntime
+```
+
+Abort cleanup MUST continue even when the outer Main deadline has already rejected its own wait。No abandoned attempt may leave a listener/live child indefinitely。
+
+---
+
+## 14. Runtime Control Binding / Ready
+
+Main-side `runtimeControl.acquire(signal)` is single-use：
+
+```text
+first call → wait exact attempt connection → return MessageCarrier
+second call → reject
+```
+
+Abort before connection closes the listener and rejects acquire。Child exit before acquire rejects acquire。Carrier loss does not permit same-attempt reconnect。
+
+Facts remain distinct：
+
+```text
+spawned != connected != identified != ready
+```
+
+Hostra RuntimeHosting owns spawned/connected；existing Runtime Control/Main own identified/ready。
+
+---
+
+## 15. Runner Bootstrap Context
+
+M6 uses one reserved environment value：
+
+```text
+LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP
+```
+
+Normative M6 envelope：
+
+```ts
+interface HostraNodeRunnerBootstrapContextV1 {
+  readonly version: 1;
+  readonly subsystemKey: string;
+  readonly physicalModule: string;
+  readonly controlEndpoint: string;
+  readonly bootstrapToken: string;
+  readonly controlProtocolVersions: readonly [1];
+  readonly helloDeadlineMs: number;
+  readonly frameDeadlineMs: number;
+  readonly terminalCleanupDeadlineMs: number;
+}
+```
+
+Encoded JSON MUST be ≤ 16_384 UTF-8 bytes and closed-validated。
+
+MUST NOT contain：
+
+```text
+GameEntryV1 / LogicalGameBootstrap
+Frame/Activation
+business initial input
+Renderer/Data material
+Content bearer
+```
+
+Runner MUST consume and scrub before business import：
+
+```text
+copy encoded value to local variable
+→ immediately delete reserved env key from process.env
+→ parse/validate/freeze local context
+→ only then import business module
+```
+
+---
+
+## 16. Safe Runner Environment
+
+M6 parent-env allowlist, copy-if-defined only：
+
+```text
+PATH
+HOME
+USERPROFILE
+HOMEDRIVE
+HOMEPATH
+TMPDIR
+TMP
+TEMP
+SystemRoot
+WINDIR
+```
+
+plus exactly the reserved bootstrap value。
+
+No other parent env is inherited by default, including：
+
+```text
+NODE_OPTIONS
+NODE_PATH
+npm_*
+HOSTRA_RPC_TOKEN
+application credentials
+arbitrary secrets
+```
+
+Game/manifest cannot append env。
+
+---
+
+## 17. Host-owned Node Runner — M6 Slice
+
+Only process entry：
+
+```text
+process.execPath <package-owned Runner Entry>
+```
+
+```text
 shell = false
+cwd   = canonical Installation Root
 ```
 
-Business Definition Module 绝不是 process argv entry。
+Business Definition Module is never argv entry。
 
-Runner：
+M6 Runner sequence：
 
 ```text
-parse/validate Hostra bootstrap
-→ verify subsystemKey / selected binding
-→ import exact resolved Definition Module
-→ validate default export SubsystemDefinitionFactory
-→ construct RuntimeControlBinding
-→ construct SubsystemDataBinding
-→ construct ContentClient
+consume/scrub bootstrap
+→ validate bootstrap
+→ convert exact physical .mjs to file URL
+→ import exact module once
+→ require default export
+→ accept it as SubsystemDefinitionFactory candidate
+→ establish Runtime Control WS MessageCarrier
+→ create RuntimeControlBinding + DeadlineScheduler
 → runSubsystem(...)
 ```
 
-MUST NOT fallback to package main、directory index、CommonJS、another module 或 arbitrary user argv。
+Runner MUST NOT fallback to package main、directory index、CommonJS、alternate module or arbitrary argv。
+
+M6 `runSubsystem` receives Runtime Control capability only。Subsystem Data binding is M8+；Content integration is M12+。
 
 ---
 
-## 12. Definition Module ABI
+## 18. Definition Module ABI
 
 Selected module MUST：
 
@@ -362,168 +613,70 @@ have default export
 be accepted as SubsystemDefinitionFactory by @loomrealm/subsystem/host
 ```
 
-Hostra/PWA MAY select different `.mjs` artifacts，但都遵守相同 author/host ABI 与 observable semantics。
+Different platforms MAY select different artifacts while preserving the same author/host ABI and business-observable semantics。
+
+Runner-local module load/ABI failures MAY use bounded diagnostics and nonzero exit；M6 does not require a second Runner→Parent typed-status protocol。
 
 ---
 
-## 13. Node Runtime / Environment Policy
+## 19. WebSocket MessageCarrier
 
-Node executable与 Runtime support policy由 Host选择。
-
-Manifest MUST NOT specify：
+M6 WS adapter semantics：
 
 ```text
-Node executable
---require / --loader / --inspect
-shell/interpreter
-arbitrary argv
-NODE_OPTIONS / NODE_PATH
+one WS text message = one MessageCarrier string
 ```
 
-Environment：
+MUST：
 
 ```text
-Host-defined Safe Baseline
-+ LoomRealm Reserved Bootstrap Environment
+reject binary as lost
+preserve order
+resolve send on local send acceptance only
+single logical inbound reader
+idempotent close
+normal close → {kind:"closed"}
+unexpected socket/error → {kind:"lost", cause}
 ```
 
-不得无条件继承完整 `process.env`。
-
-Typical：
-
-```text
-cwd          Installation Root
-shell        false
-detached     false
-stdin        closed/ignored
-stdout       bounded diagnostics
-stderr       bounded diagnostics
-provisioning dedicated Host-owned IPC capability
-```
+MUST NOT parse JSON/JSON-RPC、authenticate Runtime hello、retry、reconnect or own application deadlines。
 
 ---
 
-## 14. Launch Attempt / Bootstrap Token
+## 20. Physical Termination
 
-Each Runtime creation uses fresh：
+`HostedRuntime.terminated` settles only from child `exit` observation。
 
 ```text
-subsystemKey
-launchId
-bootstrapToken
-selected resolved module (Platform-private)
+kill requested           != stopped
+Control closed           != stopped
+requestTermination done  != stopped
+child close event alone  != stopped
+child exit               = stopped physical fact
 ```
 
-Token MUST be high-entropy、opaque、bound to Launch Attempt + key、registered before Runner executes、one successful hello consumption、revoked on abandonment、not logged。
+`requestTermination(signal)` MUST be idempotent：
+
+```text
+first non-aborted request
+→ commit normal host termination once
+→ install terminationGraceMs force fallback
+→ if child exits, cancel fallback
+→ if grace expires while alive, force terminate once
+
+subsequent requests
+→ join same committed convergence
+```
+
+Caller abort before commit rejects without starting a new convergence。Caller abort after commit MUST NOT cancel the already-committed convergence。
+
+POSIX/Windows mechanics MAY differ；observable requirement is bounded physical convergence + actual exit fact。No automatic restart in v1。
 
 ---
 
-## 15. Runner Bootstrap Context
+## 21. M6 Failure Ownership
 
-Hostra MAY use reserved environment/IPC：
-
-```ts
-interface HostraNodeRunnerBootstrapContextV1 {
-  readonly version: 1;
-  readonly subsystemKey: string;
-  readonly subsystemModule: string;
-  readonly controlEndpoint: string;
-  readonly bootstrapToken: string;
-}
-```
-
-Platform-internal only。MUST NOT contain：
-
-```text
-GameEntryV1 / LogicalGameBootstrap
-Frame/Activation
-Data generation/profile
-Renderer Data endpoint/ticket
-business initial input
-Content bearer
-```
-
----
-
-## 16. Platform Provisioning Channel
-
-Each Node Runner Process MUST have a Host-owned provisioning capability distinct from stdout/stderr、Runtime Control、Data carrier。
-
-Phase 1 first consumer：Renderer Data provisioning。
-
-It is not Subsystem Control、Frame、Renderer Control、Renderer Data application carrier 或 business RPC。
-
----
-
-## 17. Data Provisioning
-
-For current `DataAuthority(S,G,P)`：
-
-```text
-Hostra DataConnectionBroker
-→ Runner provisioning integration
-→ one-time endpoint/ticket for S/G/P
-→ target Runner validates own S/G/P
-→ Data WebSocket
-→ MessageCarrier
-→ SubsystemDataBinding yields {G,P,carrier}
-```
-
-Broker/Launcher MUST NOT mint generation/profile。
-
-same S/G/P reconnect uses fresh one-time material；stale/duplicate/consumed material cannot become current。
-
-Provisioning failure：
-
-```text
-!= Runtime failure
-!= Frame unwind
-!= DataAuthority mutation
-```
-
----
-
-## 18. Runtime Control / Ready
-
-```text
-Runner obtains Control carrier
-→ subsystem.hello
-→ identified
-→ initialize
-→ ready
-```
-
-```text
-spawned != connected != identified != ready
-ready != Data offer/carrier
-```
-
-Control loss按 Runtime Control Profile 进入 Runtime failure；same-attempt Control reconnect不存在。
-
----
-
-## 19. Supervisor / Termination
-
-Supervisor reports physical facts：
-
-```text
-process creation success/failure
-alive/exited
-exit code/signal
-termination request/result
-```
-
-`stopped` only from actual process termination observation。
-
-Unexpected exit without Main termination intent—including code 0—enters Runtime failure。
-
-v1 MUST NOT automatic restart。
-
----
-
-## 20. Failure Categories
-
-At least：
+Parent-observable Hostra failure categories：
 
 ```text
 PLATFORM_LAUNCH_MANIFEST_INVALID
@@ -532,67 +685,113 @@ PLATFORM_BINDING_UNDECLARED
 SUBSYSTEM_MODULE_INVALID
 SUBSYSTEM_MODULE_NOT_FOUND
 SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION
-SUBSYSTEM_MODULE_LOAD_FAILED
-SUBSYSTEM_MODULE_ABI_INVALID
 PLATFORM_RUNTIME_UNSUPPORTED
 LAUNCH_RUNTIME_UNAVAILABLE
 PROCESS_SPAWN_FAILED
 PROCESS_EXITED_DURING_BOOTSTRAP
-PROCESS_EXITED_UNEXPECTEDLY
 PROCESS_TERMINATION_FAILED
-PLATFORM_PROVISIONING_UNAVAILABLE
-DATA_PROVISION_INVALID
-DATA_ESTABLISHMENT_FAILED
 ```
 
-User-facing errors MUST NOT leak token/ticket/sensitive env/unnecessary physical path/internal stack。
-
----
-
-## 21. Conformance
-
-At least：
+Runner-local diagnostic categories MAY include：
 
 ```text
-launcher accepts Game source without manual Game Package caller step
-Game Entry validation failures occur inside PREPARE
-valid/closed Hostra manifest
-missing/duplicate/extra key
-exact Game↔Hostra key equality
-module syntax/containment/security rejection
-all bindings resolved before first process spawn
-no business module import during PREPARE
-LogicalGameBootstrap contains no document/executable material
-Main launch request contains no GameEntry/module
-Host-owned Runner is argv entry
-Runner imports exact planned module/default-export ABI
-Host-selected Node/safe env/shell=false
-spawn != connected != identified != ready
-ready independent from Data offer
-unexpected code-0 exit fails Runtime
-no auto restart
-provisioning distinct from Control/stdout/Data
-stale/duplicate Data material rejected
-provision failure does not fail Runtime/Frame
+SUBSYSTEM_MODULE_LOAD_FAILED
+SUBSYSTEM_MODULE_ABI_INVALID
+bootstrap validation failure
+Subsystem host fatal failure
 ```
+
+After HostedRuntime ownership transfer, unexpected process exit—including code 0 without Main termination intent—is a physical fact consumed by existing Main Runtime failure authority；Hostra Launcher MUST NOT duplicate that state machine。
+
+User-facing material MUST NOT leak bootstrap token、attempt capability、sensitive env、unnecessary physical paths or internal stack。
 
 ---
 
-## 22. Final Invariants
+## 22. M8+ Platform Provisioning Slice
 
-1. Hostra Launcher是 Hostra Runtime-product Game Entry consumer；
-2. `@loomrealm/game-package` common validation在 Launcher PREPARE 内完成；
-3. Product application不需手动传 `ValidatedGameEntryV1`；
-4. Game/Hostra key set严格相等；
-5. HostraLaunchPlan + LogicalGameBootstrap 在 first Runtime side effect前完整冻结；
-6. Main不接收 Game Entry/module/path；
-7. module/physical path只存在于 Hostra Platform boundary；
-8. Host-owned Node Runner是唯一 process entry；
-9. manifest不能选择 Node/Runner/argv-env/endpoint/credential；
-10. Definition Module ABI统一但 artifact不要求跨平台相同；
-11. Runtime Control与 Platform provisioning独立；
-12. ready不依赖 Data provisioning；
-13. Data provisioning failure不等于 Runtime/Frame failure；
-14. stopped只来自 actual process termination；
-15. no automatic restart；
-16. current v1不存在旧 `{key,module}` Game Descriptor compatibility path。
+**Not applicable to M6.**
+
+When M8 implements Subsystem Data, each Runner will gain a Host-owned provisioning capability distinct from stdout/stderr、Runtime Control and Data carrier。
+
+Conceptual future flow：
+
+```text
+Hostra DataConnectionBroker
+→ Runner provisioning integration
+→ one-time endpoint/ticket for current DataAuthority(S,G,P)
+→ target validates own S/G/P
+→ Data WebSocket
+→ MessageCarrier
+→ SubsystemDataBinding
+```
+
+Broker/Launcher MUST NOT mint generation/profile。Provisioning failure remains distinct from Runtime/Frame failure unless the owning later contract explicitly says otherwise。
+
+M6 MUST NOT create an unused version of this channel。
+
+---
+
+## 23. M12+ Content Slice
+
+**Not applicable to M6.**
+
+ContentClient/Content bearer integration enters the Runner only when the Content milestone provides a real consumer and contract。M6 bootstrap MUST NOT carry future Content credentials/material。
+
+---
+
+## 24. M6 Conformance
+
+At minimum：
+
+```text
+Launcher accepts installation root without manual Game Package caller step
+Game Entry validation occurs inside PREPARE
+closed Hostra manifest
+missing/duplicate/extra key rejection
+exact Game↔Hostra key equality
+module grammar/containment/security rejection
+all module + current Node/Runner static preflight before plan freeze
+no Runner/business import/Runtime WS before PREPARE success
+LogicalGameBootstrap contains no executable material
+Main RuntimeLaunchRequest contains only logical key + bootstrap token
+no public launchId requirement
+WS listener ready before Runner spawn
+child observers installed before awaiting spawn
+exit is canonical termination fact
+launch abort converges pending physical resources
+package-owned Runner is argv entry
+Runner scrubs bootstrap env before business import
+safe env allowlist
+Runtime Control text MessageCarrier
+spawn != connected != identified != ready
+single-use Control binding / no reconnect
+unexpected post-transfer code-0 exit reaches Main Runtime failure
+idempotent bounded physical termination
+no auto restart
+Linux + Windows qualification
+actual packed Runner artifact smoke
+```
+
+M6 non-conformance includes creating dormant M8+/M12+ capability solely to satisfy future profile text。
+
+---
+
+## 25. Final Invariants
+
+1. Hostra Launcher owns Hostra Runtime-product Game Entry consumption；
+2. common Game validation happens inside Launcher PREPARE；
+3. Game/Hostra key sets are exactly equal；
+4. plan + logical projection freeze before Subsystem Runtime side effects；
+5. M6 Node is trusted `process.execPath`, Node major ≥20；
+6. Main receives no Game/module/path/Node material；
+7. physical module material stays Hostra Platform-private；
+8. Host-owned Runner is the only process entry；
+9. manifest cannot select Node/Runner/argv/env/endpoint/credential；
+10. no public `launchId` is required；
+11. Runtime Control transport capability is not Runtime identity/authentication；
+12. child `exit` is the sole successful stopped physical fact；
+13. launch abort cannot orphan a pending child/listener；
+14. physical termination is idempotent and bounded with force fallback；
+15. no automatic Runtime restart/reconnect；
+16. M6 contains no dormant Data/Content provisioning；
+17. M8+/M12+ extend the same Runner boundary only when their real consumers arrive。
