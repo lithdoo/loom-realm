@@ -1,381 +1,429 @@
 # M7 / 05 — Qualification and Closure
 
-> 状态：Active Design / Draft  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M7 Renderer Control  
 > 落地顺序：05  
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md) → [M7 / 02](M7_02_MAIN_AUTHORITY_PROJECTION.md) → [M7 / 03](M7_03_RENDERER_CONTROL_STORE.md) → [M7 / 04](M7_04_VERTICAL_INTEGRATION.md)  
-> 目标：只定义 M7 最终 evidence/checklist；协议语义以 formal contract 为准，具体实现以前四份 M7 文档为准。
+> 冻结决策：[ADR 0027](doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 目标：定义唯一 M7 implementation qualification/evidence matrix。协议事实以 Frozen Renderer Control v1 为准；实施只能满足本清单，不得在编码阶段扩张架构。
 
-核心原则：
-
-> **M7 closure 证明 Main committed authority 能被 Renderer 以 race-free、atomic、bounded、fail-closed 的方式镜像；Renderer Control failure不能反向改变 Frozen Frame / Runtime business authority。**
+> **M7 closure = Main committed authority 经 frozen Binding + concrete Renderer Control peers，以 race-free、atomic、bounded、fail-closed 的方式镜像到唯一 current Renderer；Renderer Control failure不得改变 Frozen Frame / Runtime business authority。**
 
 ---
 
-## 1. Closure Scope
+## 1. M7 Closure Scope
 
-M7 必须关闭：
+必须实现：
 
 ```text
 @loomrealm/renderer-control
-@loomrealm/main Renderer projection/hello/current-peer slice
-@loomrealm/renderer minimal Control slice
-@loomrealm/platform-ports narrow fresh opaque material capability refinement
-deterministic cross-package vertical
+@loomrealm/platform-ports M7 slice
+    OpaqueMaterialGenerator
+    RendererControlBinding
+@loomrealm/main M7 slice
+    sessionId / revision
+    pure projection
+    bounded Renderer accept loop
+    atomic hello/currentness/replacement
+    Session terminal retirement
+@loomrealm/renderer minimal Control holder
+deterministic MemoryCarrier vertical
 ```
 
-默认不实现：
+不属于 M7 implementation closure：
 
 ```text
-Renderer physical hosting port
-Hostra Renderer Control WebSocket
-PWA Renderer Control MessagePort
-Main DataAuthority policy
-Renderer Data/Input/Render/Content
+Hostra Renderer Control WebSocket physical realization
+PWA Renderer Control MessagePort physical realization
+concrete stalled-write timeout policy
+Main DataAuthority policy / Data Broker
+User Input / Render / Content
 ```
-
-若 real carrier ingress 在实现时确实无法在不暴露 Main internals 的情况下成立，才允许基于真实阻塞补一个最窄 Renderer ingress port；不得预建 mega-interface。
 
 ---
 
 ## 2. Abstraction Budget
 
-M7 允许且必须有真实消费者的抽象：
+允许且必须有当前真实 consumer的抽象：
 
 ```text
 renderer-control Main peer
 renderer-control Renderer peer
+exact outbound hello preparation/preflight
+OpaqueMaterialGenerator
+RendererControlBinding
 Main pure Snapshot projector
-Main hello acceptance seam
-Renderer current peer + Snapshot holder
-OpaqueTokenGenerator narrow platform capability
+Main bounded Renderer accept loop + hello acceptance seam
+Renderer current peer+Snapshot holder
 ```
 
-其中 `OpaqueTokenGenerator` 已有多个真实 Main consumer：Runtime bootstrap token、Renderer Control token、Session identity material。
-
-M7 不接受：
+禁止：
 
 ```text
 GenericRpcPeer / UniversalProtocolSession
-RequestIdAllocator / PendingRequestMap for one-shot hello
+RequestIdAllocator / PendingRequestMap for hello
 StateReplicator / Publisher framework
 RendererControlState duplicate DTO
-public Store subscription without real consumer
+public Store subscription without M8 consumer
 Renderer Runtime/Frame shadow registries
 DataAuthority allocator/policy before M8
-historical receiver Set/log for lifetime validation
-RendererPlatform / universal Renderer host/service interface without ingress evidence
+historical receiver Set/log
+ConnectionRegistry / RendererPlatform / universal Renderer service interface
+cancelable writer abstraction只为消除 old inFlight late bytes
 ```
 
 ---
 
-## 3. Renderer-control Package Evidence
+## 3. `@loomrealm/renderer-control` Evidence
 
 必须证明：
 
 ```text
-exact v1 root-exported wire types
+root-only exact v1 types/surfaces
 hello first / one-shot / id=1
 closed schema + whole current-Snapshot validation
 connection-local revision monotonicity
+exact side-effect-free hello outbound preparation
+actual UTF-8/depth/member/1MiB preflight
 hello Result before later renderer.state
-Renderer initial hello Snapshot exposed before later state consumption
-active peer retirement stops publication + closes carrier
-retire during pending write settles bounded state
-0..1 in-flight + 0..1 pendingLatest
-outbound representation preflight
+Renderer initial Snapshot returned before later-state consumption
+retirement synchronously blocks new publication submission/send start
+retirement clears pendingLatest + requests carrier close
+already-started inFlight may settle without authority resurrection
+0..1 inFlight + 0..1 pendingLatest
+outbound representation failure terminalizes
 terminal first-wins
 no retry/replay/history
 ```
 
-receiver 不维护 unbounded Activation/Data generation history。
+Receiver不得维护 unbounded Activation/Data generation history。
 
 ---
 
-## 4. Main Evidence
+## 4. `@loomrealm/platform-ports` Evidence
+
+Frozen M7 surface必须实现：
+
+```ts
+interface OpaqueMaterialGenerator {
+  generate(): string;
+}
+
+interface RendererControlBinding {
+  acquire(
+    rendererControlToken: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
+}
+```
+
+证明：
+
+```text
+one acquire = one candidate physical attempt
+success returns already-established carrier only
+Binding does not authenticate/consume token
+Binding does not decide current Renderer
+abort-before-resolution prevents late live-carrier delivery
+at most one successful result per acquire
+Platform Ports still runtime-depends only on Foundation
+```
+
+`BootstrapTokenGenerator` current-v1 rename为 `OpaqueMaterialGenerator`，无 compatibility alias。
+
+---
+
+## 5. Main Evidence
 
 必须证明：
 
 ```text
 fresh Session-unique sessionId
 initial Renderer revision = 1
-revision comparison excludes revision field itself
+revision comparison excludes revision itself
 revision advances exactly once per visible committed payload change
-transport/peer changes alone do not advance revision
-Snapshot is pure projection of existing authority
-no shadow Runtime/Frame/InputTarget state
-Runtime lifecycle mapping is deterministic
-ACK-before-fresh Activation/InputTarget preserved
+no connection/transport-only revision bump
+Snapshot pure projection / no shadow Runtime/Frame/InputTarget
+Runtime lifecycle frozen mapping
+ACK-before-fresh Activation/InputTarget
 revoked Activation never regranted
-M7 dataAuthorities = []
+M7 dataAuthorities=[]
+```
+
+### Accept loop
+
+```text
+at most one pending acquire/candidate
+Renderer absence does not block Main Session business path
+current Renderer may coexist with one future candidate
+attempt terminal invalidates token
+fresh next attempt uses fresh token
+Binding Session-lifetime terminal不升级为 Runtime/Frame failure
 ```
 
 ### Hello atomicity
 
-必须有并发证据证明：
+Main serialized transaction必须证明：
 
 ```text
-hello acceptance
-= token consume + capture current R + install new current + retire old current
+Session/candidate/token/version validate
+→ capture current R
+→ exact prepared hello preflight
+→ only on success consume token + switch current + retire old
 ```
 
-相对于 Renderer-visible Main mutation是一个 serialized authority transaction。
-
-不得存在：
+必须覆盖：
 
 ```text
-hello returns R
-Main commits R+1 in acceptance gap
-R+1 neither in hello nor pending state
+concurrent R+1 is either in hello or pending, never lost
+unrepresentable candidate cannot evict healthy old current
+prepared hello send failure does not resurrect old current
 ```
 
-### Current-peer terminal
+### Current peer terminal
 
 ```text
-current peer terminal → clear current peer only
-stale old peer terminal → cannot clear new current
-peer terminal alone → no rendererRevision bump
+current terminal → clear current only
+stale old terminal → ignored for new current
+terminal alone → no revision bump
 ```
 
 ---
 
-## 5. Renderer Evidence
+## 6. Renderer Evidence
 
 必须证明：
 
 ```text
-role state = currentPeer + RendererAuthoritySnapshotV1|null
-peer + initial Snapshot installed atomically
-later state consumption starts only after initial install
+role state = one atomic {peer,snapshot} | null
+initial peer+Snapshot installed before later state consumption
+later Snapshot whole replacement
 new peer replaces old peer
-old peer late Snapshot ignored
-old peer terminal cannot clear new state
-current peer terminal clears peer + Snapshot together
+old late Snapshot ignored
+old already-inFlight late delivery ignored after replacement
+old terminal cannot clear new state
+current terminal clears current atomically
 no second revision/session validator
-no duplicate Control DTO
-no public subscription framework frozen
+no duplicate DTO
+no public subscription framework
 ```
 
 ---
 
-## 6. Replacement Evidence
+## 7. Replacement Evidence
 
-replacement必须是 active revocation：
+必须使用 A/B 两个 real peers：
 
 ```text
 A current
-→ B successful hello atomic acceptance
-→ B only current
-→ A removed from publication immediately
-→ A carrier close/terminal requested
-→ A Renderer fails closed locally
+→ B candidate
+→ B exact preflight success
+→ B atomic acceptance
+→ A immediately non-current
+→ A no new publication/send start
+→ A pendingLatest settled
+→ A carrier close requested
+→ B initial Snapshot installed
 ```
 
-必须验证：
+验证：
 
 ```text
-A does not remain silently stale
-A pending publication settles
-B hello send failure does not resurrect A
-fresh attempt required after failed B
+A already-started inFlight MAY physically arrive later
+late A activity cannot mutate B current state/currentness
+A terminal cannot clear B
+B hello send failure leaves no current A resurrection
+next recovery = fresh attempt/token
 ```
 
-“Main 不再给 A 发 state”但 A carrier长期保持 current-looking 状态，不算 closure。
+不能用“replacement 后 old peer绝不收到晚到 bytes”作为 Core pass condition。
 
 ---
 
-## 7. Representation-limit Evidence
+## 8. Session Terminal Evidence
 
-Renderer Control 的 limits 只属于 wire/connection safety。
-
-必须证明一个合法 Main authority若当前完整 Snapshot无法在 v1 profile内表示：
+分别覆盖 root outcome / external shutdown / fatal：
 
 ```text
-Renderer Control attempt/current connection fails closed
-Main Runtime/Frame/Stack authority remains unchanged
+Session terminal latch
+→ no fresh Renderer token/attempt
+→ abort pending Binding acquire
+→ invalidate pending token
+→ retire candidate peer
+→ retire current peer
+→ stop future publication
+```
+
+并证明：
+
+```text
+Main Session result/Runtime cleanup不等待 Renderer physical close
+Renderer current最终因 Control terminal变为 null
+无 final session-ended RPC/Snapshot
+```
+
+---
+
+## 9. Representation Isolation Evidence
+
+合法 Main authority若 full Renderer Control message不可表示：
+
+```text
+candidate/current Control fails closed
+Main Runtime/Frame/Stack unchanged
 no committed transaction rollback
 no Renderer-specific frame.call error
 no Snapshot truncation/drop
 ```
 
-M7 不定义额外：
-
-```text
-Runtime count business max
-Frame Stack depth business max
-DataAuthority count business max
-```
-
-因此 Frozen Frame v1 不需要为 Renderer Control增加新的 call rejection语义。
+M7不定义 Runtime count、Frame depth、DataAuthority count业务上限。
 
 ---
 
-## 8. Vertical Evidence
+## 10. Vertical Evidence
 
-必须走：
+必须走真实：
 
 ```text
-live Main authority
-→ real revision/projector/hello acceptance
-→ real renderer-control Main peer
+RendererControlBinding
+→ Main bounded accept loop
+→ Main pure projection/revision/hello acceptance
+→ renderer-control Main peer
 → MemoryCarrier
-→ real Renderer peer
-→ real Renderer current state
+→ renderer-control Renderer peer
+→ Renderer current holder
 ```
 
 禁止：
 
 ```text
 test reads Main private stack
-test manually constructs authority Snapshot
-fake revision counter
-bypass Main token/current-peer decision
+test manually constructs Snapshot/revision
+test directly marks peer current
+test bypasses Binding/token/currentness
 ```
 
 覆盖：
 
 ```text
 initial Session/revision
-hello concurrent mutation race
-Runtime lifecycle projection
+hello concurrent mutation
 initial Frame activate
 frame.call
 frame.return + fresh resume Activation
 Runtime failure + fixed-point unwind
-active connection replacement
-current/stale terminal race
+replacement
+current/stale terminal
+Session terminal
 slow consumer structural boundedness
 representation failure isolation
 ```
 
 ---
 
-## 9. Backpressure Evidence Boundary
+## 11. Backpressure Evidence Boundary
 
 M7 core必须证明：
 
 ```text
-0..1 in-flight
+0..1 inFlight
 0..1 pendingLatest
 no revision-sized queue/history
-terminal cleanup releases pending state
+every terminal/retirement settles pending state
 ```
 
-M7 deterministic MemoryCarrier **不**用来宣称 Hostra/PWA actual stalled-write timeout 已验证。
-
-后续 concrete product qualification分别证明：
+M7 MemoryCarrier **不**证明：
 
 ```text
-Hostra WebSocket finite stalled-write close policy
-PWA MessagePort/host finite failure/liveness policy
+Hostra WebSocket finite stalled-write timeout
+PWA MessagePort host liveness timeout
 ```
 
-这与 core boundedness 是两份不同 evidence。
+这些是后续 concrete Platform qualification。
 
 ---
 
-## 10. Opaque Material Evidence
+## 12. Dependency Evidence
 
-`@loomrealm/platform-ports` 的 M7 refinement必须保持：
-
-```text
-one tiny generate(): string capability
-no token registry
-no identity service
-no semantic binding in Platform
-```
-
-Main分别为 Session、Runtime attempt、Renderer attempt取得 fresh value，并自己验证/绑定/consume。
-
-Concrete Hostra/test platform适配不得扩张成 universal credential broker。
-
----
-
-## 11. Dependency Evidence
-
-目标方向：
+目标：
 
 ```text
-foundation/wire → renderer-control
-platform-ports → main
-renderer-control →?  NO
-main → renderer-control
+foundation → platform-ports
+foundation + wire → renderer-control
+main → platform-ports + runtime-control + renderer-control + wire
 renderer → renderer-control
 ```
 
-准确 invariant：
+禁止：
 
 ```text
-renderer-control !→ main
-renderer-control !→ renderer
-renderer-control !→ platform-ports
-main !→ renderer
-renderer !→ main
-```
-
-`main` 同时消费 `platform-ports` 与 `renderer-control` 是合法组合，不形成 role cycle。
-
----
-
-## 12. Regression Evidence
-
-M7不得破坏：
-
-```text
-M1 Foundation/Wire
-M2 Game Package
-M3 Runtime Control
-M4 Subsystem Runtime/Frame
-M5 Main Runtime/Frame/Stack
-M6 Hostra Runtime vertical
-```
-
-特别检查：
-
-```text
-Renderer publication不改变 Frame mutation ordering
-Renderer representation failure不改变 frame.call semantics
-opaque token capability泛化不转移 Main credential authority
-generic RPC extraction没有发生
+renderer-control → main/renderer/platform-ports
+platform-ports → main/renderer-control
+renderer → main/platform-ports
+main → renderer
 ```
 
 ---
 
-## 13. Package / CI Evidence
+## 13. Regression Evidence
+
+必须保持 M1–M6：
+
+```text
+Foundation/Wire
+Game Package
+Runtime Control
+Subsystem Runtime/Frame
+Main Runtime/Frame/Stack authority
+Hostra Runtime vertical
+```
+
+特别验证：
+
+```text
+OpaqueMaterialGenerator rename不转移 credential authority
+Renderer publication不改变 Frame ordering
+representation failure不改变 Frame semantics
+Session terminal Renderer retirement不改变 Main terminal result
+no generic RPC extraction
+```
+
+---
+
+## 14. Package / CI Evidence
 
 至少：
 
 ```text
 renderer-control build/test/pack
-platform-ports build/test
-main M7 projection/hello/replacement tests
-renderer build/test/pack if publishable
+platform-ports build/test/pack
+main M7 tests
+renderer build/test/pack
 M7 deterministic vertical
 existing core regression suites
 ```
 
-Root M7 docs 不进入 runtime package publish surface。
+M7 root docs不进入 runtime package publish surface。
 
 ---
 
-## 14. Documentation Closure
+## 15. Documentation Closure After Implementation
 
-M7 complete 后同步：
+M7 implementation qualification完成后再同步状态：
 
 ```text
 README implementation state
-phase-1-delivery-plan M7 status
-package README status
-formal Renderer Control contract review date/status
-qualification evidence reference
+phase-1-delivery-plan M7 → ✅
+package README / DESIGN implementation status
+qualification run/evidence reference
 ```
 
-formal contract是协议事实源；M7 root docs是 implementation plan/evidence source。
+Frozen contract/ADR本身不因实现完成改变语义。
 
 ---
 
-## 15. Explicit Non-goals
+## 16. Explicit Non-goals
 
 M7 complete 不表示：
 
@@ -386,78 +434,97 @@ DataConnectionBroker
 User Input / Frame Interest
 Render Update / Render Store
 Content
-Desktop BrowserWindow Renderer Control transport
-PWA Renderer Control transport
-concrete transport stalled-write policy qualified
+Hostra physical Renderer Control
+PWA physical Renderer Control
+concrete transport stalled-write policy
 cross-platform equivalence
 ```
 
 ---
 
-## 16. Closure Checklist
+## 17. Implementation Checklist
 
 ```text
-[ ] M7_01 concrete asymmetric renderer-control peers qualified
+[ ] M7_01 concrete asymmetric peers implemented
 [ ] hello id=1 / no generic request framework
-[ ] initial hello handoff before later-state consumption
-[ ] active retirement closes old carrier
-[ ] structural 1+1 publication boundedness
-[ ] representation preflight/fail-close
+[ ] exact outbound hello preparation/preflight implemented
+[ ] initial handoff before later-state consumption
+[ ] retirement blocks new sends + clears pending
+[ ] structural 1+1 boundedness
 
-[ ] M7_02 fresh opaque material capability closed
-[ ] sessionId fresh + revision starts at 1
-[ ] revision comparison excludes revision itself
-[ ] Main pure projection / no shadow authority
-[ ] hello acceptance atomic against Main visible mutation
-[ ] replacement currentness + old-peer retirement closed
-[ ] stale/current peer terminal identity-safe
-[ ] M7 dataAuthorities remains []
+[ ] platform-ports OpaqueMaterialGenerator implemented
+[ ] platform-ports RendererControlBinding implemented
+[ ] no BootstrapTokenGenerator compatibility alias
 
-[ ] M7_03 currentPeer + currentSnapshot|null only
-[ ] peer + initial Snapshot atomic install
+[ ] MainPlatform M7 view implemented
+[ ] Session id/revision=1 implemented
+[ ] pure projection / no shadow authority
+[ ] bounded accept loop implemented
+[ ] hello preflight before current switch
+[ ] concurrent revision cannot be lost
+[ ] unrepresentable candidate cannot evict healthy current
+[ ] replacement + stale/current terminal identity-safe
+[ ] Session terminal abort/retirement implemented
+[ ] M7 dataAuthorities=[]
+
+[ ] Renderer atomic {peer,snapshot}|null implemented
 [ ] no second revision/session state machine
 [ ] no duplicate DTO / premature observer framework
 
-[ ] M7_04 real vertical path passes
-[ ] concurrent hello revision cannot be lost
-[ ] old connection actively terminalized
+[ ] deterministic vertical passes
 [ ] call/return/failure traces pass
-[ ] representation limit cannot mutate Frame/Runtime authority
-[ ] no test-built authority Snapshot
+[ ] old already-inFlight late delivery has no authority effect
+[ ] representation failure isolation passes
+[ ] Session terminal trace passes
 
 [ ] dependency graph acyclic
 [ ] M1–M6 regression green
 [ ] build/type/pack clean
-[ ] README / phase plan / contract status synchronized
 ```
 
 ---
 
-## 17. Handoff to M8
+## 18. Frozen Handoff to M8
 
-M8 可以依赖：
+M8 可依赖：
 
 ```text
 Renderer either has one validated current Main Snapshot or null
-Renderer participant replacement/currentness is already authoritative
-Renderer Control wire already knows RendererDataAuthorityV1 shape
-Control representation failure does not alter Frame/Runtime semantics
+Main current Renderer participant/replacement semantics already frozen
+RendererControlBinding/Control-loss semantics already frozen
+RendererDataAuthorityV1 wire shape already frozen
+Control representation failure cannot alter Frame/Runtime authority
 ```
 
-M8 首次关闭：
+M8 首次实现：
 
 ```text
 Main DataAuthority allocation/generation/profile policy
-Subsystem DataPlane real consumer
-Renderer Data binding real consumer
-current Renderer participant ↔ Data provisioning binding
-actual Data Connection establishment/retirement
+Subsystem DataPlane consumer
+Renderer Data binding consumer
+current Renderer participant ↔ physical Data provisioning
+Data Connection establish/retire
 ```
 
 ---
 
-## 18. Final Closure Statement
+## 19. Freeze Statement
 
-M7 可以标记 complete 的唯一含义：
+本文件从 2026-09-03 起作为 M7 implementation qualification 的 Frozen evidence source。
 
-> **同一 Main Session 的 committed Runtime / Frame / Activation / InputTarget authority，通过一个 hello/currentness 原子、replacement 主动撤销、publication 结构 bounded、representation failure 隔离的 Renderer Control v1 链路，被完整镜像到当前 Renderer；Main 不建立 shadow authority，Renderer 不建立第二套协议状态机，Renderer Control 的失败或 wire limits 不改变 Frozen Frame / Runtime business semantics。**
+实施者可自由选择内部文件/函数/class命名，但不得重新决定：
+
+```text
+RendererControlBinding shape/attempt semantics
+hello preflight/current switch ordering
+one-current + one-candidate bound
+revision ownership
+replacement retirement semantics
+old inFlight可保证边界
+Renderer initial handoff ordering
+Session terminal Renderer retirement
+representation failure isolation
+DataAuthority defer-to-M8 boundary
+```
+
+需要改变这些内容必须按 ADR 0027 Reopen Rule先修改正式契约/ADR，再修改实现。
