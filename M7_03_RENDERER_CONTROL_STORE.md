@@ -4,18 +4,18 @@
 > 阶段：M7 Renderer Control  
 > 落地顺序：03  
 > 最近复核：2026-09-03  
-> 前置：[M7 / 01 — Renderer Control Package](M7_01_RENDERER_CONTROL_PACKAGE.md)、[M7 / 02 — Main Authority Projection](M7_02_MAIN_AUTHORITY_PROJECTION.md)  
-> 目标：建立 platform-neutral `@loomrealm/renderer` role package 的 M7 最小 slice，使 Renderer 能通过 `@loomrealm/renderer-control` 获得 Main committed authority，并以完整 Snapshot 原子维护只读 Control Store。
+> 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md) → [M7 / 02](M7_02_MAIN_AUTHORITY_PROJECTION.md)  
+> 目标：建立 `@loomrealm/renderer` 的 M7 最小 slice：保存 current renderer-control peer 已接受的完整 Snapshot；不复制协议状态机，不提前建立 Data/Input/Render store framework。
 
 核心原则：
 
-> **Renderer Control Store 是 Main authority 的只读 mirror，不是第二套 authority，也不是未来 Data/Input/Render 状态的总仓库。**
+> **Renderer M7 state 就是一份 `RendererAuthoritySnapshotV1 | null` 加 current peer identity。不要再造一个字段完全相同的 `RendererControlState`，也不要再验证一遍 protocol revision。**
 
 ---
 
 ## 1. Scope
 
-本步骤主要新增/修改：
+新增/修改：
 
 ```text
 @loomrealm/renderer
@@ -25,311 +25,201 @@
 
 ```text
 @loomrealm/renderer-control
-@loomrealm/foundation   （仅在真实窄依赖需要时）
 ```
 
-M7/03 不实现：
+M7 不实现：
 
 ```text
 Renderer Data plane
 Data Connection provisioning
-User Input producers
-Frame Interest
+User Input / Interest
 Render Store
-DOM / Canvas / WebGL
 Content
+DOM / Canvas / WebGL
 Desktop/PWA composition
 ```
 
 ---
 
-## 2. Package Position
+## 2. Minimal State
 
-```text
-@loomrealm/renderer-control Renderer peer
-              │
-              │ accepted typed Snapshot / terminal
-              ↓
-      @loomrealm/renderer
-              │
-              └── Control Store
-                    sessionId
-                    revision
-                    runtimes
-                    stack
-                    inputTarget
-                    dataAuthorities
-```
-
-Business、Main、Subsystem 不直接操作 Renderer Control Store。
-
----
-
-## 3. Minimal Control Store
-
-M7 最小状态：
+M7 role state保持：
 
 ```ts
-interface RendererControlState {
-  readonly sessionId: string;
-  readonly revision: number;
-  readonly runtimes: readonly RendererRuntimeStateV1[];
-  readonly stack: readonly RendererFrameStateV1[];
-  readonly inputTarget: RendererInputTargetV1 | null;
-  readonly dataAuthorities: readonly RendererDataAuthorityV1[];
-}
+currentPeer: peer identity/reference | null
+currentSnapshot: RendererAuthoritySnapshotV1 | null
 ```
 
-精确 public type naming 在真实 consumer closure 时确定。
-
-Store MUST NOT加入：
+不定义重复 alias：
 
 ```text
-connection object
-WebSocket URL
-Data endpoint/token
-Frame Interest
-Input producer state
-Render state
-DOM state
-historical revisions
-Frame call/return history
+RendererControlState  ❌
+```
+
+也不加入：
+
+```text
+authorityUsable flag
+inputUsable flag
+dataAuthorityUsable flag
+connectionState enum
+history
+per-field caches
+```
+
+含义天然为：
+
+```text
+currentSnapshot !== null → current Main authority可用
+currentSnapshot === null → no usable Main authority
 ```
 
 ---
 
-## 4. Atomic Snapshot Application
+## 3. Protocol State Is Not Reimplemented
 
-应用路径：
+`@loomrealm/renderer-control` Renderer peer 已经完成：
 
 ```text
-renderer-control validates full Snapshot
-→ Renderer role receives one accepted immutable Snapshot
-→ atomic replace Control Store
-→ observers see either old complete state or new complete state
+wire/schema validation
+whole Snapshot relation validation
+hello/session establishment
+current-connection revision monotonicity
+duplicate/regression rejection
+```
+
+因此 Renderer role application path只有：
+
+```text
+peer accepts immutable Snapshot
+→ if peer is current
+→ currentSnapshot = snapshot
+```
+
+Renderer Store MUST NOT再次实现：
+
+```text
+revision > currentRevision protocol check
+session protocol parser
+Snapshot schema validator
+Activation lifetime history validator
+```
+
+内部 assertion MAY存在，但不能形成第二个拒绝/terminal authority。
+
+---
+
+## 4. Atomic Replacement
+
+Renderer 只能看到：
+
+```text
+old complete Snapshot
+or
+new complete Snapshot
 ```
 
 禁止：
 
 ```text
 set runtimes
-then set stack
-then set activation
-then set inputTarget
+set stack
+set inputTarget
+set dataAuthorities
 ```
 
-这种 field-by-field exposure 会制造协议本身不存在的中间 authority state。
+逐字段暴露中间状态。
+
+直接替换 immutable Snapshot 即可实现原子性；M7 不需要 reducer/transaction/store framework。
 
 ---
 
-## 5. Session Semantics
+## 5. Connection / Session Replacement
 
-Renderer 维护 current Session universe。
+Renderer role 只决定哪个 peer 是 current。
 
-同 Session：
-
-```text
-new revision > current revision → atomically replace
-```
-
-新 Session：
+新成功连接成为 current 时：
 
 ```text
-fresh successful hello Snapshot
-→ discard old authority universe
-→ atomically install new universe
+currentPeer = new peer
+currentSnapshot = new peer accepted hello Snapshot
+old peer later output is ignored
 ```
 
-旧 Session 的：
+旧 Session authority 不 merge、不迁移。
 
-```text
-Activation
-InputTarget
-DataAuthority
-Runtime/Frame mirror
-```
-
-不得迁移到新 Session。
-
-Renderer role不得把相同逻辑 key 当作跨 Session identity continuity 的依据。
+Protocol session/revision legality由 peer判断；Renderer role不再维护第二份 `appliedRevision` 状态。
 
 ---
 
-## 6. Revision Semantics
+## 6. Control Loss
 
-Renderer 不分配 `AuthorityRevision`。
-
-Renderer只消费：
+Current peer terminal：
 
 ```text
-strictly newer revision
+if terminal belongs to currentPeer:
+    currentPeer = null
+    currentSnapshot = null
 ```
 
-允许：
+这一个动作已经表示：
 
 ```text
-R=10 → R=15
-```
-
-禁止：
-
-```text
-R=10 → R=10
-R=10 → R=9
-```
-
-revision gap 不表示 lost event，也不能触发 replay/resync 请求，因为 v1 的 Snapshot 已自包含。
-
----
-
-## 7. Control Loss
-
-Control connection terminal 后，Renderer 不再拥有可证明的 current Main authority。
-
-M7 Renderer role 必须立即在本地形成 fail-closed fact：
-
-```text
+InputTarget unavailable
+DataAuthority unavailable
 ordinary input authority unavailable
-InputTarget considered invalid
-all DataAuthority considered invalid
 ```
 
-M8+ 实际 Data Connections 出现后，同一 terminal handling seam 将负责请求 retire/close 这些连接。
+M8+ 如果存在真实 Data Connections，再由对应 consumer 对 `currentSnapshot → null` 做 retire/close；M7 不创建 placeholder Broker 或 connection registry。
 
-M7 不需要真实 Data Connection object，也不要为了未来能力创建 placeholder Broker。
-
-Presentation state在未来可以按 Render protocol 独立保留最后合法画面；M7 Control Store 不拥有该逻辑。
+未来 Render presentation 是否保留最后画面属于 Render Store，不属于 Control Store。
 
 ---
 
-## 8. InputTarget Is Authority, Not Input State
+## 7. Data / Input Semantics Are Deferred Consumers
 
-Store 中 `inputTarget` 只是 Main authority mirror。
-
-Renderer later computes effective ordinary input from：
+M7 可以读取 Snapshot 中的：
 
 ```text
-InputTarget
-× matching Data Connection
-× mirrored active Frame/Activation
-× Frame Interest
-× local Producer availability
-```
-
-在 M7：
-
-```text
-InputTarget can be stored
-but no User Input is sent
-```
-
-不要提前实现 InputManager。
-
----
-
-## 9. DataAuthority Is Logical Only
-
-Store 中 DataAuthority：
-
-```text
-subsystemKey
-generation
-dataProfile
-```
-
-M7 只要求：
-
-```text
-current authorities can be queried/read as immutable state
-replacement/removal follows atomic Snapshot
-control loss invalidates them
-```
-
-M7 不创建 physical Data connection。
-
-M8 的 Renderer Data integration 必须消费这个 Store，而不是自己重新推导 Main policy。
-
----
-
-## 10. No Stack-op Interpretation
-
-Renderer 只观察 current facts：
-
-```text
-stack
-frame lifecycle
-activationId
 inputTarget
+dataAuthorities
 ```
 
-不得根据：
+但不执行：
 
 ```text
-call
-return
-push
-pop
-unwind
-resume reason
+InputManager
+Frame Interest gate
+Data connection establishment
+Render lifecycle
 ```
 
-重建另一套 Frame state machine。
-
-这保证 failure unwind 和 stack authority仍唯一留在 Main。
+M7 Main vertical 默认 `dataAuthorities=[]`。非空 DataAuthority 的 wire/store representation 可由 renderer-control/renderer fixture 测试覆盖，不因此引入真实 Data policy。
 
 ---
 
-## 11. Observer Surface
+## 8. No Public Subscription Yet
 
-M7 可能需要最小 read/subscribe capability 供后续 Renderer slices 消费，但 public API 必须保持窄。
+M7 没有真实 M8/M10/M11 consumer 要求公开 observer API。
 
-允许的方向：
-
-```text
-getCurrentSnapshot()/getState()
-subscribe to atomically committed Store replacement
-```
-
-不应暴露：
+因此 M7 不冻结：
 
 ```text
-mutable store object
-per-field mutation callbacks
-arbitrary reducer dispatch
-generic event bus
-history/time-travel API
+subscribe(listener)
+EventEmitter
+selector API
+reducer dispatch
+AsyncIterator
+history/time-travel
 ```
 
-精确 public surface 等第一批真实 M8/M10 consumers 出现时再冻结。
+测试只需要读取 current Snapshot 的最窄方式；该读取 surface可以保持 package-internal/test-visible，或者仅冻结一个简单 getter（若真实 integration确实需要）。
+
+等 M8 Renderer Data binding 成为第一个真实下游消费者后，再根据真实调用方式关闭 observer/notification surface。
 
 ---
 
-## 12. Lifecycle
-
-Renderer Control role lifecycle 最小模型：
-
-```text
-not connected
-→ connecting/hello pending
-→ current
-→ terminal
-```
-
-精确状态是否需要公开，由实现决定；不要为了 UI convenience 扩大 package contract。
-
-重要事实：
-
-```text
-protocol peer terminal
-→ current Main authority proof is lost
-→ role fail closed
-```
-
-Renderer role不得自动使用 cached Snapshot恢复 ordinary authority。
-
----
-
-## 13. Package Boundary
+## 9. Package Boundary
 
 `@loomrealm/renderer` MUST NOT depend on：
 
@@ -338,84 +228,64 @@ Renderer role不得自动使用 cached Snapshot恢复 ordinary authority。
 @loomrealm/runtime-control
 @loomrealm/game-package
 @loomrealm/game-launcher-*
-concrete Hostra/PWA package
+concrete Hostra/PWA packages
 Node process APIs
 ```
 
-后续 Data/Input/Render slices可按 package architecture 增加对应 capability dependencies，但 M7 不提前建立完整 dependency graph。
+M7 不预建 `data/`、`input/`、`render/`、`content/`、`platform/` 空模块。
 
 ---
 
-## 14. Source Shape
+## 10. Source Shape
 
-M7 建议先保持极小：
+建议最小形状：
 
 ```text
 packages/renderer/
 ├─ package.json
 ├─ tsconfig.json
-├─ README.md
 ├─ src/
 │  ├─ index.ts
-│  └─ control-store.ts
+│  └─ control.ts
 └─ test/
-   └─ control-store.test.mjs
 ```
 
-必要时再拆 control integration 文件。
+`control.ts` 内部可以只是 current peer + current Snapshot orchestration；若代码足够小甚至无需额外 class。
 
-不要提前创建：
-
-```text
-input/
-render/
-data/
-content/
-platform/
-```
-
-空目录或 dormant abstractions。
+禁止提前创建 StoreManager / ObserverHub / RendererContext framework。
 
 ---
 
-## 15. Tests
+## 11. Tests
 
 至少覆盖：
 
 ```text
-initial hello Snapshot installs atomically
-newer same-session Snapshot replaces atomically
-revision gap accepted
-duplicate/regressive revision not applied
-new Session replaces whole universe
-InputTarget identity changes only through whole Snapshot
-DataAuthority replacement/removal atomic
-control terminal invalidates authority usability
-old connection cannot mutate current Store
-no stack-op interpretation
-Store contains no physical Data material
+hello accepted Snapshot becomes current atomically
+later accepted Snapshot replaces atomically
+new current peer replaces old peer
+old peer output cannot mutate current Snapshot
+current peer terminal clears Snapshot
+no duplicate RendererControlState representation
+no second revision/session validator
+no Data/Input/Render implementation leakage
 ```
 
-测试可以直接使用 renderer-control Renderer peer + MemoryCarrier，避免真实 browser transport。
+revision gap/regression 本身属于 renderer-control peer tests，不在 Renderer Store 重复测试协议规则。
 
 ---
 
-## 16. Step Closure
+## 12. Step Closure
 
 M7/03 complete when：
 
 ```text
 @loomrealm/renderer package exists
-Renderer Control Store exists
-initial/current Snapshot atomically applied
-session/revision semantics correct
-control loss fails closed
-no Data/Input/Render implementation leaked into M7 slice
-renderer package can participate in transport-independent E2E
-```
-
-完成后进入：
-
-```text
-M7_04_VERTICAL_INTEGRATION.md
+state is currentPeer + RendererAuthoritySnapshotV1|null
+Snapshot replacement is atomic
+peer replacement is first-class
+current peer terminal clears usable authority
+no public subscription framework is frozen
+no duplicate protocol/session/revision state machine exists
+package can join M7 deterministic vertical
 ```
