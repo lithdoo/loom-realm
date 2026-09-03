@@ -8,13 +8,13 @@
 > 主要定义：Main 向 Renderer 复制 committed Runtime / Frame / Activation / InputTarget / DataAuthority 的只读控制状态  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[通信系统](../10-architecture/communication-system.md)、[Frame / Call v1](./frame-call-protocol-v1.md)  
 > 后续依赖：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)、[User Input v1](./user-input-v1.md)  
-> 最近复核：2026-08-19
+> 最近复核：2026-09-03
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 核心原则：
 
-> **Main 是 Runtime / Frame / Activation / InputTarget / DataAuthority 的唯一公共 authority；Renderer Control v1 只复制 Main 已提交的逻辑 authority。DataAuthority 选择完整 Data Application Profile，但不携带任何物理 endpoint/credential。**
+> **Main 是 Runtime / Frame / Activation / InputTarget / DataAuthority 的唯一公共 authority；Renderer Control v1 只复制 Main 已提交的逻辑 authority。Renderer Control 的 wire/representation 限制不得反向创造 Frame / Runtime 业务语义。**
 
 ---
 
@@ -40,9 +40,9 @@ current InputTarget publication
 logical DataAuthority publication
 Session-local Authority Revision
 full Authority Snapshot
-reconnect/reload recovery
+connection replacement / reload recovery
 bounded latest-state publication
-validation / limits / fail-closed
+validation / representation limits / fail-closed
 ```
 
 不负责：
@@ -75,6 +75,7 @@ current Activation
 InputTarget
 DataAuthority generation/profile
 Authority Revision
+current Renderer participant / connection decision
 ```
 
 Renderer 只是 read-only committed mirror。
@@ -129,7 +130,7 @@ InputTarget(frameId, activationId)
 
 ## 4. Renderer Control Connection / Bootstrap
 
-一个 Session 同时最多一个 current Renderer Control Connection。
+一个 Session 同时最多一个 current Renderer Control Connection / Renderer participant。
 
 一次 Connection Attempt 使用：
 
@@ -150,7 +151,20 @@ not logged / not placed in URL
 
 reload/reconnect 必须取得 fresh token。
 
-新 hello 成功后该 Connection 成为 current；Main MUST停止向旧 Connection publication。
+### 4.1 Replacement Is Active Revocation
+
+新 Connection hello 成功并被 Main 接受后：
+
+```text
+new Connection becomes the only current Renderer participant
+old Connection immediately ceases to be current authority participant
+Main stops all old-Connection publication
+Main requests old Control carrier termination/close
+```
+
+仅“停止向旧 Connection publication”不足以完成 replacement；旧 Renderer 必须通过 Control terminal 进入 fail-closed local state。
+
+在旧 Renderer 实际观察 terminal 之前，它的缓存 Snapshot 也不再代表 current participant authority；后续 Data/Input realization MUST以 Main 的 current Renderer participant decision 为准，不能仅信任旧 Renderer 的本地缓存。
 
 Platform 如何把 token / carrier 交给 Renderer 属于 Platform bootstrap realization，不属于本协议 wire。
 
@@ -169,18 +183,9 @@ one carrier application unit
 JSON-RPC Batch forbidden
 ```
 
-Desktop WebSocket：
+Desktop WebSocket：one complete text message = one JSON text application unit；binary forbidden。
 
-```text
-one complete text message = one JSON text application unit
-binary forbidden
-```
-
-PWA MessagePort：
-
-```text
-postMessage(string) = one JSON text application unit
-```
+PWA MessagePort：`postMessage(string)` = one JSON text application unit。
 
 Structured Clone / Transferable 只可用于 Platform bootstrap，不得扩大 Renderer Control application payload。
 
@@ -189,10 +194,6 @@ Structured Clone / Transferable 只可用于 Platform bootstrap，不得扩大 R
 ## 6. `renderer.hello`
 
 第一条 LoomRealm application message MUST 是：
-
-```text
-renderer.hello
-```
 
 ```text
 Method:    renderer.hello
@@ -213,6 +214,8 @@ interface RendererHelloParamsV1 {
 
 认证/版本失败后 Main MUST返回 Error并关闭 Connection。
 
+v1 只有这一条 Renderer-originated Request；Request ID 只做 correlation，不是 operation identity。
+
 ---
 
 ## 7. Session Identity
@@ -228,6 +231,8 @@ never reused
 
 新 `sessionId` 表示新的 authority universe。Renderer MUST丢弃旧 Session 的所有 Runtime/Frame/Activation/InputTarget/DataAuthority mirror。
 
+`sessionId` 不是 credential；其 material generation / uniqueness mechanism 不进入 wire contract。
+
 ---
 
 ## 8. Authority Revision
@@ -242,11 +247,16 @@ type AuthorityRevision = number;
 positive safe integer
 1..2^53-1
 Session-local
+initial Renderer-visible authority revision = 1
 strictly increasing on Renderer-visible committed authority change
 never reused / never wrap
 ```
 
-Revision 是 committed authority version，不是 event sequence/replay cursor。
+Revision 是 committed authority version，不是 event sequence/replay cursor/connection sequence。
+
+Main 在 Session 建立初始 Renderer-visible authority 后从 `1` 开始；即使当前没有 Renderer Connection，后续 Renderer-visible committed change 仍推进 revision。
+
+判断 authority 是否变化时比较的是 Snapshot authority payload（`runtimes/stack/inputTarget/dataAuthorities` 等）而不是 `revision` 字段本身；revision MUST NOT参与自触发 change detection。
 
 Main MAY跳过未发送的中间 revisions；Renderer MUST接受 revision jump。
 
@@ -393,16 +403,7 @@ is not transport
 is not credential
 ```
 
-DataAuthority 不表示：
-
-```text
-Data Connection已建立
-endpoint/ticket/Port已知
-Subsystem有 Render
-Subsystem有 active Frame
-InputTarget指向该 Subsystem
-Interest已发布
-```
+DataAuthority 不表示 Data Connection 已建立，也不携 physical material。
 
 ---
 
@@ -419,15 +420,7 @@ never reused
 
 同一 Snapshot 中一个 `subsystemKey` 最多一个 DataAuthority。
 
-以下都属于 authority replacement，MUST使用 fresh generation：
-
-```text
-revoke then re-authorize after replacement
-change dataProfile
-replace authority epoch for any policy reason
-```
-
-同 generation 的 sequential transport reconnect 不需要新 generation，且 MUST保持同一 `dataProfile`。
+revoke→re-authorize、profile change 或 policy replacement MUST使用 fresh generation；同 generation 的 sequential transport reconnect MUST保持同一 `dataProfile`。
 
 ---
 
@@ -450,13 +443,13 @@ Renderer Data Application Profile / Data Connection Contract 定义建立后的 
 
 ## 17. DataAuthority Revocation
 
-某 Subsystem 的 DataAuthority 消失，或 generation/profile被新 authority替换时，Renderer MUST立即停止使用旧 authority并 retire/close旧 Data Connection。
+某 Subsystem 的 DataAuthority 消失，或 generation/profile 被新 authority 替换时，Renderer MUST立即停止使用旧 authority并 retire/close旧 Data Connection。
 
 旧 generation 永远不得重新成为 current authority。
 
 ---
 
-## 18. `renderer.hello` Success
+## 18. `renderer.hello` Success / Atomic Acceptance
 
 ```ts
 interface RendererHelloResultV1 {
@@ -465,17 +458,36 @@ interface RendererHelloResultV1 {
 }
 ```
 
-Main：
+hello success 必须相对于 Main 的 Renderer-visible authority mutation serialization 构成一个原子 acceptance point。
+
+概念顺序：
 
 ```text
-authenticate
-→ select version
-→ capture committed Snapshot revision R
-→ mark Connection current
-→ return hello Result(R)
+inside one Main authority-serialization step:
+    authenticate + consume token
+    select version
+    capture current committed Snapshot revision R
+    install candidate Connection as the only current Renderer participant
+    detach/retire previous current Connection from publication
+
+outside/after that commit:
+    send hello Result(R) on the new Connection
+    request previous Control carrier close/termination
 ```
 
-所有 `revision > R` publication MUST在 hello Result之后发送。
+在上述原子 acceptance point 之后产生的 `revision > R` committed state，MAY在 hello Result send 尚未完成时进入 bounded `pendingLatest`，但 MUST NOT先于 hello Result发送。
+
+因此禁止：
+
+```text
+capture R
+→ allow unrelated renderer-visible commit R+1 to pass unobserved
+→ later install Connection current
+```
+
+这会永久丢失 R+1 publication。
+
+如果 hello Result 无法成功发送，新 candidate Connection MUST terminal；old Connection 已被 replacement retirement，不回滚为 current。恢复只能使用 fresh attempt/token。
 
 ---
 
@@ -499,27 +511,29 @@ Main MUST只发送 committed authority，不得发布 tentative call/return、pr
 
 ---
 
-## 20. Renderer Application Rules
+## 20. Renderer Application Rules / Hello Handoff
 
-Renderer 维护：
+Renderer participant 逻辑上维护 current Session/revision/Snapshot；package implementation MAY把 connection-local session/revision validation 放在 Renderer protocol peer，但 role 不得建立第二套冲突 authority。
 
-```text
-currentSessionId
-appliedRevision
-currentSnapshot
-```
-
-相同 Session：
+hello handoff 必须保证：
 
 ```text
-new.revision > appliedRevision
-→ validate whole Snapshot
-→ atomic replace
+validate hello Result Snapshot R
+→ atomically install new peer + Snapshot R as Renderer current authority
+→ only then expose/apply later renderer.state from that peer
 ```
 
-revision gap 合法。
+新 peer 在初始 Snapshot 尚未安装前 MUST NOT通过 callback/event surface 向 Renderer role暴露后续 `renderer.state`；物理 carrier 可暂存消息，协议实现可在 role开始消费后继续读取。
 
-同 current Connection 若 `new.revision <= appliedRevision`，属于 Protocol Error；Renderer MUST fail closed。
+相同 Session 的 later Snapshot：
+
+```text
+new.revision > appliedRevision → validate whole Snapshot → atomic replace
+revision gap                  → valid
+new.revision <= appliedRevision on current Connection → Protocol Error / fail closed
+```
+
+旧 peer 的 late Snapshot / terminal MUST NOT覆盖新 current peer 的 Snapshot；Renderer role以 peer identity 判断 currentness。
 
 ---
 
@@ -535,9 +549,9 @@ Main MAY合并尚未发送的中间 Snapshots，只保留 latest committed Snaps
 
 ## 22. Backpressure
 
-Full Snapshot publication MUST bounded。
+Full Snapshot publication MUST structurally bounded。
 
-Main SHOULD维持：
+Main-side protocol mechanics SHOULD维持：
 
 ```text
 0..1 in-flight write
@@ -545,21 +559,48 @@ Main SHOULD维持：
 at most one replaceable latest unsent Snapshot
 ```
 
-持续无法 drain 时 Platform/Host implementation MUST在 finite policy下关闭 Control Connection；恢复统一 fresh hello + current Snapshot。
+持续无法 drain 时 concrete Platform/Host realization MUST在 finite policy 下关闭 Control Connection；恢复统一 fresh hello + current Snapshot。
+
+Core/package conformance证明 bounded queue structure；Hostra/PWA product qualification分别证明实际 transport 的 finite stalled-write termination policy。两者不得混为同一 evidence。
 
 ---
 
-## 23. Topology Limits
+## 23. Representation Limits Do Not Define Main Business Limits
 
-任何合法 v1 authority state MUST能由一条合法 full Snapshot 表示。
+Renderer Control v1 的 message/depth/member limits 是 **wire/connection safety limits**，不是 Runtime count、Frame Stack depth 或 DataAuthority policy 的业务上限。
+
+v1 不再定义独立的：
 
 ```text
-max Runtime entries          256
-max live Frame Stack entries 64
-max DataAuthority entries    256
+max Runtime entries
+max live Frame Stack entries
+max DataAuthority entries
 ```
 
-Main/Game Bootstrap MUST在可能超出 limits 前拒绝进入 Renderer Control v1 Session。
+合法 Main / Frozen Frame authority 不得仅为了适配 Renderer Control representation 而：
+
+```text
+拒绝本来合法的 frame.call
+回滚已提交 Frame/Runtime authority
+引入 Renderer-specific Frame error
+截断/drop Snapshot entries
+```
+
+Sender MUST在发送前对完整 Snapshot 做同一 wire profile preflight。
+
+若 current committed authority 无法在 v1 limits 内表示：
+
+```text
+Main authority remains unchanged
+Renderer Control attempt/Connection fails closed
+no partial Snapshot is sent
+no authority is truncated/normalized
+fresh hello may succeed later only if current Snapshot is representable
+```
+
+在 hello 阶段发现 initial Snapshot 不可表示时，Main MAY返回 `PROTOCOL_STATE_ERROR` 后关闭，或直接以 local/protocol terminal 关闭；不得把 Connection 标记为可用 current Renderer participant。
+
+在 current Connection 后续 publication 阶段发现 Snapshot 不可表示时，Main MUST terminalize/close该 Renderer Control Connection；不得改变 Frame/Runtime business semantics 来“保持连接”。
 
 ---
 
@@ -577,6 +618,15 @@ retire/close all Renderer⇄Subsystem Data Connections
 ```
 
 不得继续使用 cached old Activation/generation/profile。
+
+Main-side current peer terminal：
+
+```text
+if terminal peer is still current:
+    clear current Renderer Connection/participant
+    do not change Main Runtime/Frame authority
+    do not increment AuthorityRevision merely for transport loss
+```
 
 恢复：
 
@@ -640,29 +690,11 @@ Interest/Producer只能缩小，不能创建/扩大 InputTarget。
 
 ### 27.1 Interest 不进入 Control Snapshot
 
-Authority Snapshot MUST NOT包含：
-
-```text
-Input Interest
-Frame Interest Registry
-Input subscription
-Producer availability
-```
-
-Main不是这些状态的 authority，也不做 Interest relay。
+Authority Snapshot MUST NOT包含 Input Interest / Frame Interest Registry / Input subscription / Producer availability。
 
 ### 27.2 Cross-Plane Ordering
 
 Renderer Control 与 Renderer Data Connection独立，无跨连接 total order。
-
-以下都合法：
-
-```text
-Interest[F] first, authority later
-Authority/InputTarget first, Interest[F] later
-```
-
-规则：
 
 ```text
 Interest without authority → inert
@@ -740,11 +772,13 @@ protocolVersions entries         1..16
 
 所有平台都对实际 UTF-8 JSON text application unit执行 whole-message hard cap；PWA不再使用“structured object 的 Reference JSON equivalent”双重模型。
 
+Sender 与 Receiver 都执行 bounded preflight/validation；不得先构造无界历史结构来辅助验证。
+
 ---
 
 ## 31. Request ID / Error
 
-只有 `renderer.hello` 使用 Request ID：positive safe integer，Connection-lifetime sender-side never reused。
+只有 `renderer.hello` 使用 Request ID：positive safe integer，Connection-lifetime sender-side never reused。v1 concrete implementation MAY固定使用 `id = 1`。
 
 标准 JSON-RPC：`-32700 / -32600 / -32601 / -32602`。
 
@@ -781,11 +815,14 @@ close Control Connection
 
 不得局部修复 Snapshot后继续运行。
 
+Main outbound preflight失败同样 fail closed Renderer Control Connection/attempt，但不改变 Main business authority。
+
 ---
 
 ## 33. Security
 
 - rendererControlToken 是 secret，一次成功 hello后 consumed；
+- replacement 后旧 Renderer participant 立即不再 current，旧 carrier必须被主动关闭；
 - Snapshot不携 Data credential/endpoint/physical path；
 - Runtime business state不进入 Snapshot；
 - Renderer Core是 ordinary User Input Main-authority sender-side enforcement point；
@@ -801,37 +838,36 @@ close Control Connection
 ```text
 hello-first-message
 hello-auth/token-one-shot/version
+hello atomic acceptance vs concurrent Main revision
+hello Result before later state
+replacement actively closes/terminalizes old Connection
+old peer late output/terminal cannot replace new current authority
 atomic-full-snapshot
-revision-monotonic-gap-accepted-regression-rejected
+revision starts at 1 / monotonic / gap accepted / regression rejected
 
 empty/active/transitional-stack
 activate-ack-before-target
 resume-fresh-activation
 revoked-activation-never-reappears
 inputtarget-one-shot-no-regrant
-
 runtime-failure-unwind-main-only
 
-data-authority-uses-data-profile
-data-profile-is-not-endpoint-or-credential
-data-profile-change-requires-fresh-generation
-data-generation-replacement
+representation-limit outbound preflight
+unrepresentable authority fails only Renderer Control, not Frame/Runtime business authority
+oversize-message-rejected
+
 control-loss-revokes-all-data-authority
 control-loss-retires-data-connections
-
 interest-not-in-control-snapshot
-interest-first-authority-later
-authority-first-interest-later
 control-data-no-total-order
 renderer-does-not-interpret-stack-ops
-interest-alone-cannot-create-inputtarget
 
 bounded-latest-snapshot
-snapshot-topology-limits
-oversize-message-rejected
 websocket-json-text
 messageport-json-text-equivalent
 ```
+
+DataAuthority generation/profile lifecycle conformance在真实 M8 authority consumer实现后补齐；M7 MAY用 fixture 验证 wire representation。
 
 ---
 
@@ -846,6 +882,7 @@ multiple current Renderer participants
 Renderer leader election
 Frame RPC proxy/cancel
 Runtime recovery commands
+Renderer-Control-specific Frame Stack depth/business limit
 Data endpoint discovery/credential wire
 Render State
 User Input payload/Interest wire
@@ -873,22 +910,24 @@ v1 只有这两个 application methods。
 1. Main是唯一 Renderer Control authority；
 2. Renderer是 read-only committed mirror；
 3. full Snapshot自包含、原子替换；
-4. revision严格单调、允许 publication gap；
-5. reconnect只取 current Snapshot，不 replay；
-6. ACK-before-InputTarget publication；
-7. revoked Activation never reappears；
-8. `InputTarget=null`合法；
-9. InputTarget lease撤销后同一 `frameId + activationId` 不得 regrant；
-10. DataAuthority = `subsystemKey + generation + dataProfile`；
-11. `dataProfile` 选择完整 Data application stack，不是 transport/credential；
-12. profile改变必须使用 fresh generation；
-13. endpoint/token/Port/provisioning material不进入 Snapshot；
-14. Control loss立即撤销 ordinary input与全部 DataAuthority，并 retire Data Connections；
-15. Input Interest不进入 Control Snapshot；
-16. Control/Data无跨连接 total order；
-17. Renderer不解释 stack operation决定 ordinary input；
-18. bounded latest-state publication，无历史 Snapshot无界排队；
-19. Render lifecycle/revision独立；
-20. Renderer Core执行 Main Authority × Frame Interest × Producer gate；
-21. Renderer不参与 Frame failure unwind；
-22. WebSocket/MessagePort application unit统一为 UTF-8 JSON text string。
+4. initial revision = 1，之后仅 Renderer-visible committed authority change推进；
+5. revision严格单调、允许 publication gap；
+6. hello acceptance 与 current Snapshot/current Connection 安装相对 Main authority mutation原子；
+7. hello Result先于该 Connection 的所有 later state；
+8. replacement主动撤销并关闭旧 current Connection，旧 Renderer participant立即失去 currentness；
+9. reconnect只取 current Snapshot，不 replay；
+10. ACK-before-InputTarget publication；
+11. revoked Activation never reappears；
+12. `InputTarget=null`合法；
+13. InputTarget lease撤销后同一 `frameId + activationId` 不得 regrant；
+14. DataAuthority = `subsystemKey + generation + dataProfile`；
+15. endpoint/token/Port/provisioning material不进入 Snapshot；
+16. Control loss立即撤销 ordinary input与全部 DataAuthority，并 retire Data Connections；
+17. Input Interest不进入 Control Snapshot；
+18. Control/Data无跨连接 total order；
+19. Renderer不解释 stack operation决定 ordinary input；
+20. publication只有 0..1 in-flight + 0..1 pendingLatest 级别的 bounded state；
+21. wire/representation limits不创造 Frame/Runtime/Data business limits；不可表示 authority只使 Renderer Control fail closed；
+22. Render lifecycle/revision独立；
+23. Renderer不参与 Frame failure unwind；
+24. WebSocket/MessagePort application unit统一为 UTF-8 JSON text string。
