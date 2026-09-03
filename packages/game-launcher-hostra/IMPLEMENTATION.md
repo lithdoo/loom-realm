@@ -1,7 +1,7 @@
 # `@loomrealm/game-launcher-hostra` M6 实现
 
 > 状态：Implemented / Qualified Baseline
-> 资格日期：2026-09-03  
+> 资格日期：2026-09-03
 > 资格运行：GitHub Actions `33703871834`（Ubuntu / Windows，Node 20 / 24）
 > 冻结日期：2026-09-02  
 > 阶段：M6 Hostra Platform Vertical  
