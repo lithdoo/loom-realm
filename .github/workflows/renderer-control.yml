@@ -1,0 +1,48 @@
+name: Renderer Control conformance
+
+on:
+  pull_request:
+    paths:
+      - "packages/renderer-control/**"
+      - "packages/foundation/**"
+      - "packages/wire/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/renderer-control.yml"
+      - ".github/actions/setup-workspace/**"
+  push:
+    branches: [main]
+    paths:
+      - "packages/renderer-control/**"
+      - "packages/foundation/**"
+      - "packages/wire/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/renderer-control.yml"
+      - ".github/actions/setup-workspace/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build dependencies
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire
+      - name: Test Renderer Control
+        run: npm test -w @loomrealm/renderer-control
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/renderer-control --dry-run

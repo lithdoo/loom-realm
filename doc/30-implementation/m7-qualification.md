@@ -2,7 +2,7 @@
 
 > Status: **Qualified**
 > Date: 2026-09-03
-> Evidence source: [`M7_05_QUALIFICATION_CLOSURE.md`](../../M7_05_QUALIFICATION_CLOSURE.md)
+> Evidence source: [`M7_05_QUALIFICATION_CLOSURE.md`](https://github.com/lithdoo/loom-realm/blob/main/M7_05_QUALIFICATION_CLOSURE.md)
 
 ## Qualified implementation
 

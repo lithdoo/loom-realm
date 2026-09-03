@@ -1,37 +1,26 @@
-name: Main package
+name: Renderer package
 
 on:
   pull_request:
     paths:
-      - "packages/main/**"
+      - "packages/renderer/**"
+      - "packages/renderer-control/**"
       - "packages/foundation/**"
       - "packages/wire/**"
-      - "packages/platform-ports/**"
-      - "packages/runtime-control/**"
-      - "packages/renderer-control/**"
-      - "packages/renderer/**"
-      - "packages/subsystem/**"
       - "package.json"
       - "package-lock.json"
-      - ".npmrc"
-      - ".github/workflows/main-package.yml"
+      - ".github/workflows/renderer.yml"
       - ".github/actions/setup-workspace/**"
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - "packages/main/**"
+      - "packages/renderer/**"
+      - "packages/renderer-control/**"
       - "packages/foundation/**"
       - "packages/wire/**"
-      - "packages/platform-ports/**"
-      - "packages/runtime-control/**"
-      - "packages/renderer-control/**"
-      - "packages/renderer/**"
-      - "packages/subsystem/**"
       - "package.json"
       - "package-lock.json"
-      - ".npmrc"
-      - ".github/workflows/main-package.yml"
+      - ".github/workflows/renderer.yml"
       - ".github/actions/setup-workspace/**"
   workflow_dispatch:
 
@@ -46,29 +35,20 @@ jobs:
       fail-fast: false
       matrix:
         node: [20, 24]
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ matrix.node }}
-
-      - name: Build Main dependencies
+      - name: Build dependencies
         run: >-
           npm run build
           -w @loomrealm/foundation
           -w @loomrealm/wire
-          -w @loomrealm/platform-ports
-          -w @loomrealm/runtime-control
           -w @loomrealm/renderer-control
-          -w @loomrealm/renderer
-          -w @loomrealm/subsystem
-
-      - name: Test Main
-        run: npm test -w @loomrealm/main
-
+      - name: Test Renderer
+        run: npm test -w @loomrealm/renderer
       - name: Verify publishable package surface
-        run: npm pack -w @loomrealm/main --dry-run
+        run: npm pack -w @loomrealm/renderer --dry-run
