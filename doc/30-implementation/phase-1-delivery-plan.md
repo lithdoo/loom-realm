@@ -206,6 +206,15 @@ Binding present → Main runs frozen bounded candidate-slot loop
 
 Existing M6 Hostra Runtime-only composition MUST NOT add fake Renderer Binding merely for M7 typing；physical Hostra realization arrives M14。
 
+M7 仍必须机械迁移所有现有 M5/M6 `MainPlatform` providers/fixtures：
+
+```text
+bootstrapTokens / BootstrapTokenGenerator
+→ opaqueMaterial / OpaqueMaterialGenerator
+```
+
+这只是 current-v1 capability rename/output-contract migration；Hostra M6 已有 `randomBytes(32).toString("base64url")` 类 CSPRNG material 可继续满足新 bound。不得顺便加入 Renderer Binding、identity service、kind-dispatch generator或 compatibility alias。
+
 Binding settlement冻结：
 
 ```text
@@ -292,6 +301,7 @@ M7 **does close**：
 logical RendererControlBinding contract + optional capability semantics
 candidate-slot cancellation/terminal semantics
 OpaqueMaterialGenerator common output contract
+existing M5/M6 MainPlatform provider/fixture mechanical migration
 MemoryCarrier semantic implementation/evidence
 Renderer Control protocol/core boundedness
 Main authority/currentness semantics
@@ -329,7 +339,7 @@ M8 starts from Frozen M7 current Renderer participant + RendererDataAuthorityV1 
 
 ---
 
-## M9：Desktop DataConnectionBroker / Late Provisioning
+## M9：Desktop DataConnectionBroker / Late Provisioning Core
 
 ```text
 Main DataAuthority(S,G,P)
@@ -339,6 +349,8 @@ Main DataAuthority(S,G,P)
 → Subsystem endpoint/ticket
 → Data WS carriers
 ```
+
+M9 closes Desktop broker/provisioning mechanics and role-local Data binding integration against deterministic/test Renderer endpoints；**M9 is not Desktop full Renderer product composition**。BrowserWindow Renderer hosting、Renderer Control physical hosting、full Input/Render/Content product trace仍由 M14组合。
 
 Provisioning failure remains distinct from Runtime/Frame failure。
 
@@ -379,13 +391,26 @@ HostraPlatform.prepareGame
 → Main / Node Runner / Runtime Control
 → Hostra physical RendererControlBinding realization
 → BrowserWindow + Renderer Control WebSocket
+→ Desktop DataConnectionBroker / Data WS
 → Data/Input/Render/Content
 → nested Frame outcomes
 → Renderer reload/replacement
 → shutdown
 ```
 
-M14 adds Hostra Renderer Control WS token delivery/carrier establishment、finite stalled-write close policy、old physical Renderer retirement。
+M14 adds Hostra Renderer Control WS token delivery/carrier establishment、finite stalled-write close policy、old physical Renderer retirement，并把 M9 Desktop Data Broker 与 M10/M11/M12 role slices组合到真实 BrowserWindow Renderer。
+
+Physical Binding qualification必须验证：
+
+```text
+transient candidate establishment failure before a carrier is acquired
+→ MAY be absorbed/disposed by Hostra product policy while the armed slot remains meaningful
+
+if Hostra chooses to surface a non-abort acquire rejection
+→ Frozen M7 rule applies: Binding terminal for that Main Session; no re-arm
+```
+
+不得为 transient Hostra transport failure偷偷增加第二套 `BindingError` hierarchy、retry RPC或 Host-specific currentness protocol。若真实 Hostra consumer证明 Frozen settlement无法表达必要语义，按 ADR 0027 reopen，而不是局部绕过。
 
 ---
 
@@ -395,11 +420,42 @@ Implement PWA manifest/join/resolver/LaunchPlan/LogicalGameBootstrap/RuntimeHost
 
 ---
 
-## M16：PWA E2E + Cross-platform Equivalence
+## M16：PWA Full E2E + Cross-platform Equivalence
 
-Add PWA physical RendererControlBinding realization：bootstrap token delivery → MessagePort string carrier → Frozen Renderer Control semantics。
+M16 必须完成完整 PWA physical application composition，而不只实现 Renderer Control transport：
 
-Compare same logical Runtime/Frame/Renderer/Data/Input/Render/Content/business trace；physical PID/Worker/WS/Port/IPC details may differ。
+```text
+PwaPlatform.prepareGame
+→ Worker Runner + Runtime Control MessagePort
+→ PWA physical RendererControlBinding
+    bootstrap token delivery
+    → Renderer Control MessagePort string carrier
+    → Frozen M7 currentness/replacement semantics
+→ PWA DataConnectionBroker
+    MessageChannel creation
+    → RendererDataBinding
+    → Worker/SubSystemDataBinding provisioning
+→ User Input + Render Update role slices
+→ PWA Content Fetch / Service Worker / OPFS realization
+→ full logical Session trace
+```
+
+PWA `RendererControlBinding` 使用与 M14 相同的 Frozen settlement qualification：transient candidate establishment failure可以由 concrete product在 `acquire` 尚未 reject前内部吸收；一旦 non-abort `acquire` rejection 对 Main 可见，该 Binding 对该 Session terminal。不得创建 PWA-specific second currentness/retry protocol。
+
+最后比较同一 logical：
+
+```text
+Runtime
+Frame/Activation/outcome/unwind
+Renderer authority/replacement
+Data S/G/Profile/currentness
+Input delivered semantics
+Render authoritative replica
+Content logical response
+business observable state
+```
+
+physical PID/Worker/WS/Port/IPC/Fetch mechanism可以不同。
 
 ---
 
@@ -412,10 +468,13 @@ Compare same logical Runtime/Frame/Renderer/Data/Input/Render/Content/business t
 - Frozen Frame ordering/causal barriers preserved；
 - M7 optional Renderer capability absence/Binding terminal cannot break Runtime/Frame semantics；
 - M7 Frozen Binding/currentness/atomicity implemented without generic framework；
+- M7 OpaqueMaterialGenerator mechanical migration keeps M5/M6 credential authority and Hostra Runtime-only path intact；
 - Renderer local holder is not promoted into a second remote-currentness protocol；
 - Renderer Control representation failure cannot mutate Frame/Runtime authority；
 - M8/M10/M11/M12 complete Data/Input/Render/Content role slices；
+- M9 Desktop Broker remains provisioning core, while M14 owns real BrowserWindow full composition；
 - Hostra/PWA physical Renderer Control realizations conform to same Frozen Binding/protocol semantics；
+- M16 includes PWA Renderer Control + Data Broker/bindings + Content physical realization before claiming full equivalence；
 - Desktop/PWA abstract application traces equivalent。
 
 ---
