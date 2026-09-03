@@ -10,7 +10,7 @@
 
 M7 只建立一个具体、bounded、fail-closed 的 Main → Renderer committed authority mirror，不建立通用 RPC/状态同步框架。
 
-冻结前必须关闭：Renderer physical ingress、capability absence、candidate lifecycle、version negotiation ownership、hello preflight/current switch race、replacement/in-flight send、Session terminal、Runtime projection、identity material与 representation failure。
+冻结前必须关闭：Renderer physical ingress、capability absence、candidate lifecycle、Binding failure semantics、version negotiation ownership、hello preflight/current switch race、replacement/in-flight send、Renderer local-vs-remote currentness、Session terminal、Runtime projection、identity material与 representation failure。
 
 ---
 
@@ -35,7 +35,7 @@ export interface RendererControlBinding {
 
 ```text
 acquire MAY remain pending until Platform has a physical candidate Renderer
-calling acquire MUST NOT by itself mean "create a new visible Renderer now"
+calling acquire MUST NOT itself create/show a Renderer
 calling acquire MUST NOT itself replace the current Renderer
 Platform binds at most one physical candidate to T
 Platform delivers exact T to that candidate bootstrap
@@ -43,7 +43,7 @@ Platform establishes one already-connected MessageCarrier
 Promise resolves at most once with that carrier
 ```
 
-如果在没有 armed slot 时出现额外 physical candidate，或一个 slot 已经绑定 candidate 后又出现额外 candidate：
+如果没有 armed slot，或一个 slot 已绑定后又出现额外 physical candidate：
 
 ```text
 Platform MUST NOT give it the armed token
@@ -51,11 +51,24 @@ Platform MUST NOT expose it as a live Renderer Control participant
 Platform rejects/closes/discards it according to product policy
 ```
 
-Abort-before-resolution：slot canceled；后续 late candidate/carrier不得作为 live result，Platform关闭/丢弃。
+Settlement semantics固定：
+
+```text
+AbortSignal abort before resolution
+→ ordinary slot cancellation
+→ late candidate/carrier MUST NOT become a live result
+
+non-abort Promise rejection
+→ RendererControlBinding is terminal for this Main Session
+→ Main invalidates that slot/token
+→ Main MUST NOT arm another Renderer slot in the same Session
+→ current Renderer, if any, is not revoked solely by this rejection
+→ Runtime/Frame Session continues
+```
+
+Carrier已成功 acquire 后的 bad hello、unsupported version、hello send failure或 carrier terminal属于 candidate protocol attempt terminal，不是 Binding terminal；Session live且 Binding未 terminal时可用 fresh token arm下一 slot。
 
 Binding不解析 Renderer Control、不认证 token、不协商版本、不决定 currentness、不做 protocol retry/replay。
-
-这使 Main 可以在 current Renderer存在时预挂 exactly one future candidate slot，而不会因 `acquire()` 调用本身自动产生 replacement。
 
 ---
 
@@ -84,8 +97,6 @@ rendererControl present
 
 M7 deterministic Platform提供 Binding；M6 Hostra Runtime-only/headless可 omit；Hostra/PWA physical realization分别 M14/M16。
 
-Optional availability不放松 Binding存在后的 protocol semantics。
-
 ---
 
 ## 3. `OpaqueMaterialGenerator`
@@ -98,9 +109,21 @@ export interface OpaqueMaterialGenerator {
 }
 ```
 
-Main分别取得 fresh Session identity、Runtime bootstrap credential、Renderer Control credential material。Generator只生成 fresh/high-entropy/opaque material；Main拥有 identity/currentness/registration/binding/consumption/invalidation。
+每个 successful call 固定满足：
 
-无 compatibility alias、identity service、token registry或 crypto facade。
+```text
+ASCII string
+1..128 bytes
+fresh for the concrete Platform/Session lifetime
+at least 128 bits of unpredictability for security-sensitive uses
+opaque to callers
+```
+
+该共同范围同时服务：Session identity、Runtime bootstrap credential、Renderer Control credential。
+
+Main 对三个语义必须分别调用，禁止复用同一值；Main仍按各 formal contract做防御性验证。
+
+Generator不是 identity service、token registry、kind-dispatch factory 或 generic crypto facade；无 compatibility alias。
 
 ---
 
@@ -158,7 +181,7 @@ failure precedence > stopped。Session terminal后 Control retires；normal clea
 
 ## 6. Bounded Main Candidate Model
 
-Binding存在时 Main Session内部最多：
+Binding存在且未 terminal 时 Main Session内部最多：
 
 ```text
 one current Renderer peer
@@ -168,9 +191,9 @@ one armed/pending/candidate attempt
 
 Main可在 current Renderer存在时 arm下一 slot；slot MAY长期 pending，且其存在不意味着新的 Renderer已经创建。
 
-Attempt settle后，Session仍 live时 Main MAY arm one fresh next slot with fresh token。Next slot是 fresh attempt，不是 retry/replay。
+Acquired candidate protocol attempt settle后，Session仍 live且 Binding未 terminal时 Main MAY arm one fresh next slot with fresh token。Next slot是 fresh attempt，不是 retry/replay。
 
-Renderer absence、pending slot或 Binding absence不得阻塞 Runtime/Frame business execution。
+Renderer absence、pending slot、Binding absence或 Binding terminal不得阻塞 Runtime/Frame business execution。
 
 ---
 
@@ -200,7 +223,7 @@ Transaction外发送同一 prepared text并 request old close。
 
 因此 unrepresentable candidate不能驱逐 healthy old current；R+1不能落入 capture/current-install gap。
 
-Hello Result send失败：new candidate terminal；old不复活；fresh slot/attempt恢复。
+Hello Result send失败：new candidate terminal；old不复活；如 Binding未 terminal则 fresh slot/attempt恢复。
 
 ---
 
@@ -221,11 +244,20 @@ Foundation `send()` 不承诺取消已开始发送。Already-started old in-flig
 
 ---
 
-## 9. Renderer Initial Handoff
+## 9. Renderer Initial Handoff / Local Currentness
 
 Renderer peer先返回 validated initial Snapshot R；Renderer role原子安装 `{peer,R}`；之后才开始 consume later `renderer.state`。
 
-Later-state surface必须 lazy/explicit-start或等价保证。Renderer role不建立第二套 revision/session validator。
+Renderer holder 的 `current != null` 只表示：
+
+```text
+locally accepted Control mirror exists
+and this Renderer has not yet observed that peer terminal
+```
+
+它**不独立证明 Main 此刻仍将该 participant 视为 current**。Replacement可能先在 Main撤销 old participant，旧 Renderer稍后才观察 close/terminal。
+
+因此不得新增 lease、epoch、heartbeat或第二套 currentness protocol。未来 Data/Input authorization必须继续由 Main currentness + matching current DataAuthority/physical capability闭合。
 
 ---
 
@@ -276,11 +308,13 @@ Binding-present deterministic MemoryCarrier path
 Main pure projection/revision/candidate-slot/currentness
 Renderer minimal current holder
 hello/replacement/session-terminal races
+Binding cancellation vs terminal rejection
+candidate-slot no-slot/extra-candidate rules
 1 inFlight + 1 pendingLatest structural boundedness
 representation isolation
 ```
 
-Deferred：Hostra Renderer WS/BrowerWindow + stalled-write policy(M14)、PWA Renderer MessagePort(M16)、Data/Input/Render/Content(M8+)。
+Deferred：Hostra Renderer WS/BrowserWindow + stalled-write policy(M14)、PWA Renderer MessagePort(M16)、Data/Input/Render/Content(M8+)。
 
 ---
 
@@ -299,13 +333,15 @@ Current project无 compatibility obligation：`BootstrapTokenGenerator → Opaqu
 1. Main owns Renderer application authority/currentness；renderer-control owns protocol mechanics/version negotiation。  
 2. `RendererControlBinding.acquire` arms one candidate slot；它不是 Renderer launch/replacement command。  
 3. 一个 armed slot最多绑定一个 candidate；无 slot的额外 candidate不得获得 token/live carrier。  
-4. `MainPlatform.rendererControl` optional；absence无需 fake Binding。  
-5. Binding存在时最多 one current + one armed/pending/candidate attempt。  
-6. Hello exact outbound preflight先于 current switch，并与 visible mutation共享 Main serialization。  
-7. Replacement主动撤销 old current，但不虚构 in-flight send cancellation。  
-8. Renderer先安装 initial Snapshot再 consume later state。  
-9. Session terminal撤销全部 Renderer attempt/current authority。  
-10. Representation failure不改变 Frozen Frame / Runtime authority。  
-11. M7 DataAuthority policy保持空。  
-12. No generic RPC/Publisher/Store/ConnectionRegistry/Renderer mega-port/shadow authority。  
-13. 本 ADR + Frozen protocol + `M7_01`–`M7_05` 是 M7 implementation事实源。
+4. Abort取消单个 slot；non-abort acquire rejection使 Binding 对该 Main Session terminal，Main不再 re-arm。  
+5. `MainPlatform.rendererControl` optional；absence无需 fake Binding。  
+6. Binding存在且健康时最多 one current + one armed/pending/candidate attempt。  
+7. `OpaqueMaterialGenerator` 输出 ASCII 1..128 bytes、fresh、至少128-bit不可预测性；不按用途引入 kind API。  
+8. Hello exact outbound preflight先于 current switch，并与 visible mutation共享 Main serialization。  
+9. Replacement主动撤销 old current，但不虚构 in-flight send cancellation。  
+10. Renderer先安装 initial Snapshot再 consume later state；本地 holder不是远端 currentness proof。  
+11. Session terminal撤销全部 Renderer attempt/current authority。  
+12. Representation failure不改变 Frozen Frame / Runtime authority。  
+13. M7 DataAuthority policy保持空。  
+14. No generic RPC/Publisher/Store/ConnectionRegistry/Renderer mega-port/shadow authority/lease-heartbeat layer。  
+15. 本 ADR + Frozen protocol + `M7_01`–`M7_05` 是 M7 implementation事实源。
