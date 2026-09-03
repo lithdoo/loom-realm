@@ -63,6 +63,8 @@ RuntimeHosting
 RendererControlBinding?   // optional physical capability
 ```
 
+`OpaqueMaterialGenerator` successful output统一为 ASCII `1..128` bytes、fresh，并对安全用途提供至少 128-bit unpredictability；Main 对 Session / Runtime / Renderer 三个语义独立调用。
+
 Optionality：
 
 ```text
@@ -71,14 +73,30 @@ RendererControlBinding absent
 → Runtime/Frame Session remains valid
 
 present
-→ Binding establishes candidate carrier
+→ acquire(token,signal) arms one candidate slot
+→ may remain pending without creating/showing a Renderer
+→ bound candidate receives exact Main-issued token + established carrier
 → renderer-control peer negotiates protocol v1
 → Main authenticates token / grants currentness
 ```
 
-`RendererControlBinding.acquire(rendererControlToken,signal)`只建立 one candidate physical carrier；它不认证 token、不协商 protocol version、不决定 current Renderer。
+Binding settlement：
 
-Platform只生成/交付 fresh opaque material与 physical carrier；Main拥有 Session/attempt/token/currentness authority。
+```text
+abort before acquire resolves
+→ cancel this slot; no late live result
+
+non-abort acquire rejection
+→ Binding terminal for this Main Session
+→ Main does not arm another slot
+→ Runtime/Frame Session continues
+
+carrier acquired then protocol/peer terminal
+→ candidate attempt terminal only
+→ fresh slot may be armed if Binding remains healthy
+```
+
+Binding不认证 token、不协商 protocol version、不决定 current Renderer。
 
 ---
 
@@ -99,7 +117,7 @@ Renderer Control不得反向改变这些 semantics。
 ```text
 optional physical capability availability
 one current Renderer participant
-one bounded candidate attempt when capability present
+one bounded candidate slot/attempt when capability present
 renderer.hello id=1
 renderer-control peer owns protocolVersions validation/version selection
 Main owns token authentication/currentness
@@ -114,6 +132,8 @@ active old-peer retirement
 Control/Session terminal fail-closed
 representation limits do not become Frame/Runtime business limits
 ```
+
+Renderer local holder只表示已接受且尚未观察 terminal 的 local Control mirror；它不是 Main remote-currentness 的独立证明。Old cached state在 replacement窗口内不得形成第二套 lease/epoch/heartbeat authority。
 
 M7 Main Snapshot：runtimes + stack/Activation + inputTarget + `dataAuthorities=[]`。
 
@@ -165,7 +185,7 @@ Main
     Runtime credential + Renderer token/currentness/revision authority
 
 Renderer
-    read-only Main mirror + local future Data/Input/Render consumers
+    local read-only Main mirror + future Data/Input/Render consumers
 ```
 
 ---
