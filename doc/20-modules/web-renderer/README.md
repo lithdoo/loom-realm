@@ -1,143 +1,218 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：Active Design  
-> 稳定程度：Experimental  
-> 主要定义：Renderer Control、Renderer Data Profile、Frame-scoped User Input、Render Store/Presentation 与 Renderer-facing Platform ports  
-> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
-> 最近复核：2026-08-19
+> 状态：M7 Implementation Frozen / M8+ Planned  
+> 稳定程度：M7 Preimplementation Closed  
+> 主要定义：M7 Renderer Control local holder，以及 M8+ Renderer Data/Input/Render/Content slice placement  
+> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
+> 最近复核：2026-09-03
 
-Renderer 不是 Frame/Call participant。它镜像 Main committed authority，并在 Platform提供的 current Data carriers 上执行 Data Profile child protocols。
+Renderer 不是 Frame/Call participant。它只镜像 Main committed authority，并在后续 current Data carriers 上执行 Renderer Data Profile child protocols。
+
+M7 只实施 Control holder；Data/Input/Render/Content 不提前建 registry/framework。
 
 ---
 
-## 1. Internal Modules
+## 1. M7 Current Module Shape
 
 ```text
-Web Renderer
-├── RendererControlBinding Adapter
-├── Control Store
-├── RendererDataBinding Adapter
-├── Data Connection Registry
-├── one Data dispatcher
-│   ├── Input Manager
-│   └── Render Replication Manager
-├── Frame Interest Registry
-├── Input Producer Registry
-├── Effective Input Resolver
-├── Render Domain Store / Composer
-├── Content Client
-└── Presentation Environment
+@loomrealm/renderer
+└── Control holder/orchestration
+    ├── current peer reference/identity
+    └── current RendererAuthoritySnapshotV1 | null
 ```
 
-Presentation mapping可使用 DOM/Canvas/WebGL/framework internals；不是 LoomRealm protocol surface。
-
----
-
-## 2. Renderer-facing Platform Ports
+逻辑 state exactly：
 
 ```text
-RendererControlBinding
-    current Main ⇄ Renderer Control carrier
-
-RendererDataBinding
-    per-Subsystem current/fresh {generation,dataProfile,carrier}
-
-ContentClient
-    logical Content API
-
-Presentation/Input Environment
-    browser/device primitives
+{peer, snapshot} | null
 ```
 
-Renderer Core不自行发现 physical endpoint，也不在无 current DataAuthority时建立 Data Connection。
+M7 不创建：
+
+```text
+Control Store framework
+RendererControlBinding adapter
+Data Connection Registry
+Input Manager
+Render Store
+ObserverHub/EventBus
+currentness lease/epoch/heartbeat
+Data/Input/Render empty modules
+```
+
+`RendererControlBinding` 是 **Main-facing Platform candidate-slot capability**，不是 Renderer-facing port。Renderer 只消费已经交给它的 renderer-control peer/carrier-side protocol role。
 
 ---
 
-## 3. Renderer Control Store
+## 2. M7 Renderer Control Holder
 
-Main发布：
+Main publishes committed：
 
 ```text
 Runtime projection
-Frame Stack
-Activation
+Frame Stack / Activation
 InputTarget
 DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-当前 `dataProfile`：
+M7 Main implementation实际固定：
 
 ```text
-loomrealm.renderer-data/1
+dataAuthorities = []
 ```
 
-Renderer不：
+Renderer role不：
 
 ```text
 create/recover Frame or Activation
 modify Stack
 compute Runtime failure unwind
 create InputTarget from DOM/Render/Interest
+revalidate protocol revision/session/schema
 ```
 
-Control loss：
-
-```text
-InputTarget := null
-stop ordinary input
-invalidate DataAuthority
-retire old Data Connections
-```
+Whole accepted Snapshot原子替换；不得逐字段更新。
 
 ---
 
-## 4. Data Connection Registry
+## 3. Initial Hello Handoff
 
-Current key：
-
-```text
-Session + current Renderer + subsystemKey + generation
-```
-
-且 bound `dataProfile` MUST匹配 current authority。
-
-每 Subsystem最多 one current carrier。
+Renderer-control peer：
 
 ```text
-same S/G/P old retired → fresh carrier allowed
-profile change → fresh generation required
+send renderer.hello(id=1)
+→ validate hello Result Snapshot R
+→ return initial accepted R
 ```
 
-Data loss不失败 Runtime、不 unwind Frame。
+Renderer role必须先原子安装：
+
+```text
+current = {peer, snapshot:R}
+```
+
+之后才开始消费该 peer later `renderer.state`。
+
+Later-state surface可以是 lazy `AsyncIterable`、explicit start或等价机制；不得为了 handoff建立第二个 queue/Store。
 
 ---
 
-## 5. One Data Dispatcher
+## 4. Replacement / Local Currentness
 
-Renderer只建立一个 connection-wide Data reader：
+Main replacement可能先撤销 old participant，旧 Renderer稍后才观察 carrier close/terminal。
+
+因此：
 
 ```text
-MessageCarrier
-        ↓
-JSON text parse
-        ↓
-Data Profile dispatcher
-   ┌────┴────┐
- input.*   render.*
+local current != null
+→ locally accepted Control mirror exists
+→ this Renderer has not yet observed peer terminal
+→ NOT an independent proof that Main still considers it current
 ```
 
-Input/Render Manager不得分别竞争读取 raw carrier。
+B 已在本地安装后：
 
-PWA/Hostra都使用 string application unit。
+```text
+A late Snapshot     → ignore
+A late terminal     → ignore for B
+A inFlight late msg → ignore if A no longer local current peer
+```
+
+只有：
+
+```text
+terminalPeer === current.peer
+```
+
+才：
+
+```text
+current = null
+```
+
+不得新增 lease、epoch、heartbeat或第二套 currentness protocol。
 
 ---
 
-## 6. User Input
+## 5. Control Loss
+
+Current peer terminal：
 
 ```text
-Effective(F,A,C)
-=
+current = null
+```
+
+本地立即视为：
+
+```text
+InputTarget unavailable
+DataAuthority unavailable
+ordinary input authority unavailable
+```
+
+M8+ real Data Connection出现后，其 consumer按 current Main authority/DataAuthority retirement 关闭 current Data；M7 不预建 Data registry。
+
+Render stale-presentation cache属于 M11 Render Store，不属于 Control holder。
+
+---
+
+## 6. Renderer-facing Platform Capabilities
+
+M7 Renderer package**没有** Renderer Control Platform port。
+
+Future real Renderer consumers：
+
+```text
+M8+
+    RendererDataBinding / current Data connection integration
+
+M12+
+    ContentClient
+
+M14/M16 concrete product
+    DOM/Canvas/WebGL/presentation/input environment
+    BrowserWindow/Window bootstrap
+```
+
+Renderer Core不得自行发现 WebSocket URL、MessagePort、ticket、Process/Worker或 Main internal state。
+
+---
+
+## 7. M8 Data Connection Slice
+
+M8 adds real consumers around frozen authority：
+
+```text
+Main DataAuthority {S,G,P}
++
+current Renderer participant
++
+Platform-provisioned paired carrier
+→ current Data Connection
+```
+
+Connection identity：
+
+```text
+Session
++ current Renderer participant
++ subsystemKey
++ generation
++ matching dataProfile
+```
+
+Renderer local Control holder itself cannot mint remote currentness or Data currentness。
+
+Data loss/provision failure != Runtime failure/Frame unwind。
+
+---
+
+## 8. M10 User Input Slice
+
+Future effective gate：
+
+```text
 current matching Data S/G/P
 ∧ Main InputTarget == (S,F,A)
 ∧ mirrored F active/current A
@@ -145,61 +220,15 @@ current matching Data S/G/P
 ∧ Producer(C) available
 ```
 
-Renderer维护：
+Interest是 Frame-scoped config，不是 authority。
 
-```text
-InterestRegistry = Map<frameId, Set<channel>>
-```
-
-Interest是 Frame-scoped config、无 activationId、不是 authority。
-
-Renderer不解释 push/pop/call/return/unwind，只组合 current facts。
+Renderer Control 与 Data无 cross-connection total order；不增加 ACK/revision join/barrier。
 
 ---
 
-## 7. Cross-plane Ordering
+## 9. M11 Render Slice
 
-Control 与 Data无 total order。
-
-```text
-Interest first
-    → store/inert until matching authority
-
-Authority first
-    → no input until Interest[F]
-```
-
-不需要 cross-plane ACK/barrier/revision join。
-
-stale unknown/closed Frame Interest可以暂存但永远不能创建 authority。
-
----
-
-## 8. Input Lifecycle
-
-fresh Data carrier：
-
-```text
-Interest Registry = empty
-retained Input State = empty
-```
-
-Subsystem重新发布 full current registry。
-
-fresh Activation：
-
-```text
-Interest[F] may remain
-old Activation State/Event MUST NOT remain
-```
-
-`.state` 每次 Effective false→true fresh baseline；`.event` future-only；Reset只清当前 Activation-scoped State，不改 Interest。
-
----
-
-## 9. Render Replica
-
-Subsystem拥有 Domain Registry/State/revision；Renderer只维护 authoritative replica + presentation。
+Subsystem拥有 Domain Registry/State/revision；Renderer只维护 authoritative replica + local presentation。
 
 fresh Data carrier：
 
@@ -209,29 +238,34 @@ render.domains
 → patch/event
 ```
 
-Patch严格 revision chain原子提交；Event transient/no replay。
-
 ```text
 Frame close != Domain destroy
 Data retire != authoritative Domain destroy
 ```
 
+Renderer MAY保留 stale presentation cache，但它不是 current Control/Data authority proof。
+
 ---
 
-## 10. Renderer Reload
+## 10. Reload / Replacement Across Later Slices
+
+完整 future reload：
 
 ```text
-fresh Renderer Control
+fresh Renderer Control candidate
+→ Main grants fresh current participant
 → full Snapshot
-→ Broker/Platform provisions Data carriers for current S/G/P
-→ User Input empty registry then republish/baseline
-→ Render Registry + fresh Snapshots
+→ Renderer installs local current holder
+→ Platform provisions current Data S/G/P
+→ Input fresh baseline
+→ Render fresh Registry/Snapshots
 ```
 
 不得恢复：
 
 ```text
 old Activation
+old Renderer participant currentness
 old carrier Interest registry
 historical Input Event
 historical Render Patch/Event chain
@@ -239,71 +273,74 @@ historical Render Patch/Event chain
 
 ---
 
-## 11. Platform Realizations
+## 11. Physical Realizations
 
 ```text
-Hostra Desktop
-    Control    WebSocket text
-    Data       authenticated WebSocket text
-    Hosting    BrowserWindow
-    Content    HTTP
+M14 Hostra Desktop
+    Renderer hosting        BrowserWindow
+    Renderer Control        WebSocket text
+    Data                    authenticated Data WebSocket
+    Content                 HTTP/fs
 
-PWA
-    Control    MessagePort postMessage(string)
-    Data       transferred MessagePort postMessage(string)
-    Hosting    Window
-    Content    Fetch/SW
+M16 PWA
+    Renderer hosting        Window
+    Renderer Control        MessagePort postMessage(string)
+    Data                    transferred MessagePort
+    Content                 Fetch/SW/OPFS
 ```
 
-Port transfer是 Platform bootstrap；application payload仍 JSON text string。
+Physical bootstrap/Port transfer属于 Platform；application payload仍是 JSON text string。
+
+M14/M16 必须遵守同一 Frozen M7 currentness/replacement semantics，不创建 Hostra/PWA-specific Renderer authority protocol。
 
 ---
 
-## 12. Backpressure
+## 12. Backpressure Placement
 
 ```text
-Renderer Control → latest full Snapshot
-Input State      → latest coalescible baseline/state
-Input Event      → bounded ordered lossy queue
-Render commit    → protocol revision rules
-Render Event     → bounded transient queue
+M7 Renderer Control  → latest full Snapshot / structural 1+1 bound
+M10 Input State      → latest coalescible state
+M10 Input Event      → bounded ordered lossy queue
+M11 Render commit    → Render protocol revision rules
+M11 Render Event     → bounded transient queue
 ```
 
-不允许无界历史队列或 adapter retry。
+M7 Holder自己没有 publication queue/history。
 
 ---
 
 ## 13. Tests
 
-至少：
+M7 必须覆盖：
 
 ```text
-fake RendererControlBinding
-fake RendererDataBinding
-unknown/unsupported profile no current install
-single Data dispatcher demux
-Control/Data ordering independence
-Interest[F] gating
-fresh carrier empty input state
-fresh Activation no old state
-fresh Render baseline
-Control loss retires all Data
-Hostra/PWA same abstract Renderer trace
+initial Snapshot before later-state consumption
+atomic {peer,snapshot} install
+whole Snapshot replacement
+B replaces A
+A late Snapshot ignored
+A late/inFlight delivery ignored after B local current
+A terminal cannot clear B
+current terminal clears current
+local current not treated as Main remote-currentness proof
+no duplicate revision/session validator
+no Store/EventBus/subscription framework
+no Renderer-facing RendererControlBinding abstraction
 ```
+
+M8/M10/M11 分别在真实 consumer出现后增加 Data/Input/Render tests；不得提前用 fake future registries作为 M7 closure。
 
 ---
 
-## 14. Final Invariants
+## 14. Final Invariants Through M7
 
 1. Renderer不是 Frame RPC participant；
 2. Renderer Core platform-neutral；
-3. Renderer只镜像 Main committed authority；
-4. DataAuthority使用 S/G/dataProfile；
-5. Platform/Broker建立 actual Data carrier；
-6. one Data dispatcher统一 Input/Render demux；
-7. Interest Frame-scoped且不创建 authority；
-8. Control/Data无跨连接 total order；
-9. fresh Data Interest/State empty；
-10. fresh Activation可复用 Interest但不可复用 old State/Event；
-11. Render lifecycle independent from Frame/Data carrier；
-12. WebSocket/MessagePort application unit统一 JSON text string。
+3. M7 state exactly local `{peer,snapshot}|null`；
+4. renderer-control peer owns protocol legality；Renderer role不重复 revision/session validator；
+5. local holder不是 Main remote-currentness proof；
+6. `RendererControlBinding` 不属于 Renderer-facing M7 API；
+7. M7 Main DataAuthority list empty；real Data integration begins M8；
+8. no Store/Registry/EventBus/lease/currentness framework in M7；
+9. Data/Input/Render lifecycles保持独立；
+10. Hostra/PWA application unit统一 JSON text string，physical realization分别 M14/M16。
