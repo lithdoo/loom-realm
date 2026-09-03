@@ -3,6 +3,7 @@ import {
   type RendererAuthoritySnapshotV1,
   type RendererControlPeer,
   type RendererPeerConnectOptions,
+  type RendererPeerConnectOutcome,
 } from "@loomrealm/renderer-control";
 
 export interface RendererControlCurrent {
@@ -22,13 +23,22 @@ export interface RendererControlHolder {
 
 class ControlHolder implements RendererControlHolder {
   private currentValue: RendererControlCurrent | null = null;
+  private connecting = false;
 
   current(): RendererControlCurrent | null {
     return this.currentValue;
   }
 
   async connect(options: RendererPeerConnectOptions): Promise<RendererControlHolderConnectOutcome> {
-    const outcome = await connectRendererControlPeer(options);
+    if (this.connecting)
+      throw new TypeError("Renderer Control connect already in progress");
+    this.connecting = true;
+    let outcome: RendererPeerConnectOutcome;
+    try {
+      outcome = await connectRendererControlPeer(options);
+    } finally {
+      this.connecting = false;
+    }
     if (outcome.kind === "rejected")
       return Object.freeze({ kind: "rejected", code: outcome.code });
     if (outcome.kind === "terminal") return Object.freeze({ kind: "terminal" });

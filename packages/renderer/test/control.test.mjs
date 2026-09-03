@@ -47,3 +47,28 @@ test("replacement identity ignores old late state and old terminal", async () =>
   await turn();
   assert.equal(holder.current(), null);
 });
+
+test("concurrent connect on one holder fails fast without creating local currentness", async () => {
+  let releaseSend;
+  const sendGate = new Promise((resolve) => { releaseSend = resolve; });
+  const closed = new Promise(() => {});
+  const blockedCarrier = {
+    closed,
+    send() { return sendGate; },
+    async *messages() {},
+    async close() {},
+  };
+  const holder = createRendererControlHolder();
+  const first = holder.connect({ carrier: blockedCarrier, rendererControlToken: "a" });
+
+  const unused = createMemoryCarrierPair();
+  await assert.rejects(
+    holder.connect({ carrier: unused.right, rendererControlToken: "b" }),
+    /connect already in progress/,
+  );
+  assert.equal(holder.current(), null);
+
+  releaseSend();
+  assert.deepEqual(await first, { kind: "terminal" });
+  await unused.left.close();
+});

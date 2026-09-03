@@ -20,11 +20,8 @@ export type {
   RendererStateParamsV1,
   RendererControlPeer,
 } from "./model.js";
-export { RendererControlProfileError } from "./validation.js";
 export {
   prepareRendererHelloResultV1,
-  prepareRendererStateV1,
-  validateRendererAuthoritySnapshotV1,
 } from "./validation.js";
 export { createMainRendererControlPeer } from "./main-peer.js";
 export { connectRendererControlPeer } from "./renderer-peer.js";

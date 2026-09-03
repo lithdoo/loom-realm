@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
 import { createRendererControlHolder } from "@loomrealm/renderer";
+import { prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
 import {
   FrameCallRejectedError,
   completed,
@@ -39,6 +40,14 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+async function waitFor(predicate, message) {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${message}`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 function createFakePlatform(definitions, options = {}) {
   let tokenId = 0;
   const launches = [];
@@ -55,6 +64,7 @@ function createFakePlatform(definitions, options = {}) {
     runtimeHosting: {
       async launch(request, signal) {
         assert.equal(signal.aborted, false);
+        if (options.beforeLaunch) await options.beforeLaunch(request, signal);
         const definition = definitions[request.subsystemKey];
         if (!definition) throw new Error(`Missing fake Runtime ${request.subsystemKey}`);
         assert.deepEqual(Object.keys(request).sort(), [
@@ -169,6 +179,23 @@ function bootstrap(keys, initialKey, input = null) {
     subsystemKeys: Object.freeze([...keys]),
     initial: Object.freeze({ subsystemKey: initialKey, input }),
   });
+}
+
+function rendererLimitBootstrapKeys(sessionId) {
+  const keys = Array.from({ length: 3553 }, (_, index) =>
+    `${String(index).padStart(6, "0")}:${"x".repeat(249)}`,
+  );
+  keys.push(`${String(keys.length).padStart(6, "0")}:${"x".repeat(174)}`);
+  const bytes = Buffer.byteLength(prepareRendererHelloResultV1({
+    sessionId,
+    revision: 1,
+    runtimes: keys.map((subsystemKey) => ({ subsystemKey, state: "starting" })),
+    stack: [],
+    inputTarget: null,
+    dataAuthorities: [],
+  }));
+  assert.equal(bytes, 1_048_576, "fixture must sit at the exact hello byte limit");
+  return keys;
 }
 
 test("Main boots required Runtimes and drives a nested cross-Subsystem Frame to root outcome", async () => {
@@ -826,4 +853,195 @@ test("active Renderer replacement is atomic and stale terminal cannot clear the 
   await result;
   while (holder.current() !== null) await new Promise((resolve) => setImmediate(resolve));
   assert.equal(holder.current(), null);
+});
+
+test("connected Renderer mirrors committed frame.call and frame.return through fresh caller resume", async () => {
+  const allowCall = deferred();
+  const finishChild = deferred();
+  const finishRoot = deferred();
+  const rootEntered = deferred();
+  const childEntered = deferred();
+  const rootResumed = deferred();
+  const slots = [];
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem(() => ({
+        async frame(frame) {
+          rootEntered.resolve();
+          await allowCall.promise;
+          const child = await frame.call("child", null);
+          rootResumed.resolve(child);
+          await finishRoot.promise;
+          return completed("done");
+        },
+      })),
+      child: defineSubsystem(() => ({
+        async frame() {
+          childEntered.resolve();
+          await finishChild.promise;
+          return completed("child");
+        },
+      })),
+    },
+    { rendererControl: { acquire(token, signal) { const slot = deferred(); slots.push({ token, signal, slot }); return slot.promise; } } },
+  );
+  const result = runMain({ bootstrap: bootstrap(["root", "child"], "root"), platform: fake.platform, policy });
+  await waitFor(() => slots.length > 0, "Renderer candidate slot");
+  const pair = createMemoryCarrierPair();
+  slots[0].slot.resolve(pair.left);
+  const holder = createRendererControlHolder();
+  assert.equal((await holder.connect({ carrier: pair.right, rendererControlToken: slots[0].token })).kind, "installed");
+
+  await rootEntered.promise;
+  await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "root active projection");
+  const firstActivation = holder.current().snapshot.stack[0].activationId;
+  allowCall.resolve();
+  await childEntered.promise;
+  await waitFor(() => holder.current()?.snapshot.stack.length === 2 && holder.current().snapshot.stack[1].lifecycle === "active", "child active projection");
+  assert.deepEqual(holder.current().snapshot.stack.map(({ lifecycle }) => lifecycle), ["suspended", "active"]);
+  assert.equal(holder.current().snapshot.inputTarget.frameId, holder.current().snapshot.stack[1].frameId);
+
+  finishChild.resolve();
+  await rootResumed.promise;
+  await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "fresh caller resume projection");
+  assert.notEqual(holder.current().snapshot.stack[0].activationId, firstActivation);
+  assert.equal(holder.current().snapshot.inputTarget.frameId, holder.current().snapshot.stack[0].frameId);
+
+  finishRoot.resolve();
+  assert.deepEqual(await result, { kind: "root-outcome", outcome: { type: "completed", value: "done" } });
+});
+
+test("connected Renderer mirrors fixed-point failure unwind without changing Main outcome", async () => {
+  const allowCall = deferred();
+  const rootEntered = deferred();
+  const childEntered = deferred();
+  const finishRoot = deferred();
+  const rootResumed = deferred();
+  const never = new Promise(() => {});
+  const slots = [];
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem(() => ({
+        async frame(frame) {
+          rootEntered.resolve();
+          await allowCall.promise;
+          const child = await frame.call("child", null);
+          rootResumed.resolve(child);
+          await finishRoot.promise;
+          return completed({ type: child.type, code: child.type === "failed" ? child.error.code : null });
+        },
+      })),
+      child: defineSubsystem(() => ({
+        async frame() {
+          childEntered.resolve();
+          await never;
+          return completed(null);
+        },
+      })),
+    },
+    { rendererControl: { acquire(token, signal) { const slot = deferred(); slots.push({ token, signal, slot }); return slot.promise; } } },
+  );
+  const result = runMain({ bootstrap: bootstrap(["root", "child"], "root"), platform: fake.platform, policy });
+  await waitFor(() => slots.length > 0, "Renderer candidate slot");
+  const pair = createMemoryCarrierPair();
+  slots[0].slot.resolve(pair.left);
+  const holder = createRendererControlHolder();
+  assert.equal((await holder.connect({ carrier: pair.right, rendererControlToken: slots[0].token })).kind, "installed");
+
+  await rootEntered.promise;
+  await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "root active projection before failure path");
+  const oldRootActivation = holder.current().snapshot.stack[0].activationId;
+  allowCall.resolve();
+  await childEntered.promise;
+  await waitFor(() => holder.current()?.snapshot.stack.length === 2 && holder.current().snapshot.stack[1].lifecycle === "active", "child active projection");
+  fake.lose("child");
+  const failed = await rootResumed.promise;
+  assert.deepEqual(failed, { type: "failed", error: { code: "SUBSYSTEM_RUNTIME_FAILED" } });
+  await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "unwound caller projection");
+  assert.equal(holder.current().snapshot.runtimes.find(({ subsystemKey }) => subsystemKey === "child").state, "failed");
+  assert.notEqual(holder.current().snapshot.stack[0].activationId, oldRootActivation);
+
+  finishRoot.resolve();
+  assert.deepEqual(await result, {
+    kind: "root-outcome",
+    outcome: { type: "completed", value: { type: "failed", code: "SUBSYSTEM_RUNTIME_FAILED" } },
+  });
+});
+
+test("unrepresentable candidate and current publication fail closed without replacing Main authority", async () => {
+  const sessionId = `test-token-1-${"x".repeat(48)}`;
+  const keys = rendererLimitBootstrapKeys(sessionId);
+  const launchGate = deferred();
+  const initializeEntered = deferred();
+  const initializeGate = deferred();
+  const stateSendSeen = deferred();
+  const releaseStateSend = deferred();
+  const slots = [];
+  const controller = new AbortController();
+  const rootKey = keys[0];
+  const fake = createFakePlatform(
+    {
+      [rootKey]: defineSubsystem(() => ({
+        initialize() {
+          initializeEntered.resolve();
+          return initializeGate.promise;
+        },
+        frame: () => completed("unreachable"),
+      })),
+    },
+    {
+      beforeLaunch: () => launchGate.promise,
+      rendererControl: {
+        acquire(token, signal) {
+          const slot = deferred();
+          slots.push({ token, signal, slot });
+          return slot.promise;
+        },
+      },
+    },
+  );
+  const result = runMain({ bootstrap: bootstrap(keys, rootKey), platform: fake.platform, policy, signal: controller.signal });
+  await waitFor(() => slots.length > 0, "initial Renderer candidate slot");
+
+  const a = createMemoryCarrierPair();
+  let gated = false;
+  const gatedMainCarrier = {
+    closed: a.left.closed,
+    messages: () => a.left.messages(),
+    close: () => a.left.close(),
+    send(text) {
+      const message = JSON.parse(text);
+      if (!gated && message.method === "renderer.state") {
+        gated = true;
+        stateSendSeen.resolve();
+        return releaseStateSend.promise.then(() => a.left.send(text));
+      }
+      return a.left.send(text);
+    },
+  };
+  slots[0].slot.resolve(gatedMainCarrier);
+  const holder = createRendererControlHolder();
+  const installedA = await holder.connect({ carrier: a.right, rendererControlToken: slots[0].token });
+  assert.equal(installedA.kind, "installed");
+  const authorityBefore = holder.current().snapshot;
+  assert.equal(Buffer.byteLength(prepareRendererHelloResultV1(authorityBefore)), 1_048_576);
+
+  launchGate.resolve();
+  await stateSendSeen.promise;
+  await initializeEntered.promise;
+  await waitFor(() => slots.length > 1, "replacement Renderer candidate slot");
+  const b = createMemoryCarrierPair();
+  slots[1].slot.resolve(b.left);
+  const rejectedB = await holder.connect({ carrier: b.right, rendererControlToken: slots[1].token });
+  assert.deepEqual(rejectedB, { kind: "rejected", code: "PROTOCOL_STATE_ERROR" });
+  assert.equal(holder.current().peer, installedA.current.peer);
+  assert.equal(holder.current().snapshot, authorityBefore);
+
+  releaseStateSend.resolve();
+  await waitFor(() => holder.current() === null, "current Renderer representation terminal");
+  assert.equal(fake.runtimes.get(rootKey).terminated, false);
+
+  controller.abort();
+  initializeGate.resolve();
+  assert.deepEqual(await result, { kind: "shutdown" });
 });

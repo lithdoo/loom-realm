@@ -6,6 +6,8 @@ Transport-independent LoomRealm Renderer Control v1 protocol mechanics.
 
 The package implements the frozen current-v1 transport-independent Main and Renderer peers, exact outbound preflight, current-Snapshot validation, connection-local monotonicity, retirement, and structurally bounded latest-state publication.
 
+The root API is intentionally narrow: frozen protocol types, the asymmetric peer constructors, and exact hello preflight. Validators, profile errors, and later-state encoding remain package-private mechanics.
+
 - [ADR 0027 — Freeze Renderer Control v1 preimplementation closure](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)
 - [Main ⇄ Renderer Control Protocol v1](../../doc/15-contracts/main-renderer-control-v1.md)
 

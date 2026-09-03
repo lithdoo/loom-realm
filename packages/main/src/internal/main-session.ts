@@ -259,7 +259,6 @@ class MainSessionRuntime {
   private readonly runtimes = new Map<string, RuntimeRecord>();
   private readonly frames = new Map<string, FrameRecord>();
   private readonly stack: FrameRecord[] = [];
-  private readonly issuedTokens = new Set<string>();
   private readonly sessionId: string;
 
   private rendererRevision = 1;
@@ -356,14 +355,13 @@ class MainSessionRuntime {
         key,
       );
     }
-    if (!validOpaqueMaterial(token) || this.issuedTokens.has(token)) {
+    if (!validOpaqueMaterial(token) || this.hasCurrentOpaqueMaterial(token)) {
       throw new BootstrapError(
         "MAIN_BOOTSTRAP_TOKEN_INVALID",
         "Opaque material generator returned invalid or reused Runtime token material",
         key,
       );
     }
-    this.issuedTokens.add(token);
     const record: RuntimeRecord = {
       key,
       bootstrapToken: token,
@@ -1250,10 +1248,20 @@ class MainSessionRuntime {
     } catch (cause) {
       throw new TypeError(`${name} generation failed`, { cause });
     }
-    if (!validOpaqueMaterial(material) || this.issuedTokens.has(material))
-      throw new TypeError(`${name} is invalid or reused`);
-    this.issuedTokens.add(material);
+    if (!validOpaqueMaterial(material))
+      throw new TypeError(`${name} is invalid`);
     return material;
+  }
+
+  private hasCurrentOpaqueMaterial(material: string): boolean {
+    // Freshness across calls belongs to OpaqueMaterialGenerator. Main only
+    // guards material that still carries live Session authority; retaining
+    // retired Renderer tokens here would make reconnect history unbounded.
+    if (material === this.sessionId || this.rendererCandidate?.token === material)
+      return true;
+    for (const runtime of this.runtimes.values())
+      if (runtime.bootstrapToken === material) return true;
+    return false;
   }
 
   private projectRendererSnapshot(): RendererAuthoritySnapshotV1 {
@@ -1319,6 +1327,10 @@ class MainSessionRuntime {
     try {
       token = this.generateOpaqueMaterial("Renderer Control token");
     } catch {
+      this.rendererBindingTerminal = true;
+      return;
+    }
+    if (this.hasCurrentOpaqueMaterial(token)) {
       this.rendererBindingTerminal = true;
       return;
     }

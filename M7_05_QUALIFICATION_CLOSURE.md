@@ -458,6 +458,16 @@ M7 complete 不表示 Main DataAuthority policy、DataConnectionBroker、User In
 
 ## 17. Implementation Checklist
 
+> Qualification status: **Closed**
+>
+> Completion evidence: [`doc/30-implementation/m7-qualification.md`](doc/30-implementation/m7-qualification.md)
+>
+> Baseline implementation: [`016721b`](https://github.com/lithdoo/loom-realm/commit/016721bfed31f7d64b902619ebf533fd6b03a382)
+>
+> Clean-run CI qualification: [`72e435d`](https://github.com/lithdoo/loom-realm/commit/72e435d38498afc8370249c44daa925145d89594)
+
+The checklist below remains the frozen required matrix rather than a mutable historical execution log. Its completion state and concrete test/CI evidence are recorded in the qualification record linked above.
+
 ```text
 [ ] renderer-control concrete asymmetric peers implemented
 [ ] protocol peer owns hello version negotiation
