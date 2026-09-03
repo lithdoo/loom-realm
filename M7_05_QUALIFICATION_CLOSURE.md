@@ -30,7 +30,12 @@
     Session terminal retirement
 @loomrealm/renderer minimal Control holder
 deterministic MemoryCarrier vertical with Binding present
+existing M5/M6 MainPlatform providers/fixtures mechanical migration
+    bootstrapTokens / BootstrapTokenGenerator
+    → opaqueMaterial / OpaqueMaterialGenerator
 ```
+
+Existing Hostra/headless Runtime-only compositions MUST remain Renderer-capability absent unless they actually implement the M14/M16 physical Binding；M7 migration不得通过 fake/no-op Binding满足类型。
 
 不属于 M7 closure：Hostra Renderer WS、PWA Renderer MessagePort、concrete stalled-write timeout、Main DataAuthority policy/Data Broker、User Input/Render/Content。
 
@@ -130,6 +135,8 @@ fresh
 
 并证明 Main 为 sessionId / Runtime bootstrap / Renderer token 独立调用且不复用同一值。
 
+Entropy qualification使用 implementation/construction evidence（例如 CSPRNG 至少 128 random bits）+ representation/freshness tests；不得通过大样本统计测试虚构“随机性证明”。
+
 ### Candidate slot
 
 证明：
@@ -200,6 +207,20 @@ rendererControl absent
 → no Renderer token/acquire attempt
 → Runtime bootstrap/Frame/call/return/failure/Session terminal unaffected
 ```
+
+### Existing provider migration
+
+```text
+all M5/Main + M6/Hostra MainPlatform providers/fixtures
+    bootstrapTokens → opaqueMaterial
+
+no fake rendererControl field required
+existing Hostra Runtime-only vertical remains Renderer-capability absent
+existing credential registration/binding/consume authority remains in Main
+existing CSPRNG generation strategy may remain when it satisfies frozen output contract
+```
+
+Migration compile/test failures are M7 closure failures；不得通过 compatibility alias或 duplicate old/new fields绕过。
 
 ### Candidate-slot loop
 
@@ -390,6 +411,9 @@ M7 MemoryCarrier不证明 Hostra/PWA actual stalled-write timeout。
 必须保持 M1–M6，特别检查：
 
 ```text
+all existing MainPlatform providers/fixtures use opaqueMaterial after direct rename
+M6 Hostra Runtime-only provider remains valid without rendererControl
+Hostra existing CSPRNG material satisfies ASCII/length/unpredictability construction contract
 OpaqueMaterialGenerator rename/output bound不转移 credential authority
 optional Renderer capability不破坏 M6 Hostra Runtime-only composition
 Binding terminal不变成 Runtime failure
@@ -411,6 +435,8 @@ platform-ports build/test/pack
 main M7 tests including capability-absent/present/Binding-terminal paths
 renderer build/test/pack
 M7 deterministic Binding vertical
+existing Main tests/fixtures after OpaqueMaterialGenerator migration
+M6 Hostra package/e2e regression after provider migration
 existing core regression suites
 ```
 
@@ -443,6 +469,9 @@ M7 complete 不表示 Main DataAuthority policy、DataConnectionBroker、User In
 
 [ ] OpaqueMaterialGenerator implemented with ASCII 1..128 byte / >=128-bit unpredictability contract
 [ ] independent material used for session/runtime/renderer semantics
+[ ] existing M5/Main providers/fixtures migrated bootstrapTokens→opaqueMaterial
+[ ] existing M6/Hostra providers/fixtures migrated without fake rendererControl
+[ ] existing Hostra CSPRNG strategy reviewed/qualified against new material contract
 [ ] RendererControlBinding implemented
 [ ] acquire pending does not create Renderer
 [ ] no-slot and already-bound extra candidate cases rejected/closed
@@ -477,7 +506,7 @@ M7 complete 不表示 Main DataAuthority policy、DataConnectionBroker、User In
 [ ] Session terminal trace passes
 
 [ ] dependency graph acyclic
-[ ] M1–M6 regression green
+[ ] M1–M6 regression green, including Hostra M6 e2e after material-provider migration
 [ ] build/type/pack clean
 ```
 
