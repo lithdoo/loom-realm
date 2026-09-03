@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import WebSocket from "ws";
+import { ChildProcess } from "node:child_process";
+import WebSocket, { WebSocketServer } from "ws";
 import {
   createHostraRuntimeHosting,
   prepareHostraGame,
@@ -237,4 +238,60 @@ test("termination grace escalates a POSIX child that ignores the normal request"
   );
   await hosted.requestTermination(new AbortController().signal);
   await hosted.terminated;
+});
+
+test("normal termination request failure still commits and runs force convergence", async (t) => {
+  const game = await prepared(t);
+  const fixtureEntry = path.join(game.launchPlan.canonicalInstallationRoot, "termination-fixture.mjs");
+  await writeFile(fixtureEntry, "setInterval(() => {}, 1000);");
+  const plan = Object.freeze({
+    ...game.launchPlan,
+    runnerEntry: fixtureEntry,
+    runnerPolicy: Object.freeze({ ...game.launchPlan.runnerPolicy, terminationGraceMs: 30 }),
+  });
+  const originalKill = ChildProcess.prototype.kill;
+  let matchingCalls = 0;
+  ChildProcess.prototype.kill = function(signal) {
+    if (this.spawnargs?.[1] === fixtureEntry) {
+      matchingCalls += 1;
+      if (matchingCalls === 1) return false;
+    }
+    return originalKill.call(this, signal);
+  };
+  t.after(() => {
+    ChildProcess.prototype.kill = originalKill;
+  });
+
+  const hosted = await createHostraRuntimeHosting({ launchPlan: plan }).launch(
+    { subsystemKey: "root", bootstrapToken: "token" },
+    new AbortController().signal,
+  );
+  await assert.rejects(
+    hosted.requestTermination(new AbortController().signal),
+    (error) => error?.code === "PROCESS_TERMINATION_FAILED",
+  );
+  await hosted.terminated;
+  assert.equal(matchingCalls, 2);
+});
+
+test("a post-listening WS server error fails inside the attempt without crashing the host", async (t) => {
+  const game = await prepared(t);
+  const originalEmit = WebSocketServer.prototype.emit;
+  WebSocketServer.prototype.emit = function(event, ...args) {
+    const emitted = originalEmit.call(this, event, ...args);
+    if (event === "listening") {
+      queueMicrotask(() => this.emit("error", new Error("injected late server failure")));
+    }
+    return emitted;
+  };
+  t.after(() => {
+    WebSocketServer.prototype.emit = originalEmit;
+  });
+  await assert.rejects(
+    createHostraRuntimeHosting({ launchPlan: game.launchPlan }).launch(
+      { subsystemKey: "root", bootstrapToken: "token" },
+      new AbortController().signal,
+    ),
+    (error) => error?.code === "LAUNCH_RUNTIME_UNAVAILABLE",
+  );
 });

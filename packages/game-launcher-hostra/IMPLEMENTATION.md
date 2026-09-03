@@ -1,8 +1,6 @@
 # `@loomrealm/game-launcher-hostra` M6 实现
 
-> 状态：Implemented / Qualified Baseline
-> 资格日期：2026-09-03
-> 资格运行：GitHub Actions `33703871834`（Ubuntu / Windows，Node 20 / 24）
+> 状态：Implemented / Local Requalification Pending
 > 冻结日期：2026-09-02  
 > 阶段：M6 Hostra Platform Vertical  
 > 规范优先级：正式 Hostra Launcher Profile > `DESIGN.md` > 本实现文档。三者的 M6 Runtime slice 必须保持一致；若真实实现/qualification 证明契约不足，先 reopen 文档，不通过补丁扩张边界。
@@ -1106,8 +1104,8 @@ QUALIFICATION
 [x] bootstrap/module failure vertical green
 [x] unexpected code-0 exit vertical green
 [x] force fallback vertical green
-[x] Linux CI green
-[x] Windows CI green
+[ ] Linux CI requalification green
+[ ] Windows CI requalification green
 [x] npm pack --dry-run green
 [x] actual packed artifact contains Runner
 [x] packed Runner smoke/vertical green

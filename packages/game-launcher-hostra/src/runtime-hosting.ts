@@ -139,6 +139,8 @@ async function launchAttempt(
   const capability = randomBytes(32).toString("base64url");
   const capabilityPath = `/${capability}`;
   let validConnectionClaimed = false;
+  let pendingServerFailure = false;
+  let convergeServerFailure: (() => void) | null = null;
   const server = new WebSocketServer({
     host: "127.0.0.1",
     port: 0,
@@ -151,6 +153,10 @@ async function launchAttempt(
       validConnectionClaimed = true;
       done(true);
     },
+  });
+  server.on("error", () => {
+    pendingServerFailure = true;
+    convergeServerFailure?.();
   });
   try {
     await listen(server);
@@ -181,7 +187,10 @@ async function launchAttempt(
   let terminationCommitted = false;
   let terminationConvergence: Promise<void> | null = null;
   let forceTimer: NodeJS.Timeout | null = null;
+  let serverFailure: HostraLauncherError | null = null;
+  let spawnStarted = false;
   const terminated = deferred<void>();
+  const establishment = deferred<"spawned" | "exited">();
 
   const controlEndpoint = `ws://127.0.0.1:${address.port}${capabilityPath}`;
   const bootstrap: RunnerBootstrapV1 = Object.freeze({
@@ -217,12 +226,9 @@ async function launchAttempt(
   const forceTerminate = () => {
     if (exited) return;
     try {
-      const requested = child.kill(process.platform === "win32" ? undefined : "SIGKILL");
-      if (!requested && !exited) {
-        terminated.reject(launcherError("PROCESS_TERMINATION_FAILED"));
-      }
+      child.kill(process.platform === "win32" ? undefined : "SIGKILL");
     } catch {
-      terminated.reject(launcherError("PROCESS_TERMINATION_FAILED"));
+      // Kill mechanics never replace the actual child exit observation fact.
     }
   };
   const abandon = () => {
@@ -235,7 +241,25 @@ async function launchAttempt(
   };
   signal.addEventListener("abort", abandon, { once: true });
 
+  convergeServerFailure = () => {
+    if (controlCarrier !== null || exited || serverFailure !== null) return;
+    serverFailure = launcherError("LAUNCH_RUNTIME_UNAVAILABLE");
+    closeServer(server);
+    acquireWaiter?.reject(serverFailure);
+    acquireWaiter = null;
+    if (attempt.ownership === "pending" && spawnStarted) {
+      forceTerminate();
+      establishment.reject(serverFailure);
+    }
+  };
+  if (pendingServerFailure) {
+    convergeServerFailure();
+    signal.removeEventListener("abort", abandon);
+    throw serverFailure;
+  }
+
   try {
+    spawnStarted = true;
     child = spawn(plan.canonicalNodeExecutable, [plan.runnerEntry], {
       shell: false,
       cwd: plan.canonicalInstallationRoot,
@@ -249,7 +273,6 @@ async function launchAttempt(
     throw launcherError("PROCESS_SPAWN_FAILED");
   }
 
-  const establishment = deferred<"spawned" | "exited">();
   child.once("spawn", () => {
     spawned = true;
     if (attempt.ownership === "abandoned") forceTerminate();
@@ -304,6 +327,7 @@ async function launchAttempt(
         return Promise.reject(acquireSignal.reason);
       }
       if (controlCarrier !== null) return Promise.resolve(controlCarrier);
+      if (serverFailure !== null) return Promise.reject(serverFailure);
       if (exited) return Promise.reject(launcherError("PROCESS_EXITED_DURING_BOOTSTRAP"));
       acquireWaiter = deferred<MessageCarrier>();
       const onAbort = () => {
@@ -327,17 +351,17 @@ async function launchAttempt(
       terminationCommitted = true;
       terminationConvergence = Promise.resolve().then(() => {
         if (exited) return;
+        let requestFailure: HostraLauncherError | null = null;
         try {
           const requested = child.kill();
           if (!requested && !exited) {
-            throw launcherError("PROCESS_TERMINATION_FAILED");
+            requestFailure = launcherError("PROCESS_TERMINATION_FAILED");
           }
-          forceTimer = setTimeout(forceTerminate, plan.runnerPolicy.terminationGraceMs);
-        } catch (error) {
-          if (error instanceof HostraLauncherError) throw error;
-          void error;
-          throw launcherError("PROCESS_TERMINATION_FAILED");
+        } catch {
+          requestFailure = launcherError("PROCESS_TERMINATION_FAILED");
         }
+        forceTimer = setTimeout(forceTerminate, plan.runnerPolicy.terminationGraceMs);
+        if (requestFailure !== null) throw requestFailure;
       });
       return terminationConvergence;
     },

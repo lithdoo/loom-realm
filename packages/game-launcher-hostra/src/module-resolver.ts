@@ -62,6 +62,9 @@ export async function resolveInstallationModule(
   if (!isContained(canonicalRoot, canonical)) {
     throw launcherError("SUBSYSTEM_MODULE_OUTSIDE_INSTALLATION");
   }
+  if (!canonical.endsWith(".mjs")) {
+    throw launcherError("SUBSYSTEM_MODULE_INVALID");
+  }
   return canonical;
 }
 

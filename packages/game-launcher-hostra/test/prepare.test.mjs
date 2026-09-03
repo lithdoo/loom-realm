@@ -154,6 +154,38 @@ test("PREPARE rejects a directory symlink or Windows junction escape", async (t)
   );
 });
 
+for (const targetExtension of [".js", ".cjs", ".mjs"]) {
+  test(`PREPARE ${targetExtension === ".mjs" ? "accepts" : "rejects"} an in-installation .mjs symlink to ${targetExtension}`, async (t) => {
+    const root = await installation(t);
+    const target = path.join(root, "subsystems", `canonical${targetExtension}`);
+    const alias = path.join(root, "subsystems", "alias.mjs");
+    await writeFile(target, "export default () => ({ frame() { return { type: 'completed', value: null }; } });");
+    try {
+      await symlink(target, alias, "file");
+    } catch (error) {
+      if (process.platform === "win32" && error?.code === "EPERM") {
+        t.skip("symlink privilege is unavailable");
+        return;
+      }
+      throw error;
+    }
+    await writeFile(path.join(root, "launch.hostra.json"), JSON.stringify({
+      formatVersion: 1,
+      subsystems: [{ key: "root", module: "subsystems/alias.mjs" }],
+    }));
+    const preparing = prepareHostraGame({
+      source: { installationRoot: root },
+      runnerPolicy: policy,
+    });
+    if (targetExtension === ".mjs") {
+      const prepared = await preparing;
+      assert.equal(prepared.launchPlan.runtimes[0].physicalModule, target);
+    } else {
+      await assert.rejects(preparing, hostraCode("SUBSYSTEM_MODULE_INVALID"));
+    }
+  });
+}
+
 test("PREPARE validates the exact Runner policy domain before filesystem work", async () => {
   for (const invalid of [
     { ...policy, helloDeadlineMs: 0 },
