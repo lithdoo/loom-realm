@@ -1,13 +1,13 @@
 # LoomRealm 正式契约目录
 
-> 层级：正式契约  
+> 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：Evolving  
+> 稳定程度：Evolving per-contract  
 > 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)、[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)、[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
-> 最近复核：2026-08-26
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0022](../decisions/0022-render-update-v1-freeze-closure.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)、[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)、[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 最近复核：2026-09-03
 
-契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。
+契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。
 
 ```text
 Game Entry document != Main bootstrap model
@@ -24,561 +24,229 @@ Game Package v1
     Game Entry document
     Descriptor {key}
     initial target/input
-        ↓ consumed by matching launcher
+        ↓ matching Launcher
 
-    ├── Hostra Game Launcher / Node Runner Profile v1
-    │       Game validation via @loomrealm/game-package
-    │       + launch.hostra.json
-    │       → exact join / full PREPARE
-    │       → HostraLaunchPlan
-    │       → LogicalGameBootstrap projection
-    │       → concrete Platform installs plan / exposes RuntimeHosting
-    │
-    └── PWA Game Launcher / Worker Runner Profile v1
-            Game validation via @loomrealm/game-package
-            + launch.pwa.json
-            → exact join / full PREPARE
-            → PwaLaunchPlan
-            → LogicalGameBootstrap projection
-            → concrete Platform installs plan / exposes RuntimeHosting
+Hostra Game Launcher / Node Runner Profile v1
+PWA Game Launcher / Worker Runner Profile v1
 
 Subsystem Control v1
     ↓
 Runtime Control Application Profile v1
     = Control v1 + Frame / Call v1
-    = one reader + one writer + shared strict-monotonic sender IDs
 
 Frame / Call v1                         Active / Normative / Frozen
-    + Conformance v1
-
-Main ⇄ Renderer Control v1              Active Design / Draft
-    ↓ DataAuthority {S,G,dataProfile}
+Main ⇄ Renderer Control v1              Active / Normative / Frozen
 Renderer Data Application Profile v1    Active / Normative / Frozen
-    = Data Connection v1 + User Input v1 + Render Update v1
-    = one reader + one serialized writer
-    + Conformance v1 fixtureSetRevision 1
-
 Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
-    + Conformance v1 fixtureSetRevision 1
 User Input v1                           Active / Normative / Frozen
-    + Conformance v1 fixtureSetRevision 1
 Render Update v1                        Active / Normative / Frozen
-    + Conformance v1 fixtureSetRevision 1
 Readonly Content API v1                 Active / Normative / Evolving
 ```
 
----
-
-## 2. Game Package v1
-
-[Game Package v1](./game-package-v1.md)：
-
-```ts
-interface GameEntryV1 {
-  readonly formatVersion: 1;
-  readonly initial: {
-    readonly subsystem: string;
-    readonly input: JsonValue;
-  };
-  readonly subsystems: readonly {
-    readonly key: string;
-  }[];
-}
-```
-
-Game Package：
-
-```text
-logical topology/business initial input only
-closed schema
-validated detached immutable snapshot
-no executable/Platform authority
-```
-
-Runtime-product primary consumers 是 matching Platform Launchers。Main 不解析/依赖 Game Entry document model。
-
-Current v1：
-
-```text
-no v2
-no legacy {key,module} parser
-no compatibility alias
-```
+Renderer Control v1 frozen by [ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)。
 
 ---
 
-## 3. Platform Launch Profiles
+## 2. Game / Launcher / Main Boundary
 
-[Hostra Game Launcher / Node Runner Profile v1](./nodejs-launcher-profile-v1.md)：
-
-```text
-Game source
-→ Game validation
-+ launch.hostra.json
-→ exact Game↔Hostra key-set join
-→ filesystem/install security resolution
-→ HostraLaunchPlan
-→ LogicalGameBootstrap
-→ plan-bound RuntimeHosting
-→ Host-owned Node Runner
-```
-
-[PWA Game Launcher / Worker Runner Profile v1](./pwa-launcher-profile-v1.md)：
+Game Package只验证 logical document：
 
 ```text
-Game source
-→ Game validation
-+ launch.pwa.json
-→ exact Game↔PWA key-set join
-→ installation/same-origin resolution
-→ PwaLaunchPlan
-→ LogicalGameBootstrap
-→ plan-bound RuntimeHosting
-→ Host-owned Worker Runner
+formatVersion
+initial subsystem/input
+subsystems[{key}]
 ```
 
-两 profile 独立拥有各自 Platform config/schema/validation/security policy；不建立 universal launcher schema/options bag。
-
-共同 hard invariant：
-
-> **Game validation + current Platform manifest validation + exact join + all executable resolution + hosting/security preflight + plan/bootstrap projection MUST complete before the first business Runtime side effect.**
-
-PREPARE failure：
-
-```text
-Process/Worker create count = 0
-business module import count = 0
-Runtime Control establish count = 0
-```
-
----
-
-## 4. Main / Game / Runner Boundary
-
-Main consumes：
+Matching Launcher消费 Game Entry并完成 current-platform manifest/join/resolution/security PREPARE；Concrete Platform安装 PlatformLaunchPlan；Main只接收：
 
 ```text
 LogicalGameBootstrap
-    subsystemKeys
-    initial subsystemKey/input
-
++
 MainPlatform narrow capability view
-    DeadlineScheduler
-    BootstrapTokenGenerator
-    RuntimeHosting
 ```
 
-Main does not consume：
-
-```text
-GameEntryV1 / ValidatedGameEntryV1
-formatVersion
-Platform Launch Manifest / PlatformLaunchPlan
-module/path/URL
-Node/Worker options
-```
-
-Runtime launch：
-
-```text
-Main registers bootstrap token
-→ RuntimeHosting.launch({subsystemKey,bootstrapToken})
-→ RuntimeHosting lookup frozen plan
-→ Host-owned Runner
-→ selected Definition Module
-```
-
-Definition Module ABI 统一为 `@loomrealm/subsystem` 的 `SubsystemDefinitionFactory`。
-
-跨平台要求：same logical key / author ABI / formal semantics / business-observable result；不要求 same artifact/path/bytes。
+Main不读取 GameEntry、formatVersion、PlatformLaunchPlan、module/path/URL、Node/Worker options。
 
 ---
 
-## 5. Runtime Control
+## 3. MainPlatform Through M7
 
-[Subsystem Control v1](./subsystem-control-protocol-v1.md)：
+M7 Frozen target：
 
 ```text
-subsystem.hello
-subsystem.status
-subsystem.shutdown
+DeadlineScheduler
+OpaqueMaterialGenerator
+RuntimeHosting
+RendererControlBinding
 ```
 
-只拥有 Runtime identity/lifecycle protocol semantics；Launch Attempt/token authority仍属于 Main。
+`RendererControlBinding.acquire(rendererControlToken,signal)`只建立 one candidate physical Renderer Control carrier；成功 `renderer.hello` 的 Main authority transaction才授予 current Renderer participant。
 
-[Runtime Control Profile v1](./runtime-control-profile-v1.md)：
+Platform只生成/交付 fresh opaque material与 physical carrier；Main拥有 Session/attempt/token/currentness authority。
+
+---
+
+## 4. Runtime Control + Frame / Call
+
+Runtime Control owns concrete Control/Frame protocol mechanics：
 
 ```text
-Control 1 + Frame 1
-one UTF-8 JSON text unit per JSON-RPC object
-one connection-wide inbound reader/dispatcher
-one serialized outbound writer
-same-sender Control+Frame Request IDs strict monotonic
+one UTF-8 JSON text application unit
+one reader/dispatcher
+one serialized writer
+shared same-sender strict-monotonic Request IDs
 finite deadlines
-terminal/pending settlement first-wins
-no Batch / retry / replay / reconnect
+terminal/pending first-wins
+Response causal barrier
+no retry/replay/reconnect
 ```
 
-Runtime Control implementation boundary：
+Frame / Call v1 Frozen authority：
 
 ```text
-Foundation MessageCarrier
-        ↓
-Wire parse/decode
-        ↓
-Runtime Control profile limits/state/correlation
-        ↓
-role-specific Main / Subsystem Host peers
-```
-
-Reader MUST remain able to correlate Response while role handler is awaiting；single reader不得退化为 blocking handler loop。
-
-Response causal barrier：
-
-```text
-handler reply
-→ Response carrier.send accepted
-→ dependent afterResponse action
-```
-
-This realizes Frozen Frame call/return Response-before-dependent-RPC without moving Main Stack authority into Runtime Control。
-
-Request IDs：
-
-```text
-positive safe integer
-strict monotonically increasing per sender/connection
-Control + Frame shared same-sender namespace
-never reuse / never wrap
-```
-
-JSON source duplicate members follow frozen Wire / ECMAScript `JSON.parse` observable semantics；Runtime Control MUST NOT add a second duplicate-member parser。Parsed result仍 exact closed schema。
-
-`ready` 不携 Data/Platform executable material；same-attempt Control reconnect不存在。
-
----
-
-## 6. Frame / Call v1
-
-[Frame / Call v1](./frame-call-protocol-v1.md) Frozen。
-
-Exactly seven Requests：
-
-```text
-Main → Subsystem
-    initialize / activate / suspend / resume / close
-
-Subsystem → Main
-    call / return
-```
-
-核心：
-
-```text
-Main authority
-one-shot Activation
-Response send barrier before dependent RPC
+Main owns Frame/Stack/Activation/InputTarget
 ACK-before-publication
 post-commit no rollback
-Success = known commit
-Explicit Error = protocol-defined known no-commit/fatal
-timeout/loss ambiguous → Runtime failure
-no retry/replay
-lowest failed-runtime occurrence → whole-suffix fixed-point unwind
-accepted outcome preserved
-fresh surviving Caller resume
+timeout/loss ambiguity → Runtime failure
+whole-suffix fixed-point unwind
+fresh surviving Caller Activation
 ```
 
-ADR 0021 only closes Runtime Control mechanics/Wire alignment；does not reopen Frame semantic freeze。
+Renderer Control不得反向改变这些 semantics。
 
 ---
 
-## 7. Renderer Control v1
+## 5. Renderer Control v1 — Frozen
 
-[Renderer Control v1](./main-renderer-control-v1.md) 复制 Main committed authority：
+[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md) frozen semantics：
 
 ```text
-Runtime projection
-Frame Stack / Activation
-InputTarget
-DataAuthority {subsystemKey,generation,dataProfile}
+one current Renderer participant
+one bounded candidate attempt
+renderer.hello id=1
+renderer.state full Snapshot
+initial AuthorityRevision=1
+pure Main authority projection
+exact hello outbound preflight before current switch
+atomic hello currentness/replacement
+Renderer initial Snapshot install before later state
+active old-peer retirement
+0..1 inFlight + 0..1 pendingLatest
+Control/Session terminal fail-closed
+representation limits do not become Frame/Runtime business limits
 ```
 
-不携 Data endpoint/ticket/Port、Platform executable binding、Interest Registry、Render State、Content credential。
+M7 Main Snapshot fields：
+
+```text
+runtimes
+stack / current Activation
+inputTarget
+dataAuthorities=[]   // real Main Data policy starts M8
+```
+
+No physical endpoint/token/Port/executable material enters Snapshot。
 
 ---
 
-## 8. Renderer Data Application Profile v1
+## 6. Renderer Data / Input / Render
 
-[Renderer Data Profile v1](./renderer-data-profile-v1.md) Frozen：
+Renderer Data Profile v1 frozen identity：
 
 ```text
-Profile identity = loomrealm.renderer-data/1
-Connection v1 + User Input v1 + Render Update v1
+loomrealm.renderer-data/1
+= Data Connection v1 + User Input v1 + Render Update v1
 ```
 
-Profile固定 shared carrier mechanics：
+Data Connection：Session + current Renderer + subsystemKey + generation，same generation/profile sequential reconnect allowed；Data loss != Runtime failure。
+
+User Input effective gate：
 
 ```text
-one JSON-text application unit
-common 1 MiB / depth-64 preflight
-one connection-wide ordered reader/dispatcher
-one connection-wide serialized writer
-exact role direction / input.* + render.* routing
-fresh-carrier child baselines
-terminal first-wins
-no profile-created retry/replay/old-queue migration
-```
-
-共享 writer 只稳定 physical application-unit ordering；不建立 Input/Render shared revision、transaction、ACK 或 replay cursor。
-
-Profile改变必须 fresh Data generation。
-
-Conformance 由 [Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md) `fixtureSetRevision = 1` 固定。
-
----
-
-## 9. Data Connection v1
-
-[Data Connection v1](./renderer-subsystem-data-connection-v1.md) Frozen：
-
-```text
-identity = Session + current Renderer + subsystemKey + generation
-attribute = immutable dataProfile
-lifecycle = current → retired
-0..1 current per Subsystem
-same S/G/profile sequential reconnect allowed
-```
-
-Platform Broker只实现 physical carrier；不 mint generation/profile。
-
-```text
-Data loss/provisioning failure
-    != Runtime failure
-    != Frame unwind
-    != DataAuthority mutation
-```
-
-Conformance 由 [Data Connection v1 Conformance Profile](./renderer-subsystem-data-connection-conformance-v1.md) `fixtureSetRevision = 1` 固定。
-
----
-
-## 10. User Input v1
-
-[User Input v1](./user-input-v1.md) Frozen：
-
-```text
-Subsystem → Renderer
-    input.interest full Frame Registry
-
-Renderer → Subsystem
-    input.state / input.event / input.reset
-```
-
-统一 lifetime：
-
-```text
-Desired Interest = Frame-scoped
-Input Lease      = Activation-scoped InputTarget(F,A)
-Wire State       = current Data carrier scoped
-```
-
-Effective：
-
-```text
-current Data
-∩ Main InputTarget/current Activation
+current Main InputTarget
+∩ current Data Connection
+∩ mirrored active Frame/Activation
 ∩ Interest[F]
-∩ Producer(C)
+∩ Producer availability
 ```
 
-标准 `keyboard.* / pointer.* / gamepad.*` canonical payload、custom `x.*` grammar、State/Event causal ordering、Reset/producer-loss teardown、hard limits与failure taxonomy均在 v1内冻结。
-
-fresh Activation可复用 Desired Interest但不复用 old State/Event；fresh carrier remote Interest/State/Event history从 empty开始并重新 baseline。
+Render Update owns independent Domain/revision/presentation replication；Frame close/Data loss不自动等于 Render Domain destroy。
 
 ---
 
-## 11. Render Update v1
+## 7. Unified Carrier Policy
 
-[Render Update v1](./render-update-v1.md) Frozen：
-
-```text
-render.domains
-render.snapshot
-render.patch
-render.event
-```
-
-核心 identity / recovery：
-
-```text
-wire Domain identity
-= Session + subsystemKey + DataAuthority generation + domainId
-
-same-generation reconnect
-= same wire Domain lifetime + fresh publication baseline
-
-fresh generation
-= fresh Render wire universe
-```
-
-fresh carrier：
-
-```text
-first Render message = Registry
-→ each Domain independently unbaselined
-→ fresh Snapshot
-→ carrier-local strict R→R+1 Patch/Snapshot commits
-→ Event
-```
-
-Event 是 transient/no-replay，同时是 retained sender-side coalescing barrier；well-formed stale Event drop-only。Registry/Snapshot/Patch authoritative continuity error或任何 schema/hard-limit invalid message retire current Data carrier。
-
-logical Domain stacking：higher `zIndex` above；tie 用 `domainId` UTF-8 lexical order。
-
-Render failure不等于 Runtime failure/Frame unwind；Data loss后旧 Render Store最多是 stale presentation cache，不是 fresh Patch base。
-
----
-
-## 12. Content API v1
-
-[Content API v1](./content-api-v1.md) 提供 readonly logical content access。
-
-必须区分：
-
-```text
-Runtime bootstrap token
-Platform executable resolution/Runner capability
-Data ticket/Port authority
-Content credential
-```
-
-Content API 不得成为 arbitrary executable path/capability。
-
----
-
-## 13. Platform Boundary
-
-以下默认不是 application protocol：
-
-```text
-Game Entry physical location/acquisition
-Hostra/PWA Launch Manifest physical location
-Node child IPC provisioning payload
-Worker bootstrap/provisioning Port transfer object
-WebSocket endpoint discovery
-Data bearer ticket format
-Content credential injection
-Hostra Shell RPC
-```
-
-只有出现独立第三方 interoperability/security boundary 时才升级 formal Contract/Profile。
-
----
-
-## 14. Unified Carrier Policy
-
-Current message-oriented profiles统一：
+Current message-oriented application profiles统一：
 
 ```text
 one carrier unit = one UTF-8 JSON text string
 ```
 
-WebSocket / MessagePort / MemoryCarrier 共享 application value model；Structured Clone不扩大协议 payload。
+WebSocket / MessagePort / MemoryCarrier共享 application value model；Structured Clone不扩大 protocol payload。
 
-Foundation treats string opaque；Wire owns generic JSON representation；profile package owns domain limits/state mechanics。
+Foundation treats string opaque；Wire owns generic JSON representation；protocol/profile package owns domain validation/state mechanics。
 
 ---
 
-## 15. Authority Summary
+## 8. Authority Summary
 
 ```text
 Game Package
-    Game Entry document validation capability
+    Game document validation
 
-Platform Launcher
-    primary Runtime-product Game consumer
-    Game + Platform PREPARE component
-    PlatformLaunchPlan + LogicalGameBootstrap projection
+Launcher / Concrete Platform
+    Game+platform PREPARE / physical realization
 
-Concrete Platform
-    installs PlatformLaunchPlan privately
-    exposes Main-facing RuntimeHosting / scheduler / bootstrap token capability
+Platform Ports
+    narrow physical capabilities/facts
 
-Runtime Control
-    Control/Frame protocol mechanics
-    connection-local protocol state/correlation/deadlines
-    no Main/Subsystem business authority
-
-Data Profile / @loomrealm/data
-    Data Profile shared carrier mechanics
-    static Input/Render wire validation + typed routing
-    no Main/Subsystem/Renderer business authority
+Runtime Control / Renderer Control / Data profile packages
+    protocol mechanics only
 
 Main
-    Runtime/Frame/Activation/InputTarget/DataAuthority
-    Launch Attempt/bootstrap credential authority
-    no Game document dependency
+    Session / Runtime / Frame / Activation / InputTarget / DataAuthority
+    Runtime credential + Renderer currentness/token/revision authority
 
 Subsystem
-    business/local Frame/Input state / Interest[F] / Render Domains
+    business/local Frame/Input/Interest/Render state
 
 Renderer
-    read-only Main mirror / Producers / Render replica
-
-Platform Composition
-    complete physical topology/bootstrap/provisioning
+    read-only Main mirror + local producer/presentation/data consumers
 ```
 
 ---
 
-## 16. Current Closure Priorities
-
-Implemented Baseline：
+## 9. Current Implementation Order
 
 ```text
-@loomrealm/foundation
-@loomrealm/wire
-@loomrealm/game-package
-@loomrealm/runtime-control
-@loomrealm/platform-ports
-    M4 Subsystem + M5 Main consumer qualified
-@loomrealm/subsystem
-    M4 Runtime/Frame slice implemented
-@loomrealm/main
-    M5 Runtime/Frame authority slice implemented
-@loomrealm/data
-    Package-local Core Baseline Implemented
-    != M8 milestone closed
+M6 Hostra Runtime vertical ✅
+→ M7 Frozen Renderer Control design, implementation next
+→ M8 Data authority/binding integration
+→ M9 Desktop physical Data Broker
+→ M10/M11 Input/Render
+→ M12 Content
+→ M13 business map
+→ M14 Desktop Full E2E including Hostra physical Renderer Control
+→ M15 PWA Runtime vertical
+→ M16 PWA Renderer Control + full equivalence
 ```
 
-Current next implementation gate：
+M7 logical `RendererControlBinding` + deterministic MemoryCarrier semantic qualification is distinct from M14/M16 physical Renderer transport qualification。
+
+---
+
+## 10. Freeze Governance
+
+Frozen contracts can reopen only for demonstrated correctness/security contradiction、cross-Frozen-contract conflict或 real consumer证明 Frozen capability无法表达必要语义。
+
+不得因：
 
 ```text
-M6 Hostra Platform vertical
-    concrete HostraPlatform
-    Launcher PREPARE component
-    Node Runner / RuntimeHosting / Control carrier realization
+代码复用
+generic framework
+future feature speculation
+transport preference
+目录/命名对称
 ```
 
-Then：
-
-```text
-M7 Renderer Control
-M8 integration of existing Data baseline
-M9 Desktop DataConnectionBroker
-M10 User Input role managers
-M11 Render role managers
-...
-M15 PWA Platform vertical
-```
-
-Implementation priority：
-
-```text
-M6 first runnable physical Runtime vertical
-→ M7 authority mirror
-→ M8 shared Data integration
-→ M9 physical Data provisioning
-→ M10/M11 Input/Render role consumers
-```
+重新设计 current-v1。
