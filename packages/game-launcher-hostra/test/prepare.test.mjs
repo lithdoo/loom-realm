@@ -1,4 +1,4 @@
-import { access, mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -179,7 +179,7 @@ for (const targetExtension of [".js", ".cjs", ".mjs"]) {
     });
     if (targetExtension === ".mjs") {
       const prepared = await preparing;
-      assert.equal(prepared.launchPlan.runtimes[0].physicalModule, target);
+      assert.equal(prepared.launchPlan.runtimes[0].physicalModule, await realpath(target));
     } else {
       await assert.rejects(preparing, hostraCode("SUBSYSTEM_MODULE_INVALID"));
     }
