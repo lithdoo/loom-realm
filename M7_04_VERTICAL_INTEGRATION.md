@@ -1,193 +1,188 @@
 # M7 / 04 — Renderer Control Vertical Integration
 
-> 状态：Active Design / Draft  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M7 Renderer Control  
 > 落地顺序：04  
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md) → [M7 / 02](M7_02_MAIN_AUTHORITY_PROJECTION.md) → [M7 / 03](M7_03_RENDERER_CONTROL_STORE.md)  
-> 目标：通过 deterministic MemoryCarrier 跑通真实 Main integration → renderer-control → Renderer role vertical，验证 authority、hello/replacement 并发、boundedness 与 fail-closed；不引入 test-only authority bypass 或预测式 Renderer Platform abstraction。
+> 冻结决策：[ADR 0027](doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 目标：用 deterministic `RendererControlBinding + MemoryCarrier` 跑通真实 Main → renderer-control → Renderer vertical，验证 frozen authority/currentness/race/bounded/fail-closed semantics；不使用 test-only authority bypass。
 
-核心原则：
-
-> **MemoryCarrier 可以是假物理 transport，但 Main authority、revision、hello acceptance、current-peer replacement、Renderer application path必须都是真生产路径。**
+> **MemoryCarrier 可以是假 physical transport，但 Binding、Main authority、accept loop、hello acceptance、replacement、Renderer holder必须全部走生产代码路径。**
 
 ---
 
-## 1. Vertical Shape
+## 1. Frozen Vertical
 
 ```text
 LogicalGameBootstrap
 → real @loomrealm/main Session
+→ platform.rendererControl: RendererControlBinding
+→ real Main accept loop
 → existing Runtime/Frame/Stack authority
-→ real Renderer projection/revision/hello acceptance
-→ @loomrealm/renderer-control Main peer
+→ real projection/revision/hello acceptance
+→ renderer-control Main peer
 → MemoryCarrier<string>
-→ @loomrealm/renderer-control Renderer peer
-→ @loomrealm/renderer currentPeer + currentSnapshot
+→ renderer-control Renderer peer
+→ @loomrealm/renderer current peer + Snapshot
 ```
 
 Subsystem side继续复用：
 
 ```text
 Main
-↔ @loomrealm/runtime-control
+↔ runtime-control
 ↔ MemoryCarrier
-↔ @loomrealm/subsystem/host
+↔ subsystem/host
 ↔ test business Definition
 ```
 
 ---
 
-## 2. What May Be Fake
+## 2. Deterministic `RendererControlBinding` Fixture
 
-可 fake：
+M7 test Platform必须真实实现 frozen Binding shape：
 
-```text
-physical Renderer transport
-BrowserWindow / Worker
-physical token delivery mechanism
+```ts
+acquire(rendererControlToken, signal): Promise<MessageCarrier>
 ```
 
-不得 fake：
+Fixture可额外在 test-only side观察：
 
 ```text
-Main authority
-sessionId / AuthorityRevision
-Snapshot projection
-opaque material generation contract
-hello token authentication/consumption
-current Renderer peer decision
-peer replacement retirement
-renderer-control peers
-Renderer current Snapshot application
+Main交付的 token
+pending acquire count
+candidate Renderer endpoint of the MemoryCarrier pair
+abort/close facts
 ```
 
-禁止 harness 读取 Main private state后手工拼 Snapshot。
+但不得通过 fixture：
+
+```text
+认证 token
+决定 current Renderer
+构造 Snapshot/revision
+访问 Main private authority
+绕过 renderer-control peer
+```
+
+Test Binding只实现 physical delivery/establishment semantics。
 
 ---
 
-## 3. Ingress Must Be Production-shaped
+## 3. Bounded Attempt Lifecycle
 
-M7尚不预定义 RendererHosting/RendererControlHost 等新的 renderer physical port。
-
-established MemoryCarrier 必须进入真实 Main integration seam；不能靠 test-only public API或 authority bypass。
-
-若无法做到：
+必须证明 Main：
 
 ```text
-established carrier
-→ real Main hello acceptance/current-peer path
+at most one pending acquire/candidate attempt
+Renderer absence does not block Runtime/Frame Session progress
+fresh attempt uses fresh token
+attempt settle/terminal invalidates old token
+current A may coexist with exactly one future candidate B
 ```
 
-而不暴露 Main internals，则停止实现并基于真实阻塞关闭一个最窄 Core↔Platform ingress capability。
-
-允许的 `platform-ports` M7变化仅包括已有多消费者证明的 fresh opaque material capability泛化；它不等于 Renderer physical ingress port。
+Pending acquire Session terminal时必须收到 abort；abort后 fixture不得晚交付 live carrier。
 
 ---
 
-## 4. Integration Composition
+## 4. Session / Initial Revision
 
-M7 test composition只负责：
+Session creation：
 
 ```text
-construct real Main
-construct real Renderer role
-provide real narrow platform capability view including opaqueTokens
-create deterministic carrier pair
-route carrier through production ingress seam
-start/stop participants
-observe results
+fresh sessionId
+initial Renderer revision = 1
+initial Snapshot frozen
 ```
 
-one-off glue保持 test-local，不发布 service framework。
+Renderer尚未连接时 Runtime bootstrap/Frame commit可继续推进 revision。
+
+Hello取得当时 current `R`，不假设 `R=1`。
+
+验证 transport/candidate bookkeeping不推进 revision。
 
 ---
 
-## 5. Session / Initial Revision
+## 5. Initial Hello Exact Preflight + Atomicity
 
-第一条 evidence从 Main Session creation开始：
+必须构造两类 evidence。
+
+### Representable current Snapshot
+
+在 hello acceptance附近并发一个 Renderer-visible Main commit：
+
+合法结果只有：
 
 ```text
-fresh sessionId generated
-initial Renderer authority revision = 1
-initial full Snapshot frozen
+commit before atomic acceptance
+→ hello already contains R+1
+
+or
+
+acceptance captures/prepares R first
+→ candidate becomes current in same serialized transaction
+→ later commit R+1 enters pendingLatest
+→ prepared hello Result(R) sends first
+→ renderer.state(R+1) later
 ```
 
-随后 Runtime bootstrap等 visible commit可以在没有 Renderer connection时继续推进 revision。
+不得丢失 R+1。
 
-hello时 Renderer取得**当时 current revision R**，不假设 R=1。
+### Unrepresentable current Snapshot
+
+```text
+A healthy current
+→ B candidate hello
+→ current Snapshot/prepared hello exceeds v1 representation limits
+```
+
+必须：
+
+```text
+B fails closed
+B token/attempt invalidated
+A remains current
+A is NOT retired
+Main Runtime/Frame authority unchanged
+```
+
+这证明 exact preflight发生在 current switch之前。
+
+---
+
+## 6. Renderer Initial Handoff
 
 验证：
 
 ```text
-revision never starts at 0
-revision comparison excludes revision field itself
-transport/current-peer bookkeeping does not bump revision
+Renderer peer validates/returns R
+→ Renderer role installs {newPeer,R} atomically
+→ only then later state consumption starts
 ```
 
----
-
-## 6. Initial Hello Atomicity
-
-必须构造 race test：
-
-```text
-Main current Snapshot = R
-candidate hello arrives
-```
-
-在 hello acceptance serialization boundary附近并发触发一个 Renderer-visible Main commit。
-
-只允许两种合法结果：
-
-```text
-commit happens before atomic hello acceptance
-→ hello Snapshot already contains R+1
-
-or
-
-hello acceptance captures R first
-→ candidate becomes current in same atomic step
-→ later commit R+1 enters pendingLatest
-→ hello Result(R) sends first
-→ renderer.state(R+1) later
-```
-
-绝不允许：
-
-```text
-hello returns R
-Main current = R+1
-R+1 neither in hello nor pending/sent
-```
-
-验证 Renderer side：
-
-```text
-initial Snapshot installed with new peer
-before later state consumption starts
-```
+制造 R+1 已在 carrier/peer侧等待的时序，确保 initial install后才应用 R+1，不丢失、不错误归属。
 
 ---
 
 ## 7. Runtime Lifecycle Projection
 
-覆盖：
+冻结 mapping evidence：
 
 ```text
 not materialized → declared
-starting → starting
-connected → connected
+failure           → failed
+expected physical terminated → stopped
+starting          → starting
+connected         → connected
 identified / initializing → identified
-ready → ready
-stopping → stopping
-expected termination observed → stopped
-failure → failed
+ready             → ready
+stopping          → stopping
 ```
 
-比较 Main projector current output与 Renderer current Snapshot；不建立第二套 expected lifecycle machine。
+failure precedence高于 stopped。
 
-允许 publication coalescing。
+Session terminal后不要求继续观察 shutdown cleanup的 stopping/stopped publication，因为 Renderer Control同时 retirement。
 
 ---
 
@@ -198,7 +193,7 @@ failure → failed
 ```text
 starting
 → initialize success
-→ activate Response accepted
+→ activate ACK
 → Main commits active + fresh Activation/InputTarget
 → Renderer mirrors committed state
 ```
@@ -215,12 +210,12 @@ caller active
 ### frame.return
 
 ```text
-child closing/removal commit
+child closing/removal
 → caller resume ACK
 → Main commits caller active + fresh Activation/InputTarget
 ```
 
-验证 old `frameId + activationId` never regrant；该 lifetime invariant由 Main trace证明，不由 receiver历史 Set证明。
+验证 old `frameId + activationId` never regrant；由 Main trace证明，不由 receiver历史 Set证明。
 
 ---
 
@@ -241,45 +236,47 @@ Renderer无 unwind algorithm。
 
 ---
 
-## 10. DataAuthority Scope
+## 10. M7 DataAuthority Scope
 
-Main M7 vertical固定：
+Main vertical固定：
 
 ```text
 dataAuthorities = []
 ```
 
-不要构造 synthetic Main allocator/generation policy。
-
-非空 DataAuthority只在 renderer-control/renderer package fixture验证 representation；真实 lifecycle进 M8。
+非空 DataAuthority只在 renderer-control/renderer package fixture验证 formal representation。真实 lifecycle M8。
 
 ---
 
-## 11. Connection Replacement Is Active
+## 11. Active Replacement
 
-必须使用两个真实 Renderer peers：A、B。
+使用两个真实 Renderer peers A/B：
 
 ```text
-A current with Snapshot RA
-→ fresh token + B hello
-→ Main atomic acceptance makes B only current
-→ A immediately removed from publication authority
-→ A Main peer actively retire/close carrier
-→ B installs hello Snapshot RB
-→ A observes terminal and clears its local current authority
+A current
+→ Main already has one pending fresh Binding attempt
+→ B obtains candidate carrier/token and sends hello
+→ Main exact preflight succeeds
+→ atomic acceptance commits B current / A non-current
+→ A peer synchronously rejects future publication submissions
+→ A pendingLatest cleared
+→ A carrier close requested
+→ B installs initial Snapshot
+→ A eventually observes terminal
 ```
 
-验证：
+必须验证：
 
 ```text
-A receives no post-replacement valid state
-A carrier close/terminal actually occurs; not merely silence
-A late terminal cannot clear B Renderer role current state
-B hello Result send failure does not resurrect A as current
+A no new send is initiated after replacement commit
+A already-started inFlight send MAY later settle/arrive
+such late A message has no effect on B role current state
+A late terminal cannot clear B
+B hello send failure does not resurrect A
 fresh attempt required after failed B
 ```
 
-M7 Data/Input尚未存在，所以 product-level old participant input rejection在后续 Data/Input milestone消费同一 current-participant authority；M7必须先证明 Control currentness/terminal闭合。
+不得写“replacement 后 A 绝不收到任何 bytes”这种 Foundation carrier无法保证的测试。
 
 ---
 
@@ -288,87 +285,107 @@ M7 Data/Input尚未存在，所以 product-level old participant input rejection
 制造：
 
 ```text
-R in-flight
+R inFlight
 R+1 pending
-R+2 committed
-R+3 committed
+R+2 commit
+R+3 commit
 ```
 
-结构必须始终：
+实现结构始终：
 
 ```text
-0..1 in-flight
-+
+0..1 inFlight
 0..1 pendingLatest
 ```
 
-`R+1` 可被 `R+3` 替换；不能出现 revision-sized queue/history/listener。
+`R+1` 可被 `R+3` 替换；无 revision-sized queue/history/listener。
 
-M7只证明 core structural boundedness。MemoryCarrier不代替 Hostra/PWA concrete stalled-write finite close policy evidence。
+M7只证明 Core structural boundedness，不声称 Hostra/PWA stalled-write finite timeout已 qualification。
 
 ---
 
-## 13. Representation Failure Must Not Contaminate Frame Semantics
+## 13. Representation Failure During Current Connection
 
-构造一个超过 Renderer Control wire representation limit 的合法 Main projection fixture/scenario（可通过 package-level synthetic projector fixture，不必强迫真实 Frame Stack达到某 magic count）。
+构造合法 Main authority但 outbound full state message不可表示：
+
+```text
+Main commits authority
+→ peer exact outbound preflight fails
+→ current Renderer Control terminalizes
+```
 
 验证：
 
 ```text
-outbound preflight rejects full Snapshot
-Renderer Control attempt/current peer terminalizes
-Main Runtime/Frame/Stack authority unchanged
-no Frame transaction rollback
+Main Runtime/Frame/Stack unchanged
+no transaction rollback
 no Renderer-specific frame.call error
-no truncation/drop
+no Snapshot truncation/drop
+Renderer holder eventually current=null
 ```
-
-M7不得新增：
-
-```text
-max Frame Stack = N business rule
-max Runtime = N business rule
-max DataAuthority = N business rule
-```
-
-只保留 formal wire size/depth/member limits。
 
 ---
 
-## 14. Current Peer Terminal
+## 14. Current / Stale Peer Terminal
 
 验证：
 
 ```text
-current B peer terminal
-→ Main currentRendererPeer = null
-→ rendererRevision unchanged solely because of transport loss
-→ Renderer B currentPeer/currentSnapshot = null
+current B terminal
+→ Main currentRendererPeer=null
+→ rendererRevision unchanged solely for transport loss
+→ Renderer B current=null
 ```
 
 以及：
 
 ```text
 stale A terminal after B current
-→ Main ignores for currentness
-→ Renderer role ignores for B state
+→ Main ignores A for currentness
+→ Renderer role ignores A for B state
 ```
-
-恢复只允许 fresh token + fresh hello current Snapshot。
 
 ---
 
-## 15. Other Terminal Scenarios
+## 15. Main Session Terminal
 
-至少覆盖：
+分别覆盖：
+
+```text
+root outcome
+external shutdown
+fatal Main terminal
+```
+
+一旦 terminal latch：
+
+```text
+pending Binding acquire aborted
+candidate token invalidated
+candidate peer retired if present
+current peer retired/close requested
+no new Renderer attempt issued
+no further publication submitted
+Main Session result/cleanup does not wait for Renderer physical close
+```
+
+Renderer current peer最终 terminal并把 local current清空。
+
+不发送 final `session.ended` Snapshot/RPC。
+
+---
+
+## 16. Other Terminal Scenarios
+
+至少：
 
 ```text
 carrier closes during hello
 hello Result send failure
 invalid hello/auth/version
-invalid inbound/outbound wire
-replacement while old write pending
-representation preflight failure
+replacement while old write inFlight
+current state representation preflight failure
+Binding aborted at Session terminal
 ```
 
 要求：
@@ -378,81 +395,86 @@ terminal first-wins
 pending settles
 no retry/replay
 no old-current rollback
-no task/listener leak
+no unbounded task/listener leak
 ```
 
 ---
 
-## 16. Correct Package Dependency Direction
+## 17. Frozen Dependency Direction
 
 ```text
 foundation ─────┐
 wire ───────────┴→ renderer-control
 
-platform-ports ← main → renderer-control
-renderer ─────────────→ renderer-control
+foundation → platform-ports
+platform-ports →? NO (consumer direction is Main importing platform-ports)
+main → platform-ports
+main → renderer-control
+renderer → renderer-control
 ```
 
 保持：
 
 ```text
 renderer-control !→ main/renderer/platform-ports
-renderer !→ main
+renderer !→ main/platform-ports
 main !→ renderer
+platform-ports !→ main/renderer-control
 ```
-
-`platform-ports` 的 M7 refinement只提供 narrow opaque material primitive，不提供 universal Renderer services。
 
 ---
 
-## 17. CI Shape
+## 18. CI Shape
 
 分别保留：
 
 ```text
 renderer-control package tests
-platform-ports/main opaque material integration tests
-main projection/hello tests
+platform-ports M7 contract tests
+main projection/accept-loop/hello tests
 renderer role tests
 M7 cross-package vertical
+existing M1–M6 regression
 ```
 
-不要集中成一个巨型 E2E。
+不要集中成巨型 E2E。
 
 ---
 
-## 18. Physical Platform Deferred
+## 19. Physical Platform Deferred
 
-M7/04不关闭：
+M7 不 qualification：
 
 ```text
-Desktop BrowserWindow Renderer bootstrap
-Hostra Renderer Control WebSocket
-PWA Renderer Control MessagePort
-physical renderer token delivery
-concrete stalled-write timeout policy
+Hostra BrowserWindow/Renderer WS physical realization
+PWA Renderer MessagePort physical realization
+actual stalled-write timeout policy
 Data Broker
 ```
 
-这些由后续真实 product composition qualification关闭。
+但 `RendererControlBinding` logical Core↔Platform contract在 M7 已冻结并由 deterministic implementation真实消费。
+
+Hostra physical Renderer Control必须在 M14 Desktop Full E2E前关闭；PWA在 M16前关闭。
 
 ---
 
-## 19. Step Closure
+## 20. Frozen Closure
 
 M7/04 complete when：
 
 ```text
-real Main → peer → Renderer path works
-initial revision/session semantics work
-hello concurrent commit race is impossible/lossless
-Renderer hello handoff cannot lose first later state
-replacement actively closes old connection
-old/new peer terminal races are identity-safe
-call/return/fresh Activation traces work
-failure/unwind projection works
-slow consumer stays structurally bounded
-representation failure only kills Renderer Control
+real RendererControlBinding → Main accept loop → peer → Renderer path works
+one candidate bound enforced
+hello exact preflight/current switch ordering proven
+concurrent revision cannot be lost
+Renderer initial handoff cannot lose first later state
+replacement blocks new old-peer sends without fictitious cancellation
+old/current terminal identity-safe
+Session terminal retires Renderer authority
+call/return/failure traces pass
+slow consumer structurally bounded
+representation failure isolated
 no test-built authority Snapshot
-no speculative Renderer Platform abstraction
 ```
+
+除 ADR 0027 Reopen Rule外，不允许实施阶段重新选择 ingress/attempt/currentness模型。
