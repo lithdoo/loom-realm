@@ -4,10 +4,10 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：跨平台 composition boundary、Launcher-owned Game Entry PREPARE、Platform Launch Manifest/Plan、Runtime Runner、role-facing ports、DataConnectionBroker/provisioning，以及 Hostra/PWA 对同一 logical Session 的 realization  
-> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[ADR 0017](../decisions/0017-system-level-platform-composition.md)、[ADR 0019](../decisions/0019-platform-launch-manifest-boundary.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
 > 被以下文档细化：[运行承载系统](./runtime-hosting-system.md)、[运行时启动系统](./runtime-bootstrap-system.md)、[通信系统](./communication-system.md)  
 > 被以下文档实现：[Hostra Desktop Composition](../20-modules/desktop-host/README.md)、[PWA Composition](../20-modules/pwa-host/README.md)  
-> 最近复核：2026-08-28
+> 最近复核：2026-09-03
 
 本文回答：**同一套 LoomRealm application semantics 如何在不同物理平台上被完整准备、组合并运行。**
 
@@ -286,32 +286,45 @@ RuntimeHosting 不拥有 public Runtime lifecycle/Frame/Data authority。
 
 ---
 
-## 10. Role-facing Ports
+## 10. Role-facing Capabilities
+
+Role-facing capability必须由真实 consumer逐 milestone冻结；下面只列 current/future responsibility placement，不构成 universal `Platform` interface。
 
 ```text
 System Platform
 ├── Main-facing
-│   ├── RuntimeHosting / Supervisor
-│   ├── RuntimeControlHost
-│   ├── RendererHosting
-│   ├── RendererControlHost
-│   └── DataConnectionBroker
+│   ├── DeadlineScheduler
+│   ├── RuntimeHosting
+│   ├── OpaqueMaterialGenerator
+│   └── RendererControlBinding?        // M7 Frozen, optional physical capability
 │
-├── Renderer-facing
-│   ├── RendererControlBinding
+├── Renderer-facing (future slices)
 │   ├── RendererDataBinding
 │   ├── ContentClient
 │   └── presentation/input environment
 │
 └── Subsystem-facing
     ├── RuntimeControlBinding
-    ├── SubsystemDataBinding
-    └── ContentClient
+    ├── SubsystemDataBinding           // M8+
+    └── ContentClient                  // M12+
 ```
 
-这些只是 Platform 在每个 role 的 conceptual local projection；该列表不是一个必须整体出现的 TypeScript interface，也不表示 M5 需要一次冻结全部 ports。M5 exact Runtime hosting/control/supervision shape 由真实 Main consumer closure 决定，例如可由 `RuntimeHosting` 返回 attempt-scoped `HostedRuntime` 来自然绑定 Control 与 termination facts，而不是强制三个独立 registry/ports。
+M7 `RendererControlBinding` 是 **Main-facing candidate-slot/carrier capability**：
 
-Concrete `HostraPlatform` / `PwaPlatform` object MAY 同时实现多个 role-local capability view；这属于 composition convenience，不等于 `@loomrealm/platform-ports` 定义一个万能 `Platform` contract。Core role 只依赖自己需要的窄 view。
+```text
+Main issues fresh rendererControlToken
+→ RendererControlBinding.acquire(token, signal) arms one candidate slot
+→ Platform later binds at most one physical Renderer candidate
+→ returns one already-established MessageCarrier<string>
+→ renderer-control protocol peer handles hello/version
+→ Main alone grants current Renderer authority
+```
+
+它不是 Renderer-facing application API，也不是 Renderer launch/show command。Binding 不认证 token、不协商 protocol version、不决定 currentness。
+
+`Renderer hosting` 仍属于 concrete product composition responsibility：Hostra BrowserWindow/PWA Window 如何创建、显示、重载、销毁由 M14/M16 concrete realization决定；M7 不因此冻结 `RendererHosting` 或 `RendererControlHost` public port。
+
+Concrete `HostraPlatform` / `PwaPlatform` object MAY 同时实现多个 role-local capability view；这属于 composition convenience，不等于 `@loomrealm/platform-ports` 定义一个万能 `Platform` contract。Core role 只依赖自己当前真实需要的窄 view。
 
 Launcher package 是 concrete Platform 的 PREPARE / Runner integration component；它可以提供 RuntimeHosting 的内部实现材料，但不能因此吞并 Renderer/Data/Content ports 或 application authority。
 
@@ -400,6 +413,8 @@ Data Broker / Data WebSocket
 fs + HTTP Content
 ```
 
+M14 将这些 Desktop physical capability组合成 full E2E；其中 Renderer Control physical realization必须符合 M7 Frozen `RendererControlBinding` candidate-slot/settlement semantics，而不能创建第二套 Host-specific currentness protocol。
+
 PWA：
 
 ```text
@@ -413,6 +428,8 @@ Renderer Control MessagePort
 Data Broker / MessageChannel
 Fetch + Service Worker / OPFS Content
 ```
+
+M16 必须把上述 PWA Renderer Control + Data provisioning/bindings + Content realization全部接入同一 full logical trace，再做 cross-platform equivalence；不能只实现 Renderer Control transport 就宣告 PWA E2E 完成。
 
 Structured Clone 只用于 Platform bootstrap/Port transfer；application carrier仍发送 string。
 
@@ -513,8 +530,10 @@ HTTP vs Service Worker internals
 9. Host-owned Runner 与 business Definition Module 分离；
 10. Hostra/PWA manifest 独立演化；
 11. Launcher package 不扩张为 Platform mega-package；
-12. DataConnectionBroker实现 physical carrier但不拥有 Main authority；
-13. provisioning独立于 application protocols；
-14. Data provisioning failure不等于 Runtime/Frame failure；
-15. Control/Data application units统一 UTF-8 JSON text；
-16. Hostra/PWA physical mechanism/artifact可不同，但 logical application trace必须等价。
+12. M7 `RendererControlBinding` 是 Main-facing optional candidate-slot/carrier capability，不是 Renderer-facing API或 hosting service；
+13. Renderer hosting保持 concrete composition responsibility，M7 不冻结 `RendererHosting` / `RendererControlHost` mega-port；
+14. DataConnectionBroker实现 physical carrier但不拥有 Main authority；
+15. provisioning独立于 application protocols；
+16. Data provisioning failure不等于 Runtime/Frame failure；
+17. Control/Data application units统一 UTF-8 JSON text；
+18. Hostra/PWA physical mechanism/artifact可不同，但 logical application trace必须等价；M16 full PWA closure必须包含 Renderer/Data/Content physical realization。
