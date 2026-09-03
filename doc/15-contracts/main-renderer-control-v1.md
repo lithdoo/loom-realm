@@ -79,6 +79,17 @@ AuthorityRevision
 rendererControlToken issue/bind/invalidate/consume decision
 ```
 
+Renderer Control protocol peer拥有：
+
+```text
+hello wire/schema validation
+protocolVersions validation
+protocolVersion selection
+connection-local protocol state
+```
+
+Main MUST NOT重新实现 version negotiation；protocol peer选择 current v1 后只把已选择的 protocol fact交给 Main authority acceptance。
+
 Renderer 是 read-only committed mirror，不得：
 
 ```text
@@ -121,6 +132,10 @@ InputTarget(frameId, activationId)
 
 ## 4. Connection Attempt / Current Renderer
 
+Renderer Control physical capability MAY在某 concrete Platform/Session composition 中缺席。缺席时 Main 不创建 Renderer Control attempt，Runtime/Frame Session semantics照常运行；不得要求 fake/no-op transport capability。
+
+一旦 Platform提供 Frozen `RendererControlBinding` 并产生 attempt，本协议全部 semantics 强制适用。
+
 一个 Main Session 同时最多：
 
 ```text
@@ -147,7 +162,7 @@ invalidated when its attempt terminates
 consumed exactly once on successful hello acceptance
 ```
 
-Platform physical token delivery / carrier establishment由 M7 Frozen `RendererControlBinding` realization负责；该 Platform capability不拥有 authentication/currentness。
+Platform physical token delivery / carrier establishment由 M7 Frozen `RendererControlBinding` realization负责；该 Platform capability不拥有 authentication、version negotiation或 currentness。
 
 ### 4.1 Active Replacement
 
@@ -202,11 +217,22 @@ interface RendererHelloParamsV1 {
 }
 ```
 
-`protocolVersions`：1..16 positive integer entries，no duplicate。当前只选择 `1`。
+`protocolVersions`：1..16 positive integer entries，no duplicate。
+
+Version negotiation由 `@loomrealm/renderer-control` Main peer执行：
+
+```text
+validate protocolVersions
+→ select highest/current supported intersection
+→ current implementation selects exactly protocolVersion = 1
+→ only then invoke Main authority acceptance
+```
+
+如果没有共同支持版本，peer返回 `RENDERER_CONTROL_PROTOCOL_UNSUPPORTED`（能安全发送时）并关闭 Connection；Main不参与版本选择。
 
 v1 只有这一条 Renderer-originated Request；固定 `id = 1` 已满足 positive safe integer + connection-lifetime never reused，不需要 request-id allocator/pending-request framework。
 
-认证/版本/状态失败后 Main 返回相应 Error（能安全发送时）并关闭 Connection；恢复只允许 fresh attempt/token。
+认证/状态失败后返回相应 Error（能安全发送时）并关闭 Connection；恢复只允许 fresh attempt/token。
 
 ---
 
@@ -405,15 +431,17 @@ interface RendererHelloResultV1 {
 }
 ```
 
+Renderer-control Main peer完成 hello schema/version negotiation并选择 `protocolVersion = 1` 后，才进入 Main authority acceptance。
+
 成功 acceptance MUST相对于 Main Renderer-visible authority mutation serialization构成一个原子点。
 
 在 Main serialized lane 内固定顺序：
 
 ```text
 require Session live + exact candidate attempt
-validate typed token/version
+validate exact candidate rendererControlToken
 capture current committed Snapshot R
-prepare/preflight the exact hello Result(id=1, version=1, R) application text
+prepare/preflight exact hello Result(id=1, already-selected version=1, R) application text
 
 if preflight fails:
     invalidate candidate attempt/token
@@ -426,6 +454,8 @@ if preflight succeeds:
     detach/retire previous current peer from future publication
     commit accepted R + exact prepared hello text
 ```
+
+Main MUST NOT重新解析 `protocolVersions` 或进行第二次 version selection。
 
 随后在 transaction 外发送**同一 prepared text**。
 
@@ -587,6 +617,8 @@ retire/close current peer
 stop/discard future Renderer publication
 ```
 
+如果 concrete Platform未提供 RendererControlBinding，则上述 Renderer cleanup自然为空操作；不影响 Session terminal semantics。
+
 Renderer Control cleanup不是 Runtime shutdown coordinator；Main Session result不等待 physical Renderer close。
 
 v1 不增加 final `session.ended` notification。恢复不存在；新 Session必须 fresh `sessionId`。
@@ -657,7 +689,7 @@ Invalid JSON/schema/session/revision/stack/Activation/InputTarget/DataAuthority/
 - rendererControlToken 是 Session-bound secret；attempt terminal即失效，成功 hello exactly-once consume；
 - token不得日志化/放 URL；
 - Snapshot不携 Data credential/endpoint/executable path；
-- Platform Binding只物理交付 token/carrier，不解释 credential authority；
+- Platform Binding只物理交付 token/carrier，不解释 credential authority或 protocol negotiation；
 - current Renderer participant decision始终由 Main hello acceptance拥有；
 - stale/old Renderer本地缓存不构成继续授权依据。
 
@@ -668,7 +700,9 @@ Invalid JSON/schema/session/revision/stack/Activation/InputTarget/DataAuthority/
 至少覆盖：
 
 ```text
-hello-first / id=1 / auth / version
+hello-first / id=1 / auth
+version negotiation owned by renderer-control peer
+unsupported version fails before Main currentness acceptance
 initial revision=1 / gap accepted / regression rejected
 exact hello preflight before current switch
 hello concurrent visible mutation no revision loss
@@ -679,6 +713,7 @@ old in-flight completion has no current-authority effect
 old terminal cannot clear new current
 current terminal clears current only
 Session terminal aborts attempts + retires current
+binding-absent Session remains valid/nonblocking
 atomic full Snapshot
 Runtime lifecycle pure mapping
 activate/resume ACK-before-target
@@ -721,7 +756,7 @@ generic RPC framework
 
 | Method | 类型 | 方向 | 职责 |
 |---|---|---|---|
-| `renderer.hello` | Request `id=1` | Renderer → Main | one-shot auth、version、initial full Snapshot |
+| `renderer.hello` | Request `id=1` | Renderer → Main | protocol peer version negotiation + Main one-shot auth/currentness + initial full Snapshot |
 | `renderer.state` | Notification | Main → Renderer | latest complete committed Authority Snapshot |
 
 ---
@@ -736,16 +771,18 @@ generic RPC framework
 
 ## 27. Final Invariants
 
-1. Main 是唯一 Renderer Control authority/currentness owner。  
-2. Full Snapshot自包含、whole-validate、atomic replace。  
-3. Revision初值1，只随 committed visible payload变化，允许 publication gap。  
-4. Hello exact representability preflight先于 current switch。  
-5. Hello capture/preflight/current install与 Main visible mutation共享 serialization。  
-6. Replacement主动撤销 old current；old peer不再启动新 send；already-in-flight late delivery无 authority effect。  
-7. Renderer先安装 initial Snapshot再消费 later state。  
-8. ACK-before-InputTarget publication；revoked Activation never regrant。  
-9. Control loss与 Session terminal撤销 Renderer本地 authority proof。  
-10. Representation failure只终止 Renderer Control，不改变 Frozen Frame / Runtime business semantics。  
-11. DataAuthority只携 logical `S/G/profile`；M7 Main policy保持空，M8再实现。  
-12. Publication结构为 0..1 in-flight + 0..1 pendingLatest，无 replay/history queue。  
-13. v1不引入 generic RPC、transport-specific application model或 universal Platform service。
+1. Main 是唯一 Renderer Control application authority/currentness owner。  
+2. Version negotiation由 renderer-control protocol peer拥有；Main不重复协商。  
+3. Full Snapshot自包含、whole-validate、atomic replace。  
+4. Revision初值1，只随 committed visible payload变化，允许 publication gap。  
+5. Hello exact representability preflight先于 current switch。  
+6. Hello capture/preflight/current install与 Main visible mutation共享 serialization。  
+7. Replacement主动撤销 old current；old peer不再启动新 send；already-in-flight late delivery无 authority effect。  
+8. Renderer先安装 initial Snapshot再消费 later state。  
+9. ACK-before-InputTarget publication；revoked Activation never regrant。  
+10. Optional Renderer physical capability缺席不改变 Runtime/Frame Session semantics。  
+11. Control loss与 Session terminal撤销 Renderer本地 authority proof。  
+12. Representation failure只终止 Renderer Control，不改变 Frozen Frame / Runtime business semantics。  
+13. DataAuthority只携 logical `S/G/profile`；M7 Main policy保持空，M8再实现。  
+14. Publication结构为 0..1 in-flight + 0..1 pendingLatest，无 replay/history queue。  
+15. v1不引入 generic RPC、transport-specific application model或 universal Platform service。
