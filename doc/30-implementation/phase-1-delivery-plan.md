@@ -147,7 +147,7 @@ ADR 0027
 Main ⇄ Renderer Control Protocol v1 (Frozen)
 M7_01_RENDERER_CONTROL_PACKAGE.md
 M7_02_MAIN_AUTHORITY_PROJECTION.md
-M7_03_RENDERER_CONTROL_STORE.md
+M7_03_RENDERER_CONTROL_HOLDER.md
 M7_04_VERTICAL_INTEGRATION.md
 M7_05_QUALIFICATION_CLOSURE.md
 ```
@@ -180,7 +180,12 @@ Platform Ports frozen M7 target：
 
 ```text
 OpaqueMaterialGenerator
+    ASCII 1..128 bytes
+    fresh
+    >=128-bit unpredictability for security-sensitive uses
+
 RendererControlBinding.acquire(rendererControlToken, signal)
+    arms one candidate slot
 ```
 
 MainPlatform target：
@@ -196,10 +201,19 @@ Optionality：
 
 ```text
 Binding absent → no Renderer attempt; Runtime/Frame Session remains valid
-Binding present → Main runs frozen bounded Renderer accept loop
+Binding present → Main runs frozen bounded candidate-slot loop
 ```
 
 Existing M6 Hostra Runtime-only composition MUST NOT add fake Renderer Binding merely for M7 typing；physical Hostra realization arrives M14。
+
+Binding settlement冻结：
+
+```text
+acquire pending      → does not create/show/replace Renderer
+abort before resolve → cancel one slot; no late live carrier
+non-abort rejection  → Binding terminal for this Main Session; no re-arm
+acquired peer failure → candidate attempt terminal only; fresh slot may re-arm if Binding healthy
+```
 
 Main implements：
 
@@ -208,8 +222,7 @@ fresh sessionId
 initial rendererRevision=1
 pure Runtime/Frame/Activation/InputTarget projection
 M7 dataAuthorities=[]
-one-current + one-candidate bounded Renderer model when Binding exists
-background RendererControlBinding accept loop
+one-current + one-candidate bounded model
 Main consumes peer-selected protocolVersion=1; Main does not negotiate
 hello exact preflight before current switch
 atomic token consume + current install + old retirement
@@ -224,12 +237,14 @@ Renderer Control representation failure MUST NOT alter Frozen Frame / Runtime bu
 Minimal Control holder：
 
 ```text
-current = {peer, RendererAuthoritySnapshotV1} | null
+local current = {peer, RendererAuthoritySnapshotV1} | null
 atomic whole-Snapshot replacement
 initial peer+Snapshot installed before later-state consumption
 old peer late state/terminal ignored after replacement
 current terminal → null
 ```
+
+`local current != null` 只表示本地已接受且尚未观察 terminal 的 Control mirror；**不是 Main remote-currentness 的独立证明**。不得引入 lease/epoch/heartbeat层。
 
 No duplicate Control DTO、second revision validator、subscription/EventBus/Store framework、Data/Input/Render implementation。
 
@@ -239,7 +254,7 @@ Real production path with Renderer capability present：
 
 ```text
 RendererControlBinding test implementation
-→ Main bounded accept loop
+→ Main bounded candidate-slot loop
 → renderer-control Main peer version negotiation
 → Main pure projection/revision/hello acceptance
 → MemoryCarrier<string>
@@ -247,7 +262,25 @@ RendererControlBinding test implementation
 → Renderer current holder
 ```
 
-Must prove：Renderer absence nonblocking、one candidate bound、hello race lossless、unrepresentable B cannot evict A、replacement blocks new old-peer sends + close request、already-started old inFlight late delivery no authority effect、Session terminal retirement、call/return/failure projection、structural boundedness、representation isolation。
+Must prove：
+
+```text
+Renderer absence nonblocking
+acquire pending does not create Renderer
+no-slot candidate gets no token/live participant
+already-bound slot extra candidate gets no token/live participant
+abort vs non-abort Binding rejection semantics
+one candidate bound
+hello race lossless
+unrepresentable B cannot evict A
+replacement blocks new old-peer sends + close request
+already-started old inFlight late delivery no authority effect
+local old holder is not treated as remote currentness proof
+Session terminal retirement
+call/return/failure projection
+structural boundedness
+representation isolation
+```
 
 Separately prove capability-absent Main path needs no fake Binding and remains fully functional。
 
@@ -257,9 +290,12 @@ M7 **does close**：
 
 ```text
 logical RendererControlBinding contract + optional capability semantics
+candidate-slot cancellation/terminal semantics
+OpaqueMaterialGenerator common output contract
 MemoryCarrier semantic implementation/evidence
 Renderer Control protocol/core boundedness
-Main/Renderer authority/currentness semantics
+Main authority/currentness semantics
+Renderer local holder boundary
 ```
 
 M7 **does not require**：
@@ -374,8 +410,9 @@ Compare same logical Runtime/Frame/Renderer/Data/Input/Render/Content/business t
 - Runtime Control/Renderer Control own protocol mechanics, not role authority；
 - Renderer Control protocol peer owns version negotiation；Main owns authentication/currentness；
 - Frozen Frame ordering/causal barriers preserved；
-- M7 optional Renderer capability absence cannot break Runtime/Frame semantics；
+- M7 optional Renderer capability absence/Binding terminal cannot break Runtime/Frame semantics；
 - M7 Frozen Binding/currentness/atomicity implemented without generic framework；
+- Renderer local holder is not promoted into a second remote-currentness protocol；
 - Renderer Control representation failure cannot mutate Frame/Runtime authority；
 - M8/M10/M11/M12 complete Data/Input/Render/Content role slices；
 - Hostra/PWA physical Renderer Control realizations conform to same Frozen Binding/protocol semantics；
