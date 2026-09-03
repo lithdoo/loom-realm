@@ -16,6 +16,15 @@
 
 修改 `@loomrealm/main` + `@loomrealm/platform-ports` M7 slice；Main 新增 `@loomrealm/renderer-control` runtime dependency。
 
+同时必须机械迁移所有现有 M5/M6 `MainPlatform` providers、test fixtures 与 Hostra Runtime-only composition：
+
+```text
+bootstrapTokens / BootstrapTokenGenerator
+→ opaqueMaterial / OpaqueMaterialGenerator
+```
+
+该迁移只改变 current-v1 capability 名称与共同输出契约，不改变 Runtime bootstrap credential authority，也**不得**迫使现有 Hostra/headless provider增加 fake `RendererControlBinding`。现有 CSPRNG material若满足 ASCII `1..128` bytes / `>=128-bit` unpredictability 可直接复用生成策略。
+
 不改变 Runtime Control / Frozen Frame semantics，不新增 public Main Session controller 或 universal Renderer hosting interface。
 
 ---
@@ -348,6 +357,8 @@ Renderer cleanup不延迟 Main Session result/Runtime cleanup。Capability absen
 ```text
 fresh sessionId + revision=1
 OpaqueMaterialGenerator common output bound + independent values
+existing M5/Main and M6/Hostra providers/fixtures migrate bootstrapTokens→opaqueMaterial without Renderer Binding
+Hostra Runtime-only regression keeps existing credential authority and CSPRNG material behavior
 visible commit exact revision behavior
 rendererControl absent → no slot/no token + Session functional
 Binding present → at most one slot
@@ -382,6 +393,7 @@ optional MainPlatform Renderer capability
 one armed candidate-slot model when capability exists
 explicit acquire cancellation vs Binding-terminal rejection semantics
 OpaqueMaterialGenerator common output contract + migration
+existing M5/M6 MainPlatform providers/fixtures mechanically migrated without fake Renderer capability
 pure projection/revision discipline
 protocol-owned negotiation
 hello preflight/current-switch atomicity
