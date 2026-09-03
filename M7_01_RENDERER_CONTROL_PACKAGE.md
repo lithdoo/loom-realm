@@ -1,20 +1,18 @@
 # M7 / 01 — `@loomrealm/renderer-control` Package
 
-> 状态：Active Design / Draft  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M7 Renderer Control  
 > 落地顺序：01  
 > 最近复核：2026-09-03  
-> 目标：把 Main ⇄ Renderer Control Protocol v1 落成 transport-independent、bounded、可测试的具体协议 mechanics；不拥有 Main authority、Renderer role state 或 Platform transport establishment。  
 > 正式协议：[Main ⇄ Renderer Control Protocol v1](doc/15-contracts/main-renderer-control-v1.md)  
-> 分包边界：[独立分包与发布架构](doc/30-implementation/package-architecture.md)
+> 冻结决策：[ADR 0027](doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 目标：实现 transport-independent、bounded、fail-closed 的具体 Renderer Control v1 mechanics；不得重新设计 authority、Platform ingress 或 generic RPC abstraction。
 
-核心原则：
-
-> **本包只拥有 connection-local protocol mechanics。Main 创建 authority；Renderer role保存已接受 authority；本包不复制两侧业务状态机，也不抽取 generic RPC framework。**
+> **本包只拥有 connection-local protocol mechanics。Main 创建 authority/currentness；Renderer role保存已接受 authority；Platform只建立/交付 carrier。**
 
 ---
 
-## 1. Position
+## 1. Frozen Position
 
 ```text
 Main committed RendererAuthoritySnapshotV1
@@ -28,35 +26,36 @@ accepted immutable RendererAuthoritySnapshotV1
 @loomrealm/renderer
 ```
 
-v1 只有：
+Application methods exactly：
 
 ```text
-renderer.hello   Renderer → Main Request
+renderer.hello   Renderer → Main Request, id = 1
 renderer.state   Main → Renderer Notification
 ```
 
-后续：
+Dependency order：
 
 ```text
-M7_02_MAIN_AUTHORITY_PROJECTION.md
-→ M7_03_RENDERER_CONTROL_STORE.md
-→ M7_04_VERTICAL_INTEGRATION.md
-→ M7_05_QUALIFICATION_CLOSURE.md
+M7_01
+→ M7_02 Main authority integration
+→ M7_03 Renderer role holder
+→ M7_04 deterministic vertical
+→ M7_05 qualification
 ```
 
 ---
 
-## 2. Ownership
+## 2. Frozen Ownership
 
 ### Main owns
 
 ```text
 sessionId
 Runtime / Frame / Activation / InputTarget authority
-AuthorityRevision allocation
-rendererControlToken authority
-current Renderer participant / replacement decision
-authority Snapshot source
+AuthorityRevision
+rendererControlToken issue/bind/invalidate/consume
+current Renderer participant / replacement
+Snapshot source
 future DataAuthority policy
 ```
 
@@ -64,14 +63,14 @@ future DataAuthority policy
 
 ```text
 JSON-RPC representation/profile mechanics
-hello-first / hello-one-shot state
+hello-first / one-shot state
 version negotiation
-closed-schema validation
-whole current-Snapshot structural/relational validation
+closed schema / whole Snapshot validation
 connection-local session/revision monotonicity
+exact outbound preparation/preflight
 hello Result before renderer.state ordering
-bounded latest-state publication
-terminal classification
+0..1 in-flight + 0..1 pendingLatest publication
+peer retirement / terminal classification
 transport-independent typed outcomes
 ```
 
@@ -79,24 +78,21 @@ transport-independent typed outcomes
 
 ```text
 which peer is current
-current accepted Snapshot or no usable authority
-future Data/Input/Render role composition
+current accepted Snapshot | null
+future Data/Input/Render composition
 ```
 
-本包 MUST NOT拥有 Main Registry/Stack/Frame、AuthorityRevision allocation、historical authority log、Renderer Store、Data Connection、Input/Render state、WebSocket/MessagePort establishment 或 Platform lifecycle。
+本包不得拥有 Main Registry/Stack、revision allocation、historical authority log、Renderer Store、Data Connection、Input/Render state、WebSocket/MessagePort establishment 或 Platform lifecycle。
 
 ---
 
-## 3. Dependency Boundary
+## 3. Frozen Dependencies
 
-M7 runtime dependencies：
+Runtime dependencies exactly：
 
 ```text
 @loomrealm/foundation
-    MessageCarrier / CarrierClosed
-
 @loomrealm/wire
-    JSON text / JSON-RPC representation primitives
 ```
 
 MUST NOT depend on：
@@ -104,16 +100,15 @@ MUST NOT depend on：
 ```text
 @loomrealm/main
 @loomrealm/renderer
+@loomrealm/platform-ports
 @loomrealm/runtime-control
 @loomrealm/data
 @loomrealm/subsystem
-@loomrealm/game-launcher-*
-WebSocket / MessagePort / Worker
-node:*
-DOM APIs
+concrete Hostra/PWA
+node:* / DOM / WebSocket / MessagePort / Worker
 ```
 
-不要抽取：
+不抽取：
 
 ```text
 GenericRpcPeer
@@ -121,11 +116,12 @@ GenericSchemaCodec
 UniversalProtocolSession
 MethodRegistry
 RequestManager
+Publisher/StateReplicator framework
 ```
 
 ---
 
-## 4. Public Surface
+## 4. Frozen Publish Surface
 
 只发布 root：
 
@@ -133,33 +129,23 @@ RequestManager
 @loomrealm/renderer-control
 ```
 
-Main-side surface只需要：
+必须 root-export：
 
 ```text
-established MessageCarrier<string>
-Main-owned hello acceptance/auth decision
-immutable committed Snapshot submission
-retire/close capability for replacement/terminal
-terminal outcome
+exact v1 wire/model types
+Main-side concrete peer constructor/factory
+Renderer-side concrete peer constructor/factory
+side-effect-free exact outbound hello preparation/preflight
+required typed terminal/error outcomes
 ```
 
-Renderer-side surface只需要：
-
-```text
-established MessageCarrier<string>
-rendererControlToken
-initial accepted Snapshot
-later accepted Snapshot sequence/outcome
-terminal outcome
-```
-
-不发布 transport URL、WebSocket/MessagePort、Main internals、Renderer Store、extension bag 或 arbitrary method registration。
+精确函数名可在编码中选择，但**语义与调用方向不可变**。不得发布 `/main`、`/renderer`、`/schema`、`/testing`、transport-specific subpath。
 
 ---
 
 ## 5. Wire Model
 
-Field-level schema 只以正式协议为事实源。本包精确表示：
+精确表示 formal contract：
 
 ```text
 RendererHelloParamsV1
@@ -178,21 +164,21 @@ Wire object closed schema；无 metadata/extensions/physical material。
 
 ## 6. Current-State Validation Only
 
-Renderer peer暴露 Snapshot 前验证：
+Renderer peer暴露 Snapshot 前 whole-validate：
 
 ```text
-sessionId / revision representation
+sessionId/revision representation
 Runtime key uniqueness
-Frame key uniqueness / Runtime reference
-active/top/activation relation
-InputTarget current relation
+Frame key uniqueness + Runtime references
+active/top/activation relations
+InputTarget exact current relation
 DataAuthority key/generation/profile representation
-wire message/depth/member limits
+actual UTF-8 message/depth/member limits
 ```
 
-Invalid Snapshot → terminal/fail closed；不得 partial repair。
+Invalid → terminal/fail closed；不得 repair/drop/normalize。
 
-以下 lifetime facts 不由 receiver 保存历史 Set：
+以下 lifetime facts不由 receiver保存历史 Set：
 
 ```text
 revoked activationId never regranted
@@ -200,13 +186,13 @@ frameId never illegally reused
 Data generation never reused
 ```
 
-这些由 Main tests / cross-package traces证明。
+这些由 Main/tests证明。
 
 ---
 
-## 7. Revision State Is Connection-local
+## 7. Renderer Peer State
 
-Renderer peer只维护：
+只维护 connection-local：
 
 ```text
 hello pending/current/terminal
@@ -214,92 +200,121 @@ accepted sessionId
 last accepted revision
 ```
 
-同 Session：
-
 ```text
-new revision > last → accept
-gap                 → valid
-new revision <= last → terminal
+new revision > last  → accept after whole validation
+revision gap         → valid
+new revision <= last → protocol terminal
 ```
 
-Main revision 初值/推进属于 Main；Renderer role不再第二次实现 revision protocol state machine。
+Renderer role不再二次验证 revision/session。
 
 ---
 
-## 8. Hello Stays Concrete
+## 8. Hello Mechanics
 
-v1 只有一个 Renderer-originated Request，因此直接：
+Renderer-originated Request只有一个：
 
 ```text
-send renderer.hello with id = 1
-wait Response id = 1
+renderer.hello id = 1
 ```
 
-不创建 RequestIdAllocator、PendingRequestMap、GenericDispatcher、RpcScheduler、CorrelationManager。
+因此不得创建 request-id allocator、pending request map、generic dispatcher/correlation framework。
 
-### Renderer-side hello handoff
-
-Renderer peer必须把 initial hello Snapshot 与 later state暴露顺序固定为：
+Renderer-side handoff固定：
 
 ```text
-validate hello Result Snapshot R
-→ resolve/return initial Snapshot R to Renderer role
-→ Renderer role atomically installs peer + R
+send hello(id=1)
+→ validate Result Snapshot R
+→ return/resolve initial R to role
+→ role atomically installs peer + R
 → only then role begins consuming later renderer.state
 ```
 
-不得在 initial Snapshot 尚未被 role安装前通过 callback/event抢先暴露 R+1。
-
-实现可让 later state使用 lazy `AsyncIterable` / explicit start，使 carrier 自身暂存消息；无需增加第二个 Store。
+Later-state surface必须 lazy/explicit-start或等价保证，不允许在 initial install前 callback R+1。
 
 ---
 
-## 9. Main-side Hello Gate
+## 9. Exact Outbound Preparation / Preflight
 
-Main peer不得自己决定 token/currentness；它调用 Main 提供的 **单次 hello acceptance decision**。
+本包必须提供一个**无 I/O、无 Main mutation**的 exact outbound preparation capability，使 Main 能在其 serialized lane内验证 `renderer.hello` Success 的实际 JSON text application unit。
 
-该 decision概念上返回：
-
-```text
-accepted + protocolVersion + immutable Snapshot R
-or rejected semantic outcome
-```
-
-Main 负责在其 authority serialization 中原子完成：认证/consume token、capture R、install new current、retire old current。
-
-Main peer随后：
+冻结语义：
 
 ```text
-send hello Result(R)
-→ only after local send acceptance may drain renderer.state
+input:
+    protocolVersion = 1
+    request id = 1
+    immutable Snapshot R
+
+output:
+    exact sendable compact JSON text
+or:
+    deterministic representation/preflight failure
 ```
 
-在 hello Result send pending 时，Main 后续提交的 latest Snapshot可进入 `pendingLatest`，但不能先发送。
+它必须执行实际 send相同的：
 
-如果 hello Result send失败，candidate peer terminal；不得回滚旧 peer为 current。
+```text
+closed schema
+safe integer/string/profile validation
+JSON depth/member rules
+actual UTF-8 <= 1 MiB
+```
+
+Main hello acceptance只在该 preparation成功后切 current Renderer。Prepared text随后必须原样发送，避免 preflight/send TOCTOU。
+
+Later `renderer.state` outbound同样使用同一 formal profile预检；可由 peer内部准备，不要求 Main理解 JSON。
 
 ---
 
-## 10. Active Connection Retirement
+## 10. Main Peer Hello Gate
 
-Main 决定某 peer 被 replacement 后，Main-side peer必须支持明确 retirement：
+Main peer解析/验证 typed hello后调用 Main-owned single acceptance seam。
+
+Main acceptance返回：
 
 ```text
-stop accepting new publication
-clear/settle pending latest
+accepted {snapshot R, preparedHelloText}
+or typed rejection
+```
+
+Main peer自身不决定 token/currentness。
+
+Success path：
+
+```text
+Main acceptance already committed candidate currentness
+→ peer sends preparedHelloText
+→ after local send acceptance only, drain later pending state
+```
+
+Hello send pending期间可接收 Main提交的 newer Snapshot到 `pendingLatest`，但不得先发送。
+
+Hello send失败：candidate terminal；old current不复活。
+
+---
+
+## 11. Retirement / Replacement
+
+Peer retirement语义固定：
+
+```text
+mark retired synchronously
+reject/ignore future publication submissions
+clear/settle pendingLatest
 request carrier.close()
 terminal first-wins
 ```
 
-“只停止 publication、不关闭旧 carrier”不是 conformant replacement。
+Replacement commit后 old peer不得**启动新的 send**。
 
-旧 peer retirement不需要 generic ConnectionManager；一个 peer-local `retire()/close()` 语义即可。
+已经开始的 `inFlight send` MAY settle或 physically arrive；本包不承诺取消 Foundation carrier send，也不得为此引入 cancelable writer/transport ACK。Late completion无 current-authority effect。
 
 ---
 
-## 11. Bounded Publication
+## 12. Bounded Publication
 
-最小状态：
+唯一需要的 publication state：
 
 ```text
 inFlight: 0..1
@@ -309,49 +324,49 @@ pendingLatest: 0..1 replaceable Snapshot
 ```text
 R in-flight
 R+1 pending
-R+2 arrives
-→ pending = R+2
+R+2 submitted
+→ pendingLatest = R+2
 ```
 
-不创建 Publisher、StateReplicator、PublicationQueue framework、BackpressureManager。
+无 revision-sized queue/history/replay。
 
-M7 package closure只证明 queue structure bounded。真实 Hostra/PWA stalled write 的 finite close policy属于后续 concrete transport qualification。
+M7 package qualification只证明 structural boundedness；Hostra/PWA actual stalled-write finite policy后续 physical qualification。
 
 ---
 
-## 12. Representation Failure
+## 13. Representation Failure
 
-Renderer Control 的 1 MiB / JSON depth/member 等限制是 connection/wire safety，不是 Main/Frame business limit。
+Wire limits不是 Main business limits。
 
-Main peer outbound Snapshot必须 preflight。
-
-若 Snapshot不可表示：
+Outbound Snapshot不可表示：
 
 ```text
-no truncation / dropping / normalization
-no attempt to modify Main business authority
-Renderer Control attempt/connection terminalizes
+no truncation/drop
+no Main authority mutation
+candidate/current Control terminalizes
 ```
 
-本包不定义 Runtime count、Frame stack depth、DataAuthority count 业务上限。
+Initial hello不可表示时，Main不会切 current Renderer；这由 M7_02 atomic acceptance保证。
+
+不定义 Runtime count、Frame depth、DataAuthority count业务上限。
 
 ---
 
-## 13. DataAuthority Boundary
+## 14. DataAuthority Boundary
 
-协议仍表示：
+协议继续表示：
 
 ```text
 {subsystemKey, generation, dataProfile}
 ```
 
-本包验证 representation/current-Snapshot relations；M7 Main vertical固定 `dataAuthorities=[]`。
+Package验证其 representation/current-Snapshot relations。
 
-非空 DataAuthority fixture只证明 wire/Renderer representation。真实 Main allocation/generation/profile policy在 M8关闭。
+M7 Main vertical固定 `dataAuthorities=[]`；package tests可用非空 fixture验证 formal model。真实 Main Data policy M8实施。
 
 ---
 
-## 14. Source Shape
+## 15. Recommended Source Shape
 
 ```text
 packages/renderer-control/
@@ -364,26 +379,27 @@ packages/renderer-control/
 └─ test/
 ```
 
-若代码足够小可继续合并文件；不要为目录对称增加类。
+这只是内部 layout；若代码更小可合并。不得为目录对称创建 Manager/Registry/EventBus。
 
 ---
 
-## 15. Package-local Qualification
+## 16. Package Qualification
 
-至少覆盖：
+必须覆盖：
 
 ```text
 hello first / one-shot / id=1
 version/auth mapping
+exact hello preparation/preflight
 hello Result before later state
-Renderer initial-Snapshot handoff before later state exposure
+initial Snapshot handoff before later-state consumption
 connection-local revision monotonicity
 closed schema / current Snapshot relations
-replacement peer retirement closes carrier
-retire while write pending settles bounded state
+retirement blocks new sends + clears pending
+already-inFlight retirement settles without authority resurrection
 0..1 in-flight + 0..1 pendingLatest
-unrepresentable outbound Snapshot terminalizes connection
-oversize/depth/member validation
+unrepresentable outbound terminalization
+oversize/depth/member rejection
 terminal first-wins
 carrier close during hello/publication
 no retry/replay/history
@@ -392,18 +408,20 @@ non-empty DataAuthority fixture validation
 
 ---
 
-## 16. Step Closure
+## 17. Frozen Closure
 
-M7/01 complete when：
+M7/01 实施必须得到：
 
 ```text
-exact v1 types exist
-concrete asymmetric Main/Renderer peers exist
-one-shot hello has no generic request machinery
-hello ordering/handoff is race-free
-peer retirement actively closes old connection
-current-state validation is bounded
-publication is concrete 1+1 bounded state
-representation failure only kills Renderer Control
-package has no generic RPC/public transport abstraction
+exact v1 types
+concrete asymmetric Main/Renderer peers
+one-shot hello without generic request framework
+side-effect-free exact outbound hello preparation
+race-free hello ordering/handoff
+retirement without fictitious send cancellation
+bounded current-state validation/publication
+representation failure isolation
+root-only package surface
 ```
+
+除 ADR 0027 Reopen Rule外，不允许在编码阶段重新设计上述语义。
