@@ -327,7 +327,7 @@ Role graph：
     → platform-ports + runtime-control + renderer-control + wire
 
 @loomrealm/renderer
-    → renderer-control   // M7 minimal holder; package implementation pending
+    → renderer-control   // M7 minimal holder implemented / qualified
 
 @loomrealm/subsystem/host
     → platform-ports + runtime-control + role-local policy/integrations
@@ -374,7 +374,7 @@ business → game-package / launcher / protocol packages
 @loomrealm/platform-ports
     Implemented Baseline through M5
     M4/M5 slices qualified
-    M7 OpaqueMaterialGenerator + optional RendererControlBinding semantics Frozen / implementation pending
+    M7 OpaqueMaterialGenerator + optional RendererControlBinding implemented / qualified
 
 @loomrealm/subsystem
     M4 Runtime/Frame Core Implemented
@@ -384,16 +384,14 @@ business → game-package / launcher / protocol packages
 @loomrealm/main
     M5 Runtime/Frame Authority Implemented Baseline
     Main Runtime Control consumer qualified
-    M7 Renderer authority projection/currentness implementation pending
+    M7 Renderer authority projection/currentness implemented / qualified
 
 @loomrealm/renderer-control
-    M7 package scaffold exists
-    Protocol v1 + implementation plan Frozen
-    concrete peers not implemented yet
+    M7 concrete asymmetric peers implemented / qualified
+    Protocol v1 remains Frozen
 
 @loomrealm/renderer
-    M7 minimal Control holder design Frozen
-    package/implementation pending
+    M7 minimal Control holder implemented / qualified
 
 @loomrealm/data
     Package-local Core Baseline Implemented
@@ -413,12 +411,9 @@ business → game-package / launcher / protocol packages
 下一实现门：
 
 ```text
-M7 Renderer Control
-    @loomrealm/renderer-control concrete asymmetric peers
-    + platform-ports OpaqueMaterialGenerator / optional RendererControlBinding
-    + Main pure Snapshot projection / revision / candidate-currentness loop
-    + @loomrealm/renderer minimal holder
-    + deterministic MemoryCarrier vertical / qualification
+M8 Renderer Data role integration
+    starts from the qualified M7 current Renderer participant
+    + RendererDataAuthorityV1 wire shape
 ```
 
 M7 不要求 Hostra BrowserWindow/Renderer WebSocket 或 PWA MessagePort physical realization；它们分别在 M14/M16 完成。

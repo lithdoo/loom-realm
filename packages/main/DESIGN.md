@@ -1,7 +1,7 @@
 # `@loomrealm/main`
 
-> 状态：**M5 Implemented Baseline / Runtime Control Consumer Qualified / M7 Renderer Control Slice Frozen for Implementation**  
-> 阶段：M7 Renderer Control preimplementation closure  
+> 状态：**M5 Implemented Baseline / M7 Renderer Control Implemented and Qualified**
+> 阶段：M7 Renderer Control implementation closure
 > 最近复核：2026-09-03  
 > 冻结决策：[ADR 0027](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
 > M7 实施顺序：[`M7_02_MAIN_AUTHORITY_PROJECTION.md`](../../M7_02_MAIN_AUTHORITY_PROJECTION.md)

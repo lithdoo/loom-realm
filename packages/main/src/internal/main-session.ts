@@ -1,4 +1,13 @@
-import type { HostedRuntime } from "@loomrealm/platform-ports";
+import type { HostedRuntime, RendererControlBinding } from "@loomrealm/platform-ports";
+import {
+  createMainRendererControlPeer,
+  prepareRendererHelloResultV1,
+  type MainRendererControlPeer,
+  type MainRendererControlHelloAcceptance,
+  type RendererAuthoritySnapshotV1,
+  type RendererFrameLifecycleV1,
+  type RendererRuntimeLifecycleV1,
+} from "@loomrealm/renderer-control";
 import {
   createMainRuntimeControlPeer,
   type FrameCallParams,
@@ -85,6 +94,14 @@ interface InputTarget {
   readonly activationId: string;
 }
 
+interface RendererCandidateAttempt {
+  readonly token: string;
+  readonly controller: AbortController;
+  peer: MainRendererControlPeer | null;
+}
+
+type RendererCarrier = Awaited<ReturnType<RendererControlBinding["acquire"]>>;
+
 class BootstrapError extends Error {
   constructor(
     readonly code: string,
@@ -120,6 +137,14 @@ function deadline(value: number, name: string, frame = false): void {
   }
 }
 
+function validOpaqueMaterial(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 128)
+    return false;
+  for (let index = 0; index < value.length; index += 1)
+    if (value.charCodeAt(index) > 0x7f) return false;
+  return true;
+}
+
 function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
   if (options === null || typeof options !== "object") {
     throw new TypeError("Invalid runMain options");
@@ -132,14 +157,22 @@ function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
     platform.scheduler === null ||
     typeof platform.scheduler !== "object" ||
     typeof platform.scheduler.schedule !== "function" ||
-    platform.bootstrapTokens === null ||
-    typeof platform.bootstrapTokens !== "object" ||
-    typeof platform.bootstrapTokens.generate !== "function" ||
+    platform.opaqueMaterial === null ||
+    typeof platform.opaqueMaterial !== "object" ||
+    typeof platform.opaqueMaterial.generate !== "function" ||
     platform.runtimeHosting === null ||
     typeof platform.runtimeHosting !== "object" ||
     typeof platform.runtimeHosting.launch !== "function"
   ) {
     throw new TypeError("Invalid Main platform capability view");
+  }
+  if (
+    platform.rendererControl !== undefined &&
+    (platform.rendererControl === null ||
+      typeof platform.rendererControl !== "object" ||
+      typeof platform.rendererControl.acquire !== "function")
+  ) {
+    throw new TypeError("Invalid Renderer Control Binding");
   }
 
   const policy = options.policy;
@@ -227,6 +260,14 @@ class MainSessionRuntime {
   private readonly frames = new Map<string, FrameRecord>();
   private readonly stack: FrameRecord[] = [];
   private readonly issuedTokens = new Set<string>();
+  private readonly sessionId: string;
+
+  private rendererRevision = 1;
+  private rendererSnapshot!: RendererAuthoritySnapshotV1;
+  private rendererPayloadText = "";
+  private currentRendererPeer: MainRendererControlPeer | null = null;
+  private rendererCandidate: RendererCandidateAttempt | null = null;
+  private rendererBindingTerminal = false;
 
   private terminal: SessionTerminal | null = null;
   private stopRequested = false;
@@ -238,6 +279,9 @@ class MainSessionRuntime {
 
   constructor(private readonly options: RunMainOptions) {
     this.bootstrap = validateOptions(options);
+    this.sessionId = this.generateOpaqueMaterial("Session identity");
+    this.rendererSnapshot = this.projectRendererSnapshot();
+    this.rendererPayloadText = this.rendererPayload(this.rendererSnapshot);
   }
 
   run(): Promise<MainSessionResult> {
@@ -253,7 +297,10 @@ class MainSessionRuntime {
       }
     }
 
-    if (!this.stopRequested && this.terminal === null) void this.bootstrapSession();
+    if (!this.stopRequested && this.terminal === null) {
+      this.armRendererCandidateSlot();
+      void this.bootstrapSession();
+    }
     return this.done.promise;
   }
 
@@ -301,7 +348,7 @@ class MainSessionRuntime {
   private async bootstrapRuntime(key: string): Promise<void> {
     let token: string;
     try {
-      token = this.options.platform.bootstrapTokens.generate();
+      token = this.options.platform.opaqueMaterial.generate();
     } catch {
       throw new BootstrapError(
         "MAIN_BOOTSTRAP_TOKEN_GENERATION_FAILED",
@@ -309,15 +356,14 @@ class MainSessionRuntime {
         key,
       );
     }
-    if (!validProtocolString(token, 4096) || this.issuedTokens.has(token)) {
+    if (!validOpaqueMaterial(token) || this.issuedTokens.has(token)) {
       throw new BootstrapError(
         "MAIN_BOOTSTRAP_TOKEN_INVALID",
-        "Bootstrap token generator returned invalid or reused token material",
+        "Opaque material generator returned invalid or reused Runtime token material",
         key,
       );
     }
     this.issuedTokens.add(token);
-
     const record: RuntimeRecord = {
       key,
       bootstrapToken: token,
@@ -333,7 +379,7 @@ class MainSessionRuntime {
       shutdownRequested: false,
       ready: deferred<"ready" | "failed">(),
     };
-    this.runtimes.set(key, record);
+    await this.mutate(() => { this.runtimes.set(key, record); });
 
     const parents = [this.sessionController.signal];
     if (this.options.signal !== undefined) parents.push(this.options.signal);
@@ -371,7 +417,7 @@ class MainSessionRuntime {
             key,
           );
         }
-        record.phase = "connected";
+        await this.mutate(() => { record.phase = "connected"; });
 
         let peer: MainRuntimeControlPeer;
         try {
@@ -409,8 +455,10 @@ class MainSessionRuntime {
             key,
           );
         }
-        record.identified = true;
-        if (record.phase === "connected") record.phase = "identified";
+        await this.mutate(() => {
+          record.identified = true;
+          if (record.phase === "connected") record.phase = "identified";
+        });
 
         const ready = await record.ready.promise;
         if (ready !== "ready" || record.failure !== null) {
@@ -755,6 +803,7 @@ class MainSessionRuntime {
       cloneJson(this.bootstrap.initial.input),
     );
     this.stack.push(frame);
+    this.observeRendererAuthority();
 
     const initialized = await this.invokeFrame(
       runtime,
@@ -863,6 +912,7 @@ class MainSessionRuntime {
       }
       this.stack.pop();
       this.frames.delete(child.id);
+      this.observeRendererAuthority();
       if (!(await this.tryResumeCaller(child, outcome))) {
         await this.unwindFailures();
       }
@@ -940,6 +990,7 @@ class MainSessionRuntime {
     frame.lifecycle = "closed";
     this.stack.pop();
     this.frames.delete(frame.id);
+    this.observeRendererAuthority();
     if (!(await this.tryResumeCaller(frame, frame.outcome))) {
       await this.unwindFailures();
     }
@@ -1032,6 +1083,7 @@ class MainSessionRuntime {
         frame.currentActivationId = null;
         frame.lifecycle = "closing";
         frame.suspensionCause = null;
+        this.observeRendererAuthority();
 
         const runtime = this.runtimes.get(frame.subsystemKey);
         if (runtime === undefined) {
@@ -1071,6 +1123,7 @@ class MainSessionRuntime {
         frame.lifecycle = "closed";
         this.stack.pop();
         this.frames.delete(frame.id);
+        this.observeRendererAuthority();
       }
 
       if (this.stopRequested) return;
@@ -1190,6 +1243,170 @@ class MainSessionRuntime {
     return `a:${this.nextActivation++}`;
   }
 
+  private generateOpaqueMaterial(name: string): string {
+    let material: unknown;
+    try {
+      material = this.options.platform.opaqueMaterial.generate();
+    } catch (cause) {
+      throw new TypeError(`${name} generation failed`, { cause });
+    }
+    if (!validOpaqueMaterial(material) || this.issuedTokens.has(material))
+      throw new TypeError(`${name} is invalid or reused`);
+    this.issuedTokens.add(material);
+    return material;
+  }
+
+  private projectRendererSnapshot(): RendererAuthoritySnapshotV1 {
+    const runtimes = this.bootstrap.subsystemKeys.map((key) => {
+      const record = this.runtimes.get(key);
+      let state: RendererRuntimeLifecycleV1;
+      if (record === undefined) state = "declared";
+      else if (record.failure !== null) state = "failed";
+      else if (record.physicallyTerminated && record.expectedTermination) state = "stopped";
+      else state = record.phase === "initializing" ? "identified" : record.phase;
+      return Object.freeze({ subsystemKey: key, state });
+    });
+    const stack = this.stack
+      .filter((frame) => frame.lifecycle !== "closed")
+      .map((frame) => Object.freeze({
+        frameId: frame.id,
+        subsystemKey: frame.subsystemKey,
+        lifecycle: frame.lifecycle as RendererFrameLifecycleV1,
+        ...(frame.lifecycle === "active" && frame.currentActivationId !== null
+          ? { activationId: frame.currentActivationId }
+          : {}),
+      }));
+    const target = this.currentInputTarget();
+    return Object.freeze({
+      sessionId: this.sessionId,
+      revision: this.rendererRevision,
+      runtimes: Object.freeze(runtimes),
+      stack: Object.freeze(stack),
+      inputTarget: target,
+      dataAuthorities: Object.freeze([]),
+    });
+  }
+
+  private rendererPayload(snapshot: RendererAuthoritySnapshotV1): string {
+    return JSON.stringify({
+      runtimes: snapshot.runtimes,
+      stack: snapshot.stack,
+      inputTarget: snapshot.inputTarget,
+      dataAuthorities: snapshot.dataAuthorities,
+    });
+  }
+
+  private observeRendererAuthority(): void {
+    if (this.terminal !== null) return;
+    const projected = this.projectRendererSnapshot();
+    const payload = this.rendererPayload(projected);
+    if (payload === this.rendererPayloadText) return;
+    if (this.rendererRevision === Number.MAX_SAFE_INTEGER) {
+      this.beginFatal(failure("MAIN_RENDERER_REVISION_EXHAUSTED", "Renderer authority revision space exhausted"));
+      return;
+    }
+    this.rendererRevision += 1;
+    this.rendererSnapshot = Object.freeze({ ...projected, revision: this.rendererRevision });
+    this.rendererPayloadText = payload;
+    this.currentRendererPeer?.publish(this.rendererSnapshot);
+  }
+
+  private armRendererCandidateSlot(): void {
+    const binding = this.options.platform.rendererControl;
+    if (binding === undefined || this.rendererBindingTerminal || this.rendererCandidate !== null || this.terminal !== null || this.stopRequested)
+      return;
+    let token: string;
+    try {
+      token = this.generateOpaqueMaterial("Renderer Control token");
+    } catch {
+      this.rendererBindingTerminal = true;
+      return;
+    }
+    const attempt: RendererCandidateAttempt = { token, controller: new AbortController(), peer: null };
+    this.rendererCandidate = attempt;
+    let acquired: Promise<RendererCarrier>;
+    try {
+      acquired = binding.acquire(token, attempt.controller.signal);
+    } catch (cause) {
+      acquired = Promise.reject(cause);
+    }
+    void Promise.resolve(acquired).then(
+      (carrier) => this.mutate(() => this.bindRendererCandidate(attempt, carrier)),
+      (cause) => this.mutate(() => this.settleRendererAcquireFailure(attempt, cause)),
+    );
+  }
+
+  private bindRendererCandidate(
+    attempt: RendererCandidateAttempt,
+    carrier: RendererCarrier,
+  ): void {
+    if (this.rendererCandidate !== attempt || attempt.controller.signal.aborted || this.terminal !== null) {
+      void carrier.close().catch(() => {});
+      return;
+    }
+    let peer: MainRendererControlPeer;
+    try {
+      peer = createMainRendererControlPeer({
+        carrier,
+        acceptHello: (candidate, params) => this.mutate(() => this.acceptRendererHello(attempt, candidate, params.rendererControlToken)),
+      });
+    } catch {
+      void carrier.close().catch(() => {});
+      this.rendererCandidate = null;
+      this.armRendererCandidateSlot();
+      return;
+    }
+    attempt.peer = peer;
+    void peer.terminal.then(() => this.mutate(() => this.observeRendererPeerTerminal(attempt, peer)));
+  }
+
+  private acceptRendererHello(
+    attempt: RendererCandidateAttempt,
+    peer: MainRendererControlPeer,
+    token: string,
+  ): MainRendererControlHelloAcceptance {
+    if (this.terminal !== null || this.rendererCandidate !== attempt || attempt.peer !== peer || token !== attempt.token)
+      return Object.freeze({ kind: "rejected", code: "RENDERER_AUTHENTICATION_FAILED" });
+    const snapshot = this.rendererSnapshot;
+    let preparedHelloText: string;
+    try {
+      preparedHelloText = prepareRendererHelloResultV1(snapshot);
+    } catch {
+      return Object.freeze({ kind: "rejected", code: "PROTOCOL_STATE_ERROR" });
+    }
+    const old = this.currentRendererPeer;
+    this.currentRendererPeer = peer;
+    this.rendererCandidate = null;
+    if (old !== null && old !== peer) old.retire();
+    queueMicrotask(() => this.armRendererCandidateSlot());
+    return Object.freeze({ kind: "accepted", snapshot, preparedHelloText });
+  }
+
+  private observeRendererPeerTerminal(attempt: RendererCandidateAttempt, peer: MainRendererControlPeer): void {
+    if (this.currentRendererPeer === peer) this.currentRendererPeer = null;
+    if (this.rendererCandidate === attempt) {
+      this.rendererCandidate = null;
+      this.armRendererCandidateSlot();
+    }
+  }
+
+  private settleRendererAcquireFailure(attempt: RendererCandidateAttempt, _cause: unknown): void {
+    if (this.rendererCandidate !== attempt) return;
+    this.rendererCandidate = null;
+    if (attempt.controller.signal.aborted || this.terminal !== null) return;
+    this.rendererBindingTerminal = true;
+  }
+
+  private retireRendererControl(): void {
+    const candidate = this.rendererCandidate;
+    this.rendererCandidate = null;
+    candidate?.controller.abort();
+    candidate?.peer?.retire();
+    const current = this.currentRendererPeer;
+    this.currentRendererPeer = null;
+    current?.retire();
+  }
+
   private currentInputTarget(): InputTarget | null {
     const top = this.stack.at(-1);
     if (
@@ -1211,7 +1428,11 @@ class MainSessionRuntime {
   }
 
   private mutate<T>(operation: () => T | Promise<T>): Promise<T> {
-    const result = this.mutationTail.then(operation);
+    const result = this.mutationTail.then(async () => {
+      const value = await operation();
+      this.observeRendererAuthority();
+      return value;
+    });
     this.mutationTail = result.then(
       () => undefined,
       () => undefined,
@@ -1223,6 +1444,7 @@ class MainSessionRuntime {
     if (this.terminal !== null) return;
     const frozen = cloneControlOutcome(outcome);
     this.terminal = Object.freeze({ kind: "root", outcome: frozen });
+    this.retireRendererControl();
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1237,6 +1459,7 @@ class MainSessionRuntime {
   private beginShutdown(): void {
     if (this.terminal !== null) return;
     this.terminal = Object.freeze({ kind: "shutdown" });
+    this.retireRendererControl();
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1249,6 +1472,7 @@ class MainSessionRuntime {
       runtimeFailure.subsystemKey,
     );
     this.terminal = Object.freeze({ kind: "fatal", failure: primary });
+    this.retireRendererControl();
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }

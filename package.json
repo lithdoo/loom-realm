@@ -12,6 +12,7 @@
     "test:game-package": "npm test -w @loomrealm/wire -w @loomrealm/game-package",
     "test:runtime-control": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/runtime-control",
     "test:data": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/data",
+    "test:m7": "npm run build:packages && npm test -w @loomrealm/platform-ports -w @loomrealm/renderer-control -w @loomrealm/renderer -w @loomrealm/main && npm run test:game-launcher-hostra",
     "test:game-launcher-hostra": "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/subsystem -w @loomrealm/main && npm test -w @loomrealm/game-launcher-hostra",
     "test:fixtures": "npm run build -w @loomrealm/fsdb-http && node --test tools/fixtures/**/*.test.mjs",
     "docs:dev": "vitepress dev doc",

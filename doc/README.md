@@ -209,7 +209,7 @@ M3 Runtime Control mechanics                      ✅ Closed
 M4 Subsystem Runtime/Frame core                   ✅ Closed
 M5 Main Runtime/Frame authority                   ✅ Closed
 M6 Hostra Runtime physical vertical               ✅ Qualified Baseline (2026-09-03)
-M7 Renderer Control                               Implementation Frozen / Pending Implementation
+M7 Renderer Control                               ✅ Qualified (2026-09-03)
 M8 Renderer Data role integration                 Pending
 M9 Desktop DataConnectionBroker                   Pending
 M10 User Input                                    Pending
@@ -221,9 +221,9 @@ M15 PWA Runtime vertical                          Pending
 M16 PWA Full E2E / Cross-platform equivalence     Pending
 ```
 
-**当前下一实现门 = M7 Renderer Control。**
+**当前下一实现门 = M8 Renderer Data role integration。**
 
-M7 implementation facts由 ADR 0027 + Frozen Renderer Control contract + `M7_01`–`M7_05` 定义；本导航文件不重新解释其 state machine。
+M7 implementation facts由 ADR 0027 + Frozen Renderer Control contract + `M7_01`–`M7_05` 定义；qualification run见 [`M7 qualification record`](./30-implementation/m7-qualification.md)。
 
 ---
 

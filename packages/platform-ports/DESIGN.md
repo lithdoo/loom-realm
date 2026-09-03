@@ -1,7 +1,7 @@
 # `@loomrealm/platform-ports` 设计
 
-> 状态：**Implemented Baseline / Core Boundary Frozen / M4-M5 Consumer Qualified / M7 Slice Frozen for Implementation**  
-> 阶段：M7 Renderer Control preimplementation closure  
+> 状态：**Implemented Baseline / Core Boundary Frozen / M4-M7 Consumer Qualified**
+> 阶段：M7 Renderer Control implementation closure
 > 最近复核：2026-09-03  
 > 冻结决策：[ADR 0027](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
 > 当前/目标 root surface：`DeadlineScheduler` / `RuntimeControlBinding` / `OpaqueMaterialGenerator` / `RuntimeLaunchRequest` / `MainRuntimeControlBinding` / `HostedRuntime` / `RuntimeHosting` / `RendererControlBinding`

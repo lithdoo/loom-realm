@@ -33,7 +33,7 @@ const scheduler = Object.freeze({
 function mainPlatform(prepared) {
   return Object.freeze({
     scheduler,
-    bootstrapTokens: Object.freeze({ generate: () => randomBytes(32).toString("base64url") }),
+    opaqueMaterial: Object.freeze({ generate: () => randomBytes(32).toString("base64url") }),
     runtimeHosting: createHostraRuntimeHosting({ launchPlan: prepared.launchPlan }),
   });
 }

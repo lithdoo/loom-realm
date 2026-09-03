@@ -1,5 +1,6 @@
 import type {
-  BootstrapTokenGenerator,
+  OpaqueMaterialGenerator,
+  RendererControlBinding,
   DeadlineScheduler,
   RuntimeHosting,
 } from "@loomrealm/platform-ports";
@@ -16,8 +17,9 @@ export interface LogicalGameBootstrap {
 /** Narrow capability view consumed by Main from one prepared concrete Platform. */
 export interface MainPlatform {
   readonly scheduler: DeadlineScheduler;
-  readonly bootstrapTokens: BootstrapTokenGenerator;
+  readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
+  readonly rendererControl?: RendererControlBinding;
 }
 
 export interface MainPolicy {

@@ -2,9 +2,9 @@
 
 Transport-independent LoomRealm Renderer Control v1 protocol mechanics.
 
-> Status: **Implementation scaffold / Protocol + M7 implementation design Frozen / implementation pending**
+> Status: **M7 Implemented / Qualified**
 
-The package implementation has not started yet, but its current-v1 semantics, package boundary, Main/Renderer integration boundary, Platform Binding, race rules and qualification requirements are frozen by:
+The package implements the frozen current-v1 transport-independent Main and Renderer peers, exact outbound preflight, current-Snapshot validation, connection-local monotonicity, retirement, and structurally bounded latest-state publication.
 
 - [ADR 0027 — Freeze Renderer Control v1 preimplementation closure](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)
 - [Main ⇄ Renderer Control Protocol v1](../../doc/15-contracts/main-renderer-control-v1.md)

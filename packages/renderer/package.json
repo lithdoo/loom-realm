@@ -1,8 +1,8 @@
 {
-  "name": "@loomrealm/platform-ports",
+  "name": "@loomrealm/renderer",
   "version": "0.1.0-alpha.0",
   "type": "module",
-  "description": "Platform-neutral LoomRealm role-facing capability port contracts.",
+  "description": "Minimal LoomRealm Renderer role authority holder.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
@@ -12,33 +12,25 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "DESIGN.md"
-  ],
+  "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@loomrealm/foundation": "0.1.0-alpha.0"
+    "@loomrealm/renderer-control": "0.1.0-alpha.0"
   },
   "devDependencies": {
+    "@loomrealm/foundation": "0.1.0-alpha.0",
     "typescript": "^5.5.0"
   },
-  "engines": {
-    "node": ">=20"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
+  "engines": { "node": ">=20" },
+  "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lithdoo/loom-realm.git",
-    "directory": "packages/platform-ports"
+    "directory": "packages/renderer"
   },
-  "bugs": {
-    "url": "https://github.com/lithdoo/loom-realm/issues"
-  },
-  "homepage": "https://github.com/lithdoo/loom-realm/tree/main/packages/platform-ports#readme"
+  "bugs": { "url": "https://github.com/lithdoo/loom-realm/issues" },
+  "homepage": "https://github.com/lithdoo/loom-realm/tree/main/packages/renderer#readme"
 }

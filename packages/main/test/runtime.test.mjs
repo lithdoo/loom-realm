@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
+import { createRendererControlHolder } from "@loomrealm/renderer";
 import {
   FrameCallRejectedError,
   completed,
@@ -45,7 +46,7 @@ function createFakePlatform(definitions, options = {}) {
 
   const platform = {
     scheduler,
-    bootstrapTokens: {
+    opaqueMaterial: {
       generate() {
         if (options.generateToken) return options.generateToken(++tokenId);
         return `test-token-${++tokenId}-${"x".repeat(48)}`;
@@ -146,6 +147,9 @@ function createFakePlatform(definitions, options = {}) {
         });
       },
     },
+    ...(options.rendererControl === undefined
+      ? {}
+      : { rendererControl: options.rendererControl }),
   };
 
   return {
@@ -391,7 +395,7 @@ test("duplicate bootstrap token material fails closed before launching the secon
       a: defineSubsystem(() => ({ frame: () => completed(null) })),
       b: defineSubsystem(() => ({ frame: () => completed(null) })),
     },
-    { generateToken: () => token },
+    { generateToken: (id) => id === 1 ? `session-${"s".repeat(48)}` : token },
   );
 
   await assert.rejects(
@@ -413,7 +417,7 @@ test("duplicate bootstrap token material fails closed before launching the secon
 test("ill-formed bootstrap token fails closed before any Runtime launch", async () => {
   const fake = createFakePlatform(
     { root: defineSubsystem(() => ({ frame: () => completed(null) })) },
-    { generateToken: () => "\ud800" },
+    { generateToken: (id) => id === 1 ? `session-${"s".repeat(48)}` : "\ud800" },
   );
 
   await assert.rejects(
@@ -435,7 +439,10 @@ test("ill-formed bootstrap token fails closed before any Runtime launch", async 
 test("bootstrap token generation failure is attributed to the required Runtime", async () => {
   const fake = createFakePlatform(
     { root: defineSubsystem(() => ({ frame: () => completed(null) })) },
-    { generateToken: () => { throw new Error("entropy unavailable"); } },
+    { generateToken: (id) => {
+      if (id === 1) return `session-${"s".repeat(48)}`;
+      throw new Error("entropy unavailable");
+    } },
   );
 
   await assert.rejects(
@@ -595,7 +602,7 @@ test("Runtime launch that never settles is bounded by the bootstrap deadline", a
   let launchSignal;
   const platform = {
     scheduler,
-    bootstrapTokens: { generate: () => `timeout-${"x".repeat(48)}` },
+    opaqueMaterial: { generate: (() => { let id = 0; return () => `timeout-${++id}-${"x".repeat(48)}`; })() },
     runtimeHosting: {
       launch(_request, signal) {
         launchSignal = signal;
@@ -739,4 +746,84 @@ test("termination observation rejection is not accepted as physical termination 
   });
   assert.equal(shutdownCalls, 1);
   assert.equal(fake.runtimes.get("root").terminationRequests, 1);
+});
+
+test("optional Renderer Binding drives a real candidate hello and committed projection", async () => {
+  const finish = deferred();
+  const slots = [];
+  const binding = {
+    acquire(token, signal) {
+      const slot = deferred();
+      slots.push({ token, signal, slot });
+      return slot.promise;
+    },
+  };
+  const fake = createFakePlatform(
+    { root: defineSubsystem(() => ({ async frame() { await finish.promise; return completed("done"); } })) },
+    { rendererControl: binding },
+  );
+  const result = runMain({ bootstrap: bootstrap(["root"], "root"), platform: fake.platform, policy });
+  while (slots.length === 0 || !fake.runtimes.has("root")) await new Promise((resolve) => setImmediate(resolve));
+
+  const pair = createMemoryCarrierPair();
+  const first = slots[0];
+  first.slot.resolve(pair.left);
+  const holder = createRendererControlHolder();
+  const installed = await holder.connect({ carrier: pair.right, rendererControlToken: first.token });
+  assert.equal(installed.kind, "installed");
+  assert.equal(holder.current().snapshot.sessionId.startsWith("test-token-1-"), true);
+  assert.equal(holder.current().snapshot.dataAuthorities.length, 0);
+  assert.ok(holder.current().snapshot.revision >= 1);
+  assert.deepEqual(holder.current().snapshot.runtimes.map(({ subsystemKey }) => subsystemKey), ["root"]);
+
+  while (slots.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(slots[1].token, first.token);
+  finish.resolve();
+  assert.deepEqual(await result, { kind: "root-outcome", outcome: { type: "completed", value: "done" } });
+  assert.equal(slots[1].signal.aborted, true);
+  while (holder.current() !== null) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(holder.current(), null);
+});
+
+test("non-abort Renderer Binding rejection is Session-local and does not fail Runtime business", async () => {
+  let acquireCalls = 0;
+  const fake = createFakePlatform(
+    { root: defineSubsystem(() => ({ frame: () => completed("ok") })) },
+    { rendererControl: { acquire() { acquireCalls += 1; return Promise.reject(new Error("binding terminal")); } } },
+  );
+  const result = await runMain({ bootstrap: bootstrap(["root"], "root"), platform: fake.platform, policy });
+  assert.deepEqual(result, { kind: "root-outcome", outcome: { type: "completed", value: "ok" } });
+  assert.equal(acquireCalls, 1);
+});
+
+test("active Renderer replacement is atomic and stale terminal cannot clear the new holder", async () => {
+  const finish = deferred();
+  const slots = [];
+  const fake = createFakePlatform(
+    { root: defineSubsystem(() => ({ async frame() { await finish.promise; return completed("done"); } })) },
+    { rendererControl: { acquire(token, signal) { const slot = deferred(); slots.push({ token, signal, slot }); return slot.promise; } } },
+  );
+  const result = runMain({ bootstrap: bootstrap(["root"], "root"), platform: fake.platform, policy });
+  while (slots.length < 1) await new Promise((resolve) => setImmediate(resolve));
+  const holder = createRendererControlHolder();
+
+  const a = createMemoryCarrierPair();
+  slots[0].slot.resolve(a.left);
+  const installedA = await holder.connect({ carrier: a.right, rendererControlToken: slots[0].token });
+  assert.equal(installedA.kind, "installed");
+  const oldPeer = installedA.current.peer;
+
+  while (slots.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  const b = createMemoryCarrierPair();
+  slots[1].slot.resolve(b.left);
+  const installedB = await holder.connect({ carrier: b.right, rendererControlToken: slots[1].token });
+  assert.equal(installedB.kind, "installed");
+  assert.notEqual(installedB.current.peer, oldPeer);
+  await oldPeer.terminal;
+  assert.equal(holder.current().peer, installedB.current.peer);
+
+  finish.resolve();
+  await result;
+  while (holder.current() !== null) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(holder.current(), null);
 });

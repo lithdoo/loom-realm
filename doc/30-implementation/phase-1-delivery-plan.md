@@ -138,7 +138,7 @@ M6 不实现 Renderer Control physical hosting、Data Broker、Input/Render/Cont
 
 ---
 
-## M7：Renderer Control — **Implementation Frozen / Pending Implementation**
+## M7：Renderer Control — **Implemented / Qualified (2026-09-03)**
 
 事实源：
 

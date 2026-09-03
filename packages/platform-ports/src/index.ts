@@ -14,12 +14,20 @@ export interface RuntimeControlBinding {
 }
 
 /**
- * Supplies fresh high-entropy opaque bootstrap token material when Main asks
- * to create a Launch Attempt credential. The generator owns no token
- * authority: it must not register, bind, consume, or interpret the result.
+ * Supplies fresh ASCII opaque material (1..128 bytes, at least 128 bits of
+ * unpredictability for security-sensitive use). The generator owns no
+ * identity or credential authority and must not interpret the result.
  */
-export interface BootstrapTokenGenerator {
+export interface OpaqueMaterialGenerator {
   generate(): string;
+}
+
+/** Arms one slot for the next physical Renderer Control candidate. */
+export interface RendererControlBinding {
+  acquire(
+    rendererControlToken: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
 }
 
 /**
