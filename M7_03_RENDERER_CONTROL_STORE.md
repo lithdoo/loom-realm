@@ -1,44 +1,51 @@
-# M7 / 03 — Renderer Control Store
+# M7 / 03 — Renderer Control Holder
 
-> 状态：Active Design / Draft  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M7 Renderer Control  
 > 落地顺序：03  
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md) → [M7 / 02](M7_02_MAIN_AUTHORITY_PROJECTION.md)  
-> 目标：建立 `@loomrealm/renderer` 的 M7 最小 slice：保存 current renderer-control peer 已接受的完整 Snapshot；关闭 hello handoff、replacement 与 terminal race；不复制协议状态机，不提前建立 Data/Input/Render framework。
+> 冻结决策：[ADR 0027](doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 目标：建立 `@loomrealm/renderer` 的最小 M7 slice；只保存当前 peer 与已接受 Snapshot，关闭 hello handoff/replacement/terminal race，不提前建立 Store framework、Data/Input/Render architecture。
 
-核心原则：
-
-> **Renderer M7 authority state只有 `currentPeer + RendererAuthoritySnapshotV1 | null`。协议 legality由 peer判断；role只决定哪个 peer 是 current，并原子安装/撤销已接受 Snapshot。**
+> **Renderer M7 authority state exactly = current peer identity/reference + `RendererAuthoritySnapshotV1 | null`。协议 legality由 renderer-control peer维护；role只拥有 currentness 与原子安装/撤销。**
 
 ---
 
 ## 1. Scope
 
-新增/修改：
+新增：
 
 ```text
 @loomrealm/renderer
 ```
 
-直接消费：
+Runtime dependency：
 
 ```text
 @loomrealm/renderer-control
 ```
 
-M7 不实现 Renderer Data plane、Input/Interest、Render Store、Content、DOM/Canvas/WebGL、Desktop/PWA composition。
+M7 不实现 Data plane、Input/Interest、Render Store、Content、DOM/Canvas/WebGL、Desktop/PWA composition。
 
 ---
 
-## 2. Minimal State
+## 2. Frozen State
+
+逻辑上只有一个不可分割 current record：
 
 ```ts
-currentPeer: peer identity/reference | null
-currentSnapshot: RendererAuthoritySnapshotV1 | null
+current:
+  | {
+      readonly peer: RendererControlPeerIdentityOrReference;
+      readonly snapshot: RendererAuthoritySnapshotV1;
+    }
+  | null;
 ```
 
-不定义：
+实现 MAY internally用两个字段，但外部不可观察 half transition。
+
+不得新增：
 
 ```text
 RendererControlState duplicate DTO
@@ -48,122 +55,130 @@ appliedRevision duplicate field
 history/per-field caches
 ```
 
-含义：
-
 ```text
-currentPeer != null && currentSnapshot != null → current Main authority proof available
-otherwise                                  → no usable Main authority
+current != null → current Main authority proof available
+current == null → no usable Main authority
 ```
-
-两个字段的更新属于同一 role-level atomic transition；不得暴露 peer 已换而 Snapshot 仍旧、或 Snapshot 已换而 peer 仍旧的中间可观察状态。
 
 ---
 
 ## 3. Protocol State Is Not Reimplemented
 
-Renderer peer已经完成：
+Renderer peer负责：
 
 ```text
 wire/schema validation
-whole Snapshot relation validation
+whole Snapshot validation
 hello/session establishment
-current-connection revision monotonicity
+connection-local revision monotonicity
 duplicate/regression terminal
 ```
 
-Renderer role路径只有：
+Role application path：
 
 ```text
 peer accepts immutable Snapshot
-→ if peer is current
-→ replace currentSnapshot
+→ if peer identity is still current
+→ replace current.snapshot atomically
 ```
 
-Renderer role MUST NOT再次实现 revision/session/schema/lifetime-history validator。
-
-内部 assertion可存在，但不能形成第二个 protocol rejection authority。
+Role MUST NOT再次实现 revision/session/schema/lifetime-history validator。
 
 ---
 
-## 4. Atomic Snapshot Replacement
+## 4. Initial Hello Handoff
+
+冻结为 two-step handoff，不增加 staging framework：
+
+```text
+new Renderer peer
+→ renderer.hello(id=1)
+→ validated initial Snapshot R returned/resolved
+```
+
+此时 peer 尚未向 role暴露 later state。
+
+Role原子安装：
+
+```text
+old = current
+current = {peer:newPeer, snapshot:R}
+```
+
+安装完成后才：
+
+```text
+start/iterate newPeer later accepted renderer.state sequence
+```
+
+因此 R+1 不会在 R/newPeer尚未 current 时被 callback 丢失。
+
+Later-state消费 surface使用 lazy `AsyncIterable`、explicit start或等价机制；不得为了 handoff建立第二个 queue/Store。
+
+---
+
+## 5. Atomic Snapshot Replacement
 
 Renderer只能观察：
 
 ```text
-old complete current state
+old complete current snapshot
 or
-new complete current state
+new complete current snapshot
 ```
 
-不得逐字段 set runtimes/stack/inputTarget/dataAuthorities。
+不得逐字段 set `runtimes/stack/inputTarget/dataAuthorities`。
 
-immutable Snapshot引用整体替换即可；不需要 reducer/transaction/store framework。
-
----
-
-## 5. Hello Handoff Is Two-phase but Minimal
-
-new peer hello成功后，必须先取得 validated initial Snapshot R，**尚未开始向 role暴露 later state**。
-
-Renderer role原子执行：
-
-```text
-oldPeer = currentPeer
-currentPeer = newPeer
-currentSnapshot = R
-```
-
-只有这个安装完成后：
-
-```text
-start/consume newPeer later accepted renderer.state sequence
-```
-
-因此不会出现：
-
-```text
-R+1 callback arrives
-→ role尚未安装 R/newPeer
-→ R+1被丢弃或错误归属
-```
-
-实现优先使用 peer提供的 lazy later-state consumption，而不是为了 handoff增加 staging Store/queue framework。
+Immutable Snapshot whole-reference replacement足够；无 reducer/transaction/store framework。
 
 ---
 
 ## 6. Replacement / Old Peer Races
 
-Main会主动 retire/close old Control Connection；Renderer role同时以 peer identity保护本地 currentness。
+Main负责主动 retire/close old carrier；Renderer role同时用 peer identity保护 current state。
 
-newPeer安装后：
+B 安装后：
 
 ```text
-oldPeer later Snapshot → ignore
-oldPeer terminal       → ignore for current state
+A late Snapshot → ignore
+A late terminal → ignore for current B state
+A already-inFlight message arriving physically → ignore if A no longer current
 ```
 
 只有：
 
 ```text
-terminal peer === currentPeer
+terminalPeer === current.peer
 ```
 
-才执行：
+才原子执行：
 
 ```text
-currentPeer = null
-currentSnapshot = null
+current = null
 ```
 
-这样 replacement 与旧 carrier terminal race不会错误清除新 authority。
-
-Renderer role不负责向旧 peer发送 close；Main replacement authority负责主动 retirement。Renderer可自行释放旧 peer本地资源，但不能改变 Main currentness。
+Renderer role不负责决定 Main currentness，也不通过本地 close恢复/撤销另一 peer authority。
 
 ---
 
-## 7. Control Loss
+## 7. Control Loss / Session Terminal
 
-current peer terminal 后清空 `currentPeer + currentSnapshot`，即可表示：
+Current peer terminal无论原因：
+
+```text
+carrier loss
+replacement retirement
+representation failure
+Main Session terminal retirement
+```
+
+role统一：
+
+```text
+current = null
+```
+
+这立即表示：
 
 ```text
 InputTarget unavailable
@@ -171,75 +186,48 @@ DataAuthority unavailable
 ordinary input authority unavailable
 ```
 
-M8+ real Data Connections出现后，下游 consumer再对 current Snapshot撤销做 retire/close；M7 不创建 placeholder Broker/registry。
+M8+ real Data connections出现后，其 consumer再对 current authority loss做 retire/close；M7 不预建 registry。
 
-Presentation是否保留最后合法画面属于 Render Store，不属于 Control authority。
-
----
-
-## 8. Representation Failure
-
-如果 Main因 current Snapshot不可表示而主动 terminalize Control Connection，Renderer侧只观察 ordinary current-peer terminal：
-
-```text
-currentPeer/currentSnapshot → null
-```
-
-Renderer不尝试：
-
-```text
-request smaller Snapshot
-truncate local state
-resync by revision
-reconstruct from old Snapshot
-```
-
-恢复只有 fresh connection + hello current Snapshot。
+Render presentation保留最后画面属于未来 Render Store，不属于 Control holder。
 
 ---
 
-## 9. Data / Input Deferred
+## 8. No Public Subscription Yet
 
-M7可持有 Snapshot 中的 `inputTarget/dataAuthorities`，但不执行 InputManager、Interest gate、Data connection 或 Render lifecycle。
-
-M7 Main vertical固定 `dataAuthorities=[]`；非空 fixture只验证 representation/atomic storage。
-
----
-
-## 10. No Public Subscription Yet
-
-M7没有真实 M8/M10/M11 consumer要求 observer API，因此不冻结：
+M7没有真实 M8/M10/M11下游 consumer要求 observer API，因此不冻结：
 
 ```text
 subscribe(listener)
 EventEmitter
 selector/reducer API
-AsyncIterator on Store
+Store transaction API
+AsyncIterator on holder
 history/time-travel
 ```
 
-测试只需要最窄 current Snapshot read surface。等 M8真实 Renderer Data binding出现后再由实际调用方式决定 observer surface。
+M7 tests只需要最窄 current read surface。M8真实 Renderer Data consumer出现后再按实际调用方式增加通知 surface。
 
 ---
 
-## 11. Package Boundary
+## 9. Package Boundary
 
-`@loomrealm/renderer` MUST NOT依赖：
+`@loomrealm/renderer` MUST NOT depend on：
 
 ```text
 @loomrealm/main
 @loomrealm/runtime-control
+@loomrealm/platform-ports
 @loomrealm/game-package
 @loomrealm/game-launcher-*
 concrete Hostra/PWA
 Node process APIs
 ```
 
-M7不预建 `data/ input/ render/ content/ platform/` 空模块。
+M7不预建 `data/input/render/content/platform` 空模块。
 
 ---
 
-## 12. Source Shape
+## 10. Recommended Source Shape
 
 ```text
 packages/renderer/
@@ -251,45 +239,47 @@ packages/renderer/
 └─ test/
 ```
 
-`control.ts` 可以只是 peer + Snapshot orchestration；若代码足够小无需 class。
+`control.ts` 可以只是 peer orchestration + current record；若代码很小无需 class。
 
 禁止 StoreManager / ObserverHub / RendererContext framework。
 
 ---
 
-## 13. Tests
+## 11. Tests
 
-至少覆盖：
+必须覆盖：
 
 ```text
-hello initial Snapshot returned before later state consumption begins
-peer + initial Snapshot installed atomically
-later accepted Snapshot whole replacement
-new peer replaces old peer
-old peer late Snapshot ignored
-old peer terminal cannot clear new current
-current peer terminal clears peer + Snapshot together
-representation-failure terminal behaves like control loss
-no duplicate RendererControlState
+hello returns initial Snapshot before later-state consumption
+peer + R installed atomically
+later Snapshot whole replacement
+B replaces A
+A late Snapshot ignored
+A already-inFlight late delivery ignored after B current
+A terminal cannot clear B
+current B terminal clears current atomically
+Session terminal retirement observed as ordinary current terminal
+representation-failure terminal clears current
+no duplicate Control DTO
 no second revision/session validator
 no public subscription framework
 ```
 
-revision gap/regression legality只在 renderer-control peer tests验证。
-
 ---
 
-## 14. Step Closure
+## 12. Frozen Closure
 
-M7/03 complete when：
+M7/03 实施完成条件：
 
 ```text
-state is exactly currentPeer + Snapshot|null
-hello handoff cannot lose R+1
-peer replacement/old-terminal race is identity-safe
-current terminal clears authority atomically
+@loomrealm/renderer exists
+state exactly one current peer+Snapshot record or null
+initial handoff cannot lose first later state
+replacement/late-delivery/terminal identity-safe
+current terminal revokes local authority atomically
 no second protocol state machine
-no duplicate Control DTO
+no duplicate DTO
 no premature observer/Data/Input/Render framework
-package can join real M7 vertical
 ```
+
+除 ADR 0027 Reopen Rule外，不允许实施阶段新增第二套 control state abstraction。
