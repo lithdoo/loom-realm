@@ -21,6 +21,8 @@ Milestone只描述 implementation slice；package ownership以系统架构 + acc
 
 ## 1. Dependency Layers
 
+下图箭头固定表示 **provider/dependency → consumer**：
+
 ```text
 foundation ─────→ platform-ports ─────→ main / subsystem-host
  │
@@ -114,7 +116,26 @@ M7
 
 M7 directly replaces historical current implementation name `BootstrapTokenGenerator` with `OpaqueMaterialGenerator`; no compatibility alias。
 
-`RendererControlBinding.acquire(token,signal)` establishes exactly one candidate physical Renderer Control carrier and delivers the exact Main-issued token. It does not authenticate token、negotiate protocol version或 decide current Renderer。
+`OpaqueMaterialGenerator.generate()` current-v1 common output：ASCII `1..128` bytes、fresh、security-sensitive uses至少 128-bit unpredictability。它不接受 kind/type 参数，不拥有 identity/token semantics。
+
+`RendererControlBinding.acquire(token,signal)` **arms exactly one candidate slot**；它 MAY remain pending，调用本身不创建/显示 Renderer、不发生 replacement。Resolution返回一个 already-established candidate carrier并物理交付 exact Main-issued token。
+
+Settlement：
+
+```text
+abort before resolution
+→ cancel this slot / no late live result
+
+non-abort rejection
+→ Binding terminal for the owning Main Session
+→ Main does not re-acquire in that Session
+
+carrier acquired then peer/protocol terminal
+→ candidate attempt terminal only
+→ does not by itself terminalize Binding
+```
+
+Binding不认证 token、不协商 protocol version、不决定 current Renderer。
 
 No universal Platform/service locator/future port inventory。
 
@@ -142,19 +163,15 @@ M7 Snapshot = pure projection；no shadow Renderer Runtime/Frame/InputTarget reg
 
 ### Renderer
 
-M7 dependency：
+M7 runtime dependency：`@loomrealm/renderer-control` only。
 
-```text
-renderer → renderer-control
-```
-
-M7 role state only：
+M7 role local state only：
 
 ```text
 current {peer, RendererAuthoritySnapshotV1} | null
 ```
 
-No Main/Platform dependency、second revision/session validator、generic Store framework。
+该 local holder不是 Main remote-currentness 的独立证明。No Main/Platform dependency、second revision/session validator、lease/epoch/heartbeat或 generic Store framework。
 
 ### Subsystem
 
@@ -199,8 +216,8 @@ absent
 → Main issues no Renderer attempt
 → Runtime/Frame semantics unchanged
 
-present
-→ Main runs frozen one-current + one-candidate accept/currentness model
+present and healthy
+→ Main maintains at most one current Renderer + one armed/pending/bound candidate slot
 ```
 
 这不是 complete Platform API，也不要求 M6 Hostra Runtime-only composition加入 fake Binding。
@@ -209,7 +226,8 @@ Renderer candidate path：
 
 ```text
 Main issues/registers token
-→ RendererControlBinding.acquire(token,signal)
+→ RendererControlBinding.acquire(token,signal) arms one slot
+→ future physical candidate binds slot
 → candidate MessageCarrier
 → renderer-control Main peer parses hello/selects v1
 → Main exact preflight + atomic currentness decision
@@ -262,6 +280,8 @@ UniversalRendererServices
 RendererPlatform
 PlatformLaunchOptions
 options:any
+BindingErrorHierarchy
+CurrentnessLease/Epoch/Heartbeat
 ```
 
 Runtime Control and Renderer Control remain independent concrete protocol packages。
@@ -301,7 +321,7 @@ role policy/authority → owning role
 one-app glue → app internal
 ```
 
-M7 `RendererControlBinding` qualifies because Main consumes the same abstract candidate-carrier capability while Hostra/PWA physical realization differs。Capability availability may still be absent in a given composition。
+M7 `RendererControlBinding` qualifies because Main consumes the same abstract candidate-slot/carrier capability while Hostra/PWA physical realization differs。Capability availability may still be absent in a given composition。
 
 Data/Content future ports require their own real consumer closure。
 
@@ -352,16 +372,20 @@ renderer-control tests
     wire/version negotiation/validation/ordering/bounded publication/terminal
 
 platform-ports tests
-    capability shape/lifecycle
+    opaque material output contract
+    candidate-slot lifecycle
+    abort vs non-abort Binding rejection
 
 main tests
-    authority projection/revision/optional-Binding accept loop/token/currentness
+    authority projection/revision/optional-Binding slot loop/token/currentness
 
 renderer tests
-    current peer+Snapshot holder/identity-safe replacement
+    local peer+Snapshot holder/identity-safe replacement
+    no remote-currentness lease layer
 
 M7 vertical
     Binding-present real path through MemoryCarrier
+    no-slot / extra-candidate / Binding-terminal cases
 
 Main integration
     Binding-absent path remains functional
@@ -374,15 +398,34 @@ No single giant E2E replaces package/role evidence。
 
 ---
 
-## 17. Dependency Invariants
+## 17. Runtime Dependency Invariants
+
+这里改用明确 `depends on`，不混用箭头方向：
 
 ```text
-foundation → platform-ports
-foundation + wire → runtime-control
-foundation + wire → renderer-control
-main → platform-ports + runtime-control + renderer-control + wire
-renderer → renderer-control
-subsystem/host → platform-ports + runtime-control
+@loomrealm/platform-ports depends on:
+    @loomrealm/foundation
+
+@loomrealm/runtime-control depends on:
+    @loomrealm/foundation
+    @loomrealm/wire
+
+@loomrealm/renderer-control depends on:
+    @loomrealm/foundation
+    @loomrealm/wire
+
+@loomrealm/main depends on:
+    @loomrealm/platform-ports
+    @loomrealm/runtime-control
+    @loomrealm/renderer-control
+    @loomrealm/wire
+
+@loomrealm/renderer depends on:
+    @loomrealm/renderer-control
+
+@loomrealm/subsystem/host depends on:
+    @loomrealm/platform-ports
+    @loomrealm/runtime-control
 ```
 
 Forbidden：renderer-control→main/renderer/platform-ports；platform-ports→renderer-control/main；renderer→main/platform-ports；main→renderer/game-package/concrete launcher；business→protocol/platform packages。
@@ -395,11 +438,12 @@ Forbidden：renderer-control→main/renderer/platform-ports；platform-ports→r
 2. Runtime Control and Renderer Control own protocol mechanics only。  
 3. Renderer Control peer owns version negotiation；Main owns token/currentness。  
 4. Main is the single Runtime/Frame/Renderer-currentness authority。  
-5. Renderer is read-only Main mirror；M7 has no second protocol state machine。  
-6. `RendererControlBinding` gives candidate carrier only；hello grants currentness。  
-7. Binding availability may be absent per composition；no fake Binding required。  
-8. `OpaqueMaterialGenerator` gives fresh material only；Main owns semantics。  
-9. M7 closes logical Binding + MemoryCarrier semantics, not physical WS/MessagePort qualification。  
-10. Renderer Control representation failure cannot alter Frozen Frame/Runtime authority。  
-11. No generic RPC/connection/service framework。  
-12. M8 DataAuthority/Data bindings remain consumer-driven。
+5. Renderer is a local read-only Main mirror；M7 has no second protocol/currentness state machine。  
+6. `RendererControlBinding.acquire` arms one candidate slot；hello grants currentness。  
+7. Binding abort cancels one slot；non-abort acquire rejection terminalizes that Binding for the Main Session。  
+8. Binding availability may be absent per composition；no fake Binding required。  
+9. `OpaqueMaterialGenerator` gives ASCII 1..128-byte fresh material with >=128-bit unpredictability for security-sensitive uses；Main owns semantics。  
+10. M7 closes logical Binding + MemoryCarrier semantics, not physical WS/MessagePort qualification。  
+11. Renderer Control representation failure cannot alter Frozen Frame/Runtime authority。  
+12. No generic RPC/connection/service/currentness framework。  
+13. M8 DataAuthority/Data bindings remain consumer-driven。
