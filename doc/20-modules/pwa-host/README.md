@@ -1,74 +1,73 @@
 # PWA Composition 设计
 
 > 层级：模块设计  
-> 状态：Active Design  
-> 稳定程度：Experimental  
-> 主要定义：PWA Platform Composition realization：PWA Launcher-owned Game PREPARE、Window、Worker Runner、MessagePort/MessageChannel、Worker provisioning、Service Worker/OPFS 与安全边界  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-28
+> 状态：M15 Runtime Vertical Planned / M16 Full E2E Planned  
+> 稳定程度：Architecture Evolving / Renderer Control Dependency Frozen  
+> 主要定义：PWA Platform Composition realization：PWA Launcher-owned Game PREPARE、Worker Runner、Runtime Control MessagePort，以及 M16 Renderer Control/Data/Content full physical realization  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[PWA Game Launcher / Worker Subsystem Runner Profile v1](../../15-contracts/pwa-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-09-03
 
-本文描述完整 PWA Platform Composition realization，不是 `@loomrealm/platform-pwa` mega-package。`@loomrealm/game-launcher-pwa` 只抽出 Game Entry consumption + Subsystem Runtime launch planning/hosting/Runner integration；Renderer/Data Broker/Content/SW integration 仍由完整 composition负责。
+本文描述完整 PWA Platform Composition target，不是 `@loomrealm/platform-pwa` mega-package。M15只关闭 PWA Runtime/Worker vertical；M16才关闭 Renderer Control + Data Broker/bindings + Content + full cross-platform equivalence。
 
 ---
 
-## 1. Composition
+## 1. Milestone Shape
+
+### M15 Runtime Vertical
 
 ```text
 apps/pwa / product entry
-        ↓
-create session-scoped PwaPlatform
-        ↓
-PwaPlatform.prepareGame(installation/source)
-        ↓
-@loomrealm/game-launcher-pwa PREPARE component
-    ├── @loomrealm/game-package validates Game Entry
-    ├── validates launch.pwa.json
-    ├── exact key-set join
-    ├── full installation/origin/security preflight
-    ├── immutable PwaLaunchPlan → installed privately in PwaPlatform
-    └── immutable LogicalGameBootstrap → returned to composition
-        ↓
-runMain({ bootstrap: logicalBootstrap, platform: same PwaPlatform })
-        ↓
-PwaPlatform
-├── Main-facing RuntimeHosting / scheduler
-├── Worker RuntimeHosting / Supervision
-├── Host-owned Worker Subsystem Runner
-├── Runtime Control MessagePort
-├── Worker Platform Provisioning path
-├── browser Window Renderer
-├── Renderer Control MessagePort
-├── DataConnectionBroker / MessageChannel transfer
-└── Fetch + Service Worker / OPFS Content
+→ session-scoped PwaPlatform
+→ PwaPlatform.prepareGame(...)
+→ @loomrealm/game-launcher-pwa PREPARE
+→ PwaLaunchPlan installed privately + LogicalGameBootstrap
+→ runMain({bootstrap, platform})
+→ RuntimeHosting
+→ Host-owned Worker Runner
+→ Runtime Control MessagePort
+→ @loomrealm/subsystem/host
 ```
 
-`apps/pwa` MUST NOT duplicate Game Package schema validation or PWA manifest/join semantics。
+M15 does not claim Renderer Control/Data/Content full physical composition。
 
-Window/Worker/Port/Service Worker 只负责 physical realization，不拥有 Frame/Activation/InputTarget/DataAuthority/Render authority。
+### M16 Full PWA Target
+
+```text
+M15 Runtime vertical
++
+Window/Web Renderer
++
+M7 Frozen RendererControlBinding physical realization
++
+Renderer Control MessagePort
++
+PWA DataConnectionBroker / MessageChannel
++
+RendererDataBinding + SubsystemDataBinding provisioning
++
+User Input + Render Update
++
+Fetch / Service Worker / OPFS Content
+→ full PWA E2E
+→ cross-platform logical equivalence
+```
+
+PWA physical ownership never becomes Frame/Activation/InputTarget/DataAuthority/Renderer-currentness authority。
 
 ---
 
 ## 2. PWA PREPARE
 
-Product bootstrap caller 调 `PwaPlatform.prepareGame(...)`；PwaPlatform 内部调用 PWA Launcher component，而不是让 product caller：
-
-```text
-parse Game Entry manually
-→ pass ValidatedGameEntryV1 manually
-→ call PWA planner
-```
-
-PWA Launcher内部：
+Product bootstrap caller调用 `PwaPlatform.prepareGame(...)`；PwaPlatform内部调用 PWA Launcher component：
 
 ```text
 obtain Game Entry
 → @loomrealm/game-package validate
 → validate launch.pwa.json
 → exact Game↔PWA key-set join
-→ validate all module logical paths
-→ resolve through selected Installation Registry
-→ enforce same-origin/trusted-installation policy
-→ validate Worker/MessageChannel/Runner capability
+→ resolve selected-installation executable modules
+→ same-origin/trusted-installation/security preflight
+→ validate Worker/Runner capability
 → freeze PwaLaunchPlan
 → project LogicalGameBootstrap
 ```
@@ -81,62 +80,56 @@ business module import = 0
 Runtime Control establish = 0
 ```
 
+`apps/pwa` MUST NOT duplicate Game Package schema validation or PWA manifest/join semantics。
+
 ---
 
 ## 3. Main Installation Boundary
 
-Main receives：
+Main receives only：
 
 ```text
 LogicalGameBootstrap
-    subsystemKeys
-    initial {subsystemKey,input}
-
-Main-facing capability view
-    structurally satisfied by the same prepared PwaPlatform instance
++
+Main-facing narrow capability view
 ```
 
-Main does not receive：
+Main does not receive GameEntry/formatVersion/PwaLaunchPlan/module URL/Worker/Port details。
+
+Through M7 Main-facing logical shape remains：
 
 ```text
-GameEntryV1 / ValidatedGameEntryV1
-formatVersion
-launch.pwa.json
-PwaLaunchPlan
-module/moduleUrl
-Worker/Runner/Port details
+DeadlineScheduler
+OpaqueMaterialGenerator
+RuntimeHosting
+RendererControlBinding?   // optional; PWA physical realization arrives M16
 ```
 
-`PwaPlatform` 持有 frozen PwaLaunchPlan；`apps/pwa` 只负责编排 `prepareGame()` 与 `runMain()`，MUST NOT re-interpret raw config。Main 不读取 PwaLaunchPlan。
+M15 PWA Runtime-only provider MAY omit `rendererControl` entirely；no fake Binding。
 
 ---
 
-## 4. Worker Runner
+## 4. Worker Runner — M15
 
-PWA physical entry：
+Dedicated Worker physical entry：
 
 ```text
-Dedicated Worker entry = Host-owned Worker Runner
+Host-owned Worker Runner
 ```
 
 Business module：
 
 ```text
 PwaLaunchPlan[key].module
-    = selected-installation executable .mjs
+= selected-installation Definition Module
 ```
 
-Runner：
+Runner capability growth：
 
 ```text
-receive/validate Platform bootstrap
-→ verify subsystemKey + planned binding
-→ resolve/import exact planned module
-→ validate default SubsystemDefinitionFactory
-→ construct RuntimeControlBinding
-→ M8+ construct SubsystemDataBinding
-→ M12+ construct ContentClient
-→ runSubsystem(...) with current-milestone capabilities
+M15 RuntimeControlBinding
+M16/M8-derived SubsystemDataBinding provisioning
+M16/M12-derived ContentClient realization as required
 ```
 
 Business module不得创建 Worker、寻找 bootstrap Port、读取 launch manifest或分支 PWA business semantics。
@@ -148,7 +141,7 @@ Business module不得创建 Worker、寻找 bootstrap Port、读取 launch manif
 `launch.pwa.json` MAY select installation business artifact，但不得控制：
 
 ```text
-Host-owned Worker Runner URL/entry
+Host-owned Worker Runner entry
 arbitrary Worker constructor options
 bootstrap/Runtime Control/Data MessagePort
 credential material
@@ -157,265 +150,213 @@ Service Worker authority
 resource/timeouts
 ```
 
-这些属于 PWA Host deployment/security policy。
-
 ---
 
-## 6. Runtime Bootstrap
+## 6. Runtime Bootstrap — M15
 
 ```text
-PwaLaunchPlan already frozen
-→ Main creates Launch Attempt/auth for key
+PwaLaunchPlan frozen
+→ Main creates Launch Attempt/bootstrap credential
 → RuntimeHosting looks up plan[key]
-→ create Dedicated Worker running Host-owned Runner
-→ establish Runner provisioning capability
+→ create Worker Runner
 → Runner imports exact planned module
-→ Runtime Control Port available
-→ subsystem.hello
-→ identified
-→ initialize
-→ ready
+→ Runtime Control MessagePort
+→ subsystem.hello / identified / initialize / ready
 ```
 
 ```text
 plan valid != Worker created != module loaded != connected != identified != ready
-ready != Data Port/offer/current carrier
+ready != Renderer exists
+ready != Data current
 ```
 
-Module import/ABI failure使 required bootstrap失败并统一 cleanup。
+Unexpected Worker/Control loss remains Runtime failure；same-attempt Control reconnect不存在。
 
 ---
 
-## 7. Runtime Control MessagePort
+## 7. Runtime Control MessagePort — M15
 
 ```text
 postMessage(string)
-= one UTF-8 JSON text JSON-RPC message
+= one UTF-8 JSON text JSON-RPC application object
 ```
 
-Structured Clone 只用于 Platform bootstrap/Port transfer，不形成第二 application value model。
-
-Control loss / unexpected Worker termination属于 Runtime failure；same-attempt Control reconnect不存在。
+Structured Clone只用于 Platform bootstrap/Port transfer，不形成第二套 application value model。
 
 ---
 
-## 8. Renderer Hosting / Control
+## 8. Renderer Hosting / Control — M16
+
+Window creation/show/reload belongs to concrete PWA composition；M7 does not define a Core `RendererHosting` service。
+
+Frozen candidate path：
 
 ```text
-Main Renderer intent
-→ current browser Window/Web application
-→ Renderer Control MessagePort
-→ renderer.hello
-→ full current Authority Snapshot
+Main arms RendererControlBinding.acquire(T, signal)
+→ PWA composition waits for/binds at most one Window Renderer candidate
+→ exact Main-issued T delivered through secure bootstrap
+→ Renderer Control MessageChannel/MessagePort established
+→ acquire resolves one MessageCarrier<string>
+→ renderer-control peer handles renderer.hello/version
+→ Main atomic acceptance grants current Renderer
 ```
 
-Snapshot only logical：
+Binding does not authenticate token、negotiate protocol version或 decide currentness。
 
-```text
-Runtime / Stack / Activation / InputTarget
-DataAuthority {subsystemKey,generation,dataProfile}
-```
+Transient physical candidate establishment failure MAY be absorbed/disposed while `acquire` remains pending。If PWA surfaces non-abort `acquire` rejection to Main, Frozen M7 rule makes the Binding terminal for that Main Session；PWA must not add a private retry/currentness protocol。
 
-不携 Data MessagePort、transfer object、credential、PwaLaunchPlan/module URL、Game Entry material。
+Renderer Snapshot never carries Data MessagePort/transfer object/credential/PwaLaunchPlan/module URL。
 
 ---
 
-## 9. DataConnectionBroker
+## 9. DataConnectionBroker — M16 Physical Realization
+
+M8 freezes role/Data authority semantics；M16 must supply PWA physical realization：
 
 ```text
-DataAuthority(S,G,P)
-→ PWA Broker
+Main DataAuthority(S,G,P)
+→ PWA DataConnectionBroker
 → create MessageChannel
-→ bind endpoints to S/G/P
+→ bind exact Session/current Renderer/S/G/P
 → transfer Renderer endpoint
-→ transfer Subsystem endpoint through Worker provisioning
-→ RendererDataBinding / SubsystemDataBinding
+→ provision Subsystem endpoint to target Worker Runner
+→ paired current Data Connection install
 ```
 
-Current `P = loomrealm.renderer-data/1`。
+Broker不拥有 generation/profile/current Renderer authority。
 
-Broker不拥有 generation/profile。Profile change必须 fresh generation。
+Same S/G/P MAY sequentially reconnect with fresh MessageChannel；stale/duplicate endpoint cannot become current。
 
 ---
 
-## 10. Worker Platform Provisioning Path
+## 10. Worker Provisioning Path
 
-Worker Runner MUST have a path distinct from Runtime Control/Data carrier，typically Host-owned provisioning MessagePort。
+Worker Runner needs a Platform-private path distinct from Runtime Control/Data application carrier。
 
 MAY carry：
 
 ```text
-fresh Data endpoint for current S/G/P
-revoke/supersede old physical material
+fresh Data endpoint for exact current S/G/P
+revoke/supersede physical material
 ```
 
-It is not Subsystem Control、Frame、Renderer Control、Renderer Data application carrier、business RPC、Game/PWA manifest update channel。
+It is not Subsystem Control、Frame、Renderer Control、Renderer Data application protocol或 business RPC。
+
+Provisioning failure本身 != Runtime failure / Frame unwind / DataAuthority mutation。
 
 ---
 
-## 11. Data Installation / Reconnect
+## 11. Renderer Data / Input / Render — M16 Composition
 
-Runner receives current Data offer：
+Renderer Data Profile：
 
 ```text
-validate own subsystem + generation + dataProfile
-→ accept transferred MessagePort
-→ wrap MessageCarrier
-→ SubsystemDataBinding yields {G,P,carrier}
-→ SDK DataPlane installs current
+loomrealm.renderer-data/1
+= Data Connection v1 + User Input v1 + Render Update v1
 ```
 
-Data carrier：
+Data application carrier：
 
 ```text
 postMessage(string)
 = one UTF-8 JSON text child-protocol object
 ```
 
-Same S/G/P may sequentially reconnect using fresh MessageChannel；stale/duplicate endpoint cannot become current。
+One Data dispatcher demux input/render。
+
+Fresh Data carrier requires fresh Input/Render baselines according to M10/M11 semantics；Frame/Data/Render lifecycles remain independent。
 
 ---
 
-## 12. Provisioning Failure Domain
+## 12. Content — M16 Physical Realization
 
-```text
-MessageChannel creation failure
-Port transfer/installation failure
-provisioning Port loss
-same-generation reconnect failure
-```
-
-本身：
-
-```text
-!= Runtime failure
-!= Frame unwind
-!= DataAuthority mutation
-```
-
-Runtime Control loss / Worker unexpected termination remains Runtime failure domain。
-
----
-
-## 13. Data Profile / Input / Render
-
-Renderer Data Profile v1：
-
-```text
-Connection v1 + User Input v1 + Render Update v1
-```
-
-One Data dispatcher demux `input.*` / `render.*`。
-
-Fresh carrier：
-
-```text
-Input registry/state empty → republish/rebaseline
-Render current Registry → fresh Snapshot each Domain → Patch/Event
-```
-
-Frame/Data/Render lifecycles独立。
-
----
-
-## 14. Content
+PWA full closure must include：
 
 ```text
 same-origin Fetch
 Service Worker
-OPFS / Cache Storage
+OPFS / Cache Storage as product implementation requires
 ```
 
-只实现 Content API logical semantics。
+These implement logical readonly Content API only。Definition Module executable loading remains trusted Launcher/Runner capability。
 
-Definition Module executable loading属于 trusted Launcher/Runner capability，不通过 ordinary Content API给业务 arbitrary executable access。
+M16 cannot claim full PWA E2E if Renderer Control exists but Data/Content physical realization is still absent。
 
 ---
 
-## 15. Composition Root
+## 13. Composition Root
 
-Current：
-
-```text
-apps/pwa
-```
-
-MAY combine：
-
-```text
-@loomrealm/main
-@loomrealm/subsystem
-@loomrealm/renderer
-@loomrealm/game-launcher-pwa
-@loomrealm/transport-messageport
-@loomrealm/content-service-worker
-PWA Renderer/Data Broker integration
-business artifacts
-```
-
-`apps/pwa` 可以依赖 launcher；Main/business不得反向依赖。
+`apps/pwa` is final composition root and MAY combine current-platform packages/adapters as milestones land；Main/business never depend on concrete PWA implementation。
 
 ---
 
-## 16. Cross-platform Equivalence
+## 14. Cross-platform Equivalence — M16
 
-Hostra/PWA share：
+Compare same logical：
 
 ```text
-same Game Entry logical topology
-same resulting LogicalGameBootstrap semantics
-same subsystem keys
-same Subsystem Definition ABI
-same logical scenario/business expectations
-same formal application semantics
+Game topology / LogicalGameBootstrap
+Runtime lifecycle
+Frame/Activation/outcome/unwind
+Renderer authority/replacement
+Data S/G/Profile/currentness
+Input delivered semantics
+Render authoritative replica
+Content logical response
+business observable state
 ```
 
-允许各自 launch manifest/artifact不同。
-
-Compare logical Runtime/Frame/Renderer/Data/Input/Render/Content/business results，不比较 module path/bytes、PID/Worker id、IPC/Port、WS/MessagePort 等 physical trace。
-
----
-
-## 17. Tests
+Do not compare：
 
 ```text
-PWA launcher owns Game Entry validation step
-apps/pwa does not duplicate Game schema/join logic
-valid/invalid PWA manifest
-exact Game↔PWA key-set join
-all modules resolved/security-checked before first Worker creation
-PREPARE failure zero Worker/import/Control side effect
-logicalBootstrap has no Game document/executable material
-Host-owned Worker Runner is constructor entry
-Main launch has no module
-manifest cannot override Runner/Port/CSP/credential policy
-Runtime Control postMessage(string)
-created != loaded != connected != identified != ready
-ready independent from Data offer
-provisioning path distinct from Runtime/Data application protocols
-Data transfer binds S/G/P
-same-generation fresh MessageChannel
-profile change requires fresh generation
-provision failure does not fail Runtime/Frame
-actual Worker termination → stopped
-unexpected termination → Runtime failure
-no auto restart
-PWA/Hostra abstract-trace equivalence
+module path/bytes
+PID vs Worker id
+WebSocket vs MessagePort
+IPC vs Port transfer
+HTTP vs Fetch/SW internals
 ```
 
 ---
 
-## 18. Final Invariants
+## 15. Qualification Placement
 
-1. apps/pwa调用 matching PWA Launcher prepare，而不手动调用 Game Package；
-2. PWA Launcher内部拥有 common Game validation orchestration；
-3. PwaLaunchPlan + LogicalGameBootstrap在 first Worker side effect前完整冻结；
-4. Main不接收 GameEntry/module URL/Worker options；
-5. business module != Worker entry；
-6. Host-owned Worker Runner是 physical entry；
-7. PWA manifest不能覆盖 Host Runner/security/credential policy；
-8. Runtime Control与 provisioning path独立；
-9. Data provisioning/loss不等于 Runtime failure/Frame unwind；
-10. Control/Data MessagePort application unit统一 JSON text string；
-11. Frame/Data/Render lifecycle独立；
-12. PWA/Hostra artifact/physical mechanism可不同，但 logical application semantics等价。
+M15 must qualify：
+
+```text
+PWA PREPARE
+Worker Runner
+RuntimeHosting
+Runtime Control MessagePort
+real Main↔Worker↔Subsystem trace
+Worker termination/failure
+```
+
+M16 additionally must qualify：
+
+```text
+real PWA RendererControlBinding candidate-slot settlement/currentness
+Window Renderer reload/replacement
+Renderer Control MessagePort
+transient candidate establishment handling without second Binding protocol
+PWA DataConnectionBroker + paired Port provisioning
+Input/Render full trace
+PWA Content realization
+Session shutdown
+Hostra/PWA full logical equivalence
+```
+
+---
+
+## 16. Final Invariants
+
+1. M15 owns PWA Runtime/Worker vertical, not full Renderer/Data product；
+2. PWA Launcher owns Game PREPARE/Runtime launch only；
+3. Main receives no Game/executable/Worker material；
+4. Host-owned Worker Runner is physical Runtime entry；
+5. M7 `RendererControlBinding` remains Main-facing optional candidate carrier capability；
+6. Window hosting is M16 concrete composition responsibility, not Core RendererHosting service；
+7. PWA cannot invent separate Renderer currentness/retry protocol；
+8. M16 includes Renderer Control + Data Broker/bindings + Content, not Renderer Control alone；
+9. Data provisioning failure != Runtime/Frame failure；
+10. Control/Data MessagePort application unit remains JSON text string；
+11. Hostra/PWA physical mechanisms may differ, logical application semantics must match。

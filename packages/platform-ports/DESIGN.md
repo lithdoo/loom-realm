@@ -1,13 +1,12 @@
 # `@loomrealm/platform-ports` 设计
 
-> 状态：**Implemented Baseline / Core Boundary Frozen / M4 Consumer Qualified / M5 Slice Frozen**  
-> 阶段：M5 Main Platform Capability Contract baseline  
-> 最近复核：2026-08-28  
-> 当前 root export：`DeadlineScheduler` / `RuntimeControlBinding` / `BootstrapTokenGenerator` / `RuntimeLaunchRequest` / `MainRuntimeControlBinding` / `HostedRuntime` / `RuntimeHosting`  
-> 上层事实源：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[运行承载系统](../../doc/10-architecture/runtime-hosting-system.md)、[运行时启动系统](../../doc/10-architecture/runtime-bootstrap-system.md)  
-> 真实消费者：M4 `@loomrealm/subsystem/host`、M5 `@loomrealm/main` 均已通过真实 role consumer qualification。
+> 状态：**Implemented Baseline / Core Boundary Frozen / M4-M5 Consumer Qualified / M7 Slice Frozen for Implementation**  
+> 阶段：M7 Renderer Control preimplementation closure  
+> 最近复核：2026-09-03  
+> 冻结决策：[ADR 0027](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 当前/目标 root surface：`DeadlineScheduler` / `RuntimeControlBinding` / `OpaqueMaterialGenerator` / `RuntimeLaunchRequest` / `MainRuntimeControlBinding` / `HostedRuntime` / `RuntimeHosting` / `RendererControlBinding`
 
-> **本包只定义 platform-neutral Core 需要的窄 capability / physical fact contract；不拥有 Core authority、不拥有 role policy、不实现 protocol mechanics、不实现 Hostra/PWA physical mechanism。**
+> **本包只定义 platform-neutral Core 需要的窄 capability / physical fact contract；不拥有 Core authority、role policy、protocol mechanics 或 concrete Hostra/PWA implementation。**
 
 ---
 
@@ -23,63 +22,25 @@ Core roles
 Protocol packages
     protocol mechanics
 
-Hostra / PWA Platform implementations
+Hostra / PWA
     physical realization
 ```
 
-依赖方向：
-
-```text
-@loomrealm/foundation
-        ↑
-@loomrealm/platform-ports
-        ↑
-        ├──────────────┐
-        │              │
-@loomrealm/subsystem  @loomrealm/main
-        ↑              ↑
-        │              │
- Hostra / PWA implementations
-```
-
-固定：
-
-```text
-platform-ports MUST NOT depend on runtime-control
-platform-ports MUST NOT depend on main/subsystem
-platform-ports MUST NOT depend on concrete Hostra/PWA APIs
-```
-
-当前 runtime dependency 仍只有 `@loomrealm/foundation`。
-
-```text
-Platform capability != Core authority
-Platform capability != protocol mechanics
-Platform capability lifetime != physical connection lifetime
-Platform package boundary != process boundary
-```
+Runtime dependency remains exactly `@loomrealm/foundation`。MUST NOT depend on runtime-control、renderer-control、main、renderer或 concrete Hostra/PWA APIs。
 
 ---
 
 ## 2. Port Admission Rule
 
-新增 public port 必须同时满足：
+Public port只有当前真实 Core consumer + 多平台 physical realization需要时才进入本包。
 
-1. 当前 milestone 有真实 Core consumer use-site；
-2. Hostra/PWA 可用不同 physical mechanism 实现相同 abstract semantics；
-3. 表达 capability/fact，不复制 Core authority；
-4. 不重复 protocol mechanics；
-5. exact shape 是完成当前 vertical 的最小集合。
+禁止 universal Platform、service locator、generic connection registry、generic lifecycle/event bus、generic Clock/Crypto service、future port inventory。
 
-以下理由不足以新增 API：未来可能需要、为了完整、为了统一命名、测试方便、某个平台碰巧已有。
-
-禁止 universal `Platform` mega-interface、service locator、DI container、generic event bus、transport registry、generic lifecycle framework、generic Clock、platform detection API。
-
-Product composition MAY 创建 concrete `HostraPlatform` / `PwaPlatform` object；Core role 只 structural-consume 自己的 narrow role view。
+M7 `RendererControlBinding` 已由 Main real consumer closure证明；它不是 Renderer mega-port。
 
 ---
 
-## 3. Frozen Root API
+## 3. Frozen Root API Through M7
 
 ```ts
 import type { MessageCarrier } from "@loomrealm/foundation";
@@ -92,7 +53,7 @@ export interface RuntimeControlBinding {
   acquire(signal: AbortSignal): Promise<MessageCarrier>;
 }
 
-export interface BootstrapTokenGenerator {
+export interface OpaqueMaterialGenerator {
   generate(): string;
 }
 
@@ -117,331 +78,221 @@ export interface RuntimeHosting {
     signal: AbortSignal,
   ): Promise<HostedRuntime>;
 }
+
+export interface RendererControlBinding {
+  acquire(
+    rendererControlToken: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
+}
 ```
 
-M4 contracts remain unchanged. M5 adds only the capabilities proven necessary by the Main Runtime bootstrap vertical.
+Current-v1 不保留 `BootstrapTokenGenerator` alias；M7直接改为 `OpaqueMaterialGenerator`。
 
 ---
 
-## 4. M4 Contracts
+## 4. M4/M5 Frozen Baseline
 
-### `DeadlineScheduler`
+`DeadlineScheduler`：narrow relative deadline capability；no wall-clock/interval/cron。
 
-Narrow deadline scheduling capability, not a Clock:
+`RuntimeControlBinding`：Subsystem-side one-attempt single-use already-established carrier；abort prevents late live delivery；no reconnect/retry/replay。
 
-```text
-delayMs finite non-negative integer
-callback begins at most once
-cancel idempotent
-cancel-before-begin prevents later begin
-cancel-after-begin has no retroactive effect
-implementation does not intentionally fire early
-```
+`RuntimeLaunchRequest`：only `subsystemKey + bootstrapToken`。
 
-No `now`, wall clock, timezone, interval, cron, sleep Promise.
-
-### `RuntimeControlBinding`
-
-Subsystem-side one-Launch-Attempt single-use Control establishment capability:
-
-```text
-consumer acquire at most once
-at most one successful carrier result
-already-established MessageCarrier
-no hello/JSON/protocol-state ownership
-no same-attempt reconnect/retry/replay
-```
-
-Pending abort must prevent later delivery of a live carrier; late physical carrier is closed/discarded by Platform.
-
-M4 `@loomrealm/subsystem/host` is a qualified real consumer.
+`RuntimeHosting` / `HostedRuntime` / `MainRuntimeControlBinding`：physical Runtime creation、Main-side Control acquisition、termination request与actual termination fact；M5 semantics unchanged。
 
 ---
 
-## 5. M5 Bootstrap Credential Capability
+## 5. `OpaqueMaterialGenerator`
 
-### `BootstrapTokenGenerator`
+M5 Runtime bootstrap + M7 Session identity/Renderer token形成多个真实 consumer：
 
-Subsystem Control v1 requires `bootstrapToken` to be fresh, high-entropy, opaque, bound to one Main Launch Attempt + key, registered before Runtime execution, consumed once, and not logged.
-
-Main owns that credential authority, but platform-neutral Main must not import Node `crypto`, browser APIs, or concrete Platform primitives. Therefore M5 exposes one narrow capability:
-
-```text
-Main calls BootstrapTokenGenerator.generate()
-→ receives fresh high-entropy opaque token material
-→ Main validates/registers/binds it to LaunchAttempt + subsystemKey
-→ Platform receives it only through RuntimeLaunchRequest
-→ Main consumes/authenticates it during subsystem.hello
+```ts
+interface OpaqueMaterialGenerator {
+  generate(): string;
+}
 ```
 
-The generator owns **no credential authority**. It MUST NOT:
+每个 successful call MUST 返回：
 
 ```text
-register token
-bind token to subsystem/attempt
-consume token
-decide hello authentication
-retain token for application semantics
-log token
+ASCII string
+1..128 bytes
+fresh for the concrete Platform/Session lifetime
+at least 128 bits of unpredictability for security-sensitive uses
+opaque to callers
 ```
 
-Each successful call MUST yield fresh token material suitable for Subsystem Control v1 bearer authentication. Returned token MUST satisfy the protocol representation bound (`1..4096` UTF-8 bytes). Main remains responsible for rejecting invalid generator output before Runtime launch.
+Main 对 Session identity、Runtime bootstrap credential、Renderer Control credential分别独立调用；不得复用同一值。
 
-This capability is intentionally bootstrap-specific rather than a generic Crypto/Random service.
+Generator不拥有 Session identity semantics、Runtime attempt authority、Renderer currentness、credential registration/binding/consumption。Main 对每种用途仍做 formal representation validation。
+
+不是 identity service/token registry/kind-dispatch factory/crypto facade；不得为了三个用途增加 `generate(kind)` 或多个语义化 generator interface。
 
 ---
 
-## 6. M5 Runtime Hosting Contract
+## 6. `RendererControlBinding` — Frozen Candidate Slot
 
-### `RuntimeLaunchRequest`
-
-A narrow projection of Main-owned Launch Attempt authority:
-
-```text
-subsystemKey
-bootstrapToken
+```ts
+interface RendererControlBinding {
+  acquire(
+    rendererControlToken: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
+}
 ```
 
-It is not a Launch Attempt registry/model and MUST NOT contain GameEntry, PlatformLaunchPlan, module/path/URL, Node/Worker options, endpoint/Port, Renderer/Data/Content material, or mutable Main state.
-
-Before `RuntimeHosting.launch()`, Main has already registered the credential authority.
-
-Platform receives the token only to inject it into the exact Runner created by this call. It preserves the token exactly, does not log it, and does not derive application authority from it.
-
-### `RuntimeHosting`
-
-A prepared concrete Platform exposes one Main-facing physical Runtime creation capability:
+一个 acquire调用不是“立即启动一个 Renderer”，而是：
 
 ```text
-launch({subsystemKey, bootstrapToken}, signal)
-→ lookup immutable platform-private LaunchPlan[subsystemKey]
-→ prepare trusted Runner bootstrap
-→ create one physical Runtime lifetime
-→ inject key/token
-→ return HostedRuntime
+arm exactly one candidate slot with Main-issued token T
+→ MAY remain pending until Platform has a physical candidate
+→ Platform binds at most one candidate to T
+→ Platform delivers exact T to that candidate bootstrap
+→ Platform establishes one already-connected MessageCarrier
+→ Promise resolves at most once
 ```
 
-Success proves only that the physical Runtime lifetime and its correlation object exist. It does not prove Control acquisition, hello identification, ready, Frame existence, Renderer, or Data.
-
-No transparent retry/restart/reuse. Abort while pending must not later deliver a live HostedRuntime; late physical resources are retired internally.
-
-### `HostedRuntime`
-
-One already-created physical Runtime lifetime object correlates exactly:
+`acquire()` MUST NOT itself mean：
 
 ```text
-Main-side Control establishment
-physical termination request
-actual physical termination fact
+create/show a new Renderer now
+replace current Renderer
+authenticate token
+negotiate Renderer Control version
+mark candidate current
 ```
 
-This removes the need for parallel `RuntimeControlHost` / `RuntimeSupervisor` / handle registries solely to join facts belonging to the same physical lifetime.
-
-`HostedRuntime` is not Main Runtime authority and exposes no PID/Worker/module/URL.
-
-### `MainRuntimeControlBinding`
-
-Main-side one-HostedRuntime single-use Control establishment capability. It is structurally similar to Subsystem-side `RuntimeControlBinding`, but role/lifetime identity differs, so the names remain separate.
+如果没有 armed slot，或一个 slot已绑定 candidate 后又出现额外 candidate：
 
 ```text
-acquire at most once
-at most one successful carrier
-already-established MessageCarrier
-no protocol/hello ownership
-no same-attempt reconnect/retry/replay
+Platform MUST NOT give it T
+Platform MUST NOT expose it as a live Renderer Control participant
+Platform rejects/closes/discards it according to product policy
 ```
 
-Pending abort prevents late live-carrier delivery.
-
-### `terminated`
-
-`HostedRuntime.terminated` resolves only after the physical Runtime has actually terminated. Promise rejection/observation failure is **not** termination proof.
+Settlement semantics：
 
 ```text
-termination request resolved != terminated
-Control lost != terminated
-Runtime failed != terminated
-termination observation rejected != terminated
+AbortSignal abort before resolution
+→ cancel only this slot
+→ late candidate/carrier MUST NOT be delivered as a live result
+
+non-abort acquire rejection
+→ this RendererControlBinding is terminal for the owning Main Session
+→ consumer MUST NOT call acquire again in that Session
 ```
 
-Only this physical fact can support Main committing `stopped`.
+Binding无需 typed error hierarchy。Carrier成功 acquire 后的 protocol/peer failure不等于 Binding terminal。
 
-### `requestTermination(signal)`
+这允许 Main 在 current Renderer存在时预挂下一 slot而不会自动产生 replacement。
 
-Requests physical termination. Resolution means the request was accepted/issued or the Runtime was already terminated; it does not itself mean `stopped`.
-
-Repeated requests on the same HostedRuntime MUST safely converge and MUST NOT create another Runtime lifetime. Abort does not require undoing termination already in progress.
+M7 deterministic realization：MemoryCarrier fixture。Desktop/PWA physical realization分别 M14/M16。
 
 ---
 
-## 7. M5 Lifecycle Closure
+## 7. Optional Capability in Main-facing View
 
-```text
-Main creates LaunchAttempt L for subsystem S
-→ generator.generate() => token T
-→ Main validates/registers T against current L/S
-→ runtimeHosting.launch({subsystemKey:S, bootstrapToken:T}, signal)
-→ Platform creates Runner and injects S/T
-→ HostedRuntime H
-→ H.runtimeControl.acquire(signal)
-→ MessageCarrier
-→ createMainRuntimeControlPeer(...)
-→ subsystem.hello {key:S, bootstrapToken:T}
-→ Main authenticates/atomically consumes T
-→ identified
-→ status(ready)
-```
-
-Terminal cleanup separates graceful role shutdown from physical escalation:
-
-```text
-graceful Session terminal
-→ Runtime Control shutdown accepted
-→ bounded await H.terminated
-→ if no successful termination observation: H.requestTermination(...)
-→ bounded await H.terminated
-
-Runtime failure / bootstrap abort
-→ H.requestTermination(...) as needed
-→ bounded await H.terminated
-```
-
-`requestTermination()` is escalation capability, not the default first step after a successful graceful shutdown.
-
-One `launch()` result naturally carries one Control establishment capability and one termination lifetime; no second global correlation contract is needed.
-
----
-
-## 8. Capability / Policy / Authority
-
-Platform Ports owns:
-
-```text
-schedule relative deadline callback
-generate environment-backed high-entropy bootstrap token material
-create one physical Runtime
-establish its Main-side Control carrier
-request physical termination
-observe actual physical termination
-```
-
-Main owns:
-
-```text
-LogicalGameBootstrap / Subsystem Registry
-LaunchAttempt identity/currentness
-bootstrap credential validation/registration/binding/consumption
-Runtime lifecycle interpretation
-Frame / Activation / Stack / InputTarget
-failure classification / unwind
-deadline values / recovery policy
-```
-
-Runtime Control owns wire/JSON-RPC/hello mechanics, request correlation/deadlines, and terminal mechanics.
-
----
-
-## 9. Consumer-owned Role Bundle
-
-`@loomrealm/platform-ports` does not define a universal Platform interface.
-
-M5 `@loomrealm/main` may define:
+`RendererControlBinding` 是 frozen capability type，但 concrete Platform/Session MAY omit。
 
 ```ts
 interface MainPlatform {
   readonly scheduler: DeadlineScheduler;
-  readonly bootstrapTokens: BootstrapTokenGenerator;
+  readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
+  readonly rendererControl?: RendererControlBinding;
 }
 ```
 
-A concrete `HostraPlatform` / `PwaPlatform` may structural-satisfy this view while also owning `prepareGame()` and future platform capabilities.
+```text
+rendererControl absent
+→ Renderer-incapable/headless composition
+→ Main runs Runtime/Frame normally
+→ no Renderer token/candidate slot
+
+rendererControl present
+→ Main uses frozen one-current + one-slot/currentness semantics
+```
+
+M6 Hostra Runtime-only无需 fake Binding；M14加入真实 Hostra Renderer physical realization。
+
+---
+
+## 8. Capability / Protocol / Authority Split
+
+Platform Ports owns：relative deadline scheduling、fresh opaque material、Runtime physical facts、candidate Renderer slot/carrier establishment when capability exists。
+
+Renderer-control owns：hello wire/schema/version negotiation、Snapshot validation、publication/terminal mechanics。
+
+Main owns：Session identity、Runtime attempt、all credential semantics、Renderer slot token/current participant/replacement、Runtime/Frame/Activation/InputTarget/DataAuthority/revision/failure/unwind。
+
+---
+
+## 9. Binding Does Not Move Protocol Mechanics
+
+`RendererControlBinding` MUST NOT parse `renderer.hello/state`、encode JSON-RPC、validate Snapshot/revision、negotiate version、own current Renderer或 coalesce publication。
+
+Binding只等待/建立一个 candidate physical carrier；Main + renderer-control决定其 semantic fate。
+
+---
+
+## 10. Qualification Through M7
 
 ```text
-MainPlatform = Main's current capability view
-             != complete LoomRealm Platform
-             != service locator
+M4 DeadlineScheduler / RuntimeControlBinding
+    ✅ real Subsystem Host consumer qualified
+
+M5 RuntimeHosting / HostedRuntime / MainRuntimeControlBinding
+    ✅ real Main consumer qualified
+
+M7 OpaqueMaterialGenerator / RendererControlBinding
+    Frozen contract
+    deterministic Platform provides real candidate-slot Binding
+    capability-absent Main path also qualified
+
+M14 Hostra Renderer physical realization
+M16 PWA Renderer physical realization
+```
+
+M7 tests MUST prove：
+
+```text
+OpaqueMaterialGenerator output bound + independent values
+one slot → one candidate
+acquire may remain pending without creating replacement
+no-slot extra candidate gets no token/live carrier
+already-bound slot extra candidate gets no token/live carrier
+abort → no late live result
+non-abort acquire rejection → Binding terminal for Session / no re-acquire
+carrier-acquired peer failure does not falsely terminalize Binding
+Main one-candidate usage
+capability absence needs no fake Binding
 ```
 
 ---
 
-## 10. Package / Qualification
+## 11. Compatibility
 
-Current package remains root-only and runtime-depends only on `@loomrealm/foundation`. No `/main`, `/subsystem`, `/node`, `/browser`, `/testing` subpaths are created.
-
-The package contract MUST NOT depend on concrete Window/Document/WebSocket/MessagePort/fetch/child_process/Worker/filesystem APIs.
-
-Qualification:
+Current project无 public compatibility obligation：
 
 ```text
-M4 @loomrealm/subsystem/host
-    ✅ real consumer qualified
-
-M5 @loomrealm/main
-    ✅ real consumer qualified
-
-M6 HostraPlatform
-    pending physical implementation
-
-M15 PwaPlatform
-    pending second implementation/equivalence
+BootstrapTokenGenerator → OpaqueMaterialGenerator
 ```
 
-Package-local CI proves TypeScript build + publishable surface, not Hostra/PWA conformance.
+无 alias/deprecation wrapper/v2。
 
 ---
 
-## 11. Freeze Statement
+## 12. Freeze Statement
 
-Frozen M4:
-
-```text
-DeadlineScheduler
-RuntimeControlBinding
-```
-
-Frozen M5:
+Frozen M7 additions/refinement：
 
 ```text
-BootstrapTokenGenerator
-RuntimeLaunchRequest
-MainRuntimeControlBinding
-HostedRuntime
-RuntimeHosting
-Main-owned credential authority vs environment-backed generation split
-RuntimeHosting → HostedRuntime lifetime correlation
-termination request vs actual termination fact
+OpaqueMaterialGenerator common output contract
+RendererControlBinding candidate-slot semantics
+abort cancellation vs non-abort terminal rejection
+optional capability availability in MainPlatform
+Binding owns no protocol/authority
 ```
 
-Still evolving: M7 Renderer ports, M8/M9 Data ports, M12 Content ports, future subpath layout, portable termination diagnostics only if a real consumer proves necessary.
-
-Current valid claim:
-
-```text
-@loomrealm/platform-ports
-    Core Boundary Frozen
-    M4 Slice Frozen + Consumer Qualified
-    M5 Main Slice Frozen / Contract Baseline Implemented
-    M5 Main consumer qualified
-```
-
-Not valid:
-
-```text
-Platform Ports fully implemented
-Hostra/PWA integration qualified
-complete Platform API frozen
-```
-
-### Final invariants
-
-1. Platform Ports owns capabilities/facts only; Core owns authority/policy; protocol packages own mechanics.  
-2. No universal Platform/service locator.  
-3. M4 contracts remain unchanged.  
-4. Main owns bootstrap credential authority; generator only supplies fresh high-entropy material.  
-5. RuntimeLaunchRequest contains only key + token projection.  
-6. One RuntimeHosting launch returns one HostedRuntime lifetime with Control + termination correlation.  
-7. `requestTermination()` never fabricates `terminated`/`stopped`.  
-8. No same-attempt reconnect/retry/restart.  
-9. Platform Ports still depends only on Foundation.  
-10. Future ports require real milestone consumer evidence.
+除 ADR 0027 Reopen Rule外，不允许实现阶段新增 kind-specific random service、Binding error framework、connection registry或 Renderer mega-port。

@@ -20,12 +20,19 @@ LoomRealm 是一个通过只读 Game Entry 声明 **platform-neutral logical Sub
 - [Game Package v1](./doc/15-contracts/game-package-v1.md)
 - [Runtime Control Application Profile v1](./doc/15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call v1](./doc/15-contracts/frame-call-protocol-v1.md)
+- [Main ⇄ Renderer Control v1](./doc/15-contracts/main-renderer-control-v1.md)
 - [Hostra Game Launcher / Node Runner Profile v1](./doc/15-contracts/nodejs-launcher-profile-v1.md)
 - [PWA Game Launcher / Worker Runner Profile v1](./doc/15-contracts/pwa-launcher-profile-v1.md)
 - [独立分包与发布架构](./doc/30-implementation/package-architecture.md)
 - [第一阶段交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [ADR 0020：Game Entry 消费边界归 Platform Launcher](./doc/decisions/0020-game-entry-consumer-boundary.md)
 - [ADR 0021：Runtime Control 首次实现前收口](./doc/decisions/0021-runtime-control-preimplementation-closure.md)
+- [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)
+- [M7 / 01 — Renderer Control Package](./M7_01_RENDERER_CONTROL_PACKAGE.md)
+- [M7 / 02 — Main Authority Projection + Binding](./M7_02_MAIN_AUTHORITY_PROJECTION.md)
+- [M7 / 03 — Renderer Control Holder](./M7_03_RENDERER_CONTROL_HOLDER.md)
+- [M7 / 04 — Vertical Integration](./M7_04_VERTICAL_INTEGRATION.md)
+- [M7 / 05 — Qualification and Closure](./M7_05_QUALIFICATION_CLOSURE.md)
 - [完整阅读指南](./doc/README.md)
 
 ---
@@ -49,7 +56,7 @@ concrete Platform installs LaunchPlan privately
         ↓
 runMain({bootstrap, platform, policy})
         ↓
-Main generates/registers bootstrap token
+Main generates/registers Runtime bootstrap material
         ↓
 platform.runtimeHosting.launch({subsystemKey, bootstrapToken})
         ↓
@@ -108,7 +115,7 @@ Primary Runtime-product consumers：
 @loomrealm/game-launcher-pwa
 ```
 
-Tooling MAY直接消费；Main/Business不直接消费。
+Hostra consumer 已在 M6 real product vertical qualification；PWA consumer 留到 M15。Tooling MAY直接消费；Main/Business不直接消费。
 
 ---
 
@@ -178,13 +185,13 @@ Full PREPARE 未闭合前：
 
 ```text
 Process/Worker creation = 0
-business Definition import = 0
+business Definition import count = 0
 Runtime Control establishment = 0
 ```
 
 ---
 
-## Runtime Control / Frame / Data
+## Runtime Control / Frame / Renderer Control / Data
 
 Runtime Control：
 
@@ -248,12 +255,17 @@ Timeout/loss ambiguous → Runtime failure
 whole-suffix fixed-point unwind
 ```
 
-Renderer Control publishes committed：
+Renderer Control v1 is Frozen by ADR 0027：
 
 ```text
-Runtime / Stack / Activation / InputTarget
-DataAuthority {subsystemKey,generation,dataProfile}
+Main committed Runtime / Stack / Activation / InputTarget / DataAuthority
+→ full RendererAuthoritySnapshotV1
+→ renderer.hello id=1 + renderer.state
+→ one current Renderer participant
+→ 0..1 inFlight + 0..1 pendingLatest
 ```
+
+M7 Main implementation固定 `dataAuthorities=[]`；真实 DataAuthority generation/profile policy 从 M8 开始。
 
 Current Data Profile：
 
@@ -284,33 +296,38 @@ Readonly Content API
 
 Content API 不得成为 arbitrary executable path/capability。
 
-Runtime bootstrap token、Runner bootstrap、Data ticket/Port、Content credential相互独立。
+Runtime bootstrap token、Renderer Control token、Data ticket/Port、Content credential相互独立。
 
 ---
 
 ## 分包与依赖
+
+下图箭头表示 dependency/provider → consumer：
 
 ```text
 @loomrealm/foundation ─────→ @loomrealm/platform-ports ─────→ Main / Subsystem Host
        │
        ├──────────────────────┐
        │                      ↓
-@loomrealm/wire ───────→ @loomrealm/runtime-control
-       │                      ↓
-       │             Main / Subsystem Host
+@loomrealm/wire ───────→ @loomrealm/runtime-control ───────→ Main / Subsystem Host
        │
-       └→ @loomrealm/game-package
-               ↓
+       ├──────────────→ @loomrealm/renderer-control ───────→ Main / Renderer
+       │
+       └──────────────→ @loomrealm/game-package
+                               ↓
 @loomrealm/game-launcher-hostra / @loomrealm/game-launcher-pwa
-               ↓
-       apps/desktop / apps/pwa
+                               ↓
+                       apps/desktop / apps/pwa
 ```
 
 Role graph：
 
 ```text
 @loomrealm/main
-    → runtime-control / renderer-control / wire as required
+    → platform-ports + runtime-control + renderer-control + wire
+
+@loomrealm/renderer
+    → renderer-control   // M7 minimal holder; package implementation pending
 
 @loomrealm/subsystem/host
     → platform-ports + runtime-control + role-local policy/integrations
@@ -326,9 +343,10 @@ Forbidden：
 
 ```text
 runtime-control → Main/Subsystem implementation
-runtime-control → WebSocket/MessagePort/Worker
-main → game-package / concrete launcher
-business → game-package / launcher / runtime-control
+renderer-control → Main/Renderer/Platform implementation
+runtime-control / renderer-control → WebSocket/MessagePort/Worker
+main → game-package / concrete launcher / renderer role
+business → game-package / launcher / protocol packages
 ```
 
 ---
@@ -345,7 +363,8 @@ business → game-package / launcher / runtime-control
 @loomrealm/game-package
     Implemented Baseline / Core Contract Frozen
     M2 local closure complete
-    M6/M15 real launcher consumer qualification pending
+    M6 Hostra real launcher consumer qualified
+    M15 PWA real launcher consumer pending
 
 @loomrealm/runtime-control
     Implemented Baseline / Core Contract Frozen
@@ -353,10 +372,9 @@ business → game-package / launcher / runtime-control
     M4 Subsystem + M5 Main real role consumers qualified
 
 @loomrealm/platform-ports
-    Implemented Baseline / Core Boundary Frozen
-    M4 Slice Frozen + Subsystem consumer qualified
-    M5 Main Slice Frozen + Main consumer qualified
-    M7+ Evolving
+    Implemented Baseline through M5
+    M4/M5 slices qualified
+    M7 OpaqueMaterialGenerator + optional RendererControlBinding semantics Frozen / implementation pending
 
 @loomrealm/subsystem
     M4 Runtime/Frame Core Implemented
@@ -366,14 +384,24 @@ business → game-package / launcher / runtime-control
 @loomrealm/main
     M5 Runtime/Frame Authority Implemented Baseline
     Main Runtime Control consumer qualified
-    M7+ Renderer/Data slices pending
+    M7 Renderer authority projection/currentness implementation pending
+
+@loomrealm/renderer-control
+    M7 package scaffold exists
+    Protocol v1 + implementation plan Frozen
+    concrete peers not implemented yet
+
+@loomrealm/renderer
+    M7 minimal Control holder design Frozen
+    package/implementation pending
 
 @loomrealm/data
     Package-local Core Baseline Implemented
     M8 role integration pending
 
 @loomrealm/game-launcher-hostra
-    design/PREPARE component ready; M6 implementation pending
+    M6 Implemented / Qualified Baseline
+    real Node Runner + Runtime Control WebSocket vertical qualified
 
 @loomrealm/game-launcher-pwa
     design/PREPARE component ready; M15 implementation pending
@@ -385,10 +413,15 @@ business → game-package / launcher / runtime-control
 下一实现门：
 
 ```text
-M6 Hostra Platform Vertical
-    HostraPlatform + Launcher PREPARE + Node Runner + RuntimeHosting
-    first runnable Main ↔ Runtime Control ↔ Subsystem product vertical
+M7 Renderer Control
+    @loomrealm/renderer-control concrete asymmetric peers
+    + platform-ports OpaqueMaterialGenerator / optional RendererControlBinding
+    + Main pure Snapshot projection / revision / candidate-currentness loop
+    + @loomrealm/renderer minimal holder
+    + deterministic MemoryCarrier vertical / qualification
 ```
+
+M7 不要求 Hostra BrowserWindow/Renderer WebSocket 或 PWA MessagePort physical realization；它们分别在 M14/M16 完成。
 
 ---
 
@@ -402,6 +435,7 @@ same resulting LogicalGameBootstrap semantics
 same subsystem keys
 same SubsystemDefinitionFactory ABI
 same Runtime Control / Frame formal semantics
+same Renderer Control formal semantics
 same logical scenario/business input
 same business-observable result
 ```
@@ -421,7 +455,7 @@ HTTP vs Service Worker internals
 
 ## Current v1 Governance
 
-First conformant compatibility obligation has not yet formed for the Game/Launcher reset or M3 Runtime Control implementation mechanics，so current v1 is corrected directly with ADR provenance：
+First conformant compatibility obligation has not yet formed for the Game/Launcher reset or current Renderer Control first implementation，so current v1 corrections are made directly only with ADR provenance and document-governance propagation：
 
 ```text
 no fake v2
@@ -431,9 +465,11 @@ no Main compatibility adapter
 no universal launcher options/prepared bag
 no Runtime Control second JSON parser
 no legacy non-monotonic Request-ID compatibility mode
+no BootstrapTokenGenerator compatibility alias after M7 OpaqueMaterialGenerator migration
+no generic Renderer RPC/Store/currentness framework
 ```
 
-ADR 0021 does not reopen Frame seven methods/authority/Outcome/commit/unwind semantics。
+ADR 0021 does not reopen Frame seven methods/authority/Outcome/commit/unwind semantics；ADR 0027 freezes Renderer Control v1/M7 authority、Binding、hello/currentness、replacement与 representation isolation semantics。
 
 History/provenance留在 ADR/Git；current docs保持单一事实源。Real compatibility obligation形成后，incompatible changes return to normal version/migration governance。
 

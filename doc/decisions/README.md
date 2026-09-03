@@ -2,10 +2,10 @@
 
 > 层级：设计决策记录  
 > 状态：Active  
-> 主要定义：重大架构决策背景、取舍、替代关系、current-v1 映射与重新评估条件  
-> 最近复核：2026-08-28
+> 主要定义：重大架构决策背景、取舍、替代关系、current-v1 provenance 与 reopen 条件  
+> 最近复核：2026-09-03
 
-ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 为准。Superseded ADR 保留完整历史，但不形成第二份 current contract。
+ADR 记录“为什么这样设计”。Current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 与对应 Frozen implementation plan 为准；本索引不复制完整协议状态机。Superseded ADR 保留历史，但不形成第二份 current contract。
 
 ---
 
@@ -37,288 +37,180 @@ ADR 记录“为什么这样设计”；current 可实现事实以 `00-overview`
 24. [ADR 0024：Renderer ⇄ Subsystem Data Connection v1 semantic closure](./0024-renderer-subsystem-data-connection-v1-semantic-closure.md)
 25. [ADR 0025：Renderer Data Profile v1 preimplementation closure](./0025-renderer-data-profile-v1-preimplementation-closure.md)
 26. [ADR 0026：Concrete Platform 是 Session Composition Object，Launcher 是 Platform 内部 PREPARE Component](./0026-session-scoped-platform-instance.md)
+27. [ADR 0027：冻结 Renderer Control v1 与 M7 Preimplementation Closure](./0027-freeze-renderer-control-v1-preimplementation.md)
 
 ---
 
-## 当前替代 / 修正关系
+## Current 替代 / 修正关系
 
 ```text
 ADR 0004
-    → ADR 0006 supersedes Frame-owned Render lifetime assumption
-
-ADR 0005
-    → Game Entry declares Subsystem topology remains
-    → old launcher/module declaration later narrowed by 0018/0019
+→ ADR 0006 separates Frame and Render lifetime
 
 ADR 0007
-    → Superseded by later current-v1 Descriptor closure
+→ superseded by current Descriptor/Game Package closure
 
 ADR 0008
-    → Superseded by Host-owned Runner + current Hostra Launcher Profile
-
-ADR 0009
-    → current Control lifecycle-only decision
-    → Data provisioning stays outside Control
+→ superseded by Host-owned Runner + current Hostra Launcher Profile
 
 ADR 0010–0015
-    → Frame / Call v1 semantic freeze
+→ Frame / Call v1 semantic freeze
 
 ADR 0015 old PWA structured-object transport mapping
-    → corrected by ADR 0018
-    → current = UTF-8 JSON text string
+→ corrected by ADR 0018
+→ current message unit = UTF-8 JSON text string
 
 ADR 0016
-    → current DataAuthority / Data Profile / protocol minimization
+→ DataAuthority / protocol-minimization boundary
 
 ADR 0017
-    → Platform owns complete physical Session composition
+→ Platform owns complete physical Session composition
 
 ADR 0018
-    → direct-current-v1 governance precedent
-    → original Game {key,module}/same-artifact part superseded by ADR 0019
+→ first-implementation direct-current-v1 correction governance
 
 ADR 0019
-    → Game Descriptor = {key}
-    → independent Hostra/PWA Launch Manifests
-    → exact Game↔Platform key-set join
-    → full zero-side-effect executable PREPARE
-    → Main launch(key) / plan-bound RuntimeHosting
-    → same ABI/semantics; same artifact not required
+→ Game Descriptor = {key}
+→ Hostra/PWA Launch Manifest owns executable binding
+→ exact key-set join / full executable preflight
 
 ADR 0020
-    → Game Package = document validation capability, not Runtime role
-    → matching Platform Launcher owns Runtime-product Game Entry consumption
-    → GameEntryV1 != Main bootstrap model
-    → Main has no Game Package/concrete Launcher dependency
-    → Main consumes immutable LogicalGameBootstrap only
-    → prepared-result `LogicalGameBootstrap + RuntimeHosting` shape clarified/superseded by ADR 0026
+→ matching Launcher consumes Game Entry
+→ Main receives LogicalGameBootstrap only
+→ no Main → game-package/concrete-launcher dependency
 
 ADR 0021
-    → Runtime Control package root-only + role-specific peers
-    → one reader that never blocks Response correlation
-    → one serialized writer + Response causal barrier
-    → same-sender Control+Frame Request IDs strict monotonic
-    → finite deadline/terminal settlement first-wins
-    → duplicate JSON source semantics follow frozen Wire/JSON.parse
-    → no second JSON parser
+→ concrete Runtime Control mechanics before first implementation
+→ one reader / one writer / strict sender IDs / finite deadlines / no generic RPC
+
+ADR 0022–0025
+→ Render / Input / Data Connection / Renderer Data Profile current-v1 closure
 
 ADR 0026
-    → concrete Platform is session-scoped product composition object
-    → Launcher is Platform-internal PREPARE component
-    → PlatformLaunchPlan installed privately in concrete Platform
-    → Main receives LogicalGameBootstrap + Main-facing narrow Platform view
-    → concrete Platform object does not create universal Core Platform contract/mega-package
+→ Concrete Platform is session-scoped composition object
+→ Launcher is Platform-internal PREPARE component
+→ Main consumes only a narrow Main-facing capability view
+
+ADR 0027
+→ Renderer Control v1 Active / Normative / Frozen
+→ M7 implementation preclosed
+→ Main-facing optional RendererControlBinding candidate-slot capability
+→ BootstrapTokenGenerator current-v1 rename to OpaqueMaterialGenerator
+→ protocol peer owns version negotiation; Main owns token/currentness/revision
+→ exact hello preflight before atomic current switch/replacement
+→ Renderer local holder is not remote-currentness proof
+→ no generic RPC/Store/currentness framework
 ```
 
 ---
 
-## Current v1 Game / Runtime Model
+## Current Architecture Decision Chain
+
+### Game / Runtime launch
 
 ```text
-Game installation / source
-        ↓
-Session-scoped Concrete Platform.prepareGame(...)
-        ↓
-Current Platform Launcher component PREPARE
-    ├── @loomrealm/game-package
-    │       Game Entry {key...} + initial validation
-    ├── Current Platform Launch Manifest
-    │       Hostra: launch.hostra.json
-    │       PWA:    launch.pwa.json
-    ├── exact key-set join
-    ├── full executable resolution
-    └── hosting/security preflight
-        ↓
-immutable PlatformLaunchPlan → installed privately in Platform
-immutable LogicalGameBootstrap → returned to composition
-        ↓
-apps/* runs Main({ bootstrap, platform })
-        ↓
-Main launch(key) ─────────────► Platform.runtimeHosting
-                                      ↓
-                              Host-owned Runner
-                                      ↓
-                         platform-selected Definition Module
+ADR 0017
+→ ADR 0019
+→ ADR 0020
+→ ADR 0026
+→ Game Package + Hostra/PWA Launcher Profiles
+→ Platform Composition / RuntimeHosting
 ```
 
-Current Game Package不包含 `module`。
-
-Main不解析 Game Entry、不持有 `formatVersion` / `ValidatedGameEntryV1` / module material。
-
-Hostra/PWA Launch Manifest/Profile独立；不建立 universal launcher schema，也不要求 same artifact。
-
----
-
-## Current Runtime Control
+### Runtime / Frame
 
 ```text
-Runtime Control Application Profile v1
-= Subsystem Control v1
-+ Frame / Call v1
+ADR 0009
+→ ADR 0010–0015
+→ ADR 0021
+→ Subsystem Control + Frame/Call + Runtime Control Profile
 ```
 
-Current connection mechanics：
+### Renderer Control
 
 ```text
-one UTF-8 JSON text unit
-→ frozen Wire parse/decode
-→ profile limits
-→ one connection-wide reader/dispatcher
-→ Control / Frame role dispatch
+ADR 0016
+→ ADR 0017 / ADR 0026 Platform boundary
+→ ADR 0027
+→ Main ⇄ Renderer Control v1
+→ M7_01 ... M7_05
 ```
 
-Same sender / same connection：
+### Renderer Data / Input / Render
 
 ```text
-Request IDs = positive safe integer
-strictly monotonically increasing
-Control + Frame shared namespace
-never reuse / never wrap
-```
-
-Dispatcher/writer：
-
-```text
-one inbound reader
-Response correlation is never blocked by role handler
-one serialized outbound writer
-Response send acceptance before dependent afterResponse action
-```
-
-Deadline/terminal：
-
-```text
-finite Request deadline covers send + Response wait
-pending settlement first-wins
-timeout/loss ambiguous for Frame mutation
-late Response diagnostics only
-terminal first-wins
-no retry/replay/reconnect
-```
-
-JSON source duplicate members：
-
-```text
-follow frozen @loomrealm/wire / ECMAScript JSON.parse semantics
-parsed object still exact closed schema
-no private Runtime Control duplicate-member parser
-```
-
-Frame v1 remains Frozen：
-
-```text
-exact seven Requests
-ACK-before-publication
-post-commit no rollback
-whole-suffix fixed-point unwind
-```
-
-ADR 0021 does not change Frame authority/Outcome/unwind semantics。
-
----
-
-## Current Renderer Data
-
-Renderer Control publishes：
-
-```text
-DataAuthority {subsystemKey,generation,dataProfile}
-```
-
-Current：
-
-```text
-loomrealm.renderer-data/1
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
-```
-
-Platform DataConnectionBroker realizes physical carrier only；does not own generation/profile。
-
-```text
-Data provisioning/loss != Runtime failure / Frame unwind
+ADR 0016
+→ ADR 0022 / 0023 / 0024 / 0025
+→ Renderer Data Profile + Data Connection + User Input + Render Update
 ```
 
 ---
 
-## Current Carrier Rule
+## Current M7 Decision Snapshot
+
+M7 does not reopen Frame/Runtime semantics。Frozen placement：
 
 ```text
-one carrier application unit
-= one UTF-8 JSON text string
+Main
+    owns Session / Runtime / Frame / Activation / InputTarget
+    owns Renderer token/currentness/AuthorityRevision
+    pure-projects RendererAuthoritySnapshotV1
+
+@loomrealm/renderer-control
+    owns renderer.hello / renderer.state mechanics
+    owns protocolVersions validation/version selection
+    owns exact Snapshot wire validation and bounded latest-state publication
+
+@loomrealm/platform-ports
+    OpaqueMaterialGenerator
+    RendererControlBinding? candidate-slot/carrier capability
+
+@loomrealm/renderer
+    local {peer,snapshot}|null holder
 ```
 
-```text
-WebSocket   text message
-MessagePort postMessage(string)
-Memory      string
-```
-
-Structured Clone only for Platform bootstrap/Port transfer。
+M7 Main `dataAuthorities=[]`；real DataAuthority allocation/generation/profile begins M8。Hostra/PWA physical Renderer Control realization remains M14/M16。
 
 ---
 
-## Platform / Package Boundary
+## Compatibility / Reopen Governance
+
+首次 conformant/deployed compatibility boundary形成前，current-v1 correction仍需遵守[文档治理](../00-overview/document-governance.md)。
+
+Frozen ADR/Contract 不允许因为以下理由静默 reopen：
 
 ```text
-@loomrealm/game-package
-    Game Entry document validation
-
-@loomrealm/runtime-control
-    Control + Frame application protocol mechanics
-    Foundation MessageCarrier + Wire consumer
-    no Main/Subsystem authority
-
-@loomrealm/game-launcher-hostra
-@loomrealm/game-launcher-pwa
-    narrow Runtime-product Game PREPARE + launch integration
-
-@loomrealm/main
-    application authority; no Game Package/Launcher dependency
-
-apps/desktop
-apps/pwa
-    current full composition roots
+code reuse
+generic framework preference
+future speculation
+directory/name symmetry
+test convenience
+transport-specific preference
 ```
 
-Runtime Control business author surface remains behind `@loomrealm/subsystem`。
+允许 reopen 的信号必须是：
+
+```text
+demonstrated correctness/security contradiction
+conflict between Frozen contracts
+real consumer proves Frozen capability cannot express required semantics
+real compatibility boundary requires explicit migration/versioning
+```
+
+Renderer Control/M7 变更遵循 ADR 0027 的具体 reopen rule；不能通过 Hostra/PWA 私有 retry/currentness protocol绕过 Frozen semantics。
 
 ---
 
-## Compatibility Governance
+## Provenance Rule
 
-Game/Launcher/Main and M3 Runtime Control mechanics corrections still occur before a real conformant/deployed compatibility boundary：
-
-```text
-update current v1 directly
-no fake v2
-no legacy Game {key,module} parser
-no Runtime Control compatibility parser
-no second duplicate-member JSON parser
-no deprecated alias
-```
-
-ADR 0021 is intentionally narrow：it does not reopen Frame seven methods/authority/Outcome/commit/unwind/hard business limit semantics。
-
-History/provenance remains in ADR/Git；current docs stay single-source。
-
-Once first real compatibility obligation forms, future incompatible changes require normal version/migration；ADR 0018/0019/0020/0021 are not permanent exemptions。
-
----
-
-## 重新评估信号
+History stays in ADR/Git。Current readers应优先查看：
 
 ```text
-lazy/optional Subsystem changes exact key-set relation
-multiple Runtime implementations per key require application negotiation
-third-party/remote Runtime requires public launch/provisioning/control interoperability
-third-party Launcher requires stable prepared-result interoperability
-LogicalGameBootstrap expands enough to justify independent shared package
-multiple Renderer changes Platform coordination topology
-source-level duplicate JSON detection becomes mandatory security boundary
-Request ID generation needs distributed/multi-writer semantics
-reconnect/resume/checkpoint changes Control connection lifetime
-executable signing/sandbox forms independent trust contract
-real deployed compatibility boundary already exists
+Architecture topic source
+→ Current Normative/Frozen Contract
+→ Accepted current ADR
+→ Module projection
+→ Implementation plan/tests
 ```
+
+Superseded ADR 或旧 example/code shape不得覆盖 Current Contract。

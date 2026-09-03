@@ -1,0 +1,347 @@
+# ADR 0027：冻结 Renderer Control v1 与 M7 Preimplementation Closure
+
+> 状态：Accepted  
+> 日期：2026-09-03  
+> 影响范围：M7 Renderer Control、`@loomrealm/renderer-control`、`@loomrealm/main`、`@loomrealm/renderer`、`@loomrealm/platform-ports`  
+> 依赖：[ADR 0021](./0021-runtime-control-preimplementation-closure.md)、[ADR 0026](./0026-session-scoped-platform-instance.md)、[Main ⇄ Renderer Control v1](../15-contracts/main-renderer-control-v1.md)  
+> 实施文档：仓库根目录 `M7_01_*` → `M7_05_*`
+
+## 背景
+
+M7 只建立一个具体、bounded、fail-closed 的 Main → Renderer committed authority mirror，不建立通用 RPC/状态同步框架。
+
+冻结前必须关闭：Renderer physical ingress、capability absence、candidate lifecycle、Binding failure semantics、version negotiation ownership、hello preflight/current switch race、replacement/in-flight send、Renderer local-vs-remote currentness、Session terminal、Runtime projection、identity material与 representation failure。
+
+---
+
+## 1. Frozen `RendererControlBinding`
+
+`@loomrealm/platform-ports` 增加：
+
+```ts
+import type { MessageCarrier } from "@loomrealm/foundation";
+
+export interface RendererControlBinding {
+  acquire(
+    rendererControlToken: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
+}
+```
+
+一个 `acquire(T, signal)` = **arm exactly one candidate slot using Main-issued token T**。
+
+固定语义：
+
+```text
+acquire MAY remain pending until Platform has a physical candidate Renderer
+calling acquire MUST NOT itself create/show a Renderer
+calling acquire MUST NOT itself replace the current Renderer
+Platform binds at most one physical candidate to T
+Platform delivers exact T to that candidate bootstrap
+Platform establishes one already-connected MessageCarrier
+Promise resolves at most once with that carrier
+```
+
+如果没有 armed slot，或一个 slot 已绑定后又出现额外 physical candidate：
+
+```text
+Platform MUST NOT give it the armed token
+Platform MUST NOT expose it as a live Renderer Control participant
+Platform rejects/closes/discards it according to product policy
+```
+
+Settlement semantics固定：
+
+```text
+AbortSignal abort before resolution
+→ ordinary slot cancellation
+→ late candidate/carrier MUST NOT become a live result
+
+non-abort Promise rejection
+→ RendererControlBinding is terminal for this Main Session
+→ Main invalidates that slot/token
+→ Main MUST NOT arm another Renderer slot in the same Session
+→ current Renderer, if any, is not revoked solely by this rejection
+→ Runtime/Frame Session continues
+```
+
+Carrier已成功 acquire 后的 bad hello、unsupported version、hello send failure或 carrier terminal属于 candidate protocol attempt terminal，不是 Binding terminal；Session live且 Binding未 terminal时可用 fresh token arm下一 slot。
+
+Binding不解析 Renderer Control、不认证 token、不协商版本、不决定 currentness、不做 protocol retry/replay。
+
+---
+
+## 2. Binding Availability Is Optional
+
+M7 Main-facing shape：
+
+```ts
+interface MainPlatform {
+  readonly scheduler: DeadlineScheduler;
+  readonly opaqueMaterial: OpaqueMaterialGenerator;
+  readonly runtimeHosting: RuntimeHosting;
+  readonly rendererControl?: RendererControlBinding;
+}
+```
+
+```text
+rendererControl absent
+→ no Renderer Control physical capability
+→ no Renderer token/candidate slot
+→ Runtime/Frame Session normal
+
+rendererControl present
+→ Main maintains frozen bounded current/candidate model
+```
+
+M7 deterministic Platform提供 Binding；M6 Hostra Runtime-only/headless可 omit；Hostra/PWA physical realization分别 M14/M16。
+
+---
+
+## 3. `OpaqueMaterialGenerator`
+
+M5 `BootstrapTokenGenerator` current-v1 直接收敛为：
+
+```ts
+export interface OpaqueMaterialGenerator {
+  generate(): string;
+}
+```
+
+每个 successful call 固定满足：
+
+```text
+ASCII string
+1..128 bytes
+fresh for the concrete Platform/Session lifetime
+at least 128 bits of unpredictability for security-sensitive uses
+opaque to callers
+```
+
+该共同范围同时服务：Session identity、Runtime bootstrap credential、Renderer Control credential。
+
+Main 对三个语义必须分别调用，禁止复用同一值；Main仍按各 formal contract做防御性验证。
+
+Generator不是 identity service、token registry、kind-dispatch factory 或 generic crypto facade；无 compatibility alias。
+
+---
+
+## 4. Protocol Negotiation Ownership
+
+```text
+renderer-control Main peer
+    parse/validate renderer.hello
+    validate protocolVersions
+    select supported protocolVersion = 1
+    unsupported → protocol error/terminal
+    then invoke Main authority acceptance
+
+Main
+    validate Session/candidate/token/currentness
+    never parse or negotiate protocolVersions
+```
+
+Protocol mechanics stay in protocol package；authority stays in Main。
+
+---
+
+## 5. Session / Revision / Projection
+
+Main Session：
+
+```text
+fresh sessionId
+rendererRevision = 1
+initial Renderer-visible payload/Snapshot frozen
+```
+
+Revision advances exactly on committed Renderer-visible payload change, comparing payload without revision field；connection/candidate/transport changes do not bump。
+
+Snapshot is pure projection of existing Main Runtime/Frame/Stack/currentActivation/currentInputTarget authority；no shadow Renderer registries。
+
+M7 `dataAuthorities=[]`；real Data policy begins M8。
+
+Runtime mapping：
+
+```text
+no RuntimeRecord                         → declared
+failure != null                          → failed
+physicallyTerminated && expected stop    → stopped
+starting                                 → starting
+connected                                → connected
+identified / initializing                → identified
+ready                                    → ready
+stopping                                 → stopping
+```
+
+failure precedence > stopped。Session terminal后 Control retires；normal cleanup后续 transitions不要求 publication。
+
+---
+
+## 6. Bounded Main Candidate Model
+
+Binding存在且未 terminal 时 Main Session内部最多：
+
+```text
+one current Renderer peer
++
+one armed/pending/candidate attempt
+```
+
+Main可在 current Renderer存在时 arm下一 slot；slot MAY长期 pending，且其存在不意味着新的 Renderer已经创建。
+
+Acquired candidate protocol attempt settle后，Session仍 live且 Binding未 terminal时 Main MAY arm one fresh next slot with fresh token。Next slot是 fresh attempt，不是 retry/replay。
+
+Renderer absence、pending slot、Binding absence或 Binding terminal不得阻塞 Runtime/Frame business execution。
+
+---
+
+## 7. Hello Exact Preflight Before Current Switch
+
+Renderer-control peer已选择 v1 后，Main serialized authority lane固定：
+
+```text
+require Session live + exact candidate attempt
+validate exact candidate token
+capture current committed Snapshot R
+renderer-control exact side-effect-free prepare/preflight hello Result(id=1,v1,R)
+
+preflight failure:
+    invalidate attempt/token
+    old current unchanged
+    candidate fail closed
+
+preflight success:
+    consume token
+    candidate becomes only current Renderer
+    old peer synchronously retires from future publication
+    commit {R, preparedHelloText, oldPeer}
+```
+
+Transaction外发送同一 prepared text并 request old close。
+
+因此 unrepresentable candidate不能驱逐 healthy old current；R+1不能落入 capture/current-install gap。
+
+Hello Result send失败：new candidate terminal；old不复活；如 Binding未 terminal则 fresh slot/attempt恢复。
+
+---
+
+## 8. Replacement / In-flight Send
+
+Replacement commit后：
+
+```text
+old peer non-current immediately
+no new old publication/send may start
+old pendingLatest settles/discards
+old close requested
+```
+
+Foundation `send()` 不承诺取消已开始发送。Already-started old in-flight send MAY later settle/arrive；其 late activity没有 current-authority effect，不得恢复 old或清除/覆盖 new Renderer state。
+
+不得引入 cancelable writer/transport ACK只为禁止 late bytes。
+
+---
+
+## 9. Renderer Initial Handoff / Local Currentness
+
+Renderer peer先返回 validated initial Snapshot R；Renderer role原子安装 `{peer,R}`；之后才开始 consume later `renderer.state`。
+
+Renderer holder 的 `current != null` 只表示：
+
+```text
+locally accepted Control mirror exists
+and this Renderer has not yet observed that peer terminal
+```
+
+它**不独立证明 Main 此刻仍将该 participant 视为 current**。Replacement可能先在 Main撤销 old participant，旧 Renderer稍后才观察 close/terminal。
+
+因此不得新增 lease、epoch、heartbeat或第二套 currentness protocol。未来 Data/Input authorization必须继续由 Main currentness + matching current DataAuthority/physical capability闭合。
+
+---
+
+## 10. Session Terminal
+
+Main latch root outcome / external shutdown / fatal：
+
+```text
+no fresh Renderer token/slot
+abort armed/pending Binding acquire
+invalidate pending token
+retire candidate peer
+retire current peer
+stop publication
+```
+
+Renderer cleanup不改变/延迟 Main Session result，也不成为 Runtime shutdown coordinator。无 final `session.ended` RPC/Snapshot。
+
+---
+
+## 11. Representation Failure Isolation
+
+Renderer Control 1 MiB/depth/member limits是 wire safety，不是 Runtime count/Frame depth/DataAuthority业务 limit。
+
+完整 Snapshot不可表示：
+
+```text
+Renderer Control candidate/current fails closed
+Main Runtime/Frame/Stack unchanged
+no rollback
+no truncation
+no Renderer-specific frame.call error
+```
+
+Frozen Frame v1不新增 Renderer stack-limit semantics。
+
+---
+
+## 12. M7 vs Physical Qualification
+
+M7实现并 qualification：
+
+```text
+renderer-control concrete peers
+OpaqueMaterialGenerator + RendererControlBinding contract
+optional-capability Main path
+Binding-present deterministic MemoryCarrier path
+Main pure projection/revision/candidate-slot/currentness
+Renderer minimal current holder
+hello/replacement/session-terminal races
+Binding cancellation vs terminal rejection
+candidate-slot no-slot/extra-candidate rules
+1 inFlight + 1 pendingLatest structural boundedness
+representation isolation
+```
+
+Deferred：Hostra Renderer WS/BrowserWindow + stalled-write policy(M14)、PWA Renderer MessagePort(M16)、Data/Input/Render/Content(M8+)。
+
+---
+
+## Compatibility / Reopen Rule
+
+Current project无 compatibility obligation：`BootstrapTokenGenerator → OpaqueMaterialGenerator` 直接修正，无 alias/v2。
+
+只有 implementation evidence证明 correctness/security contradiction、Frozen contract conflict或 Frozen capability无法表达真实必要 consumer semantics 才允许 reopen。
+
+不得因代码复用、generic framework、未来 M8+、测试便利、命名/目录对称或 transport API偏好 reopen。
+
+---
+
+## Final Invariants
+
+1. Main owns Renderer application authority/currentness；renderer-control owns protocol mechanics/version negotiation。  
+2. `RendererControlBinding.acquire` arms one candidate slot；它不是 Renderer launch/replacement command。  
+3. 一个 armed slot最多绑定一个 candidate；无 slot的额外 candidate不得获得 token/live carrier。  
+4. Abort取消单个 slot；non-abort acquire rejection使 Binding 对该 Main Session terminal，Main不再 re-arm。  
+5. `MainPlatform.rendererControl` optional；absence无需 fake Binding。  
+6. Binding存在且健康时最多 one current + one armed/pending/candidate attempt。  
+7. `OpaqueMaterialGenerator` 输出 ASCII 1..128 bytes、fresh、至少128-bit不可预测性；不按用途引入 kind API。  
+8. Hello exact outbound preflight先于 current switch，并与 visible mutation共享 Main serialization。  
+9. Replacement主动撤销 old current，但不虚构 in-flight send cancellation。  
+10. Renderer先安装 initial Snapshot再 consume later state；本地 holder不是远端 currentness proof。  
+11. Session terminal撤销全部 Renderer attempt/current authority。  
+12. Representation failure不改变 Frozen Frame / Runtime authority。  
+13. M7 DataAuthority policy保持空。  
+14. No generic RPC/Publisher/Store/ConnectionRegistry/Renderer mega-port/shadow authority/lease-heartbeat layer。  
+15. 本 ADR + Frozen protocol + `M7_01`–`M7_05` 是 M7 implementation事实源。

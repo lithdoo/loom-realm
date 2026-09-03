@@ -1,64 +1,63 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：Active Design  
-> 稳定程度：Experimental  
-> 主要定义：Hostra Desktop Platform Composition realization：Hostra Launcher-owned Game PREPARE、Node Runner、Hostra Window、WebSocket、Runner provisioning IPC、DataConnectionBroker、HTTP/filesystem 与安全边界  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-28
+> 状态：M6 Runtime Vertical Implemented / M14 Full E2E Planned  
+> 稳定程度：M6 Qualified Baseline / Later Slices Evolving  
+> 主要定义：Hostra Desktop Platform Composition realization：Hostra Launcher-owned Game PREPARE、Node Runner、Runtime Control WebSocket，以及 M14 BrowserWindow/Renderer Control/Data/Content full composition target  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-09-03
 
-本文描述完整 Hostra Desktop Platform Composition realization，不是 `@loomrealm/platform-hostra` package spec。`@loomrealm/game-launcher-hostra` 只抽出 Game Entry consumption + Subsystem Runtime launch planning/hosting/Runner integration；Renderer/Data Broker/Content/Shell 仍由完整 composition 负责。
+本文描述完整 Hostra Desktop Platform Composition target，不是 `@loomrealm/platform-hostra` package spec。当前 M6 已只关闭 Runtime physical vertical；Renderer/Data/Content 的真实 Hostra product composition在 M14及其前置 milestones逐步完成。
 
 ---
 
-## 1. Composition
+## 1. Milestone Shape
+
+### M6 Qualified Baseline
 
 ```text
-apps/desktop / product entry
-        ↓
-create session-scoped HostraPlatform
-        ↓
-HostraPlatform.prepareGame(installation/source)
-        ↓
-@loomrealm/game-launcher-hostra PREPARE component
-    ├── @loomrealm/game-package validates Game Entry
-    ├── validates launch.hostra.json
-    ├── exact key-set join
-    ├── full executable/security preflight
-    ├── immutable HostraLaunchPlan → installed privately in HostraPlatform
-    └── immutable LogicalGameBootstrap → returned to composition
-        ↓
-runMain({ bootstrap: logicalBootstrap, platform: same HostraPlatform })
-        ↓
-HostraPlatform
-├── Main-facing RuntimeHosting / scheduler
-├── Node RuntimeHosting / Supervisor
-├── Host-owned Node Subsystem Runner
-├── Runtime Control WebSocket
-├── Runner Platform Provisioning IPC
-├── Hostra Renderer Hosting
-├── Renderer Control WebSocket
-├── DataConnectionBroker / Data WebSocket
-└── fs + localhost HTTP Content
+apps/desktop / Hostra product entry
+→ session-scoped HostraPlatform
+→ HostraPlatform.prepareGame(...)
+→ @loomrealm/game-launcher-hostra PREPARE
+→ HostraLaunchPlan installed privately + LogicalGameBootstrap
+→ runMain({bootstrap, platform})
+→ RuntimeHosting
+→ Host-owned Node Runner
+→ Runtime Control WebSocket
+→ @loomrealm/subsystem/host
 ```
 
-`apps/desktop` MUST NOT duplicate Game Package schema validation or Hostra manifest/join semantics。
+M6 explicitly does **not** include BrowserWindow Renderer、Renderer Control physical hosting、Data Broker、Input/Render/Content。
 
-Hostra只拥有 physical topology和 Hostra executable realization，不拥有 Main Frame/Activation/InputTarget/DataAuthority/Render state。
+### M14 Full Desktop Target
+
+```text
+M6 Runtime vertical
++
+Hostra BrowserWindow/Web Renderer
++
+M7 Frozen RendererControlBinding physical realization
++
+Renderer Control WebSocket
++
+M9 Desktop DataConnectionBroker / Data WebSocket
++
+M10 Input
++
+M11 Render
++
+M12 Content
+→ full Desktop E2E
+```
+
+Hostra only owns physical topology/executable realization；Main retains Frame/Activation/InputTarget/DataAuthority/Renderer-currentness authority。
 
 ---
 
 ## 2. Hostra PREPARE
 
-Product bootstrap caller调用 `HostraPlatform.prepareGame(...)`；HostraPlatform 内部调用 Hostra Launcher component，而不是让 product caller：
-
-```text
-parse Game Entry manually
-→ pass ValidatedGameEntryV1 manually
-→ call Hostra planner
-```
-
-Hostra Launcher内部固定：
+Product bootstrap caller调用 `HostraPlatform.prepareGame(...)`；HostraPlatform内部调用 Hostra Launcher component：
 
 ```text
 obtain Game Entry
@@ -81,39 +80,46 @@ business module import = 0
 Runtime Control establish = 0
 ```
 
+`apps/desktop` MUST NOT duplicate Game Package schema validation or Hostra manifest/join semantics。
+
 ---
 
 ## 3. Main Installation Boundary
 
-Main receives：
+Main receives only：
 
 ```text
 LogicalGameBootstrap
-    subsystemKeys
-    initial {subsystemKey,input}
-
-Main-facing capability view
-    structurally satisfied by the same prepared HostraPlatform instance
++
+Main-facing narrow capability view
 ```
 
 Main does not receive：
 
 ```text
-GameEntryV1 / ValidatedGameEntryV1
-formatVersion
+GameEntryV1 / formatVersion
 launch.hostra.json
 HostraLaunchPlan
 module/path
 Node/Runner/process details
 ```
 
-`HostraPlatform` 持有 frozen HostraLaunchPlan；`apps/desktop` 只负责编排 `prepareGame()` 与 `runMain()`，MUST NOT重新解释 raw config。Main 不读取 HostraLaunchPlan。
+Through M7 Main-facing view evolves to：
+
+```text
+DeadlineScheduler
+OpaqueMaterialGenerator
+RuntimeHosting
+RendererControlBinding?   // optional; M14 Hostra realization
+```
+
+M7 `OpaqueMaterialGenerator` migration is mechanical for existing Hostra Runtime-only provider；M6 composition remains valid with `rendererControl` absent。
 
 ---
 
 ## 4. Runner Model
 
-Process entry：
+Physical Runtime entry：
 
 ```text
 Host-owned Node Runner
@@ -123,20 +129,15 @@ Business module：
 
 ```text
 HostraLaunchPlan[key].module
-    = installation-local .mjs Definition Module
+= installation-local Definition Module
 ```
 
-Runner：
+Runner current/future capability growth：
 
 ```text
-parse/validate Platform bootstrap
-→ verify subsystemKey + planned binding
-→ import exact planned module
-→ validate default SubsystemDefinitionFactory
-→ construct RuntimeControlBinding
-→ M8+ construct SubsystemDataBinding
-→ M12+ construct ContentClient
-→ runSubsystem(...) with current-milestone capabilities
+M6  RuntimeControlBinding
+M8+ SubsystemDataBinding
+M12+ ContentClient
 ```
 
 Game common document不选择 module；Hostra launch manifest不选择 Node executable/Runner entry/arbitrary argv-env/WebSocket credential。
@@ -146,64 +147,54 @@ Game common document不选择 module；Hostra launch manifest不选择 Node exec
 ## 5. Hostra Shell Separation
 
 ```text
-Hostra Shell RPC
+Hostra Shell / product lifecycle
     window/platform shell operations
 
 Hostra Game Launcher
-    Game validation orchestration + executable PREPARE + RuntimeHosting + Runner
+    Game validation + executable PREPARE + RuntimeHosting + Runner
 
-LoomRealm Runtime Control
-    Control + Frame
+Runtime Control
+    Main ⇄ Subsystem Control/Frame semantics
 
-LoomRealm Renderer Control
-    Main committed authority
+Renderer Control
+    Main committed Renderer authority mirror
 
-LoomRealm Renderer Data
-    Connection + Input + Render
+Renderer Data
+    Data Connection + Input + Render
 
-Platform Provisioning IPC
-    physical infrastructure material for Runner
+Platform provisioning
+    physical carrier/ticket/IPC material
 ```
 
-同一 product process可协调这些，但 protocol/authority domain完全不同。
+同一 product process可协调这些，但不能合并 protocol/authority domain。
 
 ---
 
-## 6. Runtime Bootstrap
+## 6. Runtime Bootstrap — M6
 
 ```text
-HostraLaunchPlan already frozen
-→ Main creates Launch Attempt/token for key
+HostraLaunchPlan frozen
+→ Main creates Launch Attempt/bootstrap credential
 → RuntimeHosting looks up plan[key]
-→ establish Runner provisioning capability
-→ spawn Host-owned Runner Process
+→ spawn Host-owned Runner
 → Runner loads exact Definition Module
 → Runtime Control WS
-→ subsystem.hello
-→ identified
-→ initialize
-→ ready
+→ subsystem.hello / identified / initialize / ready
 ```
 
 ```text
-plan valid
-!= spawned
-!= module loaded
-!= connected
-!= identified
-!= ready
-ready != Data offer/carrier
+plan valid != spawned != module loaded != connected != identified != ready
+ready != Renderer exists
+ready != Data current
 ```
 
-Module load/default-export ABI failure属于 required Runtime bootstrap failure；whole Game Bootstrap按 all-required policy统一 cleanup。
-
-`stopped`只来自 process termination observation。
+`stopped`只来自 process termination observation。Unexpected Runtime exit仍进入 Main Runtime failure domain；no automatic restart。
 
 ---
 
 ## 7. Host-owned Process Policy
 
-Host选择：
+Host chooses：
 
 ```text
 Node executable
@@ -213,221 +204,171 @@ shell=false
 cwd/resource/timeout/supervision policy
 ```
 
-`launch.hostra.json` MUST NOT override：
-
-```text
-Node executable
---loader / --require / --inspect
-shell/interpreter
-arbitrary argv
-NODE_OPTIONS / NODE_PATH
-bootstrapToken
-Control endpoint
-Data ticket
-```
+`launch.hostra.json` MUST NOT override executable/Runner/security/credential policy。
 
 ---
 
-## 8. Runtime Control WebSocket
+## 8. Runtime Control WebSocket — M6
 
 ```text
 one WebSocket text message
 = one UTF-8 JSON text string
-= one JSON-RPC message
+= one JSON-RPC application object
 ```
 
 No binary/Batch/adapter retry/duplicate。
 
-Frame transaction ordering保持 Response-before-dependent-RPC / ACK-before-publication。
-
-Runtime Control loss进入 Runtime failure；same-attempt reconnect不存在。
+Frame transaction ordering保持 Response-before-dependent-RPC / ACK-before-publication。Runtime Control loss进入 Runtime failure；same-attempt reconnect不存在。
 
 ---
 
-## 9. Renderer Hosting / Control
+## 9. Renderer Hosting / Control — M14
+
+M14 Hostra product负责创建/显示/reload BrowserWindow；该 responsibility **不是** 一个 M7 Core `RendererHosting` port。
+
+Frozen candidate path：
 
 ```text
-Main Renderer intent
-→ Hostra BrowserWindow/Web app
-→ Renderer Control WebSocket
-→ renderer.hello
-→ full current Authority Snapshot
+Main arms RendererControlBinding.acquire(T, signal)
+→ Hostra product waits for/accepts one physical BrowserWindow Renderer candidate
+→ delivers exact Main-issued T through secure bootstrap
+→ establishes Renderer Control WebSocket MessageCarrier<string>
+→ acquire resolves with that candidate carrier
+→ @loomrealm/renderer-control peer handles renderer.hello/version
+→ Main atomic hello acceptance grants current Renderer
 ```
 
-Snapshot：
+Binding does not authenticate token、negotiate protocol version或 decide currentness。
 
-```text
-Runtime/Stack/Activation/InputTarget
-DataAuthority {S,G,dataProfile}
-```
+Transient physical candidate establishment failure MAY be absorbed/disposed inside Hostra while `acquire` remains pending。If a non-abort `acquire` rejection is surfaced to Main, Frozen M7 semantics make that Binding terminal for the Main Session；Hostra must not invent a private retry/currentness protocol。
 
-不携 Data endpoint/ticket、Runner provisioning IPC、HostraLaunchPlan/module path、Game Entry material。
+Renderer Snapshot contains only logical Runtime/Stack/Activation/InputTarget/DataAuthority，never endpoint/ticket/HostraLaunchPlan/module path。
 
 ---
 
-## 10. DataConnectionBroker
+## 10. DataConnectionBroker — M9 Core / M14 Composition
+
+M9 closes Desktop broker/provisioning mechanics：
 
 ```text
 DataAuthority(S,G,P)
-→ Hostra Broker
-→ create/provision authenticated Data WebSocket material
-→ Renderer side
-→ target Runner side through provisioning IPC
-→ at most one current Data carrier
+→ Desktop Broker
+→ Data WebSocket candidate material
+→ Renderer endpoint
+→ target Runner endpoint through provisioning IPC
+→ paired Data Connection install
 ```
 
-Current `P = loomrealm.renderer-data/1`。
+Broker不拥有 generation/profile；endpoint/ticket不能创造 DataAuthority。
 
-Broker不拥有 generation/profile；endpoint/ticket不能反向创造 DataAuthority。
+M9 does not imply BrowserWindow full product composition。M14 composes M9 broker with real Renderer + Input/Render/Content。
 
 ---
 
 ## 11. Runner Provisioning IPC
 
-Node Runner spawn 时获得 dedicated Host-owned provisioning channel，典型 child-process IPC。
-
-只传 Platform infrastructure material，例如：
+Dedicated Host-owned provisioning path MAY carry：
 
 ```text
 fresh Data endpoint/ticket for current S/G/P
-revoke/supersede physical material
+revoke/supersede old physical material
 ```
 
-不传 Frame RPC、Runtime status、business command、Main authority mutation、Game/Hostra manifest rewrite。
+It MUST NOT carry Frame RPC、business command、Main authority mutation或 Game manifest rewrite。
+
+Provisioning failure本身 != Runtime failure / Frame unwind / DataAuthority mutation。
 
 ---
 
-## 12. Provisioning Failure
+## 12. Data Application / Input / Render
+
+Renderer Data Profile：
 
 ```text
-expired/stale ticket
-Data WS connect failure
-provisioning IPC loss
-same-generation reconnect failure
+loomrealm.renderer-data/1
+= Data Connection v1 + User Input v1 + Render Update v1
 ```
 
-本身：
+Data WebSocket application unit remains UTF-8 JSON text。One Data dispatcher demux input/render。
 
-```text
-!= Runtime failure
-!= Frame unwind
-!= DataAuthority mutation
-```
-
-Data availability可暂时为 zero；Control/Frame可继续健康。
+Fresh carrier resets remote Input baseline and Render publication baseline according to frozen child contracts；Frame/Data/Render lifecycles remain independent。
 
 ---
 
-## 13. Data Application Mapping
+## 13. Content — M12/M14
 
-Renderer Data Profile v1：
-
-```text
-one Data WebSocket text message
-= one UTF-8 JSON text child-protocol object
-```
-
-One Data dispatcher demux `input.*` / `render.*`。
-
-fresh carrier：Input registry/state empty并 republish/rebaseline；Render current registry + fresh snapshots。
-
----
-
-## 14. Content
+Desktop Content target：
 
 ```text
-filesystem-backed Content Service
+filesystem-backed readonly Content Service
 → localhost HTTP
 ```
 
-Content credential与 Runtime token/Data ticket相互独立。
-
-Executable module resolution由 Hostra Launcher trusted capability执行，不通过 ordinary Content API 给业务 arbitrary execute authority。
+Content credential与 Runtime/Renderer/Data credentials独立。Executable module resolution remains trusted Launcher/Runner capability, not ordinary Content access。
 
 ---
 
-## 15. Composition Root
+## 14. Composition Root
 
-Current full composition root：
+`apps/desktop` is final product composition root and MAY combine packages/adapters as milestones land；this does not make Main/business depend on concrete Hostra implementation。
 
-```text
-apps/desktop
-```
-
-MAY combine：
-
-```text
-@loomrealm/main
-@loomrealm/subsystem
-@loomrealm/renderer
-@loomrealm/game-launcher-hostra
-@loomrealm/launcher-node
-@loomrealm/transport-websocket
-content adapters
-Hostra Renderer/Data Broker/Shell integration
-business artifacts
-```
-
-`apps/desktop` 可以依赖 launcher；Main/business不得反向依赖。
+M14 is the first milestone that claims **full Desktop E2E** across Runtime/Renderer/Data/Input/Render/Content。
 
 ---
 
-## 16. Cross-platform Equivalence
+## 15. Cross-platform Equivalence
 
-与 PWA共享：
+Hostra/PWA share：
 
 ```text
-same Game Entry logical topology
-same resulting LogicalGameBootstrap semantics
-same subsystem keys
-same SubsystemDefinitionFactory ABI
-same logical scenario/business expectations
-same Runtime/Frame/Data/Input/Render/Content semantics
+same Game logical topology
+same LogicalGameBootstrap semantics
+same formal Runtime/Frame/Renderer/Data/Input/Render/Content contracts
+same business-observable result
 ```
 
-允许不同 Definition artifact/module path/physical trace。
+Physical module path/bytes、PID/Worker、WS/MessagePort、IPC/Port transfer MAY differ。
 
 ---
 
-## 17. Tests
+## 16. Qualification Placement
+
+M6 already qualifies：
 
 ```text
-Hostra launcher owns Game Entry validation step
-apps/desktop does not duplicate Game schema/join logic
-valid/invalid Hostra manifest
-exact Game↔Hostra key-set join
-all modules resolved before first spawn
-PREPARE failure zero process/import/Control side effect
-logicalBootstrap has no Game document/executable material
-Host-owned Runner is process entry
-Main launch has no module
-manifest cannot replace Node/Runner/security policy
-Runtime Control JSON-text WS
-spawn != loaded != connected != identified != ready
-ready independent from Data offer
-provisioning IPC distinct from application protocols
-Data offer S/G/P binding
-same-generation fresh offer
-provision failure does not fail Runtime/Frame
-actual process exit → stopped
-unexpected code-0 exit → Runtime failure
-no auto restart
-Hostra/PWA abstract-trace equivalence
+Hostra PREPARE
+Node Runner
+RuntimeHosting
+Runtime Control WebSocket
+real Main↔Runner↔Subsystem trace
+process supervision/termination
+```
+
+M14 additionally must qualify：
+
+```text
+M7 Frozen RendererControlBinding settlement/currentness semantics on real WS
+BrowserWindow reload/replacement
+finite stalled-write close policy
+M9 Data Broker + Runner provisioning
+Input/Render/Content full trace
+transient candidate establishment handling without second Binding protocol
+shutdown convergence
 ```
 
 ---
 
-## 18. Final Invariants
+## 17. Final Invariants
 
-1. apps/desktop调用 matching Hostra Launcher prepare，而不手动调用 Game Package；
-2. Hostra Launcher内部拥有 common Game validation orchestration；
-3. HostraLaunchPlan + LogicalGameBootstrap在 first process side effect前完整冻结；
-4. Main不接收 GameEntry/module/path；
-5. Hostra implements physical composition，不拥有 Main authority；
-6. business Definition Module != process entry；
-7. Host-owned Node Runner是唯一 process entry；
-8. Hostra manifest不能覆盖 Host Node/Runner/credential/security policy；
-9. Runtime Control与 provisioning IPC独立；
-10. Data provisioning/loss不等于 Runtime failure/Frame unwind；
-11. Control/Data使用 UTF-8 JSON text application unit；
-12. Hostra/PWA artifact/physical trace可不同，但 logical application semantics等价。
+1. M6 Runtime vertical remains a qualified baseline；
+2. HostraLauncher owns Game PREPARE/Runtime launch only，不吞并 Renderer/Data/Content；
+3. Main receives no Game/executable material；
+4. Host-owned Node Runner is Runtime entry；
+5. Hostra physical composition does not own Main authority；
+6. M7 `RendererControlBinding` is Main-facing candidate-slot/carrier capability；
+7. BrowserWindow hosting remains M14 concrete product responsibility；
+8. Renderer Control token/version/currentness semantics remain Frozen M7, not Hostra-specific；
+9. M9 broker/provisioning does not own DataAuthority；
+10. Data provisioning failure != Runtime/Frame failure；
+11. Control/Data application units remain UTF-8 JSON text；
+12. M14, not M6/M9, is full Desktop E2E closure。

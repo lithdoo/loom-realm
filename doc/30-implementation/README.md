@@ -2,447 +2,326 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Experimental  
-> 主要定义：current 分包、Game/Launcher/Main bootstrap planning、Runtime Control mechanics、Runner/Platform ports、Data Profile/provisioning、测试和第一阶段交付入口  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)  
-> 最近复核：2026-08-21
+> 稳定程度：Evolving  
+> 主要定义：current 分包、测试、delivery milestone 与 implementation fact-source 入口  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
+> 最近复核：2026-09-03
 
-实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。
+实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。本文只做导航与当前实施状态摘要；精确 milestone closure 由 `phase-1-delivery-plan.md` 与对应 Frozen M/ADR 文档定义。
 
 ---
 
 ## Tracking 文档
 
-- [独立分包与发布架构](./package-architecture.md) — package/publish boundary 主要事实源；
-- [仓库与目录方案](./repository-layout.md) — monorepo、Runtime Control、Game/Launcher/Main bootstrap、Runner/provisioning placement；
-- [测试策略](./testing-strategy.md) — Game snapshot、Runtime Control、consumer boundary、preflight、Role/SDK、跨平台 equivalence；
-- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 vertical slice 实施顺序。
+- [独立分包与发布架构](./package-architecture.md) — package/publish/dependency boundary 主要事实源；
+- [仓库与目录方案](./repository-layout.md) — monorepo、Runner、provisioning 与 artifact placement；
+- [测试策略](./testing-strategy.md) — package、role、vertical、cross-platform qualification；
+- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 唯一 milestone 顺序/closure 摘要。
 
----
-
-## 当前实施前提
+M7 具体实施顺序位于仓库根目录：
 
 ```text
-Foundation / Wire              Implemented Baseline
-Game Package v1                Implemented Baseline / M2 closed
-Runtime Control                Implemented Baseline / M3 closed
-@loomrealm/data                Package-local Core Baseline Implemented
-                               != M8 milestone closed
-
-ADR 0020
-    matching Platform Launcher consumes Game Entry
-    Main consumes LogicalGameBootstrap only
-
-ADR 0021
-    Runtime Control first-implementation mechanics closure
-
-Runtime Control Profile v1
-    Control1 + Frame1
-    one reader/dispatcher
-    one serialized writer
-    strict-monotonic same-sender Request IDs
-    finite deadline / terminal settlement
-    Wire duplicate-source alignment
-
-Frame / Call v1
-    semantic authority/transaction/unwind Frozen
-```
-
-Current next implementation gate：
-
-```text
-M6 Hostra Platform vertical
-    HostraPlatform + Launcher PREPARE + Node Runner + RuntimeHosting
+M7_01_RENDERER_CONTROL_PACKAGE.md
+→ M7_02_MAIN_AUTHORITY_PROJECTION.md
+→ M7_03_RENDERER_CONTROL_HOLDER.md
+→ M7_04_VERTICAL_INTEGRATION.md
+→ M7_05_QUALIFICATION_CLOSURE.md
 ```
 
 ---
 
-## Runtime Control Baseline
-
-Target package：
+## 当前 Implemented Baseline
 
 ```text
-@loomrealm/runtime-control
+M1
+    @loomrealm/foundation
+    @loomrealm/wire
+
+M2
+    @loomrealm/game-package
+
+M3
+    @loomrealm/runtime-control concrete mechanics
+
+M4
+    @loomrealm/subsystem Runtime/Frame core + /host consumer
+
+M5
+    @loomrealm/main Runtime/Frame authority
+    LogicalGameBootstrap
+    RuntimeHosting/HostedRuntime integration
+
+M6
+    @loomrealm/game-launcher-hostra
+    Hostra PREPARE + HostraLaunchPlan
+    Node Runner
+    Runtime Control WebSocket MessageCarrier
+    real Main ↔ Runner ↔ Subsystem vertical
+    Qualified Baseline 2026-09-03
 ```
 
-Dependencies exactly：
+`@loomrealm/data` 已有 package-local Core baseline，但这不表示 M8 role integration 已关闭。
+
+---
+
+## 当前下一实现门：M7 Renderer Control
+
+M7 已完成 preimplementation freeze，尚未完成代码实现。
+
+事实源：
 
 ```text
-@loomrealm/foundation
-@loomrealm/wire
+ADR 0027
+Main ⇄ Renderer Control Protocol v1 — Active / Normative / Frozen
+M7_01 ... M7_05 — Implementation Frozen / Preimplementation Closed
 ```
 
-First public package surface is root-only；no `/control` `/frame` `/profile` `/testing`。
-
-Pipeline：
+### M7 package / role changes
 
 ```text
-already-established MessageCarrier<string>
-        ↓
-actual UTF-8 1 MiB gate
-        ↓
-Wire parseJsonText
-        ↓
-depth/profile limits
-        ↓
-Wire JSON-RPC decode
-        ↓
-strict-monotonic Request ID / method direction / exact schema
-        ↓
-Control state + Frame mechanics
-        ↓
-role-specific Main / Subsystem peers
+@loomrealm/renderer-control
+    scaffold exists
+    implement concrete asymmetric peers
+    renderer.hello id=1
+    renderer.state full Snapshot
+    exact hello preflight
+    0..1 inFlight + 0..1 pendingLatest
+
+@loomrealm/platform-ports
+    BootstrapTokenGenerator → OpaqueMaterialGenerator
+    add RendererControlBinding candidate-slot capability
+
+@loomrealm/main
+    pure Renderer authority projection
+    sessionId / AuthorityRevision
+    optional RendererControlBinding accept loop
+    one current + one candidate
+    atomic hello/currentness/replacement
+
+@loomrealm/renderer
+    create minimal package
+    local {peer,snapshot}|null holder only
 ```
 
-Connection mechanics：
+### Existing-provider migration is part of M7
+
+所有现有 M5/M6 `MainPlatform` providers/fixtures 必须机械迁移：
 
 ```text
-exactly one inbound reader
-Response correlation not blocked by role handler
-Control + Frame share dispatcher/pending table
-all outbound messages use one serialized writer
+bootstrapTokens / BootstrapTokenGenerator
+→ opaqueMaterial / OpaqueMaterialGenerator
 ```
 
-Response barrier：
+现有 Hostra Runtime-only provider继续**不提供** `rendererControl`；不得用 fake/no-op Binding满足新类型。
+
+`OpaqueMaterialGenerator` Frozen output：ASCII `1..128` bytes、fresh、安全用途至少 `128-bit` unpredictability。现有 CSPRNG实现若满足 contract可直接复用，不新增 `generate(kind)`/identity service/crypto facade。
+
+---
+
+## Current Main-facing Platform View Through M7
+
+```ts
+interface MainPlatform {
+  readonly scheduler: DeadlineScheduler;
+  readonly opaqueMaterial: OpaqueMaterialGenerator;
+  readonly runtimeHosting: RuntimeHosting;
+  readonly rendererControl?: RendererControlBinding;
+}
+```
+
+`rendererControl` 是 optional physical capability：
 
 ```text
-handler reply
-→ Response carrier.send accepted
-→ afterResponse dependent action
+absent
+→ no Renderer attempt
+→ Runtime/Frame Session fully valid
+
+present
+→ one armed/pending/bound candidate slot maximum
+→ protocol hello grants currentness
 ```
 
-Deadline/terminal：
+`RendererControlBinding` 不是 Renderer hosting API，不认证 token、不协商 protocol version、不决定 currentness。
+
+---
+
+## Current Package Dependency Baseline
 
 ```text
-finite relative scheduler
-Frame 1000..300000 ms stable per connection
-hello/shutdown own finite policy
-deadline covers send + response
-pending settlement first-wins
-terminal first-wins
-late Response diagnostics only
-no retry/replay/reconnect
+@loomrealm/platform-ports depends on:
+    @loomrealm/foundation
+
+@loomrealm/runtime-control depends on:
+    @loomrealm/foundation
+    @loomrealm/wire
+
+@loomrealm/renderer-control depends on:
+    @loomrealm/foundation
+    @loomrealm/wire
+
+@loomrealm/main depends on:
+    @loomrealm/platform-ports
+    @loomrealm/runtime-control
+    @loomrealm/renderer-control
+    @loomrealm/wire
+
+@loomrealm/renderer depends on:
+    @loomrealm/renderer-control
 ```
 
-JSON source duplicate members follow frozen Wire / ECMAScript `JSON.parse` observable semantics；Runtime Control does not create a second parser。
+禁止 generic RPC/schema DSL、universal Platform/service locator、Renderer Store framework、shadow Main authority 或 cross-plane currentness lease。
 
-Authority split：
+---
+
+## Authority / Protocol Split Through M7
 
 ```text
 Runtime Control
     protocol mechanics / connection-local state
 
-Main
-    Launch Attempt/token + Runtime/Frame/Stack authority
+Renderer Control
+    hello/version/wire/snapshot publication mechanics
 
-Subsystem Host
-    local Frame/Input/business control-flow mapping
+Main
+    Session / Runtime / Frame / Activation / InputTarget
+    Runtime credential authority
+    Renderer token/currentness/revision authority
+
+Renderer
+    local read-only accepted Main mirror
 
 Platform
-    carrier establishment / Process/Worker lifecycle
+    carrier establishment / physical hosting / provisioning
 ```
+
+Renderer Control representation failure不能改变 Frozen Frame/Runtime business authority。
 
 ---
 
-## Game / Platform Launch Baseline
+## M8+ Placement
 
 ```text
-Game source / installation
-        ↓
-session-scoped concrete Platform.prepareGame()
-    → matching Launcher component
-    → @loomrealm/game-package + current Platform manifest
-    → exact join / executable-security preflight
-    → immutable PlatformLaunchPlan
-        ↓
-Platform installs LaunchPlan privately
-+ returns LogicalGameBootstrap
-────────────────────────────────────────
-first business Runtime side effect allowed
-        ↓
-runMain({bootstrap, platform, policy})
-        ↓
-RuntimeHosting.launch({subsystemKey,bootstrapToken})
-        ↓
-Host-owned Runner
+M8
+    Main DataAuthority allocation/generation/profile
+    Subsystem DataPlane / SubsystemDataBinding
+    Renderer Data binding/current authority integration
+
+M9
+    Desktop DataConnectionBroker / late provisioning core
+    != full BrowserWindow composition
+
+M10
+    User Input / Interest / Producer gate
+
+M11
+    Render Update / Render Store / RenderDomain
+
+M12
+    Content role/adapters
+
+M13
+    loom.map business definition
+
+M14
+    Desktop Full E2E
+    Hostra BrowserWindow
+    physical RendererControlBinding + Renderer WS
+    Desktop Data Broker/Data WS
+    Input/Render/Content
+
+M15
+    PWA PREPARE + Worker Runner + Runtime Control MessagePort
+
+M16
+    PWA Full E2E
+    physical RendererControlBinding
+    PWA DataConnectionBroker / MessageChannel / role bindings
+    PWA Content Fetch/SW/OPFS
+    cross-platform logical equivalence
 ```
 
-Game common document has no module；Main sees no executable/document material。
+M14/M16 concrete Renderer Binding必须遵守 M7 Frozen candidate-slot settlement；如果真实 physical consumer证明 Frozen capability无法表达必要语义，只能按 ADR 0027 reopen，不能创建平台私有第二套 currentness/retry protocol。
 
 ---
 
-## Game Package Baseline
+## Qualification Ownership
 
 ```text
-untrusted JSON text/value
-→ Wire representation
-→ closed GameEntryV1 validation
-→ key-set/initial validation
-→ detached deeply immutable ValidatedGameEntryV1
+renderer-control tests
+    wire/version/ordering/revision/bounded publication/terminal
+
+platform-ports tests
+    OpaqueMaterialGenerator contract
+    RendererControlBinding candidate-slot lifecycle
+
+main tests
+    projection/revision/token/currentness/optional Binding
+    capability-absent + Binding-terminal paths
+
+renderer tests
+    local peer+Snapshot holder / replacement identity safety
+
+M7 vertical
+    production-shaped Binding path via MemoryCarrier
+
+M6 regression
+    Hostra Runtime-only provider after opaqueMaterial migration
+
+M14/M16
+    concrete physical Renderer/Data/Content realization
 ```
 
-Runtime dependency：Wire only。Primary Runtime-product consumers：Hostra/PWA Launchers。Not Main/business。
-
----
-
-## Main Bootstrap Baseline
-
-```text
-LogicalGameBootstrap
-    subsystemKeys
-    initial {subsystemKey,input}
-```
-
-Main MUST NOT receive GameEntry/formatVersion/PlatformLaunchPlan/module/path/URL。
-
-M5 Main is now a qualified real Main-side Runtime Control consumer：`MainPlatform = {scheduler, bootstrapTokens, runtimeHosting}`；authentication callback owns Launch Attempt/token decision，Runtime Control typed terminal/outcome feeds Main first-wins failure authority。
-
----
-
-## Platform / Runner Baseline
-
-```text
-Main / Renderer / Subsystem / Content
-    = platform-neutral application roles
-
-Game Package
-    = platform-neutral document validation capability
-
-Runtime Control
-    = platform-neutral protocol mechanics capability
-
-Platform Launcher
-    = Runtime-product Game PREPARE + RuntimeHosting/Runner integration
-
-Platform Composition
-    = complete physical Session realization
-
-Host-owned Runner
-    = physical Runtime entry + role-port adapter
-
-Business Definition Module
-    = selected author-level implementation
-```
-
-Hostra carrier binding：WebSocket MessageCarrier。  
-PWA carrier binding：MessagePort MessageCarrier。
-
-Adapters only establish/translate string carrier units；they do not parse Runtime Control methods or retry application mutations。
-
----
-
-## Role-facing Ports
-
-Subsystem-facing：
-
-```text
-RuntimeControlBinding
-SubsystemDataBinding
-ContentClient
-```
-
-Renderer-facing：
-
-```text
-RendererControlBinding
-RendererDataBinding
-ContentClient
-```
-
-Main-facing current M5：
-
-```text
-DeadlineScheduler
-BootstrapTokenGenerator
-RuntimeHosting → HostedRuntime
-    ├── MainRuntimeControlBinding
-    ├── terminated
-    └── requestTermination
-```
-
-M7+ Renderer/Data ports grow only with real consumers；Content does not automatically pass through Main.
-
-Runtime Control scheduler is a narrow protocol-mechanics constructor port，not Game/Platform manifest configuration。
-
----
-
-## Low-level / Packages
-
-```text
-low-level
-    @loomrealm/foundation
-    @loomrealm/wire
-
-contract capabilities
-    @loomrealm/game-package
-    @loomrealm/runtime-control
-    @loomrealm/renderer-control
-    @loomrealm/data
-    @loomrealm/content
-
-roles
-    @loomrealm/main
-    @loomrealm/subsystem
-    @loomrealm/renderer
-    @loomrealm/content-service
-
-runtime launch integration
-    @loomrealm/game-launcher-hostra
-    @loomrealm/game-launcher-pwa
-
-technical adapters
-    @loomrealm/launcher-node
-    transport-websocket
-    transport-messageport
-    content-fs/http/service-worker
-
-business
-    @loomrealm/map
-
-composition roots
-    apps/desktop / apps/pwa / apps/cli
-```
-
----
-
-## Dependency Baseline
-
-```text
-foundation ──┐
-             ↓
-wire ─────→ runtime-control → main / subsystem-host
- │
- └→ game-package → game-launcher-* → apps/*
-
-map → subsystem author root
-```
-
-Forbidden：
-
-```text
-runtime-control → main/subsystem implementation
-runtime-control → WebSocket/MessagePort/Worker
-runtime-control → game-package/launcher
-main → game-package / concrete launcher
-business → game-package / launcher / runtime-control
-```
-
----
-
-## Platform-specific Config
-
-```text
-Game common       game.json
-Hostra            launch.hostra.json
-PWA               launch.pwa.json
-```
-
-Runtime Control protocol limits/Request IDs/deadline fields are not business Game config and are not placed in universal launcher options。
-
----
-
-## Subsystem Author / Host Split
-
-```text
-@loomrealm/subsystem
-    business author API
-
-@loomrealm/subsystem/host
-    trusted Runner/integration API
-    consumes SubsystemRuntimeControlPeer
-```
-
-Business author does not import Runtime Control directly。
-
-M4 maps protocol pending call/return into ordinary-input gating and typed FrameOutcome/business continuation semantics。
-
----
-
-## Frame SDK Closure
-
-Frozen：
-
-```text
-exact seven Requests
-Response send barrier before dependent reverse RPC
-ACK-before-publication
-post-commit no rollback
-timeout/loss ambiguous
-whole-suffix fixed-point unwind
-```
-
-Runtime Control implements mechanics/barrier/deadline/correlation；Main/Subsystem Host implement authority/control-flow。
-
----
-
-## Renderer Data Closure
-
-```text
-DataAuthority {S,G,dataProfile}
-loomrealm.renderer-data/1 = Connection1 + Input1 + Render1
-```
-
-Profile change requires fresh generation。Desktop/PWA late provisioning remains outside Runtime Control。
-
----
-
-## Unified Message Unit
-
-```text
-MessageCarrier
-one carrier unit = one UTF-8 JSON text string
-```
-
-Foundation treats string opaque；Wire owns generic JSON；profile packages own domain limits/semantics。
-
-Structured Clone only for Platform bootstrap/Port transfer。
+不允许用单个 giant E2E 代替 package/role evidence。
 
 ---
 
 ## Current Implementation Order
 
 ```text
-Foundation ✅
-Wire ✅
-Game Package ✅
+M1 Foundation / Wire ✅
+M2 Game Package ✅
 M3 Runtime Control ✅
-M4 Subsystem Runtime/Frame author+host ✅
-M5 Main Runtime/Frame authority ✅
+M4 Subsystem Runtime/Frame ✅
+M5 Main Runtime/Frame ✅
+M6 Hostra Runtime physical vertical ✅
 ↓
-M6 Hostra Platform vertical
+M7 Renderer Control — Frozen, implement next
 ↓
-M7 Renderer Control
-↓
-M8+ Data/Input/Render/Content slices
-...
-M15 PWA Platform vertical
-M16 cross-platform equivalence
+M8 Data role integration
+M9 Desktop Data Broker
+M10 Input
+M11 Render
+M12 Content
+M13 business map
+M14 Desktop Full E2E
+M15 PWA Runtime vertical
+M16 PWA Full E2E / equivalence
 ```
 
 ---
 
 ## Phase 1 Acceptance Direction
 
-Must prove all three loops：
+Phase 1最终必须证明：
 
 ```text
 Game source
-→ concrete Platform.prepareGame() / matching Launcher PREPARE
-→ LogicalGameBootstrap + prepared Platform instance
-→ runMain({bootstrap, platform}) / Runner
+→ matching Platform PREPARE
+→ LogicalGameBootstrap + Session-scoped Platform
+→ Main/Runner Runtime authority
 ```
 
 ```text
-MessageCarrier
-→ Runtime Control mechanics
-→ role-specific peer
-→ Main/Subsystem Host authority/control-flow
+Main committed Renderer authority
+→ Frozen Renderer Control
+→ current Renderer mirror
+→ Data/Input/Render/Content consumers
 ```
 
 ```text
-Formal protocol outcome/failure
-→ SDK control-flow
-→ business-observable behavior
+Hostra physical realization
+≈ same logical application trace ≈
+PWA physical realization
 ```
 
-Hostra/PWA use same logical Game/scenario/contracts，allow platform-specific artifacts/carriers，and produce equivalent logical/protocol/business outcome。
+物理 PID/Worker、WebSocket/MessagePort、IPC/Port transfer、HTTP/Fetch 可以不同；authority、protocol observable behavior 与 business result必须等价。
