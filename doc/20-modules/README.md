@@ -3,10 +3,10 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：logical roles/modules、Game/Platform launch boundary、Runner/role-facing Platform ports、Renderer Data Profile 与 Desktop/PWA realization 入口  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)  
+> 主要定义：logical roles/modules、Game/Platform launch boundary、Runner/role-facing Platform capabilities、Renderer Control/Data 与 Desktop/PWA realization 入口  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
 > 实施映射：[独立分包与发布架构](../30-implementation/package-architecture.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-09-03
 
 模块层描述运行职责/拓扑，不等于 npm package 清单。
 
@@ -20,9 +20,9 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 
 | 系统/模块 | 入口 | 说明 |
 |---|---|---|
-| Main | [main-system](./main-system/README.md) | Runtime/Frame/DataAuthority authority、transaction/unwind；只发 logical Runtime launch intent |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | Control mirror、RendererDataBinding、Input/Render replica/presentation |
-| Game Package | [game-package](./game-package/README.md) | `{key}` logical topology、initial input、common validation、Catalog/Repository logical module responsibilities |
+| Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/DataAuthority/current Renderer authority、transaction/unwind；只发 logical Runtime/Renderer authority facts |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main Control mirror、RendererDataBinding、Input/Render replica/presentation |
+| Game Package | [game-package](./game-package/README.md) | `{key}` logical topology、initial input、common validation |
 | FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop/PWA readonly Content API implementation |
 | `loom.map` | [loom-map](./loom-map/README.md) | 普通 platform-neutral Subsystem Definition consumer |
 | Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra manifest/plan、Node Runner、WS、Runner provisioning IPC、Data Broker、HTTP/fs |
@@ -85,33 +85,36 @@ Hostra/PWA MAY选择不同 artifact；相同 ABI/formal semantics/business-obser
 
 ---
 
-## 4. Role / Platform Ports
+## 4. Role / Platform Capabilities
+
+Role-facing capability只随真实 consumer冻结；下面不是 universal `Platform` interface。
 
 ```text
 Platform Composition
 ├── Main-facing
-│   ├── RuntimeHosting / Supervisor
-│   ├── RuntimeControlHost
-│   ├── RendererHosting
-│   ├── RendererControlHost
-│   └── DataConnectionBroker
+│   ├── DeadlineScheduler
+│   ├── OpaqueMaterialGenerator
+│   ├── RuntimeHosting
+│   └── RendererControlBinding?       // M7 Frozen optional capability
 │
-├── Renderer-facing
-│   ├── RendererControlBinding
-│   ├── RendererDataBinding
-│   └── ContentClient
+├── Renderer-facing (current/future)
+│   ├── RendererDataBinding           // M8+
+│   ├── ContentClient                 // M12+
+│   └── presentation/input environment
 │
 └── Subsystem-facing
     ├── RuntimeControlBinding
-    ├── SubsystemDataBinding
-    └── ContentClient
+    ├── SubsystemDataBinding          // M8+
+    └── ContentClient                 // M12+
 ```
 
-Role package不直接发现 WebSocket/MessagePort/Process/Worker。
+M7 `RendererControlBinding` 是 Main-facing **candidate-slot + already-established carrier** capability：Main issue token → Binding arms one slot → physical candidate binds → renderer-control hello/version → Main grants currentness。
 
-Runner/provisioning把物理基础设施转换为这些 role-local ports。
+它不是 Renderer-facing API，也不是 `RendererHosting` / `RendererControlHost` service。Renderer Window/BrowserWindow 的创建、显示、reload、销毁属于 Hostra/PWA concrete composition，M14/M16 才做 physical realization。
 
-Launcher package主要实现 Main-facing RuntimeHosting + Subsystem Runner integration；不吞并完整 Platform ports。
+Role package不直接发现 WebSocket/MessagePort/Process/Worker。Runner/provisioning把物理基础设施转换为窄 role-local capability。
+
+Launcher package主要实现 Main-facing RuntimeHosting + Subsystem Runner integration；不吞并完整 Platform capabilities。
 
 ---
 
@@ -164,7 +167,40 @@ no application retry
 
 ---
 
-## 7. Renderer Data
+## 7. Renderer Control — M7 Frozen
+
+```text
+Main committed Runtime/Frame/Activation/InputTarget/DataAuthority authority
+→ RendererAuthoritySnapshotV1
+→ renderer.hello id=1 / renderer.state
+→ current Renderer local mirror
+```
+
+Ownership：
+
+```text
+Main
+    token / current Renderer / revision / source authority
+
+@loomrealm/renderer-control
+    hello schema + version negotiation
+    Snapshot validation
+    ordering / bounded publication / terminal
+
+Renderer
+    local {peer,snapshot}|null holder only
+
+Platform
+    optional RendererControlBinding candidate carrier establishment
+```
+
+Renderer local holder不是 Main remote-currentness proof；M7 不建立 Store framework、lease/epoch/heartbeat、Data/Input/Render implementation。
+
+M7 Main `dataAuthorities=[]`；真实 Data policy从 M8开始。
+
+---
+
+## 8. Renderer Data
 
 ```text
 Renderer Data Application Profile v1
@@ -189,7 +225,7 @@ Data loss/provisioning failure != Runtime failure/Frame unwind
 
 ---
 
-## 8. User Input
+## 9. User Input
 
 ```text
 Effective(F,A,C)
@@ -209,7 +245,7 @@ SDK local receive gate还必须验证 Frame owner/current Activation/channel/mut
 
 ---
 
-## 9. FrameOutcome Author Projection
+## 10. FrameOutcome Author Projection
 
 `@loomrealm/subsystem` author API必须与 Frame v1 Outcome一一对应：
 
@@ -231,7 +267,7 @@ Module/Business文档不得重新发明另一套 raw-value/exception映射。
 
 ---
 
-## 10. Platform Provisioning
+## 11. Platform Provisioning
 
 Late Data provisioning属于 Platform infrastructure：
 
@@ -249,7 +285,7 @@ Launcher package可以提供 Runner-side provisioning integration point，但 Da
 
 ---
 
-## 11. Business Portability
+## 12. Business Portability
 
 ```text
 @loomrealm/map
@@ -271,7 +307,7 @@ Business source保持 platform-neutral；build可生成 Hostra/PWA不同 artifac
 
 ---
 
-## 12. Package / Adapter Mapping
+## 13. Package / Adapter Mapping
 
 ```text
 low-level
@@ -296,10 +332,7 @@ runtime launch integration
     @loomrealm/game-launcher-pwa
 
 technical/platform integration
-    @loomrealm/launcher-node
-    @loomrealm/transport-websocket
-    @loomrealm/transport-messageport
-    @loomrealm/content-fs/http/service-worker
+    current concrete transport/content/Runner implementations
 
 composition roots
     apps/desktop
@@ -311,7 +344,7 @@ Platform Architecture不自动等于 platform mega-package。
 
 ---
 
-## 13. Cross-platform Rules
+## 14. Cross-platform Rules
 
 Platform/Adapter/Launcher MUST NOT：
 
@@ -326,13 +359,33 @@ retry ambiguous Frame mutation
 从 Render/Interest产生 InputTarget
 让 Main接触 module/path/URL
 让 Platform manifest替换 Host-owned Runner/security policy
+建立 Host/PWA-specific Renderer currentness protocol
 ```
 
 Hostra/PWA 对相同 logical Game/topology/scenario必须得到等价 logical outcome；不要求相同 Definition artifact/physical trace。
 
 ---
 
-## 14. Conformance
+## 15. Milestone Placement
+
+```text
+M6   Hostra Runtime/Runner physical vertical ✅
+M7   logical Renderer Control + Binding contract / role integration
+M8   Data role integration
+M9   Desktop Data Broker/provisioning core
+M10  Input
+M11  Render
+M12  Content
+M14  Hostra BrowserWindow + physical Renderer Control + full Desktop E2E
+M15  PWA Runtime/Worker vertical
+M16  PWA Renderer Control + Data Broker/bindings + Content + full equivalence
+```
+
+M9 不等于 Desktop full Renderer composition；M16 也不能只完成 Renderer Control MessagePort 就宣告 full PWA E2E。
+
+---
+
+## 16. Conformance
 
 协议 conformance由最接近 capability package的 fixtures负责；模块级测试验证 authority projection、port wiring、Runner/provisioning和 business semantics。
 
@@ -345,6 +398,7 @@ exact key-set join
 all-preflight-before-first-runtime-side-effect
 Main launch request has no executable material
 Host-owned Runner loads planned Definition Module
+M7 Renderer Control optional-capability/currentness semantics
 same logical Frame/Input/Render/Content scenario
 equivalent application result
 ```
