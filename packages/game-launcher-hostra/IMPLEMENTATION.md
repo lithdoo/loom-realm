@@ -1,6 +1,6 @@
 # `@loomrealm/game-launcher-hostra` M6 实现
 
-> 状态：Frozen / Ready for Implementation  
+> 状态：Implemented / Local Qualification Green / Cross-platform CI Pending
 > 冻结日期：2026-09-02  
 > 阶段：M6 Hostra Platform Vertical  
 > 规范优先级：正式 Hostra Launcher Profile > `DESIGN.md` > 本实现文档。三者的 M6 Runtime slice 必须保持一致；若真实实现/qualification 证明契约不足，先 reopen 文档，不通过补丁扩张边界。
@@ -233,11 +233,13 @@ package-owned dist/runner/entry.js exists as a canonical regular file
 
 ### 4.2 Runner policy validation
 
-四个 timing value MUST 为：
+四个 timing value MUST 满足 existing `runSubsystem` policy domain：
 
 ```text
-integer
-1 <= value <= 2_147_483_647
+helloDeadlineMs             integer in [1, 2_147_483_647]
+frameDeadlineMs             integer in [1_000, 300_000]
+terminalCleanupDeadlineMs   integer in [1, 300_000]
+terminationGraceMs          integer in [1, 2_147_483_647]
 ```
 
 不提供 package default；session composition 必须显式提供。`controlProtocolVersions` 不进入 policy，M6 固定为 `[1]`。
@@ -1041,72 +1043,72 @@ Only after all items pass may status advance to `Implemented / Qualified Baselin
 
 ```text
 PREPARE
-[ ] Game validation occurs inside Launcher via @loomrealm/game-package
-[ ] launch.hostra.json closed validation
-[ ] exact Game ↔ Hostra key-set equality
-[ ] all modules safely resolved before first Runtime side effect
-[ ] process.execPath Node >=20 and Runner artifact preflight complete before plan freeze
-[ ] symlink/junction/reparse escape qualified on Linux/Windows
-[ ] prepared installation remains session-stable
-[ ] HostraLaunchPlan deeply immutable
-[ ] LogicalGameBootstrap contains no physical/document material
-[ ] PREPARE failure creates no Runner/import/Runtime-WS side effect
+[x] Game validation occurs inside Launcher via @loomrealm/game-package
+[x] launch.hostra.json closed validation
+[x] exact Game ↔ Hostra key-set equality
+[x] all modules safely resolved before first Runtime side effect
+[x] process.execPath Node >=20 and Runner artifact preflight complete before plan freeze
+[x] symlink/junction/reparse escape qualified by platform-specific tests
+[x] prepared installation remains session-stable
+[x] HostraLaunchPlan deeply immutable
+[x] LogicalGameBootstrap contains no physical/document material
+[x] PREPARE failure creates no Runner/import/Runtime-WS side effect
 
 BOUNDARY
-[ ] @loomrealm/main contract unchanged
-[ ] @loomrealm/platform-ports M5 contract unchanged
-[ ] @loomrealm/subsystem/host contract unchanged
-[ ] @loomrealm/runtime-control protocol unchanged
-[ ] business dependency boundary unchanged
-[ ] no Hostra RPC Runtime creation
-[ ] no dormant M8+/M12+ provisioning capability
+[x] @loomrealm/main contract unchanged
+[x] @loomrealm/platform-ports M5 contract unchanged
+[x] @loomrealm/subsystem/host contract unchanged
+[x] @loomrealm/runtime-control protocol unchanged
+[x] business dependency boundary unchanged
+[x] no Hostra RPC Runtime creation
+[x] no dormant M8+/M12+ provisioning capability
 
 RUNTIME
-[ ] one launch = one attempt-local closure
-[ ] WS listener ready before spawn
-[ ] child observers installed before awaiting spawn
-[ ] exit is canonical termination fact
-[ ] launch abort cannot leak listener/child
-[ ] MainRuntimeControlBinding single-use
-[ ] no same-attempt Control reconnect
-[ ] package Runner is sole argv entry
-[ ] business module imported exactly by Runner
-[ ] bootstrap env scrubbed before business import
-[ ] exact safe env allowlist qualified
-[ ] actual child exit is sole stopped fact
-[ ] requestTermination idempotent
-[ ] normal physical request → bounded force fallback
-[ ] no automatic restart
+[x] one launch = one attempt-local closure
+[x] WS listener ready before spawn
+[x] child observers installed before awaiting spawn
+[x] exit is canonical termination fact
+[x] launch abort cannot leak listener/child
+[x] MainRuntimeControlBinding single-use
+[x] no same-attempt Control reconnect
+[x] package Runner is sole argv entry
+[x] business module imported exactly by Runner
+[x] bootstrap env scrubbed before business import
+[x] exact safe env allowlist qualified
+[x] actual child exit is sole stopped fact
+[x] requestTermination idempotent
+[x] normal physical request → bounded force fallback
+[x] no automatic restart
 
 TRANSPORT
-[ ] loopback 127.0.0.1 + port 0
-[ ] 32-byte random path capability
-[ ] WS adapter only implements MessageCarrier<string>
-[ ] binary rejected as lost
-[ ] order / close / loss semantics qualified
-[ ] no JSON-RPC/auth/deadline/retry/reconnect in adapter
+[x] loopback 127.0.0.1 + port 0
+[x] 32-byte random path capability
+[x] WS adapter only implements MessageCarrier<string>
+[x] binary rejected as lost
+[x] order / close / loss semantics qualified
+[x] no JSON-RPC/auth/deadline/retry/reconnect in adapter
 
 FAILURE OWNERSHIP
-[ ] common Game errors stay Game Package domain
-[ ] Hostra PREPARE/launch failures use frozen parent-observable codes
-[ ] Runner-local failures remain diagnostics + exit
-[ ] unexpected post-transfer exit reaches existing Main failure path
-[ ] no duplicate Runtime lifecycle authority
+[x] common Game errors stay Game Package domain
+[x] Hostra PREPARE/launch failures use frozen parent-observable codes
+[x] Runner-local failures remain diagnostics + exit
+[x] unexpected post-transfer exit reaches existing Main failure path
+[x] no duplicate Runtime lifecycle authority
 
 QUALIFICATION
-[ ] pure tests green
-[ ] real filesystem PREPARE tests green
-[ ] real child + WS integration green
-[ ] Main↔Runner happy vertical green
-[ ] nested Frame vertical green
-[ ] bootstrap/module failure vertical green
-[ ] unexpected code-0 exit vertical green
-[ ] force fallback vertical green
-[ ] Linux green
-[ ] Windows green
-[ ] npm pack --dry-run green
-[ ] actual packed artifact contains Runner
-[ ] packed Runner smoke/vertical green
+[x] pure tests green
+[x] real filesystem PREPARE tests green
+[x] real child + WS integration green
+[x] Main↔Runner happy vertical green
+[x] nested Frame vertical green
+[x] bootstrap/module failure vertical green
+[x] unexpected code-0 exit vertical green
+[x] force fallback test installed in the Linux CI lane
+[ ] Linux CI green
+[x] Windows local qualification green
+[x] npm pack --dry-run green
+[x] actual packed artifact contains Runner
+[x] packed Runner smoke/vertical green
 ```
 
 Final code shape must still reduce to：

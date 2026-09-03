@@ -1,0 +1,63 @@
+name: Hostra Game Launcher conformance
+
+on:
+  pull_request:
+    paths:
+      - "packages/game-launcher-hostra/**"
+      - "packages/game-package/**"
+      - "packages/foundation/**"
+      - "packages/platform-ports/**"
+      - "packages/runtime-control/**"
+      - "packages/subsystem/**"
+      - "packages/main/**"
+      - "packages/wire/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/qualify-hostra-packed.mjs"
+      - ".npmrc"
+      - ".github/workflows/game-launcher-hostra.yml"
+      - ".github/actions/setup-workspace/**"
+  push:
+    branches: [main]
+    paths:
+      - "packages/game-launcher-hostra/**"
+      - "packages/game-package/**"
+      - "packages/foundation/**"
+      - "packages/platform-ports/**"
+      - "packages/runtime-control/**"
+      - "packages/subsystem/**"
+      - "packages/main/**"
+      - "packages/wire/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/qualify-hostra-packed.mjs"
+      - ".npmrc"
+      - ".github/workflows/game-launcher-hostra.yml"
+      - ".github/actions/setup-workspace/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 24]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Run Hostra Launcher conformance
+        run: npm run test:game-launcher-hostra
+      - name: Verify publishable package surface
+        run: npm pack -w @loomrealm/game-launcher-hostra --dry-run
+      - name: Qualify the actual packed artifact and Runner
+        run: node scripts/qualify-hostra-packed.mjs

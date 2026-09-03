@@ -1,0 +1,54 @@
+{
+  "name": "@loomrealm/game-launcher-hostra",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "description": "Hostra Game launcher and Node Subsystem Runner.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": [
+    "./dist/runner/entry.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "DESIGN.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@loomrealm/foundation": "0.1.0-alpha.0",
+    "@loomrealm/game-package": "0.1.0-alpha.0",
+    "@loomrealm/platform-ports": "0.1.0-alpha.0",
+    "@loomrealm/subsystem": "0.1.0-alpha.0",
+    "@loomrealm/wire": "0.1.0-alpha.0",
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@loomrealm/main": "0.1.0-alpha.0",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lithdoo/loom-realm.git",
+    "directory": "packages/game-launcher-hostra"
+  },
+  "bugs": {
+    "url": "https://github.com/lithdoo/loom-realm/issues"
+  },
+  "homepage": "https://github.com/lithdoo/loom-realm/tree/main/packages/game-launcher-hostra#readme"
+}

@@ -284,7 +284,17 @@ interface HostraRunnerPolicyV1 {
 }
 ```
 
-Every value MUST be an integer in `[1, 2_147_483_647]`。
+The values MUST satisfy the existing `runSubsystem` policy domain：
+
+```text
+helloDeadlineMs             integer in [1, 2_147_483_647]
+frameDeadlineMs             integer in [1_000, 300_000]
+terminalCleanupDeadlineMs   integer in [1, 300_000]
+terminationGraceMs          integer in [1, 2_147_483_647]
+```
+
+Hostra PREPARE validates this domain before any Runtime side effect, so a
+prepared Runner policy cannot later be rejected by the existing Subsystem host.
 
 M6 Control protocol versions are fixed：
 
