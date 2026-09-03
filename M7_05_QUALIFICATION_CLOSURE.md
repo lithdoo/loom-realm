@@ -5,23 +5,23 @@
 > 落地顺序：05  
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md) → [M7 / 02](M7_02_MAIN_AUTHORITY_PROJECTION.md) → [M7 / 03](M7_03_RENDERER_CONTROL_STORE.md) → [M7 / 04](M7_04_VERTICAL_INTEGRATION.md)  
-> 目标：定义 M7 的最终 qualification evidence、package/CI closure 条件、非目标与下一阶段 handoff；只有本文件条件全部满足时才可把 M7 标记为 complete。
+> 目标：只定义 M7 最终 evidence/checklist；协议语义以 formal contract 为准，具体实现方式以前四份 M7 文档为准。
 
 核心原则：
 
-> **M7 closure 证明“Main committed authority 能被 Renderer 正确、原子、bounded、fail-closed 地镜像”，不证明 Data/Input/Render/Content 或物理 Desktop/PWA composition 已完成。**
+> **本文件不是第三份协议规范。M7 closure 只证明 Main committed authority 能被 Renderer 正确、原子、bounded、fail-closed 地镜像。**
 
 ---
 
 ## 1. Closure Scope
 
-M7 closure 涉及：
+M7 必须关闭：
 
 ```text
 @loomrealm/renderer-control
-@loomrealm/main
-@loomrealm/renderer
-cross-package deterministic integration
+@loomrealm/main Renderer projection slice
+@loomrealm/renderer minimal Control slice
+deterministic cross-package vertical
 ```
 
 默认不要求修改：
@@ -33,366 +33,301 @@ cross-package deterministic integration
 @loomrealm/game-launcher-hostra
 @loomrealm/game-launcher-pwa
 @loomrealm/data
-@loomrealm/fsdb-http
 ```
 
-`@loomrealm/platform-ports` 只有真实 M7 consumer 证明存在必要的新 Core↔Platform capability 时才允许进入 scope；不能为了形式完整而预建接口。
+`@loomrealm/platform-ports` 只有在真实 ingress 阻塞证明需要新 Core↔Platform capability 时才进入 scope。
 
 ---
 
-## 2. Required Package State
+## 2. Abstraction Budget
 
-### `@loomrealm/renderer-control`
-
-必须具备：
+M7 closure 应能说明以下抽象都有当前真实消费者：
 
 ```text
-exact v1 wire types
-closed schema validation
-renderer.hello
-renderer.state
-full Snapshot validation
-session/revision mechanics
-bounded latest publication
-terminal/fail-closed behavior
-root-only public surface
-package-local tests
+renderer-control Main peer
+renderer-control Renderer peer
+Main pure Snapshot projector
+Renderer current Snapshot holder
 ```
 
-### `@loomrealm/main`
-
-必须具备：
+M7 不接受仅为未来设计产生的：
 
 ```text
-Main-owned sessionId
-Main-owned AuthorityRevision
-committed Renderer authority projection
-immutable full Snapshot capture
-ACK causal barriers preserved
-rendererControlToken auth authority integration
-publication seam into renderer-control
-```
-
-### `@loomrealm/renderer`
-
-必须具备：
-
-```text
-M7 package slice
-atomic Control Store
-session replacement
-revision monotonic application
-control-loss authority invalidation
-no Data/Input/Render implementation leakage
+GenericRpcPeer / UniversalProtocolSession
+RequestIdAllocator / PendingRequestMap for one-shot hello
+StateReplicator / Publisher framework
+RendererControlState duplicate DTO
+public subscription/event bus without real consumer
+Renderer Runtime/Frame shadow registries
+DataAuthority allocator/policy before M8
+historical authority log/Set for lifetime validation
+speculative Platform renderer mega-port
 ```
 
 ---
 
-## 3. Required Trace Evidence
+## 3. Package Evidence — `@loomrealm/renderer-control`
 
-至少保留以下可重复测试证据：
+必须通过：
 
 ```text
-initial hello Snapshot
-Runtime declared → ready projection
-initial Frame initialize/activate projection
-activate ACK-before-InputTarget
-frame.call committed transitions
+exact v1 exported types
+closed schema + whole current-Snapshot validation
+hello is first and one-shot
+hello uses concrete id=1 correlation
+version/auth behavior
+hello Result before renderer.state
+connection-local revision monotonicity
+gap accepted / duplicate-regression terminal
+bounded 0..1 in-flight + 0..1 pendingLatest
+terminal first-wins
+no retry/replay/history
+non-empty DataAuthority fixture representation validation
+```
+
+特别证明：receiver 不维护 unbounded Activation/Data generation history。
+
+---
+
+## 4. Main Evidence
+
+必须证明：
+
+```text
+one Main-owned sessionId
+one Main-owned AuthorityRevision
+Snapshot is pure projection of existing authority
+no shadow Runtime/Frame/InputTarget authority
+all Renderer-visible mutations reach explicit commit observation
+Runtime lifecycle mapping is deterministic
+initializing collapses without second renderer lifecycle state
+activate/resume ACK before fresh Activation/InputTarget publication
+revoked Activation never regranted
+failure/unwind remains Main-only
+M7 dataAuthorities is []
+```
+
+Main tests，而不是 Renderer receiver history，负责 lifetime identity invariants。
+
+---
+
+## 5. Renderer Evidence
+
+必须证明：
+
+```text
+role state is currentPeer + RendererAuthoritySnapshotV1|null
+accepted Snapshot replacement is atomic
+new current peer replaces old peer
+old peer output cannot mutate current state
+current peer terminal clears currentSnapshot
+no second revision/session validator
+no duplicate RendererControlState DTO
+no public subscription framework frozen without consumer
+```
+
+---
+
+## 6. Vertical Evidence
+
+必须走真实生产 integration path：
+
+```text
+live Main authority
+→ real Main projector/revision
+→ real renderer-control Main peer
+→ MemoryCarrier
+→ real renderer-control Renderer peer
+→ real Renderer current Snapshot
+```
+
+禁止：
+
+```text
+harness reads Main private stack
+harness manually constructs Snapshot
+fake revision counter
+bypass Main token/current-connection decision
+```
+
+必须覆盖：
+
+```text
+initial hello
+Runtime lifecycle projection
+initial Frame activate
+frame.call
 frame.return + fresh resume Activation
-revoked Activation never reappears
-Runtime failure + fixed-point unwind result projection
-DataAuthority logical add/replace/revoke
-connection replacement/reload
-control connection terminal
-slow consumer/coalescing
+Runtime failure + fixed-point unwind result
+connection replacement
+slow consumer boundedness
+terminal/fail-closed
 ```
 
-测试不要求观察每个 intermediate revision；要求 Renderer eventual current state 与 Main latest committed authority 一致。
+Main M7 vertical 不要求非空 DataAuthority；真实 DataAuthority lifecycle 属于 M8。
 
 ---
 
-## 4. Protocol Conformance
+## 7. Ingress Stop Condition
 
-必须验证：
+如果 deterministic vertical 只能通过以下方式成立：
 
 ```text
-hello is first application message
-only renderer.hello is Request
-renderer.state is Main → Renderer Notification
-batch forbidden
-closed v1 schema
-whole-message limits
-depth/member/topology limits
-positive safe integer rules
-request ID never reused on sender connection
-unsupported version terminal behavior
-auth failure does not leak token diagnosis
-hello Result precedes all state notifications
-revision gaps accepted
-revision duplicate/regression rejected
-no delta/patch/replay/resync
+暴露 Main private authority
+加入 test-only public API
+测试手工制造 Renderer Snapshot
 ```
+
+M7/04 不得标绿。
+
+此时应 reopen ingress design，并基于真实阻塞关闭一个最窄的 Core↔Platform capability；不得为了形式完整预建 universal Renderer host/service interface。
 
 ---
 
-## 5. Authority Conformance
+## 8. Regression Evidence
 
-必须证明：
+必须保持 M1–M6 已关闭语义：
 
 ```text
-Main is unique authority
-Renderer Control does not allocate AuthorityRevision
-Renderer does not create InputTarget
-Renderer does not compute Runtime failure unwind
-Renderer does not interpret call/return as authority commands
-DataAuthority contains no endpoint/credential
-Input Interest not present in Control Snapshot
-Render state not present in Control Snapshot
+Foundation/Wire
+Game Package
+Runtime Control
+Subsystem Runtime/Frame
+Main Runtime/Frame/Stack authority
+Hostra Runtime vertical
 ```
 
-任何测试 helper 若绕过真实 ownership 都不能作为 closure evidence。
-
----
-
-## 6. Atomicity
-
-必须构造会同时改变多个 Renderer-visible facts 的 Main transaction，并证明 Renderer 不观察半状态。
-
-示例：
+特别防止：
 
 ```text
-caller active + InputTarget
-→ call transition
-→ caller suspended
-→ InputTarget null
-→ child starting
-```
-
-实现可以发布多个已提交 transitional Snapshots，但每个 Snapshot 本身必须是 Main 当时一个合法完整 authority state。
-
-不得通过 per-field Renderer events模拟原子 Snapshot。
-
----
-
-## 7. Boundedness
-
-必须证明：
-
-```text
-0..1 in-flight publication
-+
-at most one replaceable latest unsent Snapshot
-```
-
-在持续 Main mutation + blocked Renderer writer 条件下：
-
-```text
-memory does not grow with revision count
-pending queue does not grow with revision count
-terminal cleanup releases pending state/listeners
-```
-
-M7 不接受“测试规模下没出问题”作为 boundedness 证据；实现结构必须显式 bounded。
-
----
-
-## 8. Fail-closed
-
-Renderer 遇到以下情况必须停止把缓存状态当作 current authority：
-
-```text
-invalid JSON/schema
-invalid Snapshot relation
-revision regression/duplicate
-invalid session behavior
-oversize message
-carrier terminal
-protocol terminal
-```
-
-M7 时至少可观察：
-
-```text
-Control Store current authority usability revoked
-InputTarget usability revoked
-DataAuthority usability revoked
-```
-
-M8+ 的真实 Data connections 再接入 physical retire/close。
-
----
-
-## 9. Regression Requirements
-
-M7 不得破坏已有：
-
-```text
-M1 Foundation/Wire tests
-M2 Game Package validation
-M3 Runtime Control mechanics
-M4 Subsystem Runtime/Frame behavior
-M5 Main Runtime/Frame/Stack semantics
-M6 Hostra runtime vertical
-```
-
-尤其要防止：
-
-```text
-为 Renderer publication 改写 Main mutation ordering
-为 Snapshot convenience 放松 Frame ACK barrier
-为 connection abstraction 改变 Runtime Control transport semantics
-为共享代码提取 generic RPC framework
+Renderer publication改变 Main Frame ordering
+Snapshot convenience放松 ACK causal barrier
+generic RPC extraction改变 Runtime Control
+Renderer ingress制造 role/package cycle
 ```
 
 ---
 
-## 10. CI / Repository Qualification
+## 9. Package / CI Evidence
 
-建议最终至少形成：
+至少：
 
 ```text
-renderer-control package CI/test target
-renderer package CI/test target
-main package M7 regression target
-M7 vertical integration target
+renderer-control build/test/pack
+renderer build/test/pack if publishable
+main M7 projection tests
+M7 deterministic vertical
+existing core regression suites
 ```
 
-同时运行已有核心测试。
+检查 dependency direction：
 
-Qualification matrix 至少覆盖 repository support baseline（当前 Node >=20）；如果包声明 browser-compatible runtime source，应避免在 package runtime source 中引入 `node:*`。
+```text
+main → renderer-control
+renderer → renderer-control
+renderer-control !→ main/renderer
+main !→ renderer
+renderer !→ main
+```
+
+Root M7 docs 不进入 runtime dependency/publish surface。
 
 ---
 
-## 11. Pack / Publish Boundary
+## 10. Documentation Closure
 
-至少检查：
-
-```text
-npm pack --dry-run for @loomrealm/renderer-control
-npm pack --dry-run for @loomrealm/renderer if publishable
-root export resolves
-.d.ts generated
-no test/internal source unintentionally published
-no M7 root implementation docs accidentally become package runtime dependency
-```
-
-Root M7 documents属于 repository implementation tracking，不需要随 npm package 发布。
-
----
-
-## 12. Documentation Closure
-
-M7 完成时同步：
+M7 complete 后同步：
 
 ```text
-README current implementation state
+README implementation state
 phase-1-delivery-plan M7 status
 package README status
-relevant contract status/review date only if contract actually changed
-implementation/qualification evidence reference
+qualification evidence reference
+formal contract status only if contract actually changed
 ```
 
-不要仅修改 milestone checkbox，而留下 README 旧状态。
-
-如实现导致 formal contract 变化，必须先记录 contract/ADR provenance，再更新实现文档；不要让 root M7 文档成为协议事实源替代品。
+M7 root docs 不替代 formal contract。
 
 ---
 
-## 13. Explicit Non-goals for M7 Closure
+## 11. Explicit Non-goals
 
-即使 M7 complete，也不得声称以下完成：
+M7 complete 不表示：
 
 ```text
-Renderer Data Profile runtime integration
-Renderer ⇄ Subsystem Data Connection
+Main DataAuthority policy implemented
+Renderer Data runtime integration
 DataConnectionBroker
-late Data provisioning
-User Input
-Frame Interest
-Render Update
-Render Store
+User Input / Frame Interest
+Render Update / Render Store
 Content
-DOM/Canvas/WebGL presentation
-Desktop BrowserWindow product composition
-PWA Renderer/Worker composition
+Desktop BrowserWindow Renderer Control transport
+PWA Renderer Control transport
 cross-platform equivalence
 ```
 
-这些属于 M8+ 后续 slices。
+这些进入 M8+ / product composition milestones。
 
 ---
 
-## 14. Stop Conditions
-
-以下情况必须停止实现并 reopen design/contract，而不是继续打补丁：
+## 12. Closure Checklist
 
 ```text
-Main cannot produce one legal full Snapshot for a legal authority state
-required Snapshot field has ambiguous authority owner
-Renderer needs operation history to interpret current authority
-protocol package must know Main Registry internals
-renderer-control needs transport-specific endpoint/credential
-bounded latest-state publication cannot preserve required causal semantics
-real consumer requires a generic extension bag to proceed
-```
+[ ] M7_01 renderer-control minimal concrete peers qualified
+[ ] no generic RPC/request/publication framework introduced
+[ ] receiver keeps only bounded current-connection history
 
-这些都说明边界设计存在实质问题。
+[ ] M7_02 Main pure projection implemented
+[ ] no shadow Runtime/Frame/InputTarget authority
+[ ] lifecycle mapping closed
+[ ] lifetime Activation invariants Main-owned
+[ ] M7 dataAuthorities remains []
 
----
+[ ] M7_03 Renderer currentPeer + currentSnapshot|null implemented
+[ ] no duplicate revision/session state machine
+[ ] no duplicate Control DTO / premature observer API
 
-## 15. M7 Closure Checklist
-
-```text
-[ ] M7_01 renderer-control package implemented and qualified
-[ ] M7_02 Main committed authority projection implemented
-[ ] M7_03 Renderer Control Store implemented
-[ ] M7_04 deterministic vertical passes
-
-[ ] hello/auth/version behavior passes
-[ ] exact full Snapshot validation passes
-[ ] Main-owned revision semantics pass
-[ ] activate/resume ACK causal barriers pass
-[ ] call/return traces pass
-[ ] runtime failure/unwind projection passes
-[ ] logical DataAuthority traces pass
+[ ] M7_04 real integration path passes
+[ ] no test-built authority Snapshot
 [ ] connection replacement passes
 [ ] slow-consumer boundedness passes
 [ ] terminal/fail-closed passes
 
-[ ] existing M1–M6 regression suite remains green
-[ ] package dependency graph has no role cycle
-[ ] package pack/build/type output is clean
-[ ] root/phase README status is synchronized
+[ ] dependency graph remains acyclic
+[ ] M1–M6 regression green
+[ ] build/type/pack clean
+[ ] README / delivery-plan status synchronized
 ```
 
 ---
 
-## 16. Handoff to M8
+## 13. Handoff to M8
 
-M7 完成后，M8 可以假设以下稳定事实：
-
-```text
-Renderer always has either:
-    a validated current Main authority Snapshot
-    or no usable Main authority
-
-DataAuthority is already represented as:
-    subsystemKey + generation + dataProfile
-
-Renderer Data integration must consume this authority
-rather than creating a second policy source
-```
-
-M8 的第一个问题因此不是重新设计 Renderer authority，而是：
+M8 可以依赖：
 
 ```text
-How does a current logical DataAuthority become one actual Renderer ⇄ Subsystem Data Connection?
+Renderer has either:
+    one validated current Main Snapshot
+    or null / no usable Main authority
+
+Renderer Control wire already knows RendererDataAuthorityV1 shape
 ```
+
+M8 才首次关闭：
+
+```text
+Main DataAuthority allocation/generation/profile policy
+Subsystem DataPlane real consumer
+Renderer Data binding real consumer
+actual current Data Connection establishment
+```
+
+因此 M8 的问题是从真实 Data consumer 反推最小 capability，而不是继承 M7 的 fake Data policy。
 
 ---
 
-## 17. Final Closure Statement
+## 14. Final Closure Statement
 
-M7 可以标记为 complete 的唯一含义：
+M7 可以标记 complete 的唯一含义：
 
-> **同一个 Main Session 中，Main committed Runtime / Frame / Activation / InputTarget / DataAuthority authority 能通过 `@loomrealm/renderer-control` 以完整、严格验证、revision-monotonic、bounded、fail-closed 的方式复制到 `@loomrealm/renderer` Control Store；既有 Main Runtime/Frame semantics 不因 Renderer 的加入而改变。**
+> **同一 Main Session 的 committed Runtime / Frame / Activation / InputTarget authority，通过具体且 bounded 的 Renderer Control v1 peers，以完整 Snapshot 镜像到 Renderer；Main 不建立 shadow authority，Renderer 不建立第二套协议状态机，M7 不提前实现 Data/Input/Render/Platform future abstractions。**
