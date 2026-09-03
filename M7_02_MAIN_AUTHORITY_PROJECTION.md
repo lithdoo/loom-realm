@@ -6,7 +6,7 @@
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md)  
 > 冻结决策：[ADR 0027](doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 目标：让 `@loomrealm/main` 从既有 Runtime/Frame/Stack authority 纯投影 Renderer Snapshot，并精确关闭 Session identity、revision、RendererControlBinding accept loop、hello atomicity、replacement 与 Session terminal；不得建立 shadow authority。
+> 目标：让 `@loomrealm/main` 从既有 Runtime/Frame/Stack authority 纯投影 Renderer Snapshot，并关闭 Session identity、revision、optional RendererControlBinding accept loop、hello atomicity、replacement 与 Session terminal；不得建立 shadow authority。
 
 > **Main 现有 Runtime/Frame/Stack 状态始终是事实源。M7 增加的只是 pure projection + bounded Renderer connection bookkeeping。**
 
@@ -27,7 +27,7 @@
 @loomrealm/renderer-control
 ```
 
-不改变 Runtime Control / Frozen Frame semantics，不新增 universal Renderer hosting interface。
+不改变 Runtime Control / Frozen Frame semantics，不新增 public Main Session controller 或 universal Renderer hosting interface。
 
 ---
 
@@ -40,11 +40,11 @@ interface MainPlatform {
   readonly scheduler: DeadlineScheduler;
   readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
-  readonly rendererControl: RendererControlBinding;
+  readonly rendererControl?: RendererControlBinding;
 }
 ```
 
-其中 `RendererControlBinding` exact contract：
+`RendererControlBinding` exact contract：
 
 ```ts
 interface RendererControlBinding {
@@ -55,9 +55,23 @@ interface RendererControlBinding {
 }
 ```
 
-一次 `acquire` = 一个 candidate Renderer Control attempt。Success只给 already-established carrier；不授予 currentness。
+Optionality固定：
 
-Main 同时最多：
+```text
+rendererControl absent
+→ no Renderer Control physical capability for this composition
+→ Main issues no Renderer token/attempt
+→ Runtime/Frame Session proceeds normally
+
+rendererControl present
+→ Main starts the frozen bounded accept loop
+```
+
+不得为了满足 M7 type shape 给 M6 Hostra/headless composition添加 fake/no-op Binding。
+
+一次 `acquire` = 一个 candidate Renderer Control attempt。Success只返回 already-established carrier；不授予 currentness。
+
+Binding存在时 Main 同时最多：
 
 ```text
 one current Renderer peer
@@ -103,7 +117,7 @@ sessionId
 rendererRevision
 last committed Renderer authority payload/Snapshot
 currentRendererPeer | null
-current/pending Renderer attempt token + AbortController/state
+at most one pending Renderer attempt/token/AbortController when Binding exists
 ```
 
 MUST NOT新增：
@@ -124,7 +138,7 @@ ConnectionRegistry
 
 ## 5. Session Initialization
 
-在 Renderer accept loop开始前：
+无论 Renderer capability是否存在，都先：
 
 ```text
 generate + validate fresh sessionId
@@ -136,7 +150,7 @@ currentRendererPeer = null
 
 初始 Snapshot包含 declared Runtime topology、当前 live Frame state、derived InputTarget、`dataAuthorities=[]`。
 
-Renderer absence不得阻塞 Runtime bootstrap/Frame业务运行。
+如果 `rendererControl` 缺席，不启动 Renderer accept loop；revision仍随着可见 authority变化推进，以保证未来同一语义模型不依赖 transport presence。
 
 ---
 
@@ -179,13 +193,14 @@ Change detection比较 payload excluding `revision` 本身。
 不因以下递增：
 
 ```text
-renderer connection/replacement
-same Snapshot resend
+Renderer capability presence/absence
+connection/replacement
 candidate attempt
+same Snapshot resend
 transport terminal
 ```
 
-即使无 current Renderer，visible commit仍推进 revision，使 later hello取得真正 current R。
+即使无 current Renderer，visible commit仍推进 revision。
 
 ---
 
@@ -203,7 +218,7 @@ authoritative mutation commits
      submit latest to current Main peer if any
 ```
 
-现有 bootstrap中 connected/identified 等 visible assignment也必须进入该 discipline。
+Bootstrap中 connected/identified 等 visible assignment也必须进入该 discipline。
 
 只允许窄 helper；不引入 EventBus / TransactionManager / StateReplicator。
 
@@ -211,7 +226,7 @@ authoritative mutation commits
 
 ## 9. Runtime Lifecycle Mapping
 
-冻结，不再留 reopen 条件：
+冻结：
 
 ```text
 no RuntimeRecord                         → declared
@@ -226,7 +241,7 @@ stopping                                 → stopping
 
 failure precedence高于 stopped。
 
-Session terminal latch后 Renderer Control立即 retirement；因此 normal Session cleanup后续 stopping/stopped变化不要求再 publication。`stopped` 仍是合法 pure projection状态。
+Session terminal latch后 Renderer Control立即 retirement；normal cleanup后续 stopping/stopped变化不要求 publication。`stopped` 仍是合法 pure projection状态。
 
 ---
 
@@ -270,16 +285,16 @@ dataAuthorities = []
 
 ## 12. Renderer Accept Loop
 
-Main Session启动后异步运行一个 bounded accept loop：
+仅当 `platform.rendererControl` 存在时，Main Session异步运行 bounded accept loop：
 
 ```text
-while Session live and binding available:
+while Session live:
     issue/register fresh rendererControlToken
-    await platform.rendererControl.acquire(token, attemptSignal)
-    create candidate Main peer for returned carrier
-    await candidate hello outcome
+    await rendererControl.acquire(token, attemptSignal)
+    create candidate renderer-control Main peer
+    await typed candidate hello outcome
 
-    after candidate attempt settles:
+    after attempt settles:
         if Session still live:
             arm exactly one fresh next attempt
 ```
@@ -289,27 +304,51 @@ while Session live and binding available:
 ```text
 at most one acquire/candidate attempt pending
 current Renderer may coexist with one future candidate
-binding wait never blocks Runtime/Frame Session progress
+Binding wait never blocks Runtime/Frame Session progress
 attempt terminal invalidates its token
-no protocol retry/replay; next iteration is fresh attempt/token
+next iteration is fresh attempt/token, not protocol retry/replay
 ```
 
-如果 Binding 自身发生 Session-lifetime terminal failure，Main停止新的 Renderer attempts，但不把该 physical capability failure升级为 Runtime/Frame Session failure。
+如果 Binding implementation本身进入不可恢复 physical capability terminal，Main停止新的 Renderer attempts，但不把它升级为 Runtime/Frame Session failure。
 
 ---
 
-## 13. Hello Acceptance — Frozen Atomic Transaction
+## 13. Version Negotiation Ownership
 
-Main必须提供一个 single acceptance seam；函数名可选，语义不可变。
+`@loomrealm/renderer-control` Main peer在进入 Main authority acceptance前完成：
+
+```text
+renderer.hello schema validation
+protocolVersions validation
+select supported protocolVersion = 1
+unsupported-version error/terminal
+```
+
+Main接收的是**已经选择 v1 的 typed hello fact**。
+
+Main MUST NOT：
+
+```text
+parse protocolVersions
+choose version
+implement a second negotiation path
+```
+
+---
+
+## 14. Hello Acceptance — Frozen Atomic Transaction
+
+Main必须提供 single acceptance seam；函数名可选，语义不可变。
 
 在 Main serialized lane 内：
 
 ```text
 1. require Session nonterminal
 2. require candidate === current pending attempt
-3. validate exact issued token + supported version
+3. validate exact issued rendererControlToken
 4. capture current committed Snapshot R
-5. call renderer-control exact side-effect-free hello outbound prepare/preflight for id=1/version=1/R
+5. call renderer-control exact side-effect-free hello outbound prepare/preflight
+   using already-selected protocolVersion=1 + request id=1 + R
 
 if step 5 fails:
     invalidate candidate token/attempt
@@ -336,7 +375,7 @@ Hello Result send失败：candidate peer terminal；identity-safe current termin
 
 ---
 
-## 14. Replacement
+## 15. Replacement
 
 B acceptance commit 后：
 
@@ -363,7 +402,7 @@ Peer terminal本身不推进 revision。
 
 ---
 
-## 15. Representation Failure
+## 16. Representation Failure
 
 Main/renderer-control outbound path必须 preflight actual full message。
 
@@ -380,13 +419,13 @@ rendererRevision remains authority-derived only
 
 ---
 
-## 16. Session Terminal Boundary
+## 17. Session Terminal Boundary
 
 一旦 Main latch root-outcome / shutdown / fatal terminal：
 
 ```text
 stop issuing Renderer tokens
-abort pending RendererControlBinding.acquire
+abort pending RendererControlBinding.acquire if any
 invalidate pending attempt token
 retire candidate peer if any
 retire currentRendererPeer if any
@@ -394,13 +433,15 @@ clear Main current renderer peer reference
 stop/discard future Renderer publication
 ```
 
+如果 `rendererControl` capability缺席，上述 Renderer cleanup为空操作。
+
 Renderer cleanup不成为 Session result barrier；Main无需等待 physical Renderer carrier close才能完成既有 Session terminal/Runtime cleanup。
 
 不发送 final Snapshot/session-ended RPC。
 
 ---
 
-## 17. Tests
+## 18. Tests
 
 必须覆盖：
 
@@ -409,12 +450,11 @@ fresh sessionId + initial revision 1
 OpaqueMaterialGenerator values independent
 revision comparison excludes revision
 visible commit increments exactly once
-no visible change/transport bookkeeping does not increment
-runtime lifecycle frozen mapping
-activate/resume ACK-before-target
-M7 dataAuthorities=[]
-accept loop at most one pending candidate
+RendererControlBinding absent → no attempt + Session business unaffected
+Binding present → at most one pending candidate
 Renderer absence does not block Session
+renderer-control peer owns version negotiation
+Main does not re-negotiate version
 hello preflight before current switch
 unrepresentable B cannot evict healthy A
 hello concurrent R+1 cannot be lost
@@ -425,19 +465,22 @@ stale A terminal cannot clear B
 current B terminal clears current only
 Session terminal aborts pending acquire + retires peers
 representation failure cannot mutate Frame/Runtime authority
+M7 dataAuthorities=[]
 no shadow authority/framework
 ```
 
 ---
 
-## 18. Frozen Closure
+## 19. Frozen Closure
 
 M7/02 实施完成条件：
 
 ```text
-MainPlatform exact M7 view implemented
-OpaqueMaterialGenerator + RendererControlBinding consumed
-bounded background accept loop implemented
+MainPlatform optional Renderer capability implemented
+OpaqueMaterialGenerator + RendererControlBinding consumed correctly
+capability-absent path remains valid/nonblocking
+bounded background accept loop implemented when Binding exists
+protocol peer owns version negotiation
 pure projection + revision discipline implemented
 hello exact preflight/current switch atomicity implemented
 replacement/session terminal identity-safe
@@ -445,4 +488,4 @@ representation failure isolated
 M7 DataAuthority remains deferred
 ```
 
-除 ADR 0027 Reopen Rule外，编码阶段不得重新决定 Platform ingress、current-switch顺序或 Session terminal语义。
+除 ADR 0027 Reopen Rule外，编码阶段不得重新决定 Platform ingress、capability optionality、negotiation ownership、current-switch顺序或 Session terminal语义。
