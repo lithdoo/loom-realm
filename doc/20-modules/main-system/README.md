@@ -1,49 +1,48 @@
 # 程序主系统模块设计
 
 > 层级：模块设计  
-> 状态：M5 Implemented Baseline / M7+ Active Design  
-> 稳定程度：M5 Frozen Baseline / Later Slices Evolving  
-> 主要定义：Main 内部 authority/transaction/recovery 模块、LogicalGameBootstrap input、session-scoped concrete Platform composition，以及 Main-facing narrow capability view  
-> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-28
+> 状态：M5 Implemented Baseline / M7 Implementation Frozen / M8+ Planned  
+> 稳定程度：M5 Frozen Baseline / M7 Preimplementation Closed  
+> 主要定义：Main authority/transaction/recovery、LogicalGameBootstrap、Main-facing narrow Platform view、M7 Renderer authority projection/currentness、M8+ DataAuthority evolution  
+> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)  
+> 最近复核：2026-09-03
 
-Main 是 Session / Runtime / Frame / Activation / InputTarget / DataAuthority application authority。它不拥有 Game Entry document contract、Platform executable binding，也不等于 Process/Worker/WebSocket/MessagePort realization。
+Main 是 Session / Runtime / Frame / Activation / InputTarget / Renderer currentness / AuthorityRevision 的 application authority。DataAuthority 也属于 Main，但真实 allocation/generation/profile policy 从 M8 才实施。
 
-当前 M5 已实现 Session/Runtime/Frame/Activation/InputTarget 与 failure unwind；Renderer Control/DataAuthority 属于后续 M7+ slice，不作为 M5 closure 条件。
+Main 不拥有 Game Entry document、Platform executable binding、WebSocket/MessagePort、Renderer presentation、Input Interest 或 Render Domain。
 
 ---
 
-## 1. Internal Modules
+## 1. Current Module Shape Through M7
 
 ```text
 Main System
-├── LogicalGameBootstrap Installer
-├── Subsystem Registry {key}
-├── Initial Target/Input
-├── Launch Attempt Registry
-├── Runtime Registry / Supervisor Coordinator
-├── Runtime Control Registry / Dispatcher integration
-├── Frame / Activation Registry
-├── Stack Mutation Coordinator
-├── Frame Deadline / Failure Classifier
-├── Runtime Failure Unwind Coordinator
-├── Renderer Control Publisher
-├── DataAuthority Registry
-└── Platform Port Coordination
+├── LogicalGameBootstrap installer
+├── Runtime Registry / Launch Attempt authority
+├── Runtime Control integration
+├── Frame / Activation / Stack authority
+├── serialized mutation lane
+├── Runtime failure / fixed-point unwind
+├── Renderer authority projector                 // M7
+├── Renderer revision/current-participant state  // M7
+├── bounded optional Renderer candidate loop     // M7
+└── Platform capability coordination
 ```
 
-Core MUST NOT import：
+M7 **不得**新增：
 
 ```text
-@loomrealm/game-package
-GameEntryV1 / ValidatedGameEntryV1
-@loomrealm/game-launcher-hostra/pwa
-raw game.json parser
-raw Platform Launch Manifest
-filesystem/module resolver
-child_process / Worker
-WebSocket / MessagePort
+Renderer Runtime shadow registry
+Renderer Frame shadow registry
+Renderer InputTarget shadow state
+RendererAuthorityManager
+RendererControlPublisher framework
+ConnectionRegistry
+RendererHosting service
+DataAuthority allocator/policy
 ```
+
+M8 才增加真实 DataAuthority policy；M7 Snapshot 固定 `dataAuthorities=[]`。
 
 ---
 
@@ -61,385 +60,407 @@ interface LogicalGameBootstrap {
 }
 ```
 
-Main MUST validate only its own bootstrap invariants（例如 internal duplicate/declared-target defensive assertions if justified），但 MUST NOT重新执行 GameEntryV1 document validation or depend on `formatVersion`。
+Main MUST NOT重新执行 GameEntryV1 document validation，也不接收：
 
-The bootstrap contains no executable capability。
+```text
+formatVersion
+ValidatedGameEntryV1
+PlatformLaunchPlan
+module/path/URL
+Node/Worker/Runner options
+```
+
+Matching Platform PREPARE 已在 Main first side effect前闭合。
 
 ---
 
-## 3. Prepared Platform Boundary
+## 3. Main-facing Platform View Through M7
 
-Before Main physical Runtime bootstrap, matching Platform Launcher/Composition has already completed：
-
-```text
-Game Entry validation
-→ Platform Launch Manifest validation
-→ exact key-set join
-→ all executable resolution
-→ hosting/security capability preflight
-→ immutable PlatformLaunchPlan
-→ immutable LogicalGameBootstrap
-```
-
-Main starts from：
-
-```text
-LogicalGameBootstrap
-+
-session-scoped prepared concrete Platform instance
-    exposed through Main's narrow capability view
-```
-
-not from raw documents。
-
-Composition model：
-
-```ts
-const platform = createPwaPlatform(/* current environment/policy */);
-const prepared = await platform.prepareGame(source);
-
-await runMain({
-  bootstrap: prepared.logicalBootstrap,
-  platform,
-});
-```
-
-Main MUST NOT call `prepareGame()`；PREPARE belongs to product composition / concrete Platform before Main starts.
-
----
-
-## 4. Main-facing Platform Ports
-
-M5 已冻结并由真实 Main consumer 验证的 consumer-owned role-local view：
+M7 Frozen target：
 
 ```ts
 interface MainPlatform {
   readonly scheduler: DeadlineScheduler;
-  readonly bootstrapTokens: BootstrapTokenGenerator;
+  readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
+  readonly rendererControl?: RendererControlBinding;
 }
 ```
 
-`MainPlatform` 是 Main 当前需要的 capability bundle，不是 universal LoomRealm Platform contract。Concrete `HostraPlatform` / `PwaPlatform` MAY 是更大的 composition object，并 structural-satisfy 这个 view；`@loomrealm/main` 不依赖 concrete type。
+`MainPlatform` 是 consumer-owned narrow capability bundle，不是 universal Platform contract。
 
-Capability 按 milestone 增长：
+### M5 → M7 mechanical migration
 
 ```text
-M5
-    DeadlineScheduler
-    RuntimeHosting
-        → HostedRuntime
-            → Main-side Runtime Control establishment
-            → physical termination fact
-            → termination request capability
-
-M7
-    RendererHosting / Renderer Control binding
-
-M8/M9
-    DataConnectionBroker
+bootstrapTokens / BootstrapTokenGenerator
+→ opaqueMaterial / OpaqueMaterialGenerator
 ```
 
-Content 若没有 Main-owned Session-level authority，则不穿过 Main；它应由具体 Platform 直接投影到真实 role consumer。
+所有现有 Main/Hostra providers/fixtures 都必须迁移，但 Hostra Runtime-only composition 不需要 fake `rendererControl`。
 
-Ports provide physical capability/facts；Main仍拥有 application authority。
+### Optional Renderer capability
 
-Concrete Platform instance 已绑定 immutable PlatformLaunchPlan；其 `RuntimeHosting` capability 内部读取该 plan。Main 不需要 module resolver API。
+```text
+rendererControl absent
+→ no Renderer token/attempt
+→ Runtime/Frame Session fully valid
+
+rendererControl present
+→ Main MAY arm exactly one future candidate slot
+```
+
+`RendererControlBinding` 只建立 candidate carrier；不认证 token、不协商 version、不决定 currentness、不创建/显示 BrowserWindow。
 
 ---
 
-## 5. Logical Registry / Launch Boundary
-
-Main installation：
-
-```text
-LogicalGameBootstrap.subsystemKeys
-→ complete Subsystem Registry
-
-LogicalGameBootstrap.initial
-→ initial logical target/input
-```
-
-Then：
+## 4. Runtime Launch Boundary
 
 ```text
 create current Launch Attempt
-→ BootstrapTokenGenerator.generate()
-→ Main validates/registers token against key/attempt
-→ RuntimeHosting.launch({subsystemKey:key, bootstrapToken})
-→ accept Control carrier
-→ hello/identified/ready
+→ OpaqueMaterialGenerator.generate()
+→ Main validates/registers bootstrap credential
+→ RuntimeHosting.launch({subsystemKey, bootstrapToken})
+→ HostedRuntime
+→ Main-side Runtime Control
+→ identified / ready
 ```
 
-Main MUST NOT put module/path/URL/Node/Worker options into Launch Attempt application model。
+Main MUST NOT把 executable material放入 Launch Attempt。
 
 ```text
-launch != module loaded != connected != identified != ready
+launch != physical container created != connected != identified != ready
+ready != Renderer exists
 ready != Data current
 ```
 
 ---
 
-## 6. Runtime Control
+## 5. Runtime Control / HostedRuntime
+
+Runtime Control owns protocol mechanics；Main owns Runtime state/failure authority。
+
+M5 `RuntimeHosting.launch()` 返回 attempt-scoped `HostedRuntime`，自然绑定：
 
 ```text
-Control v1 + Frame v1 = Runtime Control Profile v1
-```
-
-Main-side integration：
-
-```text
-one Control carrier reader/dispatcher
-shared sender Request ID namespace
-one UTF-8 JSON text per JSON-RPC message
-no Batch
-```
-
-Control loss/ambiguity进入 Runtime failure，无 same-attempt reconnect。
-
----
-
-## 7. Frame / Activation Registry
-
-Guarantees：
-
-```text
-frameId never reused
-subsystemKey permanent
-caller immutable
-only active Frame has current Activation
-Activation never reused
-outcome/lifecycle separate
-```
-
-Main唯一 mint/revoke Activation。
-
-Executable module或 physical Runtime handle不参与 Frame identity。
-
----
-
-## 8. Stack Mutation Coordinator
-
-Normal transactions与 failure recovery共享 serial authority。
-
-```text
-Initial
-initialize ACK → activate fresh A ACK → publish target
-
-Call
-accept/revoke/suspend/push/null target
-→ call Response
-→ child initialize/activate
-→ ACK → publish child target
-
-Return
-accept outcome/revoke/closing/null target
-→ return Response
-→ close/pop
-→ fresh resume Caller ACK
-→ publish caller target
-```
-
-Response-before-dependent-RPC；ACK-before-publication。
-
----
-
-## 9. Failure Classifier / Unwind
-
-```text
-Success        → known commit
-Explicit Error → protocol-defined known no-commit/fatal
-Timeout/loss   → ambiguous
-```
-
-Ambiguous/divergence/protocol failure → Runtime failed；no retry/replay。
-
-Unwind：
-
-```text
-failedRuntimeKeys
-→ lowest live failed-runtime occurrence
-→ whole suffix doomed
-→ cleanup Top→Bottom
-→ fixed-point expansion
-→ preserve accepted outcome
-→ fresh healthy Caller resume or empty Stack
-```
-
-Platform Supervisor只能报告 physical facts，不能选择 unwind root。
-
----
-
-## 10. HostedRuntime / Physical Facts
-
-M5 `RuntimeHosting.launch({subsystemKey,bootstrapToken}, signal)` 返回一个 `HostedRuntime`，把同一 physical Runtime lifetime 的：
-
-```text
-Main-side Runtime Control establishment
+runtimeControl acquire
 requestTermination()
 terminated Promise
 ```
 
-自然关联在一起，不再需要平行 RuntimeControlHost/Supervisor handle registry。
+`terminated` resolve 才是 physical termination fact；request termination或 observation error都不等于 stopped。
 
-`terminated` 只有 **resolve** 才是 actual physical termination fact；rejection/observation failure 不得被解释为 stopped。`requestTermination()` 只请求终止，也不等于 stopped。
-
-M5 public port 暂不暴露 PID/Worker/exit code/signal 等 diagnostics；这些保持 Platform-local，直到真实 portable consumer 证明需要。
-
-No automatic restart；新 Runtime必须 fresh Launch Attempt/token/HostedRuntime/Control lifetime。
+No automatic Runtime restart；fresh Runtime = fresh Launch Attempt + fresh bootstrap credential + fresh HostedRuntime/Control lifetime。
 
 ---
 
-## 11. Renderer Control Publisher
+## 6. Frame / Stack / Activation Authority
 
-Only committed：
+Main guarantees：
 
 ```text
-Runtime projection
-Frame Stack / Activation
-InputTarget
-DataAuthority {subsystemKey,generation,dataProfile}
+frameId one-shot
+subsystemKey immutable per Frame
+caller immutable
+Stack bottom→top
+only active top Frame has current Activation
+activationId one-shot
+InputTarget derived from committed active top + Activation
 ```
 
-Never：
+Normal transactions与 failure recovery共享 serialized authority lane。
+
+Causal barriers保持 Frozen Frame v1：
 
 ```text
-GameEntryV1 / formatVersion
-Data endpoint/ticket/Port
-Platform provisioning handle
-PlatformLaunchPlan/module/path/URL
-Interest Registry
-Render State
-Content Grant
+Response-before-dependent-RPC
+ACK-before-publication
+post-commit no rollback
+ambiguous mutation failure → Runtime failure
 ```
 
 ---
 
-## 12. DataAuthority Registry
+## 7. Runtime Failure / Unwind
+
+Main alone computes：
+
+```text
+failedRuntimeKeys
+→ lowest live failed-runtime occurrence
+→ doomed whole suffix
+→ Top→Bottom cleanup
+→ fixed-point expansion
+→ fresh healthy Caller resume or empty Stack
+```
+
+Platform/Renderer不得自行推导 unwind root或恢复 revoked Activation。
+
+---
+
+## 8. M7 Renderer Authority Projection
+
+M7 Projector 是 pure function over committed Main facts：
+
+```text
+existing Runtime records
+existing live Frame Stack
+existing current Activation
+existing derived InputTarget
+M7 dataAuthorities=[]
+        ↓
+RendererAuthoritySnapshotV1
+```
+
+Projector不得拥有 transport、token、history或 parallel state。
+
+Runtime projection Frozen mapping：
+
+```text
+no RuntimeRecord                         → declared
+failure != null                          → failed
+physicallyTerminated && expected stop    → stopped
+starting                                 → starting
+connected                                → connected
+identified / initializing                → identified
+ready                                    → ready
+stopping                                 → stopping
+```
+
+Failure precedence > stopped。
+
+---
+
+## 9. AuthorityRevision / Commit Observation
+
+Session 初始化：
+
+```text
+fresh sessionId
+rendererRevision = 1
+capture initial Renderer-visible payload
+```
+
+所有 Renderer-visible mutation必须进入 existing serialized mutation discipline：
+
+```text
+commit business authority
+→ capture Renderer payload
+→ compare previous payload excluding revision
+→ changed ? revision++ : unchanged
+→ submit latest Snapshot to current Renderer peer if any
+```
+
+Connection/token/candidate bookkeeping本身不 bump revision。
+
+Main不得为 Renderer projection新增 EventBus / TransactionManager / StateReplicator。
+
+---
+
+## 10. M7 Candidate Slot / Current Renderer
+
+仅当 `platform.rendererControl` 存在且未 terminal：
+
+```text
+fresh Renderer token
+→ RendererControlBinding.acquire(token, signal)
+→ candidate MessageCarrier
+→ renderer-control Main peer validates hello/selects v1
+→ Main authority acceptance
+```
+
+Bounded state：
+
+```text
+one current Renderer peer
++
+one armed/pending/bound candidate attempt
+```
+
+Settlement：
+
+```text
+abort before acquire resolve
+→ cancel slot only
+
+non-abort acquire rejection
+→ Binding terminal for this Main Session
+→ no re-arm
+→ Runtime/Frame Session continues
+
+acquired candidate peer/protocol failure
+→ candidate attempt terminal only
+→ fresh slot MAY re-arm if Binding healthy
+```
+
+Main does not negotiate `protocolVersions`。
+
+---
+
+## 11. Hello Atomic Acceptance / Replacement
+
+Renderer-control peer选定 v1 后，在 Main serialized lane：
+
+```text
+require Session live + exact candidate
+validate exact issued token
+capture current Snapshot R
+exact prepare/preflight hello Result(R)
+
+preflight fail
+→ invalidate candidate
+→ old current unchanged
+
+preflight success
+→ consume token
+→ candidate becomes only current Renderer
+→ old peer synchronously retired from future publication
+→ commit R/prepared text
+```
+
+Transaction外发送 prepared hello text，并 request old carrier close。
+
+Already-started old send MAY later settle/arrive，但无 current-authority effect；不得为此创建 cancelable writer/Renderer epoch/heartbeat。
+
+---
+
+## 12. Renderer Control Failure / Session Terminal
+
+Current peer terminal：
+
+```text
+if peer === currentRendererPeer:
+    clear current peer
+else:
+    ignore stale terminal for currentness
+```
+
+Terminal alone不改变 Runtime/Frame authority，不 bump revision。
+
+Main Session terminal latch：
+
+```text
+stop fresh Renderer token/slot
+abort pending acquire
+invalidate pending token
+retire candidate/current peers
+stop publication
+```
+
+Renderer cleanup不延迟 Main Session result，也不是 Runtime shutdown coordinator。
+
+---
+
+## 13. Representation Isolation
+
+Renderer Control wire limits不是 Runtime/Frame business limits。
+
+```text
+unrepresentable candidate hello
+→ fail before current switch
+→ healthy old current stays
+
+unrepresentable later current Snapshot
+→ current Renderer Control terminal
+→ Main Runtime/Frame/Stack unchanged
+```
+
+No Frame depth cap、Runtime count cap、rollback、truncation或 Renderer-specific Frame error。
+
+---
+
+## 14. M8 DataAuthority Boundary
+
+M7 formal wire已经包含：
 
 ```ts
-interface DataAuthority {
+interface RendererDataAuthorityV1 {
   subsystemKey: string;
   generation: number;
   dataProfile: string;
 }
 ```
 
-Current Profile：
+但 M7 implementation：
 
 ```text
-loomrealm.renderer-data/1
+dataAuthorities = []
 ```
 
-Main负责 mint/increment generation、select profile、replace/revoke authority、publish through Renderer Control。
+M8 才实现：
 
-Profile change MUST fresh generation。
+```text
+allocation/revocation policy
+generation monotonicity
+profile selection
+Runtime replacement interaction
+Renderer/SubSystem Data binding integration
+```
+
+M9 Desktop Broker只实现 physical provisioning，不拥有 generation/profile。
 
 ---
 
-## 13. DataConnectionBroker Coordination
+## 15. Platform Physical Realization Placement
 
 ```text
-Main current DataAuthority(S,G,P)
-→ Platform DataConnectionBroker
-→ matching RendererDataBinding
-→ matching SubsystemDataBinding
+M6
+    Hostra RuntimeHosting / Node Runner / Runtime Control WS ✅
+
+M7
+    logical optional RendererControlBinding contract + MemoryCarrier vertical
+
+M14
+    Hostra BrowserWindow + Renderer Control WS + full Desktop composition
+
+M15
+    PWA Worker Runtime vertical
+
+M16
+    PWA Renderer Control MessagePort + Data Broker/bindings + Content + full equivalence
 ```
 
-Broker不拥有 generation/profile。
-
-Hostra可通过 Runner provisioning IPC；PWA可 transfer MessagePort。
-
-```text
-DataAuthority exists != carrier current
-Data loss/provision failure != Runtime failure/Frame unwind
-```
+Main-facing logical semantics在各 concrete Platform保持相同；PID/Worker/WS/MessagePort差异不进入 Main authority。
 
 ---
 
-## 14. Input / Render Boundary
+## 16. Qualification
 
-Main only owns：
+M5 baseline继续验证：Runtime bootstrap、nested call/return、same-runtime recursion、failure unwind、root outcome/shutdown、physical termination facts。
 
-```text
-Frame / Activation / InputTarget
-DataAuthority
-```
-
-Does not own：
+M7 新增：
 
 ```text
-Interest[F]
-Input Producer
-Render Domain State
+OpaqueMaterialGenerator provider migration + output contract
+rendererControl absent path
+one candidate slot bound
+hello/version ownership
+pure Snapshot/revision
+hello preflight/current-switch atomicity
+replacement + old inFlight semantics
+Binding rejection vs candidate failure
+Session terminal Renderer retirement
+representation isolation
+M7 dataAuthorities=[]
 ```
 
-Renderer ordinary input gate = Main authority × Frame Interest × Producer × current Data。
-
-Render Domain lifecycle由 Subsystem控制。
+Existing M6 Hostra e2e必须在 `bootstrapTokens→opaqueMaterial` 机械迁移后保持 green，且不新增 fake Renderer capability。
 
 ---
 
-## 15. Platform Realizations
-
-```text
-Hostra Desktop
-    RuntimeHosting        HostraLaunchPlan → Node Runner
-    RuntimeControlHost    WebSocket
-    RendererHosting       BrowserWindow
-    RendererControlHost   WebSocket
-    DataConnectionBroker  Data WS + Runner provisioning IPC
-
-PWA
-    RuntimeHosting        PwaLaunchPlan → Worker Runner
-    RuntimeControlHost    MessagePort
-    RendererHosting       Window
-    RendererControlHost   MessagePort
-    DataConnectionBroker  MessageChannel / Port transfer
-```
-
-Main-facing logical ports相同；Platform module artifact可不同。
-
----
-
-## 16. Tests
-
-M5 executable qualification 已使用 fake physical Platform + real Runtime Control + real Subsystem Host 验证：
-
-```text
-LogicalGameBootstrap defensive install
-Main public boundary has no Game Package/launcher/concrete Platform dependency
-required Runtime hello/identified/ready
-cross-Subsystem nested Frame call/return
-same-Subsystem recursion without reentrant deadlock
-recoverable undeclared target preserves current Activation
-child Runtime failure fixed-point unwind + fresh healthy Caller resume
-root Runtime loss does not re-enter stale business continuation
-duplicate bootstrap token fails closed
-root outcome / external abort graceful shutdown
-termination observation rejection is not physical termination proof
-```
-
-M7+ Renderer/Data tests remain future milestone gates and MUST NOT be used to weaken or reinterpret M5 closure.
-
----
-
-## 17. Final Invariants
+## 17. Final Invariants Through M7
 
 1. Main core platform-neutral；
-2. Main consumes `LogicalGameBootstrap`, not GameEntry/ValidatedGameEntry；
-3. Main has no `@loomrealm/game-package` or concrete launcher dependency；
-4. Main owns logical key registry, not executable binding；
-5. RuntimeHosting封闭绑定 PlatformLaunchPlan，Main launch request只投影 key + bootstrapToken；
-6. full Platform PREPARE在 Main physical Runtime bootstrap前闭合；
-7. Runtime Control = Control1 + Frame1；
-8. ready不携 Data/executable material；
-9. Frame/Stack mutation serial；
-10. ambiguous Runtime-fatal/no retry；
-11. failure unwind Main-only；
-12. stopped只来自 actual termination；
-13. DataAuthority = S/G/dataProfile；
-14. Broker/provisioning只实现 physical carrier；
-15. Data loss/provision failure不等于 Runtime/Frame failure；
-16. Main不拥有 Interest/Render Domain；
-17. Hostra/PWA document/module/Runner差异不进入 Main state。
+2. Main consumes LogicalGameBootstrap, not GameEntry/LaunchPlan；
+3. Main owns Runtime/Frame/Activation/InputTarget/Renderer currentness/revision；
+4. RuntimeHosting封闭 Platform executable plan；
+5. Runtime Control owns mechanics, not Main authority；
+6. Frame/Stack mutation serial；ambiguous mutation Runtime-fatal/no retry；
+7. failure unwind Main-only；
+8. stopped only from actual termination；
+9. M7 Renderer Snapshot is pure projection, no shadow authority；
+10. `RendererControlBinding` is optional Main-facing candidate carrier capability；
+11. protocol peer owns Renderer version negotiation；Main owns token/currentness；
+12. replacement actively retires old current but does not require send cancellation；
+13. Renderer Control representation failure cannot mutate Frame/Runtime authority；
+14. M7 DataAuthority implementation remains empty; real policy starts M8；
+15. Main does not own Interest/Render Domain or physical Renderer hosting。
