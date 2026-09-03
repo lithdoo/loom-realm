@@ -138,11 +138,19 @@ async function launchAttempt(
   const runtime = validateRequest(request, runtimes);
   const capability = randomBytes(32).toString("base64url");
   const capabilityPath = `/${capability}`;
+  let validConnectionClaimed = false;
   const server = new WebSocketServer({
     host: "127.0.0.1",
     port: 0,
     path: capabilityPath,
-    verifyClient: ({ req }, done) => done(req.url === capabilityPath),
+    verifyClient: ({ req }, done) => {
+      if (req.url !== capabilityPath || validConnectionClaimed) {
+        done(false);
+        return;
+      }
+      validConnectionClaimed = true;
+      done(true);
+    },
   });
   try {
     await listen(server);
