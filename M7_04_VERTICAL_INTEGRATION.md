@@ -5,30 +5,28 @@
 > 落地顺序：04  
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md) → [M7 / 02](M7_02_MAIN_AUTHORITY_PROJECTION.md) → [M7 / 03](M7_03_RENDERER_CONTROL_STORE.md)  
-> 目标：把 `@loomrealm/main`、`@loomrealm/renderer-control`、`@loomrealm/renderer` 通过 deterministic transport-independent carrier 组合成第一条真实 M7 vertical，并验证既有 Runtime/Frame semantics 在 Renderer mirror 中保持一致。
+> 目标：通过 deterministic MemoryCarrier 跑通真实 Main integration → renderer-control → Renderer role vertical，验证 causal/authority semantics；不引入 test-only authority bypass 或预测式 Platform abstraction。
 
 核心原则：
 
-> **M7/04 验证真实 consumer integration，但仍不把 Desktop BrowserWindow、PWA MessagePort、Data Broker 或 future Platform ports 提前带入。**
+> **MemoryCarrier 可以是假物理 transport，但 Main projection、peer、authentication/current-connection decision、Renderer application path 必须是真生产代码路径。**
 
 ---
 
 ## 1. Vertical Shape
 
-目标链路：
-
 ```text
 existing LogicalGameBootstrap
 → @loomrealm/main
-→ Main committed Runtime/Frame authority
-→ RendererAuthoritySnapshotV1
+→ existing Runtime/Frame/Stack authority
+→ real Main renderer projection/revision path
 → @loomrealm/renderer-control Main peer
-→ deterministic MessageCarrier<string>
+→ MemoryCarrier<string>
 → @loomrealm/renderer-control Renderer peer
-→ @loomrealm/renderer Control Store
+→ @loomrealm/renderer current Snapshot
 ```
 
-Subsystem side继续复用已存在的：
+Subsystem side继续复用真实：
 
 ```text
 Main
@@ -38,337 +36,277 @@ Main
 ↔ test business Definition
 ```
 
-因此完整测试拓扑是：
+---
+
+## 2. What May Be Fake
+
+测试可 fake：
 
 ```text
-Subsystem test runtime
-        ↕ Runtime Control
-       Main
-        ↓ committed authority projection
- Renderer Control Main peer
-        ↕ MemoryCarrier
- Renderer Control Renderer peer
-        ↓
- Renderer Control Store
+physical renderer transport
+physical BrowserWindow / Worker
+platform token delivery mechanism
 ```
+
+测试不得 fake：
+
+```text
+Main authority state
+AuthorityRevision
+Snapshot construction
+hello authentication decision
+current Renderer connection decision
+renderer-control peers
+Renderer current Snapshot application
+```
+
+禁止 harness 读取 Main private `stack` 后手工拼 Snapshot。
 
 ---
 
-## 2. Why MemoryCarrier First
+## 3. Ingress Must Be Production-shaped
 
-M7 要验证的是：
+M7 尚不预定义新的 `@loomrealm/platform-ports` renderer port。
 
-```text
-protocol mechanics
-Main authority projection
-Renderer atomic mirror
-cross-package causal ordering
-terminal semantics
-bounded publication
-```
+但 established MemoryCarrier 必须进入**真实 Main integration seam**，不能靠 test-only public API 或绕过 Main authority。
 
-不是：
+如果实现发现：
 
 ```text
-WebSocket handshake
-BrowserWindow lifecycle
-MessagePort transfer
-Hostra/PWA bootstrap plumbing
+无法把 established carrier 接入 live Main
+除非暴露 private authority
+或加入 test-only production API
 ```
 
-因此 first qualification 使用 `@loomrealm/foundation` deterministic memory carrier，复用 M3–M5 已验证的 semantic-first 方法。
+则停止实现，重新评估一个最窄的 Core↔Platform ingress capability。只有这个真实阻塞出现时才定义 exact port shape。
 
----
-
-## 3. No New Platform Port By Default
-
-M7/04 默认不扩展 `@loomrealm/platform-ports`。
-
-理由：
-
-```text
-renderer-control consumes already-established MessageCarrier<string>
-vertical test composition can create deterministic carrier directly
-no second concrete platform realization is required to close M7 semantics
-```
-
-只有在真实 Main/Renderer consumer 集成证明存在一个：
-
-```text
-Core ↔ Platform capability/fact
-with stable platform-neutral semantics
-```
-
-且无法合理留在 composition/test harness 时，才 reopen `platform-ports`。
-
-禁止提前定义：
+禁止预先创建：
 
 ```text
 RendererPlatform
-RendererControlHosting
 UniversalConnectionBroker
 PlatformRendererServices
+RendererHosting mega-interface
 ```
+
+这与 platform architecture 的原则一致：conceptual role-facing port 只有在真实 consumer closure 时才冻结 exact TypeScript shape。
 
 ---
 
-## 4. Integration Composition Ownership
+## 4. Integration Composition
 
-M7 test/integration composition负责：
+M7 test composition只负责：
 
 ```text
-construct Main
-construct renderer-control peers
-construct Renderer role
-connect deterministic carriers
-supply Main-owned rendererControlToken auth callback/decision
-start/stop participants in deterministic order
-capture terminal outcomes
+construct real Main
+construct real Renderer role
+create deterministic carrier pair
+supply physical bootstrap glue needed to reach production integration seam
+start/stop participants
+observe results
 ```
 
-这些 glue 若只有测试使用，应保留 test-local。
-
-不要把 one-off composition glue发布成 capability package。
+测试 glue 如果没有独立产品语义，就保持 test-local，不发布 capability package。
 
 ---
 
-## 5. Initial Hello Scenario
+## 5. Initial Hello
 
-第一条必须通过的真实链路：
+第一条真实链路：
 
 ```text
-Main Session exists
-→ Main owns current committed Snapshot R
-→ Renderer obtains attempt token from test composition
-→ renderer peer sends renderer.hello
-→ Main auth accepts/consumes token
-→ Main peer returns protocolVersion=1 + Snapshot R
+Main Session has current committed Snapshot R
+→ fresh rendererControlToken owned by Main
+→ Renderer peer sends renderer.hello(id=1)
+→ Main authenticates/consumes token
+→ Main peer returns Snapshot R
 → Renderer peer validates
-→ Renderer atomically installs Snapshot R
+→ Renderer role installs accepted Snapshot R
 ```
 
 验证：
 
 ```text
-hello is first application message
+hello first
 one successful token consumption
-hello Result precedes later renderer.state
-initial Snapshot exactly equals Main committed projection
+hello Result before renderer.state
+Renderer Snapshot equals Main real projection
 ```
 
 ---
 
-## 6. Runtime Lifecycle Trace
+## 6. Runtime Lifecycle Projection
 
-复用真实 Main Runtime lifecycle：
-
-```text
-declared
-→ starting
-→ connected
-→ identified
-→ ready
-```
-
-每次 Renderer-visible commit：
+覆盖 Main real mapping：
 
 ```text
-Main revision advances
-→ latest full Snapshot eligible for publication
-→ Renderer eventually observes a newer complete Snapshot
+bootstrap key not yet materialized → declared
+starting → starting
+connected → connected
+identified / initializing → identified
+ready → ready
+stopping → stopping
+expected termination observed → stopped
+failure → failed
 ```
 
-允许 coalescing；测试不得要求观察每个 intermediate revision。
+测试比较 Main projector output 与 Renderer current Snapshot；不得创建第二套 expected renderer lifecycle state machine。
 
-最终 Renderer state必须等价于 Main current committed state。
+允许 publication coalescing，不要求观察全部 intermediate revisions。
 
 ---
 
-## 7. Initial Frame Trace
+## 7. Frame / Activation Traces
 
-验证：
+### Initial Frame
 
 ```text
-initial Frame starting
-→ frame.initialize completes
-→ frame.activate ACK accepted
+starting
+→ initialize success
+→ activate Response accepted
 → Main commits active + fresh activationId
-→ InputTarget may become non-null
-→ Renderer receives complete committed state
+→ projection may expose InputTarget
 ```
 
-断言：
+### frame.call
 
 ```text
-Renderer never observes InputTarget for unacknowledged Activation
-active Frame and InputTarget identities match exactly
-```
-
----
-
-## 8. frame.call Trace
-
-真实业务 Definition 触发 call：
-
-```text
-Caller active
-→ Main begins call transaction
-→ caller suspension / InputTarget revocation commits as defined
-→ child Frame starts
-→ child activate ACK
+caller active
+→ Main commits suspended caller / revoked old Activation
+→ child starts
+→ child activate Response accepted
 → Main commits child active + fresh Activation/InputTarget
-→ Renderer mirrors committed results
 ```
 
-Renderer不得：
+### frame.return
 
 ```text
-interpret "call" command
-predict child
-retain old caller InputTarget
+child closing/removal commit
+→ caller resume Response accepted
+→ Main commits caller active + fresh Activation/InputTarget
 ```
 
-测试应比较 Main committed Snapshot 与 Renderer Store，而不是比较命令事件序列。
+验证 lifetime Main invariant：旧 `frameId + activationId` 永不 regrant。该断言来自 Main trace，不要求 Renderer peer 保存历史 Set。
 
 ---
 
-## 9. frame.return Trace
+## 8. Runtime Failure / Unwind
+
+复用 M5 failure scenario：
 
 ```text
-Child active
-→ child return
-→ Main commits child close/removal
-→ caller resume handshake
-→ fresh caller Activation ACK
-→ Main commits caller active + fresh InputTarget
-→ Renderer mirrors result
-```
-
-验证旧 caller `frameId + old activationId` 永不重新成为 authority。
-
----
-
-## 10. Runtime Failure / Unwind Trace
-
-利用 M5 已有 failure scenario：
-
-```text
-Runtime fails
-→ Main first-wins failure cause
+Runtime failure
+→ Main first-wins failure authority
 → fixed-point unwind
-→ committed final Runtime/Stack/InputTarget state
-→ Renderer Control publishes resulting Snapshot(s)
-→ Renderer Store matches final committed authority
+→ committed current state
+→ renderer projection/publication
+→ Renderer current Snapshot converges
 ```
 
-Renderer side没有 unwind algorithm。
+Renderer side无 unwind algorithm。
 
 ---
 
-## 11. DataAuthority Logical Trace
+## 9. DataAuthority Scope in M7
 
-M7 可使用 synthetic/logical DataAuthority 来验证 Renderer Control projection，无需建立 Data carrier。
-
-至少验证：
+Main M7 vertical固定：
 
 ```text
-authority appears
-generation replacement
-profile replacement requires fresh generation
-authority disappears
-control loss invalidates usability
+dataAuthorities = []
 ```
 
-不得在测试里为了“完整”而实现 M8 DataConnectionBroker。
+不要构造 synthetic Main DataAuthority allocator/generation policy。
+
+非空 DataAuthority 只在：
+
+```text
+renderer-control package fixtures
+renderer role accepted-Snapshot fixtures
+```
+
+验证 representation/atomic storage。真实 Main DataAuthority add/replace/revoke trace进入 M8。
 
 ---
 
-## 12. Connection Replacement / Reload
+## 10. Connection Replacement
 
-Scenario：
+需要验证真实 Main current-connection decision：
 
 ```text
-Renderer connection A current
-→ fresh token + connection B hello
-→ B becomes current
-→ A stops receiving publication
-→ B receives current full Snapshot
+connection A current
+→ fresh token + connection B successful hello
+→ B current
+→ A no longer receives valid publication
+→ Renderer role ignores old peer output
 ```
 
-不 replay A 缺失的 revisions。
+不 replay A 缺失 revisions。
 
-Renderer role应建立新 current authority universe/connection context，而不是尝试 merge old connection history。
+如果完成这个 trace 必须手工改 Main private state，则 ingress/current-connection boundary 尚未关闭，M7/04 不得通过。
 
 ---
 
-## 13. Slow Consumer / Coalescing
+## 11. Slow Consumer / Bounded Publication
 
-制造 blocked/slow writer：
+制造：
 
 ```text
-Snapshot R in-flight
+R in-flight
 R+1 pending
 R+2 committed
 R+3 committed
 ```
 
-允许：
-
-```text
-unsent R+1 replaced by R+3
-```
-
-目标 invariant：
+必须观察实现状态仍为：
 
 ```text
 0..1 in-flight
 +
-at most one latest unsent Snapshot
+0..1 pendingLatest
 ```
 
-Renderer最终获得合法 latest complete state；不要求接收每个 revision。
+`R+1` 可被 `R+3` 替换。不能出现按 revision 增长的 queue/history/listener。
 
 ---
 
-## 14. Terminal Scenarios
+## 12. Terminal Scenarios
 
 至少覆盖：
 
 ```text
 carrier closes during hello
-carrier closes after current
-invalid Renderer hello
-invalid inbound JSON/schema
-Main-side publication failure
-Renderer-side invalid Snapshot
-connection replaced while write pending
+carrier closes while current
+invalid hello
+invalid inbound Snapshot/wire
+publication failure
+connection replacement while write pending
 ```
 
 要求：
 
 ```text
 terminal first-wins
+pending settles
 no retry/replay
-pending work settles
-Renderer authority fails closed when proof is lost
+current Renderer peer terminal → Renderer currentSnapshot=null
 no unbounded task/listener leak
 ```
 
 ---
 
-## 15. Package Graph Check
+## 13. Correct Package Dependency Direction
 
-M7/04 后预期新增 dependency direction：
+M7 target：
 
 ```text
 foundation ─────┐
-wire ───────────┼→ renderer-control
-                │
-renderer-control → main
-renderer-control → renderer
+wire ───────────┴→ renderer-control
+
+main ─────────────→ renderer-control
+renderer ─────────→ renderer-control
 ```
 
-更准确的 package dependency graph 要服从实际 `package.json`，但必须保持：
+必须保持：
 
 ```text
 renderer-control !→ main
@@ -377,69 +315,56 @@ renderer !→ main
 main !→ renderer
 ```
 
-不要形成 role package cycle。
+不要形成 role cycle。
 
 ---
 
-## 16. Root Scripts / CI
+## 14. CI Shape
 
-只有在真实 package 实现出现后，再增加对应脚本，例如：
-
-```text
-test:renderer-control
-test:renderer
-```
-
-CI 应分别覆盖：
+真实实现出现后分别保留：
 
 ```text
-renderer-control package conformance
-main package Renderer projection tests
-renderer package Control Store tests
-M7 cross-package vertical
+renderer-control package tests
+main projection tests
+renderer role tests
+M7 vertical tests
 ```
 
-不要把 M7 测试全部塞进一个巨型 root E2E，使 package-local failure 难以定位。
+不要把全部行为塞进单一巨型 E2E。
 
 ---
 
-## 17. Physical Platform Deferred
+## 15. Physical Platform Deferred
 
-M7/04 明确不关闭：
+M7/04 不关闭：
 
 ```text
-Desktop BrowserWindow Renderer bootstrap
-Hostra Renderer Control WebSocket adapter
-PWA Renderer bootstrap
-MessagePort transfer
-actual platform token delivery UI/process boundary
+Desktop BrowserWindow bootstrap
+Hostra Renderer Control WebSocket
+PWA MessagePort bootstrap
+physical token delivery
+Data Broker
 ```
 
-这些能力在出现对应 product composition milestone 时落地。
-
-如果后续 phase plan 明确要求 M7 就包含某个 physical Renderer Control slice，应单独新增后续编号文档，而不是污染当前 protocol/role qualification。
+M7 的目标是 protocol/role semantics。物理产品 integration 后续由真实 Hostra/PWA consumer 再关闭。
 
 ---
 
-## 18. Step Closure
+## 16. Step Closure
 
 M7/04 complete when：
 
 ```text
-Main ↔ renderer-control ↔ Renderer real consumers run together
+real Main projection path → real Main peer works
+real Renderer peer → real Renderer current Snapshot works
+no test manually constructs authority Snapshot
 initial hello works
-Runtime lifecycle projection works
-initial Frame works
-call/return works
-failure/unwind result projection works
+Runtime lifecycle mapping works
+call/return/fresh Activation traces work
+failure/unwind projection works
 connection replacement works
-slow consumer remains bounded
-terminal behavior is deterministic
-no physical platform dependency is required for semantic qualification
-```
-
-完成后进入：
-
-```text
-M7_05_QUALIFICATION_CLOSURE.md
+slow consumer remains structurally bounded
+terminal behavior deterministic
+package dependency direction is correct
+no speculative Platform abstraction was added
 ```
