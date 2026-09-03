@@ -113,11 +113,21 @@ interface OpaqueMaterialGenerator {
 }
 ```
 
-每个 successful call MUST返回 fresh/high-entropy/opaque string material。
+每个 successful call MUST 返回：
 
-Generator不拥有 Session identity semantics、Runtime attempt authority、Renderer currentness、credential registration/binding/consumption。Main 对每种用途独立调用，禁止同一值复用不同语义。
+```text
+ASCII string
+1..128 bytes
+fresh for the concrete Platform/Session lifetime
+at least 128 bits of unpredictability for security-sensitive uses
+opaque to callers
+```
 
-不是 identity service/token registry/crypto facade。
+Main 对 Session identity、Runtime bootstrap credential、Renderer Control credential分别独立调用；不得复用同一值。
+
+Generator不拥有 Session identity semantics、Runtime attempt authority、Renderer currentness、credential registration/binding/consumption。Main 对每种用途仍做 formal representation validation。
+
+不是 identity service/token registry/kind-dispatch factory/crypto facade；不得为了三个用途增加 `generate(kind)` 或多个语义化 generator interface。
 
 ---
 
@@ -161,7 +171,19 @@ Platform MUST NOT expose it as a live Renderer Control participant
 Platform rejects/closes/discards it according to product policy
 ```
 
-Abort-before-resolution：slot canceled；late candidate/carrier不得成为 live result，Platform close/discard。
+Settlement semantics：
+
+```text
+AbortSignal abort before resolution
+→ cancel only this slot
+→ late candidate/carrier MUST NOT be delivered as a live result
+
+non-abort acquire rejection
+→ this RendererControlBinding is terminal for the owning Main Session
+→ consumer MUST NOT call acquire again in that Session
+```
+
+Binding无需 typed error hierarchy。Carrier成功 acquire 后的 protocol/peer failure不等于 Binding terminal。
 
 这允许 Main 在 current Renderer存在时预挂下一 slot而不会自动产生 replacement。
 
@@ -210,7 +232,7 @@ Main owns：Session identity、Runtime attempt、all credential semantics、Rend
 
 `RendererControlBinding` MUST NOT parse `renderer.hello/state`、encode JSON-RPC、validate Snapshot/revision、negotiate version、own current Renderer或 coalesce publication。
 
-Binding只建立/等待一个 candidate physical carrier；Main + renderer-control决定其 semantic fate。
+Binding只等待/建立一个 candidate physical carrier；Main + renderer-control决定其 semantic fate。
 
 ---
 
@@ -232,7 +254,20 @@ M14 Hostra Renderer physical realization
 M16 PWA Renderer physical realization
 ```
 
-M7 tests MUST prove：one slot→one candidate、acquire may remain pending without creating replacement、no-slot extra candidate gets no token/live carrier、abort/no-late-live-carrier、Main one-candidate usage、capability absence needs no fake Binding。
+M7 tests MUST prove：
+
+```text
+OpaqueMaterialGenerator output bound + independent values
+one slot → one candidate
+acquire may remain pending without creating replacement
+no-slot extra candidate gets no token/live carrier
+already-bound slot extra candidate gets no token/live carrier
+abort → no late live result
+non-abort acquire rejection → Binding terminal for Session / no re-acquire
+carrier-acquired peer failure does not falsely terminalize Binding
+Main one-candidate usage
+capability absence needs no fake Binding
+```
 
 ---
 
@@ -253,12 +288,11 @@ BootstrapTokenGenerator → OpaqueMaterialGenerator
 Frozen M7 additions/refinement：
 
 ```text
-OpaqueMaterialGenerator
+OpaqueMaterialGenerator common output contract
 RendererControlBinding candidate-slot semantics
+abort cancellation vs non-abort terminal rejection
 optional capability availability in MainPlatform
 Binding owns no protocol/authority
 ```
 
-Still deferred：M8 Data bindings/Broker、Content ports、physical Renderer transport implementation details。
-
-Any change to M7 Binding/slot/optionality semantics requires ADR 0027 reopen。
+除 ADR 0027 Reopen Rule外，不允许实现阶段新增 kind-specific random service、Binding error framework、connection registry或 Renderer mega-port。
