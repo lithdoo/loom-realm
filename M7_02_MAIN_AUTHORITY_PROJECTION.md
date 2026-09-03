@@ -6,7 +6,7 @@
 > 最近复核：2026-09-03  
 > 前置：[M7 / 01](M7_01_RENDERER_CONTROL_PACKAGE.md)  
 > 冻结决策：[ADR 0027](doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 目标：让 `@loomrealm/main` 从既有 Runtime/Frame/Stack authority 纯投影 Renderer Snapshot，并关闭 Session identity、revision、optional RendererControlBinding candidate-slot lifecycle、hello atomicity、replacement 与 Session terminal；不得建立 shadow authority。
+> 目标：让 `@loomrealm/main` 从既有 Runtime/Frame/Stack authority 纯投影 Renderer Snapshot，并关闭 Session identity、revision、optional `RendererControlBinding` candidate-slot lifecycle、hello atomicity、replacement 与 Session terminal；不得建立 shadow authority。
 
 > **Main 现有 Runtime/Frame/Stack 状态始终是事实源。M7 增加的只是 pure projection + bounded Renderer connection bookkeeping。**
 
@@ -14,7 +14,7 @@
 
 ## 1. Frozen Scope
 
-修改 `@loomrealm/main` + `@loomrealm/platform-ports` M7 slice；Main新增 `@loomrealm/renderer-control` runtime dependency。
+修改 `@loomrealm/main` + `@loomrealm/platform-ports` M7 slice；Main 新增 `@loomrealm/renderer-control` runtime dependency。
 
 不改变 Runtime Control / Frozen Frame semantics，不新增 public Main Session controller 或 universal Renderer hosting interface。
 
@@ -52,21 +52,21 @@ rendererControl present
 → Main may arm the frozen bounded candidate slot
 ```
 
-不得给 M6 Hostra/headless composition加 fake/no-op Binding。
+不得给 M6 Hostra/headless composition 加 fake/no-op Binding。
 
 ---
 
 ## 3. Candidate Slot Semantics
 
-Main每次 `rendererControl.acquire(T, signal)` 只表示：
+每次 `rendererControl.acquire(T, signal)` 只表示：
 
 ```text
-arm one slot for the next physical candidate using token T
+arm exactly one slot for the next physical candidate using token T
 ```
 
-它 MAY长期 pending；**调用 acquire 本身不表示 Platform应该立即创建/显示一个新 Renderer，也不表示 replacement 已发生。**
+它 MAY 长期 pending；**调用 `acquire` 本身不创建/显示 Renderer，也不发生 replacement。**
 
-Binding只在 Platform实际有 candidate时绑定至该 slot并返回 carrier。
+Binding 只在 Platform 实际有 candidate 时绑定该 slot 并返回一个 already-established `MessageCarrier<string>`。
 
 Main 同时最多：
 
@@ -76,9 +76,32 @@ one current Renderer peer
 one armed/pending/bound candidate attempt
 ```
 
-Current A存在时，Main MAY预挂 next slot等待未来 reload/replacement candidate；pending slot不改变 A currentness。
+Current A 存在时，Main MAY 预挂 next slot 等待未来 reload/replacement candidate；pending slot 不改变 A currentness。
 
-如果没有 Binding或没有 candidate，Runtime/Frame业务继续运行。
+如果没有 Binding 或没有 candidate，Runtime/Frame 业务继续运行。
+
+### Acquire settlement — frozen
+
+```text
+Promise resolves with MessageCarrier
+→ slot has exactly one bound physical candidate
+→ protocol attempt begins
+
+slot AbortSignal aborts before resolution
+→ ordinary slot cancellation
+→ no late live carrier may be delivered
+
+Promise rejects for any non-abort reason
+→ RendererControlBinding is terminal for this Main Session
+→ invalidate the slot/token
+→ do not arm another Renderer slot in this Session
+→ current Renderer, if any, is not revoked solely by Binding rejection
+→ Runtime/Frame Session continues
+```
+
+这避免 typed Binding error hierarchy、retry policy 或第二个 Binding state machine。
+
+一个 carrier 已经成功 acquire 之后发生的 bad hello、unsupported version、hello send failure 或 carrier terminal 属于**candidate protocol attempt terminal**；Session 仍 live 且 Binding 未 terminal 时 MAY 使用 fresh token arm 下一 slot。
 
 ---
 
@@ -92,15 +115,33 @@ interface OpaqueMaterialGenerator {
 }
 ```
 
-Main 独立取得 Session `sessionId` material、Runtime bootstrap token、Renderer Control token。每次 fresh；不得跨语义复用。
+每个 successful `generate()` 的共同冻结输出契约：
 
-Platform只生成 material；Main拥有 identity/credential registration/binding/currentness/consume/invalidate。无 compatibility alias。
+```text
+ASCII string
+1..128 bytes
+fresh for the concrete Platform/Session lifetime
+at least 128 bits of unpredictability for security-sensitive uses
+opaque to Platform/Core consumers
+```
+
+这个共同范围同时满足当前三个真实 consumer：
+
+```text
+Session sessionId
+Runtime bootstrap token
+Renderer Control token
+```
+
+Main 对不同语义必须独立调用；不得复用同一值。Main 仍按各自 formal contract 做防御性表示验证。
+
+Platform 只生成 material；Main 拥有 identity/credential registration/binding/currentness/consume/invalidate。无 compatibility alias、kind parameter、identity service、token registry 或 generic Crypto API。
 
 ---
 
 ## 5. Minimal Main State
 
-允许：
+允许长期状态：
 
 ```text
 sessionId
@@ -108,9 +149,10 @@ rendererRevision
 last committed Renderer payload/Snapshot
 currentRendererPeer | null
 at most one candidate-slot token + AbortController/attempt state
+rendererBindingTerminal boolean/fact only if Binding has rejected
 ```
 
-禁止 Renderer Runtime/Frame/InputTarget shadow registry、RendererAuthorityManager、ProjectionFramework、ConnectionRegistry。
+`rendererBindingTerminal` 可以由 accept-loop control flow 表达，不要求独立字段。禁止 Renderer Runtime/Frame/InputTarget shadow registry、RendererAuthorityManager、ProjectionFramework、ConnectionRegistry。
 
 Existing `runtimes/frames/stack/currentActivationId/currentInputTarget()` remain single business source of truth。
 
@@ -118,7 +160,7 @@ Existing `runtimes/frames/stack/currentActivationId/currentInputTarget()` remain
 
 ## 6. Session Initialization / Revision
 
-无论 Renderer capability是否存在：
+无论 Renderer capability 是否存在：
 
 ```text
 generate + validate fresh sessionId
@@ -129,7 +171,7 @@ currentRendererPeer = null
 
 Revision advances exactly on committed Renderer-visible payload change；compare payload excluding `revision` itself；capability/connection/candidate/terminal bookkeeping不 bump。
 
-Visible commit在无 Renderer时仍推进 revision。
+Visible commit 在无 Renderer 时仍推进 revision。
 
 ---
 
@@ -178,7 +220,7 @@ Bootstrap visible lifecycle assignments也进入该 boundary。No EventBus / Tra
 
 ## 9. Candidate Slot Loop
 
-仅当 `platform.rendererControl` 存在时：
+仅当 `platform.rendererControl` 存在且 Binding 尚未 terminal：
 
 ```text
 armCandidateSlot():
@@ -189,10 +231,15 @@ armCandidateSlot():
     create renderer-control Main peer
     await typed hello/terminal outcome
 
-on attempt settle:
+on acquired protocol attempt settle:
     invalidate attempt token if not already consumed
-    if Session live:
+    if Session live && Binding not terminal:
         arm exactly one fresh next slot
+
+on non-abort acquire rejection:
+    invalidate token/slot
+    latch Renderer Binding terminal for this Session
+    arm no further slots
 ```
 
 Rules：
@@ -201,12 +248,11 @@ Rules：
 one slot maximum
 arming a slot does not create/replace Renderer
 current Renderer may coexist with pending next slot
-attempt settle → fresh token for next slot
+protocol attempt settle → fresh token for next slot
+Binding acquire rejection → no fresh slot
 no protocol retry/replay
 pending slot never blocks Runtime/Frame business
 ```
-
-Binding physical capability terminal可停止 further Renderer attempts，但不升级为 Runtime/Frame failure。
 
 ---
 
@@ -221,7 +267,7 @@ select supported protocolVersion=1
 unsupported-version terminal
 ```
 
-Main接收 already-selected v1 typed fact + candidate token/identity。
+Main 接收 already-selected v1 typed fact + candidate token/identity。
 
 Main MUST NOT parse/choose `protocolVersions`。
 
@@ -252,9 +298,9 @@ preflight success:
 
 Outside transaction：send prepared text verbatim + request old close。
 
-R+1 after acceptance goes to candidate pendingLatest and cannot be lost/sent before hello Result。
+R+1 after acceptance goes to candidate `pendingLatest` and cannot be lost/sent before hello Result。
 
-Hello send failure：candidate terminal；old not resurrected；next fresh slot may be armed while Session live。
+Hello send failure：candidate terminal；old not resurrected；next fresh slot MAY be armed while Session live and Binding not terminal。
 
 ---
 
@@ -291,7 +337,7 @@ retire current peer if any
 stop publication
 ```
 
-Renderer cleanup不延迟 Main Session result/Runtime cleanup。Capability absent时为空操作。No final session-ended RPC。
+Renderer cleanup不延迟 Main Session result/Runtime cleanup。Capability absent或 Binding 已 terminal 时为空操作。No final session-ended RPC。
 
 ---
 
@@ -301,12 +347,17 @@ Renderer cleanup不延迟 Main Session result/Runtime cleanup。Capability absen
 
 ```text
 fresh sessionId + revision=1
+OpaqueMaterialGenerator common output bound + independent values
 visible commit exact revision behavior
 rendererControl absent → no slot/no token + Session functional
 Binding present → at most one slot
 acquire may remain pending without creating replacement
 current A + pending next slot leaves A current
 slot bind returns exactly one candidate
+abort-before-resolution has no late live carrier
+non-abort acquire rejection terminalizes Binding for Session and stops re-arm
+Binding rejection does not revoke healthy current Renderer or fail Runtime/Frame
+carrier-acquired protocol terminal may re-arm fresh slot when Binding remains healthy
 renderer-control peer owns version negotiation
 Main does not renegotiate
 hello preflight before switch
@@ -329,7 +380,8 @@ M7/02 implementation must produce：
 ```text
 optional MainPlatform Renderer capability
 one armed candidate-slot model when capability exists
-OpaqueMaterialGenerator migration
+explicit acquire cancellation vs Binding-terminal rejection semantics
+OpaqueMaterialGenerator common output contract + migration
 pure projection/revision discipline
 protocol-owned negotiation
 hello preflight/current-switch atomicity
@@ -338,4 +390,4 @@ Session terminal cleanup
 representation isolation
 ```
 
-Changing candidate-slot meaning、optionality、negotiation ownership、current-switch ordering or Session terminal semantics requires ADR 0027 reopen。
+Changing candidate-slot meaning、Binding rejection semantics、material output bound、optionality、negotiation ownership、current-switch ordering or Session terminal semantics requires ADR 0027 reopen。
