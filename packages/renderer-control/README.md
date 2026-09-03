@@ -2,4 +2,7 @@
 
 Transport-independent LoomRealm Renderer Control protocol mechanics.
 
-M7 implementation is not started yet. Package ownership, boundaries and implementation constraints are tracked in [DESIGN.md](./DESIGN.md); the formal wire contract remains [Main ⇄ Renderer Control Protocol v1](../../doc/15-contracts/main-renderer-control-v1.md).
+The package is currently an M7 scaffold with an active design draft; protocol implementation has not started yet.
+
+- Package design: [DESIGN.md](./DESIGN.md)
+- Formal wire contract: [Main ⇄ Renderer Control Protocol v1](../../doc/15-contracts/main-renderer-control-v1.md)
