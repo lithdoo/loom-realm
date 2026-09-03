@@ -13,8 +13,7 @@
     }
   },
   "files": [
-    "dist",
-    "DESIGN.md"
+    "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json"
