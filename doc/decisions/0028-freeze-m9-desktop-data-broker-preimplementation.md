@@ -28,11 +28,13 @@ M9 必须把这些 logical seam 落到真实 Hostra physical path，同时避免
 3. 为未来 PWA/M10/M11预建 generic connection/event/retry framework。
 ```
 
-首次实现前评审还暴露两个必须关闭的歧义：
+首次实现前评审进一步关闭四个 implementation-time 歧义：
 
 ```text
 DataConnectionAuthoritySink.replace() 若可抛异常，会把 Platform adapter异常带回 Main mutation；
-Runner IPC commit 若与 Broker installation混为一个原子点，会产生 post-install send failure 的半提交/rollback歧义。
+Runner IPC commit 若与 Broker installation混为一个原子点，会产生 post-install send failure 的半提交/rollback歧义；
+Runner/Broker 若允许“reject 或 supersede”两种 pending-candidate策略，会把 winner policy泄漏到两层；
+committed-undelivered Data carrier若允许无界 queue，会在合法 delayed acquire 窗口产生资源失控。
 ```
 
 本 ADR 关闭这些问题并冻结 M9 first implementation boundary。
@@ -73,7 +75,24 @@ Main 在已有 serialized authority lane 内做 full replacement。`replace(null
 
 ---
 
-## 2. `replace()` 必须同步、非阻塞、不可抛异常
+## 2. Published Authority View 是不可变 Snapshot
+
+每个 non-null `DataConnectionAuthorityView` 必须是 fresh publication snapshot：
+
+```text
+view object immutable after publication
+entries array detached from mutable Main containers and immutable after publication
+entry scalar/reference fields immutable
+HostedRuntime preserved by exact reference identity
+```
+
+`HostedRuntime` 自身不由 M9 clone/freeze；其 object identity 就是 physical Runtime correlation。
+
+`replace(view)` 返回后，不允许通过修改 view/entries containers 改变该次已发布 authority。No authority history/event log is introduced。
+
+---
+
+## 3. `replace()` 必须同步、非阻塞、不可抛异常
 
 Frozen semantics：
 
@@ -98,7 +117,7 @@ Throwing provider is non-conforming and fails qualification；M9 does not create
 
 ---
 
-## 3. Current Renderer Correlation Reuses the Accepted Token Value Only as Inert Identity
+## 4. Current Renderer Correlation Reuses the Accepted Token Value Only as Inert Identity
 
 M7 Renderer Control token T remains a one-shot authentication credential：
 
@@ -124,7 +143,7 @@ ADR 0027 Renderer currentness/authentication semantics remain unchanged。
 
 ---
 
-## 4. Exact Runtime Identity Uses Existing `HostedRuntime` Object Identity
+## 5. Exact Runtime Identity Uses Existing `HostedRuntime` Object Identity
 
 Main already owns the exact `HostedRuntime` returned for each current Runtime attempt。M9 sends that exact object in `DataConnectionAuthorityEntry.runtime`。
 
@@ -137,7 +156,7 @@ No PID/Worker ID/runtimeInstanceId is added to application wire or Main logical 
 
 ---
 
-## 5. Desktop Broker Lives in `apps/desktop`
+## 6. Desktop Broker Lives in `apps/desktop`
 
 M9 creates the first real Desktop composition workspace：
 
@@ -156,7 +175,49 @@ Broker does not move into Main、Renderer、Subsystem、Data protocol package or
 
 ---
 
-## 6. Hostra Launcher Exposes Only Runtime-scoped Provisioning Mechanics
+## 7. Broker Slot Storage 是 Per-S 且严格有界
+
+Formal Connection cardinality remains：
+
+```text
+(Session, current Renderer participant, subsystemKey)
+→ 0..1 current Data Connection
+```
+
+Because a Session has only one current Renderer participant, M9 Desktop production storage is exactly：
+
+```text
+Map<S, Slot>
+
+Slot:
+    0..1 current pair
+    0..1 pending candidate
+```
+
+Exact candidate/current identity still contains：
+
+```text
+renderer token T
+HostedRuntime R
+S/G/P
+```
+
+`T` is not used as a second registry namespace。
+
+Same-S second candidate request while `pending` exists：
+
+```text
+newcomer rejects/disposes
+existing pending remains unchanged
+```
+
+If Broker wants different pending work, it explicitly invalidates/disposes the old pending candidate first, then starts the new one。No multi-pending queue/scheduler。
+
+Frozen Data Connection v1 permits multiple establishment attempts but does not require them；this stricter state bound is conforming and removes unnecessary winner-state complexity。
+
+---
+
+## 8. Hostra Launcher Exposes Only Runtime-scoped Provisioning Mechanics
 
 `@loomrealm/game-launcher-hostra` owns the Node child and therefore adds：
 
@@ -190,7 +251,30 @@ M6/headless callers omit the hook and remain unchanged。
 
 ---
 
-## 7. Provisioning IPC Is Hostra-private and Separate from Runtime/Data Application Protocols
+## 9. Provisioner 不拥有 Candidate Winner Policy
+
+Runner provisioning layer is bounded to：
+
+```text
+0..1 prepared uncommitted candidate
+0..1 committed current-deliverable carrier
+0..1 SubsystemDataBinding waiter
+```
+
+If `prepare(C2)` arrives while `C1` is prepared-uncommitted：
+
+```text
+reject C2
+keep C1
+```
+
+Provisioner MUST NOT implicitly supersede C1。Desktop Broker must revoke/invalidate C1 before requesting C2。
+
+This keeps candidate selection/replace policy in exactly one owner: Desktop Broker。
+
+---
+
+## 10. Provisioning IPC Is Hostra-private and Separate from Runtime/Data Application Protocols
 
 Dedicated Node IPC may express：
 
@@ -208,11 +292,11 @@ Data endpoint/ticket/candidate material is never part of `RunnerBootstrapV1` or 
 
 ---
 
-## 8. Paired Installation Happens in Desktop Broker, Not Runner IPC
+## 11. Paired Installation Happens in Desktop Broker, Not Runner IPC
 
 A candidate is prepared only when both role-specific WebSockets are physically ready and bound to the same Main view identity。
 
-Per `(current Renderer, subsystemKey)` Broker serializes：
+Per `S` Broker slot serializes：
 
 ```text
 commit-time latest-view revalidation
@@ -227,7 +311,7 @@ M8 Bindings continue to mean “wait for an already-current-deliverable carrier�
 
 ---
 
-## 9. Runner `commit()` Is Post-install Delivery Notification
+## 12. Runner `commit()` Is Post-install Delivery Notification
 
 `HostraRuntimeDataProvisioner.commit()` is deliberately **after** the Broker logical installation commit。
 
@@ -250,7 +334,7 @@ If B is invalidated while commit delivery is pending, Broker aborts/revokes B；
 
 ---
 
-## 10. Desktop WebSocket Mapping
+## 13. Desktop WebSocket Mapping / Finite Resource Bound
 
 M9 concrete Hostra candidate：
 
@@ -262,11 +346,24 @@ Runner WS   ─┘
 
 Before installation：zero application traffic exposure。After installation：Broker relays text opaquely and does not parse `@loomrealm/data` messages。
 
-Either side terminal/read/write failure retires the whole pair；one half can never remain current。
+Role delivery may lag installation, therefore all Data carrier/relay application buffering MUST be finite。
+
+```text
+pre-install overflow/resource excess
+→ dispose candidate
+
+post-install overflow/resource excess
+→ current pair retires whole
+→ close/revoke pair
+```
+
+Exact byte/message bound is adapter-private。No BackpressureManager、application flow-control ACK、retry or replay protocol is added。
+
+Either side terminal/read/write failure likewise retires the whole pair；one half can never remain current。
 
 ---
 
-## 11. Same-generation Physical Replacement
+## 14. Same-generation Physical Replacement
 
 While Main authority remains exact `S/G/P`：
 
@@ -275,30 +372,34 @@ old physical pair may retire
 fresh physical candidate may install
 ```
 
+At most one replacement candidate is pending per S。
+
 No new generation、Renderer revision、resume token、replay or old queue migration。
 
 M9 only proves fresh Data peer/connection-local state。User Input fresh publication semantics remain M10；Render fresh publication semantics remain M11。
 
 ---
 
-## 12. Qualification Claim Boundary
+## 15. Qualification Claim Boundary
 
-M9 qualifies the **Hostra/Desktop physical Broker slice** for applicable Data Connection v1 cases：authority binding、candidate boundary、paired install、commit races、cardinality/cutover、current→retired、same-generation physical recovery、parent invalidation、stale traffic and failure isolation。
+M9 qualifies the **Hostra/Desktop physical Broker slice** for applicable Data Connection v1 cases：authority binding、candidate boundary、paired install、commit races、bounded slot/cardinality、cutover、current→retired、same-generation physical recovery、parent invalidation、finite physical buffering、stale traffic and failure isolation。
 
 M9 does not claim full Connection-v1 cross-platform qualification because production generation replacement/exhaustion、M10/M11 child baseline semantics and PWA Platform Mapping remain later work。
 
-A small Broker-level contract harness may synthesize sink-view replacement without inventing production Runtime restart/generation allocation in Main。
+A small Broker-level contract harness may synthesize sink-view replacement without inventing production Runtime restart/generation allocation in Main or a production multi-candidate scheduler。
 
 ---
 
-## 13. Failure-domain Rule
+## 16. Failure-domain Rule
 
 The following do not directly fail Runtime or unwind Frame：
 
 ```text
 candidate establishment failure
+same-S pending-slot rejection
 Broker authority-race rejection
 Data WS loss
+finite-buffer overflow
 Runner provisioning IPC loss while child/Runtime Control remains valid
 post-install Data delivery failure
 same-generation replacement failure
@@ -309,7 +410,7 @@ Actual child process exit / Runtime Control failure remain existing Runtime fact
 
 ---
 
-## 14. Explicit Non-goals
+## 17. Explicit Non-goals
 
 M9 does not add：
 
@@ -323,19 +424,21 @@ PWA Data Broker
 new generation allocator
 EventBus / ObserverHub
 ConnectionRegistry / ConnectionManager
+multi-pending candidate queue/scheduler
 GenericTransaction / 2PC
 retry/backoff framework
+BackpressureManager / application flow-control protocol
 second currentness protocol
 Data application hello/ready/resume messages
 ```
 
 ---
 
-## 15. Implementation / Reopen Rule
+## 18. Implementation / Reopen Rule
 
 `M9_01`–`M9_05` + this ADR + existing Frozen Data Connection contract are the M9 first-implementation fact chain。
 
-Coding-time freedom：private file/class names、candidate ID format、IPC encoding、WebSocket adapter internals。
+Coding-time freedom：private file/class names、candidate ID format、IPC encoding、finite buffer constants、WebSocket adapter internals。
 
 Reopen only for：
 
@@ -352,15 +455,19 @@ Not reopen reasons：future PWA symmetry、framework reuse、naming preference�
 ## Final Invariants
 
 1. Main remains the only Data authority owner。  
-2. `DataConnectionAuthoritySink` is full-view、session-scoped、non-blocking and non-throwing。  
-3. Current Renderer token retention is inert physical correlation after one-shot auth consumption, not reauthorization。  
-4. Exact `HostedRuntime` object identity binds Data to the current physical Runtime attempt。  
-5. Desktop Broker lives in `apps/desktop`；launcher owns only exact child provisioning mechanics。  
-6. Runtime provisioning handoff occurs before successful `RuntimeHosting.launch()` returns the Runtime。  
-7. Candidate is not current before paired Broker installation。  
-8. Broker installation commit precedes role delivery notifications。  
-9. Runner post-install delivery failure retires the newly installed pair and never resurrects old current。  
-10. One relay side terminal retires the whole pair。  
-11. Same-generation replacement has no replay/resume/generation/revision mutation。  
-12. M9 does not claim M10/M11 child publication baseline or full PWA/cross-platform conformance。  
-13. No generic authority/event/connection/retry/transaction framework。
+2. Published Data authority view/entries are fresh immutable snapshots；HostedRuntime remains exact reference identity。  
+3. `DataConnectionAuthoritySink` is full-view、session-scoped、non-blocking and non-throwing。  
+4. Current Renderer token retention is inert physical correlation after one-shot auth consumption, not reauthorization。  
+5. Exact `HostedRuntime` object identity binds Data to the current physical Runtime attempt。  
+6. Desktop Broker lives in `apps/desktop`；launcher owns only exact child provisioning mechanics。  
+7. Production Broker storage is one `Map<S,Slot>`；each S has at most one current and one pending candidate。  
+8. Provisioner never implicitly supersedes pending work；pending replacement is an explicit Broker revoke-then-prepare decision。  
+9. Runtime provisioning handoff occurs before successful `RuntimeHosting.launch()` returns the Runtime。  
+10. Candidate is not current before paired Broker installation。  
+11. Broker installation commit precedes role delivery notifications。  
+12. Runner post-install delivery failure retires the newly installed pair and never resurrects old current。  
+13. Data physical buffering is finite；overflow disposes/retire at the correct pre/post-install boundary。  
+14. One relay side terminal retires the whole pair。  
+15. Same-generation replacement has no replay/resume/generation/revision mutation。  
+16. M9 does not claim M10/M11 child publication baseline or full PWA/cross-platform conformance。  
+17. No generic authority/event/connection/retry/transaction/backpressure framework。

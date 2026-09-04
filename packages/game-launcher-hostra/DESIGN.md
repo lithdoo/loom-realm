@@ -65,6 +65,7 @@ Main Runtime/Frame/Renderer/DataAuthority
 Renderer hosting/currentness
 Desktop DataConnectionBroker
 Renderer-side Data pairing policy
+candidate winner/supersede policy
 Data application protocol parsing
 Input/Render/Content business state
 PWA abstraction
@@ -244,9 +245,9 @@ Node IPC ordering is used only for Hostra physical coordination；the applicatio
 
 ---
 
-## 10. Runner Candidate State
+## 10. Runner Candidate State — Exact Bound
 
-Runner provisioning layer needs only：
+Runner provisioning layer state is exactly：
 
 ```text
 0..1 prepared uncommitted candidate
@@ -254,9 +255,22 @@ Runner provisioning layer needs only：
 0..1 pending SubsystemDataBinding acquire waiter
 ```
 
+A current carrier and one future replacement candidate may coexist physically because only the current-deliverable carrier is current。
+
 `prepare()`：connect exact Data WS, hold carrier private, ACK prepared。  
 `commit()`：only after Broker logical install; make exact candidate current-deliverable, ACK committed。  
 `revoke()`：identity-safe, non-blocking, non-throwing invalidation/cleanup。
+
+If `prepare(C2)` arrives while prepared-uncommitted `C1` already occupies the prepare slot：
+
+```text
+reject C2
+keep C1 unchanged
+```
+
+The launcher/provisioner MUST NOT implicitly supersede C1。Desktop Broker owns candidate selection; it must revoke/invalidate C1 before issuing a fresh prepare for C2。
+
+No pending queue、winner arbitration or retry scheduler exists in this package。
 
 `SubsystemDataBinding.acquire()` remains a delivery wait and is not candidate creation/authority/installation gate。
 
@@ -280,7 +294,32 @@ If B is revoked/superseded while commit ACK is pending, late `committed(B)` is s
 
 ---
 
-## 12. Process / Runtime Control Facts — M6 Preserved
+## 12. Committed-undelivered Carrier Resource Bound
+
+A committed current-deliverable carrier may exist before `SubsystemDataBinding.acquire()` has attached the role peer reader。
+
+Therefore Hostra Data carrier buffering during that gap MUST be finite：
+
+```text
+no unbounded inbound application queue
+```
+
+The exact byte/message limit is Hostra/Desktop adapter policy and is not added to the public provisioner API or Data application wire。
+
+If the finite resource bound is exceeded after logical install：
+
+```text
+Data carrier becomes unusable
+→ Broker current pair retires whole
+→ close/revoke candidate
+→ Runtime Control/Frame/Main DataAuthority unchanged
+```
+
+No replay、retry、BackpressureManager or application flow-control protocol is introduced。
+
+---
+
+## 13. Process / Runtime Control Facts — M6 Preserved
 
 Child `exit` remains canonical physical termination fact。`HostedRuntime.terminated` semantics and `requestTermination()` convergence remain unchanged。
 
@@ -290,7 +329,7 @@ No automatic Runtime restart。
 
 ---
 
-## 13. Security Invariants Through M9
+## 14. Security Invariants Through M9
 
 ```text
 module path installation-relative .mjs only
@@ -300,6 +339,7 @@ Runner env explicit allowlist
 Runtime Control WS binds 127.0.0.1 only
 Data WS endpoints/candidate material Host-owned and loopback only
 fresh one-time unguessable Data candidate material
+finite Data application buffering
 Game/manifest cannot select Data endpoint/ticket/IPC policy
 bootstrapToken remains Runtime Control/Main authority
 Data candidate material does not create Main DataAuthority
@@ -307,23 +347,26 @@ Data candidate material does not create Main DataAuthority
 
 ---
 
-## 14. M9 Non-goals for This Package
+## 15. M9 Non-goals for This Package
 
 ```text
 Desktop DataConnectionBroker
 RendererDataBinding product policy
+candidate winner/supersede policy
 BrowserWindow / Renderer Control physical hosting
 Input / Render / Content
 PWA provisioning abstraction
 universal transport/provisioning package
 generic process supervisor
 RuntimeDirectory / ConnectionRegistry
+multi-pending queue/scheduler
+BackpressureManager / flow-control protocol
 Runtime restart/reconnect
 ```
 
 ---
 
-## 15. Qualification Through M9
+## 16. Qualification Through M9
 
 Package tests must prove：
 
@@ -335,9 +378,13 @@ hook throw → launch fails closed / child converged
 one HostedRuntime → one provisioner
 Data material absent from startup bootstrap
 prepare private carrier + prepared ACK
+0..1 prepared + 0..1 current-deliverable state bound
+second prepare while pending exists rejects / existing pending unchanged
+replacement pending work requires explicit revoke before fresh prepare
 commit is post-install delivery ACK
 commit cancellation/stale ACK identity-safe
 revoke non-throwing/identity-safe
+committed-undelivered buffering finite / overflow fails Data-only
 IPC terminal disables Data only while Runtime Control may remain healthy
 child exit remains Runtime fact
 no Broker policy/protocol parsing added
@@ -345,18 +392,21 @@ no Broker policy/protocol parsing added
 
 ---
 
-## 16. Freeze / Reopen Rule
+## 17. Freeze / Reopen Rule
 
 M6 baseline remains frozen。M9 extension is frozen by ADR 0028。
 
-Implementation may choose private file names and IPC JSON/structured message encoding, but may not change：
+Implementation may choose private file names、IPC JSON/structured message encoding and finite buffer constants, but may not change：
 
 ```text
 exact public provisioner types/signatures
 hook timing before launch resolution
 Data startup-bootstrap exclusion
+0..1 prepared + 0..1 current-deliverable bound
+second-prepare rejection / explicit revoke-before-replacement
 prepare/commit/revoke lifecycle
 post-install commit failure semantics
+finite committed-undelivered buffering
 Data-vs-Runtime failure isolation
 launcher-vs-Desktop Broker ownership
 ```

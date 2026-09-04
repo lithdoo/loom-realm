@@ -9,7 +9,7 @@
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Connection Conformance](doc/15-contracts/renderer-subsystem-data-connection-conformance-v1.md)  
 > 目标：定义唯一 M9 implementation qualification gate；关闭 Main authority feed、Desktop Broker、Hostra Runner late provisioning、two-sided Data WS 与 M8 role delivery，不提前声明 M10/M11/M14/M16。
 
-> **M9 closure = Main current authority通过一个非抛异常 full-view sink安全驱动 Desktop paired installation；Hostra Runner delivery失败只会 retire Data pair，绝不产生半提交回滚或 Runtime/Frame authority变化。**
+> **M9 closure = Main current authority通过一个非抛异常 immutable full-view sink安全驱动 bounded Desktop paired installation；Hostra Runner delivery失败只会 retire Data pair，绝不产生半提交回滚或 Runtime/Frame authority变化。**
 
 ---
 
@@ -80,21 +80,24 @@ M8 `RendererDataBinding` / `SubsystemDataBinding` signatures remain unchanged。
     optional dataConnections validation
     initial replace(null)
     current Renderer token retention as inert correlation
-    full-view projection using exact HostedRuntime identity
+    fresh immutable full-view projection using exact HostedRuntime identity
     same serialized-lane sink replacement on Renderer/Runtime/DataAuthority/session changes
 
 apps/desktop
     first real private workspace
     session-scoped DataConnectionBroker
     sink implementation
+    one Map<S,Slot> with 0..1 current + 0..1 pending per S
     two-sided loopback Data WS opaque relay
+    finite application buffering/resource policy
     per-S RendererDataBinding delivery cells
     Broker contract harness + deterministic physical Renderer host
 
 @loomrealm/game-launcher-hostra
     exact Runtime→provisioner handoff
     dedicated child provisioning IPC
-    Runner candidate prepare/commit/revoke
+    Runner 0..1 prepared + 0..1 current-deliverable state
+    second prepare rejection / explicit revoke-before-replacement
     real Runner-side SubsystemDataBinding delivery
 
 existing @loomrealm/data peers
@@ -111,10 +114,12 @@ EventBus / ObserverHub / generic authority stream
 public DataConnectionBroker interface/service locator
 RuntimeDirectory service
 ConnectionRegistry / ConnectionManager framework
+multi-pending candidate queue/scheduler
 GenericTransaction / 2PC framework
 Data application hello/ready/resume/close messages
 Runtime Control or Renderer Control provisioning RPC
 retry/backoff framework
+BackpressureManager / application flow-control protocol
 new generation allocator/history
 second Renderer lease/epoch/currentness protocol
 InputManager / RenderManager / Store placeholders
@@ -140,6 +145,8 @@ current retained token participates in live opaque-material duplicate defense
 entries are unique by subsystemKey and deterministic
 entry runtime is exact HostedRuntime object identity
 entry S/G/P equals Main current DataAuthority
+view/entries containers are fresh detached immutable snapshots after publication
+HostedRuntime itself is preserved by reference identity, not cloned/frozen
 replace(view/null) is full replacement
 replace is synchronous/non-blocking/non-throwing
 replace performs no network/IPC wait
@@ -164,7 +171,10 @@ one successful HostedRuntime → one exact provisioner when hook present
 hook fires before RuntimeHosting.launch resolves HostedRuntime
 Desktop uses private exact-object WeakMap correlation
 Data endpoint/ticket absent from RunnerBootstrapV1
+Runner state bounded to 0..1 prepared-uncommitted + 0..1 committed-current-deliverable
 prepare holds connected carrier private until install
+second prepare while pending exists rejects and leaves existing pending unchanged
+pending replacement requires Broker revoke/invalidate old before new prepare
 prepare cancellation/stale handling identity-safe
 Broker logical installation happens before provisioner.commit
 commit resolves only after Runner committed ACK/current-deliverable acceptance
@@ -172,6 +182,7 @@ commit rejection after logical install retires the new current pair
 old current is never resurrected
 revoke is non-blocking/non-throwing and identity-safe
 late prepared/committed/revoke event cannot affect newer candidate
+committed-undelivered carrier does not accumulate unbounded application traffic
 provisioning IPC terminal remains Data-only
 actual child exit remains existing Runtime fact
 ```
@@ -188,7 +199,9 @@ Runner-only prepared → not current
 pre-install child bytes never exposed as current
 both prepared + exact current view → may install
 commit-time revalidation catches S/G/P/Renderer/Runtime race
-same-slot concurrent candidates → at most one install winner
+normative cardinality is current Renderer + S; implementation storage is one Map<S,Slot>
+per-S state exactly 0..1 current + 0..1 pending
+same-S concurrent candidate requests → one pending owner; newcomers reject/dispose
 different subsystem slots independent
 old current retires before new current becomes sole occupant
 no old/new current overlap
@@ -203,7 +216,26 @@ Broker relays opaque UTF-8 text and does not parse Data application JSON
 
 ---
 
-## 7. Post-install Delivery Failure Evidence
+## 7. Finite Buffer / Resource Evidence
+
+Every production Data carrier/relay path MUST have a finite application buffering policy whenever a role reader/binding delivery is absent or delayed。
+
+Must prove：
+
+```text
+no unbounded inbound queue on Renderer or Runner side
+exact buffer constant remains adapter-private
+pre-install buffer/resource overflow → candidate disposed / never Connection
+post-install buffer/resource overflow → current pair retired whole
+buffer overflow never mutates Main S/G/P or Runtime/Frame
+buffered old units are never replayed or migrated to a fresh pair
+```
+
+No application flow-control/ACK/retry protocol is introduced solely to satisfy this resource bound。
+
+---
+
+## 8. Post-install Delivery Failure Evidence
 
 Required explicit trace：
 
@@ -222,14 +254,14 @@ This is the only allowed interpretation of Runner commit-delivery failure after 
 
 ---
 
-## 8. Recovery / Traffic Evidence
+## 9. Recovery / Traffic Evidence
 
 Must prove：
 
 ```text
 Data loss → Runtime/Frame/Renderer Control/Main authority unchanged
 same S/G/P may install fresh current
-proactive same-generation replacement uses same install path
+proactive same-generation replacement uses one pending candidate + same install path
 no generation or rendererRevision change solely for physical replacement
 no resume token
 no replay of old emitted traffic
@@ -249,7 +281,7 @@ Those child-profile semantics are M10/M11 obligations even though the Frozen con
 
 ---
 
-## 9. Conformance Claim Boundary
+## 10. Conformance Claim Boundary
 
 M9 MUST NOT claim full Renderer ⇄ Subsystem Data Connection v1 platform/cross-platform qualification because Phase 1 production M9 does not yet close：
 
@@ -267,12 +299,12 @@ authority exactness / no-authority rejection
 candidate boundary
 paired readiness/install
 commit-time races
-cardinality/concurrent winner
-cutover/no overlap/no resurrection
+cardinality/bounded pending ownership/cutover
 current→retired lifecycle
 same-generation physical replacement/recovery
 parent Renderer/Session/Runtime invalidation
 late/stale traffic isolation
+finite physical resource buffering
 failure-domain isolation
 no Data Connection application handshake messages
 ```
@@ -281,7 +313,7 @@ A small Broker contract harness MAY synthesize sink-view G/P/HostedRuntime repla
 
 ---
 
-## 10. Production Vertical Evidence
+## 11. Production Vertical Evidence
 
 Must use production：
 
@@ -299,7 +331,7 @@ Physical Renderer hosting alone may be deterministic/test。No BrowserWindow/Inp
 
 ---
 
-## 11. Repository / CI Evidence
+## 12. Repository / CI Evidence
 
 M9 creates the first `apps/desktop` workspace and root workspace pattern includes `apps/*`。
 
@@ -323,7 +355,7 @@ npm run docs:check-links
 
 ---
 
-## 12. Regression Boundary
+## 13. Regression Boundary
 
 Keep M1–M8 semantics unchanged：
 
@@ -341,33 +373,39 @@ M9 extends physical authority facts and Hostra integration；it does not reopen 
 
 ---
 
-## 13. Implementation Checklist
+## 14. Implementation Checklist
 
 ```text
 [ ] platform-ports exact DataConnectionAuthorityEntry/View/Sink exported
 [ ] platform-ports runtime dependency remains Foundation-only
 [ ] MainPlatform.dataConnections optional + validated
 [ ] Main initial null / full-view projection implemented
+[ ] published view/entries detached immutable; HostedRuntime reference preserved
 [ ] current Renderer token retained inertly and removed on currentness loss
 [ ] live token duplicate-material guard updated
 [ ] sink replace non-throwing/non-blocking qualification passes
 
 [ ] apps/* added to workspace with apps/desktop created
-[ ] Desktop Broker sink + per-S slot implemented
+[ ] Desktop Broker sink + Map<S,Slot> implemented
+[ ] each S slot bounded to 0..1 current + 0..1 pending
+[ ] same-S second pending candidate rejects/disposes; no implicit supersede
 [ ] two-sided one-time loopback Data WS candidate implemented
 [ ] relay gate closed before install / opaque after install
+[ ] finite Data buffering policy implemented; no unbounded queue
 [ ] per-slot serialized install/retire implemented
 
 [ ] HostraRuntimeDataPrepareRequest/Provisioner exact API implemented
 [ ] onRuntimeDataProvisioner handoff before launch resolution
 [ ] Runner dedicated IPC provision/prepared/commit/committed/revoke implemented
-[ ] prepare private carrier + committed-undelivered carrier semantics implemented
+[ ] Runner 0..1 prepared + 0..1 committed-undelivered state bound
+[ ] pending replacement requires explicit revoke before fresh prepare
 [ ] commit failure after install → new current retired / no rollback proven
 [ ] revoke non-throwing/identity-safe proven
 
 [ ] authority/Renderer/Runtime race harness passes
-[ ] concurrent candidate one-winner passes
+[ ] same-S concurrent request one-pending-owner passes
 [ ] whole-pair retirement passes
+[ ] finite-buffer overflow pre/post install passes
 [ ] proactive same-generation replacement passes
 [ ] loss same-generation recovery passes
 [ ] no replay/resume/migration passes
@@ -382,7 +420,7 @@ M9 extends physical authority facts and Hostra integration；it does not reopen 
 
 ---
 
-## 14. Documentation Closure After Implementation
+## 15. Documentation Closure After Implementation
 
 After code qualification only, update：
 
@@ -398,11 +436,11 @@ The frozen preimplementation documents and ADR remain semantic source；qualific
 
 ---
 
-## 15. Freeze Gate
+## 16. Freeze Gate
 
 **Gate status: CLOSED.**
 
-All public seams、authority sources、identity binding、installation order、post-install delivery failure、retirement、repository placement and qualification claim boundaries are fixed。Coding-time freedom is limited to private helper/file/class names、IPC encoding details、candidate ID generation format and WebSocket adapter internals that preserve these semantics。
+All public seams、authority sources、immutable snapshot semantics、identity binding、bounded per-S slot state、installation order、finite physical buffering、post-install delivery failure、retirement、repository placement and qualification claim boundaries are fixed。Coding-time freedom is limited to private helper/file/class names、IPC encoding details、candidate ID generation format、finite buffer constants and WebSocket adapter internals that preserve these semantics。
 
 Reopen only for：
 

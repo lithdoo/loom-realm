@@ -221,7 +221,7 @@ A throwing implementation is non-conforming and fails M9 qualification；the sha
 
 ---
 
-## 9. M9 View Identity
+## 9. M9 View Identity / Snapshot Semantics
 
 `DataConnectionAuthorityView` is Session-scoped, so Session ID is not repeated in the DTO。
 
@@ -238,6 +238,17 @@ never enters Data application wire
 `DataConnectionAuthorityEntry.runtime` is the exact `HostedRuntime` object identity。Same subsystemKey with a different HostedRuntime is a different physical target。
 
 No PID/Worker ID/runtimeInstanceId is introduced。
+
+Every non-null view is a fresh immutable publication snapshot：
+
+```text
+view object immutable after publication
+entries array detached from mutable Main containers and immutable after publication
+entry fields immutable
+HostedRuntime preserved by reference identity; not cloned/frozen by this port
+```
+
+After `replace(view)` returns, the authority represented by that exact view cannot change by mutating its containers。This does not create history/version/event semantics。
 
 ---
 
@@ -306,10 +317,11 @@ Foundation-only runtime dependency remains true
 no Broker/Hostra/PWA dependency
 view can reference HostedRuntime without adding new identity type
 sink replace signature remains void/full replacement
+snapshot containers can be published immutable without cloning HostedRuntime
 no generic event/registry/service surface exported
 ```
 
-Behavioral non-throwing/full-view ordering is qualified by Main + Desktop consumer tests, not by a fake platform-ports state machine。
+Behavioral non-throwing/full-view ordering and immutable publication are qualified by Main + Desktop consumer tests, not by a fake platform-ports state machine。
 
 ---
 
@@ -323,6 +335,7 @@ RendererControlBinding candidate-slot/settlement
 RendererDataBinding / SubsystemDataBinding exact role seams
 DataConnectionAuthorityEntry/View/Sink exact surface
 sink full-replacement/non-throwing semantics
+view/entries immutable publication snapshot semantics
 HostedRuntime object identity as physical Runtime correlation
 ```
 

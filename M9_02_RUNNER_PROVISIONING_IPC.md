@@ -134,7 +134,7 @@ IPC encoding and message field layout remain Hostra-private。Do not introduce g
 `prepare(request, signal)` resolves only after the exact Runner has：
 
 ```text
-accepted the candidate as its current prepared candidate
+accepted the candidate as its one prepared-uncommitted candidate
 connected the exact local Data WebSocket endpoint
 held the resulting carrier privately
 sent prepared(candidate)
@@ -148,7 +148,7 @@ SubsystemDataBinding does not resolve
 no child Data peer exists for this candidate
 ```
 
-Runner only needs：
+Runner provisioning state is deliberately bounded：
 
 ```text
 0..1 prepared uncommitted candidate
@@ -156,7 +156,20 @@ Runner only needs：
 0..1 SubsystemDataBinding acquire waiter
 ```
 
-A second prepare while another uncommitted candidate occupies the Runner prepare slot MAY reject/supersede according to the Broker's chosen candidate; it MUST NOT create multiple role-current carriers。
+A current carrier and one replacement candidate may coexist physically because the replacement is not current yet。
+
+### Same-slot second prepare rule
+
+If a second `prepare(C2)` arrives while an uncommitted `C1` already occupies the prepare slot：
+
+```text
+reject C2
+keep C1 unchanged
+```
+
+The provisioner MUST NOT implicitly supersede `C1` and MUST NOT choose which candidate wins。If Desktop Broker wants to replace pending work, it first invalidates/revokes `C1`; only after that slot is released may it call `prepare(C2)`。
+
+This keeps candidate-selection policy solely in Desktop Broker and bounds Runner candidate state without a queue/registry。
 
 Abort/stale candidate closes the private carrier and resolves no Binding waiter。
 
@@ -235,6 +248,8 @@ Therefore Broker may prepare/install B while old role peer A is still current。
 
 If B was committed with no waiter, Runner holds exactly one committed-undelivered carrier until the next valid acquire or until it is revoked/retired。
 
+That held carrier MUST NOT create an unbounded application-message queue。Any transport/adapter buffering before a role reader attaches is finite；resource overflow retires/revokes the current B rather than accumulating indefinitely or replaying later。
+
 ---
 
 ## 9. Provisioning Failure Domain
@@ -244,6 +259,7 @@ Candidate-level：
 ```text
 WS connect failure
 prepare rejection
+second prepare while pending slot occupied
 stale provision/revoke
 post-install commit delivery rejection
 ```
@@ -274,6 +290,7 @@ Hostra Data endpoint is Host-owned：
 fresh one-time unguessable candidate material
 single intended role side
 closed on abort/retire/session shutdown
+finite application buffering; no unbounded role-undelivered queue
 ```
 
 Game/manifest cannot select Data endpoint、ticket、IPC or credential policy。
@@ -294,18 +311,22 @@ exact HostedRuntime object maps to exact provisioner
 callback failure converges child before launch failure returns
 Data material absent from RunnerBootstrapV1
 prepare holds carrier private and reports prepared
+0..1 prepared + 0..1 current-deliverable state bound
+second prepare while pending exists rejects without implicit supersede
+Broker must revoke old pending before preparing replacement
 Broker logical install precedes provisioner.commit delivery
 commit rejection after install retires new pair; no old resurrection
 stale/aborted commit ACK cannot install/re-deliver old candidate
 revoke non-throwing + identity-safe
 SubsystemDataBinding only waits for committed current-deliverable carrier
+committed-undelivered transport buffering is finite; overflow fails Data-only
 provisioning IPC failure is Data-only
 child process exit remains Runtime fact
-no generic RPC/registry abstraction
+no generic RPC/registry/queue abstraction
 ```
 
 ---
 
 ## 12. Frozen Closure
 
-M9/02 is implementation-closed when Desktop can deterministically map exact `HostedRuntime` → exact child provisioner, and Runner prepare/commit/revoke semantics have no unresolved installation/rollback interpretation。
+M9/02 is implementation-closed when Desktop can deterministically map exact `HostedRuntime` → exact child provisioner, Runner state is bounded to one pending + one current-deliverable candidate, and prepare/commit/revoke semantics have no unresolved supersede/installation/rollback interpretation。

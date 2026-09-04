@@ -149,6 +149,19 @@ ordering deterministic; ordering has no authority meaning
 
 PID、WS URL、ticket、candidateId、Frame/Activation never enter the view。
 
+### Authority view snapshot semantics
+
+Every non-null view passed to `replace()` is a fresh immutable authority snapshot：
+
+```text
+view object is immutable after publication
+entries array is detached from mutable Main containers and immutable after publication
+entry structural fields are immutable
+HostedRuntime object is preserved by reference identity; it is not cloned/frozen by M9
+```
+
+After `replace(view)` returns, the authority represented by that exact view object MUST NOT change through object/array mutation。This is snapshot immutability, not a second authority cache/history。
+
 ---
 
 ## 6. `replace()` Contract
@@ -207,21 +220,32 @@ Session terminal
 
 ## 8. Broker Slot / Candidate Budget
 
-For the latest non-null view：
+Contract cardinality is still described by current Renderer + subsystem：
 
 ```text
-(rendererControlToken, subsystemKey)
+(Session, current Renderer participant, subsystemKey)
     → 0..1 current Data Connection
 ```
 
-Broker private state may contain only what real physical work needs：
+Because one Session has at most one current Renderer participant, the M9 Desktop implementation stores one slot per `subsystemKey` only：
 
 ```text
-latest authoritative view | null
-per-S current pair | none
-pending physical candidates
-Renderer committed-carrier delivery cell per S
+Map<S, Slot>
+
+Slot:
+    0..1 current pair
+    0..1 pending candidate
 ```
+
+The slot key `S` is only an implementation/storage simplification。Every pending/current identity still carries exact：
+
+```text
+rendererControlToken T
+HostedRuntime R
+S/G/P
+```
+
+A Renderer replacement invalidates the identities inside all existing `S` slots; it does not create a second `(T,S)` registry namespace。
 
 Different subsystem slots are independent。Broker copies G/P from Main view and never allocates/repairs generation。
 
@@ -233,6 +257,10 @@ not a Connection instance
 not allowed to expose child application traffic
 not a cardinality occupant
 ```
+
+M9 deliberately bounds one slot to **at most one pending candidate**。If another same-S candidate request arrives while one pending candidate exists, the newcomer is rejected/disposed; Broker does not create a second pending candidate。To replace pending work, Broker first invalidates/disposes the exact old pending candidate, then starts the new one。
+
+This is stricter than the Frozen Connection v1 allowance for multiple establishment attempts and remains conforming because the contract requires only at most one installation winner, not concurrent pending establishment。
 
 Candidate failure disposes only candidate material；Main authority/Runtime/Frame remain unchanged。
 
@@ -253,9 +281,25 @@ Session null/terminal
 same-generation successful supersede
 child Data-fatal carrier retirement
 explicit Platform Data-slot shutdown
+bounded-buffer overflow on either physical side
 ```
 
 Logical retirement happens before best-effort physical close。Retired carrier never becomes current again；old traffic/unsent queues are never replayed or migrated。
+
+### Finite buffering invariant
+
+M9 physical Data relay/carriers MUST NOT accumulate unbounded application traffic while a role reader/binding waiter is absent or delayed。
+
+```text
+before install overflow/resource excess
+→ dispose candidate
+
+after install overflow/resource excess on either side
+→ retire whole current pair
+→ close/revoke both sides
+```
+
+Exact byte/message bound is Desktop adapter policy and need not enter public ports or Data protocol。M9 adds no flow-control/retry/backpressure application protocol。
 
 ---
 
@@ -294,11 +338,15 @@ non-null view requires exact current Renderer
 current Renderer token is auth-consumed but retained only as inert live correlation
 live current token participates in Main duplicate-material defense
 entries exact/unique/deterministic and use HostedRuntime object identity
+published authority view/entries are detached immutable snapshots
 replace is full replacement / synchronous / non-blocking / non-throwing
 replace changes no rendererRevision by itself
 Renderer replacement invalidates old Data in the same Main mutation lane
 Runtime/DataAuthority change updates full view
 Session terminal sends null before async cleanup
+one implementation slot per S with 0..1 current + 0..1 pending
+second same-S pending candidate is rejected/disposed; no implicit pending supersede
+finite physical application buffering; overflow cannot grow unbounded
 Renderer acquire/ticket/socket cannot authorize install
 no generic authority/event/registry abstraction
 ```
@@ -307,4 +355,4 @@ no generic authority/event/registry abstraction
 
 ## 12. Frozen Closure
 
-M9/01 is implementation-closed when every Main→Broker authority arrow has the exact surface and ordering above。Coding may choose private helper/file layout only；it may not invent a second authority source、observer framework、Broker service API or alternate currentness identity。
+M9/01 is implementation-closed when every Main→Broker authority arrow has the exact surface and ordering above。Coding may choose private helper/file layout and finite buffer constants only；it may not invent a second authority source、observer framework、Broker service API、alternate currentness identity、multi-pending slot policy or unbounded Data queue。

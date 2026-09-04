@@ -105,6 +105,7 @@ Runtime not ready → no S entry
 Runtime ready commit → logical Main S/1/P exists
 no current Renderer → sink still null
 Renderer accepted → sink non-null names exact T + exact HostedRuntime + S/1/P
+published view/entries cannot mutate after replace
 Broker prepares both WS sides
 Runner prepare ACK
 commit-time latest-view revalidation
@@ -159,6 +160,8 @@ dataConnections absent keeps M1–M8 behavior
 provided sink receives initial null
 replace is synchronous/non-blocking/non-throwing
 full view entries are exact/unique/deterministic
+published view and entries array are detached immutable snapshots
+HostedRuntime is preserved by exact reference identity
 current Renderer auth-consumed token retained only while current
 live retained token participates in duplicate opaque-material defense
 Runtime/DataAuthority mutation refreshes the full view
@@ -179,18 +182,22 @@ onRuntimeDataProvisioner fires before RuntimeHosting.launch resolves exact Hoste
 Desktop exact-map uses that HostedRuntime object
 Data endpoint absent from Runtime bootstrap
 prepare connects Data WS and keeps carrier role-private
+0..1 prepared-uncommitted + 0..1 committed-current-deliverable bound
+second prepare while pending exists rejects without replacing pending identity
+Broker revokes old pending before attempting replacement
 prepare cancellation/revoke is identity-safe
 post-install provisioner.commit resolves via committed ACK
 commit delivery failure after install retires the new pair
 old current is never resurrected after new install
 late committed/prepared ACK cannot re-install stale candidate
+committed-undelivered carrier cannot accumulate unbounded application traffic
 provisioning IPC terminal is Data-only
 child exit remains existing Runtime failure fact
 ```
 
 ---
 
-## 8. Relay / Cardinality Cases
+## 8. Relay / Cardinality / Resource Cases
 
 Must prove：
 
@@ -198,13 +205,21 @@ Must prove：
 Renderer-only prepared → not current
 Runner-only prepared → not current
 pre-install application bytes → candidate fail/dispose
-same-slot concurrent candidates → at most one install winner
+one implementation slot per S
+per-S 0..1 pending + 0..1 current
+same-S concurrent candidate requests → one pending owner; newcomers reject/dispose
 loser late events cannot disturb winner
 different S slots independent
 one relay side terminal → whole pair retires
 late retired bytes/send completion cannot affect replacement
 Broker does not parse Data application JSON
+finite application buffering while role reader/delivery is delayed
+pre-install buffer overflow disposes candidate
+post-install buffer overflow retires whole pair
+no buffered old traffic replay/migration
 ```
+
+The exact finite buffer constant is adapter-private and is not part of the public port or Data protocol。
 
 ---
 
@@ -214,7 +229,7 @@ Proactive：
 
 ```text
 A role peers current
-→ B prepared privately under same S/1/P with no Binding waiter required
+→ one B pending candidate prepared privately under same S/1/P with no Binding waiter required
 → install B / retire A
 → old role peers terminal
 → fresh M8 acquire receives B if B remains deliverable
@@ -263,18 +278,20 @@ This closes the IPC half-commit ambiguity。
 
 ## 11. Broker Contract Harness
 
-In addition to the production vertical, a small Desktop Broker harness directly drives frozen sink views to cover abstract cases production M9 cannot naturally create：
+In addition to the production vertical, a small Desktop Broker harness directly drives frozen immutable sink views to cover abstract cases production M9 cannot naturally create：
 
 ```text
 wrong/stale G/P
 same-key different HostedRuntime object
 Renderer token replacement races
-multiple concurrent candidates
+same-S concurrent candidate requests
+pending candidate replacement requires explicit revoke
 post-install delivery failure
+finite-buffer overflow before/after install
 stale late traffic/ACK
 ```
 
-Harness MUST NOT add fake Runtime restart/generation allocator to `@loomrealm/main`。
+Harness MUST NOT add fake Runtime restart/generation allocator to `@loomrealm/main` and MUST NOT introduce a production multi-candidate queue merely to test concurrency。
 
 ---
 
@@ -292,6 +309,8 @@ loom.map
 PWA MessageChannel
 production same-key Runtime restart
 generation allocator
+multi-pending candidate scheduler
+BackpressureManager / application flow-control protocol
 ```
 
 ---
@@ -330,4 +349,4 @@ No giant E2E replaces package/role evidence。
 
 ## 14. Frozen Closure
 
-M9/04 is implementation-closed when repository placement、production vertical、contract harness and exact CI evidence above leave no architecture choice to be invented during coding。Private file/class names remain implementation freedom。
+M9/04 is implementation-closed when repository placement、immutable authority snapshot、bounded slot/resource state、production vertical、contract harness and exact CI evidence above leave no architecture choice to be invented during coding。Private file/class names and finite buffer constants remain implementation freedom。
