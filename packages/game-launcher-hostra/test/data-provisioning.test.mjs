@@ -31,6 +31,17 @@ class BackpressuredChild extends EventEmitter {
   }
 }
 
+class CallbackFailingChild extends EventEmitter {
+  connected = true;
+  sent = [];
+
+  send(message, callback) {
+    this.sent.push(message);
+    queueMicrotask(() => callback?.(new Error("injected IPC send failure")));
+    return true;
+  }
+}
+
 class FakeRunnerIpc extends EventEmitter {
   sent = [];
 
@@ -59,6 +70,32 @@ test("host treats child.send false as flow control and waits for the IPC callbac
   assert.equal(child.sent[1].type, "commit");
   child.emit("message", { type: "committed", candidateId: request.candidateId });
   await committing;
+});
+
+test("host treats child.send callback error as authoritative IPC terminal failure", async () => {
+  const child = new CallbackFailingChild();
+  const provisioner = createHostraRuntimeDataProvisioner(child);
+  const request = {
+    candidateId: "candidate-a",
+    endpoint: `ws://127.0.0.1:12345/${"a".repeat(43)}`,
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  };
+
+  await assert.rejects(
+    provisioner.prepare(request, new AbortController().signal),
+    /unavailable/,
+  );
+  assert.equal(child.sent.length, 1);
+  assert.equal(child.sent[0].type, "provision");
+  await assert.rejects(
+    provisioner.prepare(
+      { ...request, candidateId: "candidate-b" },
+      new AbortController().signal,
+    ),
+    /unavailable/,
+  );
+  assert.equal(child.sent.length, 1, "terminal provisioner never sends new Data work");
 });
 
 test("runner IPC disconnect rejects a pending Data acquire without terminating Runtime Control", async () => {
