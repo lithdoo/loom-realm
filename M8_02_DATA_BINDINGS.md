@@ -8,7 +8,7 @@
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md)  
 > 目标：在 `@loomrealm/platform-ports` 冻结两个真实 role consumer 所需的最窄 Data carrier capability；只交付 already-current carrier，不暴露 Broker、endpoint、ticket 或 transport。
 
-> **Binding 是 Core role 与 Platform 的窄 carrier seam，不是 DataConnectionBroker API，也不拥有 Main authority。**
+> **Binding 是 role 与 Platform 的 carrier seam。它不拥有 Main authority，也不是 DataConnectionBroker API。**
 
 ---
 
@@ -27,7 +27,7 @@ interface RendererDataBinding {
 }
 ```
 
-Subsystem side需要从 Platform获得 Main 已授权的 generation/profile；其 `subsystemKey` 已由 Runtime launch context固定，因此不重复返回：
+Subsystem side is already scoped to one Runtime/subsystemKey：
 
 ```ts
 interface SubsystemDataBindingResult {
@@ -41,115 +41,149 @@ interface SubsystemDataBinding {
 }
 ```
 
-精确 public type 名可在实现时按现有 naming style落地；上述字段与语义不可扩张。
+Exact public type names MAY follow existing naming style；the fields and semantics MUST NOT widen。
 
 ---
 
-## 2. Semantics
+## 2. Resolution Semantics
 
 `RendererDataBinding.acquire(S,G,P,signal)`：
 
 ```text
-caller already holds current Renderer Control authority S/G/P
-→ wait for one Platform-prepared paired current Data carrier
-→ resolve one Renderer endpoint carrier
+caller already mirrors current Renderer Control authority S/G/P
+→ wait for one Platform-prepared paired current carrier
+→ resolve Renderer endpoint carrier
 ```
 
 `SubsystemDataBinding.acquire(signal)`：
 
 ```text
-this Binding is already scoped to one target Runtime/subsystemKey
-→ wait for one Platform-prepared paired current Data carrier
-→ return carrier + exact G/P bound to that installation
+Binding is scoped to one target Runtime/subsystemKey
+→ wait for one Platform-prepared paired current carrier
+→ resolve carrier + exact G/P bound to that installation
 ```
 
-成功 resolution只交付一个已经建立的 `MessageCarrier<string>`；role随后构造 `@loomrealm/data` 的 `DataCurrentBindingV1`。
+After resolution the role constructs `@loomrealm/data` `DataCurrentBindingV1` locally。
 
-Binding不得返回：
+Binding MUST NOT expose：
 
 ```text
-URL
-port number
+URL / port
 ticket / nonce / credential
-MessagePort / WebSocket object
+MessagePort / WebSocket
 candidate state
 Broker handle
-Runtime process/Worker identity
+PID / Worker identity
 ```
 
 ---
 
 ## 3. Paired Installation Boundary
 
-Role-facing contract只接收 Platform 已决定可交付的 current pair：
+Role-facing Binding consumes only a Platform decision that a logical pair is current-deliverable：
 
 ```text
 one logical pair
-→ one Renderer carrier endpoint
-+ one Subsystem carrier endpoint
+→ one Renderer endpoint
++ one Subsystem endpoint
 ```
 
-M8冻结的是**交付后的 role seam**，不是 Platform candidate → paired-install commit algorithm。M8 不定义 Platform 如何获得 Main-authoritative `S/G/P`，也不 qualification commit-time Main authority/current Runtime/current Renderer revalidation。
+M8 freezes the **post-install role seam** only。It does NOT define or qualify：
 
-Role仍必须对 late resolution做本地 identity/currentness recheck；stale resolution立即 close/dispose，不得安装。这个 local recheck只保护 role currentness，不能替代 Platform 对 Main authority 的 revalidation。
+```text
+how Platform obtains Main-authoritative S/G/P
+candidate authentication/provisioning
+commit-time current Session/Renderer/Runtime/DataAuthority revalidation
+serialized candidate winner/cutover
+```
 
-M9 concrete Desktop Broker关闭 authority feed、ticket/IPC/WebSocket physical provisioning、paired commit-time revalidation；不改变本 M8 role-facing Binding surface。
+Those are M9 Broker responsibilities。
+
+Role local currentness recheck after a late resolution remains mandatory；stale result is closed/disposed。That recheck protects role state only and MUST NOT be treated as Platform/Main authority revalidation。
 
 ---
 
-## 4. Settlement
+## 4. Acquire Settlement
 
-一个 acquire MAY长期 pending；pending本身不创建 application current state。Platform 内部 transient candidate/provisioning failure MAY 被 dispose/吸收而保持这个 acquire pending；M8不冻结 retry/backoff API。
+An acquire MAY remain pending indefinitely。Pending alone creates no role current state。
+
+Platform MAY internally dispose transient candidate/provisioning failures while keeping the same acquire pending；M8 freezes no retry/backoff/error taxonomy。
 
 ```text
 abort before resolution
 → cancel this wait
-→ no late live carrier may be installed by the role
+→ no late result may become role-current
 
 non-abort rejection surfaced to the role
-→ this Binding capability is terminal for its owning role lifetime
-→ role does not spin/retry acquire
+→ acquisition capability terminal for that Binding/role lifetime
+→ no role-side busy retry
 ```
 
-一个已经成功 acquired 的 Data peer随后 terminal：
+After one successfully installed Data peer later terminalizes：
 
 ```text
-→ current Data instance retired
-→ if parent authority remains current and Binding healthy,
-   role reconciliation MAY issue one fresh acquire for the same S/G/P
+if parent authority remains current
+AND acquisition capability is still healthy
+→ role MAY issue one fresh acquire for the same S/G/P
 ```
 
-这不是 replay/retry旧 application traffic；fresh carrier没有继承旧 writer queue或 publication cursor。
+Fresh acquire is not replay/retry of old application traffic。
 
 ---
 
-## 5. Optionality
+## 5. Binding-terminal Fan-out
 
-M8 不能迫使现有 M6/M7 physical composition提供 fake Data capability。
+`RendererDataBinding` is one construction-time capability shared by all subsystem slots in that Renderer role lifetime。
 
-因此：
+Therefore the first surfaced non-abort rejection from **any** Renderer acquire fixes：
+
+```text
+latch Renderer Data acquisition capability terminal
+→ abort every other pending Renderer Data acquire
+→ start no future Renderer Data acquire for any subsystemKey
+→ already-current RendererDataPeer instances remain current solely with respect to this Binding failure
+→ Renderer Control remains current
+```
+
+Existing current Data peers retire only for their own carrier/Data-fatal/authority/Control/Session/Runtime causes。A failed ability to establish future carriers is not itself a current Connection retirement cause。
+
+For one `SubsystemDataBinding` lifetime：
+
+```text
+surfaced non-abort rejection
+→ no future acquire for that Runtime host lifetime
+→ existing current SubsystemDataPeer, if any, remains current solely with respect to this Binding failure
+```
+
+No `BindingStateManager` or typed error hierarchy is introduced；a boolean/fact or equivalent control flow is sufficient。
+
+---
+
+## 6. Optionality
+
+Existing physical compositions MUST NOT add fake Data capability。
 
 ```text
 SubsystemDataBinding absent
-→ Runtime/Frame remains valid; no Data connection
+→ Runtime/Frame remains valid; no Data
 
 RendererDataBinding absent
-→ Control mirror remains valid; no Data connection
+→ Renderer Control remains valid; no Data
 ```
 
-M8 deterministic vertical显式提供真实 test Binding；M9/M14/M16再提供 concrete platform realization。
+M8 deterministic vertical supplies a real test Binding；M9/M14/M16 supply concrete physical realizations later。
 
 ---
 
-## 6. Dependency Boundary
+## 7. Dependency Boundary
 
-`@loomrealm/platform-ports` 仍只 runtime-depends on：
+`@loomrealm/platform-ports` continues to runtime-depend only on：
 
 ```text
 @loomrealm/foundation
 ```
 
-不得为了复用 DTO而依赖：
+MUST NOT depend on：
 
 ```text
 @loomrealm/data
@@ -159,11 +193,11 @@ M8 deterministic vertical显式提供真实 test Binding；M9/M14/M16再提供 c
 @loomrealm/renderer
 ```
 
-不新增：
+Forbidden：
 
 ```text
 GenericDataBinding
-DataConnectionBroker interface
+public DataConnectionBroker interface in M8
 ConnectionRegistry
 BindingError hierarchy
 ReconnectManager
@@ -172,27 +206,29 @@ TransportAdapter framework
 
 ---
 
-## 7. Tests
+## 8. Qualification
 
-必须覆盖：
+Must prove：
 
 ```text
-Renderer acquire receives exact requested S/G/P carrier only
-Subsystem result carries G/P but does not duplicate subsystemKey
-one pair gives exactly two paired endpoints
-M8 does not claim Platform/Main authority-feed or commit-time revalidation qualification
-acquire may remain pending across internally absorbed transient provisioning failures
-abort has no late installable result
-non-abort rejection surfaced to role stops role-side re-acquire loop
-successful peer terminal permits fresh same-authority acquire when still current
-stale/aborted resolution is closed, not installed
-Binding absence does not break existing Runtime/Control paths
-no endpoint/ticket/transport type leaks into role-facing surface
-platform-ports dependency remains Foundation-only
+Renderer acquire is exact S/G/P driven
+Subsystem result returns G/P + carrier without duplicate subsystemKey
+one logical pair gives two matching role endpoints
+M8 does not claim Platform/Main authority-feed or commit-time revalidation
+acquire may stay pending across internally absorbed transient failures
+abort prevents late installation
+surfaced non-abort rejection terminalizes acquisition capability
+Renderer rejection fan-out aborts all other pending slots and blocks future acquire
+Renderer rejection does not retire unrelated already-current peers or Control
+Subsystem rejection blocks future acquire but does not fail Runtime/Frame
+successful peer terminal permits one fresh same-authority acquire only while Binding healthy
+Binding absence preserves existing Runtime/Control paths
+no endpoint/ticket/transport leak
+platform-ports remains Foundation-only
 ```
 
 ---
 
-## 8. Frozen Closure
+## 9. Frozen Closure
 
-M8/02 complete when two narrow role-facing bindings are sufficient to connect real `@loomrealm/data` peers without creating a public Broker abstraction or exposing physical provisioning material。
+M8/02 is implementation-ready when the two narrow Bindings are sufficient for real role consumers, acquire settlement/fan-out is deterministic, and no public Broker or generic connection abstraction is required。

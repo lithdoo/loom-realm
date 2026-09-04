@@ -6,67 +6,78 @@
 > 最近复核：2026-09-04  
 > 前置：[M8 / 01](M8_01_MAIN_DATA_AUTHORITY.md) → [M8 / 02](M8_02_DATA_BINDINGS.md) → [M8 / 03](M8_03_DATA_ROLE_INTEGRATION.md) → [M8 / 04](M8_04_VERTICAL_INTEGRATION.md)  
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md) · [Profile Conformance](doc/15-contracts/renderer-data-profile-conformance-v1.md)  
-> 目标：定义唯一 M8 qualification matrix；只关闭 DataAuthority + role binding/current Data lifetime，不借 M8 提前实现 M9 Broker physical provisioning、M10 Input 或 M11 Render。
+> 目标：定义唯一 M8 implementation qualification matrix；关闭 DataAuthority + role-facing current Data lifetime，不提前吸收 M9 Broker、M10 Input 或 M11 Render。
 
-> **M8 closure = Main 产生 logical DataAuthority，Renderer/Subsystem 通过窄 Platform Bindings消费 Platform 已决定可交付的 paired current carrier，并由 real `@loomrealm/data` peers安全安装/退役；Data failure不改变 Runtime/Frame/Control authority。Platform authority-feed 与 paired commit-time revalidation由 M9关闭。**
+> **M8 closure = Main 产生 logical DataAuthority；Renderer/Subsystem 通过窄 Binding 消费 Platform 已决定可交付的 paired current carrier；real `@loomrealm/data` peers 具备确定的 install/retire/teardown/failure semantics。Data failure不改变 Runtime/Frame/Control authority。**
 
 ---
 
 ## 1. M8 Closure Scope
 
-必须实现：
+Must implement：
 
 ```text
 @loomrealm/main
     DataAuthority allocation/revocation
     generation/profile policy
+    atomic Runtime/DataAuthority visible commit
     non-empty Renderer Snapshot projection
 
 @loomrealm/platform-ports
     RendererDataBinding
     SubsystemDataBinding
+    frozen settlement / terminal fan-out semantics
 
 @loomrealm/subsystem/host
-    optional Data binding + current peer lifetime
+    optional Data Binding
+    non-blocking acquire
+    current peer lifetime
+    ready-exit teardown
+    construction-failure isolation
 
 @loomrealm/renderer
-    Control-authority-driven Data reconciliation
+    construction-time optional RendererDataBinding
+    Control-driven non-blocking reconciliation
+    per-subsystem current/pending state
+    Renderer-wide acquisition-terminal fan-out
 
-real @loomrealm/data consumers on both roles
+real @loomrealm/data peers on both roles
 
 deterministic paired MemoryCarrier vertical
 ```
 
-不属于 M8：
+Not M8：
 
 ```text
 Desktop DataConnectionBroker / ticket / Runner provisioning IPC / Data WS
 PWA MessageChannel provisioning
-InputManager / Input producer/listener
+Platform authority-feed / candidate authentication
+paired commit-time Main revalidation / serialized physical cutover
+InputManager / Input producer/listener/effective gate
 RenderManager / Render Store / Domain API
 Content
 Hostra/PWA physical equivalence
-Platform candidate → paired-install authority feed / commit-time Main revalidation
 ```
 
 ---
 
 ## 2. Abstraction Budget
 
-允许：
+Allowed because there is a real consumer：
 
 ```text
-one Main generation high-water fact per subsystem
-one generation fact on the current Runtime instance
+one generation high-water fact per subsystem in Main
+one generation fact on current Runtime instance
 RendererDataBinding
 SubsystemDataBinding
-Subsystem current Data peer + one pending acquire
-Renderer per-subsystem current peer + one pending acquire
+Subsystem current peer + one pending acquire + acquisition-terminal fact
+Renderer per-subsystem current peer + pending acquire
+one Renderer-wide acquisition-terminal fact
 one construction-time optional RendererDataBinding seam
 small deterministic paired Binding fixture
 ```
 
-禁止：
+Forbidden：
 
 ```text
 DataAuthorityManager
@@ -77,92 +88,116 @@ ReconnectManager / retry scheduler
 BindingError hierarchy
 Data Store / ObserverHub / EventBus
 InputManager / RenderManager placeholders
-second DataCurrentBinding DTO shared across packages
+second shared DataCurrentBinding DTO
 transport endpoint/ticket DTO in role packages
 application replay/resume cursor
 lease/heartbeat/currentness protocol
+Data-specific cleanup scheduler/deadline
 ```
 
 ---
 
 ## 3. Main Evidence
 
-必须证明：
+Must prove：
 
 ```text
-not-ready → no authority
-ready → S/G1/loomrealm.renderer-data/1
-logical authority changes advance Renderer revision exactly once
-Data transport loss alone does not change Main authority/revision
-stopping/failure/replacement revokes authority
-fresh Runtime for same S uses G2 > G1
+not-ready → no DataAuthority
+normal ready transition → Runtime=ready + S/G1/P in one visible commit
+no normal ready/no-authority intermediate Snapshot
+normal ready exit → non-ready + no authority in one visible commit
+no non-ready Snapshot with stale DataAuthority
+logical authority commit advances Renderer revision exactly once
+Data transport loss/reconnect alone does not change Main authority/revision
+fresh Runtime same S uses G2 > G1
 Renderer replacement alone keeps G
 no generation reuse/wrap
-generation exhaustion creates no fresh authority but does not fail Runtime/Frame
+generation exhaustion creates no fresh authority and does not fail Runtime/Frame
 projection ordering deterministic but carries no authority semantics
-no physical material in Main/Snapshot
-no shadow Data authority registry
+no physical material / shadow Data authority registry
 ```
 
 ---
 
 ## 4. Binding Evidence
 
-必须证明：
+Must prove：
 
 ```text
 Renderer acquire is exact S/G/P driven
 Subsystem Binding is Runtime-scoped and returns only G/P + carrier
-one logical pair → two matching endpoints
-M8 Binding/fixture does not claim Main authority-feed or commit-time revalidation
-pending acquire does not create role current state
+one logical pair → two matching role endpoints
+M8 does not claim Platform/Main authority-feed or commit-time revalidation
+pending acquire creates no role current state
 transient physical provisioning failure may remain internal while acquire stays pending
 abort prevents late installation
-non-abort rejection surfaced to role does not cause busy retry
-successful current peer terminal can lead to one fresh acquire while authority remains current
+surfaced non-abort rejection terminalizes acquisition capability
+Renderer first rejection aborts all other pending acquires + blocks all future acquire
+Renderer Binding terminal does not retire already-current peers or Control solely for that cause
+Subsystem Binding terminal blocks future acquire but does not fail Runtime/Frame or retire current peer solely for that cause
+successful peer terminal may trigger one fresh same-authority acquire only while acquisition healthy
 Binding absence remains valid
-platform-ports stays Foundation-only
+platform-ports remains Foundation-only
 ```
 
-Binding不认证/分配 Main authority，不解析 `@loomrealm/data` application messages。
+Binding does not authenticate/mint Main authority and does not parse Data application messages。
 
 ---
 
-## 5. Role Evidence
+## 5. Subsystem Role Evidence
 
-Subsystem：
+Must prove：
 
 ```text
-ready + Binding → real SubsystemDataPeer
+Binding absent keeps Runtime/Frame path green
+ready + Binding installs real SubsystemDataPeer
 pending acquire does not block Runtime Control / Frame handling
-old terminal identity-safe
+late/stale acquire is closed, not installed
+old peer terminal cannot clear replacement peer
 Data terminal does not fail Runtime/Frame
-fresh carrier creates fresh peer
+same-generation fresh carrier creates fresh peer without replay
+leaving ready synchronously clears Data currentness
+leaving ready aborts pending acquire + retires current peer + starts no fresh acquire
+late acquire after shutdown/fatal cannot install
+Data cleanup reuses existing terminalCleanupDeadlineMs
+Data cleanup failure/time limit never replaces primary graceful/fatal Runtime result
+trusted-integration/peer-construction failure closes carrier, installs nothing, latches acquisition terminal, no Runtime/Frame failure
 ```
-
-Renderer：
-
-```text
-construction-time optional RendererDataBinding; no mutable registration/service locator
-Snapshot add authority → acquire/install without blocking later Control states
-remove/replace authority → retire
-late stale acquire closed
-Control replacement/terminal aborts and retires all child Data
-old Control/Data terminal cannot clear new state
-Data terminal alone cannot clear Control
-same S/G/P fresh carrier supported
-```
-
-Role实现不得复制 `@loomrealm/data` reader/writer/schema/terminal mechanics。
 
 ---
 
-## 6. Vertical Evidence
+## 6. Renderer Role Evidence
 
-Production role path必须是：
+Must prove：
 
 ```text
-Main Runtime ready
+construction-time optional RendererDataBinding only
+no mutable registration/service locator/RendererPlatform
+Snapshot add S/G/P → start acquire without blocking later Control states
+remove/replace authority → abort pending + retire current
+G1→G2 cannot install late G1 result
+same exact S/G/P installed/pending is kept, not duplicated
+Control A→B aborts/retires all A Data
+old Control/Data late terminal/result cannot affect B
+Data terminal alone keeps Control current
+same-generation fresh carrier supported
+one surfaced Binding rejection latches Renderer-wide acquisition terminal
+Binding rejection aborts every other pending acquire + blocks all future acquire
+Binding rejection preserves unrelated current peers + Control solely for that cause
+peer-construction failure has same acquisition-terminal isolation
+Binding absent keeps M7 holder semantics
+```
+
+Role MUST NOT duplicate `@loomrealm/data` reader/writer/schema/terminal mechanics。
+
+---
+
+## 7. Vertical Evidence
+
+Production role path：
+
+```text
+Main Runtime lifecycle commit
 → Main DataAuthority commit
 → real Renderer Control publication
 → Renderer Binding acquire
@@ -172,59 +207,62 @@ Subsystem Binding acquire
 → real RendererDataPeer / SubsystemDataPeer
 ```
 
-M8 vertical不证明 Platform 如何取得 Main-authoritative `S/G/P` 或如何在 physical pair commit前重新验证 current Runtime/current Renderer/current DataAuthority；该 evidence从 M9开始。
+M8 vertical does not prove how Platform gets Main-authoritative `S/G/P` or performs candidate install revalidation；that is M9 evidence。
 
-必须覆盖：
+Must cover：
 
 ```text
-initial installation
-late G1 acquisition after revoke
+normal atomic ready + DataAuthority publication
+normal atomic ready-exit + authority removal
+initial Data installation
+late G1 acquire after revoke
 same-generation carrier loss/replacement
-G1→G2 authority replacement
-Renderer A→B replacement with same G
-Binding absent
-Binding terminal
+G1→G2 Runtime replacement
+Renderer A→B same-G replacement
+Subsystem graceful/fatal teardown
+Renderer multi-slot Binding-terminal fan-out
+Subsystem Binding terminal
+trusted-integration construction failure on both roles
+Binding absence
 Session terminal
 Data failure isolation
-Control/Runtime processing remains non-blocking while Data acquire is pending
+Control/Runtime remain non-blocking while Data acquire pending
 ```
 
-禁止 test直接写 Main private authority、直接构造 current Renderer Snapshot、直接注入 role current peer。
+Tests MUST NOT write Main private authority、construct current Renderer Snapshot manually or inject role current peer directly。
 
 ---
 
-## 7. `@loomrealm/data` Evidence Boundary
+## 8. `@loomrealm/data` Evidence Boundary
 
-Existing package-local qualification保持 green：
+Existing package-local tests stay green：
 
 ```text
 single reader
 single serialized writer
-role direction/static validation
+static role direction/routing
 terminal first-wins
 no retry/replay
-fresh peer has no inherited writer/reader state
+fresh peer has no inherited reader/writer state
 ```
 
-M8只新增“真实 role consumer”证据。
+M8 adds real role-consumer/lifecycle evidence only。
 
-以下仍不在 M8 claim：
+Still deferred：
 
 ```text
 fresh Desired Interest republish
 Input State/Event/Reset effective semantics
-fresh Render registry/snapshot publication
+fresh Render domains/snapshot baseline
 Render revision/patch/event stateful semantics
-Hostra WebSocket vs PWA MessagePort abstract trace equivalence
+Hostra WebSocket vs PWA MessagePort abstract profile equivalence
 ```
 
-因此 M8 complete 不得表述为“Renderer Data Profile fully conformant”。
+Therefore M8 completion MUST NOT be described as “Renderer Data Profile fully conformant”。Concrete product Data capability is not qualified until M10/M11 plus platform milestones complete their obligations。
 
 ---
 
-## 8. Dependency Evidence
-
-M8 target：
+## 9. Dependency Evidence
 
 ```text
 @loomrealm/platform-ports depends on:
@@ -251,69 +289,81 @@ M8 target：
     @loomrealm/data
 ```
 
-禁止 Main↔Renderer reverse dependency、role→concrete Platform、platform-ports→protocol/role。
+Forbidden：Main↔Renderer reverse dependency、role→concrete Platform、platform-ports→protocol/role。
 
 ---
 
-## 9. Regression Evidence
+## 10. Regression Evidence
 
-必须保持 M1–M7，特别检查：
+Keep M1–M7 green, especially：
 
 ```text
-M6 Hostra Runtime-only path remains valid without fake Data Binding
-M7 Renderer Control capability-absent/present/replacement semantics unchanged
-Renderer Control dataAuthorities representation remains exact
-Data failure cannot become Runtime failure
-Frame call/return/unwind semantics unchanged
-Session terminal still owns outer cleanup
+M6 Hostra Runtime-only path needs no fake Data Binding
+M7 Renderer Control capability absence/presence/replacement unchanged
+Renderer Control DataAuthority representation remains exact
+Data acquisition/peer/cleanup failure cannot become Runtime failure
+Frame call/return/unwind ordering unchanged
+Session terminal remains outer cleanup authority
+Renderer Control consumption is never blocked by Data provisioning
+Subsystem Runtime Control/Frame processing is never blocked by Data provisioning
 @loomrealm/data package-local tests remain green
 ```
 
 ---
 
-## 10. Implementation Checklist
+## 11. Implementation Checklist
 
 ```text
-[ ] Main DataAuthority allocation/revocation implemented
-[ ] generation monotonic high-water implemented
+[ ] Main generation high-water implemented
 [ ] profile fixed to loomrealm.renderer-data/1
-[ ] non-empty Renderer Snapshot projection implemented
-[ ] Data transport loss leaves Main authority unchanged
-[ ] generation exhaustion cannot wrap/reuse or fail Runtime/Frame
-[ ] DataAuthority projection ordering has no authority semantics
+[ ] ready transition commits Runtime+DataAuthority atomically for Renderer visibility
+[ ] ready exit commits Runtime+revocation atomically for Renderer visibility
+[ ] generation exhaustion no-wrap/no Runtime-Frame failure
+[ ] Data transport loss/reconnect leaves Main authority/revision unchanged
 
 [ ] RendererDataBinding implemented
 [ ] SubsystemDataBinding implemented
-[ ] abort / terminal settlement implemented
-[ ] internally absorbed transient provisioning failure may leave acquire pending
-[ ] M8 does not claim Platform authority-feed / commit-time paired revalidation
-[ ] no generic Binding/Broker framework introduced
+[ ] pending/abort settlement implemented
+[ ] transient internal provisioning failure may leave acquire pending
+[ ] Renderer Binding terminal fan-out implemented
+[ ] Binding terminal preserves already-current peers solely for that cause
+[ ] no generic Binding/Broker/error framework
 
 [ ] Subsystem optional Data integration implemented
-[ ] Subsystem pending Data acquire does not block Runtime/Frame handling
-[ ] Renderer construction-time optional Data Binding seam implemented
-[ ] Renderer Control-driven Data reconciliation implemented
-[ ] Renderer Data reconciliation does not block later Control Snapshot consumption
+[ ] pending acquire non-blocking
+[ ] ready-exit teardown implemented
+[ ] teardown reuses terminalCleanupDeadlineMs
+[ ] cleanup failure does not replace Runtime result
+[ ] Subsystem construction-failure isolation implemented
+
+[ ] Renderer construction-time optional Binding seam implemented
+[ ] Control-driven reconciliation implemented
+[ ] reconciliation non-blocking
 [ ] stale acquire/current terminal identity-safe
-[ ] Control parent terminal retires Renderer Data
-[ ] Data terminal does not mutate Control/Runtime/Frame authority
+[ ] Control parent terminal retires all child Data
+[ ] Renderer acquisition-terminal fan-out implemented
+[ ] Renderer construction-failure isolation implemented
+[ ] Data terminal never clears Control
 
 [ ] deterministic paired MemoryCarrier vertical passes
 [ ] same-generation fresh carrier passes
 [ ] G1→G2 replacement passes
 [ ] Renderer A→B same-G replacement passes
+[ ] Subsystem teardown trace passes
+[ ] multi-slot Binding-terminal trace passes
+[ ] trusted-integration failure traces pass
 [ ] capability-absent paths pass
 
-[ ] no InputManager/RenderManager placeholder abstractions
+[ ] no InputManager/RenderManager/Store placeholder framework
 [ ] M1–M7 regression green
 [ ] build/type/test/pack clean
 ```
 
 ---
 
-## 11. Documentation Closure After Implementation
+## 12. Documentation Closure After Implementation
 
-Implementation qualification完成后，再新增/更新：
+After qualification, record implementation evidence in：
 
 ```text
 doc/30-implementation/m8-qualification.md
@@ -322,10 +372,31 @@ phase-1-delivery-plan M8 status
 package/module docs current status
 ```
 
-Frozen contracts不因实现完成改变语义。
+Frozen contracts and this preimplementation design do not change merely because implementation completed。
 
 ---
 
-## 12. Freeze Statement
+## 13. Implementation Freeze Gate
 
-M8只关闭 logical DataAuthority + role-facing current Data connection integration。任何需要 endpoint/ticket/IPC/WebSocket、Input business state、Render business state或跨平台 physical equivalence 的实现都必须留给 M9/M10/M11/M14/M16，而不是通过 M8 新增泛化 abstraction提前吸收。
+**Gate status: CLOSED.**
+
+The M8 implementation may proceed without another architecture-design pass。Coding-time choices are limited to ordinary private layout/naming that preserve the frozen observable semantics above。
+
+Reopen M8 design only if：
+
+```text
+1. implementation reveals a direct contradiction with a Frozen contract; or
+2. a real M8 consumer cannot be implemented without changing an observable seam frozen here.
+```
+
+The following are NOT reopen reasons：
+
+```text
+wanting symmetry
+future M9/M10/M11 convenience
+reducing a few call sites
+test-only convenience
+adding generic framework/registry/service abstractions
+```
+
+M8 closes logical DataAuthority + role-facing current Data lifecycle only。Endpoint/ticket/IPC/WebSocket、Input business state、Render business state and cross-platform physical equivalence remain in their later milestones。
