@@ -14,3 +14,7 @@ export {
   type HostraPrepareOptions,
 } from "./prepare.js";
 export { createHostraRuntimeHosting } from "./runtime-hosting.js";
+export type {
+  HostraRuntimeDataPrepareRequest,
+  HostraRuntimeDataProvisioner,
+} from "./data-provisioning.js";

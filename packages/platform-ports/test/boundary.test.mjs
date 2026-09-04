@@ -19,6 +19,14 @@ test("M8 exposes only the two exact role-facing Data Binding seams", async () =>
   assert.doesNotMatch(declarations, /(GenericDataBinding|UniversalConnection|DataConnectionBroker|BindingError)/);
 });
 
+test("M9 exposes the exact Main-to-Platform Data authority sink", async () => {
+  const declarations = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
+  assert.match(declarations, /interface DataConnectionAuthorityEntry \{\s*readonly subsystemKey: string;\s*readonly generation: number;\s*readonly dataProfile: string;\s*readonly runtime: HostedRuntime;\s*\}/);
+  assert.match(declarations, /interface DataConnectionAuthorityView \{\s*readonly rendererControlToken: string;\s*readonly entries: readonly DataConnectionAuthorityEntry\[\];\s*\}/);
+  assert.match(declarations, /interface DataConnectionAuthoritySink \{\s*replace\(view: DataConnectionAuthorityView \| null\): void;\s*\}/);
+  assert.doesNotMatch(declarations, /(AuthorityStream|ObserverHub|ConnectionRegistry|ConnectionManager)/);
+});
+
 test("platform-ports keeps its one-way Foundation-only runtime dependency", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   assert.deepEqual(Object.keys(manifest.dependencies), ["@loomrealm/foundation"]);

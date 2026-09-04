@@ -18,6 +18,16 @@ const policy = Object.freeze({
   terminationGraceMs: 100,
 });
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
 async function prepared(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "loomrealm-runtime-"));
   t.after(async () => {
@@ -69,6 +79,77 @@ test("RuntimeHosting launches the package Runner, acquires once, and observes ac
   await hosted.requestTermination(AbortSignal.abort(new Error("late caller abort")));
   await hosted.terminated;
   assert.ok(["closed", "lost"].includes((await carrier.closed).kind));
+});
+
+test("RuntimeHosting hands off an exact child-bound Data provisioner before launch resolves", async (t) => {
+  const game = await prepared(t);
+  let handoff = null;
+  const hosting = createHostraRuntimeHosting({
+    launchPlan: game.launchPlan,
+    onRuntimeDataProvisioner(runtime, provisioner) {
+      handoff = { runtime, provisioner };
+    },
+  });
+  const hosted = await hosting.launch(
+    { subsystemKey: "root", bootstrapToken: "token" },
+    new AbortController().signal,
+  );
+  assert.equal(handoff.runtime, hosted);
+
+  const connected = deferred();
+  const dataPath = `/${"a".repeat(43)}`;
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0, path: dataPath });
+  t.after(() => new Promise((resolve) => server.close(() => resolve())));
+  await new Promise((resolve, reject) => {
+    server.once("listening", resolve);
+    server.once("error", reject);
+  });
+  server.once("connection", (socket) => connected.resolve(socket));
+  const address = server.address();
+  assert.notEqual(address, null);
+  assert.equal(typeof address, "object");
+  const prepare = handoff.provisioner.prepare({
+    candidateId: "candidate-a",
+    endpoint: `ws://127.0.0.1:${address.port}${dataPath}`,
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  }, new AbortController().signal);
+  const socket = await connected.promise;
+  await prepare;
+
+  await assert.rejects(handoff.provisioner.prepare({
+    candidateId: "candidate-b",
+    endpoint: `ws://127.0.0.1:${address.port}${dataPath}`,
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  }, new AbortController().signal), /already prepared/);
+  await handoff.provisioner.commit("candidate-a", new AbortController().signal);
+  const overflowClosed = new Promise((resolve) => socket.once("close", resolve));
+  for (let index = 0; index < 65; index += 1) {
+    try { socket.send(`held-${index}`); } catch {}
+  }
+  await overflowClosed;
+  assert.doesNotThrow(() => handoff.provisioner.revoke("candidate-a"));
+
+  await hosted.requestTermination(new AbortController().signal);
+  await hosted.terminated;
+});
+
+test("throwing Runtime Data provisioner handoff fails launch after child convergence", async (t) => {
+  const game = await prepared(t);
+  const setupFailure = new Error("bad composition");
+  await assert.rejects(
+    createHostraRuntimeHosting({
+      launchPlan: game.launchPlan,
+      onRuntimeDataProvisioner() {
+        throw setupFailure;
+      },
+    }).launch(
+      { subsystemKey: "root", bootstrapToken: "token" },
+      new AbortController().signal,
+    ),
+    (error) => error === setupFailure,
+  );
 });
 
 test("RuntimeHosting rejects an already-aborted launch without side effects", async (t) => {

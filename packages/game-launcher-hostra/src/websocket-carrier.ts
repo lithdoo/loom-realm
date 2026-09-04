@@ -22,12 +22,19 @@ function deferred<T>(): Deferred<T> {
   };
 }
 
-export function createWebSocketCarrier(socket: WebSocket): MessageCarrier {
+export function createWebSocketCarrier(
+  socket: WebSocket,
+  buffering?: {
+    readonly maxBufferedMessages: number;
+    readonly maxBufferedBytes: number;
+  },
+): MessageCarrier {
   const terminal = deferred<CarrierClosed>();
   const queued: string[] = [];
   const waiters: ((result: IteratorResult<string>) => void)[] = [];
   let terminalFact: CarrierClosed | null = null;
   let readerClaimed = false;
+  let queuedBytes = 0;
 
   const settle = (fact: CarrierClosed) => {
     if (terminalFact !== null) return;
@@ -53,7 +60,19 @@ export function createWebSocketCarrier(socket: WebSocket): MessageCarrier {
     }
     const message = typeof data === "string" ? data : data.toString("utf8");
     const waiter = waiters.shift();
-    if (waiter === undefined) queued.push(message);
+    if (waiter === undefined) {
+      const bytes = Buffer.byteLength(message, "utf8");
+      if (
+        buffering !== undefined &&
+        (queued.length + 1 > buffering.maxBufferedMessages ||
+          queuedBytes + bytes > buffering.maxBufferedBytes)
+      ) {
+        lose(new Error("WebSocket carrier receive buffer exceeded"));
+        return;
+      }
+      queued.push(message);
+      queuedBytes += bytes;
+    }
     else waiter({ done: false, value: message });
   });
   socket.once("error", () => lose(new Error("WebSocket transport failed")));
@@ -84,7 +103,10 @@ export function createWebSocketCarrier(socket: WebSocket): MessageCarrier {
           return {
             next(): Promise<IteratorResult<string>> {
               const message = queued.shift();
-              if (message !== undefined) return Promise.resolve({ done: false, value: message });
+              if (message !== undefined) {
+                queuedBytes -= Buffer.byteLength(message, "utf8");
+                return Promise.resolve({ done: false, value: message });
+              }
               if (terminalFact !== null) return Promise.resolve({ done: true, value: undefined });
               return new Promise((resolve) => waiters.push(resolve));
             },

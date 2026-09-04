@@ -6,6 +6,7 @@ import { runSubsystem } from "@loomrealm/subsystem/host";
 import type { SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import WebSocket from "ws";
 import { createWebSocketCarrier } from "../websocket-carrier.js";
+import { createRunnerDataProvisioning } from "./data-provisioning.js";
 
 export const BOOTSTRAP_ENV_KEY = "LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP";
 const BOOTSTRAP_KEYS = [
@@ -119,7 +120,10 @@ function connect(endpoint: string, signal: AbortSignal): Promise<MessageCarrier>
   });
 }
 
-export async function runBootstrap(bootstrap: RunnerBootstrapV1): Promise<void> {
+export async function runBootstrap(
+  bootstrap: RunnerBootstrapV1,
+  earlyDataProvisioning = createRunnerDataProvisioning(),
+): Promise<void> {
   const imported = await import(pathToFileURL(bootstrap.physicalModule).href);
   if (typeof imported.default !== "function") {
     throw new TypeError("Subsystem Definition Module default export is invalid");
@@ -138,9 +142,12 @@ export async function runBootstrap(bootstrap: RunnerBootstrapV1): Promise<void> 
       return () => clearTimeout(timer);
     },
   });
-  await runSubsystem({
+  const dataProvisioning = earlyDataProvisioning;
+  try {
+    await runSubsystem({
     definition: imported.default as SubsystemDefinitionFactory,
     runtimeControl,
+    ...(dataProvisioning === null ? {} : { data: dataProvisioning.binding }),
     runtimePolicy: {
       scheduler,
       helloDeadlineMs: bootstrap.helloDeadlineMs,
@@ -152,5 +159,8 @@ export async function runBootstrap(bootstrap: RunnerBootstrapV1): Promise<void> 
       bootstrapToken: bootstrap.bootstrapToken,
       controlProtocolVersions: [1],
     },
-  });
+    });
+  } finally {
+    dataProvisioning?.close();
+  }
 }

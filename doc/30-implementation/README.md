@@ -60,15 +60,16 @@ M5  Main Runtime/Frame authority              ✅
 M6  Hostra Runtime physical vertical          ✅ Qualified 2026-09-03
 M7  Renderer Control                          ✅ Qualified 2026-09-03
 M8  Data logical authority / role integration ✅ Qualified 2026-09-04
+M9  Desktop Data Broker / late provisioning   ✅ Qualified 2026-09-04
 ```
 
-M8 qualification evidence：[m8-qualification.md](./m8-qualification.md)。
+Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md)。
 
 ---
 
-## 当前下一实现门：M9 Desktop DataConnectionBroker
+## M9 Desktop DataConnectionBroker — Implemented / Qualified
 
-M9 is already **Implementation Frozen / Preimplementation Closed**。Implementation starts directly from ADR 0028 + root `M9_01`–`M9_05`; no additional architecture pass is expected unless a frozen reopen condition is demonstrated。
+M9 implementation is qualified on 2026-09-04；evidence is recorded in [m9-qualification.md](./m9-qualification.md)。ADR 0028 + root `M9_01`–`M9_05` remain the semantic source。
 
 Exact new public/shared surfaces：
 
@@ -222,7 +223,7 @@ M9 does not claim full Connection-v1 cross-platform conformance or M10/M11 child
 ```text
 M1–M8 ✅
 ↓
-M9 Desktop Data Broker / Late Provisioning   🔒 implement next
+M9 Desktop Data Broker / Late Provisioning   ✅ qualified 2026-09-04
 ↓
 M10 User Input
 M11 Render

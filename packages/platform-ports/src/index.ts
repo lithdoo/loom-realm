@@ -82,6 +82,25 @@ export interface HostedRuntime {
   requestTermination(signal: AbortSignal): Promise<void>;
 }
 
+/** One Main-committed Data installation authority fact for a physical Runtime. */
+export interface DataConnectionAuthorityEntry {
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly runtime: HostedRuntime;
+}
+
+/** Complete current Renderer Data installation authority snapshot. */
+export interface DataConnectionAuthorityView {
+  readonly rendererControlToken: string;
+  readonly entries: readonly DataConnectionAuthorityEntry[];
+}
+
+/** Synchronous full-replacement feed from Main into one concrete Platform. */
+export interface DataConnectionAuthoritySink {
+  replace(view: DataConnectionAuthorityView | null): void;
+}
+
 /** Physical Runtime creation capability exposed by a prepared Platform. */
 export interface RuntimeHosting {
   launch(

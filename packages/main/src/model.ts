@@ -1,4 +1,5 @@
 import type {
+  DataConnectionAuthoritySink,
   OpaqueMaterialGenerator,
   RendererControlBinding,
   DeadlineScheduler,
@@ -20,6 +21,7 @@ export interface MainPlatform {
   readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
   readonly rendererControl?: RendererControlBinding;
+  readonly dataConnections?: DataConnectionAuthoritySink;
 }
 
 export interface MainPolicy {

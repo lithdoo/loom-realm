@@ -11,6 +11,10 @@ import WebSocket, { WebSocketServer } from "ws";
 import { HostraLauncherError, launcherError } from "./errors.js";
 import type { HostraLaunchPlan, HostraResolvedRuntime } from "./launch-plan.js";
 import { BOOTSTRAP_ENV_KEY, type RunnerBootstrapV1 } from "./runner/bootstrap.js";
+import {
+  createHostraRuntimeDataProvisioner,
+  type HostraRuntimeDataProvisioner,
+} from "./data-provisioning.js";
 import { createWebSocketCarrier } from "./websocket-carrier.js";
 
 const ENV_ALLOWLIST = [
@@ -133,6 +137,10 @@ async function launchAttempt(
   runtimes: ReadonlyMap<string, HostraResolvedRuntime>,
   request: RuntimeLaunchRequest,
   signal: AbortSignal,
+  onRuntimeDataProvisioner?: (
+    runtime: HostedRuntime,
+    provisioner: HostraRuntimeDataProvisioner,
+  ) => void,
 ): Promise<HostedRuntime> {
   if (signal.aborted) throw signal.reason;
   const runtime = validateRequest(request, runtimes);
@@ -264,7 +272,9 @@ async function launchAttempt(
       shell: false,
       cwd: plan.canonicalInstallationRoot,
       env: buildRunnerEnvironment(process.env, encodedBootstrap),
-      stdio: "ignore",
+      stdio: onRuntimeDataProvisioner === undefined
+        ? "ignore"
+        : ["ignore", "ignore", "ignore", "ipc"],
     });
   } catch (error) {
     signal.removeEventListener("abort", abandon);
@@ -366,20 +376,46 @@ async function launchAttempt(
       return terminationConvergence;
     },
   });
+  if (onRuntimeDataProvisioner !== undefined) {
+    const provisioner = createHostraRuntimeDataProvisioner(child);
+    try {
+      onRuntimeDataProvisioner(hosted, provisioner);
+    } catch (error) {
+      forceTerminate();
+      await terminated.promise;
+      throw error;
+    }
+  }
   return hosted;
 }
 
 export function createHostraRuntimeHosting(options: {
   readonly launchPlan: HostraLaunchPlan;
+  readonly onRuntimeDataProvisioner?: (
+    runtime: HostedRuntime,
+    provisioner: HostraRuntimeDataProvisioner,
+  ) => void;
 }): RuntimeHosting {
   if (options === null || typeof options !== "object" || options.launchPlan === null) {
     throw new TypeError("Invalid Hostra RuntimeHosting options");
   }
   const plan = options.launchPlan;
+  if (
+    options.onRuntimeDataProvisioner !== undefined &&
+    typeof options.onRuntimeDataProvisioner !== "function"
+  ) {
+    throw new TypeError("Invalid Runtime Data provisioner hook");
+  }
   const runtimes = new Map(plan.runtimes.map((runtime) => [runtime.subsystemKey, runtime] as const));
   return Object.freeze({
     launch(request: RuntimeLaunchRequest, signal: AbortSignal) {
-      return launchAttempt(plan, runtimes, request, signal);
+      return launchAttempt(
+        plan,
+        runtimes,
+        request,
+        signal,
+        options.onRuntimeDataProvisioner,
+      );
     },
   });
 }

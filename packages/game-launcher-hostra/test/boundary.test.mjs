@@ -13,6 +13,14 @@ test("public runtime surface stays narrow", () => {
 
 test("declarations expose no Runner bootstrap or mutable attempt state", async () => {
   const declaration = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
+  const provisioning = await readFile(new URL("../dist/data-provisioning.d.ts", import.meta.url), "utf8");
+  assert.match(declaration, /HostraRuntimeDataPrepareRequest/);
+  assert.match(declaration, /HostraRuntimeDataProvisioner/);
+  assert.match(provisioning, /interface HostraRuntimeDataPrepareRequest/);
+  assert.match(provisioning, /interface HostraRuntimeDataProvisioner/);
+  assert.match(provisioning, /prepare\(request: HostraRuntimeDataPrepareRequest, signal: AbortSignal\): Promise<void>/);
+  assert.match(provisioning, /commit\(candidateId: string, signal: AbortSignal\): Promise<void>/);
+  assert.match(provisioning, /revoke\(candidateId: string\): void/);
   assert.equal(declaration.includes("RunnerBootstrapV1"), false);
   assert.equal(declaration.includes("controlEndpoint"), false);
   assert.equal(declaration.includes("ownership"), false);

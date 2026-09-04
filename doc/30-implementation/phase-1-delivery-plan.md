@@ -131,7 +131,7 @@ Not M8：physical Platform authority feed、Broker、candidate pairing/cutover�
 
 ---
 
-## M9：Desktop DataConnectionBroker / Late Provisioning Core — **Implementation Frozen / Ready to Implement**
+## M9：Desktop DataConnectionBroker / Late Provisioning Core — **Implemented / Qualified (2026-09-04)**
 
 Facts：
 
@@ -143,6 +143,8 @@ M9_03_PAIRED_INSTALLATION.md
 M9_04_VERTICAL_INTEGRATION.md
 M9_05_QUALIFICATION_CLOSURE.md
 ```
+
+Implementation evidence：[m9-qualification.md](./m9-qualification.md)。
 
 ### M9/01 Main → Platform authority feed
 

@@ -1,7 +1,7 @@
-# `@loomrealm/game-launcher-hostra` M6 实现
+# `@loomrealm/game-launcher-hostra` M6 + M9 实现
 
-> 状态：Implemented / Qualified Baseline
-> 资格日期：2026-09-03
+> 状态：Implemented / Qualified through M9
+> 最近资格日期：2026-09-04
 > 资格运行：GitHub Actions `33705805220`（Ubuntu / Windows，Node 20 / 24）
 > 冻结日期：2026-09-02  
 > 阶段：M6 Hostra Platform Vertical  
@@ -44,7 +44,7 @@ Hostra BrowserWindow integration
 Hostra Shell RPC abstraction
 ```
 
-M8+ 才增加 Data provisioning；M12+ 才增加 Content integration。M6 MUST NOT 预建 dormant provisioning channel 或未来 capability placeholder。
+M9 已按真实 consumer 需求增加 Runtime-scoped late Data provisioning；M12+ 才增加 Content integration。未提供 M9 hook 的 M6/headless 路径仍不创建 provisioning IPC。
 
 ---
 

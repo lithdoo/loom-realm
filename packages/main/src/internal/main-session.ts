@@ -1,4 +1,9 @@
-import type { HostedRuntime, RendererControlBinding } from "@loomrealm/platform-ports";
+import type {
+  DataConnectionAuthorityEntry,
+  DataConnectionAuthorityView,
+  HostedRuntime,
+  RendererControlBinding,
+} from "@loomrealm/platform-ports";
 import {
   createMainRendererControlPeer,
   prepareRendererHelloResultV1,
@@ -176,6 +181,14 @@ function validateOptions(options: RunMainOptions): LogicalGameBootstrap {
   ) {
     throw new TypeError("Invalid Renderer Control Binding");
   }
+  if (
+    platform.dataConnections !== undefined &&
+    (platform.dataConnections === null ||
+      typeof platform.dataConnections !== "object" ||
+      typeof platform.dataConnections.replace !== "function")
+  ) {
+    throw new TypeError("Invalid Data Connection authority sink");
+  }
 
   const policy = options.policy;
   if (policy === null || typeof policy !== "object") {
@@ -267,8 +280,10 @@ class MainSessionRuntime {
   private rendererSnapshot!: RendererAuthoritySnapshotV1;
   private rendererPayloadText = "";
   private currentRendererPeer: MainRendererControlPeer | null = null;
+  private currentRendererControlToken: string | null = null;
   private rendererCandidate: RendererCandidateAttempt | null = null;
   private rendererBindingTerminal = false;
+  private dataConnectionView: DataConnectionAuthorityView | null = null;
 
   private terminal: SessionTerminal | null = null;
   private stopRequested = false;
@@ -280,6 +295,7 @@ class MainSessionRuntime {
 
   constructor(private readonly options: RunMainOptions) {
     this.bootstrap = validateOptions(options);
+    this.options.platform.dataConnections?.replace(null);
     this.sessionId = this.generateOpaqueMaterial("Session identity");
     this.rendererSnapshot = this.projectRendererSnapshot();
     this.rendererPayloadText = this.rendererPayload(this.rendererSnapshot);
@@ -1259,7 +1275,11 @@ class MainSessionRuntime {
     // Freshness across calls belongs to OpaqueMaterialGenerator. Main only
     // guards material that still carries live Session authority; retaining
     // retired Renderer tokens here would make reconnect history unbounded.
-    if (material === this.sessionId || this.rendererCandidate?.token === material)
+    if (
+      material === this.sessionId ||
+      this.rendererCandidate?.token === material ||
+      this.currentRendererControlToken === material
+    )
       return true;
     for (const runtime of this.runtimes.values())
       if (runtime.bootstrapToken === material) return true;
@@ -1332,6 +1352,69 @@ class MainSessionRuntime {
     this.currentRendererPeer?.publish(this.rendererSnapshot);
   }
 
+  private projectDataConnectionAuthority(): DataConnectionAuthorityView | null {
+    const rendererControlToken = this.currentRendererControlToken;
+    if (this.terminal !== null || rendererControlToken === null) return null;
+    const entries: DataConnectionAuthorityEntry[] = [];
+    for (const subsystemKey of this.bootstrap.subsystemKeys) {
+      const record = this.runtimes.get(subsystemKey);
+      if (
+        record === undefined ||
+        record.failure !== null ||
+        record.phase !== "ready" ||
+        record.hosted === null
+      ) {
+        continue;
+      }
+      entries.push(Object.freeze({
+        subsystemKey,
+        generation: 1,
+        dataProfile: RENDERER_DATA_PROFILE_V1,
+        runtime: record.hosted,
+      }));
+    }
+    entries.sort((left, right) =>
+      left.subsystemKey < right.subsystemKey
+        ? -1
+        : left.subsystemKey > right.subsystemKey
+          ? 1
+          : 0,
+    );
+    return Object.freeze({
+      rendererControlToken,
+      entries: Object.freeze(entries),
+    });
+  }
+
+  private sameDataConnectionAuthority(
+    left: DataConnectionAuthorityView | null,
+    right: DataConnectionAuthorityView | null,
+  ): boolean {
+    if (left === null || right === null) return left === right;
+    if (
+      left.rendererControlToken !== right.rendererControlToken ||
+      left.entries.length !== right.entries.length
+    ) {
+      return false;
+    }
+    return left.entries.every((entry, index) => {
+      const other = right.entries[index]!;
+      return entry.subsystemKey === other.subsystemKey &&
+        entry.generation === other.generation &&
+        entry.dataProfile === other.dataProfile &&
+        entry.runtime === other.runtime;
+    });
+  }
+
+  private observeDataConnectionAuthority(): void {
+    const sink = this.options.platform.dataConnections;
+    if (sink === undefined) return;
+    const projected = this.projectDataConnectionAuthority();
+    if (this.sameDataConnectionAuthority(this.dataConnectionView, projected)) return;
+    this.dataConnectionView = projected;
+    sink.replace(projected);
+  }
+
   private armRendererCandidateSlot(): void {
     const binding = this.options.platform.rendererControl;
     if (binding === undefined || this.rendererBindingTerminal || this.rendererCandidate !== null || this.terminal !== null || this.stopRequested)
@@ -1401,6 +1484,7 @@ class MainSessionRuntime {
     }
     const old = this.currentRendererPeer;
     this.currentRendererPeer = peer;
+    this.currentRendererControlToken = token;
     this.rendererCandidate = null;
     if (old !== null && old !== peer) old.retire();
     queueMicrotask(() => this.armRendererCandidateSlot());
@@ -1408,7 +1492,10 @@ class MainSessionRuntime {
   }
 
   private observeRendererPeerTerminal(attempt: RendererCandidateAttempt, peer: MainRendererControlPeer): void {
-    if (this.currentRendererPeer === peer) this.currentRendererPeer = null;
+    if (this.currentRendererPeer === peer) {
+      this.currentRendererPeer = null;
+      this.currentRendererControlToken = null;
+    }
     if (this.rendererCandidate === attempt) {
       this.rendererCandidate = null;
       this.armRendererCandidateSlot();
@@ -1429,6 +1516,7 @@ class MainSessionRuntime {
     candidate?.peer?.retire();
     const current = this.currentRendererPeer;
     this.currentRendererPeer = null;
+    this.currentRendererControlToken = null;
     current?.retire();
   }
 
@@ -1456,6 +1544,7 @@ class MainSessionRuntime {
     const result = this.mutationTail.then(async () => {
       const value = await operation();
       this.observeRendererAuthority();
+      this.observeDataConnectionAuthority();
       return value;
     });
     this.mutationTail = result.then(
@@ -1470,6 +1559,7 @@ class MainSessionRuntime {
     const frozen = cloneControlOutcome(outcome);
     this.terminal = Object.freeze({ kind: "root", outcome: frozen });
     this.retireRendererControl();
+    this.observeDataConnectionAuthority();
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1485,6 +1575,7 @@ class MainSessionRuntime {
     if (this.terminal !== null) return;
     this.terminal = Object.freeze({ kind: "shutdown" });
     this.retireRendererControl();
+    this.observeDataConnectionAuthority();
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }
@@ -1498,6 +1589,7 @@ class MainSessionRuntime {
     );
     this.terminal = Object.freeze({ kind: "fatal", failure: primary });
     this.retireRendererControl();
+    this.observeDataConnectionAuthority();
     this.sessionController.abort();
     void this.finishTerminal(this.terminal);
   }

@@ -374,10 +374,11 @@ business → game-package / launcher / protocol packages
     M4 Subsystem + M5 Main real role consumers qualified
 
 @loomrealm/platform-ports
-    Implemented Baseline through M8
+    Implemented Baseline through M9
     M4/M5 slices qualified
     M7 OpaqueMaterialGenerator + optional RendererControlBinding implemented / qualified
     M8 RendererDataBinding + SubsystemDataBinding implemented / qualified
+    M9 DataConnectionAuthorityEntry/View/Sink implemented / qualified
 
 @loomrealm/subsystem
     M4 Runtime/Frame Core Implemented
@@ -390,6 +391,7 @@ business → game-package / launcher / protocol packages
     Main Runtime Control consumer qualified
     M7 Renderer authority projection/currentness implemented / qualified
     M8 ready-derived DataAuthority projection implemented / qualified
+    M9 current Renderer + exact HostedRuntime full-view sink projection implemented / qualified
 
 @loomrealm/renderer-control
     M7 concrete asymmetric peers implemented / qualified
@@ -404,8 +406,13 @@ business → game-package / launcher / protocol packages
     M8 real Renderer/Subsystem role consumers qualified
 
 @loomrealm/game-launcher-hostra
-    M6 Implemented / Qualified Baseline
+    M6 Runtime Hosting + M9 late Data provisioning Implemented / Qualified
     real Node Runner + Runtime Control WebSocket vertical qualified
+    exact Runtime-scoped provisioner + dedicated child IPC qualified
+
+@loomrealm/desktop
+    M9 private Desktop Data Broker workspace Implemented / Qualified
+    paired loopback Data WebSocket install/recovery qualified
 
 @loomrealm/game-launcher-pwa
     design/PREPARE component ready; M15 implementation pending
@@ -414,12 +421,11 @@ business → game-package / launcher / protocol packages
     v1 Release Candidate implementation + tests
 ```
 
-下一实现门：
+当前下一实现门：
 
 ```text
-M9 Desktop DataConnectionBroker / Late Provisioning Core
-    starts from the qualified M8 role-facing current Data seam
-    + RendererDataAuthorityV1 wire shape
+M10 User Input v1 + InputManager
+    starts from the qualified M9 fresh physical Data peer lifecycle
 ```
 
 M7 不要求 Hostra BrowserWindow/Renderer WebSocket 或 PWA MessagePort physical realization；它们分别在 M14/M16 完成。

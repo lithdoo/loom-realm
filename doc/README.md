@@ -146,7 +146,7 @@ Renderer / Subsystem
 
 Data physical loss/reacquire does not alter Main S/G/P or Renderer revision。
 
-### Desktop Data Physical Core — M9 Frozen, Pending Implementation
+### Desktop Data Physical Core — M9 Implemented / Qualified
 
 ```text
 Main current Renderer + exact HostedRuntime + S/G/P
@@ -191,7 +191,7 @@ Physical placement：
 M6   Hostra Runtime / Node Runner / Runtime Control WS ✅
 M7   logical Renderer Control ✅
 M8   logical Data authority + role seam ✅
-M9   Desktop Data Broker / Runner late provisioning / Data WS 🔒 ready to implement
+M9   Desktop Data Broker / Runner late provisioning / Data WS ✅
 M14  BrowserWindow + physical Renderer Control + Data/Input/Render/Content full Desktop E2E
 M15  PWA Runtime vertical
 M16  PWA full Renderer/Data/Content + equivalence
@@ -248,7 +248,7 @@ M5 Main Runtime/Frame authority                   ✅ Closed
 M6 Hostra Runtime physical vertical               ✅ Qualified (2026-09-03)
 M7 Renderer Control                               ✅ Qualified (2026-09-03)
 M8 Renderer Data logical/core role integration    ✅ Qualified (2026-09-04)
-M9 Desktop DataConnectionBroker                   🔒 Implementation Frozen / Pending Code
+M9 Desktop DataConnectionBroker                   ✅ Qualified (2026-09-04)
 M10 User Input                                    Pending
 M11 Render                                        Pending
 M12 Content                                       Pending
@@ -258,9 +258,9 @@ M15 PWA Runtime vertical                          Pending
 M16 PWA Full E2E / Cross-platform equivalence     Pending
 ```
 
-**当前下一实现门 = M9 Desktop DataConnectionBroker / Late Provisioning Core。**
+**当前下一实现门 = M10 User Input v1 + InputManager。**
 
-M9 coding should start from ADR 0028 + `M9_01`–`M9_05`; no additional architecture-design pass is expected unless a frozen reopen condition is demonstrated。
+M9 implementation evidence is recorded in [m9-qualification](./30-implementation/m9-qualification.md)；the frozen plans and ADR remain its semantic source。
 
 ---
 

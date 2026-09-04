@@ -124,7 +124,7 @@ function createFakePlatform(definitions, options = {}) {
           },
         );
 
-        return Object.freeze({
+        const hosted = Object.freeze({
           runtimeControl: Object.freeze({
             async acquire(mainSignal) {
               record.acquireCount += 1;
@@ -158,11 +158,16 @@ function createFakePlatform(definitions, options = {}) {
             await pair.left.close();
           },
         });
+        record.hosted = hosted;
+        return hosted;
       },
     },
     ...(options.rendererControl === undefined
       ? {}
       : { rendererControl: options.rendererControl }),
+    ...(options.dataConnections === undefined
+      ? {}
+      : { dataConnections: options.dataConnections }),
   };
 
   return {
@@ -880,6 +885,106 @@ test("optional Renderer Binding drives a real candidate hello and committed proj
   assert.equal(slots[1].signal.aborted, true);
   while (holder.current() !== null) await new Promise((resolve) => setImmediate(resolve));
   assert.equal(holder.current(), null);
+});
+
+test("M9 projects immutable full Data authority views with exact Runtime identity and terminal null", async () => {
+  const finish = deferred();
+  const slots = [];
+  const views = [];
+  const sink = {
+    replace(view) {
+      if (view !== null) {
+        assert.equal(Object.isFrozen(view), true);
+        assert.equal(Object.isFrozen(view.entries), true);
+        assert.equal(view.entries.every(Object.isFrozen), true);
+      }
+      views.push(view);
+    },
+  };
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem(() => ({
+        async frame() {
+          await finish.promise;
+          return completed("done");
+        },
+      })),
+    },
+    {
+      dataConnections: sink,
+      rendererControl: {
+        acquire(token, signal) {
+          const slot = deferred();
+          slots.push({ token, signal, slot });
+          return slot.promise;
+        },
+      },
+    },
+  );
+
+  const result = runMain({ bootstrap: bootstrap(["root"], "root"), platform: fake.platform, policy });
+  await waitFor(() => views.length > 0, "initial Data authority null");
+  assert.deepEqual(views, [null]);
+  await waitFor(() => slots.length > 0 && fake.runtimes.has("root"), "Runtime and Renderer slot");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(views, [null], "ready Runtime without current Renderer remains null");
+
+  const pair = createMemoryCarrierPair();
+  slots[0].slot.resolve(pair.left);
+  const holder = createRendererControlHolder();
+  assert.equal((await holder.connect({
+    carrier: pair.right,
+    rendererControlToken: slots[0].token,
+  })).kind, "installed");
+  await waitFor(() => views.at(-1) !== null, "current Renderer Data authority view");
+  const published = views.at(-1);
+  assert.equal(published.rendererControlToken, slots[0].token);
+  assert.deepEqual(published.entries.map(({ subsystemKey, generation, dataProfile }) => ({ subsystemKey, generation, dataProfile })), [{
+    subsystemKey: "root",
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  }]);
+  assert.equal(published.entries[0].runtime, fake.runtimes.get("root").hosted);
+
+  finish.resolve();
+  await waitFor(() => views.at(-1) === null, "terminal Data authority null");
+  assert.deepEqual(await result, {
+    kind: "root-outcome",
+    outcome: { type: "completed", value: "done" },
+  });
+});
+
+test("current Renderer token stays live for opaque-material duplicate defense only", async () => {
+  const finish = deferred();
+  const slots = [];
+  let rendererToken;
+  const fake = createFakePlatform(
+    { root: defineSubsystem(() => ({ async frame() { await finish.promise; return completed("done"); } })) },
+    {
+      generateToken(id) {
+        if (id === 4) return rendererToken;
+        return `m9-token-${id}-${"x".repeat(48)}`;
+      },
+      rendererControl: {
+        acquire(token, signal) {
+          rendererToken ??= token;
+          const slot = deferred();
+          slots.push({ token, signal, slot });
+          return slot.promise;
+        },
+      },
+    },
+  );
+  const result = runMain({ bootstrap: bootstrap(["root"], "root"), platform: fake.platform, policy });
+  await waitFor(() => slots.length === 1, "first Renderer slot");
+  const pair = createMemoryCarrierPair();
+  slots[0].slot.resolve(pair.left);
+  const holder = createRendererControlHolder();
+  assert.equal((await holder.connect({ carrier: pair.right, rendererControlToken: rendererToken })).kind, "installed");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(slots.length, 1, "duplicate live current token cannot arm another candidate");
+  finish.resolve();
+  await result;
 });
 
 test("M8 deterministic vertical installs real paired Data peers and recovers under generation 1", async () => {
