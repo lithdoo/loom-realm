@@ -1,164 +1,201 @@
 # M9 / 03 — Paired Installation and Cutover
 
-> 状态：**Implementation Boundary Frozen / Preimplementation Closed**  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M9 Desktop DataConnectionBroker / Late Provisioning Core  
 > 落地顺序：03  
 > 最近复核：2026-09-04  
 > 前置：[M9 / 01](M9_01_DESKTOP_DATA_BROKER.md) → [M9 / 02](M9_02_RUNNER_PROVISIONING_IPC.md)  
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Connection Conformance](doc/15-contracts/renderer-subsystem-data-connection-conformance-v1.md)  
-> 目标：冻结 Desktop candidate 的 paired readiness、commit-time revalidation、single-current cutover 与 same-generation recovery；不新增 Data handshake/ACK/resume message。
+> 目标：冻结 Desktop WebSocket candidate 的 paired readiness、commit-time revalidation、single-current cutover 与 same-generation recovery；不新增 Data handshake/ACK/resume message。
 
-> **两端 socket 都连上仍然只是 prepared candidate。只有 serialized paired commit 才产生 current Data Connection。**
+> **Role acquire waits for committed carrier；Broker installation is driven by Main authority + physical readiness。**
 
 ---
 
-## 1. Candidate Preparation
+## 1. Concrete Desktop Candidate
 
-一个 candidate 必须绑定同一：
+One candidate uses two role-specific local WebSocket capabilities：
 
 ```text
-Session
-Renderer participant
-Subsystem Runtime / S
+Renderer WS ─┐
+             ├─ Desktop Broker opaque text relay
+Runner WS   ─┘
+```
+
+Each side gets fresh one-time candidate material。Broker knows both endpoints belong to the same candidate。
+
+Before commit：
+
+```text
+both sockets may physically connect
+Broker forwards zero application traffic
+unexpected pre-commit application bytes fail/dispose the candidate
+```
+
+After commit Broker relays UTF-8 text opaquely；it does not parse `@loomrealm/data` messages。
+
+---
+
+## 2. Paired Preparation
+
+Candidate binds exactly：
+
+```text
+current session-scoped sink instance
+rendererControlToken
+HostedRuntime object / subsystemKey S
 G
 P
 ```
 
-并完成：
+Physical prepare requires：
 
 ```text
 Renderer endpoint prepared
-Subsystem endpoint prepared
+AND Runner endpoint prepared through HostraRuntimeDataProvisioner
 ```
 
-任一端未 prepared：不得 commit，不得暴露 child traffic。
+One-side prepared is never current。
 
 ---
 
-## 2. Commit Gate
+## 3. Commit Gate
 
-每个 `(current Renderer, S)` slot 使用一个简单 serialized commit lane。
+Each `(rendererControlToken,S)` slot has one small serialized commit lane。
 
-Commit 前重新确认：
+Immediately before commit, Broker re-reads its latest `DataConnectionAuthorityView` and requires：
 
 ```text
 candidate still live
-Session still current
-Renderer participant still current
-target Runtime still valid
-candidate S/G/P == current Main DataAuthority S/G/P
-Renderer acquire still current
-Subsystem acquire still current
+same rendererControlToken still current
+same exact HostedRuntime object still current for S
+same exact S/G/P still present
+both physical endpoints still prepared
 ```
 
-任何条件失败：
+Role `acquire()` state is deliberately **not** part of this gate。
+
+Any mismatch：
 
 ```text
 dispose candidate
-close both physical sides
+close both sides
 install nothing
 ```
 
-不能因为 candidate 已经 physical-ready 而放宽 revalidation。
+This is the only authority revalidation point；endpoint/ticket/socket validity alone never authorizes install。
 
 ---
 
-## 3. Cutover
+## 4. Installation / Delivery
 
-如果已有 current A，prepared candidate B 可以提前存在；commit 时必须串行：
+Serialized successful commit：
 
 ```text
 revalidate B
-→ A loses current / retire
-→ B becomes sole current
-→ resolve both role-facing bindings
+→ old current A, if any, loses Broker current status
+→ B becomes sole Broker current
+→ commit Runner provisioner B
+→ commit Renderer-side delivery cell B
+→ close/retire A physical pair
 ```
 
-允许：
+Role-facing Bindings then observe one already-current carrier：
+
+```text
+waiter already pending → resolve after commit
+no waiter yet         → hold committed carrier until next acquire
+```
+
+Promise callback ordering between Renderer/Subsystem is not authority-visible；both endpoints were paired-ready before commit。
+
+Allowed：
 
 ```text
 A → none → B
 ```
 
-禁止：
+Forbidden：
 
 ```text
 A current && B current
 ```
 
-不要引入通用 TransactionManager；一个 per-slot serialized critical section 足够。
+No generic TransactionManager is needed。
 
 ---
 
-## 4. Same-generation Recovery
+## 5. Proactive and Loss Recovery
 
-Current A 因 Data physical loss retired，但 Main authority仍是同一 `S/G/P`：
+Because Binding acquire is only delivery wait：
 
 ```text
-fresh candidate B
-→ fresh paired prepare
-→ same commit gate
-→ B current
+A current
+→ Platform MAY prepare B privately under same current S/G/P
+→ commit B
+→ close A
+→ role A peer terminal
+→ role fresh acquire receives already-committed B
 ```
 
-不发生：
+The same mechanism handles physical loss：
+
+```text
+A lost/retired
+→ authority still S/G/P
+→ fresh B
+→ fresh paired prepare/commit
+```
+
+Same-generation replacement never implies：
 
 ```text
 generation change
-Renderer revision change solely for reconnect
+Renderer revision change solely for reconnect/supersede
 resume token
 old message replay
-old unsent queue migration
+old unsent migration
 ```
 
-Fresh B 创建 fresh `@loomrealm/data` peers / publication baseline。
+Fresh role peers own fresh child publication baseline。
 
 ---
 
-## 5. Stale Work
+## 6. Retirement / Relay Failure
 
-必须 identity-safe：
+Either relay side terminal/read/write failure retires the whole current pair：
 
 ```text
-old candidate prepared late
-old carrier close late
+mark pair non-current first
+→ stop accepting/forwarding traffic
+→ close both sides best-effort
+```
+
+Authority remains unchanged unless Main changes it；a fresh candidate MAY later install under the same S/G/P。
+
+Stale/retired inbound bytes are dropped and cannot affect a replacement pair。
+
+---
+
+## 7. Stale Work
+
+Identity-safe events include：
+
+```text
+old Renderer socket open/close late
 old Runner prepared ACK late
-old Renderer acquire resolution late
+old provisioner revoke/commit late
+old Binding waiter resolution/abort late
+old relay send completion late
 ```
 
-都只能影响原 candidate；不得 retire/replace newer current。
-
-Retired carrier 的 late inbound traffic直接 stale-drop，不进入 fresh peer state machine。
+They may affect only the exact old candidate/pair。
 
 ---
 
-## 6. Failure Boundary
+## 8. No New Data Messages
 
-以下都只影响 Data slot/candidate：
-
-```text
-candidate establishment failure
-authority-race rejection
-paired prepare failure
-current Data loss
-same-generation reconnect failure
-child Data-fatal retirement
-```
-
-不得直接：
-
-```text
-fail Runtime
-unwind Frame
-change Main DataAuthority
-clear Renderer Control
-```
-
----
-
-## 7. No New Data Messages
-
-Connection v1 仍然没有：
+Connection v1 still has no：
 
 ```text
 data.hello
@@ -169,18 +206,21 @@ data.ping
 data.close
 ```
 
-Renderer/Runner 的 prepared/commit coordination只能存在于 Platform-private establishment/provisioning path，不能进入 Data application carrier。
+`prepared/commit/revoke` exist only in Platform-private provisioning/control path。
 
 ---
 
-## 8. Closure
+## 9. Closure
 
-M9/03 关闭时，Desktop physical realization可以在并发、authority race、same-generation reconnect 和 cutover 下始终维持：
+M9/03 is closed when Desktop physical realization guarantees：
 
 ```text
-0..1 current per slot
 paired-before-current
-commit-time Main authority revalidation
-retired terminal
-no replay/resume
+commit-time Main-view revalidation
+0..1 current per slot
+role acquire independent from install authority
+whole-pair retirement
+same-generation fresh replacement
+retired terminal / no replay
+opaque Data relay
 ```
