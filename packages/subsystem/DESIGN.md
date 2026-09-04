@@ -950,32 +950,30 @@ Runtime terminal时 SDK最终关闭本 instance所有 local RenderDomain resourc
 
 ---
 
-## 26. DataPlane (M8 target)
+## 26. Role-local Data Peer Lifecycle (M8 implemented)
 
-Subsystem SDK只有一个 connection-wide DataPlane reader/writer：
+Subsystem Host只保留当前 Data peer、至多一个 pending acquire和 host-lifetime acquisition-stopped fact：
 
 ```text
-future SubsystemDataBinding platform port
+SubsystemDataBinding platform port
         ↓
-DataPlane
-      /       \
- InputManager RenderManager
+createSubsystemDataPeer
+        ↓
+role-local current peer
 ```
 
-DataPlane：
+`@loomrealm/data` peer：
 
 ```text
-validates generation/profile/current installation
 owns one carrier reader
 JSON text parse
 Renderer Data Profile demux
-fresh-carrier notification
-retirement cleanup
+serialized writer / terminal mechanics
 ```
 
-InputManager/RenderManager MUST NOT分别竞争消费 `carrier.messages()`。
+Host负责 acquire/install/clear/close/currentness；InputManager/RenderManager MUST NOT分别竞争消费 `carrier.messages()`。
 
-M8 具体 binding contract 以届时 `@loomrealm/platform-ports` frozen slice 为唯一事实源。
+M8 binding contract以当前 `@loomrealm/platform-ports` frozen slice为唯一事实源；M10/M11在 peer之上增加业务状态。
 
 ---
 
@@ -1017,9 +1015,9 @@ RuntimeControlBinding
 
 ---
 
-## 28. Dynamic Data Provisioning Boundary (M8/M9 target)
+## 28. Dynamic Data Provisioning Boundary (M9 target)
 
-DataAuthority通常在 Runtime启动之后才出现/替换，因此 Runner必须有 platform-internal provisioning source，用来实现未来的 Subsystem Data binding port。
+M8只消费 Platform 已决定可交付的 paired carrier；M9为 concrete Runner增加 platform-internal provisioning source来实现现有 Subsystem Data binding port。
 
 Hostra：
 
@@ -1029,8 +1027,8 @@ Main DataAuthority(S,G,P)
 → platform-local Runner provisioning channel
 → Node Runner receives one-time Data connection material
 → transport-websocket establishes/binds carrier
-→ future Subsystem Data port yields {G,P,carrier}
-→ SDK DataPlane installs current
+→ Subsystem Data port yields {G,P,carrier}
+→ Host installs real @loomrealm/data peer
 ```
 
 PWA：
@@ -1040,8 +1038,8 @@ Main DataAuthority(S,G,P)
 → PWA DataConnectionBroker
 → Worker provisioning Port/path
 → transferred matching MessagePort
-→ future Subsystem Data port yields {G,P,carrier}
-→ SDK DataPlane installs current
+→ Subsystem Data port yields {G,P,carrier}
+→ Host installs real @loomrealm/data peer
 ```
 
 Provisioning：

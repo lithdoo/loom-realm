@@ -226,6 +226,33 @@ test("trusted Data construction failure stops acquisition only for the host life
   await shutdown(session);
 });
 
+test("throwing carrier close getter stays isolated during Subsystem construction failure", async () => {
+  let acquireCount = 0;
+  const session = await createSession(
+    defineSubsystem(() => ({ frame: () => completed(null) })),
+    {},
+    defaultPolicy,
+    {
+      async acquire() {
+        acquireCount += 1;
+        return {
+          carrier: {
+            get close() {
+              throw new Error("close getter failed");
+            },
+          },
+          generation: 1,
+          dataProfile: "loomrealm.renderer-data/1",
+        };
+      },
+    },
+  );
+  await waitFor(() => acquireCount === 1, "malformed carrier acquisition");
+  await tick();
+  assert.equal(acquireCount, 1);
+  await shutdown(session);
+});
+
 test("Data Binding rejection does not fail Runtime and is not retried for the host lifetime", async () => {
   let acquireCount = 0;
   const session = await createSession(

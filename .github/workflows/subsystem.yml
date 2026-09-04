@@ -6,6 +6,7 @@ on:
       - "packages/subsystem/**"
       - "packages/platform-ports/**"
       - "packages/runtime-control/**"
+      - "packages/data/**"
       - "packages/foundation/**"
       - "packages/wire/**"
       - "package.json"
@@ -20,6 +21,7 @@ on:
       - "packages/subsystem/**"
       - "packages/platform-ports/**"
       - "packages/runtime-control/**"
+      - "packages/data/**"
       - "packages/foundation/**"
       - "packages/wire/**"
       - "package.json"
@@ -51,7 +53,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Build Subsystem dependencies
-        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control
+        run: npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/data
 
       - name: Test Subsystem
         run: npm test -w @loomrealm/subsystem

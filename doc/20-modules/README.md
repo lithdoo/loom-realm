@@ -194,9 +194,9 @@ Platform
     optional RendererControlBinding candidate carrier establishment
 ```
 
-Renderer local holder不是 Main remote-currentness proof；M7 不建立 Store framework、lease/epoch/heartbeat、Data/Input/Render implementation。
+Renderer local holder不是 Main remote-currentness proof；M8只增加 per-subsystem Data peer currentness，不建立 Store framework、lease/heartbeat或 Input/Render business state。
 
-M7 Main `dataAuthorities=[]`；真实 Data policy从 M8开始。
+M8 Main已从 ready Runtime纯投影 `S/1/loomrealm.renderer-data/1`，Renderer/Subsystem已通过窄 Binding消费真实 `@loomrealm/data` peers。
 
 ---
 

@@ -9,6 +9,7 @@ on:
       - "packages/platform-ports/**"
       - "packages/runtime-control/**"
       - "packages/renderer-control/**"
+      - "packages/data/**"
       - "packages/renderer/**"
       - "packages/subsystem/**"
       - "package.json"
@@ -26,6 +27,7 @@ on:
       - "packages/platform-ports/**"
       - "packages/runtime-control/**"
       - "packages/renderer-control/**"
+      - "packages/data/**"
       - "packages/renderer/**"
       - "packages/subsystem/**"
       - "package.json"
@@ -64,6 +66,7 @@ jobs:
           -w @loomrealm/platform-ports
           -w @loomrealm/runtime-control
           -w @loomrealm/renderer-control
+          -w @loomrealm/data
           -w @loomrealm/renderer
           -w @loomrealm/subsystem
 

@@ -40,7 +40,7 @@ M7 `RendererControlBinding` 已由 Main real consumer closure证明；它不是 
 
 ---
 
-## 3. Frozen Root API Through M7
+## 3. Frozen Root API Through M8
 
 ```ts
 import type { MessageCarrier } from "@loomrealm/foundation";
@@ -84,6 +84,25 @@ export interface RendererControlBinding {
     rendererControlToken: string,
     signal: AbortSignal,
   ): Promise<MessageCarrier>;
+}
+
+export interface RendererDataBinding {
+  acquire(
+    subsystemKey: string,
+    generation: number,
+    dataProfile: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
+}
+
+export interface SubsystemDataBindingResult {
+  readonly carrier: MessageCarrier;
+  readonly generation: number;
+  readonly dataProfile: string;
+}
+
+export interface SubsystemDataBinding {
+  acquire(signal: AbortSignal): Promise<SubsystemDataBindingResult>;
 }
 ```
 
@@ -191,7 +210,15 @@ M7 deterministic realization：MemoryCarrier fixture。Desktop/PWA physical real
 
 ---
 
-## 7. Optional Capability in Main-facing View
+## 7. M8 Renderer / Subsystem Data Bindings
+
+两条 Data Binding只交付 Platform 已决定 current-deliverable 的 paired carrier endpoint。Renderer请求精确 `S/G/P`；Runtime-scoped Subsystem Binding返回 matching `G/P + carrier`。它们不暴露 endpoint、ticket、credential、candidate/Broker handle或 transport type，也不拥有 Main authority与 role-local peer lifecycle。
+
+Acquire可 pending；abort取消该 wait并禁止 late installation。Renderer non-abort rejection只作用于当前 Control-peer + S/G/P desired identity；Subsystem rejection只停止当前 host lifetime acquisition。M8 deterministic fixture提供真实 paired MemoryCarrier，physical authority feed/revalidation/cutover属于 M9。
+
+---
+
+## 8. Optional Capability in Main-facing View
 
 `RendererControlBinding` 是 frozen capability type，但 concrete Platform/Session MAY omit。
 
@@ -218,7 +245,7 @@ M6 Hostra Runtime-only无需 fake Binding；M14加入真实 Hostra Renderer phys
 
 ---
 
-## 8. Capability / Protocol / Authority Split
+## 9. Capability / Protocol / Authority Split
 
 Platform Ports owns：relative deadline scheduling、fresh opaque material、Runtime physical facts、candidate Renderer slot/carrier establishment when capability exists。
 
@@ -228,7 +255,7 @@ Main owns：Session identity、Runtime attempt、all credential semantics、Rend
 
 ---
 
-## 9. Binding Does Not Move Protocol Mechanics
+## 10. Binding Does Not Move Protocol Mechanics
 
 `RendererControlBinding` MUST NOT parse `renderer.hello/state`、encode JSON-RPC、validate Snapshot/revision、negotiate version、own current Renderer或 coalesce publication。
 
@@ -236,7 +263,7 @@ Binding只等待/建立一个 candidate physical carrier；Main + renderer-contr
 
 ---
 
-## 10. Qualification Through M7
+## 11. Qualification Through M8
 
 ```text
 M4 DeadlineScheduler / RuntimeControlBinding
@@ -249,6 +276,12 @@ M7 OpaqueMaterialGenerator / RendererControlBinding
     Frozen contract
     deterministic Platform provides real candidate-slot Binding
     capability-absent Main path also qualified
+
+M8 RendererDataBinding / SubsystemDataBinding
+    exact declaration and Foundation-only dependency qualified
+    real Renderer + Subsystem consumers qualified
+    pending/abort/rejection/late-result semantics qualified
+    deterministic paired MemoryCarrier vertical qualified
 
 M14 Hostra Renderer physical realization
 M16 PWA Renderer physical realization
@@ -271,7 +304,7 @@ capability absence needs no fake Binding
 
 ---
 
-## 11. Compatibility
+## 12. Compatibility
 
 Current project无 public compatibility obligation：
 
@@ -283,9 +316,9 @@ BootstrapTokenGenerator → OpaqueMaterialGenerator
 
 ---
 
-## 12. Freeze Statement
+## 13. Freeze Statement
 
-Frozen M7 additions/refinement：
+Frozen M7/M8 additions/refinement：
 
 ```text
 OpaqueMaterialGenerator common output contract
@@ -293,6 +326,8 @@ RendererControlBinding candidate-slot semantics
 abort cancellation vs non-abort terminal rejection
 optional capability availability in MainPlatform
 Binding owns no protocol/authority
+exact RendererDataBinding / SubsystemDataBinding role seams
+per-role/slot failure scope and late-result rejection
 ```
 
 除 ADR 0027 Reopen Rule外，不允许实现阶段新增 kind-specific random service、Binding error framework、connection registry或 Renderer mega-port。

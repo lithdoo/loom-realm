@@ -3,7 +3,7 @@
 > 层级：模块设计  
 > 状态：M8 Implemented / Qualified；M9+ Planned
 > 稳定程度：M8 Implementation Closed
-> 主要定义：M7 Renderer Control local holder，以及 M8+ Renderer Data/Input/Render/Content slice placement  
+> 主要定义：M7 Renderer Control holder、M8 Renderer Data peer reconciliation，以及 M10+ Input/Render/Content slice placement
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
 > 最近复核：2026-09-04
 
@@ -13,13 +13,17 @@ M8 已实施 Control-driven per-subsystem Data peer reconciliation；Input/Rende
 
 ---
 
-## 1. M7 Current Module Shape
+## 1. Current Module Shape Through M8
 
 ```text
 @loomrealm/renderer
 └── Control holder/orchestration
     ├── current peer reference/identity
-    └── current RendererAuthoritySnapshotV1 | null
+    ├── current RendererAuthoritySnapshotV1 | null
+    └── per-subsystem Data slot
+        ├── 0..1 current RendererDataPeer
+        ├── 0..1 pending acquire
+        └── 0..1 failed desired identity (Control peer + S/G/P)
 ```
 
 逻辑 state exactly：
@@ -56,10 +60,10 @@ InputTarget
 DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-M7 Main implementation实际固定：
+M8 Main implementation对每个 ready Runtime发布：
 
 ```text
-dataAuthorities = []
+DataAuthority(S, 1, "loomrealm.renderer-data/1")
 ```
 
 Renderer role不：
@@ -328,11 +332,11 @@ no Store/EventBus/subscription framework
 no Renderer-facing RendererControlBinding abstraction
 ```
 
-M8/M10/M11 分别在真实 consumer出现后增加 Data/Input/Render tests；不得提前用 fake future registries作为 M7 closure。
+M8 real Data consumers与 lifecycle tests已关闭；M10/M11再增加 Input/Render business semantics，不得提前用 fake future registries替代真实 consumer。
 
 ---
 
-## 14. Final Invariants Through M7
+## 14. Final Invariants Through M8
 
 1. Renderer不是 Frame RPC participant；
 2. Renderer Core platform-neutral；
@@ -340,7 +344,7 @@ M8/M10/M11 分别在真实 consumer出现后增加 Data/Input/Render tests；不
 4. renderer-control peer owns protocol legality；Renderer role不重复 revision/session validator；
 5. local holder不是 Main remote-currentness proof；
 6. `RendererControlBinding` 不属于 Renderer-facing M7 API；
-7. M7 Main DataAuthority list empty；real Data integration begins M8；
-8. no Store/Registry/EventBus/lease/currentness framework in M7；
+7. M8 Data desired identity exactly Control peer + S/G/P；failure/current/pending均 per subsystem slot；
+8. no Store/Registry/EventBus/lease/currentness framework in M8；
 9. Data/Input/Render lifecycles保持独立；
 10. Hostra/PWA application unit统一 JSON text string，physical realization分别 M14/M16。

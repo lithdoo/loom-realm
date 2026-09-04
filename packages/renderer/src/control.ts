@@ -65,14 +65,28 @@ function sameIdentity(
 }
 
 function bestEffortCloseCarrier(value: unknown): void {
-  if (value === null || typeof value !== "object") return;
-  const close = (value as { close?: unknown }).close;
-  if (typeof close !== "function") return;
   try {
+    if (value === null || typeof value !== "object") return;
+    const close = (value as { close?: unknown }).close;
+    if (typeof close !== "function") return;
     void Promise.resolve(close.call(value)).catch(() => {});
   } catch {
     // Trusted integration cleanup is secondary to local currentness.
   }
+}
+
+function validateRendererDataBinding(
+  data: RendererDataBinding | undefined,
+): void {
+  if (data === undefined) return;
+  let valid = false;
+  try {
+    valid = data !== null && typeof data === "object" &&
+      typeof data.acquire === "function";
+  } catch {
+    // Accessor-backed integration objects are not valid capability bindings.
+  }
+  if (!valid) throw new TypeError("Invalid RendererDataBinding");
 }
 
 class ControlHolder implements RendererControlHolder {
@@ -293,5 +307,6 @@ class ControlHolder implements RendererControlHolder {
 export function createRendererControlHolder(
   data?: RendererDataBinding,
 ): RendererControlHolder {
+  validateRendererDataBinding(data);
   return new ControlHolder(data);
 }

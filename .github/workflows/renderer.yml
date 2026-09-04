@@ -5,6 +5,8 @@ on:
     paths:
       - "packages/renderer/**"
       - "packages/renderer-control/**"
+      - "packages/data/**"
+      - "packages/platform-ports/**"
       - "packages/foundation/**"
       - "packages/wire/**"
       - "package.json"
@@ -16,6 +18,8 @@ on:
     paths:
       - "packages/renderer/**"
       - "packages/renderer-control/**"
+      - "packages/data/**"
+      - "packages/platform-ports/**"
       - "packages/foundation/**"
       - "packages/wire/**"
       - "package.json"
@@ -47,6 +51,8 @@ jobs:
           npm run build
           -w @loomrealm/foundation
           -w @loomrealm/wire
+          -w @loomrealm/platform-ports
+          -w @loomrealm/data
           -w @loomrealm/renderer-control
       - name: Test Renderer
         run: npm test -w @loomrealm/renderer

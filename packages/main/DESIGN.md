@@ -139,7 +139,7 @@ Revision increment exactly on committed Renderer-visible payload change；compar
 
 ## 8. Renderer Projection
 
-Pure projector reads only committed Main authority：Runtime state、live Frame Stack、current Activation、`currentInputTarget()`、M7 `dataAuthorities=[]`。
+Pure projector reads only committed Main authority：Runtime state、live Frame Stack、current Activation、`currentInputTarget()`，以及由 ready Runtime直接派生的 M8 `S/1/loomrealm.renderer-data/1` DataAuthority。
 
 Runtime mapping：
 
@@ -304,19 +304,23 @@ Renderer cleanup不改变/延迟 Main Session result，也不成为 Runtime shut
 
 ---
 
-## 16. M7 Data Boundary
+## 16. M8 DataAuthority Boundary
 
-M7 Snapshot formal type包含 DataAuthority，但 Main implementation固定：
+M8 Main implementation直接从当前 Runtime authority派生：
 
 ```text
-dataAuthorities=[]
+Runtime phase == ready
+→ DataAuthority(subsystemKey, 1, "loomrealm.renderer-data/1")
+
+otherwise
+→ no DataAuthority for that subsystem
 ```
 
-M8才增加真实 DataAuthority allocation/generation/profile policy。
+Main不保存 Data-specific mutable registry、generation allocator或 transport state。Runtime/DataAuthority consequence共享 existing serialized mutation + Renderer projection commit；Data carrier loss/reacquire不改变 tuple或 revision。
 
 ---
 
-## 17. M7 Qualification
+## 17. M7 + M8 Qualification
 
 Main必须通过：
 
@@ -338,17 +342,23 @@ replacement / stale terminal identity safety
 old already-inFlight completion no currentness effect
 current terminal no revision bump
 Session terminal aborts/retire Renderer attempts
-representation failure isolation
-call/return/failure M5 regressions
+  representation failure isolation
+  call/return/failure M5 regressions
+
+M8 ready-derived DataAuthority
+all current generations exactly 1
+ready/non-ready projection has no split visible state
+Frame/Activation and Data transport facts do not alter S/1/P
+deterministic paired real-role vertical
 ```
 
-完整 evidence见 `M7_05_QUALIFICATION_CLOSURE.md`。
+M8 evidence见 `doc/30-implementation/m8-qualification.md`。
 
 ---
 
 ## 18. Freeze Statement
 
-M5 Runtime/Frame semantics已实现；M7 Renderer Control slice从 2026-09-03 起 preimplementation frozen。
+M5 Runtime/Frame、M7 Renderer Control与 M8 DataAuthority slice均已实现并通过资格关闭。
 
 实施者只能决定内部 helper/file/class命名；不得重新决定：
 

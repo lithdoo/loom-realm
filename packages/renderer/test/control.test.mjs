@@ -65,6 +65,12 @@ test("holder atomically installs initial peer+Snapshot before consuming later st
 test("public holder factory keeps the exact optional one-argument M8 seam", () => {
   assert.equal(createRendererControlHolder.length, 1);
   assert.ok(createRendererControlHolder());
+  assert.throws(() => createRendererControlHolder(null), /Invalid RendererDataBinding/);
+  assert.throws(() => createRendererControlHolder({}), /Invalid RendererDataBinding/);
+  assert.throws(
+    () => createRendererControlHolder({ get acquire() { throw new Error("getter"); } }),
+    /Invalid RendererDataBinding/,
+  );
 });
 
 test("replacement identity ignores old late state and old terminal", async () => {
@@ -207,4 +213,24 @@ test("trusted Renderer Data construction failure closes the carrier and suppress
   main(controlB, "b", [authority("demo")]);
   await holder.connect({ carrier: controlB.right, rendererControlToken: "b" });
   await waitFor(() => acquireCount === 2, "new Control retry");
+});
+
+test("throwing carrier close getter stays isolated during Renderer construction failure", async () => {
+  const control = createMemoryCarrierPair();
+  main(control, "a", [authority("demo")]);
+  let acquireCount = 0;
+  const holder = createRendererControlHolder({
+    async acquire() {
+      acquireCount += 1;
+      return {
+        get close() {
+          throw new Error("close getter failed");
+        },
+      };
+    },
+  });
+  await holder.connect({ carrier: control.right, rendererControlToken: "a" });
+  await waitFor(() => acquireCount === 1, "malformed carrier acquisition");
+  await turn();
+  assert.equal(holder.current().snapshot.sessionId, "a");
 });

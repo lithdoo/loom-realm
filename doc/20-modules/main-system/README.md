@@ -2,8 +2,8 @@
 
 > 层级：模块设计  
 > 状态：M8 Implemented / Qualified；M9+ Planned
-> 稳定程度：M5 Frozen Baseline / M7 Preimplementation Closed  
-> 主要定义：Main authority/transaction/recovery、LogicalGameBootstrap、Main-facing narrow Platform view、M7 Renderer authority projection/currentness、M8+ DataAuthority evolution  
+> 稳定程度：M5/M7/M8 Implemented and Qualified
+> 主要定义：Main authority/transaction/recovery、LogicalGameBootstrap、Main-facing narrow Platform view、Renderer authority projection/currentness、M8 DataAuthority policy
 > 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)  
 > 最近复核：2026-09-04
 
@@ -13,7 +13,7 @@ Main 不拥有 Game Entry document、Platform executable binding、WebSocket/Mes
 
 ---
 
-## 1. Current Module Shape Through M7
+## 1. Current Module Shape Through M8
 
 ```text
 Main System
@@ -26,6 +26,7 @@ Main System
 ├── Renderer authority projector                 // M7
 ├── Renderer revision/current-participant state  // M7
 ├── bounded optional Renderer candidate loop     // M7
+├── ready-derived DataAuthority projection       // M8
 └── Platform capability coordination
 ```
 
@@ -42,7 +43,7 @@ RendererHosting service
 DataAuthority allocator/policy
 ```
 
-M8 才增加真实 DataAuthority policy；M7 Snapshot 固定 `dataAuthorities=[]`。
+M8 不增加独立 authority state；ready Runtime在同一个 projection commit中直接产生固定 `S/1/loomrealm.renderer-data/1`。
 
 ---
 
@@ -197,16 +198,16 @@ Platform/Renderer不得自行推导 unwind root或恢复 revoked Activation。
 
 ---
 
-## 8. M7 Renderer Authority Projection
+## 8. Renderer Authority Projection Through M8
 
-M7 Projector 是 pure function over committed Main facts：
+Projector 是 pure function over committed Main facts：
 
 ```text
 existing Runtime records
 existing live Frame Stack
 existing current Activation
 existing derived InputTarget
-M7 dataAuthorities=[]
+ready Runtime-derived DataAuthority S/1/P
         ↓
 RendererAuthoritySnapshotV1
 ```
@@ -380,20 +381,19 @@ interface RendererDataAuthorityV1 {
 }
 ```
 
-但 M7 implementation：
+M8 current implementation：
 
 ```text
-dataAuthorities = []
+ready Runtime → S/1/loomrealm.renderer-data/1
+non-ready Runtime → no DataAuthority
 ```
 
-M8 才实现：
+当前 slice不实现：
 
 ```text
-allocation/revocation policy
-generation monotonicity
-profile selection
-Runtime replacement interaction
-Renderer/SubSystem Data binding integration
+same-key Runtime replacement / generation allocator
+profile replacement
+physical candidate provisioning / paired cutover
 ```
 
 M9 Desktop Broker只实现 physical provisioning，不拥有 generation/profile。
@@ -439,15 +439,18 @@ hello preflight/current-switch atomicity
 replacement + old inFlight semantics
 Binding rejection vs candidate failure
 Session terminal Renderer retirement
-representation isolation
-M7 dataAuthorities=[]
+  representation isolation
+
+M8 ready-derived S/1/P projection
+atomic ready/add and non-ready/remove consequence
+Data loss/reacquire leaves Main authority/revision unchanged
 ```
 
 Existing M6 Hostra e2e必须在 `bootstrapTokens→opaqueMaterial` 机械迁移后保持 green，且不新增 fake Renderer capability。
 
 ---
 
-## 17. Final Invariants Through M7
+## 17. Final Invariants Through M8
 
 1. Main core platform-neutral；
 2. Main consumes LogicalGameBootstrap, not GameEntry/LaunchPlan；
@@ -462,5 +465,5 @@ Existing M6 Hostra e2e必须在 `bootstrapTokens→opaqueMaterial` 机械迁移�
 11. protocol peer owns Renderer version negotiation；Main owns token/currentness；
 12. replacement actively retires old current but does not require send cancellation；
 13. Renderer Control representation failure cannot mutate Frame/Runtime authority；
-14. M7 DataAuthority implementation remains empty; real policy starts M8；
+14. M8 DataAuthority is a pure ready-Runtime derivation with generation 1 and fixed profile；
 15. Main does not own Interest/Render Domain or physical Renderer hosting。

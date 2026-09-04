@@ -78,10 +78,10 @@ interface DataAcquireAttempt {
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
 
 function bestEffortCloseCarrier(value: unknown): void {
-  if (value === null || typeof value !== "object") return;
-  const close = (value as { close?: unknown }).close;
-  if (typeof close !== "function") return;
   try {
+    if (value === null || typeof value !== "object") return;
+    const close = (value as { close?: unknown }).close;
+    if (typeof close !== "function") return;
     void Promise.resolve(close.call(value)).catch(() => {});
   } catch {
     // Trusted integration cleanup is secondary to local currentness.
