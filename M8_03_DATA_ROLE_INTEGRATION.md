@@ -22,11 +22,13 @@ data?: SubsystemDataBinding
 
 Binding absent时保持现有 M4/M6 Runtime/Frame行为，不使用 fake/no-op Binding。
 
-Runtime ready后，若 Binding存在：
+Runtime ready后，若 Binding存在，host启动一个独立的 pending Data acquire；**Runtime Control reader / Frame handling不得 await Data provisioning**：
 
 ```text
-await data.acquire(signal)
+start data.acquire(signal)
+→ Runtime/Frame processing continues
 → receive {carrier,G,P}
+→ recheck host still ready/current
 → construct DataCurrentBindingV1 with launch.subsystemKey
 → createSubsystemDataPeer(...)
 → install as current Data peer
@@ -54,6 +56,14 @@ Old/stale peer terminal不得清除新的 current Data peer。
 ## 2. Renderer Integration
 
 M8扩展现有 Control holder的 package-internal orchestration；不创建 public Renderer Store/Session framework。
+
+唯一新增 composition seam 是 construction-time optional `RendererDataBinding`：
+
+```text
+createRendererControlHolder(data?: RendererDataBinding)
+```
+
+等价的一字段 construction options MAY 使用，但语义必须是 exactly one optional typed Binding。不得增加 mutable `registerDataBinding()`、service locator、generic RendererPlatform/RendererServices。
 
 真实需要的 Data state：
 
@@ -85,6 +95,18 @@ AND acquire was not aborted
 ```
 
 任一不成立：close returned carrier，禁止安装。
+
+Reconciliation必须 non-blocking：
+
+```text
+install accepted Control Snapshot
+→ synchronously compute desired Data changes
+→ abort/retire stale Data work
+→ start missing acquire work
+→ return to Control state consumption
+```
+
+Control Snapshot consumption MUST NOT await Data acquire、peer close或 physical provisioning。Data 永远不能 backpressure Renderer Control authority updates。
 
 ---
 
@@ -158,7 +180,7 @@ producer registry
 coalescing queues
 ```
 
-若 peer constructor在 M8需要内部 handlers，只使用最小 fail-closed glue；不得据此宣称 User Input / Render Update role conformance。
+若 peer constructor在 M8需要内部 handlers，只使用最小 fail-closed glue。M8 qualification不得发送 child application traffic来证明 closure；收到 ordinary well-formed child traffic时也不得伪造 M10/M11 business state。不得据此宣称 User Input / Render Update role conformance。
 
 ---
 
@@ -211,6 +233,7 @@ Subsystem：
 
 ```text
 Binding absent keeps Runtime/Frame path green
+Data acquire pending does not block Runtime Control / Frame handling
 ready + Binding → one Data peer
 old peer terminal cannot clear replacement peer
 Data terminal does not fail Runtime/Frame
@@ -220,7 +243,8 @@ same-generation fresh carrier creates fresh peer
 Renderer：
 
 ```text
-Snapshot adds S/G/P → acquire/install
+construction-time optional RendererDataBinding; no mutable registration/service locator
+Snapshot adds S/G/P → acquire/install without blocking Control consumption
 Snapshot removes S/G/P → retire
 G1 → G2 → retire G1 + acquire G2
 late G1 acquire cannot install

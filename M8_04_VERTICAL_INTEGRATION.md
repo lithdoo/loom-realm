@@ -6,9 +6,9 @@
 > 最近复核：2026-09-04  
 > 前置：[M8 / 01](M8_01_MAIN_DATA_AUTHORITY.md) → [M8 / 02](M8_02_DATA_BINDINGS.md) → [M8 / 03](M8_03_DATA_ROLE_INTEGRATION.md)  
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md)  
-> 目标：用 deterministic paired Data Bindings + MemoryCarrier 跑通真实 Main authority → Renderer Control → paired Data carrier → real `@loomrealm/data` peers；验证 currentness/replacement/failure isolation，不实现 Desktop Broker physical provisioning。
+> 目标：用 deterministic paired Data Bindings + MemoryCarrier 跑通真实 Main authority → Renderer Control → role-facing current Data seam → real `@loomrealm/data` peers；验证 role currentness/replacement/failure isolation，不声称已实现 Platform authority-feed 或 Desktop Broker commit-time revalidation。
 
-> **Test fixture可以提供 physical pairing，但 Main authority、Renderer Control、role reconciliation 与 Data peers必须走生产代码路径。**
+> **Test fixture只模拟“Platform 已有可交付 current pair”这一 seam；Main authority、Renderer Control、role reconciliation 与 Data peers必须走生产代码路径。Fixture 不得被当作 Main DataAuthority 的第二事实源。**
 
 ---
 
@@ -25,6 +25,7 @@ real Subsystem host ready
 → SubsystemDataBinding waits for current pair
 
 Deterministic paired Binding fixture
+→ treats Renderer-requested S/G/P only as a deterministic test pairing selector
 → MemoryCarrier endpoint pair
 → Renderer acquire resolves one endpoint
 → Subsystem acquire resolves paired endpoint + G/P
@@ -32,6 +33,16 @@ Deterministic paired Binding fixture
 ```
 
 不允许测试直接构造 Main Snapshot、直接写 Renderer current state或绕过 role Binding。
+
+这里**不 qualification**：
+
+```text
+Platform obtains authoritative S/G/P from Main
+candidate authentication/provisioning
+commit-time current Runtime / current Renderer / DataAuthority revalidation
+```
+
+这些属于 M9 Broker。M8 fixture MAY 使用由真实 Renderer Control 驱动产生的 Renderer acquire `S/G/P` 作为 test-only pairing selector，但该值不因此成为 Platform authority source。
 
 ---
 
@@ -51,6 +62,8 @@ Fixture不得：
 
 ```text
 mint generation/profile
+claim Renderer request is authoritative Main state
+claim commit-time authority revalidation coverage
 change Main Runtime state
 change Renderer current participant
 parse Data application protocol
@@ -77,7 +90,7 @@ Runtime ready commit
 → both create real @loomrealm/data peers
 ```
 
-Data connection建立与否不改变 Runtime ready fact或 Frame authority。
+Data connection建立与否不改变 Runtime ready fact或 Frame authority；pending Subsystem acquire也不得阻塞 Runtime Control/Frame handling，pending Renderer acquire不得阻塞 later Control Snapshot consumption。
 
 ---
 
@@ -232,11 +245,12 @@ M8/04 complete when：
 ```text
 real ready Runtime creates Main DataAuthority
 real Renderer Control carries it
-real role Bindings produce one paired MemoryCarrier
+real role Bindings consume one deterministic already-current paired MemoryCarrier seam
 real @loomrealm/data peers install on both sides
 stale acquire cannot install
 Data loss is isolated from Runtime/Frame/Control authority
 same-generation fresh carrier works without replay or generation bump
 Renderer replacement retires old participant Data without changing G
 capability-absent paths remain valid
+M8 does not claim Platform authority-feed / commit-time paired-install qualification
 ```

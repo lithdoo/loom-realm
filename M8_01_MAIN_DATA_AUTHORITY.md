@@ -157,7 +157,16 @@ Fresh Runtime instance for same subsystemKey需要新的 DataAuthority 时：
 G2 > every prior generation for that subsystemKey in this Session
 ```
 
-若已到 `Number.MAX_SAFE_INTEGER`，不得 wrap/reuse；本 Session不能再为该 subsystemKey mint fresh DataAuthority，并按既有 Main fail-closed terminal path结束该 authority universe。
+若已到 `Number.MAX_SAFE_INTEGER`：
+
+```text
+MUST NOT wrap/reuse
+→ this Session cannot mint another DataAuthority for that subsystemKey
+→ Runtime / Frame authority remains unchanged solely for this reason
+→ a fresh Session is required for a new generation universe
+```
+
+Generation exhaustion只表示该 subsystemKey 在本 Session失去 fresh DataAuthority 能力；不得自行升级为 Runtime failure、Frame unwind或伪造 generation。
 
 ---
 
@@ -165,7 +174,7 @@ G2 > every prior generation for that subsystemKey in this Session
 
 M7 `dataAuthorities=[]` 改为从 committed Main state直接投影。
 
-稳定输出顺序沿用 `LogicalGameBootstrap.subsystemKeys`，不创建额外 sorting registry。
+Projection必须 deterministic；array ordering本身不携带 authority semantics。实现 MAY 直接沿用既有 `LogicalGameBootstrap.subsystemKeys` 遍历顺序，但不得为此创建额外 sorting registry或把该顺序冻结成跨层协议语义。
 
 Renderer-visible payload变化规则保持 M7：
 
@@ -197,6 +206,7 @@ DataAuthority visible change bumps Renderer revision exactly once
 Data loss alone does not bump Renderer revision
 profile exactly loomrealm.renderer-data/1
 no generation reuse/wrap
+generation exhaustion does not fail Runtime/Frame or invent a new generation
 no Data authority shadow registry/manager
 ```
 
@@ -211,6 +221,7 @@ Main owns one clear DataAuthority policy
 ready creates logical authority
 non-ready/replaced Runtime revokes it
 generation is monotonic authority epoch, not connection attempt
+generation exhaustion cannot wrap/reuse or mutate Runtime/Frame authority
 Renderer replacement and Data reconnect do not spuriously bump generation
 Snapshot remains pure projection
 Renderer revision observes logical authority only

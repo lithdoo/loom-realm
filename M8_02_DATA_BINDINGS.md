@@ -81,9 +81,7 @@ Runtime process/Worker identity
 
 ## 3. Paired Installation Boundary
 
-Platform只有在两个 role endpoint属于同一 prepared pair，并且 installation仍可提交时才 resolve对应 Binding。
-
-M8 deterministic implementation必须保证：
+Role-facing contract只接收 Platform 已决定可交付的 current pair：
 
 ```text
 one logical pair
@@ -91,22 +89,24 @@ one logical pair
 + one Subsystem carrier endpoint
 ```
 
-Role仍必须对 late resolution做本地 identity/currentness recheck；stale resolution立即 close/dispose，不得安装。
+M8冻结的是**交付后的 role seam**，不是 Platform candidate → paired-install commit algorithm。M8 不定义 Platform 如何获得 Main-authoritative `S/G/P`，也不 qualification commit-time Main authority/current Runtime/current Renderer revalidation。
 
-M9 concrete Desktop Broker再关闭 ticket/IPC/WebSocket 等 physical provisioning 与 commit-time authority revalidation；不改变本 M8 role-facing surface。
+Role仍必须对 late resolution做本地 identity/currentness recheck；stale resolution立即 close/dispose，不得安装。这个 local recheck只保护 role currentness，不能替代 Platform 对 Main authority 的 revalidation。
+
+M9 concrete Desktop Broker关闭 authority feed、ticket/IPC/WebSocket physical provisioning、paired commit-time revalidation；不改变本 M8 role-facing Binding surface。
 
 ---
 
 ## 4. Settlement
 
-一个 acquire MAY长期 pending；pending本身不创建 application current state。
+一个 acquire MAY长期 pending；pending本身不创建 application current state。Platform 内部 transient candidate/provisioning failure MAY 被 dispose/吸收而保持这个 acquire pending；M8不冻结 retry/backoff API。
 
 ```text
 abort before resolution
 → cancel this wait
 → no late live carrier may be installed by the role
 
-non-abort rejection
+non-abort rejection surfaced to the role
 → this Binding capability is terminal for its owning role lifetime
 → role does not spin/retry acquire
 ```
@@ -180,9 +180,10 @@ TransportAdapter framework
 Renderer acquire receives exact requested S/G/P carrier only
 Subsystem result carries G/P but does not duplicate subsystemKey
 one pair gives exactly two paired endpoints
-acquire may remain pending
+M8 does not claim Platform/Main authority-feed or commit-time revalidation qualification
+acquire may remain pending across internally absorbed transient provisioning failures
 abort has no late installable result
-non-abort rejection stops role-side re-acquire loop
+non-abort rejection surfaced to role stops role-side re-acquire loop
 successful peer terminal permits fresh same-authority acquire when still current
 stale/aborted resolution is closed, not installed
 Binding absence does not break existing Runtime/Control paths

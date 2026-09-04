@@ -8,7 +8,7 @@
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md) · [Profile Conformance](doc/15-contracts/renderer-data-profile-conformance-v1.md)  
 > 目标：定义唯一 M8 qualification matrix；只关闭 DataAuthority + role binding/current Data lifetime，不借 M8 提前实现 M9 Broker physical provisioning、M10 Input 或 M11 Render。
 
-> **M8 closure = Main 产生 logical DataAuthority，Renderer/Subsystem 通过窄 Platform Bindings获得 paired current carrier，并由 real `@loomrealm/data` peers安全安装/退役；Data failure不改变 Runtime/Frame/Control authority。**
+> **M8 closure = Main 产生 logical DataAuthority，Renderer/Subsystem 通过窄 Platform Bindings消费 Platform 已决定可交付的 paired current carrier，并由 real `@loomrealm/data` peers安全安装/退役；Data failure不改变 Runtime/Frame/Control authority。Platform authority-feed 与 paired commit-time revalidation由 M9关闭。**
 
 ---
 
@@ -46,6 +46,7 @@ InputManager / Input producer/listener
 RenderManager / Render Store / Domain API
 Content
 Hostra/PWA physical equivalence
+Platform candidate → paired-install authority feed / commit-time Main revalidation
 ```
 
 ---
@@ -61,6 +62,7 @@ RendererDataBinding
 SubsystemDataBinding
 Subsystem current Data peer + one pending acquire
 Renderer per-subsystem current peer + one pending acquire
+one construction-time optional RendererDataBinding seam
 small deterministic paired Binding fixture
 ```
 
@@ -96,6 +98,8 @@ stopping/failure/replacement revokes authority
 fresh Runtime for same S uses G2 > G1
 Renderer replacement alone keeps G
 no generation reuse/wrap
+generation exhaustion creates no fresh authority but does not fail Runtime/Frame
+projection ordering deterministic but carries no authority semantics
 no physical material in Main/Snapshot
 no shadow Data authority registry
 ```
@@ -110,9 +114,11 @@ no shadow Data authority registry
 Renderer acquire is exact S/G/P driven
 Subsystem Binding is Runtime-scoped and returns only G/P + carrier
 one logical pair → two matching endpoints
+M8 Binding/fixture does not claim Main authority-feed or commit-time revalidation
 pending acquire does not create role current state
+transient physical provisioning failure may remain internal while acquire stays pending
 abort prevents late installation
-non-abort rejection does not cause busy retry
+non-abort rejection surfaced to role does not cause busy retry
 successful current peer terminal can lead to one fresh acquire while authority remains current
 Binding absence remains valid
 platform-ports stays Foundation-only
@@ -128,6 +134,7 @@ Subsystem：
 
 ```text
 ready + Binding → real SubsystemDataPeer
+pending acquire does not block Runtime Control / Frame handling
 old terminal identity-safe
 Data terminal does not fail Runtime/Frame
 fresh carrier creates fresh peer
@@ -136,7 +143,8 @@ fresh carrier creates fresh peer
 Renderer：
 
 ```text
-Snapshot add authority → acquire/install
+construction-time optional RendererDataBinding; no mutable registration/service locator
+Snapshot add authority → acquire/install without blocking later Control states
 remove/replace authority → retire
 late stale acquire closed
 Control replacement/terminal aborts and retires all child Data
@@ -151,7 +159,7 @@ Role实现不得复制 `@loomrealm/data` reader/writer/schema/terminal mechanics
 
 ## 6. Vertical Evidence
 
-Production path必须是：
+Production role path必须是：
 
 ```text
 Main Runtime ready
@@ -160,9 +168,11 @@ Main Runtime ready
 → Renderer Binding acquire
 +
 Subsystem Binding acquire
-→ deterministic paired MemoryCarrier
+→ deterministic already-current paired MemoryCarrier seam
 → real RendererDataPeer / SubsystemDataPeer
 ```
+
+M8 vertical不证明 Platform 如何取得 Main-authoritative `S/G/P` 或如何在 physical pair commit前重新验证 current Runtime/current Renderer/current DataAuthority；该 evidence从 M9开始。
 
 必须覆盖：
 
@@ -176,6 +186,7 @@ Binding absent
 Binding terminal
 Session terminal
 Data failure isolation
+Control/Runtime processing remains non-blocking while Data acquire is pending
 ```
 
 禁止 test直接写 Main private authority、直接构造 current Renderer Snapshot、直接注入 role current peer。
@@ -268,14 +279,21 @@ Session terminal still owns outer cleanup
 [ ] profile fixed to loomrealm.renderer-data/1
 [ ] non-empty Renderer Snapshot projection implemented
 [ ] Data transport loss leaves Main authority unchanged
+[ ] generation exhaustion cannot wrap/reuse or fail Runtime/Frame
+[ ] DataAuthority projection ordering has no authority semantics
 
 [ ] RendererDataBinding implemented
 [ ] SubsystemDataBinding implemented
 [ ] abort / terminal settlement implemented
+[ ] internally absorbed transient provisioning failure may leave acquire pending
+[ ] M8 does not claim Platform authority-feed / commit-time paired revalidation
 [ ] no generic Binding/Broker framework introduced
 
 [ ] Subsystem optional Data integration implemented
+[ ] Subsystem pending Data acquire does not block Runtime/Frame handling
+[ ] Renderer construction-time optional Data Binding seam implemented
 [ ] Renderer Control-driven Data reconciliation implemented
+[ ] Renderer Data reconciliation does not block later Control Snapshot consumption
 [ ] stale acquire/current terminal identity-safe
 [ ] Control parent terminal retires Renderer Data
 [ ] Data terminal does not mutate Control/Runtime/Frame authority
