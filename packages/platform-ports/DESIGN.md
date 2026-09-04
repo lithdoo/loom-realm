@@ -1,10 +1,9 @@
 # `@loomrealm/platform-ports` 设计
 
-> 状态：**Implemented Baseline / Core Boundary Frozen / M4-M8 Consumer Qualified**
-> 阶段：M8 Renderer Data role binding closure
-> 最近复核：2026-09-04
-> 冻结决策：[ADR 0027](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 当前 root surface另含 M8 精确 role seam：`RendererDataBinding` / `SubsystemDataBinding` / `SubsystemDataBindingResult`
+> 状态：**Implemented Baseline through M8 / M9 Public Surface Frozen for Implementation**  
+> 阶段：M9 Desktop DataConnectionBroker / Main→Platform authority feed  
+> 最近复核：2026-09-04  
+> 冻结决策：[ADR 0027](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md) · [ADR 0028](../../doc/decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
 
 > **本包只定义 platform-neutral Core 需要的窄 capability / physical fact contract；不拥有 Core authority、role policy、protocol mechanics 或 concrete Hostra/PWA implementation。**
 
@@ -22,25 +21,23 @@ Core roles
 Protocol packages
     protocol mechanics
 
-Hostra / PWA
+Hostra / PWA / apps/*
     physical realization
 ```
 
-Runtime dependency remains exactly `@loomrealm/foundation`。MUST NOT depend on runtime-control、renderer-control、main、renderer或 concrete Hostra/PWA APIs。
+Runtime dependency remains exactly `@loomrealm/foundation`。MUST NOT depend on runtime-control、renderer-control、data、main、renderer或 concrete Hostra/PWA APIs。
 
 ---
 
 ## 2. Port Admission Rule
 
-Public port只有当前真实 Core consumer + 多平台 physical realization需要时才进入本包。
+A public port enters this package only when a current platform-neutral Core consumer needs the same fact/capability while physical realization may differ across Platforms。
 
-禁止 universal Platform、service locator、generic connection registry、generic lifecycle/event bus、generic Clock/Crypto service、future port inventory。
-
-M7 `RendererControlBinding` 已由 Main real consumer closure证明；它不是 Renderer mega-port。
+Forbidden：universal Platform、service locator、generic connection registry、event bus/observer stream、generic Clock/Crypto/provisioning framework、future port inventory。
 
 ---
 
-## 3. Frozen Root API Through M8
+## 3. Frozen Root API Through M9
 
 ```ts
 import type { MessageCarrier } from "@loomrealm/foundation";
@@ -55,28 +52,6 @@ export interface RuntimeControlBinding {
 
 export interface OpaqueMaterialGenerator {
   generate(): string;
-}
-
-export interface RuntimeLaunchRequest {
-  readonly subsystemKey: string;
-  readonly bootstrapToken: string;
-}
-
-export interface MainRuntimeControlBinding {
-  acquire(signal: AbortSignal): Promise<MessageCarrier>;
-}
-
-export interface HostedRuntime {
-  readonly runtimeControl: MainRuntimeControlBinding;
-  readonly terminated: Promise<void>;
-  requestTermination(signal: AbortSignal): Promise<void>;
-}
-
-export interface RuntimeHosting {
-  launch(
-    request: RuntimeLaunchRequest,
-    signal: AbortSignal,
-  ): Promise<HostedRuntime>;
 }
 
 export interface RendererControlBinding {
@@ -104,123 +79,169 @@ export interface SubsystemDataBindingResult {
 export interface SubsystemDataBinding {
   acquire(signal: AbortSignal): Promise<SubsystemDataBindingResult>;
 }
+
+export interface RuntimeLaunchRequest {
+  readonly subsystemKey: string;
+  readonly bootstrapToken: string;
+}
+
+export interface MainRuntimeControlBinding {
+  acquire(signal: AbortSignal): Promise<MessageCarrier>;
+}
+
+export interface HostedRuntime {
+  readonly runtimeControl: MainRuntimeControlBinding;
+  readonly terminated: Promise<void>;
+  requestTermination(signal: AbortSignal): Promise<void>;
+}
+
+export interface RuntimeHosting {
+  launch(
+    request: RuntimeLaunchRequest,
+    signal: AbortSignal,
+  ): Promise<HostedRuntime>;
+}
+
+export interface DataConnectionAuthorityEntry {
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+  readonly runtime: HostedRuntime;
+}
+
+export interface DataConnectionAuthorityView {
+  readonly rendererControlToken: string;
+  readonly entries: readonly DataConnectionAuthorityEntry[];
+}
+
+export interface DataConnectionAuthoritySink {
+  replace(view: DataConnectionAuthorityView | null): void;
+}
 ```
 
-Current-v1 不保留 `BootstrapTokenGenerator` alias；M7直接改为 `OpaqueMaterialGenerator`。
+Current-v1 has no `BootstrapTokenGenerator` alias and no alternate M9 Broker API。
 
 ---
 
-## 4. M4/M5 Frozen Baseline
+## 4. M4/M5 Baseline
 
-`DeadlineScheduler`：narrow relative deadline capability；no wall-clock/interval/cron。
-
-`RuntimeControlBinding`：Subsystem-side one-attempt single-use already-established carrier；abort prevents late live delivery；no reconnect/retry/replay。
-
-`RuntimeLaunchRequest`：only `subsystemKey + bootstrapToken`。
-
-`RuntimeHosting` / `HostedRuntime` / `MainRuntimeControlBinding`：physical Runtime creation、Main-side Control acquisition、termination request与actual termination fact；M5 semantics unchanged。
+`DeadlineScheduler` is a narrow relative deadline capability。  
+`RuntimeControlBinding` is Subsystem-side one-attempt already-established carrier acquisition。  
+`RuntimeLaunchRequest` is only `subsystemKey + bootstrapToken`。  
+`RuntimeHosting`/`HostedRuntime` expose physical creation/control acquisition/termination request/actual termination fact；they do not own Main Runtime/Data authority。
 
 ---
 
 ## 5. `OpaqueMaterialGenerator`
 
-M5 Runtime bootstrap + M7 Session identity/Renderer token形成多个真实 consumer：
-
-```ts
-interface OpaqueMaterialGenerator {
-  generate(): string;
-}
-```
-
-每个 successful call MUST 返回：
+Each successful call returns：
 
 ```text
-ASCII string
-1..128 bytes
+ASCII 1..128 bytes
 fresh for the concrete Platform/Session lifetime
-at least 128 bits of unpredictability for security-sensitive uses
+>=128-bit unpredictability for security-sensitive uses
 opaque to callers
 ```
 
-Main 对 Session identity、Runtime bootstrap credential、Renderer Control credential分别独立调用；不得复用同一值。
+Main owns Session/Runtime/Renderer credential semantics。No kind parameter、identity service、token registry or generic crypto facade。
 
-Generator不拥有 Session identity semantics、Runtime attempt authority、Renderer currentness、credential registration/binding/consumption。Main 对每种用途仍做 formal representation validation。
-
-不是 identity service/token registry/kind-dispatch factory/crypto facade；不得为了三个用途增加 `generate(kind)` 或多个语义化 generator interface。
+M9 does not change one-shot Renderer authentication。Main may retain the current accepted Renderer token value after authentication only as inert physical correlation；that retained live value remains part of Main's duplicate-material defense。
 
 ---
 
-## 6. `RendererControlBinding` — Frozen Candidate Slot
+## 6. `RendererControlBinding` — M7 Frozen
 
-```ts
-interface RendererControlBinding {
-  acquire(
-    rendererControlToken: string,
-    signal: AbortSignal,
-  ): Promise<MessageCarrier>;
-}
-```
+`acquire(T,signal)` arms one physical candidate slot；it does not create/show/replace Renderer or grant currentness。
 
-一个 acquire调用不是“立即启动一个 Renderer”，而是：
+Settlement：
 
 ```text
-arm exactly one candidate slot with Main-issued token T
-→ MAY remain pending until Platform has a physical candidate
-→ Platform binds at most one candidate to T
-→ Platform delivers exact T to that candidate bootstrap
-→ Platform establishes one already-connected MessageCarrier
-→ Promise resolves at most once
+abort before resolution
+→ cancel that slot / no late live result
+
+non-abort rejection
+→ Binding terminal for owning Main Session / no re-acquire
+
+carrier acquired then peer/protocol terminal
+→ candidate attempt terminal only
 ```
 
-`acquire()` MUST NOT itself mean：
-
-```text
-create/show a new Renderer now
-replace current Renderer
-authenticate token
-negotiate Renderer Control version
-mark candidate current
-```
-
-如果没有 armed slot，或一个 slot已绑定 candidate 后又出现额外 candidate：
-
-```text
-Platform MUST NOT give it T
-Platform MUST NOT expose it as a live Renderer Control participant
-Platform rejects/closes/discards it according to product policy
-```
-
-Settlement semantics：
-
-```text
-AbortSignal abort before resolution
-→ cancel only this slot
-→ late candidate/carrier MUST NOT be delivered as a live result
-
-non-abort acquire rejection
-→ this RendererControlBinding is terminal for the owning Main Session
-→ consumer MUST NOT call acquire again in that Session
-```
-
-Binding无需 typed error hierarchy。Carrier成功 acquire 后的 protocol/peer failure不等于 Binding terminal。
-
-这允许 Main 在 current Renderer存在时预挂下一 slot而不会自动产生 replacement。
-
-M7 deterministic realization：MemoryCarrier fixture。Desktop/PWA physical realization分别 M14/M16。
+Binding owns no hello/version/currentness semantics。
 
 ---
 
 ## 7. M8 Renderer / Subsystem Data Bindings
 
-两条 Data Binding只交付 Platform 已决定 current-deliverable 的 paired carrier endpoint。Renderer请求精确 `S/G/P`；Runtime-scoped Subsystem Binding返回 matching `G/P + carrier`。它们不暴露 endpoint、ticket、credential、candidate/Broker handle或 transport type，也不拥有 Main authority与 role-local peer lifecycle。
+Bindings expose only already-current-deliverable paired carrier endpoints：
 
-Acquire可 pending；abort取消该 wait并禁止 late installation。Renderer non-abort rejection只作用于当前 Control-peer + S/G/P desired identity；Subsystem rejection只停止当前 host lifetime acquisition。M8 deterministic fixture提供真实 paired MemoryCarrier，physical authority feed/revalidation/cutover属于 M9。
+```text
+RendererDataBinding.acquire(S,G,P,signal)
+SubsystemDataBinding.acquire(signal) → {carrier,G,P}
+```
+
+They do not expose endpoint/ticket/candidate/Broker/transport or Main authority。
+
+Binding waiter state is not M9 Broker installation authority and is not an installation prerequisite。
 
 ---
 
-## 8. Optional Capability in Main-facing View
+## 8. M9 `DataConnectionAuthoritySink`
 
-`RendererControlBinding` 是 frozen capability type，但 concrete Platform/Session MAY omit。
+The real Main consumer requires one narrow physical installation fact feed：
+
+```text
+current Renderer correlation
++ exact current HostedRuntime object
++ exact Main DataAuthority S/G/P
+```
+
+It is represented as full replacement：
+
+```ts
+interface DataConnectionAuthoritySink {
+  replace(view: DataConnectionAuthorityView | null): void;
+}
+```
+
+Frozen semantics：
+
+```text
+sink instance is Session-scoped
+replace(null) = no current Renderer Data installation authority
+replace(non-null) = the only installable current view
+replace is synchronous
+replace is non-blocking
+replace MUST NOT throw
+replace performs no network/IPC wait
+```
+
+Concrete implementation first atomically swaps its in-memory view and logically invalidates stale Broker current/pending material；physical close may converge asynchronously。
+
+A throwing implementation is non-conforming and fails M9 qualification；the shared contract does not add a recovery/error hierarchy for provider bugs。
+
+---
+
+## 9. M9 View Identity
+
+`DataConnectionAuthorityView` is Session-scoped, so Session ID is not repeated in the DTO。
+
+`rendererControlToken`：
+
+```text
+already consumed as M7 one-shot Renderer authentication credential
+retained by Main only while that Renderer is current
+used as inert Platform-private correlation
+never accepted from Renderer as Data authority proof
+never enters Data application wire
+```
+
+`DataConnectionAuthorityEntry.runtime` is the exact `HostedRuntime` object identity。Same subsystemKey with a different HostedRuntime is a different physical target。
+
+No PID/Worker ID/runtimeInstanceId is introduced。
+
+---
+
+## 10. Main-facing Optional Capabilities Through M9
 
 ```ts
 interface MainPlatform {
@@ -228,106 +249,83 @@ interface MainPlatform {
   readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
   readonly rendererControl?: RendererControlBinding;
+  readonly dataConnections?: DataConnectionAuthoritySink;
 }
 ```
 
 ```text
 rendererControl absent
-→ Renderer-incapable/headless composition
-→ Main runs Runtime/Frame normally
-→ no Renderer token/candidate slot
+→ no physical Renderer attempt
 
-rendererControl present
-→ Main uses frozen one-current + one-slot/currentness semantics
+dataConnections absent
+→ no physical Data installation authority feed
 ```
 
-M6 Hostra Runtime-only无需 fake Binding；M14加入真实 Hostra Renderer physical realization。
+Runtime/Frame semantics remain valid in both cases。M6/headless providers do not add fake capabilities。
 
 ---
 
-## 9. Capability / Protocol / Authority Split
+## 11. Capability / Protocol / Authority Split
 
-Platform Ports owns：relative deadline scheduling、fresh opaque material、Runtime physical facts、candidate Renderer slot/carrier establishment when capability exists。
+Platform Ports owns only narrow structural facts/capabilities。
 
-Renderer-control owns：hello wire/schema/version negotiation、Snapshot validation、publication/terminal mechanics。
+Main owns Session/Runtime/Renderer/Data authority。  
+Renderer-control owns hello/version/Snapshot mechanics。  
+Data package owns connection-local Data application mechanics。  
+Desktop/PWA composition owns Broker/physical carrier lifecycle。
 
-Main owns：Session identity、Runtime attempt、all credential semantics、Renderer slot token/current participant/replacement、Runtime/Frame/Activation/InputTarget/DataAuthority/revision/failure/unwind。
-
----
-
-## 10. Binding Does Not Move Protocol Mechanics
-
-`RendererControlBinding` MUST NOT parse `renderer.hello/state`、encode JSON-RPC、validate Snapshot/revision、negotiate version、own current Renderer或 coalesce publication。
-
-Binding只等待/建立一个 candidate physical carrier；Main + renderer-control决定其 semantic fate。
+`DataConnectionAuthoritySink` does not parse Data protocol or create generation/profile/current Renderer authority。
 
 ---
 
-## 11. Qualification Through M8
+## 12. Qualification Through M9
 
 ```text
 M4 DeadlineScheduler / RuntimeControlBinding
-    ✅ real Subsystem Host consumer qualified
+    ✅ real Subsystem Host consumer
 
 M5 RuntimeHosting / HostedRuntime / MainRuntimeControlBinding
-    ✅ real Main consumer qualified
+    ✅ real Main consumer
 
 M7 OpaqueMaterialGenerator / RendererControlBinding
-    Frozen contract
-    deterministic Platform provides real candidate-slot Binding
-    capability-absent Main path also qualified
+    ✅ real Main + deterministic candidate consumer
 
 M8 RendererDataBinding / SubsystemDataBinding
-    exact declaration and Foundation-only dependency qualified
-    real Renderer + Subsystem consumers qualified
-    pending/abort/rejection/late-result semantics qualified
-    deterministic paired MemoryCarrier vertical qualified
+    ✅ real Renderer/Subsystem consumers
 
-M14 Hostra Renderer physical realization
-M16 PWA Renderer physical realization
+M9 DataConnectionAuthorityEntry/View/Sink
+    public shape frozen before implementation
+    Main real producer + Desktop real consumer required
 ```
 
-M7 tests MUST prove：
+M9 package tests MUST prove：
 
 ```text
-OpaqueMaterialGenerator output bound + independent values
-one slot → one candidate
-acquire may remain pending without creating replacement
-no-slot extra candidate gets no token/live carrier
-already-bound slot extra candidate gets no token/live carrier
-abort → no late live result
-non-abort acquire rejection → Binding terminal for Session / no re-acquire
-carrier-acquired peer failure does not falsely terminalize Binding
-Main one-candidate usage
-capability absence needs no fake Binding
+exact exported names/fields
+Foundation-only runtime dependency remains true
+no Broker/Hostra/PWA dependency
+view can reference HostedRuntime without adding new identity type
+sink replace signature remains void/full replacement
+no generic event/registry/service surface exported
 ```
 
----
-
-## 12. Compatibility
-
-Current project无 public compatibility obligation：
-
-```text
-BootstrapTokenGenerator → OpaqueMaterialGenerator
-```
-
-无 alias/deprecation wrapper/v2。
+Behavioral non-throwing/full-view ordering is qualified by Main + Desktop consumer tests, not by a fake platform-ports state machine。
 
 ---
 
 ## 13. Freeze Statement
 
-Frozen M7/M8 additions/refinement：
+Frozen through M9：
 
 ```text
-OpaqueMaterialGenerator common output contract
-RendererControlBinding candidate-slot semantics
-abort cancellation vs non-abort terminal rejection
-optional capability availability in MainPlatform
-Binding owns no protocol/authority
-exact RendererDataBinding / SubsystemDataBinding role seams
-per-role/slot failure scope and late-result rejection
+OpaqueMaterialGenerator common output
+RendererControlBinding candidate-slot/settlement
+RendererDataBinding / SubsystemDataBinding exact role seams
+DataConnectionAuthorityEntry/View/Sink exact surface
+sink full-replacement/non-throwing semantics
+HostedRuntime object identity as physical Runtime correlation
 ```
 
-除 ADR 0027 Reopen Rule外，不允许实现阶段新增 kind-specific random service、Binding error framework、connection registry或 Renderer mega-port。
+Implementation MUST NOT add kind-specific random services、Binding error framework、AuthorityEventBus、ConnectionRegistry、public Broker interface or universal Platform mega-port。
+
+M7 changes follow ADR 0027 reopen rule；M9 shared-port changes follow ADR 0028。

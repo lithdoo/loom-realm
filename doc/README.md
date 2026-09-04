@@ -1,6 +1,6 @@
 # LoomRealm 设计文档
 
-本文是**导航与当前事实源索引**，不重复定义协议字段、状态机或 milestone closure。精确语义以对应 Architecture / Frozen Contract / Accepted ADR / Implementation Plan 为准。
+本文是**导航与当前事实源索引**，不重复定义协议字段、状态机或 milestone closure。精确语义以对应 Architecture / Frozen Contract / Accepted ADR / Frozen Implementation Plan 为准。
 
 文档按定义依赖组织：
 
@@ -11,8 +11,6 @@
 → 模块设计
 → 实施计划
 ```
-
-横向“相关”引用不应形成主要定义依赖环；被替代正文通过 ADR/Git 历史追溯。
 
 ---
 
@@ -56,12 +54,14 @@
 36. [测试策略](./30-implementation/testing-strategy.md)
 37. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
 38. [ADR 索引](./decisions/README.md)
-39. [ADR 0020：Game Entry 消费边界归 Platform Launcher](./decisions/0020-game-entry-consumer-boundary.md)
-40. [ADR 0021：Runtime Control 首次实现前收口](./decisions/0021-runtime-control-preimplementation-closure.md)
-41. [ADR 0026：Session-scoped Concrete Platform](./decisions/0026-session-scoped-platform-instance.md)
-42. [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)
+39. [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)
+40. [ADR 0028：M9 Desktop Data Broker 首次实现前冻结](./decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
 
-M7 实施顺序位于仓库根目录：
+---
+
+## Frozen Milestone Implementation Plans
+
+M7：
 
 ```text
 M7_01_RENDERER_CONTROL_PACKAGE.md
@@ -70,6 +70,28 @@ M7_01_RENDERER_CONTROL_PACKAGE.md
 → M7_04_VERTICAL_INTEGRATION.md
 → M7_05_QUALIFICATION_CLOSURE.md
 ```
+
+M8：
+
+```text
+M8_01_MAIN_DATA_AUTHORITY.md
+→ M8_02_DATA_BINDINGS.md
+→ M8_03_DATA_ROLE_INTEGRATION.md
+→ M8_04_VERTICAL_INTEGRATION.md
+→ M8_05_QUALIFICATION_CLOSURE.md
+```
+
+M9：
+
+```text
+M9_01_DESKTOP_DATA_BROKER.md
+→ M9_02_RUNNER_PROVISIONING_IPC.md
+→ M9_03_PAIRED_INSTALLATION.md
+→ M9_04_VERTICAL_INTEGRATION.md
+→ M9_05_QUALIFICATION_CLOSURE.md
+```
+
+M9 `05` is the unique qualification/closure gate；the first four documents refine one implementable boundary rather than define independent architecture variants。
 
 ---
 
@@ -95,21 +117,11 @@ Main 不读取 Game Entry、Launch Manifest、module/path/URL 或 concrete launc
 
 ### Runtime / Frame Authority
 
-```text
-Runtime Control
-    owns connection-local Control/Frame protocol mechanics
+Runtime Control owns connection-local mechanics；Main owns Session/Runtime/Frame/Stack/Activation/InputTarget/failure unwind；Subsystem Host maps typed control outcomes into business control-flow。
 
-Main
-    owns Session / Runtime / Frame / Stack / Activation / InputTarget
-    owns Runtime failure + fixed-point unwind
+Frame/Call Frozen causal rules remain ACK-before-publication、post-commit no rollback、ambiguous mutation→Runtime failure、no retry/replay。
 
-Subsystem Host
-    maps typed Runtime Control outcomes into local Frame/business control-flow
-```
-
-Frame/Call Frozen causal rules继续成立：ACK-before-publication、post-commit no rollback、ambiguous mutation failure→Runtime failure、no retry/replay。
-
-### Renderer Control — M7 Frozen
+### Renderer Control — M7 Qualified
 
 ```text
 Main committed authority
@@ -118,58 +130,71 @@ Main committed authority
 → current Renderer local holder
 ```
 
-关键边界：
+Main owns Renderer currentness/token/revision；renderer-control owns hello/version/wire mechanics；Renderer local holder is a mirror, not remote-currentness proof。
+
+### Renderer Data — M8 Qualified Logical Seam
 
 ```text
-Main owns Renderer currentness / token / revision
-renderer-control owns hello/version/wire/connection mechanics
-Platform RendererControlBinding only arms one physical candidate slot + delivers carrier/token
-Renderer local {peer,snapshot}|null is a mirror, not remote-currentness proof
-M7 Main dataAuthorities=[]
+Main ready Runtime
+→ DataAuthority S/1/loomrealm.renderer-data/1
+→ Renderer Control Snapshot
+
+Renderer / Subsystem
+→ M8 RendererDataBinding / SubsystemDataBinding
+→ real @loomrealm/data peers
 ```
 
-Formal source：[Main ⇄ Renderer Control v1](./15-contracts/main-renderer-control-v1.md) + [ADR 0027](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)。
+Data physical loss/reacquire does not alter Main S/G/P or Renderer revision。
 
-### Renderer Data / Input / Render
-
-Current frozen logical split：
+### Desktop Data Physical Core — M9 Frozen, Pending Implementation
 
 ```text
-Main DataAuthority {subsystemKey,generation,dataProfile}
-→ Platform DataConnectionBroker physical provisioning
-→ current paired Data Connection
-→ Renderer Data Application Profile
-    ├ User Input
-    └ Render Update
+Main current Renderer + exact HostedRuntime + S/G/P
+→ DataConnectionAuthoritySink.replace(full view)
+→ apps/desktop DataConnectionBroker
+→ Renderer WS + Runner WS paired candidate
+→ exact HostedRuntime → HostraRuntimeDataProvisioner
+→ Broker paired install
+→ post-install role Binding delivery
 ```
 
-Data provisioning/loss不自动失败 Runtime或 unwind Frame；Control/Data无全局 total order；Input effective authority仍是 Main InputTarget × current matching Data × Activation × Interest × Producer。
+Frozen M9 distinctions：
+
+```text
+sink replace is synchronous/non-blocking/non-throwing
+Renderer token retention after M7 auth is inert correlation only
+candidate != current Connection
+Broker installation != Runner IPC commit ACK
+post-install delivery failure → new current retires; old never resurrects
+Data failure != Runtime/Frame failure
+```
 
 ---
 
-## Platform Composition Placement
+## Platform Composition Placement Through M9
 
-Concrete Platform 是完整 physical Session composition object，但 Core只消费窄 role-facing capability view。
-
-Through M7 Main-facing current shape：
+Main-facing shape：
 
 ```text
 DeadlineScheduler
 OpaqueMaterialGenerator
 RuntimeHosting
-RendererControlBinding?   // optional physical capability
+RendererControlBinding?         // M7
+dataConnections?                // M9 DataConnectionAuthoritySink
 ```
 
-`RendererControlBinding` 是 Main-facing candidate-slot/carrier capability，不是 Renderer-facing application API，也不是 `RendererHosting` mega-port。
+Renderer/SubSystem role Data Bindings remain M8 shared ports。
 
-Physical milestone placement：
+Physical placement：
 
 ```text
 M6   Hostra Runtime / Node Runner / Runtime Control WS ✅
-M9   Desktop DataConnectionBroker provisioning core
-M14  Hostra BrowserWindow + physical Renderer Control + Data/Input/Render/Content full E2E
-M15  PWA Runtime / Worker Runner / Runtime Control MessagePort
-M16  PWA Renderer Control + Data Broker/bindings + Content full E2E + equivalence
+M7   logical Renderer Control ✅
+M8   logical Data authority + role seam ✅
+M9   Desktop Data Broker / Runner late provisioning / Data WS 🔒 ready to implement
+M14  BrowserWindow + physical Renderer Control + Data/Input/Render/Content full Desktop E2E
+M15  PWA Runtime vertical
+M16  PWA full Renderer/Data/Content + equivalence
 ```
 
 ---
@@ -178,25 +203,37 @@ M16  PWA Renderer Control + Data Broker/bindings + Content full E2E + equivalenc
 
 ```text
 Foundation / Wire
-    low-level primitives only
+    low-level primitives
 
 Game Package
     document validation
 
-Runtime Control / Renderer Control / Data protocol packages
-    protocol mechanics only
+Runtime Control / Renderer Control / Data
+    protocol mechanics
 
 Platform Ports
-    narrow Core↔Platform capabilities/facts only
+    narrow shared Core↔Platform capabilities/facts
 
 Main / Renderer / Subsystem
     role authority/policy/local state
 
-Concrete Platform / apps/*
-    physical composition/provisioning/hosting
+Concrete launcher integration
+    Game PREPARE / Runner ownership mechanics
+
+apps/*
+    one-app physical composition/policy
 ```
 
-不得因为 package symmetry 预建：generic RPC、universal Platform/service locator、Renderer Store framework、ConnectionRegistry、cross-plane currentness lease/epoch/heartbeat。
+M9 exact placement：
+
+```text
+DataConnectionAuthoritySink → platform-ports
+Main sink projection         → main
+HostraRuntimeDataProvisioner → game-launcher-hostra
+Desktop DataConnectionBroker → apps/desktop
+```
+
+Forbidden：generic RPC、AuthorityEventBus、ConnectionRegistry/Manager、RuntimeDirectory service、GenericTransaction/2PC、retry framework、second currentness lease/epoch/heartbeat。
 
 ---
 
@@ -208,10 +245,10 @@ M2 Game Package                                   ✅ Closed
 M3 Runtime Control mechanics                      ✅ Closed
 M4 Subsystem Runtime/Frame core                   ✅ Closed
 M5 Main Runtime/Frame authority                   ✅ Closed
-M6 Hostra Runtime physical vertical               ✅ Qualified Baseline (2026-09-03)
+M6 Hostra Runtime physical vertical               ✅ Qualified (2026-09-03)
 M7 Renderer Control                               ✅ Qualified (2026-09-03)
-M8 Renderer Data role integration                 Pending
-M9 Desktop DataConnectionBroker                   Pending
+M8 Renderer Data logical/core role integration    ✅ Qualified (2026-09-04)
+M9 Desktop DataConnectionBroker                   🔒 Implementation Frozen / Pending Code
 M10 User Input                                    Pending
 M11 Render                                        Pending
 M12 Content                                       Pending
@@ -221,35 +258,34 @@ M15 PWA Runtime vertical                          Pending
 M16 PWA Full E2E / Cross-platform equivalence     Pending
 ```
 
-**当前下一实现门 = M8 Renderer Data role integration。**
+**当前下一实现门 = M9 Desktop DataConnectionBroker / Late Provisioning Core。**
 
-M7 implementation facts由 ADR 0027 + Frozen Renderer Control contract + `M7_01`–`M7_05` 定义；qualification run见 [`M7 qualification record`](./30-implementation/m7-qualification.md)。
+M9 coding should start from ADR 0028 + `M9_01`–`M9_05`; no additional architecture-design pass is expected unless a frozen reopen condition is demonstrated。
 
 ---
 
 ## Current Contract Stability
 
-精确状态以[正式契约目录](./15-contracts/README.md)为唯一索引。当前关键项：
+Precise status remains in [正式契约目录](./15-contracts/README.md)。Key Frozen contracts：
 
 ```text
-Frame / Call v1                         Active / Normative / Frozen
-Main ⇄ Renderer Control v1              Active / Normative / Frozen
-Renderer Data Application Profile v1    Active / Normative / Frozen
-Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
-User Input v1                           Active / Normative / Frozen
-Render Update v1                        Active / Normative / Frozen
-Readonly Content API v1                 Active / Normative / Evolving
+Frame / Call v1
+Main ⇄ Renderer Control v1
+Renderer Data Application Profile v1
+Renderer ⇄ Subsystem Data Connection v1
+User Input v1
+Render Update v1
 ```
 
-不要在本 README 建立第二套 contract status 表述。
+M9 does not modify these wire/application contracts；it realizes the existing Data Connection contract on Hostra/Desktop physical infrastructure。
 
 ---
 
 ## Governance
 
-Current-v1 首次实现前纠错按[文档分层与变更规则](./00-overview/document-governance.md)执行。
+Current-v1 correction/freeze follows [文档分层与变更规则](./00-overview/document-governance.md)。
 
-关键 Accepted ADR：
+Key ADR chain：
 
 - [ADR 0017：Platform 是系统级 Composition Boundary](./decisions/0017-system-level-platform-composition.md)
 - [ADR 0018：首次实现前直接收口 current v1](./decisions/0018-preimplementation-v1-closure.md)
@@ -258,5 +294,6 @@ Current-v1 首次实现前纠错按[文档分层与变更规则](./00-overview/d
 - [ADR 0021：Runtime Control 首次实现前收口](./decisions/0021-runtime-control-preimplementation-closure.md)
 - [ADR 0026：Concrete Platform 是 Session composition object](./decisions/0026-session-scoped-platform-instance.md)
 - [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)
+- [ADR 0028：M9 Desktop Data Broker / Late Provisioning 首次实现前冻结](./decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
 
-Frozen contract如需改变 authority、identity、state/order、failure/recovery、wire limit或 version binding，必须先走对应 ADR reopen/migration governance；不能在实现中静默扩张。
+Frozen changes to authority、identity、lifecycle/order、failure/recovery or public surfaces require the corresponding ADR reopen rule；implementation cannot silently broaden them。

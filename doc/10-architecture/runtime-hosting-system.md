@@ -3,13 +3,13 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：Subsystem Runtime Container、PlatformLaunchPlan、Runner、Control/Frame/Input/Render 的承载粒度，以及 plan-bound RuntimeHosting / Supervisor 边界  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)  
+> 主要定义：Subsystem Runtime Container、PlatformLaunchPlan、Runner、Control/Frame/Input/Render 承载粒度、plan-bound RuntimeHosting / Supervisor，以及 Runtime-owned late Data provisioning handoff  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
 > 被以下文档细化：[运行时启动系统](./runtime-bootstrap-system.md)、[栈式运行系统](./stack-runtime-system.md)、[Subsystem 模型](./subsystem-model.md)  
 > 正式化：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)  
-> 最近复核：2026-08-28
+> 最近复核：2026-09-04
 
-本文只定义 Runtime physical hosting 边界。Game Entry document validation、Launcher PREPARE、Main authority、Frame authority与 Data authority分别由各自事实源拥有。
+本文只定义 Runtime physical hosting边界。Game Entry validation、Launcher PREPARE、Main authority、Frame authority与 Data authority分别由各自事实源拥有。
 
 ---
 
@@ -29,34 +29,26 @@ one Runtime Container
 
 Runtime application identity来自 `subsystemKey`，不来自 module path、URL、PID、Worker id 或 Launch Attempt id。
 
-Renderer Data carrier不属于 Runtime hosting cardinality；它由 DataAuthority/Broker独立管理。
+Renderer Data carrier不属于 Runtime hosting cardinality；它由 Main DataAuthority + Platform DataConnectionBroker独立管理。
 
 ---
 
 ## 2. Launcher PREPARE Before Hosting
 
-`RuntimeHosting` 不解析：
+`RuntimeHosting` 不解析 raw Game Entry / ValidatedGameEntryV1 / Platform Launch Manifest。
+
+在任何 business Runtime side effect 前，current concrete Platform `prepareGame()` MUST 已完成：
 
 ```text
-raw Game Entry
-ValidatedGameEntryV1
-Platform Launch Manifest
-```
-
-Main 也不解析/接收这些 document types。
-
-在任何 business Runtime side effect 前，current concrete Platform `prepareGame()` MUST 已通过 matching Launcher component 完成：
-
-```text
-Game Entry validation via @loomrealm/game-package
+Game Entry validation
 → Platform Launch Manifest validation
-→ exact Game↔Platform key-set join
+→ exact key-set join
 → every required executable binding resolution
 → installation/security containment
 → current hosting capability preflight
 → freeze immutable PlatformLaunchPlan
 → project immutable LogicalGameBootstrap
-→ concrete Platform installs the plan privately
+→ concrete Platform installs plan privately
 ```
 
 任一 PREPARE failure：
@@ -71,8 +63,6 @@ Runtime Control establishment = 0
 
 ## 3. LogicalGameBootstrap vs LaunchPlan
 
-两份 prepared data严格分离：
-
 ```text
 LogicalGameBootstrap
     → Main-visible
@@ -83,7 +73,7 @@ PlatformLaunchPlan
     → Map<subsystemKey, ResolvedPlatformImplementation>
 ```
 
-Main 不得通过 bootstrap 获得 executable material；session-scoped concrete Platform instance 持有 immutable PlatformLaunchPlan，并通过其 Main-facing RuntimeHosting capability 使用该 plan。RuntimeHosting 不得要求 Main重新传 Game Entry/manifest。
+Main不接收 executable material；session-scoped concrete Platform 持有 immutable plan，并通过 Main-facing `RuntimeHosting` 使用它。
 
 ---
 
@@ -98,31 +88,14 @@ Definition Module
     satisfies shared SubsystemDefinitionFactory ABI
 ```
 
-Hostra：
+Hostra：Node child → Host-owned Node Runner → exact Hostra plan module。  
+PWA：Dedicated Worker → Host-owned Worker Runner → exact PWA plan module。
 
-```text
-Node child process
-→ Host-owned Node Runner
-→ lookup frozen HostraLaunchPlan binding
-→ import selected Hostra Definition Module
-```
-
-PWA：
-
-```text
-Dedicated Worker
-→ Host-owned Worker Runner
-→ lookup frozen PwaLaunchPlan binding
-→ import selected PWA Definition Module
-```
-
-业务 module 不负责 physical hosting/bootstrap，也不读取 Game Entry/Platform manifest。
+Business module不负责 physical hosting/bootstrap，也不读取 Game Entry/Platform manifest。
 
 ---
 
 ## 5. Runner Responsibility
-
-Runner 位于 Platform 与 Subsystem role Core之间：
 
 ```text
 PlatformLaunchPlan + bootstrap/provisioning
@@ -142,12 +115,13 @@ Runner负责：
 
 ```text
 verify own planned subsystemKey/binding
-load exact plan-selected Definition Module
-validate default SubsystemDefinitionFactory ABI
+load exact selected Definition Module
+validate SubsystemDefinitionFactory ABI
 M6 construct RuntimeControlBinding
-M8+ construct SubsystemDataBinding when Data slice lands
-M12+ construct ContentClient when Content slice lands
-invoke runSubsystem(...) with only capabilities implemented by the current milestone
+M8 construct SubsystemDataBinding role seam when supplied
+M9 Hostra/PWA provisioning layer feeds that Binding dynamically
+M12+ construct ContentClient
+invoke runSubsystem(...) with current real capabilities
 platform-local diagnostics/cleanup
 ```
 
@@ -155,9 +129,9 @@ Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也�
 
 ---
 
-## 6. Main-facing RuntimeHosting
+## 6. Main-facing RuntimeHosting — Shared Contract Unchanged
 
-RuntimeHosting 是 prepared concrete Platform instance 对 Main 暴露的 logical launch capability，而不是 module loader API。M5 exact contract 已由 `@loomrealm/platform-ports` 冻结：
+M5 exact shared port remains：
 
 ```ts
 interface RuntimeLaunchRequest {
@@ -180,25 +154,47 @@ interface RuntimeHosting {
 }
 ```
 
-`RuntimeLaunchRequest` 是 Main-owned Launch Attempt 的窄 projection；只含 logical key + already-registered bootstrap token。
+`RuntimeLaunchRequest` only carries logical key + Main-owned bootstrap token。
 
 ```text
-launch({subsystemKey,bootstrapToken})
+launch(...)
 → lookup immutable PlatformLaunchPlan[subsystemKey]
 → create exact Host-owned Runner Container
 → inject key/token
-→ return one HostedRuntime lifetime
+→ return one HostedRuntime object for that physical lifetime
 ```
 
-`HostedRuntime` 自然关联该 physical Runtime 的 Main-side Control establishment、termination request capability 与 actual termination fact；不需要为了 correlation 再暴露平行 `RuntimeControlHost` / `RuntimeSupervisor` registry。
+`HostedRuntime` object identity is now additionally reused by M9 Main→Platform Data authority view as the exact physical target correlation。This does not change RuntimeHosting's public fields and does not expose PID/Worker id to application wire。
 
-Main MUST NOT传 Game Entry、PlatformLaunchPlan、module/path/URL、Node/Worker options、Control endpoint/Port、Renderer/Data/Content material。RuntimeHosting不负责 ready/Frame/Activation/InputTarget/DataAuthority/failure unwind。
+Main MUST NOT pass Game Entry、PlatformLaunchPlan、module/path/URL、Node/Worker options、Control/Data endpoint/Port、Renderer/Content material。
 
 ---
 
-## 7. Host Policy Boundary
+## 7. Runtime-owned Provisioning Handoff
 
-Platform Launch Manifest MAY 选择 installation 内 business artifact；MUST NOT覆盖：
+Because the concrete launcher/RuntimeHosting implementation owns the child, a Platform composition that needs late Data must obtain a child-scoped provisioner from that owner rather than discover the process through a public registry。
+
+Hostra M9 freezes：
+
+```text
+RuntimeHosting.launch creates exact child
+→ constructs HostedRuntime R
+→ constructs HostraRuntimeDataProvisioner P bound to that child
+→ optional composition hook receives (R,P)
+→ only then launch resolves R
+```
+
+The hook is Hostra concrete integration, not a shared `@loomrealm/platform-ports` interface。Desktop may keep a private `WeakMap<HostedRuntime,P>`。
+
+M6/headless composition omits the hook and remains valid。
+
+A fresh Runtime object always gets a fresh provisioner；provisioner lifetime cannot outlive the exact child。
+
+---
+
+## 8. Host Policy Boundary
+
+Platform Launch Manifest MAY select installation-local business artifact；MUST NOT override：
 
 ```text
 Node executable
@@ -207,22 +203,19 @@ shell / arbitrary argv / unsafe env
 Worker constructor security policy
 bootstrap credential source
 Control endpoint / MessagePort
-Data ticket/Port authority
+Data ticket/Port/provisioning IPC policy
 CSP / same-origin policy
 Supervisor resource/timeouts
 ```
 
 ```text
 select business implementation
-!=
-arbitrary host-code execution authority
+!= arbitrary host-code execution authority
 ```
 
 ---
 
-## 8. Physical Termination Fact Boundary
-
-M5 shared port只冻结最小 portable fact：
+## 9. Physical Termination Fact Boundary
 
 ```text
 HostedRuntime.terminated resolves
@@ -233,15 +226,15 @@ HostedRuntime.terminated rejects
     != stopped proof
 ```
 
-`requestTermination()` 只请求 physical termination；resolution 不等于 actual terminated。PID/Worker/exit code/signal/reason 等 richer diagnostics MAY 保持 concrete Platform-local，直到独立 portable consumer 证明需要才进入 shared port。
+`requestTermination()` only requests physical termination。PID/Worker/exit diagnostics remain concrete Platform-local until a real portable consumer requires them。
 
-Main解释 physical facts为 Runtime lifecycle；Platform不能选择 Frame unwind root、Data generation或 application recovery。
+Main interprets physical facts as Runtime lifecycle；Platform cannot select Frame unwind root、Data generation or application recovery。
 
 ---
 
-## 9. Runtime Control Carrier
+## 10. Runtime Control Carrier
 
-一个 Launch Attempt 最多一个 successful identified Control Connection。
+One Launch Attempt has at most one successful identified Control Connection：
 
 ```text
 starting
@@ -253,9 +246,11 @@ starting
 → ready
 ```
 
-same-attempt Control reconnect不存在。
+Same-attempt Control reconnect does not exist。Unexpected Control loss without shutdown intent → Runtime failed。
 
-Control carrier loss在无 shutdown intent时 → Runtime failed。
+---
+
+## 11. Ready != Data Current
 
 ```text
 ready != Data current
@@ -263,23 +258,21 @@ ready != Renderer exists
 ready != Input/Render baseline published
 ```
 
----
-
-## 10. Local Frame/Input Context
-
-Runtime 可承载多个 live local Frame Context，但公共 Stack/Activation authority仍在 Main。
-
-Local context只保存当前协议角色所需状态；不得成为第二份 public Stack authority。
-
-Frame/Input Context lifetime与 Render Domain/Data Connection相互独立。
-
-Child-call suspension可保留 Frame-scoped Interest configuration；fresh Activation不复用 old Input State/Event。
+Main may derive logical DataAuthority from `ready`, but physical Data installation additionally requires a current Renderer and matching Platform authority view。
 
 ---
 
-## 11. Render Domains
+## 12. Local Frame/Input Context
 
-Runtime 可拥有 `0..N` authoritative Render Domains，即使当前 zero active Frame / zero Data carrier。
+Runtime may host multiple live local Frame Contexts；public Stack/Activation authority remains Main-owned。
+
+Frame/Input Context lifetime and Render Domain/Data Connection lifetimes are independent。Child-call suspension may retain Frame-scoped Interest configuration；fresh Activation does not reuse old Input State/Event。
+
+---
+
+## 13. Render Domains
+
+Runtime may own `0..N` authoritative Render Domains even with zero active Frame or zero Data carrier。
 
 ```text
 Frame close != Render Domain close
@@ -287,68 +280,73 @@ Frame suspend != Render hide
 Data carrier loss != authoritative Render destroy
 ```
 
-fresh Data carrier只重建 Renderer replica baseline；authoritative Domain state仍由 Subsystem拥有。
+Fresh Data carrier eventually rebuilds Renderer replica through M11 business semantics；M9 itself only closes physical carrier/peer replacement。
 
 ---
 
-## 12. Data Provisioning Is Adjacent, Not Owned
+## 14. Data Provisioning Is Adjacent, Not Runtime Authority
 
-Data Broker可向已经运行/ready的 Runner 动态提供 fresh `SubsystemDataBinding` carrier：
-
-```text
-Runtime already ready
-→ DataAuthority(S,G,P)
-→ Platform DataConnectionBroker
-→ platform-local provisioning
-→ Runner establishes/receives carrier
-→ SDK DataPlane installs current S/G/P carrier
-```
-
-Hostra：Runner provisioning IPC + endpoint/ticket + Data WebSocket。  
-PWA：Worker provisioning + transferred MessagePort。
-
-因此：
+Hostra M9 physical flow：
 
 ```text
-Runtime ready != Data current
-Runtime hosting != Data connection lifecycle
-Data provisioning failure != Runtime hosting failure
-Data loss != Frame unwind
+Runtime already running
+→ Main current Data authority view names exact HostedRuntime R
+→ Desktop Broker finds R's HostraRuntimeDataProvisioner
+→ provision one-time Data WS candidate to Runner
+→ Runner connects/holds carrier privately and reports prepared
+→ Broker paired install
+→ post-install Runner delivery notification
+→ SubsystemDataBinding may deliver already-current carrier
 ```
+
+`SubsystemDataBinding.acquire()` remains a role delivery wait；it does not create candidate or authorize install。
+
+PWA later maps the same abstract lifecycle through Worker provisioning/MessagePort transfer。
 
 ---
 
-## 13. Termination
+## 15. Provisioning Delivery Failure Is Not Installation Rollback
 
-正常：
+Runner IPC `commit`/ack is post-install delivery, not the Broker atomic install point。
+
+Frozen result：
+
+```text
+B installed current
+→ Runner delivery notification fails
+→ B current→retired
+→ close/revoke B
+→ old A never resurrects
+```
+
+This failure does not mutate Main DataAuthority、fail Runtime or unwind Frame。
+
+If provisioning IPC becomes unusable while child/Runtime Control remains alive, Data capability may become unavailable while Runtime continues。
+
+---
+
+## 16. Termination
+
+Normal：
 
 ```text
 Main shutdown intent
 → subsystem.shutdown
-→ if shutdown accepted: bounded wait HostedRuntime.terminated
-→ if no successful termination observation: requestTermination()
 → bounded wait HostedRuntime.terminated
-→ only resolved termination fact can support stopped
+→ if needed requestTermination()
+→ bounded wait HostedRuntime.terminated
+→ only resolved termination fact supports stopped
 ```
 
-异常：
+Unexpected Runtime exit / Control loss / self-reported failed / fatal Runtime protocol invariant enter Main Runtime failure path。
 
-```text
-unexpected Runtime exit
-Control loss
-Runtime self-reported failed
-fatal protocol/SDK invariant failure
-```
+Runtime failed cannot recover merely because later exit code is 0。No automatic restart；fresh Runtime requires fresh Launch Attempt + credential + Container + Control lifetime。
 
-进入 Main Runtime failure path。
-
-Runtime 已 failed 后不能因为随后 exit code 0恢复为 graceful success。
-
-No automatic restart；新 Runtime必须 fresh Launch Attempt + fresh credential + fresh Container + fresh Control lifetime。
+Any Data provisioner associated with the old HostedRuntime becomes unusable when that child terminates；old Data material must retire independently。
 
 ---
 
-## 14. Cross-platform Realization
+## 17. Cross-platform Realization
 
 ```text
 Hostra Desktop
@@ -356,32 +354,35 @@ Hostra Desktop
     Runtime Container  Node Runner Process
     Supervisor         child process lifecycle
     Control            WebSocket
-    provisioning       child IPC/equivalent
+    provisioning       Runtime-scoped child IPC + Data WS
 
 PWA
     LaunchPlan          installation/same-origin module URL
     Runtime Container  Worker Runner
     Supervisor         Worker lifecycle
     Control            MessagePort
-    provisioning       Worker Port/message transfer
+    provisioning       Worker message/Port transfer
 ```
 
-物理 topology不同；建立后的 Runtime Control、Frame、Data/Input/Render/Content semantics必须等价。
+Physical topology differs；established Runtime Control、Frame、Data/Input/Render/Content semantics must eventually be equivalent。
 
 ---
 
-## 15. Final Invariants
+## 18. Final Invariants
 
-1. one logical `subsystemKey` 最多一个 active Runtime Container；
-2. Game Package/ValidatedGameEntry 不是 RuntimeHosting input；
-3. PlatformLaunchPlan + LogicalGameBootstrap 在 first Runtime side effect前完整闭合；
-4. Runtime Container承载 Host-owned Runner + one selected business Definition instance；
-5. Host-owned Runner是 physical entry；
-6. Main-facing RuntimeHosting只接受 `{subsystemKey, bootstrapToken}` Launch Attempt projection；
-7. Host policy/credential/security不能被 Game/Platform manifest任意覆盖；
-8. Runtime最多 `0..1 current` Control carrier，same-attempt不 reconnect；
-9. Supervisor只报告 physical facts，`stopped`只来自 actual termination；
-10. public Frame/Activation/InputTarget/DataAuthority authority仍在 Main；
-11. Runtime ready不要求 Data current；
-12. Data provisioning/loss不等于 Runtime failure/Frame unwind；
-13. Hostra/PWA hosting/artifact可不同，但 Subsystem ABI与 observable application semantics一致。
+1. one logical subsystemKey has at most one active Runtime Container；
+2. Game Package/ValidatedGameEntry are not RuntimeHosting input；
+3. PlatformLaunchPlan + LogicalGameBootstrap close before first Runtime side effect；
+4. Runtime Container hosts trusted Runner + one selected business Definition instance；
+5. Host-owned Runner is physical entry；
+6. Main-facing RuntimeHosting shared API remains `{subsystemKey,bootstrapToken} → HostedRuntime`；
+7. HostedRuntime object identity may correlate M9 physical Data target without exposing PID/Worker identity；
+8. Host policy/credential/security cannot be overridden by Game manifest；
+9. Runtime has at most one current Control carrier, no same-attempt reconnect；
+10. Supervisor reports physical facts only；`stopped` comes from actual termination；
+11. public Frame/Activation/InputTarget/DataAuthority remain Main-owned；
+12. Runtime ready does not imply Data current；
+13. Runtime owner may expose only a concrete child-scoped provisioner handoff, not Broker policy or public registry；
+14. Data provisioning/loss/post-install delivery failure does not directly equal Runtime failure/Frame unwind；
+15. post-install delivery failure retires new Data current and never rolls back old current；
+16. Hostra/PWA hosting/artifact may differ, but Subsystem ABI/formal observable semantics remain shared。

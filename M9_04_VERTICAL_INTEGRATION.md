@@ -5,14 +5,45 @@
 > 落地顺序：04  
 > 最近复核：2026-09-04  
 > 前置：[M9 / 01](M9_01_DESKTOP_DATA_BROKER.md) → [M9 / 02](M9_02_RUNNER_PROVISIONING_IPC.md) → [M9 / 03](M9_03_PAIRED_INSTALLATION.md)  
+> 冻结决策：[ADR 0028](doc/decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md)  
-> 目标：用 production Main authority sink + real Hostra Node Runner provisioning IPC + real Data WebSocket relay 跑通 M8 role-facing seam；Renderer hosting保持 deterministic/test，不提前进入 M14 BrowserWindow。
+> 目标：用 production Main authority sink + real Hostra Node Runner provisioning IPC + real two-sided Data WebSocket relay跑通现有 M8 role-facing seam；Renderer hosting保持 deterministic/test，不提前进入 M14 BrowserWindow。
 
-> **M9 vertical 新增的是 authority→Broker→IPC/WS physical closure；M8 role code与 Frozen protocol mechanics不重写。**
+> **M9 vertical新增的是 authority→Broker→IPC/WS physical closure；M8 role code与 Frozen protocol mechanics不重写，M10/M11 child business baseline不提前声明。**
 
 ---
 
-## 1. Vertical Shape
+## 1. Workspace / Placement
+
+M9 is the first real consumer that requires the Desktop composition root。
+
+Repository adds：
+
+```text
+apps/desktop/
+    private Desktop composition workspace
+    owns DataConnectionBroker / Renderer-side Data binding realization
+    owns M9 deterministic Renderer physical host fixture/composition
+```
+
+Root npm workspace list expands from：
+
+```text
+packages/*
+```
+
+into：
+
+```text
+packages/*
+apps/*
+```
+
+Do not create PWA/CLI code solely for symmetry。`apps/desktop` at M9 is not yet the full Electron/BrowserWindow product entry；M14 completes that composition。
+
+---
+
+## 2. Production Vertical Shape
 
 ```text
 Hostra PREPARE
@@ -21,191 +52,282 @@ Hostra PREPARE
 → real Subsystem host ready
 → Main committed DataAuthority(S,1,P)
 
-Main current Renderer acceptance
-→ DataConnectionAuthoritySink.replace({rendererControlToken, S/1/P, HostedRuntime})
+real Renderer Control production peers
+→ deterministic/test physical Renderer candidate
+→ Main accepts exact Renderer token T
+→ DataConnectionAuthoritySink.replace({T, S/1/P, HostedRuntime})
 → Desktop Broker
 
 createHostraRuntimeHosting(... onRuntimeDataProvisioner)
-→ app-private HostedRuntime → provisioner mapping
+→ private WeakMap<HostedRuntime, HostraRuntimeDataProvisioner>
 
 Desktop Broker
 → Renderer candidate WS
-→ Runner candidate WS through provisioner
-→ paired prepare
-→ commit-time sink-view revalidation
-→ paired commit
+→ Runner candidate WS via provisioner.prepare
+→ paired prepared
+→ commit-time Main-view revalidation
+→ sole-current install
+→ Renderer delivery + Runner post-install commit notification
 → M8 RendererDataBinding / SubsystemDataBinding
 → real RendererDataPeer / SubsystemDataPeer
 ```
 
 `P = loomrealm.renderer-data/1`。
 
-Renderer Control physical WebSocket / BrowserWindow remains M14。
+Hostra physical RendererControlBinding WebSocket + BrowserWindow remain M14。
 
 ---
 
-## 2. Renderer Test Host Boundary
+## 3. Test Renderer Boundary
 
-M9 test Renderer hosting MUST use production：
+M9 deterministic Renderer host MUST still use production：
 
 ```text
-renderer-control peers
+@loomrealm/renderer-control peers
 @loomrealm/renderer holder
-RendererDataBinding consumption
+RendererDataBinding public acquire surface
 @loomrealm/data RendererDataPeer
 ```
 
-Only physical Renderer hosting is deterministic/test。
+Only the **physical Renderer hosting/bootstrap** is test/deterministic。
 
-The same test Platform candidate that receives a Main-issued `rendererControlToken` owns the matching Renderer-side Data delivery cell。It never self-declares current；only the Main sink view makes that token installable。
+The Platform candidate that physically received Main-issued Renderer Control token T owns the matching Renderer-side Data delivery cells。It cannot self-declare current；only current `DataConnectionAuthorityView.rendererControlToken == T` makes its candidates installable。
 
 ---
 
-## 3. Initial Install
+## 4. Initial Authority / Install Trace
 
 Must prove：
 
 ```text
-Runtime not ready → sink has no S entry → no install
-Runtime ready commit → sink view includes exact S/1/P + HostedRuntime
-current Renderer exists → sink view names exact accepted token
-Broker prepares both WS endpoints
-Runner provisioner reports prepared
-commit-time revalidation succeeds
-Broker installs sole current pair
-Bindings resolve committed carriers
+Session start → sink.replace(null)
+Runtime not ready → no S entry
+Runtime ready commit → logical Main S/1/P exists
+no current Renderer → sink still null
+Renderer accepted → sink non-null names exact T + exact HostedRuntime + S/1/P
+Broker prepares both WS sides
+Runner prepare ACK
+commit-time latest-view revalidation
+sole-current installation
+Bindings resolve current-deliverable carriers
 real Data peers install
 ```
 
-No Input/Render child traffic is needed for M9 product vertical closure。
+Sink updates do not change `rendererRevision` by themselves。
 
 ---
 
-## 4. Authority Invalidations
+## 5. Authority Invalidations
 
-At least cover：
+Production vertical covers：
 
 ```text
 candidate preparing
 → Main removes S/1/P
-→ sink.replace(new view)
-→ candidate finishes late
-→ commit rejected/disposed
+→ sink full replace
+→ late physical prepare success
+→ candidate cannot install
 ```
 
-And：
+Renderer replacement：
 
 ```text
-Renderer A current / candidate A
-→ Main accepts Renderer B
-→ sink switches token A → B
-→ A current/pending Data retire/invalidate
-→ late A cannot install again
+A current token T1
+→ Main accepts B token T2
+→ same Main mutation replaces sink T1→T2
+→ A pending/current Data loses install/current status
+→ late A work cannot affect B
 ```
 
-Exact HostedRuntime replacement in a synthetic Broker test must similarly invalidate old runtime-bound candidate/current material；production M9 does not invent a Runtime restart path。
+Current Renderer terminal with no replacement：
+
+```text
+sink.replace(null)
+→ all Data current/pending retire/invalidate
+```
+
+Exact HostedRuntime replacement is driven only in Broker contract harness；production M9 does not invent same-key Runtime restart。
 
 ---
 
-## 5. Proactive Cutover / Recovery
+## 6. Sink Contract Evidence
 
-Prove installation does not depend on role acquire waiter：
+Focused Main/Platform tests MUST prove：
+
+```text
+dataConnections absent keeps M1–M8 behavior
+provided sink receives initial null
+replace is synchronous/non-blocking/non-throwing
+full view entries are exact/unique/deterministic
+current Renderer auth-consumed token retained only while current
+live retained token participates in duplicate opaque-material defense
+Runtime/DataAuthority mutation refreshes the full view
+Session terminal null occurs before async physical cleanup
+sink operation alone never bumps Renderer revision
+```
+
+No test EventBus or public authority registry is allowed as production architecture evidence。
+
+---
+
+## 7. Runner Handoff / Provisioning Cases
+
+Must prove：
+
+```text
+onRuntimeDataProvisioner fires before RuntimeHosting.launch resolves exact HostedRuntime
+Desktop exact-map uses that HostedRuntime object
+Data endpoint absent from Runtime bootstrap
+prepare connects Data WS and keeps carrier role-private
+prepare cancellation/revoke is identity-safe
+post-install provisioner.commit resolves via committed ACK
+commit delivery failure after install retires the new pair
+old current is never resurrected after new install
+late committed/prepared ACK cannot re-install stale candidate
+provisioning IPC terminal is Data-only
+child exit remains existing Runtime failure fact
+```
+
+---
+
+## 8. Relay / Cardinality Cases
+
+Must prove：
+
+```text
+Renderer-only prepared → not current
+Runner-only prepared → not current
+pre-install application bytes → candidate fail/dispose
+same-slot concurrent candidates → at most one install winner
+loser late events cannot disturb winner
+different S slots independent
+one relay side terminal → whole pair retires
+late retired bytes/send completion cannot affect replacement
+Broker does not parse Data application JSON
+```
+
+---
+
+## 9. Proactive / Loss Same-generation Replacement
+
+Proactive：
 
 ```text
 A role peers current
-→ Broker prepares/commits B same S/1/P
-→ A pair retires/closes
-→ existing role peers terminal
-→ fresh M8 acquire receives already-committed B
+→ B prepared privately under same S/1/P with no Binding waiter required
+→ install B / retire A
+→ old role peers terminal
+→ fresh M8 acquire receives B if B remains deliverable
 ```
 
-Also cover loss-triggered recovery：
+Loss：
 
 ```text
-current Data WS loss
-→ whole pair retired
-→ Runtime/Frame/Renderer Control/Main authority unchanged
-→ fresh candidate under same S/1/P
-→ fresh peers
+A WS loss
+→ A whole-pair retired
+→ Runtime/Frame/Renderer Control/Main S/1/P unchanged
+→ fresh B may install under same S/1/P
 ```
 
-No replay/resume and no Main revision change solely for physical replacement。
+Must prove：
+
+```text
+no generation change
+no Renderer revision change solely for physical replacement
+no resume token
+no old traffic/unsent queue migration
+fresh @loomrealm/data peer object / connection-local state
+```
+
+M9 MUST NOT claim fresh User Input Interest/State publication or Render snapshot/domain baseline。Those business/profile child semantics are qualified by M10/M11。
 
 ---
 
-## 6. Runner Provisioning Cases
+## 10. Post-install Delivery Failure
 
-Must cover：
+Required explicit trace：
 
 ```text
-Desktop receives provisioner before HostedRuntime can become Main-authoritative
-exact HostedRuntime maps to exact provisioner
-provision revoked before commit
-Runner prepared ACK arrives stale
-candidate WS connect failure is Data-only
-provisioning IPC terminal disables Runner Data only
-child process exit still follows existing Runtime failure path
+A current
+→ B paired prepared
+→ install commit retires A and makes B current
+→ Runner commit notification fails
+→ B current→retired
+→ no A rollback/resurrection
+→ Runtime/Frame/Main authority unchanged
 ```
 
-No Runtime Control provisioning RPC。
+This closes the IPC half-commit ambiguity。
 
 ---
 
-## 7. Relay / Cardinality Cases
+## 11. Broker Contract Harness
 
-Must cover：
+In addition to the production vertical, a small Desktop Broker harness directly drives frozen sink views to cover abstract cases production M9 cannot naturally create：
 
 ```text
-Renderer-only connected → not current
-Runner-only connected → not current
-pre-commit application bytes → candidate fail/dispose
-concurrent candidates same slot → at most one winner
-loser late events cannot disturb winner
-one relay side terminal → whole pair retires
-late retired bytes do not reach replacement
-independent subsystem slots do not interfere
+wrong/stale G/P
+same-key different HostedRuntime object
+Renderer token replacement races
+multiple concurrent candidates
+post-install delivery failure
+stale late traffic/ACK
 ```
+
+Harness MUST NOT add fake Runtime restart/generation allocator to `@loomrealm/main`。
 
 ---
 
-## 8. M9 Non-goals
+## 12. M9 Non-goals
 
-Vertical MUST NOT require：
+M9 vertical MUST NOT require：
 
 ```text
-BrowserWindow
+BrowserWindow / Electron product shell
 Hostra physical RendererControlBinding product realization
-User Input business state
-Render Store/Manager
+User Input business manager/baseline qualification
+Render Store/Manager/baseline qualification
 Content service
 loom.map
 PWA MessageChannel
 production same-key Runtime restart
-new generation allocator
+generation allocator
 ```
 
 ---
 
-## 9. CI Shape
+## 13. CI Shape
 
-Add focused gate：
+Add one root gate：
 
 ```text
 npm run test:m9
 ```
 
-Keep green：
+It MUST include：
+
+```text
+platform-ports M9 API/boundary tests
+Main authority-sink tests
+Hostra provisioner/IPC tests
+Desktop Broker contract harness
+real M9 physical vertical
+```
+
+And keep green：
 
 ```text
 npm run test:m8
 npm run test:game-launcher-hostra
 npm run test:packages
+npm run docs:build
+npm run docs:check-links
 ```
 
 No giant E2E replaces package/role evidence。
 
 ---
 
-## 10. Closure
+## 14. Frozen Closure
 
-M9/04 is closed when real Main authority propagation、exact HostedRuntime→Runner provisioner mapping、paired Data WS relay and existing M8 Bindings/peers form one deterministic Desktop physical vertical without BrowserWindow/Input/Render/Content。
+M9/04 is implementation-closed when repository placement、production vertical、contract harness and exact CI evidence above leave no architecture choice to be invented during coding。Private file/class names remain implementation freedom。

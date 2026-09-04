@@ -5,20 +5,22 @@
 > 落地顺序：01  
 > 最近复核：2026-09-04  
 > 前置：[M8 / 05](M8_05_QUALIFICATION_CLOSURE.md)  
-> 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Platform Composition](doc/10-architecture/platform-composition-system.md) · [Hostra Desktop Composition](doc/20-modules/desktop-host/README.md)  
-> 目标：关闭 Desktop session-scoped Data broker 的 authority feed、candidate/current slot 与 failure boundary；只增加真实 M9 consumer 所需的一个 Main→Platform sink，不建立通用状态同步框架。
+> 冻结决策：[ADR 0028](doc/decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
+> 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Platform Composition](doc/10-architecture/platform-composition-system.md)  
+> 目标：冻结 Main → Platform Data installation authority feed、Desktop Broker slot/candidate/current lifecycle 与失效边界；只增加真实 M9 consumer 所需的最窄 shared fact sink。
 
-> **Main 仍是唯一 Data authority；Broker 只消费 Main committed fact，并把它实现成 physical Data Connection。**
+> **Main 是唯一 Data authority。Broker 只消费 Main committed full view；Renderer acquire、ticket、socket 与 provisioning ACK 都不能创造 authority。**
 
 ---
 
-## 1. Position
+## 1. Frozen Position
 
 ```text
 Main committed authority
-    Runtime / current Renderer / DataAuthority(S,G,P)
+    current Renderer participant
+    ready Runtime / DataAuthority(S,G,P)
         ↓
-DataConnectionAuthoritySink
+DataConnectionAuthoritySink.replace(full view)
         ↓
 Desktop DataConnectionBroker
         ↓
@@ -32,209 +34,277 @@ RendererDataBinding / SubsystemDataBinding
 必须保持：
 
 ```text
-Main authority != Broker candidate != current Data Connection
+Main authority != Platform candidate != current Data Connection
 ```
 
-`RendererDataBinding.acquire(S,G,P)` 只是 role 对已授权 Data carrier 的等待，不是 Main authority source，也不是 installation commit 的授权条件。
+M8 Bindings只是 role 对 **already-current-deliverable carrier** 的等待，不是 Broker installation 的授权输入。
 
 ---
 
-## 2. Minimal Main → Platform Seam
+## 2. Exact Shared Port Surface
 
-`@loomrealm/platform-ports` 增加当前真实 Desktop consumer 所需的最窄 fact sink：
+`@loomrealm/platform-ports` 增加：
 
 ```ts
-interface DataConnectionAuthorityEntry {
+export interface DataConnectionAuthorityEntry {
   readonly subsystemKey: string;
   readonly generation: number;
   readonly dataProfile: string;
   readonly runtime: HostedRuntime;
 }
 
-interface DataConnectionAuthorityView {
+export interface DataConnectionAuthorityView {
   readonly rendererControlToken: string;
   readonly entries: readonly DataConnectionAuthorityEntry[];
 }
 
-interface DataConnectionAuthoritySink {
+export interface DataConnectionAuthoritySink {
   replace(view: DataConnectionAuthorityView | null): void;
 }
 ```
 
-`MainPlatform` 增加一个 optional capability：
+`@loomrealm/main` 的 consumer-owned view 增加：
 
 ```ts
-readonly dataConnections?: DataConnectionAuthoritySink;
+interface MainPlatform {
+  readonly scheduler: DeadlineScheduler;
+  readonly opaqueMaterial: OpaqueMaterialGenerator;
+  readonly runtimeHosting: RuntimeHosting;
+  readonly rendererControl?: RendererControlBinding;
+  readonly dataConnections?: DataConnectionAuthoritySink;
+}
 ```
 
-Optionality：
-
-```text
-absent
-→ Main Runtime/Frame/Renderer Control 正常
-→ Platform 不获得 Data installation authority
-
-present
-→ Main 在既有 serialized authority lane 中同步 replace current view
-```
-
-这不是公共 Broker API。它只把 Main 已提交的 current physical-binding fact交给同一 session-scoped Platform。
+No generic AuthorityStream、Observer、Broker interface、service locator 或 callback registry。
 
 ---
 
-## 3. View Identity
-
-`DataConnectionAuthoritySink` 本身 session-scoped，所以 Session 不重复进入 DTO。
-
-Current Renderer 使用已被 Main 接受的 exact `rendererControlToken` 作为 **Platform-private correlation key**：
+## 3. Optionality / Initial State
 
 ```text
-Main accepted Renderer candidate token T
-→ current view.rendererControlToken = T
+dataConnections absent
+→ no Platform Data installation authority feed
+→ Runtime/Frame/Renderer Control/M8 logical DataAuthority remain valid
+
+present
+→ Main MUST establish replace(null) before any non-null view
+```
+
+Non-null view only exists while Main has one current Renderer participant。Main may have logical DataAuthority with no Renderer；that still projects to Renderer Control state/revision normally, but Platform sink remains `null` until a Renderer becomes current。
+
+`replace(null)` means：
+
+```text
+no current Renderer Data installation authority
+→ all pending/current Broker Data material loses install/current status
+```
+
+---
+
+## 4. Current Renderer Correlation
+
+Main retains the accepted Renderer candidate's exact `rendererControlToken` for the lifetime of that **current participant only**。
+
+```text
+hello authentication consumes T as a one-shot credential
+T is never valid for authentication again
+Main may retain the value as inert Platform-private correlation
 ```
 
 规则：
 
 ```text
-T possession alone grants nothing
-T MUST NOT enter Data application wire
-T MUST NOT be accepted from Renderer as authority proof
-Broker only trusts T because Main current view names it
+T possession grants no Data authority
+Renderer cannot present T to authorize Data
+T never enters Data application wire
+Broker trusts T only because current Main view names it
 ```
 
-Main 可在 current Renderer lifetime 内保留该 token 仅用于 M9 physical correlation；不得创建第二套 Renderer lease/epoch/currentness protocol。
+The retained current token counts as live opaque material for Main's defensive no-reuse check。When that Renderer ceases current, Main drops the retained correlation value；no historical token set is kept。
 
-Target Runtime 使用 Main 已持有的 exact `HostedRuntime` object identity。Broker 只可绑定到同一个 object；same-key fresh Runtime 不是同一 target。
+This does not create a second Renderer lease/epoch/currentness protocol；M7 currentness remains `currentRendererPeer` authority in Main。
 
 ---
 
-## 4. Replace Semantics
+## 5. Runtime / Entry Identity
 
-`replace(view)` 是 **full replacement**，不是增量 event stream。
-
-Main 在影响以下任一事实的既有 serialized commit 中调用：
+`DataConnectionAuthorityEntry.runtime` is the exact `HostedRuntime` object returned for the Main-owned Runtime attempt。
 
 ```text
-current Renderer changes/clears
-Runtime ready/current target changes
-DataAuthority add/remove/replace
+same subsystemKey + different HostedRuntime object
+!= same physical target
+```
+
+Main emits an entry only when its current committed DataAuthority exists for that Runtime。Phase 1 M9 therefore emits ready-derived `S/1/loomrealm.renderer-data/1` entries。
+
+Entry invariants：
+
+```text
+one entry maximum per subsystemKey
+subsystemKey matches the owning Runtime record
+generation/profile exactly equal Main DataAuthority
+runtime object is the exact current HostedRuntime
+ordering deterministic; ordering has no authority meaning
+```
+
+PID、WS URL、ticket、candidateId、Frame/Activation never enter the view。
+
+---
+
+## 6. `replace()` Contract
+
+`replace()` is a synchronous **full replacement** and MUST be：
+
+```text
+non-blocking
+non-throwing
+free of network/IPC waits
+free of user/business callbacks
+```
+
+Concrete sink implementation MUST first atomically replace its in-memory authoritative view and synchronously make stale pending/current Broker material non-installable/non-current。Physical socket/IPC close may converge asynchronously after that logical invalidation。
+
+Therefore ordinary transport/cleanup failure cannot escape `replace()` and cannot interrupt Main's serialized mutation。
+
+A provider that throws from `replace()` violates the frozen Platform port contract and fails qualification；M9 defines no semantic recovery for a non-conforming provider。
+
+---
+
+## 7. Main Commit Discipline
+
+When `dataConnections` exists, Main updates it inside the existing serialized authority lane before that lane completes。
+
+Required changes：
+
+```text
+Session start
+→ replace(null)
+
+Renderer A accepted current
+→ retain A token
+→ replace(view for A + all current DataAuthority entries)
+
+Renderer A → B replacement
+→ B becomes current in existing M7 transaction
+→ retain B token / drop A token
+→ replace(full B view)
+→ old A Data invalid immediately
+
+current Renderer terminal with no replacement
+→ clear current token
+→ replace(null)
+
+Runtime/DataAuthority add/remove/replace while Renderer current
+→ replace(updated full view)
+
 Session terminal
+→ replace(null) before asynchronous physical cleanup
 ```
 
-语义：
-
-```text
-replace(newView)
-→ newView immediately becomes the only installable authority view
-→ stale pending candidates immediately become non-installable
-→ stale current pairs synchronously lose Broker current status
-→ physical close may converge asynchronously
-```
-
-```text
-replace(null)
-→ no current Renderer Data installation authority
-→ retire/invalidate all current + pending Data material
-```
-
-`replace` MUST NOT await network I/O。Concrete sink must fail closed for its own transport/cleanup failures and MUST NOT turn Data failure into Runtime/Frame failure。
-
-No EventBus、ObserverHub、AuthorityRegistry、generic state replication API。
+`replace()` does not bump `rendererRevision` and does not enter Renderer Snapshot。Renderer Control publication and Data physical invalidation derive from the same committed Main state but do not form a new cross-plane total-order protocol。
 
 ---
 
-## 5. Broker Slot Model
+## 8. Broker Slot / Candidate Budget
 
-For the current Main view：
+For the latest non-null view：
 
 ```text
 (rendererControlToken, subsystemKey)
     → 0..1 current Data Connection
 ```
 
-Broker private state only needs：
+Broker private state may contain only what real physical work needs：
 
 ```text
-latest authoritative view
+latest authoritative view | null
 per-S current pair | none
 pending physical candidates
-role-facing committed-carrier delivery cells
+Renderer committed-carrier delivery cell per S
 ```
 
-Different subsystem slots are independent。
+Different subsystem slots are independent。Broker copies G/P from Main view and never allocates/repairs generation。
 
-`generation/profile` are copied from Main view；Broker never allocates or repairs them。
-
----
-
-## 6. Candidate Boundary
-
-Candidate MAY physically create/connect/prepare before install, but before commit：
+Before install, candidate may physically create/connect/prepare but is：
 
 ```text
 not current
-no child traffic exposure
-no Input/Render baseline
-no cardinality slot
+not a Connection instance
+not allowed to expose child application traffic
+not a cardinality occupant
 ```
 
-Candidate failure：
-
-```text
-dispose candidate material
-→ Main authority unchanged
-→ Runtime/Frame unchanged
-```
-
-If the same Main view remains current, Platform MAY create a fresh candidate；this is physical establishment work, not Data protocol retry/replay。
+Candidate failure disposes only candidate material；Main authority/Runtime/Frame remain unchanged。
 
 ---
 
-## 7. Current / Retirement
+## 9. Current / Retirement
 
-Successful paired commit is the only transition into Broker current。
+Paired installation commit is the only transition into Broker current。
 
 Current pair retires on：
 
 ```text
-physical Data loss
+physical close/read/write failure
 Main view removes/replaces exact S/G/P
 current Renderer token changes/clears
-Session end
-exact HostedRuntime terminal/replaced
-successful same-generation supersede
-child Data-fatal retirement
+exact HostedRuntime changes/terminates
+Session null/terminal
+same-generation successful supersede
+child Data-fatal carrier retirement
+explicit Platform Data-slot shutdown
 ```
 
-Retired carrier never becomes current again；old traffic/queues are never migrated。
+Logical retirement happens before best-effort physical close。Retired carrier never becomes current again；old traffic/unsent queues are never replayed or migrated。
 
 ---
 
-## 8. Placement
+## 10. Ownership / Placement
 
 ```text
 @loomrealm/main
-    owns authority + calls DataConnectionAuthoritySink
+    authority owner + sink producer
 
 @loomrealm/platform-ports
-    owns only the narrow sink fact types
+    exact narrow sink fact types only
 
 apps/desktop
-    provides sink + owns Broker/Data WS composition
+    sink implementation + Desktop Broker + Data WS relay
 
 @loomrealm/game-launcher-hostra
-    owns Node child + runtime-scoped provisioning mechanics
+    exact Runtime-owned child IPC/provisioner mechanics only
 
 @loomrealm/data
-    owns Data application protocol mechanics
+    Data application protocol mechanics
 ```
 
-Broker does not enter Main/Renderer/Subsystem/business packages；launcher does not absorb Broker policy。
+No Broker policy in launcher；no physical candidate state in Main/Renderer/Subsystem role packages。
 
 ---
 
-## 9. Closure
+## 11. Qualification
 
-M9/01 is closed when Main can synchronously replace one exact session-scoped Data installation view and Desktop Broker can invalidate/revalidate candidates/current pairs solely from that view。
+Must prove：
 
-No implementation-time authority seam remains unspecified；no generic state framework is introduced。
+```text
+exact exported type names/fields
+MainPlatform.dataConnections optional
+initial replace(null)
+non-null view requires exact current Renderer
+current Renderer token is auth-consumed but retained only as inert live correlation
+live current token participates in Main duplicate-material defense
+entries exact/unique/deterministic and use HostedRuntime object identity
+replace is full replacement / synchronous / non-blocking / non-throwing
+replace changes no rendererRevision by itself
+Renderer replacement invalidates old Data in the same Main mutation lane
+Runtime/DataAuthority change updates full view
+Session terminal sends null before async cleanup
+Renderer acquire/ticket/socket cannot authorize install
+no generic authority/event/registry abstraction
+```
+
+---
+
+## 12. Frozen Closure
+
+M9/01 is implementation-closed when every Main→Broker authority arrow has the exact surface and ordering above。Coding may choose private helper/file layout only；it may not invent a second authority source、observer framework、Broker service API or alternate currentness identity。

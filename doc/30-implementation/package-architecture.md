@@ -4,8 +4,8 @@
 > 状态：Active Design / Tracking  
 > 稳定程度：Evolving by milestone  
 > 主要定义：primitive、protocol capability、role、platform ports、launcher/integration、composition root 与 business package 的 ownership/dependency boundary  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 最近复核：2026-09-03
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
+> 最近复核：2026-09-04
 
 ```text
 Protocol boundary
@@ -21,10 +21,10 @@ Milestone只描述 implementation slice；package ownership以系统架构 + acc
 
 ## 1. Dependency Layers
 
-下图箭头固定表示 **provider/dependency → consumer**：
+下图箭头表示 provider/dependency → consumer：
 
 ```text
-foundation ─────→ platform-ports ─────→ main / subsystem-host
+foundation ─────→ platform-ports ─────→ main / subsystem-host / renderer
  │
  ├─────────────────────┐
  │                     ↓
@@ -43,17 +43,15 @@ wire ─────────────→ runtime-control ──→ main /
                        apps/*
 ```
 
-Business package only depends on nearest author-facing role SDK。
+Business packages depend only on nearest author-facing role SDK。
 
 ---
 
 ## 2. Foundation / Wire
 
-`@loomrealm/foundation`：MessageCarrier / CarrierClosed / deterministic memory carrier；无 JSON/domain/platform semantics。
+`@loomrealm/foundation` owns MessageCarrier / CarrierClosed / deterministic MemoryCarrier；no JSON/domain/platform semantics。
 
-`@loomrealm/wire`：plain JSON/JSON-RPC representation、exact keys、safe integer、UTF-8/depth primitives；无 carrier/lifecycle/domain authority。
-
-两者保持 orthogonal；domain package不得创建第二 parser。
+`@loomrealm/wire` owns plain JSON/JSON-RPC representation、exact keys、safe integer、UTF-8/depth primitives；no carrier/lifecycle/domain authority。
 
 ---
 
@@ -65,38 +63,27 @@ Owns concrete Runtime Control mechanics：one reader/dispatcher、one writer、s
 
 Dependencies exactly Foundation + Wire。No Main/Subsystem authority、transport establishment、generic RPC framework。
 
-### `@loomrealm/renderer-control` — M7 Frozen
+### `@loomrealm/renderer-control`
 
-Owns：
+Owns Renderer Control v1 mechanics：hello/version selection、closed wire/model validation、whole current Snapshot、bounded latest-state publication、retirement/terminal。
 
-```text
-renderer.hello id=1
-renderer.state
-hello schema + protocolVersions validation
-protocolVersion selection
-closed wire/model validation
-connection-local session/revision
-exact outbound hello preparation/preflight
-hello ordering/handoff
-0..1 inFlight + 0..1 pendingLatest
-retirement / terminal
-```
-
-Dependencies exactly Foundation + Wire。
-
-MUST NOT depend on main、renderer、platform-ports、runtime-control、data或 concrete transports。
-
-No GenericRpcPeer / UniversalProtocolSession / Publisher framework。
+Dependencies exactly Foundation + Wire。No Main/Renderer/Platform implementation dependency。
 
 ### `@loomrealm/data`
 
-Owns Renderer Data Profile v1 + Data Connection + User Input + Render Update protocol mechanics。Role policy remains in subsystem/renderer integrations。
+Owns Renderer Data Profile v1 connection-local mechanics：Data Connection + User Input + Render Update wire/peer mechanics。Role policy remains in subsystem/renderer integrations；physical Broker authority remains Platform composition。
 
-### `@loomrealm/platform-ports`
+---
 
-Owns only narrow Core↔Platform capabilities/facts；runtime dependency exactly Foundation。
+## 4. `@loomrealm/platform-ports` — Shared Core↔Platform Facts
 
-Frozen root semantics through M7：
+Runtime dependency remains exactly：
+
+```text
+@loomrealm/foundation
+```
+
+Current frozen root surfaces through M9：
 
 ```text
 M4
@@ -112,92 +99,99 @@ M5
 M7
     OpaqueMaterialGenerator
     RendererControlBinding
+
+M8
+    RendererDataBinding
+    SubsystemDataBinding
+    SubsystemDataBindingResult
+
+M9
+    DataConnectionAuthorityEntry
+    DataConnectionAuthorityView
+    DataConnectionAuthoritySink
 ```
 
-M7 directly replaces historical current implementation name `BootstrapTokenGenerator` with `OpaqueMaterialGenerator`; no compatibility alias。
+M9 sink placement qualifies under the port rule because Main is a real platform-neutral producer and Desktop/PWA are distinct physical realizations of the same authority fact。
 
-`OpaqueMaterialGenerator.generate()` current-v1 common output：ASCII `1..128` bytes、fresh、security-sensitive uses至少 128-bit unpredictability。它不接受 kind/type 参数，不拥有 identity/token semantics。
-
-`RendererControlBinding.acquire(token,signal)` **arms exactly one candidate slot**；它 MAY remain pending，调用本身不创建/显示 Renderer、不发生 replacement。Resolution返回一个 already-established candidate carrier并物理交付 exact Main-issued token。
-
-Settlement：
+Frozen M9 sink rules：
 
 ```text
-abort before resolution
-→ cancel this slot / no late live result
-
-non-abort rejection
-→ Binding terminal for the owning Main Session
-→ Main does not re-acquire in that Session
-
-carrier acquired then peer/protocol terminal
-→ candidate attempt terminal only
-→ does not by itself terminalize Binding
+full replacement only
+session-scoped
+replace(view|null) synchronous / non-blocking / non-throwing
+no network/IPC waits inside replace
+exact current Renderer correlation + HostedRuntime object + S/G/P
+no Broker/ticket/candidate/transport exposure
 ```
 
-Binding不认证 token、不协商 protocol version、不决定 current Renderer。
-
-No universal Platform/service locator/future port inventory。
+No universal Platform/service locator/event stream/connection registry/future port inventory。
 
 ---
 
-## 4. Platform-neutral Role Packages
+## 5. Platform-neutral Role Packages
 
 ### Main
 
-Through M7 consumes：
+Through M9 depends on：
 
 ```text
-LogicalGameBootstrap
 @loomrealm/platform-ports
 @loomrealm/runtime-control
 @loomrealm/renderer-control
 @loomrealm/wire
 ```
 
-Main owns Session identity、Runtime/Launch Attempt、all credential semantics、Renderer current participant/replacement、Frame/Stack/Activation/InputTarget、AuthorityRevision、DataAuthority policy(M8)、Runtime failure unwind。
+Main owns Session、Runtime/Launch Attempt、Renderer currentness/authentication、Frame/Stack/Activation/InputTarget、Renderer revision、DataAuthority policy、failure/unwind。
 
-Main MUST NOT depend on game-package、concrete launcher、renderer role或 concrete transport。
+M9 adds no public Main Session controller。It only consumes optional `MainPlatform.dataConnections` and projects current physical-binding facts from existing authority。
 
-M7 Snapshot = pure projection；no shadow Renderer Runtime/Frame/InputTarget registry。
+Main MUST NOT depend on concrete launcher、renderer role、Data Broker implementation、Node/Worker/WebSocket/MessagePort。
 
 ### Renderer
 
-M7 runtime dependency：`@loomrealm/renderer-control` only。
-
-M7 role local state only：
+Through M8 depends on：
 
 ```text
-current {peer, RendererAuthoritySnapshotV1} | null
+@loomrealm/renderer-control
+@loomrealm/platform-ports
+@loomrealm/data
 ```
 
-该 local holder不是 Main remote-currentness 的独立证明。No Main/Platform dependency、second revision/session validator、lease/epoch/heartbeat或 generic Store framework。
+Renderer owns only local mirror/Data peer reconciliation。It does not prove Main remote currentness and does not mint Data authority。
 
 ### Subsystem
 
-Author root owns business SDK；trusted `/host` owns Runtime/Data physical role integration。M4 Runtime/Frame slice != full Subsystem closure；M8/M10/M11/M12 continue same role package。
+Author root owns business SDK；trusted `/host` owns Runtime/Data physical role integration。
+
+`/host` consumes `RuntimeControlBinding` and optional `SubsystemDataBinding` from platform-ports plus protocol peers。Business root does not import platform ports/protocol implementation/concrete transport。
 
 ---
 
-## 5. Protocol vs Authority Ownership
-
-Renderer Control version negotiation is protocol mechanics：
+## 6. Protocol vs Authority Ownership
 
 ```text
-renderer-control Main peer
-    validates protocolVersions
-    selects protocolVersion=1
+renderer-control peer
+    validates hello/protocolVersions
+    selects protocol v1
+
+Main
+    owns Renderer token/currentness
+    owns DataAuthority
+
+DataConnectionAuthoritySink
+    only receives committed Main physical-binding view
+
+Desktop/PWA Broker
+    only realizes that view into physical paired carriers
 ```
 
-Main receives an already-selected typed v1 fact and owns only candidate/token/currentness acceptance。
-
-禁止 Main/Platform Binding实现第二套 version negotiation。
+No Binding/Broker can infer authority from endpoint、ticket、socket、role acquire request or local holder state。
 
 ---
 
-## 6. M7 Frozen Main-facing Platform View
+## 7. Main-facing Platform View Through M9
 
-`@loomrealm/main` consumer-owned structural view：
+Consumer-owned structural view：
 
 ```ts
 interface MainPlatform {
@@ -205,69 +199,98 @@ interface MainPlatform {
   readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
   readonly rendererControl?: RendererControlBinding;
+  readonly dataConnections?: DataConnectionAuthoritySink;
 }
 ```
 
-`rendererControl` optionality是 **physical capability availability**：
+Optionality：
 
 ```text
-absent
-→ headless/Renderer-incapable composition
-→ Main issues no Renderer attempt
-→ Runtime/Frame semantics unchanged
+rendererControl absent
+→ no physical Renderer attempt
 
-present and healthy
-→ Main maintains at most one current Renderer + one armed/pending/bound candidate slot
+dataConnections absent
+→ no Platform Data installation authority feed
 ```
 
-这不是 complete Platform API，也不要求 M6 Hostra Runtime-only composition加入 fake Binding。
-
-Renderer candidate path：
-
-```text
-Main issues/registers token
-→ RendererControlBinding.acquire(token,signal) arms one slot
-→ future physical candidate binds slot
-→ candidate MessageCarrier
-→ renderer-control Main peer parses hello/selects v1
-→ Main exact preflight + atomic currentness decision
-```
-
-No public `attachRenderer()` Main Session controller。
+Neither absence invalidates Runtime/Frame semantics。M6/headless composition need no fake capabilities。
 
 ---
 
-## 7. Platform Launch Integration Packages
+## 8. Platform Launch Integration Packages
 
-`@loomrealm/game-launcher-hostra/pwa` own Game Entry consumption、own manifest、key join、executable/security resolution、PlatformLaunchPlan、LogicalGameBootstrap projection、RuntimeHosting/Runner integration。
-
-They solve Subsystem Runtime PREPARE/launch only；MUST NOT become Renderer/DataBroker/Content/Platform mega-package。
-
----
-
-## 8. Renderer Control Physical Placement
-
-M7 closes logical Core↔Platform Binding contract + deterministic MemoryCarrier realization。
-
-Physical realizations stay in product composition：
+`@loomrealm/game-launcher-hostra/pwa` own：
 
 ```text
-Desktop M14
-    BrowserWindow/bootstrap token delivery
-    Renderer Control WebSocket carrier
-    finite stalled-write policy
-
-PWA M16
-    renderer bootstrap token delivery
-    Renderer Control MessagePort string carrier
-    host liveness policy
+Game Entry consumption
+own Platform manifest
+key join / executable security resolution
+PlatformLaunchPlan
+LogicalGameBootstrap projection
+RuntimeHosting / Runner integration
 ```
 
-Transport adapters establish/deliver MessageCarrier only；no Renderer Control parsing/currentness。
+They MUST NOT become Renderer/DataBroker/Content mega-packages。
+
+### Hostra M9 extension
+
+Because `@loomrealm/game-launcher-hostra` owns the Node child, it may additionally own only the exact child-scoped provisioning mechanics：
+
+```text
+HostraRuntimeDataPrepareRequest
+HostraRuntimeDataProvisioner
+optional onRuntimeDataProvisioner(HostedRuntime, provisioner) hook
+Runner provisioning IPC
+Runner-side physical Data WS establishment
+```
+
+Broker policy、Renderer pairing、Main authority revalidation and Data relay remain `apps/desktop`。
+
+No generic provisioning package is extracted in M9。
 
 ---
 
-## 9. No Universal RPC / Connection Framework
+## 9. Renderer Control Physical Placement
+
+M7 closes logical `RendererControlBinding` semantics only。Physical Hostra BrowserWindow/Renderer Control WS arrives M14；PWA MessagePort realization arrives M16。
+
+M9 deterministic Renderer host may physically correlate the Main-issued Renderer token for Data Broker qualification but MUST still use real Renderer Control peers/Main acceptance。
+
+---
+
+## 10. Data Broker / Provisioning Placement
+
+M8 role-facing seam：
+
+```text
+RendererDataBinding
+SubsystemDataBinding
+```
+
+M9 authority/physical seam：
+
+```text
+Main DataConnectionAuthoritySink full view
+→ apps/desktop Desktop DataConnectionBroker
+→ Renderer WS + Runner WS candidate
+→ exact HostedRuntime → HostraRuntimeDataProvisioner
+→ paired install
+→ post-install role Binding delivery
+```
+
+Broker install is not Runtime/Renderer Control RPC。Runner provisioning IPC is not Data application protocol。
+
+Post-install Runner delivery failure：
+
+```text
+new current → retired
+no rollback/resurrection of old current
+no Runtime/Frame authority mutation
+```
+
+---
+
+## 11. No Universal Frameworks
 
 Forbidden：
 
@@ -275,40 +298,34 @@ Forbidden：
 GenericRpcPeer
 GenericSchemaCodec
 UniversalProtocolSession
-ConnectionRegistry
+ConnectionRegistry / ConnectionManager
+RuntimeDirectory service
 UniversalRendererServices
 RendererPlatform
 PlatformLaunchOptions
 options:any
 BindingErrorHierarchy
+AuthorityEventBus / ObserverHub
+GenericTransaction / 2PC
 CurrentnessLease/Epoch/Heartbeat
+retry/backoff framework
 ```
-
-Runtime Control and Renderer Control remain independent concrete protocol packages。
-
----
-
-## 10. Platform Provisioning / Data Placement
-
-M8/M9 DataConnectionBroker realizes Main current `S/G/dataProfile` into physical Renderer/Subsystem carriers。
-
-Provisioning is not Runtime Control / Renderer Control application wire and does not enter Snapshot。Provisioning failure != Runtime failure/Frame unwind。
-
----
-
-## 11. Business Packages
-
-Example：`@loomrealm/map → @loomrealm/subsystem`。
-
-Business MUST NOT depend on game-package、launcher、subsystem/host、runtime-control、renderer-control、platform adapters。
 
 ---
 
 ## 12. Composition Roots
 
-`apps/desktop` / `apps/pwa` / `apps/cli` MAY depend on lower packages and concrete Platform implementations but MUST NOT duplicate Game/Launcher/protocol/domain validation。
+`apps/desktop` / `apps/pwa` / `apps/cli` MAY depend on lower packages and concrete launch integrations but MUST NOT duplicate Game/Launcher/protocol/domain validation。
 
-Concrete Platform instance is Session-scoped per ADR 0026；其存在不等于 Platform mega-interface。
+M9 is the first real reason to materialize：
+
+```text
+apps/desktop
+```
+
+It owns Desktop Broker/WS relay and M9 deterministic physical Renderer composition。This is not full Electron product completion；M14 adds BrowserWindow/real physical Renderer Control/Input/Render/Content。
+
+Root workspaces add `apps/*` only when this real app consumer is created。
 
 ---
 
@@ -318,12 +335,20 @@ Concrete Platform instance is Session-scoped per ADR 0026；其存在不等于 P
 protocol mechanics → owning protocol package
 stable Core↔Platform capability/fact → platform-ports
 role policy/authority → owning role
-one-app glue → app internal
+one-platform Runner ownership mechanics → concrete launcher/integration package
+one-app physical composition/policy → app internal
 ```
 
-M7 `RendererControlBinding` qualifies because Main consumes the same abstract candidate-slot/carrier capability while Hostra/PWA physical realization differs。Capability availability may still be absent in a given composition。
+Examples：
 
-Data/Content future ports require their own real consumer closure。
+```text
+RendererControlBinding → platform-ports
+DataConnectionAuthoritySink → platform-ports
+HostraRuntimeDataProvisioner → game-launcher-hostra
+Desktop DataConnectionBroker → apps/desktop
+```
+
+Do not promote Hostra-only provisioner into `platform-ports` before a second real cross-platform consumer proves an identical shared capability is required。
 
 ---
 
@@ -348,59 +373,49 @@ packages/
 └── map/
 
 apps/
-├── desktop/
-├── pwa/
-└── cli/
+├── desktop/    // materializes at M9
+├── pwa/        // later
+└── cli/        // later
 ```
 
-Do not pre-create package solely because target graph imagines it。
+Do not pre-create packages/apps solely for target symmetry。
 
 ---
 
-## 15. Semver / Protocol Version
-
-`npm semver != protocol/profile version`。
-
-Current project has no compatibility obligation；ADR 0027 current-v1 rename/freeze lands directly，不创建 fake v2或 compatibility alias。
-
----
-
-## 16. Conformance Ownership
+## 15. Conformance Ownership
 
 ```text
-renderer-control tests
-    wire/version negotiation/validation/ordering/bounded publication/terminal
+renderer-control package
+    wire/version/ordering/current peer mechanics
 
-platform-ports tests
-    opaque material output contract
-    candidate-slot lifecycle
-    abort vs non-abort Binding rejection
+platform-ports
+    exact shared port declarations/boundary tests
 
-main tests
-    authority projection/revision/optional-Binding slot loop/token/currentness
+main
+    authority projection / optional capabilities / sink update discipline
 
-renderer tests
-    local peer+Snapshot holder/identity-safe replacement
-    no remote-currentness lease layer
+renderer/subsystem
+    M8 role-local Data peer lifecycle
 
-M7 vertical
-    Binding-present real path through MemoryCarrier
-    no-slot / extra-candidate / Binding-terminal cases
+game-launcher-hostra
+    exact child provisioning IPC/provisioner lifecycle
 
-Main integration
-    Binding-absent path remains functional
+apps/desktop M9
+    Broker authority binding / paired WS / install/cutover/retirement harness
+    real Hostra M9 physical vertical
+
+M10/M11
+    fresh User Input / Render business publication baseline
 
 M14/M16
-    concrete physical Binding realizations
+    full physical product/platform equivalence gates
 ```
 
-No single giant E2E replaces package/role evidence。
+No single giant E2E replaces package/role/contract evidence。
 
 ---
 
-## 17. Runtime Dependency Invariants
-
-这里改用明确 `depends on`，不混用箭头方向：
+## 16. Runtime Dependency Invariants Through M9
 
 ```text
 @loomrealm/platform-ports depends on:
@@ -414,6 +429,10 @@ No single giant E2E replaces package/role evidence。
     @loomrealm/foundation
     @loomrealm/wire
 
+@loomrealm/data depends on:
+    @loomrealm/foundation
+    @loomrealm/wire
+
 @loomrealm/main depends on:
     @loomrealm/platform-ports
     @loomrealm/runtime-control
@@ -422,28 +441,38 @@ No single giant E2E replaces package/role evidence。
 
 @loomrealm/renderer depends on:
     @loomrealm/renderer-control
+    @loomrealm/platform-ports
+    @loomrealm/data
 
 @loomrealm/subsystem/host depends on:
     @loomrealm/platform-ports
     @loomrealm/runtime-control
+    @loomrealm/data
 ```
 
-Forbidden：renderer-control→main/renderer/platform-ports；platform-ports→renderer-control/main；renderer→main/platform-ports；main→renderer/game-package/concrete launcher；business→protocol/platform packages。
+Forbidden：renderer-control→roles/platform；platform-ports→protocol/role/concrete Platform；main→renderer/game-package/concrete launcher；business→protocol/platform packages。
 
 ---
 
-## 18. Core Rules Through M7
+## 17. Semver / Compatibility
+
+`npm semver != protocol/profile version`。
+
+Current first implementation has no external compatibility obligation。M9 new shared port surfaces land directly under ADR 0028；no fake v2/deprecated alias/parallel Broker API。
+
+---
+
+## 18. Core Rules Through M9
 
 1. Foundation/Wire remain low-level orthogonal primitives。  
-2. Runtime Control and Renderer Control own protocol mechanics only。  
-3. Renderer Control peer owns version negotiation；Main owns token/currentness。  
-4. Main is the single Runtime/Frame/Renderer-currentness authority。  
-5. Renderer is a local read-only Main mirror；M7 has no second protocol/currentness state machine。  
-6. `RendererControlBinding.acquire` arms one candidate slot；hello grants currentness。  
-7. Binding abort cancels one slot；non-abort acquire rejection terminalizes that Binding for the Main Session。  
-8. Binding availability may be absent per composition；no fake Binding required。  
-9. `OpaqueMaterialGenerator` gives ASCII 1..128-byte fresh material with >=128-bit unpredictability for security-sensitive uses；Main owns semantics。  
-10. M7 closes logical Binding + MemoryCarrier semantics, not physical WS/MessagePort qualification。  
-11. Renderer Control representation failure cannot alter Frozen Frame/Runtime authority。  
-12. No generic RPC/connection/service/currentness framework。  
-13. M8 DataAuthority/Data bindings remain consumer-driven。
+2. Runtime Control/Renderer Control/Data packages own protocol mechanics, not Main/Platform authority。  
+3. Main remains single Runtime/Frame/Renderer/Data authority owner。  
+4. M7 RendererControlBinding remains one-slot candidate capability with optional availability。  
+5. M8 role Data Bindings only wait for current-deliverable carriers。  
+6. M9 DataConnectionAuthoritySink is a non-throwing full-view Main→Platform fact sink。  
+7. Current Renderer token retention after auth consumption is inert correlation only。  
+8. Exact HostedRuntime object identity binds Data to physical Runtime attempt。  
+9. apps/desktop owns Broker/relay；Hostra launcher owns only exact child provisioner mechanics。  
+10. Broker logical install precedes post-install role delivery；delivery failure retires new current with no rollback。  
+11. M9 qualifies physical Data carrier lifecycle, not M10/M11 publication baseline or full cross-platform equivalence。  
+12. No generic RPC/authority/event/connection/transaction/retry/currentness framework。

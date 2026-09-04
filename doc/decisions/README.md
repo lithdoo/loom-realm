@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、替代关系、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-03
+> 最近复核：2026-09-04
 
 ADR 记录“为什么这样设计”。Current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 与对应 Frozen implementation plan 为准；本索引不复制完整协议状态机。Superseded ADR 保留历史，但不形成第二份 current contract。
 
@@ -38,6 +38,7 @@ ADR 记录“为什么这样设计”。Current 可实现事实以 `00-overview`
 25. [ADR 0025：Renderer Data Profile v1 preimplementation closure](./0025-renderer-data-profile-v1-preimplementation-closure.md)
 26. [ADR 0026：Concrete Platform 是 Session Composition Object，Launcher 是 Platform 内部 PREPARE Component](./0026-session-scoped-platform-instance.md)
 27. [ADR 0027：冻结 Renderer Control v1 与 M7 Preimplementation Closure](./0027-freeze-renderer-control-v1-preimplementation.md)
+28. [ADR 0028：冻结 M9 Desktop DataConnectionBroker / Late Provisioning Core 首次实现边界](./0028-freeze-m9-desktop-data-broker-preimplementation.md)
 
 ---
 
@@ -100,6 +101,17 @@ ADR 0027
 → exact hello preflight before atomic current switch/replacement
 → Renderer local holder is not remote-currentness proof
 → no generic RPC/Store/currentness framework
+
+ADR 0028
+→ M9 Desktop Data physical realization preclosed
+→ Main→Platform DataConnectionAuthoritySink full-view authority feed
+→ exact HostedRuntime physical target binding
+→ current Renderer token retained only as inert post-auth correlation
+→ apps/desktop owns Broker/two-sided Data WS relay
+→ game-launcher-hostra exposes only Runtime-scoped provisioner mechanics
+→ Broker logical install precedes Runner delivery ACK
+→ post-install delivery failure retires new current; no rollback/resurrection
+→ M9 conformance claim stops before M10/M11/PWA obligations
 ```
 
 ---
@@ -142,34 +154,47 @@ ADR 0016
 ADR 0016
 → ADR 0022 / 0023 / 0024 / 0025
 → Renderer Data Profile + Data Connection + User Input + Render Update
+→ M8 logical Data authority/role seam
+→ ADR 0028
+→ M9 Desktop Broker/late provisioning physical slice
 ```
 
 ---
 
-## Current M7 Decision Snapshot
+## Current M7/M9 Decision Snapshot
 
-M7 does not reopen Frame/Runtime semantics。Frozen placement：
+M7 Renderer Control remains unchanged：
 
 ```text
 Main
     owns Session / Runtime / Frame / Activation / InputTarget
-    owns Renderer token/currentness/AuthorityRevision
-    pure-projects RendererAuthoritySnapshotV1
+    owns Renderer token authentication/currentness/AuthorityRevision
 
 @loomrealm/renderer-control
     owns renderer.hello / renderer.state mechanics
-    owns protocolVersions validation/version selection
-    owns exact Snapshot wire validation and bounded latest-state publication
 
 @loomrealm/platform-ports
     OpaqueMaterialGenerator
     RendererControlBinding? candidate-slot/carrier capability
-
-@loomrealm/renderer
-    local {peer,snapshot}|null holder
 ```
 
-M7 Main `dataAuthorities=[]`；real DataAuthority allocation/generation/profile begins M8。Hostra/PWA physical Renderer Control realization remains M14/M16。
+M9 adds only the real Data physical consumer seams：
+
+```text
+@loomrealm/platform-ports
+    DataConnectionAuthorityEntry/View/Sink
+
+MainPlatform
+    dataConnections?   // optional full-view authority sink
+
+apps/desktop
+    DataConnectionBroker + Data WS relay
+
+@loomrealm/game-launcher-hostra
+    HostraRuntimeDataProvisioner + optional handoff hook
+```
+
+M7 token consumption still authenticates exactly once；M9 retention of the current accepted token value is non-authorizing physical correlation only。
 
 ---
 
@@ -197,7 +222,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-Renderer Control/M7 变更遵循 ADR 0027 的具体 reopen rule；不能通过 Hostra/PWA 私有 retry/currentness protocol绕过 Frozen semantics。
+Renderer Control/M7 变更遵循 ADR 0027；Desktop Data/M9 变更遵循 ADR 0028。不得通过 Hostra/PWA 私有 retry/currentness/rollback protocol 绕过 Frozen semantics。
 
 ---
 
@@ -210,7 +235,7 @@ Architecture topic source
 → Current Normative/Frozen Contract
 → Accepted current ADR
 → Module projection
-→ Implementation plan/tests
+→ Frozen implementation plan/tests
 ```
 
 Superseded ADR 或旧 example/code shape不得覆盖 Current Contract。

@@ -1,93 +1,80 @@
 # `@loomrealm/game-launcher-hostra` 设计
 
-> 状态：Frozen / Ready for Implementation  
-> 冻结日期：2026-09-02  
-> 阶段：M6 Hostra Platform Vertical  
+> 状态：**M6 Implemented / Qualified + M9 Provisioning Extension Frozen for Implementation**  
+> 阶段：M9 Desktop DataConnectionBroker / Late Provisioning Core  
+> 最近复核：2026-09-04  
 > 正式契约：[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../doc/15-contracts/nodejs-launcher-profile-v1.md)  
-> 实现冻结：[IMPLEMENTATION.md](./IMPLEMENTATION.md)  
-> 消费边界：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../doc/decisions/0026-session-scoped-platform-instance.md)
+> 冻结决策：[ADR 0020](../../doc/decisions/0020-game-entry-consumer-boundary.md) · [ADR 0026](../../doc/decisions/0026-session-scoped-platform-instance.md) · [ADR 0028](../../doc/decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
 
 核心原则：
 
-> **这是 concrete HostraPlatform 内部的 Game PREPARE + RuntimeHosting/Runner integration component，不是 Hostra Platform 本身。Main 不调用本包，也不调用 Game Package；Product bootstrap 创建 session-scoped HostraPlatform，由 Platform 内部调用本包。**
+> **本包是 concrete HostraPlatform 内部的 Game PREPARE + RuntimeHosting/Runner integration component。M9 允许它增加“因为本包拥有 Node child 而必须拥有”的 Runtime-scoped Data provisioning mechanics，但 Desktop Broker authority/policy 仍不属于本包。**
 
 ---
 
 ## 1. Package Position
 
 ```text
-apps/desktop / product entry
+apps/desktop
         ↓
-session-scoped HostraPlatform
+session-scoped HostraPlatform / composition
         │
-        ├── prepareGame(source, policy)
+        ├── prepareGame(...)
         │       ↓
         │  @loomrealm/game-launcher-hostra
         │       ├── @loomrealm/game-package
         │       ├── launch.hostra.json
-        │       ├── exact key join
-        │       ├── module/runtime preflight
-        │       ├── immutable HostraLaunchPlan
+        │       ├── exact key join/security preflight
+        │       ├── HostraLaunchPlan
         │       └── LogicalGameBootstrap
         │
         └── runtimeHosting
                 ↓
-           plan-bound RuntimeHosting
-                ↓
            package-owned Node Runner
-```
-
-M6 direct dependencies：
-
-```text
-@loomrealm/game-package
-@loomrealm/foundation
-@loomrealm/platform-ports
-@loomrealm/subsystem
-@loomrealm/wire
-ws
+                ↓
+           Runtime Control + M9 child provisioning mechanics
 ```
 
 `@loomrealm/main` and business packages MUST NOT depend on this package。
 
-M6 does not create generic adapter packages。`launcher-node` / `transport-websocket` / generic supervisor extraction is deferred until another real consumer proves identical semantics。
+No generic launcher-node/transport/provisioning/supervisor extraction is required in M9 without another real consumer。
 
 ---
 
-## 2. Owned Surface
+## 2. Owned Surface Through M9
 
-本包 owns：
+Package owns：
 
 ```text
-Hostra Runtime-product Game Entry consumption orchestration
-HostraLaunchManifestV1 schema/parser
-Hostra module logical syntax and filesystem security preflight
-exact Game ↔ Hostra key-set join
-trusted current Node/Runner static preflight
+Hostra Runtime-product Game Entry consumption
+Hostra launch manifest / module security / exact join
 immutable HostraLaunchPlan
-Main-facing LogicalGameBootstrap projection
-plan-bound RuntimeHosting realization
-Node Runner/bootstrap integration
-Runtime Control WebSocket MessageCarrier
+LogicalGameBootstrap projection
+plan-bound RuntimeHosting
+Node Runner/bootstrap
+Runtime Control WebSocket carrier
 physical process convergence
+M9 exact child-scoped Data provisioner + provisioning IPC
+Runner-side Data WS establishment/delivery into SubsystemDataBinding
 ```
 
-本包 does not own：
+Package does not own：
 
 ```text
-Game Entry common schema authority
-Hostra outer Electron Host lifecycle
-Main Runtime/Frame/Stack authority
-Runtime Control protocol semantics/authentication authority
-Renderer Hosting
-DataConnectionBroker/Data provisioning in M6
-Content semantics
-business Definition behavior
+Main Runtime/Frame/Renderer/DataAuthority
+Renderer hosting/currentness
+Desktop DataConnectionBroker
+Renderer-side Data pairing policy
+Data application protocol parsing
+Input/Render/Content business state
+PWA abstraction
 ```
 
 ---
 
-## 3. Frozen M6 Integration Surface
+## 3. M6 Frozen Integration Surface — Preserved
+
+Existing Game/Runner surfaces remain：
 
 ```ts
 interface HostraGameSource {
@@ -112,45 +99,63 @@ interface PreparedHostraGame {
 }
 
 prepareHostraGame(options: HostraPrepareOptions): Promise<PreparedHostraGame>
-
-createHostraRuntimeHosting({
-  launchPlan,
-}: {
-  readonly launchPlan: HostraLaunchPlan;
-}): RuntimeHosting
 ```
 
-Exact TypeScript root exports and semantics are frozen in `IMPLEMENTATION.md`。
-
-M6 source representation is exactly：
-
-```text
-HostraGameSource = installationRoot only
-```
-
-No universal `GameSource` / `InstallationProvider` / `PreparedPlatformGame<T>` / `PlatformLaunchOptions` abstraction。
+Game source remains exactly `installationRoot`；no universal GameSource/options bag。
 
 ---
 
-## 4. PREPARE → COMMIT
+## 4. M9 Exact Provisioning Surface
 
-### PREPARE
+Add：
 
-```text
-validate Hostra runner policy
-→ canonicalize installation root
-→ read/validate game.json through @loomrealm/game-package
-→ validate launch.hostra.json
-→ exact key-set join
-→ resolve every .mjs safely
-→ preflight current trusted Node runtime
-→ preflight package-owned Runner artifact
-→ freeze HostraLaunchPlan
-→ freeze LogicalGameBootstrap
-→ return PreparedHostraGame
+```ts
+export interface HostraRuntimeDataPrepareRequest {
+  readonly candidateId: string;
+  readonly endpoint: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+}
+
+export interface HostraRuntimeDataProvisioner {
+  prepare(
+    request: HostraRuntimeDataPrepareRequest,
+    signal: AbortSignal,
+  ): Promise<void>;
+
+  commit(
+    candidateId: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+
+  revoke(candidateId: string): void;
+}
 ```
 
-Before success：
+`createHostraRuntimeHosting(...)` target becomes：
+
+```ts
+createHostraRuntimeHosting({
+  launchPlan,
+  onRuntimeDataProvisioner,
+}: {
+  readonly launchPlan: HostraLaunchPlan;
+  readonly onRuntimeDataProvisioner?: (
+    runtime: HostedRuntime,
+    provisioner: HostraRuntimeDataProvisioner,
+  ) => void;
+}): RuntimeHosting
+```
+
+The hook is concrete Hostra composition integration, not a shared platform-ports capability。
+
+---
+
+## 5. PREPARE → COMMIT — Game Path Unchanged
+
+PREPARE remains side-effect-free with respect to business Runtime：validate Game/manifest/security/all modules/Node/Runner → freeze plan/bootstrap。
+
+Before successful PREPARE：
 
 ```text
 zero Subsystem Runner process
@@ -158,192 +163,202 @@ zero business Definition import
 zero Runtime Control WebSocket
 ```
 
-### COMMIT
-
-```text
-HostraPlatform installs immutable HostraLaunchPlan
-→ apps/desktop passes LogicalGameBootstrap + same Platform to Main
-→ Main creates Launch Attempt {subsystemKey, bootstrapToken}
-→ HostraPlatform.runtimeHosting.launch(...)
-→ exact frozen-plan lookup
-→ attempt-local WS + Node Runner
-```
-
-Ordinary launch MUST NOT re-read Game/manifest or re-resolve business module selection。
+Ordinary Runtime launch still only looks up frozen HostraLaunchPlan and never re-reads Game/manifest/module selection。
 
 ---
 
-## 5. Frozen Host Policy
+## 6. RuntimeHosting Launch / Handoff Ordering
 
-M6 Node selection is intentionally minimal：
-
-```text
-Node executable = current trusted composition process.execPath
-supported Node  = major >= 20
-Runner entry    = package-owned dist/runner/entry.js
-shell           = false
-cwd             = canonical installation root
-```
-
-Game/manifest cannot select Node、Runner、argv、Node flags、env、endpoint、bootstrap credential。
-
-`HostraRunnerPolicy` contains exactly four bounded integer timing values：
+For one launch：
 
 ```text
-helloDeadlineMs
-frameDeadlineMs
-terminalCleanupDeadlineMs
-terminationGraceMs
+validate logical request against frozen plan
+→ create loopback Runtime Control listener/material
+→ spawn exact package-owned Runner
+→ construct HostedRuntime R
+→ construct child-bound HostraRuntimeDataProvisioner P
+→ if hook supplied: invoke hook(R,P)
+→ resolve RuntimeHosting.launch() with R
 ```
 
-Runtime Control protocol versions are not configurable in M6；Runner uses `[1]`。
+The hook MUST run before successful launch resolution so Desktop can map the exact Runtime identity before Main may publish it in `DataConnectionAuthorityView`。
+
+Hook is synchronous/non-blocking and expected to perform only local composition registration (e.g. WeakMap set)。If supplied hook throws：
+
+```text
+launch fails closed
+→ child/listener are converged/terminated
+→ no HostedRuntime ownership escapes
+```
+
+M6/headless caller omits the hook and sees unchanged launch behavior。
 
 ---
 
-## 6. Logical vs Physical Material
-
-`LogicalGameBootstrap` only contains：
+## 7. Hostra Provisioner Lifetime
 
 ```text
-subsystemKeys
-initial {subsystemKey,input}
+one HostedRuntime R
+→ one provisioner P
+→ same exact Node child
 ```
 
-It MUST NOT contain：
+P becomes terminal/unusable when：
 
 ```text
-Game document model/brand
-formatVersion
-HostraLaunchPlan
-module/path
-Node/Runner/process material
+child terminates
+provisioning IPC becomes permanently unavailable
 ```
 
-`HostraLaunchPlan` is a HostraPlatform integration value containing preflight-complete physical facts。It remains private from Main、Renderer and business code。
+Fresh Runtime object always receives a fresh provisioner。No lookup by subsystemKey/PID and no public RuntimeDirectory。
 
 ---
 
-## 7. RuntimeHosting and Launch Attempt
+## 8. Runner Bootstrap — Startup Material Remains Narrow
 
-Existing M5 port remains unchanged：
+Runner startup still consumes only Runtime bootstrap/control/module facts。Data endpoint/ticket/candidate is NOT added to `RunnerBootstrapV1`。
 
-```text
-RuntimeHosting.launch({subsystemKey, bootstrapToken}, signal)
-→ HostedRuntime
-```
+M9 Runner additionally installs one Host-owned provisioning IPC listener before invoking/alongside `runSubsystem(...)` and supplies a real `SubsystemDataBinding` that waits for committed current-deliverable Data carriers。
 
-No public `launchId`、module/path、Node flags or Hostra material is added。
-
-Each launch owns only attempt-local physical state：
-
-```text
-one child
-one loopback ephemeral WS listener
-one 32-byte random path capability
-one accepted Control connection
-one single-use MainRuntimeControlBinding.acquire()
-one child exit fact
-```
-
-```text
-spawned != connected != identified != ready
-```
-
-This package owns spawned/connected；existing Runtime Control/Main own identified/ready。
+Business Definition never sees Hostra IPC/endpoint material。
 
 ---
 
-## 8. Runner
+## 9. Dedicated Provisioning IPC
 
-Only process argv entry：
-
-```text
-process.execPath <package-owned runner entry>
-```
-
-Runner：
+Hostra-private messages：
 
 ```text
-consume + scrub reserved bootstrap env
-→ validate closed RunnerBootstrapV1
-→ import exact planned .mjs once
-→ validate/use default SubsystemDefinitionFactory
-→ establish Runtime Control WS MessageCarrier
-→ runSubsystem(...)
+host → runner : provision(candidateId, endpoint, G, P)
+runner → host : prepared(candidateId)
+host → runner : commit(candidateId)
+runner → host : committed(candidateId)
+host → runner : revoke(candidateId)
 ```
 
-Business Definition Module is never process entry and never receives Hostra physical material through author API。
+No Runtime Control/Frame/business/Renderer Control/Input/Render payload。
 
-M6 Runner includes Runtime Control only。
+`candidateId` is local stale-work correlation, not authority/credential/generation。
 
-```text
-M8+  adds Subsystem Data provisioning/binding when that milestone is implemented
-M12+ adds Content integration when that milestone is implemented
-```
-
-No dormant provisioning capability is created in M6。
+Node IPC ordering is used only for Hostra physical coordination；the application contracts do not depend on this wire format。
 
 ---
 
-## 9. Process Facts and Termination
+## 10. Runner Candidate State
 
-Child `exit` is the canonical physical termination fact；`close` is resource/stdio diagnostic only。
-
-`HostedRuntime.terminated` settles from the child `exit` observer already installed immediately after `spawn()` returns and before awaiting the `spawn` event。
-
-`requestTermination(signal)` is idempotent：
+Runner provisioning layer needs only：
 
 ```text
-commit normal host termination request once
-→ schedule terminationGraceMs force fallback
-→ actual exit settles terminated
+0..1 prepared uncommitted candidate
+0..1 committed current-deliverable carrier
+0..1 pending SubsystemDataBinding acquire waiter
 ```
 
-Repeated requests join the same convergence。No public `forceKill()` port；no automatic restart。
+`prepare()`：connect exact Data WS, hold carrier private, ACK prepared。  
+`commit()`：only after Broker logical install; make exact candidate current-deliverable, ACK committed。  
+`revoke()`：identity-safe, non-blocking, non-throwing invalidation/cleanup。
 
-Launch AbortSignal owns a physical attempt only until HostedRuntime is returned。Abort before ownership transfer closes the listener and force-converges any spawned child without returning an orphan Runtime。
+`SubsystemDataBinding.acquire()` remains a delivery wait and is not candidate creation/authority/installation gate。
 
 ---
 
-## 10. Security Invariants
+## 11. Post-install Delivery Failure
+
+Broker owns logical Data installation。Therefore provisioner `commit()` failure means：
 
 ```text
-module path is installation-relative .mjs only
-all module bindings canonical-safe before plan freeze
-prepared installation remains stable for one Platform Session
-reserved bootstrap env is deleted before business import
-Runner env is an explicit allowlist, never full process.env
-WS binds only 127.0.0.1:0
-attempt path uses 32 random bytes
-WS capability is not Runtime authentication
+Broker already installed B current
+→ Runner delivery fails/rejects
+→ Desktop Broker retires B
+→ package closes/revokes B material
+→ old A never resurrects
+```
+
+Package MUST NOT implement rollback to previous Data carrier and MUST NOT report this as Runtime Control failure。
+
+If B is revoked/superseded while commit ACK is pending, late `committed(B)` is stale and cannot restore B。
+
+---
+
+## 12. Process / Runtime Control Facts — M6 Preserved
+
+Child `exit` remains canonical physical termination fact。`HostedRuntime.terminated` semantics and `requestTermination()` convergence remain unchanged。
+
+Unexpected child exit is still Runtime failure via existing Main supervision path。Provisioning IPC/Data WS failure while child + Runtime Control remain healthy is Data-only。
+
+No automatic Runtime restart。
+
+---
+
+## 13. Security Invariants Through M9
+
+```text
+module path installation-relative .mjs only
+all module bindings safe before plan freeze
+reserved bootstrap env scrubbed before business import
+Runner env explicit allowlist
+Runtime Control WS binds 127.0.0.1 only
+Data WS endpoints/candidate material Host-owned and loopback only
+fresh one-time unguessable Data candidate material
+Game/manifest cannot select Data endpoint/ticket/IPC policy
 bootstrapToken remains Runtime Control/Main authority
+Data candidate material does not create Main DataAuthority
 ```
 
 ---
 
-## 11. M6 Non-goals
+## 14. M9 Non-goals for This Package
 
 ```text
-Renderer Control
-DataConnectionBroker / Data provisioning
-Content
-Input / Render
-PWA
-universal launcher registry
-universal transport package
+Desktop DataConnectionBroker
+RendererDataBinding product policy
+BrowserWindow / Renderer Control physical hosting
+Input / Render / Content
+PWA provisioning abstraction
+universal transport/provisioning package
 generic process supervisor
-Runner→Parent private lifecycle/status protocol
-arbitrary Node executable configuration
+RuntimeDirectory / ConnectionRegistry
 Runtime restart/reconnect
-live installation mutation
 ```
 
 ---
 
-## 12. Freeze / Reopen Rule
+## 15. Qualification Through M9
 
-M6 is Frozen / Ready for Implementation。
+Package tests must prove：
 
-Implementation MUST NOT reopen boundary merely for convenience。Reopen only if a real implementation/qualification failure proves one of the frozen contracts insufficient。
+```text
+M6 PREPARE/Runtime launch regressions green
+hook omitted → existing behavior unchanged
+hook fires before successful launch resolution
+hook throw → launch fails closed / child converged
+one HostedRuntime → one provisioner
+Data material absent from startup bootstrap
+prepare private carrier + prepared ACK
+commit is post-install delivery ACK
+commit cancellation/stale ACK identity-safe
+revoke non-throwing/identity-safe
+IPC terminal disables Data only while Runtime Control may remain healthy
+child exit remains Runtime fact
+no Broker policy/protocol parsing added
+```
 
-Any need to change Main/RuntimeHosting/runSubsystem/Runtime Control public contracts, create generic manager/transport layers, or let RuntimeHosting re-read Game/manifest is a design-reopen signal, not permission for a compatibility patch。
+---
+
+## 16. Freeze / Reopen Rule
+
+M6 baseline remains frozen。M9 extension is frozen by ADR 0028。
+
+Implementation may choose private file names and IPC JSON/structured message encoding, but may not change：
+
+```text
+exact public provisioner types/signatures
+hook timing before launch resolution
+Data startup-bootstrap exclusion
+prepare/commit/revoke lifecycle
+post-install commit failure semantics
+Data-vs-Runtime failure isolation
+launcher-vs-Desktop Broker ownership
+```
+
+Reopen only for demonstrated contract contradiction or a real M9 consumer inability, not code reuse/future PWA symmetry。

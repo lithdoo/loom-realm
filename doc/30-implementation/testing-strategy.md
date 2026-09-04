@@ -1,657 +1,509 @@
 # 测试策略
 
 > 层级：实施计划  
-> 状态：Draft / Tracking  
+> 状态：Tracking  
 > 稳定程度：Evolving  
-> 主要定义：Game/Platform PREPARE、Game Package snapshot、Runtime Control mechanics、Main logical bootstrap、protocol conformance、Role/SDK control-flow、Runner/provisioning、Hostra/PWA semantic equivalence 与 E2E  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-08-21
+> 主要定义：Game/Platform PREPARE、protocol mechanics、role authority、Runner/provisioning、Desktop Data Broker、Hostra/PWA equivalence 与 E2E qualification  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[独立分包与发布架构](./package-architecture.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> 最近复核：2026-09-04
 
-测试目标不是“消息能通”，而是证明每一层不能绕过 authority/failure/lifecycle/PREPARE invariant。
+测试目标不是“消息能通”，而是证明每一层不能绕过 authority、lifecycle、failure-domain、PREPARE 和 package boundary invariant。
 
 ---
 
 ## 1. Test Layers
 
 ```text
-Game Entry document representation
-→ Game Package validation/snapshot
-→ matching Launcher Game consumption
-→ Platform launch manifest / exact join / PREPARE
-→ LogicalGameBootstrap projection
-→ Main logical bootstrap
+Game document
+→ Game Package validation
+→ matching Launcher PREPARE
+→ LogicalGameBootstrap
+→ Main logical authority
 
-Foundation MessageCarrier + Wire primitives
-→ Runtime Control profile limits
-→ one reader/dispatcher + one writer
-→ Control/Frame protocol state/correlation
-→ role-specific peers
-→ Main/Subsystem Host authority/control-flow mapping
+Foundation/Wire
+→ Runtime Control / Renderer Control / Data protocol mechanics
+→ role integrations
 
-Renderer/Data/Content protocols
-→ RuntimeHosting/Runner/provisioning integration
-→ Platform composition
-→ Hostra/PWA abstract-trace equivalence
-→ E2E
+Main physical authority facts
+→ Platform bindings / Runner provisioning
+→ Desktop/PWA Broker realization
+→ business Input/Render/Content
+→ full E2E / cross-platform equivalence
 ```
 
-Package-local fixture stays with nearest capability；Platform/E2E fixture stays repository-level。
+Nearest owner owns nearest tests。No giant E2E replaces package/role/conformance evidence。
 
 ---
 
 ## 2. Unified Carrier Model
 
-All message-oriented profiles share：
+Current message-oriented application carriers use：
 
 ```text
 one carrier unit = one UTF-8 JSON text string
 ```
 
+Adapter tests cover boundary/order/close/loss/no duplicate。Foundation tests treat messages opaquely；protocol packages test JSON/wire semantics。
+
+No application retry/duplicate is introduced by adapters。
+
+---
+
+## 3. Game Package / Launcher PREPARE
+
+Game Package tests：schema/keys/immutable detached snapshot/error boundary/dependency boundary。
+
+Hostra/PWA Launcher tests：
+
+```text
+matching Game source consumption
+own manifest validation
+exact Game↔Platform key-set join
+safe module resolution
+all required executable bindings prepared before first Runtime side effect
+Host policy cannot be selected by Game manifest
+LogicalGameBootstrap contains logical fields only
+```
+
+Every PREPARE negative case proves zero Runner/Worker/business import/Runtime Control establishment。
+
+---
+
+## 4. Runtime Control Mechanics
+
+Package-local tests retain direct evidence for：
+
+```text
+one carrier reader/dispatcher
+one serialized writer
+strict monotonic shared sender ID namespace
+closed representation/limits
+hello/version/auth callback boundary
+Frame exact method/direction schemas
+Response-before-dependent-action barrier
+deadline covers send + response wait
+terminal first-wins
+no retry/replay/reconnect
+```
+
+Main/Subsystem tests own application authority mapping；Runtime Control fixtures must not duplicate it。
+
+---
+
+## 5. Frozen Frame Authority
+
+Independent tests remain required for：
+
+```text
+ACK-before-publication
+post-commit no rollback
+accepted outcome preserved
+ambiguous mutation → Runtime failure
+whole-suffix fixed-point unwind
+fresh surviving Caller resume
+```
+
+Renderer/Data changes cannot weaken these gates。
+
+---
+
+## 6. Subsystem Host / Main Role Tests
+
+Subsystem host tests：business lifecycle、Frame continuation/gating、Runtime failure isolation and M8 Data peer lifecycle。
+
+Main tests through M8：logical bootstrap、Runtime authority、Frame/Stack/Activation/InputTarget、Renderer projection/currentness、ready-derived DataAuthority、Session terminal。
+
+M9 extends Main tests only with the physical authority sink projection; it does not move Broker state into Main。
+
+---
+
+## 7. Renderer Control / Renderer Role
+
+Renderer Control package tests own hello/version/Snapshot/publication/terminal mechanics。
+
+Main tests own token/currentness/replacement/revision。Renderer tests own local `{peer,snapshot}` current mirror and M8 per-subsystem Data reconciliation。
+
+Physical Hostra/PWA RendererControlBinding tests remain M14/M16；M9 deterministic physical Renderer hosting must still use real protocol peers/Main acceptance。
+
+---
+
+## 8. `@loomrealm/platform-ports` Through M9
+
+Declaration/boundary tests must prove：
+
+```text
+runtime dependency exactly @loomrealm/foundation
+exact exported M4–M9 names/fields
+no protocol/role/concrete Platform dependency
+no public Broker/registry/event/service surface
+```
+
+M9 exact exports：
+
+```text
+DataConnectionAuthorityEntry
+DataConnectionAuthorityView
+DataConnectionAuthoritySink
+```
+
+Behavioral sink ordering/non-throwing semantics are qualified by real Main producer + Desktop consumer tests, not a fake state machine inside platform-ports。
+
+---
+
+## 9. Main M9 Authority Sink Tests
+
+Required：
+
+```text
+dataConnections absent → all M1–M8 paths unchanged
+sink present → initial replace(null)
+non-null only while exact current Renderer exists
+accepted Renderer token remains auth-consumed
+current token retained only as inert physical correlation
+current retained token participates in duplicate opaque-material defense
+full view entries exact/unique/deterministic
+entry runtime is exact HostedRuntime object
+Runtime ready/non-ready/DataAuthority changes refresh full view
+Renderer A→B changes full view in same serialized current switch
+current Renderer terminal → replace(null)
+Session terminal → replace(null) before async cleanup
+sink replacement alone does not bump Renderer revision
+```
+
+Use a conforming fake sink that records calls and never throws/blocks。Do not build EventBus/observer infrastructure for tests。
+
+---
+
+## 10. `DataConnectionAuthoritySink` Consumer Contract
+
+Desktop sink tests directly prove：
+
+```text
+replace(view|null) is synchronous
+replace is non-blocking
+replace never throws
+replace performs no network/IPC wait
+latest in-memory view changes before physical cleanup work
+stale pending candidates become non-installable synchronously
+stale current pairs lose current status synchronously
+physical close may settle later without restoring authority
+```
+
+An intentionally throwing sink is tested only as a **non-conforming provider example** if useful; no Main Runtime/Frame recovery semantics are specified for that contract violation。
+
+---
+
+## 11. Hostra Runtime Provisioner Tests — M9
+
+`@loomrealm/game-launcher-hostra` tests：
+
+```text
+hook omitted → M6 RuntimeHosting behavior unchanged
+one successful HostedRuntime → one provisioner
+hook fires before RuntimeHosting.launch resolves exact HostedRuntime
+hook throw → launch fails closed and spawned child converges
+Data endpoint/ticket absent from RunnerBootstrapV1
+prepare connects exact Data WS + keeps carrier role-private
+prepared ACK exact candidate identity
+commit called only after Broker logical install in integration trace
+commit resolves after exact committed ACK/current-deliverable acceptance
+revoke non-blocking/non-throwing/identity-safe
+stale prepared/committed/revoke cannot affect newer candidate
+provisioning IPC terminal may disable Data while Runtime Control remains healthy
+child exit remains existing Runtime termination fact
+```
+
+No generic RPC/provisioning framework test fixture。
+
+---
+
+## 12. Desktop Broker Contract Harness — M9
+
+`apps/desktop` owns a small authority/candidate harness driven by frozen sink views。
+
+Required authority cases：
+
+```text
+no authority cannot install
+wrong S/G/P cannot install
+wrong Renderer token cannot install
+wrong exact HostedRuntime object cannot install
+view replacement during establish rejects stale candidate
+```
+
+Candidate/install cases：
+
+```text
+Renderer-only prepared not current
+Runner-only prepared not current
+both prepared exact binding may install
+pre-install child bytes rejected/disposed
+same-slot concurrent candidates → at most one winner
+different subsystem slots independent
+old/new current never overlap
+retired old never current again
+```
+
+---
+
+## 13. Desktop Two-sided Data WebSocket Tests
+
+Concrete candidate topology：
+
+```text
+Renderer WS ─┐
+             ├─ opaque Broker relay
+Runner WS   ─┘
+```
+
 Tests：
 
 ```text
-websocket-text-unit
-messageport-postmessage-string-unit
-memory-carrier-string-unit
-structured-clone-object-not-accepted-as-application-unit
-no-binary-websocket-for-current-profiles
-no-application-retry-or-duplicate
-per-direction-order
-observable-close/loss
-production-adapter-no-unbounded-physical-buffering
-```
-
-Foundation tests only opaque message/order/terminal facts；domain package tests JSON/protocol semantics。
-
----
-
-## 3. `@loomrealm/game-package`
-
-### Representation / schema
-
-```text
-valid-minimal-game-entry
-malformed-json
-formatVersion-exact-1
-closed-top-level-schema
-closed-initial-schema
-closed-descriptor-schema
-Descriptor-exactly-key
-invalid-direct-JsonValue
-```
-
-### Key semantics
-
-```text
-key-non-empty
-whitespace-only-follows-current-formal-contract
-key-uniqueness-case-sensitive
-no-trim
-no-case-fold
-no-unicode-normalization
-duplicate-error-points-to-later-occurrence
-declaration-order-preserved
-```
-
-### Initial input opacity
-
-Schema-level platform-looking fields rejected；same names inside `initial.input` accepted including `module/env/platform/launcher/__proto__/constructor`。
-
-### Validated snapshot
-
-```text
-validated-result-detached-from-source
-source-mutation-after-validation-no-effect
-returned-containers-deeply-frozen
-nested-input-deeply-frozen
-caller-input-not-mutated/frozen
-deep-input-no-call-stack-overflow
-shared-acyclic-graph-no-exponential-copy
-proto-key-remains-data
-no-getter-toJSON-invocation
-```
-
-### Errors / boundary
-
-```text
-GamePackageError-class-code-path-stable
-Wire-error-not-required-by-consumer
-malformed-json-mapped
-runtime-dependency-only-wire
-no-main/launcher/node/filesystem/fetch
-root-export-only
-npm-pack-dry-run
+loopback only
+fresh one-time role-specific capability
+single intended connection per candidate side
+relay gate closed before install
+Broker parses no Data application JSON
+UTF-8 text message boundaries preserved
+read failure on either side retires whole pair
+write failure on either side retires whole pair
+late retired bytes dropped
+late retired send completion cannot affect replacement
 ```
 
 ---
 
-## 4. Consumer Boundary Tests
+## 14. Installation vs Post-install Delivery Tests
 
-Prevent architecture regression：
+This distinction is a required M9 regression gate。
 
-```text
-main-package-has-no-game-package-dependency
-main-bootstrap-fixture-does-not-use-GameEntryV1
-business-package-has-no-game-package-or-launcher-dependency
-business-package-has-no-runtime-control-direct-dependency
-```
-
-Hostra/PWA launcher：
+Normal：
 
 ```text
-launcher-prepare-consumes-Game-source-without-manual-game-package-step
-Game-validation-failure-happens-inside-launcher-PREPARE
-prepared-result-not-released-before-full-PREPARE
-logical-bootstrap-contains-only-keys-and-initial
-logical-bootstrap-has-no-formatVersion-brand-module-path-url
+both sides prepared
+→ latest Main-view revalidation
+→ old current retires
+→ B becomes sole current
+→ Renderer delivery
+→ Runner commit notification/ACK
 ```
+
+Failure trace：
+
+```text
+A current
+→ B installs current / A retires
+→ Runner post-install commit delivery rejects
+→ B current→retired
+→ B close/revoke
+→ A never resurrects
+→ Runtime/Frame/Main DataAuthority unchanged
+```
+
+Tests MUST fail implementations that classify this as pre-install candidate failure or restore A。
 
 ---
 
-## 5. Main Logical Bootstrap
+## 15. Same-generation Physical Replacement — M9
 
-Main local tests use hand-built/fake `LogicalGameBootstrap` directly：
+Proactive：
 
 ```text
-complete-key-registry-install
-initial-target-input-install
-no-formatVersion-document-metadata
-no-GamePackageError-handling
-no-GameEntry-parser
+A current
+→ B prepared under same S/G/P without Binding waiter
+→ B installs / A retires
+→ old role peers terminal
+→ fresh M8 acquire receives B if still deliverable
 ```
 
-Defensive Main assertions MUST NOT recreate GameEntryV1 validator。
+Loss recovery：
+
+```text
+A physical loss
+→ A retired
+→ Main authority unchanged
+→ fresh B may install same S/G/P
+```
+
+Required negatives：
+
+```text
+no generation change
+no rendererRevision change solely for replacement
+no resume token
+no old emitted replay
+no old unsent queue migration
+```
+
+M9 asserts a fresh Data peer/connection-local boundary only。
 
 ---
 
-## 6. Hostra Launcher PREPARE
+## 16. M10 User Input Baseline — Not M9
+
+Fresh Data current User Input cases belong to M10：
 
 ```text
-raw-common-Game-entry-consumed-by-Hostra-launcher
-valid-launch-hostra-json
-closed-hostra-schema
-format-version
-binding-key-duplicate/missing/undeclared
-exact-game-hostra-key-set
-module-mjs-only
-absolute-traversal-url-backslash-rejection
-installation-containment
-symlink-junction-reparse-escape-rejection
-regular-file-required
-all-required-modules-resolved-before-first-spawn
-node-runtime-capability-preflight
-host-runner-entry-capability-preflight
-manifest-cannot-select-node-runner-argv-env-token-endpoint
-immutable-plan-lookup-by-key
-logical-bootstrap-projection
+fresh Desired Interest publication
+fresh State/Event/Reset effective semantics
+no old input state/event inheritance
+Activation/InputTarget/Interest/Producer gate
 ```
 
-Every PREPARE negative case：
-
-```text
-process spawn count = 0
-business module import count = 0
-Runtime Control establish count = 0
-```
+These tests may reuse the M9 physical carrier but MUST NOT be counted toward M9 qualification。
 
 ---
 
-## 7. PWA Launcher PREPARE
+## 17. M11 Render Baseline — Not M9
+
+Fresh Data current Render cases belong to M11：
 
 ```text
-raw-common-Game-entry-consumed-by-PWA-launcher
-valid-launch-pwa-json
-closed-pwa-schema
-format-version
-binding-key-duplicate/missing/undeclared
-exact-game-pwa-key-set
-module-mjs-only
-absolute-traversal-external-url-backslash-rejection
-installation-registry-resolution
-same-origin-trusted-installation-policy
-all-required-modules-resolved-before-first-worker
-worker-runner-capability-preflight
-manifest-cannot-select-runner-ports-credentials-CSP
-immutable-plan-lookup-by-key
-logical-bootstrap-projection
+fresh authoritative domain snapshot baseline
+revision/patch/event semantics
+no old replica cursor inheritance
+Frame close/suspend independence from Render Domain lifetime
 ```
 
-Every PREPARE negative case：
-
-```text
-Worker creation count = 0
-business module import count = 0
-Runtime Control establish count = 0
-```
+These are not M9 Broker completion criteria。
 
 ---
 
-## 8. `@loomrealm/runtime-control` — Representation / Limits
+## 18. M9 Production Vertical
 
-M3 package tests MUST begin from deterministic `MessageCarrier`，not WebSocket/MessagePort implementations。
-
-```text
-actual-utf8-message-1mib-exact-and-over
-json-depth-64-exact-and-over
-no-jsonrpc-batch
-malformed-json-protocol-fatal
-invalid-jsonrpc-envelope-protocol-fatal
-unpaired-surrogate-rejected
-control-token-version-error-limits
-frame-business-string-key-member-array-identity-limits
-invalid-response-protocol-fatal
-unknown-semantic-code-protocol-fatal
-```
-
-Wire alignment：
+Must compose production：
 
 ```text
-duplicate-json-source-follows-wire-json-parse
-parsed-result-still-closed-schema
-runtime-control-does-not-add-private-json-parser
+Hostra PREPARE
+real Main Session
+real Node Runner + Runtime Control WS
+real Subsystem host
+real Renderer Control peers/Main acceptance
+real DataConnectionAuthoritySink
+real Hostra provisioner + child IPC
+real two-sided Data WS
+real M8 Bindings
+real Renderer/Subsystem Data peers
 ```
 
-Outbound resource safety：
+Only physical Renderer hosting/bootstrap may be deterministic/test。
 
-```text
-bounded-size-measurement-stops-over-limit
-shared-dag-wire-expansion-counted-per-occurrence
-no-arbitrarily-large-stringify-before-limit-check
-```
+Vertical covers：initial install、authority removal race、Renderer replacement、same-generation proactive replacement/loss recovery、post-install delivery failure、Session terminal cleanup。
 
 ---
 
-## 9. Runtime Control — Reader / Dispatcher / Writer
+## 19. M9 Conformance Claim Boundary
+
+M9 qualifies the Hostra/Desktop physical Broker slice for applicable Data Connection v1 cases。
+
+Not M9 closure：
 
 ```text
-exactly-one-code-path-iterates-carrier-messages
-control-frame-share-one-dispatcher
-responses-correlate-connection-wide
-response-correlation-not-blocked-by-long-role-handler
-request-notification-dispatch-preserves-inbound-order
-one-serialized-outbound-writer
-concurrent-high-level-sends-preserve-writer-order
+production generation allocation/replacement/exhaustion
+M10 Input business fresh publication baseline
+M11 Render business fresh publication baseline
+PWA platform mapping / Hostra-PWA equivalence
 ```
 
-Critical deadlock regression：
-
-```text
-handler A remains pending
-→ later carrier unit is Response to local outbound Request
-→ reader correlates Response without waiting handler A
-```
-
-This proves `single reader != blocking handler loop`。
+Do not label M9 as full Data Connection v1 cross-platform qualification。
 
 ---
 
-## 10. Runtime Control — Request IDs
+## 20. Content / Execution Boundary
 
-Same sender/connection：
-
-```text
-positive-safe-integer-only
-local-allocation-1-2-3
-strict-monotonic-increase
-control-frame-share-one-namespace
-remote-id-equal-last-rejected
-remote-id-lower-than-last-rejected
-allocated-id-never-reused-after-send-error
-allocated-id-never-reused-after-timeout
-late-response-cannot-match-new-operation
-max-safe-integer-allowed
-allocator-exhaustion-no-wrap
-```
-
-Two sender directions remain independent。
-
-No connection-lifetime all-seen ID Set should be required by conformance；O(1) last-remote-ID validation is sufficient under current contract。
+Content tests must keep logical readonly Content capability separate from executable resolution/Runner authority and keep Runtime/Data/Content credentials independent。
 
 ---
 
-## 11. Runtime Control — Hello / Control State
+## 21. Cross-platform Equivalence
 
-```text
-hello-first
-hello-one-shot
-hello-request-only
-protocol-version-list-1..16
-protocol-version-entry-positive-safe-integer
-protocol-version-no-duplicate
-select-control-1
-unsupported-version-semantic-error
-```
+Hostra/PWA equivalence compares normalized logical/protocol/application outcomes, not PID/Worker/WS/Port/IPC specifics。
 
-Authentication ownership：
-
-```text
-auth-callback-invoked-only-after-wire-schema-version-valid
-auth-callback-receives-key-token-material
-runtime-control-does-not-own-token-registry
-invalid-key-token-consumed-mismatch-map-generic-auth-failure
-duplicate-control-connection-separate-code
-accepted-auth-binds-connection-key
-```
-
-Control legality：
-
-```text
-status-before-hello-fatal
-frame-before-hello-fatal
-identified-initializing-ready-legal
-identified-ready-legal
-repeated-status-fatal
-ready-to-initializing-fatal
-stopping-to-ready-fatal
-stopping-requires-main-shutdown-intent
-failed-blocks-normal-operation
-stopped-never-produced-by-runtime-control
-```
+M9 does not perform this final Data equivalence; M16 must map PWA Data Broker and compare required abstract traces after M10/M11/M12 product semantics are available。
 
 ---
 
-## 12. Runtime Control — Frame Surface / Response Barrier
-
-```text
-exact-seven-frame-requests
-exact-method-directions
-closed-params-results-outcome-error-data
-no-extra-frame-method
-recoverable-frame-semantic-codes-classified
-fatal-divergence-codes-classified
-```
-
-Response barrier：
-
-```text
-handler-success-result-encoded-before-afterResponse
-handler-semantic-error-encoded-before-afterResponse
-carrier-send-response-resolves-before-afterResponse-starts
-frame-call-response-before-child-initialize
-frame-call-response-before-child-activate
-frame-return-response-before-close
-frame-return-response-before-resume
-afterResponse-not-run-if-response-send-terminally-fails
-```
-
-Main/Subsystem authority mutation itself is tested in role packages；M3 only proves causal mechanics。
-
----
-
-## 13. Runtime Control — Call/Return Mutation Gate
-
-Protocol-side：
-
-```text
-first-call-pending
-second-call-rejected-locally
-return-while-call-pending-rejected-locally
-call-while-return-pending-rejected-locally
-recoverable-precommit-error-releases-gate
-timeout-terminal-does-not-release-old-activation-for-normal-use
-fatal-semantic-error-terminal
-```
-
-M4 Subsystem Host separately proves pending mutation also stops ordinary input dispatch/business continuation。
-
----
-
-## 14. Runtime Control — Deadlines
-
-Use deterministic injected scheduler；do not rely only on wall-clock sleep。
-
-Frame：
-
-```text
-frame-deadline-min-1000
-frame-deadline-max-300000
-fraction-zero-negative-over-max-rejected
-frame-deadline-stable-per-connection
-frame-deadline-not-in-rpc-params
-```
-
-Control：
-
-```text
-hello-deadline-finite-positive
-shutdown-deadline-finite-positive
-hello-shutdown-values-independent-from-frame
-```
-
-Lifecycle/race：
-
-```text
-deadline-armed-before-first-carrier-send
-deadline-covers-send-stall-and-response-wait
-response-settlement-first-cancels-deadline
-timeout-settlement-first-wins
-request-id-remains-consumed-after-timeout
-late-response-diagnostics-only
-no-retry-replay-after-timeout
-shutdown-timeout-does-not-fabricate-stopped
-```
-
----
-
-## 15. Runtime Control — Terminal
-
-```text
-carrier-closed-terminal
-carrier-lost-terminal
-protocol-fatal-terminal
-request-timeout-terminal
-local-handler-throw-local-fatal
-terminal-first-wins
-terminal-immutable
-pending-requests-settle-exactly-once
-all-deadline-handles-retired
-no-new-normal-send-after-terminal
-close-idempotent
-late-response-cannot-recover-terminal
-no-same-attempt-control-reconnect
-```
-
-Role-specific mapping of terminal to Runtime failure/stopped is tested in Main/Supervisor later；M3 tests only typed connection fact。
-
----
-
-## 16. Runtime Control — Package Boundary
-
-```text
-root-export-only
-no-control-frame-profile-testing-subpath
-runtime-dependencies-exactly-foundation-wire
-foundation-used-for-messagecarrier-only
-wire-used-for-generic-json-jsonrpc
-no-main-subsystem-game-package-launcher-dependency
-no-node-websocket-messageport-worker-fetch-filesystem
-no-generic-rpc-public-framework
-no-schema-dsl-public-framework
-npm-pack-dry-run
-```
-
-Declaration/API tests SHOULD fail if internal dispatcher/request allocator/pending table becomes public accidentally。
-
----
-
-## 17. Frozen Frame Authority Conformance
-
-Frame role/authority tests remain independently required：
-
-```text
-exact-seven-RPC
-Response-before-dependent-RPC
-ACK-before-publication
-post-commit-no-rollback
-accepted-outcome-preserved
-ambiguous-mutation-Runtime-fatal
-whole-suffix-fixed-point-unwind
-fresh-surviving-Caller-resume
-```
-
-ADR 0021 does not reopen these semantics。
-
----
-
-## 18. Subsystem Author / Host SDK
-
-M4 real consumer qualification：
-
-```text
-subsystem-host-uses-SubsystemRuntimeControlPeer
-business-author-root-does-not-import-runtime-control
-initialize-does-not-start-handler
-activate-starts-handler-exactly-once
-pending-call-return-gates-ordinary-input
-child-completed-cancelled-failed-resolves-FrameOutcome
-precommit-recoverable-rejection-preserves-Activation
-Runtime-fatal-never-reenters-business-continuation
-uncaught-business-exception-maps-to-frame-failed-when-authority-healthy
-administrative-suspend-aborts-and-discards-late-completion
-```
-
-M3 does not build fake author SDK to claim this closure。
-
----
-
-## 19. Main Authority / Fake Platform Ports
-
-M5 real consumer qualification implemented：
-
-```text
-main-root-public-boundary
-logical-bootstrap-defensive-install
-MainPlatform-scheduler-bootstrapTokens-runtimeHosting-only
-bootstrap-token-freshness-and-duplicate-fail-closed
-RuntimeHosting-launch-request-key-plus-token-only
-main-uses-real-MainRuntimeControlPeer
-hello-auth-callback-owns-token-registration-consumption
-required-runtime-identified-ready-gate
-initial-frame-activate-ACK-before-publication
-cross-subsystem-nested-call-return
-same-subsystem-recursion-no-reentrant-deadlock
-recoverable-target-rejection-preserves-Activation
-child-runtime-loss-whole-suffix-unwind-fresh-caller-resume
-root-runtime-loss-no-stale-business-continuation
-root-outcome-and-external-abort-graceful-shutdown
-shutdown-success-waits-natural-termination-before-escalation
-termination-observation-rejection-not-treated-as-terminated
-npm-pack-dry-run
-```
-
-Fake Platform replaces physical hosting only；test path still uses real Runtime Control peers + MemoryCarrier + `@loomrealm/subsystem/host` business Definitions. Renderer Control/DataAuthority tests remain M7/M8 gates, not M5 requirements.
-
----
-
-## 20. Runner / Supervision
-
-Hostra：
-
-```text
-Host-owned-Runner-is-process-entry
-business-module-not-argv-entry
-exact-planned-module-imported
-safe-env-shell-false
-spawned-connected-identified-ready-distinct
-unexpected-code0-exit-fails-Runtime
-actual-termination-produces-stopped
-no-auto-restart
-```
-
-PWA equivalent with Worker Runner。
-
-Transport adapter tests additionally prove WebSocket/MessagePort both deliver only string units to Runtime Control and never reimplement JSON-RPC semantics/retry。
-
----
-
-## 21. Data / Provisioning
-
-```text
-DataAuthority-S-G-P-current-gate
-profile-change-fresh-generation
-one-Data-dispatcher
-same-S-G-P-sequential-reconnect
-stale-duplicate-provisioning-material-rejected
-fresh-carrier-Input-registry-state-empty
-fresh-carrier-Render-registry-snapshot-baseline
-```
-
-Provisioning failure remains distinct from Runtime/Frame failure and DataAuthority mutation。
-
----
-
-## 22. Content / Execution Boundary
-
-```text
-business-content-client-logical-only
-Content-capability-cannot-fetch-arbitrary-executable-target
-Runtime-token-Data-ticket-Content-credential-separated
-Platform-executable-resolver-not-exposed-as-ordinary-Content
-```
-
----
-
-## 23. Cross-platform Equivalence
-
-Shared：same Game logical content/scenario/formal contracts/Content fixture。
-
-Before Runtime E2E：Hostra/PWA prepared `LogicalGameBootstrap` semantically equivalent。
-
-Runtime Control transport equivalence uses same abstract traces through：
-
-```text
-Memory reference trace
-Hostra WebSocket string adapter
-PWA MessagePort string adapter
-```
-
-Compare protocol outcomes/authority facts，not physical PID/Worker/Port/WS traces。
-
----
-
-## 24. E2E PREPARE Gate
+## 22. E2E PREPARE Gate
 
 Every full E2E includes invalid Game/Platform binding/module/capability cases and proves no business Runtime side effect before PREPARE failure。
 
+M14 Desktop E2E additionally composes M9/M10/M11/M12 with physical BrowserWindow/Renderer Control。
+
 ---
 
-## 25. Test Ownership Rule
+## 23. Test Ownership Rule
 
 ```text
 low-level carrier/JSON representation
     → Foundation / Wire
 
-Runtime Control protocol mechanics
-    → runtime-control package tests
+protocol mechanics
+    → owning protocol package
 
 role authority/control-flow
-    → Main / Subsystem Host tests
+    → Main / Renderer / Subsystem tests
 
-platform carrier establishment
-    → adapter/platform tests
+shared port declaration
+    → platform-ports
+
+Hostra child ownership/provisioning
+    → game-launcher-hostra
+
+Desktop Broker/WS physical Data lifecycle
+    → apps/desktop
+
+Input/Render business baseline
+    → M10/M11 role tests
 
 same abstract semantics across platforms
-    → repository equivalence tests
+    → platform equivalence tests
 
 full user-visible chain
     → E2E
 ```
 
-Do not duplicate role authority inside Runtime Control fixtures merely to make M3 look end-to-end。
+---
+
+## 24. Root Gates
+
+Existing gates remain green。M9 adds：
+
+```text
+npm run test:m9
+```
+
+It MUST compose：
+
+```text
+platform-ports M9 boundary tests
+Main M9 sink tests
+Hostra provisioner/IPC tests
+Desktop Broker contract harness
+M9 production vertical
+```
+
+And retain：
+
+```text
+npm run test:m8
+npm run test:game-launcher-hostra
+npm run test:packages
+npm run docs:build
+npm run docs:check-links
+```
 
 ---
 
-## 26. Final Test Invariants
+## 25. Final Test Invariants
 
-1. Game Package tests document validation/snapshot，not Platform launch；
-2. Runtime Control tests protocol mechanics，not Main/Subsystem authority；
-3. one reader/dispatcher + one writer is directly regression-tested；
-4. same-sender Request IDs strict monotonic and shared across Control/Frame；
-5. duplicate JSON source semantics match Wire，no private parser；
-6. response barrier/deadline/terminal races are deterministic with injected scheduler；
-7. Main/Subsystem Host provide real downstream qualification in M5/M4；
-8. Launcher PREPARE negative tests prove zero Runtime side effect；
-9. Role/business dependency guards prevent Game/Launcher/Runtime Control leakage；
-10. Frame Frozen authority semantics remain independently conformant；
-11. Provisioning failure domain remains distinct；
-12. Cross-platform equivalence compares logical/protocol/application outcomes，not physical artifacts。
+1. document/Launcher PREPARE tests prove zero premature Runtime side effects；
+2. protocol packages test mechanics, not role authority；
+3. role packages test committed authority/control-flow；
+4. M9 Main sink tests prove exact full-view projection with no second authority registry；
+5. sink consumer tests prove non-blocking/non-throwing synchronous invalidation；
+6. Hostra provisioner tests prove exact Runtime handoff and Data-vs-Runtime failure isolation；
+7. Desktop Broker tests prove paired-before-current、single-current、no rollback/resurrection、whole-pair retirement；
+8. M9 same-generation replacement proves no replay/resume/generation/revision mutation；
+9. M10/M11, not M9, qualify fresh Input/Render business publication baselines；
+10. cross-platform equivalence is claimed only after both physical mappings and application slices are present；
+11. no generic RPC/authority/event/connection/transaction/retry framework is introduced for testing convenience。

@@ -5,54 +5,61 @@
 > 落地顺序：02  
 > 最近复核：2026-09-04  
 > 前置：[M9 / 01](M9_01_DESKTOP_DATA_BROKER.md)  
-> 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Hostra Desktop Composition](doc/20-modules/desktop-host/README.md)  
-> 目标：为每个真实 Node Runner 提供一个 runtime-scoped Hostra-private provisioner，使 Desktop Broker 能 late-provision Data candidate；不复用 Runtime Control，不把 Broker 放入 launcher。
+> 冻结决策：[ADR 0028](doc/decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
+> 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Runtime Hosting](doc/10-architecture/runtime-hosting-system.md)  
+> 目标：冻结 exact `HostedRuntime` → Hostra child provisioner handoff 与 Runner late Data provisioning；不复用 Runtime Control，不把 Data endpoint 固定进 Runtime bootstrap，也不让 launcher拥有 Broker policy。
 
-> **Launcher owns the child and its IPC；Desktop owns Broker policy。两者只通过一个 runtime-scoped provisioner 交接。**
+> **Launcher owns the child and its IPC；Desktop owns Broker policy。两者只通过一个 Runtime-scoped Hostra provisioner 交接。**
 
 ---
 
-## 1. Physical Shape
+## 1. Frozen Physical Shape
 
 ```text
+Main current Data view
+    exact HostedRuntime R
+        ↓
 Desktop Broker
-    │ exact HostedRuntime
-    ▼
+        ↓ lookup R
 HostraRuntimeDataProvisioner
-    │ dedicated child IPC
-    ▼
+        ↓ dedicated child IPC
 Node Runner
-    │ Data WebSocket
-    ▼
+        ↓ Data WebSocket held by provisioning layer
 SubsystemDataBinding
 ```
 
-Data endpoint/ticket MUST NOT进入 `RunnerBootstrapV1`。它们是 Runtime 已运行后的 candidate-scoped material。
+Data endpoint/ticket/candidateId MUST NOT进入 `RunnerBootstrapV1`。Runtime bootstrap只负责 Runtime Control/business Runtime启动；Data material始终 late、candidate-scoped。
 
 ---
 
-## 2. Exact Hostra-private Handoff
+## 2. Exact Hostra-private Surface
 
-`@loomrealm/game-launcher-hostra` 增加一个 concrete integration type：
+`@loomrealm/game-launcher-hostra` 增加：
 
 ```ts
-interface HostraRuntimeDataProvisioner {
+export interface HostraRuntimeDataPrepareRequest {
+  readonly candidateId: string;
+  readonly endpoint: string;
+  readonly generation: number;
+  readonly dataProfile: string;
+}
+
+export interface HostraRuntimeDataProvisioner {
   prepare(
-    request: {
-      readonly candidateId: string;
-      readonly endpoint: string;
-      readonly generation: number;
-      readonly dataProfile: string;
-    },
+    request: HostraRuntimeDataPrepareRequest,
     signal: AbortSignal,
   ): Promise<void>;
 
-  commit(candidateId: string): void;
+  commit(
+    candidateId: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+
   revoke(candidateId: string): void;
 }
 ```
 
-`createHostraRuntimeHosting(...)` 增加 optional composition callback：
+`createHostraRuntimeHosting(...)` adds one optional composition hook：
 
 ```ts
 onRuntimeDataProvisioner?: (
@@ -61,51 +68,87 @@ onRuntimeDataProvisioner?: (
 ) => void;
 ```
 
-规则：
-
-```text
-callback happens before RuntimeHosting.launch(...) resolves HostedRuntime
-one HostedRuntime object → one provisioner
-provisioner becomes unusable when that exact child terminates
-```
-
-`apps/desktop` MAY用一个 private `WeakMap<HostedRuntime, HostraRuntimeDataProvisioner>` 做 exact lookup；不创建 public RuntimeDirectory/registry service。
-
-M6/headless consumers omit the callback and remain unchanged。
+No generic `RuntimeDirectory`、ProvisioningBus、RPC client or Platform registry。
 
 ---
 
-## 3. IPC Scope
+## 3. Handoff Ordering
 
-Dedicated child IPC only carries provisioning lifecycle：
+For each successful `RuntimeHosting.launch()`：
+
+```text
+spawn exact child
+→ construct HostedRuntime R
+→ construct one provisioner P bound to that exact child
+→ invoke onRuntimeDataProvisioner(R,P) if present
+→ only then resolve launch() with R
+```
+
+Rules：
+
+```text
+one HostedRuntime object → exactly one provisioner when hook present
+provisioner lifetime ≤ exact child lifetime
+fresh Runtime object → fresh provisioner
+```
+
+`apps/desktop` MAY store the relation in a private `WeakMap<HostedRuntime, HostraRuntimeDataProvisioner>`。No public map/lookup service is introduced。
+
+Headless/M6 consumers omit the callback and retain existing behavior。
+
+The callback is composition glue and MUST be synchronous/non-blocking。If a supplied callback throws, Hostra launch fails closed and the just-created child is converged/terminated before ownership is returned；this is a non-conforming product-composition setup error, not an ordinary Data candidate failure。
+
+---
+
+## 4. Dedicated IPC Scope
+
+Hostra-private child IPC expresses only Data provisioning lifecycle：
 
 ```text
 host → runner : provision(candidate, endpoint, G, P)
 runner → host : prepared(candidate)
 host → runner : commit(candidate)
+runner → host : committed(candidate)
 host → runner : revoke(candidate)
 ```
 
 It MUST NOT carry：
 
 ```text
-Frame RPC
-Runtime Control messages
+Runtime Control / Frame RPC
 business commands
 Main authority mutation
-Input/Render payload
-Game/launch manifest rewrite
+Renderer Control
+Input/Render application payload
+Game/LaunchPlan mutation
 ```
 
-Encoding/field layout stays Hostra-private；do not create a generic RPC layer。
+IPC encoding and message field layout remain Hostra-private。Do not introduce generic RPC mechanics or `@loomrealm/wire` application schema for this channel。
 
-`candidateId` is stale-work correlation only, not Data Connection authority identity。
+`candidateId` is stale-work correlation only；it is not Connection identity、generation、credential or authority。
 
 ---
 
-## 4. Runner-side Candidate State
+## 5. `prepare()` Semantics
 
-Runner provisioning implementation only needs：
+`prepare(request, signal)` resolves only after the exact Runner has：
+
+```text
+accepted the candidate as its current prepared candidate
+connected the exact local Data WebSocket endpoint
+held the resulting carrier privately
+sent prepared(candidate)
+```
+
+Before `prepare()` resolves：
+
+```text
+carrier is not role-visible
+SubsystemDataBinding does not resolve
+no child Data peer exists for this candidate
+```
+
+Runner only needs：
 
 ```text
 0..1 prepared uncommitted candidate
@@ -113,33 +156,66 @@ Runner provisioning implementation only needs：
 0..1 SubsystemDataBinding acquire waiter
 ```
 
-`prepare(...)`：
+A second prepare while another uncommitted candidate occupies the Runner prepare slot MAY reject/supersede according to the Broker's chosen candidate; it MUST NOT create multiple role-current carriers。
 
-```text
-validate fresh candidate correlation
-→ connect exact local Data WS endpoint
-→ keep carrier private
-→ report prepared
-```
-
-`commit(candidate)`：
-
-```text
-candidate must be the prepared one
-→ replace old committed-deliverable carrier if any
-→ new carrier becomes current-deliverable
-→ resolve pending SubsystemDataBinding.acquire() if one exists
-```
-
-`revoke(candidate)` closes/discards only that candidate/current instance if identity matches；late old revoke/ACK cannot affect a newer candidate。
-
-No generic state machine framework is required。
+Abort/stale candidate closes the private carrier and resolves no Binding waiter。
 
 ---
 
-## 5. `SubsystemDataBinding` Relationship
+## 6. Installation vs `commit()` Delivery
 
-Existing M8 Binding semantics remain unchanged：
+**Broker installation commit is not the IPC `commit()` call.**
+
+Frozen ordering：
+
+```text
+both physical sides prepared
+→ Broker serialized authority revalidation
+→ old current loses current status
+→ candidate B becomes sole logical current Data Connection
+→ only after that, Broker calls provisioner.commit(B,...)
+```
+
+`commit(candidateId, signal)` is a **post-install Runner delivery notification**。It resolves when the Runner has accepted that exact candidate as current-deliverable to `SubsystemDataBinding` and has replied `committed(candidate)`。
+
+This distinction removes half-install ambiguity：
+
+```text
+commit() rejects/fails after B logical install
+→ B is a real current that immediately retires
+→ Broker closes/revokes B
+→ old A is never resurrected
+→ Runtime/Frame/Main authority unchanged
+```
+
+If B is superseded/invalidated while `commit()` is pending：
+
+```text
+abort B delivery signal
+revoke(B)
+late committed(B) ACK is stale
+→ cannot re-deliver/reinstall B
+```
+
+No rollback protocol。
+
+---
+
+## 7. `revoke()` Semantics
+
+`revoke(candidateId)` is identity-safe, non-blocking and MUST NOT throw。
+
+It synchronously makes the matching Hostra provisioner candidate/current-deliverable slot unusable locally, then best-effort sends revoke/closes physical material。
+
+Late revoke/commit/prepared events for old candidate IDs cannot clear or mutate a newer candidate。
+
+If a carrier was already delivered to `@loomrealm/subsystem/host`, Broker WS closure produces normal Data peer terminal/clear semantics；there is no out-of-band role state mutation。
+
+---
+
+## 8. Existing `SubsystemDataBinding`
+
+M8 public shape is unchanged：
 
 ```text
 SubsystemDataBinding.acquire(signal)
@@ -150,69 +226,86 @@ SubsystemDataBinding.acquire(signal)
 Important：
 
 ```text
-acquire() is NOT candidate creation
-acquire() is NOT Main authority feed
-acquire() is NOT paired-install prerequisite
+acquire() != candidate creation
+acquire() != authority feed
+acquire() != paired-install prerequisite
 ```
 
-Therefore Broker MAY prepare/commit a fresh candidate while the old role peer is still current。After cutover closes the old peer, the role's existing M8 terminal→fresh-acquire path receives the already-committed replacement。
+Therefore Broker may prepare/install B while old role peer A is still current。When A is retired/closed, existing M8 terminal→fresh-acquire flow receives B if B remains current-deliverable。
 
-Abort only cancels that role waiter；it does not resurrect/authorize a candidate。
+If B was committed with no waiter, Runner holds exactly one committed-undelivered carrier until the next valid acquire or until it is revoked/retired。
 
 ---
 
-## 6. Failure Semantics
+## 9. Provisioning Failure Domain
 
-Candidate-level failures：
+Candidate-level：
 
 ```text
 WS connect failure
-stale provision
-revoke before commit
-candidate cleanup/timeout
+prepare rejection
+stale provision/revoke
+post-install commit delivery rejection
 ```
 
-→ dispose that candidate only。
+remain Data-only facts。
 
-Provisioning IPC itself terminal/unusable：
+Provisioning IPC becomes unusable while child remains alive：
 
 ```text
-no further Runner Data candidates
-→ current/pending Data material fail closed
-→ future SubsystemDataBinding acquire MAY surface one non-abort rejection
+provisioner becomes terminal for new Data work
+prepared/committed-undelivered material fails closed
+future SubsystemDataBinding acquire MAY surface one non-abort rejection
+Runtime Control remains independent
 ```
 
-Existing M8 host semantics then stop further acquire for that Runtime host lifetime。
+Actual child process exit remains the existing RuntimeHosting termination/Runtime failure fact。
 
-All above：
-
-```text
-!= Runtime Control loss
-!= Runtime failure
-!= Frame unwind
-```
-
-Actual child process exit still follows existing RuntimeHosting supervision。
+No Data provisioning failure directly causes Frame unwind or changes Main DataAuthority。
 
 ---
 
-## 7. Security / Transport
+## 10. Security / Transport
 
-Hostra Data endpoint is Host-owned local capability：
+Hostra Data endpoint is Host-owned：
 
 ```text
-127.0.0.1
-fresh one-time unguessable path/material
-single intended candidate
-finite candidate cleanup
+127.0.0.1 only
+fresh one-time unguessable candidate material
+single intended role side
+closed on abort/retire/session shutdown
 ```
 
-Game manifest cannot choose endpoint/ticket/IPC policy。
+Game/manifest cannot select Data endpoint、ticket、IPC or credential policy。
 
-Data WS application unit remains one UTF-8 JSON text message；provisioning IPC never parses Data payload。
+Data WebSocket application unit remains one UTF-8 JSON text message；provisioning IPC never parses Data application payload。
 
 ---
 
-## 8. Closure
+## 11. Qualification
 
-M9/02 is closed when Desktop composition can map exact `HostedRuntime` object → exact Hostra provisioner, and a live Runner can prepare/commit/revoke Data candidates without Runtime restart、Runtime Control RPC or Broker ownership leaking into launcher。
+Must prove：
+
+```text
+exact public Hostra provisioner names/signatures
+hook optional; M6/headless path unchanged
+hook fires before launch resolves HostedRuntime
+exact HostedRuntime object maps to exact provisioner
+callback failure converges child before launch failure returns
+Data material absent from RunnerBootstrapV1
+prepare holds carrier private and reports prepared
+Broker logical install precedes provisioner.commit delivery
+commit rejection after install retires new pair; no old resurrection
+stale/aborted commit ACK cannot install/re-deliver old candidate
+revoke non-throwing + identity-safe
+SubsystemDataBinding only waits for committed current-deliverable carrier
+provisioning IPC failure is Data-only
+child process exit remains Runtime fact
+no generic RPC/registry abstraction
+```
+
+---
+
+## 12. Frozen Closure
+
+M9/02 is implementation-closed when Desktop can deterministically map exact `HostedRuntime` → exact child provisioner, and Runner prepare/commit/revoke semantics have no unresolved installation/rollback interpretation。

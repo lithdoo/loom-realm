@@ -4,28 +4,47 @@
 > 状态：Tracking  
 > 稳定程度：Evolving  
 > 主要定义：current 分包、测试、delivery milestone 与 implementation fact-source 入口  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 最近复核：2026-09-03
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
+> 最近复核：2026-09-04
 
-实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。本文只做导航与当前实施状态摘要；精确 milestone closure 由 `phase-1-delivery-plan.md` 与对应 Frozen M/ADR 文档定义。
+实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。精确 milestone closure 由 `phase-1-delivery-plan.md` 与对应 Frozen M/ADR 文档定义。
 
 ---
 
 ## Tracking 文档
 
-- [独立分包与发布架构](./package-architecture.md) — package/publish/dependency boundary 主要事实源；
-- [仓库与目录方案](./repository-layout.md) — monorepo、Runner、provisioning 与 artifact placement；
+- [独立分包与发布架构](./package-architecture.md) — package/publish/dependency boundary；
+- [仓库与目录方案](./repository-layout.md) — monorepo、Runner、provisioning 与 app placement；
 - [测试策略](./testing-strategy.md) — package、role、vertical、cross-platform qualification；
-- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 唯一 milestone 顺序/closure 摘要。
+- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 顺序/closure 摘要。
 
-M7 具体实施顺序位于仓库根目录：
+---
+
+## Frozen Milestone Plans
 
 ```text
-M7_01_RENDERER_CONTROL_PACKAGE.md
-→ M7_02_MAIN_AUTHORITY_PROJECTION.md
-→ M7_03_RENDERER_CONTROL_HOLDER.md
-→ M7_04_VERTICAL_INTEGRATION.md
-→ M7_05_QUALIFICATION_CLOSURE.md
+M7_01 ... M7_05
+    Renderer Control logical vertical
+    ✅ implemented / qualified
+
+M8_01 ... M8_05
+    logical DataAuthority + role-facing Data seam
+    ✅ implemented / qualified
+
+M9_01 ... M9_05
+    Desktop Data Broker / Runner late provisioning physical core
+    🔒 implementation frozen / pending code
+```
+
+M9 fact chain：
+
+```text
+ADR 0028
+→ M9_01 Main→Platform full-view authority sink
+→ M9_02 exact HostedRuntime→Hostra provisioner handoff
+→ M9_03 paired WS install/cutover/post-install delivery
+→ M9_04 production vertical + Broker contract harness
+→ M9_05 unique qualification gate
 ```
 
 ---
@@ -33,110 +52,101 @@ M7_01_RENDERER_CONTROL_PACKAGE.md
 ## 当前 Implemented Baseline
 
 ```text
-M1
-    @loomrealm/foundation
-    @loomrealm/wire
-
-M2
-    @loomrealm/game-package
-
-M3
-    @loomrealm/runtime-control concrete mechanics
-
-M4
-    @loomrealm/subsystem Runtime/Frame core + /host consumer
-
-M5
-    @loomrealm/main Runtime/Frame authority
-    LogicalGameBootstrap
-    RuntimeHosting/HostedRuntime integration
-
-M6
-    @loomrealm/game-launcher-hostra
-    Hostra PREPARE + HostraLaunchPlan
-    Node Runner
-    Runtime Control WebSocket MessageCarrier
-    real Main ↔ Runner ↔ Subsystem vertical
-    Qualified Baseline 2026-09-03
-
-M7
-    @loomrealm/renderer-control concrete peers
-    @loomrealm/main Renderer authority projection/currentness
-    @loomrealm/renderer Control holder
-
-M8
-    Main ready-derived DataAuthority S/1/P
-    role-facing Data Bindings
-    Subsystem/Renderer real Data peer lifecycle
-    deterministic paired vertical
-    Qualified 2026-09-04
+M1  Foundation / Wire                         ✅
+M2  Game Package                              ✅
+M3  Runtime Control mechanics                 ✅
+M4  Subsystem Runtime/Frame core              ✅
+M5  Main Runtime/Frame authority              ✅
+M6  Hostra Runtime physical vertical          ✅ Qualified 2026-09-03
+M7  Renderer Control                          ✅ Qualified 2026-09-03
+M8  Data logical authority / role integration ✅ Qualified 2026-09-04
 ```
 
-`@loomrealm/data` package-local Core 与 M8 real role consumers 均已关闭；Input/Render business semantics 仍分别属于 M10/M11。
+M8 qualification evidence：[m8-qualification.md](./m8-qualification.md)。
 
 ---
 
 ## 当前下一实现门：M9 Desktop DataConnectionBroker
 
-M8 qualification evidence见 [`m8-qualification.md`](./m8-qualification.md)。M9 从已经关闭的 role-facing current carrier seam 开始实现 physical provisioning；不回退修改 M8 authority/currentness 语义。
+M9 is already **Implementation Frozen / Preimplementation Closed**。Implementation starts directly from ADR 0028 + root `M9_01`–`M9_05`; no additional architecture pass is expected unless a frozen reopen condition is demonstrated。
 
----
-
-## 已关闭门：M7 Renderer Control
-
-M7 已完成实现与资格关闭；下列内容保留为实现边界记录。
-
-事实源：
+Exact new public/shared surfaces：
 
 ```text
-ADR 0027
-Main ⇄ Renderer Control Protocol v1 — Active / Normative / Frozen
-M7_01 ... M7_05 — Implementation Frozen / Preimplementation Closed
-```
-
-### M7 package / role changes
-
-```text
-@loomrealm/renderer-control
-    scaffold exists
-    implement concrete asymmetric peers
-    renderer.hello id=1
-    renderer.state full Snapshot
-    exact hello preflight
-    0..1 inFlight + 0..1 pendingLatest
-
 @loomrealm/platform-ports
-    BootstrapTokenGenerator → OpaqueMaterialGenerator
-    add RendererControlBinding candidate-slot capability
+    DataConnectionAuthorityEntry
+    DataConnectionAuthorityView
+    DataConnectionAuthoritySink
 
-@loomrealm/main
-    pure Renderer authority projection
-    sessionId / AuthorityRevision
-    optional RendererControlBinding accept loop
-    one current + one candidate
-    atomic hello/currentness/replacement
+@loomrealm/main MainPlatform
+    dataConnections?: DataConnectionAuthoritySink
 
-@loomrealm/renderer
-    create minimal package
-    local {peer,snapshot}|null holder only
+@loomrealm/game-launcher-hostra
+    HostraRuntimeDataPrepareRequest
+    HostraRuntimeDataProvisioner
+    optional onRuntimeDataProvisioner hook
 ```
 
-### Existing-provider migration is part of M7
-
-所有现有 M5/M6 `MainPlatform` providers/fixtures 必须机械迁移：
-
-```text
-bootstrapTokens / BootstrapTokenGenerator
-→ opaqueMaterial / OpaqueMaterialGenerator
-```
-
-现有 Hostra Runtime-only provider继续**不提供** `rendererControl`；不得用 fake/no-op Binding满足新类型。
-
-`OpaqueMaterialGenerator` Frozen output：ASCII `1..128` bytes、fresh、安全用途至少 `128-bit` unpredictability。现有 CSPRNG实现若满足 contract可直接复用，不新增 `generate(kind)`/identity service/crypto facade。
+M8 `RendererDataBinding` / `SubsystemDataBinding` remain unchanged。
 
 ---
 
-## Current Main-facing Platform View Through M7
+## M9 Ownership Snapshot
+
+```text
+Main
+    remains only logical Data authority owner
+    projects current Renderer + exact HostedRuntime + S/G/P
+
+DataConnectionAuthoritySink
+    full replacement
+    synchronous / non-blocking / non-throwing
+
+apps/desktop
+    session-scoped DataConnectionBroker
+    two-sided Data WS opaque relay
+    RendererDataBinding realization
+    Broker contract harness
+
+@loomrealm/game-launcher-hostra
+    exact Node-child provisioning mechanics only
+    Runtime-scoped provisioner handoff
+
+Runner
+    prepare private Data WS carrier
+    post-install committed/current-deliverable carrier
+    SubsystemDataBinding delivery
+```
+
+No Broker policy is placed in launcher；no Hostra/WS code enters Core roles/protocol packages。
+
+---
+
+## M9 Installation / Failure Rule
+
+```text
+paired prepared
+→ latest Main-view revalidation
+→ old current retires
+→ new candidate becomes sole current
+→ role delivery happens after install
+```
+
+Runner `commit()` is post-install delivery ACK。
+
+```text
+new B installed
+→ Runner delivery fails
+→ B current→retired
+→ old A never resurrects
+→ Main DataAuthority / Runtime / Frame unchanged
+```
+
+No rollback/2PC/retry/currentness framework。
+
+---
+
+## Current Main-facing Platform View
 
 ```ts
 interface MainPlatform {
@@ -144,173 +154,80 @@ interface MainPlatform {
   readonly opaqueMaterial: OpaqueMaterialGenerator;
   readonly runtimeHosting: RuntimeHosting;
   readonly rendererControl?: RendererControlBinding;
+  readonly dataConnections?: DataConnectionAuthoritySink;
 }
 ```
 
-`rendererControl` 是 optional physical capability：
-
-```text
-absent
-→ no Renderer attempt
-→ Runtime/Frame Session fully valid
-
-present
-→ one armed/pending/bound candidate slot maximum
-→ protocol hello grants currentness
-```
-
-`RendererControlBinding` 不是 Renderer hosting API，不认证 token、不协商 protocol version、不决定 currentness。
+Both optional capabilities may be absent in older/headless compositions without fake providers。
 
 ---
 
-## Current Package Dependency Baseline
+## Repository Placement at M9
+
+M9 materializes the first real app workspace：
 
 ```text
-@loomrealm/platform-ports depends on:
-    @loomrealm/foundation
-
-@loomrealm/runtime-control depends on:
-    @loomrealm/foundation
-    @loomrealm/wire
-
-@loomrealm/renderer-control depends on:
-    @loomrealm/foundation
-    @loomrealm/wire
-
-@loomrealm/main depends on:
-    @loomrealm/platform-ports
-    @loomrealm/runtime-control
-    @loomrealm/renderer-control
-    @loomrealm/wire
-
-@loomrealm/renderer depends on:
-    @loomrealm/renderer-control
+apps/desktop
 ```
 
-禁止 generic RPC/schema DSL、universal Platform/service locator、Renderer Store framework、shadow Main authority 或 cross-plane currentness lease。
-
----
-
-## Authority / Protocol Split Through M7
+Root npm workspaces add：
 
 ```text
-Runtime Control
-    protocol mechanics / connection-local state
-
-Renderer Control
-    hello/version/wire/snapshot publication mechanics
-
-Main
-    Session / Runtime / Frame / Activation / InputTarget
-    Runtime credential authority
-    Renderer token/currentness/revision authority
-
-Renderer
-    local read-only accepted Main mirror
-
-Platform
-    carrier establishment / physical hosting / provisioning
+apps/*
 ```
 
-Renderer Control representation failure不能改变 Frozen Frame/Runtime business authority。
-
----
-
-## M8+ Placement
-
-```text
-M8
-    Main DataAuthority allocation/generation/profile
-    Subsystem DataPlane / SubsystemDataBinding
-    Renderer Data binding/current authority integration
-
-M9
-    Desktop DataConnectionBroker / late provisioning core
-    != full BrowserWindow composition
-
-M10
-    User Input / Interest / Producer gate
-
-M11
-    Render Update / Render Store / RenderDomain
-
-M12
-    Content role/adapters
-
-M13
-    loom.map business definition
-
-M14
-    Desktop Full E2E
-    Hostra BrowserWindow
-    physical RendererControlBinding + Renderer WS
-    Desktop Data Broker/Data WS
-    Input/Render/Content
-
-M15
-    PWA PREPARE + Worker Runner + Runtime Control MessagePort
-
-M16
-    PWA Full E2E
-    physical RendererControlBinding
-    PWA DataConnectionBroker / MessageChannel / role bindings
-    PWA Content Fetch/SW/OPFS
-    cross-platform logical equivalence
-```
-
-M14/M16 concrete Renderer Binding必须遵守 M7 Frozen candidate-slot settlement；如果真实 physical consumer证明 Frozen capability无法表达必要语义，只能按 ADR 0027 reopen，不能创建平台私有第二套 currentness/retry protocol。
+`apps/desktop` is M9 Broker/test physical composition, not yet full BrowserWindow product shell。M14 owns full Desktop product E2E。
 
 ---
 
 ## Qualification Ownership
 
 ```text
-renderer-control tests
-    wire/version/ordering/revision/bounded publication/terminal
+platform-ports
+    exact M9 shared surface / Foundation-only dependency
 
-platform-ports tests
-    OpaqueMaterialGenerator contract
-    RendererControlBinding candidate-slot lifecycle
+main
+    optional sink / full-view projection / token correlation / mutation ordering
 
-main tests
-    projection/revision/token/currentness/optional Binding
-    capability-absent + Binding-terminal paths
+game-launcher-hostra
+    provisioner handoff + Node IPC + Runner Data delivery
 
-renderer tests
-    local peer+Snapshot holder / replacement identity safety
+apps/desktop
+    Broker authority/candidate/install/retire harness
+    two-sided WS relay
+    real M9 physical vertical
 
-M7 vertical
-    production-shaped Binding path via MemoryCarrier
+M10
+    User Input fresh business publication baseline
 
-M6 regression
-    Hostra Runtime-only provider after opaqueMaterial migration
+M11
+    Render fresh business publication baseline
 
 M14/M16
-    concrete physical Renderer/Data/Content realization
+    full physical product/platform equivalence
 ```
 
-不允许用单个 giant E2E 代替 package/role evidence。
+Root gate：
+
+```text
+npm run test:m9
+```
+
+M9 does not claim full Connection-v1 cross-platform conformance or M10/M11 child business baselines。
 
 ---
 
 ## Current Implementation Order
 
 ```text
-M1 Foundation / Wire ✅
-M2 Game Package ✅
-M3 Runtime Control ✅
-M4 Subsystem Runtime/Frame ✅
-M5 Main Runtime/Frame ✅
-M6 Hostra Runtime physical vertical ✅
+M1–M8 ✅
 ↓
-M7 Renderer Control — Frozen, implement next
+M9 Desktop Data Broker / Late Provisioning   🔒 implement next
 ↓
-M8 Data role integration
-M9 Desktop Data Broker
-M10 Input
+M10 User Input
 M11 Render
 M12 Content
-M13 business map
+M13 loom.map
 M14 Desktop Full E2E
 M15 PWA Runtime vertical
 M16 PWA Full E2E / equivalence
@@ -318,28 +235,19 @@ M16 PWA Full E2E / equivalence
 
 ---
 
-## Phase 1 Acceptance Direction
+## Implementation Governance
 
-Phase 1最终必须证明：
-
-```text
-Game source
-→ matching Platform PREPARE
-→ LogicalGameBootstrap + Session-scoped Platform
-→ Main/Runner Runtime authority
-```
+Forbidden for M9 coding：
 
 ```text
-Main committed Renderer authority
-→ Frozen Renderer Control
-→ current Renderer mirror
-→ Data/Input/Render/Content consumers
+AuthorityEventBus / ObserverHub
+ConnectionRegistry / ConnectionManager
+RuntimeDirectory public service
+GenericTransaction / 2PC
+retry/backoff framework
+second Renderer currentness lease/epoch
+Data application hello/ready/resume messages
+PWA abstraction solely for symmetry
 ```
 
-```text
-Hostra physical realization
-≈ same logical application trace ≈
-PWA physical realization
-```
-
-物理 PID/Worker、WebSocket/MessagePort、IPC/Port transfer、HTTP/Fetch 可以不同；authority、protocol observable behavior 与 business result必须等价。
+Frozen changes follow ADR 0028 reopen rules。After implementation/qualification, add `m9-qualification.md` and update status/navigation; qualification evidence must not redefine the architecture。
