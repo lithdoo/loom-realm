@@ -30,6 +30,28 @@ export interface RendererControlBinding {
   ): Promise<MessageCarrier>;
 }
 
+/** Supplies the Renderer endpoint of one Platform-prepared current Data pair. */
+export interface RendererDataBinding {
+  acquire(
+    subsystemKey: string,
+    generation: number,
+    dataProfile: string,
+    signal: AbortSignal,
+  ): Promise<MessageCarrier>;
+}
+
+/** Exact authority tuple accompanying the Subsystem endpoint of a Data pair. */
+export interface SubsystemDataBindingResult {
+  readonly carrier: MessageCarrier;
+  readonly generation: number;
+  readonly dataProfile: string;
+}
+
+/** Runtime-scoped capability for acquiring a Platform-prepared current Data pair. */
+export interface SubsystemDataBinding {
+  acquire(signal: AbortSignal): Promise<SubsystemDataBindingResult>;
+}
+
 /**
  * Narrow projection of one Main-owned Launch Attempt into physical Runtime
  * hosting. It intentionally contains no executable or platform-specific data.

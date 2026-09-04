@@ -105,6 +105,9 @@ function createFakePlatform(definitions, options = {}) {
             bootstrapToken: request.bootstrapToken,
             controlProtocolVersions: [1],
           },
+          ...(options.subsystemDataBinding === undefined
+            ? {}
+            : { data: options.subsystemDataBinding(request.subsystemKey) }),
         });
         void runtime.then(
           () => {
@@ -179,6 +182,68 @@ function bootstrap(keys, initialKey, input = null) {
     subsystemKeys: Object.freeze([...keys]),
     initial: Object.freeze({ subsystemKey: initialKey, input }),
   });
+}
+
+function createPairedDataFixture(subsystemKey) {
+  const rendererWaiters = [];
+  const subsystemWaiters = [];
+  const pairs = [];
+
+  const remove = (items, item) => {
+    const index = items.indexOf(item);
+    if (index >= 0) items.splice(index, 1);
+  };
+  const wait = (items, signal, fields = {}) => {
+    const gate = deferred();
+    const waiter = { ...fields, signal, gate, detach: () => {} };
+    const abort = () => {
+      remove(items, waiter);
+      gate.reject(new Error("Data acquire aborted"));
+    };
+    if (signal.aborted) abort();
+    else {
+      signal.addEventListener("abort", abort, { once: true });
+      waiter.detach = () => signal.removeEventListener("abort", abort);
+      items.push(waiter);
+    }
+    return waiter;
+  };
+  const pump = () => {
+    while (rendererWaiters.length > 0 && subsystemWaiters.length > 0) {
+      const renderer = rendererWaiters.shift();
+      const subsystem = subsystemWaiters.shift();
+      renderer.detach();
+      subsystem.detach();
+      if (renderer.signal.aborted || subsystem.signal.aborted) continue;
+      const pair = createMemoryCarrierPair();
+      pairs.push(pair);
+      renderer.gate.resolve(pair.left);
+      subsystem.gate.resolve({
+        carrier: pair.right,
+        generation: renderer.generation,
+        dataProfile: renderer.dataProfile,
+      });
+    }
+  };
+
+  return {
+    pairs,
+    renderer: {
+      acquire(key, generation, dataProfile, signal) {
+        assert.equal(key, subsystemKey);
+        const waiter = wait(rendererWaiters, signal, { generation, dataProfile });
+        pump();
+        return waiter.gate.promise;
+      },
+    },
+    subsystem: {
+      acquire(signal) {
+        const waiter = wait(subsystemWaiters, signal);
+        pump();
+        return waiter.gate.promise;
+      },
+    },
+  };
 }
 
 function rendererLimitBootstrapKeys(sessionId) {
@@ -799,7 +864,12 @@ test("optional Renderer Binding drives a real candidate hello and committed proj
   const installed = await holder.connect({ carrier: pair.right, rendererControlToken: first.token });
   assert.equal(installed.kind, "installed");
   assert.equal(holder.current().snapshot.sessionId.startsWith("test-token-1-"), true);
-  assert.equal(holder.current().snapshot.dataAuthorities.length, 0);
+  await waitFor(() => holder.current()?.snapshot.dataAuthorities.length === 1, "ready DataAuthority projection");
+  assert.deepEqual(holder.current().snapshot.dataAuthorities, [{
+    subsystemKey: "root",
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  }]);
   assert.ok(holder.current().snapshot.revision >= 1);
   assert.deepEqual(holder.current().snapshot.runtimes.map(({ subsystemKey }) => subsystemKey), ["root"]);
 
@@ -810,6 +880,69 @@ test("optional Renderer Binding drives a real candidate hello and committed proj
   assert.equal(slots[1].signal.aborted, true);
   while (holder.current() !== null) await new Promise((resolve) => setImmediate(resolve));
   assert.equal(holder.current(), null);
+});
+
+test("M8 deterministic vertical installs real paired Data peers and recovers under generation 1", async () => {
+  const finish = deferred();
+  const controlSlots = [];
+  const data = createPairedDataFixture("root");
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem(() => ({
+        async frame() {
+          await finish.promise;
+          return completed("done");
+        },
+      })),
+    },
+    {
+      subsystemDataBinding: () => data.subsystem,
+      rendererControl: {
+        acquire(token, signal) {
+          const slot = deferred();
+          controlSlots.push({ token, signal, slot });
+          return slot.promise;
+        },
+      },
+    },
+  );
+  const result = runMain({
+    bootstrap: bootstrap(["root"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await waitFor(() => controlSlots.length > 0, "Renderer Control slot");
+  const control = createMemoryCarrierPair();
+  controlSlots[0].slot.resolve(control.left);
+  const holder = createRendererControlHolder(data.renderer);
+  assert.equal((await holder.connect({
+    carrier: control.right,
+    rendererControlToken: controlSlots[0].token,
+  })).kind, "installed");
+
+  await waitFor(() => data.pairs.length === 1, "initial paired Data installation");
+  await waitFor(
+    () => holder.current()?.snapshot.dataAuthorities.length === 1,
+    "Main DataAuthority",
+  );
+  const authorityBefore = holder.current().snapshot.dataAuthorities[0];
+  const revisionBefore = holder.current().snapshot.revision;
+  assert.deepEqual(authorityBefore, {
+    subsystemKey: "root",
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  });
+
+  data.pairs[0].lose(new Error("test Data loss"));
+  await waitFor(() => data.pairs.length === 2, "fresh same-generation pair");
+  assert.deepEqual(holder.current().snapshot.dataAuthorities[0], authorityBefore);
+  assert.equal(holder.current().snapshot.revision, revisionBefore);
+
+  finish.resolve();
+  assert.deepEqual(await result, {
+    kind: "root-outcome",
+    outcome: { type: "completed", value: "done" },
+  });
 });
 
 test("non-abort Renderer Binding rejection is Session-local and does not fail Runtime business", async () => {
@@ -894,6 +1027,13 @@ test("connected Renderer mirrors committed frame.call and frame.return through f
 
   await rootEntered.promise;
   await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "root active projection");
+  assert.deepEqual(
+    holder.current().snapshot.dataAuthorities.map(({ subsystemKey, generation, dataProfile }) => ({ subsystemKey, generation, dataProfile })),
+    [
+      { subsystemKey: "root", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
+      { subsystemKey: "child", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
+    ],
+  );
   const firstActivation = holder.current().snapshot.stack[0].activationId;
   allowCall.resolve();
   await childEntered.promise;
@@ -959,6 +1099,12 @@ test("connected Renderer mirrors fixed-point failure unwind without changing Mai
   assert.deepEqual(failed, { type: "failed", error: { code: "SUBSYSTEM_RUNTIME_FAILED" } });
   await waitFor(() => holder.current()?.snapshot.stack.length === 1 && holder.current().snapshot.stack[0].lifecycle === "active", "unwound caller projection");
   assert.equal(holder.current().snapshot.runtimes.find(({ subsystemKey }) => subsystemKey === "child").state, "failed");
+  assert.equal(holder.current().snapshot.dataAuthorities.some(({ subsystemKey }) => subsystemKey === "child"), false);
+  assert.deepEqual(holder.current().snapshot.dataAuthorities.find(({ subsystemKey }) => subsystemKey === "root"), {
+    subsystemKey: "root",
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  });
   assert.notEqual(holder.current().snapshot.stack[0].activationId, oldRootActivation);
 
   finishRoot.resolve();

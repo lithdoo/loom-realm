@@ -1,12 +1,12 @@
 # `@loomrealm/main`
 
-> 状态：**M5 Implemented Baseline / M7 Renderer Control Implemented and Qualified**
-> 阶段：M7 Renderer Control implementation closure
-> 最近复核：2026-09-03  
+> 状态：**M8 Implemented and Qualified**
+> 阶段：M8 Renderer Data authority closure
+> 最近复核：2026-09-04
 > 冻结决策：[ADR 0027](../../doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
 > M7 实施顺序：[`M7_02_MAIN_AUTHORITY_PROJECTION.md`](../../M7_02_MAIN_AUTHORITY_PROJECTION.md)
 
-`@loomrealm/main` 是 platform-neutral Main application authority runtime。M5 已实现 Runtime/Frame/Stack authority vertical；M7 在不改变该 authority model 的前提下增加 Renderer Control pure projection、revision、optional Binding candidate-slot loop 与 current Renderer participant authority。
+`@loomrealm/main` 是 platform-neutral Main application authority runtime。M8 在 M7 Renderer Control pure projection 上，从 committed Runtime-ready state 直接派生固定 generation/profile 的 DataAuthority；没有新增 Data-specific mutable authority registry。
 
 ---
 

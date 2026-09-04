@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
+import { createRendererDataPeer } from "@loomrealm/data";
 import { createMainRuntimeControlPeer } from "@loomrealm/runtime-control";
 import {
   FrameCallRejectedError,
@@ -51,7 +52,7 @@ async function waitFor(predicate, message = "condition") {
   assert.fail(`Timed out waiting for ${message}`);
 }
 
-async function createSession(factory, mainOverrides = {}, policy = defaultPolicy) {
+async function createSession(factory, mainOverrides = {}, policy = defaultPolicy, data) {
   const pair = createMemoryCarrierPair();
   const statuses = [];
   const calls = [];
@@ -100,6 +101,7 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
       bootstrapToken: "secret",
       controlProtocolVersions: [1],
     },
+    ...(data === undefined ? {} : { data }),
   });
   void runtime.catch(() => {});
 
@@ -124,6 +126,160 @@ async function createSession(factory, mainOverrides = {}, policy = defaultPolicy
     },
   };
 }
+
+function rendererDataPeer(carrier) {
+  const accept = () => ({ kind: "accepted" });
+  return createRendererDataPeer({
+    binding: {
+      carrier,
+      subsystemKey: "demo",
+      generation: 1,
+      dataProfile: "loomrealm.renderer-data/1",
+    },
+    handlers: {
+      onInputInterest: accept,
+      onRenderDomains: accept,
+      onRenderSnapshot: accept,
+      onRenderPatch: accept,
+      onRenderEvent: accept,
+    },
+  });
+}
+
+test("ready Data acquisition is non-blocking and terminal reacquires a fresh peer", async () => {
+  const requests = [];
+  const data = {
+    acquire(signal) {
+      const gate = deferred();
+      requests.push({ signal, gate });
+      return gate.promise;
+    },
+  };
+  const session = await createSession(
+    defineSubsystem(() => ({ frame: () => completed(null) })),
+    {},
+    defaultPolicy,
+    data,
+  );
+  await waitFor(() => requests.length === 1, "initial Data acquire");
+
+  const firstPair = createMemoryCarrierPair();
+  requests[0].gate.resolve({
+    carrier: firstPair.right,
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  });
+  const firstRenderer = rendererDataPeer(firstPair.left);
+  await tick();
+  await firstRenderer.close();
+  await waitFor(() => requests.length === 2, "same-authority reacquire");
+  assert.equal(requests[1].signal.aborted, false);
+
+  await shutdown(session);
+  assert.equal(requests[1].signal.aborted, true);
+});
+
+test("shutdown aborts pending Data and closes a late carrier without changing Runtime result", async () => {
+  const request = deferred();
+  let acquireSignal;
+  const session = await createSession(
+    defineSubsystem(() => ({ frame: () => completed(null) })),
+    {},
+    defaultPolicy,
+    {
+      acquire(signal) {
+        acquireSignal = signal;
+        return request.promise;
+      },
+    },
+  );
+  await waitFor(() => acquireSignal !== undefined, "pending Data acquire");
+  await shutdown(session);
+  assert.equal(acquireSignal.aborted, true);
+
+  const late = createMemoryCarrierPair();
+  request.resolve({
+    carrier: late.right,
+    generation: 1,
+    dataProfile: "loomrealm.renderer-data/1",
+  });
+  assert.deepEqual(await late.left.closed, { kind: "closed" });
+});
+
+test("trusted Data construction failure stops acquisition only for the host lifetime", async () => {
+  const malformed = createMemoryCarrierPair();
+  let acquireCount = 0;
+  const session = await createSession(
+    defineSubsystem(() => ({ frame: () => completed(null) })),
+    {},
+    defaultPolicy,
+    {
+      async acquire() {
+        acquireCount += 1;
+        return { carrier: malformed.right, generation: 1, dataProfile: "bad/profile" };
+      },
+    },
+  );
+  assert.deepEqual(await malformed.left.closed, { kind: "closed" });
+  await tick();
+  assert.equal(acquireCount, 1);
+  await shutdown(session);
+});
+
+test("Data Binding rejection does not fail Runtime and is not retried for the host lifetime", async () => {
+  let acquireCount = 0;
+  const session = await createSession(
+    defineSubsystem(() => ({ frame: () => completed(null) })),
+    {},
+    defaultPolicy,
+    {
+      async acquire() {
+        acquireCount += 1;
+        throw new Error("Data unavailable");
+      },
+    },
+  );
+  await waitFor(() => acquireCount === 1, "rejected Data acquire");
+  await tick();
+  assert.equal(acquireCount, 1);
+  await shutdown(session);
+});
+
+test("hanging Data close shares the Runtime cleanup deadline and cannot replace graceful result", async () => {
+  let readerClaimed = false;
+  const never = new Promise(() => {});
+  const carrier = {
+    closed: never,
+    async send() {},
+    messages() {
+      return {
+        [Symbol.asyncIterator]() {
+          readerClaimed = true;
+          return { next: () => never };
+        },
+      };
+    },
+    close() {
+      return never;
+    },
+  };
+  const session = await createSession(
+    defineSubsystem(() => ({ frame: () => completed(null) })),
+    {},
+    { ...defaultPolicy, terminalCleanupDeadlineMs: 10 },
+    {
+      async acquire() {
+        return {
+          carrier,
+          generation: 1,
+          dataProfile: "loomrealm.renderer-data/1",
+        };
+      },
+    },
+  );
+  await waitFor(() => readerClaimed, "Data peer reader");
+  await shutdown(session);
+});
 
 async function shutdown(session) {
   assert.deepEqual(await session.main.control.shutdown({ reason: "session-end" }), {

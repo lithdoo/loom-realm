@@ -1,8 +1,8 @@
 # `@loomrealm/subsystem`
 
-> 状态：M4 Runtime/Frame Implemented Baseline / Full Package Evolving  
-> 阶段：M4 Runtime/Frame + Host Runtime Control closure；M8/M10/M11/M12 capability slices pending  
-> 最近复核：2026-08-28  
+> 状态：M4 Runtime/Frame + M8 Data Role Integration Implemented / Full Package Evolving
+> 阶段：M8 Data peer lifecycle closure；M10/M11/M12 business capability slices pending
+> 最近复核：2026-09-04
 > 目标：为 LoomRealm 业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author SDK，并定义 Platform Runner 可消费的最小 host integration surface。  
 > 上层架构：[平台组合系统](../../doc/10-architecture/platform-composition-system.md)、[Subsystem 模型](../../doc/10-architecture/subsystem-model.md)  
 > 平台能力契约：[`@loomrealm/platform-ports`](../platform-ports/DESIGN.md)  
@@ -31,7 +31,7 @@ Package Scope
 | --- | --- | --- | --- |
 | Definition/lifecycle + Frame/Outcome | Runtime Control Profile v1 + Frame/Call v1 | Implemented Baseline / executable semantics qualified | M4 |
 | Host Runtime Control mapping | `@loomrealm/platform-ports` M4 slice + `@loomrealm/runtime-control` typed Subsystem peer | real Subsystem-side Platform Port / Runtime Control consumer qualified | M4 |
-| DataPlane + `SubsystemDataBinding` application integration | Renderer Data Profile v1 | waits for Data application profile/core implementation | M8 |
+| role-local Data peer + `SubsystemDataBinding` integration | Renderer Data Profile v1 | Implemented / lifecycle and failure isolation qualified | M8 |
 | `InputListener` + InputManager | User Input v1 | author/input behavior closes with Input protocol implementation | M10 |
 | `RenderDomain` + RenderManager | Render Update v1 | author/render behavior closes with Render protocol implementation | M11 |
 | `ContentClient` author mapping | Content capability/contracts | closes with Content implementation | M12 |

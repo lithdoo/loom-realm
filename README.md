@@ -265,7 +265,7 @@ Main committed Runtime / Stack / Activation / InputTarget / DataAuthority
 → 0..1 inFlight + 0..1 pendingLatest
 ```
 
-M7 Main implementation固定 `dataAuthorities=[]`；真实 DataAuthority generation/profile policy 从 M8 开始。
+M8 Main 已从 committed Runtime-ready state 纯投影 `S/1/loomrealm.renderer-data/1`；Data transport loss/reacquire 不改变该 authority 或 Renderer revision。
 
 Current Data Profile：
 
@@ -372,19 +372,22 @@ business → game-package / launcher / protocol packages
     M4 Subsystem + M5 Main real role consumers qualified
 
 @loomrealm/platform-ports
-    Implemented Baseline through M5
+    Implemented Baseline through M8
     M4/M5 slices qualified
     M7 OpaqueMaterialGenerator + optional RendererControlBinding implemented / qualified
+    M8 RendererDataBinding + SubsystemDataBinding implemented / qualified
 
 @loomrealm/subsystem
     M4 Runtime/Frame Core Implemented
     M4 Host Runtime Control consumer qualified
-    M8/M10/M11/M12 later capability slices pending
+    M8 optional Data peer lifecycle implemented / qualified
+    M10/M11/M12 business capability slices pending
 
 @loomrealm/main
     M5 Runtime/Frame Authority Implemented Baseline
     Main Runtime Control consumer qualified
     M7 Renderer authority projection/currentness implemented / qualified
+    M8 ready-derived DataAuthority projection implemented / qualified
 
 @loomrealm/renderer-control
     M7 concrete asymmetric peers implemented / qualified
@@ -392,10 +395,11 @@ business → game-package / launcher / protocol packages
 
 @loomrealm/renderer
     M7 minimal Control holder implemented / qualified
+    M8 per-subsystem Data reconciliation implemented / qualified
 
 @loomrealm/data
     Package-local Core Baseline Implemented
-    M8 role integration pending
+    M8 real Renderer/Subsystem role consumers qualified
 
 @loomrealm/game-launcher-hostra
     M6 Implemented / Qualified Baseline
@@ -411,8 +415,8 @@ business → game-package / launcher / protocol packages
 下一实现门：
 
 ```text
-M8 Renderer Data role integration
-    starts from the qualified M7 current Renderer participant
+M9 Desktop DataConnectionBroker / Late Provisioning Core
+    starts from the qualified M8 role-facing current Data seam
     + RendererDataAuthorityV1 wire shape
 ```
 

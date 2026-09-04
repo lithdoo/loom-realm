@@ -18,6 +18,8 @@
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@loomrealm/data": "0.1.0-alpha.0",
+    "@loomrealm/platform-ports": "0.1.0-alpha.0",
     "@loomrealm/renderer-control": "0.1.0-alpha.0"
   },
   "devDependencies": {

@@ -1,7 +1,14 @@
 import type {
   DeadlineScheduler,
   RuntimeControlBinding,
+  SubsystemDataBinding,
 } from "@loomrealm/platform-ports";
+import {
+  createSubsystemDataPeer,
+  RENDERER_DATA_PROFILE_V1,
+  type DataInboundDisposition,
+  type SubsystemDataPeer,
+} from "@loomrealm/data";
 import {
   connectSubsystemRuntimeControl,
   type RuntimeControlHandlerReply,
@@ -37,6 +44,7 @@ export interface RunSubsystemOptions {
   readonly runtimeControl: RuntimeControlBinding;
   readonly runtimePolicy: SubsystemRuntimeControlPolicy;
   readonly launch: SubsystemLaunchContext;
+  readonly data?: SubsystemDataBinding;
 }
 
 export class SubsystemRuntimeFatalError extends Error {
@@ -61,6 +69,23 @@ type TerminalCause =
 
 interface ClosableCarrier {
   close(): Promise<void>;
+}
+
+interface DataAcquireAttempt {
+  readonly controller: AbortController;
+}
+
+const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
+
+function bestEffortCloseCarrier(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  const close = (value as { close?: unknown }).close;
+  if (typeof close !== "function") return;
+  try {
+    void Promise.resolve(close.call(value)).catch(() => {});
+  } catch {
+    // Trusted integration cleanup is secondary to local currentness.
+  }
 }
 
 function deferred(): Deferred {
@@ -119,6 +144,14 @@ function validateOptions(options: RunSubsystemOptions): void {
     typeof options.runtimeControl.acquire !== "function"
   ) {
     throw new TypeError("Invalid RuntimeControlBinding");
+  }
+  if (
+    options.data !== undefined &&
+    (options.data === null ||
+      typeof options.data !== "object" ||
+      typeof options.data.acquire !== "function")
+  ) {
+    throw new TypeError("Invalid SubsystemDataBinding");
   }
   const policy = options.runtimePolicy;
   if (
@@ -196,6 +229,10 @@ class SubsystemHost {
   private carrier: ClosableCarrier | null = null;
   private terminal: TerminalCause | null = null;
   private ready = false;
+  private currentDataPeer: SubsystemDataPeer | null = null;
+  private pendingDataAcquire: DataAcquireAttempt | null = null;
+  private dataAcquisitionStopped = false;
+  private dataCleanup: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: RunSubsystemOptions) {}
 
@@ -330,6 +367,100 @@ class SubsystemHost {
     if (!(await this.sendStartupStatus({ state: "ready" }))) return;
     if (this.terminal !== null) return;
     this.ready = true;
+    this.startDataAcquire();
+  }
+
+  private startDataAcquire(): void {
+    const binding = this.options.data;
+    if (
+      binding === undefined ||
+      !this.ready ||
+      this.terminal !== null ||
+      this.dataAcquisitionStopped ||
+      this.currentDataPeer !== null ||
+      this.pendingDataAcquire !== null
+    ) {
+      return;
+    }
+
+    const attempt: DataAcquireAttempt = { controller: new AbortController() };
+    this.pendingDataAcquire = attempt;
+    void Promise.resolve()
+      .then(() => binding.acquire(attempt.controller.signal))
+      .then(
+        (result) => this.installDataAcquire(attempt, result),
+        () => this.rejectDataAcquire(attempt),
+      );
+  }
+
+  private installDataAcquire(
+    attempt: DataAcquireAttempt,
+    result: Awaited<ReturnType<SubsystemDataBinding["acquire"]>>,
+  ): void {
+    if (
+      this.pendingDataAcquire !== attempt ||
+      attempt.controller.signal.aborted ||
+      !this.ready ||
+      this.terminal !== null
+    ) {
+      bestEffortCloseCarrier((result as { carrier?: unknown } | null)?.carrier);
+      return;
+    }
+    this.pendingDataAcquire = null;
+
+    let peer: SubsystemDataPeer;
+    try {
+      if (result.dataProfile !== RENDERER_DATA_PROFILE_V1) {
+        throw new TypeError("Unsupported Renderer Data profile");
+      }
+      const accept = (): DataInboundDisposition => acceptedDataMessage;
+      peer = createSubsystemDataPeer({
+        binding: {
+          carrier: result.carrier,
+          subsystemKey: this.options.launch.subsystemKey,
+          generation: result.generation,
+          dataProfile: result.dataProfile,
+        },
+        handlers: {
+          onInputState: accept,
+          onInputEvent: accept,
+          onInputReset: accept,
+        },
+      });
+    } catch {
+      bestEffortCloseCarrier((result as { carrier?: unknown } | null)?.carrier);
+      this.dataAcquisitionStopped = true;
+      return;
+    }
+
+    if (!this.ready || this.terminal !== null || attempt.controller.signal.aborted) {
+      void peer.close().catch(() => {});
+      return;
+    }
+    this.currentDataPeer = peer;
+    void peer.terminal.then(() => {
+      if (this.currentDataPeer !== peer) return;
+      this.currentDataPeer = null;
+      this.startDataAcquire();
+    });
+  }
+
+  private rejectDataAcquire(attempt: DataAcquireAttempt): void {
+    if (this.pendingDataAcquire !== attempt) return;
+    this.pendingDataAcquire = null;
+    if (attempt.controller.signal.aborted || !this.ready || this.terminal !== null) return;
+    this.dataAcquisitionStopped = true;
+  }
+
+  private leaveDataReady(): void {
+    const attempt = this.pendingDataAcquire;
+    this.pendingDataAcquire = null;
+    attempt?.controller.abort();
+    const peer = this.currentDataPeer;
+    this.currentDataPeer = null;
+    if (peer === null) return;
+    const close = peer.close().catch(() => {});
+    this.dataCleanup = Promise.allSettled([this.dataCleanup, close]).then(() => undefined);
   }
 
   private async sendStartupStatus(
@@ -363,6 +494,7 @@ class SubsystemHost {
     if (this.terminal === null) {
       this.terminal = Object.freeze({ kind: "graceful" });
       this.ready = false;
+      this.leaveDataReady();
     }
     return {
       kind: "success",
@@ -383,6 +515,7 @@ class SubsystemHost {
     });
     this.terminal = Object.freeze({ kind: "fatal", failure: primary });
     this.ready = false;
+    this.leaveDataReady();
     this.scopeController.abort();
     this.frames?.abortAll();
     void this.finishFatal(primary);
@@ -394,7 +527,11 @@ class SubsystemHost {
     this.frames?.abortAll();
     await this.bounded(this.bestEffortStatus({ state: "stopping" }));
     await this.bounded(
-      Promise.allSettled([this.invokeShutdownHook(), this.closeControl()]),
+      Promise.allSettled([
+        this.invokeShutdownHook(),
+        this.closeControl(),
+        this.dataCleanup,
+      ]),
     );
     this.done.resolve();
   }
@@ -404,7 +541,11 @@ class SubsystemHost {
       this.bestEffortStatus({ state: "failed", error: primary }),
     );
     await this.bounded(
-      Promise.allSettled([this.invokeFailedHook(primary), this.closeControl()]),
+      Promise.allSettled([
+        this.invokeFailedHook(primary),
+        this.closeControl(),
+        this.dataCleanup,
+      ]),
     );
     this.done.reject(new SubsystemRuntimeFatalError(primary));
   }

@@ -324,18 +324,20 @@ Hostra physical Renderer Control closes by M14；PWA physical Renderer Control b
 
 ## M8：Renderer Data Profile + Data Connection Core
 
+状态：**Implemented / Qualified（2026-09-04）**。实施证据见 [`m8-qualification.md`](./m8-qualification.md)。
+
 M8 real consumers：
 
 ```text
 @loomrealm/main
-    DataAuthority allocation/generation/profile policy
+    ready-derived DataAuthority generation/profile policy
 @loomrealm/subsystem / host
-    DataPlane + SubsystemDataBinding
+    role-local Data peer + SubsystemDataBinding
 @loomrealm/renderer
     Renderer Data binding/current authority integration
 ```
 
-M8 starts from Frozen M7 current Renderer participant + RendererDataAuthorityV1 wire shape。
+M8 从 Frozen M7 current Renderer participant + RendererDataAuthorityV1 wire shape 落地；未引入 generation allocator、Broker、InputManager、RenderManager 或 DataPlane framework。
 
 ---
 

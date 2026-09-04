@@ -58,15 +58,33 @@ M6
     Runtime Control WebSocket MessageCarrier
     real Main ↔ Runner ↔ Subsystem vertical
     Qualified Baseline 2026-09-03
+
+M7
+    @loomrealm/renderer-control concrete peers
+    @loomrealm/main Renderer authority projection/currentness
+    @loomrealm/renderer Control holder
+
+M8
+    Main ready-derived DataAuthority S/1/P
+    role-facing Data Bindings
+    Subsystem/Renderer real Data peer lifecycle
+    deterministic paired vertical
+    Qualified 2026-09-04
 ```
 
-`@loomrealm/data` 已有 package-local Core baseline，但这不表示 M8 role integration 已关闭。
+`@loomrealm/data` package-local Core 与 M8 real role consumers 均已关闭；Input/Render business semantics 仍分别属于 M10/M11。
 
 ---
 
-## 当前下一实现门：M7 Renderer Control
+## 当前下一实现门：M9 Desktop DataConnectionBroker
 
-M7 已完成 preimplementation freeze，尚未完成代码实现。
+M8 qualification evidence见 [`m8-qualification.md`](./m8-qualification.md)。M9 从已经关闭的 role-facing current carrier seam 开始实现 physical provisioning；不回退修改 M8 authority/currentness 语义。
+
+---
+
+## 已关闭门：M7 Renderer Control
+
+M7 已完成实现与资格关闭；下列内容保留为实现边界记录。
 
 事实源：
 

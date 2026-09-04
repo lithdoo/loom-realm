@@ -43,6 +43,8 @@ import {
   validProtocolString,
 } from "./primitives.js";
 
+const RENDERER_DATA_PROFILE_V1 = "loomrealm.renderer-data/1" as const;
+
 type RuntimePhase =
   | "starting"
   | "connected"
@@ -1285,13 +1287,24 @@ class MainSessionRuntime {
           : {}),
       }));
     const target = this.currentInputTarget();
+    const dataAuthorities = this.bootstrap.subsystemKeys.flatMap((subsystemKey) => {
+      const record = this.runtimes.get(subsystemKey);
+      if (record === undefined || record.failure !== null || record.phase !== "ready") {
+        return [];
+      }
+      return [Object.freeze({
+        subsystemKey,
+        generation: 1,
+        dataProfile: RENDERER_DATA_PROFILE_V1,
+      })];
+    });
     return Object.freeze({
       sessionId: this.sessionId,
       revision: this.rendererRevision,
       runtimes: Object.freeze(runtimes),
       stack: Object.freeze(stack),
       inputTarget: target,
-      dataAuthorities: Object.freeze([]),
+      dataAuthorities: Object.freeze(dataAuthorities),
     });
   }
 

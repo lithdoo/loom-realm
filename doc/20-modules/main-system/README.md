@@ -1,13 +1,13 @@
 # 程序主系统模块设计
 
 > 层级：模块设计  
-> 状态：M5 Implemented Baseline / M7 Implementation Frozen / M8+ Planned  
+> 状态：M8 Implemented / Qualified；M9+ Planned
 > 稳定程度：M5 Frozen Baseline / M7 Preimplementation Closed  
 > 主要定义：Main authority/transaction/recovery、LogicalGameBootstrap、Main-facing narrow Platform view、M7 Renderer authority projection/currentness、M8+ DataAuthority evolution  
 > 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0020](../../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)  
-> 最近复核：2026-09-03
+> 最近复核：2026-09-04
 
-Main 是 Session / Runtime / Frame / Activation / InputTarget / Renderer currentness / AuthorityRevision 的 application authority。DataAuthority 也属于 Main，但真实 allocation/generation/profile policy 从 M8 才实施。
+Main 是 Session / Runtime / Frame / Activation / InputTarget / Renderer currentness / AuthorityRevision 的 application authority。M8 已把当前可达 DataAuthority 固定为 ready Runtime 的 `S/1/loomrealm.renderer-data/1` 纯投影。
 
 Main 不拥有 Game Entry document、Platform executable binding、WebSocket/MessagePort、Renderer presentation、Input Interest 或 Render Domain。
 

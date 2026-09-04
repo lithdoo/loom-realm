@@ -25,6 +25,7 @@
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@loomrealm/data": "0.1.0-alpha.0",
     "@loomrealm/platform-ports": "0.1.0-alpha.0",
     "@loomrealm/runtime-control": "0.1.0-alpha.0",
     "@loomrealm/wire": "0.1.0-alpha.0"
