@@ -1064,9 +1064,13 @@ test("non-abort Renderer Binding rejection is Session-local and does not fail Ru
 test("active Renderer replacement is atomic and stale terminal cannot clear the new holder", async () => {
   const finish = deferred();
   const slots = [];
+  const dataViews = [];
   const fake = createFakePlatform(
     { root: defineSubsystem(() => ({ async frame() { await finish.promise; return completed("done"); } })) },
-    { rendererControl: { acquire(token, signal) { const slot = deferred(); slots.push({ token, signal, slot }); return slot.promise; } } },
+    {
+      dataConnections: { replace(view) { dataViews.push(view); } },
+      rendererControl: { acquire(token, signal) { const slot = deferred(); slots.push({ token, signal, slot }); return slot.promise; } },
+    },
   );
   const result = runMain({ bootstrap: bootstrap(["root"], "root"), platform: fake.platform, policy });
   while (slots.length < 1) await new Promise((resolve) => setImmediate(resolve));
@@ -1077,6 +1081,9 @@ test("active Renderer replacement is atomic and stale terminal cannot clear the 
   const installedA = await holder.connect({ carrier: a.right, rendererControlToken: slots[0].token });
   assert.equal(installedA.kind, "installed");
   const oldPeer = installedA.current.peer;
+  await waitFor(() => dataViews.at(-1)?.rendererControlToken === slots[0].token, "Renderer A Data token");
+  const rendererRevision = holder.current().snapshot.revision;
+  const dataEntries = dataViews.at(-1).entries;
 
   while (slots.length < 2) await new Promise((resolve) => setImmediate(resolve));
   const b = createMemoryCarrierPair();
@@ -1084,6 +1091,9 @@ test("active Renderer replacement is atomic and stale terminal cannot clear the 
   const installedB = await holder.connect({ carrier: b.right, rendererControlToken: slots[1].token });
   assert.equal(installedB.kind, "installed");
   assert.notEqual(installedB.current.peer, oldPeer);
+  await waitFor(() => dataViews.at(-1)?.rendererControlToken === slots[1].token, "Renderer B Data token");
+  assert.equal(holder.current().snapshot.revision, rendererRevision, "identical Renderer payload keeps its revision");
+  assert.deepEqual(dataViews.at(-1).entries, dataEntries, "physical correlation changes without changing S/G/P");
   await oldPeer.terminal;
   assert.equal(holder.current().peer, installedB.current.peer);
 

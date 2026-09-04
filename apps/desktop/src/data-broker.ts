@@ -100,6 +100,11 @@ export class DesktopDataConnectionBroker {
     if (renderer === undefined) {
       renderer = new DesktopRendererDataBinding(this.policy);
       this.renderers.set(rendererControlToken, renderer);
+      for (const [token, stale] of this.renderers) {
+        if (token === rendererControlToken || token === this.authority?.rendererControlToken) continue;
+        stale.close();
+        this.renderers.delete(token);
+      }
       this.scheduleReconcile();
     }
     return renderer.binding;
@@ -149,25 +154,33 @@ export class DesktopDataConnectionBroker {
   }
 
   private replace(view: DataConnectionAuthorityView | null): void {
+    if (this.closed && view !== null) return;
+    const oldRendererControlToken = this.authority?.rendererControlToken;
+    this.authority = view;
+    const retired: Candidate[] = [];
     try {
-      if (this.closed && view !== null) return;
-      this.authority = view;
       for (const slot of this.slots.values()) {
         if (slot.pending !== null && !this.authorized(slot.pending)) {
-          const stale = slot.pending;
+          retired.push(slot.pending);
           slot.pending = null;
-          this.retire(stale);
         }
         if (slot.current !== null && !this.authorized(slot.current)) {
-          const stale = slot.current;
+          retired.push(slot.current);
           slot.current = null;
-          this.retire(stale);
         }
       }
-      this.scheduleReconcile();
     } catch {
-      // The sink contract never lets adapter cleanup failure escape Main's lane.
+      // Logical invalidation above is synchronous; cleanup remains best effort.
     }
+    for (const candidate of retired) {
+      try { this.retire(candidate); } catch { candidate.completion.resolve(false); }
+    }
+    if (oldRendererControlToken !== undefined && oldRendererControlToken !== view?.rendererControlToken) {
+      const stale = this.renderers.get(oldRendererControlToken);
+      try { stale?.close(); } catch {}
+      this.renderers.delete(oldRendererControlToken);
+    }
+    try { this.scheduleReconcile(); } catch {}
   }
 
   private authorityEntry(subsystemKey: string): DataConnectionAuthorityEntry | undefined {
@@ -309,7 +322,6 @@ export class DesktopDataConnectionBroker {
     }
     candidate.state = "retired";
     candidate.controller.abort(new Error("Data Connection retired"));
-    candidate.renderer.revoke(candidate.candidateId);
     this.cleanupRetired(candidate);
     candidate.completion.resolve(false);
   }

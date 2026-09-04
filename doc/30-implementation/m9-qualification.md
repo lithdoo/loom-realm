@@ -33,6 +33,7 @@ apps/desktop
 ## Authority Evidence
 
 - Main tests prove initial `replace(null)`, current-Renderer-only non-null publication, detached frozen snapshots, deterministic entries, exact `HostedRuntime` reference identity and terminal null.
+- Main replacement tests prove an identical Renderer-visible revision can retain the same `S/G/P` payload while the independent Data authority token changes from the retired Renderer to the new current Renderer.
 - The accepted Renderer token remains one-shot authentication material; Main retains only the current value as inert correlation and includes it in live material duplicate defense.
 - Sink projection runs in the existing serialized mutation lane and does not independently bump Renderer revision.
 - Desktop replacement updates in-memory authority and makes stale pending/current material unusable before asynchronous socket/IPC cleanup.
@@ -40,7 +41,9 @@ apps/desktop
 ## Provisioning and Installation Evidence
 
 - Hostra tests prove optional hook compatibility, exact Runtime/provisioner handoff before launch resolution, child convergence on callback failure, bounded prepared/current-deliverable state and finite committed-undelivered buffering.
+- Hostra IPC tests prove `child.send() === false` is treated only as flow control, while callback errors/disconnect remain authoritative; Runner IPC disconnect closes Data-only prepared/current material and rejects pending/future Data acquisition.
 - Desktop harness proves exact T/R/S/G/P revalidation, one pending owner, explicit stale revoke, pre-install traffic rejection, sole-current cutover and whole-pair retirement.
+- Desktop qualification includes the complete proactive same-generation `A current -> B prepared -> B sole current` trace and closes/deletes retired Renderer-token bindings.
 - Runner `commit()` is invoked only after Broker logical install. Its failure retires the newly installed pair; the old pair is never resurrected.
 - Relay paths carry opaque UTF-8 text without parsing Data application JSON. Buffer overflow retires/disposes instead of accumulating or migrating old traffic.
 
@@ -64,5 +67,7 @@ npm run test:packages
 npm run docs:build
 npm run docs:check-links
 ```
+
+`.github/workflows/m9.yml` runs `npm run test:m9` on every pull request and `main` push for the supported Node 20 and Node 24 lines.
 
 The frozen M9 plans and ADR 0028 remain the semantic source; this record adds implementation evidence only.

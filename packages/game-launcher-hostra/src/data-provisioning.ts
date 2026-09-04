@@ -141,9 +141,10 @@ export function createHostraRuntimeDataProvisioner(
   const send = (message: HostToRunnerDataMessage): boolean => {
     if (terminal || !child.connected) return false;
     try {
-      return child.send(message, (error) => {
+      child.send(message, (error) => {
         if (error != null) terminate();
       });
+      return true;
     } catch {
       terminate();
       return false;

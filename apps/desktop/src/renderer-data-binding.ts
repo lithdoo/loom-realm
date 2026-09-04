@@ -42,6 +42,7 @@ function sameTuple(left: AuthorityTuple, right: AuthorityTuple): boolean {
 export class DesktopRendererDataBinding {
   readonly binding: RendererDataBinding;
   private readonly slots = new Map<string, Slot>();
+  private closed = false;
 
   constructor(private readonly policy: DataBufferPolicy) {
     this.binding = Object.freeze({
@@ -65,6 +66,7 @@ export class DesktopRendererDataBinding {
 
   private acquire(tuple: AuthorityTuple, signal: AbortSignal): Promise<MessageCarrier> {
     if (signal.aborted) return Promise.reject(signal.reason);
+    if (this.closed) return Promise.reject(new Error("Renderer Data binding closed"));
     const slot = this.slot(tuple.subsystemKey);
     if (slot.waiter !== null) return Promise.reject(new Error("Renderer Data acquire already pending"));
     if (slot.current !== null && !slot.current.delivered && sameTuple(slot.current, tuple)) {
@@ -94,6 +96,7 @@ export class DesktopRendererDataBinding {
     tuple: AuthorityTuple,
     signal: AbortSignal,
   ): Promise<void> {
+    if (this.closed) throw new Error("Renderer Data binding closed");
     const slot = this.slot(tuple.subsystemKey);
     if (slot.prepared !== null) throw new Error("Renderer Data candidate already prepared");
     const carrier = await connectBoundedDataCarrier(endpoint, signal, this.policy);
@@ -110,6 +113,7 @@ export class DesktopRendererDataBinding {
   }
 
   commit(candidateId: string, tuple: AuthorityTuple): boolean {
+    if (this.closed) return false;
     const slot = this.slot(tuple.subsystemKey);
     const prepared = slot.prepared;
     if (prepared === null || prepared.candidateId !== candidateId || !sameTuple(prepared, tuple)) return false;
@@ -142,6 +146,8 @@ export class DesktopRendererDataBinding {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     for (const slot of this.slots.values()) {
       if (slot.prepared !== null) void slot.prepared.carrier.close().catch(() => {});
       if (slot.current !== null) void slot.current.carrier.close().catch(() => {});
@@ -152,5 +158,6 @@ export class DesktopRendererDataBinding {
       waiter?.detachAbort();
       waiter?.reject(new Error("Renderer Data binding closed"));
     }
+    this.slots.clear();
   }
 }

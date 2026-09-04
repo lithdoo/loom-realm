@@ -52,9 +52,17 @@ interface AcquireWaiter {
   readonly detachAbort: () => void;
 }
 
-function send(message: RunnerToHostDataMessage): void {
+interface RunnerDataProvisioningIpc {
+  readonly send?: (message: RunnerToHostDataMessage) => boolean;
+  on(event: "message", listener: (value: unknown) => void): unknown;
+  on(event: "disconnect", listener: () => void): unknown;
+  off(event: "message", listener: (value: unknown) => void): unknown;
+  off(event: "disconnect", listener: () => void): unknown;
+}
+
+function send(ipc: RunnerDataProvisioningIpc, message: RunnerToHostDataMessage): void {
   try {
-    process.send?.(message);
+    ipc.send?.(message);
   } catch {
     // IPC terminal is Data-only; the Runtime Control path remains independent.
   }
@@ -87,11 +95,13 @@ function connect(endpoint: string, signal: AbortSignal): Promise<MessageCarrier>
   });
 }
 
-export function createRunnerDataProvisioning(): {
+export function createRunnerDataProvisioning(
+  ipc: RunnerDataProvisioningIpc = process as unknown as RunnerDataProvisioningIpc,
+): {
   readonly binding: SubsystemDataBinding;
   close(): void;
 } | null {
-  if (typeof process.send !== "function") return null;
+  if (typeof ipc.send !== "function") return null;
   let prepared: PreparedCandidate | null = null;
   let current: CurrentCarrier | null = null;
   let waiter: AcquireWaiter | null = null;
@@ -138,7 +148,7 @@ export function createRunnerDataProvisioning(): {
     }
     if (message.type === "provision") {
       if (prepared !== null) {
-        send(Object.freeze({ type: "rejected", candidateId: message.candidateId, operation: "prepare" }));
+        send(ipc, Object.freeze({ type: "rejected", candidateId: message.candidateId, operation: "prepare" }));
         return;
       }
       const candidate: PreparedCandidate = {
@@ -159,12 +169,12 @@ export function createRunnerDataProvisioning(): {
           void carrier.closed.then(() => {
             if (prepared === candidate) prepared = null;
           });
-          send(Object.freeze({ type: "prepared", candidateId: candidate.candidateId }));
+          send(ipc, Object.freeze({ type: "prepared", candidateId: candidate.candidateId }));
         },
         () => {
           if (prepared === candidate) prepared = null;
           if (!candidate.controller.signal.aborted) {
-            send(Object.freeze({ type: "rejected", candidateId: candidate.candidateId, operation: "prepare" }));
+            send(ipc, Object.freeze({ type: "rejected", candidateId: candidate.candidateId, operation: "prepare" }));
           }
         },
       );
@@ -176,7 +186,7 @@ export function createRunnerDataProvisioning(): {
       candidate.candidateId !== message.candidateId ||
       candidate.carrier === null
     ) {
-      send(Object.freeze({ type: "rejected", candidateId: message.candidateId, operation: "commit" }));
+      send(ipc, Object.freeze({ type: "rejected", candidateId: message.candidateId, operation: "commit" }));
       return;
     }
     prepared = null;
@@ -193,9 +203,23 @@ export function createRunnerDataProvisioning(): {
     current = owned;
     observeCurrent(owned);
     deliver();
-    send(Object.freeze({ type: "committed", candidateId: candidate.candidateId }));
+    send(ipc, Object.freeze({ type: "committed", candidateId: candidate.candidateId }));
   };
-  process.on("message", onMessage);
+
+  const terminate = () => {
+    if (terminal) return;
+    terminal = true;
+    ipc.off("message", onMessage);
+    ipc.off("disconnect", terminate);
+    if (prepared !== null) revoke(prepared.candidateId);
+    if (current !== null) revoke(current.candidateId);
+    const acquiring = waiter;
+    waiter = null;
+    acquiring?.detachAbort();
+    acquiring?.deferred.reject(new Error("Runtime Data provisioning is terminal"));
+  };
+  ipc.on("message", onMessage);
+  ipc.on("disconnect", terminate);
 
   const binding: SubsystemDataBinding = Object.freeze({
     acquire(signal: AbortSignal) {
@@ -225,16 +249,6 @@ export function createRunnerDataProvisioning(): {
 
   return Object.freeze({
     binding,
-    close() {
-      if (terminal) return;
-      terminal = true;
-      process.off("message", onMessage);
-      if (prepared !== null) revoke(prepared.candidateId);
-      if (current !== null) revoke(current.candidateId);
-      const acquiring = waiter;
-      waiter = null;
-      acquiring?.detachAbort();
-      acquiring?.deferred.reject(new Error("Runtime Data provisioning is terminal"));
-    },
+    close: terminate,
   });
 }

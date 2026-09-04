@@ -224,6 +224,48 @@ test("post-install Runner commit failure retires B and never resurrects A", asyn
   assert.ok(provisioner.revokes.includes("candidate-2"));
 });
 
+test("proactive same-generation replacement cuts over from A to B exactly once", async (t) => {
+  const { broker, hosted, provisioner, binding } = setup();
+  t.after(() => broker.close());
+  const firstAcquire = binding.acquire(
+    "root", 1, "loomrealm.renderer-data/1", new AbortController().signal,
+  );
+  broker.sink.replace(authority("renderer-a", hosted));
+  const a = await firstAcquire;
+  await waitFor(() => provisioner.current?.request.candidateId === "candidate-1", "A current");
+
+  assert.equal(await broker.requestCandidate("root"), true);
+  assert.equal(provisioner.current.request.candidateId, "candidate-2");
+  const b = await binding.acquire(
+    "root", 1, "loomrealm.renderer-data/1", new AbortController().signal,
+  );
+  assert.notEqual(b, a);
+  assert.ok(["closed", "lost"].includes((await a.closed).kind));
+  assert.equal(provisioner.current.request.generation, 1);
+  assert.equal(provisioner.current.request.dataProfile, "loomrealm.renderer-data/1");
+  assert.equal(provisioner.revokes.filter((id) => id === "candidate-1").length, 1);
+
+  const bClosedEarly = await Promise.race([
+    b.closed.then(() => true),
+    new Promise((resolve) => setTimeout(() => resolve(false), 30)),
+  ]);
+  assert.equal(bClosedEarly, false, "B remains the sole current carrier");
+});
+
+test("Renderer authority transition closes and forgets the retired token binding", async (t) => {
+  const { broker, hosted, provisioner, binding: bindingA } = setup();
+  t.after(() => broker.close());
+  broker.sink.replace(authority("renderer-a", hosted));
+  await waitFor(() => provisioner.current !== null, "Renderer A current");
+  const bindingB = broker.rendererDataBinding("renderer-b");
+  broker.sink.replace(authority("renderer-b", hosted));
+  await assert.rejects(
+    bindingA.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal),
+    /closed/,
+  );
+  await bindingB.acquire("root", 1, "loomrealm.renderer-data/1", new AbortController().signal);
+});
+
 test("finite role-undelivered buffer overflow retires the whole pair and permits fresh same-generation install", async (t) => {
   const { broker, hosted, provisioner, binding } = setup({
     bufferPolicy: { maxMessages: 1, maxBytes: 128 },
