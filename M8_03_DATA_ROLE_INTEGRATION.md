@@ -6,17 +6,17 @@
 > 最近复核：2026-09-04  
 > 前置：[M8 / 01](M8_01_MAIN_DATA_AUTHORITY.md) → [M8 / 02](M8_02_DATA_BINDINGS.md)  
 > 正式契约：[Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md) · [`@loomrealm/data` design](packages/data/DESIGN.md)  
-> 目标：让 `@loomrealm/subsystem/host` 与 `@loomrealm/renderer` 成为 `@loomrealm/data` 的真实 role consumers，只关闭 current Data lifetime/currentness；不提前实现 M10 InputManager、M11 RenderManager 或 Store framework。
+> 目标：让 `@loomrealm/subsystem/host` 与 `@loomrealm/renderer` 成为 `@loomrealm/data` 的真实 role consumers，只关闭 current Data peer lifecycle/currentness；不提前实现 M10 InputManager、M11 RenderManager 或 Store framework。
 
-> **M8 role state只回答“哪个 Data peer当前可用、是否还能建立新的 peer”。Data 不得反向成为 Runtime/Frame/Control authority。**
+> **Role 只拥有本地 peer currentness。Platform/Data Connection Core owns logical Connection installation/retirement；role 通过 clear local identity + close peer 表达自己不再使用该 carrier。**
 
 ---
 
 ## 1. Subsystem Host Construction
 
-`RunSubsystemOptions` adds optional：
+`RunSubsystemOptions` adds exactly one optional field：
 
-```text
+```ts
 data?: SubsystemDataBinding
 ```
 
@@ -27,35 +27,35 @@ Subsystem Data local facts only：
 ```text
 currentDataPeer | null
 0..1 pending acquire
-Data acquisition terminal fact
+acquisitionStopped: boolean
 ```
 
-The terminal fact MAY be expressed by control flow/boolean；no DataPlane manager/state-machine framework is required。
+No DataPlane manager/state-machine framework is required；these may remain private fields/control flow inside the existing host。
 
 ---
 
 ## 2. Subsystem Ready / Acquire
 
-After the host becomes locally ready, if Binding exists and acquisition is healthy：
+After the host becomes locally ready, if Binding exists and acquisition is not stopped：
 
 ```text
 start data.acquire(signal)
 → Runtime Control reader / Frame handling continues
 → resolve {carrier,G,P}
-→ recheck host is still ready/current and acquire is still current
-→ construct DataCurrentBindingV1 using launch.subsystemKey
+→ recheck host still ready/current and acquire still current
+→ construct DataCurrentBindingV1 with launch.subsystemKey
 → createSubsystemDataPeer(...)
-→ atomically install as current Data peer
+→ install peer as local current
 ```
 
-Data provisioning MUST NOT be awaited by Runtime Control reader or Frame processing。
+Data provisioning MUST NOT be awaited by Runtime Control or Frame processing。
 
 Late/stale resolution：
 
 ```text
 host no longer ready/current
 OR acquire superseded/aborted
-→ do not construct/install current peer
+→ install nothing
 → best-effort close returned carrier
 ```
 
@@ -66,68 +66,82 @@ OR acquire superseded/aborted
 Current peer terminal：
 
 ```text
-if terminal peer === current peer
-→ clear current synchronously
+if terminal peer === currentDataPeer
+→ clear currentDataPeer synchronously
 → Runtime/Frame authority unchanged
-→ if host still ready AND acquisition healthy:
+→ if host still ready AND acquisition not stopped:
      start at most one fresh acquire
 ```
 
 Old/stale peer terminal cannot clear a replacement peer。
 
-Fresh acquire under the same `S/G/P` creates a fresh `@loomrealm/data` peer；no old queue/replay/publication cursor is migrated。
+Fresh same-authority carrier always creates a fresh `@loomrealm/data` peer；no old queue/replay/publication cursor is migrated。
 
 ---
 
 ## 4. Subsystem Leaves Ready
 
-Graceful shutdown, fatal Runtime terminal, or any host transition that makes the Runtime no longer application-ready fixes：
+Graceful shutdown、fatal Runtime terminal or any host transition that makes the Runtime no longer application-ready：
 
 ```text
-mark local Data non-current synchronously
-→ abort pending Data acquire
-→ clear current Data peer identity
-→ request current peer close/retirement best-effort
-→ issue no fresh acquire
+clear currentDataPeer identity synchronously
+→ abort pending acquire
+→ best-effort close former current peer
+→ start no fresh acquire
 ```
 
-A late acquire result after this boundary is closed/disposed and never installed。
+A late acquire result after this boundary is best-effort closed and never installed。
 
-Cleanup uses the **existing** Subsystem terminal cleanup budget：
+Cleanup reuses：
 
 ```text
 runtimePolicy.terminalCleanupDeadlineMs
 ```
 
-M8 MUST NOT add `dataCleanupDeadlineMs` or another cleanup scheduler。Data cleanup MAY join existing bounded `finishGraceful` / `finishFatal` work；cleanup failure/time limit is secondary and MUST NOT replace the already-latched Runtime terminal result。
+M8 MUST NOT add a Data-specific deadline/scheduler。Data cleanup MAY join existing bounded graceful/fatal cleanup；failure/time limit is secondary and MUST NOT replace the already-latched Runtime result。
+
+Role wording is intentionally `clear + close`；the surrounding Platform/Data Connection lifecycle owns the resulting Connection retirement semantics。
 
 ---
 
-## 5. Subsystem Trusted-integration Failure
+## 5. Subsystem Acquire / Construction Failure
 
-If Binding resolution succeeds but `DataCurrentBindingV1` / `createSubsystemDataPeer(...)` construction fails before installation：
+Surfaced non-abort Binding rejection：
 
 ```text
-no Data peer becomes current
+acquisitionStopped = true
+→ no future acquire for this host lifetime
+→ current peer, if already present, is not closed solely for this fact
+→ Runtime/Frame unchanged
+```
+
+If Binding resolves but `DataCurrentBindingV1` / `createSubsystemDataPeer(...)` construction fails before installation：
+
+```text
+install nothing
 → best-effort close returned carrier
-→ latch Subsystem Data acquisition locally terminal for this host lifetime
-→ no busy retry / no future acquire
-→ Runtime/Frame authority unchanged
+→ acquisitionStopped = true
+→ no future acquire
+→ Runtime/Frame unchanged
 ```
 
-This is a local integration/capability failure, not evidence of Runtime failure or remote protocol violation。
+This is local integration/capability failure, not Runtime failure or remote protocol violation。
 
 ---
 
-## 6. Renderer Construction Seam
+## 6. Renderer Public Construction Seam
 
-M8 extends the existing Control holder with exactly one construction-time optional Binding：
+M8 freezes the public factory signature exactly：
 
-```text
-createRendererControlHolder(data?: RendererDataBinding)
+```ts
+createRendererControlHolder(
+  data?: RendererDataBinding,
+): RendererControlHolder
 ```
 
-An equivalent one-field options object MAY be used。Forbidden：
+No alternative public options object is introduced in M8。
+
+Forbidden：
 
 ```text
 mutable registerDataBinding()
@@ -136,33 +150,46 @@ RendererPlatform / RendererServices
 Data Store / EventBus
 ```
 
-Renderer Data facts：
+Renderer local facts per `subsystemKey`：
 
 ```text
-one Renderer-wide Data acquisition terminal fact
-
-per subsystemKey:
-    0..1 current RendererDataPeer
-    0..1 pending acquire
+0..1 current RendererDataPeer
+0..1 pending acquire
+0..1 failed desired authority identity
 ```
+
+Failed desired identity is exactly：
+
+```text
+current Control peer identity + S/G/P
+```
+
+There is no Renderer-wide Data acquisition terminal state。
 
 ---
 
 ## 7. Renderer Reconciliation
 
-After each accepted whole Control Snapshot is installed：
+After each accepted whole Control Snapshot is installed, for each subsystem slot：
 
 ```text
-installed peer has no exact current S/G/P
-→ retire it
+current peer has no exact desired S/G/P
+→ clear local current identity
+→ best-effort close old peer
 
-pending acquire has no exact current S/G/P
+pending acquire has no exact desired S/G/P
 → abort it
 
-exact current S/G/P already installed/pending
+failed desired identity no longer matches current Control peer + S/G/P
+→ clear failure fact
+
+exact desired S/G/P already current/pending
 → keep
 
-current authority exists + no peer/pending + acquisition healthy
+exact desired S/G/P has matching failure fact
+→ do not retry
+
+current authority exists + no current/pending/failure
 → start acquire(S,G,P)
 ```
 
@@ -170,71 +197,89 @@ Acquire resolution MUST recheck：
 
 ```text
 same Control peer is still locally current
-AND exact S/G/P is still in current Snapshot
-AND this acquire is still the current pending attempt
+AND exact S/G/P is still desired
+AND this acquire is still the slot's current pending attempt
 AND signal was not aborted
 ```
 
-Failure of any recheck：close returned carrier；never install。
+Failure of any recheck：best-effort close returned carrier；never install。
 
 Reconciliation MUST be non-blocking：
 
 ```text
 install Control Snapshot
-→ compute desired Data changes synchronously
-→ abort/retire stale work
+→ compute local Data changes synchronously
+→ abort stale pending / clear+close stale peer
 → start missing acquire work
-→ return to Control state consumption
+→ return to Control consumption
 ```
 
-Control consumption MUST NOT await Data acquire、peer close or physical provisioning。Data can never backpressure Renderer Control authority updates。
+Control consumption MUST NOT await Data acquire、peer close or physical provisioning。
 
 ---
 
-## 8. Renderer Binding / Construction Terminal
+## 8. Renderer Acquire / Construction Failure
 
-First surfaced non-abort `RendererDataBinding.acquire` rejection from any subsystem：
-
-```text
-latch Renderer-wide Data acquisition terminal
-→ abort all other pending Data acquires
-→ start no future Data acquire for any subsystem
-→ keep already-current Data peers solely with respect to this failure
-→ keep Renderer Control current
-```
-
-Likewise, if a resolved carrier cannot construct a valid `DataCurrentBindingV1` / `RendererDataPeer`：
+For one current desired identity `(Control peer,S,G,P)`：
 
 ```text
-close returned carrier
-→ install nothing
-→ latch Renderer-wide Data acquisition terminal
-→ abort all other pending acquires
-→ no future acquire
-→ unrelated already-current Data peers remain current
-→ Renderer Control remains current
+acquire rejects non-abort
+→ record failed desired identity for this slot
+→ no busy retry for this same desired identity
+→ other subsystem slots unchanged
+→ Renderer Control unchanged
 ```
 
-No retry manager / Binding error hierarchy is added。
+Resolved carrier fails `DataCurrentBindingV1` / `createRendererDataPeer(...)` construction：
+
+```text
+install nothing
+→ best-effort close carrier
+→ record the same slot-local failed desired identity
+→ other slots unchanged
+→ Renderer Control unchanged
+```
+
+When Control peer or exact S/G/P changes, the old failure fact is stale and cleared by reconciliation；a new desired identity may attempt once。
+
+No global failure manager or error hierarchy is added。
 
 ---
 
-## 9. Control Parent Authority
+## 9. Renderer Peer Terminal / Fresh Acquire
+
+Current Data peer terminal：
+
+```text
+if terminal peer === slot current peer
+→ clear local current identity
+→ if exact authority still desired
+   AND no matching failed desired identity
+   AND no pending acquire:
+     start one fresh acquire
+```
+
+Data peer terminal does not clear Renderer Control or mutate Main authority。
+
+---
+
+## 10. Control Parent Authority
 
 Current Renderer Control peer replacement / terminal：
 
 ```text
 abort all pending Data acquires
-retire/close all current Renderer Data peers
-clear all local Data current records
+→ clear all local Data current identities
+→ best-effort close all former current Data peers
+→ clear all failed desired identities
 ```
 
-Old Control peer late Snapshot/terminal/acquire resolution cannot affect new Control state。
+Old Control peer late Snapshot/terminal/acquire result cannot affect the new Control state。
 
 Reverse direction is forbidden：
 
 ```text
-Data peer terminal / Binding terminal / peer construction failure
+Data peer terminal / acquire rejection / peer construction failure
 ✗ clear Renderer Control
 ✗ mutate Main Runtime/Frame authority
 ✗ synthesize DataAuthority replacement
@@ -242,7 +287,7 @@ Data peer terminal / Binding terminal / peer construction failure
 
 ---
 
-## 10. `@loomrealm/data` Consumption / Child Boundary
+## 11. `@loomrealm/data` / Child Boundary
 
 Roles MUST directly use：
 
@@ -253,7 +298,7 @@ createRendererDataPeer(...)
 
 MUST NOT copy JSON/profile validation、single-reader dispatch、serialized writer or terminal mechanics。
 
-M8 closes Data peer lifecycle only。It does NOT implement or qualify：
+M8 does NOT implement/qualify：
 
 ```text
 Input Interest business state
@@ -262,13 +307,13 @@ Render Domain/Store/revision business state
 fresh Input/Render baseline materialization
 ```
 
-M8 vertical sends no child application traffic as closure evidence。Any minimal package-internal handler glue needed to instantiate peers MUST create no author-facing/business state and is not a conformance claim；M10/M11 replace/complete child role semantics before concrete product Data capability is qualified。
+M8 vertical sends no child application traffic as closure evidence。Any minimal internal handler glue required to instantiate peers creates no author-facing/business state and is not a Profile conformance claim。
 
-No InputManager / RenderManager / registry/store placeholder abstraction is introduced in M8。
+No InputManager / RenderManager / registry/store placeholder abstraction is introduced。
 
 ---
 
-## 11. Dependencies
+## 12. Dependencies
 
 ```text
 @loomrealm/subsystem/host depends on:
@@ -282,45 +327,45 @@ No InputManager / RenderManager / registry/store placeholder abstraction is intr
     @loomrealm/data
 ```
 
-No role→Main or role→concrete Hostra/PWA dependency。
+No role→Main or role→concrete Platform dependency。
 
 ---
 
-## 12. Qualification
+## 13. Qualification
 
-Subsystem must prove：
+Subsystem：
 
 ```text
 Binding absent keeps Runtime/Frame path green
-pending Data acquire does not block Runtime Control/Frame
+pending acquire does not block Runtime Control/Frame
 ready + Binding installs one real Data peer
-stale acquire cannot install
-peer terminal is identity-safe and does not fail Runtime/Frame
+stale acquire closes carrier and cannot install
+peer terminal identity-safe; Data loss does not fail Runtime/Frame
 same-generation fresh carrier creates fresh peer
-leaving ready aborts pending + retires current
-terminal Data cleanup reuses terminalCleanupDeadlineMs
-Data cleanup failure never replaces graceful/fatal Runtime result
-trusted-integration construction failure closes carrier, latches acquisition terminal, no Runtime/Frame failure
+leaving ready clears local current + aborts pending + closes peer
+cleanup reuses terminalCleanupDeadlineMs
+cleanup failure never replaces graceful/fatal Runtime result
+Binding rejection/construction failure stops future acquire only for this host lifetime
 ```
 
-Renderer must prove：
+Renderer：
 
 ```text
-construction-time optional Binding only
-Snapshot add/remove/G1→G2 reconciliation
-reconciliation never blocks later Control states
-late stale acquire closed
-Control A→B retires all A Data
-old terminal cannot affect new peer
+exact public createRendererControlHolder(data?) signature
+Snapshot add/remove reconciliation
+pending acquire never blocks later Control state
+late stale acquire cannot install
+per-slot acquire rejection suppresses only same Control-peer+S/G/P retry
+S1 acquire failure does not alter independent S2 current/pending work
+Control/authority change clears obsolete failure fact and permits fresh attempt
+Control A→B clears/closes all A Data and slot failure facts
+old terminal/result cannot affect new peer
 Data terminal alone keeps Control current
-one surfaced Binding rejection aborts all pending and blocks all future acquire
-Binding terminal leaves already-current peers and Control intact solely for that cause
-peer construction failure has the same acquisition-terminal isolation
-Binding absent keeps M7 holder behavior
+Binding absent keeps M7 behavior
 ```
 
 ---
 
-## 13. Frozen Closure
+## 14. Frozen Closure
 
-M8/03 is implementation-ready when Subsystem and Renderer have deterministic acquire/install/retire/teardown/failure semantics with no unresolved lifecycle policy and no premature Input/Render framework。
+M8/03 is implementation-ready when Subsystem and Renderer have direct acquire/install/clear/close/failure semantics with no unresolved lifecycle policy, no cross-slot failure coupling, and no premature Input/Render framework。

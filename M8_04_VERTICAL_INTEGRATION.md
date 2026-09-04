@@ -6,9 +6,9 @@
 > 最近复核：2026-09-04  
 > 前置：[M8 / 01](M8_01_MAIN_DATA_AUTHORITY.md) → [M8 / 02](M8_02_DATA_BINDINGS.md) → [M8 / 03](M8_03_DATA_ROLE_INTEGRATION.md)  
 > 正式契约：[Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md)  
-> 目标：用 deterministic paired Data Bindings + MemoryCarrier 跑通真实 Main authority → Renderer Control → role-facing current Data seam → real `@loomrealm/data` peers；证明 M8 authority/currentness/lifecycle/failure semantics，不实现 M9 physical Broker。
+> 目标：用 deterministic paired Bindings + MemoryCarrier 跑通真实 Main authority → Renderer Control → role-facing current Data seam → real `@loomrealm/data` peers；只证明 M8 当前可达的 authority/currentness/lifecycle/failure semantics。
 
-> **Fixture only simulates “Platform already has a current-deliverable pair”. Main authority、Renderer Control、role reconciliation 和 Data peers必须走 production code path。**
+> **Fixture only simulates “Platform already has a current-deliverable pair”. Main authority、Renderer Control、role reconciliation 与 Data peers必须走 production path。**
 
 ---
 
@@ -16,10 +16,10 @@
 
 ```text
 real Main Session
-→ Runtime lifecycle commit
-→ Main DataAuthority(S,G,P)
+→ Runtime ready commit
+→ Main DataAuthority(S,1,P)
 → real Renderer Control Snapshot
-→ RendererDataBinding.acquire(S,G,P)
+→ RendererDataBinding.acquire(S,1,P)
 
 real Subsystem host ready
 → SubsystemDataBinding.acquire()
@@ -30,7 +30,9 @@ Deterministic paired Binding fixture
 → real RendererDataPeer / SubsystemDataPeer
 ```
 
-Fixture MAY use Renderer-requested `S/G/P` only as deterministic pairing selector。It MUST NOT claim that request is Platform/Main authority source。
+`P = loomrealm.renderer-data/1`。
+
+Fixture MAY use Renderer-requested `S/1/P` only as a deterministic pairing selector；it is not Platform/Main authority source。
 
 M8 does NOT qualify：
 
@@ -54,14 +56,14 @@ pending Renderer acquire requests
 pending Subsystem acquire for target Runtime
 MemoryCarrier pair creation
 pair resolution / abort / close observations
-Binding rejection trigger
-malformed trusted-integration result trigger for isolation tests
+per-acquire rejection trigger
+malformed trusted-integration result trigger
 ```
 
 Fixture MUST NOT：
 
 ```text
-mint generation/profile
+mint/change generation/profile
 mutate Main Runtime state
 mutate Renderer current participant
 parse child Data protocol
@@ -71,29 +73,29 @@ claim Connection-v1 Broker conformance
 
 ---
 
-## 3. Main Atomic Authority Trace
+## 3. Main Authority Trace
 
-Normal ready transition must be observed as one Renderer-visible commit：
+Normal ready transition：
 
 ```text
 before: Runtime != ready, no DataAuthority
-commit: Runtime=ready + DataAuthority(S,G1,P)
+commit: Runtime=ready + DataAuthority(S,1,P)
 after: one new Renderer revision contains both
 ```
 
-MUST NOT observe a normal intermediate `ready + no DataAuthority` Snapshot。
+MUST NOT observe normal `ready + no DataAuthority`。
 
 Normal exit from ready：
 
 ```text
-before: Runtime=ready + S/G/P
-commit: Runtime=stopping/failed/stopped/replaced + no DataAuthority
+before: Runtime=ready + S/1/P
+commit: Runtime!=ready + no DataAuthority
 after: one new Renderer revision contains both consequences
 ```
 
 MUST NOT observe non-ready Runtime with stale DataAuthority。
 
-Generation exhaustion is the explicit exception：Runtime may become ready without a fresh authority and without Runtime/Frame failure。
+M8 has no same-key Runtime replacement/restart path and therefore no G1→G2/exhaustion vertical obligation。
 
 ---
 
@@ -105,8 +107,8 @@ Runtime before ready
 → no Renderer Data acquire
 
 Runtime ready commit
-→ Main publishes S/G1/P
-→ Renderer requests exact S/G1/P
+→ Main publishes S/1/P
+→ Renderer requests exact S/1/P
 → Subsystem/Renderer receive paired carrier
 → both construct/install real @loomrealm/data peers
 ```
@@ -118,20 +120,20 @@ Pending Subsystem acquire MUST NOT block Runtime Control/Frame；pending Rendere
 ## 5. Late / Stale Acquire
 
 ```text
-start acquire S/G1/P
-→ Main removes/replaces authority or Control participant changes
+start Renderer acquire S/1/P
+→ Runtime leaves ready OR Renderer Control participant changes
 → old acquire resolves late
 ```
 
 Required：
 
 ```text
-returned carrier closed/disposed
+returned carrier best-effort closed
 old peer not installed
-new/current authority and peers unchanged
+new/current Control/Runtime state unchanged
 ```
 
-Same identity rule applies to stale peer terminal and stale close completion。
+The same identity rule applies to stale peer terminal and stale close completion。
 
 ---
 
@@ -141,16 +143,16 @@ Current carrier loss：
 
 ```text
 Data peer terminal
-→ local current Data cleared
+→ role clears local current peer
 → Main Runtime/Frame/InputTarget unchanged
 → Renderer Control unchanged
-→ Main DataAuthority S/G/P unchanged
+→ Main DataAuthority S/1/P unchanged
 ```
 
-If acquisition capability remains healthy：
+If acquisition remains allowed for that role/slot：
 
 ```text
-same S/G/P
+same S/1/P
 → fresh pair
 → fresh peers
 ```
@@ -158,61 +160,57 @@ same S/G/P
 Must prove：
 
 ```text
-no generation bump
-no Renderer revision bump solely for reconnect
+no generation change
+no Renderer revision change solely for reconnect
 no old unsent migration/replay
 fresh peer object/state
 ```
 
 ---
 
-## 7. Runtime / Authority Replacement
+## 7. Runtime / Renderer Parent Changes
+
+Runtime leaves ready：
 
 ```text
-G1 current
-→ Runtime leaves ready / is replaced
-→ same Main visible commit removes authority
-→ Renderer retires G1 peer + aborts G1 pending acquire
+same Main visible commit removes S/1/P
+→ Renderer clears/closes local peer for S
+→ aborts pending S acquire
 ```
 
-Future fresh Runtime for same subsystem：
+Renderer participant A→B while Main authority remains `S/1/P`：
 
 ```text
-G2 > G1
-→ only G2 may install
+A holder clears/closes A Data through parent currentness loss
+B may obtain fresh pair under the same generation 1
 ```
 
-Renderer participant A→B with unchanged `S/G/P`：
-
-```text
-A Data retires because parent participant changed
-B may obtain fresh pair under same G
-```
+No generation allocator is involved。
 
 ---
 
 ## 8. Subsystem Teardown
 
-With current/pending Data present：
+With current/pending Data：
 
 ```text
 Subsystem graceful shutdown or fatal terminal
 → host leaves ready
-→ local Data currentness cleared
-→ pending acquire aborted
-→ current peer close/retire requested
+→ clear local Data current identity
+→ abort pending acquire
+→ best-effort close current peer
 → no future acquire
 ```
 
 Late result cannot install。
 
-Qualification MUST show Data cleanup uses existing `terminalCleanupDeadlineMs` and Data cleanup failure/time limit does not replace the primary graceful/fatal Runtime result。
+Qualification MUST show Data cleanup reuses `terminalCleanupDeadlineMs` and cleanup failure/time limit does not replace the primary Runtime result。
 
 ---
 
-## 9. Binding Terminal Fan-out
+## 9. Renderer Slot Failure Isolation
 
-Renderer with multiple subsystem slots：
+Renderer with independent subsystem slots：
 
 ```text
 S1 current
@@ -223,32 +221,47 @@ S3 acquire rejects non-abort
 Required：
 
 ```text
-Renderer acquisition capability terminal
-→ S2 pending aborted
-→ no future acquire for any S
-→ S1 current remains current solely with respect to Binding rejection
-→ Renderer Control remains current
+S3 records failed desired identity for current Control peer + S3/1/P
+→ no busy retry for that same desired identity
+→ S1 current unchanged
+→ S2 pending unchanged
+→ Renderer Control unchanged
 ```
 
-Subsystem Binding rejection likewise blocks future acquire for that host lifetime but does not fail Runtime/Frame or retire an already-current peer solely for that reason。
+Then：
+
+```text
+Control peer changes OR S3 authority removed/reintroduced under a new desired identity
+→ old S3 failure fact cleared
+→ one fresh S3 acquire may start
+```
+
+No Renderer-wide acquisition terminal exists。
 
 ---
 
 ## 10. Trusted-integration Construction Failure
 
-Fixture may return a malformed trusted integration result / invalid carrier to force role peer-construction failure。
+Fixture may return a malformed trusted integration result / invalid carrier to force peer-construction failure。
 
-Required on either role：
+Subsystem：
 
 ```text
-no peer installed
-→ returned carrier best-effort closed
-→ role acquisition capability latched terminal
-→ no busy retry
-→ parent Runtime/Frame/Control authority unchanged
+install nothing
+→ close returned carrier
+→ stop future acquire for this host lifetime
+→ Runtime/Frame unchanged
 ```
 
-Renderer additionally aborts all other pending acquires while preserving unrelated already-current peers solely with respect to this failure。
+Renderer slot S：
+
+```text
+install nothing
+→ close returned carrier
+→ record failed desired identity for this Control peer + S/1/P
+→ other subsystem slots unchanged
+→ Renderer Control unchanged
+```
 
 ---
 
@@ -266,24 +279,39 @@ Existing Hostra Runtime-only composition remains valid without fake Data Binding
 
 ---
 
-## 12. Child-protocol Boundary
+## 12. Role / Connection Ownership Vocabulary
+
+M8 role evidence observes：
+
+```text
+install peer as local current
+clear local current identity
+best-effort close peer/carrier
+peer terminal
+```
+
+It does not claim that Renderer/Subsystem role code owns Platform Connection `current→retired` state。That lifecycle remains governed by Frozen Data Connection v1 and later concrete Platform realization。
+
+---
+
+## 13. Child-protocol Boundary
 
 M8 vertical proves only：
 
 ```text
-peer installed
-peer retired/replaced
-stale work rejected
-terminal/failure isolation
+peer install / local clear / close
+stale work rejection
+same-generation fresh peer
+failure isolation
 ```
 
-It MUST NOT use Input/Render application traffic to claim M8 closure。
+It MUST NOT use Input/Render application traffic to claim closure。
 
 Input business semantics = M10；Render business semantics = M11；physical Hostra/PWA Profile equivalence = M14/M16。
 
 ---
 
-## 13. CI Shape
+## 14. CI Shape
 
 Keep separate evidence：
 
@@ -301,21 +329,22 @@ No giant E2E replaces package/role tests。
 
 ---
 
-## 14. Frozen Closure
+## 15. Frozen Closure
 
 M8/04 is implementation-ready when the production role path proves：
 
 ```text
-atomic Main Runtime/DataAuthority visible commits
+atomic Runtime/DataAuthority S/1/P visible commits
 real Control propagation
 real role Binding consumption
-real @loomrealm/data peer install/retire
+real @loomrealm/data peer installation
 non-blocking pending acquire
 stale acquire rejection
-same-generation recovery without replay/G bump
+same-generation recovery without replay/revision change
 Subsystem teardown
-Renderer Binding terminal fan-out
+Renderer per-slot failure isolation
 trusted-integration construction-failure isolation
 capability absence
+no speculative G2/restart path
 no Platform authority-feed/commit-time revalidation claim
 ```

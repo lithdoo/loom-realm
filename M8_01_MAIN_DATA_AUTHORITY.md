@@ -6,9 +6,9 @@
 > 最近复核：2026-09-04  
 > 前置：[M7 / 05](M7_05_QUALIFICATION_CLOSURE.md)  
 > 正式契约：[Main ⇄ Renderer Control v1](doc/15-contracts/main-renderer-control-v1.md) · [Data Connection v1](doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md)  
-> 目标：在 `@loomrealm/main` 中实现 DataAuthority allocation / generation / profile / revocation，并通过既有 Renderer Snapshot 纯投影发布；不得建立第二套 Data authority registry 或 connection manager。
+> 目标：在 `@loomrealm/main` 中关闭 Phase 1 当前可达的 DataAuthority policy，并通过既有 Renderer Snapshot 纯投影发布；不为尚未实现的 Runtime replacement/restart 预建 generation allocator、history 或 connection manager。
 
-> **Main 只拥有 logical DataAuthority。Data carrier、candidate、paired installation、reconnect 与 child protocol state 都不属于 Main。**
+> **Main 只拥有 logical DataAuthority。Phase 1 M8 的 DataAuthority 是 committed Runtime authority 的纯派生事实，不新增独立 authority state。**
 
 ---
 
@@ -17,17 +17,18 @@
 ```text
 Main committed Runtime authority
         ↓
-DataAuthority {subsystemKey, generation, dataProfile}
+Runtime=ready ? DataAuthority(S,1,"loomrealm.renderer-data/1") : none
         ↓
 existing RendererAuthoritySnapshotV1
         ↓
 Renderer Control
 ```
 
-Phase 1 profile exactly：
+Phase 1 exact values：
 
 ```text
-loomrealm.renderer-data/1
+generation  = 1
+dataProfile = loomrealm.renderer-data/1
 ```
 
 Main / Snapshot 中不得出现 endpoint、ticket、MessagePort、WebSocket、carrier、candidate 或 provisioning handle。
@@ -40,10 +41,8 @@ Main owns：
 
 ```text
 whether DataAuthority exists
-generation allocation / historical high-water
-profile selection
-Runtime replacement interaction
-revocation
+Phase 1 generation/profile policy
+Runtime lifecycle → authority derivation
 Renderer-visible projection / revision
 ```
 
@@ -52,33 +51,35 @@ Main does not own：
 ```text
 physical Data establishment
 paired installation / cutover
-same-generation reconnect attempt
-Input Interest / Input State
-Render Domain / Render revision
+same-generation reconnect
+Input / Render business state
 Data peer reader/writer/terminal mechanics
 ```
 
-`@loomrealm/data` owns connection-local Profile mechanics；Platform owns physical pairing；Subsystem/Renderer own role-local current Data state。
+`@loomrealm/data` owns connection-local Profile mechanics；Platform owns physical pairing；Subsystem/Renderer own role-local Data peer state。
 
 ---
 
 ## 3. Minimal Main State
 
-Only：
+M8 adds **no Data-specific mutable authority registry**。
+
+Current authority is derived directly：
 
 ```text
-per subsystemKey:
-    last allocated Data generation
+current Runtime for S exists
+AND Runtime.phase == ready
+→ { subsystemKey: S, generation: 1, dataProfile: "loomrealm.renderer-data/1" }
 
-per current Runtime record:
-    data generation minted for this Runtime instance, if any
+otherwise
+→ no DataAuthority for S
 ```
-
-Current DataAuthority 由 existing Runtime authority + generation fact 直接投影；不得另存可漂移的 current DataAuthority DTO。
 
 Forbidden：
 
 ```text
+generationHighWater Map
+per-Runtime dataGeneration field
 DataAuthorityManager
 DataConnectionRegistry
 DataConnectionState enum
@@ -87,57 +88,58 @@ carrier attempt id
 Renderer-side Data shadow state
 ```
 
----
-
-## 4. Allocation / Revocation
-
-Phase 1 policy：
-
-```text
-Runtime enters committed ready
-→ if this Runtime instance has no generation:
-     allocate fresh G
-→ DataAuthority(S,G,"loomrealm.renderer-data/1") exists
-```
-
-DataAuthority exists only while that Runtime instance remains the current application-ready Runtime。
-
-```text
-ready → stopping / failed / stopped / replaced
-→ DataAuthority removed
-```
-
-Session terminal revokes all DataAuthority；no final Data RPC。
-
-Data carrier loss / provisioning failure：
-
-```text
-→ Main DataAuthority unchanged
-→ rendererRevision unchanged solely for Data transport loss
-```
-
-Renderer participant replacement：
-
-```text
-→ does not allocate a fresh generation
-```
-
-Old Renderer Data retires because parent participant currentness is lost；a new Renderer may receive a fresh connection under the same `S/G/P`。
+The existing Runtime state is the single source of truth。
 
 ---
 
-## 5. One Visible Commit
-
-Runtime lifecycle and the DataAuthority consequence of that lifecycle MUST be committed in the same existing Main serialized mutation boundary。
+## 4. Lifecycle
 
 Normal ready transition：
 
 ```text
 identified/initializing
-→ allocate G if needed
-→ commit Runtime=ready + DataAuthority(S,G,P)
-→ capture one Renderer-visible payload
-→ advance rendererRevision once
+→ commit Runtime=ready
+→ derived DataAuthority(S,1,P) exists in the same committed state
+```
+
+Normal exit from ready：
+
+```text
+Runtime=ready + derived DataAuthority(S,1,P)
+→ commit Runtime=stopping/failed/stopped/removed
+→ derived DataAuthority disappears in the same committed state
+```
+
+Session terminal removes all Runtime authority and therefore all DataAuthority；no final Data RPC。
+
+Data carrier loss / provisioning failure：
+
+```text
+→ Runtime authority unchanged
+→ DataAuthority unchanged
+→ rendererRevision unchanged solely for that transport fact
+```
+
+Renderer participant replacement：
+
+```text
+→ DataAuthority S/1/P unchanged
+```
+
+Old participant Data becomes locally unusable through parent currentness；the new participant may obtain a fresh connection under the same `S/1/P`。
+
+---
+
+## 5. One Visible Commit
+
+Runtime lifecycle and its derived DataAuthority consequence share the existing Main serialized mutation boundary。
+
+Ready：
+
+```text
+before: Runtime != ready, no DataAuthority
+commit: Runtime=ready + DataAuthority(S,1,P)
+after: one Renderer-visible payload/revision observes both
 ```
 
 There MUST NOT be a normal observable intermediate Snapshot：
@@ -146,86 +148,69 @@ There MUST NOT be a normal observable intermediate Snapshot：
 Runtime=ready + no DataAuthority
 ```
 
-Normal exit from ready：
+Exit from ready：
 
 ```text
-Runtime=ready + DataAuthority(S,G,P)
-→ commit Runtime=stopping/failed/stopped/replaced + no DataAuthority
-→ capture one Renderer-visible payload
-→ advance rendererRevision once
+before: Runtime=ready + DataAuthority(S,1,P)
+commit: Runtime!=ready + no DataAuthority
+after: one Renderer-visible payload/revision observes both
 ```
 
-There MUST NOT be an observable intermediate Snapshot that keeps stale DataAuthority after the Runtime has left ready。
+There MUST NOT be a Snapshot with non-ready Runtime and stale DataAuthority。
 
-Only generation exhaustion may produce：
-
-```text
-Runtime=ready + no fresh DataAuthority
-```
-
-because exhaustion MUST NOT mutate Runtime/Frame authority。
-
-No EventBus / TransactionManager / DataAuthorityManager is introduced；this reuses the existing Main serialized commit discipline。
+No EventBus、TransactionManager or DataAuthorityManager is introduced；this is ordinary projection from the existing serialized Main state。
 
 ---
 
-## 6. Generation
+## 6. Generation Boundary
 
-`generation`：
+Frozen Data Connection v1 defines generation as a logical authority epoch and requires future replacement epochs within the same `(Session, subsystemKey)` to increase。
 
-```text
-positive safe integer
-Subsystem-scoped within one Session
-strictly increasing on fresh DataAuthority epoch
-never reused
-not required to be contiguous
-```
-
-It is NOT：
+Phase 1 M8 currently has no production path for：
 
 ```text
-connection attempt number
-reconnect count
-carrier id
-Renderer participant id
-Frame / Activation id
-Render revision
+same-key Runtime restart/replacement inside one Session
+multiple Runtime instances per key
+profile replacement
 ```
 
-Fresh Runtime instance for the same subsystemKey：
+Therefore M8 implements only the reachable epoch：
 
 ```text
-future G2 > every prior generation for that subsystemKey in this Session
+first/current DataAuthority epoch for each (Session,S) = generation 1
 ```
 
-If historical high-water is `Number.MAX_SAFE_INTEGER`：
+It MUST NOT prebuild：
 
 ```text
-MUST NOT wrap/reuse
-→ this Session cannot mint another DataAuthority for that subsystemKey
-→ Runtime / Frame authority remains unchanged solely for this reason
-→ a fresh Session is required for a new generation universe
+generation allocator
+historical generation storage
+exhaustion handling
+fake Runtime replacement path
 ```
 
-Exhaustion does not become Runtime failure or Frame unwind and does not invent another generation。
+If a future milestone introduces a second DataAuthority epoch for the same `(Session,S)`, that implementation MUST follow the already-Frozen contract (`G2 > G1`, no reuse/wrap) at the point the path becomes real。
+
+Reconnect and Renderer replacement are not fresh DataAuthority epochs and remain generation 1。
 
 ---
 
 ## 7. Projection / Revision
 
-M7 `dataAuthorities=[]` becomes a pure projection from committed Main state。
+M7 `dataAuthorities=[]` becomes a pure projection from committed Runtime state。
 
-Projection MUST be deterministic；array ordering carries no authority semantics。Implementation MAY naturally follow existing subsystem iteration order but MUST NOT add a sorting registry or freeze that order as a cross-layer protocol fact。
+Projection MUST be deterministic；array ordering carries no authority semantics。Implementation MAY naturally follow existing subsystem iteration order and MUST NOT add a sorting registry solely for DataAuthority。
 
 ```text
-DataAuthority add / remove / generation change
-→ rendererRevision advances exactly once with that visible commit
+Runtime ready/non-ready visible transition
+→ DataAuthority add/remove is part of the same Renderer-visible commit
+→ rendererRevision advances once for that payload change
 
 Data carrier loss / same-generation reconnect
 → no rendererRevision change
 ```
 
-Wire/schema validation stays in `@loomrealm/renderer-control`；Main does not duplicate it。
+Wire/schema validation remains in `@loomrealm/renderer-control`；Main does not duplicate it。
 
 ---
 
@@ -235,36 +220,23 @@ Must prove：
 
 ```text
 not-ready Runtime → no DataAuthority
-normal ready transition → ready + S/G1/P in one visible commit
-no normal ready/no-authority intermediate Snapshot
-ordinary Frame/Activation changes do not change G
-Data carrier facts cannot mutate Main authority
-normal ready exit → non-ready + authority removed in one visible commit
-fresh Runtime same S → G2 > G1
-Renderer replacement alone keeps G
-DataAuthority visible commit bumps Renderer revision exactly once
-Data loss/reconnect alone does not bump Renderer revision
+ready commit → Runtime=ready + S/1/P in one visible commit
+no ready/no-authority intermediate Snapshot
+ordinary Frame/Activation changes do not change authority tuple
+ready exit → Runtime non-ready + authority absent in one visible commit
+no non-ready Snapshot retains stale DataAuthority
+all M8 DataAuthority generations are exactly 1
+Renderer replacement keeps S/1/P
+Data transport loss/reconnect leaves authority/revision unchanged
 profile exactly loomrealm.renderer-data/1
-no generation reuse/wrap
-exhaustion creates no fresh authority and does not fail Runtime/Frame
-projection ordering deterministic but semantically irrelevant
-no Data authority shadow registry/manager
+projection deterministic but ordering semantically irrelevant
+no generation allocator/history/shadow authority registry
 ```
 
 ---
 
 ## 9. Frozen Closure
 
-M8/01 is implementation-ready when：
+M8/01 is implementation-ready when Main adds no independent Data authority state and `Runtime=ready` directly yields `S/1/loomrealm.renderer-data/1` in the same existing visible commit。
 
-```text
-Main has one DataAuthority policy
-Runtime lifecycle and DataAuthority consequence share one visible commit
-generation is logical authority epoch, never connection attempt
-exhaustion is fail-closed without Runtime/Frame mutation
-Renderer replacement/reconnect do not spuriously bump generation
-Snapshot remains pure projection
-no physical Data material enters Main
-```
-
-M9 Broker、M10 Input、M11 Render MUST NOT move these authority responsibilities out of Main。
+Future Runtime restart/replacement work MUST satisfy Frozen generation monotonicity when that path is actually introduced；M8 does not implement speculative state for it。
