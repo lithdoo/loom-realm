@@ -305,13 +305,15 @@ Runtime bootstrap token、Renderer Control token、Data ticket/Port、Content cr
 下图箭头表示 dependency/provider → consumer：
 
 ```text
-@loomrealm/foundation ─────→ @loomrealm/platform-ports ─────→ Main / Subsystem Host
+@loomrealm/foundation ─────→ @loomrealm/platform-ports ─────→ Main / Subsystem Host / Renderer
        │
        ├──────────────────────┐
        │                      ↓
 @loomrealm/wire ───────→ @loomrealm/runtime-control ───────→ Main / Subsystem Host
        │
        ├──────────────→ @loomrealm/renderer-control ───────→ Main / Renderer
+       │
+       ├──────────────→ @loomrealm/data ───────────────────→ Subsystem Host / Renderer
        │
        └──────────────→ @loomrealm/game-package
                                ↓
@@ -327,10 +329,10 @@ Role graph：
     → platform-ports + runtime-control + renderer-control + wire
 
 @loomrealm/renderer
-    → renderer-control   // M7 minimal holder implemented / qualified
+    → renderer-control + platform-ports + data   // M8 Control holder + Data reconciliation qualified
 
 @loomrealm/subsystem/host
-    → platform-ports + runtime-control + role-local policy/integrations
+    → platform-ports + runtime-control + data + role-local policy/integrations
 
 @loomrealm/subsystem
     → author-facing data/content/foundation capabilities

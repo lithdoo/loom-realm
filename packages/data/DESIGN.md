@@ -1,8 +1,8 @@
 # `@loomrealm/data` 设计
 
-> 状态：Package-local Core Baseline Implemented / Maintenance  
-> 阶段：M8 package-local core baseline / maintenance; real M8 role integration pending  
-> 最近复核：2026-08-26  
+> 状态：Package-local Core Baseline Implemented / M8 Role Integration Qualified / Maintenance  
+> 阶段：M8 package-local core + real Renderer/Subsystem role integration qualified；M9 physical Broker realization pending  
+> 最近复核：2026-09-04  
 > 目标：把 Frozen Data Connection v1、User Input v1、Render Update v1 与 Renderer Data Profile v1 落成 transport-independent、role-typed、可测试的 shared Data application mechanics；不建立 physical connection，不拥有 Main/Subsystem/Renderer application authority。  
 > 正式 Profile：[Renderer Data Application Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
 > Profile Conformance：[Renderer Data Profile v1 Conformance](../../doc/15-contracts/renderer-data-profile-conformance-v1.md)  
@@ -769,9 +769,9 @@ Child conformance fixtures在 M8至少 materialize static/profile-relevant subse
 
 ---
 
-## 16. Implementation Stages
+## 16. Implemented M8 Stages
 
-建议按以下顺序直接实现：
+M8 package core 与 real role integration 已按以下顺序完成并通过 qualification：
 
 ```text
 Stage A  package skeleton / metadata / exact public types
@@ -785,29 +785,27 @@ Stage H  package boundary / npm pack / CI
 Stage I  M8 Subsystem/Renderer real binding consumers
 ```
 
-不得用 fake role authority来宣称 M10/M11 complete。
+Current maintenance rule：M9/M10/M11 consumers复用这些已实现 mechanics；不得为了 physical Broker、InputManager 或 RenderManager 重新引入第二套 reader/writer/parser。
 
 ---
 
-## 17. Closure Statement
+## 17. Current Closure Statement
 
-本设计冻结后，允许开始 `@loomrealm/data` M8 implementation。
-
-M8 package-local closure完成后允许表述：
+当前可表述：
 
 ```text
 @loomrealm/data Package-local Core Baseline Implemented
+M8 real Renderer/Subsystem role consumers qualified
 ```
 
-该声明不等于 M8 milestone closed，也不等于 full Profile conformance。
-
-M8不得表述：
+这不等于：
 
 ```text
+full Renderer ⇄ Subsystem Data Connection v1 platform qualification
 Subsystem Input fully implemented
 Render Update role state fully implemented
 Renderer presentation fully implemented
 Desktop DataConnectionBroker complete
 ```
 
-这些分别属于 M9/M10/M11 后续 consumer/platform qualification。
+M9 负责 physical Broker/paired installation realization；M10/M11 分别负责 User Input / Render business-state qualification。`@loomrealm/data` 在这些后续 milestone 中保持 shared connection-local mechanics owner，而不是重新承担 Platform 或 role authority。

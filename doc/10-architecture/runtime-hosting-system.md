@@ -119,8 +119,9 @@ load exact selected Definition Module
 validate SubsystemDefinitionFactory ABI
 M6 construct RuntimeControlBinding
 M8 construct SubsystemDataBinding role seam when supplied
-M9 Hostra/PWA provisioning layer feeds that Binding dynamically
+M9 Hostra provisioning layer feeds that Binding dynamically
 M12+ construct ContentClient
+M16 PWA provisioning maps the same role seam through Worker/MessagePort
 invoke runSubsystem(...) with current real capabilities
 platform-local diagnostics/cleanup
 ```
