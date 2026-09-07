@@ -107,7 +107,8 @@ Node key Domain-wide uniqueness
 live key keeps stable tag
 removed Node key cannot be reintroduced in the same business RenderDomain lifetime
 updates apply atomically
-invalid create/replace preserves previous authoritative state
+invalid create creates no Domain
+invalid replace preserves previous authoritative state
 Runtime cleanup releases all Domains
 ```
 
