@@ -18,3 +18,19 @@ export type {
   SubsystemDefinitionFactory,
   SubsystemScope,
 } from "./model.js";
+export type {
+  InputStateChannel,
+  InputEventChannel,
+  InputChannel,
+  KeyboardStateInput,
+  KeyboardEventInput,
+  PointerStateInput,
+  PointerEventInput,
+  GamepadStateInput,
+  GamepadEventInput,
+  InputPayload,
+  InputHandler,
+  Unsubscribe,
+  CreateInputListenerOptions,
+  InputListener,
+} from "./input.js";

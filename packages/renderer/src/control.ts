@@ -1,7 +1,6 @@
 import {
   createRendererDataPeer,
   RENDERER_DATA_PROFILE_V1,
-  type DataInboundDisposition,
   type RendererDataPeer,
 } from "@loomrealm/data";
 import type { RendererDataBinding } from "@loomrealm/platform-ports";
@@ -12,6 +11,8 @@ import {
   type RendererPeerConnectOptions,
   type RendererPeerConnectOutcome,
 } from "@loomrealm/renderer-control";
+import { RendererInputGate } from "./internal/input-gate.js";
+import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
 
 export interface RendererControlCurrent {
   readonly peer: RendererControlPeer;
@@ -89,12 +90,38 @@ function validateRendererDataBinding(
   if (!valid) throw new TypeError("Invalid RendererDataBinding");
 }
 
+function validateRendererInputSource(
+  input: RendererInputSource | undefined,
+): void {
+  if (input === undefined) return;
+  let valid = false;
+  try {
+    valid = input !== null && typeof input === "object" &&
+      typeof input.start === "function";
+  } catch {
+    // Accessor-backed integration objects are not valid source capabilities.
+  }
+  if (!valid) throw new TypeError("Invalid RendererInputSource");
+}
+
+interface SourceSubscription {
+  readonly peer: RendererControlPeer;
+  phase: "starting" | "current" | "invalid";
+  readonly staged: RendererInputSourceChange[];
+  stop: (() => void) | null;
+}
+
 class ControlHolder implements RendererControlHolder {
   private currentValue: RendererControlCurrent | null = null;
   private connecting = false;
   private readonly dataSlots = new Map<string, RendererDataSlot>();
+  private readonly inputGate = new RendererInputGate();
+  private sourceSubscription: SourceSubscription | null = null;
 
-  constructor(private readonly data?: RendererDataBinding) {}
+  constructor(
+    private readonly data?: RendererDataBinding,
+    private readonly input?: RendererInputSource,
+  ) {}
 
   current(): RendererControlCurrent | null {
     return this.currentValue;
@@ -115,13 +142,23 @@ class ControlHolder implements RendererControlHolder {
     if (outcome.kind === "terminal") return Object.freeze({ kind: "terminal" });
 
     const peer = outcome.peer;
+    if (this.currentValue !== null) {
+      this.stopInputSource();
+      this.currentValue = null;
+      this.inputGate.setControl(null);
+      this.clearAllData();
+    }
     const installed = Object.freeze({ peer, snapshot: outcome.snapshot });
     this.currentValue = installed;
+    this.inputGate.setControl(outcome.snapshot);
+    this.startInputSource(peer);
     this.reconcileData(peer, outcome.snapshot);
     void this.consume(peer);
     void peer.terminal.then(() => {
       if (this.currentValue?.peer !== peer) return;
+      this.stopInputSource();
       this.currentValue = null;
+      this.inputGate.setControl(null);
       this.clearAllData();
     });
     return Object.freeze({ kind: "installed", current: installed });
@@ -131,6 +168,7 @@ class ControlHolder implements RendererControlHolder {
     for await (const snapshot of peer.states()) {
       if (this.currentValue?.peer !== peer) continue;
       this.currentValue = Object.freeze({ peer, snapshot });
+      this.inputGate.setControl(snapshot);
       this.reconcileData(peer, snapshot);
     }
   }
@@ -158,7 +196,10 @@ class ControlHolder implements RendererControlHolder {
       if (identity === undefined || !sameIdentity(slot.current?.identity ?? null, identity)) {
         const current = slot.current;
         slot.current = null;
-        if (current !== null) void current.peer.close().catch(() => {});
+        if (current !== null) {
+          this.inputGate.retireData(subsystemKey, current.peer);
+          void current.peer.close().catch(() => {});
+        }
       }
       if (identity === undefined || !sameIdentity(slot.pending?.identity ?? null, identity)) {
         const pending = slot.pending;
@@ -216,7 +257,6 @@ class ControlHolder implements RendererControlHolder {
       if (attempt.identity.dataProfile !== RENDERER_DATA_PROFILE_V1) {
         throw new TypeError("Unsupported Renderer Data profile");
       }
-      const accept = (): DataInboundDisposition => acceptedDataMessage;
       peer = createRendererDataPeer({
         binding: {
           carrier,
@@ -225,11 +265,20 @@ class ControlHolder implements RendererControlHolder {
           dataProfile: attempt.identity.dataProfile,
         },
         handlers: {
-          onInputInterest: accept,
-          onRenderDomains: accept,
-          onRenderSnapshot: accept,
-          onRenderPatch: accept,
-          onRenderEvent: accept,
+          onInputInterest: (message) => {
+            if (slot.current?.peer === peer) {
+              this.inputGate.replaceInterest(
+                attempt.identity.subsystemKey,
+                peer,
+                message,
+              );
+            }
+            return acceptedDataMessage;
+          },
+          onRenderDomains: () => acceptedDataMessage,
+          onRenderSnapshot: () => acceptedDataMessage,
+          onRenderPatch: () => acceptedDataMessage,
+          onRenderEvent: () => acceptedDataMessage,
         },
       });
     } catch {
@@ -247,8 +296,10 @@ class ControlHolder implements RendererControlHolder {
     }
     slot.pending = null;
     slot.current = { identity: attempt.identity, peer };
+    this.inputGate.installData(attempt.identity.subsystemKey, peer);
     void peer.terminal.then(() => {
       if (slot.current?.peer !== peer) return;
+      this.inputGate.retireData(attempt.identity.subsystemKey, peer);
       slot.current = null;
       if (
         this.isDesired(attempt.identity) &&
@@ -297,16 +348,108 @@ class ControlHolder implements RendererControlHolder {
       pending?.controller.abort();
       const current = slot.current;
       slot.current = null;
-      if (current !== null) void current.peer.close().catch(() => {});
+      if (current !== null) {
+        this.inputGate.retireData(current.identity.subsystemKey, current.peer);
+        void current.peer.close().catch(() => {});
+      }
       slot.failed = null;
     }
     this.dataSlots.clear();
+  }
+
+  private startInputSource(peer: RendererControlPeer): void {
+    const source = this.input;
+    this.inputGate.resetProducerFacts();
+    if (source === undefined) return;
+    const subscription: SourceSubscription = {
+      peer,
+      phase: "starting",
+      staged: [],
+      stop: null,
+    };
+    this.sourceSubscription = subscription;
+    const emit = (change: RendererInputSourceChange): void => {
+      if (this.sourceSubscription !== subscription || subscription.phase === "invalid") return;
+      if (subscription.phase === "starting") {
+        this.validateSourceChange(change);
+        if (change.kind !== "event") subscription.staged.push(change);
+        return;
+      }
+      this.applySourceChange(change);
+    };
+
+    try {
+      const stop = source.start(emit);
+      if (typeof stop !== "function") throw new TypeError("Input source start must return stop function");
+      subscription.stop = stop;
+      for (const change of subscription.staged) this.applySourceChange(change);
+      subscription.staged.length = 0;
+      subscription.phase = "current";
+    } catch {
+      subscription.phase = "invalid";
+      if (this.sourceSubscription === subscription) this.sourceSubscription = null;
+      this.inputGate.resetProducerFacts();
+      try {
+        subscription.stop?.();
+      } catch {
+        // Failed source bootstrap cleanup is locally contained.
+      }
+    }
+  }
+
+  private stopInputSource(): void {
+    const subscription = this.sourceSubscription;
+    if (subscription === null) return;
+    this.sourceSubscription = null;
+    subscription.phase = "invalid";
+    subscription.staged.length = 0;
+    this.inputGate.resetProducerFacts();
+    try {
+      subscription.stop?.();
+    } catch {
+      // Local stop failure cannot restore retired producer facts.
+    }
+  }
+
+  private validateSourceChange(change: RendererInputSourceChange): void {
+    if (change === null || typeof change !== "object") {
+      throw new TypeError("Invalid Renderer input source change");
+    }
+    if (change.kind === "availability") {
+      if (typeof change.channel !== "string" || typeof change.available !== "boolean") {
+        throw new TypeError("Invalid Renderer input availability change");
+      }
+      return;
+    }
+    if (change.kind === "state" || change.kind === "event") {
+      if (
+        typeof change.channel !== "string" ||
+        change.payload === null ||
+        typeof change.payload !== "object" ||
+        Array.isArray(change.payload)
+      ) throw new TypeError("Invalid Renderer input payload change");
+      return;
+    }
+    throw new TypeError("Invalid Renderer input source change kind");
+  }
+
+  private applySourceChange(change: RendererInputSourceChange): void {
+    this.validateSourceChange(change);
+    if (change.kind === "availability") {
+      this.inputGate.setAvailability(change.channel, change.available);
+    } else if (change.kind === "state") {
+      this.inputGate.updateState(change.channel, change.payload);
+    } else {
+      this.inputGate.emitEvent(change.channel, change.payload);
+    }
   }
 }
 
 export function createRendererControlHolder(
   data?: RendererDataBinding,
+  input?: RendererInputSource,
 ): RendererControlHolder {
   validateRendererDataBinding(data);
-  return new ControlHolder(data);
+  validateRendererInputSource(input);
+  return new ControlHolder(data, input);
 }

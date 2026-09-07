@@ -444,6 +444,175 @@ test("recoverable call rejection is catchable and keeps the current activation u
   await shutdown(session);
 });
 
+test("recoverable frame.call converges retained State before business observes rejection", async () => {
+  const dataPair = createMemoryCarrierPair();
+  const callReply = deferred();
+  const listenerReady = deferred();
+  const beginCall = deferred();
+  const observations = [];
+  let renderer;
+
+  const session = await createSession(
+    defineSubsystem((scope) => ({
+      async frame(frame) {
+        const listener = scope.createInputListener({
+          frame,
+          channels: ["keyboard.state", "keyboard.event"],
+        });
+        listener.on("keyboard.state", (value) => {
+          observations.push(`state:${value.down.join(",")}`);
+        });
+        listener.on("keyboard.event", () => observations.push("event"));
+        listenerReady.resolve();
+        await beginCall.promise;
+        try {
+          await frame.call("missing", null);
+        } catch (error) {
+          assert.ok(error instanceof FrameCallRejectedError);
+          observations.push("catch");
+        }
+        return completed(null);
+      },
+    })),
+    {
+      onFrameCall() {
+        return callReply.promise;
+      },
+    },
+    defaultPolicy,
+    {
+      async acquire() {
+        return {
+          carrier: dataPair.right,
+          generation: 1,
+          dataProfile: "loomrealm.renderer-data/1",
+        };
+      },
+    },
+  );
+  renderer = rendererDataPeer(dataPair.left);
+
+  await session.main.frame.initialize({ frameId: "root", input: null });
+  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
+  await listenerReady.promise;
+  await renderer.input.sendState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a1",
+    channel: "keyboard.state",
+    payload: { down: [] },
+  });
+  beginCall.resolve();
+  await waitFor(() => session.calls.length === 1, "pending frame.call");
+  await renderer.input.sendState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a1",
+    channel: "keyboard.state",
+    payload: { down: ["KeyA"] },
+  });
+  await renderer.input.sendEvent({
+    type: "input.event",
+    frameId: "root",
+    activationId: "a1",
+    channel: "keyboard.event",
+    payload: { action: "down", code: "KeyA", repeat: false },
+  });
+  callReply.resolve({
+    kind: "semantic-error",
+    error: { code: "FRAME_CALL_TARGET_NOT_FOUND" },
+  });
+  await waitFor(() => session.returns.length === 1, "recoverable Frame return");
+  assert.deepEqual(observations, ["state:", "state:KeyA", "catch"]);
+
+  await session.main.frame.closeFrame({ frameId: "root" });
+  await renderer.close();
+  await shutdown(session);
+});
+
+test("committed frame.call discards suppressed old-Activation State", async () => {
+  const dataPair = createMemoryCarrierPair();
+  const callReply = deferred();
+  const listenerReady = deferred();
+  const beginCall = deferred();
+  const finishFrame = deferred();
+  const observations = [];
+  const session = await createSession(
+    defineSubsystem((scope) => ({
+      async frame(frame) {
+        const listener = scope.createInputListener({
+          frame,
+          channels: ["keyboard.state"],
+        });
+        listener.on("keyboard.state", (value) => observations.push(value.down.join(",")));
+        listenerReady.resolve();
+        await beginCall.promise;
+        await frame.call("child", null);
+        await finishFrame.promise;
+        return completed(null);
+      },
+    })),
+    { onFrameCall: () => callReply.promise },
+    defaultPolicy,
+    {
+      async acquire() {
+        return {
+          carrier: dataPair.right,
+          generation: 1,
+          dataProfile: "loomrealm.renderer-data/1",
+        };
+      },
+    },
+  );
+  const renderer = rendererDataPeer(dataPair.left);
+  await session.main.frame.initialize({ frameId: "root", input: null });
+  await session.main.frame.activate({ frameId: "root", activationId: "a1" });
+  await listenerReady.promise;
+  beginCall.resolve();
+  await waitFor(() => session.calls.length === 1, "pending committed frame.call");
+  await renderer.input.sendState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a1",
+    channel: "keyboard.state",
+    payload: { down: ["KeyA"] },
+  });
+  callReply.resolve({ kind: "success", result: { childFrameId: "child-1" } });
+  await tick();
+  await tick();
+  await renderer.input.sendState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a1",
+    channel: "keyboard.state",
+    payload: { down: ["KeyB"] },
+  });
+  assert.deepEqual(
+    await session.main.frame.resume({
+      frameId: "root",
+      activationId: "a2",
+      returnedFrameId: "child-1",
+      result: { type: "completed", value: null },
+    }),
+    { kind: "success", result: {} },
+  );
+  await tick();
+  await renderer.input.sendState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a2",
+    channel: "keyboard.state",
+    payload: { down: ["KeyC"] },
+  });
+  assert.deepEqual(observations, ["KeyC"]);
+  finishFrame.resolve();
+  await waitFor(() => session.returns.length === 1, "committed Frame return");
+
+  await session.main.frame.closeFrame({ frameId: "root" });
+  await renderer.close();
+  await shutdown(session);
+});
+
 test("Runtime-fatal call never re-enters the business continuation", async () => {
   const callStarted = deferred();
   const never = new Promise(() => {});

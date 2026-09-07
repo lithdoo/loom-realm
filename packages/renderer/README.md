@@ -1,8 +1,8 @@
 # @loomrealm/renderer
 
-Renderer Control holder with M8 Data reconciliation and frozen M10 User Input implementation boundary.
+Renderer Control holder with M8 Data reconciliation and qualified M10 User Input implementation.
 
-> Status: **M8 Implemented / Qualified · M10 Implementation Frozen / Ready for Implementation**
+> Status: **M8 Implemented / Qualified · M10 Implemented / Qualified**
 
 Current implemented state remains one atomic Control `{ peer, snapshot } | null` record plus one private Data slot per desired subsystem authority. Protocol legality stays in `@loomrealm/renderer-control` and `@loomrealm/data`.
 

@@ -5,7 +5,7 @@
 > 稳定程度：M8 Implementation Closed / M10 Implementation Frozen  
 > 主要定义：Renderer Control holder、per-subsystem Data reconciliation、M10 Input gate/publisher/source placement、M11+ Render placement  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[ADR 0029](../../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> M10 实施：[M10 / 02](../../../M10_02_RENDERER_INPUT_GATE.md) · [M10 / 03](../../../M10_03_RENDERER_INPUT_PRODUCERS.md)  
+> M10 实施：[M10 / 02](https://github.com/lithdoo/loom-realm/blob/main/M10_02_RENDERER_INPUT_GATE.md) · [M10 / 03](https://github.com/lithdoo/loom-realm/blob/main/M10_03_RENDERER_INPUT_PRODUCERS.md)
 > 最近复核：2026-09-07
 
 Renderer 不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render child protocol role behavior。

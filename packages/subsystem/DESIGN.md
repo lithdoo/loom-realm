@@ -1,7 +1,7 @@
 # `@loomrealm/subsystem`
 
-> 状态：M4 Runtime/Frame + M8 Data Role Implemented；**M10 Input Implementation Frozen / Ready for Implementation**  
-> 阶段：M10 User Input implementation next；M11 Render / M12 Content pending  
+> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified**
+> 阶段：M11 Render / M12 Content pending
 > 最近复核：2026-09-07  
 > 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md)  
 > 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md)  
@@ -35,7 +35,7 @@ Package implementation MAY 在 trusted host/internal code依赖现有 shared pro
 M4  Definition/lifecycle + Frame/Outcome       implemented / qualified
 M4  Host Runtime Control mapping              implemented / qualified
 M8  role-local Data peer lifecycle            implemented / qualified
-M10 InputListener + InputManager               implementation frozen / ready
+M10 InputListener + InputManager               implemented / qualified
 M11 RenderDomain + RenderManager               pending
 M12 ContentClient author mapping               pending
 ```

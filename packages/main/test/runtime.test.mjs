@@ -1166,6 +1166,113 @@ test("connected Renderer mirrors committed frame.call and frame.return through f
   assert.deepEqual(await result, { kind: "root-outcome", outcome: { type: "completed", value: "done" } });
 });
 
+test("M10 input follows real Main nested InputTarget replacement and fresh caller Activation", async () => {
+  const allowCall = deferred();
+  const rootInitialState = deferred();
+  const childState = deferred();
+  const finishChild = deferred();
+  const finishRoot = deferred();
+  const rootStates = [];
+  const childStates = [];
+  const slots = [];
+  const data = {
+    root: createPairedDataFixture("root"),
+    child: createPairedDataFixture("child"),
+  };
+  const fake = createFakePlatform(
+    {
+      root: defineSubsystem((scope) => ({
+        async frame(frame) {
+          const listener = scope.createInputListener({
+            frame,
+            channels: ["keyboard.state", "keyboard.event"],
+          });
+          listener.on("keyboard.state", (value) => {
+            rootStates.push(value.down.join(","));
+            if (rootStates.length === 1) rootInitialState.resolve();
+          });
+          await allowCall.promise;
+          await frame.call("child", null);
+          await waitFor(() => rootStates.length === 2, "fresh root input baseline");
+          await finishRoot.promise;
+          listener.close();
+          return completed("done");
+        },
+      })),
+      child: defineSubsystem((scope) => ({
+        async frame(frame) {
+          const listener = scope.createInputListener({
+            frame,
+            channels: ["keyboard.state", "keyboard.event"],
+          });
+          listener.on("keyboard.state", (value) => {
+            childStates.push(value.down.join(","));
+            childState.resolve();
+          });
+          await finishChild.promise;
+          listener.close();
+          return completed("child");
+        },
+      })),
+    },
+    {
+      subsystemDataBinding: (key) => data[key].subsystem,
+      rendererControl: {
+        acquire(token, signal) {
+          const slot = deferred();
+          slots.push({ token, signal, slot });
+          return slot.promise;
+        },
+      },
+    },
+  );
+  const result = runMain({
+    bootstrap: bootstrap(["root", "child"], "root"),
+    platform: fake.platform,
+    policy,
+  });
+  await waitFor(() => slots.length > 0, "M10 Renderer slot");
+  const control = createMemoryCarrierPair();
+  slots[0].slot.resolve(control.left);
+  let sourceStarts = 0;
+  const source = {
+    start(emit) {
+      sourceStarts += 1;
+      emit({ kind: "state", channel: "keyboard.state", payload: { down: ["KeyA"] } });
+      emit({ kind: "availability", channel: "keyboard.state", available: true });
+      emit({ kind: "availability", channel: "keyboard.event", available: true });
+      return () => {};
+    },
+  };
+  const holder = createRendererControlHolder({
+    acquire(key, generation, dataProfile, signal) {
+      return data[key].renderer.acquire(key, generation, dataProfile, signal);
+    },
+  }, source);
+  assert.equal((await holder.connect({
+    carrier: control.right,
+    rendererControlToken: slots[0].token,
+  })).kind, "installed");
+
+  await rootInitialState.promise;
+  const firstActivation = holder.current().snapshot.inputTarget.activationId;
+  allowCall.resolve();
+  await childState.promise;
+  assert.equal(holder.current().snapshot.inputTarget.subsystemKey, "child");
+  finishChild.resolve();
+  await waitFor(() => rootStates.length === 2, "root A2 baseline");
+  assert.equal(holder.current().snapshot.inputTarget.subsystemKey, "root");
+  assert.notEqual(holder.current().snapshot.inputTarget.activationId, firstActivation);
+  finishRoot.resolve();
+  assert.deepEqual(await result, {
+    kind: "root-outcome",
+    outcome: { type: "completed", value: "done" },
+  });
+  assert.deepEqual(rootStates, ["KeyA", "KeyA"]);
+  assert.deepEqual(childStates, ["KeyA"]);
+  assert.equal(sourceStarts, 1);
+});
+
 test("connected Renderer mirrors fixed-point failure unwind without changing Main outcome", async () => {
   const allowCall = deferred();
   const rootEntered = deferred();

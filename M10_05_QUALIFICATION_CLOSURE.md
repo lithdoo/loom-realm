@@ -1,6 +1,6 @@
 # M10 / 05 — Qualification and Closure
 
-> 状态：**Implementation Frozen / Ready for Implementation**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M10 User Input  
 > 落地顺序：05  
 > 最近复核：2026-09-07  
@@ -408,19 +408,51 @@ Renderer gate/publisher/source lifecycle/failure tests
 real M10 vertical
 ```
 
-文档阶段不提前加入空 gate。
+该 gate已由真实 build、role tests 与 vertical组成，不是空 gate。
 
 ---
 
 ## 13. Closure Claim
 
-当前文档允许声明：
+当前实现与 qualification evidence允许声明：
 
 ```text
-M10 design = Implementation Frozen / Ready for Implementation
-no further design round is expected before coding
+M10 = Implemented / Qualified
+User Input v1 fixtureSetRevision 2 role qualification = pass
 ```
 
-实现 + qualification通过后才允许声明 M10 implemented/qualified。
-
 不得提前声明 BrowserWindow Input、Render、Content 或 PWA/full cross-platform User Input conformance complete。
+
+---
+
+## 14. Implementation Qualification Record
+
+2026-09-07 implementation evidence：
+
+```text
+protocol = loomrealm.user-input
+protocolVersion = 1
+fixtureSetRevision = 2
+role = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
+result = pass
+```
+
+落地证据：
+
+```text
+packages/subsystem/src/internal/input-manager.ts
+packages/renderer/src/internal/input-gate.ts
+packages/renderer/src/input.ts
+packages/main/test/runtime.test.mjs
+apps/desktop/test/m10-input-vertical.test.mjs
+test/m10-qualification.test.mjs
+```
+
+资格门禁：
+
+```text
+npm run test:m10
+result = pass
+```
+
+Claim严格限定为 current platform-independent User Input role semantics 与 frozen M10 SDK/source projection 在 Hostra/Desktop Data lifecycle 上 qualified；Hostra/PWA transport equivalence仍留到 M16。

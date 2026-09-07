@@ -6,7 +6,7 @@
 > 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input author projection/Interest/State、Render Domain、错误收敛与 role-facing Platform boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> M10 实施：[M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](../../M10_05_QUALIFICATION_CLOSURE.md)  
+> M10 实施：[M10 / 01](https://github.com/lithdoo/loom-realm/blob/main/M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](https://github.com/lithdoo/loom-realm/blob/main/M10_05_QUALIFICATION_CLOSURE.md)
 > 最近复核：2026-09-07
 
 ---

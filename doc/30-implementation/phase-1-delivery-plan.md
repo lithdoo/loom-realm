@@ -136,7 +136,7 @@ M9只证明 physical Data lifecycle；fresh Input/Render business baseline属于
 
 ---
 
-## M10：User Input v1 + InputManager — **Implementation Frozen / Ready for Implementation**
+## M10：User Input v1 + InputManager — **Implemented / Qualified**
 
 Current facts：
 
@@ -211,13 +211,13 @@ fresh-generation语义用 role-level deterministic fixture证明，不为测试�
 
 M10只声明 current platform-independent User Input role semantics + frozen SDK/source projection在 Hostra/Desktop Data lifecycle上 qualified；完整 Hostra/PWA transport equivalence留到 M16。
 
-Implementation完成时新增：
+Implementation qualification gate：
 
 ```text
 npm run test:m10
 ```
 
-文档阶段不放空 gate。
+该 gate已落地并通过；不得以更窄的 package-only test替代 closure gate。
 
 ### Freeze rule
 

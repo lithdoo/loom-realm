@@ -4,3 +4,7 @@ export type {
   RendererControlHolder,
   RendererControlHolderConnectOutcome,
 } from "./control.js";
+export type {
+  RendererInputSource,
+  RendererInputSourceChange,
+} from "./input.js";

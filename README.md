@@ -22,7 +22,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-### M10 implementation plans — Frozen / Ready
+### M10 implementation and qualification — Complete
 
 - [M10 / 01 — Subsystem InputManager](./M10_01_SUBSYSTEM_INPUT_MANAGER.md)
 - [M10 / 02 — Renderer Input Gate](./M10_02_RENDERER_INPUT_GATE.md)
@@ -123,7 +123,7 @@ ADR 0029 修正首次实现前 State convergence hole：commit-sensitive mutatio
 
 ---
 
-## M10 Frozen Author / Renderer Surface
+## M10 Qualified Author / Renderer Surface
 
 Subsystem author：
 
@@ -172,7 +172,7 @@ M6 Hostra Runtime vertical            ✅
 M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
-M10 User Input                        Implementation Frozen / Ready for Implementation
+M10 User Input                        ✅
 M11 Render                            pending
 M12 Content                           pending
 M13 loom.map                          pending
@@ -239,4 +239,4 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Current implementation gate：**M10**。文档设计已冻结，可直接开始编码；实现完成时再加入 `npm run test:m10`，不提前放空 script。
+Latest qualified implementation gate：**M10**。运行 `npm run test:m10` 可复验完整 M9 regression、M10 role semantics、SDK/source projection与真实 Desktop/Hostra vertical。

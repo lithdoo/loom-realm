@@ -28,6 +28,7 @@ import type {
   RuntimeFailure,
   SubsystemDefinition,
 } from "../model.js";
+import type { InputManager, InputRuntimeFacts } from "./input-manager.js";
 
 type FrameHandlers = Omit<SubsystemRuntimeControlHandlers, "onShutdown">;
 type EmptyReply = RuntimeControlHandlerReply<Record<string, never>, FrameRpcErrorData>;
@@ -104,15 +105,57 @@ function runtimeFailure(code: string, message: string): RuntimeFailure {
   return Object.freeze({ code, message });
 }
 
-export class FrameRuntime {
+export class FrameRuntime implements InputRuntimeFacts {
   private readonly contexts = new Map<string, FrameContext>();
+  private readonly ownedFrames = new WeakMap<Frame, FrameContext>();
 
   constructor(
     private readonly definition: SubsystemDefinition,
     private readonly getPeer: () => SubsystemRuntimeControlPeer | null,
     private readonly canAcceptFrames: () => boolean,
     private readonly failRuntime: (failure: RuntimeFailure) => void,
+    private readonly input: InputManager,
   ) {}
+
+  inspect(frame: Frame):
+    | { readonly kind: "foreign" }
+    | { readonly kind: "closed" }
+    | {
+        readonly kind: "live";
+        readonly frameId: string;
+        readonly activationId: string | null;
+        readonly deliveryOpen: boolean;
+      } {
+    const context = this.ownedFrames.get(frame);
+    if (context === undefined) return { kind: "foreign" };
+    if (context.state === "closed" || context.state === "closing") return { kind: "closed" };
+    return {
+      kind: "live",
+      frameId: context.id,
+      activationId: context.activationId ?? null,
+      deliveryOpen: context.state === "active",
+    };
+  }
+
+  inspectById(frameId: string):
+    | { readonly kind: "closed" }
+    | {
+        readonly kind: "live";
+        readonly frameId: string;
+        readonly activationId: string | null;
+        readonly deliveryOpen: boolean;
+      }
+    | null {
+    const context = this.contexts.get(frameId);
+    if (context === undefined) return null;
+    if (context.state === "closed" || context.state === "closing") return { kind: "closed" };
+    return {
+      kind: "live",
+      frameId: context.id,
+      activationId: context.activationId ?? null,
+      deliveryOpen: context.state === "active",
+    };
+  }
 
   handlers(): FrameHandlers {
     return {
@@ -134,6 +177,7 @@ export class FrameRuntime {
 
   abortAll(): void {
     for (const context of this.contexts.values()) {
+      this.input.closeFrame(context.id);
       context.controller.abort();
       context.state = "closed";
       context.activationId = undefined;
@@ -175,6 +219,7 @@ export class FrameRuntime {
       started: false,
     });
     this.contexts.set(frameId, context);
+    this.ownedFrames.set(frame, context);
     return success();
   }
 
@@ -192,6 +237,7 @@ export class FrameRuntime {
       context.state = "active";
       context.activationId = activationId;
       context.started = true;
+      this.input.activationChanged(frameId);
       void this.runHandler(context);
     });
   }
@@ -212,6 +258,7 @@ export class FrameRuntime {
       if (context.state !== "suspending") return;
       context.state = "admin-suspended";
       context.activationId = undefined;
+      this.input.activationChanged(frameId);
       context.controller.abort();
     });
   }
@@ -242,6 +289,7 @@ export class FrameRuntime {
       context.pendingCall = undefined;
       context.activationId = activationId;
       context.state = "active";
+      this.input.activationChanged(frameId);
       pending.resume.resolve(protocolOutcomeToAuthor(result));
     });
   }
@@ -256,6 +304,7 @@ export class FrameRuntime {
 
     context.state = "closing";
     context.activationId = undefined;
+    this.input.closeFrame(frameId);
     return success(() => {
       context.controller.abort();
       context.pendingCall = undefined;
@@ -323,6 +372,7 @@ export class FrameRuntime {
 
     if (outcome.kind === "success") {
       const resume = deferred<FrameOutcome>();
+      this.input.activationChanged(context.id);
       context.activationId = undefined;
       context.state = "awaiting-resume";
       context.pendingCall = {
@@ -341,6 +391,7 @@ export class FrameRuntime {
     ) {
       context.state = "active";
       context.activationId = activationId;
+      this.input.mutationReopened(context.id, activationId);
       throw new FrameCallRejectedError(outcome.error.code);
     }
 
@@ -415,6 +466,7 @@ export class FrameRuntime {
     }
 
     context.state = "returning";
+    this.input.activationChanged(context.id);
     context.activationId = undefined;
     context.controller.abort();
 

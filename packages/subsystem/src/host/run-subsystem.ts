@@ -6,7 +6,6 @@ import type {
 import {
   createSubsystemDataPeer,
   RENDERER_DATA_PROFILE_V1,
-  type DataInboundDisposition,
   type SubsystemDataPeer,
 } from "@loomrealm/data";
 import {
@@ -24,7 +23,9 @@ import type {
   SubsystemDefinitionFactory,
   SubsystemScope,
 } from "../model.js";
+import type { CreateInputListenerOptions } from "../input.js";
 import { FrameRuntime } from "../internal/frame-runtime.js";
+import { InputManager } from "../internal/input-manager.js";
 
 export interface SubsystemRuntimeControlPolicy {
   readonly scheduler: DeadlineScheduler;
@@ -233,6 +234,7 @@ class SubsystemHost {
   private pendingDataAcquire: DataAcquireAttempt | null = null;
   private dataAcquisitionStopped = false;
   private dataCleanup: Promise<void> = Promise.resolve();
+  private readonly input = new InputManager();
 
   constructor(private readonly options: RunSubsystemOptions) {}
 
@@ -246,6 +248,8 @@ class SubsystemHost {
   private async bootstrap(): Promise<void> {
     const scope: SubsystemScope = Object.freeze({
       signal: this.scopeController.signal,
+      createInputListener: (options: CreateInputListenerOptions) =>
+        this.input.createListener(options),
     });
 
     let definition: SubsystemDefinition;
@@ -269,7 +273,9 @@ class SubsystemHost {
       () => this.peer,
       this.canAcceptFrames,
       (runtimeFailure) => this.failRuntime(runtimeFailure),
+      this.input,
     );
+    this.input.bindRuntime(this.frames);
 
     let carrier;
     try {
@@ -413,7 +419,6 @@ class SubsystemHost {
       if (result.dataProfile !== RENDERER_DATA_PROFILE_V1) {
         throw new TypeError("Unsupported Renderer Data profile");
       }
-      const accept = (): DataInboundDisposition => acceptedDataMessage;
       peer = createSubsystemDataPeer({
         binding: {
           carrier: result.carrier,
@@ -422,9 +427,18 @@ class SubsystemHost {
           dataProfile: result.dataProfile,
         },
         handlers: {
-          onInputState: accept,
-          onInputEvent: accept,
-          onInputReset: accept,
+          onInputState: (message) =>
+            this.currentDataPeer === peer
+              ? this.input.onState(message)
+              : acceptedDataMessage,
+          onInputEvent: (message) =>
+            this.currentDataPeer === peer
+              ? this.input.onEvent(message)
+              : acceptedDataMessage,
+          onInputReset: (message) =>
+            this.currentDataPeer === peer
+              ? this.input.onReset(message)
+              : acceptedDataMessage,
         },
       });
     } catch {
@@ -438,9 +452,11 @@ class SubsystemHost {
       return;
     }
     this.currentDataPeer = peer;
+    this.input.setDataPeer(peer);
     void peer.terminal.then(() => {
       if (this.currentDataPeer !== peer) return;
       this.currentDataPeer = null;
+      this.input.setDataPeer(null);
       this.startDataAcquire();
     });
   }
@@ -458,6 +474,7 @@ class SubsystemHost {
     attempt?.controller.abort();
     const peer = this.currentDataPeer;
     this.currentDataPeer = null;
+    this.input.setDataPeer(null);
     if (peer === null) return;
     const close = peer.close().catch(() => {});
     this.dataCleanup = Promise.allSettled([this.dataCleanup, close]).then(() => undefined);
@@ -518,6 +535,7 @@ class SubsystemHost {
     this.leaveDataReady();
     this.scopeController.abort();
     this.frames?.abortAll();
+    this.input.closeAll();
     void this.finishFatal(primary);
   }
 
@@ -525,6 +543,7 @@ class SubsystemHost {
     if (this.terminal?.kind !== "graceful") return;
     this.scopeController.abort();
     this.frames?.abortAll();
+    this.input.closeAll();
     await this.bounded(this.bestEffortStatus({ state: "stopping" }));
     await this.bounded(
       Promise.allSettled([

@@ -5,7 +5,7 @@
 > 稳定程度：Evolving overall / **M10 qualification Frozen**  
 > 主要定义：protocol mechanics、role authority、Platform provisioning、M10 Input revision 2 + frozen SDK/source projection、Desktop/PWA E2E qualification  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> M10 closure：[M10 / 05](../../M10_05_QUALIFICATION_CLOSURE.md)  
+> M10 closure：[M10 / 05](https://github.com/lithdoo/loom-realm/blob/main/M10_05_QUALIFICATION_CLOSURE.md)
 > 最近复核：2026-09-07
 
 测试目标不是“消息能通”，而是证明每层不能绕过 authority、lifecycle、failure-domain、public SDK semantics、PREPARE 与 package boundary。

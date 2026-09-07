@@ -62,8 +62,8 @@ test("holder atomically installs initial peer+Snapshot before consuming later st
   assert.ok(Object.isFrozen(holder.current()));
 });
 
-test("public holder factory keeps the exact optional one-argument M8 seam", () => {
-  assert.equal(createRendererControlHolder.length, 1);
+test("public holder factory keeps old M8 calls valid while accepting the M10 source seam", () => {
+  assert.equal(createRendererControlHolder.length, 2);
   assert.ok(createRendererControlHolder());
   assert.throws(() => createRendererControlHolder(null), /Invalid RendererDataBinding/);
   assert.throws(() => createRendererControlHolder({}), /Invalid RendererDataBinding/);
@@ -71,6 +71,7 @@ test("public holder factory keeps the exact optional one-argument M8 seam", () =
     () => createRendererControlHolder({ get acquire() { throw new Error("getter"); } }),
     /Invalid RendererDataBinding/,
   );
+  assert.throws(() => createRendererControlHolder(undefined, null), /Invalid RendererInputSource/);
 });
 
 test("replacement identity ignores old late state and old terminal", async () => {
