@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：M0..M16 实现顺序、Game/Launcher/Main bootstrap boundary、Runtime Control mechanics、Renderer/Data/Input/Render/Content capability 与 Desktop/PWA qualification  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[正式契约目录](../15-contracts/README.md)  
-> 最近复核：2026-09-04
+> 最近复核：2026-09-07
 
 核心顺序：
 
@@ -249,11 +249,39 @@ M9 is **not** Desktop full Renderer product composition。BrowserWindow/physical
 
 ---
 
-## M10：User Input v1 + InputManager
+## M10：User Input v1 + InputManager — **Implementation Frozen / Preimplementation Closed**
 
-Frame Interest Registry + State/Event/Reset + Renderer sender gate + Subsystem InputListener/InputManager + fresh Activation/Data publication semantics。
+Facts：Frozen User Input v1 + existing Subsystem/Web Renderer module boundaries + root implementation plans：
 
-M10 is where fresh Data peer/current receives and qualifies User Input business baseline; M9 only proves fresh physical carrier/peer lifecycle。
+```text
+M10_01_SUBSYSTEM_INPUT_MANAGER.md
+M10_02_RENDERER_INPUT_GATE.md
+M10_03_RENDERER_INPUT_PRODUCERS.md
+M10_04_VERTICAL_INTEGRATION.md
+M10_05_QUALIFICATION_CLOSURE.md
+```
+
+M10只增加真实 role behavior：
+
+```text
+@loomrealm/subsystem
+    InputListener + one role-local InputManager
+    desired Interest aggregation / receive gate
+
+@loomrealm/renderer
+    Effective = current Data × Main InputTarget × Interest[F] × Producer(C)
+    Reset / fresh baseline / State-Event ordering
+    one narrow canonical producer seam
+
+M9 Desktop Data lifecycle
+    consumed unchanged for real User Input business baseline
+```
+
+No new Main authority、Platform Port、generic Input framework、Store/EventBus、cross-plane ACK/revision/barrier、retry/replay/history。
+
+M10 qualification must include fresh Activation and same-generation fresh Data peer baselines；historical Event never replays。BrowserWindow/DOM physical input remains M14。
+
+Implementation完成时新增 root `npm run test:m10`；文档阶段不提前加入空 gate。
 
 ---
 
