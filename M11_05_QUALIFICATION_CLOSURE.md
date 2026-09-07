@@ -153,11 +153,13 @@ test-only Data generation authority
 
 ---
 
-## 6. Explicit Fixture Evidence
+## 6. Executable Fixture Catalog / Evidence
 
-Formal qualification 不允许用 group-level test 名义替代逐-fixture evidence。
+Runner 直接从 Frozen `render-update-conformance-v1.md` 的 M11 application-role Required fixture code blocks（§§5–20）建立 current normative catalog；不得维护第二份手写 fixture-name 清单。§21 `transport` 不进入 M11 catalog。
 
-每个 claimed role 的每个 normative fixture descriptor 必须在 runner 中 **exactly once** 注册并执行，evidence 至少记录：
+每个 catalog fixture 必须显式绑定 assertion callback 与至少一个 M11 claimed role mapping；group pass 不得批量合成 fixture pass。
+
+每个 claimed role 的每条 evidence 至少记录：
 
 ```text
 protocol = loomrealm.render-update
@@ -165,23 +167,26 @@ protocolVersion = 1
 fixtureSetRevision = 1
 role = subsystem-sender | renderer-receiver
 group
-fixture
+fixture = normative fixture id
 result = pass
 ```
 
-final audit 必须失败于任何：
+只有对应 assertion callback 真正成功后才能记录 `pass`。
+
+Final audit 必须验证：
 
 ```text
-missing fixture
-duplicate fixture registration
-registered but unexecuted fixture
-unexpected claimed role
-non-pass claimed fixture
+normative §§5..20 groups all registered
+normative fixture catalog exactly once
+no unknown fixture/group
+no duplicate fixture registration/evidence
+no registered-but-unexecuted fixture
+required claimed role mapping per fixture is non-empty
+passed evidence == executed claimed evidence
+no transport role evidence in M11 claim
 ```
 
-`transport` fixture 不注册进 M11 claimed-role audit。
-
-Qualification adapter 只负责把 fixture observable actions 映射到当前实现；不得成为未来协议的 generic conformance framework。
+Qualification adapter只把 fixture observable actions映射到当前生产实现或 package-private qualification seam；不得成为未来协议的 generic conformance framework，不得读取内部 Map/tree layout作为 assertion truth。
 
 ---
 
@@ -236,7 +241,7 @@ closure 后记录：
 doc/30-implementation/m11-qualification.md
 ```
 
-至少包含 protocol/version/fixtureSetRevision、两个 claimed role 的 fixture counts/results、real vertical、M10 regression 与 root gate result。
+至少包含 protocol/version/fixtureSetRevision、catalog fixture count、两个 claimed role 的 evidence counts/results、real vertical、M10 regression 与 root gate result。
 
 ---
 
