@@ -1,6 +1,6 @@
 # M10 / 05 — Qualification and Closure
 
-> 状态：**Implemented / Qualification Pending**
+> 状态：**Implemented / Qualification Pending**  
 > 阶段：M10 User Input  
 > 落地顺序：05  
 > 最近复核：2026-09-07  
@@ -9,451 +9,245 @@
 > Conformance：[User Input v1 Conformance](doc/15-contracts/user-input-conformance-v1.md)  
 > 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-> **M10 implementation = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Desired Interest、Renderer Producer经 current Data收敛为 deterministic business input；State保持 current truth，Event保持 future-only，旧 lease/carrier/source facts不可复活。正式 Closed 声明等待 fixtureSetRevision 2 的完整可执行 role qualification。**
+M10 implementation 已完成。M10/05只负责把现有实现变成可重复、可审计的正式 qualification evidence；不再设计 Input API、authority、wire 或新的 runtime abstraction。
 
 ---
 
-## 1. Closure Scope
+## 1. Close Gate
 
-必须实现：
-
-```text
-@loomrealm/subsystem
-    minimal exact Input author surface
-    exactly one InputManager / instance
-    listener contribution + registration semantics
-    Desired Interest aggregation + validation
-    retained immutable State + delivery gate
-    deterministic synchronous delivery semantics
-    async handler isolation
-    latest-only Interest publisher
-
-@loomrealm/renderer
-    createRendererControlHolder(data?, input?)
-    RendererInputSource
-    current Interest Registry per Data peer
-    Effective gate
-    bounded State/Event/Reset publisher
-    current-Control-scoped source subscription
-    local start/stop failure containment
-
-existing @loomrealm/data
-    typed User Input mechanics reused unchanged
-
-M9 Desktop vertical
-    real paired Data lifecycle consumed by M10
-```
-
-M10不改变 Main InputTarget authority，不新增 Platform Port、wire message/version或 package。
-
----
-
-## 2. No Remaining Design Decisions
-
-实现阶段可以选择：
+M10 只有在以下全部成立后才能声明 Closed：
 
 ```text
-private class/function names
-Map/Set/array layout
-how registration order is represented internally
-finite Event queue capacity
-JSON detach/freeze implementation
-source-subscription token representation
-one-time FrameRuntime binding representation
-test file split
-```
-
-实现阶段不得再选择：
-
-```text
-root Input export set
-handler payload vs envelope
-on() whether changes Interest
-setChannels whether deletes handlers
-unsubscribe/close idempotence
-observable handler order
-mutation during delivery current-vs-next effect
-whether async handlers block Data reader
-recoverable frame.call rejection vs State convergence ordering
-Renderer source API/lifetime/restart/failure behavior
-Event/Reset barrier behavior
-Data/Control/Activation authority semantics
-```
-
----
-
-## 3. Abstraction Budget
-
-允许：
-
-```text
-one InputManager
-listener contribution + registration records
-one DesiredRegistry
-minimal immutable retained State
-0..1 inFlight + pendingLatest Interest publication
-one Renderer input gate per current Data slot
-one bounded input publisher
-one construction-time RendererInputSource
-0..1 current source subscription
-one local source-start staging record
-```
-
-禁止：
-
-```text
-Generic Input / Queue / Authorization framework
-InputDeviceRegistry / plugin system
-Action/Command mapping
-EventBus / Observable / Store
-registration ordinal/counter abstraction required only by docs
-extra root supporting aliases only for symmetry
-Frame/InputTarget/Activation shadow registry
-Data generation allocator for M10 tests
-cross-plane ACK/revision/barrier
-second Data reader/writer
-retry/replay/history
-BrowserWindow/DOM composition
-new Input error hierarchy solely for M10
-generic source retry/backoff framework
-```
-
----
-
-## 4. Exact Subsystem SDK Evidence
-
-Root exports exactly：
-
-```text
-InputStateChannel
-InputEventChannel
-InputChannel
-KeyboardStateInput
-KeyboardEventInput
-PointerStateInput
-PointerEventInput
-GamepadStateInput
-GamepadEventInput
-InputPayload
-InputHandler
-Unsubscribe
-CreateInputListenerOptions
-InputListener
-```
-
-以及 `SubsystemScope.createInputListener`。
-
-必须证明：
-
-```text
-six standard payload names structurally match User Input v1 payloads
-custom x.* resolves through InputPayload<C> to bounded JSON object shape
-supporting nested types are obtainable through payload indexed access
-supporting aliases are not separately root-exported merely for symmetry
-handler sees payload only
-business Definition needs only @loomrealm/subsystem import
-```
-
-Listener behavior：
-
-```text
-channels own Interest contribution
-on/unsubscribe never change Interest
-channels=[] valid
-duplicate contribution invalid
-setChannels preserves registrations
-removed registration dormant / re-add reactivates
-unsubscribe idempotent
-close idempotent
-on/setChannels after close → TypeError
-foreign Frame → TypeError
-known local closed Frame → FrameClosedError
-hard-limit overflow → RangeError
-invalid mutation leaves local/wire/Data state unchanged
-```
-
-Bootstrap evidence必须证明 InputManager可在 Definition factory前创建并由 scope引用，FrameRuntime随后一次性绑定；不得创建 dummy/shadow Frame registry。
-
----
-
-## 5. Retained State / Handler Evidence
-
-必须证明：
-
-```text
-retained State detached/deep-immutable
-business mutation cannot corrupt later baseline
-payload object identity not required
-new active state registration gets one synchronous retained baseline
-reactivated dormant state registration gets current baseline while union stayed live
-true union removal clears retained State
-event registration/reactivation gets no history
-```
-
-Determinism：
-
-```text
-same-channel matching handlers follow successful on() registration order
-multi-channel local convergence uses canonical ASCII channel order
-stable matching-registration snapshot per delivery
-callback mutation affects subsequent delivery only
-sync throw contained; later matching handlers still attempted
-Promise rejection contained
-Promise never settles does not stall later handlers/Data reader
-```
-
-Qualification **不得**要求某个 private ordinal/counter implementation。
-
----
-
-## 6. Mutation Gate / ADR 0029 Evidence
-
-```text
-pending commit-sensitive mutation
-→ same-Activation State retained but not delivered
-→ Event dropped
-→ current Reset clears retained/suppressed State
-
-known no-commit + same Activation reopen
-→ mutation eligibility restored
-→ latest retained State handlers synchronously attempted
-→ only then frame.call recoverable rejection becomes observable
-→ no Event replay
-
-commit / Activation revoke / admin suspend / terminal
-→ suppressed old-Activation State discarded
-```
-
-Business `catch` 开始时，同步 State-handler side effect必须已发生；async handler Promise settlement不属于 barrier。
-
----
-
-## 7. Renderer Gate / Publisher Evidence
-
-必须证明：
-
-```text
-Effective = Data × InputTarget × active F/A × Interest × Producer
-Interest-first / authority-first converge
-unknown/stale Interest inert
-fresh state Effective transition sends self-contained baseline
-event begins future-only
-same-carrier target replacement Reset(old) before new ordinary input
-producer loss Reset/rebaseline
-Control loss disables immediately
-Data retirement discards Registry/publisher state
-old Data/Control facts cannot emit after replacement
-```
-
-Ordering/backpressure：
-
-```text
-State latest-pending only between barriers
-Event never coalesces/replays
-Event = global State-coalescing barrier
-Reset = global State-coalescing barrier
-State cannot cross Event/Reset
-post-transition State before paired Event
-bounded Event overflow drops before emitted
-surviving Event order preserved
-ordinary Input backlog cannot overflow generic Data writer into local-fatal
-lease/Data retirement discards obsolete not-started input
-```
-
-Event queue capacity是 private finite constant，不形成 compatibility surface。
-
----
-
-## 8. Renderer Source Evidence
-
-Exact surface：
-
-```text
-createRendererControlHolder(data?, input?)
-RendererInputSource.start(emit) → idempotent stop
-RendererInputSourceChange = availability | state | event
-```
-
-必须证明：
-
-```text
-old one-argument factory call valid
-no source → Producer unavailable
-source object fixed at holder construction
-no current Control → no subscription
-current Control install → exactly one start attempt
-successful start → exactly one active subscription
-replacement/terminal → invalidate + stop old subscription
-late old emit ignored
-same holder later current Control → same source object restarted
-fresh subscription inherits no old facts
-start never replays historical Event
-state availability requires fresh sample
-state loss clears sample
-state return supplies fresh sample before available=true
-source cannot choose Frame/Activation or bypass publisher/Data peer
-```
-
-Failure：
-
-```text
-start throw/non-function/partial bootstrap failure
-→ partial facts discarded
-→ Producer unavailable for current Control epoch
-→ no same-epoch retry
-→ Control/Data remain current
-
-stop throw
-→ subscription already invalidated
-→ contained
-→ old facts never resurrect
-```
-
----
-
-## 9. Real Vertical Evidence
-
-必须使用真实：
-
-```text
-Main Runtime/Frame/InputTarget authority
-Renderer Control holder
-M9 Desktop authority feed + Broker
-Hostra Runtime data provisioner
-paired Data WebSocket
-RendererDataPeer + SubsystemDataPeer
-Subsystem business Definition
-```
-
-仅 physical canonical input source可 deterministic。
-
-至少覆盖：
-
-```text
-minimal exact SDK surface behavior
-initial active Frame input
-Interest-first / authority-first
-nested child call / fresh caller Activation
-recoverable frame.call no-commit State-before-rejection convergence
-committed call suppresses old-Activation retained State
-same-generation Data reconnect / fresh State / no Event replay
-fresh-generation role fixture
-Control replacement + source restart / late-source isolation
-producer loss/return
-handler sync/async isolation
-Frame close cleanup
-```
-
-Source start/stop failure可由 renderer package deterministic tests独立证明，不要求塞进大 vertical。
-
----
-
-## 10. Formal Conformance Boundary
-
-Current User Input v1：
-
-```text
-protocolVersion = 1
 fixtureSetRevision = 2
+
+Subsystem Interest Sender      qualified
+Renderer Input Sender         qualified
+Subsystem Input Receiver      qualified
+
+M10 SDK/source projection     qualified
+Hostra/Desktop real vertical  pass
+M9 regression                 pass
 ```
 
-M10正式关闭前必须通过全部 platform-independent Renderer/Subsystem protocol role obligations，以及本 milestone 的 SDK/source projection qualification。当前 package、regression 与 vertical gate 不能替代逐 fixture 的正式 conformance runner。
-
-M10 closure wording：
-
-```text
-User Input v1 Renderer/Subsystem role implementation
-qualified against current platform-independent fixtureSetRevision=2
-plus frozen M10 SDK/source projection semantics
-on Hostra/Desktop physical Data lifecycle
-```
-
-不得声明完整 Hostra/PWA transport-equivalence；留到 M16。
+完整 Hostra/PWA transport equivalence 不属于 M10，留到 M16。
 
 ---
 
-## 11. Regression Boundary
+## 2. Qualification Runner
 
-必须保持：
-
-```text
-M3 Runtime Control unchanged
-M5 Main Frame/Activation/InputTarget authority unchanged
-M7 Renderer currentness/replacement unchanged
-M8 Data role currentness/failure isolation unchanged
-M9 Broker paired installation/recovery unchanged
-Data failure != Runtime failure / Frame unwind
-```
-
-除 ADR 0029 的 Subsystem-local correction外，不修改 Frozen User Input v1 wire/authority/lifetime模型。
-
----
-
-## 12. CI Gate
-
-实现完成时 root 新增：
+增加 implementation-neutral conformance runner：
 
 ```text
-npm run test:m10
+formal fixture
+→ role adapter
+→ current @loomrealm/* implementation
+→ observable trace/result
 ```
 
-至少组合：
+runner 只观察协议允许的行为，不依赖 private `Map`、queue、class 或内部字段。
+
+Role adapters exactly：
 
 ```text
-M9 dependency/build gates
-User Input fixtureSetRevision=2
-Subsystem minimal SDK surface/type/bootstrap tests
-Subsystem InputManager lifecycle/order/async tests
-Renderer gate/publisher/source lifecycle/failure tests
-real M10 vertical
+subsystem-interest-sender
+renderer-input-sender
+subsystem-input-receiver
 ```
 
-该 gate已由真实 build、package role regressions 与 vertical组成，不是空 gate；但它当前是 implementation regression gate，不声明覆盖 conformance 文档中的每个命名 fixture。
-
----
-
-## 13. Closure Claim
-
-当前证据允许声明：
-
-```text
-M10 = Implemented / Regression Verified
-User Input v1 fixtureSetRevision 2 formal role qualification = pending
-```
-
-不得提前声明 BrowserWindow Input、Render、Content 或 PWA/full cross-platform User Input conformance complete。
-
----
-
-## 14. Implementation Verification Record
-
-2026-09-07 implementation evidence：
+每个 fixture 至少记录：
 
 ```text
 protocol = loomrealm.user-input
 protocolVersion = 1
 fixtureSetRevision = 2
-implemented roles = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
-implementation regression result = pass
-formal fixture-by-fixture role qualification = not yet claimed
+role
+group
+fixture
+result
 ```
 
-落地证据：
+不增加第二套 runtime、Data authority 或 test-only generation model。
+
+---
+
+## 3. Required Fixture Groups
+
+按 Frozen Conformance Profile 覆盖全部 platform-independent required groups：
 
 ```text
-packages/subsystem/src/internal/input-manager.ts
-packages/renderer/src/internal/input-gate.ts
-packages/renderer/src/input.ts
-packages/main/test/runtime.test.mjs
-apps/desktop/test/m10-input-vertical.test.mjs
-test/m10-boundary.test.mjs
+wire-schema / limits / channel
+interest / author-usage / listener
+lifetime / fresh-carrier
+authority / producer
+mutation-gate
+state-event / reset / backpressure
+keyboard / pointer / gamepad / custom
+failure
 ```
 
-实现回归门禁：
+优先证明高风险语义：
+
+```text
+Interest-first / authority-first convergence
+mutation-gate retained State + Event drop
+known-no-commit same-Activation State-before-rejection convergence
+commit discards suppressed old-Activation State
+same-generation reconnect fresh State / no Event replay
+InputTarget replacement Reset(old) before new input
+producer loss/return baseline semantics
+bounded backlog + stale lease/carrier isolation
+```
+
+Fixture 名称和 expected observable behavior 以 current `user-input-conformance-v1.md` 为准；本文件不复制第二份规范。
+
+---
+
+## 4. M10-specific Qualification
+
+Formal protocol role qualification 之外，还必须证明当前 M10 implementation contract：
+
+### Subsystem author surface
+
+```text
+SubsystemScope.createInputListener
+channels/setChannels owns Interest contribution
+on/unsubscribe owns callbacks only
+setChannels keeps dormant registrations
+stable registration-order delivery
+handler receives canonical payload only
+business Definition depends only on @loomrealm/subsystem
+```
+
+### Renderer source surface
+
+```text
+createRendererControlHolder(data?, input?)
+one construction-time RendererInputSource
+0..1 subscription for current Control
+replacement/terminal invalidates old subscription
+late old emit ignored
+same holder may restart same source for later Control
+source cannot choose Frame/Activation
+```
+
+这些属于 M10 implementation qualification，不升级成 User Input v1 protocol structure。
+
+---
+
+## 5. Real Vertical
+
+复用现有 M9/M10 physical path：
+
+```text
+Hostra prepare/runtime
+→ Main Runtime/Frame/InputTarget authority
+→ Renderer Control
+→ Desktop Data Broker
+→ RendererDataPeer ⇄ SubsystemDataPeer
+→ Renderer Input Gate
+→ Subsystem InputManager
+→ business Definition
+```
+
+至少保留：
+
+```text
+initial active Frame input
+nested Frame / fresh Activation
+recoverable no-commit convergence
+committed-call old Activation suppression
+same-generation Data reconnect
+Control replacement / source restart
+producer loss/return
+Frame close cleanup
+old Data/Control/source isolation
+```
+
+真实 Browser DOM/Gamepad source 不属于 M10；M14 必须复用已经冻结的 M10 source contract。
+
+---
+
+## 6. Regression Gate
+
+最终 root gate 应表达：
 
 ```text
 npm run test:m10
-result = pass
+= M9 regression
++ M10 package/SDK/source tests
++ User Input fixtureSetRevision 2 qualification
++ real M10 Hostra/Desktop vertical
 ```
 
-该记录只证明 current implementation regressions、frozen M10 SDK/source boundary 与现有 Hostra/Desktop vertical；完整 fixtureSetRevision 2 role qualification 尚需独立的逐 fixture 可执行证据，Hostra/PWA transport equivalence仍留到 M16。
+M10 close 不允许通过改变以下既有语义换取测试通过：
+
+```text
+Main InputTarget authority
+Frame / Activation ownership
+Renderer currentness
+Data currentness/failure isolation
+Data failure != Runtime failure / Frame unwind
+State current-truth / Event future-only
+no retry / no replay
+```
+
+---
+
+## 7. Abstraction Budget
+
+Close 工作允许新增：
+
+```text
+fixture catalog
+small role adapters
+trace/assert helpers
+qualification report output
+```
+
+禁止新增：
+
+```text
+generic conformance framework for future protocols
+Generic Input / EventBus / Observable / Store
+shadow Frame/InputTarget/Data authority
+protocol simulator replacing real role implementation
+retry/replay/ACK layer
+new public M10 API only for testing
+```
+
+测试 seam 可以是 package-private；不得为了 harness 扩张生产架构。
+
+---
+
+## 8. Closure Record
+
+全部 gate 通过后，把本文件状态改为：
+
+```text
+M10 = Implemented / Qualified / Closed
+```
+
+并记录一次固定 qualification snapshot：
+
+```text
+protocol = loomrealm.user-input
+protocolVersion = 1
+fixtureSetRevision = 2
+roles = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
+platform-independent role qualification = pass
+M10 SDK/source qualification = pass
+Hostra/Desktop vertical = pass
+M9 regression = pass
+```
+
+同时更新 README 与 Phase 1 delivery status，然后 M11 implementation gate 才可开启。
+
+M10 close 不声明：
+
+```text
+BrowserWindow/DOM physical input complete
+Render complete
+Content complete
+PWA complete
+Hostra/PWA transport equivalence complete
+```
