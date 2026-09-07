@@ -38,6 +38,8 @@ ADR 0023 + ADR 0029
 
 ADR 0029 只修正 Subsystem mutation-gate期间 same-Activation `.state` 的 local retention/convergence；wire schema、authority、Renderer Effective、Data profile identity不变。
 
+M10 exact author SDK / Renderer source projection属于 role implementation contract，由根目录 `M10_01`–`M10_05` 冻结；不反向扩大 formal User Input wire contract。
+
 ---
 
 ## 2. Bootstrap Boundary
@@ -116,7 +118,7 @@ Input Lease      = Activation scoped
 Wire Publication= Data carrier scoped
 ```
 
-Current revision 2 clarification：
+Current revision 2：
 
 ```text
 commit-sensitive mutation gate closed
@@ -166,7 +168,7 @@ M6 Hostra Runtime          ✅
 M7 Renderer Control       ✅
 M8 Data Role/Core         ✅
 M9 Desktop Data Broker    ✅
-M10 User Input            preimplementation closed / implementation next
+M10 User Input            Implementation Frozen / Ready for Implementation
 M11 Render                pending
 M12 Content               pending
 M13 loom.map              pending
@@ -175,7 +177,7 @@ M15 PWA Runtime           pending
 M16 PWA Full E2E          pending
 ```
 
-M10 implementation依据：`M10_01`–`M10_05` + User Input `fixtureSetRevision=2`。
+M10 implementation依据：`M10_01`–`M10_05` + User Input `fixtureSetRevision=2`。从当前状态起不再要求另一轮 design closure。
 
 ---
 
