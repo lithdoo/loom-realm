@@ -1,17 +1,18 @@
 # M11 / 02 — Render Publication
 
-> 状态：**Planned**  
+> 状态：**Implementation Frozen / Waiting on M10 Closure**  
 > 阶段：M11 Render  
 > 落地顺序：02  
 > 最近复核：2026-09-07  
 > 前置：[M11 / 01](M11_01_SUBSYSTEM_RENDER_MANAGER.md)  
-> 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)
+> 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)  
+> 目标：把 Subsystem-owned Render state投影到 current Data carrier；只实现 Frozen Render Update v1 publication lifecycle。
 
-M11/02把 Subsystem-owned business Render state投影到 current Data carrier；只实现 Render Update v1 publication lifecycle，不改变 business Domain ownership。
+> **publication state属于 generation/carrier lifecycle，不是第二份 business authority。**
 
 ---
 
-## 1. Goal
+## 1. Frozen Position
 
 ```text
 business Render Domains
@@ -19,8 +20,6 @@ business Render Domains
 → current Data carrier
 → render.domains / snapshot / patch / event
 ```
-
-publication state属于 wire/carrier lifecycle，不是第二份 business authority。
 
 ---
 
@@ -47,14 +46,12 @@ unbaselined
 
 ## 3. Identity / Generation
 
-必须保持：
-
 ```text
 wire Domain identity
 = Session × subsystemKey × DataAuthority generation × domainId
 ```
 
-因此：
+必须保持：
 
 ```text
 same-generation carrier replacement
@@ -73,7 +70,7 @@ carrier replacement不得被实现成 business Domain recreate。
 
 ## 4. Publication Rules
 
-每个 carrier + Domain维护最小 publication cursor：
+每个 carrier + Domain只维护：
 
 ```text
 unbaselined | baselined(revision)
@@ -84,8 +81,8 @@ unbaselined | baselined(revision)
 ```text
 Registry present before Domain message
 fresh baseline uses Snapshot
-Patch only from current revision R to R+1
-post-baseline Snapshot also commits R+1
+Patch only R→R+1
+post-baseline Snapshot commits R+1
 Event ordered, transient, never replayed
 Domain removal discards pending unsent Domain messages
 carrier loss discards old cursor/pending publication
@@ -97,10 +94,10 @@ carrier loss discards old cursor/pending publication
 
 ## 5. Backpressure
 
-只实现协议需要的有界 publication：
+只实现协议要求的有界 publication：
 
 ```text
-authoritative desired state may coalesce before emitted boundary
+desired authoritative state may coalesce before emitted boundary
 Event remains ordering barrier
 old carrier pending work cannot cross replacement
 ```
@@ -151,4 +148,4 @@ Domain removal publication barrier
 revision continuity
 ```
 
-M11/02完成后，Subsystem侧应能通过现有 Data peer产生完整合法 Render Update v1 trace。
+M11/02完成后，Subsystem侧应能通过现有 Data peer产生合法 Render Update v1 trace。
