@@ -4,9 +4,9 @@
 > 状态：Active / Normative / Frozen  
 > Profile 版本：1  
 > 适用协议：`loomrealm.user-input / 1`  
-> fixtureSetRevision：1  
-> 依赖：[User Input Protocol v1](./user-input-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)  
-> 最近复核：2026-08-21
+> fixtureSetRevision：2  
+> 依赖：[User Input Protocol v1](./user-input-v1.md)、[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)、[ADR 0023](../decisions/0023-user-input-v1-semantic-closure.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 最近复核：2026-09-07
 
 本文固定 User Input v1 独立实现必须证明的 observable behavior。与主协议冲突时以 [User Input Protocol v1](./user-input-v1.md) 为准。
 
@@ -14,7 +14,7 @@
 
 ## 1. Conformance Claims
 
-完整角色声明：
+完整角色 claim：
 
 ```text
 LoomRealm User Input v1 Subsystem Interest Sender Conformant
@@ -27,21 +27,14 @@ LoomRealm User Input v1 Subsystem Input Receiver Conformant
 ```text
 protocol = loomrealm.user-input
 protocolVersion = 1
-fixtureSetRevision = 1
+fixtureSetRevision = 2
 role = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
 result = pass
 ```
 
-不得声明：
+不得用 revision 1 结果声明 current complete conformance，也不得声明 keyboard-only/state-only/no-reset/DOM-event-compatible 为 User Input v1 conformant。
 
-```text
-keyboard-only v1 conformant
-no-reset v1 conformant
-state-only v1 conformant
-DOM-event compatible = User Input v1 conformant
-```
-
-若实现声称支持完整 `loomrealm.renderer-data/1`，还必须满足对应 Data Profile 的全部 child protocol要求。
+完整 `loomrealm.renderer-data/1` claim还必须满足 Data Profile 全部 child/composition obligations。
 
 ---
 
@@ -50,122 +43,88 @@ DOM-event compatible = User Input v1 conformant
 Renderer harness至少观察：
 
 ```text
-current Data carrier identity/current-retired
+current Data carrier/current-retired
 current Control mirror/InputTarget
 published Interest Registry
 Producer availability
 per (F,A,C) Effective
 outbound User Input application trace
+publisher pending/inFlight bounds
 ```
 
 Subsystem harness至少观察：
 
 ```text
-local Frame existence/lifecycle/current Activation
+local Frame lifecycle/current Activation/mutation gate
 local Desired Interest
 retained State by (F,A,state-channel)
 business-delivered State/Event trace
 Reset application
-current Data carrier identity
+current Data carrier
+listener configuration/lifetime
 ```
 
-测试比较协议可观察事实，不要求暴露真实内部 Map/queue/DOM/native object。
+测试验证 observable behavior，不要求暴露真实 Map/queue/internal class。
 
 ---
 
-## 3. Fixture Manifest
+## 3. Required Groups
 
-```ts
-interface UserInputFixtureManifestV1 {
-  readonly fixtureFormatVersion: 1;
-  readonly protocol: "loomrealm.user-input";
-  readonly protocolVersion: 1;
-  readonly fixtureSetRevision: 1;
-  readonly fixtures: readonly UserInputFixtureDescriptorV1[];
-}
-
-interface UserInputFixtureDescriptorV1 {
-  readonly id: string;
-  readonly role:
-    | "subsystem-interest-sender"
-    | "renderer-input-sender"
-    | "subsystem-input-receiver";
-  readonly group:
-    | "wire-schema"
-    | "limits"
-    | "interest"
-    | "authority"
-    | "lifetime"
-    | "state-event"
-    | "reset"
-    | "producer"
-    | "keyboard"
-    | "pointer"
-    | "gamepad"
-    | "custom"
-    | "failure"
-    | "transport-equivalence";
-}
+```text
+wire-schema
+limits
+channel
+interest
+author-usage
+lifetime
+authority
+mutation-gate
+state-event
+reset
+backpressure
+producer
+keyboard
+pointer
+gamepad
+custom
+listener
+failure
+fresh-carrier
+transport-equivalence
 ```
-
-`fixtureSetRevision` 不进入 wire，也不是 replay cursor/version negotiation。
 
 ---
 
-## 4. Wire / Closed Schema
+## 4. Wire / Channel / Limits
 
 Required：
 
 ```text
-wire-valid-interest
-wire-valid-state
-wire-valid-event
-wire-valid-reset
-wire-top-level-not-object
-wire-invalid-json
-wire-unknown-input-type
-wire-extra-top-level-member
-wire-missing-required-member
-wire-wrong-member-type
-wire-state-channel-event-suffix-rejected
-wire-event-channel-state-suffix-rejected
-wire-reserved-unknown-standard-channel-rejected
+wire-valid-interest/state/event/reset
+wire-invalid-json / top-level-not-object / unknown-input-type
+wire-extra-member / missing-member / wrong-member-type
+wire-state-event-suffix-mismatch
+wire-reserved-unknown-standard-channel
 wire-source-duplicate-member-follows-wire-semantics
-wire-message-exact-byte-limit
-wire-message-one-byte-over
-wire-json-depth-exact-limit
-wire-json-depth-one-over
-```
+wire-message-exact-byte-limit / one-over
+wire-json-depth-exact-limit / one-over
 
-Protocol-invalid application unit MUST retire current Data carrier；不得作为普通 stale/drop处理。
-
----
-
-## 5. Channel Grammar
-
-Required：
-
-```text
 channel-six-standard-exact
-channel-custom-single-segment
-channel-custom-multi-segment
-channel-custom-max-total-length
-channel-custom-one-byte-over
-channel-custom-segment-max
-channel-custom-segment-one-over
-channel-custom-uppercase-rejected
-channel-custom-leading-digit-rejected
-channel-custom-empty-segment-rejected
-channel-custom-wildcard-rejected
-channel-unknown-non-x-rejected
+channel-custom-single/multi-segment
+channel-custom-max-total / one-over
+channel-custom-segment-max / one-over
+channel-uppercase/leading-digit/empty-segment/wildcard rejected
+channel-unknown-non-x rejected
 channel-case-sensitive
+
+payload-exact-byte/depth/member limits
 ```
 
-Standard channel不可通过 `x.*` grammar改变其语义。
+Protocol-invalid MUST retire current Data；不能降级为 stale/drop。
 
 ---
 
-## 6. Interest Registry
+## 5. Interest / Author Usage
 
 Required：
 
@@ -174,46 +133,54 @@ interest-empty-registry-valid
 interest-full-replacement
 interest-frame-absence-means-empty
 interest-empty-frame-channels-rejected
-interest-duplicate-frame-rejected
-interest-duplicate-channel-rejected
-interest-frame-order-canonical
-interest-channel-order-canonical
-interest-exact-frame-limit
-interest-one-over-frame-limit
-interest-exact-channels-per-frame
-interest-one-over-channels-per-frame
-interest-exact-total-pairs
-interest-one-over-total-pairs
+interest-duplicate-frame/channel rejected
+interest-frame/channel canonical order
+interest-exact/over frame limit
+interest-exact/over channels-per-frame
+interest-exact/over total pairs
 interest-latest-unsent-coalescing
 interest-local-update-before-publication
-interest-frame-close-removes-local-desired-before-success
+interest-frame-close-local-cleanup-before-success
+interest-unknown-control-frame-inert
 ```
 
-Unknown/stale Control Frame的 well-formed Interest必须 inert，而不是 protocol fatal。
+M10 author projection additionally：
+
+```text
+author-invalid-channel-local-rejection
+author-duplicate-contribution-local-rejection
+author-union-over-frame-limit-local-rejection
+author-registry-over-global-limit-local-rejection
+author-invalid-update-preserves-old-config
+author-invalid-update-wire-send-zero
+author-invalid-update-does-not-retire-data
+```
 
 ---
 
-## 7. Three-lifetime Separation
+## 6. Three Lifetimes / Fresh Carrier
 
 Required：
 
 ```text
-lifetime-interest-survives-suspension
+lifetime-interest-survives-child-suspension
 lifetime-interest-survives-fresh-activation
-lifetime-old-state-does-not-survive-activation
-lifetime-old-event-does-not-survive-activation
+lifetime-old-state/event-do-not-survive-activation
 lifetime-desired-interest-survives-same-generation-reconnect
 lifetime-desired-interest-survives-fresh-generation-when-frame-live
-lifetime-remote-interest-resets-on-fresh-carrier
-lifetime-retained-state-resets-on-fresh-carrier
-lifetime-event-history-not-replayed-on-fresh-carrier
-lifetime-data-reconnect-does-not-create-frame
-lifetime-data-reconnect-does-not-create-activation
+lifetime-remote-interest-empty-on-fresh-carrier
+lifetime-retained-state-empty-on-fresh-carrier
+lifetime-event-history-empty-on-fresh-carrier
+lifetime-data-reconnect-does-not-create-frame/activation
+fresh-carrier-republish-current-desired-interest
+fresh-carrier-current-target-plus-interest-fresh-state
+same-generation-no-old-event-replay
+fresh-generation-no-old-wire-state/event-replay
 ```
 
 ---
 
-## 8. Cross-plane Authority Convergence
+## 7. Cross-plane Authority
 
 Required：
 
@@ -221,12 +188,9 @@ Required：
 authority-interest-first-inert
 authority-then-interest-starts-effective
 authority-first-no-send-without-interest
-authority-then-later-interest-starts-effective
-authority-null-target-no-send
-authority-wrong-subsystem-no-send
-authority-non-active-frame-no-send
-authority-activation-mismatch-no-send
-authority-producer-unavailable-no-send
+authority-later-interest-starts-effective
+authority-null-target/wrong-subsystem/non-active-frame/activation-mismatch no-send
+authority-producer-unavailable no-send
 authority-interest-cannot-create-target
 authority-render-focus-cannot-create-target
 authority-no-push-pop-interpretation
@@ -236,66 +200,96 @@ Control/Data arrival order不得改变最终 Effective结果。
 
 ---
 
-## 9. Effective Transition / State Baseline
+## 8. Mutation-gate State Convergence — Revision 2
 
 Required：
 
 ```text
-state-interest-expand-false-to-true-fresh-baseline
-state-inputtarget-false-to-true-fresh-baseline
-state-fresh-activation-false-to-true-fresh-baseline
-state-fresh-carrier-republish-fresh-baseline
+mutation-gate-state-retained-not-delivered
+mutation-gate-state-latest-wins-while-suppressed
+mutation-gate-event-dropped
+mutation-gate-reset-clears-suppressed-state
+mutation-gate-recoverable-no-commit-same-activation-reopens
+mutation-gate-reopen-delivers-at-most-one-latest-state-per-channel
+mutation-gate-reopen-does-not-replay-event
+mutation-gate-commit-discards-suppressed-old-activation-state
+mutation-gate-admin-suspend-discards-suppressed-state
+mutation-gate-runtime-terminal-discards-suppressed-state
+mutation-gate-data-retire-discards-suppressed-state
+```
+
+核心 trace：
+
+```text
+F/A active, retained S0
+→ mutation gate closes for pending call
+→ S1 arrives: retained, not business-delivered
+→ Event arrives: dropped
+→ explicit pre-commit rejection
+→ same F/A gate reopens
+→ business receives latest S1
+→ no Event replay
+```
+
+成功 commit 对照必须证明 S1不进入旧 Activation business continuation。
+
+---
+
+## 9. State / Event / Reset
+
+Required：
+
+```text
+state-interest-expand-fresh-baseline
+state-inputtarget-fresh-baseline
+state-fresh-activation-fresh-baseline
+state-fresh-carrier-fresh-baseline
 state-producer-return-fresh-baseline
-state-self-contained
-state-does-not-require-previous-state
+state-self-contained / no-previous-state dependency
 state-latest-pending-coalescing
-state-effective-true-to-false-stops-new-send
-```
+state-effective-false-stops-new-send
 
-Event false→true只允许 future Event，无 historical replay。
-
----
-
-## 10. Standard State-before-Event Causality
-
-Required：
-
-```text
-causal-keyboard-down-state-before-event
-causal-keyboard-up-state-before-event
-causal-keyboard-repeat-no-required-state-transition
-causal-pointer-down-state-before-event
-causal-pointer-up-state-before-event
-causal-pointer-cancel-state-before-event
-causal-gamepad-down-state-before-event
-causal-gamepad-up-state-before-event
-causal-event-without-sibling-state-interest-does-not-force-state
-causal-retained-event-blocks-state-coalescing-across-it
-causal-dropped-unemitted-event-removes-barrier
-```
-
-如果 sibling State同时 Effective，Event handler观察的 retained State必须已经是 post-transition State。
-
----
-
-## 11. Event / Reset Ordering
-
-Required：
-
-```text
 event-order-preserved
 event-not-coalesced
 event-may-drop-before-emitted
 event-drop-never-replayed
-event-overflow-not-runtime-failure
-event-overflow-not-frame-unwind
+
+event-future-only-on-interest/authority/producer-return
+
 reset-clears-all-retained-state-for-activation
 reset-does-not-modify-interest
-reset-is-global-state-coalescing-barrier
-stale-reset-dropped
+reset-stale-dropped
 ```
 
-Trace：
+---
+
+## 10. State-before-Event / Barrier / Backpressure
+
+Required：
+
+```text
+causal-keyboard-down/up-state-before-event
+causal-keyboard-repeat-no-required-state-transition
+causal-pointer-down/up/cancel-state-before-event
+causal-gamepad-down/up-state-before-event
+causal-event-without-sibling-state-does-not-force-state
+
+event-is-global-state-coalescing-barrier
+reset-is-global-state-coalescing-barrier
+state-cannot-coalesce-across-event
+state-cannot-coalesce-across-reset
+dropped-unemitted-event-removes-barrier
+
+backpressure-all-input-queues-bounded
+backpressure-event-overflow-drops-before-emitted
+backpressure-surviving-event-order-preserved
+backpressure-event-overflow-not-runtime-failure/frame-unwind
+backpressure-input-backlog-does-not-overflow-generic-data-writer
+backpressure-lease-retire-discards-obsolete-not-started-input
+backpressure-data-retire-discards-publisher-state
+```
+
+允许 trace：
 
 ```text
 State S1
@@ -307,7 +301,7 @@ Reset
 State S5
 ```
 
-允许：
+coalesce 为：
 
 ```text
 State S2
@@ -317,131 +311,120 @@ Reset
 State S5
 ```
 
-不允许 State跨 E/Reset移动到另一侧。
+不得让 State越过 E/Reset。
 
 ---
 
-## 12. InputTarget Replacement
+## 11. InputTarget Replacement
 
 Required：
 
 ```text
-lease-a1-revoked-stops-a1-input-immediately
+lease-a1-revoked-stops-immediately
 lease-one-shot-a1-never-regranted
-lease-same-carrier-a1-to-a2-reset-before-a2-ordinary-input
-lease-control-coalesced-no-null-still-tears-down-a1
-lease-different-carriers-no-cross-carrier-order-required
+lease-same-carrier-a1-to-a2-reset-before-a2-input
+lease-coalesced-no-null-still-tears-down-a1
+lease-different-carriers-no-cross-carrier-order
 lease-reset-best-effort-carrier-loss-still-ends-old-state
 lease-a2-state-fresh-baseline
 lease-a2-event-future-only
 ```
 
-Renderer不得依赖一定观察到中间 `InputTarget=null`。
-
 ---
 
-## 13. Producer Loss / Return
+## 12. Producer
 
 Required：
 
 ```text
+producer-single-holder-lifetime-source
+producer-old-holder-source-cannot-affect-replacement
 producer-state-loss-stops-channel
 producer-state-loss-best-effort-reset
-producer-state-loss-rebaseline-other-effective-state-channels
+producer-state-loss-rebaseline-other-effective-state
 producer-state-return-fresh-baseline
 producer-event-loss-stops-future-event
 producer-event-return-future-only
-producer-loss-does-not-change-main-authority
-producer-loss-does-not-retire-data
-producer-loss-does-not-fail-runtime
+producer-loss-does-not-change-main-authority/retire-data/fail-runtime
+producer-cannot-choose-frame-or-activation
+producer-cannot-bypass-input-publisher
 ```
 
 ---
 
-## 14. Keyboard Canonical Payload
+## 13. Listener / Business Isolation — Revision 2
 
 Required：
 
 ```text
-keyboard-state-empty
-keyboard-state-unique-sorted-codes
-keyboard-state-duplicate-code-rejected
-keyboard-state-unsorted-rejected
-keyboard-state-max-count
-keyboard-state-over-count
-keyboard-code-key-range
-keyboard-code-digit-range
-keyboard-code-function-range
-keyboard-code-fixed-control-set
-keyboard-code-unknown-rejected
+listener-multiple-union
+listener-close-isolation
+listener-state-add-with-retained-state-gets-current-local-baseline
+listener-state-expand-with-retained-state-gets-current-local-baseline
+listener-event-add-no-history
+listener-interest-shrink-clears-removed-state
+listener-frame-remove-clears-frame-state
+listener-frame-close-disables-before-protocol-success
+listener-handler-throw-contained
+listener-handler-rejected-promise-contained
+listener-handler-failure-does-not-retire-data
+listener-handler-failure-does-not-block-other-matching-listener
+listener-retained-state-author-mutation-cannot-corrupt-future-baseline
+```
+
+---
+
+## 14. Standard Keyboard
+
+Required：
+
+```text
+keyboard-state-empty / unique-sorted / duplicate-rejected / unsorted-rejected
+keyboard-state-max/over-count
+keyboard-code-key/digit/function/fixed-control-set / unknown-rejected
 keyboard-event-first-down-repeat-false
 keyboard-event-repeat-down-repeat-true
-keyboard-event-up-repeat-false
-keyboard-event-up-repeat-true-rejected
+keyboard-event-up-repeat-false / repeat-true-rejected
 keyboard-text-character-not-standard-payload
 ```
 
-Keyboard code语义是 physical/control identity，不是 locale text。
-
 ---
 
-## 15. Pointer Canonical Payload
+## 15. Standard Pointer
 
 Required：
 
 ```text
-pointer-state-empty
-pointer-state-multiple-sorted-by-id
-pointer-state-duplicate-id-rejected
-pointer-state-unsorted-id-rejected
-pointer-state-exact-count-limit
-pointer-state-one-over-count-limit
-pointer-id-positive-safe-integer
-pointer-id-zero-rejected
-pointer-id-one-shot-within-activation
+pointer-state-empty / sorted / duplicate-id-rejected / unsorted-rejected
+pointer-state-exact/over-count
+pointer-id-positive-safe / zero-rejected / one-shot-within-activation
 pointer-kind-enum
 pointer-buttons-unique-canonical-order
-pointer-coordinate-zero-left-top
-pointer-coordinate-million-right-bottom
-pointer-coordinate-negative-off-surface-valid
-pointer-coordinate-int32-min-max
-pointer-coordinate-outside-int32-rejected
-pointer-event-down-button-required
-pointer-event-up-button-required
-pointer-event-cancel-button-null
-pointer-event-invalid-cancel-button-rejected
+pointer-coordinate-zero/million/negative-off-surface/int32-min-max/outside-rejected
+pointer-event-down/up-button-required
+pointer-event-cancel-button-null / invalid-cancel-button-rejected
 ```
 
-v1 fixture不得要求 wheel/pressure/tilt/gesture字段。
+v1 fixture不得要求 wheel/pressure/tilt/gesture。
 
 ---
 
-## 16. Gamepad Canonical Payload
+## 16. Standard Gamepad
 
 Required：
 
 ```text
-gamepad-state-empty
-gamepad-state-sorted-by-id
-gamepad-state-duplicate-id-rejected
-gamepad-state-exact-count-limit
-gamepad-state-one-over-count-limit
-gamepad-id-positive-safe-integer
-gamepad-id-one-shot-within-activation
-gamepad-axes-all-required
-gamepad-buttons-all-required
-gamepad-axis-min-max
-gamepad-axis-over-range-rejected
-gamepad-button-min-max
-gamepad-button-over-range-rejected
-gamepad-threshold-499999-released
-gamepad-threshold-500000-pressed
+gamepad-state-empty / sorted / duplicate-id-rejected
+gamepad-state-exact/over-count
+gamepad-id-positive-safe / one-shot-within-activation
+gamepad-axes/buttons-all-required
+gamepad-axis-min-max / over-range-rejected
+gamepad-button-min-max / over-range-rejected
+gamepad-threshold-499999-released / 500000-pressed
 gamepad-event-released-to-pressed-down
 gamepad-event-pressed-to-released-up
 gamepad-event-value-post-transition
 ```
-
-vendor-specific extra button/axis不得偷加到 standard payload closed schema。
 
 ---
 
@@ -453,116 +436,55 @@ Required：
 custom-state-json-object
 custom-event-json-object
 custom-payload-non-object-rejected
-custom-payload-exact-byte-limit
-custom-payload-one-byte-over
-custom-payload-exact-relative-depth
-custom-payload-one-over-relative-depth
-custom-state-self-contained-contract
-custom-event-no-replay-contract
-custom-obeys-interest-and-activation-gate
+custom-payload-byte/depth limits
+custom-state-self-contained
+custom-event-no-replay
+custom-obeys-interest-and-activation
 ```
 
-Core不验证 custom业务 member语义。
+Core不验证 custom business members。
 
 ---
 
-## 18. Interest Shrink / Late Input
+## 18. Failure Taxonomy
 
 Required：
 
 ```text
-interest-shrink-local-gate-updates-before-wire-publication
-interest-shrink-late-state-dropped
-interest-shrink-late-event-dropped
-interest-shrink-state-retained-value-cleared
-interest-remove-frame-clears-frame-retained-state
-interest-shrink-does-not-change-inputtarget
-interest-shrink-does-not-close-frame
+failure-malformed-json/invalid-schema/invalid-standard-payload/invalid-channel/hard-limit → retire Data
+failure-stale-activation-state/event/reset → drop only
+failure-unknown-local-frame/not-interested → drop only
+failure-unknown-frame-interest → inert
+failure-mutation-gate-state → retain/suppress per revision 2
+failure-mutation-gate-event → drop
+failure-business-handler → local containment
+failure-data-retire-not-runtime-failure/frame-unwind
 ```
+
+Malformed Event不能因为 Event可丢而宽容接受。
 
 ---
 
-## 19. Failure Taxonomy
+## 19. Transport / Platform Equivalence
 
-Required：
-
-```text
-failure-malformed-json-retires-data
-failure-invalid-schema-retires-data
-failure-invalid-standard-payload-retires-data
-failure-invalid-channel-retires-data
-failure-hard-limit-retires-data
-failure-stale-activation-state-drops-only
-failure-stale-activation-event-drops-only
-failure-stale-reset-drops-only
-failure-unknown-local-frame-input-drops-only
-failure-not-interested-input-drops-only
-failure-unknown-frame-interest-inert
-failure-business-handler-error-not-wire-error
-failure-data-retire-not-runtime-failure
-failure-data-retire-not-frame-unwind
-```
-
-Malformed Event不能因为 Event本来可丢而被宽容接受。
-
----
-
-## 20. Fresh Carrier Recovery
-
-Required：
-
-```text
-fresh-carrier-interest-registry-empty
-fresh-carrier-no-mandatory-immediate-interest
-fresh-carrier-republish-current-desired-interest
-fresh-carrier-state-empty
-fresh-carrier-event-history-empty
-fresh-carrier-current-target-plus-interest-fresh-state
-same-generation-reconnect-no-old-event-replay
-fresh-generation-no-old-wire-state-replay
-fresh-carrier-does-not-restart-runtime
-fresh-carrier-does-not-restart-frame
-```
-
----
-
-## 21. Transport / Platform Equivalence
-
-User Input application mapping由 Renderer Data Profile统一。
-
-Required abstract trace equivalence：
+完整 formal conformance还要求 abstract mapping：
 
 ```text
 websocket-text-application-unit
 messageport-string-application-unit
 messageport-structured-object-does-not-widen-model
 per-direction-order-preserved
-adapter-no-retry
-adapter-no-duplicate
+adapter-no-retry / no-duplicate
 hostra-pwa-same-interest-authority-input-trace
 hostra-pwa-same-standard-payload-meaning
 ```
 
-平台 adapter可以不同，但同一 canonical input facts必须产生同一 User Input observable model。
+M10 可以完成所有 platform-independent role fixtures并在 Hostra/Desktop Data lifecycle 上 qualification；完整 Hostra/PWA equivalence claim直到 M16 physical realization 后才成立。
 
 ---
 
-## 22. Frozen Compatibility Boundary
+## 20. Revision / Compatibility
 
-fixtureSetRevision 1 固定验证：
+`fixtureSetRevision = 2` 取代 revision 1 作为 current complete fixture set。Revision 2只增加 ADR 0029 所需 State convergence、listener/business isolation、author-local validation与明确 barrier/backpressure evidence；不改变 User Input wire version或 Data Profile identity。
 
-```text
-message/schema
-channel grammar
-three lifetimes
-Interest replacement/canonical form
-Effective gate
-State/Event/Reset ordering
-standard payload mapping
-standard numeric ranges
-producer loss behavior
-failure/drop/recovery
-hard limits
-```
-
-未来 executable corpus可扩充更多等价案例，但不得通过修改 expected behavior改变 Frozen v1 semantics；不兼容 semantic change需要新 protocol version/profile combination。
+未来 incompatible semantic change必须遵守 User Input v1 compatibility boundary，不能再次静默修改 expected behavior。
