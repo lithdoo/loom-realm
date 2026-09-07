@@ -61,10 +61,10 @@ M6  Hostra Runtime physical vertical          ✅ Qualified 2026-09-03
 M7  Renderer Control                          ✅ Qualified 2026-09-03
 M8  Data logical authority / role integration ✅ Qualified 2026-09-04
 M9  Desktop Data Broker / late provisioning   ✅ Qualified 2026-09-04
-M10 User Input                                 Implemented / Qualification Pending
+M10 User Input                                 ✅ Qualified 2026-09-07
 ```
 
-Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md)。
+Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md)。
 
 ---
 

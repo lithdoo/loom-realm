@@ -1,6 +1,6 @@
 # `@loomrealm/subsystem`
 
-> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Regression Verified / Qualification Pending**
+> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified**
 > 阶段：M11 Render / M12 Content pending
 > 最近复核：2026-09-07  
 > 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md)  
@@ -35,7 +35,7 @@ Package implementation MAY 在 trusted host/internal code依赖现有 shared pro
 M4  Definition/lifecycle + Frame/Outcome       implemented / qualified
 M4  Host Runtime Control mapping              implemented / qualified
 M8  role-local Data peer lifecycle            implemented / qualified
-M10 InputListener + InputManager               implemented / regression verified / qualification pending
+M10 InputListener + InputManager               implemented / qualified
 M11 RenderDomain + RenderManager               pending
 M12 ContentClient author mapping               pending
 ```

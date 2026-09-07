@@ -1,0 +1,92 @@
+name: M10 User Input qualification
+
+on:
+  pull_request:
+    paths:
+      - "M10_*.md"
+      - "doc/15-contracts/user-input-*.md"
+      - "doc/decisions/0023-user-input-v1-semantic-closure.md"
+      - "doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md"
+      - "test/user-input-v1/**"
+      - "test/m10-boundary.test.mjs"
+      - "packages/data/**"
+      - "packages/subsystem/**"
+      - "packages/renderer/**"
+      - "packages/renderer-control/**"
+      - "packages/main/**"
+      - "packages/platform-ports/**"
+      - "packages/runtime-control/**"
+      - "packages/foundation/**"
+      - "packages/wire/**"
+      - "packages/game-package/**"
+      - "packages/game-launcher-hostra/**"
+      - "apps/desktop/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".npmrc"
+      - ".github/workflows/m10.yml"
+      - ".github/actions/setup-workspace/**"
+  push:
+    branches: [main]
+    paths:
+      - "M10_*.md"
+      - "doc/15-contracts/user-input-*.md"
+      - "doc/decisions/0023-user-input-v1-semantic-closure.md"
+      - "doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md"
+      - "test/user-input-v1/**"
+      - "test/m10-boundary.test.mjs"
+      - "packages/data/**"
+      - "packages/subsystem/**"
+      - "packages/renderer/**"
+      - "packages/renderer-control/**"
+      - "packages/main/**"
+      - "packages/platform-ports/**"
+      - "packages/runtime-control/**"
+      - "packages/foundation/**"
+      - "packages/wire/**"
+      - "packages/game-package/**"
+      - "packages/game-launcher-hostra/**"
+      - "apps/desktop/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".npmrc"
+      - ".github/workflows/m10.yml"
+      - ".github/actions/setup-workspace/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Run M10 closure gate and capture qualification records
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          npm run test:m10 | tee artifacts/m10-user-input-node-${{ matrix.node }}.tap
+
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m10-user-input-node-${{ matrix.node }}
+          path: artifacts/m10-user-input-node-${{ matrix.node }}.tap
+          if-no-files-found: error

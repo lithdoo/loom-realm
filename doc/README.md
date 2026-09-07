@@ -249,7 +249,7 @@ M6 Hostra Runtime physical vertical               ✅ Qualified (2026-09-03)
 M7 Renderer Control                               ✅ Qualified (2026-09-03)
 M8 Renderer Data logical/core role integration    ✅ Qualified (2026-09-04)
 M9 Desktop DataConnectionBroker                   ✅ Qualified (2026-09-04)
-M10 User Input                                    Implemented / Qualification Pending
+M10 User Input                                    ✅ Qualified (2026-09-07)
 M11 Render                                        Pending
 M12 Content                                       Pending
 M13 loom.map business vertical                    Pending
@@ -258,7 +258,7 @@ M15 PWA Runtime vertical                          Pending
 M16 PWA Full E2E / Cross-platform equivalence     Pending
 ```
 
-**当前下一资格门 = M10 User Input v1 fixtureSetRevision 2 role conformance。**
+**当前下一实现门 = M11 Render。**
 
 M9 implementation evidence is recorded in [m9-qualification](./30-implementation/m9-qualification.md)；the frozen plans and ADR remain its semantic source。
 

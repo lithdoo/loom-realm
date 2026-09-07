@@ -1,6 +1,6 @@
 # M10 / 05 — Qualification and Closure
 
-> 状态：**Implemented / Qualification Pending**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M10 User Input  
 > 落地顺序：05  
 > 最近复核：2026-09-07  
@@ -9,7 +9,7 @@
 > Conformance：[User Input v1 Conformance](doc/15-contracts/user-input-conformance-v1.md)  
 > 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-M10 implementation 已完成。M10/05只负责把现有实现变成可重复、可审计的正式 qualification evidence；不再设计 Input API、authority、wire 或新的 runtime abstraction。
+M10 implementation 与 qualification 已完成。M10/05记录可重复、可审计的正式 evidence；不重新设计 Input API、authority、wire 或新的 runtime abstraction。
 
 ---
 
@@ -35,7 +35,7 @@ M9 regression                 pass
 
 ## 2. Qualification Runner
 
-增加 implementation-neutral conformance runner：
+已增加 implementation-neutral conformance runner：
 
 ```text
 formal fixture
@@ -169,7 +169,7 @@ old Data/Control/source isolation
 
 ## 6. Regression Gate
 
-最终 root gate 应表达：
+最终 root gate 已表达：
 
 ```text
 npm run test:m10
@@ -221,7 +221,7 @@ new public M10 API only for testing
 
 ## 8. Closure Record
 
-全部 gate 通过后，把本文件状态改为：
+全部 gate 已通过，本文件状态为：
 
 ```text
 M10 = Implemented / Qualified / Closed
@@ -234,13 +234,15 @@ protocol = loomrealm.user-input
 protocolVersion = 1
 fixtureSetRevision = 2
 roles = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
-platform-independent role qualification = pass
+platform-independent role qualification = pass (168 required entries / 303 role records)
 M10 SDK/source qualification = pass
 Hostra/Desktop vertical = pass
 M9 regression = pass
 ```
 
-同时更新 README 与 Phase 1 delivery status，然后 M11 implementation gate 才可开启。
+固定证据记录见 [M10 qualification](doc/30-implementation/m10-qualification.md)，独立 CI 为 `.github/workflows/m10.yml`。
+
+README 与 Phase 1 delivery status 已同步更新，M11 implementation gate 可以开启。
 
 M10 close 不声明：
 

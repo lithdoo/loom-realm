@@ -22,13 +22,14 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-### M10 implementation — Complete; formal qualification pending
+### M10 implementation and qualification — Complete
 
 - [M10 / 01 — Subsystem InputManager](./M10_01_SUBSYSTEM_INPUT_MANAGER.md)
 - [M10 / 02 — Renderer Input Gate](./M10_02_RENDERER_INPUT_GATE.md)
 - [M10 / 03 — Renderer Input Producers](./M10_03_RENDERER_INPUT_PRODUCERS.md)
 - [M10 / 04 — User Input Vertical Integration](./M10_04_VERTICAL_INTEGRATION.md)
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
+- [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
 ### M11 implementation plan — Frozen; waits for M10 closure
 
@@ -180,7 +181,7 @@ M6 Hostra Runtime vertical            ✅
 M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
-M10 User Input                        implemented / qualification pending
+M10 User Input                        ✅ Qualified / Closed
 M11 Render                            plan frozen / waits M10 closure
 M12 Content                           pending
 M13 loom.map                          pending
@@ -247,4 +248,4 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Latest implemented regression gate：**M10**。运行 `npm run test:m10` 可复验完整 M9 regression、M10 package semantics、SDK/source projection与真实 Desktop/Hostra vertical；它不等同于 User Input v1 fixtureSetRevision 2 的完整逐 fixture qualification。
+Latest qualified implementation gate：**M10**。运行 `npm run test:m10` 可复验完整 M9 regression、User Input fixtureSetRevision 2 platform-independent role qualification、M10 SDK/source projection与真实 Desktop/Hostra vertical。
