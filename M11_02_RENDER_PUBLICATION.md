@@ -16,11 +16,13 @@
 
 ```text
 business Render Domains
-→ one publication coordinator
+→ one bounded publication responsibility
 → generation-scoped wire Domains
 → existing SubsystemDataPeer.render
 → render.domains / snapshot / patch / event
 ```
+
+这里的 publication coordinator 是一个 responsibility/state boundary，不要求独立 class/service；它可以直接由 `RenderManager` 内部承担。不得因为文档名义再造 connection/session/replication framework。
 
 Author 只提交 current desired state/Event intent，不接触 wire identity、revision、message kind 或 send outcome。
 
@@ -80,6 +82,29 @@ carrier replacement不得 recreate business Domain。
 
 M11/01 的 business Node-key one-shot 是 local stronger invariant；M11/02 仍维护 Frozen protocol 要求的 generation-scoped **emitted** Domain/Node identity history。
 
+### 3.1 Revision Exhaustion
+
+Frozen Render v1 禁止 revision wrap/reuse。若某 current carrier/domain 的 `lastEmittedRevision == Number.MAX_SAFE_INTEGER`，且该 live business Domain 之后还有新的 authoritative desired change：
+
+```text
+MUST NOT emit MAX+1 / wrap / reuse revision
+→ discard pending old-wire-domain Events
+→ mint one fresh SDK-private domainId
+→ emit next full Registry with old domainId absent + fresh domainId present
+→ fresh domainId starts unbaselined
+→ emit fresh Snapshot for the same still-live business Domain
+```
+
+这是 protocol-mandated wire lifecycle rollover，不是 business Domain recreation：
+
+```text
+business RenderDomain handle/lifetime unchanged
+business authoritative state unchanged except the author mutation itself
+wire Domain identity changes
+```
+
+该异常路径只需要在 Domain record 中替换当前 private wire `domainId` 或等价 private fact；不得因此建立 generic business↔wire identity translation layer、revision rollover framework 或新的 Main/Data authority mechanism。
+
 ---
 
 ## 4. Per-carrier Publication State
@@ -100,6 +125,18 @@ post-baseline Snapshot commits R+1
 Domain removal discards pending unsent Domain messages
 carrier loss discards all old carrier cursors/pending output
 ```
+
+Business `close()` 与 publication 直接闭合：
+
+```text
+close() local commit
+→ Domain immediately absent from desired business Registry
+→ discard all not-yet-emitted Snapshot/Patch/Event for that Domain
+→ if old wire domainId was emitted present, next valid Registry publication removes it
+→ after removal publication, no message for that old wire domainId may be sent
+```
+
+已经进入 ordered-send boundary 的 message 不能 retract；它属于 close 之前的 emitted history。close 不等待 Registry send completion。
 
 `replace()` 不对应固定 Patch。publication 可基于 `lastEmittedRevision`：
 
@@ -127,7 +164,7 @@ no current carrier
 current carrier + Domain unbaselined
 → Event MAY enter bounded current-carrier pending queue
 → Snapshot establishing current target lifetime MUST emit first
-→ carrier loss / Domain removal discards pending Event
+→ carrier loss / Domain removal / forced wire-id rollover discards pending Event
 
 current carrier + Domain baselined
 → ordinary bounded ordered Event publication
@@ -213,18 +250,19 @@ Author validation已经保证成功 local state/event 可表示为 Frozen Render
 允许：
 
 ```text
-one publication coordinator
+one bounded publication responsibility
 per-generation emitted identity history
 per-carrier Domain cursors
 bounded current-carrier pending work
 minimal Patch/Snapshot selection
+private current wire-domain id on each business Domain record
 ```
 
 禁止：
 
 ```text
 generic replication framework
-business-key → wire-key translation layer
+generic business↔wire identity translation layer
 cross-Domain global revision
 transport retry/backoff
 Renderer acknowledgment/resync protocol
@@ -246,6 +284,8 @@ same-generation reconnect keeps emitted identity history
 old carrier cursor/pending output retired
 fresh-generation wire reset by sender-role fixture
 revision continuity + Snapshot fallback
+revision exhaustion never wraps and rolls to one fresh private wire domainId
+business close removes desired Domain and discards not-yet-emitted Domain work
 Domain removal publication barrier
 no-carrier Event never crosses into future carrier
 prebaseline retained Event follows establishing Snapshot
