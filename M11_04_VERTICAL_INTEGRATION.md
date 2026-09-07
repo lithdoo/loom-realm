@@ -1,12 +1,13 @@
 # M11 / 04 — Render Vertical Integration
 
-> 状态：**Planned**  
+> 状态：**Implementation Frozen / Waiting on M10 Closure**  
 > 阶段：M11 Render  
 > 落地顺序：04  
 > 最近复核：2026-09-07  
-> 前置：[M11 / 01](M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 02](M11_02_RENDER_PUBLICATION.md) → [M11 / 03](M11_03_RENDERER_STORE.md)
+> 前置：[M11 / 01](M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 02](M11_02_RENDER_PUBLICATION.md) → [M11 / 03](M11_03_RENDERER_STORE.md)  
+> 目标：在真实 Main/Desktop/Hostra Data lifecycle 上验证 Render authority、publication 与 replica；不加入 physical presentation。
 
-M11/04只验证真实 Main/Desktop/Hostra Data lifecycle 上的 Render authority、publication 与 replica；不加入 physical presentation。
+> **M11 vertical复用现有 Runtime/Data authority，不建立第二套测试专用生命周期。**
 
 ---
 
@@ -22,8 +23,6 @@ Subsystem host + RenderManager
 SubsystemDataPeer / RendererDataPeer
 Renderer Render Store
 ```
-
-不得用第二套测试专用 Data lifecycle替代现有 M9/M10 vertical。
 
 ---
 
@@ -86,15 +85,15 @@ stale well-formed Event dropped
 
 ## 5. Regression Gate
 
-M11 vertical必须建立在现有 M10 regression baseline 之上：
+M11 vertical建立在关闭后的 M10 baseline 之上：
 
 ```text
-M10 regression remains pass
+M10 full regression + qualification remains pass
 M11 package semantics pass
 M11 real Render vertical pass
 ```
 
-M11 不得通过修改 Input/Data authority semantics来换取 Render 实现便利。
+不得修改 Input/Data authority semantics来换取 Render 实现便利。
 
 ---
 
