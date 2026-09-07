@@ -256,13 +256,28 @@ Data retire != authoritative Domain destroy
 
 ## M12：Content
 
-Implement readonly Content capability + Desktop adapters + Subsystem ContentClient mapping。
+Implement readonly Content capability + Desktop Content Service/adapters，并完成两个真实 consumer projection：
+
+```text
+Subsystem
+    author-facing ContentClient mapping
+
+Renderer
+    Resource/Content client mapping
+    logical resource reference → readonly Content API
+```
 
 保持：
 
 ```text
 ordinary Content capability != executable/module resolution capability
+Renderer resource lookup != Render authority
+Content credential != Frame/Render/business payload
 ```
+
+Content API虽然允许 Main作为 consumer，但 Phase 1 不为对称性预先给 Main增加 Content capability；只有出现真实 Main-side use case时才按 demand-driven 原则 materialize。
+
+M12 必须为 M13 business content usage与 M14 Renderer resource presentation提供同一 logical Content semantics，不把 Renderer resource loading推迟成 M14 临时旁路。
 
 ---
 
@@ -289,6 +304,8 @@ HostraPlatform.prepareGame
 ```
 
 M14加入真实 DOM/Gamepad `RendererInputSource`，必须复用 M10 exact source API、current-Control subscription lifetime与同一 authority/publisher semantics。
+
+M14 Renderer presentation必须消费 M12 已建立的 Renderer Content/Resource client；不得从 Render payload直接解释 physical path、absolute privileged URL 或 Content bearer。
 
 ---
 
@@ -322,6 +339,7 @@ PwaPlatform.prepareGame
 - Renderer currentness/token/revision保持 M7 boundary；
 - Data authority/lifecycle保持 M8/M9 boundary；
 - M10 State/Event/Reset revision 2 + exact SDK/source semantics完整闭合；
+- M12同时提供 Subsystem author Content 与 Renderer resource Content consumer，不扩大 executable capability；
 - Data failure不升级 Runtime/Frame；
 - M14才宣称 Desktop full product E2E；
 - M16才宣称完整 PWA/cross-platform equivalence；
