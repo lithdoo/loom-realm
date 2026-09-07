@@ -3,30 +3,33 @@
 > 层级：实施计划  
 > 状态：Tracking  
 > 稳定程度：Evolving  
-> 主要定义：M0..M16 实现顺序、Game/Launcher/Main bootstrap boundary、Runtime Control mechanics、Renderer/Data/Input/Render/Content capability 与 Desktop/PWA qualification  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[仓库与目录方案](./repository-layout.md)、[测试策略](./testing-strategy.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[正式契约目录](../15-contracts/README.md)  
+> 主要定义：M0..M16 实现顺序、当前 closure、Desktop/PWA qualification 边界  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
+> 当前 Input 决策：[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 最近复核：2026-09-07
 
 核心顺序：
 
 ```text
-lowest stable primitives
-→ common Game document validation
-→ Runtime Control protocol mechanics
-→ Subsystem Runtime/Frame role slice
-→ Main logical bootstrap + authority
-→ Hostra Runtime physical vertical
-→ Renderer Control logical mirror vertical
-→ Data logical role seam
-→ Desktop Data physical Broker/provisioning core
-→ Input/Render/Content capability slices
-→ Desktop full physical E2E
-→ PWA physical vertical/equivalence
+Foundation/Wire
+→ Game document
+→ Runtime Control
+→ Subsystem Runtime/Frame
+→ Main authority
+→ Hostra Runtime
+→ Renderer Control
+→ Data role seam
+→ Desktop Data Broker
+→ Input
+→ Render
+→ Content
+→ loom.map
+→ Desktop full E2E
+→ PWA Runtime
+→ PWA full E2E/equivalence
 ```
 
-Current first implementation直接收口；不做 fake v2 / compatibility parser。
-
-### Milestone interpretation rule
+规则：
 
 ```text
 Package Scope
@@ -34,224 +37,116 @@ Package Scope
 != Milestone Closure
 ```
 
-Priority：system architecture → package boundary → accepted/frozen ADR + formal contract → milestone slice。
+首次实现只维护一个 current model；不制造 fake v2 / deprecated alias / generic framework。
 
 ---
 
 ## M0：文档与契约基线
 
-Current docs must agree on Game Package v1、Runtime Control Profile v1、Frame/Call v1、Renderer Control v1、Renderer Data/Data Connection/Input/Render contracts and current Platform composition boundaries。
-
-Closed：no Main→game-package、no Game Descriptor.module、no universal launcher options、no generic RPC/connection framework、no second JSON parser。
+Current docs统一 Game/Launcher/Main、Runtime/Frame、Renderer Control、Data/Input/Render contracts与 Platform composition boundary。
 
 ---
 
 ## M1：Foundation + Wire ✅
 
-Implemented Baseline：MessageCarrier/MemoryCarrier + JSON/JSON-RPC representation/limits primitives。
+MessageCarrier/MemoryCarrier + JSON/JSON-RPC representation/limits primitives。
 
 ---
 
 ## M2：Game Package v1 ✅
 
-Implemented document validation/snapshot capability；Runtime dependency Wire only。M6 Hostra is the first real Runtime-product consumer；M15 PWA is the second。
+Common Game Entry validation/snapshot capability。M6 Hostra first real consumer；M15 PWA second consumer。
 
 ---
 
 ## M3：Runtime Control Mechanics ✅
 
-Implemented concrete one-reader/one-writer Control+Frame mechanics、strict monotonic IDs、deadlines、terminal first-wins、no retry/replay/reconnect。Real role consumers qualified in M4/M5。
+one reader / one writer、strict sender IDs、finite deadlines、terminal first-wins、no retry/replay/reconnect。
 
 ---
 
 ## M4：Subsystem Runtime/Frame Core ✅
 
-Closed `@loomrealm/subsystem` Runtime/Frame host slice。Input/Render/Content remain M10/M11/M12；M8 later added role-local Data peer integration。
+Runtime/Frame author/host slice implemented；Input/Render/Content分别 M10/M11/M12。
 
 ---
 
 ## M5：Main Core + LogicalGameBootstrap ✅
 
-Implemented Main Runtime/Frame authority、RuntimeHosting consumption、Stack/Activation/InputTarget、serialized mutation、failure unwind and Session terminal。
+Runtime/Frame authority、Stack/Activation/InputTarget、serialized mutation、failure unwind、Session terminal implemented。
 
 ---
 
-## M6：Hostra Platform Vertical / Launcher / Node Runner ✅
+## M6：Hostra Platform Vertical / Node Runner ✅
 
-Qualified Baseline（2026-09-03）：Hostra PREPARE → immutable plan/bootstrap → Node Runner → Runtime Control WS → real Main/Subsystem vertical。
-
-M6 does not require Renderer/Data/Input/Render/Content physical composition。
+Qualified 2026-09-03：Hostra PREPARE → LaunchPlan/bootstrap → Node Runner → Runtime Control WS → real Main/Subsystem vertical。
 
 ---
 
-## M7：Renderer Control ✅ Implemented / Qualified (2026-09-03)
+## M7：Renderer Control ✅
 
-Facts：ADR 0027 + `M7_01`–`M7_05` + Frozen Main⇄Renderer Control v1。
-
-Closed：
+Qualified 2026-09-03：
 
 ```text
-@loomrealm/renderer-control concrete peers
-OpaqueMaterialGenerator migration
-optional RendererControlBinding candidate-slot semantics
+@loomrealm/renderer-control peers
+OpaqueMaterialGenerator
+optional RendererControlBinding candidate slot
 Main pure authority projection/revision/currentness
 Renderer local holder
-hello preflight/current switch/replacement/session-terminal races
+replacement/race/fail-closed qualification
 ```
 
-Physical Hostra Renderer Control remains M14；PWA remains M16。
+Physical BrowserWindow Renderer Control remains M14；PWA M16。
 
 ---
 
-## M8：Renderer Data Role/Core ✅ Implemented / Qualified (2026-09-04)
+## M8：Renderer Data Role/Core ✅
 
-Evidence：[m8-qualification.md](./m8-qualification.md)。
-
-Closed real consumers：
+Qualified 2026-09-04：
 
 ```text
-@loomrealm/main
-    ready-derived DataAuthority S/1/loomrealm.renderer-data/1
-
-@loomrealm/platform-ports
-    RendererDataBinding
-    SubsystemDataBinding / Result
-
-@loomrealm/subsystem/host
-    optional non-blocking Data peer lifecycle
-
-@loomrealm/renderer
-    per-subsystem Data reconciliation
-
-@loomrealm/data
-    real peers consumed by both roles
+Main ready-derived DataAuthority
+RendererDataBinding / SubsystemDataBinding
+Subsystem optional Data peer lifecycle
+Renderer per-subsystem Data reconciliation
+real @loomrealm/data peers
 ```
 
-Not M8：physical Platform authority feed、Broker、candidate pairing/cutover、Runner late provisioning、Input/Render business managers。
+No Broker/Input/Render business semantics in M8。
 
 ---
 
-## M9：Desktop DataConnectionBroker / Late Provisioning Core — **Implemented / Qualified (2026-09-04)**
+## M9：Desktop DataConnectionBroker / Late Provisioning ✅
 
-Facts：
-
-```text
-ADR 0028
-M9_01_DESKTOP_DATA_BROKER.md
-M9_02_RUNNER_PROVISIONING_IPC.md
-M9_03_PAIRED_INSTALLATION.md
-M9_04_VERTICAL_INTEGRATION.md
-M9_05_QUALIFICATION_CLOSURE.md
-```
-
-Implementation evidence：[m9-qualification.md](./m9-qualification.md)。
-
-### M9/01 Main → Platform authority feed
-
-Frozen shared port：
+Qualified 2026-09-04：
 
 ```text
-DataConnectionAuthorityEntry
-    subsystemKey / generation / dataProfile / exact HostedRuntime
-
-DataConnectionAuthorityView
-    current rendererControlToken correlation + full entries
-
-DataConnectionAuthoritySink.replace(view|null)
-    synchronous
-    non-blocking
-    non-throwing
-    full replacement only
+Main → Platform full Data authority view
+exact HostedRuntime target
+Hostra Runtime-scoped provisioner + child IPC
+Desktop paired Data WebSocket Broker
+commit-time revalidation
+install-before-role-delivery
+post-install delivery failure never resurrects old current
 ```
 
-`MainPlatform.dataConnections?` remains optional。Main sends initial null and replaces the full view inside its existing serialized mutation lane。
+Root gate：`npm run test:m9`。
 
-Current accepted Renderer token remains consumed for authentication; its value is retained only while current as inert Platform correlation and participates in Main live material duplicate defense。
-
-### M9/02 Hostra Runtime-scoped provisioner
-
-`@loomrealm/game-launcher-hostra` adds exact child-owned integration：
-
-```text
-HostraRuntimeDataPrepareRequest
-HostraRuntimeDataProvisioner.prepare(...)
-HostraRuntimeDataProvisioner.commit(...)
-HostraRuntimeDataProvisioner.revoke(...)
-optional onRuntimeDataProvisioner(HostedRuntime, provisioner)
-```
-
-Handoff happens before successful `RuntimeHosting.launch()` resolves。Desktop may keep a private `WeakMap`；no RuntimeDirectory/service registry。
-
-Dedicated child IPC：
-
-```text
-provision / prepared / commit / committed / revoke
-```
-
-It is not Runtime Control or Data application wire。
-
-### M9/03 Desktop Broker / paired installation
-
-M9 materializes the first `apps/desktop` workspace and root workspace pattern adds `apps/*`。
-
-Concrete candidate：
-
-```text
-Renderer WS ─┐
-             ├─ Desktop Broker opaque text relay
-Runner WS   ─┘
-```
-
-Before install relay gate is closed。Per current Renderer/subsystem slot：0..1 current；commit lane revalidates exact latest Main view before install。
-
-Frozen cutover：
-
-```text
-paired prepared
-→ revalidate
-→ old current retires
-→ new candidate becomes sole current
-→ role delivery occurs after install
-```
-
-Runner `commit()` is post-install delivery ACK, not the installation atom。
-
-```text
-new B installed
-→ Runner delivery failure
-→ B current→retired
-→ old A never resurrects
-```
-
-No rollback/2PC/retry framework。
-
-### M9/04 Vertical / qualification shape
-
-Production path：real Main + real Renderer Control peers + real Node Runner/Runtime Control + real Hostra provisioning IPC + real two-sided Data WS + real M8 Bindings/Data peers；only physical Renderer hosting is deterministic/test。
-
-Broker harness covers stale G/P/Renderer/HostedRuntime races and concurrency without inventing production Runtime restart/generation allocator in Main。
-
-M9 does **not** claim User Input/Render fresh business publication baseline；those are M10/M11。
-
-### M9/05 CI gate
-
-Root adds：
-
-```text
-npm run test:m9
-```
-
-It composes：platform-ports M9 boundary + Main sink + Hostra provisioner/IPC + Desktop Broker harness + real M9 vertical。
-
-M9 claims the Hostra/Desktop physical Broker slice only；full Connection-v1 cross-platform qualification waits for generation/business-baseline/PWA obligations。
-
-M9 is **not** Desktop full Renderer product composition。BrowserWindow/physical Renderer Control/Input/Render/Content remain M14 composition work。
+M9只证明 physical Data lifecycle；fresh Input/Render business baseline属于 M10/M11。
 
 ---
 
 ## M10：User Input v1 + InputManager — **Implementation Frozen / Preimplementation Closed**
 
-Facts：Frozen User Input v1 + existing Subsystem/Web Renderer module boundaries + root implementation plans：
+Current facts：
+
+```text
+User Input v1 protocolVersion = 1
+fixtureSetRevision = 2
+ADR 0023 + ADR 0029
+```
+
+Root implementation plans：
 
 ```text
 M10_01_SUBSYSTEM_INPUT_MANAGER.md
@@ -261,41 +156,78 @@ M10_04_VERTICAL_INTEGRATION.md
 M10_05_QUALIFICATION_CLOSURE.md
 ```
 
-M10只增加真实 role behavior：
+### Subsystem slice
 
 ```text
-@loomrealm/subsystem
-    InputListener + one role-local InputManager
-    desired Interest aggregation / receive gate
-
-@loomrealm/renderer
-    Effective = current Data × Main InputTarget × Interest[F] × Producer(C)
-    Reset / fresh baseline / State-Event ordering
-    one narrow canonical producer seam
-
-M9 Desktop Data lifecycle
-    consumed unchanged for real User Input business baseline
+one InputManager / instance
+InputListener author surface
+Desired Interest union + local representability validation
+immutable retained State
+retention gate != business delivery gate
+known-no-commit same-Activation State convergence
+latest-only Interest publication
+handler failure containment
 ```
 
-No new Main authority、Platform Port、generic Input framework、Store/EventBus、cross-plane ACK/revision/barrier、retry/replay/history。
+### Renderer slice
 
-M10 qualification must include fresh Activation and same-generation fresh Data peer baselines；historical Event never replays。BrowserWindow/DOM physical input remains M14。
+```text
+Effective = Data × InputTarget × active F/A × Interest × Producer
+one input gate per current Data slot
+one bounded State/Event/Reset publisher
+Event/Reset global State-coalescing barriers
+one holder-lifetime canonical input source
+```
 
-Implementation完成时新增 root `npm run test:m10`；文档阶段不提前加入空 gate。
+### Qualification
+
+Real M9 Desktop Data vertical必须证明：
+
+```text
+Interest-first / Authority-first convergence
+nested child call / fresh Activation
+recoverable frame.call no-commit retained-State convergence
+committed call never leaks old suppressed State
+same-generation Data reconnect fresh baseline/no Event replay
+producer loss/return
+handler/local author error isolation
+barrier/backpressure rules
+```
+
+fresh-generation语义用 role-level deterministic fixture证明，不为测试提前加入 Main generation allocator。
+
+M10只声明 current platform-independent User Input role semantics在 Hostra/Desktop Data lifecycle上 qualified；完整 Hostra/PWA transport equivalence留到 M16。
+
+Implementation完成时新增：
+
+```text
+npm run test:m10
+```
+
+文档阶段不放空 gate。
 
 ---
 
 ## M11：Render Update v1 + RenderManager
 
-Render domains/snapshot/patch/event + Renderer Render Store + Subsystem RenderDomain/RenderManager；Frame close != Render destroy。
+Subsystem RenderDomain/RenderManager + Renderer authoritative replica/store；fresh Data建立 Domain Registry/Snapshot baseline。
 
-M11 qualifies fresh Data Render snapshot/domain publication baseline。
+```text
+Frame close != Render Domain destroy
+Data retire != authoritative Domain destroy
+```
 
 ---
 
 ## M12：Content
 
-Implement `@loomrealm/content` / content-service / Desktop fs/http adapters + Subsystem `ContentClient` author mapping。
+Implement readonly Content capability + Desktop adapters + Subsystem ContentClient mapping。
+
+保持：
+
+```text
+ordinary Content capability != executable/module resolution capability
+```
 
 ---
 
@@ -305,7 +237,7 @@ Implement `@loomrealm/content` / content-service / Desktop fs/http adapters + Su
 @loomrealm/map → @loomrealm/subsystem
 ```
 
-No Game/Launcher/Runtime Control/Platform imports。
+No Game/Launcher/Runtime Control/Platform imports。用真实 Input/Render/Content/Frame call验证 author SDK。
 
 ---
 
@@ -314,22 +246,20 @@ No Game/Launcher/Runtime Control/Platform imports。
 ```text
 HostraPlatform.prepareGame
 → Main / Node Runner / Runtime Control
-→ Hostra physical RendererControlBinding realization
-→ BrowserWindow + Renderer Control WebSocket
-→ M9 Desktop DataConnectionBroker / Data WS
+→ physical RendererControlBinding
+→ BrowserWindow + Renderer Control WS
+→ M9 Data Broker
 → M10 Input + M11 Render + M12 Content
-→ nested Frame outcomes / Renderer reload / shutdown
+→ nested Frames / Renderer reload / shutdown
 ```
 
-M14 adds real Hostra BrowserWindow/Renderer Control token delivery/stalled-write policy and composes previously qualified M9/M10/M11/M12 slices into one product trace。
-
-Physical RendererControlBinding still obeys ADR 0027 settlement；M14 must not create a second retry/currentness protocol。
+M14加入真实 DOM/Gamepad input source，但必须复用 M10 holder-lifetime source seam与同一 authority/publisher semantics。
 
 ---
 
-## M15：PWA Game Launcher / Runner / Second Game Package Consumer
+## M15：PWA Game Launcher / Runner
 
-Implement PWA manifest/join/resolver/LaunchPlan/LogicalGameBootstrap/RuntimeHosting/Worker Runner + MessagePort Runtime Control carrier。
+PWA manifest/join/resolver/LaunchPlan/LogicalGameBootstrap/RuntimeHosting/Worker Runner + MessagePort Runtime Control；成为 Game Package第二 real consumer。
 
 ---
 
@@ -337,34 +267,30 @@ Implement PWA manifest/join/resolver/LaunchPlan/LogicalGameBootstrap/RuntimeHost
 
 ```text
 PwaPlatform.prepareGame
-→ Worker Runner + Runtime Control MessagePort
-→ PWA physical RendererControlBinding
-→ PWA DataConnectionBroker / MessageChannel provisioning
-→ User Input + Render Update
-→ PWA Content
+→ Worker Runtime
+→ PWA Renderer Control
+→ PWA Data provisioning
+→ User Input + Render + Content
 → full logical Session trace
 ```
 
-PWA may realize the M9 abstract Data authority/install lifecycle differently, but must preserve same logical Connection results before full Hostra/PWA equivalence is claimed。
+在这里完成 User Input/Data Profile 的 Hostra/PWA transport-equivalence conformance claim。
 
 ---
 
 ## Phase 1 Acceptance
 
-- Foundation/Wire remain single-purpose；
-- Game Package validation boundary intact；
-- Runtime/Renderer/Data protocol packages own mechanics, not role authority；
-- Frozen Frame causal/commit/unwind rules preserved；
-- M7 Renderer currentness/token/revision semantics preserved；
-- M8 logical DataAuthority + role Data seams remain unchanged；
-- M9 Main→Platform sink is exact full-view/non-throwing and not a generic event framework；
-- M9 exact HostedRuntime→Hostra provisioner handoff avoids public Runtime registry；
-- M9 paired Broker install precedes role delivery and post-install delivery failure never rolls back old current；
-- M9 Data failure remains outside Runtime/Frame authority；
-- M10/M11 own child business publication-baseline qualification；
-- M14, not M9, claims full Desktop product E2E；
-- M16 includes PWA Renderer/Data/Content realization before full cross-platform equivalence；
-- no generic RPC/connection/authority/transaction/retry/currentness framework。
+- Foundation/Wire单一用途；
+- Game Package / Launcher / Main bootstrap boundary不倒退；
+- protocol package拥有 mechanics，不拥有 role authority；
+- Frame causal/commit/unwind semantics保持 Frozen；
+- Renderer currentness/token/revision保持 M7 boundary；
+- Data authority/lifecycle保持 M8/M9 boundary；
+- M10 State/Event/Reset revision 2 semantics完整闭合；
+- Data failure不升级 Runtime/Frame；
+- M14才宣称 Desktop full product E2E；
+- M16才宣称完整 PWA/cross-platform equivalence；
+- no generic RPC/connection/authority/input/transaction/retry/currentness framework。
 
 ---
 
@@ -382,6 +308,5 @@ multiple current Renderer participants
 runtime implementation negotiation
 universal multi-platform launcher schema
 generic RPC/connection framework
-Foundation-wide Clock abstraction without second consumer
 Render history replay
 ```
