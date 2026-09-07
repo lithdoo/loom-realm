@@ -3,9 +3,9 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、替代关系、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-04
+> 最近复核：2026-09-07
 
-ADR 记录“为什么这样设计”。Current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 与对应 Frozen implementation plan 为准；本索引不复制完整协议状态机。Superseded ADR 保留历史，但不形成第二份 current contract。
+ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 与对应 Frozen implementation plan 为准。Superseded/updated ADR保留历史，不形成第二份 current contract。
 
 ---
 
@@ -33,98 +33,53 @@ ADR 记录“为什么这样设计”。Current 可实现事实以 `00-overview`
 20. [ADR 0020：Game Entry 消费边界归 Platform Launcher，Main 只接收 LogicalGameBootstrap](./0020-game-entry-consumer-boundary.md)
 21. [ADR 0021：Runtime Control 首次实现前收口 current v1 mechanics](./0021-runtime-control-preimplementation-closure.md)
 22. [ADR 0022：Render Update v1 freeze closure](./0022-render-update-v1-freeze-closure.md)
-23. [ADR 0023：User Input v1 semantic closure](./0023-user-input-v1-semantic-closure.md)
+23. [ADR 0023：User Input v1 semantic closure（部分由 ADR 0029 更新）](./0023-user-input-v1-semantic-closure.md)
 24. [ADR 0024：Renderer ⇄ Subsystem Data Connection v1 semantic closure](./0024-renderer-subsystem-data-connection-v1-semantic-closure.md)
 25. [ADR 0025：Renderer Data Profile v1 preimplementation closure](./0025-renderer-data-profile-v1-preimplementation-closure.md)
 26. [ADR 0026：Concrete Platform 是 Session Composition Object，Launcher 是 Platform 内部 PREPARE Component](./0026-session-scoped-platform-instance.md)
 27. [ADR 0027：冻结 Renderer Control v1 与 M7 Preimplementation Closure](./0027-freeze-renderer-control-v1-preimplementation.md)
 28. [ADR 0028：冻结 M9 Desktop DataConnectionBroker / Late Provisioning Core 首次实现边界](./0028-freeze-m9-desktop-data-broker-preimplementation.md)
+29. [ADR 0029：User Input v1 mutation-gate State convergence correction](./0029-user-input-v1-mutation-gate-state-convergence.md)
 
 ---
 
-## Current 替代 / 修正关系
+## Current 修正关系
 
 ```text
-ADR 0004
-→ ADR 0006 separates Frame and Render lifetime
-
-ADR 0007
-→ superseded by current Descriptor/Game Package closure
-
-ADR 0008
-→ superseded by Host-owned Runner + current Hostra Launcher Profile
-
-ADR 0010–0015
-→ Frame / Call v1 semantic freeze
-
-ADR 0015 old PWA structured-object transport mapping
-→ corrected by ADR 0018
-→ current message unit = UTF-8 JSON text string
-
-ADR 0016
-→ DataAuthority / protocol-minimization boundary
-
-ADR 0017
-→ Platform owns complete physical Session composition
-
 ADR 0018
-→ first-implementation direct-current-v1 correction governance
+    establishes first-implementation direct-current-v1 correction governance
 
-ADR 0019
-→ Game Descriptor = {key}
-→ Hostra/PWA Launch Manifest owns executable binding
-→ exact key-set join / full executable preflight
-
-ADR 0020
-→ matching Launcher consumes Game Entry
-→ Main receives LogicalGameBootstrap only
-→ no Main → game-package/concrete-launcher dependency
+ADR 0019 → ADR 0020 → ADR 0026
+    current Game / Platform / Main launch boundary
 
 ADR 0021
-→ concrete Runtime Control mechanics before first implementation
-→ one reader / one writer / strict sender IDs / finite deadlines / no generic RPC
+    concrete Runtime Control mechanics
 
 ADR 0022–0025
-→ Render / Input / Data Connection / Renderer Data Profile current-v1 closure
-
-ADR 0026
-→ Concrete Platform is session-scoped composition object
-→ Launcher is Platform-internal PREPARE component
-→ Main consumes only a narrow Main-facing capability view
+    Render / Input / Data Connection / Renderer Data Profile closure
 
 ADR 0027
-→ Renderer Control v1 Active / Normative / Frozen
-→ M7 implementation preclosed
-→ Main-facing optional RendererControlBinding candidate-slot capability
-→ BootstrapTokenGenerator current-v1 rename to OpaqueMaterialGenerator
-→ protocol peer owns version negotiation; Main owns token/currentness/revision
-→ exact hello preflight before atomic current switch/replacement
-→ Renderer local holder is not remote-currentness proof
-→ no generic RPC/Store/currentness framework
+    Renderer Control v1 + M7 closure
 
 ADR 0028
-→ M9 Desktop Data physical realization preclosed
-→ Main→Platform DataConnectionAuthoritySink full-view authority feed
-→ exact HostedRuntime physical target binding
-→ current Renderer token retained only as inert post-auth correlation
-→ apps/desktop owns Broker/two-sided Data WS relay
-→ game-launcher-hostra exposes only Runtime-scoped provisioner mechanics
-→ Broker logical install precedes Runner delivery ACK
-→ post-install delivery failure retires new current; no rollback/resurrection
-→ M9 conformance claim stops before M10/M11/PWA obligations
+    M9 Desktop Data Broker / late provisioning closure
+
+ADR 0023
+→ ADR 0029 narrowly corrects Subsystem local State retention while mutation gate is temporarily closed
+→ User Input wire/version/authority/Renderer Effective remain unchanged
+→ User Input conformance fixtureSetRevision 1 → 2
 ```
+
+ADR 0029 是 document-governance §7 的 Frozen preimplementation correction：当前没有 User Input v1 conformant/deployed compatibility boundary，M10尚未实现；因此直接修 current v1，不制造 v2。
 
 ---
 
-## Current Architecture Decision Chain
+## Current Decision Chains
 
 ### Game / Runtime launch
 
 ```text
-ADR 0017
-→ ADR 0019
-→ ADR 0020
-→ ADR 0026
+ADR 0017 → 0019 → 0020 → 0026
 → Game Package + Hostra/PWA Launcher Profiles
 → Platform Composition / RuntimeHosting
 ```
@@ -132,18 +87,14 @@ ADR 0017
 ### Runtime / Frame
 
 ```text
-ADR 0009
-→ ADR 0010–0015
-→ ADR 0021
+ADR 0009 → 0010–0015 → 0021
 → Subsystem Control + Frame/Call + Runtime Control Profile
 ```
 
 ### Renderer Control
 
 ```text
-ADR 0016
-→ ADR 0017 / ADR 0026 Platform boundary
-→ ADR 0027
+ADR 0016 → 0017/0026 → 0027
 → Main ⇄ Renderer Control v1
 → M7_01 ... M7_05
 ```
@@ -154,66 +105,19 @@ ADR 0016
 ADR 0016
 → ADR 0022 / 0023 / 0024 / 0025
 → Renderer Data Profile + Data Connection + User Input + Render Update
-→ M8 logical Data authority/role seam
-→ ADR 0028
-→ M9 Desktop Broker/late provisioning physical slice
+→ M8 logical Data role seam
+→ ADR 0028 / M9 physical Data slice
+→ ADR 0029 / User Input fixtureSetRevision=2
+→ M10_01 ... M10_05
 ```
-
----
-
-## Current M7/M9 Decision Snapshot
-
-M7 Renderer Control remains unchanged：
-
-```text
-Main
-    owns Session / Runtime / Frame / Activation / InputTarget
-    owns Renderer token authentication/currentness/AuthorityRevision
-
-@loomrealm/renderer-control
-    owns renderer.hello / renderer.state mechanics
-
-@loomrealm/platform-ports
-    OpaqueMaterialGenerator
-    RendererControlBinding? candidate-slot/carrier capability
-```
-
-M9 adds only the real Data physical consumer seams：
-
-```text
-@loomrealm/platform-ports
-    DataConnectionAuthorityEntry/View/Sink
-
-MainPlatform
-    dataConnections?   // optional full-view authority sink
-
-apps/desktop
-    DataConnectionBroker + Data WS relay
-
-@loomrealm/game-launcher-hostra
-    HostraRuntimeDataProvisioner + optional handoff hook
-```
-
-M7 token consumption still authenticates exactly once；M9 retention of the current accepted token value is non-authorizing physical correlation only。
 
 ---
 
 ## Compatibility / Reopen Governance
 
-首次 conformant/deployed compatibility boundary形成前，current-v1 correction仍需遵守[文档治理](../00-overview/document-governance.md)。
+首次 conformant/deployed compatibility boundary形成前，current-v1 correction遵守[文档治理](../00-overview/document-governance.md)。Frozen Contract不得因 code reuse、framework preference、future speculation、test convenience 或 transport preference静默 reopen。
 
-Frozen ADR/Contract 不允许因为以下理由静默 reopen：
-
-```text
-code reuse
-generic framework preference
-future speculation
-directory/name symmetry
-test convenience
-transport-specific preference
-```
-
-允许 reopen 的信号必须是：
+允许 reopen 的信号：
 
 ```text
 demonstrated correctness/security contradiction
@@ -222,13 +126,13 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-Renderer Control/M7 变更遵循 ADR 0027；Desktop Data/M9 变更遵循 ADR 0028。不得通过 Hostra/PWA 私有 retry/currentness/rollback protocol 绕过 Frozen semantics。
+ADR 0029只解决已证明的 same-Activation State convergence contradiction；它不授权继续扩大 User Input v1。
 
 ---
 
 ## Provenance Rule
 
-History stays in ADR/Git。Current readers应优先查看：
+Current readers优先：
 
 ```text
 Architecture topic source
@@ -238,4 +142,4 @@ Architecture topic source
 → Frozen implementation plan/tests
 ```
 
-Superseded ADR 或旧 example/code shape不得覆盖 Current Contract。
+历史 ADR/Git保留演进；旧 shape不得覆盖 Current Contract。
