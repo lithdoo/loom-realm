@@ -6,111 +6,103 @@
 > 最近复核：2026-09-07  
 > 前置：[M10 / 01](M10_01_SUBSYSTEM_INPUT_MANAGER.md) → [M10 / 02](M10_02_RENDERER_INPUT_GATE.md)  
 > 正式协议：[User Input v1](doc/15-contracts/user-input-v1.md)  
-> 目标：给 Renderer input gate 提供最小 canonical producer seam，用 deterministic producer 完成 M10 qualification；真实 BrowserWindow/DOM 接入留到 M14。
+> 目标：给 Renderer input gate 提供一个 holder-lifetime canonical input source；M10 使用 deterministic realization，真实 BrowserWindow/DOM mapping 留到 M14。
 
-> **Producer 只描述“某 channel 当前是否可生产，以及当前 canonical state / future event 是什么”；它不知道 Frame、Activation、Interest、Data authority 或 Subsystem。**
+> **Producer 只描述 canonical device facts。它不知道 Frame、Activation、Interest、Data authority、Subsystem 或 wire ordering。**
 
 ---
 
-## 1. Boundary
+## 1. Construction / Lifetime
+
+Renderer role construction时最多注入一个 input source：
 
 ```text
-physical/test input source
-→ canonical Producer(C)
+create Renderer holder
++ optional canonical input source
+→ holder/input gate owns consumption for that holder lifetime
+```
+
+固定：
+
+```text
+single construction-time injection
+no runtime producer registry
+no plugin registration API
+source availability may change
+holder terminal/replacement stops old source consumption
+```
+
+精确 TypeScript 命名可在实现中选择；不得为了命名对称扩展为通用 device framework。
+
+---
+
+## 2. Boundary
+
+```text
+physical/test environment
+→ canonical input source
 → Renderer input gate
-→ @loomrealm/data typed Renderer peer
+→ bounded input publisher
+→ @loomrealm/data RendererDataPeer
 ```
 
-Producer 输入必须已经是 Frozen User Input v1 canonical payload；DOM/OS/native event object 不进入 gate 或 wire。
-
-M10 不要求 BrowserWindow、DOM listener、Gamepad API 或 Pointer Events physical composition。
-
----
-
-## 2. Minimal Seam
-
-实现只允许一个窄 producer-facing seam，覆盖：
+source 提供的事实只需要覆盖：
 
 ```text
-availability change
+channel availability change
 current self-contained payload for .state baseline
-future payload delivery for .state/.event changes
+future canonical state/event transition
 ```
 
-精确 TypeScript 命名可在实现中选择，但不得把它扩展成：
-
-```text
-InputDevice framework
-plugin registry
-platform service
-focus manager
-gesture system
-key binding system
-command/action mapping
-```
-
-M10 deterministic producer 与 M14 real browser producer必须走同一 gate semantics；M14 不得重做一套输入 authority。
+DOM/OS/native event object 不进入 gate、Data peer 或 wire。
 
 ---
 
-## 3. Producer Responsibilities
+## 3. Ownership
 
-Producer owns：
+Source owns：
 
 ```text
-canonical Keyboard / Pointer / Gamepad / x.* payload creation
+Keyboard / Pointer / Gamepad / x.* canonical payload creation
 channel availability
 current sample for .state
-future physical/canonical changes
+future physical/canonical transition
 ```
 
-Producer does not own：
+Input gate/publisher owns：
 
 ```text
-InputTarget
-Frame/Activation validity
-Interest Registry
+InputTarget/Frame/Activation applicability
+Interest
 Data currentness
 Reset decision
-State/Event send ordering across lease boundaries
-backpressure settlement policy
+lease teardown
+State/Event/Reset ordering
+coalescing/backpressure
 ```
 
-这些仍由 Renderer input gate + `@loomrealm/data` current peer处理。
+Producer不能选择 `frameId` / `activationId`，也不能直接调用 Data peer。
 
 ---
 
-## 4. State / Event Ordering
+## 4. Canonical Transition
 
-当一个 physical transition 同时产生 sibling State + Event，而对应 State channel Effective：
-
-```text
-post-transition input.state
-→ corresponding input.event
-```
-
-若 State channel不 Effective，则不得为了 Event 虚构 State publication。
-
-Event：
+标准 stateful family在一个 physical transition 同时改变 State并产生 Event时，source先把 post-transition facts交给 gate；若 sibling `.state` Effective，publisher最终必须观察为：
 
 ```text
-ordered
-future-only
-not coalesced
-may be dropped before emitted under bounded backpressure
+post-transition State
+→ corresponding Event
 ```
 
-State：
+repeat 等“不改变 State”的 Event不要求虚构额外 State。
 
-```text
-self-contained latest state
-may coalesce before emitted
-fresh Effective transition requires current baseline
-```
+如果 sibling `.state` 不 Effective，不为了 Event发送未订阅 State。
+
+Event/Reset barrier 与 coalescing规则属于 M10/02 publisher，不由 source重复实现。
 
 ---
 
-## 5. Deterministic M10 Producer
+## 5. Deterministic M10 Source
 
 M10 qualification使用 production-shaped deterministic source，可控制：
 
@@ -125,33 +117,34 @@ paired State+Event transition
 Fixture 不得：
 
 ```text
-write Data carrier directly
-construct input.state/event/reset wire text
+write Data carrier/peer directly
+construct input.state/event/reset wire object
 set InputTarget
-inject Interest Registry into Renderer local state
-bypass Renderer gate
+inject Interest Registry
+select Frame/Activation
+bypass input gate/publisher
 ```
 
-它只扮演 physical producer。
+M14 Browser source必须进入同一 construction seam 和 input gate，不得重做 authority semantics。
 
 ---
 
-## 6. Browser/PWA Placement
+## 6. Browser / PWA Placement
 
 ```text
 M10
-    deterministic canonical producer
+    deterministic canonical source
     proves role semantics
 
 M14 Desktop
-    real browser DOM/Gamepad producer
-    maps physical events → same canonical producer seam
+    DOM / Pointer / Gamepad APIs
+    physical facts → same canonical source seam
 
 M16 PWA
-    uses same logical Renderer input semantics
+    same logical Renderer input semantics
 ```
 
-因此 M10 不新增 Platform Port；input environment 属于 Renderer product composition，不进入 `@loomrealm/platform-ports` Main/Subsystem capability contracts。
+因此 M10 不新增 Platform Port。Input environment属于 concrete Renderer product composition。
 
 ---
 
@@ -160,9 +153,9 @@ M16 PWA
 允许：
 
 ```text
-one narrow producer seam
-small deterministic implementation for tests/vertical
-bounded local queue/coalescing required by User Input v1
+one narrow holder-lifetime input source seam
+small deterministic test implementation
+small browser realization later in M14
 ```
 
 禁止：
@@ -170,11 +163,11 @@ bounded local queue/coalescing required by User Input v1
 ```text
 InputDeviceRegistry
 GenericProducer<T>
+plugin system
 EventBus / Observable framework
-Action/Command abstraction
-platform detection
-DOM types in protocol/core state
-producer-created Frame/Activation identity
+Action/Command mapping
+focus/gesture framework
+platform detection in Renderer Core
 ```
 
 ---
@@ -184,12 +177,13 @@ producer-created Frame/Activation identity
 M10/03 必须证明：
 
 ```text
-unavailable producer cannot emit
-availability return triggers fresh .state baseline when Effective
-paired transition orders State before Event
-Event is never replayed after inactive/Data boundary
-Producer cannot bypass current Renderer input gate
-canonical payload validation remains owned by existing Data profile mechanics
+source injected once for one holder lifetime
+old holder/source cannot affect replacement holder
+unavailable channel cannot produce ordinary input
+availability return rebaselines .state when Effective
+paired transition preserves State-before-Event
+source cannot choose authority identity or bypass publisher
+canonical payload validation remains @loomrealm/data responsibility
 ```
 
 下一步：[M10 / 04 — Vertical Integration](M10_04_VERTICAL_INTEGRATION.md)。
