@@ -7,7 +7,7 @@
 > 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)  
 > 被以下文档使用：[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
 > 正式化：[Render Update v1](../15-contracts/render-update-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
-> M11 实施：[M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 05](../../M11_05_QUALIFICATION_CLOSURE.md)  
+> M11 实施：[M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 05](https://github.com/lithdoo/loom-realm/blob/main/M11_05_QUALIFICATION_CLOSURE.md)  
 > 最近复核：2026-09-07
 
 ---
@@ -133,7 +133,7 @@ validate Frozen Render v1 representability
 
 SDK-minted `domainId` 在一个 Subsystem Runtime instance 内不复用。business Node key 在一个 business RenderDomain lifetime 内采用 stronger one-shot rule：一旦从 authoritative state移除，不得作为 later new Node lifetime重新引入。
 
-Exact TypeScript surface / local error model以 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为 implementation source of truth。
+Exact TypeScript surface / local error model以 [M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为 implementation source of truth。
 
 ---
 
