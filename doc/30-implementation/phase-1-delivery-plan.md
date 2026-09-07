@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving  
+> 稳定程度：Evolving overall / M10 frozen  
 > 主要定义：M0..M16 实现顺序、当前 closure、Desktop/PWA qualification 边界  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
 > 当前 Input 决策：[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
@@ -136,14 +136,15 @@ M9只证明 physical Data lifecycle；fresh Input/Render business baseline属于
 
 ---
 
-## M10：User Input v1 + InputManager — **Implementation Frozen / Preimplementation Closed**
+## M10：User Input v1 + InputManager — **Implementation Frozen / Ready for Implementation**
 
 Current facts：
 
 ```text
-User Input v1 protocolVersion = 1
+User Input protocolVersion = 1
 fixtureSetRevision = 2
 ADR 0023 + ADR 0029
+no further design round expected before coding
 ```
 
 Root implementation plans：
@@ -156,17 +157,21 @@ M10_04_VERTICAL_INTEGRATION.md
 M10_05_QUALIFICATION_CLOSURE.md
 ```
 
-### Subsystem slice
+### Exact Subsystem author slice
 
 ```text
 one InputManager / instance
-InputListener author surface
-Desired Interest union + local representability validation
-immutable retained State
-retention gate != business delivery gate
-known-no-commit same-Activation State convergence
+SubsystemScope.createInputListener exact surface
+InputChannel → canonical payload typed mapping
+channels/setChannels solely own Interest contribution
+on/unsubscribe solely own callback registration
+setChannels preserves dormant registrations
+unsubscribe + close idempotent
+stable deterministic handler snapshot/order
+async handler Promise does not block Data reader
+immutable retained State/local state baseline
+known-no-commit convergence before frame.call rejection observable
 latest-only Interest publication
-handler failure containment
 ```
 
 ### Renderer slice
@@ -176,7 +181,10 @@ Effective = Data × InputTarget × active F/A × Interest × Producer
 one input gate per current Data slot
 one bounded State/Event/Reset publisher
 Event/Reset global State-coalescing barriers
-one holder-lifetime canonical input source
+exact createRendererControlHolder(data?, input?) additive API
+one construction-time RendererInputSource object
+0..1 active source subscription for current Control peer
+fresh source facts after Control replacement/reconnect
 ```
 
 ### Qualification
@@ -184,11 +192,16 @@ one holder-lifetime canonical input source
 Real M9 Desktop Data vertical必须证明：
 
 ```text
+exact SDK contribution/handler semantics
+handler registration order + stable snapshot
+async handler isolation
 Interest-first / Authority-first convergence
 nested child call / fresh Activation
-recoverable frame.call no-commit retained-State convergence
+recoverable frame.call State-before-rejection convergence
 committed call never leaks old suppressed State
 same-generation Data reconnect fresh baseline/no Event replay
+fresh-generation role fixture
+Control replacement source restart + late callback isolation
 producer loss/return
 handler/local author error isolation
 barrier/backpressure rules
@@ -196,7 +209,7 @@ barrier/backpressure rules
 
 fresh-generation语义用 role-level deterministic fixture证明，不为测试提前加入 Main generation allocator。
 
-M10只声明 current platform-independent User Input role semantics在 Hostra/Desktop Data lifecycle上 qualified；完整 Hostra/PWA transport equivalence留到 M16。
+M10只声明 current platform-independent User Input role semantics + frozen SDK/source projection在 Hostra/Desktop Data lifecycle上 qualified；完整 Hostra/PWA transport equivalence留到 M16。
 
 Implementation完成时新增：
 
@@ -205,6 +218,28 @@ npm run test:m10
 ```
 
 文档阶段不放空 gate。
+
+### Freeze rule
+
+从当前状态开始，M10实现阶段允许改变：
+
+```text
+private names/layout/data structure
+finite local queue capacity
+private detach/freeze/token representation
+```
+
+不得重新讨论：
+
+```text
+public InputListener semantics
+handler payload shape/order/async behavior
+mutation reopen/rejection ordering
+Renderer source construction/lifetime
+User Input authority/lifetime/wire/backpressure
+```
+
+若编码遇到困难，默认按实现问题处理；只有证明 Frozen docs自身存在 correctness contradiction 才重新打开设计。
 
 ---
 
@@ -253,7 +288,7 @@ HostraPlatform.prepareGame
 → nested Frames / Renderer reload / shutdown
 ```
 
-M14加入真实 DOM/Gamepad input source，但必须复用 M10 holder-lifetime source seam与同一 authority/publisher semantics。
+M14加入真实 DOM/Gamepad `RendererInputSource`，必须复用 M10 exact source API、current-Control subscription lifetime与同一 authority/publisher semantics。
 
 ---
 
@@ -286,7 +321,7 @@ PwaPlatform.prepareGame
 - Frame causal/commit/unwind semantics保持 Frozen；
 - Renderer currentness/token/revision保持 M7 boundary；
 - Data authority/lifecycle保持 M8/M9 boundary；
-- M10 State/Event/Reset revision 2 semantics完整闭合；
+- M10 State/Event/Reset revision 2 + exact SDK/source semantics完整闭合；
 - Data failure不升级 Runtime/Frame；
 - M14才宣称 Desktop full product E2E；
 - M16才宣称完整 PWA/cross-platform equivalence；
