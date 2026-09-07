@@ -2,11 +2,11 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving  
-> 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input Interest/State、Render Domain、错误收敛与 role-facing Platform boundary  
+> 稳定程度：Evolving overall / **M10 Input slice Frozen**  
+> 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input author projection/Interest/State、Render Domain、错误收敛与 role-facing Platform boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> 实现草案：[package design source](https://github.com/lithdoo/loom-realm/blob/main/packages/subsystem/DESIGN.md)  
+> M10 实施：[M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](../../M10_05_QUALIFICATION_CLOSURE.md)  
 > 最近复核：2026-09-07
 
 ---
@@ -19,7 +19,8 @@ Subsystem Runtime负责：
 business state
 Runtime-level business initialization/cleanup
 local Frame Context + mutation gate
-Frame-scoped Desired Input Interest + retained State
+Frame-scoped Desired Input Interest
+retained author-safe Input State + business delivery
 outbound Frame call/return role
 Render Domain authoritative state
 Content client usage
@@ -38,6 +39,8 @@ default export = SubsystemDefinitionFactory
 ```
 
 Hostra/PWA artifact MAY不同，但进入同一 author/host ABI。Definition Module不得读取 Platform Launch Manifest、探测平台分支业务语义、打开 Control/Data carrier、读取 bootstrap material、spawn Process/Worker 或拥有 Broker。
+
+业务 Definition source只依赖 `@loomrealm/subsystem`；SDK package内部可使用 shared JSON/protocol mechanics，但不得把 protocol envelope/peer/Platform capability变成业务依赖。
 
 Runner把 physical resources投影为窄 role-local capabilities：
 
@@ -87,7 +90,7 @@ Runner loads planned module
 → ready
 ```
 
-`ready != Data exists != Renderer exists != Frame exists != Render baseline exists`。
+`ready != Data exists != Renderer exists != Frame exists != Input baseline exists != Render baseline exists`。
 
 `frame.initialize`只建立 local context；首次 successful `frame.activate`安装 fresh Activation后，author handler才启动 exactly once。
 
@@ -126,6 +129,16 @@ caller Activation
 
 只有明确 pre-commit recoverable rejection可以 typed reject并确认 same current Activation继续；timeout/loss/divergence等 ambiguous/fatal绝不重新进入业务 continuation。
 
+M10进一步冻结 recoverable rejection的本地顺序：
+
+```text
+same Activation mutation gate reopen
+→ synchronously deliver current retained State convergence
+→ then frame.call rejection becomes observable to business catch
+```
+
+只保证 handler同步 invocation已尝试；async handler Promise不等待。
+
 ---
 
 ## 6. Mutation Gate
@@ -139,48 +152,113 @@ State retention eligibility
 != business delivery eligibility
 ```
 
-因此 pending mutation期间 same-current-Activation `.state` 可以更新 latest retained State，但不交业务；Event drop。只有明确 known-no-commit + same Activation重新开放时，latest State local-converge，Event不 replay。commit/revoke/terminal则丢弃 suppressed old State。
+因此 pending mutation期间 same-current-Activation `.state` 更新 latest retained State但不交业务；Event drop。只有明确 known-no-commit + same Activation重新开放时，latest State local-converge，Event不 replay。commit/revoke/terminal则丢弃 suppressed old State。
 
 这条由 User Input v1 revision 2 / ADR 0029冻结；Renderer不感知 Subsystem mutation gate。
 
 ---
 
-## 7. Business Exception / Runtime Failure
+## 7. Input Author Projection — Frozen M10
 
-ordinary uncaught business exception在 authority明确健康时 → sanitized `FrameOutcome.failed` → normal return。
+Author-facing channel是 User Input v1 canonical channels的业务 projection：
 
-protocol ambiguity、SDK invariant corruption、Control loss → Runtime failure。
+```text
+keyboard.state / keyboard.event
+pointer.state  / pointer.event
+gamepad.state  / gamepad.event
+x.<custom>.state / x.<custom>.event
+```
 
-InputListener handler throw/reject属于 local business callback failure：必须 contained，不得升级为 Data/Runtime failure，也不得阻止其它匹配 listener被尝试交付。
+Handler接收 canonical **payload only**，不接收 `input.*` envelope、Frame/Activation/Data identity。
+
+标准 payload结构与 User Input v1完全一致；custom payload是 bounded JSON object。
+
+`SubsystemScope.createInputListener({frame,channels})` 是唯一 M10 creation seam。
 
 ---
 
-## 8. Administrative Suspend / Terminal
+## 8. Interest Contribution vs Handler Registration
 
-`frame.suspend` 是 administrative one-way suspension：revoke Activation、close ordinary gates、abort frame signal、保留 context供 close cleanup。Child-call suspension不是 administrative suspend。
-
-一个 Runtime instance只有一个 first terminal cause：graceful shutdown或 Runtime-fatal。SDK先 abort relevant signals，再 bounded cleanup；Input listeners/Interest/retained State最终全部清除。
-
----
-
-## 9. Input Interest / Listener
-
-InputListener绑定 branded Frame capability。
+InputListener绑定同一 Subsystem instance 的 branded live Frame capability。
 
 ```text
 Desired Interest[F]
 = union(all live listener channel contributions for F)
 ```
 
-Interest是 Frame-scoped desired configuration，不是 Main authority。Publication始终是 full Registry snapshot。
+固定：
 
-Author mutation必须先验证 candidate representability；非法 channel/duplicate/union hard-limit失败要 local-atomically reject：旧 Desired Interest不变、wire send=0、Data peer不受影响。
+```text
+channels / setChannels
+    own this listener's Interest contribution
 
-同一 `(F,A,C.state)` 已有 retained State时，新 `.state` listener首次 locally eligible可直接得到 current retained baseline；`.event` listener只接收 future Event。
+on(channel, handler)
+    callback registration only
+    does not change Interest
+
+unsubscribe
+    removes one callback only
+    idempotent
+
+close
+    removes listener contribution + registrations
+    idempotent
+```
+
+`setChannels` shrink保留 callback registration为 dormant；re-add重新激活。`channels=[]` 合法。
+
+Author config invalid/duplicate/hard-limit overflow必须在 local commit前拒绝，旧 Desired Interest不变、wire send=0、Data不受影响。
 
 ---
 
-## 10. Input Across Activation / Data
+## 9. Retained State / Deterministic Delivery
+
+InputManager保存 current `(F,A,C.state)` latest **detached deep-immutable** author payload。
+
+State handler首次 locally eligible且已有 retained State：
+
+```text
+registration/config commit
+→ one synchronous current local baseline
+```
+
+如果 derived union真正移除 state channel，则 retained State同时清除；later re-add等待 fresh Renderer baseline。
+
+Event永不 local replay。
+
+每次 delivery捕获 stable matching-handler snapshot：
+
+```text
+single channel
+    registration order
+
+multi-channel local convergence
+    canonical ASCII channel order
+    then registration order
+```
+
+Handler在 callback中 unsubscribe/close/setChannels/on只影响 subsequent delivery。
+
+---
+
+## 10. Async Handler Boundary
+
+Input handler可以返回 Promise，但业务 async completion不是 Data flow control：
+
+```text
+invoke synchronously
+sync throw → contained
+Promise reject → observed/contained
+Promise pending forever → does not stall later handler or Data reader
+```
+
+InputManager不得把 handler Promise return/chain到 `@loomrealm/data` inbound dispatcher。
+
+因此 Data peer等待的是 InputManager对本条 application message的同步 local application完成，而不是业务 async task完成。
+
+---
+
+## 11. Input Across Activation / Data
 
 Child-call suspension：listener + Desired Interest保留，ordinary delivery停止；fresh A2后同一 config重新生效，但 A1 State/Event不跨到 A2。
 
@@ -199,7 +277,30 @@ Frame close protocol success成立前必须已关闭 listeners、移除 Desired 
 
 ---
 
-## 11. DataPlane
+## 12. Business Exception / Runtime Failure
+
+ordinary uncaught business exception在 authority明确健康时 → sanitized `FrameOutcome.failed` → normal return。
+
+```text
+Input handler sync/async failure → local containment
+pre-commit call rejection       → State convergence then typed local error
+protocol ambiguity/Control loss → Runtime failure
+Data failure                    → Data unavailable, not Frame unwind
+```
+
+Input handler failure不得阻止其它 matching handler同步 invocation。
+
+---
+
+## 13. Administrative Suspend / Terminal
+
+`frame.suspend` 是 administrative one-way suspension：revoke Activation、close ordinary gates、abort frame signal、保留 context供 close cleanup。Child-call suspension不是 administrative suspend。
+
+一个 Runtime instance只有一个 first terminal cause：graceful shutdown或 Runtime-fatal。SDK先 abort relevant signals，再 bounded cleanup；Input listeners/Interest/retained State最终全部清除。
+
+---
+
+## 14. DataPlane
 
 Subsystem SDK只有一个 connection-wide Data peer/reader：
 
@@ -217,7 +318,7 @@ InputManager拥有 latest-only Interest publisher，而不是第二 writer；Dat
 
 ---
 
-## 12. Render Domain
+## 15. Render Domain
 
 Subsystem author创建 `RenderDomain`表达 authoritative presentation state/event。SDK mint domainId；business name不是 protocol identity。
 
@@ -231,7 +332,7 @@ fresh Data carrier重新 publication Domain Registry + fresh Snapshots，不能�
 
 ---
 
-## 13. Dynamic Provisioning / Content
+## 16. Dynamic Provisioning / Content
 
 Hostra Data：Broker → Runner IPC → Data WS → SubsystemDataBinding。
 
@@ -243,7 +344,7 @@ Content只通过 platform-neutral `ContentClient`；ordinary readonly content ca
 
 ---
 
-## 14. Portability / Error Boundary
+## 17. Portability / Error Boundary
 
 业务应满足：
 
@@ -257,7 +358,7 @@ Content只通过 platform-neutral `ContentClient`；ordinary readonly content ca
 
 ```text
 business validation → FrameOutcome.failed
-pre-commit call rejection → typed local error
+pre-commit call rejection → typed local error after State convergence
 protocol ambiguity/fatal → Runtime failure
 module load/ABI → bootstrap failure
 Data provisioning/loss → Data unavailable
@@ -268,21 +369,23 @@ Platform path/token/ticket/internal stack不得泄漏给普通业务错误。
 
 ---
 
-## 15. Final Invariants
+## 18. Final Invariants
 
 1. Subsystem role platform-neutral；
 2. Main独占 public Frame/Activation/InputTarget authority；
 3. Definition artifact由 Platform LaunchPlan选择，业务只见统一 ABI；
-4. ready不暗示 Data/Renderer；
+4. ready不暗示 Data/Renderer/Input baseline；
 5. initialize只建 Frame Context，activate后才启动 handler；
 6. FrameOutcome与 protocol三态一一对应；
 7. ambiguous/fatal绝不重新进入业务 continuation；
 8. Desired Interest Frame-scoped，Input lease Activation-scoped，wire publication carrier-scoped；
-9. mutation gate关闭时 State retention与 business delivery分离，确保 known-no-commit same-Activation current-State收敛；
-10. Event不 replay；handler failure不升级 Data/Runtime；
-11. fresh Data重新建立 Input/Render baselines；
-12. Render Domain独立于 Frame/Data carrier；
-13. one Data peer统一 demux；
-14. Platform provisioning不污染 application protocols；
-15. executable capability与 readonly Content capability分离；
-16. Hostra/PWA physical差异不得改变 business-observable semantics。
+9. channels贡献 Interest，handler registration不改变 Interest；
+10. retained State author-visible值 detached/immutable，Event不 replay；
+11. deterministic handler invocation使用 stable snapshot + registration order；
+12. async Input handler不成为 Data flow control；
+13. known-no-commit State convergence先于 recoverable `frame.call` rejection observable；
+14. fresh Data重新建立 Input/Render baselines；
+15. Render Domain独立于 Frame/Data carrier；
+16. one Data peer统一 demux；
+17. Platform provisioning不污染 application protocols；
+18. Hostra/PWA physical差异不得改变 business-observable semantics。
