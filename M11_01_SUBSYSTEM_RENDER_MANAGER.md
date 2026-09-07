@@ -1,17 +1,18 @@
 # M11 / 01 — Subsystem RenderManager
 
-> 状态：**Planned**  
+> 状态：**Implementation Frozen / Waiting on M10 Closure**  
 > 阶段：M11 Render  
 > 落地顺序：01  
 > 最近复核：2026-09-07  
 > 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)  
-> 架构：[渲染系统](doc/10-architecture/rendering-system.md)
+> 架构：[渲染系统](doc/10-architecture/rendering-system.md)  
+> 目标：实现 Subsystem-owned business Render Domain 与最小 author surface；不得引入 presentation 或 generic state abstraction。
 
-M11/01只实现 Subsystem-owned business Render Domain 与最小 author surface；不实现 publication、Renderer store、DOM/Canvas/WebGL 或 Content。
+> **M11/01只建立 business Render authority。publication、Renderer replica、DOM/Canvas/WebGL 与 Content 均不属于本步。**
 
 ---
 
-## 1. Goal
+## 1. Frozen Position
 
 ```text
 Subsystem business state
@@ -20,13 +21,23 @@ Subsystem business state
 → authoritative desired Render state
 ```
 
+Dependency order：
+
+```text
+M11_01
+→ M11_02 publication
+→ M11_03 Renderer Store
+→ M11_04 vertical
+→ M11_05 qualification
+```
+
 Subsystem 是 Render authority。Main、Renderer、Frame、Data carrier 都不拥有 business Render Domain lifecycle。
 
 ---
 
 ## 2. Required Surface
 
-实现一个 Subsystem-local `RenderManager`，负责：
+实现一个 Subsystem-local `RenderManager`：
 
 ```text
 create Domain
@@ -61,7 +72,7 @@ Frame close   != Domain destroy
 Data retire   != Domain destroy
 ```
 
-Domain 属于 Subsystem Runtime business state。若业务希望 Domain 与 Frame 同生共死，只能由业务代码显式管理。
+若业务希望 Domain 与 Frame 同生共死，只能由业务代码显式管理。
 
 ---
 
@@ -73,13 +84,12 @@ Domain 属于 Subsystem Runtime business state。若业务希望 Domain 与 Fram
 domainId local uniqueness
 Node key Domain-wide uniqueness
 live key keeps stable tag
-removed published identity cannot be silently reused later by publication layer
-updates are applied atomically to local authoritative state
-invalid update leaves previous state unchanged
+updates apply atomically
+invalid update preserves previous state
 Runtime cleanup releases all Domains
 ```
 
-M11/01 不分配 Data generation，不维护 carrier publication revision。
+M11/01 不分配 Data generation，不维护 carrier publication revision；published one-shot identity由 M11/02 publication lifecycle负责。
 
 ---
 
@@ -124,4 +134,4 @@ Runtime cleanup tests
 business Definition remains dependent only on @loomrealm/subsystem
 ```
 
-M11/01 完成后进入 M11/02 publication；不得提前把 physical presentation 引入 Subsystem。
+M10 formal qualification 未关闭前不得开始 M11 implementation。
