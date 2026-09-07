@@ -49,12 +49,12 @@ export type RendererInputSourceChange =
   | {
       readonly kind: "state";
       readonly channel: InputStateChannelV1;
-      readonly payload: JsonObject;
+      readonly payload: InputStateV1["payload"];
     }
   | {
       readonly kind: "event";
       readonly channel: InputEventChannelV1;
-      readonly payload: JsonObject;
+      readonly payload: InputEventV1["payload"];
     };
 
 export interface RendererInputSource {
@@ -64,7 +64,9 @@ export interface RendererInputSource {
 }
 ```
 
-这里的 `Input*V1` / canonical payload model直接来自 `@loomrealm/data`；这是 trusted Renderer integration surface，不是 business author API。
+`InputChannelV1` / `InputStateChannelV1` / `InputEventChannelV1` / `InputStateV1` / `InputEventV1` 全部来自现有 `@loomrealm/data` root export。这样 `@loomrealm/renderer` **不新增对 `@loomrealm/wire` 的直接 dependency**。
+
+Source payload仍是 exact Data/User Input JSON object payload model；这是 trusted Renderer integration surface，不是 business author API。
 
 `start()` 返回的 stop function必须 idempotent。
 
@@ -317,7 +319,17 @@ M14 real source必须能在每次 successful `start()` 提供 fresh canonical cu
 
 ---
 
-## 11. Abstraction Budget
+## 11. Dependency / Abstraction Budget
+
+`@loomrealm/renderer` M10 runtime dependencies remain exactly current set：
+
+```text
+@loomrealm/renderer-control
+@loomrealm/platform-ports
+@loomrealm/data
+```
+
+M10 source surface复用 `@loomrealm/data` exported types，不添加 `@loomrealm/wire` dependency。
 
 允许：
 
@@ -352,6 +364,8 @@ M10/03 必须证明：
 
 ```text
 factory old one-argument calls remain valid
+renderer package dependency set unchanged
+source public types resolve through @loomrealm/data only
 source object injected once at holder construction
 0..1 active source subscription
 current Control replacement/terminal stops old subscription
