@@ -22,7 +22,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-### M10 implementation plans
+### M10 implementation plans — Frozen / Ready
 
 - [M10 / 01 — Subsystem InputManager](./M10_01_SUBSYSTEM_INPUT_MANAGER.md)
 - [M10 / 02 — Renderer Input Gate](./M10_02_RENDERER_INPUT_GATE.md)
@@ -72,13 +72,14 @@ Main
 Subsystem
     business state
     local Frame Context / mutation gate
-    Desired Input Interest + retained State
+    Desired Input Interest + retained author State
     Render authoritative state
 
 Renderer
     read-only Main mirror
     current Data consumers
-    Input sender / Render replica
+    canonical Producer facts / Input sender
+    Render replica
 
 Platform
     executable binding
@@ -116,9 +117,46 @@ Effective
 × Producer(C)
 ```
 
-ADR 0029 修正一个首次实现前 State convergence hole：commit-sensitive mutation gate 暂时关闭时，same-current-Activation `.state` 可 retain latest但 suppress business delivery；explicit known-no-commit + same Activation reopen时 local-deliver latest State，Event仍不 replay。
+ADR 0029 修正首次实现前 State convergence hole：commit-sensitive mutation gate 暂时关闭时，same-current-Activation `.state` retain latest但 suppress business delivery；explicit known-no-commit + same Activation reopen时先同步完成 current retained-State handler invocation，再让 recoverable `frame.call` rejection 对业务可见；Event仍不 replay。
 
 没有增加 wire message、revision、ACK、cross-plane barrier或 Renderer 对 Subsystem mutation gate 的知识。
+
+---
+
+## M10 Frozen Author / Renderer Surface
+
+Subsystem author：
+
+```text
+SubsystemScope.createInputListener
+InputChannel → canonical payload typed mapping
+channels/setChannels = Interest contribution
+on/unsubscribe = callback registration only
+setChannels keeps dormant registrations
+unsubscribe + close idempotent
+stable registration-order delivery
+async handler Promise does not block Data reader
+```
+
+Handler只收到 canonical payload，不收到 wire envelope/activationId/Data identity。
+
+Renderer construction：
+
+```ts
+createRendererControlHolder(
+  data?: RendererDataBinding,
+  input?: RendererInputSource,
+)
+```
+
+```text
+one construction-time RendererInputSource object
+0..1 active source subscription for current Control peer
+Control replacement/terminal → invalidate + stop old subscription
+same holder later Control → restart same source object with fresh facts
+```
+
+M10不新增 Platform Port、producer registry、Store/EventBus 或 generic Input framework。
 
 ---
 
@@ -134,7 +172,7 @@ M6 Hostra Runtime vertical            ✅
 M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
-M10 User Input                        Implementation Frozen / next
+M10 User Input                        Implementation Frozen / Ready for Implementation
 M11 Render                            pending
 M12 Content                           pending
 M13 loom.map                          pending
@@ -143,7 +181,7 @@ M15 PWA Runtime                       pending
 M16 PWA full E2E/equivalence          pending
 ```
 
-M10 不实现 BrowserWindow/DOM physical composition；真实 Browser input source属于 M14。M10只增加一个 holder-lifetime canonical source seam并使用 deterministic source完成 role qualification。
+M10 不实现 BrowserWindow/DOM physical composition；真实 Browser `RendererInputSource` 属于 M14，并必须复用 frozen M10 source API/lifetime。
 
 ---
 
@@ -155,9 +193,11 @@ M10 不实现 BrowserWindow/DOM physical composition；真实 Browser input sour
 @loomrealm/main       → platform-ports + runtime-control + renderer-control + wire
 @loomrealm/renderer   → renderer-control + platform-ports + data
 @loomrealm/subsystem/host → platform-ports + runtime-control + data
-@loomrealm/subsystem  → author-facing capabilities only
+Business Definition  → @loomrealm/subsystem only
 @loomrealm/map        → @loomrealm/subsystem
 ```
+
+`@loomrealm/subsystem` package implementation may internally/type-only use shared Wire/protocol packages；business Definition不得直接依赖它们。
 
 Forbidden：
 
@@ -199,4 +239,4 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Current implementation gate：M10。实现完成时再加入 `npm run test:m10`，不提前放空 script。
+Current implementation gate：**M10**。文档设计已冻结，可直接开始编码；实现完成时再加入 `npm run test:m10`，不提前放空 script。
