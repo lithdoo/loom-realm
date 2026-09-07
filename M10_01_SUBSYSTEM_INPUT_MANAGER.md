@@ -1,15 +1,15 @@
 # M10 / 01 — Subsystem InputManager
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implementation Frozen / Ready for Implementation**  
 > 阶段：M10 User Input  
 > 落地顺序：01  
 > 最近复核：2026-09-07  
 > 正式协议：[User Input v1](doc/15-contracts/user-input-v1.md)  
 > 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > Author boundary：[packages/subsystem/DESIGN.md](packages/subsystem/DESIGN.md)  
-> 目标：在现有 M4 Frame Runtime + M8 Data peer 上实现唯一 role-local `InputManager`；只暴露业务 listener，不复制 Frame authority、Data lifecycle 或 wire mechanics。
+> 目标：在现有 M4 Frame Runtime + M8 Data peer 上实现唯一 role-local `InputManager`；公开 SDK 语义在本文冻结，编码阶段只允许选择 private layout/name，不得再发明 author-visible behavior。
 
-> **InputManager 拥有 desired Interest、listener lifecycle、retained State 与 local delivery；FrameRuntime 仍是 local Frame/Activation/mutation-gate 唯一事实源，`@loomrealm/data` 仍拥有 wire validation/serialization。**
+> **InputManager 拥有 Desired Interest、listener lifecycle、retained State 与 local delivery；FrameRuntime 仍是 local Frame/Activation/mutation-gate 唯一事实源，`@loomrealm/data` 仍拥有 wire validation/serialization。**
 
 ---
 
@@ -31,51 +31,156 @@ scope.createInputListener(...)
 → same InputManager
 
 FrameRuntime lifecycle transition
-→ direct same-package InputManager cleanup/reopen hook or query
+→ direct same-package InputManager hook/query
 
 current SubsystemDataPeer
 ↔ same InputManager
 ```
 
-不得建立 Frame shadow registry、EventBus、service locator 或第二条 Data reader。
+不得建立 Frame shadow registry、EventBus、service locator 或第二条 Data reader/writer。
 
 ---
 
-## 2. Author Surface
+## 2. Exact Author Surface
 
-沿用既有 target surface：
+M10 root-export 以下业务类型；名字与行为冻结：
 
 ```ts
-interface CreateInputListenerOptions {
+export type InputStateChannel =
+  | "keyboard.state"
+  | "pointer.state"
+  | "gamepad.state"
+  | `x.${string}.state`;
+
+export type InputEventChannel =
+  | "keyboard.event"
+  | "pointer.event"
+  | "gamepad.event"
+  | `x.${string}.event`;
+
+export type InputChannel = InputStateChannel | InputEventChannel;
+
+export type InputPayload<C extends InputChannel> =
+  C extends "keyboard.state" ? KeyboardStateInput :
+  C extends "keyboard.event" ? KeyboardEventInput :
+  C extends "pointer.state" ? PointerStateInput :
+  C extends "pointer.event" ? PointerEventInput :
+  C extends "gamepad.state" ? GamepadStateInput :
+  C extends "gamepad.event" ? GamepadEventInput :
+  C extends `x.${string}.state` | `x.${string}.event` ? JsonObject :
+  never;
+
+export type InputHandler<C extends InputChannel> =
+  (value: InputPayload<C>) => void | Promise<void>;
+
+export type Unsubscribe = () => void;
+
+export interface CreateInputListenerOptions {
   readonly frame: Frame;
   readonly channels: readonly InputChannel[];
 }
 
-interface InputListener {
-  on<T>(channel: InputChannel, handler: (value: T) => void): Unsubscribe;
+export interface InputListener {
+  on<C extends InputChannel>(
+    channel: C,
+    handler: InputHandler<C>,
+  ): Unsubscribe;
+
   setChannels(channels: readonly InputChannel[]): void;
   close(): void;
 }
 ```
 
-通过 `SubsystemScope.createInputListener(...)` 创建。Author 不见：
+`SubsystemScope` exact M10 extension：
+
+```ts
+interface SubsystemScope {
+  readonly signal: AbortSignal;
+  createInputListener(options: CreateInputListenerOptions): InputListener;
+}
+```
+
+Standard author payload types：
 
 ```text
-activationId
+KeyboardStateInput
+KeyboardEventInput
+PointerStateInput
+PointerEventInput
+GamepadStateInput
+GamepadEventInput
+```
+
+以及它们需要的 canonical supporting types（Keyboard code、Pointer sample/button/kind、Gamepad sample/axes/buttons）全部是 User Input v1 对应 payload 的 **结构等价 author projection**；字段、numeric range、canonical ordering不得另定义第二套语义。
+
+Custom `x.*` handler value是 bounded JSON object payload。
+
+Handler **只收到 payload**，绝不收到：
+
+```text
+input.state / input.event envelope
+frameId / activationId
 generation / dataProfile
-input.interest/state/event/reset
 RendererDataPeer / MessageCarrier
 ```
 
+实现可在 package 内部通过 type alias 复用 `@loomrealm/data` / shared JSON types，但 root-export 使用上述 author names；业务 Definition 只 import `@loomrealm/subsystem`。
+
 ---
 
-## 3. Local Author Validation
+## 3. Listener Contribution vs Handler Registration
 
-`createInputListener` / `setChannels` 在改变任何 local state 前必须验证：
+两个概念必须分离：
 
 ```text
-channel grammar/suffix
-no duplicate contribution
+listener.channels contribution
+    owns Desired Interest contribution
+
+listener.on(...)
+    owns callback registration only
+```
+
+固定规则：
+
+```text
+createInputListener({channels})
+    creates exactly one listener contribution
+    channels MAY be []
+
+on(channel, handler)
+    MUST NOT change Interest
+    channel MUST currently belong to this listener contribution
+    one call = one independent registration
+
+setChannels(channels)
+    changes this listener contribution only
+    preserves existing handler registrations
+    removed-channel handlers become dormant
+    re-added channel reactivates those handlers
+
+unsubscribe()
+    removes exactly its registration
+    MUST NOT change Interest
+    idempotent
+
+close()
+    atomically disables all registrations + removes this contribution
+    idempotent
+```
+
+`on()` / `setChannels()` after `close()` synchronously throw `TypeError`；`unsubscribe()` after listener close remains harmless/idempotent。
+
+`createInputListener` 必须使用同一 Subsystem instance 的 live branded `Frame` capability；foreign/invalid capability同步 `TypeError`，已知 local closed Frame使用现有 `FrameClosedError`。
+
+---
+
+## 4. Local Author Validation
+
+`createInputListener` / `setChannels` 在改变任何 local state 前验证：
+
+```text
+exact User Input v1 channel grammar/suffix
+no duplicate channel in supplied contribution
 resulting Frame union <= 64 channels
 resulting Registry <= 128 Frames / 4096 pairs
 ```
@@ -83,20 +188,22 @@ resulting Registry <= 128 Frames / 4096 pairs
 失败：
 
 ```text
-local usage error
-→ old listener contribution unchanged
-→ old DesiredRegistry unchanged
-→ wire send = 0
-→ current Data peer unaffected
+invalid/duplicate/illegal usage → TypeError
+representability hard-limit overflow → RangeError
+
+old listener contribution unchanged
+old DesiredRegistry unchanged
+wire send = 0
+current Data peer unaffected
 ```
 
 这是 author representability validation，不建立第二套 inbound wire/schema validator。
 
 ---
 
-## 4. Desired Interest
+## 5. Desired Interest
 
-每个 listener 保存自己的 channel contribution；InputManager 只派生：
+每个 listener 保存自己的 contribution；InputManager 派生：
 
 ```text
 DesiredRegistry = Map<frameId, Set<channel>>
@@ -104,22 +211,27 @@ DesiredRegistry = Map<frameId, Set<channel>>
 
 同一 Frame 多 listener取 union。
 
-`setChannels()` / `close()`：
+Config mutation顺序：
 
 ```text
 validate candidate
-→ atomically commit local contribution
+→ atomically commit local contribution/lifecycle
 → recompute affected union
 → local receive/delivery eligibility立即反映新值
-→ queue latest full input.interest snapshot
+→ perform any required local retained-State baseline delivery
+→ if derived DesiredRegistry changed, queue latest full input.interest snapshot
 ```
+
+`on()` / `unsubscribe()` 永不 publication Interest。
+
+如果 listener contribution变化但 derived union未变，不发送冗余 Registry。
 
 Wire 始终 full replacement，不做 incremental subscribe/unsubscribe。
 
-Interest publisher只需要：
+Interest publisher exact shape：
 
 ```text
-0..1 inFlight send
+0..1 inFlight sendInterest
 0..1 pendingLatest full Registry
 ```
 
@@ -127,26 +239,52 @@ fresh Data peer丢弃旧 publisher state，并从 current DesiredRegistry重新 
 
 ---
 
-## 5. Retained State / Listener Baseline
+## 6. Retained State / Author-safe Value
 
-InputManager 对 current `(F,A,C.state)` 保存最新 author-safe immutable State snapshot。
-
-当一个 listener 首次 locally eligible 且该 channel已有 current retained State：
+InputManager 对 current `(F,A,C.state)` 保存最新 **detached deep-immutable** State payload snapshot。
 
 ```text
-install listener/config first
-→ deliver exactly one latest retained State to that listener
+wire/data payload object
+→ detach from protocol-owned mutable object graph
+→ recursively make author-visible snapshot immutable
+→ retain/deliver that snapshot
 ```
 
-无需为了新增本地 listener制造 Interest shrink/expand，也不要求 Renderer重发 baseline。
-
-`.event` listener永远 future-only，不做 local replay。
+具体 clone/freeze helper是 private mechanics，不形成新的 public abstraction；业务对收到对象的突变尝试不得改变以后 retained baseline。
 
 Interest union真正移除一个 `.state` channel时立即清该 channel retained State；移除整个 Frame entry时清该 Frame retained State。
 
 ---
 
-## 6. Receive: Retention Gate vs Business Gate
+## 7. Handler Eligibility / Local Baseline
+
+State handler首次 locally eligible有两种来源：
+
+```text
+A. on(C.state, handler) registration
+   while C already belongs to listener contribution
+
+B. setChannels(...) re-add/expand C.state
+   with previously registered dormant handlers
+```
+
+若 `(F,A,C.state)` 已有 current retained State：
+
+```text
+commit registration/config first
+→ synchronously invoke eligible handler(s) exactly once with latest retained State
+→ method returns
+```
+
+无需制造 wire Interest toggle，也不要求 Renderer重发 baseline。
+
+`.event` registration/expansion只接收 future Event，绝不 local replay。
+
+如果 union曾真正移除 `.state`，其 retained State已清除，因此以后 re-add 必须等待 Renderer fresh baseline；不能复活旧 local State。
+
+---
+
+## 8. Receive: Retention Gate vs Business Gate
 
 well-formed `.state(F,A,C)` 先检查 retention eligibility：
 
@@ -159,7 +297,7 @@ message from current Data peer
 
 不满足 → drop。
 
-满足时：
+满足：
 
 ```text
 retain latest immutable State
@@ -172,9 +310,9 @@ Frame active
 ∧ ordinary mutation gate open
 ```
 
-才交给 business listeners。
+才交 business handlers。
 
-因此 commit-sensitive mutation pending 时：
+因此 commit-sensitive mutation pending：
 
 ```text
 State → retain latest, suppress delivery
@@ -186,15 +324,77 @@ Reset(current F/A) → clear retained/suppressed State
 
 ---
 
-## 7. Mutation Reopen / Activation Boundary
+## 9. Deterministic Handler Invocation
 
-只有明确 known-no-commit 且 same Activation 恢复 ordinary mutation 时：
+每次 business delivery先捕获一个 stable matching-registration snapshot。
+
+顺序冻结：
 
 ```text
-mutation gate reopens on same F/A
-→ deliver at most one latest retained State per still-interested .state channel
-→ no Event replay
+single channel delivery
+    handlers by registration order
+
+multi-channel local convergence
+    channels by canonical ASCII channel order
+    then handlers by registration order
 ```
+
+因此 handler 在 invocation 中调用：
+
+```text
+unsubscribe
+listener.close
+listener.setChannels
+new listener.on
+```
+
+只影响 **subsequent delivery**，不改变当前已捕获 snapshot。
+
+每个 matching handler 都必须被 synchronously attempted；一个 handler同步 throw不能阻止后续 handler invocation。
+
+---
+
+## 10. Async Handler Isolation
+
+`InputHandler` MAY return `Promise<void>`，但 business async completion **不是 Data flow control**。
+
+固定：
+
+```text
+invoke handler synchronously
+→ if it returns Promise, observe settlement only for rejection containment
+→ DO NOT await it before invoking next handler
+→ DO NOT return/chain it into @loomrealm/data inbound dispatcher
+```
+
+所以：
+
+```text
+sync throw          → contained
+Promise reject      → contained
+Promise never settles → does not stall Data reader / other input delivery
+```
+
+M10 不建立 diagnostics/event framework；具体 logging 属于以后独立 diagnostics policy。
+
+---
+
+## 11. Mutation Reopen / Activation Boundary
+
+只有明确 known-no-commit 且 same Activation 恢复 ordinary mutation时：
+
+```text
+restore same F/A mutation eligibility
+→ synchronously perform retained-State convergence
+   canonical state-channel order
+   matching handlers registration order
+→ only after all eligible handler invocations have been attempted,
+   settle frame.call() with recoverable rejection
+```
+
+异步 handler Promise 不等待 settlement。
+
+因此业务 `catch` / rejected-Promise continuation开始时，所有 current retained State handler的同步 invocation side effects已经发生。
 
 如果 mutation commit / Activation revoke / administrative suspend / Frame close / Runtime terminal：
 
@@ -206,7 +406,7 @@ Child-call正常成功：listener + Desired Interest可跨 suspension保留，�
 
 ---
 
-## 8. Data / Frame Cleanup
+## 12. Data / Frame Cleanup
 
 Fresh Data peer：
 
@@ -233,39 +433,25 @@ Runtime terminal最终清全部 listener/Interest/retained State。
 
 ---
 
-## 9. Handler Isolation
-
-一个 accepted input delivery使用当前匹配 listener集合；单个 handler throw 或 returned Promise reject：
-
-```text
-contained by InputManager
-→ does not escape @loomrealm/data handler
-→ does not retire Data
-→ does not modify Frame/Runtime authority
-→ does not prevent other matching listeners from being attempted
-```
-
-M10 不建立 diagnostics/event framework。
-
----
-
-## 10. Implementation Budget
+## 13. Implementation Budget
 
 允许：
 
 ```text
 one InputManager per Subsystem instance
-per-listener contribution records
+per-listener contribution + registration records
 one derived DesiredRegistry
 minimal immutable retained State
 one latest-only Interest publisher
-small direct FrameRuntime integration hooks/queries
+small direct FrameRuntime hooks/queries
+small recursive JSON detach/freeze helper
 ```
 
 禁止：
 
 ```text
 InputStore / GenericSubscription / EventBus
+Generic async task scheduler
 InputTarget/Frame/Activation shadow authority
 second Data reader/writer
 cross-plane ACK/revision/barrier
@@ -275,21 +461,28 @@ platform event objects in author API
 
 ---
 
-## 11. Done
+## 14. Done
 
 M10/01 必须证明：
 
 ```text
+exact root-export Input SDK types compile
+handler receives payload only, never protocol envelope
+channels own Interest; on/unsubscribe never mutate Interest
+empty contribution valid / duplicates invalid
+unsubscribe + close idempotent
+setChannels preserves dormant handlers
+registration-order + stable-snapshot delivery
+state on()/reactivation local baseline
+.event no local replay
+async handler never stalls Data dispatch
 local invalid configuration rejects atomically without Data failure
-multiple listener union / close isolation / shrink-expand
-new state listener receives current retained local baseline
-new event listener receives no historical Event
+multiple listener union / close isolation
 pending mutation retains State but suppresses delivery
-recoverable no-commit same-Activation reopen delivers latest State
+recoverable no-commit convergence happens before frame.call rejection is observable
 committed mutation never leaks suppressed old-Activation State
-handler failure does not retire Data
 Frame close local-first cleanup
-fresh Data peer clears State + republishes Interest
+fresh Data clears State + republishes Interest
 ```
 
 下一步：[M10 / 02 — Renderer Input Gate](M10_02_RENDERER_INPUT_GATE.md)。
