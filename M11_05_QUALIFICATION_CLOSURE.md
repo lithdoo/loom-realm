@@ -42,18 +42,20 @@ existing @loomrealm/data
     Frozen Render Update v1 codec/send/disposition mechanics reused
 
 @loomrealm/subsystem host
-    one RenderManager
-    generation/current-carrier publication
+    one RenderManager authority responsibility
+    bounded generation/current-carrier publication responsibility
     Registry + Snapshot/Patch/Event
 
 @loomrealm/renderer
-    internal Render Store on existing Data slot
+    internal replica state on existing Data slot
     atomic Registry/Snapshot/Patch application
     no new public Render/presentation API
 
 Desktop/Hostra vertical
     same-generation reconnect / old-stream isolation
 ```
+
+`RenderManager`、publication coordinator、Renderer Store 都只描述真实 responsibility/state boundary；不要求独立 reusable class/framework。
 
 不属于 M11：DOM/Canvas/WebGL presentation、Content/resource resolution、component registry、layout/animation、PWA transport equivalence。
 
@@ -98,7 +100,8 @@ exact author API is synchronous local-only
 successful author values always representable by Frozen Render v1
 Frame close != Domain destroy
 Data retire != Domain destroy
-SDK domainId not reused within one Subsystem Runtime instance
+business close immediately removes Domain from desired Registry and discards not-yet-emitted Domain work
+SDK domainId is valid/private and never reused within one Subsystem Runtime instance
 business Node key one-shot within business RenderDomain lifetime
 same-generation reconnect != new wire Domain lifetime
 fresh generation = fresh wire Render universe
@@ -106,11 +109,12 @@ fresh carrier starts Registry + per-Domain Snapshot baseline
 Domain/Node emitted one-shot history holds within wire lifetime
 live Node key keeps stable tag
 Patch continuity is carrier-local R→R+1
+revision never wraps; exhaustion rolls one still-live business Domain to one fresh private wire domainId
 Snapshot/Patch commit atomically
 Event ordered/transient/no replay
 prebaseline retained Event follows establishing Snapshot
 old carrier cannot mutate current replica
-Renderer Store remains internal
+Renderer replica state remains internal
 Render stream failure != Runtime terminal / Frame unwind
 ```
 
@@ -123,15 +127,16 @@ fresh-generation semantics由 sender/receiver deterministic role fixtures证明�
 允许：
 
 ```text
-one internal Subsystem RenderManager
-RenderDomain handles
+one internal Subsystem Render authority responsibility
+RenderDomain handles/records
 minimal Domain/tree validation/indexing
-one publication coordinator
+one bounded publication responsibility (may live inside RenderManager)
 per-generation emitted identity history
 per-carrier Domain cursors
-one internal Renderer Render Store per Data-slot identity
+one internal Renderer replica state per Data-slot identity
 isolated candidate helpers
 small sender/receiver qualification adapters
+only-if-needed minimal test observation seam
 ```
 
 禁止：
@@ -140,6 +145,7 @@ small sender/receiver qualification adapters
 Generic Store / Observable / EventBus
 generic conformance framework for future protocols
 public RenderManager / RenderStore / subscription API
+mandatory separate manager/coordinator/store class hierarchy
 virtual DOM / reconciler
 component/plugin registry
 resource/content resolver
@@ -147,7 +153,7 @@ Render RPC / ACK / resync / replay
 cross-Domain revision/transaction framework
 Frame→Domain implicit ownership layer
 generic replication framework
-business-key → wire-key translation layer
+generic business↔wire identity translation layer
 test-only Data generation authority
 ```
 
@@ -198,6 +204,8 @@ Qualification adapter只把 fixture observable actions映射到当前生产实�
 Subsystem exact public-boundary compile tests
 Subsystem validation/detach/lifecycle tests
 publication Registry/baseline/revision/Event tests
+business close → desired Registry removal / pending discard tests
+revision-exhaustion no-wrap + fresh private wire-domain rollover sender test
 Renderer atomic replica/disposition tests
 identity/tombstone tests
 same-generation reconnect real vertical
@@ -251,8 +259,9 @@ doc/30-implementation/m11-qualification.md
 
 ```text
 private class/function/file names
+whether internal responsibilities share one object or use small private records/helpers
 private Map/tree/index representation
-private domainId mint representation meeting frozen invariants
+private domainId mint/current-wire-id representation meeting frozen invariants
 finite local queue capacities within protocol bounds
 Patch-vs-Snapshot heuristic
 internal test/observation wiring
