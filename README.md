@@ -19,6 +19,8 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [Renderer Data Profile v1](./doc/15-contracts/renderer-data-profile-v1.md)
 - [User Input v1](./doc/15-contracts/user-input-v1.md)
 - [User Input v1 Conformance — fixtureSetRevision 2](./doc/15-contracts/user-input-conformance-v1.md)
+- [Render Update v1](./doc/15-contracts/render-update-v1.md)
+- [Render Update v1 Conformance — fixtureSetRevision 1](./doc/15-contracts/render-update-conformance-v1.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
@@ -31,7 +33,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 - [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
-### M11 implementation plan — Frozen; ready after M10 closure
+### M11 implementation plan — Frozen / Ready
 
 - [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 - [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
@@ -191,6 +193,8 @@ M16 PWA full E2E/equivalence          pending
 ```
 
 M10 不实现 BrowserWindow/DOM physical composition；真实 Browser `RendererInputSource` 属于 M14，并必须复用 frozen M10 source API/lifetime。
+
+M11 qualification 只关闭 Render Update v1 `subsystem-sender` 与 `renderer-receiver` role；包含 Hostra/PWA trace equivalence 的 `transport` role 留到 M16。
 
 ---
 
