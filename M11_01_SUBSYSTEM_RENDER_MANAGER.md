@@ -6,80 +6,170 @@
 > 最近复核：2026-09-07  
 > 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)  
 > 架构：[渲染系统](doc/10-architecture/rendering-system.md)  
-> 目标：实现 Subsystem-owned business Render Domain 与最小 author surface；不得引入 presentation 或 generic state abstraction。
+> 目标：冻结 Subsystem-owned business Render Domain 的 exact author surface 与 local correctness；编码阶段只允许 private realization choices。
 
-> **M11/01 只建立 business Render authority。publication、Renderer replica、DOM/Canvas/WebGL 与 Content 均不属于本步。**
+> **M11/01 只建立 business Render authority。publication、Renderer replica、presentation 与 Content 均不属于本步。**
 
 ---
 
-## 1. Frozen Position
+## 1. Position
 
 ```text
 Subsystem business state
-→ RenderManager
+→ one internal RenderManager
 → business Render Domains
-→ authoritative desired Render state
+→ authoritative desired Render state / transient Event intent
 ```
 
-Dependency order：
-
-```text
-M11_01
-→ M11_02 publication
-→ M11_03 Renderer Store
-→ M11_04 vertical
-→ M11_05 qualification
-```
-
-Subsystem 是 Render authority。Main、Renderer、Frame、Data carrier 都不拥有 business Render Domain lifecycle。
+Subsystem 是 business Render authority。Main、Renderer、Frame、Data carrier 都不拥有 business Render Domain lifecycle。
 
 ---
 
-## 2. Frozen Author Surface
+## 2. Minimal Exact Author Surface
 
-`RenderManager` 是 SDK internal implementation，不直接暴露给 business Definition。author-facing surface 固定为：
-
-```text
-SubsystemScope.createRenderDomain(initialState) → RenderDomain
-
-RenderDomain.replace(state)
-RenderDomain.emit(event)
-RenderDomain.close()
-```
-
-其中：
+M11 root-export **只新增**：
 
 ```text
-state = { zIndex, roots }
-event = { targetKey, name, data }
+RenderNode
+RenderDomainState
+RenderEvent
+RenderDomain
 ```
 
-固定：
+以及 `SubsystemScope.createRenderDomain(...)`。
 
-```text
-createRenderDomain requires a complete initial authoritative state
-replace atomically replaces one business Domain desired state
-emit expresses transient presentation intent only
-close destroys this business Domain
+Exact shape：
+
+```ts
+// implementation MAY type-alias the matching @loomrealm/data declarations;
+// business source still imports only @loomrealm/subsystem.
+export type RenderNode = RenderNodeV1;
+
+export interface RenderDomainState {
+  readonly zIndex: number;
+  readonly roots: readonly RenderNode[];
+}
+
+export interface RenderEvent {
+  readonly targetKey: string;
+  readonly name: string;
+  readonly data: RenderEventV1["data"];
+}
+
+export interface RenderDomain {
+  replace(state: RenderDomainState): void;
+  emit(event: RenderEvent): void;
+  close(): void;
+}
+
+interface SubsystemScope {
+  readonly signal: AbortSignal;
+  createInputListener(options: CreateInputListenerOptions): InputListener;
+  createRenderDomain(initialState: RenderDomainState): RenderDomain;
+}
 ```
 
-SDK mint `domainId`；author 不提供也不管理：
+不 root-export supporting aliases 只为对称性服务。`RenderManager` 是 SDK internal implementation，不是 author service。
+
+Author 不提供、不观察、不管理：
 
 ```text
 domainId
 generation
 Registry
 revision
-Snapshot/Patch
+Snapshot / Patch
 publication cursor
 carrier identity
 ```
 
-Node `key` 与 `tag` 由 author state 提供；`tag`、`attrs`、`data` 保持 opaque，不引入 component registry 或 presentation schema。
+---
+
+## 3. Synchronous Local Commit
+
+以下 API 全部是同步 local operation：
+
+```text
+createRenderDomain
+replace
+emit
+close
+```
+
+固定顺序：
+
+```text
+validate
+→ detach caller-owned value
+→ atomic local commit / bounded Event offer
+→ return
+```
+
+不得：
+
+```text
+await Data / Renderer
+return publication Promise
+expose revision/send outcome
+freeze or mutate caller-owned object
+retain caller-owned mutable object by reference
+```
+
+成功提交后，调用方后续修改原始 object/array 不得改变已提交 Domain state 或 Event intent。内部 authoritative snapshot 必须 detached；具体 clone/freeze representation 是 private mechanics。
 
 ---
 
-## 3. Lifetime
+## 4. Author Validation / Errors
+
+任何成功 local commit 都必须能无损表示为合法 Frozen Render Update v1 application state/event。
+
+因此 `createRenderDomain` / `replace` / `emit` 在 local commit 前验证相应：
+
+```text
+plain JSON representation
+identifier/string rules
+zIndex range
+Domain-wide Node key uniqueness
+stable live-key tag
+business Node-key one-shot
+Render tree / attrs / data structure
+Frozen Render v1 hard limits
+```
+
+此外：
+
+```text
+live business Domains / Subsystem instance <= 256
+```
+
+错误分类保持最小：
+
+```text
+invalid shape / semantic usage / stale target / closed handle → TypeError
+hard-limit overflow                                  → RangeError
+```
+
+失败必须 local-atomic：
+
+```text
+invalid create  → no Domain created; no publication caused by this call
+invalid replace → previous authoritative state unchanged; no publication caused by this call
+invalid emit    → no Event intent queued/sent
+```
+
+Author usage error：
+
+```text
+!= Data fatal
+!= Runtime failure
+!= Frame failure
+```
+
+不新增 Render-specific error hierarchy。
+
+---
+
+## 5. Lifetime / Identity
 
 必须保持：
 
@@ -91,53 +181,60 @@ Frame close   != Domain destroy
 Data retire   != Domain destroy
 ```
 
-若业务希望 Domain 与 Frame 同生共死，只能由业务代码显式管理。
+若业务希望 Domain 与 Frame 同生共死，只能由业务代码显式 `close()`。
 
-`close()` 幂等；Runtime terminal 最终关闭全部仍存活 Domain。
-
----
-
-## 4. Local Identity / Correctness
-
-必须验证：
+`close()`：
 
 ```text
-SDK-minted domainId local uniqueness
-Node key Domain-wide uniqueness
-live key keeps stable tag
-removed Node key cannot be reintroduced in the same business RenderDomain lifetime
-updates apply atomically
-invalid create creates no Domain
-invalid replace preserves previous authoritative state
-Runtime cleanup releases all Domains
+idempotent
+atomically ends the business Domain lifetime
+all later replace/emit → TypeError
+Runtime terminal → eventually closes every still-live Domain
 ```
 
-business-level Node key one-shot intentionally stronger than wire minimum：它避免 author mutation validity 依赖“该 key 是否已经 emitted”的 publication history，也避免 business-key → wire-key translation layer。
+SDK mint `domainId`，并在一个 Subsystem Runtime instance 内从不复用已经 mint 过的 `domainId`。具体 mint strategy 是 private mechanics。
 
-fresh generation 可以重新导出仍 live 的 keys；这不是 key reuse。新 business RenderDomain 也是新的 local Domain lifetime。
+Node key 使用更强 local invariant：
 
-M11/01 不分配 Data generation，不维护 carrier publication revision；wire Domain one-shot history与 publication cursor 由 M11/02 负责。
+```text
+unique across one current Domain state
+live key keeps stable tag
+once removed from a business RenderDomain lifetime
+→ same key cannot be introduced again in that business RenderDomain lifetime
+```
+
+该规则故意强于 wire minimum，以避免 author mutation validity 依赖 emitted history，也避免 business-key → wire-key translation layer。
+
+fresh Data generation 可以重新导出仍 live 的 business keys；这不是 key reuse。
 
 ---
 
-## 5. Event Boundary
+## 6. Event Boundary
 
-`emit(event)`：
+`emit(event)` 先要求：
+
+```text
+Domain still live
+targetKey exists in current business authoritative state
+event shape/limits valid
+```
+
+否则 `TypeError` / `RangeError`，且不产生 Event intent。
+
+成功 `emit` 只表达：
 
 ```text
 ordered intent
 transient
 non-authoritative
-no historical replay
+no historical replay guarantee
 ```
 
-Event 不改变 business Domain state。若当前没有可合法发布的 current carrier/baseline，Event 不得成为未来连接的 replay backlog。
-
-具体 emitted barrier/backpressure 由 M11/02 Frozen Render v1 publication rules负责。
+Event 不改变 Domain state/revision。是否最终发送由 M11/02 current-carrier bounded publication 决定；author 不获得 delivery receipt。
 
 ---
 
-## 6. Abstraction Budget
+## 7. Abstraction Budget
 
 允许：
 
@@ -145,17 +242,18 @@ Event 不改变 business Domain state。若当前没有可合法发布的 curren
 one internal RenderManager per Subsystem instance
 RenderDomain handles
 Domain records
-minimal tree/index helpers required for validation
-immutable/detached authoritative state representation
+minimal tree/index validation helpers
+minimal detached immutable authoritative snapshots
+private domainId minting
 ```
 
 禁止：
 
 ```text
-public Generic RenderManager service locator
+public RenderManager / service locator
 Generic Store / Observable / EventBus
 virtual DOM / reconciler
-component registry / plugin system
+component/plugin registry
 layout / animation engine
 Content/resource resolver
 Render RPC
@@ -167,19 +265,23 @@ cross-Domain transaction framework
 
 ---
 
-## 7. Evidence
+## 8. Done
 
-完成条件：
+M11/01 必须证明：
 
 ```text
-exact author surface frozen
-create/replace/emit/close semantics tests
-Domain lifecycle tests
-Node identity/tag invariants
-atomic invalid-update tests
-Frame independence tests
-Runtime cleanup tests
-business Definition remains dependent only on @loomrealm/subsystem
+exact four Render root exports + createRenderDomain compile
+all author operations synchronous local-only
+caller-owned values detached before commit
+live Domain count bound
+create/replace validation local-atomic
+replace/emit after close reject; close idempotent
+SDK domainId never reused within Runtime instance
+Node identity/tag/one-shot invariants
+emit requires current business target
+Frame/Data independence
+Runtime cleanup
+Business Definition depends only on @loomrealm/subsystem
 ```
 
-M10 已正式 Qualified / Closed；M11/01 implementation gate 已开启。
+编码阶段不得再讨论 public author shape、lifetime、identity、validation/error model；除非证明本冻结文档与 Frozen Render v1 存在 correctness contradiction。
