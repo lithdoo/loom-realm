@@ -1,10 +1,11 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Implemented / Qualified；M10 Input Preimplementation Closed  
-> 稳定程度：M8 Implementation Closed / M10 Frozen Plan  
+> 状态：M8 Implemented / Qualified；**M10 Input Implementation Frozen / Ready for Implementation**  
+> 稳定程度：M8 Implementation Closed / M10 Implementation Frozen  
 > 主要定义：Renderer Control holder、per-subsystem Data reconciliation、M10 Input gate/publisher/source placement、M11+ Render placement  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[ADR 0029](../../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> M10 实施：[M10 / 02](../../../M10_02_RENDERER_INPUT_GATE.md) · [M10 / 03](../../../M10_03_RENDERER_INPUT_PRODUCERS.md)  
 > 最近复核：2026-09-07
 
 Renderer 不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render child protocol role behavior。
@@ -21,10 +22,11 @@ Renderer 不是 Frame/Call participant。它镜像 Main committed authority，�
     │   ├── 0..1 current RendererDataPeer
     │   ├── 0..1 pending acquire
     │   └── 0..1 failed desired identity
-    └── optional holder-lifetime canonical input source   // M10
+    ├── optional construction-time RendererInputSource object
+    └── 0..1 active source subscription for current Control peer
 ```
 
-M8已实现 Control-driven Data reconciliation。M10只在现有 current Data slot上增加 Input local state，不创建独立 connection/currentness layer。
+M8已实现 Control-driven Data reconciliation。M10只在现有 holder/Data slot上增加 Input local state，不创建独立 connection/currentness layer。
 
 ---
 
@@ -53,7 +55,30 @@ Control snapshot whole-replace；local current holder不是 Main remote-currentn
 
 ---
 
-## 3. Data Slot
+## 3. Exact M10 Construction Surface
+
+Existing M8 call remains source-compatible：
+
+```ts
+createRendererControlHolder(data?: RendererDataBinding)
+```
+
+M10 exact additive surface：
+
+```ts
+createRendererControlHolder(
+  data?: RendererDataBinding,
+  input?: RendererInputSource,
+): RendererControlHolder
+```
+
+No second factory, no mutable `setInputSource`, no producer registry。
+
+No source：all Producer unavailable；Control/Data functionality unchanged。
+
+---
+
+## 4. Data Slot
 
 Desired Data identity remains exactly：
 
@@ -70,7 +95,7 @@ fresh current Data peer建立新的 carrier-local Input/Render publication state
 
 ---
 
-## 4. M10 Effective Input Gate
+## 5. M10 Effective Input Gate
 
 对 `(S,F,A,C)`：
 
@@ -93,7 +118,7 @@ ADR 0029 的 Subsystem mutation gate不进入 Renderer Effective；Renderer无�
 
 ---
 
-## 5. Input Slot State
+## 6. Input Slot State
 
 每个 current Data slot的 Input state只需要：
 
@@ -116,7 +141,7 @@ Data retire立即销毁该 carrier-local Registry/Effective/publisher state。
 
 ---
 
-## 6. Bounded Publisher
+## 7. Bounded Publisher
 
 User Input coalescing/backpressure由 Renderer role拥有；`@loomrealm/data`只负责 validated serialized send。
 
@@ -138,7 +163,69 @@ State不得跨 Event/Reset移动。Event overflow必须在 generic Data writer o
 
 ---
 
-## 7. Lease / Producer Transitions
+## 8. Exact RendererInputSource
+
+Trusted Renderer integration surface：
+
+```ts
+export type RendererInputSourceChange =
+  | { kind: "availability"; channel: InputChannelV1; available: boolean }
+  | { kind: "state"; channel: InputStateChannelV1; payload: JsonObject }
+  | { kind: "event"; channel: InputEventChannelV1; payload: JsonObject };
+
+export interface RendererInputSource {
+  start(
+    emit: (change: RendererInputSourceChange) => void,
+  ): () => void;
+}
+```
+
+`start()` returned stop function idempotent。
+
+Source不知道 Frame/Activation/Interest/Data/wire envelope，也不能直接调用 Data peer。
+
+---
+
+## 9. Source Lifetime / Fresh Facts
+
+Source object construction-time固定在 holder；active subscription跟 **current installed Control peer epoch** 走：
+
+```text
+no current Control
+    → no active source subscription
+
+Control current installed
+    → producer facts reset empty/unavailable
+    → source.start once
+
+Control replaced/terminal
+    → invalidate source callback identity synchronously
+    → stop old subscription
+    → old Producer facts invalid
+
+same holder later installs new Control
+    → same source object start again
+    → fresh facts only
+```
+
+At most one active source subscription。
+
+Late emit from stopped subscription MUST ignore。
+
+`.state` Producer available requires：
+
+```text
+availability=true
+AND fresh current sample exists in this source subscription
+```
+
+availability false clears cached producer sample；return必须 emit fresh sample before available=true。
+
+因此 Control peer terminal不是“source object永久销毁”；同一 holder后续 connect可以重新使用 source，而不会复用旧 producer facts。
+
+---
+
+## 10. Lease / Producer Transitions
 
 same-carrier old lease → new lease：
 
@@ -149,38 +236,15 @@ old Effective false immediately
 → first new ordinary input only after Reset barrier
 ```
 
-`.state` producer loss：Reset current lease并重新 baseline其它 remaining Effective states；return时 fresh baseline。
+`.state` producer loss：clear producer sample → Reset current lease → rebaseline其它 remaining Effective states；return时 fresh sample + fresh baseline。
 
 `.event` producer loss/return只影响 future Events。
 
----
-
-## 8. Canonical Input Source
-
-M10只允许一个窄 source seam：
-
-```text
-one optional source injected at Renderer holder construction
-→ owned/consumed for holder lifetime
-→ availability may change
-→ no runtime producer registry
-```
-
-Source只提供：
-
-```text
-canonical channel availability
-current self-contained State sample
-future canonical transitions/events
-```
-
-Source不知道 Frame/Activation/Interest/Data/wire ordering，也不能直接调用 Data peer。
-
-M10使用 deterministic source；M14 BrowserWindow DOM/Pointer/Gamepad mapping必须复用同一 seam/gate/publisher。
+标准 paired transition source顺序：post-transition State change → Event change。
 
 ---
 
-## 9. M11 Render Placement
+## 11. M11 Render Placement
 
 Subsystem拥有 Domain Registry/State/revision；Renderer维护 authoritative replica + local presentation。
 
@@ -201,14 +265,14 @@ Renderer MAY保留 stale presentation cache，但它不是 current authority pro
 
 ---
 
-## 10. Physical Realization
+## 12. Physical Realization
 
 ```text
 M14 Hostra Desktop
     BrowserWindow
     Renderer Control WebSocket
     M9 Data WebSocket Broker
-    real DOM/Gamepad input source
+    real DOM/Gamepad RendererInputSource
     presentation
 
 M16 PWA
@@ -218,20 +282,29 @@ M16 PWA
 
 M10 不新增 Platform Port，也不实现 BrowserWindow。
 
+M14 browser input必须实现 exact M10 `RendererInputSource`，不得另开 DOM→Data shortcut。
+
 ---
 
-## 11. Tests / Invariants
+## 13. Tests / Invariants
 
 M10必须证明：
 
 ```text
+existing createRendererControlHolder(data?) usage remains valid
+exact second optional source argument
+0..1 active source subscription
+Control replacement/terminal source invalidation
+same holder reconnect source restart
+late old source callback ignored
+fresh state sample required for availability
 Interest-first / Authority-first convergence
 fresh Activation/Data state baseline
 same-carrier Reset-before-new-input
 Event/Reset barrier correctness
 bounded Event overflow without Data local-fatal
 producer loss/return
-old holder/source/Data slot cannot emit after replacement
+old holder/Data slot cannot emit after replacement
 ```
 
 Final invariants：
@@ -240,7 +313,8 @@ Final invariants：
 2. Control holder仍是唯一 local Control current record；
 3. M8 Data currentness不被 Input重复实现；
 4. M10 Input只组合 current facts；
-5. one holder-lifetime source，无 producer registry；
-6. one bounded publisher per current Data slot；
-7. Input/Data/Frame/Render lifetimes保持独立；
-8. Hostra/PWA physical差异不得改变 logical User Input semantics。
+5. one construction-time source object，无 producer registry；
+6. 0..1 current-Control source subscription，旧 callback不可复活；
+7. one bounded publisher per current Data slot；
+8. Input/Data/Frame/Render lifetimes保持独立；
+9. Hostra/PWA physical差异不得改变 logical User Input semantics。
