@@ -108,20 +108,49 @@ M10 SDK/source projection tests是 role/package qualification，不修改 wire v
 
 ## 6. Exact Subsystem SDK Surface
 
-Type/build tests必须锁定：
+Type/build tests必须锁定 exact root names：
 
 ```text
-InputStateChannel / InputEventChannel / InputChannel
-InputPayload<C> exact standard mapping
-InputHandler<C>
-CreateInputListenerOptions / InputListener
+InputStateChannel
+InputEventChannel
+InputChannel
+InputJsonObject
+KeyboardCode
+PointerKind
+PointerButton
+PointerSample
+GamepadAxes
+GamepadButtons
+GamepadSample
+GamepadButtonName
+KeyboardStateInput
+KeyboardEventInput
+PointerStateInput
+PointerEventInput
+GamepadStateInput
+GamepadEventInput
+InputPayload
+InputHandler
+Unsubscribe
+CreateInputListenerOptions
+InputListener
 SubsystemScope.createInputListener
-standard canonical supporting author types
 ```
 
-业务 fixture只 import `@loomrealm/subsystem`。
+必须证明 standard author types结构等价 User Input v1 canonical payload；custom `x.*` maps to `InputJsonObject`。
 
-Negative compile/runtime boundary要证明 handler看不到 protocol envelope/frameId/activationId/Data peer。
+业务 fixture只 import `@loomrealm/subsystem`；handler看不到 protocol envelope/frameId/activationId/Data peer。
+
+Bootstrap test必须使用现有真实顺序：
+
+```text
+create InputManager + scope
+→ definition factory(scope)
+→ create FrameRuntime(definition)
+→ one-time late bind same FrameRuntime facts to InputManager
+```
+
+并证明没有 dummy/shadow Frame registry；binding在任何 author Frame handler可运行前完成。
 
 ---
 
@@ -161,6 +190,7 @@ Required：
 ```text
 retained payload detached/deep-immutable
 author mutation cannot corrupt later baseline
+payload structural value is semantic; object identity not required
 new active state registration gets one synchronous retained baseline
 reactivated dormant state registration gets current baseline when union stayed live
 true union removal clears retained State
@@ -171,8 +201,8 @@ event registration/reactivation has no history
 Delivery ordering：
 
 ```text
-same channel → registration order
-multi-channel local convergence → canonical ASCII channel order, then registration order
+same channel → global InputManager registration order
+multi-channel local convergence → canonical ASCII channel order, then global registration order
 stable matching-registration snapshot per delivery
 callback mutation affects next delivery only
 sync throw contained + later matching handlers attempted
@@ -266,16 +296,35 @@ existing one-argument factory usage stays valid
 no source → Producer all unavailable
 source object fixed at holder construction
 no current Control → start count 0
-current Control install → exactly one active start
+current Control install → exactly one start attempt
+successful start → exactly one active subscription
 Control replacement/terminal → old subscription invalidated + stopped
 late stopped-subscription emit ignored
 same holder later installs Control → same source object start again
 fresh start inherits no producer facts
+start does not replay historical Event
 state available requires fresh current sample
 state availability=false clears cached sample
 return requires fresh sample before available=true
 source cannot choose Frame/Activation or bypass gate/Data peer
 paired source State then Event preserves causal order
+```
+
+Failure boundary：
+
+```text
+start throw
+start non-function return
+start partial emits then failure
+    → partial facts discarded
+    → Producer unavailable for current Control epoch
+    → no same-epoch retry
+    → Control/Data remain current
+
+stop throw
+    → local subscription already invalidated
+    → contained
+    → old facts never resurrect
 ```
 
 M14 browser source必须通过相同 tests/surface。
@@ -317,6 +366,8 @@ producer loss/return
 handler sync/async isolation
 Frame close cleanup
 ```
+
+Source start/stop local failure由 renderer package deterministic tests证明，不要求塞进大 vertical。
 
 不得为测试提前扩 Main generation allocator。
 
@@ -399,9 +450,9 @@ npm run test:m10
 ```text
 M9 dependencies/build
 User Input fixtureSetRevision=2
-Subsystem SDK type/surface tests
+Subsystem SDK exact type/surface/bootstrap tests
 Subsystem InputManager lifecycle/order/async tests
-Renderer gate/publisher/source lifecycle tests
+Renderer gate/publisher/source lifecycle/failure tests
 real M10 vertical
 ```
 
@@ -415,10 +466,11 @@ real M10 vertical
 2. protocol mechanics与 role projection/authority测试分离；
 3. M9 physical Data lifecycle不冒充 M10 business baseline；
 4. M10 revision 2证明 same-Activation State convergence与 Event non-replay；
-5. exact SDK handler/Interest/lifecycle semantics有独立 evidence；
+5. exact SDK handler/Interest/lifecycle/type semantics有独立 evidence；
 6. async handler不成为 Data flow-control dependency；
 7. source currentness跟 current Control subscription，不复用 stale producer facts；
-8. Input backpressure在 role-local publisher处理，不依赖 generic Data writer failure；
-9. M14才宣称 Desktop full E2E；
-10. M16才宣称 full cross-platform equivalence；
-11. no generic RPC/authority/event/input/connection/transaction/retry framework for test convenience。
+8. source lifecycle failure不升级 Control/Data failure，也不创建 retry loop；
+9. Input backpressure在 role-local publisher处理，不依赖 generic Data writer failure；
+10. M14才宣称 Desktop full E2E；
+11. M16才宣称 full cross-platform equivalence；
+12. no generic RPC/authority/event/input/connection/transaction/retry framework for test convenience。
