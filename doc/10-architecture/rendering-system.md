@@ -32,29 +32,38 @@ Subsystem拥有：
 
 ```text
 business Render Domain lifecycle
-Domain desired state / zIndex / tree
-transient Render Event intent
+Domain desired state
+Domain zIndex
+Render tree authoritative state
+publication intent
+transient Render Event source
 ```
 
 Renderer拥有：
 
 ```text
 current authoritative replica when Data stream current
-optional stale presentation cache after stream loss
-local presentation/resources/paint scheduling
+stale presentation cache after stream loss if product chooses
+local component/presentation mapping
+DOM/Canvas/WebGL resources
+paint/frame scheduling
 ```
 
-Main不拥有 Render Domain state。Frame/Data/Renderer currentness都不能创造或销毁 business Domain authority。
+Main不拥有 Render Domain state。
 
 ---
 
 ## 3. Two Lifetimes
 
+必须区分：
+
 ```text
 business Render Domain lifetime
-!= Render Update wire Domain lifetime
-!= Data carrier lifetime
+!=
+Render Update wire Domain lifetime
 ```
+
+业务 Domain属于 Subsystem Runtime business state。
 
 Frozen Render v1 wire identity：
 
@@ -66,64 +75,27 @@ Frozen Render v1 wire identity：
 
 ```text
 same-generation Data carrier replacement
-→ fresh publication baseline
-→ same wire Domain/Node lifetime
+    → fresh publication baseline
+    → same wire Domain/Node lifetime
 
 fresh DataAuthority generation
-→ fresh Render wire universe
-→ business Domain MAY survive and be re-exported
+    → fresh Render wire universe
+    → business Domain MAY survive and be re-exported
 ```
 
-ordinary reconnect不是 Domain recreation。
+这避免把 ordinary Data reconnect误建模成 Domain recreate，同时明确 generation 是 Data application authority epoch。
 
 ---
 
-## 4. Frozen M11 Author Projection
-
-M11 把 business Render authority投影成一个窄的同步 local capability：
-
-```text
-SubsystemScope.createRenderDomain(initialState) → RenderDomain
-RenderDomain.replace(state)
-RenderDomain.emit(event)
-RenderDomain.close()
-```
-
-`RenderManager` 只存在于 SDK internal implementation，不是 author service。
-
-Author 不观察：
-
-```text
-domainId / generation / Registry / revision
-Snapshot / Patch / carrier / send outcome
-```
-
-成功 author mutation 固定：
-
-```text
-validate Frozen Render-v1 representability
-→ detach caller-owned value
-→ atomic local commit
-→ return synchronously
-```
-
-Author usage error是 local error，不是 Data/Runtime/Frame failure。
-
-SDK-minted `domainId` 在一个 Subsystem Runtime instance 内不复用。business Node key 在一个 business RenderDomain lifetime 内采用 stronger one-shot rule：一旦从 authoritative state移除，不得作为新 Node lifetime重新引入。该 stronger local rule用于避免 emitted-history-dependent author validation 与 identity translation layer。
-
-Exact TypeScript surface / local error model 以 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为 implementation source of truth。
-
----
-
-## 5. Domain Model
+## 4. Domain Model
 
 一个 Runtime：
 
 ```text
-0..256 live business Render Domains
+0..N business Render Domains
 ```
 
-上限直接保证任意成功 local state均可形成 Frozen Render v1 Registry。
+M11 author boundary进一步冻结：成功创建的 live business Domains `<= 256`，保证 current business state始终可形成 Frozen Render v1 Registry。
 
 当前 generation 导出的每个 wire Domain：
 
@@ -137,9 +109,35 @@ carrier-local revision continuity after baseline
 
 Domain不是 Frame；同一个 business Domain可以服务多个 Frame，也可以在 zero active Frame时继续存在。
 
+### 4.1 M11 Frozen Author Projection
+
+M11 exact author seam：
+
+```text
+SubsystemScope.createRenderDomain(initialState) → RenderDomain
+RenderDomain.replace(state): void
+RenderDomain.emit(event): void
+RenderDomain.close(): void
+```
+
+`RenderManager` 是 SDK internal implementation，不是 public service。Author不观察 domainId/generation/Registry/revision/Snapshot/Patch/carrier/send outcome。
+
+成功 author mutation固定：
+
+```text
+validate Frozen Render v1 representability
+→ detach caller-owned value
+→ atomic local commit
+→ synchronous return
+```
+
+SDK-minted `domainId` 在一个 Subsystem Runtime instance 内不复用。business Node key 在一个 business RenderDomain lifetime 内采用 stronger one-shot rule：一旦从 authoritative state移除，不得作为 later new Node lifetime重新引入。
+
+Exact TypeScript surface / local error model以 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为 implementation source of truth。
+
 ---
 
-## 6. Render Update Model
+## 5. Render Update Model
 
 Frozen v1：
 
@@ -161,7 +159,7 @@ Renderer必须原子应用 authoritative commit，不暴露半更新 tree。
 
 ---
 
-## 7. Data Profile / Carrier
+## 6. Data Profile / Carrier
 
 Render Update运行在：
 
@@ -169,17 +167,19 @@ Render Update运行在：
 loomrealm.renderer-data/1
 ```
 
+当前 Profile静态绑定 Render Update v1。
+
 ```text
 DataPlane single dispatcher
 → render.* messages
-→ internal Renderer Render Store
+→ Render Store
 ```
 
-Render implementation不得竞争读取 raw carrier，也不创建第二套 Data currentness。
+Render implementation不得自己竞争读取 raw Data carrier。
 
 ---
 
-## 8. Fresh Carrier / Baseline
+## 7. Fresh Data Carrier / Per-Domain Baseline
 
 fresh current Data carrier：
 
@@ -187,7 +187,7 @@ fresh current Data carrier：
 first Render message = current render.domains
 ```
 
-每个 current Domain独立：
+Registry 中每个 Domain独立：
 
 ```text
 unbaselined
@@ -196,45 +196,15 @@ unbaselined
 → patch/event
 ```
 
-不存在 global Render ready。旧 carrier sender cursor/Renderer Patch base不得继承为 fresh authority。
+不存在 global Render ready。Registry可以在部分 Domain尚未 baseline 时继续变化。
 
-same-generation reconnect保留 wire one-shot identity history，但重建 carrier-local Registry/baseline/revision。
+旧 carrier sender cursor/Renderer Patch base不得继承为 fresh carrier authority。
 
----
-
-## 9. Event Boundary
-
-Render Event：
-
-```text
-ordered
-transient
-non-authoritative
-no replay
-may be lost
-```
-
-Author `emit` 只对 current business target合法。
-
-Publication：
-
-```text
-no carrier
-→ Event not retained for future carrier
-
-current carrier + Domain unbaselined
-→ Event MAY remain bounded/current-carrier pending
-→ establishing Snapshot must emit first
-
-carrier loss / Domain removal
-→ pending Event discarded
-```
-
-因此 current-carrier pending 不等于历史 replay。保留的未 emitted Event是 sender authoritative coalescing barrier；drop-before-emitted释放 barrier。
+same-generation fresh carrier 不创建新 wire Domain lifecycle。
 
 ---
 
-## 10. Frame / Data / Runtime Independence
+## 8. Frame Independence
 
 禁止隐式关系：
 
@@ -243,20 +213,21 @@ Frame create  → create Domain
 Frame active  → show Domain
 Frame suspend → hide Domain
 Frame close   → destroy Domain
-Data retire   → destroy Domain
 ```
 
-业务需要同生共死时显式调用 Domain `close()`；不建立 Frame→Domain ownership registry。
-
-Runtime terminal最终释放本 Runtime business Domains/resource，这是 Runtime cleanup，不表示 Frame/Data拥有 Domain lifecycle。
+如果业务希望某 Domain与某 Frame同生共死，应由 business代码显式管理，不能升级成 protocol semantics，也不建立 Frame→Domain implicit registry。
 
 ---
 
-## 11. Renderer Store / Stale Cache
+## 9. Data Independence / Stale Cache
 
-Renderer Store挂在现有 Data-slot currentness上，M11 不新增 public Store/subscription API。
+```text
+Data carrier retired
+    → current Render publication authority ends
+    ↛ business Domain destroyed
+```
 
-Data retire 后最后合法 state MAY保留为：
+Renderer MAY保留最后合法 Store用于视觉连续性，但此时只可视为：
 
 ```text
 stale presentation cache
@@ -271,94 +242,232 @@ Input authority
 DataAuthority proof
 ```
 
-恢复必须 fresh Registry + Snapshots。
+恢复必须使用 fresh Registry + Snapshots。
 
 ---
 
-## 12. Node Identity / Ordering
+## 10. Runtime Independence
 
-Wire Node key在 wire Domain lifetime内 one-shot；live key保持 stable `tag`。same-generation reconnect保留该 history；fresh generation创建 fresh wire universe。
+business Render Domain属于 Subsystem Runtime业务 state的一部分。
 
-Domain 内 roots/children order 是 authoritative sibling order。
+Runtime terminal最终释放本 Runtime business Domains/resource；这是 Runtime cleanup，不表示 Frame/Data拥有 Domain lifecycle。
+
+未来新 Runtime通常通过 fresh Data generation建立新的 Render wire universe。
+
+---
+
+## 11. Node Identity
+
+Render node `key` 是 wire Domain-wide logical identity；同一 wire Domain lifetime内 one-shot。
+
+```text
+removed published key
+→ same key cannot represent later new node lifetime
+```
+
+live key保持 stable `tag`。
+
+same-generation reconnect保留该 identity history；fresh generation创建新的 wire universe。
+
+M11 business author boundary使用更强 local invariant：Node key一旦从同一 business RenderDomain lifetime移除，即使尚未 emitted，也不得重新引入。该 local规则不改变 Frozen wire identity语义，只消除 business-key→wire-key translation与 emitted-history-dependent author validation。
+
+---
+
+## 12. Logical Ordering
+
+Domain 内：
+
+```text
+roots order
+children order
+```
+
+都是 authoritative logical sibling order。
 
 Domain 间：
 
 ```text
 higher zIndex = above lower zIndex
-same zIndex → domainId UTF-8 lexical tie-break
 ```
 
-不规定 CSS/DOM/Canvas/WebGL realization。
+相同 zIndex 使用 Frozen Render v1 的 `domainId` UTF-8 lexical tie-break。
+
+这定义 logical ordering，不规定 CSS/DOM/Canvas/WebGL realization。
 
 ---
 
-## 13. Presentation / Content / Input Boundaries
+## 13. Presentation Mapping
 
-`tag` 是 opaque presentation identifier。Render Core不定义 component registry、component loading、DOM tag semantics 或 unknown-tag authoritative error。
+`tag` 是 opaque string。
 
-Render `data` MAY携 logical resource reference，但不得携 filesystem capability、Content bearer、privileged URL 等 physical capability；资源解析属于 M12 Content。
+Render Core不定义：
 
-Render Domain存在不能创建 InputTarget。User Input authority仍由 Main InputTarget + Interest + Producer + current Data决定。
+```text
+known component registry
+component module loading
+DOM tag semantics
+Canvas/WebGL object model
+unknown-tag authoritative error
+```
+
+Renderer product/implementation决定如何解释 presentation tag；presentation-local failure不改变 authoritative Render Store validity。
+
+M11 Renderer Store保持 internal，不新增 public Render subscription/presentation API；physical presentation consumer属于 M14。
 
 ---
 
-## 14. Failure Boundary
+## 14. Resource References
+
+Render `data` MAY携 logical resource reference，但不得携：
+
+```text
+filesystem path capability
+Content bearer
+absolute privileged local URL
+resource bytes as hidden capability channel
+```
+
+Renderer Resource Client通过 Content boundary解析资源。
+
+Render Core不冻结 product-specific resource-reference schema。
+
+---
+
+## 15. Event Boundary
+
+Render Event：
+
+```text
+ordered
+transient
+non-authoritative
+no replay
+may be lost
+```
+
+不能作为 persistent correctness唯一来源。
+
+well-formed Event若 Domain/baseline/target不再 applicable：
+
+```text
+drop only
+```
+
+retained Event同时是 sender-side authoritative coalescing barrier：Event依赖的 target lifetime必须在 Event wire position前已经由 authoritative state建立。
+
+M11 publication进一步冻结：
+
+```text
+no current carrier
+→ Event不得保留到 future carrier
+
+current carrier + Domain unbaselined
+→ Event MAY bounded-pend in current carrier lifetime
+→ establishing Snapshot MUST emit before Event
+
+carrier loss / Domain removal
+→ pending Event discarded
+```
+
+因此 current-carrier pending Event不是历史 replay backlog。
+
+---
+
+## 16. Input Boundary
+
+Render focus/component存在不能创造 User Input authority。
+
+User Input ordinary gate仍是：
+
+```text
+Main InputTarget(S,F,A)
+∩ Interest[F]
+∩ Producer(C)
+∩ current matching Data connection
+```
+
+Renderer presentation MAY作为某个 Producer实现的输入源，但 Render Domain本身不拥有 InputTarget。
+
+---
+
+## 17. Failure Boundary
 
 Render v1区分：
 
 ```text
 representation/schema/limit invalid
-→ Data stream fatal
+    → Data stream fatal
 
-authoritative continuity invalid
-→ Data stream fatal
+authoritative Registry/Snapshot/Patch continuity invalid
+    → Data stream fatal
 
 well-formed stale Event
-→ drop only
+    → drop
 
 presentation-local failure
-→ renderer product policy
+    → renderer product policy
 ```
 
+Render Data stream failure：
+
 ```text
-Render/Data stream failure
-!= Runtime terminal
+!= Runtime terminal failure
 != Frame unwind
 ```
 
-fresh current Data仍通过 Registry + Snapshots恢复。
+M11 author invalid usage / hard-limit rejection是 synchronous local TypeError / RangeError，不升级 Data/Runtime/Frame。
 
 ---
 
-## 15. Cross-platform / M11 Qualification
+## 18. Cross-platform Presentation
 
-Hostra/PWA必须共享相同 logical Render semantics；physical presentation/transport可以不同。
-
-M11 formal qualification只关闭：
+Hostra/PWA共享相同：
 
 ```text
-subsystem-sender
-renderer-receiver
+wire identity/lifecycle
+generation relationship
+Registry/per-Domain baseline
+revision/commit semantics
+Patch algebra
+Event ordering/barrier/drop semantics
+logical stacking order
+hard limits
+failure/recovery
 ```
 
-包含 Hostra/PWA trace equivalence 的 `transport` role 留到 M16。
+允许不同：
+
+```text
+DOM implementation
+Canvas/WebGL implementation
+resource cache
+paint cadence
+browser capability
+internal tree/index strategy
+```
+
+M11 formal qualification只关闭 Render Update v1 `subsystem-sender` 与 `renderer-receiver` role；包含 Hostra/PWA application-trace equivalence 的 `transport` role 留到 M16。
 
 ---
 
-## 16. Final Invariants
+## 19. Final Invariants
 
-1. business Render authority只在 Subsystem；
-2. exact author API同步 local-only，成功值始终可表示为 Frozen Render v1；
-3. business Domain / wire Domain / carrier lifetime分离；
-4. SDK domainId在一个 Runtime instance内不复用；
-5. business Node key采用 Domain-lifetime one-shot stronger invariant；
-6. same-generation reconnect保留 wire identity history并重建 baseline；
-7. fresh generation创建新的 Render wire universe；
-8. fresh carrier以 Registry + per-Domain Snapshot建立 authority；
-9. Frame/Data不拥有 business Domain lifecycle；
-10. Renderer Store internal-only，stale cache不是 current authority；
-11. Snapshot/Patch原子提交；
-12. Event transient/no replay，current-carrier pending不是 future-carrier history；
-13. Render state不携 physical resource capability；
-14. Render/presentation不能生成 Main InputTarget；
-15. Render stream failure不等于 Runtime/Frame failure。
+1. business Render authority在 Subsystem；
+2. Renderer只维护 current replica + optional stale presentation cache；
+3. Main/Frame不拥有 Render lifecycle；
+4. Render wire identity包含 DataAuthority generation；
+5. same-generation reconnect不创建新 wire Domain lifecycle；
+6. fresh generation创建新的 Render wire universe，但不强制 business Domain销毁；
+7. fresh carrier用 Registry + per-Domain fresh Snapshot重建 baseline；
+8. Frame close/suspend不隐式 destroy/hide business Domain；
+9. Data retire不 destroy business Domain；
+10. Node key在 wire Domain lifetime内 one-shot；M11 business boundary使用更强 Domain-lifetime one-shot；
+11. roots/children/zIndex/tie-break构成确定 logical ordering；
+12. tag是 opaque presentation identifier；
+13. retained Render Event是 transient ordering barrier；current-carrier pending不跨 carrier replay；
+14. stale Store不是 current authority/Patch base；
+15. Render state不携 physical resource capability；
+16. Render/presentation不能生成 Main InputTarget；
+17. Render stream failure不等于 Runtime/Frame failure；
+18. M11 author API synchronous local-only，成功值始终可表示为 Frozen Render v1；
+19. M11 Renderer Store internal-only，不新增 public Render subscription surface。
