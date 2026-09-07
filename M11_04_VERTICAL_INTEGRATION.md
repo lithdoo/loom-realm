@@ -1,0 +1,116 @@
+# M11 / 04 — Render Vertical Integration
+
+> 状态：**Implementation Frozen / Waiting on M10 Closure**  
+> 阶段：M11 Render  
+> 落地顺序：04  
+> 最近复核：2026-09-07  
+> 前置：[M11 / 01](M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 02](M11_02_RENDER_PUBLICATION.md) → [M11 / 03](M11_03_RENDERER_STORE.md)  
+> 目标：在真实 Main/Desktop/Hostra Data lifecycle 上验证 Render authority、publication 与 replica；不加入 physical presentation。
+
+> **M11 vertical复用现有 Runtime/Data authority，不建立第二套测试专用生命周期。**
+
+---
+
+## 1. Required Vertical
+
+使用真实：
+
+```text
+Hostra prepare/Runtime hosting
+Main Session/DataAuthority
+Desktop DataConnectionBroker
+Subsystem host + RenderManager
+SubsystemDataPeer / RendererDataPeer
+Renderer Render Store
+```
+
+---
+
+## 2. Core Scenario
+
+至少证明：
+
+```text
+business Domain created
+→ current Registry
+→ fresh Snapshot
+→ Renderer replica established
+→ authoritative update commits
+→ Renderer replica changes
+
+same-generation Data carrier closes
+→ business Domain survives
+→ fresh carrier
+→ fresh Registry + Snapshot
+→ replica rebuilt
+→ old carrier output cannot mutate current replica
+```
+
+---
+
+## 3. Independence
+
+必须加入对照：
+
+```text
+Frame close
+→ business Domain remains unless business explicitly destroys it
+
+Data retire/reconnect
+→ business Domain remains
+
+fresh Data generation
+→ fresh wire universe
+→ surviving business Domain re-exported through fresh Registry/Snapshot
+```
+
+Render stream failure不得升级成 Runtime terminal / Frame unwind。
+
+---
+
+## 4. Event / Ordering
+
+至少覆盖：
+
+```text
+Snapshot/Patch establishes target before dependent Event
+Event no replay after reconnect
+removed Domain pending Event discarded
+stale well-formed Event dropped
+```
+
+不要求 browser animation、paint cadence 或 DOM observable behavior。
+
+---
+
+## 5. Regression Gate
+
+M11 vertical建立在关闭后的 M10 baseline 之上：
+
+```text
+M10 full regression + qualification remains pass
+M11 package semantics pass
+M11 real Render vertical pass
+```
+
+不得修改 Input/Data authority semantics来换取 Render 实现便利。
+
+---
+
+## 6. Evidence
+
+完成条件：
+
+```text
+real authority feed
+real paired Data connection
+fresh-carrier recovery
+same-generation identity continuity
+fresh-generation identity reset
+Frame/Data independence
+old-stream isolation
+no Event replay
+Runtime/Input regressions remain pass
+```
+
+通过后进入 M11/05 qualification and closure。

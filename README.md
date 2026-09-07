@@ -30,6 +30,14 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 04 — User Input Vertical Integration](./M10_04_VERTICAL_INTEGRATION.md)
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 
+### M11 implementation plan — Frozen; waits for M10 closure
+
+- [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
+- [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
+- [M11 / 03 — Renderer Render Store](./M11_03_RENDERER_STORE.md)
+- [M11 / 04 — Render Vertical Integration](./M11_04_VERTICAL_INTEGRATION.md)
+- [M11 / 05 — Qualification and Closure](./M11_05_QUALIFICATION_CLOSURE.md)
+
 历史 M7/M8/M9 root plans继续保留作为已完成 milestone implementation provenance。
 
 ---
@@ -173,7 +181,7 @@ M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        implemented / qualification pending
-M11 Render                            pending
+M11 Render                            plan frozen / waits M10 closure
 M12 Content                           pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
