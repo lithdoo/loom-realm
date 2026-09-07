@@ -19,9 +19,9 @@
 Hostra prepare/Runtime hosting
 Main Session/DataAuthority
 Desktop DataConnectionBroker
-Subsystem host + RenderManager
+Subsystem host + RenderManager responsibility
 SubsystemDataPeer / RendererDataPeer
-Renderer Render Store
+Renderer internal Render replica state
 ```
 
 ---
@@ -38,8 +38,14 @@ business Domain created
 → authoritative update commits
 → Renderer replica changes
 
+business Domain close
+→ immediately absent from desired business Registry
+→ not-yet-emitted Domain work discarded
+→ Registry removal
+→ Renderer retires current replica
+
 same-generation Data carrier closes
-→ business Domain survives
+→ surviving business Domain remains
 → fresh carrier
 → fresh Registry + Snapshot
 → replica rebuilt
@@ -54,7 +60,7 @@ same-generation Data carrier closes
 
 ```text
 Frame close
-→ business Domain remains unless business explicitly destroys it
+→ business Domain remains unless business explicitly closes it
 
 Data retire/reconnect
 → business Domain remains
@@ -71,6 +77,8 @@ G1 → G2
 ```
 
 不得为了该 fixture 给 Main、Broker 或 Platform 增加 test-only generation rollover API。
+
+Revision exhaustion 同样不要求真实 vertical 推进到 `Number.MAX_SAFE_INTEGER`；sender qualification 通过 package-private deterministic cursor state证明 no-wrap + fresh private wire-domain identity rollover，不增加 production testing authority。
 
 ---
 
@@ -110,6 +118,7 @@ M11 real same-generation Render vertical pass
 ```text
 real authority feed
 real paired Data connection
+create/update/close Registry lifecycle
 fresh-carrier recovery
 same-generation identity continuity
 Frame/Data independence
@@ -118,6 +127,6 @@ no Event replay
 Runtime/Input regressions remain pass
 ```
 
-fresh-generation identity reset 属于 M11/05 sender/receiver conformance evidence，不属于 real vertical evidence。
+fresh-generation identity reset与 revision-exhaustion rollover属于 M11/05 sender/receiver deterministic conformance evidence，不属于 real vertical evidence。
 
 通过后进入 M11/05 qualification and closure。
