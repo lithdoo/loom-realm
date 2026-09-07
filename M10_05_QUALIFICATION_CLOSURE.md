@@ -1,6 +1,6 @@
 # M10 / 05 — Qualification and Closure
 
-> 状态：**Implemented / Qualified / Closed**
+> 状态：**Implemented / Qualification Pending**
 > 阶段：M10 User Input  
 > 落地顺序：05  
 > 最近复核：2026-09-07  
@@ -9,7 +9,7 @@
 > Conformance：[User Input v1 Conformance](doc/15-contracts/user-input-conformance-v1.md)  
 > 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-> **M10 closure = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Desired Interest、Renderer Producer经 current Data收敛为 deterministic business input；State保持 current truth，Event保持 future-only，旧 lease/carrier/source facts不可复活。**
+> **M10 implementation = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Desired Interest、Renderer Producer经 current Data收敛为 deterministic business input；State保持 current truth，Event保持 future-only，旧 lease/carrier/source facts不可复活。正式 Closed 声明等待 fixtureSetRevision 2 的完整可执行 role qualification。**
 
 ---
 
@@ -357,7 +357,7 @@ protocolVersion = 1
 fixtureSetRevision = 2
 ```
 
-M10必须通过全部 platform-independent Renderer/Subsystem protocol role obligations，以及本 milestone 的 SDK/source projection qualification。
+M10正式关闭前必须通过全部 platform-independent Renderer/Subsystem protocol role obligations，以及本 milestone 的 SDK/source projection qualification。当前 package、regression 与 vertical gate 不能替代逐 fixture 的正式 conformance runner。
 
 M10 closure wording：
 
@@ -408,24 +408,24 @@ Renderer gate/publisher/source lifecycle/failure tests
 real M10 vertical
 ```
 
-该 gate已由真实 build、role tests 与 vertical组成，不是空 gate。
+该 gate已由真实 build、package role regressions 与 vertical组成，不是空 gate；但它当前是 implementation regression gate，不声明覆盖 conformance 文档中的每个命名 fixture。
 
 ---
 
 ## 13. Closure Claim
 
-当前实现与 qualification evidence允许声明：
+当前证据允许声明：
 
 ```text
-M10 = Implemented / Qualified
-User Input v1 fixtureSetRevision 2 role qualification = pass
+M10 = Implemented / Regression Verified
+User Input v1 fixtureSetRevision 2 formal role qualification = pending
 ```
 
 不得提前声明 BrowserWindow Input、Render、Content 或 PWA/full cross-platform User Input conformance complete。
 
 ---
 
-## 14. Implementation Qualification Record
+## 14. Implementation Verification Record
 
 2026-09-07 implementation evidence：
 
@@ -433,8 +433,9 @@ User Input v1 fixtureSetRevision 2 role qualification = pass
 protocol = loomrealm.user-input
 protocolVersion = 1
 fixtureSetRevision = 2
-role = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
-result = pass
+implemented roles = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
+implementation regression result = pass
+formal fixture-by-fixture role qualification = not yet claimed
 ```
 
 落地证据：
@@ -445,14 +446,14 @@ packages/renderer/src/internal/input-gate.ts
 packages/renderer/src/input.ts
 packages/main/test/runtime.test.mjs
 apps/desktop/test/m10-input-vertical.test.mjs
-test/m10-qualification.test.mjs
+test/m10-boundary.test.mjs
 ```
 
-资格门禁：
+实现回归门禁：
 
 ```text
 npm run test:m10
 result = pass
 ```
 
-Claim严格限定为 current platform-independent User Input role semantics 与 frozen M10 SDK/source projection 在 Hostra/Desktop Data lifecycle 上 qualified；Hostra/PWA transport equivalence仍留到 M16。
+该记录只证明 current implementation regressions、frozen M10 SDK/source boundary 与现有 Hostra/Desktop vertical；完整 fixtureSetRevision 2 role qualification 尚需独立的逐 fixture 可执行证据，Hostra/PWA transport equivalence仍留到 M16。

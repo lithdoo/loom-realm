@@ -85,6 +85,39 @@ test("Interest-first and authority-first both produce one fresh State baseline",
   }
 });
 
+test("State snapshots preserve own __proto__ and keep non-JSON prototypes invalid", () => {
+  const gate = new RendererInputGate();
+  const harness = peerHarness();
+  const source = JSON.parse('{"__proto__":{"marker":1}}');
+  gate.installData("demo", harness.peer);
+  gate.updateState("x.proto.state", source);
+  gate.setAvailability("x.proto.state", true);
+  gate.setControl(snapshot(1));
+  gate.replaceInterest("demo", harness.peer, {
+    type: "input.interest",
+    frames: [{ frameId: "root", channels: ["x.proto.state"] }],
+  });
+  source.__proto__.marker = 99;
+
+  const payload = harness.sent[0].payload;
+  assert.equal(Object.hasOwn(payload, "__proto__"), true);
+  assert.equal(Object.getPrototypeOf(payload), Object.prototype);
+  assert.equal(payload.__proto__.marker, 1);
+  assert.equal(Object.isFrozen(payload.__proto__), true);
+
+  const invalidGate = new RendererInputGate();
+  const invalidHarness = peerHarness();
+  invalidGate.installData("demo", invalidHarness.peer);
+  invalidGate.updateState("x.invalid.state", new Date("2026-01-01T00:00:00.000Z"));
+  invalidGate.setAvailability("x.invalid.state", true);
+  invalidGate.setControl(snapshot(1));
+  invalidGate.replaceInterest("demo", invalidHarness.peer, {
+    type: "input.interest",
+    frames: [{ frameId: "root", channels: ["x.invalid.state"] }],
+  });
+  assert.equal(Object.getPrototypeOf(invalidHarness.sent[0].payload), Date.prototype);
+});
+
 test("publisher coalesces State only within Event barriers and keeps one send in flight", async () => {
   const gate = new RendererInputGate();
   const harness = peerHarness();

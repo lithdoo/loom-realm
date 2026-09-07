@@ -91,18 +91,25 @@ function isStateChannel(channel: InputChannel): channel is InputStateChannel {
   return channel.endsWith(".state");
 }
 
-function detachedFrozen<T>(value: T): T {
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map((item) => detachedFrozen(item))) as T;
-  }
-  if (value !== null && typeof value === "object") {
-    const output: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) {
-      output[key] = detachedFrozen(child);
+function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
+  if (value === null || typeof value !== "object") return value;
+  const existing = seen.get(value);
+  if (existing !== undefined) return existing as T;
+  const prototype = Object.getPrototypeOf(value);
+  const output: object = Array.isArray(value)
+    ? new Array(value.length)
+    : Object.create(prototype);
+  seen.set(value, output);
+  for (const key of Reflect.ownKeys(value)) {
+    if (Array.isArray(value) && key === "length") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined) continue;
+    if ("value" in descriptor) {
+      descriptor.value = detachedFrozen(descriptor.value, seen);
     }
-    return Object.freeze(output) as T;
+    Object.defineProperty(output, key, descriptor);
   }
-  return value;
+  return Object.freeze(output) as T;
 }
 
 export class InputManager {
@@ -301,15 +308,23 @@ export class InputManager {
     const reactivated = [...next].filter((channel) => !listener.channels.has(channel)).sort();
     listener.channels = next;
     this.rebuildDesired();
+    const baselines: Array<{
+      readonly registration: Registration;
+      readonly payload: InputStateV1["payload"];
+    }> = [];
     for (const channel of reactivated) {
       for (const registration of this.registrations) {
         if (
           registration.listener === listener &&
           registration.active &&
           registration.channel === channel
-        ) this.deliverBaseline(listener, registration);
+        ) {
+          const payload = this.baselinePayload(listener, registration);
+          if (payload !== null) baselines.push({ registration, payload });
+        }
       }
     }
+    for (const { registration, payload } of baselines) this.invoke(registration, payload);
   }
 
   private closeListener(listener: ListenerRecord): void {
@@ -436,12 +451,20 @@ export class InputManager {
   }
 
   private deliverBaseline(listener: ListenerRecord, registration: Registration): void {
-    if (!isStateChannel(registration.channel) || !listener.channels.has(registration.channel)) return;
+    const payload = this.baselinePayload(listener, registration);
+    if (payload !== null) this.invoke(registration, payload);
+  }
+
+  private baselinePayload(
+    listener: ListenerRecord,
+    registration: Registration,
+  ): InputStateV1["payload"] | null {
+    if (!isStateChannel(registration.channel) || !listener.channels.has(registration.channel)) return null;
     const view = this.facts?.inspect(listener.frame) ?? null;
-    if (view?.kind !== "live" || !view.deliveryOpen || view.activationId === null) return;
+    if (view?.kind !== "live" || !view.deliveryOpen || view.activationId === null) return null;
     const retained = this.retained.get(listener.frameId)?.get(registration.channel);
-    if (retained?.activationId !== view.activationId) return;
-    this.invoke(registration, retained.payload);
+    if (retained?.activationId !== view.activationId) return null;
+    return retained.payload;
   }
 
   private deliver(

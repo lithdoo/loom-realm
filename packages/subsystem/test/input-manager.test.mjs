@@ -131,6 +131,27 @@ test("retained State is detached, deeply immutable, replayed synchronously, and 
   assert.equal(replayed, false);
 });
 
+test("retained State preserves an own __proto__ JSON member without prototype mutation", () => {
+  const { manager, frame } = harness();
+  const listener = manager.createListener({ frame, channels: ["x.proto.state"] });
+  const source = JSON.parse('{"__proto__":{"marker":1},"nested":{"value":2}}');
+  manager.onState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a1",
+    channel: "x.proto.state",
+    payload: source,
+  });
+  source.__proto__.marker = 99;
+
+  let baseline;
+  listener.on("x.proto.state", (value) => { baseline = value; });
+  assert.equal(Object.hasOwn(baseline, "__proto__"), true);
+  assert.equal(Object.getPrototypeOf(baseline), Object.prototype);
+  assert.equal(baseline.__proto__.marker, 1);
+  assert.equal(Object.isFrozen(baseline.__proto__), true);
+});
+
 test("dormant handlers reactivate with baseline while another contribution keeps State live", () => {
   const { manager, frame } = harness();
   const first = manager.createListener({ frame, channels: ["keyboard.state"] });
@@ -154,6 +175,36 @@ test("dormant handlers reactivate with baseline while another contribution keeps
   });
   first.setChannels(["keyboard.state"]);
   assert.deepEqual(values, ["KeyA", "KeyB"]);
+  keeper.close();
+});
+
+test("reactivation baselines use a stable registration snapshot", () => {
+  const { manager, frame } = harness();
+  const listener = manager.createListener({ frame, channels: ["keyboard.state"] });
+  const keeper = manager.createListener({ frame, channels: ["keyboard.state"] });
+  const order = [];
+  let registered = false;
+  let addDuringReactivation = false;
+  listener.on("keyboard.state", () => {
+    order.push("A");
+    if (addDuringReactivation && !registered) {
+      registered = true;
+      listener.on("keyboard.state", () => order.push("B"));
+    }
+  });
+  manager.onState({
+    type: "input.state",
+    frameId: "root",
+    activationId: "a1",
+    channel: "keyboard.state",
+    payload: { down: ["KeyA"] },
+  });
+  order.length = 0;
+  addDuringReactivation = true;
+  listener.setChannels([]);
+  listener.setChannels(["keyboard.state"]);
+
+  assert.deepEqual(order, ["A", "B"]);
   keeper.close();
 });
 

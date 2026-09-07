@@ -1,6 +1,6 @@
 # M10 / 03 — Renderer Input Producers
 
-> 状态：**Implemented / Qualified**
+> 状态：**Implemented / Regression Verified**
 > 阶段：M10 User Input  
 > 落地顺序：03  
 > 最近复核：2026-09-07  

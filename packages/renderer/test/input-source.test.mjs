@@ -14,7 +14,13 @@ const authority = {
   dataProfile: "loomrealm.renderer-data/1",
 };
 
-const snapshot = (sessionId, revision, active = true) => ({
+const snapshot = (
+  sessionId,
+  revision,
+  active = true,
+  generation = 1,
+  activationId = "a1",
+) => ({
   sessionId,
   revision,
   runtimes: [{ subsystemKey: "demo", state: "ready" }],
@@ -22,12 +28,12 @@ const snapshot = (sessionId, revision, active = true) => ({
     frameId: "root",
     subsystemKey: "demo",
     lifecycle: "active",
-    activationId: "a1",
+    activationId,
   }] : [],
   inputTarget: active
-    ? { subsystemKey: "demo", frameId: "root", activationId: "a1" }
+    ? { subsystemKey: "demo", frameId: "root", activationId }
     : null,
-  dataAuthorities: [authority],
+  dataAuthorities: [{ ...authority, generation }],
 });
 
 function main(pair, sessionId) {
@@ -183,4 +189,66 @@ test("fresh source State and paired transition flow only through gate and curren
   await turn();
   assert.equal(received.length, 3);
   await subsystem.close();
+});
+
+test("Control generation replacement retires old Data before new Input facts enter the gate", async () => {
+  const control = createMemoryCarrierPair();
+  const publisher = main(control, "a");
+  const acquisitions = [];
+  const accepted = () => ({ kind: "accepted" });
+  const source = {
+    start(emit) {
+      emit({ kind: "state", channel: "keyboard.state", payload: { down: ["KeyA"] } });
+      emit({ kind: "availability", channel: "keyboard.state", available: true });
+      return () => {};
+    },
+  };
+  const holder = createRendererControlHolder({
+    async acquire(_key, generation) {
+      const pair = createMemoryCarrierPair();
+      const received = [];
+      const subsystem = createSubsystemDataPeer({
+        binding: {
+          carrier: pair.left,
+          subsystemKey: "demo",
+          generation,
+          dataProfile: "loomrealm.renderer-data/1",
+        },
+        handlers: {
+          onInputState(message) { received.push(message); return accepted(); },
+          onInputEvent(message) { received.push(message); return accepted(); },
+          onInputReset(message) { received.push(message); return accepted(); },
+        },
+      });
+      acquisitions.push({ generation, received, subsystem });
+      return pair.right;
+    },
+  }, source);
+  await holder.connect({ carrier: control.right, rendererControlToken: "a" });
+  await waitFor(() => acquisitions.length === 1, "generation 1 Data");
+  await acquisitions[0].subsystem.input.sendInterest({
+    type: "input.interest",
+    frames: [{ frameId: "root", channels: ["keyboard.state"] }],
+  });
+  await waitFor(() => acquisitions[0].received.length === 1, "generation 1 baseline");
+
+  publisher.publish(snapshot("a", 2, true, 2, "a2"));
+  await waitFor(() => acquisitions.length === 2, "generation 2 Data");
+  await turn();
+  assert.deepEqual(
+    acquisitions[0].received.map(({ type, activationId }) => [type, activationId]),
+    [["input.state", "a1"]],
+  );
+
+  await acquisitions[1].subsystem.input.sendInterest({
+    type: "input.interest",
+    frames: [{ frameId: "root", channels: ["keyboard.state"] }],
+  });
+  await waitFor(() => acquisitions[1].received.length === 1, "generation 2 baseline");
+  assert.deepEqual(
+    acquisitions[1].received.map(({ type, activationId }) => [type, activationId]),
+    [["input.state", "a2"]],
+  );
+  publisher.retire();
+  await acquisitions[1].subsystem.terminal;
 });

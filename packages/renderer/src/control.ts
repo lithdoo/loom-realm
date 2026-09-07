@@ -143,10 +143,10 @@ class ControlHolder implements RendererControlHolder {
 
     const peer = outcome.peer;
     if (this.currentValue !== null) {
-      this.stopInputSource();
       this.currentValue = null;
-      this.inputGate.setControl(null);
       this.clearAllData();
+      this.stopInputSource();
+      this.inputGate.setControl(null);
     }
     const installed = Object.freeze({ peer, snapshot: outcome.snapshot });
     this.currentValue = installed;
@@ -156,10 +156,10 @@ class ControlHolder implements RendererControlHolder {
     void this.consume(peer);
     void peer.terminal.then(() => {
       if (this.currentValue?.peer !== peer) return;
-      this.stopInputSource();
       this.currentValue = null;
-      this.inputGate.setControl(null);
       this.clearAllData();
+      this.stopInputSource();
+      this.inputGate.setControl(null);
     });
     return Object.freeze({ kind: "installed", current: installed });
   }
@@ -167,6 +167,7 @@ class ControlHolder implements RendererControlHolder {
   private async consume(peer: RendererControlPeer): Promise<void> {
     for await (const snapshot of peer.states()) {
       if (this.currentValue?.peer !== peer) continue;
+      this.retireMismatchedData(peer, snapshot);
       this.currentValue = Object.freeze({ peer, snapshot });
       this.inputGate.setControl(snapshot);
       this.reconcileData(peer, snapshot);
@@ -215,6 +216,34 @@ class ControlHolder implements RendererControlHolder {
       } else if (slot.current === null && slot.pending === null && slot.failed === null) {
         this.startDataAcquire(slot, identity);
       }
+    }
+  }
+
+  private retireMismatchedData(
+    controlPeer: RendererControlPeer,
+    snapshot: RendererAuthoritySnapshotV1,
+  ): void {
+    const desired = new Map(snapshot.dataAuthorities.map((authority) => [
+      authority.subsystemKey,
+      Object.freeze({ controlPeer, ...authority }) as DesiredDataIdentity,
+    ]));
+    for (const [subsystemKey, slot] of this.dataSlots) {
+      const identity = desired.get(subsystemKey);
+      if (identity === undefined || !sameIdentity(slot.current?.identity ?? null, identity)) {
+        const current = slot.current;
+        slot.current = null;
+        if (current !== null) {
+          this.inputGate.retireData(subsystemKey, current.peer);
+          void current.peer.close().catch(() => {});
+        }
+      }
+      if (identity === undefined || !sameIdentity(slot.pending?.identity ?? null, identity)) {
+        const pending = slot.pending;
+        slot.pending = null;
+        pending?.controller.abort();
+      }
+      if (identity === undefined || !sameIdentity(slot.failed, identity)) slot.failed = null;
+      if (identity === undefined) this.dataSlots.delete(subsystemKey);
     }
   }
 

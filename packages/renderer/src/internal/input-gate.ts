@@ -28,16 +28,25 @@ function sameLease(left: Lease | null, right: Lease | null): boolean {
   );
 }
 
-function detachedFrozen<T>(value: T): T {
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map((item) => detachedFrozen(item))) as T;
+function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
+  if (value === null || typeof value !== "object") return value;
+  const existing = seen.get(value);
+  if (existing !== undefined) return existing as T;
+  const prototype = Object.getPrototypeOf(value);
+  const output: object = Array.isArray(value)
+    ? new Array(value.length)
+    : Object.create(prototype);
+  seen.set(value, output);
+  for (const key of Reflect.ownKeys(value)) {
+    if (Array.isArray(value) && key === "length") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined) continue;
+    if ("value" in descriptor) {
+      descriptor.value = detachedFrozen(descriptor.value, seen);
+    }
+    Object.defineProperty(output, key, descriptor);
   }
-  if (value !== null && typeof value === "object") {
-    const output: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) output[key] = detachedFrozen(child);
-    return Object.freeze(output) as T;
-  }
-  return value;
+  return Object.freeze(output) as T;
 }
 
 class BoundedInputPublisher {

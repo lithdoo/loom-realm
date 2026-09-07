@@ -1,6 +1,6 @@
 # M10 / 02 — Renderer Input Gate
 
-> 状态：**Implemented / Qualified**
+> 状态：**Implemented / Regression Verified**
 > 阶段：M10 User Input  
 > 落地顺序：02  
 > 最近复核：2026-09-07  

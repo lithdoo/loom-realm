@@ -140,6 +140,23 @@ test("KeyboardCode runtime acceptance uses the frozen finite set", async () => {
   assert.equal(invalid.terminal.kind, "local-fatal");
 });
 
+test("non-JSON custom Input payload is rejected instead of normalized", async () => {
+  const carrier = hangingCarrier();
+  const renderer = createRendererDataPeer({
+    binding: binding(carrier),
+    handlers: rendererHandlers,
+  });
+  const result = await renderer.input.sendState({
+    type: "input.state",
+    frameId: "f1",
+    activationId: "a1",
+    channel: "x.invalid.state",
+    payload: new Date("2026-01-01T00:00:00.000Z"),
+  });
+  assert.equal(result.kind, "terminal");
+  assert.equal(result.terminal.kind, "local-fatal");
+});
+
 test("unknown type fail-closes the current Data peer", async () => {
   const carrier = inboundCarrier([JSON.stringify({ type: "input.unknown" })]);
   const subsystem = createSubsystemDataPeer({

@@ -1,8 +1,8 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Implemented / Qualified；**M10 Input Implementation Frozen / Ready for Implementation**  
-> 稳定程度：M8 Implementation Closed / M10 Implementation Frozen  
+> 状态：M8 Implemented / Qualified；**M10 Input Implemented / Qualification Pending**
+> 稳定程度：M8 Implementation Closed / M10 Regression Verified
 > 主要定义：Renderer Control holder、per-subsystem Data reconciliation、M10 Input gate/publisher/source placement、M11+ Render placement  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[ADR 0029](../../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > M10 实施：[M10 / 02](https://github.com/lithdoo/loom-realm/blob/main/M10_02_RENDERER_INPUT_GATE.md) · [M10 / 03](https://github.com/lithdoo/loom-realm/blob/main/M10_03_RENDERER_INPUT_PRODUCERS.md)

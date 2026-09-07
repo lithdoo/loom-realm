@@ -1,6 +1,6 @@
 # M10 / 01 — Subsystem InputManager
 
-> 状态：**Implemented / Qualified**
+> 状态：**Implemented / Regression Verified**
 > 阶段：M10 User Input  
 > 落地顺序：01  
 > 最近复核：2026-09-07  
