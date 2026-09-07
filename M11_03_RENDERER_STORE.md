@@ -17,7 +17,7 @@
 ```text
 existing Renderer Data slot
 → current RendererDataPeer render handlers
-→ internal Render Store
+→ internal Render replica state
 → validate
 → isolated candidate
 → atomic commit
@@ -25,6 +25,8 @@ existing Renderer Data slot
 ```
 
 Render Store 挂接现有 `(controlPeer, subsystemKey, generation, dataProfile)` Data-slot currentness；不新增 Render Session、Render Connection Manager 或第二套 Data currentness。
+
+这里的 “Store” 只是当前 replica + one-shot history 的 package-internal state boundary，不要求实现为独立 class、observable store 或 reusable framework；可以直接是现有 Data slot/holder 持有的私有 records/indexes。
 
 ---
 
@@ -43,7 +45,7 @@ PresentationAdapter
 RenderEventBus
 ```
 
-Store 与 Event-delivery seam 均保持 package-internal。Unit/conformance tests MAY 使用 internal/test-only observation seam 读取 normalized committed state/Event trace；该 seam 不形成 production compatibility boundary。
+Store 与 Event-delivery state 均保持 package-internal。Unit/conformance tests SHOULD 优先直接驱动 current production handlers + package-internal state；只有现有测试无法观察 normalized committed state/Event trace 时，才 MAY 加一个最小 test-only observation seam。该 seam 不形成 production compatibility boundary，也不得演化成 subscription API。
 
 Physical presentation consumer 属于 M14。
 
@@ -106,6 +108,17 @@ render.event
 ```
 
 Registry removal retires that current authoritative Domain replica but preserves required generation one-shot history。
+
+A sender-side revision-exhaustion rollover appears to Renderer only as ordinary Frozen v1 lifecycle：
+
+```text
+Registry: old domainId absent + fresh domainId present
+→ old replica retired / tombstone retained
+→ fresh domainId unbaselined
+→ fresh Snapshot
+```
+
+Renderer 不需要 “rollover” 专用 message/state/API。
 
 ---
 
@@ -176,10 +189,10 @@ validate whole message
 允许：
 
 ```text
-one concrete internal Render Store per current Renderer Data-slot identity
+one concrete internal replica state per current Renderer Data-slot identity
 minimal Domain/node indexes
 isolated candidate helpers
-minimal internal Event-delivery/test observation seam
+only-if-needed minimal test observation seam
 ```
 
 禁止：
@@ -215,6 +228,7 @@ well-formed stale Event accepted+drop only
 same-generation Data replacement isolates old stream and preserves identity history
 fresh carrier requires fresh Registry/Snapshot
 fresh-generation identity reset by receiver-role fixture
+wire-domain rollover needs no receiver-side special abstraction
 Render fatal does not mutate Runtime/Frame authority
 ```
 
