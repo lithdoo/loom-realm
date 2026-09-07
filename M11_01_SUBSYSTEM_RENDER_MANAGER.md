@@ -16,12 +16,14 @@
 
 ```text
 Subsystem business state
-→ one internal RenderManager
+→ one internal RenderManager responsibility
 → business Render Domains
 → authoritative desired Render state / transient Event intent
 ```
 
 Subsystem 是 business Render authority。Main、Renderer、Frame、Data carrier 都不拥有 business Render Domain lifecycle。
+
+`RenderManager` 是 internal ownership boundary，不要求实现为独立 framework/service class；可以由一个私有对象或等价闭包/records实现，只要 authority 唯一。
 
 ---
 
@@ -70,7 +72,7 @@ interface SubsystemScope {
 }
 ```
 
-不 root-export supporting aliases 只为对称性服务。`RenderManager` 是 SDK internal implementation，不是 author service。
+不 root-export supporting aliases 只为对称性服务。`RenderNode` 直接投影 Frozen `RenderNodeV1`，不复制第二套 recursive tree schema。`RenderManager` 是 SDK internal implementation，不是 author service。
 
 Author 不提供、不观察、不管理：
 
@@ -97,7 +99,7 @@ emit
 close
 ```
 
-固定顺序：
+对携带 author value 的调用固定：
 
 ```text
 validate
@@ -105,6 +107,8 @@ validate
 → atomic local commit / bounded Event offer
 → return
 ```
+
+`close()` 无 caller value，只做同步 atomic lifetime transition。
 
 不得：
 
@@ -188,12 +192,17 @@ Data retire   != Domain destroy
 
 ```text
 idempotent
+atomically removes the Domain from RenderManager live business Registry
 atomically ends the business Domain lifetime
 all later replace/emit → TypeError
 Runtime terminal → eventually closes every still-live Domain
 ```
 
-SDK mint `domainId`，并在一个 Subsystem Runtime instance 内从不复用已经 mint 过的 `domainId`。具体 mint strategy 是 private mechanics。
+`close()` 后该 Domain 立即不再属于 desired Render publication set；current-carrier pending/output cleanup 与 wire Registry removal顺序由 M11/02 冻结。
+
+SDK mint 的 `domainId` 是 author-invisible wire projection identity，不是 business handle identity。每次 mint 必须满足 Frozen v1 `domainId` representation/length，且一个 Subsystem Runtime instance 内从不复用已经 mint 过的值。
+
+普通情况下一个 live business Domain 保持当前 wire `domainId`。只有 Frozen Render v1 明确要求 fresh wire identity 的异常边界（revision exhaustion）才允许为同一仍-live business Domain mint fresh `domainId`；business handle/lifetime 不因此改变，具体 rollover 见 M11/02。不得把这一条扩张成 generic business↔wire identity translation layer。
 
 Node key 使用更强 local invariant：
 
@@ -240,7 +249,7 @@ Event 不改变 Domain state/revision。是否最终发送由 M11/02 current-car
 允许：
 
 ```text
-one internal RenderManager per Subsystem instance
+one internal RenderManager responsibility per Subsystem instance
 RenderDomain handles
 Domain records
 minimal tree/index validation helpers
@@ -260,7 +269,7 @@ Content/resource resolver
 Render RPC
 Frame→Domain implicit registry
 Data carrier reader/writer
-business-key → wire-key identity translation layer
+generic business↔wire identity translation layer
 cross-Domain transaction framework
 ```
 
@@ -277,7 +286,8 @@ caller-owned values detached before commit
 live Domain count bound
 create/replace validation local-atomic
 replace/emit after close reject; close idempotent
-SDK domainId never reused within Runtime instance
+close immediately removes Domain from live desired business Registry
+SDK domainId valid and never reused within Runtime instance
 Node identity/tag/one-shot invariants
 emit requires current business target
 Frame/Data independence
