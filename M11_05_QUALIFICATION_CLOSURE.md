@@ -1,6 +1,6 @@
 # M11 / 05 — Qualification and Closure
 
-> 状态：**Implemented / Qualification Reopened / Pending**
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M11 Render  
 > 落地顺序：05  
 > 最近复核：2026-09-07  
@@ -12,7 +12,7 @@
 
 > **M11 closure = Subsystem-owned business Render Domains 经 current generation/current Data publication为 Registry + per-Domain authoritative commits，Renderer只维护 current replica；Frame/Data 不取得 Render ownership，fresh carrier以 fresh baseline恢复，transient Event不 replay。**
 
-2026-09-07 最终复核确认 production architecture仍成立，但 Render representation validation 与 formal role evidence 尚未满足完整 Frozen closure。此前 `Qualified / Closed` claim 暂时撤回；本文件与最终评审定义的固定 checklist 全部通过后才能恢复 Closed。
+2026-09-07 最终复核确认 production architecture仍成立；Render representation validation、formal role evidence、hard-limit matrix 与 fail-closed catalog 已按固定 checklist 补齐并重新通过 closure gate。
 
 ---
 
@@ -340,13 +340,7 @@ qualification/root-gate shape
 
 ## 10. Closure Claim
 
-当前固定状态：
-
-```text
-M11 Render = Implemented / Qualification Pending
-```
-
-最终评审 [M11 Render 最终闭环评审结论](doc/30-implementation/m11-final-closure-review.md) 的 checklist全部满足，且 Node 20/24 `npm run test:m11` 全绿后，才允许恢复：
+最终固定状态：
 
 ```text
 M11 Render = Implemented / Qualified / Closed

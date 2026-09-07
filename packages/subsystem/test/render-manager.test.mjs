@@ -69,6 +69,21 @@ test("Render author validation is atomic and classifies shape versus hard limits
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].key, "a");
 });
 
+test("Render author validation rejects non-scalar strings in generic data synchronously", () => {
+  const manager = new RenderManager();
+  assert.throws(() => manager.createDomain(state([
+    node("root", [], "sprite", {}, { value: "\ud800" }),
+  ])), /Unicode/);
+  const domain = manager.createDomain(state([
+    node("root", [], "sprite", {}, { value: "😀" }),
+  ]));
+  assert.throws(() => domain.replace(state([
+    node("root", [], "sprite", {}, { nested: ["\udc00"] }),
+  ])), /Unicode/);
+  assert.throws(() => domain.emit({ targetKey: "root", name: "tick", data: { value: "\ud800" } }), /Unicode/);
+  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.value, "😀");
+});
+
 test("fresh carrier publishes Registry then baseline and orders Event after target", async () => {
   const manager = new RenderManager();
   const domain = manager.createDomain(state([node("root")], 2));

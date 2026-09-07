@@ -77,7 +77,7 @@ function scalarString(value: unknown, min: number, max: number, label: string): 
     const unit = value.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) throw new TypeError(`${label} has invalid Unicode`);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) throw new TypeError(`${label} has invalid Unicode`);
       index += 1;
     } else if (unit >= 0xdc00 && unit <= 0xdfff) {
       throw new TypeError(`${label} has invalid Unicode`);
@@ -102,6 +102,10 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
   const stack: JsonValue[] = [value];
   while (stack.length > 0) {
     const current = stack.pop();
+    if (typeof current === "string") {
+      scalarString(current, 0, Number.POSITIVE_INFINITY, `${label} string`);
+      continue;
+    }
     if (current === undefined || current === null || typeof current !== "object") continue;
     if (Array.isArray(current)) {
       if (current.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} array limit exceeded`);

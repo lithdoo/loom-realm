@@ -1,33 +1,19 @@
 # M11 Render Qualification
 
-> 状态：**Implemented / Qualification Reopened / Pending**
+> 状态：**Implemented / Qualified / Closed**
 > 日期：2026-09-07
 > 规范入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 > 最终评审：[M11 Render 最终闭环评审结论](./m11-final-closure-review.md)
 > 协议：`loomrealm.render-update / 1`
 > Fixture：`fixtureSetRevision = 1`
 
-M11 production architecture、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现；但 2026-09-07 最终复核发现 production Render representation validation 与 formal qualification evidence 尚未满足完整 Frozen closure 条件，因此此前 `Qualified / Closed` claim 暂时撤回。
+M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并重新通过最终闭环评审。
 
 DOM/Canvas/WebGL presentation、Content resolution 与 Hostra/PWA transport equivalence仍不属于 M11。
 
-## Previous Evidence — Superseded for Closure
+## Current Executable Evidence
 
-此前 runner 记录：
-
-```text
-required unique fixture entries = 202
-explicit executable fixture mappings = 202
-qualification role records = 266
-
-subsystem-sender = 81
-renderer-receiver = 185
-transport = 0
-```
-
-这些数字仍可作为历史执行记录，但**不得继续作为当前 M11 closure evidence**。最终评审确认：catalog parser 曾 silent-filter normative fixture `lastEmittedRevision-reset-per-carrier`，且 fixture callback pass 会自动扩散到同 fixture 的多个 claimed roles；因此 fixture coverage 与 role evidence 必须重新生成。
-
-修复后的 source-derived expected result：
+Fail-closed catalog parser 直接读取 Frozen Required blocks；role-specific runner 分别执行 sender/receiver assertion callback。当前 source-derived 结果：
 
 ```text
 unique fixtures       = 203
@@ -37,11 +23,11 @@ role evidence pairs   = 267
 transport             = 0
 ```
 
-最终数字必须由 executable catalog/audit 派生，不得通过手工常量伪造通过。
+这些数字由 executable catalog/audit 派生；expected、registered、executed 与 passed role/fixture pair sets 严格相等。
 
-## Required Requalification
+## Requalification Closure
 
-唯一修复方案见 [M11 Render 最终闭环评审结论](./m11-final-closure-review.md)。必须一次完成：
+最终评审要求已一次完成：
 
 ```text
 production Render representation validation closure
@@ -100,14 +86,6 @@ npm run test:m11
 ```
 
 最终必须在 Node 20 + Node 24 对同一 root gate通过，并由 executable output重新生成 current qualification record。
-
-在完成前：
-
-```text
-M11 Render = Implemented / Qualification Pending
-```
-
-只有最终评审 checklist 全部满足后，才能恢复：
 
 ```text
 M11 Render = Implemented / Qualified / Closed

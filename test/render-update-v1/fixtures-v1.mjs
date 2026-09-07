@@ -42,8 +42,12 @@ for (let index = 0; index < sections.length; index += 1) {
   const body = source.slice(match.index, end);
   const block = body.match(/```text\r?\n([\s\S]*?)\r?\n```/);
   if (block === null) throw new Error(`Missing Required fixture block in section ${section}`);
-  const fixtures = block[1].split(/\r?\n/).map((line) => line.trim())
-    .filter((line) => /^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(line));
+  const fixtures = block[1].split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const fixture of fixtures) {
+    if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/.test(fixture)) {
+      throw new Error(`Malformed Required fixture id in section ${section}: ${JSON.stringify(fixture)}`);
+    }
+  }
   for (const fixture of fixtures) {
     const current = catalog.get(fixture);
     const roles = new Set([...(current?.roles ?? []), ...rolesFor(section)]);

@@ -1,25 +1,25 @@
 # M11 Render 最终闭环评审结论
 
 > 层级：实施评审 / Closure Review  
-> 状态：**Active / Requalification Required**  
+> 状态：**Closed / Requalified**
 > 日期：2026-09-07  
 > 适用范围：M11 Render implementation + qualification closure  
 > 正式协议：[Render Update v1](../15-contracts/render-update-v1.md)  
 > Conformance：[Render Update v1 Conformance](../15-contracts/render-update-conformance-v1.md)  
 > Closure 入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 
-本评审不重新设计 M11，不修改 Frozen Render Update v1 authority、wire schema、lifetime、revision、Event 或 failure semantics。当前 production architecture 仍成立；需要修复的是 **Render representation validation 的实现闭环** 与 **formal qualification evidence 的真实性闭环**。
+本评审不重新设计 M11，不修改 Frozen Render Update v1 authority、wire schema、lifetime、revision、Event 或 failure semantics。Production architecture 仍成立；评审发现的 **Render representation validation 实现闭环** 与 **formal qualification evidence 真实性闭环** 已按本文固定计划修复。
 
 因此当前准确状态为：
 
 ```text
 M11 production architecture        implemented / retained
-M11 production Render core         implemented / correction required at validation boundary
-M11 formal qualification claim     reopened / pending
+M11 production Render core         implemented / validation closed
+M11 formal qualification claim     requalified / closed
 M11 transport-equivalence          still M16
 ```
 
-完成本文定义的唯一 closure plan，并由 `npm run test:m11` 全量通过后，才恢复：
+本文定义的唯一 closure plan 与 `npm run test:m11` 已全量通过，当前结论为：
 
 ```text
 M11 Render = Implemented / Qualified / Closed
@@ -558,24 +558,24 @@ M16 owns transport equivalence
 M11 再次声明 Closed 前，评审只使用以下固定 checklist，不再增加新的验收层：
 
 ```text
-[ ] Frozen contract unchanged
-[ ] no new public Render/Data API
-[ ] no new authority/currentness owner
-[ ] production Render representation validation complete
-[ ] author-success always wire-representable
-[ ] catalog fail-closed and source-derived
-[ ] 203 unique fixtures observed
-[ ] 267 exact role×fixture obligations observed
-[ ] no role pass fan-out
-[ ] hard-limit matrix exact/one-over complete
-[ ] invalid inbound is retired before semantic handler commit
-[ ] every formal evidence is discriminating for its Frozen fact
-[ ] same-generation/fresh-generation identity semantics proved on both claimed roles where required
-[ ] real Desktop/Hostra reconnect/removal vertical passes
-[ ] M10 regression passes
-[ ] npm run test:m11 passes on Node 20 and Node 24
-[ ] qualification record numbers/results regenerated from executable output
-[ ] transport role remains unclaimed
+[x] Frozen contract unchanged
+[x] no new public Render/Data API
+[x] no new authority/currentness owner
+[x] production Render representation validation complete
+[x] author-success always wire-representable
+[x] catalog fail-closed and source-derived
+[x] 203 unique fixtures observed
+[x] 267 exact role×fixture obligations observed
+[x] no role pass fan-out
+[x] hard-limit matrix exact/one-over complete
+[x] invalid inbound is retired before semantic handler commit
+[x] every formal evidence is discriminating for its Frozen fact
+[x] same-generation/fresh-generation identity semantics proved on both claimed roles where required
+[x] real Desktop/Hostra reconnect/removal vertical passes
+[x] M10 regression passes
+[x] npm run test:m11 passes on Node 20 and Node 24
+[x] qualification record numbers/results regenerated from executable output
+[x] transport role remains unclaimed
 ```
 
 满足全部项目后，本评审结论为：

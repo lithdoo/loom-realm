@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving overall / **M10 Closed / M11 Implemented / Qualification Reopened**  
+> 稳定程度：Evolving overall / **M11 Closed**
 > 主要定义：M0..M16 实现顺序、当前 closure、Desktop/PWA qualification 边界  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
 > 当前 Input 决策：[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
@@ -244,7 +244,7 @@ User Input authority/lifetime/wire/backpressure
 
 ---
 
-## M11：Render Update v1 + RenderManager — **Implemented / Qualification Reopened / Pending**
+## M11：Render Update v1 + RenderManager — **Implemented / Qualified / Closed**
 
 Current facts：
 
@@ -257,9 +257,9 @@ M11 root gate = npm run test:m11
 M11 final closure review = doc/30-implementation/m11-final-closure-review.md
 ```
 
-2026-09-07 最终复核不重新打开 Render authority/lifetime/protocol design；只重新打开 production representation validation 与 formal qualification evidence。历史 `202 fixtures / 266 role records` 不再构成 current closure evidence。
+2026-09-07 最终复核未改变 Render authority/lifetime/protocol design；production representation validation 与 formal qualification evidence 已按固定 checklist 重新关闭。
 
-修复后的 source-derived audit target：
+当前 executable output 派生的 audit result：
 
 ```text
 unique fixtures       = 203
@@ -515,7 +515,7 @@ M11 claimed conformance roles / qualification root gate
 
 不得引入 generic validator/conformance/schema/replication framework。完整且固定的 correction checklist见 [M11 Render 最终闭环评审结论](./m11-final-closure-review.md)。
 
-M11 未恢复 `Qualified / Closed` 前不进入 M12 implementation closure。
+M11 已恢复 `Qualified / Closed`，可进入 M12 implementation closure。
 
 ---
 

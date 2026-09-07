@@ -34,8 +34,31 @@ function attrs(raw: unknown): void {
   }
 }
 
+function renderJsonValue(raw: unknown): void {
+  try {
+    assertJsonValue(raw);
+  } catch {
+    fail("render", "data must be plain JSON");
+  }
+  const stack = [raw];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "string") {
+      boundedString(current, "render", "data string", 0, Number.POSITIVE_INFINITY);
+    } else if (Array.isArray(current)) {
+      for (const child of current) stack.push(child);
+    } else if (current !== null && typeof current === "object") {
+      for (const [key, value] of Object.entries(current)) {
+        boundedString(key, "render", "data key", 0, 256);
+        stack.push(value);
+      }
+    }
+  }
+}
+
 function renderData(raw: unknown): JsonObject {
   const d = object(raw, "render", "data");
+  renderJsonValue(d);
   assertBoundedJson(d, "render");
   if (utf8ByteLength(stringifyJson(d)) > MAX_PAYLOAD_BYTES) fail("render", "render data byte limit");
   return d;
@@ -77,14 +100,16 @@ function stringDelta(raw: unknown, json: boolean): void {
   if (d.set === undefined && d.remove === undefined) fail("render", "empty delta");
   let nonempty = false;
   if (d.set !== undefined) {
-    const s = object(d.set, "render", "delta.set");
+    const s = json ? renderData(d.set) : object(d.set, "render", "delta.set");
     const keys = Object.keys(s);
     if (keys.length) nonempty = true;
     for (const k of keys) {
       if (json) {
-        assertJsonValue(s[k]);
-      } else if (typeof s[k] !== "string") {
-        fail("render", "string delta value");
+        boundedString(k, "render", "data delta key", 0, 256);
+        renderJsonValue(s[k]);
+      } else {
+        boundedString(k, "render", "attrs delta key", 1, 128);
+        boundedString(s[k], "render", "attrs delta value", 0, 4096);
       }
     }
   }
@@ -94,6 +119,7 @@ function stringDelta(raw: unknown, json: boolean): void {
     const seen = new Set<string>();
     for (const x of r) {
       if (typeof x !== "string" || seen.has(x)) fail("render", "invalid delta remove");
+      boundedString(x, "render", json ? "data delta key" : "attrs delta key", json ? 0 : 1, json ? 256 : 128);
       seen.add(x);
       if (d.set !== undefined && Object.prototype.hasOwnProperty.call(d.set, x)) {
         fail("render", "delta set/remove overlap");

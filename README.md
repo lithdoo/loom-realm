@@ -208,7 +208,7 @@ Publication复用 existing `SubsystemDataPeer.render`；same-generation reconnec
 
 M11 qualification仍只 claim `subsystem-sender` + `renderer-receiver`；包含 Hostra/PWA trace equivalence 的 `transport` role 留 M16。
 
-2026-09-07 最终复核不改变上述 Frozen architecture，但重新打开 formal qualification：必须补齐 production Render representation validation，并按 `(role, fixture)` 建立 exact executable evidence；完整方案与固定 closure checklist见 [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)。
+2026-09-07 最终复核要求的 production Render representation validation、fail-closed catalog、`(role, fixture)` exact evidence 与 hard-limit matrix 已完成；闭环记录见 [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)。
 
 ---
 
@@ -225,7 +225,7 @@ M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
-M11 Render                            ⚠️ Implemented / Qualification Pending
+M11 Render                            ✅ Qualified / Closed
 M12 Content                           pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
@@ -293,4 +293,4 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Current closed implementation gate仍是 **M10**。M11 production implementation已完成，但 qualification按最终评审重新打开；完成 [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md) 的固定 checklist 后，以 `npm run test:m11` 在 Node 20/24 重新生成 current evidence并恢复 Closed claim。
+Current closed implementation gate为 **M11**。`npm run test:m11` 覆盖 M10 regression、M11 package/boundary、203 fixtures / 267 role evidence pairs、hard-limit matrix 与 Desktop/Hostra vertical；独立 CI 在 Node 20/24 执行同一 root gate。

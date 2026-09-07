@@ -63,7 +63,7 @@ M7  Renderer Control                          ✅ Qualified 2026-09-03
 M8  Data logical authority / role integration ✅ Qualified 2026-09-04
 M9  Desktop Data Broker / late provisioning   ✅ Qualified 2026-09-04
 M10 User Input                                 ✅ Qualified 2026-09-07
-M11 Render                                     ⚠️ Implemented / Qualification Pending
+M11 Render                                     ✅ Qualified 2026-09-07
 ```
 
 Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md) · [m11-qualification.md](./m11-qualification.md)。M11 current closure标准见 [m11-final-closure-review.md](./m11-final-closure-review.md)。
@@ -240,7 +240,7 @@ M15 PWA Runtime vertical
 M16 PWA Full E2E / equivalence
 ```
 
-M11 未按 [final closure review](./m11-final-closure-review.md) 恢复 `Qualified / Closed` 前，不进入 M12 implementation closure。
+M11 已按 [final closure review](./m11-final-closure-review.md) 恢复 `Qualified / Closed`，可进入 M12 implementation closure。
 
 ---
 
