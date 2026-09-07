@@ -40,7 +40,8 @@ business Domain created
 
 business Domain close
 → immediately absent from desired business Registry
-→ not-yet-emitted Domain work discarded
+→ pending/not-started Domain work discarded
+→ any already-started send settles in order
 → Registry removal
 → Renderer retires current replica
 
@@ -119,6 +120,7 @@ M11 real same-generation Render vertical pass
 real authority feed
 real paired Data connection
 create/update/close Registry lifecycle
+started-send-before-removal ordering
 fresh-carrier recovery
 same-generation identity continuity
 Frame/Data independence
