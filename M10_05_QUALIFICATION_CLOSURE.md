@@ -36,6 +36,7 @@
     Effective gate
     bounded State/Event/Reset publisher
     current-Control-scoped source subscription
+    local start/stop failure containment
 
 existing @loomrealm/data
     User Input codecs/typed peers/serialized send reused unchanged
@@ -58,12 +59,14 @@ private Map/Set/array layout
 private queue capacity finite constant
 private JSON detach/freeze helper implementation
 private source-subscription token representation
+private one-time FrameRuntime binding representation
 private test file split
 ```
 
 实现阶段 **不得再选择**：
 
 ```text
+public Input type names
 handler receives payload vs envelope
 on() whether changes Interest
 setChannels whether deletes handlers
@@ -72,7 +75,7 @@ handler invocation order
 mutation during delivery current-vs-next effect
 whether async handlers block Data reader
 recoverable frame.call rejection vs State convergence ordering
-Renderer source construction API/lifetime/restart behavior
+Renderer source construction API/lifetime/restart/failure behavior
 Event/Reset barrier behavior
 Data/Control/Activation authority semantics
 ```
@@ -88,6 +91,7 @@ Data/Control/Activation authority semantics
 ```text
 one InputManager per Subsystem instance
 listener contribution + registration records
+one global registration ordinal
 one derived DesiredRegistry
 minimal immutable retained State
 0..1 inFlight + pendingLatest Interest publication
@@ -95,6 +99,7 @@ one Renderer input gate per current Data slot
 one bounded input publisher
 one construction-time RendererInputSource object
 0..1 current source subscription
+one local source-start staging record
 ```
 
 禁止：
@@ -111,19 +116,48 @@ second Data reader/writer
 retry/replay/history
 BrowserWindow/DOM composition
 new Input error hierarchy solely for M10
+generic source retry/backoff framework
 ```
 
 ---
 
 ## 4. Exact Subsystem SDK Evidence
 
-编译/运行 evidence必须证明：
+编译/运行 evidence必须证明 root exports exact names：
 
 ```text
-root exports exact InputChannel/InputPayload/InputHandler/InputListener surface
+InputStateChannel
+InputEventChannel
+InputChannel
+InputJsonObject
+KeyboardCode
+PointerKind
+PointerButton
+PointerSample
+GamepadAxes
+GamepadButtons
+GamepadSample
+GamepadButtonName
+KeyboardStateInput
+KeyboardEventInput
+PointerStateInput
+PointerEventInput
+GamepadStateInput
+GamepadEventInput
+InputPayload
+InputHandler
+Unsubscribe
+CreateInputListenerOptions
+InputListener
+```
+
+以及：
+
+```text
 SubsystemScope exposes createInputListener
-standard channel maps to exact canonical payload type
-custom x.* maps to JSON object payload
+standard channel maps to exact canonical author payload type
+custom x.* maps to InputJsonObject
+standard author types structurally match User Input v1 payloads
 handler sees payload only
 business Definition needs only @loomrealm/subsystem import
 ```
@@ -156,6 +190,7 @@ invalid mutation leaves local/wire/Data state unchanged
 ```text
 retained author State detached/deep-immutable
 business mutation cannot corrupt later baseline
+payload object identity is not required for semantic equality
 new active .state registration gets one synchronous retained baseline
 reactivated dormant .state handler gets current baseline when retained state still exists
 union true→false clears retained state
@@ -165,7 +200,7 @@ union true→false clears retained state
 Determinism：
 
 ```text
-same-channel handlers invoked by registration order
+same-channel handlers invoked by global InputManager registration order
 multi-channel local convergence uses canonical ASCII channel order
 stable registration snapshot captured before delivery
 handler unsubscribe/close/setChannels during delivery affects subsequent delivery only
@@ -196,6 +231,8 @@ commit / Activation revoke / admin suspend / terminal
 ```
 
 Qualification必须明确断言：business `catch` 开始时，同步 State-handler side effect已经发生；不等待 async handler Promise settlement。
+
+Bootstrap wiring还必须证明 InputManager可在 Definition factory前创建并由 scope引用，而 FrameRuntime在 Definition产生后一次性绑定；不得因此创建 dummy/shadow Frame registry。
 
 ---
 
@@ -249,20 +286,40 @@ RendererInputSourceChange = availability | state | event
 
 ```text
 old one-argument factory call remains valid
+no source → all Producer unavailable
 source object fixed at holder construction
 no current Control → no active subscription
-current Control install → exactly one start
+current Control install → exactly one start attempt
+successful start → exactly one current active subscription
 replacement/terminal → invalidate + stop old subscription
 late old emit ignored
 same holder later current Control → same source object restarted
 fresh subscription inherits no old producer facts
+start MUST NOT replay historical Event
 state availability requires current sample
 state loss clears producer sample
 state return provides fresh sample before available=true
 source cannot choose frameId/activationId or bypass publisher/Data peer
 ```
 
-M14 real browser mapping必须复用这一 exact seam。
+Failure cases：
+
+```text
+start throws
+start returns non-function
+start emits partial facts then fails
+    → all partial facts discarded
+    → Producer all unavailable for that current Control epoch
+    → no same-epoch retry
+    → Control/Data remain current
+
+stop throws
+    → subscription already locally invalidated
+    → error contained
+    → no old Producer resurrection
+```
+
+M14 real browser mapping必须复用这一 exact seam/failure boundary。
 
 ---
 
@@ -298,6 +355,8 @@ producer loss/return
 handler sync/async isolation
 Frame close cleanup
 ```
+
+Source start/stop failure可由 renderer package deterministic qualification独立证明，不要求把每个 local integration failure塞进大 vertical。
 
 Fresh-generation behavior使用 role-level deterministic Data fixture证明；不得为此提前扩大 Main generation machinery。
 
@@ -360,8 +419,8 @@ npm run test:m10
 M9 dependency/build gates
 current User Input fixtureSetRevision=2
 Subsystem exact SDK surface/type tests
-Subsystem InputManager lifecycle/order/async tests
-Renderer gate/publisher/source lifecycle tests
+Subsystem InputManager lifecycle/order/async/bootstrap tests
+Renderer gate/publisher/source lifecycle/failure tests
 real M10 vertical
 ```
 
