@@ -2,10 +2,9 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving overall / M10 frozen  
+> 稳定程度：Evolving overall / **M10 Closed / M11 Implementation Frozen**  
 > 主要定义：M0..M16 实现顺序、当前 closure、Desktop/PWA qualification 边界  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
-> 当前 Input 决策：[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 最近复核：2026-09-07
 
 核心顺序：
@@ -32,9 +31,7 @@ Foundation/Wire
 规则：
 
 ```text
-Package Scope
-!= Current Implementable Slice
-!= Milestone Closure
+Package Scope != Current Implementable Slice != Milestone Closure
 ```
 
 首次实现只维护一个 current model；不制造 fake v2 / deprecated alias / generic framework。
@@ -51,233 +48,288 @@ Current docs统一 Game/Launcher/Main、Runtime/Frame、Renderer Control、Data/
 
 MessageCarrier/MemoryCarrier + JSON/JSON-RPC representation/limits primitives。
 
----
-
 ## M2：Game Package v1 ✅
 
 Common Game Entry validation/snapshot capability。M6 Hostra first real consumer；M15 PWA second consumer。
-
----
 
 ## M3：Runtime Control Mechanics ✅
 
 one reader / one writer、strict sender IDs、finite deadlines、terminal first-wins、no retry/replay/reconnect。
 
----
-
 ## M4：Subsystem Runtime/Frame Core ✅
 
 Runtime/Frame author/host slice implemented；Input/Render/Content分别 M10/M11/M12。
-
----
 
 ## M5：Main Core + LogicalGameBootstrap ✅
 
 Runtime/Frame authority、Stack/Activation/InputTarget、serialized mutation、failure unwind、Session terminal implemented。
 
----
-
 ## M6：Hostra Platform Vertical / Node Runner ✅
 
 Qualified 2026-09-03：Hostra PREPARE → LaunchPlan/bootstrap → Node Runner → Runtime Control WS → real Main/Subsystem vertical。
 
----
-
 ## M7：Renderer Control ✅
 
-Qualified 2026-09-03：
-
-```text
-@loomrealm/renderer-control peers
-OpaqueMaterialGenerator
-optional RendererControlBinding candidate slot
-Main pure authority projection/revision/currentness
-Renderer local holder
-replacement/race/fail-closed qualification
-```
-
-Physical BrowserWindow Renderer Control remains M14；PWA M16。
-
----
+Qualified 2026-09-03：Main pure authority projection/revision/currentness + Renderer local holder。Physical BrowserWindow Renderer Control remains M14；PWA M16。
 
 ## M8：Renderer Data Role/Core ✅
 
-Qualified 2026-09-04：
-
-```text
-Main ready-derived DataAuthority
-RendererDataBinding / SubsystemDataBinding
-Subsystem optional Data peer lifecycle
-Renderer per-subsystem Data reconciliation
-real @loomrealm/data peers
-```
-
-No Broker/Input/Render business semantics in M8。
-
----
+Qualified 2026-09-04：Main ready-derived DataAuthority、RendererDataBinding / SubsystemDataBinding、real `@loomrealm/data` peers、Renderer per-subsystem Data reconciliation。
 
 ## M9：Desktop DataConnectionBroker / Late Provisioning ✅
 
-Qualified 2026-09-04：
-
-```text
-Main → Platform full Data authority view
-exact HostedRuntime target
-Hostra Runtime-scoped provisioner + child IPC
-Desktop paired Data WebSocket Broker
-commit-time revalidation
-install-before-role-delivery
-post-install delivery failure never resurrects old current
-```
-
-Root gate：`npm run test:m9`。
-
-M9只证明 physical Data lifecycle；fresh Input/Render business baseline属于 M10/M11。
+Qualified 2026-09-04：Main full Data authority view → exact HostedRuntime → paired Desktop Data WebSockets → install-before-role-delivery。Root gate：`npm run test:m9`。
 
 ---
 
 ## M10：User Input v1 + InputManager — **Implemented / Qualified / Closed**
 
-Current facts：
-
 ```text
-User Input protocolVersion = 1
+protocolVersion = 1
 fixtureSetRevision = 2
-ADR 0023 + ADR 0029
-no further design round expected before coding
+root gate = npm run test:m10
 ```
 
-Root implementation plans：
+Frozen/qualified：
 
 ```text
-M10_01_SUBSYSTEM_INPUT_MANAGER.md
-M10_02_RENDERER_INPUT_GATE.md
-M10_03_RENDERER_INPUT_PRODUCERS.md
-M10_04_VERTICAL_INTEGRATION.md
-M10_05_QUALIFICATION_CLOSURE.md
+SubsystemScope.createInputListener exact author surface
+InputManager Desired Interest + retained State
+mutation-gate State convergence
+Renderer Effective gate / bounded State-Event-Reset publisher
+RendererInputSource exact construction/lifetime
+same-generation reconnect fresh State baseline / no Event replay
+platform-independent role qualification
+Hostra/Desktop real vertical
+```
+
+fresh-generation role semantics由 deterministic fixture证明，不为测试增加 Main generation allocator。Hostra/PWA transport equivalence留 M16。
+
+M10 已关闭；M11不得修改其 authority、API、lifetime、ordering或 Data currentness。
+
+---
+
+## M11：Render Update v1 + RenderManager — **Implementation Frozen / Ready**
+
+正式输入：
+
+```text
+Render Update protocolVersion = 1
+Conformance fixtureSetRevision = 1
+```
+
+Root plans：
+
+```text
+M11_01_SUBSYSTEM_RENDER_MANAGER.md
+M11_02_RENDER_PUBLICATION.md
+M11_03_RENDERER_STORE.md
+M11_04_VERTICAL_INTEGRATION.md
+M11_05_QUALIFICATION_CLOSURE.md
 ```
 
 ### Exact Subsystem author slice
 
+M11 root **只新增**：
+
 ```text
-one InputManager / instance
-SubsystemScope.createInputListener exact surface
-InputChannel → canonical payload typed mapping
-channels/setChannels solely own Interest contribution
-on/unsubscribe solely own callback registration
-setChannels preserves dormant registrations
-unsubscribe + close idempotent
-stable deterministic handler snapshot/order
-async handler Promise does not block Data reader
-immutable retained State/local state baseline
-known-no-commit convergence before frame.call rejection observable
-latest-only Interest publication
+RenderNode
+RenderDomainState
+RenderEvent
+RenderDomain
 ```
+
+以及：
+
+```text
+SubsystemScope.createRenderDomain(initialState) → RenderDomain
+RenderDomain.replace(state): void
+RenderDomain.emit(event): void
+RenderDomain.close(): void
+```
+
+固定：
+
+```text
+one internal RenderManager / Subsystem instance
+all author operations synchronous local-only
+validate → detach caller-owned value → atomic local commit
+successful state/event always Frozen-v1 representable
+live business Domains <= 256
+invalid semantic/closed/stale target → TypeError
+hard-limit overflow → RangeError
+close idempotent; replace/emit after close reject
+SDK domainId never reused within one Runtime instance
+business Node key one-shot within one business RenderDomain lifetime
+Frame/Data do not own Domain lifetime
+```
+
+不新增 public RenderManager、Frame→Domain registry、identity translation layer或 Render error hierarchy。
+
+### Publication slice
+
+```text
+business Domains
+→ one publication coordinator
+→ existing SubsystemDataPeer.render
+```
+
+Fresh carrier：
+
+```text
+render.domains(current Registry)
+→ fresh Snapshot each current Domain
+→ Patch/Snapshot/Event
+```
+
+same-generation reconnect：
+
+```text
+keep emitted Domain/Node one-shot history
+reset old carrier cursor/pending output
+fresh Registry + Snapshots
+```
+
+Event：
+
+```text
+no carrier → never retained into future carrier
+current carrier + unbaselined → MAY bounded-pend behind establishing Snapshot
+carrier loss / Domain removal → pending Event discarded
+never replay
+```
+
+第一版允许保守 Snapshot fallback；Patch-vs-Snapshot heuristic是 private optimization。无 ACK/NACK/resync/retry/history。
 
 ### Renderer slice
 
-```text
-Effective = Data × InputTarget × active F/A × Interest × Producer
-one input gate per current Data slot
-one bounded State/Event/Reset publisher
-Event/Reset global State-coalescing barriers
-exact createRendererControlHolder(data?, input?) additive API
-one construction-time RendererInputSource object
-0..1 active source subscription for current Control peer
-fresh source facts after Control replacement/reconnect
-```
-
-### Implementation verification and formal qualification
-
-Real M9 Desktop Data vertical必须证明：
+M11 Store挂在 existing Renderer Data-slot identity：
 
 ```text
-exact SDK contribution/handler semantics
-handler registration order + stable snapshot
-async handler isolation
-Interest-first / Authority-first convergence
-nested child call / fresh Activation
-recoverable frame.call State-before-rejection convergence
-committed call never leaks old suppressed State
-same-generation Data reconnect fresh baseline/no Event replay
-fresh-generation role fixture
-Control replacement source restart + late callback isolation
-producer loss/return
-handler/local author error isolation
-barrier/backpressure rules
+current Registry
+per-Domain baseline/revision
+current committed zIndex/tree
+generation-scoped observed one-shot history
 ```
 
-fresh-generation语义的 implementation regression 使用 role-level deterministic fixture证明，不为测试提前加入 Main generation allocator。
-
-M10声明 User Input implementation、current platform-independent fixtureSetRevision=2 role qualification、frozen SDK/source projection与 Hostra/Desktop vertical 已通过；Hostra/PWA transport equivalence留到 M16。
-
-Implementation qualification gate：
+固定：
 
 ```text
-npm run test:m10
+Registry/Snapshot/Patch atomic application
+well-formed stale Event → accepted + drop
+schema/limit/authoritative continuity invalid → protocol-fatal disposition
+old carrier cannot mutate replacement current
+same-generation reconnect retains identity history but resets baseline
 ```
 
-该 closure gate已落地并通过；不得以更窄的 package-only test替代。
+M11 **不新增 public `@loomrealm/renderer` Render/subscription API**；Store与 qualification observation seam internal-only。DOM/Canvas/WebGL presentation留 M14。
+
+### Real vertical
+
+Hostra/Desktop real vertical只要求当前真实 lifecycle：
+
+```text
+business Domain create
+→ Registry
+→ Snapshot
+→ current Renderer replica
+→ authoritative update
+→ replica changes
+
+same-generation carrier close
+→ business Domain survives
+→ fresh carrier Registry + Snapshot
+→ old output isolated
+```
+
+同时验证：
+
+```text
+Frame close != business Domain destroy
+Data retire != business Domain destroy
+Render/Data failure != Runtime terminal / Frame unwind
+Event no replay
+```
+
+fresh-generation语义只由 sender/receiver deterministic fixtures证明；不得为 M11 增加 test-only generation authority。
+
+### Formal qualification / root gate
+
+M11 只形成：
+
+```text
+LoomRealm Render Update v1 Subsystem Sender Conformant
+LoomRealm Render Update v1 Renderer Receiver Conformant
+```
+
+`transport` role（含 Hostra/PWA trace equivalence）留 M16。
+
+每个 claimed role 的每个 normative fixture descriptor必须 exactly once 注册/执行，并记录：
+
+```text
+protocol
+protocolVersion
+fixtureSetRevision
+role
+group
+fixture
+result
+```
+
+Audit 必须拒绝 missing / duplicate / unexecuted / non-pass fixture。
+
+唯一 M11 closure gate：
+
+```text
+npm run test:m11
+= npm run test:m10
++ Subsystem author/lifecycle/public-boundary tests
++ subsystem-sender fixtureSetRevision 1 qualification + audit
++ renderer-receiver fixtureSetRevision 1 qualification + audit
++ Renderer replica/package tests
++ Desktop/Hostra same-generation real vertical
+```
+
+closure evidence：
+
+```text
+doc/30-implementation/m11-qualification.md
+```
 
 ### Freeze rule
 
-从当前状态开始，M10实现阶段允许改变：
+M11 implementation允许改变：
 
 ```text
-private names/layout/data structure
-finite local queue capacity
-private detach/freeze/token representation
+private files/classes/data structures
+private domainId representation meeting invariants
+finite local queue capacities within protocol bounds
+Patch-vs-Snapshot heuristic
+internal test observation wiring
 ```
 
 不得重新讨论：
 
 ```text
-public InputListener semantics
-handler payload shape/order/async behavior
-mutation reopen/rejection ordering
-Renderer source construction/lifetime
-User Input authority/lifetime/wire/backpressure
+Render authority owner
+exact Subsystem author API / sync semantics
+business/wire/carrier lifetime
+identity rules
+validation/error model
+Registry/baseline/revision/Event semantics
+Renderer public boundary/currentness
+M11 conformance claim roles / root gate
 ```
 
-若编码遇到困难，默认按实现问题处理；只有证明 Frozen docs自身存在 correctness contradiction 才重新打开设计。
-
----
-
-## M11：Render Update v1 + RenderManager
-
-Subsystem RenderDomain/RenderManager + Renderer authoritative replica/store；fresh Data建立 Domain Registry/Snapshot baseline。
-
-```text
-Frame close != Render Domain destroy
-Data retire != authoritative Domain destroy
-```
+编码遇到困难默认按 implementation problem处理；只有证明 Frozen docs存在 correctness contradiction 才走显式治理流程重新打开设计。
 
 ---
 
 ## M12：Content
 
-Implement readonly Content capability + Desktop Content Service/adapters，并完成两个真实 consumer projection：
+Implement readonly Content capability + Desktop Content Service/adapters，并提供 Subsystem `ContentClient` 与 Renderer resource Content consumer。
 
-```text
-Subsystem
-    author-facing ContentClient mapping
-
-Renderer
-    Resource/Content client mapping
-    logical resource reference → readonly Content API
-```
-
-保持：
-
-```text
-ordinary Content capability != executable/module resolution capability
-Renderer resource lookup != Render authority
-Content credential != Frame/Render/business payload
-```
-
-Content API虽然允许 Main作为 consumer，但 Phase 1 不为对称性预先给 Main增加 Content capability；只有出现真实 Main-side use case时才按 demand-driven 原则 materialize。
-
-M12 必须为 M13 business content usage与 M14 Renderer resource presentation提供同一 logical Content semantics，不把 Renderer resource loading推迟成 M14 临时旁路。
+保持 ordinary Content capability != executable/module resolution capability；Renderer resource lookup != Render authority。
 
 ---
 
@@ -296,16 +348,13 @@ No Game/Launcher/Runtime Control/Platform imports。用真实 Input/Render/Conte
 ```text
 HostraPlatform.prepareGame
 → Main / Node Runner / Runtime Control
-→ physical RendererControlBinding
 → BrowserWindow + Renderer Control WS
 → M9 Data Broker
 → M10 Input + M11 Render + M12 Content
-→ nested Frames / Renderer reload / shutdown
+→ presentation / nested Frames / reload / shutdown
 ```
 
-M14加入真实 DOM/Gamepad `RendererInputSource`，必须复用 M10 exact source API、current-Control subscription lifetime与同一 authority/publisher semantics。
-
-M14 Renderer presentation必须消费 M12 已建立的 Renderer Content/Resource client；不得从 Render payload直接解释 physical path、absolute privileged URL 或 Content bearer。
+M14 real RendererInputSource必须复用 M10 source seam；presentation消费 M11 internal current replica + M12 Content，不反向改变 M11 Render contract。
 
 ---
 
@@ -326,7 +375,7 @@ PwaPlatform.prepareGame
 → full logical Session trace
 ```
 
-在这里完成 User Input/Data Profile 的 Hostra/PWA transport-equivalence conformance claim。
+在这里完成 User Input 与 Render Update 的 Hostra/PWA transport-equivalence conformance claims。
 
 ---
 
@@ -338,12 +387,13 @@ PwaPlatform.prepareGame
 - Frame causal/commit/unwind semantics保持 Frozen；
 - Renderer currentness/token/revision保持 M7 boundary；
 - Data authority/lifecycle保持 M8/M9 boundary；
-- M10 State/Event/Reset revision 2 + exact SDK/source semantics完整闭合；
-- M12同时提供 Subsystem author Content 与 Renderer resource Content consumer，不扩大 executable capability；
-- Data failure不升级 Runtime/Frame；
+- M10 Input exact SDK/source semantics与 fixtureSetRevision 2完整闭合；
+- M11 Render exact author surface、publication、internal replica、sender/receiver qualification完整闭合；
+- M12同时提供 Subsystem author Content 与 Renderer resource Content consumer；
+- Data/Render failure不升级 Runtime/Frame；
 - M14才宣称 Desktop full product E2E；
-- M16才宣称完整 PWA/cross-platform equivalence；
-- no generic RPC/connection/authority/input/transaction/retry/currentness framework。
+- M16才宣称完整 PWA/cross-platform transport equivalence；
+- no generic RPC/connection/authority/input/render/transaction/retry/currentness framework。
 
 ---
 
