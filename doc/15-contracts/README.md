@@ -3,17 +3,11 @@
 > 层级：正式契约索引  
 > 状态：Active Design  
 > 稳定程度：Evolving per-contract  
-> 主要定义：current 跨角色协议/Profile、Game document contract、Platform launch profiles、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 最近复核：2026-09-03
+> 主要定义：current 跨角色协议/Profile、版本绑定、兼容边界与成熟度  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 最近复核：2026-09-07
 
-契约层只保留跨角色/跨实现必须一致的可观察语义。Platform physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。
-
-```text
-Game Entry document != Main bootstrap model
-Game topology != Platform executable binding
-Runtime != Frame != Renderer Control != Data Connection != User Input != Render != Content
-```
+契约层只保留跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。
 
 ---
 
@@ -21,8 +15,8 @@ Runtime != Frame != Renderer Control != Data Connection != User Input != Render 
 
 ```text
 Game Package v1
-Hostra Game Launcher / Node Runner Profile v1
-PWA Game Launcher / Worker Runner Profile v1
+Hostra Launcher / Node Runner Profile v1
+PWA Launcher / Worker Runner Profile v1
 Subsystem Control v1
 Runtime Control Application Profile v1
 Frame / Call v1                         Active / Normative / Frozen
@@ -34,158 +28,133 @@ Render Update v1                        Active / Normative / Frozen
 Readonly Content API v1                 Active / Normative / Evolving
 ```
 
-Renderer Control v1 frozen by [ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)。
+Current User Input：
+
+```text
+protocolVersion = 1
+fixtureSetRevision = 2
+ADR 0023 + ADR 0029
+```
+
+ADR 0029 只修正 Subsystem mutation-gate期间 same-Activation `.state` 的 local retention/convergence；wire schema、authority、Renderer Effective、Data profile identity不变。
 
 ---
 
-## 2. Game / Launcher / Main Boundary
-
-Game Package只验证 logical document；Matching Launcher完成 Game+current-platform PREPARE；Main只接收：
+## 2. Bootstrap Boundary
 
 ```text
-LogicalGameBootstrap
-+
-MainPlatform narrow capability view
+Game Entry
+→ matching Platform Launcher full PREPARE
+→ Platform-private LaunchPlan
+→ LogicalGameBootstrap
+→ Main narrow capability view
 ```
 
-Main不读取 GameEntry、formatVersion、PlatformLaunchPlan、module/path/URL、Node/Worker options。
+Main不读取 Game document/formatVersion/module/path/URL/Node/Worker options。
 
 ---
 
-## 3. MainPlatform Through M7
+## 3. Runtime / Frame
 
-M7 Frozen target：
+Runtime Control owns protocol mechanics：one UTF-8 JSON text unit、one reader、one writer、strict sender IDs、finite deadlines、terminal first-wins、Response causal barrier、no retry/replay/reconnect。
 
-```text
-DeadlineScheduler
-OpaqueMaterialGenerator
-RuntimeHosting
-RendererControlBinding?   // optional physical capability
-```
-
-`OpaqueMaterialGenerator` successful output统一为 ASCII `1..128` bytes、fresh，并对安全用途提供至少 128-bit unpredictability；Main 对 Session / Runtime / Renderer 三个语义独立调用。
-
-Optionality：
-
-```text
-RendererControlBinding absent
-→ no Renderer Control attempt for that composition
-→ Runtime/Frame Session remains valid
-
-present
-→ acquire(token,signal) arms one candidate slot
-→ may remain pending without creating/showing a Renderer
-→ bound candidate receives exact Main-issued token + established carrier
-→ renderer-control peer negotiates protocol v1
-→ Main authenticates token / grants currentness
-```
-
-Binding settlement：
-
-```text
-abort before acquire resolves
-→ cancel this slot; no late live result
-
-non-abort acquire rejection
-→ Binding terminal for this Main Session
-→ Main does not arm another slot
-→ Runtime/Frame Session continues
-
-carrier acquired then protocol/peer terminal
-→ candidate attempt terminal only
-→ fresh slot may be armed if Binding remains healthy
-```
-
-Binding不认证 token、不协商 protocol version、不决定 current Renderer。
+Frame / Call v1：Main owns Frame/Stack/Activation/InputTarget；ACK-before-publication；post-commit no rollback；timeout/loss ambiguity→Runtime failure；fresh surviving Caller Activation。
 
 ---
 
-## 4. Runtime Control + Frame / Call
+## 4. Renderer Control
 
-Runtime Control owns concrete Control/Frame protocol mechanics：one UTF-8 JSON text unit、one reader/dispatcher、one writer、strict sender IDs、finite deadlines、terminal/pending first-wins、Response causal barrier、no retry/replay/reconnect。
-
-Frame / Call v1 Frozen：Main owns Frame/Stack/Activation/InputTarget；ACK-before-publication；post-commit no rollback；timeout/loss ambiguity→Runtime failure；fixed-point unwind；fresh surviving Caller Activation。
-
-Renderer Control不得反向改变这些 semantics。
-
----
-
-## 5. Renderer Control v1 — Frozen
-
-[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)：
+Renderer Control v1：
 
 ```text
-optional physical capability availability
 one current Renderer participant
-one bounded candidate slot/attempt when capability present
+optional RendererControlBinding candidate slot
 renderer.hello id=1
-renderer-control peer owns protocolVersions validation/version selection
-Main owns token authentication/currentness
-renderer.state full Snapshot
-initial AuthorityRevision=1
-pure Main authority projection
-exact hello outbound preflight before current switch
-atomic hello currentness/replacement
-Renderer initial Snapshot install before later state
-active old-peer retirement
+Main token authentication/currentness/revision
+full authority Snapshot
+atomic replacement
 0..1 inFlight + 0..1 pendingLatest
-Control/Session terminal fail-closed
-representation limits do not become Frame/Runtime business limits
+fail-closed terminal
 ```
 
-Renderer local holder只表示已接受且尚未观察 terminal 的 local Control mirror；它不是 Main remote-currentness 的独立证明。Old cached state在 replacement窗口内不得形成第二套 lease/epoch/heartbeat authority。
-
-M7 Main Snapshot：runtimes + stack/Activation + inputTarget + `dataAuthorities=[]`。
-
-No physical endpoint/token/Port/executable material enters Snapshot。
+Renderer local holder不是 Main remote-currentness proof；不增加 lease/epoch/heartbeat。
 
 ---
 
-## 6. Renderer Data / Input / Render
-
-Renderer Data Profile v1 identity：`loomrealm.renderer-data/1 = Data Connection v1 + User Input v1 + Render Update v1`。
-
-Data Connection：Session + current Renderer + subsystemKey + generation；Data loss != Runtime failure。
-
-User Input effective gate future composition：Main InputTarget ∩ current Data Connection ∩ active Frame/Activation ∩ Interest[F] ∩ Producer availability。
-
-Render Update owns independent Domain/revision/presentation replication；Frame close/Data loss不自动等于 Render Domain destroy。
-
----
-
-## 7. Unified Carrier Policy
-
-Current message-oriented application profiles统一：
+## 5. Renderer Data Profile
 
 ```text
-one carrier unit = one UTF-8 JSON text string
+loomrealm.renderer-data/1
+= Data Connection v1
++ User Input v1
++ Render Update v1
 ```
 
-Foundation treats string opaque；Wire owns generic JSON representation；protocol package owns domain validation/state mechanics。
+Data Connection identity：Session + current Renderer + subsystemKey + generation/profile。Data loss/provision failure != Runtime failure/Frame unwind。
+
+Profile application unit统一 UTF-8 JSON text string。
+
+---
+
+## 6. User Input v1
+
+Effective：
+
+```text
+current Data
+× Main InputTarget(F,A)
+× active mirrored F/A
+× Interest[F]
+× Producer(C)
+```
+
+Three lifetimes：
+
+```text
+Desired Interest = Frame scoped
+Input Lease      = Activation scoped
+Wire Publication= Data carrier scoped
+```
+
+Current revision 2 clarification：
+
+```text
+commit-sensitive mutation gate closed
+    .state → retain latest if same current F/A/C, suppress business delivery
+    .event → drop
+    reset  → clear retained/suppressed State
+
+known-no-commit + same Activation reopen
+    → local-deliver latest retained State
+    → no Event replay
+```
+
+Renderer不感知 Subsystem mutation gate。
+
+---
+
+## 7. Render Update
+
+Render Domain/revision/presentation replication与 Frame/Input lifetime独立：
+
+```text
+Frame close != Domain destroy
+Data retire != authoritative Domain destroy
+```
+
+fresh carrier通过 Registry + Snapshot重新建立 Render baseline。
 
 ---
 
 ## 8. Authority Summary
 
 ```text
-Game Package
-    Game document validation
-
-Launcher / Concrete Platform
-    Game+platform PREPARE / physical realization
-
-Platform Ports
-    narrow optional/required physical capabilities/facts
-
-Runtime Control / Renderer Control / Data profile packages
-    protocol mechanics only
-
-Main
-    Session / Runtime / Frame / Activation / InputTarget / DataAuthority
-    Runtime credential + Renderer token/currentness/revision authority
-
-Renderer
-    local read-only Main mirror + future Data/Input/Render consumers
+Game Package      document validation
+Launcher/Platform PREPARE + physical realization
+Protocol packages wire/profile mechanics
+Main              Session/Runtime/Frame/Activation/InputTarget/DataAuthority
+Subsystem         business state / Desired Input Interest / Render authoritative state
+Renderer          read-only Main mirror + Input/Render role behavior
 ```
 
 ---
@@ -193,24 +162,25 @@ Renderer
 ## 9. Current Implementation Order
 
 ```text
-M6 Hostra Runtime vertical ✅
-→ M7 Frozen Renderer Control design, implementation next
-→ M8 Data authority/binding
-→ M9 Desktop Data Broker
-→ M10/M11 Input/Render
-→ M12 Content
-→ M13 business map
-→ M14 Desktop Full E2E + Hostra physical Renderer Control
-→ M15 PWA Runtime vertical
-→ M16 PWA Renderer Control + full equivalence
+M6 Hostra Runtime          ✅
+M7 Renderer Control       ✅
+M8 Data Role/Core         ✅
+M9 Desktop Data Broker    ✅
+M10 User Input            preimplementation closed / implementation next
+M11 Render                pending
+M12 Content               pending
+M13 loom.map              pending
+M14 Desktop Full E2E      pending
+M15 PWA Runtime           pending
+M16 PWA Full E2E          pending
 ```
 
-M7 logical optional `RendererControlBinding` + deterministic MemoryCarrier qualification is distinct from M14/M16 physical Renderer transport qualification。
+M10 implementation依据：`M10_01`–`M10_05` + User Input `fixtureSetRevision=2`。
 
 ---
 
 ## 10. Freeze Governance
 
-Frozen contracts can reopen only for demonstrated correctness/security contradiction、cross-Frozen-contract conflict或 real consumer证明 Frozen capability无法表达必要语义。
+Frozen contract只有 demonstrated correctness/security contradiction、cross-contract conflict 或 real consumer capability failure 才能 reopen。
 
-不得因代码复用、generic framework、future speculation、transport preference、目录/命名对称重新设计 current-v1。
+ADR 0029 按 document-governance §7 是首次 conformant implementation前的 current-v1 correction；它不授权未来继续修改 v1，也不制造 fake v2。
