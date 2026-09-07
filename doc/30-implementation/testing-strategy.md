@@ -2,12 +2,13 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving  
-> 主要定义：protocol mechanics、role authority、Platform provisioning、M10 Input revision 2、Desktop/PWA E2E qualification  
+> 稳定程度：Evolving overall / **M10 qualification Frozen**  
+> 主要定义：protocol mechanics、role authority、Platform provisioning、M10 Input revision 2 + frozen SDK/source projection、Desktop/PWA E2E qualification  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> M10 closure：[M10 / 05](../../M10_05_QUALIFICATION_CLOSURE.md)  
 > 最近复核：2026-09-07
 
-测试目标不是“消息能通”，而是证明每层不能绕过 authority、lifecycle、failure-domain、PREPARE 与 package boundary。
+测试目标不是“消息能通”，而是证明每层不能绕过 authority、lifecycle、failure-domain、public SDK semantics、PREPARE 与 package boundary。
 
 ---
 
@@ -21,7 +22,7 @@ protocol package
     wire/profile mechanics + conformance
 
 Main / Renderer / Subsystem
-    role authority/control-flow
+    role authority/control-flow + frozen role projection
 
 Platform/Launcher/Broker
     physical hosting/provisioning/current install
@@ -70,24 +71,13 @@ M7 tests继续拥有 Renderer hello/currentness/replacement/revision。
 
 M8 tests继续拥有 role-local Data acquire/install/clear/close/currentness。
 
-M9 tests继续拥有：
-
-```text
-Main full Data authority sink
-exact HostedRuntime target
-Hostra provisioner/IPC
-Desktop paired Data WS Broker
-commit-time revalidation
-install-before-role-delivery
-no rollback/resurrection
-same-generation physical replacement
-```
+M9 tests继续拥有 Main Data authority sink、exact HostedRuntime、Hostra provisioner/IPC、Desktop paired Broker、install/revalidation/no rollback、same-generation replacement。
 
 Data failure != Runtime failure / Frame unwind。
 
 ---
 
-## 5. M10 User Input Conformance
+## 5. M10 Formal User Input Conformance
 
 Current formal fixture：
 
@@ -97,23 +87,119 @@ protocolVersion = 1
 fixtureSetRevision = 2
 ```
 
-M10必须通过全部 platform-independent Renderer/Subsystem role obligations；旧 revision 1不能作为 current closure evidence。
+M10必须通过全部 platform-independent Renderer/Subsystem protocol role obligations；旧 revision 1不能作为 current closure evidence。
 
-### Subsystem
-
-必须覆盖：
+Formal protocol tests继续验证：
 
 ```text
-listener union / close isolation / setChannels shrink-expand
-invalid author channel/union local atomic rejection
-new .state listener receives current retained baseline
-new .event listener receives no history
-fresh Data clears old retained State + republishes Interest
-Frame close local-first cleanup
-handler throw/rejected Promise contained without Data terminal
+three lifetimes
+Effective authority convergence
+State/Event/Reset
+ADR 0029 mutation-gate retention
+fresh Activation/Data
+producer loss
+barriers/backpressure
+failure taxonomy
 ```
 
-ADR 0029 trace：
+M10 SDK/source projection tests是 role/package qualification，不修改 wire version。
+
+---
+
+## 6. Exact Subsystem SDK Surface
+
+Type/build tests必须锁定：
+
+```text
+InputStateChannel / InputEventChannel / InputChannel
+InputPayload<C> exact standard mapping
+InputHandler<C>
+CreateInputListenerOptions / InputListener
+SubsystemScope.createInputListener
+standard canonical supporting author types
+```
+
+业务 fixture只 import `@loomrealm/subsystem`。
+
+Negative compile/runtime boundary要证明 handler看不到 protocol envelope/frameId/activationId/Data peer。
+
+---
+
+## 7. Listener Contribution / Registration Tests
+
+Required：
+
+```text
+channels=[] valid
+channels contribution creates Interest
+on() does not change Interest
+unsubscribe does not change Interest
+setChannels changes only this listener contribution
+setChannels preserves registrations
+removed registration dormant
+re-add reactivates same registration
+multiple listener union
+close isolation
+unsubscribe idempotent
+close idempotent
+on/setChannels after close → TypeError
+foreign Frame → TypeError
+known local closed Frame → FrameClosedError
+duplicate/invalid channels → TypeError
+hard-limit overflow → RangeError
+invalid mutation old local state unchanged / wire send zero / Data current
+```
+
+如果 contribution变化但 derived union未变，测试必须证明不发送冗余 Interest snapshot。
+
+---
+
+## 8. Retained State / Deterministic Delivery Tests
+
+Required：
+
+```text
+retained payload detached/deep-immutable
+author mutation cannot corrupt later baseline
+new active state registration gets one synchronous retained baseline
+reactivated dormant state registration gets current baseline when union stayed live
+true union removal clears retained State
+later re-add after true removal waits for fresh Renderer baseline
+event registration/reactivation has no history
+```
+
+Delivery ordering：
+
+```text
+same channel → registration order
+multi-channel local convergence → canonical ASCII channel order, then registration order
+stable matching-registration snapshot per delivery
+callback mutation affects next delivery only
+sync throw contained + later matching handlers attempted
+```
+
+---
+
+## 9. Async Handler Isolation Tests
+
+Required：
+
+```text
+handler may return Promise<void>
+returned Promise is not awaited before next handler invocation
+Promise reject contained
+never-settling Promise does not stall Data reader
+business async settlement order does not alter Input protocol ordering
+@loomrealm/data dispatch settles after synchronous InputManager application, not business Promise completion
+```
+
+不得用 generic async scheduler/framework实现测试便利。
+
+---
+
+## 10. ADR 0029 / Recoverable Call Ordering
+
+Core trace：
 
 ```text
 F/A active + retained S0
@@ -121,17 +207,23 @@ F/A active + retained S0
 → mutation gate closed
 → S1 arrives: retained, not business-delivered
 → Event arrives: dropped
-→ explicit pre-commit rejection
-→ same F/A reopens
-→ latest S1 delivered
+→ explicit pre-commit rejection received internally
+→ same F/A gate reopens
+→ current retained State handlers synchronously invoked
+→ only then frame.call Promise rejection becomes observable
+→ business catch sees synchronous State side effect already applied
 → no Event replay
 ```
 
 成功 commit 对照必须证明 suppressed old-Activation State永不进入旧 business continuation。
 
-### Renderer
+异步 Input handler Promise completion不属于 rejection ordering barrier。
 
-必须覆盖：
+---
+
+## 11. Renderer Gate / Backpressure
+
+Required：
 
 ```text
 Effective = Data × InputTarget × active F/A × Interest × Producer
@@ -140,52 +232,57 @@ fresh Activation/Data state baseline
 same-carrier Reset-before-new-input
 producer loss/return
 Control/Data replacement stale work isolation
-```
 
----
-
-## 6. M10 Ordering / Backpressure
-
-Renderer input publisher必须单独证明：
-
-```text
-State latest-pending coalescing only between barriers
+State latest-pending only between barriers
 Event never coalesces/replays
 Event = global State-coalescing barrier
 Reset = global State-coalescing barrier
 State cannot cross Event/Reset
-standard State-before-Event causality
+standard State-before-Event
 all input queues bounded
 Event overflow drops before emitted
 surviving Events keep order
 ordinary Input backlog does not overflow generic Data writer into local-fatal
-lease/Data retirement discards obsolete not-started input
 ```
 
-具体 Event queue capacity是 implementation-local test constant，不形成 protocol compatibility surface。
+具体 Event queue capacity是 implementation-local finite constant。
 
 ---
 
-## 7. M10 Producer Seam
+## 12. Exact Renderer Source Tests
 
-M10 deterministic source与未来 M14 browser source必须走同一 production seam。
+Surface：
+
+```text
+createRendererControlHolder(data?, input?)
+RendererInputSource.start(emit) → idempotent stop
+RendererInputSourceChange = availability | state | event
+```
 
 Required：
 
 ```text
-one optional source injected at holder construction
-no runtime producer registry
-source cannot choose frameId/activationId
-source cannot bypass gate/publisher/Data peer
-old holder/source cannot affect replacement
-availability loss/return semantics correct
+existing one-argument factory usage stays valid
+no source → Producer all unavailable
+source object fixed at holder construction
+no current Control → start count 0
+current Control install → exactly one active start
+Control replacement/terminal → old subscription invalidated + stopped
+late stopped-subscription emit ignored
+same holder later installs Control → same source object start again
+fresh start inherits no producer facts
+state available requires fresh current sample
+state availability=false clears cached sample
+return requires fresh sample before available=true
+source cannot choose Frame/Activation or bypass gate/Data peer
+paired source State then Event preserves causal order
 ```
 
-Fixture只控制 canonical physical facts，不直接写 User Input message或 authority state。
+M14 browser source必须通过相同 tests/surface。
 
 ---
 
-## 8. M10 Real Vertical
+## 13. M10 Real Vertical
 
 必须组合 production path：
 
@@ -196,9 +293,8 @@ real LogicalGameBootstrap
 → real M9 authority feed/Broker
 → real Hostra provisioner
 → real paired Data WS
-→ real RendererDataPeer/SubystemDataPeer
-→ Renderer gate/publisher
-→ deterministic canonical source
+→ real RendererDataPeer/SubsystemDataPeer
+→ Renderer gate/publisher/source
 → Subsystem InputManager
 → business InputListener
 ```
@@ -208,28 +304,32 @@ real LogicalGameBootstrap
 至少覆盖：
 
 ```text
+exact SDK contribution/handler behavior
 initial input
 Interest-first / Authority-first
 nested child call / fresh resume Activation
-recoverable no-commit State convergence
+recoverable no-commit State-before-rejection convergence
 committed call old-State suppression
 same-generation Data reconnect fresh baseline/no Event replay
+fresh-generation role fixture
+Control replacement + source restart/late callback isolation
 producer loss/return
-handler failure isolation
+handler sync/async isolation
 Frame close cleanup
 ```
 
-Fresh-generation Input behavior使用 role-level deterministic Data fixture；不得为测试提前扩 Main generation allocator。
+不得为测试提前扩 Main generation allocator。
 
 ---
 
-## 9. M10 Claim Boundary
+## 14. M10 Claim Boundary
 
 M10 closure wording：
 
 ```text
 User Input v1 Renderer/Subsystem role implementation
 qualified against current platform-independent fixtureSetRevision=2
+plus frozen M10 SDK/source projection semantics
 on Hostra/Desktop physical Data lifecycle
 ```
 
@@ -237,7 +337,7 @@ on Hostra/Desktop physical Data lifecycle
 
 ---
 
-## 10. M11 / M12 / M13
+## 15. M11 / M12 / M13
 
 M11 Render：fresh Data Domain Registry/Snapshot、Patch revision、Frame/Data lifetime independence。
 
@@ -247,7 +347,7 @@ M13 `loom.map`：业务 package只依赖 `@loomrealm/subsystem`，用真实 Inpu
 
 ---
 
-## 11. M14 Desktop Full E2E
+## 16. M14 Desktop Full E2E
 
 M14必须组合：
 
@@ -257,7 +357,7 @@ Main / Node Runner / Runtime Control
 physical Renderer Control WebSocket
 BrowserWindow
 M9 Data Broker
-M10 real DOM/Gamepad source via same input seam
+M10 real DOM/Gamepad RendererInputSource via exact frozen seam
 M11 Render
 M12 Content
 business nested Frames / reload / shutdown
@@ -267,23 +367,15 @@ BrowserWindow tests不得重做 Input authority或绕过 M10 publisher。
 
 ---
 
-## 12. M16 Cross-platform Equivalence
+## 17. M16 Cross-platform Equivalence
 
-PWA完成 Worker/Window/MessagePort/Broker/Content后，比较 normalized logical/application traces：
-
-```text
-same Game logical topology
-same Frame/Input/Render/Content scenario
-same protocol/application observable outcome
-```
-
-不比较 PID/Worker/WS/Port/IPC physical identity。
+PWA完成 Worker/Window/MessagePort/Broker/Content后，比较 normalized logical/application traces。
 
 这里才完成 User Input + Renderer Data Profile 的 Hostra/PWA transport-equivalence claim。
 
 ---
 
-## 13. Root Gates
+## 18. Root Gates
 
 Current：
 
@@ -307,8 +399,9 @@ npm run test:m10
 ```text
 M9 dependencies/build
 User Input fixtureSetRevision=2
-Subsystem InputManager tests
-Renderer gate/publisher/source tests
+Subsystem SDK type/surface tests
+Subsystem InputManager lifecycle/order/async tests
+Renderer gate/publisher/source lifecycle tests
 real M10 vertical
 ```
 
@@ -316,14 +409,16 @@ real M10 vertical
 
 ---
 
-## 14. Final Test Invariants
+## 19. Final Test Invariants
 
 1. tests不能通过 bypass authority来“证明”功能；
-2. protocol mechanics与 role authority测试分离；
-3. M9 physical Data lifecycle不冒充 M10/M11 business baseline；
-4. M10 revision 2必须证明 same-Activation State convergence与 Event non-replay；
-5. handler/author usage错误不升级 Data/Runtime failure；
-6. Input backpressure在 role-local publisher处理，不依赖 generic Data writer failure；
-7. M14才宣称 Desktop full E2E；
-8. M16才宣称 full cross-platform equivalence；
-9. no generic RPC/authority/event/input/connection/transaction/retry framework for test convenience。
+2. protocol mechanics与 role projection/authority测试分离；
+3. M9 physical Data lifecycle不冒充 M10 business baseline；
+4. M10 revision 2证明 same-Activation State convergence与 Event non-replay；
+5. exact SDK handler/Interest/lifecycle semantics有独立 evidence；
+6. async handler不成为 Data flow-control dependency；
+7. source currentness跟 current Control subscription，不复用 stale producer facts；
+8. Input backpressure在 role-local publisher处理，不依赖 generic Data writer failure；
+9. M14才宣称 Desktop full E2E；
+10. M16才宣称 full cross-platform equivalence；
+11. no generic RPC/authority/event/input/connection/transaction/retry framework for test convenience。
