@@ -5,36 +5,45 @@
 > 落地顺序：01  
 > 最近复核：2026-09-07  
 > 正式协议：[User Input v1](doc/15-contracts/user-input-v1.md)  
-> 组合协议：[Renderer Data Profile v1](doc/15-contracts/renderer-data-profile-v1.md)  
+> 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > Author boundary：[packages/subsystem/DESIGN.md](packages/subsystem/DESIGN.md)  
-> 目标：在现有 M4 Frame Runtime + M8 Data peer 之上实现最小 `InputListener` / InputManager；不把 Activation、Data generation、wire message 或 carrier 暴露给业务。
+> 目标：在现有 M4 Frame Runtime + M8 Data peer 上实现唯一 role-local `InputManager`；只暴露业务 listener，不复制 Frame authority、Data lifecycle 或 wire mechanics。
 
-> **InputManager 只拥有 Subsystem-local desired Interest、listener lifecycle、retained input state 与 receive gate。Main 仍拥有 InputTarget；`@loomrealm/data` 仍拥有 User Input wire mechanics。**
+> **InputManager 拥有 desired Interest、listener lifecycle、retained State 与 local delivery；FrameRuntime 仍是 local Frame/Activation/mutation-gate 唯一事实源，`@loomrealm/data` 仍拥有 wire validation/serialization。**
 
 ---
 
-## 1. Position
+## 1. Construction / Position
+
+每个 Subsystem instance exactly one InputManager：
 
 ```text
-business Frame
-→ InputListener contribution
-→ InputManager DesiredRegistry
-→ current SubsystemDataPeer
-→ input.interest full snapshot
-
-current SubsystemDataPeer
-→ input.state / input.event / input.reset
-→ InputManager receive gate
-→ business listener
+SubsystemHost
+├── FrameRuntime          // local Frame/Activation/mutation gate source
+├── InputManager          // one instance
+└── current Data peer     // M8 lifecycle
 ```
 
-M10 不创建第二条 Data reader，不改变 M8 Data peer lifecycle。
+固定 wiring：
+
+```text
+scope.createInputListener(...)
+→ same InputManager
+
+FrameRuntime lifecycle transition
+→ direct same-package InputManager cleanup/reopen hook or query
+
+current SubsystemDataPeer
+↔ same InputManager
+```
+
+不得建立 Frame shadow registry、EventBus、service locator 或第二条 Data reader。
 
 ---
 
-## 2. Frozen Author Surface
+## 2. Author Surface
 
-沿用现有 Subsystem target surface：
+沿用既有 target surface：
 
 ```ts
 interface CreateInputListenerOptions {
@@ -58,106 +67,189 @@ input.interest/state/event/reset
 RendererDataPeer / MessageCarrier
 ```
 
-不得增加 Input service locator、subscription framework、EventBus 或 generic observable API。
+---
+
+## 3. Local Author Validation
+
+`createInputListener` / `setChannels` 在改变任何 local state 前必须验证：
+
+```text
+channel grammar/suffix
+no duplicate contribution
+resulting Frame union <= 64 channels
+resulting Registry <= 128 Frames / 4096 pairs
+```
+
+失败：
+
+```text
+local usage error
+→ old listener contribution unchanged
+→ old DesiredRegistry unchanged
+→ wire send = 0
+→ current Data peer unaffected
+```
+
+这是 author representability validation，不建立第二套 inbound wire/schema validator。
 
 ---
 
-## 3. Desired Interest
+## 4. Desired Interest
 
-每个 listener 贡献自己的 channel set；InputManager 只派生一个：
+每个 listener 保存自己的 channel contribution；InputManager 只派生：
 
 ```text
-Map<frameId, Set<channel>>
+DesiredRegistry = Map<frameId, Set<channel>>
 ```
 
-同一 Frame 多 listener 取 union。
+同一 Frame 多 listener取 union。
 
-`setChannels()` / `close()` 顺序固定：
+`setChannels()` / `close()`：
 
 ```text
-update local contribution
-→ recompute affected Frame union
-→ local receive gate立即生效
+validate candidate
+→ atomically commit local contribution
+→ recompute affected union
+→ local receive/delivery eligibility立即反映新值
 → queue latest full input.interest snapshot
 ```
 
-Wire publication始终是 full Registry，不做 incremental subscribe/unsubscribe。
+Wire 始终 full replacement，不做 incremental subscribe/unsubscribe。
+
+Interest publisher只需要：
+
+```text
+0..1 inFlight send
+0..1 pendingLatest full Registry
+```
+
+fresh Data peer丢弃旧 publisher state，并从 current DesiredRegistry重新 publication；不 retry/replay old send。
 
 ---
 
-## 4. Frame / Activation Lifecycle
+## 5. Retained State / Listener Baseline
 
-Child-call suspension：
+InputManager 对 current `(F,A,C.state)` 保存最新 author-safe immutable State snapshot。
 
-```text
-F/A1 active
-→ child call accepted
-→ A1 revoked / F suspended
-→ listener + Desired Interest remain
-→ ordinary input stops
-→ F resumes with fresh A2
-→ same listener config reused
-```
-
-A1 retained State/Event不得进入 A2。
-
-Frame close前本地必须已经：
+当一个 listener 首次 locally eligible 且该 channel已有 current retained State：
 
 ```text
-close listeners bound to F
-remove Interest[F]
-clear retained state for F
+install listener/config first
+→ deliver exactly one latest retained State to that listener
 ```
 
-wire cleanup可以随后 coalesce/send；本地正确性不依赖远端先收到 Registry 更新。
+无需为了新增本地 listener制造 Interest shrink/expand，也不要求 Renderer重发 baseline。
+
+`.event` listener永远 future-only，不做 local replay。
+
+Interest union真正移除一个 `.state` channel时立即清该 channel retained State；移除整个 Frame entry时清该 Frame retained State。
 
 ---
 
-## 5. Fresh Data Peer
+## 6. Receive: Retention Gate vs Business Gate
 
-Data peer loss/replace不销毁业务 listener 或 DesiredRegistry。
-
-每个 fresh current Data peer：
-
-```text
-remote Interest Registry assumed empty
-→ publish current full DesiredRegistry
-→ receive fresh State baselines
-→ Event remains future-only
-```
-
-不得迁移旧 carrier 的 unsent queue、retained remote state 或 Event history。
-
----
-
-## 6. Receive Gate
-
-well-formed State/Event 交给业务前必须重新验证：
+well-formed `.state(F,A,C)` 先检查 retention eligibility：
 
 ```text
 message from current Data peer
 ∧ local Frame exists
-∧ Frame active
 ∧ activationId == current local Activation
-∧ channel ∈ Desired Interest[F]
-∧ Frame mutation gate open
+∧ C ∈ DesiredRegistry[F]
 ```
 
 不满足 → drop。
 
+满足时：
+
 ```text
-stale authority/data
-!= protocol fatal
-!= Runtime failure
+retain latest immutable State
 ```
 
-Malformed/invalid User Input message仍由 `@loomrealm/data` 按 Frozen profile 处理；InputManager 不写第二套 schema validator。
+随后只有：
 
-`input.reset(F,A)` 只清 current `(F,A)` retained State；stale Reset drop。
+```text
+Frame active
+∧ ordinary mutation gate open
+```
+
+才交给 business listeners。
+
+因此 commit-sensitive mutation pending 时：
+
+```text
+State → retain latest, suppress delivery
+Event → drop
+Reset(current F/A) → clear retained/suppressed State
+```
+
+这不改变 Renderer Effective，也不增加 cross-plane signal。
 
 ---
 
-## 7. Implementation Budget
+## 7. Mutation Reopen / Activation Boundary
+
+只有明确 known-no-commit 且 same Activation 恢复 ordinary mutation 时：
+
+```text
+mutation gate reopens on same F/A
+→ deliver at most one latest retained State per still-interested .state channel
+→ no Event replay
+```
+
+如果 mutation commit / Activation revoke / administrative suspend / Frame close / Runtime terminal：
+
+```text
+old/suppressed Activation State discarded
+```
+
+Child-call正常成功：listener + Desired Interest可跨 suspension保留，但 A1 State/Event 不跨到 fresh A2；A2 等待 fresh Renderer baseline。
+
+---
+
+## 8. Data / Frame Cleanup
+
+Fresh Data peer：
+
+```text
+clear all old-carrier retained State
+DesiredRegistry/listeners remain
+remote Registry assumed empty
+→ republish current full DesiredRegistry
+→ fresh .state baseline
+→ Event future-only
+```
+
+Frame close protocol success成立前，本地必须已经：
+
+```text
+close listeners bound to F
+remove DesiredRegistry[F]
+clear retained/suppressed State for F
+```
+
+wire Interest cleanup可以随后 coalesce/send；本地正确性不依赖远端先观察。
+
+Runtime terminal最终清全部 listener/Interest/retained State。
+
+---
+
+## 9. Handler Isolation
+
+一个 accepted input delivery使用当前匹配 listener集合；单个 handler throw 或 returned Promise reject：
+
+```text
+contained by InputManager
+→ does not escape @loomrealm/data handler
+→ does not retire Data
+→ does not modify Frame/Runtime authority
+→ does not prevent other matching listeners from being attempted
+```
+
+M10 不建立 diagnostics/event framework。
+
+---
+
+## 10. Implementation Budget
 
 允许：
 
@@ -165,37 +257,39 @@ Malformed/invalid User Input message仍由 `@loomrealm/data` 按 Frozen profile 
 one InputManager per Subsystem instance
 per-listener contribution records
 one derived DesiredRegistry
-minimal retained State keyed by current Frame/Activation/channel
-latest full-registry publication scheduling
+minimal immutable retained State
+one latest-only Interest publisher
+small direct FrameRuntime integration hooks/queries
 ```
 
 禁止：
 
 ```text
-InputStore framework
-GenericSubscription / EventBus
-InputTarget shadow authority
-Activation allocator
+InputStore / GenericSubscription / EventBus
+InputTarget/Frame/Activation shadow authority
 second Data reader/writer
+cross-plane ACK/revision/barrier
 retry/replay/history
 platform event objects in author API
 ```
 
 ---
 
-## 8. Done
+## 11. Done
 
-M10/01 完成必须证明：
+M10/01 必须证明：
 
 ```text
-multiple listener union
-setChannels shrink/expand
-listener close isolation
-child-call suspend/resume preserves config but not old lease state
+local invalid configuration rejects atomically without Data failure
+multiple listener union / close isolation / shrink-expand
+new state listener receives current retained local baseline
+new event listener receives no historical Event
+pending mutation retains State but suppresses delivery
+recoverable no-commit same-Activation reopen delivers latest State
+committed mutation never leaks suppressed old-Activation State
+handler failure does not retire Data
 Frame close local-first cleanup
-fresh Data peer full Interest republish
-stale State/Event/Reset drop
-business handler cannot receive input while Frame mutation gate closed
+fresh Data peer clears State + republishes Interest
 ```
 
 下一步：[M10 / 02 — Renderer Input Gate](M10_02_RENDERER_INPUT_GATE.md)。
