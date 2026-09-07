@@ -136,7 +136,7 @@ M9只证明 physical Data lifecycle；fresh Input/Render business baseline属于
 
 ---
 
-## M10：User Input v1 + InputManager — **Implemented / Qualified**
+## M10：User Input v1 + InputManager — **Implemented / Regression Verified / Formal Qualification Pending**
 
 Current facts：
 
@@ -187,7 +187,7 @@ one construction-time RendererInputSource object
 fresh source facts after Control replacement/reconnect
 ```
 
-### Qualification
+### Implementation verification and formal qualification
 
 Real M9 Desktop Data vertical必须证明：
 
@@ -207,17 +207,17 @@ handler/local author error isolation
 barrier/backpressure rules
 ```
 
-fresh-generation语义用 role-level deterministic fixture证明，不为测试提前加入 Main generation allocator。
+fresh-generation语义的 implementation regression 使用 role-level deterministic fixture证明，不为测试提前加入 Main generation allocator。
 
-M10只声明 current platform-independent User Input role semantics + frozen SDK/source projection在 Hostra/Desktop Data lifecycle上 qualified；完整 Hostra/PWA transport equivalence留到 M16。
+当前只声明 User Input implementation、frozen SDK/source projection与 Hostra/Desktop vertical 的 regression obligations 已验证。完整 platform-independent fixtureSetRevision=2 role qualification 仍待逐 fixture 的可执行证据；Hostra/PWA transport equivalence留到 M16。
 
-Implementation qualification gate：
+Implementation regression gate：
 
 ```text
 npm run test:m10
 ```
 
-该 gate已落地并通过；不得以更窄的 package-only test替代 closure gate。
+该 gate已落地并通过；不得以更窄的 package-only test替代 implementation regression gate，也不得把该结果表述为 formal fixtureSetRevision=2 qualification 已完成。
 
 ### Freeze rule
 
