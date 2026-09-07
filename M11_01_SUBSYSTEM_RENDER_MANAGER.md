@@ -41,8 +41,9 @@ RenderDomain
 Exact shape：
 
 ```ts
-// implementation MAY type-alias the matching @loomrealm/data declarations;
-// business source still imports only @loomrealm/subsystem.
+// implementation-private declaration dependency; not a root re-export
+import type { RenderEventV1, RenderNodeV1 } from "@loomrealm/data";
+
 export type RenderNode = RenderNodeV1;
 
 export interface RenderDomainState {
