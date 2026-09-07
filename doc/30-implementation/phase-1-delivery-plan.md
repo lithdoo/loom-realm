@@ -2,10 +2,11 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving overall / **M10 Closed / M11 Implementation Frozen**  
+> 稳定程度：Evolving overall / **M10 Closed / M11 Implemented / Qualification Reopened**  
 > 主要定义：M0..M16 实现顺序、当前 closure、Desktop/PWA qualification 边界  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)  
 > 当前 Input 决策：[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 当前 M11 评审：[M11 Render 最终闭环评审结论](./m11-final-closure-review.md)  
 > 最近复核：2026-09-07
 
 核心顺序：
@@ -243,7 +244,7 @@ User Input authority/lifetime/wire/backpressure
 
 ---
 
-## M11：Render Update v1 + RenderManager — **Implemented / Qualified / Closed**
+## M11：Render Update v1 + RenderManager — **Implemented / Qualification Reopened / Pending**
 
 Current facts：
 
@@ -251,8 +252,21 @@ Current facts：
 Render Update protocolVersion = 1
 Conformance fixtureSetRevision = 1
 M10 = Implemented / Qualified / Closed
+M11 production architecture = implemented
 M11 root gate = npm run test:m11
-M11 qualification = 202 fixtures / 266 sender+receiver role records
+M11 final closure review = doc/30-implementation/m11-final-closure-review.md
+```
+
+2026-09-07 最终复核不重新打开 Render authority/lifetime/protocol design；只重新打开 production representation validation 与 formal qualification evidence。历史 `202 fixtures / 266 role records` 不再构成 current closure evidence。
+
+修复后的 source-derived audit target：
+
+```text
+unique fixtures       = 203
+subsystem-sender      = 82
+renderer-receiver     = 185
+role evidence pairs   = 267
+transport             = 0
 ```
 
 Root implementation plans：
@@ -303,6 +317,8 @@ Frame/Data do not own business Domain lifetime
 
 不新增 public RenderManager、Render-specific error hierarchy、Frame→Domain registry或 business-key→wire-key translation layer。
 
+最终 correction 只允许在现有 author validation 中补齐 generic JSON Unicode-scalar representation guard；不得把 author API 绑定到 Data codec result或新增 public validator。
+
 ### Publication slice
 
 ```text
@@ -343,6 +359,19 @@ never replay across carrier
 ```
 
 第一版允许保守 Snapshot fallback；Patch-vs-Snapshot heuristic是 private optimization。无 ACK/NACK/resync/retry/history。
+
+### Data Render validation correction
+
+Frozen representation/schema/static-limit invalidity必须在 Renderer semantic handler前 fail-closed。`@loomrealm/data` 只在现有 private Render codec 内补齐：
+
+```text
+generic Render JSON object key UTF-8 bound
+all JSON string Unicode-scalar validity
+Render Event data representation
+Patch attrs/data Delta frozen static limits
+```
+
+不得新增 public Data validator surface、schema framework或第二 parser。
 
 ### Renderer slice
 
@@ -405,7 +434,7 @@ fresh-generation语义由 sender/receiver deterministic fixtures证明；不得�
 
 ### Formal qualification / root gate
 
-M11只声明：
+M11最终只声明：
 
 ```text
 LoomRealm Render Update v1 Subsystem Sender Conformant
@@ -414,21 +443,30 @@ LoomRealm Render Update v1 Renderer Receiver Conformant
 
 `transport` role（含 Hostra/PWA application-trace equivalence）留 M16。
 
-Qualification runner直接从 Frozen `render-update-conformance-v1.md` 的 M11 application-role Required fixture code blocks（§§5–20）建立 current normative catalog；§21 transport不进入 M11 catalog。不得维护第二份手写 fixture-name清单。
+Qualification runner继续直接从 Frozen `render-update-conformance-v1.md` §§5–20 Required blocks派生 catalog；§21 transport不进入 M11 catalog。Parser必须 fail-closed，不得 silent-filter normative line，不维护第二份 fixture-name清单。
 
-每个 normative fixture 必须显式绑定 assertion callback 与至少一个 claimed role；只有 callback真正成功后才记录：
+Formal evidence identity固定为：
 
 ```text
-protocol = loomrealm.render-update
-protocolVersion = 1
-fixtureSetRevision = 1
-role = subsystem-sender | renderer-receiver
-group
-fixture
-result = pass
+(protocol, protocolVersion, fixtureSetRevision, role, group, fixture)
 ```
 
-Final audit拒绝 missing / unknown / duplicate / unexecuted / non-pass fixture/evidence，也拒绝 M11 claim 中出现 transport role evidence。
+每个 `(role, fixture)` 必须执行与该 role production seam对应的判别性 assertion；一个 fixture pass不得 fan-out 为多个 role pass。
+
+Final audit固定验证：
+
+```text
+expected role×fixture pairs
+== registered
+== executed
+== passed
+
+no missing / unknown / duplicate / unexecuted
+no automatic role fan-out
+no transport evidence
+```
+
+Frozen Conformance §4 的全部 hard limits使用一个 M11-specific table-driven matrix证明 exact-at ACCEPT、one-over REJECT/inbound retirement、UTF-8 multibyte boundary；该 matrix不得演化为 generic test framework。
 
 唯一 M11 closure gate：
 
@@ -436,25 +474,30 @@ Final audit拒绝 missing / unknown / duplicate / unexecuted / non-pass fixture/
 npm run test:m11
 = npm run test:m10
 + Subsystem author/lifecycle/public-boundary tests
-+ subsystem-sender fixtureSetRevision 1 qualification + audit
-+ renderer-receiver fixtureSetRevision 1 qualification + audit
++ production Render validation regressions
++ subsystem-sender fixtureSetRevision 1 role-specific qualification + audit
++ renderer-receiver fixtureSetRevision 1 role-specific qualification + audit
++ Frozen §4 hard-limit matrix
 + Renderer replica/package tests
 + Desktop/Hostra same-generation real vertical
 ```
 
-Closure evidence：`doc/30-implementation/m11-qualification.md`。
+Node 20 + Node 24 必须运行同一个 root gate。Closure evidence重新生成到 `doc/30-implementation/m11-qualification.md`。
 
 ### Freeze rule
 
-M11 implementation允许改变：
+M11 correction允许改变：
 
 ```text
 private class/function/file names
+private validation helpers inside existing Data/Subsystem responsibilities
 private Map/tree/index representation
 private domainId representation meeting frozen invariants
 finite local queue capacities within protocol bounds
 Patch-vs-Snapshot heuristic
 internal test observation wiring
+role×fixture evidence tables
+M11-specific hard-limit data generators
 ```
 
 不得重新讨论：
@@ -470,7 +513,9 @@ Renderer public boundary/currentness
 M11 claimed conformance roles / qualification root gate
 ```
 
-编码遇到困难默认按 implementation problem处理；只有证明 Frozen Render v1 或 M11 plan存在 correctness contradiction，才按显式治理流程重新打开设计。
+不得引入 generic validator/conformance/schema/replication framework。完整且固定的 correction checklist见 [M11 Render 最终闭环评审结论](./m11-final-closure-review.md)。
+
+M11 未恢复 `Qualified / Closed` 前不进入 M12 implementation closure。
 
 ---
 
@@ -559,12 +604,12 @@ PwaPlatform.prepareGame
 - Renderer currentness/token/revision保持 M7 boundary；
 - Data authority/lifecycle保持 M8/M9 boundary；
 - M10 State/Event/Reset revision 2 + exact SDK/source semantics完整闭合；
-- M11 exact author surface、publication、internal Renderer replica、sender/receiver fixtureSetRevision 1 qualification完整闭合；
+- M11 exact author surface、publication、internal Renderer replica保持 Frozen，且 production Render representation validation、203-fixture/267-role evidence、hard-limit matrix与 sender/receiver fixtureSetRevision 1 qualification完整闭合；
 - M12同时提供 Subsystem author Content 与 Renderer resource Content consumer，不扩大 executable capability；
 - Data/Render failure不升级 Runtime/Frame；
 - M14才宣称 Desktop full product E2E；
 - M16才宣称完整 PWA/cross-platform transport equivalence；
-- no generic RPC/connection/authority/input/render/transaction/retry/currentness framework。
+- no generic RPC/connection/authority/input/render/transaction/retry/currentness/conformance framework。
 
 ---
 

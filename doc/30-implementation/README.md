@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：current 分包、测试、delivery milestone 与 implementation fact-source 入口  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
-> 最近复核：2026-09-04
+> 最近复核：2026-09-07
 
 实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。精确 milestone closure 由 `phase-1-delivery-plan.md` 与对应 Frozen M/ADR 文档定义。
 
@@ -16,7 +16,8 @@
 - [独立分包与发布架构](./package-architecture.md) — package/publish/dependency boundary；
 - [仓库与目录方案](./repository-layout.md) — monorepo、Runner、provisioning 与 app placement；
 - [测试策略](./testing-strategy.md) — package、role、vertical、cross-platform qualification；
-- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 顺序/closure 摘要。
+- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 顺序/closure 摘要；
+- [M11 Render 最终闭环评审结论](./m11-final-closure-review.md) — production validation + role-specific qualification reclosure 的唯一当前评审结论。
 
 ---
 
@@ -62,10 +63,10 @@ M7  Renderer Control                          ✅ Qualified 2026-09-03
 M8  Data logical authority / role integration ✅ Qualified 2026-09-04
 M9  Desktop Data Broker / late provisioning   ✅ Qualified 2026-09-04
 M10 User Input                                 ✅ Qualified 2026-09-07
-M11 Render                                     ✅ Qualified 2026-09-07
+M11 Render                                     ⚠️ Implemented / Qualification Pending
 ```
 
-Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md) · [m11-qualification.md](./m11-qualification.md)。
+Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md) · [m11-qualification.md](./m11-qualification.md)。M11 current closure标准见 [m11-final-closure-review.md](./m11-final-closure-review.md)。
 
 ---
 
@@ -204,7 +205,8 @@ M10
     User Input fresh business publication baseline
 
 M11
-    Render fresh business publication baseline
+    Render production implementation complete
+    final qualification reclosure = representation validation + exact role×fixture evidence
 
 M14/M16
     full physical product/platform equivalence
@@ -227,8 +229,10 @@ M1–M8 ✅
 ↓
 M9 Desktop Data Broker / Late Provisioning   ✅ qualified 2026-09-04
 ↓
-M10 User Input
-M11 Render                                      ✅ qualified 2026-09-07
+M10 User Input                               ✅ qualified / closed
+↓
+M11 Render                                   ⚠️ implemented / qualification pending
+↓
 M12 Content
 M13 loom.map
 M14 Desktop Full E2E
@@ -236,11 +240,13 @@ M15 PWA Runtime vertical
 M16 PWA Full E2E / equivalence
 ```
 
+M11 未按 [final closure review](./m11-final-closure-review.md) 恢复 `Qualified / Closed` 前，不进入 M12 implementation closure。
+
 ---
 
 ## Implementation Governance
 
-Forbidden for M9 coding：
+Forbidden for current coding：
 
 ```text
 AuthorityEventBus / ObserverHub
@@ -251,6 +257,7 @@ retry/backoff framework
 second Renderer currentness lease/epoch
 Data application hello/ready/resume messages
 PWA abstraction solely for symmetry
+Generic Render/Conformance/Schema framework
 ```
 
-Frozen changes follow ADR 0028 reopen rules。After implementation/qualification, add `m9-qualification.md` and update status/navigation; qualification evidence must not redefine the architecture。
+Frozen changes follow对应 ADR/root plan reopen rules。M11 本轮只允许 implementation correctness 与 qualification evidence correction；不得借修复重新设计 authority/lifetime/public API。

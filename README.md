@@ -23,6 +23,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [Render Update v1](./doc/15-contracts/render-update-v1.md)
 - [Render Update v1 Conformance — fixtureSetRevision 1](./doc/15-contracts/render-update-conformance-v1.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
+- [M11 Render 最终闭环评审结论](./doc/30-implementation/m11-final-closure-review.md)
 - [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
 ### M10 implementation and qualification — Complete
@@ -34,13 +35,14 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 - [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
-### M11 implementation and qualification — Complete
+### M11 implementation — Complete / qualification reopened
 
 - [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 - [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
 - [M11 / 03 — Renderer Render Store](./M11_03_RENDERER_STORE.md)
 - [M11 / 04 — Render Vertical Integration](./M11_04_VERTICAL_INTEGRATION.md)
 - [M11 / 05 — Qualification and Closure](./M11_05_QUALIFICATION_CLOSURE.md)
+- [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)
 - [M11 qualification record](./doc/30-implementation/m11-qualification.md)
 
 历史 M7/M8/M9 root plans继续保留作为已完成 milestone implementation provenance。
@@ -204,7 +206,9 @@ business Node key one-shot within one business RenderDomain lifetime
 
 Publication复用 existing `SubsystemDataPeer.render`；same-generation reconnect保留 emitted identity history并以 fresh Registry/Snapshot重建 carrier baseline。Renderer Store挂在 existing Data slot，internal-only；M11不新增 public Renderer Render/subscription API。
 
-M11 qualification只 claim `subsystem-sender` + `renderer-receiver`；包含 Hostra/PWA trace equivalence 的 `transport` role 留 M16。
+M11 qualification仍只 claim `subsystem-sender` + `renderer-receiver`；包含 Hostra/PWA trace equivalence 的 `transport` role 留 M16。
+
+2026-09-07 最终复核不改变上述 Frozen architecture，但重新打开 formal qualification：必须补齐 production Render representation validation，并按 `(role, fixture)` 建立 exact executable evidence；完整方案与固定 closure checklist见 [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)。
 
 ---
 
@@ -221,7 +225,7 @@ M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
-M11 Render                            ✅ Qualified / Closed
+M11 Render                            ⚠️ Implemented / Qualification Pending
 M12 Content                           pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
@@ -231,7 +235,7 @@ M16 PWA full E2E/equivalence          pending
 
 M10 不实现 BrowserWindow/DOM physical composition；真实 Browser `RendererInputSource` 属于 M14，并必须复用 frozen M10 source API/lifetime。
 
-M11 已按冻结设计完成 Subsystem business authority、bounded publication、Renderer internal replica、Desktop/Hostra vertical 与 sender/receiver qualification。DOM/physical presentation 仍不属于 M11。
+M11 已实现 Subsystem business authority、bounded publication、Renderer internal replica 与 Desktop/Hostra vertical；最终 qualification correction不引入新的 Render authority/public API。DOM/physical presentation仍不属于 M11。
 
 ---
 
@@ -289,4 +293,4 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Latest qualified implementation gate：**M11**。运行 `npm run test:m11` 可复验完整 M10 regression、Render Update fixtureSetRevision 1 sender/receiver qualification、Subsystem/Renderer package semantics与真实 Desktop/Hostra Render vertical；语义与证据见 [M11 / 05](./M11_05_QUALIFICATION_CLOSURE.md) 和 [M11 qualification](./doc/30-implementation/m11-qualification.md)。
+Current closed implementation gate仍是 **M10**。M11 production implementation已完成，但 qualification按最终评审重新打开；完成 [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md) 的固定 checklist 后，以 `npm run test:m11` 在 Node 20/24 重新生成 current evidence并恢复 Closed claim。
