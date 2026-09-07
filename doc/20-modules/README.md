@@ -3,12 +3,10 @@
 > 层级：模块设计  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：logical roles/modules、Game/Platform launch boundary、Runner/role-facing Platform capabilities、Renderer Control/Data 与 Desktop/PWA realization 入口  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)  
-> 实施映射：[独立分包与发布架构](../30-implementation/package-architecture.md)  
-> 最近复核：2026-09-03
-
-模块层描述运行职责/拓扑，不等于 npm package 清单。
+> 主要定义：logical roles/modules、Runner/role-facing capabilities、Renderer/Data/Input/Render 与 Desktop/PWA realization 入口  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
+> 最近复核：2026-09-07
 
 ```text
 module boundary != npm package boundary != protocol boundary != platform boundary
@@ -18,387 +16,214 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 
 ## 1. Module Map
 
-| 系统/模块 | 入口 | 说明 |
+| 模块 | 入口 | Current responsibility |
 |---|---|---|
-| Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/DataAuthority/current Renderer authority、transaction/unwind；只发 logical Runtime/Renderer authority facts |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main Control mirror、RendererDataBinding、Input/Render replica/presentation |
-| Game Package | [game-package](./game-package/README.md) | `{key}` logical topology、initial input、common validation |
-| FSDB Content Service | [fsdb-content-service](./fsdb-content-service/README.md) | Desktop/PWA readonly Content API implementation |
-| `loom.map` | [loom-map](./loom-map/README.md) | 普通 platform-neutral Subsystem Definition consumer |
-| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra manifest/plan、Node Runner、WS、Runner provisioning IPC、Data Broker、HTTP/fs |
-| PWA | [pwa-host](./pwa-host/README.md) | PWA manifest/plan、Worker Runner、MessagePort、Worker provisioning、Data Broker、SW/OPFS |
+| Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 Input gate/publisher/source placement |
+| Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
+| FSDB Content | [fsdb-content-service](./fsdb-content-service/README.md) | readonly Content implementation |
+| `loom.map` | [loom-map](./loom-map/README.md) | ordinary platform-neutral Subsystem consumer |
+| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra Launcher/Runner/WS/Data Broker/Content composition |
+| PWA | [pwa-host](./pwa-host/README.md) | PWA Launcher/Worker/MessagePort/Broker/Content composition |
 
-Desktop/PWA 是同一 Platform Composition Architecture 的两个 realization，不是两套 application model。
-
----
-
-## 2. Game / Platform Launch Boundary
-
-```text
-Game Entry
-    {key...} + initial target/input
-        │
-        ├──► Main logical topology
-        │
-        └──► Current Platform Launch Planner
-                + launch.hostra.json / launch.pwa.json
-                → exact key-set join
-                → resolve all executable bindings
-                → hosting/security preflight
-                → immutable PlatformLaunchPlan
-```
-
-Game Package不拥有 `module`；Main也不接触 module/path/URL。
-
-Launcher profile/package拥有 executable binding，但不因此获得 Frame/Data/Renderer/Content application authority。
+Desktop/PWA 是同一 application architecture 的不同 physical realization。
 
 ---
 
-## 3. Definition Module / Runner
-
-业务 artifact：
+## 2. Launch / Runner Boundary
 
 ```text
-Subsystem Definition Module
-    .mjs
-    default export SubsystemDefinitionFactory
+Game Entry logical topology
+→ current Platform Launcher
+→ platform manifest exact join + preflight
+→ immutable PlatformLaunchPlan
+→ Host-owned Runner
+→ selected Subsystem Definition Module
+→ @loomrealm/subsystem/host
 ```
 
-Platform artifact：
-
-```text
-Host-owned Subsystem Runner
-    → lookup frozen PlatformLaunchPlan binding
-    → load exact selected Definition Module
-    → construct role-local ports
-    → run @loomrealm/subsystem/host
-```
-
-```text
-Hostra → Node Runner
-PWA    → Worker Runner
-```
-
-Definition Module != Runtime process/Worker entry policy。
-
-Hostra/PWA MAY选择不同 artifact；相同 ABI/formal semantics/business-observable result才是 requirement。
+Game Package/Main不拥有 executable path；Launcher/Runner physical ownership不产生 Frame/Data/Input/Render authority。
 
 ---
 
-## 4. Role / Platform Capabilities
-
-Role-facing capability只随真实 consumer冻结；下面不是 universal `Platform` interface。
+## 3. Role-facing Capabilities
 
 ```text
-Platform Composition
-├── Main-facing
-│   ├── DeadlineScheduler
-│   ├── OpaqueMaterialGenerator
-│   ├── RuntimeHosting
-│   └── RendererControlBinding?       // M7 Frozen optional capability
-│
-├── Renderer-facing (current/future)
-│   ├── RendererDataBinding           // M8+
-│   ├── ContentClient                 // M12+
-│   └── presentation/input environment
-│
-└── Subsystem-facing
-    ├── RuntimeControlBinding
-    ├── SubsystemDataBinding          // M8+
-    └── ContentClient                 // M12+
+Main-facing
+    DeadlineScheduler
+    OpaqueMaterialGenerator
+    RuntimeHosting
+    RendererControlBinding?
+    DataConnectionAuthoritySink?
+
+Renderer-facing
+    RendererDataBinding
+    presentation/input environment in concrete product
+
+Subsystem-facing
+    RuntimeControlBinding
+    SubsystemDataBinding
+    ContentClient (M12)
 ```
 
-M7 `RendererControlBinding` 是 Main-facing **candidate-slot + already-established carrier** capability：Main issue token → Binding arms one slot → physical candidate binds → renderer-control hello/version → Main grants currentness。
-
-它不是 Renderer-facing API，也不是 `RendererHosting` / `RendererControlHost` service。Renderer Window/BrowserWindow 的创建、显示、reload、销毁属于 Hostra/PWA concrete composition，M14/M16 才做 physical realization。
-
-Role package不直接发现 WebSocket/MessagePort/Process/Worker。Runner/provisioning把物理基础设施转换为窄 role-local capability。
-
-Launcher package主要实现 Main-facing RuntimeHosting + Subsystem Runner integration；不吞并完整 Platform capabilities。
+这些不是 universal Platform interface；capability只随真实 consumer冻结。
 
 ---
 
-## 5. Runtime / Frame / Data / Render
+## 4. Authority / Lifetime
 
 ```text
-Runtime Container
-    Host-owned Runner + one business Definition instance
+Main
+    Frame / Stack / Activation / InputTarget / DataAuthority
 
-Frame
-    Main-owned call/input Context
+Subsystem
+    business state / local Frame Context
+    Desired Interest / retained Input State
+    Render Domain authoritative state
 
-Input Interest
-    Subsystem-owned Interest[F]
-
-Render Domain
-    Subsystem-owned presentation authoritative state
-
-Data Connection
-    Session/current Renderer/subsystem/generation
-    + immutable dataProfile for authority epoch
+Renderer
+    read-only Main mirror
+    Producer facts / Input sender gate
+    Render replica/presentation
 ```
 
 保持：
 
 ```text
-Frame lifecycle != Runtime/Data/Render lifecycle
-Activation lifetime != Interest lifetime
-carrier lifetime != capability lifetime
+Frame != Runtime != Data != Render lifecycle
+Activation != Desired Interest lifetime
+Data carrier != capability lifetime
 ```
 
 ---
 
-## 6. Runtime Control
+## 5. Renderer Control / Data
 
-```text
-Runtime Control Profile v1
-= Subsystem Control v1 + Frame / Call v1
-```
+M7 Renderer Control已 qualified：Main authority → full Snapshot → one current Renderer holder。
 
-```text
-one dispatcher
-shared sender Request ID namespace
-one UTF-8 JSON text application unit
-no Batch
-no application retry
-```
+M8 Data role已 qualified：Main ready-derived DataAuthority → Renderer/Subsystem Bindings → real `@loomrealm/data` peers。
 
-`ready` 不携 Data material、Platform executable binding或 Renderer state。
+M9 Desktop Broker已 qualified：Main full authority view + exact HostedRuntime → paired Data WebSockets → install-before-role-delivery。
+
+Data loss/provisioning failure != Runtime failure/Frame unwind。
 
 ---
 
-## 7. Renderer Control — M7 Frozen
-
-```text
-Main committed Runtime/Frame/Activation/InputTarget/DataAuthority authority
-→ RendererAuthoritySnapshotV1
-→ renderer.hello id=1 / renderer.state
-→ current Renderer local mirror
-```
-
-Ownership：
-
-```text
-Main
-    token / current Renderer / revision / source authority
-
-@loomrealm/renderer-control
-    hello schema + version negotiation
-    Snapshot validation
-    ordering / bounded publication / terminal
-
-Renderer
-    local {peer,snapshot}|null holder only
-
-Platform
-    optional RendererControlBinding candidate carrier establishment
-```
-
-Renderer local holder不是 Main remote-currentness proof；M8只增加 per-subsystem Data peer currentness，不建立 Store framework、lease/heartbeat或 Input/Render business state。
-
-M8 Main已从 ready Runtime纯投影 `S/1/loomrealm.renderer-data/1`，Renderer/Subsystem已通过窄 Binding消费真实 `@loomrealm/data` peers。
-
----
-
-## 8. Renderer Data
-
-```text
-Renderer Data Application Profile v1
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
-```
-
-Main发布：
-
-```text
-DataAuthority {subsystemKey,generation,dataProfile}
-```
-
-Platform Broker实现 matching physical carrier；profile改变必须 fresh generation。
-
-Renderer/Subsystem各自只有一个 connection-wide Data dispatcher读取 carrier，再 demux `input.*` / `render.*`。
-
-```text
-Data loss/provisioning failure != Runtime failure/Frame unwind
-```
-
----
-
-## 9. User Input
+## 6. User Input — Current Revision 2
 
 ```text
 Effective(F,A,C)
 =
 current matching Data
 ∧ Main InputTarget(S,F,A)
-∧ current active Activation
+∧ current active F/A
 ∧ C ∈ Interest[F]
 ∧ Producer(C)
 ```
 
-Interest是 Frame-scoped config，不是 authority。
+Three lifetimes：Desired Interest Frame-scoped；Input Lease Activation-scoped；wire publication Data-carrier-scoped。
 
-fresh Activation可复用 Interest config但不复用 old Input State/Event；fresh Data remote registry/state empty。
+Subsystem receive semantics now distinguish：
 
-SDK local receive gate还必须验证 Frame owner/current Activation/channel/mutation gate。
+```text
+retention eligibility
+    current Data + local Frame/current Activation + Desired Interest
+
+business delivery eligibility
+    retention eligibility + Frame active + mutation gate open
+```
+
+因此 pending commit-sensitive mutation期间：
+
+```text
+.state → retain latest, suppress business delivery
+.event → drop
+reset  → clear current retained/suppressed State
+```
+
+explicit known-no-commit + same Activation reopen时 local-deliver latest State；Event不 replay。Renderer不感知该 mutation gate。
+
+User Input current conformance：`protocolVersion=1 / fixtureSetRevision=2`。
 
 ---
 
-## 10. FrameOutcome Author Projection
+## 7. Renderer Input Placement
 
-`@loomrealm/subsystem` author API必须与 Frame v1 Outcome一一对应：
-
-```text
-completed(value)
-cancelled()
-failed(error)
-```
-
-`frame.call()`：
+M10 Renderer role只增加：
 
 ```text
-child terminal Outcome → resolve FrameOutcome
-pre-commit recoverable rejection → typed reject, current Activation remains valid
-Runtime-fatal/ambiguous → never re-enter business continuation
+one optional canonical input source per holder lifetime
+one current Interest Registry per Data slot
+one Effective gate
+one bounded State/Event/Reset publisher
 ```
 
-Module/Business文档不得重新发明另一套 raw-value/exception映射。
+Event/Reset是 global State-coalescing barriers；普通 Input backlog必须在 generic Data writer overflow前 bounded/coalesce/drop。
+
+不增加 InputDeviceRegistry、Store/EventBus、InputTarget shadow authority、retry/replay/currentness protocol。
 
 ---
 
-## 11. Platform Provisioning
+## 8. Subsystem Input Placement
 
-Late Data provisioning属于 Platform infrastructure：
+M10 Subsystem role只增加：
 
 ```text
-Hostra
-    Broker → Runner IPC → Data WS → SubsystemDataBinding
-
-PWA
-    Broker → Worker provisioning path → transferred Port → SubsystemDataBinding
+one InputManager / Runtime instance
+listener contributions + one DesiredRegistry
+immutable retained State
+latest-only Interest publisher
+small direct FrameRuntime integration
 ```
 
-Provisioning不是 Runtime Control、Renderer Control、Platform Launch Manifest或 Data application/business protocol，failure也不自动失败 Runtime/Frame。
-
-Launcher package可以提供 Runner-side provisioning integration point，但 DataConnectionBroker仍是 system-level Platform coordination responsibility。
+Author invalid channel/union config local-atomically reject，不得把 usage error变成 Data fatal。Handler failure local-contain，不得 retire Data。
 
 ---
 
-## 12. Business Portability
+## 9. FrameOutcome / Render / Content
 
-```text
-@loomrealm/map
-    → @loomrealm/subsystem
-```
+Frame Outcome保持：completed / cancelled / failed；只有明确 pre-commit rejection可 catch继续，同一 ambiguous/fatal path不得回到 business continuation。
 
-业务 package不依赖：
+M11 Render：Frame close/Data retire不自动 destroy authoritative Domain。
 
-```text
-@loomrealm/subsystem/host
-game-launcher-hostra/pwa
-transport
-Runner
-Platform composition
-launch.hostra.json / launch.pwa.json
-```
-
-Business source保持 platform-neutral；build可生成 Hostra/PWA不同 artifact，由各自 manifest绑定。
+M12 Content：readonly logical content capability与 executable/module resolution严格分离。
 
 ---
 
-## 13. Package / Adapter Mapping
+## 10. Physical Placement
 
 ```text
-low-level
-    @loomrealm/wire
-    @loomrealm/foundation
+M14 Hostra Desktop
+    BrowserWindow
+    physical Renderer Control WS
+    M9 Data Broker
+    real DOM/Gamepad source → same M10 input seam
+    presentation + Content
 
-contract/capability
-    @loomrealm/game-package
-    @loomrealm/runtime-control
-    @loomrealm/renderer-control
-    @loomrealm/data
-    @loomrealm/content
-
-role
-    @loomrealm/main
-    @loomrealm/subsystem
-    @loomrealm/renderer
-    @loomrealm/content-service
-
-runtime launch integration
-    @loomrealm/game-launcher-hostra
-    @loomrealm/game-launcher-pwa
-
-technical/platform integration
-    current concrete transport/content/Runner implementations
-
-composition roots
-    apps/desktop
-    apps/pwa
-    apps/cli
+M16 PWA
+    Window/Worker + MessagePort
+    PWA Data provisioning
+    same logical Input/Render/Content semantics
 ```
 
-Platform Architecture不自动等于 platform mega-package。
+M10 不实现 BrowserWindow/DOM physical input；M16才完成 Hostra/PWA full transport equivalence。
 
 ---
 
-## 14. Cross-platform Rules
-
-Platform/Adapter/Launcher MUST NOT：
+## 11. Current Milestones
 
 ```text
-改变 Control/Frame transaction semantics
-retry ambiguous Frame mutation
-让 Runtime-fatal重新进入 business continuation
-从 endpoint/Port推导 DataAuthority
-在同 generation静默换 dataProfile
-用 Data reconnect恢复 Frame authority
-用 Structured Clone扩大 application payload model
-从 Render/Interest产生 InputTarget
-让 Main接触 module/path/URL
-让 Platform manifest替换 Host-owned Runner/security policy
-建立 Host/PWA-specific Renderer currentness protocol
+M6 Hostra Runtime             ✅
+M7 Renderer Control           ✅
+M8 Data role/core             ✅
+M9 Desktop Data Broker        ✅
+M10 User Input                preimplementation closed / next
+M11 Render                    pending
+M12 Content                   pending
+M13 loom.map                  pending
+M14 Desktop full E2E          pending
+M15 PWA Runtime               pending
+M16 PWA full E2E/equivalence  pending
 ```
 
-Hostra/PWA 对相同 logical Game/topology/scenario必须得到等价 logical outcome；不要求相同 Definition artifact/physical trace。
-
----
-
-## 15. Milestone Placement
-
-```text
-M6   Hostra Runtime/Runner physical vertical ✅
-M7   logical Renderer Control + Binding contract / role integration
-M8   Data role integration
-M9   Desktop Data Broker/provisioning core
-M10  Input
-M11  Render
-M12  Content
-M14  Hostra BrowserWindow + physical Renderer Control + full Desktop E2E
-M15  PWA Runtime/Worker vertical
-M16  PWA Renderer Control + Data Broker/bindings + Content + full equivalence
-```
-
-M9 不等于 Desktop full Renderer composition；M16 也不能只完成 Renderer Control MessagePort 就宣告 full PWA E2E。
-
----
-
-## 16. Conformance
-
-协议 conformance由最接近 capability package的 fixtures负责；模块级测试验证 authority projection、port wiring、Runner/provisioning和 business semantics。
-
-系统级必须验证：
-
-```text
-same logical Game Entry
-platform-specific Hostra/PWA Launch Manifests
-exact key-set join
-all-preflight-before-first-runtime-side-effect
-Main launch request has no executable material
-Host-owned Runner loads planned Definition Module
-M7 Renderer Control optional-capability/currentness semantics
-same logical Frame/Input/Render/Content scenario
-equivalent application result
-```
+Module tests验证 role semantics；protocol conformance由对应 contract fixtures负责；system E2E验证同一 logical scenario在不同 Platform realization下得到等价 business-observable result。
