@@ -7,10 +7,9 @@
 > 前置：[M10 / 01](M10_01_SUBSYSTEM_INPUT_MANAGER.md) → [M10 / 02](M10_02_RENDERER_INPUT_GATE.md) → [M10 / 03](M10_03_RENDERER_INPUT_PRODUCERS.md) → [M10 / 04](M10_04_VERTICAL_INTEGRATION.md)  
 > 正式协议：[User Input v1](doc/15-contracts/user-input-v1.md)  
 > Conformance：[User Input v1 Conformance](doc/15-contracts/user-input-conformance-v1.md)  
-> 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> 目标：冻结唯一 M10 implementation + qualification boundary；从本文起实现阶段不得再决定新的 public SDK semantics、authority/lifetime、source lifecycle 或 backpressure policy。
+> 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
 
-> **M10 closure = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Desired Interest、Renderer Producer经 current Data收敛为 deterministic business input；State保持 current truth，Event保持 future-only，所有旧 lease/carrier/source facts均不可复活。**
+> **M10 closure = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Desired Interest、Renderer Producer经 current Data收敛为 deterministic business input；State保持 current truth，Event保持 future-only，旧 lease/carrier/source facts不可复活。**
 
 ---
 
@@ -20,18 +19,18 @@
 
 ```text
 @loomrealm/subsystem
-    exact Input author types + SubsystemScope.createInputListener
+    minimal exact Input author surface
     exactly one InputManager / instance
     listener contribution + registration semantics
-    Desired Interest aggregation + local validation
-    retained detached immutable State + delivery gate
-    deterministic synchronous handler invocation order
-    async handler isolation from Data flow control
+    Desired Interest aggregation + validation
+    retained immutable State + delivery gate
+    deterministic synchronous delivery semantics
+    async handler isolation
     latest-only Interest publisher
 
 @loomrealm/renderer
-    exact createRendererControlHolder(data?, input?) extension
-    exact RendererInputSource surface
+    createRendererControlHolder(data?, input?)
+    RendererInputSource
     current Interest Registry per Data peer
     Effective gate
     bounded State/Event/Reset publisher
@@ -39,48 +38,47 @@
     local start/stop failure containment
 
 existing @loomrealm/data
-    User Input codecs/typed peers/serialized send reused unchanged
+    typed User Input mechanics reused unchanged
 
 M9 Desktop vertical
-    real paired Data lifecycle consumed by M10 business input
+    real paired Data lifecycle consumed by M10
 ```
 
-M10 不改变 Main InputTarget authority，不新增 Platform Port，不新增 wire message/version。
+M10不改变 Main InputTarget authority，不新增 Platform Port、wire message/version或 package。
 
 ---
 
 ## 2. No Remaining Design Decisions
 
-实现阶段 **可以**选择：
+实现阶段可以选择：
 
 ```text
 private class/function names
-private Map/Set/array layout
-private queue capacity finite constant
-private JSON detach/freeze helper implementation
-private source-subscription token representation
-private one-time FrameRuntime binding representation
-private test file split
+Map/Set/array layout
+how registration order is represented internally
+finite Event queue capacity
+JSON detach/freeze implementation
+source-subscription token representation
+one-time FrameRuntime binding representation
+test file split
 ```
 
-实现阶段 **不得再选择**：
+实现阶段不得再选择：
 
 ```text
-public Input type names
-handler receives payload vs envelope
+root Input export set
+handler payload vs envelope
 on() whether changes Interest
 setChannels whether deletes handlers
 unsubscribe/close idempotence
-handler invocation order
+observable handler order
 mutation during delivery current-vs-next effect
 whether async handlers block Data reader
 recoverable frame.call rejection vs State convergence ordering
-Renderer source construction API/lifetime/restart/failure behavior
+Renderer source API/lifetime/restart/failure behavior
 Event/Reset barrier behavior
 Data/Control/Activation authority semantics
 ```
-
-这些已由 M10/01–04 冻结。
 
 ---
 
@@ -89,15 +87,14 @@ Data/Control/Activation authority semantics
 允许：
 
 ```text
-one InputManager per Subsystem instance
+one InputManager
 listener contribution + registration records
-one global registration ordinal
-one derived DesiredRegistry
+one DesiredRegistry
 minimal immutable retained State
 0..1 inFlight + pendingLatest Interest publication
 one Renderer input gate per current Data slot
 one bounded input publisher
-one construction-time RendererInputSource object
+one construction-time RendererInputSource
 0..1 current source subscription
 one local source-start staging record
 ```
@@ -109,6 +106,8 @@ Generic Input / Queue / Authorization framework
 InputDeviceRegistry / plugin system
 Action/Command mapping
 EventBus / Observable / Store
+registration ordinal/counter abstraction required only by docs
+extra root supporting aliases only for symmetry
 Frame/InputTarget/Activation shadow registry
 Data generation allocator for M10 tests
 cross-plane ACK/revision/barrier
@@ -123,21 +122,12 @@ generic source retry/backoff framework
 
 ## 4. Exact Subsystem SDK Evidence
 
-编译/运行 evidence必须证明 root exports exact names：
+Root exports exactly：
 
 ```text
 InputStateChannel
 InputEventChannel
 InputChannel
-InputJsonObject
-KeyboardCode
-PointerKind
-PointerButton
-PointerSample
-GamepadAxes
-GamepadButtons
-GamepadSample
-GamepadButtonName
 KeyboardStateInput
 KeyboardEventInput
 PointerStateInput
@@ -151,13 +141,15 @@ CreateInputListenerOptions
 InputListener
 ```
 
-以及：
+以及 `SubsystemScope.createInputListener`。
+
+必须证明：
 
 ```text
-SubsystemScope exposes createInputListener
-standard channel maps to exact canonical author payload type
-custom x.* maps to InputJsonObject
-standard author types structurally match User Input v1 payloads
+six standard payload names structurally match User Input v1 payloads
+custom x.* resolves through InputPayload<C> to bounded JSON object shape
+supporting nested types are obtainable through payload indexed access
+supporting aliases are not separately root-exported merely for symmetry
 handler sees payload only
 business Definition needs only @loomrealm/subsystem import
 ```
@@ -169,9 +161,8 @@ channels own Interest contribution
 on/unsubscribe never change Interest
 channels=[] valid
 duplicate contribution invalid
-setChannels preserves handler registrations
-removed handler registration becomes dormant
-re-add reactivates same registration
+setChannels preserves registrations
+removed registration dormant / re-add reactivates
 unsubscribe idempotent
 close idempotent
 on/setChannels after close → TypeError
@@ -181,6 +172,8 @@ hard-limit overflow → RangeError
 invalid mutation leaves local/wire/Data state unchanged
 ```
 
+Bootstrap evidence必须证明 InputManager可在 Definition factory前创建并由 scope引用，FrameRuntime随后一次性绑定；不得创建 dummy/shadow Frame registry。
+
 ---
 
 ## 5. Retained State / Handler Evidence
@@ -188,27 +181,28 @@ invalid mutation leaves local/wire/Data state unchanged
 必须证明：
 
 ```text
-retained author State detached/deep-immutable
+retained State detached/deep-immutable
 business mutation cannot corrupt later baseline
-payload object identity is not required for semantic equality
-new active .state registration gets one synchronous retained baseline
-reactivated dormant .state handler gets current baseline when retained state still exists
-union true→false clears retained state
-.event registration/reactivation gets no history
+payload object identity not required
+new active state registration gets one synchronous retained baseline
+reactivated dormant state registration gets current baseline while union stayed live
+true union removal clears retained State
+event registration/reactivation gets no history
 ```
 
 Determinism：
 
 ```text
-same-channel handlers invoked by global InputManager registration order
+same-channel matching handlers follow successful on() registration order
 multi-channel local convergence uses canonical ASCII channel order
-stable registration snapshot captured before delivery
-handler unsubscribe/close/setChannels during delivery affects subsequent delivery only
-sync throw contained; later handlers still attempted
+stable matching-registration snapshot per delivery
+callback mutation affects subsequent delivery only
+sync throw contained; later matching handlers still attempted
 Promise rejection contained
 Promise never settles does not stall later handlers/Data reader
-async completion not awaited by @loomrealm/data dispatch
 ```
+
+Qualification **不得**要求某个 private ordinal/counter implementation。
 
 ---
 
@@ -216,7 +210,7 @@ async completion not awaited by @loomrealm/data dispatch
 
 ```text
 pending commit-sensitive mutation
-→ current same-Activation State retained but not delivered
+→ same-Activation State retained but not delivered
 → Event dropped
 → current Reset clears retained/suppressed State
 
@@ -230,9 +224,7 @@ commit / Activation revoke / admin suspend / terminal
 → suppressed old-Activation State discarded
 ```
 
-Qualification必须明确断言：business `catch` 开始时，同步 State-handler side effect已经发生；不等待 async handler Promise settlement。
-
-Bootstrap wiring还必须证明 InputManager可在 Definition factory前创建并由 scope引用，而 FrameRuntime在 Definition产生后一次性绑定；不得因此创建 dummy/shadow Frame registry。
+Business `catch` 开始时，同步 State-handler side effect必须已发生；async handler Promise settlement不属于 barrier。
 
 ---
 
@@ -242,13 +234,13 @@ Bootstrap wiring还必须证明 InputManager可在 Definition factory前创建�
 
 ```text
 Effective = Data × InputTarget × active F/A × Interest × Producer
-Interest-first and authority-first converge
-unknown/stale Interest stays inert
+Interest-first / authority-first converge
+unknown/stale Interest inert
 fresh state Effective transition sends self-contained baseline
-.event begins future-only
-same-carrier target replacement orders Reset(old) before new ordinary input
-producer loss Reset/rebaseline correct
-Control loss disables input immediately
+event begins future-only
+same-carrier target replacement Reset(old) before new ordinary input
+producer loss Reset/rebaseline
+Control loss disables immediately
 Data retirement discards Registry/publisher state
 old Data/Control facts cannot emit after replacement
 ```
@@ -256,19 +248,19 @@ old Data/Control facts cannot emit after replacement
 Ordering/backpressure：
 
 ```text
-State latest-pending coalescing only between barriers
+State latest-pending only between barriers
 Event never coalesces/replays
-Event is global State-coalescing barrier
-Reset is global State-coalescing barrier
-State cannot move across retained Event/Reset
-standard paired transition: post-transition State before Event
+Event = global State-coalescing barrier
+Reset = global State-coalescing barrier
+State cannot cross Event/Reset
+post-transition State before paired Event
 bounded Event overflow drops before emitted
 surviving Event order preserved
-Input backlog does not overflow @loomrealm/data generic writer into local-fatal
-lease/Data retirement discards obsolete not-started pending input
+ordinary Input backlog cannot overflow generic Data writer into local-fatal
+lease/Data retirement discards obsolete not-started input
 ```
 
-具体 Event queue capacity不形成 compatibility surface。
+Event queue capacity是 private finite constant，不形成 compatibility surface。
 
 ---
 
@@ -285,41 +277,37 @@ RendererInputSourceChange = availability | state | event
 必须证明：
 
 ```text
-old one-argument factory call remains valid
-no source → all Producer unavailable
+old one-argument factory call valid
+no source → Producer unavailable
 source object fixed at holder construction
-no current Control → no active subscription
+no current Control → no subscription
 current Control install → exactly one start attempt
-successful start → exactly one current active subscription
+successful start → exactly one active subscription
 replacement/terminal → invalidate + stop old subscription
 late old emit ignored
 same holder later current Control → same source object restarted
-fresh subscription inherits no old producer facts
-start MUST NOT replay historical Event
-state availability requires current sample
-state loss clears producer sample
-state return provides fresh sample before available=true
-source cannot choose frameId/activationId or bypass publisher/Data peer
+fresh subscription inherits no old facts
+start never replays historical Event
+state availability requires fresh sample
+state loss clears sample
+state return supplies fresh sample before available=true
+source cannot choose Frame/Activation or bypass publisher/Data peer
 ```
 
-Failure cases：
+Failure：
 
 ```text
-start throws
-start returns non-function
-start emits partial facts then fails
-    → all partial facts discarded
-    → Producer all unavailable for that current Control epoch
-    → no same-epoch retry
-    → Control/Data remain current
+start throw/non-function/partial bootstrap failure
+→ partial facts discarded
+→ Producer unavailable for current Control epoch
+→ no same-epoch retry
+→ Control/Data remain current
 
-stop throws
-    → subscription already locally invalidated
-    → error contained
-    → no old Producer resurrection
+stop throw
+→ subscription already invalidated
+→ contained
+→ old facts never resurrect
 ```
-
-M14 real browser mapping必须复用这一 exact seam/failure boundary。
 
 ---
 
@@ -342,8 +330,8 @@ Subsystem business Definition
 至少覆盖：
 
 ```text
+minimal exact SDK surface behavior
 initial active Frame input
-exact SDK contribution/handler semantics
 Interest-first / authority-first
 nested child call / fresh caller Activation
 recoverable frame.call no-commit State-before-rejection convergence
@@ -356,9 +344,7 @@ handler sync/async isolation
 Frame close cleanup
 ```
 
-Source start/stop failure可由 renderer package deterministic qualification独立证明，不要求把每个 local integration failure塞进大 vertical。
-
-Fresh-generation behavior使用 role-level deterministic Data fixture证明；不得为此提前扩大 Main generation machinery。
+Source start/stop failure可由 renderer package deterministic tests独立证明，不要求塞进大 vertical。
 
 ---
 
@@ -371,11 +357,9 @@ protocolVersion = 1
 fixtureSetRevision = 2
 ```
 
-M10 必须通过所有 platform-independent Renderer/Subsystem protocol role obligations，并通过本文新增的 exact SDK/source qualification cases。
+M10必须通过全部 platform-independent Renderer/Subsystem protocol role obligations，以及本 milestone 的 SDK/source projection qualification。
 
-SDK/source cases是 `@loomrealm/subsystem` / `@loomrealm/renderer` implementation qualification；它们不改变 User Input wire version、schema 或 formal cross-platform transport claim。
-
-M10 **不得**宣称 Hostra/PWA full transport-equivalence conformance；PWA physical realization尚属 M16。M10 closure wording固定为：
+M10 closure wording：
 
 ```text
 User Input v1 Renderer/Subsystem role implementation
@@ -384,16 +368,16 @@ plus frozen M10 SDK/source projection semantics
 on Hostra/Desktop physical Data lifecycle
 ```
 
-完整 cross-platform Profile/User Input conformance claim留到 M16。
+不得声明完整 Hostra/PWA transport-equivalence；留到 M16。
 
 ---
 
 ## 11. Regression Boundary
 
-M10 必须保持：
+必须保持：
 
 ```text
-M3 Runtime Control semantics unchanged
+M3 Runtime Control unchanged
 M5 Main Frame/Activation/InputTarget authority unchanged
 M7 Renderer currentness/replacement unchanged
 M8 Data role currentness/failure isolation unchanged
@@ -401,7 +385,7 @@ M9 Broker paired installation/recovery unchanged
 Data failure != Runtime failure / Frame unwind
 ```
 
-除 ADR 0029 明确的 Subsystem-local State retention correction外，不修改 Frozen User Input v1 wire/authority/lifetime模型。
+除 ADR 0029 的 Subsystem-local correction外，不修改 Frozen User Input v1 wire/authority/lifetime模型。
 
 ---
 
@@ -417,43 +401,26 @@ npm run test:m10
 
 ```text
 M9 dependency/build gates
-current User Input fixtureSetRevision=2
-Subsystem exact SDK surface/type tests
-Subsystem InputManager lifecycle/order/async/bootstrap tests
+User Input fixtureSetRevision=2
+Subsystem minimal SDK surface/type/bootstrap tests
+Subsystem InputManager lifecycle/order/async tests
 Renderer gate/publisher/source lifecycle/failure tests
 real M10 vertical
 ```
 
-文档阶段不提前加入空 `test:m10`。
+文档阶段不提前加入空 gate。
 
 ---
 
 ## 13. Closure Claim
 
-文档现在允许声明：
+当前文档允许声明：
 
 ```text
 M10 design = Implementation Frozen / Ready for Implementation
 no further design round is expected before coding
 ```
 
-M10 实现与 qualification通过后才允许声明：
+实现 + qualification通过后才允许声明 M10 implemented/qualified。
 
-```text
-Subsystem InputListener/InputManager implemented
-Renderer User Input gate/publisher/source integration implemented
-User Input v1 current platform-independent role semantics qualified
-frozen M10 SDK/source projection qualified
-fresh Activation/Data input baseline qualified on Desktop M9 lifecycle
-```
-
-不得声明：
-
-```text
-Desktop BrowserWindow input complete
-Render complete
-Content complete
-PWA / full cross-platform User Input conformance complete
-```
-
-这些分别属于 M14、M11、M12、M16。
+不得提前声明 BrowserWindow Input、Render、Content 或 PWA/full cross-platform User Input conformance complete。
