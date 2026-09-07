@@ -56,7 +56,7 @@ current Data
 ∧ C ∈ local Desired Interest[F]
 ```
 
-成立时，InputManager MAY/SHALL retain latest immutable State even when the local ordinary-mutation gate is temporarily closed by a commit-sensitive mutation.
+成立时，InputManager **MUST retain the latest immutable State**，即使 local ordinary-mutation gate 因 commit-sensitive mutation 暂时关闭。
 
 当 mutation gate open：
 
