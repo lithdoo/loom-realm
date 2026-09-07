@@ -10,7 +10,7 @@
 > 上游 authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)  
 > Conformance：[Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md)  
 > 决策：[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
-> 最近复核：2026-08-26
+> 最近复核：2026-09-07
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -482,7 +482,9 @@ common terminal/fail-closed behavior
 
 ## 13. Conformance
 
-Normative qualification由 [Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md) `fixtureSetRevision = 1` 固定。
+Normative qualification由 [Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md) `fixtureSetRevision = 2` 固定。
+
+Revision 2 只更新 current conformance evidence，来自 User Input v1 revision 2 的组合义务；它不改变 `loomrealm.renderer-data/1` identity、Data Connection version、User Input wire version或 Render Update version。
 
 至少证明：
 
@@ -504,7 +506,7 @@ control-data-no-total-order
 hostra-pwa-same-data-profile-trace
 ```
 
-Executable fixture materialization属于 M8 implementation qualification；不得改变本 Frozen observable contract。
+Executable fixture materialization属于 M8 implementation qualification；current complete Profile conformance还必须满足 revision 2 child/composition obligations。不得改变本 Frozen observable contract。
 
 ---
 
