@@ -165,13 +165,25 @@ State不得跨 Event/Reset移动。Event overflow必须在 generic Data writer o
 
 ## 8. Exact RendererInputSource
 
-Trusted Renderer integration surface：
+Trusted Renderer integration surface复用现有 `@loomrealm/data` root types：
 
 ```ts
 export type RendererInputSourceChange =
-  | { kind: "availability"; channel: InputChannelV1; available: boolean }
-  | { kind: "state"; channel: InputStateChannelV1; payload: JsonObject }
-  | { kind: "event"; channel: InputEventChannelV1; payload: JsonObject };
+  | {
+      kind: "availability";
+      channel: InputChannelV1;
+      available: boolean;
+    }
+  | {
+      kind: "state";
+      channel: InputStateChannelV1;
+      payload: InputStateV1["payload"];
+    }
+  | {
+      kind: "event";
+      channel: InputEventChannelV1;
+      payload: InputEventV1["payload"];
+    };
 
 export interface RendererInputSource {
   start(
@@ -180,9 +192,11 @@ export interface RendererInputSource {
 }
 ```
 
+这不增加 `@loomrealm/renderer → @loomrealm/wire` direct dependency；M10 renderer dependencies继续是 renderer-control + platform-ports + data。
+
 `start()` returned stop function idempotent。
 
-Source不知道 Frame/Activation/Interest/Data/wire envelope，也不能直接调用 Data peer。
+Source不知道 Frame/Activation/Interest/Data authority/wire envelope，也不能直接调用 Data peer。
 
 ---
 
@@ -196,11 +210,11 @@ no current Control
 
 Control current installed
     → producer facts reset empty/unavailable
-    → source.start once
+    → source.start exactly once for this epoch
 
 Control replaced/terminal
     → invalidate source callback identity synchronously
-    → stop old subscription
+    → stop old subscription best-effort
     → old Producer facts invalid
 
 same holder later installs new Control
@@ -208,9 +222,7 @@ same holder later installs new Control
     → fresh facts only
 ```
 
-At most one active source subscription。
-
-Late emit from stopped subscription MUST ignore。
+At most one active source subscription。Late emit from stopped/invalidated subscription MUST ignore。
 
 `.state` Producer available requires：
 
@@ -221,11 +233,41 @@ AND fresh current sample exists in this source subscription
 
 availability false clears cached producer sample；return必须 emit fresh sample before available=true。
 
+Start bootstrap MUST NOT replay historical Event。
+
 因此 Control peer terminal不是“source object永久销毁”；同一 holder后续 connect可以重新使用 source，而不会复用旧 producer facts。
 
 ---
 
-## 10. Lease / Producer Transitions
+## 10. Source Failure Boundary
+
+每个 current Control epoch最多一次 `start()` attempt。
+
+```text
+start throws
+OR returns non-function
+OR emits partial facts then fails
+    → invalidate attempted subscription
+    → discard all partial producer facts
+    → Producer unavailable for this Control epoch
+    → no same-epoch retry
+    → Control/Data remain current
+```
+
+later fresh Control epoch可以重新 `start()`。
+
+Stop顺序：
+
+```text
+invalidate subscription/facts locally
+→ call stop() best-effort
+```
+
+stop throw被 contained；不得 terminalize Control/Data或恢复 old producer facts。
+
+---
+
+## 11. Lease / Producer Transitions
 
 same-carrier old lease → new lease：
 
@@ -244,7 +286,7 @@ old Effective false immediately
 
 ---
 
-## 11. M11 Render Placement
+## 12. M11 Render Placement
 
 Subsystem拥有 Domain Registry/State/revision；Renderer维护 authoritative replica + local presentation。
 
@@ -265,7 +307,7 @@ Renderer MAY保留 stale presentation cache，但它不是 current authority pro
 
 ---
 
-## 12. Physical Realization
+## 13. Physical Realization
 
 ```text
 M14 Hostra Desktop
@@ -286,17 +328,20 @@ M14 browser input必须实现 exact M10 `RendererInputSource`，不得另开 DOM
 
 ---
 
-## 13. Tests / Invariants
+## 14. Tests / Invariants
 
 M10必须证明：
 
 ```text
 existing createRendererControlHolder(data?) usage remains valid
 exact second optional source argument
+renderer dependency set unchanged
 0..1 active source subscription
 Control replacement/terminal source invalidation
 same holder reconnect source restart
 late old source callback ignored
+start failure discards partial facts / no same-epoch retry
+stop failure contained
 fresh state sample required for availability
 Interest-first / Authority-first convergence
 fresh Activation/Data state baseline
@@ -315,6 +360,7 @@ Final invariants：
 4. M10 Input只组合 current facts；
 5. one construction-time source object，无 producer registry；
 6. 0..1 current-Control source subscription，旧 callback不可复活；
-7. one bounded publisher per current Data slot；
-8. Input/Data/Frame/Render lifetimes保持独立；
-9. Hostra/PWA physical差异不得改变 logical User Input semantics。
+7. source local failure不改变 Control/Data authority；
+8. one bounded publisher per current Data slot；
+9. Input/Data/Frame/Render lifetimes保持独立；
+10. Hostra/PWA physical差异不得改变 logical User Input semantics。
