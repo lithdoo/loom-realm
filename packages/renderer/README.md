@@ -1,23 +1,37 @@
 # @loomrealm/renderer
 
-Renderer Control holder with M8 Data reconciliation and M10 User Input implementation boundary.
+Renderer Control holder with M8 Data reconciliation and frozen M10 User Input implementation boundary.
 
-> Status: **M8 Implemented / Qualified · M10 Preimplementation Closed**
+> Status: **M8 Implemented / Qualified · M10 Implementation Frozen / Ready for Implementation**
 
 Current implemented state remains one atomic Control `{ peer, snapshot } | null` record plus one private Data slot per desired subsystem authority. Protocol legality stays in `@loomrealm/renderer-control` and `@loomrealm/data`.
 
-M10 adds only role-local behavior on top of those existing slots:
+M10 exact additive construction surface：
+
+```ts
+createRendererControlHolder(
+  data?: RendererDataBinding,
+  input?: RendererInputSource,
+): RendererControlHolder
+```
+
+Existing one-argument calls remain valid。
+
+M10 adds only role-local behavior on top of existing holder/Data slots：
 
 ```text
-optional canonical input source injected once for holder lifetime
+one optional construction-time RendererInputSource object
+→ 0..1 active source subscription for current Control peer
 → current Data-slot Interest Registry
 → Effective gate from Control + Data + Interest + Producer
 → bounded State/Event/Reset publisher
 → current RendererDataPeer
 ```
 
-No Store, EventBus, producer registry, InputTarget shadow authority, lease/heartbeat, generic queue framework, Broker, retry or replay layer is added.
+Source object is fixed for holder lifetime；Control replacement/terminal invalidates and stops the old active subscription，and a later current Control on the same holder restarts the same source object with fresh producer facts。Late callbacks from a stopped subscription are ignored。
 
-ADR 0029 does not change Renderer Effective semantics: Subsystem mutation-gate State suppression/reopen convergence is entirely Subsystem-local.
+No Store、EventBus、producer registry、mutable source replacement、InputTarget shadow authority、lease/heartbeat、generic queue framework、Broker、retry or replay layer is added。
 
-The precise M10 construction signature may evolve during implementation, but ownership is frozen: one source per holder lifetime, no mutable runtime producer-registration API, and old holder/source/Data-slot work cannot affect a replacement holder.
+ADR 0029 does not change Renderer Effective semantics：Subsystem mutation-gate State suppression/reopen convergence remains entirely Subsystem-local。
+
+Implementation may choose private class/layout names only；the public construction surface、source lifetime、Effective semantics and publisher ordering are frozen by M10/02–M10/05。
