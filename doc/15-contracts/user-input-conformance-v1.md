@@ -334,11 +334,14 @@ lease-a2-event-future-only
 
 ## 12. Producer
 
+Formal conformance只冻结 Producer 对 User Input 的 observable role semantics；不要求 `RendererControlHolder`、`RendererInputSource`、construction-time injection 或任何特定内部 source object model。Exact M10 holder/source API 与 subscription lifecycle由 M10 role qualification独立证明。
+
 Required：
 
 ```text
-producer-single-holder-lifetime-source
-producer-old-holder-source-cannot-affect-replacement
+producer-current-authority-loss-disables-effective-input
+producer-stale-facts-cannot-affect-fresh-renderer-authority-epoch
+producer-fresh-facts-required-after-authority-replacement
 producer-state-loss-stops-channel
 producer-state-loss-best-effort-reset
 producer-state-loss-rebaseline-other-effective-state
@@ -347,8 +350,10 @@ producer-event-loss-stops-future-event
 producer-event-return-future-only
 producer-loss-does-not-change-main-authority/retire-data/fail-runtime
 producer-cannot-choose-frame-or-activation
-producer-cannot-bypass-input-publisher
+producer-cannot-bypass-input-sender-semantics
 ```
+
+任意 Renderer 实现只要满足这些 observable semantics即可声明 formal User Input role conformance；M10 的 single construction-time source / current-Control subscription 是当前 `@loomrealm/renderer` implementation contract，不升级为协议结构要求。
 
 ---
 
