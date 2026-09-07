@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：Evolving  
+> 稳定程度：Evolving overall / M10 frozen  
 > 主要定义：logical roles/modules、Runner/role-facing capabilities、Renderer/Data/Input/Render 与 Desktop/PWA realization 入口  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
@@ -19,7 +19,7 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 | 模块 | 入口 | Current responsibility |
 |---|---|---|
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 Input gate/publisher/source placement |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 frozen Input gate/publisher/source role |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
 | FSDB Content | [fsdb-content-service](./fsdb-content-service/README.md) | readonly Content implementation |
 | `loom.map` | [loom-map](./loom-map/README.md) | ordinary platform-neutral Subsystem consumer |
@@ -58,7 +58,8 @@ Main-facing
 
 Renderer-facing
     RendererDataBinding
-    presentation/input environment in concrete product
+    RendererInputSource          // M10 role integration, not Platform Port
+    presentation environment
 
 Subsystem-facing
     RuntimeControlBinding
@@ -66,7 +67,7 @@ Subsystem-facing
     ContentClient (M12)
 ```
 
-这些不是 universal Platform interface；capability只随真实 consumer冻结。
+这些不是 universal Platform interface；capability只随真实 consumer冻结。M10没有新增 `@loomrealm/platform-ports` surface。
 
 ---
 
@@ -78,8 +79,7 @@ Main
 
 Subsystem
     business state / local Frame Context
-    Desired Interest / retained Input State
-    Render Domain authoritative state
+    Desired Interest / retained author Input State
 
 Renderer
     read-only Main mirror
@@ -93,6 +93,7 @@ Renderer
 Frame != Runtime != Data != Render lifecycle
 Activation != Desired Interest lifetime
 Data carrier != capability lifetime
+source object != source subscription != Data lifetime
 ```
 
 ---
@@ -123,7 +124,7 @@ current matching Data
 
 Three lifetimes：Desired Interest Frame-scoped；Input Lease Activation-scoped；wire publication Data-carrier-scoped。
 
-Subsystem receive semantics now distinguish：
+Subsystem receive semantics distinguish：
 
 ```text
 retention eligibility
@@ -133,7 +134,7 @@ business delivery eligibility
     retention eligibility + Frame active + mutation gate open
 ```
 
-因此 pending commit-sensitive mutation期间：
+pending commit-sensitive mutation：
 
 ```text
 .state → retain latest, suppress business delivery
@@ -141,22 +142,68 @@ business delivery eligibility
 reset  → clear current retained/suppressed State
 ```
 
-explicit known-no-commit + same Activation reopen时 local-deliver latest State；Event不 replay。Renderer不感知该 mutation gate。
+explicit known-no-commit + same Activation reopen时：
+
+```text
+synchronously deliver current retained State convergence
+→ then recoverable frame.call rejection becomes observable
+```
+
+Event不 replay；Renderer不感知 mutation gate。
 
 User Input current conformance：`protocolVersion=1 / fixtureSetRevision=2`。
 
 ---
 
-## 7. Renderer Input Placement
+## 7. Frozen Subsystem Input Projection
 
-M10 Renderer role只增加：
+M10 Subsystem role只增加 one InputManager，并冻结：
 
 ```text
-one optional canonical input source per holder lifetime
+SubsystemScope.createInputListener
+InputChannel → canonical payload mapping
+listener channels/setChannels = Interest contribution
+on/unsubscribe = handler registration only
+setChannels keeps dormant registrations
+unsubscribe + close idempotent
+stable delivery snapshot
+same-channel registration order
+multi-channel canonical channel order
+async handler Promise does not block Data reader
+immutable retained State/local baseline
+latest-only Interest publisher
+```
+
+Handler只收到 payload，不收到 wire envelope/frameId/activationId/Data identity。
+
+Author invalid config local-atomically reject，不得把 usage error变成 Data fatal。
+
+---
+
+## 8. Frozen Renderer Input Projection
+
+Exact construction：
+
+```ts
+createRendererControlHolder(
+  data?: RendererDataBinding,
+  input?: RendererInputSource,
+)
+```
+
+Renderer role只增加：
+
+```text
+one construction-time source object per holder
+0..1 active source subscription for current Control peer
 one current Interest Registry per Data slot
 one Effective gate
 one bounded State/Event/Reset publisher
 ```
+
+Control replacement/terminal invalidates/stops old source subscription；same holder later current Control会 restart同一个 source object并建立 fresh producer facts。Late old callback drop。
+
+`.state` Producer available要求 fresh current sample + availability=true；loss清 producer sample，return不得使用 stale cache。
 
 Event/Reset是 global State-coalescing barriers；普通 Input backlog必须在 generic Data writer overflow前 bounded/coalesce/drop。
 
@@ -164,25 +211,9 @@ Event/Reset是 global State-coalescing barriers；普通 Input backlog必须在 
 
 ---
 
-## 8. Subsystem Input Placement
-
-M10 Subsystem role只增加：
-
-```text
-one InputManager / Runtime instance
-listener contributions + one DesiredRegistry
-immutable retained State
-latest-only Interest publisher
-small direct FrameRuntime integration
-```
-
-Author invalid channel/union config local-atomically reject，不得把 usage error变成 Data fatal。Handler failure local-contain，不得 retire Data。
-
----
-
 ## 9. FrameOutcome / Render / Content
 
-Frame Outcome保持：completed / cancelled / failed；只有明确 pre-commit rejection可 catch继续，同一 ambiguous/fatal path不得回到 business continuation。
+Frame Outcome保持 completed / cancelled / failed；只有明确 pre-commit rejection可 catch继续，同一 ambiguous/fatal path不得回到 business continuation。
 
 M11 Render：Frame close/Data retire不自动 destroy authoritative Domain。
 
@@ -197,7 +228,7 @@ M14 Hostra Desktop
     BrowserWindow
     physical Renderer Control WS
     M9 Data Broker
-    real DOM/Gamepad source → same M10 input seam
+    real DOM/Gamepad RendererInputSource → exact M10 source seam
     presentation + Content
 
 M16 PWA
@@ -217,7 +248,7 @@ M6 Hostra Runtime             ✅
 M7 Renderer Control           ✅
 M8 Data role/core             ✅
 M9 Desktop Data Broker        ✅
-M10 User Input                preimplementation closed / next
+M10 User Input                Implementation Frozen / Ready for Implementation
 M11 Render                    pending
 M12 Content                   pending
 M13 loom.map                  pending
