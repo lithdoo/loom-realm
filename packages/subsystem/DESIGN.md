@@ -6,7 +6,8 @@
 > 目标：为业务 Subsystem 提供稳定、平台无关、协议机械细节不可见的 author SDK，并给 trusted Runner 提供最小 host integration surface。  
 > 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md)  
 > 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md)  
-> Input correction：[ADR 0029](../../doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
+> Input correction：[ADR 0029](../../doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> Exact M10 surface：[M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md)
 
 > **业务只表达业务；SDK把 Frozen protocol 映射为不可绕过的 Frame/Input/Render/Content capability；Platform Runner只注入 role-local ports。M10 author-visible Input behavior已冻结，编码阶段只允许 private realization choices。**
 
@@ -96,10 +97,29 @@ completed / cancelled / failed
 business-safe Frame errors
 
 M10 exact Input surface:
-    InputStateChannel / InputEventChannel / InputChannel
-    InputPayload / InputHandler / Unsubscribe
-    CreateInputListenerOptions / InputListener
-    standard canonical author Input payload/supporting types
+    InputStateChannel
+    InputEventChannel
+    InputChannel
+    InputJsonObject
+    KeyboardCode
+    PointerKind
+    PointerButton
+    PointerSample
+    GamepadAxes
+    GamepadButtons
+    GamepadSample
+    GamepadButtonName
+    KeyboardStateInput
+    KeyboardEventInput
+    PointerStateInput
+    PointerEventInput
+    GamepadStateInput
+    GamepadEventInput
+    InputPayload
+    InputHandler
+    Unsubscribe
+    CreateInputListenerOptions
+    InputListener
 ```
 
 Host surface继续：
@@ -243,6 +263,75 @@ export type InputEventChannel =
 
 export type InputChannel = InputStateChannel | InputEventChannel;
 
+export type InputJsonObject = JsonObject;
+
+export type KeyboardCode = KeyboardCodeV1;
+export type PointerKind = "mouse" | "touch" | "pen";
+export type PointerButton =
+  | "primary"
+  | "auxiliary"
+  | "secondary"
+  | "back"
+  | "forward";
+
+export interface PointerSample {
+  readonly pointerId: number;
+  readonly kind: PointerKind;
+  readonly x: number;
+  readonly y: number;
+  readonly buttons: readonly PointerButton[];
+}
+
+export interface GamepadAxes {
+  readonly leftX: number;
+  readonly leftY: number;
+  readonly rightX: number;
+  readonly rightY: number;
+}
+
+export interface GamepadButtons {
+  // exact User Input v1 standard logical button fields
+}
+
+export interface GamepadSample {
+  readonly gamepadId: number;
+  readonly axes: GamepadAxes;
+  readonly buttons: GamepadButtons;
+}
+
+export type GamepadButtonName = keyof GamepadButtons;
+
+export interface KeyboardStateInput {
+  readonly down: readonly KeyboardCode[];
+}
+
+export interface KeyboardEventInput {
+  readonly action: "down" | "up";
+  readonly code: KeyboardCode;
+  readonly repeat: boolean;
+}
+
+export interface PointerStateInput {
+  readonly pointers: readonly PointerSample[];
+}
+
+export interface PointerEventInput {
+  readonly action: "down" | "up" | "cancel";
+  readonly pointer: PointerSample;
+  readonly button: PointerButton | null;
+}
+
+export interface GamepadStateInput {
+  readonly gamepads: readonly GamepadSample[];
+}
+
+export interface GamepadEventInput {
+  readonly action: "down" | "up";
+  readonly gamepadId: number;
+  readonly button: GamepadButtonName;
+  readonly value: number;
+}
+
 export type InputPayload<C extends InputChannel> =
   C extends "keyboard.state" ? KeyboardStateInput :
   C extends "keyboard.event" ? KeyboardEventInput :
@@ -250,7 +339,7 @@ export type InputPayload<C extends InputChannel> =
   C extends "pointer.event" ? PointerEventInput :
   C extends "gamepad.state" ? GamepadStateInput :
   C extends "gamepad.event" ? GamepadEventInput :
-  C extends `x.${string}.state` | `x.${string}.event` ? JsonObject :
+  C extends `x.${string}.state` | `x.${string}.event` ? InputJsonObject :
   never;
 
 export type InputHandler<C extends InputChannel> =
@@ -259,9 +348,7 @@ export type InputHandler<C extends InputChannel> =
 export type Unsubscribe = () => void;
 ```
 
-`KeyboardStateInput` / `KeyboardEventInput` / Pointer / Gamepad author types及 supporting canonical types与 User Input v1 对应 payload **结构等价**；不得建立不同字段、range、ordering语义。
-
-Custom `x.*` handler value是 JSON object payload。
+`KeyboardCode` exact set = User Input v1 `KEYBOARD_CODES_V1`；`GamepadButtons` exact fields、numeric range、canonical ordering同样只以 User Input v1 为准。Author names固定；implementation可用 private type alias复用 `@loomrealm/data` types。
 
 Handler只收到 payload；author surface不暴露 `frameId`、`activationId`、message `type` 或 Data identity。
 
@@ -388,6 +475,8 @@ OR setChannels reactivates existing state registration
 
 `.event` registration/reactivation永不 replay历史 Event。
 
+Author-visible payload object identity不形成 contract；只保证 immutable structural value semantics。
+
 ---
 
 ## 13. Deterministic Handler Delivery
@@ -396,11 +485,11 @@ OR setChannels reactivates existing state registration
 
 ```text
 single channel
-    registration order
+    global InputManager registration order
 
 multi-channel local convergence
     canonical ASCII channel order
-    then registration order
+    then global registration order
 ```
 
 Handler在当前 invocation中调用 unsubscribe/close/setChannels/on，只影响后续 delivery，不修改当前 snapshot。
@@ -447,7 +536,7 @@ current Reset → clear retained/suppressed State
 ```text
 FrameRuntime restores mutation eligibility
 → InputManager synchronously invokes current retained State convergence
-   canonical channel order / registration order
+   canonical channel order / global registration order
 → only after all eligible synchronous invocations attempted
    frame.call Promise becomes rejected with recoverable error
 ```
@@ -538,6 +627,7 @@ M10允许：
 ```text
 one InputManager
 listener contribution + registration records
+one global registration ordinal
 one DesiredRegistry
 minimal detached immutable retained State
 small FrameRuntime integration methods
@@ -565,7 +655,7 @@ Input-specific error hierarchy without new requirement
 M10编码不得重新决定 public behavior；必须直接实现：
 
 ```text
-exact root Input types + createInputListener surface
+exact root Input names/types + createInputListener surface
 channel contribution vs handler registration separation
 idempotent unsubscribe/close
 stable deterministic synchronous handler invocation
