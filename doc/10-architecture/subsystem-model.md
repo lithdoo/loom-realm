@@ -7,8 +7,8 @@
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 正式 Render：[Render Update v1](../15-contracts/render-update-v1.md)  
-> M10 实施：[M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](../../M10_05_QUALIFICATION_CLOSURE.md)  
-> M11 实施：[M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) · [M11 / 05](../../M11_05_QUALIFICATION_CLOSURE.md)  
+> M10 实施：[M10 / 01](https://github.com/lithdoo/loom-realm/blob/main/M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](https://github.com/lithdoo/loom-realm/blob/main/M10_05_QUALIFICATION_CLOSURE.md)  
+> M11 实施：[M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) · [M11 / 05](https://github.com/lithdoo/loom-realm/blob/main/M11_05_QUALIFICATION_CLOSURE.md)  
 > 最近复核：2026-09-07
 
 ---
@@ -396,7 +396,7 @@ render.domains(current Registry)
 
 same-generation reconnect保留 wire emitted identity history，但重建 carrier-local baseline/revision；无 current carrier 的 Event 不得带到 future carrier，current carrier + unbaselined Domain 的 Event MAY bounded-pend behind establishing Snapshot，carrier loss/Domain removal则丢弃，永不 replay。
 
-Exact implementation contract 见 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 与 [M11 / 02](../../M11_02_RENDER_PUBLICATION.md)。
+Exact implementation contract 见 [M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) 与 [M11 / 02](https://github.com/lithdoo/loom-realm/blob/main/M11_02_RENDER_PUBLICATION.md)。
 
 ---
 
