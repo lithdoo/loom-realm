@@ -212,6 +212,41 @@ test("retained Event is an authoritative coalescing barrier", async () => {
   assert.equal(current.messages.at(-1).roots[0].attrs.phase, "after");
 });
 
+test("an Event is a coalescing barrier only for its own Domain", async () => {
+  let release;
+  let blockNext = false;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const manager = new RenderManager();
+  const first = manager.createDomain(state([node("first")]));
+  const second = manager.createDomain(state([node("second")]));
+  const current = peer(1, {
+    async send(message) {
+      if (blockNext && message.type === "render.snapshot") {
+        blockNext = false;
+        await gate;
+      }
+    },
+  });
+  manager.setDataPeer(current);
+  await settle();
+  blockNext = true;
+  first.replace(state([node("first", [], "sprite", { phase: "blocked" })]));
+  second.replace(state([node("second", [], "sprite", { phase: "before" })]));
+  first.emit({ targetKey: "first", name: "barrier", data: {} });
+  second.replace(state([node("second", [], "sprite", { phase: "after" })]));
+  await turn();
+  release();
+  await settle();
+  const tail = current.messages.slice(-3);
+  assert.deepEqual(tail.map(({ type }) => type), [
+    "render.snapshot",
+    "render.snapshot",
+    "render.event",
+  ]);
+  assert.equal(tail[1].domainId, current.messages[2].domainId);
+  assert.equal(tail[1].roots[0].attrs.phase, "after");
+});
+
 test("an unemitted create-close lifecycle never publishes stale Domain presence", async () => {
   let releaseRegistry;
   const gate = new Promise((resolve) => { releaseRegistry = resolve; });

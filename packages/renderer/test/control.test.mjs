@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
+import { createSubsystemDataPeer } from "@loomrealm/data";
 import { createMainRendererControlPeer, prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../dist/index.js";
 
@@ -48,6 +49,26 @@ const authority = (subsystemKey) => ({
   generation: 1,
   dataProfile: "loomrealm.renderer-data/1",
 });
+
+function renderDataHarness() {
+  const peers = [];
+  const binding = {
+    async acquire(subsystemKey, generation, dataProfile) {
+      const pair = createMemoryCarrierPair();
+      const peer = createSubsystemDataPeer({
+        binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
+        handlers: {
+          onInputState: () => ({ kind: "accepted" }),
+          onInputEvent: () => ({ kind: "accepted" }),
+          onInputReset: () => ({ kind: "accepted" }),
+        },
+      });
+      peers.push(peer);
+      return pair.right;
+    },
+  };
+  return { binding, peers };
+}
 
 test("holder atomically installs initial peer+Snapshot before consuming later state", async () => {
   const pair = createMemoryCarrierPair();
@@ -234,4 +255,64 @@ test("throwing carrier close getter stays isolated during Renderer construction 
   await waitFor(() => acquireCount === 1, "malformed carrier acquisition");
   await turn();
   assert.equal(holder.current().snapshot.sessionId, "a");
+});
+
+test("same-Session Control participant replacement preserves retired Domain identity history", async (t) => {
+  const data = renderDataHarness();
+  t.after(async () => Promise.allSettled(data.peers.map((peer) => peer.close())));
+  const holder = createRendererControlHolder(data.binding);
+  const firstPair = createMemoryCarrierPair();
+  const firstMain = main(firstPair, "same-session", [authority("root")]);
+  await holder.connect({ carrier: firstPair.right, rendererControlToken: "c1" });
+  await waitFor(() => data.peers.length === 1, "first participant Data peer");
+  await data.peers[0].render.sendDomains({ type: "render.domains", domains: ["retired"] });
+  await data.peers[0].render.sendSnapshot({
+    type: "render.snapshot", domainId: "retired", revision: 1, zIndex: 0,
+    roots: [{ key: "node", tag: "sprite", attrs: {}, data: {}, children: [] }],
+  });
+  await data.peers[0].render.sendDomains({ type: "render.domains", domains: [] });
+  await turn();
+
+  const secondPair = createMemoryCarrierPair();
+  const secondMain = main(secondPair, "same-session", [authority("root")]);
+  await holder.connect({ carrier: secondPair.right, rendererControlToken: "c2" });
+  await waitFor(() => data.peers.length === 2, "replacement participant Data peer");
+  await data.peers[1].render.sendDomains({ type: "render.domains", domains: ["retired"] });
+  await waitFor(() => data.peers.length === 3, "protocol-fatal replacement after Domain reuse");
+
+  firstMain.retire();
+  secondMain.retire();
+});
+
+test("same-Session Control participant replacement preserves Node one-shot history", async (t) => {
+  const data = renderDataHarness();
+  t.after(async () => Promise.allSettled(data.peers.map((peer) => peer.close())));
+  const holder = createRendererControlHolder(data.binding);
+  const firstPair = createMemoryCarrierPair();
+  const firstMain = main(firstPair, "same-session", [authority("root")]);
+  await holder.connect({ carrier: firstPair.right, rendererControlToken: "c1" });
+  await waitFor(() => data.peers.length === 1, "first participant Data peer");
+  await data.peers[0].render.sendDomains({ type: "render.domains", domains: ["live"] });
+  await data.peers[0].render.sendSnapshot({
+    type: "render.snapshot", domainId: "live", revision: 1, zIndex: 0,
+    roots: [{ key: "once", tag: "sprite", attrs: {}, data: {}, children: [] }],
+  });
+  await turn();
+
+  const secondPair = createMemoryCarrierPair();
+  const secondMain = main(secondPair, "same-session", [authority("root")]);
+  await holder.connect({ carrier: secondPair.right, rendererControlToken: "c2" });
+  await waitFor(() => data.peers.length === 2, "replacement participant Data peer");
+  await data.peers[1].render.sendDomains({ type: "render.domains", domains: ["live"] });
+  await data.peers[1].render.sendSnapshot({
+    type: "render.snapshot", domainId: "live", revision: 9, zIndex: 0, roots: [],
+  });
+  await data.peers[1].render.sendSnapshot({
+    type: "render.snapshot", domainId: "live", revision: 10, zIndex: 0,
+    roots: [{ key: "once", tag: "sprite", attrs: {}, data: {}, children: [] }],
+  });
+  await waitFor(() => data.peers.length === 3, "protocol-fatal replacement after Node reuse");
+
+  firstMain.retire();
+  secondMain.retire();
 });

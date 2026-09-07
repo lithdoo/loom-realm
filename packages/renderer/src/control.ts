@@ -52,7 +52,7 @@ interface RendererDataSlot {
   current: CurrentDataPeer | null;
   pending: PendingDataAcquire | null;
   failed: DesiredDataIdentity | null;
-  renderIdentity: DesiredDataIdentity | null;
+  renderHistoryKey: string;
   render: RendererRenderStore;
 }
 
@@ -119,6 +119,8 @@ class ControlHolder implements RendererControlHolder {
   private currentValue: RendererControlCurrent | null = null;
   private connecting = false;
   private readonly dataSlots = new Map<string, RendererDataSlot>();
+  private renderSessionId: string | null = null;
+  private readonly renderHistories = new Map<string, RendererRenderStore>();
   private readonly inputGate = new RendererInputGate();
   private sourceSubscription: SourceSubscription | null = null;
 
@@ -156,6 +158,7 @@ class ControlHolder implements RendererControlHolder {
       this.stopInputSource();
       this.inputGate.setControl(null);
     }
+    this.prepareRenderSession(outcome.snapshot.sessionId);
     const installed = Object.freeze({ peer, snapshot: outcome.snapshot });
     this.currentValue = installed;
     this.inputGate.setControl(outcome.snapshot);
@@ -176,6 +179,7 @@ class ControlHolder implements RendererControlHolder {
     for await (const snapshot of peer.states()) {
       if (this.currentValue?.peer !== peer) continue;
       this.retireMismatchedData(peer, snapshot);
+      this.prepareRenderSession(snapshot.sessionId);
       this.currentValue = Object.freeze({ peer, snapshot });
       this.inputGate.setControl(snapshot);
       this.reconcileData(peer, snapshot);
@@ -196,19 +200,19 @@ class ControlHolder implements RendererControlHolder {
     for (const subsystemKey of keys) {
       const identity = desired.get(subsystemKey);
       const existingSlot = this.dataSlots.get(subsystemKey);
+      const historyKey = identity === undefined
+        ? ""
+        : this.renderHistoryKey(snapshot.sessionId, identity);
       const slot = existingSlot ?? {
         current: null,
         pending: null,
         failed: null,
-        renderIdentity: identity ?? null,
-        render: new RendererRenderStore(identity?.generation ?? 1),
+        renderHistoryKey: historyKey,
+        render: identity === undefined
+          ? new RendererRenderStore(1)
+          : this.renderHistory(historyKey, identity.generation),
       };
       this.dataSlots.set(subsystemKey, slot);
-
-      if (identity !== undefined && !sameIdentity(slot.renderIdentity, identity)) {
-        slot.render = new RendererRenderStore(identity.generation);
-        slot.renderIdentity = identity;
-      }
 
       if (identity === undefined || !sameIdentity(slot.current?.identity ?? null, identity)) {
         const current = slot.current;
@@ -226,6 +230,12 @@ class ControlHolder implements RendererControlHolder {
       }
       if (identity === undefined || !sameIdentity(slot.failed, identity)) {
         slot.failed = null;
+      }
+
+      if (identity !== undefined && slot.renderHistoryKey !== historyKey) {
+        slot.render.retireCarrier();
+        slot.renderHistoryKey = historyKey;
+        slot.render = this.renderHistory(historyKey, identity.generation);
       }
 
       if (identity === undefined) {
@@ -419,6 +429,33 @@ class ControlHolder implements RendererControlHolder {
       slot.failed = null;
     }
     this.dataSlots.clear();
+  }
+
+  private prepareRenderSession(sessionId: string): void {
+    if (this.renderSessionId === sessionId) return;
+    this.renderSessionId = sessionId;
+    this.renderHistories.clear();
+  }
+
+  private renderHistoryKey(
+    sessionId: string,
+    identity: DesiredDataIdentity,
+  ): string {
+    return JSON.stringify([
+      sessionId,
+      identity.subsystemKey,
+      identity.generation,
+      identity.dataProfile,
+    ]);
+  }
+
+  private renderHistory(key: string, generation: number): RendererRenderStore {
+    let store = this.renderHistories.get(key);
+    if (store === undefined) {
+      store = new RendererRenderStore(generation);
+      this.renderHistories.set(key, store);
+    }
+    return store;
   }
 
   private startInputSource(peer: RendererControlPeer): void {

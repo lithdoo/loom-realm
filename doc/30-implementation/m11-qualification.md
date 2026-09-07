@@ -23,7 +23,7 @@ renderer-receiver = 185
 transport = 0
 ```
 
-Coverage audit 强制验证 normative catalog 唯一性、group 全覆盖、fixture 注册/执行/通过集合相等、每条 fixture claimed role 非空，且 M11 不产生 transport evidence。
+Coverage audit 强制验证 normative catalog 唯一性、group 全覆盖、fixture 注册/执行/通过集合相等、每条 fixture claimed role 非空，且 M11 不产生 transport evidence。每个 fixture ID 绑定独立 callback；每次 callback 都创建新的 production sender/receiver 状态并验证 observable outcome，不缓存或扩散 group 结果。
 
 ## Implemented Boundaries
 
@@ -39,7 +39,7 @@ Coverage audit 强制验证 normative catalog 唯一性、group 全覆盖、fixt
     one internal Render replica per existing Data slot identity
     atomic Registry/Snapshot/Patch application
     transient Event deliver/drop trace
-    same-generation identity history across carrier replacement
+    same-generation identity history across carrier and Control participant replacement
     no public Render Store/subscription API
 ```
 

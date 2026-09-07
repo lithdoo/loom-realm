@@ -399,7 +399,7 @@ export class RenderManager {
   private lastBarrierIndex(domain: DomainRecord): number {
     for (let index = this.work.length - 1; index >= 0; index -= 1) {
       const item = this.work[index];
-      if (item?.kind === "event") return index;
+      if (item?.kind === "event" && item.domain === domain) return index;
     }
     return -1;
   }
