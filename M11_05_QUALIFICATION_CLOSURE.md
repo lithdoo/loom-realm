@@ -39,7 +39,7 @@ M11 不重新打开 M10 authority、Input 或 Data lifecycle 设计。
     business Domain authority / identity / lifecycle
 
 existing @loomrealm/data
-    Frozen Render Update v1 codec/send/disposition mechanics reused
+    Frozen Render Update v1 codec/send/disposition mechanics reused as final wire preflight
 
 @loomrealm/subsystem host
     one RenderManager authority responsibility
@@ -56,6 +56,8 @@ Desktop/Hostra vertical
 ```
 
 `RenderManager`、publication coordinator、Renderer Store 都只描述真实 responsibility/state boundary；不要求独立 reusable class/framework。
+
+M11 author boundary必须自己在 local commit前完成 author-shape/limit/stronger-lifetime validation；`@loomrealm/data` 继续拥有最终 outbound wire static validation。不得为了复用 M11 author validator新增 public codec/validator framework，也不得把 author invalidity推迟到 Data `local-fatal`。
 
 不属于 M11：DOM/Canvas/WebGL presentation、Content/resource resolution、component registry、layout/animation、PWA transport equivalence。
 
@@ -98,9 +100,12 @@ transport role 包含 Hostra/PWA application-trace equivalence，留到 M16。
 business Render authority only in Subsystem
 exact author API is synchronous local-only
 successful author values always representable by Frozen Render v1
+publication absence/backpressure never becomes author API error
 Frame close != Domain destroy
 Data retire != Domain destroy
-business close immediately removes Domain from desired Registry and discards not-yet-emitted Domain work
+business close immediately removes Domain from desired Registry
+business close starts no new Domain sends and discards pending/not-started Domain work
+already-started send may settle only before Registry removal ordering
 SDK domainId is valid/private and never reused within one Subsystem Runtime instance
 business Node key one-shot within business RenderDomain lifetime
 same-generation reconnect != new wire Domain lifetime
@@ -146,6 +151,7 @@ Generic Store / Observable / EventBus
 generic conformance framework for future protocols
 public RenderManager / RenderStore / subscription API
 mandatory separate manager/coordinator/store class hierarchy
+new public @loomrealm/data codec/validator surface only to DRY M11 author validation
 virtual DOM / reconciler
 component/plugin registry
 resource/content resolver
@@ -204,8 +210,10 @@ Qualification adapter只把 fixture observable actions映射到当前生产实�
 Subsystem exact public-boundary compile tests
 Subsystem validation/detach/lifecycle tests
 publication Registry/baseline/revision/Event tests
-business close → desired Registry removal / pending discard tests
+business close → desired Registry removal / pending-not-started discard tests
+already-started send → Registry removal ordering test
 revision-exhaustion no-wrap + fresh private wire-domain rollover sender test
+publication pressure / no-carrier does not reject valid author mutation
 Renderer atomic replica/disposition tests
 identity/tombstone tests
 same-generation reconnect real vertical
