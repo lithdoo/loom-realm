@@ -1,240 +1,190 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Implemented / Qualified；M9+ Planned
-> 稳定程度：M8 Implementation Closed
-> 主要定义：M7 Renderer Control holder、M8 Renderer Data peer reconciliation，以及 M10+ Input/Render/Content slice placement
-> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)  
-> 最近复核：2026-09-04
+> 状态：M8 Implemented / Qualified；M10 Input Preimplementation Closed  
+> 稳定程度：M8 Implementation Closed / M10 Frozen Plan  
+> 主要定义：Renderer Control holder、per-subsystem Data reconciliation、M10 Input gate/publisher/source placement、M11+ Render placement  
+> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[ADR 0029](../../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 最近复核：2026-09-07
 
-Renderer 不是 Frame/Call participant。它只镜像 Main committed authority，并在后续 current Data carriers 上执行 Renderer Data Profile child protocols。
-
-M8 已实施 Control-driven per-subsystem Data peer reconciliation；Input/Render/Content 业务状态仍不提前建 registry/framework。
+Renderer 不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render child protocol role behavior。
 
 ---
 
-## 1. Current Module Shape Through M8
+## 1. Current Shape
 
 ```text
 @loomrealm/renderer
-└── Control holder/orchestration
-    ├── current peer reference/identity
-    ├── current RendererAuthoritySnapshotV1 | null
-    └── per-subsystem Data slot
-        ├── 0..1 current RendererDataPeer
-        ├── 0..1 pending acquire
-        └── 0..1 failed desired identity (Control peer + S/G/P)
+└── one Control holder
+    ├── current {peer,snapshot} | null
+    ├── per-subsystem Data slot
+    │   ├── 0..1 current RendererDataPeer
+    │   ├── 0..1 pending acquire
+    │   └── 0..1 failed desired identity
+    └── optional holder-lifetime canonical input source   // M10
 ```
 
-逻辑 state exactly：
-
-```text
-{peer, snapshot} | null
-```
-
-M7 不创建：
-
-```text
-Control Store framework
-RendererControlBinding adapter
-Data Connection Registry
-Input Manager
-Render Store
-ObserverHub/EventBus
-currentness lease/epoch/heartbeat
-Data/Input/Render empty modules
-```
-
-`RendererControlBinding` 是 **Main-facing Platform candidate-slot capability**，不是 Renderer-facing port。Renderer 只消费已经交给它的 renderer-control peer/carrier-side protocol role。
+M8已实现 Control-driven Data reconciliation。M10只在现有 current Data slot上增加 Input local state，不创建独立 connection/currentness layer。
 
 ---
 
-## 2. M7 Renderer Control Holder
+## 2. Authority / Currentness
 
 Main publishes committed：
 
 ```text
 Runtime projection
-Frame Stack / Activation
-InputTarget
+Frame / Activation / InputTarget
 DataAuthority {subsystemKey,generation,dataProfile}
 ```
 
-M8 Main implementation对每个 ready Runtime发布：
-
-```text
-DataAuthority(S, 1, "loomrealm.renderer-data/1")
-```
-
-Renderer role不：
+Renderer不得：
 
 ```text
 create/recover Frame or Activation
 modify Stack
-compute Runtime failure unwind
-create InputTarget from DOM/Render/Interest
-revalidate protocol revision/session/schema
+compute failure unwind
+create InputTarget from focus/Interest
+revalidate Control revision/session/schema
+mint Data authority/currentness
 ```
 
-Whole accepted Snapshot原子替换；不得逐字段更新。
+Control snapshot whole-replace；local current holder不是 Main remote-currentness proof。Old peer late state/terminal不得影响 replacement current。
 
 ---
 
-## 3. Initial Hello Handoff
+## 3. Data Slot
 
-Renderer-control peer：
-
-```text
-send renderer.hello(id=1)
-→ validate hello Result Snapshot R
-→ return initial accepted R
-```
-
-Renderer role必须先原子安装：
+Desired Data identity remains exactly：
 
 ```text
-current = {peer, snapshot:R}
-```
-
-之后才开始消费该 peer later `renderer.state`。
-
-Later-state surface可以是 lazy `AsyncIterable`、explicit start或等价机制；不得为了 handoff建立第二个 queue/Store。
-
----
-
-## 4. Replacement / Local Currentness
-
-Main replacement可能先撤销 old participant，旧 Renderer稍后才观察 carrier close/terminal。
-
-因此：
-
-```text
-local current != null
-→ locally accepted Control mirror exists
-→ this Renderer has not yet observed peer terminal
-→ NOT an independent proof that Main still considers it current
-```
-
-B 已在本地安装后：
-
-```text
-A late Snapshot     → ignore
-A late terminal     → ignore for B
-A inFlight late msg → ignore if A no longer local current peer
-```
-
-只有：
-
-```text
-terminalPeer === current.peer
-```
-
-才：
-
-```text
-current = null
-```
-
-不得新增 lease、epoch、heartbeat或第二套 currentness protocol。
-
----
-
-## 5. Control Loss
-
-Current peer terminal：
-
-```text
-current = null
-```
-
-本地立即视为：
-
-```text
-InputTarget unavailable
-DataAuthority unavailable
-ordinary input authority unavailable
-```
-
-M8+ real Data Connection出现后，其 consumer按 current Main authority/DataAuthority retirement 关闭 current Data；M7 不预建 Data registry。
-
-Render stale-presentation cache属于 M11 Render Store，不属于 Control holder。
-
----
-
-## 6. Renderer-facing Platform Capabilities
-
-M7 Renderer package**没有** Renderer Control Platform port。
-
-Future real Renderer consumers：
-
-```text
-M8+
-    RendererDataBinding / current Data connection integration
-
-M12+
-    ContentClient
-
-M14/M16 concrete product
-    DOM/Canvas/WebGL/presentation/input environment
-    BrowserWindow/Window bootstrap
-```
-
-Renderer Core不得自行发现 WebSocket URL、MessagePort、ticket、Process/Worker或 Main internal state。
-
----
-
-## 7. M8 Data Connection Slice
-
-M8 adds real consumers around frozen authority：
-
-```text
-Main DataAuthority {S,G,P}
-+
-current Renderer participant
-+
-Platform-provisioned paired carrier
-→ current Data Connection
-```
-
-Connection identity：
-
-```text
-Session
-+ current Renderer participant
+current Control peer
 + subsystemKey
 + generation
-+ matching dataProfile
++ dataProfile
 ```
 
-Renderer local Control holder itself cannot mint remote currentness or Data currentness。
+Data loss/provision failure不等于 Runtime/Frame failure。
 
-Data loss/provision failure != Runtime failure/Frame unwind。
+fresh current Data peer建立新的 carrier-local Input/Render publication state；旧 slot的 handler/publisher settlement不得复活。
 
 ---
 
-## 8. M10 User Input Slice
+## 4. M10 Effective Input Gate
 
-Future effective gate：
+对 `(S,F,A,C)`：
 
 ```text
-current matching Data S/G/P
+Effective
+=
+current matching Data
+∧ current Control snapshot
 ∧ Main InputTarget == (S,F,A)
-∧ mirrored F active/current A
-∧ C ∈ Interest[F]
+∧ mirrored F active with activationId A
+∧ C ∈ current Interest[F]
 ∧ Producer(C) available
 ```
 
-Interest是 Frame-scoped config，不是 authority。
+Interest / focus / component / carrier existence不能创建 authority。
 
-Renderer Control 与 Data无 cross-connection total order；不增加 ACK/revision join/barrier。
+Control 与 Data没有 cross-connection total order；Interest-first / Authority-first都通过 current facts重算收敛，不增加 ACK/revision join/barrier。
+
+ADR 0029 的 Subsystem mutation gate不进入 Renderer Effective；Renderer无需知道业务是否暂时 suppress delivery。
 
 ---
 
-## 9. M11 Render Slice
+## 5. Input Slot State
 
-Subsystem拥有 Domain Registry/State/revision；Renderer只维护 authoritative replica + local presentation。
+每个 current Data slot的 Input state只需要：
 
-fresh Data carrier：
+```text
+current full Interest Registry
+current Effective facts
+one bounded User Input publisher
+```
+
+不得创建：
+
+```text
+InputTarget registry
+Frame/Activation shadow state machine
+Input Store/EventBus
+currentness lease/heartbeat
+```
+
+Data retire立即销毁该 carrier-local Registry/Effective/publisher state。
+
+---
+
+## 6. Bounded Publisher
+
+User Input coalescing/backpressure由 Renderer role拥有；`@loomrealm/data`只负责 validated serialized send。
+
+```text
+0..1 Data send inFlight
+bounded pending input work
+```
+
+Frozen rules：
+
+```text
+State = latest pending per state channel between barriers
+Event = ordered / no coalesce / bounded / may drop before emitted
+Event = global State-coalescing barrier
+Reset = teardown + global State-coalescing barrier
+```
+
+State不得跨 Event/Reset移动。Event overflow必须在 generic Data writer overflow之前 local-drop；不能把普通 Input backlog变成 Data local-fatal。
+
+---
+
+## 7. Lease / Producer Transitions
+
+same-carrier old lease → new lease：
+
+```text
+old Effective false immediately
+→ discard obsolete not-started old State/Event
+→ best-effort Reset(old)
+→ first new ordinary input only after Reset barrier
+```
+
+`.state` producer loss：Reset current lease并重新 baseline其它 remaining Effective states；return时 fresh baseline。
+
+`.event` producer loss/return只影响 future Events。
+
+---
+
+## 8. Canonical Input Source
+
+M10只允许一个窄 source seam：
+
+```text
+one optional source injected at Renderer holder construction
+→ owned/consumed for holder lifetime
+→ availability may change
+→ no runtime producer registry
+```
+
+Source只提供：
+
+```text
+canonical channel availability
+current self-contained State sample
+future canonical transitions/events
+```
+
+Source不知道 Frame/Activation/Interest/Data/wire ordering，也不能直接调用 Data peer。
+
+M10使用 deterministic source；M14 BrowserWindow DOM/Pointer/Gamepad mapping必须复用同一 seam/gate/publisher。
+
+---
+
+## 9. M11 Render Placement
+
+Subsystem拥有 Domain Registry/State/revision；Renderer维护 authoritative replica + local presentation。
+
+fresh Data：
 
 ```text
 render.domains
@@ -247,104 +197,50 @@ Frame close != Domain destroy
 Data retire != authoritative Domain destroy
 ```
 
-Renderer MAY保留 stale presentation cache，但它不是 current Control/Data authority proof。
+Renderer MAY保留 stale presentation cache，但它不是 current authority proof。
 
 ---
 
-## 10. Reload / Replacement Across Later Slices
-
-完整 future reload：
-
-```text
-fresh Renderer Control candidate
-→ Main grants fresh current participant
-→ full Snapshot
-→ Renderer installs local current holder
-→ Platform provisions current Data S/G/P
-→ Input fresh baseline
-→ Render fresh Registry/Snapshots
-```
-
-不得恢复：
-
-```text
-old Activation
-old Renderer participant currentness
-old carrier Interest registry
-historical Input Event
-historical Render Patch/Event chain
-```
-
----
-
-## 11. Physical Realizations
+## 10. Physical Realization
 
 ```text
 M14 Hostra Desktop
-    Renderer hosting        BrowserWindow
-    Renderer Control        WebSocket text
-    Data                    authenticated Data WebSocket
-    Content                 HTTP/fs
+    BrowserWindow
+    Renderer Control WebSocket
+    M9 Data WebSocket Broker
+    real DOM/Gamepad input source
+    presentation
 
 M16 PWA
-    Renderer hosting        Window
-    Renderer Control        MessagePort postMessage(string)
-    Data                    transferred MessagePort
-    Content                 Fetch/SW/OPFS
+    Window + MessagePort Control/Data
+    same logical Input/Render semantics
 ```
 
-Physical bootstrap/Port transfer属于 Platform；application payload仍是 JSON text string。
-
-M14/M16 必须遵守同一 Frozen M7 currentness/replacement semantics，不创建 Hostra/PWA-specific Renderer authority protocol。
+M10 不新增 Platform Port，也不实现 BrowserWindow。
 
 ---
 
-## 12. Backpressure Placement
+## 11. Tests / Invariants
+
+M10必须证明：
 
 ```text
-M7 Renderer Control  → latest full Snapshot / structural 1+1 bound
-M10 Input State      → latest coalescible state
-M10 Input Event      → bounded ordered lossy queue
-M11 Render commit    → Render protocol revision rules
-M11 Render Event     → bounded transient queue
+Interest-first / Authority-first convergence
+fresh Activation/Data state baseline
+same-carrier Reset-before-new-input
+Event/Reset barrier correctness
+bounded Event overflow without Data local-fatal
+producer loss/return
+old holder/source/Data slot cannot emit after replacement
 ```
 
-M7 Holder自己没有 publication queue/history。
-
----
-
-## 13. Tests
-
-M7 必须覆盖：
-
-```text
-initial Snapshot before later-state consumption
-atomic {peer,snapshot} install
-whole Snapshot replacement
-B replaces A
-A late Snapshot ignored
-A late/inFlight delivery ignored after B local current
-A terminal cannot clear B
-current terminal clears current
-local current not treated as Main remote-currentness proof
-no duplicate revision/session validator
-no Store/EventBus/subscription framework
-no Renderer-facing RendererControlBinding abstraction
-```
-
-M8 real Data consumers与 lifecycle tests已关闭；M10/M11再增加 Input/Render business semantics，不得提前用 fake future registries替代真实 consumer。
-
----
-
-## 14. Final Invariants Through M8
+Final invariants：
 
 1. Renderer不是 Frame RPC participant；
-2. Renderer Core platform-neutral；
-3. M7 state exactly local `{peer,snapshot}|null`；
-4. renderer-control peer owns protocol legality；Renderer role不重复 revision/session validator；
-5. local holder不是 Main remote-currentness proof；
-6. `RendererControlBinding` 不属于 Renderer-facing M7 API；
-7. M8 Data desired identity exactly Control peer + S/G/P；failure/current/pending均 per subsystem slot；
-8. no Store/Registry/EventBus/lease/currentness framework in M8；
-9. Data/Input/Render lifecycles保持独立；
-10. Hostra/PWA application unit统一 JSON text string，physical realization分别 M14/M16。
+2. Control holder仍是唯一 local Control current record；
+3. M8 Data currentness不被 Input重复实现；
+4. M10 Input只组合 current facts；
+5. one holder-lifetime source，无 producer registry；
+6. one bounded publisher per current Data slot；
+7. Input/Data/Frame/Render lifetimes保持独立；
+8. Hostra/PWA physical差异不得改变 logical User Input semantics。
