@@ -1,6 +1,6 @@
 # M10 / 04 — User Input Vertical Integration
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implementation Frozen / Ready for Implementation**  
 > 阶段：M10 User Input  
 > 落地顺序：04  
 > 最近复核：2026-09-07  
@@ -9,7 +9,7 @@
 > 依赖基线：M9 Desktop Data Broker / late provisioning qualified  
 > 目标：在真实 M9 Data lifecycle 上跑通 Main authority → Renderer gate → User Input wire → Subsystem InputManager → business listener；仅 physical input source保持 deterministic。
 
-> **M10 vertical 不允许直接注入 protocol message、InputTarget、Interest 或 current Data peer。Control、Data、Input 必须走生产路径。**
+> **M10 vertical 不允许直接注入 protocol message、InputTarget、Interest 或 current Data peer。Control、Data、Input 必须走生产路径；业务只通过冻结的 `@loomrealm/subsystem` InputListener surface观察结果。**
 
 ---
 
@@ -24,7 +24,7 @@ real LogicalGameBootstrap
 → real paired Data WebSocket
 → real RendererDataPeer
 → Renderer input gate + bounded publisher
-→ deterministic canonical input source
+→ deterministic RendererInputSource
 → input.state/event/reset
 → real SubsystemDataPeer
 → Subsystem InputManager
@@ -43,16 +43,75 @@ M10 不要求 BrowserWindow 或 physical Renderer Control WebSocket；它们仍�
 
 ```text
 Frame activate
-→ create InputListener(frame, [keyboard.state, keyboard.event])
+→ scope.createInputListener({
+     frame,
+     channels: ["keyboard.state", "keyboard.event"]
+   })
+→ listener.on("keyboard.state", ...)
+→ listener.on("keyboard.event", ...)
 → canonical keyboard input
 → business-observable result
 ```
 
 Fixture业务只依赖 `@loomrealm/subsystem` author API，不 import protocol/platform packages。
 
+Handler收到 canonical **payload only**，不得通过测试 fixture暴露 frameId/activationId/wire envelope。
+
 ---
 
-## 3. Cross-plane Convergence
+## 3. SDK Surface Vertical
+
+必须直接证明冻结的 author semantics：
+
+```text
+channels own Interest contribution
+on()/unsubscribe() do not alter Interest
+setChannels preserves registrations
+removed-channel handler dormant
+re-add reactivates handler
+unsubscribe idempotent
+close idempotent
+on/setChannels after close → TypeError
+```
+
+Retained local baseline：
+
+```text
+channel already in derived union + current retained State exists
+→ newly registered state handler gets one synchronous current baseline
+
+listener removes channel while another listener keeps union
+→ handler dormant, retained State remains globally current
+→ re-add channel
+→ same handler gets one synchronous current baseline
+
+union actually removes state channel
+→ retained State cleared
+→ later re-add waits for fresh Renderer baseline
+```
+
+`.event` handler registration/re-add never replays historical Event。
+
+---
+
+## 4. Deterministic Handler Ordering
+
+真实 business fixture必须证明：
+
+```text
+same-channel handlers invoked in registration order
+handler mutation during delivery does not alter current stable delivery snapshot
+sync throw contained; later handlers still invoked
+returned Promise not awaited before later handler invocation
+never-settling Promise does not stall Data reader
+rejected Promise contained; Data stays current
+```
+
+Multi-channel local State convergence按 canonical ASCII channel order；同 channel 内按 registration order。
+
+---
+
+## 5. Cross-plane Convergence
 
 必须分别跑：
 
@@ -75,7 +134,7 @@ Authority first
 
 ---
 
-## 4. Real Activation Replacement
+## 6. Real Activation Replacement
 
 至少一次 nested Frame call：
 
@@ -95,7 +154,7 @@ A1 State/Event不得跨到 A2。
 
 ---
 
-## 5. Recoverable Mutation Gate Trace
+## 7. Recoverable Mutation Gate Trace
 
 必须覆盖 ADR 0029 的真实 no-commit path：
 
@@ -106,13 +165,16 @@ F/A active + retained State S0
 → producer changes to S1
 → Renderer sends S1
 → Subsystem retains S1 but does not deliver while gate closed
-→ frame.call returns explicit recoverable pre-commit rejection
+→ frame.call receives explicit recoverable pre-commit rejection
 → same F/A mutation gate reopens
-→ business observes latest State S1
+→ InputManager synchronously invokes latest retained State handlers
+→ only then frame.call Promise becomes rejected/observable to business catch
 → no historical Event replay
 ```
 
-并覆盖成功 commit 对照：
+Test必须证明 business `catch` 开始执行时，同步 State handler side effect已经发生；异步 handler Promise completion不属于该 ordering guarantee。
+
+成功 commit 对照：
 
 ```text
 pending call while S1 suppressed
@@ -124,7 +186,7 @@ pending call while S1 suppressed
 
 ---
 
-## 6. Data Reconnect
+## 8. Data Reconnect
 
 Frame/Activation不变时退休 current Data：
 
@@ -139,40 +201,36 @@ old Data retired
 → historical Event not replayed
 ```
 
-这条是 M10 对 M9 physical lifecycle 的 business-baseline qualification。
-
 另用 role-level deterministic carrier fixture证明 fresh generation具有同样的 Interest/State/Event fresh-baseline语义；不为测试提前给 Main增加 generation allocator。
 
 ---
 
-## 7. Local Listener / Handler Behavior
+## 9. Renderer Source Lifecycle
 
-真实 business fixture还必须证明：
+Vertical必须使用冻结的：
 
-```text
-second .state listener added while current State retained
-→ receives current local baseline without extra wire baseline
-
-.event listener added late
-→ no historical Event
-
-handler throws/rejects
-→ other matching listener still runs
-→ Data remains current
+```ts
+createRendererControlHolder(data?, input?)
 ```
 
-非法 author channel/union configuration：
+并证明：
 
 ```text
-local atomic rejection
-→ old DesiredRegistry unchanged
-→ no wire send
-→ Data remains current
+no current Control → no active source subscription
+current Control install → source.start once
+Control replacement/terminal → old source subscription invalidated/stopped
+late emit from stopped subscription ignored
+same holder later installs Control → same source object start again
+fresh subscription starts with no inherited producer facts
 ```
+
+`.state` producer return必须 fresh current sample先于 availability=true；否则 channel不得成为 available。
+
+M14 browser source以后必须通过同一 surface，不允许另开 authority/input path。
 
 ---
 
-## 8. Producer / Ordering / Backpressure
+## 10. Producer / Ordering / Backpressure
 
 必须通过 production input gate证明：
 
@@ -189,13 +247,20 @@ bounded Event overflow drops un-emitted Event
 Producer loss/return：
 
 ```text
-.state loss → Reset → remaining state rebaseline
-return → fresh State baseline
+.state loss
+→ producer sample cleared
+→ Reset
+→ remaining state rebaseline
+
+return
+→ fresh sample
+→ availability=true
+→ fresh State baseline if Effective
 ```
 
 ---
 
-## 9. Failure Boundaries
+## 11. Failure Boundaries
 
 必须证明：
 
@@ -205,13 +270,15 @@ protocol-invalid input → Data protocol terminal
 Data carrier loss → Data reacquire path, no Runtime failure
 Control current loss → all ordinary input disabled
 business handler failure → local containment, no Data terminal
+invalid author configuration → local TypeError/RangeError, no Data effect
+invalid trusted source canonical payload → existing @loomrealm/data local-fatal boundary; no silent normalization
 ```
 
 M10 不添加 retry/replay/reconnect policy。
 
 ---
 
-## 10. No Bypass Rule
+## 12. No Bypass Rule
 
 Vertical fixture不得：
 
@@ -221,13 +288,14 @@ write User Input wire directly
 set Renderer Interest/InputTarget directly
 construct fake current Data peer outside M9 Broker
 bypass bounded input publisher
+invoke business handler directly to fake baseline/convergence
 ```
 
-唯一新增可控 seam 是 holder-lifetime canonical input source。
+唯一新增可控 seam 是 exact `RendererInputSource`。
 
 ---
 
-## 11. Done
+## 13. Done
 
 M10/04 完成第一次真实证明：
 
@@ -236,9 +304,9 @@ Main InputTarget
 × Subsystem Desired Interest
 × Renderer Producer
 × current M9 Data connection
-→ stable business-observable User Input
+→ deterministic business-observable User Input
 ```
 
-包括：cross-plane convergence、fresh Activation、recoverable mutation convergence、fresh Data baseline、barrier/backpressure 与 business error isolation。
+包括：SDK surface semantics、handler ordering/isolation、cross-plane convergence、fresh Activation、recoverable mutation convergence、fresh Data baseline、source lifecycle、barrier/backpressure 与 failure isolation。
 
 下一步：[M10 / 05 — Qualification and Closure](M10_05_QUALIFICATION_CLOSURE.md)。
