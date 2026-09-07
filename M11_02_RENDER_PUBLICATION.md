@@ -56,6 +56,16 @@ no historical authoritative publication queue is required
 next fresh carrier observes latest current state through Registry + Snapshots
 ```
 
+Data absent、publication backlog、send outcome 都不能反向改变已经通过 local validation 的 author mutation：
+
+```text
+replace → authoritative local state commits
+emit    → author call succeeds; Event MAY be dropped by current publication policy
+close   → business lifetime closes
+```
+
+只有 M11/01 定义的 local validation/lifetime misuse 才从 author API 抛错；普通 publication pressure 不向 business 暴露。
+
 ---
 
 ## 3. Identity / Generation
@@ -88,7 +98,9 @@ Frozen Render v1 禁止 revision wrap/reuse。若某 current carrier/domain 的 
 
 ```text
 MUST NOT emit MAX+1 / wrap / reuse revision
-→ discard pending old-wire-domain Events
+→ stop starting new old-wire-domain Snapshot/Patch/Event sends
+→ discard pending/not-started old-wire-domain Events/work
+→ allow any already-started send to settle
 → mint one fresh SDK-private domainId
 → emit next full Registry with old domainId absent + fresh domainId present
 → fresh domainId starts unbaselined
@@ -122,7 +134,7 @@ Registry present before Domain message
 fresh baseline uses Snapshot
 Patch only R→R+1
 post-baseline Snapshot commits R+1
-Domain removal discards pending unsent Domain messages
+Domain removal discards pending/not-started Domain messages
 carrier loss discards all old carrier cursors/pending output
 ```
 
@@ -131,12 +143,14 @@ Business `close()` 与 publication 直接闭合：
 ```text
 close() local commit
 → Domain immediately absent from desired business Registry
-→ discard all not-yet-emitted Snapshot/Patch/Event for that Domain
-→ if old wire domainId was emitted present, next valid Registry publication removes it
-→ after removal publication, no message for that old wire domainId may be sent
+→ no new Snapshot/Patch/Event send for that Domain may start
+→ discard all pending/not-started Snapshot/Patch/Event for that Domain
+→ allow any already-started send to settle
+→ if old wire domainId was emitted present, next Render publication for that lifecycle change is Registry removal
+→ after Registry removal is emitted, no message for that old wire domainId may be sent
 ```
 
-已经进入 ordered-send boundary 的 message 不能 retract；它属于 close 之前的 emitted history。close 不等待 Registry send completion。
+Foundation/Data 不保证取消已经开始的 `send()`。因此 close 前已经 started 的 send MAY 在 close 后才 resolve；若它成功，则其 emitted position逻辑上仍先于后续 Registry removal。close 不等待 send completion，也不把该 race 暴露给 author。
 
 `replace()` 不对应固定 Patch。publication 可基于 `lastEmittedRevision`：
 
@@ -164,7 +178,7 @@ no current carrier
 current carrier + Domain unbaselined
 → Event MAY enter bounded current-carrier pending queue
 → Snapshot establishing current target lifetime MUST emit first
-→ carrier loss / Domain removal / forced wire-id rollover discards pending Event
+→ carrier loss / Domain removal / forced wire-id rollover discards pending/not-started Event
 
 current carrier + Domain baselined
 → ordinary bounded ordered Event publication
@@ -177,7 +191,7 @@ current-carrier pending Event
 != historical replay
 ```
 
-保留的未 emitted Event 是 authoritative coalescing barrier；若 backpressure policy 在 emitted 前丢弃 Event，则 barrier 同时消失。
+保留的未 started Event 是 authoritative coalescing barrier；若 backpressure policy 在 start 前丢弃 Event，则 barrier 同时消失。已经 started 的 Event 不能 retract，按其最终 send outcome处理。
 
 Event：
 
@@ -203,22 +217,22 @@ bounded pending Event work
 允许：
 
 ```text
-unemitted desired authoritative changes coalesce to latest representable state
+not-started desired authoritative changes coalesce to latest representable state
 Snapshot fallback
-Event drop before emitted under pressure
+Event drop before send starts under pressure
 ```
 
 禁止：
 
 ```text
-retract/reorder emitted authoritative message
+retract/reorder started or emitted authoritative message
 retry an accepted send after loss
 replay old Patch/Event
 ACK/NACK/resume cursor
 history log
 ```
 
-`emitted` 完全沿用 Frozen Render v1：current carrier ordered send boundary 成功接受 application unit。
+`emitted` 完全沿用 Frozen Render v1：current carrier ordered send boundary 成功接受 application unit。`started` 只是实现侧已有 `send*()` in-flight、尚未得到 outcome 的状态，不是新的 wire/protocol state。
 
 ---
 
@@ -242,6 +256,8 @@ Render publication/Data failure：
 ```
 
 Author validation已经保证成功 local state/event 可表示为 Frozen Render v1；若 publication 内部仍构造非法 outbound message，这是 implementation/programming failure，不得转嫁给 author，也不得依赖 Renderer 宽容解析。
+
+`@loomrealm/data` 仍是 outbound wire static validation/serialization 的最终 owner。M11 author validator 是 role-local commit guard；不得仅为了 DRY 扩大 `@loomrealm/data` public codec/validator API，也不得把 author validation推迟到 `send*()` 后让 local-fatal Data terminal替代业务错误。
 
 ---
 
@@ -268,6 +284,7 @@ transport retry/backoff
 Renderer acknowledgment/resync protocol
 history/replay buffer
 raw carrier competing reader/writer
+new public @loomrealm/data validator/codec surface only for M11 convenience
 DOM/presentation logic
 ```
 
@@ -285,11 +302,13 @@ old carrier cursor/pending output retired
 fresh-generation wire reset by sender-role fixture
 revision continuity + Snapshot fallback
 revision exhaustion never wraps and rolls to one fresh private wire domainId
-business close removes desired Domain and discards not-yet-emitted Domain work
+business close starts no new Domain sends and discards pending/not-started Domain work
+already-started send settles before Registry removal ordering
 Domain removal publication barrier
 no-carrier Event never crosses into future carrier
 prebaseline retained Event follows establishing Snapshot
 Event no replay / bounded drop / barrier semantics
+publication pressure never becomes author API error
 Data terminal keeps business Domains and does not fail Runtime/Frame
 outbound preflight prevents illegal v1 message
 ```
