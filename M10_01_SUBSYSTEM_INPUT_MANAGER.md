@@ -60,6 +60,75 @@ export type InputEventChannel =
 
 export type InputChannel = InputStateChannel | InputEventChannel;
 
+export type InputJsonObject = JsonObject;
+
+export type KeyboardCode = KeyboardCodeV1;
+export type PointerKind = "mouse" | "touch" | "pen";
+export type PointerButton =
+  | "primary"
+  | "auxiliary"
+  | "secondary"
+  | "back"
+  | "forward";
+
+export interface PointerSample {
+  readonly pointerId: number;
+  readonly kind: PointerKind;
+  readonly x: number;
+  readonly y: number;
+  readonly buttons: readonly PointerButton[];
+}
+
+export interface GamepadAxes {
+  readonly leftX: number;
+  readonly leftY: number;
+  readonly rightX: number;
+  readonly rightY: number;
+}
+
+export interface GamepadButtons {
+  // exact User Input v1 standard logical button fields
+}
+
+export interface GamepadSample {
+  readonly gamepadId: number;
+  readonly axes: GamepadAxes;
+  readonly buttons: GamepadButtons;
+}
+
+export type GamepadButtonName = keyof GamepadButtons;
+
+export interface KeyboardStateInput {
+  readonly down: readonly KeyboardCode[];
+}
+
+export interface KeyboardEventInput {
+  readonly action: "down" | "up";
+  readonly code: KeyboardCode;
+  readonly repeat: boolean;
+}
+
+export interface PointerStateInput {
+  readonly pointers: readonly PointerSample[];
+}
+
+export interface PointerEventInput {
+  readonly action: "down" | "up" | "cancel";
+  readonly pointer: PointerSample;
+  readonly button: PointerButton | null;
+}
+
+export interface GamepadStateInput {
+  readonly gamepads: readonly GamepadSample[];
+}
+
+export interface GamepadEventInput {
+  readonly action: "down" | "up";
+  readonly gamepadId: number;
+  readonly button: GamepadButtonName;
+  readonly value: number;
+}
+
 export type InputPayload<C extends InputChannel> =
   C extends "keyboard.state" ? KeyboardStateInput :
   C extends "keyboard.event" ? KeyboardEventInput :
@@ -67,7 +136,7 @@ export type InputPayload<C extends InputChannel> =
   C extends "pointer.event" ? PointerEventInput :
   C extends "gamepad.state" ? GamepadStateInput :
   C extends "gamepad.event" ? GamepadEventInput :
-  C extends `x.${string}.state` | `x.${string}.event` ? JsonObject :
+  C extends `x.${string}.state` | `x.${string}.event` ? InputJsonObject :
   never;
 
 export type InputHandler<C extends InputChannel> =
@@ -91,6 +160,22 @@ export interface InputListener {
 }
 ```
 
+`KeyboardCode` exact union = User Input v1 frozen `KEYBOARD_CODES_V1` set；实现可用内部 type alias 复用 `KeyboardCodeV1`，但 author root name固定为 `KeyboardCode`。
+
+`GamepadButtons` exact fields、所有 standard payload numeric range/canonical ordering以 User Input v1 为唯一事实源；author types只是结构等价 projection，不能出现第二套字段/范围。Supporting type names固定为：
+
+```text
+InputJsonObject
+KeyboardCode
+PointerKind
+PointerButton
+PointerSample
+GamepadAxes
+GamepadButtons
+GamepadSample
+GamepadButtonName
+```
+
 `SubsystemScope` exact M10 extension：
 
 ```ts
@@ -100,20 +185,7 @@ interface SubsystemScope {
 }
 ```
 
-Standard author payload types：
-
-```text
-KeyboardStateInput
-KeyboardEventInput
-PointerStateInput
-PointerEventInput
-GamepadStateInput
-GamepadEventInput
-```
-
-以及它们需要的 canonical supporting types（Keyboard code、Pointer sample/button/kind、Gamepad sample/axes/buttons）全部是 User Input v1 对应 payload 的 **结构等价 author projection**；字段、numeric range、canonical ordering不得另定义第二套语义。
-
-Custom `x.*` handler value是 bounded JSON object payload。
+Custom `x.*` handler value是 `InputJsonObject`；它结构上复用 shared bounded JSON object model，不要求业务 import `@loomrealm/wire`。
 
 Handler **只收到 payload**，绝不收到：
 
@@ -124,7 +196,7 @@ generation / dataProfile
 RendererDataPeer / MessageCarrier
 ```
 
-实现可在 package 内部通过 type alias 复用 `@loomrealm/data` / shared JSON types，但 root-export 使用上述 author names；业务 Definition 只 import `@loomrealm/subsystem`。
+实现可在 package 内部通过 type alias 复用 `@loomrealm/data` / shared JSON types，但 root-export 使用上述 exact author names；业务 Definition 只 import `@loomrealm/subsystem`。
 
 ---
 
@@ -252,6 +324,8 @@ wire/data payload object
 
 具体 clone/freeze helper是 private mechanics，不形成新的 public abstraction；业务对收到对象的突变尝试不得改变以后 retained baseline。
 
+Author-visible payload **object identity不是 contract**；实现可以对同一 immutable retained version复用对象，也可以等价重新 materialize，业务只能依赖结构值语义。
+
 Interest union真正移除一个 `.state` channel时立即清该 channel retained State；移除整个 Frame entry时清该 Frame retained State。
 
 ---
@@ -332,11 +406,11 @@ Reset(current F/A) → clear retained/suppressed State
 
 ```text
 single channel delivery
-    handlers by registration order
+    handlers by global InputManager registration order
 
 multi-channel local convergence
     channels by canonical ASCII channel order
-    then handlers by registration order
+    then handlers by global registration order
 ```
 
 因此 handler 在 invocation 中调用：
@@ -370,10 +444,12 @@ invoke handler synchronously
 所以：
 
 ```text
-sync throw          → contained
-Promise reject      → contained
+sync throw            → contained
+Promise reject        → contained
 Promise never settles → does not stall Data reader / other input delivery
 ```
+
+Async Promise completion order不构成 Input delivery ordering guarantee。
 
 M10 不建立 diagnostics/event framework；具体 logging 属于以后独立 diagnostics policy。
 
@@ -387,7 +463,7 @@ M10 不建立 diagnostics/event framework；具体 logging 属于以后独立 di
 restore same F/A mutation eligibility
 → synchronously perform retained-State convergence
    canonical state-channel order
-   matching handlers registration order
+   matching handlers global registration order
 → only after all eligible handler invocations have been attempted,
    settle frame.call() with recoverable rejection
 ```
@@ -440,6 +516,7 @@ Runtime terminal最终清全部 listener/Interest/retained State。
 ```text
 one InputManager per Subsystem instance
 per-listener contribution + registration records
+one global registration ordinal
 one derived DesiredRegistry
 minimal immutable retained State
 one latest-only Interest publisher
@@ -466,15 +543,17 @@ platform event objects in author API
 M10/01 必须证明：
 
 ```text
-exact root-export Input SDK types compile
+exact root-export Input SDK names/types compile
+standard/supporting author type names are frozen
 handler receives payload only, never protocol envelope
 channels own Interest; on/unsubscribe never mutate Interest
 empty contribution valid / duplicates invalid
 unsubscribe + close idempotent
 setChannels preserves dormant handlers
-registration-order + stable-snapshot delivery
+global registration-order + stable-snapshot delivery
 state on()/reactivation local baseline
 .event no local replay
+payload object identity not relied upon
 async handler never stalls Data dispatch
 local invalid configuration rejects atomically without Data failure
 multiple listener union / close isolation
