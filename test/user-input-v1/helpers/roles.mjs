@@ -125,6 +125,14 @@ export function subsystemRole({ frameCount = 1 } = {}) {
     interests,
     sends,
     peer,
+    suspendFrame(frameId = "root") {
+      // Mirrors FrameRuntime's committed administrative-suspend transition into InputManager.
+      const view = views.get(frameId);
+      assert.equal(view?.kind, "live", `missing live Frame ${frameId}`);
+      view.deliveryOpen = false;
+      view.activationId = null;
+      manager.activationChanged(frameId);
+    },
     release(index, outcome = { kind: "sent" }) {
       assert.ok(sends[index], `missing Interest send ${index}`);
       sends[index].resolve(outcome);

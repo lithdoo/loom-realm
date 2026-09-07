@@ -44,7 +44,7 @@ formal fixture
 → observable trace/result
 ```
 
-runner 只观察协议允许的行为，不依赖 private `Map`、queue、class 或内部字段。
+role adapter 可以通过 package-private qualification seam 驱动真实 `InputManager`、`RendererInputGate` 与其 lifecycle seam；断言只观察 wire result、published trace、business delivery 与 lifetime transition，不依赖内部数据结构或字段 layout。
 
 Role adapters exactly：
 
@@ -65,6 +65,8 @@ group
 fixture
 result
 ```
+
+每条记录只在对应 fixture 的显式 assertion callback 成功后产生；group test 成功不得批量推导组内 fixture pass。最终 audit 同时验证 168 条 normative fixture 均且仅注册一次、全部 evidence 已执行通过、每条 fixture 存在 required role evidence。
 
 不增加第二套 runtime、Data authority 或 test-only generation model。
 
@@ -234,7 +236,7 @@ protocol = loomrealm.user-input
 protocolVersion = 1
 fixtureSetRevision = 2
 roles = subsystem-interest-sender | renderer-input-sender | subsystem-input-receiver
-platform-independent role qualification = pass (168 required entries / 303 role records)
+platform-independent role qualification = pass (168 explicit fixture evidence mappings / 303 role records)
 M10 SDK/source qualification = pass
 Hostra/Desktop vertical = pass
 M9 regression = pass

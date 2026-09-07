@@ -14,6 +14,7 @@ M10 已关闭 platform-independent User Input role implementation、Subsystem SD
 
 ```text
 required fixture entries = 168
+explicit executable fixture mappings = 168
 executable groups = 15
 qualification role records = 303
 
@@ -30,10 +31,18 @@ Coverage audit 强制验证：
 fixtureSetRevision = 2
 catalog entry count = 168
 registered executable groups = normative groups 4..18
+registered fixture evidence = normative fixture catalog exactly once
+passed fixture evidence = registered fixture evidence exactly
+required roles per fixture > 0
 unknown group = fail
 duplicate group = fail
 missing group = fail
+unknown fixture = fail
+duplicate fixture evidence = fail
+missing fixture evidence = fail
 ```
+
+报告不再由“15 个 group pass”批量合成。每个 normative fixture 显式绑定 assertion callback；只有该 callback 成功后才进入 passed set 并输出对应 role records。任一 assertion 失败、缺失、重名或 role 为空都会使 qualification 失败。
 
 ## Role Evidence
 
@@ -53,7 +62,7 @@ subsystem-input-receiver
     @loomrealm/subsystem InputManager / FrameRuntime package tests
 ```
 
-适配器只观察 wire result、Interest、published Input trace、business delivery和 lifetime transitions，不读取生产 private fields，也不创建 shadow Main/InputTarget/Data authority。
+适配器允许通过 package-private qualification seam 驱动真实 `InputManager` 与 `RendererInputGate`，包括 FrameRuntime 对 InputManager 使用的 suspension/lifetime transition；它只断言 wire result、Interest、published Input trace、business delivery和 lifetime transitions，不读取内部数据结构或字段 layout，也不创建 shadow Main/InputTarget/Data authority。
 
 ## Qualified Semantics
 
@@ -70,6 +79,8 @@ Executable evidence覆盖：
 - listener union/baseline/order/async failure isolation；
 - Keyboard、Pointer、Gamepad与 custom payload矩阵；
 - protocol-invalid Data retirement、stale drop与 business-local containment。
+
+关闭复核中特别补强的显式证据包括 child-call suspension 下 Desired Interest 保留、fresh Activation/generation 不继承旧 State/Event、真实 administrative-suspension lifecycle seam 清除 suppressed State，以及 InputTarget replacement、Pointer/Gamepad identifier 与 one-shot contract 的逐项 evidence mapping。
 
 ## M10-specific Evidence
 

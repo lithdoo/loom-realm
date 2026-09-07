@@ -31,7 +31,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 - [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
-### M11 implementation plan — Frozen; waits for M10 closure
+### M11 implementation plan — Frozen; ready after M10 closure
 
 - [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 - [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
@@ -182,7 +182,7 @@ M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
-M11 Render                            plan frozen / waits M10 closure
+M11 Render                            plan frozen / implementation gate ready
 M12 Content                           pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
