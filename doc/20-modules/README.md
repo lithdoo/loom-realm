@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / M10 frozen  
+> 稳定程度：Evolving overall / **M10 Closed / M11 implementation slice Frozen**  
 > 主要定义：logical roles/modules、Runner/role-facing capabilities、Renderer/Data/Input/Render 与 Desktop/PWA realization 入口  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
@@ -19,7 +19,7 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 | 模块 | 入口 | Current responsibility |
 |---|---|---|
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 frozen Input gate/publisher/source role |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 frozen Input role、M11 internal Render receiver Store |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
 | FSDB Content | [fsdb-content-service](./fsdb-content-service/README.md) | readonly Content implementation |
 | `loom.map` | [loom-map](./loom-map/README.md) | ordinary platform-neutral Subsystem consumer |
@@ -67,7 +67,7 @@ Subsystem-facing
     ContentClient (M12)
 ```
 
-这些不是 universal Platform interface；capability只随真实 consumer冻结。M10没有新增 `@loomrealm/platform-ports` surface。
+这些不是 universal Platform interface；capability只随真实 consumer冻结。M10/M11 都没有新增 `@loomrealm/platform-ports` surface。
 
 ---
 
@@ -80,11 +80,12 @@ Main
 Subsystem
     business state / local Frame Context
     Desired Interest / retained author Input State
+    business Render Domains
 
 Renderer
     read-only Main mirror
     Producer facts / Input sender gate
-    Render replica/presentation
+    current Render replica / optional stale presentation cache
 ```
 
 保持：
@@ -92,6 +93,7 @@ Renderer
 ```text
 Frame != Runtime != Data != Render lifecycle
 Activation != Desired Interest lifetime
+business Render Domain != wire Render Domain != Data carrier
 Data carrier != capability lifetime
 source object != source subscription != Data lifetime
 ```
@@ -107,6 +109,8 @@ M8 Data role已 qualified：Main ready-derived DataAuthority → Renderer/Subsys
 M9 Desktop Broker已 qualified：Main full authority view + exact HostedRuntime → paired Data WebSockets → install-before-role-delivery。
 
 Data loss/provisioning failure != Runtime failure/Frame unwind。
+
+M10 User Input 已 Implemented / Qualified / Closed；M11 Render不得修改以上 currentness/Data lifecycle换取实现便利。
 
 ---
 
@@ -215,7 +219,37 @@ Event/Reset是 global State-coalescing barriers；普通 Input backlog必须在 
 
 Frame Outcome保持 completed / cancelled / failed；只有明确 pre-commit rejection可 catch继续，同一 ambiguous/fatal path不得回到 business continuation。
 
-M11 Render：Frame close/Data retire不自动 destroy authoritative Domain。
+M11 Render 已冻结为直接可实施：
+
+```text
+Subsystem author
+    RenderNode / RenderDomainState / RenderEvent / RenderDomain
+    SubsystemScope.createRenderDomain
+    replace / emit / close = synchronous local-only
+    validate → detach → atomic local commit
+
+Subsystem host
+    one internal RenderManager
+    existing SubsystemDataPeer.render publication
+
+Renderer
+    existing Data slot → internal Render Store
+    no new public Render/subscription API
+```
+
+保持：
+
+```text
+live business Domains <= 256
+SDK domainId Runtime-instance 内不复用
+business Node key business-Domain-lifetime one-shot
+Frame close/Data retire != business Domain destroy
+same-generation reconnect keeps wire identity history, rebuilds carrier baseline
+Event no future-carrier replay
+Render/Data failure != Runtime failure / Frame unwind
+```
+
+M11 formal qualification只 claim `subsystem-sender` + `renderer-receiver`；transport-equivalence留 M16。
 
 M12 Content：readonly logical content capability与 executable/module resolution严格分离。
 
@@ -229,7 +263,8 @@ M14 Hostra Desktop
     physical Renderer Control WS
     M9 Data Broker
     real DOM/Gamepad RendererInputSource → exact M10 source seam
-    presentation + Content
+    M11 internal current Render replica → presentation
+    M12 Content → resources
 
 M16 PWA
     Window/Worker + MessagePort
@@ -237,7 +272,7 @@ M16 PWA
     same logical Input/Render/Content semantics
 ```
 
-M10 不实现 BrowserWindow/DOM physical input；M16才完成 Hostra/PWA full transport equivalence。
+M10 不实现 BrowserWindow/DOM physical input；M11 不实现 physical presentation；M16才完成 Hostra/PWA full transport equivalence。
 
 ---
 
@@ -248,8 +283,8 @@ M6 Hostra Runtime             ✅
 M7 Renderer Control           ✅
 M8 Data role/core             ✅
 M9 Desktop Data Broker        ✅
-M10 User Input                Implementation Frozen / Ready for Implementation
-M11 Render                    pending
+M10 User Input                ✅ Implemented / Qualified / Closed
+M11 Render                    Implementation Frozen / Ready
 M12 Content                   pending
 M13 loom.map                  pending
 M14 Desktop full E2E          pending
@@ -258,3 +293,5 @@ M16 PWA full E2E/equivalence  pending
 ```
 
 Module tests验证 role semantics；protocol conformance由对应 contract fixtures负责；system E2E验证同一 logical scenario在不同 Platform realization下得到等价 business-observable result。
+
+M11 implementation阶段只允许 private realization choices；public API、authority/lifetime、identity/error、publication/receiver semantics与 qualification shape不得重新设计，除非证明 Frozen docs存在 correctness contradiction。

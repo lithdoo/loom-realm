@@ -2,11 +2,13 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / **M10 Input slice Frozen**  
+> 稳定程度：Evolving overall / **M10 Input + M11 Render implementation slices Frozen**  
 > 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input author projection/Interest/State、Render Domain、错误收敛与 role-facing Platform boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> M10 实施：[M10 / 01](https://github.com/lithdoo/loom-realm/blob/main/M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](https://github.com/lithdoo/loom-realm/blob/main/M10_05_QUALIFICATION_CLOSURE.md)
+> 正式 Render：[Render Update v1](../15-contracts/render-update-v1.md)  
+> M10 实施：[M10 / 01](https://github.com/lithdoo/loom-realm/blob/main/M10_01_SUBSYSTEM_INPUT_MANAGER.md) · [M10 / 05](https://github.com/lithdoo/loom-realm/blob/main/M10_05_QUALIFICATION_CLOSURE.md)  
+> M11 实施：[M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) · [M11 / 05](https://github.com/lithdoo/loom-realm/blob/main/M11_05_QUALIFICATION_CLOSURE.md)  
 > 最近复核：2026-09-07
 
 ---
@@ -22,7 +24,7 @@ local Frame Context + mutation gate
 Frame-scoped Desired Input Interest
 retained author-safe Input State + business delivery
 outbound Frame call/return role
-Render Domain authoritative state
+business Render Domain authoritative state + transient Event intent
 Content client usage
 ```
 
@@ -66,13 +68,13 @@ Subsystem
     local Frame Context + mutation gate
     Desired Interest[F]
     retained Input State / business delivery
-    Render Domain Registry/State
+    business Render Domain Registry/State/Event intent
 
 Platform
     executable binding + physical topology/provisioning
 ```
 
-任何 Runner/module/transport ownership都不能产生第二份 Frame/Input authority。
+任何 Runner/module/transport ownership都不能产生第二份 Frame/Input/Render authority。
 
 ---
 
@@ -155,6 +157,8 @@ State retention eligibility
 因此 pending mutation期间 same-current-Activation `.state` 更新 latest retained State但不交业务；Event drop。只有明确 known-no-commit + same Activation重新开放时，latest State local-converge，Event不 replay。commit/revoke/terminal则丢弃 suppressed old State。
 
 这条由 User Input v1 revision 2 / ADR 0029冻结；Renderer不感知 Subsystem mutation gate。
+
+Render Domain authority不由 Frame mutation gate创建或销毁；Render protocol也不引入 Frame/Activation identity。业务代码若在 ordinary business path调用 RenderDomain，仍受该 path 的既有 mutation discipline约束。
 
 ---
 
@@ -296,7 +300,7 @@ Input handler failure不得阻止其它 matching handler同步 invocation。
 
 `frame.suspend` 是 administrative one-way suspension：revoke Activation、close ordinary gates、abort frame signal、保留 context供 close cleanup。Child-call suspension不是 administrative suspend。
 
-一个 Runtime instance只有一个 first terminal cause：graceful shutdown或 Runtime-fatal。SDK先 abort relevant signals，再 bounded cleanup；Input listeners/Interest/retained State最终全部清除。
+一个 Runtime instance只有一个 first terminal cause：graceful shutdown或 Runtime-fatal。SDK先 abort relevant signals，再 bounded cleanup；Input listeners/Interest/retained State 与 live Render Domains 最终全部清除。
 
 ---
 
@@ -309,26 +313,90 @@ SubsystemDataBinding
       ↓
 @loomrealm/data peer
       ↓
-InputManager / RenderManager
+InputManager / RenderManager publication
 ```
 
 `@loomrealm/data`拥有 carrier reader、JSON/profile validation、typed demux、serialized send/terminal；Input/Render manager不得竞争 raw carrier。
 
-InputManager拥有 latest-only Interest publisher，而不是第二 writer；Data peer retirement触发 fresh-role publication，不做 retry/replay old send。
+InputManager拥有 latest-only Interest publisher；RenderManager拥有 bounded current-carrier publication coordinator。二者都复用同一 Data peer，不形成第二 writer/currentness abstraction；Data peer retirement触发 fresh-role publication，不 retry/replay old send。
 
 ---
 
-## 15. Render Domain
+## 15. Render Domain — Frozen M11
 
-Subsystem author创建 `RenderDomain`表达 authoritative presentation state/event。SDK mint domainId；business name不是 protocol identity。
+Exact author seam：
 
 ```text
-Frame close/suspend != Domain destroy/hide
-Activation change   != Domain lifetime
-Data retire          != authoritative Domain destroy
+SubsystemScope.createRenderDomain(initialState) → RenderDomain
+RenderDomain.replace(state): void
+RenderDomain.emit(event): void
+RenderDomain.close(): void
 ```
 
-fresh Data carrier重新 publication Domain Registry + fresh Snapshots，不能复用旧 Patch chain。
+M11 root只新增：
+
+```text
+RenderNode
+RenderDomainState
+RenderEvent
+RenderDomain
+```
+
+`RenderManager` internal-only。Author不见 `domainId`、generation、Registry、revision、Snapshot/Patch、carrier 或 send outcome。
+
+所有 author operations 都是 synchronous local-only：
+
+```text
+validate Frozen Render v1 representability
+→ detach caller-owned value
+→ atomic local commit / bounded Event offer
+→ return
+```
+
+成功提交的 state/event 必须始终可表示为 Frozen Render Update v1；调用方后续 mutation 不得改变已提交值。
+
+Local error：
+
+```text
+invalid shape / semantic usage / stale Event target / closed handle → TypeError
+hard-limit overflow                                         → RangeError
+```
+
+失败 local-atomic，不产生由失败调用引起的新 publication，也不升级 Data/Runtime/Frame。
+
+必须保持：
+
+```text
+live business Domains / Subsystem instance <= 256
+Frame close/suspend != Domain destroy/hide
+Activation change   != Domain lifetime
+Data retire          != business Domain destroy
+```
+
+SDK mint `domainId`，一个 Subsystem Runtime instance 内不复用已 mint 值。
+
+business Node key 使用更强 local invariant：
+
+```text
+Domain-wide current-state unique
+live key keeps stable tag
+once removed from one business RenderDomain lifetime
+→ cannot be introduced again in that business RenderDomain lifetime
+```
+
+`close()` 幂等；close 后 `replace/emit` → TypeError。
+
+`emit` 要求 `targetKey` 当前存在于 business authoritative state。Fresh Data publication：
+
+```text
+render.domains(current Registry)
+→ fresh Snapshot each current Domain
+→ Patch/Snapshot/Event
+```
+
+same-generation reconnect保留 wire emitted identity history，但重建 carrier-local baseline/revision；无 current carrier 的 Event 不得带到 future carrier，current carrier + unbaselined Domain 的 Event MAY bounded-pend behind establishing Snapshot，carrier loss/Domain removal则丢弃，永不 replay。
+
+Exact implementation contract 见 [M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) 与 [M11 / 02](https://github.com/lithdoo/loom-realm/blob/main/M11_02_RENDER_PUBLICATION.md)。
 
 ---
 
@@ -359,7 +427,8 @@ Content只通过 platform-neutral `ContentClient`；ordinary readonly content ca
 ```text
 business validation → FrameOutcome.failed
 pre-commit call rejection → typed local error after State convergence
-protocol ambiguity/fatal → Runtime failure
+Render author misuse/limit → local TypeError / RangeError
+protocol ambiguity/fatal → Runtime failure when Control; Data retirement when Data
 module load/ABI → bootstrap failure
 Data provisioning/loss → Data unavailable
 Input handler failure → local callback containment
@@ -374,7 +443,7 @@ Platform path/token/ticket/internal stack不得泄漏给普通业务错误。
 1. Subsystem role platform-neutral；
 2. Main独占 public Frame/Activation/InputTarget authority；
 3. Definition artifact由 Platform LaunchPlan选择，业务只见统一 ABI；
-4. ready不暗示 Data/Renderer/Input baseline；
+4. ready不暗示 Data/Renderer/Input/Render baseline；
 5. initialize只建 Frame Context，activate后才启动 handler；
 6. FrameOutcome与 protocol三态一一对应；
 7. ambiguous/fatal绝不重新进入业务 continuation；
@@ -384,8 +453,10 @@ Platform path/token/ticket/internal stack不得泄漏给普通业务错误。
 11. deterministic handler invocation使用 stable snapshot + registration order；
 12. async Input handler不成为 Data flow control；
 13. known-no-commit State convergence先于 recoverable `frame.call` rejection observable；
-14. fresh Data重新建立 Input/Render baselines；
-15. Render Domain独立于 Frame/Data carrier；
-16. one Data peer统一 demux；
-17. Platform provisioning不污染 application protocols；
-18. Hostra/PWA physical差异不得改变 business-observable semantics。
+14. one Data peer统一 demux Input/Render；
+15. M11 exact Render author API synchronous local-only，成功值始终 Frozen-v1 representable；
+16. business Render Domain独立于 Frame/Data carrier；SDK domainId Runtime-instance 内不复用；business Node key Domain-lifetime one-shot；
+17. fresh Data重新建立 Input/Render baselines，Render Event不跨 carrier replay；
+18. Render author error/Data failure不升级 Runtime/Frame；
+19. Platform provisioning不污染 application protocols；
+20. Hostra/PWA physical差异不得改变 business-observable semantics。

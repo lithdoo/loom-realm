@@ -12,6 +12,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [文档治理](./doc/00-overview/document-governance.md)
 - [系统架构总览](./doc/10-architecture/system-overview.md)
 - [Subsystem 模型](./doc/10-architecture/subsystem-model.md)
+- [渲染系统](./doc/10-architecture/rendering-system.md)
 - [正式契约目录](./doc/15-contracts/README.md)
 - [Runtime Control v1](./doc/15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call v1](./doc/15-contracts/frame-call-protocol-v1.md)
@@ -33,7 +34,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 - [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
-### M11 implementation plan — Frozen / Ready
+### M11 implementation plan — Frozen / Directly Implementable
 
 - [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 - [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
@@ -171,6 +172,41 @@ M10不新增 Platform Port、producer registry、Store/EventBus 或 generic Inpu
 
 ---
 
+## M11 Frozen Implementation Boundary
+
+Subsystem author root只新增：
+
+```text
+RenderNode
+RenderDomainState
+RenderEvent
+RenderDomain
+```
+
+```text
+SubsystemScope.createRenderDomain(initialState) → RenderDomain
+RenderDomain.replace(state): void
+RenderDomain.emit(event): void
+RenderDomain.close(): void
+```
+
+固定：
+
+```text
+all author calls synchronous local-only
+validate → detach caller-owned value → atomic local commit
+successful state/event always Frozen Render v1 representable
+live business Domains <= 256
+SDK domainId never reused within one Runtime instance
+business Node key one-shot within one business RenderDomain lifetime
+```
+
+Publication复用 existing `SubsystemDataPeer.render`；same-generation reconnect保留 emitted identity history并以 fresh Registry/Snapshot重建 carrier baseline。Renderer Store挂在 existing Data slot，internal-only；M11不新增 public Renderer Render/subscription API。
+
+M11 qualification只 claim `subsystem-sender` + `renderer-receiver`；包含 Hostra/PWA trace equivalence 的 `transport` role 留 M16。
+
+---
+
 ## 当前实现状态
 
 ```text
@@ -184,7 +220,7 @@ M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
-M11 Render                            plan frozen / implementation gate ready
+M11 Render                            Implementation Frozen / Ready
 M12 Content                           pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
@@ -194,7 +230,7 @@ M16 PWA full E2E/equivalence          pending
 
 M10 不实现 BrowserWindow/DOM physical composition；真实 Browser `RendererInputSource` 属于 M14，并必须复用 frozen M10 source API/lifetime。
 
-M11 qualification 只关闭 Render Update v1 `subsystem-sender` 与 `renderer-receiver` role；包含 Hostra/PWA trace equivalence 的 `transport` role 留到 M16。
+M11 现在进入 implementation-only phase：只允许 private layout/data structure、finite queue capacity、private domainId representation与 Patch-vs-Snapshot heuristic 等 realization choices；authority、public API、identity/lifetime、error/publication/receiver semantics与 qualification shape已冻结。
 
 ---
 
@@ -237,7 +273,7 @@ same business-observable result for same logical scenario
 
 可不同：Platform Launch Manifest、artifact/path、PID/Worker、WebSocket/MessagePort、IPC/Port transfer、HTTP/SW internals。
 
-完整 User Input/Data Profile Hostra/PWA transport-equivalence claim在 M16完成。
+完整 User Input / Render Update Hostra/PWA transport-equivalence claims在 M16完成。
 
 ---
 
@@ -253,3 +289,5 @@ npm run docs:check-links
 ```
 
 Latest qualified implementation gate：**M10**。运行 `npm run test:m10` 可复验完整 M9 regression、User Input fixtureSetRevision 2 platform-independent role qualification、M10 SDK/source projection与真实 Desktop/Hostra vertical。
+
+M11 implementation完成后的唯一 closure gate已冻结为 `npm run test:m11`；语义见 [M11 / 05](./M11_05_QUALIFICATION_CLOSURE.md)。
