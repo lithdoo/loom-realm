@@ -1,11 +1,23 @@
 # @loomrealm/renderer
 
-Renderer Control holder with M8 role-local Data reconciliation.
+Renderer Control holder with M8 Data reconciliation and M10 User Input implementation boundary.
 
-> Status: **M8 Implemented / Qualified**
+> Status: **M8 Implemented / Qualified · M10 Preimplementation Closed**
 
-The package owns one atomic Control `{ peer, snapshot } | null` record and one private Data slot per desired subsystem authority. Protocol legality remains in `@loomrealm/renderer-control` and `@loomrealm/data`; this package performs whole-Snapshot replacement plus identity-safe Data acquire/install/clear/close reconciliation.
+Current implemented state remains one atomic Control `{ peer, snapshot } | null` record plus one private Data slot per desired subsystem authority. Protocol legality stays in `@loomrealm/renderer-control` and `@loomrealm/data`.
 
-`connect()` is a fail-fast serialized entry point: callers MUST NOT start another connection attempt on the same holder until the previous attempt settles. Sequential connection attempts still provide atomic replacement.
+M10 adds only role-local behavior on top of those existing slots:
 
-The only M8 construction seam is `createRendererControlHolder(data?: RendererDataBinding)`. It intentionally exposes no Store, subscription framework, Input/Render business state, lease, heartbeat, Broker, or mutable registration API.
+```text
+optional canonical input source injected once for holder lifetime
+→ current Data-slot Interest Registry
+→ Effective gate from Control + Data + Interest + Producer
+→ bounded State/Event/Reset publisher
+→ current RendererDataPeer
+```
+
+No Store, EventBus, producer registry, InputTarget shadow authority, lease/heartbeat, generic queue framework, Broker, retry or replay layer is added.
+
+ADR 0029 does not change Renderer Effective semantics: Subsystem mutation-gate State suppression/reopen convergence is entirely Subsystem-local.
+
+The precise M10 construction signature may evolve during implementation, but ownership is frozen: one source per holder lifetime, no mutable runtime producer-registration API, and old holder/source/Data-slot work cannot affect a replacement holder.
