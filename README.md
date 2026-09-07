@@ -1,490 +1,194 @@
 # LoomRealm
 
-LoomRealm 是一个通过只读 Game Entry 声明 **platform-neutral logical Subsystem topology**、由 matching Platform Launcher 完成 common Game validation 与 current-platform executable PREPARE、由 Main 管理 Session/Runtime/Frame/Data authority，并由 Hostra Desktop / PWA 等 Platform Composition 实现真实物理承载的模块化游戏运行平台。
+LoomRealm 是一个通过只读 Game Entry 声明 **platform-neutral logical Subsystem topology**、由 matching Platform Launcher 完成 common Game validation 与 current-platform executable PREPARE、由 Main 管理 Session/Runtime/Frame/Data authority，并由 Hostra Desktop / PWA Platform Composition 实现物理承载的模块化游戏运行平台。
 
-第一阶段使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` Subsystem 的纵向验证场景。
+Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom.map` vertical validation。
 
 ---
 
-## 设计文档
-
-推荐入口：
+## 当前入口
 
 - [产品设计总览](./doc/00-overview/product-vision.md)
-- [文档分层与变更规则](./doc/00-overview/document-governance.md)
+- [文档治理](./doc/00-overview/document-governance.md)
 - [系统架构总览](./doc/10-architecture/system-overview.md)
-- [平台组合系统](./doc/10-architecture/platform-composition-system.md)
-- [运行承载系统](./doc/10-architecture/runtime-hosting-system.md)
-- [运行时启动与连接建立系统](./doc/10-architecture/runtime-bootstrap-system.md)
+- [Subsystem 模型](./doc/10-architecture/subsystem-model.md)
 - [正式契约目录](./doc/15-contracts/README.md)
-- [Game Package v1](./doc/15-contracts/game-package-v1.md)
-- [Runtime Control Application Profile v1](./doc/15-contracts/runtime-control-profile-v1.md)
+- [Runtime Control v1](./doc/15-contracts/runtime-control-profile-v1.md)
 - [Frame / Call v1](./doc/15-contracts/frame-call-protocol-v1.md)
-- [Main ⇄ Renderer Control v1](./doc/15-contracts/main-renderer-control-v1.md)
-- [Hostra Game Launcher / Node Runner Profile v1](./doc/15-contracts/nodejs-launcher-profile-v1.md)
-- [PWA Game Launcher / Worker Runner Profile v1](./doc/15-contracts/pwa-launcher-profile-v1.md)
-- [独立分包与发布架构](./doc/30-implementation/package-architecture.md)
-- [第一阶段交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
-- [ADR 0020：Game Entry 消费边界归 Platform Launcher](./doc/decisions/0020-game-entry-consumer-boundary.md)
-- [ADR 0021：Runtime Control 首次实现前收口](./doc/decisions/0021-runtime-control-preimplementation-closure.md)
-- [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./doc/decisions/0027-freeze-renderer-control-v1-preimplementation.md)
-- [M7 / 01 — Renderer Control Package](./M7_01_RENDERER_CONTROL_PACKAGE.md)
-- [M7 / 02 — Main Authority Projection + Binding](./M7_02_MAIN_AUTHORITY_PROJECTION.md)
-- [M7 / 03 — Renderer Control Holder](./M7_03_RENDERER_CONTROL_HOLDER.md)
-- [M7 / 04 — Vertical Integration](./M7_04_VERTICAL_INTEGRATION.md)
-- [M7 / 05 — Qualification and Closure](./M7_05_QUALIFICATION_CLOSURE.md)
-- [完整阅读指南](./doc/README.md)
+- [Renderer Control v1](./doc/15-contracts/main-renderer-control-v1.md)
+- [Renderer Data Profile v1](./doc/15-contracts/renderer-data-profile-v1.md)
+- [User Input v1](./doc/15-contracts/user-input-v1.md)
+- [User Input v1 Conformance — fixtureSetRevision 2](./doc/15-contracts/user-input-conformance-v1.md)
+- [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
+- [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
+
+### M10 implementation plans
+
+- [M10 / 01 — Subsystem InputManager](./M10_01_SUBSYSTEM_INPUT_MANAGER.md)
+- [M10 / 02 — Renderer Input Gate](./M10_02_RENDERER_INPUT_GATE.md)
+- [M10 / 03 — Renderer Input Producers](./M10_03_RENDERER_INPUT_PRODUCERS.md)
+- [M10 / 04 — User Input Vertical Integration](./M10_04_VERTICAL_INTEGRATION.md)
+- [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
+
+历史 M7/M8/M9 root plans继续保留作为已完成 milestone implementation provenance。
 
 ---
 
-## Game / Platform / Main Bootstrap 闭环
+## Bootstrap Boundary
 
 ```text
-Game installation / source
-        ↓
-create HostraPlatform / PwaPlatform
-        ↓
-platform.prepareGame(source)
-    → matching game-launcher-* component
-    → @loomrealm/game-package validation
-    → current Platform Launch Manifest
-    → exact key-set join / executable resolution / security preflight
-    → immutable PlatformLaunchPlan
-        ↓
-concrete Platform installs LaunchPlan privately
-+ returns immutable LogicalGameBootstrap
-        ↓
-runMain({bootstrap, platform, policy})
-        ↓
-Main generates/registers Runtime bootstrap material
-        ↓
-platform.runtimeHosting.launch({subsystemKey, bootstrapToken})
-        ↓
-HostedRuntime / Host-owned Runner
-        ↓
-platform-selected Definition Module
-        ↓
-@loomrealm/subsystem/host
+Game installation/source
+→ concrete Platform.prepareGame(source)
+→ matching Launcher
+→ @loomrealm/game-package validation
+→ current Platform Launch Manifest join/preflight
+→ immutable PlatformLaunchPlan
+→ Platform-private plan install
+→ LogicalGameBootstrap
+→ runMain({bootstrap, platform, policy})
+→ RuntimeHosting.launch
+→ Host-owned Runner
+→ platform-selected Definition Module
+→ @loomrealm/subsystem/host
 ```
 
-关键规则：
+固定：
 
 ```text
 Game Entry document != Main bootstrap model
-Game Package != Runtime role
-Product bootstrap caller → matching Launcher
-Launcher → @loomrealm/game-package
-Main ✗ @loomrealm/game-package
-Business ✗ Game Package / Launcher
-```
-
-Game common config不包含 `module`；Main不接触 `formatVersion`、Game document brand、module/path/URL、Node/Worker options。
-
----
-
-## Game Package v1
-
-Current Game Entry：
-
-```ts
-interface GameEntryV1 {
-  readonly formatVersion: 1;
-  readonly initial: {
-    readonly subsystem: string;
-    readonly input: JsonValue;
-  };
-  readonly subsystems: readonly {
-    readonly key: string;
-  }[];
-}
-```
-
-`@loomrealm/game-package` 是 document validation capability：
-
-```text
-untrusted JSON text/value
-→ @loomrealm/wire representation validation
-→ closed Game schema / exact key-set / initial validation
-→ detached deeply immutable ValidatedGameEntryV1
-```
-
-Primary Runtime-product consumers：
-
-```text
-@loomrealm/game-launcher-hostra
-@loomrealm/game-launcher-pwa
-```
-
-Hostra consumer 已在 M6 real product vertical qualification；PWA consumer 留到 M15。Tooling MAY直接消费；Main/Business不直接消费。
-
----
-
-## Main-facing Logical Bootstrap
-
-Concrete Platform 的 `prepareGame()` 通过 matching Launcher 完成 full PREPARE 后，只向 Main投影：
-
-```ts
-interface LogicalGameBootstrap {
-  readonly subsystemKeys: readonly string[];
-  readonly initial: {
-    readonly subsystemKey: string;
-    readonly input: JsonValue;
-  };
-}
-```
-
-它不包含：
-
-```text
-formatVersion
-ValidatedGameEntryV1 brand
-PlatformLaunchPlan
-module/path/URL
-Node/Worker/Runner/Port
-```
-
-PlatformLaunchPlan 保持 Platform-private；Main 通过 plan-bound `RuntimeHosting` 使用它。
-
----
-
-## Hostra / PWA Launch Boundary
-
-Hostra：
-
-```text
-HostraPlatform.prepareGame()
-→ @loomrealm/game-launcher-hostra component
-→ game-package validation + launch.hostra.json
-→ exact join / safe filesystem resolution
-→ HostraLaunchPlan installed privately + LogicalGameBootstrap returned
-→ HostraPlatform exposes Node Runner RuntimeHosting
-```
-
-PWA：
-
-```text
-PwaPlatform.prepareGame()
-→ @loomrealm/game-launcher-pwa component
-→ game-package validation + launch.pwa.json
-→ exact join / installation + same-origin resolution
-→ PwaLaunchPlan installed privately + LogicalGameBootstrap returned
-→ PwaPlatform exposes Worker Runner RuntimeHosting
-```
-
-两个 launcher package 是 concrete Platform 内部的窄 Game PREPARE / Runner integration components，不是完整 Platform object，更不是 Renderer/DataBroker/Content mega-package。
-
-Phase 1：
-
-```text
-keys(GameEntry.subsystems)
-=
-keys(CurrentPlatformLaunchManifest.subsystems)
-```
-
-Full PREPARE 未闭合前：
-
-```text
-Process/Worker creation = 0
-business Definition import count = 0
-Runtime Control establishment = 0
+Game topology != Platform executable binding
+Main ✗ game-package / concrete launcher
+Business ✗ Game Package / Launcher / protocol packages
 ```
 
 ---
 
-## Runtime Control / Frame / Renderer Control / Data
-
-Runtime Control：
+## Authority / Role Boundary
 
 ```text
-Subsystem Control v1
-+ Frame / Call v1
-= Runtime Control Application Profile v1
+Main
+    Session / Runtime / Frame / Stack / Activation / InputTarget / DataAuthority
+
+Subsystem
+    business state
+    local Frame Context / mutation gate
+    Desired Input Interest + retained State
+    Render authoritative state
+
+Renderer
+    read-only Main mirror
+    current Data consumers
+    Input sender / Render replica
+
+Platform
+    executable binding
+    Runtime/Renderer hosting
+    Control/Data physical provisioning
+    Content binding
 ```
 
-M3 current mechanics：
+一个 authority 只允许一个 owner；Platform physical ownership不产生第二份 application authority。
 
-```text
-already-established MessageCarrier<string>
-→ bounded Wire/Profile decode
-→ exactly one connection-wide reader/dispatcher
-→ Control + Frame role dispatch
+---
 
-all outbound messages
-→ one serialized writer
-```
-
-Same sender / same Control Connection：
-
-```text
-Request IDs positive safe integer
-strictly monotonically increasing
-Control + Frame shared namespace
-never reuse / never wrap
-```
-
-Deadline / terminal：
-
-```text
-finite deadline covers send + Response wait
-pending settlement first-wins
-terminal first-wins
-late Response diagnostics only
-no retry/replay/reconnect
-```
-
-Frame causal barrier：
-
-```text
-frame.call Response send accepted
-→ Child initialize / activate
-
-frame.return Response send accepted
-→ close / resume
-```
-
-Runtime Control owns this protocol mechanics but not Main Stack authority。
-
-Source duplicate JSON members follow frozen `@loomrealm/wire` / ECMAScript `JSON.parse` observable semantics；Runtime Control does not add a second JSON parser。
-
-Frame / Call v1 remains Frozen：
-
-```text
-ACK-before-publication
-post-commit no rollback
-Timeout/loss ambiguous → Runtime failure
-whole-suffix fixed-point unwind
-```
-
-Renderer Control v1 is Frozen by ADR 0027：
-
-```text
-Main committed Runtime / Stack / Activation / InputTarget / DataAuthority
-→ full RendererAuthoritySnapshotV1
-→ renderer.hello id=1 + renderer.state
-→ one current Renderer participant
-→ 0..1 inFlight + 0..1 pendingLatest
-```
-
-M8 Main 已从 committed Runtime-ready state 纯投影 `S/1/loomrealm.renderer-data/1`；Data transport loss/reacquire 不改变该 authority 或 Renderer revision。
-
-Current Data Profile：
+## Current Data / Input Model
 
 ```text
 loomrealm.renderer-data/1
-= Data Connection v1 + User Input v1 + Render Update v1
+= Data Connection v1
++ User Input v1
++ Render Update v1
 ```
+
+Data provisioning/loss != Runtime failure / Frame unwind。
+
+Current User Input：
 
 ```text
-Data provisioning/loss != Runtime failure / Frame unwind
+protocolVersion = 1
+fixtureSetRevision = 2
+
+Effective
+= current Data
+× Main InputTarget(F,A)
+× active F/A
+× Interest[F]
+× Producer(C)
 ```
 
-Hostra late Data provisioning via Runner IPC + Data WebSocket；PWA via Worker provisioning + transferred MessagePort。
+ADR 0029 修正一个首次实现前 State convergence hole：commit-sensitive mutation gate 暂时关闭时，same-current-Activation `.state` 可 retain latest但 suppress business delivery；explicit known-no-commit + same Activation reopen时 local-deliver latest State，Event仍不 replay。
 
----
-
-## Content / Execution Boundary
-
-必须区分：
-
-```text
-Platform executable capability
-    PlatformLaunchPlan + trusted Runner loads selected Definition Module
-
-Readonly Content API
-    logical data/resource access only
-```
-
-Content API 不得成为 arbitrary executable path/capability。
-
-Runtime bootstrap token、Renderer Control token、Data ticket/Port、Content credential相互独立。
-
----
-
-## 分包与依赖
-
-下图箭头表示 dependency/provider → consumer：
-
-```text
-@loomrealm/foundation ─────→ @loomrealm/platform-ports ─────→ Main / Subsystem Host / Renderer
-       │
-       ├──────────────────────┐
-       │                      ↓
-@loomrealm/wire ───────→ @loomrealm/runtime-control ───────→ Main / Subsystem Host
-       │
-       ├──────────────→ @loomrealm/renderer-control ───────→ Main / Renderer
-       │
-       ├──────────────→ @loomrealm/data ───────────────────→ Subsystem Host / Renderer
-       │
-       └──────────────→ @loomrealm/game-package
-                               ↓
-@loomrealm/game-launcher-hostra / @loomrealm/game-launcher-pwa
-                               ↓
-                       apps/desktop / apps/pwa
-```
-
-Role graph：
-
-```text
-@loomrealm/main
-    → platform-ports + runtime-control + renderer-control + wire
-
-@loomrealm/renderer
-    → renderer-control + platform-ports + data   // M8 Control holder + Data reconciliation qualified
-
-@loomrealm/subsystem/host
-    → platform-ports + runtime-control + data + role-local policy/integrations
-
-@loomrealm/subsystem
-    → author-facing data/content/foundation capabilities
-
-@loomrealm/map
-    → @loomrealm/subsystem
-```
-
-Forbidden：
-
-```text
-runtime-control → Main/Subsystem implementation
-renderer-control → Main/Renderer/Platform implementation
-runtime-control / renderer-control → WebSocket/MessagePort/Worker
-main → game-package / concrete launcher / renderer role
-business → game-package / launcher / protocol packages
-```
+没有增加 wire message、revision、ACK、cross-plane barrier或 Renderer 对 Subsystem mutation gate 的知识。
 
 ---
 
 ## 当前实现状态
 
 ```text
-@loomrealm/foundation
-    Implemented Baseline / Core Contract Frozen
-
-@loomrealm/wire
-    Implemented Baseline / Core Contract Frozen
-
-@loomrealm/game-package
-    Implemented Baseline / Core Contract Frozen
-    M2 local closure complete
-    M6 Hostra real launcher consumer qualified
-    M15 PWA real launcher consumer pending
-
-@loomrealm/runtime-control
-    Implemented Baseline / Core Contract Frozen
-    M3 local closure complete
-    M4 Subsystem + M5 Main real role consumers qualified
-
-@loomrealm/platform-ports
-    Implemented Baseline through M9
-    M4/M5 slices qualified
-    M7 OpaqueMaterialGenerator + optional RendererControlBinding implemented / qualified
-    M8 RendererDataBinding + SubsystemDataBinding implemented / qualified
-    M9 DataConnectionAuthorityEntry/View/Sink implemented / qualified
-
-@loomrealm/subsystem
-    M4 Runtime/Frame Core Implemented
-    M4 Host Runtime Control consumer qualified
-    M8 optional Data peer lifecycle implemented / qualified
-    M10/M11/M12 business capability slices pending
-
-@loomrealm/main
-    M5 Runtime/Frame Authority Implemented Baseline
-    Main Runtime Control consumer qualified
-    M7 Renderer authority projection/currentness implemented / qualified
-    M8 ready-derived DataAuthority projection implemented / qualified
-    M9 current Renderer + exact HostedRuntime full-view sink projection implemented / qualified
-
-@loomrealm/renderer-control
-    M7 concrete asymmetric peers implemented / qualified
-    Protocol v1 remains Frozen
-
-@loomrealm/renderer
-    M7 minimal Control holder implemented / qualified
-    M8 per-subsystem Data reconciliation implemented / qualified
-
-@loomrealm/data
-    Package-local Core Baseline Implemented
-    M8 real Renderer/Subsystem role consumers qualified
-
-@loomrealm/game-launcher-hostra
-    M6 Runtime Hosting + M9 late Data provisioning Implemented / Qualified
-    real Node Runner + Runtime Control WebSocket vertical qualified
-    exact Runtime-scoped provisioner + dedicated child IPC qualified
-
-@loomrealm/desktop
-    M9 private Desktop Data Broker workspace Implemented / Qualified
-    paired loopback Data WebSocket install/recovery qualified
-
-@loomrealm/game-launcher-pwa
-    design/PREPARE component ready; M15 implementation pending
-
-@loomrealm/fsdb-http
-    v1 Release Candidate implementation + tests
+M1 Foundation + Wire                  ✅
+M2 Game Package                       ✅
+M3 Runtime Control                    ✅
+M4 Subsystem Runtime/Frame            ✅
+M5 Main Core                          ✅
+M6 Hostra Runtime vertical            ✅
+M7 Renderer Control                   ✅
+M8 Renderer Data role/core            ✅
+M9 Desktop Data Broker                ✅
+M10 User Input                        Implementation Frozen / next
+M11 Render                            pending
+M12 Content                           pending
+M13 loom.map                          pending
+M14 Desktop full E2E                  pending
+M15 PWA Runtime                       pending
+M16 PWA full E2E/equivalence          pending
 ```
 
-当前下一实现门：
+M10 不实现 BrowserWindow/DOM physical composition；真实 Browser input source属于 M14。M10只增加一个 holder-lifetime canonical source seam并使用 deterministic source完成 role qualification。
+
+---
+
+## Dependency Rules
 
 ```text
-M10 User Input v1 + InputManager
-    starts from the qualified M9 fresh physical Data peer lifecycle
+@loomrealm/foundation → platform-ports / protocol mechanics
+@loomrealm/wire       → runtime-control / renderer-control / data / game-package
+@loomrealm/main       → platform-ports + runtime-control + renderer-control + wire
+@loomrealm/renderer   → renderer-control + platform-ports + data
+@loomrealm/subsystem/host → platform-ports + runtime-control + data
+@loomrealm/subsystem  → author-facing capabilities only
+@loomrealm/map        → @loomrealm/subsystem
 ```
 
-M7 不要求 Hostra BrowserWindow/Renderer WebSocket 或 PWA MessagePort physical realization；它们分别在 M14/M16 完成。
+Forbidden：
+
+```text
+protocol mechanics → role authority implementations
+main → game-package / concrete launcher / renderer role
+business → platform/protocol packages
+InputManager/RenderManager → raw carrier reader
+Hostra/PWA private retry/currentness protocol
+```
 
 ---
 
 ## Cross-platform Equivalence
 
-Hostra/PWA share：
+Hostra/PWA必须共享 logical semantics，而不是 physical identity：
 
 ```text
-same Game Entry logical topology
-same resulting LogicalGameBootstrap semantics
-same subsystem keys
+same logical Game topology/bootstrap semantics
 same SubsystemDefinitionFactory ABI
-same Runtime Control / Frame formal semantics
-same Renderer Control formal semantics
-same logical scenario/business input
-same business-observable result
+same Runtime/Frame/Renderer Control/Data/Input/Render semantics
+same business-observable result for same logical scenario
 ```
 
-May differ：
+可不同：Platform Launch Manifest、artifact/path、PID/Worker、WebSocket/MessagePort、IPC/Port transfer、HTTP/SW internals。
 
-```text
-Platform Launch Manifest
-Definition artifact/path/bytes
-PID vs Worker id
-WebSocket vs MessagePort
-IPC/ticket vs Port transfer
-HTTP vs Service Worker internals
-```
+完整 User Input/Data Profile Hostra/PWA transport-equivalence claim在 M16完成。
 
 ---
 
-## Current v1 Governance
-
-First conformant compatibility obligation has not yet formed for the Game/Launcher reset or current Renderer Control first implementation，so current v1 corrections are made directly only with ADR provenance and document-governance propagation：
-
-```text
-no fake v2
-no legacy {key,module} Game parser
-no deprecated module alias
-no Main compatibility adapter
-no universal launcher options/prepared bag
-no Runtime Control second JSON parser
-no legacy non-monotonic Request-ID compatibility mode
-no BootstrapTokenGenerator compatibility alias after M7 OpaqueMaterialGenerator migration
-no generic Renderer RPC/Store/currentness framework
-```
-
-ADR 0021 does not reopen Frame seven methods/authority/Outcome/commit/unwind semantics；ADR 0027 freezes Renderer Control v1/M7 authority、Binding、hello/currentness、replacement与 representation isolation semantics。
-
-History/provenance留在 ADR/Git；current docs保持单一事实源。Real compatibility obligation形成后，incompatible changes return to normal version/migration governance。
-
----
-
-## 文档站点
-
-GitHub Pages：`https://lithdoo.github.io/loom-realm/`
+## 文档与测试
 
 需要 Node.js 20+：
 
@@ -494,3 +198,5 @@ npm run docs:dev
 npm run docs:build
 npm run docs:check-links
 ```
+
+Current implementation gate：M10。实现完成时再加入 `npm run test:m10`，不提前放空 script。
