@@ -132,13 +132,20 @@ M10 不新增 Platform Port；Input business behavior建立在 current Data peer
 
 ---
 
-## 6. Runtime Startup
+## 6. Runtime Startup / Bootstrap-safe Wiring
+
+现有 M4 `FrameRuntime` 需要 business `SubsystemDefinition`，而 M10 `SubsystemScope` 又必须在 Definition factory 时已经暴露 `createInputListener`。因此 M10 **不得**为了顺序对称重写 FrameRuntime constructor；使用一个最小 late-bound same-package wiring：
 
 ```text
 Runner loads selected Definition Module
 → validate ABI
-→ create FrameRuntime + InputManager(M10) + scope
+→ create exactly one InputManager
+→ create SubsystemScope
+     signal
+     createInputListener(...) → same InputManager
 → definition factory(scope)
+→ create FrameRuntime(definition, ...)
+→ one-time bind/close over exact same FrameRuntime facts for InputManager
 → RuntimeControlBinding.acquire
 → connect Runtime Control
 → hello / identified
@@ -147,6 +154,16 @@ Runner loads selected Definition Module
 → start optional Data acquire
 → accept Frames
 ```
+
+实现可用 private one-time setter 或 closure over `FrameRuntime | null`；名字/layout不冻结。必须满足：
+
+```text
+0..1 FrameRuntime binding into InputManager
+binding completed before any protocol Frame can reach author handler
+InputManager never creates a shadow Frame registry
+```
+
+Definition factory / initialize阶段没有合法 author `Frame` capability；若业务伪造/传入 foreign Frame 调 `createInputListener`，按 M10 author validation失败，不要求为了 bootstrap 建 dummy Frame state。
 
 `ready != Data exists != Renderer exists != Input baseline exists`。
 
