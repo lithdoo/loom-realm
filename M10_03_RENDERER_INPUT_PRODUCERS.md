@@ -118,9 +118,64 @@ new holder has its own source injection
 
 ---
 
-## 4. Producer-local Facts
+## 4. Start / Stop Failure Boundary
 
-Input gate从 current active source subscription只保存最小 producer facts：
+Source是 trusted local integration，但其 lifecycle failure不等于 Main/Data authority failure。
+
+`start(emit)` 必须按一个 local bootstrap attempt处理：
+
+```text
+producer facts reset empty/unavailable
+→ call source.start(emit)
+→ if it returns a function, subscription installed
+→ otherwise start failure
+```
+
+如果 `start()` throw、返回非 function、或在返回前发生 local bootstrap exception：
+
+```text
+invalidate this attempted subscription
+→ discard every producer fact emitted by this failed start
+→ Producer(C)=unavailable for this current Control epoch
+→ no retry within the same Control epoch
+→ Control peer/Data peers remain current
+```
+
+later fresh current Control epoch MAY call `start()` again。
+
+`stop()` 先失效 subscription/facts，再 best-effort调用；stop throw被 contained，不恢复 old Producer facts，也不 terminalize Control/Data。
+
+这不是 retry framework；每个 current Control epoch最多一次 start attempt。
+
+---
+
+## 5. Fresh Source Bootstrap
+
+每次 successful `start()` 建立 fresh producer facts，不继承上一 subscription。
+
+Start bootstrap允许同步 emit：
+
+```text
+current .state samples
+availability facts
+```
+
+但 MUST NOT replay historical `.event`；Event从 successful current subscription建立后只表示 future physical/canonical event。
+
+如果 source需要为 available `.state` channel建立 current事实：
+
+```text
+emit current State sample
+→ emit availability=true
+```
+
+Start返回前已经 emit 的 facts只有在 `start()`最终成功时才一起 commit为 current producer facts；start failure时全部丢弃。
+
+---
+
+## 6. Producer-local Facts
+
+Input gate从 current active source subscription只保存：
 
 ```text
 availability per channel
@@ -134,7 +189,7 @@ all channels unavailable
 no cached State sample
 ```
 
-开始；不得继承上一 Control epoch的 producer facts。
+开始。
 
 ### State channel availability
 
@@ -147,7 +202,7 @@ AND current State sample exists
 
 才算 Producer available。
 
-因此 source 在首次/重新变 available 前必须先 emit current self-contained State sample，再 emit `availability=true`；gate在没有 current sample时不得把 state channel视为 available。
+source 在首次/重新变 available 前必须先 emit current self-contained State sample，再 emit `availability=true`；gate在没有 current sample时不得把 state channel视为 available。
 
 `availability=false`：
 
@@ -165,7 +220,7 @@ return时必须 fresh sample → available=true，保证 false→true baseline�
 
 ---
 
-## 5. Source Change Processing
+## 7. Source Change Processing
 
 ```text
 state change
@@ -188,7 +243,7 @@ Trusted source的 payload canonical validity最终仍由 `@loomrealm/data` outbo
 
 ---
 
-## 6. Canonical Transition Ordering
+## 8. Canonical Transition Ordering
 
 标准 stateful family在一个 physical transition同时改变 State并产生 Event时，source必须按：
 
@@ -212,11 +267,13 @@ Event/Reset barrier 与 coalescing属于 M10/02 publisher，不由 source重复�
 
 ---
 
-## 7. Deterministic M10 Source
+## 9. Deterministic M10 Source
 
 M10 qualification使用一个真实实现 `RendererInputSource` surface 的 deterministic source，可控制：
 
 ```text
+start success/failure
+stop throw
 start/stop count
 channel availability
 current State sample
@@ -226,7 +283,7 @@ paired State+Event transition
 late emit after stop
 ```
 
-每次 `start()` 必须 materialize该时刻的 fresh producer facts，而不是 replay上一 subscription历史。
+每次 successful `start()` 必须 materialize该时刻的 fresh producer facts，而不是 replay上一 subscription历史。
 
 Fixture 不得：
 
@@ -241,7 +298,7 @@ bypass input gate/publisher
 
 ---
 
-## 8. Browser / PWA Placement
+## 10. Browser / PWA Placement
 
 ```text
 M10
@@ -256,11 +313,11 @@ M16 PWA
     same logical source/gate semantics
 ```
 
-M14 real source必须能在每次 `start()` 提供 fresh canonical current State samples；不能把 DOM Event object交给 Core。
+M14 real source必须能在每次 successful `start()` 提供 fresh canonical current State samples；不能把 DOM Event object交给 Core。
 
 ---
 
-## 9. Abstraction Budget
+## 11. Abstraction Budget
 
 允许：
 
@@ -268,6 +325,7 @@ M14 real source必须能在每次 `start()` 提供 fresh canonical current State
 one RendererInputSource interface
 one narrow discriminated change union
 one active subscription token/currentness check
+one local start bootstrap staging record
 small deterministic implementation
 small browser realization later in M14
 ```
@@ -283,11 +341,12 @@ Action/Command mapping
 focus/gesture framework
 Platform input capability/port
 runtime mutable source replacement
+source retry/backoff loop
 ```
 
 ---
 
-## 10. Done
+## 12. Done
 
 M10/03 必须证明：
 
@@ -298,6 +357,10 @@ source object injected once at holder construction
 current Control replacement/terminal stops old subscription
 same holder later Control install restarts same source object with fresh facts
 late stopped-source emit ignored
+start throw/non-function return discards partial facts and leaves Control/Data healthy
+no same-Control start retry
+stop throw contained after local invalidation
+start does not replay historical Event
 fresh .state availability requires fresh current sample
 availability loss clears producer sample + applies Reset semantics
 availability return fresh-baselines .state when Effective
