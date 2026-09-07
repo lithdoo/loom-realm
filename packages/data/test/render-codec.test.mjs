@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { jsonDepth } from "@loomrealm/wire";
 import { createSubsystemDataPeer } from "../dist/index.js";
 
 const renderNode = (data = {}) => ({ key: "root", tag: "sprite", attrs: {}, data, children: [] });
@@ -23,6 +24,22 @@ function outboundHarness() {
     },
   });
   return { peer, sent };
+}
+
+function globalDepthMessage(target) {
+  for (let extra = 0; extra <= 32; extra += 1) {
+    const leaf = { key: "n30", tag: "sprite", attrs: {}, data: {}, children: [] };
+    let parent = leaf;
+    for (let depth = 29; depth >= 1; depth -= 1) {
+      parent = { key: `n${depth}`, tag: "sprite", attrs: {}, data: {}, children: [parent] };
+    }
+    let data = null;
+    for (let depth = 1; depth < extra; depth += 1) data = { child: data };
+    leaf.data = extra === 0 ? {} : { deep: data };
+    const message = { type: "render.snapshot", domainId: "d", revision: 1, zIndex: 0, roots: [parent] };
+    if (jsonDepth(message) === target) return message;
+  }
+  throw new Error(`Cannot construct Render message at JSON depth ${target}`);
 }
 
 test("Render JSON keys use UTF-8 limits and every string is a Unicode scalar sequence", async () => {
@@ -99,4 +116,12 @@ test("invalid Render representation retires inbound Data before handler delivery
   });
   assert.equal((await peer.terminal).kind, "protocol-fatal");
   assert.equal(delivered, 0);
+});
+
+test("outbound preflight rejects a global JSON depth over 64 before carrier emission", async () => {
+  const invalid = outboundHarness();
+  const outcome = await invalid.peer.render.sendSnapshot(globalDepthMessage(65));
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.terminal.kind, "local-fatal");
+  assert.equal(invalid.sent.length, 0);
 });

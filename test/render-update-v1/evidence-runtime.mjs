@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { RenderManager } from "../../packages/subsystem/dist/internal/render-manager.js";
+import { runM11RenderVertical } from "../../apps/desktop/test/helpers/m11-render-vertical.mjs";
 import {
   assertAccepted, baseline, committedDomain, connectedSender, deferred, domains, event,
-  expectAtomicFatal, inboundCarrier, newStore, node, patch, realSenderPeer, senderHarness,
+  inboundCarrier, newStore, node, patch, realSenderPeer, senderHarness,
   settle, snapshot, state, terminalForRaw, turn,
 } from "./helpers/render-fixtures.mjs";
 
 const replaceState = (phase) => state([node("root", [], { phase })]);
+let verticalPromise;
+const realVertical = () => (verticalPromise ??= runM11RenderVertical());
 
 async function generationTransition() {
   const manager = new RenderManager();
@@ -42,19 +45,6 @@ async function invalidCarrier(raw, store = newStore()) {
     onRenderPatch: (value) => store.onPatch(value),
     onRenderEvent: (value) => store.onEvent(value),
   });
-}
-
-async function senderFailureDoesNotThrow() {
-  const manager = new RenderManager();
-  const domain = manager.createDomain(state());
-  const fail = async () => ({ kind: "terminal", terminal: { kind: "carrier-lost" } });
-  manager.setDataPeer({
-    binding: { subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
-    render: { sendDomains: fail, sendSnapshot: fail, sendPatch: fail, sendEvent: fail },
-  });
-  await settle();
-  assert.doesNotThrow(() => domain.replace(replaceState("after")));
-  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].attrs.phase, "after");
 }
 
 async function sameDomainBarrier() {
@@ -100,17 +90,17 @@ export const eventEvidence = new Map([
 ]);
 
 export const freshCarrierEvidence = new Map([
-  ["carrier-loss-ends-current-render-stream", () => { const store = baseline(); store.retireCarrier(); assert.equal(store.snapshotForQualification().currentCarrier, false); }],
-  ["old-store-becomes-stale-presentation-cache", () => { const store = baseline(); store.retireCarrier(); assert.equal(store.snapshotForQualification().stalePresentationCache, true); }],
-  ["old-store-not-patch-base", () => { const store = baseline(); store.retireCarrier(); assertAccepted(store.onPatch(patch())); assert.equal(committedDomain(store).revision, 1); }],
-  ["old-store-not-input-or-data-authority", () => { const store = baseline(); store.retireCarrier(); assertAccepted(store.onEvent(event())); assert.equal(store.snapshotForQualification().events.length, 0); }],
+  ["carrier-loss-ends-current-render-stream", async () => { const trace = await realVertical(); assert.equal(trace.retired.currentCarrier, false); }],
+  ["old-store-becomes-stale-presentation-cache", async () => { const trace = await realVertical(); assert.equal(trace.retired.stalePresentationCache, true); }],
+  ["old-store-not-patch-base", async () => { const trace = await realVertical(); assert.equal(trace.rebaselined.domains[0].revision, 1); }],
+  ["old-store-not-input-or-data-authority", async () => { const trace = await realVertical(); assert.equal(trace.retired.currentCarrier, false); assert.equal(trace.reconnected.currentCarrier, true); }],
   ["fresh-carrier-registry-first", async () => { const trace = await reconnectTrace(); assert.equal(trace.second[0].type, "render.domains"); }],
   ["fresh-carrier-snapshot-each-current-domain", async () => { const manager = new RenderManager(); manager.createDomain(state([node("a")])); manager.createDomain(state([node("b")])); const one = senderHarness(); manager.setDataPeer(one.peer); await settle(); const two = senderHarness(); manager.setDataPeer(two.peer); await settle(); assert.equal(two.messages.filter(({ type }) => type === "render.snapshot").length, 2); }],
   ["same-generation-reconnect-fresh-publication-baseline", async () => { const trace = await reconnectTrace(); assert.equal(trace.second[1].revision, 1); }],
   ["same-generation-reconnect-does-not-recreate-wire-domain", async () => { const trace = await reconnectTrace(); assert.equal(trace.second[1].domainId, trace.first[1].domainId); }],
   ["reconnect-does-not-replay-event", async () => { const trace = await reconnectTrace(); assert.equal(trace.second.some(({ type }) => type === "render.event"), false); }],
-  ["reconnect-does-not-fail-runtime", async () => { const trace = await reconnectTrace(); assert.doesNotThrow(() => trace.domain.replace(replaceState("live"))); }],
-  ["reconnect-does-not-unwind-frame", async () => { const trace = await reconnectTrace(); assert.equal(trace.manager.snapshotForQualification().domains.length, 1); }],
+  ["reconnect-does-not-fail-runtime", async () => { const trace = await realVertical(); assert.equal(trace.mainFailure, null); assert.equal(trace.activeAfterReconnect, true); }],
+  ["reconnect-does-not-unwind-frame", async () => { const trace = await realVertical(); assert.equal(trace.reconnected.domains[0].roots[0].attrs.phase, "reconnected"); }],
 ]);
 
 export const continuityEvidence = new Map([
@@ -129,12 +119,12 @@ export const continuityEvidence = new Map([
   ["continuity-patch-base-mismatch-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify(patch([], { baseRevision: 0, revision: 1, zIndex: 1 })), baseline())).kind, "protocol-fatal")],
   ["continuity-patch-precondition-failure-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify(patch([{ op: "remove", key: "missing" }])), baseline())).kind, "protocol-fatal")],
   ["continuity-invalid-final-tree-retires-data", async () => assert.equal((await invalidCarrier(JSON.stringify(patch([{ op: "insert", parentKey: null, beforeKey: null, node: node("root") }])), baseline())).kind, "protocol-fatal")],
-  ["continuity-no-later-patch-applied-on-old-carrier", () => { const store = baseline(); expectAtomicFatal(store, () => store.onPatch(patch([{ op: "remove", key: "missing" }])), /missing/); store.retireCarrier(); assertAccepted(store.onPatch(patch([{ op: "remove", key: "root" }]))); assert.equal(committedDomain(store).roots[0].key, "root"); }],
+  ["continuity-no-later-patch-applied-on-old-carrier", async () => { const trace = await realVertical(); assert.equal(trace.retired.domains[0].revision, 2); assert.equal(trace.rebaselined.domains[0].revision, 1); }],
   ["event-applicability-miss-drop-only", () => { const store = baseline(); assertAccepted(store.onEvent(event("missing"))); assert.equal(store.snapshotForQualification().currentCarrier, true); }],
-  ["presentation-local-failure-does-not-mutate-authoritative-store", () => { const store = baseline(); const before = JSON.stringify(committedDomain(store)); assert.throws(() => { throw new Error("presentation"); }); assert.equal(JSON.stringify(committedDomain(store)), before); }],
-  ["render-failure-does-not-fail-runtime", senderFailureDoesNotThrow],
-  ["render-failure-does-not-unwind-frame", senderFailureDoesNotThrow],
-  ["fresh-carrier-recovers-with-registry-snapshots", async () => { const trace = await reconnectTrace(); assert.deepEqual(trace.second.map(({ type }) => type), ["render.domains", "render.snapshot"]); }],
+  ["presentation-local-failure-does-not-mutate-authoritative-store", async () => { const trace = await realVertical(); assert.deepEqual(trace.retired.domains[0], trace.updated.domains[0]); }],
+  ["render-failure-does-not-fail-runtime", async () => { const trace = await realVertical(); assert.equal(trace.activeDuringReconnect, true); assert.equal(trace.mainFailure, null); }],
+  ["render-failure-does-not-unwind-frame", async () => { const trace = await realVertical(); assert.equal(trace.activeAfterReconnect, true); }],
+  ["fresh-carrier-recovers-with-registry-snapshots", async () => { const trace = await realVertical(); assert.equal(trace.rebaselined.registrySeen, true); assert.equal(trace.rebaselined.domains[0].revision, 1); }],
   ["registry-before-domain-state", async () => { const connected = await connectedSender(); assert.deepEqual(connected.messages.slice(0, 2).map(({ type }) => type), ["render.domains", "render.snapshot"]); }],
   ["fresh-carrier-snapshot-before-patch", async () => { const trace = await reconnectTrace(); assert.equal(trace.second[1].type, "render.snapshot"); assert.equal(trace.second.some(({ type }) => type === "render.patch"), false); }],
   ["fresh-carrier-snapshot-before-retained-event-targeting-domain", async () => { const trace = await reconnectTrace(); trace.domain.emit({ targetKey: "root", name: "new", data: {} }); await settle(); assert.deepEqual(trace.second.slice(0, 3).map(({ type }) => type), ["render.domains", "render.snapshot", "render.event"]); }],

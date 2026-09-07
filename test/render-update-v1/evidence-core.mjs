@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { runM11RenderVertical } from "../../apps/desktop/test/helpers/m11-render-vertical.mjs";
 import {
   assertAccepted, assertFatal, baseline, chain, committedDomain, connectedSender,
   domains, event, expectAtomicFatal, expectInboundAccepted, expectInboundRejected,
   expectOutboundAccepted, expectOutboundRejected, flatNodes, newStore, node, patch,
   settle, snapshot, state, terminalForRaw,
 } from "./helpers/render-fixtures.mjs";
+
+let verticalPromise;
+const realVertical = () => (verticalPromise ??= runM11RenderVertical());
 
 const validMessages = {
   "wire-valid-domains": domains("d1"),
@@ -17,15 +21,14 @@ export const wireEvidence = new Map([
   ...Object.entries(validMessages).map(([id, message]) => [id, () => {
     const raw = JSON.stringify(message);
     assert.deepEqual(expectInboundAccepted(raw), message);
-    expectOutboundAccepted(message);
   }]),
   ["wire-top-level-not-object", () => expectInboundRejected("null", /object/)],
   ["wire-invalid-json", () => expectInboundRejected("{", /invalid JSON/)],
   ["wire-unpaired-surrogate", () => expectInboundRejected('{"type":"render.domains","domains":["\\ud800"]}', /Unicode/)],
   ["wire-unknown-type", () => expectInboundRejected('{"type":"render.unknown"}', /unknown/)],
-  ["wire-extra-top-level-member", () => expectOutboundRejected({ ...domains(), extra: true }, /closed schema/)],
-  ["wire-missing-required-member", () => expectOutboundRejected({ type: "render.domains" }, /Missing required/)],
-  ["wire-wrong-member-type", () => expectOutboundRejected({ type: "render.domains", domains: {} }, /array/)],
+  ["wire-extra-top-level-member", () => expectInboundRejected(JSON.stringify({ ...domains(), extra: true }), /closed schema/)],
+  ["wire-missing-required-member", () => expectInboundRejected(JSON.stringify({ type: "render.domains" }), /Missing required/)],
+  ["wire-wrong-member-type", () => expectInboundRejected(JSON.stringify({ type: "render.domains", domains: {} }), /array/)],
   ["wire-message-exact-byte-limit", () => {
     const base = JSON.stringify(domains());
     const raw = `${base}${" ".repeat(1_048_576 - Buffer.byteLength(base))}`;
@@ -113,10 +116,10 @@ export const registryEvidence = new Map([
     assert.equal(trace.find((message) => message.type === "render.snapshot").domainId, "d2");
     durable.close();
   }],
-  ["registry-removal-retires-authoritative-replica", () => {
-    const store = baseline();
-    assertAccepted(store.onDomains(domains()));
-    assert.equal(store.snapshotForQualification().domains.length, 0);
+  ["registry-removal-retires-authoritative-replica", async () => {
+    const trace = await realVertical();
+    assert.equal(trace.reconnected.domains.length, 1);
+    assert.deepEqual(trace.removed.domains, []);
   }],
   ["pending-domain-messages-discarded-after-removal", async () => {
     let release;
@@ -203,10 +206,10 @@ export const snapshotEvidence = new Map([
   ["snapshot-one-over-node-count-limit", () => assertFatal(newStore().onSnapshot(snapshot("d1", 1, minimalNodes(16_385))), /count limit/)],
   ["snapshot-exact-tree-depth-limit", () => assertAccepted(newStore().onSnapshot(snapshot("d1", 1, [chain(30)])))],
   ["snapshot-one-over-tree-depth-limit", () => assertFatal(newStore().onSnapshot(snapshot("d1", 1, [chain(31)])), /depth limit/)],
-  ["zindex-min", () => expectOutboundAccepted(snapshot("d1", 1, [], -2_147_483_648))],
-  ["zindex-max", () => expectOutboundAccepted(snapshot("d1", 1, [], 2_147_483_647))],
-  ["zindex-below-min", () => expectOutboundRejected(snapshot("d1", 1, [], -2_147_483_649), /zIndex/)],
-  ["zindex-above-max", () => expectOutboundRejected(snapshot("d1", 1, [], 2_147_483_648), /zIndex/)],
+  ["zindex-min", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], -2_147_483_648))).zIndex, -2_147_483_648)],
+  ["zindex-max", () => assert.equal(expectInboundAccepted(JSON.stringify(snapshot("d1", 1, [], 2_147_483_647))).zIndex, 2_147_483_647)],
+  ["zindex-below-min", () => expectInboundRejected(JSON.stringify(snapshot("d1", 1, [], -2_147_483_649)), /zIndex/)],
+  ["zindex-above-max", () => expectInboundRejected(JSON.stringify(snapshot("d1", 1, [], 2_147_483_648)), /zIndex/)],
   ["higher-zindex-above-lower", () => { const store = newStore(1, ["high", "low"]); assertAccepted(store.onSnapshot(snapshot("high", 1, [], 2))); assertAccepted(store.onSnapshot(snapshot("low", 1, [], 1))); assert.deepEqual(store.snapshotForQualification().logicalOrder, ["low", "high"]); }],
   ["same-zindex-domainid-utf8-lexical-tiebreak", () => { const store = newStore(1, ["é", "z"]); assertAccepted(store.onSnapshot(snapshot("é", 1, []))); assertAccepted(store.onSnapshot(snapshot("z", 1, []))); assert.deepEqual(store.snapshotForQualification().logicalOrder, ["z", "é"]); }],
   ["registry-order-not-stacking-order", () => { const store = newStore(1, ["high", "low"]); assertAccepted(store.onSnapshot(snapshot("high", 1, [], 2))); assertAccepted(store.onSnapshot(snapshot("low", 1, [], 1))); assert.deepEqual(store.snapshotForQualification().logicalOrder, ["low", "high"]); }],

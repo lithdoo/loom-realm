@@ -69,6 +69,24 @@ function depthMessage(target) {
   throw new Error(`Cannot construct Render message at JSON depth ${target}`);
 }
 
+function applicationMessageBytes(target) {
+  const message = snapshot("d", 1, Array.from({ length: 4 }, (_, index) =>
+    node(`n${index}`, [], {}, { value: "" }),
+  ));
+  const emptyBytes = Buffer.byteLength(JSON.stringify(message));
+  const payloadBytes = target - emptyBytes;
+  assert.ok(payloadBytes >= 0);
+  const perNode = Math.floor(payloadBytes / message.roots.length);
+  let remainder = payloadBytes % message.roots.length;
+  for (const root of message.roots) {
+    const size = perNode + (remainder > 0 ? 1 : 0);
+    root.data.value = "x".repeat(size);
+    if (remainder > 0) remainder -= 1;
+  }
+  assert.equal(Buffer.byteLength(JSON.stringify(message)), target);
+  return message;
+}
+
 export function registerHardLimitAudit() {
   test("M11 Render hard-limit matrix proves exact, one-over, UTF-8, and inbound retirement", async () => {
     const utf8 = (bytes) => "é".repeat(bytes / 2);
@@ -99,16 +117,27 @@ export function registerHardLimitAudit() {
       await inbound(over, false);
       assert.ok(label.length > 0);
     }
-    for (const value of [-2_147_483_648, 2_147_483_647]) await outbound(snapshot("d", 1, [], value), true);
-    for (const value of [-2_147_483_649, 2_147_483_648]) await inbound(snapshot("d", 1, [], value), false);
+    for (const value of [-2_147_483_648, 2_147_483_647]) {
+      await outbound(snapshot("d", 1, [], value), true, `zIndex ${value} exact outbound`);
+      await inbound(snapshot("d", 1, [], value), true);
+    }
+    for (const value of [-2_147_483_649, 2_147_483_648]) {
+      await outbound(snapshot("d", 1, [], value), false, `zIndex ${value} outside outbound`);
+      await inbound(snapshot("d", 1, [], value), false);
+    }
 
     const exactDepth = depthMessage(64);
     const overDepth = depthMessage(65);
+    await outbound(exactDepth, true, "global JSON depth exact outbound");
     await inbound(exactDepth, true);
+    await outbound(overDepth, false, "global JSON depth one-over outbound");
     await inbound(overDepth, false);
 
-    const base = JSON.stringify(domains());
-    await inbound(`${base}${" ".repeat(1_048_576 - Buffer.byteLength(base))}`, true);
-    await inbound(`${base}${" ".repeat(1_048_577 - Buffer.byteLength(base))}`, false);
+    const exactApplicationMessage = applicationMessageBytes(1_048_576);
+    const overApplicationMessage = applicationMessageBytes(1_048_577);
+    await outbound(exactApplicationMessage, true, "application message bytes exact outbound");
+    await inbound(exactApplicationMessage, true);
+    await outbound(overApplicationMessage, false, "application message bytes one-over outbound");
+    await inbound(overApplicationMessage, false);
   });
 }

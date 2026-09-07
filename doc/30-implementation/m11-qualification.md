@@ -25,6 +25,12 @@ transport             = 0
 
 这些数字由 executable catalog/audit 派生；expected、registered、executed 与 passed role/fixture pair sets 严格相等。
 
+角色证据不再通过两个 wrapper 委托同一个 group callback。`evidence-role-specific.mjs`
+为 dual-role obligation 提供缺失一侧的独立生产 seam assertion；基础 callback 只归属一个角色，
+runner 继续对 267 个 `(role, fixture)` identity 做 exact-set audit。被点名的 reconnect、旧流隔离、
+Runtime/Frame 独立性与 Domain close 证据复用真实 Main → Desktop → Hostra vertical 的共享装配，
+在第二条 Data carrier 提交前观察旧 Store retirement，并在同一 Frame 中完成 reconnect 后再次发布。
+
 ## Requalification Closure
 
 最终评审要求已一次完成：
@@ -36,6 +42,11 @@ strict fail-closed normative catalog extraction
 complete exact/one-over hard-limit matrix
 discriminating role-specific production-seam assertions
 ```
+
+Hard-limit audit 对 application-message bytes、global JSON depth 与 zIndex 同样执行完整四象限：
+exact outbound、exact inbound、one-over/outside outbound 零发送，以及 one-over/outside inbound
+在 handler/store commit 前 protocol-fatal。该矩阵同时发现并闭合了 outbound codec 缺失的 global
+JSON depth preflight；修复仅位于现有 private profile codec，没有增加 public API。
 
 不得为本次修复引入新的 Render authority、Runtime/Session/Connection abstraction、generic validator service、scenario DSL 或 conformance framework。
 

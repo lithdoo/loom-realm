@@ -78,6 +78,9 @@ export function encodeForRole(message: RendererDataMessageV1, role: DataRole): s
     fail(t.startsWith("input.") ? "input" : "render", "outbound direction invalid for role");
   }
   assertJsonValue(validated as unknown);
+  if (jsonDepth(validated as unknown as JsonValue) > MAX_JSON_DEPTH) {
+    fail("profile", "JSON depth limit exceeded");
+  }
   const text = stringifyJson(validated as unknown as JsonValue);
   if (utf8ByteLength(text) > MAX_MESSAGE_BYTES) fail("profile", "message byte limit exceeded");
   return text;

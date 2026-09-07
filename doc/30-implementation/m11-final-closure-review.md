@@ -8,6 +8,10 @@
 > Conformance：[Render Update v1 Conformance](../15-contracts/render-update-conformance-v1.md)  
 > Closure 入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 
+> 2026-09-07 最终复核补强：dual-role evidence 已取消“不同 wrapper → 同一 assertion”模式；
+> reconnect/old-stream/Runtime/Frame/Domain removal proof 已接入共享的真实 Desktop/Hostra vertical；
+> application bytes、global JSON depth、zIndex 的 outbound/inbound matrix cells 已补齐。
+
 本评审不重新设计 M11，不修改 Frozen Render Update v1 authority、wire schema、lifetime、revision、Event 或 failure semantics。Production architecture 仍成立；评审发现的 **Render representation validation 实现闭环** 与 **formal qualification evidence 真实性闭环** 已按本文固定计划修复。
 
 因此当前准确状态为：
