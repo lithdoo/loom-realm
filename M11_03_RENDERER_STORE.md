@@ -1,4 +1,4 @@
-# M11 / 03 — Renderer Render Store
+# M11 / 03 — Renderer Store
 
 > 状态：**Implementation Frozen / Waiting on M10 Closure**  
 > 阶段：M11 Render  
