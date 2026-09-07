@@ -1,5 +1,6 @@
 import type { JsonValue } from "@loomrealm/wire";
 import type { CreateInputListenerOptions, InputListener } from "./input.js";
+import type { RenderDomain, RenderDomainState } from "./render.js";
 
 export interface FrameFailure {
   readonly code: string;
@@ -31,6 +32,7 @@ export interface Frame<TParams extends JsonValue = JsonValue> {
 export interface SubsystemScope {
   readonly signal: AbortSignal;
   createInputListener(options: CreateInputListenerOptions): InputListener;
+  createRenderDomain(initialState: RenderDomainState): RenderDomain;
 }
 
 export interface SubsystemDefinition {

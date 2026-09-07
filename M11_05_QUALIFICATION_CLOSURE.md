@@ -1,6 +1,6 @@
 # M11 / 05 — Qualification and Closure
 
-> 状态：**Implementation Frozen / Ready**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M11 Render  
 > 落地顺序：05  
 > 最近复核：2026-09-07  
@@ -308,3 +308,5 @@ Implemented / Qualification Pending
 ```
 
 M11 Closed 后进入 M12 Content；Render transport-equivalence claim 仍留到 M16。
+
+固定证据记录见 [M11 qualification](doc/30-implementation/m11-qualification.md)，独立 CI 为 `.github/workflows/m11.yml`。

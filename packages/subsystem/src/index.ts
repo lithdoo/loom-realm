@@ -34,3 +34,9 @@ export type {
   CreateInputListenerOptions,
   InputListener,
 } from "./input.js";
+export type {
+  RenderNode,
+  RenderDomainState,
+  RenderEvent,
+  RenderDomain,
+} from "./render.js";

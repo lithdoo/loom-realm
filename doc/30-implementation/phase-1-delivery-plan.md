@@ -243,7 +243,7 @@ User Input authority/lifetime/wire/backpressure
 
 ---
 
-## M11：Render Update v1 + RenderManager — **Implementation Frozen / Ready**
+## M11：Render Update v1 + RenderManager — **Implemented / Qualified / Closed**
 
 Current facts：
 
@@ -251,6 +251,8 @@ Current facts：
 Render Update protocolVersion = 1
 Conformance fixtureSetRevision = 1
 M10 = Implemented / Qualified / Closed
+M11 root gate = npm run test:m11
+M11 qualification = 202 fixtures / 266 sender+receiver role records
 ```
 
 Root implementation plans：

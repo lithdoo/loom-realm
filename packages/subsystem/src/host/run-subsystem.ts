@@ -26,6 +26,8 @@ import type {
 import type { CreateInputListenerOptions } from "../input.js";
 import { FrameRuntime } from "../internal/frame-runtime.js";
 import { InputManager } from "../internal/input-manager.js";
+import { RenderManager } from "../internal/render-manager.js";
+import type { RenderDomainState } from "../render.js";
 
 export interface SubsystemRuntimeControlPolicy {
   readonly scheduler: DeadlineScheduler;
@@ -235,6 +237,7 @@ class SubsystemHost {
   private dataAcquisitionStopped = false;
   private dataCleanup: Promise<void> = Promise.resolve();
   private readonly input = new InputManager();
+  private readonly render = new RenderManager();
 
   constructor(private readonly options: RunSubsystemOptions) {}
 
@@ -250,6 +253,8 @@ class SubsystemHost {
       signal: this.scopeController.signal,
       createInputListener: (options: CreateInputListenerOptions) =>
         this.input.createListener(options),
+      createRenderDomain: (state: RenderDomainState) =>
+        this.render.createDomain(state),
     });
 
     let definition: SubsystemDefinition;
@@ -453,10 +458,12 @@ class SubsystemHost {
     }
     this.currentDataPeer = peer;
     this.input.setDataPeer(peer);
+    this.render.setDataPeer(peer);
     void peer.terminal.then(() => {
       if (this.currentDataPeer !== peer) return;
       this.currentDataPeer = null;
       this.input.setDataPeer(null);
+      this.render.setDataPeer(null);
       this.startDataAcquire();
     });
   }
@@ -475,6 +482,7 @@ class SubsystemHost {
     const peer = this.currentDataPeer;
     this.currentDataPeer = null;
     this.input.setDataPeer(null);
+    this.render.setDataPeer(null);
     if (peer === null) return;
     const close = peer.close().catch(() => {});
     this.dataCleanup = Promise.allSettled([this.dataCleanup, close]).then(() => undefined);
@@ -536,6 +544,7 @@ class SubsystemHost {
     this.scopeController.abort();
     this.frames?.abortAll();
     this.input.closeAll();
+    this.render.closeAll();
     void this.finishFatal(primary);
   }
 
@@ -544,6 +553,7 @@ class SubsystemHost {
     this.scopeController.abort();
     this.frames?.abortAll();
     this.input.closeAll();
+    this.render.closeAll();
     await this.bounded(this.bestEffortStatus({ state: "stopping" }));
     await this.bounded(
       Promise.allSettled([

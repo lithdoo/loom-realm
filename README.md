@@ -34,13 +34,14 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 - [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
-### M11 implementation plan — Frozen / Directly Implementable
+### M11 implementation and qualification — Complete
 
 - [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 - [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
 - [M11 / 03 — Renderer Render Store](./M11_03_RENDERER_STORE.md)
 - [M11 / 04 — Render Vertical Integration](./M11_04_VERTICAL_INTEGRATION.md)
 - [M11 / 05 — Qualification and Closure](./M11_05_QUALIFICATION_CLOSURE.md)
+- [M11 qualification record](./doc/30-implementation/m11-qualification.md)
 
 历史 M7/M8/M9 root plans继续保留作为已完成 milestone implementation provenance。
 
@@ -220,7 +221,7 @@ M7 Renderer Control                   ✅
 M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
-M11 Render                            Implementation Frozen / Ready
+M11 Render                            ✅ Qualified / Closed
 M12 Content                           pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
@@ -230,7 +231,7 @@ M16 PWA full E2E/equivalence          pending
 
 M10 不实现 BrowserWindow/DOM physical composition；真实 Browser `RendererInputSource` 属于 M14，并必须复用 frozen M10 source API/lifetime。
 
-M11 现在进入 implementation-only phase：只允许 private layout/data structure、finite queue capacity、private domainId representation与 Patch-vs-Snapshot heuristic 等 realization choices；authority、public API、identity/lifetime、error/publication/receiver semantics与 qualification shape已冻结。
+M11 已按冻结设计完成 Subsystem business authority、bounded publication、Renderer internal replica、Desktop/Hostra vertical 与 sender/receiver qualification。DOM/physical presentation 仍不属于 M11。
 
 ---
 
@@ -288,6 +289,4 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Latest qualified implementation gate：**M10**。运行 `npm run test:m10` 可复验完整 M9 regression、User Input fixtureSetRevision 2 platform-independent role qualification、M10 SDK/source projection与真实 Desktop/Hostra vertical。
-
-M11 implementation完成后的唯一 closure gate已冻结为 `npm run test:m11`；语义见 [M11 / 05](./M11_05_QUALIFICATION_CLOSURE.md)。
+Latest qualified implementation gate：**M11**。运行 `npm run test:m11` 可复验完整 M10 regression、Render Update fixtureSetRevision 1 sender/receiver qualification、Subsystem/Renderer package semantics与真实 Desktop/Hostra Render vertical；语义与证据见 [M11 / 05](./M11_05_QUALIFICATION_CLOSURE.md) 和 [M11 qualification](./doc/30-implementation/m11-qualification.md)。

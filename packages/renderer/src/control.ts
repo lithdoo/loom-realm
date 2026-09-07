@@ -12,6 +12,8 @@ import {
   type RendererPeerConnectOutcome,
 } from "@loomrealm/renderer-control";
 import { RendererInputGate } from "./internal/input-gate.js";
+import { RendererRenderStore } from "./internal/render-store.js";
+import { renderQualification } from "./internal/render-qualification.js";
 import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
 
 export interface RendererControlCurrent {
@@ -50,6 +52,8 @@ interface RendererDataSlot {
   current: CurrentDataPeer | null;
   pending: PendingDataAcquire | null;
   failed: DesiredDataIdentity | null;
+  renderIdentity: DesiredDataIdentity | null;
+  render: RendererRenderStore;
 }
 
 const acceptedDataMessage = Object.freeze({ kind: "accepted" } as const);
@@ -127,6 +131,10 @@ class ControlHolder implements RendererControlHolder {
     return this.currentValue;
   }
 
+  [renderQualification](subsystemKey: string) {
+    return this.dataSlots.get(subsystemKey)?.render.snapshotForQualification() ?? null;
+  }
+
   async connect(options: RendererPeerConnectOptions): Promise<RendererControlHolderConnectOutcome> {
     if (this.connecting)
       throw new TypeError("Renderer Control connect already in progress");
@@ -187,18 +195,27 @@ class ControlHolder implements RendererControlHolder {
 
     for (const subsystemKey of keys) {
       const identity = desired.get(subsystemKey);
-      const slot = this.dataSlots.get(subsystemKey) ?? {
+      const existingSlot = this.dataSlots.get(subsystemKey);
+      const slot = existingSlot ?? {
         current: null,
         pending: null,
         failed: null,
+        renderIdentity: identity ?? null,
+        render: new RendererRenderStore(identity?.generation ?? 1),
       };
       this.dataSlots.set(subsystemKey, slot);
+
+      if (identity !== undefined && !sameIdentity(slot.renderIdentity, identity)) {
+        slot.render = new RendererRenderStore(identity.generation);
+        slot.renderIdentity = identity;
+      }
 
       if (identity === undefined || !sameIdentity(slot.current?.identity ?? null, identity)) {
         const current = slot.current;
         slot.current = null;
         if (current !== null) {
           this.inputGate.retireData(subsystemKey, current.peer);
+          slot.render.retireCarrier();
           void current.peer.close().catch(() => {});
         }
       }
@@ -234,6 +251,7 @@ class ControlHolder implements RendererControlHolder {
         slot.current = null;
         if (current !== null) {
           this.inputGate.retireData(subsystemKey, current.peer);
+          slot.render.retireCarrier();
           void current.peer.close().catch(() => {});
         }
       }
@@ -286,6 +304,7 @@ class ControlHolder implements RendererControlHolder {
       if (attempt.identity.dataProfile !== RENDERER_DATA_PROFILE_V1) {
         throw new TypeError("Unsupported Renderer Data profile");
       }
+      slot.render.beginCarrier();
       peer = createRendererDataPeer({
         binding: {
           carrier,
@@ -304,13 +323,26 @@ class ControlHolder implements RendererControlHolder {
             }
             return acceptedDataMessage;
           },
-          onRenderDomains: () => acceptedDataMessage,
-          onRenderSnapshot: () => acceptedDataMessage,
-          onRenderPatch: () => acceptedDataMessage,
-          onRenderEvent: () => acceptedDataMessage,
+          onRenderDomains: (message) =>
+            slot.current?.peer === peer
+              ? slot.render.onDomains(message)
+              : acceptedDataMessage,
+          onRenderSnapshot: (message) =>
+            slot.current?.peer === peer
+              ? slot.render.onSnapshot(message)
+              : acceptedDataMessage,
+          onRenderPatch: (message) =>
+            slot.current?.peer === peer
+              ? slot.render.onPatch(message)
+              : acceptedDataMessage,
+          onRenderEvent: (message) =>
+            slot.current?.peer === peer
+              ? slot.render.onEvent(message)
+              : acceptedDataMessage,
         },
       });
     } catch {
+      slot.render.retireCarrier();
       bestEffortCloseCarrier(carrier);
       if (slot.pending === attempt) {
         slot.pending = null;
@@ -320,6 +352,7 @@ class ControlHolder implements RendererControlHolder {
     }
 
     if (!this.isCurrentAttempt(slot, attempt)) {
+      slot.render.retireCarrier();
       void peer.close().catch(() => {});
       return;
     }
@@ -329,6 +362,7 @@ class ControlHolder implements RendererControlHolder {
     void peer.terminal.then(() => {
       if (slot.current?.peer !== peer) return;
       this.inputGate.retireData(attempt.identity.subsystemKey, peer);
+      slot.render.retireCarrier();
       slot.current = null;
       if (
         this.isDesired(attempt.identity) &&
@@ -379,6 +413,7 @@ class ControlHolder implements RendererControlHolder {
       slot.current = null;
       if (current !== null) {
         this.inputGate.retireData(current.identity.subsystemKey, current.peer);
+        slot.render.retireCarrier();
         void current.peer.close().catch(() => {});
       }
       slot.failed = null;
