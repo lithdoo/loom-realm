@@ -286,7 +286,7 @@ RenderDomain.close(): void
 固定：
 
 ```text
-one internal RenderManager / Subsystem instance
+one internal RenderManager responsibility per Subsystem instance
 all author operations synchronous local-only
 validate → detach caller-owned value → atomic local commit / bounded Event offer
 successful state/event always Frozen Render v1 representable
@@ -305,7 +305,7 @@ Frame/Data do not own business Domain lifetime
 
 ```text
 business Domains
-→ one bounded publication coordinator
+→ one bounded publication responsibility
 → existing SubsystemDataPeer.render
 ```
 
@@ -376,6 +376,13 @@ business Domain create
 → current Renderer replica
 → authoritative update
 → replica changes
+
+business Domain close
+→ no new Domain send starts
+→ pending/not-started Domain work discarded
+→ any already-started send settles in order
+→ Registry removal
+→ Renderer replica retires
 
 same-generation carrier close
 → business Domain survives
