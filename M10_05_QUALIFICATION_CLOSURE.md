@@ -6,9 +6,11 @@
 > 最近复核：2026-09-07  
 > 前置：[M10 / 01](M10_01_SUBSYSTEM_INPUT_MANAGER.md) → [M10 / 02](M10_02_RENDERER_INPUT_GATE.md) → [M10 / 03](M10_03_RENDERER_INPUT_PRODUCERS.md) → [M10 / 04](M10_04_VERTICAL_INTEGRATION.md)  
 > 正式协议：[User Input v1](doc/15-contracts/user-input-v1.md)  
-> 目标：定义唯一 M10 implementation qualification boundary；实现只满足 Frozen User Input semantics 与现有 role boundaries，不借 M10 扩张平台、Store、authority 或通用输入框架。
+> Conformance：[User Input v1 Conformance](doc/15-contracts/user-input-conformance-v1.md)  
+> 修正决策：[ADR 0029](doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 目标：定义唯一 M10 implementation qualification boundary；只实现 Frozen User Input role behavior，不借 M10扩张 Main、Platform、Store、connection 或 generic input framework。
 
-> **M10 closure = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Interest、Renderer Producer 三者经 current Data 正确收敛为 business input；fresh Activation/Data 建立 fresh baseline，旧 lease/event 永不复活。**
+> **M10 closure = 在 qualified M9 Data lifecycle 上，Main InputTarget、Subsystem Desired Interest、Renderer Producer经 current Data收敛为稳定 business input；State保持 current truth，Event保持 future-only，所有旧 lease/carrier state均不可复活。**
 
 ---
 
@@ -19,22 +21,22 @@
 ```text
 @loomrealm/subsystem
     InputListener author surface
-    one role-local InputManager
-    Desired Interest aggregation
-    receive gate / retained state cleanup
-    fresh Data Interest republish
+    exactly one InputManager / instance
+    Desired Interest aggregation + local validation
+    retained immutable State + delivery gate
+    latest-only Interest publisher
 
 @loomrealm/renderer
+    holder-lifetime canonical input source seam
     current Interest Registry per Data peer
-    Effective input gate
-    Reset / fresh baseline / State-Event ordering
-    minimal producer-facing seam
+    Effective gate
+    bounded State/Event/Reset publisher
 
 existing @loomrealm/data
-    typed User Input messages/codecs/reader/writer reused unchanged
+    User Input codecs/typed peers/serialized send reused unchanged
 
-M9 vertical
-    real paired Desktop Data lifecycle consumed by M10 business input
+M9 Desktop vertical
+    real paired Data lifecycle consumed by M10 business input
 ```
 
 M10 不改变 Main InputTarget authority，不新增 Platform Port。
@@ -47,28 +49,28 @@ M10 不改变 Main InputTarget authority，不新增 Platform Port。
 
 ```text
 one InputManager per Subsystem instance
-InputListener records + derived DesiredRegistry
-one Renderer-local input gate over existing holder/Data slots
-one narrow canonical producer seam
-bounded State coalescing / Event queue required by Frozen protocol
+listener records + one derived DesiredRegistry
+minimal immutable retained State
+0..1 inFlight + pendingLatest Interest publication
+one Renderer input gate per current Data slot
+one bounded input publisher
+one construction-time canonical input source seam
 ```
 
 禁止：
 
 ```text
-Generic Input framework
+Generic Input / Queue / Authorization framework
 InputDeviceRegistry / plugin system
 Action/Command mapping
-EventBus / Observable / Store framework
-InputTarget shadow registry
-Activation/Data generation allocator
+EventBus / Observable / Store
+Frame/InputTarget/Activation shadow registry
+Data generation allocator for M10 tests
 cross-plane ACK/revision/barrier
 second Data reader/writer
 retry/replay/history
-BrowserWindow/DOM physical composition
+BrowserWindow/DOM composition
 ```
-
-若实现需要上述任一项，先证明 Frozen contract + current real consumer 无法直接完成；否则不得加入。
 
 ---
 
@@ -78,18 +80,33 @@ BrowserWindow/DOM physical composition
 
 ```text
 public API only exposes business concepts
+invalid author config rejects locally and atomically
 multiple listeners union correctly
-one listener close does not remove another contribution
-setChannels shrink updates local receive gate before wire publication
-Frame close performs local-first listener/Interest/state cleanup
-child-call suspension preserves desired config but revokes ordinary delivery
-fresh Activation reuses config with fresh state baseline
-fresh Data peer republishes full current Interest Registry
-stale State/Event/Reset drop without Runtime failure
-mutation gate blocks business input during commit-sensitive Frame mutation
+listener close does not remove another contribution
+setChannels shrink updates local eligibility before wire publication
+new .state listener gets current retained local baseline
+new .event listener gets no history
+fresh Data clears old retained State and republishes DesiredRegistry
+Frame close performs local-first listener/Interest/State cleanup
 ```
 
-Author code不得 import protocol/platform packages。
+### Mutation gate / ADR 0029
+
+```text
+pending commit-sensitive mutation
+→ current same-Activation State retained but not delivered
+→ Event dropped
+→ current Reset clears retained/suppressed State
+
+known no-commit + same Activation reopen
+→ at most one latest retained State / interested state channel delivered
+→ no Event replay
+
+commit / Activation revoke / terminal
+→ suppressed old-Activation State discarded
+```
+
+Handler throw/reject必须 contained，不得逃逸成 Data local-fatal。
 
 ---
 
@@ -99,42 +116,59 @@ Author code不得 import protocol/platform packages。
 
 ```text
 Effective = Data × InputTarget × active F/A × Interest × Producer
-Interest-first and authority-first both converge
-unknown/stale Interest remains inert
-Interest shrink stops production immediately
-fresh .state Effective transition sends self-contained baseline
-.event starts future-only
-same-carrier InputTarget replacement orders Reset(old) before ordinary input(new)
-producer loss Reset semantics are correct
-producer return rebaselines state
+Interest-first and authority-first converge
+unknown/stale Interest stays inert
+fresh state Effective transition sends self-contained baseline
+.event begins future-only
+same-carrier target replacement orders Reset(old) before new ordinary input
+producer loss Reset/rebaseline correct
 Control loss disables input immediately
-Data retirement discards carrier-local Registry/publication state
-old Data/Control facts cannot emit after replacement
+Data retirement discards Registry/publisher state
+old Data/Control/source facts cannot emit after replacement
 ```
 
-Renderer不得解释 Frame call stack semantics；只组合 committed current facts。
+Renderer不得解释 Frame call stack或 Subsystem mutation gate。
 
 ---
 
-## 5. Producer / Backpressure Evidence
+## 5. Ordering / Backpressure Evidence
 
-必须证明：
+必须证明 Frozen observable rules：
 
 ```text
-unavailable producer emits nothing
-canonical payload only
-paired physical transition: post-transition State before Event when State Effective
-State may coalesce before emitted
+State latest-pending coalescing only between barriers
 Event never coalesces/replays
-bounded queue does not migrate across lease/Data retirement
-producer cannot choose frameId/activationId
+Event is global State-coalescing barrier
+Reset is global State-coalescing barrier
+State cannot move across retained Event/Reset
+standard paired transition: post-transition State before Event
+bounded Event overflow drops before emitted
+surviving Event order preserved
+Input backlog does not overflow @loomrealm/data generic writer into local-fatal
+lease/Data retirement discards obsolete not-started pending input
 ```
 
-M10 deterministic producer必须经过同一 production input gate，不得直接写 Data peer/wire。
+具体 Event queue capacity不形成 protocol compatibility surface。
 
 ---
 
-## 6. Real Vertical Evidence
+## 6. Producer Evidence
+
+```text
+one source injected at Renderer holder construction
+no runtime producer registry
+old holder/source cannot affect replacement holder
+source cannot choose frameId/activationId
+unavailable producer cannot emit
+producer return rebaselines .state if Effective
+source cannot bypass gate/publisher/Data peer
+```
+
+M14 real browser mapping必须复用同一 seam/semantics。
+
+---
+
+## 7. Real Vertical Evidence
 
 必须使用真实：
 
@@ -148,24 +182,49 @@ RendererDataPeer + SubsystemDataPeer
 Subsystem business Definition
 ```
 
-仅 physical input source可 deterministic。
+仅 physical canonical input source可 deterministic。
 
 至少覆盖：
 
 ```text
 initial active Frame input
-Interest-first convergence
-authority-first convergence
-nested child call / caller fresh resume Activation
-same-generation Data reconnect with fresh baseline
-historical Event no replay
+Interest-first / authority-first
+nested child call / fresh caller Activation
+recoverable frame.call no-commit State convergence
+committed call suppresses old-Activation retained State
+same-generation Data reconnect / fresh State / no Event replay
 producer loss/return
+handler failure isolation
 Frame close cleanup
 ```
 
+Fresh-generation behavior使用 role-level deterministic Data fixture证明；不得为此提前扩大 Main generation machinery。
+
 ---
 
-## 7. Regression Boundary
+## 8. Formal Conformance Boundary
+
+Current User Input v1 conformance fixture revision：
+
+```text
+fixtureSetRevision = 2
+```
+
+M10 必须通过所有 platform-independent Renderer/Subsystem role obligations，包括 ADR 0029 cases。
+
+M10 **不得**宣称 Hostra/PWA full transport-equivalence conformance；PWA physical realization尚属 M16。因此 M10 closure wording固定为：
+
+```text
+User Input v1 Renderer/Subsystem role implementation
+qualified against current platform-independent fixtureSetRevision=2
+on Hostra/Desktop physical Data lifecycle
+```
+
+完整 cross-platform Profile/User Input conformance claim留到 M16。
+
+---
+
+## 9. Regression Boundary
 
 M10 必须保持：
 
@@ -178,11 +237,11 @@ M9 Broker paired installation/recovery unchanged
 Data failure != Runtime failure / Frame unwind
 ```
 
-M10 不修改 Frozen User Input v1 wire schema。
+除 ADR 0029 明确的 Subsystem-local State retention correction外，不修改 Frozen User Input v1 wire/authority/lifetime模型。
 
 ---
 
-## 8. CI Gate
+## 10. CI Gate
 
 实现完成时 root 新增：
 
@@ -190,29 +249,29 @@ M10 不修改 Frozen User Input v1 wire schema。
 npm run test:m10
 ```
 
-它至少组合：
+至少组合：
 
 ```text
-M9 dependencies/build
+M9 dependency/build gates
+current User Input fixtureSetRevision=2
 Subsystem InputManager tests
-Renderer input gate/producer tests
-User Input protocol regression
+Renderer gate/publisher/source tests
 real M10 vertical
 ```
 
-文档阶段不提前加入空的 `test:m10` script。
+文档阶段不提前加入空 `test:m10`。
 
 ---
 
-## 9. Closure Claim
+## 11. Closure Claim
 
 M10 完成后允许声明：
 
 ```text
-User Input v1 real Renderer/Subsystem role behavior implemented / qualified
 Subsystem InputListener/InputManager implemented
-Renderer sender gate + canonical producer integration implemented
-fresh Activation/Data input baseline qualified on Desktop M9 physical Data lifecycle
+Renderer User Input gate/publisher/source integration implemented
+User Input v1 current platform-independent role semantics qualified
+fresh Activation/Data input baseline qualified on Desktop M9 lifecycle
 ```
 
 不得声明：
@@ -221,7 +280,7 @@ fresh Activation/Data input baseline qualified on Desktop M9 physical Data lifec
 Desktop BrowserWindow input complete
 Render complete
 Content complete
-PWA input equivalence complete
+PWA / full cross-platform User Input conformance complete
 ```
 
 这些分别属于 M14、M11、M12、M16。
