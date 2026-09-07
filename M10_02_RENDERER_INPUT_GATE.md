@@ -1,6 +1,6 @@
 # M10 / 02 — Renderer Input Gate
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implementation Frozen / Ready for Implementation**  
 > 阶段：M10 User Input  
 > 落地顺序：02  
 > 最近复核：2026-09-07  
@@ -107,6 +107,8 @@ Producer return
 
 `true → false`：立即阻止新的 ordinary input进入 publisher；尚未开始 send 的 obsolete State/Event按 lifetime boundary丢弃。
 
+对 `.state`，M10/03 冻结 Producer available 必须同时具有 current source sample；因此 false→true baseline绝不使用上一 source subscription的 stale cache。
+
 ---
 
 ## 5. Bounded Input Publisher
@@ -191,7 +193,7 @@ stop affected channel
 Producer return：
 
 ```text
-.state → false→true fresh baseline
+.state → fresh current source sample + false→true fresh baseline
 .event → future-only
 ```
 
@@ -213,11 +215,12 @@ old send settlement cannot resurrect slot
 
 fresh Data peer从 empty Registry开始，等待 Subsystem republish。
 
-Current Control peer terminal：
+Current Control peer terminal/replacement：
 
 ```text
-InputTarget unavailable
+InputTarget/current producer epoch unavailable
 → all Effective=false immediately
+→ M10/03 invalidates current source subscription
 ```
 
 Input/Data loss不创建 Runtime/Frame failure。
@@ -259,6 +262,7 @@ State cannot coalesce across retained Event/Reset
 bounded Event overflow drops before Data writer overflow
 Interest shrink / Control loss / Data retirement stop input immediately
 old slot/publisher settlement cannot emit after replacement
+state producer availability never uses stale source-subscription sample
 ```
 
 下一步：[M10 / 03 — Renderer Input Producers](M10_03_RENDERER_INPUT_PRODUCERS.md)。
