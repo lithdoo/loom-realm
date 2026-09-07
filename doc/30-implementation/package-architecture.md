@@ -79,38 +79,16 @@ M10 does not move Input role policy into `@loomrealm/data`。
 
 ## 4. `@loomrealm/platform-ports` — Shared Core↔Platform Facts
 
-Runtime dependency remains exactly：
-
-```text
-@loomrealm/foundation
-```
+Runtime dependency remains exactly `@loomrealm/foundation`。
 
 Frozen root surfaces through M10仍然只有 M4–M9 declarations：
 
 ```text
-M4
-    DeadlineScheduler
-    RuntimeControlBinding
-
-M5
-    RuntimeLaunchRequest
-    MainRuntimeControlBinding
-    HostedRuntime
-    RuntimeHosting
-
-M7
-    OpaqueMaterialGenerator
-    RendererControlBinding
-
-M8
-    RendererDataBinding
-    SubsystemDataBinding
-    SubsystemDataBindingResult
-
-M9
-    DataConnectionAuthorityEntry
-    DataConnectionAuthorityView
-    DataConnectionAuthoritySink
+M4  DeadlineScheduler / RuntimeControlBinding
+M5  RuntimeLaunchRequest / MainRuntimeControlBinding / HostedRuntime / RuntimeHosting
+M7  OpaqueMaterialGenerator / RendererControlBinding
+M8  RendererDataBinding / SubsystemDataBinding / SubsystemDataBindingResult
+M9  DataConnectionAuthorityEntry / DataConnectionAuthorityView / DataConnectionAuthoritySink
 ```
 
 **M10 adds no Platform Port。** Renderer input source是 Renderer role integration surface，不是 reusable Core↔Platform capability。
@@ -132,9 +110,7 @@ Through M10仍依赖：
 @loomrealm/wire
 ```
 
-Main owns Session、Runtime/Launch Attempt、Renderer currentness/authentication、Frame/Stack/Activation/InputTarget、Renderer revision、DataAuthority policy、failure/unwind。
-
-M10 adds no Main API/authority。
+Main owns Session、Runtime/Launch Attempt、Renderer currentness/authentication、Frame/Stack/Activation/InputTarget、Renderer revision、DataAuthority policy、failure/unwind。M10 adds no Main API/authority。
 
 ### Renderer
 
@@ -160,17 +136,19 @@ Source object construction-time fixed；0..1 source subscription follows current
 
 Author root owns business SDK；trusted `/host` owns Runtime/Data role integration。
 
-M10 root adds exact author-facing：
+M10 root adds **minimal exact author-facing surface**：
 
 ```text
 InputStateChannel / InputEventChannel / InputChannel
+KeyboardStateInput / KeyboardEventInput
+PointerStateInput / PointerEventInput
+GamepadStateInput / GamepadEventInput
 InputPayload / InputHandler / Unsubscribe
 CreateInputListenerOptions / InputListener
 SubsystemScope.createInputListener
-canonical standard author payload/supporting types
 ```
 
-Author handler sees payload only；protocol envelope/peer/activationId/generation不进入 root business API。
+Nested keyboard/pointer/gamepad/custom supporting shapes do not get separate root exports solely for symmetry；they remain expressible through payload indexed access。Author handler sees payload only；protocol envelope/peer/activationId/generation不进入 root business API。
 
 `/host` consumes `RuntimeControlBinding` + optional `SubsystemDataBinding` and protocol peers。Business Definition source只 import `@loomrealm/subsystem`。
 
@@ -214,10 +192,12 @@ on/unsubscribe       → callback registration only
 setChannels preserves dormant registrations
 unsubscribe/close idempotent
 stable delivery snapshot
-same-channel registration order
+matching handlers follow successful on() registration order
 multi-channel local convergence canonical channel order
 async handler Promise never becomes Data-reader flow control
 ```
+
+The observable registration order is frozen；its private representation is not。No registration ordinal/counter framework is required。
 
 Known-no-commit `frame.call`：InputManager retained-State synchronous convergence precedes recoverable rejection becoming business-observable。
 
@@ -252,8 +232,6 @@ No Binding/Broker/Input source can infer authority from endpoint、ticket、sock
 
 ## 9. Main-facing Platform View Through M10
 
-Consumer-owned structural view remains：
-
 ```ts
 interface MainPlatform {
   readonly scheduler: DeadlineScheduler;
@@ -272,17 +250,13 @@ M10 does not modify this view。
 
 `@loomrealm/game-launcher-hostra/pwa` own Game Entry consumption、own Platform manifest、key join / executable security resolution、PlatformLaunchPlan、LogicalGameBootstrap、RuntimeHosting / Runner integration。
 
-They MUST NOT become Renderer/DataBroker/Input/Content mega-packages。
-
-Hostra M9 child-scoped Data provisioner mechanics remain unchanged by M10。
+They MUST NOT become Renderer/DataBroker/Input/Content mega-packages。Hostra M9 child-scoped Data provisioner mechanics remain unchanged by M10。
 
 ---
 
 ## 11. Renderer Control / Input Physical Placement
 
 M7 closes logical `RendererControlBinding` only。Physical Hostra BrowserWindow/Renderer Control WS arrives M14；PWA MessagePort realization M16。
-
-M10 closes logical Renderer input role + canonical source seam only：
 
 ```text
 M10 deterministic RendererInputSource
@@ -322,6 +296,7 @@ BindingErrorHierarchy
 AuthorityEventBus / ObserverHub
 GenericInputManager framework
 InputDeviceRegistry/plugin system
+registration sequencing framework
 Generic async callback scheduler
 GenericTransaction / 2PC
 CurrentnessLease/Epoch/Heartbeat
@@ -389,7 +364,7 @@ M10 creates no new package/workspace。
     formal User Input wire/profile mechanics
 
 @loomrealm/subsystem
-    exact Input author types/API
+    minimal exact Input author types/API
     listener/Interest/State/delivery/async semantics
 
 @loomrealm/renderer
@@ -410,35 +385,16 @@ No giant E2E replaces package/role/contract evidence。
 ## 18. Runtime Dependency Invariants Through M10
 
 ```text
-@loomrealm/platform-ports depends on:
-    @loomrealm/foundation
-
-@loomrealm/runtime-control depends on:
-    @loomrealm/foundation
-    @loomrealm/wire
-
-@loomrealm/renderer-control depends on:
-    @loomrealm/foundation
-    @loomrealm/wire
-
-@loomrealm/data depends on:
-    @loomrealm/foundation
-    @loomrealm/wire
-
-@loomrealm/main depends on:
-    @loomrealm/platform-ports
-    @loomrealm/runtime-control
-    @loomrealm/renderer-control
-    @loomrealm/wire
-
-@loomrealm/renderer depends on:
-    @loomrealm/renderer-control
-    @loomrealm/platform-ports
-    @loomrealm/data
-
-@loomrealm/subsystem package depends on shared protocol/port/wire packages for host/internal realization,
-but business Definition consumes only @loomrealm/subsystem root
+@loomrealm/platform-ports → @loomrealm/foundation
+@loomrealm/runtime-control → @loomrealm/foundation + @loomrealm/wire
+@loomrealm/renderer-control → @loomrealm/foundation + @loomrealm/wire
+@loomrealm/data → @loomrealm/foundation + @loomrealm/wire
+@loomrealm/main → platform-ports + runtime-control + renderer-control + wire
+@loomrealm/renderer → renderer-control + platform-ports + data
+@loomrealm/subsystem → shared protocol/port/wire packages for host/internal realization
 ```
+
+Business Definition consumes only `@loomrealm/subsystem` root。
 
 Forbidden：renderer-control→roles/platform；platform-ports→protocol/role/concrete Platform；main→renderer/game-package/concrete launcher；business Definition→protocol/platform packages。
 
@@ -454,14 +410,16 @@ Current first implementation has no external compatibility obligation。M10 exac
 
 ## 20. Core Rules Through M10
 
-1. Foundation/Wire remain orthogonal primitives；
-2. protocol packages own mechanics, not Main/Platform authority；
-3. Main remains single Runtime/Frame/Renderer/Data/InputTarget authority owner；
-4. M8/M9 Data currentness/Broker ownership remains unchanged；
-5. M10 adds no Platform Port/package；
-6. Subsystem one InputManager owns Desired Interest + retained author State + deterministic delivery；
-7. Input handler registration does not own Interest；
-8. async handler completion does not own Data flow control；
-9. Renderer one construction-time source object + current-Control subscription feeds canonical facts only；
-10. Renderer one bounded publisher per current Data slot owns User Input ordering/backpressure；
-11. no generic RPC/authority/event/input/connection/transaction/retry/currentness framework。
+1. Foundation/Wire remain orthogonal primitives；  
+2. protocol packages own mechanics, not Main/Platform authority；  
+3. Main remains single Runtime/Frame/Renderer/Data/InputTarget authority owner；  
+4. M8/M9 Data currentness/Broker ownership remains unchanged；  
+5. M10 adds no Platform Port/package；  
+6. Subsystem one InputManager owns Desired Interest + retained author State + delivery；  
+7. Input handler registration does not own Interest；  
+8. public API exports only behaviorally useful Input types；  
+9. registration order is observable, private sequencing mechanism is not；  
+10. async handler completion does not own Data flow control；  
+11. Renderer one construction-time source object + current-Control subscription feeds canonical facts only；  
+12. Renderer one bounded publisher per current Data slot owns User Input ordering/backpressure；  
+13. no generic RPC/authority/event/input/connection/transaction/retry/currentness framework。
