@@ -9,7 +9,7 @@
 > 架构：[渲染系统](doc/10-architecture/rendering-system.md)、[存储与内容系统](doc/10-architecture/storage-system.md)  
 > 目标：给 Renderer 一个 version-checked readonly resource bytes capability；不在 M12 决定 RenderNode presentation/resource-reference schema。
 
-> **M12/03 冻结的是 Content resource identity → bytes boundary。Render replica 如何被某个 presentation tag解释成该 identity，属于 M14。**
+> **M12/03 冻结的是 Content resource identity → bytes boundary。Render replica如何被某个 presentation tag解释成该 identity，属于 M14。**
 
 ---
 
@@ -17,10 +17,18 @@
 
 ```text
 Renderer-side logical Content resource identity
-    namespace + key + expectedContentVersion
+    namespace + resourceKey + expectedContentVersion
 → bound Renderer ResourceClient
 → Desktop Content API
 → bytes + MIME + actualContentVersion
+```
+
+其中：
+
+```text
+namespace = one Content logical segment
+resourceKey = one-or-more validated logical segments joined by /
+expectedContentVersion = sha256:<64 lowercase hex>
 ```
 
 M12 不冻结：
@@ -31,7 +39,7 @@ known tag/component schema
 DOM/Canvas/WebGL consumption
 ```
 
-因此不再要求 M12 ResourceClient自行解析 Render Store。
+因此不要求 M12 ResourceClient自行解析 Render Store。
 
 ---
 
@@ -54,15 +62,23 @@ interface RendererResourceClient {
 }
 ```
 
-这是 Renderer implementation seam，不要求 root-export新的 AssetManager/Store/observer surface。精确 private class/function 名可调整。
+这是 Renderer implementation seam，不要求 root-export新的 AssetManager/Store/observer surface。精确 private class/function名可调整。
 
-Platform composition绑定 current prepared installation 与 authorization material；调用方只给 logical namespace/key/version。
+Platform composition绑定 current prepared installation与 authorization material；调用方只给 logical namespace/key/version。
+
+Local caller传入 malformed namespace/resourceKey/version 时必须在 HTTP前拒绝；精确 private error class不属于 public Renderer contract。不得把 malformed expected version静默当成 cache miss。
 
 ---
 
 ## 3. Version Check
 
-`expectedContentVersion` 不创建新的 HTTP request-version protocol。
+`expectedContentVersion` 精确匹配 Content API v1：
+
+```text
+sha256:<64 lowercase hex>
+```
+
+它不创建新的 HTTP request-version protocol。
 
 固定行为：
 
@@ -70,6 +86,7 @@ Platform composition绑定 current prepared installation 与 authorization mater
 GET current logical resource
 → validate response Content metadata
 → actual X-Loom-Content-Version
+→ actual format valid
 → actual == expected → accept bytes
 → actual != expected → reject as content conflict
 ```
@@ -81,17 +98,35 @@ Cache identity：
 ```text
 prepared installation identity
 + namespace
-+ key
++ hierarchical resourceKey
 + contentVersion
 ```
 
-因此不同 version 永远不能共享错误 bytes。
+因此不同 version永远不能共享错误 bytes。
 
 ---
 
-## 4. Value / Cache Ownership
+## 4. Resource Key / Route Boundary
 
-允许 private immutable success cache 和 same-ID in-flight dedupe，但 cache storage不得直接交给 consumer。
+`key` MAY 是 hierarchical logical ResourceKey，例如：
+
+```text
+ui/icons/potion.png
+```
+
+Client必须逐 logical segment编码 Content API resource route：
+
+```text
+/resources/{namespace}/ui/icons/potion.png
+```
+
+不得把 whole resourceKey作为 filesystem path，也不得把 `/` percent-encode进单个 segment来绕过 route grammar。
+
+---
+
+## 5. Value / Cache Ownership
+
+允许 private immutable success cache和 same-ID in-flight dedupe，但 cache storage不得直接交给 consumer。
 
 ```text
 returned Uint8Array
@@ -101,11 +136,11 @@ returned Uint8Array
 
 失败不得永久缓存成成功事实。
 
-不引入 LRU framework、prefetch planner、dependency graph 或 mutable asset registry。
+不引入 LRU framework、prefetch planner、dependency graph或 mutable asset registry。
 
 ---
 
-## 5. Failure Boundary
+## 6. Failure Boundary
 
 Renderer Content failure只影响当前 resource read/presentation-local policy：
 
@@ -127,7 +162,7 @@ Presentation将来可选择 placeholder/drop/report；M12不冻结该产品策�
 
 ---
 
-## 6. Lifetime Independence
+## 7. Lifetime Independence
 
 ```text
 ResourceClient lifetime != RenderDomain lifetime
@@ -139,7 +174,7 @@ Renderer Control replacement/reload MAY创建 fresh local client composition；�
 
 ---
 
-## 7. Deferred to M14
+## 8. Deferred to M14
 
 明确 deferred：
 
@@ -153,11 +188,11 @@ texture/object lifetime
 presentation-specific eviction/prefetch
 ```
 
-Render state仍不得携 Content bearer、filesystem path、absolute privileged URL 或 resource bytes capability。
+Render state仍不得携 Content bearer、filesystem path、absolute privileged URL或 resource bytes capability。
 
 ---
 
-## 8. Abstraction Budget
+## 9. Abstraction Budget
 
 允许：
 
@@ -182,12 +217,13 @@ presentation lifecycle coupled to Content lifecycle
 
 ---
 
-## 9. Done
+## 10. Done
 
 M12/03 complete when：
 
 ```text
-logical namespace/key/expectedVersion → real Content API works
+logical namespace/hierarchical key/expectedVersion → real Content API works
+expected/actual version exact sha256 format validated
 response version mismatch cannot return bytes as success
 same key + different version cannot reuse stale bytes
 returned bytes cannot mutate internal cache/future reads
@@ -197,4 +233,4 @@ no RenderNode schema interpretation is pulled into M12
 no presentation/asset framework is introduced
 ```
 
-M14 只需把真实 presentation resource reference投影到这条已冻结的 bytes capability。
+编码阶段只允许调整 private class/function/file布局与 cache mechanics；resource identity、version comparison、route grammar与 failure boundary不得重新选择。
