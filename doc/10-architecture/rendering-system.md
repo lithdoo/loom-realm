@@ -323,10 +323,43 @@ M13 **不** 为这些 logical facts新增 generic CSS layer/container/stacking a
 
 Top-level projected roots直接挂到 `document.body`；Projector只维护 projected nodes本身，不创建 per-Domain wrapper、CSS stacking context或自动 `z-index` style。
 
+### 12.1 Deterministic `document.body` Flattening
+
+对于 current 且已 baselined 的 Render Domains，Web Projector MUST 使用 M11 已冻结的 logical Domain stacking order 形成唯一确定的 managed `document.body` child sequence：
+
+```text
+Domain order
+1. zIndex ascending
+2. same zIndex → domainId encoded UTF-8 lexical ascending
+
+within each Domain
+→ authoritative roots order
+
+within each RenderNode
+→ authoritative children order
+```
+
+等价地：
+
+```text
+managedBodyRoots
+=
+concat(
+  sort(currentBaselinedDomains, M11LogicalStackingOrder)
+    .map(domain => domain.roots)
+)
+```
+
+因此 lower logical stacking 的 Domain roots更早出现在 managed `document.body` child sequence，higher logical stacking 的 Domain roots更晚出现。
+
+Domain `zIndex` 或相同 `zIndex` 下的确定性 Domain order变化时，Projector MUST 通过移动已有 live root HTMLElement来重排 `document.body`；对仍 live 的同一 key，MUST NOT 通过 remove + recreate实现重排。
+
+该规则只定义 deterministic DOM projection order，不把 DOM sibling order升级成 generic CSS stacking contract。LoomRealm仍不生成 CSS `z-index`、stacking context、Domain wrapper或 layout policy；Business WC / business CSS继续拥有 actual layout / position / stacking realization。
+
 因此：
 
 ```text
-LoomRealm owns Render logical state + DOM node projection
+LoomRealm owns Render logical state + deterministic DOM node projection
 Business WC / business CSS owns actual layout / position / stacking realization
 ```
 
@@ -548,6 +581,8 @@ same live key
    receiveRenderData(complete current data)
 ```
 
+其中 structure 阶段包含 §12.1 定义的跨 Domain `document.body` deterministic flatten/reorder；Domain order变化必须优先完成 physical move，再进入 attrs/data delivery。
+
 因此 `receiveRenderData(...)` 被调用时，该 element的 managed structure/children与 attrs已经反映同一次 committed Store state。
 
 浏览器 native `connectedCallback` / `attributeChangedCallback` 不是 LoomRealm atomic-commit ABI；业务要观察完整 current Render data时使用 `receiveRenderData(...)`。
@@ -753,6 +788,10 @@ window.onload ready barrier
 customElements registration
 Store commit → Projector notification
 roots → document.body
+multiple Domains flatten deterministically into document.body
+Domain zIndex ascending determines Domain root body order
+same-zIndex domainId UTF-8 lexical tie-break determines Domain root body order
+Domain zIndex/order change moves existing root HTMLElements without recreating same-live-key instances
 snapshot / insert / remove / move
 same key → same HTMLElement
 attrs projection
@@ -780,22 +819,23 @@ Hostra/PWA共享 logical Web presentation semantics；physical Content storage�
 9. Data retire不 destroy business Domain；
 10. Node key在 wire Domain lifetime内 one-shot；M11 business boundary使用更强 Domain-lifetime one-shot；
 11. same live key在 Web projection中保持同一 HTMLElement instance；
-12. M11 logical root/children/Domain ordering保持，但 M13不新增 generic CSS layer/zIndex system；
-13. top-level projected roots直接进入 `document.body`；
-14. tag对 Render Core保持 opaque；具体 Custom Element semantics由业务拥有；
-15. Render-managed attrs/data/children等全部 projection state对 WC只读；M13不做 MutationObserver policing；
-16. children是 Renderer-managed ordered light DOM；业务私有 subtree放在 WC private presentation state；
-17. data与 attrs独立；WC v1通过 optional `receiveRenderData(complete readonly current data)` 接收完整 snapshot；
-18. projection observable order = structure → attrs → receiveRenderData；
-19. DOM不是 authority source，Renderer不得从 DOM反向同步 Store；
-20. Web Projector不建立第二份 desired presentation tree authority；必要 keyed physical reconciliation不构成第二 authority；
-21. Store只在 successful atomic commit后通过 package-private seam通知 Projector；
-22. runtime bootstrap source是用户指定的 Window-level WebPresentationConfigV1；没有 subsystems；Desktop用户不单独指定 FSDB；
-23. presentation bootstrap使用 ordered `<link>` / classic `<script>`，`window.onload`后才启动 Projector；
-24. M13不定义 RenderEvent → WC/DOM event ABI；
-25. stale Store/WC tree不是 current authority/Patch base；
-26. Render state不携 physical resource capability；Business WC不得绕过 M12 Content credential/version boundary；
-27. Render/presentation不能生成 Main InputTarget；
-28. presentation-local failure不回滚 Store、不自动 fail Runtime/Frame；
-29. M13使用真实 Chromium qualification关闭 browser semantics；
-30. M11 Renderer Store internal-only；M13 projection消费 trusted/package-private current Store seam，不新增 business Render Store API。
+12. M11 logical root/children/Domain ordering保持；多 Domain top-level roots按 `zIndex` 升序、同 `zIndex` 按 `domainId` UTF-8 lexical 升序 deterministic flatten 到 `document.body`，每个 Domain内保持 roots order；
+13. Domain ordering变化只移动仍 live 的现有 HTMLElement，不以 recreate替代；M13仍不新增 generic CSS layer/zIndex system；
+14. top-level projected roots直接进入 `document.body`；
+15. tag对 Render Core保持 opaque；具体 Custom Element semantics由业务拥有；
+16. Render-managed attrs/data/children等全部 projection state对 WC只读；M13不做 MutationObserver policing；
+17. children是 Renderer-managed ordered light DOM；业务私有 subtree放在 WC private presentation state；
+18. data与 attrs独立；WC v1通过 optional `receiveRenderData(complete readonly current data)` 接收完整 snapshot；
+19. projection observable order = structure（含跨 Domain body reorder）→ attrs → receiveRenderData；
+20. DOM不是 authority source，Renderer不得从 DOM反向同步 Store；
+21. Web Projector不建立第二份 desired presentation tree authority；必要 keyed physical reconciliation不构成第二 authority；
+22. Store只在 successful atomic commit后通过 package-private seam通知 Projector；
+23. runtime bootstrap source是用户指定的 Window-level WebPresentationConfigV1；没有 subsystems；Desktop用户不单独指定 FSDB；
+24. presentation bootstrap使用 ordered `<link>` / classic `<script>`，`window.onload`后才启动 Projector；
+25. M13不定义 RenderEvent → WC/DOM event ABI；
+26. stale Store/WC tree不是 current authority/Patch base；
+27. Render state不携 physical resource capability；Business WC不得绕过 M12 Content credential/version boundary；
+28. Render/presentation不能生成 Main InputTarget；
+29. presentation-local failure不回滚 Store、不自动 fail Runtime/Frame；
+30. M13使用真实 Chromium qualification关闭 browser semantics；
+31. M11 Renderer Store internal-only；M13 projection消费 trusted/package-private current Store seam，不新增 business Render Store API。
