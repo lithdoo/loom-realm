@@ -87,6 +87,14 @@ styles
 
 `formatVersion` MUST 精确等于 `1`。
 
+在 `scripts` 与 `styles` 各自列表内，logical ref identity：
+
+```text
+(namespace, key)
+```
+
+MUST 唯一。任一列表出现 duplicate logical ref 都是 invalid config，MUST 在 browser bootstrap 前拒绝；实现不得通过 dedupe、重复安装或重复执行来解释同一输入。
+
 V1 MUST NOT 增加：
 
 ```text
@@ -166,7 +174,7 @@ scripts[] → ordered classic <script src="..."></script>
 
 stylesheets MUST 按 declaration order materialize。scripts MUST 保持 declaration evaluation order；不得使用 `async` 破坏顺序。
 
-同一 logical bootstrap resource 在同一 Window SHOULD 只安装/执行一次；implementation MAY deterministic dedupe，但不得造成 nondeterministic Custom Element registration。
+Duplicate logical ref 已由 §2 定义为 invalid config；bootstrap MUST NOT dedupe，也不得重复执行同一合法列表项以外的隐式副本。
 
 V1 不建立：
 
@@ -204,9 +212,9 @@ Web Projector may start
 
 Web Projector MUST NOT start before `window.onload`。
 
-V1 normal path不依赖“先创建 unknown element，再等待 arbitrary future loader/native upgrade”。projection 使用某个 `RenderNode.tag` 时若对应 Custom Element仍未注册，属于 presentation-local contract failure。
-
 实现还必须独立观察/报告 stylesheet/script load/evaluation failure；`window.onload` 本身不得被解释成“所有 bootstrap resource 必然成功”的证明。
+
+V1 normal path不依赖“先创建 unknown element，再等待 arbitrary future loader/native upgrade”。但 Config v1 不声明 expected tag set，因此 bootstrap phase不推断“某 script 应注册哪些 tag”。当 Projector 实际使用某个 `RenderNode.tag` 时仍未注册，该问题属于 [Web Presentation API v1](./web-presentation-api-v1.md) 定义的 **projection-time presentation structural failure**，不是 bootstrap/config failure。
 
 ---
 
@@ -279,15 +287,15 @@ RenderNode                    → current authoritative presentation state
 
 ## 10. Failure Boundary
 
-以下至少属于 bootstrap/config failure：
+以下属于 bootstrap/config failure：
 
 ```text
 invalid config/schema/version
+including duplicate logical ref in scripts/styles
 invalid or missing prepared resource
 incompatible resource kind/MIME
 stylesheet/script load failure
-script evaluation/registration failure
-required Custom Element unregistered at projection use
+script evaluation failure
 ```
 
 bootstrap failure：
@@ -298,7 +306,14 @@ bootstrap failure：
 → not Render protocol-fatal
 ```
 
-runtime receiver/resource failure由 Web Presentation API v1 定义，不属于本 Config contract。
+以下不属于 Config/bootstrap failure：
+
+```text
+RenderNode.tag unregistered when Projector actually needs it
+runtime receiver/resource/DOM projection failure
+```
+
+它们在 Projector 已进入运行阶段后发生，由 Web Presentation API v1 的 presentation-local failure boundary治理。
 
 ---
 
@@ -306,13 +321,13 @@ runtime receiver/resource failure由 Web Presentation API v1 定义，不属于�
 
 1. Web Presentation Config 是 product startup input，但 source acquisition是 platform/product-private mechanics，不属于 Config v1；
 2. V1 exact top-level shape = `formatVersion/scripts/styles`；
-3. scripts/styles 是 Window-level ordered lists，没有 `subsystems`；
+3. scripts/styles 是 Window-level ordered lists，没有 `subsystems`；每个列表内 `(namespace,key)` MUST 唯一，duplicate config直接拒绝；
 4. refs 复用 M12 logical `namespace + hierarchical key`；
 5. Desktop继续复用 prepared installation唯一 FSDB/Content view，用户不单独配置 FSDB；
 6. config/prepared public facts不携 path/URL/bearer/loader capability；
-7. browser mechanism = ordered `<link>` + ordered classic `<script>`；
-8. business JS使用 browser-native `customElements.define(...)`；
-9. `window.onload` 是 Web Projector start barrier，但 load/evaluation failure必须独立检测；
+7. browser mechanism = ordered `<link>` + ordered classic `<script>`，不存在 implementation-defined dedupe；
+8. business JS使用 browser-native `customElements.define(...)`；Config不声明 expected tag set；
+9. `window.onload` 是 Web Projector start barrier，但 load/evaluation failure必须独立检测；unregistered RenderNode tag是 projection-time failure；
 10. bootstrap lifetime与 Renderer Window lifetime一致；
 11. runtime business resource capability属于 Web Presentation API v1，不属于 Config；
 12. M13不建立 ESM loader、dynamic component loader、second registry或 universal startup DTO。
