@@ -1,8 +1,11 @@
 # ADR 0003：逻辑只读 Content API
 
-> 状态：Accepted  
+> 状态：Accepted / **Realization partially updated by ADR 0030**  
 > 日期：2026-08-01  
-> 影响范围：存储与内容系统、FSDB、桌面 Content Service、PWA Service Worker、Repository
+> 影响范围：存储与内容系统、FSDB、桌面 Content Service、PWA Service Worker、Repository  
+> Current realization：[ADR 0030](./0030-freeze-m12-content-preimplementation-closure.md)
+
+> **本 ADR 的 logical readonly Content API、Desktop HTTP / PWA Fetch、physical-path hiding 与 Content≠execution 决策仍有效；2026-08 初版的 registry/repository/index/client-version realization 不再覆盖当前 M12 baseline。**
 
 ## 背景
 
@@ -28,7 +31,7 @@ FSDB 运行时访问主要发生在初始化、地图切换和资源加载，不
 
 优点：跨平台、跨语言，天然支持 MIME、ETag、缓存和流式资源；物理路径集中在受控服务内。
 
-代价：需要 Package Index、路由和服务实现；开发工具仍需独立文件能力。
+代价：需要可信 logical index、路由和服务实现；开发工具仍需独立文件能力。
 
 ## 决定
 
@@ -41,22 +44,48 @@ group(namespace, key)
 resource(namespace, key)
 ```
 
-桌面由 localhost HTTP Content Service 映射到只读游戏包目录。PWA 由 Service Worker 映射到 OPFS、Cache Storage 和安装注册表。
+桌面由 localhost HTTP Content Service 实现；PWA 由 same-origin Fetch / Service Worker 映射到其 persistent installation/content storage。
 
-运行时客户端不提交物理路径，只提交 `installationId`、Namespace、Key 和内容版本。
+运行时请求使用 logical installation/namespace/key identity，不提交物理路径。
 
-## 结果
+## 结果 — Current Meaning
 
-- 需要生成或验证 `fsdb.index.json`；
-- Content Service 负责路径安全、MIME、ETag 和授权；
-- Repository 负责业务解析、Schema 校验、请求去重和不可变缓存；
-- Renderer 使用相同 API 获取图片、音频和其他资源；
-- 安装、导入、写入和全包验证使用独立 Package Storage 能力；
-- Content Service 和 Service Worker 不拥有 Frame Runtime 状态。
+以下结论继续有效：
+
+- Content Service 负责 logical route/path safety、MIME、version/cache 与 authorization projection；
+- Renderer 使用相同 logical Content API语义获取资源；
+- 安装、导入、写入与 executable loading使用独立 capability；
+- Content Service / Service Worker 不拥有 Runtime/Frame/Render application authority；
+- Desktop/PWA physical storage mechanics可以不同，但 logical response semantics必须等价。
+
+ADR 0030 对首次实现 realization 做了最小收口。以下旧假设 **不再是 Current M12 requirement**：
+
+```text
+mandatory fsdb.index.json artifact
+global mutable Installation Registry in Desktop M12
+generic Repository / ReadonlyContentStorage framework
+Subsystem client显式提交 installationId
+client-selected historical contentVersion selector
+single-segment-only resource key
+Renderer Blob/ImageBitmap/Audio/GPU cache as M12 responsibility
+```
+
+Current M12 采用：
+
+```text
+current prepared installation view
+→ @loomrealm/fsdb readonly core
+→ private immutable Content Index
+→ Desktop Content Service
+→ Subsystem ContentClient / Renderer-private ResourceClient
+```
+
+并由 Content API v1冻结 hierarchical ResourceKey 与 `sha256:<64 lowercase hex>` Content version语义。
 
 ## 重新评估条件
 
 - 浏览器标准文件系统 API 获得稳定跨平台目录访问和授权持久化；
 - FSDB 被单文件归档格式替换；
 - 性能测试证明 HTTP/Service Worker 成为内容加载瓶颈；
-- 需要远程 CDN 或多人内容分发 Profile。
+- 需要远程 CDN 或多人内容分发 Profile；
+- M13/M14/M16真实 consumer证明 ADR 0030 frozen capability存在无法由 private realization满足的缺口。
