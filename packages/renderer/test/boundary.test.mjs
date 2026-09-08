@@ -18,3 +18,11 @@ test("Renderer exposes the additive M10 construction seam and unchanged dependen
   assert.match(input, /type RendererInputSourceChange/);
   assert.match(input, /from "@loomrealm\/data"/);
 });
+
+test("M12 ResourceClient stays off the Renderer root surface", async () => {
+  const root = await import("../dist/index.js");
+  assert.equal("createRendererResourceClient" in root, false);
+  const declaration = await readFile(new URL("../dist/internal/resource-client.d.ts", import.meta.url), "utf8");
+  assert.match(declaration, /expectedContentVersion: string/);
+  assert.doesNotMatch(declaration, /(AssetManager|RenderNode|filesystem|bearer)/);
+});

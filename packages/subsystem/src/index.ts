@@ -1,4 +1,5 @@
 export { defineSubsystem } from "./model.js";
+export { ContentReadError } from "./content.js";
 export { completed, cancelled, failed } from "./outcome.js";
 export {
   FrameCallRejectedError,
@@ -40,3 +41,10 @@ export type {
   RenderEvent,
   RenderDomain,
 } from "./render.js";
+export type {
+  ContentClient,
+  ContentReadErrorCode,
+  ContentReadOptions,
+  ContentRecord,
+  ContentResource,
+} from "./content.js";

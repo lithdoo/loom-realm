@@ -19,9 +19,12 @@
     "M12_CORE_EXTRACTION.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "prepublishOnly": "npm run build",
-    "test": "npm run build && node --test test/*.test.mjs"
+    "test": "npm run build && node --test"
+  },
+  "dependencies": {
+    "@loomrealm/fsdb": "0.1.0-alpha.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

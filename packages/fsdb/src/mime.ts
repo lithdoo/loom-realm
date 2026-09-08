@@ -1,4 +1,9 @@
-const RESOURCE_TYPES: Readonly<Record<string, string>> = Object.freeze({
+export const JSON_TYPE = "application/json; charset=utf-8";
+export const JSONL_TYPE = "application/x-ndjson; charset=utf-8";
+export const MARKDOWN_TYPE = "text/markdown; charset=utf-8";
+export const SCHEMA_TYPE = "application/schema+json; charset=utf-8";
+
+const TYPES: Readonly<Record<string, string>> = Object.freeze({
   avif: "image/avif", bmp: "image/bmp", css: "text/css", gif: "image/gif",
   html: "text/html", ico: "image/x-icon", jpeg: "image/jpeg", jpg: "image/jpeg",
   js: "text/javascript", mjs: "text/javascript", json: "application/json",
@@ -9,10 +14,5 @@ const RESOURCE_TYPES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 export function resourceMime(extension: string): string {
-  return RESOURCE_TYPES[extension] ?? "application/octet-stream";
+  return TYPES[extension] ?? "application/octet-stream";
 }
-
-export const JSON_TYPE = "application/json; charset=utf-8";
-export const JSONL_TYPE = "application/x-ndjson; charset=utf-8";
-export const SCHEMA_TYPE = "application/schema+json; charset=utf-8";
-export const MARKDOWN_TYPE = "text/markdown; charset=utf-8";

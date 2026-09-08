@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving overall / **M12 Preimplementation Frozen**  
+> 稳定程度：Evolving overall / **M12 Implemented / Qualified / Closed**
 > 主要定义：M0..M16 实现顺序、当前 closure、Desktop/PWA qualification 边界  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[独立分包与发布架构](./package-architecture.md)、[测试策略](./testing-strategy.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
 > 最近复核：2026-09-08
@@ -125,9 +125,9 @@ M11不实现 DOM/Canvas/WebGL presentation；transport-equivalence role留 M16�
 
 ---
 
-## M12：Content — Implementation Frozen / Preimplementation Closed
+## M12：Content — Implemented / Qualified / Closed
 
-M12设计已冻结，**当前状态仍是 implementation pending**。
+M12已按冻结设计完整实施，并于 2026-09-08 在 Node 20.20.2 / 24.20.0 通过同一个 `npm run test:m12` 根门禁；证据见 [M12 qualification](./m12-qualification.md)。
 
 Root implementation plans：
 
@@ -258,7 +258,7 @@ npm run test:m12
 
 Node 20 + Node 24运行同一 gate。
 
-只有该 gate与 qualification record关闭后，README/本计划才能将 M12升级为 Implemented / Qualified / Closed。
+该 gate与 qualification record现已关闭；M12后续变更继续遵循 M12/05 correctness-contradiction reopen门槛。
 
 ---
 
@@ -371,11 +371,11 @@ M8  Renderer Data                      ✅
 M9  Desktop Data Broker                ✅
 M10 User Input                         ✅ Implemented / Qualified / Closed
 M11 Render                             ✅ Implemented / Qualified / Closed
-M12 Content                            Implementation Frozen / implementation pending
+M12 Content                            ✅ Qualified / Closed 2026-09-08
 M13 loom.map                           pending
 M14 Desktop full E2E                   pending
 M15 PWA Runtime                        pending
 M16 PWA full E2E/equivalence           pending
 ```
 
-当前已关闭 executable root gate仍是 `npm run test:m11`。下一步是**直接实施 M12**，不是再增加一轮架构设计。
+当前已关闭 executable root gate为 `npm run test:m12`。下一步进入 M13 `loom.map`，直接消费冻结的 `scope.content.record/resource`；若出现首个真实 `group()` consumer，按 demand-driven rule最小 reopen。

@@ -28,6 +28,7 @@ import { FrameRuntime } from "../internal/frame-runtime.js";
 import { InputManager } from "../internal/input-manager.js";
 import { RenderManager } from "../internal/render-manager.js";
 import type { RenderDomainState } from "../render.js";
+import { ContentReadError, type ContentClient } from "../content.js";
 
 export interface SubsystemRuntimeControlPolicy {
   readonly scheduler: DeadlineScheduler;
@@ -48,6 +49,7 @@ export interface RunSubsystemOptions {
   readonly runtimePolicy: SubsystemRuntimeControlPolicy;
   readonly launch: SubsystemLaunchContext;
   readonly data?: SubsystemDataBinding;
+  readonly content?: ContentClient;
 }
 
 export class SubsystemRuntimeFatalError extends Error {
@@ -156,6 +158,9 @@ function validateOptions(options: RunSubsystemOptions): void {
   ) {
     throw new TypeError("Invalid SubsystemDataBinding");
   }
+  if (options.content !== undefined && (options.content === null || typeof options.content !== "object" || typeof options.content.record !== "function" || typeof options.content.resource !== "function")) {
+    throw new TypeError("Invalid ContentClient");
+  }
   const policy = options.runtimePolicy;
   if (
     policy === null ||
@@ -249,8 +254,13 @@ class SubsystemHost {
   private canAcceptFrames = (): boolean => this.ready && this.terminal === null;
 
   private async bootstrap(): Promise<void> {
+    const unavailableContent: ContentClient = Object.freeze({
+      record: () => Promise.reject(new ContentReadError("CONTENT_UNAVAILABLE")),
+      resource: () => Promise.reject(new ContentReadError("CONTENT_UNAVAILABLE")),
+    });
     const scope: SubsystemScope = Object.freeze({
       signal: this.scopeController.signal,
+      content: this.options.content ?? unavailableContent,
       createInputListener: (options: CreateInputListenerOptions) =>
         this.input.createListener(options),
       createRenderDomain: (state: RenderDomainState) =>

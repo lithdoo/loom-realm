@@ -7,7 +7,10 @@ export {
 export type {
   FsdbDatabase,
   FsdbDatabaseState,
-  FsdbHttpService,
   OpenFsdbOptions,
+} from "@loomrealm/fsdb";
+
+export type {
+  FsdbHttpService,
   ServeFsdbOptions,
 } from "./public.js";

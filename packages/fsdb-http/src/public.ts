@@ -1,20 +1,11 @@
 import { createServer, type RequestListener, type Server } from "node:http";
 import { isIP } from "node:net";
 import type { Duplex } from "node:stream";
-import { DatabaseImpl, asDatabase, createDatabaseHandle } from "./database.js";
+import { openFsdb, type FsdbDatabase, type OpenFsdbOptions } from "@loomrealm/fsdb";
 import { makeHandler } from "./http.js";
-import { scanFsdb } from "./scanner.js";
 
-declare const fsdbDatabaseBrand: unique symbol;
-
-export interface OpenFsdbOptions { readonly root: string; }
-export type FsdbDatabaseState = "open" | "stale" | "closed";
-export interface FsdbDatabase {
-  readonly [fsdbDatabaseBrand]: never;
-  readonly name: string;
-  readonly state: FsdbDatabaseState;
-  close(): Promise<void>;
-}
+export { openFsdb };
+export type { FsdbDatabase, OpenFsdbOptions };
 
 export interface ServeFsdbOptions extends OpenFsdbOptions {
   readonly host?: string;
@@ -28,14 +19,8 @@ export interface FsdbHttpService {
   close(): Promise<void>;
 }
 
-export async function openFsdb(options: OpenFsdbOptions): Promise<FsdbDatabase> {
-  if (!options || typeof options !== "object") throw new Error("Invalid options");
-  const db = new DatabaseImpl(await scanFsdb(options.root));
-  return createDatabaseHandle(db) as FsdbDatabase;
-}
-
 export function createFsdbHttpHandler(db: FsdbDatabase): RequestListener {
-  return makeHandler(asDatabase(db));
+  return makeHandler(db);
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {
@@ -60,8 +45,7 @@ function rejectAuthorityForm(socket: Duplex): void {
 export async function serveFsdb(options: ServeFsdbOptions): Promise<FsdbHttpService> {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 0;
-  const dbPublic = await openFsdb(options);
-  const db = asDatabase(dbPublic);
+  const db = await openFsdb(options);
   const server = createServer(makeHandler(db));
   const serverClosed = new Promise<void>((resolve) => server.once("close", resolve));
   server.on("connect", (_request, socket) => rejectAuthorityForm(socket));

@@ -15,6 +15,7 @@ import {
   createHostraRuntimeDataProvisioner,
   type HostraRuntimeDataProvisioner,
 } from "./data-provisioning.js";
+import { CONTENT_ACCESS_ENV_KEY, encodeHostraContentAccess, validateHostraContentAccess, type HostraContentAccess } from "./content-access.js";
 import { createWebSocketCarrier } from "./websocket-carrier.js";
 
 const ENV_ALLOWLIST = [
@@ -62,6 +63,7 @@ function deferred<T>(): Deferred<T> {
 export function buildRunnerEnvironment(
   parent: NodeJS.ProcessEnv,
   encodedBootstrap: string,
+  encodedContentAccess?: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   if (process.platform === "win32") {
@@ -79,6 +81,7 @@ export function buildRunnerEnvironment(
     }
   }
   environment[BOOTSTRAP_ENV_KEY] = encodedBootstrap;
+  if (encodedContentAccess !== undefined) environment[CONTENT_ACCESS_ENV_KEY] = encodedContentAccess;
   return environment;
 }
 
@@ -141,6 +144,7 @@ async function launchAttempt(
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
   ) => void,
+  contentAccess?: HostraContentAccess,
 ): Promise<HostedRuntime> {
   if (signal.aborted) throw signal.reason;
   const runtime = validateRequest(request, runtimes);
@@ -213,8 +217,10 @@ async function launchAttempt(
     terminalCleanupDeadlineMs: plan.runnerPolicy.terminalCleanupDeadlineMs,
   });
   let encodedBootstrap: string;
+  let encodedContentAccess: string | undefined;
   try {
     encodedBootstrap = encodeBootstrap(bootstrap);
+    encodedContentAccess = contentAccess === undefined ? undefined : encodeHostraContentAccess(contentAccess);
   } catch (error) {
     closeServer(server);
     throw error;
@@ -271,7 +277,7 @@ async function launchAttempt(
     child = spawn(plan.canonicalNodeExecutable, [plan.runnerEntry], {
       shell: false,
       cwd: plan.canonicalInstallationRoot,
-      env: buildRunnerEnvironment(process.env, encodedBootstrap),
+      env: buildRunnerEnvironment(process.env, encodedBootstrap, encodedContentAccess),
       stdio: onRuntimeDataProvisioner === undefined
         ? "ignore"
         : ["ignore", "ignore", "ignore", "ipc"],
@@ -391,6 +397,7 @@ async function launchAttempt(
 
 export function createHostraRuntimeHosting(options: {
   readonly launchPlan: HostraLaunchPlan;
+  readonly contentAccess?: HostraContentAccess;
   readonly onRuntimeDataProvisioner?: (
     runtime: HostedRuntime,
     provisioner: HostraRuntimeDataProvisioner,
@@ -406,6 +413,7 @@ export function createHostraRuntimeHosting(options: {
   ) {
     throw new TypeError("Invalid Runtime Data provisioner hook");
   }
+  const contentAccess = options.contentAccess === undefined ? undefined : validateHostraContentAccess(options.contentAccess);
   const runtimes = new Map(plan.runtimes.map((runtime) => [runtime.subsystemKey, runtime] as const));
   return Object.freeze({
     launch(request: RuntimeLaunchRequest, signal: AbortSignal) {
@@ -415,6 +423,7 @@ export function createHostraRuntimeHosting(options: {
         request,
         signal,
         options.onRuntimeDataProvisioner,
+        contentAccess,
       );
     },
   });

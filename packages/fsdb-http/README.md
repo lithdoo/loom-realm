@@ -2,7 +2,7 @@
 
 Read-only HTTP adapter for filesystem-backed FSDB directories.
 
-> Status: **v1 Release Candidate / M12 core extraction preimplementation frozen**. The current implementation still contains the FSDB core internally; M12 will mechanically extract that core without changing this package's public HTTP contract.
+> Status: **v1 Release Candidate / M12 core extraction implemented and qualified**. The package is now the HTTP adapter over `@loomrealm/fsdb`; its public HTTP contract remains unchanged.
 
 The package exposes a Well-formed FSDB readonly snapshot through a small Node.js-native HTTP interface without leaking physical filesystem paths.
 
@@ -13,23 +13,9 @@ The package exposes a Well-formed FSDB readonly snapshot through a small Node.js
 - Mandatory conformance cases: [CONFORMANCE.md](./CONFORMANCE.md)
 - FSDB storage authority: [FSDB 目录结构详解](../../doc/fsdb/FSDB目录结构详解.md)
 
-## Current implementation vs M12 target
+## Current implementation
 
-Current pre-M12 implementation：
-
-```text
-filesystem FSDB directory
-        ↓
-@loomrealm/fsdb-http internal scanner/database
-        ↓
-opaque FsdbDatabase
-        ↓
-createFsdbHttpHandler()
-        ↓
-node:http RequestListener
-```
-
-Frozen M12 target：
+Completed M12 ownership：
 
 ```text
 filesystem FSDB directory
@@ -47,7 +33,7 @@ node:http RequestListener
 
 The extraction is an ownership/dependency change, not a second FSDB model or an HTTP behavior change.
 
-`FsdbDatabase` remains an opaque handle rather than a user-constructible structural object. Under the M12 target the handle is minted by `@loomrealm/fsdb`; this package continues to expose source-compatible `openFsdb()` and accepts the same opaque core handle.
+`FsdbDatabase` remains an opaque handle rather than a user-constructible structural object. The handle is minted by `@loomrealm/fsdb`; this package continues to expose source-compatible `openFsdb()` and accepts the same opaque core handle.
 
 `createFsdbHttpHandler(db)` borrows a caller-owned database; closing the HTTP server does not close that database.
 
@@ -71,14 +57,14 @@ const service = await serveFsdb({
 
 The public `@loomrealm/fsdb-http` v1 API remains unchanged by M12.
 
-Current implementation uses Node standard-library primitives only. M12 implementation will add exactly one runtime workspace dependency, public package `@loomrealm/fsdb`; that package itself remains Node-stdlib-only. No other runtime framework dependency is authorized by the amendment.
+Current implementation has exactly one runtime workspace dependency, public package `@loomrealm/fsdb`; that package itself remains Node-stdlib-only. No other runtime framework dependency is used.
 
 ## Node request boundary
 
 Node routes a valid `CONNECT` authority-form request to the server's `connect` event and does not invoke its `RequestListener`. `createFsdbHttpHandler()` owns requests delivered through Node's `request` event. `serveFsdb()` additionally owns its server-level `connect` policy and returns the frozen `400` response for CONNECT. A caller-composed Server retains ownership of its own `connect` event policy.
 
-## M12 implementation constraint
+## M12 implementation result
 
-Until M12 implementation lands, the repository may still contain scanner/database files under this workspace. The M12 closure requires moving the shared FSDB domain mechanics into `@loomrealm/fsdb`, updating this package to depend on/re-export the core where specified, and keeping all existing `fsdb-http` conformance green.
+Scanner/database/index/safe-open mechanics now live only in `@loomrealm/fsdb`. This package depends on and re-exports the compatible opener/types where specified; all existing `fsdb-http` conformance remains green, and clean builds remove stale pre-extraction output before packing.
 
 Do not implement M12 by HTTP-over-HTTP proxying, cross-workspace private imports, or duplicated scanner/safe-open logic.

@@ -6,6 +6,7 @@ import * as host from "../dist/host/index.js";
 
 test("author root and trusted host surface stay separated", () => {
   assert.deepEqual(Object.keys(author).sort(), [
+    "ContentReadError",
     "FrameBusyError",
     "FrameCallRejectedError",
     "FrameClosedError",
@@ -17,12 +18,27 @@ test("author root and trusted host surface stay separated", () => {
   ]);
   assert.deepEqual(Object.keys(host).sort(), [
     "SubsystemRuntimeFatalError",
+    "createBoundContentClient",
     "runSubsystem",
   ]);
 
   assert.equal("runSubsystem" in author, false);
   assert.equal("connectSubsystemRuntimeControl" in author, false);
   assert.equal("RuntimeControlBinding" in author, false);
+  assert.equal("createBoundContentClient" in author, false);
+});
+
+test("M12 author declarations expose only the frozen Content projection", async () => {
+  const index = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
+  const content = await readFile(new URL("../dist/content.d.ts", import.meta.url), "utf8");
+  const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");
+  for (const name of ["ContentReadOptions", "ContentRecord", "ContentResource", "ContentReadErrorCode", "ContentReadError", "ContentClient"]) {
+    assert.match(index, new RegExp(`\\b${name}\\b`));
+  }
+  assert.match(content, /record\(/);
+  assert.match(content, /resource\(/);
+  for (const forbidden of ["manifest(", "group(", "fetch(", "installationId", "token", "URL"]) assert.equal(content.includes(forbidden), false);
+  assert.match(model, /readonly content: ContentClient/);
 });
 
 test("trusted host keeps the exact M8 protocol and port dependency direction", async () => {

@@ -1,8 +1,8 @@
 # @loomrealm/renderer
 
-Renderer Control holder with M8 Data reconciliation, qualified M10 User Input, and qualified M11 Render replica implementation.
+Renderer Control holder with M8 Data reconciliation, qualified M10 User Input, qualified M11 Render replica, and the M12 version-safe resource integration seam.
 
-> Status: **M8 Implemented / Qualified · M10 Implemented / Qualified · M11 Implemented / Qualified**
+> Status: **M8/M10/M11/M12 Implemented / Qualified**
 
 Current implemented state remains one atomic Control `{ peer, snapshot } | null` record plus one private Data slot per desired subsystem authority. Protocol legality stays in `@loomrealm/renderer-control` and `@loomrealm/data`.
 
@@ -37,3 +37,5 @@ ADR 0029 does not change Renderer Effective semantics：Subsystem mutation-gate 
 Implementation may choose private class/layout names only；the public construction surface、source lifetime、Effective semantics and publisher ordering are frozen by M10/02–M10/05。
 
 M11 adds one internal Render replica per existing Data slot. Registry/Snapshot/Patch commits are atomic, Event delivery is transient, and same-generation carrier replacement preserves identity history while requiring a fresh Registry/Snapshot baseline. The Store and its qualification observation seam are not exported from the package root; M11 adds no presentation or subscription API.
+
+M12 adds `@loomrealm/renderer/resource-client` as a platform-integration subpath while keeping the root surface unchanged. It resolves only logical namespace/hierarchical keys, requires `expectedContentVersion`, rejects version mismatch before returning bytes, and returns detached `Uint8Array` values. RenderNode-to-resource presentation remains M14 work.

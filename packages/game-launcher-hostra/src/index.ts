@@ -18,3 +18,4 @@ export type {
   HostraRuntimeDataPrepareRequest,
   HostraRuntimeDataProvisioner,
 } from "./data-provisioning.js";
+export type { HostraContentAccess } from "./content-access.js";

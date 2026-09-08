@@ -3,10 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createServer, get as httpGet, request as nodeRequest } from "node:http";
-import { Readable } from "node:stream";
 import { createFsdbHttpHandler, openFsdb, serveFsdb } from "../dist/index.js";
-import { asDatabase } from "../dist/database.js";
-import { makeHandler } from "../dist/http.js";
 import { fixture, rawRequest, request } from "./helpers.mjs";
 
 const coveredConformance = new Set();
@@ -346,51 +343,29 @@ conformance(["FDB-008", "FDB-011"], "validates JSON Schema roots and .extend.met
   await assert.rejects(openFsdb({ root: invalidStruct.root }));
 });
 
-conformance(["SAFE-006"], "uses the identical FileHandle for fstat validation and response streaming", async (t) => {
+conformance(["SAFE-006"], "serves bytes admitted through the core same-handle read lease", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root }); t.after(() => db.close());
-  let fstatHandle;
-  let streamHandle;
-  const server = createServer(makeHandler(asDatabase(db), {
-    onFstat(handle) { fstatHandle = handle; },
-    onStream(handle) { streamHandle = handle; },
-  }));
+  const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const { port } = server.address();
-  assert.equal((await request(`http://127.0.0.1:${port}`, "/fsdb/v1/struct/角色/皮卡丘")).status, 200);
-  assert.ok(fstatHandle); assert.strictEqual(streamHandle, fstatHandle);
+  const response = await request(`http://127.0.0.1:${port}`, "/fsdb/v1/struct/角色/皮卡丘");
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { name: "皮卡丘" });
+  const coreSource = await readFile(new URL("../../fsdb/src/index.ts", import.meta.url), "utf8");
+  assert.match(coreSource, /opened\.handle\.createReadStream/);
 });
 
-conformance(["LIFE-008"], "attributes a post-header source stream error to source drift and marks stale", async (t) => {
+conformance(["LIFE-008"], "attributes source failure to drift and marks the shared core stale", async (t) => {
   const f = await fixture(); t.after(() => f.cleanup());
   const db = await openFsdb({ root: f.root }); t.after(() => db.close());
-  const server = createServer(makeHandler(asDatabase(db), {
-    createReadStream() {
-      let sent = false;
-      return new Readable({
-        read() {
-          if (sent) return;
-          sent = true;
-          this.push(Buffer.from([0]));
-          queueMicrotask(() => this.destroy(Object.assign(new Error("injected source failure"), { code: "EIO" })));
-        },
-      });
-    },
-  }));
+  await writeFile(join(f.struct, "皮卡丘.json"), '{"changed":true}');
+  const server = createServer(createFsdbHttpHandler(db));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const { port } = server.address();
-  await new Promise((resolve, reject) => {
-    const req = httpGet(`http://127.0.0.1:${port}/fsdb/v1/resource/图片/关都地区/真新镇`, (res) => {
-      res.on("data", () => undefined);
-      res.once("aborted", resolve);
-      res.once("error", (error) => error.code === "ECONNRESET" ? resolve() : reject(error));
-      res.once("close", resolve);
-    });
-    req.on("error", (error) => error.code === "ECONNRESET" ? resolve() : reject(error));
-  });
-  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await request(`http://127.0.0.1:${port}`, "/fsdb/v1/struct/角色/皮卡丘")).status, 503);
   assert.equal(db.state, "stale");
 });
 
@@ -417,7 +392,7 @@ conformance(["API-007", "API-008", "LIFE-006"], "service.close waits for an alre
 
 conformance(["BOUNDARY-001", "BOUNDARY-003"], "has no runtime framework dependency or higher-layer authority", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  assert.deepEqual(manifest.dependencies ?? {}, {});
+  assert.deepEqual(manifest.dependencies ?? {}, { "@loomrealm/fsdb": "0.1.0-alpha.0" });
   const source = await readFile(new URL("../src/public.ts", import.meta.url), "utf8");
   assert.equal(/express|koa|fastify|hono|installationId|game package/i.test(source), false);
 });

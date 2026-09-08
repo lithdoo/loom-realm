@@ -39,9 +39,9 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)
 - [M11 qualification record](./doc/30-implementation/m11-qualification.md)
 
-### M12 — Implementation Frozen / Preimplementation Closed
+### M12 — Implemented / Qualified / Closed
 
-M12 设计已冻结，可直接实施；**尚未声明 Implemented / Qualified / Closed**。
+M12 readonly Content capability 已完整落地，并在 Node 20.20.2 / 24.20.0 通过同一个 `npm run test:m12` 根门禁。
 
 - [M12 / 01 — Desktop Content Service](./M12_01_CONTENT_SERVICE.md)
 - [M12 / 02 — Subsystem Content Client](./M12_02_SUBSYSTEM_CONTENT_CLIENT.md)
@@ -49,6 +49,7 @@ M12 设计已冻结，可直接实施；**尚未声明 Implemented / Qualified /
 - [M12 / 04 — Content Vertical Integration](./M12_04_VERTICAL_INTEGRATION.md)
 - [M12 / 05 — Qualification and Closure](./M12_05_QUALIFICATION_CLOSURE.md)
 - [`fsdb-http` M12 Core Extraction Amendment](./packages/fsdb-http/M12_CORE_EXTRACTION.md)
+- [M12 qualification record](./doc/30-implementation/m12-qualification.md)
 
 历史 M7/M8/M9 root plans继续保留作为已完成 milestone implementation provenance。
 
@@ -197,7 +198,7 @@ M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
 M11 Render                            ✅ Qualified / Closed
-M12 Content                           Implementation Frozen / implementation pending
+M12 Content                           ✅ Qualified / Closed 2026-09-08
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
 M15 PWA Runtime                       pending
@@ -277,4 +278,4 @@ npm run docs:check-links
 npm run test:m11
 ```
 
-M12 implementation完成前，不得把设计冻结误写成 implementation closure。M12完成后唯一 closure target为 `npm run test:m12`，并在 Node 20/24 跑同一 root gate，再同步 README/Phase Plan/qualification record为 Implemented / Qualified / Closed。
+M12唯一 closure target为 `npm run test:m12`；当前已在 Node 20/24 对同一 root gate完成 qualification。后续 M13/M14只消费已冻结的 `scope.content` 与 Renderer resource bytes seam，不重新选择 M12 identity/version/credential/lifetime语义。

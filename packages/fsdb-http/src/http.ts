@@ -1,20 +1,18 @@
 import { createHash } from "node:crypto";
 import type { IncomingMessage, RequestListener, ServerResponse } from "node:http";
-import type { FileHandle } from "node:fs/promises";
-import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { DatabaseImpl, SourceUnavailableError } from "./database.js";
-import { JSON_TYPE } from "./mime.js";
-import { tableId, type FileEntry } from "./model.js";
+import {
+  describeFsdb,
+  getFsdbSnapshotId,
+  openFsdbObject,
+  type FsdbDatabase,
+  type FsdbObjectIdentity,
+} from "@loomrealm/fsdb";
 import { BadTargetError, parseTarget, type Route } from "./router.js";
 
-export interface HandlerHooks {
-  readonly onFstat?: (handle: FileHandle) => void;
-  readonly onStream?: (handle: FileHandle) => void;
-  readonly createReadStream?: (handle: FileHandle) => Readable;
-}
+const JSON_TYPE = "application/json; charset=utf-8";
 
-function errorResponse(res: ServerResponse, method: string | undefined, status: number, allow = false): void {
+function errorResponse(res: ServerResponse, status: number, allow = false): void {
   res.statusCode = status;
   res.setHeader("Cache-Control", "no-store");
   if (allow) res.setHeader("Allow", "GET, HEAD");
@@ -40,119 +38,97 @@ function entityTags(value: string): Array<{ weak: boolean; opaque: string }> | u
 function precondition(req: IncomingMessage, etag: string): 200 | 304 | 412 {
   const opaque = etag.slice(3, -1);
   const ifMatch = req.headers["if-match"];
-  if (ifMatch !== undefined) {
-    if (ifMatch.trim() !== "*") {
-      // The current v1 validator is weak, so no entity-tag can pass If-Match's
-      // required strong comparison. Only the existing-resource wildcard can.
-      return 412;
-    }
-  }
+  if (ifMatch !== undefined && ifMatch.trim() !== "*") return 412;
   const ifNone = req.headers["if-none-match"];
   if (ifNone !== undefined) {
     if (ifNone.trim() === "*") return 304;
-    const tags = entityTags(ifNone);
-    if (tags?.some((tag) => tag.opaque === opaque)) return 304;
+    if (entityTags(ifNone)?.some((tag) => tag.opaque === opaque)) return 304;
   }
   return 200;
 }
 
-function etag(snapshotId: string, fingerprint: string): string {
-  return `W/"${snapshotId}-${fingerprint}"`;
+function etag(snapshotId: string, sourceTag: string): string {
+  return `W/"${snapshotId}-${sourceTag}"`;
 }
 
-function lookup(db: DatabaseImpl, route: Exclude<Route, { type: "outside" | "descriptor" }>): FileEntry | undefined {
-  const table = db.snapshot.tables.get(tableId(route.kind, route.table));
-  return route.type === "entry" ? table?.entries.get(route.key) : table?.metadata.get(route.metadata);
+function conditionalHeaders(res: ServerResponse, currentEtag: string, decision: 304 | 412): void {
+  res.statusCode = decision;
+  res.setHeader("ETag", currentEtag);
+  res.setHeader("Cache-Control", decision === 304 ? "no-cache" : "no-store");
+  res.end();
 }
 
-async function sendBuffer(req: IncomingMessage, res: ServerResponse, db: DatabaseImpl, bytes: Buffer): Promise<void> {
-  if (db.state !== "open") return errorResponse(res, req.method, 503);
+function sendBuffer(req: IncomingMessage, res: ServerResponse, db: FsdbDatabase, bytes: Uint8Array): void {
+  if (db.state !== "open") return errorResponse(res, 503);
   const hash = createHash("sha256").update(bytes).digest("base64url").slice(0, 22);
-  const currentEtag = etag(db.snapshot.snapshotId, hash);
+  const currentEtag = etag(getFsdbSnapshotId(db), hash);
   const decision = precondition(req, currentEtag);
-  if (decision !== 200) {
-    res.statusCode = decision;
-    res.setHeader("ETag", currentEtag);
-    res.setHeader("Cache-Control", decision === 304 ? "no-cache" : "no-store");
-    res.end();
-    return;
-  }
+  if (decision !== 200) return conditionalHeaders(res, currentEtag, decision);
   res.statusCode = 200;
   res.setHeader("Content-Type", JSON_TYPE);
-  res.setHeader("Content-Length", bytes.length);
+  res.setHeader("Content-Length", bytes.byteLength);
   res.setHeader("ETag", currentEtag);
   res.setHeader("Cache-Control", "no-cache");
   res.end(req.method === "HEAD" ? undefined : bytes);
 }
 
-async function sendFile(req: IncomingMessage, res: ServerResponse, db: DatabaseImpl, entry: FileEntry, hooks: HandlerHooks): Promise<void> {
-  let opened: Awaited<ReturnType<DatabaseImpl["openValidated"]>>;
-  try { opened = await db.openValidated(entry, hooks.onFstat); } catch (error) {
-    return errorResponse(res, req.method, error instanceof SourceUnavailableError ? 503 : 500);
-  }
-  const { handle, release } = opened;
+function identity(route: Exclude<Route, { type: "outside" | "descriptor" }>): FsdbObjectIdentity {
+  return route.type === "entry"
+    ? { type: "entry", kind: route.kind, table: route.table, key: route.key }
+    : { type: "metadata", kind: route.kind, table: route.table, metadata: route.metadata };
+}
+
+async function sendObject(req: IncomingMessage, res: ServerResponse, db: FsdbDatabase, route: Exclude<Route, { type: "outside" | "descriptor" }>): Promise<void> {
+  const controller = new AbortController();
+  let lease: Awaited<ReturnType<typeof openFsdbObject>> = null;
+  const cancel = () => {
+    if (lease) void lease.close();
+    else controller.abort();
+  };
+  req.once("aborted", cancel);
+  res.once("close", cancel);
   try {
-    const currentEtag = etag(db.snapshot.snapshotId, entry.fingerprintText);
-    const decision = precondition(req, currentEtag);
-    if (decision !== 200) {
-      res.statusCode = decision;
-      res.setHeader("ETag", currentEtag);
-      res.setHeader("Cache-Control", decision === 304 ? "no-cache" : "no-store");
-      res.end();
-      return;
+    try { lease = await openFsdbObject(db, identity(route), controller.signal); }
+    catch (error) {
+      if (controller.signal.aborted) return;
+      return errorResponse(res, db.state === "stale" || db.state === "closed" ? 503 : 500);
     }
+    if (!lease) return errorResponse(res, 404);
+    const currentEtag = etag(getFsdbSnapshotId(db), lease.descriptor.sourceTag);
+    const decision = precondition(req, currentEtag);
+    if (decision !== 200) return conditionalHeaders(res, currentEtag, decision);
     res.statusCode = 200;
-    res.setHeader("Content-Type", entry.contentType);
-    res.setHeader("Content-Length", entry.length.toString());
+    res.setHeader("Content-Type", lease.descriptor.contentType);
+    res.setHeader("Content-Length", lease.descriptor.length.toString());
     res.setHeader("ETag", currentEtag);
     res.setHeader("Cache-Control", "no-cache");
     if (req.method === "HEAD") {
       res.end();
       return;
     }
-    hooks.onStream?.(handle);
-    const stream = hooks.createReadStream?.(handle) ?? handle.createReadStream({ autoClose: false });
-    let clientCancelled = false;
-    let sourceFailed = false;
-    const onRequestAborted = () => { clientCancelled = true; };
-    const onResponseClose = () => { if (!res.writableFinished) clientCancelled = true; };
-    const onSourceError = () => { if (!clientCancelled) sourceFailed = true; };
-    req.once("aborted", onRequestAborted);
-    res.once("close", onResponseClose);
-    stream.once("error", onSourceError);
-    try {
-      await pipeline(stream, res);
-    } catch {
-      if (sourceFailed) db.markStale();
-      res.destroy();
-    } finally {
-      req.off("aborted", onRequestAborted);
-      res.off("close", onResponseClose);
-      stream.off("error", onSourceError);
-    }
+    try { await pipeline(lease.stream, res); } catch { res.destroy(); }
   } finally {
-    await handle.close().catch(() => undefined);
-    release();
+    req.off("aborted", cancel);
+    res.off("close", cancel);
+    await lease?.close().catch(() => undefined);
   }
 }
 
-export function makeHandler(db: DatabaseImpl, hooks: HandlerHooks = {}): RequestListener {
+export function makeHandler(db: FsdbDatabase): RequestListener {
+  // Core validates the opaque brand synchronously here without exposing internals.
+  getFsdbSnapshotId(db);
   return (req, res) => {
     req.resume();
     void (async () => {
       let route: Route;
-      try { route = parseTarget(req.url); } catch (error) {
-        if (error instanceof BadTargetError) return errorResponse(res, req.method, 400);
-        return errorResponse(res, req.method, 500);
-      }
-      if (route.type === "outside") return errorResponse(res, req.method, 404);
-      if (req.method !== "GET" && req.method !== "HEAD") return errorResponse(res, req.method, 405, true);
-      if (route.type === "descriptor") return sendBuffer(req, res, db, db.snapshot.descriptor);
-      const entry = lookup(db, route);
-      if (!entry) return errorResponse(res, req.method, 404);
-      await sendFile(req, res, db, entry, hooks);
+      try { route = parseTarget(req.url); }
+      catch (error) { return errorResponse(res, error instanceof BadTargetError ? 400 : 500); }
+      if (route.type === "outside") return errorResponse(res, 404);
+      if (req.method !== "GET" && req.method !== "HEAD") return errorResponse(res, 405, true);
+      if (route.type === "descriptor") return sendBuffer(req, res, db, describeFsdb(db));
+      await sendObject(req, res, db, route);
     })().catch(() => {
-      if (!res.headersSent) errorResponse(res, req.method, 500);
+      if (!res.headersSent) errorResponse(res, 500);
       else res.destroy();
     });
   };

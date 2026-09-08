@@ -7,11 +7,13 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test test/*.test.mjs"
+    "test": "npm run build && node --test"
   },
   "dependencies": {
     "@loomrealm/foundation": "0.1.0-alpha.0",
+    "@loomrealm/fsdb": "0.1.0-alpha.0",
     "@loomrealm/game-launcher-hostra": "0.1.0-alpha.0",
+    "@loomrealm/game-package": "0.1.0-alpha.0",
     "@loomrealm/platform-ports": "0.1.0-alpha.0",
     "ws": "8.21.3"
   },

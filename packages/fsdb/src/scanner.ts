@@ -4,7 +4,7 @@ import { open, lstat, readdir, realpath } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
 import { canonicalName, resourceExtension } from "./names.js";
 import { JSONL_TYPE, JSON_TYPE, MARKDOWN_TYPE, SCHEMA_TYPE, resourceMime } from "./mime.js";
-import { tableId, type FileEntry, type Fingerprint, type MetadataName, type Snapshot, type TableIndex, type TableKind } from "./model.js";
+import { tableId, type FileEntry, type Fingerprint, type FsdbMetadataName, type Snapshot, type TableIndex, type FsdbTableKind } from "./model.js";
 
 const TABLE = /^\[(struct|extend|group|resource)\](.*)$/;
 const PATH_SEPARATOR = Buffer.from(sep);
@@ -100,15 +100,15 @@ async function scanFile(path: Buffer, contentType: string, validation: "json-obj
       else if (validation === "extend-meta") validateJsonl(bytes, true);
       else decodeUtf8(bytes);
     }
-    return { type: "file", path: Buffer.from(path), contentType, length: stat.size, fingerprint: fp, fingerprintText: fingerprintText(fp) };
+    return { path: Buffer.from(path), contentType, length: stat.size, fingerprint: fp, sourceTag: fingerprintText(fp) };
   } finally {
     await handle.close();
   }
 }
 
-async function metadata(tablePath: Buffer, kind: TableKind): Promise<Map<MetadataName, FileEntry>> {
-  const result = new Map<MetadataName, FileEntry>();
-  const specs: Array<[string, MetadataName, boolean, string, "info-meta" | "extend-meta" | "text"]> = [];
+async function metadata(tablePath: Buffer, kind: FsdbTableKind): Promise<Map<FsdbMetadataName, FileEntry>> {
+  const result = new Map<FsdbMetadataName, FileEntry>();
+  const specs: Array<[string, FsdbMetadataName, boolean, string, "info-meta" | "extend-meta" | "text"]> = [];
   if (kind !== "resource") specs.push([".info.meta", "$info", true, SCHEMA_TYPE, "info-meta"]);
   if (kind === "extend" || kind === "group") specs.push([".extend.meta", "$extend", kind === "extend", JSONL_TYPE, "extend-meta"]);
   specs.push([".desc.meta", "$desc", kind === "group" || kind === "resource", MARKDOWN_TYPE, "text"]);
@@ -154,7 +154,7 @@ async function scanResourceDirectory(path: Buffer, segments: readonly string[], 
   }
 }
 
-async function scanTable(path: Buffer, kind: TableKind, name: string): Promise<TableIndex> {
+async function scanTable(path: Buffer, kind: FsdbTableKind, name: string): Promise<TableIndex> {
   const entries = new Map<string, FileEntry>();
   const meta = await metadata(path, kind);
   if (kind === "resource") {
@@ -190,7 +190,7 @@ export async function scanFsdb(rootInput: string): Promise<Snapshot> {
     const physicalName = decodePhysicalName(item.name);
     const match = TABLE.exec(physicalName);
     if (!match) continue;
-    const kind = match[1] as TableKind;
+    const kind = match[1] as FsdbTableKind;
     const tableName = canonicalName(match[2]!);
     const path = childPath(root, item.name);
     const stat = await lstat(path);
@@ -201,7 +201,7 @@ export async function scanFsdb(rootInput: string): Promise<Snapshot> {
   }
   const tableList = [...tables.values()].sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : codePointCompare(a.name, b.name))).map(({ kind, name: tableName }) => ({ kind, name: tableName }));
   const descriptor = Buffer.from(JSON.stringify({ name, tables: tableList }), "utf8");
-  return { name, root, snapshotId: randomBytes(16).toString("base64url"), tables, descriptor };
+  return { name, snapshotId: randomBytes(16).toString("base64url"), tables, descriptor };
 }
 
 function codePointCompare(a: string, b: string): number {
