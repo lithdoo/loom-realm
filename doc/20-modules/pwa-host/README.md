@@ -48,7 +48,7 @@ PwaPlatform.prepareGame
 
 Main只接收 logical bootstrap + narrow platform capabilities，不接收 module URL/Worker/Port/presentation implementation material。
 
-WebPresentationConfigV1是独立 product startup input，不进入 `launch.pwa.json`、PwaLaunchPlan、LogicalGameBootstrap或 RenderNode。
+WebPresentationConfigV1是独立 product startup input，不进入 `launch.pwa.json`、PwaLaunchPlan、LogicalGameBootstrap或 RenderNode。PWA如何通过 picker、persisted handle 或 app-owned source取得 Config candidate属于 product-private acquisition，不属于 Config v1 ABI。
 
 ---
 
@@ -90,7 +90,8 @@ Broker不拥有 generation/profile/current Renderer authority。same S/G/P recon
 PWA必须复用 M13 formal contracts，而不是创建平台专属 Web projection variant：
 
 ```text
-WebPresentationConfigV1
+PWA-private Config acquisition
+→ WebPresentationConfigV1
 → ordered browser bootstrap
 → window.onload
 → Web Projector
@@ -99,12 +100,24 @@ Web Presentation API v1
 → context / data / PresentationResourceClient
 ```
 
-Identity/order同样固定：
+Identity/order/currentness同样固定：
 
 ```text
 same live wire-node identity
 (Session, subsystemKey, generation, domainId, key)
 → same HTMLElement
+
+same-generation carrier loss
+→ keep last committed DOM mounted
+→ freeze projection
+→ no receiver / LoomRealm detach-reinsert
+
+replacement carrier
+→ fresh Registry + every current Domain fresh baseline
+→ then reconcile preserving matching HTMLElement
+
+fresh generation
+→ fresh HTMLElement identity universe
 
 managed root order
 → subsystemKey UTF-8 lexical
@@ -112,7 +125,7 @@ managed root order
 → roots order
 ```
 
-PWA不得退化成 bare `same key → same element` 规则，也不得自己发明 cross-Subsystem zIndex/layer semantics。
+PWA不得退化成 bare `same key → same element` 规则，也不得自己选择不同 reconnect DOM lifecycle、cross-Subsystem zIndex/layer semantics。
 
 ---
 
@@ -156,6 +169,8 @@ Content logical identity/version/errors
 Web Presentation Config v1 semantics
 Web Presentation API v1 semantics
 scoped wire-node → HTMLElement identity
+same-generation presentation freeze/complete-rebaseline semantics
+fresh-generation HTMLElement replacement semantics
 managed body ordering
 business-observable outcome
 ```
@@ -166,6 +181,7 @@ business-observable outcome
 Process vs Worker
 WebSocket vs MessagePort
 Desktop HTTP/FSDB vs PWA Fetch/SW/OPFS
+private Config acquisition mechanism
 private browser href/src binding
 business WC private Shadow DOM/Canvas/WebGL implementation
 ```
@@ -184,6 +200,8 @@ PWA Data broker/provisioning
 Input/Render full trace
 M13 ordered bootstrap + failure handling
 scoped identity / deterministic body order
+same-generation loss + complete-rebaseline presentation lifecycle
+fresh-generation HTMLElement replacement
 context/data/resource API
 PWA Content realization
 reload/replacement/shutdown
@@ -196,6 +214,7 @@ Hostra/PWA logical equivalence
 
 1. PWA physical mechanics不创建新 application authority；
 2. M16 Runtime-only与 M17 full E2E边界保持清晰；
-3. Web presentation直接复用 M13 Config/API/identity/order semantics；
-4. PWA不引入平台专属 component loader、layer manager、RenderEvent bridge或 second projection tree；
-5. physical storage/transport可以不同，logical business outcome必须等价。
+3. Web presentation直接复用 M13 Config/API/identity/currentness/order semantics；
+4. Config acquisition可以平台不同，但 Config v1 value contract一致；
+5. PWA不引入平台专属 component loader、layer manager、RenderEvent bridge或 second projection tree；
+6. physical storage/transport可以不同，logical business outcome必须等价。
