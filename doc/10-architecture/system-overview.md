@@ -4,7 +4,9 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
-> 依赖：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
+> 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
+> 被以下文档细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
+> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
 本文只描述 system-level responsibility / authority / topology。精确 wire、schema、limits、error、qualification 由 `15-contracts` 与 milestone closure拥有。
