@@ -16,10 +16,13 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [存储与内容系统](./doc/10-architecture/storage-system.md)
 - [正式契约目录](./doc/15-contracts/README.md)
 - [Content API v1](./doc/15-contracts/content-api-v1.md)
+- [Web Presentation Config v1](./doc/15-contracts/web-presentation-config-v1.md)
+- [Web Presentation API v1](./doc/15-contracts/web-presentation-api-v1.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [Package Architecture](./doc/30-implementation/package-architecture.md)
 - [ADR 0030：M12 Content 预实施闭环](./doc/decisions/0030-freeze-m12-content-preimplementation-closure.md)
 - [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./doc/decisions/0031-business-owned-web-component-projection.md)
+- [ADR 0032：M13 Web Presentation API v1 与 presentation resource capability](./doc/decisions/0032-freeze-m13-web-presentation-api-v1.md)
 
 ### M10 — Implemented / Qualified / Closed
 
@@ -111,6 +114,7 @@ Renderer
 
 Business Web Component
     read-only consumer of projected Render state
+    consumer of narrow presentation resource capability
     owner of private Shadow DOM / Canvas / WebGL / presentation-local state
 
 Platform
@@ -162,15 +166,20 @@ Renderer committed Render Store
 → business-owned Custom Element instances
 ```
 
-投影规则：
+投影 / local ABI：
 
 ```text
 key      → stable HTMLElement identity
 tag      → business-owned Custom Element name
 attrs    → Renderer-managed host attributes
-data     → complete readonly full snapshot via dedicated optional WC observer interface
+context  → optional one-shot receiveRenderContext(WebPresentationContext)
+data     → optional receiveRenderData(complete readonly full snapshot)
 children → Renderer-managed ordered light DOM
 ```
+
+`receiveRenderContext` 与 `receiveRenderData` 由同一个 `Web Presentation API v1`治理，但接口独立：context 是 Window-lifetime capability/environment，只在新 HTMLElement 第一次 managed DOM insertion前最多注入一次；data 是 retained Render state，可随 successful Store commit重复交付。
+
+`WebPresentationContext` V1只暴露 narrow `PresentationResourceClient`：业务给出 `namespace + hierarchical key + expectedContentVersion`，得到 caller-owned bytes + MIME + actual version；Renderer-private Content origin、installationId、bearer/token、filesystem path、privileged URL与 private ResourceClient object均不暴露给业务。
 
 多 Domain 的 top-level roots 直接 flatten 到 `document.body`，顺序固定复用 M11 logical Domain ordering：`zIndex` 升序，同 `zIndex` 按 `domainId` UTF-8 lexical 升序；每个 Domain 内保持 authoritative roots order。Domain ordering变化只移动仍 live 的现有 HTMLElement，不以 recreate 替代。
 
@@ -220,7 +229,7 @@ Content capability != executable resolver
 
 Subsystem author root只增加真实 consumer需要的 `scope.content.record/resource`；Renderer通过 trusted `@loomrealm/renderer/resource-client` integration subpath提供 logical resource → version-checked bytes responsibility，Renderer root保持不变。M12不建立 `@loomrealm/content`、`@loomrealm/content-service`、generic Repository、StorageProvider、InstallationRegistry 或 AssetManager framework。
 
-Business-owned Web Components不得绕过 M12 Content boundary获得 filesystem path、bearer、privileged URL 或 FSDB capability；后续真实 presentation consumer如需 resource capability，只能由 M13/M14按真实 consumer最小冻结，不预建 universal AssetManager/loader。
+M13 `Web Presentation API v1` 现在在 Renderer-private ResourceClient 外冻结 narrow business-facing `PresentationResourceClient` façade。Business-owned Web Components只能使用 logical namespace/key/expectedContentVersion 读取 caller-owned bytes，不得获得 filesystem path、bearer、privileged URL、FSDB capability或 Renderer private client。该 façade不是 AssetManager，也不提供 decoder/loader/plugin framework。
 
 ---
 
@@ -259,7 +268,7 @@ Input
 → PWA full E2E/equivalence
 ```
 
-M13只关闭 LoomRealm-owned Render Store → business-owned Custom Element projection seam；M14 `@loomrealm/map → @loomrealm/subsystem` 并增加 map-owned Web presentation implementation作为第一个真实综合 consumer；M15完成 BrowserWindow/Renderer Control/Input/Content/presentation的完整 Desktop composition；M16只完成 PWA Runtime；M17完成 PWA Renderer/Data/Input/Render/Content/presentation和 Hostra/PWA logical equivalence。
+M13关闭 Window bootstrap、LoomRealm-owned Render Store → business-owned Custom Element projection seam，以及 `Web Presentation API v1` 的 context/data receivers + narrow runtime resource capability；M14 `@loomrealm/map → @loomrealm/subsystem` 并增加 map-owned Web presentation implementation作为第一个真实综合 consumer；M15完成 BrowserWindow/Renderer Control/Input/Content/presentation的完整 Desktop composition；M16只完成 PWA Runtime；M17完成 PWA Renderer/Data/Input/Render/Content/presentation和 Hostra/PWA logical equivalence。
 
 M13 已冻结 browser loading / registration / projection-start semantics：ordered `<link>` / classic `<script>`、`customElements.define(...)`、`window.onload` ready barrier。尚未冻结的只包括 presentation implementation 的 package/subpath/bundle topology，以及 trusted prepared resource → browser `href/src` 的 implementation-private binding mechanics。
 
@@ -280,7 +289,7 @@ Business Definition  → @loomrealm/subsystem only
 apps/desktop Content  → @loomrealm/fsdb
 ```
 
-M13 不建立 LoomRealm-owned business component library或通用 Presentation DSL。Web projection可以 materialize 为 Renderer trusted/private Web integration seam，但不得扩张 Renderer root application authority；具体 package placement由真实 implementation ownership决定。
+M13 不建立 LoomRealm-owned business component library或通用 Presentation DSL。Web projection可以 materialize 为 Renderer trusted/private Web integration seam；Web Presentation API只冻结 business-observable browser ABI，不要求用 global service locator，也不得扩张 Renderer root application authority。具体 package placement由真实 implementation ownership决定。
 
 Forbidden：
 
@@ -291,6 +300,7 @@ business Definition → platform/protocol/FSDB/HTTP/browser packages
 InputManager/RenderManager → raw carrier reader
 ContentClient → filesystem path / bearer / raw Response exposure
 Business WC → Render Store mutation / protocol carrier / Content credential
+Business WC → physical Content URL/path/token/private RendererResourceClient
 Renderer → DOM reverse-sync into Render Store
 second LoomRealm projection tree authority
 Hostra/PWA private retry/currentness protocol
@@ -308,6 +318,7 @@ same SubsystemDefinitionFactory ABI
 same Runtime/Frame/Renderer Control/Data/Input/Render semantics
 same Content logical response semantics
 same Web projection semantics for RenderNode identity/attrs/data/children
+same Web Presentation API context/data/resource observable semantics
 same business-observable result for same logical scenario
 ```
 
