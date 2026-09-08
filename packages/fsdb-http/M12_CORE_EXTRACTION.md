@@ -4,9 +4,10 @@
 > 生效：M12 Content preimplementation freeze  
 > 最近复核：2026-09-08  
 > 原合同：[DESIGN.md](./DESIGN.md)  
-> M12 冻结：[../../M12_01_CONTENT_SERVICE.md](../../M12_01_CONTENT_SERVICE.md)
+> M12 冻结：[../../M12_01_CONTENT_SERVICE.md](../../M12_01_CONTENT_SERVICE.md)  
+> 决策：[ADR 0030](../../doc/decisions/0030-freeze-m12-content-preimplementation-closure.md)
 
-本文件只修订 `@loomrealm/fsdb-http` v1 原冻结合同中与 **package dependency / internal ownership** 有关的条款。除本文明确覆盖的内容外，`DESIGN.md` 与 `CONFORMANCE.md` 的 public API、HTTP observable behavior、安全不变量、lifecycle 和 conformance要求全部继续有效。
+本文件只修订 `@loomrealm/fsdb-http` v1 原冻结合同中与 **package dependency / FSDB core ownership / valid database-handle producer** 有关的条款。除本文明确覆盖的内容外，`DESIGN.md` 与 `CONFORMANCE.md` 的 public API、HTTP observable behavior、安全不变量、lifecycle 和 conformance要求全部继续有效。
 
 ---
 
@@ -50,9 +51,19 @@ Node.js stdlib
 @loomrealm/fsdb-http
 ```
 
-这是本 amendment 唯一允许新增的 runtime package dependency。
+这是本 amendment 唯一允许新增的 runtime workspace dependency。
 
-`@loomrealm/fsdb` 本身只依赖 Node stdlib。
+`@loomrealm/fsdb` 本身只依赖 Node stdlib，并且是正常可发布 package：
+
+```text
+name          = @loomrealm/fsdb
+module        = ESM
+engines       = Node >=20
+publishConfig = public
+exports       = root only
+```
+
+它的版本遵循当前 workspace release version。`@loomrealm/fsdb-http` 不通过 bundling、跨 workspace private import 或 unpublished hidden dependency消费它。
 
 ---
 
@@ -97,7 +108,33 @@ FSDB domain mechanics != HTTP representation mechanics
 
 ---
 
-## 4. Public Compatibility
+## 4. Opaque Database Handle Amendment
+
+原 DESIGN 中“只有 `@loomrealm/fsdb-http` 本 package 的 `openFsdb()` / internal composition 可以产生 valid `FsdbDatabase`”这一 ownership wording 被本节替代。
+
+M12 起唯一 valid runtime producer是：
+
+```text
+@loomrealm/fsdb.openFsdb()
+→ opaque FsdbDatabase
+```
+
+`@loomrealm/fsdb-http.openFsdb()` 是该 core opener 的 source-compatible re-export / projection，因此 existing consumer仍可从旧 package入口获得合法 handle。
+
+固定：
+
+```text
+only @loomrealm/fsdb core can mint a valid FsdbDatabase handle
+structural look-alike remains invalid
+fsdb-http accepts the same opaque core handle
+physical path/index/private implementation never becomes public
+```
+
+这不允许第三方构造、伪造或 subclass database handle。
+
+---
+
+## 5. Public Compatibility
 
 `@loomrealm/fsdb-http` existing root public surface MUST remain unchanged：
 
@@ -128,7 +165,7 @@ Existing consumers MUST NOT need source changes solely because of the extraction
 
 ---
 
-## 5. HTTP Compatibility
+## 6. HTTP Compatibility
 
 Extraction MUST preserve all existing `fsdb-http` observable/conformance behavior，including：
 
@@ -154,7 +191,7 @@ Internal ETag source material MAY now be obtained from `@loomrealm/fsdb` snapsho
 
 ---
 
-## 6. No New Framework
+## 7. No New Framework
 
 该 extraction 不授权新增：
 
@@ -173,7 +210,22 @@ watch/hot reload system
 
 ---
 
-## 7. Qualification
+## 8. Distribution / Package Evidence
+
+因为 `@loomrealm/fsdb-http` 是 publishable package，M12 extraction必须同时证明：
+
+```text
+npm pack @loomrealm/fsdb includes its root runtime/types/docs
+npm pack @loomrealm/fsdb-http declares @loomrealm/fsdb as runtime dependency
+M12_CORE_EXTRACTION.md is included in fsdb-http published files
+installing packed fsdb-http + fsdb resolves without monorepo-private paths
+```
+
+不得依赖 workspace source layout才能运行 published `@loomrealm/fsdb-http`。
+
+---
+
+## 9. Qualification
 
 M12 必须证明：
 
@@ -182,14 +234,16 @@ M12 必须证明：
 @loomrealm/fsdb-http build/test/pack
 existing fsdb-http conformance green
 existing fsdb-http public exports unchanged
+valid opaque handle is core-minted / structural forgery rejected
 all descriptor/ordinary/metadata reads use @loomrealm/fsdb core
 no duplicate scanner/index/safe-open implementation remains in fsdb-http
+packed dependency installation resolves
 ```
 
 ---
 
-## 8. Freeze Statement
+## 10. Freeze Statement
 
-本 amendment 显式改变的是 `fsdb-http` 的 internal package dependency/ownership，不改变其 v1 HTTP contract。
+本 amendment 显式改变的是 `fsdb-http` 的 internal package dependency/ownership与 valid opaque-handle producer，不改变其 v1 HTTP contract。
 
 除非证明 core extraction 与既有 FSDB HTTP observable contract存在无法通过 private realization满足的 correctness contradiction，否则实现阶段不得扩大本 amendment 的修订范围。
