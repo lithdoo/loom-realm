@@ -1,19 +1,48 @@
-# Web Presentation Config v1
+# LoomRealm Web Presentation Config v1
 
 > 层级：正式契约  
-> 状态：Active / Normative / Stabilizing  
-> Milestone：M13 Web Presentation Projection  
-> 主要定义：Renderer Window-level business Web presentation bootstrap resource declaration、prepared Content resolution、browser loading/registration ready barrier  
-> 依赖：[Content API v1](./content-api-v1.md)、[Web Presentation API v1](./web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-freeze-m13-web-presentation-api-v1.md)  
+> 状态：Active / Normative  
+> 契约版本：1  
+> 稳定程度：Stabilizing / M13 current design  
+> 主要定义：用户启动时选择的 Web presentation 配置、Window-level JS/CSS resource list、M12 Content/FSDB logical resource resolution、`<script>` / `<link>` browser bootstrap、`window.onload` projection-start barrier  
+> 依赖：[Readonly Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
-本契约回答：**当前 Renderer Window 启动时需要加载哪些 business-owned Web presentation JS/CSS，以及这些 logical resources 如何在不暴露 filesystem path / Content credential 的前提下绑定到 browser bootstrap。**
+本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
-它不定义 Runtime executable binding，不定义 RenderNode schema，不定义业务 Custom Element vocabulary，也不建立 dynamic module-loader framework。
+核心原则：
+
+> **Web Presentation Config 描述“当前 Renderer Window 在启动 Render projection 前必须加载哪些业务 JS/CSS”；它不是 Game logical topology、不是 Subsystem executable binding、不是 Render state，也不按 Subsystem 切分资源。**
 
 ---
 
-## 1. Exact Shape
+## 1. Startup Input Boundary
+
+用户在产品启动时显式提供 Web Presentation Config source/path。
+
+概念产品输入：
+
+```ts
+interface DesktopStartInput {
+  readonly installationRoot: string;
+  readonly webPresentationConfig: string;
+}
+```
+
+这里的 `webPresentationConfig` 只表示 product/application composition 要读取的配置文件位置；它：
+
+```text
+MUST NOT enter GameEntryV1
+MUST NOT enter Hostra/PWA Launch Manifest
+MUST NOT enter LogicalGameBootstrap
+MUST NOT enter Main / Frame / RenderNode
+```
+
+本契约不要求 installation 内存在固定文件名。用户选择哪一个配置文件属于启动输入，不扩大 `game.json` 或 `launch.*.json` schema。
+
+---
+
+## 2. Normative JSON Shape
 
 ```ts
 interface WebPresentationConfigV1 {
@@ -28,47 +57,65 @@ interface WebPresentationResourceRefV1 {
 }
 ```
 
-Top-level 与 resource ref 都是 closed exact shape；未知字段必须拒绝。
+概念示例：
 
-`formatVersion` 必须精确为 `1`。
-
----
-
-## 2. Independent Startup Input
-
-Web Presentation Config 是独立 product startup input：
-
-```text
-Game installation/source
-→ Platform Launcher PREPARE
-→ prepared current-platform game + current Content view
-
-user-selected WebPresentationConfigV1
-→ validate
-→ resolve against that current prepared Content view
-→ PreparedWebPresentation
-→ Renderer Window bootstrap
+```json
+{
+  "formatVersion": 1,
+  "scripts": [
+    {
+      "namespace": "resource.web",
+      "key": "components/common"
+    },
+    {
+      "namespace": "resource.web",
+      "key": "components/game"
+    }
+  ],
+  "styles": [
+    {
+      "namespace": "resource.web",
+      "key": "styles/base"
+    },
+    {
+      "namespace": "resource.web",
+      "key": "styles/game"
+    }
+  ]
+}
 ```
 
-它不属于：
+V1 顶层 schema MUST 精确包含：
 
 ```text
-game.json
-launch.hostra.json
-launch.pwa.json
-LogicalGameBootstrap
-Main state
-Subsystem Definition
-Render Update
+formatVersion
+scripts
+styles
 ```
 
-因此修改 presentation bootstrap resource list不修改 logical Game topology，也不创建新的 Runtime executable binding。
+V1 MUST NOT 增加：
+
+```text
+subsystems
+module
+url
+filesystemPath
+bearer
+credential
+loader
+resolver
+platform
+hostra
+pwa
+```
+
+`formatVersion` MUST 精确等于 `1`。
 
 ---
 
 ## 3. Window-level Scope
 
-Config作用域是整个 Renderer Window：
+`scripts[]` / `styles[]` 属于整个 Renderer Window presentation environment，而不是某个 Subsystem：
 
 ```text
 WebPresentationConfigV1
@@ -299,16 +346,7 @@ runtime business resources
 
 Config只声明 bootstrap JS/CSS。
 
-Business WC运行后需要普通 resource bytes时，使用 [Web Presentation API v1](./web-presentation-api-v1.md) 冻结的 `PresentationResourceClient`：
-
-```text
-namespace + hierarchical key + expectedContentVersion
-→ caller-owned bytes + MIME + actual contentVersion
-```
-
-该 API由 trusted Projector通过 one-shot `receiveRenderContext(...)` 注入；它复用 M12 Renderer-private ResourceClient semantics，但不得暴露 private client object、filesystem path、Content bearer、origin/installationId或 privileged URL。
-
-Bootstrap `<script>` / `<link>` physical binding 与 runtime resource capability仍是两个不同 seam；存在其中一个不授权业务取得另一个的 physical material。
+Business WC运行后需要普通 resource bytes时，仍必须通过 M13/M14明确授予的受限 presentation Content capability消费 M12 ResourceClient semantics；不得因为 bootstrap `<script>` / `<link>` binding存在就获得任意 Content URL/path/credential。
 
 ---
 
@@ -338,156 +376,63 @@ launch.<platform>.json
 user-selected WebPresentationConfigV1
 → what business Web JS/CSS this Renderer Window loads
 
-Web Presentation API v1
-→ how running projected business WC receives context/data and reads ordinary runtime resource bytes
-
 RenderNode
 → current authoritative presentation state to project
 ```
 
----
-
-## 12. Browser Realization Is Intentionally Narrow
-
-M13 V1 当前只冻结：
-
-```text
-<link rel="stylesheet">
-classic <script>
-browser customElements registry
-window.onload ready barrier
-```
-
-M13 V1 不建立：
-
-```text
-ESM module graph loader
-Blob module linker
-import-map framework
-hot component loader
-per-Subsystem module lifecycle
-dynamic tag → module resolver
-```
-
-这不是声明未来永远禁止 ESM，而是当前没有真实需求要求 LoomRealm拥有 module graph / loader authority。
+四者不得合并成 universal startup DTO。
 
 ---
 
-## 13. Failure Boundary
+## 12. Failure Boundary
 
-以下是 presentation bootstrap failure：
-
-```text
-config parse/shape invalid
-resource ref invalid
-required prepared Content resource missing
-invalid resource MIME/version fact
-trusted browser binding failure
-stylesheet load failure
-script load/evaluation failure
-required Custom Element registration absent at projection use
-```
-
-结果：
+以下至少属于 presentation bootstrap/config failure：
 
 ```text
-presentation bootstrap fails
-→ Web Projector MUST NOT enter running state if failure occurs before ready/start
+config JSON/schema invalid
+unsupported formatVersion
+resource identity invalid
+resource not found in current prepared Content view
+resource kind/MIME incompatible with declared scripts/styles use
+stylesheet/script load failure
+script evaluation/registration failure
+required Custom Element remains unregistered at projection use
 ```
 
-`window.onload` 本身只是 ready barrier；implementation仍必须独立跟踪 required stylesheet/script load/evaluation/registration failure，不得把“onload已触发”自动解释成所有 business bootstrap均成功。
+bootstrap failure → presentation不进入 Projector running state。
 
-Presentation failure不修改 Main/Subsystem authority，也不回滚已合法 committed Renderer Store。
+这些 failure MUST NOT 静默修改 Main/Subsystem/Render Store authority，也不得伪装成 Render protocol-fatal。
 
 ---
 
-## 14. Security / Capability Boundary
+## 13. Browser Realization Boundary
 
-Business config/WC只能观察 logical identity与业务可见 API，不得取得：
+M13 V1 已冻结 browser mechanism：
 
 ```text
-Desktop Content bearer
-Content Service privileged origin/path
-filesystem path
-FSDB handle
-prepared installation internal object
-Launcher executable resolver
-PlatformLaunchPlan
+CSS = <link rel="stylesheet">
+JS  = ordered classic <script>
+ready = window.onload
 ```
 
-trusted composition负责 physical `<link href>` / `<script src>` binding；该 binding MUST NOT 把 bearer、filesystem path 或 broad resolver capability编码成业务脚本可复用的 credential channel。
+trusted host/composition仍负责把 prepared logical resources私下绑定成可供这些标签加载的 browser `href/src`。该绑定 MUST 保持 current installation identity，并 MUST NOT 向 business config/WC 暴露 Content bearer、filesystem path或 privileged resolver capability。
 
-Business script本身运行在同一 Window，可能观察浏览器标准 `document.currentScript.src` / DOM `href/src`；因此 implementation使用的 browser-loadable binding必须本身是 narrowly scoped / non-sensitive material，而不是把 secret直接塞进 URL。
-
-Runtime ordinary resource access则只能通过 Web Presentation API v1 narrow façade；不得通过 bootstrap URL反向派生 Content credential。
+LoomRealm不建立 ESM module graph、Blob-module loader、dynamic component loader或 presentation dependency framework。
 
 ---
 
-## 15. Cross-platform Semantics
+## 14. Core Invariants
 
-Hostra Desktop 与 PWA MUST 保持：
-
-```text
-same config shape
-same logical namespace/key semantics
-same ordered list semantics
-same classic-script evaluation ordering expectation
-same window.onload ready barrier
-same Custom Element registration expectation
-same no-dynamic-loader baseline
-```
-
-Physical realization MAY 不同：
-
-```text
-Desktop Content HTTP/FSDB binding
-PWA Service Worker/Cache/OPFS binding
-browser-loadable href/src materialization
-```
-
-但 physical difference不得对 business产生 filesystem/token/platform-specific capability exposure。
-
-Runtime WC resource access的 cross-platform business-observable semantics由 Web Presentation API v1独立冻结。
-
----
-
-## 16. Qualification
-
-M13 qualification至少证明：
-
-```text
-exact config validation
-ordered scripts/styles retained
-logical refs resolve only against current prepared Content view
-no separately selected fsdbRoot
-no path/URL/bearer accepted in config
-ordered <link> realization
-ordered classic <script> realization
-window.onload before Projector start
-required script/style failure prevents successful bootstrap
-business customElements.define registration works in real Chromium
-unregistered projected tag follows presentation failure policy
-config does not create subsystem/resource binding
-runtime WC resource capability comes from Web Presentation API v1, not bootstrap href/src
-```
-
-真实 browser lifecycle语义必须使用 headless Chromium；Node/fake DOM不足以关闭本契约。
-
----
-
-## 17. Final Invariants
-
-1. Web Presentation Config是独立 Window-level startup input；
-2. exact V1 shape只有 `formatVersion/scripts/styles`；
-3. scripts/styles只使用 M12 logical namespace + hierarchical resource key；
-4. Desktop只使用 current prepared installation内 exactly-one `[FSDB]*`，用户不选第二个 fsdbRoot；
-5. prepared representation只携 logical identity/contentVersion/MIME，不暴露 path/token/privileged URL；
-6. styles使用 ordered `<link rel="stylesheet">`；
-7. scripts使用 ordered classic `<script>`，不得 async破坏 declaration order；
-8. `window.onload` 是 V1 Web Projector start barrier，但 implementation仍独立处理 resource/evaluation/registration failure；
-9. business JS用 native `customElements.define(...)`注册 concrete WC；
-10. V1不建立 ESM/dynamic component loader framework；
-11. bootstrap JS/CSS与 runtime ordinary resources是不同用途；runtime resource由 Web Presentation API v1读取；
-12. Config不进入 Game Entry/Launcher manifest/Main/Render state；
-13. physical browser binding不能成为 business credential/path capability；
-14. Hostra/PWA可有不同 physical storage/binding，但必须保持 business-observable config/bootstrap semantics。
+1. Web Presentation Config 是用户启动输入，不进入 Game/Launcher/Main/Render authority；
+2. V1 config顶层只有 `formatVersion/scripts/styles`；没有 `subsystems`；
+3. scripts/styles是整个 Renderer Window的资源列表；
+4. resource ref使用 M12 `namespace + hierarchical resource key`；
+5. Desktop继续自动发现 prepared installation内 exactly one FSDB；用户不单独配置 FSDB；
+6. config不携 filesystem path/URL/bearer/loader capability；
+7. prepare阶段把 resource ref解析为 current immutable contentVersion/MIME facts；
+8. styles使用 ordered `<link rel="stylesheet">`，scripts使用 ordered classic `<script>`；
+9. `window.onload` 是 V1 presentation-ready / Web Projector start barrier；
+10. JS由业务方负责通过 browser `customElements` 注册具体 WC；LoomRealm不维护 business component registry；
+11. normal v1 bootstrap不依赖 arbitrary late Custom Element upgrade；
+12. presentation bootstrap lifetime与 Renderer Window lifetime一致；
+13. existing `game.json`、platform launch manifest、LogicalGameBootstrap与 M12 Content contracts保持不变。
