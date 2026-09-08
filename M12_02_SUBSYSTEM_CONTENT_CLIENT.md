@@ -140,9 +140,20 @@ no leading/trailing /
 
 ```text
 must be non-null object
-only signal is recognized by the M12 surface
+must have no own enumerable property other than "signal"
 signal, when present, must be an AbortSignal
 ```
+
+因此 typo/未来字段不会被静默忽略：
+
+```text
+{ timeout: 500 }
+{ signal, timeout: 500 }
+→ synchronous TypeError
+→ zero HTTP request
+```
+
+Prototype-inherited properties不属于 M12 options surface；实现只读取 validated own `signal`。
 
 Invalid namespace/key/options：
 
@@ -158,6 +169,8 @@ Valid call with already-aborted `signal`：
 → no HTTP request
 → returned Promise rejects ContentReadError("CONTENT_CANCELLED")
 ```
+
+Valid non-aborted `signal` owns that one async Content read until it settles；abort MAY cancel the in-flight request but不得影响 ContentClient或其他 reads。
 
 因此 author misuse 与 remote Content failure始终分开。
 
@@ -335,6 +348,7 @@ ContentReadError constructor/name/code behavior exact
 scope.content is always present for a running M12 Subsystem Runtime
 record/resource read through @loomrealm/subsystem only
 single-segment and hierarchical-resource local validation exact
+unknown own enumerable option property synchronously TypeError + zero HTTP
 invalid arguments synchronously TypeError with zero HTTP
 already-aborted valid request maps to CONTENT_CANCELLED with zero HTTP
 no author installationId/contentVersion request selector
