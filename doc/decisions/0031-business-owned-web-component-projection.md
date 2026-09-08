@@ -87,9 +87,13 @@ styles[]
 
 资源使用 M12 logical `namespace + hierarchical key`，不按 Subsystem 切分，也不进入 Game Entry、Platform Launch Manifest、LogicalGameBootstrap 或 RenderNode。
 
+在 `scripts` 与 `styles` 各自列表内，`(namespace,key)` 必须唯一。Duplicate logical ref 是 invalid config，必须在 bootstrap 前拒绝；Desktop/PWA 不得通过 implementation-defined dedupe 或重复执行产生不同可观察语义。
+
 M13 不建立 ESM/Blob module graph、dynamic component loader、PluginManager 或第二个 Custom Element registry。
 
 trusted prepared resource → browser `href/src` 的具体 physical binding 保持 implementation-private，不向 business config/WC 暴露 bearer、path、FSDB 或 privileged resolver。
+
+`window.onload` 只关闭 bootstrap phase。Config 不声明 expected tag set，因此 bootstrap 不猜测某 script 应注册哪些 Custom Elements；如果 Projector 实际 materialize `RenderNode.tag` 时该 tag 仍未注册，这是 projection-time presentation structural failure，而不是 bootstrap/config failure。
 
 ---
 
@@ -233,7 +237,7 @@ construct
 structure/reorder → attrs → receiveRenderData when required
 ```
 
-Browser-native lifecycle callbacks不是 LoomRealm atomic-commit ABI。
+Browser-native lifecycle callbacks不是 LoomRealm atomic-commit ABI。`connectedCallback()` 只可依赖“若实现 context receiver，则 context 已注入”；不得假设 initial managed attrs、children 或 Render data 已 ready，retained data必须以 `receiveRenderData(...)` 为准。
 
 ---
 
@@ -313,11 +317,29 @@ fresh generation结束旧 wire-node identity universe，因此 old generation ma
 
 ---
 
-## 11. Qualification
+## 11. Presentation Failure Closure
+
+普通 callback/resource failure仍按 Web Presentation API v1 best-effort、presentation-local boundary处理。
+
+未注册 tag 属于更窄的 structural failure：当 Projector 需要 materialize `RenderNode.tag` 且 `customElements.get(tag) === undefined` 时，不创建 unknown HTMLElement、不等待 arbitrary future registration/native upgrade，并停止该 Renderer Window 后续 LoomRealm-managed DOM mutation，保留最后成功 reconcile 的 managed DOM。恢复使用 fresh Renderer Window/bootstrap。
+
+这一 Window-local failed presentation state 不公开成 `PresentationState` authority，并且始终：
+
+```text
+no Store rollback
+no Main/Subsystem authority mutation
+no Runtime/Frame failure
+not Render protocol-fatal
+```
+
+---
+
+## 12. Qualification
 
 M13 必须使用真实 headless Chromium，至少证明：
 
 ```text
+duplicate scripts/styles logical ref rejected before bootstrap
 ordered <link> / classic <script> + load failure detection
 window.onload projection-start barrier
 business customElements registration
@@ -331,8 +353,11 @@ fresh generation does not inherit old HTMLElement identity
 subsystemKey → M11 domain order → roots deterministic body sequence
 reorder moves existing HTMLElement
 receiveRenderContext before first managed insertion; at most once
+connectedCallback does not assume initial attrs/children/data ready
 receiveRenderData initial/update full snapshots
 context/data receiver independence
+unregistered RenderNode.tag causes Window-local presentation structural failure
+unregistered tag never creates unknown element or waits for future upgrade
 real M12 resource read through PresentationResourceClient
 version conflict / cancellation / returned-bytes ownership
 no credential/path/private-client exposure
@@ -345,7 +370,7 @@ M13不复制 M11 protocol conformance，也不重测 M12 Content internals；只
 
 ---
 
-## 12. Milestone Route / Renumbering Provenance
+## 13. Milestone Route / Renumbering Provenance
 
 ADR 0031 在 `loom.map` 前插入一个独立 Web Presentation milestone。
 
@@ -376,7 +401,7 @@ M13关闭 presentation infrastructure；M14 `loom.map` 成为首个真实 busine
 
 ---
 
-## 13. Consequences / Explicit Non-goals
+## 14. Consequences / Explicit Non-goals
 
 保留：
 
@@ -384,6 +409,8 @@ M13关闭 presentation infrastructure；M14 `loom.map` 成为首个真实 busine
 - M12 resource/version/credential boundary不复制；
 - concrete Web Components、layout、Canvas/WebGL语义由业务拥有；
 - Config acquisition、Config value、runtime API分离；
+- duplicate bootstrap ref直接拒绝，不留下 platform-specific dedupe semantics；
+- bootstrap failure与 projection-time structural failure严格分 phase；
 - Projector只有 mechanical projection authority；
 - same-generation reconnect保持同一 live element universe，fresh generation才切换 element identity universe。
 
