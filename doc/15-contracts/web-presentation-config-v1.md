@@ -4,32 +4,51 @@
 > 状态：Active / Normative / Stabilizing  
 > 契约版本：1  
 > Milestone：M13 Web Presentation Projection  
-> 主要定义：用户启动时选择的 Window-level business JS/CSS、M12 logical Content resolution、browser bootstrap、`window.onload` projection-start barrier  
-> 依赖：[Content API v1](./content-api-v1.md)、[Web Presentation API v1](./web-presentation-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
+> 主要定义：Window-level business JS/CSS declaration、M12 logical Content resolution、browser bootstrap、`window.onload` projection-start barrier  
+> 依赖：[Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)  
+> 相关：[Web Presentation API v1](./web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 核心原则：
 
-> **Web Presentation Config 只描述“当前 Renderer Window 在启动 Render projection 前加载哪些业务 JS/CSS”。它不是 Game topology、Subsystem executable binding、Render state、runtime asset API 或 module-loader contract。**
+> **Web Presentation Config 只描述“当前 Renderer Window 在启动 Render projection 前加载哪些业务 JS/CSS”。它不是 Game topology、Subsystem executable binding、Render state、runtime asset API、module-loader contract，也不定义产品如何取得配置 source。**
 
 ---
 
-## 1. Startup Input Boundary
+## 1. Config Acquisition Boundary
 
-用户在产品启动时显式选择 Web Presentation Config source/path。
+Web Presentation Config 是 product startup input，但 **source acquisition 不属于本契约**。
 
-概念产品输入：
+边界固定为：
 
-```ts
-interface DesktopStartInput {
-  readonly installationRoot: string;
-  readonly webPresentationConfig: string;
-}
+```text
+product / Platform composition
+→ acquire config source using platform-private mechanism
+→ read / parse candidate JSON
+────────────────────────────────────────────
+Web Presentation Config v1 contract begins
+→ validate WebPresentationConfigV1
+→ resolve prepared Content refs
+→ browser bootstrap
 ```
 
-`webPresentationConfig` 只属于 product/application composition，MUST NOT enter：
+因此本契约不定义或冻结：
+
+```text
+filesystem path
+URL
+FileSystemHandle
+picker result
+command-line argument
+settings key
+opaque source locator
+```
+
+Desktop MAY 使用用户选择的 filesystem path；PWA MAY 使用 picker、persisted handle 或 app-owned source。上述 acquisition mechanics 都不是 `WebPresentationConfigV1` 字段或跨平台 ABI。
+
+配置 acquisition/material 不得进入：
 
 ```text
 GameEntryV1
@@ -285,7 +304,7 @@ runtime receiver/resource failure由 Web Presentation API v1 定义，不属于�
 
 ## 11. Core Invariants
 
-1. Web Presentation Config 是 product startup input，不进入 Game/Launcher/Main/Render authority；
+1. Web Presentation Config 是 product startup input，但 source acquisition是 platform/product-private mechanics，不属于 Config v1；
 2. V1 exact top-level shape = `formatVersion/scripts/styles`；
 3. scripts/styles 是 Window-level ordered lists，没有 `subsystems`；
 4. refs 复用 M12 logical `namespace + hierarchical key`；
