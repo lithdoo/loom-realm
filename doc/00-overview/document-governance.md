@@ -4,7 +4,7 @@
 > 状态：Active / Normative  
 > 稳定程度：Stable  
 > 主要定义：文档层级、主要定义依赖、设计稳定状态、真实 compatibility boundary、首次实现前 current-v1 收口与版本治理  
-> 最近复核：2026-08-20
+> 最近复核：2026-09-08
 
 LoomRealm仍处于首次实现阶段。治理目标同时满足：
 
@@ -91,11 +91,7 @@ Normative表示“当前 first implementation 应遵守”，**不自动等于�
 
 ## 4. Stability vs Compatibility Boundary
 
-这两个概念必须分离。
-
 ### Stability
-
-描述设计团队预期变化频率：
 
 ```text
 Frozen / Stable
@@ -113,16 +109,12 @@ Experimental
 
 ### Real compatibility boundary
 
-表示“改变会破坏真实消费者/互操作/持久数据”。只有它直接产生版本迁移义务。
-
-因此：
-
 ```text
 Frozen design
     != automatically shipped compatibility boundary
 ```
 
-但 Frozen仍比 Stabilizing更严格：不得无 ADR静默做 incompatible correction。
+Frozen仍比 Stabilizing更严格：不得无显式 governance/provenance 静默做 incompatible correction。
 
 ---
 
@@ -161,9 +153,7 @@ design correction
 → preserve provenance in ADR/Git
 ```
 
-这适用于 Normative + Stabilizing/Evolving 文档。
-
-对于 Frozen 文档，额外要求见下一节。
+这适用于 Normative + Stabilizing/Evolving 文档。Frozen preimplementation correction还必须满足下一节。
 
 ---
 
@@ -173,21 +163,19 @@ Frozen意味着：
 
 > **默认不再改变 semantic/wire compatibility；任何 incompatible correction必须被显式证明为“首次实现前纠错”，而不是普通编辑。**
 
-在**尚无真实 compatibility boundary**时，Frozen文档仍可进行一次明确的 incompatible correction，但必须同时满足：
+在尚无真实 compatibility boundary时，Frozen文档仍可进行一次明确 incompatible correction，但必须同时满足：
 
 ```text
-1. Accepted ADR明确说明为什么 current v1错误/不闭环
+1. Accepted ADR明确说明为什么 current model错误/不闭环
 2. ADR明确声明没有真实 compatibility obligation
 3. correction scope最小且列出什么没有改变
 4. current Contract直接更新，不保留 deprecated dual model
-5. Conformance fixtureSetRevision更新/旧 fixture不能冒充 current
+5. 已存在 formal conformance revision时同步更新 fixture revision/evidence
 6. 所有 dependent Current docs同步传播
 7. 导航/ADR明确历史决策已 superseded/updated
 ```
 
-ADR 0018对 Frame v1 PWA transport mapping的 correction就是该机制的当前实例。
-
-一旦 first conformant implementation baseline形成，Frozen incompatible change回到正常 version/migration规则，不能再次引用 ADR 0018或 ADR 0019作为通用豁免。
+若该 boundary尚无 formal conformance fixture revision，则第 5 条由其当前 qualification matrix/evidence承担，不为治理形式预造第二套 conformance protocol。
 
 ---
 
@@ -205,17 +193,7 @@ incorrect/incomplete first-implementation design
 → propagate through all Current docs/tests
 ```
 
-ADR 0019 就是该机制在 Game/Platform launch boundary 上的应用：
-
-```text
-Game Package Descriptor {key,module}
-→ Game Package Descriptor {key}
-+ platform-specific Launch Manifest
-+ exact key-set join
-+ zero-side-effect preflight LaunchPlan
-```
-
-这不会降低 Frozen Frame / Call v1 的治理等级。
+ADR 0019是 Game/Platform launch boundary 实例；ADR 0030是 M12 Content realization closure实例。
 
 ---
 
@@ -284,7 +262,18 @@ Game Package
 → cross-platform E2E/conformance
 ```
 
-不能只改一个协议文件留下其他 Current source继续旧模型。
+Content realization这类跨层变化必须同步：
+
+```text
+Content ADR/Contract
+→ storage/platform/subsystem architecture
+→ Desktop/PWA module placement
+→ package architecture
+→ M12/M13/M14/M16 delivery plan
+→ navigation/qualification
+```
+
+不能只改一个协议或 milestone 文件留下其他 Current source继续旧模型。
 
 ---
 
@@ -304,18 +293,26 @@ Product scope/governance
 
 `Superseded` ADR/Git history不能覆盖 Current Contract。
 
-如果高层与 Contract冲突，应修正主要定义链，而不是选择对自己方便的一份。
-
-对于 executable launch authority，current chain是：
+Executable launch current chain：
 
 ```text
 Product/Platform architecture
-→ Game Package + Hostra/PWA Launcher Profiles
+→ Game Package + Platform Launcher Profiles
 → ADR 0019 provenance
 → Modules/Implementation
 ```
 
-历史 ADR 0005/0007/0008/0018 中的旧 Game module shape不能覆盖 current Game Package v1。
+Content current chain：
+
+```text
+Product/Storage + Platform architecture
+→ Content API v1
+→ ADR 0030 current realization provenance
+→ M12_01–05
+→ Modules/Package Architecture/Delivery Plan
+```
+
+ADR 0003 的 logical Content原则继续有效，但被 ADR 0030明确更新的旧 registry/repository/index realization不能覆盖当前 M12 model。
 
 ---
 
@@ -331,13 +328,9 @@ what remains unchanged
 re-evaluation conditions
 ```
 
-重大 breaking preimplementation correction必须有 ADR。
+重大 breaking/preimplementation correction必须有 ADR。ADR不是另一个协议正文；Current Contract仍是实现依据。
 
-ADR不是另一个协议正文；Current Contract仍是实现依据。
-
-被取代 ADR应明确标记 `Superseded` 或“某部分由 ADR xxxx更新”。
-
-历史 ADR可以保留当时的完整推理，但必须在 current navigation/metadata 中清楚说明 supersession，不得伪装成 current implementable shape。
+被取代 ADR应明确标记 `Superseded` 或“某部分由 ADR xxxx更新”。历史 ADR可以保留当时完整推理，但必须在 current navigation/metadata 中清楚说明 supersession/update。
 
 ---
 
@@ -352,7 +345,6 @@ ADR 0018
     Renderer Data/Profile cleanup
     late Data provisioning
     Frame v1 PWA transport one-time correction
-    direct-current-v1 governance precedent
 
 ADR 0019
     Game Descriptor {key,module} → {key}
@@ -360,10 +352,19 @@ ADR 0019
     exact Game↔Platform key-set join
     full zero-side-effect PlatformLaunchPlan preflight
     Main logical launch(key) boundary
-    same ABI/semantics, artifact identity not required
+
+ADR 0030
+    M12 Content current prepared installation view
+    @loomrealm/fsdb readonly core extraction
+    no generic content/content-service/Repository package requirement
+    hierarchical ResourceKey
+    exact sha256 Content version
+    frozen Subsystem ContentClient + Renderer private ResourceClient
 ```
 
-ADR 0019 supersedes ADR 0018 only where 0018曾定义 Game `{key,module}` / Hostra-PWA same Definition artifact。Frame/Data/SDK/carrier/governance结论继续有效。
+ADR 0019 supersedes ADR 0018 only where 0018曾定义 Game `{key,module}` / Hostra-PWA same Definition artifact。
+
+ADR 0030 updates ADR 0003 only in first-implementation realization；ADR 0003 的 logical readonly API、Desktop HTTP/PWA Fetch、path hiding、Content≠execution原则继续有效。
 
 规则仍是：
 
@@ -374,8 +375,6 @@ no dual parser
 one current first implementation model
 ```
 
-这不是未来破坏 compatibility 的永久许可证。
-
 ---
 
 ## 14. Superseded Cleanup
@@ -383,11 +382,11 @@ one current first implementation model
 新模型接管后：
 
 1. Current入口/交叉引用全部更新；
-2. 旧完整协议正文不作为可实现入口长期并列；
+2. 旧完整协议/模块正文不作为可实现入口长期并列；
 3. ADR保留真实设计演进；
-4. Superseded状态或 partial supersession必须显式；
+4. Superseded/partial update必须显式；
 5. Git history保留旧全文；
-6. 导航不能把已取代协议伪装成 current contract；
+6. 导航不能把已取代协议/模块伪装成 current implementation；
 7. tests/fixtures不得让 legacy parser/alias冒充 current behavior。
 
 ---
@@ -412,24 +411,12 @@ product/governance
 → platform composition
 → runtime hosting
 → stack / communication
-→ rendering
+→ rendering / storage-content
 → subsystem model
-→ runtime bootstrap synthesis
 → contracts
 → modules
 → implementation
 ```
-
-Platform launch boundary在该 DAG 中按：
-
-```text
-product/system/platform
-→ Game Package + Platform Launcher Profiles
-→ RuntimeHosting/Runner module design
-→ package/repository/tests
-```
-
-向下传播。
 
 ---
 
@@ -438,10 +425,11 @@ product/system/platform
 1. Current first implementation只有一个模型；
 2. 无真实 compatibility boundary时不制造虚假版本；
 3. Frozen是设计关闭承诺，但真实 compatibility boundary才直接产生版本升级义务；
-4. Frozen incompatible preimplementation correction必须走显式 ADR + conformance revision + 全树传播；
+4. Frozen incompatible preimplementation correction必须走显式 ADR + 可用的 qualification/conformance evidence + 全树传播；
 5. Stabilizing/Evolving 的 major direct-v1 reset也必须保留 ADR/provenance并全树传播；
 6. 有真实 compatibility obligation后 incompatible change必须 version/migrate；
 7. 主要定义 dependency必须 DAG；
-8. Superseded history不能覆盖 Current Contract；
+8. Superseded/history不能覆盖 Current Contract；
 9. 下层实现不得反向重写上层 authority；
-10. current Game/Platform launch模型不保留 `{key,module}` Game alias、universal launcher schema或 fake v2。
+10. current Game/Platform launch模型不保留 `{key,module}` Game alias、universal launcher schema或 fake v2；
+11. current M12 Content模型不保留 generic Repository/InstallationRegistry/content-service package作为无 consumer 的 mandatory abstraction。
