@@ -3,7 +3,7 @@
 > 状态：Accepted / Current Design  
 > 日期：2026-09-08  
 > 层级：架构决策记录  
-> 决策范围：M13 Web Presentation bootstrap、thin Web projection、local WC ABI、runtime resource capability  
+> 决策范围：M13 Web Presentation bootstrap、thin Web projection、local WC ABI、runtime resource capability、presentation currentness  
 > 正式化：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 
 ---
@@ -61,10 +61,12 @@ DOM 永远不是 Render authority source；Renderer 不从 DOM 反向同步 Stor
 
 ## 3. Window Bootstrap
 
-M13 使用独立、用户选择的 Window-level `WebPresentationConfigV1`：
+M13 使用独立的 Window-level `WebPresentationConfigV1`：
 
 ```text
-user-selected config
+product/platform-private config acquisition
+→ parse candidate JSON
+→ WebPresentationConfigV1 validation
 → current prepared Content resolution
 → ordered <link rel="stylesheet">
 → ordered classic <script>
@@ -80,6 +82,8 @@ formatVersion
 scripts[]
 styles[]
 ```
+
+配置 source 如何取得不是 Config v1 contract。Desktop 可以使用用户选择的 filesystem path；PWA 可以使用 picker/persisted handle/app-owned source；这些 acquisition mechanics 不进入 `WebPresentationConfigV1` 或跨平台 ABI。
 
 资源使用 M12 logical `namespace + hierarchical key`，不按 Subsystem 切分，也不进入 Game Entry、Platform Launch Manifest、LogicalGameBootstrap 或 RenderNode。
 
@@ -269,6 +273,7 @@ Render wire
 → Renderer Store validate
 → atomic successful commit
 → package-private post-commit notification/effect
+→ presentation eligibility/currentness gate
 → Projector
 ```
 
@@ -280,7 +285,35 @@ M13 不定义 RenderEvent → WC/DOM ABI；不新增 `receiveRenderEvent`、`onR
 
 ---
 
-## 10. Qualification
+## 10. Presentation Currentness
+
+M11 已冻结 same-generation Data carrier replacement不创建新的 wire identity universe。M13 因此冻结对应的 browser-observable behavior：
+
+```text
+same-generation carrier loss
+→ keep last committed managed DOM mounted
+→ freeze Projector mutation
+→ no receiver callback caused by loss itself
+→ no LoomRealm-caused detach/reinsert of preserved elements
+```
+
+replacement carrier必须先重新建立 complete presentation baseline：
+
+```text
+fresh Registry committed
+AND
+every Domain in current Registry has a fresh baseline
+```
+
+partial Domain rebaseline不得泄漏到 DOM；只有 complete baseline后才进行一次 mechanical reconciliation。匹配相同 live wire-node identity 的节点复用 existing HTMLElement。
+
+fresh generation结束旧 wire-node identity universe，因此 old generation managed elements被 retire/remove；新 generation 中相同 textual key仍得到 fresh HTMLElement，并重新执行 one-shot context injection。
+
+该规则只冻结 projection eligibility/lifecycle，不增加 public PresentationState、stale callback、DOM stale attribute或第二份 Store。
+
+---
+
+## 11. Qualification
 
 M13 必须使用真实 headless Chromium，至少证明：
 
@@ -291,7 +324,10 @@ business customElements registration
 Store successful commit → Projector only
 same live wire-node identity → same HTMLElement
 same key string across Domains/Subsystems does not collide
-fresh generation does not inherit old node identity
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation does not inherit old HTMLElement identity
 subsystemKey → M11 domain order → roots deterministic body sequence
 reorder moves existing HTMLElement
 receiveRenderContext before first managed insertion; at most once
@@ -309,7 +345,20 @@ M13不复制 M11 protocol conformance，也不重测 M12 Content internals；只
 
 ---
 
-## 11. Milestone Route
+## 12. Milestone Route / Renumbering Provenance
+
+ADR 0031 在 `loom.map` 前插入一个独立 Web Presentation milestone。
+
+历史路线：
+
+```text
+M13 loom.map
+M14 Desktop full E2E
+M15 PWA Runtime
+M16 PWA full E2E/equivalence
+```
+
+Current route：
 
 ```text
 M11 Render Replication                 ✅
@@ -321,19 +370,22 @@ M16 PWA Runtime                        pending
 M17 PWA full E2E/equivalence           pending
 ```
 
+Current navigation/plans/modules MUST 使用新编号。已经关闭的历史 milestone/qualification 文档 MAY 保留创建时编号作为 provenance，但如果其中的旧编号仍被作为 current forward reference 使用，必须标注 historical numbering 或更新到 current number。
+
 M13关闭 presentation infrastructure；M14 `loom.map` 成为首个真实 business + map-owned WC consumer。
 
 ---
 
-## 12. Consequences / Explicit Non-goals
+## 13. Consequences / Explicit Non-goals
 
 保留：
 
 - M11 Render protocol/authority不重开；
 - M12 resource/version/credential boundary不复制；
 - concrete Web Components、layout、Canvas/WebGL语义由业务拥有；
-- Config和runtime API分离；
-- Projector只有 mechanical projection authority。
+- Config acquisition、Config value、runtime API分离；
+- Projector只有 mechanical projection authority；
+- same-generation reconnect保持同一 live element universe，fresh generation才切换 element identity universe。
 
 M13明确不增加：
 
@@ -346,6 +398,7 @@ per-Domain wrappers / global layer manager
 public Render Store/subscription
 public RenderNodeIdentity framework
 global Window service locator
+public PresentationState/currentness API
 MutationObserver policing
 RenderEvent WC ABI
 ```
