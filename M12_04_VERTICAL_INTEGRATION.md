@@ -6,70 +6,111 @@
 > 最近复核：2026-09-08  
 > 前置：[M12 / 01](M12_01_CONTENT_SERVICE.md) → [M12 / 02](M12_02_SUBSYSTEM_CONTENT_CLIENT.md) → [M12 / 03](M12_03_RENDERER_RESOURCE_CLIENT.md)  
 > 正式契约：[Content API v1](doc/15-contracts/content-api-v1.md)  
-> 目标：用真实 Hostra/Desktop production path 证明 Content Service、Subsystem author capability 与 Renderer resource capability 已连成闭环；不使用 test-only direct reader 绕过 Content API。
+> 目标：用真实 Hostra/Desktop production path证明 Content Service、Subsystem author capability 与 Renderer resource capability闭环；不把 M14 presentation拉入 M12。
 
-> **M12 closure 必须证明两类真实 consumer：Subsystem 读取业务内容，Renderer 读取 Render 引用的资源。**
+> **M12 closure证明两个真实 consumer，但 Renderer vertical只证明 Content resource bytes capability；RenderNode→resource mapping留给 M14。**
 
 ---
 
 ## 1. Vertical A — Subsystem Content
 
 ```text
-temporary validated game installation
-→ Hostra prepare / launch plan
+temporary game installation
+→ real Hostra prepare
+→ immutable prepared Content view
 → Desktop Content Service
-→ Host-private Content grant
+→ Host-private scoped grant
 → real Node Runner
+→ construct bound ContentClient
+→ runSubsystem({content,...})
 → SubsystemScope.content
 → business Definition
-→ record/group/resource read
+→ record/resource read
 → business-observable result
 ```
 
-必须走真实 Content request/response path；test fixture 不得直接把文件内容注入 `ContentClient`。
+必须走真实 HTTP request/response path；fixture不得直接注入文件 bytes/value到 ContentClient。
 
 至少证明：
 
 ```text
 record success
-group success
 resource success
 contentVersion preserved
-not-found/version/invalid-content failures mapped
-AbortSignal cancels one request only
-Frame/Runtime remain healthy after ordinary handled Content failure
+returned value/bytes detached from cache ownership
+CONTENT_NOT_FOUND / CONFLICT / INVALID / UNAVAILABLE / CANCELLED mapping
+AbortSignal only cancels one read
+ordinary handled Content failure leaves Runtime/Frame healthy
 ```
+
+Formal Content API 的 manifest/group success在 service qualification覆盖；M12 author surface不为对称性暴露它们。
 
 ---
 
 ## 2. Vertical B — Renderer Resource
 
 ```text
-real RenderDomain state
-→ Render publication
-→ Renderer internal replica
-→ logical resource reference
-→ Renderer ResourceClient
+temporary prepared installation
 → Desktop Content Service
-→ bytes + MIME + contentVersion
+→ Renderer-scoped grant
+→ production Renderer ResourceClient
+→ resource(namespace,key,expectedVersion)
+→ real HTTP request
+→ bytes + MIME + actual contentVersion
 ```
 
 必须证明：
 
 ```text
-Render State carries no URL/path/token
-correct resource bytes reach Renderer role
-different contentVersion cannot reuse stale bytes
-Content failure does not mutate Render/Main authority
+matching version → correct bytes
+mismatched expected version → no success bytes
+same key + new version → old cache cannot satisfy
+returned bytes cannot mutate cache/future reads
+Content failure does not mutate Renderer Render Store/Main/Subsystem authority
 ```
 
-M12 不要求把 bytes decode/render 到 DOM/Canvas/WebGL。
+M12 vertical **不要求**：
+
+```text
+RenderDomain
+Render publication
+Render replica interpretation
+DOM/Canvas/WebGL
+```
+
+这些由 M14 把真实 presentation reference接到已 qualification 的 ResourceClient。
 
 ---
 
-## 3. Authorization Evidence
+## 3. Prepare / Installation Evidence
 
-Desktop vertical至少覆盖：
+必须通过真实 prepare证明：
+
+```text
+one prepare success
+→ one opaque installationId
+→ normalized public GameEntry manifest
+→ immutable Content Index
+```
+
+FSDB projection至少覆盖：
+
+```text
+struct.<TableName> / record
+extend.<TableName> / record
+group.<TableName> / group
+resource.<TableName> / resource
+```
+
+并证明同名 struct/extend不会 collision或依赖 lookup priority。
+
+Prepare/content index failure发生在 first business Runtime side effect前。
+
+---
+
+## 4. Authorization / Injection Evidence
+
+Desktop至少覆盖：
 
 ```text
 missing bearer          → 401
@@ -78,7 +119,54 @@ valid wrong scope       → 403
 valid current grant     → success
 ```
 
-并证明 error/log/business/Render observable data不泄露：
+Hostra injection必须证明：
+
+```text
+Desktop owns service/grant policy
+Hostra owner injects exact child-private access material
+Runner constructs ContentClient before runSubsystem
+Content material absent from SubsystemLaunchContext / Frame params
+Content grant != Runtime bootstrapToken
+Content grant != Data ticket
+Content grant is not sent through M9 Data provisioning IPC
+```
+
+如果 required Content capability在 `definition.initialize` 前无法构造，Runtime bootstrap失败；之后 ordinary read failure不 terminalize Runtime。
+
+---
+
+## 5. HTTP / Version Evidence
+
+至少覆盖：
+
+```text
+manifest / record / group / resource service success
+GET / HEAD
+ETag / If-None-Match → 304
+X-Loom-Content-Version consistent with ETag
+HEAD metadata matches GET where determinable
+same logical content bytes → stable contentVersion within the prepared identity model
+changed bytes → different contentVersion
+process-local fsdb snapshotId/fingerprint is not exposed as Content version authority
+```
+
+M12 不 qualification optional Range，除非实现选择支持。
+
+---
+
+## 6. Failure / Confidentiality Evidence
+
+至少覆盖：
+
+```text
+404 not found
+409 installation/version/index conflict
+422 schema/integrity failure
+413 / 429 bounded deployment failure
+405 non-GET/HEAD
+```
+
+error/log/business/Renderer observable data不得泄露：
 
 ```text
 token
@@ -88,78 +176,65 @@ internal stack
 unauthorized index data
 ```
 
-Grant delivery 属于 Host-private composition；不得新增 credential protocol。
-
 ---
 
-## 4. Cache / Version Evidence
-
-至少覆盖：
-
-```text
-ETag / If-None-Match → 304
-HEAD metadata matches GET where determinable
-contentVersion returned consistently
-same logical key + new version → fresh bytes
-old cached bytes never satisfy new version
-```
-
-M12 不 qualification optional Range。
-
----
-
-## 5. Lifecycle Evidence
+## 7. Lifecycle Evidence
 
 显式证明：
 
 ```text
-Frame suspend/return does not destroy Content capability
-Data carrier reconnect does not destroy Content capability
-RenderDomain close does not own resource cache lifetime
-ordinary Content request failure does not terminalize Runtime
-Session/Renderer terminal settles owned outstanding requests
+Frame suspend/return != ContentClient lifetime
+Activation change     != ContentClient replacement
+Data reconnect         != ContentClient/ResourceClient invalidation
+RenderDomain close     != resource cache lifetime
+ordinary read failure != Runtime/Frame/Data/Render authority failure
+Runtime/Renderer terminal settles owned outstanding reads
 ```
 
 不得为这些关系增加 cross-system lifecycle coordinator。
 
 ---
 
-## 6. Production Path Rule
+## 8. Production Path Rule
 
-Vertical 可以使用 temporary installation 和 deterministic fixtures，但以下必须是生产实现：
+Temporary installation和deterministic fixture可以由 tests拥有，但以下必须是 production implementation：
 
 ```text
-installation/content lookup
+prepare → Content view/index
+FSDB logical projection
 Desktop Content Service
-HTTP request path
+HTTP path
 bearer authorization
+Hostra Content injection
 Subsystem ContentClient
 Renderer ResourceClient
-Render publication/replica path used by Renderer vertical
 ```
 
 禁止：
 
 ```text
-test-only file reader as ContentClient
+test-only file reader
+HTTP-over-HTTP fsdb proxy
+manual private-path injection
 test-only ResourceClient returning fixture bytes
-private filesystem path passed through business/Render payload
-manual authority mutation
+manual Main/Render authority mutation
 ```
 
 ---
 
-## 7. Done
+## 9. Done
 
 M12/04 complete when：
 
 ```text
-Subsystem real consumer vertical passes
-Renderer real resource vertical passes
-Content API authorization/cache/version/error semantics are observable end to end
-ordinary Content failure remains isolated from Runtime/Frame/Data/Render authority
-physical path/token never crosses application boundary
-no presentation work is pulled forward from M14
+Subsystem real Hostra consumer vertical passes
+Renderer production ResourceClient vertical passes
+prepare/index/namespace identity is unambiguous
+Hostra credential injection boundary is proven
+Content API auth/cache/version/error semantics pass end-to-end
+caller mutation cannot poison Content caches
+ordinary Content failure remains isolated
+M14 presentation work remains deferred
 ```
 
-M13 can then consume the frozen Subsystem Content surface without adding a second content path。
+M13 可以直接消费 frozen `scope.content`；M14 可以直接消费已 qualification 的 Renderer bytes capability。
