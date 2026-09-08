@@ -6,9 +6,9 @@
 > 最近复核：2026-09-08  
 > 前置：[M12 / 01](M12_01_CONTENT_SERVICE.md) → [M12 / 02](M12_02_SUBSYSTEM_CONTENT_CLIENT.md) → [M12 / 03](M12_03_RENDERER_RESOURCE_CLIENT.md)  
 > 正式契约：[Content API v1](doc/15-contracts/content-api-v1.md)  
-> 目标：用真实 Hostra/Desktop production path证明 Content Service、Subsystem author capability 与 Renderer resource capability闭环；不把 M14 presentation拉入 M12。
+> 目标：用真实 Hostra/Desktop production path证明 Content core、Desktop Service、Subsystem author capability 与 Renderer resource capability闭环；不把 M14 presentation拉入 M12。
 
-> **M12 closure证明两个真实 consumer，但 Renderer vertical只证明 Content resource bytes capability；RenderNode→resource mapping留给 M14。**
+> **M12 closure证明两个真实 consumer；Renderer vertical只证明 Content resource bytes capability，RenderNode→resource mapping留给 M14。**
 
 ---
 
@@ -18,6 +18,7 @@
 temporary game installation
 → real Hostra prepare
 → immutable prepared Content view
+→ @loomrealm/fsdb snapshot/index
 → Desktop Content Service
 → Host-private scoped grant
 → real Node Runner
@@ -35,8 +36,9 @@ temporary game installation
 
 ```text
 record success
-resource success
-contentVersion preserved
+resource single-segment success
+resource hierarchical key success
+contentVersion exact sha256:<64 lowercase hex>
 returned value/bytes detached from cache ownership
 CONTENT_NOT_FOUND / CONFLICT / INVALID / UNAVAILABLE / CANCELLED mapping
 AbortSignal only cancels one read
@@ -64,6 +66,7 @@ temporary prepared installation
 ```text
 matching version → correct bytes
 mismatched expected version → no success bytes
+hierarchical ResourceKey round-trips
 same key + new version → old cache cannot satisfy
 returned bytes cannot mutate cache/future reads
 Content failure does not mutate Renderer Render Store/Main/Subsystem authority
@@ -82,14 +85,39 @@ DOM/Canvas/WebGL
 
 ---
 
-## 3. Prepare / Installation Evidence
+## 3. FSDB Core Extraction Evidence
+
+必须证明：
+
+```text
+@loomrealm/fsdb owns scan/index/safe-open/read-lease mechanics
+@loomrealm/fsdb-http depends on @loomrealm/fsdb
+Desktop Content Service depends on @loomrealm/fsdb
+```
+
+并证明：
+
+```text
+fsdb-http existing root public API unchanged
+fsdb-http existing conformance green
+no HTTP-over-HTTP proxy
+no duplicate scanner/safe-open implementation
+no cross-workspace relative import
+no import of fsdb-http private internals
+```
+
+`listFsdbEntries()` deterministic ordering、descriptor immutability、`openFsdbEntry()` absent/abort/read semantics与 lease idempotent close均需直接 qualification。
+
+---
+
+## 4. Prepare / Installation Evidence
 
 必须通过真实 prepare证明：
 
 ```text
 one prepare success
 → one opaque installationId
-→ normalized public GameEntry manifest
+→ normalized public GameEntry manifest bytes
 → immutable Content Index
 ```
 
@@ -102,13 +130,20 @@ group.<TableName> / group
 resource.<TableName> / resource
 ```
 
-并证明同名 struct/extend不会 collision或依赖 lookup priority。
+并证明：
+
+```text
+same-name struct/extend do not collide
+record/group key stay single segment
+resource key may contain multiple logical segments
+resource route segment decoding never becomes direct filesystem resolution
+```
 
 Prepare/content index failure发生在 first business Runtime side effect前。
 
 ---
 
-## 4. Authorization / Injection Evidence
+## 5. Authorization / Injection Evidence
 
 Desktop至少覆盖：
 
@@ -135,7 +170,7 @@ Content grant is not sent through M9 Data provisioning IPC
 
 ---
 
-## 5. HTTP / Version Evidence
+## 6. HTTP / Version Evidence
 
 至少覆盖：
 
@@ -143,18 +178,47 @@ Content grant is not sent through M9 Data provisioning IPC
 manifest / record / group / resource service success
 GET / HEAD
 ETag / If-None-Match → 304
-X-Loom-Content-Version consistent with ETag
-HEAD metadata matches GET where determinable
-same logical content bytes → stable contentVersion within the prepared identity model
-changed bytes → different contentVersion
-process-local fsdb snapshotId/fingerprint is not exposed as Content version authority
+X-Loom-Content-Version = sha256:<64 lowercase hex>
+ETag = quoted exact same contentVersion
+HEAD metadata matches corresponding full-body GET
+same full-body bytes → same contentVersion
+changed full-body bytes → different contentVersion
 ```
+
+Manifest额外证明：
+
+```text
+public GameEntryV1-only projection
+recursive sorted-key deterministic JSON serialization
+UTF-8 without BOM / no insignificant whitespace
+same normalized manifest → stable bytes/version
+```
+
+FSDB-backed record/group/resource证明 `FsdbEntryDescriptor.sha256`对应 exact served bytes；process-local snapshotId/fingerprint不进入 Content version authority。
 
 M12 不 qualification optional Range，除非实现选择支持。
 
 ---
 
-## 6. Failure / Confidentiality Evidence
+## 7. Author API Observable Evidence
+
+必须证明 exact M12 author behavior：
+
+```text
+ContentReadError(code) sets name/code exactly
+caller must not depend on message
+invalid namespace/record-key/options → synchronous TypeError
+invalid hierarchical resource key → synchronous TypeError
+invalid local argument → zero HTTP request
+already-aborted valid signal → CONTENT_CANCELLED + zero HTTP request
+legal remote 400 → CONTENT_UNAVAILABLE
+```
+
+并证明 returned JSON/Uint8Array mutation不能改变 cache或 future reads。
+
+---
+
+## 8. Failure / Confidentiality Evidence
 
 至少覆盖：
 
@@ -178,7 +242,7 @@ unauthorized index data
 
 ---
 
-## 7. Lifecycle Evidence
+## 9. Lifecycle Evidence
 
 显式证明：
 
@@ -195,11 +259,12 @@ Runtime/Renderer terminal settles owned outstanding reads
 
 ---
 
-## 8. Production Path Rule
+## 10. Production Path Rule
 
 Temporary installation和deterministic fixture可以由 tests拥有，但以下必须是 production implementation：
 
 ```text
+@loomrealm/fsdb core
 prepare → Content view/index
 FSDB logical projection
 Desktop Content Service
@@ -222,14 +287,17 @@ manual Main/Render authority mutation
 
 ---
 
-## 9. Done
+## 11. Done
 
 M12/04 complete when：
 
 ```text
+FSDB core extraction preserves fsdb-http regression
 Subsystem real Hostra consumer vertical passes
 Renderer production ResourceClient vertical passes
-prepare/index/namespace identity is unambiguous
+prepare/index/namespace/resource identity is unambiguous
+exact contentVersion representation is proven end-to-end
+local author misuse behavior is proven
 Hostra credential injection boundary is proven
 Content API auth/cache/version/error semantics pass end-to-end
 caller mutation cannot poison Content caches
