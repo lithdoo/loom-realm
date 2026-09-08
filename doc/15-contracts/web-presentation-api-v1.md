@@ -3,7 +3,8 @@
 > 状态：Active / Normative / Stabilizing  
 > Milestone：M13 Web Presentation Projection  
 > 层级：Renderer Window-local business presentation ABI  
-> 依赖：[Render Update v1](./render-update-v1.md)、[Content API v1](./content-api-v1.md)、[Web Presentation Config v1](./web-presentation-config-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
+> 依赖：[Render Update v1](./render-update-v1.md)、[Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)  
+> 相关：[Web Presentation Config v1](./web-presentation-config-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
@@ -299,7 +300,54 @@ object identity → no semantic meaning
 
 ---
 
-## 10. Failure Boundary
+## 10. Data Currentness / Reconnect Semantics
+
+Data carrier lifetime 不等于 live wire-node / HTMLElement lifetime。
+
+same-generation current carrier loss时：
+
+```text
+keep last committed managed DOM mounted
+freeze Projector mutation
+no receiveRenderContext call
+no receiveRenderData call
+no LoomRealm-caused disconnect/reconnect of preserved elements
+```
+
+因此 carrier loss本身 MUST NOT 通过 remove/reinsert 触发 preserved business element 的 `disconnectedCallback` / `connectedCallback`。
+
+replacement carrier开始后，Projector MUST 等待一个 complete presentation baseline：
+
+```text
+fresh Registry committed
+AND
+every Domain in current Registry has a fresh baseline
+```
+
+在 complete baseline 前到达的 individual Domain Snapshot/Patch MAY 更新 Renderer Store，但 MUST NOT 产生 partial DOM reconciliation，也 MUST NOT 向 WC交付混合新旧 `receiveRenderData(...)`。
+
+complete baseline建立后，Projector对 current Store做一次 mechanical reconciliation：
+
+```text
+matching same live wire-node identity
+→ preserve existing HTMLElement
+
+removed identity
+→ remove old managed HTMLElement
+
+new identity
+→ construct fresh HTMLElement
+```
+
+如果 fresh Registry 为空，complete baseline在 Registry commit 后成立，并 reconcile 到空 managed presentation。
+
+fresh generation结束旧 wire-node identity universe；旧 generation 的 managed elements MUST 被 retire/remove。新 generation 即使复用相同 `domainId/key` 文本，也 MUST 创建 fresh HTMLElement，并按 §4 重新执行 context injection。
+
+本契约不增加 business-visible stale/current callback、DOM attribute、event或 PresentationState API。
+
+---
+
+## 11. Failure Boundary
 
 如果 `receiveRenderContext` 或 `receiveRenderData` throws：
 
@@ -315,7 +363,7 @@ Resource Promise rejection遵循同一 authority boundary，由业务选择 plac
 
 ---
 
-## 11. No Global Capability Channel
+## 12. No Global Capability Channel
 
 M13 V1 不把 PresentationResourceClient 公开为：
 
@@ -331,7 +379,7 @@ Capability 只通过 `receiveRenderContext(...)` 从 trusted Projector注入目�
 
 ---
 
-## 12. Relation to Config / Render Identity
+## 13. Relation to Config / Render Identity
 
 两份 Web presentation contract职责分离：
 
@@ -357,7 +405,7 @@ same live wire-node identity MUST 保持同一 HTMLElement；fresh generation / 
 
 ---
 
-## 13. Qualification
+## 14. Qualification
 
 M13真实 Chromium qualification至少证明：
 
@@ -367,7 +415,10 @@ context before first managed insertion / connectedCallback
 same HTMLElement receives context at most once
 same live wire-node identity preserves HTMLElement across move/reorder
 same key string in different Domains/Subsystems does not collide
-fresh generation may reuse key string without reusing old wire-node identity
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM or deliver mixed data
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation may reuse key string without reusing old HTMLElement identity
 PresentationResourceClient reads real M12 bytes
 expectedContentVersion mismatch rejects as CONTENT_CONFLICT
 returned bytes mutation cannot alter future reads
@@ -376,19 +427,21 @@ resource cancellation → CONTENT_CANCELLED
 receiver/resource failure never rolls back authority
 ```
 
-Node/unit tests可覆盖 façade validation/error mapping；browser lifecycle/injection/HTMLElement identity必须由真实 Chromium gate覆盖。
+Node/unit tests可覆盖 façade validation/error mapping；browser lifecycle/injection/HTMLElement identity/currentness必须由真实 Chromium gate覆盖。
 
 ---
 
-## 14. Final Invariants
+## 15. Final Invariants
 
 1. `receiveRenderContext` 与 `receiveRenderData` 属于同一个 Web Presentation API v1，但保持独立 optional receiver；
 2. Context 是 Window-lifetime capability/environment，不是 Render state；
 3. Data 是 current retained Render state，不携 capability；
 4. 新 HTMLElement在第一次 managed DOM insertion前完成 context injection；同一 HTMLElement最多一次；
-5. Presentation resource capability只读且 version-checked；
-6. business永远看不到 Content bearer/path/physical URL/FSDB/private Renderer client；
-7. resource/callback failure不回滚 application authority；
-8. RenderNode.data resource-reference schema仍由业务拥有；
-9. bare RenderNode `key` 不是 Window-global identity；HTMLElement identity跟随完整 live wire-node scope；
-10. M13不因此建立 AssetManager、dynamic loader、global service locator、public identity framework或第二份 Render authority。
+5. same-generation carrier loss保持最后 committed DOM mounted并冻结 receiver/projection；partial rebaseline不泄漏，complete baseline后才 reconcile；
+6. fresh generation创建 fresh HTMLElement identity universe；
+7. Presentation resource capability只读且 version-checked；
+8. business永远看不到 Content bearer/path/physical URL/FSDB/private Renderer client；
+9. resource/callback failure不回滚 application authority；
+10. RenderNode.data resource-reference schema仍由业务拥有；
+11. bare RenderNode `key` 不是 Window-global identity；HTMLElement identity跟随完整 live wire-node scope；
+12. M13不因此建立 AssetManager、dynamic loader、global service locator、public identity framework或第二份 Render authority。
