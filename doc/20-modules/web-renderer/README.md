@@ -25,12 +25,16 @@ Renderer不是 Frame/Call participant。它镜像 Main committed authority，并
     ├── M12 trusted/private ResourceClient
     └── M13 package-private post-commit seam
             ↓
+        presentation eligibility/currentness gate
+            ↓
         thin Web Projector
             ↓
         document.body / business-owned Custom Elements
 
 Renderer Window bootstrap
-└── user-selected WebPresentationConfigV1
+└── product-private Config acquisition
+    ↓
+    WebPresentationConfigV1
     ├── ordered <link rel="stylesheet">
     ├── ordered classic <script>
     ├── business customElements registration
@@ -58,7 +62,7 @@ current Control peer
 + dataProfile
 ```
 
-Store保持 current Registry、per-Domain baseline/revision、committed tree与 required one-shot identity history。M11仍没有 public Render Store/subscription/presentation API。
+Store保持 current Registry、per-Domain baseline/revision、committed tree与 required one-shot identity history。same-generation carrier replacement重新建立 carrier-local baseline但不创建 fresh wire identity universe。M11仍没有 public Render Store/subscription/presentation API。
 
 ### M12 ResourceClient
 
@@ -79,6 +83,7 @@ M13不把它本体、origin、token、path或 physical URL交给 business WC。
 render.* wire
 → M11 Store validate + atomic commit
 → package-private post-commit notification/effect
+→ presentation eligibility/currentness gate
 → Web Projector
 ```
 
@@ -87,6 +92,7 @@ render.* wire
 ```text
 successful commit only
 failed Store mutation → no projection notification
+partial same-generation rebaseline → no DOM reconciliation
 business cannot subscribe
 Projector cannot write Store authority
 ```
@@ -95,7 +101,7 @@ Projector实现放在 Renderer trusted/package-private ownership 内；M13不为
 
 ---
 
-## 4. Element Identity
+## 4. Element Identity / Currentness
 
 `RenderNode.key` 不是 Window-global identity。Projector必须使用完整 current wire-node scope：
 
@@ -120,7 +126,30 @@ same live wire-node identity
 → same HTMLElement
 ```
 
-move/reparent/root reorder只移动 existing instance。fresh generation、different subsystem或different domain即使 key相同也建立不同 identity。
+move/reparent/root reorder只移动 existing instance。different subsystem/domain 或 fresh generation即使 key相同也建立不同 identity。
+
+same-generation carrier loss冻结 presentation：
+
+```text
+keep last committed managed DOM mounted
+freeze Projector mutation
+no receiver callback caused by loss
+no LoomRealm-caused detach/reinsert
+```
+
+replacement carrier只有在以下 predicate满足后才重新启用 reconciliation：
+
+```text
+registrySeen
+AND
+every Domain in current Registry is baselined
+```
+
+fresh Registry 后的 partial Domain baseline只更新 Store，不更新 DOM。complete baseline 后一次 reconcile，匹配相同 live wire-node identity 的节点复用 existing HTMLElement。
+
+fresh generation结束旧 identity universe：旧 managed elements被 retire/remove；新 generation 的相同 textual key得到 fresh HTMLElement。
+
+这些都是 package-private implementation state，不新增 public `RenderNodeIdentity`、`PresentationState` 或 reconnect coordinator API。
 
 ---
 
@@ -175,11 +204,13 @@ Renderer不从 DOM反向同步 Store，也不使用 MutationObserver policing业
 
 ```text
 Web Presentation Config v1
-→ startup JS/CSS / prepared Content / ordered browser bootstrap
+→ parsed Config value / startup JS/CSS / prepared Content / ordered browser bootstrap
 
 Web Presentation API v1
-→ receiveRenderContext / receiveRenderData / PresentationResourceClient
+→ receiveRenderContext / receiveRenderData / PresentationResourceClient / reconnect-observable behavior
 ```
+
+Config source/path/handle acquisition属于 concrete product/platform，不属于 Renderer public API或 Config v1。
 
 实现必须保持：
 
@@ -187,6 +218,8 @@ Web Presentation API v1
 context before first managed insertion
 same HTMLElement context at most once
 existing element commit: structure/reorder → attrs → data
+same-generation carrier loss: no detach/reinsert or receiver
+complete rebaseline before reconnect reconciliation
 ```
 
 Business WC runtime resource只能使用 API façade；不能取得 M12 private client/credential/path。
@@ -221,7 +254,10 @@ Custom Element registration
 Store commit → Projector only after success
 same wire-node identity → same HTMLElement
 same key across Domains/Subsystems does not collide
-fresh generation gets fresh identity
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation gets fresh HTMLElement identity
 subsystemKey → M11 Domain order → roots deterministic sequence
 reorder moves existing elements
 context before first insertion; at most once
@@ -250,17 +286,18 @@ M16 PWA Runtime             pending
 M17 PWA full E2E            pending
 ```
 
-Hostra/PWA共享 Config/API/identity/body-order logical semantics；physical storage、transport和 trusted `href/src` binding可以不同。Node-only `@loomrealm/fsdb` 不成为 PWA abstraction。
+Hostra/PWA共享 Config/API/identity/currentness/body-order logical semantics；Config acquisition、physical storage、transport和 trusted `href/src` binding可以不同。Node-only `@loomrealm/fsdb` 不成为 PWA abstraction。
 
 ---
 
 ## 11. Final Invariants
 
 1. Renderer不拥有 business/Frame/Render authority；
-2. M11 Store internal-only；M13只消费 successful commit seam；
+2. M11 Store internal-only；M13只消费 successful且 presentation-eligible 的 commit seam；
 3. bare key不是 Window-global identity；same live wire-node identity保持 same HTMLElement；
-4. managed body order = subsystemKey lexical → M11 per-subsystem Domain order → roots；
-5. Projector不创建第二份 desired-tree authority或 generic layer system；
-6. business WC对 LoomRealm-managed projection只读；DOM不反向同步 Store；
-7. Config/API formal contracts拥有精确 browser/receiver/resource semantics；
-8. M13不增加 public presentation package、AssetManager、dynamic loader、RenderEvent WC bridge或 global service locator。
+4. same-generation carrier loss保留最后 committed DOM且冻结 projection，complete rebaseline后才 reconcile；fresh generation建立 fresh HTMLElement universe；
+5. managed body order = subsystemKey lexical → M11 per-subsystem Domain order → roots；
+6. Projector不创建第二份 desired-tree authority或 generic layer system；
+7. business WC对 LoomRealm-managed projection只读；DOM不反向同步 Store；
+8. Config/API formal contracts拥有精确 browser/receiver/resource/currentness semantics；
+9. M13不增加 public presentation package、AssetManager、dynamic loader、RenderEvent WC bridge或 global service locator。
