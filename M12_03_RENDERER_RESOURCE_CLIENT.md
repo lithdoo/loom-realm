@@ -7,55 +7,44 @@
 > 前置：[M12 / 01](M12_01_CONTENT_SERVICE.md)  
 > 正式契约：[Content API v1](doc/15-contracts/content-api-v1.md)  
 > 架构：[渲染系统](doc/10-architecture/rendering-system.md)、[存储与内容系统](doc/10-architecture/storage-system.md)  
-> 目标：让 Renderer 根据 Render State 中的 logical resource reference 读取当前 installation 的资源；不提前实现 presentation 或 asset framework。
+> 目标：给 Renderer 一个 version-checked readonly resource bytes capability；不在 M12 决定 RenderNode presentation/resource-reference schema。
 
-> **M12/03 只把 logical resource reference 解析为 version-safe readonly bytes；DOM、ImageBitmap、Audio、Canvas、WebGL 属于后续 presentation。**
+> **M12/03 冻结的是 Content resource identity → bytes boundary。Render replica 如何被某个 presentation tag解释成该 identity，属于 M14。**
 
 ---
 
-## 1. Position
+## 1. Frozen Position
 
 ```text
-Subsystem Render authority
-→ Render Update
-→ Renderer internal replica
-→ logical resource reference
-→ Renderer ResourceClient
+Renderer-side logical Content resource identity
+    namespace + key + expectedContentVersion
+→ bound Renderer ResourceClient
 → Desktop Content API
-→ bytes + MIME + contentVersion
+→ bytes + MIME + actualContentVersion
 ```
 
-Renderer 不获得 filesystem path、Content bearer 或 executable capability。
-
----
-
-## 2. Resource Reference Boundary
-
-Render/business data 只携 logical reference：
+M12 不冻结：
 
 ```text
-resourceKey
-contentVersion
+RenderNode.data → resource identity mapping
+known tag/component schema
+DOM/Canvas/WebGL consumption
 ```
 
-若当前 Render schema 需要 namespace，则 namespace 作为 logical identity 的一部分处理；不得用 absolute URL 或 physical path 代替。
-
-ResourceClient 由 Platform composition 绑定当前 installation 与授权上下文。
+因此不再要求 M12 ResourceClient自行解析 Render Store。
 
 ---
 
-## 3. Minimal Renderer Surface
+## 2. Minimal Private Responsibility
 
-M12 不要求新增 public Renderer subscription/store API。
-
-Renderer 内部只需要一个最小读取能力，例如：
+Renderer production code只需要一个内部 responsibility，语义等价于：
 
 ```ts
 interface RendererResourceClient {
   resource(
     namespace: string,
     key: string,
-    contentVersion: string,
+    expectedContentVersion: string,
     signal?: AbortSignal,
   ): Promise<{
     readonly bytes: Uint8Array;
@@ -65,80 +54,116 @@ interface RendererResourceClient {
 }
 ```
 
-精确命名可私有调整；语义必须保持只读、version-bound。
+这是 Renderer implementation seam，不要求 root-export新的 AssetManager/Store/observer surface。精确 private class/function 名可调整。
+
+Platform composition绑定 current prepared installation 与 authorization material；调用方只给 logical namespace/key/version。
 
 ---
 
-## 4. Cache Semantics
+## 3. Version Check
 
-缓存 identity 至少包含：
+`expectedContentVersion` 不创建新的 HTTP request-version protocol。
+
+固定行为：
 
 ```text
-installation
-namespace
-key
-contentVersion
+GET current logical resource
+→ validate response Content metadata
+→ actual X-Loom-Content-Version
+→ actual == expected → accept bytes
+→ actual != expected → reject as content conflict
 ```
 
-必须保证：
+客户端不得通过私有 header/query发明第二套 version selector。
+
+Cache identity：
 
 ```text
-same key + different contentVersion
-→ never share stale bytes
+prepared installation identity
++ namespace
++ key
++ contentVersion
 ```
 
-允许：
+因此不同 version 永远不能共享错误 bytes。
+
+---
+
+## 4. Value / Cache Ownership
+
+允许 private immutable success cache 和 same-ID in-flight dedupe，但 cache storage不得直接交给 consumer。
 
 ```text
-immutable successful-result cache
-same-ID concurrent request dedupe
-ETag/304 reuse behind the client
+returned Uint8Array
+→ caller-owned detached bytes
+→ caller mutation cannot change cached bytes or later reads
 ```
 
 失败不得永久缓存成成功事实。
 
-不引入 LRU framework、prefetch planner、resource dependency graph 或 mutable asset registry。
+不引入 LRU framework、prefetch planner、dependency graph 或 mutable asset registry。
 
 ---
 
-## 5. Lifetime Independence
+## 5. Failure Boundary
+
+Renderer Content failure只影响当前 resource read/presentation-local policy：
+
+```text
+not found / conflict / invalid / unavailable / cancelled
+→ local read rejection
+```
+
+它不得：
+
+```text
+mutate Renderer authoritative Render Store
+mutate Main authority
+mutate Subsystem Render authority
+fail Runtime/Frame
+```
+
+Presentation将来可选择 placeholder/drop/report；M12不冻结该产品策略。
+
+---
+
+## 6. Lifetime Independence
 
 ```text
 ResourceClient lifetime != RenderDomain lifetime
-resource cache lifetime != Frame lifetime
-Data carrier reconnect != content cache invalidation
-Renderer Control replacement/reload MAY create a fresh client composition
+resource cache lifetime  != Frame lifetime
+Data carrier reconnect   != Content cache invalidation
 ```
 
-Content fetch failure只影响当前资源读取；不得修改 Main/Subsystem authority。
+Renderer Control replacement/reload MAY创建 fresh local client composition；这不改变 Content identity semantics。
 
 ---
 
-## 6. No Presentation in M12
+## 7. Deferred to M14
 
 明确 deferred：
 
 ```text
+Render tag/data resource-reference schema
 PNG/JPEG decode
 ImageBitmap / HTMLImageElement
 AudioBuffer
-DOM
-Canvas
-WebGL texture upload
-resource eviction policy tuned for presentation
+DOM / Canvas / WebGL
+texture/object lifetime
+presentation-specific eviction/prefetch
 ```
 
-M14 Desktop full E2E 再证明 physical presentation。
+Render state仍不得携 Content bearer、filesystem path、absolute privileged URL 或 resource bytes capability。
 
 ---
 
-## 7. Abstraction Budget
+## 8. Abstraction Budget
 
 允许：
 
 ```text
 one Renderer-private ResourceClient responsibility
-small version-safe immutable cache
+small version-safe cache/dedupe
 small Content response/error mapping
 ```
 
@@ -147,26 +172,29 @@ small Content response/error mapping
 ```text
 public AssetManager
 ResourceStore subscription API
-loader plugin system
-generic decoder registry
-presentation lifecycle coupled to Content lifecycle
+loader/plugin/decoder registry
+generic repository hierarchy
 Content URL in Render State
+presentation lifecycle coupled to Content lifecycle
 ```
+
+若 Subsystem 与 Renderer实现阶段确实产生相同 Content HTTP client mechanics，只有在两个 production consumers都真实存在时才抽取最小 shared client helper；不得为了 package symmetry预建 `content-core`。
 
 ---
 
-## 8. Done
+## 9. Done
 
 M12/03 complete when：
 
 ```text
-Renderer resolves logical resource reference through Content API
-version mismatch cannot return stale bytes
-MIME/contentVersion survive the boundary
-physical URL/path/token never enters Render replica
-Data reconnect does not invent Content lifecycle
-no DOM/Canvas/WebGL dependency is added
-no public asset framework is introduced
+logical namespace/key/expectedVersion → real Content API works
+response version mismatch cannot return bytes as success
+same key + different version cannot reuse stale bytes
+returned bytes cannot mutate internal cache/future reads
+physical URL/path/token不进入 Renderer business/Render state
+Content failure不改变 Render/Main/Subsystem authority
+no RenderNode schema interpretation is pulled into M12
+no presentation/asset framework is introduced
 ```
 
-M12/03 为 M14 presentation 提供 bytes boundary，但不替 M14 做 presentation。
+M14 只需把真实 presentation resource reference投影到这条已冻结的 bytes capability。
