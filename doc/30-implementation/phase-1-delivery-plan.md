@@ -134,13 +134,15 @@ M13复用它的 version/credential boundary，不复制 Content system。
 关闭 M11 留下的 physical Web seam：
 
 ```text
-WebPresentationConfigV1
+product/platform-private config acquisition
+→ WebPresentationConfigV1
 → prepared Content refs
 → ordered <link> / classic <script>
 → business customElements registration
 → window.onload
 → M11 committed Renderer Store
 → package-private post-commit seam
+→ presentation eligibility/currentness gate
 → thin Web Projector
 → document.body / business-owned Custom Elements
 ```
@@ -168,6 +170,7 @@ Config closed-schema validation + prepared Content resolution
 ordered browser bootstrap + explicit load/evaluation failure detection
 window.onload Projector start barrier
 package-private Store successful-commit notification
+presentation eligibility/currentness gate
 thin DOM projector
 business-owned Custom Element construction
 managed attrs / light-DOM children
@@ -176,7 +179,9 @@ PresentationResourceClient façade over M12 private ResourceClient
 presentation-local failure containment
 ```
 
-### Identity
+Config source/path/handle acquisition属于 concrete product/platform composition，不进入 `WebPresentationConfigV1` 或跨平台 ABI。
+
+### Identity / currentness
 
 Projector不得使用 bare `key` 作为 Window-global identity。
 
@@ -193,7 +198,25 @@ same live wire-node identity → same HTMLElement
 
 不同 Domain/Subsystem/fresh generation即使 key string相同也不得 collision；move/reorder只移动 existing element。
 
-不新增 public `RenderNodeIdentity` framework。
+same-generation current carrier loss：
+
+```text
+keep last committed managed DOM mounted
+freeze Projector mutation
+no receiver callback caused by loss
+```
+
+replacement carrier只有在以下 predicate成立后才可恢复 projection：
+
+```text
+registrySeen
+AND
+every Domain in current Registry is baselined
+```
+
+partial rebaseline不得泄漏到 DOM；complete baseline后一次 reconcile，并复用匹配的 existing HTMLElement。fresh generation结束旧 element identity universe，相同 textual key得到 fresh HTMLElement。
+
+不新增 public `RenderNodeIdentity` / `PresentationState` framework。
 
 ### Managed body ordering
 
@@ -237,6 +260,8 @@ existing element:
 structure/reorder → attrs → data when required
 ```
 
+same-generation carrier loss不做 LoomRealm-caused detach/reinsert；complete rebaseline后已有 element继续遵守 existing-element ordering。
+
 M13不定义 RenderEvent → WC/DOM ABI，不使用 MutationObserver policing，不从 DOM reverse-sync Store。
 
 ### M13 Qualification Target
@@ -252,7 +277,10 @@ business Custom Element registration
 Store successful commit → Projector only
 same live wire-node identity preserves HTMLElement
 same key across Domain/Subsystem does not collide
-fresh generation gets fresh wire-node identity
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation gets fresh HTMLElement identity
 subsystemKey → M11 Domain order → roots deterministic body sequence
 reorder moves existing HTMLElements
 receiveRenderContext before first insertion; at most once
@@ -304,7 +332,8 @@ Runtime resource由 M13 `PresentationResourceClient`消费；M14不再发明第�
 完成真实 Desktop composition：
 
 ```text
-installationRoot + WebPresentationConfigV1
+installationRoot + product-private Config acquisition
+→ WebPresentationConfigV1
 → Hostra PREPARE / prepared Content
 → Main / Runner / Control / Data Broker
 → BrowserWindow bootstrap
@@ -338,6 +367,7 @@ installationRoot + WebPresentationConfigV1
 PID vs Worker
 WebSocket vs MessagePort
 Desktop FSDB/HTTP vs PWA storage/fetch mechanics
+private Config acquisition mechanism
 trusted physical href/src binding
 business WC private implementation
 ```
