@@ -13,20 +13,14 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [系统架构总览](./doc/10-architecture/system-overview.md)
 - [Subsystem 模型](./doc/10-architecture/subsystem-model.md)
 - [渲染系统](./doc/10-architecture/rendering-system.md)
+- [存储与内容系统](./doc/10-architecture/storage-system.md)
 - [正式契约目录](./doc/15-contracts/README.md)
-- [Runtime Control v1](./doc/15-contracts/runtime-control-profile-v1.md)
-- [Frame / Call v1](./doc/15-contracts/frame-call-protocol-v1.md)
-- [Renderer Control v1](./doc/15-contracts/main-renderer-control-v1.md)
-- [Renderer Data Profile v1](./doc/15-contracts/renderer-data-profile-v1.md)
-- [User Input v1](./doc/15-contracts/user-input-v1.md)
-- [User Input v1 Conformance — fixtureSetRevision 2](./doc/15-contracts/user-input-conformance-v1.md)
-- [Render Update v1](./doc/15-contracts/render-update-v1.md)
-- [Render Update v1 Conformance — fixtureSetRevision 1](./doc/15-contracts/render-update-conformance-v1.md)
+- [Content API v1](./doc/15-contracts/content-api-v1.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
-- [M11 Render 最终闭环评审结论](./doc/30-implementation/m11-final-closure-review.md)
-- [ADR 0029：User Input mutation-gate State convergence correction](./doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
+- [Package Architecture](./doc/30-implementation/package-architecture.md)
+- [ADR 0030：M12 Content 预实施闭环](./doc/decisions/0030-freeze-m12-content-preimplementation-closure.md)
 
-### M10 implementation and qualification — Complete
+### M10 — Implemented / Qualified / Closed
 
 - [M10 / 01 — Subsystem InputManager](./M10_01_SUBSYSTEM_INPUT_MANAGER.md)
 - [M10 / 02 — Renderer Input Gate](./M10_02_RENDERER_INPUT_GATE.md)
@@ -35,7 +29,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M10 / 05 — Qualification and Closure](./M10_05_QUALIFICATION_CLOSURE.md)
 - [M10 qualification record](./doc/30-implementation/m10-qualification.md)
 
-### M11 implementation — Complete / qualification reopened
+### M11 — Implemented / Qualified / Closed
 
 - [M11 / 01 — Subsystem RenderManager](./M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 - [M11 / 02 — Render Publication](./M11_02_RENDER_PUBLICATION.md)
@@ -44,6 +38,17 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 - [M11 / 05 — Qualification and Closure](./M11_05_QUALIFICATION_CLOSURE.md)
 - [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)
 - [M11 qualification record](./doc/30-implementation/m11-qualification.md)
+
+### M12 — Implementation Frozen / Preimplementation Closed
+
+M12 设计已冻结，可直接实施；**尚未声明 Implemented / Qualified / Closed**。
+
+- [M12 / 01 — Desktop Content Service](./M12_01_CONTENT_SERVICE.md)
+- [M12 / 02 — Subsystem Content Client](./M12_02_SUBSYSTEM_CONTENT_CLIENT.md)
+- [M12 / 03 — Renderer Resource Client](./M12_03_RENDERER_RESOURCE_CLIENT.md)
+- [M12 / 04 — Content Vertical Integration](./M12_04_VERTICAL_INTEGRATION.md)
+- [M12 / 05 — Qualification and Closure](./M12_05_QUALIFICATION_CLOSURE.md)
+- [`fsdb-http` M12 Core Extraction Amendment](./packages/fsdb-http/M12_CORE_EXTRACTION.md)
 
 历史 M7/M8/M9 root plans继续保留作为已完成 milestone implementation provenance。
 
@@ -82,32 +87,35 @@ Business ✗ Game Package / Launcher / protocol packages
 
 ```text
 Main
-    Session / Runtime / Frame / Stack / Activation / InputTarget / DataAuthority
+    Session / Runtime / Frame / Stack / Activation
+    InputTarget / Renderer currentness / DataAuthority
 
 Subsystem
     business state
     local Frame Context / mutation gate
     Desired Input Interest + retained author State
     Render authoritative state
+    author-facing ContentClient usage
 
 Renderer
     read-only Main mirror
     current Data consumers
     canonical Producer facts / Input sender
     Render replica
+    private Content resource reads
 
 Platform
     executable binding
     Runtime/Renderer hosting
     Control/Data physical provisioning
-    Content binding
+    Content service/binding/credential
 ```
 
 一个 authority 只允许一个 owner；Platform physical ownership不产生第二份 application authority。
 
 ---
 
-## Current Data / Input Model
+## Current Data / Input / Render
 
 ```text
 loomrealm.renderer-data/1
@@ -118,12 +126,9 @@ loomrealm.renderer-data/1
 
 Data provisioning/loss != Runtime failure / Frame unwind。
 
-Current User Input：
+Input：
 
 ```text
-protocolVersion = 1
-fixtureSetRevision = 2
-
 Effective
 = current Data
 × Main InputTarget(F,A)
@@ -132,87 +137,53 @@ Effective
 × Producer(C)
 ```
 
-ADR 0029 修正首次实现前 State convergence hole：commit-sensitive mutation gate 暂时关闭时，same-current-Activation `.state` retain latest但 suppress business delivery；explicit known-no-commit + same Activation reopen时先同步完成 current retained-State handler invocation，再让 recoverable `frame.call` rejection 对业务可见；Event仍不 replay。
+M10已关闭：Subsystem `createInputListener`、Renderer `RendererInputSource`、mutation-gate State convergence、fresh Data/Activation semantics均已 qualification。
 
-没有增加 wire message、revision、ACK、cross-plane barrier或 Renderer 对 Subsystem mutation gate 的知识。
-
----
-
-## M10 Implemented Author / Renderer Surface
-
-Subsystem author：
-
-```text
-SubsystemScope.createInputListener
-InputChannel → canonical payload typed mapping
-channels/setChannels = Interest contribution
-on/unsubscribe = callback registration only
-setChannels keeps dormant registrations
-unsubscribe + close idempotent
-stable registration-order delivery
-async handler Promise does not block Data reader
-```
-
-Handler只收到 canonical payload，不收到 wire envelope/activationId/Data identity。
-
-Renderer construction：
-
-```ts
-createRendererControlHolder(
-  data?: RendererDataBinding,
-  input?: RendererInputSource,
-)
-```
-
-```text
-one construction-time RendererInputSource object
-0..1 active source subscription for current Control peer
-Control replacement/terminal → invalidate + stop old subscription
-same holder later Control → restart same source object with fresh facts
-```
-
-M10不新增 Platform Port、producer registry、Store/EventBus 或 generic Input framework。
+M11已关闭：Subsystem `createRenderDomain(initialState)` + `replace/emit/close`、bounded publication、Renderer internal replica、same-generation reconnect baseline、identity one-shot和 Desktop/Hostra vertical均已 qualification。DOM/Canvas/WebGL presentation仍属于 M14。
 
 ---
 
-## M11 Frozen Implementation Boundary
+## M12 Frozen Content Boundary
 
-Subsystem author root只新增：
-
-```text
-RenderNode
-RenderDomainState
-RenderEvent
-RenderDomain
-```
+M12不是“重新实现 HTTP”。现有 `@loomrealm/fsdb-http` 的 FSDB HTTP mechanics被机械拆成一个完整 readonly FSDB core：
 
 ```text
-SubsystemScope.createRenderDomain(initialState) → RenderDomain
-RenderDomain.replace(state): void
-RenderDomain.emit(event): void
-RenderDomain.close(): void
+Node stdlib
+    ↓
+@loomrealm/fsdb
+    ├────────→ @loomrealm/fsdb-http
+    └────────→ apps/desktop Content composition
 ```
 
-固定：
+`@loomrealm/fsdb` 是 Node-only、public publishable workspace package；它只拥有 FSDB validation/snapshot/index/descriptor/entry+metadata lookup/safe-read/read-lease，不拥有 LoomRealm Content API。
+
+Desktop M12：
 
 ```text
-all author calls synchronous local-only
-validate → detach caller-owned value → atomic local commit
-successful state/event always Frozen Render v1 representable
-live business Domains <= 256
-SDK domainId never reused within one Runtime instance
-business Node key one-shot within one business RenderDomain lifetime
+Hostra PREPARE
+→ current immutable prepared installation view
+→ @loomrealm/fsdb snapshot
+→ private immutable Content Index + normalized public manifest
+→ localhost Content Service
 ```
 
-Publication复用 existing `SubsystemDataPeer.render`；same-generation reconnect保留 emitted identity history并以 fresh Registry/Snapshot重建 carrier baseline。Renderer Store挂在 existing Data slot，internal-only；M11不新增 public Renderer Render/subscription API。
+Content v1 当前固定：
 
-M11 qualification仍只 claim `subsystem-sender` + `renderer-receiver`；包含 Hostra/PWA trace equivalence 的 `transport` role 留 M16。
+```text
+GET / HEAD only
+record/group key = single segment
+resource key = hierarchical logical ResourceKey
+contentVersion = sha256:<64 lowercase hex>
+ETag = quoted exact contentVersion
+Desktop bearer is Host-private scoped material
+Content capability != executable resolver
+```
 
-2026-09-07 最终复核要求的 production Render representation validation、fail-closed catalog、`(role, fixture)` exact evidence 与 hard-limit matrix 已完成；闭环记录见 [M11 final closure review](./doc/30-implementation/m11-final-closure-review.md)。
+Subsystem author root只增加真实 consumer需要的 `scope.content.record/resource`；Renderer只增加 private logical resource → version-checked bytes responsibility。M12不建立 `@loomrealm/content`、`@loomrealm/content-service`、generic Repository、StorageProvider、InstallationRegistry 或 AssetManager framework。
 
 ---
 
-## 当前实现状态
+## Current Milestones
 
 ```text
 M1 Foundation + Wire                  ✅
@@ -226,20 +197,24 @@ M8 Renderer Data role/core            ✅
 M9 Desktop Data Broker                ✅
 M10 User Input                        ✅ Qualified / Closed
 M11 Render                            ✅ Qualified / Closed
-M12 Content                           pending
+M12 Content                           Implementation Frozen / implementation pending
 M13 loom.map                          pending
 M14 Desktop full E2E                  pending
 M15 PWA Runtime                       pending
 M16 PWA full E2E/equivalence          pending
 ```
 
-M10 不实现 BrowserWindow/DOM physical composition；真实 Browser `RendererInputSource` 属于 M14，并必须复用 frozen M10 source API/lifetime。
+Critical path保持：
 
-M11 已实现 Subsystem business authority、bounded publication、Renderer internal replica 与 Desktop/Hostra vertical；最终 qualification correction不引入新的 Render authority/public API。DOM/physical presentation仍不属于 M11。
+```text
+Input → Render → Content → loom.map → Desktop full E2E → PWA Runtime → PWA full E2E/equivalence
+```
+
+M13 `@loomrealm/map → @loomrealm/subsystem`，真实消费 Frame/Input/Render/Content；M14完成 BrowserWindow/Renderer Control/Input/Render presentation/Content；M15只完成 PWA Runtime；M16完成 PWA Renderer/Data/Input/Render/Content和 Hostra/PWA logical equivalence。
 
 ---
 
-## Dependency Rules
+## Dependency Rules Through M12
 
 ```text
 @loomrealm/foundation → platform-ports / protocol mechanics
@@ -249,17 +224,19 @@ M11 已实现 Subsystem business authority、bounded publication、Renderer inte
 @loomrealm/subsystem/host → platform-ports + runtime-control + data
 Business Definition  → @loomrealm/subsystem only
 @loomrealm/map        → @loomrealm/subsystem
-```
 
-`@loomrealm/subsystem` package implementation may internally/type-only use shared Wire/protocol packages；business Definition不得直接依赖它们。
+@loomrealm/fsdb-http  → @loomrealm/fsdb
+apps/desktop Content  → @loomrealm/fsdb
+```
 
 Forbidden：
 
 ```text
 protocol mechanics → role authority implementations
 main → game-package / concrete launcher / renderer role
-business → platform/protocol packages
+business → platform/protocol/FSDB/HTTP packages
 InputManager/RenderManager → raw carrier reader
+ContentClient → filesystem path / bearer / raw Response exposure
 Hostra/PWA private retry/currentness protocol
 ```
 
@@ -267,18 +244,19 @@ Hostra/PWA private retry/currentness protocol
 
 ## Cross-platform Equivalence
 
-Hostra/PWA必须共享 logical semantics，而不是 physical identity：
+Hostra/PWA共享 logical semantics，而不是 physical identity：
 
 ```text
 same logical Game topology/bootstrap semantics
 same SubsystemDefinitionFactory ABI
 same Runtime/Frame/Renderer Control/Data/Input/Render semantics
+same Content logical response semantics
 same business-observable result for same logical scenario
 ```
 
-可不同：Platform Launch Manifest、artifact/path、PID/Worker、WebSocket/MessagePort、IPC/Port transfer、HTTP/SW internals。
+可不同：Platform Launch Manifest、artifact/path、PID/Worker、WebSocket/MessagePort、IPC/Port transfer、Desktop FSDB/HTTP vs PWA Service Worker/OPFS/Cache。
 
-完整 User Input / Render Update Hostra/PWA transport-equivalence claims在 M16完成。
+完整 Hostra/PWA transport/content equivalence在 M16关闭。
 
 ---
 
@@ -293,4 +271,10 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-Current closed implementation gate为 **M11**。`npm run test:m11` 覆盖 M10 regression、M11 package/boundary、203 fixtures / 267 role evidence pairs、hard-limit matrix 与 Desktop/Hostra vertical；独立 CI 在 Node 20/24 执行同一 root gate。
+当前**已关闭 executable gate**仍是：
+
+```text
+npm run test:m11
+```
+
+M12 implementation完成前，不得把设计冻结误写成 implementation closure。M12完成后唯一 closure target为 `npm run test:m12`，并在 Node 20/24 跑同一 root gate，再同步 README/Phase Plan/qualification record为 Implemented / Qualified / Closed。
