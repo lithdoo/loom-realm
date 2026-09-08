@@ -1,6 +1,6 @@
 # LoomRealm 设计文档
 
-本文是**导航与当前事实源索引**，不重复定义协议字段、状态机或 milestone closure。精确语义以对应 Architecture / Frozen Contract / Accepted ADR / Frozen Implementation Plan 为准。
+本文是**导航与当前事实源索引**，不重复定义协议字段、状态机或 milestone closure。精确语义以对应 Architecture / Frozen Contract / Accepted ADR / Frozen Implementation Plan / Qualification Record 为准。
 
 文档按定义依赖组织：
 
@@ -31,7 +31,7 @@
 13. [正式契约目录](./15-contracts/README.md)
 14. [Game Package v1](./15-contracts/game-package-v1.md)
 15. [Hostra Game Launcher / Node Runner Profile v1](./15-contracts/nodejs-launcher-profile-v1.md)
-16. [PWA Game Launcher / Worker Runner Profile v1](./15-contracts/pwa-launcher-profile-v1.md)
+16. [PWA Game Launcher / Worker Subsystem Runner Profile v1](./15-contracts/pwa-launcher-profile-v1.md)
 17. [Subsystem Control v1](./15-contracts/subsystem-control-protocol-v1.md)
 18. [Runtime Control Application Profile v1](./15-contracts/runtime-control-profile-v1.md)
 19. [Frame / Call v1](./15-contracts/frame-call-protocol-v1.md)
@@ -44,18 +44,21 @@
 26. [Readonly Content API v1](./15-contracts/content-api-v1.md)
 27. [模块设计目录](./20-modules/README.md)
 28. [Main System](./20-modules/main-system/README.md)
-29. [Game Package](./20-modules/game-package/README.md)
-30. [Hostra Desktop Composition](./20-modules/desktop-host/README.md)
-31. [PWA Composition](./20-modules/pwa-host/README.md)
-32. [`loom.map`](./20-modules/loom-map/README.md)
-33. [实施计划目录](./30-implementation/README.md)
-34. [独立分包与发布架构](./30-implementation/package-architecture.md)
-35. [仓库与目录方案](./30-implementation/repository-layout.md)
-36. [测试策略](./30-implementation/testing-strategy.md)
-37. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
-38. [ADR 索引](./decisions/README.md)
-39. [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)
-40. [ADR 0028：M9 Desktop Data Broker 首次实现前冻结](./decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
+29. [Web Renderer](./20-modules/web-renderer/README.md)
+30. [Game Package](./20-modules/game-package/README.md)
+31. [Hostra Desktop Composition](./20-modules/desktop-host/README.md)
+32. [PWA Composition](./20-modules/pwa-host/README.md)
+33. [`loom.map`](./20-modules/loom-map/README.md)
+34. [实施计划目录](./30-implementation/README.md)
+35. [独立分包与发布架构](./30-implementation/package-architecture.md)
+36. [仓库与目录方案](./30-implementation/repository-layout.md)
+37. [测试策略](./30-implementation/testing-strategy.md)
+38. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
+39. [ADR 索引](./decisions/README.md)
+40. [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)
+41. [ADR 0028：M9 Desktop Data Broker 首次实现前冻结](./decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
+42. [ADR 0030：M12 Content preimplementation closure](./decisions/0030-freeze-m12-content-preimplementation-closure.md)
+43. [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./decisions/0031-business-owned-web-component-projection.md)
 
 ---
 
@@ -92,6 +95,8 @@ M9_01_DESKTOP_DATA_BROKER.md
 ```
 
 M9 `05` is the unique qualification/closure gate；the first four documents refine one implementable boundary rather than define independent architecture variants。
+
+M10–M12 的后续 closure/qualification 证据继续保留在对应 implementation plan 与 `doc/30-implementation/*-qualification.md`；本索引不重写这些历史事实。
 
 ---
 
@@ -169,9 +174,51 @@ post-install delivery failure → new current retires; old never resurrects
 Data failure != Runtime/Frame failure
 ```
 
+### M10–M12 Closed Slices
+
+```text
+M10 User Input
+    → Subsystem InputListener + RendererInputSource + Effective gate
+
+M11 Render Replication
+    → Subsystem authoritative Render tree
+    → Render Update v1
+    → Renderer committed internal Render Store
+
+M12 Content
+    → @loomrealm/fsdb
+    → Desktop Content Service
+    → Subsystem ContentClient
+    → Renderer ResourceClient
+```
+
+M11 没有关闭 physical Web presentation；M12 没有定义 RenderNode → presentation semantics。
+
+### M13 Web Presentation Direction
+
+```text
+M11 committed Render Store
+→ thin Web Projector
+→ business-owned Custom Element instances
+```
+
+当前已冻结：
+
+```text
+key      → stable HTMLElement identity
+attrs    → Renderer-managed host attributes
+data     → complete readonly full snapshot
+children → Renderer-managed ordered light DOM
+WC       → read-only consumer of all projected state
+```
+
+具体 WC semantics由业务拥有；Web Projector是 exclusive physical projection mutator，DOM不是 Render authority source。
+
+M13尚未冻结 presentation implementation 的 package/subpath/bundle topology、loading responsibility、customElements registration vs native upgrade ordering或 projection-start ordering。
+
 ---
 
-## Platform Composition Placement Through M9
+## Platform Composition Placement
 
 Main-facing shape：
 
@@ -192,9 +239,14 @@ M6   Hostra Runtime / Node Runner / Runtime Control WS ✅
 M7   logical Renderer Control ✅
 M8   logical Data authority + role seam ✅
 M9   Desktop Data Broker / Runner late provisioning / Data WS ✅
-M14  BrowserWindow + physical Renderer Control + Data/Input/Render/Content full Desktop E2E
-M15  PWA Runtime vertical
-M16  PWA full Renderer/Data/Content + equivalence
+M10  User Input ✅
+M11  Render Replication ✅
+M12  Desktop Content + Subsystem/Renderer consumers ✅
+M13  Web Presentation Projection pending
+M14  loom.map business + map-owned WC pending
+M15  BrowserWindow + physical Renderer Control + Data/Input/Render/Content full Desktop E2E
+M16  PWA Runtime vertical
+M17  PWA full Renderer/Data/Input/Render/Content/Web projection + equivalence
 ```
 
 ---
@@ -224,7 +276,7 @@ apps/*
     one-app physical composition/policy
 ```
 
-M9 exact placement：
+M9 exact placement继续保持：
 
 ```text
 DataConnectionAuthoritySink → platform-ports
@@ -233,7 +285,9 @@ HostraRuntimeDataProvisioner → game-launcher-hostra
 Desktop DataConnectionBroker → apps/desktop
 ```
 
-Forbidden：generic RPC、AuthorityEventBus、ConnectionRegistry/Manager、RuntimeDirectory service、GenericTransaction/2PC、retry framework、second currentness lease/epoch/heartbeat。
+M13 不预先建立 generic presentation/component package。Business Definition 与 Web presentation implementation保持 execution/authority boundary，但 package/artifact/bundle placement由真实 M13 implementation决定。
+
+Forbidden：generic RPC、AuthorityEventBus、ConnectionRegistry/Manager、RuntimeDirectory service、GenericTransaction/2PC、retry framework、second currentness lease/epoch/heartbeat、second LoomRealm projection tree authority、generic business Web Component vocabulary。
 
 ---
 
@@ -250,17 +304,18 @@ M7 Renderer Control                               ✅ Qualified (2026-09-03)
 M8 Renderer Data logical/core role integration    ✅ Qualified (2026-09-04)
 M9 Desktop DataConnectionBroker                   ✅ Qualified (2026-09-04)
 M10 User Input                                    ✅ Qualified (2026-09-07)
-M11 Render                                        Pending
-M12 Content                                       Pending
-M13 loom.map business vertical                    Pending
-M14 Desktop Full E2E                              Pending
-M15 PWA Runtime vertical                          Pending
-M16 PWA Full E2E / Cross-platform equivalence     Pending
+M11 Render Replication                            ✅ Qualified / Closed
+M12 Content                                       ✅ Qualified / Closed (2026-09-08)
+M13 Web Presentation Projection                   Pending
+M14 loom.map business + Web presentation          Pending
+M15 Desktop Full E2E                              Pending
+M16 PWA Runtime vertical                          Pending
+M17 PWA Full E2E / Cross-platform equivalence     Pending
 ```
 
-**当前下一实现门 = M11 Render。**
+**当前下一实现门 = M13 Web Presentation Projection。**
 
-M9 implementation evidence is recorded in [m9-qualification](./30-implementation/m9-qualification.md)；the frozen plans and ADR remain its semantic source。
+当前 canonical executable closure gate仍为 `npm run test:m12`；M13 implementation plan冻结后再建立 `test:m13`。
 
 ---
 
@@ -275,9 +330,10 @@ Renderer Data Application Profile v1
 Renderer ⇄ Subsystem Data Connection v1
 User Input v1
 Render Update v1
+Readonly Content API v1
 ```
 
-M9 does not modify these wire/application contracts；it realizes the existing Data Connection contract on Hostra/Desktop physical infrastructure。
+M13 不修改 Render Update v1 wire/profile；它只定义 M11 committed Render Store之后的 physical Web consumer boundary。
 
 ---
 
@@ -295,5 +351,7 @@ Key ADR chain：
 - [ADR 0026：Concrete Platform 是 Session composition object](./decisions/0026-session-scoped-platform-instance.md)
 - [ADR 0027：Renderer Control v1 / M7 首次实现前冻结](./decisions/0027-freeze-renderer-control-v1-preimplementation.md)
 - [ADR 0028：M9 Desktop Data Broker / Late Provisioning 首次实现前冻结](./decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)
+- [ADR 0030：M12 Content preimplementation closure](./decisions/0030-freeze-m12-content-preimplementation-closure.md)
+- [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./decisions/0031-business-owned-web-component-projection.md)
 
 Frozen changes to authority、identity、lifecycle/order、failure/recovery or public surfaces require the corresponding ADR reopen rule；implementation cannot silently broaden them。

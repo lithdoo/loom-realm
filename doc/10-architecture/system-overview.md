@@ -3,12 +3,12 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Evolving  
-> 主要定义：顶层 logical roles、Game/Launcher/Main bootstrap boundary、状态所有权、运行承载、Platform Composition 与主要 authority/lifecycle 关系  
-> 依赖：[产品设计总览](../00-overview/product-vision.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
+> 主要定义：顶层 logical roles、Game/Launcher/Main bootstrap boundary、状态所有权、运行承载、Web presentation projection、Platform Composition 与主要 authority/lifecycle 关系  
+> 依赖：[产品设计总览](../00-overview/product-vision.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)  
 > 被以下文档细化：[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)、[运行时启动系统](./runtime-bootstrap-system.md)、[栈式运行系统](./stack-runtime-system.md)、[通信系统](./communication-system.md)、[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)  
-> 最近复核：2026-08-20
+> 最近复核：2026-09-08
 
-本文只描述 system-level responsibility / authority / topology。精确 wire、transaction、error、limit、conformance 由 `15-contracts` 定义。
+本文只描述 system-level responsibility / authority / topology。精确 wire、transaction、error、limit、conformance 由 `15-contracts` 与对应 milestone closure定义。
 
 ---
 
@@ -16,7 +16,7 @@
 
 Game Package 不是 Runtime role。
 
-Bootstrap boundary：
+Runtime bootstrap boundary：
 
 ```text
 Game installation / source
@@ -35,6 +35,14 @@ Prepared current-platform game
 apps/* composition
 ```
 
+Web presentation bootstrap是独立 product startup input：
+
+```text
+user-selected WebPresentationConfigV1
+→ current prepared Content resource resolution
+→ Renderer Window bootstrap
+```
+
 Platform-neutral Runtime/application roles：
 
 ```text
@@ -51,13 +59,25 @@ Subsystem Runtime
 ├── Interest[F]
 └── Render Domain authoritative state
 
-Web Renderer
+Renderer
 ├── read-only Main authority mirror
 ├── Data connections
 ├── Input producers/gating
-└── Render replica/presentation
+├── Render replica
+└── thin Web projection
 
 Readonly Content Service
+```
+
+Web physical presentation再区分：
+
+```text
+Web Projector
+    → Renderer-owned mechanical physical projection
+
+Business Custom Elements
+    → business-owned concrete presentation/layout
+    → read-only consumer of LoomRealm projected state
 ```
 
 因此：
@@ -65,6 +85,8 @@ Readonly Content Service
 ```text
 Game Package capability != Runtime role
 GameEntryV1 != Main state model
+Render replica != business Custom Element implementation
+WebPresentationConfigV1 != Game topology / executable manifest
 ```
 
 ---
@@ -85,32 +107,17 @@ interface LogicalGameBootstrap {
 }
 ```
 
-它只表达：
+它只表达 complete logical key set、initial logical target 与 initial business JsonValue。
 
-```text
-complete logical key set
-initial logical target
-initial business JsonValue
-```
-
-它不表达：
-
-```text
-formatVersion
-ValidatedGameEntry brand
-module/path/URL
-Platform manifest
-Node/Worker/Runner
-PlatformLaunchPlan
-```
+它不表达 formatVersion、ValidatedGameEntry brand、module/path/URL、Platform manifest、Node/Worker/Runner、PlatformLaunchPlan、Web Presentation Config或 Content credential。
 
 Main 通过独立 Main-facing Platform port 使用 plan-bound `RuntimeHosting`。
 
 ---
 
-## 3. Platform Composition
+## 3. Platform / App Composition
 
-Platform 负责真实 physical Session realization：
+Platform/app composition负责真实 physical Session realization：
 
 ```text
 matching Game Launcher / executable PREPARE
@@ -121,6 +128,8 @@ Main ⇄ Renderer Control binding
 Renderer ⇄ Subsystem DataConnectionBroker
 late Data provisioning
 Content Binding
+Web Presentation Config acquisition/resolution
+Renderer Window presentation bootstrap
 physical startup/shutdown
 ```
 
@@ -146,11 +155,24 @@ Worker provisioning
 Service Worker/Fetch/OPFS
 ```
 
-Platform physical ownership不会提升成 Main/Subsystem/Renderer application authority。
+Physical ownership不会提升成 Main/Subsystem/Renderer application authority，也不会让 Platform拥有具体业务 Custom Element语义。
+
+M13 current presentation startup已经冻结：
+
+```text
+user-selected Window-level WebPresentationConfigV1
+→ ordered styles/scripts from current prepared Content
+→ <link rel="stylesheet"> / classic <script>
+→ business customElements.define(...)
+→ window.onload
+→ Web Projector starts
+```
+
+该模型不扩张 Launcher Runtime PREPARE、Game Entry或 LogicalGameBootstrap。
 
 ---
 
-## 4. Game Entry / Platform Executable Binding
+## 4. Game Entry / Platform Executable / Presentation Config
 
 Game Entry v1：
 
@@ -158,15 +180,6 @@ Game Entry v1：
 interface SubsystemDescriptorV1 {
   readonly key: string;
 }
-```
-
-还包含：
-
-```text
-formatVersion
-initial.subsystem
-initial.input
-complete required key set
 ```
 
 Current Platform独立声明：
@@ -190,13 +203,23 @@ subsystemKey = application identity
 module/path/URL = Platform executable material
 ```
 
-业务 module不是 Node process entry，也不是 Worker constructor policy。
+Web Presentation Config独立回答另一个问题：
+
+```text
+WebPresentationConfigV1
+→ whole Renderer Window scripts[] / styles[]
+→ M12 namespace + hierarchical resource key
+```
+
+它没有 `subsystems`，不建立 `subsystemKey → presentation resource` binding。
+
+Business Definition与 Web presentation implementation保持 execution/authority boundary；两者都不把 arbitrary module path/URL或 loader capability写进 RenderNode。
 
 ---
 
 ## 5. Parse → Plan → Commit
 
-Matching Launcher 的 PREPARE 是完整 transaction：
+Matching Launcher 的 Runtime PREPARE 是完整 transaction：
 
 ```text
 obtain/read Game Entry
@@ -220,7 +243,9 @@ business Definition import = 0
 Runtime Control establishment = 0
 ```
 
-Prepared result 释放后，普通 Runtime launch 不再解释 raw Game/Platform config。
+Presentation startup不加入这个 executable join。成功 PREPARE后的 current prepared Content view与用户指定的 Web Presentation Config共同形成 `PreparedWebPresentation`，然后由 Renderer Window bootstrap消费。
+
+不得依赖 Render tree到达后从业务 data拼接 arbitrary module URL。
 
 ---
 
@@ -241,11 +266,11 @@ Runner：
 verify planned key/binding
 → import exact selected Definition Module
 → validate SubsystemDefinitionFactory
-→ construct role-local Platform Ports
+→ construct role-local capabilities
 → enter @loomrealm/subsystem/host
 ```
 
-Hostra/PWA MAY 加载不同 artifact；相同 logical key、author ABI、formal semantics 与 business-observable result 才是跨平台不变量。
+Business Web presentation implementation不进入 Subsystem Runner，也不能获得 business Runtime object reference。
 
 ---
 
@@ -257,15 +282,7 @@ Main 创建 Launch Attempt 后只发：
 RuntimeHosting.launch(subsystemKey, LaunchAttemptMaterial)
 ```
 
-Main 不持有：
-
-```text
-module/path/URL
-Node executable/argv/env
-Worker target/options
-Runner entry
-Control endpoint/MessagePort
-```
+Main 不持有 module/path/URL、Node executable/argv/env、Worker target/options、Runner entry、Control endpoint/MessagePort或 presentation material。
 
 Runtime lifecycle：
 
@@ -296,6 +313,7 @@ Subsystem Control v1
 ```text
 ready != Data current
 ready != Renderer exists
+ready != Web presentation ready
 ```
 
 Control carrier loss在无 shutdown intent时进入 Runtime failure；same-attempt Control reconnect不存在。
@@ -304,18 +322,7 @@ Control carrier loss在无 shutdown intent时进入 Runtime failure；same-attem
 
 ## 9. Frame / Activation
 
-Main 唯一拥有：
-
-```text
-frameId
-Frame→subsystemKey
-caller
-lifecycle/outcome
-Stack
-activationId
-InputTarget
-transaction/recovery
-```
+Main 唯一拥有 frameId、Frame→subsystemKey、caller、lifecycle/outcome、Stack、activationId、InputTarget、transaction/recovery。
 
 核心 transaction barrier：
 
@@ -335,7 +342,7 @@ Timeout/loss   → ambiguous → Runtime failure
 
 No retry/replay ambiguous mutation。
 
-Failure unwind root/order由 Main 计算，Platform/Runner/SDK不得自行替代。
+Failure unwind root/order由 Main 计算，Platform/Runner/SDK/Renderer/WC不得自行替代。
 
 ---
 
@@ -354,17 +361,9 @@ DataAuthority {
 }
 ```
 
-Snapshot 不携：
+Snapshot 不携 Data endpoint/ticket/MessagePort、PlatformLaunchPlan/module、Interest Registry、Render state、Web Presentation Config或 Content credential。
 
-```text
-Data endpoint/ticket/MessagePort
-PlatformLaunchPlan/module
-Interest Registry
-Render state
-Content credential
-```
-
-Renderer 只复制 authority，不 mint/recover authority。
+Renderer只复制 authority，不 mint/recover authority。
 
 ---
 
@@ -392,7 +391,7 @@ same generation/profile MAY sequential reconnect
 profile change MUST fresh generation
 ```
 
-Platform DataConnectionBroker 只实现 physical carrier；generation/profile 仍属于 Main authority。
+Platform DataConnectionBroker只实现 physical carrier；generation/profile仍属于 Main authority。
 
 ---
 
@@ -412,13 +411,15 @@ Authority：Main InputTarget。
 Configuration：Subsystem `Interest[F]`。  
 Physical producer：Renderer。
 
-fresh Activation 可以复用 Interest config，但不能复用 old Input State/Event。
+fresh Activation可以复用 Interest config，但不能复用 old Input State/Event。
+
+Business WC的 DOM focus/event不创建 Input authority；physical event如需进入游戏，必须通过 frozen `RendererInputSource` gate。
 
 ---
 
-## 13. Render
+## 13. Render Replication vs Thin Web Projection
 
-Subsystem 拥有 `0..N` Render Domains authoritative state。
+Subsystem拥有 `0..N` Render Domains authoritative state。
 
 ```text
 Frame close != Render Domain destroy
@@ -426,24 +427,97 @@ Frame suspend != Render hide
 Data carrier loss != authoritative Render destroy
 ```
 
-fresh Data carrier 通过 current Registry + fresh Snapshot 重建 Renderer replica baseline。
+fresh Data carrier通过 current Registry + fresh Snapshot重建 Renderer replica baseline。
+
+M11关闭：
+
+```text
+business Render authority
+→ Render Update
+→ committed Renderer Store
+```
+
+M13关闭：
+
+```text
+Renderer Store successful atomic commit
+→ package-private post-commit notification/effect
+→ thin Web Projector
+→ document.body / business-owned WC instances
+```
+
+Web projection：
+
+```text
+key      → stable HTMLElement identity
+tag      → business-owned WC name
+attrs    → Renderer-managed host attrs
+data     → optional receiveRenderData(complete readonly snapshot)
+children → Renderer-managed ordered light DOM
+```
+
+一次 committed change的 physical order：
+
+```text
+structure / children
+→ attrs
+→ receiveRenderData(...)
+```
+
+Top-level roots直接进入 `document.body`。M13不建立 per-Domain wrapper、generic CSS layer、automatic z-index、cross-Subsystem stacking manager或 layout engine；actual layout/position/stacking由 business WC/CSS负责。
+
+M13不建立第二份 desired projection tree authority；必要 keyed physical reconciliation只用于保持 same live key → same HTMLElement。
+
+M13也不定义 RenderEvent → WC/DOM event ABI。
 
 ---
 
-## 14. Content / Execution Boundary
+## 14. WC Read-only Boundary
+
+Business WC对 LoomRealm projected state只有读取权：
+
+```text
+Element identity/tag
+managed host attrs
+Render data
+managed light-DOM children/order
+```
+
+WC可以写自己的 private fields、Shadow DOM、Canvas/WebGL、decoded resources、animation/cache和 layout state。
+
+M13不使用 MutationObserver或其他 policing机制检测/修复业务对 managed DOM的违规 mutation：
+
+```text
+Renderer Store remains authoritative
+DOM is never adopted back into Store
+presentation-local behavior after violation is not guaranteed
+```
+
+这是 authority/API contract，不是 hostile-code sandbox。
+
+---
+
+## 15. Content / Execution / Presentation Boundary
 
 必须区分：
 
 ```text
 Platform executable resolver/Runner capability
 Readonly Content capability
+Web presentation bootstrap physical binding
+Business Web presentation implementation
+Render projection mutation capability
 ```
 
-业务/Renderer 只使用 logical Content identity；不得获得 arbitrary physical path 或 executable capability。
+M12 ResourceClient负责 Renderer trusted logical resource + expected version → bytes。
+
+Presentation bootstrap同样从 current prepared Content/FSDB logical identities出发，但由 trusted composition私下绑定为 browser `<link href>` / `<script src>`；business config/WC不获得 filesystem path、bearer、privileged URL或 resolver capability。
+
+Business WC runtime resource usage仍不得绕过 M12 credential/version boundary。
 
 ---
 
-## 15. Messaging Model
+## 16. Messaging Model
 
 当前 message-oriented Control/Data profiles统一：
 
@@ -460,21 +534,23 @@ MessagePort postMessage(string)
 MemoryCarrier string
 ```
 
-Structured Clone 只用于 Platform bootstrap/Port transfer。
+Structured Clone只用于 Platform bootstrap/Port transfer。
+
+Web projection是 Renderer-local physical realization，不增加 network/wire profile。
 
 ---
 
-## 16. State Ownership
+## 17. State / Dependency Ownership
 
 ```text
 Game Package capability
     validates Game Entry document
 
 Platform Launcher
-    consumes Game Entry for current-platform PREPARE
-    owns executable binding/preflight LaunchPlan
-    projects LogicalGameBootstrap
-    implements plan-bound RuntimeHosting
+    owns Runtime executable PREPARE / PlatformLaunchPlan
+
+Platform/app composition
+    owns physical Window/Content/presentation bootstrap binding
 
 Main
     Session/Runtime/Frame/Activation/InputTarget/DataAuthority
@@ -482,26 +558,25 @@ Main
 Subsystem
     business state / Interest[F] / Render Domains
 
-Renderer
-    read-only Main mirror / Producers / Render replica
+Renderer Store
+    current authoritative Render replica
 
-Platform Composition
-    complete physical topology/bootstrap/provisioning
+Web Projector
+    mechanical Store → DOM projection
+
+Business Web Component
+    read-only projected Render state
+    private presentation/layout implementation state
 ```
-
-Physical ownership不改变 application authority owner。
-
----
-
-## 17. Dependency Boundary
 
 禁止：
 
 ```text
-main → game-package
-main → concrete game-launcher-*
-business → game-package
-business → game-launcher-*
+main → game-package / concrete game-launcher-*
+business Definition → game-package / launcher / renderer / browser
+business WC → Render Store writer / Data carrier / Content credential
+Renderer → DOM reverse-sync into Store
+RenderNode → arbitrary module URL / loader capability
 game-package → launcher/Main
 ```
 
@@ -510,28 +585,58 @@ game-package → launcher/Main
 ```text
 launcher → game-package
 apps/* → matching launcher + roles + adapters
+business Web presentation implementation → browser APIs + explicitly granted presentation integration seam
 ```
+
+Business build/package可以自由产出最终 JS/CSS；runtime source由 `WebPresentationConfigV1` 中的 current installation resource refs确定。
 
 ---
 
-## 18. Core Invariants
+## 18. Phase 1 Route
 
-1. Game Package 不是 Runtime role；
-2. Game Entry document model 与 Main bootstrap model 分离；
-3. matching Launcher 是 Runtime-product Game Entry consumer；
-4. Main 不依赖 Game Package 或 concrete Launcher；
-5. Descriptor v1 精确 `{key}`；
+```text
+M10 User Input                    closed
+M11 Render Replication            closed
+M12 Content                       closed
+M13 Web Presentation Projection   pending
+M14 loom.map                      pending
+M15 Desktop full E2E              pending
+M16 PWA Runtime                   pending
+M17 PWA full E2E/equivalence      pending
+```
+
+M13先关闭 Window-level presentation bootstrap + thin Store→body projection，再让 M14 map业务及其自有 WC成为首个真实 consumer。
+
+---
+
+## 19. Core Invariants
+
+1. Game Package不是 Runtime role；
+2. Game Entry document model与 Main bootstrap model分离；
+3. matching Launcher是 Runtime-product Game Entry consumer；
+4. Main不依赖 Game Package或 concrete Launcher；
+5. Descriptor v1精确 `{key}`；
 6. executable binding由 current Platform Launch Manifest拥有；
 7. Phase 1 Game/Platform key set严格相等；
-8. immutable PlatformLaunchPlan + LogicalGameBootstrap 在任何 business Runtime side effect前闭合；
-9. Main launch intent只携 logical key/Launch Attempt material；
-10. Host-owned Runner是 physical Runtime entry；
-11. Definition artifact可按平台不同；
-12. Frame/Stack/Activation/recovery authority = Main；
-13. ambiguous Frame mutation Runtime-fatal/no retry；
-14. DataAuthority = subsystemKey + generation + dataProfile；
-15. Broker只实现 physical carrier；
-16. Data provisioning/loss不等于 Runtime/Frame failure；
-17. Render lifecycle独立于 Frame/Data carrier；
-18. message-oriented profiles统一 UTF-8 JSON text；
-19. Hostra/PWA比较 logical application trace，不比较 physical/executable trace。
+8. immutable PlatformLaunchPlan + LogicalGameBootstrap在任何 business Runtime side effect前闭合；
+9. Web Presentation Config是独立 product startup input，不进入 Launcher manifest/Main/Render；
+10. WebPresentationConfigV1只有 Window-level `scripts/styles`，没有 `subsystems`；
+11. Desktop presentation resources从 current prepared installation唯一 FSDB/Content view解析，用户不单独指定 FSDB；
+12. browser bootstrap使用 ordered `<link>` / classic `<script>`，`window.onload`是 Projector start barrier；
+13. Main launch intent只携 logical key/Launch Attempt material；
+14. Host-owned Runner是 physical Runtime entry；
+15. Frame/Stack/Activation/recovery authority = Main；
+16. ambiguous Frame mutation Runtime-fatal/no retry；
+17. DataAuthority = subsystemKey + generation + dataProfile；
+18. Broker只实现 physical carrier；Data provisioning/loss不等于 Runtime/Frame failure；
+19. Render lifecycle独立于 Frame/Data carrier；
+20. M11 Render replica与 M13 Web projection是不同 closure；
+21. concrete Custom Elements由业务拥有；
+22. top-level roots直接进入 `document.body`；LoomRealm不拥有 generic layout/stacking framework；
+23. data通过 optional `receiveRenderData(complete readonly snapshot)`投递；projection order = structure → attrs → data；
+24. Business WC对 projected state只读；M13不做 MutationObserver policing；DOM不是 Render authority source；
+25. Store只在 successful atomic commit后通过 package-private seam通知 Projector；Projector不直接消费 raw Render wire；
+26. M13不定义 RenderEvent → WC/DOM event ABI；
+27. Business WC不得绕过 M12 Content credential/version boundary；
+28. message-oriented profiles统一 UTF-8 JSON text；
+29. Hostra/PWA共享 logical/browser-visible Web presentation semantics，但不比较 physical executable/storage/href-src binding trace。
