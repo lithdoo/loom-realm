@@ -1,366 +1,211 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：M6 Runtime Vertical Implemented / M9 Data Core Implementation Frozen / M14 Full E2E Planned  
-> 稳定程度：M6 Qualified Baseline / M9 Preimplementation Frozen / Later Slices Evolving  
-> 主要定义：Hostra Desktop Platform Composition realization：Hostra Launcher PREPARE、Node Runner、Runtime Control WebSocket、M9 Desktop Data Broker/Runner late provisioning，以及 M14 BrowserWindow/Renderer Control/Data/Input/Render/Content full composition target  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[Game Package v1](../../15-contracts/game-package-v1.md)、[Hostra Game Launcher / Node Subsystem Runner Profile v1](../../15-contracts/nodejs-launcher-profile-v1.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)  
-> 最近复核：2026-09-04
+> 状态：M6 Runtime / M9 Data **Implemented + Qualified**；M12 Content **Preimplementation Frozen**；M14 Full E2E Planned  
+> 稳定程度：Closed lower slices / M12 implementation shape Frozen / M14 physical presentation Evolving  
+> 主要定义：Hostra Launcher PREPARE、Node Runner、Runtime Control WS、Desktop Data Broker、M12 Content composition，以及 M14 BrowserWindow/Renderer full product target  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 最近复核：2026-09-08
 
-本文描述完整 Hostra Desktop Platform Composition target。当前 M6 已 qualified；M9 physical Data core 已冻结待实施；M14 才是 full Desktop product E2E。
+Hostra owns physical topology only；Main retains Session/Runtime/Frame/Activation/InputTarget/DataAuthority/Renderer-currentness authority。
 
 ---
 
 ## 1. Milestone Shape
 
-### M6 Qualified Baseline
-
 ```text
-apps/desktop / Hostra product entry concept
-→ session-scoped HostraPlatform
-→ HostraPlatform.prepareGame(...)
-→ @loomrealm/game-launcher-hostra PREPARE
-→ HostraLaunchPlan + LogicalGameBootstrap
-→ runMain({bootstrap, platform})
-→ RuntimeHosting
-→ Host-owned Node Runner
-→ Runtime Control WebSocket
-→ @loomrealm/subsystem/host
+M6  Hostra PREPARE + Node Runner + Runtime Control        ✅
+M9  Desktop paired Data Broker + child provisioning      ✅
+M10 Input role behavior                                  ✅
+M11 Render role behavior                                 ✅
+M12 Desktop Content service + two Content consumers      frozen / pending implementation
+M14 BrowserWindow + physical Renderer + presentation E2E pending
 ```
 
-M6 excludes Renderer/Data/Input/Render/Content physical product composition。
-
-### M9 Frozen Data Core
-
-```text
-M6 Runtime path
-+
-Main DataConnectionAuthoritySink
-+
-apps/desktop DataConnectionBroker
-+
-exact HostedRuntime → HostraRuntimeDataProvisioner handoff
-+
-Node child provisioning IPC
-+
-two-sided Data WebSocket relay
-+
-M8 RendererDataBinding / SubsystemDataBinding
-```
-
-M9 uses deterministic/test physical Renderer hosting；no BrowserWindow/physical Renderer Control product requirement。
-
-### M14 Full Desktop Target
-
-```text
-M9 core
-+
-Hostra BrowserWindow/Web Renderer
-+
-M7 Frozen RendererControlBinding physical realization
-+
-Renderer Control WebSocket
-+
-M10 Input
-+
-M11 Render
-+
-M12 Content
-→ full Desktop E2E
-```
-
-Hostra owns physical topology only；Main retains Runtime/Frame/Activation/InputTarget/DataAuthority/Renderer-currentness authority。
+M14不会重新设计 M9–M12 logical semantics，只完成真实 Desktop physical composition。
 
 ---
 
 ## 2. Hostra PREPARE
 
-Product bootstrap invokes `HostraPlatform.prepareGame(...)`; HostraPlatform delegates Game/launch preparation to `@loomrealm/game-launcher-hostra`：
-
 ```text
-obtain Game Entry
-→ @loomrealm/game-package validate
-→ validate launch.hostra.json
-→ exact Game↔Hostra key-set join
-→ safe .mjs resolution / containment
-→ Host-selected Node + Runner preflight
-→ freeze HostraLaunchPlan
-→ project LogicalGameBootstrap
+HostraPlatform.prepareGame(...)
+→ @loomrealm/game-launcher-hostra
+→ @loomrealm/game-package validation
+→ launch.hostra.json validation
+→ exact key-set join
+→ safe executable resolution/preflight
+→ immutable HostraLaunchPlan
+→ LogicalGameBootstrap
 ```
 
 Any PREPARE failure：
 
 ```text
-process create = 0
+Process create = 0
 business module import = 0
 Runtime Control establish = 0
+Content service business exposure = 0
 ```
 
-`apps/desktop` does not duplicate Game/manifest validation。
+Main只接收 LogicalGameBootstrap + narrow Main-facing capabilities，不接收 Hostra plan/module/path/Content credential。
 
 ---
 
-## 3. Main Installation Boundary Through M9
-
-Main receives only：
+## 3. Runner / Runtime
 
 ```text
-LogicalGameBootstrap
-+
-Main-facing narrow capability view
-```
-
-Through M9：
-
-```text
-DeadlineScheduler
-OpaqueMaterialGenerator
 RuntimeHosting
-RendererControlBinding?         // physical Hostra realization still M14
-dataConnections?                // DataConnectionAuthoritySink; M9 Desktop realization
+→ Host-owned Node Runner
+→ exact planned Definition Module
+→ RuntimeControlBinding
+→ optional/current SubsystemDataBinding
+→ M12 bound ContentClient
+→ @loomrealm/subsystem/host
 ```
 
-M9 deterministic Desktop composition may provide both a test physical RendererControlBinding and the real Data authority sink for qualification；M6 Runtime-only composition may omit both。
+Runner负责构造 physical role-local capabilities，不拥有 Frame/Data/Render authority。
 
-Main never receives HostraLaunchPlan、module/path、Node child、WS endpoint/ticket or provisioner handle。
+M12 required ContentClient必须在 `runSubsystem()` / business `initialize` 前构造成功；构造失败属于 Runtime bootstrap failure。运行后的普通 Content read rejection只是 caller-local failure。
 
 ---
 
-## 4. Runner Model
-
-Physical Runtime entry remains Host-owned Node Runner。Business module remains exact `HostraLaunchPlan[key].module`。
-
-Capability growth：
+## 4. M9 Data Provisioning — Closed
 
 ```text
-M6  RuntimeControlBinding
-M8  SubsystemDataBinding role seam in subsystem host
-M9  Runner provisioning implementation feeds real current-deliverable Data carriers
-M12 ContentClient
+Main DataConnectionAuthoritySink
+→ apps/desktop Broker
+→ Renderer WS + Runner WS candidate
+→ exact HostedRuntime-bound HostraRuntimeDataProvisioner
+→ commit-time latest-view revalidation
+→ paired sole-current install
 ```
 
-Game common document/Hostra manifest cannot choose Node executable、Runner entry、IPC/WS credentials or Data provisioning policy。
+Data ticket/provisioning IPC不产生 application authority。Post-install Runner delivery failure只 retire新 Data current，不 resurrect旧 current，也不自动 fail Runtime/Frame。
+
+M12 Content credential/material **不得复用 M9 Data provisioning IPC/ticket**。
 
 ---
 
-## 5. Hostra Shell Separation
+## 5. M12 Desktop Content — Frozen
+
+Physical chain：
 
 ```text
-Hostra Shell / product lifecycle
-    product/window lifecycle
-
-Hostra Game Launcher
-    Game validation + executable PREPARE + RuntimeHosting + child-owned provisioning mechanics
-
-Runtime Control
-    Main ⇄ Subsystem Control/Frame semantics
-
-Renderer Control
-    Main committed Renderer authority mirror
-
-Desktop Data Broker
-    Main full-view authority realization + paired Data WS lifecycle
-
-Platform provisioning
-    child IPC / endpoint/ticket/candidate material
-
-Renderer Data
-    Data application protocol peers
+successful Hostra PREPARE
+→ current immutable prepared installation view
+→ @loomrealm/fsdb snapshot
+→ private immutable Content Index + normalized public manifest
+→ localhost Content Service
 ```
 
-Same process may coordinate these, but ownership remains separate。
-
----
-
-## 6. Runtime Bootstrap — M6 Unchanged
+Package placement：
 
 ```text
-HostraLaunchPlan frozen
-→ Main creates Launch Attempt/bootstrap credential
-→ RuntimeHosting lookup plan[key]
-→ spawn Host-owned Runner
-→ Runner loads exact Definition Module
-→ Runtime Control WS
-→ hello / identified / initialize / ready
+@loomrealm/fsdb
+    readonly Node FSDB core
+
+@loomrealm/fsdb-http
+    standalone FSDB HTTP projection
+
+apps/desktop
+    LoomRealm Content route/auth/version composition
 ```
+
+M12不建立 `@loomrealm/content-service` package、global InstallationRegistry、generic Repository/StorageProvider。
+
+Desktop Content grant：
 
 ```text
-plan valid != spawned != connected != identified != ready
-ready != Renderer exists
-ready != Data current
+Host-owned
+opaque
+installation scoped
+permission scoped
+expiring
+separate from Runtime bootstrapToken / Renderer token / Data ticket
 ```
 
-Data endpoint/ticket does not enter Runtime startup bootstrap。
+Hostra owner通过独立最小 child-private injection把 Runtime所需 access material交给 Runner；具体 env/IPC/context spelling是 private mechanics，但不得进入 Runtime Control/Data application/business payload。
 
 ---
 
-## 7. Host-owned Process Policy
+## 6. M12 Content Consumers
 
-Host chooses Node executable、package-owned Runner entry、safe env、`shell=false`、cwd/resource/supervision policy。
-
-`launch.hostra.json` cannot override executable/Runner/argv/env/Control/Data credential policy。
-
----
-
-## 8. Runtime Control WebSocket — M6
-
-One WS text message = one UTF-8 JSON text application unit。No binary/batch/adapter retry/duplicate。
-
-Frame causal rules remain Response-before-dependent-RPC / ACK-before-publication。Runtime Control loss enters Runtime failure；same-attempt reconnect does not exist。
-
----
-
-## 9. Runtime-scoped Data Provisioner — M9 Frozen
-
-`@loomrealm/game-launcher-hostra` adds exact child-owned integration：
-
-```ts
-interface HostraRuntimeDataPrepareRequest {
-  readonly candidateId: string;
-  readonly endpoint: string;
-  readonly generation: number;
-  readonly dataProfile: string;
-}
-
-interface HostraRuntimeDataProvisioner {
-  prepare(request: HostraRuntimeDataPrepareRequest, signal: AbortSignal): Promise<void>;
-  commit(candidateId: string, signal: AbortSignal): Promise<void>;
-  revoke(candidateId: string): void;
-}
-```
-
-`createHostraRuntimeHosting` may receive：
+Subsystem：
 
 ```text
-onRuntimeDataProvisioner(HostedRuntime, provisioner)
+Runner constructs bound ContentClient
+→ runSubsystem({content,...})
+→ scope.content.record/resource
 ```
 
-Handoff occurs before successful `RuntimeHosting.launch()` resolves that exact HostedRuntime。Desktop stores correlation privately; no public RuntimeDirectory。
-
-Provisioner IPC scope：
+Renderer：
 
 ```text
-provision / prepared / commit / committed / revoke
+Desktop composition binds current installation/grant
+→ @loomrealm/renderer private ResourceClient
+→ logical resource + expected sha256 version
+→ bytes + MIME
 ```
 
-No Runtime Control/Frame/business/Input/Render payload。
+Renderer ResourceClient不是 public Platform port/AssetManager，也不解释 RenderNode presentation schema。
 
 ---
 
-## 10. Desktop DataConnectionBroker — M9 Frozen
-
-Main publishes physical installation facts through optional `DataConnectionAuthoritySink`：
+## 7. Content Failure / Lifetime
 
 ```text
-current Renderer token T
-+ exact HostedRuntime R
-+ S/G/P
+Frame suspend/close != ContentClient close
+Activation change   != ContentClient replacement
+Data reconnect       != ContentClient/ResourceClient invalidation
+RenderDomain close   != resource cache lifetime
 ```
 
-The accepted Renderer token was already consumed as M7 authentication credential；M9 retention is inert physical correlation only。
+普通 Content failure不得 mutate Main/Render authority或 terminalize Runtime/Frame。
 
-Desktop candidate：
-
-```text
-Renderer WS ─┐
-             ├─ Desktop Broker opaque UTF-8 relay
-Runner WS   ─┘
-```
-
-Before install：relay gate closed / no child traffic exposure。Candidate requires both sides prepared and exact latest Main view at commit。
-
-Per `(T,S)`：
-
-```text
-0..1 current
-serialized install/retire
-```
-
-Broker owns no generation/profile policy and parses no Data application messages。
+Prepared installation在该 Content Service lifetime内是 Host-trusted readonly source；不为具有 physical write authority 的恶意并发 writer建立 transaction/copy-on-read storage system。
 
 ---
 
-## 11. Installation vs Runner Delivery
-
-Frozen M9 ordering：
+## 8. M14 Full Desktop Target
 
 ```text
-both sides prepared
-→ commit-time latest Main-view revalidation
-→ old current retires
-→ new candidate becomes sole current
-→ relay gate opens
-→ Renderer delivery cell commit
-→ Runner post-install commit notification/ACK
+M12-capable Hostra composition
++
+BrowserWindow/Web Renderer
++
+physical RendererControlBinding WS
++
+M9 Data Broker
++
+real DOM/Gamepad RendererInputSource
++
+M11 internal current Render replica → presentation
++
+M12 Renderer ResourceClient → resource bytes
++
+M13 loom.map
+→ full Desktop E2E
 ```
 
-Runner `commit` ACK is not the logical installation point。
-
-If Runner delivery fails after install：
+M14不得：
 
 ```text
-new current → retired
-close/revoke new pair
-old current never resurrects
-Runtime/Frame/Main DataAuthority unchanged
+DOM→Data shortcut绕过 M10 source
+presentation自建 Render authority
+Render State携 Content URL/token/path
+Renderer直接读 fs/fsdb-http business path
 ```
 
-No rollback/2PC framework。
-
 ---
 
-## 12. Data Loss / Same-generation Replacement
+## 9. Final Invariants
 
-```text
-current Data WS loss
-→ whole pair retired
-→ Main S/G/P unchanged
-→ fresh physical pair may install under same S/G/P
-```
-
-Proactive same-generation physical replacement is also allowed without a pending role acquire waiter。
-
-No generation/revision mutation solely for physical replacement；no resume/replay/old queue migration。
-
-M9 proves fresh carrier/peer connection-local state only。Fresh User Input business publication is M10；fresh Render business baseline is M11。
-
----
-
-## 13. Renderer Hosting / Control — M14
-
-M14 Hostra product creates/shows/reloads BrowserWindow and realizes physical `RendererControlBinding` WS path according to ADR 0027。
-
-M9 deterministic Renderer host is not promoted to a public `RendererHosting` port。
-
-Renderer Snapshot remains logical only and never includes Data endpoint/ticket/provisioner/Hostra plan。
-
----
-
-## 14. Content — M12/M14
-
-Desktop Content target remains readonly filesystem-backed service → localhost HTTP。Content credential remains separate from Runtime/Renderer/Data credentials；executable module resolution is not ordinary Content access。
-
----
-
-## 15. Composition Root
-
-M9 materializes private `apps/desktop` workspace because Broker is one-app physical composition policy。It may combine lower packages/adapters without turning any Core package into a Hostra mega-interface。
-
-M14 is still the first milestone claiming full Desktop E2E across Runtime/Renderer/Data/Input/Render/Content。
-
----
-
-## 16. Final Invariants
-
-1. M6 Runtime launch/control semantics remain valid when M9 capabilities are absent；
-2. Main sees no Hostra Game/Node/WS/IPC/provisioner material；
-3. M9 DataConnectionAuthoritySink is full-view/non-blocking/non-throwing；
-4. exact HostedRuntime object binds Data to exact child/provisioner；
-5. launcher owns child provisioning mechanics but not Broker policy；
-6. apps/desktop owns Desktop Broker/two-sided relay；
-7. candidate is not current before paired Broker install；
-8. install precedes Runner delivery ACK；delivery failure retires new current without rollback；
-9. one Data side terminal retires whole pair；
-10. Data provisioning/loss does not directly fail Runtime or unwind Frame；
-11. M9 does not claim BrowserWindow/Input/Render/Content or full cross-platform equivalence；
-12. M14 remains full Desktop product composition gate。
+1. Launcher owns Game/executable PREPARE, not Renderer/Content application authority；
+2. Main sees no Hostra plan/module/path/token；
+3. M9 Data and M12 Content physical credentials/lifetimes remain separate；
+4. apps/desktop owns Broker + Content composition policy；
+5. `@loomrealm/fsdb` owns FSDB domain, not Content semantics；
+6. Content version/auth/routes belong Desktop Content projection；
+7. ordinary Data/Content failure does not directly equal Runtime/Frame failure；
+8. M14 is first full BrowserWindow/presentation product closure。
