@@ -2,10 +2,10 @@
 
 > 层级：实施计划 / Package Boundary  
 > 状态：Active Design / Tracking  
-> 稳定程度：Evolving by milestone / M10 boundary frozen  
-> 主要定义：primitive、protocol capability、role、platform ports、launcher/integration、composition root 与 business package 的 ownership/dependency boundary  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> 最近复核：2026-09-07
+> 稳定程度：Evolving by milestone / **M12 preimplementation boundary frozen**  
+> 主要定义：primitive、protocol capability、role、FSDB core、platform ports、launcher/integration、composition root 与 business package 的 ownership/dependency boundary  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 最近复核：2026-09-08
 
 ```text
 Protocol boundary
@@ -15,11 +15,11 @@ Protocol boundary
 != milestone boundary
 ```
 
-Milestone只描述 implementation slice；package ownership以系统架构 + accepted/frozen ADR + 本文为准。
+Milestone只描述 implementation slice；package只有在真实 ownership/consumer要求出现时 materialize。
 
 ---
 
-## 1. Dependency Layers
+## 1. Current Dependency Shape
 
 ```text
 foundation ─────→ platform-ports ─────→ main / subsystem-host / renderer
@@ -32,56 +32,53 @@ wire ─────────────→ runtime-control ──→ main /
  │
  ├──────────────→ data ───────────────→ subsystem / renderer
  │
- ├──────────────→ content ────────────→ subsystem / renderer/content-service
- │
  └──────────────→ game-package
                          ↓
               game-launcher-hostra/pwa
                          ↓
                        apps/*
+
+Node stdlib
+    ↓
+@loomrealm/fsdb
+    ├────────→ @loomrealm/fsdb-http
+    └────────→ apps/desktop Content composition
 ```
 
-Business packages depend only on nearest author-facing role SDK。
+Business Definition只依赖最近的 author SDK：
+
+```text
+business Definition → @loomrealm/subsystem
+@loomrealm/map       → @loomrealm/subsystem
+```
+
+M12 **不**建立 `@loomrealm/content` 或 `@loomrealm/content-service` package。Subsystem ContentClient属于 `@loomrealm/subsystem` author surface；Renderer ResourceClient属于 `@loomrealm/renderer` private realization；Desktop Content Service属于 `apps/desktop` composition。
 
 ---
 
-## 2. Foundation / Wire
+## 2. Primitive / Protocol Packages
 
 `@loomrealm/foundation` owns MessageCarrier / CarrierClosed / deterministic MemoryCarrier；no JSON/domain/platform semantics。
 
 `@loomrealm/wire` owns plain JSON/JSON-RPC representation、exact keys、safe integer、UTF-8/depth primitives；no carrier/lifecycle/domain authority。
 
-Role SDK package MAY use Wire JSON types internally/type-only；这不授权 business Definition直接 import Wire/protocol packages。
+Protocol capability packages：
+
+```text
+@loomrealm/runtime-control   → Foundation + Wire
+@loomrealm/renderer-control  → Foundation + Wire
+@loomrealm/data              → Foundation + Wire
+```
+
+它们拥有 wire/profile mechanics，不拥有 Main/Subsystem/Renderer/Platform authority。
 
 ---
 
-## 3. Contract Capability Packages
+## 3. `@loomrealm/platform-ports`
 
-### `@loomrealm/runtime-control`
+Runtime dependency保持 exactly `@loomrealm/foundation`。
 
-Owns concrete Runtime Control mechanics：one reader/dispatcher、one writer、shared sender IDs、pending/deadline/terminal、Response causal barrier、typed peers。
-
-Dependencies exactly Foundation + Wire。No Main/Subsystem authority、transport establishment、generic RPC framework。
-
-### `@loomrealm/renderer-control`
-
-Owns Renderer Control v1 mechanics：hello/version selection、closed wire/model validation、whole current Snapshot、bounded latest-state publication、retirement/terminal。
-
-Dependencies exactly Foundation + Wire。No Main/Renderer/Platform implementation dependency。
-
-### `@loomrealm/data`
-
-Owns Renderer Data Profile v1 connection-local mechanics：Data Connection + User Input + Render Update wire/peer mechanics。Role policy remains in subsystem/renderer integrations；physical Broker authority remains Platform composition。
-
-M10 does not move Input role policy into `@loomrealm/data`。
-
----
-
-## 4. `@loomrealm/platform-ports` — Shared Core↔Platform Facts
-
-Runtime dependency remains exactly `@loomrealm/foundation`。
-
-Frozen root surfaces through M10仍然只有 M4–M9 declarations：
+Frozen root surfaces through M12仍只有已经出现真实 Core↔Platform consumer 的能力：
 
 ```text
 M4  DeadlineScheduler / RuntimeControlBinding
@@ -91,17 +88,25 @@ M8  RendererDataBinding / SubsystemDataBinding / SubsystemDataBindingResult
 M9  DataConnectionAuthorityEntry / DataConnectionAuthorityView / DataConnectionAuthoritySink
 ```
 
-**M10 adds no Platform Port。** Renderer input source是 Renderer role integration surface，不是 reusable Core↔Platform capability。
+M10 Input、M11 Render、M12 Content均 **不新增 Platform Port**：
 
-No universal Platform/service locator/event stream/connection registry/future port inventory。
+```text
+RendererInputSource      → Renderer role integration surface
+RenderManager/Store      → owning role internals
+ContentClient            → Subsystem author SDK
+Renderer ResourceClient  → Renderer private role implementation
+Desktop Content service  → app composition
+```
+
+No universal Platform/service locator/future port inventory。
 
 ---
 
-## 5. Platform-neutral Role Packages
+## 4. Platform-neutral Role Packages
 
 ### Main
 
-Through M10仍依赖：
+依赖：
 
 ```text
 @loomrealm/platform-ports
@@ -110,11 +115,11 @@ Through M10仍依赖：
 @loomrealm/wire
 ```
 
-Main owns Session、Runtime/Launch Attempt、Renderer currentness/authentication、Frame/Stack/Activation/InputTarget、Renderer revision、DataAuthority policy、failure/unwind。M10 adds no Main API/authority。
+Main owns Session、Runtime、Frame、Stack、Activation、InputTarget、Renderer currentness、DataAuthority、failure/unwind。M10–M12不增加 Main Content/Input/Render authority。
 
 ### Renderer
 
-Through M10依赖：
+依赖保持：
 
 ```text
 @loomrealm/renderer-control
@@ -122,212 +127,160 @@ Through M10依赖：
 @loomrealm/data
 ```
 
-M10 exact additive role surface：
+M10 root surface只有 frozen `RendererInputSource` integration；M11 Render Store internal-only；M12 ResourceClient继续 internal-only。M12不得为了共享 HTTP mechanics预建 public AssetManager/Repository/ContentClient root API。
 
-```text
-createRendererControlHolder(data?, input?)
-RendererInputSource
-RendererInputSourceChange
-```
-
-Source object construction-time fixed；0..1 source subscription follows current Control peer epoch。Renderer owns Effective gate + bounded User Input publisher on existing Data slots；does not mint Main/Data authority。
+若 Subsystem 与 Renderer真正出现相同、可独立复用的 transport client mechanics，只能在两个 production consumers都存在后抽取最小 helper；不得建立 `content-core` 以追求 package symmetry。
 
 ### Subsystem
 
-Author root owns business SDK；trusted `/host` owns Runtime/Data role integration。
-
-M10 root adds **minimal exact author-facing surface**：
+Author root owns：
 
 ```text
-InputStateChannel / InputEventChannel / InputChannel
-KeyboardStateInput / KeyboardEventInput
-PointerStateInput / PointerEventInput
-GamepadStateInput / GamepadEventInput
-InputPayload / InputHandler / Unsubscribe
-CreateInputListenerOptions / InputListener
-SubsystemScope.createInputListener
+Frame / FrameOutcome
+InputListener
+RenderDomain
+ContentClient            // M12 frozen
+AbortSignal
 ```
 
-Nested keyboard/pointer/gamepad/custom supporting shapes do not get separate root exports solely for symmetry；they remain expressible through payload indexed access。Author handler sees payload only；protocol envelope/peer/activationId/generation不进入 root business API。
+trusted `/host` owns Runtime/Data/Content physical integration。Business Definition仍只 import `@loomrealm/subsystem`；不得直接 import Wire、protocol、Platform、FSDB、HTTP 或 launcher packages。
 
-`/host` consumes `RuntimeControlBinding` + optional `SubsystemDataBinding` and protocol peers。Business Definition source只 import `@loomrealm/subsystem`。
-
----
-
-## 6. M10 Role Ownership
+M12 Content root只 materialize真实 author consumer需要的：
 
 ```text
-Subsystem FrameRuntime
-    local Frame/Activation/mutation-gate facts
-
-Subsystem InputManager
-    listener contributions/registrations
-    Desired Interest
-    retained immutable State
-    deterministic business delivery
-    latest-only Interest publication
-
-Renderer Control holder/Data slots
-    current Control/Data facts
-
-Renderer Input gate/publisher
-    Effective intersection
-    State/Event/Reset ordering/backpressure
-
-RendererInputSource
-    canonical producer facts only
+ContentClient.record
+ContentClient.resource
+ContentReadOptions
+ContentRecord
+ContentResource
+ContentReadError / ContentReadErrorCode
+SubsystemScope.content
 ```
 
-No role duplicates another owner。
+不为 HTTP surface symmetry发布 manifest/group/head/raw fetch/URL builder。
 
 ---
 
-## 7. M10 Author / Async Boundary
+## 5. `@loomrealm/fsdb` — Frozen M12 Domain Core
 
-Frozen Subsystem SDK rules：
+M12新增 exactly one Node-specific FSDB package：
 
 ```text
-channels/setChannels → Interest contribution
-on/unsubscribe       → callback registration only
-setChannels preserves dormant registrations
-unsubscribe/close idempotent
-stable delivery snapshot
-matching handlers follow successful on() registration order
-multi-channel local convergence canonical channel order
-async handler Promise never becomes Data-reader flow control
+@loomrealm/fsdb
 ```
 
-The observable registration order is frozen；its private representation is not。No registration ordinal/counter framework is required。
-
-Known-no-commit `frame.call`：InputManager retained-State synchronous convergence precedes recoverable rejection becoming business-observable。
-
-No generic subscription/async scheduler framework is extracted。
-
----
-
-## 8. Protocol vs Authority Ownership
+理由不是分层对称，而是已有两个 production consumers：
 
 ```text
-renderer-control peer
-    validates hello/protocolVersions
-    selects protocol v1
-
-Main
-    owns Renderer token/currentness
-    owns DataAuthority / InputTarget
-
-DataConnectionAuthoritySink
-    only receives committed Main physical-binding view
-
-Desktop/PWA Broker
-    only realizes that view into physical paired carriers
-
-User Input roles
-    only consume current committed facts
+@loomrealm/fsdb-http
+apps/desktop Content Service
 ```
 
-No Binding/Broker/Input source can infer authority from endpoint、ticket、socket、focus、role acquire request or local holder state。
-
----
-
-## 9. Main-facing Platform View Through M10
-
-```ts
-interface MainPlatform {
-  readonly scheduler: DeadlineScheduler;
-  readonly opaqueMaterial: OpaqueMaterialGenerator;
-  readonly runtimeHosting: RuntimeHosting;
-  readonly rendererControl?: RendererControlBinding;
-  readonly dataConnections?: DataConnectionAuthoritySink;
-}
-```
-
-M10 does not modify this view。
-
----
-
-## 10. Platform Launch Integration Packages
-
-`@loomrealm/game-launcher-hostra/pwa` own Game Entry consumption、own Platform manifest、key join / executable security resolution、PlatformLaunchPlan、LogicalGameBootstrap、RuntimeHosting / Runner integration。
-
-They MUST NOT become Renderer/DataBroker/Input/Content mega-packages。Hostra M9 child-scoped Data provisioner mechanics remain unchanged by M10。
-
----
-
-## 11. Renderer Control / Input Physical Placement
-
-M7 closes logical `RendererControlBinding` only。Physical Hostra BrowserWindow/Renderer Control WS arrives M14；PWA MessagePort realization M16。
+它只拥有：
 
 ```text
-M10 deterministic RendererInputSource
-M14 DOM/Gamepad RendererInputSource
-M16 PWA equivalent source
+FSDB Well-formed validation
+immutable logical snapshot/index
+deterministic database descriptor
+ordinary entry + metadata logical identity
+safe-open / same-handle currentness
+OPEN / STALE / CLOSED state
+read admission / lease / close drain
+source-local validator facts
 ```
 
-M14/M16 source implementations must reuse exact M10 source API/current-Control subscription semantics。
-
----
-
-## 12. Data Broker / Provisioning Placement
-
-M8 role-facing seam：RendererDataBinding / SubsystemDataBinding。
-
-M9 authority/physical seam：Main DataConnectionAuthoritySink → apps/desktop Broker → Renderer WS + Runner WS → HostraRuntimeDataProvisioner → paired install。
-
-M10 only consumes current M9 Data peers；no Broker/Runner/provisioning ownership moves into Input roles。
-
----
-
-## 13. No Universal Frameworks
-
-Forbidden：
+它不拥有：
 
 ```text
-GenericRpcPeer
-GenericSchemaCodec
-UniversalProtocolSession
-ConnectionRegistry / ConnectionManager
-RuntimeDirectory service
-UniversalRendererServices
-RendererPlatform
-PlatformLaunchOptions
-options:any
-BindingErrorHierarchy
-AuthorityEventBus / ObserverHub
-GenericInputManager framework
-InputDeviceRegistry/plugin system
-registration sequencing framework
-Generic async callback scheduler
-GenericTransaction / 2PC
-CurrentnessLease/Epoch/Heartbeat
-retry/backoff framework
+HTTP
+LoomRealm Content API
+contentVersion SHA-256 policy
+installation registry
+Game/Launcher/Main/Subsystem/Renderer
+Repository / StorageProvider SPI
+watch/hot reload
+filesystem transaction layer
 ```
 
----
-
-## 14. Composition Roots
-
-`apps/desktop` / `apps/pwa` / `apps/cli` MAY depend on lower packages and concrete launch integrations but MUST NOT duplicate Game/Launcher/protocol/domain validation。
-
-M9 materialized `apps/desktop` for Broker/WS relay；M14 adds BrowserWindow/real Renderer Control/Input/Render/Content。
-
----
-
-## 15. Port Placement Rule
+`@loomrealm/fsdb` 是正常可发布 workspace dependency：
 
 ```text
-protocol mechanics → owning protocol package
-stable Core↔Platform capability/fact → platform-ports
-role policy/authority projection → owning role
-one-platform Runner mechanics → concrete launcher/integration package
-one-app physical composition/policy → app internal
+name          = @loomrealm/fsdb
+version       = current workspace version
+module        = ESM
+engines       = Node >=20
+publishConfig = public
+exports       = root only
+runtime deps  = 0 workspace deps / Node stdlib only
 ```
 
-`RendererInputSource` stays `@loomrealm/renderer` role surface because its consumer is Renderer input composition and M10 has no second shared Core↔Platform capability requirement。
+`@loomrealm/fsdb-http` 从 M12 起唯一新增 runtime workspace dependency就是 `@loomrealm/fsdb`；existing root API 与 HTTP conformance保持不变。精确修订见 [`M12_CORE_EXTRACTION.md`](../../packages/fsdb-http/M12_CORE_EXTRACTION.md)。
 
 ---
 
-## 16. Target Workspace — Demand Driven
+## 6. Content Placement — Frozen M12
+
+```text
+Hostra PREPARE
+→ current immutable prepared installation view
+→ @loomrealm/fsdb snapshot
+→ private immutable Content Index + manifest/version facts
+→ apps/desktop readonly Content HTTP service
+```
+
+Desktop Content Service是 app-private composition responsibility，不单独建立 `@loomrealm/content-service` package。
+
+Content version属于 Content contract：
+
+```text
+sha256:<64 lowercase hex>
+```
+
+由 prepare-time Content projection对 exact served bytes计算；不是 FSDB domain fact。
+
+Hostra child Content credential injection属于 concrete Host/Runner integration，不进入 Runtime Control、M9 Data provisioning IPC、Frame/Render/business payload，也不要求新的 platform-port 或 credential protocol。
+
+---
+
+## 7. Launcher / Composition Ownership
+
+`@loomrealm/game-launcher-hostra/pwa` own Game Entry consumption、own Platform manifest、key join、executable security resolution、PlatformLaunchPlan、LogicalGameBootstrap 与 RuntimeHosting/Runner integration。
+
+它们不得吸收 Renderer/DataBroker/Input/Render/Content policy成为 mega-package。
+
+```text
+one-platform child mechanics
+→ concrete launcher/integration package
+
+one-app physical composition/policy
+→ apps/* private implementation
+```
+
+M9 child-scoped Data provisioner继续属于 Hostra launcher integration；M12 child-private Content material注入只做最小独立 Host seam，不复用 Data provisioning protocol。
+
+---
+
+## 8. Physical Milestone Placement
+
+```text
+M10  deterministic RendererInputSource role behavior
+M11  Render authority/publication/internal Renderer replica
+M12  Desktop Content + Subsystem/Renderer consumers
+M13  @loomrealm/map ordinary author SDK consumer
+M14  BrowserWindow + physical Renderer Control/Input/Render presentation/Content
+M15  PWA Runtime/Worker vertical
+M16  PWA Renderer/Data/Input/Render/Content + cross-platform equivalence
+```
+
+M14 browser input必须复用 M10 source seam；presentation消费 M11 internal current replica；资源获取消费 M12 Renderer ResourceClient，不得新开 DOM→filesystem/URL shortcut。
+
+PWA M16实现相同 logical Content API，但 **不依赖 Node-only `@loomrealm/fsdb`**；其 physical storage可以是 OPFS/Cache/Service Worker。
+
+---
+
+## 9. Target Workspace — Demand Driven
+
+Current/next真实 workspace：
 
 ```text
 packages/
@@ -340,86 +293,104 @@ packages/
 ├── runtime-control/
 ├── renderer-control/
 ├── data/
-├── content/
+├── fsdb/                 // M12
+├── fsdb-http/
 ├── main/
 ├── subsystem/
 ├── renderer/
-├── content-service/
-└── map/
+└── map/                  // M13
 
 apps/
 ├── desktop/
-├── pwa/        // later
-└── cli/        // later
+└── pwa/                  // M15+
 ```
 
-M10 creates no new package/workspace。
+不存在 current requirement 的：
+
+```text
+packages/content/
+packages/content-service/
+packages/repository/
+packages/asset-manager/
+```
+
+不得为了未来可能用途预建。
 
 ---
 
-## 17. Conformance / Qualification Ownership
+## 10. Conformance / Qualification Ownership
 
 ```text
-@loomrealm/data
-    formal User Input wire/profile mechanics
+@loomrealm/fsdb
+    FSDB domain/core extraction tests
+
+@loomrealm/fsdb-http
+    existing FSDB HTTP conformance regression
+
+apps/desktop M12
+    Content API/auth/version/prepare/index/service vertical
 
 @loomrealm/subsystem
-    minimal exact Input author types/API
-    listener/Interest/State/delivery/async semantics
+    exact ContentClient author behavior/lifecycle
 
 @loomrealm/renderer
-    exact source API/lifetime
-    Effective gate/publisher
+    private ResourceClient version/cache/ownership behavior
 
-apps/desktop M10 vertical
-    real M9 physical Data + production role integration
+M13
+    business SDK usage, not protocol duplication
 
 M14/M16
-    real physical source + full platform equivalence
+    complete physical E2E/equivalence
 ```
 
 No giant E2E replaces package/role/contract evidence。
 
 ---
 
-## 18. Runtime Dependency Invariants Through M10
+## 11. No Universal Frameworks
+
+Forbidden unless a later real consumer reopens the boundary：
 
 ```text
-@loomrealm/platform-ports → @loomrealm/foundation
-@loomrealm/runtime-control → @loomrealm/foundation + @loomrealm/wire
-@loomrealm/renderer-control → @loomrealm/foundation + @loomrealm/wire
-@loomrealm/data → @loomrealm/foundation + @loomrealm/wire
-@loomrealm/main → platform-ports + runtime-control + renderer-control + wire
-@loomrealm/renderer → renderer-control + platform-ports + data
-@loomrealm/subsystem → shared protocol/port/wire packages for host/internal realization
+GenericRpcPeer / GenericSchemaCodec
+ConnectionRegistry / RuntimeDirectory
+UniversalRendererServices / RendererPlatform
+PlatformLaunchOptions / options:any
+AuthorityEventBus / ObserverHub
+Generic Input/Render manager framework
+Generic Repository hierarchy
+StorageProvider / StorageBackend SPI
+InstallationManager / global mutable registry
+AssetManager / loader/decoder plugin registry
+Content RPC / credential protocol
+GenericTransaction / 2PC
+CurrentnessLease / Heartbeat / retry framework
 ```
-
-Business Definition consumes only `@loomrealm/subsystem` root。
-
-Forbidden：renderer-control→roles/platform；platform-ports→protocol/role/concrete Platform；main→renderer/game-package/concrete launcher；business Definition→protocol/platform packages。
 
 ---
 
-## 19. Semver / Compatibility
+## 12. Semver / Compatibility
 
 `npm semver != protocol/profile version`。
 
-Current first implementation has no external compatibility obligation。M10 exact author/source APIs land directly as current first implementation；no deprecated alias/parallel Input API/fake v2。
+Current first implementation只维护一个 current model；没有真实 compatibility obligation时不制造 fake v2/deprecated alias/dual parser。
+
+`@loomrealm/fsdb` 与 `@loomrealm/fsdb-http` 都是正常 publishable workspace packages；后者的 M12 core extraction只改变 internal package ownership/dependency，不改变既有 v1 HTTP observable contract。
 
 ---
 
-## 20. Core Rules Through M10
+## 13. Core Rules Through M12
 
 1. Foundation/Wire remain orthogonal primitives；  
-2. protocol packages own mechanics, not Main/Platform authority；  
-3. Main remains single Runtime/Frame/Renderer/Data/InputTarget authority owner；  
-4. M8/M9 Data currentness/Broker ownership remains unchanged；  
-5. M10 adds no Platform Port/package；  
-6. Subsystem one InputManager owns Desired Interest + retained author State + delivery；  
-7. Input handler registration does not own Interest；  
-8. public API exports only behaviorally useful Input types；  
-9. registration order is observable, private sequencing mechanism is not；  
-10. async handler completion does not own Data flow control；  
-11. Renderer one construction-time source object + current-Control subscription feeds canonical facts only；  
-12. Renderer one bounded publisher per current Data slot owns User Input ordering/backpressure；  
-13. no generic RPC/authority/event/input/connection/transaction/retry/currentness framework。
+2. protocol packages own mechanics, not role/Platform authority；  
+3. Main remains single Session/Runtime/Frame/Renderer/Data authority owner；  
+4. Input/Render/Content不复制 M8/M9 currentness/Broker authority；  
+5. M10–M12均不因对称性新增 Platform Port；  
+6. Business Definition只依赖 `@loomrealm/subsystem`；  
+7. `@loomrealm/fsdb` 只因两个真实 consumers materialize，并完整拥有 readonly FSDB domain；  
+8. `@loomrealm/fsdb-http` 仍只是 FSDB HTTP projection；  
+9. Desktop Content Service留在 `apps/desktop`，不建立无必要 content-service package；  
+10. Content version属于 Content projection，不属于 FSDB core；  
+11. Renderer M12 ResourceClient保持 private，presentation仍是 M14；  
+12. PWA M16共享 logical Content semantics，不共享 Node storage mechanics；  
+13. no generic storage/content/repository/asset/credential framework without a demonstrated second consumer。
