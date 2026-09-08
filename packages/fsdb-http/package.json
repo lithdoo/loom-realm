@@ -15,7 +15,8 @@
     "dist",
     "README.md",
     "DESIGN.md",
-    "CONFORMANCE.md"
+    "CONFORMANCE.md",
+    "M12_CORE_EXTRACTION.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
