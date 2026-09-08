@@ -3,8 +3,10 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：M11 Render Replication **Frozen / Implemented / Qualified**；M13 Web Presentation **Stabilizing**  
-> 主要定义：Subsystem-owned Render authority、Renderer replica、wire-node identity、thin Web projection、deterministic body ordering、presentation authority boundary  
-> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
+> 主要定义：Subsystem-owned Render authority、Renderer replica、wire-node identity、thin Web projection、deterministic body ordering、presentation authority/currentness boundary  
+> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)  
+> 正式化：[Render Update v1](../15-contracts/render-update-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
+> 相关：[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
 ---
@@ -44,7 +46,7 @@ current authoritative replica
 required one-shot identity history
 physical Web projection mutation
 presentation context injection
-optional stale presentation cache after currentness loss
+last committed presentation across same-generation carrier loss
 ```
 
 Business Web presentation拥有：
@@ -88,6 +90,49 @@ key
 same-generation carrier replacement只重建 carrier-local baseline，不创建新的 wire Domain/Node identity universe。fresh generation建立新的 wire universe；business Domain MAY 跨 generation继续存在并重新导出。
 
 Frame create/active/suspend/close 与 RenderDomain create/show/hide/destroy没有隐式对应关系。
+
+### 3.1 Presentation behavior across Data currentness loss
+
+M13 对同一 generation 的 transient carrier loss冻结一个最小可观察规则：
+
+```text
+current carrier + complete baseline
+→ projection live
+
+same-generation carrier loss
+→ keep last committed managed DOM mounted
+→ freeze Projector mutation
+→ no context/data receiver calls caused by loss itself
+
+replacement carrier begins
+→ fresh Registry
+→ wait until every Domain in current Registry has a fresh baseline
+→ reconcile once presentation baseline is complete
+→ preserve same live wire-node identity → same HTMLElement
+```
+
+Presentation baseline complete 的 predicate 固定为：
+
+```text
+registrySeen
+AND
+every Domain in current Registry is baselined
+```
+
+因此 fresh Registry 后逐个到达的 partial Domain baselines **MUST NOT** 泄漏成混合新旧 DOM。若 current Registry 为空，则该 predicate 在 Registry commit 后成立，Projector可 reconcile 到空 managed presentation。
+
+这里的 frozen DOM 是“最后一次 successful complete presentation reconciliation”的物理结果，不成为第二份 Render authority；Store/current wire facts仍是唯一 source of truth。
+
+fresh generation 不继承旧 wire-node identity universe：
+
+```text
+fresh generation becomes current
+→ old generation managed elements are retired/removed
+→ old HTMLElement identity is not reusable by the new generation
+→ new complete baseline creates/reconciles a fresh element universe
+```
+
+同一 textual key 在 fresh generation 中可以再次出现，但必须对应 fresh HTMLElement。M13不为 stale/live 状态增加 business-visible callback、DOM attribute或公共 PresentationState API。
 
 ---
 
@@ -152,6 +197,7 @@ Render wire
 → Renderer Store validate
 → atomic successful commit
 → package-private post-commit notification/effect
+→ presentation eligibility/currentness gate
 → Web Projector
 ```
 
@@ -159,6 +205,7 @@ Render wire
 
 ```text
 failed Store mutation → no projection notification
+partial reconnect baseline → no DOM reconciliation
 business cannot subscribe to the seam
 Projector cannot write Store authority
 mechanical reconciliation != second desired-tree authority
@@ -272,7 +319,7 @@ receiveRenderContext(...)  // Window-lifetime capability, at most once per HTMLE
 receiveRenderData(...)     // retained current data, repeated as committed data changes
 ```
 
-精确 shape/lifetime/error vocabulary由 formal contracts拥有；本架构文档不复制完整接口定义。
+精确 shape/lifetime/error/currentness vocabulary由 formal contracts拥有；本架构文档不复制完整接口定义。
 
 ---
 
@@ -318,6 +365,8 @@ structure / children / root reorder
 → attrs
 → data delivery when required
 ```
+
+same-generation carrier loss本身不触发 DOM detach/reinsert，也不触发 receiver；complete rebaseline后的 reconciliation继续遵守上述 existing-element ordering。
 
 Browser-native lifecycle callback不是 LoomRealm atomic-commit ABI。
 
@@ -377,6 +426,10 @@ same key string across Domain/Subsystem does not collide
 fresh generation creates fresh wire-node identity
 subsystemKey → M11 Domain order → roots deterministic body sequence
 reorder moves existing elements
+same-generation carrier loss keeps last committed DOM mounted and fires no receiver
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline reconciles while preserving matching HTMLElement identity
+fresh generation retires old elements and same textual key receives fresh HTMLElement
 context before first managed insertion; at most once
 context/data receiver independence
 data initial/update full snapshot
@@ -397,10 +450,12 @@ M13不复制 M11 protocol conformance或 M12 Content internals。
 1. business Render authority在 Subsystem；Renderer只复制并呈现；
 2. wire identity包含 `subsystemKey + generation + domainId + key` scope；bare key不是 Window-global identity；
 3. same live wire-node identity保持 same HTMLElement；reorder只 move，不 recreate；
-4. M11 zIndex/domainId只在 Subsystem scope内有 logical ordering语义；
-5. M13 managed body order = `subsystemKey lexical → M11 Domain order → roots`，只是 deterministic physical concatenation；
-6. Projector只消费 successful Store commit后的 package-private seam；
-7. Projector不建立第二份 Render/projection authority；
-8. WC对 attrs/data/managed children只读；DOM不反向同步 Store；
-9. Config管理启动资源；Presentation API管理运行时 context/data/resource；
-10. M13不建立 component library、Presentation DSL、AssetManager、dynamic loader、global layer manager、public identity framework或 RenderEvent WC ABI。
+4. same-generation carrier loss保持最后 committed DOM mounted且冻结 projection；partial rebaseline不泄漏到 DOM；complete rebaseline后才 reconcile；
+5. fresh generation结束旧 HTMLElement identity universe；
+6. M11 zIndex/domainId只在 Subsystem scope内有 logical ordering语义；
+7. M13 managed body order = `subsystemKey lexical → M11 Domain order → roots`，只是 deterministic physical concatenation；
+8. Projector只消费 successful Store commit且 presentation-eligible 的 package-private seam；
+9. Projector不建立第二份 Render/projection authority；
+10. WC对 attrs/data/managed children只读；DOM不反向同步 Store；
+11. Config管理启动资源；Presentation API管理运行时 context/data/resource；
+12. M13不建立 component library、Presentation DSL、AssetManager、dynamic loader、global layer manager、public identity framework或 RenderEvent WC ABI。
