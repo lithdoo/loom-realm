@@ -122,7 +122,7 @@ Platform
 
 一个 authority 只允许一个 owner；Platform physical ownership不产生第二份 application authority。
 
-M13还需决定 business Web presentation implementation如何在 Renderer environment中被 trusted composition获得/加载/注册；当前不预设一定属于 Platform PREPARE、独立 artifact、package subpath或 app bundle。
+M13 已冻结 business Web presentation 的 runtime acquisition/loading/registration：`WebPresentationConfigV1` 从 current prepared Content 解析资源，由 trusted composition 私下绑定 browser `href/src`，按 ordered `<link>` / classic `<script>` 加载，业务脚本通过 `customElements.define(...)` 注册，并以 `window.onload` 作为 Web Projector start barrier。仍不属于 runtime contract 的是 business presentation implementation 如何进行 package/subpath/bundle/build organization，以及 trusted prepared resource → browser `href/src` 的 implementation-private binding mechanics。
 
 ---
 
@@ -171,6 +171,8 @@ attrs    → Renderer-managed host attributes
 data     → complete readonly full snapshot via dedicated optional WC observer interface
 children → Renderer-managed ordered light DOM
 ```
+
+多 Domain 的 top-level roots 直接 flatten 到 `document.body`，顺序固定复用 M11 logical Domain ordering：`zIndex` 升序，同 `zIndex` 按 `domainId` UTF-8 lexical 升序；每个 Domain 内保持 authoritative roots order。Domain ordering变化只移动仍 live 的现有 HTMLElement，不以 recreate 替代。
 
 业务 WC 对 LoomRealm 投影出的 `tag/attrs/data/children` 等全部 Render state只有读取权；只能修改自己的 private presentation state（Shadow DOM、Canvas/WebGL、decoded resource、animation/cache 等）。Renderer 不从 DOM 反向推导 Render Store。
 
@@ -259,7 +261,7 @@ Input
 
 M13只关闭 LoomRealm-owned Render Store → business-owned Custom Element projection seam；M14 `@loomrealm/map → @loomrealm/subsystem` 并增加 map-owned Web presentation implementation作为第一个真实综合 consumer；M15完成 BrowserWindow/Renderer Control/Input/Content/presentation的完整 Desktop composition；M16只完成 PWA Runtime；M17完成 PWA Renderer/Data/Input/Render/Content/presentation和 Hostra/PWA logical equivalence。
 
-M13尚未冻结 presentation implementation的 package/subpath/bundle topology、module loading responsibility、`customElements` registration vs native upgrade语义或 projection-start ordering。
+M13 已冻结 browser loading / registration / projection-start semantics：ordered `<link>` / classic `<script>`、`customElements.define(...)`、`window.onload` ready barrier。尚未冻结的只包括 presentation implementation 的 package/subpath/bundle topology，以及 trusted prepared resource → browser `href/src` 的 implementation-private binding mechanics。
 
 ---
 
