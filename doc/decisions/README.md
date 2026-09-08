@@ -42,6 +42,7 @@ ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-archi
 29. [ADR 0029：User Input v1 mutation-gate State convergence correction](./0029-user-input-v1-mutation-gate-state-convergence.md)
 30. [ADR 0030：冻结 M12 Content preimplementation closure](./0030-freeze-m12-content-preimplementation-closure.md)
 31. [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./0031-business-owned-web-component-projection.md)
+32. [ADR 0032：冻结 M13 Web Presentation API v1 与 presentation resource capability](./0032-freeze-m13-web-presentation-api-v1.md)
 
 ---
 
@@ -81,14 +82,22 @@ ADR 0031
     reuses current prepared Content/FSDB logical resource identity without adding fsdbRoot input
     freezes ordered <link> / classic <script> + window.onload bootstrap
     freezes direct document.body root projection with no generic layer/stacking framework
-    freezes optional receiveRenderData(full readonly snapshot) as the WC data ABI
+    freezes optional receiveRenderData(full readonly snapshot) as retained-data WC ABI
     does not define RenderEvent → WC/DOM event delivery
     does not police business WC DOM contract violations with MutationObserver
+
+ADR 0032
+    narrowly updates ADR 0031's M13 WC ABI closure
+    places receiveRenderContext + receiveRenderData in one Web Presentation API v1 contract while keeping interfaces independent
+    freezes one-shot pre-insertion context injection
+    freezes narrow PresentationResourceClient facade over M12 Renderer-private ResourceClient
+    requires expected contentVersion and hides origin/token/path/private client
+    keeps resource and callback failures presentation-local
 ```
 
-ADR 0031 不 supersede ADR 0022。它明确：M11 已关闭 Render authority/replication，但 physical Web projection是下一层 consumer；因此无需重开 Render Update v1。
+ADR 0031 / 0032 不 supersede ADR 0022。它们明确：M11 已关闭 Render authority/replication，而 physical Web projection + local WC ABI是下一层 consumer；因此无需重开 Render Update v1。
 
-`Web Presentation Config v1` 是 ADR 0031 当前 startup realization的 formal contract；它不扩张 Game Entry / Platform Launch Manifest / LogicalGameBootstrap。
+`Web Presentation Config v1` 是 ADR 0031 current startup realization的 formal contract；`Web Presentation API v1` 是 ADR 0032 current Projector↔business-WC local ABI的 formal contract。两者都不扩张 Game Entry / Platform Launch Manifest / LogicalGameBootstrap。
 
 ---
 
@@ -127,7 +136,9 @@ ADR 0016
 → ADR 0028 / M9 physical Data slice
 → ADR 0029 / M10 Input correction + closure
 → M11 Render replication closure
-→ ADR 0031 / Web Presentation Config v1 / M13 thin Web Presentation Projection
+→ ADR 0031 / Web Presentation Config v1
+→ ADR 0032 / Web Presentation API v1
+→ M13 thin Web Presentation Projection
 ```
 
 ### Content
@@ -137,6 +148,7 @@ ADR 0003
 → ADR 0030
 → M12 Content implementation/qualification closure
 → M13 presentation bootstrap logical resource resolution
+→ ADR 0032 PresentationResourceClient narrow business-facing façade
 ```
 
 ---
@@ -154,7 +166,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-ADR 0031 不授权为了 Web framework convenience修改 M11 wire/tree semantics；M13应优先作为 M11 Store的 trusted physical consumer实现。业务 WC内部 framework选择不构成对 M11/M13 projection authority的 reopen。
+ADR 0031 / 0032 不授权为了 Web framework convenience修改 M11 wire/tree semantics；M13应优先作为 M11 Store的 trusted physical consumer实现。业务 WC内部 framework选择不构成对 M11/M13 projection authority的 reopen。
 
 ---
 
