@@ -4,7 +4,7 @@
 > 状态：Active / Normative / Evolving  
 > 主要定义：跨 Desktop/PWA 的逻辑只读内容访问、路由、缓存、错误、完整性与 request authorization semantics  
 > 依赖：[存储与内容系统](../10-architecture/storage-system.md)、[Game Package v1](./game-package-v1.md)、[ADR 0016](../decisions/0016-protocol-boundary-cleanup.md)  
-> 最近复核：2026-08-09
+> 最近复核：2026-09-08
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -83,9 +83,32 @@ Base route：
 /_lr/v1/games/{installationId}
 ```
 
-路径段使用 UTF-8 percent-encoding。解码后不得包含 `/`、`\`、`.`/`..` path semantics、NUL/control chars、Drive/UNC/URL semantics。
+### 2.1 Segment rules
+
+所有 route segment 使用 UTF-8 percent-encoding。每个解码后的 logical segment 都必须：
+
+```text
+non-empty
+valid Unicode text
+contain no / or \
+not equal . or ..
+contain no NUL/control chars
+contain no Drive/UNC/URL semantics
+```
+
+`installationId`、`namespace`、record/group `key` 都是单个 logical segment。
+
+Resource `key` MAY 是 hierarchical logical key：
+
+```text
+segment1/segment2/.../segmentN
+```
+
+它由一个或多个分别满足上述规则的 resource segments 组成；`/` 只作为 logical ResourceKey segment separator，不属于任何单个 segment，也不得通过 percent-decoding 从一个 segment 内制造。
 
 请求必须先做 logical identity validation，再查询 trusted Package Index；禁止 URL→filesystem direct mapping。
+
+`ContentIdentityV1.contentVersion` 表达内容版本/cache identity；v1 route 不提供 client-selected historical-version selector。客户端若有 expected version，应读取 current logical identity 后比较 response version，而不是发明私有 query/header。
 
 ---
 
@@ -107,6 +130,8 @@ GET  /_lr/v1/games/{installationId}/records/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/records/{namespace}/{key}
 ```
 
+`key` 是单个 logical segment。
+
 默认：
 
 ```text
@@ -120,6 +145,8 @@ GET  /_lr/v1/games/{installationId}/groups/{namespace}/{key}
 HEAD /_lr/v1/games/{installationId}/groups/{namespace}/{key}
 ```
 
+`key` 是单个 logical segment。
+
 v1 默认 JSON Lines：
 
 ```text
@@ -131,9 +158,11 @@ Content-Type: application/x-ndjson; charset=utf-8
 ### Resource
 
 ```http
-GET  /_lr/v1/games/{installationId}/resources/{namespace}/{key}
-HEAD /_lr/v1/games/{installationId}/resources/{namespace}/{key}
+GET  /_lr/v1/games/{installationId}/resources/{namespace}/{key...}
+HEAD /_lr/v1/games/{installationId}/resources/{namespace}/{key...}
 ```
+
+`{key...}` 是一个或多个 resource path segments。服务端逐 segment decode/validate 后，以 `/` 连接成 logical ResourceKey；不得把原始 request path 直接交给 filesystem resolver。
 
 返回 Package Index 声明的 MIME + binary body；普通资源不得 Base64 包入 JSON。
 
@@ -155,7 +184,9 @@ interface ContentIndexEntryV1 {
 }
 ```
 
-`internalPath` 只存在可信 Content Service 内部，MUST NOT 返回客户端。
+Resource entry 的 `key` MAY 是 `/` 分隔的 hierarchical logical ResourceKey；`internalPath` 仍只存在可信 Content Service 内部。
+
+`internalPath` MUST NOT 返回客户端。
 
 ```text
 logical identity
@@ -166,7 +197,51 @@ logical identity
 
 ---
 
-## 5. Success / Cache Metadata
+## 5. Content Version / Success Metadata
+
+### 5.1 Frozen version representation
+
+v1 `contentVersion` 精确表示为：
+
+```text
+sha256:<64 lowercase hexadecimal characters>
+```
+
+计算：
+
+```text
+SHA-256(exact successful full-body 200 representation bytes)
+→ lowercase hex
+→ prefix "sha256:"
+```
+
+因此：
+
+```text
+same response bytes → same contentVersion
+changed response bytes → different contentVersion
+```
+
+不得使用 process-local snapshot id、inode/mtime/ctime/fingerprint 或随机值作为 Content version authority。
+
+Record/group/resource 默认 hash 其实际成功 GET 返回的完整 body bytes。
+
+Manifest 是生成内容，必须先形成 deterministic normalized public `GameEntryV1` JSON bytes：
+
+```text
+construct only public GameEntryV1 fields
+→ recursively serialize JsonValue
+    object keys sorted by Unicode code-point order
+    array order preserved
+    scalar spelling follows JSON.stringify semantics
+    no insignificant whitespace
+→ UTF-8 without BOM
+→ SHA-256 those exact served bytes
+```
+
+该 serializer 只服务 Content manifest representation；不得因此建立 public generic canonical-JSON framework。
+
+### 5.2 Response headers
 
 成功响应至少提供：
 
@@ -178,12 +253,14 @@ Cache-Control
 Content-Length when determinable
 ```
 
-推荐：
+v1 固定：
 
 ```text
-ETag: "<contentVersion>"
-X-Loom-Content-Version: <contentVersion>
+X-Loom-Content-Version: sha256:<64 lowercase hex>
+ETag: "sha256:<64 lowercase hex>"
 ```
+
+`ETag` 与 `X-Loom-Content-Version` MUST 表达同一个 `contentVersion`。
 
 不可变 hash-addressed content MAY 使用长期 immutable cache；Manifest/registration-like content使用更保守 cache policy。
 
@@ -200,6 +277,8 @@ If-None-Match
 no body
 ```
 
+HEAD/304 使用对应 full-body 200 representation 的同一 `contentVersion`，不得重新生成另一版本事实。
+
 client cache identity 至少包含：
 
 ```text
@@ -214,7 +293,7 @@ installationId + kind + namespace + key + contentVersion
 
 `HEAD` MUST 执行与 GET 相同的 authorization、route、existence、version 检查，但不返回 body。
 
-可确定 headers SHOULD 与对应 GET 一致。
+可确定 headers SHOULD 与对应 GET 一致；`ETag` 与 `X-Loom-Content-Version` 必须与对应 full-body GET 一致。
 
 ---
 
@@ -236,6 +315,8 @@ Content-Range
 Accept-Ranges: bytes
 416 Range Not Satisfiable
 ```
+
+Content version仍标识完整 resource representation，而不是每个 range slice 的独立版本。
 
 客户端不得假设所有部署都支持 Range；可依据标准 HTTP response/header 判断。
 
@@ -467,6 +548,8 @@ MUST NOT return 200
 
 两类不得混用。
 
+Content `contentVersion` 的 SHA-256 可以与 Package Index integrity hash 共用同一次 trusted byte scan，但两个语义不得混淆：integrity policy决定“是否可信”，Content version决定“这些响应 bytes 是哪一版”。
+
 ---
 
 ## 14. Resource Reference Boundary
@@ -480,7 +563,9 @@ interface ResourceReferenceV1 {
 }
 ```
 
-具体 Renderer Resource Client再根据 installation context 解析 Content API。
+`resourceKey` MAY 是 `/` 分隔的 hierarchical logical ResourceKey；它不是 filesystem path。
+
+具体 Renderer Resource Client再根据 installation/namespace context 解析 Content API。
 
 不得在 Render/Frame/business payload中携带：
 
@@ -520,11 +605,16 @@ Service Worker 不承担 Runtime Tick、Frame Stack、Renderer Control、User In
 
 ```text
 manifest/record/group/resource success
+single-segment record/group identity
+multi-segment resource identity
+segment-level traversal/malformed rejection
 GET/HEAD semantic equivalence
+exact sha256:<64 lowercase hex> contentVersion representation
+ETag exact quoted contentVersion
 ETag/304
+manifest deterministic representation/version
 contentVersion cache isolation
 unknown installation/namespace/key
-logical path traversal rejection
 MIME correctness
 Desktop bearer missing/invalid/expired/scope-denied
 PWA same-origin registration validation
@@ -543,11 +633,14 @@ Conformance 不检查 Host 使用何种内部机制把 Desktop grant交给 Runti
 
 1. Content API 是 logical readonly GET/HEAD API；
 2. logical identity 不直接映射 filesystem path；
-3. Desktop/PWA共享 route/cache/error/integrity semantics；
-4. Desktop request authorization使用 scoped opaque bearer；PWA使用 same-origin Service Worker authority；
-5. Host credential issuance/distribution/rotation 是 implementation responsibility，不存在独立 Content Access Profile；
-6. credential 不进入 Frame、Render、URL query或 ordinary business payload；
-7. Range 是可选标准 HTTP能力，不存在 LoomRealm Range Profile；
-8. deployment size/concurrency/rate/timeouts 是 bounded implementation configuration，不形成协议 Profile；
-9. 409 与 422 failure category固定；
-10. Content API 不拥有 Runtime/Frame/Renderer/Input authority。
+3. record/group key 是单 segment，resource key 可由多个 validated logical segments组成；
+4. Desktop/PWA共享 route/cache/error/integrity semantics；
+5. `contentVersion` 精确为 `sha256:<64 lowercase hex>`，基于 exact successful full-body representation bytes；
+6. `ETag` 精确引用同一 contentVersion；
+7. Desktop request authorization使用 scoped opaque bearer；PWA使用 same-origin Service Worker authority；
+8. Host credential issuance/distribution/rotation 是 implementation responsibility，不存在独立 Content Access Profile；
+9. credential 不进入 Frame、Render、URL query或 ordinary business payload；
+10. Range 是可选标准 HTTP能力，不存在 LoomRealm Range Profile；
+11. deployment size/concurrency/rate/timeouts 是 bounded implementation configuration，不形成协议 Profile；
+12. 409 与 422 failure category固定；
+13. Content API 不拥有 Runtime/Frame/Renderer/Input authority。
