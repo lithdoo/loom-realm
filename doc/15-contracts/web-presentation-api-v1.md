@@ -149,6 +149,8 @@ receiveRenderContext
 
 Render move、Domain/root reorder、attrs/data update、same-live-wire-node reconciliation 不得重复注入 context。一次调用即计为 injection attempt；如果 callback throws，后续 Render commit不得自动重试形成 retry loop。
 
+`connectedCallback()` 只有一个 LoomRealm-defined initial guarantee：如果 element实现 `receiveRenderContext(...)`，context injection已经发生。它 **MUST NOT** 假设 initial managed attrs、managed children或 Render data已经安装；需要 retained Render data的业务逻辑必须以 `receiveRenderData(...)` 为准。
+
 ---
 
 ## 5. Context Ownership
@@ -281,7 +283,7 @@ object identity → no semantic meaning
 ```text
 0. construct
 1. receiveRenderContext(...), if implemented
-2. structure / managed insertion / children
+2. first managed insertion / structure / children
 3. attrs
 4. receiveRenderData(...), if implemented
 ```
@@ -296,7 +298,7 @@ object identity → no semantic meaning
 
 已有 element 不重复执行 construct/context steps。
 
-`connectedCallback` / `attributeChangedCallback` 是 browser-native lifecycle，不是 LoomRealm atomic-commit ABI；只有本契约明确的 receiver 调用具有 LoomRealm-defined callback semantics。
+`connectedCallback` / `attributeChangedCallback` 是 browser-native lifecycle，不是 LoomRealm atomic-commit ABI；只有本契约明确的 receiver 调用具有 LoomRealm-defined callback semantics。尤其 `connectedCallback` 不得被业务当成 initial Render snapshot ready barrier。
 
 ---
 
@@ -349,6 +351,8 @@ fresh generation结束旧 wire-node identity universe；旧 generation 的 manag
 
 ## 11. Failure Boundary
 
+普通 receiver/resource failure保持 presentation-local：
+
 如果 `receiveRenderContext` 或 `receiveRenderData` throws：
 
 ```text
@@ -360,6 +364,39 @@ continue best-effort projection where possible
 ```
 
 Resource Promise rejection遵循同一 authority boundary，由业务选择 placeholder/drop/report/private recovery。
+
+### Unregistered Custom Element tag
+
+Config v1 不声明 expected tag set，因此未注册 tag 只能在 Projector 实际 materialize current Render state时被发现。
+
+当 Projector 需要创建 `RenderNode.tag`，且：
+
+```text
+customElements.get(tag) === undefined
+```
+
+这是 **projection-time presentation structural failure**。Projector MUST：
+
+```text
+report failure
+MUST NOT create an unknown HTMLElement as fallback
+MUST NOT wait for arbitrary future registration/native upgrade
+stop further LoomRealm-managed DOM mutation for this Renderer Window
+preserve the last successfully reconciled managed DOM
+```
+
+该 failed presentation state 是 Renderer-private Window-local implementation state，不是新的 public `PresentationState` authority。恢复方式是 fresh Renderer Window/bootstrap，而不是在原 Window 中动态补注册后继续。
+
+该 failure同样：
+
+```text
+no Renderer Store rollback
+no Main/Subsystem authority mutation
+no Runtime/Frame failure
+not Render protocol-fatal
+```
+
+这与 Web Presentation Config v1 的 bootstrap failure严格分 phase：bootstrap failure阻止 Projector进入 running；unregistered `RenderNode.tag` 只可能在 Projector 已进入 running 后成为 presentation structural failure。
 
 ---
 
@@ -412,6 +449,7 @@ M13真实 Chromium qualification至少证明：
 ```text
 context/data receivers independent and optional
 context before first managed insertion / connectedCallback
+connectedCallback cannot assume initial managed attrs/children/data are ready
 same HTMLElement receives context at most once
 same live wire-node identity preserves HTMLElement across move/reorder
 same key string in different Domains/Subsystems does not collide
@@ -419,6 +457,8 @@ same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/
 partial same-generation rebaseline does not mutate DOM or deliver mixed data
 complete same-generation rebaseline preserves matching HTMLElement identity
 fresh generation may reuse key string without reusing old HTMLElement identity
+unregistered RenderNode.tag becomes Window-local presentation structural failure
+unregistered tag does not create unknown element or wait for future upgrade
 PresentationResourceClient reads real M12 bytes
 expectedContentVersion mismatch rejects as CONTENT_CONFLICT
 returned bytes mutation cannot alter future reads
@@ -436,12 +476,13 @@ Node/unit tests可覆盖 façade validation/error mapping；browser lifecycle/in
 1. `receiveRenderContext` 与 `receiveRenderData` 属于同一个 Web Presentation API v1，但保持独立 optional receiver；
 2. Context 是 Window-lifetime capability/environment，不是 Render state；
 3. Data 是 current retained Render state，不携 capability；
-4. 新 HTMLElement在第一次 managed DOM insertion前完成 context injection；同一 HTMLElement最多一次；
+4. 新 HTMLElement在第一次 managed DOM insertion前完成 context injection；同一 HTMLElement最多一次；`connectedCallback` 不代表 initial attrs/children/data ready；
 5. same-generation carrier loss保持最后 committed DOM mounted并冻结 receiver/projection；partial rebaseline不泄漏，complete baseline后才 reconcile；
 6. fresh generation创建 fresh HTMLElement identity universe；
 7. Presentation resource capability只读且 version-checked；
 8. business永远看不到 Content bearer/path/physical URL/FSDB/private Renderer client；
 9. resource/callback failure不回滚 application authority；
-10. RenderNode.data resource-reference schema仍由业务拥有；
-11. bare RenderNode `key` 不是 Window-global identity；HTMLElement identity跟随完整 live wire-node scope；
-12. M13不因此建立 AssetManager、dynamic loader、global service locator、public identity framework或第二份 Render authority。
+10. unregistered `RenderNode.tag` 是 projection-time structural failure：不创建 unknown element、不等待 late registration、停止该 Window 后续 managed DOM mutation，恢复需 fresh Window；
+11. RenderNode.data resource-reference schema仍由业务拥有；
+12. bare RenderNode `key` 不是 Window-global identity；HTMLElement identity跟随完整 live wire-node scope；
+13. M13不因此建立 AssetManager、dynamic loader、global service locator、public identity framework或第二份 Render authority。
