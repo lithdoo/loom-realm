@@ -3,7 +3,7 @@
 > 层级：模块设计 / 历史 provenance  
 > 状态：**Superseded**  
 > 最近复核：2026-09-08  
-> 被取代：[M12 / 01 — Desktop Content Service](../../../M12_01_CONTENT_SERVICE.md) → [M12 / 05 — Qualification and Closure](../../../M12_05_QUALIFICATION_CLOSURE.md)  
+> 被取代：[M12 / 01 — Desktop Content Service](https://github.com/lithdoo/loom-realm/blob/main/M12_01_CONTENT_SERVICE.md) → [M12 / 05 — Qualification and Closure](https://github.com/lithdoo/loom-realm/blob/main/M12_05_QUALIFICATION_CLOSURE.md)
 > 正式契约：[Content API v1](../../15-contracts/content-api-v1.md)  
 > 决策：[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)
 

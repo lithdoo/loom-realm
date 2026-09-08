@@ -183,8 +183,7 @@ export async function prepareDesktopContentView(
       index: mutable as ReadonlyMap<string, ContentIndexEntry>,
       close() {
         state.state = "closed";
-        closing ??= db.close();
-        return closing;
+        return closing ?? (closing = db.close());
       },
     };
     const view: PreparedDesktopContentView = Object.freeze({

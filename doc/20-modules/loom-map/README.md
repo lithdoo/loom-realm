@@ -5,7 +5,7 @@
 > 稳定程度：M10/M11/M12 consumed boundaries frozen；map business design仍 Experimental  
 > 主要定义：Phase 1 地图 Subsystem business module；作为 `@loomrealm/subsystem` 的普通 platform-neutral Definition Module consumer  
 > 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
-> 实施前置：[M10 Input](../../../M10_01_SUBSYSTEM_INPUT_MANAGER.md)、[M11 Render](../../../M11_01_SUBSYSTEM_RENDER_MANAGER.md)、[M12 Content](../../../M12_02_SUBSYSTEM_CONTENT_CLIENT.md)  
+> 实施前置：[M10 Input](https://github.com/lithdoo/loom-realm/blob/main/M10_01_SUBSYSTEM_INPUT_MANAGER.md)、[M11 Render](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md)、[M12 Content](https://github.com/lithdoo/loom-realm/blob/main/M12_02_SUBSYSTEM_CONTENT_CLIENT.md)
 > 最近复核：2026-09-08
 
 核心原则：

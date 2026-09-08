@@ -214,7 +214,7 @@ exports       = root only
 runtime deps  = 0 workspace deps / Node stdlib only
 ```
 
-`@loomrealm/fsdb-http` 从 M12 起唯一新增 runtime workspace dependency就是 `@loomrealm/fsdb`；existing root API 与 HTTP conformance保持不变。精确修订见 [`M12_CORE_EXTRACTION.md`](../../packages/fsdb-http/M12_CORE_EXTRACTION.md)。
+`@loomrealm/fsdb-http` 从 M12 起唯一新增 runtime workspace dependency就是 `@loomrealm/fsdb`；existing root API 与 HTTP conformance保持不变。精确修订见 [`M12_CORE_EXTRACTION.md`](https://github.com/lithdoo/loom-realm/blob/main/packages/fsdb-http/M12_CORE_EXTRACTION.md)。
 
 ---
 

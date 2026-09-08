@@ -19,6 +19,7 @@
     "M12_CORE_EXTRACTION.md"
   ],
   "scripts": {
+    "prebuild": "npm run build -w @loomrealm/fsdb",
     "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "prepublishOnly": "npm run build",
     "test": "npm run build && node --test"

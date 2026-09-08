@@ -4,7 +4,7 @@
 > 日期：2026-09-08  
 > 影响范围：Readonly Content API、Desktop Content composition、FSDB core ownership、Subsystem/Renderer Content projection、M13/M14/M16 交付边界  
 > 更新：[ADR 0003](./0003-readonly-content-api.md) 的首次实现 realization 细节  
-> 实施基线：[M12 / 01](../../M12_01_CONTENT_SERVICE.md) → [M12 / 05](../../M12_05_QUALIFICATION_CLOSURE.md)
+> 实施基线：[M12 / 01](https://github.com/lithdoo/loom-realm/blob/main/M12_01_CONTENT_SERVICE.md) → [M12 / 05](https://github.com/lithdoo/loom-realm/blob/main/M12_05_QUALIFICATION_CLOSURE.md)
 
 ## 背景
 
