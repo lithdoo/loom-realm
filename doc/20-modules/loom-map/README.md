@@ -1,460 +1,247 @@
 # `loom.map` 地图 Subsystem 模块设计
 
 > 层级：模块设计  
-> 状态：Active Design / **M14 Pending**  
-> 稳定程度：M10/M11/M12 consumed boundaries frozen；M13 Web Projection pending；map business design仍 Experimental  
-> 主要定义：Phase 1 地图 Subsystem business module + business-owned Web presentation implementation；作为 frozen Frame/Input/Render/Content/Web projection 的第一个真实综合业务 consumer  
-> 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  
-> 实施前置：[M10 Input](https://github.com/lithdoo/loom-realm/blob/main/M10_01_SUBSYSTEM_INPUT_MANAGER.md)、[M11 Render](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md)、[M12 Content](https://github.com/lithdoo/loom-realm/blob/main/M12_02_SUBSYSTEM_CONTENT_CLIENT.md)、M13 Web Presentation Projection  
+> 状态：Active Design / M14 Pending  
+> 稳定程度：M10/M11/M12 consumed boundaries frozen；M13 Web Presentation pending；map business design Experimental  
+> 主要定义：Phase 1 map business + map-owned Web presentation，作为 Frame/Input/Render/Content/M13 的第一个真实综合 consumer  
+> 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
 核心原则：
 
-> **`loom.map` 的业务 Definition只实现地图业务并消费 `@loomrealm/subsystem`；具体 Web Custom Elements同样由 map业务方拥有，但与 Business Definition保持 execution/authority boundary。LoomRealm Renderer只负责 Render replica → WC instance projection，不定义 map component vocabulary、layout或 stacking。**
+> **map Business Definition只依赖 `@loomrealm/subsystem`；map Web presentation由同一业务 owner拥有但运行在独立 Web execution side。LoomRealm只提供 authority/replication/Content/Web Presentation contracts，不拥有 map component vocabulary或 layout。**
 
 ---
 
 ## 1. Business / Presentation Boundary
 
-逻辑业务依赖固定：
-
 ```text
-@loomrealm/map
-    → @loomrealm/subsystem
+@loomrealm/map Definition
+→ @loomrealm/subsystem only
+
+map Web presentation
+→ concrete map-owned Custom Elements
+→ Web Presentation API v1 consumer
 ```
 
-Business Definition source不得直接依赖：
+Business Definition不得 import Renderer/Platform/DOM/FSDB/protocol/launcher packages。Web presentation不得获得 Subsystem business object或 RenderDomain writer。
 
-```text
-@loomrealm/subsystem/host
-@loomrealm/data
-@loomrealm/runtime-control
-@loomrealm/renderer
-@loomrealm/fsdb / @loomrealm/fsdb-http
-@loomrealm/game-package
-game-launcher-hostra/pwa
-platform-ports
-node:fs / node:http
-Browser/DOM/Worker transport
-```
-
-同一个 map owner另外拥有 Web presentation implementation：
-
-```text
-map business side
-    → SubsystemDefinitionFactory
-
-map Web presentation side
-    → concrete business-owned Custom Elements
-```
-
-二者 ownership相同，但 execution/authority boundary不同。Business Definition不得 import或调用 Web presentation code；Web presentation side也不获得 Subsystem business object/RenderDomain authority。
-
-M13 current runtime model已经冻结：业务 build产出的 presentation JS/CSS作为 current installation resources，由用户选择的 Window-level `WebPresentationConfigV1` 引用；不是把 presentation resource绑定进 `loom.map` subsystem descriptor。
-
-Game Entry仍只声明 logical Subsystem：
-
-```json
-{ "key": "loom.map" }
-```
-
-presentation module path/URL、loader capability不进入业务 Render tree。
+Presentation JS/CSS由 Window-level `WebPresentationConfigV1`引用，不绑定进 `loom.map` descriptor。Game Entry仍只声明 logical `{ "key": "loom.map" }`。
 
 ---
 
-## 2. Exact Author Capabilities Consumed by M14
+## 2. M14 Consumed Author Capabilities
 
-Business Definition只使用已经冻结的 author SDK：
+M14只消费已经冻结的 SDK：
 
 ```text
-SubsystemScope.signal
-SubsystemScope.createInputListener(...)
-SubsystemScope.createRenderDomain(...)
-SubsystemScope.content
-Frame.id / params / signal / call(...)
-FrameOutcome completed/cancelled/failed
+Frame / frame.call / FrameOutcome
+SubsystemScope.createInputListener
+SubsystemScope.createRenderDomain
+scope.content.record/resource
+scope.signal / frame.signal
 ```
 
-不新增 map-specific Runtime service locator。
-
-概念形状：
-
-```ts
-import {
-  defineSubsystem,
-  completed,
-} from "@loomrealm/subsystem";
-
-export default defineSubsystem((scope) => ({
-  async initialize() {
-    // load Runtime-level logical map/catalog facts through scope.content
-  },
-
-  async frame(frame) {
-    // consume frame.params, Input, Render, Content and nested frame.call
-    return completed(null);
-  },
-
-  async shutdown() {
-    // bounded business cleanup
-  },
-}));
-```
-
-业务 Definition不得观察 installationId、Content URL/bearer、module path、Runner、generation、domainId、activationId、HTMLElement 或 transport identity。
+不新增 map-specific Runtime service locator、raw carrier或 platform adapter。
 
 ---
 
-## 3. Content — Consume Frozen M12 Surface
+## 3. Content / Input / Render
 
-M14 current author surface：
+### Content
 
-```text
-scope.content.record(namespace, key, {signal?})
-scope.content.resource(namespace, resourceKey, {signal?})
-```
+Map Definition通过 M12 logical Content API读取 metadata/resource；不得观察 installationId、filesystem path、URL、bearer、HTTP/FSDB physical identity。
 
-地图可以使用 logical namespace/resource identity读取 map metadata、tileset/character metadata与 hierarchical resource bytes。
+如果真实实现证明 `ContentClient.group()` 必需，再最小 reopen M12 author surface；禁止 raw fetch旁路。
 
-返回的 `contentVersion` 是：
+### Input
 
-```text
-sha256:<64 lowercase hex>
-```
+Map listener继续服从 M10 Interest/Producer/Main InputTarget/current Data semantics。WC focus/DOM event不能创造 Input authority或绕过 `RendererInputSource`。
 
-业务 Definition不得看到或构造 installationId、filesystem path、localhost URL、bearer、HTTP Response/Headers或 FSDB physical identity。
+### Render
 
-M12没有为了对称性发布 `group()`/`manifest()`。如果 M14真实实现证明地图必须直接消费 group，则显式最小 reopen M12 author projection；不得通过 raw fetch/HTTP/FSDB旁路绕过。
+Map创建业务 RenderDomains并使用 `replace/close`维护 authoritative state。Frame/Data/Activation lifetime不隐式控制 Domain lifetime。
+
+`RenderDomain.emit`仍可用，但 M14不为 coverage硬造 RenderEvent consumer；M13没有 Event→WC ABI。
 
 ---
 
-## 4. Input — Consume Frozen M10 Surface
+## 4. Map-owned Web Presentation
 
-Frame-scoped listener：
-
-```ts
-const input = scope.createInputListener({
-  frame,
-  channels: [
-    "keyboard.event",
-    "pointer.state",
-    "x.map.interact.event",
-  ],
-});
-```
-
-固定语义：
+map Web side可使用：
 
 ```text
-channels/setChannels = Interest contribution
-on/unsubscribe       = handler registration
-listener survives ordinary child-call suspend/resume
-fresh Activation does not reuse old Input State/Event
-fresh Data reconnect republish hidden from business
+Custom Elements
+Shadow DOM
+Canvas / WebGL
+business UI framework
+private decoded resource/cache/animation
+business layout / position / stacking
 ```
 
-map Web Component focus/DOM event不得创造 InputTarget或绕过 `RendererInputSource`。
+概念 tags如 `pokemon-map` / `pokemon-character` 只是业务示例，不形成 LoomRealm vocabulary。
+
+Business WC对 LoomRealm-managed attrs/data/children/order只读，也不能写 Render Store/Main/Data authority。
 
 ---
 
-## 5. Render — Consume Frozen M11 Surface
+## 5. M13 Projection Contract as Consumer
 
-M11 exact author API保持：
+Map不得重新解释 projection identity。
 
-```ts
-const world = scope.createRenderDomain(buildWorldRenderState());
-const hud = scope.createRenderDomain(buildHudRenderState());
-
-world.replace(buildNextWorldRenderState());
-hud.replace(buildNextHudRenderState());
-
-// RenderDomain.emit(...) remains available from frozen M11,
-// but M14 is not required to emit an event merely for coverage.
-
-world.close();
-hud.close();
-```
-
-其中：
-
-```ts
-interface RenderDomainState {
-  readonly zIndex: number;
-  readonly roots: readonly RenderNode[];
-}
-```
-
-地图不得使用旧 API或自建 domainId/revision/Snapshot/Patch。
-
-固定 lifetime：
+正确 identity：
 
 ```text
-Frame close/suspend != RenderDomain close/hide
-Activation change    != RenderDomain lifetime
-Data reconnect        != authoritative Domain destroy
+same live wire-node identity
+(Session, subsystemKey, generation, domainId, key)
+→ same HTMLElement
 ```
 
-M14 map business拥有 `RenderNode.tag/data/children` 的业务语义，但不拥有 Renderer physical projection mechanics。
+不是：
 
-M11 `RenderDomain.emit` / RenderEvent仍然是 frozen M11能力；M13不把 RenderEvent投递给 WC。因此 M14只有在真实 business/Renderer consumer证明需要时才使用它，不能为了 qualification 对称性硬造 presentation event。
+```text
+bare key string → global HTMLElement
+```
+
+因此不同 Domain可以合法使用相同 key string而不 collision；move/reparent/reorder保持 existing WC instance。
+
+Top-level root physical order由 M13确定：
+
+```text
+subsystemKey UTF-8 lexical
+→ within subsystem: M11 zIndex/domainId order
+→ roots order
+```
+
+Map不得依赖 cross-Subsystem global zIndex semantics；actual visual stacking由 map/business CSS表达。
 
 ---
 
-## 6. Map-owned Web Components / Startup
+## 6. Context / Data ABI
 
-map Web presentation implementation负责具体 tags与 element implementation，例如概念上的：
+精确 callback shape/lifetime由 [Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)拥有。
 
-```text
-pokemon-map
-pokemon-character
-pokemon-dialog
-```
-
-这些名字只是示例，不形成 LoomRealm vocabulary。
-
-map business owner产出的 JS/CSS由 Window-level `WebPresentationConfigV1`引用。M13 browser startup：
+Map WC可以实现：
 
 ```text
-ordered <link rel="stylesheet">
-→ ordered classic <script>
-→ map business JS customElements.define(...)
-→ window.onload
-→ Web Projector starts
+receiveRenderContext
+→ get Window-lifetime narrow presentation capability
+
+receiveRenderData
+→ get current retained full business data
 ```
 
-业务 Web side可以：
+两个 receiver独立；context不会随每次 data commit重复注入。
 
-```text
-use Shadow DOM
-use Canvas/WebGL
-manage decoded resources/cache/animations
-interpret map-owned attrs/data/children contract
-use business-chosen internal UI framework
-own layout / position / stacking through WC/CSS
-```
-
-它不得 write Render Store/RenderDomain、mint Main/Data/Input authority、consume raw Data carrier或 obtain Content bearer/filesystem path。
+Map `data` schema完全由 map Definition与 map WC共同拥有；LoomRealm不冻结 map-specific asset/data schema。
 
 ---
 
-## 7. Projection Contract Consumed from M13
+## 7. Runtime Resource Use
 
-map Web Components消费 M13 frozen projection：
+M13已经明确提供 runtime `PresentationResourceClient`，M14不再设计另一套 capability：
 
 ```text
-key
-→ stable WC instance identity
-
-tag
-→ business-owned WC construction name
-
-attrs
-→ Renderer-managed host attributes
-
-data
-→ optional receiveRenderData(complete readonly full snapshot)
-
-children
-→ Renderer-managed ordered light DOM
+map WC
+→ context.resources.resource(namespace,key,expectedContentVersion)
+→ caller-owned bytes + MIME + actual version
 ```
 
-Top-level roots直接进入 `document.body`。LoomRealm不为 map建立 generic Domain layer、CSS stacking context或自动 z-index framework；map WC/CSS自行决定 actual visual composition。
+Map WC不得看到 bearer/path/FSDB/privileged URL/private Renderer ResourceClient。
 
-map WC对全部 projected Render state只有读取权。
-
-M13不使用 MutationObserver policing业务 WC的违规 host/light-DOM mutation；若业务违反 contract，Store不会采纳 DOM state，后续 presentation-local行为不保证。
+ImageBitmap/texture/AudioBuffer decoding、cache与asset dependency strategy属于 map private presentation implementation；不建立 universal AssetManager/decoder registry。
 
 ---
 
-## 8. `data` Contract Ownership / `receiveRenderData`
+## 8. Children / Component Granularity
 
-LoomRealm定义 data delivery：
-
-```ts
-interface RenderDataReceiver {
-  receiveRenderData(data: DeepReadonly<JsonObject>): void;
-}
-```
-
-语义：
+RenderNode child granularity由 map business identity/lifecycle需求决定，不由视觉嵌套决定。
 
 ```text
-optional
-initial materialization → complete current snapshot
-committed data change → complete current snapshot
-missing method → no data delivery, not failure
-wire delta never exposed
-object identity has no semantic meaning
+Render-managed children → light DOM composition
+WC private implementation subtree → Shadow DOM/private state
 ```
 
-projection order固定：
-
-```text
-structure / children
-→ attrs
-→ receiveRenderData(...)
-```
-
-所以 map WC进入 `receiveRenderData` 时，其 managed children/attrs已对应同一次 committed Store state。
-
-具体 `data` schema完全由 map与其 WC共同拥有。
+M13不增加 TextNode/HTML-fragment graphics primitive；文本等业务 primitive可由 map-owned WC表达。
 
 ---
 
-## 9. Children / Component Granularity
+## 9. Frame / Cancellation
 
-是否把一个视觉对象建模成独立 child RenderNode是 map业务设计决策，而不是 LoomRealm graphics primitive rule。
+`scope.signal`用于 Runtime-level business work，`frame.signal`用于 Frame-scoped work。Normal child-call suspension不销毁 Runtime-level Content/Input config/RenderDomain。
 
-例如以下都合法：
-
-```text
-A. <pokemon-map> data内包含全部 tiles，children只放独立 actor/dialog components
-
-B. map把若干真正拥有独立 identity/lifecycle的业务 presentation object建成 child WC
-```
-
-判断标准是：
-
-> **对象是否需要独立 RenderNode identity/lifecycle/composition，而不是视觉上是否“位于另一个对象里面”。**
-
-Render-managed children对应 light DOM；WC自己的 implementation subtree放在 Shadow DOM/private state。
+WC `connectedCallback` / `disconnectedCallback`也不能决定 Frame/Runtime/Domain authority lifetime。
 
 ---
 
-## 10. Resource Use in Web Presentation
+## 10. Compatibility Boundary
 
-M12 Renderer ResourceClient只公开 trusted logical resource + expected version → bytes semantics。
-
-map WC如何把 bytes解码成 ImageBitmap、Canvas texture、WebGL texture、AudioBuffer等属于 map presentation implementation。
-
-但 map WC不得直接知道 localhost Content URL、bearer、filesystem path、installationId或 FSDB physical identity。
-
-M13/M14只按真实 consumer最小授予 runtime resource capability，不建立 universal AssetManager/decoder registry。
-
----
-
-## 11. RenderEvent Is Not a WC Input
-
-M13 Web Projector不把 M11 `RenderEvent`映射为：
-
-```text
-WC method callback
-DOM CustomEvent
-dispatchEvent()
-```
-
-map WC当前只消费 retained projection：
-
-```text
-tag / attrs / data / children
-```
-
-若未来 map真实 presentation证明必须消费 transient RenderEvent，再单独设计，而不是在 M14自行发明平台/业务专属 event bridge。
-
----
-
-## 12. Frame / Call
-
-业务参数只来自 `frame.params`。
-
-Frame handler显式返回 completed/cancelled/failed；Nested call继续通过 `frame.call(...)`。
-
-只有明确 pre-commit recoverable rejection可以被 business catch 后继续。Control loss、timeout/loss ambiguity、protocol divergence等 Runtime-fatal path不得重新进入旧 business continuation。
-
----
-
-## 13. Cancellation / Lifetime
-
-```text
-scope.signal = Runtime-level business work
-frame.signal = Frame-scoped business work
-```
-
-normal child-call suspension不会因为“暂时非 active”自动销毁 Runtime-level ContentClient、Input config或 RenderDomain。
-
-WC physical connected/disconnected lifecycle同样不能决定 Frame/Runtime/Domain authority lifetime。
-
----
-
-## 14. Pokémon Essentials Compatibility Boundary
-
-Phase 1兼容 RPG Maker XP / Pokémon Essentials v21.1 地图来源。
-
-Compatibility compiler只负责：
+RPG Maker XP / Pokémon Essentials v21.1 compatibility compiler只负责：
 
 ```text
 source format
-→ map business logical records/resource references
+→ map logical records/resource references/business state
 ```
 
-它不得解析 Game/Platform Launch Manifest、打开 Runtime/Data/Render carrier、直接读取 Hostra filesystem path、选择 executable/presentation loading或把 Desktop/PWA branching引入 map business semantics。
+它不解析 Game/Platform manifests、不打开 Runtime/Data carrier、不读取 Hostra path、不选择 presentation loading，也不把 Desktop/PWA branching引入 business semantics。
 
 ---
 
-## 15. M14 Qualification Target
+## 11. M14 Qualification
 
-M14至少证明一个真实地图业务 + Web presentation vertical：
+至少证明：
 
 ```text
 real @loomrealm/map Definition
 → @loomrealm/subsystem only
-→ Content record/resource
-→ Input listener
-→ RenderDomain replace/close
-→ M11 Render replication
-→ M13 <link>/classic <script>/window.onload bootstrap
-→ M13 document.body Web projection
+→ M12 Content
+→ M10 Input
+→ M11 RenderDomain
+→ M13 Window bootstrap
+→ M13 scoped DOM projection
 → map-owned WC
-→ receiveRenderData current snapshot
+→ context/resources + receiveRenderData
 → observable physical presentation
 → nested frame.call/return
 → business outcome
 ```
 
-至少覆盖：
+覆盖：
 
 ```text
-Content platform-neutral result
-hierarchical resource identity
-Input survives child-call resume with fresh Activation semantics
-RenderDomain survives Frame/Data lifecycle unless explicitly closed
-stable RenderNode key preserves WC instance identity
-attrs/receiveRenderData/children projection is read-only to WC
-map layout/stacking is business WC/CSS responsibility
-recoverable call rejection remains business-handleable
-Runtime-fatal path does not re-enter map continuation
-business Definition cannot access Platform/Content physical material
-business WC cannot mutate Render authority or access Content credentials
-no RenderEvent → WC/DOM bridge is assumed
+same key across map Domains does not collide
+same live wire-node preserves WC instance
+map runtime resource version is checked
+attrs/data/children projection is read-only
+layout/stacking remains business-owned
+business Definition cannot access physical platform material
+WC cannot access Content credential/private Renderer client
+no RenderEvent→WC bridge assumed
 ```
 
-M14不复制 M10/M11/M12/M13 lower-level conformance；已关闭 qualification继续作为下层证据。
+M14不复制 M10–M13 lower-level conformance。
 
 ---
 
-## 16. Abstraction Budget
+## 12. Abstraction Budget
 
-允许地图内部真实 business概念，例如 world state、map catalog、compatibility compiler、地图规则对象、map-owned WC/component contracts。
+允许真实 map domain concepts：world state、catalog、compatibility compiler、map-owned WC contracts。
 
 禁止仅为未来推测建立：
 
 ```text
-generic Repository base class
+Repository base hierarchy
 Runtime service locator
 Content transport adapter
-second LoomRealm Render projection tree authority
-Input device registry
-platform abstraction inside business Definition
-universal asset manager
-generic LoomRealm component vocabulary
-generic LoomRealm presentation layer/stacking framework
-map-specific RenderEvent→DOM bridge
+second projection tree authority
+universal AssetManager
+LoomRealm component vocabulary
+presentation layer manager
+map-specific Event→DOM bridge
 ```
-
-业务 WC内部可以自由选择自己的 UI framework；禁止的是让该 framework反向接管 LoomRealm-managed host projection或形成第二份 Render authority。
 
 ---
 
-## 17. Final Goal
+## 13. Final Goal
 
-> **`loom.map` 证明一个普通、可移植的 Subsystem业务实现与一个由同一业务方拥有、但保持 execution/authority boundary 的 Web presentation implementation：业务 Definition只依赖 `@loomrealm/subsystem`；业务 JS/CSS由 Window-level Web Presentation Config加载；具体 Custom Elements由业务拥有；LoomRealm只负责 authority、replication、Content capability与 thin read-only WC projection。Top-level roots直接进入 body，data通过 `receiveRenderData`接收，layout/stacking由业务负责。**
+> **`loom.map` 证明：一个普通 platform-neutral Subsystem Definition可以通过 M10/M11/M12产生业务状态，再由 M13 thin Web Presentation以 scoped identity、read-only projection和 narrow resource capability驱动 map-owned Custom Elements；业务仍拥有具体视觉实现，而无需扩张 LoomRealm core abstraction。**

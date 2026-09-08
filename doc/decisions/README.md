@@ -2,10 +2,10 @@
 
 > 层级：设计决策记录  
 > 状态：Active  
-> 主要定义：重大架构决策背景、取舍、替代关系、current-v1 provenance 与 reopen 条件  
+> 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
 > 最近复核：2026-09-08
 
-ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 与对应 implementation/qualification plan 为准。Superseded/updated ADR保留历史，不形成第二份 current contract。
+ADR 记录“为什么”；Current 可实现事实以 architecture / formal contract / implementation qualification 为准。**同一个尚未合并的 current design不通过额外 ADR人为制造历史层。**
 
 ---
 
@@ -42,7 +42,6 @@ ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-archi
 29. [ADR 0029：User Input v1 mutation-gate State convergence correction](./0029-user-input-v1-mutation-gate-state-convergence.md)
 30. [ADR 0030：冻结 M12 Content preimplementation closure](./0030-freeze-m12-content-preimplementation-closure.md)
 31. [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./0031-business-owned-web-component-projection.md)
-32. [ADR 0032：冻结 M13 Web Presentation API v1 与 presentation resource capability](./0032-freeze-m13-web-presentation-api-v1.md)
 
 ---
 
@@ -50,54 +49,51 @@ ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-archi
 
 ```text
 ADR 0018
-    establishes first-implementation direct-current-v1 correction governance
+    first-implementation direct-current-v1 correction governance
 
 ADR 0019 → ADR 0020 → ADR 0026
-    current Game / Platform / Main launch boundary
+    Game / Platform / Main launch boundary
 
 ADR 0021
-    concrete Runtime Control mechanics
+    Runtime Control mechanics
 
 ADR 0022–0025
     Render / Input / Data Connection / Renderer Data Profile closure
 
 ADR 0027
-    Renderer Control v1 + M7 closure
+    Renderer Control + M7 closure
 
 ADR 0028
     M9 Desktop Data Broker / late provisioning closure
 
-ADR 0023
-→ ADR 0029 narrowly corrects Subsystem local State retention while mutation gate is temporarily closed
-→ User Input wire/version/authority/Renderer Effective remain unchanged
+ADR 0023 → ADR 0029
+    narrow User Input State convergence correction
 
 ADR 0030
-    M12 Content storage/service/Subsystem/Renderer consumer boundary
+    M12 Content storage/service/Subsystem/Renderer consumer closure
 
 ADR 0031
-    preserves M11 Render Update v1
-    adds post-replica thin Web projection ownership/read-only boundary
-    moves loom.map behind a dedicated Web Presentation Projection milestone
-    freezes Window-level user-selected Web Presentation Config as M13 presentation bootstrap source
-    reuses current prepared Content/FSDB logical resource identity without adding fsdbRoot input
-    freezes ordered <link> / classic <script> + window.onload bootstrap
-    freezes direct document.body root projection with no generic layer/stacking framework
-    freezes optional receiveRenderData(full readonly snapshot) as retained-data WC ABI
-    does not define RenderEvent → WC/DOM event delivery
-    does not police business WC DOM contract violations with MutationObserver
-
-ADR 0032
-    narrowly updates ADR 0031's M13 WC ABI closure
-    places receiveRenderContext + receiveRenderData in one Web Presentation API v1 contract while keeping interfaces independent
-    freezes one-shot pre-insertion context injection
-    freezes narrow PresentationResourceClient facade over M12 Renderer-private ResourceClient
-    requires expected contentVersion and hides origin/token/path/private client
-    keeps resource and callback failures presentation-local
+    M13 Web Presentation current decision
+    → business-owned Custom Elements / thin Renderer projector
+    → Window-level WebPresentationConfigV1
+    → deterministic scoped wire-node → HTMLElement identity
+    → deterministic cross-Subsystem body concatenation without global zIndex semantics
+    → one Web Presentation API v1 with independent context/data receivers
+    → narrow PresentationResourceClient over M12 private ResourceClient
+    → no RenderEvent WC ABI / no generic layer/loader/AssetManager
 ```
 
-ADR 0031 / 0032 不 supersede ADR 0022。它们明确：M11 已关闭 Render authority/replication，而 physical Web projection + local WC ABI是下一层 consumer；因此无需重开 Render Update v1。
+ADR 0031不 supersede ADR 0022；M11 Render authority/replication保持 Frozen，M13只是其 physical consumer。
 
-`Web Presentation Config v1` 是 ADR 0031 current startup realization的 formal contract；`Web Presentation API v1` 是 ADR 0032 current Projector↔business-WC local ABI的 formal contract。两者都不扩张 Game Entry / Platform Launch Manifest / LogicalGameBootstrap。
+Formal sources：
+
+```text
+Web Presentation Config v1
+→ startup JS/CSS / prepared Content / browser ready semantics
+
+Web Presentation API v1
+→ Projector ↔ WC context/data/resource ABI
+```
 
 ---
 
@@ -118,27 +114,18 @@ ADR 0009 → 0010–0015 → 0021
 → Subsystem Control + Frame/Call + Runtime Control Profile
 ```
 
-### Renderer Control
-
-```text
-ADR 0016 → 0017/0026 → 0027
-→ Main ⇄ Renderer Control v1
-→ M7_01 ... M7_05
-```
-
-### Renderer Data / Input / Render / Web Projection
+### Renderer Data / Input / Render / Web Presentation
 
 ```text
 ADR 0016
 → ADR 0022 / 0023 / 0024 / 0025
-→ Renderer Data Profile + Data Connection + User Input + Render Update
-→ M8 logical Data role seam
-→ ADR 0028 / M9 physical Data slice
-→ ADR 0029 / M10 Input correction + closure
+→ M8 Data role seam
+→ ADR 0028 / M9 physical Data
+→ ADR 0029 / M10 Input closure
 → M11 Render replication closure
-→ ADR 0031 / Web Presentation Config v1
-→ ADR 0032 / Web Presentation API v1
-→ M13 thin Web Presentation Projection
+→ ADR 0031
+→ Web Presentation Config v1 + Web Presentation API v1
+→ M13 Web Presentation
 ```
 
 ### Content
@@ -146,18 +133,17 @@ ADR 0016
 ```text
 ADR 0003
 → ADR 0030
-→ M12 Content implementation/qualification closure
-→ M13 presentation bootstrap logical resource resolution
-→ ADR 0032 PresentationResourceClient narrow business-facing façade
+→ M12 Content implementation/qualification
+→ M13 bootstrap resolution + PresentationResourceClient façade
 ```
 
 ---
 
 ## Compatibility / Reopen Governance
 
-首次 conformant/deployed compatibility boundary形成前，current-v1 correction遵守[文档治理](../00-overview/document-governance.md)。Frozen Contract不得因 code reuse、framework preference、future speculation、test convenience 或 transport preference静默 reopen。
+Frozen Contract不得因 code reuse、framework preference、future speculation、test convenience 或 transport preference静默 reopen。
 
-允许 reopen 的信号：
+允许 reopen：
 
 ```text
 demonstrated correctness/security contradiction
@@ -166,7 +152,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-ADR 0031 / 0032 不授权为了 Web framework convenience修改 M11 wire/tree semantics；M13应优先作为 M11 Store的 trusted physical consumer实现。业务 WC内部 framework选择不构成对 M11/M13 projection authority的 reopen。
+M13应优先作为 M11 Store的 trusted physical consumer实现。业务内部 UI framework选择不构成对 Render/Web presentation authority boundary 的 reopen。
 
 ---
 
