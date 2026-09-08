@@ -6,6 +6,7 @@
 > 最近复核：2026-09-08  
 > 前置：[M12 / 01](M12_01_CONTENT_SERVICE.md) → [M12 / 02](M12_02_SUBSYSTEM_CONTENT_CLIENT.md) → [M12 / 03](M12_03_RENDERER_RESOURCE_CLIENT.md) → [M12 / 04](M12_04_VERTICAL_INTEGRATION.md)  
 > 正式契约：[Content API v1](doc/15-contracts/content-api-v1.md)  
+> `fsdb-http` 修订：[M12 FSDB Core Extraction Amendment](packages/fsdb-http/M12_CORE_EXTRACTION.md)  
 > 目标：定义唯一 M12 closure matrix；实现只完成 readonly Content capability，不扩张为 storage、asset、presentation 或 deployment framework。
 
 > **M12 已冻结到可直接完整实施：package ownership、public API、identity、version、validation、error、lifetime、vertical 与 qualification均不得在编码阶段重新选择。**
@@ -17,8 +18,8 @@
 必须完成：
 
 ```text
-@loomrealm/fsdb exact Node FSDB core extraction
-prepare-time immutable Content view/index
+@loomrealm/fsdb exact complete readonly FSDB core extraction
+prepare-time immutable Content view/index/version hashing
 Desktop Content API composition
 FSDB logical Content projection
 Desktop bearer authorization
@@ -40,13 +41,15 @@ PWA Service Worker implementation/equivalence
 package install/update/delete
 executable resolution changes
 Save System
+global Installation Registry
+transactional filesystem snapshotting
 ```
 
 ---
 
 ## 2. Freeze / Reopen Rule
 
-本组 M12 文档与当前 Content API v1共同构成 frozen implementation baseline。
+本组 M12 文档、当前 Content API v1 与 `packages/fsdb-http/M12_CORE_EXTRACTION.md` 共同构成 frozen implementation baseline。
 
 编码阶段只允许：
 
@@ -71,12 +74,12 @@ vertical scope
 qualification evidence
 ```
 
-若实施证明 formal contract 与 frozen M12 slice存在 correctness contradiction：
+若实施证明 formal/frozen contract 与 M12 slice存在 correctness contradiction：
 
 ```text
 stop
 → classify exact contradiction
-→ explicitly update/review formal contract
+→ explicitly update/review affected contract
 → reopen affected M12 item
 ```
 
@@ -86,7 +89,7 @@ stop
 
 ## 3. Exact FSDB Package Ownership
 
-M12新增 exactly one FSDB core package：
+M12新增 exactly one Node FSDB core package：
 
 ```text
 @loomrealm/fsdb
@@ -109,40 +112,86 @@ M12新增 exactly one FSDB core package：
 
 ```text
 FsdbTableKind
+FsdbMetadataName
 OpenFsdbOptions
 FsdbDatabaseState
 FsdbDatabase
-FsdbEntryIdentity
+FsdbObjectIdentity
 FsdbEntryDescriptor
+FsdbObjectDescriptor
 FsdbReadLease
 openFsdb
+describeFsdb
+getFsdbSnapshotId
 listFsdbEntries
-openFsdbEntry
+openFsdbObject
 ```
 
 Exact signatures/semantics以 M12/01 为准。
+
+Core responsibility必须完整覆盖现有 FSDB domain：
+
+```text
+database descriptor
+ordinary entries
+$info / $extend / $desc metadata
+snapshot/index
+safe-open/currentness
+read lease/drain
+```
+
+`listFsdbEntries()` 只为 Content preparation枚举 ordinary entries；其 array order intentionally non-semantic，不增加无 consumer 的排序 contract。
+
+`openFsdbObject()` 承接 ordinary + metadata lookup，使 `fsdb-http` 不需要第二份 metadata index/scanner。
+
+`@loomrealm/fsdb` 不拥有：
+
+```text
+HTTP route/status/cache
+Content contentVersion/hash policy
+installation
+authorization
+Repository/storage-provider framework
+```
+
+---
+
+## 4. `fsdb-http` Compatibility Evidence
+
+`packages/fsdb-http/M12_CORE_EXTRACTION.md` 显式 supersede 原 DESIGN 中“0 runtime dependencies / internal package ownership”条款，仅允许：
+
+```text
+Node stdlib
+→ @loomrealm/fsdb
+→ @loomrealm/fsdb-http
+```
 
 必须保持：
 
 ```text
 fsdb-http existing root public API unchanged
-fsdb-http existing observable HTTP behavior/conformance unchanged
-listFsdbEntries/openFsdbEntry not re-exported by fsdb-http root
+fsdb-http descriptor route unchanged
+ordinary FSDB routes unchanged
+$info/$extend/$desc route matrix unchanged
+MIME/status/cache/weak-ETag semantics unchanged
+same-handle/stale/abort/close semantics unchanged
+existing conformance green
 ```
 
-禁止：
+证明：
 
 ```text
-HTTP-over-HTTP fsdb proxy
-duplicate FSDB scanner/safe-open
-cross-workspace relative import
-import fsdb-http private implementation
-generic Repository/storage-provider framework
+no HTTP-over-HTTP fsdb proxy
+no duplicate FSDB scanner/index/metadata-index/safe-open implementation
+no cross-workspace relative import
+no import of fsdb-http private implementation by Desktop
 ```
+
+FSDB HTTP validator facts (`snapshotId`/`sourceTag`) MUST NOT 被当成 Content version。
 
 ---
 
-## 4. Prepared Installation / Identity Evidence
+## 5. Prepared Installation / Identity Evidence
 
 必须证明：
 
@@ -150,6 +199,7 @@ generic Repository/storage-provider framework
 one successful prepare
 → one opaque installationId
 → deterministic normalized public GameEntryV1 manifest bytes
+→ one @loomrealm/fsdb database
 → one immutable Content Index
 ```
 
@@ -173,11 +223,13 @@ resource key     = one-or-more validated logical segments joined by /
 
 同名 struct/extend必须可区分；不得使用 lookup priority。
 
+FSDB metadata不进入 ordinary Content projection。
+
 `installationId`/namespace/key均是 logical identity，不是 path。Resource route逐 segment decode/validate后形成 logical ResourceKey；禁止 request path→filesystem direct mapping。
 
 ---
 
-## 5. Exact Content Version Evidence
+## 6. Exact Content Version Evidence
 
 Content API v1 exact format：
 
@@ -192,6 +244,7 @@ SHA-256 covers exact successful full-body 200 representation bytes
 same full-body bytes → same version
 changed full-body bytes → different version
 contentVersion != fsdb snapshotId
+contentVersion != fsdb sourceTag
 contentVersion != raw filesystem metadata fingerprint
 X-Loom-Content-Version = exact contentVersion
 ETag = quoted exact contentVersion
@@ -199,7 +252,16 @@ If-None-Match match → 304
 HEAD/304 use corresponding full-body 200 version fact
 ```
 
-FSDB-backed record/group/resource使用 `FsdbEntryDescriptor.sha256` 对应 exact served bytes。
+FSDB-backed record/group/resource version必须由 Desktop prepare-time Content Index builder通过：
+
+```text
+listFsdbEntries
+→ openFsdbObject
+→ stream exact ordinary bytes through SHA-256
+→ close lease
+```
+
+计算；不得把 Content SHA-256 policy下沉到 `@loomrealm/fsdb` descriptor。
 
 Manifest固定：
 
@@ -219,7 +281,31 @@ Client cache identity至少包含 prepared installation + logical identity + con
 
 ---
 
-## 6. Content API Service Evidence
+## 7. Static Source / Threat Model Evidence
+
+M12 Desktop source assumption冻结为：
+
+```text
+prepared installation is Host-trusted readonly
+for the Content Service lifetime
+```
+
+必须证明普通 Runtime/Renderer capability没有 installation physical write authority，并保留 FSDB已知 drift fail-closed行为。
+
+不要求抵抗拥有 installation physical write authority 的恶意 concurrent local writer 在 validated same-handle stream期间直接篡改 backing storage；这不是 M12 Content correctness threat model。
+
+因此禁止为 M12引入：
+
+```text
+copy-on-read blob store
+transactional filesystem abstraction
+writer coordination protocol
+immutable storage service
+```
+
+---
+
+## 8. Content API Service Evidence
 
 至少覆盖：
 
@@ -251,7 +337,7 @@ Range只在实现支持时按标准 HTTP qualification；不是 closure requirem
 
 ---
 
-## 7. Exact Subsystem Author Surface
+## 9. Exact Subsystem Author Surface
 
 M12 root surface exactly：
 
@@ -281,13 +367,14 @@ Local validation：
 namespace / record key = valid single Content segment
 resource key = one-or-more valid segments joined by /
 options = non-null object when supplied
+no own enumerable options property except signal
 signal = AbortSignal when supplied
 ```
 
 Observable result：
 
 ```text
-invalid local argument
+invalid local argument / unknown option
 → synchronous TypeError
 → zero HTTP request
 
@@ -325,7 +412,7 @@ Hostra Runner必须在 `definition.initialize` 前构造 required ContentClient�
 
 ---
 
-## 8. Renderer Evidence
+## 10. Renderer Evidence
 
 必须证明：
 
@@ -351,7 +438,7 @@ M12 不 qualification RenderNode.data→resource mapping，也不新增 public A
 
 ---
 
-## 9. Vertical Evidence
+## 11. Vertical Evidence
 
 必须有两个 production-path vertical：
 
@@ -360,13 +447,13 @@ A. prepare → @loomrealm/fsdb → Desktop Service → Hostra child → scope.co
 B. prepare → @loomrealm/fsdb → Desktop Service → production Renderer ResourceClient → resource bytes
 ```
 
-Temporary installation/fixtures可以 test-owned；FSDB core、prepare/index、service、authorization、Hostra injection、clients必须走 production code。
+Temporary installation/fixtures可以 test-owned；FSDB core、prepare/index/version hashing、service、authorization、Hostra injection、clients必须走 production code。
 
 禁止 test-only direct file reader、test-only ResourceClient、manual private-path injection或手工 authority mutation。
 
 ---
 
-## 10. Abstraction Budget
+## 12. Abstraction Budget
 
 允许：
 
@@ -392,13 +479,14 @@ Content RPC / credential protocol
 second HTTP stack
 Content/Main authority coupling
 executable/content capability merge
+transactional filesystem abstraction
 ```
 
 跨角色 shared Content client helper只有两个 production consumers出现真实重复时才允许抽取。
 
 ---
 
-## 11. Dependency Evidence
+## 13. Dependency Evidence
 
 必须保持：
 
@@ -418,7 +506,7 @@ Physical Content Service、grant、installation view留在 Platform composition�
 
 ---
 
-## 12. Root Gate
+## 14. Root Gate
 
 M12实施后建立唯一 closure gate：
 
@@ -438,26 +526,31 @@ Node 20 / 24 CI执行同一 gate。
 
 ---
 
-## 13. Implementation Checklist
+## 15. Implementation Checklist
 
 ```text
 [ ] @loomrealm/fsdb exact public surface implemented
+[ ] describeFsdb/getFsdbSnapshotId/listFsdbEntries/openFsdbObject qualified
+[ ] ordinary + metadata FSDB objects share one index/safe-open owner
+[ ] openFsdbObject signal ownership and lease.close semantics qualified
 [ ] existing fsdb-http public contract/conformance preserved
-[ ] no duplicate scanner/safe-read/HTTP proxy/cross-workspace private import
-[ ] FsdbEntryDescriptor.sha256 exact 64 lowercase hex
-[ ] list/open/lease semantics qualified
+[ ] M12_CORE_EXTRACTION amendment enforced
+[ ] no duplicate scanner/metadata-index/safe-read/HTTP proxy/private import
 
 [ ] prepared installation Content view/index implemented
 [ ] opaque installationId + deterministic public GameEntry manifest proven
 [ ] FSDB namespace mapping exact and collision-free
 [ ] hierarchical ResourceKey route round-trip proven
-[ ] exact sha256 contentVersion/ETag semantics proven
+[ ] prepare-time exact-byte sha256 contentVersion/ETag semantics proven
+[ ] FSDB core remains free of Content hash/version policy
+[ ] static trusted-readonly source boundary proven
 [ ] bearer scope/expiry enforced
 [ ] 409 vs 422 qualified
 
 [ ] exact Subsystem ContentClient surface implemented
 [ ] ContentReadError constructor/name/code exact
 [ ] invalid local arguments synchronously TypeError + zero HTTP
+[ ] unknown own enumerable option property → TypeError + zero HTTP
 [ ] already-aborted valid signal → CONTENT_CANCELLED + zero HTTP
 [ ] no author group/manifest/contentVersion-selector/raw fetch
 [ ] returned JSON/bytes cannot poison cache/future reads
@@ -480,11 +573,11 @@ Node 20 / 24 CI执行同一 gate。
 
 ---
 
-## 14. Freeze Statement
+## 16. Freeze Statement
 
 **M12 preimplementation design is closed.**
 
-Implementation MUST now follow M12/01–05 + Content API v1 as written.普通编码困难、文件布局偏好或复用便利性都不是 reopen理由。
+Implementation MUST now follow M12/01–05 + Content API v1 + `M12_CORE_EXTRACTION.md` as written。普通编码困难、文件布局偏好或复用便利性都不是 reopen理由。
 
 允许 reopen 的唯一门槛：
 
@@ -498,14 +591,14 @@ that cannot be satisfied by private realization choices
 
 ---
 
-## 15. Closure Statement
+## 17. Closure Statement
 
 M12 complete 后：
 
 ```text
 current prepared installation
-→ @loomrealm/fsdb immutable logical source
-→ immutable logical Content view
+→ @loomrealm/fsdb complete readonly logical source
+→ immutable logical Content view/index + exact-byte version facts
 → Desktop readonly Content API
 → Subsystem business record/resource reads
 → Renderer version-safe resource bytes reads
