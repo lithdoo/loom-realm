@@ -14,15 +14,16 @@ npm run test:m12
 同一命令已通过：
 
 ```text
-Node 20.20.2  PASS  84.0s
-Node 24.20.0  PASS  74.2s
+Node 20.20.2  PASS  71.0s
+Node 24.20.0  PASS  63.9s
 ```
 
 ## Implemented production chain
 
 ```text
 successful Hostra prepare
-→ opaque prepared Desktop Content view
+→ one immutable prepared installation truth
+→ opaque prepared Desktop Content view（不再读取 game.json 或接受独立 fsdbRoot）
 → @loomrealm/fsdb immutable readonly snapshot/index
 → prepare-time exact-byte SHA-256 versions
 → loopback Desktop Content API + scoped bearer
@@ -45,15 +46,16 @@ successful Hostra prepare
 - Manifest只投影 public GameEntryV1，并按 Unicode code-point key order确定性序列化。
 - `contentVersion = sha256:<64 lowercase hex>`覆盖 exact full-body bytes；ETag为 quoted exact version。
 - GET/HEAD/If-None-Match/304、MIME、Content-Length与 cache policy已验证。
-- missing/expired bearer为401，scope denied为403；404/405/409/413/429及 problem confidentiality已验证。
-- runtime source drift fail closed为409；已知 full-body hash/length mismatch在发送成功响应前映射422。
+- HTTP problem projection由 stable semantic fact驱动；`INSTALLATION_NOT_FOUND`、`INSTALLATION_INCOMPLETE`、`CONTENT_NOT_FOUND`、`CONTENT_SCHEMA_INVALID`、`CONTENT_INTEGRITY_FAILED`等不再由 status反推。
+- missing/expired bearer为401，scope denied为403；404/405/409/413/422/429及 problem confidentiality已验证。
+- runtime source drift以409 `INSTALLATION_INCOMPLETE` fail closed；selected structured body schema失败为422 `CONTENT_SCHEMA_INVALID`，full-body hash/length mismatch为422 `CONTENT_INTEGRITY_FAILED`。
 - max body与 concurrent admission均有界；429不破坏已 admitted读取。
 
 ## Client and vertical evidence
 
 Subsystem root新增且仅新增冻结的 Content author projection：`ContentReadOptions`、`ContentRecord`、`ContentResource`、`ContentReadError`、`ContentClient.record/resource`和`SubsystemScope.content`。本地误用同步 `TypeError`且零请求；remote status、cancel与 caller-owned value均已验证。
 
-Renderer ResourceClient位于 `@loomrealm/renderer/resource-client` integration subpath，不进入 Renderer root。它逐segment编码 resource key、强制 expected version、按 installation+identity+version隔离缓存，并为每次返回复制 bytes。
+Renderer ResourceClient位于 trusted `@loomrealm/renderer/resource-client` integration subpath，不进入 Renderer author/application root。Platform composition可合法构造和使用；它逐segment编码 resource key、强制 expected version、按 installation+identity+version隔离缓存，并为每次返回复制 bytes。
 
 两条 production vertical均通过：
 
@@ -63,6 +65,8 @@ B. prepare → FSDB → Desktop Service → Renderer ResourceClient → version-
 ```
 
 Content grant通过独立 child-private环境材料注入，进入 Runner后立即删除；它不进入 `SubsystemLaunchContext`、Runtime bootstrapToken、Frame params或 M9 Data provisioning IPC。
+
+`test:regression`承担 current package/unit/vertical regression；历史 `test:m9`、`test:m10`、`test:m11`不再递归包含后续里程碑。`.github/workflows/m12.yml`在 Node 20/24持续强制执行同一个 `test:m12` closure gate并上传资格记录。
 
 ## Closure boundary
 

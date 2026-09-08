@@ -11,6 +11,12 @@ test("public runtime surface stays narrow", () => {
   ]);
 });
 
+test("prepared installation projection is confined to the trusted integration subpath", async () => {
+  const integration = await import("../dist/prepared-installation.js");
+  assert.deepEqual(Object.keys(integration), ["projectHostraPreparedInstallation"]);
+  assert.equal("projectHostraPreparedInstallation" in launcher, false);
+});
+
 test("declarations expose no Runner bootstrap or mutable attempt state", async () => {
   const declaration = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
   const provisioning = await readFile(new URL("../dist/data-provisioning.d.ts", import.meta.url), "utf8");

@@ -228,6 +228,8 @@ Hostra PREPARE
 → apps/desktop readonly Content HTTP service
 ```
 
+`apps/desktop`只消费 genuine `PreparedHostraGame`及 trusted `@loomrealm/game-launcher-hostra/prepared-installation` projection；不直接依赖 `@loomrealm/game-package`，不重读 `game.json`，也不接受可独立组合的 installation/FSDB roots。FSDB source从 canonical installation内唯一直接 `[FSDB]*`目录派生。
+
 Desktop Content Service是 app-private composition responsibility，不单独建立 `@loomrealm/content-service` package。
 
 Content version属于 Content contract：
@@ -334,7 +336,7 @@ apps/desktop M12
     exact ContentClient author behavior/lifecycle
 
 @loomrealm/renderer
-    private ResourceClient version/cache/ownership behavior
+    trusted integration-subpath ResourceClient version/cache/ownership behavior
 
 M13
     business SDK usage, not protocol duplication

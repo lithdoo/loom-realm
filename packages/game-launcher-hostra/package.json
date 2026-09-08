@@ -12,6 +12,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./prepared-installation": {
+      "types": "./dist/prepared-installation.d.ts",
+      "import": "./dist/prepared-installation.js"
     }
   },
   "files": [

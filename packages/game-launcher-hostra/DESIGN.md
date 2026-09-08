@@ -100,9 +100,11 @@ interface PreparedHostraGame {
 }
 
 prepareHostraGame(options: HostraPrepareOptions): Promise<PreparedHostraGame>
+// trusted @loomrealm/game-launcher-hostra/prepared-installation subpath
+projectHostraPreparedInstallation(prepared: PreparedHostraGame): HostraPreparedInstallation
 ```
 
-Game source remains exactly `installationRoot`；no universal GameSource/options bag。
+Game source remains exactly `installationRoot`；no universal GameSource/options bag。The projection is a trusted composition seam backed by the genuine prepared object; Desktop Content derives its manifest and the unique in-installation `[FSDB]*` root from this one prepared truth instead of re-reading `game.json` or accepting independently supplied roots.
 
 ---
 

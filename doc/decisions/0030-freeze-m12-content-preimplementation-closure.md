@@ -30,7 +30,7 @@ Hostra PREPARE
 → @loomrealm/fsdb readonly logical core
 → private immutable Content Index + normalized public manifest
 → Desktop localhost Content Service
-→ Subsystem ContentClient / Renderer-private ResourceClient
+→ Subsystem ContentClient / trusted Renderer integration-subpath ResourceClient
 ```
 
 ### FSDB ownership
@@ -84,7 +84,7 @@ ContentClient.resource(...)
 
 不为 HTTP surface symmetry 预先发布 `manifest()`、`group()`、`head()`、raw fetch、URL builder 或 repository abstraction。
 
-Renderer只增加 private logical resource identity → version-checked bytes responsibility；RenderNode → resource identity 与 DOM/Canvas/WebGL/Audio presentation仍属于 M14。
+Renderer只通过 trusted `@loomrealm/renderer/resource-client` integration subpath增加 logical resource identity → version-checked bytes responsibility，root author/application surface保持不变；RenderNode → resource identity 与 DOM/Canvas/WebGL/Audio presentation仍属于 M14。
 
 ## 对 ADR 0003 的更新
 

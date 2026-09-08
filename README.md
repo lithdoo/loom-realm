@@ -180,7 +180,7 @@ Desktop bearer is Host-private scoped material
 Content capability != executable resolver
 ```
 
-Subsystem author root只增加真实 consumer需要的 `scope.content.record/resource`；Renderer只增加 private logical resource → version-checked bytes responsibility。M12不建立 `@loomrealm/content`、`@loomrealm/content-service`、generic Repository、StorageProvider、InstallationRegistry 或 AssetManager framework。
+Subsystem author root只增加真实 consumer需要的 `scope.content.record/resource`；Renderer通过 trusted `@loomrealm/renderer/resource-client` integration subpath提供 logical resource → version-checked bytes responsibility，Renderer root保持不变。M12不建立 `@loomrealm/content`、`@loomrealm/content-service`、generic Repository、StorageProvider、InstallationRegistry 或 AssetManager framework。
 
 ---
 
@@ -272,10 +272,10 @@ npm run docs:build
 npm run docs:check-links
 ```
 
-当前**已关闭 executable gate**仍是：
+当前 package/unit/vertical regression入口为：
 
 ```text
-npm run test:m11
+npm run test:regression
 ```
 
-M12唯一 closure target为 `npm run test:m12`；当前已在 Node 20/24 对同一 root gate完成 qualification。后续 M13/M14只消费已冻结的 `scope.content` 与 Renderer resource bytes seam，不重新选择 M12 identity/version/credential/lifetime语义。
+M12唯一 canonical closure target为 `npm run test:m12`，并由 `.github/workflows/m12.yml`在 Node 20/24持续执行；`test:m9`、`test:m10`、`test:m11`仅保留各自的历史 qualification，不再递归承载后续 milestone regression。后续 M13/M14只消费已冻结的 `scope.content` 与 Renderer resource bytes seam，不重新选择 M12 identity/version/credential/lifetime语义。

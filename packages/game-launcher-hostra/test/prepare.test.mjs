@@ -8,6 +8,7 @@ import {
   HostraLauncherError,
   prepareHostraGame,
 } from "../dist/index.js";
+import { projectHostraPreparedInstallation } from "../dist/prepared-installation.js";
 
 const policy = Object.freeze({
   helloDeadlineMs: 1,
@@ -61,6 +62,15 @@ test("PREPARE validates, joins, resolves, and deeply freezes the plan", async (t
   assert.ok(Object.isFrozen(prepared.launchPlan.runtimes));
   assert.throws(() => prepared.launchPlan.runtimes.push({}));
   assert.equal("physicalModule" in prepared.logicalBootstrap, false);
+  const preparedInstallation = projectHostraPreparedInstallation(prepared);
+  assert.deepEqual(preparedInstallation, {
+    formatVersion: 1,
+    canonicalRoot: await realpath(root),
+    subsystemKeys: ["root"],
+    initial: { subsystemKey: "root", input: { value: 1 } },
+  });
+  assert.ok(Object.isFrozen(preparedInstallation));
+  assert.throws(() => projectHostraPreparedInstallation({ ...prepared }), TypeError);
 });
 
 test("PREPARE rejects closed-manifest violations and exact-set mismatches", async (t) => {

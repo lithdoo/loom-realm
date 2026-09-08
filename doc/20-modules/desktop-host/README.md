@@ -143,7 +143,7 @@ Renderer：
 
 ```text
 Desktop composition binds current installation/grant
-→ @loomrealm/renderer private ResourceClient
+→ trusted @loomrealm/renderer/resource-client integration subpath
 → logical resource + expected sha256 version
 → bytes + MIME
 ```

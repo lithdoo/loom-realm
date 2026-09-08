@@ -30,7 +30,7 @@ Hostra PREPARE
 → @loomrealm/fsdb readonly logical core
 → private immutable Content Index + normalized public manifest
 → apps/desktop localhost Content Service
-→ Subsystem ContentClient / Renderer-private ResourceClient
+→ Subsystem ContentClient / trusted Renderer integration-subpath ResourceClient
 ```
 
 固定：
@@ -61,7 +61,7 @@ apps/desktop
     author-facing ContentClient
 
 @loomrealm/renderer
-    private ResourceClient
+    trusted integration-subpath ResourceClient
 ```
 
 当前 **不存在** `@loomrealm/content-service`、generic Repository、StorageProvider、InstallationManager 或 AssetManager requirement。

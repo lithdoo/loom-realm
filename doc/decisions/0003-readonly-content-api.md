@@ -77,7 +77,7 @@ current prepared installation view
 → @loomrealm/fsdb readonly core
 → private immutable Content Index
 → Desktop Content Service
-→ Subsystem ContentClient / Renderer-private ResourceClient
+→ Subsystem ContentClient / trusted Renderer integration-subpath ResourceClient
 ```
 
 并由 Content API v1冻结 hierarchical ResourceKey 与 `sha256:<64 lowercase hex>` Content version语义。

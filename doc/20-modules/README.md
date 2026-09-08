@@ -19,7 +19,7 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 | 模块 | 入口 | Current responsibility |
 |---|---|---|
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 Input、M11 internal Render replica、M12 private resource client target |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 Input、M11 internal Render replica、M12 trusted resource integration subpath |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
 | FSDB Content legacy | [fsdb-content-service](./fsdb-content-service/README.md) | **Superseded**；current implementation由 M12_01–05 定义 |
 | `loom.map` | [loom-map](./loom-map/README.md) | M13 ordinary platform-neutral Subsystem consumer；消费 frozen Input/Render/Content/Frame APIs |
@@ -82,7 +82,7 @@ Renderer-facing/current role integration：
 ```text
 RendererDataBinding
 RendererInputSource             // M10 public role seam
-Renderer-private ResourceClient // M12, not root public API
+trusted Renderer integration-subpath ResourceClient // M12, not root author/application API
 presentation environment        // M14/M16
 ```
 

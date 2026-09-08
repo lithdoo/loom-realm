@@ -1,6 +1,6 @@
 # M12 / 02 — Subsystem Content Client
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M12 Content  
 > 落地顺序：02  
 > 最近复核：2026-09-08  

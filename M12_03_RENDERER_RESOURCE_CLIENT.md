@@ -1,6 +1,6 @@
 # M12 / 03 — Renderer Resource Client
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M12 Content  
 > 落地顺序：03  
 > 最近复核：2026-09-08  
@@ -43,9 +43,9 @@ DOM/Canvas/WebGL consumption
 
 ---
 
-## 2. Minimal Private Responsibility
+## 2. Minimal Trusted Integration Responsibility
 
-Renderer production code只需要一个内部 responsibility，语义等价于：
+Renderer production code只需要一个 trusted integration responsibility，语义等价于：
 
 ```ts
 interface RendererResourceClient {
@@ -62,7 +62,7 @@ interface RendererResourceClient {
 }
 ```
 
-这是 Renderer implementation seam，不要求 root-export新的 AssetManager/Store/observer surface。精确 private class/function名可调整。
+这是正式发布的 `@loomrealm/renderer/resource-client` trusted integration subpath；Platform composition可以合法构造和使用它，但 `@loomrealm/renderer` root仍只承载 author/application role surface，不导出 ResourceClient、AssetManager、Store或 observer API。精确 implementation class/function名可调整。
 
 Platform composition绑定 current prepared installation与 authorization material；调用方只给 logical namespace/key/version。
 
@@ -197,7 +197,7 @@ Render state仍不得携 Content bearer、filesystem path、absolute privileged 
 允许：
 
 ```text
-one Renderer-private ResourceClient responsibility
+one trusted Renderer integration-subpath ResourceClient responsibility
 small version-safe cache/dedupe
 small Content response/error mapping
 ```

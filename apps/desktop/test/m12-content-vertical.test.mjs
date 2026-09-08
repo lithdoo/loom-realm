@@ -45,7 +45,7 @@ async function installation(t) {
     writeFile(path.join(resources, "potion.png"), resourceBytes),
   ]);
   const prepared = await prepareHostraGame({ source: { installationRoot: root }, runnerPolicy });
-  const view = await prepareDesktopContentView({ installationRoot: root, fsdbRoot });
+  const view = await prepareDesktopContentView(prepared);
   const service = await createDesktopContentService({ view });
   t.after(() => service.close());
   return { prepared, service, recordBytes, resourceBytes };

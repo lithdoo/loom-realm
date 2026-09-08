@@ -359,7 +359,7 @@ ADR 0030
     no generic content/content-service/Repository package requirement
     hierarchical ResourceKey
     exact sha256 Content version
-    frozen Subsystem ContentClient + Renderer private ResourceClient
+    frozen Subsystem ContentClient + trusted Renderer integration-subpath ResourceClient
 ```
 
 ADR 0019 supersedes ADR 0018 only where 0018曾定义 Game `{key,module}` / Hostra-PWA same Definition artifact。

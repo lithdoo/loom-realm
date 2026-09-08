@@ -35,6 +35,29 @@ export interface PreparedHostraGame {
   readonly launchPlan: HostraLaunchPlan;
 }
 
+export interface HostraPreparedInstallation {
+  readonly formatVersion: 1;
+  readonly canonicalRoot: string;
+  readonly subsystemKeys: readonly string[];
+  readonly initial: {
+    readonly subsystemKey: string;
+    readonly input: JsonValue;
+  };
+}
+
+const preparedInstallations = new WeakMap<object, HostraPreparedInstallation>();
+
+export function projectHostraPreparedInstallation(
+  prepared: PreparedHostraGame,
+): HostraPreparedInstallation {
+  if ((typeof prepared !== "object" && typeof prepared !== "function") || prepared === null) {
+    throw new TypeError("Invalid prepared Hostra game");
+  }
+  const installation = preparedInstallations.get(prepared);
+  if (!installation) throw new TypeError("Invalid prepared Hostra game");
+  return installation;
+}
+
 function boundedInteger(value: number, minimum: number, maximum: number): boolean {
   return Number.isInteger(value) && value >= minimum && value <= maximum;
 }
@@ -111,5 +134,12 @@ export function createPreparedHostraGame(options: {
     runnerPolicy,
     runtimes: Object.freeze(runtimes),
   });
-  return Object.freeze({ logicalBootstrap, launchPlan });
+  const prepared = Object.freeze({ logicalBootstrap, launchPlan });
+  preparedInstallations.set(prepared, Object.freeze({
+    formatVersion: 1,
+    canonicalRoot: options.canonicalInstallationRoot,
+    subsystemKeys: logicalBootstrap.subsystemKeys,
+    initial: logicalBootstrap.initial,
+  }));
+  return prepared;
 }

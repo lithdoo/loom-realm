@@ -189,6 +189,8 @@ Hostra PREPARE success
 → Desktop localhost Content Service
 ```
 
+Desktop Content直接消费 genuine `PreparedHostraGame`的 trusted projection；manifest不再二次解析 `game.json`，FSDB source从 canonical installation内唯一 `[FSDB]*`直接子目录派生，`apps/desktop`不直接依赖 `@loomrealm/game-package`。
+
 不建立 global mutable Installation Registry。Content source在 service lifetime内属于 Host-trusted readonly installation；不为恶意 concurrent physical writer建立 transactional filesystem abstraction。
 
 ### Content API semantics
@@ -223,7 +225,7 @@ M12只冻结：
 
 ```text
 logical namespace + hierarchical resourceKey + expectedContentVersion
-→ Renderer-private ResourceClient
+→ trusted Renderer integration-subpath ResourceClient
 → bytes + MIME + actualVersion
 ```
 

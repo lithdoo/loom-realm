@@ -1,6 +1,6 @@
 # M12 / 04 — Content Vertical Integration
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M12 Content  
 > 落地顺序：04  
 > 最近复核：2026-09-08  
@@ -17,6 +17,7 @@
 ```text
 temporary game installation
 → real Hostra prepare
+→ one genuine PreparedHostraGame truth
 → @loomrealm/fsdb readonly snapshot
 → prepare-time immutable Content Index/version hashing
 → Desktop Content Service
@@ -31,6 +32,8 @@ temporary game installation
 ```
 
 必须走真实 HTTP request/response path；fixture不得直接注入文件 bytes/value到 ContentClient。
+
+Desktop Content composition必须直接消费 Hostra返回的 genuine `PreparedHostraGame`；测试需证明 PREPARE后改写 `game.json`不会产生第二份 Content manifest事实，且 Desktop不接受独立 `fsdbRoot`。
 
 至少证明：
 
@@ -53,6 +56,7 @@ Formal Content API 的 manifest/group success在 service qualification覆盖；M
 
 ```text
 temporary prepared installation
+→ same genuine PreparedHostraGame truth
 → Desktop Content Service
 → Renderer-scoped grant
 → production Renderer ResourceClient

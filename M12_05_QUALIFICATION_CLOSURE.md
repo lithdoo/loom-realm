@@ -1,6 +1,6 @@
 # M12 / 05 — Qualification and Closure
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M12 Content  
 > 落地顺序：05  
 > 最近复核：2026-09-08  
@@ -25,10 +25,12 @@ FSDB logical Content projection
 Desktop bearer authorization
 exact Content version/cache/error semantics
 exact Subsystem ContentClient author surface
-Renderer-private version-checked ResourceClient
+trusted Renderer integration-subpath version-checked ResourceClient
 real Hostra Subsystem vertical
 real Renderer ResourceClient vertical
 ```
+
+Closure同时锁定 one prepared truth：Hostra是 `game.json`的唯一 PREPARE consumer；Desktop Content只消费 genuine `PreparedHostraGame`的 trusted projection，并从 canonical installation内派生唯一 `[FSDB]*` source，不接受第二组 root facts。
 
 不属于 M12：
 
@@ -463,7 +465,7 @@ one prepared-installation Content view
 one Desktop Content Service composition
 minimal authorization/version/problem helpers
 one bound Subsystem ContentClient responsibility
-one Renderer-private ResourceClient responsibility
+one trusted Renderer integration-subpath ResourceClient responsibility
 small immutable cache/dedupe where directly useful
 ```
 
@@ -512,17 +514,14 @@ M12实施后建立唯一 closure gate：
 
 ```text
 npm run test:m12
-    = npm run test:m11
-    + @loomrealm/fsdb build/test/pack
-    + fsdb-http regression/build/test/pack
-    + Content API qualification
-    + Subsystem ContentClient tests
-    + Renderer ResourceClient tests
-    + dependency/boundary tests
-    + M12 production verticals
+    = current package/unit/vertical regression
+    + still-required M10/M11 formal qualification evidence
+    + M10/M11/M12 boundary tests
+    + FSDB fixture regression
+    + @loomrealm/fsdb + fsdb-http pack
 ```
 
-Node 20 / 24 CI执行同一 gate。
+`.github/workflows/m12.yml`在 Node 20 / 24 CI持续执行同一 gate。历史 `test:m9`、`test:m10`、`test:m11`各自保留为里程碑 qualification入口，不再递归承担后续 milestone 的 current package regression。
 
 ---
 

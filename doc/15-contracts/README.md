@@ -152,7 +152,7 @@ Launcher/Platform  PREPARE + physical realization
 Protocol packages  wire/profile mechanics
 Main               Session/Runtime/Frame/Activation/InputTarget/DataAuthority
 Subsystem          business state / Desired Input Interest / Render authority / author Content usage
-Renderer           read-only Main mirror + Input/Render role behavior + private resource reads
+Renderer           read-only Main mirror + Input/Render role behavior + trusted integration-subpath resource reads
 Platform            physical Content binding/service/credentials
 ```
 

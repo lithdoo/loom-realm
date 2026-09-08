@@ -15,5 +15,4 @@ export {
   type DesktopContentService,
   type DesktopContentServiceOptions,
   type PreparedDesktopContentView,
-  type PrepareDesktopContentViewOptions,
 } from "./content-service.js";

@@ -2,12 +2,12 @@
 
 > 层级：模块设计  
 > 状态：M8 Data / M10 Input / M11 Render **Implemented + Qualified**；M12 ResourceClient **Preimplementation Frozen**  
-> 稳定程度：closed lower slices / M12 private resource boundary Frozen  
-> 主要定义：Renderer Control holder、Data reconciliation、Input gate/source、internal Render replica、M12 private resource bytes capability与 M14 presentation placement  
+> 稳定程度：closed lower slices / M12 trusted resource integration boundary Frozen
+> 主要定义：Renderer Control holder、Data reconciliation、Input gate/source、internal Render replica、M12 trusted integration-subpath resource bytes capability与 M14 presentation placement
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
 > 最近复核：2026-09-08
 
-Renderer不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render role behavior；M12只增加 private logical resource → bytes responsibility。
+Renderer不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render role behavior；M12只通过 trusted integration subpath增加 logical resource → bytes responsibility，root author/application surface保持不变。
 
 ---
 
@@ -22,7 +22,7 @@ Renderer不是 Frame/Call participant。它镜像 Main committed authority，并
     │   ├── M10 Input Registry/gate/publisher
     │   └── M11 internal Render replica
     ├── optional construction-time RendererInputSource
-    └── M12 private ResourceClient composition
+    └── M12 trusted integration-subpath ResourceClient composition
 ```
 
 M8/M10/M11均复用同一 currentness/Data slot，不创建第二套 Renderer Session/Connection authority。M12 ResourceClient也不得成为新的 authority/currentness layer。

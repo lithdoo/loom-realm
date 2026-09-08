@@ -207,10 +207,16 @@ export async function prepareHostraGame(
   options: HostraPrepareOptions,
 ): Promise<PreparedHostraGame>;
 
+export function projectHostraPreparedInstallation(
+  prepared: PreparedHostraGame,
+): HostraPreparedInstallation;
+
 export function createHostraRuntimeHosting(options: {
   readonly launchPlan: HostraLaunchPlan;
 }): RuntimeHosting;
 ```
+
+`projectHostraPreparedInstallation`只从 trusted `@loomrealm/game-launcher-hostra/prepared-installation` integration subpath导出；launcher root runtime surface保持不变。
 
 ### 4.1 M6 Node selection is fixed
 

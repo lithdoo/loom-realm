@@ -1,6 +1,6 @@
 # M12 / 01 — Desktop Content Service
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M12 Content  
 > 落地顺序：01  
 > 最近复核：2026-09-08  
@@ -299,6 +299,17 @@ duplicate safe-open implementation
 ## 3. Prepared Installation View
 
 M12 Desktop只服务**当前 concrete Platform已成功 prepare 的 installation**；不建立 global mutable InstallationRegistry。
+
+唯一事实链固定为：
+
+```text
+prepareHostraGame(source)
+→ genuine PreparedHostraGame
+→ trusted prepared-installation projection
+→ prepareDesktopContentView(prepared)
+```
+
+Desktop Content不得再次读取/解析 `game.json`，也不得接受可独立组合的 `installationRoot + fsdbRoot`。Public manifest只从同一个 prepared logical bootstrap重建；Content source只从其 canonical installation root内唯一的直接子目录 `[FSDB]*`受控派生，并拒绝缺失、多个或逃逸的候选。
 
 Prepare 在 first business Runtime side effect前形成并私有持有：
 

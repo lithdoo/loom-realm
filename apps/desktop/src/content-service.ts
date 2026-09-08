@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import {
   listFsdbEntries,
   openFsdb,
@@ -10,18 +10,17 @@ import {
   type FsdbDatabase,
   type FsdbObjectIdentity,
 } from "@loomrealm/fsdb";
-import { parseGameEntryV1, type ValidatedGameEntryV1 } from "@loomrealm/game-package";
+import { type PreparedHostraGame } from "@loomrealm/game-launcher-hostra";
+import {
+  projectHostraPreparedInstallation,
+  type HostraPreparedInstallation,
+} from "@loomrealm/game-launcher-hostra/prepared-installation";
 
 const CONTENT_VERSION = /^sha256:[0-9a-f]{64}$/;
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 64;
 
 export type DesktopContentPermission = "manifest" | "records" | "groups" | "resources";
-
-export interface PrepareDesktopContentViewOptions {
-  readonly installationRoot: string;
-  readonly fsdbRoot: string;
-}
 
 interface ContentIndexEntry {
   readonly kind: "record" | "group" | "resource";
@@ -118,13 +117,30 @@ function canonicalJson(value: unknown): string {
   throw new TypeError("Invalid public manifest");
 }
 
-function publicManifest(game: ValidatedGameEntryV1): Uint8Array {
+function publicManifest(installation: HostraPreparedInstallation): Uint8Array {
   const projection = {
-    formatVersion: game.formatVersion,
-    initial: { subsystem: game.initial.subsystem, input: game.initial.input },
-    subsystems: game.subsystems.map(({ key }) => ({ key })),
+    formatVersion: installation.formatVersion,
+    initial: { subsystem: installation.initial.subsystemKey, input: installation.initial.input },
+    subsystems: installation.subsystemKeys.map((key) => ({ key })),
   };
   return Buffer.from(canonicalJson(projection), "utf8");
+}
+
+async function preparedFsdbRoot(canonicalRoot: string): Promise<string> {
+  const entries = await readdir(canonicalRoot, { withFileTypes: true });
+  const candidates = entries.filter((entry) =>
+    entry.isDirectory() && !entry.isSymbolicLink() && /^\[FSDB\].+$/u.test(entry.name),
+  );
+  if (candidates.length !== 1) throw new TypeError("Prepared installation must contain exactly one FSDB root");
+  const candidate = join(canonicalRoot, candidates[0]!.name);
+  const stat = await lstat(candidate);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new TypeError("Invalid prepared installation FSDB root");
+  const canonicalFsdbRoot = await realpath(candidate);
+  const within = relative(canonicalRoot, canonicalFsdbRoot);
+  if (within === "" || isAbsolute(within) || within === ".." || within.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || within.includes("/") || within.includes("\\")) {
+    throw new TypeError("Invalid prepared installation FSDB root");
+  }
+  return canonicalFsdbRoot;
 }
 
 function version(bytes: Uint8Array): string {
@@ -146,13 +162,10 @@ function indexKey(kind: string, namespace: string, key: string): string {
 }
 
 export async function prepareDesktopContentView(
-  options: PrepareDesktopContentViewOptions,
+  prepared: PreparedHostraGame,
 ): Promise<PreparedDesktopContentView> {
-  if (options === null || typeof options !== "object" || typeof options.installationRoot !== "string" || typeof options.fsdbRoot !== "string") {
-    throw new TypeError("Invalid Desktop Content preparation options");
-  }
-  const game = parseGameEntryV1(await readFile(join(options.installationRoot, "game.json"), "utf8"));
-  const db = await openFsdb({ root: options.fsdbRoot });
+  const installation = projectHostraPreparedInstallation(prepared);
+  const db = await openFsdb({ root: await preparedFsdbRoot(installation.canonicalRoot) });
   try {
     const mutable = new Map<string, ContentIndexEntry>();
     for (const descriptor of listFsdbEntries(db)) {
@@ -172,7 +185,7 @@ export async function prepareDesktopContentView(
       if (mutable.has(lookup)) throw new Error("Duplicate Content identity");
       mutable.set(lookup, entry);
     }
-    const manifestBytes = publicManifest(game);
+    const manifestBytes = publicManifest(installation);
     let closing: Promise<void> | undefined;
     const state: PreparedDesktopContentViewState = {
       installationId: randomBytes(24).toString("base64url"),
@@ -239,28 +252,62 @@ function parseRoute(raw: string | undefined): Route | null {
   return { kind, installationId, namespace, key: keyParts.join("/"), permission: collection };
 }
 
-const PROBLEMS: Readonly<Record<number, { readonly title: string; readonly code: string }>> = Object.freeze({
-  400: { title: "Bad Request", code: "CONTENT_REQUEST_INVALID" },
-  401: { title: "Unauthorized", code: "CONTENT_AUTH_REQUIRED" },
-  403: { title: "Forbidden", code: "CONTENT_PERMISSION_DENIED" },
-  404: { title: "Not Found", code: "CONTENT_NOT_FOUND" },
-  405: { title: "Method Not Allowed", code: "CONTENT_METHOD_NOT_ALLOWED" },
-  409: { title: "Conflict", code: "CONTENT_VERSION_MISMATCH" },
-  413: { title: "Content Too Large", code: "CONTENT_TOO_LARGE" },
-  422: { title: "Unprocessable Content", code: "CONTENT_INTEGRITY_FAILED" },
-  429: { title: "Too Many Requests", code: "CONTENT_PRESSURE" },
-  500: { title: "Internal Server Error", code: "CONTENT_UNAVAILABLE" },
+type ContentProblemCode =
+  | "CONTENT_REQUEST_INVALID" | "CONTENT_AUTH_REQUIRED" | "CONTENT_PERMISSION_DENIED"
+  | "INSTALLATION_NOT_FOUND" | "INSTALLATION_INCOMPLETE" | "CONTENT_NOT_FOUND"
+  | "CONTENT_METHOD_NOT_ALLOWED" | "CONTENT_VERSION_MISMATCH" | "CONTENT_TOO_LARGE"
+  | "CONTENT_SCHEMA_INVALID" | "CONTENT_INTEGRITY_FAILED" | "RANGE_INVALID"
+  | "CONTENT_PRESSURE" | "CONTENT_UNAVAILABLE";
+
+interface ContentProblemFact { readonly status: number; readonly title: string; }
+
+const PROBLEMS: Readonly<Record<ContentProblemCode, ContentProblemFact>> = Object.freeze({
+  CONTENT_REQUEST_INVALID: { status: 400, title: "Bad Request" },
+  CONTENT_AUTH_REQUIRED: { status: 401, title: "Unauthorized" },
+  CONTENT_PERMISSION_DENIED: { status: 403, title: "Forbidden" },
+  INSTALLATION_NOT_FOUND: { status: 404, title: "Installation Not Found" },
+  INSTALLATION_INCOMPLETE: { status: 409, title: "Installation Incomplete" },
+  CONTENT_NOT_FOUND: { status: 404, title: "Content Not Found" },
+  CONTENT_METHOD_NOT_ALLOWED: { status: 405, title: "Method Not Allowed" },
+  CONTENT_VERSION_MISMATCH: { status: 409, title: "Content Version Mismatch" },
+  CONTENT_TOO_LARGE: { status: 413, title: "Content Too Large" },
+  CONTENT_SCHEMA_INVALID: { status: 422, title: "Content Schema Invalid" },
+  CONTENT_INTEGRITY_FAILED: { status: 422, title: "Content Integrity Failed" },
+  RANGE_INVALID: { status: 416, title: "Range Not Satisfiable" },
+  CONTENT_PRESSURE: { status: 429, title: "Too Many Requests" },
+  CONTENT_UNAVAILABLE: { status: 500, title: "Internal Server Error" },
 });
 
-function problem(res: ServerResponse, status: number, allow = false): void {
-  const fact = PROBLEMS[status] ?? PROBLEMS[500]!;
-  const body = Buffer.from(JSON.stringify({ type: `urn:loomrealm:content:${fact.code.toLowerCase()}`, title: fact.title, status, code: fact.code }), "utf8");
-  res.statusCode = status;
+function problem(res: ServerResponse, code: ContentProblemCode, allow = false): void {
+  const fact = PROBLEMS[code];
+  const body = Buffer.from(JSON.stringify({ type: `urn:loomrealm:content:${code.toLowerCase()}`, title: fact.title, status: fact.status, code }), "utf8");
+  res.statusCode = fact.status;
   res.setHeader("Content-Type", "application/problem+json");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Length", body.length);
   if (allow) res.setHeader("Allow", "GET, HEAD");
   res.end(body);
+}
+
+function selectedBodyHasValidSchema(kind: ContentIndexEntry["kind"], body: Uint8Array): boolean {
+  if (kind === "resource") return true;
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(body); }
+  catch { return false; }
+  try {
+    if (kind === "record") {
+      const value: unknown = JSON.parse(text);
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    }
+    const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
+    if (lines.length === 1 && lines[0] === "") return true;
+    for (const line of lines) {
+      if (line === "" || line.endsWith("\r")) return false;
+      const value: unknown = JSON.parse(line);
+      if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    }
+    return true;
+  } catch { return false; }
 }
 
 function bearer(req: IncomingMessage): string | null {
@@ -311,29 +358,29 @@ export async function createDesktopContentService(options: DesktopContentService
   const server = createServer((req, res) => {
     req.resume();
     void (async () => {
-      if (req.method !== "GET" && req.method !== "HEAD") return problem(res, 405, true);
+      if (req.method !== "GET" && req.method !== "HEAD") return problem(res, "CONTENT_METHOD_NOT_ALLOWED", true);
       let route: Route | null;
-      try { route = parseRoute(req.url); } catch { return problem(res, 400); }
-      if (!route) return problem(res, 404);
+      try { route = parseRoute(req.url); } catch { return problem(res, "CONTENT_REQUEST_INVALID"); }
+      if (!route) return problem(res, "CONTENT_NOT_FOUND");
       const token = bearer(req);
       const grant = token ? grants.get(token) : undefined;
-      if (!grant || grant.expiresAtUnixMs <= Date.now()) return problem(res, 401);
-      if (route.installationId !== view.installationId || grant.installationId !== route.installationId) return problem(res, 404);
-      if (!grant.permissions.includes(route.permission)) return problem(res, 403);
-      if (active >= maxConcurrentRequests) return problem(res, 429);
+      if (!grant || grant.expiresAtUnixMs <= Date.now()) return problem(res, "CONTENT_AUTH_REQUIRED");
+      if (route.installationId !== view.installationId || grant.installationId !== route.installationId) return problem(res, "INSTALLATION_NOT_FOUND");
+      if (!grant.permissions.includes(route.permission)) return problem(res, "CONTENT_PERMISSION_DENIED");
+      if (active >= maxConcurrentRequests) return problem(res, "CONTENT_PRESSURE");
       active++;
       try {
-        if (view.state !== "open" || view.db.state !== "open") return problem(res, 409);
+        if (view.state !== "open" || view.db.state !== "open") return problem(res, "INSTALLATION_INCOMPLETE");
         if (route.kind === "manifest") {
-          if (view.manifestBytes.byteLength > maxBodyBytes) return problem(res, 413);
+          if (view.manifestBytes.byteLength > maxBodyBytes) return problem(res, "CONTENT_TOO_LARGE");
           successHeaders(res, "application/json; charset=utf-8", view.manifestVersion, view.manifestBytes.byteLength, false);
           if (notModified(req, view.manifestVersion)) { res.statusCode = 304; return res.end(); }
           res.statusCode = 200;
           return res.end(req.method === "HEAD" ? undefined : view.manifestBytes);
         }
         const entry = view.index.get(indexKey(route.kind, route.namespace, route.key));
-        if (!entry) return problem(res, 404);
-        if (entry.length > BigInt(maxBodyBytes)) return problem(res, 413);
+        if (!entry) return problem(res, "CONTENT_NOT_FOUND");
+        if (entry.length > BigInt(maxBodyBytes)) return problem(res, "CONTENT_TOO_LARGE");
         const controller = new AbortController();
         const cancel = () => controller.abort();
         req.once("aborted", cancel);
@@ -341,34 +388,30 @@ export async function createDesktopContentService(options: DesktopContentService
         const lease = await openFsdbObject(view.db, entry.identity, controller.signal).catch(() => null);
         req.off("aborted", cancel);
         res.off("close", cancel);
-        if (!lease) return problem(res, view.db.state === "open" ? 404 : 409);
+        if (!lease) return problem(res, view.db.state === "open" ? "CONTENT_NOT_FOUND" : "INSTALLATION_INCOMPLETE");
         try {
           const unchanged = notModified(req, entry.contentVersion);
-          if (req.method === "HEAD" || unchanged) {
-            successHeaders(res, entry.mime, entry.contentVersion, entry.length, true);
-            res.statusCode = unchanged ? 304 : 200;
-            return res.end();
-          }
           const chunks: Buffer[] = [];
           const hash = createHash("sha256");
           let length = 0;
           for await (const chunk of lease.stream) {
             const bytes = Buffer.from(chunk as Uint8Array);
             length += bytes.length;
-            if (length > maxBodyBytes) return problem(res, 413);
+            if (length > maxBodyBytes) return problem(res, "CONTENT_TOO_LARGE");
             hash.update(bytes);
             chunks.push(bytes);
           }
           const actual = `sha256:${hash.digest("hex")}`;
-          if (!CONTENT_VERSION.test(actual) || actual !== entry.contentVersion || BigInt(length) !== entry.length) return problem(res, 422);
+          if (!CONTENT_VERSION.test(actual) || actual !== entry.contentVersion || BigInt(length) !== entry.length) return problem(res, "CONTENT_INTEGRITY_FAILED");
           const body = Buffer.concat(chunks, length);
+          if (!selectedBodyHasValidSchema(entry.kind, body)) return problem(res, "CONTENT_SCHEMA_INVALID");
           successHeaders(res, entry.mime, entry.contentVersion, body.length, true);
-          res.statusCode = 200;
-          res.end(body);
+          res.statusCode = unchanged ? 304 : 200;
+          res.end(req.method === "HEAD" || unchanged ? undefined : body);
         } finally { await lease.close(); }
       } finally { active--; }
     })().catch(() => {
-      if (!res.headersSent) problem(res, 500);
+      if (!res.headersSent) problem(res, "CONTENT_UNAVAILABLE");
       else res.destroy();
     });
   });

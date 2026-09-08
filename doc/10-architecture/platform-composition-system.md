@@ -136,11 +136,11 @@ Renderer physical realization：
 RendererDataBinding
 RendererInputSource environment
 M12 bound readonly Content access
-    → @loomrealm/renderer private ResourceClient
+    → trusted @loomrealm/renderer/resource-client integration subpath
 presentation environment
 ```
 
-注意：Renderer-facing M12不是 public `ContentClient` SDK；public author `ContentClient`只属于 `@loomrealm/subsystem`。Renderer只拥有 private resource bytes responsibility。
+注意：Renderer-facing M12不是 public `ContentClient` SDK；public author `ContentClient`只属于 `@loomrealm/subsystem`。Renderer通过 trusted `@loomrealm/renderer/resource-client` integration subpath拥有 resource bytes responsibility，Renderer root保持不变。
 
 M10/M11/M12都没有新增 `@loomrealm/platform-ports` surface。
 
@@ -222,7 +222,7 @@ Renderer：
 
 ```text
 Desktop composition binds current installation/grant
-→ Renderer-private ResourceClient
+→ trusted Renderer integration-subpath ResourceClient
 → logical resource + expected version
 → Content API bytes
 ```
@@ -341,7 +341,7 @@ Desktop FSDB/HTTP vs PWA OPFS/Service Worker
 4. Host-owned Runner是 physical Runtime entry；
 5. Data provisioning与 Content injection是不同 physical capabilities；
 6. M12 Content不新增 Platform Port或 universal Content service locator；
-7. Subsystem public ContentClient 与 Renderer private ResourceClient职责不同；
+7. Subsystem public ContentClient 与 trusted Renderer integration-subpath ResourceClient职责不同；
 8. Content physical service/credential属于 Platform，logical Content semantics属于 Content contract；
 9. Hostra/PWA可以使用不同 storage/transport mechanics；
 10. M16只在 logical application trace等价时关闭跨平台 equivalence。
