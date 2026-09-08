@@ -2,9 +2,8 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / **M10+M11 Closed / M12 Preimplementation Frozen**  
-> 主要定义：logical roles/modules、Runner/role-facing capabilities、Renderer/Data/Input/Render/Content 与 Desktop/PWA realization 入口  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 稳定程度：M10–M12 Closed / M13 Web Presentation Pending  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
 > 最近复核：2026-09-08
 
@@ -19,253 +18,138 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 | 模块 | 入口 | Current responsibility |
 |---|---|---|
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | read-only Main mirror、Data reconciliation、M10 Input、M11 internal Render replica、M12 trusted resource integration subpath |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 Projector |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
-| FSDB Content legacy | [fsdb-content-service](./fsdb-content-service/README.md) | **Superseded**；current implementation由 M12_01–05 定义 |
-| `loom.map` | [loom-map](./loom-map/README.md) | M13 ordinary platform-neutral Subsystem consumer；消费 frozen Input/Render/Content/Frame APIs |
-| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra Launcher/Runner/WS/Data Broker/M12 Content/M14 full composition |
-| PWA | [pwa-host](./pwa-host/README.md) | PWA Launcher/Worker/MessagePort；M16 Content/full equivalence target |
+| `loom.map` | [loom-map](./loom-map/README.md) | M14 platform-neutral business + map-owned Web presentation |
+| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra physical composition、Content、M13/M15 integration |
+| PWA | [pwa-host](./pwa-host/README.md) | PWA Worker Runtime、M17 Renderer/Data/Content/Web presentation realization |
 
-Desktop/PWA 是同一 application architecture 的不同 physical realization。
+Desktop/PWA 是同一 logical architecture 的不同 physical realization。
 
 ---
 
-## 2. Authority / Role Boundaries
+## 2. Authority Boundaries
 
 ```text
 Main
-    Session / Runtime / Frame / Stack / Activation
-    InputTarget / Renderer currentness / DataAuthority
+    Session / Runtime / Frame / Activation / InputTarget / DataAuthority
 
 Subsystem
-    business state / local Frame Context
-    Desired Input Interest / retained author State
-    Render authoritative Domains
-    author-facing ContentClient usage
+    business state / Input Interest / authoritative Render Domains / Content author usage
 
-Renderer
-    read-only Main mirror
-    Input Producer/gate
-    Render replica
-    private resource bytes client
+Renderer Store
+    current authoritative Render replica
 
-Platform Composition
-    executable binding / Process-Worker-Window
+Web Projector
+    mechanical committed Store → DOM projection
+
+Business Web Component
+    read-only projected state
+    private Shadow DOM / Canvas / WebGL / layout state
+
+Platform/App Composition
+    Process/Worker/Window
     Control/Data physical provisioning
-    Content service/binding/credential
+    Content physical binding
+    presentation bootstrap environment
 ```
 
-保持：
-
-```text
-Frame != Runtime != Data != Render != Content lifecycle
-Platform physical ownership != application authority
-Content capability != executable resolver
-```
+M13精确 browser/API semantics不在本索引重复定义；见 Config/API formal contracts。
 
 ---
 
-## 3. Role-facing Capabilities Through M12
-
-Main-facing：
+## 3. Closed Slices
 
 ```text
-DeadlineScheduler
-OpaqueMaterialGenerator
-RuntimeHosting
-RendererControlBinding?
-DataConnectionAuthoritySink?
+M10 User Input        ✅
+M11 Render Replication ✅
+M12 Content           ✅
 ```
 
-Renderer-facing/current role integration：
-
-```text
-RendererDataBinding
-RendererInputSource             // M10 public role seam
-trusted Renderer integration-subpath ResourceClient // M12, not root author/application API
-presentation environment        // M14/M16
-```
-
-Subsystem-facing：
-
-```text
-RuntimeControlBinding
-SubsystemDataBinding
-ContentClient                   // M12 author SDK
-```
-
-这些不是 universal Platform interface；capability只随真实 consumer冻结。M10/M11/M12均没有新增 `@loomrealm/platform-ports` surface。
+M11只关闭 Render authority/replication；M12只关闭 readonly Content boundary。M13消费这些既有能力，不重开下层 contracts。
 
 ---
 
-## 4. M10 User Input — Closed
+## 4. M13 Web Presentation
 
 ```text
-Effective(F,A,C)
-=
-current matching Data
-∧ Main InputTarget(S,F,A)
-∧ current active Activation
-∧ C ∈ Interest[F]
-∧ Producer(C)
+WebPresentationConfigV1
+→ ordered browser bootstrap
+→ window.onload
+→ committed Renderer Store
+→ package-private post-commit seam
+→ thin Web Projector
+→ document.body / business-owned WC
 ```
 
-Subsystem author冻结 `createInputListener`；Renderer冻结 one construction-time `RendererInputSource` + current-Control subscription。Known-no-commit同 Activation恢复时 retained State convergence先于 recoverable `frame.call` rejection observable；Event不 replay。
+关键 architecture facts：
 
-Status：**Implemented / Qualified / Closed**。
+```text
+same live wire-node identity
+(Session, subsystemKey, generation, domainId, key)
+→ same HTMLElement
+
+managed root order
+→ subsystemKey UTF-8 lexical
+→ within subsystem: M11 zIndex/domainId order
+→ roots order
+```
+
+裸 `key` 不是 Window-global identity；M13也不创建 cross-Subsystem global zIndex authority。
+
+Web Presentation API v1统一治理独立的 `receiveRenderContext` / `receiveRenderData`，并提供 narrow `PresentationResourceClient`。Business WC看不到 Content credential/path/FSDB/private Renderer client。
 
 ---
 
-## 5. M11 Render — Closed
+## 5. M14 `loom.map`
 
-Subsystem exact author surface：
+同一个 map owner提供两个 execution side：
 
 ```text
-RenderNode
-RenderDomainState
-RenderEvent
-RenderDomain
-SubsystemScope.createRenderDomain(initialState)
-RenderDomain.replace / emit / close
+@loomrealm/map Definition
+→ @loomrealm/subsystem only
+
+map Web presentation
+→ business-owned Custom Elements
+→ Web Presentation API v1 consumer
 ```
 
-所有 author calls synchronous local-only；business Domain lifecycle独立于 Frame/Data carrier。Renderer Store挂 existing Data slot、internal-only；presentation留 M14。
-
-Status：**Implemented / Qualified / Closed**。
+M14是真实 Frame/Input/Render/Content/Web Presentation综合 consumer；不为了 API coverage 强制使用 RenderEvent，也不发明第二套 resource/loading boundary。
 
 ---
 
-## 6. M12 Content — Frozen / Pending Implementation
-
-Current implementation baseline：
+## 6. Physical Placement
 
 ```text
-M12_01_CONTENT_SERVICE.md
-M12_02_SUBSYSTEM_CONTENT_CLIENT.md
-M12_03_RENDERER_RESOURCE_CLIENT.md
-M12_04_VERTICAL_INTEGRATION.md
-M12_05_QUALIFICATION_CLOSURE.md
-ADR 0030
+M15 Desktop
+    BrowserWindow + Renderer Control/Data/Input/Render/Content
+    M13 Config/API/Projector
+    M14 map-owned WC
+
+M17 PWA
+    Window/Worker + MessagePort/Data provisioning
+    PWA Content realization
+    same M13 logical Web presentation semantics
 ```
 
-Physical/data shape：
-
-```text
-Hostra PREPARE
-→ current prepared installation view
-→ @loomrealm/fsdb
-→ private Content Index + manifest/version
-→ apps/desktop Content Service
-```
-
-Consumers：
-
-```text
-Subsystem
-    scope.content.record/resource
-
-Renderer
-    private resource(namespace,key,expectedVersion)
-    → bytes + MIME + actual version
-```
-
-固定：
-
-```text
-contentVersion = sha256:<64 lowercase hex>
-resource key may be hierarchical
-Content credential remains Host-private
-ordinary Content failure != Runtime/Frame failure
-Renderer resource read != Render authority
-```
-
-不创建：
-
-```text
-@loomrealm/content
-@loomrealm/content-service
-generic Repository/StorageProvider
-InstallationManager/global registry
-AssetManager
-```
-
-旧 [FSDB Content Service 模块设计](./fsdb-content-service/README.md) 已标记 Superseded，不得作为 Current implementation source。
+PWA可以使用不同 storage/fetch/private browser binding，但不能改变 identity/order/API observable semantics。
 
 ---
 
-## 7. M13 `loom.map`
+## 7. Abstraction Rule
 
-`loom.map` 当前模块文档已同步到 frozen author APIs：
-
-```text
-@loomrealm/map → @loomrealm/subsystem
-```
-
-M13 应真实组合：
-
-```text
-Frame/Call
-M10 InputListener
-M11 RenderDomain replace/emit/close
-M12 ContentClient record/resource
-```
-
-如果 M13首次证明需要 `ContentClient.group()`，应以真实 consumer为依据最小 reopen author projection；不得 raw-fetch/FSDB旁路。
-
----
-
-## 8. Physical Placement
-
-```text
-M14 Hostra Desktop
-    BrowserWindow
-    physical Renderer Control WS
-    M9 Data Broker
-    real DOM/Gamepad RendererInputSource
-    M11 current Render replica → presentation
-    M12 Renderer ResourceClient → resources
-
-M16 PWA
-    Window/Worker + MessagePort
-    PWA Data provisioning
-    same logical Input/Render/Content semantics
-```
-
-PWA可以使用 Fetch/Service Worker/OPFS/Cache，不复用 Node-only `@loomrealm/fsdb`；比较的是 logical Content response，不是 storage mechanics。
-
----
-
-## 9. Current Milestones
-
-```text
-M6 Hostra Runtime             ✅
-M7 Renderer Control           ✅
-M8 Data role/core             ✅
-M9 Desktop Data Broker        ✅
-M10 User Input                ✅ Implemented / Qualified / Closed
-M11 Render                    ✅ Implemented / Qualified / Closed
-M12 Content                   Implementation Frozen / Preimplementation Closed / pending
-M13 loom.map                  pending
-M14 Desktop full E2E          pending
-M15 PWA Runtime               pending
-M16 PWA full E2E/equivalence  pending
-```
-
-Module tests验证 role semantics；protocol conformance由对应 contract负责；system E2E验证同一 logical scenario在不同 Platform realization下得到等价 business-observable result。
-
----
-
-## 10. Abstraction Rule
-
-模块文档不得为了未来可能用途重新引入已经由当前 closure删除的模型。特别禁止用旧 Experimental 文档恢复：
+禁止仅为未来可能用途建立：
 
 ```text
 runtime service locator
-generic Content Repository
-universal asset loader
-Content storage adapter hierarchy
+Repository / AssetManager
 Renderer public Render Store
-platform-specific business branch
+LoomRealm component library / Presentation DSL
+generic layer/stacking manager
+dynamic component loader
+public RenderNodeIdentity framework
+RenderEvent→DOM bridge without real consumer
+second projection-tree authority
 ```
 
-遇到真实 consumer capability gap，按文档治理显式 reopen最小 owning boundary。
+业务 WC内部选择 UI framework不受限制，只要不接管 LoomRealm-managed host projection。

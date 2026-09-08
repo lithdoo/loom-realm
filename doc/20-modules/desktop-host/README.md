@@ -1,211 +1,198 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：M6 Runtime / M9 Data **Implemented + Qualified**；M12 Content **Preimplementation Frozen**；M14 Full E2E Planned  
-> 稳定程度：Closed lower slices / M12 implementation shape Frozen / M14 physical presentation Evolving  
-> 主要定义：Hostra Launcher PREPARE、Node Runner、Runtime Control WS、Desktop Data Broker、M12 Content composition，以及 M14 BrowserWindow/Renderer full product target  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行承载系统](../../10-architecture/runtime-hosting-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 状态：M6 Runtime / M9 Data / M12 Content **Implemented + Qualified**；M13 Web Presentation / M15 Full E2E Planned  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
-Hostra owns physical topology only；Main retains Session/Runtime/Frame/Activation/InputTarget/DataAuthority/Renderer-currentness authority。
+Hostra只拥有 physical topology/composition；Main保留 Session/Runtime/Frame/Activation/InputTarget/DataAuthority authority，Subsystem保留 business Render authority。
 
 ---
 
 ## 1. Milestone Shape
 
 ```text
-M6  Hostra PREPARE + Node Runner + Runtime Control        ✅
-M9  Desktop paired Data Broker + child provisioning      ✅
-M10 Input role behavior                                  ✅
-M11 Render role behavior                                 ✅
-M12 Desktop Content service + two Content consumers      frozen / pending implementation
-M14 BrowserWindow + physical Renderer + presentation E2E pending
+M6  Hostra PREPARE / Runner / Runtime Control         ✅
+M9  Desktop Data Broker / child provisioning         ✅
+M10 User Input                                       ✅
+M11 Render Replication                               ✅
+M12 Desktop Content                                  ✅
+M13 Web Presentation                                 pending
+M14 loom.map + map-owned WC                          pending
+M15 BrowserWindow/full Desktop E2E                    pending
 ```
 
-M14不会重新设计 M9–M12 logical semantics，只完成真实 Desktop physical composition。
+M15只完成真实 Desktop physical composition，不重新设计 M9–M13 logical semantics。
 
 ---
 
-## 2. Hostra PREPARE
+## 2. Runtime PREPARE / Presentation Input
+
+Hostra Runtime PREPARE继续：
 
 ```text
-HostraPlatform.prepareGame(...)
-→ @loomrealm/game-launcher-hostra
-→ @loomrealm/game-package validation
-→ launch.hostra.json validation
-→ exact key-set join
-→ safe executable resolution/preflight
+HostraPlatform.prepareGame
+→ game-launcher-hostra
+→ Game Entry + launch.hostra.json validation/join
+→ executable/security preflight
 → immutable HostraLaunchPlan
 → LogicalGameBootstrap
 ```
 
-Any PREPARE failure：
+Web presentation是独立 product startup input，但 Config acquisition mechanics属于 Desktop private composition：
 
 ```text
-Process create = 0
-business module import = 0
-Runtime Control establish = 0
-Content service business exposure = 0
+installationRoot
++
+user-selected Desktop-private config source/path
+→ read / parse candidate JSON
+→ WebPresentationConfigV1
 ```
 
-Main只接收 LogicalGameBootstrap + narrow Main-facing capabilities，不接收 Hostra plan/module/path/Content credential。
+filesystem path只是一种 Desktop acquisition mechanism，不是 `WebPresentationConfigV1` 字段或跨平台 ABI。Presentation Config不进入 Game Entry、Hostra manifest、Runtime executable join或 Main bootstrap。
 
 ---
 
-## 3. Runner / Runtime
+## 3. Existing Physical Slices
 
-```text
-RuntimeHosting
-→ Host-owned Node Runner
-→ exact planned Definition Module
-→ RuntimeControlBinding
-→ optional/current SubsystemDataBinding
-→ M12 bound ContentClient
-→ @loomrealm/subsystem/host
-```
+### M9 Data
 
-Runner负责构造 physical role-local capabilities，不拥有 Frame/Data/Render authority。
+Data Broker负责 paired current Renderer/Runner carrier；Data ticket/provisioning IPC不能作为 Content或JS/CSS loader channel。
 
-M12 required ContentClient必须在 `runSubsystem()` / business `initialize` 前构造成功；构造失败属于 Runtime bootstrap failure。运行后的普通 Content read rejection只是 caller-local failure。
-
----
-
-## 4. M9 Data Provisioning — Closed
-
-```text
-Main DataConnectionAuthoritySink
-→ apps/desktop Broker
-→ Renderer WS + Runner WS candidate
-→ exact HostedRuntime-bound HostraRuntimeDataProvisioner
-→ commit-time latest-view revalidation
-→ paired sole-current install
-```
-
-Data ticket/provisioning IPC不产生 application authority。Post-install Runner delivery failure只 retire新 Data current，不 resurrect旧 current，也不自动 fail Runtime/Frame。
-
-M12 Content credential/material **不得复用 M9 Data provisioning IPC/ticket**。
-
----
-
-## 5. M12 Desktop Content — Frozen
-
-Physical chain：
+### M12 Content
 
 ```text
 successful Hostra PREPARE
-→ current immutable prepared installation view
-→ @loomrealm/fsdb snapshot
-→ private immutable Content Index + normalized public manifest
-→ localhost Content Service
+→ prepared installation
+→ exactly one direct-child [FSDB]*
+→ readonly Content view/service
 ```
 
-Package placement：
-
-```text
-@loomrealm/fsdb
-    readonly Node FSDB core
-
-@loomrealm/fsdb-http
-    standalone FSDB HTTP projection
-
-apps/desktop
-    LoomRealm Content route/auth/version composition
-```
-
-M12不建立 `@loomrealm/content-service` package、global InstallationRegistry、generic Repository/StorageProvider。
-
-Desktop Content grant：
-
-```text
-Host-owned
-opaque
-installation scoped
-permission scoped
-expiring
-separate from Runtime bootstrapToken / Renderer token / Data ticket
-```
-
-Hostra owner通过独立最小 child-private injection把 Runtime所需 access material交给 Runner；具体 env/IPC/context spelling是 private mechanics，但不得进入 Runtime Control/Data application/business payload。
+Subsystem获得 bound ContentClient；Renderer获得 trusted/private ResourceClient。Desktop不新增独立 `fsdbRoot` 用户配置。
 
 ---
 
-## 6. M12 Content Consumers
+## 4. M13 Browser Bootstrap
 
-Subsystem：
-
-```text
-Runner constructs bound ContentClient
-→ runSubsystem({content,...})
-→ scope.content.record/resource
-```
-
-Renderer：
+精确规则由 [Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md) 拥有：
 
 ```text
-Desktop composition binds current installation/grant
-→ trusted @loomrealm/renderer/resource-client integration subpath
-→ logical resource + expected sha256 version
-→ bytes + MIME
+Desktop-private config acquisition
+→ WebPresentationConfigV1
+→ current prepared Content refs
+→ ordered <link rel="stylesheet">
+→ ordered classic <script>
+→ business customElements.define(...)
+→ window.onload
+→ start Web Projector
 ```
 
-Renderer ResourceClient不是 public Platform port/AssetManager，也不解释 RenderNode presentation schema。
+Desktop负责 trusted prepared resource → browser `href/src` 的 private binding，并必须独立检测 stylesheet/script load/evaluation failure。
+
+Business config/WC不得观察 path、bearer、FSDB或 privileged localhost URL。
 
 ---
 
-## 7. Content Failure / Lifetime
+## 5. M13 Projector Integration
 
 ```text
-Frame suspend/close != ContentClient close
-Activation change   != ContentClient replacement
-Data reconnect       != ContentClient/ResourceClient invalidation
-RenderDomain close   != resource cache lifetime
+M11 Store successful commit
+→ package-private post-commit seam
+→ presentation eligibility/currentness gate
+→ Web Projector
+→ document.body / business-owned WC
 ```
 
-普通 Content failure不得 mutate Main/Render authority或 terminalize Runtime/Frame。
+Desktop实现必须服从 Rendering System：
 
-Prepared installation在该 Content Service lifetime内是 Host-trusted readonly source；不为具有 physical write authority 的恶意并发 writer建立 transaction/copy-on-read storage system。
+```text
+same live wire-node identity
+(Session, subsystemKey, generation, domainId, key)
+→ same HTMLElement
+
+managed root order
+→ subsystemKey UTF-8 lexical
+→ within subsystem: M11 zIndex/domainId order
+→ roots order
+```
+
+不得以裸 `Map<key, HTMLElement>` 实现 Window-global identity，也不得把 zIndex升级成 cross-Subsystem global stacking authority。
+
+same-generation carrier loss必须保留最后 committed managed DOM mounted，并冻结 Projector mutation；replacement carrier只有在 fresh Registry + every current Domain fresh baseline 完整后才 reconcile。partial rebaseline不得泄漏到 DOM。fresh generation才 retire旧 managed elements并创建 fresh HTMLElement identity universe。
+
+Actual layout/stacking由 business WC/CSS负责；Desktop不建立 per-Domain layer/framework。
 
 ---
 
-## 8. M14 Full Desktop Target
+## 6. Web Presentation API Integration
+
+精确 local ABI由 [Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md) 拥有。
+
+Desktop/Renderer必须提供：
 
 ```text
-M12-capable Hostra composition
-+
-BrowserWindow/Web Renderer
-+
-physical RendererControlBinding WS
-+
-M9 Data Broker
-+
-real DOM/Gamepad RendererInputSource
-+
-M11 internal current Render replica → presentation
-+
-M12 Renderer ResourceClient → resource bytes
-+
-M13 loom.map
-→ full Desktop E2E
+receiveRenderContext before first managed insertion; at most once per HTMLElement
+receiveRenderData for current retained full data
+same-generation carrier loss causes no receiver or LoomRealm detach/reinsert
+complete rebaseline before reconnect reconciliation
+PresentationResourceClient façade over M12 private ResourceClient
 ```
 
-M14不得：
+Business WC runtime resource只使用 logical namespace/key/expectedContentVersion，不能获得 Content origin/token/path/FSDB/private Renderer client。
+
+Config bootstrap resource binding与runtime PresentationResourceClient是不同 capability boundary。
+
+---
+
+## 7. Failure / Lifetime
+
+Bootstrap failure阻止 Projector进入 running state。Runtime WC/resource/DOM failure是 presentation-local：
 
 ```text
-DOM→Data shortcut绕过 M10 source
-presentation自建 Render authority
-Render State携 Content URL/token/path
-Renderer直接读 fs/fsdb-http business path
+no Store rollback
+no Main/Subsystem authority mutation
+no automatic Runtime/Frame failure
 ```
+
+Presentation bootstrap/context lifetime与 Renderer Window environment对齐；不按 Subsystem/Frame/Domain/Data reconnect动态装卸 scripts/styles或重建 capability。
+
+same-generation Data currentness loss只冻结 projection，不结束 Window-lifetime context capability或仍 live element identity；fresh generation结束旧 wire-node/HTMLElement identity universe。
+
+---
+
+## 8. Qualification
+
+M13 real Chromium至少覆盖：
+
+```text
+ordered bootstrap + explicit resource failure detection
+window.onload start barrier
+Custom Element registration
+successful Store commit → Projector
+scoped wire-node identity / no key collision
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation gets fresh HTMLElement identity
+subsystemKey → M11 domain order → roots
+reorder moves existing elements
+context/data receiver lifecycle
+real PresentationResourceClient → M12 bytes
+version conflict/cancellation/value ownership
+no credential/path/private-client exposure
+failure never rolls back authority
+```
+
+M15再覆盖完整 BrowserWindow + Renderer Control + Data Broker + physical input + M14 map + reconnect/reload/shutdown trace。
 
 ---
 
 ## 9. Final Invariants
 
-1. Launcher owns Game/executable PREPARE, not Renderer/Content application authority；
-2. Main sees no Hostra plan/module/path/token；
-3. M9 Data and M12 Content physical credentials/lifetimes remain separate；
-4. apps/desktop owns Broker + Content composition policy；
-5. `@loomrealm/fsdb` owns FSDB domain, not Content semantics；
-6. Content version/auth/routes belong Desktop Content projection；
-7. ordinary Data/Content failure does not directly equal Runtime/Frame failure；
-8. M14 is first full BrowserWindow/presentation product closure。
+1. Hostra Launcher只拥有 Runtime executable PREPARE；presentation startup独立；
+2. Main不接收 plan/path/token/presentation config；
+3. Config source/path acquisition属于 Desktop private composition，不属于 Config v1；
+4. Data provisioning、Content credential、presentation bootstrap不混成万能 channel；
+5. Desktop只实现 M13 formal Config/API/identity/currentness/order semantics，不新增平台专属 variant；
+6. Business WC只读 LoomRealm projection并只通过 narrow PresentationResourceClient读取runtime resource；
+7. Desktop不建立 component registry、AssetManager、dynamic loader、global layer manager或 second projection authority。

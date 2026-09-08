@@ -1,17 +1,17 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Data / M10 Input / M11 Render **Implemented + Qualified**；M12 ResourceClient **Preimplementation Frozen**  
-> 稳定程度：closed lower slices / M12 trusted resource integration boundary Frozen
-> 主要定义：Renderer Control holder、Data reconciliation、Input gate/source、internal Render replica、M12 trusted integration-subpath resource bytes capability与 M14 presentation placement
-> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[User Input v1](../../15-contracts/user-input-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient **Implemented + Qualified**；M13 Web Presentation **Pending**  
+> 稳定程度：closed lower slices / M13 Stabilizing  
+> 主要定义：Renderer currentness、internal Render replica、trusted ResourceClient、M13 Window bootstrap、thin Web Projector placement  
+> 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Renderer Data Profile v1](../../15-contracts/renderer-data-profile-v1.md)、[Render Update v1](../../15-contracts/render-update-v1.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
-Renderer不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render role behavior；M12只通过 trusted integration subpath增加 logical resource → bytes responsibility，root author/application surface保持不变。
+Renderer不是 Frame/Call participant。它镜像 Main committed authority，并在 current Data peers上执行 Input/Render role behavior；M12增加 trusted logical resource → bytes responsibility；M13只增加 Window-local physical Web presentation，不创建新的 application authority。
 
 ---
 
-## 1. Current Shape
+## 1. Current / Target Shape
 
 ```text
 @loomrealm/renderer
@@ -21,59 +21,39 @@ Renderer不是 Frame/Call participant。它镜像 Main committed authority，并
     │   ├── current RendererDataPeer
     │   ├── M10 Input Registry/gate/publisher
     │   └── M11 internal Render replica
-    ├── optional construction-time RendererInputSource
-    └── M12 trusted integration-subpath ResourceClient composition
+    ├── optional RendererInputSource
+    ├── M12 trusted/private ResourceClient
+    └── M13 package-private post-commit seam
+            ↓
+        presentation eligibility/currentness gate
+            ↓
+        thin Web Projector
+            ↓
+        document.body / business-owned Custom Elements
+
+Renderer Window bootstrap
+└── product-private Config acquisition
+    ↓
+    WebPresentationConfigV1
+    ├── ordered <link rel="stylesheet">
+    ├── ordered classic <script>
+    ├── business customElements registration
+    └── window.onload → enable Projector
 ```
 
-M8/M10/M11均复用同一 currentness/Data slot，不创建第二套 Renderer Session/Connection authority。M12 ResourceClient也不得成为新的 authority/currentness layer。
+M13复用 existing currentness facts；DOM/WC existence不 mint Data/Render authority。
 
 ---
 
-## 2. Authority / Currentness
+## 2. Existing Closed Slices
 
-Main publishes committed：
+### M10 Input
 
-```text
-Runtime projection
-Frame / Activation / InputTarget
-DataAuthority {subsystemKey,generation,dataProfile}
-```
+Physical DOM/Gamepad input继续进入 frozen `RendererInputSource` seam，并受 Main InputTarget、Interest、Producer 与 current Data gate约束。业务 WC focus/event listener不能形成 Renderer→Data shortcut。
 
-Renderer不得 create/recover Frame/Activation、modify Stack、mint Data authority/currentness或从 focus/Content availability推导 InputTarget。
+### M11 Render Replica
 
-Content current installation/grant是 Platform composition fact，不提升为 Renderer application authority。
-
----
-
-## 3. M10 Input — Closed
-
-Exact construction仍是：
-
-```ts
-createRendererControlHolder(
-  data?: RendererDataBinding,
-  input?: RendererInputSource,
-)
-```
-
-一个 construction-time source object；0..1 active source subscription跟 current Control peer epoch。Effective gate：
-
-```text
-current Data
-× current Control snapshot
-× Main InputTarget
-× active F/A
-× Interest[F]
-× Producer(C)
-```
-
-Source failure/late callback不得改变 Control/Data authority；Input backlog在 Renderer role内 bounded/coalesce/drop，不能把 ordinary input pressure升级成 Data local-fatal。
-
----
-
-## 4. M11 Render Replica — Closed
-
-M11 Store挂 existing desired Data identity：
+Store identity挂在 current Data slot：
 
 ```text
 current Control peer
@@ -82,128 +62,242 @@ current Control peer
 + dataProfile
 ```
 
-Store internal facts：current Registry、per-Domain baseline/revision、committed tree、generation-scoped observed identity history。
+Store保持 current Registry、per-Domain baseline/revision、committed tree与 required one-shot identity history。same-generation carrier replacement重新建立 carrier-local baseline但不创建 fresh wire identity universe。M11仍没有 public Render Store/subscription/presentation API。
 
-same-generation carrier replacement保留 identity history但重建 carrier baseline；old peer不能 mutate replacement current。Render protocol-fatal只 retire current Data peer，不直接 fail Runtime/Frame。
+### M12 ResourceClient
 
-M11 **没有 public Render Store/subscription/presentation API**；M14 presentation继续消费 package-private current replica seam。
+trusted/private ResourceClient继续提供：
+
+```text
+namespace + hierarchical resourceKey + expectedContentVersion
+→ bytes + MIME + actual contentVersion
+```
+
+M13不把它本体、origin、token、path或 physical URL交给 business WC。
 
 ---
 
-## 5. M12 Private ResourceClient — Frozen
+## 3. M13 Projector Placement
 
-M12不把完整 ContentClient变成 Renderer public API。Renderer只需要一个 private responsibility，语义等价于：
+```text
+render.* wire
+→ M11 Store validate + atomic commit
+→ package-private post-commit notification/effect
+→ presentation eligibility/currentness gate
+→ Web Projector
+```
+
+要求：
+
+```text
+successful commit only
+failed Store mutation → no projection notification
+partial same-generation rebaseline → no DOM reconciliation
+business cannot subscribe
+Projector cannot write Store authority
+```
+
+Projector实现放在 Renderer trusted/package-private ownership 内；M13不为了 package symmetry新增 `@loomrealm/presentation` 或 public PresentationAdapter。
+
+---
+
+## 4. Element Identity / Currentness
+
+`RenderNode.key` 不是 Window-global identity。Projector必须使用完整 current wire-node scope：
+
+```text
+(Session, subsystemKey, generation, domainId, key)
+```
+
+Renderer Window已经固定 Session/Renderer时，private implementation可只保存其余组成部分。
+
+概念 private mapping可以是 composite/nested map，但 **不得** 简化成：
 
 ```ts
-resource(
-  namespace: string,
-  hierarchicalResourceKey: string,
-  expectedContentVersion: string,
-  signal?: AbortSignal,
-): Promise<{
-  readonly bytes: Uint8Array;
-  readonly mime: string;
-  readonly contentVersion: string;
-}>
+Map<RenderNodeKey, HTMLElement>
 ```
 
-固定：
+因为 different Domains/Subsystems可以合法拥有相同 key string。
+
+Frozen rule：
 
 ```text
-expectedContentVersion = sha256:<64 lowercase hex>
-resourceKey = one-or-more logical segments joined by /
-current response version must equal expected version
-returned bytes detached from internal cache ownership
-same key + different version cannot reuse stale bytes
-malformed local identity/version rejected before HTTP
+same live wire-node identity
+→ same HTMLElement
 ```
 
-ResourceClient不创建新的 request-version header/query protocol；它读取 current logical resource并比较 `X-Loom-Content-Version`。
+move/reparent/root reorder只移动 existing instance。different subsystem/domain 或 fresh generation即使 key相同也建立不同 identity。
+
+same-generation carrier loss冻结 presentation：
+
+```text
+keep last committed managed DOM mounted
+freeze Projector mutation
+no receiver callback caused by loss
+no LoomRealm-caused detach/reinsert
+```
+
+replacement carrier只有在以下 predicate满足后才重新启用 reconciliation：
+
+```text
+registrySeen
+AND
+every Domain in current Registry is baselined
+```
+
+fresh Registry 后的 partial Domain baseline只更新 Store，不更新 DOM。complete baseline 后一次 reconcile，匹配相同 live wire-node identity 的节点复用 existing HTMLElement。
+
+fresh generation结束旧 identity universe：旧 managed elements被 retire/remove；新 generation 的相同 textual key得到 fresh HTMLElement。
+
+这些都是 package-private implementation state，不新增 public `RenderNodeIdentity`、`PresentationState` 或 reconnect coordinator API。
 
 ---
 
-## 6. Content / Render Separation
+## 5. Projection / Physical Mount
 
-M12只冻结：
-
-```text
-logical Content resource identity
-→ version-checked bytes
-```
-
-M12不冻结：
+精确 business-visible mapping由 [渲染系统](../../10-architecture/rendering-system.md) 与 [Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md) 拥有。Renderer module只实现：
 
 ```text
-RenderNode.data → resource identity mapping
-known presentation tag/component schema
-PNG/JPEG decode
-ImageBitmap / HTMLImageElement / AudioBuffer
-Canvas / WebGL texture/object lifetime
-presentation eviction/prefetch
+tag      → create business-owned element
+attrs    → managed host attrs
+children → managed ordered light DOM
+context  → optional one-shot API injection
+data     → optional full current API delivery
 ```
 
-这些属于 M14。
+Top-level roots直接进入 `document.body`，不创建 per-Domain wrapper、generic layer、CSS z-index synthesis 或 layout engine。
 
-Render state不得携：
+Managed root order：
 
 ```text
-Content bearer
-absolute privileged Content URL
-filesystem path
-resource bytes capability
+subsystemKey UTF-8 lexical
+→ within subsystem: M11 zIndex/domainId order
+→ roots order
 ```
 
-Renderer ResourceClient failure只影响当前 resource read/presentation-local future policy；不得 mutate Render Store、Main authority或 Subsystem authoritative state。
+该顺序只用于 deterministic physical concatenation；不创建 cross-Subsystem global zIndex semantics。Business WC/CSS拥有实际 layout/stacking。
+
+Host/bootstrap non-business DOM不属于 LoomRealm-managed root sequence。
 
 ---
 
-## 7. Resource Lifetime / Cache
+## 6. WC Authority Boundary
+
+Business WC 对以下 state只有 read access：
 
 ```text
-ResourceClient lifetime != RenderDomain lifetime
-resource cache lifetime  != Frame lifetime
-Data reconnect            != Content cache invalidation
+Element identity/tag
+Render-managed host attrs
+Render data
+managed light-DOM children/order
 ```
 
-允许 small version-safe immutable success cache + same-ID in-flight dedupe；不得提前建立 AssetManager、loader/decoder registry、observable ResourceStore或 generic Repository hierarchy。
+它拥有 private fields、Shadow DOM、Canvas/WebGL、decoded resource/cache、animation/timers 与业务 layout state。
 
-Renderer reload/control replacement MAY创建 fresh local resource composition；logical resource identity/version semantics不变。
+Renderer不从 DOM反向同步 Store，也不使用 MutationObserver policing业务违规 mutation。Contract violation只产生 presentation-local consequences。
 
 ---
 
-## 8. M14 Physical Presentation
+## 7. Config / API Ownership
+
+不要在 module README 重复 formal shape；以两份 contract为唯一精确 source：
 
 ```text
-BrowserWindow/Web Renderer
-→ current M11 Render replica
-→ presentation-specific RenderNode interpretation
-→ logical resource identity
-→ already-qualified M12 ResourceClient
-→ decode/presentation
+Web Presentation Config v1
+→ parsed Config value / startup JS/CSS / prepared Content / ordered browser bootstrap
+
+Web Presentation API v1
+→ receiveRenderContext / receiveRenderData / PresentationResourceClient / reconnect-observable behavior
 ```
 
-M14不得通过 direct localhost URL、filesystem、`@loomrealm/fsdb` 或 `@loomrealm/fsdb-http` 绕过 ResourceClient/version/credential boundary。
+Config source/path/handle acquisition属于 concrete product/platform，不属于 Renderer public API或 Config v1。
 
-M10 real DOM/Gamepad input也必须继续实现 exact `RendererInputSource` seam，不能 DOM→Data shortcut。
+实现必须保持：
+
+```text
+context before first managed insertion
+same HTMLElement context at most once
+existing element commit: structure/reorder → attrs → data
+same-generation carrier loss: no detach/reinsert or receiver
+complete rebaseline before reconnect reconciliation
+```
+
+Business WC runtime resource只能使用 API façade；不能取得 M12 private client/credential/path。
 
 ---
 
-## 9. PWA / M16
+## 8. RenderEvent / Failure
 
-PWA Renderer使用相同 logical resource/version semantics，但 physical Content实现可以是 Fetch/Service Worker/OPFS/Cache；不依赖 Node-only `@loomrealm/fsdb`。
+M13不定义 RenderEvent → WC/DOM ABI。
 
-M16比较 logical application trace与 Content response，不比较 Desktop/PWA storage/transport identity。
+Bootstrap failure阻止 Projector进入 running state。Runtime callback/resource/DOM failure是 presentation-local：
+
+```text
+no Store rollback
+no Main/Subsystem authority mutation
+no automatic Runtime/Frame failure
+best-effort continuation where possible
+```
+
+不预建 generic recovery framework。
 
 ---
 
-## 10. Final Invariants
+## 9. M13 Qualification
 
-1. Renderer仍不是 Frame RPC participant或 application authority owner；
-2. Control holder/Data slots保持唯一 currentness facts；
-3. M10 Input / M11 Render不复制 currentness；
-4. M11 Render Store internal-only；
-5. M12 ResourceClient private-only，不新增 public AssetManager/ContentClient；
-6. resource version identity独立于 Data/Frame/RenderDomain lifetime；
-7. Content failure不改变 Main/Subsystem/Render authority；
-8. presentation/resource-reference schema留 M14；
-9. PWA M16共享 logical semantics，不共享 Node storage mechanics。
+真实 headless Chromium至少证明：
+
+```text
+Config ordered bootstrap + load failure detection
+window.onload start barrier
+Custom Element registration
+Store commit → Projector only after success
+same wire-node identity → same HTMLElement
+same key across Domains/Subsystems does not collide
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation gets fresh HTMLElement identity
+subsystemKey → M11 Domain order → roots deterministic sequence
+reorder moves existing elements
+context before first insertion; at most once
+context/data receivers independent
+data initial/update full snapshot
+real PresentationResourceClient → M12 bytes
+version conflict/cancel/value ownership
+no credential/path/private-client exposure
+DOM/callback/resource failure never mutates authority
+RenderEvent not delivered to WC/DOM
+```
+
+M13不复制 M11 protocol conformance或 M12 Content internals。
+
+---
+
+## 10. Phase Placement / PWA
+
+```text
+M11 Render Replication      closed
+M12 Content                 closed
+M13 Web Presentation        pending
+M14 loom.map                pending
+M15 Desktop full E2E        pending
+M16 PWA Runtime             pending
+M17 PWA full E2E            pending
+```
+
+Hostra/PWA共享 Config/API/identity/currentness/body-order logical semantics；Config acquisition、physical storage、transport和 trusted `href/src` binding可以不同。Node-only `@loomrealm/fsdb` 不成为 PWA abstraction。
+
+---
+
+## 11. Final Invariants
+
+1. Renderer不拥有 business/Frame/Render authority；
+2. M11 Store internal-only；M13只消费 successful且 presentation-eligible 的 commit seam；
+3. bare key不是 Window-global identity；same live wire-node identity保持 same HTMLElement；
+4. same-generation carrier loss保留最后 committed DOM且冻结 projection，complete rebaseline后才 reconcile；fresh generation建立 fresh HTMLElement universe；
+5. managed body order = subsystemKey lexical → M11 per-subsystem Domain order → roots；
+6. Projector不创建第二份 desired-tree authority或 generic layer system；
+7. business WC对 LoomRealm-managed projection只读；DOM不反向同步 Store；
+8. Config/API formal contracts拥有精确 browser/receiver/resource/currentness semantics；
+9. M13不增加 public presentation package、AssetManager、dynamic loader、RenderEvent WC bridge或 global service locator。

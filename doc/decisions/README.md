@@ -2,10 +2,10 @@
 
 > 层级：设计决策记录  
 > 状态：Active  
-> 主要定义：重大架构决策背景、取舍、替代关系、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-07
+> 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
+> 最近复核：2026-09-08
 
-ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-architecture`、`15-contracts` 与对应 Frozen implementation plan 为准。Superseded/updated ADR保留历史，不形成第二份 current contract。
+ADR 记录“为什么”；Current 可实现事实以 architecture / formal contract / implementation qualification 为准。**同一个尚未合并的 current design不通过额外 ADR人为制造历史层。**
 
 ---
 
@@ -40,6 +40,8 @@ ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-archi
 27. [ADR 0027：冻结 Renderer Control v1 与 M7 Preimplementation Closure](./0027-freeze-renderer-control-v1-preimplementation.md)
 28. [ADR 0028：冻结 M9 Desktop DataConnectionBroker / Late Provisioning Core 首次实现边界](./0028-freeze-m9-desktop-data-broker-preimplementation.md)
 29. [ADR 0029：User Input v1 mutation-gate State convergence correction](./0029-user-input-v1-mutation-gate-state-convergence.md)
+30. [ADR 0030：冻结 M12 Content preimplementation closure](./0030-freeze-m12-content-preimplementation-closure.md)
+31. [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./0031-business-owned-web-component-projection.md)
 
 ---
 
@@ -47,30 +49,51 @@ ADR 记录“为什么”；Current 可实现事实以 `00-overview`、`10-archi
 
 ```text
 ADR 0018
-    establishes first-implementation direct-current-v1 correction governance
+    first-implementation direct-current-v1 correction governance
 
 ADR 0019 → ADR 0020 → ADR 0026
-    current Game / Platform / Main launch boundary
+    Game / Platform / Main launch boundary
 
 ADR 0021
-    concrete Runtime Control mechanics
+    Runtime Control mechanics
 
 ADR 0022–0025
     Render / Input / Data Connection / Renderer Data Profile closure
 
 ADR 0027
-    Renderer Control v1 + M7 closure
+    Renderer Control + M7 closure
 
 ADR 0028
     M9 Desktop Data Broker / late provisioning closure
 
-ADR 0023
-→ ADR 0029 narrowly corrects Subsystem local State retention while mutation gate is temporarily closed
-→ User Input wire/version/authority/Renderer Effective remain unchanged
-→ User Input conformance fixtureSetRevision 1 → 2
+ADR 0023 → ADR 0029
+    narrow User Input State convergence correction
+
+ADR 0030
+    M12 Content storage/service/Subsystem/Renderer consumer closure
+
+ADR 0031
+    M13 Web Presentation current decision
+    → business-owned Custom Elements / thin Renderer projector
+    → Window-level WebPresentationConfigV1
+    → deterministic scoped wire-node → HTMLElement identity
+    → deterministic cross-Subsystem body concatenation without global zIndex semantics
+    → one Web Presentation API v1 with independent context/data receivers
+    → narrow PresentationResourceClient over M12 private ResourceClient
+    → no RenderEvent WC ABI / no generic layer/loader/AssetManager
 ```
 
-ADR 0029 是 document-governance §7 的 Frozen preimplementation correction：当前没有 User Input v1 conformant/deployed compatibility boundary，M10尚未实现；因此直接修 current v1，不制造 v2。
+ADR 0031不 supersede ADR 0022；M11 Render authority/replication保持 Frozen，M13只是其 physical consumer。
+
+Formal sources：
+
+```text
+Web Presentation Config v1
+→ startup JS/CSS / prepared Content / browser ready semantics
+
+Web Presentation API v1
+→ Projector ↔ WC context/data/resource ABI
+```
 
 ---
 
@@ -91,33 +114,36 @@ ADR 0009 → 0010–0015 → 0021
 → Subsystem Control + Frame/Call + Runtime Control Profile
 ```
 
-### Renderer Control
-
-```text
-ADR 0016 → 0017/0026 → 0027
-→ Main ⇄ Renderer Control v1
-→ M7_01 ... M7_05
-```
-
-### Renderer Data / Input / Render
+### Renderer Data / Input / Render / Web Presentation
 
 ```text
 ADR 0016
 → ADR 0022 / 0023 / 0024 / 0025
-→ Renderer Data Profile + Data Connection + User Input + Render Update
-→ M8 logical Data role seam
-→ ADR 0028 / M9 physical Data slice
-→ ADR 0029 / User Input fixtureSetRevision=2
-→ M10_01 ... M10_05
+→ M8 Data role seam
+→ ADR 0028 / M9 physical Data
+→ ADR 0029 / M10 Input closure
+→ M11 Render replication closure
+→ ADR 0031
+→ Web Presentation Config v1 + Web Presentation API v1
+→ M13 Web Presentation
+```
+
+### Content
+
+```text
+ADR 0003
+→ ADR 0030
+→ M12 Content implementation/qualification
+→ M13 bootstrap resolution + PresentationResourceClient façade
 ```
 
 ---
 
 ## Compatibility / Reopen Governance
 
-首次 conformant/deployed compatibility boundary形成前，current-v1 correction遵守[文档治理](../00-overview/document-governance.md)。Frozen Contract不得因 code reuse、framework preference、future speculation、test convenience 或 transport preference静默 reopen。
+Frozen Contract不得因 code reuse、framework preference、future speculation、test convenience 或 transport preference静默 reopen。
 
-允许 reopen 的信号：
+允许 reopen：
 
 ```text
 demonstrated correctness/security contradiction
@@ -126,7 +152,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-ADR 0029只解决已证明的 same-Activation State convergence contradiction；它不授权继续扩大 User Input v1。
+M13应优先作为 M11 Store的 trusted physical consumer实现。业务内部 UI framework选择不构成对 Render/Web presentation authority boundary 的 reopen。
 
 ---
 
@@ -139,7 +165,7 @@ Architecture topic source
 → Current Normative/Frozen Contract
 → Accepted current ADR
 → Module projection
-→ Frozen implementation plan/tests
+→ implementation plan/tests
 ```
 
 历史 ADR/Git保留演进；旧 shape不得覆盖 Current Contract。

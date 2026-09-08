@@ -2,9 +2,9 @@
 
 > 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：Evolving per-contract / M10+M11 closed / M12 implementation projection frozen  
-> 主要定义：current 跨角色协议/Profile、版本绑定、兼容边界与成熟度  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 稳定程度：M10+M11+M12 closed / M13 Web Presentation Stabilizing  
+> 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-08
 
 契约层只保留跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。
@@ -26,111 +26,79 @@ Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
 User Input v1                           Active / Normative / Frozen
 Render Update v1                        Active / Normative / Frozen
 Readonly Content API v1                 Active / Normative / Evolving
+Web Presentation Config v1              Active / Normative / Stabilizing
+Web Presentation API v1                 Active / Normative / Stabilizing
 ```
 
-Content API v1 仍标记 `Evolving`，因为 PWA independent implementation / interoperability boundary 尚未形成；但 **M12 Desktop/author/Renderer implementation projection 已由 M12_01–05 + ADR 0030 冻结**，编码阶段不得借 `Evolving` 标签重新选择当前 M12 semantics。
+M12 Desktop/Subsystem/Renderer realization已由 M12_01–05 + ADR 0030完成 qualification。Content API整体仍 `Evolving`，因为 PWA independent realization/interoperability 尚未关闭。
 
----
-
-## 2. Bootstrap Boundary
+M13 Web presentation由两份互补 formal contract组成：
 
 ```text
-Game Entry
-→ matching Platform Launcher full PREPARE
-→ Platform-private LaunchPlan
-→ LogicalGameBootstrap
-→ Main narrow capability view
+Web Presentation Config v1
+→ Window bootstrap JS/CSS + prepared Content resolution + loading/ready semantics
+
+Web Presentation API v1
+→ Projector ↔ business WC local ABI
+→ context/data receivers + narrow runtime resource capability
 ```
 
-Main不读取 Game document/formatVersion/module/path/URL/Node/Worker options。
+Ownership/identity/body-order decision由 ADR 0031 + Rendering System记录；本索引不复制完整 interface。
 
 ---
 
-## 3. Runtime / Frame
+## 2. Frozen Runtime / Data Contracts
 
-Runtime Control owns one reader/writer、strict IDs、finite deadlines、terminal first-wins、Response causal barrier、no retry/replay/reconnect。
+### Runtime / Frame
 
-Frame / Call v1：Main owns Frame/Stack/Activation/InputTarget；ACK-before-publication；post-commit no rollback；timeout/loss ambiguity→Runtime failure；surviving caller uses fresh Activation。
+Main拥有 Frame/Stack/Activation/InputTarget；mutation遵守 ACK-before-publication、post-commit no rollback、timeout/loss ambiguity → Runtime failure、no replay/retry。
 
----
-
-## 4. Renderer Control / Data
-
-Renderer Control v1：Main owns token/currentness/revision；Renderer holder只复制 committed authority，不 mint/recover authority。
+### Renderer Control / Data
 
 Current Data profile：
 
 ```text
 loomrealm.renderer-data/1
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
+= Data Connection v1 + User Input v1 + Render Update v1
 ```
 
-Data loss/provision failure != Runtime failure / Frame unwind。
+Data loss/provision failure != Runtime/Frame failure。
 
----
-
-## 5. User Input v1
-
-Current：
-
-```text
-protocolVersion = 1
-fixtureSetRevision = 2
-ADR 0023 + ADR 0029
-```
-
-Effective：
+### User Input v1
 
 ```text
 current Data
-× Main InputTarget(F,A)
-× active mirrored F/A
+× Main InputTarget
+× active F/A
 × Interest[F]
 × Producer(C)
 ```
 
-Known-no-commit + same Activation reopen时，retained State local convergence先于 recoverable `frame.call` rejection observable；Event不 replay。
+M10 Implemented / Qualified / Closed。
 
-M10 exact author SDK/Renderer source projection由根目录 `M10_01`–`M10_05` 冻结；M10现为 Implemented / Qualified / Closed。
+### Render Update v1
 
----
+Render Domain/revision/identity与 Frame/Data carrier lifetime分离。fresh carrier用 Registry + Snapshot重建 baseline；Event transient/no future-carrier replay。
 
-## 6. Render Update v1
-
-Render Domain/revision/replication与 Frame/Input/Data carrier lifetime分离：
-
-```text
-Frame close != Domain destroy
-Data retire != authoritative Domain destroy
-```
-
-fresh carrier通过 Registry + Snapshot重建 baseline；Event不跨 future carrier replay。
-
-M11 exact author/publication/Renderer Store projection由 `M11_01`–`M11_05` 冻结并已 Implemented / Qualified / Closed；transport-equivalence role留 M16。
+M11 Implemented / Qualified / Closed。M13不修改 Render Update v1，也不要求 RenderEvent → WC/DOM mapping。
 
 ---
 
-## 7. Readonly Content API v1
+## 3. Readonly Content API v1
 
-Current M12-relevant frozen semantics：
+Current M12 semantics：
 
 ```text
 GET/HEAD only
 logical installation/namespace/key identity
-record/group key = one segment
-resource key = hierarchical logical ResourceKey
+resource key = hierarchical ResourceKey
 contentVersion = sha256:<64 lowercase hex>
 ETag = quoted exact contentVersion
 Desktop scoped bearer
-PWA same-origin authorization model
 Content capability != executable capability
 ```
 
-Content API不定义 Host credential delivery wire。
-
-M12 exact current implementation projection：
+M12 implementation projection：
 
 ```text
 M12_01_CONTENT_SERVICE.md
@@ -140,46 +108,106 @@ M12_04_VERTICAL_INTEGRATION.md
 M12_05_QUALIFICATION_CLOSURE.md
 ```
 
-ADR 0030记录了对 ADR 0003 realization 的 current-first-implementation收口：M12不要求 global Installation Registry、generic Repository、`@loomrealm/content-service` package或 client-selected historical version protocol。
+---
+
+## 4. Web Presentation Config v1
+
+正式契约：[Web Presentation Config v1](./web-presentation-config-v1.md)。
+
+只回答：
+
+```text
+当前 Renderer Window 启动 projection 前加载哪些 business JS/CSS？
+```
+
+核心：Window-level ordered `scripts/styles`、M12 logical resource refs、prepared Content resolution、ordered `<link>`/classic `<script>`、business `customElements.define(...)`、`window.onload` start barrier。
+
+不定义 runtime asset API、dynamic module loader、Subsystem binding或 business component vocabulary。
 
 ---
 
-## 8. Authority Summary
+## 5. Web Presentation API v1
+
+正式契约：[Web Presentation API v1](./web-presentation-api-v1.md)。
+
+只回答：
 
 ```text
-Game Package       document validation
-Launcher/Platform  PREPARE + physical realization
-Protocol packages  wire/profile mechanics
+Projector运行后怎样向 business WC交付 capability 与 retained data？
+```
+
+两个独立 optional receiver：
+
+```text
+receiveRenderContext → Window-lifetime capability, at most once per HTMLElement
+receiveRenderData    → retained current full data, repeated on committed data changes
+```
+
+Context V1只暴露 narrow `PresentationResourceClient`，复用 M12 logical identity/version semantics，不暴露 bearer/path/FSDB/privileged URL/private Renderer client。
+
+Resource error只冻结 structural `Error + code` vocabulary，不要求共享 constructor/`instanceof` identity。
+
+---
+
+## 6. Projection Identity / Ordering
+
+Render v1中 `key` 只在一个 Domain内唯一。M13不得把裸 key当 Window-global identity：
+
+```text
+same live wire-node identity
+(Session, subsystemKey, generation, domainId, key)
+→ same HTMLElement
+```
+
+不同 Domain/Subsystem/fresh generation即使 key string相同也不得 collision。
+
+Top-level managed root order：
+
+```text
+subsystemKey UTF-8 lexical
+→ within subsystem: M11 zIndex/domainId logical order
+→ roots order
+```
+
+这里不创建 cross-Subsystem global zIndex/stacking authority；actual layout/stacking属于 business WC/CSS。
+
+---
+
+## 7. Authority Summary
+
+```text
+Launcher           Runtime executable PREPARE
 Main               Session/Runtime/Frame/Activation/InputTarget/DataAuthority
-Subsystem          business state / Desired Input Interest / Render authority / author Content usage
-Renderer           read-only Main mirror + Input/Render role behavior + trusted integration-subpath resource reads
-Platform            physical Content binding/service/credentials
+Subsystem          business state / Input Interest / Render authority / Content author usage
+Renderer Store     current authoritative Render replica
+Web Projector      mechanical Store → DOM projection + context injection
+Business WC        read-only projected state + private presentation/layout
+Presentation API   narrow readonly resource capability
 ```
+
+DOM永远不反向成为 Store authority；M13不使用 MutationObserver policing，也不建立 second desired projection authority。
 
 ---
 
-## 9. Current Implementation Order
+## 8. Current Implementation Order
 
 ```text
-M6 Hostra Runtime          ✅
-M7 Renderer Control       ✅
-M8 Data Role/Core         ✅
-M9 Desktop Data Broker    ✅
-M10 User Input            ✅ Implemented / Qualified / Closed
-M11 Render                ✅ Implemented / Qualified / Closed
-M12 Content               Implementation Frozen / Preimplementation Closed / implementation pending
-M13 loom.map              pending
-M14 Desktop Full E2E      pending
-M15 PWA Runtime           pending
-M16 PWA Full E2E          pending
+M10 User Input             ✅ Closed
+M11 Render Replication     ✅ Closed
+M12 Content                ✅ Closed
+M13 Web Presentation       pending
+M14 loom.map               pending
+M15 Desktop Full E2E       pending
+M16 PWA Runtime            pending
+M17 PWA Full E2E           pending
 ```
 
-Current closed executable root gate仍是 `npm run test:m11`。M12 implementation完成后才允许把导航状态升级为 Implemented/Qualified/Closed，并建立 `npm run test:m12` closure evidence。
+当前 closed executable root gate是 `npm run test:m12`。M13实现后建立自己的 `npm run test:m13`，并必须包含真实 Chromium qualification。
 
 ---
 
-## 10. Freeze Governance
+## 9. Freeze Governance
 
 Frozen contract只有 demonstrated correctness/security contradiction、cross-contract conflict 或 real consumer capability failure 才能 reopen。
 
-首次实现前 Current correction按 [文档治理](../00-overview/document-governance.md)传播；ADR 0030是 M12 Content realization closure provenance，不制造 fake v2/compat layer。
+ADR 0031 是 M13 current decision provenance；Config/API formal contracts是 business-observable source of truth。后续文档应引用它们，而不是复制第二套 interface/ordering/error定义。
