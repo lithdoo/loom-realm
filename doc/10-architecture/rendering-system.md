@@ -3,10 +3,10 @@
 > 层级：系统架构  
 > 状态：Active Design  
 > 稳定程度：Stabilizing overall / **M11 implementation slice Frozen / M13 Web projection Active Design**  
-> 主要定义：Subsystem-owned business Render Domain、generation-scoped Render wire lifecycle、Renderer authoritative replica、thin Web Component projection、Web presentation startup config、Data/Frame/Input independence  
-> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)  
+> 主要定义：Subsystem-owned business Render Domain、generation-scoped Render wire lifecycle、Renderer authoritative replica、thin Web Component projection、Web presentation startup config/local API、Data/Frame/Input independence  
+> 依赖：[系统架构总览](./system-overview.md)、[通信系统](./communication-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-freeze-m13-web-presentation-api-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 > 被以下文档使用：[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)、[Web Renderer](../20-modules/web-renderer/README.md)  
-> 正式化：[Render Update v1](../15-contracts/render-update-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> 正式化：[Render Update v1](../15-contracts/render-update-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 > M11 实施：[M11 / 01](https://github.com/lithdoo/loom-realm/blob/main/M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 05](https://github.com/lithdoo/loom-realm/blob/main/M11_05_QUALIFICATION_CLOSURE.md)  
 > 最近复核：2026-09-08
 
@@ -26,7 +26,7 @@ Subsystem business state
 
 M11 Render protocol复制 authoritative presentation state，不把 Renderer变成 business authority，也不把 DOM/Canvas/WebGL命令暴露给 Subsystem。
 
-M13补齐 M11 有意留下的 physical Web presentation seam：LoomRealm只把 current replica机械投影为 business-owned Custom Element实例树，不拥有具体 component vocabulary、layout engine、stacking framework 或 component implementation。
+M13补齐 M11 有意留下的 physical Web presentation seam：LoomRealm只把 current replica机械投影为 business-owned Custom Element实例树，不拥有具体 component vocabulary、layout engine、stacking framework 或 component implementation。M13同时通过一个 narrow Web Presentation API向 projected business WC交付 Window-lifetime presentation context与 retained Render data；该 API不扩张 Render authority。
 
 ---
 
@@ -50,6 +50,7 @@ current authoritative replica when Data stream current
 stale presentation cache after stream loss if product chooses
 Web projection instance mapping
 physical projection mutation
+presentation context injection
 paint/presentation hosting integration
 ```
 
@@ -65,7 +66,7 @@ presentation-local derived state
 business layout / positioning / stacking policy
 ```
 
-Business Web Component **不拥有** Render projection authority。它对 LoomRealm投影的 Element identity/tag/attrs/data/managed children只有读取权。
+Business Web Component **不拥有** Render projection authority。它对 LoomRealm投影的 Element identity/tag/attrs/data/managed children只有读取权；它可以消费 Web Presentation API明确授予的 narrow readonly runtime resource capability，但不拥有 Content credential/path/private Renderer client。
 
 Main不拥有 Render Domain state；physical hosting/composition也不产生第二份 Render authority。
 
@@ -383,13 +384,14 @@ Web Projector
 document.body + business-owned Custom Element instances
 ```
 
-映射：
+映射 / local ABI：
 
 ```text
 key      → stable HTMLElement identity
 tag      → Web element construction using business-owned tag semantics
 attrs    → Renderer-managed host attributes
-data     → receiveRenderData(complete readonly current snapshot)
+context  → optional one-shot receiveRenderContext(WebPresentationContext)
+data     → optional receiveRenderData(complete readonly current snapshot)
 children → Renderer-managed ordered light DOM
 ```
 
@@ -404,7 +406,7 @@ business Canvas/WebGL object model
 generic visual layer system
 ```
 
-concrete Custom Elements由 business Web presentation implementation提供；业务 JS通过 browser `customElements`注册，运行时 bootstrap source由 [Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md) 定义。
+concrete Custom Elements由 business Web presentation implementation提供；业务 JS通过 browser `customElements`注册，运行时 bootstrap source由 [Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md) 定义；Projector与 business WC之间的 context/data/resource local ABI由 [Web Presentation API v1](../15-contracts/web-presentation-api-v1.md) 定义。
 
 ---
 
@@ -477,7 +479,70 @@ WC私有 implementation不得写入或重排 Render-managed light DOM；private 
 
 ---
 
-## 16. Data / Attr Separation — `receiveRenderData`
+## 16. Web Presentation API v1 — Context / Data
+
+M13把 `receiveRenderContext` 与 `receiveRenderData` 放在同一个 formal Web Presentation API v1中治理，但保持两个独立 optional interfaces：
+
+```ts
+interface RenderContextReceiver {
+  receiveRenderContext(context: WebPresentationContext): void;
+}
+
+interface RenderDataReceiver {
+  receiveRenderData(data: DeepReadonly<JsonObject>): void;
+}
+```
+
+接口独立的原因是 lifetime不同：
+
+```text
+context
+= Window-lifetime capability/environment
+= normally one injection per HTMLElement instance
+
+data
+= retained authoritative presentation state
+= initial + repeated committed updates
+```
+
+业务 element MAY 实现 neither / one / both receiver；缺少任一 method都不是 presentation failure。
+
+### 16.1 `receiveRenderContext`
+
+`WebPresentationContext` V1 exact shape：
+
+```ts
+interface WebPresentationContext {
+  readonly resources: PresentationResourceClient;
+}
+```
+
+新 projected HTMLElement：
+
+```text
+construct HTMLElement
+→ receiveRenderContext(...), if implemented
+→ first managed DOM insertion / connectedCallback may happen
+```
+
+因此 context injection MUST 在该 element第一次进入 LoomRealm-managed DOM之前完成。
+
+同一 HTMLElement最多注入一次 context。Render move、Domain reorder、attrs/data update、same-live-key reconciliation都不得重新注入。
+
+`PresentationResourceClient` 是 M12 Renderer-private ResourceClient外的 narrow readonly façade：
+
+```text
+namespace + hierarchical key + expectedContentVersion
+→ caller-owned bytes + MIME + actual contentVersion
+```
+
+它不得向业务暴露 origin、installationId、bearer/token、filesystem path、FSDB、privileged URL、raw Response或 private RendererResourceClient object。
+
+Context/resource capability lifetime与 Renderer Window presentation environment对齐；不绑定 Frame、Activation、RenderDomain、RenderNode或 Data carrier。Window teardown取消仍在进行的 reads。
+
+M13不通过 `window`/`globalThis` service locator、DOM attribute/Event payload或 mandatory LoomRealm base element公开该 capability。
+
+### 16.2 `receiveRenderData`
 
 `attrs` 与 `data` 是独立 channel：
 
@@ -499,14 +564,6 @@ wire snapshot / data delta
 → complete current JsonObject
 → readonly full snapshot delivery
 → receiveRenderData(...)
-```
-
-M13冻结：
-
-```ts
-interface RenderDataReceiver {
-  receiveRenderData(data: DeepReadonly<JsonObject>): void;
-}
 ```
 
 语义：
@@ -568,17 +625,37 @@ same live key
 
 ## 18. Projection Commit Ordering
 
-一次 committed Render state变化的 physical projection顺序固定为：
+新 HTMLElement materialization的 observable order固定为：
+
+```text
+0. construct element
+
+1. context
+   receiveRenderContext(current WebPresentationContext), if implemented
+
+2. structure
+   first managed insert / managed children
+
+3. attrs
+   set / remove managed host attributes
+
+4. data
+   receiveRenderData(complete current data), if implemented
+```
+
+Context injection发生在 first managed DOM insertion / possible `connectedCallback`之前，并且对同一 HTMLElement最多一次。
+
+已有 element 的 committed Render state update顺序保持：
 
 ```text
 1. structure
-   create / insert / remove / move / managed children
+   insert / remove / move / managed children / Domain-root reorder
 
 2. attrs
    set / remove managed host attributes
 
 3. data
-   receiveRenderData(complete current data)
+   receiveRenderData(complete current data), when delivery is required
 ```
 
 其中 structure 阶段包含 §12.1 定义的跨 Domain `document.body` deterministic flatten/reorder；Domain order变化必须优先完成 physical move，再进入 attrs/data delivery。
@@ -649,7 +726,16 @@ absolute privileged local URL
 resource bytes as hidden capability channel
 ```
 
-M12 Renderer ResourceClient已负责 logical resource + expected version → version-checked bytes。
+M12 Renderer ResourceClient已负责 logical resource + expected version → version-checked bytes，并保持 Renderer trusted/private integration boundary。
+
+M13 Web Presentation API在其外提供 `PresentationResourceClient` narrow façade：
+
+```text
+Business WC
+→ PresentationResourceClient(namespace, key, expectedContentVersion)
+→ Renderer private ResourceClient
+→ M12 Content API
+```
 
 Presentation bootstrap resource与 runtime business resource必须区分：
 
@@ -660,10 +746,12 @@ bootstrap JS/CSS
 
 runtime resource
     → business Render data / element contract
-    → restricted M12 ResourceClient semantics after projection
+    → Web Presentation API PresentationResourceClient after projection
 ```
 
-Business WC不得绕过 ResourceClient/Platform credential boundary。Render Core仍不冻结 product-specific resource-reference schema；具体 element如何解释其 data并消费受限 resource capability属于 business presentation contract。
+Business WC不得绕过 PresentationResourceClient/Renderer ResourceClient/Platform credential boundary。Render Core仍不冻结 product-specific resource-reference schema；具体 element如何解释其 data并选择 namespace/key/expectedContentVersion属于 business presentation contract。
+
+`expectedContentVersion`必须继续满足 M12 `sha256:<64 lowercase hex>`，actual version mismatch必须作为 conflict reject，不能 silent读取其他版本 bytes。
 
 不为此预建 universal AssetManager、loader/decoder registry或 generic Presentation DSL。
 
@@ -693,13 +781,15 @@ M11 publication继续保持 current-carrier ordering/barrier/drop规则。
 
 **M13不定义 RenderEvent → WC delivery ABI。** 不新增 `onRenderEvent`、`receiveRenderEvent` 或 DOM `dispatchEvent` mapping。
 
-当前 Web Projector只投影 retained Render state：
+当前 Web Projector只投影 retained Render state，并独立注入 presentation context：
 
 ```text
 tag
 attrs
 data
 children
++
+one-shot context capability injection
 ```
 
 未来真实 presentation consumer若证明必须消费 RenderEvent，再按 demand-driven rule独立设计，不为了协议对称性提前扩张 WC ABI。
@@ -754,24 +844,30 @@ script evaluation/registration failure
 → Web Projector does not enter running state
 ```
 
-### Runtime projection/WC failure
+### Runtime projection/WC/resource failure
 
 ```text
 projected tag unregistered
+receiveRenderContext throws
 receiveRenderData throws
+PresentationResourceClient rejects
 DOM operation failure
 WC contract violation
 business presentation local exception
 ```
 
 ```text
-→ report presentation-local error
+→ report presentation-local error / resource Promise rejection
 → no Store rollback
 → no Main/Subsystem authority mutation
 → continue best-effort where possible
 ```
 
-M13不预建复杂 node/domain recovery framework。
+`receiveRenderContext`一旦被调用即计为该 HTMLElement 的 injection attempt；throw后不得因未来 Render commit自动重复注入形成 retry loop。
+
+Presentation resource error稳定映射为 `CONTENT_NOT_FOUND / CONTENT_CONFLICT / CONTENT_INVALID / CONTENT_UNAVAILABLE / CONTENT_CANCELLED`，且不得把 Renderer-private error object升级为 business contract。
+
+M13不预建复杂 node/domain/resource recovery framework。
 
 ---
 
@@ -795,14 +891,23 @@ Domain zIndex/order change moves existing root HTMLElements without recreating s
 snapshot / insert / remove / move
 same key → same HTMLElement
 attrs projection
+receiveRenderContext optional + before first managed insertion/connectedCallback
+same HTMLElement receives context at most once
+move/Domain reorder does not re-inject context
+context/data receivers can be implemented independently
+PresentationResourceClient reads real M12 resource bytes
+expectedContentVersion mismatch rejects as conflict
+returned bytes mutation cannot alter future reads
+business cannot observe origin/token/path/private Renderer client through API
+resource cancellation maps to CONTENT_CANCELLED
 receiveRenderData initial/update full snapshots
 structure/attrs before receiveRenderData
 WC mutation never rewrites Store
-WC callback failure does not roll back authority
+WC/resource callback failure does not roll back authority
 RenderEvent not delivered as WC/DOM event
 ```
 
-Hostra/PWA共享 logical Web presentation semantics；physical Content storage和 trusted `href/src` binding可以按平台不同实现，但不得改变 WebPresentationConfigV1、`window.onload` ready barrier、projector/data ABI的 business-observable semantics。
+Hostra/PWA共享 logical Web presentation semantics；physical Content storage和 trusted `href/src` binding可以按平台不同实现，但不得改变 WebPresentationConfigV1、`window.onload` ready barrier、deterministic body ordering或 Web Presentation API context/data/resource 的 business-observable semantics。
 
 ---
 
@@ -825,17 +930,21 @@ Hostra/PWA共享 logical Web presentation semantics；physical Content storage�
 15. tag对 Render Core保持 opaque；具体 Custom Element semantics由业务拥有；
 16. Render-managed attrs/data/children等全部 projection state对 WC只读；M13不做 MutationObserver policing；
 17. children是 Renderer-managed ordered light DOM；业务私有 subtree放在 WC private presentation state；
-18. data与 attrs独立；WC v1通过 optional `receiveRenderData(complete readonly current data)` 接收完整 snapshot；
-19. projection observable order = structure（含跨 Domain body reorder）→ attrs → receiveRenderData；
-20. DOM不是 authority source，Renderer不得从 DOM反向同步 Store；
-21. Web Projector不建立第二份 desired presentation tree authority；必要 keyed physical reconciliation不构成第二 authority；
-22. Store只在 successful atomic commit后通过 package-private seam通知 Projector；
-23. runtime bootstrap source是用户指定的 Window-level WebPresentationConfigV1；没有 subsystems；Desktop用户不单独指定 FSDB；
-24. presentation bootstrap使用 ordered `<link>` / classic `<script>`，`window.onload`后才启动 Projector；
-25. M13不定义 RenderEvent → WC/DOM event ABI；
-26. stale Store/WC tree不是 current authority/Patch base；
-27. Render state不携 physical resource capability；Business WC不得绕过 M12 Content credential/version boundary；
-28. Render/presentation不能生成 Main InputTarget；
-29. presentation-local failure不回滚 Store、不自动 fail Runtime/Frame；
-30. M13使用真实 Chromium qualification关闭 browser semantics；
-31. M11 Renderer Store internal-only；M13 projection消费 trusted/package-private current Store seam，不新增 business Render Store API。
+18. Web Presentation API v1统一治理 `receiveRenderContext` 与 `receiveRenderData`，但两个 receiver保持独立 optional interface；
+19. context是 Window-lifetime capability/environment；新 HTMLElement在 first managed DOM insertion前最多注入一次，move/reorder/update不得重复注入；
+20. context V1只提供 narrow readonly `PresentationResourceClient`；业务不得获得 Content origin/token/path/FSDB/private Renderer client；
+21. runtime resource read要求 namespace + hierarchical key + expectedContentVersion，version mismatch不得 silent成功；
+22. data与 attrs独立；WC v1通过 optional `receiveRenderData(complete readonly current data)` 接收完整 snapshot；
+23. new element observable order = construct → context → structure → attrs → data；已有 element update = structure（含跨 Domain body reorder）→ attrs → data；
+24. DOM不是 authority source，Renderer不得从 DOM反向同步 Store；
+25. Web Projector不建立第二份 desired presentation tree authority；必要 keyed physical reconciliation不构成第二 authority；
+26. Store只在 successful atomic commit后通过 package-private seam通知 Projector；
+27. runtime bootstrap source是用户指定的 Window-level WebPresentationConfigV1；没有 subsystems；Desktop用户不单独指定 FSDB；
+28. presentation bootstrap使用 ordered `<link>` / classic `<script>`，`window.onload`后才启动 Projector；
+29. M13不定义 RenderEvent → WC/DOM event ABI；
+30. stale Store/WC tree不是 current authority/Patch base；
+31. Render state不携 physical resource capability；Business WC只通过 Web Presentation API narrow façade消费 runtime resource，不得绕过 M12 credential/version boundary；
+32. Render/presentation不能生成 Main InputTarget；
+33. presentation-local callback/resource failure不回滚 Store、不自动 fail Runtime/Frame；
+34. M13使用真实 Chromium qualification关闭 browser semantics；
+35. M11 Renderer Store internal-only；M13 projection消费 trusted/package-private current Store seam，不新增 business Render Store API。
