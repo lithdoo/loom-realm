@@ -39,15 +39,17 @@ HostraPlatform.prepareGame
 → LogicalGameBootstrap
 ```
 
-Web presentation是独立 product startup input：
+Web presentation是独立 product startup input，但 Config acquisition mechanics属于 Desktop private composition：
 
 ```text
 installationRoot
 +
-WebPresentationConfigV1 source/path
+user-selected Desktop-private config source/path
+→ read / parse candidate JSON
+→ WebPresentationConfigV1
 ```
 
-Presentation Config不进入 Game Entry、Hostra manifest、Runtime executable join或 Main bootstrap。
+filesystem path只是一种 Desktop acquisition mechanism，不是 `WebPresentationConfigV1` 字段或跨平台 ABI。Presentation Config不进入 Game Entry、Hostra manifest、Runtime executable join或 Main bootstrap。
 
 ---
 
@@ -75,7 +77,8 @@ Subsystem获得 bound ContentClient；Renderer获得 trusted/private ResourceCli
 精确规则由 [Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md) 拥有：
 
 ```text
-user-selected config
+Desktop-private config acquisition
+→ WebPresentationConfigV1
 → current prepared Content refs
 → ordered <link rel="stylesheet">
 → ordered classic <script>
@@ -95,6 +98,7 @@ Business config/WC不得观察 path、bearer、FSDB或 privileged localhost URL�
 ```text
 M11 Store successful commit
 → package-private post-commit seam
+→ presentation eligibility/currentness gate
 → Web Projector
 → document.body / business-owned WC
 ```
@@ -114,6 +118,8 @@ managed root order
 
 不得以裸 `Map<key, HTMLElement>` 实现 Window-global identity，也不得把 zIndex升级成 cross-Subsystem global stacking authority。
 
+same-generation carrier loss必须保留最后 committed managed DOM mounted，并冻结 Projector mutation；replacement carrier只有在 fresh Registry + every current Domain fresh baseline 完整后才 reconcile。partial rebaseline不得泄漏到 DOM。fresh generation才 retire旧 managed elements并创建 fresh HTMLElement identity universe。
+
 Actual layout/stacking由 business WC/CSS负责；Desktop不建立 per-Domain layer/framework。
 
 ---
@@ -127,6 +133,8 @@ Desktop/Renderer必须提供：
 ```text
 receiveRenderContext before first managed insertion; at most once per HTMLElement
 receiveRenderData for current retained full data
+same-generation carrier loss causes no receiver or LoomRealm detach/reinsert
+complete rebaseline before reconnect reconciliation
 PresentationResourceClient façade over M12 private ResourceClient
 ```
 
@@ -146,7 +154,9 @@ no Main/Subsystem authority mutation
 no automatic Runtime/Frame failure
 ```
 
-Presentation bootstrap/context lifetime与 Renderer Window environment对齐；不按 Subsystem/Frame/Domain动态装卸 scripts/styles或重建 capability。
+Presentation bootstrap/context lifetime与 Renderer Window environment对齐；不按 Subsystem/Frame/Domain/Data reconnect动态装卸 scripts/styles或重建 capability。
+
+same-generation Data currentness loss只冻结 projection，不结束 Window-lifetime context capability或仍 live element identity；fresh generation结束旧 wire-node/HTMLElement identity universe。
 
 ---
 
@@ -160,7 +170,10 @@ window.onload start barrier
 Custom Element registration
 successful Store commit → Projector
 scoped wire-node identity / no key collision
-fresh generation identity
+same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
+partial same-generation rebaseline does not mutate DOM
+complete same-generation rebaseline preserves matching HTMLElement identity
+fresh generation gets fresh HTMLElement identity
 subsystemKey → M11 domain order → roots
 reorder moves existing elements
 context/data receiver lifecycle
@@ -170,7 +183,7 @@ no credential/path/private-client exposure
 failure never rolls back authority
 ```
 
-M15再覆盖完整 BrowserWindow + Renderer Control + Data Broker + physical input + M14 map + shutdown/reload trace。
+M15再覆盖完整 BrowserWindow + Renderer Control + Data Broker + physical input + M14 map + reconnect/reload/shutdown trace。
 
 ---
 
@@ -178,7 +191,8 @@ M15再覆盖完整 BrowserWindow + Renderer Control + Data Broker + physical inp
 
 1. Hostra Launcher只拥有 Runtime executable PREPARE；presentation startup独立；
 2. Main不接收 plan/path/token/presentation config；
-3. Data provisioning、Content credential、presentation bootstrap不混成万能 channel；
-4. Desktop只实现 M13 formal Config/API/identity/order semantics，不新增平台专属 variant；
-5. Business WC只读 LoomRealm projection并只通过 narrow PresentationResourceClient读取runtime resource；
-6. Desktop不建立 component registry、AssetManager、dynamic loader、global layer manager或 second projection authority。
+3. Config source/path acquisition属于 Desktop private composition，不属于 Config v1；
+4. Data provisioning、Content credential、presentation bootstrap不混成万能 channel；
+5. Desktop只实现 M13 formal Config/API/identity/currentness/order semantics，不新增平台专属 variant；
+6. Business WC只读 LoomRealm projection并只通过 narrow PresentationResourceClient读取runtime resource；
+7. Desktop不建立 component registry、AssetManager、dynamic loader、global layer manager或 second projection authority。
