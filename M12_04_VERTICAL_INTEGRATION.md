@@ -17,8 +17,8 @@
 ```text
 temporary game installation
 → real Hostra prepare
-→ immutable prepared Content view
-→ @loomrealm/fsdb snapshot/index
+→ @loomrealm/fsdb readonly snapshot
+→ prepare-time immutable Content Index/version hashing
 → Desktop Content Service
 → Host-private scoped grant
 → real Node Runner
@@ -90,23 +90,38 @@ DOM/Canvas/WebGL
 必须证明：
 
 ```text
-@loomrealm/fsdb owns scan/index/safe-open/read-lease mechanics
+@loomrealm/fsdb owns complete readonly FSDB domain core
 @loomrealm/fsdb-http depends on @loomrealm/fsdb
 Desktop Content Service depends on @loomrealm/fsdb
+```
+
+Core extraction至少直接 qualification：
+
+```text
+describeFsdb() returns existing deterministic descriptor bytes
+listFsdbEntries() covers ordinary entries only; order is non-semantic
+openFsdbObject() covers ordinary entries + $info/$extend/$desc metadata
+getFsdbSnapshotId() is fresh/process-local and not Content version
+sourceTag is opaque and not Content hash
+invalid/forged identity fails closed
+absent object returns null
+abort before resolve leaves no live lease
+resolved lease is caller-owned; original signal no longer owns it
+lease.close() idempotent
+FsdbDatabase.close() drains admitted leases
 ```
 
 并证明：
 
 ```text
 fsdb-http existing root public API unchanged
-fsdb-http existing conformance green
+fsdb-http existing descriptor/metadata/ordinary routes and conformance green
+M12_CORE_EXTRACTION amendment is the only dependency-contract revision
 no HTTP-over-HTTP proxy
-no duplicate scanner/safe-open implementation
+no duplicate scanner/metadata-index/safe-open implementation
 no cross-workspace relative import
 no import of fsdb-http private internals
 ```
-
-`listFsdbEntries()` deterministic ordering、descriptor immutability、`openFsdbEntry()` absent/abort/read semantics与 lease idempotent close均需直接 qualification。
 
 ---
 
@@ -118,6 +133,7 @@ no import of fsdb-http private internals
 one prepare success
 → one opaque installationId
 → normalized public GameEntry manifest bytes
+→ one @loomrealm/fsdb database
 → immutable Content Index
 ```
 
@@ -137,6 +153,7 @@ same-name struct/extend do not collide
 record/group key stay single segment
 resource key may contain multiple logical segments
 resource route segment decoding never becomes direct filesystem resolution
+FSDB metadata stays outside ordinary Content projection
 ```
 
 Prepare/content index failure发生在 first business Runtime side effect前。
@@ -194,13 +211,29 @@ UTF-8 without BOM / no insignificant whitespace
 same normalized manifest → stable bytes/version
 ```
 
-FSDB-backed record/group/resource证明 `FsdbEntryDescriptor.sha256`对应 exact served bytes；process-local snapshotId/fingerprint不进入 Content version authority。
+FSDB-backed record/group/resource的 Content version必须由 prepare-time code通过 `openFsdbObject()` 读取 exact ordinary bytes并计算 SHA-256；`snapshotId`/`sourceTag`/filesystem fingerprint不进入 Content version authority。
 
 M12 不 qualification optional Range，除非实现选择支持。
 
 ---
 
-## 7. Author API Observable Evidence
+## 7. Static Source / Drift Evidence
+
+必须证明 M12 依赖现有 static-source边界，而不是发明 filesystem transaction：
+
+```text
+prepared installation is Host-trusted readonly for Content Service lifetime
+ordinary Runtime/Renderer capabilities receive no physical write authority
+known replacement/drift detected by FSDB safe-open → fail closed
+```
+
+不要求模拟或抵抗拥有 installation physical write authority 的恶意 concurrent writer 在 validated same-handle stream期间直接篡改 backing storage。
+
+不得为该非目标新增 copy-on-read store、transactional filesystem abstraction 或 writer coordination protocol。
+
+---
+
+## 8. Author API Observable Evidence
 
 必须证明 exact M12 author behavior：
 
@@ -209,6 +242,7 @@ ContentReadError(code) sets name/code exactly
 caller must not depend on message
 invalid namespace/record-key/options → synchronous TypeError
 invalid hierarchical resource key → synchronous TypeError
+unknown own enumerable option property → synchronous TypeError
 invalid local argument → zero HTTP request
 already-aborted valid signal → CONTENT_CANCELLED + zero HTTP request
 legal remote 400 → CONTENT_UNAVAILABLE
@@ -218,7 +252,7 @@ legal remote 400 → CONTENT_UNAVAILABLE
 
 ---
 
-## 8. Failure / Confidentiality Evidence
+## 9. Failure / Confidentiality Evidence
 
 至少覆盖：
 
@@ -242,7 +276,7 @@ unauthorized index data
 
 ---
 
-## 9. Lifecycle Evidence
+## 10. Lifecycle Evidence
 
 显式证明：
 
@@ -259,13 +293,13 @@ Runtime/Renderer terminal settles owned outstanding reads
 
 ---
 
-## 10. Production Path Rule
+## 11. Production Path Rule
 
 Temporary installation和deterministic fixture可以由 tests拥有，但以下必须是 production implementation：
 
 ```text
 @loomrealm/fsdb core
-prepare → Content view/index
+prepare → Content view/index/version hashing
 FSDB logical projection
 Desktop Content Service
 HTTP path
@@ -287,16 +321,17 @@ manual Main/Render authority mutation
 
 ---
 
-## 11. Done
+## 12. Done
 
 M12/04 complete when：
 
 ```text
-FSDB core extraction preserves fsdb-http regression
+FSDB core extraction preserves fsdb-http descriptor/metadata/ordinary regression
 Subsystem real Hostra consumer vertical passes
 Renderer production ResourceClient vertical passes
 prepare/index/namespace/resource identity is unambiguous
 exact contentVersion representation is proven end-to-end
+static trusted-readonly source boundary is explicit
 local author misuse behavior is proven
 Hostra credential injection boundary is proven
 Content API auth/cache/version/error semantics pass end-to-end
