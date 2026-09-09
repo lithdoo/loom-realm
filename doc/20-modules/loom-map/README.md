@@ -9,7 +9,7 @@
 
 核心原则：
 
-> **Map 是 reusable game-domain library，不是 LoomRealm framework module。Framework 只提供 author/runtime/presentation contracts；map owner拥有地图业务 vocabulary、RMXP/Essentials-compatible map semantics 与具体 Web presentation。**
+> **Map 是 reusable game-domain library，不是 LoomRealm framework module。RMXP/Essentials 提供第一版地图内容的 semantic authority；prepared FSDB JSON + ContentClient 才是 map Runtime 的数据边界。Framework 只提供 author/runtime/presentation contracts；map owner拥有地图业务 vocabulary 与具体 Web presentation。**
 
 ---
 
@@ -56,11 +56,11 @@ Definition 不得 import Renderer/Platform/DOM/FSDB/protocol/tooling。Browser s
 
 ---
 
-## 3. RMXP / Essentials map model
+## 3. RMXP / Essentials semantic authority vs FSDB Runtime representation
 
-M14 不再为了“通用地图”定义独立 normalized map schema。`@loomrealm-game/map` 直接采用当前 Essentials v21.1 / RMXP map semantic model。
+M14 不再为了“通用地图”定义独立 normalized map schema。
 
-第一版可以直接消费：
+第一版地图内容的 semantic authority 是：
 
 ```text
 RPG::Map
@@ -73,28 +73,20 @@ RGSS Table
 Essentials MapMetadata / map connections when needed
 ```
 
-允许 map library 理解这些 map-domain semantics；禁止它理解：
+这些名称定义数据的业务含义与关系来源，不是 `@loomrealm-game/map` 的 Runtime object 类型。
+
+真正的 Runtime 数据链：
 
 ```text
-Ruby Marshal binary format
-.rxdata decoding
-Ruby object graph identity
-RmxpObject / RubyString / $id / $ref / $typed importer wrappers
-tools/fixtures implementation/filesystem layout
-Hostra/PWA physical storage
+Essentials / RMXP source
+→ importer decoder/internal representation
+→ semantic JSON materialization
+→ prepared FSDB records/resources
+→ M12 ContentClient
+→ @loomrealm-game/map
 ```
 
-因此 compatibility/import tooling 只负责把 source representation materialize 成可由 M12 Content API 直接读取的 RMXP/Essentials semantic JSON records；不再建立 example-local Essentials→map adapter，也不再定义 `MapNormalizedV1`。
-
----
-
-## 4. Content / Input / Render
-
-### Content
-
-Definition 通过 M12 logical Content API 直接读取 prepared semantic records/resources；不得观察 installationId、filesystem path、URL、bearer、HTTP/FSDB physical identity。
-
-优先保留 existing domain separation，例如：
+因此 map Runtime 只读取普通 JSON-compatible FSDB records，例如概念 identity：
 
 ```text
 Map/{id}
@@ -103,7 +95,48 @@ MapInfo/{id}
 MapMetadata/{id}
 ```
 
-而不是建立新的 MapBundle。
+并通过：
+
+```text
+ContentClient.record(...)
+→ ContentRecord { value: JsonValue, contentVersion }
+```
+
+获得数据。
+
+Map library 可以依赖这些 FSDB JSON records 的 **RMXP/Essentials-compatible field semantics**，但禁止依赖：
+
+```text
+Ruby Marshal binary format
+.rxdata decoding
+RPG/RMXP decoder object/class instances
+Ruby object graph identity
+RmxpObject / RubyString / $id / $ref / $typed importer wrappers
+rubyObjectId
+tools/fixtures implementation/filesystem layout
+Hostra/PWA physical storage
+```
+
+Compatibility/import tooling 负责把 source/decoder representation materialize 成 M12 Content API 可直接返回的 JSON records。该转换是 persistence/runtime representation conversion，不是第二套 map business model；因此不建立 example-local Essentials→map adapter，也不定义 `MapNormalizedV1`。
+
+---
+
+## 4. Content / Input / Render
+
+### Content
+
+Definition 通过 M12 logical Content API 直接读取 prepared FSDB JSON records/resources；不得直接打开 FSDB，也不得观察 installationId、filesystem path、URL、bearer、HTTP/FSDB physical identity。
+
+概念读取：
+
+```text
+ContentClient.record("Map", mapId)
+ContentClient.record("Tileset", tilesetId)
+ContentClient.record("MapInfo", mapId)
+ContentClient.record("MapMetadata", mapId) when needed
+```
+
+优先保留 existing domain separation，而不是建立新的 MapBundle。
 
 ### Input
 
@@ -139,7 +172,8 @@ Business WC 对 LoomRealm-managed attrs/data/children/order只读。
 真实可见资源按以下路径获得：
 
 ```text
-runtime Content semantic record
+FSDB JSON Content record
+→ map runtime ContentClient
 → resource logical identity/version
 → Render data
 → receiveRenderData
@@ -192,10 +226,12 @@ WC private subtree      → Shadow DOM/private state
 ```text
 Essentials source
 → tools/fixtures/essentials-v21.1
-→ RMXP/Essentials semantic records + resources
+→ source/decoder representation
+→ FSDB JSON records whose semantics mirror required RMXP/Essentials map facts
+  + resources
 → prepared Content
 → examples/essentials-v21.1
-→ @loomrealm-game/map
+→ @loomrealm-game/map via ContentClient
 ```
 
 Example 负责 Game Entry、Subsystem key、initial input、game-specific composition与 presentation declaration；它不是 map compiler。
@@ -210,9 +246,9 @@ Example 负责 Game Entry、Subsystem key、initial input、game-specific compos
 
 ```text
 examples/essentials-v21.1
-→ @loomrealm-game/map
+→ prepared FSDB JSON Content
+→ @loomrealm-game/map via ContentClient
 → @loomrealm/subsystem public author API
-→ M12 Content
 → M10 Input
 → M11 RenderDomain
 → M13 thin projection
@@ -228,7 +264,7 @@ M14 不复制 M10–M13 lower-level conformance，只证明真实 consumer integ
 
 ## 10. Abstraction budget
 
-允许真实 RMXP/Essentials map domain concepts：world/map state、movement/collision、events、tilesets、map-owned WC contracts。
+允许真实 RMXP/Essentials-compatible map domain concepts：world/map state、movement/collision、events、tilesets、map-owned WC contracts。
 
 禁止：
 
@@ -243,11 +279,11 @@ universal AssetManager
 LoomRealm component vocabulary
 presentation layer manager
 map-specific Event→DOM bridge
-Ruby/Marshal parser inside map package
+Ruby/Marshal/RMXP decoder inside map package
 ```
 
 ---
 
 ## 11. Final goal
 
-> **证明一个位于 framework 之外的 reusable map library 可以直接消费 prepared RMXP/Essentials semantic records，只依赖 LoomRealm public author contracts，再被 concrete game消费并通过 M13 得到真实 browser presentation。**
+> **证明一个位于 framework 之外的 reusable map library 可以通过 `ContentClient` 直接消费 prepared FSDB JSON records（其业务语义与 RMXP/Essentials map model 对齐），只依赖 LoomRealm public author contracts，再被 concrete game消费并通过 M13 得到真实 browser presentation。**

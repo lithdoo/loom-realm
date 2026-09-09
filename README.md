@@ -153,22 +153,29 @@ Frame / Input / Content / Render / M13
 playable map slice
 ```
 
-M14 直接采用 Essentials v21.1 / RMXP map semantic model，不再为“通用地图”另建 normalized schema：
+M14 不为“通用地图”另建 normalized schema，但明确区分语义来源与 Runtime 数据格式：
 
 ```text
-RPG::Map / RPG::Tileset / RPG::MapInfo
-RPG::Event / Page / EventCommand
-RGSS Table
-Essentials MapMetadata / map connections as needed
+RMXP / Essentials map model
+    = semantic authority
+
+prepared FSDB JSON records/resources
+    = persisted/runtime representation
+
+ContentClient.record()/resource()
+    = map Runtime access boundary
 ```
 
-现有 `tools/fixtures/essentials-v21.1` importer 负责 Ruby/Marshal/`.rxdata`/PBS 等 source semantics，并把它们 materialize 为可由 M12 Content API 直接读取的 semantic records/resources。`@loomrealm-game/map` 可以理解 RMXP/Essentials 地图语义，但不依赖 importer object wrappers、tooling filesystem 或 platform storage。
+`RPG::Map` / `RPG::Tileset` / `RPG::MapInfo`、`RPG::Event` / Page / EventCommand、RGSS `Table` 与需要的 Essentials MapMetadata/map connections 只定义 FSDB JSON 字段的业务含义与关系来源；它们不是 `@loomrealm-game/map` 接收的 decoder object 类型。
+
+现有 `tools/fixtures/essentials-v21.1` importer 负责 Ruby/Marshal/`.rxdata`/PBS 等 source semantics，并把 importer internal representation materialize 为可由 M12 Content API 返回的 JSON-compatible FSDB records/resources。`@loomrealm-game/map` 只通过 `ContentClient` 消费这些 `JsonValue` records/resources，不依赖 `RmxpObject`、`RubyString`、`$id/$ref/$typed`、decoder class/object、tooling filesystem 或 platform storage。
 
 ```text
 Essentials source
-→ importer
-→ RMXP/Essentials semantic records + resources
-→ prepared Content
+→ importer decode/internal representation
+→ semantic JSON materialization
+→ FSDB JSON records + resources
+→ M12 ContentClient
 → @loomrealm-game/map runtime
 → Render logical resource refs
 → M13 map WC

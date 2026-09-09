@@ -439,18 +439,20 @@ external/local Essentials v21.1 source
         ↓
 tools/fixtures/essentials-v21.1 importer
         ↓
-RMXP/Essentials semantic map records + raw resources
+source/decoder representation
         ↓
-prepared Content
+semantic JSON materialization
         ↓
-examples/essentials-v21.1
+prepared FSDB JSON records + raw resources
         ↓
-@loomrealm-game/map
+M12 ContentClient
+        ↓
+examples/essentials-v21.1 + @loomrealm-game/map
         ↓
 Frame/Input/Render/Content/M13 real map vertical
 ```
 
-M14 直接采用现有 RMXP/Essentials map semantics，不再额外定义 `MapNormalizedV1` / generic MapBundle。Importer负责 Ruby Marshal、`.rxdata`、PBS 与 source object representation，并把这些 source mechanics materialize 为可由 Content API 直接读取的 semantic records；map library可以理解 `RPG::Map` / `RPG::Tileset` / `RPG::Event` / RGSS `Table` / Essentials map metadata，但不依赖 importer object wrappers、tooling filesystem 或 Platform storage。随后分别在 Hostra Desktop 与 PWA 完成 full E2E，并验证等价 logical outcome。
+M14 不再额外定义 `MapNormalizedV1` / generic MapBundle。RMXP/Essentials map model 是 FSDB JSON records 的 semantic authority；prepared FSDB JSON 是 Runtime representation；`ContentClient` 是 map runtime 的访问边界。`RPG::Map` / `RPG::Tileset` / `RPG::Event` / RGSS `Table` / Essentials map metadata 等名称定义字段语义和关系来源，不表示 `@loomrealm-game/map` 接收 importer/RMXP decoder object。Map runtime 不依赖 `RmxpObject`、`RubyString`、`$id/$ref/$typed`、tooling filesystem 或 Platform storage。随后分别在 Hostra Desktop 与 PWA 完成 full E2E，并验证等价 logical outcome。
 
 ---
 
@@ -508,4 +510,4 @@ M16 PWA Runtime                                      pending
 M17 PWA full E2E / equivalence                       pending
 ```
 
-当前 executable closure是 `npm run test:m13`。下一步按 M14/01–05 建立 `game-libs/map` 与 `examples/essentials-v21.1`，直接消费 importer materialized 的 RMXP/Essentials semantic records完成 first playable map vertical，再进入 Desktop/PWA full E2E。
+当前 executable closure是 `npm run test:m13`。下一步按 M14/01–05 建立 `game-libs/map` 与 `examples/essentials-v21.1`，让 map runtime 通过 `ContentClient` 消费 RMXP/Essentials-compatible FSDB JSON records完成 first playable map vertical，再进入 Desktop/PWA full E2E。

@@ -212,20 +212,34 @@ game-libs/map
     @loomrealm-game/map
 ```
 
-M14 直接采用 RMXP/Essentials map semantic model，而不是定义另一套 normalized map schema。数据准备链：
+M14 不定义另一套 normalized map schema，但区分 semantic authority 与 Runtime representation：
+
+```text
+RMXP/Essentials map model
+    semantic authority
+
+prepared FSDB JSON records/resources
+    persisted/runtime representation
+
+ContentClient
+    map Runtime access boundary
+```
+
+数据准备链：
 
 ```text
 Essentials source
 → tools/fixtures/essentials-v21.1
-→ Ruby/Marshal/RMXP decode
-→ RMXP/Essentials semantic records + raw resources
-→ prepared Content
+→ Ruby/Marshal/RMXP decode/internal representation
+→ semantic JSON materialization
+→ prepared FSDB JSON records + raw resources
+→ M12 ContentClient
 → @loomrealm-game/map
 ```
 
-Map library可以理解 `RPG::Map` / `RPG::Tileset` / `RPG::Event` / RGSS `Table` / Essentials map metadata等业务语义；不得理解 Ruby Marshal binary、`.rxdata` decoding、importer object-graph wrappers或 tooling filesystem layout。
+`RPG::Map` / `RPG::Tileset` / `RPG::Event` / RGSS `Table` / Essentials map metadata等名称定义 FSDB JSON records 的业务语义来源，不表示 map runtime 接收对应 decoder object。Map runtime只读取 `ContentClient.record()` 返回的 `JsonValue`，不得依赖 Ruby Marshal binary、`.rxdata` decoding、`RmxpObject/RubyString/$id/$ref/$typed`、decoder class/object或 tooling filesystem layout。
 
-Runtime通过 `ContentClient` 读取 semantic records；可见资源以 logical identity/version进入 Render state，WC再通过 `PresentationResourceClient`取 bytes。Map browser JS/CSS也必须通过 prepared Content + `WebPresentationConfigV1`启动。
+可见资源以 logical identity/version进入 Render state，WC再通过 `PresentationResourceClient`取 bytes。Map browser JS/CSS也必须通过 prepared Content + `WebPresentationConfigV1`启动。
 
 M14 qualification可使用 test-owned composition harness复用 existing production roles + real Chromium；该 harness不是新的 production Platform/Host，完整 Desktop composition仍属于 M15。
 
@@ -244,4 +258,4 @@ M10 Input
 → M17 PWA full E2E/equivalence
 ```
 
-M14 不 reopen M10–M13 frozen contracts，也不把 RMXP-compatible map model升级为 LoomRealm universal map contract。
+M14 不 reopen M10–M13 frozen contracts，也不把 RMXP-compatible FSDB map semantics升级为 LoomRealm universal map contract。

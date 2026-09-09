@@ -16,17 +16,19 @@ concrete example
 → observable playable map slice
 ```
 
-M14 不引入额外 map normalized schema。Runtime 直接消费 importer materialized 的 RMXP/Essentials semantic records。
+M14 不引入额外 map normalized schema。RMXP/Essentials 提供 map semantic authority；Runtime 只消费 prepared FSDB 中的 JSON records/resources，并通过 `ContentClient` 访问它们。
 
 ## Required trace
 
 至少覆盖：
 
 ```text
-prepare/load RMXP/Essentials semantic map records
+Essentials/RMXP source or CI-safe equivalent
+→ semantic JSON materialization
+→ prepared FSDB Map/Tileset/... records + resources
 → launch map Subsystem
 → initial Frame/business state
-→ ContentClient reads Map/Tileset/MapInfo/MapMetadata as needed
+→ ContentClient.record() reads Map/Tileset/MapInfo/MapMetadata JsonValue as needed
 → create InputListener + RenderDomain
 → publish initial map/player Render state
 → Render data carries logical resource ref/version only
@@ -38,6 +40,8 @@ prepare/load RMXP/Essentials semantic map records
 → existing HTMLElement identity reused where required
 → visible map/player result changes
 ```
+
+`RPG::Map` / `RPG::Tileset` 等名称用于说明这些 FSDB JSON records 应保持的业务语义，不是 vertical 中传给 map runtime 的 decoder object 类型。测试不得通过直接构造 `RmxpObject`、`RPG::*` decoder instance 或 `$id/$ref/$typed` wrapper 绕过 FSDB + ContentClient boundary。
 
 如果所选真实 interaction 自然需要另一个 Subsystem，可增加一次 `frame.call/return`；不得为了覆盖率创建假的 reusable dialogue/battle library。
 
@@ -78,7 +82,9 @@ M13 已关闭 generic browser semantics，M14 只证明真实 map consumer 可�
 至少一个真实可见资源（tileset 或 player sprite）必须完整走：
 
 ```text
-Content logical resource identity/version
+FSDB semantic JSON record
+→ map runtime ContentClient
+→ logical resource identity/version
 → Render data
 → receiveRenderData
 → PresentationResourceClient
@@ -106,6 +112,7 @@ Example/game-lib failure 不得通过 shortcut 修改 Main/Renderer authority。
 
 ```text
 new universal map content model
+Runtime consumption of importer/RMXP decoder objects
 Electron BrowserWindow full composition
 physical keyboard/gamepad final Desktop path
 Renderer reload/shutdown full trace
@@ -119,4 +126,4 @@ PWA Runtime/equivalence
 
 M14/04 通过时应能人工/自动回答：
 
-> 一个普通 concrete game 是否能让 reusable map library 直接消费 prepared RMXP/Essentials semantic records，只通过 public LoomRealm contracts，在真实 M13 browser presentation 中得到可玩的地图切片？
+> 一个普通 concrete game 是否能让 reusable map library 通过 `ContentClient` 消费 prepared FSDB JSON records（其业务语义与 RMXP/Essentials map model 对齐），只通过 public LoomRealm contracts，在真实 M13 browser presentation 中得到可玩的地图切片？

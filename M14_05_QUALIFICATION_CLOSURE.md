@@ -19,7 +19,7 @@ npm run test:m14
 ```text
 npm run test:m13
 map game-library tests
-semantic-map materialization tests using distributable fixture
+FSDB semantic-JSON materialization tests using distributable fixture
 real Chromium M14 game vertical
 workspace/package boundary checks
 @loomrealm-game/map pack/publish dry-run qualification
@@ -38,31 +38,53 @@ game-libs/map runtime entry does not import renderer/main/platform/tooling
 examples are private
 packages/* do not depend on game-libs/examples
 runtime example does not import tools/fixtures
+map runtime reads map content through ContentClient
+map runtime receives JsonValue FSDB records, not RPG/RMXP decoder objects
 map runtime does not consume RmxpObject/RubyString/$id/$ref/$typed importer wrappers
 M13/M12 physical credentials/paths do not leak into game business state
 ```
 
 ## Data-shape evidence
 
-必须证明 importer/preparation：
+必须证明 preparation chain：
 
 ```text
 Ruby/Marshal/RMXP source mechanics
-→ materialized RMXP/Essentials semantic records
-→ M12 Content records/resources
+→ importer internal typed/object-graph representation
+→ JSON-compatible semantic materialization
+→ FSDB Map/Tileset/MapInfo/... records + resources
+→ M12 ContentClient
+→ @loomrealm-game/map JsonValue consumer
 ```
 
-第一版不定义独立 `MapNormalizedV1` 或 `MapBundle`。Semantic records 应保留 RMXP/Essentials map meaning，同时移除 Ruby object graph/serialization mechanics。
+第一版不定义独立 `MapNormalizedV1` 或 `MapBundle`。
 
-至少覆盖 M14 vertical 实际需要的：
+这里的语义/表示边界固定为：
 
 ```text
-RPG::Map
-RPG::Tileset
-RPG::MapInfo
+RMXP/Essentials
+    semantic authority
+
+FSDB JSON record
+    persisted/runtime representation
+
+ContentClient.record()
+    Runtime access boundary
+```
+
+`RPG::Map`、`RPG::Tileset`、`RPG::Event`、RGSS `Table` 等名称用于定义 FSDB record 的字段含义和关系来源，不表示 map runtime 接收对应 decoder class/object。
+
+FSDB JSON records 必须移除 Ruby object graph/serialization mechanics，并能作为普通 `JsonValue` 被 M12 Content API 返回。
+
+至少覆盖 M14 vertical 实际需要的语义：
+
+```text
+RPG::Map-compatible map facts
+RPG::Tileset-compatible tileset/passability facts
+RPG::MapInfo-compatible map info
 Essentials MapMetadata / connections when used
-RPG::Event / Page / EventCommand when used
-RGSS Table tile data
+RPG::Event / Page / EventCommand semantics when used
+RGSS Table tile-data semantics
 ```
 
 ## Functional evidence
@@ -70,7 +92,7 @@ RGSS Table tile data
 至少证明：
 
 ```text
-RMXP/Essentials semantic map record load
+FSDB Map/Tileset JSON record load via ContentClient
 real Content resource use
 player spawn
 Input movement
@@ -117,13 +139,15 @@ M14 不 claim Hostra Launcher / Electron BrowserWindow / physical input / reload
 M14 closure record分开记录：
 
 ```text
-CI-safe synthetic/author-owned RMXP-compatible semantic fixture qualification
-local exact-v21.1 corpus compatibility qualification
+CI-safe synthetic/author-owned FSDB JSON fixture qualification
+local exact-v21.1 corpus importer → FSDB JSON compatibility qualification
 ```
 
-local official corpus 不提交、不上传为 repository artifact；记录 source version/fingerprint、semantic materialization result与必要统计即可。
+CI fixture 的字段语义必须与同一 M14 RMXP/Essentials-compatible FSDB Content model 对齐；不能构造只在测试里存在的 fake map object model。
 
-两条 evidence 必须汇入同一 map runtime/browser consumer path；CI 不得维护另一套 fake map schema。
+local official corpus 不提交、不上传为 repository artifact；记录 source version/fingerprint、FSDB semantic materialization result与必要统计即可。
+
+两条 evidence 必须汇入同一 `ContentClient` → map runtime → browser consumer path。
 
 ## Explicit non-claims
 

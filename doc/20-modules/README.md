@@ -21,7 +21,7 @@ framework module != reusable game library != concrete game
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
 | Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
-| Map Game Library | [map design](./loom-map/README.md) | M14 RMXP/Essentials-compatible map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
+| Map Game Library | [map design](./loom-map/README.md) | M14 RMXP/Essentials-compatible FSDB map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
 | Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra physical composition、Content、M13/M15 integration |
 | PWA | [pwa-host](./pwa-host/README.md) | PWA Worker Runtime、M17 Renderer/Data/Content/Web presentation realization |
 
@@ -122,18 +122,30 @@ game-libs/map
     browser side       → map-owned Custom Elements
 ```
 
-M14 不定义第二套 normalized map schema。Map library 直接消费 importer materialized 的 RMXP/Essentials semantic records，例如 `RPG::Map`、`RPG::Tileset`、`RPG::MapInfo`、`RPG::Event`、RGSS `Table` 与需要的 Essentials map metadata。
+M14 不定义第二套 normalized map schema，但明确三层：
+
+```text
+RMXP/Essentials map model
+    semantic authority
+
+prepared FSDB JSON records/resources
+    persisted/runtime representation
+
+ContentClient
+    map Runtime access boundary
+```
 
 ```text
 Essentials source
 → tools/fixtures/essentials-v21.1 importer
-→ Ruby/Marshal/RMXP decode
-→ semantic records + raw resources
-→ prepared Content
+→ Ruby/Marshal/RMXP decode/internal representation
+→ semantic JSON materialization
+→ prepared FSDB JSON records + raw resources
+→ M12 ContentClient
 → @loomrealm-game/map
 ```
 
-Map library 可以理解这些地图业务语义，但不 import Ruby/Marshal decoder、`.rxdata` parser、`RmxpObject/$ref/$typed` wrappers 或 tool filesystem。Example 不再拥有 Essentials→map adapter；它只负责 concrete Game Entry/composition/initial input/presentation declaration。
+`RPG::Map`、`RPG::Tileset`、`RPG::MapInfo`、`RPG::Event`、RGSS `Table` 与需要的 Essentials map metadata 只定义 FSDB JSON records 的业务语义。Map runtime 不接收这些 decoder object，也不 import Ruby/Marshal decoder、`.rxdata` parser、`RmxpObject/RubyString/$id/$ref/$typed` wrappers 或 tool filesystem。Example 不再拥有 Essentials→map adapter；它只负责 concrete Game Entry/composition/initial input/presentation declaration。
 
 M14 是真实 Frame/Input/Render/Content/Web Presentation 综合 consumer；至少一个真实 tileset/player resource 必须经 Render logical identity/version → `PresentationResourceClient` 到达 WC，map browser JS/CSS 也必须经 prepared Content + `WebPresentationConfigV1` 启动。
 

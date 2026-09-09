@@ -265,18 +265,22 @@ Root workspace增加 `game-libs/*` 与 `examples/*`。Framework继续 `@loomreal
 
 `game-libs/map` runtime Definition只依赖 public `@loomrealm/subsystem`，真实使用 Frame/InputListener/RenderDomain/ContentClient；browser side拥有 map-owned Custom Elements并结构性消费 M13。
 
-M14 不再额外定义 normalized map schema。第一版 map library 直接采用 Essentials v21.1 / RMXP map semantic model：
+M14 不再额外定义 normalized map schema。第一版边界固定为：
 
 ```text
-RPG::Map
-RPG::Tileset
-RPG::MapInfo
-RPG::Event / Page / EventCommand
-RGSS Table
-Essentials MapMetadata / map connections when needed
+RMXP/Essentials map model
+    semantic authority
+
+prepared FSDB JSON records/resources
+    persisted/runtime representation
+
+ContentClient.record()/resource()
+    @loomrealm-game/map Runtime access boundary
 ```
 
-Map library可以理解这些 map-domain semantics，但不得理解 Ruby Marshal binary、`.rxdata` decoding、Ruby object-graph wrappers、`RmxpObject/$ref/$typed` importer representation、tool filesystem或 Platform storage。
+`RPG::Map`、`RPG::Tileset`、`RPG::MapInfo`、`RPG::Event / Page / EventCommand`、RGSS `Table`、Essentials MapMetadata/map connections 只定义 FSDB JSON fields 的业务含义与关系来源；map runtime 不接收 RPG/RMXP decoder object。
+
+Map runtime不得依赖 Ruby Marshal binary、`.rxdata` decoding、`RmxpObject/RubyString/$id/$ref/$typed` importer representation、decoder class/object、tool filesystem或 Platform storage。
 
 ### M14/03 — Essentials concrete example / preparation
 
@@ -285,23 +289,23 @@ Map library可以理解这些 map-domain semantics，但不得理解 Ruby Marsha
 ```text
 external/local source
 → tools/fixtures/essentials-v21.1 importer
-→ Ruby/Marshal/RMXP decoding
-→ RMXP/Essentials semantic records + raw resources
-→ prepared Content/FSDB
-→ examples/essentials-v21.1
-→ @loomrealm-game/map
+→ Ruby/Marshal/RMXP decoding/internal representation
+→ semantic JSON materialization
+→ prepared FSDB JSON records + raw resources
+→ M12 ContentClient
+→ examples/essentials-v21.1 / @loomrealm-game/map
 ```
 
-Importer materialization只剥离 source/serialization mechanics，不重新定义 map semantics。Runtime example/map library不 import tool modules，第三方 corpus不提交仓库。
+Importer materialization只把已有 RMXP/Essentials semantics 转为 JSON-compatible FSDB representation，并剥离 source/decoder/serialization mechanics；不重新定义 map semantics。Runtime example/map library不 import tool modules，第三方 corpus不提交仓库。
 
-Canonical CI使用 checked-in synthetic/author-owned RMXP-compatible semantic fixture；exact v21.1 official/local corpus作为独立 local compatibility evidence。两条 evidence必须汇入同一 Content/runtime/browser consumer path。
+Canonical CI使用 checked-in synthetic/author-owned FSDB JSON fixture，其 field semantics 与同一 RMXP/Essentials-compatible Content model 对齐；exact v21.1 official/local corpus作为独立 local compatibility evidence。两条 evidence必须汇入同一 `ContentClient`/runtime/browser consumer path。
 
 ### M14/04 — real consumer vertical
 
 至少完成：
 
 ```text
-load one RPG::Map + referenced RPG::Tileset
+ContentClient loads FSDB Map JSON + referenced Tileset JSON
 → player spawn
 → directional input
 → business movement/collision
@@ -313,7 +317,8 @@ load one RPG::Map + referenced RPG::Tileset
 至少一个真实可见资源（tileset 或 player sprite）必须完整走：
 
 ```text
-Content semantic record
+FSDB JSON Content record
+→ map runtime ContentClient
 → resource logical identity/version
 → Render data
 → map WC
@@ -337,11 +342,11 @@ Future canonical gate：
 npm run test:m14
 ```
 
-该命令不存在/未通过前不得声明 M14 Closed。Gate至少包含 `test:m13`、workspace/package boundary、RMXP/Essentials semantic materialization、game-lib tests、example preparation/vertical、real Chromium与 `@loomrealm-game/map` pack qualification，并在 Node 20/24 CI执行。
+该命令不存在/未通过前不得声明 M14 Closed。Gate至少包含 `test:m13`、workspace/package boundary、source → FSDB semantic JSON materialization、game-lib tests、example preparation/vertical、real Chromium与 `@loomrealm-game/map` pack qualification，并在 Node 20/24 CI执行。
 
-M14必须自动证明 runtime不依赖 tools/importer、不消费 `RmxpObject/RubyString/$id/$ref/$typed` wrappers、Render state不泄漏 path/URL/token/bytes、map browser startup走 prepared Content + M13 Config。
+M14必须自动证明 runtime不依赖 tools/importer、不消费 RPG/RMXP decoder objects或 `RmxpObject/RubyString/$id/$ref/$typed` wrappers、只通过 `ContentClient` 获得 FSDB `JsonValue` map records、Render state不泄漏 path/URL/token/bytes、map browser startup走 prepared Content + M13 Config。
 
-M14 Closed只证明 first real RMXP/Essentials-compatible game vertical，不代表完整 Pokémon Essentials gameplay、universal map schema或 Desktop/PWA full E2E。
+M14 Closed只证明 first real RMXP/Essentials-compatible FSDB game vertical，不代表完整 Pokémon Essentials gameplay、universal map schema或 Desktop/PWA full E2E。
 
 ---
 
@@ -349,7 +354,7 @@ M14 Closed只证明 first real RMXP/Essentials-compatible game vertical，不代
 
 完成真实 Desktop composition：PREPARE、Main/Runner/Control/Data Broker、BrowserWindow、M13 presentation、M10 physical input、M14 concrete game + map library、reload/reconnect/shutdown。
 
-M15 用真实 Desktop physical composition替换 M14 test-owned qualification harness；不重新设计 Input/Render/Content/Web Presentation/game-library ownership或 RMXP/Essentials map semantics。
+M15 用真实 Desktop physical composition替换 M14 test-owned qualification harness；不重新设计 Input/Render/Content/Web Presentation/game-library ownership或 RMXP/Essentials-compatible FSDB map semantics。
 
 ---
 
@@ -381,4 +386,4 @@ M16 PWA Runtime                            pending
 M17 PWA full E2E/equivalence               pending
 ```
 
-当前 canonical executable closure为 `npm run test:m13`。下一步按 M14/01–05 建立 first real RMXP/Essentials-compatible game consumer；不重新打开 M13 已冻结边界，也不为通用化复制第二份 map schema。
+当前 canonical executable closure为 `npm run test:m13`。下一步按 M14/01–05 建立 first real RMXP/Essentials-compatible FSDB Content consumer；不重新打开 M13 已冻结边界，也不为通用化复制第二份 map schema。

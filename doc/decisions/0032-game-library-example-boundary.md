@@ -81,7 +81,9 @@ browser presentation side
 
 两侧可以来自同一个 game library workspace，但不得通过同一 runtime entry 混入 DOM/Renderer/Platform dependency。
 
-M14 直接采用 Essentials v21.1 / RMXP map semantic model作为第一版 map business/content model。Map library MAY understand：
+M14 不建立 `MapNormalizedV1`、`MapBundle` 或另一个 generic map schema。Essentials v21.1 / RMXP map model 是第一版 map content 的 **semantic authority**，而不是 map runtime 的 object/API representation。
+
+Semantic authority 包括：
 
 ```text
 RPG::Map
@@ -92,20 +94,32 @@ RGSS Table
 Essentials MapMetadata / map connections
 ```
 
-但 MUST NOT understand：
+这些名称定义字段含义、关系与行为来源。
+
+Runtime representation 固定为：
 
 ```text
+prepared FSDB JSON records/resources
+→ M12 ContentClient
+→ @loomrealm-game/map
+```
+
+Map runtime MUST consume ordinary `JsonValue` records returned by `ContentClient.record()`；它 MUST NOT receive or depend on：
+
+```text
+RPG/RMXP decoder object/class instances
 Ruby Marshal binary encoding
 .rxdata parsing
 Ruby object graph wrappers
 RmxpObject / RubyString / $id / $ref / $typed importer representation
+rubyObjectId
 tools/fixtures implementation/filesystem layout
 Hostra/PWA physical storage
 ```
 
-因此 M14 不建立 `MapNormalizedV1`、`MapBundle` 或另一个 generic map schema。
+因此“采用 RMXP/Essentials map semantics”精确表示：**FSDB JSON record 的业务含义与 RMXP/Essentials map model 对齐，而不是把 importer/RMXP decoder object 暴露给 game library。**
 
-## Import / semantic materialization
+## Import / FSDB semantic materialization
 
 `tools/fixtures/essentials-v21.1` 继续拥有 source acquisition 与 source-format compatibility semantics：
 
@@ -116,7 +130,16 @@ PBS / Essentials compiled data
 source filesystem/layout
 ```
 
-它在 preparation 阶段把 source representation materialize 为可由 M12 Content API 直接读取的 RMXP/Essentials semantic records/resources，例如：
+它在 preparation 阶段完成：
+
+```text
+source bytes/objects
+→ importer internal typed/object-graph representation
+→ JSON-compatible semantic materialization
+→ prepared FSDB records/resources
+```
+
+例如概念 FSDB identity：
 
 ```text
 Map/{id}
@@ -125,7 +148,7 @@ MapInfo/{id}
 MapMetadata/{id}
 ```
 
-该 materialization 的职责只是移除 Ruby/Marshal/object-graph transport details，不重新发明地图业务语义。
+该 materialization 只把已有 RMXP/Essentials 语义转换为 `ContentClient` 可返回的 JSON-compatible persisted representation，并移除 Ruby/Marshal/object-graph transport details；不重新发明地图业务语义。
 
 Runtime game/map library不 import tool modules；第三方 source/material不提交仓库。
 
@@ -154,18 +177,20 @@ WebPresentationConfig declaration
 ```text
 local/external Essentials v21.1 source
 → tools/fixtures/essentials-v21.1 importer
-→ RMXP/Essentials semantic records + resources
-→ local prepared Content/FSDB
+→ FSDB JSON records whose semantics mirror required RMXP/Essentials map facts
+  + raw resources
+→ local prepared Content
 → examples/essentials-v21.1
-→ @loomrealm-game/map
+→ @loomrealm-game/map via ContentClient
 ```
 
 ## Presentation resource path
 
-Map runtime通过 `ContentClient` 读取 semantic records，并把可见资源的 logical identity/version放入 Render state；map-owned WC 再通过 M13 `PresentationResourceClient` 获得 tileset/player sprite bytes。
+Map runtime通过 `ContentClient` 读取 FSDB JSON records，并把可见资源的 logical identity/version放入 Render state；map-owned WC 再通过 M13 `PresentationResourceClient` 获得 tileset/player sprite bytes。
 
 ```text
-Content semantic record
+FSDB JSON Content record
+→ map runtime ContentClient
 → resource logical identity/version
 → RenderDomain
 → M13
@@ -180,7 +205,9 @@ Map browser JS/CSS 本身也必须作为 prepared Content 资源进入 `WebPrese
 
 ## Qualification split
 
-M14 canonical CI 使用仓库可分发的 synthetic/author-owned RMXP-compatible semantic fixture，证明完整 architecture/game vertical；官方 Essentials v21.1 corpus 作为独立 local compatibility evidence，证明真实数据 materialization，不把第三方 corpus 变成 CI/repository distribution dependency。
+M14 canonical CI 使用仓库可分发的 synthetic/author-owned **FSDB JSON fixture**，其字段语义必须与同一 RMXP/Essentials-compatible Content model 对齐，证明完整 architecture/game vertical；官方 Essentials v21.1 corpus 作为独立 local compatibility evidence，证明真实 source → FSDB JSON materialization，不把第三方 corpus 变成 CI/repository distribution dependency。
+
+两条 evidence 必须通过相同的 `ContentClient` → `@loomrealm-game/map` → browser consumer path，不能让 CI 或 local qualification 直接给 map runtime 注入 decoder object。
 
 M14 full vertical可以使用 test-owned composition harness串联现有 production Main/Subsystem/Data/Renderer/Content roles + real Chromium。该 harness只是 qualification mechanics，不是新的 production Host/Platform；Hostra BrowserWindow/physical input/reload-shutdown仍属于 M15。
 
@@ -195,6 +222,7 @@ MapBundle abstraction
 examples hidden inside apps/desktop
 runtime dependency on tools/fixtures
 copy official Essentials/Pokémon assets into repository
+map runtime consuming RPG/RMXP decoder objects
 map runtime consuming RmxpObject/$ref/$typed importer wrappers
 universal GameLibrary framework/registry
 MiniDesktopHost / MapHost production abstraction for M14
@@ -204,7 +232,7 @@ MiniDesktopHost / MapHost production abstraction for M14
 
 M14 是第一次明确验证：LoomRealm framework 可以被独立 game library 与 concrete game 消费，而不把业务能力吸收到 core package graph。
 
-采用现成 RMXP/Essentials map semantics 也意味着 `@loomrealm-game/map` 是一个真实的 tile-RPG map library，而不是 LoomRealm 的 universal map abstraction。未来 3D/hex/voxel world 不被要求适配这一 package。
+采用现成 RMXP/Essentials map semantics 也意味着 `@loomrealm-game/map` 是一个真实的 tile-RPG map library，而不是 LoomRealm 的 universal map abstraction；但其 Runtime 数据面仍是 FSDB JSON + Content API，不是 RMXP decoder API。未来 3D/hex/voxel world 不被要求适配这一 package。
 
 M10–M13 contracts 不因本决定 reopen；本 ADR 只改变 M14 repository/package ownership 与 consumer composition。
 
