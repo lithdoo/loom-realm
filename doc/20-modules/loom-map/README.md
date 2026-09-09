@@ -1,75 +1,101 @@
-# `loom.map` 地图 Subsystem 模块设计
+# Map Game Library 设计
 
-> 层级：模块设计  
+> 层级：Game Library 设计  
 > 状态：Active Design / M14 Pending  
-> 稳定程度：M10–M13 consumed boundaries closed；map business design Experimental
-> 主要定义：Phase 1 map business + map-owned Web presentation，作为 Frame/Input/Render/Content/M13 的第一个真实综合 consumer  
-> 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)  
+> 稳定程度：M10–M13 consumed boundaries closed；M14 repository/game ownership revised  
+> 主要定义：`game-libs/map` reusable map business library + map-owned Web presentation  
+> 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-09
 
 核心原则：
 
-> **map Business Definition只依赖 `@loomrealm/subsystem`；map Web presentation由同一业务 owner拥有但运行在独立 Web execution side。LoomRealm只提供 authority/replication/Content/Web Presentation contracts，不拥有 map component vocabulary或 layout。**
+> **Map 是 reusable game-domain library，不是 LoomRealm framework module。Framework 只提供 author/runtime/presentation contracts；map owner拥有地图业务 vocabulary、normalized content schema 与具体 Web presentation。**
 
 ---
 
-## 1. Business / Presentation Boundary
+## 1. Physical placement / identity
+
+M14 实现位置：
 
 ```text
-@loomrealm/map Definition
+game-libs/map
+```
+
+package identity：
+
+```text
+@loomrealm-game/map
+```
+
+明确禁止：
+
+```text
+packages/map
+@loomrealm/map
+framework-reserved loom.map business identity
+```
+
+具体 game/example 自己选择 Subsystem key，例如 `map`；package name与 Subsystem key不是同一概念。
+
+---
+
+## 2. Runtime / Browser execution boundary
+
+同一个 map library owner 可以提供两个隔离 side：
+
+```text
+runtime Definition side
 → @loomrealm/subsystem only
 
-map Web presentation
+browser presentation side
 → concrete map-owned Custom Elements
-→ Web Presentation API v1 consumer
+→ Web Presentation API v1 structural consumer
 ```
 
-Business Definition 不得 import Renderer/Platform/DOM/FSDB/protocol/launcher packages。Web presentation 不得获得 Subsystem business object 或 RenderDomain writer。
-
-Presentation JS/CSS 由 Window-level `WebPresentationConfigV1` 引用，不绑定进 `loom.map` descriptor。Game Entry 仍只声明 logical `{ "key": "loom.map" }`。
+Definition 不得 import Renderer/Platform/DOM/FSDB/protocol/tooling。Browser side不得获得 Subsystem business object、RenderDomain writer、Data carrier或 Main authority。
 
 ---
 
-## 2. M14 Consumed Author Capabilities
+## 3. Map-owned normalized content
 
-M14 只消费已经关闭/冻结的 SDK/contract：
+Map library定义运行时真正需要的 normalized records/resources。它们是 game-library business schema，不升级为 LoomRealm contract。
+
+Map library不得直接解析或依赖：
 
 ```text
-Frame / frame.call / FrameOutcome
-SubsystemScope.createInputListener
-SubsystemScope.createRenderDomain
-scope.content.record/resource
-scope.signal / frame.signal
-M13 Web Presentation Config/API
+Pokémon Essentials
+RPG Maker XP
+PBS
+Ruby Marshal
+RGSS objects
+tools/fixtures filesystem/layout
 ```
 
-不新增 map-specific Runtime service locator、raw carrier或 platform adapter。
+Source compatibility translation发生在 concrete example preparation。
 
 ---
 
-## 3. Content / Input / Render
+## 4. Content / Input / Render
 
 ### Content
 
-Map Definition 通过 M12 logical Content API 读取 metadata/resource；不得观察 installationId、filesystem path、URL、bearer、HTTP/FSDB physical identity。
-
-如果真实实现证明新的 author capability 必需，再按对应 frozen/current boundary 的治理规则最小 reopen；禁止 raw fetch 旁路。
+Definition 通过 M12 logical Content API 读取 map-owned normalized record/resource；不得观察 installationId、filesystem path、URL、bearer、HTTP/FSDB physical identity。
 
 ### Input
 
-Map listener 继续服从 M10 Interest/Producer/Main InputTarget/current Data semantics。WC focus/DOM event 不能创造 Input authority或绕过 `RendererInputSource`。
+Map listener服从 M10 Interest/Producer/Main InputTarget/current Data semantics。WC focus/DOM event不能绕过 `RendererInputSource` 创造 Input authority。
 
 ### Render
 
-Map 创建业务 RenderDomains 并维护 authoritative state。Frame/Data/Activation lifetime 不隐式控制 Domain lifetime。
+Map 创建业务 RenderDomains并维护 authoritative state。Frame/Data/Activation lifetime不隐式控制 Domain lifetime。
 
-`RenderDomain.emit` 可用，但 M14 不为 coverage 硬造 RenderEvent consumer；M13 没有 Event→WC ABI。
+M14 不为 coverage 强制使用 RenderEvent；M13 没有 Event→WC ABI。
 
 ---
 
-## 4. Map-owned Web Presentation
+## 5. Map-owned Web Presentation
 
-map Web side 可使用：
+map browser side可使用：
 
 ```text
 Custom Elements
@@ -80,17 +106,15 @@ private decoded resource/cache/animation
 business layout / position / stacking
 ```
 
-概念 tags 只是业务 vocabulary，不形成 LoomRealm component vocabulary。
+Map tags/render vocabulary属于 game library，不形成 LoomRealm component vocabulary。
 
-Business WC 对 LoomRealm-managed attrs/data/children/order 只读，也不能写 Render Store/Main/Data authority。
+Business WC 对 LoomRealm-managed attrs/data/children/order只读。
 
 ---
 
-## 5. M13 Contract as Consumer Boundary
+## 6. M13 consumer boundary
 
-Map 不重新解释 M13 identity/currentness/order/failure/resource semantics；这些全部直接消费 frozen [Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)。
-
-核心约束只有：
+Map 不重新解释 M13 identity/currentness/order/failure/resource semantics；直接消费 frozen Web Presentation API。
 
 ```text
 same full live wire-node identity
@@ -103,49 +127,44 @@ same-generation transport loss
 → does not mint/remove application authority
 ```
 
-Map 不依赖 cross-Subsystem global zIndex；actual visual stacking 由 map/business CSS表达。
+Map 不依赖 cross-Subsystem global zIndex；actual visual stacking由 map CSS/private presentation表达。
 
 ---
 
-## 6. Context / Data / Runtime Resource
+## 7. Context / Data / resources
 
-Map WC 可以结构性实现 `receiveRenderContext` / `receiveRenderData`，并通过 `context.resources` 读取 runtime resource。
+Map WC 可以结构性实现 `receiveRenderContext` / `receiveRenderData`，通过 `context.resources` 读取 runtime resource。
 
-Map `data` schema、decoded cache、ImageBitmap/texture/AudioBuffer strategy 都由 map Definition/Web side 共同拥有；LoomRealm 不冻结 map-specific asset/data schema，也不建立 universal AssetManager/decoder registry。
+Map-owned data schema、decoded cache、ImageBitmap/texture策略全部留在 game library/browser side；LoomRealm 不建立 universal AssetManager/decoder registry。
 
 ---
 
-## 7. Children / Component Granularity
+## 8. Children / granularity
 
-RenderNode child granularity 由 map business identity/lifecycle 需求决定，不由视觉嵌套决定。
+RenderNode child granularity由 map business identity/lifecycle需求决定，不由视觉嵌套决定。
 
 ```text
 Render-managed children → light DOM composition
-WC private implementation subtree → Shadow DOM/private state
+WC private subtree      → Shadow DOM/private state
 ```
 
-M13 不增加 TextNode/HTML-fragment graphics primitive；文本等业务 primitive 可由 map-owned WC 表达。
+文本、tile layer、player/event representation由 map library自己定义；LoomRealm不增加图形 primitive DSL。
 
 ---
 
-## 8. Frame / Cancellation
+## 9. Essentials relationship
 
-`scope.signal` 用于 Runtime-level business work，`frame.signal` 用于 Frame-scoped work。Normal child-call suspension 不销毁 Runtime-level Content/Input config/RenderDomain。
-
-WC lifecycle 不能决定 Frame/Runtime/Domain authority lifetime。
-
----
-
-## 9. Compatibility Boundary
-
-RPG Maker XP / Pokémon Essentials v21.1 compatibility compiler 只负责：
+`examples/essentials-v21.1` 是 M14 concrete consumer。Essentials importer与 compatibility preparation不属于 map library：
 
 ```text
-source format
-→ map logical records/resource references/business state
+Essentials source
+→ tools/fixtures/essentials-v21.1
+→ example-local compatibility preparation
+→ map normalized records/resources
+→ @loomrealm-game/map
 ```
 
-它不解析 Game/Platform manifests、不打开 Runtime/Data carrier、不读取 Hostra path、不选择 presentation loading，也不把 Desktop/PWA branching 引入 business semantics。
+只有第二个真实 consumer证明兼容层需要复用时，才评估独立 compatibility package。
 
 ---
 
@@ -154,28 +173,26 @@ source format
 至少证明：
 
 ```text
-real @loomrealm/map Definition
-→ @loomrealm/subsystem only
+examples/essentials-v21.1
+→ @loomrealm-game/map
+→ @loomrealm/subsystem public author API
 → M12 Content
 → M10 Input
 → M11 RenderDomain
-→ M13 Window bootstrap / thin projection
+→ M13 thin projection
 → map-owned WC
-→ context/resources + receiveRenderData
-→ observable physical presentation
-→ nested frame.call/return
-→ business outcome
+→ observable playable map slice
 ```
 
-M14 不复制 M10–M13 lower-level conformance，只证明真实 consumer integration。
+M14 不复制 M10–M13 lower-level conformance，只证明真实 consumer integration与业务自然性。
 
 ---
 
-## 11. Abstraction Budget
+## 11. Abstraction budget
 
-允许真实 map domain concepts：world state、catalog、compatibility compiler、map-owned WC contracts。
+允许真实 map domain concepts：world/map state、normalized records、movement/collision、map-owned WC contracts。
 
-禁止仅为未来推测建立：
+禁止：
 
 ```text
 Repository base hierarchy
@@ -186,10 +203,11 @@ universal AssetManager
 LoomRealm component vocabulary
 presentation layer manager
 map-specific Event→DOM bridge
+Essentials parser/runtime adapter inside map package
 ```
 
 ---
 
-## 12. Final Goal
+## 12. Final goal
 
-> **`loom.map` 证明：普通 platform-neutral Subsystem Definition 可以通过 M10/M11/M12 产生业务状态，再由 M13 thin Web Presentation 驱动 map-owned Custom Elements；业务仍拥有具体视觉实现，而无需扩张 LoomRealm core abstraction。**
+> **证明一个位于 framework 之外的 reusable game library 可以只依赖 LoomRealm public author contracts，再被 concrete game消费并通过 M13 得到真实 browser presentation。**
