@@ -21,7 +21,7 @@ framework module != reusable game library != concrete game
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
 | Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
-| Map Game Library | [map design](./loom-map/README.md) | M14 reusable map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
+| Map Game Library | [map design](./loom-map/README.md) | M14 RMXP/Essentials-compatible map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
 | Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra physical composition、Content、M13/M15 integration |
 | PWA | [pwa-host](./pwa-host/README.md) | PWA Worker Runtime、M17 Renderer/Data/Content/Web presentation realization |
 
@@ -113,24 +113,39 @@ Window bootstrap
 ## 6. M14 Map Game Library + Concrete Example
 
 ```text
+examples/essentials-v21.1
+    consumes
+        ↓
 game-libs/map
     @loomrealm-game/map
     runtime Definition → @loomrealm/subsystem only
     browser side       → map-owned Custom Elements
-        ↓
-examples/essentials-v21.1
-    private concrete game
 ```
 
-Map library拥有 normalized map schema，不解析 Essentials/RMXP/PBS/Marshal。`tools/fixtures/essentials-v21.1`只在 development/preparation阶段生成本地 canonical data；example-local preparation再转换为 map-owned records/resources。
+M14 不定义第二套 normalized map schema。Map library 直接消费 importer materialized 的 RMXP/Essentials semantic records，例如 `RPG::Map`、`RPG::Tileset`、`RPG::MapInfo`、`RPG::Event`、RGSS `Table` 与需要的 Essentials map metadata。
 
-M14 是真实 Frame/Input/Render/Content/Web Presentation 综合 consumer；不为 coverage 强制使用 RenderEvent，也不发明第二套 resource/loading boundary。
+```text
+Essentials source
+→ tools/fixtures/essentials-v21.1 importer
+→ Ruby/Marshal/RMXP decode
+→ semantic records + raw resources
+→ prepared Content
+→ @loomrealm-game/map
+```
+
+Map library 可以理解这些地图业务语义，但不 import Ruby/Marshal decoder、`.rxdata` parser、`RmxpObject/$ref/$typed` wrappers 或 tool filesystem。Example 不再拥有 Essentials→map adapter；它只负责 concrete Game Entry/composition/initial input/presentation declaration。
+
+M14 是真实 Frame/Input/Render/Content/Web Presentation 综合 consumer；至少一个真实 tileset/player resource 必须经 Render logical identity/version → `PresentationResourceClient` 到达 WC，map browser JS/CSS 也必须经 prepared Content + `WebPresentationConfigV1` 启动。
 
 ---
 
 ## 7. Physical Placement
 
 ```text
+M14 qualification
+    test-owned composition harness
+    existing production roles + real Chromium
+
 M15 Desktop
     BrowserWindow + Renderer Control/Data/Input/Render/Content
     M13 Config/API/Projector
@@ -142,7 +157,7 @@ M17 PWA
     same concrete logical game + M13 semantics
 ```
 
-PWA 可以使用不同 storage/fetch/private browser binding，但不能改变 frozen M13 observable semantics或复制 game business source。
+M14 harness不是新的 production Host。PWA 可以使用不同 storage/fetch/private browser binding，但不能改变 frozen M13 observable semantics或复制 game business source。
 
 ---
 
@@ -152,6 +167,8 @@ PWA 可以使用不同 storage/fetch/private browser binding，但不能改变 f
 
 ```text
 GameLibrary registry/base framework
+MapNormalizedV1 / universal map schema
+MapBundle abstraction
 runtime service locator
 Repository / AssetManager
 Renderer public Render Store
@@ -162,6 +179,7 @@ public RenderNodeIdentity framework
 RenderEvent→DOM bridge without real consumer
 second projection-tree/topology authority
 runtime dependency on tools/importer
+MiniDesktopHost / MapHost production abstraction
 ```
 
 业务/game-library WC内部选择 UI framework 不受限制，只要不接管 LoomRealm-managed host projection。
