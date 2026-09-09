@@ -140,19 +140,42 @@ Qualification evidence：[M13 Web Presentation qualification](./doc/30-implement
 M14 不创建 `packages/map` / `@loomrealm/map`：
 
 ```text
+examples/essentials-v21.1
+    consumes
+        ↓
 game-libs/map
     @loomrealm-game/map
-    reusable map business + map-owned Web presentation
         ↓
-examples/essentials-v21.1
-    private concrete game
+@loomrealm/subsystem public author APIs
         ↓
 Frame / Input / Content / Render / M13
         ↓
 playable map slice
 ```
 
-Essentials source只通过现有 `tools/fixtures/essentials-v21.1` importer参与 local development/preparation；tooling不成为 runtime dependency，第三方 corpus不提交仓库。
+M14 直接采用 Essentials v21.1 / RMXP map semantic model，不再为“通用地图”另建 normalized schema：
+
+```text
+RPG::Map / RPG::Tileset / RPG::MapInfo
+RPG::Event / Page / EventCommand
+RGSS Table
+Essentials MapMetadata / map connections as needed
+```
+
+现有 `tools/fixtures/essentials-v21.1` importer 负责 Ruby/Marshal/`.rxdata`/PBS 等 source semantics，并把它们 materialize 为可由 M12 Content API 直接读取的 semantic records/resources。`@loomrealm-game/map` 可以理解 RMXP/Essentials 地图语义，但不依赖 importer object wrappers、tooling filesystem 或 platform storage。
+
+```text
+Essentials source
+→ importer
+→ RMXP/Essentials semantic records + resources
+→ prepared Content
+→ @loomrealm-game/map runtime
+→ Render logical resource refs
+→ M13 map WC
+→ PresentationResourceClient
+```
+
+Map browser JS/CSS 本身也必须通过 prepared Content + `WebPresentationConfigV1` 启动；M14 qualification 使用 test-owned composition harness + existing production roles + real Chromium，不创建新的 production Host。
 
 实施顺序：
 
