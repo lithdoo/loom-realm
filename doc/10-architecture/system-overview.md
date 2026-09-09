@@ -205,29 +205,43 @@ M13 implementation只允许选择不改变 frozen observable semantics 的 priva
 ## 9. M14 Consumer Placement
 
 ```text
+examples/essentials-v21.1
+    consumes
+        ↓
 game-libs/map
     @loomrealm-game/map
-    reusable map business + map-owned WC
-        ↓
-examples/essentials-v21.1
-    concrete private game
 ```
 
-Essentials source compatibility通过 `tools/fixtures/essentials-v21.1` + example-local preparation转换为 map-owned normalized Content；map library本身不理解 PBS/Marshal/RMXP/Essentials。
+M14 直接采用 RMXP/Essentials map semantic model，而不是定义另一套 normalized map schema。数据准备链：
+
+```text
+Essentials source
+→ tools/fixtures/essentials-v21.1
+→ Ruby/Marshal/RMXP decode
+→ RMXP/Essentials semantic records + raw resources
+→ prepared Content
+→ @loomrealm-game/map
+```
+
+Map library可以理解 `RPG::Map` / `RPG::Tileset` / `RPG::Event` / RGSS `Table` / Essentials map metadata等业务语义；不得理解 Ruby Marshal binary、`.rxdata` decoding、importer object-graph wrappers或 tooling filesystem layout。
+
+Runtime通过 `ContentClient` 读取 semantic records；可见资源以 logical identity/version进入 Render state，WC再通过 `PresentationResourceClient`取 bytes。Map browser JS/CSS也必须通过 prepared Content + `WebPresentationConfigV1`启动。
+
+M14 qualification可使用 test-owned composition harness复用 existing production roles + real Chromium；该 harness不是新的 production Platform/Host，完整 Desktop composition仍属于 M15。
 
 ---
 
 ## 10. Phase Route
 
 ```text
-M10 User Input                                closed
-M11 Render Replication                        closed
-M12 Content                                   closed
-M13 Web Presentation                          ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game        pending
-M15 Desktop full E2E                           pending
-M16 PWA Runtime                                pending
-M17 PWA full E2E/equivalence                   pending
+M10 Input
+→ M11 Render
+→ M12 Content
+→ M13 Web Presentation
+→ M14 Map Game Library + First Real Game
+→ M15 Desktop full E2E
+→ M16 PWA Runtime
+→ M17 PWA full E2E/equivalence
 ```
 
-当前 executable closure是 `npm run test:m13`；M13 qualification记录见 [m13-qualification.md](../30-implementation/m13-qualification.md)。
+M14 不 reopen M10–M13 frozen contracts，也不把 RMXP-compatible map model升级为 LoomRealm universal map contract。
