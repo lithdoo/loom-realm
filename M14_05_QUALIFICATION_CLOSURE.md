@@ -4,239 +4,361 @@
 
 ## Closure target
 
-M14 的 canonical CI gate：
+M14 canonical CI gate：
 
 ```text
 npm run test:m14
 ```
 
-M14 `Closed` 不是仅指 CI fixture green。关闭该 milestone 必须同时满足：
+M14 `Closed` requires both：
 
 ```text
 1. npm run test:m14
-   → canonical Node 20 / 24 CI matrix green
+   → Node 20 / 24 CI green
 
-2. npm run test:m14:essentials-local
-   → 对 exact Essentials v21.1 local corpus 完成一次记录化 compatibility qualification
-   → 对应同一个 M14 closure revision
+2. npm run test:m14:essentials-local -- --source <path> --map-id <id> --x <x> --y <y> --character-name <name>
+   → one recorded exact Essentials v21.1 compatibility qualification
+   → performed against the same closure revision
 ```
 
-第二条是 milestone closure evidence，不进入 GitHub Actions，也不使第三方 corpus 成为 repository/CI dependency。在两类 evidence 都真实通过并记录前，不宣称 M14 Closed。
+The local command is not a GitHub Actions dependency. Third-party corpus stays local/ignored and is never committed or uploaded as an artifact.
 
-Closure record MUST 绑定：
+Closure record binds：
 
 ```text
 repository commit SHA
-CI M14 qualification result
+canonical CI result
 exact-v21.1 source identity/fingerprint
-local consumer-projection result
-first-slice semantic + presentation vertical result
+selected local map/spawn/character
+consumer projection result
+semantic/runtime/browser result
 ```
 
-这样后续不能用另一个 revision 的 importer/local result 替当前 M14 implementation 背书。
+## 1. Required root scripts
 
-## Required gate composition
+M14 implementation must add at least：
 
-`test:m14` 至少包含：
+```text
+test:m14
+test:m14:pack
+test:m14:essentials-local
+```
+
+`test:m14` MUST include：
 
 ```text
 npm run test:m13
-map game-library tests
-M14 consumer-projection tests using distributable fixture
-concrete example Game Entry validation/startup test
-prepared Content assembly test
-real Chromium M14 game semantic/presentation vertical
 workspace/package boundary checks
-@loomrealm-game/map pack/publish dry-run qualification
+M14 consumer-projection tests
+game-lib unit/semantic tests
+concrete game.json parse/validation/startup test
+prepared Content assembly test
+real Chromium M14 vertical
+npm run test:m14:pack
 ```
 
-`examples/essentials-v21.1` 必须 private，不做 publish/pack product qualification。
-
-Node 20 / 24 CI 继续作为 canonical matrix。
-
-`test:m14:essentials-local` 是 local-only compatibility command。它可以复用现有 importer/acquisition mechanics，但第三方 source/bytes 必须继续位于 ignored/local ownership，不得被提交、上传为 CI artifact 或变成 `test:m14` 的隐式 prerequisite。
-
-## Boundary evidence
-
-必须自动证明：
+`test:m14:pack` MUST prove `@loomrealm-game/map` package contents include both runtime output and：
 
 ```text
-game-libs/map runtime entry does not import renderer/main/platform/tooling
-examples are private
-packages/* do not depend on game-libs/examples
-runtime example does not import tools/fixtures
-map runtime reads map content through ContentClient
-map runtime receives JsonValue FSDB records, not RPG/RMXP decoder objects
-map runtime does not consume RmxpObject/RubyString/$id/$ref/$typed importer wrappers
-M13/M12 physical credentials/paths do not leak into game business state
-Essentials importer does not own map browser JS/CSS packaging
-example/test preparation does not parse PBS/Marshal/RMXP source
-browser WC does not direct-fetch resource URL/path/token
-WC/DOM does not mutate authoritative player position outside M10 Input path
+dist/browser/map.browser.js
+dist/browser/map.css
 ```
 
-## First-slice topology evidence
+`examples/essentials-v21.1` remains private and is not a publishable package.
 
-M14 first slice 必须证明 logical topology 是最小且明确的：
+## 2. Workspace / dependency boundary
+
+Automated checks must prove：
 
 ```text
-one business subsystemKey = "map"
-→ @loomrealm-game/map Definition
-
-one authoritative RenderDomain
-→ domainId = "map.main"
+root workspaces include game-libs/* + examples/*
+packages/* do not depend on game-libs/* or examples/*
+@loomrealm-game/map runtime imports only public author-facing LoomRealm APIs
+map Runtime does not import renderer/main/platform/tooling/DOM
+example Runtime does not import tools/fixtures
+example package is private
 ```
 
-不得为了 presentation 拆出：
+Do not build a generic workspace orchestrator for this gate.
+
+## 3. Consumer projection gate
+
+Tests under the Essentials fixture must prove the exact mechanical rules in `M14_CONSUMER_PROJECTION.md`：
 
 ```text
-player Subsystem
-tile/layer/camera Subsystem
-presentation Subsystem
-map.tiles / map.entities visual-only RenderDomains
+known @ivar spelling projection
+primitive safe/fail-closed rules
+string/symbol/array/hash projection
+RGSS Table shape
+Table index(x,y,z)=x+y*xSize+z*xSize*ySize
+Table values.length invariant
+Color/Tone finite-number projection when required
+Map.events embedded decimal keys
+no kind/className/rubyObjectId/$id/$ref/$typed consumer metadata
 ```
 
-M14 harness使用 test-owned physical binding，不 claim real Hostra child process。Closure record必须明确：真实 Node Runner child + BrowserWindow composition属于 M15，而不是由 M14 test harness冒充完成。
+At least one non-zero `(x,y,z)` Table case must prove axis/serialized ordering.
 
-## Data-shape evidence
-
-必须证明 preparation chain：
+Source-container extraction tests MUST additionally prove：
 
 ```text
-Ruby/Marshal/RMXP source mechanics
-→ importer internal typed/object-graph representation
-→ JSON-compatible semantic materialization
-→ FSDB Map/Tileset/MapInfo/... records + resources
-→ M12 ContentClient
-→ @loomrealm-game/map JsonValue consumer
+MapNNN.rxdata RPG::Map root
+→ Map/{decimal N}
+
+Tilesets.rxdata array entry i
+→ Tileset/{i}
+→ projected object id must equal i for materialized non-null entries
+
+MapInfos.rxdata integer-key Hash entry k
+→ MapInfo/{k} when MapInfo is materialized
 ```
 
-第一版不定义独立 `MapNormalizedV1` 或 `MapBundle`。
+Required ambiguity/mismatch fails closed; it must not be repaired by a Runtime adapter.
 
-这里的语义/表示边界固定为：
+## 4. Exact Game Entry gate
 
-```text
-RMXP/Essentials
-    semantic authority
-
-FSDB JSON record
-    persisted/runtime representation
-
-ContentClient.record()
-    Runtime access boundary
-```
-
-`RPG::Map`、`RPG::Tileset`、`RPG::Event`、RGSS `Table` 等名称用于定义 FSDB record 的字段含义和关系来源，不表示 map runtime 接收对应 decoder class/object。
-
-FSDB JSON records 必须移除 Ruby object graph/serialization mechanics，并能作为普通 `JsonValue` 被 M12 Content API 返回。
-
-M14 consumer projection 的机械规则必须按 `tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md` 自动验证，至少包括：
-
-```text
-known RPG @ivar → strip one leading @ and preserve remaining spelling
-nil → null
-boolean → JSON boolean
-safe Integer → JSON number; unsafe required Integer fails closed
-finite Float → JSON number; non-finite required Float fails closed
-RubyString/RubySymbol → JSON string
-Ruby Array → JSON array
-RGSS Table → { dimensions, xSize, ySize, zSize, values:number[] }
-RGSS Table index(x,y,z) = x + y*xSize + z*xSize*ySize
-RGSS Table values.length = xSize*ySize*zSize
-Map.events stays embedded and uses decimal event-id JSON object keys
-no kind/className/rubyObjectId/$id/$ref/$typed in consumer records
-```
-
-Table qualification不能只断言 `values` 是 number array；至少必须使用已知非零坐标样本证明 serialized order、轴顺序与 frozen index rule 一致。
-
-M14-required source fact若无法无歧义投影成 JsonValue，preparation 必须 fail closed；不得通过 generic wrapper把问题推给 Runtime。
-
-至少覆盖 M14 vertical 实际需要的语义：
-
-```text
-RPG::Map-compatible map width/height/tile-data facts
-RPG::Tileset-compatible resource/passability facts
-RPG::MapInfo-compatible map info
-Essentials MapMetadata / connections when used
-RPG::Event / Page / EventCommand semantics when used
-RGSS Table tile-data semantics
-```
-
-第一版不得为了 Event 表型拆分引入 `ContentClient.group()`。
-
-## Concrete Game Entry evidence
-
-M14 必须证明 `examples/essentials-v21.1` 是真实 concrete game，而不只是 fixture directory：
+Canonical CI reads checked-in：
 
 ```text
 examples/essentials-v21.1/game.json
-→ parseGameEntryV1 / validateGameEntryV1
-→ validated subsystem topology contains logical key "map"
-→ initial target/input
-→ test-owned physical Definition binding
-→ existing Main
-→ initial Frame
 ```
 
-测试不得绕过 Game Package validation 后直接硬编码 logical topology。
-
-第一条 vertical可以使用 example initial input中的 `mapId/x/y` 作为 player spawn；完整 `RPG::System` startup compatibility不是 M14 closure prerequisite。
-
-## Prepared Content assembly evidence
-
-必须证明 qualification 只使用一个 assembled prepared Content view：
+and proves through existing Game Package APIs：
 
 ```text
-importer-produced FSDB or CI-safe semantic fixture
+formatVersion=1
+exact subsystem list contains "map"
+initial target="map"
+initial input = {
+  mapId:1,
+  x:10,
+  y:8,
+  characterName:"m14_player"
+}
+```
+
+Only after validation may the M14 harness bind logical `map` to the concrete Definition.
+
+No Hostra/PWA launch manifest is fabricated for M14.
+
+## 5. Gameplay Frame lifetime gate
+
+The map Definition must prove a real long-lived gameplay Frame：
+
+```text
+Frame becomes active
+→ Map/Tileset/resource load completes
+→ InputListener created for that Frame
+→ initial Render visible
+→ Frame handler remains pending
+→ first input delivered
+→ second input delivered
+```
+
+A Frame that returns/completes before movement input fails M14.
+
+Teardown after observations must cleanly close listener/Runtime. Qualification must not invent implicit Frame-owned RenderDomain teardown because M11 explicitly keeps those lifetimes independent.
+
+## 6. RenderDomain topology gate
+
+M14 owns exactly one current business RenderDomain for the map first slice.
+
+The SDK-assigned wire domain id is **opaque**：
+
+```text
+MUST NOT assert "map.main"
+MUST NOT require a particular d1/d2/... spelling
+MUST NOT reopen createRenderDomain(initialState) to accept an author id
+```
+
+Qualification identifies the Domain by：
+
+```text
+current subsystemKey="map"
 +
-@loomrealm-game/map browser JS + component/default CSS
-+
-example page CSS + WebPresentationConfig logical refs
-→ example/test preparation
-→ one prepared Content view
+exact viewport/player Render tree
 ```
 
-该 preparation 只做 composition/materialization；不得成为 Runtime dependency、production Host、第二个 map adapter 或 generic GamePackager/ContentBuilder framework。
+No visual-only tile/layer/entity Domain may be added.
 
-## Functional / semantic evidence
+## 7. Frozen CI fixture gate
 
-M14 full vertical 至少证明：
+The repository-owned semantic fixture from M14/03 is normative for canonical movement evidence：
 
 ```text
-FSDB Map/Tileset JSON record load via ContentClient
-Map.data is interpreted with the frozen RGSS Table indexing semantics
-at least one visible tile is derived from Map.data tile identity + Tileset/resource facts
-real Content resource use
-player spawn from validated example initial input
-Input path reaches map business logic
-one passable movement is accepted from persisted map/tileset passability facts
-one blocked movement is rejected from persisted map/tileset passability facts
-map.main RenderDomain initial/update state reflects authoritative business position
-visible movement occurs for the passable case and not for the blocked case
+Map/1 width=24 height=18 tileset_id=1
+spawn=(10,8)
+z0 regular tile 384 except (12,8)=385
+z1/z2 tile 0
+
+Tileset/1
+passages[384]=0x00, priorities[384]=0
+passages[385]=0x02, priorities[385]=0
 ```
 
-Qualification 不得用下面的方式获得形式通过：
+Tests must inspect these persisted facts. Forbidden fixture shortcuts：
 
 ```text
-load Map/Tileset but render a test-local fixed terrain
-inject isBlocked/passable conclusions that do not exist in real consumer Content semantics
-move player by unconditional x/y increment without consulting implemented passability facts
-use a fake CI-only map object model different from the local exact-v21.1 consumer path
-let WC keydown handler mutate player position directly
+isBlocked
+walkable
+collision bitmap generated only for the test
+hard-coded "x==12 means blocked"
 ```
 
-第一版只要求所选 map slice 实际需要的 RMXP/Essentials-compatible passability subset，不要求 M14 一次实现完整 event collision、priority、terrain、transition compatibility。但实际实现的 subset 必须由 persisted Content facts驱动，并在 CI fixture 与 local exact-v21.1 qualification 中走同一 map runtime logic。
+## 8. Exact RMXP passability gate
 
-## Concrete Web Component evidence
+Unit + vertical tests must prove M14/02 first-slice algorithm：
 
-M14 first-slice component vocabulary固定为：
+```text
+d=2 → 0x01
+d=4 → 0x02
+d=6 → 0x04
+d=8 → 0x08
+
+map coordinate evaluation scans z=2,1,0
+passage direction bit blocks
+0x0f blocks all directions
+priority==0 establishes passability
+movement checks source direction and target reverse direction
+out-of-bounds target blocks
+```
+
+Canonical movement sequence is exact：
+
+```text
+start (10,8), facing down
+
+ArrowRight down repeat=false
+→ (11,8), facing right
+
+ArrowRight down repeat=false
+→ blocked by tile 385 left-entry bit 0x02
+→ remains (11,8), facing right
+```
+
+`keyup`, `repeat=true`, timer-driven movement and keyboard.state polling are not accepted substitutes.
+
+Event collision, through/debug semantics, terrain tags and map transitions are explicit M14 nonclaims.
+
+## 9. Fixed viewport / camera gate
+
+Chromium computed style MUST show：
+
+```text
+lr-map-view = 640px × 480px
+```
+
+Logical invariants：
+
+```text
+tileSize=32
+viewport=640×480
+nominal grid=20×15
+```
+
+Runtime must not read DOM dimensions and there must be no DOM→Runtime resize/layout feedback path.
+
+Expected camera facts：
+
+```text
+player (10,8) → cameraX=16, cameraY=32
+player (11,8) → cameraX=48, cameraY=32
+blocked second right → camera remains 48,32
+```
+
+A different `devicePixelRatio` may change private Canvas backing-store size only; logical coordinates remain unchanged.
+
+## 10. Tile rendering gate
+
+Canonical browser vertical must prove persisted tile identity controls actual pixels：
+
+```text
+Map.data
+→ frozen Table lookup
+→ regular tileId
+→ Tileset resource
+→ source rectangle
+→ private Canvas
+```
+
+Regular tile mapping is exact：
+
+```text
+tileId=0 → transparent
+for tileId>=384:
+    sx=((tileId-384)%8)*32
+    sy=floor((tileId-384)/8)*32
+    sw=32
+    sh=32
+```
+
+The author-owned tileset image must make tile 384 and 385 visually distinguishable and the test must prove the expected source cell is used.
+
+Canonical CI visible area uses no required autotile (`48..383`) and no priority-over-player visual. Encountering an unsupported required tile kind fails instead of being silently approximated.
+
+## 11. Resource gate
+
+At least both first-slice visible resources are qualified：
+
+```text
+Graphics / Tilesets/m14_tileset
+Graphics / Characters/m14_player
+```
+
+For each：
+
+```text
+Runtime ContentClient.resource()
+→ bytes + mime + contentVersion
+→ Render carries namespace/key/contentVersion only
+→ PresentationResourceClient reads browser bytes
+→ actual qualified pixels use those bytes
+```
+
+Render state MUST NOT contain raw bytes, URL, path, bearer or privileged physical identity.
+
+No resource metadata/HEAD API is added for M14.
+
+## 12. Exact Render data gate
+
+Runtime/browser must use the package-private shapes frozen in M14/02, not an open-ended “at least these fields” agreement.
+
+`lr-map-view` data exact members：
+
+```text
+mapId
+mapWidth
+mapHeight
+cameraX
+cameraY
+tileset { namespace,key,contentVersion }
+tiles[] { x,y,z,tileId }
+```
+
+`lr-map-sprite` data exact members：
+
+```text
+x
+y
+screenX
+screenY
+direction
+pattern=0
+sprite { namespace,key,contentVersion }
+```
+
+No raw RMXP/importer object is allowed in either data object.
+
+## 13. Web Component / DOM identity gate
+
+M14 required tags are exactly：
 
 ```text
 lr-map-view
 lr-map-sprite
 ```
 
-Real Chromium qualification必须证明 M13-managed light DOM 正常形状为：
+Real Chromium must observe M13-managed light DOM：
 
 ```html
 <body>
@@ -246,218 +368,152 @@ Real Chromium qualification必须证明 M13-managed light DOM 正常形状为：
 </body>
 ```
 
-并证明 Render identity：
+Required observations：
 
 ```text
-map.main
-root key="viewport" tag="lr-map-view"
-child key="player" tag="lr-map-sprite"
+lr-map-view has private Shadow DOM tile Canvas + entity slot/overlay
+player remains light-DOM child
+no lr-map-tile/lr-map-layer/lr-map-camera dependency
+same lr-map-view HTMLElement survives movement updates
+same lr-map-sprite HTMLElement survives movement updates
+first right move visibly moves the player
+blocked second right does not move/recreate the player
 ```
 
-至少验证：
+The player resource crop must come from the real 4×4 fixture sheet with `pattern=0` and row selected from direction.
+
+## 14. CSS / presentation bootstrap gate
+
+Prepared Content identities/order：
 
 ```text
-both tags are registered through normal M13 bootstrap before projection
-same live identity keeps the same lr-map-view HTMLElement
-same live identity keeps the same lr-map-sprite HTMLElement across passable movement
-blocked movement does not recreate/move player presentation
-fresh Session/generation still follows M13 fresh element rules
+styles:
+    Presentation / map/map.css
+    Presentation / essentials/page.css
+scripts:
+    Presentation / map/map.browser.js
 ```
 
-第一版不得把每个 tile/layer/camera materialize 成 Render-managed WC。测试应断言没有为了 first slice引入 `lr-map-tile` / `lr-map-layer` / `lr-map-camera` 依赖。
+The page CSS fixes `lr-map-view` to 640×480 and owns page centering/margin/scroll policy. Map CSS owns component/private presentation.
 
-`lr-map-view` 必须证明存在 private tile rendering surface + entity-slot composition，语义等价于：
+The JS resource must execute as a classic script：
 
 ```text
-Shadow DOM viewport
-→ private tile Canvas
-→ private entity overlay
-→ slot for M13-managed light-DOM children
+no import/export at execution time
+no browser runtime ESM graph
+native customElements.define("lr-map-view", ...)
+native customElements.define("lr-map-sprite", ...)
 ```
 
-Qualification 不把 Shadow DOM private class 名变成 public ABI；它只证明 tile surface是 private presentation、player仍是 Render-managed light-DOM identity。
+Qualification may not direct-import browser source, define the tags in test code, or inject replacement CSS.
 
-`lr-map-sprite` 可以使用 private div/background crop或 Canvas；closure只要求其 visible state来自 received authoritative data，resource bytes来自 PresentationResourceClient。
+## 15. Physical-input milestone boundary
 
-## Render-data evidence
+M14 canonical vertical uses existing/synthetic `RendererInputSource` to prove M10 semantics.
 
-M14 不建立 public/versioned Map Render schema，但 qualification必须证明 Runtime/Browser 使用同一明确的 first-slice vocabulary。
-
-`lr-map-view` data至少包含：
+Real Desktop DOM Keyboard/Pointer/Gamepad mapping is **M15**, not M14：
 
 ```text
-map identity/size
-viewport/camera facts needed by first slice
-tile size
-tileset { namespace, key, contentVersion }
-visible tile projection derived by Runtime from Map.data + Tileset semantics
+M14
+→ logical Input vertical with existing/synthetic source
+
+M15
+→ BrowserWindow physical events
+→ real RendererInputSource realization
+→ same M10 gate
+→ same M14 map gameplay logic
 ```
 
-`lr-map-sprite` data至少包含：
+Any earlier future-looking milestone note that said “M14 Desktop DOM mapping” is superseded by this implemented milestone partition; no core M10 API changes are implied.
+
+## 16. Exact local-v21.1 command
+
+Required invocation：
 
 ```text
-x / y
-direction
-animation frame when used
-sprite { namespace, key, contentVersion }
+npm run test:m14:essentials-local -- \
+  --source <local-source-or-archive> \
+  --map-id <positive-int> \
+  --x <non-negative-int> \
+  --y <non-negative-int> \
+  --character-name <semantic-name>
 ```
 
-禁止 Render payload包含：
+The command may create only ignored local working data under：
 
 ```text
-raw Map/RmxpObject decoder wrappers
-filesystem path / privileged URL / credential
-raw resource bytes
-second browser-owned authoritative map model
+.local/m14-essentials/
 ```
 
-至少一个 tileset 或 player sprite 必须走：
+It must：
 
 ```text
-semantic record-derived namespace/key
-→ map runtime ContentClient.resource(namespace, key)
-→ returned contentVersion
-→ Render data namespace/key/contentVersion
-→ PresentationResourceClient
-→ browser bytes
-→ resource is actually used by the visible qualified result
+run existing importer/acquisition path
+materialize M14 consumer Map/Tileset records
+assemble same map browser/page artifacts
+run same map Runtime/browser implementation
+record source fingerprint + selected slice + semantic/presentation outcome
 ```
 
-Runtime 获得的 raw bytes不得进入 Render payload。M14 不新增 resource metadata/HEAD author API；允许 Runtime 与 Renderer各读取一次同一 resource。只有真实 M14 performance evidence才能支持后续最小 reopen M12。
+It does not need to re-prove repository `game.json` parsing; canonical CI owns that evidence.
 
-## CSS / page composition evidence
+If the selected exact-corpus slice requires autotiles/priority-over-player semantics absent from M14, qualification fails with an explicit unsupported-first-slice reason. Closure then requires the smallest real implementation addition or another semantically meaningful supported slice; it may not substitute a fake local map.
 
-M14必须证明 CSS ownership不是隐含约定：
+## 17. Closure record
+
+At actual closure create/update：
 
 ```text
-@loomrealm-game/map
-→ component/default host CSS + component-private Shadow DOM styles
-
-examples/essentials-v21.1
-→ concrete Renderer document/page composition CSS
+doc/30-implementation/m14-qualification.md
 ```
 
-Real Chromium至少验证：
+Record only：
 
 ```text
-html/body fill the document
-body default margin removed
-body does not scroll in the first-slice composition
-lr-map-view fills the intended viewport and clips overflow
-lr-map-sprite is positioned from map-owned presentation state
-private tile/entity surfaces fill the map viewport
-pixel-art rendering avoids unintended smoothing where supported
+closure commit SHA
+Node 20/24 canonical run/result
+exact-v21.1 source version + fingerprint
+local selection mapId/x/y/characterName
+consumer projection summary
+record/resource counts relevant to selected slice
+passable/blocked movement results
+visible tile/resource result
+WC/DOM result
+final pass/fail
 ```
 
-Example CSS不得依赖 map WC Shadow DOM private selectors作为跨-package contract。
+Never record third-party asset bytes.
 
-两层 CSS 必须作为 prepared Content resources由 `WebPresentationConfigV1.styles[]` 正常加载；测试不得用 direct `<style>` injection替代真实 bootstrap。
+## 18. Reopen policy
 
-## Presentation bootstrap evidence
-
-必须证明：
+M14 may reopen M10–M13 only for：
 
 ```text
-map component/default CSS
-→ example page CSS
-→ @loomrealm-game/map browser registration JS
-→ assembled prepared Content
-→ WebPresentationConfigV1
-→ ordered M13 bootstrap
-→ customElements.define("lr-map-view", ...)
-→ customElements.define("lr-map-sprite", ...)
-→ window.onload
-→ real map projection
+demonstrated correctness/security contradiction
+required author capability genuinely absent
+real exact-consumer behavior impossible through frozen seam
+measurable workload failure
 ```
 
-测试不得通过直接 import browser entry、测试代码手工注册 element或直接注入样式来绕过该路径。
+Do not reopen for API symmetry, prettier domain ids, resource-read duplication, responsive-layout speculation, ESM loader preference or hypothetical future game engines.
 
-## Qualification harness evidence
+## Explicit nonclaims
 
-M14 full vertical 可以使用 test-owned composition harness，但必须：
+M14 Closed does not claim：
 
 ```text
-reuse existing production Main/Subsystem/Data/Renderer/Content roles
-reuse existing/synthetic RendererInputSource producer
-use real Chromium
-create no new production hosting abstraction
+full Pokémon Essentials gameplay
+all RMXP maps render
+RMXP autotile completeness
+priority-over-player rendering completeness
+event collision/interpreter completeness
+map transitions
+responsive viewport
+animation/game Tick API
+Desktop Node child / BrowserWindow physical E2E
+PWA Runtime/equivalence
+universal map schema
+public map presentation SDK
 ```
 
-M14 不 claim Hostra Launcher / real Node child / Electron BrowserWindow / physical input / reload-shutdown full composition；这些仍属于 M15。
-
-## Essentials compatibility evidence
-
-M14 closure record分开记录两类证据，但两者共同构成 `Closed`：
-
-```text
-CI
-→ npm run test:m14
-→ checked-in synthetic/author-owned FSDB JSON fixture
-→ deterministic full M14 semantic + presentation vertical
-
-Local exact-v21.1
-→ npm run test:m14:essentials-local
-→ exact Essentials v21.1 corpus
-→ existing importer
-→ M14 consumer projection
-→ same prepared Content / ContentClient / map runtime / WC browser path
-→ recorded compatibility result
-```
-
-CI fixture 的字段语义必须与同一 M14 RMXP/Essentials-compatible FSDB Content model 对齐；不能构造只在测试里存在的 fake map object model。
-
-Local qualification record 至少包含：
-
-```text
-repository commit SHA
-source version/identity + fingerprint
-consumer projection pass/fail
-materialized Map/Tileset/... record counts as relevant
-resource count/statistics needed to identify the qualified slice
-first-slice visible-tile semantic result
-passable + blocked movement semantic result
-lr-map-view/lr-map-sprite presentation result
-final qualification pass/fail
-```
-
-local official corpus 不提交、不上传为 repository artifact；closure record 只保存 fingerprint/result/statistics，不保存第三方 bytes。
-
-两条 evidence 必须汇入同一 assembled prepared Content → `ContentClient` → map runtime → `map.main` → `lr-map-view/lr-map-sprite` browser consumer path。Local command 不允许直接向 map Runtime 注入 decoder objects；CI 也不允许使用另一套 fake runtime/presentation model。
-
-现有 importer RC 仍然有效，但不得把它误写成 M14 consumer projection 已完成：
-
-```text
-existing importer RC
-!=
-Map/{id} / Tileset/{id} Runtime consumer projection closure
-```
-
-M14 closure record必须单独记录后者的实现与 qualification，并与 closure revision SHA 对齐。
-
-## Performance evidence
-
-轻量 timing/node/update diagnostics MAY 随 M14 qualification 记录，但默认不是 closure gate，也不得为了 qualification 新建 MetricsCollector、Profiler、Scheduler 或其他 performance framework。
-
-只有 first real vertical 出现可复现的 frame pressure、unbounded latency 或其他 measurable failure 时，性能才成为 blocking evidence，并可支持最小 reopen M12/M13。
-
-## Explicit non-claims
-
-M14 Closed 不代表：
-
-```text
-Pokémon Essentials v21.1 full gameplay complete
-all maps/events semantically complete
-full RMXP collision/passability/event semantics complete
-universal map schema established
-public Map presentation SDK/schema established
-Content group API established
-resource metadata API established
-full RPG::System startup compatibility established
-real Hostra Node child / Desktop BrowserWindow full E2E complete
-PWA Runtime/full E2E complete
-large-map performance universally solved
-```
-
-## Reopen rule
-
-只有真实 map consumer 暴露 correctness/security contradiction、author capability缺口或可测性能失败时，才 reopen M10–M13。目录对称、API美观、qualification 代码整洁诉求或未来猜测不是 reopen evidence。
+Those require later real consumer evidence or M15–M17.
