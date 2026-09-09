@@ -133,14 +133,34 @@ test("real Chromium proves ordered bootstrap, Custom Element registration, load 
   const result = await page.evaluate(async ({ origin, version }) => {
     globalThis.bootstrapOrder = [];
     const { bootstrapWebPresentation } = await import(`${origin}/packages/renderer/dist/internal/web-presentation-bootstrap.js`);
+    const { WebProjector } = await import(`${origin}/packages/renderer/dist/internal/web-projector.js`);
     let started = 0;
+    let firstMutationReadyState;
     await bootstrapWebPresentation(window, {
       styles: ["first.css", "second.css"].map((name) => ({ namespace: "presentation", key: name, mime: "text/css", contentVersion: version, browserSource: `${origin}/business/${name}` })),
       scripts: ["first.js", "second.js"].map((name) => ({ namespace: "presentation", key: name, mime: "text/javascript", contentVersion: version, browserSource: `${origin}/business/${name}` })),
-    }, () => { started += 1; globalThis.bootstrapOrder.push(`start:${document.readyState}`); });
-    return { order: globalThis.bootstrapOrder, started, registered: customElements.get("lr-bootstrap") !== undefined };
+    }, () => {
+      started += 1;
+      globalThis.bootstrapOrder.push(`start:${document.readyState}`);
+      const projector = new WebProjector({ document, resourceClient: { async resource() { throw new Error("unused"); } } });
+      projector.reevaluate({ read: () => ({ sessionId: "bootstrap", subsystems: [{ subsystemKey: "A", generation: 1, eligible: true, domains: [{ domainId: "d", zIndex: 0, roots: [{ key: "root", tag: "lr-bootstrap", attrs: {}, data: {}, children: [] }] }] }] }) });
+      firstMutationReadyState = document.readyState;
+    });
+    return {
+      order: globalThis.bootstrapOrder,
+      started,
+      registered: customElements.get("lr-bootstrap") !== undefined,
+      projected: document.body.children.length,
+      firstMutationReadyState,
+    };
   }, { origin: fixture.origin, version });
-  assert.deepEqual(result, { order: ["script-1", "script-2", "start:complete"], started: 1, registered: true });
+  assert.deepEqual(result, {
+    order: ["script-1", "script-2", "start:complete"],
+    started: 1,
+    registered: true,
+    projected: 1,
+    firstMutationReadyState: "complete",
+  });
   assert.ok(fixture.requests.indexOf("/business/first.css") < fixture.requests.indexOf("/business/second.css"));
   assert.ok(fixture.requests.indexOf("/business/first.js") < fixture.requests.indexOf("/business/second.js"));
 
@@ -224,14 +244,19 @@ test("real Chromium proves Projector identity, receiver ordering, currentness an
     const freshGeneration = freshA !== a;
     const frozenBNotDetached = globalThis.lifecycle.filter((value) => value === "disconnected").length === bDisconnectsBefore;
 
+    current = { sessionId: "S-prime", subsystems: [{ subsystemKey: "A", generation: 2, eligible: true, domains: [{ domainId: "d", zIndex: 0, roots: [node("same", { session: "fresh" })] }] }] };
+    projector.reevaluate(source);
+    const freshSessionA = document.body.children[0];
+    const freshSession = freshSessionA !== freshA && !freshA.isConnected && freshSessionA.isConnected;
+
     const beforeFailure = document.body.innerHTML;
-    current = { sessionId: "S", subsystems: [{ subsystemKey: "A", generation: 2, eligible: true, domains: [{ domainId: "d", zIndex: 0, roots: [node("same", { changed: true }), { ...node("bad"), tag: "lr-not-registered" }] }] }] };
+    current = { sessionId: "S-prime", subsystems: [{ subsystemKey: "A", generation: 2, eligible: true, domains: [{ domainId: "d", zIndex: 0, roots: [node("same", { changed: true }), { ...node("bad"), tag: "lr-not-registered" }] }] }] };
     projector.reevaluate(source);
     const zeroMutation = document.body.innerHTML === beforeFailure;
     current = { sessionId: "S2", subsystems: [] };
     projector.reevaluate(source);
     const permanentFreeze = document.body.innerHTML === beforeFailure && projector.structuralFailed();
-    return { initial, movedIdentity, noObjectOrderRedelivery, frozenBStillMounted, oldARetired, freshGeneration, frozenBNotDetached, zeroMutation, permanentFreeze, failures: failures.length };
+    return { initial, movedIdentity, noObjectOrderRedelivery, frozenBStillMounted, oldARetired, freshGeneration, freshSession, frozenBNotDetached, zeroMutation, permanentFreeze, failures: failures.length };
   }, { origin: fixture.origin });
   assert.deepEqual(result, {
     initial: { tags: ["same", "same"], distinct: true, connectedAfterContext: true },
@@ -240,6 +265,7 @@ test("real Chromium proves Projector identity, receiver ordering, currentness an
     frozenBStillMounted: true,
     oldARetired: true,
     freshGeneration: true,
+    freshSession: true,
     frozenBNotDetached: true,
     zeroMutation: true,
     permanentFreeze: true,
@@ -256,7 +282,10 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
     let serial = 0;
     class VerticalElement extends HTMLElement {
       constructor() { super(); this.instance = ++serial; }
-      receiveRenderData(data) { this.value = data.value; }
+      receiveRenderContext() { this.contexts = (this.contexts ?? 0) + 1; }
+      connectedCallback() { this.connects = (this.connects ?? 0) + 1; }
+      disconnectedCallback() { this.disconnects = (this.disconnects ?? 0) + 1; }
+      receiveRenderData(data) { this.deliveries = (this.deliveries ?? 0) + 1; this.value = data.value; }
     }
     customElements.define("lr-vertical", VerticalElement);
     const projector = new WebProjector({ document, resourceClient: { async resource() { throw new Error("unused"); } } });
@@ -279,8 +308,10 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   });
   t.after(async () => Promise.allSettled(peers.map(({ peer }) => peer.close())));
   let browserDelivery = Promise.resolve();
+  let presentationNotifications = 0;
   const detach = attachRendererPresentation(holder, {
     reevaluate(source) {
+      presentationNotifications += 1;
       const view = structuredClone(source.read());
       browserDelivery = browserDelivery.then(() => page.evaluate((next) => globalThis.applyRendererView(next), view));
     },
@@ -300,6 +331,12 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   const initial = await page.evaluate(() => [...document.body.children].map((element) => ({ key: element.getAttribute("data-key"), value: element.value, instance: element.instance })));
   assert.deepEqual(initial.map(({ value }) => value), ["A", "B"]);
   assert.notEqual(initial[0].instance, initial[1].instance);
+
+  const notificationsBeforeEvent = presentationNotifications;
+  const eventPeer = peers.find((entry) => entry.subsystemKey === "B");
+  await eventPeer.peer.render.sendEvent({ type: "render.event", domainId: "d", targetKey: "same", name: "ignored", data: {} });
+  await turn();
+  assert.equal(presentationNotifications, notificationsBeforeEvent, "RenderEvent does not trigger presentation");
 
   const a = peers.find((entry) => entry.subsystemKey === "A");
   await a.peer.close();
@@ -323,6 +360,19 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   await waitFor(() => holder.current().snapshot.revision === 2, "authority removal");
   await browserDelivery;
   assert.deepEqual(await page.evaluate(() => [...document.body.children].map((element) => element.value)), ["B2"]);
+
+  const beforeControlLoss = await page.evaluate(() => {
+    const element = document.body.children[0];
+    return { html: document.body.innerHTML, instance: element.instance, contexts: element.contexts, connects: element.connects, disconnects: element.disconnects ?? 0, deliveries: element.deliveries };
+  });
+  publisher.retire();
+  await waitFor(() => holder.current() === null, "Control terminal");
+  await browserDelivery;
+  const afterControlLoss = await page.evaluate(() => {
+    const element = document.body.children[0];
+    return { html: document.body.innerHTML, instance: element.instance, contexts: element.contexts, connects: element.connects, disconnects: element.disconnects ?? 0, deliveries: element.deliveries };
+  });
+  assert.deepEqual(afterControlLoss, beforeControlLoss, "Control transport loss freezes the mounted browser presentation");
 });
 
 test("real Chromium proves structural data delivery and independent optional receivers", async (t) => {

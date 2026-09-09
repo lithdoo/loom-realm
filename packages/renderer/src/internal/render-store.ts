@@ -220,6 +220,18 @@ export interface RenderStoreSnapshot {
   }[];
 }
 
+export interface RenderPresentationFacts {
+  readonly generation: number;
+  readonly currentCarrier: boolean;
+  readonly registrySeen: boolean;
+  readonly domains: readonly {
+    readonly domainId: string;
+    readonly baselined: boolean;
+    readonly zIndex: number;
+    readonly roots: readonly RenderNodeV1[];
+  }[];
+}
+
 function utf8Less(left: string, right: string): boolean {
   const a = left[Symbol.iterator]();
   const b = right[Symbol.iterator]();
@@ -416,6 +428,20 @@ export class RendererRenderStore {
       events: Object.freeze([...this.events]),
       logicalOrder: Object.freeze(logicalOrder),
       domains: Object.freeze(domains),
+    });
+  }
+
+  readPresentationFacts(): RenderPresentationFacts {
+    return Object.freeze({
+      generation: this.generation,
+      currentCarrier: this.currentCarrier,
+      registrySeen: this.registrySeen,
+      domains: Object.freeze([...this.domains.values()].map((domain) => Object.freeze({
+        domainId: domain.domainId,
+        baselined: domain.baselined,
+        zIndex: domain.zIndex,
+        roots: domain.roots as readonly RenderNodeV1[],
+      }))),
     });
   }
 

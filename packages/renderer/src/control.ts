@@ -433,7 +433,7 @@ class ControlHolder implements RendererControlHolder {
       const matching = slot?.current?.identity.controlPeer === current.peer &&
         slot.current.identity.generation === authority.generation &&
         slot.current.identity.dataProfile === authority.dataProfile;
-      const store = matching ? slot.render.snapshotForQualification() : null;
+      const store = matching ? slot.render.readPresentationFacts() : null;
       const eligible = store !== null && store.currentCarrier && store.registrySeen &&
         store.domains.every((domain) => domain.baselined);
       return Object.freeze({

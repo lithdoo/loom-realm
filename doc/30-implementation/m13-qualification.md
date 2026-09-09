@@ -50,6 +50,7 @@ WebPresentationConfigV1 closed validation
 - Eligibility 每次直接从 current Control、Data slot和 Store facts 推导；没有 retained Presentation currentness machine。
 - 真实 Control/Data protocol → Store → Chromium Projector vertical 覆盖 A/B independent projection、same-generation carrier loss、partial/complete rebaseline和 committed authority removal。
 - Control/Data transport loss不被解释为 authority removal；受影响 DOM 保持 frozen，健康 subsystem仍可更新。
+- Real Chromium additionally proves normal `S → S'` replacement with identical textual subsystem/generation/domain/key retires the old HTMLElement and creates a distinct instance；terminal Control transport preserves the mounted HTMLElement、DOM 与 context/data/lifecycle counters exactly。
 
 ## Projector/API evidence
 
@@ -58,6 +59,7 @@ WebPresentationConfigV1 closed validation
 - Context在首次 managed insertion前最多 attempt一次；context/data receiver彼此独立。
 - Data交付 full current value；object member order无语义、array order有语义、attrs/order-only commit不重发；throwing receiver对相同 value不重试。
 - 所有新 tag在首次 DOM mutation前 preflight；unknown tag造成该次零 mutation并永久冻结该 Window，后续 authority/Store变化也不能恢复 mutation。
+- Ordered bootstrap的 start callback直接启动真实 Projector；qualification观察到首次 managed DOM mutation只发生在 `window.onload` 已完成后。
 
 ## Resource/lifetime evidence
 
@@ -74,6 +76,8 @@ post-teardown read      → CONTENT_CANCELLED
 ```
 
 每次返回独立 bytes；origin、installationId、token和private client不进入 business ABI。
+
+Production presentation读取 Store 的 narrow `readPresentationFacts()`；`snapshotForQualification()`只供测试 introspection。Malformed signal-like input必须同时具备 `addEventListener/removeEventListener`，否则在调用private client前拒绝为 `CONTENT_INVALID`。
 
 ## Closure boundary
 

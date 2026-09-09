@@ -69,7 +69,8 @@ function abortSignal(caller: AbortSignal | undefined, lifetime: AbortSignal): { 
 function validSignal(value: unknown): value is AbortSignal {
   return value !== null && typeof value === "object" &&
     typeof (value as AbortSignal).aborted === "boolean" &&
-    typeof (value as AbortSignal).addEventListener === "function";
+    typeof (value as AbortSignal).addEventListener === "function" &&
+    typeof (value as AbortSignal).removeEventListener === "function";
 }
 
 function validSegment(value: unknown, hierarchy: boolean): value is string {

@@ -30,6 +30,22 @@ test("Registry and Snapshot establish one atomic current replica", () => {
   assert.equal(view.domains[0].roots[0].key, "root");
 });
 
+test("production presentation reads only narrow current Store facts", () => {
+  const store = new RendererRenderStore(3);
+  store.beginCarrier();
+  store.onDomains(domains("d1"));
+  store.onSnapshot(snapshot("d1", 7, [node("root")], 3));
+  store.onEvent({ type: "render.event", domainId: "d1", targetKey: "root", name: "pulse", data: {} });
+  const facts = store.readPresentationFacts();
+  assert.deepEqual(Object.keys(facts).sort(), ["currentCarrier", "domains", "generation", "registrySeen"]);
+  assert.deepEqual(Object.keys(facts.domains[0]).sort(), ["baselined", "domainId", "roots", "zIndex"]);
+  assert.equal("events" in facts, false);
+  assert.equal("logicalOrder" in facts, false);
+  assert.equal("stalePresentationCache" in facts, false);
+  assert.ok(Object.isFrozen(facts));
+  assert.ok(Object.isFrozen(facts.domains));
+});
+
 test("Patch applies insert, move, update and remove in order with one final commit", () => {
   const store = new RendererRenderStore(1);
   store.beginCarrier();

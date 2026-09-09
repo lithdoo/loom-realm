@@ -58,3 +58,15 @@ test("post-teardown well-formed reads cancel before the private client is called
   await assert.rejects(client.resource("images", "icons/a.png", version), (error) => error.code === "CONTENT_CANCELLED");
   assert.equal(calls, 0);
 });
+
+test("malformed signal-like input is rejected before the private client is called", async () => {
+  const lifetime = new AbortController();
+  let calls = 0;
+  const client = createPresentationResourceClient({ async resource() { calls += 1; throw new Error(); } }, lifetime.signal);
+  const malformed = { aborted: false, addEventListener() {} };
+  await assert.rejects(
+    client.resource("images", "icons/a.png", version, { signal: malformed }),
+    (error) => error instanceof PresentationResourceError && error.code === "CONTENT_INVALID",
+  );
+  assert.equal(calls, 0);
+});

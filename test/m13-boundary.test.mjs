@@ -29,6 +29,9 @@ test("M13 private implementation stays thin and credential-free at the business 
   const declaration = await text("packages/renderer/dist/internal/presentation-resource-client.d.ts");
   assert.doesNotMatch(declaration, /(origin|installationId|token|filesystem|RendererContentAccess)/);
   assert.match(declaration, /CONTENT_CANCELLED/);
+  const control = await text("packages/renderer/src/control.ts");
+  assert.match(control, /readPresentationFacts\(\)/);
+  assert.doesNotMatch(control.match(/private readPresentation\(\)[\s\S]*?\n  }/)?.[0] ?? "", /snapshotForQualification/);
 });
 
 test("M13 canonical gate strictly includes M12, Chromium, pack and Node 20/24 CI", async () => {
