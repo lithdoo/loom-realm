@@ -2,10 +2,10 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M12 Implemented / Qualified / Closed；M13 Web Presentation pending  
-> 主要定义：M0..M17 实现顺序、当前 closure、Desktop/PWA qualification 边界  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
-> 最近复核：2026-09-08
+> 稳定程度：M12 Implemented / Qualified / Closed；M13 Web Presentation **Design Frozen / Preimplementation Closed / implementation pending**  
+> 主要定义：M0..M17 实现顺序、current closure、Desktop/PWA qualification boundary  
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)  
+> 最近复核：2026-09-09
 
 核心顺序：
 
@@ -35,31 +35,29 @@ Foundation/Wire
 Package Scope != Implementable Slice != Milestone Closure
 ```
 
-首次实现只维护一个 current model；不为了未来可能需求预建 fake v2、deprecated alias 或 generic framework。
+不为未来猜测预建 fake v2、deprecated alias 或 generic framework。
 
 ---
 
-## M0–M9：Foundation / Hostra / Data 主干 ✅
+## M1–M9：Foundation / Hostra / Data ✅
 
 ```text
-M1 Foundation + Wire                ✅
-M2 Game Package                     ✅
-M3 Runtime Control                  ✅
-M4 Subsystem Runtime/Frame          ✅
-M5 Main Core                        ✅
-M6 Hostra Runtime vertical          ✅
-M7 Renderer Control                 ✅
-M8 Renderer Data role/core          ✅
-M9 Desktop Data Broker              ✅
+M1 Foundation + Wire
+M2 Game Package
+M3 Runtime Control
+M4 Subsystem Runtime/Frame
+M5 Main Core
+M6 Hostra Runtime
+M7 Renderer Control
+M8 Renderer Data
+M9 Desktop Data Broker
 ```
 
-已建立 logical Game bootstrap、Main authority、Hostra Runner/Control、Renderer Control、Data role seam 与 Desktop paired Data Broker/late provisioning。
+均已关闭对应主干。
 
 ---
 
 ## M10：User Input — Closed ✅
-
-关闭：Subsystem InputListener、RendererInputSource、Effective gate、bounded State/Event/Reset publication、mutation-gate State convergence 与 Desktop/Hostra Data vertical。
 
 Canonical gate：
 
@@ -73,228 +71,152 @@ M15/M17 physical DOM/Gamepad source必须复用 frozen M10 seam。
 
 ## M11：Render Replication — Closed ✅
 
-关闭：
-
-```text
-Subsystem authoritative RenderDomain
-Render Update v1
-Renderer internal current replica
-Domain/Node one-shot identity
-same-generation reconnect baseline rebuild
-Event transient/no-replay semantics
-Desktop/Hostra real vertical
-```
-
-Canonical gate：
+关闭 Subsystem authoritative RenderDomain、Render Update v1、Renderer internal Store、one-shot identity、same-generation baseline rebuild、Event transient semantics与 Desktop/Hostra vertical。
 
 ```text
 npm run test:m11
 ```
 
-M11不定义 DOM/Custom Element/Canvas/WebGL presentation；M13只消费 committed Store，不重开 Render Update v1。
+M13不重开 Render Update v1。
 
 ---
 
 ## M12：Content — Closed ✅
 
-2026-09-08 已在 Node 20.20.2 / 24.20.0 通过同一个：
+2026-09-08 已在 Node 20.20.2 / 24.20.0 通过：
 
 ```text
 npm run test:m12
 ```
 
-关闭：
-
-```text
-@loomrealm/fsdb readonly domain core
-Desktop prepared Content view/service
-auth/version/ETag/path confidentiality
-Subsystem ContentClient
-Renderer trusted/private ResourceClient
-Hostra child + Renderer two条真实 production vertical
-```
-
-M12不建立 generic Repository、StorageProvider、InstallationManager、AssetManager 或 Content RPC framework。
-
-Renderer ResourceClient冻结：
-
-```text
-namespace + hierarchical resourceKey + expectedContentVersion
-→ bytes + MIME + actual contentVersion
-```
-
-M13复用它的 version/credential boundary，不复制 Content system。
+关闭 readonly FSDB/Content Service、Subsystem ContentClient、Renderer trusted/private ResourceClient 与真实 production vertical。M13复用其 identity/version/credential boundary。
 
 ---
 
-## M13：Web Presentation — pending
+## M13：Web Presentation — Design Frozen / Implementation Pending
 
-### Goal
-
-关闭 M11 留下的 physical Web seam：
+Formal source：
 
 ```text
-product/platform-private config acquisition
-→ WebPresentationConfigV1
-→ prepared Content refs
+Web Presentation Config v1        Active / Normative / Frozen
+Web Presentation API v1           Active / Normative / Frozen
+ADR 0031                          Accepted / Frozen
+Rendering System                  M13 Preimplementation Closed
+```
+
+Landing docs：
+
+```text
+M13_01_WEB_PRESENTATION_BOOTSTRAP.md
+→ M13_02_RENDERER_PRESENTATION_SEAM.md
+→ M13_03_WEB_PROJECTOR.md
+→ M13_04_VERTICAL_INTEGRATION.md
+→ M13_05_QUALIFICATION_CLOSURE.md
+```
+
+### Frozen implementation flow
+
+```text
+concrete Window composition
+→ Config source
+→ fail-closed validation
+→ prepared M12 Content
+→ exact MIME
+    scripts = text/javascript essence
+    styles  = text/css essence
 → ordered <link> / classic <script>
-→ business customElements registration
+→ customElements registration
 → window.onload
-→ M11 committed Renderer Store
-→ package-private post-commit seam
-→ presentation eligibility/currentness gate
-→ thin Web Projector
-→ document.body / business-owned Custom Elements
+→ start presentation
+
+current Control Session/DataAuthority ─┐
+                                      ├→ package-private reevaluation
+current per-subsystem Store ──────────┘
+                                               ↓
+                                     per-subsystem eligibility
+                                               ↓
+                                       thin Web Projector
+                                               ↓
+                                document.body / business WC
 ```
 
-M13不创作业务 WC vocabulary/layout，也不建立第二份 Render authority。
-
-### Formal contracts
-
-精确 semantics只由：
+### Frozen authority/currentness
 
 ```text
-Web Presentation Config v1
-Web Presentation API v1
-ADR 0031
+Control snapshot
+→ only Session/subsystem/generation topology authority
+
+Renderer Store
+→ only per-subsystem Render replica authority
+
+same-generation carrier loss
+→ freeze only affected subsystem
+→ partial rebaseline hidden
+→ complete baseline reconcile once
+
+DataAuthority removed
+→ remove DOM without later Render commit
+
+generation changed
+→ retire old DOM immediately
+
+fresh Session
+→ fresh entire HTMLElement universe
+
+Control transport loss only
+→ preserve/freeze last presentation
 ```
 
-拥有。计划文档不复制完整 interfaces。
-
-### Exact implementation slice
-
-必须实现：
+### Frozen Projector/API
 
 ```text
-Config closed-schema validation + prepared Content resolution
-ordered browser bootstrap + explicit load/evaluation failure detection
-window.onload Projector start barrier
-package-private Store successful-commit notification
-presentation eligibility/currentness gate
-thin DOM projector
-business-owned Custom Element construction
-managed attrs / light-DOM children
-Web Presentation API context/data callbacks
-PresentationResourceClient façade over M12 private ResourceClient
-presentation-local failure containment
-```
+identity = (Session, subsystemKey, generation, domainId, key)
+same identity → same HTMLElement
+move/reorder → move existing HTMLElement
+body order = subsystemKey lexical → zIndex → domainId lexical → roots
 
-Config source/path/handle acquisition属于 concrete product/platform composition，不进入 `WebPresentationConfigV1` 或跨平台 ABI。
-
-### Identity / currentness
-
-Projector不得使用 bare `key` 作为 Window-global identity。
-
-```text
-live wire-node identity
-= (Session, subsystemKey, generation, domainId, key)
-```
-
-Frozen M13 rule：
-
-```text
-same live wire-node identity → same HTMLElement
-```
-
-不同 Domain/Subsystem/fresh generation即使 key string相同也不得 collision；move/reorder只移动 existing element。
-
-same-generation current carrier loss：
-
-```text
-keep last committed managed DOM mounted
-freeze Projector mutation
-no receiver callback caused by loss
-```
-
-replacement carrier只有在以下 predicate成立后才可恢复 projection：
-
-```text
-registrySeen
-AND
-every Domain in current Registry is baselined
-```
-
-partial rebaseline不得泄漏到 DOM；complete baseline后一次 reconcile，并复用匹配的 existing HTMLElement。fresh generation结束旧 element identity universe，相同 textual key得到 fresh HTMLElement。
-
-不新增 public `RenderNodeIdentity` / `PresentationState` framework。
-
-### Managed body ordering
-
-M11 `zIndex/domainId`只在一个 Subsystem scope内定义 logical order。M13只增加 deterministic physical concatenation：
-
-```text
-subsystemKey UTF-8 lexical ascending
-→ within subsystem: zIndex ascending
-→ same zIndex: domainId UTF-8 lexical ascending
-→ authoritative roots order
-```
-
-这不是 cross-Subsystem global zIndex/stacking authority。Actual layout/stacking仍由 business CSS/WC负责。
-
-### WC ABI / resource
-
-一个 `Web Presentation API v1`，两个独立 optional receiver：
-
-```text
-receiveRenderContext
-→ Window-lifetime capability
-→ before first managed insertion
-→ at most once per HTMLElement
-
-receiveRenderData
-→ current retained full data
-→ initial + committed data updates
-```
-
-Context只暴露 narrow `PresentationResourceClient`。Business WC不得获得 Content bearer/path/FSDB/privileged URL/private Renderer ResourceClient。
-
-M13不建立 AssetManager、decoder registry、dynamic loader或 global service locator。
-
-### Projection order
-
-```text
 new element:
 construct → context → insertion/structure → attrs → data
 
 existing element:
-structure/reorder → attrs → data when required
+structure/reorder → attrs → data only when retained JSON value changed
 ```
 
-same-generation carrier loss不做 LoomRealm-caused detach/reinsert；complete rebaseline后已有 element继续遵守 existing-element ordering。
+PresentationResourceClient复用 M12 private ResourceClient。Window teardown取消在途 reads，teardown 后格式正确的 `resource()` reject `CONTENT_CANCELLED`。
 
-M13不定义 RenderEvent → WC/DOM ABI，不使用 MutationObserver policing，不从 DOM reverse-sync Store。
+### Frozen structural failure
 
-### M13 Qualification Target
-
-真实 headless Chromium至少证明：
+所有本次需要新建的 tags 必须在首次 DOM mutation前 preflight：
 
 ```text
-Config validation/resolution
-ordered <link> / classic <script>
-explicit stylesheet/script load/evaluation failure handling
-window.onload blocks Projector start
-business Custom Element registration
-Store successful commit → Projector only
-same live wire-node identity preserves HTMLElement
-same key across Domain/Subsystem does not collide
-same-generation carrier loss keeps DOM mounted and fires no receiver/disconnect/reconnect
-partial same-generation rebaseline does not mutate DOM
-complete same-generation rebaseline preserves matching HTMLElement identity
-fresh generation gets fresh HTMLElement identity
-subsystemKey → M11 Domain order → roots deterministic body sequence
-reorder moves existing HTMLElements
-receiveRenderContext before first insertion; at most once
-context/data receivers independent
-receiveRenderData initial/update full snapshot
-PresentationResourceClient reads real M12 bytes
-version mismatch → conflict
-cancellation / caller-owned returned bytes
-no credential/path/private-client exposure
-DOM/callback/resource failure never rolls back authority
-RenderEvent not delivered to WC/DOM
+unknown tag
+→ zero mutation for reconciliation
+→ preserve last successful DOM exactly
+→ no fallback / no late registration wait
+→ no future managed DOM mutation in this Window
 ```
 
-M13不复制 M11 protocol conformance，也不重测 M12 Content internals。
+恢复只能 fresh Window。
+
+### Explicit non-goals
+
+M13不建立：
+
+```text
+@loomrealm/presentation
+second Store/topology/currentness
+public RenderNodeIdentity/PresentationState
+AssetManager / decoder registry
+dynamic loader / PluginManager
+layout/layer/component framework
+global service locator
+DOM rollback framework
+RenderEvent → WC ABI
+```
+
+### Qualification
+
+M13/04–05 必须使用 real headless Chromium，覆盖 bootstrap、Session/DataAuthority/generation transitions、per-subsystem reconnect、HTMLElement identity/order、unknown-tag zero-mutation、real M12 resource bytes、Window teardown 与 failure isolation。
 
 Future canonical gate：
 
@@ -302,98 +224,62 @@ Future canonical gate：
 npm run test:m13
 ```
 
+只有该命令真实存在并通过 Node 20/24 + Chromium qualification，才能将 M13 标为 Implemented / Qualified / Closed。
+
+实施期间除 demonstrated correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，**禁止设计性 reopen**。
+
 ---
 
-## M14：`loom.map` Business + Web Presentation — pending
+## M14：`loom.map` — pending
 
-`@loomrealm/map` 成为第一个真实 business consumer，必须真实使用：
+`@loomrealm/map` 成为首个真实 business consumer，必须真实使用：
 
 ```text
-Frame / frame.call / FrameOutcome
+Frame / frame.call
 M10 InputListener
-M11 RenderDomain replace/close
-M12 ContentClient record/resource
-M13 Config + Web Presentation API
-map-owned Custom Elements
+M11 RenderDomain
+M12 ContentClient
+M13 Config/API + map-owned Custom Elements
 ```
 
-Business Definition仍只依赖 `@loomrealm/subsystem`，不接触 Browser/Renderer/Platform/FSDB/protocol authority。
-
-Map presentation JS/CSS由 Window-level `WebPresentationConfigV1`引用，不把 scripts/styles绑定到 Subsystem descriptor。
-
-Runtime resource由 M13 `PresentationResourceClient`消费；M14不再发明第二套 presentation resource/loading boundary。
-
-如果真实地图需求证明 M12 `ContentClient.group()`必要，再按 demand-driven rule最小 reopen。
+Business Definition仍只依赖 `@loomrealm/subsystem`。M14不发明第二套 presentation resource/loading boundary。
 
 ---
 
 ## M15：Desktop Full E2E — pending
 
-完成真实 Desktop composition：
+完成真实 Desktop composition：PREPARE、Main/Runner/Control/Data Broker、BrowserWindow、M13 presentation、M10 physical input、M14 map、reload/reconnect/shutdown。
 
-```text
-installationRoot + product-private Config acquisition
-→ WebPresentationConfigV1
-→ Hostra PREPARE / prepared Content
-→ Main / Runner / Control / Data Broker
-→ BrowserWindow bootstrap
-→ M13 Web presentation
-→ M10 physical input
-→ M11 replica
-→ M14 map-owned WC
-→ M12/M13 runtime resource bytes
-→ reconnect / reload / shutdown
-```
-
-不重新设计 Input/Render/Content/Web Presentation logical semantics。
+不重新设计 Input/Render/Content/Web Presentation semantics。
 
 ---
 
 ## M16：PWA Runtime — pending
 
-只关闭 PWA PREPARE、Worker Runner、RuntimeHosting、Runtime Control MessagePort、Main↔Worker↔Subsystem trace 与 terminal/failure。
-
-不提前 claim完整 PWA Renderer/Data/Content/presentation equivalence。
+只关闭 PWA PREPARE、Worker Runner、RuntimeHosting、Runtime Control MessagePort、Main↔Worker↔Subsystem lifecycle。
 
 ---
 
 ## M17：PWA Full E2E / Equivalence — pending
 
-完成 Window Renderer Control、PWA Data broker、Input/Render、Content、M13 Config/API semantics、business WC、reload/replacement与 shutdown。
+完成 Window Renderer Control、PWA Data broker、Input/Render、Content、M13 Config/API semantics、business WC、reload/replacement/shutdown。
 
-比较 logical semantics/outcome，不比较：
-
-```text
-PID vs Worker
-WebSocket vs MessagePort
-Desktop FSDB/HTTP vs PWA storage/fetch mechanics
-private Config acquisition mechanism
-trusted physical href/src binding
-business WC private implementation
-```
+比较 logical semantics/outcome，不要求相同 PID/Worker、WebSocket/MessagePort、FSDB/OPFS 或 private physical binding。
 
 ---
 
 ## Current Status
 
 ```text
-M1  Foundation + Wire                  ✅
-M2  Game Package                       ✅
-M3  Runtime Control                    ✅
-M4  Subsystem Runtime/Frame            ✅
-M5  Main Core                          ✅
-M6  Hostra Runtime                     ✅
-M7  Renderer Control                   ✅
-M8  Renderer Data                      ✅
-M9  Desktop Data Broker                ✅
+M1–M9                                  ✅
 M10 User Input                         ✅ Closed
 M11 Render Replication                 ✅ Closed
 M12 Content                            ✅ Closed 2026-09-08
-M13 Web Presentation                   pending
+M13 Web Presentation                   Design Frozen / implementation pending
 M14 loom.map                           pending
 M15 Desktop full E2E                   pending
 M16 PWA Runtime                        pending
 M17 PWA full E2E/equivalence           pending
 ```
 
-当前 canonical executable closure gate仍为 `npm run test:m12`。下一步实现 M13；M13关闭后进入 M14 `loom.map`。
+当前 canonical executable closure仍为 `npm run test:m12`。下一步直接实施 M13/01–05；不再进行开放式设计扩张。

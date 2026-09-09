@@ -1,68 +1,42 @@
 # LoomRealm Web Presentation Config v1
 
 > 层级：正式契约  
-> 状态：Active / Normative / Stabilizing  
+> 状态：Active / Normative / Frozen  
 > 契约版本：1  
-> Milestone：M13 Web Presentation Projection  
-> 主要定义：Window-level business JS/CSS declaration、M12 logical Content resolution、browser bootstrap、`window.onload` projection-start barrier  
+> 稳定程度：Frozen for M13 implementation  
+> Milestone：M13 Web Presentation  
+> 主要定义：Window-level business JS/CSS declaration、M12 prepared Content resolution、MIME compatibility、ordered browser bootstrap、`window.onload` start barrier  
 > 依赖：[Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)  
 > 相关：[Web Presentation API v1](./web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
-> 最近复核：2026-09-08
+> 最近复核：2026-09-09
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
 核心原则：
 
-> **Web Presentation Config 只描述“当前 Renderer Window 在启动 Render projection 前加载哪些业务 JS/CSS”。它不是 Game topology、Subsystem executable binding、Render state、runtime asset API、module-loader contract，也不定义产品如何取得配置 source。**
+> **Config 只描述“当前 Renderer Window 在启动 projection 前加载哪些 business JS/CSS”。它不是 Game topology、Subsystem binding、runtime asset API 或 module-loader contract。**
 
 ---
 
-## 1. Config Acquisition Boundary
+## 1. Acquisition Boundary
 
-Web Presentation Config 是 product startup input，但 **source acquisition 不属于本契约**。
-
-边界固定为：
+Config source acquisition属于 concrete product/platform：
 
 ```text
-product / Platform composition
-→ acquire config source using platform-private mechanism
+product/platform-private source acquisition
 → read / parse candidate JSON
-────────────────────────────────────────────
-Web Presentation Config v1 contract begins
-→ validate WebPresentationConfigV1
+────────────────────────────────────────
+Web Presentation Config v1 begins
+→ validate
 → resolve prepared Content refs
 → browser bootstrap
 ```
 
-因此本契约不定义或冻结：
-
-```text
-filesystem path
-URL
-FileSystemHandle
-picker result
-command-line argument
-settings key
-opaque source locator
-```
-
-Desktop MAY 使用用户选择的 filesystem path；PWA MAY 使用 picker、persisted handle 或 app-owned source。上述 acquisition mechanics 都不是 `WebPresentationConfigV1` 字段或跨平台 ABI。
-
-配置 acquisition/material 不得进入：
-
-```text
-GameEntryV1
-Hostra/PWA Launch Manifest
-LogicalGameBootstrap
-Main / Frame
-RenderNode / Render Update
-```
-
-本契约不要求 installation 内存在固定配置文件名。
+本契约不定义 path、URL、FileSystemHandle、picker、settings key 或 opaque locator。Config acquisition/material MUST NOT进入 GameEntry、Platform Launch Manifest、LogicalGameBootstrap、Main/Frame 或 RenderNode。
 
 ---
 
-## 2. Normative JSON Shape
+## 2. Normative Shape
 
 ```ts
 interface WebPresentationConfigV1 {
@@ -77,7 +51,7 @@ interface WebPresentationResourceRefV1 {
 }
 ```
 
-V1 顶层 MUST 精确包含：
+Top-level MUST 精确包含：
 
 ```text
 formatVersion
@@ -85,136 +59,109 @@ scripts
 styles
 ```
 
-`formatVersion` MUST 精确等于 `1`。
+`formatVersion` MUST === `1`。Unknown/missing fields invalid。
 
-在 `scripts` 与 `styles` 各自列表内，logical ref identity：
+`scripts` 与 `styles` 各自列表内 `(namespace,key)` MUST 唯一；duplicate config MUST 在任何 browser bootstrap side effect 前拒绝。实现不得 dedupe、repeat 或自行解释 duplicate。
 
-```text
-(namespace, key)
-```
-
-MUST 唯一。任一列表出现 duplicate logical ref 都是 invalid config，MUST 在 browser bootstrap 前拒绝；实现不得通过 dedupe、重复安装或重复执行来解释同一输入。
-
-V1 MUST NOT 增加：
-
-```text
-subsystems
-module / url / filesystemPath
-bearer / credential
-loader / resolver
-platform / hostra / pwa
-runtime resource capability
-```
+V1 MUST NOT增加 subsystem、module/url/path、credential、loader/resolver 或 runtime resource capability 字段。
 
 ---
 
-## 3. Window-level Scope
+## 3. Window Scope
 
-`scripts[]` / `styles[]` 属于整个 Renderer Window presentation environment，而不是某个 Subsystem。
+`scripts[]` / `styles[]` 属于整个 Renderer Window presentation environment，不绑定 Subsystem、Frame、RenderDomain 或 RenderNode.tag。
 
-V1 不建立：
-
-```text
-subsystemKey → scripts/styles
-Frame → presentation resource
-RenderDomain → presentation resource
-RenderNode.tag → module path
-```
-
-一个 script MAY 注册多个 Custom Elements；多个 Subsystem MAY 使用同一已注册 business element。
+一个 script MAY 注册多个 Custom Elements；多个 Subsystem MAY 使用同一 element definition。Phase 1 不在同一 Window 中按 Subsystem 动态装卸 bootstrap resources。
 
 ---
 
-## 4. Resource Identity / Prepared Source
+## 4. Prepared Content / MIME
 
-每个 ref 使用 M12 logical Content identity：
-
-```text
-namespace + hierarchical resource key
-```
-
-配置 MUST NOT 携：
+每个 ref使用 M12 logical identity：
 
 ```text
-absolute filesystem path
-file/http/https URL
-privileged localhost URL
-Content bearer
-FSDB handle/root
+namespace + hierarchical ResourceKey
 ```
 
-Current Desktop 继续复用 prepared installation：
+trusted composition MUST 在 current prepared Content view 中 resolve ref，并在 browser side effect 前固定：
 
 ```text
-user selects installationRoot
-→ successful Hostra PREPARE
-→ canonical prepared installation
-→ exactly one direct-child [FSDB]*
-→ current readonly Content view
+contentVersion
+MIME
+private browser-load binding material
 ```
 
-M13 不新增用户可配置 `fsdbRoot`。
+Business config/WC MUST NOT获得 filesystem path、FSDB handle、Content bearer、origin 或 privileged URL。
 
-trusted composition MUST 在 current prepared Content view 中 resolve 每个 ref，并固定当前 immutable `contentVersion` / MIME facts。Prepared representation不得向 business config/WC 暴露 path、FSDB handle、bearer 或 privileged URL。
+### 4.1 Frozen MIME compatibility
 
-trusted Window bootstrap MAY 私下把 prepared resource 绑定成 browser-loadable `src` / `href`；该 binding 是 implementation-private physical capability。
+M13 V1 不依赖 platform/browser-specific MIME sniffing。Compatibility按 parsed media type **essence** 判断；参数（例如 `charset=utf-8`）不参与 equality。
+
+```text
+scripts[] item
+→ MIME essence MUST equal "text/javascript"
+
+styles[] item
+→ MIME essence MUST equal "text/css"
+```
+
+因此：
+
+```text
+text/javascript; charset=utf-8  ✅ script
+text/css; charset=utf-8         ✅ style
+application/javascript         ❌ M13 V1 script
+text/plain                     ❌
+missing/unparseable MIME       ❌
+```
+
+Wrong/missing MIME是 bootstrap/config failure；实现 MUST NOT通过 browser sniff、fallback type 或 platform-specific allowlist扩大 V1 semantics。
 
 ---
 
 ## 5. Ordered Browser Bootstrap
 
-`scripts[]` 与 `styles[]` 都是 ordered lists。
-
-Current V1 realization冻结：
+Current V1 realization：
 
 ```text
 styles[]  → ordered <link rel="stylesheet" href="...">
 scripts[] → ordered classic <script src="..."></script>
 ```
 
-stylesheets MUST 按 declaration order materialize。scripts MUST 保持 declaration evaluation order；不得使用 `async` 破坏顺序。
-
-Duplicate logical ref 已由 §2 定义为 invalid config；bootstrap MUST NOT dedupe，也不得重复执行同一合法列表项以外的隐式副本。
-
-V1 不建立：
+要求：
 
 ```text
-ESM / Blob module graph
-runtime component loader
-PluginManager
-second Custom Element registry
-tag vocabulary
+styles preserve declaration order
+scripts preserve declaration evaluation order
+scripts MUST NOT use async ordering
+no implementation-defined dedupe
+business scripts use native customElements.define(...)
 ```
 
-业务 JS 使用 browser-native `customElements.define(...)`。
+M13不建立 ESM/Blob module graph、dynamic component loader、PluginManager、second registry或 tag vocabulary。
 
 ---
 
-## 6. `window.onload` Ready Barrier
+## 6. `window.onload` Start Barrier
 
-正常启动路径：
+正常路径：
 
 ```text
-validate + resolve WebPresentationConfigV1
-↓
-create/open Renderer bootstrap document
-↓
-materialize ordered styles/scripts
-↓
-browser loads/evaluates resources
-↓
-business JS registers Custom Elements
-↓
-window.onload
-────────────────────────────────────────
-Web Projector may start
+pure fail-closed validation
+→ prepared Content resolution + MIME fixation
+→ private href/src binding
+→ ordered styles/scripts
+→ browser load/evaluation
+→ business customElements registration
+→ window.onload
+→ start presentation once
 ```
 
-Web Projector MUST NOT start before `window.onload`。
+Validation MUST complete before Content/browser side effects。`window.onload` 是 normal presentation start barrier，但不是 resource success 的替代证明。
 
-实现还必须独立观察/报告 stylesheet/script load/evaluation failure；`window.onload` 本身不得被解释成“所有 bootstrap resource 必然成功”的证明。
+实现 MUST 独立观察其 bootstrap mechanism 可观察到的 stylesheet/script load/evaluation failure；failure 时 presentation MUST NOT start。
 
-V1 normal path不依赖“先创建 unknown element，再等待 arbitrary future loader/native upgrade”。但 Config v1 不声明 expected tag set，因此 bootstrap phase不推断“某 script 应注册哪些 tag”。当 Projector 实际使用某个 `RenderNode.tag` 时仍未注册，该问题属于 [Web Presentation API v1](./web-presentation-api-v1.md) 定义的 **projection-time presentation structural failure**，不是 bootstrap/config failure。
+Config 不声明 expected tag set。Projector实际需要某 `RenderNode.tag` 时仍未注册，属于 Web Presentation API v1 的 projection-time structural failure。
 
 ---
 
@@ -223,111 +170,85 @@ V1 normal path不依赖“先创建 unknown element，再等待 arbitrary future
 ```text
 Renderer Window lifetime
 =
-Web presentation bootstrap lifetime
+Web presentation bootstrap environment lifetime
 =
 Custom Element registry lifetime
 ```
 
-V1 不按 Subsystem、Frame、Activation、RenderDomain 或 Data reconnect 动态装卸 scripts/styles。
-
-需要 incompatible presentation definitions 时，Phase 1 使用 fresh Renderer Window，而不是在同一 Window 中卸载/重定义既有 Custom Elements。
+需要 incompatible definitions 时使用 fresh Renderer Window，不在同一 Window 中卸载/重定义既有 Custom Elements。
 
 ---
 
 ## 8. Bootstrap vs Runtime Resources
 
-必须区分：
-
 ```text
-bootstrap presentation resources
-    JS / CSS
-    declared by WebPresentationConfigV1
-    loaded before Projector start
+bootstrap resources
+    JS/CSS
+    declared by Config v1
+    loaded before presentation start
 
-runtime business resources
-    image / map / audio / data / etc.
-    consumed by projected business WC after start
+runtime resources
+    image/map/audio/data/etc.
+    read after start through PresentationResourceClient
 ```
 
-Config **只**声明 bootstrap JS/CSS。
-
-M13 已通过 [Web Presentation API v1](./web-presentation-api-v1.md) 冻结 runtime presentation resource capability：Business WC 只能经 `receiveRenderContext(...)` 获得 narrow `PresentationResourceClient`，以 `namespace + hierarchical key + expectedContentVersion` 读取 caller-owned bytes。
-
-Bootstrap `href/src` binding MUST NOT 因此暴露任意 Content URL/path/credential；PresentationResourceClient 也 MUST NOT 演化成 dynamic script/component loader。
+Config MUST NOT 演化成 runtime asset API；PresentationResourceClient MUST NOT 演化成 dynamic script/component loader。
 
 ---
 
-## 9. Existing Startup Contracts Remain Unchanged
+## 9. Failure Boundary
 
-本契约不修改：
-
-```text
-GameEntryV1 / game.json
-SubsystemDescriptorV1 = exactly {key}
-launch.hostra.json / launch.pwa.json executable binding
-LogicalGameBootstrap
-Main RuntimeHosting request
-M12 Content identity/version semantics
-Render Update v1
-```
-
-关系是：
+Bootstrap failure包括：
 
 ```text
-game.json                    → what logical business exists
-launch.<platform>.json       → how Runtime executes
-WebPresentationConfigV1      → what business Web JS/CSS the Window loads
-Web Presentation API v1      → how projected WC consumes local context/data/resources
-RenderNode                    → current authoritative presentation state
-```
-
-这些边界不得合并成 universal startup/presentation DTO。
-
----
-
-## 10. Failure Boundary
-
-以下属于 bootstrap/config failure：
-
-```text
-invalid config/schema/version
-including duplicate logical ref in scripts/styles
-invalid or missing prepared resource
-incompatible resource kind/MIME
+invalid shape/version/duplicate
+missing/invalid prepared resource
+MIME mismatch
 stylesheet/script load failure
 script evaluation failure
 ```
 
-bootstrap failure：
+结果：
 
 ```text
-→ Projector does not enter running state
-→ no Main/Subsystem/Render Store authority mutation
-→ not Render protocol-fatal
+presentation does not start
+no Renderer Store rollback
+no Main/Subsystem authority mutation
+not Render protocol-fatal
 ```
 
-以下不属于 Config/bootstrap failure：
-
-```text
-RenderNode.tag unregistered when Projector actually needs it
-runtime receiver/resource/DOM projection failure
-```
-
-它们在 Projector 已进入运行阶段后发生，由 Web Presentation API v1 的 presentation-local failure boundary治理。
+Unregistered RenderNode.tag、receiver/resource/DOM failure属于 presentation phase，不属于 Config phase。
 
 ---
 
-## 11. Core Invariants
+## 10. Qualification Minimum
 
-1. Web Presentation Config 是 product startup input，但 source acquisition是 platform/product-private mechanics，不属于 Config v1；
-2. V1 exact top-level shape = `formatVersion/scripts/styles`；
-3. scripts/styles 是 Window-level ordered lists，没有 `subsystems`；每个列表内 `(namespace,key)` MUST 唯一，duplicate config直接拒绝；
-4. refs 复用 M12 logical `namespace + hierarchical key`；
-5. Desktop继续复用 prepared installation唯一 FSDB/Content view，用户不单独配置 FSDB；
-6. config/prepared public facts不携 path/URL/bearer/loader capability；
-7. browser mechanism = ordered `<link>` + ordered classic `<script>`，不存在 implementation-defined dedupe；
-8. business JS使用 browser-native `customElements.define(...)`；Config不声明 expected tag set；
-9. `window.onload` 是 Web Projector start barrier，但 load/evaluation failure必须独立检测；unregistered RenderNode tag是 projection-time failure；
-10. bootstrap lifetime与 Renderer Window lifetime一致；
-11. runtime business resource capability属于 Web Presentation API v1，不属于 Config；
-12. M13不建立 ESM loader、dynamic component loader、second registry或 universal startup DTO。
+必须证明：
+
+```text
+closed-schema validation before side effects
+duplicate refs rejected
+exact MIME essence rules
+ordered styles/scripts
+load/evaluation failure detection
+business customElements registration
+window.onload before first Projector mutation
+no path/token/private binding exposure
+```
+
+Browser-observable evidence MUST 使用 real Chromium；纯 validation/resolution可由 Node tests关闭。
+
+---
+
+## 11. Frozen Invariants / Reopen Rule
+
+1. Config exact shape = `{formatVersion,scripts,styles}`；
+2. source acquisition属于 product/platform-private mechanics；
+3. refs复用 M12 logical Content identity；
+4. script/style MIME essence分别固定为 `text/javascript` / `text/css`；
+5. bootstrap固定为 ordered `<link>` + ordered classic `<script>`；
+6. `window.onload` 后 presentation才可启动；
+7. Config不声明 tag vocabulary、runtime resources或 Subsystem binding；
+8. M13不建立 generic loader/registry/framework。
+
+除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本契约在 M13 implementation/qualification期间不 reopen。
