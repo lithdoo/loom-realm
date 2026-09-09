@@ -4,13 +4,36 @@
 
 ## Closure target
 
-M14 的 future canonical gate：
+M14 的 canonical CI gate：
 
 ```text
 npm run test:m14
 ```
 
-在实现该命令并真实通过前，不宣称 M14 Closed。
+M14 `Closed` 不是仅指 CI fixture green。关闭该 milestone 必须同时满足：
+
+```text
+1. npm run test:m14
+   → canonical Node 20 / 24 CI matrix green
+
+2. npm run test:m14:essentials-local
+   → 对 exact Essentials v21.1 local corpus 完成一次记录化 compatibility qualification
+   → 对应同一个 M14 closure revision
+```
+
+第二条是 milestone closure evidence，不进入 GitHub Actions，也不使第三方 corpus 成为 repository/CI dependency。在两类 evidence 都真实通过并记录前，不宣称 M14 Closed。
+
+Closure record MUST 绑定：
+
+```text
+repository commit SHA
+CI M14 qualification result
+exact-v21.1 source identity/fingerprint
+local consumer-projection result
+first-slice semantic vertical result
+```
+
+这样后续不能用另一个 revision 的 importer/local result 替当前 M14 implementation 背书。
 
 ## Required gate composition
 
@@ -22,7 +45,7 @@ map game-library tests
 M14 consumer-projection tests using distributable fixture
 concrete example Game Entry validation/startup test
 prepared Content assembly test
-real Chromium M14 game vertical
+real Chromium M14 game semantic vertical
 workspace/package boundary checks
 @loomrealm-game/map pack/publish dry-run qualification
 ```
@@ -30,6 +53,8 @@ workspace/package boundary checks
 `examples/essentials-v21.1` 必须 private，不做 publish/pack product qualification。
 
 Node 20 / 24 CI 继续作为 canonical matrix。
+
+`test:m14:essentials-local` 是 local-only compatibility command。它可以复用现有 importer/acquisition mechanics，但第三方 source/bytes 必须继续位于 ignored/local ownership，不得被提交、上传为 CI artifact 或变成 `test:m14` 的隐式 prerequisite。
 
 ## Boundary evidence
 
@@ -84,20 +109,28 @@ M14 consumer projection 的机械规则必须按 `tools/fixtures/essentials-v21.
 
 ```text
 known RPG @ivar → strip one leading @ and preserve remaining spelling
+nil → null
+boolean → JSON boolean
+safe Integer → JSON number; unsafe required Integer fails closed
+finite Float → JSON number; non-finite required Float fails closed
 RubyString/RubySymbol → JSON string
 Ruby Array → JSON array
 RGSS Table → { dimensions, xSize, ySize, zSize, values:number[] }
+RGSS Table index(x,y,z) = x + y*xSize + z*xSize*ySize
+RGSS Table values.length = xSize*ySize*zSize
 Map.events stays embedded and uses decimal event-id JSON object keys
 no kind/className/rubyObjectId/$id/$ref/$typed in consumer records
 ```
+
+Table qualification不能只断言 `values` 是 number array；至少必须使用已知非零坐标样本证明 serialized order、轴顺序与 frozen index rule 一致。
 
 M14-required source fact若无法无歧义投影成 JsonValue，preparation 必须 fail closed；不得通过 generic wrapper把问题推给 Runtime。
 
 至少覆盖 M14 vertical 实际需要的语义：
 
 ```text
-RPG::Map-compatible map facts
-RPG::Tileset-compatible tileset/passability facts
+RPG::Map-compatible map width/height/tile-data facts
+RPG::Tileset-compatible resource/passability facts
 RPG::MapInfo-compatible map info
 Essentials MapMetadata / connections when used
 RPG::Event / Page / EventCommand semantics when used
@@ -139,20 +172,35 @@ example WebPresentationConfig logical refs
 
 该 preparation 只做 composition/materialization；不得成为 Runtime dependency、production Host、第二个 map adapter 或 generic GamePackager/ContentBuilder framework。
 
-## Functional evidence
+## Functional / semantic evidence
 
-至少证明：
+M14 full vertical 至少证明：
 
 ```text
 FSDB Map/Tileset JSON record load via ContentClient
+Map.data is interpreted with the frozen RGSS Table indexing semantics
+at least one visible tile is derived from Map.data tile identity + Tileset/resource facts
 real Content resource use
 player spawn from validated example initial input
-Input movement
-RenderDomain initial/update state
+Input path reaches map business logic
+one passable movement is accepted from persisted map/tileset passability facts
+one blocked movement is rejected from persisted map/tileset passability facts
+RenderDomain initial/update state reflects authoritative business position
 map-owned WC projection
 same live identity reuse across ordinary update
-visible movement result
+visible movement occurs for the passable case and not for the blocked case
 ```
+
+Qualification 不得用下面的方式获得形式通过：
+
+```text
+load Map/Tileset but render a test-local fixed terrain
+inject isBlocked/passable conclusions that do not exist in real consumer Content semantics
+move player by unconditional x/y increment without consulting implemented passability facts
+use a fake CI-only map object model different from the local exact-v21.1 consumer path
+```
+
+第一版只要求所选 map slice 实际需要的 RMXP/Essentials-compatible passability subset，不要求 M14 一次实现完整 event collision、priority、terrain、transition compatibility。但实际实现的 subset 必须由 persisted Content facts驱动，并在 CI fixture 与 local exact-v21.1 qualification 中走同一 map runtime logic。
 
 至少一个 tileset 或 player sprite 必须走：
 
@@ -163,6 +211,7 @@ semantic record-derived namespace/key
 → Render data namespace/key/contentVersion
 → PresentationResourceClient
 → browser bytes
+→ resource is actually used by the visible qualified result
 ```
 
 Runtime 获得的 raw bytes不得进入 Render payload。M14 不新增 resource metadata/HEAD author API；允许 Runtime 与 Renderer各读取一次同一 resource。只有真实 M14 performance evidence才能支持后续最小 reopen M12。
@@ -199,18 +248,41 @@ M14 不 claim Hostra Launcher / Electron BrowserWindow / physical input / reload
 
 ## Essentials compatibility evidence
 
-M14 closure record分开记录：
+M14 closure record分开记录两类证据，但两者共同构成 `Closed`：
 
 ```text
-CI-safe synthetic/author-owned FSDB JSON fixture qualification
-local exact-v21.1 corpus importer → M14 consumer projection → FSDB JSON compatibility qualification
+CI
+→ npm run test:m14
+→ checked-in synthetic/author-owned FSDB JSON fixture
+→ deterministic full M14 semantic vertical
+
+Local exact-v21.1
+→ npm run test:m14:essentials-local
+→ exact Essentials v21.1 corpus
+→ existing importer
+→ M14 consumer projection
+→ same prepared Content / ContentClient / map / browser path
+→ recorded compatibility result
 ```
 
 CI fixture 的字段语义必须与同一 M14 RMXP/Essentials-compatible FSDB Content model 对齐；不能构造只在测试里存在的 fake map object model。
 
-local official corpus 不提交、不上传为 repository artifact；记录 source version/fingerprint、FSDB semantic materialization result与必要统计即可。
+Local qualification record 至少包含：
 
-两条 evidence 必须汇入同一 assembled prepared Content → `ContentClient` → map runtime → browser consumer path。
+```text
+repository commit SHA
+source version/identity + fingerprint
+consumer projection pass/fail
+materialized Map/Tileset/... record counts as relevant
+resource count/statistics needed to identify the qualified slice
+first-slice visible-tile semantic result
+passable + blocked movement semantic result
+final qualification pass/fail
+```
+
+local official corpus 不提交、不上传为 repository artifact；closure record 只保存 fingerprint/result/statistics，不保存第三方 bytes。
+
+两条 evidence 必须汇入同一 assembled prepared Content → `ContentClient` → map runtime → browser consumer path。Local command 不允许直接向 map Runtime 注入 decoder objects；CI 也不允许使用另一套 fake runtime model。
 
 现有 importer RC 仍然有效，但不得把它误写成 M14 consumer projection 已完成：
 
@@ -220,7 +292,13 @@ existing importer RC
 Map/{id} / Tileset/{id} Runtime consumer projection closure
 ```
 
-M14 closure record必须单独记录后者的实现与 qualification。
+M14 closure record必须单独记录后者的实现与 qualification，并与 closure revision SHA 对齐。
+
+## Performance evidence
+
+轻量 timing/node/update diagnostics MAY 随 M14 qualification 记录，但默认不是 closure gate，也不得为了 qualification 新建 MetricsCollector、Profiler、Scheduler 或其他 performance framework。
+
+只有 first real vertical 出现可复现的 frame pressure、unbounded latency 或其他 measurable failure 时，性能才成为 blocking evidence，并可支持最小 reopen M12/M13。
 
 ## Explicit non-claims
 
@@ -229,6 +307,7 @@ M14 Closed 不代表：
 ```text
 Pokémon Essentials v21.1 full gameplay complete
 all maps/events semantically complete
+full RMXP collision/passability/event semantics complete
 universal map schema established
 Content group API established
 resource metadata API established
@@ -240,4 +319,4 @@ large-map performance universally solved
 
 ## Reopen rule
 
-只有真实 map consumer 暴露 correctness/security contradiction、author capability缺口或可测性能失败时，才 reopen M10–M13。目录对称、API美观或未来猜测不是 reopen evidence。
+只有真实 map consumer 暴露 correctness/security contradiction、author capability缺口或可测性能失败时，才 reopen M10–M13。目录对称、API美观、qualification 代码整洁诉求或未来猜测不是 reopen evidence。
