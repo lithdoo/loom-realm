@@ -2,8 +2,9 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 consumer ownership revised
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[Package Architecture](../30-implementation/package-architecture.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
 > 最近复核：2026-09-09
 
 ```text
@@ -13,68 +14,71 @@ framework module != reusable game library != concrete game
 
 ---
 
-## 1. Module / consumer map
+## 1. Module Map
 
-| 类别 | 入口 | Current responsibility |
+| 模块/consumer | 入口 | Current responsibility |
 |---|---|---|
-| Framework Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority authority |
-| Framework Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、Render Store、Content resource client、M13 thin Projector |
-| Framework Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
-| Game Library: Map | [map design](./loom-map/README.md) | M14 reusable map business + map-owned Web presentation；physical target `game-libs/map` |
-| Platform: Hostra Desktop | [desktop-host](./desktop-host/README.md) | physical composition、M15 integration |
-| Platform: PWA | [pwa-host](./pwa-host/README.md) | Worker Runtime、M17 full realization |
+| Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector |
+| Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
+| Map Game Library | [map design](./loom-map/README.md) | M14 reusable map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
+| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra physical composition、Content、M13/M15 integration |
+| PWA | [pwa-host](./pwa-host/README.md) | PWA Worker Runtime、M17 Renderer/Data/Content/Web presentation realization |
 
-Concrete M14 game位于 planned `examples/essentials-v21.1`，不是 framework module。
+Concrete M14 game planned at `examples/essentials-v21.1`，不是 framework module。Desktop/PWA 是同一 logical architecture 的不同 physical realization。
 
 ---
 
-## 2. Repository ownership
+## 2. Repository Ownership
 
 ```text
-packages/      framework/runtime
-game-libs/     reusable business libraries
+packages/      LoomRealm framework/runtime
+game-libs/     reusable game-domain libraries
 examples/      concrete games
 apps/          platform hosts
-tools/         dev/import/compatibility tooling
+tools/         development/import/compatibility tooling
 ```
 
-依赖主方向：
+主依赖方向：
 
 ```text
-examples → game-libs → public framework author APIs
+examples → game-libs → public LoomRealm author APIs
 ```
-
-Platform apps不拥有 reusable game business semantics；framework不反向依赖 game-lib/example。
 
 ---
 
-## 3. Authority boundaries
+## 3. Authority Boundaries
 
 ```text
 Main
-    application authority
+    Session / Runtime / Frame / Activation / InputTarget / DataAuthority
 
-Subsystem/game library runtime
-    business state / Input Interest / Render Domains / Content author usage
+Subsystem / game library
+    business state / Input Interest / authoritative Render Domains / Content author usage
 
 Renderer Store
-    per-subsystem Render replica
+    current per-subsystem Render replica authority
 
 Web Projector
-    mechanical managed DOM projection
+    reads Control topology + eligible Store facts
+    owns mechanical LoomRealm-managed DOM mutation only
 
-Game-library Web Component
-    concrete presentation semantics/private UI state
+Business Web Component
+    read-only projected state
+    private Shadow DOM / Canvas / WebGL / layout state
 
 Platform/App Composition
-    physical Process/Worker/Window/Control/Data/Content binding
+    Process/Worker/Window
+    Control/Data physical provisioning
+    Content physical binding
+    presentation bootstrap environment
 ```
 
-M13 precision继续由 frozen formal contracts拥有。
+M13 精确 browser/API/currentness semantics 不在本索引重复定义；见 frozen Web Presentation contracts。
 
 ---
 
-## 4. Closed slices
+## 4. Closed / Frozen Slices
 
 ```text
 M10 User Input         ✅ Closed
@@ -83,41 +87,66 @@ M12 Content            ✅ Closed
 M13 Web Presentation   ✅ Closed 2026-09-09
 ```
 
+M13 消费既有 Control/Data/Render/Content 能力，不重开下层 contracts。
+
 ---
 
-## 5. M14 first real consumer
+## 5. M13 Web Presentation Placement
 
 ```text
-game-libs/map (@loomrealm-game/map)
-        ↓
-examples/essentials-v21.1 (private)
-        ↓
-Frame + Input + Content + Render + M13
-        ↓
-playable map slice
+Window bootstrap
+→ current Control Session/DataAuthority topology ─┐
+                                                 ├→ package-private reevaluation
+   current per-subsystem Renderer Store ─────────┘
+                                                       ↓
+                                             per-subsystem eligibility
+                                                       ↓
+                                                thin Web Projector
+                                                       ↓
+                                        business-owned Custom Elements
 ```
 
-Map library不解析 Essentials source；`tools/fixtures/essentials-v21.1` 只在 development/preparation阶段生成本地数据。Example-local compatibility preparation再投影为 map-owned normalized records/resources。
+完整 identity、reconnect、receiver/resource lifetime、structural failure 与 body ordering 全部由 frozen Rendering System / formal contracts 拥有；模块层不维护第二份协议正文。
 
 ---
 
-## 6. Physical placement after M14
+## 6. M14 Map Game Library + Concrete Example
+
+```text
+game-libs/map
+    @loomrealm-game/map
+    runtime Definition → @loomrealm/subsystem only
+    browser side       → map-owned Custom Elements
+        ↓
+examples/essentials-v21.1
+    private concrete game
+```
+
+Map library拥有 normalized map schema，不解析 Essentials/RMXP/PBS/Marshal。`tools/fixtures/essentials-v21.1`只在 development/preparation阶段生成本地 canonical data；example-local preparation再转换为 map-owned records/resources。
+
+M14 是真实 Frame/Input/Render/Content/Web Presentation 综合 consumer；不为 coverage 强制使用 RenderEvent，也不发明第二套 resource/loading boundary。
+
+---
+
+## 7. Physical Placement
 
 ```text
 M15 Desktop
-    BrowserWindow + Control/Data/Input/Render/Content
-    M13 Presentation
-    M14 concrete game + map library
+    BrowserWindow + Renderer Control/Data/Input/Render/Content
+    M13 Config/API/Projector
+    M14 concrete game + map-owned WC
 
 M17 PWA
-    Window/Worker + PWA physical realization
-    same concrete logical game scenario
-    same M13 observable semantics
+    Window/Worker + MessagePort/Data provisioning
+    PWA Content realization
+    same concrete logical game + M13 semantics
 ```
+
+PWA 可以使用不同 storage/fetch/private browser binding，但不能改变 frozen M13 observable semantics或复制 game business source。
 
 ---
 
-## 7. Abstraction rule
+## 8. Abstraction Rule
 
 禁止仅为未来可能用途建立：
 
@@ -125,11 +154,14 @@ M17 PWA
 GameLibrary registry/base framework
 runtime service locator
 Repository / AssetManager
+Renderer public Render Store
 LoomRealm component library / Presentation DSL
 generic layer/stacking manager
 dynamic component loader
-runtime importer dependency
-framework-owned Essentials adapter
+public RenderNodeIdentity framework
+RenderEvent→DOM bridge without real consumer
+second projection-tree/topology authority
+runtime dependency on tools/importer
 ```
 
-真实 game library可以自由拥有自己的 domain types、WC与私有 presentation实现。
+业务/game-library WC内部选择 UI framework 不受限制，只要不接管 LoomRealm-managed host projection。

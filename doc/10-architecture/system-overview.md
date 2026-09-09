@@ -2,47 +2,75 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 consumer taxonomy revised
-> 主要定义：logical roles、authority、platform composition、framework/game-library/concrete-game placement  
-> 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
+> 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
+> 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
+> 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
+> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-09
 
-本文描述 system-level responsibility / authority / topology。精确 browser/API semantics由 formal contracts拥有；具体 game-library business semantics不升级为 LoomRealm architecture。
+本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。
 
 ---
 
-## 1. Logical roles
+## 1. Logical Roles
 
 ```text
-LoomRealm framework
-    Game Package / Platform Launcher / Main / Subsystem Runtime / Renderer / Content
+Game Package
+    logical Game Entry
+
+Platform Launcher
+    executable binding + PREPARE
+    PlatformLaunchPlan + LogicalGameBootstrap
+
+Main
+    Session / Runtime / Frame / Stack / Activation
+    InputTarget / DataAuthority / failure unwind
+
+Subsystem Runtime
+    business state
+    Input Interest
+    authoritative Render Domains
+    author-facing ContentClient
+
+Renderer
+    read-only Main authority mirror
+    per-subsystem Data consumers
+    Input producer gate
+    current Render replicas
+    thin physical Web projection
+
+Readonly Content Service
+    logical readonly Content bytes
+
+Business Web presentation
+    concrete Custom Elements
+    Shadow DOM / Canvas / WebGL / layout/private state
 
 Reusable game libraries
-    consume public author APIs
-    own reusable business semantics + optional business Web presentation
+    consumers of public Subsystem author APIs
+    reusable business state/Render/Content semantics
+    optional business-owned Web presentation
 
 Concrete games
-    compose game libraries + game-specific business/config/content
-
-Platform apps
-    own physical hosting/composition
-
-Tooling
-    development/import/compatibility preparation only
+    compose game libraries + game-specific Subsystems/content/config
 ```
 
-一个 authority只有一个 owner；目录/package category不创建新 application authority。
+一个 authority只有一个 owner；physical Platform/DOM ownership不会产生第二份 application authority。Game library/concrete game 是 business consumer layer，不成为新的 framework authority role。
 
 ---
 
-## 2. Bootstrap boundaries
+## 2. Bootstrap Boundaries
 
 Runtime executable bootstrap：
 
 ```text
 installation/source
 → matching Platform Launcher PREPARE
-→ PlatformLaunchPlan + LogicalGameBootstrap
+→ Game Entry + Platform manifest join
+→ executable/capability preflight
+→ PlatformLaunchPlan
+→ LogicalGameBootstrap
 → RuntimeHosting
 ```
 
@@ -50,121 +78,146 @@ Web presentation bootstrap独立：
 
 ```text
 product/platform-private Config source
-→ prepared Content
+→ current prepared Content
 → Renderer Window bootstrap
 → presentation start
 ```
 
-Game-library/example placement不改变这两个 bootstrap contract。
-
----
-
-## 3. Main / Renderer authority
-
-Main唯一拥有 Session、Runtime/Frame/Stack/Activation、InputTarget、DataAuthority generation/profile 与 failure unwind。
-
-Renderer只镜像 committed authority并维护 per-subsystem Render replica；Web presentation currentness从现有 Control/Data/Store facts推导。
-
----
-
-## 4. Subsystem / game-library business boundary
-
-Reusable game library运行时是普通 Subsystem author consumer：
+因此：
 
 ```text
-public @loomrealm/subsystem author API
-→ game-library business behavior
+Game topology != executable binding != Web presentation bootstrap
 ```
 
-Framework不知道 map/menu/dialogue/battle 等业务 vocabulary。
-
-Concrete game可以组合多个 game libraries，也可以拥有 example/game-specific Subsystem；这些都不得反向要求 Main/Renderer成为业务 authority。
+Config source、prepared Content selection、private browser binding、Window/document lifecycle属于 concrete `apps/*` composition，不进入 Main、Frame、RenderNode或 Launcher logical ABI。精确 Config shape/MIME/loading barrier由 Web Presentation Config v1拥有。
 
 ---
 
-## 5. Renderer Data / Input / Render
+## 3. Main / Renderer Authority
 
-Current Data identity仍为 Session + current Renderer + subsystemKey + generation。
+Main唯一拥有 Session、Runtime/Frame/Stack/Activation、InputTarget、DataAuthority generation/profile 与 failure unwind，并向 Renderer发布 committed authority snapshot。
 
-Input受 current Data × Main InputTarget × Activation × Subsystem Interest × physical Producer gate约束。
+对 Web presentation，current Control snapshot唯一决定 current Session 与 subsystem/generation topology。Renderer不得复制出第二份 presentation topology authority。
+
+---
+
+## 4. Renderer Data / Input / Render
+
+Current Data identity：
+
+```text
+Session + current Renderer + subsystemKey + generation
+```
+
+Data loss != Runtime/Frame failure；same generation/profile可 reconnect，profile change需要 fresh generation。
+
+Input继续受 current Data × Main InputTarget × active Activation × Subsystem Interest × physical Producer gate约束。
 
 Render：
 
 ```text
-Subsystem/game-library authoritative Render Domains
+Subsystem authoritative Render Domains
 → Render Update v1
 → per-subsystem Renderer Store
 ```
 
+Wire node identity包含 `(Session, subsystemKey, generation, domainId, key)`。
+
 ---
 
-## 6. M13 Web Presentation placement
+## 5. M13 Web Presentation Placement
 
 ```text
 Window bootstrap
-→ current Control + per-subsystem Store
-→ package-private reevaluation
-→ per-subsystem eligibility
-→ thin Projector
-→ business-owned WC
+→ presentation start
+→ current Control Session/DataAuthority facts ─┐
+                                               ├→ package-private reevaluation
+   current per-subsystem Renderer Store ───────┘
+                                                     ↓
+                                           per-subsystem eligibility
+                                                     ↓
+                                               thin Projector
+                                                     ↓
+                                     document.body / business WC
 ```
 
-M14 map-owned WC只是这个 boundary的第一个真实 game-library consumer；M13不因此增加 map/component semantics。
+Production reevaluation只有 committed/fresh current Control snapshot 与 successful current Store domains/snapshot/patch commit。Failed Store mutation与 RenderEvent不触发 Web projection。
+
+Same-generation transport loss不等于 authority removal；fresh Session/generation结束旧 identity universe。精确 eligibility/reconnect/DOM-observable semantics由 Web Presentation API v1拥有。
 
 ---
 
-## 7. Repository / package placement
+## 6. Projection / Business Boundary
 
-ADR 0032冻结M14方向：
+Same full live wire-node identity保持 same HTMLElement；move/reparent/reorder移动 existing instance。Top-level managed roots按 deterministic physical sequence组成，但该顺序不建立 cross-Subsystem visual stacking authority；layout/stacking仍属于 business WC/CSS。
+
+Business WC 对 managed attrs/data/light DOM只读；DOM不 reverse-sync Store。Business可拥有 Shadow DOM、Canvas/WebGL、decoded resource cache、animation/timers与 private layout state。
+
+Projector只注入 formal Web Presentation API 定义的 narrow context/data/resource capability，不创建 component library、AssetManager、dynamic loader、global service locator或 RenderEvent WC ABI。
+
+---
+
+## 7. Failure / Lifetime Boundary
+
+Bootstrap failure阻止 presentation start。Runtime presentation failure保持 Window-local，不 rollback Store、不 mutate Main/Subsystem、不自动 fail Runtime/Frame。
+
+Unknown-tag precise preflight/freeze semantics、receiver callback ordering/data equality、resource teardown/error semantics全部由 Web Presentation API v1拥有；本总览不复制。
+
+---
+
+## 8. Dependency / Non-goals
+
+M14 repository taxonomy：
 
 ```text
-packages/      LoomRealm framework/runtime
+packages/      framework/runtime
 game-libs/     reusable game-domain libraries
 examples/      concrete games
 apps/          platform hosts
-tools/         preparation/import tooling
+tools/         development/import/compatibility tooling
 ```
 
-依赖：
+主依赖方向：
 
 ```text
 examples → game-libs → public author APIs
 ```
 
-不得出现 framework → game-library/example 反向依赖。
-
----
-
-## 8. M14 Essentials development path
+禁止：
 
 ```text
-external/local Essentials v21.1 source
-→ tools/fixtures/essentials-v21.1 importer
-→ local prepared canonical data
-→ example-local compatibility preparation
-→ map normalized Content
-→ @loomrealm-game/map
-→ M13 presentation
+Business Definition → renderer/browser/platform/protocol authority
+Business WC → Store/Data carrier/Content credential
+Renderer → DOM reverse-sync Store
+RenderNode → arbitrary module URL/loader
+public PresentationState / second Store/topology
+component registry / AssetManager / dynamic loader
+layout/layer authority / global service locator
+RenderEvent WC ABI
+packages/framework → game-libs/examples reverse dependency
+runtime game/game-lib → tools/* dependency
 ```
 
-Tooling不进入 runtime graph，第三方 corpus不进入 repository distribution。
+M13 implementation只允许选择不改变 frozen observable semantics 的 private mechanics。Game-library business vocabulary也不得反向升级为 LoomRealm framework contract。
 
 ---
 
-## 9. Non-goals
+## 9. M14 Consumer Placement
 
 ```text
-framework-owned map/menu/dialogue vocabulary
-GameLibrary registry/framework
-runtime importer/tool dependency
-universal asset/repository abstraction
-Presentation DSL/component framework
-examples embedded as platform app semantics
+game-libs/map
+    @loomrealm-game/map
+    reusable map business + map-owned WC
+        ↓
+examples/essentials-v21.1
+    concrete private game
 ```
+
+Essentials source compatibility通过 `tools/fixtures/essentials-v21.1` + example-local preparation转换为 map-owned normalized Content；map library本身不理解 PBS/Marshal/RMXP/Essentials。
 
 ---
 
-## 10. Phase route
+## 10. Phase Route
 
 ```text
 M10 User Input                                closed
@@ -177,4 +230,4 @@ M16 PWA Runtime                                pending
 M17 PWA full E2E/equivalence                   pending
 ```
 
-当前 executable closure是 `npm run test:m13`。M14只在实现 `npm run test:m14` 并形成真实 game consumer evidence后关闭。
+当前 executable closure是 `npm run test:m13`；M13 qualification记录见 [m13-qualification.md](../30-implementation/m13-qualification.md)。

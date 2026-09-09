@@ -2,9 +2,9 @@
 
 > 层级：实施计划 / Package Boundary  
 > 状态：Active Design / Tracking  
-> 稳定程度：M12/M13 **Implemented / Qualified / Closed**；M14 workspace taxonomy revised  
-> 主要定义：framework、game library、concrete game、platform app、tooling 的 ownership/dependency boundary  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 稳定程度：M12/M13 **Implemented / Qualified / Closed**；M14 workspace taxonomy revised
+> 主要定义：protocol、role、platform、Content、Web presentation、framework/game-library/example package ownership/dependency boundary  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-09
 
 ```text
@@ -20,70 +20,49 @@ Protocol boundary
 
 ---
 
-## 1. Repository taxonomy
+## 1. Current Dependency Shape
 
-Phase 1 顶层职责：
+```text
+foundation ─→ platform-ports ─→ main / subsystem-host / renderer
+wire ───────→ runtime-control / renderer-control / data / game-package
+                                     ↓
+                           launcher-hostra / launcher-pwa
+                                     ↓
+                                   apps/*
+
+Node stdlib → fsdb → fsdb-http / apps/desktop Content composition
+```
+
+M14新增的是 framework consumer layer，不进入上述 core dependency DAG：
+
+```text
+examples/* → game-libs/* → public @loomrealm/subsystem author API
+```
+
+Business Definition继续只依赖 `@loomrealm/subsystem`。Business Web presentation是独立 execution side，可使用 browser APIs，但不获得 Render/Main authority。
+
+---
+
+## 2. Repository / Namespace Rule
 
 ```text
 packages/
-    LoomRealm framework/runtime packages
+    LoomRealm framework/runtime
+    → @loomrealm/*
 
 game-libs/
     reusable game-domain libraries
+    → @loomrealm-game/*
 
 examples/
-    concrete games / integration examples
+    concrete games
+    → private
 
 apps/
-    platform host applications
+    platform hosts/products
 
 tools/
     development/import/compatibility tooling
-```
-
-这些目录表达 ownership，不等于 process boundary。
-
----
-
-## 2. Namespace / publication rule
-
-```text
-packages/*
-→ framework namespace @loomrealm/*
-
-game-libs/*
-→ separate game-library namespace @loomrealm-game/*
-
-examples/*
-→ private; never framework/public package by default
-
-apps/*
-→ private platform products/hosts
-
-tools/*
-→ repository development tooling
-```
-
-因此 M14 map：
-
-```text
-game-libs/map
-@loomrealm-game/map
-```
-
-而不是 `packages/map` / `@loomrealm/map`。
-
----
-
-## 3. Dependency DAG
-
-```text
-examples/* ───────→ game-libs/* ───────→ public @loomrealm author APIs
-     └──────────────────────────────────→ public @loomrealm author APIs
-
-apps/* ───────────→ framework/platform composition packages
-
-tools/* ──────────→ local prepared artifacts / qualification only
 ```
 
 禁止：
@@ -92,107 +71,193 @@ tools/* ──────────→ local prepared artifacts / qualificati
 packages/* → game-libs/* / examples/*
 game-libs/* → renderer/main/platform/protocol internals
 runtime game code → tools/*
-apps/* owning reusable business semantics
+apps/* → reusable concrete business implementation
 ```
-
-Business Definition继续只依赖 `@loomrealm/subsystem` author surface。Business Web presentation是独立 browser execution side，不获得 Render/Main authority。
 
 ---
 
-## 4. M13 placement remains unchanged
+## 3. M13 Physical Startup Ownership
 
-Concrete app/Renderer Window composition拥有 Config source、prepared Content selection、private browser binding、Window lifecycle。
-
-`@loomrealm/renderer` 保持 package-private/trusted：
+Concrete app / Renderer Window composition拥有：
 
 ```text
-Control/Data/Store facts
+Config source acquisition
+current prepared Content view selection
+private browser href/src binding
+document/Window bootstrap lifecycle
+```
+
+```text
+WebPresentationConfigV1
+→ prepared M12 Content
+→ exact MIME check
+→ ordered JS/CSS
+→ window.onload
+→ start presentation
+```
+
+M13不为此增加 platform universal module-loader port、PresentationRegistry port、AssetManager port或 RendererServiceLocator port。
+
+---
+
+## 4. Renderer Ownership
+
+`@loomrealm/renderer` 继续拥有 existing Control/Data/Input/Render role implementation。
+
+M13只增加 package-private/trusted mechanics：
+
+```text
+current Control Session/DataAuthority topology + Store commit
 → presentation reevaluation
 → per-subsystem eligibility
-→ thin Web Projector
-→ context/data/resource façade
+→ live identity → HTMLElement mapping
+→ managed create/remove/move/attrs/children
+→ context/data delivery
+→ PresentationResourceClient façade
+→ Window-local failure/resource lifetime
 ```
 
-M14 repository taxonomy 不 reopen M13 contract/package surface。
+M13不 root-export Store、PresentationState、PresentationTopology、PresentationAdapter、component registry、layer manager或 Content credential。
 
 ---
 
-## 5. M14 map game library
+## 5. Subsystem / Business Boundary
 
-`game-libs/map` 可以在同一 workspace拥有隔离的 runtime/browser outputs：
-
-```text
-runtime Definition
-→ only @loomrealm/subsystem
-
-browser presentation
-→ map-owned Custom Elements/CSS/Canvas/WebGL
-→ structural M13 ABI consumer
-```
-
-Map library owns normalized map business/content schema；不得理解 Essentials/RMXP/PBS/Marshal source format。
-
-不因为 game library category出现就增加：
+Subsystem author root继续只暴露真实 business能力：
 
 ```text
-GameLibrary base package
-GameLibraryRegistry
-component SDK
-AssetManager
-Repository hierarchy
+Frame
+Input
+Render
+Content
 ```
+
+M13不向 `@loomrealm/subsystem` 增加 DOM/Web Component API。
+
+Business/game-library Web presentation可以拥有：
+
+```text
+Custom Elements
+Shadow DOM / Canvas / WebGL
+private UI framework
+layout/position/stacking
+private decoded resource cache
+```
+
+Business WC不得获得 Data peer、Render Store writer、Subsystem RenderDomain writer、Main authority、Content bearer/path/FSDB/privileged URL/private Renderer client。
 
 ---
 
-## 6. M14 concrete example / tooling
+## 6. Identity / Currentness Placement
+
+完整 presentation identity：
+
+```text
+(Session, subsystemKey, generation, domainId, key)
+```
+
+Control snapshot仍是 Session/DataAuthority topology authority；Store仍是 per-subsystem Render replica authority。M13不 materialize Presentation topology registry或 second currentness state machine。
+
+Same-generation reconnect保留 wire/HTMLElement identity；fresh Session/generation结束旧 element universe。
+
+---
+
+## 7. Resource Placement
+
+M12 Renderer-private ResourceClient继续拥有 Content credential/origin/cache/version validation。
+
+M13 façade只提供：
+
+```text
+namespace + key + expectedContentVersion
+→ caller-owned bytes + MIME + actual version
+```
+
+Window teardown取消 reads；M13不建立第二份 cache、AssetManager、decoder registry、prefetch planner或 dynamic loader。
+
+---
+
+## 8. M14 Game Library / Example Placement
+
+M14 map不进入 framework `packages/`：
+
+```text
+game-libs/map
+    package: @loomrealm-game/map
+    runtime side → @loomrealm/subsystem only
+    browser side → map-owned Web presentation
+```
 
 Concrete game：
 
 ```text
 examples/essentials-v21.1
+    private
 ```
 
-它是 private workspace，负责 concrete Game Entry、game-specific keys、compatibility preparation和 `@loomrealm-game/map` composition。
+Map library拥有 normalized map business/content schema，不理解 Essentials/RMXP/PBS/Marshal source semantics。
 
-Tool chain：
+Preparation：
 
 ```text
-external/local Essentials source
+external/local Essentials v21.1 source
 → tools/fixtures/essentials-v21.1 importer
-→ ignored .local prepared data
+→ ignored .local imported data
 → example-local compatibility preparation
 → map normalized Content
 ```
 
-Tool不是 runtime dependency；第三方 corpus不提交仓库。
+Tool不是 runtime dependency；第三方 corpus不提交仓库。只有第二个真实 consumer证明兼容层需要复用时才评估新的 compatibility package。
 
 ---
 
-## 7. Workspace implementation rule
+## 9. Workspace Rule
 
-当前 root `package.json` 尚只有：
+Current root workspace目前：
 
 ```text
 packages/*
 apps/*
 ```
 
-M14/01 实施时增加：
+M14/01实施时扩展为：
 
 ```text
+packages/*
 game-libs/*
+apps/*
 examples/*
 ```
 
-并复核所有 `--workspaces` scripts，避免 framework build/test 隐式扩张为 example qualification。只做需要的命令分层，不引入 workspace orchestration framework。
+`tools/*` 保持 development tooling，不作为 runtime workspace category。
+
+加入 examples 后必须复核所有 `--workspaces` scripts；framework build/test 不应隐式等价于 example qualification。只做最小命令分层，不引入 workspace orchestration framework。
+
+M13不自动新增：
+
+```text
+packages/presentation
+packages/web-components
+packages/renderer-web
+packages/presentation-layers
+packages/asset-manager
+```
+
+M14也不新增 Generic GameLibrary registry/base package。
 
 ---
 
-## 8. Qualification ownership
+## 10. Qualification Ownership
 
 ```text
+M11 Renderer
+    Render Store / wire conformance
+
+M12 Renderer
+    trusted ResourceClient
+
 M13
-    Web presentation generic contract/browser closure
+    Config/bootstrap + thin projection + real Chromium
 
 M14 game-lib
     reusable map business + browser consumer
@@ -201,39 +266,47 @@ M14 example
     concrete game composition + compatibility preparation
 
 M14 CI
-    distributable synthetic/author-owned fixture vertical
+    distributable synthetic/author-owned fixture
 
 M14 local evidence
     exact Essentials v21.1 corpus compatibility
 
 M15/M17
-    complete physical Desktop/PWA E2E/equivalence
+    complete physical E2E/equivalence
 ```
 
 No giant E2E replaces role/contract evidence。
 
 ---
 
-## 9. Explicitly rejected abstractions
+## 11. Explicitly Rejected Abstractions
+
+除 real correctness/consumer need reopen 外，禁止：
 
 ```text
 @loomrealm/map
 packages/map
-Generic GameLibrary framework
+Generic GameLibrary framework/registry
 Generic Repository / StorageProvider
+InstallationManager
 AssetManager / decoder/plugin registry
 UniversalRendererServices
 Presentation DSL / graphics scene graph
 LoomRealm component library
+Presentation Layer / stacking manager
 Dynamic Component / ESM loader
 second projection tree/topology authority
-runtime dependency on importer/tooling
+public RenderNodeIdentity service
+Window-global service locator
+DOM transaction/rollback framework
+RenderEvent WC bridge
+runtime importer dependency
 framework-owned Essentials compatibility layer
 ```
 
 ---
 
-## 10. Milestone placement
+## 12. Milestone Placement
 
 ```text
 M12 Content                                  closed
@@ -244,4 +317,4 @@ M16 PWA Runtime                              pending
 M17 PWA full E2E/equivalence                 pending
 ```
 
-M14 按根目录 M14/01–05 实施。M10–M13 frozen boundaries 不因 repository taxonomy 调整而重开。
+M14按根目录 M14/01–05执行；不得为了 package symmetry扩大 framework public API。
