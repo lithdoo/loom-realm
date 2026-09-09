@@ -60,6 +60,8 @@ interface PresentationResourceError extends Error {
 
 `WebPresentationContext` V1 closed shape = exactly `resources`。Error contract是 structural `Error + readonly code`；不冻结 shared constructor/`instanceof` identity。
 
+该 TypeScript surface 描述 **structural ABI shape**，不要求 M13 新增独立 `@loomrealm/presentation` package、public runtime object或 mandatory base class。Business code MAY 以兼容 structural type直接实现；是否在后续真实 author consumer 中增加 type-only package/subpath，只能由真实 ergonomics/correctness需求 reopen，不能为了 package symmetry预建。
+
 V1 不定义 RenderEvent→WC、WC→Render mutation、DOM→Store reverse sync、component registry、AssetManager、dynamic loader、layout/stacking framework或 global service locator。
 
 ---
@@ -119,9 +121,44 @@ later committed state
 
 Object identity无语义。Attrs/order-only commit若 data structural value未变，MUST NOT 重发 data callback。
 
-Callback throw仍记录为该 value 的一次 delivery attempt；无 data change 的后续 commit MUST NOT 对同一 value 自动 retry。
+### 3.1 Frozen structural equality
 
-Implementation MAY 使用 deterministic structural compare/hash 或等价 bounded private bookkeeping；这不是第二份 Render authority。
+V1 的 JSON structural equality固定为递归 value equality：
+
+```text
+null / boolean / string / number
+→ compare by JSON value
+
+array
+→ length + element order significant
+→ compare elements recursively
+
+object
+→ member order insignificant
+→ exact key set must match
+→ each key's value compares recursively
+```
+
+因此：
+
+```text
+{"a":1,"b":2}
+==
+{"b":2,"a":1}
+```
+
+但：
+
+```text
+[1,2] != [2,1]
+{"a":1} != {"a":1,"b":null}
+```
+
+实现 MAY 使用 recursive compare、canonical hash或其他 deterministic equivalent；observable callback decision必须等价于上述规则，不得以 JS object identity 或 property insertion order决定 delivery。
+
+Callback throw仍记录为该 structural value 的一次 delivery attempt；无 data change 的后续 commit MUST NOT 对同一 value自动 retry。
+
+Minimal per-live-element delivery bookkeeping是允许的 private mechanics，不是第二份 Render authority。
 
 ---
 
@@ -339,8 +376,9 @@ Real Chromium MUST至少证明：
 context before first insertion / at most once
 connectedCallback cannot assume initial attrs/children/data
 initial data full snapshot
-unchanged data not redelivered
-changed data full snapshot
+object member order does not cause data redelivery
+array order/data value change does cause data redelivery
+attrs/order-only commit with structurally equal data does not redeliver
 same identity preserves HTMLElement
 fresh Session/generation never reuse HTMLElement
 DataAuthority removal needs no later Render commit
@@ -366,9 +404,10 @@ RenderEvent not delivered to WC/DOM
 4. full live identity包含 Session/subsystem/generation/domain/key；
 5. currentness按 subsystem独立计算；
 6. transport loss != authority removal；
-7. context/data receiver独立，data只在 retained value变化时重发；
+7. context/data receiver独立；data callback只按 §3 structural JSON value变化重发；
 8. resource capability随 Window teardown终止；
 9. unknown-tag preflight必须阻止 partial DOM mutation，并永久冻结 failed Window；
-10. M13不建立 public PresentationState、second Store/topology、loader/registry、AssetManager、layout/layer framework、global service locator或 RenderEvent WC ABI。
+10. M13 structural ABI不要求新增 public presentation package/subpath；
+11. M13不建立 public PresentationState、second Store/topology、loader/registry、AssetManager、layout/layer framework、global service locator或 RenderEvent WC ABI。
 
 除 correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，本契约在 M13 implementation/qualification期间不 reopen。

@@ -9,7 +9,7 @@
 > 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-09
 
-本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/currentness semantics由 formal contracts拥有。
+本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。
 
 ---
 
@@ -70,12 +70,9 @@ Web presentation bootstrap独立：
 
 ```text
 product/platform-private Config source
-→ WebPresentationConfigV1 validation
-→ current prepared Content refs
-→ private browser binding
-→ ordered business JS/CSS
-→ window.onload
-→ start presentation once
+→ current prepared Content
+→ Renderer Window bootstrap
+→ presentation start
 ```
 
 因此：
@@ -84,31 +81,15 @@ product/platform-private Config source
 Game topology != executable binding != Web presentation bootstrap
 ```
 
-Config source、prepared Content selection、private `href/src` binding、Window/document lifecycle属于 concrete `apps/*` composition，不进入 Main、Frame、RenderNode或 Launcher logical ABI。
+Config source、prepared Content selection、private browser binding、Window/document lifecycle属于 concrete `apps/*` composition，不进入 Main、Frame、RenderNode或 Launcher logical ABI。精确 Config shape/MIME/loading barrier由 Web Presentation Config v1拥有。
 
 ---
 
 ## 3. Main / Renderer Authority
 
-Main唯一拥有：
+Main唯一拥有 Session、Runtime/Frame/Stack/Activation、InputTarget、DataAuthority generation/profile 与 failure unwind，并向 Renderer发布 committed authority snapshot。
 
-```text
-Session
-Runtime lifecycle
-Frame/Stack/Activation
-InputTarget
-DataAuthority generation/profile
-failure unwind
-```
-
-Main向 Renderer发布 committed authority snapshot。对 Web presentation，current Control snapshot唯一决定：
-
-```text
-current Session
-current subsystemKey + DataAuthority generation topology
-```
-
-Renderer不得复制出第二份 presentation topology authority。
+对 Web presentation，current Control snapshot唯一决定 current Session 与 subsystem/generation topology。Renderer不得复制出第二份 presentation topology authority。
 
 ---
 
@@ -120,17 +101,9 @@ Current Data identity：
 Session + current Renderer + subsystemKey + generation
 ```
 
-Data loss != Runtime/Frame failure。Same generation/profile可 reconnect；profile change需要 fresh generation。
+Data loss != Runtime/Frame failure；same generation/profile可 reconnect，profile change需要 fresh generation。
 
-Input继续受：
-
-```text
-current Data
-∧ Main InputTarget
-∧ active Activation
-∧ Subsystem Interest
-∧ physical Producer
-```
+Input继续受 current Data × Main InputTarget × active Activation × Subsystem Interest × physical Producer gate约束。
 
 Render：
 
@@ -140,24 +113,18 @@ Subsystem authoritative Render Domains
 → per-subsystem Renderer Store
 ```
 
-Wire node identity：
-
-```text
-(Session, subsystemKey, generation, domainId, key)
-```
+Wire node identity包含 `(Session, subsystemKey, generation, domainId, key)`。
 
 ---
 
-## 5. M13 Web Presentation — Frozen Design
-
-M13关闭：
+## 5. M13 Web Presentation Placement
 
 ```text
 Window bootstrap
 → presentation start
 → current Control Session/DataAuthority facts ─┐
                                                ├→ package-private reevaluation
-→ current per-subsystem Renderer Store ───────┘
+   current per-subsystem Renderer Store ───────┘
                                                      ↓
                                            per-subsystem eligibility
                                                      ↓
@@ -166,120 +133,31 @@ Window bootstrap
                                      document.body / business WC
 ```
 
-Production reevaluation只有：
+Production reevaluation只有 committed/fresh current Control snapshot 与 successful current Store domains/snapshot/patch commit。Failed Store mutation与 RenderEvent不触发 Web projection。
 
-```text
-committed/fresh current Control snapshot
-successful current Store domains/snapshot/patch commit
-```
-
-Failed Store mutation与 RenderEvent不触发 Web projection。
+Same-generation transport loss不等于 authority removal；fresh Session/generation结束旧 identity universe。精确 eligibility/reconnect/DOM-observable semantics由 Web Presentation API v1拥有。
 
 ---
 
-## 6. Presentation Currentness
+## 6. Projection / Business Boundary
 
-Per-subsystem eligibility：
-
-```text
-committed DataAuthority exists
-AND matching current Data carrier
-AND Store currentCarrier
-AND registrySeen
-AND every current Domain baselined
-```
-
-```text
-same-generation carrier loss
-→ preserve/freeze only affected subsystem DOM
-→ partial rebaseline hidden
-→ complete baseline reconciles once
-
-DataAuthority removed
-→ remove subsystem DOM without waiting Render commit
-
-generation changed
-→ retire old generation DOM immediately
-→ wait new baseline
-
-fresh Session
-→ retire entire old Session element universe
-
-Control transport loss without committed replacement
-→ preserve/freeze last presentation
-→ do not invent empty authority
-```
-
----
-
-## 7. Projection Identity / Ordering
-
-```text
-same full live wire-node identity
-→ same HTMLElement instance
-```
-
-Move/reparent/reorder MUST move existing element。Fresh Session/generation或 different Subsystem/Domain不得复用 HTMLElement identity。
-
-Managed root order：
-
-```text
-subsystemKey UTF-8 lexical
-→ within subsystem: zIndex ascending
-→ same zIndex: domainId UTF-8 lexical
-→ roots order
-```
-
-这只是 deterministic physical concatenation，不定义 cross-Subsystem visual stacking；layout/stacking仍属于 business WC/CSS。
-
----
-
-## 8. Business WC / Resource Boundary
+Same full live wire-node identity保持 same HTMLElement；move/reparent/reorder移动 existing instance。Top-level managed roots按 deterministic physical sequence组成，但该顺序不建立 cross-Subsystem visual stacking authority；layout/stacking仍属于 business WC/CSS。
 
 Business WC 对 managed attrs/data/light DOM只读；DOM不 reverse-sync Store。Business可拥有 Shadow DOM、Canvas/WebGL、decoded resource cache、animation/timers与 private layout state。
 
-Web Presentation API v1：
-
-```text
-receiveRenderContext
-→ Window-lifetime capability
-→ before first managed insertion
-→ at most once
-
-receiveRenderData
-→ current full retained data
-→ initial + only on structural data change
-```
-
-Context只提供 narrow `PresentationResourceClient`；不暴露 bearer/path/FSDB/origin/private client。Window teardown终止 capability、取消在途 reads，后续格式正确的 `resource()` reject `CONTENT_CANCELLED`。
+Projector只注入 formal Web Presentation API 定义的 narrow context/data/resource capability，不创建 component library、AssetManager、dynamic loader、global service locator或 RenderEvent WC ABI。
 
 ---
 
-## 9. Bootstrap / Failure
+## 7. Failure / Lifetime Boundary
 
-Config v1 exact MIME：
+Bootstrap failure阻止 presentation start。Runtime presentation failure保持 Window-local，不 rollback Store、不 mutate Main/Subsystem、不自动 fail Runtime/Frame。
 
-```text
-scripts → text/javascript essence
-styles  → text/css essence
-```
-
-Wrong/missing MIME直接 bootstrap failure；不做 platform-specific sniff/fallback。
-
-Projector在每次 reconciliation 首次 DOM mutation前 preflight all newly-required tags。Unknown tag：
-
-```text
-zero mutation for current reconciliation
-→ preserve last successful DOM exactly
-→ latch no-further-managed-DOM-mutation for this Window
-→ recovery only via fresh Window
-```
-
-Ordinary receiver/resource/DOM failure保持 presentation-local，不 rollback Store、不 mutate Main/Subsystem、不自动 fail Runtime/Frame。
+Unknown-tag precise preflight/freeze semantics、receiver callback ordering/data equality、resource teardown/error semantics全部由 Web Presentation API v1拥有；本总览不复制。
 
 ---
 
-## 10. Dependency / Non-goals
+## 8. Dependency / Non-goals
 
 禁止：
 
@@ -298,7 +176,7 @@ M13 implementation只允许选择不改变 frozen observable semantics 的 priva
 
 ---
 
-## 11. Phase Route
+## 9. Phase Route
 
 ```text
 M10 User Input                    closed

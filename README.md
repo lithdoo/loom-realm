@@ -20,12 +20,17 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 
 ---
 
-## 已关闭里程碑
+## 当前状态
 
 ```text
 M10 User Input          ✅ Closed
 M11 Render Replication  ✅ Closed
 M12 Content             ✅ Closed 2026-09-08
+M13 Web Presentation    Design Frozen / implementation pending
+M14 loom.map            pending
+M15 Desktop full E2E    pending
+M16 PWA Runtime         pending
+M17 PWA full E2E        pending
 ```
 
 当前 executable closure gate：
@@ -44,27 +49,23 @@ Main
     InputTarget / DataAuthority
 
 Subsystem
-    business state
-    Input Interest
+    business state / Input Interest
     authoritative Render Domains
     author-facing ContentClient
 
 Renderer
     read-only Main mirror
-    per-subsystem Data consumers
-    current Render replicas
+    per-subsystem Data consumers / current Render replicas
     trusted/private ResourceClient
     physical Web projection mutation
 
 Business Web Component
     read-only projection consumer
-    Web Presentation API consumer
     Shadow DOM / Canvas / WebGL / private presentation owner
 
 Platform / apps/*
     executable hosting
-    Control/Data physical provisioning
-    Content physical binding
+    Control/Data/Content physical binding
     Renderer Window composition
 ```
 
@@ -72,19 +73,27 @@ Platform / apps/*
 
 ---
 
-## M13 Web Presentation — Design Frozen
+## M13 Web Presentation — Frozen for Implementation
 
-M13 已 **Preimplementation Closed**，实现尚未开始关闭。
+M13 已 **Preimplementation Closed**。唯一实现主线：
+
+```text
+Window bootstrap
+→ current Control Session/DataAuthority + per-subsystem Render Store
+→ package-private reevaluation / per-subsystem eligibility
+→ thin Web Projector
+→ business-owned Custom Elements
+```
 
 Formal source：
 
 ```text
 Web Presentation Config v1   Active / Normative / Frozen
 Web Presentation API v1      Active / Normative / Frozen
-ADR 0031                     Accepted / Frozen
+ADR 0031                     Accepted / Frozen decision provenance
 ```
 
-实施文档：
+实施顺序：
 
 - [M13 / 01 — Bootstrap](./M13_01_WEB_PRESENTATION_BOOTSTRAP.md)
 - [M13 / 02 — Renderer Presentation Seam](./M13_02_RENDERER_PRESENTATION_SEAM.md)
@@ -92,87 +101,9 @@ ADR 0031                     Accepted / Frozen
 - [M13 / 04 — Chromium Vertical](./M13_04_VERTICAL_INTEGRATION.md)
 - [M13 / 05 — Qualification Closure](./M13_05_QUALIFICATION_CLOSURE.md)
 
-### Frozen flow
+M13不建立 second Store/topology、public PresentationState、component registry/loader、AssetManager、layout/layer framework、global service locator、DOM rollback framework或 mandatory presentation SDK/package。
 
-```text
-concrete Window composition
-→ Config validation + prepared M12 Content
-→ exact MIME + ordered JS/CSS
-→ window.onload
-→ start presentation
-
-current Control Session/DataAuthority ─┐
-                                      ├→ package-private reevaluation
-current per-subsystem Render Store ───┘
-                                               ↓
-                                     per-subsystem eligibility
-                                               ↓
-                                       thin Web Projector
-                                               ↓
-                                business-owned Custom Elements
-```
-
-### Frozen identity/currentness
-
-```text
-identity = (Session, subsystemKey, generation, domainId, key)
-same identity → same HTMLElement
-fresh Session/generation → fresh HTMLElement universe
-
-same-generation carrier loss
-→ freeze only affected subsystem
-→ partial rebaseline hidden
-→ complete baseline reconcile once
-
-DataAuthority removal/generation change
-→ presentation updates from Control authority topology
-→ does not wait for a later Render commit
-```
-
-### Frozen bootstrap/API/failure
-
-```text
-scripts MIME essence = text/javascript
-styles  MIME essence = text/css
-
-new element:
-construct → context → insertion/structure → attrs → data
-
-unknown required tag:
-preflight before DOM mutation
-→ zero partial mutation
-→ freeze failed Window permanently
-
-Window teardown:
-→ cancel presentation resource reads
-→ later well-formed resource() = CONTENT_CANCELLED
-```
-
-M13明确不建立 second Store/topology、public PresentationState、AssetManager、dynamic loader、component registry、layout/layer framework、global service locator、DOM rollback framework或 RenderEvent WC ABI。
-
----
-
-## Current Milestones
-
-```text
-M1–M9                                  ✅
-M10 User Input                         ✅ Closed
-M11 Render Replication                 ✅ Closed
-M12 Content                            ✅ Closed 2026-09-08
-M13 Web Presentation                   Design Frozen / implementation pending
-M14 loom.map                           pending
-M15 Desktop full E2E                   pending
-M16 PWA Runtime                        pending
-M17 PWA full E2E/equivalence           pending
-```
-
-Critical path：
-
-```text
-Input → Render → Content → Web Presentation → loom.map → Desktop E2E → PWA Runtime → PWA E2E
-```
-
-下一步直接实施 M13/01–05。M13完成后建立真实 Chromium qualification 的：
+下一步直接实施 M13/01–05；完成后建立 real Chromium qualification 的：
 
 ```text
 npm run test:m13
