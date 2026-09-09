@@ -15,6 +15,8 @@ game-libs/map
 
 M14 不再为了“通用地图”额外定义一套 normalized map schema。Essentials v21.1 / RMXP map model 只作为第一版地图内容的 **semantic authority**；`@loomrealm-game/map` 的 Runtime 数据表示是 importer 已 materialize 并写入 prepared FSDB、再由 M12 `ContentClient.record()` 返回的普通 JSON records。
 
+Importer 侧的 M14 consumer projection 由 [`tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`](tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md) 冻结；map package不得自行发明另一套转换。
+
 ## Runtime side
 
 Map Definition 只消费 public author capabilities：
@@ -112,6 +114,45 @@ Hostra/PWA physical storage
 
 现有 Essentials importer 必须把 source/decoder representation materialize 为可由 Content API 直接读取的 JSON-compatible FSDB records。该 materialization 只负责把已有 RMXP/Essentials 语义变成 Runtime-safe JSON 表示，不重新发明一套地图业务模型。
 
+### M14 semantic JSON mechanical rules
+
+第一版不得把“semantic JSON”留成实现自由度。机械规则固定为：
+
+```text
+known RPG ivar
+    strip exactly one leading @
+    preserve remaining spelling
+
+RubyString semantic text
+    → JSON string
+
+RubySymbol
+    → symbol-name JSON string
+
+Ruby Array
+    → JSON array
+
+RGSS Table
+    → { dimensions, xSize, ySize, zSize, values:number[] }
+```
+
+因此例如：
+
+```text
+@tileset_id    → tileset_id
+@autoplay_bgm  → autoplay_bgm
+@move_type     → move_type
+@character_name → character_name
+```
+
+不得为了 JavaScript 风格改成 camelCase，也不得重命名为 LoomRealm 自创 vocabulary。
+
+M14 所需 Hash 只在 key 可无歧义投影为 integer/string/symbol scalar 时变成 JSON object；integer key 使用十进制字符串。`RPG::Map.events` 因此继续嵌在 `Map/{id}` record 中并以 event id 字符串索引，不拆成 `MapEvent` Group。这样保持 RMXP ownership，也不要求为 M14 reopen Subsystem `ContentClient.group()`。
+
+`kind`、`className`、`rubyObjectId`、`$id/$ref/$typed` 等 decoder/serialization metadata不得进入 consumer record。无法无歧义投影、但又被真实 M14 vertical需要的字段必须 fail closed，先增加最小 semantic projection，再允许 Runtime消费；不得把 generic wrapper 穿透给 map library。
+
+Importer 的 lossless structural/raw authority继续保存 unknown/extra source data；consumer projection 是 derived view，不替代该 authority。
+
 ## Content / Input / Render
 
 ### Content
@@ -130,6 +171,42 @@ ContentClient.record("MapMetadata", mapId) when needed
 返回值是 `JsonValue + contentVersion`，不是 `RPG::Map`/`RmxpObject` runtime instance。
 
 优先保留 existing domain separation，而不是合并成新的 MapBundle。
+
+第一版 `Map/{id}` 中保留其嵌套 `events`；不为了 FSDB 形态对称拆成独立 Group。
+
+### Resource identity / version
+
+Raw resource logical identity继续复用现有 importer/Content mapping。例如：
+
+```text
+RPG::Tileset.tileset_name
+→ Graphics / Tilesets/{tileset_name}
+
+RPG::Tileset.autotile_names[n]
+→ Graphics / Autotiles/{name}
+
+RPG::Event::Page::Graphic.character_name
+→ Graphics / Characters/{character_name}
+```
+
+空 resource name 表示无资源，不发起读取。
+
+当前 author API 没有 resource metadata/HEAD surface。M14 第一版直接使用现有：
+
+```text
+ContentClient.resource(namespace, key)
+→ bytes + mime + contentVersion
+```
+
+Map Runtime 对需要交给 browser 的真实资源调用一次 `resource()`，用返回值确认资源并取得 `contentVersion`；如果 Runtime 本身不需要 bytes，就不长期保留这些 bytes。随后只把：
+
+```text
+namespace + key + contentVersion
+```
+
+放进 Render state。
+
+这可能导致 Runtime 与 Renderer 各读一次同一资源。M14 接受该成本，不新增 `resourceMetadata()` / HEAD author API；只有真实 workload 证明有 measurable problem 才以 consumer evidence讨论最小 reopen M12。
 
 ### Input
 
@@ -163,7 +240,9 @@ Business WC 对 LoomRealm-managed attrs/data/children/order只读。
 可见 tileset/player sprite 等真实资源通过：
 
 ```text
-Render data logical resource ref/version
+Runtime ContentClient.resource()
+→ logical resource ref/version
+→ Render data
 → receiveRenderData
 → context.resources / PresentationResourceClient
 → bytes
@@ -197,12 +276,14 @@ Map browser build 必须作为 prepared Content 的 JS/CSS resource 进入 `WebP
 ```text
 load one FSDB Map JSON record whose semantics mirror RPG::Map
 load referenced FSDB Tileset JSON record/resources
-spawn player
+spawn player from concrete example initial input
 accept directional input
 update business position
 publish RenderDomain state
 project through M13 map-owned WC
 ```
+
+第一版可由 example initial input提供 `mapId/x/y`；不为了首张地图强制实现完整 `RPG::System` startup compatibility。
 
 事件、地图切换或 nested `frame.call()` 只有在 example 中存在自然业务需求时实现；不为 protocol coverage 硬造功能。
 
@@ -220,6 +301,7 @@ SceneGraph framework
 universal component registry
 LoomRealm map layer manager
 runtime service locator
+Content resource metadata API only for M14 elegance
 ```
 
 允许直接的 RMXP/Essentials-compatible map-domain types/functions，只要它们描述 FSDB JSON records 的业务语义并由真实 M14 vertical 使用，而不是暴露 importer decoder representation。
@@ -230,6 +312,8 @@ runtime service locator
 - runtime entry dependency 只指向 public author SDK；
 - browser entry 不污染 runtime Definition；
 - RMXP/Essentials 是 map content 的 semantic authority，prepared FSDB JSON records 是 Runtime representation；
+- semantic JSON projection遵守冻结的机械映射规则，`Map.events` 在第一版保持嵌套；
 - runtime 只通过 `ContentClient` 消费 `JsonValue` records/resources，不消费 importer object-graph wrappers或 decoder instances；
+- resource version由现有 `ContentClient.resource()` 获得，不为 M14 新增 metadata API；
 - 至少一个真实 map resource 通过 PresentationResourceClient 到达 map WC；
 - unit/integration tests证明 Content/Input/Render 的真实业务路径。
