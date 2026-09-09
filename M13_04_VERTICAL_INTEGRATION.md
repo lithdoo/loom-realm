@@ -7,9 +7,9 @@
 > 前置：[M13 / 01](M13_01_WEB_PRESENTATION_BOOTSTRAP.md) → [M13 / 02](M13_02_RENDERER_PRESENTATION_SEAM.md) → [M13 / 03](M13_03_WEB_PROJECTOR.md)  
 > 正式契约：[Web Presentation Config v1](doc/15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](doc/15-contracts/web-presentation-api-v1.md)  
 > 冻结决策：[ADR 0031](doc/decisions/0031-business-owned-web-component-projection.md)  
-> 目标：在真实 headless Chromium 中跑通 Config → M12 Content → Renderer Store → Projector → business Custom Element；验证 browser-observable lifecycle/currentness，而不提前实现 M15 Desktop full E2E。
+> 目标：在真实 headless Chromium 中跑通 Config → M12 Content → Renderer authority/Store → Projector → business Custom Element；验证 browser-observable lifecycle/currentness，而不提前实现 M15 Desktop full E2E。
 
-> **M13/04 的浏览器可以是 qualification harness，但 Config、ResourceClient、Renderer Store、Projector 与 WC ABI必须走生产代码路径。**
+> **M13/04 的浏览器可以是 qualification harness，但 Config/bootstrap helper、ResourceClient、Renderer authority/Data-slot/Store、Projector 与 WC ABI必须走生产代码路径。**
 
 ---
 
@@ -17,13 +17,16 @@
 
 ```text
 prepared M12 Content fixture
+→ concrete test Window composition
 → WebPresentationConfigV1
 → real browser bootstrap
 → business JS/CSS
 → customElements.define(...)
 → window.onload
-→ real @loomrealm/renderer Store
-→ M13/02 eligibility seam
+→ start real presentation
+→ current Renderer Control/Data authority
+→ real per-subsystem Renderer Store
+→ M13/02 reevaluation/eligibility
 → M13/03 Projector
 → document.body
 → test business Custom Elements
@@ -54,6 +57,7 @@ stylesheet/script load events
 window.onload
 HTMLElement object identity
 DOM move/reorder behavior
+AbortSignal/fetch cancellation interaction
 ```
 
 具体 runner属于 test plumbing，不进入 runtime architecture。
@@ -65,10 +69,11 @@ DOM move/reorder behavior
 必须证明：
 
 ```text
-Config invalid → browser projection never starts
+Config invalid → Content/browser bootstrap side effects do not begin
 scripts/styles preserve declaration order
 business scripts register Custom Elements
 resource load/evaluation failure is observed
+bootstrap failure → presentation never starts
 window.onload occurs before first Projector mutation
 ```
 
@@ -76,7 +81,63 @@ window.onload occurs before first Projector mutation
 
 ---
 
-## 4. Identity / Ordering Evidence
+## 4. Authority Topology / Per-subsystem Currentness Evidence
+
+至少使用两个 subsystem A/B。
+
+### Committed removal
+
+```text
+A + B current and projected
+→ next committed Control snapshot removes A DataAuthority
+→ A managed DOM removed without any later A Render message
+→ B remains valid
+```
+
+### Fresh generation
+
+```text
+A generation G projected
+→ committed Control snapshot changes A to G+1
+→ G DOM retires immediately
+→ no G HTMLElement is reused
+→ G+1 waits for matching carrier + complete baseline
+→ same textual key receives fresh HTMLElement
+```
+
+### Same-generation carrier loss
+
+```text
+A carrier lost while Control still declares A generation G
+→ A DOM stays mounted/frozen
+→ A fires no context/data/disconnect/reconnect caused by loss
+→ B remains independently projectable
+```
+
+### Partial rebaseline
+
+```text
+A replacement carrier
+→ fresh Registry
+→ first/partial Domain baselines
+→ Store may advance
+→ A DOM unchanged
+→ all current A Domains baselined
+→ one A reconciliation
+→ matching HTMLElement identity preserved
+```
+
+### Control transport loss
+
+```text
+current Control peer terminal without committed replacement Snapshot
+→ last managed DOM remains frozen
+→ implementation does not reinterpret local loss as empty authoritative topology
+```
+
+---
+
+## 5. Identity / Ordering Evidence
 
 至少构造：
 
@@ -96,37 +157,12 @@ different live identity → different HTMLElement
 move/reorder moves existing instance
 fresh generation → fresh instance
 managed body sequence deterministic
+frozen subsystem element is never detached/recreated by another subsystem update
 ```
 
 ---
 
-## 5. Reconnect Evidence
-
-Same-generation carrier loss：
-
-```text
-keep last managed DOM mounted
-no context/data callback
-no disconnectedCallback/connectedCallback caused by LoomRealm
-```
-
-Replacement baseline：
-
-```text
-fresh Registry
-→ first/partial Domain baselines
-→ Store may advance
-→ DOM unchanged
-→ all current Domains baselined
-→ one reconcile
-→ matching HTMLElement identity preserved
-```
-
-Fresh generation必须 retire old managed elements并创建 fresh identity universe。
-
----
-
-## 6. WC ABI Evidence
+## 6. WC ABI / Data Delivery Evidence
 
 Test business elements至少覆盖：
 
@@ -145,8 +181,11 @@ resource consumer
 context before first managed insertion
 context at most once
 connectedCallback cannot rely on initial attrs/children/data
-data initial + committed full updates
-resource version conflict/cancellation/value ownership
+data initial full snapshot
+changed data → new full snapshot
+attrs/order-only update with unchanged data → no data callback
+throwing data receiver → no retry until data actually changes
+context/data receivers independent
 receiver/resource failure stays presentation-local
 ```
 
@@ -154,23 +193,53 @@ receiver/resource failure stays presentation-local
 
 ## 7. Structural Failure Evidence
 
-构造 Store 中实际需要的 unregistered tag：
+构造一次 reconciliation，同时包含：
 
 ```text
-Projector running
-→ current Render requires unknown tag
+one otherwise-valid DOM change
++ one new unregistered RenderNode.tag
+```
+
+必须证明：
+
+```text
+Projector preflight detects unknown tag before mutation
+→ zero managed DOM change from that reconciliation
 → no unknown fallback HTMLElement created
 → no wait-for-upgrade behavior
-→ further managed DOM mutation stops
-→ last successful managed DOM preserved
+→ further managed DOM mutation stops for this Window
+→ previous successful managed DOM remains exactly preserved
 → Store/Main/Subsystem remain unchanged
 ```
 
-恢复不在原 Window内尝试；fresh Window属于后续产品 composition。
+恢复不在原 Window内尝试；fresh Window属于后续 product composition。
 
 ---
 
-## 8. Deferred Physical Scope
+## 8. Presentation Resource Lifetime Evidence
+
+必须真实证明：
+
+```text
+WC resource() → real M12 bytes
+expected version mismatch → CONTENT_CONFLICT
+caller AbortSignal → CONTENT_CANCELLED
+returned bytes mutation does not affect later reads
+
+in-flight read
+→ Window presentation teardown
+→ underlying read cancelled
+→ business sees CONTENT_CANCELLED
+
+post-teardown resource()
+→ CONTENT_CANCELLED
+```
+
+不得向 WC 暴露 token/path/origin/private Renderer client。
+
+---
+
+## 9. Deferred Physical Scope
 
 M13/04 不要求：
 
@@ -183,21 +252,23 @@ PWA Worker/MessagePort runtime
 PWA storage/fetch equivalence
 ```
 
-这些分别属于 M14–M17。
+Window presentation teardown在 Chromium harness中只 qualification M13 resource/callback lifetime；不声称 M15 Desktop shutdown E2E已关闭。
 
 ---
 
-## 9. Frozen Closure
+## 10. Frozen Closure
 
 M13/04 complete when real Chromium proves：
 
 ```text
 bootstrap ordering/barrier is real
+Control/DataAuthority topology changes drive presentation correctly
+currentness/reconnect is scoped per subsystem
 Custom Element lifecycle ordering is real
-Store eligibility/currentness is browser-observable as specified
 HTMLElement identity survives allowed moves/reconnect
 fresh generation changes identity universe
-PresentationResourceClient reaches real M12 bytes
+unknown-tag structural failure causes zero partial DOM mutation
+PresentationResourceClient reaches real M12 bytes and dies with Window lifetime
 presentation failures do not mutate application authority
 ```
 
