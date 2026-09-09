@@ -9,7 +9,7 @@
 > 冻结决策：[ADR 0031](doc/decisions/0031-business-owned-web-component-projection.md)  
 > 目标：定义 M13 唯一 qualification/closure matrix；关闭 M11 Render replica + existing Renderer authority lifecycle → physical Web presentation seam，不扩大为 UI framework 或 Desktop full E2E。
 
-> **M13 closure = prepared business JS/CSS 在真实 Chromium 中启动；current Control/DataAuthority + eligible per-subsystem Renderer Store 被稳定机械投影为 business-owned Custom Elements，并保持 Frozen Render identity/currentness 与 M12 resource authority boundary。**
+> **M13 closure = prepared business JS/CSS 在真实 Chromium 中启动；current Control Session/DataAuthority + eligible per-subsystem Renderer Store 被稳定机械投影为 business-owned Custom Elements，并保持 Frozen Render identity/currentness 与 M12 resource authority boundary。**
 
 ---
 
@@ -22,11 +22,11 @@ WebPresentationConfigV1 validation before side effects
 prepared M12 Content resolution
 private Window browser binding + ordered bootstrap
 window.onload one-shot presentation start
-committed Control/DataAuthority topology reevaluation
+committed Control Session/DataAuthority topology reevaluation
 Renderer Store successful-commit reevaluation
 per-subsystem presentation eligibility/currentness
 thin Web Projector
-stable HTMLElement identity
+stable full-scope HTMLElement identity
 managed attrs/light DOM
 structural tag preflight
 context/data receiver ABI
@@ -110,8 +110,9 @@ Validation call count本身不是 contract；只要求 side effects前完成 fai
 必须证明：
 
 ```text
-Control snapshot is the only current subsystem/generation topology authority
+Control snapshot is the only current Session/subsystem/generation topology authority
 Store is the only per-subsystem Render replica authority
+fresh Session retires the entire old HTMLElement universe even when textual ids are reused
 DataAuthority removal removes managed subsystem DOM without requiring later Render commit
 generation change retires old DOM and old HTMLElement identity immediately
 new generation waits matching carrier + complete baseline
@@ -124,7 +125,7 @@ Control transport loss alone preserves/freeze last presentation and is not empty
 failed Store mutation → no presentation effect
 ```
 
-不得创建第二份 topology、generation或 reconnect state machine。
+不得创建第二份 Session/topology、generation或 reconnect state machine。
 
 ---
 
@@ -134,6 +135,7 @@ failed Store mutation → no presentation effect
 
 ```text
 same live wire-node → same HTMLElement
+fresh Session with same textual ids → fresh HTMLElement
 same key across Domain/Subsystem does not collide
 move/reparent/reorder preserves instance
 managed body order deterministic
@@ -159,6 +161,7 @@ unregistered tag → zero mutation for that reconciliation
 no unknown element fallback
 previous successful managed DOM preserved exactly
 Window latches no-further-managed-mutation state
+later Session/DataAuthority/generation/Store changes still produce zero DOM mutation in failed Window
 ```
 
 不允许用 DOM rollback framework满足该要求。
@@ -198,6 +201,7 @@ bootstrap failure → Projector never runs
 context/data callback throw → presentation-local
 resource rejection → presentation-local
 unregistered tag → preflight fail-closed + preserve previous DOM
+structural failed Window remains frozen despite later authority change
 ordinary DOM/business presentation failure → presentation-local best effort
 no failure above rolls back Renderer Store
 no failure above mutates Main/Subsystem authority
@@ -216,10 +220,11 @@ window.onload
 script/style load behavior
 HTMLElement identity
 DOM move/reorder
+fresh Session identity replacement
 DataAuthority removal/generation transition
 per-subsystem same-generation reconnect
 Control transport loss freeze
-unknown-tag zero-mutation preflight
+unknown-tag zero-mutation preflight + post-failure freeze
 resource-backed business WC
 Window teardown resource cancellation
 ```
@@ -258,7 +263,8 @@ CI 至少保持当前 Node 20 / 24 qualification policy；浏览器 runner只是
 [ ] private Window binding + ordered styles/scripts + explicit bootstrap failure detection
 [ ] window.onload one-shot presentation start / no bootstrapReady state machine
 
-[ ] M13/02 committed DataAuthority topology reevaluation
+[ ] M13/02 committed Session/DataAuthority topology reevaluation
+[ ] fresh Session cannot reuse old HTMLElement universe
 [ ] DataAuthority removal cannot leave orphaned DOM
 [ ] fresh generation retires old element universe before new baseline
 [ ] successful Store commit reevaluation
@@ -267,9 +273,10 @@ CI 至少保持当前 Node 20 / 24 qualification policy；浏览器 runner只是
 [ ] Control transport loss preserves last presentation without inventing empty authority
 
 [ ] M13/03 thin Projector
-[ ] stable full-scope HTMLElement identity
+[ ] stable full-scope HTMLElement identity including Session
 [ ] deterministic managed body order
 [ ] preflight all newly-required tags before DOM mutation
+[ ] structural failure stays frozen across later authority changes
 [ ] context/data receiver ordering + no unchanged-data retry/redelivery
 [ ] PresentationResourceClient façade
 [ ] Window lifetime cancellation
@@ -277,8 +284,8 @@ CI 至少保持当前 Node 20 / 24 qualification policy；浏览器 runner只是
 
 [ ] M13/04 real Chromium vertical
 [ ] real M12 resource read from business WC
-[ ] authority removal / generation / reconnect identity evidence
-[ ] unknown-tag zero-partial-DOM evidence
+[ ] Session / authority removal / generation / reconnect identity evidence
+[ ] unknown-tag zero-partial-DOM + post-failure freeze evidence
 [ ] teardown cancellation evidence
 [ ] callback/resource/structural failure isolation
 

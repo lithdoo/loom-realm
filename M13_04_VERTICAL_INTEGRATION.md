@@ -85,6 +85,17 @@ window.onload occurs before first Projector mutation
 
 至少使用两个 subsystem A/B。
 
+### Fresh Session
+
+```text
+Session S projects A/B
+→ current Control is replaced by fresh Session S'
+→ S' may reuse same subsystemKey/generation/domainId/key text
+→ every S HTMLElement retires
+→ no S HTMLElement is reused by S'
+→ S' waits matching Data carriers/baselines before fresh projection
+```
+
 ### Committed removal
 
 ```text
@@ -147,6 +158,7 @@ same key in two Subsystems
 root reorder
 tree reparent
 fresh generation reusing textual key
+fresh Session reusing all textual identity components except sessionId
 ```
 
 证明：
@@ -155,7 +167,7 @@ fresh generation reusing textual key
 same live wire-node → same HTMLElement
 different live identity → different HTMLElement
 move/reorder moves existing instance
-fresh generation → fresh instance
+fresh generation / fresh Session → fresh instance
 managed body sequence deterministic
 frozen subsystem element is never detached/recreated by another subsystem update
 ```
@@ -212,6 +224,8 @@ Projector preflight detects unknown tag before mutation
 → Store/Main/Subsystem remain unchanged
 ```
 
+随后再制造一个真实 committed authority topology change（例如 remove subsystem 或 generation change），必须继续证明该 failed Window 的 DOM仍完全不变；authority/Store事实可前进，但 presentation不得自行“恢复”。
+
 恢复不在原 Window内尝试；fresh Window属于后续 product composition。
 
 ---
@@ -262,12 +276,11 @@ M13/04 complete when real Chromium proves：
 
 ```text
 bootstrap ordering/barrier is real
-Control/DataAuthority topology changes drive presentation correctly
+Session/DataAuthority topology changes drive presentation correctly
 currentness/reconnect is scoped per subsystem
 Custom Element lifecycle ordering is real
-HTMLElement identity survives allowed moves/reconnect
-fresh generation changes identity universe
-unknown-tag structural failure causes zero partial DOM mutation
+HTMLElement identity survives allowed moves/reconnect but never crosses Session/generation identity boundary
+unknown-tag structural failure causes zero partial DOM mutation and stays frozen across later authority changes
 PresentationResourceClient reaches real M12 bytes and dies with Window lifetime
 presentation failures do not mutate application authority
 ```

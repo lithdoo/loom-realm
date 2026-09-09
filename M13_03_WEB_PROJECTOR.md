@@ -32,7 +32,7 @@ same live wire-node identity
 
 ```text
 move/reparent/reorder → move existing element
-different Domain/Subsystem → distinct element
+different Session/Domain/Subsystem → distinct element
 fresh generation → fresh element
 ```
 
@@ -92,6 +92,8 @@ derive current mechanical reconciliation
 ```
 
 这里的 preflight只是 current reconciliation 的 side-effect-free检查；不建立 component registry、transaction framework或 DOM rollback system。
+
+Structural-failure latch一旦成立，后续 M13/02 Session/DataAuthority/generation变化和 Store commits仍然可以更新真实 authority/replica，但对该 Window产生 **zero managed DOM mutation**；不得以“清理过期 DOM”为理由绕过 formal failure freeze。恢复只通过 fresh Renderer Window/bootstrap。
 
 ---
 
@@ -268,12 +270,14 @@ DOM transaction/rollback framework
 
 ```text
 same live identity preserves HTMLElement
+same textual ids in fresh Session do not reuse HTMLElement
 same key across Domain/Subsystem does not collide
 move/reorder preserves element identity
 fresh generation creates fresh element
 managed body order deterministic
 unregistered new tag is detected before any DOM mutation
 structural failure preserves previous DOM exactly
+later authority/Store changes cannot mutate structurally failed Window
 context before first insertion and at most once
 context/data receivers independent
 initial data is delivered once
@@ -298,8 +302,9 @@ M13/03 complete when：
 
 ```text
 DOM is a mechanical projection of M13/02 authoritative/current facts
-wire identity maps stably to HTMLElement identity
+full wire identity including Session maps stably to HTMLElement identity
 structural preflight prevents partial DOM mutation on unknown tag
+structural failed Window remains physically frozen despite later authority changes
 business WC receives only context/data/resource capabilities defined by v1
 resource lifetime terminates with Window presentation lifetime
 presentation failures remain Window-local

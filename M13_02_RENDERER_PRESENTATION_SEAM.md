@@ -19,7 +19,7 @@ Presentation启动后只有两类 production reevaluation source：
 
 ```text
 A. committed Renderer authority topology change
-   → current Control Snapshot 的 dataAuthorities 发生 committed change
+   → fresh/current Control Snapshot 的 sessionId / dataAuthorities 发生 authoritative change
 
 B. successful current Render Store commit
    → render.domains / render.snapshot / render.patch accepted + atomically committed
@@ -45,6 +45,8 @@ Failed Store mutation：
 
 Business code不得订阅该 seam。
 
+所有 reevaluation 都受 M13/03 Window-local structural-failure latch约束：一旦该 latch成立，authority/Store仍可继续变化，但这个 Window不再发生 LoomRealm-managed DOM mutation。
+
 ---
 
 ## 2. Existing Facts Remain Authority
@@ -53,6 +55,7 @@ M13只读取既有事实：
 
 ```text
 current Control peer/snapshot
+current sessionId
 current dataAuthorities[]
 per-subsystem current/pending/failed Data slot
 Data identity: subsystemKey + generation + dataProfile
@@ -81,10 +84,11 @@ DOM存在与否不得反向决定 authority/currentness。
 
 ## 3. Per-subsystem Eligibility
 
-Eligibility 按 current `(subsystemKey, generation)` 独立计算，不是 Window-global all-or-nothing gate：
+Eligibility 按 current `(sessionId, subsystemKey, generation)` 独立计算，不是 Window-global all-or-nothing gate：
 
 ```text
-committed DataAuthority exists for subsystemKey/generation
+current Control snapshot identifies sessionId
+AND committed DataAuthority exists for subsystemKey/generation
 AND matching current Data carrier exists
 AND matching Store currentCarrier
 AND registrySeen
@@ -99,9 +103,25 @@ Window-level deterministic body order仍由 M13/03统一机械维护；对 froze
 
 ---
 
-## 4. Committed Authority Topology Change
+## 4. Committed Authority / Identity Topology Change
 
-Control snapshot 是“哪些 subsystem/generation 当前有 authority”的唯一 topology source。
+Control snapshot 是“哪个 Session、哪些 subsystem/generation 当前有 authority”的唯一 topology source。
+
+### Session changed
+
+Fresh current Control snapshot 若从 Session `S` 切到 `S'`：
+
+```text
+S != S'
+→ entire S wire-node / HTMLElement identity universe ends
+→ retire/remove all S managed elements
+→ discard S private identity/delivery bookkeeping
+→ evaluate S' current dataAuthorities
+→ wait each S' subsystem matching carrier + complete baseline
+→ project only fresh S' identities
+```
+
+即使 `subsystemKey/generation/domainId/key` 文本全部相同，也不得跨 Session复用 HTMLElement。
 
 ### DataAuthority removed
 
@@ -127,7 +147,9 @@ committed snapshot: subsystemKey G → G+1
 
 相同 textual `domainId/key` 在 G+1 中仍是 fresh identity。
 
-不得把 topology复制到 Presentation registry；reevaluation时直接读取 current Control/Data-slot facts。
+不得把 Session/DataAuthority topology复制到 Presentation registry；reevaluation时直接读取 current Control/Data-slot facts。
+
+如果 M13/03 已进入 structural failed state，上述 authority变化仍然有效，但不得再修改该 failed Window 的 managed DOM；恢复只通过 fresh Window。
 
 ---
 
@@ -138,7 +160,7 @@ committed snapshot: subsystemKey G → G+1
 ### Same-generation Data carrier loss
 
 ```text
-Control仍声明 same subsystemKey/generation
+Control仍声明 same sessionId/subsystemKey/generation
 + current Data carrier lost
 → keep that subsystem last committed managed DOM mounted
 → freeze that subsystem projection
@@ -164,11 +186,11 @@ Local Control terminal本身不是一个新的 committed empty authority snapsho
 
 ```text
 → freeze last successful managed presentation
-→ do not reinterpret as dataAuthorities=[]
+→ do not reinterpret as session/dataAuthorities removal
 → no presentation-driven authority mutation
 ```
 
-后续 fresh current Control snapshot再按其 committed topology决定 remove / generation change / resume。
+后续 fresh current Control snapshot再按其 `sessionId + dataAuthorities` 决定 full Session replacement / remove / generation change / resume。
 
 ---
 
@@ -198,6 +220,7 @@ presentation failure cannot rollback Store
 failed Store mutation → no presentation effect
 successful eligible Store commit → projection opportunity
 successful ineligible Store commit → stale DOM unchanged
+fresh Session with same textual node ids creates entirely fresh HTMLElement universe
 DataAuthority removal removes subsystem DOM without requiring another Render commit
 generation change retires old DOM before new baseline and never reuses old HTMLElement
 same-generation carrier loss preserves/freeze only affected subsystem
@@ -206,7 +229,8 @@ partial same-generation rebaseline stays hidden
 complete same-generation rebaseline enables one reconcile
 empty Registry reconciles that subsystem to empty
 Control terminal alone preserves/freeze last presentation
-fresh Control snapshot re-evaluates authoritative topology
+fresh Control snapshot re-evaluates session + authoritative topology
+structural-failed Window ignores later reevaluation for DOM mutation
 no second topology/store/revision/currentness machine
 ```
 
@@ -217,12 +241,14 @@ no second topology/store/revision/currentness machine
 M13/02 complete when：
 
 ```text
-Control snapshot remains the only presentation topology authority
+Control snapshot remains the only Session/subsystem/generation presentation topology authority
 M11 Store remains the only per-subsystem Render replica authority
-DataAuthority removal/generation change cannot leave orphaned old DOM
+Session/DataAuthority/generation changes cannot accidentally reuse stale HTMLElement identity
+DataAuthority removal/generation change cannot leave orphaned old DOM while Window is running
 same-generation transport loss cannot be mistaken for authority removal
 eligibility is per-subsystem and derived only from existing facts
 partial reconnect never leaks mixed state
+structural failed Window never resumes mutation from later authority changes
 business cannot observe or mutate the internal seam
 ```
 
