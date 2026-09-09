@@ -20,7 +20,15 @@ Example owns：
 Game Entry / game-specific Subsystem keys
 concrete game composition
 initial business input / game-specific glue
+concrete Renderer document/page CSS
 WebPresentationConfig declaration for the example/dev composition
+```
+
+M14 first slice 的 concrete logical key 固定为：
+
+```text
+subsystemKey = "map"
+→ @loomrealm-game/map Definition
 ```
 
 Example 是 private workspace，不作为 npm 发布物。
@@ -32,6 +40,8 @@ Importer 侧精确的 M14 consumer projection 见：
 ```text
 tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
 ```
+
+Map first-slice component vocabulary、RenderNode tree、Shadow/light DOM boundary 与 map-owned component CSS由 `M14_02_MAP_GAME_LIBRARY.md` 冻结；Example只拥有 concrete page/window composition，不复制另一份 component implementation。
 
 ## Source / preparation boundary
 
@@ -106,17 +116,7 @@ FSDB Map/{id} field meaning
 
 Materialization 负责移除 Ruby/Marshal/object-graph transport details，例如 decoder wrapper、object identity、typed-array runtime object等，并生成 `ContentClient.record()` 可返回的 `JsonValue`。它不是第二套 map business model。
 
-机械 projection 规则由 `M14_CONSUMER_PROJECTION.md` 唯一拥有，包括：
-
-```text
-known @ivar → strip one leading @, preserve remaining spelling
-RubyString/RubySymbol → JSON string
-Array → JSON array
-Table → { dimensions, xSize, ySize, zSize, values:number[] }
-Map.events → embedded JSON object keyed by decimal event id
-```
-
-第一版不拆 `MapEvent` Group，也不为 M14 增加 `ContentClient.group()`。
+机械 projection 规则由 `M14_CONSUMER_PROJECTION.md` 唯一拥有，包括 primitive/Hash/Table/index/fail-closed 细则。第一版 `Map.events` 保持嵌套，不拆 `MapEvent` Group，也不为 M14 增加 `ContentClient.group()`。
 
 因此 M14 不创建：
 
@@ -131,14 +131,18 @@ Essentials→map example adapter
 
 ## Example/test prepared Content assembly
 
-Essentials importer 不负责 map browser build，也不负责 Web Presentation Config。
+Essentials importer 不负责 map browser build，也不负责 Web Presentation Config/page CSS。
 
 M14 使用一个薄的 example/test preparation step 把已经存在的内容组装成 qualification 使用的 prepared Content view：
 
 ```text
 importer-produced FSDB or CI-safe semantic fixture
 +
-@loomrealm-game/map browser JS/CSS build
+@loomrealm-game/map browser registration JS
++
+@loomrealm-game/map component/default CSS
++
+examples/essentials-v21.1 concrete page CSS
 +
 example WebPresentationConfig logical refs
 → one test-local prepared Content view
@@ -154,6 +158,7 @@ MUST NOT become Runtime dependency
 MUST NOT become production Host
 MUST NOT create UniversalGamePackager / ContentBuilder framework
 MUST NOT teach the Essentials importer about map browser JS/CSS
+MUST NOT rewrite/inject WC implementation or CSS at qualification time
 ```
 
 只有未来多个真实 games 证明需要共享 packaging capability 时才讨论抽出 package。
@@ -165,12 +170,12 @@ MUST NOT teach the Essentials importer about map browser JS/CSS
 ```text
 examples/essentials-v21.1/game.json
 → parseGameEntryV1 / validateGameEntryV1
-→ validated subsystem keys + initial target/input
+→ validated logical subsystemKey "map" + initial target/input
 → test-owned physical Definition binding
 → Main
 ```
 
-M14 test harness 只为 validated logical key 绑定具体 Definition；不要求 Hostra/PWA Launch Manifest，因此不侵入 M15。
+M14 test harness 只为 validated logical key绑定具体 Definition；不要求 Hostra/PWA Launch Manifest，因此不侵入 M15。
 
 第一条 vertical 可以使用最小 initial business input，例如：
 
@@ -186,20 +191,66 @@ M14 test harness 只为 validated logical key 绑定具体 Definition；不要�
 
 ## Presentation preparation
 
-`@loomrealm-game/map` browser build 是 game library-owned presentation artifact，但必须进入正常 prepared Content：
+`@loomrealm-game/map` browser build 是 game library-owned presentation artifact；它固定注册 M14 first-slice tags：
 
 ```text
-map browser JS/CSS build
+lr-map-view
+lr-map-sprite
+```
+
+Example 不重复定义这些 Custom Elements。它只声明并提供 concrete page composition CSS，例如语义等价于：
+
+```css
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+lr-map-view {
+  width: 100%;
+  height: 100%;
+}
+```
+
+该 CSS 不得依赖 `lr-map-view` / `lr-map-sprite` Shadow DOM private class 名作为跨-package contract。
+
+Browser presentation必须进入正常 prepared Content：
+
+```text
+map component/default CSS
+→ example page CSS
+→ map browser registration JS
 → example/test prepared Content assembly
 → prepared Content logical refs
 → WebPresentationConfigV1
-→ M13 bootstrap
+→ ordered M13 bootstrap
 → native customElements registration
+→ window.onload
+→ Projector
 ```
 
-Example 可以拥有该具体游戏的 Config declaration；Config acquisition/private browser binding/Window lifecycle 仍属于 test/platform composition，不进入 business authority。
+Example 的 Config 必须保持：
 
-M14 qualification 不得通过测试文件直接 import map browser entry 来替代 M13 bootstrap。
+```text
+styles[]
+    map component/default CSS first
+    example page/override CSS second
+
+scripts[]
+    map browser registration JS
+```
+
+具体 namespace/key 由 prepared Content identity决定；Config 不携带 path/URL/token。
+
+Config acquisition/private browser binding/Window lifecycle仍属于 test/platform composition，不进入 business authority。
+
+M14 qualification 不得通过测试文件直接 import map browser entry、手工注册 tags或直接注入 CSS 来替代 M13 bootstrap。
 
 ## CI vs official corpus
 
@@ -218,11 +269,11 @@ Local compatibility qualification
 → existing importer
 → same semantic JSON materialization into FSDB
 → same prepared Content assembly
-→ same ContentClient/map runtime/browser path
+→ same ContentClient/map runtime/browser WC path
 → recorded compatibility result
 ```
 
-两条路径必须汇入同一 `@loomrealm-game/map` consumer path，不允许 CI 使用另一套 fake map model，也不允许 map runtime 在 local path 读取 importer decoder objects。
+两条路径必须汇入同一 `@loomrealm-game/map` consumer path，不允许 CI 使用另一套 fake map model/presentation，也不允许 map runtime 在 local path 读取 importer decoder objects。
 
 ## First slice
 
@@ -237,18 +288,29 @@ movement collision facts needed by first slice
 real tileset/player resource
 ```
 
-资源 logical identity继续使用现有 Content mapping，例如 tileset `Graphics / Tilesets/{tileset_name}`、character `Graphics / Characters/{character_name}`；version由 map Runtime 调现有 `ContentClient.resource()` 获得。
+资源 logical identity继续使用现有 Content mapping，例如 tileset `Graphics / Tilesets/{tileset_name}`、character `Graphics / Characters/{character_name}`；version由 map Runtime调现有 `ContentClient.resource()` 获得。
+
+Presentation first slice固定：
+
+```text
+map.main RenderDomain
+→ lr-map-view viewport root
+→ lr-map-sprite player child
+→ map-view private tile Canvas + entity slot
+```
 
 M14 不承诺完整 Pokémon Essentials gameplay、battle/menu/party/Pokédex 等业务。
 
 ## Closure
 
 - example workspace private；
-- importer 只参与 source/semantic preparation，不成为 runtime dependency；
-- local output 位于 ignored `.local/`；
-- importer 将 source/decoder representation materialize 为 FSDB JSON records，不把 Ruby object wrappers变成 map runtime API；
-- example/test preparation只组装 semantic Content + map browser artifacts + Config refs，不成为新 framework；
-- `game.json` 真实经过 `@loomrealm/game-package` validation 并驱动 M14 logical startup；
-- Runtime 通过 `ContentClient` 消费 FSDB JSON `JsonValue` records/resources；
-- example runtime 直接消费 prepared Content + game library/public LoomRealm APIs；
-- CI fixture 与 official-corpus qualification 使用同一 FSDB Content/runtime/browser path。
+- concrete Game Entry固定启动 logical `map` Subsystem，M14 harness不冒充 M15 Hostra child；
+- importer只参与 source/semantic preparation，不成为 runtime dependency；
+- local output位于 ignored `.local/`；
+- importer将 source/decoder representation materialize 为 FSDB JSON records，不把 Ruby object wrappers变成 map runtime API；
+- example/test preparation只组装 semantic Content + map browser artifacts + page CSS + Config refs，不成为新 framework；
+- `game.json`真实经过 `@loomrealm/game-package` validation并驱动 M14 logical startup；
+- Runtime通过 `ContentClient`消费 FSDB JSON `JsonValue` records/resources；
+- example只拥有 concrete page CSS/Config，不复制 map WC内部实现；
+- map browser tags/CSS真实通过 prepared Content + M13 bootstrap加载；
+- CI fixture与 official-corpus qualification使用同一 FSDB Content/runtime/`lr-map-view`+`lr-map-sprite` browser path。
