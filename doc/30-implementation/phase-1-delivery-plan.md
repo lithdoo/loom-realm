@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M12/M13 **Implemented / Qualified / Closed**；M14 consumer shape revised
+> 稳定程度：M12/M13 **Implemented / Qualified / Closed**；M14 consumer + presentation shape revised
 > 主要定义：M0..M17 实现顺序、current closure、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-09
@@ -263,9 +263,21 @@ Root workspace增加 `game-libs/*` 与 `examples/*`。Framework继续 `@loomreal
 
 ### M14/02 — map game library
 
-`game-libs/map` runtime Definition只依赖 public `@loomrealm/subsystem`，真实使用 Frame/InputListener/RenderDomain/ContentClient；browser side拥有 map-owned Custom Elements并结构性消费 M13。
+`game-libs/map` runtime Definition只依赖 public `@loomrealm/subsystem`，真实使用 Frame/InputListener/RenderDomain/ContentClient；browser side结构性消费 M13。
 
-M14 不再额外定义 normalized map schema。第一版边界固定为：
+第一条 vertical 固定最小 logical topology：
+
+```text
+one business subsystemKey = "map"
+→ @loomrealm-game/map Definition
+
+one authoritative RenderDomain
+→ domainId = "map.main"
+```
+
+M14 test-owned binding不 claim真实 Desktop Node child；M15才把同一 logical `map` Subsystem通过 Hostra RuntimeHosting落成真实 Node Runner child。Player/tile/camera/event visual representation不拆额外 Subsystem/Runtime Container。
+
+M14 不再额外定义 normalized map schema。第一版数据边界固定为：
 
 ```text
 RMXP/Essentials map model
@@ -282,9 +294,29 @@ ContentClient.record()/resource()
 
 Map runtime不得依赖 Ruby Marshal binary、`.rxdata` decoding、`RmxpObject/RubyString/$id/$ref/$typed` importer representation、decoder class/object、tool filesystem或 Platform storage。
 
+M14 first-slice browser vocabulary同时冻结为：
+
+```text
+map.main
+root  key="viewport" tag="lr-map-view"
+└── child key="player" tag="lr-map-sprite"
+```
+
+正常 managed light DOM：
+
+```html
+<body>
+  <lr-map-view>
+    <lr-map-sprite></lr-map-sprite>
+  </lr-map-view>
+</body>
+```
+
+`lr-map-view` 用 private Shadow DOM + tile Canvas + entity slot实现 viewport/tile presentation；tile/layer/camera不建立 one-WC-per-object taxonomy。`lr-map-sprite`表达 player visual，ordinary movement复用 same HTMLElement identity。
+
 ### M14/03 — Essentials concrete example / preparation
 
-`examples/essentials-v21.1`负责 concrete Game Entry、game-specific keys、initial business input/composition 与 presentation declaration；它不再承担 Essentials→map normalized adapter。
+`examples/essentials-v21.1`负责 concrete Game Entry、logical `map` key、initial business input/composition、concrete page CSS 与 WebPresentationConfig declaration；它不承担 Essentials→map normalized adapter，也不复制 map WC内部实现。
 
 ```text
 external/local source
@@ -296,57 +328,69 @@ external/local source
 → examples/essentials-v21.1 / @loomrealm-game/map
 ```
 
-Importer materialization只把已有 RMXP/Essentials semantics 转为 JSON-compatible FSDB representation，并剥离 source/decoder/serialization mechanics；不重新定义 map semantics。Runtime example/map library不 import tool modules，第三方 corpus不提交仓库。
+Prepared Content assembly固定组合：
 
-Canonical CI使用 checked-in synthetic/author-owned FSDB JSON fixture，其 field semantics 与同一 RMXP/Essentials-compatible Content model 对齐；exact v21.1 official/local corpus作为独立 local compatibility evidence。两条 evidence必须汇入同一 `ContentClient`/runtime/browser consumer path。
+```text
+FSDB records/resources
++ map browser registration JS
++ map component/default CSS
++ example page CSS
++ example WebPresentationConfig refs
+→ one prepared Content view
+```
+
+Styles按 map defaults → example override/page CSS 顺序进入 M13 bootstrap；browser script注册 `lr-map-view` / `lr-map-sprite`。Test不得 direct import、手工注册 tags或直接注入 CSS绕过 bootstrap。
+
+Canonical CI使用 checked-in synthetic/author-owned FSDB JSON fixture，其 field semantics 与同一 RMXP/Essentials-compatible Content model 对齐；exact v21.1 official/local corpus作为独立 local compatibility evidence。两条 evidence必须汇入同一 `ContentClient`/runtime/`map.main`/WC consumer path。
 
 ### M14/04 — real consumer vertical
 
 至少完成：
 
 ```text
-ContentClient loads FSDB Map JSON + referenced Tileset JSON
+Game Entry logical "map"
+→ ContentClient loads FSDB Map + referenced Tileset
+→ Map.data/Table + Tileset semantics derive visible tile/passability
 → player spawn
 → directional input
 → business movement/collision
-→ RenderDomain update
-→ M13 map-owned WC
-→ visible movement
+→ map.main RenderDomain
+→ lr-map-view + lr-map-sprite
+→ private tile Canvas + real PresentationResourceClient bytes
+→ visible passable movement + visible blocked movement evidence
 ```
 
-至少一个真实可见资源（tileset 或 player sprite）必须完整走：
+至少一个可见 tile必须真实由 `Map.data + Tileset/resource` facts驱动；至少一个 passable 与一个 blocked movement必须由 persisted passability facts决定。不能只“读到了 Map/Tileset”后渲染 test-local fake terrain。
 
-```text
-FSDB JSON Content record
-→ map runtime ContentClient
-→ resource logical identity/version
-→ Render data
-→ map WC
-→ PresentationResourceClient
-→ browser bytes
-```
-
-Map browser JS/CSS 必须通过 prepared Content + `WebPresentationConfigV1`进入 M13 bootstrap；qualification不得用 test-local direct import或手工注册绕过 startup。
+Map/example JS/CSS 必须通过 prepared Content + `WebPresentationConfigV1`进入 M13 bootstrap。Real Chromium必须证明 exact managed tree、same HTMLElement reuse、private tile surface/entity slot、CSS page composition与真实 resource使用。
 
 M14 full vertical使用 test-owned composition harness串联 existing production Main/Subsystem/Data/Renderer/Content + existing/synthetic RendererInputSource + real Chromium。该 harness不是新的 production Host/Platform；不得创建 MiniDesktopHost/MapHost/GameRuntimeHost。
 
-只有真实 interaction自然需要时才增加 nested `frame.call/return`；不为覆盖率硬造第二个 reusable game library。
+只有真实 interaction自然需要时才增加 nested `frame.call/return`；不为覆盖率硬造第二个 reusable game library、第二个 visual-only RenderDomain或更多 WC taxonomy。
 
-记录真实 map workload 的 projection cost；只有可测 frame pressure 才允许最小 reopen M13 scheduling mechanics。
+性能只记录容易取得的 lightweight diagnostics；只有可复现 measurable failure才允许最小 reopen M12/M13，不为 M14 预建 profiler/scheduler framework。
 
 ### M14/05 — closure
 
-Future canonical gate：
+Target canonical CI gate：
 
 ```text
 npm run test:m14
 ```
 
-该命令不存在/未通过前不得声明 M14 Closed。Gate至少包含 `test:m13`、workspace/package boundary、source → FSDB semantic JSON materialization、game-lib tests、example preparation/vertical、real Chromium与 `@loomrealm-game/map` pack qualification，并在 Node 20/24 CI执行。
+该命令真实存在并通过前，当前 executable closure仍停在 `test:m13`。
 
-M14必须自动证明 runtime不依赖 tools/importer、不消费 RPG/RMXP decoder objects或 `RmxpObject/RubyString/$id/$ref/$typed` wrappers、只通过 `ContentClient` 获得 FSDB `JsonValue` map records、Render state不泄漏 path/URL/token/bytes、map browser startup走 prepared Content + M13 Config。
+M14 `Closed` 还必须有与同一 closure revision绑定的一次 local exact-v21.1 qualification：
 
-M14 Closed只证明 first real RMXP/Essentials-compatible FSDB game vertical，不代表完整 Pokémon Essentials gameplay、universal map schema或 Desktop/PWA full E2E。
+```text
+npm run test:m14:essentials-local
+```
+
+Closure evidence = Node 20/24 CI `test:m14` green + exact-v21.1 source fingerprint/local compatibility result + first-slice semantic/presentation result。第三方 corpus不进入仓库或 CI。
+
+Gate至少证明：workspace/package boundary、source→FSDB consumer projection、single `map` Subsystem、single `map.main` Domain、Game Entry startup、prepared Content、`lr-map-view → lr-map-sprite` managed tree、map private Canvas/Shadow boundary、map/example CSS ownership、M10 passability movement、real resource bytes、same HTMLElement identity与 real Chromium outcome。
+
+M14 Closed只证明 first real RMXP/Essentials-compatible FSDB game vertical，不代表完整 Pokémon Essentials gameplay、universal map schema、public Map presentation SDK或 Desktop/PWA full E2E。
 
 ---
 
@@ -354,7 +398,7 @@ M14 Closed只证明 first real RMXP/Essentials-compatible FSDB game vertical，�
 
 完成真实 Desktop composition：PREPARE、Main/Runner/Control/Data Broker、BrowserWindow、M13 presentation、M10 physical input、M14 concrete game + map library、reload/reconnect/shutdown。
 
-M15 用真实 Desktop physical composition替换 M14 test-owned qualification harness；不重新设计 Input/Render/Content/Web Presentation/game-library ownership或 RMXP/Essentials-compatible FSDB map semantics。
+M15 用真实 Desktop physical composition替换 M14 test-owned qualification harness；同一个 logical `map` Subsystem此时必须实际落成 Hostra Node Runner child。不重新设计 Input/Render/Content/Web Presentation/game-library ownership、`map.main` first-slice vocabulary或 RMXP/Essentials-compatible FSDB map semantics。
 
 ---
 
@@ -386,4 +430,4 @@ M16 PWA Runtime                            pending
 M17 PWA full E2E/equivalence               pending
 ```
 
-当前 canonical executable closure为 `npm run test:m13`。下一步按 M14/01–05 建立 first real RMXP/Essentials-compatible FSDB Content consumer；不重新打开 M13 已冻结边界，也不为通用化复制第二份 map schema。
+当前 canonical executable closure为 `npm run test:m13`。下一步按 M14/01–05 建立 first real RMXP/Essentials-compatible FSDB Content consumer，并按已冻结的 `map` / `map.main` / `lr-map-view → lr-map-sprite` presentation shape落地；不重新打开 M13 已冻结边界，也不为通用化复制第二份 map schema或 presentation framework。
