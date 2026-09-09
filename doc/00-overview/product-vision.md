@@ -4,7 +4,7 @@
 > 状态：Active / Normative  
 > 稳定程度：方向稳定，current v1 在首次实现 compatibility boundary 形成前可按治理规则直接收口  
 > 主要定义：产品目标、Game/Platform/Main 消费边界、跨平台原则、第一阶段验收方向  
-> 最近复核：2026-08-20
+> 最近复核：2026-09-09
 
 本文是 LoomRealm 最高层产品事实源。下层架构、协议、模块和实施文档不得通过实现便利反向改变这里的产品边界。
 
@@ -356,6 +356,8 @@ Main InputTarget
 
 Render Domain authoritative state 属于 Subsystem，Frame/Data carrier lifecycle 不自动创建/销毁 Render Domain。
 
+Web Presentation 只把 current Control/DataAuthority 与 current Render replica 的 authoritative facts 机械投影到 business-owned Web Components；DOM 不成为 Main/Render authority source。精确 identity/currentness/ABI 由冻结的 Web Presentation contracts 定义。
+
 ---
 
 ## 10. Content / Execution Boundary
@@ -374,6 +376,8 @@ Content API 不提供 arbitrary executable path/capability。
 
 Runtime bootstrap token、Runner bootstrap、Data ticket/Port、Content credential 相互独立。
 
+Presentation bootstrap JS/CSS 通过独立 Window-level Config 消费 prepared Content；runtime business presentation resources 通过 narrow PresentationResourceClient 消费 Content。两者都不得把 executable/path/credential material带入 business authority。
+
 ---
 
 ## 11. Cross-platform Equivalence
@@ -386,6 +390,7 @@ same subsystem keys
 same LogicalGameBootstrap semantics
 same formal protocol/profile semantics
 same Subsystem author ABI
+same Web Presentation Config/API semantics
 same logical scenario/input
 same business-observable outcome
 ```
@@ -398,6 +403,7 @@ PID == Worker id
 IPC/ticket == Port transfer
 WebSocket == MessagePort
 HTTP == Service Worker internals
+private browser resource binding identical
 ```
 
 ---
@@ -415,13 +421,15 @@ Game source
 → Content
 → Input
 → Render
+→ Web Presentation
+→ real business Web Components
 → nested Subsystem call/return
 → Data reconnect
 → Renderer reload
 → shutdown
 ```
 
-分别在 Hostra Desktop 与 PWA 得到等价 logical outcome。
+先由 `loom.map` 成为 Frame/Input/Render/Content/Web Presentation 的首个真实综合 consumer，再分别在 Hostra Desktop 与 PWA 完成 full E2E，并验证等价 logical outcome。
 
 ---
 
@@ -463,20 +471,15 @@ predictive platform/Runner mega-package
 ## 15. 当前实施主线
 
 ```text
-Foundation ✅
-Wire ✅
-↓
-Game Package document validation ✅
-↓
-Runtime Control mechanics
-↓
-Subsystem author/host + Main logical bootstrap
-↓
-Hostra Launcher first real Game Package consumer
-↓
-Desktop vertical slice / Data / Input / Render / Content
-↓
-PWA Launcher second real Game Package consumer
-↓
-PWA E2E / cross-platform equivalence
+M1–M9 Foundation / Game / Runtime / Hostra / Data   ✅
+M10 User Input                                      ✅ Closed
+M11 Render Replication                              ✅ Closed
+M12 Content                                         ✅ Closed
+M13 Web Presentation                                Design Frozen / implementation pending
+M14 loom.map                                         pending
+M15 Desktop full E2E                                 pending
+M16 PWA Runtime                                      pending
+M17 PWA full E2E / equivalence                       pending
 ```
+
+当前 executable closure仍是 `npm run test:m12`。下一步按已冻结的 M13/01–05 完整实施 Web Presentation；M13 关闭后再以 `loom.map` 验证真实 business consumer，并进入 Desktop/PWA full E2E。
