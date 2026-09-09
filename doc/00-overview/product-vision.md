@@ -28,230 +28,114 @@ LoomRealm 是一个：
 - 每个平台独立拥有 Launch Manifest/schema/resolver，不建立万能 launcher option bag；
 - 业务 Subsystem source 不依赖 Desktop/PWA/Transport/launch config；
 - Main 是唯一 Session/Runtime/Frame/Activation/InputTarget/DataAuthority application authority；
-- Platform 负责 executable binding、Process/Worker/Socket/Port/Window/Content/Provisioning physical topology，但不获得 application authority；
-- Hostra/PWA 对相同 logical Game/scenario 得到等价 application outcome；
-- 不同平台可以使用不同 Definition artifact/path/bytes，只要遵守相同 author ABI、formal semantics 与 business-observable result。
+- Platform 负责 executable/Process/Worker/Socket/Port/Window/Content physical topology，不获得 application authority；
+- Renderer 只拥有 read-only Main mirror、Input producer gate、per-subsystem Render replica、physical Web projection；
+- Business Web presentation 只拥有具体 Custom Element/Canvas/WebGL/layout/private state；
+- Hostra/PWA 对相同 logical Game/scenario 得到等价 application outcome。
 
 ---
 
-## 2. 总体闭环
+## 2. Repository / Consumer Layering
+
+Phase 1 从 M14 开始显式区分：
 
 ```text
-Game installation / source
-        ↓
-matching Platform Launcher PREPARE
-    ├── @loomrealm/game-package
-    │       Game Entry parse / validate
-    ├── current Platform Launch Manifest parse / validate
-    ├── exact Game↔Platform key-set join
-    ├── all executable resolution
-    ├── installation/security containment
-    └── hosting capability preflight
-        ↓
-Prepared Current-Platform Game
-    ├── immutable LogicalGameBootstrap
-    │       ↓
-    │      LoomRealm Main
-    │       │
-    │       └── launch(subsystemKey)
-    │
-    └── plan-bound RuntimeHosting
-            ↓
-       Host-owned Runner
-            ↓
- platform-selected Definition Module
-            ↓
-     @loomrealm/subsystem/host
-            ↓
-       business behavior
+packages/
+    LoomRealm framework/runtime
+
+game-libs/
+    reusable game-domain libraries
+
+examples/
+    concrete games
+
+apps/
+    platform hosts
+
+tools/
+    development/import/compatibility tooling
 ```
 
-Renderer/Data：
+主消费方向：
 
 ```text
-Main committed authority
-        ↓
-Web Renderer
-        ⇅ authorized Data Profile
-Subsystem Runtime
+examples → game-libs → public LoomRealm author APIs → packages
 ```
 
-核心边界：
+Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 
-```text
-Game Entry document != Main bootstrap model
-Game logical topology != Platform executable binding
-Platform physical ownership != application authority
-Framework package != reusable game library != concrete game
-```
+`@loomrealm-game/map` 是第一个真实 reusable game library；它采用现有 RMXP/Essentials map semantics 作为第一版业务模型，而不是升级为 LoomRealm universal map contract。
 
 ---
 
-## 3. Game Entry / Game Package
+## 3. Game / Platform / Main Boundary
 
-Game Package v1 document：
-
-```ts
-interface GameEntryV1 {
-  readonly formatVersion: 1;
-  readonly initial: {
-    readonly subsystem: string;
-    readonly input: JsonValue;
-  };
-  readonly subsystems: readonly {
-    readonly key: string;
-  }[];
-}
-```
-
-`key` 是 application Subsystem identity，由 concrete game 拥有；LoomRealm 不为 map 等业务预留 `loom.*` key prefix。
-
-Game Entry 不声明：
+Game source负责 logical game declaration与 business source；Platform Launcher负责 current platform executable binding；Main只消费 validated logical bootstrap。
 
 ```text
-module
-launcher.type / launcher.entry
-Node/Worker selection
-argv/env/options
-WebSocket/MessagePort
-Platform provisioning
-bootstrap token / Data ticket
-platform switch/options bag
+Game source
+→ matching Platform Launcher PREPARE
+→ LogicalGameBootstrap + PlatformLaunchPlan
+→ RuntimeHosting
+→ Main
 ```
 
-`@loomrealm/game-package`：
-
-```text
-untrusted Game Entry
-→ deterministic closed validation
-→ detached immutable ValidatedGameEntryV1
-```
-
-它的 Runtime-product primary consumers 是 matching Platform Launchers，不是 Main 或业务 Subsystem。
+平台可以使用不同 executable/transport/storage mechanics，但不能改变 logical application authority。
 
 ---
 
-## 4. Platform Launcher PREPARE
+## 4. Game Entry / Launch Manifest
 
-Hostra：
-
-```text
-@loomrealm/game-launcher-hostra
-    game.json via @loomrealm/game-package
-    + launch.hostra.json
-    → HostraLaunchPlan
-```
-
-PWA：
+Game Entry 是 platform-neutral、readonly、declarative game topology；Platform Launch Manifest只声明 current platform executable/hosting facts。
 
 ```text
-@loomrealm/game-launcher-pwa
-    game.json via @loomrealm/game-package
-    + launch.pwa.json
-    → PwaLaunchPlan
-```
-
-两个 Platform manifest 当前 MAY 都有 `{key,module}` binding，但不是 universal schema。
-
-Phase 1：
-
-```text
-keys(Game Entry) = keys(Current Platform Launch Manifest)
-```
-
-PREPARE 必须在任何 business Runtime side effect 前完成：
-
-```text
-Game validation
-→ Platform manifest validation
-→ exact join
-→ all executable resolution
-→ security/hosting capability validation
-→ freeze immutable PlatformLaunchPlan
-→ project immutable LogicalGameBootstrap
-```
-
-任何 PREPARE failure：
-
-```text
-Process/Worker creation = 0
-business Definition import = 0
-Runtime Control establishment = 0
-```
-
----
-
-## 5. Main-facing Bootstrap
-
-Main 接收的不是 Game Entry document，而是已经投影的 logical facts：
-
-```ts
-interface LogicalGameBootstrap {
-  readonly subsystemKeys: readonly string[];
-  readonly initial: {
-    readonly subsystemKey: string;
-    readonly input: JsonValue;
-  };
-}
-```
-
-Main 不接收：
-
-```text
-formatVersion
-ValidatedGameEntryV1 brand
-PlatformLaunchPlan
-module/path/URL
-Node/Worker options
-raw launch manifest
-```
-
-同时 Platform 提供 plan-bound `RuntimeHosting`：
-
-```text
-Main launch(subsystemKey)
-→ RuntimeHosting lookup frozen plan
-→ physical Runner Runtime
-```
-
-这使 Main 保持 platform-neutral，同时不与 installation document model 耦合。
-
----
-
-## 6. Platform / Runner
-
-Host-owned Runner 是 physical Runtime entry：
-
-```text
-Hostra → Host-owned Node Runner Process
-PWA    → Host-owned Worker Runner
-```
-
-Runner：
-
-```text
-verify planned binding
-→ load exact selected Definition Module
-→ validate SubsystemDefinitionFactory
-→ construct RuntimeControlBinding / SubsystemDataBinding / ContentClient
-→ enter @loomrealm/subsystem/host
-```
-
-Business Definition Module 不是 Process/Worker entry，也不读取 Platform manifest/bootstrap material。
-
-Host-owned deployment/security policy包括：
-
-```text
-Node executable / Worker Runner entry
-shell/argv/env safety policy
-Worker constructor policy
-bootstrap credentials
-Control/provisioning facilities
-resource/timeouts
-CSP/same-origin policy
+Game Entry
+!= Hostra launch manifest
+!= PWA launch manifest
+!= Web presentation config
 ```
 
 Game/Platform manifest不能把“选择 business implementation”升级为任意 Host code execution authority。
+
+---
+
+## 5. PREPARE Boundary
+
+matching Platform Launcher负责：
+
+```text
+common Game validation
++ current Platform manifest validation
++ exact key join
++ executable/security/hosting preflight
+→ immutable PlatformLaunchPlan
++ LogicalGameBootstrap
+```
+
+PREPARE failure必须发生在 Runtime/Subsystem Definition side effects之前。
+
+---
+
+## 6. Platform Composition
+
+Platform composition拥有：
+
+```text
+Process / Worker / Window hosting
+Control/Data physical binding
+Content physical binding
+Web presentation config acquisition/private browser binding
+startup / shutdown / supervision
+```
+
+但不拥有：
+
+```text
+Session/Frame/InputTarget/DataAuthority
+Subsystem business state
+Render Domain authority
+business Web Component semantics
+```
 
 ---
 
@@ -381,6 +265,18 @@ Runtime bootstrap token、Runner bootstrap、Data ticket/Port、Content credenti
 
 Presentation bootstrap JS/CSS 通过独立 Window-level Config 消费 prepared Content；runtime business presentation resources 通过 narrow PresentationResourceClient 消费 Content。两者都不得把 executable/path/credential material带入 business authority。
 
+M14 的 map content 不再经过额外 normalized-map adapter：
+
+```text
+Essentials/RMXP source
+→ tools importer
+→ RMXP/Essentials semantic records + raw resources
+→ prepared Content
+→ @loomrealm-game/map
+```
+
+Importer可以理解 Ruby Marshal、`.rxdata`、PBS、RPG::* source objects；map runtime只理解 materialized map semantics，不理解 importer wrappers、tool filesystem 或 physical storage。
+
 ---
 
 ## 11. Cross-platform Equivalence
@@ -435,14 +331,18 @@ Game source
 M14 先建立 framework 之外的 reusable game library + concrete game consumer：
 
 ```text
-game-libs/map            @loomrealm-game/map
-        ↓
-examples/essentials-v21.1
-        ↓
-Frame/Input/Render/Content/M13 real map vertical
+external/local Essentials v21.1 source
+→ existing importer
+→ RMXP/Essentials semantic map records + resources
+→ prepared Content
+→ examples/essentials-v21.1
+→ @loomrealm-game/map
+→ Frame/Input/Render/Content/M13 real map vertical
 ```
 
-Essentials/RPG Maker source compatibility 只通过 `tools/fixtures/essentials-v21.1` 与 example-local preparation进入 normalized map content；map library 不理解 source-format/tooling semantics。随后分别在 Hostra Desktop 与 PWA 完成 full E2E，并验证等价 logical outcome。
+Map library直接使用 RMXP/Essentials map semantics；不建立 `MapNormalizedV1` 或 generic MapBundle。Map browser JS/CSS通过 prepared Content + `WebPresentationConfigV1`启动，可见 tileset/player资源由 WC通过 `PresentationResourceClient`获得。
+
+随后分别在 Hostra Desktop 与 PWA 完成 full E2E，并验证等价 logical outcome。
 
 ---
 
@@ -462,7 +362,8 @@ Essentials/RPG Maker source compatibility 只通过 `tools/fixtures/essentials-v
 12. 主要定义依赖保持单向 DAG；
 13. tooling/preparation不成为 runtime game dependency；
 14. 没有真实 compatibility obligation 时不制造虚假 v2/compat layer；
-15. 有真实 compatibility obligation 后严格 version/migration 治理。
+15. 已有真实 domain model 足以满足 consumer 时，不为了“通用化”复制第二份 schema；
+16. 有真实 compatibility obligation 后严格 version/migration 治理。
 
 ---
 
@@ -480,6 +381,7 @@ universal cross-platform launcher schema
 predictive platform/Runner mega-package
 GameLibrary registry/base framework
 framework-owned map/menu/dialogue/battle vocabulary
+universal map schema / MapNormalizedV1
 ```
 
 ---
@@ -498,4 +400,4 @@ M16 PWA Runtime                                      pending
 M17 PWA full E2E / equivalence                       pending
 ```
 
-当前 executable closure是 `npm run test:m13`。下一步按 M14/01–05 建立 `game-libs/map` 与 `examples/essentials-v21.1`，再进入 Desktop/PWA full E2E。
+当前 executable closure是 `npm run test:m13`。下一步按 M14/01–05 建立 `game-libs/map` 与 `examples/essentials-v21.1`，直接用 importer materialized 的 RMXP/Essentials semantic records完成 first playable map vertical，再进入 Desktop/PWA full E2E。
