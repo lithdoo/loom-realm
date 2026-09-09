@@ -119,6 +119,40 @@ Hostra/PWA physical storage
 
 Compatibility/import tooling 负责把 source/decoder representation materialize 成 M12 Content API 可直接返回的 JSON records。该转换是 persistence/runtime representation conversion，不是第二套 map business model；因此不建立 example-local Essentials→map adapter，也不定义 `MapNormalizedV1`。
 
+### M14 consumer projection
+
+精确 projection 规则由：
+
+```text
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
+```
+
+拥有。Map Runtime 不自行复制另一套 mapper。
+
+第一版核心规则：
+
+```text
+known RPG @ivar → strip one leading @, preserve remaining spelling
+RubyString / RubySymbol → JSON string
+Ruby Array → JSON array
+RGSS Table → { dimensions, xSize, ySize, zSize, values:number[] }
+Map.events → embedded JSON object keyed by decimal event id
+```
+
+例如：
+
+```text
+@tileset_id    → tileset_id
+@autoplay_bgm  → autoplay_bgm
+@character_name → character_name
+```
+
+不为 JS 风格改成 camelCase，不生成 LoomRealm 自创字段名。
+
+`Map.events` 第一版保持嵌套，不拆成独立 `MapEvent` Group，也不为此新增 `ContentClient.group()`。无法无歧义 materialize、但被真实 M14 vertical需要的 source fact必须在 preparation 阶段 fail closed；不得把 generic importer wrapper穿透给 map Runtime。
+
+Importer 的 lossless raw/structural authority继续保存 unknown/extra source facts；consumer projection只是 derived Runtime view。
+
 ---
 
 ## 4. Content / Input / Render
@@ -137,6 +171,33 @@ ContentClient.record("MapMetadata", mapId) when needed
 ```
 
 优先保留 existing domain separation，而不是建立新的 MapBundle。
+
+### Resource identity/version
+
+M14 复用 importer 已有 resource logical identity，例如：
+
+```text
+Tileset name   → Graphics / Tilesets/{tileset_name}
+Autotile name  → Graphics / Autotiles/{name}
+Character name → Graphics / Characters/{character_name}
+```
+
+Map Runtime 使用现有：
+
+```text
+ContentClient.resource(namespace, key)
+→ bytes + mime + contentVersion
+```
+
+取得浏览器所需资源的真实 `contentVersion`。若 Runtime 不需要 resource bytes，不长期保留；Render state只携带：
+
+```text
+namespace
+key
+contentVersion
+```
+
+M14 接受 Runtime 与 Renderer可能各读取一次同一资源，不为理论效率新增 Content resource metadata/HEAD author API。只有真实 workload 的 measurable evidence才能支持最小 reopen M12。
 
 ### Input
 
@@ -173,7 +234,7 @@ Business WC 对 LoomRealm-managed attrs/data/children/order只读。
 
 ```text
 FSDB JSON Content record
-→ map runtime ContentClient
+→ map runtime ContentClient.resource()
 → resource logical identity/version
 → Render data
 → receiveRenderData
@@ -229,12 +290,19 @@ Essentials source
 → source/decoder representation
 → FSDB JSON records whose semantics mirror required RMXP/Essentials map facts
   + resources
+→ example/test prepared Content assembly
 → prepared Content
 → examples/essentials-v21.1
 → @loomrealm-game/map via ContentClient
 ```
 
 Example 负责 Game Entry、Subsystem key、initial input、game-specific composition与 presentation declaration；它不是 map compiler。
+
+Qualification 必须让 `examples/essentials-v21.1/game.json` 真实经过 `parseGameEntryV1 / validateGameEntryV1`，再由 test-owned harness 绑定 concrete Definition并进入 Main。不得把 example 降级为只提供 fixture。
+
+第一条 vertical可以由 example initial input直接提供 `mapId/x/y` player spawn；完整 `RPG::System` startup compatibility不是 first-slice prerequisite。
+
+Importer只负责 source→semantic records/resources；map browser JS/CSS + example Config refs由薄的 example/test preparation组装进同一个 prepared Content view。这个 preparation不成为 Runtime dependency、production Host或 generic GamePackager framework。
 
 如果未来出现完全不同的 3D/hex/voxel world，不要求其必须适配 `@loomrealm-game/map`。只有真实多个 consumers证明需要共同抽象时才讨论更通用 map model。
 
@@ -245,8 +313,10 @@ Example 负责 Game Entry、Subsystem key、initial input、game-specific compos
 至少证明：
 
 ```text
-examples/essentials-v21.1
-→ prepared FSDB JSON Content
+examples/essentials-v21.1 game.json
+→ Game Package validation
+→ validated logical startup
+→ one assembled prepared Content view
 → @loomrealm-game/map via ContentClient
 → @loomrealm/subsystem public author API
 → M10 Input
@@ -271,11 +341,14 @@ M14 不复制 M10–M13 lower-level conformance，只证明真实 consumer integ
 ```text
 MapNormalizedV1 / universal map schema
 MapBundle abstraction
+MapEvent Group + ContentClient.group() only for symmetry
 Repository base hierarchy
 Runtime service locator
 Content transport adapter
+Content resource metadata API only for elegance
 second projection tree authority
 universal AssetManager
+UniversalGamePackager / generic ContentBuilder
 LoomRealm component vocabulary
 presentation layer manager
 map-specific Event→DOM bridge
@@ -286,4 +359,4 @@ Ruby/Marshal/RMXP decoder inside map package
 
 ## 11. Final goal
 
-> **证明一个位于 framework 之外的 reusable map library 可以通过 `ContentClient` 直接消费 prepared FSDB JSON records（其业务语义与 RMXP/Essentials map model 对齐），只依赖 LoomRealm public author contracts，再被 concrete game消费并通过 M13 得到真实 browser presentation。**
+> **证明一个位于 framework 之外的 reusable map library 可以通过 `ContentClient` 直接消费 prepared FSDB JSON records（其业务语义与 RMXP/Essentials map model 对齐），由真实 concrete Game Entry启动，并通过现有 Content resource/version capability与 M13 得到真实 browser presentation。**
