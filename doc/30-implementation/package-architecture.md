@@ -195,19 +195,33 @@ examples/essentials-v21.1
     private
 ```
 
-Map library拥有 normalized map business/content schema，不理解 Essentials/RMXP/PBS/Marshal source semantics。
+M14 直接采用 Essentials v21.1 / RMXP map semantic model，不再定义独立 normalized map schema。Map library MAY理解：
+
+```text
+RPG::Map
+RPG::Tileset
+RPG::MapInfo
+RPG::Event / Page / EventCommand
+RGSS Table
+Essentials MapMetadata / map connections
+```
+
+但不得理解 Ruby Marshal binary、`.rxdata` parsing、Ruby object-graph wrappers、`tools/fixtures` implementation/filesystem layout。
 
 Preparation：
 
 ```text
 external/local Essentials v21.1 source
 → tools/fixtures/essentials-v21.1 importer
-→ ignored .local imported data
-→ example-local compatibility preparation
-→ map normalized Content
+→ RMXP/Essentials semantic records + raw resources
+→ prepared Content/FSDB
+→ examples/essentials-v21.1
+→ @loomrealm-game/map
 ```
 
-Tool不是 runtime dependency；第三方 corpus不提交仓库。只有第二个真实 consumer证明兼容层需要复用时才评估新的 compatibility package。
+Importer materialization只剥离 Ruby/Marshal/object-graph transport details，不重新发明地图业务 schema。Tool不是 runtime dependency；第三方 corpus不提交仓库。
+
+Map runtime 通过 `ContentClient` 读取 semantic records；可见资源的 logical identity/version通过 Render data交给 map WC，再由 `PresentationResourceClient`取 bytes。Map browser JS/CSS 本身也通过 prepared Content + `WebPresentationConfigV1` 启动。
 
 ---
 
@@ -243,7 +257,7 @@ packages/presentation-layers
 packages/asset-manager
 ```
 
-M14也不新增 Generic GameLibrary registry/base package。
+M14也不新增 Generic GameLibrary registry/base package、`MapNormalizedV1`、MapBundle 或 universal map package。
 
 ---
 
@@ -259,14 +273,17 @@ M12 Renderer
 M13
     Config/bootstrap + thin projection + real Chromium
 
+M14 importer/preparation
+    Ruby/Marshal/RMXP → semantic map records/resources
+
 M14 game-lib
-    reusable map business + browser consumer
+    RMXP/Essentials-compatible map business + browser consumer
 
 M14 example
-    concrete game composition + compatibility preparation
+    concrete Game Entry / composition / presentation declaration
 
 M14 CI
-    distributable synthetic/author-owned fixture
+    distributable synthetic/author-owned RMXP-compatible semantic fixture
 
 M14 local evidence
     exact Essentials v21.1 corpus compatibility
@@ -274,6 +291,8 @@ M14 local evidence
 M15/M17
     complete physical E2E/equivalence
 ```
+
+M14 full vertical可使用 test-owned composition harness复用现有 production roles；不得因此 materialize MiniDesktopHost/MapHost 等 production abstraction。
 
 No giant E2E replaces role/contract evidence。
 
@@ -287,6 +306,8 @@ No giant E2E replaces role/contract evidence。
 @loomrealm/map
 packages/map
 Generic GameLibrary framework/registry
+MapNormalizedV1 / universal map schema
+MapBundle abstraction
 Generic Repository / StorageProvider
 InstallationManager
 AssetManager / decoder/plugin registry
@@ -301,7 +322,7 @@ Window-global service locator
 DOM transaction/rollback framework
 RenderEvent WC bridge
 runtime importer dependency
-framework-owned Essentials compatibility layer
+MiniDesktopHost / MapHost production abstraction
 ```
 
 ---
@@ -317,4 +338,4 @@ M16 PWA Runtime                              pending
 M17 PWA full E2E/equivalence                 pending
 ```
 
-M14按根目录 M14/01–05执行；不得为了 package symmetry扩大 framework public API。
+M14按根目录 M14/01–05执行；不得为了 package symmetry扩大 framework public API，也不得为了假想通用性重新建模已有 RMXP/Essentials map semantics。
