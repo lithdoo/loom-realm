@@ -150,6 +150,26 @@ MapMetadata/{id}
 
 该 materialization 只把已有 RMXP/Essentials 语义转换为 `ContentClient` 可返回的 JSON-compatible persisted representation，并移除 Ruby/Marshal/object-graph transport details；不重新发明地图业务语义。
 
+M14 consumer projection 的精确机械规则由：
+
+```text
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
+```
+
+拥有。关键规则包括：
+
+```text
+known RPG @ivar → strip exactly one leading @, preserve remaining spelling
+RubyString / RubySymbol → JSON string
+Ruby Array → JSON array
+RGSS Table → { dimensions, xSize, ySize, zSize, values:number[] }
+Map.events → embedded JSON object keyed by decimal event id
+```
+
+M14 first slice 不拆 `MapEvent` Group，也不为表型对称新增 `ContentClient.group()`。无法无歧义 materialize、但被真实 vertical需要的 source fact必须在 preparation 阶段 fail closed，先增加最小 semantic projection；不得把 generic importer wrapper穿透给 Runtime。
+
+现有 importer lossless structural/raw authority继续保留 unknown/extra source data；M14 consumer projection 是 derived consumer view，不替代原 authority。
+
 Runtime game/map library不 import tool modules；第三方 source/material不提交仓库。
 
 ## First concrete example
@@ -179,19 +199,69 @@ local/external Essentials v21.1 source
 → tools/fixtures/essentials-v21.1 importer
 → FSDB JSON records whose semantics mirror required RMXP/Essentials map facts
   + raw resources
+→ example/test prepared Content assembly
 → local prepared Content
 → examples/essentials-v21.1
 → @loomrealm-game/map via ContentClient
 ```
 
+## Concrete Game Entry participation
+
+M14 qualification MUST 实际读取并验证：
+
+```text
+examples/essentials-v21.1/game.json
+→ parseGameEntryV1 / validateGameEntryV1
+→ validated subsystem topology + initial target/input
+→ test-owned physical Definition binding
+→ Main
+```
+
+不得把 example 降级为“只提供 fixture 文件”，也不得在 test harness 中绕过 Game Package 后硬编码 logical topology。
+
+M14 不要求 Hostra/PWA Launch Manifest。第一条 vertical MAY 由 example initial input直接提供 `mapId/x/y` player spawn，从而不把完整 `RPG::System` startup compatibility变成 first-slice prerequisite。
+
+## Prepared Content assembly
+
+Essentials importer只负责 source → semantic records/resources；它不拥有 map browser artifacts。
+
+M14 的 example/test preparation 只负责把已有内容组装成 qualification 使用的单一 prepared Content view：
+
+```text
+importer-produced FSDB or CI-safe semantic fixture
++
+@loomrealm-game/map browser JS/CSS
++
+example WebPresentationConfig logical refs
+→ one test-local prepared Content view
+```
+
+该 preparation不得重新解释 RMXP semantics，不成为 Runtime dependency/production Host，也不建立 UniversalGamePackager / generic ContentBuilder framework。
+
 ## Presentation resource path
 
-Map runtime通过 `ContentClient` 读取 FSDB JSON records，并把可见资源的 logical identity/version放入 Render state；map-owned WC 再通过 M13 `PresentationResourceClient` 获得 tileset/player sprite bytes。
+Map runtime通过 `ContentClient` 读取 FSDB JSON records。Resource logical identity复用现有 Content mapping，例如：
+
+```text
+Tileset name  → Graphics / Tilesets/{tileset_name}
+Autotile name → Graphics / Autotiles/{name}
+Character name → Graphics / Characters/{character_name}
+```
+
+当前 Subsystem author API 没有 resource metadata/HEAD surface。M14 第一版用现有：
+
+```text
+ContentClient.resource(namespace, key)
+→ bytes + mime + contentVersion
+```
+
+取得真实资源的 `contentVersion`；Runtime 若不需要 bytes，不长期保留。Render state只携带 `namespace/key/contentVersion`，map-owned WC 再通过 M13 `PresentationResourceClient` 获得 tileset/player sprite bytes。
 
 ```text
 FSDB JSON Content record
-→ map runtime ContentClient
-→ resource logical identity/version
+→ logical resource namespace/key
+→ map runtime ContentClient.resource()
+→ contentVersion
 → RenderDomain
 → M13
 → map WC
@@ -201,13 +271,17 @@ FSDB JSON Content record
 
 禁止 path、URL、credential、raw resource bytes进入 business Render payload。
 
+M14 接受 Runtime 与 Renderer 可能各读一次同一 resource，不为理论效率新增 M12 resource metadata API；只有真实 workload 的 measurable evidence 才支持后续最小 reopen。
+
 Map browser JS/CSS 本身也必须作为 prepared Content 资源进入 `WebPresentationConfigV1` bootstrap；qualification不得用 test-local direct import绕过 M13 startup。
 
 ## Qualification split
 
-M14 canonical CI 使用仓库可分发的 synthetic/author-owned **FSDB JSON fixture**，其字段语义必须与同一 RMXP/Essentials-compatible Content model 对齐，证明完整 architecture/game vertical；官方 Essentials v21.1 corpus 作为独立 local compatibility evidence，证明真实 source → FSDB JSON materialization，不把第三方 corpus 变成 CI/repository distribution dependency。
+M14 canonical CI 使用仓库可分发的 synthetic/author-owned **FSDB JSON fixture**，其字段语义必须与同一 RMXP/Essentials-compatible Content model 对齐，证明完整 architecture/game vertical；官方 Essentials v21.1 corpus 作为独立 local compatibility evidence，证明真实 source → M14 consumer projection → FSDB JSON materialization，不把第三方 corpus 变成 CI/repository distribution dependency。
 
-两条 evidence 必须通过相同的 `ContentClient` → `@loomrealm-game/map` → browser consumer path，不能让 CI 或 local qualification 直接给 map runtime 注入 decoder object。
+两条 evidence 必须通过相同的 prepared Content assembly → `ContentClient` → `@loomrealm-game/map` → browser consumer path，不能让 CI 或 local qualification 直接给 map runtime 注入 decoder object。
+
+现有 importer RC 继续有效，但不等价于 M14 `Map/{id}` / `Tileset/{id}` consumer projection 已完成；后者必须单独实现和 qualification。
 
 M14 full vertical可以使用 test-owned composition harness串联现有 production Main/Subsystem/Data/Renderer/Content roles + real Chromium。该 harness只是 qualification mechanics，不是新的 production Host/Platform；Hostra BrowserWindow/physical input/reload-shutdown仍属于 M15。
 
@@ -219,12 +293,15 @@ packages/map
 framework-owned map/component vocabulary
 MapNormalizedV1 / universal map schema
 MapBundle abstraction
+MapEvent Group + ContentClient.group() only for M14 symmetry
 examples hidden inside apps/desktop
 runtime dependency on tools/fixtures
 copy official Essentials/Pokémon assets into repository
 map runtime consuming RPG/RMXP decoder objects
 map runtime consuming RmxpObject/$ref/$typed importer wrappers
+resource metadata/HEAD author API only for theoretical efficiency
 universal GameLibrary framework/registry
+UniversalGamePackager / generic ContentBuilder
 MiniDesktopHost / MapHost production abstraction for M14
 ```
 
@@ -238,4 +315,4 @@ M10–M13 contracts 不因本决定 reopen；本 ADR 只改变 M14 repository/pa
 
 ## Reopen
 
-只有真实多个 game libraries/examples证明当前五类目录无法表达 ownership，或真实非-RMXP map consumer证明需要共享更高层 map abstraction时才调整。不得为了目录/package/API 对称提前泛化。
+只有真实多个 game libraries/examples证明当前五类目录无法表达 ownership，或真实非-RMXP map consumer证明需要共享更高层 map abstraction，或 M14 workload证明现有 Content capability有 measurable correctness/performance缺口时才调整。不得为了目录/package/API 对称提前泛化。
