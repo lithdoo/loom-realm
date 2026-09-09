@@ -1,0 +1,47 @@
+name: M13 Web Presentation qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install qualification Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run M13 closure gate and capture qualification records
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          npm run test:m13 | tee artifacts/m13-web-presentation-node-${{ matrix.node }}.tap
+
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m13-web-presentation-node-${{ matrix.node }}
+          path: artifacts/m13-web-presentation-node-${{ matrix.node }}.tap
+          if-no-files-found: error

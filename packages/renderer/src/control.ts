@@ -14,6 +14,12 @@ import {
 import { RendererInputGate } from "./internal/input-gate.js";
 import { RendererRenderStore } from "./internal/render-store.js";
 import { renderQualification } from "./internal/render-qualification.js";
+import {
+  presentationAttachment,
+  type RendererPresentationEffect,
+  type RendererPresentationSource,
+  type RendererPresentationView,
+} from "./internal/presentation-seam.js";
 import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
 
 export interface RendererControlCurrent {
@@ -123,6 +129,10 @@ class ControlHolder implements RendererControlHolder {
   private readonly renderHistories = new Map<string, RendererRenderStore>();
   private readonly inputGate = new RendererInputGate();
   private sourceSubscription: SourceSubscription | null = null;
+  private presentationEffect: RendererPresentationEffect | null = null;
+  private readonly presentationSource: RendererPresentationSource = Object.freeze({
+    read: () => this.readPresentation(),
+  });
 
   constructor(
     private readonly data?: RendererDataBinding,
@@ -135,6 +145,15 @@ class ControlHolder implements RendererControlHolder {
 
   [renderQualification](subsystemKey: string) {
     return this.dataSlots.get(subsystemKey)?.render.snapshotForQualification() ?? null;
+  }
+
+  [presentationAttachment](effect: RendererPresentationEffect): () => void {
+    if (this.presentationEffect !== null) throw new TypeError("Renderer presentation already attached");
+    this.presentationEffect = effect;
+    if (this.currentValue !== null) this.notifyPresentation();
+    return () => {
+      if (this.presentationEffect === effect) this.presentationEffect = null;
+    };
   }
 
   async connect(options: RendererPeerConnectOptions): Promise<RendererControlHolderConnectOutcome> {
@@ -164,6 +183,7 @@ class ControlHolder implements RendererControlHolder {
     this.inputGate.setControl(outcome.snapshot);
     this.startInputSource(peer);
     this.reconcileData(peer, outcome.snapshot);
+    this.notifyPresentation();
     void this.consume(peer);
     void peer.terminal.then(() => {
       if (this.currentValue?.peer !== peer) return;
@@ -183,6 +203,7 @@ class ControlHolder implements RendererControlHolder {
       this.currentValue = Object.freeze({ peer, snapshot });
       this.inputGate.setControl(snapshot);
       this.reconcileData(peer, snapshot);
+      this.notifyPresentation();
     }
   }
 
@@ -333,18 +354,9 @@ class ControlHolder implements RendererControlHolder {
             }
             return acceptedDataMessage;
           },
-          onRenderDomains: (message) =>
-            slot.current?.peer === peer
-              ? slot.render.onDomains(message)
-              : acceptedDataMessage,
-          onRenderSnapshot: (message) =>
-            slot.current?.peer === peer
-              ? slot.render.onSnapshot(message)
-              : acceptedDataMessage,
-          onRenderPatch: (message) =>
-            slot.current?.peer === peer
-              ? slot.render.onPatch(message)
-              : acceptedDataMessage,
+          onRenderDomains: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onDomains(message)),
+          onRenderSnapshot: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onSnapshot(message)),
+          onRenderPatch: (message) => this.commitRenderMessage(slot, peer, () => slot.render.onPatch(message)),
           onRenderEvent: (message) =>
             slot.current?.peer === peer
               ? slot.render.onEvent(message)
@@ -392,6 +404,48 @@ class ControlHolder implements RendererControlHolder {
     slot.pending = null;
     if (attempt.controller.signal.aborted || !this.isDesired(attempt.identity)) return;
     slot.failed = attempt.identity;
+  }
+
+  private commitRenderMessage(
+    slot: RendererDataSlot,
+    peer: RendererDataPeer,
+    commit: () => ReturnType<RendererRenderStore["onDomains"]>,
+  ): ReturnType<RendererRenderStore["onDomains"]> {
+    if (slot.current?.peer !== peer) return acceptedDataMessage;
+    const outcome = commit();
+    if (outcome.kind === "accepted") this.notifyPresentation();
+    return outcome;
+  }
+
+  private notifyPresentation(): void {
+    try {
+      this.presentationEffect?.reevaluate(this.presentationSource);
+    } catch {
+      // Presentation failure cannot roll back committed authority or Store state.
+    }
+  }
+
+  private readPresentation(): RendererPresentationView | null {
+    const current = this.currentValue;
+    if (current === null) return null;
+    const subsystems = current.snapshot.dataAuthorities.map((authority) => {
+      const slot = this.dataSlots.get(authority.subsystemKey);
+      const matching = slot?.current?.identity.controlPeer === current.peer &&
+        slot.current.identity.generation === authority.generation &&
+        slot.current.identity.dataProfile === authority.dataProfile;
+      const store = matching ? slot.render.snapshotForQualification() : null;
+      const eligible = store !== null && store.currentCarrier && store.registrySeen &&
+        store.domains.every((domain) => domain.baselined);
+      return Object.freeze({
+        subsystemKey: authority.subsystemKey,
+        generation: authority.generation,
+        eligible,
+        domains: Object.freeze(eligible
+          ? store.domains.map(({ domainId, zIndex, roots }) => Object.freeze({ domainId, zIndex, roots }))
+          : []),
+      });
+    });
+    return Object.freeze({ sessionId: current.snapshot.sessionId, subsystems: Object.freeze(subsystems) });
   }
 
   private isCurrentAttempt(

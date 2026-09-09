@@ -2,7 +2,7 @@
 
 > 层级：Renderer Window-local business presentation ABI  
 > 状态：Active / Normative / Frozen  
-> 稳定程度：Frozen for M13 implementation  
+> 稳定程度：Frozen / Implemented / Qualified
 > Milestone：M13 Web Presentation  
 > 依赖：[Render Update v1](./render-update-v1.md)、[Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)  
 > 相关：[Web Presentation Config v1](./web-presentation-config-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  

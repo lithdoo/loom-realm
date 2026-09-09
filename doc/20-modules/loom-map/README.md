@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：Active Design / M14 Pending  
-> 稳定程度：M10/M11/M12 consumed boundaries closed；M13 Web Presentation **Design Frozen / Implementation Pending**；map business design Experimental  
+> 稳定程度：M10–M13 consumed boundaries closed；map business design Experimental
 > 主要定义：Phase 1 map business + map-owned Web presentation，作为 Frame/Input/Render/Content/M13 的第一个真实综合 consumer  
 > 依赖：[Subsystem 模型](../../10-architecture/subsystem-model.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)  
 > 最近复核：2026-09-09

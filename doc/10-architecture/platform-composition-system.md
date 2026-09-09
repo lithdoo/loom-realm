@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12 closed；M13 Web Presentation **Frozen / Preimplementation Closed**  
+> 稳定程度：M9/M12/M13 **Implemented / Qualified / Closed**
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
@@ -229,7 +229,7 @@ PluginManager / PresentationLayerManager
 
 ```text
 M12 Content                            closed
-M13 Web Presentation                  Design Frozen / implementation pending
+M13 Web Presentation                  ✅ Closed 2026-09-09
 M14 loom.map                           pending
 M15 Desktop full E2E                   pending
 M16 PWA Runtime                        pending

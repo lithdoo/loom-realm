@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：M10–M12 Closed / M13 Web Presentation **Design Frozen / Implementation Pending**  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
 > 最近复核：2026-09-09
@@ -65,7 +65,7 @@ M13 精确 browser/API/currentness semantics 不在本索引重复定义；见 [
 M10 User Input         ✅ Closed
 M11 Render Replication ✅ Closed
 M12 Content            ✅ Closed
-M13 Web Presentation   Design Frozen / implementation pending
+M13 Web Presentation   ✅ Closed 2026-09-09
 ```
 
 M13 消费既有 Control/Data/Render/Content 能力，不重开下层 contracts。

@@ -1,7 +1,7 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：M6 Runtime / M9 Data / M12 Content **Implemented + Qualified**；M13 Web Presentation **Design Frozen / Implementation Pending**；M15 Full E2E Planned  
+> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M15 Full E2E Planned
 > 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)  
 > 最近复核：2026-09-09
 
@@ -17,7 +17,7 @@ M9  Desktop Data Broker / child provisioning         ✅
 M10 User Input                                       ✅
 M11 Render Replication                               ✅
 M12 Desktop Content                                  ✅
-M13 Web Presentation                                 Design Frozen / implementation pending
+M13 Web Presentation                                 ✅ Qualified 2026-09-09
 M14 loom.map + map-owned WC                          pending
 M15 BrowserWindow/full Desktop E2E                   pending
 ```

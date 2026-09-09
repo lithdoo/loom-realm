@@ -5,7 +5,7 @@
 > 稳定程度：Evolving  
 > 主要定义：current 分包、测试、delivery milestone 与 implementation fact-source 入口  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
-> 最近复核：2026-09-08
+> 最近复核：2026-09-09
 
 实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。精确 milestone closure 由 `phase-1-delivery-plan.md` 与对应 Frozen M/ADR 文档定义。
 
@@ -19,6 +19,7 @@
 - [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 顺序/closure 摘要；
 - [M11 Render 最终闭环评审结论](./m11-final-closure-review.md) — production validation + role-specific qualification reclosure 的唯一当前评审结论。
 - [M12 Content qualification](./m12-qualification.md) — FSDB core、Desktop Content API、两类客户端、production vertical 与 Node 20/24 根门禁证据。
+- [M13 Web Presentation qualification](./m13-qualification.md) — Config/bootstrap、Renderer seam、thin Projector、resource lifetime 与 real Chromium vertical证据。
 
 ---
 
@@ -66,9 +67,10 @@ M9  Desktop Data Broker / late provisioning   ✅ Qualified 2026-09-04
 M10 User Input                                 ✅ Qualified 2026-09-07
 M11 Render                                     ✅ Qualified 2026-09-07
 M12 Content                                    ✅ Qualified 2026-09-08
+M13 Web Presentation                           ✅ Qualified 2026-09-09
 ```
 
-Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md) · [m11-qualification.md](./m11-qualification.md) · [m12-qualification.md](./m12-qualification.md)。M11 current closure标准见 [m11-final-closure-review.md](./m11-final-closure-review.md)。
+Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md) · [m11-qualification.md](./m11-qualification.md) · [m12-qualification.md](./m12-qualification.md) · [m13-qualification.md](./m13-qualification.md)。M11 current closure标准见 [m11-final-closure-review.md](./m11-final-closure-review.md)。
 
 ---
 

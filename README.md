@@ -26,7 +26,7 @@ Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 地图兼容作为 `loom
 M10 User Input          ✅ Closed
 M11 Render Replication  ✅ Closed
 M12 Content             ✅ Closed 2026-09-08
-M13 Web Presentation    Design Frozen / implementation pending
+M13 Web Presentation    ✅ Closed 2026-09-09
 M14 loom.map            pending
 M15 Desktop full E2E    pending
 M16 PWA Runtime         pending
@@ -36,7 +36,7 @@ M17 PWA full E2E        pending
 当前 executable closure gate：
 
 ```text
-npm run test:m12
+npm run test:m13
 ```
 
 ---
@@ -73,9 +73,9 @@ Platform / apps/*
 
 ---
 
-## M13 Web Presentation — Frozen for Implementation
+## M13 Web Presentation — Implemented / Qualified / Closed
 
-M13 已 **Preimplementation Closed**。唯一实现主线：
+M13 已按冻结设计完成生产实现与真实 Chromium qualification。实现主线：
 
 ```text
 Window bootstrap
@@ -103,11 +103,13 @@ ADR 0031                     Accepted / Frozen decision provenance
 
 M13不建立 second Store/topology、public PresentationState、component registry/loader、AssetManager、layout/layer framework、global service locator、DOM rollback framework或 mandatory presentation SDK/package。
 
-下一步直接实施 M13/01–05；完成后建立 real Chromium qualification 的：
+唯一 executable closure gate：
 
 ```text
 npm run test:m13
 ```
+
+Qualification evidence：[M13 Web Presentation qualification](./doc/30-implementation/m13-qualification.md)。下一步进入 M14 `loom.map` 真实 business consumer。
 
 ---
 

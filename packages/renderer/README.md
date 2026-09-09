@@ -1,8 +1,8 @@
 # @loomrealm/renderer
 
-Renderer Control holder with M8 Data reconciliation, qualified M10 User Input, qualified M11 Render replica, and the M12 version-safe resource integration seam.
+Renderer Control holder with M8 Data reconciliation, qualified M10 User Input, qualified M11 Render replica, M12 version-safe resources, and qualified M13 Web Presentation.
 
-> Status: **M8/M10/M11/M12 Implemented / Qualified**
+> Status: **M8/M10/M11/M12/M13 Implemented / Qualified**
 
 Current implemented state remains one atomic Control `{ peer, snapshot } | null` record plus one private Data slot per desired subsystem authority. Protocol legality stays in `@loomrealm/renderer-control` and `@loomrealm/data`.
 
@@ -38,4 +38,6 @@ Implementation may choose private class/layout names only；the public construct
 
 M11 adds one internal Render replica per existing Data slot. Registry/Snapshot/Patch commits are atomic, Event delivery is transient, and same-generation carrier replacement preserves identity history while requiring a fresh Registry/Snapshot baseline. The Store and its qualification observation seam are not exported from the package root; M11 adds no presentation or subscription API.
 
-M12 adds `@loomrealm/renderer/resource-client` as a platform-integration subpath while keeping the root surface unchanged. It resolves only logical namespace/hierarchical keys, requires `expectedContentVersion`, rejects version mismatch before returning bytes, and returns detached `Uint8Array` values. RenderNode-to-resource presentation remains M14 work.
+M12 adds `@loomrealm/renderer/resource-client` as a platform-integration subpath while keeping the root surface unchanged. It resolves only logical namespace/hierarchical keys, requires `expectedContentVersion`, rejects version mismatch before returning bytes, and returns detached `Uint8Array` values.
+
+M13 adds only trusted/internal Config/bootstrap helpers, a Control/Store reevaluation attachment, a thin stable-identity Web Projector, and a Window-lifetime resource façade. None is exported from the package root. Real Chromium qualification covers browser loading, Custom Element lifecycle, per-subsystem currentness, structural data delivery, unknown-tag permanent freeze, and resource cancellation. M14 supplies the first real `loom.map` business component vocabulary; it does not own the projection mechanism.

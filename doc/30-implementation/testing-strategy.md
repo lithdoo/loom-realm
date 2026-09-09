@@ -380,12 +380,12 @@ npm run test:m8
 npm run test:m9
 npm run test:game-launcher-hostra
 npm run test:packages
-npm run test:m12
+npm run test:m13
 npm run docs:build
 npm run docs:check-links
 ```
 
-`test:regression`承担 current package/unit/vertical regression；`test:m9`、`test:m10`、`test:m11`是互不递归的历史 qualification入口；`test:m12`组合 current regression、仍需保留的 formal qualification、最新 boundary/vertical、fixture与 pack，并由 Node 20/24 CI持续执行。
+`test:regression`承担 current package/unit/vertical regression；`test:m9`、`test:m10`、`test:m11`是互不递归的历史 qualification入口；`test:m12`保留 Content closure；`test:m13`严格组合 `test:m12`、real Chromium Web Presentation qualification、最新 boundary 与 pack，并由 Node 20/24 CI持续执行。
 
 M10 implementation完成时新增：
 

@@ -3,7 +3,7 @@
 > 层级：正式契约  
 > 状态：Active / Normative / Frozen  
 > 契约版本：1  
-> 稳定程度：Frozen for M13 implementation  
+> 稳定程度：Frozen / Implemented / Qualified
 > Milestone：M13 Web Presentation  
 > 主要定义：Window-level business JS/CSS declaration、M12 prepared Content resolution、MIME compatibility、ordered browser bootstrap、`window.onload` start barrier  
 > 依赖：[Content API v1](./content-api-v1.md)、[渲染系统](../10-architecture/rendering-system.md)  

@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M12 Implemented / Qualified / Closed；M13 Web Presentation **Design Frozen / Preimplementation Closed / implementation pending**  
+> 稳定程度：M12/M13 **Implemented / Qualified / Closed**
 > 主要定义：M0..M17 实现顺序、current closure、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)  
 > 最近复核：2026-09-09
@@ -93,7 +93,7 @@ npm run test:m12
 
 ---
 
-## M13：Web Presentation — Design Frozen / Implementation Pending
+## M13：Web Presentation — Implemented / Qualified / Closed
 
 Formal source：
 
@@ -101,7 +101,7 @@ Formal source：
 Web Presentation Config v1        Active / Normative / Frozen
 Web Presentation API v1           Active / Normative / Frozen
 ADR 0031                          Accepted / Frozen
-Rendering System                  M13 Preimplementation Closed
+Rendering System                  M13 Implemented / Qualified
 ```
 
 Landing docs：
@@ -218,13 +218,13 @@ RenderEvent → WC ABI
 
 M13/04–05 必须使用 real headless Chromium，覆盖 bootstrap、Session/DataAuthority/generation transitions、per-subsystem reconnect、HTMLElement identity/order、unknown-tag zero-mutation、real M12 resource bytes、Window teardown 与 failure isolation。
 
-Future canonical gate：
+Canonical gate：
 
 ```text
 npm run test:m13
 ```
 
-只有该命令真实存在并通过 Node 20/24 + Chromium qualification，才能将 M13 标为 Implemented / Qualified / Closed。
+该命令已真实存在，并由 Node 20/24 CI + Chromium qualification持续强制；closure evidence见 [m13-qualification.md](./m13-qualification.md)。
 
 实施期间除 demonstrated correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，**禁止设计性 reopen**。
 
@@ -275,11 +275,11 @@ M1–M9                                  ✅
 M10 User Input                         ✅ Closed
 M11 Render Replication                 ✅ Closed
 M12 Content                            ✅ Closed 2026-09-08
-M13 Web Presentation                   Design Frozen / implementation pending
+M13 Web Presentation                   ✅ Closed 2026-09-09
 M14 loom.map                           pending
 M15 Desktop full E2E                   pending
 M16 PWA Runtime                        pending
 M17 PWA full E2E/equivalence           pending
 ```
 
-当前 canonical executable closure仍为 `npm run test:m12`。下一步直接实施 M13/01–05；不再进行开放式设计扩张。
+当前 canonical executable closure为 `npm run test:m13`。下一步进入 M14 `loom.map` 真实 business consumer；不重新打开 M13 已冻结边界。

@@ -2,7 +2,7 @@
 
 > 层级：实施计划 / Package Boundary  
 > 状态：Active Design / Tracking  
-> 稳定程度：M12 closed / M13 Web Presentation **Design Frozen / implementation pending**  
+> 稳定程度：M12/M13 **Implemented / Qualified / Closed**
 > 主要定义：protocol、role、platform、Content、Web presentation、business package ownership/dependency boundary  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 > 最近复核：2026-09-09
@@ -233,7 +233,7 @@ RenderEvent WC bridge
 
 ```text
 M12 Content                         closed
-M13 Web Presentation               Design Frozen / implementation pending
+M13 Web Presentation               ✅ Closed 2026-09-09
 M14 loom.map                        pending
 M15 Desktop full E2E                pending
 M16 PWA Runtime                     pending

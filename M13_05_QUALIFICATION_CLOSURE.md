@@ -1,6 +1,6 @@
 # M13 / 05 — Qualification and Closure
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Implemented / Qualified / Closed**
 > 阶段：M13 Web Presentation  
 > 落地顺序：05  
 > 最近复核：2026-09-09  

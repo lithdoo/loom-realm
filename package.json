@@ -25,6 +25,10 @@
     "test:m12:packages": "npm test -w @loomrealm/fsdb -w @loomrealm/fsdb-http -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/game-launcher-hostra -w @loomrealm/desktop",
     "test:m12:pack": "npm pack -w @loomrealm/fsdb -w @loomrealm/fsdb-http --dry-run",
     "test:m12": "npm run test:regression && npm run test:m10:qualification:run && node --test test/m10-boundary.test.mjs && npm run test:m11:qualification:run && node --test test/m11-boundary.test.mjs && npm run test:fixtures && node --test test/m12-boundary.test.mjs && npm run test:m12:pack",
+    "test:m13:qualification:run": "node --test test/web-presentation-v1/qualification.test.mjs",
+    "test:m13:qualification": "npm run build -w @loomrealm/renderer && npm run test:m13:qualification:run",
+    "test:m13:pack": "npm pack -w @loomrealm/renderer --dry-run",
+    "test:m13": "npm run test:m12 && npm run test:m13:qualification:run && node --test test/m13-boundary.test.mjs && npm run test:m13:pack",
     "test:m8": "npm run build:packages && npm test -w @loomrealm/platform-ports -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer-control -w @loomrealm/renderer -w @loomrealm/main && npm run test:game-launcher-hostra",
     "test:m7": "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/data -w @loomrealm/renderer-control -w @loomrealm/renderer && npm run build:packages && npm test -w @loomrealm/platform-ports -w @loomrealm/renderer-control -w @loomrealm/renderer -w @loomrealm/main && npm run test:game-launcher-hostra",
     "test:game-launcher-hostra": "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/main && npm test -w @loomrealm/game-launcher-hostra",
@@ -39,6 +43,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "playwright": "1.63.0",
     "vitepress": "1.6.4",
     "yauzl": "3.2.0"
   }

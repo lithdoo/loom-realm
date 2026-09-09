@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M12 closed；M13 Web Presentation **Frozen / Preimplementation Closed**  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
@@ -182,11 +182,11 @@ M13 implementation只允许选择不改变 frozen observable semantics 的 priva
 M10 User Input                    closed
 M11 Render Replication            closed
 M12 Content                       closed
-M13 Web Presentation              Design Frozen / implementation pending
+M13 Web Presentation              ✅ Closed 2026-09-09
 M14 loom.map                      pending
 M15 Desktop full E2E              pending
 M16 PWA Runtime                   pending
 M17 PWA full E2E/equivalence      pending
 ```
 
-当前 executable closure仍是 `npm run test:m12`；M13只有真实实现并通过 `npm run test:m13` + Chromium qualification 后才可 Closed。
+当前 executable closure是 `npm run test:m13`；M13 qualification记录见 [m13-qualification.md](../30-implementation/m13-qualification.md)。

@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M11 Render Replication **Frozen / Implemented / Qualified**；M13 Web Presentation **Frozen / Preimplementation Closed**  
+> 稳定程度：M11 Render Replication / M13 Web Presentation **Frozen / Implemented / Qualified**
 > 主要定义：Subsystem Render authority、Renderer replica、Session/DataAuthority currentness、wire-node identity、thin Web projection、deterministic body ordering  
 > 依赖：[系统架构总览](./system-overview.md)  
 > 正式化：[Render Update v1](../15-contracts/render-update-v1.md)、[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  

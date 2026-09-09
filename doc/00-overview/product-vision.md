@@ -475,11 +475,11 @@ M1–M9 Foundation / Game / Runtime / Hostra / Data   ✅
 M10 User Input                                      ✅ Closed
 M11 Render Replication                              ✅ Closed
 M12 Content                                         ✅ Closed
-M13 Web Presentation                                Design Frozen / implementation pending
+M13 Web Presentation                                ✅ Closed 2026-09-09
 M14 loom.map                                         pending
 M15 Desktop full E2E                                 pending
 M16 PWA Runtime                                      pending
 M17 PWA full E2E / equivalence                       pending
 ```
 
-当前 executable closure仍是 `npm run test:m12`。下一步按已冻结的 M13/01–05 完整实施 Web Presentation；M13 关闭后再以 `loom.map` 验证真实 business consumer，并进入 Desktop/PWA full E2E。
+当前 executable closure是 `npm run test:m13`。下一步以 `loom.map` 验证真实 business consumer，再进入 Desktop/PWA full E2E。

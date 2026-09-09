@@ -61,10 +61,10 @@ M12 Content
     → Renderer trusted/private ResourceClient
 ```
 
-M10/M11/M12均已 Implemented / Qualified / Closed。当前 canonical executable closure gate：
+M10/M11/M12/M13均已 Implemented / Qualified / Closed。当前 canonical executable closure gate：
 
 ```text
-npm run test:m12
+npm run test:m13
 ```
 
 ---
@@ -127,7 +127,7 @@ M9   Desktop Data Broker                               ✅
 M10  User Input                                        ✅
 M11  Render Replication                                ✅
 M12  Content                                           ✅
-M13  Web Presentation                                  pending
+M13  Web Presentation                                  ✅
 M14  loom.map business + map-owned WC                  pending
 M15  Desktop full physical E2E                         pending
 M16  PWA Runtime                                       pending

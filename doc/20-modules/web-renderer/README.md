@@ -1,8 +1,8 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient **Implemented + Qualified**；M13 Web Presentation **Design Frozen / Implementation Pending**  
-> 稳定程度：M13 **Preimplementation Closed**  
+> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient / M13 Web Presentation **Implemented + Qualified**
+> 稳定程度：M13 **Implemented / Qualified / Closed**
 > 主要定义：Renderer currentness、per-subsystem Render Store、trusted ResourceClient、M13 package-private reevaluation + Projector placement  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-09

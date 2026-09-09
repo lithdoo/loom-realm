@@ -2,7 +2,7 @@
 
 > 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：M10+M11+M12 closed / M13 Web Presentation **Frozen / Preimplementation Closed**  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
 > 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-09
@@ -158,7 +158,7 @@ Unregistered tag 是 projection-time structural failure：所有本次需要新�
 M10 User Input             ✅ Closed
 M11 Render Replication     ✅ Closed
 M12 Content                ✅ Closed
-M13 Web Presentation       Design Frozen / implementation pending
+M13 Web Presentation       ✅ Closed 2026-09-09
 M14 loom.map               pending
 M15 Desktop Full E2E       pending
 M16 PWA Runtime            pending
@@ -167,13 +167,13 @@ M17 PWA Full E2E           pending
 
 M13 落地文档：
 
-- [M13 / 01](../../M13_01_WEB_PRESENTATION_BOOTSTRAP.md)
-- [M13 / 02](../../M13_02_RENDERER_PRESENTATION_SEAM.md)
-- [M13 / 03](../../M13_03_WEB_PROJECTOR.md)
-- [M13 / 04](../../M13_04_VERTICAL_INTEGRATION.md)
-- [M13 / 05](../../M13_05_QUALIFICATION_CLOSURE.md)
+- [M13 / 01](https://github.com/lithdoo/loom-realm/blob/main/M13_01_WEB_PRESENTATION_BOOTSTRAP.md)
+- [M13 / 02](https://github.com/lithdoo/loom-realm/blob/main/M13_02_RENDERER_PRESENTATION_SEAM.md)
+- [M13 / 03](https://github.com/lithdoo/loom-realm/blob/main/M13_03_WEB_PROJECTOR.md)
+- [M13 / 04](https://github.com/lithdoo/loom-realm/blob/main/M13_04_VERTICAL_INTEGRATION.md)
+- [M13 / 05](https://github.com/lithdoo/loom-realm/blob/main/M13_05_QUALIFICATION_CLOSURE.md)
 
-当前 executable closure gate仍是 `npm run test:m12`。只有 `npm run test:m13` 真实存在并通过 real Chromium qualification 后，M13 才可标记 Implemented / Qualified / Closed。
+当前 executable closure gate是 `npm run test:m13`，包含 real Chromium qualification；证据见 [M13 qualification](../30-implementation/m13-qualification.md)。
 
 ---
 
