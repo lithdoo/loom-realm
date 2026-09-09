@@ -1,61 +1,111 @@
-# Phase 1 Delivery Plan
+# 第一阶段交付计划
 
 > 层级：实施计划  
-> 状态：Active / Tracking  
-> 当前 closure：M13 Web Presentation **Implemented / Qualified / Closed**；M14 pending  
+> 状态：Tracking  
+> 稳定程度：M12/M13 **Implemented / Qualified / Closed**；M14 consumer shape revised
+> 主要定义：M0..M17 实现顺序、current closure、Desktop/PWA qualification boundary  
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-09
 
-Phase 1 继续按真实 boundary closure推进。Milestone不是 package 对称，也不是每次增加一个“框架模块”。
-
----
-
-## M1–M9 Foundation / Runtime / Hostra / Data — Closed
-
-M1–M9 已关闭 foundational packages、Game Package、Main/Runtime/Frame、Hostra Launcher/Runner、Renderer Control、Data Connection/Broker 等基础链路。既有 qualified semantics 不因 M14 consumer restructuring reopen。
-
----
-
-## M10：User Input — Closed
-
-M10 已关闭 Input Interest、Main InputTarget/currentness、Renderer producer gate、Subsystem author InputListener 与 Data reconnect semantics。
-
-Canonical gate 已纳入后续 closure chain。
-
----
-
-## M11：Render Replication — Closed
-
-M11 已关闭 Subsystem-owned RenderDomain authority、Render Update v1、Renderer per-subsystem Store、Registry/Snapshot/Patch、same-generation reconnect/stale presentation preservation 与 deterministic identity/order。
-
----
-
-## M12：Content — Closed
-
-M12 已关闭：
+核心顺序：
 
 ```text
-Subsystem ContentClient
-Renderer private ResourceClient
-Desktop readonly Content Service
-logical record/group/resource identity
-contentVersion / MIME / error / cancellation semantics
+Foundation/Wire
+→ Game document
+→ Runtime Control
+→ Subsystem Runtime/Frame
+→ Main authority
+→ Hostra Runtime
+→ Renderer Control
+→ Data role seam
+→ Desktop Data Broker
+→ Input
+→ Render Replication
+→ Content
+→ Web Presentation
+→ Map Game Library + first concrete game
+→ Desktop full E2E
+→ PWA Runtime
+→ PWA full E2E/equivalence
 ```
 
-Content credential/path/origin/FSDB physical identity不进入 business state、Frame params或 Render payload。
+规则：
+
+```text
+Package Scope != Implementable Slice != Milestone Closure
+Framework Package != Game Library != Concrete Game
+```
+
+不为未来猜测预建 fake v2、deprecated alias 或 generic framework。
 
 ---
 
-## M13：Web Presentation — Closed 2026-09-09
-
-Formal sources：
+## M1–M9：Foundation / Hostra / Data ✅
 
 ```text
-Web Presentation Config v1   Active / Normative / Frozen
-Web Presentation API v1      Active / Normative / Frozen
-ADR 0031                     Accepted / Frozen
+M1 Foundation + Wire
+M2 Game Package
+M3 Runtime Control
+M4 Subsystem Runtime/Frame
+M5 Main Core
+M6 Hostra Runtime
+M7 Renderer Control
+M8 Renderer Data
+M9 Desktop Data Broker
 ```
 
-Implementation/qualification：
+均已关闭对应主干。
+
+---
+
+## M10：User Input — Closed ✅
+
+Canonical gate：
+
+```text
+npm run test:m10
+```
+
+M15/M17 physical DOM/Gamepad source必须复用 frozen M10 seam。
+
+---
+
+## M11：Render Replication — Closed ✅
+
+关闭 Subsystem authoritative RenderDomain、Render Update v1、Renderer internal Store、one-shot identity、same-generation baseline rebuild、Event transient semantics与 Desktop/Hostra vertical。
+
+```text
+npm run test:m11
+```
+
+M13不重开 Render Update v1。
+
+---
+
+## M12：Content — Closed ✅
+
+2026-09-08 已在 Node 20.20.2 / 24.20.0 通过：
+
+```text
+npm run test:m12
+```
+
+关闭 readonly FSDB/Content Service、Subsystem ContentClient、Renderer trusted/private ResourceClient 与真实 production vertical。M13/M14复用其 identity/version/credential boundary。
+
+---
+
+## M13：Web Presentation — Implemented / Qualified / Closed
+
+Formal source：
+
+```text
+Web Presentation Config v1        Active / Normative / Frozen
+Web Presentation API v1           Active / Normative / Frozen
+ADR 0031                          Accepted / Frozen
+Rendering System                  M13 Implemented / Qualified
+```
+
+Landing docs：
 
 ```text
 M13_01_WEB_PRESENTATION_BOOTSTRAP.md
@@ -65,32 +115,125 @@ M13_01_WEB_PRESENTATION_BOOTSTRAP.md
 → M13_05_QUALIFICATION_CLOSURE.md
 ```
 
-Canonical executable closure：
+### Frozen implementation flow
+
+```text
+concrete Window composition
+→ Config source
+→ fail-closed validation
+→ prepared M12 Content
+→ exact MIME
+    scripts = text/javascript essence
+    styles  = text/css essence
+→ ordered <link> / classic <script>
+→ customElements registration
+→ window.onload
+→ start presentation
+
+current Control Session/DataAuthority ─┐
+                                      ├→ package-private reevaluation
+current per-subsystem Store ──────────┘
+                                               ↓
+                                     per-subsystem eligibility
+                                               ↓
+                                       thin Web Projector
+                                               ↓
+                                document.body / business WC
+```
+
+### Frozen authority/currentness
+
+```text
+Control snapshot
+→ only Session/subsystem/generation topology authority
+
+Renderer Store
+→ only per-subsystem Render replica authority
+
+same-generation carrier loss
+→ freeze only affected subsystem
+→ partial rebaseline hidden
+→ complete baseline reconcile once
+
+DataAuthority removed
+→ remove DOM without later Render commit
+
+generation changed
+→ retire old DOM immediately
+
+fresh Session
+→ fresh entire HTMLElement universe
+
+Control transport loss only
+→ preserve/freeze last presentation
+```
+
+### Frozen Projector/API
+
+```text
+identity = (Session, subsystemKey, generation, domainId, key)
+same identity → same HTMLElement
+move/reorder → move existing HTMLElement
+body order = subsystemKey lexical → zIndex → domainId lexical → roots
+
+new element:
+construct → context → insertion/structure → attrs → data
+
+existing element:
+structure/reorder → attrs → data only when retained JSON value changed
+```
+
+PresentationResourceClient复用 M12 private ResourceClient。Window teardown取消在途 reads，teardown 后格式正确的 `resource()` reject `CONTENT_CANCELLED`。
+
+### Frozen structural failure
+
+所有本次需要新建的 tags 必须在首次 DOM mutation前 preflight：
+
+```text
+unknown tag
+→ zero mutation for reconciliation
+→ preserve last successful DOM exactly
+→ no fallback / no late registration wait
+→ no future managed DOM mutation in this Window
+```
+
+恢复只能 fresh Window。
+
+### Explicit non-goals
+
+M13不建立：
+
+```text
+@loomrealm/presentation
+second Store/topology/currentness
+public RenderNodeIdentity/PresentationState
+AssetManager / decoder registry
+dynamic loader / PluginManager
+layout/layer/component framework
+global service locator
+DOM rollback framework
+RenderEvent → WC ABI
+```
+
+### Qualification
+
+M13/04–05 使用 real headless Chromium覆盖 bootstrap、Session/DataAuthority/generation transitions、per-subsystem reconnect、HTMLElement identity/order、unknown-tag zero-mutation、real M12 resource bytes、Window teardown 与 failure isolation。
+
+Canonical gate：
 
 ```text
 npm run test:m13
 ```
 
-M13 production chain：
+该命令已真实存在，并由 Node 20/24 CI + Chromium qualification持续强制；closure evidence见 [m13-qualification.md](./m13-qualification.md)。
 
-```text
-Window bootstrap
-→ current Control Session/DataAuthority topology
-  + current per-subsystem Render Store
-→ package-private reevaluation / eligibility
-→ thin Web Projector
-→ business-owned Custom Elements
-```
-
-M13不建立 second Store/topology、component registry/loader、AssetManager、layout/layer framework、global service locator、DOM rollback framework或 mandatory presentation SDK/package。
-
-M10–M13 作为 M14 的 frozen/closed consumer baseline；只有 real consumer 暴露 correctness/security contradiction、author capability缺口或可测性能失败时才 reopen。
+实施期间除 demonstrated correctness/security contradiction、cross-contract conflict 或 real consumer failure 外，**禁止设计性 reopen**。
 
 ---
 
 ## M14：Map Game Library + First Real Game — pending
 
-M14 不创建 `packages/map` / `@loomrealm/map`。它第一次证明 framework consumer layering：
+M14不再实现 `packages/map` / `@loomrealm/map`。它第一次证明 framework consumer layering：
 
 ```text
 examples/essentials-v21.1
@@ -101,19 +244,7 @@ game-libs/map
         ↓
 @loomrealm/subsystem public author APIs
         ↓
-Frame / Input / Content / Render / M13
-        ↓
 observable playable map slice
-```
-
-Repository taxonomy：
-
-```text
-packages/      framework/runtime
-game-libs/     reusable game-domain libraries
-examples/      concrete games
-apps/          platform hosts
-tools/         development/import/compatibility tooling
 ```
 
 Landing docs：
@@ -134,7 +265,7 @@ Root workspace增加 `game-libs/*` 与 `examples/*`。Framework继续 `@loomreal
 
 `game-libs/map` runtime Definition只依赖 public `@loomrealm/subsystem`，真实使用 Frame/InputListener/RenderDomain/ContentClient；browser side拥有 map-owned Custom Elements并结构性消费 M13。
 
-M14 不设计独立 normalized map schema。第一版 map library 直接采用 Essentials v21.1 / RMXP map semantics：
+M14 不再额外定义 normalized map schema。第一版 map library 直接采用 Essentials v21.1 / RMXP map semantic model：
 
 ```text
 RPG::Map
@@ -145,16 +276,14 @@ RGSS Table
 Essentials MapMetadata / map connections when needed
 ```
 
-Map library 可以理解这些业务语义，但不能依赖 Ruby Marshal、`.rxdata` decoder、Ruby object graph wrappers、`tools/fixtures` internals 或 platform storage。
+Map library可以理解这些 map-domain semantics，但不得理解 Ruby Marshal binary、`.rxdata` decoding、Ruby object-graph wrappers、`RmxpObject/$ref/$typed` importer representation、tool filesystem或 Platform storage。
 
 ### M14/03 — Essentials concrete example / preparation
 
-`examples/essentials-v21.1`负责 concrete Game Entry、game-specific Subsystem keys、initial input/composition 与 presentation declaration；它不再拥有 Essentials→map normalized adapter。
-
-真实数据链：
+`examples/essentials-v21.1`负责 concrete Game Entry、game-specific keys、initial business input/composition 与 presentation declaration；它不再承担 Essentials→map normalized adapter。
 
 ```text
-external/local Essentials v21.1 source
+external/local source
 → tools/fixtures/essentials-v21.1 importer
 → Ruby/Marshal/RMXP decoding
 → RMXP/Essentials semantic records + raw resources
@@ -163,9 +292,9 @@ external/local Essentials v21.1 source
 → @loomrealm-game/map
 ```
 
-Importer materialization只去掉 source/serialization mechanics，不重新定义 map semantics。Runtime example/map library 不 import tool modules。
+Importer materialization只剥离 source/serialization mechanics，不重新定义 map semantics。Runtime example/map library不 import tool modules，第三方 corpus不提交仓库。
 
-Canonical CI 使用 checked-in synthetic/author-owned RMXP-compatible semantic fixture；exact v21.1 official/local corpus作为独立 local compatibility evidence。两者必须汇入同一 Content/runtime/browser path。
+Canonical CI使用 checked-in synthetic/author-owned RMXP-compatible semantic fixture；exact v21.1 official/local corpus作为独立 local compatibility evidence。两条 evidence必须汇入同一 Content/runtime/browser consumer path。
 
 ### M14/04 — real consumer vertical
 
@@ -192,18 +321,9 @@ Content semantic record
 → browser bytes
 ```
 
-Map browser JS/CSS 必须走：
+Map browser JS/CSS 必须通过 prepared Content + `WebPresentationConfigV1`进入 M13 bootstrap；qualification不得用 test-local direct import或手工注册绕过 startup。
 
-```text
-prepared Content
-→ WebPresentationConfigV1
-→ M13 bootstrap
-→ customElements registration
-```
-
-不得通过 test-local direct import 绕过 M13 startup。
-
-M14 full vertical使用 test-owned composition harness串联 existing production Main/Subsystem/Data/Renderer/Content + synthetic/existing RendererInputSource + real Chromium。该 harness不是新的 Host/Platform architecture；不得创建 MiniDesktopHost/MapHost/GameRuntimeHost。
+M14 full vertical使用 test-owned composition harness串联 existing production Main/Subsystem/Data/Renderer/Content + existing/synthetic RendererInputSource + real Chromium。该 harness不是新的 production Host/Platform；不得创建 MiniDesktopHost/MapHost/GameRuntimeHost。
 
 只有真实 interaction自然需要时才增加 nested `frame.call/return`；不为覆盖率硬造第二个 reusable game library。
 
@@ -217,49 +337,19 @@ Future canonical gate：
 npm run test:m14
 ```
 
-该命令不存在/未通过前不得声明 M14 Closed。Gate至少包含：
+该命令不存在/未通过前不得声明 M14 Closed。Gate至少包含 `test:m13`、workspace/package boundary、RMXP/Essentials semantic materialization、game-lib tests、example preparation/vertical、real Chromium与 `@loomrealm-game/map` pack qualification，并在 Node 20/24 CI执行。
 
-```text
-npm run test:m13
-workspace/package boundary checks
-RMXP/Essentials semantic materialization tests
-@loomrealm-game/map tests
-example/Content preparation qualification
-real Chromium playable vertical
-@loomrealm-game/map pack qualification
-Node 20/24 CI
-```
+M14必须自动证明 runtime不依赖 tools/importer、不消费 `RmxpObject/RubyString/$id/$ref/$typed` wrappers、Render state不泄漏 path/URL/token/bytes、map browser startup走 prepared Content + M13 Config。
 
-Boundary evidence至少证明：
-
-```text
-packages/* do not depend on game-libs/examples
-game-libs/map runtime does not import renderer/main/platform/tools
-runtime game does not import tools/fixtures
-runtime does not consume RmxpObject/RubyString/$id/$ref/$typed wrappers
-resource path/URL/token/bytes do not leak through Render business state
-map browser startup uses prepared Content + WebPresentationConfigV1
-```
-
-M14 Closed只证明 first real RMXP/Essentials-compatible map vertical，不代表完整 Pokémon Essentials gameplay，也不建立 universal map schema。
+M14 Closed只证明 first real RMXP/Essentials-compatible game vertical，不代表完整 Pokémon Essentials gameplay、universal map schema或 Desktop/PWA full E2E。
 
 ---
 
 ## M15：Desktop Full E2E — pending
 
-完成真实 Desktop composition：
+完成真实 Desktop composition：PREPARE、Main/Runner/Control/Data Broker、BrowserWindow、M13 presentation、M10 physical input、M14 concrete game + map library、reload/reconnect/shutdown。
 
-```text
-Hostra PREPARE
-→ Main/Runner/Control/Data Broker
-→ BrowserWindow
-→ M13 presentation bootstrap/runtime
-→ M10 physical input
-→ examples/essentials-v21.1 + @loomrealm-game/map
-→ reload/reconnect/shutdown
-```
-
-M15 用真实 Desktop physical composition替换 M14 qualification harness；不重新设计 Input/Render/Content/Web Presentation/game-library ownership或 RMXP map semantics。
+M15 用真实 Desktop physical composition替换 M14 test-owned qualification harness；不重新设计 Input/Render/Content/Web Presentation/game-library ownership或 RMXP/Essentials map semantics。
 
 ---
 
@@ -271,30 +361,24 @@ M15 用真实 Desktop physical composition替换 M14 qualification harness；不
 
 ## M17：PWA Full E2E / Equivalence — pending
 
-完成 PWA Renderer/Data/Input/Render/Content/M13 + M14 concrete game，并与 Desktop 验证相同 logical game scenario/business-observable outcome。
+完成 Window Renderer Control、PWA Data broker、Input/Render、Content、M13 Config/API semantics、same concrete M14 game/business WC、reload/replacement/shutdown。
 
-PWA 不创建 platform-specific map/game library/presentation contract。
+比较 logical semantics/outcome，不要求相同 PID/Worker、WebSocket/MessagePort、FSDB/OPFS 或 private physical binding。
 
 ---
 
-## Phase 1 Final Route
+## Current Status
 
 ```text
-M1–M9 Foundation / Runtime / Hostra / Data
-→ M10 Input
-→ M11 Render
-→ M12 Content
-→ M13 Web Presentation
-→ M14 Map Game Library + First Real Game
-→ M15 Desktop Full E2E
-→ M16 PWA Runtime
-→ M17 PWA Full E2E / Equivalence
+M1–M9                                      ✅
+M10 User Input                             ✅ Closed
+M11 Render Replication                     ✅ Closed
+M12 Content                                ✅ Closed 2026-09-08
+M13 Web Presentation                       ✅ Closed 2026-09-09
+M14 Map Game Library + First Real Game     pending
+M15 Desktop full E2E                       pending
+M16 PWA Runtime                            pending
+M17 PWA full E2E/equivalence               pending
 ```
 
-长期原则：
-
-```text
-Package Scope != Implementable Slice != Milestone Closure
-```
-
-真实 consumer first；没有 demonstrated consumer/correctness obligation 时不为 symmetry 创建 abstraction、package、protocol 或 compatibility layer。
+当前 canonical executable closure为 `npm run test:m13`。下一步按 M14/01–05 建立 first real RMXP/Essentials-compatible game consumer；不重新打开 M13 已冻结边界，也不为通用化复制第二份 map schema。
