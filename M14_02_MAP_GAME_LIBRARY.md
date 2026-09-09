@@ -1,6 +1,7 @@
 # M14 / 02 — Map Game Library
 
-> 状态：Implementation Landing / M14 Pending
+> 状态：Implementation Landing / M14 Pending  
+> 规范优先级：本文是 M14 map consumer 的 implementation freeze；若更早的 milestone 文档仅以 future-looking wording 把 Desktop physical input、author-chosen RenderDomain id 等留给 M14，以本文和 M14/04–05 为准。
 
 ## Objective
 
@@ -11,318 +12,392 @@ game-libs/map
 @loomrealm-game/map
 ```
 
-它是 LoomRealm 的 consumer，不是 LoomRealm framework module。
+它是 LoomRealm framework 的 consumer，不是 framework module。M14 的价值是证明 M10–M13 已冻结的 author/runtime/presentation seams 足够支撑一个真实地图 consumer；不得为了地图方便 reopen core API 或建立第二套 map framework。
 
-M14 不再为了“通用地图”额外定义一套 normalized map schema。Essentials v21.1 / RMXP map model 只作为第一版地图内容的 **semantic authority**；`@loomrealm-game/map` 的 Runtime 数据表示是 importer 已 materialize 并写入 prepared FSDB、再由 M12 `ContentClient.record()` 返回的普通 JSON records。
+## 1. Package / execution boundary
 
-Importer 侧的 M14 consumer projection 由 [`tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`](tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md) 冻结；map package不得自行发明另一套转换。
-
-## Runtime side
-
-Map Definition 只消费 public author capabilities：
+同一个 package owner 提供物理隔离的两侧：
 
 ```text
-@loomrealm/subsystem
-Frame / AbortSignal
-InputListener
-RenderDomain
-ContentClient
+Runtime side
+    @loomrealm/subsystem only
+    map/world state
+    Content/Input/Render business logic
+
+Browser side
+    Custom Elements
+    CSS / Shadow DOM / Canvas
+    PresentationResourceClient through M13 context
 ```
 
-不得 import Renderer、Main、Platform、wire/Data internals、FSDB physical APIs 或 tooling。
+Runtime side不得 import Renderer、Main、Platform、DOM、wire/Data internals、FSDB physical API 或 importer/tooling。Browser side不得获得 Subsystem business object、RenderDomain writer、Main/Data authority或 physical Content credential。
 
-Map library owns：
-
-```text
-map/world runtime state
-player/map movement rules
-RMXP/Essentials-compatible map business semantics
-RenderNode vocabulary emitted by the library
-map interaction semantics
-```
-
-LoomRealm core 不拥有这些概念。
-
-### First-slice logical topology
-
-M14 concrete example 的第一条 vertical 固定只需要一个业务 Subsystem：
+M14 first slice 只有一个 logical business Subsystem：
 
 ```text
 subsystemKey = "map"
-→ @loomrealm-game/map Runtime Definition
 ```
 
-Player、tile、camera、map event visual representation都属于该 map business/runtime 内部状态或 presentation vocabulary，不拆成独立 Subsystem/Runtime Container。
+Player、tile、camera、visual event representation不是独立 Subsystem。M14 harness只做 validated logical key → Definition 的 test-owned physical binding；真实 Hostra Node Runner child process属于 M15 Desktop full E2E。
 
-M14 qualification 使用 test-owned physical Definition binding，因此不要求真实 Desktop Node child；M15 Desktop full E2E 才把同一个 logical `map` Subsystem 通过 Hostra RuntimeHosting 落成一个 Node Runner child process。Renderer/BrowserWindow是 presentation role，不是第二个业务 Subsystem。
+## 2. Content authority / Runtime representation
 
-只有真实业务 interaction 需要另一个 independently-owned business authority 时，才允许新增 Subsystem + `frame.call/return`；不得为了“多进程完整性”拆 player/tile/event。
-
-## Presentation side
-
-同一个 game library owner 提供 browser-only presentation source：
-
-```text
-map-owned Custom Elements
-CSS
-Shadow DOM
-Canvas / WebGL
-private decoded resource cache
-animation/private UI state
-```
-
-Browser side结构性消费 M13 `receiveRenderContext` / `receiveRenderData`，不需要 public presentation SDK/package。
-
-Runtime Definition entry 与 browser presentation entry 必须物理隔离；Definition import 不能加载 DOM/browser code。
-
-M14 first slice 的 browser vocabulary、managed DOM 与 CSS ownership由本文 §Map-owned Web Presentation 冻结，不能留给 qualification 临时决定。
-
-## Map content boundary
-
-M14 不创建 `MapNormalizedV1`、`MapBundle` 或第二套通用地图 vocabulary，但必须区分 **semantic authority** 与 **Runtime representation**。
-
-RMXP/Essentials semantic authority 包括：
-
-```text
-RPG::Map
-RPG::Tileset
-RPG::MapInfo
-RPG::Event
-RPG::Event::Page
-RPG::EventCommand
-RGSS Table
-Essentials MapMetadata / map connections when needed
-```
-
-这些名称描述字段含义、关系和业务行为来源，不表示 `@loomrealm-game/map` 会接收 Ruby/RMXP decoder object。
-
-Runtime boundary 精确为：
+RMXP/Essentials 是 map field semantics 与 first-slice movement/passability 的 semantic authority；Runtime persisted representation 是 ordinary JSON-compatible FSDB records。
 
 ```text
 Essentials / RMXP source
-→ importer Ruby/Marshal/RMXP decoding
-→ importer internal object representation
-→ semantic JSON materialization
+→ importer Marshal/RMXP decode
+→ importer internal representation
+→ M14 consumer semantic JSON materialization
 → prepared FSDB records/resources
 → ContentClient.record()/resource()
-→ @loomrealm-game/map
+→ @loomrealm-game/map Runtime
 ```
 
-例如概念 identity：
+Consumer projection 的唯一机械规则由：
 
 ```text
-Map/{id}
-Tileset/{id}
-MapInfo/{id}
-MapMetadata/{id}
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
 ```
 
-`@loomrealm-game/map` 看到的是这些 FSDB records 的 `JsonValue`；其字段语义保持对应 `RPG::*` / Essentials map semantics。它 MUST NOT 接收、import 或要求理解：
+拥有。Map Runtime 不再创建 normalized adapter/schema。
+
+First-slice required records只有：
 
 ```text
-Ruby Marshal binary encoding
-.rxdata parsing
-Ruby object graph identity/wrappers
-RmxpObject / RubyString / $id / $ref / $typed importer representation
-rubyObjectId / decoder class instances
-tools/fixtures implementation/filesystem layout
-Hostra/PWA physical storage
+Map/{mapId}
+Tileset/{tilesetId}
 ```
 
-现有 Essentials importer 必须把 source/decoder representation materialize 为可由 Content API 直接读取的 JSON-compatible FSDB records。该 materialization 只负责把已有 RMXP/Essentials 语义变成 Runtime-safe JSON 表示，不重新发明一套地图业务模型。
+`MapInfo/{mapId}` MAY materialize/qualify，但 first playable slice不依赖它。`MapMetadata/{mapId}` 只有真实 first-slice consumer需要时才加入 exact extraction/use rule；M14 不为结构对称提前读取。
 
-### M14 semantic JSON mechanical rules
-
-第一版不得把“semantic JSON”留成实现自由度。机械规则固定为：
+Map Runtime MUST NOT理解：
 
 ```text
-known RPG ivar
-    strip exactly one leading @
-    preserve remaining spelling
-
-RubyString semantic text
-    → JSON string
-
-RubySymbol
-    → symbol-name JSON string
-
-Ruby Array
-    → JSON array
-
-RGSS Table
-    → { dimensions, xSize, ySize, zSize, values:number[] }
+Ruby Marshal / .rxdata
+RmxpObject / RubyString wrapper
+rubyObjectId / className / kind
+$id / $ref / $typed
+Buffer / Int16Array importer object
+tool filesystem / Hostra/PWA storage identity
 ```
 
-因此例如：
+`Map.events` 保持嵌入 `Map/{id}`；不拆 `MapEvent` Group，也不增加 `ContentClient.group()`。
+
+## 3. Exact initial business input
+
+Concrete M14 Game Entry 的 initial Frame input 固定为：
+
+```ts
+interface MapInitialInput {
+  mapId: number;
+  x: number;
+  y: number;
+  characterName: string;
+}
+```
+
+M14 CI example 使用：
+
+```json
+{
+  "mapId": 1,
+  "x": 10,
+  "y": 8,
+  "characterName": "m14_player"
+}
+```
+
+Rules：
 
 ```text
-@tileset_id     → tileset_id
-@autoplay_bgm   → autoplay_bgm
-@move_type      → move_type
-@character_name → character_name
+mapId       positive safe integer
+x/y         non-negative safe integers and inside loaded map
+characterName non-empty semantic resource name
 ```
 
-不得为了 JavaScript 风格改成 camelCase，也不得重命名为 LoomRealm 自创 vocabulary。
-
-Primitive、Hash、RGSS Table flatten/index、Color/Tone 与 fail-closed 细则由 `M14_CONSUMER_PROJECTION.md` 唯一冻结；本文不复制第二份 projection authority。
-
-M14 所需 Hash 只在 key 可无歧义投影为 integer/string/symbol scalar 时变成 JSON object；integer key 使用十进制字符串。`RPG::Map.events` 因此继续嵌在 `Map/{id}` record 中并以 event id 字符串索引，不拆成 `MapEvent` Group。这样保持 RMXP ownership，也不要求为 M14 reopen Subsystem `ContentClient.group()`。
-
-`kind`、`className`、`rubyObjectId`、`$id/$ref/$typed` 等 decoder/serialization metadata不得进入 consumer record。无法无歧义投影、但又被真实 M14 vertical需要的字段必须 fail closed，先增加最小 semantic projection，再允许 Runtime消费；不得把 generic wrapper 穿透给 map library。
-
-Importer 的 lossless structural/raw authority继续保存 unknown/extra source data；consumer projection 是 derived view，不替代该 authority。
-
-## Content / Input / Render
-
-### Content
-
-Definition 只通过 M12 logical Content API 读取 prepared FSDB JSON records/resources；不得直接打开 FSDB，也不得观察 installationId、filesystem path、URL、bearer、HTTP/FSDB physical identity。
-
-概念读取路径：
+Player resource identity：
 
 ```text
-ContentClient.record("Map", mapId)
-ContentClient.record("Tileset", tilesetId)
-ContentClient.record("MapInfo", mapId)
-ContentClient.record("MapMetadata", mapId) when needed
+characterName
+→ Graphics / Characters/{characterName}
 ```
 
-返回值是 `JsonValue + contentVersion`，不是 `RPG::Map`/`RmxpObject` runtime instance。
+不为 first slice 实现完整 RPG::System / Trainer startup。未来真实 startup需要这些 authority时再由 consumer evidence加入。
 
-优先保留 existing domain separation，而不是合并成新的 MapBundle。
+## 4. Gameplay Frame lifetime
 
-第一版 `Map/{id}` 中保留其嵌套 `events`；不为了 FSDB 形态对称拆成独立 Group。
+M14 initial map Frame 是 **long-lived gameplay Frame**，不是“加载地图后立即 completed”的 setup call。
 
-### Resource identity / version
+Exact lifecycle：
 
-Raw resource logical identity继续复用现有 importer/Content mapping。例如：
+```text
+frame activated
+→ validate MapInitialInput
+→ load Map + Tileset records
+→ validate spawn
+→ confirm required tileset/player resources + capture contentVersion
+→ create exactly one InputListener bound to this Frame
+→ create/reuse exactly one business RenderDomain for this map Runtime
+→ publish initial viewport/player state
+→ remain pending while frame.signal is live
+```
+
+The frame handler MUST NOT return an ordinary completed outcome while gameplay input is expected. Otherwise M10 Frame-bound Input Interest would disappear and the vertical would be invalid.
+
+On `frame.signal` abort / Frame close / Runtime teardown：
+
+```text
+listener.close() best-effort/idempotent
+pending gameplay wait ends
+```
+
+RenderDomain lifetime remains independent from Frame lifetime as frozen by M11：
+
+```text
+Frame close/suspend != RenderDomain destroy
+Data loss            != RenderDomain destroy
+```
+
+M14 one-frame vertical does not require multi-map/multi-frame session management. A second concurrent map gameplay Frame is outside first-slice scope and MUST NOT cause creation of a second RenderDomain just to make the implementation convenient.
+
+## 5. Resource identity / version
+
+Runtime uses only current M12 author API：
+
+```text
+ContentClient.record(namespace, key)
+ContentClient.resource(namespace, key)
+```
+
+Tileset resource：
 
 ```text
 RPG::Tileset.tileset_name
 → Graphics / Tilesets/{tileset_name}
-
-RPG::Tileset.autotile_names[n]
-→ Graphics / Autotiles/{name}
-
-RPG::Event::Page::Graphic.character_name
-→ Graphics / Characters/{character_name}
 ```
 
-空 resource name 表示无资源，不发起读取。
-
-当前 author API 没有 resource metadata/HEAD surface。M14 第一版直接使用现有：
+Player resource：
 
 ```text
-ContentClient.resource(namespace, key)
-→ bytes + mime + contentVersion
+MapInitialInput.characterName
+→ Graphics / Characters/{characterName}
 ```
 
-Map Runtime 对需要交给 browser 的真实资源调用一次 `resource()`，用返回值确认资源并取得 `contentVersion`；如果 Runtime 本身不需要 bytes，就不长期保留这些 bytes。随后只把：
+Empty required resource name is invalid for this first slice.
+
+Runtime calls `resource()` once for each required visible resource to prove existence and obtain `contentVersion`; bytes are not retained when Runtime does not need them. Render data carries only：
 
 ```text
-namespace + key + contentVersion
+namespace
+key
+contentVersion
 ```
 
-放进 Render state。
+Browser later uses M13 `PresentationResourceClient` to obtain bytes. Runtime + Renderer duplicate reads are accepted in M14; do not add metadata/HEAD API, AssetManager, shared cache service or URL/token escape hatch.
 
-这可能导致 Runtime 与 Renderer 各读一次同一资源。M14 接受该成本，不新增 `resourceMetadata()` / HEAD author API；只有真实 workload 证明有 measurable problem 才以 consumer evidence讨论最小 reopen M12。
+## 6. Directional input semantics
 
-### Input
-
-Map listener服从 M10 Interest/Producer/Main InputTarget/current Data semantics。WC focus/DOM event不能绕过 `RendererInputSource` 创造 Input authority。
-
-第一版方向输入必须走：
+M14 first slice uses exactly：
 
 ```text
-physical/synthetic RendererInputSource
-→ M10 Input
-→ map InputListener
-→ passability/business decision
-→ authoritative player position
-→ RenderDomain update
+channel = "keyboard.event"
 ```
 
-WC 不监听 `keydown` 后直接改变 player/map business position。
-
-### Render
-
-Map 创建业务 RenderDomains并维护 authoritative state。Frame/Data/Activation lifetime不隐式控制 Domain lifetime。
-
-M14 first slice 固定一个 authoritative RenderDomain：
+Accepted movement attempt：
 
 ```text
-domainId = "map.main"
+action = "down"
+repeat = false
+code ∈ { ArrowDown, ArrowLeft, ArrowRight, ArrowUp }
 ```
 
-它足以表达 viewport + player first slice；不得仅为视觉 layer 拆 `map.tiles` / `map.entities` 等 RenderDomain。未来只有独立业务 lifecycle/authority 证据才允许增加 Domain。
-
-Render data只携带业务状态与 logical resource identity/version；不得携带 filesystem path、privileged URL、Content credential或 raw resource bytes。
-
-`Map.data` 是 Runtime content/business input，不原样作为“浏览器自行解释 RMXP map”的 payload。Runtime 必须先按冻结的 Table/index + Tileset semantics 推导 first-slice tile/passability facts，再发布 map-owned Render vocabulary。
-
-M14 不为 coverage 强制使用 RenderEvent；M13 没有 Event→WC ABI。
-
-## Map-owned Web Presentation
-
-### Frozen first-slice component vocabulary
-
-M14 first slice 固定只需要两个业务 Custom Elements：
+Mapping preserves RMXP direction numbers：
 
 ```text
-<lr-map-view>    required
-<lr-map-sprite>  required
+ArrowDown  → d=2 → (0,+1)
+ArrowLeft  → d=4 → (-1,0)
+ArrowRight → d=6 → (+1,0)
+ArrowUp    → d=8 → (0,-1)
 ```
 
-职责：
+`action="up"` and `repeat=true` do not move in M14. No keyboard.state timer loop, key-repeat game loop, Scheduler or Tick abstraction is introduced.
+
+One accepted non-repeat key-down means exactly one tile movement attempt：
 
 ```text
-lr-map-view
-    map viewport
-    camera/clip
-    tile layer rendering
-    tileset resource decoding/cache
-    map-private Canvas drawing
-    composition host for Render-managed entity children
-
-lr-map-sprite
-    player visual
-    sprite resource decoding/cache
-    direction/frame crop
-    visual position/animation derived from received business state
+set authoritative facing direction = d
+→ evaluate first-slice passability
+→ if passable: update x/y by one tile
+→ if blocked: keep x/y unchanged
+→ recompute camera/render state
+→ RenderDomain.replace(...)
 ```
 
-第一版明确不创建：
+Blocked movement still changes/retains facing to the attempted direction; position stays unchanged.
+
+WC/DOM code MUST NOT listen to keydown and mutate map authority directly. M14 qualification uses an existing/synthetic `RendererInputSource`; real BrowserWindow DOM Keyboard/Pointer/Gamepad producer realization belongs to M15.
+
+## 7. First-slice RMXP passability
+
+M14 implements a narrow but real RMXP-compatible tile passability subset. It does not implement event collision, through/debug movement, terrain effects or map transitions.
+
+Direction passage bits：
 
 ```text
-lr-map-tile
-lr-map-layer
-lr-map-camera
-lr-map-input
-lr-map-resource
-lr-map-collision
-lr-map-event-command
-lr-game-root
+down  d=2 → 0x01
+left  d=4 → 0x02
+right d=6 → 0x04
+up    d=8 → 0x08
 ```
 
-Tile/layer/camera 是 `<lr-map-view>` private presentation mechanics；input/collision/content 是 Runtime/business capability，不是 visual component。
-
-`<lr-map-event>` M14 first slice 不要求。只有真实 Event 获得独立 RenderNode identity/lifecycle/interaction需要时，后续才可自然增加；不能为了 RMXP class 对称提前建立完整 WC taxonomy。
-
-### Frozen RenderNode tree
-
-第一版一个 `map.main` Domain 的 managed tree 固定为：
+For one map coordinate `(x,y)` and direction `d`, `mapTilePassable(x,y,d)` is frozen as：
 
 ```text
-root
-key = "viewport"
-tag = "lr-map-view"
+if (x,y) outside map
+    false
 
-└── child
-    key = "player"
-    tag = "lr-map-sprite"
+bit = passage bit for d
+
+for z in [2, 1, 0]:
+    tileId = Map.data[x,y,z]
+    missing/invalid tileId → false
+
+    passage = Tileset.passages[tileId]
+    priority = Tileset.priorities[tileId]
+
+    if (passage & bit) != 0
+        false
+
+    if (passage & 0x0f) == 0x0f
+        false
+
+    if priority == 0
+        true
+
+return true
 ```
 
-因此 M13-managed light DOM 的正常第一版形状为：
+One player movement from `(x,y)` in `d` computes target `(nx,ny)` and requires both：
+
+```text
+mapTilePassable(x,  y,  d)
+AND
+mapTilePassable(nx, ny, 10 - d)
+```
+
+Target outside map is blocked. This preserves the RMXP source-side “leave source / enter target from reverse direction” semantics while deliberately excluding Event collision from M14 first slice.
+
+`passages` / `priorities` are ordinary projected RGSS Table values; no `CollisionMap`, `PassabilityService`, `TileRepository` or derived blocked-grid cache is part of the public design.
+
+## 8. Tile rendering subset
+
+M14 first presentation slice intentionally supports a small regular-tile subset sufficient to prove real `Map.data + Tileset resource → pixels` semantics：
+
+```text
+tileId = 0         → transparent / no draw
+tileId >= 384      → regular Tileset tile
+tileId 48..383     → RMXP autotile; NOT required by M14 first slice
+other unsupported  → fail first-slice qualification rather than guess
+```
+
+Regular tile source rectangle is frozen：
+
+```text
+sx = ((tileId - 384) % 8) * 32
+sy = floor((tileId - 384) / 8) * 32
+sw = 32
+sh = 32
+```
+
+Visible regular tiles draw in `z=0 → 1 → 2` order onto the private map Canvas.
+
+M14 CI fixture visible window MUST use only transparent tile `0` and regular tiles `>=384`, and MUST avoid priority-over-player visuals. Autotile composition and priority-over-entity rendering are explicit nonclaims; if exact v21.1 compatibility cannot produce a meaningful first slice without them, that is real consumer evidence to add the smallest missing map behavior rather than a reason to build a generic TileRenderer framework upfront.
+
+## 9. Fixed logical viewport / camera
+
+M14 first slice has no DOM/layout feedback channel and no responsive runtime semantics.
+
+Frozen constants：
+
+```text
+tileSize          = 32 logical CSS px
+viewportWidth     = 640 CSS px
+viewportHeight    = 480 CSS px
+nominal grid      = 20 × 15 tiles
+```
+
+The concrete example fixes the physical host size in CSS. Runtime does not read DOM size and browser does not send resize/layout facts back to Runtime.
+
+Camera is authoritative map Runtime state in logical pixels. First-slice center/clamp rule：
+
+```text
+cameraX = clamp(playerX * 32 - 304, 0, max(mapWidth  * 32 - 640, 0))
+cameraY = clamp(playerY * 32 - 224, 0, max(mapHeight * 32 - 480, 0))
+```
+
+This places the player tile center at the classic 640×480 center `(320,240)` when not clamped.
+
+Visible tile bounds are derived from the fixed viewport：
+
+```text
+minTileX = floor(cameraX / 32)
+maxTileX = min(mapWidth  - 1, floor((cameraX + 639) / 32))
+minTileY = floor(cameraY / 32)
+maxTileY = min(mapHeight - 1, floor((cameraY + 479) / 32))
+```
+
+Tile screen position：
+
+```text
+screenX = tileX * 32 - cameraX
+screenY = tileY * 32 - cameraY
+```
+
+Responsive viewport, Window resize, dynamic logical resolution and DOM→Runtime layout feedback are not M14 requirements. `devicePixelRatio` MAY affect private Canvas backing-store resolution but MUST NOT change these logical coordinates or business camera state.
+
+## 10. RenderDomain identity / lifetime
+
+M14 owns **exactly one business RenderDomain**, but it does **not** own or choose its wire `domainId` spelling.
+
+Current M11 author API is：
+
+```ts
+scope.createRenderDomain(initialState)
+```
+
+The SDK assigns an opaque never-reused domain identity. Therefore：
+
+```text
+M14 runtime/browser/test MUST NOT require domainId == "map.main"
+M14 MUST NOT reopen createRenderDomain() to accept an author domain id
+qualification asserts exactly one current map Domain by topology/content, not by id spelling
+```
+
+The single domain is sufficient for viewport + player. Do not create tile/entity/layer Domains solely for visual structure.
+
+## 11. Exact first-slice Render tree
+
+The one map Domain has exactly：
+
+```text
+zIndex = 0
+roots = [viewport]
+
+viewport
+    key      = "viewport"
+    tag      = "lr-map-view"
+    attrs    = {}
+    children = [player]
+
+player
+    key      = "player"
+    tag      = "lr-map-sprite"
+    attrs    = {}
+    children = []
+```
+
+M13-managed DOM：
 
 ```html
 <body>
@@ -332,249 +407,188 @@ tag = "lr-map-view"
 </body>
 ```
 
-这里的 `<body>` / element insertion/order/identity继续由 M13 Projector管理；map browser code不得自行创建第二棵 authoritative player/entity tree。
+Same live M13 identity means ordinary movement reuses the same `<lr-map-sprite>` HTMLElement. Browser code does not build a second authoritative entity tree.
 
-同一 live wire-node identity 下，ordinary movement只更新现有 `<lr-map-sprite>`，不得 recreate player HTMLElement。Fresh Session/generation仍服从 M13，必须得到 fresh element universe。
+## 12. Exact package-private Render data agreement
 
-### Render data vocabulary
+M14 does not create a public/versioned framework Map Render protocol, but Runtime and browser entries MUST share one exact package-owned JSON shape.
 
-M14 不建立 public/versioned Map Render schema；但 first-slice implementation shape必须足够具体，避免 Runtime/Browser 两边各自猜测。
+```ts
+type ResourceRef = {
+  namespace: string;
+  key: string;
+  contentVersion: string;
+};
 
-`lr-map-view` data 至少包含：
+type VisibleTile = {
+  x: number;
+  y: number;
+  z: 0 | 1 | 2;
+  tileId: number;
+};
 
-```text
-mapId
-mapWidth / mapHeight
-viewport/camera coordinates needed by first slice
-tileSize used by presentation
-tileset logical resource { namespace, key, contentVersion }
-visible tile projection derived by Runtime from Map.data + Tileset semantics
+type MapViewRenderData = {
+  mapId: number;
+  mapWidth: number;
+  mapHeight: number;
+  cameraX: number;
+  cameraY: number;
+  tileset: ResourceRef;
+  tiles: VisibleTile[];
+};
+
+type MapSpriteRenderData = {
+  x: number;
+  y: number;
+  screenX: number;
+  screenY: number;
+  direction: 2 | 4 | 6 | 8;
+  pattern: 0;
+  sprite: ResourceRef;
+};
 ```
 
-Visible tile projection只表达 presentation所需的 map-domain result，例如 tile coordinate/layer/tile identity；不得携带原始 `RmxpObject`、完整 source wrapper、filesystem location或 raw bytes。
-
-`lr-map-sprite` data 至少包含：
+Player screen position is computed by Runtime from authoritative world/camera state：
 
 ```text
-x / y
-direction
-animation frame when used
-sprite logical resource { namespace, key, contentVersion }
+screenX = playerX * 32 - cameraX
+screenY = playerY * 32 - cameraY
 ```
 
-Position/direction 是 Runtime authoritative business result。WC 可以用 CSS transform/Canvas crop做 visual realization，但不得自行改变 authoritative x/y。
+`pattern=0` is frozen for M14 because there is no gameplay clock/animation scheduler. Later real movement animation MAY extend map-private vocabulary based on consumer evidence; M14 does not invent a Tick API.
 
-### Shadow DOM / private subtree
+Render data MUST NOT contain source wrapper, filesystem path, URL, token, credential or raw resource bytes.
 
-`<lr-map-view>` 第一版使用一个 private Shadow DOM viewport：
+## 13. Map-owned Web Components
 
-```html
+Exactly two business Custom Elements are required：
+
+```text
 <lr-map-view>
-  #shadow-root
-    <div class="viewport">
-      <canvas class="tiles"></canvas>
-      <div class="entities">
-        <slot></slot>
-      </div>
-    </div>
-
-  <lr-map-sprite></lr-map-sprite>
-</lr-map-view>
+<lr-map-sprite>
 ```
 
-含义：
+`lr-map-view` owns：
 
 ```text
-canvas.tiles
-    private tile rendering surface
-    NOT a RenderNode tree
-
-slot
-    projects M13-managed light-DOM entity children
-
-entities
-    private positioning/stacking container
+private Shadow DOM
+fixed logical viewport realization
+private <canvas class="tiles">
+tileset decode/cache
+regular tile source-rect drawing
+entity overlay + <slot>
 ```
 
-`<lr-map-sprite>` 第一版可使用最小 Shadow DOM：
+Private structure is semantically equivalent to：
 
 ```html
-<lr-map-sprite>
-  #shadow-root
-    <div class="sprite"></div>
-</lr-map-sprite>
+#shadow-root
+  <div class="viewport">
+    <canvas class="tiles"></canvas>
+    <div class="entities"><slot></slot></div>
+  </div>
 ```
 
-实现 MAY 用 private Canvas 替代 `.sprite`，但不得因此改变 RenderNode identity/data/resource boundary。是否由 `div` background crop 或 Canvas 绘制属于 map-library private implementation choice，不形成 LoomRealm contract。
+`lr-map-sprite` owns player visual and character-sheet crop. For a normal RMXP 4×4 character sheet：
 
-### CSS ownership
+```text
+frameWidth  = image width  / 4
+frameHeight = image height / 4
+column      = pattern (M14 = 0)
+row         = (direction - 2) / 2
+```
 
-样式明确分两层：
+The sprite is visually bottom-center anchored to its 32×32 map cell using received `screenX/screenY`; the WC may realize this with a private `div`/background crop or Canvas. It MUST NOT alter authoritative world/camera coordinates.
+
+Do not create first-slice：
+
+```text
+lr-map-tile
+lr-map-layer
+lr-map-camera
+lr-map-input
+lr-map-resource
+lr-map-collision
+lr-game-root
+SceneGraph / component registry / layer manager
+```
+
+## 14. CSS ownership
 
 ```text
 @loomrealm-game/map
-    owns component/visual behavior CSS
+→ component host/default CSS
+→ Shadow DOM private CSS
+→ clipping / Canvas / sprite visual mechanics
 
 examples/essentials-v21.1
-    owns concrete Window/page composition CSS
+→ concrete page/window CSS
+→ fixed 640×480 host size
+→ centering / margin / scroll policy
 ```
 
-Map browser build 至少提供 host-level component defaults，语义等价于：
+Map component CSS MUST NOT make page/window composition decisions. Example CSS MUST NOT select Shadow DOM private classes.
 
-```css
-lr-map-view {
-  display: block;
-  position: relative;
-  overflow: hidden;
-  contain: layout paint;
-}
+M14 logical viewport size is fixed by the first-slice contract and realized by example CSS; there is no runtime viewport config object, ResizeObserver protocol or LayoutService.
 
-lr-map-sprite {
-  display: block;
-  position: absolute;
-}
-```
+## 15. Browser artifact
 
-`lr-map-view` Shadow DOM private styles至少保证：
+M13 bootstrap loads ordered classic `<script>` resources. Therefore the M14 browser artifact MUST be directly classic-script executable：
 
 ```text
-.viewport fills host and clips overflow
-.tiles fills viewport
-.entities fills viewport as overlay
-pixel-art resource rendering avoids unintended smoothing where browser mechanism supports it
+no import/export syntax at browser execution time
+no runtime ESM import graph
+registers lr-map-view + lr-map-sprite through native customElements.define()
 ```
 
-Concrete example page CSS只负责 Window composition，例如：
-
-```css
-html,
-body {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  overflow: hidden;
-}
-
-lr-map-view {
-  width: 100%;
-  height: 100%;
-}
-```
-
-Example CSS 可以覆盖 map host 的尺寸/主题，但不得依赖 Shadow DOM private class 名作为跨-package contract。Shadow DOM internal style可随 browser JS静态定义；不为它建立新的 stylesheet loader/capability。
-
-### Resource flow
-
-两个 WC 都只通过 M13 context 读取真实可见资源：
+First-slice implementation freezes a deliberately simple artifact shape：
 
 ```text
-Runtime ContentClient.resource()
-→ logical resource ref/version
-→ Render data
-→ receiveRenderData
-→ context.resources / PresentationResourceClient
-→ bytes
-→ private decode/cache
-→ visible tile/sprite
+game-libs/map/browser/map.browser.js
+    one standalone browser source; no ESM imports
+
+game-libs/map/browser/map.css
+    component/default host CSS
+
+package build
+→ dist/browser/map.browser.js   classic JS, copied/materialized without module graph
+→ dist/browser/map.css
 ```
 
-WC 不直接 fetch、不接收 path/URL/token，不把 decoded image/cache变成 application authority。
+Runtime TypeScript may continue normal ESM/tsc build separately. Do not reopen M13 loader to support modules merely for M14, and do not introduce a browser framework/bundler architecture. A later private build-tool change is allowed only if the produced artifact preserves the same classic-script boundary.
 
-### Bootstrap
+These artifacts MUST be included in `npm pack --dry-run` and enter prepared Content normally; tests may not direct-import browser source or call `customElements.define()` themselves.
 
-Map browser build必须作为 prepared Content 的 JS/CSS resource进入 `WebPresentationConfigV1`。Browser script使用原生：
+## 16. First-slice non-goals / abstraction budget
 
-```text
-customElements.define("lr-map-view", ...)
-customElements.define("lr-map-sprite", ...)
-```
-
-Example Config 的 ordering原则是：
-
-```text
-map component/default CSS
-→ concrete example page/override CSS
-
-map browser registration script
-→ window.onload
-→ M13 presentation start
-```
-
-Qualification不得通过 test-local direct import或测试代码手工 `customElements.define()` 绕过 M13 bootstrap。
-
-## M13 consumer boundary
-
-Map 不重新解释 M13 identity/currentness/order/failure/resource semantics；直接消费 frozen Web Presentation API。
-
-```text
-same full live wire-node identity
-→ same HTMLElement
-
-fresh Session/generation
-→ fresh element universe
-
-same-generation transport loss
-→ does not mint/remove application authority
-```
-
-Map 不依赖 cross-Subsystem global zIndex；actual visual stacking由 map CSS/private presentation表达。
-
-## Minimal M14 capability
-
-第一版只实现一个真实 playable map slice 所需能力：
-
-```text
-one logical map Subsystem
-one authoritative map.main RenderDomain
-load one FSDB Map JSON record whose semantics mirror RPG::Map
-load referenced FSDB Tileset JSON record/resources
-spawn player from concrete example initial input
-accept directional input
-update business position through passability rules
-publish viewport + player RenderNode state
-project exactly through lr-map-view + lr-map-sprite
-render tiles privately in lr-map-view Canvas
-reuse the same lr-map-sprite HTMLElement across ordinary movement
-```
-
-第一版可由 example initial input提供 `mapId/x/y`；不为了首张地图强制实现完整 `RPG::System` startup compatibility。
-
-事件、地图切换或 nested `frame.call()` 只有在 example 中存在自然业务需求时实现；不为 protocol coverage 硬造功能。
-
-## Abstraction budget
-
-禁止：
+M14 does not establish：
 
 ```text
 MapNormalizedV1 / universal map schema
 GameLibrary base framework
-MapRepository hierarchy
-MapBundle abstraction
-AssetManager
-SceneGraph framework
-universal component registry
-LoomRealm map layer manager
+MapRepository / MapBundle / AssetManager
+SceneGraph / LayerManager / component registry
 runtime service locator
-Content resource metadata API only for M14 elegance
-one-WebComponent-per-tile/layer/camera taxonomy
-presentation-specific Subsystem/RenderDomain splitting
+Content metadata API
+responsive viewport protocol
+DOM→Runtime layout feedback
+game Tick/Scheduler/EventQueue
+autotile framework
+full priority-over-entity renderer
+Event collision/interpreter
+complete Pokémon Essentials gameplay
 ```
 
-允许直接的 RMXP/Essentials-compatible map-domain types/functions，只要它们描述 FSDB JSON records 的业务语义并由真实 M14 vertical 使用，而不是暴露 importer decoder representation。
+Allowed implementation nouns should remain concrete：
 
-## Closure
+```text
+map Definition
+Map/Tileset JSON validators needed by first slice
+small Table lookup helper
+passability function
+camera/visible-tile projection functions
+lr-map-view / lr-map-sprite
+standalone browser artifact
+```
 
-- package 位于 `game-libs/map`，identity 为 `@loomrealm-game/map`；
-- first slice只有一个 logical `map` business Subsystem；M14 harness不假装 Desktop child process，M15再验证真实 Hostra child；
-- runtime entry dependency只指向 public author SDK；browser entry不污染 Runtime Definition；
-- RMXP/Essentials 是 map content semantic authority，prepared FSDB JSON records 是 Runtime representation；
-- semantic JSON projection遵守冻结的机械映射规则，`Map.events` 第一版保持嵌套；
-- runtime只通过 `ContentClient` 消费 `JsonValue` records/resources，不消费 importer object-graph wrappers或 decoder instances；
-- resource version由现有 `ContentClient.resource()` 获得，不为 M14 新增 metadata API；
-- first slice固定 `map.main` → `lr-map-view(viewport)` → `lr-map-sprite(player)`；tile绘制留在 map-view private Canvas；
-- map/example CSS ownership明确，browser build真实通过 prepared Content + M13 Config启动；
-- 至少一个真实 map resource通过 PresentationResourceClient到达 WC 并参与可见结果；
-- unit/integration/Chromium tests证明 Content/Input/Render/DOM/resource 的真实业务路径。
+If implementation requires a new Manager/Registry/Repository/Provider/Resolver/Adapter/Pipeline/Builder/Factory/Service/Host/Platform/Scheduler solely to satisfy M14 elegance, stop and re-check whether the behavior can remain ordinary map-domain code.
