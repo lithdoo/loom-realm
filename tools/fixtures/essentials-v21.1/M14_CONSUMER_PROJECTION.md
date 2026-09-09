@@ -1,119 +1,188 @@
 # M14 Consumer Projection — RMXP/Essentials → Runtime FSDB JSON
 
 > 状态：M14 Implementation Addendum / Preimplementation Frozen Candidate  
-> 适用范围：`tools/fixtures/essentials-v21.1` 在 M14 新增的 consumer-facing semantic projection  
-> 依赖：`DESIGN.md`、`IMPLEMENTATION.md`、M12 Content API、M14 Map Game Library  
+> 适用范围：`tools/fixtures/essentials-v21.1` 新增的 consumer-facing semantic projection  
+> 依赖：existing importer RC、M12 Content API、M14 Map Game Library  
 > 日期：2026-09-09
 
-本文补充现有 Essentials v21.1 importer 设计与 RC 事实，不推翻既有 qualification。
+## Objective
 
-现有 importer RC 已证明：
+现有 importer 已关闭：
 
 ```text
 source acquisition
 → PBS / Marshal / RMXP decode
 → canonical / derived facts
-→ current FSDB mapping
-→ production openFsdb / integrity / Oracle qualification
+→ current generic FSDB mapping
+→ production openFsdb / integrity qualification
 ```
 
-M14 新增的工作只解决一个真实 consumer 缺口：
+M14 只补一个真实 consumer gap：
 
 ```text
-lossless RMXP/internal representation
-→ Runtime-safe JSON semantic records
+lossless/importer RMXP representation
+→ Runtime-safe RMXP-compatible JsonValue records
+→ Map/{id} / Tileset/{id} / optional MapInfo/{id}
 → M12 ContentClient
 → @loomrealm-game/map
 ```
 
-它不是新的通用 map schema，也不是新的 importer architecture layer。
+It is not a universal map schema and not a new importer architecture layer.
 
----
+## 1. Authority boundary
 
-## 1. Authority Boundary
-
-三层必须分开：
+Keep three layers distinct：
 
 ```text
 RMXP / Essentials source semantics
-    → 字段含义、关系、运行行为的 authority
+    field meaning / source-container identity / behavior authority
 
 Importer structural representation
-    → Marshal graph / RmxpObject / RubyString / typed arrays / object identity
+    Marshal graph / RmxpObject / RubyString / typed arrays / object identity
 
 M14 consumer projection
-    → 普通 JsonValue FSDB records
+    ordinary JsonValue FSDB record values
 ```
 
-M14 Runtime MUST NOT 接收：
+Runtime MUST NOT receive：
 
 ```text
 RmxpObject
-RubyString
+RubyString wrapper
 RubySymbol wrapper
-GenericRubyObject
-GenericMarshalNode
+GenericRubyObject / GenericMarshalNode
 rubyObjectId
 $id / $ref / $typed
-Buffer / Int16Array runtime object
+Buffer / Int16Array runtime objects
 ```
 
-这些 representation 可以继续存在于 importer 内部或 lossless structural evidence 中，但不是 map Runtime API。
+The existing lossless/structural path remains authoritative for source fidelity; M14 consumer records are a derived view.
 
----
+## 2. Required first-slice consumer identities
 
-## 2. First-slice FSDB Identities
-
-M14 第一条 vertical 优先 materialize：
+M14 playable first slice requires exactly：
 
 ```text
 Map/{mapId}
 Tileset/{tilesetId}
-MapInfo/{mapId}
-MapMetadata/{mapId}        when needed
 ```
 
-`mapId` / `tilesetId` 使用十进制 logical key spelling，例如 `1`、`42`；文件名零填充如 `Map001.rxdata` 不进入 Runtime logical identity。
+`MapInfo/{mapId}` MAY also be materialized and qualified. `MapMetadata/{mapId}` is not a first-slice requirement until a real selected M14 behavior consumes it.
 
-M14 不为表型美观创建：
+Logical keys use unpadded decimal spelling：
 
 ```text
-MapBundle
-MapEvent Group
-MapLayer Group
-universal map record
+1
+42
+105
 ```
 
-`RPG::Map.events` 在第一版继续嵌入 `Map/{mapId}` record，保持 RMXP 原有 ownership，也避免为 M14 引入 Subsystem `ContentClient.group()` 能力。
+Physical filenames such as `Map001.rxdata` never become Runtime keys.
 
----
+## 3. Source-container → record extraction
 
-## 3. Mechanical JSON Projection Rules
+Recursive object projection alone is insufficient; M14 also freezes which source container owns record identity.
 
-Projection MUST 是机械的、可测试的，并尽量保留既有 RMXP spelling。这里的规则是 consumer boundary invariant，不允许 map Runtime 或 example 再做第二次 representation conversion。
+### 3.1 MapNNN.rxdata → Map/{N}
 
-### 3.1 Known RPG/RMXP object
+A source root whose canonical physical filename matches：
 
-对 `RmxpObject` 的 known fields：
+```text
+Map<digits>.rxdata
+```
+
+and whose decoded root is known `RPG::Map` materializes exactly one record：
+
+```text
+Map/{decimal integer represented by <digits>}
+```
+
+Examples：
+
+```text
+Map001.rxdata → Map/1
+Map042.rxdata → Map/42
+```
+
+Rules：
+
+```text
+N must be a positive safe integer
+leading zeroes are removed only by decimal integer interpretation
+root must be known RPG::Map
+one physical map root produces one consumer Map record
+```
+
+Filename/root mismatch or an invalid id fails closed for M14 consumer materialization.
+
+Do not add `id` to the `Map` JSON merely because identity came from its filename; RMXP `RPG::Map` does not own an `@id` field. Runtime identity is the Content key.
+
+### 3.2 Tilesets.rxdata → Tileset/{i}
+
+RMXP `Tilesets.rxdata` decodes as the source tileset collection/array. For every materialized non-null known `RPG::Tileset` entry at array index `i`：
+
+```text
+Tilesets.rxdata[i]
+→ Tileset/{i}
+```
+
+For M14 consumer identity：
+
+```text
+i must be a positive safe integer
+projected RPG::Tileset.id must exist
+projected id must equal i
+```
+
+An index/id mismatch is not normalized or silently repaired; required materialization fails closed. This prevents two competing authorities for `Tileset/{id}`.
+
+Null/empty collection slots are skipped and do not produce records.
+
+### 3.3 MapInfos.rxdata → MapInfo/{k}
+
+When M14 materializes `MapInfo` evidence, `MapInfos.rxdata` integer-key Hash ownership is preserved：
+
+```text
+MapInfos.rxdata[k] = RPG::MapInfo
+→ MapInfo/{k}
+```
+
+`k` must be a positive safe integer and becomes the unpadded decimal Content key. `RPG::MapInfo` has no invented consumer `id` member.
+
+MapInfo is not required by the first playable vertical; do not make `@loomrealm-game/map` load it only because this record can be materialized.
+
+### 3.4 MapMetadata
+
+M14 first slice does not freeze a `MapMetadata` source extraction rule because it does not consume MapMetadata. If a real exact-v21.1 selected vertical later requires it, add the smallest source-specific extraction rule here before Runtime use.
+
+Do not create an empty/general metadata record family for symmetry.
+
+## 4. Mechanical recursive JSON rules
+
+Projection is mechanical and testable. Known source field spelling is preserved unless a rule below says otherwise.
+
+### 4.1 Known RPG/RMXP object
+
+For known `RmxpObject` fields：
 
 ```text
 strip exactly one leading "@"
-preserve remaining field spelling
-recursively project field value
+preserve remaining spelling
+recursively project the field value
 ```
 
-例如：
+Examples：
 
 ```text
-@tileset_id   → tileset_id
-@autoplay_bgm → autoplay_bgm
-@move_type    → move_type
+@tileset_id     → tileset_id
+@autoplay_bgm   → autoplay_bgm
+@move_type      → move_type
 @character_name → character_name
 ```
 
-不得仅为 JavaScript 风格把它们改成 camelCase，也不得重命名为 LoomRealm 自创 vocabulary。
+Do not camelCase or create LoomRealm-specific names.
 
-以下 decoder metadata 不进入 consumer record：
+Decoder metadata never enters the consumer object：
 
 ```text
 kind
@@ -121,321 +190,256 @@ className
 rubyObjectId
 ```
 
-### 3.2 Primitive values
-
-Ruby/Marshal primitive 必须直接落成等价 JsonValue，不允许 wrapper：
+### 4.2 Primitive values
 
 ```text
 nil         → null
 true/false  → JSON boolean
-Integer     → JSON number, only when exactly representable as a JavaScript safe integer
+Integer     → JSON number only when Number.isSafeInteger-compatible
 Float       → finite JSON number
 ```
 
-对 M14-required consumer fact：
+For a required M14 fact：
 
 ```text
-Integer outside Number.isSafeInteger range → fail closed
-NaN / +Infinity / -Infinity                → fail closed
+unsafe Integer        → fail closed
+NaN / ±Infinity       → fail closed
 ```
 
-不得通过 decimal string、tagged number、`$typed` 或其他 M14-only wrapper 绕开 JsonValue boundary。未来若真实 consumer 需要超出该范围的数值语义，再基于 consumer evidence定义最小 semantic projection。
+Do not introduce decimal-string/tagged-number wrappers only to stay inside JsonValue.
 
-### 3.3 Ruby text/symbol
+### 4.3 Ruby text / symbol
 
 ```text
-RubyString with semantic text → JSON string
-RubySymbol                    → symbol name JSON string
+RubyString with defined semantic text
+→ JSON string
+
+RubySymbol
+→ symbol-name JSON string
 ```
 
-M14-required field 若只有 opaque/binary Ruby string 而没有已定义 semantic text projection，materialization MUST fail closed for that required consumer fact；不得把 bytes/base64 wrapper伪装成业务字符串。
+Opaque/binary RubyString required as a semantic text fact fails closed unless an existing source-specific text rule defines it. Do not expose bytes/base64 wrapper as fake business text.
 
-Raw/lossless authority仍由 importer已有 structural/raw path保留。
-
-### 3.4 Array
+### 4.4 Array
 
 ```text
-Ruby Array wrapper
+Ruby Array
 → JSON array
-→ recursively projected elements
+→ recursively projected members
 ```
 
-### 3.5 Hash
+### 4.5 Hash
 
-M14-required RMXP map Hash 若 key 为 integer/string/symbol scalar，可 materialize 为 JSON object：
+A required Hash may become a JSON object only when each key is an unambiguous scalar：
 
 ```text
-integer key → decimal string key
-string key  → same string
-symbol key  → symbol name
+Integer → decimal string
+String  → same string
+Symbol  → symbol-name string
 ```
 
-`RPG::Map.events` 因此表示为按 event id 索引的 JSON object，例如：
+If projection causes key collision, uses a non-scalar key, or depends on Ruby Hash default semantics required by the consumer, fail closed.
+
+`RPG::Map.events` therefore remains embedded in `Map/{id}`：
 
 ```json
 {
-  "1": { "id": 1, "name": "...", "x": 10, "y": 12, "pages": [] }
+  "1": {
+    "id": 1,
+    "name": "...",
+    "x": 10,
+    "y": 12,
+    "pages": []
+  }
 }
 ```
 
-若 M14-required Hash 使用 non-scalar key、Ruby default semantics 或无法无歧义投影的 key collision，MUST fail materialization，直到有真实 consumer 驱动的明确 semantic handler；不得泄漏 generic Hash wrapper给 Runtime。
+Do not split a `MapEvent` Group or request `ContentClient.group()`.
 
-### 3.6 RGSS Table
+## 5. RGSS Table
 
-现有 decoder 已把 RGSS `Table` payload 按 serialized element order 解成：
+Existing decoder facts are projected to exact JSON：
 
-```text
-dimensions
-xSize
-ySize
-zSize
-values: Int16Array
-```
-
-M14 consumer JSON 固定为：
-
-```json
+```ts
 {
-  "dimensions": 3,
-  "xSize": 40,
-  "ySize": 30,
-  "zSize": 3,
-  "values": [0, 0, 384, 385]
+  dimensions: number,
+  xSize: number,
+  ySize: number,
+  zSize: number,
+  values: number[]
 }
 ```
 
-Consumer representation MUST 保持 RGSS Table 的元素顺序。坐标到 `values` 的索引固定为：
+Serialized element ordering is preserved. Coordinate lookup is frozen：
 
 ```text
-index(x, y, z) = x + y * xSize + z * xSize * ySize
+index(x,y,z) = x + y*xSize + z*xSize*ySize
 ```
 
-因此 x 是最内层/最快变化维度，随后是 y，再随后是 z。对 1D/2D Table，未使用维度按 decoder/RGSS shape 取 size 1，consumer 不创建另一套 flattening convention。
+Therefore x changes fastest, then y, then z.
 
-Materialization MUST 验证：
+For 1D/2D Tables, unused dimensions retain decoder/RGSS size `1`; do not establish a second flattening convention.
+
+Materialization MUST validate：
 
 ```text
-values.length === xSize * ySize * zSize
+dimensions is the decoded RGSS dimension count
+xSize/ySize/zSize are positive safe integers
+values.length == xSize * ySize * zSize
+all values are finite safe JSON numbers preserving decoded Int16 values
+```
+
+Consumer lookup code additionally requires requested coordinates in bounds：
+
+```text
 0 <= x < xSize
 0 <= y < ySize
 0 <= z < zSize
 ```
 
-M14 qualification 至少用已知非零坐标样本证明 serialized order 与该 index rule 一致，避免只验证 `values` 是 number array 却把轴顺序实现错误。
+Qualification must use a known non-zero coordinate sample to prove axis ordering. A test that only checks `values` is an array does not close M14.
 
-`values` 中每个值是 JSON number，保留原 Int16 数值；不得输出 `$typed` 或 base64 wrapper，也不为此建立 Runtime `Table` framework/class。
+No Runtime `Table` framework/class is implied; ordinary helper functions are enough.
 
-### 3.7 Color / Tone
+## 6. Color / Tone
 
-若 M14-required nested object包含现有 typed `Color` / `Tone`，直接使用 decoder 已定义的数值字段：
+If a required nested known object uses existing decoded RGSS values：
 
 ```text
 Color → { red, green, blue, alpha }
 Tone  → { red, green, blue, gray }
 ```
 
-所有分量必须是 finite JSON number；非有限值对 required fact fail closed。不携带 `kind` / `rubyObjectId` / ivar transport metadata。
+Every component must be finite. Transport metadata is removed.
 
-### 3.8 Nested known objects
+## 7. Nested known RPG objects
 
-`RPG::AudioFile`、`RPG::Event`、`RPG::Event::Page`、`Condition`、`Graphic`、`EventCommand`、`MoveRoute`、`MoveCommand` 等 M14 所需 known object递归使用同一规则。
-
-例如 `EventCommand` consumer shape自然成为：
-
-```json
-{
-  "code": 355,
-  "indent": 0,
-  "parameters": ["..."]
-}
-```
-
-只 materialize 真实 M14 consumer 使用的 known semantics；不要为了“完整 RMXP TypeScript model”提前投影未使用的对象层级。
-
-### 3.9 Extra/unknown facts
-
-M14 consumer projection 是 derived consumer view，不替代 importer 的 lossless structural authority。
-
-因此：
+When actually required, nested known objects such as：
 
 ```text
-unknown/extra source data
-→ MUST remain preserved in existing raw/structural authority
-→ MUST NOT be silently reinterpreted as known map semantics
+RPG::AudioFile
+RPG::Event
+RPG::Event::Page
+RPG::Event::Page::Condition
+RPG::Event::Page::Graphic
+RPG::EventCommand
+RPG::MoveRoute
+RPG::MoveCommand
 ```
 
-若真实 M14 vertical 需要某个 extra ivar / GenericRubyObject 的业务含义，则先增加最小、明确、可测试的 semantic projection，再让 map Runtime消费；不得直接把 generic wrapper穿透到 Runtime。
+recursively use the same object rules.
 
----
+Do not build a complete TypeScript/RMXP class hierarchy simply because the class registry knows these types. Materialize the known object graph present in required `Map`/`Tileset` facts without inventing a new model layer.
 
-## 4. Resource Identity Projection
+## 8. First-slice Map / Tileset facts
 
-Raw resource namespace/key继续使用现有 importer resource mapping，不建立 AssetManager 或第二套 asset identity。
+The M14 map library requires these persisted semantic members from the selected records：
 
-M14 第一版至少使用：
+```text
+Map
+    tileset_id
+    width
+    height
+    data
+    events may remain present but first movement slice does not require event collision
+
+Tileset
+    id
+    tileset_name
+    passages
+    priorities
+    autotile_names may remain present but M14 CI rendering does not require autotiles
+```
+
+These are not a new normalized schema. They are the subset of mechanically projected RMXP fields consumed by the first vertical.
+
+Required invariants：
+
+```text
+Map.width/height positive safe integers
+Map.tileset_id positive safe integer
+Map.data is a valid 3D RGSS Table covering width × height × at least 3 layers used by the slice
+Tileset.id matches its Content key
+Tileset.passages/priorities are valid projected Tables indexable for all tile ids required by the selected slice
+Tileset.tileset_name is non-empty when regular tiles are visible
+```
+
+Semantic passability behavior belongs to `M14_02_MAP_GAME_LIBRARY.md`, not this importer document.
+
+## 9. Raw resource identity
+
+Existing raw resource mapping remains authoritative. M14 consumes logical identities such as：
 
 ```text
 RPG::Tileset.tileset_name
-→ namespace = Graphics
-→ key = Tilesets/{tileset_name}
+→ Graphics / Tilesets/{tileset_name}
 
 RPG::Tileset.autotile_names[n]
-→ namespace = Graphics
-→ key = Autotiles/{name}
+→ Graphics / Autotiles/{name}
 
 RPG::Event::Page::Graphic.character_name
-→ namespace = Graphics
-→ key = Characters/{character_name}
+or M14 initial characterName
+→ Graphics / Characters/{character_name}
 ```
 
-空 resource name 表示无对应可见 resource，不发起读取。
+Projection does not create AssetManifest/AssetManager or resource metadata records.
 
-logical key 不携带 filesystem path、URL、credential；extension resolution继续由 prepared Content/Package Index拥有。
+## 10. Failure / unknown facts
 
----
+The consumer projection does not replace lossless source authority.
 
-## 5. Resource Version for M14
-
-当前 Subsystem author API 已有：
+For unknown/extra source values：
 
 ```text
-ContentClient.resource(namespace, key)
-→ bytes + mime + contentVersion
+not required by M14 consumer
+→ retain through existing lossless/importer evidence; no need to force into consumer record
+
+required by M14 consumer but not mechanically representable
+→ fail closed
+→ add the smallest explicit semantic projection here before Runtime use
 ```
 
-M14 不新增 `resourceMetadata()` / HEAD author API。
+Never push a generic importer wrapper into map Runtime as an escape hatch.
 
-第一版 map Runtime 对需要交给 browser presentation 的真实资源：
+## 11. Implementation shape
+
+Preferred implementation is a handful of importer-local functions, for example：
 
 ```text
-logical namespace/key
-→ ContentClient.resource(namespace, key)
-→ verify resource exists / obtain contentVersion
-→ discard/avoid retaining bytes when Runtime does not otherwise need them
-→ Render data { namespace, key, contentVersion }
-→ map WC
-→ PresentationResourceClient
-→ browser-owned bytes
+projectJsonValue(...)
+projectKnownRmxpObject(...)
+projectTable(...)
+extractMapRecord(...)
+extractTilesetRecords(...)
+extractMapInfoRecords(...) when used
 ```
 
-这可能产生 Runtime 与 Renderer 各一次 resource read。M14 接受该成本；只有真实 workload 证明它造成 measurable problem，才以 consumer evidence讨论最小 reopen M12。
-
-禁止仅为理论效率预建：
+Names are not public ABI. Do not create：
 
 ```text
-Content resource metadata API
-AssetManifest
-ResourceRepository
-shared decoded cache authority
+ConsumerProjector<T>
+ProjectionRegistry
+SemanticMaterializer class hierarchy
+ProjectionPipeline
+ProjectionContext service
+map-schema package
 ```
 
----
+## 12. Qualification minimum
 
-## 6. M14 Prepared Content Assembly
-
-Essentials importer只拥有：
+Before M14 closure prove：
 
 ```text
-source corpus
-→ semantic records/resources
-→ importer-produced prepared FSDB/content material
+Map001.rxdata extraction → Map/1
+Tilesets array extraction → stable Tileset keys + id/index mismatch failure
+MapInfos hash extraction when MapInfo path is implemented
+primitive safe/fail-closed rules
+Hash key projection/collision failure
+Table shape + non-zero coordinate index ordering
+no decoder metadata/wrappers in consumer records
+Map.events remains embedded
+production FSDB can persist/read the records as JsonValue
+@loomrealm-game/map obtains them only through ContentClient
 ```
 
-它 MUST NOT 开始理解或打包 `@loomrealm-game/map` browser build。
-
-M14 的 example/test preparation 独立负责把现成部分组装成一个 qualification 使用的 prepared Content view：
-
-```text
-importer-produced FSDB or CI-safe semantic fixture
-+
-@loomrealm-game/map browser JS/CSS build
-+
-example WebPresentationConfig logical refs
-→ one test-local prepared Content view
-```
-
-这个 preparation 只做 composition/materialization，不：
-
-```text
-重新解释 RMXP semantics
-创建第二个 map adapter
-成为 Runtime dependency
-成为 production Host
-定义 UniversalGamePackager / ContentBuilder framework
-```
-
-具体脚本可以位于 `examples/essentials-v21.1` 或 qualification tooling，直到真实多个 consumers证明需要共享 package。
-
----
-
-## 7. Game Entry Participation
-
-M14 concrete example 不能只是 fixture directory。
-
-Qualification MUST 实际读取并通过现有 `@loomrealm/game-package`：
-
-```text
-examples/essentials-v21.1/game.json
-→ parseGameEntryV1 / validateGameEntryV1
-→ validated logical subsystem topology + initial target/input
-→ test-owned physical Definition binding
-→ Main
-```
-
-M14 不要求 Hostra/PWA Launch Manifest；test harness只为 validated logical key绑定 `@loomrealm-game/map` Definition。
-
-第一条 vertical MAY 使用最小 initial business input：
-
-```json
-{
-  "mapId": 1,
-  "x": 10,
-  "y": 8
-}
-```
-
-这样 M14 可验证真实 Game Entry → initial Frame/map startup，而不为了第一张地图强制实现完整 `RPG::System` startup compatibility。后续真实需求再扩展 initial input/Essentials startup behavior。
-
----
-
-## 8. Qualification
-
-M14 projection 至少证明：
-
-```text
-selected Map/Tileset semantic JSON contains no importer wrappers
-known field spelling follows mechanical rules
-nil/boolean/integer/float projection follows JsonValue rules and invalid required numbers fail closed
-Table values are ordinary JSON numbers
-Table values length and known-coordinate indexing follow the frozen RGSS order
-Map events remain embedded and addressable by event id
-CI-safe fixture and official/local corpus produce the same consumer semantics
-map Runtime only sees ContentClient JsonValue/resources
-resource version comes from existing ContentClient.resource()
-```
-
-官方/local corpus qualification继续不提交第三方 bytes；只记录 source identity/fingerprint、projection result和必要统计。
-
----
-
-## 9. Existing RC Status
-
-本 addendum 不把现有 importer 标记回未完成。
-
-```text
-Existing importer RC
-    remains valid for its previously qualified acquisition/decoding/canonical/current-FSDB scope.
-
-M14 consumer projection
-    is new pending work required by the first Runtime map consumer.
-```
-
-因此实现/qualification记录必须明确区分：
-
-```text
-"importer RC already passed"
-!=
-"M14 Map/Tileset consumer projection already implemented"
-```
-
-在真实 `Map/{id}` / `Tileset/{id}` 等 consumer records materialize 并通过 M14 gate 以前，不得声称这部分已经由旧 RC 自动覆盖。
+Existing importer RC remains valid but does not, by itself, count as M14 consumer-projection closure.
