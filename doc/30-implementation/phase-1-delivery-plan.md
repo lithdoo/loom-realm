@@ -9,20 +9,80 @@ Phase 1 继续按真实 boundary closure推进。Milestone不是 package 对称�
 
 ---
 
-## M10–M13 Closed Baseline
+## M1–M9 Foundation / Runtime / Hostra / Data — Closed
+
+M1–M9 已关闭 foundational packages、Game Package、Main/Runtime/Frame、Hostra Launcher/Runner、Renderer Control、Data Connection/Broker 等基础链路。既有 qualified semantics 不因 M14 consumer restructuring reopen。
+
+---
+
+## M10：User Input — Closed
+
+M10 已关闭 Input Interest、Main InputTarget/currentness、Renderer producer gate、Subsystem author InputListener 与 Data reconnect semantics。
+
+Canonical gate 已纳入后续 closure chain。
+
+---
+
+## M11：Render Replication — Closed
+
+M11 已关闭 Subsystem-owned RenderDomain authority、Render Update v1、Renderer per-subsystem Store、Registry/Snapshot/Patch、same-generation reconnect/stale presentation preservation 与 deterministic identity/order。
+
+---
+
+## M12：Content — Closed
+
+M12 已关闭：
 
 ```text
-M10 User Input                              ✅ Closed
-M11 Render Replication                      ✅ Closed
-M12 Content                                 ✅ Closed
-M13 Web Presentation                        ✅ Closed 2026-09-09
+Subsystem ContentClient
+Renderer private ResourceClient
+Desktop readonly Content Service
+logical record/group/resource identity
+contentVersion / MIME / error / cancellation semantics
 ```
 
-当前 executable closure gate：
+Content credential/path/origin/FSDB physical identity不进入 business state、Frame params或 Render payload。
+
+---
+
+## M13：Web Presentation — Closed 2026-09-09
+
+Formal sources：
+
+```text
+Web Presentation Config v1   Active / Normative / Frozen
+Web Presentation API v1      Active / Normative / Frozen
+ADR 0031                     Accepted / Frozen
+```
+
+Implementation/qualification：
+
+```text
+M13_01_WEB_PRESENTATION_BOOTSTRAP.md
+→ M13_02_RENDERER_PRESENTATION_SEAM.md
+→ M13_03_WEB_PROJECTOR.md
+→ M13_04_VERTICAL_INTEGRATION.md
+→ M13_05_QUALIFICATION_CLOSURE.md
+```
+
+Canonical executable closure：
 
 ```text
 npm run test:m13
 ```
+
+M13 production chain：
+
+```text
+Window bootstrap
+→ current Control Session/DataAuthority topology
+  + current per-subsystem Render Store
+→ package-private reevaluation / eligibility
+→ thin Web Projector
+→ business-owned Custom Elements
+```
+
+M13不建立 second Store/topology、component registry/loader、AssetManager、layout/layer framework、global service locator、DOM rollback framework或 mandatory presentation SDK/package。
 
 M10–M13 作为 M14 的 frozen/closed consumer baseline；只有 real consumer 暴露 correctness/security contradiction、author capability缺口或可测性能失败时才 reopen。
 
@@ -220,7 +280,8 @@ PWA 不创建 platform-specific map/game library/presentation contract。
 ## Phase 1 Final Route
 
 ```text
-M10 Input
+M1–M9 Foundation / Runtime / Hostra / Data
+→ M10 Input
 → M11 Render
 → M12 Content
 → M13 Web Presentation
