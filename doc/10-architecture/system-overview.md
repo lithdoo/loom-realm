@@ -2,14 +2,14 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M14 **Implemented / Qualified / Closed**
+> 稳定程度：M10–M13 closed baseline；M14 consumer architecture/implementation frozen；M15 Desktop physical composition preimplementation frozen  
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
-> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
-> 最近复核：2026-09-10
+> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 最近复核：2026-09-11
 
-本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。
+本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。M14 live formal status只以 [`m14-qualification.md`](../30-implementation/m14-qualification.md) 为准；本文不维护 run-level PASS/Closed事实。
 
 ---
 
@@ -90,6 +90,8 @@ Game topology != executable binding != Web presentation bootstrap
 ```
 
 Config source、prepared Content selection、private browser binding、Window/document lifecycle属于 concrete `apps/*` composition，不进入 Main、Frame、RenderNode或 Launcher logical ABI。精确 Config shape/MIME/loading barrier由 Web Presentation Config v1拥有。
+
+Concrete Desktop/PWA process、origin、transport choices由 Platform Composition / milestone physical docs拥有，不上升为 Main or common Game semantics。
 
 ---
 
@@ -267,3 +269,5 @@ M10 Input
 ```
 
 M14 不 reopen M10–M13 frozen contracts，也不把 RMXP-compatible map semantics升级为 LoomRealm universal map contract。M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
+
+当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总；M14 formal evidence由其 qualification ledger独占。Architecture docs不独立发布 milestone Closed日期。
