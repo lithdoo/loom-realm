@@ -145,12 +145,10 @@ Presentation / map/map.browser.js
 Required MIME：
 
 ```text
-map/map.css            text/css
-entials/page.css      text/css
-map/map.browser.js     text/javascript
+map/map.css               text/css
+essentials/page.css       text/css
+map/map.browser.js        text/javascript
 ```
-
-The obvious spelling correction for the second line is normative as `essentials/page.css`; no alternate namespace/key is allowed in the canonical CI fixture.
 
 The preparation step MAY copy/materialize files and create the test-local Content view. It MUST NOT perform another map semantic transform, rewrite WC code, manually register tags, parse RMXP source, become a production Host or become a generic GamePackager/ContentBuilder.
 
@@ -237,7 +235,7 @@ Required fields：
 ```text
 id = 1
 tileset_name = "m14_tileset"
-passages  = projected 1D RGSS Table
+passages   = projected 1D RGSS Table
 priorities = projected 1D RGSS Table
 ```
 
@@ -295,7 +293,7 @@ Graphics / Characters/m14_player
     exact fixture image size 128×128
     4×4 sheet
     each frame = 32×32
-    direction rows visually/pixel-test distinguishable
+    direction rows visibly/pixel-test distinguishable
 ```
 
 The exact pixel colors/patterns may be chosen when author-created fixture bytes are generated, but the qualification test records the expected fixture pixels and proves the selected source cells are used. It may not replace the real PNGs with CSS boxes.
