@@ -49,8 +49,8 @@ webSecurity = true
 M15 Desktop page origin固定为 **app-owned `http://127.0.0.1:<port>` loopback origin**。BrowserWindow shell与 existing Desktop Content API MUST share the exact same scheme + host + port：
 
 ```text
-http://127.0.0.1:<desktop-origin>/...        app-private exact shell routes
-http://127.0.0.1:<desktop-origin>/_lr/v1/... existing Content API routes
+http://127.0.0.1:<port>/...        app-private exact shell routes
+http://127.0.0.1:<port>/_lr/v1/... existing Content API routes
 ```
 
 这只是一个 physical listener/origin composition，**不是把 shell 加入 Content API**。Shell routes属于 `apps/desktop` private product mechanics；`/_lr/v1/...` 继续完全由 Content API v1语义拥有。
