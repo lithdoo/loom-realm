@@ -2,12 +2,12 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13 **Implemented / Qualified / Closed**
+> 稳定程度：M9/M12/M13 **Implemented / Qualified / Closed**；M14 implementation boundary frozen  
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
 > 相关：[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
-> 最近复核：2026-09-09
+> 最近复核：2026-09-10
 
 本文回答：**同一套 LoomRealm logical application semantics 如何在 Hostra / PWA 上被完整准备、组合并运行。** Platform 是 physical composition boundary，不是 universal application authority/service locator。
 
@@ -170,21 +170,22 @@ game-libs/map
     @loomrealm-game/map
 ```
 
-Essentials/RMXP source只在 development/preparation阶段经过 tooling：
+Platform不拥有 map schema，也不负责 RMXP source translation。Preparation只 materialize map consumer 当前实际需要的 source facts：
 
 ```text
-Essentials source
-→ tools/fixtures/essentials-v21.1 importer
-→ RMXP/Essentials semantic records + resources
-→ prepared Content
-→ game runtime
+Essentials/RMXP source
+→ tools/fixtures/essentials-v21.1 importer/lossless decode
+→ selective M14 consumer projection
+→ Map/{id} + Tileset/{id}
+→ prepared Content + raw resources
+→ @loomrealm-game/map
 ```
 
-Platform不拥有 map schema，也不负责 source translation。M14直接采用 RMXP/Essentials map semantics；不建立 universal map contract。
+Unused Event/MapInfo/MapMetadata/Color/Tone/AudioFile 等 source facts 不进入 M14 first-slice consumer view merely because tooling can decode them。
 
-Map browser JS/CSS 是 prepared Content resource，由 concrete Window composition通过 `WebPresentationConfigV1`启动。Runtime Render只携 logical resource identity/version，实际 tileset/player bytes由 WC 通过 `PresentationResourceClient`读取。
+Map browser JS/CSS 是 prepared Content resources，由 qualification/product Window composition通过 `WebPresentationConfigV1`启动。Runtime Render只携 logical resource identity/version，实际 tileset/player bytes由 WC 通过 `PresentationResourceClient`读取。
 
-M14 qualification可用 test-owned harness复用 existing production roles + real Chromium；该 harness不是新的 Platform/Host。完整 Hostra BrowserWindow/physical input/reload-shutdown仍属于 M15。
+M14 qualification可用 test-owned harness复用 existing production roles + real Chromium；该 harness不是新的 Platform/Host。完整 Hostra BrowserWindow/physical input/reload-shutdown属于 M15。
 
 ---
 
@@ -267,15 +268,15 @@ MiniDesktopHost / MapHost production abstraction
 ## 11. Milestone Placement
 
 ```text
-M12 Content                                  closed
+M12 Content                                  ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      pending
-M15 Desktop full E2E                         pending
-M16 PWA Runtime                              pending
-M17 PWA full E2E/equivalence                 pending
+M14 Map Game Library + First Real Game      🔒 Frozen for Implementation / Pending
+M15 Desktop Full E2E                        pending
+M16 PWA Runtime                             pending
+M17 PWA Full E2E / Equivalence              pending
 ```
 
-M13 使用 fixture WC + real Chromium 关闭 Web semantics；M14引入 `game-libs/map` + concrete Essentials-derived example，并直接消费 importer materialized 的 RMXP/Essentials semantic records；M15/M17只完成各平台 physical composition/equivalence，不重开 M13 logical contract，也不重新建模 M14 map semantics。
+M13 使用 fixture WC + real Chromium 关闭 Web semantics。M14验证 independent game library/concrete game consumer。M15完成 Hostra/Desktop real physical composition。M16只关闭 PWA Worker Runtime hosting。M17完成 PWA Renderer/Data/Input/Content/Web Presentation 与 cross-platform equivalence。
 
 ---
 
@@ -288,5 +289,6 @@ M13 使用 fixture WC + real Chromium 关闭 Web semantics；M14引入 `game-lib
 5. Platform 不拥有 concrete Custom Element semantics/layout；
 6. M13 authority/currentness semantics 跨 Hostra/PWA 一致，由 frozen contracts 定义；
 7. reusable game library/concrete game不被吸收到 platform app；
-8. M14 map library可以理解 RMXP/Essentials map semantics，但 Platform/tooling transport representation不进入 runtime；
-9. Hostra/PWA 可以有不同 physical realization，但必须保持相同 logical game/presentation outcome。
+8. M14 map library只消费 selective RMXP/Essentials facts，不把 tooling/importer representation带入 Runtime；
+9. M15/M16/M17 physical realization不能复制或重定义 M14 game semantics；
+10. Hostra/PWA 可以有不同 physical realization，但必须保持相同 logical game/presentation outcome。
