@@ -37,6 +37,7 @@ Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 - [ADR 0031：M13 Web Presentation Frozen Design](./doc/decisions/0031-business-owned-web-component-projection.md)
 - [ADR 0032：Game Library / Example Boundary](./doc/decisions/0032-game-library-example-boundary.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
+- [M14 qualification record](./doc/30-implementation/m14-qualification.md)
 - [Package Architecture](./doc/30-implementation/package-architecture.md)
 - [Map Game Library design](./doc/20-modules/loom-map/README.md)
 
@@ -49,13 +50,21 @@ M10 User Input                              ✅ Closed
 M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      ✅ Closed 2026-09-10
+M14 Map Game Library + First Real Game      ⚠️ Implementation complete / requalification pending
 M15 Desktop full E2E                         pending
 M16 PWA Runtime                              pending
 M17 PWA full E2E                             pending
 ```
 
-当前 executable closure gate：
+M14 design/implementation is frozen；the current exact-local gate is recorded PASS, while hosted Node 20/24 evidence for the current qualification subject remains pending. Formal status is owned only by [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md).
+
+Last formally closed milestone gate：
+
+```text
+npm run test:m13
+```
+
+Current M14 hosted requalification gate：
 
 ```text
 npm run test:m14
@@ -125,19 +134,19 @@ ADR 0031                     Accepted / Frozen decision provenance
 
 M13不建立 second Store/topology、public PresentationState、component registry/loader、AssetManager、layout/layer framework、global service locator、DOM rollback framework或 mandatory presentation SDK/package。
 
-当前 executable closure gate：
+M13 closure gate remains：
 
 ```text
-npm run test:m14
+npm run test:m13
 ```
 
-Qualification evidence：[M13 Web Presentation qualification](./doc/30-implementation/m13-qualification.md) · [M14 Map Game qualification](./doc/30-implementation/m14-qualification.md)。
+Qualification evidence：[M13 Web Presentation qualification](./doc/30-implementation/m13-qualification.md)。M14 consumer evidence is tracked separately in [M14 Map Game qualification](./doc/30-implementation/m14-qualification.md)。
 
 ---
 
 ## M14 revised direction
 
-M14 不创建 `packages/map` / `@loomrealm/map`：
+M14 implementation does not create `packages/map` / `@loomrealm/map`：
 
 ```text
 examples/essentials-v21.1
@@ -192,7 +201,7 @@ Map browser JS/CSS 本身也必须通过 prepared Content + `WebPresentationConf
 - [M14 / 04 — First Real Game Vertical](./M14_04_REAL_GAME_VERTICAL.md)
 - [M14 / 05 — Qualification Closure](./M14_05_QUALIFICATION_CLOSURE.md)
 
-M10–M13 不因这次 repository/business ownership调整而 reopen。
+M10–M13 不因这次 repository/business ownership调整而 reopen。M14 formal requalification changes only the evidence/status claim unless a new hosted run exposes a concrete behavioral defect.
 
 ---
 
