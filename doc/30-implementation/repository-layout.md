@@ -24,13 +24,11 @@ packages/      LoomRealm framework/runtime
     runtime-control/
     renderer-control/
     data/
-    content/
     fsdb/
     fsdb-http/
     main/
     subsystem/
     renderer/
-    content-service/
 
 game-libs/     reusable game-domain libraries
     map/        M14 → @loomrealm-game/map
@@ -46,7 +44,7 @@ tools/         development/import/compatibility tooling
     fixtures/essentials-v21.1/
 ```
 
-There is no `packages/map` / `@loomrealm/map`。Map business belongs to `game-libs/map`。
+The current M12 Content realization is distributed across existing FSDB/HTTP、Subsystem/Renderer clients and Desktop composition；there is no current `packages/content` or `packages/content-service` package。There is also no `packages/map` / `@loomrealm/map`；Map business belongs to `game-libs/map`。
 
 Current root workspaces before M14 implementation：
 
@@ -121,6 +119,9 @@ packages/renderer
 
 packages/game-launcher-hostra
     Hostra PREPARE / Node Runner / child-owned provisioning mechanics
+
+packages/fsdb + packages/fsdb-http
+    Desktop prepared-content storage / readonly HTTP mechanics
 
 apps/desktop
     Desktop app-scoped Data broker/content/presentation physical composition
