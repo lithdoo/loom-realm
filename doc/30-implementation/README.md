@@ -2,266 +2,229 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving  
-> 主要定义：current 分包、测试、delivery milestone 与 implementation fact-source 入口  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0027](../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
-> 最近复核：2026-09-09
+> 稳定程度：M1–M13 Implemented / Qualified / Closed；M14 Frozen for Implementation  
+> 主要定义：current implementation fact-source、delivery route、qualification entry points  
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 最近复核：2026-09-10
 
-实施层只落地 current architecture/contracts，不反向创造 authority/lifecycle/recovery 语义。精确 milestone closure 由 `phase-1-delivery-plan.md` 与对应 Frozen M/ADR 文档定义。
+实施层只落地 current architecture/contracts；不反向创造 authority、lifecycle、recovery 或 framework abstraction。精确 milestone closure 由 `phase-1-delivery-plan.md`、对应 root Mxx landing 和 qualification record 共同定义。
 
 ---
 
-## Tracking 文档
+## 1. Current Tracking Sources
 
+- [第一阶段交付计划](./phase-1-delivery-plan.md) — M1–M17 顺序与 milestone closure；
 - [独立分包与发布架构](./package-architecture.md) — package/publish/dependency boundary；
-- [仓库与目录方案](./repository-layout.md) — monorepo、Runner、provisioning 与 app placement；
-- [测试策略](./testing-strategy.md) — package、role、vertical、cross-platform qualification；
-- [第一阶段交付计划](./phase-1-delivery-plan.md) — M0..M16 顺序/closure 摘要；
-- [M11 Render 最终闭环评审结论](./m11-final-closure-review.md) — production validation + role-specific qualification reclosure 的唯一当前评审结论。
-- [M12 Content qualification](./m12-qualification.md) — FSDB core、Desktop Content API、两类客户端、production vertical 与 Node 20/24 根门禁证据。
-- [M13 Web Presentation qualification](./m13-qualification.md) — Config/bootstrap、Renderer seam、thin Projector、resource lifetime 与 real Chromium vertical证据。
+- [仓库与目录方案](./repository-layout.md) — current/planned physical code placement；
+- [测试策略](./testing-strategy.md) — package/role/vertical/E2E evidence ownership；
+- [M11 Render 最终闭环评审](./m11-final-closure-review.md)；
+- [M12 Content qualification](./m12-qualification.md)；
+- [M13 Web Presentation qualification](./m13-qualification.md)。
 
----
-
-## Frozen Milestone Plans
+M14 current normative implementation set：
 
 ```text
-M7_01 ... M7_05
-    Renderer Control logical vertical
-    ✅ implemented / qualified
-
-M8_01 ... M8_05
-    logical DataAuthority + role-facing Data seam
-    ✅ implemented / qualified
-
-M9_01 ... M9_05
-    Desktop Data Broker / Runner late provisioning physical core
-    🔒 implementation frozen / pending code
-```
-
-M9 fact chain：
-
-```text
-ADR 0028
-→ M9_01 Main→Platform full-view authority sink
-→ M9_02 exact HostedRuntime→Hostra provisioner handoff
-→ M9_03 paired WS install/cutover/post-install delivery
-→ M9_04 production vertical + Broker contract harness
-→ M9_05 unique qualification gate
+ADR 0032
+M14_01_WORKSPACE_BOUNDARY.md
+M14_02_MAP_GAME_LIBRARY.md
+M14_03_ESSENTIALS_EXAMPLE.md
+M14_04_REAL_GAME_VERTICAL.md
+M14_05_QUALIFICATION_CLOSURE.md
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
 ```
 
 ---
 
-## 当前 Implemented Baseline
+## 2. Current Implemented Baseline
 
 ```text
 M1  Foundation / Wire                         ✅
 M2  Game Package                              ✅
-M3  Runtime Control mechanics                 ✅
-M4  Subsystem Runtime/Frame core              ✅
-M5  Main Runtime/Frame authority              ✅
-M6  Hostra Runtime physical vertical          ✅ Qualified 2026-09-03
+M3  Runtime Control                           ✅
+M4  Subsystem Runtime / Frame                 ✅
+M5  Main authority                            ✅
+M6  Hostra Runtime                            ✅ Qualified 2026-09-03
 M7  Renderer Control                          ✅ Qualified 2026-09-03
-M8  Data logical authority / role integration ✅ Qualified 2026-09-04
-M9  Desktop Data Broker / late provisioning   ✅ Qualified 2026-09-04
-M10 User Input                                 ✅ Qualified 2026-09-07
-M11 Render                                     ✅ Qualified 2026-09-07
-M12 Content                                    ✅ Qualified 2026-09-08
-M13 Web Presentation                           ✅ Qualified 2026-09-09
+M8  Data role integration                     ✅ Qualified 2026-09-04
+M9  Desktop Data Broker                       ✅ Qualified 2026-09-04
+M10 User Input                                ✅ Qualified / Closed 2026-09-07
+M11 Render Replication                        ✅ Qualified / Closed 2026-09-07
+M12 Content                                   ✅ Qualified / Closed 2026-09-08
+M13 Web Presentation                          ✅ Qualified / Closed 2026-09-09
 ```
 
-Qualification evidence：[m8-qualification.md](./m8-qualification.md) · [m9-qualification.md](./m9-qualification.md) · [m10-qualification.md](./m10-qualification.md) · [m11-qualification.md](./m11-qualification.md) · [m12-qualification.md](./m12-qualification.md) · [m13-qualification.md](./m13-qualification.md)。M11 current closure标准见 [m11-final-closure-review.md](./m11-final-closure-review.md)。
+Current canonical executable closure：
+
+```text
+npm run test:m13
+```
+
+M14 scripts/workspaces are intentionally absent until M14 implementation lands。
 
 ---
 
-## M9 Desktop DataConnectionBroker — Implemented / Qualified
-
-M9 implementation is qualified on 2026-09-04；evidence is recorded in [m9-qualification.md](./m9-qualification.md)。ADR 0028 + root `M9_01`–`M9_05` remain the semantic source。
-
-Exact new public/shared surfaces：
+## 3. Current Phase Route
 
 ```text
-@loomrealm/platform-ports
-    DataConnectionAuthorityEntry
-    DataConnectionAuthorityView
-    DataConnectionAuthoritySink
-
-@loomrealm/main MainPlatform
-    dataConnections?: DataConnectionAuthoritySink
-
-@loomrealm/game-launcher-hostra
-    HostraRuntimeDataPrepareRequest
-    HostraRuntimeDataProvisioner
-    optional onRuntimeDataProvisioner hook
-```
-
-M8 `RendererDataBinding` / `SubsystemDataBinding` remain unchanged。
-
----
-
-## M9 Ownership Snapshot
-
-```text
-Main
-    remains only logical Data authority owner
-    projects current Renderer + exact HostedRuntime + S/G/P
-
-DataConnectionAuthoritySink
-    full replacement
-    synchronous / non-blocking / non-throwing
-
-apps/desktop
-    session-scoped DataConnectionBroker
-    two-sided Data WS opaque relay
-    RendererDataBinding realization
-    Broker contract harness
-
-@loomrealm/game-launcher-hostra
-    exact Node-child provisioning mechanics only
-    Runtime-scoped provisioner handoff
-
-Runner
-    prepare private Data WS carrier
-    post-install committed/current-deliverable carrier
-    SubsystemDataBinding delivery
-```
-
-No Broker policy is placed in launcher；no Hostra/WS code enters Core roles/protocol packages。
-
----
-
-## M9 Installation / Failure Rule
-
-```text
-paired prepared
-→ latest Main-view revalidation
-→ old current retires
-→ new candidate becomes sole current
-→ role delivery happens after install
-```
-
-Runner `commit()` is post-install delivery ACK。
-
-```text
-new B installed
-→ Runner delivery fails
-→ B current→retired
-→ old A never resurrects
-→ Main DataAuthority / Runtime / Frame unchanged
-```
-
-No rollback/2PC/retry/currentness framework。
-
----
-
-## Current Main-facing Platform View
-
-```ts
-interface MainPlatform {
-  readonly scheduler: DeadlineScheduler;
-  readonly opaqueMaterial: OpaqueMaterialGenerator;
-  readonly runtimeHosting: RuntimeHosting;
-  readonly rendererControl?: RendererControlBinding;
-  readonly dataConnections?: DataConnectionAuthoritySink;
-}
-```
-
-Both optional capabilities may be absent in older/headless compositions without fake providers。
-
----
-
-## Repository Placement at M9
-
-M9 materializes the first real app workspace：
-
-```text
-apps/desktop
-```
-
-Root npm workspaces add：
-
-```text
-apps/*
-```
-
-`apps/desktop` is M9 Broker/test physical composition, not yet full BrowserWindow product shell。M14 owns full Desktop product E2E。
-
----
-
-## Qualification Ownership
-
-```text
-platform-ports
-    exact M9 shared surface / Foundation-only dependency
-
-main
-    optional sink / full-view projection / token correlation / mutation ordering
-
-game-launcher-hostra
-    provisioner handoff + Node IPC + Runner Data delivery
-
-apps/desktop
-    Broker authority/candidate/install/retire harness
-    two-sided WS relay
-    real M9 physical vertical
-
-M10
-    User Input fresh business publication baseline
-
-M11
-    Render production implementation complete
-    final qualification reclosure = representation validation + exact role×fixture evidence
-
-M14/M16
-    full physical product/platform equivalence
-```
-
-Root gate：
-
-```text
-npm run test:m9
-```
-
-M9 does not claim full Connection-v1 cross-platform conformance or M10/M11 child business baselines。
-
----
-
-## Current Implementation Order
-
-```text
-M1–M8 ✅
+M1–M13                                  ✅ Closed
 ↓
-M9 Desktop Data Broker / Late Provisioning   ✅ qualified 2026-09-04
+M14 Map Game Library + First Real Game     🔒 Frozen for Implementation / Pending
 ↓
-M10 User Input                               ✅ qualified / closed
+M15 Desktop Full E2E                       Pending
 ↓
-M11 Render                                   ✅ qualified / closed
+M16 PWA Runtime                            Pending
 ↓
-M12 Content                                  ✅ qualified / closed
-M13 loom.map
-M14 Desktop Full E2E
-M15 PWA Runtime vertical
-M16 PWA Full E2E / equivalence
+M17 PWA Full E2E / Equivalence             Pending
 ```
 
-M12 已按 [qualification record](./m12-qualification.md) 完成 `Implemented / Qualified / Closed`，可进入 M13 implementation。
+This numbering is canonical。Older tracking text that called `loom.map` M13, Desktop E2E M14 or cross-platform equivalence M16 is superseded。
 
 ---
 
-## Implementation Governance
+## 4. M14 Implementation Boundary
 
-Forbidden for current coding：
+M14 proves a real independent business consumer of M10–M13：
+
+```text
+examples/essentials-v21.1
+    ↓
+game-libs/map
+    @loomrealm-game/map
+    ↓
+@loomrealm/subsystem public author API
+    ↓
+Input + Render + Content + M13 Web Presentation
+```
+
+M14 source compatibility is selective：
+
+```text
+RMXP/Essentials source
+→ existing importer/lossless representation
+→ selective consumer projection
+→ Map/{id} + Tileset/{id}
+→ prepared Content
+→ map Runtime
+```
+
+First slice does not materialize MapInfo/Event/Color/Tone/AudioFile graphs without a real consumer。
+
+M14 qualification uses existing/synthetic `RendererInputSource` + real Chromium。It does not claim real Desktop Node child、BrowserWindow DOM input、reload/reconnect/shutdown；those belong to M15。
+
+M14 target gates：
+
+```text
+npm run test:m14
+npm run test:m14:essentials-local -- ...
+```
+
+The local gate is same-revision compatibility evidence and never commits third-party source bytes。
+
+---
+
+## 5. M15–M17 Boundary
+
+### M15 Desktop Full E2E
+
+```text
+Hostra PREPARE
+→ Main
+→ real Node Runner child
+→ Desktop Data/Content
+→ Electron BrowserWindow
+→ real DOM RendererInputSource
+→ M13 presentation
+→ same M14 game/map Runtime/WC
+→ reload / reconnect / shutdown
+```
+
+### M16 PWA Runtime
+
+```text
+PWA PREPARE
+→ Worker Runner
+→ RuntimeHosting
+→ Runtime Control MessagePort
+→ Main ↔ Worker ↔ Subsystem lifecycle
+```
+
+No requirement to implement full PWA Renderer/Data/Content/Web presentation in M16。
+
+### M17 PWA Full E2E / Equivalence
+
+```text
+Window Renderer
+→ PWA Data
+→ PWA Content
+→ physical Window input
+→ M13 presentation
+→ same M14 concrete game
+→ Hostra/PWA logical-outcome equivalence
+```
+
+Physical transport/storage may differ；logical semantics and business-observable results must match。
+
+---
+
+## 6. Repository Ownership
+
+```text
+packages/      LoomRealm framework/runtime
+game-libs/     reusable game-domain libraries
+examples/      private concrete games
+apps/          physical platform hosts/products
+tools/         development/import/compatibility tooling
+```
+
+Primary dependency direction：
+
+```text
+examples → game-libs → public LoomRealm author APIs
+```
+
+There is no framework `packages/map` / `@loomrealm/map`。
+
+---
+
+## 7. Qualification Records
+
+Current closed evidence：
+
+```text
+m8-qualification.md
+m9-qualification.md
+m10-qualification.md
+m11-qualification.md
+m12-qualification.md
+m13-qualification.md
+```
+
+When M14 actually closes, create/update：
+
+```text
+doc/30-implementation/m14-qualification.md
+```
+
+It records the exact closure revision、Node 20/24 canonical result、local Essentials source fingerprint/selected slice and semantic/browser evidence required by M14/05。
+
+---
+
+## 8. Implementation Governance
+
+Do not create without real evidence：
 
 ```text
 AuthorityEventBus / ObserverHub
-ConnectionRegistry / ConnectionManager
-RuntimeDirectory public service
+ConnectionRegistry / RuntimeDirectory
 GenericTransaction / 2PC
 retry/backoff framework
-second Renderer currentness lease/epoch
-Data application hello/ready/resume messages
+GameLibrary registry/base framework
+MapNormalizedV1 / MapRepository / MapManager
+ProjectionRegistry / ConsumerProjector<T>
+AssetManager / ResourceProvider
+SceneGraph / LayerManager
+MiniDesktopHost / MapHost / GameRuntimeHost
 PWA abstraction solely for symmetry
-Generic Render/Conformance/Schema framework
 ```
 
-Frozen changes follow对应 ADR/root plan reopen rules。M11 本轮只允许 implementation correctness 与 qualification evidence correction；不得借修复重新设计 authority/lifetime/public API。
+M14 implementation should remain concrete and small；M15–M17 materialize only their own physical responsibilities。
