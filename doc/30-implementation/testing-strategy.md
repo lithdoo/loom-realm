@@ -4,8 +4,8 @@
 > 状态：Tracking  
 > 稳定程度：M1–M13 closed；M14 implementation complete / requalification pending；M15 preimplementation frozen  
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
-> 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
-> 最近复核：2026-09-10
+> 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 最近复核：2026-09-11
 
 测试目标不是“消息能通”，而是证明每层不能绕过 authority、lifecycle、failure-domain、public author API、PREPARE、package boundary 和 currentness。
 
@@ -165,21 +165,32 @@ M15 replaces M14 test-owned physical composition with the frozen real Hostra/Des
 
 ```text
 checked-in Hostra-ready M14 installation
-→ Hostra PREPARE
+→ Hostra PREPARE in Electron main
 → Main
-→ real Node Runner child
-→ Runtime Control
+→ process.execPath + ELECTRON_RUN_AS_NODE real Hostra Runner child
+→ existing Runtime Control WebSocket
 → Desktop Data Broker
-→ Desktop Content
+→ exact 127.0.0.1 Desktop shell + Content origin
 → secure Electron BrowserWindow
 → one-shot isolated-preload handoff
-→ Main-World trusted Renderer
+→ Main-World trusted Renderer + captured native primitives
 → Renderer Control native MessagePort
 → BrowserWindow-native Data WebSocket
 → real DOM Keyboard/Pointer/Gamepad RendererInputSource
 → existing M13 presentation
 → same M14 game/map Runtime/WC
 ```
+
+Hostra/Electron evidence is deliberately narrow。ADR 0033 preserves the existing Hostra process model：
+
+```text
+Runner executable remains process.execPath
+Electron child receives host-synthesized ELECTRON_RUN_AS_NODE=1
+supported Electron build keeps runAsNode fuse enabled
+real child reaches existing Runtime Control ready + HostedRuntime termination
+```
+
+Qualification MUST NOT satisfy this by selecting an external Node path、adding UtilityProcess RuntimeHosting or creating another Runner path。
 
 BrowserWindow qualification MUST assert：
 
@@ -188,47 +199,47 @@ nodeIntegration=false
 contextIsolation=true
 sandbox=true
 webSecurity=true
+shell and /_lr/v1 Content API share exact http://127.0.0.1:<port> origin
+no file:// shell
+no Content CORS/OPTIONS extension
+no preload Content-fetch proxy
 no generic Electron/contextBridge API visible to business page
 ```
 
-Execution-world evidence MUST preserve：
+Execution-world/capability evidence MUST preserve：
 
 ```text
 preload isolated world
     exact bootstrap/port handoff only
 
-page Main World
+page Main World before business bootstrap
     trusted Renderer holder/input/M13 Projector
-    business Custom Elements loaded after private bootstrap consumption
+    private bootstrap material consumed
+    authority-bearing native browser primitives captured/bound
+
+page Main World after that boundary
+    business Custom Elements/scripts
 ```
 
-Renderer Control physical evidence uses `MessageChannelMain → native DOM MessagePort → existing Renderer Control`。Data evidence keeps the M9 Broker as sole candidate/current owner；Electron Data handoff carries only prepare/commit/revoke settlement, while Data application messages use the native browser WebSocket carrier。
+After business bootstrap，qualification MUST replace the page-visible `fetch` and `WebSocket` globals and prove the production trusted clients continue through their captured primitives without exposing Content bearer、private Data endpoint or raw transferred ports。
 
-Physical input evidence MUST use the production M15 DOM source：
+Renderer Control physical evidence uses `MessageChannelMain → native DOM MessagePort → existing Renderer Control`。Data evidence keeps the M9 Broker as sole candidate/current owner；Electron Data handoff carries only prepare/commit/revoke settlement, while Data application messages use the captured native browser WebSocket carrier。
+
+Physical input evidence MUST use the production M15 DOM source and the exact frozen mapping/provenance rules in `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`。The repository-level strategy does not duplicate that algorithm；the cross-owner minimum evidence is：
 
 ```text
-Keyboard
-    KeyboardEvent.code → frozen KeyboardCodeV1
-
-Pointer
-    BrowserWindow content viewport normalization
-    fresh non-reused canonical pointerId
-    State-before-Event on down/up/cancel
-
-Gamepad
-    navigator.getGamepads()
-    mapping="standard"
-    requestAnimationFrame polling
-    fresh canonical gamepadId after reconnect/index reuse
-    500000 threshold crossing
+trusted Keyboard ArrowRight reaches existing M10 path
+synthetic Keyboard/Pointer dispatch is ignored
+Pointer chorded-button transition preserves State-before-Event
+Gamepad standard mapping/threshold path runs through the same production source
+focus/visibility loss → unavailable → fresh baseline → available
 ```
-
-Focus/visibility loss/return MUST prove producer unavailable → fresh State → available with no stale Event replay。
 
 Qualification adds real product lifecycle evidence：
 
 ```text
 startup
+real Electron-hosted Hostra child ready
 physical keyboard input
 focused Pointer/Gamepad producer evidence
 reload / Renderer replacement
@@ -238,7 +249,7 @@ Runner child termination
 Window-local failure containment
 ```
 
-M15 MUST NOT re-test M6/M10–M14 by bypassing their frozen seams or fork map business semantics into Desktop code。
+M15 MUST NOT re-test M6/M10–M14 by bypassing their frozen seams or fork map business semantics into Desktop code。It only adds the physical Electron evidence missing from those owner-local suites。
 
 Canonical M15 gate is frozen as：
 
@@ -295,7 +306,7 @@ same business-observable presentation result
 
 Allowed physical differences include Process vs Worker、WebSocket vs MessagePort、Desktop FSDB/HTTP vs PWA Fetch/SW/OPFS。
 
-M17 does not duplicate all lower-level M13 Chromium conformance；it proves the PWA physical realization satisfies the already-frozen semantics。
+M17 does not duplicate all lower-level M13 Chromium conformance；it proves the PWA physical realization satisfies the already-frozen semantics。The Desktop-only Electron run-as-node and same-loopback-origin choices are **not** PWA contracts。
 
 ---
 
@@ -346,6 +357,8 @@ retry/backoff framework
 ProjectionRegistry / ConsumerProjector<T>
 AssetManager / ResourceProvider
 InputDeviceManager / generic input registry
+BrowserPrimitiveRegistry / security service locator
+generic local-server/CORS framework
 generic conformance framework for one fixture
 second Renderer currentness state machine
 ```
@@ -363,6 +376,8 @@ Prefer small test-local objects/functions that drive the real seams。
 5. M17 closes full PWA E2E and Hostra/PWA logical equivalence；
 6. M14 uses synthetic/existing input source through the exact M10 gate；M15/M17 own physical DOM producers；
 7. M15 preserves isolated preload vs Main-World Renderer/business placement and does not expose generic Electron APIs；
-8. M15 Control/Data/Content physical paths remain capability-separated；
-9. tests assert public/observable behavior, not unnecessary private Shadow/ordering/helpers；
-10. no test-only business path, hidden second state model, or generic registry/manager/service/framework is created solely for qualification convenience。
+8. M15 uses the existing Hostra Runner through Electron run-as-node mode rather than creating a second Runtime path；
+9. M15 shell/Content are same-origin and Control/Data/Content physical paths remain capability-separated；
+10. M15 trusted browser clients do not dynamically resolve business-replaceable authority-bearing globals after business bootstrap；
+11. tests assert public/observable behavior, not unnecessary private Shadow/ordering/helpers；
+12. no test-only business path, hidden second state model, or generic registry/manager/service/framework is created solely for qualification convenience。
