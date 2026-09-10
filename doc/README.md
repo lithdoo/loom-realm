@@ -33,12 +33,14 @@ Architecture topic
 15. [Web Presentation API v1](./15-contracts/web-presentation-api-v1.md)
 16. [模块设计目录](./20-modules/README.md)
 17. [Web Renderer](./20-modules/web-renderer/README.md)
-18. [`loom.map`](./20-modules/loom-map/README.md)
+18. [Map Game Library](./20-modules/loom-map/README.md)
 19. [独立分包与发布架构](./30-implementation/package-architecture.md)
-20. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
-21. [ADR 索引](./decisions/README.md)
-22. [ADR 0030：M12 Content closure](./decisions/0030-freeze-m12-content-preimplementation-closure.md)
-23. [ADR 0031：M13 Web Presentation current design](./decisions/0031-business-owned-web-component-projection.md)
+20. [仓库与目录方案](./30-implementation/repository-layout.md)
+21. [测试策略](./30-implementation/testing-strategy.md)
+22. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
+23. [ADR 索引](./decisions/README.md)
+24. [ADR 0031：M13 Web Presentation](./decisions/0031-business-owned-web-component-projection.md)
+25. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
 
 ---
 
@@ -52,16 +54,21 @@ M10 User Input
 M11 Render Replication
     → Subsystem authoritative Render Domains
     → Render Update v1
-    → Renderer internal committed Store
+    → Renderer committed Store
 
 M12 Content
-    → @loomrealm/fsdb
-    → Desktop Content Service
+    → readonly Content
     → Subsystem ContentClient
     → Renderer trusted/private ResourceClient
+
+M13 Web Presentation
+    → WebPresentationConfigV1
+    → thin Web Projector
+    → business-owned Custom Elements
+    → PresentationResourceClient
 ```
 
-M10/M11/M12/M13均已 Implemented / Qualified / Closed。当前 canonical executable closure gate：
+M10–M13 均已 Implemented / Qualified / Closed。Current canonical executable closure gate：
 
 ```text
 npm run test:m13
@@ -69,55 +76,57 @@ npm run test:m13
 
 ---
 
-## M13 Current Source Map
+## Current M14 Source Map
 
-M11没有关闭 physical Web presentation。M13 current design只由以下 source共同定义：
-
-```text
-ADR 0031
-    why / ownership / rejected abstractions
-
-Rendering System
-    authority / wire-node identity / deterministic managed body ordering
-
-Web Presentation Config v1
-    startup JS/CSS / prepared Content / browser loading + ready barrier
-
-Web Presentation API v1
-    receiveRenderContext / receiveRenderData / PresentationResourceClient
-
-Web Renderer module
-    implementation placement
-
-Phase 1 plan
-    deliverables / qualification
-```
-
-关键 current facts：
+M14 是第一个真实 framework consumer，不是新的 framework module。Current source-of-truth：
 
 ```text
-same live wire-node identity
-(Session, subsystemKey, generation, domainId, key)
-→ same HTMLElement
+ADR 0032
+    repository/package ownership + rejected abstractions
 
-managed body roots
-→ subsystemKey UTF-8 lexical
-→ within subsystem: M11 zIndex/domainId order
-→ roots order
+M14_01_WORKSPACE_BOUNDARY.md
+    workspace/package identity/dependency direction
 
-new element
-→ construct → context → insertion/structure → attrs → data
+M14_02_MAP_GAME_LIBRARY.md
+    map Runtime/Input/passability/camera/Render/WC semantics
+
+M14_03_ESSENTIALS_EXAMPLE.md
+    concrete example/fixture/config/resources
+
+M14_04_REAL_GAME_VERTICAL.md
+    end-to-end observable evidence
+
+M14_05_QUALIFICATION_CLOSURE.md
+    executable closure gate
+
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
+    selective RMXP Map/Tileset source→JsonValue projection
 ```
 
-`subsystemKey`排序只用于 deterministic physical concatenation，不创建 cross-Subsystem global zIndex/stacking authority。
+Repository placement：
 
-Business WC对 LoomRealm-managed projection只读；runtime resource只通过 M13 narrow `PresentationResourceClient`，不暴露 Content bearer/path/FSDB/privileged URL/private Renderer client。
+```text
+packages/      LoomRealm framework/runtime
 
-M13不建立 AssetManager、dynamic component loader、global service locator、LoomRealm component library、generic layer manager、public identity framework或 RenderEvent→WC ABI。
+game-libs/map
+    @loomrealm-game/map
+
+examples/essentials-v21.1
+    private concrete game
+```
+
+M14 first slice materializes only current consumer facts：
+
+```text
+Map/{id}: tileset_id,width,height,data
+Tileset/{id}: id,tileset_name,passages,priorities
+```
+
+It does not recursively project the whole RMXP object graph or create a universal map schema。
 
 ---
 
-## Platform Placement
+## Platform Route
 
 ```text
 M6   Hostra Runtime / Runner / Control                ✅
@@ -128,16 +137,18 @@ M10  User Input                                        ✅
 M11  Render Replication                                ✅
 M12  Content                                           ✅
 M13  Web Presentation                                  ✅
-M14  loom.map business + map-owned WC                  pending
-M15  Desktop full physical E2E                         pending
+M14  Map Game Library + First Real Game               🔒 pending implementation
+M15  Desktop Full E2E                                  pending
 M16  PWA Runtime                                       pending
-M17  PWA full Renderer/Data/Input/Render/Content/Web   pending
+M17  PWA Full E2E / Equivalence                        pending
 ```
+
+M14 uses existing/synthetic input source + real Chromium。M15 owns real Desktop Node-child/BrowserWindow/DOM input。M16 owns PWA Worker Runtime hosting only。M17 completes PWA Renderer/Data/Input/Content/Web presentation and cross-platform logical equivalence。
 
 ---
 
 ## Documentation Governance
 
-不要在 README/index/module/plan 中复制 formal contract interface。Summary docs只写 ownership、placement、milestone与链接；精确 schema/lifetime/error/order由 formal contract拥有。
+Summary/index docs only describe ownership、placement、milestone and links。Exact schema/lifetime/order/failure semantics stay in formal contracts or the current frozen milestone source。
 
-Frozen authority、identity、lifecycle/order、failure/recovery 或 public surface只能通过对应 reopen rule修改，implementation不能静默扩张。
+Frozen authority、identity、lifecycle/order、failure/recovery or public surface can change only through the corresponding reopen rule；implementation cannot silently expand them。
