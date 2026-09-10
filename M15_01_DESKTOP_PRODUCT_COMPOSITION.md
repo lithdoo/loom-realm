@@ -14,7 +14,8 @@
 ## 1. Required Product Trace
 
 ```text
-Hostra PREPARE
+Hostra-ready M14 installation
+→ Hostra PREPARE
 → Main Session
 → real Node Runner child
 → Runtime Control
@@ -27,7 +28,41 @@ Hostra PREPARE
 
 M15 不再使用 M14 test-owned Window composition 作为产品宿主。
 
-## 2. `apps/desktop` Owns
+## 2. Hostra-ready M14 Installation
+
+Canonical Desktop vertical 直接使用 checked-in `examples/essentials-v21.1` installation，不在测试中临时生成另一份 Hostra game：
+
+```text
+examples/essentials-v21.1/
+    game.json
+    launch.hostra.json
+    subsystems/map.mjs
+    presentation.json
+    presentation.css
+    fixtures/...
+```
+
+Hostra binding exactly：
+
+```text
+subsystemKey = "map"
+→ subsystems/map.mjs
+→ default export from @loomrealm-game/map
+```
+
+`launch.hostra.json` 只完成 Hostra executable binding；不得携带 Electron、Content、Data、Renderer 或 presentation 配置。`subsystems/map.mjs` 只作为 installation-local module seam，不复制 map Runtime/business source。
+
+因此同一个 concrete example 同时拥有：
+
+```text
+game.json              logical game declaration
+launch.hostra.json      Hostra executable binding
+presentation.json       Web presentation startup declaration
+```
+
+三者保持既有边界，不合并成 product manifest。
+
+## 3. `apps/desktop` Owns
 
 ```text
 Electron application entry
@@ -49,17 +84,17 @@ presentation component registry/layering
 second currentness/projection state
 ```
 
-## 3. Startup Ordering
+## 4. Startup Ordering
 
 Canonical startup：
 
 ```text
 Electron ready
-→ acquire product inputs
+→ select Hostra installation root
 → Hostra PREPARE
 → prepared Desktop Content view/service
 → Desktop Data Broker + Main physical bindings
-→ Main Session / real Runner child
+→ start Main Session / real Runner child
 → arm Renderer candidate capability
 → create BrowserWindow
 → Renderer bootstrap
@@ -69,7 +104,7 @@ Web Presentation Config 是独立 product startup input；不得进入 Game Entr
 
 PREPARE failure 不创建 Runner/business Definition side effects，也不启动 presentation。
 
-## 4. Minimal Implementation Rule
+## 5. Minimal Implementation Rule
 
 优先直接组合已有 production objects。允许增加 `apps/desktop` 内部的 concrete Electron entry/composition functions；不得为了 M15 新建：
 
@@ -82,11 +117,11 @@ UniversalRendererHost
 PlatformManager
 ```
 
-若现有 M13 Window composition 缺少 production-consumable 入口，只提升实际 Desktop consumer 所需的最窄 concrete seam；不新增 package，不抽象跨平台 hosting framework。
+M15/02 唯一允许补出的 shared surface 是现有 M13 implementation 的最窄 trusted product-consumable Renderer subpath；不得新增 package或跨平台 hosting framework。
 
-## 5. Completion
+## 6. Completion
 
-M15/01 完成时必须能从真实 Electron process 启动同一 M14 game，并证明：
+M15/01 完成时必须能从真实 Electron process 启动 checked-in M14 Hostra installation，并证明：
 
 ```text
 Hostra PREPARE succeeded
