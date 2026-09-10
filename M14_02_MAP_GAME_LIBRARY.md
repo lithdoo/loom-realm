@@ -1,6 +1,6 @@
 # M14 / 02 — Map Game Library
 
-> 状态：Implementation Landing / M14 Pending  
+> 状态：Frozen for Implementation / M14 Pending  
 > 规范优先级：本文是 M14 map consumer 的 implementation freeze；若更早 milestone 文档仅以 future-looking wording 把 Desktop physical input、author-chosen RenderDomain id 等留给 M14，以本文和 M14/04–05 为准。
 
 ## Objective
@@ -139,7 +139,7 @@ Tileset.priorities[id]   = tableAt(Tileset.priorities,id)
 
 No Runtime Table class/framework or second flattening convention.
 
-## 5. Exact initial business input
+## 5. Exact initial business input / initial state
 
 ```ts
 interface MapInitialInput {
@@ -157,6 +157,13 @@ Canonical CI：
 ```
 
 Rules：`mapId` positive safe integer; `x/y` non-negative safe integers inside loaded Map; `characterName` non-empty semantic resource name.
+
+Initial direction is package-owned first-slice state, not GameEntry input：
+
+```text
+direction = 2 / down
+pattern = 0
+```
 
 Player resource：
 
@@ -205,7 +212,7 @@ Runtime uses existing `ContentClient.resource()` for both required visible resou
 
 Runtime/Renderer duplicate reads are accepted. No metadata/HEAD API, AssetManager or privileged URL escape hatch.
 
-## 8. Directional input semantics
+## 8. Directional input semantics / ordering
 
 Exactly `keyboard.event` is used.
 
@@ -227,6 +234,8 @@ ArrowUp    → d=8 → (0,-1)
 ```
 
 `up` and `repeat=true` do not move. One accepted event sets facing, evaluates passability, updates x/y by exactly one tile only when passable, recomputes camera/render state and calls `RenderDomain.replace(...)`. Blocked movement keeps attempted facing but not position.
+
+After gameplay initialization the `keyboard.event` movement handler is synchronous. It MUST NOT await Content, fetch resources, decode assets or otherwise yield before the authoritative movement commit. One accepted event completes facing → passability → x/y → camera → full RenderDomain `replace(...)` before the handler returns. M14 adds no EventQueue/Scheduler merely to serialize movement.
 
 M14 uses existing/synthetic RendererInputSource. Real BrowserWindow DOM input belongs to M15. WC code never mutates business coordinates from DOM events.
 
@@ -268,8 +277,8 @@ M14 excludes event collision, through/debug movement, terrain effects and map tr
 Canonical first slice supports：
 
 ```text
-tileId=0      → transparent / no draw
-tileId>=384   → regular Tileset tile
+tileId=0       → transparent / no draw
+tileId>=384    → regular Tileset tile
 tileId 48..383 → autotile, not required by canonical CI
 other unsupported required kind → fail closed
 ```
@@ -324,6 +333,15 @@ Tile destination：
 screenX=tileX*32-cameraX
 screenY=tileY*32-cameraY
 ```
+
+For the canonical interior movement, camera follows the player and the player remains at the same screen-cell origin while world position changes：
+
+```text
+player (10,8), camera (16,32) → player screen (304,224)
+player (11,8), camera (48,32) → player screen (304,224)
+```
+
+The visible movement evidence is therefore the map/Canvas shifting relative to the viewport plus world-state/facing change; qualification MUST NOT require the centered player's `screenX/screenY` to change.
 
 Responsive layout, resize protocol and DOM→Runtime feedback are non-goals. DPR may affect private backing-store pixels only.
 
@@ -441,6 +459,8 @@ screenY=playerY*32-cameraY
 
 `pattern=0` because M14 has no gameplay animation clock. No physical paths/URLs/tokens/bytes/source wrappers.
 
+Runtime authors publish current full `RenderDomainState` through `replace(...)`; M14 defines no map-private wire delta protocol. M11/M13 may optimize transport internally, while each WC receives the current full node `data` according to the frozen M13 ABI.
+
 ## 16. Map-owned Web Components
 
 Exactly：
@@ -525,14 +545,29 @@ A later private bundler may change copy mechanics only if these artifact seams a
 
 ## 19. Async browser resource currentness
 
-WC receivers may fetch/decode asynchronously, but latest M13 data remains the presentation-local truth：
+WC receivers may fetch/decode asynchronously, but latest M13 data remains the presentation-local truth.
+
+Each receiver keeps the latest full data and may use a private monotonically increasing data-generation token per `receiveRenderData` call. Resource decode/cache completion and painting are separate concerns：
 
 ```text
-receiveRenderContext(context) → retain only M13 context
-receiveRenderData(data)       → validate/store latest data, request/decode as needed
-async completion              → paint only if resource ref/version still matches latest data
-stale completion              → ignore
+receiveRenderContext(context)
+→ retain only M13 context
+
+receiveRenderData(data)
+→ validate/store latest full data
+→ advance private data generation
+→ request/decode missing resource as needed
+
+async resource/decode completion
+→ may populate cache only for the resolved resource identity/version
+→ repaint using the receiver's latest retained data
+  OR paint only if captured data-generation is still current
+
+stale completion
+→ MUST NOT paint captured old camera/tiles[]/screen position/direction
 ```
+
+Checking only `{namespace,key,contentVersion}` is insufficient because camera/tiles/direction can change while the same image resource/version remains current. A delayed initial tileset or sprite decode after a movement must render the latest movement state, not the old call's captured state.
 
 Resource failure produces no fake fallback pixels. This is private presentation mechanics, not AssetManager/business authority/new protocol.
 
