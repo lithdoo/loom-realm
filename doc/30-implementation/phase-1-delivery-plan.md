@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-10
@@ -354,24 +354,72 @@ M14 closure proves one real RMXP/Essentials-compatible consumer slice only。It 
 
 ---
 
-## M15 — Desktop Full E2E — pending
+## M15 — Desktop Full E2E 🔒 Implementation Frozen / Preimplementation Closed
 
-Replace M14 test-owned physical composition with real Desktop composition：
+Replace M14 test-owned physical composition with the frozen real Desktop composition：
 
 ```text
-PREPARE
+checked-in Hostra-ready M14 installation
+→ Hostra PREPARE
 → Main
-→ Hostra RuntimeHosting
-→ real Node Runner child for "map"
-→ Data Broker + Desktop Content
-→ Electron BrowserWindow
-→ M13 presentation
-→ real DOM RendererInputSource
+→ Hostra RuntimeHosting / real Node Runner child for "map"
+→ Desktop Data Broker + Desktop Content
+→ secure Electron BrowserWindow
+→ isolated preload one-shot handoff
+→ Main-World trusted Renderer
+→ Renderer Control MessagePort
+→ browser-native Data WebSocket
+→ real DOM Keyboard/Pointer/Gamepad RendererInputSource
+→ existing M13 presentation
 → same M14 game/map Runtime/WC
 → reload / reconnect / shutdown
 ```
 
-M15 should consume the frozen M14 logical/business boundary rather than redesign it because the physical host becomes real. Formal M14 requalification is still completed independently through the M14 evidence ledger.
+Frozen BrowserWindow settings：
+
+```text
+nodeIntegration=false
+contextIsolation=true
+sandbox=true
+webSecurity=true
+```
+
+Frozen physical ownership：
+
+```text
+preload isolated world
+    exact one-shot bootstrap/port handoff only
+
+page Main World
+    trusted Renderer holder/input/M13 Projector
+    business Custom Elements loaded after private bootstrap
+
+Control
+    MessageChannelMain → native DOM MessagePort → existing Renderer Control
+
+Data
+    existing M9 Broker keeps candidate/currentness
+    Electron port carries physical prepare/commit/revoke settlement only
+    Data application messages use native browser WebSocket
+```
+
+Physical input mapping is frozen by `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`：Keyboard uses standard `KeyboardEvent.code`; Pointer uses BrowserWindow viewport fixed-point coordinates + fresh one-shot ids; Gamepad uses browser `mapping="standard"` + rAF polling + frozen threshold crossing semantics。
+
+Normal shutdown is fixed to Window retirement → abort `runMain` signal → await Main/RuntimeHosting child convergence → close remaining Broker/Content services → Electron exit。
+
+Normative implementation order：
+
+```text
+M15_01_DESKTOP_PRODUCT_COMPOSITION.md
+→ M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md
+→ M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md
+→ M15_04_DESKTOP_FULL_E2E_VERTICAL.md
+→ M15_05_QUALIFICATION_CLOSURE.md
+```
+
+M15 can now proceed directly to implementation without another design pass. Private helper/file names remain implementation details；authority ownership、execution-world placement、Control/Data/Content separation、DOM input mapping与 lifecycle owner chain不得因代码便利性重新选择。
+
+Formal M14 requalification continues independently through the M14 evidence ledger。M15 implementation may proceed before that evidence completes, but M15 formal closure requires M14 formal status = Closed and the frozen `npm run test:m15` gate to pass。
 
 ---
 
@@ -420,7 +468,7 @@ M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game     ⚠️ Implementation complete / requalification pending
-M15 Desktop Full E2E                       pending
+M15 Desktop Full E2E                       🔒 Implementation Frozen / Preimplementation Closed
 M16 PWA Runtime                            pending
 M17 PWA Full E2E / Equivalence             pending
 ```
@@ -437,4 +485,4 @@ Current M14 hosted requalification gate：
 npm run test:m14
 ```
 
-Immediate closure work is limited to obtaining/recording the current qualification subject's hosted Node 20/24 evidence. No M10–M13 or M14 architecture reopen is justified unless that evidence exposes a concrete behavioral failure. M15 may continue to consume the frozen M14 boundaries, but documentation must not call M14 formally `Closed` before the ledger is complete。
+M14 immediate closure work is limited to obtaining/recording the current qualification subject's hosted Node 20/24 evidence. No M10–M14 architecture reopen is justified unless that evidence exposes a concrete behavioral failure. M15 no longer requires design work and may proceed directly to full implementation；documentation must still not call M14 or M15 formally `Closed` before their respective evidence ledgers satisfy the frozen closure rules。
