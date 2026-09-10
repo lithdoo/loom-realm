@@ -40,7 +40,7 @@ checked-in game.json
 → packaged classic map browser JS defines lr-map-view/lr-map-sprite
 → M13 Projector creates managed DOM
 → PresentationResourceClient supplies real fixture PNG bytes
-→ private Canvas paints current map and player becomes visible
+→ private map drawing paints current map and player becomes visible
 → two non-repeat ArrowRight events traverse M10
 → first move succeeds; second is blocked by persisted Tileset facts
 → same managed HTMLElements survive both attempts
@@ -178,7 +178,7 @@ Required managed light DOM：
 
 Same `lr-map-view` and `lr-map-sprite` HTMLElement identities survive both movement attempts。
 
-Qualification may inspect that `lr-map-view` has a private tile Canvas and a slot/overlay path for its managed child, but MUST NOT require a specific private Shadow wrapper hierarchy or class names。Private DOM remains implementation mechanics。
+Qualification proves behaviorally that map-owned private presentation provides tile drawing、clipping and correct player overlay/slot behavior。Pixel/screenshot evidence is sufficient。If an implementation happens to use an open Shadow root, tests MAY inspect it, but MUST NOT require an open Shadow root、specific wrapper hierarchy、private class names or unnecessary nesting。
 
 No per-tile Custom Elements。
 
