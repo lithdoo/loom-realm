@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-08
+> 最近复核：2026-09-11
 
 ADR 记录“为什么”；Current 可实现事实以 architecture / formal contract / implementation qualification 为准。**同一个尚未合并的 current design不通过额外 ADR人为制造历史层。**
 
@@ -42,6 +42,8 @@ ADR 记录“为什么”；Current 可实现事实以 architecture / formal con
 29. [ADR 0029：User Input v1 mutation-gate State convergence correction](./0029-user-input-v1-mutation-gate-state-convergence.md)
 30. [ADR 0030：冻结 M12 Content preimplementation closure](./0030-freeze-m12-content-preimplementation-closure.md)
 31. [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./0031-business-owned-web-component-projection.md)
+32. [ADR 0032：Framework / Game Library / Example Boundary](./0032-game-library-example-boundary.md)
+33. [ADR 0033：Electron-hosted Hostra Runner uses the current executable in Node mode](./0033-electron-hostra-run-as-node.md)
 
 ---
 
@@ -81,13 +83,32 @@ ADR 0031
     → one Web Presentation API v1 with independent context/data receivers
     → narrow PresentationResourceClient over M12 private ResourceClient
     → no RenderEvent WC ABI / no generic layer/loader/AssetManager
+
+ADR 0032
+    M14 framework / reusable game library / concrete game boundary
+    → packages/* framework
+    → game-libs/* reusable business
+    → examples/* concrete games
+    → no framework-owned map vocabulary/registry
+
+ADR 0033
+    first Electron Hostra consumer physical correction
+    → Runner executable remains canonical process.execPath
+    → Electron Runner child gets host-synthesized ELECTRON_RUN_AS_NODE=1
+    → supported Desktop Electron build keeps runAsNode fuse enabled
+    → no configurable Node executable / UtilityProcess second RuntimeHosting
 ```
 
 ADR 0031不 supersede ADR 0022；M11 Render authority/replication保持 Frozen，M13只是其 physical consumer。
 
+ADR 0033 does not supersede the Hostra Runtime model；it corrects the physical execution mode of the same process executable when the trusted composition process is Electron。Node-hosted Hostra behavior and shared RuntimeHosting/Runtime Control contracts remain unchanged。
+
 Formal sources：
 
 ```text
+Hostra Game Launcher / Node Subsystem Runner Profile v1
+→ current Hostra executable/Runner physical contract, including ADR 0033 correction
+
 Web Presentation Config v1
 → startup JS/CSS / prepared Content / browser ready semantics
 
@@ -105,7 +126,10 @@ Web Presentation API v1
 ADR 0017 → 0019 → 0020 → 0026
 → Game Package + Hostra/PWA Launcher Profiles
 → Platform Composition / RuntimeHosting
+→ ADR 0033 for the Electron-hosted Hostra physical execution correction
 ```
+
+ADR 0033 remains Hostra/Desktop-specific and does not alter the PWA Worker chain。
 
 ### Runtime / Frame
 
@@ -137,6 +161,17 @@ ADR 0003
 → M13 bootstrap resolution + PresentationResourceClient façade
 ```
 
+### Framework consumer / Desktop product
+
+```text
+ADR 0032
+→ M14 game-libs/map + concrete example
+→ M15 real Desktop product consumer
+
+ADR 0033
+→ M15 Electron-hosted Hostra Runner physical execution
+```
+
 ---
 
 ## Compatibility / Reopen Governance
@@ -152,7 +187,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-M13应优先作为 M11 Store的 trusted physical consumer实现。业务内部 UI framework选择不构成对 Render/Web presentation authority boundary 的 reopen。
+ADR 0033 is an example of a permitted first-implementation correction：the first Electron consumer exposed a real contradiction in the old `process.execPath == ordinary Node executable` assumption，and the correction keeps the scope at the nearest physical owner without adding a new public selection surface。
 
 ---
 
