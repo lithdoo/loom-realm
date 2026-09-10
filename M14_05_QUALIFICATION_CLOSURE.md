@@ -48,12 +48,23 @@ real Chromium M14 vertical
 npm run test:m14:pack
 ```
 
-`test:m14:pack` proves `@loomrealm-game/map` contains Runtime output plus：
+`test:m14:pack` proves both package resolution and tarball contents：
 
 ```text
-dist/browser/map.browser.js
-dist/browser/map.css
+import("@loomrealm-game/map")
+    → Runtime root, default map SubsystemDefinitionFactory
+
+resolve @loomrealm-game/map/browser/map.browser.js
+    → packaged dist/browser/map.browser.js
+
+resolve @loomrealm-game/map/browser/map.css
+    → packaged dist/browser/map.css
+
+npm pack --dry-run
+    → includes Runtime output + both browser artifact files
 ```
+
+The pack test MUST NOT execute the browser JS in Node; actual execution belongs to Chromium/M13 classic-script bootstrap.
 
 The concrete example remains private and is not a publishable product package.
 
@@ -69,6 +80,7 @@ map Runtime does not import renderer/main/platform/tooling/DOM
 browser source does not become a Runtime dependency
 example Runtime does not import tools/fixtures
 example package is private
+prepared Content assembly resolves browser files through package subpaths, not node_modules/dist/source reach-through
 ```
 
 No generic workspace orchestrator is required.
@@ -417,19 +429,25 @@ Player crop uses real 4×4 PNG. General frame placement follows bottom-center an
 
 ## 15. CSS / classic browser artifact gate
 
-Prepared Content bootstrap must load exact checked-in Config refs in order. Page CSS owns centering/margin/scroll/fixed 640×480 host; map CSS owns component/private visual mechanics.
-
-`dist/browser/map.browser.js` must：
+Prepared Content assembly resolves source artifacts only through：
 
 ```text
-execute as classic script
-contain no execution-time import/export dependency graph
-register lr-map-view and lr-map-sprite through native customElements.define()
+@loomrealm-game/map/browser/map.css
+@loomrealm-game/map/browser/map.browser.js
 ```
 
-Qualification may not direct-import browser source, manually define tags or inject replacement CSS.
+and materializes them under the logical Config refs from checked-in `presentation.json`：
 
-`npm run test:m14:pack` proves both browser files are packaged alongside the Runtime output.
+```text
+Presentation / map/map.css
+Presentation / map/map.browser.js
+```
+
+Page CSS comes from the concrete example as `Presentation / essentials/page.css`.
+
+The map JS must execute as classic script, contain no execution-time import/export graph, and register `lr-map-view` + `lr-map-sprite` through native `customElements.define()`.
+
+Qualification may not direct-import browser source, manually define tags, inject replacement CSS, or reach through package-private `dist/`/source paths.
 
 ## 16. Physical-input / process milestone boundary
 
