@@ -2,15 +2,17 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：M10–M14 **Implemented / Qualified / Closed**
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 稳定程度：M10–M13 closed baseline；M14 implementation frozen / formal status ledger-owned；M15 Desktop module boundary preimplementation frozen  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
-> 最近复核：2026-09-10
+> 最近复核：2026-09-11
 
 ```text
 module boundary != npm package boundary != protocol boundary != platform boundary
 framework module != reusable game library != concrete game
 ```
+
+本索引不维护独立 milestone PASS/Closed ledger。M14 live formal status只以 [`m14-qualification.md`](../30-implementation/m14-qualification.md) 为准。
 
 ---
 
@@ -19,7 +21,7 @@ framework module != reusable game library != concrete game
 | 模块/consumer | 入口 | Current responsibility |
 |---|---|---|
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector；M15 exposes the narrow trusted `@loomrealm/renderer/web-presentation` production seam |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
 | Map Game Library | [map design](./loom-map/README.md) | M14 selective RMXP/Essentials-compatible map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
 | Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra physical composition、Content、M13 integration、M15 full Desktop E2E |
@@ -80,14 +82,15 @@ M13 exact identity/currentness/receiver/resource semantics remain in frozen form
 ## 4. Closed / Frozen Slices
 
 ```text
-M10 User Input         ✅ Closed
-M11 Render Replication ✅ Closed
-M12 Content            ✅ Closed
-M13 Web Presentation   ✅ Closed 2026-09-09
-M14 Map Game Library   ✅ Closed 2026-09-10
+M10 User Input         closed baseline
+M11 Render Replication closed baseline
+M12 Content            closed baseline
+M13 Web Presentation   closed baseline
+M14 Map Game Library   implementation/consumer semantics frozen; formal status ledger-owned
+M15 Desktop Full E2E   Implementation Frozen / Preimplementation Closed
 ```
 
-M14 consumes M10–M13；it does not reopen their public contracts for map-specific convenience。
+M14 consumes M10–M13；it does not reopen their public contracts for map-specific convenience。M15 materializes the real Desktop physical composition without turning physical Electron details into common framework authority。
 
 ---
 
@@ -137,7 +140,10 @@ M14 qualification
     existing roles + existing/synthetic RendererInputSource + real Chromium
 
 M15 Desktop
-    real Node Runner child + BrowserWindow + physical DOM input
+    Electron main + existing Hostra process model
+    process.execPath Runner child in host-owned run-as-node mode
+    same-origin 127.0.0.1 shell + existing Content API
+    secure BrowserWindow + physical DOM input
     same M13 presentation + same M14 game/map business
 
 M16 PWA Runtime
@@ -149,7 +155,7 @@ M17 PWA
     cross-platform logical-outcome equivalence
 ```
 
-M14 harness is not a new production Host。PWA may use different transport/storage/private browser binding but cannot change M13/M14 logical semantics。
+M14 harness is not a new production Host。M15's Electron run-as-node/same-origin choices are concrete Desktop mechanics only。PWA may use different transport/storage/private browser binding but cannot change M13/M14 logical semantics。
 
 ---
 
@@ -167,6 +173,8 @@ Renderer public Render Store
 LoomRealm component library / Presentation DSL
 SceneGraph / generic layer manager
 dynamic component loader
+PresentationHost / PresentationRuntime
+BrowserPrimitiveRegistry
 public RenderNodeIdentity framework
 RenderEvent→DOM bridge without a real consumer
 second projection-tree/topology authority
