@@ -1,9 +1,10 @@
 # Map Game Library 设计
 
 > 层级：Game Library 设计  
-> 状态：**Implemented / Qualified / Closed**
-> 稳定程度：M10–M14 consumed boundaries closed
+> 状态：**Implemented / contract frozen; formal requalification pending**
+> 稳定程度：M10–M13 consumed boundaries closed；M14 map design/implementation frozen  
 > 精确 landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
+> Formal qualification source：[`m14-qualification.md`](../../30-implementation/m14-qualification.md)  
 > 决策：[ADR 0032](../../decisions/0032-game-library-example-boundary.md)
 
 ## Core principle
@@ -255,8 +256,10 @@ generic recursive RMXP consumer model
 
 ## Qualification
 
+The map design and implementation are frozen；formal milestone status is intentionally not duplicated here.
+
 Canonical CI uses checked-in selective Map/Tileset facts + author-owned graphics and proves one passable + one blocked movement through real Chromium。
 
 Exact local Essentials v21.1 evidence uses the same importer projection、prepared Content、Runtime and browser implementation against real source。
 
-Precise executable criteria live only in M14/03–05；this summary intentionally does not duplicate their full checklists。
+Precise executable criteria live in M14/03–05；the current qualification subject and PASS/PENDING evidence live only in `doc/30-implementation/m14-qualification.md`。
