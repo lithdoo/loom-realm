@@ -36,6 +36,7 @@ Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 - [Web Presentation API v1](./doc/15-contracts/web-presentation-api-v1.md)
 - [ADR 0031：M13 Web Presentation Frozen Design](./doc/decisions/0031-business-owned-web-component-projection.md)
 - [ADR 0032：Game Library / Example Boundary](./doc/decisions/0032-game-library-example-boundary.md)
+- [ADR 0033：Electron-hosted Hostra Runner](./doc/decisions/0033-electron-hostra-run-as-node.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [M14 qualification record](./doc/30-implementation/m14-qualification.md)
 - [M15 Desktop product composition](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
@@ -53,9 +54,9 @@ M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game      ⚠️ Implementation complete / requalification pending
-M15 Desktop full E2E                         🔒 Implementation Frozen / Preimplementation Closed
-M16 PWA Runtime                              pending
-M17 PWA full E2E                             pending
+M15 Desktop full E2E                        🔒 Implementation Frozen / Preimplementation Closed
+M16 PWA Runtime                             pending
+M17 PWA full E2E                            pending
 ```
 
 M14 design/implementation is frozen；the current exact-local gate is recorded PASS, while hosted Node 20/24 evidence for the current qualification subject remains pending. Formal status is owned only by [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md).
@@ -205,7 +206,7 @@ Map browser JS/CSS 本身也必须通过 prepared Content + `WebPresentationConf
 - [M14 / 04 — First Real Game Vertical](./M14_04_REAL_GAME_VERTICAL.md)
 - [M14 / 05 — Qualification Closure](./M14_05_QUALIFICATION_CLOSURE.md)
 
-M10–M13 不因这次 repository/business ownership调整而 reopen。M14 formal requalification changes only the evidence/status claim unless a new hosted run exposes a concrete behavioral defect.
+M10–M13 不因这次 repository/business ownership调整而 reopen。M14 formal requalification changes only the evidence/status claim unless a new hosted run exposes a concrete behavioral defect。
 
 ---
 
@@ -215,12 +216,16 @@ M15 只把 M14 test-owned physical composition 换成真实 Desktop product comp
 
 ```text
 checked-in Hostra-ready M14 installation
-→ Hostra PREPARE
-→ Main + real Node Runner child
-→ Desktop Data/Content
+→ Hostra PREPARE in Electron main
+→ Main
+→ process.execPath + host-synthesized ELECTRON_RUN_AS_NODE real Hostra Runner child
+→ existing Runtime Control WebSocket
+→ Desktop Data Broker
+→ exact same-origin 127.0.0.1 Desktop shell + existing Content API
 → secure Electron BrowserWindow
 → isolated preload one-shot handoff
 → Main-World trusted Renderer
+→ captured authority-bearing native browser primitives
 → Renderer Control MessagePort
 → browser-native Data WebSocket
 → real DOM Keyboard/Pointer/Gamepad input
@@ -228,16 +233,31 @@ checked-in Hostra-ready M14 installation
 → same M14 game/map business
 ```
 
-Frozen BrowserWindow boundary：
+Frozen Desktop physical boundary：
 
 ```text
-nodeIntegration=false
-contextIsolation=true
-sandbox=true
-webSecurity=true
+Hostra Runner executable = canonical process.execPath
+Electron Runner child env += ELECTRON_RUN_AS_NODE=1
+supported Electron build keeps runAsNode fuse enabled
+
+BrowserWindow:
+    nodeIntegration=false
+    contextIsolation=true
+    sandbox=true
+    webSecurity=true
+
+browser origin:
+    app-owned shell + existing /_lr/v1 Content API
+    = exact same http://127.0.0.1:<port> origin
+
+trusted Main World before business JS:
+    private bootstrap consumed
+    native fetch/WebSocket/ports/input primitives captured/bound
 ```
 
-M15保留 Main/Renderer/Subsystem/M9 Broker既有 authority。Preload不暴露 generic Electron API；Control、Data settlement、Data application和 Content保持分离；DOM input直接映射到既有 M10 `RendererInputSource`。
+M15不使用 configurable Node executable、UtilityProcess second RuntimeHosting、`file://` shell、Content CORS/OPTIONS expansion、preload Content proxy或 BrowserPrimitiveRegistry。Preload不暴露 generic Electron API；Control、Data settlement、Data application和 Content保持分离；DOM input直接映射到既有 M10 `RendererInputSource`。
+
+M15 production code uses the existing trusted `@loomrealm/renderer/resource-client` plus the single new narrow product subpath `@loomrealm/renderer/web-presentation`；business code仍不能获得 Renderer private authority/credentials。
 
 实施顺序：
 
@@ -247,9 +267,9 @@ M15保留 Main/Renderer/Subsystem/M9 Broker既有 authority。Preload不暴露 g
 - [M15 / 04 — Desktop Full E2E Vertical](./M15_04_DESKTOP_FULL_E2E_VERTICAL.md)
 - [M15 / 05 — Qualification Closure](./M15_05_QUALIFICATION_CLOSURE.md)
 
-五份 landing docs 均为 **Implementation Frozen / Preimplementation Closed**。实现阶段可以选择 private function/file names，但不得重新选择 authority owner、execution-world placement、Control/Data/Content physical topology、DOM input canonical mapping或 reload/reconnect/shutdown owner chain。
+五份 landing docs 均为 **Implementation Frozen / Preimplementation Closed**。实现阶段可以选择 private function/file names 与 exact app-shell route spelling，但不得重新选择 authority owner、Electron-hosted Hostra mode、same-origin boundary、execution-world placement、Control/Data/Content physical topology、DOM input canonical mapping或 reload/reconnect/shutdown owner chain。
 
-M15 不新增 logical authority、game semantics、component registry、generic host/manager、InputDeviceManager 或第二套 currentness/recovery model。
+M15 不新增 logical authority、game semantics、component registry、generic host/manager、InputDeviceManager、BrowserPrimitiveRegistry 或第二套 currentness/recovery model。
 
 ---
 
