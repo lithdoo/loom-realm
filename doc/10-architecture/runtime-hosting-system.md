@@ -4,10 +4,10 @@
 > 状态：Active Design  
 > 稳定程度：Evolving  
 > 主要定义：Subsystem Runtime Container、PlatformLaunchPlan、Runner、Control/Frame/Input/Render 承载粒度、plan-bound RuntimeHosting / Supervisor，以及 Runtime-owned late Data provisioning handoff  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
 > 被以下文档细化：[运行时启动系统](./runtime-bootstrap-system.md)、[栈式运行系统](./stack-runtime-system.md)、[Subsystem 模型](./subsystem-model.md)  
 > 正式化：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)  
-> 最近复核：2026-09-04
+> 最近复核：2026-09-11
 
 本文只定义 Runtime physical hosting边界。Game Entry validation、Launcher PREPARE、Main authority、Frame authority与 Data authority分别由各自事实源拥有。
 
@@ -198,9 +198,10 @@ A fresh Runtime object always gets a fresh provisioner；provisioner lifetime ca
 Platform Launch Manifest MAY select installation-local business artifact；MUST NOT override：
 
 ```text
-Node executable
+Node/Runner executable
 Host-owned Node/Worker Runner entry
 shell / arbitrary argv / unsafe env
+Electron run-as-node mode
 Worker constructor security policy
 bootstrap credential source
 Control endpoint / MessagePort
@@ -213,6 +214,17 @@ Supervisor resource/timeouts
 select business implementation
 != arbitrary host-code execution authority
 ```
+
+For the first Electron Hostra consumer，ADR 0033 fixes one concrete host-owned execution detail without enlarging this policy surface：
+
+```text
+Runner executable remains canonical process.execPath
+Electron composition only
+    → Hostra synthesizes ELECTRON_RUN_AS_NODE=1 for the exact Runner child
+    → supported Electron build keeps runAsNode fuse enabled
+```
+
+Game/manifest cannot select a different executable、set this environment value or request a different process container。
 
 ---
 
@@ -350,12 +362,19 @@ Any Data provisioner associated with the old HostedRuntime becomes unusable when
 ## 17. Cross-platform Realization
 
 ```text
-Hostra Desktop
+Hostra under ordinary Node composition
     LaunchPlan          installation-contained filesystem .mjs
-    Runtime Container  Node Runner Process
+    Runtime Container  process.execPath Node Runner child
     Supervisor         child process lifecycle
     Control            WebSocket
     provisioning       Runtime-scoped child IPC + Data WS
+
+Hostra Desktop under Electron composition (M15)
+    LaunchPlan          same Hostra plan
+    Runtime Container  same process.execPath with host-synthesized ELECTRON_RUN_AS_NODE=1
+    Supervisor         same child process lifecycle
+    Control            same Runtime Control WebSocket
+    provisioning       same Runtime-scoped child IPC + Data WS
 
 PWA
     LaunchPlan          installation/same-origin module URL
@@ -364,6 +383,8 @@ PWA
     Control            MessagePort
     provisioning       Worker message/Port transfer
 ```
+
+Electron does not create a third logical Runtime model or a second Hostra RuntimeHosting。The supported Electron build's `runAsNode` capability is a concrete Desktop build prerequisite verified by M15。
 
 Physical topology differs；established Runtime Control、Frame、Data/Input/Render/Content semantics must eventually be equivalent。
 
@@ -386,4 +407,5 @@ Physical topology differs；established Runtime Control、Frame、Data/Input/Ren
 13. Runtime owner may expose only a concrete child-scoped provisioner handoff, not Broker policy or public registry；
 14. Data provisioning/loss/post-install delivery failure does not directly equal Runtime failure/Frame unwind；
 15. post-install delivery failure retires new Data current and never rolls back old current；
-16. Hostra/PWA hosting/artifact may differ, but Subsystem ABI/formal observable semantics remain shared。
+16. Hostra/PWA hosting/artifact may differ, but Subsystem ABI/formal observable semantics remain shared；
+17. Electron-hosted Hostra reuses the same Runner/process owner chain via host-controlled Node mode rather than a configurable executable or second RuntimeHosting。
