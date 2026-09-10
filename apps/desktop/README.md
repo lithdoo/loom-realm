@@ -1,12 +1,22 @@
 # `@loomrealm/desktop` Physical Platform Composition
 
-> 状态：M9 Data + M12 Content **Implemented / Qualified**（2026-09-08）
+> 状态：M9 Data + M12 Content **Implemented / Qualified**（2026-09-08）；M15 Full Desktop E2E **Planned**
 
 This private workspace owns the M9 session-scoped Desktop `DataConnectionBroker`, two-sided loopback Data WebSocket relay, finite buffering policy and Renderer-side `RendererDataBinding` delivery cells.
 
 It also owns the M12 prepared-installation Content view and loopback readonly Content Service：deterministic public manifest bytes, immutable FSDB logical index, exact-byte SHA-256 versions, scoped/expiring bearer grants, bounded request admission, and lifecycle closure. `prepareDesktopContentView(prepared)` consumes the genuine Hostra-prepared truth through its trusted integration subpath, derives the unique in-installation `[FSDB]*` root, and never re-reads `game.json` or accepts independently supplied roots. The public prepared-view handle exposes no filesystem path, FSDB handle, or Content Index.
 
-It is not the full Desktop product shell. BrowserWindow and physical Renderer hosting remain M14 responsibilities；Input/Render publication baselines remain M10/M11。
+It is not yet the full Desktop product shell. BrowserWindow、physical Renderer hosting、real DOM input and product lifecycle belong to M15；Input/Render logical baselines remain M10/M11。
+
+M15 implementation plan：
+
+```text
+M15_01_DESKTOP_PRODUCT_COMPOSITION.md
+→ M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md
+→ M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md
+→ M15_04_DESKTOP_FULL_E2E_VERTICAL.md
+→ M15_05_QUALIFICATION_CLOSURE.md
+```
 
 ```powershell
 npm test -w @loomrealm/desktop
