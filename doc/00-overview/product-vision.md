@@ -4,9 +4,11 @@
 > 状态：Active / Normative  
 > 稳定程度：方向稳定，current v1 在首次实现 compatibility boundary 形成前可按治理规则直接收口  
 > 主要定义：产品目标、Game/Platform/Main 消费边界、跨平台原则、第一阶段验收方向  
-> 最近复核：2026-09-09
+> 最近复核：2026-09-11
 
 本文是 LoomRealm 最高层产品事实源。下层架构、协议、模块和实施文档不得通过实现便利反向改变这里的产品边界。
+
+Milestone 的 live qualification 状态不由本文复制维护：当前汇总见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)，M14 当前 qualification subject / evidence / formal status 只以 [`m14-qualification.md`](../30-implementation/m14-qualification.md) 为准。
 
 ---
 
@@ -253,6 +255,8 @@ CSP/same-origin policy
 
 Game/Platform manifest不能把“选择 business implementation”升级为任意 Host code execution authority。
 
+Concrete Hostra/Electron process mechanics are lower-level physical realization；they do not create product-level executable selection or application authority。
+
 ---
 
 ## 7. Runtime / Frame Authority
@@ -432,7 +436,9 @@ Game source
 → shutdown
 ```
 
-M14 先建立 framework 之外的 reusable game library + concrete game consumer：
+这些行为由 nearest-owner qualification + later physical E2E共同关闭，不要求一个 concrete game scenario重复覆盖所有已经关闭的 owner-local semantics。例如 nested Subsystem call/return 由 Main/Frame owner qualification拥有；M14/M15 map vertical不为重复该事实而人为增加第二个 game Subsystem。
+
+M14 建立 framework 之外的 reusable game library + concrete game consumer：
 
 ```text
 external/local Essentials v21.1 source
@@ -498,16 +504,21 @@ universal map schema / MapNormalizedV1
 
 ## 15. 当前实施主线
 
+本文只固定路线，不拥有 live qualification checkmarks：
+
 ```text
-M1–M9 Foundation / Game / Runtime / Hostra / Data   ✅
-M10 User Input                                      ✅ Closed
-M11 Render Replication                              ✅ Closed
-M12 Content                                         ✅ Closed
-M13 Web Presentation                                ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game              ✅ Closed 2026-09-10
-M15 Desktop full E2E                                 pending
-M16 PWA Runtime                                      pending
-M17 PWA full E2E / equivalence                       pending
+M1–M13  closed baseline
+→ M14   first real game consumer
+→ M15   Desktop full E2E
+→ M16   PWA Runtime
+→ M17   PWA full E2E / equivalence
 ```
 
-当前 executable closure是 `npm run test:m14`。M14 已以 `game-libs/map` 与 `examples/essentials-v21.1` 完成 first playable map vertical；下一步进入 Desktop/PWA full E2E。
+Current live status：
+
+```text
+M14 → doc/30-implementation/m14-qualification.md
+M15–M17 summary → doc/30-implementation/phase-1-delivery-plan.md
+```
+
+截至本次复核，Phase 1 summary记录 M14 implementation complete / requalification pending，M15 Implementation Frozen / Preimplementation Closed；本文不复制 run IDs、Closed 日期或 evidence flags。
