@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
+import { prepareHostraGame } from "@loomrealm/game-launcher-hostra";
+import { runMain } from "@loomrealm/main";
+import { createRendererControlHolder } from "@loomrealm/renderer";
+import { createBoundContentClient, runSubsystem } from "@loomrealm/subsystem/host";
+import { createDesktopContentService, prepareDesktopContentView } from "../apps/desktop/dist/index.js";
 import mapDefinition from "@loomrealm-game/map";
+import { attachRendererPresentation } from "../packages/renderer/dist/internal/presentation-seam.js";
 import { run as runImporter } from "../tools/fixtures/essentials-v21.1/import.mjs";
 import { buildSourceManifest } from "../tools/fixtures/essentials-v21.1/lib/source/manifest.mjs";
 import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/prepare.mjs";
@@ -14,7 +21,10 @@ import { prepareExamplePresentation } from "../examples/essentials-v21.1/test/pr
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workRoot = path.join(repository, ".local", "m14-essentials");
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const version = (bytes) => `sha256:${digest(bytes)}`;
+const scheduler = Object.freeze({ schedule(ms, callback) { const timer = setTimeout(callback, ms); return () => clearTimeout(timer); } });
+const runtimePolicy = Object.freeze({ scheduler, helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 100 });
+const mainPolicy = Object.freeze({ runtimeBootstrapDeadlineMs: 5_000, frameDeadlineMs: 5_000, shutdownDeadlineMs: 5_000, terminationDeadlineMs: 1_000 });
+const runnerPolicy = Object.freeze({ helloDeadlineMs: 5_000, frameDeadlineMs: 5_000, terminalCleanupDeadlineMs: 1_000, terminationGraceMs: 100 });
 
 function argumentsOf(argv) {
   if (argv.length === 5 && argv.every((value) => !value.startsWith("--"))) {
@@ -39,16 +49,67 @@ async function sourceFingerprint(source) {
   return digest(Buffer.from(lines.join("\n")));
 }
 
-async function resourceFile(fsdbRoot, namespace, key) {
-  const parts = key.split("/"); const leaf = parts.pop(); const directory = path.join(fsdbRoot, `[resource]${namespace}`, ...parts);
-  const names = await readdir(directory);
-  const match = names.find((name) => path.parse(name).name === leaf);
-  if (!match) throw new Error(`Missing local resource ${namespace}/${key}`);
-  return path.join(directory, match);
-}
-
 function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
+}
+
+async function waitFor(predicate, label, timeout = 15_000) {
+  const deadline = Date.now() + timeout;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function createDataHub() {
+  const waiting = [];
+  const pairs = [];
+  const take = () => {
+    while (waiting.length && pairs.length) waiting.shift().resolve(pairs.shift());
+  };
+  return {
+    subsystemBinding: Object.freeze({
+      acquire(signal) {
+        if (signal.aborted) return Promise.reject(signal.reason);
+        return new Promise((resolve, reject) => {
+          const request = { resolve, reject };
+          waiting.push(request); take();
+          signal.addEventListener("abort", () => { const index = waiting.indexOf(request); if (index >= 0) waiting.splice(index, 1); reject(signal.reason); }, { once: true });
+        });
+      },
+    }),
+    rendererBinding: Object.freeze({
+      acquire(_key, generation, dataProfile) {
+        const pair = createMemoryCarrierPair();
+        pairs.push({ carrier: pair.left, generation, dataProfile }); take();
+        return Promise.resolve(pair.right);
+      },
+    }),
+  };
+}
+
+async function prepareProductionContent(options) {
+  const installationRoot = await mkdtemp(path.join(workRoot, "installation-"));
+  const subsystems = path.join(installationRoot, "subsystems");
+  await mkdir(subsystems, { recursive: true });
+  await Promise.all([
+    writeFile(path.join(installationRoot, "game.json"), `${JSON.stringify({
+      formatVersion: 1,
+      initial: { subsystem: "map", input: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] } },
+      subsystems: [{ key: "map" }],
+    }, null, 2)}\n`),
+    writeFile(path.join(installationRoot, "launch.hostra.json"), '{"formatVersion":1,"subsystems":[{"key":"map","module":"subsystems/map.mjs"}]}\n'),
+    writeFile(path.join(subsystems, "map.mjs"), "export default () => ({ frame() {} });\n"),
+  ]);
+  const fsdbRoot = await runImporter(["--source", options.source, "--output", installationRoot]);
+  const prepared = await prepareHostraGame({ source: { installationRoot }, runnerPolicy });
+  const view = await prepareDesktopContentView(prepared);
+  const service = await createDesktopContentService({ view });
+  const grant = service.createGrant({ permissions: ["records", "resources"], expiresAtUnixMs: Date.now() + 60 * 60 * 1000 });
+  const access = service.access(grant);
+  const lifetime = new AbortController();
+  const content = createBoundContentClient({ origin: access.origin.href, installationId: access.installationId, token: access.token }, lifetime.signal);
+  return { access, content, fsdbRoot, installationRoot, lifetime, prepared, service };
 }
 
 async function browserQualification(renderState, resources) {
@@ -101,33 +162,91 @@ async function browserQualification(renderState, resources) {
 const options = argumentsOf(process.argv.slice(2));
 await mkdir(workRoot, { recursive: true });
 const fingerprint = await sourceFingerprint(path.resolve(options.source));
-const fsdbRoot = process.env.LOOMREALM_M14_REUSE_FSDB
-  ? path.resolve(process.env.LOOMREALM_M14_REUSE_FSDB)
-  : await runImporter(["--source", options.source, "--output", workRoot]);
-const map = JSON.parse(await readFile(path.join(fsdbRoot, "[struct]Map", `${options["map-id"]}.json`), "utf8"));
-const tileset = JSON.parse(await readFile(path.join(fsdbRoot, "[struct]Tileset", `${map.tileset_id}.json`), "utf8"));
-assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data"]);
-assert.deepEqual(Object.keys(tileset), ["id", "tileset_name", "passages", "priorities"]);
-const tilesetPath = await resourceFile(fsdbRoot, "Graphics", `Tilesets/${tileset.tileset_name}`);
-const playerPath = await resourceFile(fsdbRoot, "Graphics", `Characters/${options["character-name"]}`);
-const tilesetBytes = await readFile(tilesetPath); const playerBytes = await readFile(playerPath);
-const resources = new Map([
-  [`Graphics/Tilesets/${tileset.tileset_name}`, { bytes: tilesetBytes, mime: "image/png", contentVersion: version(tilesetBytes) }],
-  [`Graphics/Characters/${options["character-name"]}`, { bytes: playerBytes, mime: "image/png", contentVersion: version(playerBytes) }],
-]);
-let handler; const states = []; const controller = new AbortController();
-const definition = mapDefinition({ signal: controller.signal, content: {
-  async record(namespace, key) { return { value: namespace === "Map" ? map : tileset, contentVersion: version(Buffer.from(`${namespace}/${key}`)) }; },
-  async resource(namespace, key) { const item = resources.get(`${namespace}/${key}`); if (!item) throw new Error("missing resource"); return { ...item, bytes: Uint8Array.from(item.bytes) }; },
-}, createInputListener() { return { on(_channel, value) { handler = value; return () => {}; }, setChannels() {}, close() {} }; }, createRenderDomain(initial) { states.push(initial); return { replace(value) { states.push(value); }, emit() {}, close() {} }; } });
-const pending = definition.frame({ id: "local", params: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] }, signal: controller.signal, async call() { throw new Error("unused"); } });
-for (let attempt = 0; attempt < 200 && !handler; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-if (!handler) throw new Error("Local map Runtime did not start");
-const before = states.at(-1).roots[0].children[0].data;
-await handler({ action: "down", code: "ArrowRight", repeat: false });
-const after = states.at(-1).roots[0].children[0].data;
-const browser = await browserQualification(states.at(-1), resources);
-controller.abort(); await pending;
-const record = { sourceFingerprint: `sha256:${fingerprint}`, fsdbRoot, selection: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] }, tileset: tileset.tileset_name, movement: { code: "ArrowRight", before: { x: before.x, y: before.y }, after: { x: after.x, y: after.y }, direction: after.direction }, browser, pass: true };
-await import("node:fs/promises").then(({ writeFile }) => writeFile(path.join(workRoot, "last-qualification.json"), `${JSON.stringify(record, null, 2)}\n`));
-console.log(JSON.stringify(record, null, 2));
+const production = await prepareProductionContent(options);
+const controller = new AbortController();
+let main;
+let detach = () => {};
+try {
+  const mapResult = await production.content.record("struct.Map", String(options["map-id"]));
+  const map = mapResult.value;
+  const tilesetResult = await production.content.record("struct.Tileset", String(map.tileset_id));
+  const tileset = tilesetResult.value;
+  assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data"]);
+  assert.deepEqual(Object.keys(tileset), ["id", "tileset_name", "passages", "priorities"]);
+  const tilesetResource = await production.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`);
+  const playerResource = await production.content.resource("resource.Graphics", `Characters/${options["character-name"]}`);
+  assert.equal(tilesetResource.mime, "image/png");
+  assert.equal(playerResource.mime, "image/png");
+  const resources = new Map([
+    [`resource.Graphics/Tilesets/${tileset.tileset_name}`, tilesetResource],
+    [`resource.Graphics/Characters/${options["character-name"]}`, playerResource],
+  ]);
+
+  const hub = createDataHub();
+  let inputEmit;
+  const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
+  let holder;
+  const rendererControl = Object.freeze({
+    acquire(token, signal) {
+      if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      const pair = createMemoryCarrierPair();
+      holder = createRendererControlHolder(hub.rendererBinding, inputSource);
+      void holder.connect({ carrier: pair.right, rendererControlToken: token });
+      return Promise.resolve(pair.left);
+    },
+  });
+  const runtimeHosting = Object.freeze({
+    async launch(request) {
+      assert.equal(request.subsystemKey, "map");
+      const pair = createMemoryCarrierPair();
+      let acquired = false;
+      const runtime = runSubsystem({
+        definition: mapDefinition,
+        runtimeControl: { acquire() { assert.equal(acquired, false); acquired = true; return Promise.resolve(pair.right); } },
+        runtimePolicy,
+        launch: { subsystemKey: request.subsystemKey, bootstrapToken: request.bootstrapToken, controlProtocolVersions: [1] },
+        data: hub.subsystemBinding,
+        content: production.content,
+      });
+      void runtime.catch(() => {});
+      return Object.freeze({ runtimeControl: { acquire() { return Promise.resolve(pair.left); } }, terminated: runtime, async requestTermination() { await pair.left.close(); } });
+    },
+  });
+  main = runMain({
+    bootstrap: production.prepared.logicalBootstrap,
+    policy: mainPolicy,
+    signal: controller.signal,
+    platform: { scheduler, opaqueMaterial: { generate: () => randomBytes(32).toString("base64url") }, runtimeHosting, rendererControl, dataConnections: { replace() {} } },
+  });
+  void main.catch(() => {});
+  await waitFor(() => holder?.current() !== null && typeof inputEmit === "function", "Renderer and M10 input source");
+  let latestView;
+  detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); } });
+  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 2, "initial exact-source Render state");
+  const before = latestView.subsystems[0].domains[0].roots[0].children[0].data;
+  inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
+  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "ArrowRight through M10");
+  const domain = latestView.subsystems[0].domains[0];
+  const after = domain.roots[0].children[0].data;
+  const browser = await browserQualification(domain, resources);
+  const record = {
+    sourceFingerprint: `sha256:${fingerprint}`,
+    fsdbRoot: production.fsdbRoot,
+    content: { seam: "Desktop FSDB HTTP -> Bound ContentClient", mapVersion: mapResult.contentVersion, tilesetVersion: tilesetResult.contentVersion, tilesetMime: tilesetResource.mime, playerMime: playerResource.mime },
+    input: { seam: "RendererInputSource -> M10 -> Data -> Subsystem InputListener", action: "down", code: "ArrowRight", repeat: false },
+    selection: { mapId: options["map-id"], x: options.x, y: options.y, characterName: options["character-name"] },
+    tileset: tileset.tileset_name,
+    movement: { code: "ArrowRight", before: { x: before.x, y: before.y }, after: { x: after.x, y: after.y }, direction: after.direction },
+    browser,
+    pass: true,
+  };
+  await writeFile(path.join(workRoot, "last-qualification.json"), `${JSON.stringify(record, null, 2)}\n`);
+  console.log(JSON.stringify(record, null, 2));
+} finally {
+  detach();
+  controller.abort(new Error("M14 exact-source qualification complete"));
+  if (main) await main.catch(() => {});
+  production.lifetime.abort();
+  await production.service.close().catch(() => {});
+  await rm(production.installationRoot, { recursive: true, force: true });
+}

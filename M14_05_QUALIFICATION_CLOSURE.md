@@ -21,6 +21,8 @@ npm run test:m14:essentials-local -- \
   --character-name <name>
 ```
 
+The exact-local gate MUST read the imported FSDB through the production Desktop Content HTTP service and bound Subsystem `ContentClient`。It MUST derive resource MIME/contentVersion from that seam, not from filename assumptions or hard-coded MIME。Its non-repeat directional input MUST enter through a synthetic `RendererInputSource` and traverse the complete M10/Data/InputListener path；direct invocation of the map handler is not qualification evidence。
+
 M14/02 is the authority for map Runtime/presentation semantics。M14/03 is the authority for checked-in example/fixture/config/resources。M14/04 is the authority for end-to-end observables。This file is the executable checklist and MUST NOT redefine those algorithms independently。
 
 ## 1. Required scripts

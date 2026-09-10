@@ -45,6 +45,8 @@ function integer(value: unknown, label: string, positive = true): number {
 
 export function validateTable(value: unknown, label: string): ProjectedTable {
   const input = object(value, label);
+  const fields = ["dimensions", "xSize", "ySize", "zSize", "values"];
+  if (!fields.every((key) => key in input) || Object.keys(input).length !== fields.length) throw new TypeError(`${label} has an invalid field set`);
   if (!Array.isArray(input.values)) throw new TypeError(`${label}.values must be an array`);
   const table = {
     dimensions: integer(input.dimensions, `${label}.dimensions`),

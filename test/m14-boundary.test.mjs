@@ -17,7 +17,7 @@ async function sourceTree(relative) {
     }
   }
   await walk(path.resolve(directory.pathname.slice(process.platform === "win32" ? 1 : 0)));
-  return Promise.all(files.filter((file) => /\.(?:ts|js|mjs)$/u.test(file)).map((file) => readFile(file, "utf8")));
+  return Promise.all(files.filter((file) => /\.(?:ts|js|mjs)$/u.test(file)).map(async (file) => ({ file: path.normalize(file), source: await readFile(file, "utf8") })));
 }
 
 test("M14 workspace identity and dependency direction are explicit", async () => {
@@ -29,6 +29,7 @@ test("M14 workspace identity and dependency direction are explicit", async () =>
   const example = await json("examples/essentials-v21.1/package.json");
   assert.equal(example.private, true); assert.equal(example.type, "module");
   assert.equal(typeof mapDefinition, "function");
+  assert.deepEqual(Object.keys(await import("@loomrealm-game/map")), ["default"]);
 });
 
 test("framework packages never acquire reverse game/example dependencies", async () => {
@@ -44,6 +45,7 @@ test("framework packages never acquire reverse game/example dependencies", async
 test("map and example business sources do not cross Renderer/tooling boundaries", async () => {
   const sources = await sourceTree("game-libs/map/");
   const exampleSources = await sourceTree("examples/essentials-v21.1/");
-  assert.doesNotMatch(sources.join("\n"), /@loomrealm\/(?:renderer|main|data|wire|fsdb)|packages[\\/]renderer|tools[\\/]/);
-  assert.doesNotMatch(exampleSources.filter((source) => !source.includes("prepareWebPresentationV1")).join("\n"), /packages[\\/]renderer[\\/]dist[\\/]internal/);
+  assert.doesNotMatch(sources.map(({ source }) => source).join("\n"), /@loomrealm\/(?:renderer|main|data|wire|fsdb)|packages[\\/]renderer|tools[\\/]/);
+  const allowedPreparation = path.normalize(path.resolve(new URL("examples/essentials-v21.1/test/prepare.mjs", root).pathname.slice(process.platform === "win32" ? 1 : 0)));
+  assert.doesNotMatch(exampleSources.filter(({ file }) => file !== allowedPreparation).map(({ source }) => source).join("\n"), /packages[\\/]renderer[\\/]dist[\\/]internal/);
 });

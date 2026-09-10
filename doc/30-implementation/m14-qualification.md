@@ -2,20 +2,23 @@
 
 ## Status
 
-**Implemented / Qualified / Closed** on 2026-09-10. The implementation revision
-passes the canonical committed Node 20/24 workflow and the exact local v21.1
-compatibility gate.
+Qualification hardening candidate on 2026-09-10. Review found that the original
+exact-local input and Content paths were weaker than the frozen closure claim.
+The implementation now closes both gaps locally; formal reclosure awaits this
+revision's committed Node 20/24 workflow.
 
 ## Revision
 
 - Implementation base: `f3b14408e75cc701dc593f34bb4dfa8b90431f07`
 - Qualified implementation commit: `d415742f337ff8613c2e349cebb9a820dc0bda72`
+- Qualification-hardening commit: pending commit
 - Local canonical runtime: Node `22.12.0`, npm `10.9.0`
 - `npm run test:m14`: PASS
 - Node 20.20.2 M14-specific suite: 18/18 PASS, including Chromium
 - Node 24.20.0 M14-specific suite: 18/18 PASS, including Chromium
 - Full Node 20/24 canonical CI: PASS in GitHub Actions run
   [`34446050878`](https://github.com/lithdoo/loom-realm/actions/runs/34446050878)
+- Hardened revision Node 20/24 canonical CI: pending committed workflow execution
 
 ## Selective projection
 
@@ -54,6 +57,12 @@ compatibility gate.
   decoded; 49 RMXP classes encountered; zero discarded Marshal nodes or RMXP
   ivars; production FSDB validation PASS.
 - Real tileset and character resources resolved from the local prepared FSDB.
+- Exact records and resources traversed the production Desktop FSDB HTTP service
+  and bound Subsystem `ContentClient`; recorded MIME and contentVersion came from
+  that seam rather than direct filesystem reads or hard-coded MIME.
+- The non-repeat ArrowRight traversed synthetic `RendererInputSource` → Renderer
+  Input Gate → Data → Subsystem `InputManager` → Frame-bound `InputListener` →
+  map handler; the local gate no longer calls the handler directly.
 - ArrowRight result: position remained `(10,8)` according to persisted
   passability facts; authoritative facing became `6` before Render replacement.
 - The same map Runtime and browser artifacts started; Chromium observed a
@@ -66,6 +75,6 @@ compatibility gate.
 
 Local implementation and exact-source qualification: PASS.
 
-Formal milestone closure: **PASS / Closed**. All 20 workflows triggered for the
-qualified implementation commit completed successfully, including the M14
-Node 20/24 canonical gate and the complete M13 regression gate.
+Original canonical implementation CI and exact-source compatibility remain PASS.
+Formal milestone reclosure is pending the hardened revision's hosted Node 20/24
+canonical workflow result.

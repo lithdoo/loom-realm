@@ -81,6 +81,16 @@ Unused RMXP facts（events、BGM/BGS、encounters、autotile names、terrain tag
 
 Runtime MUST NOT理解 Ruby Marshal、`.rxdata`、RmxpObject、Ruby wrapper、`$id/$ref/$typed`、tool filesystem layout或 Host storage identity。
 
+`Map/{id}`、`Tileset/{id}` 与 `Graphics/...` 是下文的 semantic shorthand。通过现有 M12 FSDB Content seam 读取时，exact public namespaces 是：
+
+```text
+ContentClient.record("struct.Map", id)
+ContentClient.record("struct.Tileset", id)
+ContentClient.resource("resource.Graphics", key)
+```
+
+Map Runtime直接使用这些 production namespaces；qualification 不得在 ContentClient 外再造去前缀 adapter。
+
 ## 3. Exact required shapes
 
 `Map/{id}`：
@@ -168,7 +178,7 @@ pattern=0
 Player resource logical identity：
 
 ```text
-Graphics / Characters/{characterName}
+resource.Graphics / Characters/{characterName}
 ```
 
 M14 不引入 RPG::System/Trainer startup compatibility。
@@ -199,14 +209,14 @@ Tileset：
 
 ```text
 tileset_name
-→ Graphics / Tilesets/{tileset_name}
+→ resource.Graphics / Tilesets/{tileset_name}
 ```
 
 Player：
 
 ```text
 characterName
-→ Graphics / Characters/{characterName}
+→ resource.Graphics / Characters/{characterName}
 ```
 
 Runtime 使用现有 `ContentClient.resource()` 证明资源存在并取得 `contentVersion`；无需长期保存 bytes。Render 只携带：

@@ -46,8 +46,8 @@ const priorities = Array(386).fill(0); priorities[0] = 5;
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 const fixture = {
   records: {
-    "Map/1": { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, mapValues) },
-    "Tileset/1": { id: 1, tileset_name: "m14_tileset", passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) }
+    "struct.Map/1": { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, mapValues) },
+    "struct.Tileset/1": { id: 1, tileset_name: "m14_tileset", passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) }
   },
   expectedPixels: { tile384: [220, 40, 40, 255], tile385: [40, 80, 220, 255], playerDown: [240, 160, 30, 255], playerRight: [30, 110, 240, 255] }
 };

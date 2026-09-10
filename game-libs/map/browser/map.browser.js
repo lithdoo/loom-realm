@@ -122,6 +122,6 @@
     }
   }
 
-  if (!customElements.get("lr-map-view")) customElements.define("lr-map-view", LoomRealmMapView);
-  if (!customElements.get("lr-map-sprite")) customElements.define("lr-map-sprite", LoomRealmMapSprite);
+  customElements.define("lr-map-view", LoomRealmMapView);
+  customElements.define("lr-map-sprite", LoomRealmMapSprite);
 })();

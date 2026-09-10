@@ -55,6 +55,8 @@ Map/{mapId}
 Tileset/{tilesetId}
 ```
 
+These are semantic identities。The existing M12 FSDB Content projection exposes them as `struct.Map/{mapId}` and `struct.Tileset/{tilesetId}`；graphics are read as `resource.Graphics/{key}`。M14 Runtime uses those exact public Content namespaces without a qualification-only adapter。
+
 ### 2.1 Map/{id}
 
 Consumer value contains exactly the facts M14 map Runtime consumes：

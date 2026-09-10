@@ -101,8 +101,8 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
   const tilesetBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_tileset.png"));
   const playerBytes = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_player.png"));
   const resources = new Map([
-    ["Graphics/Tilesets/m14_tileset", { bytes: tilesetBytes, mime: "image/png", contentVersion: hash(tilesetBytes) }],
-    ["Graphics/Characters/m14_player", { bytes: playerBytes, mime: "image/png", contentVersion: hash(playerBytes) }],
+    ["resource.Graphics/Tilesets/m14_tileset", { bytes: tilesetBytes, mime: "image/png", contentVersion: hash(tilesetBytes) }],
+    ["resource.Graphics/Characters/m14_player", { bytes: playerBytes, mime: "image/png", contentVersion: hash(playerBytes) }],
   ]);
   const server = await fixtureServer(t, resources);
   const game = parseGameEntryV1(await readFile(path.join(exampleRoot, "game.json"), "utf8"));
@@ -198,7 +198,7 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
 
 test("map view clears full state and delayed same-resource decode paints only latest data", { timeout: 15_000 }, async (t) => {
   const tileset = await readFile(path.join(exampleRoot, "fixtures", "resources", "m14_tileset.png"));
-  const resources = new Map([["Graphics/Tilesets/m14_tileset", { bytes: tileset, mime: "image/png", contentVersion: hash(tileset) }]]);
+  const resources = new Map([["resource.Graphics/Tilesets/m14_tileset", { bytes: tileset, mime: "image/png", contentVersion: hash(tileset) }]]);
   const server = await fixtureServer(t, resources);
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) }); t.after(() => browser.close());
   const page = await browser.newPage(); await page.goto(server.origin);
@@ -207,7 +207,7 @@ test("map view clears full state and delayed same-resource decode paints only la
     const view = document.createElement("lr-map-view"); document.body.append(view);
     let release; const gate = new Promise((resolve) => { release = resolve; });
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
-    const tileset = { namespace: "Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
+    const tileset = { namespace: "resource.Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
     view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [{ x: 0, y: 0, z: 0, tileId: 384 }] });
     view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [{ x: 1, y: 0, z: 0, tileId: 385 }] });
     release(); await new Promise((resolve) => setTimeout(resolve, 50));
@@ -218,4 +218,15 @@ test("map view clears full state and delayed same-resource decode paints only la
     return { stale, latest, cleared };
   }, { bytes: [...tileset], version: hash(tileset) });
   assert.equal(result.stale[3], 0); assert.deepEqual(result.latest, [40, 80, 220, 255]); assert.equal(result.cleared[3], 0);
+});
+
+test("map browser registration fails closed when an owned tag is already registered", { timeout: 15_000 }, async (t) => {
+  const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent("<!doctype html><html><body></body></html>");
+  await page.evaluate(() => customElements.define("lr-map-view", class ConflictingMapView extends HTMLElement {}));
+  const browserSource = await readFile(path.join(root, "game-libs", "map", "dist", "browser", "map.browser.js"), "utf8");
+  await assert.rejects(page.evaluate((source) => (0, eval)(source), browserSource), /register|defined/i);
+  assert.equal(await page.evaluate(() => customElements.get("lr-map-sprite")), undefined);
 });

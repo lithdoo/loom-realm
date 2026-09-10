@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import mapDefinition, { tableAt } from "@loomrealm-game/map";
-import { computeCamera, projectVisibleTiles, validateMapRecord, validateTilesetRecord } from "../dist/semantics.js";
+import mapDefinition from "@loomrealm-game/map";
+import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, validateMapRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -27,7 +27,7 @@ test("Table, camera and visible projection follow frozen ordering", () => {
 
 test("one long-lived Frame accepts one move and one persisted reverse-entry block", async () => {
   const { map, tileset } = fixture();
-  const records = { "Map/1": map, "Tileset/1": tileset };
+  const records = { "struct.Map/1": map, "struct.Tileset/1": tileset };
   let handler; const states = []; let listenerClosed = false; let domainClosed = false;
   const definition = mapDefinition({
     signal: new AbortController().signal,
@@ -43,7 +43,7 @@ test("one long-lived Frame accepts one move and one persisted reverse-entry bloc
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(states.length, 1);
   await handler({ action: "down", code: "ArrowRight", repeat: false });
-  assert.deepEqual(states.at(-1).roots[0].children[0].data, { x: 11, y: 8, screenX: 304, screenY: 224, direction: 6, pattern: 0, sprite: { namespace: "Graphics", key: "Characters/m14_player", contentVersion: "v-image" } });
+  assert.deepEqual(states.at(-1).roots[0].children[0].data, { x: 11, y: 8, screenX: 304, screenY: 224, direction: 6, pattern: 0, sprite: { namespace: "resource.Graphics", key: "Characters/m14_player", contentVersion: "v-image" } });
   assert.equal(states.at(-1).roots[0].data.cameraX, 48);
   await handler({ action: "down", code: "ArrowRight", repeat: false });
   assert.equal(states.at(-1).roots[0].children[0].data.x, 11);
@@ -57,4 +57,57 @@ test("consumer records fail closed instead of accepting alternate shapes", () =>
   const { map, tileset } = fixture();
   assert.throws(() => validateMapRecord({ ...map, events: [] }), /field set/);
   assert.throws(() => validateTilesetRecord({ ...tileset, id: 2 }, 1), /Content key/);
+  assert.throws(() => validateTable({ ...map.data, surprise: true }, "Map.data"), /field set/);
+});
+
+test("passability covers every direction bit and the all-direction block", () => {
+  const directionBits = [[2, 0x01], [4, 0x02], [6, 0x04], [8, 0x08]];
+  for (const [direction, bit] of directionBits) {
+    const raw = fixture();
+    raw.tileset.passages.values[384] = bit;
+    const map = validateMapRecord(raw.map);
+    const tileset = validateTilesetRecord(raw.tileset, 1);
+    assert.equal(mapTilePassable(map, tileset, 10, 8, direction), false, `direction ${direction}`);
+    const otherDirection = direction === 2 ? 4 : 2;
+    assert.equal(mapTilePassable(map, tileset, 10, 8, otherDirection), true, `non-matching direction ${otherDirection}`);
+  }
+  const raw = fixture();
+  raw.tileset.passages.values[384] = 0x0f;
+  const map = validateMapRecord(raw.map);
+  const tileset = validateTilesetRecord(raw.tileset, 1);
+  for (const [direction] of directionBits) assert.equal(mapTilePassable(map, tileset, 10, 8, direction), false);
+});
+
+test("passability respects z=2,1,0 priority layering and bounds", () => {
+  const raw = fixture();
+  const index = 10 + 8 * 24;
+  raw.map.data.values[index + 2 * 24 * 18] = 385;
+  raw.tileset.passages.values[385] = 0;
+  raw.tileset.priorities.values[385] = 1;
+  raw.tileset.passages.values[384] = 0x04;
+  let map = validateMapRecord(raw.map);
+  let tileset = validateTilesetRecord(raw.tileset, 1);
+  assert.equal(mapTilePassable(map, tileset, 10, 8, 6), false, "priority > 0 continues to a blocked lower layer");
+
+  raw.tileset.priorities.values[385] = 0;
+  map = validateMapRecord(raw.map);
+  tileset = validateTilesetRecord(raw.tileset, 1);
+  assert.equal(mapTilePassable(map, tileset, 10, 8, 6), true, "priority == 0 decides pass before the lower layer");
+  assert.equal(mapTilePassable(map, tileset, -1, 8, 6), false);
+  assert.equal(mapTilePassable(map, tileset, 24, 8, 6), false);
+});
+
+test("movement checks both source direction and target reverse direction", () => {
+  const sourceBlocked = fixture();
+  sourceBlocked.tileset.passages.values[384] = 0x04;
+  assert.equal(canMove(validateMapRecord(sourceBlocked.map), validateTilesetRecord(sourceBlocked.tileset, 1), 10, 8, 6, 1, 0), false);
+
+  const targetBlocked = fixture();
+  targetBlocked.map.data.values[11 + 8 * 24] = 385;
+  targetBlocked.tileset.passages.values[385] = 0x02;
+  assert.equal(canMove(validateMapRecord(targetBlocked.map), validateTilesetRecord(targetBlocked.tileset, 1), 10, 8, 6, 1, 0), false);
+
+  const passable = fixture();
+  assert.equal(canMove(validateMapRecord(passable.map), validateTilesetRecord(passable.tileset, 1), 10, 8, 6, 1, 0), true);
+  assert.equal(canMove(validateMapRecord(passable.map), validateTilesetRecord(passable.tileset, 1), 23, 8, 6, 1, 0), false);
 });

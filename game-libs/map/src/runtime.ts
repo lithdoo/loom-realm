@@ -30,13 +30,13 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
     let domain;
     try {
       const input = initialInput(frame.params);
-      const map = validateMapRecord((await scope.content.record("Map", String(input.mapId), { signal: frame.signal })).value);
-      const tileset = validateTilesetRecord((await scope.content.record("Tileset", String(map.tileset_id), { signal: frame.signal })).value, map.tileset_id);
+      const map = validateMapRecord((await scope.content.record("struct.Map", String(input.mapId), { signal: frame.signal })).value);
+      const tileset = validateTilesetRecord((await scope.content.record("struct.Tileset", String(map.tileset_id), { signal: frame.signal })).value, map.tileset_id);
       if (input.x >= map.width || input.y >= map.height) throw new TypeError("Map spawn lies outside the loaded Map");
-      const tilesetResource = await scope.content.resource("Graphics", `Tilesets/${tileset.tileset_name}`, { signal: frame.signal });
-      const playerResource = await scope.content.resource("Graphics", `Characters/${input.characterName}`, { signal: frame.signal });
-      const tilesetRef = ref("Graphics", `Tilesets/${tileset.tileset_name}`, tilesetResource.contentVersion);
-      const playerRef = ref("Graphics", `Characters/${input.characterName}`, playerResource.contentVersion);
+      const tilesetResource = await scope.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`, { signal: frame.signal });
+      const playerResource = await scope.content.resource("resource.Graphics", `Characters/${input.characterName}`, { signal: frame.signal });
+      const tilesetRef = ref("resource.Graphics", `Tilesets/${tileset.tileset_name}`, tilesetResource.contentVersion);
+      const playerRef = ref("resource.Graphics", `Characters/${input.characterName}`, playerResource.contentVersion);
       let x = input.x;
       let y = input.y;
       let direction: Direction = 2;
