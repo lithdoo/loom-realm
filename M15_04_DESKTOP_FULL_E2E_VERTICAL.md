@@ -3,9 +3,9 @@
 > 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 落地顺序：04  
-> 最近复核：2026-09-10  
+> 最近复核：2026-09-11  
 > 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)  
-> 依赖：[M14 / 04](M14_04_REAL_GAME_VERTICAL.md)  
+> 依赖：[M14 / 04](M14_04_REAL_GAME_VERTICAL.md)、[ADR 0033](doc/decisions/0033-electron-hostra-run-as-node.md)  
 > 目标：用真实 Hostra/Desktop product composition 跑通 M14 concrete game；只证明 physical integration，不复制 M6/M10–M14 owner-local qualification。
 
 > **M15 vertical 的测试主体是 Desktop product composition，不是新的 test-owned host。**
@@ -16,15 +16,16 @@
 
 ```text
 checked-in examples/essentials-v21.1 Hostra installation
-→ Hostra PREPARE
+→ Hostra PREPARE in Electron main
 → Main
-→ real Node Runner child
-→ existing Hostra Runtime Control
+→ process.execPath + ELECTRON_RUN_AS_NODE real Hostra Runner child
+→ existing Hostra Runtime Control WebSocket
 → Desktop Data Broker
 → Desktop Content
+→ exact same-origin 127.0.0.1 Desktop shell + Content listener
 → secure Electron BrowserWindow
 → one-shot private Renderer bootstrap
-→ Main-World trusted Renderer
+→ Main-World trusted Renderer with captured native primitives
 → native BrowserWindow RendererDataBinding + DOM RendererInputSource
 → existing M13 presentation
 → @loomrealm-game/map runtime + business WC
@@ -54,15 +55,30 @@ M15不重新断言全部 map schema、Canvas source rectangles、Custom Element 
 同一 product suite必须证明真实 Window使用冻结 physical boundary：
 
 ```text
-nodeIntegration=false
-contextIsolation=true
-sandbox=true
-webSecurity=true
+Hostra Runner:
+    Electron main keeps process.execPath
+    → host-synthesized ELECTRON_RUN_AS_NODE=1
+    → supported Electron runAsNode fuse enabled
+    → real existing Hostra Runner reaches Runtime Control ready
+
+BrowserWindow:
+    nodeIntegration=false
+    contextIsolation=true
+    sandbox=true
+    webSecurity=true
+
+HTTP origin:
+    BrowserWindow shell = http://127.0.0.1:<port>/app-private-route
+    Content API        = http://127.0.0.1:<same-port>/_lr/v1/...
+    → no file://
+    → no CORS/OPTIONS extension
+    → no preload Content proxy
 
 bootstrap:
     app-owned shell did-finish-load
     → one-shot private handoff
     → trusted Main-World Renderer consumes it
+    → captures authority-bearing browser primitives
     → business JS/CSS loads later
 
 Renderer Control:
@@ -71,11 +87,13 @@ Renderer Control:
 Data:
     Broker candidate lifecycle
     → dedicated endpoint settlement port
-    → native browser WebSocket
+    → captured native browser WebSocket
     → existing RendererDataBinding/Data peer
 ```
 
 必须可观察地证明 business page没有 generic Electron/contextBridge API，Data application messages不通过 Electron handoff port，product source不引用 Renderer internal filesystem path。
+
+After trusted bootstrap, qualification MUST replace the page-visible `fetch`/`WebSocket` globals and still prove normal Resource/Data operation；the replacements must not observe Content bearer、private Data endpoint or transferred Control/Data ports。This closes the same-Main-World credential/capability hiding invariant without creating another Realm or bridge framework。
 
 ## 4. Input Evidence
 
@@ -97,7 +115,7 @@ Pointer
 
 Gamepad
 → captured navigator.getGamepads() standard mapping
-→ rAF current-state polling
+→ captured rAF current-state polling
 → fresh gamepadId on reconnect/index reuse
 → 500000 threshold crossing State-before-Event
 ```
@@ -110,6 +128,7 @@ focus/visibility loss/return必须证明 unavailable → fresh baseline → avai
 
 ```text
 startup
+real Electron-hosted Hostra Runner ready
 physical keyboard input
 BrowserWindow reload/replacement
 same-generation Data disconnect/reconnect
@@ -117,7 +136,7 @@ normal app shutdown through runMain AbortSignal
 real Runner child termination before Electron exit
 ```
 
-Reload后应恢复 current projection，而不是通过重启 game获得初始状态；fresh Window必须取得 fresh bootstrap/Control/Data/Content physical material。
+Reload后应恢复 current projection，而不是通过重启 game获得初始状态；fresh Window必须取得 fresh bootstrap/Control/Data/Content physical material和 fresh trusted primitive closure。
 
 ## 6. Failure Evidence
 
@@ -129,6 +148,8 @@ one Data carrier loss/reconnect
 one Renderer close/replacement
 one input-source bootstrap/unavailable containment case
 ```
+
+A Desktop build whose Electron binary cannot honor the required run-as-node Runner start fails M15 product qualification；it does not trigger an alternate Runner implementation。
 
 Unexpected Runner terminal的 Runtime/Main semantics已由 Hostra owner-local qualification拥有；M15不为了“full E2E”重复建立第二份 failure conformance。M15只证明 normal product shutdown最终让真实 Runner child收敛终止。
 
@@ -147,4 +168,16 @@ test/m15-*.test.mjs        repository boundary/full vertical evidence
 
 ## 8. Completion
 
-M15/04完成时，一条真实 Electron trace必须从 checked-in Hostra installation的 PREPARE一直走到 business-visible map result，并在同一 Main Session/product composition上完成 secure one-shot Window bootstrap、trusted physical input、reload、same-generation reconnect与 normal shutdown/Runner termination evidence。
+M15/04完成时，一条真实 Electron trace必须从 checked-in Hostra installation的 PREPARE一直走到 business-visible map result，并在同一 Main Session/product composition上完成：
+
+```text
+Electron process.execPath → real Hostra Node-mode child
+same-origin secure BrowserWindow shell + existing Content API
+one-shot trusted bootstrap + private primitive capture
+trusted physical input
+reload
+same-generation reconnect
+normal shutdown / real Runner termination
+```
+
+No alternate Hostra Runtime、CORS Content variant、preload Content proxy or browser security bypass may be used to make the vertical pass。
