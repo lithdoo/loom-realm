@@ -3,10 +3,10 @@
 > 状态：**Implemented / Qualified**
 > 阶段：M10 User Input  
 > 落地顺序：03  
-> 最近复核：2026-09-07  
+> 最近复核：2026-09-10  
 > 前置：[M10 / 01](M10_01_SUBSYSTEM_INPUT_MANAGER.md) → [M10 / 02](M10_02_RENDERER_INPUT_GATE.md)  
 > 正式协议：[User Input v1](doc/15-contracts/user-input-v1.md)  
-> 目标：冻结 Renderer holder 的唯一 canonical input source seam；M10 使用 deterministic realization，真实 BrowserWindow/DOM mapping 留到 M14。编码阶段不得再选择另一套 producer lifecycle/API。
+> 目标：冻结 Renderer holder 的唯一 canonical input source seam；M10 使用 deterministic realization，M14 first-real-game qualification复用 existing/synthetic source，真实 Desktop BrowserWindow/DOM mapping 留到 M15，PWA Window realization留到 M17。编码阶段不得再选择另一套 producer lifecycle/API。
 
 > **Source 只描述 canonical device facts。它不知道 Frame、Activation、Interest、Data authority、Subsystem 或 wire ordering。**
 
@@ -307,15 +307,21 @@ M10
     deterministic RendererInputSource
     proves role semantics
 
-M14 Desktop
-    DOM Keyboard/Pointer/Gamepad mapping
+M14 first-real-game qualification
+    existing/synthetic RendererInputSource
+    proves real game consumer semantics through the exact same source/gate path
+    does NOT claim BrowserWindow DOM production
+
+M15 Desktop full E2E
+    real BrowserWindow DOM Keyboard/Pointer/Gamepad mapping
     physical facts → exact same RendererInputSource seam
 
-M16 PWA
+M17 PWA full E2E
+    real Window input producer
     same logical source/gate semantics
 ```
 
-M14 real source必须能在每次 successful `start()` 提供 fresh canonical current State samples；不能把 DOM Event object交给 Core。
+M15/M17 physical source必须在每次 successful `start()` 提供 fresh canonical current State samples；不能把 DOM Event object交给 Core。M14 只需要通过 existing/synthetic source产生同形 canonical facts，不新增第二套 input path。
 
 ---
 
@@ -339,7 +345,7 @@ one narrow discriminated change union
 one active subscription token/currentness check
 one local start bootstrap staging record
 small deterministic implementation
-small browser realization later in M14
+small physical browser realizations later in M15/M17
 ```
 
 禁止：
