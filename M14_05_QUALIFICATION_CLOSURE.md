@@ -219,15 +219,7 @@ Required light DOM：
 
 Same view/sprite HTMLElement identities survive both movement attempts。
 
-Qualification checks private capabilities only：
-
-```text
-private tile Canvas exists
-managed player can overlay through a slot/path owned by lr-map-view
-clipping/stacking is correct
-```
-
-It MUST NOT require private Shadow wrapper element names、class names or unnecessary nesting。
+Qualification proves behaviorally that map-owned private presentation supplies tile drawing、clipping and correct player overlay/slot behavior。Pixel/screenshot evidence is sufficient。Tests MUST NOT require an open Shadow root、specific private wrapper elements、class names or unnecessary nesting。
 
 No per-tile Custom Elements。
 
