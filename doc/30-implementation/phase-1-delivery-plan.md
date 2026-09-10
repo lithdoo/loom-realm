@@ -2,10 +2,12 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M14 **Implemented / Qualified / Closed**
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-10
+
+实施状态与正式 closure 必须分开记录。M14 的当前 qualification subject / live evidence 只以 [`m14-qualification.md`](./m14-qualification.md) 为准；本计划只汇总 milestone 状态，不复制 run-level evidence。
 
 ## Delivery order
 
@@ -34,6 +36,7 @@ Rules：
 ```text
 Package Scope != Implementable Slice != Milestone Closure
 Framework Package != Game Library != Concrete Game
+Implementation complete != Qualification closed
 ```
 
 Do not prebuild fake v2、deprecated aliases or generic frameworks for hypothetical later consumers。
@@ -168,9 +171,9 @@ M14 consumes this surface；it does not introduce a second presentation store、
 
 ---
 
-## M14 — Map Game Library + First Real Game ✅ Implemented / Qualified / Closed
+## M14 — Map Game Library + First Real Game ⚠️ Implemented / requalification pending
 
-M14 proves that M10–M13 can support a real independent business consumer without new core machinery：
+M14 implementation proves that M10–M13 can support a real independent business consumer without new core machinery：
 
 ```text
 examples/essentials-v21.1
@@ -184,6 +187,8 @@ M10 Input + M11 Render + M12 Content + M13 Presentation
     ↓
 observable playable RMXP-compatible map slice
 ```
+
+The architecture/consumer contract and hardened implementation are frozen. Formal M14 closure remains pending until the current qualification subject has exact-local + hosted Node 20 + hosted Node 24 evidence recorded together in `m14-qualification.md`.
 
 Normative landing order：
 
@@ -246,6 +251,8 @@ RMXP/Essentials source semantics
 → ContentClient
 → map Runtime
 ```
+
+At the public M12 seam these records/resources are read through the frozen production namespaces `struct.Map`、`struct.Tileset` and `resource.Graphics`；qualification does not install a namespace-stripping adapter。
 
 Unused MapInfo/Event/MapMetadata/Color/Tone/AudioFile facts remain outside M14 consumer records until a real behavior consumes them。
 
@@ -314,26 +321,36 @@ M14 uses existing/synthetic RendererInputSource and test-owned physical composit
 
 ### M14/05 — closure
 
-Canonical CI target：
+Canonical hosted gate：
 
 ```text
 npm run test:m14
 ```
 
-M14 `Closed` additionally requires same-revision local compatibility evidence：
+Exact-local gate：
 
 ```text
-npm run test:m14:essentials-local -- \
-  --source <path> \
-  --map-id <id> \
-  --x <x> \
-  --y <y> \
-  --character-name <name>
+npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root>
 ```
 
-Closure record captures commit SHA、Node 20/24 result、source fingerprint/selected local slice、projection result and semantic/browser evidence。
+Formal closure is keyed to one **qualification subject** rather than the commit that happens to write the evidence record：
 
-M14 Closed proves one real RMXP/Essentials-compatible consumer slice only。It does not claim autotile/event-interpreter completeness、responsive viewport or Desktop/PWA physical E2E。
+```text
+one behavior-affecting subject SHA
++
+exact-local PASS
++
+hosted Node 20 PASS
++
+hosted Node 24 PASS
+→ M14 Closed
+```
+
+A later docs-only commit that only records run IDs/results does not invalidate the subject. Any later Runtime/importer/browser/fixture/harness/workflow behavior change creates a new subject and requires requalification.
+
+Current subject and live PASS/PENDING state are recorded only in `m14-qualification.md`.
+
+M14 closure proves one real RMXP/Essentials-compatible consumer slice only。It does not claim autotile/event-interpreter completeness、responsive viewport or Desktop/PWA physical E2E。
 
 ---
 
@@ -354,7 +371,7 @@ PREPARE
 → reload / reconnect / shutdown
 ```
 
-M15 must not redesign M10–M14 logical/business semantics because the physical host becomes real。
+M15 should consume the frozen M14 logical/business boundary rather than redesign it because the physical host becomes real. Formal M14 requalification is still completed independently through the M14 evidence ledger.
 
 ---
 
@@ -402,16 +419,22 @@ M10 User Input                             ✅ Closed
 M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game     ✅ Closed 2026-09-10
+M14 Map Game Library + First Real Game     ⚠️ Implementation complete / requalification pending
 M15 Desktop Full E2E                       pending
 M16 PWA Runtime                            pending
 M17 PWA Full E2E / Equivalence             pending
 ```
 
-Current canonical executable closure remains：
+Last formally closed milestone gate：
+
+```text
+npm run test:m13
+```
+
+Current M14 hosted requalification gate：
 
 ```text
 npm run test:m14
 ```
 
-Next work is M15 Desktop physical composition against the closed M10–M14 boundaries。Do not reopen core seams for prettier domain ids、responsive-layout speculation、ESM-loader preference or hypothetical generic map abstractions。
+Immediate closure work is limited to obtaining/recording the current qualification subject's hosted Node 20/24 evidence. No M10–M13 or M14 architecture reopen is justified unless that evidence exposes a concrete behavioral failure. M15 may continue to consume the frozen M14 boundaries, but documentation must not call M14 formally `Closed` before the ledger is complete。
