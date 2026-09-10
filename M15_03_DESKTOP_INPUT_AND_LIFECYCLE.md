@@ -56,28 +56,34 @@ old Renderer retires
 carrier lost
 → affected projection freezes/unavailable as already defined
 → Main DataAuthority remains current
-→ fresh physical carrier reconnects
+→ existing Broker prepares fresh physical pair
+→ fresh RendererDataBinding.acquire resolves current carrier
 → current state resumes
 ```
 
 健康 subsystem 不因另一 subsystem carrier loss 被停止。
 
-不得增加 retry/backoff framework；qualification 只需驱动一次确定性的 disconnect/reconnect。
+不得增加 retry/backoff framework；qualification 只需驱动一次确定性的 disconnect/reconnect，并证明既有 Broker/Renderer acquisition mechanics 自动收敛。
 
 ## 4. Shutdown
 
-Product shutdown 使用现有 owner 的 close/abort/termination mechanics，按依赖反向收敛：
+Desktop 只拥有 product-level cancellation 和 physical resource lifetime；Main/RuntimeHosting 继续拥有 Session/Runner convergence。
+
+Canonical shutdown：
 
 ```text
-stop accepting Renderer activity
-→ retire Window/Renderer bindings
-→ close Data/Content physical services
-→ close Main Session / Runtime hosting
-→ terminate Runner child
+stop accepting new Window/Renderer activity
+→ retire/close current BrowserWindow
+→ abort the AbortSignal passed to runMain(...)
+→ await runMain(...) settlement
+→ existing Main/RuntimeHosting converges Runtime + Runner termination
+→ close Desktop Data Broker / Content service and remaining physical bindings
 → Electron exit
 ```
 
-最终不得残留 child process、listener、WebSocket/HTTP listener 或可继续使用的 Content/Data credential。
+Desktop 不直接实现第二条 Runner shutdown/kill authority。必要的 process termination、grace/timeout 与 fatal convergence继续由 existing Main + Hostra RuntimeHosting semantics拥有。
+
+Main settlement 前不得通过过早销毁 Broker/Content physical owner 破坏已有 Session terminal convergence；最终必须无 child process、DOM/input listener、WebSocket/HTTP listener或可继续使用的 Content/Data credential。
 
 ## 5. Failure Containment
 
@@ -87,11 +93,11 @@ stop accepting Renderer activity
 presentation/bootstrap failure → Window-local; no Store/Main rollback
 Data carrier failure           → no DataAuthority removal
 Renderer failure               → no implicit Runtime/Frame failure
-Runner terminal                → existing RuntimeHosting/Main semantics
+Runner terminal                → existing RuntimeHosting/Main semantics; M15 does not redefine it
 ```
 
 Desktop 不创建 RecoveryManager、ConnectionManager、WindowLifecycleManager 或额外 recovery state machine。
 
 ## 6. Completion
 
-M15/03 完成时，真实 BrowserWindow input 能驱动现有 M10 path；reload、same-generation reconnect 与 shutdown 都只通过已有 authority/lifecycle seams 收敛。
+M15/03 完成时，真实 BrowserWindow input 能驱动现有 M10 path；reload、same-generation reconnect 与 shutdown 都只通过已有 authority/lifecycle seams 收敛，并且 normal product shutdown 由一个 `runMain` cancellation path最终终止真实 Runner child。
