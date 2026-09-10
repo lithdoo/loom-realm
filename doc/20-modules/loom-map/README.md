@@ -23,7 +23,7 @@ RMXP/Essentials source semantics
 
 Framework owns transport/authority contracts. Map library owns map business semantics and concrete map presentation vocabulary.
 
-## Physical identity
+## Physical/package identity
 
 ```text
 game-libs/map
@@ -37,13 +37,22 @@ packages/map
 @loomrealm/map
 ```
 
-M14 concrete first slice uses one logical Subsystem key：
+M14 concrete first slice uses one logical Subsystem key `map`. M14 harness binds it to the map Definition; M15 proves the same logical Subsystem inside a real Hostra Node Runner child.
+
+Package consumer seams：
 
 ```text
-map
+@loomrealm-game/map
+    → Runtime root/default SubsystemDefinitionFactory
+
+@loomrealm-game/map/browser/map.browser.js
+    → classic browser artifact
+
+@loomrealm-game/map/browser/map.css
+    → map component CSS artifact
 ```
 
-M14 harness binds this key to the map Definition for qualification. M15 proves the same logical Subsystem inside a real Hostra Node Runner child.
+Prepared Content tooling resolves these package subpaths and does not reach through private `dist/`/source paths.
 
 ## Runtime / browser split
 
@@ -72,35 +81,33 @@ Map/{id}
 Tileset/{id}
 ```
 
-`MapInfo/{id}` is optional supporting evidence; `MapMetadata` is deferred until a real first-slice behavior needs it.
+`MapInfo/{id}` is optional supporting evidence; `MapMetadata` is deferred until a real behavior needs it.
 
-Consumer records retain RMXP-compatible field meaning but are ordinary JsonValue values. Exact source extraction and projection rules live in：
-
-```text
-tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
-```
+Exact source extraction/projection rules live in `tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`.
 
 Important invariants：
 
 ```text
 known @ivar → strip one leading @
-Table index(x,y,z) = x + y*xSize + z*xSize*ySize
+Table index=x+y*xSize+z*xSize*ySize
 Map.events stays embedded
 MapNNN.rxdata → Map/{N}
 Tilesets.rxdata[i] → Tileset/{i}, id must equal i
 ```
 
+Projected Table is an object, not a nested JS array. Runtime uses a small equivalent `tableAt(table,x,y=0,z=0)` lookup for Map.data/passages/priorities and validates first-slice Table dimensions before use.
+
 Runtime never consumes Ruby/Marshal/RMXP decoder wrappers.
 
 ## First-slice gameplay
 
-Initial business input：
+Initial input：
 
 ```text
 { mapId, x, y, characterName }
 ```
 
-The initial map Frame is long-lived：
+Initial map Frame is long-lived：
 
 ```text
 activate
@@ -121,9 +128,7 @@ ArrowRight → d=6
 ArrowUp    → d=8
 ```
 
-Only non-repeat key-down causes one tile movement attempt in M14. Blocked movement still sets facing but keeps x/y unchanged.
-
-Real Desktop DOM input production belongs to M15; M14 uses an existing/synthetic `RendererInputSource` to prove the frozen M10 path.
+Only non-repeat key-down causes one tile movement attempt. Blocked movement sets facing but keeps x/y. Real Desktop DOM input belongs to M15; M14 uses existing/synthetic RendererInputSource.
 
 ## RMXP passability subset
 
@@ -136,44 +141,45 @@ right 0x04
 up    0x08
 ```
 
-Map coordinate evaluation scans layers `2 → 1 → 0`, uses `passages` + `priorities`, and movement requires both source-direction passability and target reverse-direction passability.
+Map coordinate evaluation scans `z=2 → 1 → 0`, looks up tile/passages/priorities through projected Table semantics, and movement requires source-direction + target reverse-direction passability.
 
 M14 excludes event collision, through/debug behavior, terrain effects and map transitions.
 
 ## Fixed viewport / camera
 
-First slice freezes：
+First slice：
 
 ```text
 tile size        32
-CSS viewport     640 × 480
-nominal grid     20 × 15
+CSS viewport     640×480
+nominal full grid 20×15
 ```
 
-Example CSS fixes the physical host. There is no DOM→Runtime layout feedback or responsive protocol.
+Example CSS fixes host size. There is no DOM→Runtime layout feedback.
 
-Runtime camera is logical pixels：
+Runtime camera：
 
 ```text
-cameraX = clamp(playerX*32 - 304, 0, max(mapWidth*32  - 640, 0))
-cameraY = clamp(playerY*32 - 224, 0, max(mapHeight*32 - 480, 0))
+cameraX=clamp(playerX*32-304,0,max(mapWidth*32-640,0))
+cameraY=clamp(playerY*32-224,0,max(mapHeight*32-480,0))
 ```
+
+Visible bounds include every tile cell intersecting the pixel viewport. A non-tile-aligned camera may therefore intersect one extra edge column/row; `20×15` is not a fixed `tiles.length`. Canonical initial `cameraX=16` intersects 21 columns.
 
 ## Render ownership
 
-M14 owns exactly one business RenderDomain, but the SDK assigns its wire id. Domain identity is opaque：
+M14 owns exactly one business RenderDomain, but SDK assigns its opaque wire id：
 
 ```text
 no author-chosen "map.main"
-no requirement on d1/d2 spelling
+no d1/d2 spelling requirement
 no reopen of createRenderDomain(initialState)
 ```
 
-Exact first-slice tree：
+Exact tree：
 
 ```text
 zIndex=0
-
 key="viewport" tag="lr-map-view"
 └── key="player" tag="lr-map-sprite"
 ```
@@ -188,20 +194,20 @@ Managed DOM：
 </body>
 ```
 
-Movement reuses the same live HTMLElements.
+Movement reuses same live HTMLElements.
 
 ## Render data agreement
-
-Package-private exact data is frozen by M14/02.
 
 View data：
 
 ```text
 mapId / mapWidth / mapHeight
 cameraX / cameraY
-tileset { namespace,key,contentVersion }
-tiles[] { x,y,z,tileId }
+tileset {namespace,key,contentVersion}
+tiles[] {x,y,z,tileId}
 ```
+
+`tiles[]` contains only non-zero supported visible regular tiles and is ordered `z ascending → y ascending → x ascending`. Browser draws that order and does not reconstruct RMXP layer semantics.
 
 Sprite data：
 
@@ -210,7 +216,7 @@ x / y
 screenX / screenY
 direction
 pattern=0
-sprite { namespace,key,contentVersion }
+sprite {namespace,key,contentVersion}
 ```
 
 No path/URL/token/bytes/source wrapper enters Render state.
@@ -227,22 +233,22 @@ viewport
 
 `lr-map-sprite` owns player character-sheet crop/placement.
 
-M14 regular-tile subset：
+Regular-tile subset：
 
 ```text
-0        → transparent
->= 384   → regular 32×32 tileset tile
-48..383  → autotile, not required by first CI slice
+0       → transparent/omitted
+>=384   → regular 32×32 tileset tile
+48..383 → autotile not required by canonical CI
 ```
 
-Regular tile source rect：
+Source rect：
 
 ```text
 sx=((tileId-384)%8)*32
 sy=floor((tileId-384)/8)*32
 ```
 
-Do not create per-tile Web Components, SceneGraph, LayerManager or component registry.
+No per-tile WC, SceneGraph, LayerManager or component registry.
 
 ## CSS / browser artifact
 
@@ -256,7 +262,7 @@ examples/essentials-v21.1
 → page/window CSS + fixed 640×480 host
 ```
 
-M13 loads classic scripts, so the first browser artifact is standalone classic JS：
+M13 loads classic scripts. Package-internal output remains：
 
 ```text
 dist/browser/map.browser.js
@@ -266,20 +272,20 @@ dist/browser/map.browser.js
 dist/browser/map.css
 ```
 
-Runtime ESM build remains separate. Do not reopen M13 into an ESM loader for M14.
+External consumers resolve these through the package subpaths above. Runtime ESM build remains separate; M14 does not reopen M13 into an ESM loader.
 
 ## Resource flow
 
 ```text
 Runtime ContentClient.resource()
 → contentVersion
-→ Render { namespace,key,contentVersion }
+→ Render {namespace,key,contentVersion}
 → PresentationResourceClient
 → browser bytes
 → actual Canvas/sprite pixels
 ```
 
-Runtime/Renderer may read the same resource independently. M14 adds no metadata/HEAD API or AssetManager.
+Async resource/decode completion paints only when its ref/version is still current. Runtime/Renderer may read the same resource independently. No metadata/HEAD API or AssetManager.
 
 ## Abstraction budget
 
@@ -287,7 +293,7 @@ Allowed concrete implementation：
 
 ```text
 small Map/Tileset validators
-Table lookup helper
+tableAt helper
 passability function
 camera/visible-tile projection
 map Definition
@@ -295,7 +301,7 @@ lr-map-view / lr-map-sprite
 standalone browser artifact
 ```
 
-Not justified by M14：
+Not justified：
 
 ```text
 MapRepository / MapBundle
