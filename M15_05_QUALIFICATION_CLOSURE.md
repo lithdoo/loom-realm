@@ -36,7 +36,7 @@ secure BrowserWindow preferences
 one-shot isolated-preload → Main-World Renderer bootstrap
 real BrowserWindow Renderer candidate/currentness
 real Node Runner child
-existing Runtime Control over dedicated MessagePort carrier
+existing Hostra Runtime Control over its existing WebSocket carrier
 existing Desktop Data Broker authority/pairing
 BrowserWindow-native Renderer Data acquisition over native WebSocket
 existing Desktop Content service + private Renderer resource access
@@ -50,7 +50,7 @@ Runner child termination
 failure containment
 ```
 
-M6/M10–M14 已关闭的 protocol/business semantics继续由原 qualification拥有；M15不复制第二套 conformance suite。
+M6、M10–M13 已正式关闭的 protocol/business semantics继续由原 qualification拥有；M14 frozen implementation/business semantics继续由 M14 landing docs/qualification subject拥有，formal status仍以 `m14-qualification.md` 为准。M15不复制第二套 conformance suite。
 
 ## 3. Frozen Physical Decisions
 
@@ -68,6 +68,14 @@ execution worlds:
     trusted Renderer + M13 Projector = page Main World
     business JS = page Main World, loaded only after trusted bootstrap consumption
 
+bootstrap timing:
+    app-owned shell did-finish-load
+    → exactly one private handoff attempt for that document
+    → stale document/ports retire instead of retrying old material
+
+Runtime Control:
+    existing Hostra Node Runner WebSocket carrier remains unchanged
+
 Renderer Control:
     Electron MessageChannelMain / MessagePortMain
     → native DOM MessagePort
@@ -79,8 +87,8 @@ Renderer Data:
     → native browser WebSocket carries Data application messages
 
 physical input:
-    KeyboardEvent.code → frozen KeyboardCodeV1
-    PointerEvent → BrowserWindow viewport fixed-point mapping + one-shot local ids
+    trusted KeyboardEvent.code → frozen KeyboardCodeV1
+    trusted PointerEvent → BrowserWindow viewport mapping + buttons-set transitions + one-shot local ids
     navigator.getGamepads() mapping="standard" → rAF sampling + frozen threshold events
 ```
 
@@ -124,7 +132,7 @@ startup:
     checked-in Hostra installation
     → PREPARE → child → Main
     → secure BrowserWindow
-    → one-shot private bootstrap
+    → did-finish-load → one-shot private bootstrap
     → visible M14 map
 
 security/world boundary:
@@ -134,8 +142,9 @@ security/world boundary:
     → business bootstrap begins after private Renderer bootstrap consumption
 
 input:
-    real DOM ArrowRight → existing M10 → passable then blocked M14 outcome
-    + focused Pointer/Gamepad production-source qualification
+    trusted real DOM ArrowRight → existing M10 → passable then blocked M14 outcome
+    + synthetic Keyboard/Pointer dispatch ignored
+    + focused Pointer chorded-button / Gamepad production-source qualification
     + focus/visibility unavailable → fresh baseline → available
 
 reload:
@@ -155,7 +164,7 @@ shutdown:
     → no live DOM listeners/rAF/ports/sockets/servers/Runner child
 
 failure containment:
-    input/presentation/Window-local failure does not mutate Main/Subsystem authority
+    synthetic/input/presentation/Window-local failure does not mutate Main/Subsystem authority
 ```
 
 Unexpected Runner failure semantics remain owned by existing Hostra/Main qualification；M15只证明真实 product shutdown能够通过现有 owner chain终止 child。
@@ -198,9 +207,12 @@ business WC importing Desktop/Renderer private authority
 presentation config entering Hostra/Main bootstrap
 BrowserWindow receiving Node-only DesktopRendererDataBinding
 business page seeing generic ipcRenderer/contextBridge Electron API
+bootstrap material sent before trusted shell did-finish-load
 trusted Projector placed in an isolated world that cannot use the same business Custom Element ABI
 Data application messages routed through Electron settlement IPC
+Runtime Control incorrectly replaced by Desktop Renderer MessagePort
 BrowserWindow presenting rendererControlToken as Data authorization
+synthetic Keyboard/Pointer DOM events entering RendererInputSource
 Desktop direct Store/Main mutation
 Desktop directly owning a second Runner termination policy
 new generic host/manager/registry/recovery abstraction introduced only for E2E
@@ -214,9 +226,10 @@ Implementation可以自由选择 private function/class/file names、bounded que
 authority owner
 process/window topology
 execution-world placement
+Runtime Control / Renderer Control physical distinction
 Control/Data/Content capability separation
 Data candidate/currentness semantics
-DOM input canonical mapping
+DOM input canonical mapping and physical provenance
 reload/reconnect/shutdown owner chain
 qualification ownership
 ```
