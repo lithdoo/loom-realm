@@ -4,7 +4,7 @@
 
 ## Objective
 
-证明一个 concrete game 能完整消费已经冻结的 LoomRealm seams，而不是重新设计 M10–M13：
+证明 concrete game 能完整消费 M10–M13 已冻结 seams，而不重新定义 map semantics：
 
 ```text
 examples/essentials-v21.1/game.json
@@ -17,290 +17,156 @@ examples/essentials-v21.1/game.json
 → real Chromium playable first slice
 ```
 
-M14/04 必须证明真实 map semantics，不允许“Content API读了一遍 + Renderer画了另一个假地图”。
+本文只定义 vertical 需要观察到的证据。Map business/runtime/presentation semantics 由 M14/02 唯一定义；concrete fixture/config/resource facts 由 M14/03 唯一定义。Qualification 不得在本文件旁路重造另一套规则。
 
 ## 1. Canonical end-to-end trace
 
-Canonical CI vertical MUST cover：
+Canonical CI MUST run the real chain：
 
 ```text
 checked-in game.json
-→ parse/validate existing GameEntryV1
-→ initial target subsystemKey="map"
-→ input { mapId:1, x:10, y:8, characterName:"m14_player" }
-→ map initializes direction=2/down and pattern=0
-→ test-owned logical-key → Definition binding
+→ existing GameEntryV1 parse/validation
+→ initial subsystemKey="map"
+→ test-owned logical key → @loomrealm-game/map Definition binding
 → existing Main initial Frame
-→ @loomrealm-game/map
-→ ContentClient.record("Map", "1")
-→ ContentClient.record("Tileset", "1")
-→ validate exact Map/Tileset/Table shapes
-→ tableAt(Map.data,...), tableAt(passages,...), tableAt(priorities,...)
-→ ContentClient.resource("Graphics", "Tilesets/m14_tileset")
-→ ContentClient.resource("Graphics", "Characters/m14_player")
-→ capture contentVersion
-→ create Frame-bound keyboard.event InputListener
-→ create exactly one business RenderDomain
-→ compute camera + canonical visible tiles[]
-→ publish viewport/player tree
-→ keep gameplay Frame pending
-→ read checked-in presentation.json
-→ existing M13 Config validation/preparation behavior
-→ resolve package browser artifacts into prepared Content
-→ classic map JS registers Custom Elements
-→ window.onload
-→ M13 Projector
-→ body > lr-map-view > lr-map-sprite
-→ PresentationResourceClient obtains real PNG bytes
-→ private Canvas draws canonical tiles[]
-→ player crop is visible
-→ two ArrowRight non-repeat attempts through M10
-→ first moves world/camera/map pixels; second blocked
-→ same DOM element identities retained
+→ map Runtime reads Map/1 + Tileset/1 through ContentClient
+→ validates selective consumer shapes from M14 consumer projection
+→ confirms tileset/player resources and captures contentVersion
+→ creates one Frame-bound keyboard.event InputListener
+→ creates one opaque SDK-owned RenderDomain
+→ publishes initial full Render state
+→ keeps gameplay Frame pending
+→ checked-in presentation.json enters existing M13 preparation/bootstrap behavior
+→ packaged classic map browser JS defines lr-map-view/lr-map-sprite
+→ M13 Projector creates managed DOM
+→ PresentationResourceClient supplies real fixture PNG bytes
+→ private Canvas paints current map and player becomes visible
+→ two non-repeat ArrowRight events traverse M10
+→ first move succeeds; second is blocked by persisted Tileset facts
+→ same managed HTMLElements survive both attempts
 ```
 
-RenderDomain wire id is SDK-assigned/opaque; no `map.main` expectation.
+No direct decoder object injection, direct DOM mutation, inline replacement Config, manual Custom Element registration or fake collision truth.
 
-## 2. Gameplay Frame evidence
+## 2. Gameplay / input evidence
 
-After initial render the map Frame MUST still be active/pending：
+After initial visible render：
 
 ```text
-Frame active
-→ listener Interest current
-→ initial Render visible
-→ first input delivered to same Frame
-→ second input delivered to same Frame
+Frame still active/pending
+InputListener Interest still current
 ```
 
-Returning `completed(...)` before movement fails M14. Test teardown may abort/close Frame/Runtime afterwards. RenderDomain lifetime stays independent per M11.
-
-## 3. Exact projected Table evidence
-
-Runtime consumes real projected Table objects：
+Then canonical M14/03 fixture produces：
 
 ```text
-Map.data
-    dimensions=3
-    xSize=24
-    ySize=18
-    zSize=3
-    values.length=1296
+start: (10,8), facing 2/down
 
-Tileset.passages/priorities
-    dimensions=1
-    ySize=1
-    zSize=1
-    xSize>=386
-    values.length=xSize
+ArrowRight down repeat=false
+→ (11,8), facing 6/right
+
+ArrowRight down repeat=false
+→ persisted tile/passages facts block target reverse-entry
+→ remains (11,8), facing 6/right
 ```
 
-All lookups use：
+The movement handler follows M14/02 synchronous ordering and finishes authoritative `RenderDomain.replace(...)` before returning。`keyup`、repeat、timer或 keyboard.state polling are not substitutes。
+
+## 3. Content / Table evidence
+
+Qualification proves Runtime consumed the selective consumer records, not importer wrappers：
 
 ```text
-tableAt(table,x,y,z)
-index=x+y*xSize+z*xSize*ySize
+Map/1 value keys exactly:
+    tileset_id,width,height,data
+
+Tileset/1 value keys exactly:
+    id,tileset_name,passages,priorities
 ```
 
-Qualification MUST prove a non-zero coordinate, including：
+`Map.data` satisfies M14/02 exact 3D shape with `zSize=3`；passages/priorities satisfy exact 1D shape。
+
+At least one non-zero coordinate proves the frozen Table index convention, including canonical：
 
 ```text
 tableAt(Map.data,12,8,0)==385
 ```
 
-No nested `[z][y][x]` fixture/runtime alternative.
+No MapInfo/Event projection is required for M14 first slice。
 
-## 4. Frozen CI content facts
+## 4. Render / camera evidence
 
-```text
-Map/1
-    width=24
-    height=18
-    tileset_id=1
-    z0 tile 384 throughout canonical tested area except (12,8)=385
-    z1/z2 tile 0
+Exact tree and node data are those frozen by M14/02。Qualification observes one map Domain only and never depends on its wire-id spelling。
 
-Tileset/1
-    id=1
-    tileset_name="m14_tileset"
-    tableAt(passages,384)=0x00
-    tableAt(priorities,384)=0
-    tableAt(passages,385)=0x02
-    tableAt(priorities,385)=0
-```
-
-No `isBlocked`, `walkable`, collision bitmap, hard-coded coordinate rule or fake nested tile representation.
-
-## 5. Exact input / movement observations
-
-Only `keyboard.event`：
+Canonical camera observations from M14/03 fixture：
 
 ```text
-first:  down ArrowRight repeat=false
-(10,8), facing 2
-→ facing 6
-→ source/target passable
-→ (11,8)
-
-second: down ArrowRight repeat=false
-(11,8), facing 6
-→ tableAt(Map.data,12,8,0)=385
-→ target reverse-entry left bit=0x02 blocked
-→ remains (11,8), facing 6
-```
-
-`keyup`, repeat events, timers and keyboard.state polling are not substitutes.
-
-After initialization the movement handler is synchronous：
-
-```text
-one accepted event
-→ facing
-→ passability
-→ x/y
-→ camera
-→ full RenderDomain.replace(...)
-→ handler returns
-```
-
-It MUST NOT await Content/resource/decode work or yield before the authoritative movement commit. M14 adds no queue/scheduler to serialize this path.
-
-## 6. Fixed viewport / canonical Chromium environment
-
-Example CSS computes `lr-map-view=640×480` CSS px. Runtime never reads DOM layout.
-
-Canonical CI browser context：
-
-```text
-viewport=800×600 CSS px
-deviceScaleFactor=1
-```
-
-Qualification-harness fact only; not a Runtime API.
-
-Camera：
-
-```text
-(10,8) → camera=(16,32)
-(11,8) → camera=(48,32)
-blocked second right → camera remains (48,32)
-```
-
-Player screen-cell origin：
-
-```text
-initial (10,8), camera (16,32) → (304,224)
-after move (11,8), camera (48,32) → (304,224)
-```
-
-The player remains centered for this interior movement. Qualification MUST NOT require `lr-map-sprite` screen placement to change. Visible movement is instead proved by world `x` changing, facing changing `2→6`, camera moving `16→48`, and map/Canvas content shifting 32 CSS px relative to the viewport. Canonical tile `(12,8)` moves from screen x `368` to `336`.
-
-Because camera may be non-tile-aligned, nominal `20×15` is not a fixed visible coordinate count.
-
-Initial intersecting bounds：
-
-```text
+start world=(10,8)
 camera=(16,32)
-x=0..20   # 21 intersecting columns
-y=1..15   # 15 rows
-```
+player screen=(304,224)
+visible x=0..20, y=1..15
 
-After first right move：
-
-```text
+first move world=(11,8)
 camera=(48,32)
-x=1..21   # 21 intersecting columns
-y=1..15
+player screen=(304,224)
+visible x=1..21, y=1..15
 ```
 
-The extra edge column is required because partial 32px cells intersect the 640px viewport.
-
-## 7. Canonical visible-tile projection evidence
-
-For each intersecting coordinate/layer Runtime calls `tableAt(Map.data,x,y,z)`.
-
-Projection rules：
+The centered player's screen position does not need to change。Visible movement is proved by：
 
 ```text
-tileId=0      → omitted from tiles[]
-tileId>=384   → included
-tileId 48..383 or another unsupported nonzero required value
-              → canonical first slice fails closed
+world x 10→11
+facing 2→6
+cameraX 16→48
+map/Canvas content shifts left 32 CSS px
+canonical tile (12,8) screen x 368→336
 ```
 
-`tiles[]` order MUST be：
+Blocked second move leaves world position、camera、player screen origin and map placement unchanged。
+
+## 5. Full-state Canvas evidence
+
+`lr-map-view` consumes current full view data。For every paint it must behave as frozen by M14/02：
 
 ```text
-z ascending
-then y ascending
-then x ascending
+clear full logical 640×480 tile Canvas
+→ draw current retained tiles[] in canonical order
 ```
 
-Thus browser drawing order is already authoritative and deterministic; `lr-map-view` does not sort/reinterpret RMXP layers.
+Qualification MUST prove stale pixels cannot survive a full-state change。A minimal deterministic case may replace one previously drawn current tile with an omitted/transparent current state and assert the old pixel disappears after repaint。
 
-At initial canonical state, with z1/z2 zero, `tiles[]` contains the non-zero z0 entries for `x=0..20,y=1..15` in y/x order. It is **not** required to contain exactly `20*15` entries.
+Do not qualify dirty rectangles、tile patches or incremental Canvas state；they are not M14 behavior。
 
-## 8. Tile pixel evidence
+## 6. Pixel / player evidence
 
-Author-owned tileset PNG distinguishes：
-
-```text
-tile 384 → source x=0..31
-tile 385 → source x=32..63
-```
-
-Drawing chain：
+Using the author-owned PNGs from M14/03, Chromium proves：
 
 ```text
-tableAt(Map.data,...)
-→ canonical tiles[]
+Map.data tileId
+→ current ordered tiles[]
 → Tileset resource/version
 → PresentationResourceClient bytes
-→ decoded PNG
-→ source rect sx/sy
-→ destination x*32-cameraX, y*32-cameraY
-→ private Canvas
-→ expected pixels
+→ regular-tile source rectangle
+→ Canvas destination from current camera
+→ expected fixture pixel
 ```
 
-Regular mapping：
+At least tile 384 and tile 385 source cells are distinguishable and correctly selected。
+
+Player evidence proves：
 
 ```text
-sx=((tileId-384)%8)*32
-sy=floor((tileId-384)/8)*32
-sw=sh=32
+real 4×4 character sheet
+correct direction row
+pattern=0 column
+bottom-center placement from current screenX/screenY
 ```
 
-Canonical CI uses no required autotile or priority-over-player visual.
+CSS color boxes are not substitutes。
 
-## 9. Exact Render topology / data
+## 7. DOM / private presentation evidence
 
-Exactly one map Domain：
-
-```text
-zIndex=0
-root key="viewport" tag="lr-map-view"
-└── key="player" tag="lr-map-sprite"
-```
-
-Node data exactly follows M14/02：
-
-```text
-view:
-  mapId,mapWidth,mapHeight,cameraX,cameraY
-  tileset {namespace,key,contentVersion}
-  canonical ordered tiles[] {x,y,z,tileId}
-
-player:
-  x,y,screenX,screenY,direction,pattern=0
-  sprite {namespace,key,contentVersion}
-```
-
-Runtime publishes current full domain state with `replace(...)`; no map-private delta protocol is introduced. No path/URL/token/credential/bytes/importer wrapper.
-
-## 10. DOM / Web Component evidence
-
-Chromium observes：
+Required managed light DOM：
 
 ```html
 <body>
@@ -310,67 +176,31 @@ Chromium observes：
 </body>
 ```
 
-`lr-map-view` owns private Shadow DOM tile Canvas + entity overlay/slot; player remains M13-managed light DOM. No tile-per-WC tree.
+Same `lr-map-view` and `lr-map-sprite` HTMLElement identities survive both movement attempts。
 
-Same element identities survive both movement attempts.
+Qualification may inspect that `lr-map-view` has a private tile Canvas and a slot/overlay path for its managed child, but MUST NOT require a specific private Shadow wrapper hierarchy or class names。Private DOM remains implementation mechanics。
 
-Canonical first movement evidence is：
+No per-tile Custom Elements。
 
-```text
-world player x: 10 → 11
-facing: 2 → 6
-cameraX: 16 → 48
-player screen origin: stays (304,224)
-map/Canvas pixels: shift left by 32 CSS px relative to viewport
-```
+## 8. Async resource currentness evidence
 
-Blocked second movement leaves world x/y, camera, player screen origin and map placement unchanged while facing remains right.
-
-## 11. Player resource / crop
-
-Browser gets `Graphics/Characters/m14_player` through PresentationResourceClient.
-
-Canonical sheet：128×128, 4×4, frame 32×32. General RMXP-compatible crop：
+At least one delayed resource/decode case proves：
 
 ```text
-frameWidth=imageWidth/4
-frameHeight=imageHeight/4
-column=pattern=0
-row=(direction-2)/2
-visualLeft=screenX+(32-frameWidth)/2
-visualTop=screenY+32-frameHeight
+receive data A
+→ decode pending
+receive newer data B using same image resource/version
+→ decode completes
+→ visible output represents latest B
 ```
 
-No CSS color-box substitute; no walking Tick/Scheduler required.
+Matching image resource/version alone cannot authorize painting captured old camera/tiles/direction。A completion may populate cache, but repaint uses latest retained data or an equivalent current data-generation check。
 
-## 12. Presentation Config / package artifact bootstrap
+No fake fallback pixels or AssetManager abstraction。
 
-The test reads checked-in `examples/essentials-v21.1/presentation.json` and uses existing M13 validation/preparation behavior.
+## 9. M13 qualification-composition boundary
 
-Prepared source artifacts are resolved through：
-
-```text
-@loomrealm-game/map/browser/map.css
-@loomrealm-game/map/browser/map.browser.js
-```
-
-then materialized under Config logical refs：
-
-```text
-Presentation / map/map.css
-Presentation / essentials/page.css
-Presentation / map/map.browser.js
-```
-
-Map JS executes as classic script and registers both tags before Projector startup.
-
-No direct browser-source import, manual tag registration, replacement CSS, manual DOM or package-private map path reach-through.
-
-## 13. M13 qualification-composition boundary
-
-M13's Web Projector/bootstrap/config-preparation implementation is intentionally not a public Renderer root API. M14 does not reopen that package surface.
-
-Frozen rule：
+M14 does not publish a new Renderer presentation host API merely for tests。
 
 ```text
 game-libs/map code
@@ -378,71 +208,43 @@ examples/essentials-v21.1 business/runtime/browser code
     MUST NOT import Renderer internal paths
 
 repository-owned M14 qualification harness
-    MAY reuse packages/renderer/dist/internal/* M13 composition mechanics
-    solely to assemble/drive the test Window
+    MAY reuse existing M13 internal Window-composition mechanics
+    only to construct/drive the qualification Window
 ```
 
-This mirrors M13's own repository qualification mechanics and is not an author/product integration API. No wrapper package or public presentation service is created for M14. M15 owns the production Desktop Window integration seam.
+That repository-test exception is not an author/product seam。Production Desktop Window composition belongs to M15。
 
-## 14. Physical composition boundary
+## 10. Physical composition boundary
 
-M14 uses existing Main/Subsystem/Data/Renderer/Content + existing/synthetic RendererInputSource + real Chromium.
+M14 uses existing Main/Subsystem/Data/Renderer/Content roles、existing/synthetic RendererInputSource and real Chromium。
 
-M15 owns Hostra Node Runner child, Electron BrowserWindow, real DOM Keyboard/Pointer/Gamepad source and reload/reconnect/shutdown physical E2E. No M14 MiniDesktopHost/MapHost/GameRuntimeHost.
-
-## 15. Local exact-v21.1 evidence
-
-Local selected slice must use existing importer → M14 consumer projection → actual Table objects → prepared FSDB → same map Runtime/fixed viewport/passability/visible-tile/browser code.
-
-A local PASS requires：
+M14 does not introduce：
 
 ```text
-exact source fingerprint/version accepted
-→ selected Map/Tileset successfully projected
-→ actual projected Table consumed by same runtime code
-→ selected tileset raw resource resolves
-→ selected character raw resource resolves
-→ same @loomrealm-game/map Runtime starts
-→ same M13 Chromium presentation starts
-→ at least one real regular source tile is visibly derived from source bytes
-→ real player sprite is visible
-→ one non-repeat directional input traverses M10
-→ resulting world state agrees with persisted passability facts
+MiniDesktopHost
+MapHost
+InProcessRuntimeHost package
+DefinitionRegistry
+GameRuntimeHost
 ```
 
-The local path need not prove both passable and blocked branches; canonical CI deterministically proves both. Decoded Ruby/RPG objects may not cross into Runtime.
+A small test-local platform/composition function may connect existing public/trusted host seams, similar to existing repository tests。Real Hostra child process、Electron BrowserWindow、DOM physical input、reload/reconnect/shutdown belong to M15。
 
-If meaningful exact-corpus evidence necessarily needs unsupported autotile/priority behavior, fail explicitly and implement the smallest real missing behavior before M14 Closed, or select another meaningful supported slice.
+## 11. Exact local-v21.1 evidence
 
-## 16. Async presentation/resource currentness
-
-WC keeps latest received full data and treats resource loading/decoding as stale-able private work.
+Local qualification uses：
 
 ```text
-receiveRenderContext
-→ retain M13 context
-
-receiveRenderData(data)
-→ validate/store latest full data
-→ advance private data generation if used
-→ request/decode missing resource
-
-async resource/decode completion
-→ may populate matching resource/version cache
-→ repaint from latest retained data
-  OR paint only when captured data generation is still current
+real source
+→ existing importer/lossless decode
+→ selective M14 Map/Tileset consumer projection
+→ prepared FSDB
+→ same @loomrealm-game/map Runtime/browser code
+→ same M13 Chromium path
 ```
 
-A matching image resource/version alone is NOT enough to authorize an old paint. Qualification must cover at least one delayed-resource case where a newer render data value arrives while the same tileset/sprite resource version remains unchanged; when decode completes, visible pixels/state MUST represent the newer data, not captured old camera/tiles/direction.
-
-No fake fallback pixels or AssetManager abstraction.
-
-## 17. Failure / diagnostics
-
-Optional lightweight update/node/input-to-visible timings are allowed; no profiler framework.
-
-Fail closed on invalid Map/Tileset/Table shape, missing resource, unsupported required tile kind, tag/bootstrap failure or invalid Render state. Do not insert semantic defaults.
+PASS minimum is owned by M14/05。The local selected slice does not need to prove both deterministic canonical movement branches；CI owns those。If meaningful selected source necessarily requires unsupported behavior, fail explicitly and add only the smallest real missing behavior or select another meaningful supported slice。
 
 ## Closure question
 
-M14/04 passes only if a checked-in concrete game can keep one gameplay Frame alive, consume real projected Map/Tileset facts through ContentClient/`tableAt`, derive canonical intersecting regular-tile pixels and RMXP-compatible passability, synchronously update authoritative player/camera state from M10 input, and project current full state through one opaque SDK-owned RenderDomain into stable `lr-map-view → lr-map-sprite` elements through real M13 bootstrap in deterministic Chromium, with centered-player camera behavior and async presentation currentness both proven.
+M14/04 passes only if the checked-in game can keep one gameplay Frame alive, consume the exact selective Map/Tileset facts through ContentClient, derive passability/camera/current full Render state, repaint a real Canvas from current full data, display a real player sprite, accept M10 directional input and preserve M13 element identity/currentness through real Chromium — without adding a second game framework or test-only business path.
