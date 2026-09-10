@@ -2,448 +2,281 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：Evolving  
-> 主要定义：monorepo 物理目录、Game/Runtime/Renderer/Data packages、Main-facing bootstrap/authority surface、Runner provisioning、Desktop composition 与测试布局  
-> 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0021](../decisions/0021-runtime-control-preimplementation-closure.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
-> 最近复核：2026-09-04
+> 稳定程度：M1–M13 implemented/qualified；M14 implementation boundary frozen  
+> 主要定义：current monorepo physical placement、framework/game-library/example/app ownership、M14–M17 materialization order  
+> 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 最近复核：2026-09-10
 
-公开 package 职责以 package architecture为权威；本文只回答“当前/下一步代码放哪里”。
+公开 package/authority 职责以 architecture/contracts/package architecture 为权威；本文只回答“代码放哪里、何时 materialize”。不要为了未来 symmetry 预建目录、package 或 orchestration framework。
 
 ---
 
-## 1. Top-level
+## 1. Current / Planned Top-level
 
 ```text
-packages/
-├── foundation/
-├── platform-ports/
-├── wire/
-├── game-package/
-├── game-launcher-hostra/
-├── game-launcher-pwa/
-├── runtime-control/
-├── renderer-control/
-├── data/
-├── content/                 // M12+
-├── main/
-├── subsystem/
-├── renderer/
-├── content-service/         // M12+
-└── map/                     // M13+
+packages/      LoomRealm framework/runtime
+    foundation/
+    platform-ports/
+    wire/
+    game-package/
+    game-launcher-hostra/
+    game-launcher-pwa/
+    runtime-control/
+    renderer-control/
+    data/
+    content/
+    fsdb/
+    fsdb-http/
+    main/
+    subsystem/
+    renderer/
+    content-service/
 
-apps/
-├── desktop/                 // first materializes in M9
-├── pwa/                     // later
-└── cli/                     // later
+game-libs/     reusable game-domain libraries
+    map/        M14 → @loomrealm-game/map
 
-tools/
-└── fixtures/...
+examples/      concrete private games
+    essentials-v21.1/   M14
+
+apps/          platform hosts/products
+    desktop/    existing from M9; M15 adds full BrowserWindow E2E
+    pwa/        materializes with real PWA work
+
+tools/         development/import/compatibility tooling
+    fixtures/essentials-v21.1/
 ```
 
-Do not create every target directory in advance。M9 creates `apps/desktop` because it now has a real one-app physical consumer；PWA/CLI remain demand-driven。
+There is no `packages/map` / `@loomrealm/map`。Map business belongs to `game-libs/map`。
 
-Root npm workspaces through M8：
-
-```text
-packages/*
-```
-
-M9 implementation changes this to：
+Current root workspaces before M14 implementation：
 
 ```text
 packages/*
 apps/*
 ```
 
----
-
-## 2. Package Categories
+M14/01 adds：
 
 ```text
-low-level
-    foundation / wire
-
-shared Core↔Platform contract
-    platform-ports
-
-document/protocol capability
-    game-package / runtime-control / renderer-control / data / content
-
-role
-    main / subsystem / renderer / content-service
-
-runtime launch integration
-    game-launcher-hostra / game-launcher-pwa
-
-app composition
-    apps/desktop / apps/pwa / apps/cli
-
-business
-    map / compatibility packages
+game-libs/*
+examples/*
 ```
 
-Protocol package、process boundary、Platform composition与 milestone不等同。
+`tools/*` remains tooling rather than a runtime workspace category。
 
 ---
 
-## 3. `packages/platform-ports`
-
-Current layout stays intentionally small：
+## 2. Ownership Categories
 
 ```text
-packages/platform-ports/
-├── DESIGN.md
-├── package.json
-├── tsconfig.json
-├── src/
-│   └── index.ts
-└── test/
+packages/*
+    protocols / roles / shared framework mechanics
+
+game-libs/*
+    reusable game business + optional business-owned browser presentation
+
+examples/*
+    concrete Game Entry / content composition / example-specific presentation declaration
+
+apps/*
+    physical Process / Worker / Window / transport / product composition
+
+tools/*
+    import / compatibility / preparation helpers
 ```
 
-Frozen root surface through M9：
+Primary dependency direction：
 
 ```text
-M4
-    DeadlineScheduler
-    RuntimeControlBinding
-
-M5
-    RuntimeLaunchRequest
-    MainRuntimeControlBinding
-    HostedRuntime
-    RuntimeHosting
-
-M7
-    OpaqueMaterialGenerator
-    RendererControlBinding
-
-M8
-    RendererDataBinding
-    SubsystemDataBinding
-    SubsystemDataBindingResult
-
-M9
-    DataConnectionAuthorityEntry
-    DataConnectionAuthorityView
-    DataConnectionAuthoritySink
-```
-
-Runtime dependency remains exactly `@loomrealm/foundation`。
-
-M9 types remain in `src/index.ts`; do not create `authority/`, `broker/`, EventBus or Platform mega-interface solely for three small structural types。
-
----
-
-## 4. `packages/runtime-control` / `packages/renderer-control` / `packages/data`
-
-These remain protocol-mechanics packages with no concrete Hostra/PWA transport authority。
-
-```text
-runtime-control
-    Foundation + Wire
-
-renderer-control
-    Foundation + Wire
-
-data
-    Foundation + Wire
-```
-
-M9 MUST NOT add WS/IPC/Broker code or authority sink implementation to `packages/data`。
-
----
-
-## 5. `packages/game-launcher-hostra`
-
-Current M6 implementation remains the Runtime launch owner；M9 adds only child-owned provisioning integration。
-
-Recommended current structure after M9：
-
-```text
-packages/game-launcher-hostra/
-├── src/
-│   ├── index.ts
-│   ├── prepare.ts
-│   ├── launch-plan.ts
-│   ├── manifest.ts
-│   ├── module-resolver.ts
-│   ├── runtime-hosting.ts
-│   ├── websocket-carrier.ts
-│   └── runner/
-│       ├── entry.ts / bootstrap.ts
-│       └── data-provisioning.ts       // M9
-└── test/
-```
-
-M9 public Hostra integration types may stay near `runtime-hosting.ts`/root export：
-
-```text
-HostraRuntimeDataPrepareRequest
-HostraRuntimeDataProvisioner
-onRuntimeDataProvisioner hook
-```
-
-Do not create generic `provisioning` npm package、RuntimeDirectory or DataConnectionBroker inside launcher。
-
----
-
-## 6. `packages/game-launcher-pwa`
-
-PWA package remains its own Game PREPARE/Worker Runtime launch integration。M9 MUST NOT modify it only for type symmetry。
-
-PWA Data provisioning/MessageChannel mapping begins when its real platform slice is implemented (M16 full physical closure path)。
-
----
-
-## 7. `packages/main`
-
-Current layout may remain：
-
-```text
-packages/main/
-├── DESIGN.md
-├── package.json
-├── tsconfig.json
-├── src/
-│   ├── index.ts
-│   ├── model.ts
-│   ├── errors.ts
-│   └── internal/
-│       ├── main-session.ts
-│       └── primitives.ts
-└── test/
-```
-
-M9 does not justify a stateful `DataAuthorityManager` or `PlatformProjectionBus` directory。`MainSessionRuntime` may add small pure helpers/private projection records while remaining the single authority coordinator。
-
-`model.ts` adds only optional：
-
-```ts
-readonly dataConnections?: DataConnectionAuthoritySink;
-```
-
-M9 main-session changes：
-
-```text
-retain current accepted Renderer token as inert correlation
-include it in live opaque-material duplicate check
-project exact full DataConnectionAuthorityView
-call replace(null/view) inside existing mutation lane
-```
-
-No public Main Session controller。
-
----
-
-## 8. `packages/subsystem`
-
-Existing M8 role-facing Data path remains unchanged。
-
-```text
-packages/subsystem/src/host/
-    run-subsystem.ts
-    Runtime Control integration
-    optional SubsystemDataBinding integration
-```
-
-M9 Runner provisioning implementation lives in Hostra launcher/Runner code, not in author-facing subsystem root。`SubsystemDataBinding.acquire()` continues to wait for an already-current-deliverable carrier。
-
----
-
-## 9. `packages/renderer`
-
-Existing M8 Renderer holder/reconciliation remains unchanged。
-
-M9 provides a real Desktop `RendererDataBinding` realization from `apps/desktop`; it does not add Hostra/WebSocket imports to the platform-neutral renderer package。
-
----
-
-## 10. `apps/desktop` — M9 First Real Layout
-
-M9 creates a private app workspace. Exact private filenames may vary, but responsibility placement is frozen：
-
-```text
-apps/desktop/
-├── package.json
-├── tsconfig.json
-├── src/
-│   ├── data-broker.ts            // session-scoped Broker / sink
-│   ├── data-websocket.ts         // two-sided loopback candidate/relay
-│   └── renderer-data-binding.ts  // per-physical-Renderer delivery cells
-└── test/
-    ├── data-broker.test.*        // contract harness
-    └── m9-vertical.test.*        // real Main/Runner/Data vertical
-```
-
-Equivalent private layout is allowed；ownership is not。
-
-Desktop Broker owns：
-
-```text
-DataConnectionAuthoritySink realization
-latest full Main view
-per-S candidate/current slots
-two-sided one-time WS capabilities
-opaque relay gate
-RendererDataBinding delivery
-exact HostedRuntime→Hostra provisioner private WeakMap correlation
-```
-
-It MUST NOT own Game schema、Runtime/Renderer Control protocol parsing、Main authority、Input/Render business state or Content。
-
-M9 `apps/desktop` is not yet a full Electron BrowserWindow app；M14 completes that product composition。
-
----
-
-## 11. Hostra Runner Provisioning Placement
-
-```text
-Host process / runtime-hosting.ts
-    owns child IPC endpoint + provisioner object
-
-Runner bootstrap
-    installs provisioning IPC listener
-    constructs real SubsystemDataBinding
-
-runner/data-provisioning.ts
-    prepared candidate
-    committed current-deliverable carrier
-    Binding waiter
-```
-
-Data endpoint remains late; it MUST NOT be added to `RunnerBootstrapV1` startup material。
-
-Hostra-private IPC messages：
-
-```text
-provision / prepared / commit / committed / revoke
-```
-
-No generic RPC layer。
-
----
-
-## 12. Role-facing Port Placement Through M9
-
-Shared Core↔Platform contracts live only in：
-
-```text
-packages/platform-ports/src/index.ts
-```
-
-Consumer/physical implementations stay with their owner：
-
-```text
-Main
-    consumes DataConnectionAuthoritySink
-
-Renderer
-    consumes RendererDataBinding
-
-Subsystem host
-    consumes SubsystemDataBinding
-
-apps/desktop
-    implements DataConnectionAuthoritySink + RendererDataBinding
-
-Hostra Runner integration
-    implements SubsystemDataBinding delivery mechanics
-```
-
-`DataConnectionBroker` remains app composition, not shared port type。
-
----
-
-## 13. Testing Placement
-
-Keep evidence close to owners：
-
-```text
-packages/platform-ports/test
-    exact M9 exported structural surface / Foundation-only dependency
-
-packages/main/test
-    sink optionality/full-view/token correlation/mutation ordering
-
-packages/game-launcher-hostra/test
-    provisioner handoff/IPC/Runner Data binding
-
-apps/desktop/test
-    Broker authority/candidate/install/retire harness
-    real M9 Hostra vertical
-```
-
-Root script `test:m9` composes these gates。
-
-M10/M11 business publication-baseline tests do not belong in M9 Broker tests。
-
----
-
-## 14. Typical Dependencies Through M9
-
-```text
-platform-ports
-    → foundation
-
-runtime-control / renderer-control / data
-    → foundation + wire
-
-main
-    → platform-ports + runtime-control + renderer-control + wire
-
-subsystem/host
-    → platform-ports + runtime-control + data
-
-renderer
-    → renderer-control + platform-ports + data
-
-game-launcher-hostra
-    → game-package + foundation + platform-ports + subsystem + wire + ws
-
-apps/desktop
-    → main/renderer + platform-ports + matching Hostra integration + protocol roles as composition needs
+examples → game-libs → public LoomRealm author APIs
 ```
 
 Forbidden：
 
 ```text
-main → game-launcher-hostra/apps/desktop
-renderer/subsystem business root → apps/desktop or concrete transport
-platform-ports → main/protocol/concrete Platform
-packages/data → WS/IPC/Broker
-apps/desktop duplicating protocol validators
+packages → game-libs/examples
+game-libs Runtime → renderer/main/platform/protocol internals
+runtime game code → tools/*
+apps/* owning reusable map business semantics
 ```
 
 ---
 
-## 15. M9 Creation Order
+## 3. Existing Core Placement
+
+Existing M1–M13 packages keep their current ownership。Important placement constraints：
 
 ```text
-1. platform-ports exact authority sink types
-2. MainPlatform optional sink + Main full-view projection
-3. Hostra runtime→provisioner handoff
-4. Runner provisioning IPC + current-deliverable SubsystemDataBinding
-5. create apps/desktop workspace + workspace glob
-6. Desktop Broker/two-sided WS/RendererDataBinding
-7. Broker contract harness
-8. real M9 vertical + root test:m9
+packages/platform-ports
+    narrow shared Core↔Platform structural ports only
+
+packages/main
+    Session/Runtime/Frame/Activation/InputTarget/DataAuthority authority
+
+packages/subsystem
+    author API + trusted runSubsystem host integration
+
+packages/renderer
+    Renderer Control/Data/Input/Render + M13 package-private Web presentation mechanics
+
+packages/game-launcher-hostra
+    Hostra PREPARE / Node Runner / child-owned provisioning mechanics
+
+apps/desktop
+    Desktop app-scoped Data broker/content/presentation physical composition
 ```
 
-This order minimizes circular construction and keeps M6/M8 regression paths usable throughout implementation。
+Do not move Hostra WS/IPC into protocol packages or map business into `apps/desktop`。
 
 ---
 
-## 16. Final Rules
+## 4. M14 Physical Placement
 
-1. repository layout realizes package architecture；it does not redefine authority；
-2. `platform-ports` stays one small Foundation-only root module through M9；
-3. Main adds no Data-specific authority registry/event bus；
-4. Hostra launcher owns child provisioning mechanics but not Broker policy；
-5. `apps/desktop` materializes at M9 because a real app-scoped Broker now exists；
-6. Desktop Broker uses plain private records/maps, not a public ConnectionManager framework；
-7. Data WebSocket/IPC never enters `@loomrealm/data`/Renderer/Subsystem author packages；
-8. M8 Binding signatures stay unchanged；
-9. Runner startup bootstrap stays Data-endpoint-free；
-10. M9 tests stop at physical Data peer lifecycle and do not claim M10/M11 business baselines；
-11. PWA/CLI directories remain uncreated until real consumers require them；
-12. no generic RPC/registry/event/transaction/retry framework is created for M9。
+M14 materializes exactly the first real framework-consumer layer：
+
+```text
+game-libs/map/
+    package.json
+    tsconfig.json
+    src/                  Runtime Definition + small map helpers
+    browser/              classic map.browser.js + map.css source
+    test/                 game-lib semantic tests
+
+examples/essentials-v21.1/
+    package.json          private=true
+    game.json
+    presentation.json
+    presentation.css
+    fixture/              repository-owned semantic/PNG fixture material as needed
+```
+
+Exact private filenames may vary where M14/01–05 do not make them observable。
+
+`@loomrealm-game/map` root is the Runtime Definition entry。Stable browser package subpaths expose：
+
+```text
+@loomrealm-game/map/browser/map.browser.js
+@loomrealm-game/map/browser/map.css
+```
+
+Prepared Content assembly is a small action/test preparation step; do not create GamePackager/ContentBuilder/Manifest framework。
+
+M14 repository qualification may use a small test-local composition function connecting existing Main/Subsystem/Data/Renderer/Content roles + real Chromium。It is not a production Host package。
+
+---
+
+## 5. M15 Desktop Placement
+
+M9 already created `apps/desktop` for real Desktop Data Broker mechanics。M15 extends the real Desktop product composition to：
+
+```text
+Hostra PREPARE
+→ Main
+→ real Node Runner child
+→ Runtime/Data physical paths
+→ Electron BrowserWindow
+→ existing M13 Web presentation
+→ real BrowserWindow RendererInputSource
+→ same M14 game/map Runtime/WC
+→ reload / reconnect / shutdown
+```
+
+M15 does not move map code into Desktop and does not reopen M10–M14 logical contracts。
+
+---
+
+## 6. M16 / M17 PWA Placement
+
+M16 materializes only the real PWA Runtime hosting slice needed for：
+
+```text
+PWA PREPARE
+→ Dedicated Worker Runner
+→ RuntimeHosting
+→ Runtime Control MessagePort
+→ Main ↔ Worker ↔ Subsystem lifecycle
+```
+
+PWA Data/Content/Renderer/physical input/Web presentation are not required to close M16。Existing `runSubsystem` supports absent physical Content by exposing the normal unavailable Content capability。
+
+M17 then completes：
+
+```text
+Window Renderer Control
+PWA Data broker / MessageChannel provisioning
+PWA Content realization
+physical Window RendererInputSource
+M13 Config/API/Projector
+same M14 concrete game + business WC
+cross-platform observable equivalence
+```
+
+Do not pre-create PWA abstractions merely to mirror Hostra filenames/classes。
+
+---
+
+## 7. Test Placement
+
+Keep evidence close to its owner：
+
+```text
+packages/*/test
+    package/role/protocol behavior
+
+game-libs/map/test
+    map validation/passability/camera/projection behavior
+
+tools/fixtures/essentials-v21.1/test
+    selective M14 source→consumer projection
+
+repository test/m14* / equivalent
+    cross-owner qualification harness + boundaries
+
+apps/desktop/test
+    Desktop physical composition evidence
+
+PWA package/app tests
+    M16/M17 physical realization evidence
+```
+
+A giant E2E never replaces lower-owner qualification。
+
+---
+
+## 8. Abstraction Budget
+
+Do not introduce for M14–M17 without real consumer evidence：
+
+```text
+GameLibrary registry/base framework
+MapRepository / MapManager / MapBundle
+MapNormalizedV1
+ConsumerProjector<T> / ProjectionRegistry
+AssetManager / ResourceProvider
+SceneGraph / LayerManager
+MiniDesktopHost / MapHost / GameRuntimeHost
+RuntimeDirectory
+UniversalPlatform / StorageProvider SPI
+workspace orchestration framework
+Generic RPC / EventBus / transaction / retry framework
+```
+
+Small private records/maps/functions remain preferable when they satisfy the concrete owner。
+
+---
+
+## 9. Current Materialization Order
+
+```text
+M1–M13                                ✅ implemented / qualified
+↓
+M14 Map Game Library + First Real Game   🔒 frozen for implementation / pending
+↓
+M15 Desktop Full E2E                     pending
+↓
+M16 PWA Runtime                          pending
+↓
+M17 PWA Full E2E / Equivalence           pending
+```
+
+Repository layout follows that demand order。Do not create M15/M16/M17 production machinery to make M14 tests look more product-like。
