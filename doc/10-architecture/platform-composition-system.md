@@ -2,14 +2,16 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13/M14 **Implemented / Qualified / Closed**
+> 稳定程度：M9/M12/M13 closed baseline；M14 consumer architecture frozen；M15 Desktop physical composition preimplementation frozen  
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
-> 相关：[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
-> 最近复核：2026-09-10
+> 相关：[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 最近复核：2026-09-11
 
 本文回答：**同一套 LoomRealm logical application semantics 如何在 Hostra / PWA 上被完整准备、组合并运行。** Platform 是 physical composition boundary，不是 universal application authority/service locator。
+
+Milestone live qualification status由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总；M14 formal status/evidence只由 [`m14-qualification.md`](../30-implementation/m14-qualification.md) 维护。本文不复制 run-level Closed/PASS事实。
 
 ---
 
@@ -117,6 +119,8 @@ successful Hostra PREPARE
 
 Subsystem 获得 bound ContentClient；Renderer 拥有 trusted/private ResourceClient。Content credential 不得进入 Runtime Control/Data messages、Frame params、Render state、business WC public state或 Web Presentation Config。
 
+When a browser Realm later executes business code，trusted Content/Data physical clients must retain private credentials/endpoints through bound lexical capabilities rather than dynamically resolving business-replaceable globals。This is capability hiding inside the concrete platform binding，not a new logical Content/Data contract。
+
 ---
 
 ## 5. M13 Presentation Startup
@@ -191,7 +195,9 @@ M14 qualification可用 test-owned harness复用 existing production roles + rea
 
 ## 8. Hostra / PWA Realization
 
-Hostra 可以使用：
+Logical platform equality does not require physical symmetry。
+
+Hostra can use：
 
 ```text
 Node Runner Process
@@ -201,7 +207,27 @@ fs + localhost Content HTTP
 private browser resource binding
 ```
 
-PWA 可以使用：
+M15 fixes the first real Electron Desktop realization more precisely：
+
+```text
+Electron main
+→ Hostra Runner executable remains canonical process.execPath
+→ Hostra synthesizes ELECTRON_RUN_AS_NODE=1 for that Runner child
+→ supported Electron build keeps runAsNode fuse enabled
+→ same existing Hostra ChildProcess / Runtime Control / provisioning path
+
+Desktop BrowserWindow
+→ exact http://127.0.0.1:<port> app shell
+→ same exact origin for existing /_lr/v1 Content API
+→ nodeIntegration=false / contextIsolation=true / sandbox=true / webSecurity=true
+→ isolated preload one-shot handoff
+→ trusted Main-World Renderer captures authority-bearing native browser primitives
+→ business presentation loads afterward
+```
+
+This does **not** add a configurable Node executable、alternate RuntimeHosting、CORS Content profile、preload Content proxy or cross-platform BrowserHost abstraction。
+
+PWA can use：
 
 ```text
 Dedicated Worker
@@ -211,7 +237,7 @@ Fetch / Service Worker / OPFS/Cache
 platform-specific private browser resource binding
 ```
 
-两平台共享 logical semantics，不要求相同 physical mechanics。PWA 不依赖 Node-only `@loomrealm/fsdb`。
+M15's Electron run-as-node and same-loopback-origin choices are Desktop-only physical facts。PWA does not inherit them；the two platforms share logical semantics, not physical mechanics。PWA 不依赖 Node-only `@loomrealm/fsdb`。
 
 M14 concrete game保持在 `examples/*`，reusable map保持在 `game-libs/*`；M15/M17让 Hostra/PWA分别运行同一 logical game scenario，不为平台复制 game business source。
 
@@ -259,6 +285,8 @@ UniversalPresentationRegistry
 PluginManager / PresentationLayerManager
 GameLibraryHost / platform-owned game registry
 MiniDesktopHost / MapHost production abstraction
+BrowserPrimitiveRegistry / security service locator
+generic local web-server/CORS framework
 ```
 
 需要多个 concrete platform 实现同一真实 narrow seam 时，再最小 materialize port。
@@ -267,16 +295,18 @@ MiniDesktopHost / MapHost production abstraction
 
 ## 11. Milestone Placement
 
+Architecture只记录责任顺序，不复制 live closure ledger：
+
 ```text
-M12 Content                                  ✅ Closed 2026-09-08
-M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      ✅ Closed 2026-09-10
-M15 Desktop Full E2E                        pending
-M16 PWA Runtime                             pending
-M17 PWA Full E2E / Equivalence              pending
+M12 Content
+→ M13 Web Presentation
+→ M14 Map Game Library + First Real Game
+→ M15 Desktop Full E2E
+→ M16 PWA Runtime
+→ M17 PWA Full E2E / Equivalence
 ```
 
-M13 使用 fixture WC + real Chromium 关闭 Web semantics。M14验证 independent game library/concrete game consumer。M15完成 Hostra/Desktop real physical composition。M16只关闭 PWA Worker Runtime hosting。M17完成 PWA Renderer/Data/Input/Content/Web Presentation 与 cross-platform equivalence。
+Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M14 formal status/evidence见 [`m14-qualification.md`](../30-implementation/m14-qualification.md)。截至本次复核，M14 implementation complete / requalification pending，M15 Implementation Frozen / Preimplementation Closed。
 
 ---
 
@@ -291,4 +321,5 @@ M13 使用 fixture WC + real Chromium 关闭 Web semantics。M14验证 independe
 7. reusable game library/concrete game不被吸收到 platform app；
 8. M14 map library只消费 selective RMXP/Essentials facts，不把 tooling/importer representation带入 Runtime；
 9. M15/M16/M17 physical realization不能复制或重定义 M14 game semantics；
-10. Hostra/PWA 可以有不同 physical realization，但必须保持相同 logical game/presentation outcome。
+10. Hostra/PWA 可以有不同 physical realization，但必须保持相同 logical game/presentation outcome；
+11. Desktop-specific run-as-node、same-origin和native primitive capture不得升级为不需要的跨平台 abstraction。
