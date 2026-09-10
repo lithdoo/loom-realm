@@ -124,9 +124,9 @@ One example/test-local step composes already-existing artifacts：
 ```text
 CI semantic FSDB fixture OR importer-produced local FSDB
 +
-@loomrealm-game/map dist/browser/map.browser.js
+resolve @loomrealm-game/map/browser/map.browser.js
 +
-@loomrealm-game/map dist/browser/map.css
+resolve @loomrealm-game/map/browser/map.css
 +
 examples/essentials-v21.1/presentation.css
 +
@@ -134,7 +134,9 @@ examples/essentials-v21.1/presentation.json
 → one prepared Content view + prepared M13 bootstrap input
 ```
 
-Stable logical presentation identities：
+The map browser files MUST be located through the package subpath exports frozen by M14/01. Preparation MUST NOT hard-code `node_modules/@loomrealm-game/map/dist/...`, reach into `game-libs/map/browser/...` source, or otherwise depend on the package's private physical layout.
+
+Stable logical presentation identities in prepared Content：
 
 ```text
 Presentation / map/map.css
@@ -150,7 +152,7 @@ essentials/page.css       text/css
 map/map.browser.js        text/javascript
 ```
 
-The preparation step MAY copy/materialize files and create the test-local Content view. It MUST NOT perform another map semantic transform, rewrite WC code, manually register tags, parse RMXP source, become a production Host or become a generic GamePackager/ContentBuilder.
+The preparation step MAY copy/materialize resolved artifact bytes and create the test-local Content view. It MUST NOT perform another map semantic transform, rewrite WC code, manually register tags, parse RMXP source, become a production Host or become a generic GamePackager/ContentBuilder.
 
 ## 6. Fixed 640×480 page composition
 
@@ -318,16 +320,18 @@ cameraY = 32
 
 Blocked second right leaves camera unchanged.
 
-## 10. Browser artifacts
+## 10. Browser artifact consumption
 
-The example consumes package artifacts, not map browser source directly：
+The example resolves package artifacts through：
 
 ```text
-@loomrealm-game/map dist/browser/map.browser.js
-@loomrealm-game/map dist/browser/map.css
+@loomrealm-game/map/browser/map.browser.js
+@loomrealm-game/map/browser/map.css
 ```
 
-The JS is standalone classic script and registers only the frozen first-slice tags needed here：
+It does not import/execute the JS in Node. Preparation only reads/materializes its bytes into logical prepared Content; M13's classic `<script>` bootstrap is the execution path.
+
+The JS registers only the frozen first-slice tags needed here：
 
 ```text
 lr-map-view
@@ -385,5 +389,6 @@ M15 replaces M14 test-owned physical composition with real Desktop Hostra/Browse
 - canonical fixture uses actual projected Table objects, not array shorthand;
 - Map/Tileset passability facts predetermine one allowed + one blocked move;
 - author-owned PNG dimensions/cells are deterministic;
+- browser artifacts are found through package subpath exports, not physical-layout reach-through;
 - CI and exact local materialization enter the same Runtime/browser implementation;
 - no tool/importer object or third-party asset crosses the runtime/repository boundary.
