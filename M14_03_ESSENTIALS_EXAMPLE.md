@@ -12,18 +12,17 @@ examples/essentials-v21.1
 
 它证明 concrete game 如何组合 LoomRealm framework + `@loomrealm-game/map`，而不是把 game-specific glue 塞进 `packages/*` 或 `apps/desktop`。
 
-## 1. Ownership
+## 1. Ownership / exact example files
 
 Example owns：
 
 ```text
-game.json
-concrete logical subsystem keys
-initial business input
-thin test/dev composition
-concrete page/window CSS
-WebPresentationConfig declaration
-CI-safe author-owned first-slice fixture
+examples/essentials-v21.1/
+    package.json                 private workspace
+    game.json                    GameEntryV1
+    presentation.json            WebPresentationConfigV1 candidate
+    presentation.css             concrete page/window CSS
+    test/...                     example/prepared-content qualification mechanics
 ```
 
 It does not own：
@@ -36,7 +35,7 @@ Desktop Hostra process topology
 source/importer implementation
 ```
 
-Concrete logical key is frozen：
+Concrete logical key：
 
 ```text
 map
@@ -47,7 +46,7 @@ The workspace is `private: true` and is not publishable.
 
 ## 2. Exact Game Entry
 
-M14 CI example `game.json` is conceptually exact：
+Checked-in `game.json` is：
 
 ```json
 {
@@ -67,20 +66,41 @@ M14 CI example `game.json` is conceptually exact：
 }
 ```
 
-Qualification MUST read this file and run it through existing `@loomrealm/game-package` parsing/validation before Main receives the initial target/input.
+Qualification MUST read this file and run existing `@loomrealm/game-package` parsing/validation before Main receives initial target/input.
 
-The example does not fake a Launch Manifest. M14 harness owns only the physical test binding：
+M14 harness owns only：
 
 ```text
 validated logical key "map"
 → @loomrealm-game/map Definition
 ```
 
-Real Hostra Node child provisioning belongs to M15.
+No Launch Manifest is fabricated. Real Hostra Node child provisioning belongs to M15.
 
-## 3. Source / importer boundary
+## 3. Exact Web Presentation Config
 
-`tools/fixtures/essentials-v21.1` remains source/import/compatibility tooling only.
+Checked-in `presentation.json` is：
+
+```json
+{
+  "formatVersion": 1,
+  "styles": [
+    { "namespace": "Presentation", "key": "map/map.css" },
+    { "namespace": "Presentation", "key": "essentials/page.css" }
+  ],
+  "scripts": [
+    { "namespace": "Presentation", "key": "map/map.browser.js" }
+  ]
+}
+```
+
+Qualification reads this file as the Config candidate and runs the existing M13 validation/preparation path. Test code MUST NOT replace it with an inline alternate Config.
+
+The Config carries logical refs only; browser href/src binding remains test/Window composition mechanics as frozen by M13.
+
+## 4. Source / importer boundary
+
+`tools/fixtures/essentials-v21.1` remains source/import/compatibility tooling only：
 
 ```text
 external/local Essentials v21.1 source
@@ -93,15 +113,13 @@ external/local Essentials v21.1 source
 → @loomrealm-game/map Runtime/browser path
 ```
 
-Runtime example and game library MUST NOT import `tools/*`, inspect `.rxdata`, or consume `RmxpObject/RubyString/$id/$ref/$typed` wrappers.
+Runtime example/game library never imports `tools/*`, inspects `.rxdata` or consumes importer wrappers.
 
-Exact source-root → `Map`/`Tileset` consumer identity belongs to `tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`.
+Exact source-root → consumer identities are owned by `tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`.
 
-## 4. Thin prepared Content assembly
+## 5. Thin prepared Content assembly
 
-The importer does not know browser JS/CSS or Web Presentation Config. The map package does not know the concrete game page.
-
-One example/test-local preparation step composes already-existing artifacts：
+One example/test-local step composes already-existing artifacts：
 
 ```text
 CI semantic FSDB fixture OR importer-produced local FSDB
@@ -112,26 +130,11 @@ CI semantic FSDB fixture OR importer-produced local FSDB
 +
 examples/essentials-v21.1/presentation.css
 +
-example WebPresentationConfig refs
-→ one prepared Content view
+examples/essentials-v21.1/presentation.json
+→ one prepared Content view + prepared M13 bootstrap input
 ```
 
-This step MAY copy/materialize files and create the test-local Content view. It MUST NOT：
-
-```text
-perform another map semantic transform
-rewrite WC source
-inject test-only customElements.define()
-parse RMXP source
-become a production Host
-become UniversalGamePackager / ContentBuilder framework
-```
-
-No generic packaging abstraction is introduced for one example.
-
-## 5. Frozen browser Content identities
-
-For M14 qualification the prepared view uses stable logical presentation identities：
+Stable logical presentation identities：
 
 ```text
 Presentation / map/map.css
@@ -139,24 +142,21 @@ Presentation / essentials/page.css
 Presentation / map/map.browser.js
 ```
 
-The example `WebPresentationConfigV1` preserves order：
+Required MIME：
 
 ```text
-styles[]
-    1. Presentation / map/map.css
-    2. Presentation / essentials/page.css
-
-scripts[]
-    1. Presentation / map/map.browser.js
+map/map.css            text/css
+entials/page.css      text/css
+map/map.browser.js     text/javascript
 ```
 
-The config carries logical Content refs only; no path/URL/token.
+The obvious spelling correction for the second line is normative as `essentials/page.css`; no alternate namespace/key is allowed in the canonical CI fixture.
 
-The map browser artifact is the classic-script artifact frozen by M14/02. Tests may not import its source directly or manually register the two tags.
+The preparation step MAY copy/materialize files and create the test-local Content view. It MUST NOT perform another map semantic transform, rewrite WC code, manually register tags, parse RMXP source, become a production Host or become a generic GamePackager/ContentBuilder.
 
 ## 6. Fixed 640×480 page composition
 
-M14 first slice deliberately does not support responsive map layout. The example page CSS fixes the viewport through CSS：
+`presentation.css` fixes the first-slice viewport：
 
 ```css
 html,
@@ -178,66 +178,80 @@ lr-map-view {
 }
 ```
 
-This is concrete example/page ownership. Map component CSS still owns clipping, Canvas/entity overlay and sprite visual mechanics.
+Map component CSS owns clipping/Canvas/entity/sprite mechanics. Example CSS does not select Shadow DOM private classes.
 
-The fixed first-slice agreement is：
+Frozen agreement：
 
 ```text
-32px tile
+32px logical tile
 640×480 CSS viewport
 20×15 nominal tile viewport
 ```
 
-Runtime uses the corresponding frozen logical constants from M14/02; it does not read computed DOM layout. Browser does not send resize information back to Runtime.
-
-Qualification MUST observe computed `lr-map-view` size `640×480` in Chromium. `devicePixelRatio` may change Canvas backing-store pixels privately but not logical map coordinates.
+Runtime uses M14/02 constants, never computed DOM layout. Browser sends no resize facts to Runtime. Chromium qualification observes computed 640×480 size.
 
 ## 7. Author-owned CI semantic fixture
 
-Canonical CI MUST NOT depend on third-party Pokémon Essentials assets. It uses a checked-in synthetic/author-owned fixture whose facts are frozen before implementation so the test cannot adapt to an arbitrary algorithm.
+Canonical CI uses repository-owned synthetic semantic Content facts fixed before implementation.
 
 ### Map/1
 
 ```text
-width  = 24
-height = 18
+width      = 24
+height     = 18
 tileset_id = 1
-spawn = (10,8)
+spawn      = (10,8)
 ```
 
-`data` is a 3D projected RGSS Table：
+`data` is an actual projected RGSS Table object：
 
 ```text
 dimensions = 3
-xSize = 24
-ySize = 18
-zSize = 3
+xSize      = 24
+ySize      = 18
+zSize      = 3
 values.length = 24 * 18 * 3
 ```
 
-Fixture tile facts：
+Its `values` array is populated only through the frozen index convention：
 
 ```text
-z=0: regular tile 384 everywhere in the tested/visible map area,
+index(x,y,z) = x + y*24 + z*24*18
+```
+
+Fixture facts：
+
+```text
+z=0: tile 384 everywhere in the tested/visible map area,
      except (12,8) = tile 385
 z=1: tile 0
 z=2: tile 0
 ```
 
-It MUST obey frozen Table index ordering rather than use a bespoke fixture layout.
+No alternate nested `[z][y][x]` fixture representation is permitted.
 
 ### Tileset/1
 
-Minimal required semantic fields：
+Required fields：
 
 ```text
 id = 1
 tileset_name = "m14_tileset"
-passages = projected 1D Table large enough to index used tile ids
-priorities = projected 1D Table large enough to index used tile ids
+passages  = projected 1D RGSS Table
+priorities = projected 1D RGSS Table
 ```
 
-Critical passability facts：
+Both tables use：
+
+```text
+dimensions = 1
+ySize = 1
+zSize = 1
+xSize >= 386
+values.length = xSize
+```
+
+The following notation is semantic shorthand for `tableAt(table, tileId)`：
 
 ```text
 passages[0]   = 0
@@ -246,72 +260,92 @@ priorities[0] = 5
 passages[384]   = 0x00
 priorities[384] = 0
 
-passages[385]   = 0x02   # cannot enter this tile from its left side
+passages[385]   = 0x02
 priorities[385] = 0
 ```
 
-Therefore the exact CI movement sequence is predetermined：
+Therefore canonical movement is predetermined：
 
 ```text
 start (10,8), facing down
-ArrowRight non-repeat down
-→ source/target passability true
-→ position (11,8), facing right
+ArrowRight down repeat=false
+→ (11,8), facing right
 
-ArrowRight non-repeat down again
-→ target (12,8) reverse-entry direction = left / 0x02
-→ blocked
-→ position remains (11,8), facing right
+ArrowRight down repeat=false
+→ target (12,8), reverse-entry left bit 0x02 blocked
+→ remains (11,8), facing right
 ```
 
-No `blocked: true` derived fixture field is allowed; movement must follow Map.data + Tileset.passages/priorities.
+No `blocked`, `walkable`, collision bitmap or hard-coded x-coordinate truth exists in fixture Content.
 
-### Author-owned graphic resources
+## 8. Author-owned CI graphic resources
 
-The checked-in CI fixture includes only author-created images needed for deterministic browser qualification：
+Only author-created deterministic PNGs are committed.
 
 ```text
 Graphics / Tilesets/m14_tileset
-    PNG
-    at least 256px wide
-    tile 384 and 385 source cells visually distinct
+    MIME image/png
+    exact fixture image size 256×32
+    tile 384 = source cell x=0..31
+    tile 385 = source cell x=32..63
+    those two cells visibly/pixel-test distinguishable
 
 Graphics / Characters/m14_player
-    PNG
-    valid 4×4 character sheet
-    frames visually distinguishable enough to prove the resource/crop path
+    MIME image/png
+    exact fixture image size 128×128
+    4×4 sheet
+    each frame = 32×32
+    direction rows visually/pixel-test distinguishable
 ```
 
-The tileset visible slice uses only tile `0` and regular tiles `>=384`; no autotile is required by CI.
+The exact pixel colors/patterns may be chosen when author-created fixture bytes are generated, but the qualification test records the expected fixture pixels and proves the selected source cells are used. It may not replace the real PNGs with CSS boxes.
 
-Third-party Essentials assets MUST NOT be copied into repository, logs or CI artifacts.
+Third-party Essentials assets never enter repo/logs/CI artifacts.
 
-## 8. CI first-slice expected camera facts
+## 9. CI camera facts
 
-With `Map/1`, spawn `(10,8)` and M14/02 camera formula：
+For Map/1 and spawn `(10,8)`：
 
 ```text
 initial cameraX = 16
 initial cameraY = 32
 ```
 
-After the first right move to `(11,8)`：
+After first right move to `(11,8)`：
 
 ```text
 cameraX = 48
 cameraY = 32
 ```
 
-The fixed viewport and these expected values give qualification a deterministic observable for camera recomputation without any DOM→Runtime layout feedback.
+Blocked second right leaves camera unchanged.
 
-## 9. CI vs exact local corpus
+## 10. Browser artifacts
 
-Two evidence paths remain distinct but converge into the same consumer implementation：
+The example consumes package artifacts, not map browser source directly：
+
+```text
+@loomrealm-game/map dist/browser/map.browser.js
+@loomrealm-game/map dist/browser/map.css
+```
+
+The JS is standalone classic script and registers only the frozen first-slice tags needed here：
+
+```text
+lr-map-view
+lr-map-sprite
+```
+
+The example does not define those Custom Elements itself.
+
+## 11. CI vs exact local corpus
+
+Two evidence paths converge on the same implementation：
 
 ```text
 Canonical CI
 → checked-in author-owned semantic FSDB fixture
-→ exact game.json
+→ game.json + presentation.json
 → prepared Content assembly
 → @loomrealm-game/map
 → M13 browser path
@@ -324,15 +358,13 @@ Exact v21.1 local compatibility
 → same @loomrealm-game/map Runtime/browser code
 ```
 
-Local compatibility does not need to re-prove Game Entry parsing because canonical CI already does; its purpose is to prove that exact Essentials v21.1 source can materialize the same required consumer facts and drive the same first-slice map implementation.
-
-The local qualifier MAY accept a map/spawn/character selection because the external corpus is not a repository-owned fixture. That selection is qualification input, not a new game/runtime config API.
+Local selection may specify map/spawn/character because the external corpus is not repository-owned. Selection is qualification input, not a runtime config API.
 
 Local output stays under ignored `.local/` and never commits third-party bytes.
 
-## 10. What the example does not own
+## 12. Explicit non-ownership
 
-M14 example does not create：
+The example does not create：
 
 ```text
 EssentialsAdapter
@@ -345,15 +377,15 @@ responsive layout controller
 asset manifest/service
 ```
 
-M15 will replace the M14 test-owned physical binding/input source with real Desktop Hostra/BrowserWindow physical composition while reusing this same `game.json`, map library and business WC vocabulary.
+M15 replaces M14 test-owned physical composition with real Desktop Hostra/BrowserWindow while reusing the same game/map business path.
 
 ## Closure
 
-- private example workspace exists;
-- exact `game.json` parses/validates and targets logical `map`;
-- fixed example CSS produces 640×480 `lr-map-view`;
-- browser Config loads map CSS → page CSS → classic map JS in order;
-- canonical fixture has frozen Map/Tileset/passability/resource facts;
-- first passable + blocked movement outcomes are predetermined by those persisted facts;
-- CI fixture and local v21.1 materialization enter the same Runtime/browser implementation;
-- no importer/tool object or third-party asset crosses into Runtime or repository artifacts.
+- private example workspace and exact `game.json` exist;
+- exact checked-in `presentation.json` enters existing M13 preparation;
+- page CSS computes `lr-map-view` to 640×480;
+- canonical fixture uses actual projected Table objects, not array shorthand;
+- Map/Tileset passability facts predetermine one allowed + one blocked move;
+- author-owned PNG dimensions/cells are deterministic;
+- CI and exact local materialization enter the same Runtime/browser implementation;
+- no tool/importer object or third-party asset crosses the runtime/repository boundary.
