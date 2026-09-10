@@ -4,7 +4,7 @@
 
 ## Objective
 
-先把 repository ownership 落到文件系统和 npm workspace，再实现 map。M14 不允许继续把业务库放进 framework `packages/`。
+先把 repository ownership 和 package-resolution boundary 落到文件系统/npm workspace，再实现 map。M14 不允许继续把业务库放进 framework `packages/`。
 
 目标结构：
 
@@ -16,16 +16,16 @@ apps/          platform hosts
 tools/         development/import/compatibility tooling
 ```
 
-## Required workspace change
+## 1. Required workspace change
 
-当前 root workspace 只有 `packages/*` 与 `apps/*`。M14/01 增加：
+Root `workspaces` adds：
 
 ```text
 game-libs/*
 examples/*
 ```
 
-预期 npm workspace shape：
+Required shape：
 
 ```json
 {
@@ -38,9 +38,9 @@ examples/*
 }
 ```
 
-`tools/*` 不是 runtime workspace category；现有 fixture/import tooling 保持 tool ownership。
+`tools/*` remains tooling ownership, not a runtime workspace category.
 
-## Package identity
+## 2. Package identity
 
 ```text
 packages/*   → @loomrealm/*
@@ -55,35 +55,121 @@ game-libs/map
 @loomrealm-game/map
 ```
 
-禁止创建 `@loomrealm/map`。
+`@loomrealm/map` is forbidden.
 
-## Dependency rule
+## 3. Map package external seams
+
+The reusable package must be consumable without a caller knowing its `dist/` filesystem layout.
+
+Required package-level seams：
+
+```text
+@loomrealm-game/map
+    Runtime root module
+    default export = SubsystemDefinitionFactory for the map Definition
+
+@loomrealm-game/map/browser/map.browser.js
+    classic-script presentation artifact
+
+@loomrealm-game/map/browser/map.css
+    presentation CSS artifact
+```
+
+Conceptual `exports` shape：
+
+```json
+{
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser/map.browser.js": "./dist/browser/map.browser.js",
+    "./browser/map.css": "./dist/browser/map.css"
+  }
+}
+```
+
+The exact package metadata order is not normative, but these resolvable subpaths are. Example/preparation tooling MUST resolve the package artifacts through package metadata/subpaths rather than hard-code `node_modules/@loomrealm-game/map/dist/...` or reach into `game-libs/map/browser/...` source.
+
+The browser JS/CSS subpaths are artifact-discovery seams, not a new JavaScript presentation SDK. `map.browser.js` remains a classic script as frozen by M14/02.
+
+`files`/pack output must include `dist/` so all three seams survive `npm pack`.
+
+## 4. Dependency direction
 
 ```text
 examples → game-libs → public LoomRealm author APIs
 ```
 
-Framework/runtime packages不得依赖 game libraries/examples；game library runtime side不得 import Renderer/Main/Platform/protocol internals。
-
-## Script hygiene
-
-现有使用 `--workspaces` 的命令在加入 examples 后必须复核语义。Framework/package qualification 不应因为 workspace expansion 隐式把 concrete examples 当成 framework packages。
-
-允许最小拆分：
+For M14 Runtime code, `@loomrealm-game/map` has one LoomRealm runtime dependency：
 
 ```text
-framework package build/test
+@loomrealm/subsystem
+```
+
+It MUST NOT add direct Runtime dependencies on Renderer/Main/Platform/Data/Wire/FSDB/tooling merely because those packages exist transitively elsewhere.
+
+Browser presentation source is standalone classic browser code and does not import Runtime/core package modules at execution time.
+
+Framework/runtime packages never depend on game libraries/examples.
+
+## 5. Concrete example package boundary
+
+`examples/essentials-v21.1/package.json` MUST contain：
+
+```text
+private = true
+type = module
+```
+
+It may depend on `@loomrealm-game/map` and existing framework packages needed by its test/dev composition, but it does not become a published game SDK or Host package.
+
+The example's exact `game.json`, `presentation.json` and page CSS are frozen by M14/03.
+
+## 6. Script hygiene
+
+Adding workspaces changes the expansion of existing `--workspaces` convenience scripts. M14 implementation MUST review each such script before changing root workspaces.
+
+Canonical milestone gates MUST NOT depend on ambiguous workspace expansion; M14's new build/test/pack commands should use explicit workspace/package targets where milestone meaning matters.
+
+Existing M10–M13 canonical gates must retain their previous meaning after workspace expansion. Do not rename/rewrite historical gates merely for cosmetic script cleanup.
+
+Allowed minimal separation：
+
+```text
+existing framework/package gates
 game-lib build/test
 example qualification
 repository-wide convenience command
 ```
 
-不要建立 workspace orchestration framework。
+No workspace orchestration framework.
+
+## 7. Pack qualification
+
+M14 package qualification must resolve and verify：
+
+```text
+import("@loomrealm-game/map")
+    → Runtime root / default map Definition factory
+
+package subpath resolution:
+    @loomrealm-game/map/browser/map.browser.js
+    @loomrealm-game/map/browser/map.css
+```
+
+and `npm pack --dry-run` must include the corresponding `dist` files.
+
+The test does not execute the browser artifact in Node; execution is qualified through the M13 Chromium bootstrap.
 
 ## Closure
 
-- repository taxonomy 与 ADR 0032 一致；
-- `game-libs/` / `examples/` 成为真实 workspaces；
-- existing M13 gate 不因 workspace 扩展改变语义；
-- examples 明确 private；
-- framework package graph 不出现 game-lib/example reverse dependency。
+- `game-libs/*` and `examples/*` are real workspaces;
+- package identity follows ADR 0032;
+- map Runtime root and browser artifact subpaths are resolvable without physical-layout reach-through;
+- map Runtime dependency graph points only to public author APIs;
+- example is private;
+- framework graph has no reverse dependency;
+- existing M13 gate semantics do not change due to workspace expansion;
+- no package/asset registry or workspace orchestration framework is introduced.
