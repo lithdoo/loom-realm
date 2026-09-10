@@ -1,6 +1,6 @@
 # M14 / 05 — Qualification Closure
 
-> 状态：Implementation Landing / M14 Pending
+> 状态：Frozen for Implementation / M14 Pending
 
 ## Closure target
 
@@ -128,9 +128,16 @@ initial.subsystem="map"
 initial.input={mapId:1,x:10,y:8,characterName:"m14_player"}
 ```
 
+Map first-slice state then initializes：
+
+```text
+direction=2/down
+pattern=0
+```
+
 Only then may harness bind `map` to the Definition.
 
-`presentation.json` validates through existing M13 API with：
+`presentation.json` validates through existing M13 behavior with：
 
 ```text
 styles
@@ -158,7 +165,23 @@ Frame active
 
 Early `completed(...)` fails. Teardown uses existing Frame/Runtime lifecycle; no implicit Frame-owned RenderDomain teardown.
 
-## 6. RenderDomain topology gate
+## 6. Input ordering gate
+
+After gameplay initialization the `keyboard.event` handler must be synchronous：
+
+```text
+one accepted event
+→ facing
+→ passability
+→ x/y
+→ camera
+→ full RenderDomain.replace(...)
+→ return
+```
+
+The handler MUST NOT await Content, resource acquisition, browser decode or any other work before authoritative commit. Two sequential input events therefore observe the state produced by the previous event without a new M14 EventQueue/Scheduler abstraction.
+
+## 7. RenderDomain topology gate
 
 Exactly one map business RenderDomain. SDK wire ID opaque：
 
@@ -178,7 +201,7 @@ root key="viewport" tag="lr-map-view"
 
 No visual-only Domains.
 
-## 7. Exact Table/runtime shape gate
+## 8. Exact Table/runtime shape gate
 
 `Map.data`：
 
@@ -208,7 +231,7 @@ Canonical proof：
 tableAt(Map.data,12,8,0)==385
 ```
 
-## 8. Frozen CI fixture/resources gate
+## 9. Frozen CI fixture/resources gate
 
 ```text
 Map/1 width=24 height=18 tileset_id=1
@@ -239,7 +262,7 @@ Graphics/Characters/m14_player
 
 No third-party Essentials bytes.
 
-## 9. Input / RMXP passability gate
+## 10. Input / RMXP passability gate
 
 Prove passage bits and first-slice algorithm：
 
@@ -264,7 +287,7 @@ ArrowRight down repeat=false → tile385 blocks left-entry 0x02
 
 No keyup/repeat/timer/keyboard.state substitute. Event collision, through/debug, terrain and transitions are nonclaims.
 
-## 10. Fixed viewport / intersecting visible-window gate
+## 11. Fixed viewport / intersecting visible-window gate
 
 Logical/presentation invariants：
 
@@ -289,19 +312,31 @@ Expected camera/bounds：
 ```text
 player (10,8)
 camera=(16,32)
+player screen=(304,224)
 intersecting x=0..20, y=1..15
 
 player (11,8)
 camera=(48,32)
+player screen=(304,224)
 intersecting x=1..21, y=1..15
 
 blocked second right
-camera/bounds unchanged
+world/camera/player-screen/bounds unchanged
 ```
 
 The 21 intersecting columns are intentional when cameraX is not tile-aligned. Qualification MUST NOT assert `tiles.length==20*15` merely from the nominal grid.
 
-## 11. Canonical visible-tile projection gate
+The canonical first movement MUST NOT require the centered player's screen placement to change. Visible movement is proved by：
+
+```text
+world x 10→11
+facing 2→6
+cameraX 16→48
+map/Canvas content shifts left 32 CSS px
+canonical tile (12,8) screen x 368→336
+```
+
+## 12. Canonical visible-tile projection gate
 
 For every intersecting `(x,y,z)` Runtime uses `tableAt(Map.data,x,y,z)` and applies：
 
@@ -321,7 +356,7 @@ then x ascending
 
 With canonical fixture z1/z2 are zero, so initial `tiles[]` consists of non-zero z0 entries for `x=0..20,y=1..15` in y/x order. Browser must draw received order and MUST NOT re-sort/reconstruct RMXP layer semantics.
 
-## 12. Tile pixel gate
+## 13. Tile pixel gate
 
 Prove：
 
@@ -347,22 +382,38 @@ id>=384:
 
 Tile384/385 must resolve to distinct fixture cells. No required autotile or priority-over-player visual in canonical CI. Canvas pixel-art drawing has smoothing disabled.
 
-## 13. Resource / async currentness gate
+## 14. Resource / async currentness gate
 
 Both resources go through Runtime `ContentClient.resource()` for version, Render `{namespace,key,contentVersion}`, then PresentationResourceClient for browser bytes and actual visible pixels.
 
 No raw bytes/path/URL/bearer in Render state; no metadata/HEAD API.
 
-If WC resource/decode work is async, stale completion must not paint after a newer resource ref/version. No fake fallback pixels.
+WC currentness requirement is stronger than resource-version equality：
 
-## 14. Exact Render-data gate
+```text
+receiveRenderData A
+→ async decode starts
+
+receiveRenderData B
+→ same image resource/version may remain current
+→ camera/tiles/direction may differ
+
+A decode completion
+→ MAY populate matching resource cache
+→ MUST paint from latest retained B
+  OR MUST be rejected by a private data-generation check
+```
+
+Qualification must include at least one delayed decode/resource case proving old camera/tiles/direction cannot paint after newer data merely because the image resource/version matches. No fake fallback pixels.
+
+## 15. Exact Render-data gate
 
 `lr-map-view.data` exact：
 
 ```text
 mapId,mapWidth,mapHeight,cameraX,cameraY
 tileset {namespace,key,contentVersion}
-tiles[] {x,y,z,tileId} with §11 inclusion/order
+tiles[] {x,y,z,tileId} with §12 inclusion/order
 ```
 
 `lr-map-sprite.data` exact：
@@ -372,9 +423,9 @@ x,y,screenX,screenY,direction,pattern=0
 sprite {namespace,key,contentVersion}
 ```
 
-No source/physical extras.
+Runtime publishes current full `RenderDomainState` using `replace(...)`; M14 introduces no map delta/update protocol. M13 delivers current full node data according to its frozen ABI. No source/physical extras.
 
-## 15. Web Component / DOM identity gate
+## 16. Web Component / DOM identity gate
 
 Required tags exactly：
 
@@ -393,11 +444,11 @@ Chromium observes：
 </body>
 ```
 
-Prove private tile Canvas + entity slot/overlay, player light-DOM ownership, no per-tile WC, same view/sprite HTMLElement through both attempts, visible first move and no visible blocked move.
+Prove private tile Canvas + entity slot/overlay, player light-DOM ownership, no per-tile WC, same view/sprite HTMLElement through both attempts, centered player through the first movement, 32px map shift on the first movement and no map/world movement on the blocked second attempt.
 
 Player uses real 4×4 sheet and bottom-center crop/placement frozen by M14/02–04.
 
-## 16. CSS / package artifact / bootstrap gate
+## 17. CSS / package artifact / bootstrap gate
 
 Prepared assembly resolves only：
 
@@ -410,13 +461,31 @@ and materializes those under checked-in Config logical refs. Page CSS is `Presen
 
 Map JS executes as classic script, has no runtime ESM graph and natively defines both tags before Projector startup.
 
-No direct browser-source import, manual tag definition, replacement CSS or package-private `dist/`/source reach-through.
+No direct browser-source import, manual tag definition, replacement CSS or package-private map `dist/`/source reach-through.
 
-## 17. Physical-input/process boundary
+## 18. M13 qualification-composition gate
+
+M13 intentionally keeps Web Projector/bootstrap/config-preparation implementation off the public Renderer root. M14 does not add a public presentation API merely for qualification.
+
+Automated boundary checks prove：
+
+```text
+game-libs/map/**/*
+examples/essentials-v21.1 business/runtime/browser code
+    do not import packages/renderer/dist/internal/*
+
+repository-owned M14 qualification harness
+    may reuse existing M13 internal composition mechanics
+    only to construct/drive the test Window
+```
+
+That test-only reach-through is not a game-author/package seam and must not be exported or copied into runtime/example business code. Production Desktop Window composition remains M15 scope.
+
+## 19. Physical-input/process boundary
 
 M14 uses existing/synthetic RendererInputSource through M10. M15 owns real Hostra Node child + Electron BrowserWindow + physical DOM input + reload/reconnect/shutdown. PWA Window physical input belongs to M17. Historical future-looking M10 text has been corrected; no M10 API change.
 
-## 18. Exact local-v21.1 command
+## 20. Exact local-v21.1 command / PASS gate
 
 ```text
 npm run test:m14:essentials-local -- \
@@ -429,14 +498,36 @@ npm run test:m14:essentials-local -- \
 
 Work root：`.local/m14-essentials/`.
 
-Run existing importer/acquisition → M14 consumer projection → same prepared Content/package artifacts → same map Runtime/browser implementation. Record source fingerprint, selection and semantic/presentation result.
+Run existing importer/acquisition → M14 consumer projection → same prepared Content/package artifacts → same map Runtime/browser implementation.
 
-A meaningful exact-corpus slice that requires unsupported behavior fails explicitly until the smallest real addition is made or another meaningful supported slice is selected.
+Local PASS requires all of：
 
-## 19. Closure record / reopen policy
+```text
+exact source fingerprint/version recorded
+selected Map/Tileset projected successfully
+actual projected Table shape/index used by same runtime implementation
+selected tileset raw resource resolved from source
+selected character raw resource resolved from source
+same @loomrealm-game/map Runtime starts
+same fixed 640×480 M13 Chromium presentation starts
+at least one real regular tile is visibly derived from source resource bytes
+real selected player sprite is visible
+one non-repeat directional input traverses M10
+resulting world state agrees with persisted passability facts for that attempted move
+```
+
+The local run does NOT have to reproduce both canonical passable and blocked branches; canonical CI owns those deterministic branch proofs. A meaningful exact-corpus slice that requires unsupported behavior fails explicitly until the smallest real addition is made or another meaningful supported slice is selected.
+
+## 21. Closure record / reopen policy
 
 At actual closure create/update `doc/30-implementation/m14-qualification.md` with closure SHA, Node20/24 run, exact source fingerprint/selection, projection summary, relevant record/resource counts, movement result, visible resource/tile result, WC/DOM result and final pass/fail. Never record third-party bytes.
 
 Reopen M10–M13 only for demonstrated contradiction, genuinely absent capability, impossible exact-consumer behavior or measurable workload failure—not for prettier IDs, resource-read duplication, responsive speculation, ESM preference or generic-map aesthetics.
 
 M14 Closed does not claim complete Essentials gameplay/maps, autotiles, priority-over-player rendering, event collision/interpreter, transitions, responsive viewport, Tick API, Desktop physical E2E, PWA equivalence, universal map schema or public map presentation SDK.
+
+## Freeze declaration
+
+M14/01–05 plus `M14_CONSUMER_PROJECTION.md` are frozen for implementation once their repository revisions contain the same rules above. `Frozen for Implementation` means implementation should no longer invent or redesign ownership, business semantics, topology, Render data, presentation structure or qualification criteria. It does **not** mean M14 is Closed.
+
+M14 remains `Pending` until both canonical CI and one same-revision exact-v21.1 local qualification pass and the closure record is written.
