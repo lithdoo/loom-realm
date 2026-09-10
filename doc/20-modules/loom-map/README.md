@@ -1,7 +1,7 @@
 # Map Game Library 设计
 
 > 层级：Game Library 设计  
-> 状态：Active Design / M14 Pending  
+> 状态：Frozen for Implementation / M14 Pending  
 > 稳定程度：M10–M13 consumed boundaries closed；M14 first-slice implementation shape frozen  
 > 主要定义：`game-libs/map` reusable map business library + map-owned Web presentation  
 > 精确 landing：根目录 `M14_02_MAP_GAME_LIBRARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
@@ -70,6 +70,8 @@ Browser side
 
 Runtime may not import DOM/Renderer/Main/Platform/tooling. Browser side may not obtain business-authority objects or physical Content credentials.
 
+Repository-owned M14 qualification code may reuse the already-qualified M13 internal Window-composition mechanics solely as test harness infrastructure. That exception is not a game-library/example author seam and is not exported; real Desktop Window composition remains M15 scope.
+
 ## Content boundary
 
 M14 does not define `MapNormalizedV1` or a universal map schema.
@@ -107,6 +109,13 @@ Initial input：
 { mapId, x, y, characterName }
 ```
 
+Initial package-owned state：
+
+```text
+direction=2/down
+pattern=0
+```
+
 Initial map Frame is long-lived：
 
 ```text
@@ -128,7 +137,9 @@ ArrowRight → d=6
 ArrowUp    → d=8
 ```
 
-Only non-repeat key-down causes one tile movement attempt. Blocked movement sets facing but keeps x/y. Real Desktop DOM input belongs to M15; M14 uses existing/synthetic RendererInputSource.
+Only non-repeat key-down causes one tile movement attempt. Blocked movement sets facing but keeps x/y. After initialization the movement handler is synchronous through facing → passability → x/y → camera → full RenderDomain.replace before returning; it does not await Content/resource/decode work.
+
+Real Desktop DOM input belongs to M15; M14 uses existing/synthetic RendererInputSource.
 
 ## RMXP passability subset
 
@@ -150,8 +161,8 @@ M14 excludes event collision, through/debug behavior, terrain effects and map tr
 First slice：
 
 ```text
-tile size        32
-CSS viewport     640×480
+tile size         32
+CSS viewport      640×480
 nominal full grid 20×15
 ```
 
@@ -165,6 +176,8 @@ cameraY=clamp(playerY*32-224,0,max(mapHeight*32-480,0))
 ```
 
 Visible bounds include every tile cell intersecting the pixel viewport. A non-tile-aligned camera may therefore intersect one extra edge column/row; `20×15` is not a fixed `tiles.length`. Canonical initial `cameraX=16` intersects 21 columns.
+
+For the canonical move `(10,8)→(11,8)` the camera moves `(16,32)→(48,32)` while player screen origin stays `(304,224)`. Visible movement is map/Canvas content shifting left 32 CSS px plus world/facing change; qualification does not require the centered sprite screen position to move.
 
 ## Render ownership
 
@@ -218,6 +231,8 @@ direction
 pattern=0
 sprite {namespace,key,contentVersion}
 ```
+
+Runtime publishes current full RenderDomain state through `replace(...)`; M14 adds no map delta protocol. M13 may optimize replication internally and WC receives current full node data.
 
 No path/URL/token/bytes/source wrapper enters Render state.
 
@@ -274,7 +289,7 @@ dist/browser/map.css
 
 External consumers resolve these through the package subpaths above. Runtime ESM build remains separate; M14 does not reopen M13 into an ESM loader.
 
-## Resource flow
+## Resource flow / currentness
 
 ```text
 Runtime ContentClient.resource()
@@ -285,7 +300,13 @@ Runtime ContentClient.resource()
 → actual Canvas/sprite pixels
 ```
 
-Async resource/decode completion paints only when its ref/version is still current. Runtime/Renderer may read the same resource independently. No metadata/HEAD API or AssetManager.
+Async resource/decode completion may populate a cache, but it must repaint from the latest retained node data or pass an equivalent private data-generation check. Matching resource ref/version alone is insufficient because camera/tiles/direction can change while the same image remains current. Old captured render data must never repaint over newer state.
+
+Runtime/Renderer may read the same resource independently. No metadata/HEAD API or AssetManager.
+
+## Exact local evidence
+
+Local exact-v21.1 qualification uses the same importer projection, prepared Content, map Runtime and browser code. PASS requires projected Map/Tileset/Table consumption, real selected tileset/player resources, real Chromium visibility of at least one regular source tile and the player, and one non-repeat M10 directional attempt whose resulting world state agrees with persisted passability facts. Canonical CI, not local corpus selection, owns the deterministic proof of both passable and blocked branches.
 
 ## Abstraction budget
 
