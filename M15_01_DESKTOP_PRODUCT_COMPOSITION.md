@@ -1,6 +1,6 @@
 # M15 / 01 — Desktop Product Composition
 
-> 状态：**Implementation Planned / Boundary Frozen**  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 落地顺序：01  
 > 最近复核：2026-09-10  
