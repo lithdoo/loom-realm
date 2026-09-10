@@ -2,17 +2,18 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 implementation landing frozen  
-> 主要定义：M1..M17 实现顺序、current closure、Desktop/PWA qualification boundary  
-> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Frozen for Implementation / Pending**  
+> 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 最近复核：2026-09-10
 
 ## Delivery order
 
 ```text
-Foundation/Wire
+Foundation / Wire
 → Game document
 → Runtime Control
-→ Subsystem Runtime/Frame
+→ Subsystem Runtime / Frame
 → Main authority
 → Hostra Runtime
 → Renderer Control
@@ -22,10 +23,10 @@ Foundation/Wire
 → Render Replication
 → Content
 → Web Presentation
-→ Map Game Library + first concrete game
-→ Desktop full E2E
+→ Map Game Library + First Real Game
+→ Desktop Full E2E
 → PWA Runtime
-→ PWA full E2E/equivalence
+→ PWA Full E2E / Equivalence
 ```
 
 Rules：
@@ -35,7 +36,7 @@ Package Scope != Implementable Slice != Milestone Closure
 Framework Package != Game Library != Concrete Game
 ```
 
-Do not prebuild fake v2, deprecated aliases or generic frameworks for hypothetical later consumers.
+Do not prebuild fake v2、deprecated aliases or generic frameworks for hypothetical later consumers。
 
 ---
 
@@ -45,7 +46,7 @@ Do not prebuild fake v2, deprecated aliases or generic frameworks for hypothetic
 M1 Foundation + Wire
 M2 Game Package
 M3 Runtime Control
-M4 Subsystem Runtime/Frame
+M4 Subsystem Runtime / Frame
 M5 Main Core
 M6 Hostra Runtime
 M7 Renderer Control
@@ -53,7 +54,7 @@ M8 Renderer Data
 M9 Desktop Data Broker
 ```
 
-Closed on the existing mainline implementation/qualification path.
+Closed on the existing mainline implementation/qualification path。
 
 ---
 
@@ -65,9 +66,9 @@ Canonical gate：
 npm run test:m10
 ```
 
-Frozen result：Subsystem `InputListener`, Main InputTarget/Activation authority, Renderer producer/gate seam.
+Frozen result：Subsystem `InputListener`、Main InputTarget/Activation authority、Renderer producer/gate seam。
 
-Physical producer ownership for future milestones：
+Physical producer placement：
 
 ```text
 M14
@@ -80,7 +81,7 @@ M17 PWA
 → equivalent physical Window producer semantics
 ```
 
-Any older future-looking M10 note assigning real Desktop DOM input to M14 is superseded by this milestone partition; the M10 API itself is unchanged.
+Older wording assigning real Desktop DOM input to M14 is superseded；M10 API is unchanged。
 
 ---
 
@@ -92,16 +93,16 @@ Canonical gate：
 npm run test:m11
 ```
 
-Closed：Subsystem authoritative RenderDomain, Render Update v1, Renderer Store, one-shot node identity, reconnect baseline semantics and Event transient behavior.
+Closed：Subsystem authoritative RenderDomain、Render Update v1、Renderer Store、one-shot node identity、reconnect baseline semantics and Event transient behavior。
 
-Important M14 consumer constraint：
+M14 constraint：
 
 ```text
 createRenderDomain(initialState)
 → SDK assigns opaque domainId
 ```
 
-Business authors do not choose `domainId`; M14 must not reopen this surface.
+Business authors do not choose `domainId`；M14 does not reopen this surface。
 
 ---
 
@@ -113,7 +114,7 @@ Canonical gate：
 npm run test:m12
 ```
 
-Closed：readonly Content Service/FSDB path, Subsystem `ContentClient`, Renderer trusted/private resource path and version/credential boundary.
+Closed：readonly Content Service/FSDB path、Subsystem `ContentClient`、Renderer trusted/private resource path、version/credential boundary。
 
 M14 reuses：
 
@@ -123,7 +124,7 @@ ContentClient.resource()
 PresentationResourceClient
 ```
 
-No metadata/HEAD API is added merely for the first game consumer.
+No new metadata/HEAD author API is added merely for the first game consumer。
 
 ---
 
@@ -144,7 +145,7 @@ ADR 0031
 M13_01..05 landing docs
 ```
 
-Core implementation flow：
+Core flow：
 
 ```text
 prepared M12 Content
@@ -152,10 +153,10 @@ prepared M12 Content
 → business customElements registration
 → window.onload
 → thin Web Projector
-→ document.body / business WC
+→ business WC
 ```
 
-Frozen identity/currentness remains：
+Frozen identity/currentness：
 
 ```text
 identity = (Session, subsystemKey, generation, domainId, key)
@@ -163,13 +164,13 @@ same identity → same HTMLElement
 fresh Session/generation → fresh element universe
 ```
 
-M14 uses this surface as a consumer; it does not introduce a second presentation store, map SDK, loader or component framework.
+M14 consumes this surface；it does not introduce a second presentation store、loader、component registry or map SDK in Renderer。
 
 ---
 
-## M14 — Map Game Library + First Real Game — pending
+## M14 — Map Game Library + First Real Game 🔒 Pending Implementation
 
-M14 first proves framework consumer layering：
+M14 proves that M10–M13 can support a real independent business consumer without new core machinery：
 
 ```text
 examples/essentials-v21.1
@@ -184,7 +185,7 @@ M10 Input + M11 Render + M12 Content + M13 Presentation
 observable playable RMXP-compatible map slice
 ```
 
-Landing docs are normative in this order：
+Normative landing order：
 
 ```text
 M14_01_WORKSPACE_BOUNDARY.md
@@ -194,24 +195,30 @@ M14_01_WORKSPACE_BOUNDARY.md
 → M14_05_QUALIFICATION_CLOSURE.md
 ```
 
+Consumer projection authority：
+
+```text
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
+```
+
 ### M14/01 — workspace ownership
 
-Add：
+M14 adds：
 
 ```text
 game-libs/*
 examples/*
 ```
 
-Package ownership：
+Ownership：
 
 ```text
 packages/*   → @loomrealm/* framework
- game-libs/* → @loomrealm-game/* reusable game-domain libraries
+game-libs/*  → @loomrealm-game/* reusable game-domain libraries
 examples/*   → private concrete games
 ```
 
-No framework reverse dependency on game libraries/examples.
+No framework reverse dependency on game libraries/examples。
 
 ### M14/02 — exact map first slice
 
@@ -223,31 +230,34 @@ one business subsystemKey = "map"
 
 one business RenderDomain
 → SDK-assigned opaque wire domainId
-→ M14 never depends on id spelling
 ```
 
-The initial map Frame is long-lived through gameplay input. Player/tile/camera are state/presentation vocabulary, not extra Subsystems.
+Initial map Frame remains long-lived while gameplay input is expected。Player/tile/camera are business/presentation state, not extra Subsystems。
 
-Content representation：
+Selective Content path：
 
 ```text
-RMXP/Essentials semantic authority
-→ importer consumer JsonValue projection
-→ Map/{id} + Tileset/{id}
-→ prepared FSDB
+RMXP/Essentials source semantics
+→ existing importer/lossless representation
+→ selective consumer projection
+→ Map/{id}: tileset_id,width,height,data
+→ Tileset/{id}: id,tileset_name,passages,priorities
+→ prepared Content
 → ContentClient
 → map Runtime
 ```
 
-First-slice input：
+Unused MapInfo/Event/MapMetadata/Color/Tone/AudioFile facts remain outside M14 consumer records until a real behavior consumes them。
+
+Input first slice：
 
 ```text
 keyboard.event
 non-repeat Arrow key down
-→ one tile movement attempt
+→ synchronous one-tile movement attempt
 ```
 
-RMXP passability subset uses frozen passage bits, top-down map layers, priorities, source-direction and target reverse-direction checks.
+RMXP passability uses frozen directional passage bits、top-down source layers/priorities and source-direction + target reverse-direction checks。
 
 Fixed presentation constants：
 
@@ -257,73 +267,50 @@ CSS viewport = 640×480
 nominal grid = 20×15
 ```
 
-Runtime owns logical-pixel camera; no DOM→Runtime layout/resize feedback.
+Runtime owns logical camera；no DOM→Runtime resize/layout feedback。
 
-Exact Render tree：
-
-```text
-key="viewport" tag="lr-map-view"
-└── key="player" tag="lr-map-sprite"
-```
-
-Exact package-private data includes camera/resource/visible-tile facts for the view and world/screen/direction/resource facts for the player.
-
-Tile rendering subset：
+Exact managed tree：
 
 ```text
-0       → transparent
->=384   → regular 32×32 tileset tile
-48..383 → autotile not required by canonical M14 CI slice
+lr-map-view
+└── lr-map-sprite
 ```
 
-`lr-map-view` owns private Shadow DOM + tile Canvas + entity slot. `lr-map-sprite` owns character-sheet crop/placement.
+`lr-map-view` owns private tile drawing/clipping/overlay mechanics。Its exact private Shadow wrapper/class topology is not normative。Every current full view repaint clears the logical Canvas before drawing current ordered `tiles[]`。
 
-M13 loads classic scripts, so map browser output is a standalone classic artifact with no execution-time ESM graph.
+Map browser JS/CSS are standalone package artifacts loaded through prepared Content + M13 classic bootstrap。
 
 ### M14/03 — concrete example / fixture
 
-`examples/essentials-v21.1/game.json` uses：
+`examples/essentials-v21.1/game.json` initial input：
 
 ```text
-subsystem = "map"
-input = { mapId:1, x:10, y:8, characterName:"m14_player" }
+{ mapId:1, x:10, y:8, characterName:"m14_player" }
 ```
 
-Example page CSS fixes `lr-map-view` to 640×480 and owns centering/margin/scroll policy.
+Example page CSS fixes `lr-map-view` to 640×480 and owns page placement only。
 
-Prepared Content composes：
-
-```text
-semantic FSDB
-+ map browser classic JS
-+ map component CSS
-+ example page CSS
-+ WebPresentationConfig refs
-```
-
-Canonical CI uses an author-owned fixture with predetermined Map/Tileset/passability facts and author-owned PNG resources. It must not use third-party Essentials assets.
-
-Exact local Essentials v21.1 source remains separate compatibility evidence but enters the same consumer implementation.
+Canonical CI uses repository-author-owned semantic fixture + PNGs。Exact external Essentials v21.1 corpus remains separate local compatibility evidence；third-party bytes are never committed。
 
 ### M14/04 — real consumer vertical
 
-Required observable chain：
+Required chain：
 
 ```text
 game.json validation
 → long-lived map Frame
-→ Map/Tileset Content reads
+→ selective Map/Tileset Content reads
 → resource version confirmation
-→ initial Render
-→ real M13 bootstrap
-→ 640×480 lr-map-view + player
-→ real regular-tile Canvas pixels
-→ first ArrowRight moves from (10,8) to (11,8)
-→ second ArrowRight is blocked at (12,8)
-→ same lr-map-view / lr-map-sprite HTMLElements retained
+→ initial full Render state
+→ M13 bootstrap
+→ real Chromium
+→ real regular-tile Canvas pixels + player sprite
+→ first ArrowRight: (10,8) → (11,8)
+→ second ArrowRight: blocked at target (12,8)
+→ same lr-map-view / lr-map-sprite live identities retained
 ```
 
-M14 uses existing/synthetic RendererInputSource. Real Desktop DOM physical producer/Node child/BrowserWindow/reload-shutdown belongs to M15.
+M14 uses existing/synthetic RendererInputSource and test-owned physical composition。Real Node child/BrowserWindow/DOM physical input/reload-shutdown belong to M15。
 
 ### M14/05 — closure
 
@@ -333,7 +320,7 @@ Canonical CI target：
 npm run test:m14
 ```
 
-M14 `Closed` additionally requires one exact-v21.1 local qualification against the same closure revision：
+M14 `Closed` additionally requires same-revision local compatibility evidence：
 
 ```text
 npm run test:m14:essentials-local -- \
@@ -344,9 +331,9 @@ npm run test:m14:essentials-local -- \
   --character-name <name>
 ```
 
-Closure evidence records commit SHA, Node 20/24 CI result, source fingerprint, selected local slice, consumer-projection result and semantic/browser result. Third-party bytes never enter the repository.
+Closure record captures commit SHA、Node 20/24 result、source fingerprint/selected local slice、projection result and semantic/browser evidence。
 
-M14 Closed proves one real RMXP/Essentials-compatible consumer slice only. It does not claim autotile completeness, event interpreter/collision completeness, responsive viewport, full Essentials gameplay or Desktop/PWA physical E2E.
+M14 Closed proves one real RMXP/Essentials-compatible consumer slice only。It does not claim autotile/event-interpreter completeness、responsive viewport or Desktop/PWA physical E2E。
 
 ---
 
@@ -358,40 +345,52 @@ Replace M14 test-owned physical composition with real Desktop composition：
 PREPARE
 → Main
 → Hostra RuntimeHosting
-→ real Node Runner child for logical "map"
-→ Data Broker
+→ real Node Runner child for "map"
+→ Data Broker + Desktop Content
 → Electron BrowserWindow
 → M13 presentation
-→ real DOM Keyboard/Pointer/Gamepad RendererInputSource
+→ real DOM RendererInputSource
 → same M14 game/map Runtime/WC
-→ reload/reconnect/shutdown
+→ reload / reconnect / shutdown
 ```
 
-M15 must not redesign Input/Render/Content/Web Presentation or map consumer semantics merely because the physical host is now real.
+M15 must not redesign M10–M14 logical/business semantics because the physical host becomes real。
 
 ---
 
 ## M16 — PWA Runtime — pending
 
-Close only PWA runtime hosting mechanics：
+Close only PWA Runtime hosting mechanics：
 
 ```text
 PWA PREPARE
-Worker Runner
-RuntimeHosting
-Runtime Control MessagePort
-Main ↔ Worker ↔ Subsystem lifecycle
+→ Dedicated Worker Runner
+→ RuntimeHosting
+→ Runtime Control MessagePort
+→ Main ↔ Worker ↔ Subsystem lifecycle
+→ termination/failure
 ```
 
-Do not duplicate M14 game semantics.
+PWA Renderer/Data/Content/Web presentation are not required for M16 closure。Existing Subsystem host can expose the normal unavailable Content capability until M17 supplies a physical ContentClient。
 
 ---
 
 ## M17 — PWA Full E2E / Equivalence — pending
 
-Complete Window Renderer Control, PWA Data broker, physical input, Content, M13 presentation and the same concrete M14 game/business WC.
+Complete：
 
-Equivalence compares logical semantics/outcome, not identical PID/Worker, WebSocket/MessagePort or physical storage implementation.
+```text
+Window Renderer Control
+→ PWA Data broker / provisioning
+→ PWA Content
+→ physical Window input
+→ Render
+→ M13 presentation
+→ same concrete M14 game/business WC
+→ Hostra/PWA logical-outcome equivalence
+```
+
+Equivalence compares shared logical semantics/business outcomes, not identical PID/Worker、WebSocket/MessagePort or physical storage implementation。
 
 ---
 
@@ -403,10 +402,10 @@ M10 User Input                             ✅ Closed
 M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game     pending
-M15 Desktop full E2E                       pending
+M14 Map Game Library + First Real Game     🔒 Frozen for Implementation / Pending
+M15 Desktop Full E2E                       pending
 M16 PWA Runtime                            pending
-M17 PWA full E2E/equivalence               pending
+M17 PWA Full E2E / Equivalence             pending
 ```
 
 Current canonical executable closure remains：
@@ -415,4 +414,4 @@ Current canonical executable closure remains：
 npm run test:m13
 ```
 
-Next work is implementation of M14/01–05 exactly as frozen; do not reopen core seams for prettier domain ids, responsive layout speculation, ESM loader preference or hypothetical generic map abstractions.
+Next work is M14 implementation exactly against the frozen landing。Do not reopen core seams for prettier domain ids、responsive-layout speculation、ESM-loader preference or hypothetical generic map abstractions。
