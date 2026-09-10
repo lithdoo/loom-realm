@@ -1,6 +1,7 @@
 # M14 / 01 — Workspace and Game Ownership Boundary
 
-> 状态：**Implemented / Qualified / Closed**
+> 状态：**Implemented / contract frozen; formal requalification pending**
+> Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented workspace/package boundary; it does not independently claim milestone closure.
 
 ## Objective
 
@@ -164,6 +165,8 @@ and `npm pack --dry-run` must include the corresponding `dist` files.
 The test does not execute the browser artifact in Node; execution is qualified through the M13 Chromium bootstrap.
 
 ## Closure
+
+This boundary is implemented and frozen. Formal M14 closure is nevertheless governed by the current qualification subject recorded in `doc/30-implementation/m14-qualification.md`.
 
 - `game-libs/*` and `examples/*` are real workspaces;
 - package identity follows ADR 0032;
