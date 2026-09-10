@@ -2,12 +2,12 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 implementation boundary frozen  
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
 > 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
-> 最近复核：2026-09-09
+> 最近复核：2026-09-10
 
 本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。
 
@@ -212,13 +212,20 @@ game-libs/map
     @loomrealm-game/map
 ```
 
-M14 不定义另一套 normalized map schema，但区分 semantic authority 与 Runtime representation：
+M14 不定义 universal/normalized map schema。它区分 source semantics、consumer representation 与 Runtime access：
 
 ```text
-RMXP/Essentials map model
-    semantic authority
+RMXP/Essentials source
+    semantic authority for facts actually consumed
 
-prepared FSDB JSON records/resources
+existing importer/lossless representation
+    source fidelity / decoder representation
+
+selective M14 consumer JSON
+    Map/{id}: tileset_id,width,height,data
+    Tileset/{id}: id,tileset_name,passages,priorities
+
+prepared Content
     persisted/runtime representation
 
 ContentClient
@@ -229,19 +236,20 @@ ContentClient
 
 ```text
 Essentials source
-→ tools/fixtures/essentials-v21.1
-→ Ruby/Marshal/RMXP decode/internal representation
-→ semantic JSON materialization
-→ prepared FSDB JSON records + raw resources
+→ tools/fixtures/essentials-v21.1 importer/lossless decode
+→ selective Map/Tileset consumer projection
+→ prepared FSDB records + raw resources
 → M12 ContentClient
 → @loomrealm-game/map
 ```
 
-`RPG::Map` / `RPG::Tileset` / `RPG::Event` / RGSS `Table` / Essentials map metadata等名称定义 FSDB JSON records 的业务语义来源，不表示 map runtime 接收对应 decoder object。Map runtime只读取 `ContentClient.record()` 返回的 `JsonValue`，不得依赖 Ruby Marshal binary、`.rxdata` decoding、`RmxpObject/RubyString/$id/$ref/$typed`、decoder class/object或 tooling filesystem layout。
+M14 不因 importer 能识别 `RPG::Event`、MapInfo、Color/Tone、AudioFile 等对象就把它们递归 materialize 到 first-slice consumer view。未消费 source facts继续留在 existing importer/lossless evidence；later real behavior需要时再增加最小 source-specific projection。
 
-可见资源以 logical identity/version进入 Render state，WC再通过 `PresentationResourceClient`取 bytes。Map browser JS/CSS也必须通过 prepared Content + `WebPresentationConfigV1`启动。
+Map runtime只读取 `ContentClient.record()` 返回的普通 JsonValue，不依赖 Ruby Marshal binary、`.rxdata` decoding、`RmxpObject/RubyString/$id/$ref/$typed`、decoder object或 tooling filesystem layout。
 
-M14 qualification可使用 test-owned composition harness复用 existing production roles + real Chromium；该 harness不是新的 production Platform/Host，完整 Desktop composition仍属于 M15。
+可见资源以 logical identity/version进入 Render state，WC再通过 `PresentationResourceClient`取 bytes。Map browser JS/CSS也通过 prepared Content + `WebPresentationConfigV1`启动。
+
+M14 qualification可使用 test-owned composition harness复用 existing roles + real Chromium；该 harness不是新的 production Platform/Host，完整 Desktop composition属于 M15。
 
 ---
 
@@ -253,9 +261,9 @@ M10 Input
 → M12 Content
 → M13 Web Presentation
 → M14 Map Game Library + First Real Game
-→ M15 Desktop full E2E
+→ M15 Desktop Full E2E
 → M16 PWA Runtime
-→ M17 PWA full E2E/equivalence
+→ M17 PWA Full E2E / Equivalence
 ```
 
-M14 不 reopen M10–M13 frozen contracts，也不把 RMXP-compatible FSDB map semantics升级为 LoomRealm universal map contract。
+M14 不 reopen M10–M13 frozen contracts，也不把 RMXP-compatible map semantics升级为 LoomRealm universal map contract。M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
