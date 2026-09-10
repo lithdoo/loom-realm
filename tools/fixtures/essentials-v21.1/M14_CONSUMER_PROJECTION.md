@@ -1,6 +1,6 @@
 # M14 Consumer Projection — RMXP/Essentials → Runtime FSDB JSON
 
-> 状态：M14 Implementation Addendum / Preimplementation Frozen Candidate  
+> 状态：Frozen for Implementation / M14 Pending  
 > 适用范围：`tools/fixtures/essentials-v21.1` 新增的 consumer-facing semantic projection  
 > 依赖：existing importer RC、M12 Content API、M14 Map Game Library  
 > 日期：2026-09-09
