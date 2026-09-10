@@ -1,6 +1,6 @@
 # M14 / 01 — Workspace and Game Ownership Boundary
 
-> 状态：Implementation Landing / M14 Pending
+> 状态：Frozen for Implementation / M14 Pending
 
 ## Objective
 
