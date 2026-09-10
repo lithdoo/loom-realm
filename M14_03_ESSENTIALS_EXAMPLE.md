@@ -1,6 +1,6 @@
 # M14 / 03 — Essentials v21.1 Concrete Example
 
-> 状态：Implementation Landing / M14 Pending
+> 状态：Frozen for Implementation / M14 Pending
 
 ## Objective
 
@@ -33,6 +33,7 @@ map Runtime semantics
 map Web Component internals
 Desktop Hostra process topology
 source/importer implementation
+M13 Renderer internal implementation
 ```
 
 Concrete logical key：
@@ -68,6 +69,13 @@ Checked-in `game.json` is：
 
 Qualification MUST read this file and run existing `@loomrealm/game-package` parsing/validation before Main receives initial target/input.
 
+`direction` is deliberately not part of GameEntry input. The M14 map first slice initializes authoritative facing to：
+
+```text
+direction=2 / down
+pattern=0
+```
+
 M14 harness owns only：
 
 ```text
@@ -94,7 +102,7 @@ Checked-in `presentation.json` is：
 }
 ```
 
-Qualification reads this file as the Config candidate and runs the existing M13 validation/preparation path. Test code MUST NOT replace it with an inline alternate Config.
+Qualification reads this file as the Config candidate and runs the existing M13 validation/preparation behavior. Test code MUST NOT replace it with an inline alternate Config.
 
 The Config carries logical refs only; browser href/src binding remains test/Window composition mechanics as frozen by M13.
 
@@ -154,7 +162,27 @@ map/map.browser.js        text/javascript
 
 The preparation step MAY copy/materialize resolved artifact bytes and create the test-local Content view. It MUST NOT perform another map semantic transform, rewrite WC code, manually register tags, parse RMXP source, become a production Host or become a generic GamePackager/ContentBuilder.
 
-## 6. Fixed 640×480 page composition
+## 6. M13 qualification-composition ownership
+
+M13 intentionally keeps Web Projector/bootstrap/config-preparation implementation off the public Renderer root. M14 does not reopen that decision merely to create an example.
+
+Frozen boundary：
+
+```text
+@loomrealm-game/map Runtime/browser code
+    MUST NOT import packages/renderer/dist/internal/*
+
+examples/essentials-v21.1 business/runtime/browser code
+    MUST NOT import packages/renderer/dist/internal/*
+
+repository-owned M14 qualification harness under test/* or example test/*
+    MAY reuse the already-qualified M13 internal composition mechanics
+    solely to assemble/drive the qualification Window
+```
+
+That repository-test exception is qualification mechanics, not a package or author seam. It MUST NOT be exported from the example, copied into game business code, or treated as the production Desktop integration surface. M15 owns the real Desktop Window composition seam.
+
+## 7. Fixed 640×480 page composition
 
 `presentation.css` fixes the first-slice viewport：
 
@@ -190,7 +218,7 @@ Frozen agreement：
 
 Runtime uses M14/02 constants, never computed DOM layout. Browser sends no resize facts to Runtime. Chromium qualification observes computed 640×480 size.
 
-## 7. Author-owned CI semantic fixture
+## 8. Author-owned CI semantic fixture
 
 Canonical CI uses repository-owned synthetic semantic Content facts fixed before implementation.
 
@@ -278,7 +306,7 @@ ArrowRight down repeat=false
 
 No `blocked`, `walkable`, collision bitmap or hard-coded x-coordinate truth exists in fixture Content.
 
-## 8. Author-owned CI graphic resources
+## 9. Author-owned CI graphic resources
 
 Only author-created deterministic PNGs are committed.
 
@@ -302,13 +330,14 @@ The exact pixel colors/patterns may be chosen when author-created fixture bytes 
 
 Third-party Essentials assets never enter repo/logs/CI artifacts.
 
-## 9. CI camera facts
+## 10. CI camera / visible movement facts
 
 For Map/1 and spawn `(10,8)`：
 
 ```text
 initial cameraX = 16
 initial cameraY = 32
+initial player screen = (304,224)
 ```
 
 After first right move to `(11,8)`：
@@ -316,11 +345,14 @@ After first right move to `(11,8)`：
 ```text
 cameraX = 48
 cameraY = 32
+player screen = (304,224)
 ```
 
-Blocked second right leaves camera unchanged.
+The player remains centered. Visible movement is proved by authoritative world `x` changing, facing changing to right, and map/Canvas pixels shifting 32 CSS px relative to the viewport. For example tile `(12,8)` moves from screen x `368` to `336`.
 
-## 10. Browser artifact consumption
+Blocked second right leaves world x/y, camera, player screen position and map placement unchanged; facing remains right.
+
+## 11. Browser artifact consumption
 
 The example resolves package artifacts through：
 
@@ -340,7 +372,7 @@ lr-map-sprite
 
 The example does not define those Custom Elements itself.
 
-## 11. CI vs exact local corpus
+## 12. CI vs exact local corpus
 
 Two evidence paths converge on the same implementation：
 
@@ -362,9 +394,11 @@ Exact v21.1 local compatibility
 
 Local selection may specify map/spawn/character because the external corpus is not repository-owned. Selection is qualification input, not a runtime config API.
 
+A local PASS requires the selected exact source to reach the same implementation far enough to prove: projected Map/Tileset/Table facts are consumed, selected tileset and character resources resolve, the same map Runtime starts, the same M13 Chromium presentation starts, at least one real regular source tile and the real player sprite are visible, and at least one non-repeat directional input passes through M10 with resulting world state agreeing with persisted passability facts. The local path does not need to reproduce both canonical passable and blocked branches because CI owns those deterministic branch proofs.
+
 Local output stays under ignored `.local/` and never commits third-party bytes.
 
-## 12. Explicit non-ownership
+## 13. Explicit non-ownership
 
 The example does not create：
 
@@ -377,6 +411,7 @@ RendererPlatform
 DOM input producer
 responsive layout controller
 asset manifest/service
+public presentation integration wrapper
 ```
 
 M15 replaces M14 test-owned physical composition with real Desktop Hostra/BrowserWindow while reusing the same game/map business path.
@@ -384,11 +419,15 @@ M15 replaces M14 test-owned physical composition with real Desktop Hostra/Browse
 ## Closure
 
 - private example workspace and exact `game.json` exist;
-- exact checked-in `presentation.json` enters existing M13 preparation;
+- initial direction is map-owned `2/down`, not an undeclared GameEntry field;
+- exact checked-in `presentation.json` enters existing M13 preparation behavior;
+- repository qualification may reuse M13 internal composition mechanics, while game/example business code may not;
 - page CSS computes `lr-map-view` to 640×480;
 - canonical fixture uses actual projected Table objects, not array shorthand;
 - Map/Tileset passability facts predetermine one allowed + one blocked move;
 - author-owned PNG dimensions/cells are deterministic;
+- canonical visible movement means centered player + 32px map shift, not player screen-position movement;
 - browser artifacts are found through package subpath exports, not physical-layout reach-through;
 - CI and exact local materialization enter the same Runtime/browser implementation;
+- local PASS proves real source tile + player + one M10 movement outcome against persisted facts;
 - no tool/importer object or third-party asset crosses the runtime/repository boundary.
