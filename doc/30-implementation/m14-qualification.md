@@ -1,80 +1,176 @@
-# M14 Map Game qualification
+# M14 Map Game Qualification Record
 
 ## Status
 
-Qualification hardening candidate on 2026-09-10. Review found that the original
-exact-local input and Content paths were weaker than the frozen closure claim.
-The implementation now closes both gaps locally; formal reclosure awaits this
-revision's committed Node 20/24 workflow.
+**Implementation complete / requalification pending.**
 
-## Revision
+The M14 architecture and hardened implementation do not require another design reopen. Formal milestone closure is pending only the missing hosted evidence for the current qualification subject.
 
-- Implementation base: `f3b14408e75cc701dc593f34bb4dfa8b90431f07`
-- Qualified implementation commit: `d415742f337ff8613c2e349cebb9a820dc0bda72`
-- Qualification-hardening commit: pending commit
-- Local canonical runtime: Node `22.12.0`, npm `10.9.0`
-- `npm run test:m14`: PASS
-- Node 20.20.2 M14-specific suite: 18/18 PASS, including Chromium
-- Node 24.20.0 M14-specific suite: 18/18 PASS, including Chromium
-- Full Node 20/24 canonical CI: PASS in GitHub Actions run
-  [`34446050878`](https://github.com/lithdoo/loom-realm/actions/runs/34446050878)
-- Hardened revision Node 20/24 canonical CI: pending committed workflow execution
+This file is the **single source of truth** for M14 formal qualification status and evidence. `M14_01`–`M14_04` freeze implemented contracts/behavior; `M14_05` defines the closure gate. Those documents must not independently mirror a live `Qualified / Closed` claim.
 
-## Selective projection
+## Qualification subject
 
-- `Map001.rxdata` materializes ordinary JSON `Map/1` with only
-  `tileset_id,width,height,data`.
-- `Tilesets.rxdata[i]` materializes ordinary JSON `Tileset/{i}` with only
-  `id,tileset_name,passages,priorities`.
-- Table values preserve `x + y*xSize + z*xSize*ySize` ordering.
-- Production FSDB validation passed for the exact local corpus.
-- Exact v21.1 evidence revealed unreferenced non-null editor placeholders 24
-  and 25 with empty `tileset_name`. The projection freeze was minimally
-  reopened to omit only unreferenced empty-name placeholders; a referenced
-  empty-name entry still fails closed.
+Current qualification subject：
 
-## Canonical fixture result
+```text
+5cec44829471f2e3419b46903ebee73f4114ebdf
+fix: harden M14 qualification closure
+```
 
-- Initial player: world `(10,8)`, facing `2`, camera `(16,32)`, screen
-  `(304,224)`.
-- First ArrowRight: world `(11,8)`, facing `6`, camera `(48,32)`.
-- Second ArrowRight: blocked by tile 385 reverse-entry passage bit; world and
-  camera remain unchanged.
-- The gameplay Frame remains pending until cancellation and retains one
-  Frame-bound `keyboard.event` listener and one RenderDomain.
-- Chromium proves 640x480 Canvas rendering, tile 384/385 source selection,
-  4x4 player direction-row crop, DOM identity retention, full-state stale-pixel
-  clearing, and delayed same-resource currentness.
+A qualification subject is the last commit that changes M14 executable behavior or qualification inputs. Later docs-only commits that only record/explain evidence do **not** create a new subject.
 
-## Exact Essentials v21.1 result
+Any later change to M14 Runtime/importer/browser behavior, prepared Content, fixture, test/harness, workflow/execution configuration, or consumed M10–M13 behavior creates a new qualification subject and invalidates the current formal-closure decision until requalified.
 
-- Source fingerprint:
-  `sha256:da0a34ec81ed40a4346fe6101debd7d938cbeadd43ff0aad87c3e388392a1665`
-- Selection: map `1`, spawn `(10,8)`, character
-  `trainer_POKEMONTRAINER_Red`.
-- Projected tileset: `Poke Centre interior`.
-- Import coverage: 7,677/7,677 physical objects classified; 110 Marshal roots
-  decoded; 49 RMXP classes encountered; zero discarded Marshal nodes or RMXP
-  ivars; production FSDB validation PASS.
-- Real tileset and character resources resolved from the local prepared FSDB.
-- Exact records and resources traversed the production Desktop FSDB HTTP service
-  and bound Subsystem `ContentClient`; recorded MIME and contentVersion came from
-  that seam rather than direct filesystem reads or hard-coded MIME.
-- The non-repeat ArrowRight traversed synthetic `RendererInputSource` → Renderer
-  Input Gate → Data → Subsystem `InputManager` → Frame-bound `InputListener` →
-  map handler; the local gate no longer calls the handler directly.
-- ArrowRight result: position remained `(10,8)` according to persisted
-  passability facts; authoritative facing became `6` before Render replacement.
-- The same map Runtime and browser artifacts started; Chromium observed a
-  640x480 viewport, real non-transparent regular-tile pixels, a real player
-  sprite, and the required `lr-map-view > lr-map-sprite` light DOM.
-- Third-party source bytes and generated local FSDB remain under ignored
-  `.local/` paths and are not recorded here.
+## Current-subject evidence
 
-## Final result
+| Gate | Required evidence | Status |
+| --- | --- | --- |
+| Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus, canonical Content + M10 paths | **PASS** |
+| Hosted Node 20 | `npm run test:m14` on the current subject | **PENDING** |
+| Hosted Node 24 | `npm run test:m14` on the current subject | **PENDING** |
+| Formal M14 closure | all three rows above target the same qualification subject | **PENDING** |
 
-Local implementation and exact-source qualification: PASS.
+No historical CI run may be promoted into a PASS for the current subject merely because an older implementation passed the same command.
 
-Original canonical implementation CI and exact-source compatibility remain PASS.
-Formal milestone reclosure is pending the hardened revision's hosted Node 20/24
-canonical workflow result.
+## Why requalification was required
+
+Review of the earlier closure found two exact-local shortcuts weaker than the frozen claim：
+
+1. directional input did not fully traverse the canonical RendererInputSource → M10 → Frame-bound InputListener path；
+2. exact-local Content/resource evidence did not fully traverse the Desktop FSDB HTTP service + standard bound ContentClient, including MIME evidence from that seam.
+
+The hardened subject closes both gaps without adding a second Runtime path or reopening M10–M13 public contracts. The hardening also strengthened passability branch evidence, author-API surface discipline, Custom Element conflict handling, projected-Table fail-closed validation and renderer-internal qualification boundaries.
+
+## Current exact-local evidence
+
+Exact-source compatibility for the hardened subject is recorded as PASS.
+
+Source fingerprint：
+
+```text
+sha256:da0a34ec81ed40a4346fe6101debd7d938cbeadd43ff0aad87c3e388392a1665
+```
+
+Selection：
+
+```text
+map: 1
+spawn: (10,8)
+character: trainer_POKEMONTRAINER_Red
+projected tileset: Poke Centre interior
+```
+
+Observed importer/content evidence：
+
+- 7,677 / 7,677 physical objects classified；
+- 110 Marshal roots decoded；
+- 49 RMXP classes encountered；
+- zero discarded Marshal nodes or RMXP ivars；
+- production FSDB validation PASS；
+- real Tileset and Character resources resolved from the local prepared FSDB；
+- exact records/resources traversed the production Desktop FSDB HTTP service and bound Subsystem ContentClient；
+- observed MIME/contentVersion came from that Content seam, not direct filesystem reads or hard-coded MIME.
+
+Exact v21.1 exposed unreferenced non-null editor placeholders 24 and 25 with empty `tileset_name`. The consumer projection was minimally refined to omit only unreferenced empty-name placeholders；a referenced empty-name entry still fails closed.
+
+## Current exact-local input evidence
+
+The selected non-repeat ArrowRight traversed：
+
+```text
+synthetic RendererInputSource
+→ Renderer Input Gate
+→ Data
+→ Subsystem InputManager
+→ Frame-bound InputListener
+→ @loomrealm-game/map handler
+```
+
+The local qualification no longer invokes a captured listener handler directly.
+
+Observed result：
+
+```text
+world position: (10,8) → (10,8)
+facing: 2/down → 6/right
+```
+
+The persisted passability facts blocked movement while the frozen attempted-facing rule still committed direction before Render replacement.
+
+The same map Runtime/browser artifacts started in Chromium；the browser observed a 640×480 viewport, real non-transparent regular-tile pixels, a real player sprite and the required `lr-map-view > lr-map-sprite` managed light DOM.
+
+Third-party source bytes and generated local FSDB remain under ignored local paths and are not recorded in the repository.
+
+## Canonical synthetic behavior retained by the hardened subject
+
+The canonical fixture continues to define：
+
+```text
+initial:
+  world=(10,8)
+  facing=2/down
+  camera=(16,32)
+  screen=(304,224)
+
+first ArrowRight:
+  world=(11,8)
+  facing=6/right
+  camera=(48,32)
+
+second ArrowRight:
+  blocked by tile 385 reverse-entry passage bit
+  world/camera unchanged
+  facing remains 6/right
+```
+
+The gameplay Frame remains pending until cancellation and owns one Frame-bound `keyboard.event` listener. The map business path owns one SDK-assigned opaque RenderDomain.
+
+Chromium qualification is expected to continue proving the frozen M14/04 evidence：640×480 Canvas rendering, regular tile 384/385 source selection, 4×4 player direction-row crop, managed DOM identity retention, full-state stale-pixel clearing, delayed same-resource currentness and fail-closed foreign Custom Element conflicts.
+
+## Historical evidence — not current closure evidence
+
+Earlier qualified implementation：
+
+```text
+d415742f337ff8613c2e349cebb9a820dc0bda72
+```
+
+Historical hosted run：
+
+```text
+GitHub Actions run 34446050878
+Node 20.20.2 M14-specific suite: 18/18 PASS, including Chromium
+Node 24.20.0 M14-specific suite: 18/18 PASS, including Chromium
+full canonical CI: PASS
+```
+
+Historical local canonical runtime recorded Node `22.12.0`, npm `10.9.0`, with `npm run test:m14` PASS.
+
+This evidence demonstrates that the pre-hardening implementation was healthy, but it does **not** satisfy hosted Node 20/24 evidence for subject `5cec44829471f2e3419b46903ebee73f4114ebdf`.
+
+## Formal closure rule
+
+M14 may return to `Closed` only when this record contains hosted Node 20 and Node 24 PASS evidence for the current subject in addition to the current exact-local PASS：
+
+```text
+subject 5cec44829471f2e3419b46903ebee73f4114ebdf
++
+exact v21.1 local PASS
++
+hosted Node 20 npm run test:m14 PASS
++
+hosted Node 24 npm run test:m14 PASS
+→ M14 Closed
+```
+
+Until then the precise status is：
+
+```text
+architecture / contracts     frozen
+implementation               complete + hardened
+exact-local qualification    PASS
+current hosted qualification pending
+formal M14 milestone         requalification pending
+```
+
+No further M14 implementation optimization is required merely to change the status label. If hosted requalification exposes a real behavioral failure, fix the concrete failure and establish a new qualification subject；otherwise only record the hosted evidence here and then synchronize the milestone status to `Closed`.
