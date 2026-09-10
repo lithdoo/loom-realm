@@ -38,6 +38,8 @@ Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 - [ADR 0032：Game Library / Example Boundary](./doc/decisions/0032-game-library-example-boundary.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [M14 qualification record](./doc/30-implementation/m14-qualification.md)
+- [M15 Desktop product composition](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
+- [M15 qualification closure](./M15_05_QUALIFICATION_CLOSURE.md)
 - [Package Architecture](./doc/30-implementation/package-architecture.md)
 - [Map Game Library design](./doc/20-modules/loom-map/README.md)
 
@@ -202,6 +204,32 @@ Map browser JS/CSS 本身也必须通过 prepared Content + `WebPresentationConf
 - [M14 / 05 — Qualification Closure](./M14_05_QUALIFICATION_CLOSURE.md)
 
 M10–M13 不因这次 repository/business ownership调整而 reopen。M14 formal requalification changes only the evidence/status claim unless a new hosted run exposes a concrete behavioral defect.
+
+---
+
+## M15 Desktop full E2E — planned
+
+M15 只把 M14 test-owned physical composition 换成真实 Desktop product composition：
+
+```text
+Hostra PREPARE
+→ Main + real Node Runner child
+→ Desktop Data/Content
+→ Electron BrowserWindow
+→ real DOM input
+→ existing M13 presentation
+→ same M14 game/map business
+```
+
+实施顺序：
+
+- [M15 / 01 — Desktop Product Composition](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
+- [M15 / 02 — BrowserWindow Renderer Composition](./M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md)
+- [M15 / 03 — Desktop Physical Input and Lifecycle](./M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)
+- [M15 / 04 — Desktop Full E2E Vertical](./M15_04_DESKTOP_FULL_E2E_VERTICAL.md)
+- [M15 / 05 — Qualification Closure](./M15_05_QUALIFICATION_CLOSURE.md)
+
+M15 不新增 logical authority、game semantics、component registry、generic host/manager 或第二套 currentness/recovery model。
 
 ---
 
