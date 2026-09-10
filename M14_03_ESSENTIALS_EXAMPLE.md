@@ -1,6 +1,7 @@
 # M14 / 03 — Essentials v21.1 Concrete Example
 
-> 状态：**Implemented / Qualified / Closed**
+> 状态：**Implemented / contract frozen; formal requalification pending**
+> Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented concrete example and prepared-content composition; it does not independently claim milestone closure.
 
 ## Objective
 
@@ -417,6 +418,8 @@ public presentation integration wrapper
 M15 replaces M14 test-owned physical composition with real Desktop Hostra/BrowserWindow while reusing the same game/map business path.
 
 ## Closure
+
+This example composition is implemented and frozen. Formal M14 closure still requires the current qualification subject/evidence recorded in `doc/30-implementation/m14-qualification.md`.
 
 - private example workspace and exact `game.json` exist;
 - initial direction is map-owned `2/down`, not an undeclared GameEntry field;
