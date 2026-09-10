@@ -3,7 +3,7 @@
 > 状态：**Implemented / Qualified / Closed**
 > 阶段：M12 Content  
 > 落地顺序：03  
-> 最近复核：2026-09-08  
+> 最近复核：2026-09-11  
 > 前置：[M12 / 01](M12_01_CONTENT_SERVICE.md)  
 > 正式契约：[Content API v1](doc/15-contracts/content-api-v1.md)  
 > 架构：[渲染系统](doc/10-architecture/rendering-system.md)、[存储与内容系统](doc/10-architecture/storage-system.md)  
@@ -67,6 +67,22 @@ interface RendererResourceClient {
 Platform composition绑定 current prepared installation与 authorization material；调用方只给 logical namespace/key/version。
 
 Local caller传入 malformed namespace/resourceKey/version 时必须在 HTTP前拒绝；精确 private error class不属于 public Renderer contract。不得把 malformed expected version静默当成 cache miss。
+
+### Trusted browser binding
+
+When this client runs in a browser Realm that will later execute business presentation code，the client MUST bind the native request primitive before that business code is loaded：
+
+```text
+trusted bootstrap
+→ capture/bind native fetch + URL construction required by the client
+→ create RendererResourceClient with private RendererContentAccess
+→ only then load business JS
+→ later resource() uses the captured request primitive
+```
+
+A later business assignment to `globalThis.fetch` MUST NOT receive the private `Authorization: Bearer ...` request。The implementation therefore MUST NOT dynamically look up a business-replaceable page-global `fetch` at `resource()` call time。
+
+This is a concrete capability-hiding requirement already implied by the frozen rule that business presentation cannot obtain physical Content credentials；it does not add a new Content API field、public browser API or BrowserPrimitiveRegistry。
 
 ---
 
@@ -172,6 +188,8 @@ Data carrier reconnect   != Content cache invalidation
 
 Renderer Control replacement/reload MAY创建 fresh local client composition；这不改变 Content identity semantics。
 
+A fresh browser Window/Renderer lifetime MUST also create a fresh trusted browser binding；old captured primitives/private Content access cannot be reused across retired Window lifetime。
+
 ---
 
 ## 8. Deferred to M14
@@ -200,6 +218,7 @@ Render state仍不得携 Content bearer、filesystem path、absolute privileged 
 one trusted Renderer integration-subpath ResourceClient responsibility
 small version-safe cache/dedupe
 small Content response/error mapping
+one lexical/bound native browser request primitive when running beside business JS
 ```
 
 禁止：
@@ -209,6 +228,7 @@ public AssetManager
 ResourceStore subscription API
 loader/plugin/decoder registry
 generic repository hierarchy
+BrowserPrimitiveRegistry / security service locator
 Content URL in Render State
 presentation lifecycle coupled to Content lifecycle
 ```
@@ -228,9 +248,10 @@ response version mismatch cannot return bytes as success
 same key + different version cannot reuse stale bytes
 returned bytes cannot mutate internal cache/future reads
 physical URL/path/token不进入 Renderer business/Render state
+browser business code cannot intercept the Content bearer by replacing page-global fetch after trusted client creation
 Content failure不改变 Render/Main/Subsystem authority
 no RenderNode schema interpretation is pulled into M12
-no presentation/asset framework is introduced
+no presentation/asset/security framework is introduced
 ```
 
-编码阶段只允许调整 private class/function/file布局与 cache mechanics；resource identity、version comparison、route grammar与 failure boundary不得重新选择。
+编码阶段只允许调整 private class/function/file布局与 cache mechanics；resource identity、version comparison、route grammar、credential hiding与 failure boundary不得重新选择。
