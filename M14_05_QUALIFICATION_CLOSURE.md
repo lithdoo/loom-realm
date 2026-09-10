@@ -77,6 +77,8 @@ MapNNN.rxdata → Map/{decimal N}
 Tilesets.rxdata[i] → Tileset/{i}
 Tileset projected id == source array index
 mismatch fails closed
+unreferenced exact-v21.1 empty-name editor placeholders are omitted;
+referenced empty-name entries fail closed
 
 Map value keys exactly:
     tileset_id,width,height,data

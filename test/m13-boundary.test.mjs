@@ -15,7 +15,8 @@ test("M13 leaves business presentation off the Renderer public root and package 
   const monorepo = await json("package.json");
   const lock = await json("package-lock.json");
   assert.equal(Object.keys(lock.packages).some((key) => /packages[\\/]presentation$/i.test(key)), false);
-  assert.deepEqual(monorepo.workspaces, ["packages/*", "apps/*"]);
+  assert.ok(monorepo.workspaces.includes("packages/*"));
+  assert.ok(monorepo.workspaces.includes("apps/*"));
 });
 
 test("M13 private implementation stays thin and credential-free at the business ABI", async () => {

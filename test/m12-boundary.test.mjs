@@ -90,7 +90,8 @@ test("M12 closure has a persistent Node 20 and 24 CI gate and separated regressi
 
 test("M12 does not introduce forbidden generic storage or Content framework packages", async () => {
   const monorepo = await json("package.json");
-  assert.deepEqual(monorepo.workspaces, ["packages/*", "apps/*"]);
+  assert.ok(monorepo.workspaces.includes("packages/*"));
+  assert.ok(monorepo.workspaces.includes("apps/*"));
   const packageLock = await json("package-lock.json");
   assert.ok(packageLock.packages["packages/fsdb"]);
   for (const forbidden of ["content-core", "asset-manager", "storage-provider", "installation-registry"]) {

@@ -69,3 +69,14 @@ export function structuredObject(table, key, value, references = []) {
     open: () => streamStructuredJson(value),
   });
 }
+
+export function jsonObject(table, key, value) {
+  const bytes = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
+  return Object.freeze({
+    table,
+    key,
+    relativeSegments: Object.freeze([`${key}.json`]),
+    references: Object.freeze([]),
+    open: async function* () { yield bytes; },
+  });
+}

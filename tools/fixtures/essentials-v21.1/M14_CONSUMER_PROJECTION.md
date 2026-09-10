@@ -157,7 +157,7 @@ Do not invent an `id` member in Map value; Content key owns map identity.
 
 ### 3.2 Tilesets.rxdata → Tileset/{i}
 
-For each non-null known `RPG::Tileset` at source array index `i`：
+For each consumer-relevant non-null known `RPG::Tileset` at source array index `i`：
 
 ```text
 Tilesets.rxdata[i]
@@ -173,6 +173,12 @@ projected id == i
 ```
 
 Index/id mismatch fails closed; it is not normalized or repaired. Null slots are skipped.
+
+Exact v21.1 evidence contains non-null editor placeholder entries whose
+`tileset_name` is empty and which are not referenced by any projected Map.
+Those unreferenced empty-name placeholders are omitted like unused slots. An
+empty-name entry referenced by any projected Map still fails closed. This is
+the only placeholder exception; non-empty entries retain the index/id rule.
 
 ## 4. Scalar projection used by M14
 

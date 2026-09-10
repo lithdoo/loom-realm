@@ -1,5 +1,5 @@
 import { basename, extname } from "node:path";
-import { structuredObject } from "./structured.mjs";
+import { jsonObject, structuredObject } from "./structured.mjs";
 
 const INTERNAL_DOMAINS = new Set(["MarshalRoots", "RmxpRoots", "PbsDocuments", "DerivedSemantics"]);
 
@@ -24,7 +24,11 @@ export function mapCanonicalDataset(canonicalDataset) {
   const tableRecords = new Map();
   for (const [domain, records] of Object.entries(canonicalDataset.domains)) {
     if (INTERNAL_DOMAINS.has(domain) || !Array.isArray(records)) continue;
-    tableRecords.set(domain, records.map((record) => ({ key: String(record.id), value: record })));
+    if (domain === "Map" || domain === "Tileset") {
+      tableRecords.set(domain, records.map((record) => ({ key: record.key, value: record.value })));
+    } else {
+      tableRecords.set(domain, records.map((record) => ({ key: String(record.id), value: record })));
+    }
   }
   const pbs = canonicalDataset.domains.PbsDocuments ?? [];
   tableRecords.set("PbsDocument", pbs.map((document) => ({ key: fileKey(document.file), value: document })));
@@ -38,7 +42,11 @@ export function mapCanonicalDataset(canonicalDataset) {
   for (const [name, records] of [...tableRecords].sort(([left], [right]) => left.localeCompare(right))) {
     if (records.length === 0) continue;
     tables.push(Object.freeze({ kind: "struct", name, schema: Object.freeze({ type: "object" }) }));
-    for (const record of records) objects.push(structuredObject(name, record.key, record.value, collectReferences(record.value)));
+    for (const record of records) objects.push(
+      name === "Map" || name === "Tileset"
+        ? jsonObject(name, record.key, record.value)
+        : structuredObject(name, record.key, record.value, collectReferences(record.value)),
+    );
   }
   return Object.freeze({ tables: Object.freeze(tables), objects: Object.freeze(objects) });
 }

@@ -1,0 +1,15 @@
+{
+  "name": "@loomrealm-example/essentials-v21.1",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@loomrealm-game/map": "0.1.0-alpha.0"
+  },
+  "devDependencies": {
+    "@loomrealm/game-package": "0.1.0-alpha.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

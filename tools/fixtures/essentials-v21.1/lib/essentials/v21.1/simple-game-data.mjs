@@ -11,6 +11,7 @@ import { classifyEssentialsSemantics } from "../../semantic/classifier.mjs";
 import { VANILLA_REGISTRY_V21_1 } from "./vanilla-registry.mjs";
 import { compareV21Oracle } from "./oracle-v21.mjs";
 import { materializeCompiledDataDomains } from "./compiled-data.mjs";
+import { materializeM14ConsumerDomains } from "./m14-consumer.mjs";
 
 const ID = /^(?![0-9])\w+$/u;
 
@@ -136,9 +137,10 @@ export async function buildCanonicalDataset(manifest) {
   const remaining = await compileRemainingPbs(manifest, reader);
   const marshal = await decodeMarshalCorpus(manifest, reader);
   const rmxp = decodeRmxpCorpus(marshal);
+  const m14 = materializeM14ConsumerDomains(rmxp.roots);
   const pbsDomains = Object.freeze({ ...initialDomains, ...species.domains, ...remaining.domains });
   const compiledData = materializeCompiledDataDomains(rmxp.roots, pbsDomains);
-  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains });
+  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14 });
   const semantic = classifyEssentialsSemantics(rmxp, VANILLA_REGISTRY_V21_1.compilerPasses);
   const oracleComparison = compareV21Oracle(canonicalDomains, rmxp.roots);
   const oracle = Object.freeze({ ...oracleComparison, compiledDataRootsCompared: compiledData.coverage.observedRoots.length });
