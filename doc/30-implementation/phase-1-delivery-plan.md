@@ -4,8 +4,8 @@
 > 状态：Tracking  
 > 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
-> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
-> 最近复核：2026-09-10
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 最近复核：2026-09-11
 
 实施状态与正式 closure 必须分开记录。M14 的当前 qualification subject / live evidence 只以 [`m14-qualification.md`](./m14-qualification.md) 为准；本计划只汇总 milestone 状态，不复制 run-level evidence。
 
@@ -57,7 +57,7 @@ M8 Renderer Data
 M9 Desktop Data Broker
 ```
 
-Closed on the existing mainline implementation/qualification path。
+Closed on the existing mainline implementation/qualification path。ADR 0033 later corrects only the first Electron embedding of the existing M6 process model；it does not reopen M6 application/protocol semantics or Node-hosted behavior。
 
 ---
 
@@ -128,6 +128,8 @@ PresentationResourceClient
 ```
 
 No new metadata/HEAD author API is added merely for the first game consumer。
+
+For M15 Main-World browser composition，the existing credential-hiding invariant additionally requires the trusted Renderer ResourceClient to bind its native request primitive before business JS；this is implementation hardening of the same M12 capability boundary, not a new Content API。
 
 ---
 
@@ -317,7 +319,7 @@ game.json validation
 → same lr-map-view / lr-map-sprite live identities retained
 ```
 
-M14 uses existing/synthetic RendererInputSource and test-owned physical composition。Real Node child/BrowserWindow/DOM physical input/reload-shutdown belong to M15。
+M14 uses existing/synthetic RendererInputSource and test-owned physical composition。Real Hostra child/BrowserWindow/DOM physical input/reload-shutdown belong to M15。
 
 ### M14/05 — closure
 
@@ -360,13 +362,16 @@ Replace M14 test-owned physical composition with the frozen real Desktop composi
 
 ```text
 checked-in Hostra-ready M14 installation
-→ Hostra PREPARE
+→ Hostra PREPARE in Electron main
 → Main
-→ Hostra RuntimeHosting / real Node Runner child for "map"
-→ Desktop Data Broker + Desktop Content
+→ process.execPath + host-synthesized ELECTRON_RUN_AS_NODE real Hostra Runner child
+→ existing Runtime Control WebSocket
+→ Desktop Data Broker
+→ exact same-origin 127.0.0.1 Desktop shell + existing Content API
 → secure Electron BrowserWindow
 → isolated preload one-shot handoff
 → Main-World trusted Renderer
+→ capture authority-bearing native browser primitives
 → Renderer Control MessagePort
 → browser-native Data WebSocket
 → real DOM Keyboard/Pointer/Gamepad RendererInputSource
@@ -374,6 +379,17 @@ checked-in Hostra-ready M14 installation
 → same M14 game/map Runtime/WC
 → reload / reconnect / shutdown
 ```
+
+Frozen Hostra Electron realization：
+
+```text
+Runner executable = canonical process.execPath
+Electron RuntimeHosting child env += ELECTRON_RUN_AS_NODE=1
+supported Desktop Electron build keeps runAsNode fuse enabled
+same existing ChildProcess / Runtime Control / provisioning path
+```
+
+No configurable Node executable、UtilityProcess Runtime path or Electron-specific RuntimeHosting is introduced。
 
 Frozen BrowserWindow settings：
 
@@ -384,28 +400,44 @@ sandbox=true
 webSecurity=true
 ```
 
+Frozen browser origin：
+
+```text
+app-owned shell
++
+existing /_lr/v1 Content API
+=
+exact same http://127.0.0.1:<port> origin
+```
+
+This keeps existing Content GET/HEAD + bearer semantics without `file://`、CORS/OPTIONS expansion、`webSecurity=false` or preload Content proxy。App shell routes remain exact product-private routes outside the Content API contract。
+
 Frozen physical ownership：
 
 ```text
 preload isolated world
     exact one-shot bootstrap/port handoff only
 
-page Main World
+page Main World before business scripts
     trusted Renderer holder/input/M13 Projector
-    business Custom Elements loaded after private bootstrap
+    private bootstrap consumed
+    native fetch/WebSocket/ports/input primitives captured/bound
 
-Control
+page Main World afterward
+    business Custom Elements
+
+Renderer Control
     MessageChannelMain → native DOM MessagePort → existing Renderer Control
 
 Data
     existing M9 Broker keeps candidate/currentness
     Electron port carries physical prepare/commit/revoke settlement only
-    Data application messages use native browser WebSocket
+    Data application messages use captured native browser WebSocket
 ```
 
-Physical input mapping is frozen by `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`：Keyboard uses standard `KeyboardEvent.code`; Pointer uses BrowserWindow viewport fixed-point coordinates + fresh one-shot ids; Gamepad uses browser `mapping="standard"` + rAF polling + frozen threshold crossing semantics。
+Physical input mapping is frozen by `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`；the authoritative details live there rather than being copied into this plan。At the plan level the required facts are trusted physical DOM provenance、canonical Keyboard/Pointer/Gamepad mapping、focus/visibility fresh baseline and no synthetic-input shortcut。
 
-Normal shutdown is fixed to Window retirement → abort `runMain` signal → await Main/RuntimeHosting child convergence → close remaining Broker/Content services → Electron exit。
+Normal shutdown is fixed to Window retirement → abort `runMain` signal → await Main/RuntimeHosting child convergence → close remaining Broker/Content/shell services → Electron exit。
 
 Normative implementation order：
 
@@ -417,9 +449,9 @@ M15_01_DESKTOP_PRODUCT_COMPOSITION.md
 → M15_05_QUALIFICATION_CLOSURE.md
 ```
 
-M15 can now proceed directly to implementation without another design pass. Private helper/file names remain implementation details；authority ownership、execution-world placement、Control/Data/Content separation、DOM input mapping与 lifecycle owner chain不得因代码便利性重新选择。
+M15 can now proceed directly to implementation without another design pass. Private helper/file names and exact app-shell route spelling remain implementation details；authority ownership、Hostra Electron mode、same-origin boundary、execution-world placement、Control/Data/Content separation、DOM input mapping与 lifecycle owner chain不得因代码便利性重新选择。
 
-Formal M14 requalification continues independently through the M14 evidence ledger。M15 implementation may proceed before that evidence completes, but M15 formal closure requires M14 formal status = Closed and the frozen `npm run test:m15` gate to pass。
+Formal M14 requalification continues independently through the M14 evidence ledger。The current corrections are documentation/first-M15 physical decisions and do not themselves claim new M14 executable evidence。M15 implementation may proceed before M14 evidence completes, but M15 formal closure requires M14 formal status = Closed and the frozen `npm run test:m15` gate to pass。
 
 ---
 
@@ -437,6 +469,8 @@ PWA PREPARE
 ```
 
 PWA Renderer/Data/Content/Web presentation are not required for M16 closure。Existing Subsystem host can expose the normal unavailable Content capability until M17 supplies a physical ContentClient。
+
+The M15 Electron run-as-node and Desktop same-loopback-origin decisions are concrete Hostra/Desktop mechanics，not PWA requirements。
 
 ---
 
@@ -485,4 +519,4 @@ Current M14 hosted requalification gate：
 npm run test:m14
 ```
 
-M14 immediate closure work is limited to obtaining/recording the current qualification subject's hosted Node 20/24 evidence. No M10–M14 architecture reopen is justified unless that evidence exposes a concrete behavioral failure. M15 no longer requires design work and may proceed directly to full implementation；documentation must still not call M14 or M15 formally `Closed` before their respective evidence ledgers satisfy the frozen closure rules。
+M14 immediate closure work is limited to obtaining/recording the current qualification subject's hosted Node 20/24 evidence. No M10–M14 application architecture reopen is justified unless that evidence exposes a concrete behavioral failure. M15 no longer requires design work and may proceed directly to full implementation；documentation must still not call M14 or M15 formally `Closed` before their respective evidence ledgers satisfy the frozen closure rules。
