@@ -1,6 +1,7 @@
 # M14 / 04 — First Real Game Vertical
 
-> 状态：**Implemented / Qualified / Closed**
+> 状态：**Implemented / contract frozen; formal requalification pending**
+> Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented canonical vertical/evidence shape; it does not independently claim milestone closure.
 
 ## Objective
 
@@ -247,4 +248,6 @@ PASS minimum is owned by M14/05。The local selected slice does not need to prov
 
 ## Closure question
 
-M14/04 passes only if the checked-in game can keep one gameplay Frame alive, consume the exact selective Map/Tileset facts through ContentClient, derive passability/camera/current full Render state, repaint a real Canvas from current full data, display a real player sprite, accept M10 directional input and preserve M13 element identity/currentness through real Chromium — without adding a second game framework or test-only business path.
+The canonical vertical is implemented. Formal M14 closure additionally requires the current qualification subject/evidence recorded in `doc/30-implementation/m14-qualification.md`.
+
+M14/04's behavioral gate passes only if the checked-in game can keep one gameplay Frame alive, consume the exact selective Map/Tileset facts through ContentClient, derive passability/camera/current full Render state, repaint a real Canvas from current full data, display a real player sprite, accept M10 directional input and preserve M13 element identity/currentness through real Chromium — without adding a second game framework or test-only business path.
