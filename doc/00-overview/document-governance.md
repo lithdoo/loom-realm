@@ -4,7 +4,7 @@
 > 状态：Active / Normative  
 > 稳定程度：Stable  
 > 主要定义：文档层级、主要定义依赖、设计稳定状态、真实 compatibility boundary、首次实现前 current-v1 收口与版本治理  
-> 最近复核：2026-09-08
+> 最近复核：2026-09-11
 
 LoomRealm仍处于首次实现阶段。治理目标同时满足：
 
@@ -298,7 +298,8 @@ Executable launch current chain：
 ```text
 Product/Platform architecture
 → Game Package + Platform Launcher Profiles
-→ ADR 0019 provenance
+→ ADR 0019 / ADR 0020 / ADR 0026 provenance
+→ Hostra Electron physical correction: ADR 0033 when applicable
 → Modules/Implementation
 ```
 
@@ -336,7 +337,7 @@ re-evaluation conditions
 
 ## 13. Current Reset History
 
-当前项目的 direct-current-v1 closure包括：
+当前项目的 direct-current-v1 / frozen-preimplementation corrections包括：
 
 ```text
 ADR 0018
@@ -360,11 +361,20 @@ ADR 0030
     hierarchical ResourceKey
     exact sha256 Content version
     frozen Subsystem ContentClient + trusted Renderer integration-subpath ResourceClient
+
+ADR 0033
+    first Electron consumer exposed process.execPath != ordinary standalone Node executable
+    Hostra Runner executable selection remains canonical process.execPath
+    Electron composition uses host-synthesized ELECTRON_RUN_AS_NODE=1 for the exact Runner child
+    supported Desktop build keeps runAsNode fuse enabled
+    no configurable Node path / UtilityProcess second RuntimeHosting / fake v2
 ```
 
 ADR 0019 supersedes ADR 0018 only where 0018曾定义 Game `{key,module}` / Hostra-PWA same Definition artifact。
 
 ADR 0030 updates ADR 0003 only in first-implementation realization；ADR 0003 的 logical readonly API、Desktop HTTP/PWA Fetch、path hiding、Content≠execution原则继续有效。
+
+ADR 0033 is a §7 Frozen preimplementation correction：it fixes one concrete Hostra physical contradiction exposed by M15 while preserving Game/Hostra manifests、LogicalGameBootstrap、RuntimeHosting shared port、Runtime Control、Node-hosted behavior and application authority semantics。
 
 规则仍是：
 
