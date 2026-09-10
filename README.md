@@ -53,12 +53,14 @@ M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game      ⚠️ Implementation complete / requalification pending
-M15 Desktop full E2E                         pending
+M15 Desktop full E2E                         🔒 Implementation Frozen / Preimplementation Closed
 M16 PWA Runtime                              pending
 M17 PWA full E2E                             pending
 ```
 
 M14 design/implementation is frozen；the current exact-local gate is recorded PASS, while hosted Node 20/24 evidence for the current qualification subject remains pending. Formal status is owned only by [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md).
+
+M15 design is fully frozen and may proceed directly to implementation. M15 formal closure still requires M14 formal closure plus repeatable `npm run test:m15` evidence.
 
 Last formally closed milestone gate：
 
@@ -207,19 +209,35 @@ M10–M13 不因这次 repository/business ownership调整而 reopen。M14 forma
 
 ---
 
-## M15 Desktop full E2E — planned
+## M15 Desktop full E2E — frozen / ready for implementation
 
 M15 只把 M14 test-owned physical composition 换成真实 Desktop product composition：
 
 ```text
-Hostra PREPARE
+checked-in Hostra-ready M14 installation
+→ Hostra PREPARE
 → Main + real Node Runner child
 → Desktop Data/Content
-→ Electron BrowserWindow
-→ real DOM input
+→ secure Electron BrowserWindow
+→ isolated preload one-shot handoff
+→ Main-World trusted Renderer
+→ Renderer Control MessagePort
+→ browser-native Data WebSocket
+→ real DOM Keyboard/Pointer/Gamepad input
 → existing M13 presentation
 → same M14 game/map business
 ```
+
+Frozen BrowserWindow boundary：
+
+```text
+nodeIntegration=false
+contextIsolation=true
+sandbox=true
+webSecurity=true
+```
+
+M15保留 Main/Renderer/Subsystem/M9 Broker既有 authority。Preload不暴露 generic Electron API；Control、Data settlement、Data application和 Content保持分离；DOM input直接映射到既有 M10 `RendererInputSource`。
 
 实施顺序：
 
@@ -229,7 +247,9 @@ Hostra PREPARE
 - [M15 / 04 — Desktop Full E2E Vertical](./M15_04_DESKTOP_FULL_E2E_VERTICAL.md)
 - [M15 / 05 — Qualification Closure](./M15_05_QUALIFICATION_CLOSURE.md)
 
-M15 不新增 logical authority、game semantics、component registry、generic host/manager 或第二套 currentness/recovery model。
+五份 landing docs 均为 **Implementation Frozen / Preimplementation Closed**。实现阶段可以选择 private function/file names，但不得重新选择 authority owner、execution-world placement、Control/Data/Content physical topology、DOM input canonical mapping或 reload/reconnect/shutdown owner chain。
+
+M15 不新增 logical authority、game semantics、component registry、generic host/manager、InputDeviceManager 或第二套 currentness/recovery model。
 
 ---
 
