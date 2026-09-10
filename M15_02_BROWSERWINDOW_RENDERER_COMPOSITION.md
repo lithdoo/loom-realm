@@ -66,18 +66,23 @@ Exact startup handoff：
 ```text
 app-owned local shell
 → load app-owned trusted Renderer entry first
-→ trusted entry installs one-shot bootstrap listener
+→ trusted entry installs exact one-shot bootstrap listener
+→ local shell reaches Electron did-finish-load
 
 Electron main
 → webContents.postMessage(exact private channel, bootstrap envelope, transferred ports)
 → preload isolated world receives exact channel only
-→ preload transfers the envelope + native ports once through DOM window.postMessage
-→ trusted Main-World entry consumes exact one-shot message
+→ preload transfers envelope + native ports once through DOM window.postMessage
+→ trusted Main-World entry accepts only same-window exact-channel message
+→ consume private material into lexical/private state
 → remove bootstrap listener
-→ no private bootstrap object is published on globalThis/window
-→ start Renderer Control/Data/Content/Presentation composition
+→ start Renderer Control/Data/Content composition
 → only then load business JS/CSS through M13
 ```
+
+Electron main **MUST NOT** send the one-shot bootstrap before the app-owned shell's `did-finish-load`；该时点保证 trusted entry已经有机会安装 listener，不增加 bootstrap ACK/handshake protocol。
+
+每个 loaded document最多一次 bootstrap transfer。若 reload/navigation在 transfer完成前使 document失效，旧 envelope/ports直接 retire；fresh document只能获得 fresh material，不 retry旧 transfer。
 
 Bootstrap envelope只允许携带当前 Window启动必需的 concrete material：
 
@@ -88,7 +93,7 @@ RendererContentAccess for existing resource client
 WebPresentationConfigV1 candidate
 ```
 
-这些值只能保存在 trusted Renderer lexical/private state中；business script不得获得其 global property、Electron bridge或 raw port/token引用。
+这些值只能保存在 trusted Renderer lexical/private state中；不得发布到 `globalThis/window`。Trusted entry应在加载 business JS 前捕获自己依赖的 browser primitives；business code不得获得 Electron bridge或 raw port/token引用。
 
 这不是新的 authentication protocol。Renderer Control token仍只用于现有 Renderer hello；它不得被重新解释为 Data/Content authorization。
 
@@ -127,7 +132,7 @@ one-shot product-private Config candidate
 → resolve refs against current prepared Content
 → private browser bootstrap binding
 → ordered JS/CSS bootstrap
-→ window.onload
+→ window.onload/readyState complete
 → WebProjector attach/start
 ```
 
@@ -199,7 +204,9 @@ BrowserWindow reload/replacement 产生新的 physical Renderer candidate；Main
 
 ```text
 old Renderer current
-→ fresh Window gets fresh one-shot bootstrap + Control candidate
+→ fresh Window loads trusted shell/entry
+→ did-finish-load
+→ fresh one-shot bootstrap + Control candidate
 → new candidate hello/accept
 → atomic Main replacement
 → old Renderer retired
@@ -226,6 +233,7 @@ existing M13 Web projection
 ```text
 security preferences固定生效
 preload与页面 Main World保持 context isolation
+bootstrap只在 trusted shell did-finish-load 后发送一次
 business JS加载前 private bootstrap已被 trusted Renderer消费
 no generic Electron/contextBridge API exposed to business code
 Control使用 dedicated MessagePort carrier
