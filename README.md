@@ -49,7 +49,7 @@ M10 User Input                              ✅ Closed
 M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      pending
+M14 Map Game Library + First Real Game      ✅ Closed 2026-09-10
 M15 Desktop full E2E                         pending
 M16 PWA Runtime                              pending
 M17 PWA full E2E                             pending
@@ -58,7 +58,7 @@ M17 PWA full E2E                             pending
 当前 executable closure gate：
 
 ```text
-npm run test:m13
+npm run test:m14
 ```
 
 ---
@@ -125,13 +125,13 @@ ADR 0031                     Accepted / Frozen decision provenance
 
 M13不建立 second Store/topology、public PresentationState、component registry/loader、AssetManager、layout/layer framework、global service locator、DOM rollback framework或 mandatory presentation SDK/package。
 
-唯一 executable closure gate：
+当前 executable closure gate：
 
 ```text
-npm run test:m13
+npm run test:m14
 ```
 
-Qualification evidence：[M13 Web Presentation qualification](./doc/30-implementation/m13-qualification.md)。
+Qualification evidence：[M13 Web Presentation qualification](./doc/30-implementation/m13-qualification.md) · [M14 Map Game qualification](./doc/30-implementation/m14-qualification.md)。
 
 ---
 

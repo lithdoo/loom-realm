@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 Implemented / Qualified / Closed；M14 Frozen for Implementation  
+> 稳定程度：M1–M14 Implemented / Qualified / Closed
 > 主要定义：current implementation fact-source、delivery route、qualification entry points  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-10
@@ -19,7 +19,8 @@
 - [测试策略](./testing-strategy.md) — package/role/vertical/E2E evidence ownership；
 - [M11 Render 最终闭环评审](./m11-final-closure-review.md)；
 - [M12 Content qualification](./m12-qualification.md)；
-- [M13 Web Presentation qualification](./m13-qualification.md)。
+- [M13 Web Presentation qualification](./m13-qualification.md)；
+- [M14 Map Game qualification](./m14-qualification.md)。
 
 M14 current normative implementation set：
 
@@ -51,24 +52,23 @@ M10 User Input                                ✅ Qualified / Closed 2026-09-07
 M11 Render Replication                        ✅ Qualified / Closed 2026-09-07
 M12 Content                                   ✅ Qualified / Closed 2026-09-08
 M13 Web Presentation                          ✅ Qualified / Closed 2026-09-09
+M14 Map Game Library + First Real Game        ✅ Qualified / Closed 2026-09-10
 ```
 
 Current canonical executable closure：
 
 ```text
-npm run test:m13
+npm run test:m14
 ```
 
-M14 scripts/workspaces are intentionally absent until M14 implementation lands。
+M14 scripts/workspaces are implemented and enforced by the canonical root gate。
 
 ---
 
 ## 3. Current Phase Route
 
 ```text
-M1–M13                                  ✅ Closed
-↓
-M14 Map Game Library + First Real Game     🔒 Frozen for Implementation / Pending
+M1–M14                                  ✅ Closed
 ↓
 M15 Desktop Full E2E                       Pending
 ↓

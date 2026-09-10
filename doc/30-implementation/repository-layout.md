@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 implemented/qualified；M14 implementation boundary frozen  
+> 稳定程度：M1–M14 implemented/qualified
 > 主要定义：current monorepo physical placement、framework/game-library/example/app ownership、M14–M17 materialization order  
 > 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-10
@@ -46,7 +46,7 @@ tools/         development/import/compatibility tooling
 
 The current M12 Content realization is distributed across existing FSDB/HTTP、Subsystem/Renderer clients and Desktop composition；there is no current `packages/content` or `packages/content-service` package。There is also no `packages/map` / `@loomrealm/map`；Map business belongs to `game-libs/map`。
 
-Current root workspaces before M14 implementation：
+Root workspaces before the M14 additions were：
 
 ```text
 packages/*
@@ -271,7 +271,7 @@ Small private records/maps/functions remain preferable when they satisfy the con
 ```text
 M1–M13                                ✅ implemented / qualified
 ↓
-M14 Map Game Library + First Real Game   🔒 frozen for implementation / pending
+M14 Map Game Library + First Real Game   ✅ closed 2026-09-10
 ↓
 M15 Desktop Full E2E                     pending
 ↓

@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Frozen for Implementation / Pending**  
+> 稳定程度：M10–M14 **Implemented / Qualified / Closed**
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-10
@@ -168,7 +168,7 @@ M14 consumes this surface；it does not introduce a second presentation store、
 
 ---
 
-## M14 — Map Game Library + First Real Game 🔒 Pending Implementation
+## M14 — Map Game Library + First Real Game ✅ Implemented / Qualified / Closed
 
 M14 proves that M10–M13 can support a real independent business consumer without new core machinery：
 
@@ -402,7 +402,7 @@ M10 User Input                             ✅ Closed
 M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game     🔒 Frozen for Implementation / Pending
+M14 Map Game Library + First Real Game     ✅ Closed 2026-09-10
 M15 Desktop Full E2E                       pending
 M16 PWA Runtime                            pending
 M17 PWA Full E2E / Equivalence             pending
@@ -411,7 +411,7 @@ M17 PWA Full E2E / Equivalence             pending
 Current canonical executable closure remains：
 
 ```text
-npm run test:m13
+npm run test:m14
 ```
 
-Next work is M14 implementation exactly against the frozen landing。Do not reopen core seams for prettier domain ids、responsive-layout speculation、ESM-loader preference or hypothetical generic map abstractions。
+Next work is M15 Desktop physical composition against the closed M10–M14 boundaries。Do not reopen core seams for prettier domain ids、responsive-layout speculation、ESM-loader preference or hypothetical generic map abstractions。

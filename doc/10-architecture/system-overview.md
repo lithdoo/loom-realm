@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 implementation boundary frozen  
+> 稳定程度：M10–M14 **Implemented / Qualified / Closed**
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  

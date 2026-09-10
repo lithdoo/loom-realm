@@ -71,7 +71,7 @@ M13 Web Presentation
 M10–M13 均已 Implemented / Qualified / Closed。Current canonical executable closure gate：
 
 ```text
-npm run test:m13
+npm run test:m14
 ```
 
 ---
@@ -137,7 +137,7 @@ M10  User Input                                        ✅
 M11  Render Replication                                ✅
 M12  Content                                           ✅
 M13  Web Presentation                                  ✅
-M14  Map Game Library + First Real Game               🔒 pending implementation
+M14  Map Game Library + First Real Game               ✅
 M15  Desktop Full E2E                                  pending
 M16  PWA Runtime                                       pending
 M17  PWA Full E2E / Equivalence                        pending

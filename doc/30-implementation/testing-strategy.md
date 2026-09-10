@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 qualified；M14 qualification frozen for implementation  
+> 稳定程度：M1–M14 qualified
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-10
@@ -58,10 +58,10 @@ M12      Content
 M13      Web Presentation
 ```
 
-Do not weaken or duplicate their detailed gates here。Current canonical executable closure before M14 remains：
+Do not weaken or duplicate their detailed gates here。Current canonical executable closure is：
 
 ```text
-npm run test:m13
+npm run test:m14
 ```
 
 M10 physical-source milestone placement is frozen：
@@ -240,7 +240,7 @@ M17 does not duplicate all lower-level M13 Chromium conformance；it proves the 
 
 ## 8. Root Gate Evolution
 
-Current before M14 implementation：
+The root gate set before M14 was：
 
 ```text
 npm run test:regression

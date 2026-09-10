@@ -159,7 +159,7 @@ M10 User Input             ✅ Closed
 M11 Render Replication     ✅ Closed
 M12 Content                ✅ Closed
 M13 Web Presentation       ✅ Closed 2026-09-09
-M14 loom.map               pending
+M14 Map Game Library       ✅ Closed 2026-09-10
 M15 Desktop Full E2E       pending
 M16 PWA Runtime            pending
 M17 PWA Full E2E           pending
@@ -173,7 +173,7 @@ M13 落地文档：
 - [M13 / 04](https://github.com/lithdoo/loom-realm/blob/main/M13_04_VERTICAL_INTEGRATION.md)
 - [M13 / 05](https://github.com/lithdoo/loom-realm/blob/main/M13_05_QUALIFICATION_CLOSURE.md)
 
-当前 executable closure gate是 `npm run test:m13`，包含 real Chromium qualification；证据见 [M13 qualification](../30-implementation/m13-qualification.md)。
+当前 executable closure gate是 `npm run test:m14`，包含 real Chromium qualification；证据见 [M14 qualification](../30-implementation/m14-qualification.md)。
 
 ---
 

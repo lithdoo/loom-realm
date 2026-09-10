@@ -167,7 +167,7 @@ Runtime/Renderer duplicate reads are accepted for M14。No Content metadata/HEAD
 
 ## 7. Workspace Rule
 
-Current root workspaces before M14 implementation：
+Root workspaces before the M14 additions were：
 
 ```text
 packages/*
@@ -256,7 +256,7 @@ MiniDesktopHost / MapHost / GameRuntimeHost
 ```text
 M12 Content                                  ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      🔒 Frozen for Implementation / Pending
+M14 Map Game Library + First Real Game      ✅ Closed 2026-09-10
 M15 Desktop Full E2E                        pending
 M16 PWA Runtime                             pending
 M17 PWA Full E2E / Equivalence              pending

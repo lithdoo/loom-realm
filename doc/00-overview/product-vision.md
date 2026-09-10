@@ -504,10 +504,10 @@ M10 User Input                                      ✅ Closed
 M11 Render Replication                              ✅ Closed
 M12 Content                                         ✅ Closed
 M13 Web Presentation                                ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game              pending
+M14 Map Game Library + First Real Game              ✅ Closed 2026-09-10
 M15 Desktop full E2E                                 pending
 M16 PWA Runtime                                      pending
 M17 PWA full E2E / equivalence                       pending
 ```
 
-当前 executable closure是 `npm run test:m13`。下一步按 M14/01–05 建立 `game-libs/map` 与 `examples/essentials-v21.1`，让 map runtime 通过 `ContentClient` 消费 RMXP/Essentials-compatible FSDB JSON records完成 first playable map vertical，再进入 Desktop/PWA full E2E。
+当前 executable closure是 `npm run test:m14`。M14 已以 `game-libs/map` 与 `examples/essentials-v21.1` 完成 first playable map vertical；下一步进入 Desktop/PWA full E2E。

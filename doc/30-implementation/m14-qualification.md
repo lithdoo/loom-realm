@@ -2,20 +2,20 @@
 
 ## Status
 
-Implementation qualification candidate. The working tree passes the canonical
-gate and exact local v21.1 gate. M14 becomes formally Closed after these changes
-receive a closure commit SHA and the committed Node 20/24 workflow passes.
+**Implemented / Qualified / Closed** on 2026-09-10. The implementation revision
+passes the canonical committed Node 20/24 workflow and the exact local v21.1
+compatibility gate.
 
 ## Revision
 
-- Working-tree base: `f3b14408e75cc701dc593f34bb4dfa8b90431f07`
-- Closure commit SHA: pending commit
+- Implementation base: `f3b14408e75cc701dc593f34bb4dfa8b90431f07`
+- Qualified implementation commit: `d415742f337ff8613c2e349cebb9a820dc0bda72`
 - Local canonical runtime: Node `22.12.0`, npm `10.9.0`
 - `npm run test:m14`: PASS
 - Node 20.20.2 M14-specific suite: 18/18 PASS, including Chromium
 - Node 24.20.0 M14-specific suite: 18/18 PASS, including Chromium
-- Full Node 20/24 canonical CI: configured in `.github/workflows/m14.yml`;
-  pending committed workflow execution
+- Full Node 20/24 canonical CI: PASS in GitHub Actions run
+  [`34446050878`](https://github.com/lithdoo/loom-realm/actions/runs/34446050878)
 
 ## Selective projection
 
@@ -66,5 +66,6 @@ receive a closure commit SHA and the committed Node 20/24 workflow passes.
 
 Local implementation and exact-source qualification: PASS.
 
-Formal milestone closure: pending closure commit and its hosted Node 20/24
-canonical workflow result.
+Formal milestone closure: **PASS / Closed**. All 20 workflows triggered for the
+qualified implementation commit completed successfully, including the M14
+Node 20/24 canonical gate and the complete M13 regression gate.

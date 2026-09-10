@@ -1,6 +1,6 @@
 # M14 / 05 — Qualification Closure
 
-> 状态：Frozen for Implementation / M14 Pending
+> 状态：**Implemented / Qualified / Closed**
 
 ## Closure target
 
@@ -355,6 +355,6 @@ public map presentation SDK
 
 ## Freeze declaration
 
-M14/01–05 plus `M14_CONSUMER_PROJECTION.md` are frozen for implementation。`Frozen for Implementation` means implementation should no longer redesign ownership、consumer data scope、business semantics、topology、Render data、presentation structure or qualification criteria。
+M14/01–05 plus `M14_CONSUMER_PROJECTION.md` remain the frozen design baseline。Closure does not reopen ownership、consumer data scope、business semantics、topology、Render data、presentation structure or qualification criteria。
 
-M14 remains `Pending` until canonical CI and one same-revision exact-v21.1 local qualification pass and the closure record is written。
+M14 could not become `Closed` until canonical CI、one same-revision exact-v21.1 local qualification and the closure record all passed；those conditions were satisfied on 2026-09-10。

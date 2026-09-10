@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 implementation boundary frozen  
+> 稳定程度：M10–M14 **Implemented / Qualified / Closed**
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
 > 最近复核：2026-09-10
@@ -84,7 +84,7 @@ M10 User Input         ✅ Closed
 M11 Render Replication ✅ Closed
 M12 Content            ✅ Closed
 M13 Web Presentation   ✅ Closed 2026-09-09
-M14 Map Game Library   🔒 Frozen for Implementation / Pending
+M14 Map Game Library   ✅ Closed 2026-09-10
 ```
 
 M14 consumes M10–M13；it does not reopen their public contracts for map-specific convenience。

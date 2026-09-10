@@ -18,7 +18,7 @@ M10 User Input                                       ✅
 M11 Render Replication                               ✅
 M12 Desktop Content                                  ✅
 M13 Web Presentation                                 ✅ Qualified 2026-09-09
-M14 Map Game Library + concrete example              pending
+M14 Map Game Library + concrete example              ✅ Qualified 2026-09-10
 M15 BrowserWindow/full Desktop E2E                   pending
 ```
 

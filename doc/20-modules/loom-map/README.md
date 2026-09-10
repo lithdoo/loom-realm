@@ -1,8 +1,8 @@
 # Map Game Library 设计
 
 > 层级：Game Library 设计  
-> 状态：Frozen for Implementation / M14 Pending  
-> 稳定程度：M10–M13 consumed boundaries closed；M14 first-slice implementation shape frozen  
+> 状态：**Implemented / Qualified / Closed**
+> 稳定程度：M10–M14 consumed boundaries closed
 > 精确 landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
 > 决策：[ADR 0032](../../decisions/0032-game-library-example-boundary.md)
 
