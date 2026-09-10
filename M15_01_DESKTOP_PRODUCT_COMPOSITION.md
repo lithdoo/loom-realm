@@ -95,10 +95,12 @@ Electron ready
 → prepared Desktop Content view/service
 → Desktop Data Broker + Main physical bindings
 → start Main Session / real Runner child
-→ arm Renderer candidate capability
-→ create BrowserWindow
-→ Renderer bootstrap
+→ Main arms Renderer Control candidate slot
+→ create BrowserWindow shell
+→ M15/02 fulfills the physical Renderer candidate/bootstrap
 ```
+
+`RendererControlBinding.acquire(...)` 的 slot/currentness 仍由 Main-owned flow决定；Desktop只提供 physical carrier，不 mint Renderer authority。
 
 Web Presentation Config 是独立 product startup input；不得进入 Game Entry、Hostra launch manifest、HostraLaunchPlan 或 Main bootstrap。
 
@@ -121,15 +123,20 @@ M15/02 唯一允许补出的 shared surface 是现有 M13 implementation 的最�
 
 ## 6. Completion
 
-M15/01 完成时必须能从真实 Electron process 启动 checked-in M14 Hostra installation，并证明：
+M15/01 只关闭 **Electron main/product composition slice**；不提前要求 M15/02 的 Renderer currentness 或 visible presentation。
+
+完成时必须证明：
 
 ```text
-Hostra PREPARE succeeded
-real Runner child exists
-Main Session is live
-Desktop Data/Content are live
-one BrowserWindow Renderer candidate becomes current
-M14 presentation becomes visible
+checked-in Hostra installation can be selected
+Hostra PREPARE succeeds
+prepared Desktop Content view/service exists
+Desktop Data Broker + Main physical bindings exist
+runMain starts with real Hostra RuntimeHosting
+real Runner child exists while Main Session is live
+product-owned lifetime/cancellation is established
+BrowserWindow shell creation path exists
+Renderer Control physical slot can be handed to M15/02
 ```
 
-此阶段不以 reload/reconnect/shutdown 完整资格为 closure；这些属于后续 M15 slices。
+Renderer candidate becomes current、BrowserWindow Data/Content acquisition 与 M14 presentation visible 由 M15/02关闭；reload/reconnect/shutdown完整资格由后续 slices关闭。
