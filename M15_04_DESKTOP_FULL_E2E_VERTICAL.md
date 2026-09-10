@@ -1,6 +1,6 @@
 # M15 / 04 — Desktop Full E2E Vertical
 
-> 状态：**Implementation Planned / Boundary Frozen**  
+> 状态：**Implementation Frozen / Preimplementation Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 落地顺序：04  
 > 最近复核：2026-09-10  
@@ -22,17 +22,19 @@ checked-in examples/essentials-v21.1 Hostra installation
 → Runtime Control
 → Desktop Data Broker
 → Desktop Content
-→ Electron BrowserWindow
-→ real DOM RendererInputSource
+→ secure Electron BrowserWindow
+→ one-shot private Renderer bootstrap
+→ Main-World trusted Renderer
+→ native BrowserWindow RendererDataBinding + DOM RendererInputSource
 → existing M13 presentation
 → @loomrealm-game/map runtime + business WC
 ```
 
-测试可以使用 Playwright 驱动 Electron，但不得用 Playwright 直接注入 Main/Store/game state，也不得临时生成另一份 game/Hostra manifest 来替代 canonical example。
+测试可以使用 Playwright驱动 Electron，但不得用 Playwright直接注入 Main/Store/game state，也不得临时生成另一份 game/Hostra manifest替代 canonical example。
 
 ## 2. Happy-path Evidence
 
-Canonical scenario 复用 M14 已冻结事实：
+Canonical scenario复用 M14已冻结事实：
 
 ```text
 map visible
@@ -45,11 +47,60 @@ map visible
 → player remains (11,8)
 ```
 
-M15 不重新断言全部 map schema、Canvas source rectangles、Custom Element private structure；这些由 M14 qualification 拥有。这里只证明相同 business outcome 经真实 Desktop physical path 到达。
+M15不重新断言全部 map schema、Canvas source rectangles、Custom Element private structure；这些由 M14 qualification拥有。这里只证明相同 business outcome经真实 Desktop physical path到达。
 
-## 3. Lifecycle Evidence
+## 3. Physical Boundary Evidence
 
-同一 product E2E suite 至少证明：
+同一 product suite必须证明真实 Window使用冻结 physical boundary：
+
+```text
+nodeIntegration=false
+contextIsolation=true
+sandbox=true
+webSecurity=true
+
+Control:
+    MessageChannelMain → native DOM MessagePort → existing Renderer Control
+
+Data:
+    Broker candidate lifecycle
+    → dedicated endpoint settlement port
+    → native browser WebSocket
+    → existing RendererDataBinding/Data peer
+
+Presentation:
+    trusted Renderer Main World first
+    → private bootstrap consumed
+    → business JS/CSS loaded later through M13
+```
+
+必须可观察地证明 business page没有 generic Electron/contextBridge API，Data application messages不通过 Electron handoff port，product source不引用 Renderer internal filesystem path。
+
+## 4. Input Evidence
+
+Keyboard happy path由真实 `KeyboardEvent`关闭。Pointer/Gamepad可以使用 focused producer-level browser evidence，但必须运行同一 production DOM source：
+
+```text
+Keyboard
+→ code filtering + State-before-Event
+
+Pointer
+→ BrowserWindow viewport normalization
+→ fresh one-shot canonical pointerId
+→ down/up/cancel State-before-Event
+
+Gamepad
+→ navigator.getGamepads() standard mapping
+→ rAF current-state polling
+→ fresh gamepadId on reconnect/index reuse
+→ 500000 threshold crossing State-before-Event
+```
+
+focus/visibility loss/return必须证明 unavailable → fresh baseline → available，无 stale Event replay。
+
+## 5. Lifecycle Evidence
+
+同一 product E2E suite至少证明：
 
 ```text
 startup
@@ -60,23 +111,24 @@ normal app shutdown through runMain AbortSignal
 real Runner child termination before Electron exit
 ```
 
-Reload 后应恢复 current projection，而不是通过重启 game 获得初始状态。
+Reload后应恢复 current projection，而不是通过重启 game获得初始状态；fresh Window必须取得 fresh bootstrap/Control/Data/Content physical material。
 
-## 4. Failure Evidence
+## 6. Failure Evidence
 
-只选择 M15 新增 physical composition 必须证明的最小 failure cases：
+只选择 M15新增 physical composition必须证明的最小 failure cases：
 
 ```text
 one presentation/bootstrap failure
 one Data carrier loss/reconnect
 one Renderer close/replacement
+one input-source bootstrap/unavailable containment case
 ```
 
-Unexpected Runner terminal 的 Runtime/Main semantics 已由 Hostra owner-local qualification拥有；M15 不为了“full E2E”重复建立第二份 failure conformance。M15 只证明 normal product shutdown 最终让真实 Runner child 收敛终止。
+Unexpected Runner terminal的 Runtime/Main semantics已由 Hostra owner-local qualification拥有；M15不为了“full E2E”重复建立第二份 failure conformance。M15只证明 normal product shutdown最终让真实 Runner child收敛终止。
 
-断言 public/observable effects 与 owner boundaries；不要冻结 private helper、Electron event ordering 或额外 internal state。
+断言 public/observable effects与 owner boundaries；不要冻结 private helper、无业务意义的 Electron callback ordering或额外 internal state。
 
-## 5. Test Placement
+## 7. Test Placement
 
 允许：
 
@@ -85,8 +137,8 @@ apps/desktop/test/*        concrete Desktop physical behavior
 test/m15-*.test.mjs        repository boundary/full vertical evidence
 ```
 
-不允许为了测试建立 production `MiniDesktopHost`、fake application authority、test-only Hostra game 或第二条 map runtime/presentation path。
+不允许为了测试建立 production `MiniDesktopHost`、fake application authority、test-only Hostra game、second Renderer transport path或第二条 map runtime/presentation path。
 
-## 6. Completion
+## 8. Completion
 
-M15/04 完成时，一条真实 Electron trace 必须从 checked-in Hostra installation 的 PREPARE 一直走到 business-visible map result，并在同一 Main Session/product composition 上完成 reload、same-generation reconnect与 normal shutdown/Runner termination evidence。
+M15/04完成时，一条真实 Electron trace必须从 checked-in Hostra installation的 PREPARE一直走到 business-visible map result，并在同一 Main Session/product composition上完成 secure Window bootstrap、real input、reload、same-generation reconnect与 normal shutdown/Runner termination evidence。
