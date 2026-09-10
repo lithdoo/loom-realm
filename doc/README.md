@@ -12,6 +12,8 @@ Architecture topic
 → Implementation plan / qualification
 ```
 
+Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/phase-1-delivery-plan.md)；M14 current qualification subject / evidence / formal status只看 [`M14 Qualification Record`](./30-implementation/m14-qualification.md)。索引页不维护第二套 dated PASS/Closed checkmark。
+
 ---
 
 ## 推荐阅读顺序
@@ -38,9 +40,11 @@ Architecture topic
 20. [仓库与目录方案](./30-implementation/repository-layout.md)
 21. [测试策略](./30-implementation/testing-strategy.md)
 22. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
-23. [ADR 索引](./decisions/README.md)
-24. [ADR 0031：M13 Web Presentation](./decisions/0031-business-owned-web-component-projection.md)
-25. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
+23. [M14 Qualification Record](./30-implementation/m14-qualification.md)
+24. [ADR 索引](./decisions/README.md)
+25. [ADR 0031：M13 Web Presentation](./decisions/0031-business-owned-web-component-projection.md)
+26. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
+27. [ADR 0033：Electron-hosted Hostra Runner uses current executable in Node mode](./decisions/0033-electron-hostra-run-as-node.md)
 
 ---
 
@@ -68,11 +72,7 @@ M13 Web Presentation
     → PresentationResourceClient
 ```
 
-M10–M13 均已 Implemented / Qualified / Closed。Current canonical executable closure gate：
-
-```text
-npm run test:m14
-```
+M10–M13 是当前正式 closed baseline。M14 已有完整 consumer implementation，但 formal status仍由 qualification ledger判定；本文不从实现完成推导 Closed。
 
 ---
 
@@ -98,6 +98,9 @@ M14_04_REAL_GAME_VERTICAL.md
 
 M14_05_QUALIFICATION_CLOSURE.md
     executable closure gate
+
+doc/30-implementation/m14-qualification.md
+    live qualification subject / evidence / formal status
 
 tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
     selective RMXP Map/Tileset source→JsonValue projection
@@ -128,27 +131,38 @@ It does not recursively project the whole RMXP object graph or create a universa
 
 ## Platform Route
 
+责任/materialization route：
+
 ```text
-M6   Hostra Runtime / Runner / Control                ✅
-M7   Renderer Control                                  ✅
-M8   logical Data role seam                            ✅
-M9   Desktop Data Broker                               ✅
-M10  User Input                                        ✅
-M11  Render Replication                                ✅
-M12  Content                                           ✅
-M13  Web Presentation                                  ✅
-M14  Map Game Library + First Real Game               ✅
-M15  Desktop Full E2E                                  pending
-M16  PWA Runtime                                       pending
-M17  PWA Full E2E / Equivalence                        pending
+M6   Hostra Runtime / Runner / Control
+M7   Renderer Control
+M8   logical Data role seam
+M9   Desktop Data Broker
+M10  User Input
+M11  Render Replication
+M12  Content
+M13  Web Presentation
+M14  Map Game Library + First Real Game
+M15  Desktop Full E2E
+M16  PWA Runtime
+M17  PWA Full E2E / Equivalence
 ```
 
-M14 uses existing/synthetic input source + real Chromium。M15 owns real Desktop Node-child/BrowserWindow/DOM input。M16 owns PWA Worker Runtime hosting only。M17 completes PWA Renderer/Data/Input/Content/Web presentation and cross-platform logical equivalence。
+Current summary：
+
+```text
+M1–M13  closed baseline
+M14     implementation complete; formal status → m14-qualification.md
+M15     Implementation Frozen / Preimplementation Closed
+M16–17  planned
+```
+
+M14 uses existing/synthetic input source + real Chromium。M15 owns real Electron-hosted Hostra child、BrowserWindow、same-origin Desktop shell/Content、DOM input and lifecycle。M16 owns PWA Worker Runtime hosting only。M17 completes PWA Renderer/Data/Input/Content/Web presentation and cross-platform logical equivalence。
 
 ---
 
 ## Documentation Governance
 
-Summary/index docs only describe ownership、placement、milestone and links。Exact schema/lifetime/order/failure semantics stay in formal contracts or the current frozen milestone source。
+Summary/index docs only describe ownership、placement、milestone route and links。Exact schema/lifetime/order/failure semantics stay in formal contracts or the current frozen milestone source；live evidence stays in the designated qualification ledger。
 
 Frozen authority、identity、lifecycle/order、failure/recovery or public surface can change only through the corresponding reopen rule；implementation cannot silently expand them。
