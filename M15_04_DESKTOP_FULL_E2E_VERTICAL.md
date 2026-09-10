@@ -19,7 +19,7 @@ checked-in examples/essentials-v21.1 Hostra installation
 → Hostra PREPARE
 → Main
 → real Node Runner child
-→ Runtime Control
+→ existing Hostra Runtime Control
 → Desktop Data Broker
 → Desktop Content
 → secure Electron BrowserWindow
@@ -38,7 +38,7 @@ Canonical scenario复用 M14已冻结事实：
 
 ```text
 map visible
-→ real BrowserWindow ArrowRight key event
+→ trusted real BrowserWindow ArrowRight key event
 → existing M10 path
 → first move succeeds: (10,8) → (11,8)
 → presentation reflects current state
@@ -59,7 +59,13 @@ contextIsolation=true
 sandbox=true
 webSecurity=true
 
-Control:
+bootstrap:
+    app-owned shell did-finish-load
+    → one-shot private handoff
+    → trusted Main-World Renderer consumes it
+    → business JS/CSS loads later
+
+Renderer Control:
     MessageChannelMain → native DOM MessagePort → existing Renderer Control
 
 Data:
@@ -67,30 +73,30 @@ Data:
     → dedicated endpoint settlement port
     → native browser WebSocket
     → existing RendererDataBinding/Data peer
-
-Presentation:
-    trusted Renderer Main World first
-    → private bootstrap consumed
-    → business JS/CSS loaded later through M13
 ```
 
 必须可观察地证明 business page没有 generic Electron/contextBridge API，Data application messages不通过 Electron handoff port，product source不引用 Renderer internal filesystem path。
 
 ## 4. Input Evidence
 
-Keyboard happy path由真实 `KeyboardEvent`关闭。Pointer/Gamepad可以使用 focused producer-level browser evidence，但必须运行同一 production DOM source：
+Keyboard happy path由真实 trusted `KeyboardEvent`关闭。Pointer/Gamepad可以使用 focused producer-level browser evidence，但必须运行同一 production DOM source：
 
 ```text
 Keyboard
+→ event.isTrusted required
 → code filtering + State-before-Event
+→ synthetic dispatch ignored
 
 Pointer
+→ event.isTrusted required
 → BrowserWindow viewport normalization
 → fresh one-shot canonical pointerId
-→ down/up/cancel State-before-Event
+→ previous buttons vs event.buttons chord transition
+→ State-before-Event in frozen button order
+→ synthetic dispatch ignored
 
 Gamepad
-→ navigator.getGamepads() standard mapping
+→ captured navigator.getGamepads() standard mapping
 → rAF current-state polling
 → fresh gamepadId on reconnect/index reuse
 → 500000 threshold crossing State-before-Event
@@ -141,4 +147,4 @@ test/m15-*.test.mjs        repository boundary/full vertical evidence
 
 ## 8. Completion
 
-M15/04完成时，一条真实 Electron trace必须从 checked-in Hostra installation的 PREPARE一直走到 business-visible map result，并在同一 Main Session/product composition上完成 secure Window bootstrap、real input、reload、same-generation reconnect与 normal shutdown/Runner termination evidence。
+M15/04完成时，一条真实 Electron trace必须从 checked-in Hostra installation的 PREPARE一直走到 business-visible map result，并在同一 Main Session/product composition上完成 secure one-shot Window bootstrap、trusted physical input、reload、same-generation reconnect与 normal shutdown/Runner termination evidence。
