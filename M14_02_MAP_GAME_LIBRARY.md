@@ -1,6 +1,6 @@
 # M14 / 02 — Map Game Library
 
-> 状态：**Implemented / contract frozen; formal requalification pending**
+> 状态：**Implemented / contract frozen; formal Closed**
 > Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented map consumer contract; it does not independently claim milestone closure.
 > 规范优先级：本文是 M14 map consumer 的 implementation freeze；更早 milestone 中 future-looking 的 Desktop input、author-chosen RenderDomain id 等表述，以本文和 M14/04–05 为准。
 

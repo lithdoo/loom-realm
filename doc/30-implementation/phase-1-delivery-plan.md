@@ -2,10 +2,10 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**
+> 稳定程度：M10–M15 **Implemented / Qualified / Closed**；M15 physical design remains ADR 0034 + recomposition SSOT
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 最近复核：2026-09-12
 
 实施状态与正式 closure 必须分开记录。M14 的当前 qualification subject / live evidence 只以 [`m14-qualification.md`](./m14-qualification.md) 为准；M15 current physical composition 只以根目录 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md) + ADR 0034 为准。
 
@@ -173,7 +173,7 @@ M14 consumes this surface；it does not introduce a second presentation store、
 
 ---
 
-## M14 — Map Game Library + First Real Game ⚠️ Implemented / requalification pending
+## M14 — Map Game Library + First Real Game ✅ Closed
 
 M14 implementation proves that M10–M13 can support a real independent business consumer without new core machinery：
 
@@ -190,7 +190,7 @@ M10 Input + M11 Render + M12 Content + M13 Presentation
 observable playable RMXP-compatible map slice
 ```
 
-The architecture/consumer contract and hardened implementation are frozen. Formal M14 closure remains pending until the current qualification subject has exact-local + hosted Node 20 + hosted Node 24 evidence recorded together in `m14-qualification.md`.
+The architecture/consumer contract and hardened implementation are frozen. Formal M14 status is **Closed** in [`m14-qualification.md`](./m14-qualification.md)：exact-local + hosted Node 20 + hosted Node 24 PASS on subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`。
 
 Normative landing order：
 
@@ -330,7 +330,7 @@ Current subject and live PASS/PENDING state are recorded only in `m14-qualificat
 
 ---
 
-## M15 — Hostra-owned Desktop Full E2E 🔒 Implementation Frozen / Preimplementation Closed
+## M15 — Hostra-owned Desktop Full E2E ✅ Closed
 
 ADR 0034 corrects only the outer physical owner：
 
@@ -468,9 +468,9 @@ Canonical M15 gate remains：
 npm run test:m15
 ```
 
-It must run current `test:m14` first and then real frozen-Hostra boundary/build/E2E/input/reload/Data-only reconnect/lifecycle evidence。Formal M15 closure additionally requires M14 formal status = Closed。
+It must run current `test:m14` first and then real frozen-Hostra boundary/build/E2E/input/reload/Data-only reconnect/lifecycle evidence。Formal M15 status is Closed in [`m15-qualification.md`](./m15-qualification.md)。
 
-**No further M15 architecture/design pass is required before implementation.** Slices 1–7 may proceed directly；only a real contradiction with the frozen Hostra baseline or frozen LoomRealm contracts may reopen physical design。
+M15 implementation and hosted qualification are complete. Only a real contradiction with the frozen Hostra baseline or frozen LoomRealm contracts may reopen physical design。
 
 ---
 
@@ -520,8 +520,8 @@ M10 User Input                             ✅ Closed
 M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game     ⚠️ Implementation complete / requalification pending
-M15 Desktop Full E2E                       🔒 Implementation Frozen / Preimplementation Closed
+M14 Map Game Library + First Real Game     ✅ Closed
+M15 Desktop Full E2E                       ✅ Closed
 M16 PWA Runtime                            pending
 M17 PWA Full E2E / Equivalence             pending
 ```
@@ -529,13 +529,7 @@ M17 PWA Full E2E / Equivalence             pending
 Last formally closed milestone gate：
 
 ```text
-npm run test:m13
+npm run test:m15
 ```
 
-Current M14 hosted requalification gate：
-
-```text
-npm run test:m14
-```
-
-M15 may proceed directly to full implementation according to ADR 0034 + the frozen recomposition SSOT, but documentation and qualification must not call M15 formally `Closed` before the Hostra-owned qualification subject satisfies its evidence ledger。
+Live evidence remains in the designated ledgers. Do not reopen M14/M15 physical or consumer design without a real contradiction against the frozen contracts or Hostra baseline。

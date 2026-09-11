@@ -1,6 +1,6 @@
 # M15 Hostra Desktop Recomposition Plan
 
-> 状态：**Implementation Frozen / Preimplementation Closed / current M15 physical SSOT**  
+> 状态：**Physical SSOT frozen; implemented and Closed**  
 > 决策：[ADR 0034 — Hostra-owned Desktop composition](doc/decisions/0034-hostra-owned-desktop-composition.md)  
 > 目标：把历史 standalone Electron M15 改造成真正由 Hostra 承载的 Desktop product  
 > 范围：只重做 M15 physical composition；M10–M14 logical/business contracts 不 reopen  

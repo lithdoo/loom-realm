@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 implemented/qualified；M14 implementation complete / requalification pending；M15 placement **Implementation Frozen / Preimplementation Closed**  
+> 稳定程度：M1–M15 implemented/qualified/Closed  
 > 主要定义：current monorepo physical placement、framework/game-library/example/app ownership、M14–M17 materialization order  
 > 依赖：[独立分包与发布架构](./package-architecture.md)、[平台组合系统](../10-architecture/platform-composition-system.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
@@ -322,4 +322,4 @@ M16 PWA Runtime
 M17 PWA Full E2E / Equivalence
 ```
 
-Current summary见 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md)。M14 implementation complete / requalification pending；M15 Implementation Frozen / Preimplementation Closed。Do not materialize later-milestone machinery early merely for test symmetry。
+Current summary见 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md)。M14 and M15 are Closed。Do not materialize later-milestone machinery early merely for test symmetry。

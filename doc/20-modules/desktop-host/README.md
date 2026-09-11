@@ -1,7 +1,7 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Implementation complete / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**  
+> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Closed**；M15 **Closed**  
 > 当前 M15 physical SSOT：[M15 Hostra Desktop Recomposition Plan](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
 > 决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)  
 > 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../../decisions/0032-game-library-example-boundary.md)  
@@ -34,8 +34,8 @@ M10 User Input                                      ✅
 M11 Render Replication                              ✅
 M12 Desktop Content                                 ✅
 M13 Web Presentation                                ✅ Closed
-M14 Map Game Library + concrete example             ⚠️ implementation complete / requalification pending
-M15 Hostra-owned full Desktop E2E                   🔒 Implementation Frozen / Preimplementation Closed
+M14 Map Game Library + concrete example             ✅ Closed
+M15 Hostra-owned full Desktop E2E                   ✅ Closed
 ```
 
 M15只纠正最外层 physical owner；不重新设计 M9–M14 logical/business semantics。

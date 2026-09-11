@@ -57,13 +57,13 @@ M10 User Input                              ✅ Closed
 M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      ⚠️ Implementation complete / requalification pending
-M15 Desktop full E2E                        🔒 Implementation Frozen / Preimplementation Closed
+M14 Map Game Library + First Real Game      ✅ Closed
+M15 Desktop full E2E                        ✅ Closed
 M16 PWA Runtime                             pending
 M17 PWA full E2E                            pending
 ```
 
-M14 design/implementation is frozen；formal status只由 [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md) 拥有。
+M14/M15 formal evidence lives in [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md) and [`m15-qualification.md`](./doc/30-implementation/m15-qualification.md)。
 
 M15 的 Main/Data/Renderer/Input/Presentation/game logical intent保持冻结；此前 standalone Electron implementation作为历史/迁移证据保留。Canonical physical host已经由 ADR 0034纠正为：
 
@@ -87,27 +87,12 @@ shutdown grace 1000 ms
 
 当前 M15 physical SSOT 是 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)。ADR 0033只保留 historical direct-Electron compatibility relevance。
 
-M15 formal closure要求：
-
-```text
-M14 formal closure
-+ frozen Hostra baseline
-+ repeatable Hostra-owned npm run test:m15
-+ full Hostra E2E/lifecycle evidence
-```
-
-Preimplementation 已关闭，可直接进入 Slices 1–7 完整实施；只有真实 Hostra baseline 与 frozen LoomRealm contract 的 correctness/security contradiction 才允许 reopen。
+M15 is Closed on the frozen Hostra subject. Only a real Hostra baseline or frozen LoomRealm contract contradiction may reopen the physical design。
 
 Last formally closed milestone gate：
 
 ```text
-npm run test:m13
-```
-
-Current M14 hosted requalification gate：
-
-```text
-npm run test:m14
+npm run test:m15
 ```
 
 ---
@@ -197,7 +182,7 @@ M14 qualification使用 test-owned physical harness + real Chromium；真实 Hos
 
 ---
 
-## M15 Desktop full E2E — Implementation Frozen / Preimplementation Closed
+## M15 Desktop full E2E — Closed
 
 Canonical topology：
 

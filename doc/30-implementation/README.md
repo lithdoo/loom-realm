@@ -2,10 +2,10 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 Qualified / Closed；M14 implementation complete / requalification pending；M15 **Implementation Frozen / Preimplementation Closed**  
+> 稳定程度：M1–M15 Qualified / Closed  
 > 主要定义：current implementation fact-source、delivery route、qualification entry points  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 最近复核：2026-09-12
 
 实施层只落地 current architecture/contracts；不反向创造 authority、lifecycle、recovery 或 framework abstraction。精确 milestone closure由 `phase-1-delivery-plan.md` 与对应 qualification record决定。
 
@@ -48,8 +48,8 @@ M10 User Input                                ✅ Closed
 M11 Render Replication                        ✅ Closed
 M12 Content                                   ✅ Closed
 M13 Web Presentation                          ✅ Closed
-M14 Map Game Library + First Real Game        ⚠️ Implemented / requalification pending
-M15 Hostra-owned Desktop Full E2E             🔒 Implementation Frozen / Preimplementation Closed
+M14 Map Game Library + First Real Game        ✅ Closed
+M15 Hostra-owned Desktop Full E2E             ✅ Closed
 M16 PWA Runtime                               pending
 M17 PWA Full E2E / Equivalence                pending
 ```
@@ -57,10 +57,10 @@ M17 PWA Full E2E / Equivalence                pending
 Last formally closed milestone gate remains：
 
 ```text
-npm run test:m13
+npm run test:m15
 ```
 
-M14 implementation/consumer semantics are frozen；formal M14 status only follows `m14-qualification.md`。
+M14/M15 implementation/consumer/physical semantics remain frozen；formal status only follows the designated qualification records。
 
 ---
 
@@ -69,16 +69,16 @@ M14 implementation/consumer semantics are frozen；formal M14 status only follow
 ```text
 M1–M13                                      Closed
 ↓
-M14 Map Game Library + First Real Game     Requalification pending
+M14 Map Game Library + First Real Game     Closed
 ↓
-M15 Hostra-owned Desktop Full E2E          Preimplementation Closed / implementation pending
+M15 Hostra-owned Desktop Full E2E          Closed
 ↓
 M16 PWA Runtime                            Pending
 ↓
 M17 PWA Full E2E / Equivalence             Pending
 ```
 
-M15 implementation may proceed while M14 hosted requalification is pending；formal M15 closure still requires M14 formally Closed。
+Next implementable milestone is M16. Do not reopen M14/M15 without a real contradiction against the frozen contracts or Hostra baseline。
 
 ---
 
@@ -192,7 +192,7 @@ There is no framework `packages/map` / `@loomrealm/map` and no new shared Hostra
 
 ## 7. Qualification Records
 
-Formally closed evidence stays in existing qualification records。Current open ledgers：
+Formally closed evidence stays in existing qualification records。Current closed ledgers：
 
 ```text
 doc/30-implementation/m14-qualification.md

@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：M10–M13 closed baseline；M14 implementation frozen / formal status ledger-owned；M15 Desktop module boundary **Implementation Frozen / Preimplementation Closed**  
+> 稳定程度：M10–M13 closed baseline；M14/M15 implemented, qualified, and Closed  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
 > 最近复核：2026-09-11
@@ -87,8 +87,8 @@ M10 User Input         closed baseline
 M11 Render Replication closed baseline
 M12 Content            closed baseline
 M13 Web Presentation   closed baseline
-M14 Map Game Library   implementation/consumer semantics frozen; formal status ledger-owned
-M15 Desktop Full E2E   Implementation Frozen / Preimplementation Closed
+M14 Map Game Library   Closed
+M15 Desktop Full E2E   Closed
 ```
 
 M14 consumes M10–M13；不因 map convenience reopen public contracts。M15只 materialize真实 Desktop physical composition，不把 Hostra/Electron mechanics提升为 common framework contracts。

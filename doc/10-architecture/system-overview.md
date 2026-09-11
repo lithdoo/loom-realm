@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M13 closed baseline；M14 consumer architecture/implementation frozen；M15 **Implementation Frozen / Preimplementation Closed**  
+> 稳定程度：M10–M15 closed baseline；M15 physical realization remains ADR 0034 + recomposition SSOT  
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
@@ -258,4 +258,4 @@ M10 Input
 
 M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
 
-当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M15 已达到 **Implementation Frozen / Preimplementation Closed**，可直接进入完整实施；Architecture docs不独立发布 milestone Closed日期。
+当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M14/M15 已 Closed；Architecture docs不独立发布 milestone Closed日期。

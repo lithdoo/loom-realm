@@ -160,8 +160,8 @@ Current summary for navigation only：
 
 ```text
 M10–M13  Closed
-M14      implementation complete / requalification pending
-M15      Implementation Frozen / Preimplementation Closed / implementation pending
+M14      Closed → ../30-implementation/m14-qualification.md
+M15      Closed → ../30-implementation/m15-qualification.md
 M16–M17  pending
 ```
 

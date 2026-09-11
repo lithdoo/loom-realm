@@ -65,16 +65,16 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 
 | Gate | Evidence | Status |
 | --- | --- | --- |
-| Existing milestone prerequisite | current `npm run test:m14` on same tree | **LOCAL PASS — 2026-09-11** |
+| Existing milestone prerequisite | current `npm run test:m14` on same tree | **PASS — hosted Node 20/24 included in `test:m15`** |
 | Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PASS — 2026-09-12** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
-| M15 boundary/build | no canonical LoomRealm Electron ownership | **LOCAL PASS — 2026-09-11** |
-| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **LOCAL PASS — 2026-09-11** |
-| Document bootstrap | acquire/document rendezvous + navigation-only route | **LOCAL PASS — 2026-09-11** |
-| Input/reload/reconnect | production Hostra Window path | **LOCAL PASS — 2026-09-11** |
+| M15 boundary/build | no canonical LoomRealm Electron ownership | **PASS** |
+| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PASS** |
+| Document bootstrap | acquire/document rendezvous + navigation-only route | **PASS** |
+| Input/reload/reconnect | production Hostra Window path | **PASS** |
 | Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PASS — hosted Ubuntu / 2026-09-12** |
-| Canonical aggregate | `npm run test:m15` | **LOCAL PASS — Windows / Node 22.12.0 / 2026-09-11** |
-| Hosted qualification | dedicated M15 workflow, same subject | **PASS — run 34621764146 / Node 24** |
+| Canonical aggregate | `npm run test:m15` | **PASS — local Windows Node 24.19.0 + hosted Ubuntu Node 24** |
+| Hosted qualification | dedicated M15 workflow, same subject | **PASS — run 34621764146 / Node 24；reconfirmed 34622237743** |
 | Formal M15 closure | all rows above PASS for one subject | **PASS — 2026-09-12** |
 
 `getHostState/getAllWindows` may observe that a Window is Hostra-owned；they are not production authority/currentness mechanisms。
@@ -305,10 +305,11 @@ The landed implementation subject completed the seven recomposition slices, the 
 
 ```text
 Windows
-Node 22.12.0
-npm 10.9.0
+Node 24.19.0 / npm 10.9.2
 frozen Hostra d863beab3c59c3bd4f271514a228fa8fee0bf5b6
-npm run test:m15 → PASS
+npm run test:m15:desktop → PASS
+npm run test:m15:hostra → PASS
+historical local Node 22.12.0 npm run test:m15 → PASS
 npm run docs:check-links → PASS
 npm run docs:build → PASS
 exact Essentials v21.1 local → PASS
@@ -338,7 +339,7 @@ former Content/listener port refuses connections after process exit
 
 The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。The hosted Ubuntu qualification supplied the required `window.closed` / `host.shuttingDown` / SIGTERM ordering and terminal cleanup evidence。
 
-The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。[M15 run 34621764146](https://github.com/lithdoo/loom-realm/actions/runs/34621764146) completed the canonical gate and uploaded its qualification report for the docs-only descendant carrying implementation subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`。
+The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。[M15 run 34621764146](https://github.com/lithdoo/loom-realm/actions/runs/34621764146) completed the canonical gate and uploaded its qualification report for the docs-only descendant carrying implementation subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`。The later ledger-only descendant `920d5f410975e0b6cb1bd9431ceb100fc2993698` reconfirmed the same gate in [M15 run 34622237743](https://github.com/lithdoo/loom-realm/actions/runs/34622237743)。
 
 ---
 

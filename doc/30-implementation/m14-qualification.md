@@ -30,7 +30,7 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 | Hosted Node 24 | `npm run test:m14` on the current subject | **PASS — run 34621763706 / job 103337200362** |
 | Formal M14 closure | all three rows above target the same qualification subject | **PASS — 2026-09-12** |
 
-Hosted evidence: [M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706) completed successfully for the docs-only descendant carrying subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`；both Node 20 and Node 24 executed the complete canonical `npm run test:m14` gate。
+Hosted evidence: [M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706) completed successfully for the docs-only descendant carrying subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`；both Node 20 and Node 24 executed the complete canonical `npm run test:m14` gate。The later ledger-only descendant `920d5f410975e0b6cb1bd9431ceb100fc2993698` reconfirmed the same gate in [M14 run 34622237560](https://github.com/lithdoo/loom-realm/actions/runs/34622237560)。
 
 No historical CI run may be promoted into a PASS for the current subject merely because an older implementation passed the same command.
 

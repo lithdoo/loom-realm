@@ -1,7 +1,7 @@
 # Map Game Library 设计
 
 > 层级：Game Library 设计  
-> 状态：**Implemented / contract frozen; formal requalification pending**
+> 状态：**Implemented / contract frozen; formal Closed**
 > 稳定程度：M10–M13 consumed boundaries closed；M14 map design/implementation frozen  
 > 精确 landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
 > Formal qualification source：[`m14-qualification.md`](../../30-implementation/m14-qualification.md)  

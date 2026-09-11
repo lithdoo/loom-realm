@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 closed；M14 implementation complete / requalification pending；M15 **Implementation Frozen / Preimplementation Closed**  
+> 稳定程度：M1–M15 closed  
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
@@ -321,7 +321,7 @@ bootstrap/Renderer convergence failure
 npm run test:m15
 ```
 
-It runs current `npm run test:m14` first, then boundary/build + frozen Hostra full E2E + input/reload/Data-only reconnect/termination evidence。Formal M15 closure additionally requires M14 formal status = Closed。
+It runs current `npm run test:m14` first, then boundary/build + frozen Hostra full E2E + input/reload/Data-only reconnect/termination evidence。Formal M15 status is Closed in [`m15-qualification.md`](./m15-qualification.md)。
 
 ---
 
@@ -416,8 +416,8 @@ Prefer small test-local objects/functions that drive real seams。
 ## 10. Final Test Invariants
 
 1. M1–M13 closed evidence remains valid；
-2. M14 proves first real game consumer and its formal status remains ledger-owned；
-3. M15 physical design is **Implementation Frozen / Preimplementation Closed** before coding；
+2. M14 proves first real game consumer and is Closed in its ledger；
+3. M15 physical design stayed **Implementation Frozen / Preimplementation Closed** before coding and is now Closed；
 4. M15 alone claims full Hostra-owned Desktop E2E；
 5. M16 alone closes PWA Worker Runtime；
 6. M17 closes full PWA E2E + logical equivalence；

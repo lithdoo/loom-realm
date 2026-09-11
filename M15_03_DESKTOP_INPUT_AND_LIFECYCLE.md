@@ -1,6 +1,6 @@
 # M15 / 03 — Desktop Physical Input and Lifecycle
 
-> 状态：**Implementation Frozen / Preimplementation Closed — input semantics retained / lifecycle ownership recomposed through Hostra**  
+> 状态：**Input semantics retained / lifecycle implemented and Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：03  
 > 最近复核：2026-09-11  

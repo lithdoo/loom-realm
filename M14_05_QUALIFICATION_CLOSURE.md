@@ -1,6 +1,6 @@
 # M14 / 05 — Qualification Closure
 
-> 状态：**Closure contract frozen; formal requalification pending**
+> 状态：**Closure contract frozen; formal Closed**
 > Evidence authority：`doc/30-implementation/m14-qualification.md` is the single source of truth for the current qualification subject, run IDs, local evidence and formal M14 status. This file defines the gate; it does not mirror live PASS checkmarks.
 
 ## 1. Closure unit

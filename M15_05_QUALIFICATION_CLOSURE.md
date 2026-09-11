@@ -1,6 +1,6 @@
 # M15 / 05 — Qualification and Closure
 
-> 状态：**Implementation Frozen / Preimplementation Closed — qualification subject recomposed around Hostra**  
+> 状态：**Physical design frozen; formal Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：05  
 > 最近复核：2026-09-11  
@@ -343,4 +343,4 @@ document/bootstrap + reload/reconnect/input + lifecycle/failure evidence = PASS
 legacy direct-Electron canonical ownership removed
 ```
 
-**Preimplementation is Closed now.** No further design pass is required before implementing Slices 1–7；only implementation evidence may reopen the physical design under §12。
+Live evidence and Closed status belong to `doc/30-implementation/m15-qualification.md`。This landing document keeps the frozen closure contract；it does not independently republish run IDs。

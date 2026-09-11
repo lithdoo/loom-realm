@@ -1,6 +1,6 @@
 # `@loomrealm/desktop` Hostra-owned product composition
 
-> 状态：M15 Hostra recomposition implemented；formal closure仍由 `doc/30-implementation/m15-qualification.md` 管理，并等待同一 subject 的 hosted qualification。
+> 状态：M15 Hostra recomposition implemented and Closed；live evidence in `doc/30-implementation/m15-qualification.md`。
 
 Canonical Desktop topology：
 

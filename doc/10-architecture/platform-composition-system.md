@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13 closed baseline；M14 consumer architecture frozen；M15 **Implementation Frozen / Preimplementation Closed**  
+> 稳定程度：M9/M12/M13 closed baseline；M14/M15 implemented and Closed  
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
@@ -352,7 +352,7 @@ M12 Content
 → M17 PWA Full E2E / Equivalence
 ```
 
-Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15当前是 **Implementation Frozen / Preimplementation Closed**，可直接实施；它不是旧 direct-Electron `Implementation Frozen` subject。
+Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15 formal status is Closed；it is not the old direct-Electron `Implementation Frozen` subject。
 
 ---
 

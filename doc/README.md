@@ -59,11 +59,11 @@ M10 User Input             Closed
 M11 Render Replication     Closed
 M12 Content                Closed
 M13 Web Presentation       Closed
-M14 consumer design        Frozen; formal status ledger-owned
-M15 physical composition   Implementation Frozen / Preimplementation Closed
+M14 Map Game Library       Closed
+M15 Desktop Full E2E       Closed
 ```
 
-M14 已有完整 consumer implementation，但 formal status仍由 qualification ledger判定；本文不从实现完成推导 Closed。
+M14/M15 formal evidence remains in their qualification ledgers；本文不复制 run ID。
 
 ---
 
@@ -156,8 +156,8 @@ Current summary：
 
 ```text
 M1–M13  closed baseline
-M14     implementation complete; requalification status → m14-qualification.md
-M15     Implementation Frozen / Preimplementation Closed; implementation pending
+M14     Closed → m14-qualification.md
+M15     Closed → m15-qualification.md
 M16–17  planned
 ```
 

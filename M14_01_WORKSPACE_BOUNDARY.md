@@ -1,6 +1,6 @@
 # M14 / 01 — Workspace and Game Ownership Boundary
 
-> 状态：**Implemented / contract frozen; formal requalification pending**
+> 状态：**Implemented / contract frozen; formal Closed**
 > Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented workspace/package boundary; it does not independently claim milestone closure.
 
 ## Objective

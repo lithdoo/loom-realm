@@ -1,6 +1,6 @@
 # M15 / 04 — Desktop Full E2E Vertical
 
-> 状态：**Implementation Frozen / Preimplementation Closed — business-visible vertical on Hostra**  
+> 状态：**Business-visible Hostra vertical implemented and Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：04  
 > 最近复核：2026-09-11  
