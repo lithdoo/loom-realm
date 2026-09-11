@@ -2,8 +2,8 @@
 
 > 层级：模块设计  
 > 状态：Active Design  
-> 稳定程度：M10–M13 closed baseline；M14 implementation frozen / formal status ledger-owned；M15 Desktop module boundary preimplementation frozen  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 稳定程度：M10–M13 closed baseline；M14 implementation frozen / formal status ledger-owned；M15 Desktop module boundary **Implementation Frozen / Preimplementation Closed**  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 实施映射：[Phase 1 交付计划](../30-implementation/phase-1-delivery-plan.md)  
 > 最近复核：2026-09-11
 
@@ -12,7 +12,7 @@ module boundary != npm package boundary != protocol boundary != platform boundar
 framework module != reusable game library != concrete game
 ```
 
-本索引不维护独立 milestone PASS/Closed ledger。M14 live formal status只以 [`m14-qualification.md`](../30-implementation/m14-qualification.md) 为准。
+本索引不维护独立 milestone PASS/Closed ledger。M14/M15 live evidence分别由对应 qualification record拥有。
 
 ---
 
@@ -21,13 +21,13 @@ framework module != reusable game library != concrete game
 | 模块/consumer | 入口 | Current responsibility |
 |---|---|---|
 | Main | [main-system](./main-system/README.md) | Session/Runtime/Frame/Activation/InputTarget/DataAuthority/current Renderer authority |
-| Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector；M15 exposes the narrow trusted `@loomrealm/renderer/web-presentation` production seam |
+| Web Renderer | [web-renderer](./web-renderer/README.md) | Main mirror、Data/Input、M11 Store、M12 private ResourceClient、M13 thin Projector；M15使用 narrow trusted `@loomrealm/renderer/web-presentation` seam |
 | Game Package | [game-package](./game-package/README.md) | logical Game topology/common validation |
-| Map Game Library | [map design](./loom-map/README.md) | M14 selective RMXP/Essentials-compatible map business + map-owned Web presentation；target `game-libs/map` / `@loomrealm-game/map` |
-| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra physical composition、Content、M13 integration、M15 full Desktop E2E |
+| Map Game Library | [map design](./loom-map/README.md) | M14 selective RMXP/Essentials-compatible map business + map-owned Web presentation；`game-libs/map` / `@loomrealm-game/map` |
+| Hostra Desktop | [desktop-host](./desktop-host/README.md) | Hostra-owned Desktop physical composition、Content、M13 integration、M15 full E2E |
 | PWA | [pwa-host](./pwa-host/README.md) | M16 Worker Runtime、M17 Renderer/Data/Input/Content/Web presentation realization |
 
-Concrete M14 game lives at `examples/essentials-v21.1` and is not a framework module。Desktop/PWA are physical realizations of the same logical architecture。
+Concrete M14 game位于 `examples/essentials-v21.1`；不是 framework module。Desktop/PWA是同一 logical architecture 的不同 physical realization。
 
 ---
 
@@ -37,7 +37,7 @@ Concrete M14 game lives at `examples/essentials-v21.1` and is not a framework mo
 packages/      LoomRealm framework/runtime
 game-libs/     reusable game-domain libraries
 examples/      concrete games
-apps/          platform hosts
+apps/          platform/product compositions
 tools/         development/import/compatibility tooling
 ```
 
@@ -68,14 +68,15 @@ Business Web Component
     read-only projected state
     private Shadow DOM / Canvas / WebGL / layout state
 
-Platform/App Composition
-    Process/Worker/Window
-    Control/Data physical provisioning
-    Content physical binding
-    presentation bootstrap environment
+Hostra shell
+    Electron / BrowserWindow / direct HOSTRA_SUBCMD process
+
+LoomRealm Desktop app composition
+    Control/Data/Content/trusted-shell physical services
+    concrete Hostra RPC adapter
 ```
 
-M13 exact identity/currentness/receiver/resource semantics remain in frozen formal contracts rather than this index。
+M13 exact identity/currentness/receiver/resource semantics remain in frozen formal contracts。Hostra physical ownership不产生 second application authority。
 
 ---
 
@@ -90,7 +91,7 @@ M14 Map Game Library   implementation/consumer semantics frozen; formal status l
 M15 Desktop Full E2E   Implementation Frozen / Preimplementation Closed
 ```
 
-M14 consumes M10–M13；it does not reopen their public contracts for map-specific convenience。M15 materializes the real Desktop physical composition without turning physical Electron details into common framework authority。
+M14 consumes M10–M13；不因 map convenience reopen public contracts。M15只 materialize真实 Desktop physical composition，不把 Hostra/Electron mechanics提升为 common framework contracts。
 
 ---
 
@@ -106,7 +107,7 @@ game-libs/map
     browser side       → map-owned Custom Elements
 ```
 
-M14 does not define a normalized map framework。Its data path is deliberately selective：
+M14不定义 normalized map framework。数据路径保持 selective：
 
 ```text
 RMXP/Essentials source semantics
@@ -117,18 +118,7 @@ RMXP/Essentials source semantics
 → @loomrealm-game/map
 ```
 
-First-slice consumer records are only：
-
-```text
-Map/{id}: tileset_id,width,height,data
-Tileset/{id}: id,tileset_name,passages,priorities
-```
-
-MapInfo、Event、MapMetadata、Color/Tone、AudioFile and other known source graph facts are not M14 consumer records without an actual behavior that reads them。
-
-Example owns concrete Game Entry、initial input、presentation declaration and page CSS。It does not own an Essentials→map adapter framework or production Host。
-
-Visible tileset/player resources travel through Render logical identity/version → `PresentationResourceClient` → business WC。Map browser JS/CSS also enter through prepared Content + `WebPresentationConfigV1`。
+Example owns concrete Game Entry、initial input、presentation declaration和 page CSS；不拥有 production Host 或 adapter framework。
 
 ---
 
@@ -137,14 +127,23 @@ Visible tileset/player resources travel through Render logical identity/version 
 ```text
 M14 qualification
     test-owned composition harness
-    existing roles + existing/synthetic RendererInputSource + real Chromium
+    existing/synthetic RendererInputSource + real Chromium
 
 M15 Desktop
-    Electron main + existing Hostra process model
-    process.execPath Runner child in host-owned run-as-node mode
-    same-origin 127.0.0.1 shell + existing Content API
-    secure BrowserWindow + physical DOM input
-    same M13 presentation + same M14 game/map business
+    Hostra shell owns Electron / BrowserWindow / direct HOSTRA_SUBCMD
+        ↓
+    LoomRealm Desktop plain Node process
+        ├─ Main
+        ├─ RuntimeHosting → Runner
+        ├─ Data Broker
+        ├─ Content + trusted shell
+        ├─ Renderer Control loopback carrier
+        └─ Data settlement loopback carrier
+        ↓
+    Hostra-owned BrowserWindow
+        → real DOM RendererInputSource
+        → M13 presentation
+        → same M14 game/map business
 
 M16 PWA Runtime
     PWA PREPARE + Worker Runner + Runtime Control MessagePort
@@ -155,7 +154,20 @@ M17 PWA
     cross-platform logical-outcome equivalence
 ```
 
-M14 harness is not a new production Host。M15's Electron run-as-node/same-origin choices are concrete Desktop mechanics only。PWA may use different transport/storage/private browser binding but cannot change M13/M14 logical semantics。
+Frozen M15 distinctions：
+
+```text
+reload
+→ same Hostra Window + fresh Renderer identity
+
+same-generation Data-only reconnect
+→ same Renderer identity + fresh Data physical pair
+
+window/signal/RPC/fatal/startup failure
+→ one idempotent termination funnel
+```
+
+ADR0033 run-as-node behavior remains conditional/historical for an Electron composition process；canonical M15 LoomRealm Desktop process is plain Node under ADR0034。
 
 ---
 
@@ -180,6 +192,10 @@ RenderEvent→DOM bridge without a real consumer
 second projection-tree/topology authority
 runtime dependency on tools/importer
 MiniDesktopHost / MapHost / GameRuntimeHost
+HostraManager / HostraSession / HostraPlatformPort
+WindowRegistry / WindowLifecycleManager / WindowSession
+DocumentManager / BootstrapCoordinator
+ConnectionManager / TransportRegistry / RecoveryManager
 ```
 
-Business/game-library WC may choose private implementation mechanics freely as long as LoomRealm-managed host projection remains read-only。
+Business/game-library WC可以自由选择 private mechanics，只要 LoomRealm-managed projection保持 read-only。M15新增 Hostra/RPC/WS mechanics优先保持 `apps/desktop` concrete implementation，不因单一 consumer提取 shared framework。
