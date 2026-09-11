@@ -1,46 +1,81 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Implementation complete / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**  
-> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../../decisions/0033-electron-hostra-run-as-node.md)  
+> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Implementation complete / requalification pending**；M15 **physical recomposition reopened / implementation plan frozen**  
+> 当前 M15 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
+> 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-11
 
-Hostra Desktop只拥有 physical topology/composition；Main保留 Session/Runtime/Frame/Activation/InputTarget/DataAuthority authority，Subsystem/game library保留 business Render authority，Renderer保留 current replica与 Web projection mechanics。
+Hostra owns the Desktop host；LoomRealm Desktop只拥有自己的 physical service composition。Main保留 Session/Runtime/Frame/Activation/InputTarget/DataAuthority authority，Subsystem/game library保留 business Render authority，Renderer保留 current replica与 Web projection mechanics。
 
 ---
 
 ## 1. Milestone Shape
 
 ```text
-M6  Hostra PREPARE / Runner / Runtime Control         ✅
+M6  Game PREPARE / Runner / Runtime Control           ✅
 M9  Desktop Data Broker / child provisioning         ✅
 M10 User Input                                       ✅
 M11 Render Replication                               ✅
 M12 Desktop Content                                  ✅
 M13 Web Presentation                                 ✅ Closed
 M14 Map Game Library + concrete example              ⚠️ implementation complete / requalification pending
-M15 BrowserWindow/full Desktop E2E                   🔒 implementation frozen / ready
+M15 Hostra-owned full Desktop E2E                    🔄 physical recomposition
 ```
 
-M15只完成真实 Desktop physical composition，不重新设计 M9–M14 logical/business ownership semantics。ADR 0033只修正首次 Electron consumer暴露出的 Hostra physical launch contradiction；Node-hosted Hostra与 application contracts不变。
+M15只纠正最外层 physical owner；不重新设计 M9–M14 logical/business semantics。
 
 ---
 
-## 2. Runtime PREPARE / Product Inputs
+## 2. Product Topology
 
-Hostra Runtime PREPARE继续：
+```text
+Hostra process
+├─ Electron app
+├─ Hostra preload / ambient API
+├─ JSON-RPC server
+├─ BrowserWindow owner
+└─ HOSTRA_SUBCMD
+     ↓
+LoomRealm Desktop plain Node process
+├─ concrete Hostra RPC adapter
+├─ Main
+├─ RuntimeHosting
+│   └─ real Node Runner
+├─ Desktop Data Broker
+├─ Desktop Content + trusted shell
+├─ Renderer Control loopback WS
+└─ Renderer Data settlement loopback WS
+
+Hostra BrowserWindow
+└─ LoomRealm trusted shell
+    ├─ Renderer Control
+    ├─ Data
+    ├─ Content
+    ├─ DOM Input
+    └─ M13 Presentation
+```
+
+Hostra is the sole Electron/BrowserWindow owner in the canonical Desktop product path。`apps/desktop` MUST NOT import Electron or create/quit BrowserWindow/Application primitives after recomposition。
+
+---
+
+## 3. Runtime PREPARE / Product Inputs
+
+Runtime PREPARE remains：
 
 ```text
 installation root
 → game.json
 → launch.hostra.json
-→ game-launcher-hostra PREPARE
-→ executable/security preflight
+→ @loomrealm/game-launcher-hostra PREPARE
 → immutable HostraLaunchPlan
 → LogicalGameBootstrap
 ```
 
-Canonical M15 game是 checked-in `examples/essentials-v21.1` Hostra-ready installation。Web Presentation Config仍是独立 product startup input：
+Canonical M15 game remains checked-in `examples/essentials-v21.1` Hostra-ready installation。
+
+Web Presentation Config remains independent product startup input：
 
 ```text
 presentation.json
@@ -48,30 +83,43 @@ presentation.json
 → WebPresentationConfigV1 validation/preparation
 ```
 
-Presentation Config不得进入 Game Entry、Hostra manifest、HostraLaunchPlan或 Main bootstrap。
+Presentation Config does not enter Game Entry、launch manifest、HostraLaunchPlan or Main bootstrap。
 
-### Electron-hosted Runner
-
-M15 Desktop main process is Electron，but Hostra keeps its single process model：
-
-```text
-canonical Runner executable = process.execPath
-current process = Electron main
-→ Hostra synthesizes ELECTRON_RUN_AS_NODE=1 for Runner child only
-→ same package-owned Hostra Runner entry
-→ same ChildProcess supervision
-→ same Runtime Control WebSocket
-```
-
-The supported Electron build MUST keep its `runAsNode` fuse enabled。Game/manifest cannot select another Node executable or control this environment value。Desktop does not add UtilityProcess、ElectronRuntimeHosting、ProcessManager or Runner registry。
+`@loomrealm/game-launcher-hostra` continues to own the existing PREPARE + Node Runner mechanics。Do not rename/extract that package as part of M15 recomposition。
 
 ---
 
-## 3. Existing Physical Slices
+## 4. Hostra RPC Boundary
 
-### Data
+LoomRealm consumes Hostra only as an external host through loopback JSON-RPC。
 
-M9 Desktop Data Broker继续唯一拥有 paired candidate/current lifecycle：
+Production minimum：
+
+```text
+openWindow
+closeWindow
+hostra.event
+```
+
+`getHostState/getAllWindows` are useful for qualification/diagnostics, not LoomRealm authority or startup currentness。
+
+Hostra RPC MUST NOT carry：
+
+```text
+Renderer Control application messages
+Data settlement/application messages
+Content bytes
+Input/Render protocol
+Main/Subsystem business state
+```
+
+The adapter remains a concrete `apps/desktop` module；do not promote Hostra into `platform-ports` or create HostraManager/HostraSession abstractions。
+
+---
+
+## 5. Data
+
+M9 `DesktopDataConnectionBroker` remains the only Desktop paired candidate/current owner：
 
 ```text
 Main committed Data authority
@@ -79,269 +127,168 @@ Main committed Data authority
 → Runner provisioner + Renderer physical delivery
 ```
 
-Data ticket/provisioning IPC不能作为 Content或 JS/CSS loader channel。
-
-### Content
-
-```text
-successful Hostra PREPARE
-→ readonly prepared Content view/service
-→ Subsystem ContentClient
-→ Renderer trusted/private ResourceClient
-→ narrow PresentationResourceClient
-```
-
-Desktop不新增 Content authority，也不向 business WC暴露 path/token/origin/raw private client。
-
-M15 BrowserWindow physical composition reuses this exact Content API on the same loopback origin as the app-owned shell；it does not add CORS/OPTIONS、preload fetch proxy or a second Content service semantics。
-
----
-
-## 4. M15 Frozen BrowserWindow Boundary
-
-BrowserWindow固定：
-
-```text
-nodeIntegration = false
-contextIsolation = true
-sandbox = true
-webSecurity = true
-```
-
-BrowserWindow loads an app-owned shell from an exact loopback HTTP origin：
-
-```text
-http://127.0.0.1:<port>/...            app-private trusted shell
-http://127.0.0.1:<same-port>/_lr/v1/... existing Desktop Content API
-```
-
-The same physical listener may dispatch exact app-shell routes beside the existing Content handler，but shell routes are not Content API routes and MUST NOT become an arbitrary static-filesystem server。
-
-禁止通过下列方式解决浏览器同源问题：
-
-```text
-file:// shell
-webSecurity=false
-new CORS/OPTIONS Content semantics
-preload Content proxy
-custom privileged protocol solely as a bypass
-```
-
-Preload运行在 Electron isolated world，只负责 exact one-shot physical handoff；不得向 page Main World暴露 generic `ipcRenderer`、filesystem、shell、process或 service-manager API。
-
-Execution-world placement固定：
-
-```text
-Electron isolated world
-    preload: exact bootstrap handoff only
-
-page Main World
-    trusted LoomRealm Renderer entry
-    Renderer holder / DOM RendererInputSource
-    M13 bootstrap / WebProjector
-    business Custom Elements loaded afterward
-```
-
-Trusted Renderer必须和 business Custom Elements处于同一 page Main World，确保 M13 `document/customElements` 与 structural receiver ABI是同一真实 browser realm；privileged Electron APIs则留在 isolated preload/main process。
-
----
-
-## 5. Renderer Control / Private Bootstrap
-
-Renderer Control的 Desktop physical realization固定：
-
-```text
-Electron main MessageChannelMain
-→ transferable MessagePortMain
-→ preload exact handoff
-→ native DOM MessagePort in trusted Renderer
-→ MessageCarrier
-→ existing Renderer Control peer/holder
-```
-
-当前 Window的一次性 bootstrap material仅允许：
-
-```text
-Renderer Control token + Control port
-window-scoped Data handoff port
-RendererContentAccess
-WebPresentationConfigV1 candidate
-```
-
-Material由 trusted Renderer lexical/private state消费；不得发布到 `window/globalThis`。Business JS只能在该 handoff被消费后由 M13启动。
-
-Because business code shares the Main World，trusted Renderer MUST capture/bind any later authority-bearing native primitive before loading business JS。At minimum：
-
-```text
-native fetch for private Content bearer requests
-native WebSocket for private Data endpoint acquisition
-transferred MessagePort objects/methods
-M15/03 browser input primitives
-```
-
-Concrete adapters close over those primitives；Desktop does not create a BrowserPrimitiveRegistry/security service locator。
-
----
-
-## 6. BrowserWindow Data Delivery
-
-M9 current `DesktopRendererDataBinding`是 Node-side deterministic Renderer realization；M15不把它注入 BrowserWindow。
-
-M15仅增加 concrete Window-side physical delivery：
-
-```text
-Desktop Broker prepares renderer WS endpoint
-→ dedicated window Data handoff port
-→ captured BrowserWindow native WebSocket
-→ MessageCarrier
-→ existing RendererDataBinding / RendererDataPeer
-```
-
-Dedicated handoff port只允许 physical settlement：
+Only Renderer-side settlement transport changes from the historical Electron MessagePort realization to a narrow loopback WS realization。
 
 ```text
 prepare / prepared-or-failed / commit / revoke / close
 ```
 
-Data application bytes只走 WebSocket，不走 Electron IPC/MessagePort。BrowserWindow不能提交 `rendererControlToken`创建 Data authorization；Broker继续依据 Main committed view决定 candidate是否 installable/current。
-
-Same-generation loss继续使用既有 Broker replacement + fresh `RendererDataBinding.acquire()`；不新增 retry/recovery authority。
+Data application bytes remain separate WebSocket traffic。Same-generation physical loss continues through existing Broker replacement + fresh `RendererDataBinding.acquire()`；no retry/recovery authority。
 
 ---
 
-## 7. M13 Presentation Integration
+## 6. Content / Shell / Presentation
 
-M15 product code通过 trusted subpaths使用现有实现：
+Existing Content semantics remain：
+
+```text
+successful PREPARE
+→ readonly prepared Content view/service
+→ Subsystem ContentClient
+→ Renderer ResourceClient
+→ PresentationResourceClient
+```
+
+The same bounded loopback listener may serve exact trusted shell/document routes beside `/_lr/v1/...` Content routes。This does not turn shell routes into Content API and MUST NOT become a generic filesystem/static server。
+
+M13 continues through：
 
 ```text
 @loomrealm/renderer/web-presentation
 @loomrealm/renderer/resource-client
 ```
 
-`web-presentation`只提升已存在的 M13 validation/preparation/bootstrap/attachment/WebProjector mechanics；它不是 business API，也不是新的 PresentationHost/Runtime。
+No PresentationHost/Runtime/component registry is introduced。
 
-Frozen flow：
+---
+
+## 7. Renderer Control / Document Bootstrap
+
+Historical direct-Electron `MessageChannelMain` + LoomRealm preload handoff is superseded。
+
+Current target：
 
 ```text
-private presentation candidate
-→ current prepared Content refs
-→ private browser binding
-→ trusted ResourceClient/native primitives captured
-→ ordered business JS/CSS
-→ window.onload
-→ existing M13 Projector
-→ business WC
+Main RendererControlBinding.acquire(token)
+→ concrete Desktop loopback WS binding
+→ trusted shell/document receives fresh one-shot endpoint capability
+→ trusted Renderer connects
+→ existing Renderer Control protocol continues unchanged
 ```
 
-Config bootstrap resource binding与 runtime `PresentationResourceClient`保持独立 capability boundary。
+Every document lifetime receives fresh：
+
+```text
+Renderer Control material
+Data settlement capability
+Content grant
+Presentation config candidate
+```
+
+Trusted Renderer consumes this before loading business scripts and captures the required native browser primitives。Hostra's own preload/ambient `window.electronAPI` remains Hostra-owned and is neither removed nor required by LoomRealm business contracts。
 
 ---
 
 ## 8. Physical Input
 
-M15 BrowserWindow source直接实现既有 `RendererInputSource`：
+M15 source remains the existing browser producer：
 
 ```text
 trusted KeyboardEvent.code
 trusted PointerEvent
 captured navigator.getGamepads()
-        ↓
-canonical RendererInputSourceChange
-        ↓
-existing M10 gate
+→ canonical RendererInputSourceChange
+→ existing M10 gate
 ```
 
-Frozen physical choices由 `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`拥有：Keyboard只接受 trusted标准 code；Pointer以 BrowserWindow content viewport归一化、使用不可复用 local id并按 `event.buttons` 前后差异生成 chorded-button transition；Gamepad只消费 `mapping="standard"`，使用 captured rAF采样和 frozen 500000 button threshold。
-
-focus/visibility loss使 producer unavailable；恢复必须 fresh State → availability=true，无 Event replay。Synthetic Keyboard/Pointer events不得进入 M10。
+Keyboard/Pointer/Gamepad exact canonical choices remain owned by `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`。
 
 ---
 
 ## 9. Reload / Shutdown / Failure
 
-Reload只替换 Renderer physical lifetime：
+Reload：
 
 ```text
+same Hostra physical Window
 Main / Runner / Subsystem stay live
-→ old Window/ports/resource capability/primitive closure retire
-→ fresh same-origin BrowserWindow + fresh bootstrap
-→ existing Main Renderer currentness replaces participant
-→ current Data/Render presentation resumes
+old document/Renderer retires
+fresh document/Renderer material converges
+current Data/Render presentation resumes
 ```
 
-Normal shutdown固定：
+Normal product close：
 
 ```text
-retire current Window
+Hostra window.closed or LoomRealm closeWindow request
 → abort signal passed to runMain(...)
-→ await Main settlement
-→ existing Main/RuntimeHosting converges Runner termination
-→ close remaining Broker/Content/shell physical services
-→ Electron exit
+→ await Main/RuntimeHosting convergence
+→ ALWAYS close LoomRealm Control/Data/Content resources
+→ LoomRealm Node process exits
+→ Hostra follows its normal HOSTRA_SUBCMD lifecycle
 ```
 
-Desktop不建立第二份 Runner termination policy。
-
-Failure containment：presentation/bootstrap/input failure保持 Window-local；Data carrier loss不等于 DataAuthority removal；Renderer failure不隐式 fail Runtime/Frame；Runner terminal继续使用 existing RuntimeHosting/Main semantics。
+Main/Runner fatal preserves original logical failure but still performs finally-like LoomRealm physical cleanup。Hostra RPC terminal is product-terminal in M15；no host reconnect/recovery model。
 
 ---
 
-## 10. Game Consumer Placement
+## 10. Abstraction Budget
+
+Expected new conceptual pieces are only：
 
 ```text
-game-libs/map
-    reusable @loomrealm-game/map
-
-examples/essentials-v21.1
-    concrete Hostra-ready private game
-
-apps/desktop
-    physical Hostra/Electron host
+concrete Hostra RPC adapter
+concrete Renderer Control WS realization
+one concrete Data settlement WS realization
+small single-window document bootstrap state
 ```
 
-Game library/example不得依赖 `apps/desktop`、Electron或 Renderer internals。Desktop runtime不得直接调用 importer/tooling或读取 third-party source corpus path。
+Do not add：
+
+```text
+HostraManager / HostraSession / HostraPlatformPort
+WindowRegistry / WindowLifecycleManager / WindowSession
+DocumentManager / BootstrapCoordinator
+ConnectionManager / TransportRegistry
+RecoveryManager
+BrowserPrimitiveRegistry
+UniversalRendererHost
+```
+
+Capability separation does not require one Server class per capability；implementation may share a physical listener or use multiple tiny listeners according to concrete simplicity。
 
 ---
 
 ## 11. Qualification Placement
 
-M14正式状态只以 `doc/30-implementation/m14-qualification.md`为准；当前 implementation complete / requalification pending。M15可以实施，但 formal M15 closure必须等待 M14 formal closure。
+M14 formal status remains owned solely by `doc/30-implementation/m14-qualification.md`。
 
-M15 qualification覆盖：
+Final M15 qualification must start the real pinned Hostra host：
 
 ```text
-Hostra-ready checked-in game
-Electron process.execPath + run-as-node real Hostra child
-existing Runtime Control ready/termination
-same-origin 127.0.0.1 shell + Content API
-secure BrowserWindow + execution-world isolation
-one-shot bootstrap + trusted native primitive capture
-Renderer Control MessagePort
-Browser-native Data WebSocket
-Desktop Content
-real trusted DOM Keyboard/Pointer/Gamepad source
-M13 presentation
-reload / same-generation reconnect / shutdown
-full business-visible M14 trace
+pinned Hostra
+→ HOSTRA_SUBCMD LoomRealm Node product
+→ Hostra RPC openWindow
+→ Hostra-owned BrowserWindow
+→ real Main/Runner/Data/Content/Input/M13/M14 path
+→ reload / same-generation reconnect / shutdown
 ```
 
-M15不得重新测试或重写 M6/M10–M14 owner-local semantics。It only adds the real Electron physical evidence that earlier owner-local qualification did not possess。
+Hostra CDP may be used only for E2E observation。The historical standalone Electron vertical is migration evidence, not final M15 closure evidence。
 
 ---
 
 ## 12. Final Invariants
 
-1. Hostra Launcher只拥有 Runtime executable PREPARE；presentation startup独立；
-2. Electron-hosted Hostra keeps `process.execPath` and uses host-owned run-as-node mode rather than a second Runtime path；
-3. Main不接收 path/token/presentation config；
-4. BrowserWindow security preferences、same-origin shell/Content placement与 execution-world placement已冻结；
-5. preload只做 exact private handoff，不提供 generic Electron API；
-6. trusted Renderer在 business bootstrap前捕获 authority-bearing browser primitives；
-7. Control、Data settlement、Data application、Content保持分离；
-8. M9 Broker仍是 Desktop Data candidate/current owner；
-9. trusted Renderer/Main-World Projector不建立第二份 authority；
-10. Business WC只消费 structural presentation ABI与 narrow resource capability；
-11. reusable game library/concrete game不被吸收到 `apps/desktop`；
-12. Desktop不建立 component registry、AssetManager、dynamic loader、global layer manager、InputDeviceManager、BrowserPrimitiveRegistry、generic host/manager或 recovery state machine。
-
-M15 implementation现在可以直接依据根目录 `M15_01`–`M15_05`推进；除真实 correctness/security/platform contradiction外，不再进行 design reopen。
+1. Hostra is the sole Electron/BrowserWindow owner in canonical M15；
+2. LoomRealm Desktop is a plain Node Hostra subprocess and owns only LoomRealm physical services；
+3. Main/Renderer/Subsystem authority boundaries are unchanged；
+4. Hostra RPC remains host-control only；
+5. Control、Data settlement、Data application、Content remain separated；
+6. M9 Broker remains sole Desktop Data candidate/current owner；
+7. trusted Renderer captures private browser primitives before business bootstrap；
+8. M10 input、M13 presentation、M14 game paths remain unchanged logically；
+9. reload keeps Hostra Window but replaces Renderer logical participant；
+10. shutdown/failure uses one Main cancellation owner chain and finally-like physical cleanup；
+11. no generic Hostra/Window/Document/Connection/Recovery framework is introduced；
+12. physical implementation and qualification follow `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`。
