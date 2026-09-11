@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M9/M12/M13 closed baseline；M14 consumer architecture frozen；M15 Hostra physical recomposition frozen for execution  
+> 稳定程度：M9/M12/M13 closed baseline；M14 consumer architecture frozen；M15 **Implementation Frozen / Preimplementation Closed**  
 > 主要定义：跨平台 physical composition、Launcher PREPARE、Runtime/Renderer/Data/Content/Web presentation placement  
 > 依赖：[系统架构总览](./system-overview.md)、[渲染系统](./rendering-system.md)  
 > 正式化：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)  
@@ -206,6 +206,15 @@ LoomRealm Desktop plain Node process
 └─ Data settlement loopback carrier
 ```
 
+Frozen M15 external host baseline由 current recomposition SSOT拥有：
+
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
+```
+
 Hostra RPC只用于 existing host-control operations：
 
 ```text
@@ -231,6 +240,20 @@ same Main/Runner/game truth
 
 Main Control acquire与 top-level document navigation通过 bounded rendezvous收敛；普通 fetch/XHR/subframe/resource request不能建立新的 Renderer document lifetime。
 
+### Data reconnect physical fact
+
+```text
+reload
+    → fresh Renderer identity
+
+same-generation Data-only reconnect
+    → same Renderer Control participant
+    → fresh Data physical pair only
+    → fresh RendererDataBinding.acquire()
+```
+
+Data-only reconnect不得建立第二个 Renderer currentness universe。
+
 ### Termination physical facts
 
 所有终态汇入 LoomRealm Desktop process 的同一个 idempotent termination funnel，包括：
@@ -247,7 +270,7 @@ startup partial failure
 
 LoomRealm通过 existing `runMain` + RuntimeHosting owner chain收敛 Runner，finally-like释放自己的 physical resources；不建立第二份 direct Runner kill authority。
 
-精确 sequence、Hostra shutdown grace和 qualification由 M15 recomposition plan拥有。
+精确 sequence、frozen Hostra shutdown grace和 qualification由 M15 recomposition plan拥有。
 
 ---
 
@@ -329,7 +352,7 @@ M12 Content
 → M17 PWA Full E2E / Equivalence
 ```
 
-Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15当前是 Hostra physical recomposition / plan frozen，不是旧 direct-Electron `Implementation Frozen` subject。
+Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md)。M15当前是 **Implementation Frozen / Preimplementation Closed**，可直接实施；它不是旧 direct-Electron `Implementation Frozen` subject。
 
 ---
 
@@ -343,7 +366,9 @@ Current status summary见 [`phase-1-delivery-plan.md`](../30-implementation/phas
 6. Control、Data settlement、Data application、Content保持 capability separation；
 7. M9 Broker仍是 Desktop Data candidate/current owner；
 8. top-level document/bootstrap lifecycle不得被 ordinary page fetch/subframe触发；
-9. Hostra signal/window/RPC/failure终态汇入同一个 LoomRealm termination owner chain；
-10. M13 authority/currentness与 M14 business semantics不因 physical recomposition而改变；
-11. Hostra/PWA允许不同 physical realization，但保持 logical/business outcome；
-12. 不为 M15 materialize generic Hostra/Window/Document/Recovery framework。
+9. reload replaces Renderer identity；Data-only reconnect preserves Renderer identity；
+10. Hostra signal/window/RPC/failure终态汇入同一个 LoomRealm termination owner chain；
+11. frozen Hostra baseline is part of M15 qualification subject；
+12. M13 authority/currentness与 M14 business semantics不因 physical recomposition而改变；
+13. Hostra/PWA允许不同 physical realization，但保持 logical/business outcome；
+14. 不为 M15 materialize generic Hostra/Window/Document/Recovery framework。
