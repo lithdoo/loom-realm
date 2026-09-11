@@ -1,15 +1,16 @@
 # M15 Hostra Desktop Recomposition Plan
 
-> 状态：**M15 physical composition reopened / this plan is the current physical SSOT and frozen for execution**  
-> 目标：把当前 standalone Electron M15 改造成真正由 Hostra 承载的 Desktop product  
+> 状态：**M15 physical composition reopened / current physical SSOT / frozen for execution**  
+> 决策：[ADR 0034 — Hostra-owned Desktop composition](doc/decisions/0034-hostra-owned-desktop-composition.md)  
+> 目标：把历史 standalone Electron M15 改造成真正由 Hostra 承载的 Desktop product  
 > 范围：只重做 M15 physical composition；M10–M14 logical/business contracts 不 reopen  
-> Hostra：`lithdoo/hostra`，保持既有 Electron / preload / RPC / subprocess 运行模型，不为 LoomRealm 定制 Hostra
+> Hostra：`lithdoo/hostra` 保持既有 Electron / preload / RPC / subprocess 运行模型，不为 LoomRealm 定制
 
 ---
 
-## 1. Why Recomposition Is Required
+## 1. Correction Scope
 
-当前 M15 已证明 Main、Runner、Data、Content、Renderer、Input、M13 Presentation 与 M14 Map Game 能在真实 Electron BrowserWindow 中完整工作，但当前 product path 是：
+历史 M15 已证明 Main、Runner、Data、Content、Renderer、Input、M13 Presentation 与 M14 Map Game 可以在真实 Electron BrowserWindow 中完整工作，但旧 product path 是：
 
 ```text
 LoomRealm Desktop
@@ -18,75 +19,101 @@ LoomRealm Desktop
 ├─ creates BrowserWindow
 ├─ owns MessageChannelMain / preload bootstrap
 └─ @loomrealm/game-launcher-hostra
-    └─ Node Subsystem Runner
+    └─ Node Runner
 ```
 
-这不是 Hostra product composition。
+它不是 Hostra product composition。
 
-真正的目标是：
+Canonical M15 改为：
 
 ```text
-Hostra
+Hostra shell
 ├─ Electron app
 ├─ BrowserWindow owner
+├─ Hostra preload / ambient API
 ├─ WebSocket JSON-RPC
 └─ HOSTRA_SUBCMD
      ↓
-LoomRealm Desktop plain Node process
+LoomRealm Desktop process (plain Node)
+├─ Main
+├─ RuntimeHosting
+│   └─ Runner child
+├─ DesktopDataConnectionBroker
+├─ Content + trusted shell
+├─ Renderer Control loopback carrier
+└─ Renderer Data settlement loopback carrier
 ```
 
-因此本次纠偏只替换最外层 physical owner。当前 standalone Electron E2E 保留为迁移回归证据，但不再拥有最终 M15 closure claim。
+本次纠偏只替换最外层 physical owner。旧 standalone Electron implementation/E2E 保留为迁移回归证据，但不再拥有最终 M15 closure claim。
 
 ---
 
-## 2. Supersession / SSOT
+## 2. Terminology
 
-从本计划落地起，**M15 physical composition 只以本文为当前 SSOT**。旧 `M15_01`–`M15_05` 仍保留已经验证过的 logical/business/lifecycle intent，但其中 direct-Electron realization 不再是当前冻结设计。
+以下术语固定使用，避免再次混淆两个“Hostra”概念：
+
+```text
+Hostra shell
+    lithdoo/hostra external Electron host
+
+Hostra launch profile
+    @loomrealm/game-launcher-hostra PREPARE + Node Runner realization
+
+LoomRealm Desktop process
+    Hostra HOSTRA_SUBCMD direct child
+
+Runner
+    LoomRealm RuntimeHosting child of the Desktop process
+```
+
+不要再用模糊的：
+
+```text
+Hostra → Runner
+```
+
+替代真实 owner chain。
+
+---
+
+## 3. Supersession / SSOT
+
+M15 physical composition 只以本文 + ADR 0034 为当前 SSOT。
+
+旧 `M15_01`–`M15_05` 保留已经验证过的 logical/business/input intent，但 direct-Electron realization 被 supersede：
 
 | 原文档 | 继续有效 | 被本文 supersede |
 | --- | --- | --- |
-| `M15_01_DESKTOP_PRODUCT_COMPOSITION.md` | Main/Broker/Content ownership、Hostra-ready installation、无 shadow authority | Electron app ownership、BrowserWindow ownership、Electron-main run-as-node product topology |
-| `M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md` | Renderer/M13 seam、Control/Data/Content capability separation、trusted primitive capture intent | `MessageChannelMain`、LoomRealm preload、direct BrowserWindow configuration/ownership |
-| `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md` | DOM input canonical mapping、reload/reconnect logical semantics、single cancellation owner | Electron app/window shutdown mechanics |
-| `M15_04_DESKTOP_FULL_E2E_VERTICAL.md` | M14 gameplay outcome、real physical input/reload/reconnect evidence intent | direct-Electron canonical E2E topology |
-| `M15_05_QUALIFICATION_CLOSURE.md` | M14 formal prerequisite、single `test:m15` closure gate、boundary discipline | direct-Electron qualification subject |
+| `M15_01_DESKTOP_PRODUCT_COMPOSITION.md` | Main/Broker/Content ownership、Hostra-ready installation、无 shadow authority | Electron app / BrowserWindow ownership、Electron-main Runner topology |
+| `M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md` | Renderer/M13 seam、Control/Data/Content separation、trusted primitive capture intent | `MessageChannelMain`、LoomRealm preload、direct BrowserWindow ownership |
+| `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md` | DOM input canonical mapping、reload/reconnect semantics、single cancellation owner | Electron app/window shutdown mechanics |
+| `M15_04_DESKTOP_FULL_E2E_VERTICAL.md` | M14 gameplay outcome、real input/reload/reconnect evidence intent | direct-Electron canonical E2E topology |
+| `M15_05_QUALIFICATION_CLOSURE.md` | M14 prerequisite、single `test:m15` gate、boundary discipline | direct-Electron qualification subject |
 
-如果本文与旧 M15 文档在 physical topology、Electron ownership、Renderer bootstrap transport 或 canonical E2E host 上冲突，以本文为准。
+发生冲突时，physical topology、Window ownership、bootstrap transport、shutdown/failure owner chain与 canonical E2E host 以本文为准。
 
 ---
 
-## 3. Non-negotiable Boundaries
-
-### 3.1 Hostra stays unchanged
-
-M15 不要求 Hostra 增加 LoomRealm-specific Window profile，也不要求修改 Hostra preload、`window.open` policy、RPC wire、subprocess semantics 或 BrowserWindow defaults。
+## 4. Frozen Ownership
 
 ```text
-Hostra implementation policy    → Hostra owns
-LoomRealm application semantics → LoomRealm owns
+Hostra shell
+    physical Electron / BrowserWindow / direct-subprocess authority
+
+LoomRealm Desktop process
+    LoomRealm-specific physical composition only
+
+Main
+    Session / Runtime / Frame / Renderer currentness / DataAuthority
+
+Renderer
+    replica / presentation / physical input producer
+
+Subsystem/game
+    business state / Render authority
 ```
 
-Hostra 的 ambient `window.electronAPI` 属于 Hostra runtime environment。LoomRealm 只保证自己的 Runtime/Renderer/business contracts 不依赖它。
-
-### 3.2 M10–M14 stay frozen
-
-不得因为 transport 迁移而重写：
-
-```text
-Main Session / Runtime / Frame authority
-Renderer Control logical protocol
-DataAuthority / Data profile semantics
-M9 Broker candidate/currentness
-M10 Input semantics
-M11 Render replication/store
-M12 Content API semantics
-M13 Web Presentation semantics
-M14 map/game business runtime
-```
-
-### 3.3 Hostra RPC is host control, not a LoomRealm bus
-
-Production LoomRealm 只消费 Hostra 已存在的 host operations：
+Hostra RPC 只消费既有 host-control operations：
 
 ```text
 openWindow
@@ -94,148 +121,78 @@ closeWindow
 hostra.event
 ```
 
-`getHostState` / `getAllWindows` 可用于 qualification、diagnostics 和 assertions，但不得成为新的 LoomRealm authority、startup handshake 或 currentness source。
+`getHostState/getAllWindows` 只允许 qualification/diagnostics 使用，不是 production startup handshake、currentness 或 authority。
 
 Hostra RPC 不承载：
 
 ```text
 Renderer Control application messages
 Data settlement/application messages
-Render/Input protocol
 Content bytes
+Input/Render protocol
 Main/Subsystem business state
 ```
 
-### 3.4 No new generic hosting framework
+---
 
-禁止仅为本次迁移引入：
+## 5. Abstraction Budget
+
+新增概念预算固定为：
 
 ```text
-IHostraClient / HostraClientPort
-HostraManager / HostraSession
-DesktopHostFramework
-WindowRegistry / WindowLifecycleManager
+concrete Hostra RPC adapter
+concrete Renderer Control loopback realization
+one concrete Data settlement loopback realization
+small single-window document bootstrap state
+```
+
+可以共享一个 loopback listener，也可以使用几个很小的 listener；冻结的是 capability/wire separation，不是 Server-class topology。
+
+不得仅为 M15 引入：
+
+```text
+IHostraClient / HostraClientPort / HostraSession
+HostraManager / HostraPlatformPort
+WindowRegistry / WindowLifecycleManager / WindowSession
 DocumentManager / BootstrapCoordinator
 ConnectionManager / TransportRegistry
 RecoveryManager
 BrowserPrimitiveRegistry
-HostraPlatformPort
+generic WebSocket transport framework
 ```
 
-Hostra 目前只有 Desktop 一个真实 consumer；adapter 留在 `apps/desktop`。
-
----
-
-## 4. Target Topology and Authority
-
-```text
-Hostra process
-├─ Electron app
-├─ Hostra preload / ambient API
-├─ JSON-RPC server
-├─ BrowserWindow owner
-├─ optional CDP endpoint
-│
-└─ HOSTRA_SUBCMD
-     ↓
-LoomRealm Desktop process (plain Node)
-├─ concrete Hostra RPC adapter
-├─ Main
-├─ RuntimeHosting
-│   └─ Node Runner
-│       └─ Subsystem / @loomrealm-game/map
-├─ DesktopDataConnectionBroker
-├─ Desktop Content + trusted shell listener
-├─ Renderer Control loopback WS realization
-└─ Renderer Data settlement loopback WS realization
-
-Hostra BrowserWindow
-└─ LoomRealm trusted shell
-    ├─ Renderer Control WS
-    ├─ Data settlement WS
-    ├─ existing Data application WS
-    ├─ Content HTTP
-    ├─ M13 Web Presentation
-    └─ M14 business Custom Elements
-```
-
-Authority remains：
-
-```text
-Hostra             physical desktop/window/direct-subprocess authority
-LoomRealm Desktop  LoomRealm physical service composition only
-Main               Session / Runtime / Frame / Renderer currentness / DataAuthority
-Renderer           replica / presentation / physical input producer
-Subsystem/game     business state / Render authority
-```
-
----
-
-## 5. Minimal Implementation Budget
-
-The correction should add only concrete production pieces with immediate consumers. Conceptually the budget is：
-
-```text
-apps/desktop/src/hostra-rpc-client.ts
-    concrete connect/call/event adapter; no architectural interface required
-
-apps/desktop/src/renderer-control-ws.ts
-    RendererControlBinding physical WS realization
-
-existing window-data-binding.ts or one replacement file
-    same settlement semantics over WS
-
-small document bootstrap state inside product/content composition
-    single product Window only; no manager/state-machine hierarchy
-```
-
-The implementation MAY reuse one physical loopback listener for shell/Content/Control/settlement upgrades or use multiple tiny listeners if that is materially simpler. The frozen requirement is **capability/wire separation**, not a mandatory Server-class topology。
-
-Do not create a generic WebSocket transport package or shared endpoint registry without a second real consumer。
+没有第二个真实 consumer 时，不提取 shared Hostra/transport package。
 
 ---
 
 ## 6. Desktop Becomes a Plain Node Product
 
-Current：
-
-```text
-apps/desktop/src/main-entry.ts
-→ import Electron app
-→ app.whenReady()
-→ app.quit()
-```
-
-Target：
+Canonical path：
 
 ```text
 Hostra HOSTRA_SUBCMD
 → node apps/desktop/dist/main-entry.js
 ```
 
-After migration, production `apps/desktop/src` MUST NOT own Electron primitives：
+最终 recomposition 完成后，canonical production `apps/desktop` 不拥有：
 
 ```text
-from "electron"
-require("electron")
+Electron app
 BrowserWindow
-MessageChannelMain
-MessagePortMain
+MessageChannelMain / MessagePortMain
 ipcMain / ipcRenderer
 app.quit()
 ```
 
-`apps/desktop/package.json` MUST NOT require Electron to run the LoomRealm Desktop process。
+Hostra 可以由 product/qualification tooling 安装并启动，但 LoomRealm application source 不 import Hostra internals 作为 in-process library。
 
-Canonical qualification pins an exact Hostra release/source identity; no `latest` qualification. At plan time the observed package is `hostra@1.0.1-beta.1`; changing the pin creates a new Desktop qualification subject。
-
-Hostra may be installed by product/qualification tooling, but LoomRealm application source does not import Hostra internals as an in-process library。
+Canonical qualification 固定 exact Hostra release/source identity；改变 pin 创建新的 M15 qualification subject。
 
 ---
 
-## 7. Thin Hostra RPC Adapter
+## 7. Concrete Hostra RPC Adapter
 
-A concrete module, for example `hostra-rpc-client.ts`, may expose functions/one returned object such as：
+允许一个 Desktop-private concrete module，例如：
 
 ```ts
 const hostra = await connectHostraRpc({ port, token });
@@ -245,160 +202,206 @@ await hostra.closeWindow(...);
 await hostra.close();
 ```
 
-No separate `IHostraClient`/port/factory abstraction is required。
-
-Connection material comes from inherited：
+连接材料来自 Hostra inherited environment：
 
 ```text
 HOSTRA_RPC_PORT
 HOSTRA_RPC_TOKEN
 ```
 
-Rules：
+规则：
 
-1. connect loopback only；
-2. token is Hostra RPC credential only；
-3. request ids are client-local correlation；
-4. unsolicited `hostra.event` is separated from request responses；
-5. RPC terminal is product-terminal in M15；do not add Hostra reconnect/recovery authority；
-6. Hostra RPC types do not leak into `@loomrealm/main`、`platform-ports`、Renderer or game packages。
-
-`getHostState()` / `getAllWindows()` belong to qualification/diagnostics unless a concrete production need is later demonstrated。
+```text
+loopback only
+Hostra token only authorizes Hostra RPC
+request id = local correlation only
+hostra.event separate from request response
+RPC terminal = product-terminal for M15
+no reconnect to a fresh Hostra session
+no Hostra types leak into Main/platform-ports/Renderer/game packages
+```
 
 ---
 
-## 8. Startup and Window Correlation
+## 8. Startup
 
 Canonical startup：
 
 ```text
-Hostra starts and exposes RPC
+Hostra shell ready
 → Hostra starts HOSTRA_SUBCMD
-→ LoomRealm Desktop reads inherited HOSTRA_* env
+→ LoomRealm Desktop reads HOSTRA_* env
 → connect Hostra RPC
-→ Hostra game PREPARE
-→ start Content/shell + Control/Data physical endpoints
+→ Hostra launch-profile PREPARE
+→ create prepared Content view
+→ start bounded shell/Content + Control/Data physical endpoints
 → runMain(...)
-→ Main arms Renderer Control acquire
-→ mint caller-provided opaque Hostra Window correlation id
+→ Main may arm RendererControlBinding.acquire(token)
+→ mint caller-provided opaque Hostra window correlation id
 → mint stable high-entropy shell route secret
 → Hostra RPC openWindow({ id, loadUrl })
 → Hostra creates BrowserWindow
-→ document requests LoomRealm shell
+→ top-level document navigates to trusted shell route
+→ document/acquire rendezvous
 → fresh Renderer bootstrap
-→ Renderer Control/Data connect
+→ Renderer Control/Data converge
 → M13 presentation
 → M14 game visible
 ```
 
-The caller-provided `windowId` is **correlation, not LoomRealm authority**. Pre-minting it makes RPC response / `window.created` event ordering irrelevant。
+`windowId` 只是 caller-provided Hostra correlation，不是 LoomRealm authority。
 
-The shell URL remains stable across reload and includes one random route capability, conceptually：
+Stable shell route conceptually：
 
 ```text
 http://127.0.0.1:<loom-port>/_lr/window/<random-route-secret>
 ```
 
-The route secret is only a random string used to guard this product Window's bootstrap route. Do not promote it into a WindowAuthority/Lease/Credential object model。
+route secret 只是高熵随机字符串，不建立 WindowAuthority/Lease/Credential object model。
+
+`openWindow` RPC success 不等于 product ready。Visible/ready 必须由真实 Renderer Control + presentation vertical 证明。
 
 ---
 
-## 9. Renderer Control: MessagePort → One-shot WS Capability
+## 9. Renderer Control Physical Realization
 
-Current physical path：
+旧：
 
 ```text
 RendererControlBinding.acquire(token)
-→ ElectronRendererControlBinding
 → MessageChannelMain
-→ preload/native MessagePort
+→ LoomRealm preload
+→ DOM MessagePort
 ```
 
-Target：
+新：
 
 ```text
 RendererControlBinding.acquire(token)
-→ concrete Desktop WS binding
-→ document bootstrap receives fresh one-shot WS endpoint
+→ concrete Desktop loopback binding
+→ fresh one-shot endpoint capability
 → trusted Renderer connects
-→ endpoint is consumed
-→ WS MessageCarrier resolves acquire(token)
+→ endpoint consumed
+→ MessageCarrier resolves existing acquire(token)
 ```
 
-The unguessable endpoint itself is the physical capability；do not add a parallel ticket object/store unless platform behavior proves it necessary。
+Endpoint 本身就是 physical one-shot capability；不要增加 parallel ticket store。
 
-Required invariants：
+必须保持：
 
 ```text
-existing RendererControlBinding contract unchanged
-0..1 pending acquire bound preserved
-fresh endpoint per document/candidate
-successful handoff consumes endpoint
-stale/duplicate connection cannot restore old Renderer
-reload creates fresh logical Renderer participant
-no Control payload passes through Hostra RPC
+existing RendererControlBinding logical contract unchanged
+0..1 pending acquire bound
+fresh endpoint per Renderer document
+successful claim consumes endpoint
+stale/duplicate claim cannot restore old Renderer
+reload creates fresh logical Renderer
+Control payload never passes through Hostra RPC
 ```
 
 ---
 
-## 10. Trusted Shell / Document Bootstrap
+## 10. Document / Acquire Rendezvous
 
-LoomRealm preload transfer disappears because Hostra owns the BrowserWindow and its own preload。LoomRealm reuses/extends its exact bounded loopback shell handling; it MUST NOT become a generic filesystem/static-file server。
+Reload/startup 中 HTTP navigation 与 Main `RendererControlBinding.acquire()` 是两个独立异步方向。M15 固定一个最小 rendezvous，不增加 coordinator abstraction。
 
-For one Hostra Window：
-
-```text
-Hostra windowId        stable physical correlation
-shell route secret     stable high-entropy route capability
-RendererControl token  fresh logical participant material
-Control WS endpoint    fresh physical one-shot capability
-Data settlement endpoint fresh document physical capability
-Content grant          fresh document capability
-```
-
-Every main-document request to the stable shell route：
+有界状态只有：
 
 ```text
-retire previous document-local LoomRealm grants/carriers if still present
-→ bind fresh pending Renderer Control candidate
-→ mint fresh document material
-→ return trusted shell + renderer.js
+pendingAcquire   0..1
+pendingDocument  0..1
+currentDocument  0..1
 ```
 
-Trusted `renderer.js` consumes bootstrap before M13 loads business scripts, captures the required native `fetch` / `WebSocket` / input primitives, and removes or invalidates bootstrap material as soon as practical。
+规则：
 
-Bootstrap MUST NOT contain Hostra RPC credentials/endpoints for business use、filesystem paths、Runner bootstrap material、Main private state or DataAuthority policy。
+```text
+acquire first
+→ hold pendingAcquire
+→ top-level document arrives
+→ pair
 
-Hostra's own preload/ambient API remains unchanged and is not a LoomRealm capability source。
+document first
+→ hold one pending main-document response
+→ acquire arrives
+→ pair
 
-Single-window M15 should keep document lifetime as small composition state (grant/carrier/abort handles). Do not introduce `DocumentManager`、`WindowSession`、`BootstrapCoordinator` or a product Window state-machine hierarchy。
+both present
+→ mint fresh Control endpoint
+→ mint fresh Data settlement capability
+→ mint fresh Content grant
+→ bind presentation candidate
+→ return/complete trusted document bootstrap
+```
+
+取消规则：
+
+```text
+HTTP request aborted     → clear pendingDocument only
+acquire aborted/retired  → clear pendingAcquire only
+product termination      → cancel both + current document
+new valid top-level navigation
+    → retire previous current document material
+    → becomes the sole pending/current document candidate
+```
+
+不得通过 retry framework 或第二套 Renderer currentness 解决该 race。
 
 ---
 
-## 11. Data: Preserve M9, Replace Settlement Transport Only
+## 11. Navigation-only Trusted Bootstrap Route
 
-`DesktopDataConnectionBroker` remains the only Desktop Data candidate/current owner。
+Trusted shell route 是 **main-document bootstrap endpoint**，不是普通可重复读取的 application resource。
 
-Current：
+它只允许当前 Hostra Window 的 top-level main-frame navigation 建立 document lifetime。
+
+必须拒绝或不产生 lifecycle effect：
 
 ```text
-Broker
-→ WindowRendererDataSettlement
-→ Electron MessagePort
-→ browser RendererDataBinding
-→ Data application WS
+fetch()/XHR
+iframe/subframe navigation
+script/style/image/resource request
+non-GET/HEAD method
+request for wrong route secret
+request after product termination
 ```
 
-Target：
+普通 page code 即使知道当前 URL，也不能通过 `fetch(location.href)` retire 当前 Renderer 或 mint 新 bootstrap。
+
+实现可使用 Chromium/HTTP 提供的可靠 navigation metadata 或等价 main-document判据；具体 header/helper 名称不是 contract，但 qualification 必须证明 ordinary page fetch/subframe 无法触发 fresh Renderer lifetime。
+
+每个成功 document pairing 才获得 fresh：
+
+```text
+Renderer Control token/material
+Control one-shot endpoint
+Data settlement capability
+Content grant
+WebPresentationConfigV1 candidate
+```
+
+Trusted `renderer.js` 在 M13 business scripts 前消费 material、捕获需要的 native `fetch` / `WebSocket` / input primitives，并尽快移除/失效 page-visible bootstrap representation。
+
+Bootstrap 不得包含 Hostra RPC credentials、filesystem path、Runner private material、Main private state或 DataAuthority policy。
+
+Hostra 自己的 preload/ambient API 保持 Hostra-owned；LoomRealm 不修改它，也不依赖它作为 application capability。
+
+---
+
+## 12. Data
+
+`DesktopDataConnectionBroker` 继续是唯一 Desktop Data candidate/current owner。
+
+只替换 Renderer-side settlement transport：
 
 ```text
 Broker
-→ one concrete WS settlement realization
+→ concrete loopback settlement realization
 → browser RendererDataBinding
 → existing Data application WS
 ```
 
-Settlement remains physically narrow：
+Settlement wire继续只允许：
 
 ```text
 prepare
@@ -408,9 +411,9 @@ revoke
 close
 ```
 
-Do not merge settlement and application Data. Do not preserve Electron and WS realizations merely to create a transport hierarchy；once the Hostra vertical qualifies, remove dead Electron-only settlement code。
+Data application bytes不与 settlement合并。
 
-M9 semantics remain exactly：
+M9 semantics完全保持：
 
 ```text
 Broker chooses pending/current
@@ -418,22 +421,19 @@ Runner provisioner prepares/commits runner side
 Renderer settlement prepares/commits renderer side
 same-generation physical loss retires current pair
 fresh candidate converges
-Main DataAuthority remains unchanged
+Main DataAuthority unchanged
 ```
 
-No retry scheduler、rollback authority、ConnectionManager or second currentness model。
+不要保留 Electron + WS 两套 production realization 只为了做 transport hierarchy。Hostra vertical qualified 后删除 dead Electron settlement path。
 
 ---
 
-## 12. Content / Presentation / Input
+## 13. Content / Presentation / Input
 
-Change as little as possible。
-
-Keep：
+尽量不改：
 
 ```text
-prepared Hostra installation view
-Desktop Content API
+prepared Content view/service
 Subsystem ContentClient
 Renderer ResourceClient
 PresentationResourceClient
@@ -445,7 +445,7 @@ WebProjector
 current DOM RendererInputSource
 ```
 
-Physical input remains：
+Input继续：
 
 ```text
 trusted KeyboardEvent
@@ -455,25 +455,26 @@ captured navigator.getGamepads()
 → existing M10 gate
 ```
 
-The browser producer must not know whether the containing BrowserWindow is owned directly by Electron application code or by Hostra。
+Browser producer不知道 BrowserWindow 是由 Hostra 还是历史 direct Electron 所拥有。
 
 ---
 
-## 13. Reload / Shutdown / Failure
-
-### Reload
+## 14. Reload
 
 ```text
-same Hostra Window W stays alive
+same Hostra physical Window W
 Main / Runner / Subsystem / game state stay alive
-old document D1 dies
-→ old LoomRealm Control/Data/Content document material retires
+
+old document D1 terminates
+→ old Control/Data/Content document material retires
 → old Renderer R1 retires
-same shell URL reloads
-→ fresh document D2
+
+same stable shell URL reloads
+→ fresh top-level navigation D2
+→ rendezvous with fresh Main acquire
 → fresh Renderer R2
-→ fresh Control/Data material
-→ current projection/input resumes
+→ fresh Control/Data/Content material
+→ current truth projects
 ```
 
 Invariant：
@@ -483,121 +484,208 @@ Hostra windowId stable
 R1 != R2
 Subsystem generation unchanged
 current game state unchanged
-reload does not call Hostra openWindow() again
+reload does not call Hostra openWindow again
 ```
-
-### User closes Hostra Window
-
-```text
-hostra.event window.closed(windowId)
-→ stop accepting fresh document activity
-→ abort runMain signal
-→ await Main settlement
-→ existing RuntimeHosting converges Runner
-→ ALWAYS close LoomRealm Control/Data/Content resources
-→ close Hostra RPC adapter
-→ LoomRealm Node process exits
-→ Hostra observes HOSTRA_SUBCMD exit and follows its own normal shutdown
-```
-
-### Programmatic product close
-
-```text
-best-effort Hostra closeWindow(windowId)
-→ same local cancellation/cleanup path
-```
-
-Close is idempotent and tolerates RPC/event ordering races。
-
-### Main / Runner fatal
-
-Preserve the original logical failure, but physical cleanup is `finally`-like：
-
-```text
-Main reject / Runner terminal
-→ best-effort Hostra closeWindow
-→ ALWAYS dispose LoomRealm-owned Control/Data/Content resources
-→ process exits non-zero
-```
-
-A Main rejection must never skip Desktop physical cleanup。
-
-### Hostra shutdown / RPC terminal
-
-```text
-host.shuttingDown or RPC terminal
-→ abort Main
-→ converge Runner
-→ close LoomRealm services
-→ exit
-```
-
-No reconnect to a fresh Hostra session in M15。
 
 ---
 
-## 14. File Migration Map
+## 15. One Termination Funnel
+
+所有 product-terminal trigger 必须汇入一个 idempotent one-shot path，概念上：
+
+```text
+window.closed(windowId) ─────┐
+SIGTERM / SIGINT ────────────┤
+host.shuttingDown ───────────┤
+Hostra RPC terminal ─────────┤
+programmatic product close ──┤
+Main / Runner fatal ─────────┤
+startup partial failure ─────┘
+                             ↓
+                    beginTermination(reason)
+                             ↓
+                    stop new document activity
+                             ↓
+                    abort runMain signal
+                             ↓
+                    await/preserve Main settlement
+                             ↓
+                    finally close
+                    Control / Data / Content
+                    pending/current document material
+                    Hostra RPC adapter
+                             ↓
+                    LoomRealm process exits
+```
+
+实现可简单使用一个 cached Promise；不需要 LifecycleManager/state-machine framework。
+
+Main rejection必须保留原 logical failure，但不能跳过 physical cleanup。
+
+Programmatic close 可以 best-effort `closeWindow(windowId)`，但本地 termination 不得依赖 `window.closed` 一定返回。
+
+---
+
+## 16. Real Hostra Shutdown Constraint
+
+Pinned Hostra 在非 macOS 平台最后一个 Window 关闭时会进入自己的 shutdown，并向直属 `HOSTRA_SUBCMD` 发送 termination signal。因此 LoomRealm Node entry 必须把 `SIGTERM/SIGINT` 当作一级 product-terminal trigger。
+
+不得假设：
+
+```text
+window.closed event
+always arrives and fully completes LoomRealm cleanup
+before Hostra termination signal
+```
+
+Hostra signal、event、RPC terminal 的任意合理 ordering 都必须汇入同一个 `beginTermination()`。
+
+LoomRealm 不建立第二份 Runner kill authority；它仍通过 `runMain` + existing RuntimeHosting owner chain收敛 Runner。
+
+Pinned Hostra 的实际 shutdown grace 是 qualification subject 的真实外层约束。Qualification 必须证明 ordinary final-window close 后：
+
+```text
+LoomRealm signal handler runs
+Main/RuntimeHosting converges
+Runner absent
+LoomRealm child absent
+no LoomRealm listener/socket remains
+Hostra converges normally
+```
+
+如果真实 owner chain 无法在 pinned Hostra grace 下收敛，这是 platform contradiction，需要显式 reopen；不得偷偷增加 Desktop direct Runner kill path。
+
+---
+
+## 17. Startup / Partial Failure Convergence
+
+以下任一失败均走同一个 termination/finally cleanup，不另造 rollback framework：
+
+```text
+Hostra RPC connect failure
+PREPARE failure
+Content/shell listener failure
+Control/Data listener failure
+runMain early rejection
+openWindow RPC failure
+Window/document bootstrap failure
+Renderer never converges
+```
+
+原则：
+
+```text
+resource created → owner records concrete handle
+later step fails → beginTermination(cause)
+cleanup closes only handles that exist
+original failure remains observable
+```
+
+`openWindow` success 不意味着 `loadURL`/document/presentation success；qualification 以真实 page/Renderer convergence 为准。
+
+---
+
+## 18. Migration Staging
+
+避免“保留 legacy oracle”与“第一步整个仓库无 Electron”互相矛盾。
+
+### Slices 1–6
+
+Canonical Hostra path必须不依赖 Electron ownership；历史 direct-Electron path可以暂时隔离保留，仅作为 regression oracle。
+
+此阶段 gate检查：
+
+```text
+Hostra-started canonical entry imports no Electron
+canonical composition does not create BrowserWindow/app.quit
+Hostra-owned Window vertical progressively replaces old path
+```
+
+不要因为 legacy test/source 仍暂存就让早期 slice失败。
+
+### Final replacement slice
+
+Hostra vertical已经覆盖 M14 visibility + input + reload + reconnect + lifecycle 后：
+
+```text
+delete legacy direct-Electron production path
+remove Electron dependency/start command from canonical Desktop product
+repository-wide apps/desktop production Electron ownership/import → FAIL
+old direct-Electron qualification no longer closure owner
+```
+
+---
+
+## 19. File Migration Map
 
 | Current surface | Action |
 | --- | --- |
-| `apps/desktop/src/main-entry.ts` | rewrite as plain Node entry |
-| `apps/desktop/src/product-composition.ts` | rewrite outer composition around Hostra RPC; retain Main/Broker/Content ownership |
-| `apps/desktop/src/electron-renderer-control.ts` | replace with concrete loopback WS Renderer Control binding |
-| `apps/desktop/src/preload.ts` | remove from LoomRealm product path |
-| `apps/desktop/src/message-port-carrier.ts` | remove from M15 product path if no real consumer remains |
-| `apps/desktop/src/window-data-binding.ts` | preserve settlement semantics; change physical realization to WS or replace with one concrete WS file |
+| `apps/desktop/src/main-entry.ts` | canonical entry改为 plain Node + signals/termination funnel |
+| `apps/desktop/src/product-composition.ts` | rewrite outer composition around Hostra RPC；保留 Main/Broker/Content owners |
+| `apps/desktop/src/electron-renderer-control.ts` | replace with concrete loopback Renderer Control binding |
+| `apps/desktop/src/preload.ts` | remove from canonical LoomRealm path；final slice删除 dead path |
+| `apps/desktop/src/message-port-carrier.ts` | no real consumer后删除 |
+| `apps/desktop/src/window-data-binding.ts` | preserve settlement semantics；physical realization改为 loopback carrier |
 | `apps/desktop/src/data-broker.ts` | preserve authority/currentness |
 | `apps/desktop/src/data-websocket.ts` | preserve application Data semantics |
-| `apps/desktop/src/browser-websocket-carrier.ts` | reuse where it directly fits |
-| `apps/desktop/src/content-service.ts` | preserve Content semantics; add exact document bootstrap handling only |
-| `apps/desktop/src/desktop-bootstrap.ts` | revise to document bootstrap shape |
-| `apps/desktop/src/renderer-entry.ts` | preserve M13/Input/Data composition; replace MessagePort bootstrap/connect path |
+| `apps/desktop/src/content-service.ts` | preserve Content；add exact navigation-only document bootstrap handling |
+| `apps/desktop/src/desktop-bootstrap.ts` | revise to document bootstrap material |
+| `apps/desktop/src/renderer-entry.ts` | preserve M13/Input/Data；replace Electron-port bootstrap |
 | `apps/desktop/src/renderer-input-source.ts` | preserve |
-| `apps/desktop/package.json` | remove LoomRealm Electron runtime/start path; keep only actual Node-product dependencies |
-
-Do not delete the working direct-Electron vertical until the Hostra vertical displays the canonical M14 map；after replacement qualification, remove dead Electron-only production code instead of maintaining two paths。
+| `apps/desktop/package.json` | final slice remove canonical Electron runtime/start dependency |
 
 ---
 
-## 15. Implementation Slices
+## 20. Implementation Slices
 
-### Slice 1 — Node product + Hostra RPC
+### Slice 1 — Hostra Node product skeleton
 
-Deliver plain Node entry + concrete RPC adapter + `openWindow/closeWindow/hostra.event`。Gate：Hostra launches LoomRealm through `HOSTRA_SUBCMD`; LoomRealm opens one inert trusted shell Window; production source owns no Electron primitive。
+Hostra launches LoomRealm via `HOSTRA_SUBCMD`；canonical Node entry connects RPC、starts bounded shell、opens an inert Hostra Window。Canonical path itself imports no Electron。
 
-### Slice 2 — Renderer Control WS
+### Slice 2 — Renderer Control + rendezvous
 
-Gate：real Main Renderer Control connects through the Hostra-owned Window with no Electron MessagePort。
+Implement concrete Control carrier and `pendingAcquire/pendingDocument/currentDocument` rendezvous。Gate startup ordering both directions + cancellation。
 
-### Slice 3 — Document bootstrap + M13/M14 visibility
+### Slice 3 — Navigation-only bootstrap + M13/M14 visibility
 
-Gate：Hostra Window loads existing M13 presentation and checked-in M14 map through the trusted shell without a LoomRealm preload bridge。
+Trusted shell only bootstraps top-level navigation；ordinary fetch/subframe cannot mint Renderer lifetime。Hostra Window displays checked-in M14 map through existing M13 seams。
 
-### Slice 4 — Data settlement WS
+### Slice 4 — Data settlement replacement
 
-Gate：existing Broker `prepare/prepared/commit/revoke/current` semantics pass through the Hostra Window；same-generation reconnect works。
+Existing Broker prepare/prepared/commit/revoke/current semantics converge over new settlement carrier；same-generation replacement works。
 
 ### Slice 5 — Physical input + reload
 
-Gate：trusted ArrowRight still proves `(10,8) → (11,8)` and blocked `(12,8)`；reload keeps Hostra `windowId`, replaces Renderer identity, preserves Main/Runner/game state, reconnects Data and resumes presentation/input。
+ArrowRight proves `(10,8) → (11,8)` and blocked `(12,8)`；reload keeps Hostra `windowId`、replaces Renderer identity、preserves Main/Runner/game truth并恢复 input/presentation。
 
-### Slice 6 — Lifecycle/failure convergence
+### Slice 6 — Termination/failure convergence
 
-Gate：user close、programmatic close、Main fatal、Runner fatal、Hostra shutdown/RPC terminal all converge with no orphan Runner、LoomRealm listener/socket or child process。
+Gate：
 
-### Slice 7 — Qualification replacement + legacy removal
+```text
+user final-window close
+programmatic close
+SIGTERM/SIGINT
+host.shuttingDown / RPC terminal
+Main fatal / Runner fatal
+startup partial failure
+```
 
-Only after the Hostra vertical passes, remove dead Electron ownership/dependency and replace direct-Electron M15 closure evidence with Hostra evidence。
+全部进入同一个 termination funnel；无 orphan Runner/child/listener/socket。
+
+### Slice 7 — Canonical qualification + legacy removal
+
+Pinned Hostra full E2E通过后删除 dead direct-Electron ownership/dependency，启用 repository-wide no-Electron ownership gate。
 
 ---
 
-## 16. Canonical Qualification and Closure
+## 21. Canonical Qualification
 
-Final M15 product qualification MUST start at Hostra：
+Final M15 qualification从真实 Hostra开始：
 
 ```text
 qualification harness
-→ launch pinned Hostra
+→ launch exact pinned Hostra
    HOSTRA_RPC_PORT=<controlled/ephemeral>
    HOSTRA_RPC_TOKEN=<fresh>
    HOSTRA_CDP_PORT=0
@@ -605,53 +693,62 @@ qualification harness
 → observe hostra.ready
 → Hostra starts LoomRealm child
 → LoomRealm RPC openWindow
-→ qualification observes Hostra window.created / getHostState or getAllWindows
-→ Playwright connects to Hostra CDP
-→ select Hostra-owned LoomRealm page
+→ observe Hostra-owned Window via lifecycle/getHostState/getAllWindows
+→ Playwright connects through Hostra CDP
+→ exercise real Hostra BrowserWindow
 ```
 
-`getHostState/getAllWindows` here are observation only, not production authority。
+`getHostState/getAllWindows` 是 qualification observation only。
 
-Required evidence：
+必须证明：
 
 ```text
-Hostra is actual Electron process
-LoomRealm is actual HOSTRA_SUBCMD Node child
-Window is Hostra-owned
+Hostra is actual Electron/BrowserWindow owner
+LoomRealm is actual HOSTRA_SUBCMD child
+Runner is LoomRealm RuntimeHosting child
 canonical M14 map visible
-trusted Keyboard/Pointer/Gamepad path remains valid
-ArrowRight move + blocked move
-reload: same Hostra windowId + fresh Renderer identity
+trusted ArrowRight + blocked move
+ordinary fetch/subframe cannot trigger document bootstrap
+reload same Hostra windowId + fresh Renderer identity
 same-generation Data replacement
-presentation/current truth resumes
-user close reaches LoomRealm lifecycle
-Main/Runner/Control/Data/Content converge
-LoomRealm child terminates
-Hostra converges according to its normal model
-former LoomRealm loopback ports refuse connections
+current presentation/input resumes
+final Window close / Hostra signal ordering converges
+programmatic close converges
+Main/Runner fatal converges
+startup failure leaves no resources
+Runner absent
+LoomRealm child absent
+former loopback ports refuse connections
+Hostra converges according to pinned host model
 ```
 
-Boundary gate MUST reject：
+Boundary gate最终必须拒绝：
 
 ```text
-apps/desktop production source importing Electron
-apps/desktop creating BrowserWindow or owning app.quit
+canonical apps/desktop production path importing Electron
+canonical path creating BrowserWindow/app.quit
 Hostra RPC carrying LoomRealm Control/Data application payload
 Hostra types leaking into platform-ports/Main/Renderer/game packages
 second Data currentness/recovery owner
+second Runner termination authority
 generic Hostra/Window/Document/Connection manager abstraction
 canonical M15 gate launching Electron directly instead of Hostra
 Hostra source/runtime patched by LoomRealm qualification
 ```
 
-Formal closure remains：
+---
+
+## 22. Closure
+
+Formal closure：
 
 ```text
 M14 formally Closed
-+ pinned Hostra identity recorded
++ ADR 0034 propagated through all Current dependent docs
++ exact Hostra identity recorded
 + npm run test:m15 repeatably PASS in supported CI
 + Hostra-owned full Desktop E2E/lifecycle evidence PASS
 → M15 Closed
 ```
 
-No new ADR/package/framework is required unless implementation discovers a real contract contradiction rather than a private implementation inconvenience。
+No additional ADR/package/framework is required unless implementation discovers a real Hostra public lifecycle vs frozen LoomRealm contract contradiction。
