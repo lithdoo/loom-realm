@@ -2,12 +2,12 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Hostra physical recomposition / plan frozen**
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
-> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
 
-实施状态与正式 closure 必须分开记录。M14 的当前 qualification subject / live evidence 只以 [`m14-qualification.md`](./m14-qualification.md) 为准；本计划只汇总 milestone 状态，不复制 run-level evidence。
+实施状态与正式 closure 必须分开记录。M14 的当前 qualification subject / live evidence 只以 [`m14-qualification.md`](./m14-qualification.md) 为准；M15 current physical composition 只以根目录 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md) + ADR 0034 为准。
 
 ## Delivery order
 
@@ -17,7 +17,7 @@ Foundation / Wire
 → Runtime Control
 → Subsystem Runtime / Frame
 → Main authority
-→ Hostra Runtime
+→ Hostra Runtime profile
 → Renderer Control
 → Data role seam
 → Desktop Data Broker
@@ -26,7 +26,7 @@ Foundation / Wire
 → Content
 → Web Presentation
 → Map Game Library + First Real Game
-→ Desktop Full E2E
+→ Hostra-owned Desktop Full E2E
 → PWA Runtime
 → PWA Full E2E / Equivalence
 ```
@@ -43,7 +43,7 @@ Do not prebuild fake v2、deprecated aliases or generic frameworks for hypotheti
 
 ---
 
-## M1–M9 — Foundation / Hostra / Data ✅
+## M1–M9 — Foundation / Runtime Profile / Data ✅
 
 ```text
 M1 Foundation + Wire
@@ -51,13 +51,13 @@ M2 Game Package
 M3 Runtime Control
 M4 Subsystem Runtime / Frame
 M5 Main Core
-M6 Hostra Runtime
+M6 Hostra launch-profile Runtime
 M7 Renderer Control
 M8 Renderer Data
 M9 Desktop Data Broker
 ```
 
-Closed on the existing mainline implementation/qualification path。ADR 0033 later corrects only the first Electron embedding of the existing M6 process model；it does not reopen M6 application/protocol semantics or Node-hosted behavior。
+Closed on the existing mainline implementation/qualification path。ADR 0033 records the historical direct-Electron run-as-node compatibility decision；ADR 0034 supersedes that embedding assumption for canonical M15 without reopening M6 application/protocol semantics or ordinary Node-hosted launch-profile behavior。
 
 ---
 
@@ -78,7 +78,7 @@ M14
 → existing/synthetic RendererInputSource for consumer qualification
 
 M15 Desktop
-→ real BrowserWindow DOM Keyboard/Pointer/Gamepad RendererInputSource
+→ real Hostra-owned BrowserWindow DOM Keyboard/Pointer/Gamepad RendererInputSource
 
 M17 PWA
 → equivalent physical Window producer semantics
@@ -129,7 +129,7 @@ PresentationResourceClient
 
 No new metadata/HEAD author API is added merely for the first game consumer。
 
-For M15 Main-World browser composition，the existing credential-hiding invariant additionally requires the trusted Renderer ResourceClient to bind its native request primitive before business JS；this is implementation hardening of the same M12 capability boundary, not a new Content API。
+M15 trusted browser composition still requires private Content/Data clients to capture/bind authority-bearing browser primitives before business JS；this is physical hardening of the same M12/M9 capability boundaries, not a new logical protocol。
 
 ---
 
@@ -210,15 +210,6 @@ tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
 
 ### M14/01 — workspace ownership
 
-M14 adds：
-
-```text
-game-libs/*
-examples/*
-```
-
-Ownership：
-
 ```text
 packages/*   → @loomrealm/* framework
 game-libs/*  → @loomrealm-game/* reusable game-domain libraries
@@ -239,8 +230,6 @@ one business RenderDomain
 → SDK-assigned opaque wire domainId
 ```
 
-Initial map Frame remains long-lived while gameplay input is expected。Player/tile/camera are business/presentation state, not extra Subsystems。
-
 Selective Content path：
 
 ```text
@@ -254,9 +243,7 @@ RMXP/Essentials source semantics
 → map Runtime
 ```
 
-At the public M12 seam these records/resources are read through the frozen production namespaces `struct.Map`、`struct.Tileset` and `resource.Graphics`；qualification does not install a namespace-stripping adapter。
-
-Unused MapInfo/Event/MapMetadata/Color/Tone/AudioFile facts remain outside M14 consumer records until a real behavior consumes them。
+At the public M12 seam these records/resources are read through `struct.Map`、`struct.Tileset` and `resource.Graphics`。Unused MapInfo/Event/MapMetadata/Color/Tone/AudioFile facts remain outside the first consumer view until real behavior consumes them。
 
 Input first slice：
 
@@ -285,8 +272,6 @@ lr-map-view
 └── lr-map-sprite
 ```
 
-`lr-map-view` owns private tile drawing/clipping/overlay mechanics。Its exact private Shadow wrapper/class topology is not normative。Every current full view repaint clears the logical Canvas before drawing current ordered `tiles[]`。
-
 Map browser JS/CSS are standalone package artifacts loaded through prepared Content + M13 classic bootstrap。
 
 ### M14/03 — concrete example / fixture
@@ -296,8 +281,6 @@ Map browser JS/CSS are standalone package artifacts loaded through prepared Cont
 ```text
 { mapId:1, x:10, y:8, characterName:"m14_player" }
 ```
-
-Example page CSS fixes `lr-map-view` to 640×480 and owns page placement only。
 
 Canonical CI uses repository-author-owned semantic fixture + PNGs。Exact external Essentials v21.1 corpus remains separate local compatibility evidence；third-party bytes are never committed。
 
@@ -309,17 +292,15 @@ Required chain：
 game.json validation
 → long-lived map Frame
 → selective Map/Tileset Content reads
-→ resource version confirmation
 → initial full Render state
 → M13 bootstrap
 → real Chromium
-→ real regular-tile Canvas pixels + player sprite
+→ tile pixels + player sprite
 → first ArrowRight: (10,8) → (11,8)
 → second ArrowRight: blocked at target (12,8)
-→ same lr-map-view / lr-map-sprite live identities retained
 ```
 
-M14 uses existing/synthetic RendererInputSource and test-owned physical composition。Real Hostra child/BrowserWindow/DOM physical input/reload-shutdown belong to M15。
+M14 uses existing/synthetic RendererInputSource and test-owned physical composition。Real Hostra shell/BrowserWindow/DOM physical input/reload-shutdown belong to M15。
 
 ### M14/05 — closure
 
@@ -335,123 +316,139 @@ Exact-local gate：
 npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root>
 ```
 
-Formal closure is keyed to one **qualification subject** rather than the commit that happens to write the evidence record：
+Formal closure：
 
 ```text
 one behavior-affecting subject SHA
-+
-exact-local PASS
-+
-hosted Node 20 PASS
-+
-hosted Node 24 PASS
++ exact-local PASS
++ hosted Node 20 PASS
++ hosted Node 24 PASS
 → M14 Closed
 ```
 
-A later docs-only commit that only records run IDs/results does not invalidate the subject. Any later Runtime/importer/browser/fixture/harness/workflow behavior change creates a new subject and requires requalification.
-
-Current subject and live PASS/PENDING state are recorded only in `m14-qualification.md`.
-
-M14 closure proves one real RMXP/Essentials-compatible consumer slice only。It does not claim autotile/event-interpreter completeness、responsive viewport or Desktop/PWA physical E2E。
+Current subject and live PASS/PENDING state are recorded only in `m14-qualification.md`。
 
 ---
 
-## M15 — Desktop Full E2E 🔒 Implementation Frozen / Preimplementation Closed
+## M15 — Hostra-owned Desktop Full E2E 🔄 Physical recomposition
 
-Replace M14 test-owned physical composition with the frozen real Desktop composition：
+ADR 0034 corrects only the outer physical owner：
 
 ```text
-checked-in Hostra-ready M14 installation
-→ Hostra PREPARE in Electron main
-→ Main
-→ process.execPath + host-synthesized ELECTRON_RUN_AS_NODE real Hostra Runner child
-→ existing Runtime Control WebSocket
-→ Desktop Data Broker
-→ exact same-origin 127.0.0.1 Desktop shell + existing Content API
-→ secure Electron BrowserWindow
-→ isolated preload one-shot handoff
-→ Main-World trusted Renderer
-→ capture authority-bearing native browser primitives
-→ Renderer Control MessagePort
-→ browser-native Data WebSocket
-→ real DOM Keyboard/Pointer/Gamepad RendererInputSource
+Hostra shell
+├─ Electron / BrowserWindow / RPC
+└─ HOSTRA_SUBCMD
+     ↓
+LoomRealm Desktop plain Node process
+├─ Main
+├─ RuntimeHosting → Runner
+├─ Desktop Data Broker
+├─ Content + trusted shell
+├─ Renderer Control loopback carrier
+└─ Data settlement loopback carrier
+
+Hostra-owned BrowserWindow
+→ trusted Renderer
+→ real DOM input
 → existing M13 presentation
-→ same M14 game/map Runtime/WC
-→ reload / reconnect / shutdown
+→ same M14 game
 ```
 
-Frozen Hostra Electron realization：
+Canonical M15 does **not** use LoomRealm-owned Electron app/BrowserWindow、LoomRealm preload、`MessageChannelMain` or ADR0033 run-as-node embedding。
+
+Physical SSOT：
 
 ```text
-Runner executable = canonical process.execPath
-Electron RuntimeHosting child env += ELECTRON_RUN_AS_NODE=1
-supported Desktop Electron build keeps runAsNode fuse enabled
-same existing ChildProcess / Runtime Control / provisioning path
+M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
+ADR 0034
 ```
 
-No configurable Node executable、UtilityProcess Runtime path or Electron-specific RuntimeHosting is introduced。
+Old `M15_01`–`M15_05` retain logical/input intent only where explicitly preserved by the supersession matrix。
 
-Frozen BrowserWindow settings：
+### Required physical invariants
 
 ```text
-nodeIntegration=false
-contextIsolation=true
-sandbox=true
-webSecurity=true
+Hostra shell is sole Electron/BrowserWindow owner
+LoomRealm Desktop is actual HOSTRA_SUBCMD Node child
+Runner is LoomRealm RuntimeHosting child
+Hostra RPC is host-control only
+Control/Data settlement/Data application/Content remain separated
+M9 Broker remains sole Data candidate/current owner
+M10/M13/M14 logical paths remain unchanged
 ```
 
-Frozen browser origin：
+### Document/reload invariant
+
+Single-window bootstrap uses only bounded state：
 
 ```text
-app-owned shell
-+
-existing /_lr/v1 Content API
-=
-exact same http://127.0.0.1:<port> origin
+pendingAcquire   0..1
+pendingDocument  0..1
+currentDocument  0..1
 ```
 
-This keeps existing Content GET/HEAD + bearer semantics without `file://`、CORS/OPTIONS expansion、`webSecurity=false` or preload Content proxy。App shell routes remain exact product-private routes outside the Content API contract。
+Main acquire and top-level document navigation rendezvous whichever arrives first。Only valid top-level main-document navigation may create a fresh Renderer document；ordinary `fetch(location.href)`、XHR、subframe or resource requests cannot retire/mint Renderer lifetime。
 
-Frozen physical ownership：
+Reload：
 
 ```text
-preload isolated world
-    exact one-shot bootstrap/port handoff only
-
-page Main World before business scripts
-    trusted Renderer holder/input/M13 Projector
-    private bootstrap consumed
-    native fetch/WebSocket/ports/input primitives captured/bound
-
-page Main World afterward
-    business Custom Elements
-
-Renderer Control
-    MessageChannelMain → native DOM MessagePort → existing Renderer Control
-
-Data
-    existing M9 Broker keeps candidate/currentness
-    Electron port carries physical prepare/commit/revoke settlement only
-    Data application messages use captured native browser WebSocket
+same Hostra windowId
+→ old Renderer/document retires
+→ fresh document/acquire rendezvous
+→ fresh Renderer identity/material
+→ Main/Runner/Subsystem/game truth unchanged
 ```
 
-Physical input mapping is frozen by `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`；the authoritative details live there rather than being copied into this plan。At the plan level the required facts are trusted physical DOM provenance、canonical Keyboard/Pointer/Gamepad mapping、focus/visibility fresh baseline and no synthetic-input shortcut。
+### Termination invariant
 
-Normal shutdown is fixed to Window retirement → abort `runMain` signal → await Main/RuntimeHosting child convergence → close remaining Broker/Content/shell services → Electron exit。
-
-Normative implementation order：
+All terminal triggers use one idempotent owner path：
 
 ```text
-M15_01_DESKTOP_PRODUCT_COMPOSITION.md
-→ M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md
-→ M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md
-→ M15_04_DESKTOP_FULL_E2E_VERTICAL.md
-→ M15_05_QUALIFICATION_CLOSURE.md
+window.closed
+SIGTERM/SIGINT
+host.shuttingDown
+RPC terminal
+programmatic close
+Main/Runner fatal
+startup partial failure
+    ↓
+beginTermination
+    ↓
+abort runMain
+    ↓
+Main/RuntimeHosting convergence
+    ↓
+finally close Control/Data/Content/document resources
+    ↓
+LoomRealm process exit
 ```
 
-M15 can now proceed directly to implementation without another design pass. Private helper/file names and exact app-shell route spelling remain implementation details；authority ownership、Hostra Electron mode、same-origin boundary、execution-world placement、Control/Data/Content separation、DOM input mapping与 lifecycle owner chain不得因代码便利性重新选择。
+This is required because Hostra may signal the `HOSTRA_SUBCMD` during final-window shutdown；M15 must prove no orphan Runner remains under real pinned Hostra grace。Desktop不得补第二份 direct Runner kill authority。
 
-Formal M14 requalification continues independently through the M14 evidence ledger。The current corrections are documentation/first-M15 physical decisions and do not themselves claim new M14 executable evidence。M15 implementation may proceed before M14 evidence completes, but M15 formal closure requires M14 formal status = Closed and the frozen `npm run test:m15` gate to pass。
+### Migration staging
+
+```text
+Slices 1–6
+    canonical Hostra path does not depend on Electron ownership
+    legacy direct-Electron path may remain isolated as regression oracle
+
+Final replacement
+    Hostra vertical qualified
+    → delete legacy direct-Electron production ownership
+    → repository-wide canonical apps/desktop Electron ownership/import = FAIL
+```
+
+Do not require repository-wide Electron deletion before the replacement vertical exists。
+
+### Closure
+
+Canonical M15 gate remains：
+
+```text
+npm run test:m15
+```
+
+It must run current `test:m14` first and then real pinned Hostra boundary/build/E2E/input/reload/reconnect/lifecycle evidence。Formal M15 closure additionally requires M14 formal status = Closed。
 
 ---
 
@@ -470,7 +467,7 @@ PWA PREPARE
 
 PWA Renderer/Data/Content/Web presentation are not required for M16 closure。Existing Subsystem host can expose the normal unavailable Content capability until M17 supplies a physical ContentClient。
 
-The M15 Electron run-as-node and Desktop same-loopback-origin decisions are concrete Hostra/Desktop mechanics，not PWA requirements。
+M15 Hostra-shell / HOSTRA_SUBCMD / loopback mechanics are Desktop-only and do not become PWA requirements。
 
 ---
 
@@ -502,7 +499,7 @@ M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game     ⚠️ Implementation complete / requalification pending
-M15 Desktop Full E2E                       🔒 Implementation Frozen / Preimplementation Closed
+M15 Desktop Full E2E                       🔄 Hostra physical recomposition / plan frozen
 M16 PWA Runtime                            pending
 M17 PWA Full E2E / Equivalence             pending
 ```
@@ -519,4 +516,4 @@ Current M14 hosted requalification gate：
 npm run test:m14
 ```
 
-M14 immediate closure work is limited to obtaining/recording the current qualification subject's hosted Node 20/24 evidence. No M10–M14 application architecture reopen is justified unless that evidence exposes a concrete behavioral failure. M15 no longer requires design work and may proceed directly to full implementation；documentation must still not call M14 or M15 formally `Closed` before their respective evidence ledgers satisfy the frozen closure rules。
+M15 may proceed according to ADR 0034 + the recomposition SSOT, but documentation and qualification must not call M15 formally `Closed` before the Hostra-owned qualification subject satisfies its evidence ledger。
