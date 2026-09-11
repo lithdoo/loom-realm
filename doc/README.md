@@ -1,6 +1,6 @@
 # LoomRealm 设计文档
 
-本文只做**导航与 current source-of-truth 索引**，不重复定义协议字段、状态机、Web Presentation interfaces 或 milestone closure。
+本文只做 **current source-of-truth 导航**，不重复定义协议字段、状态机或 milestone evidence。
 
 阅读优先级：
 
@@ -12,7 +12,7 @@ Architecture topic
 → Implementation plan / qualification
 ```
 
-Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/phase-1-delivery-plan.md)；M14 current qualification subject / evidence / formal status只看 [`M14 Qualification Record`](./30-implementation/m14-qualification.md)。索引页不维护第二套 dated PASS/Closed checkmark。
+Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/phase-1-delivery-plan.md)。M14 formal status/evidence只看 [`M14 Qualification Record`](./30-implementation/m14-qualification.md)；M15 implementation/qualification evidence只看 [`M15 Qualification Record`](./30-implementation/m15-qualification.md)。索引页不维护第二套 dated PASS/Closed ledger。
 
 ---
 
@@ -34,107 +34,111 @@ Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/ph
 14. [Web Presentation Config v1](./15-contracts/web-presentation-config-v1.md)
 15. [Web Presentation API v1](./15-contracts/web-presentation-api-v1.md)
 16. [模块设计目录](./20-modules/README.md)
-17. [Web Renderer](./20-modules/web-renderer/README.md)
-18. [Map Game Library](./20-modules/loom-map/README.md)
-19. [独立分包与发布架构](./30-implementation/package-architecture.md)
-20. [仓库与目录方案](./30-implementation/repository-layout.md)
-21. [测试策略](./30-implementation/testing-strategy.md)
-22. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
-23. [M14 Qualification Record](./30-implementation/m14-qualification.md)
-24. [ADR 索引](./decisions/README.md)
-25. [ADR 0031：M13 Web Presentation](./decisions/0031-business-owned-web-component-projection.md)
-26. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
-27. [ADR 0033：Electron-hosted Hostra Runner uses current executable in Node mode](./decisions/0033-electron-hostra-run-as-node.md)
+17. [Hostra Desktop Composition](./20-modules/desktop-host/README.md)
+18. [Web Renderer](./20-modules/web-renderer/README.md)
+19. [Map Game Library](./20-modules/loom-map/README.md)
+20. [独立分包与发布架构](./30-implementation/package-architecture.md)
+21. [仓库与目录方案](./30-implementation/repository-layout.md)
+22. [测试策略](./30-implementation/testing-strategy.md)
+23. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
+24. [M14 Qualification Record](./30-implementation/m14-qualification.md)
+25. [M15 Qualification Record](./30-implementation/m15-qualification.md)
+26. [ADR 索引](./decisions/README.md)
+27. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
+28. [ADR 0034：Hostra owns Desktop Electron composition](./decisions/0034-hostra-owned-desktop-composition.md)
+29. [M15 Hostra Desktop Recomposition Plan](../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
+
+ADR 0033 仍保留 Electron-main composition 的历史/conditional provenance，但不再定义 canonical M15 physical topology。
 
 ---
 
-## 当前已关闭主干
+## 当前 closed / frozen 主干
 
 ```text
-M10 User Input
-    → Subsystem InputListener
-    → RendererInputSource / Effective gate
-
-M11 Render Replication
-    → Subsystem authoritative Render Domains
-    → Render Update v1
-    → Renderer committed Store
-
-M12 Content
-    → readonly Content
-    → Subsystem ContentClient
-    → Renderer trusted/private ResourceClient
-
-M13 Web Presentation
-    → WebPresentationConfigV1
-    → thin Web Projector
-    → business-owned Custom Elements
-    → PresentationResourceClient
+M10 User Input             Closed
+M11 Render Replication     Closed
+M12 Content                Closed
+M13 Web Presentation       Closed
+M14 consumer design        Frozen; formal status ledger-owned
+M15 physical composition   Implementation Frozen / Preimplementation Closed
 ```
 
-M10–M13 是当前正式 closed baseline。M14 已有完整 consumer implementation，但 formal status仍由 qualification ledger判定；本文不从实现完成推导 Closed。
+M14 已有完整 consumer implementation，但 formal status仍由 qualification ledger判定；本文不从实现完成推导 Closed。
 
 ---
 
 ## Current M14 Source Map
 
-M14 是第一个真实 framework consumer，不是新的 framework module。Current source-of-truth：
-
 ```text
 ADR 0032
-    repository/package ownership + rejected abstractions
-
 M14_01_WORKSPACE_BOUNDARY.md
-    workspace/package identity/dependency direction
-
 M14_02_MAP_GAME_LIBRARY.md
-    map Runtime/Input/passability/camera/Render/WC semantics
-
 M14_03_ESSENTIALS_EXAMPLE.md
-    concrete example/fixture/config/resources
-
 M14_04_REAL_GAME_VERTICAL.md
-    end-to-end observable evidence
-
 M14_05_QUALIFICATION_CLOSURE.md
-    executable closure gate
-
 doc/30-implementation/m14-qualification.md
-    live qualification subject / evidence / formal status
-
 tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
-    selective RMXP Map/Tileset source→JsonValue projection
 ```
 
 Repository placement：
 
 ```text
 packages/      LoomRealm framework/runtime
-
-game-libs/map
-    @loomrealm-game/map
-
-examples/essentials-v21.1
-    private concrete game
+game-libs/map  @loomrealm-game/map
+examples/essentials-v21.1  private concrete game
 ```
 
-M14 first slice materializes only current consumer facts：
+M14 first slice只 materialize current consumer读取的 Map/Tileset facts；不建立 universal map schema。
+
+---
+
+## Current M15 Source Map
+
+Canonical Desktop physical owner chain：
 
 ```text
-Map/{id}: tileset_id,width,height,data
-Tileset/{id}: id,tileset_name,passages,priorities
+Hostra shell
+    owns Electron / BrowserWindow / direct HOSTRA_SUBCMD process
+        ↓
+LoomRealm Desktop plain Node process
+    owns LoomRealm Control/Data/Content/trusted-shell composition
+        ↓ RuntimeHosting
+Runner
 ```
 
-It does not recursively project the whole RMXP object graph or create a universal map schema。
+Current source-of-truth：
+
+```text
+ADR 0034
+M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
+M15_01..05 retained/superseded landing docs
+doc/20-modules/desktop-host/README.md
+doc/30-implementation/m15-qualification.md
+```
+
+Frozen distinctions：
+
+```text
+reload
+    → same Hostra Window
+    → fresh Renderer logical participant
+
+same-generation Data-only reconnect
+    → same Renderer logical participant
+    → fresh Data physical pair only
+
+terminal triggers
+    → one idempotent LoomRealm termination funnel
+```
+
+Historical standalone Electron M15 remains migration evidence only。
 
 ---
 
 ## Platform Route
 
-责任/materialization route：
-
 ```text
-M6   Hostra Runtime / Runner / Control
+M6   Hostra launch-profile Runtime / Runner / Control
 M7   Renderer Control
 M8   logical Data role seam
 M9   Desktop Data Broker
@@ -143,7 +147,7 @@ M11  Render Replication
 M12  Content
 M13  Web Presentation
 M14  Map Game Library + First Real Game
-M15  Desktop Full E2E
+M15  Hostra-owned Desktop Full E2E
 M16  PWA Runtime
 M17  PWA Full E2E / Equivalence
 ```
@@ -152,17 +156,17 @@ Current summary：
 
 ```text
 M1–M13  closed baseline
-M14     implementation complete; formal status → m14-qualification.md
-M15     Implementation Frozen / Preimplementation Closed
+M14     implementation complete; requalification status → m14-qualification.md
+M15     Implementation Frozen / Preimplementation Closed; implementation pending
 M16–17  planned
 ```
 
-M14 uses existing/synthetic input source + real Chromium。M15 owns real Electron-hosted Hostra child、BrowserWindow、same-origin Desktop shell/Content、DOM input and lifecycle。M16 owns PWA Worker Runtime hosting only。M17 completes PWA Renderer/Data/Input/Content/Web presentation and cross-platform logical equivalence。
+M16 remains Worker Runtime-only；M17 completes PWA Renderer/Data/Input/Content/Web Presentation and cross-platform logical-outcome equivalence。M15 Hostra shell/HOSTRA_SUBCMD/loopback mechanics不得升级为 PWA contracts。
 
 ---
 
 ## Documentation Governance
 
-Summary/index docs only describe ownership、placement、milestone route and links。Exact schema/lifetime/order/failure semantics stay in formal contracts or the current frozen milestone source；live evidence stays in the designated qualification ledger。
+Summary/index docs只描述 ownership、placement、milestone route 和 links。Exact schema/lifetime/order/failure semantics留在 formal contracts 或 current frozen milestone SSOT；live evidence留在 designated qualification ledger。
 
-Frozen authority、identity、lifecycle/order、failure/recovery or public surface can change only through the corresponding reopen rule；implementation cannot silently expand them。
+Frozen authority、identity、lifecycle/order、failure/recovery 或 public surface 只能按 governance reopen；implementation不得静默扩张或恢复 superseded direct-Electron topology。
