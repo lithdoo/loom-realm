@@ -9,6 +9,7 @@ Current physical subject is defined by：
 ```text
 ADR 0034
 + M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
++ LoomRealm implementation 659e56e9a65cac40b786bfc04e351bdc5f808c00
 ```
 
 The previous direct-Electron implementation is not the current qualification subject。
@@ -37,7 +38,14 @@ M14 formally Closed
 
 ## 1. Frozen Qualification Subject
 
-The next qualifying subject is the first landed LoomRealm tree containing：
+The current qualifying implementation subject is：
+
+```text
+659e56e9a65cac40b786bfc04e351bdc5f808c00
+fix: close M15 qualification gaps
+```
+
+It is the landed LoomRealm tree containing：
 
 ```text
 frozen Hostra shell
@@ -49,7 +57,7 @@ frozen Hostra shell
 → existing Main/M10–M14 path
 ```
 
-Record exact LoomRealm commit SHA after implementation lands。The Hostra identity is already frozen above；any later behavior-affecting change to M15 physical path、Hostra baseline、harness/workflow or consumed lower-layer behavior creates a new qualification subject and requires requalification。
+The Hostra identity is frozen above；any later behavior-affecting change to M15 physical path、Hostra baseline、harness/workflow or consumed lower-layer behavior creates a new qualification subject and requires requalification。Later ledger-only commits do not create a new implementation subject。
 
 ---
 
@@ -57,7 +65,7 @@ Record exact LoomRealm commit SHA after implementation lands。The Hostra identi
 
 | Gate | Evidence | Status |
 | --- | --- | --- |
-| Existing milestone prerequisite | current `npm run test:m14` on same tree | **required** |
+| Existing milestone prerequisite | current `npm run test:m14` on same tree | **LOCAL PASS — 2026-09-11** |
 | Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
 | M15 boundary/build | no canonical LoomRealm Electron ownership | **LOCAL PASS — 2026-09-11** |
@@ -66,7 +74,7 @@ Record exact LoomRealm commit SHA after implementation lands。The Hostra identi
 | Input/reload/reconnect | production Hostra Window path | **LOCAL PASS — 2026-09-11** |
 | Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **LOCAL PARTIAL / HOSTED POSIX REQUIRED** |
 | Canonical aggregate | `npm run test:m15` | **LOCAL PASS — Windows / Node 22.12.0 / 2026-09-11** |
-| Hosted qualification | dedicated M15 workflow, same subject | **PENDING IMPLEMENTATION** |
+| Hosted qualification | dedicated M15 workflow, same subject | **PENDING HOSTED EVIDENCE** |
 | Formal M15 closure | all rows above PASS for one subject | **PENDING** |
 
 `getHostState/getAllWindows` may observe that a Window is Hostra-owned；they are not production authority/currentness mechanisms。
@@ -293,7 +301,7 @@ npm run test:m14
 
 ## 10. Current Implementation Evidence — 2026-09-11
 
-The current uncommitted implementation tree completed the seven recomposition slices and passed the canonical aggregate locally：
+The landed implementation subject completed the seven recomposition slices, the qualification cleanup, and the canonical aggregate locally：
 
 ```text
 Windows
@@ -301,7 +309,12 @@ Node 22.12.0
 npm 10.9.0
 frozen Hostra d863beab3c59c3bd4f271514a228fa8fee0bf5b6
 npm run test:m15 → PASS
+npm run docs:check-links → PASS
+npm run docs:build → PASS
+exact Essentials v21.1 local → PASS
 ```
+
+The concrete nested termination budgets are now mechanically guarded as `Runner 100 ms < Main 250 ms < Hostra 1000 ms`。The document bootstrap route is GET-only, and qualification cleanup uses bounded SIGTERM wait followed by a bounded SIGKILL fallback。
 
 Observed real-host evidence：
 
@@ -325,7 +338,7 @@ former Content/listener port refuses connections after process exit
 
 The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。Accordingly the local Windows run proves final-window Hostra/process convergence but cannot claim the complete signal-handler cleanup ordering。The hosted Ubuntu M15 workflow must prove the full `window.closed` / `host.shuttingDown` / SIGTERM ordering and all terminal cleanup events before this row becomes PASS。
 
-The workflow now checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。Record the LoomRealm commit SHA here after the implementation lands；until hosted evidence targets that SHA, formal M15 remains pending。
+The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。Until hosted evidence targets implementation subject `659e56e9a65cac40b786bfc04e351bdc5f808c00`, formal M15 remains pending。
 
 ---
 
