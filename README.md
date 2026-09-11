@@ -42,7 +42,7 @@ Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [Testing Strategy](./doc/30-implementation/testing-strategy.md)
 - [M14 qualification record](./doc/30-implementation/m14-qualification.md)
-- [M15 Hostra Desktop Recomposition Plan — current physical SSOT](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
+- [M15 Hostra Desktop Recomposition Plan — frozen physical SSOT](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
 - [M15 qualification record](./doc/30-implementation/m15-qualification.md)
 - [Package Architecture](./doc/30-implementation/package-architecture.md)
 - [Desktop Host module design](./doc/20-modules/desktop-host/README.md)
@@ -58,7 +58,7 @@ M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game      ⚠️ Implementation complete / requalification pending
-M15 Desktop full E2E                        🔄 Hostra physical recomposition / plan frozen
+M15 Desktop full E2E                        🔒 Implementation Frozen / Preimplementation Closed
 M16 PWA Runtime                             pending
 M17 PWA full E2E                            pending
 ```
@@ -76,16 +76,27 @@ LoomRealm Desktop plain Node process
 Runner
 ```
 
+M15 frozen Hostra baseline：
+
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
+```
+
 当前 M15 physical SSOT 是 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)。ADR 0033只保留 historical direct-Electron compatibility relevance。
 
 M15 formal closure要求：
 
 ```text
 M14 formal closure
-+ exact pinned Hostra identity
++ frozen Hostra baseline
 + repeatable Hostra-owned npm run test:m15
 + full Hostra E2E/lifecycle evidence
 ```
+
+Preimplementation 已关闭，可直接进入 Slices 1–7 完整实施；只有真实 Hostra baseline 与 frozen LoomRealm contract 的 correctness/security contradiction 才允许 reopen。
 
 Last formally closed milestone gate：
 
@@ -186,12 +197,12 @@ M14 qualification使用 test-owned physical harness + real Chromium；真实 Hos
 
 ---
 
-## M15 Desktop full E2E — Hostra physical recomposition
+## M15 Desktop full E2E — Implementation Frozen / Preimplementation Closed
 
 Canonical topology：
 
 ```text
-pinned Hostra shell
+frozen Hostra shell
 ├─ Electron app
 ├─ Hostra preload/RPC
 ├─ BrowserWindow owner
@@ -222,6 +233,7 @@ M9 Broker = sole Data candidate/current owner
 trusted shell bootstrap = top-level-navigation-only
 Main acquire + document navigation = bounded 0..1 rendezvous
 reload = same Hostra Window + fresh Renderer logical participant
+Data-only reconnect = same Renderer identity + fresh Data physical pair
 window/signal/RPC/fatal/startup failure = one idempotent termination funnel
 Runner convergence remains existing Main/RuntimeHosting owner chain
 ```
