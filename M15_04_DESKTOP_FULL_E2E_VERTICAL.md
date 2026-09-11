@@ -1,6 +1,6 @@
 # M15 / 04 — Desktop Full E2E Vertical
 
-> 状态：**Business-visible vertical retained / canonical physical host changed to Hostra**  
+> 状态：**Implementation Frozen / Preimplementation Closed — business-visible vertical on Hostra**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：04  
 > 最近复核：2026-09-11  
@@ -9,16 +9,18 @@
 > 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)  
 > 依赖：[M14 / 04](M14_04_REAL_GAME_VERTICAL.md)
 
-> **Supersession notice:** 本文继续拥有同一 M14 gameplay outcome、real DOM input、reload、same-generation reconnect 与 owner-boundary evidence intent；原 direct-Electron canonical trace、Electron-main run-as-node、LoomRealm preload/MessagePort evidence 已被 ADR 0034 supersede。
+> **Supersession notice:** 本文继续拥有同一 M14 gameplay outcome、real DOM input、reload、same-generation reconnect 与 owner-boundary evidence；原 direct-Electron canonical trace、Electron-main run-as-node、LoomRealm preload/MessagePort evidence 已被 ADR 0034 supersede。
 
 ---
 
 ## 1. Canonical Trace
 
-Final M15 vertical MUST start at Hostra：
+Final M15 vertical MUST start at the frozen Hostra baseline：
 
 ```text
-pinned Hostra shell
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+Electron 44.1.1
 → HOSTRA_SUBCMD LoomRealm Desktop plain Node process
 → checked-in examples/essentials-v21.1 installation
 → Hostra launch-profile PREPARE
@@ -153,18 +155,19 @@ current game state unchanged
 presentation/input resume
 ```
 
-same-generation Data failure：
+same-generation Data-only failure：
 
 ```text
-current physical pair lost
-→ Main DataAuthority remains
-→ Broker retires pair
-→ fresh prepare/commit/current
-→ fresh Renderer acquire
-→ presentation resumes
+current Renderer Control participant remains current
+→ current physical Data pair lost
+→ Main DataAuthority remains current
+→ Broker retires old pair
+→ fresh prepare/prepared/commit/current
+→ fresh RendererDataBinding.acquire() resolves
+→ same Renderer identity resumes current truth
 ```
 
-Reload MUST NOT call Hostra `openWindow()` again。
+Qualification MUST assert that a Data-only reconnect does **not** mint a fresh Renderer identity。Reload MUST NOT call Hostra `openWindow()` again。
 
 ---
 
@@ -193,7 +196,7 @@ beginTermination
 → LoomRealm child exits
 ```
 
-Pinned Hostra's actual final-window signal ordering MUST be exercised；do not assume `window.closed` completes cleanup before SIGTERM。
+Frozen Hostra baseline has a 1000 ms shutdown grace。Its actual final-window signal ordering MUST be exercised；do not assume `window.closed` completes cleanup before SIGTERM。
 
 Terminal assertions：
 
@@ -204,7 +207,7 @@ former LoomRealm loopback ports refuse connections
 Hostra converges normally
 ```
 
-No Desktop direct Runner kill shortcut is permitted。If real Hostra grace is insufficient for the existing owner chain, qualification fails and architecture must explicitly reopen。
+No Desktop direct Runner kill shortcut is permitted。If the existing owner chain cannot converge under the frozen Hostra grace, qualification fails and architecture must explicitly reopen。
 
 ---
 
@@ -244,10 +247,10 @@ Assertions target public/observable effects and owner boundaries, not private ca
 
 ## 10. Completion
 
-M15/04 retained intent is complete when one real Hostra trace proves：
+M15/04 is frozen and implementation-ready when one real Hostra trace proves：
 
 ```text
-pinned Hostra owns Electron + BrowserWindow
+frozen Hostra baseline owns Electron + BrowserWindow
 LoomRealm is HOSTRA_SUBCMD Node child
 Runner is RuntimeHosting child
 same checked-in game reaches Main/Runner
@@ -255,8 +258,8 @@ same M13/M14 presentation is visible
 navigation-only bootstrap + race-safe rendezvous
 trusted physical input reaches M10
 reload = same Hostra Window + fresh Renderer + same game
-same-generation Data reconnect converges
+same-generation Data reconnect = same Renderer identity + fresh Data pair
 window/signal/RPC/fatal/startup failure all leave no LoomRealm orphan resources
 ```
 
-The earlier standalone Electron E2E remains migration evidence only and cannot satisfy final M15 closure by itself。
+The earlier standalone Electron E2E remains migration evidence only and cannot satisfy final M15 closure by itself。No further E2E topology design pass is required before implementation。
