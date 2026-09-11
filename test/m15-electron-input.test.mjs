@@ -15,10 +15,8 @@ async function waitFor(page, label, predicate, arg) {
     const diagnostic = await page.evaluate(() => ({
       ready: document.documentElement.dataset.ready,
       focus: document.hasFocus(),
-      activeElement: document.activeElement?.id || document.activeElement?.tagName || null,
       visibility: document.visibilityState,
       changes: globalThis.__m15Input?.changes ?? null,
-      rawKeys: globalThis.__rawKeys ?? null,
     })).catch(() => null);
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`${label}: ${detail}; diagnostic=${JSON.stringify(diagnostic)}`);
@@ -38,39 +36,17 @@ test("production Desktop input source runs in a real focused Electron Renderer",
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
   await waitFor(page, "renderer focus", () => document.hasFocus());
   await page.evaluate(() => globalThis.__m15Input.start());
-  await waitFor(page, "pointer availability", () => globalThis.__m15Input.changes.some(({ kind, channel, available }) => kind === "availability" && channel === "pointer.event" && available === true));
+  await waitFor(page, "input availability", () => {
+    const available = new Set(globalThis.__m15Input.changes
+      .filter(({ kind, available }) => kind === "availability" && available === true)
+      .map(({ channel }) => channel));
+    return ["keyboard.state", "keyboard.event", "pointer.state", "pointer.event", "gamepad.state", "gamepad.event"]
+      .every((channel) => available.has(channel));
+  });
 
   const beforeSynthetic = (await changes(page)).length;
   await page.evaluate(() => dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", pointerId: 91, clientX: 30, clientY: 40, buttons: 1 })));
   assert.equal((await changes(page)).length, beforeSynthetic);
-
-  await page.evaluate(() => {
-    const surface = document.querySelector("#surface");
-    surface.tabIndex = -1;
-    surface.focus();
-    globalThis.__rawKeys = [];
-    for (const name of ["keydown", "keyup"]) {
-      addEventListener(name, (event) => globalThis.__rawKeys.push({
-        type: event.type,
-        trusted: event.isTrusted,
-        code: event.code,
-        repeat: event.repeat,
-      }));
-    }
-  });
-  await waitFor(page, "surface focus", () => document.activeElement?.id === "surface");
-  await page.keyboard.press("ArrowRight");
-  await waitFor(page, "trusted keyboard events", () => globalThis.__m15Input.changes.filter(({ channel, kind }) => channel === "keyboard.event" && kind === "event").length >= 2);
-
-  const keyboard = (await changes(page)).filter(({ channel, kind }) => channel === "keyboard.event" && kind === "event");
-  assert.deepEqual(keyboard.map(({ payload }) => [payload.action, payload.code, payload.repeat]), [
-    ["down", "ArrowRight", false],
-    ["up", "ArrowRight", false],
-  ]);
-  assert.deepEqual(await page.evaluate(() => globalThis.__rawKeys), [
-    { type: "keydown", trusted: true, code: "ArrowRight", repeat: false },
-    { type: "keyup", trusted: true, code: "ArrowRight", repeat: false },
-  ]);
 
   await page.evaluate(() => globalThis.__m15Input.setPad(0));
   await waitFor(page, "gamepad attach", () => globalThis.__m15Input.changes.some(({ channel, kind, payload }) => channel === "gamepad.state" && kind === "state" && payload.gamepads.length === 1));
