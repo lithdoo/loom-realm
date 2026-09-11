@@ -1,6 +1,6 @@
 # M15 Hostra Desktop Recomposition Plan
 
-> 状态：**M15 physical composition reopened / current physical SSOT / frozen for execution**  
+> 状态：**Implementation Frozen / Preimplementation Closed / current M15 physical SSOT**  
 > 决策：[ADR 0034 — Hostra-owned Desktop composition](doc/decisions/0034-hostra-owned-desktop-composition.md)  
 > 目标：把历史 standalone Electron M15 改造成真正由 Hostra 承载的 Desktop product  
 > 范围：只重做 M15 physical composition；M10–M14 logical/business contracts 不 reopen  
@@ -186,7 +186,19 @@ app.quit()
 
 Hostra 可以由 product/qualification tooling 安装并启动，但 LoomRealm application source 不 import Hostra internals 作为 in-process library。
 
-Canonical qualification 固定 exact Hostra release/source identity；改变 pin 创建新的 M15 qualification subject。
+### 6.1 Frozen Hostra implementation baseline
+
+M15 implementation and qualification are frozen against this exact external host baseline：
+
+```text
+package          hostra@1.0.1-beta.1
+source repository lithdoo/hostra
+source commit     d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron  44.1.1
+shutdown grace    1000 ms
+```
+
+Implementation MUST NOT silently follow `latest` or a moving Hostra branch. Changing the package/source identity, bundled Electron, or lifecycle behavior creates a new M15 qualification subject and requires requalification；it does not by itself justify a new LoomRealm abstraction。
 
 ---
 
@@ -424,6 +436,22 @@ fresh candidate converges
 Main DataAuthority unchanged
 ```
 
+Data-only reconnect 与 document reload 必须严格区分：
+
+```text
+reload
+    → old Renderer Control participant retires
+    → fresh Renderer logical identity
+
+same-generation Data-only reconnect
+    → current Renderer Control participant remains the same
+    → Main DataAuthority remains current
+    → only Data physical pair is replaced
+    → fresh RendererDataBinding.acquire() resolves
+```
+
+不得把 Data carrier replacement 实现成 Renderer Control replacement，也不得因为 Data-only reconnect mint 新 Renderer identity。
+
 不要保留 Electron + WS 两套 production realization 只为了做 transport hierarchy。Hostra vertical qualified 后删除 dead Electron settlement path。
 
 ---
@@ -528,7 +556,7 @@ Programmatic close 可以 best-effort `closeWindow(windowId)`，但本地 termin
 
 ## 16. Real Hostra Shutdown Constraint
 
-Pinned Hostra 在非 macOS 平台最后一个 Window 关闭时会进入自己的 shutdown，并向直属 `HOSTRA_SUBCMD` 发送 termination signal。因此 LoomRealm Node entry 必须把 `SIGTERM/SIGINT` 当作一级 product-terminal trigger。
+Frozen Hostra baseline 在非 macOS 平台最后一个 Window 关闭时会进入自己的 shutdown，并向直属 `HOSTRA_SUBCMD` 发送 termination signal；当前 baseline 的 shutdown grace 是 **1000 ms**。因此 LoomRealm Node entry 必须把 `SIGTERM/SIGINT` 当作一级 product-terminal trigger。
 
 不得假设：
 
@@ -542,7 +570,7 @@ Hostra signal、event、RPC terminal 的任意合理 ordering 都必须汇入同
 
 LoomRealm 不建立第二份 Runner kill authority；它仍通过 `runMain` + existing RuntimeHosting owner chain收敛 Runner。
 
-Pinned Hostra 的实际 shutdown grace 是 qualification subject 的真实外层约束。Qualification 必须证明 ordinary final-window close 后：
+Qualification 必须证明 ordinary final-window close 后：
 
 ```text
 LoomRealm signal handler runs
@@ -553,7 +581,7 @@ no LoomRealm listener/socket remains
 Hostra converges normally
 ```
 
-如果真实 owner chain 无法在 pinned Hostra grace 下收敛，这是 platform contradiction，需要显式 reopen；不得偷偷增加 Desktop direct Runner kill path。
+如果真实 owner chain 无法在 frozen Hostra 1000 ms grace 下收敛，这是 platform contradiction，需要显式 reopen；不得偷偷增加 Desktop direct Runner kill path。
 
 ---
 
@@ -652,7 +680,7 @@ Trusted shell only bootstraps top-level navigation；ordinary fetch/subframe can
 
 ### Slice 4 — Data settlement replacement
 
-Existing Broker prepare/prepared/commit/revoke/current semantics converge over new settlement carrier；same-generation replacement works。
+Existing Broker prepare/prepared/commit/revoke/current semantics converge over new settlement carrier；same-generation replacement keeps the same Renderer Control participant and replaces only the Data physical pair。
 
 ### Slice 5 — Physical input + reload
 
@@ -675,17 +703,22 @@ startup partial failure
 
 ### Slice 7 — Canonical qualification + legacy removal
 
-Pinned Hostra full E2E通过后删除 dead direct-Electron ownership/dependency，启用 repository-wide no-Electron ownership gate。
+Frozen Hostra full E2E通过后删除 dead direct-Electron ownership/dependency，启用 repository-wide no-Electron ownership gate。
 
 ---
 
 ## 21. Canonical Qualification
 
-Final M15 qualification从真实 Hostra开始：
+Final M15 qualification从 frozen Hostra baseline 开始：
 
 ```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+Electron 44.1.1
+shutdown grace 1000 ms
+    ↓
 qualification harness
-→ launch exact pinned Hostra
+→ launch Hostra
    HOSTRA_RPC_PORT=<controlled/ephemeral>
    HOSTRA_RPC_TOKEN=<fresh>
    HOSTRA_CDP_PORT=0
@@ -710,7 +743,8 @@ canonical M14 map visible
 trusted ArrowRight + blocked move
 ordinary fetch/subframe cannot trigger document bootstrap
 reload same Hostra windowId + fresh Renderer identity
-same-generation Data replacement
+same-generation Data-only reconnect keeps same Renderer identity
+same-generation Data physical pair replacement converges
 current presentation/input resumes
 final Window close / Hostra signal ordering converges
 programmatic close converges
@@ -719,7 +753,7 @@ startup failure leaves no resources
 Runner absent
 LoomRealm child absent
 former loopback ports refuse connections
-Hostra converges according to pinned host model
+Hostra converges according to frozen host model
 ```
 
 Boundary gate最终必须拒绝：
@@ -745,10 +779,10 @@ Formal closure：
 ```text
 M14 formally Closed
 + ADR 0034 propagated through all Current dependent docs
-+ exact Hostra identity recorded
++ frozen Hostra baseline used exactly
 + npm run test:m15 repeatably PASS in supported CI
 + Hostra-owned full Desktop E2E/lifecycle evidence PASS
 → M15 Closed
 ```
 
-No additional ADR/package/framework is required unless implementation discovers a real Hostra public lifecycle vs frozen LoomRealm contract contradiction。
+**Preimplementation is closed now.** Implementation may choose only the private mechanics explicitly left open above（file/function names、bounded queue constants、exact navigation metadata helper、shared-vs-small-listener realization）。Any change to ownership、Renderer/Data identity semantics、rendezvous、bootstrap lifetime、termination owner chain or Hostra baseline is a design reopen and requires explicit evidence under the governance rules。
