@@ -2,12 +2,12 @@
 
 > 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14/M15 milestone status ledger-owned  
 > 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
-> 最近复核：2026-09-09
+> 最近复核：2026-09-11
 
-契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。
+契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。
 
 ---
 
@@ -21,29 +21,12 @@ Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
 User Input v1                           Active / Normative / Frozen
 Render Update v1                        Active / Normative / Frozen
 Readonly Content API v1                 Active / Normative / Evolving
+Hostra Game Launcher / Node Runner v1   Active / Normative / Frozen M6 slice
 Web Presentation Config v1              Active / Normative / Frozen
 Web Presentation API v1                 Active / Normative / Frozen
 ```
 
-M13 的可实施语义由两份 formal contract + ADR 0031 冻结：
-
-```text
-Web Presentation Config v1
-→ Window bootstrap JS/CSS
-→ prepared Content resolution
-→ exact MIME compatibility
-→ ordered browser bootstrap
-→ window.onload start barrier
-
-Web Presentation API v1
-→ Projector ↔ business WC local ABI
-→ Session/DataAuthority/currentness observable behavior
-→ context/data receivers
-→ narrow runtime resource capability
-→ Window teardown semantics
-```
-
-M13 不修改 Render Update v1，也不复制 M12 Content authority。
+M15 Hostra shell/HOSTRA_SUBCMD/window/bootstrap mechanics是 product physical composition，不新增 cross-role application protocol，也不修改上述 Renderer/Data/Content/Web Presentation contracts。
 
 ---
 
@@ -72,11 +55,11 @@ committed current Control Session/DataAuthority topology change
 successful current Render Store commit
 ```
 
-DOM、Presentation mapping 或 test harness 都不得成为第二份 topology/currentness/Render authority。
+DOM、Presentation mapping 或 test harness不得成为第二份 topology/currentness/Render authority。
 
 ---
 
-## 3. Config / Bootstrap Frozen Rules
+## 3. Web Presentation Config Frozen Rules
 
 正式契约：[Web Presentation Config v1](./web-presentation-config-v1.md)。
 
@@ -96,6 +79,8 @@ WebPresentationConfigV1
 ```
 
 MIME parameters不参与 compatibility；missing/unparseable/wrong MIME直接 bootstrap failure，不做 sniff/fallback。
+
+M15的 top-level-navigation-only trusted shell lifetime属于 Desktop physical composition；它不得改变 Config v1 value contract或 M13 `window.onload` presentation semantics。
 
 ---
 
@@ -124,7 +109,7 @@ receiveRenderData
 
 same identity → same HTMLElement；fresh Session/fresh generation → fresh element universe。
 
-`PresentationResourceClient` 只暴露 logical resource identity/version。Window teardown取消在途 reads；teardown 后格式正确的 `resource()` 调用 MUST reject `CONTENT_CANCELLED`。
+`PresentationResourceClient`只暴露 logical resource identity/version。Window teardown取消在途 reads；teardown后 well-formed `resource()` MUST reject `CONTENT_CANCELLED`。
 
 ---
 
@@ -132,7 +117,7 @@ same identity → same HTMLElement；fresh Session/fresh generation → fresh el
 
 ```text
 DataAuthority removed
-→ remove that subsystem managed DOM without waiting Render commit
+→ remove affected subsystem DOM without waiting Render commit
 
 generation changed
 → old element universe retires immediately
@@ -140,6 +125,7 @@ generation changed
 
 same-generation Data carrier loss
 → preserve/freeze only affected subsystem DOM
+→ same Renderer logical participant remains current
 → partial rebaseline hidden
 → complete baseline reconciles once
 
@@ -148,32 +134,38 @@ Control transport loss without committed replacement snapshot
 → do not invent empty authority
 ```
 
-Unregistered tag 是 projection-time structural failure：所有本次需要新建的 tags MUST 在首次 DOM mutation 前 preflight；失败时本次 zero mutation，并永久停止该 Window 后续 LoomRealm-managed DOM mutation。恢复只能 fresh Window。
+M15 reload is a fresh Renderer logical participant；M15 Data-only reconnect is not。These physical scenarios consume the frozen contracts rather than redefining them。
+
+Unregistered tag remains projection-time structural failure：preflight before first DOM mutation；failure means zero mutation for that reconciliation and permanent Window-local managed-DOM failure until fresh Window/document lifetime according to the current product composition。
 
 ---
 
-## 6. Implementation Route
+## 6. Implementation / Milestone Route
+
+This contract index intentionally does not publish a second live milestone ledger。Current authoritative status sources：
 
 ```text
-M10 User Input             ✅ Closed
-M11 Render Replication     ✅ Closed
-M12 Content                ✅ Closed
-M13 Web Presentation       ✅ Closed 2026-09-09
-M14 Map Game Library       ✅ Closed 2026-09-10
-M15 Desktop Full E2E       pending
-M16 PWA Runtime            pending
-M17 PWA Full E2E           pending
+M10–M13
+    closed qualification records
+
+M14
+    ../30-implementation/m14-qualification.md
+
+M15
+    ../30-implementation/m15-qualification.md
+    + ../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
 ```
 
-M13 落地文档：
+Current summary for navigation only：
 
-- [M13 / 01](https://github.com/lithdoo/loom-realm/blob/main/M13_01_WEB_PRESENTATION_BOOTSTRAP.md)
-- [M13 / 02](https://github.com/lithdoo/loom-realm/blob/main/M13_02_RENDERER_PRESENTATION_SEAM.md)
-- [M13 / 03](https://github.com/lithdoo/loom-realm/blob/main/M13_03_WEB_PROJECTOR.md)
-- [M13 / 04](https://github.com/lithdoo/loom-realm/blob/main/M13_04_VERTICAL_INTEGRATION.md)
-- [M13 / 05](https://github.com/lithdoo/loom-realm/blob/main/M13_05_QUALIFICATION_CLOSURE.md)
+```text
+M10–M13  Closed
+M14      implementation complete / requalification pending
+M15      Implementation Frozen / Preimplementation Closed / implementation pending
+M16–M17  pending
+```
 
-当前 executable closure gate是 `npm run test:m14`，包含 real Chromium qualification；证据见 [M14 qualification](../30-implementation/m14-qualification.md)。
+M13 landing docs remain `M13_01`–`M13_05`。M14/M15 formal Closed claims must come from their designated evidence ledgers, not this index。
 
 ---
 
@@ -187,4 +179,4 @@ cross-contract conflict
 real consumer capability failure
 ```
 
-不得以 API symmetry、目录对称、未来猜测或测试便利为理由增加 public presentation package、第二份 Store/topology/currentness、generic loader/registry、layout/layer authority、DOM rollback framework或 RenderEvent WC ABI。
+不得以 API symmetry、目录对称、future speculation、Hostra/PWA physical symmetry或 test convenience 为理由增加 public presentation package、第二份 Store/topology/currentness、generic loader/registry、layout/layer authority、DOM rollback framework或 RenderEvent WC ABI。
