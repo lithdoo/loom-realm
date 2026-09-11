@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implementation complete / local frozen-Hostra qualification PASS / hosted qualification and formal M15 closure pending.**
+**Closed — local and hosted frozen-Hostra qualification PASS.**
 
 Current physical subject is defined by：
 
@@ -66,16 +66,16 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 | Gate | Evidence | Status |
 | --- | --- | --- |
 | Existing milestone prerequisite | current `npm run test:m14` on same tree | **LOCAL PASS — 2026-09-11** |
-| Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING** |
+| Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PASS — 2026-09-12** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
 | M15 boundary/build | no canonical LoomRealm Electron ownership | **LOCAL PASS — 2026-09-11** |
 | Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **LOCAL PASS — 2026-09-11** |
 | Document bootstrap | acquire/document rendezvous + navigation-only route | **LOCAL PASS — 2026-09-11** |
 | Input/reload/reconnect | production Hostra Window path | **LOCAL PASS — 2026-09-11** |
-| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **LOCAL PARTIAL / HOSTED POSIX REQUIRED** |
+| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PASS — hosted Ubuntu / 2026-09-12** |
 | Canonical aggregate | `npm run test:m15` | **LOCAL PASS — Windows / Node 22.12.0 / 2026-09-11** |
-| Hosted qualification | dedicated M15 workflow, same subject | **PENDING HOSTED EVIDENCE** |
-| Formal M15 closure | all rows above PASS for one subject | **PENDING** |
+| Hosted qualification | dedicated M15 workflow, same subject | **PASS — run 34621764146 / Node 24** |
+| Formal M15 closure | all rows above PASS for one subject | **PASS — 2026-09-12** |
 
 `getHostState/getAllWindows` may observe that a Window is Hostra-owned；they are not production authority/currentness mechanisms。
 
@@ -336,9 +336,9 @@ openWindow failure preserves its cause and closes partial resources
 former Content/listener port refuses connections after process exit
 ```
 
-The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。Accordingly the local Windows run proves final-window Hostra/process convergence but cannot claim the complete signal-handler cleanup ordering。The hosted Ubuntu M15 workflow must prove the full `window.closed` / `host.shuttingDown` / SIGTERM ordering and all terminal cleanup events before this row becomes PASS。
+The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。The hosted Ubuntu qualification supplied the required `window.closed` / `host.shuttingDown` / SIGTERM ordering and terminal cleanup evidence。
 
-The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。Until hosted evidence targets implementation subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`, formal M15 remains pending。
+The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。[M15 run 34621764146](https://github.com/lithdoo/loom-realm/actions/runs/34621764146) completed the canonical gate and uploaded its qualification report for the docs-only descendant carrying implementation subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`。
 
 ---
 
@@ -363,7 +363,7 @@ M10–M14 logical/business contracts   frozen
 historical standalone Electron M15   implemented + migration-qualified
 M15 Hostra physical design           Implementation Frozen / Preimplementation Closed
 M15 Hostra implementation            complete + locally qualified
-formal M15 milestone                 pending
+formal M15 milestone                 Closed
 ```
 
 No further architecture/design pass is required。Only evidence of a real contradiction with the frozen Hostra baseline or a frozen LoomRealm contract may reopen M15 physical design。

@@ -2,9 +2,9 @@
 
 ## Status
 
-**Implementation complete / requalification pending.**
+**Closed — exact-local and hosted Node 20/24 qualification PASS.**
 
-The M14 architecture and hardened implementation do not require another design reopen. Formal milestone closure is pending only the missing hosted evidence for the current qualification subject.
+The M14 architecture, hardened implementation and same-subject qualification are complete. Any later qualification-input change establishes a new subject under the rule below.
 
 This file is the **single source of truth** for M14 formal qualification status and evidence. `M14_01`–`M14_04` freeze implemented contracts/behavior; `M14_05` defines the closure gate. Those documents must not independently mirror a live `Qualified / Closed` claim.
 
@@ -26,9 +26,11 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 | Gate | Required evidence | Status |
 | --- | --- | --- |
 | Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus, canonical Content + M10 paths | **PASS** |
-| Hosted Node 20 | `npm run test:m14` on the current subject | **PENDING** |
-| Hosted Node 24 | `npm run test:m14` on the current subject | **PENDING** |
-| Formal M14 closure | all three rows above target the same qualification subject | **PENDING** |
+| Hosted Node 20 | `npm run test:m14` on the current subject | **PASS — run 34621763706 / job 103337200632** |
+| Hosted Node 24 | `npm run test:m14` on the current subject | **PASS — run 34621763706 / job 103337200362** |
+| Formal M14 closure | all three rows above target the same qualification subject | **PASS — 2026-09-12** |
+
+Hosted evidence: [M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706) completed successfully for the docs-only descendant carrying subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`；both Node 20 and Node 24 executed the complete canonical `npm run test:m14` gate。
 
 No historical CI run may be promoted into a PASS for the current subject merely because an older implementation passed the same command.
 
@@ -163,14 +165,14 @@ hosted Node 24 npm run test:m14 PASS
 → M14 Closed
 ```
 
-Until then the precise status is：
+The resulting status is：
 
 ```text
 architecture / contracts     frozen
 implementation               complete + hardened
 exact-local qualification    PASS
-current hosted qualification pending
-formal M14 milestone         requalification pending
+current hosted qualification PASS — Node 20 + Node 24
+formal M14 milestone         Closed
 ```
 
 No further M14 implementation optimization is required merely to change the status label. If hosted requalification exposes a real behavioral failure, fix the concrete failure and establish a new qualification subject；otherwise only record the hosted evidence here and then synchronize the milestone status to `Closed`.
