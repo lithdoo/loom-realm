@@ -1,124 +1,114 @@
 # ADR 0033 — Electron-hosted Hostra Runner uses the current executable in Node mode
 
-- 状态：Accepted / M15 preimplementation correction
+- 状态：Accepted / historical direct-Electron compatibility decision
 - 日期：2026-09-11
-- 影响范围：Hostra Runner physical launch、M15 Electron product composition、qualification
+- 当前关系：**canonical M15 Desktop composition 已由 [ADR 0034](./0034-hostra-owned-desktop-composition.md) supersede 本 ADR 的 Electron-main embedding assumption**
+- 影响范围：任何真实 consumer 仍直接在 Electron main 中组合 `@loomrealm/game-launcher-hostra` 时的 Runner physical launch
 
-## Context
+## Current relevance
 
-M6 Hostra v1 intentionally froze a very small host policy：the trusted composition process uses its own `process.execPath` as the Runner executable，and `launch.hostra.json` cannot select arbitrary Node/argv/env。
+本 ADR 解决的前提是：
 
-That is correct when Hostra is composed by an ordinary Node process。M15 introduces the first real Electron product consumer，where the composition process is Electron main。In that environment `process.execPath` names the Electron executable，not a standalone `node` executable。
+```text
+current composition process = Electron main
+```
 
-Electron supports starting that same executable as a normal Node process through the host-controlled environment value：
+在该前提下，`process.execPath` 指向 Electron binary，因此需要 host-owned：
 
 ```text
 ELECTRON_RUN_AS_NODE=1
 ```
 
-This behavior is available only when Electron's `runAsNode` fuse is enabled。
+来继续启动既有 Node Runner。
 
-Without an explicit M15 correction，the two frozen statements would conflict：
+ADR 0034 已决定 canonical M15 不再采用该前提：
+
+```text
+Hostra shell
+→ HOSTRA_SUBCMD LoomRealm Desktop plain Node process
+→ RuntimeHosting
+→ Runner
+```
+
+因此 canonical M15 product path 不依赖本 ADR 的 run-as-node correction。本 ADR 作为历史实现 provenance 保留；若未来另一个真实 Electron-main consumer 直接消费同一 launch profile，本决策仍可适用于那个 consumer。
+
+## Context
+
+M6 Hostra launch profile冻结了很小的 executable policy：trusted composition process 使用自己的 `process.execPath` 作为 Runner executable，`launch.hostra.json` 不能选择任意 Node/argv/env。
+
+历史 direct-Electron M15 首次把 composition process 设为 Electron main。在该环境中 `process.execPath` 指向 Electron executable，而 Runner 仍要求 Node execution semantics，因此产生：
 
 ```text
 M6: Runner executable = current composition process.execPath
-M15: composition process = Electron main, but Runner must still be a Node Runner
+historical M15: composition process = Electron main
+Runner: must execute as Node
 ```
 
-There is no shipped external compatibility boundary for this Electron composition yet。This is therefore a first-implementation physical correctness correction under the existing document governance，not a new Hostra protocol version。
+该 direct-Electron composition 当时尚未形成外部 compatibility obligation，因此允许作为 first-implementation physical correction。
 
-## Decision
+## Decision under that embedding
 
-Hostra keeps exactly one executable-selection rule：
+当且仅当 current composition process 确实是 Electron main 时：
 
 ```text
 Runner executable = canonical current process.execPath
+Runner child env += ELECTRON_RUN_AS_NODE=1
 ```
 
-No public/configurable Node executable option is added。
+该值由 host physical launch code合成，不从 arbitrary parent environment 或 Game/launch manifest继承。
 
-Physical start mode is：
-
-```text
-ordinary Node composition
-    process.execPath RunnerEntry
-
-Electron main composition
-    ELECTRON_RUN_AS_NODE=1
-    process.execPath RunnerEntry
-```
-
-When the current composition process is Electron，Hostra RuntimeHosting MUST synthesize `ELECTRON_RUN_AS_NODE=1` into the exact Runner child environment。It MUST NOT copy this value from arbitrary parent environment，and Game/Hostra manifests cannot configure、remove or override it。
-
-The existing parent-environment allowlist remains unchanged。`ELECTRON_RUN_AS_NODE` is host-owned launch material like the reserved Runner bootstrap/content values，not a newly allowed inherited environment variable。
-
-M15 Desktop supports only an Electron binary/package whose `runAsNode` fuse remains enabled。The product build/qualification owns that physical prerequisite；a build with the fuse disabled is not a conforming M15 Desktop build。
-
-## Why this is the smallest correction
-
-Rejected alternatives：
+不增加：
 
 ```text
 HostraPrepareOptions.nodeExecutable
 arbitrary Node path in launch.hostra.json
-bundled/external Node selection framework
+bundled/external Node selector
 second Electron-specific RuntimeHosting
-Electron utilityProcess-based second Runner path
+UtilityProcess alternate Runner path
 RunnerManager / ProcessRegistry
 ```
 
-A configurable executable would enlarge Host policy and executable attack surface merely because the first Electron consumer exposed one physical embedding detail。A second RuntimeHosting would duplicate already-qualified Runtime/termination/Data-provisioning semantics。
-
-Using the same trusted executable in Electron's explicit Node mode preserves the existing Hostra process model、ChildProcess supervision、Runtime Control WebSocket、Runner bootstrap and Data provisioning path。
-
-## Security boundary
-
-`runAsNode` is enabled because LoomRealm Desktop intentionally needs a host-owned Node Runner。That capability does not become business authority：
-
-```text
-business JS has nodeIntegration=false
-business JS has no Electron/process API
-launch.hostra.json cannot control Runner env/argv
-Runner child receives the existing strict env allowlist
-ELECTRON_RUN_AS_NODE is synthesized only by Hostra physical launch
-```
-
-M15 qualification MUST run the real Electron composition and prove that the exact Hostra Runner child reaches existing Runtime Control readiness and terminates through the existing `HostedRuntime` owner chain。
+Electron build必须保持 `runAsNode` fuse enabled 才能满足该 embedding。
 
 ## What does not change
 
-This correction does **not** change：
+该历史 correction 不改变：
 
 ```text
-Game Entry / launch.hostra.json schemas
+Game Entry / launch.hostra.json schema
 LogicalGameBootstrap
-RuntimeHosting shared port
+RuntimeHosting port
 HostedRuntime shape
 Runtime Control protocol/profile
 bootstrapToken semantics
 Runtime Control WebSocket
-Hostra Runner entry/module ABI
+Runner entry/module ABI
 Data provisioning/currentness
 Main/Frame/Data authority
-Node-hosted Hostra behavior
+ordinary Node-hosted launch-profile behavior
 ```
 
-No v2、deprecated alias or dual launcher model is introduced。
+## Canonical M15 supersession
 
-## Propagation
+ADR 0034 不否定这里描述的 Electron compatibility mechanics；它删除了 canonical M15 对这些 mechanics 的需求。
 
-Current sources must describe the same rule：
+因此 Current 文档描述 M15 时必须使用：
 
 ```text
-Hostra Launcher Profile v1
-Runtime hosting architecture
-Desktop Host module design
-M15/01, M15/04, M15/05
-Phase 1 / testing summaries where physical execution is mentioned
+Hostra shell
+→ LoomRealm Desktop HOSTRA_SUBCMD Node process
+→ RuntimeHosting Runner child
 ```
+
+不得再把：
+
+```text
+Electron main
+→ ELECTRON_RUN_AS_NODE Runner
+```
+
+写成 canonical M15 topology。
 
 ## Reopen
 
-Reopen only if a supported Electron release/build can no longer provide a trustworthy Node-mode child through this mechanism，or a real product security requirement proves that keeping `runAsNode` enabled is unacceptable。
-
-Such evidence may justify a different concrete Runner container，but not an arbitrary executable-selection framework by default。
+仅当存在新的真实 Electron-main consumer，并且其支持的 Electron build无法安全提供 Node-mode child时，才针对那个 consumer重新评估 physical Runner container。不得因此引入任意 executable-selection framework。
