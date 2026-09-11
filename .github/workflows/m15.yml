@@ -28,8 +28,10 @@ jobs:
       - name: Install Chromium and Electron runtimes
         run: |
           npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends xdotool
           npx install-electron --no
           test -x node_modules/electron/dist/electron
+          command -v xdotool
       - name: Run M15 canonical closure gate
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
