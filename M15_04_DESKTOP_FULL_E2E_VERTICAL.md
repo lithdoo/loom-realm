@@ -1,183 +1,206 @@
 # M15 / 04 — Desktop Full E2E Vertical
 
-> 状态：**Implementation Frozen / Preimplementation Closed**  
+> 状态：**Business-visible vertical retained / canonical physical host changed to Hostra**  
 > 阶段：M15 Desktop Full E2E  
-> 落地顺序：04  
+> 原落地顺序：04  
 > 最近复核：2026-09-11  
+> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
 > 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)  
-> 依赖：[M14 / 04](M14_04_REAL_GAME_VERTICAL.md)、[ADR 0033](doc/decisions/0033-electron-hostra-run-as-node.md)  
-> 目标：用真实 Hostra/Desktop product composition 跑通 M14 concrete game；只证明 physical integration，不复制 M6/M10–M14 owner-local qualification。
+> 依赖：[M14 / 04](M14_04_REAL_GAME_VERTICAL.md)
 
-> **M15 vertical 的测试主体是 Desktop product composition，不是新的 test-owned host。**
+> **Supersession notice:** 本文继续拥有同一 M14 gameplay outcome、real DOM input、reload、same-generation reconnect 与 owner-boundary evidence intent；原 direct-Electron canonical trace、Electron-main run-as-node qualification、LoomRealm preload/MessagePort evidence 已被 Hostra recomposition supersede。
 
 ---
 
 ## 1. Canonical Trace
 
+Final M15 vertical MUST start at Hostra：
+
 ```text
-checked-in examples/essentials-v21.1 Hostra installation
-→ Hostra PREPARE in Electron main
+pinned Hostra
+→ HOSTRA_SUBCMD LoomRealm Desktop plain Node process
+→ checked-in examples/essentials-v21.1 Hostra installation
+→ Hostra PREPARE
 → Main
-→ process.execPath + ELECTRON_RUN_AS_NODE real Hostra Runner child
-→ existing Hostra Runtime Control WebSocket
+→ existing RuntimeHosting / real Node Runner
+→ existing Runtime Control
 → Desktop Data Broker
-→ Desktop Content
-→ exact same-origin 127.0.0.1 Desktop shell + Content listener
-→ secure Electron BrowserWindow
-→ one-shot private Renderer bootstrap
-→ Main-World trusted Renderer with captured native primitives
-→ native BrowserWindow RendererDataBinding + DOM RendererInputSource
+→ Desktop Content + trusted shell
+→ Hostra RPC openWindow
+→ Hostra-owned BrowserWindow
+→ trusted Renderer bootstrap
+→ Renderer Control WS + Data settlement/application WS
 → existing M13 presentation
-→ @loomrealm-game/map runtime + business WC
+→ @loomrealm-game/map + business Custom Elements
 ```
 
-测试可以使用 Playwright驱动 Electron，但不得用 Playwright直接注入 Main/Store/game state，也不得临时生成另一份 game/Hostra manifest替代 canonical example。
+Qualification may use Hostra CDP/Playwright for observation and trusted physical input, but MUST NOT inject Main/Store/game state or manufacture a second game/manifest/runtime path。
 
-## 2. Happy-path Evidence
+## 2. Business-visible Happy Path
 
-Canonical scenario复用 M14已冻结事实：
+Canonical scenario reuses M14 frozen facts：
 
 ```text
 map visible
-→ trusted real BrowserWindow ArrowRight key event
+→ trusted ArrowRight
 → existing M10 path
 → first move succeeds: (10,8) → (11,8)
 → presentation reflects current state
 → second ArrowRight
-→ persisted passability blocks move
+→ persisted passability blocks movement
 → player remains (11,8)
 ```
 
-M15不重新断言全部 map schema、Canvas source rectangles、Custom Element private structure；这些由 M14 qualification拥有。这里只证明相同 business outcome经真实 Desktop physical path到达。
+M15 does not re-own map schema、Canvas crop math、Custom Element internals or other M14 owner-local semantics。It proves the same business outcome through the real Desktop host composition。
 
-## 3. Physical Boundary Evidence
+## 3. Physical Host Evidence
 
-同一 product suite必须证明真实 Window使用冻结 physical boundary：
+The suite MUST prove：
 
 ```text
-Hostra Runner:
-    Electron main keeps process.execPath
-    → host-synthesized ELECTRON_RUN_AS_NODE=1
-    → supported Electron runAsNode fuse enabled
-    → real existing Hostra Runner reaches Runtime Control ready
-
-BrowserWindow:
-    nodeIntegration=false
-    contextIsolation=true
-    sandbox=true
-    webSecurity=true
-
-HTTP origin:
-    BrowserWindow shell = http://127.0.0.1:<port>/app-private-route
-    Content API        = http://127.0.0.1:<same-port>/_lr/v1/...
-    → no file://
-    → no CORS/OPTIONS extension
-    → no preload Content proxy
-
-bootstrap:
-    app-owned shell did-finish-load
-    → one-shot private handoff
-    → trusted Main-World Renderer consumes it
-    → captures authority-bearing browser primitives
-    → business JS/CSS loads later
-
-Renderer Control:
-    MessageChannelMain → native DOM MessagePort → existing Renderer Control
-
-Data:
-    Broker candidate lifecycle
-    → dedicated endpoint settlement port
-    → captured native browser WebSocket
-    → existing RendererDataBinding/Data peer
+Hostra is the actual Electron process
+LoomRealm Desktop is the actual HOSTRA_SUBCMD Node child
+product Window appears in Hostra lifecycle/state observation
+apps/desktop production code does not create BrowserWindow or own app.quit
+Hostra itself is not patched for LoomRealm
 ```
 
-必须可观察地证明 business page没有 generic Electron/contextBridge API，Data application messages不通过 Electron handoff port，product source不引用 Renderer internal filesystem path。
+Hostra RPC is only Window/lifecycle control；LoomRealm Control/Data application payload never flows through it。
 
-After trusted bootstrap, qualification MUST replace the page-visible `fetch`/`WebSocket` globals and still prove normal Resource/Data operation；the replacements must not observe Content bearer、private Data endpoint or transferred Control/Data ports。This closes the same-Main-World credential/capability hiding invariant without creating another Realm or bridge framework。
+## 4. Renderer / Capability Evidence
 
-## 4. Input Evidence
+Browser-side evidence must prove：
 
-Keyboard happy path由真实 trusted `KeyboardEvent`关闭。Pointer/Gamepad可以使用 focused producer-level browser evidence，但必须运行同一 production DOM source：
+```text
+trusted LoomRealm shell loads in Hostra-owned BrowserWindow
+fresh document bootstrap is consumed before business scripts
+Renderer Control uses LoomRealm loopback WS physical carrier
+Data Broker remains candidate/current owner
+Data settlement remains separate from Data application WS
+Content remains existing Desktop HTTP Content API
+M13 production seam projects the same M14 game
+```
+
+After trusted bootstrap, qualification SHOULD replace page-visible `fetch` / `WebSocket` and still prove normal Resource/Data behavior；the replacements must not observe private Content bearer or LoomRealm private endpoint material。
+
+Hostra's own ambient preload/API may exist；the requirement is that LoomRealm contracts/business code do not depend on it。
+
+## 5. Input Evidence
+
+The same production DOM source proves：
 
 ```text
 Keyboard
-→ event.isTrusted required
-→ code filtering + State-before-Event
+→ trusted event only
+→ existing M10 path
 → synthetic dispatch ignored
 
 Pointer
-→ event.isTrusted required
-→ BrowserWindow viewport normalization
-→ fresh one-shot canonical pointerId
-→ previous buttons vs event.buttons chord transition
-→ State-before-Event in frozen button order
+→ trusted event only
+→ viewport normalization
+→ fresh local pointerId
+→ chorded buttons State-before-Event
 → synthetic dispatch ignored
 
 Gamepad
-→ captured navigator.getGamepads() standard mapping
-→ captured rAF current-state polling
+→ captured getGamepads()
+→ standard mapping
+→ rAF sampling
 → fresh gamepadId on reconnect/index reuse
-→ 500000 threshold crossing State-before-Event
+→ frozen threshold crossing ordering
 ```
 
-focus/visibility loss/return必须证明 unavailable → fresh baseline → available，无 stale Event replay。
+focus/visibility loss/return proves unavailable → fresh baseline → available, with no stale Event replay。
 
-## 5. Lifecycle Evidence
+## 6. Reload / Reconnect Evidence
 
-同一 product E2E suite至少证明：
+Reload MUST be same physical Hostra Window but fresh logical Renderer：
 
 ```text
-startup
-real Electron-hosted Hostra Runner ready
-physical keyboard input
-BrowserWindow reload/replacement
-same-generation Data disconnect/reconnect
-normal app shutdown through runMain AbortSignal
-real Runner child termination before Electron exit
+Hostra windowId remains stable
+old Renderer identity retires
+fresh Renderer identity appears
+Main / Runner / Subsystem generation remain unchanged
+current game state remains unchanged
+fresh Control/Data/Content document material converges
+presentation/input resume
 ```
 
-Reload后应恢复 current projection，而不是通过重启 game获得初始状态；fresh Window必须取得 fresh bootstrap/Control/Data/Content physical material和 fresh trusted primitive closure。
-
-## 6. Failure Evidence
-
-只选择 M15新增 physical composition必须证明的最小 failure cases：
+same-generation Data failure：
 
 ```text
-one presentation/bootstrap failure
-one Data carrier loss/reconnect
-one Renderer close/replacement
-one input-source bootstrap/unavailable containment case
+current physical pair lost
+→ Main DataAuthority remains
+→ Broker retires pair
+→ fresh prepare/commit/current
+→ fresh Renderer acquire
+→ current presentation resumes
 ```
 
-A Desktop build whose Electron binary cannot honor the required run-as-node Runner start fails M15 product qualification；it does not trigger an alternate Runner implementation。
+Reload MUST NOT call Hostra `openWindow()` again。
 
-Unexpected Runner terminal的 Runtime/Main semantics已由 Hostra owner-local qualification拥有；M15不为了“full E2E”重复建立第二份 failure conformance。M15只证明 normal product shutdown最终让真实 Runner child收敛终止。
+## 7. Lifecycle / Failure Evidence
 
-断言 public/observable effects与 owner boundaries；不要冻结 private helper、无业务意义的 Electron callback ordering或额外 internal state。
-
-## 7. Test Placement
-
-允许：
+Minimum physical lifecycle evidence：
 
 ```text
-apps/desktop/test/*        concrete Desktop physical behavior
-test/m15-*.test.mjs        repository boundary/full vertical evidence
+user closes Hostra Window
+→ hostra.event reaches LoomRealm
+→ runMain AbortSignal path starts
+→ RuntimeHosting converges Runner
+→ LoomRealm Control/Data/Content listeners close
+→ LoomRealm child exits
+→ Hostra follows normal subprocess shutdown behavior
 ```
 
-不允许为了测试建立 production `MiniDesktopHost`、fake application authority、test-only Hostra game、second Renderer transport path或第二条 map runtime/presentation path。
-
-## 8. Completion
-
-M15/04完成时，一条真实 Electron trace必须从 checked-in Hostra installation的 PREPARE一直走到 business-visible map result，并在同一 Main Session/product composition上完成：
+Also qualify：
 
 ```text
-Electron process.execPath → real Hostra Node-mode child
-same-origin secure BrowserWindow shell + existing Content API
-one-shot trusted bootstrap + private primitive capture
-trusted physical input
-reload
-same-generation reconnect
-normal shutdown / real Runner termination
+programmatic Hostra closeWindow
+Main/Runner fatal with finally-like LoomRealm cleanup
+Hostra RPC terminal / host shutdown convergence
+one presentation/bootstrap-local failure
+one input unavailable/bootstrap containment case
 ```
 
-No alternate Hostra Runtime、CORS Content variant、preload Content proxy or browser security bypass may be used to make the vertical pass。
+Do not duplicate M6/Main unexpected Runner semantics; prove only the extra product-level physical convergence introduced by Hostra composition。
+
+## 8. Test Placement and Abstraction Budget
+
+Allowed：
+
+```text
+apps/desktop/test/*
+test/m15-*.test.mjs
+```
+
+Do not create production：
+
+```text
+MiniDesktopHost
+HostraManager / HostraSession
+WindowRegistry / WindowLifecycleManager
+DocumentManager / BootstrapCoordinator
+TransportRegistry / ConnectionManager
+fake application authority
+test-only game/runtime/presentation path
+```
+
+Assertions should target public/observable effects and owner boundaries, not private callback ordering or helper class shape。
+
+## 9. Completion
+
+M15/04 retained intent is complete when one real Hostra trace proves：
+
+```text
+pinned Hostra owns Electron + BrowserWindow
+LoomRealm runs as HOSTRA_SUBCMD Node child
+same checked-in Hostra installation reaches real Runner/Main
+same M13/M14 presentation path is visible
+trusted physical input reaches M10
+reload = same Hostra Window + fresh Renderer + same game
+same-generation Data reconnect converges
+normal/fatal/Hostra-terminal cleanup leaves no LoomRealm orphan resources
+```
+
+The earlier standalone Electron E2E remains migration evidence only and cannot satisfy final M15 closure by itself。
