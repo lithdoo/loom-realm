@@ -1,6 +1,5 @@
 import type { MessageCarrier } from "@loomrealm/foundation";
 import type { RendererDataBinding } from "@loomrealm/platform-ports";
-import type { DesktopRendererCandidateBinding } from "./data-broker.js";
 import { connectBrowserDataCarrier } from "./browser-websocket-carrier.js";
 import type { DataBufferPolicy } from "./data-websocket.js";
 
@@ -26,62 +25,6 @@ function listen(port: PortLike, name: "message" | "close", listener: (event?: un
 
 function sameTuple(left: Tuple, right: Tuple): boolean {
   return left.subsystemKey === right.subsystemKey && left.generation === right.generation && left.dataProfile === right.dataProfile;
-}
-
-export class WindowRendererDataSettlement implements DesktopRendererCandidateBinding {
-  private readonly pending = new Map<string, { resolve(): void; reject(cause: unknown): void; detach(): void }>();
-  private closed = false;
-  private readonly detachMessage: () => void;
-  private readonly detachClose: () => void;
-
-  constructor(private readonly port: PortLike) {
-    this.detachMessage = listen(port, "message", (event) => this.onMessage(event));
-    this.detachClose = listen(port, "close", () => this.close());
-    port.start();
-  }
-
-  private onMessage(event: unknown): void {
-    const message = event !== null && typeof event === "object" && "data" in event ? (event as { data: unknown }).data : event;
-    if (message === null || typeof message !== "object") return;
-    const value = message as Record<string, unknown>;
-    if (value.type !== "prepared" || typeof value.candidateId !== "string" || typeof value.ok !== "boolean") return;
-    const pending = this.pending.get(value.candidateId);
-    if (!pending) return;
-    this.pending.delete(value.candidateId); pending.detach();
-    if (value.ok) pending.resolve(); else pending.reject(new Error("BrowserWindow Data preparation failed"));
-  }
-
-  prepare(candidateId: string, endpoint: string, tuple: Tuple, signal: AbortSignal): Promise<void> {
-    if (this.closed) return Promise.reject(new Error("Window Data settlement closed"));
-    if (signal.aborted) return Promise.reject(signal.reason);
-    if (this.pending.has(candidateId)) return Promise.reject(new Error("Window Data candidate already pending"));
-    return new Promise((resolve, reject) => {
-      const onAbort = () => {
-        const pending = this.pending.get(candidateId);
-        if (!pending) return;
-        this.pending.delete(candidateId); pending.detach(); reject(signal.reason);
-        try { this.port.postMessage({ type: "revoke", candidateId }); } catch {}
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      this.pending.set(candidateId, { resolve, reject, detach: () => signal.removeEventListener("abort", onAbort) });
-      try { this.port.postMessage({ type: "prepare", candidateId, endpoint, ...tuple }); }
-      catch (cause) { this.pending.delete(candidateId); signal.removeEventListener("abort", onAbort); reject(cause); }
-    });
-  }
-
-  commit(candidateId: string, tuple: Tuple): boolean {
-    if (this.closed) return false;
-    try { this.port.postMessage({ type: "commit", candidateId, ...tuple }); return true; } catch { return false; }
-  }
-  revoke(candidateId: string): void { if (!this.closed) try { this.port.postMessage({ type: "revoke", candidateId }); } catch {} }
-  close(): void {
-    if (this.closed) return;
-    this.closed = true; this.detachMessage(); this.detachClose();
-    for (const pending of this.pending.values()) { pending.detach(); pending.reject(new Error("Window Data settlement closed")); }
-    this.pending.clear();
-    try { this.port.postMessage({ type: "close" }); } catch {}
-    try { this.port.close(); } catch {}
-  }
 }
 
 interface Prepared extends Tuple { readonly candidateId: string; readonly carrier: MessageCarrier }
@@ -164,4 +107,46 @@ export function createWindowRendererDataBinding(
       });
     },
   });
+}
+
+export async function connectLoopbackRendererDataBinding(
+  endpoint: string,
+  NativeWebSocket: typeof WebSocket,
+): Promise<RendererDataBinding> {
+  const socket = new NativeWebSocket(endpoint);
+  await new Promise<void>((resolve, reject) => {
+    const opened = () => { socket.removeEventListener("error", failed); resolve(); };
+    const failed = () => { socket.removeEventListener("open", opened); reject(new Error("Renderer Data settlement connection failed")); };
+    socket.addEventListener("open", opened, { once: true });
+    socket.addEventListener("error", failed, { once: true });
+  });
+  const messageListeners = new Map<(event?: unknown) => void, (event: MessageEvent<unknown>) => void>();
+  const closeListeners = new Map<(event?: unknown) => void, (event: CloseEvent) => void>();
+  const port: PortLike = {
+    postMessage(message) { socket.send(JSON.stringify(message)); },
+    start() {},
+    close() { socket.close(1000); },
+    on(name, listener) {
+      if (name === "message") {
+        const wrapped = (event: MessageEvent<unknown>) => {
+          if (typeof event.data !== "string") return listener({ data: null });
+          try { listener({ data: JSON.parse(event.data) }); } catch { listener({ data: null }); }
+        };
+        messageListeners.set(listener, wrapped); socket.addEventListener("message", wrapped);
+      } else {
+        const wrapped = (event: CloseEvent) => listener(event);
+        closeListeners.set(listener, wrapped); socket.addEventListener("close", wrapped);
+      }
+    },
+    off(name, listener) {
+      if (name === "message") {
+        const wrapped = messageListeners.get(listener); if (wrapped) socket.removeEventListener("message", wrapped);
+        messageListeners.delete(listener);
+      } else {
+        const wrapped = closeListeners.get(listener); if (wrapped) socket.removeEventListener("close", wrapped);
+        closeListeners.delete(listener);
+      }
+    },
+  };
+  return createWindowRendererDataBinding(port, NativeWebSocket);
 }

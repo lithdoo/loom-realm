@@ -8,7 +8,6 @@
   "scripts": {
     "prebuild": "npm run build -w @loomrealm/fsdb",
     "build": "tsc -p tsconfig.json && node scripts/build.mjs",
-    "start": "npm run build && electron dist/main-entry.js",
     "test": "npm run build && node --test"
   },
   "dependencies": {
@@ -26,7 +25,6 @@
     "@loomrealm/subsystem": "0.1.0-alpha.0",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.18.1",
-    "electron": "44.3.0",
     "esbuild": "0.25.9",
     "typescript": "^5.5.0"
   },

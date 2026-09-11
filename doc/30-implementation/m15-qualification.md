@@ -2,7 +2,7 @@
 
 ## Status
 
-**Implementation Frozen / Preimplementation Closed / Hostra recomposition pending implementation / formal M15 closure pending.**
+**Implementation complete / local frozen-Hostra qualification PASS / hosted qualification and formal M15 closure pending.**
 
 Current physical subject is defined by：
 
@@ -60,12 +60,12 @@ Record exact LoomRealm commit SHA after implementation lands。The Hostra identi
 | Existing milestone prerequisite | current `npm run test:m14` on same tree | **required** |
 | Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
-| M15 boundary/build | no canonical LoomRealm Electron ownership | **PENDING IMPLEMENTATION** |
-| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PENDING IMPLEMENTATION** |
-| Document bootstrap | acquire/document rendezvous + navigation-only route | **PENDING IMPLEMENTATION** |
-| Input/reload/reconnect | production Hostra Window path | **PENDING IMPLEMENTATION** |
-| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PENDING IMPLEMENTATION** |
-| Canonical aggregate | `npm run test:m15` | **PENDING IMPLEMENTATION** |
+| M15 boundary/build | no canonical LoomRealm Electron ownership | **LOCAL PASS — 2026-09-11** |
+| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **LOCAL PASS — 2026-09-11** |
+| Document bootstrap | acquire/document rendezvous + navigation-only route | **LOCAL PASS — 2026-09-11** |
+| Input/reload/reconnect | production Hostra Window path | **LOCAL PASS — 2026-09-11** |
+| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **LOCAL PARTIAL / HOSTED POSIX REQUIRED** |
+| Canonical aggregate | `npm run test:m15` | **LOCAL PASS — Windows / Node 22.12.0 / 2026-09-11** |
 | Hosted qualification | dedicated M15 workflow, same subject | **PENDING IMPLEMENTATION** |
 | Formal M15 closure | all rows above PASS for one subject | **PENDING** |
 
@@ -289,11 +289,47 @@ npm run test:m14
 → termination/failure/startup-cleanup evidence
 ```
 
-The old direct-Electron gate may remain temporarily during migration, but after Hostra replacement qualification it must not remain the canonical M15 closure owner。
+---
+
+## 10. Current Implementation Evidence — 2026-09-11
+
+The current uncommitted implementation tree completed the seven recomposition slices and passed the canonical aggregate locally：
+
+```text
+Windows
+Node 22.12.0
+npm 10.9.0
+frozen Hostra d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+npm run test:m15 → PASS
+```
+
+Observed real-host evidence：
+
+```text
+Hostra host PID owns the CDP BrowserWindow
+LoomRealm PID is Hostra subprocess.pid and direct child
+Runner PID is LoomRealm direct child
+M14 map visible
+trusted ArrowRight move + blocked second move
+fetch(location.href) and iframe produce no document lifetime
+reload retains Hostra windowId and game state while replacing Renderer identity
+Data-only physical loss retains Renderer identity and generation
+input/presentation resume after Data replacement
+Runner abrupt loss converges through Main and the product termination funnel
+representative PREPARE failure leaves no Window or RPC listener
+programmatic product close uses the same cleanup funnel
+Hostra RPC terminal triggers product cleanup
+openWindow failure preserves its cause and closes partial resources
+former Content/listener port refuses connections after process exit
+```
+
+The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。Accordingly the local Windows run proves final-window Hostra/process convergence but cannot claim the complete signal-handler cleanup ordering。The hosted Ubuntu M15 workflow must prove the full `window.closed` / `host.shuttingDown` / SIGTERM ordering and all terminal cleanup events before this row becomes PASS。
+
+The workflow now checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。Record the LoomRealm commit SHA here after the implementation lands；until hosted evidence targets that SHA, formal M15 remains pending。
 
 ---
 
-## 10. Formal Closure Rule
+## 11. Formal Closure Rule
 
 M15 may be changed to **Closed** only when this record identifies one current LoomRealm implementation subject and records：
 
@@ -313,8 +349,8 @@ Current state：
 M10–M14 logical/business contracts   frozen
 historical standalone Electron M15   implemented + migration-qualified
 M15 Hostra physical design           Implementation Frozen / Preimplementation Closed
-M15 Hostra implementation            pending
+M15 Hostra implementation            complete + locally qualified
 formal M15 milestone                 pending
 ```
 
-No further architecture/design pass is required before implementation。Only evidence of a real contradiction with the frozen Hostra baseline or a frozen LoomRealm contract may reopen M15 physical design。
+No further architecture/design pass is required。Only evidence of a real contradiction with the frozen Hostra baseline or a frozen LoomRealm contract may reopen M15 physical design。

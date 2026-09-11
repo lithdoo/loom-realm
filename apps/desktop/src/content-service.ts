@@ -15,6 +15,7 @@ import {
   projectHostraPreparedInstallation,
   type HostraPreparedInstallation,
 } from "@loomrealm/game-launcher-hostra/prepared-installation";
+import type { DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
 
 const CONTENT_VERSION = /^sha256:[0-9a-f]{64}$/;
 const DEFAULT_MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -69,6 +70,7 @@ export interface DesktopContentServiceOptions {
   readonly maxConcurrentRequests?: number;
   readonly trustedShell?: {
     readonly entryScript: Uint8Array;
+    readonly bootstrap: (signal: AbortSignal) => Promise<DesktopRendererBootstrapEnvelope>;
   };
 }
 
@@ -86,25 +88,57 @@ export interface DesktopContentService {
   close(): Promise<void>;
 }
 
-const DESKTOP_SHELL_PATH = "/_loomrealm/desktop/";
-const DESKTOP_ENTRY_PATH = "/_loomrealm/desktop/renderer.js";
-const DESKTOP_SHELL_HTML = Buffer.from(`<!doctype html>
-<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://127.0.0.1:*; object-src 'none'; base-uri 'none'"><script type="module" src="${DESKTOP_ENTRY_PATH}"></script></head><body></body></html>`, "utf8");
+interface TrustedShellRuntime {
+  readonly entryScript: Uint8Array;
+  readonly bootstrap: (signal: AbortSignal) => Promise<DesktopRendererBootstrapEnvelope>;
+  readonly documentPath: string;
+  readonly entryPath: string;
+  readonly requests: Set<AbortController>;
+}
+
+function safeBootstrapJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</gu, "\\u003c").replace(/\u2028/gu, "\\u2028").replace(/\u2029/gu, "\\u2029");
+}
 
 function serveTrustedShell(
   req: IncomingMessage,
   res: ServerResponse,
-  shell: DesktopContentServiceOptions["trustedShell"],
+  shell: TrustedShellRuntime | undefined,
 ): boolean {
-  if (shell === undefined || (req.url !== DESKTOP_SHELL_PATH && req.url !== DESKTOP_ENTRY_PATH)) return false;
+  if (shell === undefined) return false;
+  const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+  if (pathname === shell.entryPath) {
+    if (req.method !== "GET" && req.method !== "HEAD") { problem(res, "CONTENT_METHOD_NOT_ALLOWED", true); return true; }
+    const body = Buffer.from(shell.entryScript);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+    res.setHeader("Content-Length", body.byteLength);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(req.method === "HEAD" ? undefined : body);
+    return true;
+  }
+  if (pathname !== shell.documentPath) return false;
   if (req.method !== "GET" && req.method !== "HEAD") { problem(res, "CONTENT_METHOD_NOT_ALLOWED", true); return true; }
-  const body = req.url === DESKTOP_SHELL_PATH ? DESKTOP_SHELL_HTML : Buffer.from(shell.entryScript);
-  res.statusCode = 200;
-  res.setHeader("Content-Type", req.url === DESKTOP_SHELL_PATH ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8");
-  res.setHeader("Content-Length", body.byteLength);
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.end(req.method === "HEAD" ? undefined : body);
+  if (req.headers["sec-fetch-mode"] !== "navigate" || req.headers["sec-fetch-dest"] !== "document") {
+    problem(res, "CONTENT_NOT_FOUND"); return true;
+  }
+  const controller = new AbortController();
+  shell.requests.add(controller);
+  const cancel = () => { if (!res.writableEnded) controller.abort(new Error("Desktop document request aborted")); };
+  req.once("aborted", cancel); res.once("close", cancel);
+  void shell.bootstrap(controller.signal).then((bootstrap) => {
+    if (controller.signal.aborted) return;
+    const body = Buffer.from(`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-src 'none'"><script id="__loomrealm_bootstrap" type="application/json">${safeBootstrapJson(bootstrap)}</script><script type="module" src="${shell.entryPath}"></script></head><body></body></html>`, "utf8");
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Content-Length", body.byteLength);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(req.method === "HEAD" ? undefined : body);
+  }, () => { if (!controller.signal.aborted && !res.headersSent) problem(res, "CONTENT_UNAVAILABLE"); }).finally(() => {
+    shell.requests.delete(controller); req.off("aborted", cancel); res.off("close", cancel);
+  });
   return true;
 }
 
@@ -379,10 +413,17 @@ export async function createDesktopContentService(options: DesktopContentService
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new TypeError("Invalid Content service port");
   const maxBodyBytes = validLimit(options.maxBodyBytes, DEFAULT_MAX_BODY_BYTES);
   const maxConcurrentRequests = validLimit(options.maxConcurrentRequests, DEFAULT_MAX_CONCURRENT_REQUESTS);
-  const trustedShell = options.trustedShell;
-  if (trustedShell !== undefined && (trustedShell === null || typeof trustedShell !== "object" || !(trustedShell.entryScript instanceof Uint8Array))) {
+  const trustedShellOptions = options.trustedShell;
+  if (trustedShellOptions !== undefined && (trustedShellOptions === null || typeof trustedShellOptions !== "object" || !(trustedShellOptions.entryScript instanceof Uint8Array) || typeof trustedShellOptions.bootstrap !== "function")) {
     throw new TypeError("Invalid trusted Desktop shell");
   }
+  const trustedShell: TrustedShellRuntime | undefined = trustedShellOptions === undefined ? undefined : {
+    entryScript: trustedShellOptions.entryScript,
+    bootstrap: trustedShellOptions.bootstrap,
+    documentPath: `/_lr/window/${randomBytes(32).toString("base64url")}`,
+    entryPath: `/_lr/static/${randomBytes(24).toString("base64url")}/renderer.js`,
+    requests: new Set(),
+  };
   const grants = new Map<string, DesktopContentGrant>();
   let active = 0;
 
@@ -459,7 +500,7 @@ export async function createDesktopContentService(options: DesktopContentService
     server,
     origin,
     view: publicView,
-    shell: trustedShell === undefined ? null : new URL(DESKTOP_SHELL_PATH, origin),
+    shell: trustedShell === undefined ? null : new URL(trustedShell.documentPath, origin),
     createGrant(grantOptions: { readonly permissions: readonly DesktopContentPermission[]; readonly expiresAtUnixMs: number }): DesktopContentGrant {
       if (grantOptions === null || typeof grantOptions !== "object" || !Array.isArray(grantOptions.permissions) || grantOptions.permissions.length === 0 || grantOptions.permissions.some((permission) => !validPermission(permission)) || !Number.isSafeInteger(grantOptions.expiresAtUnixMs) || grantOptions.expiresAtUnixMs <= 0) {
         throw new TypeError("Invalid Content grant");
@@ -483,6 +524,7 @@ export async function createDesktopContentService(options: DesktopContentService
     close() {
       closing ??= (async () => {
         grants.clear();
+        if (trustedShell !== undefined) for (const request of trustedShell.requests) request.abort(new Error("Desktop Content service closed"));
         await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
         await view.close();
       })();

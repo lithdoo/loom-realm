@@ -9,9 +9,9 @@ import {
   type WebPresentationResourceRefV1,
 } from "@loomrealm/renderer/web-presentation";
 import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
-import { createMessagePortCarrier } from "./message-port-carrier.js";
+import { connectBrowserControlCarrier } from "./browser-control-carrier.js";
 import { createDesktopRendererInputSource } from "./renderer-input-source.js";
-import { createWindowRendererDataBinding } from "./window-data-binding.js";
+import { connectLoopbackRendererDataBinding } from "./window-data-binding.js";
 
 const NativeURL = URL;
 const trustedFetch = globalThis.fetch.bind(globalThis);
@@ -24,22 +24,21 @@ function validEnvelope(value: unknown): value is DesktopRendererBootstrapEnvelop
   const content = envelope.content as Record<string, unknown> | null;
   return envelope.channel === DESKTOP_BOOTSTRAP_CHANNEL &&
     typeof envelope.rendererControlToken === "string" && envelope.rendererControlToken.length > 0 &&
+    typeof envelope.rendererIdentity === "string" && envelope.rendererIdentity.length > 0 &&
+    typeof envelope.controlEndpoint === "string" && envelope.controlEndpoint.startsWith("ws://127.0.0.1:") &&
+    typeof envelope.dataSettlementEndpoint === "string" && envelope.dataSettlementEndpoint.startsWith("ws://127.0.0.1:") &&
     content !== null && typeof content === "object" && typeof content.origin === "string" &&
     typeof content.installationId === "string" && typeof content.token === "string";
 }
 
-function bootstrap(): Promise<{ envelope: DesktopRendererBootstrapEnvelope; control: MessagePort; data: MessagePort }> {
-  return new Promise((resolve) => {
-    const receive = (event: MessageEvent<unknown>) => {
-      if (event.source !== window || event.origin !== window.location.origin || event.ports.length !== 2 ||
-        event.data === null || typeof event.data !== "object") return;
-      const data = event.data as Record<string, unknown>;
-      if (data.channel !== DESKTOP_BOOTSTRAP_CHANNEL || !validEnvelope(data.envelope)) return;
-      window.removeEventListener("message", receive);
-      resolve({ envelope: data.envelope, control: event.ports[0]!, data: event.ports[1]! });
-    };
-    window.addEventListener("message", receive);
-  });
+function bootstrap(): DesktopRendererBootstrapEnvelope {
+  const element = document.getElementById("__loomrealm_bootstrap");
+  const source = element?.textContent ?? "";
+  element?.remove();
+  let value: unknown;
+  try { value = JSON.parse(source); } catch { throw new Error("Invalid Desktop bootstrap JSON"); }
+  if (!validEnvelope(value)) throw new Error("Invalid Desktop bootstrap envelope");
+  return value;
 }
 
 async function resolveBootstrapResource(
@@ -63,10 +62,13 @@ async function resolveBootstrapResource(
 }
 
 void (async () => {
-  const { envelope, control, data } = await bootstrap();
+  const envelope = bootstrap();
   const objectUrls: string[] = [];
   const resourceClient = createRendererResourceClient(envelope.content, lifetime.signal);
-  const dataBinding = createWindowRendererDataBinding(data, NativeWebSocket);
+  const [controlCarrier, dataBinding] = await Promise.all([
+    connectBrowserControlCarrier(envelope.controlEndpoint, lifetime.signal, NativeWebSocket),
+    connectLoopbackRendererDataBinding(envelope.dataSettlementEndpoint, NativeWebSocket),
+  ]);
   const inputSource = createDesktopRendererInputSource(window);
   const holder = createRendererControlHolder(dataBinding, inputSource);
   const prepared = await prepareWebPresentationV1(
@@ -74,7 +76,7 @@ void (async () => {
     (ref) => resolveBootstrapResource(envelope, ref, objectUrls),
   );
   const connected = holder.connect({
-    carrier: createMessagePortCarrier(control),
+    carrier: controlCarrier,
     rendererControlToken: envelope.rendererControlToken,
   });
   await bootstrapWebPresentation(window, prepared, () => {
@@ -88,6 +90,7 @@ void (async () => {
   });
   const outcome = await connected;
   document.documentElement.dataset.loomrealmRenderer = outcome.kind;
+  document.documentElement.dataset.loomrealmRendererIdentity = envelope.rendererIdentity;
   document.documentElement.dataset.loomrealmPresentation ??= "ready";
   lifetime.signal.addEventListener("abort", () => {
     for (const source of objectUrls) NativeURL.revokeObjectURL(source);

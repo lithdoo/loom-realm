@@ -21,18 +21,25 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+      - name: Check out frozen Hostra
+        uses: actions/checkout@v6
+        with:
+          repository: lithdoo/hostra
+          ref: d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+          path: .qualification/hostra
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ matrix.node }}
-      - name: Install Chromium and Electron runtimes
+      - name: Install Chromium and frozen Hostra runtime
         run: |
           npx playwright install --with-deps chromium
-          npx install-electron --no
-          test -x node_modules/electron/dist/electron
+          npm ci --prefix .qualification/hostra --no-audit --no-fund
+          test -x .qualification/hostra/packages/hostra/electron_bin/electron
       - name: Run M15 canonical closure gate
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
+          HOSTRA_SOURCE_DIR: ${{ github.workspace }}/.qualification/hostra
         run: |
           mkdir -p artifacts
           set -o pipefail

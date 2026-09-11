@@ -126,7 +126,7 @@ export class DesktopDataConnectionBroker {
       this.scheduleReconcile();
     }
     if (!(renderer instanceof DesktopRendererDataBinding)) {
-      throw new TypeError("Renderer token is bound to a BrowserWindow");
+      throw new TypeError("Renderer token is bound to a physical document");
     }
     return renderer.binding;
   }
