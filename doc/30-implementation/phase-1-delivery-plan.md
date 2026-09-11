@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Hostra physical recomposition / plan frozen**
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14 **Implemented / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
@@ -330,7 +330,7 @@ Current subject and live PASS/PENDING state are recorded only in `m14-qualificat
 
 ---
 
-## M15 — Hostra-owned Desktop Full E2E 🔄 Physical recomposition
+## M15 — Hostra-owned Desktop Full E2E 🔒 Implementation Frozen / Preimplementation Closed
 
 ADR 0034 corrects only the outer physical owner：
 
@@ -356,11 +356,20 @@ Hostra-owned BrowserWindow
 
 Canonical M15 does **not** use LoomRealm-owned Electron app/BrowserWindow、LoomRealm preload、`MessageChannelMain` or ADR0033 run-as-node embedding。
 
-Physical SSOT：
+Frozen physical SSOT：
 
 ```text
 M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
 ADR 0034
+```
+
+Frozen Hostra baseline：
+
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
 ```
 
 Old `M15_01`–`M15_05` retain logical/input intent only where explicitly preserved by the supersession matrix。
@@ -374,6 +383,8 @@ Runner is LoomRealm RuntimeHosting child
 Hostra RPC is host-control only
 Control/Data settlement/Data application/Content remain separated
 M9 Broker remains sole Data candidate/current owner
+reload replaces Renderer identity
+same-generation Data-only reconnect preserves Renderer identity
 M10/M13/M14 logical paths remain unchanged
 ```
 
@@ -397,6 +408,15 @@ same Hostra windowId
 → fresh document/acquire rendezvous
 → fresh Renderer identity/material
 → Main/Runner/Subsystem/game truth unchanged
+```
+
+Data-only reconnect：
+
+```text
+same Renderer Control participant
+→ Data physical pair replacement only
+→ fresh RendererDataBinding.acquire()
+→ same Renderer identity resumes current truth
 ```
 
 ### Termination invariant
@@ -423,7 +443,7 @@ finally close Control/Data/Content/document resources
 LoomRealm process exit
 ```
 
-This is required because Hostra may signal the `HOSTRA_SUBCMD` during final-window shutdown；M15 must prove no orphan Runner remains under real pinned Hostra grace。Desktop不得补第二份 direct Runner kill authority。
+This is required because frozen Hostra may signal the `HOSTRA_SUBCMD` during final-window shutdown；M15 must prove no orphan Runner remains under its 1000 ms grace。Desktop不得补第二份 direct Runner kill authority。
 
 ### Migration staging
 
@@ -448,7 +468,9 @@ Canonical M15 gate remains：
 npm run test:m15
 ```
 
-It must run current `test:m14` first and then real pinned Hostra boundary/build/E2E/input/reload/reconnect/lifecycle evidence。Formal M15 closure additionally requires M14 formal status = Closed。
+It must run current `test:m14` first and then real frozen-Hostra boundary/build/E2E/input/reload/Data-only reconnect/lifecycle evidence。Formal M15 closure additionally requires M14 formal status = Closed。
+
+**No further M15 architecture/design pass is required before implementation.** Slices 1–7 may proceed directly；only a real contradiction with the frozen Hostra baseline or frozen LoomRealm contracts may reopen physical design。
 
 ---
 
@@ -499,7 +521,7 @@ M11 Render Replication                     ✅ Closed
 M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game     ⚠️ Implementation complete / requalification pending
-M15 Desktop Full E2E                       🔄 Hostra physical recomposition / plan frozen
+M15 Desktop Full E2E                       🔒 Implementation Frozen / Preimplementation Closed
 M16 PWA Runtime                            pending
 M17 PWA Full E2E / Equivalence             pending
 ```
@@ -516,4 +538,4 @@ Current M14 hosted requalification gate：
 npm run test:m14
 ```
 
-M15 may proceed according to ADR 0034 + the recomposition SSOT, but documentation and qualification must not call M15 formally `Closed` before the Hostra-owned qualification subject satisfies its evidence ledger。
+M15 may proceed directly to full implementation according to ADR 0034 + the frozen recomposition SSOT, but documentation and qualification must not call M15 formally `Closed` before the Hostra-owned qualification subject satisfies its evidence ledger。
