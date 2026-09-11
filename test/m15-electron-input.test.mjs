@@ -40,20 +40,15 @@ test("production Desktop input source runs in a real focused Electron Renderer",
     const x = bounds.x + 100; const y = bounds.y + 80;
     await execute("powershell.exe", ["-NoProfile", "-Command", `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class M15Mouse { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint dx,uint dy,uint data,UIntPtr extra); }'; [M15Mouse]::SetForegroundWindow([IntPtr]::new([long]${physical.handle})); [M15Mouse]::SetCursorPos(${x},${y}); Start-Sleep -Milliseconds 100; [M15Mouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [M15Mouse]::mouse_event(8,0,0,0,[UIntPtr]::Zero); [M15Mouse]::mouse_event(16,0,0,0,[UIntPtr]::Zero); [M15Mouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)`]);
   } else if (process.platform === "linux") {
-    const { stdout } = await execute("xdotool", ["getwindowfocus"]);
-    const windowId = stdout.trim();
-    assert.match(windowId, /^\d+$/u);
-    await execute("xdotool", [
-      "mousemove", "--window", windowId, "100", "80",
-      "sleep", "0.05",
-      "mousedown", "1",
-      "sleep", "0.05",
-      "mousedown", "3",
-      "sleep", "0.05",
-      "mouseup", "3",
-      "sleep", "0.05",
-      "mouseup", "1",
-    ]);
+    await application.evaluate(({ BrowserWindow }) => {
+      const contents = BrowserWindow.getAllWindows()[0]?.webContents;
+      if (!contents) throw new Error("missing BrowserWindow WebContents");
+      contents.sendInputEvent({ type: "mouseMove", x: 100, y: 80 });
+      contents.sendInputEvent({ type: "mouseDown", x: 100, y: 80, button: "left", clickCount: 1 });
+      contents.sendInputEvent({ type: "mouseDown", x: 100, y: 80, button: "right", clickCount: 1, modifiers: ["leftbuttondown"] });
+      contents.sendInputEvent({ type: "mouseUp", x: 100, y: 80, button: "right", clickCount: 1, modifiers: ["leftbuttondown", "rightbuttondown"] });
+      contents.sendInputEvent({ type: "mouseUp", x: 100, y: 80, button: "left", clickCount: 1, modifiers: ["leftbuttondown"] });
+    });
   } else {
     await page.mouse.move(100, 80);
     await page.mouse.down({ button: "left" });
