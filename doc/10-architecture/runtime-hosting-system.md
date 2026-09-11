@@ -2,14 +2,31 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving  
+> 稳定程度：Evolving；M6/M9 consumed RuntimeHosting boundaries implemented/qualified  
 > 主要定义：Subsystem Runtime Container、PlatformLaunchPlan、Runner、Control/Frame/Input/Render 承载粒度、plan-bound RuntimeHosting / Supervisor，以及 Runtime-owned late Data provisioning handoff  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)、[ADR 0026](../decisions/0026-session-scoped-platform-instance.md)、[ADR 0028](../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)  
+> 相关：[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 被以下文档细化：[运行时启动系统](./runtime-bootstrap-system.md)、[栈式运行系统](./stack-runtime-system.md)、[Subsystem 模型](./subsystem-model.md)  
-> 正式化：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)  
+> 正式化：[Subsystem Control v1](../15-contracts/subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../15-contracts/frame-call-protocol-v1.md)、[Hostra Game Launcher / Node Runner Profile v1](../15-contracts/nodejs-launcher-profile-v1.md)  
 > 最近复核：2026-09-11
 
-本文只定义 Runtime physical hosting边界。Game Entry validation、Launcher PREPARE、Main authority、Frame authority与 Data authority分别由各自事实源拥有。
+本文只定义 **LoomRealm Runtime physical hosting boundary**。External Desktop shell/window ownership不属于 RuntimeHosting。Canonical M15 outer topology由 ADR0034 + `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`拥有。
+
+术语固定：
+
+```text
+Hostra shell
+    external lithdoo/hostra Electron host
+
+Hostra launch profile
+    @loomrealm/game-launcher-hostra PREPARE + Node Runner realization
+
+LoomRealm Desktop process
+    M15 Hostra HOSTRA_SUBCMD plain Node child
+
+Runner
+    LoomRealm RuntimeHosting child / Worker container
+```
 
 ---
 
@@ -27,9 +44,9 @@ one Runtime Container
     → 0..1 current Main Control carrier
 ```
 
-Runtime application identity来自 `subsystemKey`，不来自 module path、URL、PID、Worker id 或 Launch Attempt id。
+Runtime application identity来自 `subsystemKey`，不来自 module path、URL、PID、Worker id、Window id 或 Launch Attempt id。
 
-Renderer Data carrier不属于 Runtime hosting cardinality；它由 Main DataAuthority + Platform DataConnectionBroker独立管理。
+Renderer Data carrier不属于 Runtime hosting cardinality；它由 Main `DataAuthority` + concrete DataConnectionBroker独立管理。
 
 ---
 
@@ -37,18 +54,17 @@ Renderer Data carrier不属于 Runtime hosting cardinality；它由 Main DataAut
 
 `RuntimeHosting` 不解析 raw Game Entry / ValidatedGameEntryV1 / Platform Launch Manifest。
 
-在任何 business Runtime side effect 前，current concrete Platform `prepareGame()` MUST 已完成：
+任何 business Runtime side effect 前，matching Launcher/launch profile MUST 已完成：
 
 ```text
 Game Entry validation
 → Platform Launch Manifest validation
 → exact key-set join
-→ every required executable binding resolution
+→ required executable binding resolution
 → installation/security containment
 → current hosting capability preflight
-→ freeze immutable PlatformLaunchPlan
-→ project immutable LogicalGameBootstrap
-→ concrete Platform installs plan privately
+→ immutable PlatformLaunchPlan
+→ immutable LogicalGameBootstrap
 ```
 
 任一 PREPARE failure：
@@ -59,25 +75,11 @@ business Definition Module import = 0
 Runtime Control establishment = 0
 ```
 
----
-
-## 3. LogicalGameBootstrap vs LaunchPlan
-
-```text
-LogicalGameBootstrap
-    → Main-visible
-    → subsystemKeys + initial target/input only
-
-PlatformLaunchPlan
-    → Platform-private
-    → Map<subsystemKey, ResolvedPlatformImplementation>
-```
-
-Main不接收 executable material；session-scoped concrete Platform 持有 immutable plan，并通过 Main-facing `RuntimeHosting` 使用它。
+`LogicalGameBootstrap`只给 Main；`PlatformLaunchPlan`由 concrete product/runtime composition私有持有。
 
 ---
 
-## 4. Runtime Container vs Business Module
+## 3. Runtime Container vs Business Module
 
 ```text
 Runtime Container
@@ -88,14 +90,14 @@ Definition Module
     satisfies shared SubsystemDefinitionFactory ABI
 ```
 
-Hostra：Node child → Host-owned Node Runner → exact Hostra plan module。  
-PWA：Dedicated Worker → Host-owned Worker Runner → exact PWA plan module。
+Hostra launch profile：Node child → trusted Node Runner → exact planned `.mjs`。  
+PWA：Dedicated Worker → trusted Worker Runner → exact planned module。
 
-Business module不负责 physical hosting/bootstrap，也不读取 Game Entry/Platform manifest。
+Business module不负责 physical hosting/bootstrap，不读取 Game Entry/Platform manifest，不创建第二 Runtime。
 
 ---
 
-## 5. Runner Responsibility
+## 4. Runner Responsibility
 
 ```text
 PlatformLaunchPlan + bootstrap/provisioning
@@ -114,25 +116,24 @@ Business Definition
 Runner负责：
 
 ```text
-verify own planned subsystemKey/binding
+verify planned subsystemKey/binding
 load exact selected Definition Module
 validate SubsystemDefinitionFactory ABI
-M6 construct RuntimeControlBinding
-M8 construct SubsystemDataBinding role seam when supplied
-M9 Hostra provisioning layer feeds that Binding dynamically
-M12+ construct ContentClient
-M16 PWA provisioning maps the same role seam through Worker/MessagePort
-invoke runSubsystem(...) with current real capabilities
+construct RuntimeControlBinding
+construct SubsystemDataBinding when supplied
+accept Runtime-scoped late Data provisioning
+construct ContentClient when supplied
+invoke runSubsystem(...) with current capabilities
 platform-local diagnostics/cleanup
 ```
 
-Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也不重新解释 raw manifests。
+Runner不拥有 Main Frame/Activation/InputTarget/DataAuthority authority，也不重新解释 manifests。
 
 ---
 
-## 6. Main-facing RuntimeHosting — Shared Contract Unchanged
+## 5. Main-facing RuntimeHosting — Shared Contract
 
-M5 exact shared port remains：
+M5 shared port remains：
 
 ```ts
 interface RuntimeLaunchRequest {
@@ -155,58 +156,54 @@ interface RuntimeHosting {
 }
 ```
 
-`RuntimeLaunchRequest` only carries logical key + Main-owned bootstrap token。
-
 ```text
 launch(...)
 → lookup immutable PlatformLaunchPlan[subsystemKey]
-→ create exact Host-owned Runner Container
+→ create exact Runner Container
 → inject key/token
-→ return one HostedRuntime object for that physical lifetime
+→ return one HostedRuntime for that physical lifetime
 ```
 
-`HostedRuntime` object identity is now additionally reused by M9 Main→Platform Data authority view as the exact physical target correlation。This does not change RuntimeHosting's public fields and does not expose PID/Worker id to application wire。
+`HostedRuntime` object identity MAY correlate M9 physical Data target without exposing PID/Worker id to application wire。
 
 Main MUST NOT pass Game Entry、PlatformLaunchPlan、module/path/URL、Node/Worker options、Control/Data endpoint/Port、Renderer/Content material。
 
 ---
 
-## 7. Runtime-owned Provisioning Handoff
+## 6. Runtime-owned Provisioning Handoff
 
-Because the concrete launcher/RuntimeHosting implementation owns the child, a Platform composition that needs late Data must obtain a child-scoped provisioner from that owner rather than discover the process through a public registry。
+A composition needing late Data obtains a child-scoped provisioner from the Runtime owner；它不得通过 public process registry发现 child。
 
-Hostra M9 freezes：
+Hostra launch-profile M9 flow：
 
 ```text
 RuntimeHosting.launch creates exact child
 → constructs HostedRuntime R
-→ constructs HostraRuntimeDataProvisioner P bound to that child
-→ optional composition hook receives (R,P)
+→ constructs RuntimeDataProvisioner P bound to that child
+→ optional concrete composition hook receives (R,P)
 → only then launch resolves R
 ```
 
-The hook is Hostra concrete integration, not a shared `@loomrealm/platform-ports` interface。Desktop may keep a private `WeakMap<HostedRuntime,P>`。
+The hook is concrete integration, not a shared `@loomrealm/platform-ports` interface。Desktop may keep private `WeakMap<HostedRuntime,P>`。
 
-M6/headless composition omits the hook and remains valid。
-
-A fresh Runtime object always gets a fresh provisioner；provisioner lifetime cannot outlive the exact child。
+Fresh Runtime object → fresh provisioner；provisioner不得 outlive exact child。
 
 ---
 
-## 8. Host Policy Boundary
+## 7. Host Policy Boundary
 
 Platform Launch Manifest MAY select installation-local business artifact；MUST NOT override：
 
 ```text
 Node/Runner executable
-Host-owned Node/Worker Runner entry
+Runner entry
 shell / arbitrary argv / unsafe env
 Electron run-as-node mode
 Worker constructor security policy
 bootstrap credential source
 Control endpoint / MessagePort
 Data ticket/Port/provisioning IPC policy
-CSP / same-origin policy
+Content credential
 Supervisor resource/timeouts
 ```
 
@@ -215,20 +212,23 @@ select business implementation
 != arbitrary host-code execution authority
 ```
 
-For the first Electron Hostra consumer，ADR 0033 fixes one concrete host-owned execution detail without enlarging this policy surface：
+ADR0033 defines one **conditional** execution fact：
 
 ```text
-Runner executable remains canonical process.execPath
-Electron composition only
-    → Hostra synthesizes ELECTRON_RUN_AS_NODE=1 for the exact Runner child
-    → supported Electron build keeps runAsNode fuse enabled
+IF the trusted RuntimeHosting composition process itself is Electron
+THEN
+    Runner executable remains canonical process.execPath
+    host synthesizes ELECTRON_RUN_AS_NODE=1 for the exact Runner child
+    supported Electron build keeps runAsNode fuse enabled
 ```
 
-Game/manifest cannot select a different executable、set this environment value or request a different process container。
+Game/manifest cannot request or configure this mode。
+
+Canonical M15 does **not** satisfy that precondition：ADR0034 places LoomRealm Desktop RuntimeHosting in a plain Node `HOSTRA_SUBCMD` process beneath the external Hostra shell。Therefore M15 Runner startup uses the ordinary Node branch of the same Hostra launch profile。
 
 ---
 
-## 9. Physical Termination Fact Boundary
+## 8. Physical Termination Fact Boundary
 
 ```text
 HostedRuntime.terminated resolves
@@ -239,13 +239,13 @@ HostedRuntime.terminated rejects
     != stopped proof
 ```
 
-`requestTermination()` only requests physical termination。PID/Worker/exit diagnostics remain concrete Platform-local until a real portable consumer requires them。
+`requestTermination()` only requests physical termination。PID/Worker/exit diagnostics remain concrete composition-local until a portable consumer requires them。
 
-Main interprets physical facts as Runtime lifecycle；Platform cannot select Frame unwind root、Data generation or application recovery。
+Main interprets physical facts as Runtime lifecycle；Platform cannot choose Frame unwind root、Data generation or recovery policy。
 
 ---
 
-## 10. Runtime Control Carrier
+## 9. Runtime Control Carrier
 
 One Launch Attempt has at most one successful identified Control Connection：
 
@@ -259,11 +259,11 @@ starting
 → ready
 ```
 
-Same-attempt Control reconnect does not exist。Unexpected Control loss without shutdown intent → Runtime failed。
+Same-attempt Control reconnect does not exist。Unexpected Control loss without shutdown intent → Runtime failure path。
 
 ---
 
-## 11. Ready != Data Current
+## 10. Ready != Data Current
 
 ```text
 ready != Data current
@@ -271,56 +271,51 @@ ready != Renderer exists
 ready != Input/Render baseline published
 ```
 
-Main may derive logical DataAuthority from `ready`, but physical Data installation additionally requires a current Renderer and matching Platform authority view。
+Main may derive logical DataAuthority from ready，but physical Data installation additionally requires current Renderer + matching authority view。
 
 ---
 
-## 12. Local Frame/Input Context
+## 11. Frame / Input / Render Lifetime Independence
 
-Runtime may host multiple live local Frame Contexts；public Stack/Activation authority remains Main-owned。
-
-Frame/Input Context lifetime and Render Domain/Data Connection lifetimes are independent。Child-call suspension may retain Frame-scoped Interest configuration；fresh Activation does not reuse old Input State/Event。
-
----
-
-## 13. Render Domains
-
-Runtime may own `0..N` authoritative Render Domains even with zero active Frame or zero Data carrier。
+Runtime may host multiple local Frame/Input Contexts and `0..N` authoritative Render Domains。
 
 ```text
 Frame close != Render Domain close
 Frame suspend != Render hide
 Data carrier loss != authoritative Render destroy
+fresh Activation != reuse old Input State/Event
 ```
 
-Fresh Data carrier eventually rebuilds Renderer replica through M11 business semantics；M9 itself only closes physical carrier/peer replacement。
+Public Stack/Activation/InputTarget authority remains Main-owned。
+
+Fresh Data carrier eventually rebuilds Renderer replica through M11 semantics；M9 only manages physical candidate/current carrier replacement。
 
 ---
 
-## 14. Data Provisioning Is Adjacent, Not Runtime Authority
+## 12. Data Provisioning Is Adjacent, Not Runtime Authority
 
-Hostra M9 physical flow：
+Hostra launch-profile physical flow：
 
 ```text
 Runtime already running
-→ Main current Data authority view names exact HostedRuntime R
-→ Desktop Broker finds R's HostraRuntimeDataProvisioner
+→ Main current DataAuthority names exact HostedRuntime R
+→ Desktop Broker finds R-bound provisioner
 → provision one-time Data WS candidate to Runner
-→ Runner connects/holds carrier privately and reports prepared
+→ Runner connects/holds carrier and reports prepared
 → Broker paired install
 → post-install Runner delivery notification
-→ SubsystemDataBinding may deliver already-current carrier
+→ SubsystemDataBinding delivers current carrier
 ```
 
-`SubsystemDataBinding.acquire()` remains a role delivery wait；it does not create candidate or authorize install。
+`SubsystemDataBinding.acquire()` is role delivery wait；it does not create candidate or authorize install。
 
-PWA later maps the same abstract lifecycle through Worker provisioning/MessagePort transfer。
+PWA later maps the same logical lifecycle through Worker/MessagePort transfer。
 
 ---
 
-## 15. Provisioning Delivery Failure Is Not Installation Rollback
+## 13. Provisioning Delivery Failure Is Not Installation Rollback
 
-Runner IPC `commit`/ack is post-install delivery, not the Broker atomic install point。
+Runner IPC commit/ack is post-install delivery, not Broker atomic install point。
 
 Frozen result：
 
@@ -334,13 +329,39 @@ B installed current
 
 This failure does not mutate Main DataAuthority、fail Runtime or unwind Frame。
 
-If provisioning IPC becomes unusable while child/Runtime Control remains alive, Data capability may become unavailable while Runtime continues。
+Provisioning IPC may become unavailable while Runtime Control/child remain healthy；Data capability can be unavailable while Runtime continues。
 
 ---
 
-## 16. Termination
+## 14. Same-generation Data Reconnect
 
-Normal：
+```text
+carrier A current
+→ physical loss / retired
+→ Main DataAuthority unchanged
+→ same Renderer Control participant remains current
+→ Broker provisions fresh physical carrier B
+→ fresh RendererDataBinding.acquire()
+→ fresh baseline/current truth
+```
+
+It MUST NOT imply：
+
+```text
+fresh Renderer identity
+Runtime restart
+Frame resume/restart
+reuse old Input state
+reuse old Render patch base
+```
+
+Renderer replacement/reload is a different lifetime transition。
+
+---
+
+## 15. Runtime Termination
+
+Normal Main-owned Runtime shutdown：
 
 ```text
 Main shutdown intent
@@ -351,61 +372,87 @@ Main shutdown intent
 → only resolved termination fact supports stopped
 ```
 
-Unexpected Runtime exit / Control loss / self-reported failed / fatal Runtime protocol invariant enter Main Runtime failure path。
+Unexpected Runtime exit / Control loss / self-reported failed / fatal protocol invariant enters Main Runtime failure path。No automatic restart；fresh Runtime requires fresh Launch Attempt + credential + Container + Control lifetime。
 
-Runtime failed cannot recover merely because later exit code is 0。No automatic restart；fresh Runtime requires fresh Launch Attempt + credential + Container + Control lifetime。
+Any provisioner bound to old HostedRuntime becomes unusable when that child terminates；Data retirement remains independently owned by Data path。
 
-Any Data provisioner associated with the old HostedRuntime becomes unusable when that child terminates；old Data material must retire independently。
+M15 product-level `SIGTERM/window/RPC` funnel lives **outside** RuntimeHosting and converges into this existing Main/RuntimeHosting chain；Desktop must not add a second direct Runner-kill authority。
 
 ---
 
-## 17. Cross-platform Realization
+## 16. Cross-platform Realization
 
 ```text
-Hostra under ordinary Node composition
+Hostra launch profile under ordinary Node composition
     LaunchPlan          installation-contained filesystem .mjs
     Runtime Container  process.execPath Node Runner child
     Supervisor         child process lifecycle
     Control            WebSocket
     provisioning       Runtime-scoped child IPC + Data WS
 
-Hostra Desktop under Electron composition (M15)
-    LaunchPlan          same Hostra plan
-    Runtime Container  same process.execPath with host-synthesized ELECTRON_RUN_AS_NODE=1
-    Supervisor         same child process lifecycle
-    Control            same Runtime Control WebSocket
-    provisioning       same Runtime-scoped child IPC + Data WS
+Conditional Electron composition (ADR0033)
+    only when RuntimeHosting composition process itself is Electron
+    same LaunchPlan / Runtime model
+    process.execPath enters Node mode via host-owned ELECTRON_RUN_AS_NODE=1
+
+Canonical M15 Desktop (ADR0034)
+    Hostra shell        external Electron / BrowserWindow / direct HOSTRA_SUBCMD owner
+    LoomRealm Desktop   plain Node HOSTRA_SUBCMD
+    Runtime Container  ordinary Node Hostra launch-profile Runner child
+    Control/provision   existing Hostra launch-profile mechanics
 
 PWA
-    LaunchPlan          installation/same-origin module URL
+    LaunchPlan          same-origin module URL
     Runtime Container  Worker Runner
     Supervisor         Worker lifecycle
     Control            MessagePort
     provisioning       Worker message/Port transfer
 ```
 
-Electron does not create a third logical Runtime model or a second Hostra RuntimeHosting。The supported Electron build's `runAsNode` capability is a concrete Desktop build prerequisite verified by M15。
+External Hostra shell ownership does not create a third Runtime model。M15 only changes outer physical composition；M6/M9 RuntimeHosting contracts remain the same。
 
-Physical topology differs；established Runtime Control、Frame、Data/Input/Render/Content semantics must eventually be equivalent。
+---
+
+## 17. M15 / M16 / M17 Placement
+
+```text
+M15
+    external Hostra shell
+    → HOSTRA_SUBCMD LoomRealm Desktop
+    → this RuntimeHosting
+    → Runner
+
+M16
+    PWA PREPARE
+    → Worker RuntimeHosting vertical only
+
+M17
+    completes PWA Renderer/Data/Content/Input/Web Presentation
+    → logical/business outcome equivalence with M15
+```
+
+Hostra shell RPC、Window lifecycle、loopback trusted-shell bootstrap、OS-signal handling are Desktop product mechanics and do not enter this RuntimeHosting contract or PWA requirements。
 
 ---
 
 ## 18. Final Invariants
 
 1. one logical subsystemKey has at most one active Runtime Container；
-2. Game Package/ValidatedGameEntry are not RuntimeHosting input；
+2. Game Package/raw manifests are not RuntimeHosting input；
 3. PlatformLaunchPlan + LogicalGameBootstrap close before first Runtime side effect；
 4. Runtime Container hosts trusted Runner + one selected business Definition instance；
-5. Host-owned Runner is physical entry；
-6. Main-facing RuntimeHosting shared API remains `{subsystemKey,bootstrapToken} → HostedRuntime`；
-7. HostedRuntime object identity may correlate M9 physical Data target without exposing PID/Worker identity；
-8. Host policy/credential/security cannot be overridden by Game manifest；
+5. Runner is the physical entry for business Runtime；
+6. Main-facing RuntimeHosting remains `{subsystemKey,bootstrapToken} → HostedRuntime`；
+7. HostedRuntime may correlate M9 physical target without exposing PID/Worker identity；
+8. Game/manifest cannot override host executable/security/credential policy；
 9. Runtime has at most one current Control carrier, no same-attempt reconnect；
-10. Supervisor reports physical facts only；`stopped` comes from actual termination；
-11. public Frame/Activation/InputTarget/DataAuthority remain Main-owned；
+10. `stopped` comes only from actual termination observation；
+11. Frame/Activation/InputTarget/DataAuthority remain Main-owned；
 12. Runtime ready does not imply Data current；
-13. Runtime owner may expose only a concrete child-scoped provisioner handoff, not Broker policy or public registry；
-14. Data provisioning/loss/post-install delivery failure does not directly equal Runtime failure/Frame unwind；
-15. post-install delivery failure retires new Data current and never rolls back old current；
-16. Hostra/PWA hosting/artifact may differ, but Subsystem ABI/formal observable semantics remain shared；
-17. Electron-hosted Hostra reuses the same Runner/process owner chain via host-controlled Node mode rather than a configurable executable or second RuntimeHosting。
+13. Runtime owner may expose concrete child-scoped provisioner handoff, not public registry/Broker policy；
+14. Data provisioning/loss/delivery failure does not equal Runtime failure/Frame unwind；
+15. post-install delivery failure retires new Data current and never resurrects old current；
+16. same-generation Data reconnect keeps the same Renderer logical participant；
+17. Hostra/PWA physical hosting may differ while shared logical semantics remain stable；
+18. ADR0033 is conditional on an Electron RuntimeHosting composition process；ADR0034 defines canonical M15 outer host and does not make LoomRealm Desktop Electron-owned；
+19. M15 product termination converges through Main/RuntimeHosting rather than creating a second Runner kill authority。
