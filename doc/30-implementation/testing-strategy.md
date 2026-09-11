@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M13 closed；M14 implementation complete / requalification pending；M15 Hostra physical recomposition frozen for execution  
+> 稳定程度：M1–M13 closed；M14 implementation complete / requalification pending；M15 **Implementation Frozen / Preimplementation Closed**  
 > 主要定义：package/role/protocol/vertical ownership，以及 M14–M17 E2E qualification 分工  
 > 依赖：[正式契约目录](../15-contracts/README.md)、[Phase 1 交付计划](./phase-1-delivery-plan.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
@@ -122,10 +122,19 @@ M14 does not claim Hostra shell/BrowserWindow/full Desktop lifecycle。
 
 ## 5. M15 — Hostra-owned Desktop Full E2E
 
+M15 frozen qualification baseline：
+
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
+```
+
 M15 canonical subject is：
 
 ```text
-pinned Hostra shell
+frozen Hostra shell
 ├─ actual Electron / BrowserWindow owner
 └─ HOSTRA_SUBCMD
      ↓
@@ -144,7 +153,7 @@ Hostra-owned BrowserWindow
 → same M14 game
 ```
 
-Qualification MUST NOT satisfy M15 by launching Electron directly from LoomRealm application code or by relying on ADR0033 run-as-node embedding。
+Qualification MUST NOT satisfy M15 by launching Electron directly from LoomRealm application code、by relying on ADR0033 run-as-node embedding、or by silently changing the frozen Hostra baseline。
 
 ### 5.1 Boundary evidence
 
@@ -246,14 +255,16 @@ Reload MUST NOT call Hostra `openWindow()` again。
 
 ```text
 same-generation physical Data loss
+→ same Renderer Control participant remains current
 → Main DataAuthority remains current
-→ existing Broker retires pair
+→ existing Broker retires old pair
 → fresh prepare/prepared/commit
-→ fresh Renderer acquire
-→ presentation resumes current truth
+→ fresh RendererDataBinding.acquire() resolves
+→ fresh Data physical pair only
+→ same Renderer identity resumes current truth
 ```
 
-No retry/backoff/recovery authority is introduced。
+Qualification MUST assert Renderer logical identity remains unchanged during Data-only reconnect。No retry/backoff/recovery authority is introduced。
 
 ### 5.8 Termination/failure evidence
 
@@ -278,7 +289,7 @@ Main/RuntimeHosting convergence
 finally Control/Data/Content/document cleanup
 ```
 
-This suite must specifically exercise real pinned Hostra final-window behavior because Hostra may signal the `HOSTRA_SUBCMD` during host shutdown。Prove：
+This suite must specifically exercise frozen Hostra final-window behavior because Hostra may signal the `HOSTRA_SUBCMD` during host shutdown。Prove：
 
 ```text
 signal handler participates in the same termination path
@@ -288,7 +299,7 @@ former loopback ports refuse connections
 Hostra converges normally
 ```
 
-If the owner chain cannot converge within pinned Hostra's real grace, qualification fails and the platform boundary must be explicitly reopened；tests must not add a Desktop direct Runner kill shortcut。
+If the owner chain cannot converge within the frozen Hostra **1000 ms** grace, qualification fails and the platform boundary must be explicitly reopened；tests must not add a Desktop direct Runner kill shortcut。
 
 ### 5.9 Startup failure evidence
 
@@ -310,7 +321,7 @@ bootstrap/Renderer convergence failure
 npm run test:m15
 ```
 
-It runs current `npm run test:m14` first, then boundary/build + pinned Hostra full E2E + input/reload/reconnect/termination evidence。Formal M15 closure additionally requires M14 formal status = Closed。
+It runs current `npm run test:m14` first, then boundary/build + frozen Hostra full E2E + input/reload/Data-only reconnect/termination evidence。Formal M15 closure additionally requires M14 formal status = Closed。
 
 ---
 
@@ -406,13 +417,15 @@ Prefer small test-local objects/functions that drive real seams。
 
 1. M1–M13 closed evidence remains valid；
 2. M14 proves first real game consumer and its formal status remains ledger-owned；
-3. M15 alone claims full Hostra-owned Desktop E2E；
-4. M16 alone closes PWA Worker Runtime；
-5. M17 closes full PWA E2E + logical equivalence；
-6. M15 uses Hostra-owned BrowserWindow, not LoomRealm-owned Electron；
-7. M15 Hostra RPC is host-control only；
-8. M15 document bootstrap is top-level-navigation-only and rendezvous is race-safe；
-9. M15 termination has one idempotent funnel including OS signals；
-10. M15 Data Broker remains sole candidate/current owner；
-11. tests assert observable behavior, not unnecessary helper/class topology；
-12. no generic registry/manager/recovery/framework is created solely for qualification convenience。
+3. M15 physical design is **Implementation Frozen / Preimplementation Closed** before coding；
+4. M15 alone claims full Hostra-owned Desktop E2E；
+5. M16 alone closes PWA Worker Runtime；
+6. M17 closes full PWA E2E + logical equivalence；
+7. M15 uses frozen Hostra-owned BrowserWindow, not LoomRealm-owned Electron；
+8. M15 Hostra RPC is host-control only；
+9. M15 document bootstrap is top-level-navigation-only and rendezvous is race-safe；
+10. reload replaces Renderer identity；Data-only reconnect preserves Renderer identity；
+11. M15 termination has one idempotent funnel including OS signals；
+12. M15 Data Broker remains sole candidate/current owner；
+13. tests assert observable behavior, not unnecessary helper/class topology；
+14. no generic registry/manager/recovery/framework is created solely for qualification convenience。
