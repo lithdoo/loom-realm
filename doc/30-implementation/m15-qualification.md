@@ -2,30 +2,65 @@
 
 ## Status
 
-**Implementation complete / locally qualified / hosted qualification pending.**
+**Physical recomposition in progress / previous standalone Electron evidence retained as historical / formal M15 closure pending.**
 
-M15 product composition is implemented against the frozen M15/01–M15/05 design. Formal closure is not claimed here: it requires a repeatable hosted Node 24 `npm run test:m15` PASS and formal M14 closure (whose own workflow separately qualifies Node 20 and Node 24).
+The previous M15 implementation successfully qualified a direct-Electron LoomRealm Desktop composition, but that physical subject is no longer canonical after the Hostra recomposition decision. Current physical implementation and closure requirements are owned by `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md` and the updated M15/01–M15/05 documents。
 
-## Qualification subject
+Formal M15 closure now requires：
 
-The qualification subject is the commit that first contains the complete M15 implementation, canonical checked-in Hostra installation, boundary gate, Electron E2E and dedicated workflow. Record its commit hash after the implementation lands; any later change to these inputs creates a new subject.
+```text
+M14 formally Closed
++ pinned Hostra identity recorded
++ Hostra-owned npm run test:m15 PASS in supported CI
++ Hostra-owned full Desktop E2E/lifecycle evidence PASS
+→ M15 Closed
+```
 
-## Required evidence
+---
+
+## 1. Current Qualification Subject
+
+The next qualifying M15 subject is the first landed tree that contains the complete Hostra-owned recomposition：
+
+```text
+pinned Hostra
+→ HOSTRA_SUBCMD LoomRealm Desktop plain Node process
+→ Hostra RPC Window lifecycle
+→ Hostra-owned BrowserWindow
+→ LoomRealm Control/Data/Content physical services
+→ existing Main/RuntimeHosting/Runner
+→ existing M13 presentation
+→ same M14 game
+```
+
+Record the exact commit SHA and pinned Hostra version/source identity after that implementation lands。Any later change to M15 physical behavior、Hostra pin、qualification harness/workflow or consumed M10–M14 behavior creates a new qualification subject。
+
+The previous direct-Electron implementation is not the current qualification subject。
+
+---
+
+## 2. Required Current Evidence
 
 | Gate | Evidence | Status |
 | --- | --- | --- |
-| Existing milestone prerequisite | `npm run test:m14` on the same tree | **PASS locally** |
-| M15 boundary and producer input | `npm run test:m15:desktop` | **PASS locally (8/8)** |
-| Real Electron vertical | `npm run test:m15:electron` | **PASS locally (2/2)** |
-| Canonical aggregate | `npm run test:m15` | **PASS locally** |
-| Exact Essentials v21.1 Electron source | `npm run test:m15:essentials-local -- <source>` | **PASS locally** |
-| Hosted Node 24 | dedicated M15 workflow, same subject | **PENDING** |
+| Existing milestone prerequisite | current `npm run test:m14` on same tree | **required** |
 | Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING** |
+| M15 boundary/build | no direct LoomRealm Electron ownership + Hostra boundary checks | **PENDING RECOMPOSITION** |
+| Real Hostra vertical | pinned Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PENDING RECOMPOSITION** |
+| Input/reload/reconnect/lifecycle | production Hostra Window path | **PENDING RECOMPOSITION** |
+| Canonical aggregate | `npm run test:m15` | **PENDING RECOMPOSITION** |
+| Hosted qualification | dedicated M15 workflow, same qualification subject | **PENDING RECOMPOSITION** |
 | Formal M15 closure | all rows above PASS for one subject | **PENDING** |
 
-## Local evidence — 2026-09-11
+`getHostState/getAllWindows` may be used by qualification to observe that the Window is actually Hostra-owned；they are not production startup authority/currentness mechanisms。
 
-Environment:
+---
+
+## 3. Historical Standalone Electron Evidence — 2026-09-11
+
+The following evidence remains useful as regression/migration evidence for LoomRealm internals, but **does not satisfy final Hostra-owned M15 closure**。
+
+Historical environment：
 
 ```text
 Windows
@@ -34,43 +69,49 @@ npm 10.9.0
 Electron 44.3.0
 ```
 
-`npm run test:m15` completed successfully in 167.7 seconds. Because that aggregate begins with the unchanged `npm run test:m14`, the result covers the complete historical M10–M14 qualification chain, package regression/build/pack checks, real Chromium M14 projection, M15 boundary/input evidence and the real Electron lifecycle vertical on one working tree.
+Historical `npm run test:m15` completed successfully in 167.7 seconds and exercised：
 
-The Electron vertical observed the canonical map, trusted ArrowRight movement and blocking, rejection of synthetic keyboard input, fresh-document reload projection, same-generation Data reconnect after deterministic physical socket loss, resistance to post-bootstrap `fetch`/`WebSocket` replacement and normal application shutdown. The producer test additionally covers synthetic Pointer rejection, chorded pointer transitions, standard Gamepad threshold transitions, fresh local Gamepad identity and focus/visibility unavailability.
+```text
+checked-in deterministic M14 fixture
+real direct Electron BrowserWindow
+trusted ArrowRight movement + blocking
+synthetic keyboard rejection
+fresh-document reload projection
+same-generation Data reconnect
+post-bootstrap fetch/WebSocket replacement resistance
+normal direct-Electron application shutdown
+Pointer/Gamepad producer behavior
+```
 
-The strengthened M15 physical evidence directly observes:
+Observed historical lifecycle evidence included：
 
 ```text
 Renderer replacement:
-    two distinct hashed Renderer identities across reload
+    distinct Renderer identities across reload
 
 Data reconnect:
-    current candidate retirement caused by deterministic physical socket destruction
-    → fresh candidate prepare / prepared / current
-    → unchanged subsystem generation and data profile
-    → presentation and trusted keyboard input resume
-
-Browser input producer:
-    production createDesktopRendererInputSource running inside Electron Chromium
-    → OS-trusted Pointer primary/secondary chord on Windows (Playwright trusted pointer on hosted Linux)
-    → synthetic Pointer rejected
-    → standard Gamepad polling/threshold/fresh reconnect identity
-    → unavailable → fresh State baseline → available lifecycle ordering
+    physical pair retirement
+    → fresh prepare / prepared / current
+    → unchanged subsystem generation/data profile
+    → presentation/input resume
 
 Shutdown:
-    ordinary BrowserWindow close
+    BrowserWindow close
     → Main settled
     → Renderer Control closed
     → Data Broker closed
     → Content service closed
-    → product closed
-    → captured Hostra Runner PID absent
-    → former Content loopback port refuses connections
+    → Runner PID absent
+    → former Content loopback port refused connections
 ```
 
-## Exact-source Electron evidence — 2026-09-11
+This evidence demonstrates that M10–M14 seams and the Desktop adapters worked in a real Chromium/Electron environment。It is a migration oracle only because LoomRealm itself owned Electron/BrowserWindow in that subject。
 
-The repository-portable M15 E2E uses the checked-in deterministic M14 fixture. It must not be described as original Essentials artwork. A separate local gate now consumes the actual third-party source corpus without checking those bytes into this repository:
+---
+
+## 4. Historical Exact-source Evidence — 2026-09-11
+
+The previous direct-Electron exact-source gate consumed the actual third-party source corpus without checking those bytes into the repository：
 
 ```text
 command: npm run test:m15:essentials-local -- .local/m14-essentials/source.zip
@@ -83,25 +124,123 @@ viewport: 640x480
 non-black map pixels: PASS
 real player sprite pixels: PASS
 trusted ArrowRight changed the player direction frame: PASS
-screenshot: artifacts/m15-essentials-v21.1-electron.png
-local gate duration: 146.3 seconds
 ```
 
-The product executes the frozen `@loomrealm-game/map` TypeScript business implementation. The Essentials v21.1 Ruby scripts are imported and classified as source material but are not executed by the Node Hostra Runner; claiming otherwise would misstate the M14/M15 architecture.
+The product executes the frozen `@loomrealm-game/map` TypeScript business implementation。Essentials Ruby scripts are imported/classified source material and are not executed by the Node Runner。
 
-## Implemented qualification surface
+This exact-source evidence remains relevant to M14/content compatibility, but final M15 product closure must re-establish the required visible/gameplay evidence through the Hostra-owned Window path。
 
-The canonical gate owns evidence for the checked-in Hostra-ready Essentials example, Electron `process.execPath` Runner in run-as-node mode, the existing Runtime Control and Desktop Data/Content owners, secure same-origin BrowserWindow composition, isolated one-shot preload handoff, Main-World M13 presentation, trusted DOM input mapping, reload, same-generation Data reconnect, primitive-capture resistance and normal owner-chain shutdown.
+---
 
-The boundary suite mechanically rejects the frozen architectural escapes, including executable selection in the launch manifest, insecure BrowserWindow preferences, generic Electron exposure, CORS/file-origin expansion, renderer-internal imports, application Data over settlement IPC and new generic host/registry/recovery abstractions.
+## 5. Current Boundary Evidence Required
 
-## Formal closure rule
+The new M15 subject must mechanically prove：
 
-M15 may be changed to **Closed** only after this record identifies one landed qualification subject and records:
+```text
+Hostra is actual Electron/BrowserWindow owner
+LoomRealm Desktop is actual HOSTRA_SUBCMD Node child
+apps/desktop production source does not import Electron
+apps/desktop does not create BrowserWindow or own app.quit
+Hostra source/runtime is not patched for LoomRealm
+Hostra RPC carries only Window/lifecycle operations
+Hostra types do not leak into platform-ports/Main/Renderer/game packages
+Renderer Control uses LoomRealm loopback physical carrier
+Data settlement is separate from Data application
+M9 Broker remains sole Data candidate/current owner
+Content/M13/M14 logical paths remain unchanged
+business code does not require Hostra ambient electronAPI
+no generic Hostra/Window/Document/Connection/Recovery abstraction appears only for E2E
+```
+
+Capability separation does not require a generic transport/server framework；small concrete adapters/listeners are preferred。
+
+---
+
+## 6. Current Runtime Evidence Required
+
+The Hostra-owned vertical must directly observe：
+
+```text
+startup:
+    pinned Hostra ready
+    → Hostra starts LoomRealm HOSTRA_SUBCMD
+    → LoomRealm PREPARE/Main/Runner ready
+    → Hostra RPC openWindow
+    → Hostra-owned page displays canonical M14 map
+
+input:
+    trusted ArrowRight
+    → same M10 path
+    → (10,8) → (11,8)
+    → second Right blocked
+
+reload:
+    same Hostra windowId
+    → fresh Renderer identity
+    → unchanged Main/Runner/Subsystem generation/game state
+    → fresh Control/Data/Content document material
+    → current projection/input resumes
+
+reconnect:
+    same-generation physical Data loss
+    → DataAuthority retained
+    → existing Broker fresh pair/current
+    → fresh Renderer acquire
+    → presentation resumes
+
+shutdown/failure:
+    user Hostra Window close
+    programmatic closeWindow
+    Main/Runner fatal
+    Hostra RPC terminal/host shutdown
+    → one LoomRealm cancellation owner chain
+    → finally-like Control/Data/Content cleanup
+    → no orphan Runner/LoomRealm child/listener/socket
+```
+
+Hostra CDP may be used for observation and Playwright input。CDP is test observation only, never LoomRealm production communication。
+
+---
+
+## 7. Canonical Gate
+
+The unique closure command remains：
+
+```text
+npm run test:m15
+```
+
+Final composition must be：
+
+```text
+npm run test:m14
+→ M15 boundary/build checks
+→ pinned Hostra full E2E
+→ input/reload/reconnect/lifecycle evidence
+```
+
+The old standalone Electron gate may remain temporarily during migration, but once the Hostra vertical is qualified it must no longer be the canonical M15 closure owner。
+
+---
+
+## 8. Formal Closure Rule
+
+M15 may be changed to **Closed** only when this record identifies one current Hostra recomposition qualification subject and records：
 
 ```text
 M14 = formally Closed
-+ local npm run test:m15 = PASS
-+ hosted Node 24 npm run test:m15 = PASS
++ exact pinned Hostra identity
++ local/current npm run test:m15 = PASS
++ hosted npm run test:m15 = PASS
++ Hostra-owned E2E/lifecycle evidence = PASS
 → M15 Closed
+```
+
+Until then the precise state is：
+
+```text
+M10–M14 logical/business contracts   frozen
+historical standalone Electron M15   implemented + locally qualified
+M15 Hostra physical composition      recomposition pending
+formal M15 milestone                 pending
 ```
