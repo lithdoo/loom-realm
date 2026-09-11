@@ -28,26 +28,27 @@ test("production Desktop input source runs in a real focused Electron Renderer",
   assert.equal((await changes(page)).length, beforeSynthetic);
 
   await page.evaluate(() => {
-    globalThis.__rawPointers = [];
-    for (const name of ["pointerdown", "pointerup"]) {
-      addEventListener(name, (event) => globalThis.__rawPointers.push({
+    globalThis.__rawKeys = [];
+    for (const name of ["keydown", "keyup"]) {
+      addEventListener(name, (event) => globalThis.__rawKeys.push({
         type: event.type,
         trusted: event.isTrusted,
-        pointerType: event.pointerType,
-        buttons: event.buttons,
+        code: event.code,
+        repeat: event.repeat,
       }));
     }
   });
-  await page.mouse.click(100, 80, { button: "left" });
-  await page.waitForFunction(() => globalThis.__m15Input.changes.filter(({ channel, kind }) => channel === "pointer.event" && kind === "event").length >= 2);
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => globalThis.__m15Input.changes.filter(({ channel, kind }) => channel === "keyboard.event" && kind === "event").length >= 2);
 
-  const pointer = (await changes(page)).filter(({ channel, kind }) => channel === "pointer.event" && kind === "event");
-  assert.deepEqual(pointer.map(({ payload }) => [payload.action, payload.button]), [["down", "primary"], ["up", "primary"]]);
-  assert.equal(pointer.every(({ payload }) => payload.pointer.pointerId === 1), true);
-  assert.deepEqual(pointer.map(({ payload }) => payload.pointer.buttons), [["primary"], []]);
-  assert.deepEqual(await page.evaluate(() => globalThis.__rawPointers), [
-    { type: "pointerdown", trusted: true, pointerType: "mouse", buttons: 1 },
-    { type: "pointerup", trusted: true, pointerType: "mouse", buttons: 0 },
+  const keyboard = (await changes(page)).filter(({ channel, kind }) => channel === "keyboard.event" && kind === "event");
+  assert.deepEqual(keyboard.map(({ payload }) => [payload.action, payload.code, payload.repeat]), [
+    ["down", "ArrowRight", false],
+    ["up", "ArrowRight", false],
+  ]);
+  assert.deepEqual(await page.evaluate(() => globalThis.__rawKeys), [
+    { type: "keydown", trusted: true, code: "ArrowRight", repeat: false },
+    { type: "keyup", trusted: true, code: "ArrowRight", repeat: false },
   ]);
 
   await page.evaluate(() => globalThis.__m15Input.setPad(0));
