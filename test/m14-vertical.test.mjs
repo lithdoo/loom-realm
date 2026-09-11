@@ -210,8 +210,15 @@ test("map view clears full state and delayed same-resource decode paints only la
     const tileset = { namespace: "resource.Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
     view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [{ x: 0, y: 0, z: 0, tileId: 384 }] });
     view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [{ x: 1, y: 0, z: 0, tileId: 385 }] });
-    release(); await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
     const context = view.shadowRoot.querySelector("canvas").getContext("2d");
+    const deadline = performance.now() + 5_000;
+    while (true) {
+      const pixel = context.getImageData(37, 5, 1, 1).data;
+      if (pixel[0] === 40 && pixel[1] === 80 && pixel[2] === 220 && pixel[3] === 255) break;
+      if (performance.now() >= deadline) throw new Error("Timed out waiting for latest map paint");
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
     const stale = [...context.getImageData(5, 5, 1, 1).data]; const latest = [...context.getImageData(37, 5, 1, 1).data];
     view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [] });
     const cleared = [...context.getImageData(37, 5, 1, 1).data];
