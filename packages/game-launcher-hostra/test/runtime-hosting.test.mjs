@@ -59,6 +59,7 @@ test("Runner environment uses the exact allowlist and reserved bootstrap", () =>
     NODE_OPTIONS: "--inspect",
     NODE_PATH: "secret",
     HOSTRA_RPC_TOKEN: "secret",
+    ELECTRON_RUN_AS_NODE: "parent-controlled-value",
   }, "bootstrap");
   assert.equal(environment.PATH, "path");
   assert.equal(environment.TEMP, "temp");
@@ -66,6 +67,7 @@ test("Runner environment uses the exact allowlist and reserved bootstrap", () =>
   assert.equal(environment.NODE_OPTIONS, undefined);
   assert.equal(environment.NODE_PATH, undefined);
   assert.equal(environment.HOSTRA_RPC_TOKEN, undefined);
+  assert.equal(environment.ELECTRON_RUN_AS_NODE, undefined);
 });
 
 test("RuntimeHosting launches the package Runner, acquires once, and observes actual exit", async (t) => {

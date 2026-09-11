@@ -1,6 +1,6 @@
 # `@loomrealm/desktop` Physical Platform Composition
 
-> 状态：M9 Data + M12 Content **Implemented / Qualified**（2026-09-08）；M15 Full Desktop E2E **Implementation Frozen / Preimplementation Closed**
+> 状态：M9 Data + M12 Content **Implemented / Qualified**（2026-09-08）；M15 Full Desktop E2E **Implemented / Locally Qualified**（2026-09-11）。正式关闭仍由 `doc/30-implementation/m15-qualification.md` 拥有，并等待 M14 正式关闭以及托管 Node 24 M15 证据。
 
 This private workspace owns the M9 session-scoped Desktop `DataConnectionBroker`, two-sided loopback Data WebSocket relay, finite buffering policy and current Node-side deterministic Renderer `RendererDataBinding` realization.
 
@@ -44,4 +44,12 @@ npm run test:m9
 npm run test:m12
 ```
 
-M15 implementation adds the frozen repository gate `npm run test:m15` defined by M15/05.
+M15 implementation provides the frozen repository gate `npm run test:m15` defined by M15/05.
+
+Exact Pokémon Essentials v21.1 source qualification is intentionally local because the third-party corpus is not checked into this repository:
+
+```powershell
+npm run test:m15:essentials-local -- <path-to-Essentials-v21.1.zip-or-directory>
+```
+
+This gate imports the supplied source through the production v21.1 importer, launches the same Electron/Hostra product against the imported FSDB, rejects an all-black map canvas, proves the real player sprite and a trusted ArrowRight direction-frame change, and writes `artifacts/m15-essentials-v21.1-electron.png`.

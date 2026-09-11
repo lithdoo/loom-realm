@@ -14,6 +14,10 @@
     "./resource-client": {
       "types": "./dist/internal/resource-client.d.ts",
       "import": "./dist/internal/resource-client.js"
+    },
+    "./web-presentation": {
+      "types": "./dist/web-presentation.d.ts",
+      "import": "./dist/web-presentation.js"
     }
   },
   "files": ["dist", "README.md"],

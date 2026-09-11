@@ -56,6 +56,8 @@ test("package keeps the frozen dependency and authority boundary", async () => {
   ).join("\n");
   assert.equal(source.includes("@loomrealm/main"), false);
   assert.equal(source.includes("@loomrealm/runtime-control"), false);
-  assert.equal(source.includes("electron"), false);
+  assert.doesNotMatch(source, /from\s+["']electron["']/);
+  assert.match(source, /process\.versions\.electron/);
+  assert.match(source, /ELECTRON_RUN_AS_NODE/);
   assert.equal(source.includes("HOSTRA_RPC"), false);
 });

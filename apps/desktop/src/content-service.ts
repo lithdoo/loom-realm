@@ -67,18 +67,45 @@ export interface DesktopContentServiceOptions {
   readonly port?: number;
   readonly maxBodyBytes?: number;
   readonly maxConcurrentRequests?: number;
+  readonly trustedShell?: {
+    readonly entryScript: Uint8Array;
+  };
 }
 
 export interface DesktopContentService {
   readonly server: Server;
   readonly origin: URL;
   readonly view: PreparedDesktopContentView;
+  readonly shell: URL | null;
   createGrant(options: {
     readonly permissions: readonly DesktopContentPermission[];
     readonly expiresAtUnixMs: number;
   }): DesktopContentGrant;
+  revokeGrant(grant: DesktopContentGrant): void;
   access(grant: DesktopContentGrant): DesktopContentAccess;
   close(): Promise<void>;
+}
+
+const DESKTOP_SHELL_PATH = "/_loomrealm/desktop/";
+const DESKTOP_ENTRY_PATH = "/_loomrealm/desktop/renderer.js";
+const DESKTOP_SHELL_HTML = Buffer.from(`<!doctype html>
+<html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://127.0.0.1:*; object-src 'none'; base-uri 'none'"><script type="module" src="${DESKTOP_ENTRY_PATH}"></script></head><body></body></html>`, "utf8");
+
+function serveTrustedShell(
+  req: IncomingMessage,
+  res: ServerResponse,
+  shell: DesktopContentServiceOptions["trustedShell"],
+): boolean {
+  if (shell === undefined || (req.url !== DESKTOP_SHELL_PATH && req.url !== DESKTOP_ENTRY_PATH)) return false;
+  if (req.method !== "GET" && req.method !== "HEAD") { problem(res, "CONTENT_METHOD_NOT_ALLOWED", true); return true; }
+  const body = req.url === DESKTOP_SHELL_PATH ? DESKTOP_SHELL_HTML : Buffer.from(shell.entryScript);
+  res.statusCode = 200;
+  res.setHeader("Content-Type", req.url === DESKTOP_SHELL_PATH ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8");
+  res.setHeader("Content-Length", body.byteLength);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.end(req.method === "HEAD" ? undefined : body);
+  return true;
 }
 
 const views = new WeakMap<object, PreparedDesktopContentViewState>();
@@ -352,11 +379,16 @@ export async function createDesktopContentService(options: DesktopContentService
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new TypeError("Invalid Content service port");
   const maxBodyBytes = validLimit(options.maxBodyBytes, DEFAULT_MAX_BODY_BYTES);
   const maxConcurrentRequests = validLimit(options.maxConcurrentRequests, DEFAULT_MAX_CONCURRENT_REQUESTS);
+  const trustedShell = options.trustedShell;
+  if (trustedShell !== undefined && (trustedShell === null || typeof trustedShell !== "object" || !(trustedShell.entryScript instanceof Uint8Array))) {
+    throw new TypeError("Invalid trusted Desktop shell");
+  }
   const grants = new Map<string, DesktopContentGrant>();
   let active = 0;
 
   const server = createServer((req, res) => {
     req.resume();
+    if (serveTrustedShell(req, res, trustedShell)) return;
     void (async () => {
       if (req.method !== "GET" && req.method !== "HEAD") return problem(res, "CONTENT_METHOD_NOT_ALLOWED", true);
       let route: Route | null;
@@ -427,6 +459,7 @@ export async function createDesktopContentService(options: DesktopContentService
     server,
     origin,
     view: publicView,
+    shell: trustedShell === undefined ? null : new URL(DESKTOP_SHELL_PATH, origin),
     createGrant(grantOptions: { readonly permissions: readonly DesktopContentPermission[]; readonly expiresAtUnixMs: number }): DesktopContentGrant {
       if (grantOptions === null || typeof grantOptions !== "object" || !Array.isArray(grantOptions.permissions) || grantOptions.permissions.length === 0 || grantOptions.permissions.some((permission) => !validPermission(permission)) || !Number.isSafeInteger(grantOptions.expiresAtUnixMs) || grantOptions.expiresAtUnixMs <= 0) {
         throw new TypeError("Invalid Content grant");
@@ -443,6 +476,9 @@ export async function createDesktopContentService(options: DesktopContentService
     access(grant: DesktopContentGrant): DesktopContentAccess {
       if (grants.get(grant?.token) !== grant) throw new TypeError("Unknown Content grant");
       return Object.freeze({ origin: new URL(origin), installationId: grant.installationId, token: grant.token });
+    },
+    revokeGrant(grant: DesktopContentGrant): void {
+      if (grants.get(grant?.token) === grant) grants.delete(grant.token);
     },
     close() {
       closing ??= (async () => {

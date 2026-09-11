@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
 
 const output = new URL("../fixtures/", import.meta.url);
@@ -59,3 +59,29 @@ await writeFile(new URL("resources/m14_player.png", output), png(128, 128, (x, y
   const edge = x % 32 < 3 || x % 32 > 28 || y % 32 < 3 || y % 32 > 28;
   return edge ? [20, 20, 20, 255] : base;
 }));
+
+const installation = new URL("../", import.meta.url);
+const fsdb = new URL("../[FSDB]essentials-v21.1/", import.meta.url);
+await rm(fsdb, { recursive: true, force: true });
+const directories = [
+  "[struct]Map/",
+  "[struct]Tileset/",
+  "[resource]Graphics/Tilesets/",
+  "[resource]Graphics/Characters/",
+  "[resource]Presentation/map/",
+  "[resource]Presentation/essentials/",
+];
+await Promise.all(directories.map((directory) => mkdir(new URL(directory, fsdb), { recursive: true })));
+await Promise.all([
+  writeFile(new URL("[struct]Map/.info.meta", fsdb), "{}\n"),
+  writeFile(new URL("[struct]Map/1.json", fsdb), `${JSON.stringify(fixture.records["struct.Map/1"])}\n`),
+  writeFile(new URL("[struct]Tileset/.info.meta", fsdb), "{}\n"),
+  writeFile(new URL("[struct]Tileset/1.json", fsdb), `${JSON.stringify(fixture.records["struct.Tileset/1"])}\n`),
+  writeFile(new URL("[resource]Graphics/.desc.meta", fsdb), "M15 canonical game resources.\n"),
+  writeFile(new URL("[resource]Graphics/Tilesets/m14_tileset.png", fsdb), await readFile(new URL("resources/m14_tileset.png", output))),
+  writeFile(new URL("[resource]Graphics/Characters/m14_player.png", fsdb), await readFile(new URL("resources/m14_player.png", output))),
+  writeFile(new URL("[resource]Presentation/.desc.meta", fsdb), "M15 trusted presentation resources.\n"),
+  writeFile(new URL("[resource]Presentation/map/map.css.css", fsdb), await readFile(new URL("../../game-libs/map/browser/map.css", installation))),
+  writeFile(new URL("[resource]Presentation/map/map.browser.js.js", fsdb), await readFile(new URL("../../game-libs/map/browser/map.browser.js", installation))),
+  writeFile(new URL("[resource]Presentation/essentials/page.css.css", fsdb), await readFile(new URL("presentation.css", installation))),
+]);

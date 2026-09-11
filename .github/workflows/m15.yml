@@ -1,0 +1,43 @@
+name: M15 Desktop full E2E qualification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [24]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install Chromium and Electron system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run M15 canonical closure gate
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          xvfb-run -a npm run test:m15 | tee artifacts/m15-desktop-node-${{ matrix.node }}.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m15-desktop-node-${{ matrix.node }}
+          path: artifacts/m15-desktop-node-${{ matrix.node }}.tap
+          if-no-files-found: error

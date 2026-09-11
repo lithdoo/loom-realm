@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "subsystems": [
+    {
+      "key": "map",
+      "module": "subsystems/map.mjs"
+    }
+  ]
+}

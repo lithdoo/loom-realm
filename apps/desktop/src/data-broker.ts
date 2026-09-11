@@ -38,10 +38,17 @@ interface CandidateIdentity {
   readonly dataProfile: string;
 }
 
+export interface DesktopRendererCandidateBinding {
+  prepare(candidateId: string, endpoint: string, tuple: { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: string }, signal: AbortSignal): Promise<void>;
+  commit(candidateId: string, tuple: { readonly subsystemKey: string; readonly generation: number; readonly dataProfile: string }): boolean;
+  revoke(candidateId: string): void;
+  close(): void;
+}
+
 interface Candidate extends CandidateIdentity {
   readonly candidateId: string;
   readonly provisioner: HostraRuntimeDataProvisioner;
-  readonly renderer: DesktopRendererDataBinding;
+  readonly renderer: DesktopRendererCandidateBinding;
   readonly controller: AbortController;
   readonly completion: Deferred<boolean>;
   physical: DesktopDataWebSocketPair | null;
@@ -57,6 +64,15 @@ interface Slot {
 export interface DesktopDataBrokerOptions {
   readonly bufferPolicy?: DataBufferPolicy;
   readonly candidateId?: () => string;
+  readonly observeCandidate?: (event: Readonly<{
+    type: "preparing" | "physical" | "prepared" | "current" | "retired";
+    candidateId: string;
+    subsystemKey: string;
+    generation: number;
+    dataProfile: string;
+    rendererPort?: number;
+    runnerPort?: number;
+  }>) => void;
 }
 
 export class DesktopDataConnectionBroker {
@@ -68,10 +84,11 @@ export class DesktopDataConnectionBroker {
 
   private authority: DataConnectionAuthorityView | null = null;
   private readonly provisioners = new WeakMap<HostedRuntime, HostraRuntimeDataProvisioner>();
-  private readonly renderers = new Map<string, DesktopRendererDataBinding>();
+  private readonly renderers = new Map<string, DesktopRendererCandidateBinding>();
   private readonly slots = new Map<string, Slot>();
   private readonly policy: DataBufferPolicy;
   private readonly mintCandidateId: () => string;
+  private readonly observeCandidate: NonNullable<DesktopDataBrokerOptions["observeCandidate"]>;
   private closed = false;
 
   constructor(options: DesktopDataBrokerOptions = {}) {
@@ -83,6 +100,7 @@ export class DesktopDataConnectionBroker {
       throw new TypeError("Invalid Desktop Data buffer policy");
     }
     this.mintCandidateId = options.candidateId ?? (() => randomBytes(24).toString("base64url"));
+    this.observeCandidate = options.observeCandidate ?? (() => {});
     this.sink = Object.freeze({
       replace: (view: DataConnectionAuthorityView | null) => this.replace(view),
     });
@@ -107,7 +125,30 @@ export class DesktopDataConnectionBroker {
       }
       this.scheduleReconcile();
     }
+    if (!(renderer instanceof DesktopRendererDataBinding)) {
+      throw new TypeError("Renderer token is bound to a BrowserWindow");
+    }
     return renderer.binding;
+  }
+
+  attachWindowRenderer(
+    rendererControlToken: string,
+    renderer: DesktopRendererCandidateBinding,
+  ): void {
+    if (typeof rendererControlToken !== "string" || rendererControlToken.length === 0 ||
+      renderer === null || typeof renderer !== "object" || typeof renderer.prepare !== "function" ||
+      typeof renderer.commit !== "function" || typeof renderer.revoke !== "function" || typeof renderer.close !== "function") {
+      throw new TypeError("Invalid Window Renderer Data binding");
+    }
+    if (this.closed) throw new Error("Desktop Data broker closed");
+    const previous = this.renderers.get(rendererControlToken);
+    if (previous !== undefined && previous !== renderer) previous.close();
+    this.renderers.set(rendererControlToken, renderer);
+    for (const [token, stale] of this.renderers) {
+      if (token === rendererControlToken || token === this.authority?.rendererControlToken) continue;
+      stale.close(); this.renderers.delete(token);
+    }
+    this.scheduleReconcile();
   }
 
   requestCandidate(subsystemKey: string): Promise<boolean> {
@@ -140,6 +181,7 @@ export class DesktopDataConnectionBroker {
       state: "preparing",
     };
     slot.pending = candidate;
+    this.observe(candidate, "preparing");
     void this.prepareCandidate(slot, candidate);
     return completion.promise;
   }
@@ -215,6 +257,10 @@ export class DesktopDataConnectionBroker {
         (cause) => this.onPhysicalFailure(slot, candidate, cause),
       );
       candidate.physical = physical;
+      this.observe(candidate, "physical", {
+        rendererPort: Number(new URL(physical.rendererEndpoint).port),
+        runnerPort: Number(new URL(physical.runnerEndpoint).port),
+      });
       if (slot.pending !== candidate || !this.authorized(candidate) || candidate.controller.signal.aborted) {
         physical.dispose();
         this.disposePending(slot, candidate);
@@ -241,6 +287,7 @@ export class DesktopDataConnectionBroker {
         physical.prepared,
       ]);
       candidate.state = "prepared";
+      this.observe(candidate, "prepared");
       this.enqueue(slot, () => this.install(slot, candidate));
     } catch {
       this.enqueue(slot, () => this.disposePending(slot, candidate));
@@ -266,6 +313,7 @@ export class DesktopDataConnectionBroker {
     slot.pending = null;
     slot.current = candidate;
     candidate.state = "current";
+    this.observe(candidate, "current");
     const tuple = {
       subsystemKey: candidate.subsystemKey,
       generation: candidate.generation,
@@ -321,6 +369,7 @@ export class DesktopDataConnectionBroker {
       return;
     }
     candidate.state = "retired";
+    this.observe(candidate, "retired");
     candidate.controller.abort(new Error("Data Connection retired"));
     this.cleanupRetired(candidate);
     candidate.completion.resolve(false);
@@ -336,6 +385,19 @@ export class DesktopDataConnectionBroker {
   private enqueue(slot: Slot, operation: () => void): void {
     const next = slot.tail.then(operation, operation);
     slot.tail = next.then(() => undefined, () => undefined);
+  }
+
+  private observe(candidate: CandidateIdentity & { readonly candidateId: string }, type: "preparing" | "physical" | "prepared" | "current" | "retired", physical: { rendererPort: number; runnerPort: number } | null = null): void {
+    try {
+      this.observeCandidate(Object.freeze({
+        type,
+        candidateId: candidate.candidateId,
+        subsystemKey: candidate.subsystemKey,
+        generation: candidate.generation,
+        dataProfile: candidate.dataProfile,
+        ...(physical ?? {}),
+      }));
+    } catch {}
   }
 
   close(): void {

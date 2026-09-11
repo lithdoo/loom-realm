@@ -31,6 +31,8 @@ const ENV_ALLOWLIST = [
   "WINDIR",
 ] as const;
 
+const ELECTRON_RUN_AS_NODE_ENV_KEY = "ELECTRON_RUN_AS_NODE";
+
 interface Deferred<T> {
   readonly promise: Promise<T>;
   resolve(value: T): void;
@@ -82,6 +84,9 @@ export function buildRunnerEnvironment(
   }
   environment[BOOTSTRAP_ENV_KEY] = encodedBootstrap;
   if (encodedContentAccess !== undefined) environment[CONTENT_ACCESS_ENV_KEY] = encodedContentAccess;
+  if (typeof process.versions.electron === "string") {
+    environment[ELECTRON_RUN_AS_NODE_ENV_KEY] = "1";
+  }
   return environment;
 }
 

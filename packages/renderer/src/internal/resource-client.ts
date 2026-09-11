@@ -46,6 +46,8 @@ export function createRendererResourceClient(access: RendererContentAccess, life
   try { origin = new URL(access.origin); } catch { throw new TypeError("Invalid Renderer Content origin"); }
   if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash) throw new TypeError("Invalid Renderer Content origin");
   const base = new URL(`_lr/v1/games/${encodeURIComponent(access.installationId)}/resources/`, origin);
+  const NativeURL = URL;
+  const trustedFetch = globalThis.fetch.bind(globalThis);
   const cache = new Map<string, { readonly bytes: Uint8Array; readonly mime: string; readonly contentVersion: string }>();
 
   return Object.freeze({
@@ -67,7 +69,7 @@ export function createRendererResourceClient(access: RendererContentAccess, life
         localSignal?.addEventListener("abort", cancel, { once: true });
         try {
           const path = `${encodeURIComponent(namespace)}/${parts.map(encodeURIComponent).join("/")}`;
-          const response = await fetch(new URL(path, base), { headers: { Authorization: `Bearer ${access.token}` }, signal: controller.signal });
+          const response = await trustedFetch(new NativeURL(path, base), { headers: { Authorization: `Bearer ${access.token}` }, signal: controller.signal });
           if (!response.ok) throw mapStatus(response.status);
           const actual = response.headers.get("x-loom-content-version");
           const mime = response.headers.get("content-type");

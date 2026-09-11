@@ -61,3 +61,21 @@ test("expected version, hierarchical routing, and immutable cache identity are e
   await assert.rejects(client.resource("resource.images", "other", v1), (error) => error.code === "conflict");
   await assert.rejects(client.resource("resource.images", "missing", v2), (error) => error.code === "not-found");
 });
+
+test("client captures native fetch before business globals can be replaced", async (t) => {
+  const f = await fixture(); t.after(() => f.close());
+  const client = createRendererResourceClient(
+    { origin: f.origin, installationId: "installation", token: "renderer_token" },
+    new AbortController().signal,
+  );
+  const nativeFetch = globalThis.fetch;
+  let intercepted = 0;
+  globalThis.fetch = async () => { intercepted++; throw new Error("business fetch replacement"); };
+  try {
+    const resource = await client.resource("resource.images", "captured", version(bodies.get("v1")));
+    assert.deepEqual([...resource.bytes], [1, 2, 3]);
+    assert.equal(intercepted, 0);
+  } finally {
+    globalThis.fetch = nativeFetch;
+  }
+});
