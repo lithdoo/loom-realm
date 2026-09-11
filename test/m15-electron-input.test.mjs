@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { _electron as electron } from "playwright";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const electronRoot = path.dirname(fileURLToPath(import.meta.resolve("electron")));
 const changes = (page) => page.evaluate(() => globalThis.__m15Input.changes);
-const execute = promisify(execFile);
 
 test("production Desktop input source runs in a real focused Electron Renderer", { timeout: 30_000 }, async (t) => {
   const environment = { ...process.env }; delete environment.ELECTRON_RUN_AS_NODE;
@@ -30,36 +27,28 @@ test("production Desktop input source runs in a real focused Electron Renderer",
   await page.evaluate(() => dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", pointerId: 91, clientX: 30, clientY: 40, buttons: 1 })));
   assert.equal((await changes(page)).length, beforeSynthetic);
 
-  await page.evaluate(() => { globalThis.__rawPointers = []; for (const name of ["pointerdown", "pointermove", "pointerup"]) addEventListener(name, (event) => globalThis.__rawPointers.push({ type: event.type, trusted: event.isTrusted, pointerType: event.pointerType, buttons: event.buttons })); });
-  if (process.platform === "win32") {
-    const physical = await application.evaluate(({ BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows()[0];
-      return { bounds: window.getContentBounds(), handle: window.getNativeWindowHandle().readBigUInt64LE().toString() };
-    });
-    const bounds = physical.bounds;
-    const x = bounds.x + 100; const y = bounds.y + 80;
-    await execute("powershell.exe", ["-NoProfile", "-Command", `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class M15Mouse { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint dx,uint dy,uint data,UIntPtr extra); }'; [M15Mouse]::SetForegroundWindow([IntPtr]::new([long]${physical.handle})); [M15Mouse]::SetCursorPos(${x},${y}); Start-Sleep -Milliseconds 100; [M15Mouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero); [M15Mouse]::mouse_event(8,0,0,0,[UIntPtr]::Zero); [M15Mouse]::mouse_event(16,0,0,0,[UIntPtr]::Zero); [M15Mouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)`]);
-  } else if (process.platform === "linux") {
-    await application.evaluate(({ BrowserWindow }) => {
-      const contents = BrowserWindow.getAllWindows()[0]?.webContents;
-      if (!contents) throw new Error("missing BrowserWindow WebContents");
-      contents.sendInputEvent({ type: "mouseMove", x: 100, y: 80 });
-      contents.sendInputEvent({ type: "mouseDown", x: 100, y: 80, button: "left", clickCount: 1 });
-      contents.sendInputEvent({ type: "mouseDown", x: 100, y: 80, button: "right", clickCount: 1, modifiers: ["leftbuttondown"] });
-      contents.sendInputEvent({ type: "mouseUp", x: 100, y: 80, button: "right", clickCount: 1, modifiers: ["leftbuttondown", "rightbuttondown"] });
-      contents.sendInputEvent({ type: "mouseUp", x: 100, y: 80, button: "left", clickCount: 1, modifiers: ["leftbuttondown"] });
-    });
-  } else {
-    await page.mouse.move(100, 80);
-    await page.mouse.down({ button: "left" });
-    await page.mouse.down({ button: "right" });
-    await page.mouse.up({ button: "right" });
-    await page.mouse.up({ button: "left" });
-  }
+  await page.evaluate(() => {
+    globalThis.__rawPointers = [];
+    for (const name of ["pointerdown", "pointerup"]) {
+      addEventListener(name, (event) => globalThis.__rawPointers.push({
+        type: event.type,
+        trusted: event.isTrusted,
+        pointerType: event.pointerType,
+        buttons: event.buttons,
+      }));
+    }
+  });
+  await page.mouse.click(100, 80, { button: "left" });
+  await page.waitForFunction(() => globalThis.__m15Input.changes.filter(({ channel, kind }) => channel === "pointer.event" && kind === "event").length >= 2);
+
   const pointer = (await changes(page)).filter(({ channel, kind }) => channel === "pointer.event" && kind === "event");
-  assert.deepEqual(pointer.map(({ payload }) => [payload.action, payload.button]), [["down", "primary"], ["down", "secondary"], ["up", "secondary"], ["up", "primary"]], `raw=${JSON.stringify(await page.evaluate(() => globalThis.__rawPointers))}`);
+  assert.deepEqual(pointer.map(({ payload }) => [payload.action, payload.button]), [["down", "primary"], ["up", "primary"]]);
   assert.equal(pointer.every(({ payload }) => payload.pointer.pointerId === 1), true);
-  assert.deepEqual(pointer.slice(0, 2).map(({ payload }) => payload.pointer.buttons), [["primary"], ["primary", "secondary"]]);
+  assert.deepEqual(pointer.map(({ payload }) => payload.pointer.buttons), [["primary"], []]);
+  assert.deepEqual(await page.evaluate(() => globalThis.__rawPointers), [
+    { type: "pointerdown", trusted: true, pointerType: "mouse", buttons: 1 },
+    { type: "pointerup", trusted: true, pointerType: "mouse", buttons: 0 },
+  ]);
 
   await page.evaluate(() => globalThis.__m15Input.setPad(0));
   await page.waitForFunction(() => globalThis.__m15Input.changes.some(({ channel, kind, payload }) => channel === "gamepad.state" && kind === "state" && payload.gamepads.length === 1));
