@@ -9,7 +9,7 @@ Current physical subject is defined by：
 ```text
 ADR 0034
 + M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
-+ LoomRealm implementation 659e56e9a65cac40b786bfc04e351bdc5f808c00
++ LoomRealm implementation fd1df5872d4310e268857e700a067f4e0b9e75d1
 ```
 
 The previous direct-Electron implementation is not the current qualification subject。
@@ -41,8 +41,8 @@ M14 formally Closed
 The current qualifying implementation subject is：
 
 ```text
-659e56e9a65cac40b786bfc04e351bdc5f808c00
-fix: close M15 qualification gaps
+fd1df5872d4310e268857e700a067f4e0b9e75d1
+ci: configure frozen Hostra sandbox
 ```
 
 It is the landed LoomRealm tree containing：
@@ -338,7 +338,7 @@ former Content/listener port refuses connections after process exit
 
 The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。Accordingly the local Windows run proves final-window Hostra/process convergence but cannot claim the complete signal-handler cleanup ordering。The hosted Ubuntu M15 workflow must prove the full `window.closed` / `host.shuttingDown` / SIGTERM ordering and all terminal cleanup events before this row becomes PASS。
 
-The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。Until hosted evidence targets implementation subject `659e56e9a65cac40b786bfc04e351bdc5f808c00`, formal M15 remains pending。
+The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。Until hosted evidence targets implementation subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`, formal M15 remains pending。
 
 ---
 

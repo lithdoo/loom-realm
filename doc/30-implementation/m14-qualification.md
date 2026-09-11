@@ -13,8 +13,8 @@ This file is the **single source of truth** for M14 formal qualification status 
 Current qualification subject：
 
 ```text
-659e56e9a65cac40b786bfc04e351bdc5f808c00
-fix: close M15 qualification gaps
+fd1df5872d4310e268857e700a067f4e0b9e75d1
+ci: configure frozen Hostra sandbox
 ```
 
 A qualification subject is the last commit that changes M14 executable behavior or qualification inputs. Later docs-only commits that only record/explain evidence do **not** create a new subject.
@@ -146,14 +146,14 @@ full canonical CI: PASS
 
 Historical local canonical runtime recorded Node `22.12.0`, npm `10.9.0`, with `npm run test:m14` PASS.
 
-This evidence demonstrates that the pre-hardening implementation was healthy, but it does **not** satisfy hosted Node 20/24 evidence for subject `659e56e9a65cac40b786bfc04e351bdc5f808c00`.
+This evidence demonstrates that the pre-hardening implementation was healthy, but it does **not** satisfy hosted Node 20/24 evidence for subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`.
 
 ## Formal closure rule
 
 M14 may return to `Closed` only when this record contains hosted Node 20 and Node 24 PASS evidence for the current subject in addition to the current exact-local PASS：
 
 ```text
-subject 659e56e9a65cac40b786bfc04e351bdc5f808c00
+subject fd1df5872d4310e268857e700a067f4e0b9e75d1
 +
 exact v21.1 local PASS
 +
