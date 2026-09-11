@@ -2,9 +2,9 @@
 
 > 层级：实施计划 / Package Boundary  
 > 状态：Active Design / Tracking  
-> 稳定程度：M12/M13 closed；M14 workspace taxonomy/consumer implementation frozen；M15 package boundary preimplementation frozen  
+> 稳定程度：M12/M13 closed；M14 workspace taxonomy/consumer implementation frozen；M15 Hostra physical recomposition frozen for execution  
 > 主要定义：protocol、role、platform、Content、Web presentation、framework/game-library/example package ownership/dependency boundary  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)  
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
 
 ```text
@@ -18,13 +18,11 @@ Protocol boundary
 
 只有真实 ownership/consumer 需要时才 materialize package；不为了 symmetry 预建 framework。
 
-Milestone live status由 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md) 汇总；M14 formal evidence/status只由 [`m14-qualification.md`](./m14-qualification.md) 维护。本文只定义 package ownership与允许 materialize 的 seam。
-
 ---
 
 ## 1. Dependency Shape
 
-Core framework 继续位于 `packages/*`。M14 新增独立 consumer layer：
+Core framework继续位于 `packages/*`。M14 consumer layer：
 
 ```text
 examples/*
@@ -36,7 +34,7 @@ public LoomRealm author APIs
 packages/*
 ```
 
-Business Runtime Definition 只依赖公开 author surface；business browser presentation 是独立 execution side，不获得 Main/Renderer Store/Data/physical Content credential authority。
+Business Runtime Definition只依赖公开 author surface；business browser presentation不获得 Main/Renderer Store/Data/physical Content credential authority。
 
 ---
 
@@ -56,7 +54,7 @@ examples/
     → private
 
 apps/
-    platform hosts/products
+    concrete product/platform compositions
 
 tools/
     development/import/compatibility tooling
@@ -75,52 +73,18 @@ apps/* → reusable concrete business implementation
 
 ## 3. Renderer / Presentation Ownership
 
-`@loomrealm/renderer` keeps existing Control/Data/Input/Render role implementation plus trusted M13 Web presentation mechanics：
+`@loomrealm/renderer` keeps existing Control/Data/Input/Render role implementation plus trusted M13 mechanics。
 
-```text
-current Control topology + current Store commit
-→ presentation reevaluation
-→ thin Web Projector
-→ managed DOM
-→ context/data delivery
-→ PresentationResourceClient façade
-```
-
-M13 does not root-export Store、PresentationState、component registry、AssetManager、dynamic loader、layer manager or service locator。
-
-M15 introduces **no new package**。The first production Desktop consumer only promotes the already-existing M13 mechanics through exactly one narrow trusted subpath：
+M15 introduces **no new framework package**。Production Desktop consumer继续使用：
 
 ```text
 @loomrealm/renderer/web-presentation
-```
-
-That subpath may expose only the concrete M13 product-composition surface already required by the real consumer：
-
-```text
-WebPresentationConfigV1 validation/preparation
-bootstrapWebPresentation
-attachRendererPresentation
-WebProjector
-```
-
-Existing private Content resource integration remains the separate trusted subpath：
-
-```text
 @loomrealm/renderer/resource-client
 ```
 
-Neither subpath is a business author API。They do not justify root-exporting Renderer Store/currentness，and they do not create `PresentationHost`、`PresentationRuntime`、`RendererServices` or a new browser framework。
+`web-presentation`只暴露已有 M13 product-composition mechanics，不建立 PresentationHost/PresentationRuntime/RendererServices。
 
-Business Web presentation may own：
-
-```text
-Custom Elements
-Shadow DOM / Canvas / WebGL
-private decoded resource cache
-layout/position/private animation
-```
-
-but cannot mutate LoomRealm authority through DOM reverse-sync or obtain private Renderer physical credentials/capabilities。
+Business presentation可拥有 Custom Elements、Shadow DOM/Canvas/WebGL、private decoded cache和 layout，但不能获得 Renderer physical credentials或 reverse-sync authority。
 
 ---
 
@@ -131,12 +95,6 @@ Reusable map：
 ```text
 game-libs/map
 package: @loomrealm-game/map
-
-Runtime root
-    → @loomrealm/subsystem public author API only
-
-browser side
-    → map-owned Custom Elements / classic JS / CSS
 ```
 
 Concrete game：
@@ -146,79 +104,97 @@ examples/essentials-v21.1
 private=true
 ```
 
-There is no `packages/map` / `@loomrealm/map`。
+不存在 `packages/map` / `@loomrealm/map`。M14 selective consumer representation仍由实际行为驱动，不建立 universal map schema/projection registry。
 
-M14 does not define a normalized/universal map schema。Its Runtime Content representation is selective and consumer-driven：
+---
+
+## 5. Browser Artifact / Resource Placement
+
+Map browser JS/CSS通过 prepared Content + `WebPresentationConfigV1`进入 Window。
+
+Renderer trusted ResourceClient拥有 private Content bearer/origin binding；M15 concrete browser composition必须在 business bootstrap前绑定需要的 native request primitives，而不是暴露 BrowserPrimitiveRegistry或动态重新读取 business-replaceable globals。
+
+---
+
+## 6. M15 Hostra Composition Placement
+
+ADR 0034 不新增 workspace/package层。
+
+Canonical ownership：
 
 ```text
-RMXP/Essentials source semantics
-→ existing importer/lossless representation
-→ selective consumer projection
-→ Map/{id}: tileset_id,width,height,data
-→ Tileset/{id}: id,tileset_name,passages,priorities
-→ prepared Content
-→ ContentClient
-→ @loomrealm-game/map
+external lithdoo/hostra executable/package
+    starts
+        ↓ HOSTRA_SUBCMD
+apps/desktop plain Node product
+    consumes Hostra only through concrete JSON-RPC adapter
+        ↓
+existing LoomRealm packages
 ```
 
-Unused Event/MapInfo/MapMetadata/Color/Tone/AudioFile/other RMXP graph facts remain in importer/lossless evidence until a real behavior consumes them。Do not create a generic recursive consumer model or projection registry。
+Hostra RPC adapter必须留在 `apps/desktop`，因为目前只有一个真实 consumer。
 
-Runtime does not depend on Ruby Marshal、`.rxdata` parser、decoder instances/wrappers or tooling filesystem layout。
-
----
-
-## 5. Browser Artifact Placement
-
-M13 Config loads classic scripts/styles from prepared Content。Map package therefore exposes stable browser subpaths：
+不得为了这次迁移新增：
 
 ```text
-@loomrealm-game/map/browser/map.browser.js
-@loomrealm-game/map/browser/map.css
+@loomrealm/hostra
+@loomrealm/desktop-host
+HostraPlatformPort
+HostraClient interface package
+Window/Document lifecycle package
+generic WebSocket transport package
 ```
 
-These are game-library package seams；consumers do not reach into `dist/` or source layout。
+`@loomrealm/game-launcher-hostra` 保持现有 **Hostra launch profile** package：
 
-M15 Desktop product similarly must consume Renderer presentation through `@loomrealm/renderer/web-presentation` rather than `packages/renderer/dist/internal/*` reach-through。
+```text
+game.json + launch.hostra.json
+→ PREPARE
+→ HostraLaunchPlan / LogicalGameBootstrap
+→ Node Runner realization
+```
 
-Map browser JS/CSS enter the Window through prepared Content + `WebPresentationConfigV1`。Do not add ESM graph loader、PluginManager、component registry or package-wide browser Host abstraction。
-
----
-
-## 6. Resource Placement
-
-Runtime derives logical visible-resource identities and captures `contentVersion` through `ContentClient.resource()`。Render carries only logical identity/version。Business WC obtains bytes through M13 `PresentationResourceClient`。
-
-Renderer's trusted `@loomrealm/renderer/resource-client` owns the private Content bearer/origin binding；M15's same-Main-World physical realization must bind its native browser request primitive before business JS rather than exposing or dynamically rediscovering that capability through business-replaceable globals。
-
-Runtime/Renderer duplicate reads are accepted for M14。No Content metadata/HEAD author API、AssetManager、BrowserPrimitiveRegistry or URL escape hatch is introduced for theoretical efficiency。
+它与 external `lithdoo/hostra` shell是两个不同 owner，不因为名字相同而合并 package或职责。
 
 ---
 
-## 7. Workspace Rule
+## 7. Migration Package Rule
 
-Root workspaces before the M14 additions were：
+迁移前半段允许 legacy direct-Electron code暂存为 isolated regression oracle；因此早期 slice只要求：
+
+```text
+canonical Hostra entry/path does not import Electron
+canonical path does not own BrowserWindow/app.quit
+```
+
+当 Hostra vertical qualification完成后，final replacement必须：
+
+```text
+delete dead direct-Electron production ownership
+remove canonical Electron runtime/start dependency from apps/desktop
+repository-wide apps/desktop production Electron ownership/import = FAIL
+```
+
+不要为了满足最终 cleanliness gate而在 replacement vertical可工作前提前删除 migration oracle。
+
+---
+
+## 8. Workspace Rule
+
+Root workspaces：
 
 ```text
 packages/*
 apps/*
-```
-
-M14 adds：
-
-```text
 game-libs/*
 examples/*
 ```
 
-`tools/*` remains development tooling。After adding workspaces, root scripts must not rely on accidental `--workspaces` expansion to define milestone meaning；use explicit package targets where needed。
-
-M15 does not add a workspace category or a new shared package solely for Electron composition。
-
-Do not add workspace orchestration framework merely to manage these categories。
+`tools/*` remains development tooling。M15不增加 workspace category或 shared package。
 
 ---
 
-## 8. Qualification Ownership
+## 9. Qualification Ownership
 
 ```text
 M11 Renderer
@@ -230,74 +206,56 @@ M12
 M13
     Config/bootstrap + Projector + real Chromium
 
-M14 importer/preparation
-    RMXP source → selective Map/Tileset consumer records/resources
-
-M14 game-lib
-    ContentClient consumer + map business/browser presentation
-
-M14 example
-    concrete Game Entry/config/page composition
-
-M14 CI/local
-    deterministic author-owned fixture + exact external Essentials compatibility evidence
+M14
+    importer/preparation + game-lib + example consumer evidence
 
 M15
-    full Desktop physical E2E
-    + production use of @loomrealm/renderer/web-presentation
+    pinned Hostra shell
+    → HOSTRA_SUBCMD apps/desktop
+    → Hostra-owned BrowserWindow
+    → full Desktop physical E2E/lifecycle
 
 M16
-    PWA Worker Runtime hosting
+    PWA Worker Runtime
 
 M17
-    full PWA E2E / cross-platform equivalence
+    PWA full E2E / equivalence
 ```
 
-M14 repository qualification may use a small test-owned composition harness；it does not justify MiniDesktopHost/MapHost production abstractions。M15 product code replacing that reach-through with the narrow Renderer subpath is the real-consumer justification for materializing the subpath。
+M15 qualification必须证明 Hostra是实际 Electron/Window owner，但这不正当化 production HostraManager/WindowManager abstraction。
 
 ---
 
-## 9. Explicitly Rejected Abstractions
+## 10. Explicitly Rejected Abstractions
 
-Unless real correctness/consumer evidence reopens them：
+除真实 correctness/consumer evidence外，不建立：
 
 ```text
-@loomrealm/map
-packages/map
+@loomrealm/map / packages/map
 Generic GameLibrary framework/registry
 MapNormalizedV1 / universal map schema
-MapBundle / MapRepository / MapManager
-ConsumerProjector<T> / ProjectionRegistry
-Generic Repository / StorageProvider
 AssetManager / decoder/plugin registry
 UniversalRendererServices
-Presentation DSL / SceneGraph / layer manager
-LoomRealm component library
-Dynamic Component / ESM loader
 PresentationHost / PresentationRuntime
 BrowserPrimitiveRegistry
-second projection tree/topology authority
-public RenderNodeIdentity service
-Window-global service locator
-runtime importer dependency
 MiniDesktopHost / MapHost / GameRuntimeHost
+HostraManager / HostraSession / HostraPlatformPort
+WindowRegistry / WindowLifecycleManager / WindowSession
+DocumentManager / BootstrapCoordinator
+ConnectionManager / TransportRegistry / RecoveryManager
 ```
 
 ---
 
-## 10. Milestone Placement
-
-Package architecture只记录 materialization route，不拥有 live milestone closure：
+## 11. Milestone Placement
 
 ```text
 M12 Content
 → M13 Web Presentation
 → M14 Map Game Library + First Real Game
-→ M15 Desktop Full E2E
+→ M15 Hostra-owned Desktop Full E2E
 → M16 PWA Runtime
 → M17 PWA Full E2E / Equivalence
 ```
 
-Current summary见 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md)。截至本次复核，M14 implementation complete / requalification pending，M15 Implementation Frozen / Preimplementation Closed；这些 live status 不在本文独立维护为 dated Closed checkmark。
-
-M14 is the first framework consumer proof。M15–M17 materialize physical platform integration without moving game business back into framework/apps or redesigning M14 map semantics。
+Live status由 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md) 汇总。M15 current physical SSOT为 ADR 0034 + root recomposition plan，不再以 historical direct-Electron package boundary为准。
