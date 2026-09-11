@@ -36,11 +36,13 @@ Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 - [Web Presentation API v1](./doc/15-contracts/web-presentation-api-v1.md)
 - [ADR 0031：M13 Web Presentation Frozen Design](./doc/decisions/0031-business-owned-web-component-projection.md)
 - [ADR 0032：Game Library / Example Boundary](./doc/decisions/0032-game-library-example-boundary.md)
-- [ADR 0033：Electron-hosted Hostra Runner](./doc/decisions/0033-electron-hostra-run-as-node.md)
+- [ADR 0033：historical direct-Electron Runner compatibility](./doc/decisions/0033-electron-hostra-run-as-node.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [M14 qualification record](./doc/30-implementation/m14-qualification.md)
-- [M15 Desktop product composition](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
+- [M15 Hostra Desktop Recomposition Plan](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
+- [M15 Desktop product composition retained intent](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
 - [M15 qualification closure](./M15_05_QUALIFICATION_CLOSURE.md)
+- [M15 qualification record](./doc/30-implementation/m15-qualification.md)
 - [Package Architecture](./doc/30-implementation/package-architecture.md)
 - [Map Game Library design](./doc/20-modules/loom-map/README.md)
 
@@ -54,14 +56,16 @@ M11 Render Replication                      ✅ Closed
 M12 Content                                 ✅ Closed 2026-09-08
 M13 Web Presentation                        ✅ Closed 2026-09-09
 M14 Map Game Library + First Real Game      ⚠️ Implementation complete / requalification pending
-M15 Desktop full E2E                        🔒 Implementation Frozen / Preimplementation Closed
+M15 Desktop full E2E                        🔄 Hostra physical recomposition / plan frozen
 M16 PWA Runtime                             pending
 M17 PWA full E2E                            pending
 ```
 
 M14 design/implementation is frozen；the current exact-local gate is recorded PASS, while hosted Node 20/24 evidence for the current qualification subject remains pending. Formal status is owned only by [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md).
 
-M15 design is fully frozen and may proceed directly to implementation. M15 formal closure still requires M14 formal closure plus repeatable `npm run test:m15` evidence.
+M15 的 Main/Data/Renderer/Input/Presentation/game logical intent保持冻结；此前 standalone Electron implementation 作为历史/迁移证据保留，但 canonical physical host 已纠正为 **Hostra-owned Electron/BrowserWindow + `HOSTRA_SUBCMD` LoomRealm Node process**。当前 physical SSOT 是 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)。
+
+M15 formal closure仍要求 M14 formal closure + pinned Hostra identity + repeatable Hostra-owned `npm run test:m15` evidence。
 
 Last formally closed milestone gate：
 
@@ -99,13 +103,15 @@ Business Web Component
     read-only projection consumer
     Shadow DOM / Canvas / WebGL / private presentation owner
 
+Hostra
+    Electron / BrowserWindow / direct subprocess host
+
 Platform / apps/*
-    executable hosting
-    Control/Data/Content physical binding
-    Renderer Window composition
+    LoomRealm Control/Data/Content physical composition
+    external-host adapters
 ```
 
-一个 authority只允许一个 owner；DOM/Platform physical ownership不产生第二份 application authority。
+一个 authority只允许一个 owner；DOM/Platform/Host physical ownership不产生第二份 application authority。
 
 ---
 
@@ -210,66 +216,57 @@ M10–M13 不因这次 repository/business ownership调整而 reopen。M14 forma
 
 ---
 
-## M15 Desktop full E2E — frozen / ready for implementation
+## M15 Desktop full E2E — Hostra physical recomposition
 
-M15 只把 M14 test-owned physical composition 换成真实 Desktop product composition：
+M15 当前 canonical product topology：
 
 ```text
-checked-in Hostra-ready M14 installation
-→ Hostra PREPARE in Electron main
-→ Main
-→ process.execPath + host-synthesized ELECTRON_RUN_AS_NODE real Hostra Runner child
-→ existing Runtime Control WebSocket
-→ Desktop Data Broker
-→ exact same-origin 127.0.0.1 Desktop shell + existing Content API
-→ secure Electron BrowserWindow
-→ isolated preload one-shot handoff
-→ Main-World trusted Renderer
-→ captured authority-bearing native browser primitives
-→ Renderer Control MessagePort
-→ browser-native Data WebSocket
-→ real DOM Keyboard/Pointer/Gamepad input
+pinned Hostra
+├─ Electron app
+├─ Hostra preload/RPC
+├─ BrowserWindow owner
+└─ HOSTRA_SUBCMD
+     ↓
+LoomRealm Desktop plain Node process
+├─ Hostra RPC adapter
+├─ Hostra PREPARE / Main / existing RuntimeHosting / Runner
+├─ Desktop Data Broker
+├─ Desktop Content + trusted shell
+├─ Renderer Control loopback WS
+└─ Data settlement loopback WS
+     ↓
+Hostra-owned BrowserWindow
+→ trusted Renderer
+→ real DOM input
 → existing M13 presentation
-→ same M14 game/map business
+→ same M14 game
 ```
 
-Frozen Desktop physical boundary：
+Frozen current boundaries：
 
 ```text
-Hostra Runner executable = canonical process.execPath
-Electron Runner child env += ELECTRON_RUN_AS_NODE=1
-supported Electron build keeps runAsNode fuse enabled
-
-BrowserWindow:
-    nodeIntegration=false
-    contextIsolation=true
-    sandbox=true
-    webSecurity=true
-
-browser origin:
-    app-owned shell + existing /_lr/v1 Content API
-    = exact same http://127.0.0.1:<port> origin
-
-trusted Main World before business JS:
-    private bootstrap consumed
-    native fetch/WebSocket/ports/input primitives captured/bound
+Hostra is sole Electron/BrowserWindow owner
+apps/desktop production source does not import Electron
+Hostra RPC is Window/lifecycle control only
+Control / Data settlement / Data application / Content remain separated
+M9 Broker remains sole Data candidate/current owner
+trusted Renderer captures private browser primitives before business bootstrap
+reload = same Hostra Window + fresh Renderer logical participant
+shutdown/fatal/Hostra terminal converge through one Main cancellation owner chain
 ```
 
-M15不使用 configurable Node executable、UtilityProcess second RuntimeHosting、`file://` shell、Content CORS/OPTIONS expansion、preload Content proxy或 BrowserPrimitiveRegistry。Preload不暴露 generic Electron API；Control、Data settlement、Data application和 Content保持分离；DOM input直接映射到既有 M10 `RendererInputSource`。
+Implementation does not require generic `HostraManager`、`HostraSession`、Window/Document manager、TransportRegistry、ConnectionManager、RecoveryManager or a generic WebSocket transport package。Only concrete adapters with immediate production consumers are allowed。
 
-M15 production code uses the existing trusted `@loomrealm/renderer/resource-client` plus the single new narrow product subpath `@loomrealm/renderer/web-presentation`；business code仍不能获得 Renderer private authority/credentials。
+Current document ownership：
 
-实施顺序：
+- [M15 Hostra Desktop Recomposition Plan — current physical SSOT](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
+- [M15 / 01 — retained product ownership intent](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
+- [M15 / 02 — retained Renderer/M13/capability constraints](./M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md)
+- [M15 / 03 — retained physical input/lifecycle semantics](./M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)
+- [M15 / 04 — Hostra full E2E evidence intent](./M15_04_DESKTOP_FULL_E2E_VERTICAL.md)
+- [M15 / 05 — current closure rules](./M15_05_QUALIFICATION_CLOSURE.md)
 
-- [M15 / 01 — Desktop Product Composition](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
-- [M15 / 02 — BrowserWindow Renderer Composition](./M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md)
-- [M15 / 03 — Desktop Physical Input and Lifecycle](./M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)
-- [M15 / 04 — Desktop Full E2E Vertical](./M15_04_DESKTOP_FULL_E2E_VERTICAL.md)
-- [M15 / 05 — Qualification Closure](./M15_05_QUALIFICATION_CLOSURE.md)
-
-五份 landing docs 均为 **Implementation Frozen / Preimplementation Closed**。实现阶段可以选择 private function/file names 与 exact app-shell route spelling，但不得重新选择 authority owner、Electron-hosted Hostra mode、same-origin boundary、execution-world placement、Control/Data/Content physical topology、DOM input canonical mapping或 reload/reconnect/shutdown owner chain。
-
-M15 不新增 logical authority、game semantics、component registry、generic host/manager、InputDeviceManager、BrowserPrimitiveRegistry 或第二套 currentness/recovery model。
+Historical standalone Electron evidence remains in [M15 qualification record](./doc/30-implementation/m15-qualification.md) as migration evidence only；final closure must use the pinned Hostra-owned E2E subject。
 
 ---
 
