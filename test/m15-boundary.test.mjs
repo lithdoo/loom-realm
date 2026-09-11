@@ -91,5 +91,8 @@ test("M15 canonical gate runs M14 first and then frozen Hostra", async () => {
   const workflow = await read(".github/workflows/m15.yml");
   assert.match(workflow, /lithdoo\/hostra/u);
   assert.match(workflow, /d863beab3c59c3bd4f271514a228fa8fee0bf5b6/u);
+  assert.match(workflow, /chrome-sandbox/u);
+  assert.match(workflow, /chmod 4755/u);
+  assert.doesNotMatch(workflow, /--no-sandbox|ELECTRON_DISABLE_SANDBOX/u);
   assert.match(workflow, /npm run test:m15/u);
 });

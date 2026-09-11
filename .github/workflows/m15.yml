@@ -36,6 +36,10 @@ jobs:
           npx playwright install --with-deps chromium
           npm ci --prefix .qualification/hostra --no-audit --no-fund
           test -x .qualification/hostra/packages/hostra/electron_bin/electron
+          sandbox=.qualification/hostra/packages/hostra/electron_bin/chrome-sandbox
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
       - name: Run M15 canonical closure gate
         env:
           LOOMREALM_QUALIFICATION_REPORT: "1"
