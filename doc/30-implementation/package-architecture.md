@@ -2,7 +2,7 @@
 
 > 层级：实施计划 / Package Boundary  
 > 状态：Active Design / Tracking  
-> 稳定程度：M12/M13 closed；M14 workspace taxonomy/consumer implementation frozen；M15 Hostra physical recomposition frozen for execution  
+> 稳定程度：M12/M13 closed；M14 workspace taxonomy/consumer implementation frozen；M15 **Implementation Frozen / Preimplementation Closed**  
 > 主要定义：protocol、role、platform、Content、Web presentation、framework/game-library/example package ownership/dependency boundary  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
 > 最近复核：2026-09-11
@@ -132,6 +132,14 @@ apps/desktop plain Node product
 existing LoomRealm packages
 ```
 
+Frozen external host baseline由 M15 physical SSOT拥有：
+
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+```
+
 Hostra RPC adapter必须留在 `apps/desktop`，因为目前只有一个真实 consumer。
 
 不得为了这次迁移新增：
@@ -210,7 +218,7 @@ M14
     importer/preparation + game-lib + example consumer evidence
 
 M15
-    pinned Hostra shell
+    frozen Hostra shell
     → HOSTRA_SUBCMD apps/desktop
     → Hostra-owned BrowserWindow
     → full Desktop physical E2E/lifecycle
@@ -258,4 +266,4 @@ M12 Content
 → M17 PWA Full E2E / Equivalence
 ```
 
-Live status由 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md) 汇总。M15 current physical SSOT为 ADR 0034 + root recomposition plan，不再以 historical direct-Electron package boundary为准。
+Live status由 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md) 汇总。M15 current physical SSOT为 ADR 0034 + root recomposition plan，状态为 **Implementation Frozen / Preimplementation Closed**，可直接实施；不再以 historical direct-Electron package boundary为准。
