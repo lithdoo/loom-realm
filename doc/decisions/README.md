@@ -5,7 +5,7 @@
 > 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
 > 最近复核：2026-09-11
 
-ADR 记录“为什么”；Current 可实现事实以 architecture / formal contract / implementation qualification 为准。**同一个尚未合并的 current design不通过额外 ADR人为制造历史层。**
+ADR记录“为什么”；Current可实现事实以 architecture / formal contract / current milestone SSOT / qualification为准。历史 ADR不得覆盖后续 accepted correction。
 
 ---
 
@@ -44,6 +44,7 @@ ADR 记录“为什么”；Current 可实现事实以 architecture / formal con
 31. [ADR 0031：业务拥有 Web Components，LoomRealm 只投影 Render replica](./0031-business-owned-web-component-projection.md)
 32. [ADR 0032：Framework / Game Library / Example Boundary](./0032-game-library-example-boundary.md)
 33. [ADR 0033：Electron-hosted Hostra Runner uses the current executable in Node mode](./0033-electron-hostra-run-as-node.md)
+34. [ADR 0034：Hostra owns Desktop Electron composition; LoomRealm runs as HOSTRA_SUBCMD](./0034-hostra-owned-desktop-composition.md)
 
 ---
 
@@ -72,49 +73,30 @@ ADR 0023 → ADR 0029
     narrow User Input State convergence correction
 
 ADR 0030
-    M12 Content storage/service/Subsystem/Renderer consumer closure
+    M12 Content current realization
 
 ADR 0031
     M13 Web Presentation current decision
-    → business-owned Custom Elements / thin Renderer projector
-    → Window-level WebPresentationConfigV1
-    → deterministic scoped wire-node → HTMLElement identity
-    → deterministic cross-Subsystem body concatenation without global zIndex semantics
-    → one Web Presentation API v1 with independent context/data receivers
-    → narrow PresentationResourceClient over M12 private ResourceClient
-    → no RenderEvent WC ABI / no generic layer/loader/AssetManager
 
 ADR 0032
     M14 framework / reusable game library / concrete game boundary
-    → packages/* framework
-    → game-libs/* reusable business
-    → examples/* concrete games
-    → no framework-owned map vocabulary/registry
 
 ADR 0033
-    first Electron Hostra consumer physical correction
-    → Runner executable remains canonical process.execPath
-    → Electron Runner child gets host-synthesized ELECTRON_RUN_AS_NODE=1
-    → supported Desktop Electron build keeps runAsNode fuse enabled
+    conditional Electron-composition Runner execution correction
+    → when the trusted RuntimeHosting composition process itself is Electron
+    → canonical process.execPath enters Node mode via host-synthesized ELECTRON_RUN_AS_NODE=1
     → no configurable Node executable / UtilityProcess second RuntimeHosting
+
+ADR 0034
+    canonical M15 outer physical-owner correction
+    → external lithdoo/hostra owns Electron / BrowserWindow / direct subprocess
+    → LoomRealm Desktop runs as plain Node HOSTRA_SUBCMD
+    → LoomRealm RuntimeHosting owns Runner beneath that child
+    → Hostra RPC remains host-control only
+    → direct-Electron M15 topology becomes historical/migration evidence
 ```
 
-ADR 0031不 supersede ADR 0022；M11 Render authority/replication保持 Frozen，M13只是其 physical consumer。
-
-ADR 0033 does not supersede the Hostra Runtime model；it corrects the physical execution mode of the same process executable when the trusted composition process is Electron。Node-hosted Hostra behavior and shared RuntimeHosting/Runtime Control contracts remain unchanged。
-
-Formal sources：
-
-```text
-Hostra Game Launcher / Node Subsystem Runner Profile v1
-→ current Hostra executable/Runner physical contract, including ADR 0033 correction
-
-Web Presentation Config v1
-→ startup JS/CSS / prepared Content / browser ready semantics
-
-Web Presentation API v1
-→ Projector ↔ WC context/data/resource ABI
-```
+ADR0033 remains valid as a conditional RuntimeHosting fact；ADR0034 supersedes only the assumption that canonical M15 LoomRealm Desktop itself is the Electron composition process。
 
 ---
 
@@ -126,10 +108,24 @@ Web Presentation API v1
 ADR 0017 → 0019 → 0020 → 0026
 → Game Package + Hostra/PWA Launcher Profiles
 → Platform Composition / RuntimeHosting
-→ ADR 0033 for the Electron-hosted Hostra physical execution correction
 ```
 
-ADR 0033 remains Hostra/Desktop-specific and does not alter the PWA Worker chain。
+Conditional Electron composition only：
+
+```text
+RuntimeHosting composition process is Electron
+→ ADR 0033
+```
+
+Canonical M15 Desktop：
+
+```text
+ADR 0034
+→ Hostra shell
+→ HOSTRA_SUBCMD LoomRealm Desktop plain Node process
+→ existing Hostra launch-profile RuntimeHosting
+→ Runner
+```
 
 ### Runtime / Frame
 
@@ -166,10 +162,30 @@ ADR 0003
 ```text
 ADR 0032
 → M14 game-libs/map + concrete example
-→ M15 real Desktop product consumer
+→ ADR 0034
+→ M15 Hostra-owned Desktop product
+```
 
-ADR 0033
-→ M15 Electron-hosted Hostra Runner physical execution
+ADR0033 does not define this outer product topology。
+
+---
+
+## Current Formal / Frozen Sources
+
+```text
+Hostra Game Launcher / Node Subsystem Runner Profile v1
+    Runtime PREPARE / Runner / provisioning physical contract
+    ADR0033 applies only when its Electron-composition precondition exists
+
+Web Presentation Config v1
+    startup JS/CSS / prepared Content / browser ready semantics
+
+Web Presentation API v1
+    Projector ↔ WC context/data/resource ABI
+
+M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
+    canonical M15 Hostra-owned physical composition
+    frozen implementation baseline / lifecycle / qualification subject
 ```
 
 ---
@@ -187,7 +203,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-ADR 0033 is an example of a permitted first-implementation correction：the first Electron consumer exposed a real contradiction in the old `process.execPath == ordinary Node executable` assumption，and the correction keeps the scope at the nearest physical owner without adding a new public selection surface。
+ADR0033和ADR0034都是 permitted preimplementation corrections，但作用域不同：前者修正 Electron-process Runner execution；后者修正 M15 outer host ownership。Implementation不得把两者重新合并成“LoomRealm Electron main owns Hostra Runner”的旧模型。
 
 ---
 
@@ -199,8 +215,9 @@ Current readers优先：
 Architecture topic source
 → Current Normative/Frozen Contract
 → Accepted current ADR
+→ current milestone physical SSOT when applicable
 → Module projection
 → implementation plan/tests
 ```
 
-历史 ADR/Git保留演进；旧 shape不得覆盖 Current Contract。
+历史 ADR/Git保留演进；旧 shape不得覆盖 Current Contract 或后续 Accepted correction。
