@@ -1,19 +1,22 @@
 # Hostra Game Launcher / Node Subsystem Runner Profile v1
 
-> 层级：正式契约 / Hostra Platform Profile  
+> 层级：正式契约 / Hostra Launch Profile  
 > 状态：Active / Normative  
 > Profile Version：1  
-> M6 Runtime Slice：Frozen / Implemented / Qualified；Electron embedding corrected by [ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
+> M6 Runtime Slice：Frozen / Implemented / Qualified；conditional Electron-composition execution corrected by [ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)  
 > M8+ Data / M12+ Content slices：Implemented / qualified on their owner milestones  
 > M6 冻结日期：2026-09-02  
 > 依赖：[Game Package v1](./game-package-v1.md)、[Subsystem Control v1](./subsystem-control-protocol-v1.md)、[Runtime Control Profile v1](./runtime-control-profile-v1.md)、[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[ADR 0020](../decisions/0020-game-entry-consumer-boundary.md)  
-> 最近纠错：2026-09-11 — Electron-hosted Hostra keeps `process.execPath` but starts it with host-synthesized `ELECTRON_RUN_AS_NODE=1`
+> 相关：[ADR 0033](../decisions/0033-electron-hostra-run-as-node.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
+> 最近复核：2026-09-11
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
+> **本 Profile 描述 `@loomrealm/game-launcher-hostra` 的 PREPARE + Node Runner contract。它不描述 external `lithdoo/hostra` Electron shell/window manager。Canonical M15 outer composition由 ADR0034 + M15 physical SSOT拥有。**
+
 核心原则：
 
-> **Hostra Launcher 是 Hostra Runtime-product Game Entry consumer。它在任何 Subsystem Runtime side effect 前完成 common Game validation、Hostra executable binding、安全 preflight、immutable HostraLaunchPlan 与 LogicalGameBootstrap。Host-owned Node Runner 是唯一 process entry。**
+> **Hostra Launcher 是 Hostra launch-profile Runtime-product Game Entry consumer。它在任何 Subsystem Runtime side effect 前完成 common Game validation、Hostra executable binding、安全 preflight、immutable HostraLaunchPlan 与 LogicalGameBootstrap。Host-owned Node Runner 是唯一 business Runtime process entry。**
 
 ---
 
@@ -66,7 +69,7 @@ Hostra Launcher PREPARE
         ↓
 PreparedHostraGame
         ↓
-session-scoped HostraPlatform installs plan
+session-scoped composition installs plan
         ↓
 existing Main launch({subsystemKey, bootstrapToken})
         ↓
@@ -112,7 +115,7 @@ interface HostraSubsystemBindingV1 {
 }
 ```
 
-The manifest only selects installation-local Hostra business implementation artifacts。
+The manifest only selects installation-local business implementation artifacts。
 
 MUST NOT configure/replace Host policy：
 
@@ -232,13 +235,13 @@ validate logical module syntax
 → create host-private resolved module fact
 ```
 
-Conceptual M6 resolved fact：
+Conceptual resolved fact：
 
 ```ts
 interface ResolvedHostraSubsystemModuleV1 {
   readonly subsystemKey: string;
   readonly logicalModule: string;
-  readonly physicalModule: string; // Hostra Platform-private
+  readonly physicalModule: string; // launch-profile private
 }
 ```
 
@@ -254,7 +257,7 @@ Installation update/replacement/switch requires a new Session + new PREPARE。Li
 
 ## 8. M6 Node Runtime and Runner Policy
 
-Hostra keeps one trusted executable-selection rule：
+Hostra launch profile keeps one trusted executable-selection rule：
 
 ```text
 Runner executable = canonical process.execPath
@@ -264,18 +267,20 @@ Runner entry = package-owned dist/runner/entry.js
 
 There is no public or manifest-selected Node executable。
 
-Physical start mode is fixed by the current composition process：
+Physical start mode is determined only by the **trusted RuntimeHosting composition process**：
 
 ```text
 ordinary Node composition
     process.execPath RunnerEntry
 
-Electron main composition
+conditional Electron composition (ADR0033)
     host synthesizes ELECTRON_RUN_AS_NODE=1
     process.execPath RunnerEntry
 ```
 
-The Electron branch is the M15 first-consumer correction recorded by ADR 0033。It preserves the same Host-owned Node Runner process model rather than adding a second Electron RuntimeHosting。
+ADR0033 is conditional：it applies only when this RuntimeHosting composition process itself is Electron。It preserves the same Node Runner model rather than adding a second RuntimeHosting。
+
+Canonical M15 under ADR0034 runs this launch profile inside the plain-Node LoomRealm `HOSTRA_SUBCMD` process, so M15 uses the **ordinary Node composition** branch。The external Hostra shell's Electron process is not this RuntimeHosting composition process。
 
 PREPARE MUST statically verify：
 
@@ -286,7 +291,9 @@ POSIX executable access
 package-owned Runner entry canonical regular file
 ```
 
-No Runner/business execution is permitted for this preflight。For an Electron-hosted Desktop product, the selected Electron build additionally MUST keep its `runAsNode` fuse enabled；that product/build capability is proven by the real M15 Electron qualification rather than by spawning a probe process during PREPARE。
+No Runner/business execution is permitted for this preflight。
+
+If a real product uses the conditional Electron composition branch, that product MUST separately qualify its Electron build's `runAsNode` capability；that requirement is not part of canonical M15 qualification after ADR0034。
 
 Frozen Runner policy：
 
@@ -299,7 +306,7 @@ interface HostraRunnerPolicyV1 {
 }
 ```
 
-The values MUST satisfy the existing `runSubsystem` policy domain：
+Values MUST satisfy：
 
 ```text
 helloDeadlineMs             integer in [1, 2_147_483_647]
@@ -308,15 +315,13 @@ terminalCleanupDeadlineMs   integer in [1, 300_000]
 terminationGraceMs          integer in [1, 2_147_483_647]
 ```
 
-Hostra PREPARE validates this domain before any Runtime side effect, so a prepared Runner policy cannot later be rejected by the existing Subsystem host。
+PREPARE validates this domain before any Runtime side effect。
 
 M6 Control protocol versions are fixed：
 
 ```text
 [1]
 ```
-
-No protocol-version configuration surface is introduced。
 
 Product composition MUST ensure：
 
@@ -341,7 +346,7 @@ package-owned Runner entry available
 Runner policy valid
 ```
 
-Conceptual M6 model remains：
+Conceptual model：
 
 ```ts
 interface HostraLaunchPlanV1 {
@@ -353,9 +358,9 @@ interface HostraLaunchPlanV1 {
 }
 ```
 
-`canonicalNodeExecutable` retains its historical field name；its value is the canonical trusted `process.execPath`。In Electron composition the same executable is entered in Node mode by host-owned environment, not by changing this plan shape。
+`canonicalNodeExecutable` retains its historical field name；its value is canonical trusted `process.execPath`。In the conditional Electron branch the same executable enters Node mode through host-owned environment, not by changing plan shape。
 
-Plan MUST be deeply immutable plain data。A frozen `Map` alone is not an immutable representation because `.set()` remains possible。
+Plan MUST be deeply immutable plain data。
 
 Before plan + logical projection are complete：
 
@@ -370,8 +375,6 @@ Ordinary launch MUST NOT re-read Game/manifest or re-resolve selected module pol
 ---
 
 ## 10. LogicalGameBootstrap Projection
-
-M6 Main-facing projection：
 
 ```ts
 interface LogicalGameBootstrap {
@@ -393,7 +396,7 @@ HostraLaunchPlan
 Node/Runner/process material
 ```
 
-Prepared result MUST NOT be released until both HostraLaunchPlan and LogicalGameBootstrap are complete and immutable。
+Prepared result MUST NOT be released until HostraLaunchPlan + LogicalGameBootstrap are complete and immutable。
 
 ---
 
@@ -408,13 +411,7 @@ launch({subsystemKey, bootstrapToken}, signal)
 
 Main MUST NOT pass GameEntry、manifest、module/path、Node flags or Hostra material。
 
-No public `launchId` is required by M6。A Hostra implementation MAY create an internal attempt id for diagnostics, but：
-
-```text
-launchId is not Runtime identity
-launchId is not protocol material
-launchId is not required in RuntimeLaunchRequest
-```
+No public `launchId` is required。Internal attempt ids MAY exist for diagnostics but are not Runtime identity/protocol/request material。
 
 RuntimeHosting owns physical creation facts only；it does not own Frame/Activation/InputTarget/Runtime ready/failure unwind authority。
 
@@ -437,8 +434,6 @@ WS listener MUST be listening before Runner spawn。
 
 Only exact attempt path may upgrade。Wrong paths MUST be rejected without consuming the valid connection slot。
 
-Transport capability is not authentication：
-
 ```text
 WS capability != bootstrapToken != Runtime identity
 ```
@@ -453,14 +448,14 @@ Frozen creation sequence：
 
 ```text
 runnerEnv = strict copied allowlist + Hostra reserved material
-if current process is Electron:
+if trusted RuntimeHosting composition process is Electron:
     runnerEnv.ELECTRON_RUN_AS_NODE = "1"
 child = spawn(process.execPath, [RunnerEntry], shell=false, env=runnerEnv)
 → synchronously install spawn/error/exit observers
 → only then await spawn-or-error
 ```
 
-`ELECTRON_RUN_AS_NODE` is synthesized by Hostra only for the Electron composition case。It is not read from Game/manifest and is not a caller-selectable launch option。
+`ELECTRON_RUN_AS_NODE` MUST NOT come from Game/manifest/caller environment。
 
 Canonical facts：
 
@@ -470,15 +465,10 @@ exit event  = actual process termination authority
 close event = stdio/resource closure diagnostic only
 ```
 
-If `error` occurs before spawn：
+Errors before ownership transfer include：
 
 ```text
 PROCESS_SPAWN_FAILED
-```
-
-If child exits before HostedRuntime ownership transfer：
-
-```text
 PROCESS_EXITED_DURING_BOOTSTRAP
 ```
 
@@ -489,44 +479,42 @@ abort while pending
 → mark attempt abandoned first-wins
 → close WS server
 → force-converge any spawned child
-→ retain internal exit observation until actual exit
+→ retain exit observation until actual exit
 → never return HostedRuntime
 ```
 
-Abort cleanup MUST continue even when the outer Main deadline has already rejected its own wait。No abandoned attempt may leave a listener/live child indefinitely。
+Abort cleanup MUST continue even when outer Main deadline already rejected。No abandoned attempt may leave live listener/child indefinitely。
 
 ---
 
 ## 14. Runtime Control Binding / Ready
 
-Main-side `runtimeControl.acquire(signal)` is single-use：
+`runtimeControl.acquire(signal)` is single-use：
 
 ```text
 first call → wait exact attempt connection → return MessageCarrier
 second call → reject
 ```
 
-Abort before connection closes the listener and rejects acquire。Child exit before acquire rejects acquire。Carrier loss does not permit same-attempt reconnect。
-
-Facts remain distinct：
+Abort before connection closes listener and rejects acquire。Child exit before acquire rejects acquire。Carrier loss does not permit same-attempt reconnect。
 
 ```text
 spawned != connected != identified != ready
 ```
 
-Hostra RuntimeHosting owns spawned/connected；existing Runtime Control/Main own identified/ready。
+RuntimeHosting owns spawned/connected；existing Runtime Control/Main own identified/ready。
 
 ---
 
 ## 15. Runner Bootstrap Context
 
-M6 uses one reserved environment value：
+Reserved M6 environment value：
 
 ```text
 LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP
 ```
 
-Normative M6 envelope：
+Normative envelope：
 
 ```ts
 interface HostraNodeRunnerBootstrapContextV1 {
@@ -554,11 +542,11 @@ Renderer/Data material
 Content bearer
 ```
 
-Runner MUST consume and scrub before business import：
+Runner MUST consume/scrub before business import：
 
 ```text
 copy encoded value to local variable
-→ immediately delete reserved env key from process.env
+→ delete reserved env key from process.env
 → parse/validate/freeze local context
 → only then import business module
 ```
@@ -567,7 +555,7 @@ copy encoded value to local variable
 
 ## 16. Safe Runner Environment
 
-M6 parent-env allowlist remains copy-if-defined only：
+Parent-env allowlist remains copy-if-defined only：
 
 ```text
 PATH
@@ -582,17 +570,15 @@ SystemRoot
 WINDIR
 ```
 
-Host-owned values are then synthesized separately as applicable：
+Host-owned values MAY then be synthesized：
 
 ```text
 LOOMREALM_HOSTRA_RUNNER_BOOTSTRAP
-LOOMREALM_HOSTRA_CONTENT_ACCESS     // M12+ when Content is supplied
-ELECTRON_RUN_AS_NODE=1             // only when current composition process is Electron
+LOOMREALM_HOSTRA_CONTENT_ACCESS     // M12+ when supplied
+ELECTRON_RUN_AS_NODE=1             // conditional Electron RuntimeHosting composition only
 ```
 
-`ELECTRON_RUN_AS_NODE` MUST NOT be inherited from arbitrary parent environment；Hostra decides whether it is required from the current trusted composition runtime。Game/manifest cannot append、remove or override any of these values。
-
-No other parent env is inherited by default, including：
+No arbitrary parent env is inherited by default, including：
 
 ```text
 NODE_OPTIONS
@@ -603,19 +589,23 @@ application credentials
 arbitrary secrets
 ```
 
+External Hostra shell credentials MUST NOT leak merely because canonical M15 LoomRealm Desktop is its `HOSTRA_SUBCMD` child；the launch profile's child env remains this strict allowlist + LoomRealm host-owned values。
+
 ---
 
 ## 17. Host-owned Node Runner — M6 Slice
 
-Only process entry remains the package-owned Runner under the current trusted executable：
+Only process entry remains the package-owned Runner：
 
 ```text
-ordinary Node:
+ordinary Node RuntimeHosting composition:
     process.execPath <package-owned Runner Entry>
 
-Electron-hosted Desktop:
+conditional Electron RuntimeHosting composition (ADR0033):
     ELECTRON_RUN_AS_NODE=1 process.execPath <package-owned Runner Entry>
 ```
+
+Canonical M15 uses the first branch because LoomRealm Desktop is a plain Node `HOSTRA_SUBCMD` under ADR0034。
 
 ```text
 shell = false
@@ -632,7 +622,7 @@ consume/scrub bootstrap
 → convert exact physical .mjs to file URL
 → import exact module once
 → require default export
-→ accept it as SubsystemDefinitionFactory candidate
+→ accept SubsystemDefinitionFactory candidate
 → establish Runtime Control WS MessageCarrier
 → create RuntimeControlBinding + DeadlineScheduler
 → runSubsystem(...)
@@ -654,15 +644,13 @@ have default export
 be accepted as SubsystemDefinitionFactory by @loomrealm/subsystem/host
 ```
 
-Different platforms MAY select different artifacts while preserving the same author/host ABI and business-observable semantics。
+Different platforms MAY select different artifacts while preserving shared author/host ABI and business-observable semantics。
 
 Runner-local module load/ABI failures MAY use bounded diagnostics and nonzero exit；M6 does not require a second Runner→Parent typed-status protocol。
 
 ---
 
 ## 19. WebSocket MessageCarrier
-
-M6 WS adapter semantics：
 
 ```text
 one WS text message = one MessageCarrier string
@@ -709,15 +697,17 @@ subsequent requests
 → join same committed convergence
 ```
 
-Caller abort before commit rejects without starting a new convergence。Caller abort after commit MUST NOT cancel the already-committed convergence。
+Caller abort before commit rejects without starting convergence。Caller abort after commit MUST NOT cancel already-committed convergence。
 
 POSIX/Windows mechanics MAY differ；observable requirement is bounded physical convergence + actual exit fact。No automatic restart in v1。
+
+M15 external Hostra shell may independently signal its direct LoomRealm `HOSTRA_SUBCMD` child；that product-level signal is outside this Profile and must converge through Main/RuntimeHosting rather than directly killing this Runner from Desktop code。
 
 ---
 
 ## 21. M6 Failure Ownership
 
-Parent-observable Hostra failure categories：
+Parent-observable categories：
 
 ```text
 PLATFORM_LAUNCH_MANIFEST_INVALID
@@ -733,7 +723,7 @@ PROCESS_EXITED_DURING_BOOTSTRAP
 PROCESS_TERMINATION_FAILED
 ```
 
-Runner-local diagnostic categories MAY include：
+Runner-local diagnostics MAY include：
 
 ```text
 SUBSYSTEM_MODULE_LOAD_FAILED
@@ -742,7 +732,7 @@ bootstrap validation failure
 Subsystem host fatal failure
 ```
 
-After HostedRuntime ownership transfer, unexpected process exit—including code 0 without Main termination intent—is a physical fact consumed by existing Main Runtime failure authority；Hostra Launcher MUST NOT duplicate that state machine。
+After HostedRuntime ownership transfer, unexpected process exit—including code 0 without Main termination intent—is a physical fact consumed by existing Main Runtime failure authority；Launcher MUST NOT duplicate that state machine。
 
 User-facing material MUST NOT leak bootstrap token、attempt capability、sensitive env、unnecessary physical paths or internal stack。
 
@@ -750,12 +740,10 @@ User-facing material MUST NOT leak bootstrap token、attempt capability、sensit
 
 ## 22. M8+ Platform Provisioning Slice
 
-When M8 implements Subsystem Data, each Runner gains a Host-owned provisioning capability distinct from stdout/stderr、Runtime Control and Data carrier。
-
-Current Hostra realization follows：
+Each Runner gains a Host-owned provisioning capability distinct from stdout/stderr、Runtime Control and Data carrier。
 
 ```text
-Hostra DataConnectionBroker
+Desktop DataConnectionBroker
 → Runner provisioning integration
 → one-time endpoint/ticket for current DataAuthority(S,G,P)
 → target validates own S/G/P
@@ -764,23 +752,23 @@ Hostra DataConnectionBroker
 → SubsystemDataBinding
 ```
 
-Broker/Launcher MUST NOT mint generation/profile。Provisioning failure remains distinct from Runtime/Frame failure unless the owning later contract explicitly says otherwise。
+Broker/Launcher MUST NOT mint generation/profile。Provisioning failure remains distinct from Runtime/Frame failure unless an owning later contract explicitly says otherwise。
 
-This extension reuses the same Runner child/process boundary；it does not change the Electron run-as-node correction。
+This extension reuses the same Runner child/process boundary；it is independent of whether the conditional ADR0033 Electron execution branch is used。
 
 ---
 
 ## 23. M12+ Content Slice
 
-ContentClient/Content bearer integration enters the same Runner only through the M12 Content realization。The Content bearer remains distinct from Runtime bootstrap and Data provisioning material。
+ContentClient/Content bearer integration enters the same Runner only through the M12 Content realization。Content bearer remains distinct from Runtime bootstrap and Data provisioning material。
 
-The Hostra Runner environment MAY contain the dedicated host-generated Content access value required by current M12 implementation；business code receives only the bound `ContentClient` and does not receive the bearer or physical origin/path。
+Runner environment MAY contain the dedicated host-generated Content access value required by current M12 implementation；business code receives only bound `ContentClient` and not bearer/origin/path。
 
 ---
 
-## 24. M6 / Hostra Runtime Conformance
+## 24. Hostra Launch-profile Conformance
 
-At minimum the owner-local Hostra Runtime qualification preserves：
+Owner-local qualification preserves at minimum：
 
 ```text
 Launcher accepts installation root without manual Game Package caller step
@@ -811,36 +799,48 @@ Linux + Windows qualification
 actual packed Runner artifact smoke
 ```
 
-M15 additionally owns the first Electron-hosted qualification：
+Conditional ADR0033 conformance belongs to any product whose **RuntimeHosting composition process is Electron**：
 
 ```text
-current Electron executable used as process.execPath
-runAsNode fuse enabled for the supported build
-Hostra synthesizes ELECTRON_RUN_AS_NODE=1 only for the Runner child
-real child reaches existing Runtime Control ready path
+current Electron executable is process.execPath
+runAsNode capability enabled for that product build
+host synthesizes ELECTRON_RUN_AS_NODE=1 only for exact Runner child
+real child reaches existing Runtime Control path
 real child terminates through existing HostedRuntime/Main owner chain
 ```
 
-The Electron evidence extends physical hosting coverage；it does not create a second Hostra protocol or application conformance suite。
+Canonical M15 does not qualify this branch merely because the external Hostra shell itself is Electron。M15 instead qualifies：
+
+```text
+external pinned Hostra shell
+→ HOSTRA_SUBCMD LoomRealm plain Node product
+→ this Profile's ordinary Node RuntimeHosting branch
+→ Runner
+```
+
+The two evidence subjects must not be conflated。
 
 ---
 
 ## 25. Final Invariants
 
-1. Hostra Launcher owns Hostra Runtime-product Game Entry consumption；
+1. Hostra Launcher owns launch-profile Runtime-product Game Entry consumption；
 2. common Game validation happens inside Launcher PREPARE；
 3. Game/Hostra key sets are exactly equal；
 4. plan + logical projection freeze before Subsystem Runtime side effects；
-5. trusted Runner executable remains canonical `process.execPath`, embedded Node major ≥20；Electron composition enters that executable with host-synthesized `ELECTRON_RUN_AS_NODE=1`；
-6. Main receives no Game/module/path/Node material；
-7. physical module material stays Hostra Platform-private；
-8. Host-owned Runner is the only process entry；
-9. manifest cannot select executable/Runner/argv/env/endpoint/credential；
-10. no public `launchId` is required；
-11. Runtime Control transport capability is not Runtime identity/authentication；
-12. child `exit` is the sole successful stopped physical fact；
-13. launch abort cannot orphan a pending child/listener；
-14. physical termination is idempotent and bounded with force fallback；
-15. no automatic Runtime restart/reconnect；
-16. M8 Data and M12 Content extend the same Runner boundary without changing application authority；
-17. Electron run-as-node support is a Hostra/M15 physical realization requirement, not a Game/manifest configuration surface。
+5. trusted Runner executable remains canonical `process.execPath`, embedded Node major ≥20；
+6. ADR0033 Electron Node mode is conditional on the RuntimeHosting composition process itself being Electron；
+7. canonical M15 under ADR0034 uses ordinary Node RuntimeHosting inside the LoomRealm `HOSTRA_SUBCMD` child；
+8. Main receives no Game/module/path/Node material；
+9. physical module material stays launch-profile private；
+10. package-owned Runner is the only business Runtime process entry；
+11. manifest cannot select executable/Runner/argv/env/endpoint/credential；
+12. no public `launchId` is required；
+13. Runtime Control transport capability is not Runtime identity/authentication；
+14. child `exit` is the sole successful stopped physical fact；
+15. launch abort cannot orphan a pending child/listener；
+16. physical termination is idempotent and bounded with force fallback；
+17. no automatic Runtime restart/reconnect；
+18. M8 Data and M12 Content extend the same Runner boundary without changing application authority；
+19. external Hostra shell Window/RPC/HOSTRA_SUBCMD ownership is outside this Profile and must not be folded into Launcher/Runner contracts；
+20. product-level M15 termination converges through existing Main/RuntimeHosting owner chain and does not add a second Runner kill authority。
