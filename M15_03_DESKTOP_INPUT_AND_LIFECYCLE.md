@@ -1,14 +1,15 @@
 # M15 / 03 — Desktop Physical Input and Lifecycle
 
-> 状态：**Input semantics retained / lifecycle physical ownership recomposed through Hostra**  
+> 状态：**Implementation Frozen / Preimplementation Closed — input semantics retained / lifecycle ownership recomposed through Hostra**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：03  
 > 最近复核：2026-09-11  
 > 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
+> 当前决策：[ADR 0034](doc/decisions/0034-hostra-owned-desktop-composition.md)  
 > 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md)  
 > 依赖：[M10 User Input](M10_05_QUALIFICATION_CLOSURE.md)、[M13 Web Presentation](M13_05_QUALIFICATION_CLOSURE.md)
 
-> **Supersession notice:** Keyboard/Pointer/Gamepad canonical mapping、reload logical semantics、same-generation reconnect 与 single-cancellation ownership继续有效；原 LoomRealm-owned BrowserWindow/Electron exit mechanics 已被 Hostra recomposition supersede。
+> **Supersession notice:** Keyboard/Pointer/Gamepad canonical mapping、reload logical semantics、same-generation reconnect 与 single-cancellation ownership继续有效；原 LoomRealm-owned BrowserWindow/Electron exit mechanics 已被 ADR 0034 supersede。
 
 ---
 
@@ -165,37 +166,48 @@ same-generation Data carrier loss继续是：
 ```text
 carrier lost
 → affected projection freezes/unavailable
+→ same Renderer Control participant remains current
 → Main DataAuthority remains current
-→ existing Broker prepares fresh physical pair
-→ fresh RendererDataBinding.acquire resolves
+→ existing Broker prepares fresh physical Data pair
+→ fresh RendererDataBinding.acquire() resolves
 → current baseline/state converges
 → presentation resumes
 ```
+
+Data-only reconnect MUST NOT retire or replace the Renderer logical participant and MUST NOT mint a fresh Renderer identity。它只替换 Data physical pair；这与 reload 的 fresh Renderer semantics 严格分离。
 
 健康 subsystem 不因另一 subsystem carrier loss被停止。不得增加 retry/backoff/recovery framework。
 
 ## 8. Shutdown Ownership
 
-Hostra owns physical Window/Electron lifetime；LoomRealm owns its own Main cancellation and LoomRealm service cleanup。
+Hostra owns physical Window/Electron/direct-subprocess lifetime；LoomRealm owns its own Main cancellation and LoomRealm service cleanup。Terminal trigger ordering由 ADR 0034 + current recomposition SSOT拥有，不得假设 `window.closed` 一定先于 Hostra signal。
 
-User closes product Window：
+以下 trigger 全部进入同一个 idempotent termination owner path：
 
 ```text
-Hostra emits window.closed(windowId)
-→ stop accepting fresh LoomRealm document activity
-→ DOM source/document lifetime retires
+window.closed(windowId)
+SIGTERM / SIGINT
+host.shuttingDown
+Hostra RPC terminal
+programmatic product close
+Main / Runner fatal
+startup partial failure
+        ↓
+beginTermination(reason)
+        ↓
+stop accepting fresh LoomRealm document activity
+→ retire DOM/document physical lifetime
 → abort AbortSignal passed to runMain(...)
-→ await Main settlement
+→ await/preserve Main settlement
 → existing Main/RuntimeHosting converges Runner
 → ALWAYS close LoomRealm Renderer Control / Data Broker / Content/listeners
 → close Hostra RPC adapter
 → LoomRealm Node process exits
-→ Hostra follows its normal HOSTRA_SUBCMD shutdown behavior
 ```
 
-Programmatic product close first performs best-effort Hostra `closeWindow(windowId)`，then converges through the same local cleanup path。
+Programmatic product close may first perform best-effort Hostra `closeWindow(windowId)`，but local cleanup MUST NOT depend on a later `window.closed` callback。
 
-Main rejection / Runner fatal MUST preserve the original logical failure but still execute finally-like physical cleanup。Hostra RPC terminal/`host.shuttingDown` is product-terminal for M15 and uses the same cancellation path；no Hostra reconnect/recovery authority。
+Frozen Hostra baseline may send `SIGTERM` to `HOSTRA_SUBCMD` during final-window shutdown；signal handling therefore participates in this same path。Main rejection / Runner fatal MUST preserve the original logical failure but still execute finally-like physical cleanup。No Hostra reconnect/recovery authority is added。
 
 ## 9. Failure Containment
 
@@ -205,7 +217,7 @@ At minimum：
 synthetic DOM input            → ignored
 input source bootstrap failure → producer unavailable; Control/Data remain logically independent
 presentation/bootstrap failure → Renderer/document-local; no Store/Main rollback
-Data carrier failure           → no DataAuthority removal
+Data carrier failure           → no DataAuthority removal / no Renderer replacement
 Renderer failure               → no implicit Runtime/Frame failure
 Runner terminal                → existing RuntimeHosting/Main semantics
 Hostra RPC terminal            → product shutdown, not state recovery/recreation
@@ -225,7 +237,7 @@ extra recovery state machine
 
 ## 10. Completion
 
-M15/03 retained intent is complete when：
+M15/03 is frozen and implementation-ready when the implementation proves：
 
 ```text
 trusted real KeyboardEvent → exact M10 path
@@ -234,7 +246,9 @@ Pointer viewport/id/chord semantics hold
 standard Gamepad mapping/threshold/fresh identity hold
 focus/visibility loss cannot leak stale physical input
 reload = same Hostra Window + fresh Renderer/source + same game
-same-generation reconnect converges through existing Broker/acquire path
-Window close / Main fatal / Hostra terminal converge through one runMain cancellation path
+same-generation Data-only reconnect = same Renderer identity + fresh Data physical pair
+window/signal/RPC/fatal/startup terminal triggers converge through one termination path
 all LoomRealm DOM/rAF/network physical lifetime is closed
 ```
+
+No further M15 input/lifecycle design pass is required before implementation。
