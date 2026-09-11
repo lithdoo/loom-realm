@@ -2,7 +2,7 @@
 
 > 层级：模块设计  
 > 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Implementation complete / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**  
-> 当前 M15 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
+> 当前 M15 physical SSOT：[M15 Hostra Desktop Recomposition Plan](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
 > 决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)  
 > 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../../decisions/0032-game-library-example-boundary.md)  
 > 最近复核：2026-09-11

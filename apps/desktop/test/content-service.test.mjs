@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -57,6 +58,18 @@ function request(access, suffix, init = {}) {
   return fetch(pathFor(access, suffix), {
     ...init,
     headers: { Authorization: `Bearer ${access.token}`, ...init.headers },
+  });
+}
+
+function shellRequest(url, { method = "GET", headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(url, { method, headers }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.once("end", () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.once("error", reject);
+    req.end();
   });
 }
 
@@ -118,6 +131,46 @@ test("prepared view serves deterministic manifest and the complete logical FSDB 
   assert.deepEqual(Buffer.from(await resource.arrayBuffer()), f.resourceBytes);
   assert.equal(resource.headers.get("content-type"), "image/png");
   assert.equal(resource.headers.get("x-loom-content-version"), hash(f.resourceBytes));
+});
+
+test("trusted shell mints a document lifetime only for a real GET navigation", async (t) => {
+  const f = await fixture(); t.after(() => f.cleanup());
+  const view = await prepareDesktopContentView(f.prepared);
+  let bootstrapCount = 0;
+  const service = await createDesktopContentService({
+    view,
+    trustedShell: {
+      entryScript: Buffer.from("export {};"),
+      async bootstrap() {
+        bootstrapCount += 1;
+        return {
+          channel: "loomrealm.desktop.renderer-bootstrap/1",
+          rendererControlToken: "control-token",
+          rendererIdentity: "renderer-identity",
+          controlEndpoint: "ws://127.0.0.1:1",
+          dataSettlementEndpoint: "ws://127.0.0.1:2",
+          content: { origin: service.origin.href, installationId: view.installationId, token: "content-token" },
+          presentation: {},
+        };
+      },
+    },
+  });
+  t.after(() => service.close());
+  const navigationHeaders = { "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" };
+
+  const head = await shellRequest(service.shell, { method: "HEAD", headers: navigationHeaders });
+  assert.equal(head.status, 405);
+  assert.equal(head.headers.allow, "GET");
+  assert.equal(bootstrapCount, 0);
+
+  const nonNavigation = await fetch(service.shell);
+  assert.equal(nonNavigation.status, 404);
+  assert.equal(bootstrapCount, 0);
+
+  const get = await shellRequest(service.shell, { headers: navigationHeaders });
+  assert.equal(get.status, 200);
+  assert.match(get.body, /loomrealm\.desktop\.renderer-bootstrap\/1/u);
+  assert.equal(bootstrapCount, 1);
 });
 
 test("authorization, route validation, method, HEAD, cache, and confidentiality semantics are closed", async (t) => {

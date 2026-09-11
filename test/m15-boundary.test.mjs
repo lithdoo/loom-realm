@@ -73,6 +73,16 @@ test("Control, settlement and document bootstrap stay inside the frozen abstract
   assert.doesNotMatch(content, /Access-Control-Allow|\bOPTIONS\b/u);
 });
 
+test("Desktop termination budgets preserve the frozen nested deadline order", async () => {
+  const product = await read("apps/desktop/src/product-composition.ts");
+  const runnerGrace = Number(/terminationGraceMs:\s*([\d_]+)/u.exec(product)?.[1].replaceAll("_", ""));
+  const mainDeadline = Number(/terminationDeadlineMs:\s*([\d_]+)/u.exec(product)?.[1].replaceAll("_", ""));
+  assert.equal(Number.isSafeInteger(runnerGrace), true);
+  assert.equal(Number.isSafeInteger(mainDeadline), true);
+  assert.equal(runnerGrace < mainDeadline, true, `${runnerGrace} must be less than ${mainDeadline}`);
+  assert.equal(mainDeadline < 1_000, true, `${mainDeadline} must fit inside Hostra's frozen 1000 ms grace`);
+});
+
 test("M15 canonical gate runs M14 first and then frozen Hostra", async () => {
   const monorepo = await json("package.json");
   assert.match(monorepo.scripts["test:m15"], /^npm run test:m14 && /u);

@@ -42,6 +42,34 @@ function portClosed(port) {
   });
 }
 
+function childExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (childExited(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (exited) => {
+      clearTimeout(timer);
+      child.off("exit", onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(childExited(child)), timeoutMs);
+    child.once("exit", onExit);
+  });
+}
+
+async function terminateChild(child) {
+  if (childExited(child)) return;
+  child.kill("SIGTERM");
+  if (await waitForChildExit(child, 3_000)) return;
+  child.kill("SIGKILL");
+  if (!await waitForChildExit(child, 3_000)) {
+    throw new Error(`Child process ${child.pid ?? "unknown"} did not terminate`);
+  }
+}
+
 function launchHostra(eventLog, userData, overrides = {}) {
   const rpcToken = `qualification-${Date.now()}-${Math.random()}`;
   const environment = {
@@ -144,10 +172,12 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   const hostra = launchHostra(eventLog, path.join(temporary, "hostra-user-data"));
   let browser = null;
   t.after(async () => {
-    await browser?.close().catch(() => {});
-    if (hostra.child.exitCode === null) hostra.child.kill("SIGTERM");
-    await new Promise((resolve) => hostra.child.exitCode === null ? hostra.child.once("exit", resolve) : resolve());
-    await rm(temporary, { recursive: true, force: true });
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
   const ready = await hostra.ready;
   assert.match(ready.data.cdpEndpoint, /^http:\/\/127\.0\.0\.1:\d+$/u);
@@ -298,10 +328,12 @@ test("M15 Runner fatal converges through Main and the one product funnel", { tim
   const hostra = launchHostra(eventLog, path.join(temporary, "hostra-user-data"));
   let browser = null;
   t.after(async () => {
-    await browser?.close().catch(() => {});
-    if (hostra.child.exitCode === null) hostra.child.kill("SIGTERM");
-    await new Promise((resolve) => hostra.child.exitCode === null ? hostra.child.once("exit", resolve) : resolve());
-    await rm(temporary, { recursive: true, force: true });
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
   const ready = await hostra.ready;
   browser = await chromium.connectOverCDP(ready.data.cdpEndpoint);
@@ -335,9 +367,11 @@ test("M15 startup failure closes partial resources and lets Hostra converge", { 
     LOOMREALM_DESKTOP_INSTALLATION_ROOT: path.join(temporary, "missing-installation"),
   });
   t.after(async () => {
-    if (hostra.child.exitCode === null) hostra.child.kill("SIGTERM");
-    await new Promise((resolve) => hostra.child.exitCode === null ? hostra.child.once("exit", resolve) : resolve());
-    await rm(temporary, { recursive: true, force: true });
+    try {
+      await terminateChild(hostra.child);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
   const ready = await hostra.ready;
   const rpcPort = Number(new URL(ready.data.rpcEndpoint).port);

@@ -26,7 +26,7 @@ M15 → m15-qualification.md
 - [测试策略](./testing-strategy.md) — package/role/vertical/E2E evidence ownership；
 - [M14 Map Game qualification](./m14-qualification.md) — M14 formal status/evidence authority；
 - [M15 Desktop qualification](./m15-qualification.md) — current Hostra-owned M15 evidence ledger；
-- [ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md) + root [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md) — current M15 physical SSOT。
+- [ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md) + root [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md) — current M15 physical SSOT。
 
 Historical direct-Electron M15 evidence可作为 migration/regression oracle，但不拥有 current closure claim。
 

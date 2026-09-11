@@ -20,7 +20,7 @@ const mainPolicy = Object.freeze({
   runtimeBootstrapDeadlineMs: 10_000,
   frameDeadlineMs: 10_000,
   shutdownDeadlineMs: 100,
-  terminationDeadlineMs: 100,
+  terminationDeadlineMs: 250,
 });
 
 export interface DesktopProduct {
@@ -54,7 +54,6 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
   const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
   let startupFailure: unknown = null;
   let startupComplete = false;
-  let deferredTermination: { reason: unknown; closeWindow: boolean } | null = null;
   const controller = new AbortController();
   let detachExternalSignal = () => {};
 
@@ -102,7 +101,6 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
 
   const triggerTermination = (reason: unknown, closeWindow: boolean): void => {
     if (!startupComplete) {
-      deferredTermination ??= { reason, closeWindow };
       controller.abort(reason);
       return;
     }

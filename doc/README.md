@@ -46,7 +46,7 @@ Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/ph
 26. [ADR 索引](./decisions/README.md)
 27. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
 28. [ADR 0034：Hostra owns Desktop Electron composition](./decisions/0034-hostra-owned-desktop-composition.md)
-29. [M15 Hostra Desktop Recomposition Plan](../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
+29. [M15 Hostra Desktop Recomposition Plan](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
 
 ADR 0033 仍保留 Electron-main composition 的历史/conditional provenance，但不再定义 canonical M15 physical topology。
 

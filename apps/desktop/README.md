@@ -17,6 +17,8 @@ frozen Hostra shell
 
 Hostra exclusively owns Electron、BrowserWindow、preload and direct subprocess lifecycle。Desktop consumes only `HOSTRA_RPC_PORT`、`HOSTRA_RPC_TOKEN` and the bounded `openWindow`/`closeWindow`/`hostra.event` JSON-RPC surface。
 
+The canonical LoomRealm Hostra composition requires a non-empty `HOSTRA_RPC_TOKEN` as a concrete product security policy, even though Hostra itself also supports unauthenticated RPC deployments。
+
 The existing Main、M9 Broker、Content、M10 Input、M13 Presentation and M14 game contracts remain unchanged。Reload creates a fresh Renderer identity while preserving Hostra `windowId` and Main/Runner/game truth；same-generation Data replacement preserves the Renderer identity。
 
 Canonical gates：

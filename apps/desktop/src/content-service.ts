@@ -119,7 +119,7 @@ function serveTrustedShell(
     return true;
   }
   if (pathname !== shell.documentPath) return false;
-  if (req.method !== "GET" && req.method !== "HEAD") { problem(res, "CONTENT_METHOD_NOT_ALLOWED", true); return true; }
+  if (req.method !== "GET") { problem(res, "CONTENT_METHOD_NOT_ALLOWED", "GET"); return true; }
   if (req.headers["sec-fetch-mode"] !== "navigate" || req.headers["sec-fetch-dest"] !== "document") {
     problem(res, "CONTENT_NOT_FOUND"); return true;
   }
@@ -135,7 +135,7 @@ function serveTrustedShell(
     res.setHeader("Content-Length", body.byteLength);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.end(req.method === "HEAD" ? undefined : body);
+    res.end(body);
   }, () => { if (!controller.signal.aborted && !res.headersSent) problem(res, "CONTENT_UNAVAILABLE"); }).finally(() => {
     shell.requests.delete(controller); req.off("aborted", cancel); res.off("close", cancel);
   });
@@ -339,14 +339,14 @@ const PROBLEMS: Readonly<Record<ContentProblemCode, ContentProblemFact>> = Objec
   CONTENT_UNAVAILABLE: { status: 500, title: "Internal Server Error" },
 });
 
-function problem(res: ServerResponse, code: ContentProblemCode, allow = false): void {
+function problem(res: ServerResponse, code: ContentProblemCode, allow: false | true | string = false): void {
   const fact = PROBLEMS[code];
   const body = Buffer.from(JSON.stringify({ type: `urn:loomrealm:content:${code.toLowerCase()}`, title: fact.title, status: fact.status, code }), "utf8");
   res.statusCode = fact.status;
   res.setHeader("Content-Type", "application/problem+json");
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Content-Length", body.length);
-  if (allow) res.setHeader("Allow", "GET, HEAD");
+  if (allow) res.setHeader("Allow", allow === true ? "GET, HEAD" : allow);
   res.end(body);
 }
 
