@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M13 closed baseline；M14 consumer architecture/implementation frozen；M15 Hostra physical recomposition frozen for execution  
+> 稳定程度：M10–M13 closed baseline；M14 consumer architecture/implementation frozen；M15 **Implementation Frozen / Preimplementation Closed**  
 > 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
 > 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
@@ -108,6 +108,17 @@ Session + current Renderer + subsystemKey + generation
 ```
 
 Data loss != Runtime/Frame failure；same generation/profile可 reconnect。
+
+```text
+reload
+    → fresh Renderer logical identity
+
+same-generation Data-only reconnect
+    → same Renderer Control participant / same Renderer identity
+    → fresh Data physical pair only
+```
+
+因此 Data carrier loss不得隐式升级为 Renderer replacement 或第二份 Renderer currentness。
 
 Input继续受 current Data × Main InputTarget × active Activation × Subsystem Interest × physical Producer gate约束。
 
@@ -226,7 +237,7 @@ Subsystem Runtime
 
 M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem、M9–M14 logical semantics。
 
-Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；Hostra window/RPC/OS-signal/failure终态汇入一个 LoomRealm Desktop cancellation/cleanup owner chain。精确 rendezvous/navigation-only bootstrap/shutdown sequence由 M15 physical SSOT拥有。
+Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；same-generation Data-only reconnect保持当前 Renderer identity，只替换 Data physical pair。Hostra window/RPC/OS-signal/failure终态汇入一个 LoomRealm Desktop cancellation/cleanup owner chain。精确 rendezvous/navigation-only bootstrap/shutdown sequence与 frozen Hostra baseline由 M15 physical SSOT拥有。
 
 ADR 0033只保留 historical direct-Electron compatibility relevance；canonical M15 composition由 ADR 0034决定。
 
@@ -247,4 +258,4 @@ M10 Input
 
 M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
 
-当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总；Architecture docs不独立发布 milestone Closed日期。
+当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M15 已达到 **Implementation Frozen / Preimplementation Closed**，可直接进入完整实施；Architecture docs不独立发布 milestone Closed日期。
