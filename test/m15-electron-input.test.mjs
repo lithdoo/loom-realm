@@ -15,6 +15,7 @@ async function waitFor(page, label, predicate, arg) {
     const diagnostic = await page.evaluate(() => ({
       ready: document.documentElement.dataset.ready,
       focus: document.hasFocus(),
+      activeElement: document.activeElement?.id || document.activeElement?.tagName || null,
       visibility: document.visibilityState,
       changes: globalThis.__m15Input?.changes ?? null,
       rawKeys: globalThis.__rawKeys ?? null,
@@ -44,6 +45,9 @@ test("production Desktop input source runs in a real focused Electron Renderer",
   assert.equal((await changes(page)).length, beforeSynthetic);
 
   await page.evaluate(() => {
+    const surface = document.querySelector("#surface");
+    surface.tabIndex = -1;
+    surface.focus();
     globalThis.__rawKeys = [];
     for (const name of ["keydown", "keyup"]) {
       addEventListener(name, (event) => globalThis.__rawKeys.push({
@@ -54,6 +58,7 @@ test("production Desktop input source runs in a real focused Electron Renderer",
       }));
     }
   });
+  await waitFor(page, "surface focus", () => document.activeElement?.id === "surface");
   await page.keyboard.press("ArrowRight");
   await waitFor(page, "trusted keyboard events", () => globalThis.__m15Input.changes.filter(({ channel, kind }) => channel === "keyboard.event" && kind === "event").length >= 2);
 
