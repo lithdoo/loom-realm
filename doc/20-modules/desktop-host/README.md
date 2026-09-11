@@ -1,7 +1,7 @@
 # Hostra Desktop Composition 设计
 
 > 层级：模块设计  
-> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Implementation complete / requalification pending**；M15 **Hostra physical recomposition / implementation plan frozen**  
+> 状态：M6 Runtime / M9 Data / M12 Content / M13 Web Presentation **Implemented + Qualified**；M14 **Implementation complete / requalification pending**；M15 **Implementation Frozen / Preimplementation Closed**  
 > 当前 M15 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
 > 决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)  
 > 依赖：[平台组合系统](../../10-architecture/platform-composition-system.md)、[渲染系统](../../10-architecture/rendering-system.md)、[Content API v1](../../15-contracts/content-api-v1.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0032](../../decisions/0032-game-library-example-boundary.md)  
@@ -35,10 +35,19 @@ M11 Render Replication                              ✅
 M12 Desktop Content                                 ✅
 M13 Web Presentation                                ✅ Closed
 M14 Map Game Library + concrete example             ⚠️ implementation complete / requalification pending
-M15 Hostra-owned full Desktop E2E                   🔄 physical recomposition
+M15 Hostra-owned full Desktop E2E                   🔒 Implementation Frozen / Preimplementation Closed
 ```
 
 M15只纠正最外层 physical owner；不重新设计 M9–M14 logical/business semantics。
+
+Frozen external host baseline：
+
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
+```
 
 ---
 
@@ -199,7 +208,19 @@ Main committed Data authority
 prepare / prepared-or-failed / commit / revoke / close
 ```
 
-Data application bytes保持独立 carrier。Same-generation loss继续通过 existing Broker replacement + fresh `RendererDataBinding.acquire()`；不增加 retry/recovery authority。
+Data application bytes保持独立 carrier。
+
+```text
+reload
+    → fresh Renderer logical identity
+
+same-generation Data-only reconnect
+    → same Renderer Control participant
+    → fresh Data physical pair only
+    → fresh RendererDataBinding.acquire()
+```
+
+不得把 Data-only reconnect实现成 Renderer replacement；不增加 retry/recovery authority。
 
 ---
 
@@ -232,7 +253,7 @@ captured navigator.getGamepads()
 → existing M10 gate
 ```
 
-Keyboard/Pointer/Gamepad exact mapping仍由 `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`保留的 logical/input intent拥有。
+Keyboard/Pointer/Gamepad exact mapping仍由 `M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md`拥有。
 
 ---
 
@@ -289,7 +310,7 @@ beginTermination(reason)
 
 `beginTermination()` 必须 idempotent。Main rejection不得跳过 cleanup；programmatic close不得依赖 `window.closed` 一定返回。
 
-Pinned Hostra 在 final-window shutdown中可能直接 signal `HOSTRA_SUBCMD`，因此 Node entry必须显式处理 SIGTERM/SIGINT并进入同一 funnel。Desktop不得增加第二份 direct Runner kill authority。
+Frozen Hostra baseline 在 final-window shutdown中可能直接 signal `HOSTRA_SUBCMD`，因此 Node entry必须显式处理 SIGTERM/SIGINT并进入同一 funnel。Existing owner chain必须在 1000 ms grace 下收敛；Desktop不得增加第二份 direct Runner kill authority。
 
 ---
 
@@ -340,16 +361,16 @@ Capability separation不要求一个 Server class per capability。
 
 ## 13. Qualification Placement
 
-Final M15 qualification从 pinned real Hostra开始：
+Final M15 qualification从 frozen real Hostra开始：
 
 ```text
-pinned Hostra
+hostra@1.0.1-beta.1 / d863beab3c59c3bd4f271514a228fa8fee0bf5b6
 → HOSTRA_SUBCMD LoomRealm Node product
 → Hostra RPC openWindow
 → Hostra-owned BrowserWindow
 → real Main/Runner/Data/Content/Input/M13/M14 path
 → navigation-only bootstrap
-→ reload / same-generation reconnect
+→ reload / same-generation Data-only reconnect
 → final-window signal/lifecycle convergence
 ```
 
@@ -367,8 +388,12 @@ Hostra CDP只用于 E2E observation。Historical standalone Electron vertical是
 6. Control、Data settlement、Data application、Content remain separated；
 7. M9 Broker remains sole Desktop Data candidate/current owner；
 8. document/acquire rendezvous bounded且 navigation-only bootstrap不能被普通 page request触发；
-9. reload keeps Hostra Window but replaces Renderer logical participant；
-10. signals/window/RPC/failure汇入 one termination funnel；
-11. no second Runner kill authority；
-12. no generic Hostra/Window/Document/Connection/Recovery framework；
-13. physical implementation follows ADR 0034 + root recomposition SSOT。
+9. reload keeps Hostra Window and creates fresh Renderer identity；
+10. Data-only reconnect keeps same Renderer identity and replaces only Data physical pair；
+11. signals/window/RPC/failure汇入 one termination funnel；
+12. frozen Hostra baseline is part of the qualification subject；
+13. no second Runner kill authority；
+14. no generic Hostra/Window/Document/Connection/Recovery framework；
+15. physical implementation follows ADR 0034 + root recomposition SSOT。
+
+**M15 module design is frozen and directly implementable；no additional preimplementation design pass is required.**
