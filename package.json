@@ -39,7 +39,7 @@
     "test:m14": "npm run test:m13 && npm run build:m14 && node --test test/m14-boundary.test.mjs && npm run test:m14:projection && npm test -w @loomrealm-game/map && npm test -w @loomrealm-example/essentials-v21.1 && npm run test:m14:vertical && npm run test:m14:pack",
     "build:m15": "npm run build:m14",
     "test:m15:desktop": "node --test apps/desktop/test/renderer-input-source.test.mjs test/m15-boundary.test.mjs",
-    "test:m15:electron": "node --test test/m15-electron-input.test.mjs test/m15-electron-product.test.mjs",
+    "test:m15:electron": "node --test --test-concurrency=1 test/m15-electron-input.test.mjs test/m15-electron-product.test.mjs",
     "test:m15:essentials-local": "npm run build:m15 && node scripts/m15-essentials-electron-local.mjs",
     "test:m15": "npm run test:m14 && npm run build:m15 && npm run test:m15:desktop && npm run test:m15:electron",
     "test:m8": "npm run build:packages && npm test -w @loomrealm/platform-ports -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer-control -w @loomrealm/renderer -w @loomrealm/main && npm run test:game-launcher-hostra",
