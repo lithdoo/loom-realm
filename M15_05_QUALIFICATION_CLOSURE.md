@@ -1,6 +1,6 @@
 # M15 / 05 — Qualification and Closure
 
-> 状态：**Closure rules retained / qualification subject recomposed around Hostra**  
+> 状态：**Implementation Frozen / Preimplementation Closed — qualification subject recomposed around Hostra**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：05  
 > 最近复核：2026-09-11  
@@ -26,12 +26,15 @@ M14 != Closed
 
 ---
 
-## 2. Current Closure Subject
+## 2. Frozen Closure Subject
 
-Final subject：
+Final subject is fixed before implementation：
 
 ```text
-pinned Hostra shell
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
 → HOSTRA_SUBCMD LoomRealm plain Node product
 → LoomRealm RuntimeHosting Runner child
 → Hostra-owned BrowserWindow
@@ -39,7 +42,7 @@ pinned Hostra shell
 → existing Main/M10–M14 path
 ```
 
-Historical standalone Electron E2E is migration evidence only。
+Historical standalone Electron E2E is migration evidence only。Changing the Hostra package/source/bundled Electron/lifecycle baseline creates a new qualification subject and requires requalification。
 
 ---
 
@@ -118,15 +121,18 @@ same Hostra windowId
 
 Reload MUST NOT call Hostra `openWindow()` again。
 
-Reconnect：
+Same-generation Data-only reconnect：
 
 ```text
-same-generation physical Data loss
+same Renderer Control participant remains current
 → DataAuthority retained
 → existing Broker retire/prepare/commit/current
-→ fresh Renderer acquire
-→ presentation resumes
+→ fresh RendererDataBinding.acquire() resolves
+→ fresh Data physical pair only
+→ same Renderer identity resumes current truth
 ```
+
+Qualification MUST reject any implementation that turns Data-only reconnect into Renderer Control replacement or mints a fresh Renderer identity。
 
 ---
 
@@ -160,7 +166,7 @@ beginTermination(reason)
 
 Main rejection MUST NOT skip physical cleanup。Programmatic close MUST NOT rely on `window.closed` callback to begin local cleanup。
 
-Pinned Hostra final-window behavior may signal the `HOSTRA_SUBCMD` before LoomRealm has completed cleanup；therefore real SIGTERM/SIGINT handling is part of M15 qualification。
+Frozen Hostra final-window behavior may signal the `HOSTRA_SUBCMD` before LoomRealm has completed cleanup；real SIGTERM/SIGINT handling is therefore part of M15 qualification。
 
 Qualification must observe：
 
@@ -169,10 +175,10 @@ signal handler enters same termination path
 Runner PID absent
 LoomRealm child absent
 former LoomRealm ports refuse connections
-Hostra converges according to pinned host behavior
+Hostra converges according to frozen host behavior
 ```
 
-No second Desktop direct Runner kill authority is allowed。If existing owner chain cannot converge within pinned Hostra's actual grace, M15 fails and physical design must be explicitly reopened。
+No second Desktop direct Runner kill authority is allowed。If existing owner chain cannot converge within the frozen Hostra **1000 ms** grace, M15 fails and physical design must be explicitly reopened。
 
 ---
 
@@ -259,9 +265,9 @@ It MUST compose：
 ```text
 npm run test:m14
 → Desktop boundary/build
-→ pinned Hostra full E2E
+→ frozen Hostra full E2E
 → document/bootstrap rendezvous + navigation-only evidence
-→ input/reload/reconnect
+→ input/reload/Data-only reconnect
 → signal/window/RPC/fatal/startup cleanup evidence
 ```
 
@@ -284,11 +290,13 @@ canonical apps/desktop path imports "electron"
 canonical path creates BrowserWindow or owns app.quit
 canonical M15 launches Electron directly instead of Hostra
 Hostra source/runtime patched for LoomRealm
+Hostra baseline differs from the frozen qualification subject without explicit requalification
 Hostra RPC carries LoomRealm application payload
 Hostra types leak into platform-ports/Main/Renderer/game packages
 business code depends on window.electronAPI
 ordinary fetch/subframe can create Renderer document lifetime
 Data application merges into settlement channel
+Data-only reconnect replaces Renderer Control participant
 second Data currentness owner
 second Runner termination policy
 new Hostra/Window/Document/Connection/Recovery manager abstraction
@@ -298,19 +306,21 @@ new Hostra/Window/Document/Connection/Recovery manager abstraction
 
 ## 12. Reopen Rule
 
-Implementation may choose private names、route spelling、bounded queue constants、and whether small loopback carriers share a listener。
+Implementation may choose private names、route spelling、bounded queue constants、exact navigation-metadata helper、and whether small loopback carriers share a listener。
 
 Do not reopen：
 
 ```text
 authority ownership
 Hostra-as-sole Electron/Window host
+frozen Hostra baseline
 M10–M14 logical/business contracts
 Control/Data/Content separation
 M9 Broker currentness
+reload = fresh Renderer identity
+Data-only reconnect = same Renderer identity
 bounded document/acquire rendezvous
 navigation-only bootstrap lifetime
-reload semantics
 one idempotent termination funnel
 qualification ownership
 ```
@@ -326,9 +336,11 @@ M15 can be marked Closed only when：
 ```text
 M14 formal status = Closed
 ADR 0034 propagation complete
-pinned Hostra identity recorded
+frozen Hostra baseline used exactly
 npm run test:m15 = repeatable PASS in supported CI
 Hostra-owned full Desktop E2E = PASS
 document/bootstrap + reload/reconnect/input + lifecycle/failure evidence = PASS
 legacy direct-Electron canonical ownership removed
 ```
+
+**Preimplementation is Closed now.** No further design pass is required before implementing Slices 1–7；only implementation evidence may reopen the physical design under §12。
