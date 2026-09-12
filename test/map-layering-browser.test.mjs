@@ -5,7 +5,6 @@ import http from "node:http";
 import path from "node:path";
 import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
-import { deflateSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,44 +14,6 @@ function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
 }
 
-let crcTable;
-function crc32(bytes) {
-  crcTable ??= Array.from({ length: 256 }, (_, n) => {
-    let value = n;
-    for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    return value >>> 0;
-  });
-  let crc = 0xffffffff;
-  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function chunk(name, data) {
-  const type = Buffer.from(name, "ascii");
-  const length = Buffer.alloc(4); length.writeUInt32BE(data.length);
-  const checksum = Buffer.alloc(4); checksum.writeUInt32BE(crc32(Buffer.concat([type, data])));
-  return Buffer.concat([length, type, data, checksum]);
-}
-
-function png(width, height, pixel) {
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4);
-  header[8] = 8; header[9] = 6;
-  const raw = Buffer.alloc((width * 4 + 1) * height);
-  for (let y = 0; y < height; y += 1) {
-    const row = y * (width * 4 + 1); raw[row] = 0;
-    for (let x = 0; x < width; x += 1) {
-      const color = pixel(x, y); const offset = row + 1 + x * 4;
-      raw[offset] = color[0]; raw[offset + 1] = color[1]; raw[offset + 2] = color[2]; raw[offset + 3] = color[3];
-    }
-  }
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
-}
-
-const tilesetPng = png(32, 32, () => [0, 0, 255, 255]);
-const characterPng = png(128, 128, () => [255, 0, 0, 255]);
-const tilesetB64 = tilesetPng.toString("base64");
-const characterB64 = characterPng.toString("base64");
 const tilesetRef = (contentVersion) => ({ namespace: "resource.Graphics", key: "Tilesets/blue", contentVersion });
 const spriteRef = Object.freeze({ namespace: "resource.Graphics", key: "Characters/red", contentVersion: "v1" });
 const identityOf = (ref) => `${ref.namespace}\u0000${ref.key}\u0000${ref.contentVersion}`;
@@ -102,14 +63,20 @@ async function openPage() {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
   await page.goto(origin);
   await page.addScriptTag({ url: `${origin}/map.browser.js` });
-  await page.evaluate(({ tilesetB64: tileset, characterB64: character }) => {
-    const decodePng = (b64) => {
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-      return bytes;
+  await page.evaluate(async () => {
+    const pngBytes = async (width, height, r, g, b) => {
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext("2d");
+      context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      context.fillRect(0, 0, width, height);
+      const blob = await canvas.convertToBlob({ type: "image/png" });
+      return new Uint8Array(await blob.arrayBuffer());
     };
-    window.__mapLayering = { tilesetBytes: decodePng(tileset), characterBytes: decodePng(character), delayed: new Map() };
+    window.__mapLayering = {
+      tilesetBytes: await pngBytes(32, 32, 0, 0, 255),
+      characterBytes: await pngBytes(128, 128, 255, 0, 0),
+      delayed: new Map(),
+    };
     const resources = {
       async resource(namespace, key, contentVersion) {
         const id = `${namespace}\u0000${key}\u0000${contentVersion}`;
@@ -127,7 +94,7 @@ async function openPage() {
     sprite.receiveRenderContext({ resources });
     window.__view = view;
     window.__sprite = sprite;
-  }, { tilesetB64, characterB64 });
+  });
   return page;
 }
 
@@ -150,6 +117,28 @@ async function waitPainted(page, tileZIndex, spriteZIndex = "65") {
     if (Date.now() >= deadline) assert.fail(`Timed out waiting for tile z-index ${tileZIndex} and sprite z-index ${spriteZIndex}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+}
+
+async function waitForPendingImage(page, ref) {
+  const id = identityOf(ref);
+  const deadline = Date.now() + 10_000;
+  while (!(await page.evaluate((imageId) => window.__view._images.has(imageId), id))) {
+    if (Date.now() >= deadline) assert.fail(`Timed out waiting for pending image ${id}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+async function settlePendingImage(page, ref, outcome) {
+  const id = identityOf(ref);
+  await page.evaluate(async ({ imageId, outcome: next }) => {
+    const pending = window.__view._images.get(imageId);
+    if (!pending) throw new Error(`stale image promise missing for ${imageId}`);
+    const delayed = window.__mapLayering.delayed.get(imageId);
+    if (!delayed) throw new Error(`delayed resource missing for ${imageId}`);
+    if (next === "resolve") delayed.resolve({ bytes: window.__mapLayering.tilesetBytes, mime: "image/png" });
+    else delayed.reject(new Error("stale tileset failed"));
+    await pending.then(() => undefined, () => undefined);
+  }, { imageId: id, outcome });
 }
 
 async function compositeCenter(page) {
@@ -201,18 +190,6 @@ async function delayTileset(page, ref) {
     let reject;
     const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
     window.__mapLayering.delayed.set(id, { promise, resolve, reject });
-  }, identityOf(ref));
-}
-
-async function resolveTileset(page, ref) {
-  await page.evaluate((id) => {
-    window.__mapLayering.delayed.get(id).resolve({ bytes: window.__mapLayering.tilesetBytes, mime: "image/png" });
-  }, identityOf(ref));
-}
-
-async function rejectTileset(page, ref) {
-  await page.evaluate((id) => {
-    window.__mapLayering.delayed.get(id).reject(new Error("stale tileset failed"));
   }, identityOf(ref));
 }
 
@@ -315,13 +292,12 @@ test("F. stale async success cannot overwrite a newer tileset identity", { timeo
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
   }, { viewPayload: viewData({ depth: 64, tileset: firstRef }), spritePayload: spriteData(0) });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitForPendingImage(page, firstRef);
   await page.evaluate(({ viewPayload }) => {
     window.__view.receiveRenderData(viewPayload);
   }, { viewPayload: viewData({ depth: 0, tileset: secondRef }) });
   await waitPainted(page, "0", "65");
-  await resolveTileset(page, firstRef);
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settlePendingImage(page, firstRef, "resolve");
   const info = await layerInfo(page);
   const visibleZ = info.zIndex.filter((_, index) => info.hidden[index] === false);
   assert.deepEqual(visibleZ, ["0"]);
@@ -338,14 +314,13 @@ test("G. stale async failure cannot clear a newer tileset identity", { timeout: 
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
   }, { viewPayload: viewData({ depth: 0, tileset: firstRef }), spritePayload: spriteData(0) });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await waitForPendingImage(page, firstRef);
   await page.evaluate(({ viewPayload }) => {
     window.__view.receiveRenderData(viewPayload);
   }, { viewPayload: viewData({ depth: 64, tileset: secondRef }) });
   await waitPainted(page, "128", "65");
   const before = await layerInfo(page);
-  await rejectTileset(page, firstRef);
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await settlePendingImage(page, firstRef, "reject");
   const after = await layerInfo(page);
   assert.equal(after.hidden[0], false);
   assert.equal(after.zIndex[0], before.zIndex[0]);
