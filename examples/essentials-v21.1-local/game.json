@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "initial": {
+    "subsystem": "map",
+    "input": {
+      "mapId": 66,
+      "x": 8,
+      "y": 7,
+      "characterName": "trainer_POKEMONTRAINER_Red"
+    }
+  },
+  "subsystems": [
+    { "key": "map" }
+  ]
+}

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHostraRuntimeHosting, prepareHostraGame } from "@loomrealm/game-launcher-hostra";
 import { runMain, type MainSessionResult } from "@loomrealm/main";
@@ -129,7 +130,7 @@ export async function startDesktopProduct(options: DesktopProductOptions = {}): 
     preparedView = view;
     assertStarting();
     const entryScript = await readFile(new URL("./browser/renderer.js", import.meta.url));
-    const presentation = JSON.parse(await readFile(new URL("../../../examples/essentials-v21.1/presentation.json", import.meta.url), "utf8")) as unknown;
+    const presentation = JSON.parse(await readFile(join(installationRoot, "presentation.json"), "utf8")) as unknown;
     broker = new DesktopDataConnectionBroker({ observeCandidate: (event) => observe({ ...event, type: `data-${event.type}` }) });
     rendererControl = new LoopbackRendererControlBinding();
     content = await createDesktopContentService({

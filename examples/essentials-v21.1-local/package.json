@@ -1,0 +1,9 @@
+{
+  "name": "@loomrealm-example/essentials-v21.1-local",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@loomrealm-game/map": "0.1.0-alpha.0"
+  }
+}
