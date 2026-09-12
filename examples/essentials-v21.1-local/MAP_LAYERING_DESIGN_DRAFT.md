@@ -134,7 +134,6 @@ tileDepth == characterDepth → character 在 tile 上面
 function tileStackValue(depth) {
   return depth * 2;
 }
-
 function characterStackValue(depth) {
   return depth * 2 + 1;
 }
@@ -384,7 +383,7 @@ void this._paintLatest();
 
 ### 5.7 `_paintLatest()` latest-wins
 
-严格顺序：
+成功路径严格如下：
 
 ```text
 requested = this._latestData
@@ -392,47 +391,81 @@ await _image(requested.tileset)
 current = this._latestData
 current 不存在 → return
 resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset) → return
-用 current.tiles 绘制，不用 requested.tiles
+使用 current.tiles 绘制，不使用 requested.tiles
 ```
 
-当前 resource load 失败：调用 `_clearLayers()` 后 return。
+失败路径也必须 obey latest-wins。冻结为：
 
-同一 tileset 下 await 期间收到新 RenderData，可以直接绘制最新 current；不同 tileset 的旧异步完成绝不能覆盖最新状态。
+```js
+let image;
+try {
+  image = await this._image(requested.tileset);
+} catch {
+  const current = this._latestData;
+  if (!current) return;
+  if (resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset)) return;
+  this._clearLayers();
+  return;
+}
+```
 
-### 5.8 Bucket
-
-每次 paint 创建临时 `Map<number, VisibleTile[]>`：
+因此：
 
 ```text
-按 current.tiles 输入顺序 push 到 bucket
-bucket 按 numeric depth 升序
-bucket 内不再次排序
+当前请求失败
+→ 清空当前 tile visual
+
+已经 stale 的旧请求晚失败
+→ 直接 return
+→ 不允许清掉更新请求已经成功绘制的画面
 ```
 
-每个 bucket：
+同一 tileset identity 下 await 期间收到新 RenderData，异步完成后可直接绘制最新 current；不同 tileset identity 的旧异步成功或失败都不能改变最新状态。
+
+### 5.8 Bucket：唯一允许的数据形态
+
+每次 paint 创建临时 `Map<number, VisibleTile[]>`，随后立刻转成排序后的数组。不要把 `Map` 保存到实例字段。
+
+冻结代码形态：
 
 ```js
-const layer = this._ensureLayer(index);
-layer.context.clearRect(0, 0, 640, 480);
-layer.canvas.style.zIndex = String(tileStackValue(depth));
+const buckets = new Map();
+for (const tile of current.tiles) {
+  let bucket = buckets.get(tile.depth);
+  if (!bucket) {
+    bucket = [];
+    buckets.set(tile.depth, bucket);
+  }
+  bucket.push(tile);
+}
+
+const groups = [...buckets.entries()]
+  .sort(([leftDepth], [rightDepth]) => leftDepth - rightDepth);
+
+for (let index = 0; index < groups.length; index += 1) {
+  const [depth, tiles] = groups[index];
+  const layer = this._ensureLayer(index);
+  layer.context.clearRect(0, 0, 640, 480);
+  layer.canvas.style.zIndex = String(tileStackValue(depth));
+
+  for (const tile of tiles) {
+    const source = tile.tileId - 384;
+    const sx = (source % 8) * 32;
+    const sy = Math.floor(source / 8) * 32;
+    layer.context.drawImage(
+      image,
+      sx, sy, 32, 32,
+      tile.x * 32 - current.cameraX,
+      tile.y * 32 - current.cameraY,
+      32, 32,
+    );
+  }
+}
+
+this._trimLayers(groups.length);
 ```
 
-tile crop/draw 数学保持现状：
-
-```js
-const source = tile.tileId - 384;
-const sx = (source % 8) * 32;
-const sy = Math.floor(source / 8) * 32;
-layer.context.drawImage(
-  image,
-  sx, sy, 32, 32,
-  tile.x * 32 - current.cameraX,
-  tile.y * 32 - current.cameraY,
-  32, 32,
-);
-```
-
-所有 bucket 完成后 `_trimLayers(groups.length)`。
+`groups` 是 Array，所以这里使用 `.length`；`buckets` 是 Map，不使用 `.length`。bucket 内保持 `current.tiles` 原输入顺序，不再次排序。
 
 ### 5.9 MapSprite
 
@@ -515,7 +548,7 @@ game-libs/map/dist/browser/map.browser.js
 
 page 内创建最小 fake resource client 返回 PNG bytes；创建 `lr-map-view` 与其 light-DOM `lr-map-sprite`，直接调用 `receiveRenderContext/receiveRenderData`。
 
-必须有 7 个 case：
+必须覆盖以下 8 个 case。
 
 **A. DOM**
 
@@ -549,7 +582,7 @@ character depth=32 → 65
 assert 0 < 65
 ```
 
-**E. stale bucket**
+**E. stale bucket cleanup**
 
 ```text
 先 [0,64]
@@ -558,13 +591,19 @@ assert 0 < 65
 → 第二个 canvas 像素已 clear
 ```
 
-**F. async latest-wins**
+**F. async latest-wins：旧成功不能覆盖新状态**
 
-第一份 tileset resource promise 延迟；完成前提交不同 resource identity 的第二份 RenderData；第一份最后才 resolve。
+第一份 tileset resource promise 延迟；完成前提交不同 resource identity 的第二份 RenderData；第二份先成功绘制，第一份最后才 resolve。
 
-最终 canvas/z-index/像素只能对应第二份最新数据。
+断言最终 canvas/z-index/像素只对应第二份最新数据。
 
-**G. validation**
+**G. async latest-wins：旧失败不能清掉新状态**
+
+第一份 tileset resource promise 延迟；完成前提交不同 resource identity 的第二份 RenderData；第二份先成功绘制，第一份最后 reject。
+
+断言第一份 reject 后，第二份已绘制的 canvas 仍 visible、z-index 不变、像素不被 clear。
+
+**H. validation**
 
 ```text
 negative/non-integer tile.depth → synchronous TypeError
@@ -572,6 +611,38 @@ negative/non-integer player.y   → synchronous TypeError
 ```
 
 不要增加 screenX/screenY integer validation 测试。
+
+### 6.3 最终 compositing 必须直接验证像素，不只验证 z-index 数字
+
+Case B/C/D 可共享同一套 32×32 重叠 fixture：
+
+```text
+view: 640×480
+tile: x=0,y=0,tileId=384,camera=(0,0)
+player: y=0,screenX=0,screenY=0,direction=2,pattern=0
+Tileset PNG: 第一个 32×32 tile 为纯蓝
+Character PNG: 128×128，全部 frame 为纯红，frameHeight=32
+```
+
+必须至少做两个实际合成断言：
+
+```text
+high tile: tile.depth=64
+→ 最终重叠中心像素为蓝色
+
+low tile: tile.depth=0
+→ 最终重叠中心像素为红色
+```
+
+不新增 PNG parser 依赖。唯一允许的方法：
+
+1. `const png = await page.locator("lr-map-view").screenshot()` 获取元素最终合成后的 PNG；
+2. Node 侧 `png.toString("base64")` 传给 `page.evaluate()`；
+3. page 内 `atob` → `Uint8Array` → `Blob("image/png")` → `createImageBitmap()`；
+4. 画到 `OffscreenCanvas` 或普通临时 Canvas；
+5. `getImageData(16,16,1,1)` 读取最终 RGB。
+
+这个断言验证的不是单个 shadow Canvas，而是 Chromium 对 `tile-layer + slotted lr-map-sprite` 的真实最终合成结果。若 z-index 数字正确但最终像素错误，browser test 必须失败。
 
 ---
 
@@ -587,9 +658,9 @@ game-libs/map/src/runtime.ts
 game-libs/map/test/semantics.test.mjs
 ```
 
-注意：`projectVisibleTiles` 改成四参数后，必须同时更新 runtime 调用；禁止在旧 runtime 调用仍存在时运行 package build/test 并误判规格失败。
+`projectVisibleTiles` 改成四参数后必须同时更新 runtime 调用；不要在旧 runtime 调用仍存在时运行 package build/test。
 
-完成后运行：
+运行：
 
 ```bash
 npm test -w @loomrealm-game/map
@@ -700,7 +771,9 @@ real-asset smoke not run: source unavailable
 [ ] .entities 已删除
 [ ] Canvas 为当前可见 bucket 数量对应的可复用数组
 [ ] stale Canvas 使用 clear + hidden，不 remove
-[ ] latest-wins test 通过
+[ ] stale async success 不能覆盖新状态
+[ ] stale async failure 不能清掉新状态
+[ ] high/low depth 的最终 Chromium 合成像素正确
 [ ] 无新增 dependency
 [ ] 无新增 framework abstraction
 [ ] npm test -w @loomrealm-game/map 通过
@@ -728,7 +801,7 @@ STOP
 → 不改 framework 绕过 map-local 问题
 ```
 
-执行任务应当只有：
+执行任务只包含：
 
 ```text
 按本文修改 3 个 production 文件
@@ -737,4 +810,4 @@ STOP
 → 全绿则 implementation complete
 ```
 
-不再包含架构设计或兼容规则研究。
+不再包含架构设计、兼容规则研究或测试框架选择。
