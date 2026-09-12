@@ -22,7 +22,21 @@ export interface TilesetRecord {
   readonly priorities: ProjectedTable;
 }
 
-export interface VisibleTile { readonly [key: string]: number; readonly x: number; readonly y: number; readonly z: 0 | 1 | 2; readonly tileId: number }
+export interface VisibleTile {
+  readonly [key: string]: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: 0 | 1 | 2;
+  readonly tileId: number;
+  readonly depth: number;
+}
+
+const TILE_SIZE = 32;
+
+export function tileVisualDepth(y: number, priority: number): number {
+  if (priority === 0) return 0;
+  return (y + priority + 1) * TILE_SIZE;
+}
 
 const directions = Object.freeze({
   ArrowDown: { direction: 2 as const, dx: 0, dy: 1 },
@@ -83,6 +97,9 @@ export function validateTilesetRecord(value: unknown, contentId: number): Tilese
   for (const [name, table] of [["passages", passages], ["priorities", priorities]] as const) {
     if (table.dimensions !== 1 || table.ySize !== 1 || table.zSize !== 1) throw new TypeError(`Tileset.${name} must be a 1D Table`);
   }
+  if (priorities.values.some((value) => value < 0 || value > 5)) {
+    throw new TypeError("Tileset.priorities values must be integers from 0 through 5");
+  }
   return Object.freeze({ id, tileset_name: input.tileset_name, passages, priorities });
 }
 
@@ -120,7 +137,12 @@ export function computeCamera(map: MapRecord, playerX: number, playerY: number) 
   });
 }
 
-export function projectVisibleTiles(map: MapRecord, cameraX: number, cameraY: number): readonly VisibleTile[] {
+export function projectVisibleTiles(
+  map: MapRecord,
+  tileset: TilesetRecord,
+  cameraX: number,
+  cameraY: number,
+): readonly VisibleTile[] {
   const minX = Math.floor(cameraX / 32);
   const maxX = Math.min(map.width - 1, Math.floor((cameraX + 639) / 32));
   const minY = Math.floor(cameraY / 32);
@@ -130,7 +152,12 @@ export function projectVisibleTiles(map: MapRecord, cameraX: number, cameraY: nu
     const tileId = tableAt(map.data, x, y, z);
     if (tileId === 0) continue;
     if (tileId < 384) throw new TypeError(`Unsupported M14 tile id ${tileId}`);
-    tiles.push(Object.freeze({ x, y, z, tileId }));
+    if (tileId >= tileset.priorities.xSize) {
+      throw new TypeError(`Tileset.priorities has no entry for tile id ${tileId}`);
+    }
+    const priority = tableAt(tileset.priorities, tileId);
+    const depth = tileVisualDepth(y, priority);
+    tiles.push(Object.freeze({ x, y, z, tileId, depth }));
   }
   return Object.freeze(tiles);
 }

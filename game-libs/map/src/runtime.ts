@@ -46,7 +46,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           zIndex: 0,
           roots: [{
             key: "viewport", tag: "lr-map-view", attrs: {},
-            data: { mapId: input.mapId, mapWidth: map.width, mapHeight: map.height, cameraX, cameraY, tileset: tilesetRef, tiles: projectVisibleTiles(map, cameraX, cameraY) },
+            data: { mapId: input.mapId, mapWidth: map.width, mapHeight: map.height, cameraX, cameraY, tileset: tilesetRef, tiles: projectVisibleTiles(map, tileset, cameraX, cameraY) },
             children: [{ key: "player", tag: "lr-map-sprite", attrs: {}, data: { x, y, screenX: x * 32 - cameraX, screenY: y * 32 - cameraY, direction, pattern: 0, sprite: playerRef }, children: [] }],
           }],
         };

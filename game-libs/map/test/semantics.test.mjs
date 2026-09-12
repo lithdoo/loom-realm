@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import mapDefinition from "@loomrealm-game/map";
-import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, validateMapRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
+import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -16,13 +16,57 @@ function fixture() {
   };
 }
 
+test("tileVisualDepth matches the frozen RMXP vectors", () => {
+  assert.equal(tileVisualDepth(0, 0), 0);
+  assert.equal(tileVisualDepth(0, 1), 64);
+  assert.equal(tileVisualDepth(1, 1), 96);
+  assert.equal(tileVisualDepth(0, 2), 96);
+});
+
 test("Table, camera and visible projection follow frozen ordering", () => {
-  const { map: raw } = fixture(); const map = validateMapRecord(raw);
+  const { map: raw, tileset: rawTileset } = fixture();
+  const map = validateMapRecord(raw);
+  const tileset = validateTilesetRecord(rawTileset, 1);
   assert.equal(tableAt(map.data, 12, 8, 0), 385);
   assert.deepEqual(computeCamera(map, 10, 8), { cameraX: 16, cameraY: 32 });
-  const tiles = projectVisibleTiles(map, 16, 32);
-  assert.deepEqual(tiles[0], { x: 0, y: 1, z: 0, tileId: 384 });
+  const tiles = projectVisibleTiles(map, tileset, 16, 32);
+  assert.deepEqual(tiles[0], { x: 0, y: 1, z: 0, tileId: 384, depth: 0 });
   assert.ok(tiles.find((tile) => tile.x === 12 && tile.y === 8 && tile.tileId === 385));
+});
+
+test("Tileset.priorities accepts 0 through 5 and rejects the rest", () => {
+  const accepted = fixture();
+  accepted.tileset.priorities.values[384] = 0;
+  accepted.tileset.priorities.values[385] = 5;
+  assert.doesNotThrow(() => validateTilesetRecord(accepted.tileset, 1));
+
+  const tooLow = fixture();
+  tooLow.tileset.priorities.values[384] = -1;
+  assert.throws(() => validateTilesetRecord(tooLow.tileset, 1), /priorities/);
+
+  const tooHigh = fixture();
+  tooHigh.tileset.priorities.values[384] = 6;
+  assert.throws(() => validateTilesetRecord(tooHigh.tileset, 1), /priorities/);
+});
+
+test("projection depth follows priority while z/y/x order stays fixed", () => {
+  const raw = fixture();
+  const map = validateMapRecord(raw.map);
+  const tilesetPriority0 = validateTilesetRecord(raw.tileset, 1);
+  const tilesPriority0 = projectVisibleTiles(map, tilesetPriority0, 16, 32);
+  const sample0 = tilesPriority0.find((tile) => tile.x === 0 && tile.y === 1 && tile.tileId === 384);
+  assert.equal(sample0.depth, 0);
+
+  raw.tileset.priorities.values[384] = 1;
+  const tilesetPriority1 = validateTilesetRecord(raw.tileset, 1);
+  const tilesPriority1 = projectVisibleTiles(map, tilesetPriority1, 16, 32);
+  const sample1 = tilesPriority1.find((tile) => tile.x === 0 && tile.y === 1 && tile.tileId === 384);
+  assert.equal(sample1.depth, 96);
+  assert.notEqual(sample0.depth, sample1.depth);
+  assert.deepEqual(
+    tilesPriority0.map(({ x, y, z, tileId }) => ({ x, y, z, tileId })),
+    tilesPriority1.map(({ x, y, z, tileId }) => ({ x, y, z, tileId })),
+  );
 });
 
 test("one long-lived Frame accepts one move and one persisted reverse-entry block", async () => {

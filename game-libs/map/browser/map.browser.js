@@ -9,6 +9,18 @@
     return value && typeof value === "object" && [value.namespace, value.key, value.contentVersion].every((part) => typeof part === "string" && part.length > 0);
   }
 
+  function characterVisualDepth(y, frameHeight) {
+    return y * 32 + 32 + (frameHeight > 32 ? 31 : 0);
+  }
+
+  function tileStackValue(depth) {
+    return depth * 2;
+  }
+
+  function characterStackValue(depth) {
+    return depth * 2 + 1;
+  }
+
   class ResourceElement extends HTMLElement {
     constructor() {
       super();
@@ -45,40 +57,115 @@
       super();
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = ":host{display:block;position:relative;overflow:hidden;width:640px;height:480px}canvas{display:block;width:640px;height:480px;image-rendering:pixelated}.entities{position:absolute;inset:0;overflow:hidden;pointer-events:none}";
-      this._canvas = document.createElement("canvas");
-      this._canvas.width = 640;
-      this._canvas.height = 480;
-      const entities = document.createElement("div");
-      entities.className = "entities";
-      entities.append(document.createElement("slot"));
-      shadow.append(style, this._canvas, entities);
-      this._context = this._canvas.getContext("2d", { alpha: true });
-      this._context.imageSmoothingEnabled = false;
+      style.textContent = ":host{display:block;position:relative;overflow:hidden;width:640px;height:480px}canvas.tile-layer{position:absolute;inset:0;display:block;width:640px;height:480px;image-rendering:pixelated;pointer-events:none}canvas.tile-layer[hidden]{display:none}slot{display:contents}";
+      this._layers = [];
+      this._slot = document.createElement("slot");
+      shadow.append(style, this._slot);
+    }
+
+    _ensureLayer(index) {
+      const existing = this._layers[index];
+      if (existing) {
+        existing.canvas.hidden = false;
+        return existing;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.className = "tile-layer";
+      canvas.width = 640;
+      canvas.height = 480;
+      const context = canvas.getContext("2d", { alpha: true });
+      context.imageSmoothingEnabled = false;
+      this.shadowRoot.insertBefore(canvas, this._slot);
+      const layer = { canvas, context };
+      this._layers.push(layer);
+      return layer;
+    }
+
+    _clearLayers() {
+      for (const layer of this._layers) {
+        layer.context.clearRect(0, 0, 640, 480);
+        layer.canvas.hidden = true;
+      }
+    }
+
+    _trimLayers(count) {
+      for (let index = count; index < this._layers.length; index += 1) {
+        const layer = this._layers[index];
+        layer.context.clearRect(0, 0, 640, 480);
+        layer.canvas.hidden = true;
+      }
     }
 
     receiveRenderData(data) {
       if (!data || !Number.isSafeInteger(data.cameraX) || !Number.isSafeInteger(data.cameraY) || !Array.isArray(data.tiles) || !validRef(data.tileset)) throw new TypeError("Invalid MapViewRenderData");
+      for (const tile of data.tiles) {
+        if (
+          !tile || typeof tile !== "object"
+          || !Number.isSafeInteger(tile.x) || tile.x < 0
+          || !Number.isSafeInteger(tile.y) || tile.y < 0
+          || ![0, 1, 2].includes(tile.z)
+          || !Number.isSafeInteger(tile.tileId) || tile.tileId < 384
+          || !Number.isSafeInteger(tile.depth) || tile.depth < 0
+        ) {
+          throw new TypeError("Invalid visible regular tile");
+        }
+      }
       this._latestData = data;
-      this._paintLatest();
+      this._clearLayers();
+      void this._paintLatest();
     }
 
     async _paintLatest() {
       const requested = this._latestData;
-      this._context.clearRect(0, 0, 640, 480);
       if (!requested) return;
       let image;
-      try { image = await this._image(requested.tileset); } catch { return; }
-      const current = this._latestData;
-      if (!current || resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset)) return;
-      this._context.clearRect(0, 0, 640, 480);
-      for (const tile of current.tiles) {
-        if (!tile || !Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y) || !Number.isSafeInteger(tile.tileId) || tile.tileId < 384) throw new TypeError("Invalid visible regular tile");
-        const source = tile.tileId - 384;
-        const sx = (source % 8) * 32;
-        const sy = Math.floor(source / 8) * 32;
-        this._context.drawImage(image, sx, sy, 32, 32, tile.x * 32 - current.cameraX, tile.y * 32 - current.cameraY, 32, 32);
+      try {
+        image = await this._image(requested.tileset);
+      } catch {
+        const current = this._latestData;
+        if (!current) return;
+        if (resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset)) return;
+        this._clearLayers();
+        return;
       }
+      const current = this._latestData;
+      if (!current) return;
+      if (resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset)) return;
+
+      const buckets = new Map();
+      for (const tile of current.tiles) {
+        let bucket = buckets.get(tile.depth);
+        if (!bucket) {
+          bucket = [];
+          buckets.set(tile.depth, bucket);
+        }
+        bucket.push(tile);
+      }
+
+      const groups = [...buckets.entries()]
+        .sort(([leftDepth], [rightDepth]) => leftDepth - rightDepth);
+
+      for (let index = 0; index < groups.length; index += 1) {
+        const [depth, tiles] = groups[index];
+        const layer = this._ensureLayer(index);
+        layer.context.clearRect(0, 0, 640, 480);
+        layer.canvas.style.zIndex = String(tileStackValue(depth));
+
+        for (const tile of tiles) {
+          const source = tile.tileId - 384;
+          const sx = (source % 8) * 32;
+          const sy = Math.floor(source / 8) * 32;
+          layer.context.drawImage(
+            image,
+            sx, sy, 32, 32,
+            tile.x * 32 - current.cameraX,
+            tile.y * 32 - current.cameraY,
+            32, 32,
+          );
+        }
+      }
+
+      this._trimLayers(groups.length);
     }
   }
 
@@ -87,7 +174,7 @@
       super();
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = ":host{position:absolute;display:block;image-rendering:pixelated}canvas{display:block;image-rendering:pixelated}";
+      style.textContent = ":host{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas{display:block;image-rendering:pixelated}";
       this._canvas = document.createElement("canvas");
       shadow.append(style, this._canvas);
       this._context = this._canvas.getContext("2d", { alpha: true });
@@ -95,7 +182,7 @@
     }
 
     receiveRenderData(data) {
-      if (!data || ![2, 4, 6, 8].includes(data.direction) || data.pattern !== 0 || !validRef(data.sprite)) throw new TypeError("Invalid MapSpriteRenderData");
+      if (!data || ![2, 4, 6, 8].includes(data.direction) || data.pattern !== 0 || !validRef(data.sprite) || !Number.isSafeInteger(data.y) || data.y < 0) throw new TypeError("Invalid MapSpriteRenderData");
       this._latestData = data;
       this._paintLatest();
     }
@@ -119,6 +206,8 @@
       this.style.top = `${current.screenY + 32 - frameHeight}px`;
       this.style.width = `${frameWidth}px`;
       this.style.height = `${frameHeight}px`;
+      const depth = characterVisualDepth(current.y, frameHeight);
+      this.style.zIndex = String(characterStackValue(depth));
     }
   }
 
