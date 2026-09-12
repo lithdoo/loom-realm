@@ -9,76 +9,78 @@
 
 当前本地 Essentials v21.1 示例已经能读取真实 `Map/{id}`、`Tileset/{id}`、Tileset PNG 和 Character PNG，并完成普通 tile 绘制、玩家显示、方向键逐格移动与通行判定。
 
-当前缺口是：地图先被整体画进一个 Canvas，玩家 `lr-map-sprite` 再作为独立元素画在 Canvas 上方，因此玩家永远盖住所有地图像素。Tileset `priorities` 虽已进入 consumer record，但只参与通行判定，没有进入 presentation depth。
+当前缺口是：`lr-map-view` 先把全部地图 tile flatten 到一个 Canvas，`lr-map-sprite` 再显示在该 Canvas 上方，因此玩家永远盖住所有地图像素。Tileset `priorities` 已经进入 M14 consumer record，但目前只参与通行判定，没有参与视觉遮挡。
 
-本设计的目标是：
+本设计只增加完成当前真实需求所需的最小机制：
 
 ```text
-真实 RMXP / Essentials map facts
+Map.data[x,y,z] + Tileset.priorities[tileId]
         ↓
-@loomrealm-game/map 的地图视觉深度语义
+@loomrealm-game/map 计算 tile visual depth
         ↓
-Map RenderData
+VisibleTile 增加 depth
         ↓
-lr-map-view 内部按深度组合 tile Canvas 与角色
+lr-map-view 按 depth 分组绘制 Canvas
+
+player y + 实际 character frame height
         ↓
-玩家在树冠、屋檐、柜台、桥、门楣等环境前后得到与原版一致的遮挡
+lr-map-sprite 计算自身 visual depth
+        ↓
+CSS stacking 与 tile Canvas 交错
 ```
 
-本设计不修改 M14/M15 已 Closed 的 framework contract，不把 RMXP 层级概念上推到 LoomRealm Renderer / Main / Subsystem framework。
+不修改 M14/M15 已 Closed 的 framework contract，不把 RMXP priority、tile layer 或 character depth 上推到 LoomRealm Renderer / Main / Subsystem framework。
 
 ---
 
-## 2. 现状与问题
+## 2. 现状
 
 当前 `game-libs/map/src/semantics.ts` 中：
 
 ```ts
 interface VisibleTile {
-  x: number;
-  y: number;
-  z: 0 | 1 | 2;
-  tileId: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: 0 | 1 | 2;
+  readonly tileId: number;
 }
 ```
 
-`projectVisibleTiles()` 依次遍历 `Map.data` 的 `z=0,1,2`，当前 browser presentation 再按照该数组顺序把所有 tile 画进同一个 Canvas。
+`projectVisibleTiles()` 按 `z=0,1,2` 遍历 `Map.data`。当前 browser presentation 再按数组顺序把所有 tile 画入同一个 Canvas。
 
-当前 `game-libs/map/browser/map.browser.js` 的结构等价于：
+当前结构等价于：
 
 ```text
 lr-map-view
 ├─ canvas            ← 所有地图 tile 已经 flatten
-└─ entities / slot
-   └─ lr-map-sprite  ← 玩家永远在整个 Canvas 上方
+└─ slot
+   └─ lr-map-sprite  ← 玩家始终在整个地图 Canvas 上方
 ```
 
-因此现在只有「地图 tile 之间的绘制顺序」，没有「地图 tile 与角色之间的视觉深度」。
-
-`Map.data` 的第三维 `z` 不能直接视为最终视觉深度。它表示地图编辑器中的 tile stack；玩家遮挡还需要消费 `Tileset.priorities[tileId]`，并与角色脚点的垂直位置共同决定最终显示前后。
+这里的 `Map.data.z` 只是 RMXP 地图 tile stack 的一个 source 维度，不能单独决定 tile 与角色之间的最终前后关系。视觉遮挡还需要 `Tileset.priorities[tileId]` 和角色脚点位置。
 
 ---
 
-## 3. 三种层级必须分开
+## 3. 最小层级模型
 
-### 3.1 Map layer
+本设计只保留三个事实，不新增 Layer/Depth/SceneGraph 类层次。
+
+### 3.1 Map tile stack
 
 来源：
 
 ```text
-Map.data[x, y, layer]
-layer ∈ {0,1,2}
+Map.data[x, y, z]
+z ∈ {0,1,2}
 ```
 
-它表示同一个地图坐标上的三层 tile 数据。
+保留现有字段名 `z`，不为了本需求改名为 `layer`。它继续负责：
 
-职责：
+- 表示 source tile stack；
+- 保持现有 `z=0 → 1 → 2` 的稳定 tile 顺序；
+- 当多个 tile 最终落到同一 visual depth 时，维持确定性的内部绘制顺序。
 
-- 保留 source tile stack；
-- 当多个 tile 落入同一个 visual depth bucket 时，作为稳定的内部绘制顺序之一；
-- 不单独决定 tile 是否遮住玩家。
-
-实现中建议把当前 `VisibleTile.z` 重命名为 `layer`，避免与最终 visual depth 混淆。
+它不单独决定是否遮住角色。
 
 ### 3.2 Tileset priority
 
@@ -90,18 +92,13 @@ Tileset.priorities[tileId]
 
 该字段已经是 M14 `Tileset/{id}` consumer projection 的正式字段，无需扩 importer。
 
-职责：
-
-- 保留 RMXP/Essentials 对 tile 视觉高度的事实；
-- `priority == 0` 表示普通底层 tile；
-- `priority > 0` 的 tile 随地图 Y 与 priority 进入不同的视觉深度；
-- 同一 priority 向下移动一格，与 priority 增加一级，都会使视觉深度增加一个 tile 高度。
+它是 tile visual depth 的 source fact。`priority=0` 是普通底层 tile；`priority>0` 的 tile 随地图 Y 和 priority 进入更高的视觉深度。
 
 ### 3.3 Character depth
 
-角色不是固定在一个全局 “entity layer”。角色的深度跟随脚点 Y；较高的 character frame 还需要原版兼容的高度修正，使角色能正确夹在相邻 priority tile 之间。
+玩家不是固定在一个全局 entity layer。角色深度跟随其脚点 Y，同时受实际 character frame 高度影响。
 
-所以最终关系不是：
+最终画面因此是一个 numeric depth 序列，而不是固定的：
 
 ```text
 ground
@@ -109,30 +106,13 @@ player
 foreground
 ```
 
-而是一个可交错的有序序列：
-
-```text
-depth 0       普通地面
-...
-depth N       priority tile
-...
-depth P       player
-...
-depth N+32    priority tile
-...
-```
-
-后续 NPC/Event sprite 也可以自然进入同一 map-local depth 空间，而不需要把当前实现推翻成新的 SceneGraph。
-
 ---
 
-## 4. Visual depth 语义草案
+## 4. Tile visual depth
 
-### 4.1 Tile depth
+采用 map-local world depth。camera 只影响屏幕位置，不参与谁在谁前面的判断。
 
-本设计采用世界坐标中的 map-local depth；camera 只影响屏幕位置，不影响谁在谁前面。
-
-候选规则：
+候选兼容规则：
 
 ```ts
 const TILE_SIZE = 32;
@@ -143,97 +123,56 @@ function tileVisualDepth(y: number, priority: number): number {
 }
 ```
 
-该表达满足 RMXP Tilemap 的关键顺序性质：
+该规则表达以下顺序性质：
 
 ```text
-priority=0
-→ 恒处于普通地图底层
+priority = 0
+→ 普通地图底层
 
-相同 y：priority + 1
+相同 y，priority + 1
 → depth + 32
 
-相同 priority：y + 1
+相同 priority，y + 1
 → depth + 32
 ```
 
-注意：此公式在本草案阶段是兼容候选，不作为新的冻结 framework contract。实现前必须用真实 Essentials v21.1 map 事实和原版可观察行为做至少一组前/后对照；如 source evidence 表明有细节差异，应只修正 `@loomrealm-game/map` 内部的 map semantics。
+该公式在 Draft 阶段只是 RMXP/Essentials 兼容候选，不是新的冻结 framework contract。实现前需要用真实 Essentials v21.1 map 与原版可观察行为验证至少一个“玩家在 tile 前”和一个“玩家在 tile 后”的场景。
 
-### 4.2 Character depth
+如果实证发现细节差异，只修正 `@loomrealm-game/map` 内部兼容规则。
 
-Runtime 已知道玩家 logical tile position，但 browser 在加载实际 Character PNG 后才知道一帧真实高度。因此职责应拆成：
+### Camera
 
-```text
-Runtime
-→ 提供角色脚点的 world depth base
-
-Browser map presentation
-→ 根据实际 character frame height 做原版兼容修正
-```
-
-候选基础：
-
-```ts
-const depthBase = y * 32 + 32;
-```
-
-Browser 加载 4×4 character sheet 后：
-
-```ts
-const frameHeight = image.height / 4;
-const depth = depthBase + (frameHeight > 32 ? 31 : 0);
-```
-
-这里的高度修正同样属于 map presentation compatibility rule，不应进入 LoomRealm Renderer 通用 contract。实现时要用真实 Essentials character sheet 与遮挡场景验证边界，尤其验证同深度附近的 tie 行为。
-
-### 4.3 Camera 不参与 depth authority
-
-当前 camera：
+visual depth 使用 world Y：
 
 ```text
-world position
-→ cameraX / cameraY
-→ screen position
+cameraX / cameraY
+→ 只影响 screen position
+
+visual depth
+→ 只影响 draw order
 ```
 
-visual depth 比较应使用 world Y，不应把 `cameraY` 写进 authoritative depth。原因是 tile 和 character 会被 camera 同量平移，比较前后时 camera offset 会抵消。
-
-因此：
-
-```text
-camera
-→ 只决定 draw position
-
-map-local depth
-→ 只决定 draw order
-```
+不把 `cameraY` 写进 depth 计算。
 
 ---
 
-## 5. RenderData 设计
+## 5. RenderData 最小改动
 
-### 5.1 VisibleTile
+### 5.1 VisibleTile 只增加一个字段
 
-建议把当前：
-
-```ts
-{ x, y, z, tileId }
-```
-
-改为：
+保持当前结构，增加 `depth`：
 
 ```ts
 interface VisibleTile {
   readonly x: number;
   readonly y: number;
-  readonly layer: 0 | 1 | 2;
+  readonly z: 0 | 1 | 2;
   readonly tileId: number;
   readonly depth: number;
 }
 ```
 
-`priority` 是计算 `depth` 的 source fact，但 browser compositor 没有必须再次理解 priority 的理由。因此默认不把 `priority` 重复放入 RenderData；它留在 `semantics.ts` 的计算与单测里。
-
-如果后续调试证据表明确实需要 browser diagnostics，再增加 package-private/debug 信息，不为了方便先扩正式数据面。
+不把 `priority` 重复送到 browser。Browser 只需要最终 `depth`；priority 留在 `semantics.ts` 作为 source fact 和测试输入。
 
 ### 5.2 projectVisibleTiles
 
@@ -243,135 +182,163 @@ interface VisibleTile {
 projectVisibleTiles(map, cameraX, cameraY)
 ```
 
-变成：
+改成：
 
 ```ts
 projectVisibleTiles(map, tileset, cameraX, cameraY)
 ```
 
-概念实现：
+核心变化只有：
 
 ```ts
-for (const layer of [0, 1, 2] as const) {
-  for (const visible x/y) {
-    const tileId = tableAt(map.data, x, y, layer);
-    if (tileId === 0) continue;
+const tileId = tableAt(map.data, x, y, z);
+if (tileId === 0) continue;
 
-    const priority = tableAt(tileset.priorities, tileId);
-    const depth = tileVisualDepth(y, priority);
+const priority = tableAt(tileset.priorities, tileId);
+const depth = tileVisualDepth(y, priority);
 
-    tiles.push({ x, y, layer, tileId, depth });
-  }
-}
+tiles.push({ x, y, z, tileId, depth });
 ```
 
-现有 regular tile / bounds / tileset table validation 继续 fail closed。
+现有 tileId / table bounds / regular tile validation 继续 fail closed。
 
-priority 一旦成为可见行为的输入，应新增明确验证。预期 RMXP priority 范围为普通 priority levels；实际允许集合在冻结前应从真实 Essentials v21.1 数据扫描和原版证据确认，而不是只因为碰撞代码当前使用了 `priority === 0` / `priority > 0` 就直接假设所有值均合法。
+priority 一旦成为可见行为输入，应增加最小合法性验证；实际允许值域应从 Essentials v21.1 真实数据和 RMXP 行为证据确认后再冻结。
 
-### 5.3 Player RenderData
+### 5.3 Player RenderData 不新增 depthBase
 
-当前 player data：
+当前 player data 已经包含：
 
 ```text
-x/y
-screenX/screenY
+x / y
+screenX / screenY
 direction
 pattern
 sprite
 ```
 
-增加：
+不新增 `depthBase`，因为它只是 `y` 的派生值，会制造重复状态。
 
-```ts
-depthBase: y * 32 + 32
+`lr-map-sprite` 已经知道 `y`，并在加载 Character PNG 后知道实际 `frameHeight`，因此最终 character visual depth 直接在 browser presentation 内计算。
+
+候选兼容规则：
+
+```js
+const frameHeight = image.height / 4;
+const depth = current.y * 32 + 32 + (frameHeight > 32 ? 31 : 0);
 ```
 
-不在 Runtime 里输出最终 `depth`，因为 Runtime 不应为了 presentation ordering 去解析 PNG 尺寸。
+这里的 frame-height 修正同样属于 map presentation compatibility rule，需要真实 Essentials/RGSS 行为验证后再冻结。
 
 ---
 
-## 6. Browser composition：Depth Bucket Canvas
+## 6. Browser composition
 
-### 6.1 不采用两个固定 Canvas
+### 6.1 为什么不能继续使用单 Canvas
 
-最简单的：
+当前结构：
 
 ```text
-background canvas
+全部 tile Canvas
+↓
 player
-foreground canvas
 ```
 
-只能处理一个 player。后续出现 NPC/Event 后会需要：
+无法表达：
 
 ```text
-tile
-NPC
+低 depth tile
+↓
 player
-tile
-NPC
-tile
+↓
+高 depth tile
 ```
 
-两个固定 Canvas 无法表达。
+因此至少需要让 tile presentation 能分成多个可与 `lr-map-sprite` 交错的 stacking participant。
 
-### 6.2 不采用一 tile 一个 DOM element
+### 6.2 Depth Bucket Canvas
 
-640×480 的可视区约 20×15 格，三层普通 tile 最坏会接近数百个可见 tile。把每个 tile 变成 DOM node 会无必要地放大 presentation 成本，也偏离当前 Canvas 路线。
-
-### 6.3 采用 depth bucket
-
-`lr-map-view` 内按 `depth` 对可见 tile 分组：
+`lr-map-view` 按当前可见 tile 的 `depth` 分组：
 
 ```text
-depth = 0
-→ 一个 Canvas，画全部 depth=0 tile
+depth=0
+→ 一个 Canvas
 
-depth = 256
-→ 一个 Canvas，画全部 depth=256 tile
+depth=256
+→ 一个 Canvas
 
-depth = 288
-→ 一个 Canvas，画全部 depth=288 tile
-...
+depth=288
+→ 一个 Canvas
 ```
 
-角色本身保持 `lr-map-sprite`，使用同一 map-local depth 作为 CSS stacking 值：
+`lr-map-sprite` 独立计算自己的 numeric depth，并设置 CSS `z-index`。
+
+最终浏览器自然得到：
 
 ```text
-canvas depth=0
-canvas depth=256
-lr-map-sprite depth=287
-canvas depth=288
-canvas depth=320
+canvas z=256
+player z=287
+canvas z=288
 ```
 
-这样可以在保持 Canvas 聚合绘制的同时，让 tile 与 character 交错。
+采用 bucket 的理由只基于当前需求：
+
+- tile depth 由 Map/Tileset facts 决定；
+- player 最终 depth 依赖实际 character frame height；
+- 两者各自在自己的 presentation element 中得到 numeric depth；
+- CSS stacking 可以直接组合它们，不需要 `lr-map-view` 反向知道 player bitmap 尺寸，也不需要 `lr-map-sprite` 把最终 depth 回传给父组件。
+
+未来 NPC/Event 如能复用同一 numeric depth 只是附带收益，不作为本设计成立的前提。
+
+### 6.3 不建立 depth→Canvas 长期 registry
+
+不要实现长期增长的：
+
+```js
+this._depthCanvases = new Map();
+```
+
+因为 world depth 会随地图 Y 改变，玩家移动后可能不断出现新的 depth 值。
+
+使用一个仅针对当前可见 bucket 数量的可复用 Canvas 数组即可：
+
+```js
+this._layers = [];
+```
+
+每次重绘：
+
+```text
+visible tiles
+→ 按 depth 分组并按 depth 排序
+→ 当前得到 N 个 bucket
+→ 复用前 N 个 canvas
+→ 设置每个 canvas 的 z-index = bucket.depth
+→ 多余 canvas 隐藏或移除
+```
+
+概念实现：
+
+```js
+const groups = groupTilesByDepth(current.tiles);
+
+for (let i = 0; i < groups.length; i += 1) {
+  const layer = this._ensureLayer(i);
+  layer.canvas.style.zIndex = String(groups[i].depth);
+  paintTiles(layer.context, groups[i].tiles);
+}
+
+this._trimLayers(groups.length);
+```
+
+这里不新增 `DepthManager`、`LayerManager`、`CanvasRegistry`、`SceneGraph` 等抽象。
 
 ### 6.4 Bucket 内顺序
 
-同一个 depth bucket 内继续保持 source 稳定顺序：
+同一 depth 内直接保持 `projectVisibleTiles()` 现有输出顺序即可。由于该函数当前按 `z=0 → 1 → 2` 遍历，source tile stack 的稳定顺序自然保留。
 
-```text
-layer 0
-→ layer 1
-→ layer 2
-```
-
-并保持当前 visible projection 对 x/y 的确定性遍历。
-
-最终排序责任可以理解为：
-
-```text
-第一层：visual depth
-第二层：Map.data layer / 现有稳定 tile order
-```
-
-不要把 `Map.data.layer` 当成跨角色的全局深度。
+不再额外引入第二套 layer sort key。
 
 ### 6.5 Shadow DOM / slot
-
-当前 `.entities` 如果形成独立 stacking context，会导致 `lr-map-sprite` 的 z-index 无法与内部 tile canvas 真正交错。
 
 重构后必须保证：
 
@@ -381,29 +348,40 @@ depth canvases
 slotted lr-map-sprite
 ```
 
-处在同一个 `lr-map-view` stacking context 中。
+能够在同一个 `lr-map-view` stacking context 中比较 z-index。
 
-实现可以使用不形成额外 stacking context 的 slot/container；具体 CSS 不是本草案的逻辑合同。该行为必须由真实 Chromium presentation test 验证，不能只靠 Node/DOM 推断。
+具体 DOM/CSS 写法不是逻辑合同，但必须用目标 Chromium/Electron 做真实 presentation test；不能只靠 Node 测试推断 Shadow DOM stacking 行为。
 
 ---
 
-## 7. Ownership / 边界
+## 7. Ownership / 修改范围
 
-本需求应只落在 map consumer：
+本需求只修改 map consumer：
+
+```text
+game-libs/map/src/semantics.ts
+    + tileVisualDepth()
+    + projectVisibleTiles(..., tileset, ...)
+    + VisibleTile.depth
+
+game-libs/map/src/runtime.ts
+    + 调整 projectVisibleTiles() 调用
+
+game-libs/map/browser/map.browser.js
+    + depth bucket Canvas
+    + lr-map-sprite numeric z-index
+
+game-libs/map/test/*
+    + 最小 semantics / browser evidence
+```
+
+默认不修改：
 
 ```text
 tools/fixtures/essentials-v21.1
-    已有 priorities projection；默认不改
-
-@loomrealm-game/map / semantics.ts
-    RMXP tile priority → map-local visual depth
-
-@loomrealm-game/map / runtime.ts
-    输出 computed tile depth + player depthBase
-
-@loomrealm-game/map / browser/map.browser.js
-    depth bucket Canvas + sprite stacking
 ```
+
+因为 `Tileset.priorities` 已经存在于 M14 consumer projection。
 
 明确不修改：
 
@@ -415,9 +393,7 @@ packages/data
 packages/wire
 ```
 
-理由：priority、tile layer、character foot depth 都是 map game library 的业务 presentation semantics，不是 LoomRealm framework 的通用 authority。
-
-同样不新增：
+也不新增：
 
 ```text
 SceneGraph
@@ -427,46 +403,42 @@ PresentationRuntime
 Renderer generic z-sort API
 ```
 
-当前只有一个真实 map consumer，先在 `@loomrealm-game/map` 内把具体需求做对。
+priority、tile stack 和 character depth 都是 `@loomrealm-game/map` 的业务 presentation semantics。
 
 ---
 
 ## 8. 测试策略
 
-### 8.1 Pure semantics tests
+### 8.1 Pure semantics
 
-在 `game-libs/map/test/semantics.test.mjs` 增加：
+只保留能保护真实规则的测试：
 
 1. `priority=0` 得到底层 depth；
-2. 相同 y，priority 每增加 1，depth 增加 32；
-3. 相同 priority，y 每增加 1，depth 增加 32；
-4. `projectVisibleTiles()` 从真实 `Tileset.priorities` 查值，而不是从 Map layer 猜 depth；
-5. 同一个 depth bucket 中保持 `layer=0,1,2` 的稳定顺序；
-6. cameraX/cameraY 改变不会改变同一 world tile 的 depth；
-7. 非法 priority / 越界 tileId 按最终冻结的 source rule fail closed。
+2. 相同 y 时，priority 增加会使 depth 增加；
+3. 相同 priority 时，y 增加会使 depth 增加；
+4. `projectVisibleTiles()` 确实从 `Tileset.priorities` 得到 depth，而不是从 `Map.data.z` 推断；
+5. 多个 tile 落在同一个 depth 时，现有 `z=0 → 1 → 2` 顺序保持稳定；
+6. 非法 priority / tileId 按最终实证规则 fail closed。
 
-### 8.2 Browser presentation tests
+不单独测试“camera 不改变 depth”：`tileVisualDepth(y, priority)` 的签名中本来就没有 camera，这个性质由代码结构直接保证。
 
-至少验证三种排序：
+### 8.2 Browser presentation
+
+至少用 Chromium 验证：
 
 ```text
-低 depth tile
-< player
-
-高 depth tile
-> player
-
-同一 player 移动到相邻 y 后
-遮挡关系随新位置立即变化
+低 depth tile < player
+高 depth tile > player
+玩家 y 改变后遮挡关系同步改变
 ```
 
-重点测试真实 Chromium 的 stacking，而不是只检查 RenderData 数字。
+重点验证真实 Canvas / Shadow DOM / CSS stacking，而不仅检查 RenderData 数字。
 
 ### 8.3 Real Essentials acceptance
 
-最终验收必须使用本目录初始化得到的真实 Essentials v21.1 FSDB，不新增假地图替代玩家可见验收。
+最终验收必须使用本目录真实 Essentials v21.1 FSDB。
 
-选择至少一个真实场景，证明：
+选择至少一个真实遮挡场景：
 
 ```text
 玩家走到树冠 / 屋檐 / 门楣等后方
@@ -476,15 +448,15 @@ Renderer generic z-sort API
 → 角色重新完整可见
 ```
 
-验收坐标和 tile evidence 应在实现阶段从真实 FSDB 中选取并记录，不在本草案中凭印象硬编码。
+如原版 Essentials 同地图可运行，以原版画面作为视觉前后关系 oracle。
 
-如果原版 Essentials 的同一地图可运行，应把原版画面作为前后关系 oracle；LoomRealm 不另发明一套视觉层级规则。
+验收坐标和 tile evidence 在实现阶段从真实数据中选取，不在本 Draft 中凭印象硬编码。
 
 ---
 
-## 9. 建议落地顺序
+## 9. 落地顺序
 
-### Slice A — 冻结 map-local depth semantics
+### Slice 1 — Depth semantics
 
 只改：
 
@@ -497,37 +469,19 @@ semantics.test.mjs
 
 ```text
 tileVisualDepth()
-VisibleTile.layer
 VisibleTile.depth
 projectVisibleTiles(map, tileset, ...)
 priority validation/evidence
 ```
 
-先把「什么应该在谁前面」做成纯函数并测准。
+先把“什么应该在谁前面”做成最小纯函数并测准。
 
-### Slice B — RenderData plumbing
+### Slice 2 — Browser realization
 
 改：
 
 ```text
 runtime.ts
-相关 runtime / M14 consumer tests
-```
-
-完成：
-
-```text
-tile depth → MapViewRenderData
-player depthBase → MapSpriteRenderData
-```
-
-确认没有修改 Main / Renderer / Subsystem framework contract。
-
-### Slice C — Browser compositor
-
-改：
-
-```text
 browser/map.browser.js
 browser presentation tests
 ```
@@ -535,27 +489,23 @@ browser presentation tests
 完成：
 
 ```text
-single map canvas
-→ depth bucket canvases
-
-player
-→ map-local CSS stacking depth
+tile depth 进入 RenderData
+single map canvas → 当前可见 depth bucket canvases
+lr-map-sprite → numeric z-index
 ```
 
-验证 Shadow DOM / slot stacking 在 Chromium 中真实成立。
+### Slice 3 — Real asset qualification
 
-### Slice D — Real asset qualification
-
-使用 `essentials-v21.1-local` 的真实 FSDB：
+使用 `essentials-v21.1-local` 真实 FSDB：
 
 ```text
 选定真实遮挡场景
-→ 与原版前后关系对照
-→ 玩家移动前后均观察正确
+→ 与原版关系对照
+→ 玩家移动前后均正确
 → 记录 evidence
 ```
 
-只有这一刀通过后，才把需求文档第 1 节视为已落地。
+通过后再把需求文档第 1 节视为已落地。
 
 ---
 
@@ -568,54 +518,47 @@ player
 按住方向连续移动
 地图 Transfer / Map Event
 NPC/Event lifecycle
-always_on_top 等尚未出现的 event character 行为
+always_on_top 等 event character 行为
 autotile 新支持
 战斗 / 菜单 / 对话
 通用 Renderer scene graph
 ```
 
-如果后续 NPC/Event 成为真实 consumer，优先复用这里形成的 map-local depth 空间；只有出现无法由具体 map compositor 表达的第二个独立真实 consumer 时，再讨论是否抽公共 presentation mechanism。
+如果后续出现新的真实 consumer，只在其确实无法复用当前具体 map compositor 时，再讨论是否抽公共 presentation mechanism。
 
 ---
 
 ## 11. 待实证问题
 
-以下问题在实现前必须通过真实 Essentials / RGSS 行为证据确认，不在 Draft 阶段擅自冻结：
+实现前需要通过真实 Essentials / RGSS 行为证据确认：
 
-1. character frame `height > 32` 时的精确 depth 修正规则，以及 Essentials 是否在基础 RMXP 上有覆写；
-2. tile 与 character 出现相同最终 depth 时的 tie-break 行为；
-3. Essentials v21.1 实际 Tileset priority 值域及是否存在特殊值；
-4. 当前 local example 的最佳真实遮挡验收地点；
-5. Shadow DOM slot 与内部 canvas 在目标 Chromium/Electron 版本下的 stacking 细节。
+1. tile visual depth 的精确公式；
+2. character frame `height > 32` 时的精确 depth 修正规则，以及 Essentials 是否覆盖基础 RMXP 行为；
+3. tile 与 character 得到相同最终 depth 时的 tie-break；
+4. Essentials v21.1 实际 Tileset priority 值域及特殊值；
+5. 当前 local example 中最合适的真实遮挡验收地点；
+6. 目标 Chromium/Electron 下 Shadow DOM slot 与内部 Canvas 的 stacking 行为。
 
-这些都是 `@loomrealm-game/map` 的兼容性证据问题，不应先转化为 LoomRealm framework abstraction。
+这些都是 `@loomrealm-game/map` 的兼容性证据问题，不应转化成 LoomRealm framework abstraction。
 
 ---
 
 ## 12. 预期完成态
 
-实现完成后，map presentation 应从当前：
+实现完成后，变化应保持非常小：
 
 ```text
-全部地图像素
-↓
-玩家
+semantics.ts
+→ 增加一个 tile depth 规则
+
+VisibleTile
+→ 增加一个 depth 字段
+
+runtime.ts
+→ projectVisibleTiles() 多传 tileset
+
+map.browser.js
+→ 一个可复用 Canvas 数组 + sprite z-index
 ```
 
-变成：
-
-```text
-RMXP Map layer + Tileset priority
-        ↓
-map-local tile visual depth
-        ↓
-Depth Bucket Canvas
-
-player logical foot position + actual frame height
-        ↓
-map-local character visual depth
-        ↓
-与 tile bucket 交错
-```
-
-最终玩家看到的是原版地图已有的前后关系；LoomRealm Renderer 仍然只负责已有 Render Store / Web projection 机制，不知道 tree、roof、priority 或 RMXP tile layer 的存在。
+最终玩家看到原版地图已有的前后关系；LoomRealm Renderer 仍然只负责既有 Render Store / Web projection 机制，不知道 tree、roof、priority 或 RMXP tile stack 的存在。
