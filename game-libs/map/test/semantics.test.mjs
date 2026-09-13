@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
+import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -152,4 +152,55 @@ test("movement checks both source direction and target reverse direction", () =>
   const passable = fixture();
   assert.equal(canMove(validateMapRecord(passable.map), validateTilesetRecord(passable.tileset, 1), 10, 8, 6, 1, 0), true);
   assert.equal(canMove(validateMapRecord(passable.map), validateTilesetRecord(passable.tileset, 1), 23, 8, 6, 1, 0), false);
+});
+
+test("validateMapTransferRecord accepts empty/step/contact/edge records", () => {
+  assert.deepEqual(validateMapTransferRecord({ id: 1, steps: [], contacts: [], edges: [] }, 1), {
+    id: 1, steps: [], contacts: [], edges: [],
+  });
+  const record = validateMapTransferRecord({
+    id: 66,
+    steps: [{ x: 12, y: 7, targetMapId: 50, targetX: 12, targetY: 7, targetDirection: null }],
+    contacts: [{ x: 12, y: 8, direction: 8, targetMapId: 67, targetX: 4, targetY: 7, targetDirection: 8 }],
+    edges: [{ x: 21, y: 8, direction: 6, targetMapId: 2, targetX: 0, targetY: 8 }],
+  }, 66);
+  assert.equal(record.steps[0].targetDirection, null);
+  assert.equal(record.contacts[0].direction, 8);
+  assert.equal(record.edges[0].targetMapId, 2);
+  assert.equal("targetDirection" in record.edges[0], false);
+});
+
+test("validateMapTransferRecord rejects unknown fields, wrong ids, directions, duplicates, and extra edge fields", () => {
+  assert.throws(() => validateMapTransferRecord({ id: 1, steps: [], contacts: [], edges: [], extra: true }, 1), /field set/);
+  assert.throws(() => validateMapTransferRecord({ id: 2, steps: [], contacts: [], edges: [] }, 1), /Content key/);
+  assert.throws(() => validateMapTransferRecord({
+    id: 1, steps: [], contacts: [{ x: 0, y: 0, direction: 1, targetMapId: 2, targetX: 0, targetY: 0, targetDirection: null }], edges: [],
+  }, 1), /direction/);
+  assert.throws(() => validateMapTransferRecord({
+    id: 1,
+    steps: [
+      { x: 1, y: 1, targetMapId: 2, targetX: 0, targetY: 0, targetDirection: null },
+      { x: 1, y: 1, targetMapId: 3, targetX: 0, targetY: 0, targetDirection: 2 },
+    ],
+    contacts: [],
+    edges: [],
+  }, 1), /duplicate/);
+  assert.throws(() => validateMapTransferRecord({
+    id: 1, steps: [], contacts: [], edges: [{ x: 0, y: 0, direction: 6, targetMapId: 2, targetX: 0, targetY: 0, targetDirection: 6 }],
+  }, 1), /field set/);
+});
+
+test("validateMapTransferRecord returns a detached deep-frozen record", () => {
+  const input = {
+    id: 1,
+    steps: [{ x: 1, y: 2, targetMapId: 2, targetX: 3, targetY: 4, targetDirection: 8 }],
+    contacts: [],
+    edges: [],
+  };
+  const record = validateMapTransferRecord(input, 1);
+  input.steps[0].x = 99;
+  assert.equal(record.steps[0].x, 1);
+  assert.ok(Object.isFrozen(record));
+  assert.ok(Object.isFrozen(record.steps));
+  assert.ok(Object.isFrozen(record.steps[0]));
 });

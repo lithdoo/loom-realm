@@ -22,6 +22,43 @@ export interface TilesetRecord {
   readonly priorities: ProjectedTable;
 }
 
+export type TargetDirection = Direction | null;
+
+export interface StepTransfer {
+  readonly x: number;
+  readonly y: number;
+  readonly targetMapId: number;
+  readonly targetX: number;
+  readonly targetY: number;
+  readonly targetDirection: TargetDirection;
+}
+
+export interface ContactTransfer {
+  readonly x: number;
+  readonly y: number;
+  readonly direction: Direction;
+  readonly targetMapId: number;
+  readonly targetX: number;
+  readonly targetY: number;
+  readonly targetDirection: TargetDirection;
+}
+
+export interface EdgeTransfer {
+  readonly x: number;
+  readonly y: number;
+  readonly direction: Direction;
+  readonly targetMapId: number;
+  readonly targetX: number;
+  readonly targetY: number;
+}
+
+export interface MapTransferRecord {
+  readonly id: number;
+  readonly steps: readonly StepTransfer[];
+  readonly contacts: readonly ContactTransfer[];
+  readonly edges: readonly EdgeTransfer[];
+}
+
 export interface VisibleTile {
   readonly [key: string]: number;
   readonly x: number;
@@ -84,6 +121,88 @@ export function validateMapRecord(value: unknown): MapRecord {
   const data = validateTable(input.data, "Map.data");
   if (data.dimensions !== 3 || data.xSize !== width || data.ySize !== height || data.zSize !== 3) throw new TypeError("Map.data has an invalid 3D shape");
   return Object.freeze({ tileset_id: integer(input.tileset_id, "Map.tileset_id"), width, height, data });
+}
+
+function transferDirection(value: unknown, label: string): Direction {
+  if (value !== 2 && value !== 4 && value !== 6 && value !== 8) throw new TypeError(`${label} must be 2, 4, 6, or 8`);
+  return value;
+}
+
+function targetDirection(value: unknown, label: string): TargetDirection {
+  if (value === null) return null;
+  return transferDirection(value, label);
+}
+
+function exactObject(value: unknown, label: string, fields: readonly string[]): Record<string, unknown> {
+  const input = object(value, label);
+  if (!fields.every((key) => key in input) || Object.keys(input).length !== fields.length) throw new TypeError(`${label} has an invalid field set`);
+  return input;
+}
+
+function addUnique(seen: Set<string>, key: string, label: string) {
+  if (seen.has(key)) throw new TypeError(`${label} has a duplicate source key`);
+  seen.add(key);
+}
+
+export function validateMapTransferRecord(value: unknown, contentMapId: number): MapTransferRecord {
+  const input = exactObject(value, "MapTransfer", ["id", "steps", "contacts", "edges"]);
+  const id = integer(input.id, "MapTransfer.id");
+  if (id !== contentMapId) throw new TypeError("MapTransfer.id does not equal its Content key");
+  if (!Array.isArray(input.steps) || !Array.isArray(input.contacts) || !Array.isArray(input.edges)) {
+    throw new TypeError("MapTransfer steps/contacts/edges must be arrays");
+  }
+  const stepKeys = new Set<string>();
+  const contactKeys = new Set<string>();
+  const edgeKeys = new Set<string>();
+  const steps = Object.freeze(input.steps.map((item, index) => {
+    const label = `MapTransfer.steps[${index}]`;
+    const record = exactObject(item, label, ["x", "y", "targetMapId", "targetX", "targetY", "targetDirection"]);
+    const x = integer(record.x, `${label}.x`, false);
+    const y = integer(record.y, `${label}.y`, false);
+    addUnique(stepKeys, `${x},${y}`, label);
+    return Object.freeze({
+      x,
+      y,
+      targetMapId: integer(record.targetMapId, `${label}.targetMapId`),
+      targetX: integer(record.targetX, `${label}.targetX`, false),
+      targetY: integer(record.targetY, `${label}.targetY`, false),
+      targetDirection: targetDirection(record.targetDirection, `${label}.targetDirection`),
+    });
+  }));
+  const contacts = Object.freeze(input.contacts.map((item, index) => {
+    const label = `MapTransfer.contacts[${index}]`;
+    const record = exactObject(item, label, ["x", "y", "direction", "targetMapId", "targetX", "targetY", "targetDirection"]);
+    const x = integer(record.x, `${label}.x`, false);
+    const y = integer(record.y, `${label}.y`, false);
+    const direction = transferDirection(record.direction, `${label}.direction`);
+    addUnique(contactKeys, `${x},${y},${direction}`, label);
+    return Object.freeze({
+      x,
+      y,
+      direction,
+      targetMapId: integer(record.targetMapId, `${label}.targetMapId`),
+      targetX: integer(record.targetX, `${label}.targetX`, false),
+      targetY: integer(record.targetY, `${label}.targetY`, false),
+      targetDirection: targetDirection(record.targetDirection, `${label}.targetDirection`),
+    });
+  }));
+  const edges = Object.freeze(input.edges.map((item, index) => {
+    const label = `MapTransfer.edges[${index}]`;
+    const record = exactObject(item, label, ["x", "y", "direction", "targetMapId", "targetX", "targetY"]);
+    const x = integer(record.x, `${label}.x`, false);
+    const y = integer(record.y, `${label}.y`, false);
+    const direction = transferDirection(record.direction, `${label}.direction`);
+    addUnique(edgeKeys, `${x},${y},${direction}`, label);
+    return Object.freeze({
+      x,
+      y,
+      direction,
+      targetMapId: integer(record.targetMapId, `${label}.targetMapId`),
+      targetX: integer(record.targetX, `${label}.targetX`, false),
+      targetY: integer(record.targetY, `${label}.targetY`, false),
+    });
+  }));
+  return Object.freeze({ id, steps, contacts, edges });
 }
 
 export function validateTilesetRecord(value: unknown, contentId: number): TilesetRecord {

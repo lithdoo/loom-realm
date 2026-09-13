@@ -650,3 +650,38 @@ test("late tileset decode catches up from receivedAt and skips MapView rAF", { t
   }, "late tileset decode lands on target camera without rAF");
   assert.equal(await page.evaluate(() => window.__tileDestX()), 0);
 });
+
+test("late source tileset decode cannot overwrite a newer map-transfer target", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const sourceRef = tilesetRef("source");
+  const targetRef = tilesetRef("target");
+  await delayTileset(page, sourceRef);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: { ...viewData({
+      depth: 64,
+      tileset: sourceRef,
+      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 64 }],
+    }), mapId: 66 },
+    spritePayload: spriteData(0),
+  });
+  await waitForPendingImage(page, sourceRef);
+  await page.evaluate(({ viewPayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+  }, {
+    viewPayload: { ...viewData({
+      depth: 0,
+      tileset: targetRef,
+      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 0 }],
+    }), mapId: 2 },
+  });
+  await waitPainted(page, "0", "65");
+  await settlePendingImage(page, sourceRef, "resolve");
+  const info = await layerInfo(page);
+  const visibleZ = info.zIndex.filter((_, index) => info.hidden[index] === false);
+  assert.deepEqual(visibleZ, ["0"]);
+  assert.deepEqual(await compositeCenter(page), [255, 0, 0, 255]);
+});
