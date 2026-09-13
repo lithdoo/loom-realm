@@ -63,7 +63,10 @@ function condition(flags = {}) {
 function page(fields) {
   return object("RPG::Event::Page", {
     "@condition": fields.condition ?? condition(),
-    "@graphic": object("RPG::Event::Page::Graphic", { "@character_name": string(fields.graphic ?? "") }),
+    "@graphic": object("RPG::Event::Page::Graphic", {
+      "@character_name": string(fields.graphic ?? ""),
+      "@tile_id": fields.tileId ?? 0,
+    }),
     "@through": fields.through ?? false,
     "@always_on_top": fields.alwaysOnTop ?? false,
     "@trigger": fields.trigger ?? 1,
@@ -140,17 +143,34 @@ test("projects E-CONTACT-1 door contacts from the static page", () => {
   assert.ok(empty(records.get("67")));
 });
 
-test("projects return Exit contact with retained targetDirection null", () => {
+test("projects empty-graphic Exit as StepTransfer only when the event tile is d=0 passable", () => {
   const maps = [mapEntry(66, 22, 20), mapEntry(67, 10, 10)];
   const tilesets = [tilesetEntry()];
-  const exit = event(1, "Exit", 4, 8, [page({ graphic: "exit", commands: [transferCommand(66, 12, 7, 0)] })]);
+  const exit = event(1, "Exit", 4, 8, [page({ graphic: "", tileId: 0, commands: [transferCommand(66, 12, 7, 0)] })]);
   const records = byId(materializeMapTransferRecords([
     mapRoot(66, 22, 20, hash([])),
     mapRoot(67, 10, 10, hash([[1, exit]])),
   ], maps, tilesets, []));
+  assert.deepEqual(records.get("67").steps, [{
+    x: 4, y: 8, targetMapId: 66, targetX: 12, targetY: 7, targetDirection: null,
+  }]);
+  assert.equal(records.get("67").contacts.length, 0);
+});
+
+test("projects Map067-style empty-graphic Exit as ContactTransfer when the event tile is d=0 blocked", () => {
+  const paint = (values, width) => { values[4 + 8 * width] = 385; };
+  const maps = [mapEntry(66, 22, 20), mapEntry(67, 10, 10, 1, paint)];
+  const tilesets = [tilesetEntry((passages) => { passages[385] = 0x0f; })];
+  const exit = event(1, "Exit", 4, 8, [page({ graphic: "", tileId: 0, commands: [transferCommand(66, 12, 7, 0)] })]);
+  const records = byId(materializeMapTransferRecords([
+    mapRoot(66, 22, 20, hash([])),
+    mapRoot(67, 10, 10, hash([[1, exit]]), 1, paint),
+  ], maps, tilesets, []));
   assert.deepEqual(records.get("67").contacts.find((item) => item.x === 4 && item.y === 7 && item.direction === 2), {
     x: 4, y: 7, direction: 2, targetMapId: 66, targetX: 12, targetY: 7, targetDirection: null,
   });
+  assert.equal(records.get("67").contacts.length, 4);
+  assert.equal(records.get("67").steps.length, 0);
 });
 
 test("projects E-STEP-1 holes when the event tile is d=0 passable", () => {
@@ -169,15 +189,21 @@ test("projects E-STEP-1 holes when the event tile is d=0 passable", () => {
 });
 
 test("ignores unsupported events instead of emitting transfers", () => {
-  const maps = [mapEntry(1, 8, 8, 1, (values, width) => { values[2 + 2 * width] = 385; }), mapEntry(2, 8, 8)];
+  const maps = [mapEntry(1, 8, 8, 1, (values, width) => {
+    values[2 + 2 * width] = 385;
+    values[3 + 1 * width] = 385;
+  }), mapEntry(2, 8, 8)];
   const tilesets = [tilesetEntry((passages) => { passages[385] = 0x0f; })];
-  const blocked = mapValues(8, 8, (values, width) => { values[2 + 2 * width] = 385; });
+  const blocked = mapValues(8, 8, (values, width) => {
+    values[2 + 2 * width] = 385;
+    values[3 + 1 * width] = 385;
+  });
   const events = hash([
     [1, event(1, "hiddenitem", 1, 1, [page({ graphic: "item", commands: [transferCommand(2, 0, 0, 0)] })])],
     [2, event(2, "size(2,2)", 1, 2, [page({ graphic: "rock", commands: [transferCommand(2, 0, 0, 0)] })])],
     [3, event(3, "Action", 1, 3, [page({ trigger: 0, graphic: "npc", commands: [transferCommand(2, 0, 0, 0)] })])],
     [4, event(4, "Top", 1, 4, [page({ alwaysOnTop: true, graphic: "npc", commands: [transferCommand(2, 0, 0, 0)] })])],
-    [5, event(5, "Blank", 1, 5, [page({ graphic: "", commands: [transferCommand(2, 0, 0, 0)] })])],
+    [5, event(5, "BlankTile", 1, 5, [page({ graphic: "", tileId: 1, commands: [transferCommand(2, 0, 0, 0)] })])],
     [6, event(6, "Nested", 3, 3, [page({ graphic: "npc", commands: [command(201, 1, [0, 2, 0, 0, 0, 1])] })])],
     [7, event(7, "Variable", 3, 4, [page({ graphic: "npc", commands: [transferCommand(2, 0, 0, 0, 1)] })])],
     [8, event(8, "BlockedHole", 2, 2, [page({ through: true, commands: [transferCommand(2, 0, 0, 0)] })])],

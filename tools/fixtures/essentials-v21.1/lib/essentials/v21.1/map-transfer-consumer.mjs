@@ -127,14 +127,53 @@ function uniqueDirectTransfer(page) {
   };
 }
 
-function characterName(page) {
+function graphicInfo(page) {
   const graphic = page.fields["@graphic"];
   if (graphic?.kind !== "RmxpObject" || graphic.className !== "RPG::Event::Page::Graphic") {
     invalid("RPG::Event::Page @graphic must be RPG::Event::Page::Graphic");
   }
   const name = graphic.fields["@character_name"];
   if (name?.kind !== "RubyString" || typeof name.text !== "string") invalid("page graphic.character_name must be a RubyString");
-  return name.text;
+  return {
+    characterName: name.text,
+    tileId: integer(graphic.fields["@tile_id"], "page graphic.tile_id", { nonNegative: true }),
+  };
+}
+
+function emitStep(transfer, sourceMap, tileset, x, y) {
+  if (projectedD0Passable(sourceMap, tileset, x, y) !== true) return { steps: [], contacts: [] };
+  if (!inBounds(sourceMap, x, y)) invalid("StepTransfer source coordinate is out of bounds");
+  return {
+    steps: [Object.freeze({
+      x,
+      y,
+      targetMapId: transfer.targetMapId,
+      targetX: transfer.targetX,
+      targetY: transfer.targetY,
+      targetDirection: transfer.targetDirection,
+    })],
+    contacts: [],
+  };
+}
+
+function emitContacts(transfer, sourceMap, x, y) {
+  const contacts = [];
+  for (const direction of DIRECTIONS) {
+    const { dx, dy } = DELTA[direction];
+    const playerX = x - dx;
+    const playerY = y - dy;
+    if (!inBounds(sourceMap, playerX, playerY)) continue;
+    contacts.push(Object.freeze({
+      x: playerX,
+      y: playerY,
+      direction,
+      targetMapId: transfer.targetMapId,
+      targetX: transfer.targetX,
+      targetY: transfer.targetY,
+      targetDirection: transfer.targetDirection,
+    }));
+  }
+  return { steps: [], contacts };
 }
 
 function projectEvent(event, sourceMap, maps, tileset) {
@@ -155,40 +194,15 @@ function projectEvent(event, sourceMap, maps, tileset) {
   const y = integer(event.fields["@y"], "RPG::Event @y", { nonNegative: true });
   const through = boolean(page.fields["@through"], "page.through");
   if (through === false) {
-    if (characterName(page).length === 0) return { steps: [], contacts: [] };
-    const contacts = [];
-    for (const direction of DIRECTIONS) {
-      const { dx, dy } = DELTA[direction];
-      const playerX = x - dx;
-      const playerY = y - dy;
-      if (!inBounds(sourceMap, playerX, playerY)) continue;
-      contacts.push(Object.freeze({
-        x: playerX,
-        y: playerY,
-        direction,
-        targetMapId: transfer.targetMapId,
-        targetX: transfer.targetX,
-        targetY: transfer.targetY,
-        targetDirection: transfer.targetDirection,
-      }));
+    const graphic = graphicInfo(page);
+    if (graphic.characterName.length > 0) return emitContacts(transfer, sourceMap, x, y);
+    if (graphic.characterName.length === 0 && graphic.tileId === 0) {
+      if (projectedD0Passable(sourceMap, tileset, x, y) === true) return emitStep(transfer, sourceMap, tileset, x, y);
+      return emitContacts(transfer, sourceMap, x, y);
     }
-    return { steps: [], contacts };
+    return { steps: [], contacts: [] };
   }
-  if (through === true) {
-    if (projectedD0Passable(sourceMap, tileset, x, y) !== true) return { steps: [], contacts: [] };
-    if (!inBounds(sourceMap, x, y)) invalid("StepTransfer source coordinate is out of bounds");
-    return {
-      steps: [Object.freeze({
-        x,
-        y,
-        targetMapId: transfer.targetMapId,
-        targetX: transfer.targetX,
-        targetY: transfer.targetY,
-        targetDirection: transfer.targetDirection,
-      })],
-      contacts: [],
-    };
-  }
+  if (through === true) return emitStep(transfer, sourceMap, tileset, x, y);
   return { steps: [], contacts: [] };
 }
 

@@ -1,6 +1,6 @@
 # 地图跳转设计冻结稿
 
-> 状态：Frozen for implementation  
+> 状态：Frozen for implementation（2026-09-14 re-freeze：Map067 空 graphic Exit 按 `over_trigger? === false` 归为 ContactTransfer；exact gates 增加 baseline-exception 规则）  
 > 目录：`examples/essentials-v21.1-local`  
 > 需求来源：`MAP_BEHAVIOR_REQUIREMENTS.md` 第 3 节  
 > 证据基线：本地 Essentials v21.1 FSDB + `Maruno17/pokemon-essentials@ea7b5d56`  
@@ -623,7 +623,7 @@ closed M14/M15 qualification contracts
 
 **Importer test** 使用 `node:test` + `node:assert/strict`，复用 `m14-consumer.test.mjs` 的局部轻量 builders，不新增 shared test framework。必须证明：
 
-- Section 12 event patterns 的 deterministic projection；
+- Section 12 event patterns 的 deterministic projection，包括 E-CONTACT-1、E-CONTACT-2（空 graphic 且 `projectedD0Passable === false` 的 Exit）与两条 E-STEP-1（through 洞口、空 graphic 且 `projectedD0Passable === true`）；
 - unsupported event 不发射 transfer；
 - malformed/target missing/out-of-bounds/duplicate fail closed；
 - Section 12 connection geometry vectors；
@@ -658,11 +658,33 @@ test diff 只含 Section 11.2 的 4 个文件
 Browser production / packages / M14 consumer contracts 无改动
 ```
 
-满足上述 gates + diff scope = **Implementation Complete**。
+**Baseline-exception 规则（严格）：**
+
+- 只有在**同环境、同 command、clean main** 上可复现的既有失败，才允许记为 baseline exception；
+- 本 feature 新增或修改的 targeted case 必须 green，不得记入 exception；
+- 不得修改既有 test/qualification contract 来让 gate 通过；
+- 不得把 feature 自己的失败写成 baseline exception。
+
+当前记录的 baseline exceptions（Windows local；clean main 可复现）：
+
+```text
+node --test test/map-layering-browser.test.mjs
+  既有用例 "moving depth is below the tile before the boundary pixel and above at it"
+  在 screenshot 采样窗口内输掉 depth race。
+  本刀新增 map-transfer latest-state regression 必须 green。
+
+npm run test:m14
+  既有 @loomrealm/main bootstrap timeout，以及后续 Hostra 套件 hang/failure。
+  本刀不修改 packages/*。
+```
+
+满足 targeted gates + diff scope，且未 green 的 exact command 都有上述 exception = **Feature implementation complete; frozen gate closure pending documented baseline exceptions.**
+
+全部 exact command 在无豁免情况下 green + diff scope = **Implementation Complete**。
+
+在 exception 清掉之前，不得把状态写成严格 Implementation Complete。远端 commit status 不是本刀的证明；gates 证据以同环境本地结果为准，除非远端 CI 对该 commit 给出记录。
 
 随后用 Section 12.6 的真实 event A↔B 与 map connection 在实际 Essentials v21.1 FSDB/example 中走通 = **Product Closed**。
-
-不得修改既有 test/qualification contract 来让 gate 通过。
 
 ### 11.6 唯一施工顺序
 
@@ -696,6 +718,20 @@ Browser production / packages / M14 consumer contracts 无改动
 
 任一步发现冻结事实无法成立：STOP，不进入下一步。
 
+### 11.7 Re-freeze follow-up（空 graphic Player Touch）
+
+本轮只允许修改：
+
+```text
+examples/essentials-v21.1-local/MAP_TRANSFER_DESIGN_DRAFT.md
+tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs
+tools/fixtures/essentials-v21.1/map-transfer-consumer.test.mjs
+```
+
+不得改 Runtime / semantics / mapper / Browser production。Runtime 已支持 ContactTransfer 与 StepTransfer；Map067 Exit 只是 importer 按官方 `over_trigger?` 分类。
+
+施工后：`--force` 重导入真实 FSDB，再按 Section 12.6 走真实 Map066 ↔ Map067 与 Map066 ↔ Map002。
+
 ---
 
 ## 12. Frozen v21.1 evidence contract
@@ -727,7 +763,7 @@ page:
 
 page graphic:
   className === "RPG::Event::Page::Graphic"
-  fields used: @character_name
+  fields used: @character_name @tile_id
 
 command list:
   page.fields["@list"].kind === "Array"
@@ -807,12 +843,39 @@ playerY = event.y - dy
 
 真实 fixture：Map066 event 1 `Door`。
 
-#### E-STEP-1
+不要把空 `character_name` 纳入 E-CONTACT-1。
+
+#### E-CONTACT-2
+
+官方 `Game_Event#over_trigger?`：空 `character_name`（或 `through`）之后，仍要求 `map.passable?(event.x, event.y, 0, $game_player)`。官方 `Game_Player#move_generic` 在 `can_move_in_direction?` 失败时调用 `check_event_trigger_touch(dir)`；该方法对 **Player Touch 与 Event Touch** 都生效，且跳过 `over_trigger? === true` 的 event。
+
+因此：空 graphic 且事件格 **不是** d=0 可通行时，Player Touch 是 bump/contact，不是踩上后再 `check_event_trigger_here`。
 
 ```text
-selected page through === true
+selected page through === false
+graphic.character_name === ""
+graphic.tile_id === 0
+projectedD0Passable(source Map/Tileset, event.x, event.y) === false
+```
+
+`tile_id === 0` 来自真实 Map067 Exit page 0 证据。输出与 E-CONTACT-1 相同的四向 ContactTransfer 展开。
+
+真实 fixture：Map067 event 1 Exit at (4,8)。event 格 z=1 tile 1254 与 z=0 tile 542 的 passage 均为 0x0F，terrain_tag 均为 0；`projectedD0Passable(4,8) === false`。
+
+#### E-STEP-1
+
+官方碰撞：`Game_Character#passable?` 只在玩家走向目标格 event 且 `event.character_name != ""`（且非 through）时把该 event 当作角色阻挡。`Game_Event#over_trigger?` 对不形成 blocking character 的 event，继续检查所在 tile 是否可通行；可通行则是 same-position/over-trigger event。玩家成功走完一步后，Essentials 调用 `check_event_trigger_here([1,2])` 启动这种 Player Touch。
+
+本刀冻结的 over-trigger 静态子集：
+
+```text
+event 本身不形成 blocking character：
+  through === true
+  OR (graphic.character_name === "" AND graphic.tile_id === 0)
 projectedD0Passable(source Map/Tileset, event.x, event.y) === true
 ```
+
+`tile_id === 0` 来自真实空 graphic page 证据；本刀不为此引入额外 event-tile passability 模拟。空 graphic 但 `projectedD0Passable === false` 走 E-CONTACT-2，不走本条。
 
 输出一条 StepTransfer：
 
@@ -825,7 +888,13 @@ targetY = parameters[3]
 targetDirection = parameters[4] === 0 ? null : parameters[4]
 ```
 
-真实 fixture：Map049 event 4 `Hole`、Map034 event 6 `Hole`。
+真实 fixture：
+
+```text
+Map049 event 4 Hole、Map034 event 6 Hole：through === true
+```
+
+空 graphic + `tile_id === 0` + 可通行格的 StepTransfer 由 importer test 覆盖；真实 Map067 Exit 不属于本条。
 
 #### 其他 event
 
@@ -834,7 +903,7 @@ targetDirection = parameters[4] === 0 ? null : parameters[4]
 - variable appointment；
 - action/event-touch/autorun/parallel trigger；
 - `always_on_top === true`；
-- direct support table之外的 through/graphic 组合；
+- direct support table之外的 through/graphic/tile_id 组合（含 `character_name === ""` 且 `tile_id !== 0`）；
 - hiddenitem/size event；
 - nested/conditional 201；
 - 无静态 page。
@@ -934,20 +1003,24 @@ crossing 后方向保持 attempted direction；官方 `setCurrentMap` 只 moveto
 
 ### 12.6 Real acceptance fixtures
 
-**Event contact A→B→A**
+**Event A→B→A（去程 ContactTransfer，回程也是 ContactTransfer）**
 
 ```text
 Map066 player (12,8), dir8
-→ event 1 "Door" at (12,7)
+→ event 1 "Door" at (12,7)   # E-CONTACT-1, graphic "doors7"
 → Map067 (4,7), targetDirection=8
 
 return:
-Map067 player (4,7), dir2
-→ event 1 "Exit" at (4,8)
+Map067 spawn (4,7)
+→ 向下
+→ ContactTransfer at (4,7) dir2
+→ event 1 "Exit" at (4,8)    # E-CONTACT-2
 → Map066 (12,7), targetDirection=null
 ```
 
-Map066 Door 的静态 selected page：trigger=1、through=false、always_on_top=false、non-empty character graphic；201 = `[0,67,4,7,8,1]`。conditional arrival page 不参与本刀。
+不要把回程写成走入 (4,8) 再 250ms `finishStep` 的 StepTransfer。Exit 的静态 selected page：trigger=1、through=false、always_on_top=false、`character_name === ""`、`tile_id === 0`；201 = `[0,66,12,7,0,1]`。事件格 `projectedD0Passable(4,8) === false`，因此官方 `over_trigger?` 为 false；`Game_Player#move_generic` 在无法走入时 `check_event_trigger_touch` 启动该 Player Touch。
+
+Map066 Door 的静态 selected page：trigger=1、through=false、always_on_top=false、non-empty character graphic `doors7`；201 = `[0,67,4,7,8,1]`。conditional arrival page 不参与本刀。
 
 **Map connection A→B→A**
 
