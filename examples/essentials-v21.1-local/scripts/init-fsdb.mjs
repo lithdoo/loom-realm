@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -10,9 +10,9 @@ import { fileURLToPath } from "node:url";
 import { EEVEE_EXPO_DOWNLOAD, OFFICIAL_ARCHIVE_IDENTITY } from "../../../tools/fixtures/essentials-v21.1/lib/acquisition/eevee-expo.mjs";
 import { ImportFailure } from "../../../tools/fixtures/essentials-v21.1/lib/errors.mjs";
 import { run } from "../../../tools/fixtures/essentials-v21.1/import.mjs";
+import { syncPresentation } from "./sync-presentation.mjs";
 
 const exampleRoot = fileURLToPath(new URL("..", import.meta.url));
-const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
 function parse(argv) {
   const result = { source: undefined, force: false };
@@ -124,19 +124,5 @@ try {
   }
 }
 
-const presentation = join(fsdbRoot, "[resource]Presentation");
-await mkdir(join(presentation, "map"), { recursive: true });
-await writeFile(join(presentation, ".desc.meta"), "Trusted presentation resources.\n");
-await writeFile(
-  join(presentation, "map", "map.css.css"),
-  await readFile(join(repoRoot, "game-libs/map/browser/map.css")),
-);
-await writeFile(
-  join(presentation, "map", "map.browser.js.js"),
-  await readFile(join(repoRoot, "game-libs/map/browser/map.browser.js")),
-);
-await writeFile(
-  join(presentation, "page.css.css"),
-  await readFile(join(exampleRoot, "presentation.css")),
-);
+await syncPresentation(fsdbRoot);
 console.log(`FSDB ready: ${fsdbRoot}`);

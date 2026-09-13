@@ -68,6 +68,23 @@ if not exist "%REPO%\node_modules\" (
   popd
 )
 
+echo 正在构建 Map 并把最新 presentation 拷进 FSDB...
+pushd "%REPO%"
+call npm run build -w @loomrealm-game/map
+if errorlevel 1 (
+  popd
+  echo Map 构建失败。
+  pause
+  exit /b 1
+)
+popd
+"%NODE%" "%EXAMPLE%\scripts\sync-presentation.mjs"
+if errorlevel 1 (
+  echo 无法把 map presentation 写入 FSDB。不要用 init-fsdb --force，除非确实要重建整份素材库。
+  pause
+  exit /b 1
+)
+
 if not exist "%DESKTOP_ENTRY%" (
   echo 正在构建 Desktop / Map...
   pushd "%REPO%"
