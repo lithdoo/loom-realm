@@ -1,13 +1,23 @@
 # 地图跳转设计草案
 
-> 状态：Draft  
+> 状态：Draft — **禁止实施**  
 > 目录：`examples/essentials-v21.1-local`  
 > 需求来源：`MAP_BEHAVIOR_REQUIREMENTS.md` 第 3 节  
 > 前置能力：地图遮挡与人物行走动画已完成并进入 `main`。
 
 本文只设计最后一项地图行为：玩家通过原版 Essentials v21.1 已有的门、楼梯、洞口或地图边缘出口，从当前地图进入目标地图，并能按原版出口关系返回。
 
-本文当前不是实施冻结合同。真实 v21.1 event/page/command 形态、`map_connections` 精确坐标公式、connection crossing 语义和最终 acceptance fixture 尚需在 Freeze Gate 中用真实素材闭合；这些事项关闭后才能标记 `Frozen for implementation`。
+## 实施规则
+
+本文件最终要交给低判断力 implementation agent 机械落地，因此规则如下：
+
+- **只要顶部状态仍为 `Draft`，implementation agent 必须 STOP，不得开始改 production。**
+- 本文出现 `FREEZE-BLOCKER` 的事项必须由设计/调查阶段先关闭并替换为确定事实。
+- 状态改成 `Frozen for implementation` 后，agent **没有架构、schema、算法、文件范围、测试 harness、fixture 或 gate 选择权**。
+- Frozen 后若任一规则无法按原文实现，agent 必须 STOP 并报告 blocker；不得自行扩大 scope、补 Event Interpreter、修改 framework contract 或选择“近似实现”。
+- 除本文明确覆盖的部分外，已冻结的 walking/layering authority、input、timer、Render latest-state、Browser stale-resource/rAF 合同继续有效。
+
+当前只剩真实 v21.1 source semantics 与 acceptance fixture 仍未冻结；文件范围、Runtime 状态机、failure/lifecycle、测试文件、gate 和施工顺序已在本文写死。
 
 ---
 
@@ -16,113 +26,68 @@
 ### 1.1 本刀必须解决
 
 - 游戏运行中从当前地图进入另一张地图，不修改启动参数、不重启 Frame。
-- 原版地图事件中的静态 Transfer Player 出口能投影为 Runtime 可直接消费的事实。
-- `map_connections` 表达的地图边缘连接能投影为 Runtime 可直接消费的事实。
-- Event transfer 按原版触发边界区分：成功走入后触发，或 movement attempt 与阻挡事件发生接触时触发；不能把所有出口一律当成“走到该格后触发”。
-- 地图边缘出口在玩家尝试从边界向连接地图继续移动时触发。
-- 成功跳转后，目标地图、目标格、朝向、camera、遮挡与后续 walking 都继续使用现有规则。
-- 目标 Map/MapTransfer/Tileset/resource 读取或结构验证失败时显式结束当前 Frame，不能提交半加载 target authority。
+- 原版地图事件中的静态 Transfer Player 出口投影成 Runtime 可直接消费的事实。
+- `map_connections` 表达的地图边缘连接投影成 Runtime 可直接消费的事实。
+- Event transfer 按原版触发 boundary 区分：成功走入后触发，或 movement attempt 与阻挡 event 接触时触发。
+- 地图边缘出口在玩家从边界向连接地图继续移动时触发。
+- 成功 transfer 后，目标地图、目标格、方向、camera、遮挡和后续 walking 继续复用现有规则。
+- 目标 Map/MapTransfer/Tileset/resource 读取或结构验证失败时显式结束当前 Frame，不能提交 half-loaded target authority。
 - 原版可逆出口必须能 A → B → A。
 
 ### 1.2 明确不做
 
-本刀不实现完整 RMXP/Event Interpreter，也不实现：
+本刀不实现：
 
-- 条件分支、变量目标、脚本计算出来的传送位置；
-- 通用事件页选择器；
-- Common Event / Script Command 执行；
+- 完整 RMXP/Event Interpreter；
+- 条件分支、变量 target、Script Command 计算 target；
+- 通用 event page evaluator；
+- Common Event；
 - 开门动画、淡入淡出、黑屏 transition；
 - connected-map 无缝同屏滚动；
 - NPC、对话、战斗、菜单；
 - Browser 图片 decode failure 反向上报 Runtime；
-- 通用 `SceneManager`、`WorldManager`、`MapRouter`、`TransitionService`；
-- 为地图跳转修改 framework Runtime/Renderer 合同。
+- `SceneManager`、`WorldManager`、`MapRouter`、`TransitionService`；
+- framework Runtime/Renderer/Data contract 修改。
 
-若真实验收出口依赖上述能力之一，Freeze 前必须明确扩大范围，不能由 implementation agent 临场补 Event Interpreter 或 framework primitive。
-
----
-
-## 2. 当前实现与真正缺口
-
-当前 `@loomrealm-game/map` 已经拥有：
-
-- 当前地图整数格坐标 `x/y` authority；
-- tile passability；
-- 250ms/tile walking；
-- held input 与方向优先级；
-- Browser rAF presentation；
-- camera interpolation；
-- moving layering；
-- latest-state Render projection 与 stale async 收敛。
-
-但当前 map frame 在 activation 时只加载一次：
-
-```text
-struct.Map/<initial mapId>
-struct.Tileset/<map.tileset_id>
-Tilesets/<tileset_name>
-```
-
-当前 `struct.Map` consumer record 只有：
-
-```ts
-{
-  tileset_id,
-  width,
-  height,
-  data,
-}
-```
-
-`RPG::Map.events` 没有进入这个 consumer record，现有 `canMove()` 也只知道 tile passages，不知道 event collision/priority。因此地图跳转不能在 Runtime 里临时“识别门”或依赖 tile passability 推断 event contact；必须先在 Importer/compatibility 边界把原版出口事实归一化。
-
-关键原则：**不重开 `struct.Map`，新增独立 `struct.MapTransfer` consumer domain。**
+真实 acceptance 若依赖以上能力之一，必须在 Freeze 前返回设计阶段；implementation agent 不得临场补能力。
 
 ---
 
-## 3. Authority 边界
+## 2. Authority 边界
 
-### 3.1 Importer / compatibility 层负责
+### 2.1 Importer / compatibility 层负责
 
-Importer 负责理解 Essentials/RMXP 来源格式，并输出 Runtime 不需要再次解释的地图跳转事实：
+Importer 负责理解 Essentials/RMXP source，并输出 Runtime 不再解释的规范事实：
 
-- `RPG::Map.events` 中本刀支持的静态 Transfer Player 出口；
-- event trigger/priority/page/command 组合对应的是 `step` 还是 `contact` Runtime boundary；
-- 对 contact event，把事件自身的阻挡/接触语义展开成具体 `(playerX, playerY, direction)`；
-- `PBS/map_connections*.txt` 中的地图边缘关系；
-- connection offset 到具体 source/target 格坐标的换算；
-- source/target map 存在性、bounds 与静态结构校验；
-- Event Transfer Player 的原始方向编码归一化为 Runtime `2 | 4 | 6 | 8 | null`。
+- `RPG::Map.events` 中本刀支持的静态 Transfer Player；
+- event trigger/priority/through/page/command 组合属于 `step` 还是 `contact` boundary；
+- contact event 展开为具体 player `(x,y,direction)`；
+- `PBS/map_connections*.txt` 的 line grammar、edge/offset 和双向关系；
+- connection 展开为具体 source/target tile；
+- source/target map、bounds、duplicate/ambiguity 静态校验；
+- Event Transfer Player direction 归一化为 `2 | 4 | 6 | 8 | null`。
 
-`map_connections` 不预留目标朝向字段。当前 Draft 按“跨边缘保持当前移动方向”建模；Freeze 前必须用官方 v21.1 语义确认这一点，若证据相反再改 schema。
+Runtime 不得读取或解释 EventCommand/PBS 原始结构。
 
-### 3.2 `@loomrealm-game/map` Runtime 负责
+### 2.2 `@loomrealm-game/map` Runtime 负责
 
 Runtime 只负责：
 
-- 当前地图 authority；
-- 玩家当前格与方向；
+- current map authority；
+- player `x/y/direction`；
 - movement attempt 与 walking completion boundary；
-- 对 `steps / contacts / edges` 做直接 lookup；
-- 无 contact 时继续使用现有 tile `canMove()`；
-- 异步加载目标 `Map/Tileset/resource/MapTransfer`；
-- 成功后原子替换当前地图 authority；
-- transfer 期间禁止第二个 movement/transfer；
-- transfer 失败时通过 frame-local terminal channel 结束当前 Frame。
+- `steps / contacts / edges` lookup；
+- 无 contact 时现有 tile `canMove()`；
+- target Map/Tileset/resource/MapTransfer 加载；
+- atomic current-map authority swap；
+- transfer 并发门；
+- terminal failure / abort cleanup。
 
-Runtime **不解析**：
+### 2.3 Browser 负责
 
-- `RPG::Event`；
-- `RPG::EventCommand`；
-- event priority/collision；
-- PBS connection 文本；
-- Ruby/RMXP Marshal 结构。
+Browser 不新增 transfer authority。
 
-### 3.3 Browser 负责
-
-Browser 不新增地图跳转 authority。
-
-成功 transfer 后 Runtime 发新的 standing RenderState：
+成功 target commit 后 Runtime 继续发送普通 standing RenderState：
 
 ```text
 new mapId
@@ -136,15 +101,13 @@ motion = null
 cameraMotion = null
 ```
 
-现有 latest-data/resource currentness/stale guard 应自然收敛到新地图。
-
-Browser 图片 decode failure 继续沿用既有 presentation failure policy；本刀不新增 Browser → Runtime failure channel。
+现有 latest-data identity、resource currentness 和 rAF cancellation 负责收敛。Browser image decode failure 继续沿用既有 presentation failure policy；本刀不增加 Browser → Runtime ACK/failure channel。
 
 ---
 
-## 4. 新 consumer domain：`struct.MapTransfer`
+## 3. Consumer schema：`struct.MapTransfer`
 
-schema 直接对应 Runtime 的三个触发 boundary，不建立通用 Trigger/Rule hierarchy。
+不修改已经 Closed 的 `struct.Map`。新增独立普通 structured domain：
 
 ```ts
 type Direction = 2 | 4 | 6 | 8;
@@ -185,62 +148,63 @@ interface MapTransferRecord {
 }
 ```
 
-### 4.1 `steps`
+### 3.1 `steps`
 
-语义：玩家成功走入 `(x,y)`，250ms walking 完成后，在 `finishStep()` boundary 检查该格是否触发 event transfer。
+`StepTransfer(x,y)` 表示玩家已经成功走入 `(x,y)`，250ms walking 完成后在 `finishStep()` boundary 触发。
 
-因此：
+禁止：
 
-- step start 不触发；
-- walking 中途不触发；
-- 初始 spawn 在 step-transfer tile 上不会自动触发；
-- transfer 落到 reciprocal exit tile 上不会仅因 spawn 自动弹回。
+- step start 触发；
+- walking progress 触发；
+- spawn 时扫描 step；
+- Browser 判断 step。
 
-### 4.2 `contacts`
+因此 transfer target 即使落在 reciprocal step tile，也不会仅因 spawn 自动弹回。
 
-语义：玩家当前站在 `(x,y)`，面向 `direction` 发起一次 **in-bounds movement attempt**；Importer 已静态证明该 attempt 会与一个支持的阻挡 transfer event 接触，因此 Runtime 在普通 tile `canMove()` 之前命中 contact 并直接发起 transfer。
+### 3.2 `contacts`
 
-重要：contact 是否成立 **不能由当前 `canMove()` 推断**。现有 `canMove()` 只看 map tiles/tileset passages，并不知道 RMXP event collision。`ContactTransfer` 本身就是 importer 对 event blocking/trigger 语义的规范化事实。
+`ContactTransfer(x,y,direction)` 表示玩家当前站在 `(x,y)` 并尝试向 `direction` 移动时，Importer 已静态证明会接触支持的阻挡 transfer event。
 
-命中 contact 时：
+Runtime **必须在 tile `canMove()` 之前查 contact**。现有 `canMove()` 只知道 tile passages，不知道 RMXP event collision。
 
-- 不改变 source `x/y`；
-- 不创建 `ActiveMove`；
-- 不播放 walking gait；
-- 不启动 250ms step timer；
-- 保持 facing 为 attempted direction，然后发起 transfer。
+命中 contact：
 
-Importer 必须把 event 坐标/trigger/priority 等来源语义展开成 Runtime 可直接 lookup 的具体 `(playerX, playerY, direction)`；Runtime 不需要知道 event 在哪一格，也不执行 Event Interpreter。
+```text
+source x/y 不变
+direction = attempted direction
+无 ActiveMove
+无 gait
+无 250ms timer
+→ startTransfer(contact)
+```
 
-不能静态证明的 event pattern fail closed。
+### 3.3 `edges`
 
-### 4.3 `edges`
+`EdgeTransfer(x,y,direction)` 表示下一格已经超出当前 map bounds，且当前 source tile/direction 对应一条已规范化 connection。
 
-语义：玩家当前位于 `(x,y)`，向 `direction` 尝试移动时，下一格已经超出当前 map bounds；若存在匹配 edge transfer，则切换到目标地图/格。
+Runtime 不解释 edge name/offset。
 
-Runtime 不解释 connection edge/offset。
+`EdgeTransfer` 不携带 `targetDirection`；Frozen 前必须用官方语义确认 crossing 保持 attempted direction。
 
-`EdgeTransfer` 不携带 `targetDirection`；当前 Draft 保留 source movement direction。
+### 3.4 Event target direction
 
-### 4.4 Event `targetDirection`
-
-只属于 `StepTransfer / ContactTransfer`：
+只存在于 `StepTransfer / ContactTransfer`：
 
 - `null`：保留 transfer 前方向；
-- `2/4/6/8`：落地后强制朝向该方向。
+- `2/4/6/8`：target commit 后固定朝向。
 
-Importer 应把 Essentials/RMXP 的 retain-direction 编码归一化成 `null`，不要把原始编码泄漏给 Runtime。
+Importer 不得把 RMXP 原始 retain-direction 编码泄漏给 Runtime。
 
-### 4.5 唯一性与 lookup
+### 3.5 唯一性
 
-Freeze 前必须写死：
+Importer 必须 fail closed：
 
-- 同一 `(x,y)` 最多一条有效 step；
+- 同一 `(x,y)` 最多一条 step；
 - 同一 `(x,y,direction)` 最多一条 contact；
 - 同一 `(x,y,direction)` 最多一条 edge；
-- duplicate/ambiguous projection 必须 importer fail closed，不能靠数组顺序选第一条。
+- duplicate/ambiguous 不能按数组顺序选第一条。
 
-第一刀 Runtime 直接小数组 `find`：
+Runtime lookup 直接小数组 `find`：
 
 ```ts
 transfers.steps.find(...)
@@ -248,28 +212,26 @@ transfers.contacts.find(...)
 transfers.edges.find(...)
 ```
 
-不新增 `TransferIndex`、persistent `Map` 或其他索引层。
+禁止新增 `TransferIndex` 或 persistent `Map`。
 
 ---
 
-## 5. Importer 设计
+## 4. Importer projection
 
-### 5.1 不修改 M14 `struct.Map` 投影
+### 4.1 唯一 production module
 
-当前 `m14-consumer.mjs` 继续只负责现有 Map/Tileset consumer contract。
-
-推荐新增独立 feature module：
+新增：
 
 ```text
 tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs
 ```
 
-输入：
+它接收当前 canonical/intermediate 数据：
 
 ```text
 RMXP roots
-+ 已投影 Map records（用于 width/height）
-+ connections family 的 PbsDocument
++ 已投影 Map records（width/height）
++ connections family PbsDocument
 ```
 
 输出：
@@ -278,26 +240,13 @@ RMXP roots
 MapTransfer[]
 ```
 
-`MapTransferRecord` 自带 `id`，加入 canonical domains 后可走现有普通 structured-domain mapper；原则上不需要修改 FSDB framework 或现有 `struct.Map` shape。
+`MapTransferRecord` 自带 `id`，通过现有普通 structured-domain mapper 写入 FSDB；禁止修改 FSDB mapper/framework 或 `struct.Map` shape。
 
-### 5.2 Event transfer projection
+### 4.2 Event projection
 
-Importer 从 `MapNNN.rxdata` 的 `RPG::Map.events` 中识别本刀支持的静态出口。
+Importer 只支持 Freeze 后明确列出的 event patterns，并直接产出 `StepTransfer` 或 `ContactTransfer`。
 
-真实 inventory 必须先把支持的 event pattern 分类成：
-
-```text
-step
-  = 成功 movement 完成后触发
-
-contact
-  = movement attempt 在进入 tile passability 判断前，
-    已由 event blocking/trigger 语义证明应触发
-```
-
-然后输出最终 Runtime fact，不暴露 event id/page/command list。
-
-Step 输出：
+Step 输出事实：
 
 ```text
 source map id
@@ -307,7 +256,7 @@ target x/y
 target direction|null
 ```
 
-Contact 输出：
+Contact 输出事实：
 
 ```text
 source map id
@@ -318,48 +267,63 @@ target x/y
 target direction|null
 ```
 
-具体支持哪些 RMXP trigger/page/priority/through/command pattern **现在不冻结**。Freeze 前必须扫描真实 Essentials v21.1 acceptance 出口并写成确定算法。
+任何不在 Frozen 支持表内的 page/trigger/priority/through/command 组合都 fail closed；禁止 agent 自行“理解”或执行 event。
 
-若 target 依赖变量、条件分支、Script Command 或需要通用 event execution，第一刀标记 unsupported/fail closed，不猜执行结果。
+**FREEZE-BLOCKER E1：** 在状态改为 Frozen 前，Section 16 必须填入真实 v21.1 支持表、decoded-tree 字段路径和 Transfer Player 参数位置。
 
-### 5.3 `map_connections` projection
+### 4.3 `map_connections` projection
 
-已有 importer 会识别 `connections` PBS family，但当前只保留 ordered-line document。
+Importer 必须把每条 connection 展开为具体双向 `EdgeTransfer`，Runtime 不接受 half-parsed `edge + offset`。
 
-新的 transfer projection 负责：
+**FREEZE-BLOCKER C1：** Section 16 必须填入官方 v21.1 line grammar、edge 名称、offset 方向、N↔S/E↔W 坐标公式、合法范围和测试向量。
 
-1. 解析 v21.1 connection line；
-2. 使用双方 Map width/height；
-3. 校验 N↔S / E↔W 关系与 offset 合法性；
-4. 将每个实际可跨越的边界格展开成具体 `EdgeTransfer`；
-5. 同时生成反向边界规则；
-6. 校验 target coordinate 在目标图 bounds 内。
+**FREEZE-BLOCKER C2：** Section 16 必须写死 crossing 的 source/target passage 规则与方向规则。
 
-Runtime 不接受“edge + offset”这种半解析结构。
+### 4.4 每张 Map 必须有 transfer record
 
-Freeze 前必须用官方 v21.1 compiler/runtime 和真实 fixture 固定精确公式与测试向量。
-
-### 5.4 每张 Map 都有 transfer record
-
-推荐 importer 为每个 `struct.Map/<id>` 生成对应：
+这是固定合同，不再是“推荐”：
 
 ```text
-struct.MapTransfer/<id>
+对每个 struct.Map/<id>
+必须生成 struct.MapTransfer/<id>
 ```
 
-无出口时：
+无出口：
 
 ```json
 { "id": 1, "steps": [], "contacts": [], "edges": [] }
 ```
 
-这样 Runtime 不需要 optional/fallback 分支。
+Runtime 不实现 optional MapTransfer fallback。
+
+### 4.5 canonical dataset 集成点
+
+只在：
+
+```text
+tools/fixtures/essentials-v21.1/lib/essentials/v21.1/simple-game-data.mjs
+```
+
+集成新 projection。
+
+固定顺序：
+
+```text
+decode Marshal
+→ decode RMXP
+→ materialize existing M14 Map/Tileset
+→ materialize MapTransfer using RMXP roots + Map records + PbsDocuments
+→ merge MapTransfer into canonical domains
+→ existing compiled-data / semantic / oracle flow continues
+```
+
+若真实实现证明这个顺序无法满足既有 canonical/oracle invariant，STOP 并返回设计；禁止修改 mapper/framework 绕过。
 
 ---
 
-## 6. Runtime 当前地图模型
+## 5. Runtime current-map 模型
 
-地图跳转后，把 activation 时固定的 map 常量收拢成最小 current snapshot：
+将 activation 时固定的 `map/tileset/tilesetRef` 收拢为：
 
 ```ts
 interface LoadedMap {
@@ -373,7 +337,7 @@ interface LoadedMap {
 let current: LoadedMap;
 ```
 
-玩家状态继续独立：
+玩家状态继续沿用 walking：
 
 ```text
 x
@@ -386,22 +350,23 @@ nextStartPattern
 stepTimer
 ```
 
-新增长期 transfer 状态只有：
+transfer 只新增一个长期状态：
 
 ```ts
 let transitioning = false;
 ```
 
-`transitioning` 同时表示“正在加载 target”与“禁止第二个 movement/transfer”。不要再增加：
+禁止新增：
 
 ```text
 transferId
 transferEpoch
 transferToken
 activeTransfer object
+MapSession / Scene / WorldState manager
 ```
 
-### 6.1 `loadMap(mapId)`
+### 5.1 `loadMap(mapId)`
 
 Runtime 内局部 helper：
 
@@ -409,141 +374,197 @@ Runtime 内局部 helper：
 async function loadMap(mapId: number): Promise<LoadedMap>
 ```
 
-按顺序加载并验证：
+固定读取顺序：
 
 ```text
-struct.Map/<mapId>
-struct.MapTransfer/<mapId>
-struct.Tileset/<tileset_id>
-resource.Graphics/Tilesets/<tileset_name>
+1. struct.Map/<mapId>
+2. validate Map
+3. struct.MapTransfer/<mapId>
+4. validate MapTransfer 且 record.id === mapId
+5. struct.Tileset/<map.tileset_id>
+6. validate Tileset
+7. resource.Graphics/Tilesets/<tileset_name>
+8. build tilesetRef
+9. return frozen LoadedMap snapshot
 ```
 
-角色 sprite resource 与地图无关，继续只在 frame activation 加载一次。
+所有 Content read 使用 `frame.signal`。
 
-`loadMap()` 不做长期 cache；不要新增 `MapCache`、`LoadedMapRepository`、LRU 或 target preload。
+`loadMap()` 不做长期 cache/preload。
 
-### 6.2 Runtime 能承诺的 resource failure 边界
+### 5.2 initial activation 与 later transfer failure 分离
 
-Runtime 只承诺以下失败在 authority commit 前成为 `MAP_TRANSFER_FAILED`：
+初始：
 
-- `ContentClient.record()` / `resource()` reject；
-- Map/MapTransfer/Tileset validation failure；
-- target spawn out of bounds；
-- target transfer record/content key 不一致。
+```text
+current = await loadMap(input.mapId)
+```
 
-Runtime 不承诺 Browser `createImageBitmap()`/实际图片 decode failure 会回传 `MAP_TRANSFER_FAILED`；该情况继续属于现有 presentation resource policy。本刀不新增 Browser → Runtime ACK/failure channel。
+发生在 RenderDomain/InputListener 创建之前。
+
+初始 Map/MapTransfer/Tileset/resource/read/validation/spawn failure：
+
+```text
+MAP_ACTIVATION_FAILED
+```
+
+Frame 已经 live 后由 `beginTransfer()` 加载 target 的同类 failure：
+
+```text
+MAP_TRANSFER_FAILED
+```
+
+Browser `createImageBitmap()` decode failure不属于 `MAP_TRANSFER_FAILED`。
 
 ---
 
-## 7. Runtime movement/transfer 状态机
+## 6. Activation / lifecycle 唯一顺序
 
-### 7.1 `attempt(next)` 的确定顺序
-
-所有 movement attempt 先：
+在 `frame(frame)` 中严格按以下顺序：
 
 ```text
+1. parse/validate initial input
+2. create frame-local terminal Promise/resolve state
+3. define local loadMap/renderState/attempt/finishStep/beginTransfer/startTransfer helpers
+4. current = await loadMap(input.mapId)
+5. validate initial x/y inside current.map bounds
+6. load player character resource and build playerRef
+7. initialize x/y/direction/heldDirections/nextMoveId/nextStartPattern/activeMove/stepTimer/transitioning
+8. createRenderDomain(initial standing renderState())
+9. createInputListener(channels: keyboard.event + keyboard.state)
+10. register keyboard.event handler
+11. register keyboard.state handler
+12. await Promise.race(terminal, frame abort)
+13. close listener
+14. clear stepTimer if any
+15. activeMove = null
+16. transitioning = false
+17. close RenderDomain
+18. return the single resolved FrameOutcome
+```
+
+关键约束：RenderDomain 必须在任何 input handler 注册前存在，保持 walking 已冻结的 retained `keyboard.state` baseline 安全性。
+
+禁止因为 transfer 重建 InputListener、RenderDomain 或 Frame。
+
+---
+
+## 7. Movement / transfer 状态机
+
+### 7.1 `attempt(next)` 唯一顺序
+
+```text
+if frame aborted: return
 if transitioning: return
 
 direction = next
-compute nx/ny
+compute dx/dy/nx/ny
 ```
 
-然后严格按以下顺序。
+之后严格三路。
 
-#### A. 下一格仍在当前 map bounds 内：先查 contact
-
-先查：
+#### A. `nx/ny` 在 current map bounds 内：先 contact
 
 ```ts
-transfers.contacts.find(
+const contact = current.transfers.contacts.find(
   rule => rule.x === x && rule.y === y && rule.direction === direction
-)
+);
 ```
 
-如果命中：
+命中：
 
 ```text
-不调用普通 tile canMove()
-不改变 x/y
-不创建 ActiveMove
-不播放 gait
-不启动 250ms step timer
-→ startTransfer(contact)
+startTransfer(contact)
+return
 ```
 
-`ContactTransfer` 已经代表 importer 对 event blocking/trigger 的静态结论，Runtime 不再尝试从 tile passability 反推 event behavior。
+不得调用 `canMove()`。
 
-#### B. in-bounds 且没有 contact：再走现有 tile `canMove()`
+#### B. in-bounds 且没有 contact：现有 tile movement
 
-如果 `canMove(...) === true`：
+`canMove(...) === true`：完全复用 walking start：
 
 ```text
-fromX/fromY
-→ x/y authority 改为 target
-→ ActiveMove
-→ walking RenderState
-→ 250ms timer
+capture fromX/fromY
+x/y authority 改为 target
+create ActiveMove
+replace walking RenderState
+set 250ms finishStep timer
 ```
 
-如果 `canMove(...) === false`：按现有 blocked movement：
+`canMove(...) === false`：完全复用 blocked behavior：
 
 ```text
+x/y 不变
 activeMove = null
+stepTimer = null
 nextStartPattern = 1
-standing facing attempted direction
+replace standing facing attempted direction
 ```
 
-#### C. 下一格超出当前 map bounds
+不得自动尝试第二优先 held direction。
+
+#### C. `nx/ny` 超出 current map bounds：edge
+
+```ts
+const edge = current.transfers.edges.find(
+  rule => rule.x === x && rule.y === y && rule.direction === direction
+);
+```
+
+无 edge：blocked standing。
+
+有 edge：按 Frozen Section 16 的 crossing passage 公式验证；失败则 blocked standing；通过则：
+
+```text
+startTransfer(edge)
+```
+
+edge 不创建 ActiveMove、不播放跨图 walking tween。
+
+### 7.2 `finishStep(moveId)`
+
+先保留 walking stale guard：
+
+```text
+if frame aborted: return
+if activeMove?.id !== moveId: return
+```
+
+然后：
+
+```text
+stepTimer = null
+activeMove = null
+```
 
 查：
 
 ```ts
-transfers.edges.find(
-  rule => rule.x === x && rule.y === y && rule.direction === direction
-)
+const step = current.transfers.steps.find(
+  rule => rule.x === x && rule.y === y
+);
 ```
 
-命中后按 Freeze 后确定的 connection passability 规则验证，通过则：
+有 step：
 
 ```text
-不创建 ActiveMove
-不播放跨图 walking tween
-→ startTransfer(edge)
+startTransfer(step)
+return
 ```
 
-无规则或 passage 不通过：按 blocked movement。
-
-### 7.2 Step transfer：`finishStep()` boundary
-
-成功 walking 的 timer completion：
+无 step：完全沿用 walking 已冻结规则：
 
 ```text
-finishStep(moveId)
-  ↓
-确认 frame 未 abort 且 activeMove.id 匹配
-  ↓
-stepTimer = null
-activeMove = null
-  ↓
-查 steps.find(x,y)
-  ├─ 有 → startTransfer(step)
-  └─ 无 → 现有 held-next-step / standing
-```
-
-禁止：
-
-```text
-keydown 时触发 step transfer
-step start 时触发
-Browser progress 触发
-spawn 时扫描 step transfer
+held 非空 → toggle nextStartPattern → attempt(highest held)
+held 为空 → nextStartPattern = 1 → standing replace
 ```
 
 ---
 
-## 8. `beginTransfer()`：异步、原子 authority swap
+## 8. `beginTransfer()` / authority swap
 
-三种 transfer 共用一个局部 helper，不新增 `TransferRule` hierarchy：
+唯一 helper：
 
 ```ts
 async function beginTransfer(
@@ -551,45 +572,43 @@ async function beginTransfer(
 ): Promise<void>
 ```
 
-外层只通过 `startTransfer(rule)` fire-and-catch 启动；Input handler 不直接返回 `beginTransfer()` Promise。
+### 8.1 source standing
 
-### 8.1 source standing boundary
-
-开始时：
+入口：
 
 ```text
+if frame aborted: return
 if transitioning: return
 transitioning = true
 activeMove = null
-clear stepTimer
+if stepTimer != null: clearTimeout(stepTimer)
+stepTimer = null
 nextStartPattern = 1
-
-domain.replace(renderState())   // current source map, standing
+replace current source standing RenderState
 ```
 
-此时 `current/x/y/direction` 仍是 source authority。
+source authority 此时不变。
 
-对于 step，source x/y 是已完成 walking 的出口格；对于 contact/edge，是当前未移动的 source 格。contact/edge 的 direction 已在 `attempt(next)` 开头更新为 attempted direction。
+- step：source x/y 是已完成 walking 的出口格；
+- contact/edge：source x/y 不移动，direction 已是 attempted direction。
 
-source-standing snapshot 可以被 Render transport 与后续 target snapshot coalesce；这是允许的。它的作用是正常资源时不把画面留在旧 walking pose，而不是建立 ACK boundary。
+source-standing snapshot 允许被 transport coalesce。
 
-### 8.2 异步加载与 target commit
-
-然后：
+### 8.2 load + atomic commit
 
 ```text
 const target = await loadMap(rule.targetMapId)
 ```
 
-提交前再次确认：
+commit 前：
 
 ```text
-frame 未 abort
-transitioning === true
-rule.targetX/Y 在 target map bounds 内
+if frame.signal.aborted: return
+if !transitioning: return
+validate rule.targetX/Y inside target.map
 ```
 
-成功后一次性：
+一次性提交：
 
 ```text
 current = target
@@ -598,18 +617,16 @@ y = rule.targetY
 
 StepTransfer / ContactTransfer:
   direction = rule.targetDirection ?? direction
-
 EdgeTransfer:
-  direction 保持 source attempted direction
+  direction unchanged
 
 activeMove = null
 nextStartPattern = 1
 transitioning = false
-
-domain.replace(renderState())   // target standing
+replace target standing RenderState
 ```
 
-目标 standing 必须是：
+目标 standing 必须：
 
 ```text
 pattern = 0
@@ -617,46 +634,28 @@ motion = null
 cameraMotion = null
 ```
 
-### 8.3 held input after transfer：直接使用 Runtime 已保存 intent
+### 8.3 held continuation
 
-不等待未来的 `keyboard.state` 再投递。现有 listener 在 map transfer 前后没有重新注册，因此 retained state 不保证因 transfer 自动重放。
-
-成功 target standing projection 后：
+target standing replace 后立即：
 
 ```text
 if heldDirections.length > 0:
     attempt(highest-priority held direction)
 ```
 
-这一步直接复用 Runtime 已保存的 held intent，不新增 input replay 机制。
-
-允许 target standing snapshot 与随后 walking snapshot 被 Render transport coalesce；authority 仍然先完整 commit 到 target spawn，再开始下一次 movement attempt。
-
-如果 held movement 命中目标图上的 contact/blocked/edge 规则，按目标图当前 `transfers` 正常处理。
+不等待新的 `keyboard.state`。允许 target-standing 与后续 target movement snapshot 被 latest-state transport 合并。
 
 ### 8.4 不使用 `frame.call()`
 
-地图跳转是同一个地图会话里的 current-map authority 变化，不是 child workflow。
-
-禁止：
-
-```text
-map A frame
-  call map B frame
-    call map C frame
-```
-
-否则长期 stack、return/failure 和 backtracking 都会无谓复杂化。
+禁止 map A → child map B → child map C stack。地图 transfer 是同一个 map Frame 内的 current authority swap。
 
 ---
 
-## 9. Transfer failure 与 Frame 生命周期
+## 9. Async failure / terminal outcome
 
-异步 transfer 失败不能依赖 Input handler Promise rejection 自动传播。Input business handler 的异步 rejection 不属于 Frame outcome channel，因此必须显式接回 frame-local terminal Promise。
+Input handler 的 async rejection 不作为 Frame outcome，因此所有 transfer 必须显式接回 frame-local terminal channel。
 
-### 9.1 唯一允许的 terminal failure 结构
-
-frame 内局部：
+固定结构：
 
 ```ts
 let resolveTerminal!: (outcome: FrameOutcome) => void;
@@ -666,8 +665,6 @@ const terminal = new Promise<FrameOutcome>((resolve) => {
   resolveTerminal = resolve;
 });
 ```
-
-局部 failure helper：
 
 ```ts
 const failTransfer = (error: unknown) => {
@@ -680,18 +677,18 @@ const failTransfer = (error: unknown) => {
 };
 ```
 
-所有异步 transfer 从同步 handler 通过：
-
 ```ts
-const startTransfer = (rule: StepTransfer | ContactTransfer | EdgeTransfer) => {
-  if (transitioning || frame.signal.aborted) return;
+const startTransfer = (
+  rule: StepTransfer | ContactTransfer | EdgeTransfer,
+) => {
+  if (frame.signal.aborted || transitioning) return;
   void beginTransfer(rule).catch(failTransfer);
 };
 ```
 
-Input handler / timer callback 不直接 `return beginTransfer(...)`。
+handler/timer callback 不得 `return beginTransfer(...)`。
 
-frame 主等待：
+主等待：
 
 ```ts
 const outcome = await Promise.race([
@@ -700,174 +697,386 @@ const outcome = await Promise.race([
 ]);
 ```
 
-然后统一 cleanup 并返回 `outcome`。
+竞争规则：
 
-不要新增通用 `Deferred`、Task、ErrorBus 或 framework primitive。
+- `failTransfer()` 被调用时若 `frame.signal.aborted === true`，abort/cancelled 胜；
+- 否则先 settle 的 terminal/abort outcome 胜；
+- cleanup 只执行一次；
+- late load completion 不得 replace closed domain。
 
-### 9.2 Cleanup
-
-无论 abort 或 terminal failure：
-
-```text
-close listener
-clear stepTimer
-stepTimer = null
-activeMove = null
-transitioning = false
-close RenderDomain
-```
-
-### 9.3 Abort precedence
-
-- 所有 target content read 使用 `frame.signal`；
-- frame 已 abort 时 `failTransfer()` 不发布 failure；
-- late target completion 不得 `domain.replace()`；
-- abort 返回 `cancelled()`，不是 `MAP_TRANSFER_FAILED`。
-
-Freeze 时测试 abort 与 load rejection 的竞争，保证只产生一个 terminal outcome。
+禁止通用 Deferred、Task、ErrorBus/framework primitive。
 
 ---
 
-## 10. Render transport 与 Browser 收敛
+## 10. Render / Browser convergence
 
-地图跳转继续遵循 walking 已冻结的原则：Render 是 latest-state projection，不是不可丢命令队列。
-
-普通 transfer 的 projection 可能是：
+transfer 期间可能产生：
 
 ```text
 source standing
 → target standing
-→ （若 held）target walking/blocked/contact/edge next state
+→ 若 held：target walking / blocked / contact / edge next state
 ```
 
-中间 snapshot 可以因 backpressure 被合并。必须保证最终收敛到最新 Runtime authority：
+中间 snapshots 可以被 transport coalesce。正确性只要求最终收敛到最新 Runtime authority。
 
-- 旧 tileset/image completion 不能覆盖新 map；
-- 旧 walking/camera rAF 不能覆盖 target state；
-- target standing 后若立即继续 walking，最终以最新 target state 为准。
+Browser production **不得修改**。
 
-现有 Browser current-data identity 与 rAF cancellation 应提供这些性质；若测试证明有缺口，只局部修复，不增加 transition epoch/queue/ACK。
+现有 Browser stale/current-data 合同必须覆盖：
+
+- old map delayed tileset image completion 不能覆盖 new map RenderData；
+- old walking/camera rAF 不能覆盖 target standing/movement；
+- same resource identity 也不能绕过 `_latestData === requested` currentness。
+
+Browser regression 必须在现有 `test/map-layering-browser.test.mjs` 添加一个 map-transfer latest-state case，不能新建 browser harness。
 
 ---
 
-## 11. Validation / fail-closed 规则
+## 11. Validation / fail-closed
 
-`validateMapTransferRecord()` 至少验证：
+`validateMapTransferRecord(value, contentMapId)` 必须：
 
-- exact field set；
-- `id/targetMapId` 为 positive safe integer；
-- `x/y/targetX/targetY` 为 non-negative safe integer；
+- exact top-level fields：`id/steps/contacts/edges`；
+- `id === contentMapId`；
+- `id/targetMapId` positive safe integer；
+- `x/y/targetX/targetY` non-negative safe integer；
 - contact/edge `direction` ∈ `2,4,6,8`；
-- step/contact `targetDirection` 为 `null | 2 | 4 | 6 | 8`；
-- edge 不允许 `targetDirection`；
-- `steps/contacts/edges` 为 arrays；
-- duplicate step/contact/edge source keys 拒绝；
-- 当前 record `id` 必须和 Content key 一致。
+- step/contact `targetDirection` ∈ `null,2,4,6,8`；
+- edge exact fields中不存在 `targetDirection`；
+- arrays 中每个 record exact field set；
+- duplicate step/contact/edge source key 拒绝；
+- 返回 detached/frozen normalized record，风格与现有 Map/Tileset validator 一致。
 
-Importer 能静态验证的 source/target map、source player coordinate、target bounds 与 ambiguity 应在 import 时 fail closed；Runtime 在加载 target 时仍重复验证当前实际 target bounds。
+Importer 负责静态验证：
+
+- source/target map 存在；
+- source player coordinate 可表达且 in bounds；
+- target coordinate in bounds；
+- ambiguity/duplicate；
+- Frozen 支持表之外的 event pattern。
+
+Runtime 加载 target 时仍重复 target bounds 校验。
 
 ---
 
-## 12. 推荐 production 修改面
+## 12. Production / test 文件合同
 
-当前 Draft 推荐最小 production 面：
+### 12.1 Production ONLY
+
+Frozen implementation 只允许修改：
 
 ```text
 tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs   # new
-tools/fixtures/essentials-v21.1/lib/essentials/v21.1/simple-game-data.mjs      # integrate domain
-game-libs/map/src/semantics.ts                                                   # validation
-game-libs/map/src/runtime.ts                                                     # current map + transfer state machine
+tools/fixtures/essentials-v21.1/lib/essentials/v21.1/simple-game-data.mjs
+game-libs/map/src/semantics.ts
+game-libs/map/src/runtime.ts
 ```
 
-原则上不需要修改：
+### 12.2 Tests ONLY
+
+只允许新增/修改：
+
+```text
+tools/fixtures/essentials-v21.1/map-transfer-consumer.test.mjs   # new
+game-libs/map/test/runtime.test.mjs
+test/map-layering-browser.test.mjs
+```
+
+### 12.3 明确禁止修改
 
 ```text
 game-libs/map/browser/map.browser.js
-packages/* framework
-struct.Map existing shape
-FSDB mapper/framework
+packages/*
+tools/fixtures/essentials-v21.1/lib/fsdb/mapper.mjs
+现有 m14-consumer.mjs / m14-consumer.test.mjs
+struct.Map / struct.Tileset shape
+root/package scripts
+closed M14/M15 qualification contracts
 ```
 
-如果 Freeze 调查发现必须修改上述“不需要修改”范围，必须先返回设计阶段说明原因，不能由 implementation agent 自行扩大 scope。
+如果实现需要超出以上 production/test 文件：**STOP，报告 blocker，返回设计。**
 
 ---
 
-## 13. 测试闭环
+## 13. Test harness 合同
 
-### 13.1 Importer projection tests
+### 13.1 Importer：新 `map-transfer-consumer.test.mjs`
 
-至少固定：
+使用：
 
-- 真实支持模式的 step Transfer Player → 一个 `StepTransfer`；
-- 真实支持模式的 blocking/front-contact Transfer Player → 一个或多个具体 `ContactTransfer`；
-- step/contact trigger classification 与官方 v21.1 行为一致；
-- contact 的 player source x/y/direction 展开正确；
-- retain direction → `null`；
-- fixed direction → `2/4/6/8`；
-- unsupported variable/script target fail closed；
-- ambiguous/duplicate step/contact fail closed；
-- connection N↔S / E↔W 坐标展开；
-- offset 正/负边界；
-- reciprocal edges；
-- edge 不携带目标朝向；
-- target bounds failure；
-- map 无出口 → 空 `steps/contacts/edges` record。
+```text
+node:test
+node:assert/strict
+```
 
-测试向量必须来自或对应官方 v21.1 语义，不凭自创 event shape。
+测试局部 RMXP builders 直接复制 `m14-consumer.test.mjs` 的轻量风格（`object/string/table` 等），不得为了测试新增 shared test framework。
 
-### 13.2 Map Runtime tests
+测试同时覆盖：
 
-扩展现有 `game-libs/map/test/runtime.test.mjs` harness，不为 transfer 抽生产 manager。
+- `map-transfer-consumer.mjs` 纯 projection；
+- `simple-game-data.mjs` integration 后 canonical domains 确实包含 `MapTransfer`；
+- `mapCanonicalDataset()` 能把 `MapTransfer` 写成 ordinary JSON struct object，无特殊 mapper 修改。
+
+Freeze 后 Section 16 的每一个真实 event/connection vector 都必须成为 deterministic test case。
+
+### 13.2 Runtime：扩展现有 `game-libs/map/test/runtime.test.mjs`
+
+继续使用现有 fake ContentClient、fake RenderDomain、input handlers、fake global timers。不得新增 production test hook。
 
 至少证明：
 
-- step transfer 在 step start/249ms 不触发，`finishStep` 后触发；
-- in-bounds attempt 命中 contact 时 **即使底层 tile `canMove()` 本可通过** 也不启动 walking，而是直接 transfer；
+- initial load 读取 MapTransfer，缺失/非法 → `MAP_ACTIVATION_FAILED`；
+- step 在 start/249ms 不触发，`finishStep` 后触发；
+- contact 优先于本可通过的 tile `canMove()`；
 - contact 不改变 source x/y、不创建 gait/timer；
-- in-bounds 无 contact + `canMove=true` 正常 walking；
-- in-bounds 无 contact + `canMove=false` 正常 blocked standing；
-- out-of-bounds 有/无 edge 的分支正确；
-- source standing 在 target load 完成前出现；
-- transfer 成功后 `mapId/x/y/direction` 精确；
-- step/contact retain/fixed direction 正确；
-- edge 保持 attempted direction；
-- target standing `pattern=0/motion=null/cameraMotion=null`；
-- target 使用自己的 Map/Tileset/tilesetRef/MapTransfer；
-- reciprocal exit 不因 spawn 自动 bounce；
+- in-bounds no-contact passable → walking；
+- in-bounds no-contact blocked → standing；
+- out-of-bounds edge 有/无及 passage pass/fail；
+- source standing 在 delayed target load 完成前出现；
+- target commit 的 mapId/x/y/direction/camera/tileset/MapTransfer 正确；
+- step/contact retain/fixed direction；
+- edge direction 按 Frozen 规则；
+- reciprocal spawn 不自动 step bounce；
 - A → B → A；
-- transfer 中 input 只更新 `heldDirections`，不启动 movement；
-- target commit 后仍 held 时直接从 target authority 继续 attempt；
-- 第二个 transfer 不能并发启动；
-- content read / validation / out-of-bounds target → `MAP_TRANSFER_FAILED`；
-- 从 keyboard handler 启动的 async transfer rejection 能进入 terminal failure，而不是被 handler isolation 吞掉；
-- abort during target load → cancelled，无 late replace；
-- abort 与 transfer rejection 竞争只返回一个 outcome。
+- transfer 中 input 只更新 held intent；
+- target commit 后 held 立即继续 target attempt；
+- 第二 transfer 不并发；
+- transfer Content read/validation/target bounds failure → `MAP_TRANSFER_FAILED`；
+- keyboard handler 发起的 async rejection 进入 terminal outcome；
+- abort during load → cancelled；
+- abort/rejection race 单 outcome；
+- abort 后 no late replace。
 
-### 13.3 Browser regression
+Runtime tests 继续不用固定 wall-clock sleep。
 
-第一刀预计不新增 Browser production 行为，因此至少继续跑既有 layering/walking browser tests。
+### 13.3 Browser：扩展现有 `test/map-layering-browser.test.mjs`
 
-Freeze 前审一次现有 stale-resource coverage；若它不能证明“旧地图延迟 image completion 不覆盖新 map RenderData”，就在现有 browser test 文件增加一个 integration-level case，不新增新 harness。
-
-### 13.4 Product acceptance
-
-必须使用真实 Essentials v21.1 FSDB：
+必须增加一个 deterministic latest-state regression：
 
 ```text
-真实门/楼梯/洞口
-→ 按原版 step/contact boundary 进入 B
-→ B 的目标格/方向正确
-→ walking/layering 正常
-→ reciprocal exit 回到 A
+1. source map RenderData 使用 delayed tileset image resource
+2. source paint/decode 尚未完成时发送 target map RenderData
+3. resolve old source image
+4. 证明 old completion 不改变 target canvas/current state
+5. target 最终正常 paint
 ```
 
-同时固定一个真实 `map_connections` 场景验证边缘跨图。
-
-如果 acceptance door 是 contact 型，必须明确验证“底层 tile 本身的 passage 不代表 event 可走入；contact rule 优先于 tile canMove”。
+继续使用现有 Playwright/server/resource-delay harness；不新增 browser test 文件。
 
 ---
 
-## 14. 抽象预算
+## 14. 精确 gate 与 Implementation Complete
+
+Frozen implementation 完成后按顺序执行：
+
+```bash
+node --test tools/fixtures/essentials-v21.1/map-transfer-consumer.test.mjs
+npm test -w @loomrealm-game/map
+node --test test/map-layering-browser.test.mjs
+npm run test:fixtures
+npm run test:m14
+```
+
+全部 green 后再检查：
+
+```text
+production diff 只包含 Section 12.1 的 4 个文件
+test diff 只包含 Section 12.2 的 3 个文件
+Browser production / packages / mapper / M14 contracts 均无改动
+```
+
+同时完成 Section 16 固定的真实 event A↔B 和 map connection product acceptance，才可标记 **Implementation Complete**。
+
+不得修改既有 test/qualification contract 来“让 gate 通过”。
+
+---
+
+## 15. Frozen 后唯一施工顺序
+
+implementation agent 必须按以下顺序，不自行重排设计：
+
+```text
+1. map-transfer-consumer.mjs
+   - 实现 Frozen Section 16 event decoder/projection
+   - 实现 Frozen connection formula
+   - 产出每 Map 的 MapTransfer record
+
+2. simple-game-data.mjs
+   - 按 Section 4.5 集成 MapTransfer domain
+
+3. semantics.ts
+   - 加 Step/Contact/Edge/MapTransfer types
+   - validateMapTransferRecord()
+
+4. runtime.ts — current map foundation
+   - LoadedMap
+   - loadMap()
+   - initial activation 改用 loadMap()
+   - initial failure 仍 MAP_ACTIVATION_FAILED
+
+5. runtime.ts — transfer lifecycle
+   - terminal Promise
+   - transitioning
+   - startTransfer/beginTransfer
+   - source standing / target atomic commit
+
+6. runtime.ts — movement integration
+   - contact precedence
+   - edge path
+   - finishStep step lookup
+   - held continuation
+
+7. importer test
+8. runtime test
+9. browser regression
+10. 运行 Section 14 exact gates
+11. 检查 exact diff scope
+12. 跑 Section 16 real acceptance
+```
+
+任一步发现 Frozen 事实无法成立：STOP，不进入下一步。
+
+---
+
+## 16. FREEZE-BLOCKERS：必须由真实 v21.1 证据填满
+
+**本节只要还有 `TBD`，顶部状态就不得改为 Frozen。implementation agent 不负责调查本节。**
+
+### 16.1 E1 — Event decoded-tree 与支持表
+
+必须填入当前 importer decoded tree 的精确字段路径和支持模式。最终格式必须达到如下粒度：
+
+```text
+RMXP Map event path:
+TBD
+
+RPG::Event fields used:
+TBD
+
+RPG::Event::Page fields used:
+TBD
+
+EventCommand list path:
+TBD
+
+Transfer Player command code:
+TBD
+
+Transfer Player parameters:
+  target map id: TBD
+  target x: TBD
+  target y: TBD
+  direction: TBD
+
+retain-direction raw value -> null:
+TBD
+fixed direction raw values -> 2/4/6/8:
+TBD
+```
+
+支持模式必须列成穷举表，例如：
+
+```text
+Pattern E-STEP-1
+  trigger = TBD
+  priority = TBD
+  through = TBD
+  page selection = TBD
+  command requirements = TBD
+  output = StepTransfer
+
+Pattern E-CONTACT-1
+  trigger = TBD
+  priority = TBD
+  through = TBD
+  page selection = TBD
+  command requirements = TBD
+  contact player coordinate formula = TBD
+  output = ContactTransfer
+```
+
+不在支持表的 event → fail closed。
+
+### 16.2 E2 — 多 page 静态选择
+
+必须写死：
+
+```text
+page count/conditions 如何判断可静态投影: TBD
+选择哪个 page: TBD
+哪些 condition 允许: TBD
+哪些组合直接 unsupported: TBD
+```
+
+不得留给 Runtime 或 implementation agent 选择。
+
+### 16.3 C1 — `map_connections` grammar 与坐标公式
+
+必须写死：
+
+```text
+line fields: TBD
+edge names/encoding: TBD
+offset sign semantics: TBD
+
+N -> S:
+  source coordinate formula: TBD
+  target coordinate formula: TBD
+  valid overlap range: TBD
+
+S -> N:
+  ... TBD
+
+E -> W:
+  ... TBD
+
+W -> E:
+  ... TBD
+```
+
+必须附至少一个正 offset、一个负 offset、一个边界 overlap 的真实/官方测试向量。
+
+### 16.4 C2 — Connection crossing passage / direction
+
+必须写死：
+
+```text
+source passage check: TBD
+target reverse passage check: TBD
+other target passage check: TBD
+crossing direction after commit: TBD
+```
+
+### 16.5 A1 — 真实 acceptance fixtures
+
+Event transfer：
+
+```text
+source mapId: TBD
+source player start x/y: TBD
+attempt/step direction: TBD
+boundary type: step | contact = TBD
+target mapId: TBD
+target x/y: TBD
+target direction: TBD
+reciprocal return rule: TBD
+```
+
+Map connection：
+
+```text
+source mapId: TBD
+source edge x/y/direction: TBD
+target mapId: TBD
+target x/y/direction: TBD
+expected reciprocal crossing: TBD
+```
+
+记录的 fixture 必须来自实际 Essentials v21.1 FSDB/source，而不是自造 fake map。
+
+---
+
+## 17. 抽象预算
 
 允许新增的长期概念只有：
 
@@ -876,11 +1085,9 @@ MapTransferRecord
 StepTransfer / ContactTransfer / EdgeTransfer data shapes
 LoadedMap
 transitioning boolean
-beginTransfer/loadMap/startTransfer local helpers
+loadMap / startTransfer / beginTransfer local helpers
 frame-local terminal Promise/resolve
 ```
-
-Importer 可以有一个 feature-specific projection module。
 
 明确禁止：
 
@@ -906,46 +1113,9 @@ LRU / target preload
 Browser → Runtime transfer ACK
 ```
 
-实现策略保持局部：数组 `find`、ContentClient 直接读取、一个 `transitioning`、一个 frame-local terminal Promise。
-
 ---
 
-## 15. Freeze 前必须关闭的事项
-
-当前 Draft 不能直接交 implementation agent。至少关闭以下事项后才能改为 `Frozen for implementation`：
-
-1. **真实 event inventory 与 boundary 分类**  
-   扫描 acceptance 用 Essentials v21.1 门、楼梯、洞口，记录 trigger/page/priority/through/command 形态；逐个分类为 `step` 或 `contact`，并把 contact 展开为具体 player `(x,y,direction)`；明确 unsupported 集合。若真实模式不能被这两个 boundary 静态表达，先返回设计阶段，不扩 Event Interpreter。
-
-2. **Transfer Player decoded-tree 合同**  
-   写死当前 RMXP decoded tree 中 Map events/pages/list/EventCommand 的确切字段形态、Transfer Player command 参数位置、retain/fixed direction 编码。
-
-3. **Event page 静态选择规则**  
-   如果同一出口存在多 page，写死 importer 如何静态证明并选择可投影 transfer；无法静态证明的组合 fail closed。
-
-4. **`map_connections` 精确公式**  
-   根据官方 v21.1 compiler/runtime 固定 line grammar、edge 名称、offset 方向和双方坐标展开公式，并写真实测试向量。
-
-5. **Connection crossing 语义**  
-   写死跨 edge 时的 source/target passage 规则，并确认 crossing 后方向保持 source attempted direction。
-
-6. **精确 production/test 文件与 gate 命令**  
-   确认 importer test 文件、map test 文件、browser regression 文件与最终 gate；Frozen 后 implementation agent 不自行选择 harness。
-
-7. **真实 acceptance fixture**  
-   固定至少一个 event transfer A↔B 和一个 map connection，记录 map id、source/target 格、触发 boundary 与预期方向。
-
-以下事项已经在本 Draft 中关闭，不再留给 implementation agent 选择：
-
-- contact precedence：in-bounds attempt 先查 importer-projected contact，再调用 tile `canMove()`；
-- held input after transfer：直接复用 `heldDirections`，target commit 后若仍 held 就继续 `attempt()`；
-- async failure propagation：只能走 frame-local terminal Promise + `startTransfer(...).catch(failTransfer)`；
-- resource failure boundary：Runtime 只负责 Content read/结构验证，不承担 Browser image decode failure；
-- transfer concurrency：只用 `transitioning`，不增加 transfer epoch/token/id。
-
----
-
-## 16. 目标闭环
+## 18. 最终闭环
 
 ```text
 Essentials v21.1 source
@@ -1001,4 +1171,9 @@ Essentials v21.1 source
                                                     walking + layering continue normally
 ```
 
-这条链成立时，地图跳转仍然只是 map consumer 的业务能力：Importer 负责兼容格式和 event/contact 语义，Runtime 负责 authority/failure，Browser 继续只负责 projection；不需要重开 framework，也不需要实现通用 RMXP 游戏引擎。
+当 Section 16 全部由真实 v21.1 证据填满、所有 `TBD` 清零后：
+
+1. 将顶部状态改为 `Frozen for implementation`；
+2. 不再修改 Sections 1–15、17–18 的架构/状态机/file scope/harness/gate；
+3. implementation agent 按 Section 15 机械实施；
+4. 任意冲突均 STOP 返回设计。
