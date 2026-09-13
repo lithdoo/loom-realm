@@ -18,7 +18,7 @@
 - 游戏运行中从当前地图进入另一张地图，不修改启动参数、不重启 Frame。
 - 原版地图事件中的静态 Transfer Player 出口能投影为 Runtime 可直接消费的事实。
 - `map_connections` 表达的地图边缘连接能投影为 Runtime 可直接消费的事实。
-- Event transfer 按原版触发边界区分：成功走入后触发，或向不可进入的事件格发生接触时触发；不能把所有出口一律当成“走到该格后触发”。
+- Event transfer 按原版触发边界区分：成功走入后触发，或 movement attempt 与阻挡事件发生接触时触发；不能把所有出口一律当成“走到该格后触发”。
 - 地图边缘出口在玩家尝试从边界向连接地图继续移动时触发。
 - 成功跳转后，目标地图、目标格、朝向、camera、遮挡与后续 walking 都继续使用现有规则。
 - 目标 Map/MapTransfer/Tileset/resource 读取或结构验证失败时显式结束当前 Frame，不能提交半加载 target authority。
@@ -47,7 +47,7 @@
 当前 `@loomrealm-game/map` 已经拥有：
 
 - 当前地图整数格坐标 `x/y` authority；
-- passability；
+- tile passability；
 - 250ms/tile walking；
 - held input 与方向优先级；
 - Browser rAF presentation；
@@ -74,7 +74,7 @@ Tilesets/<tileset_name>
 }
 ```
 
-`RPG::Map.events` 没有进入这个 consumer record。因此地图跳转不能只在 `runtime.ts` 中“识别门”；必须先在 Importer/compatibility 边界把原版出口事实归一化。
+`RPG::Map.events` 没有进入这个 consumer record，现有 `canMove()` 也只知道 tile passages，不知道 event collision/priority。因此地图跳转不能在 Runtime 里临时“识别门”或依赖 tile passability 推断 event contact；必须先在 Importer/compatibility 边界把原版出口事实归一化。
 
 关键原则：**不重开 `struct.Map`，新增独立 `struct.MapTransfer` consumer domain。**
 
@@ -88,6 +88,7 @@ Importer 负责理解 Essentials/RMXP 来源格式，并输出 Runtime 不需要
 
 - `RPG::Map.events` 中本刀支持的静态 Transfer Player 出口；
 - event trigger/priority/page/command 组合对应的是 `step` 还是 `contact` Runtime boundary；
+- 对 contact event，把事件自身的阻挡/接触语义展开成具体 `(playerX, playerY, direction)`；
 - `PBS/map_connections*.txt` 中的地图边缘关系；
 - connection offset 到具体 source/target 格坐标的换算；
 - source/target map 存在性、bounds 与静态结构校验；
@@ -103,6 +104,7 @@ Runtime 只负责：
 - 玩家当前格与方向；
 - movement attempt 与 walking completion boundary；
 - 对 `steps / contacts / edges` 做直接 lookup；
+- 无 contact 时继续使用现有 tile `canMove()`；
 - 异步加载目标 `Map/Tileset/resource/MapTransfer`；
 - 成功后原子替换当前地图 authority；
 - transfer 期间禁止第二个 movement/transfer；
@@ -112,6 +114,7 @@ Runtime **不解析**：
 
 - `RPG::Event`；
 - `RPG::EventCommand`；
+- event priority/collision；
 - PBS connection 文本；
 - Ruby/RMXP Marshal 结构。
 
@@ -195,11 +198,21 @@ interface MapTransferRecord {
 
 ### 4.2 `contacts`
 
-语义：玩家当前站在 `(x,y)`，面向 `direction` 尝试移动；目标仍在当前 map bounds 内，但普通移动不能进入目标格。若存在匹配 contact transfer，则不播放 walking gait，直接从当前 standing boundary 发起 transfer。
+语义：玩家当前站在 `(x,y)`，面向 `direction` 发起一次 **in-bounds movement attempt**；Importer 已静态证明该 attempt 会与一个支持的阻挡 transfer event 接触，因此 Runtime 在普通 tile `canMove()` 之前命中 contact 并直接发起 transfer。
+
+重要：contact 是否成立 **不能由当前 `canMove()` 推断**。现有 `canMove()` 只看 map tiles/tileset passages，并不知道 RMXP event collision。`ContactTransfer` 本身就是 importer 对 event blocking/trigger 语义的规范化事实。
+
+命中 contact 时：
+
+- 不改变 source `x/y`；
+- 不创建 `ActiveMove`；
+- 不播放 walking gait；
+- 不启动 250ms step timer；
+- 保持 facing 为 attempted direction，然后发起 transfer。
 
 Importer 必须把 event 坐标/trigger/priority 等来源语义展开成 Runtime 可直接 lookup 的具体 `(playerX, playerY, direction)`；Runtime 不需要知道 event 在哪一格，也不执行 Event Interpreter。
 
-`ContactTransfer` 只用于 Freeze inventory 能静态证明的 player-contact transfer。不能静态证明的 event pattern fail closed。
+不能静态证明的 event pattern fail closed。
 
 ### 4.3 `edges`
 
@@ -278,7 +291,8 @@ step
   = 成功 movement 完成后触发
 
 contact
-  = movement attempt 不能进入目标格时，因 player contact 触发
+  = movement attempt 在进入 tile passability 判断前，
+    已由 event blocking/trigger 语义证明应触发
 ```
 
 然后输出最终 Runtime fact，不暴露 event id/page/command list。
@@ -304,7 +318,7 @@ target x/y
 target direction|null
 ```
 
-具体支持哪些 RMXP trigger/page/priority/command pattern **现在不冻结**。Freeze 前必须扫描真实 Essentials v21.1 acceptance 出口并写成确定算法。
+具体支持哪些 RMXP trigger/page/priority/through/command pattern **现在不冻结**。Freeze 前必须扫描真实 Essentials v21.1 acceptance 出口并写成确定算法。
 
 若 target 依赖变量、条件分支、Script Command 或需要通用 event execution，第一刀标记 unsupported/fail closed，不猜执行结果。
 
@@ -434,23 +448,9 @@ direction = next
 compute nx/ny
 ```
 
-然后严格分三路。
+然后严格按以下顺序。
 
-#### A. 下一格在 map bounds 内且 `canMove(...) === true`
-
-走现有 walking：
-
-```text
-fromX/fromY
-→ x/y authority 改为 target
-→ ActiveMove
-→ walking RenderState
-→ 250ms timer
-```
-
-此时不检查 contact。
-
-#### B. 下一格在 map bounds 内且 `canMove(...) === false`
+#### A. 下一格仍在当前 map bounds 内：先查 contact
 
 先查：
 
@@ -460,16 +460,32 @@ transfers.contacts.find(
 )
 ```
 
-命中：
+如果命中：
 
 ```text
+不调用普通 tile canMove()
+不改变 x/y
 不创建 ActiveMove
 不播放 gait
 不启动 250ms step timer
 → startTransfer(contact)
 ```
 
-未命中：按现有 blocked movement：
+`ContactTransfer` 已经代表 importer 对 event blocking/trigger 的静态结论，Runtime 不再尝试从 tile passability 反推 event behavior。
+
+#### B. in-bounds 且没有 contact：再走现有 tile `canMove()`
+
+如果 `canMove(...) === true`：
+
+```text
+fromX/fromY
+→ x/y authority 改为 target
+→ ActiveMove
+→ walking RenderState
+→ 250ms timer
+```
+
+如果 `canMove(...) === false`：按现有 blocked movement：
 
 ```text
 activeMove = null
@@ -616,7 +632,7 @@ if heldDirections.length > 0:
 
 允许 target standing snapshot 与随后 walking snapshot 被 Render transport coalesce；authority 仍然先完整 commit 到 target spawn，再开始下一次 movement attempt。
 
-如果 held movement 命中目标图上的 blocked/contact/edge 规则，按目标图当前 `transfers` 正常处理。
+如果 held movement 命中目标图上的 contact/blocked/edge 规则，按目标图当前 `transfers` 正常处理。
 
 ### 8.4 不使用 `frame.call()`
 
@@ -728,7 +744,7 @@ source standing
 
 - 旧 tileset/image completion 不能覆盖新 map；
 - 旧 walking/camera rAF 不能覆盖 target state；
-- target standing 后若立即继续 walking，最终以最新 target walking state 为准。
+- target standing 后若立即继续 walking，最终以最新 target state 为准。
 
 现有 Browser current-data identity 与 rAF cancellation 应提供这些性质；若测试证明有缺口，只局部修复，不增加 transition epoch/queue/ACK。
 
@@ -748,7 +764,7 @@ source standing
 - duplicate step/contact/edge source keys 拒绝；
 - 当前 record `id` 必须和 Content key 一致。
 
-Importer 能静态验证的 target map/bounds/ambiguity 应在 import 时 fail closed；Runtime 在加载 target 时仍重复验证当前实际 target bounds。
+Importer 能静态验证的 source/target map、source player coordinate、target bounds 与 ambiguity 应在 import 时 fail closed；Runtime 在加载 target 时仍重复验证当前实际 target bounds。
 
 ---
 
@@ -783,8 +799,9 @@ FSDB mapper/framework
 至少固定：
 
 - 真实支持模式的 step Transfer Player → 一个 `StepTransfer`；
-- 真实支持模式的 blocked/front-contact Transfer Player → 一个或多个具体 `ContactTransfer`；
+- 真实支持模式的 blocking/front-contact Transfer Player → 一个或多个具体 `ContactTransfer`；
 - step/contact trigger classification 与官方 v21.1 行为一致；
+- contact 的 player source x/y/direction 展开正确；
 - retain direction → `null`；
 - fixed direction → `2/4/6/8`；
 - unsupported variable/script target fail closed；
@@ -805,9 +822,10 @@ FSDB mapper/framework
 至少证明：
 
 - step transfer 在 step start/249ms 不触发，`finishStep` 后触发；
-- blocked in-bounds attempt 命中 contact 时不创建 gait/timer，直接 transfer；
-- blocked in-bounds 无 contact 仍 standing facing attempted direction；
-- passable movement 不走 contact 分支；
+- in-bounds attempt 命中 contact 时 **即使底层 tile `canMove()` 本可通过** 也不启动 walking，而是直接 transfer；
+- contact 不改变 source x/y、不创建 gait/timer；
+- in-bounds 无 contact + `canMove=true` 正常 walking；
+- in-bounds 无 contact + `canMove=false` 正常 blocked standing；
 - out-of-bounds 有/无 edge 的分支正确；
 - source standing 在 target load 完成前出现；
 - transfer 成功后 `mapId/x/y/direction` 精确；
@@ -837,7 +855,7 @@ Freeze 前审一次现有 stale-resource coverage；若它不能证明“旧地�
 
 ```text
 真实门/楼梯/洞口
-→ 按原版触发 boundary 进入 B
+→ 按原版 step/contact boundary 进入 B
 → B 的目标格/方向正确
 → walking/layering 正常
 → reciprocal exit 回到 A
@@ -845,7 +863,7 @@ Freeze 前审一次现有 stale-resource coverage；若它不能证明“旧地�
 
 同时固定一个真实 `map_connections` 场景验证边缘跨图。
 
-如果 acceptance door 是 contact 型，必须明确验证“目标格不可普通走入但接触仍可 transfer”；不能只用 passable floor transfer 替代。
+如果 acceptance door 是 contact 型，必须明确验证“底层 tile 本身的 passage 不代表 event 可走入；contact rule 优先于 tile canMove”。
 
 ---
 
@@ -897,7 +915,7 @@ Browser → Runtime transfer ACK
 当前 Draft 不能直接交 implementation agent。至少关闭以下事项后才能改为 `Frozen for implementation`：
 
 1. **真实 event inventory 与 boundary 分类**  
-   扫描 acceptance 用 Essentials v21.1 门、楼梯、洞口，记录 trigger/page/priority/through/command 形态；逐个分类为 `step` 或 `contact`，明确 unsupported 集合。若真实模式不能被这两个 boundary 静态表达，先返回设计阶段，不扩 Event Interpreter。
+   扫描 acceptance 用 Essentials v21.1 门、楼梯、洞口，记录 trigger/page/priority/through/command 形态；逐个分类为 `step` 或 `contact`，并把 contact 展开为具体 player `(x,y,direction)`；明确 unsupported 集合。若真实模式不能被这两个 boundary 静态表达，先返回设计阶段，不扩 Event Interpreter。
 
 2. **Transfer Player decoded-tree 合同**  
    写死当前 RMXP decoded tree 中 Map events/pages/list/EventCommand 的确切字段形态、Transfer Player command 参数位置、retain/fixed direction 编码。
@@ -919,6 +937,7 @@ Browser → Runtime transfer ACK
 
 以下事项已经在本 Draft 中关闭，不再留给 implementation agent 选择：
 
+- contact precedence：in-bounds attempt 先查 importer-projected contact，再调用 tile `canMove()`；
 - held input after transfer：直接复用 `heldDirections`，target commit 后若仍 held 就继续 `attempt()`；
 - async failure propagation：只能走 frame-local terminal Promise + `startTransfer(...).catch(failTransfer)`；
 - resource failure boundary：Runtime 只负责 Content read/结构验证，不承担 Browser image decode failure；
@@ -931,49 +950,55 @@ Browser → Runtime transfer ACK
 ```text
 Essentials v21.1 source
   │
-  ├─ RPG::Map events ─────────────────────────────┐
-  │                                               │
-  └─ PBS map_connections ───────────────────────┐ │
-                                                ▼ ▼
-                              Importer compatibility projection
-                                                │
-                                   struct.MapTransfer/<mapId>
-                                                │
-                                                ▼
-                                   @loomrealm-game/map Runtime
-                                                │
-            ┌───────────────────────┬─────────────┴──────────────┐
-            │                       │                            │
-   successful step complete   blocked in-bounds attempt   out-of-bounds attempt
-            │                       │                            │
-        step lookup             contact lookup                 edge lookup
-            │                       │                            │
-            └───────────────────────┴─────────────┬──────────────┘
-                                                ▼
-                                         startTransfer
-                                                │
-                                         beginTransfer
-                                                │
-                                  source standing projection
-                                                │
-                                         load target map
-                                   ┌────────────┴────────────┐
-                                   │                         │
-                                failure                   success
-                                   │                         │
-                           terminal Frame failure     atomic authority swap
-                                                             │
-                                                   target standing projection
-                                                             │
-                                               heldDirections still non-empty?
-                                                   ├─ yes → attempt again
-                                                   └─ no  → remain standing
-                                                             │
-                                                             ▼
-                                             existing Browser latest projection
-                                                             │
-                                                             ▼
-                                          walking + layering continue normally
+  ├─ RPG::Map events ─────────────────────────────────────┐
+  │                                                       │
+  └─ PBS map_connections ───────────────────────────────┐ │
+                                                        ▼ ▼
+                                      Importer compatibility projection
+                                                        │
+                                           struct.MapTransfer/<mapId>
+                                                        │
+                                                        ▼
+                                           @loomrealm-game/map Runtime
+                                                        │
+                  ┌─────────────────────────┬─────────────┴──────────────┐
+                  │                         │                            │
+         in-bounds attempt            successful step complete   out-of-bounds attempt
+                  │                         │                            │
+             contact lookup              step lookup                  edge lookup
+          ┌───────┴───────┐                 │                            │
+        match          no match              │                            │
+          │                │                  │                            │
+          │          tile canMove()           │                            │
+          │        ┌───────┴───────┐          │                            │
+          │      walk           blocked       │                            │
+          │        │              │           │                            │
+          └────────┴──────────────┴───────────┴─────────────┬──────────────┘
+                                                          ▼
+                                                   startTransfer
+                                                          │
+                                                   beginTransfer
+                                                          │
+                                            source standing projection
+                                                          │
+                                                   load target map
+                                             ┌────────────┴────────────┐
+                                             │                         │
+                                          failure                   success
+                                             │                         │
+                                     terminal Frame failure     atomic authority swap
+                                                                       │
+                                                             target standing projection
+                                                                       │
+                                                         heldDirections still non-empty?
+                                                             ├─ yes → attempt again
+                                                             └─ no  → remain standing
+                                                                       │
+                                                                       ▼
+                                                       existing Browser latest projection
+                                                                       │
+                                                                       ▼
+                                                    walking + layering continue normally
 ```
 
-这条链成立时，地图跳转仍然只是 map consumer 的业务能力：Importer 负责兼容格式，Runtime 负责 authority/failure，Browser 继续只负责 projection；不需要重开 framework，也不需要实现通用 RMXP 游戏引擎。
+这条链成立时，地图跳转仍然只是 map consumer 的业务能力：Importer 负责兼容格式和 event/contact 语义，Runtime 负责 authority/failure，Browser 继续只负责 projection；不需要重开 framework，也不需要实现通用 RMXP 游戏引擎。
