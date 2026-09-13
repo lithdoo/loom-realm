@@ -89,7 +89,9 @@ Importer 负责理解 Essentials/RMXP 来源格式，并输出 Runtime 不需要
 - `PBS/map_connections*.txt` 中的地图边缘关系；
 - connection offset 到具体 source/target 格坐标的换算；
 - source/target map 存在性、bounds 与静态结构校验；
-- 原始方向编码到 Runtime `2 | 4 | 6 | 8 | null` 的归一化。
+- Event Transfer Player 的原始方向编码归一化为 Runtime `2 | 4 | 6 | 8 | null`。
+
+`map_connections` 不预先携带目标朝向字段；当前 Draft 按“跨边缘保持当前移动方向”建模。Freeze 前必须用官方 v21.1 语义确认该假设；若真实语义要求改变朝向，再重新审 schema，而不是现在为未来可能性预留字段。
 
 ### 3.2 `@loomrealm-game/map` Runtime 负责
 
@@ -158,7 +160,6 @@ type EdgeTransfer = Readonly<{
   targetMapId: number;
   targetX: number;
   targetY: number;
-  targetDirection: Direction | null;
 }>;
 
 interface MapTransferRecord {
@@ -188,20 +189,33 @@ interface MapTransferRecord {
 
 Runtime 不再解释 connection offset。
 
-### 4.3 `targetDirection`
+`EdgeTransfer` 不携带 `targetDirection`。当前 Draft 直接保留跨边缘前的 `direction`；Freeze 前只需要验证这与官方 v21.1 connection 语义一致。
+
+### 4.3 Arrival `targetDirection`
+
+只属于 Event Transfer Player：
 
 - `null`：保留 transfer 前方向；
 - `2/4/6/8`：落地后强制朝向该方向。
 
 Importer 应把 Essentials/RMXP 的 retain-direction 编码归一化成 `null`，不要把原始 `0` 泄漏给 Runtime。
 
-### 4.4 唯一性
+### 4.4 唯一性与 lookup
 
 Freeze 前必须写死：
 
 - 同一 `(x,y)` 最多允许一条有效 arrival；
 - 同一 `(x,y,direction)` 最多允许一条 edge；
 - duplicate/ambiguous projection 必须 importer fail closed，不能靠数组顺序选第一条。
+
+第一刀 Runtime 直接对小数组做：
+
+```ts
+transfers.arrivals.find(...)
+transfers.edges.find(...)
+```
+
+不新增 `TransferIndex`、persistent `Map` 或其他索引层。只有 profiling 证明真实出口数量导致热点时才单独优化。
 
 ---
 
@@ -303,11 +317,22 @@ nextStartPattern
 stepTimer
 ```
 
-新增的长期 transfer 状态只建议：
+新增的长期 transfer 状态只有：
 
 ```ts
 let transitioning = false;
 ```
+
+`transitioning` 同时承担“正在异步加载目标图”和“禁止第二个 movement/transfer”的唯一并发门。第一刀不要再增加：
+
+```text
+transferId
+transferEpoch
+transferToken
+activeTransfer object
+```
+
+只要 `beginTransfer()` 在入口拒绝 `transitioning === true`，并在 await 后检查 `frame.signal.aborted` 与 `transitioning`，就不需要第二套 currentness 状态。
 
 不要新增 `MapSession`、`Scene`、`WorldState` manager。
 
@@ -331,6 +356,8 @@ resource.Graphics/Tilesets/<tileset_name>
 角色 sprite resource 与地图无关，继续只在 frame activation 加载一次。
 
 不存在 transfer record 的策略 Freeze 前写死；推荐 importer 为每张 Map 都产出一个空 `MapTransfer`，这样 Runtime 不需要 optional fallback。
+
+`loadMap()` 不做长期 cache。第一刀不要新增 `MapCache`、`LoadedMapRepository`、LRU 或 target preload；ContentClient 已经是数据访问边界，当前需求只需要在 transfer 时读取目标地图。
 
 ---
 
@@ -360,7 +387,7 @@ stepTimer = null
 activeMove = null
   ↓
 查 arrivals[x,y]
-  ├─ 有 → beginTransfer(rule)
+  ├─ 有 → beginTransfer(arrival)
   └─ 无 → 现有 held-next-step / standing
 ```
 
@@ -419,7 +446,7 @@ const ny = y + dy;
 如果 nx/ny 在当前 map bounds 内
     → 走现有 canMove + walking
 否则
-    → 查 edges[x,y,direction]
+    → 查 edges.find(x,y,direction)
        ├─ 无：按 blocked movement 处理
        └─ 有：验证 source 出边 passage 后 beginTransfer(edge)
 ```
@@ -444,52 +471,74 @@ edge transfer 第一刀直接切图，不同时渲染 source + target 两张地�
 
 ## 9. `beginTransfer()`：异步、原子 authority swap
 
-推荐唯一入口：
+普通 arrival 和 edge 共用一个局部 helper，不抽象新的 `TransferRule` hierarchy：
 
 ```ts
-async function beginTransfer(rule: TransferRule): Promise<void>
+async function beginTransfer(rule: ArrivalTransfer | EdgeTransfer): Promise<void>
 ```
 
-开始时：
+开始时必须先把当前 source map 收敛到 standing：
 
 ```text
 transitioning = true
 activeMove = null
-clear step timer
+clear stepTimer
 nextStartPattern = 1
+
+domain.replace(renderState())   // current source map, standing
 ```
+
+此时 `current/x/y/direction` 仍然是 source authority；`renderState()` 必须产生：
+
+```text
+source mapId
+source exit x/y
+pattern = 0
+motion = null
+cameraMotion = null
+```
+
+这样目标地图加载较慢时，Browser 不会停在上一条 walking motion 的末帧。若这个 source-standing snapshot 因 Render transport backpressure 被后续 target snapshot coalesce 掉，可以接受；authority 不受影响，最终仍必须收敛到 target。
 
 transfer 期间：
 
 - input event/state 仍可更新 `heldDirections`；
 - `attempt()` 必须因 `transitioning` 直接返回；
+- `beginTransfer()` 在 `transitioning === true` 时不得再次启动；
 - 不允许第二个 transfer 并发开始；
 - 不发送 half-loaded target RenderState。
 
 然后异步加载 target：
 
 ```text
-const target = await loadMap(targetMapId)
+const target = await loadMap(rule.targetMapId)
 ```
 
 在提交前验证：
 
 ```text
-targetX/Y 是 non-negative safe integer
-targetX < target.map.width
-targetY < target.map.height
-targetDirection 合法
+rule.targetX/Y 是 non-negative safe integer
+rule.targetX < target.map.width
+rule.targetY < target.map.height
+arrival.targetDirection 合法
 frame 未 abort
-当前 transfer 仍是最新/唯一 active transfer
+transitioning 仍为 true
 ```
+
+不新增 transfer id/epoch/token；单一 `transitioning` gate 已保证同一 frame 不会存在两个合法并发 transfer。
 
 成功后一次性提交：
 
 ```text
 current = target
-x = targetX
-y = targetY
-direction = targetDirection ?? direction
+x = rule.targetX
+y = rule.targetY
+
+如果 rule 是 ArrivalTransfer：
+    direction = rule.targetDirection ?? direction
+如果 rule 是 EdgeTransfer：
+    direction 保持不变
+
 activeMove = null
 nextStartPattern = 1
 transitioning = false
@@ -544,6 +593,8 @@ Promise.race([
 ])
 ```
 
+这里的 terminal failure 只允许是 `frame()` 内局部 Promise/resolve 组合；不要为此新增通用 `Deferred`、Task、ErrorBus 或 framework primitive。
+
 transfer load/validation 失败时返回：
 
 ```text
@@ -559,10 +610,9 @@ failed({
 close listener
 clear stepTimer
 activeMove = null
+transitioning = false
 close RenderDomain
 ```
-
-不要新增 ErrorBus/TaskManager。
 
 ### 10.1 Abort
 
@@ -579,7 +629,12 @@ Frame abort 时：
 
 地图跳转继续遵循 walking 已冻结的原则：Render 是 latest-state projection，不是不可丢命令队列。
 
-成功 transfer 最终只需要一个完整 target standing snapshot。
+一次普通 transfer 最多需要两个 projection：
+
+```text
+source standing snapshot
+→ target standing snapshot
+```
 
 若 source standing snapshot 与 target snapshot 因 backpressure 被合并，允许 Browser 直接看到 target；必须保证：
 
@@ -600,7 +655,8 @@ Frame abort 时：
 - `id/targetMapId` 为 positive safe integer；
 - `x/y/targetX/targetY` 为 non-negative safe integer；
 - edge `direction` ∈ `2,4,6,8`；
-- `targetDirection` 为 `null | 2 | 4 | 6 | 8`；
+- arrival `targetDirection` 为 `null | 2 | 4 | 6 | 8`；
+- edge 不允许 `targetDirection` 字段；
 - `arrivals/edges` 为 frozen-compatible arrays；
 - duplicate source keys 拒绝；
 - 当前 record `id` 必须和 Content key 一致。
@@ -649,6 +705,7 @@ struct.Map existing shape
 - connection E↔W 坐标展开；
 - offset 正/负边界；
 - reciprocal edges；
+- edge 不携带目标朝向，Runtime crossing 保持 source direction；
 - target bounds failure；
 - map 无出口 → 空 record。
 
@@ -663,12 +720,16 @@ struct.Map existing shape
 - arrival 在 step start 不触发；
 - 249ms/未 completion 不触发；
 - finishStep 后触发；
+- 命中 arrival 后、target load 完成前先出现 source standing snapshot；
 - transfer 成功后 `mapId/x/y/direction` 精确；
+- arrival retain/fixed direction 正确；
+- edge transfer 保持 source direction；
 - target standing `pattern=0/motion=null/cameraMotion=null`；
 - target 使用自己的 Map/Tileset/tilesetRef；
 - reciprocal exit 不因 spawn 自动 bounce；
 - A → B → A；
 - transfer 中 input 不启动 movement；
+- 第二个 transfer 不能并发启动；
 - edge 无规则仍按 blocked；
 - edge 有规则才 transfer；
 - target missing / out-of-bounds → `MAP_TRANSFER_FAILED`；
@@ -714,7 +775,7 @@ beginTransfer/loadMap local helpers
 
 Importer 可以有一个 feature-specific projection module。
 
-禁止为了这刀引入：
+明确禁止为了这刀引入：
 
 ```text
 EventInterpreter
@@ -725,10 +786,26 @@ TransitionService
 TransferQueue
 AnimationTimeline
 MapStack
+TransferRule hierarchy
+TransferController
+TransferIndex
+transferId / transferEpoch / transferToken
+activeTransfer object
+MapCache
+LoadedMapRepository
+LRU / target preload
+通用 Deferred helper
 通用 async task manager
 ```
 
-若未来需要事件执行、fade 或 seamless connected maps，再以真实需求单独设计。
+实现策略保持局部：
+
+- arrival/edge lookup 直接数组 `find`；
+- 目标加载直接走 ContentClient；
+- terminal failure 只用 `frame()` 内局部 Promise；
+- concurrency/currentness 只用现有 `frame.signal` + 一个 `transitioning` boolean。
+
+若未来需要事件执行、fade、缓存优化或 seamless connected maps，再以真实需求和 profiling 单独设计。
 
 ---
 
@@ -748,14 +825,14 @@ MapStack
 4. **`map_connections` 精确公式**  
    根据官方 v21.1 compiler/runtime 固定 line grammar、edge 名称、offset 方向和双方坐标展开公式，并写测试向量。
 
-5. **Connection passability**  
-   写死跨 edge 时只校验 source passage，还是同时校验 target reverse passage，与原版语义一致。
+5. **Connection crossing 语义**  
+   写死跨 edge 时只校验 source passage，还是同时校验 target reverse passage；同时确认 connection 是否始终保持 source direction。两项都必须与原版 v21.1 一致。
 
 6. **held input after transfer**  
    确认 retained `keyboard.state` 的现有投递语义，写死 transfer 完成后是立即按 held direction 起步，还是必须等下一次 input delivery；避免落地自动多走一格或必须松开重按。
 
 7. **async terminal failure 的具体实现**  
-   在现有 subsystem API 下写死最小 Promise/cleanup 结构，不引入 framework primitive。
+   在现有 subsystem API 下写死 `frame()` 内最小 Promise/resolve/cleanup 结构；不得引入通用 Deferred/framework primitive。
 
 8. **精确 production/test 文件与 gate 命令**  
    确认 importer test 文件、map test 文件和最终命令；Frozen 后 implementation agent 不再自行选择 harness。
@@ -790,6 +867,8 @@ Essentials v21.1 source
              └──────────────────┬──────────────────┘
                                 ▼
                          beginTransfer
+                                │
+                    source standing projection
                                 │
                          load target map
                                 │
