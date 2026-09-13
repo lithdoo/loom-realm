@@ -21,17 +21,60 @@
     return depth * 2 + 1;
   }
 
+  function lerp(from, to, progress) {
+    return from + (to - from) * progress;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function exactObject(value, keys) {
+    return Boolean(value) && typeof value === "object" && keys.every((key) => key in value) && Object.keys(value).length === keys.length;
+  }
+
+  function validCameraMotion(value) {
+    if (value === null) return true;
+    if (!exactObject(value, ["id", "durationMs", "fromCameraX", "fromCameraY"])) return false;
+    return Number.isSafeInteger(value.id) && value.id > 0
+      && value.durationMs === 250
+      && Number.isSafeInteger(value.fromCameraX) && value.fromCameraX >= 0
+      && Number.isSafeInteger(value.fromCameraY) && value.fromCameraY >= 0;
+  }
+
+  function validPlayerMotion(value) {
+    if (value === null) return true;
+    if (!exactObject(value, ["id", "durationMs", "fromY", "fromScreenX", "fromScreenY"])) return false;
+    return Number.isSafeInteger(value.id) && value.id > 0
+      && value.durationMs === 250
+      && Number.isSafeInteger(value.fromY) && value.fromY >= 0
+      && Number.isFinite(value.fromScreenX)
+      && Number.isFinite(value.fromScreenY);
+  }
+
   class ResourceElement extends HTMLElement {
     constructor() {
       super();
       this._resources = undefined;
       this._images = new Map();
       this._latestData = undefined;
+      this._raf = undefined;
     }
 
     receiveRenderContext(context) {
       if (!context || !context.resources || typeof context.resources.resource !== "function") throw new TypeError("Map presentation requires PresentationResourceClient");
       this._resources = context.resources;
+    }
+
+    _cancelRaf() {
+      if (this._raf !== undefined) {
+        cancelAnimationFrame(this._raf);
+        this._raf = undefined;
+      }
+    }
+
+    disconnectedCallback() {
+      this._cancelRaf();
     }
 
     async _image(ref) {
@@ -97,7 +140,14 @@
     }
 
     receiveRenderData(data) {
-      if (!data || !Number.isSafeInteger(data.cameraX) || !Number.isSafeInteger(data.cameraY) || !Array.isArray(data.tiles) || !validRef(data.tileset)) throw new TypeError("Invalid MapViewRenderData");
+      if (
+        !data
+        || !Number.isSafeInteger(data.cameraX) || data.cameraX < 0
+        || !Number.isSafeInteger(data.cameraY) || data.cameraY < 0
+        || !Array.isArray(data.tiles)
+        || !validRef(data.tileset)
+        || !validCameraMotion(data.cameraMotion)
+      ) throw new TypeError("Invalid MapViewRenderData");
       for (const tile of data.tiles) {
         if (
           !tile || typeof tile !== "object"
@@ -110,30 +160,31 @@
           throw new TypeError("Invalid visible regular tile");
         }
       }
+      this._cancelRaf();
       this._latestData = data;
-      this._clearLayers();
-      void this._paintLatest();
+      const receivedAt = performance.now();
+      void this._paintLatest(data, receivedAt);
     }
 
-    async _paintLatest() {
-      const requested = this._latestData;
-      if (!requested) return;
+    async _paintLatest(requested, receivedAt) {
+      this._ensureLayer(0);
       let image;
       try {
         image = await this._image(requested.tileset);
       } catch {
-        const current = this._latestData;
-        if (!current) return;
-        if (resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset)) return;
+        if (this._latestData !== requested) return;
         this._clearLayers();
         return;
       }
-      const current = this._latestData;
-      if (!current) return;
-      if (resourceIdentity(current.tileset) !== resourceIdentity(requested.tileset)) return;
+      if (this._latestData !== requested || !this.isConnected) return;
+
+      const motion = requested.cameraMotion;
+      const progress = motion ? clamp((performance.now() - receivedAt) / motion.durationMs, 0, 1) : 1;
+      const cameraX = motion ? Math.round(lerp(motion.fromCameraX, requested.cameraX, progress)) : requested.cameraX;
+      const cameraY = motion ? Math.round(lerp(motion.fromCameraY, requested.cameraY, progress)) : requested.cameraY;
 
       const buckets = new Map();
-      for (const tile of current.tiles) {
+      for (const tile of requested.tiles) {
         let bucket = buckets.get(tile.depth);
         if (!bucket) {
           bucket = [];
@@ -158,14 +209,23 @@
           layer.context.drawImage(
             image,
             sx, sy, 32, 32,
-            tile.x * 32 - current.cameraX,
-            tile.y * 32 - current.cameraY,
+            tile.x * 32 - cameraX,
+            tile.y * 32 - cameraY,
             32, 32,
           );
         }
       }
 
       this._trimLayers(groups.length);
+      if (motion && progress < 1) {
+        this._raf = requestAnimationFrame(() => {
+          this._raf = undefined;
+          if (this._latestData !== requested || !this.isConnected) return;
+          void this._paintLatest(requested, receivedAt);
+        });
+        return;
+      }
+      this._raf = undefined;
     }
   }
 
@@ -182,32 +242,61 @@
     }
 
     receiveRenderData(data) {
-      if (!data || ![2, 4, 6, 8].includes(data.direction) || data.pattern !== 0 || !validRef(data.sprite) || !Number.isSafeInteger(data.y) || data.y < 0) throw new TypeError("Invalid MapSpriteRenderData");
+      if (
+        !data
+        || !Number.isSafeInteger(data.x) || data.x < 0
+        || !Number.isSafeInteger(data.y) || data.y < 0
+        || ![2, 4, 6, 8].includes(data.direction)
+        || ![0, 1, 2, 3].includes(data.pattern)
+        || !Number.isFinite(data.screenX)
+        || !Number.isFinite(data.screenY)
+        || !validRef(data.sprite)
+        || !validPlayerMotion(data.motion)
+        || (data.motion === null && data.pattern !== 0)
+        || (data.motion !== null && data.pattern !== 1 && data.pattern !== 3)
+      ) throw new TypeError("Invalid MapSpriteRenderData");
+      this._cancelRaf();
       this._latestData = data;
-      this._paintLatest();
+      const receivedAt = performance.now();
+      void this._paintLatest(data, receivedAt);
     }
 
-    async _paintLatest() {
-      const requested = this._latestData;
-      if (!requested) return;
+    async _paintLatest(requested, receivedAt) {
       let image;
-      try { image = await this._image(requested.sprite); } catch { return; }
-      const current = this._latestData;
-      if (!current || resourceIdentity(current.sprite) !== resourceIdentity(requested.sprite)) return;
+      try { image = await this._image(requested.sprite); } catch {
+        if (this._latestData !== requested) return;
+        return;
+      }
+      if (this._latestData !== requested || !this.isConnected) return;
       const frameWidth = image.width / 4;
       const frameHeight = image.height / 4;
       if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) throw new TypeError("Character sheet must be 4 by 4");
+      const motion = requested.motion;
+      const progress = motion ? clamp((performance.now() - receivedAt) / motion.durationMs, 0, 1) : 1;
+      const pattern = motion ? (progress < 0.5 ? requested.pattern : (requested.pattern + 1) % 4) : 0;
+      const screenX = motion ? Math.round(lerp(motion.fromScreenX, requested.screenX, progress)) : requested.screenX;
+      const screenY = motion ? Math.round(lerp(motion.fromScreenY, requested.screenY, progress)) : requested.screenY;
+      const visualPixelY = motion ? Math.round(lerp(motion.fromY * 32, requested.y * 32, progress)) : requested.y * 32;
+      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
       this._canvas.width = frameWidth;
       this._canvas.height = frameHeight;
       this._context.imageSmoothingEnabled = false;
       this._context.clearRect(0, 0, frameWidth, frameHeight);
-      this._context.drawImage(image, 0, ((current.direction - 2) / 2) * frameHeight, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
-      this.style.left = `${current.screenX + (32 - frameWidth) / 2}px`;
-      this.style.top = `${current.screenY + 32 - frameHeight}px`;
+      this._context.drawImage(image, pattern * frameWidth, ((requested.direction - 2) / 2) * frameHeight, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
+      this.style.left = `${screenX + (32 - frameWidth) / 2}px`;
+      this.style.top = `${screenY + 32 - frameHeight}px`;
       this.style.width = `${frameWidth}px`;
       this.style.height = `${frameHeight}px`;
-      const depth = characterVisualDepth(current.y, frameHeight);
       this.style.zIndex = String(characterStackValue(depth));
+      if (motion && progress < 1) {
+        this._raf = requestAnimationFrame(() => {
+          this._raf = undefined;
+          if (this._latestData !== requested || !this.isConnected) return;
+          void this._paintLatest(requested, receivedAt);
+        });
+        return;
+      }
+      this._raf = undefined;
     }
   }
 

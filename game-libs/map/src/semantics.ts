@@ -143,10 +143,11 @@ export function projectVisibleTiles(
   cameraX: number,
   cameraY: number,
 ): readonly VisibleTile[] {
-  const minX = Math.floor(cameraX / 32);
-  const maxX = Math.min(map.width - 1, Math.floor((cameraX + 639) / 32));
-  const minY = Math.floor(cameraY / 32);
-  const maxY = Math.min(map.height - 1, Math.floor((cameraY + 479) / 32));
+  const overscan = 1;
+  const minX = Math.max(0, Math.floor(cameraX / 32) - overscan);
+  const maxX = Math.min(map.width - 1, Math.floor((cameraX + 639) / 32) + overscan);
+  const minY = Math.max(0, Math.floor(cameraY / 32) - overscan);
+  const maxY = Math.min(map.height - 1, Math.floor((cameraY + 479) / 32) + overscan);
   const tiles: VisibleTile[] = [];
   for (const z of [0, 1, 2] as const) for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
     const tileId = tableAt(map.data, x, y, z);

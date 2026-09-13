@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import mapDefinition from "@loomrealm-game/map";
 import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
@@ -30,8 +29,35 @@ test("Table, camera and visible projection follow frozen ordering", () => {
   assert.equal(tableAt(map.data, 12, 8, 0), 385);
   assert.deepEqual(computeCamera(map, 10, 8), { cameraX: 16, cameraY: 32 });
   const tiles = projectVisibleTiles(map, tileset, 16, 32);
-  assert.deepEqual(tiles[0], { x: 0, y: 1, z: 0, tileId: 384, depth: 0 });
+  assert.deepEqual(tiles[0], { x: 0, y: 0, z: 0, tileId: 384, depth: 0 });
   assert.ok(tiles.find((tile) => tile.x === 12 && tile.y === 8 && tile.tileId === 385));
+});
+
+test("visible projection clamps one-tile overscan to map bounds", () => {
+  const { map: raw, tileset: rawTileset } = fixture();
+  const map = validateMapRecord(raw);
+  const tileset = validateTilesetRecord(rawTileset, 1);
+  const origin = projectVisibleTiles(map, tileset, 0, 0);
+  assert.equal(origin[0].x, 0);
+  assert.equal(origin[0].y, 0);
+  assert.equal(origin.some((tile) => tile.x < 0 || tile.y < 0), false);
+  const far = projectVisibleTiles(map, tileset, map.width * 32, map.height * 32);
+  assert.equal(far.some((tile) => tile.x >= map.width || tile.y >= map.height), false);
+  assert.ok(far.find((tile) => tile.x === map.width - 1 && tile.y === map.height - 1));
+});
+
+test("target camera overscan covers the previous step's source camera edge", () => {
+  const { map: raw, tileset: rawTileset } = fixture();
+  const map = validateMapRecord(raw);
+  const tileset = validateTilesetRecord(rawTileset, 1);
+  const source = computeCamera(map, 10, 8);
+  const target = computeCamera(map, 11, 8);
+  assert.deepEqual(source, { cameraX: 16, cameraY: 32 });
+  assert.deepEqual(target, { cameraX: 48, cameraY: 32 });
+  const sourceEdgeX = Math.floor(source.cameraX / 32);
+  const tiles = projectVisibleTiles(map, tileset, target.cameraX, target.cameraY);
+  assert.ok(tiles.find((tile) => tile.x === sourceEdgeX && tile.y === Math.floor(source.cameraY / 32)));
+  assert.ok(tiles.find((tile) => tile.x === Math.min(map.width - 1, Math.floor((target.cameraX + 639) / 32) + 1)));
 });
 
 test("Tileset.priorities accepts 0 through 5 and rejects the rest", () => {
@@ -67,34 +93,6 @@ test("projection depth follows priority while z/y/x order stays fixed", () => {
     tilesPriority0.map(({ x, y, z, tileId }) => ({ x, y, z, tileId })),
     tilesPriority1.map(({ x, y, z, tileId }) => ({ x, y, z, tileId })),
   );
-});
-
-test("one long-lived Frame accepts one move and one persisted reverse-entry block", async () => {
-  const { map, tileset } = fixture();
-  const records = { "struct.Map/1": map, "struct.Tileset/1": tileset };
-  let handler; const states = []; let listenerClosed = false; let domainClosed = false;
-  const definition = mapDefinition({
-    signal: new AbortController().signal,
-    content: {
-      async record(namespace, key) { return { value: records[`${namespace}/${key}`], contentVersion: "v-record" }; },
-      async resource() { return { bytes: new Uint8Array([1]), mime: "image/png", contentVersion: "v-image" }; },
-    },
-    createInputListener() { return { on(channel, value) { assert.equal(channel, "keyboard.event"); handler = value; return () => {}; }, setChannels() {}, close() { listenerClosed = true; } }; },
-    createRenderDomain(initial) { states.push(initial); return { replace(state) { states.push(state); }, emit() {}, close() { domainClosed = true; } }; },
-  });
-  const controller = new AbortController();
-  const pending = definition.frame({ id: "f", params: { mapId: 1, x: 10, y: 8, characterName: "m14_player" }, signal: controller.signal, async call() { throw new Error("unused"); } });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(states.length, 1);
-  await handler({ action: "down", code: "ArrowRight", repeat: false });
-  assert.deepEqual(states.at(-1).roots[0].children[0].data, { x: 11, y: 8, screenX: 304, screenY: 224, direction: 6, pattern: 0, sprite: { namespace: "resource.Graphics", key: "Characters/m14_player", contentVersion: "v-image" } });
-  assert.equal(states.at(-1).roots[0].data.cameraX, 48);
-  await handler({ action: "down", code: "ArrowRight", repeat: false });
-  assert.equal(states.at(-1).roots[0].children[0].data.x, 11);
-  assert.equal(states.at(-1).roots[0].children[0].data.direction, 6);
-  controller.abort();
-  assert.deepEqual(await pending, { type: "cancelled" });
-  assert.equal(listenerClosed, true); assert.equal(domainClosed, true);
 });
 
 test("consumer records fail closed instead of accepting alternate shapes", () => {

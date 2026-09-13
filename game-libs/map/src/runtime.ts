@@ -3,6 +3,27 @@ import { canMove, computeCamera, directionForCode, projectVisibleTiles, validate
 
 interface InitialInput { mapId: number; x: number; y: number; characterName: string }
 interface ResourceRef { readonly [name: string]: string; namespace: string; key: string; contentVersion: string }
+interface ActiveMove {
+  readonly id: number;
+  readonly fromX: number;
+  readonly fromY: number;
+  readonly startPattern: 1 | 3;
+}
+
+const WALK_STEP_MS = 250;
+const stepDelta: Record<Direction, { readonly dx: number; readonly dy: number }> = {
+  2: { dx: 0, dy: 1 },
+  4: { dx: -1, dy: 0 },
+  6: { dx: 1, dy: 0 },
+  8: { dx: 0, dy: -1 },
+};
+const codeByDirection: Record<Direction, string> = {
+  2: "ArrowDown",
+  4: "ArrowLeft",
+  6: "ArrowRight",
+  8: "ArrowUp",
+};
+const fallbackCodes = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] as const;
 
 function initialInput(value: unknown): InitialInput {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Map input must be an object");
@@ -28,6 +49,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
   async frame(frame: Frame) {
     let listener;
     let domain;
+    let stepTimer: ReturnType<typeof setTimeout> | null = null;
+    let activeMove: ActiveMove | null = null;
     try {
       const input = initialInput(frame.params);
       const map = validateMapRecord((await scope.content.record("struct.Map", String(input.mapId), { signal: frame.signal })).value);
@@ -40,33 +63,153 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       let x = input.x;
       let y = input.y;
       let direction: Direction = 2;
+      let nextMoveId = 1;
+      let nextStartPattern: 1 | 3 = 1;
+      let heldDirections: Direction[] = [];
+
       const renderState = (): RenderDomainState => {
+        if (activeMove) {
+          const fromCamera = computeCamera(map, activeMove.fromX, activeMove.fromY);
+          const targetCamera = computeCamera(map, x, y);
+          const fromScreenX = activeMove.fromX * 32 - fromCamera.cameraX;
+          const fromScreenY = activeMove.fromY * 32 - fromCamera.cameraY;
+          const screenX = x * 32 - targetCamera.cameraX;
+          const screenY = y * 32 - targetCamera.cameraY;
+          return {
+            zIndex: 0,
+            roots: [{
+              key: "viewport", tag: "lr-map-view", attrs: {},
+              data: {
+                mapId: input.mapId, mapWidth: map.width, mapHeight: map.height,
+                cameraX: targetCamera.cameraX, cameraY: targetCamera.cameraY, tileset: tilesetRef,
+                tiles: projectVisibleTiles(map, tileset, targetCamera.cameraX, targetCamera.cameraY),
+                cameraMotion: Object.freeze({
+                  id: activeMove.id,
+                  durationMs: WALK_STEP_MS,
+                  fromCameraX: fromCamera.cameraX,
+                  fromCameraY: fromCamera.cameraY,
+                }),
+              },
+              children: [{
+                key: "player", tag: "lr-map-sprite", attrs: {},
+                data: {
+                  x, y, screenX, screenY, direction,
+                  pattern: activeMove.startPattern, sprite: playerRef,
+                  motion: Object.freeze({
+                    id: activeMove.id,
+                    durationMs: WALK_STEP_MS,
+                    fromY: activeMove.fromY,
+                    fromScreenX,
+                    fromScreenY,
+                  }),
+                },
+                children: [],
+              }],
+            }],
+          };
+        }
         const { cameraX, cameraY } = computeCamera(map, x, y);
         return {
           zIndex: 0,
           roots: [{
             key: "viewport", tag: "lr-map-view", attrs: {},
-            data: { mapId: input.mapId, mapWidth: map.width, mapHeight: map.height, cameraX, cameraY, tileset: tilesetRef, tiles: projectVisibleTiles(map, tileset, cameraX, cameraY) },
-            children: [{ key: "player", tag: "lr-map-sprite", attrs: {}, data: { x, y, screenX: x * 32 - cameraX, screenY: y * 32 - cameraY, direction, pattern: 0, sprite: playerRef }, children: [] }],
+            data: {
+              mapId: input.mapId, mapWidth: map.width, mapHeight: map.height,
+              cameraX, cameraY, tileset: tilesetRef,
+              tiles: projectVisibleTiles(map, tileset, cameraX, cameraY),
+              cameraMotion: null,
+            },
+            children: [{
+              key: "player", tag: "lr-map-sprite", attrs: {},
+              data: {
+                x, y, screenX: x * 32 - cameraX, screenY: y * 32 - cameraY, direction,
+                pattern: 0, sprite: playerRef, motion: null,
+              },
+              children: [],
+            }],
           }],
         };
       };
-      listener = scope.createInputListener({ frame, channels: ["keyboard.event"] });
+
+      const attempt = (next: Direction) => {
+        direction = next;
+        const { dx, dy } = stepDelta[next];
+        if (!canMove(map, tileset, x, y, direction, dx, dy)) {
+          activeMove = null;
+          if (stepTimer !== null) {
+            clearTimeout(stepTimer);
+            stepTimer = null;
+          }
+          nextStartPattern = 1;
+          domain!.replace(renderState());
+          return;
+        }
+        const fromX = x;
+        const fromY = y;
+        x += dx;
+        y += dy;
+        const moveId = nextMoveId++;
+        activeMove = { id: moveId, fromX, fromY, startPattern: nextStartPattern };
+        domain!.replace(renderState());
+        stepTimer = setTimeout(() => finishStep(moveId), WALK_STEP_MS);
+      };
+
+      const finishStep = (moveId: number) => {
+        if (frame.signal.aborted || activeMove?.id !== moveId) return;
+        stepTimer = null;
+        activeMove = null;
+        if (heldDirections.length > 0) {
+          nextStartPattern = nextStartPattern === 1 ? 3 : 1;
+          attempt(heldDirections[heldDirections.length - 1]!);
+        } else {
+          nextStartPattern = 1;
+          domain!.replace(renderState());
+        }
+      };
+
       domain = scope.createRenderDomain(renderState());
+      listener = scope.createInputListener({ frame, channels: ["keyboard.event", "keyboard.state"] });
       listener.on("keyboard.event", (event) => {
-        if (event.action !== "down" || event.repeat) return;
         const movement = directionForCode(event.code);
         if (!movement) return;
-        direction = movement.direction;
-        if (canMove(map, tileset, x, y, direction, movement.dx, movement.dy)) { x += movement.dx; y += movement.dy; }
-        domain!.replace(renderState());
+        if (event.action === "down") {
+          if (event.repeat) return;
+          heldDirections = heldDirections.filter((item) => item !== movement.direction);
+          heldDirections.push(movement.direction);
+          if (activeMove === null) attempt(heldDirections[heldDirections.length - 1]!);
+          return;
+        }
+        if (event.action !== "up") return;
+        heldDirections = heldDirections.filter((item) => item !== movement.direction);
+        if (activeMove === null && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+      });
+      listener.on("keyboard.state", (state) => {
+        const down = new Set(Array.isArray(state?.down) ? state.down : []);
+        heldDirections = heldDirections.filter((item) => down.has(codeByDirection[item]));
+        for (const code of fallbackCodes) {
+          if (!down.has(code)) continue;
+          const movement = directionForCode(code);
+          if (!movement || heldDirections.includes(movement.direction)) continue;
+          heldDirections.push(movement.direction);
+        }
+        if (activeMove === null && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       await waitForAbort(frame.signal);
       listener.close();
+      if (stepTimer !== null) {
+        clearTimeout(stepTimer);
+        stepTimer = null;
+      }
+      activeMove = null;
       domain.close();
       return cancelled();
     } catch (error) {
       listener?.close();
+      if (stepTimer !== null) {
+        clearTimeout(stepTimer);
+        stepTimer = null;
+      }
+      activeMove = null;
       domain?.close();
       if (frame.signal.aborted) return cancelled();
       return failed({ code: "MAP_ACTIVATION_FAILED", message: error instanceof Error ? error.message : "Map activation failed" });
