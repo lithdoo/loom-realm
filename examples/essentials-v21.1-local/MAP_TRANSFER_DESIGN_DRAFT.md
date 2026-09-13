@@ -1,6 +1,6 @@
 # 地图跳转设计草案
 
-> 状态：Draft — **禁止实施**  
+> 状态：Frozen for implementation
 > 目录：`examples/essentials-v21.1-local`  
 > 需求来源：`MAP_BEHAVIOR_REQUIREMENTS.md` 第 3 节  
 > 前置能力：地图遮挡与人物行走动画已完成并进入 `main`。
@@ -17,7 +17,7 @@
 - Frozen 后若任一规则无法按原文实现，agent 必须 STOP 并报告 blocker；不得自行扩大 scope、补 Event Interpreter、修改 framework contract 或选择“近似实现”。
 - 除本文明确覆盖的部分外，已冻结的 walking/layering authority、input、timer、Render latest-state、Browser stale-resource/rAF 合同继续有效。
 
-当前只剩真实 v21.1 source semantics 与 acceptance fixture 仍未冻结；文件范围、Runtime 状态机、failure/lifecycle、测试文件、gate 和施工顺序已在本文写死。
+Section 16 已由本地 Essentials v21.1 FSDB 与官方 v21.1 Scripts（`Maruno17/pokemon-essentials@ea7b5d56`）填满。文件范围、Runtime 状态机、failure/lifecycle、测试文件、gate 和施工顺序保持写死。
 
 ---
 
@@ -938,141 +938,342 @@ implementation agent 必须按以下顺序，不自行重排设计：
 
 ---
 
-## 16. FREEZE-BLOCKERS：必须由真实 v21.1 证据填满
+## 16. FREEZE-BLOCKERS：真实 v21.1 证据（已填满）
 
-**本节只要还有 `TBD`，顶部状态就不得改为 Frozen。implementation agent 不负责调查本节。**
+**本节已无待填项。implementation agent 不得再调查、改写或放宽本节；只能按原文投影。**
+
+证据来源：
+
+- 本地 FSDB `[FSDB]Essentials v21.1/[resource]Data/Map*.rxdata`（全图 136 个含 Transfer Player 的 event，168 条 code 201，全部 `parameters[0] === 0`）
+- 本地 `[resource]PBS/map_connections.txt` 与编译结果 `[resource]Data/map_connections.dat`（19 行 6-tuple）
+- 官方 v21.1 Scripts，`Maruno17/pokemon-essentials@ea7b5d56`
 
 ### 16.1 E1 — Event decoded-tree 与支持表
 
-必须填入当前 importer decoded tree 的精确字段路径和支持模式。最终格式必须达到如下粒度：
-
 ```text
 RMXP Map event path:
-TBD
+  decodeMarshal(MapNNN.rxdata) → decodeRmxpGraph
+  root.kind === "RmxpObject" && root.className === "RPG::Map"
+  root.fields["@events"].kind === "Hash"
+  Hash.entries[i] = [key, event]
+  key 是 number，且 key === event.fields["@id"]
+  （已在 Map002/005/034/049/050/066/067 上核对，无 mismatch）
+  event.kind === "RmxpObject" && event.className === "RPG::Event"
 
 RPG::Event fields used:
-TBD
+  @id @name @x @y @pages
 
 RPG::Event::Page fields used:
-TBD
+  @condition @through @always_on_top @trigger @list
+  XP 没有 VX @priority_type；高度/层级用 @always_on_top boolean。
+  本刀支持页全部 always_on_top === false。
 
 EventCommand list path:
-TBD
+  page.fields["@list"].kind === "Array"
+  items 中 className === "RPG::EventCommand"
+  command.fields: @code @indent @parameters
+  @parameters.kind === "Array"；元素是 number / boolean / RubyString
 
 Transfer Player command code:
-TBD
+  201
+  官方 Interpreter#command_201
+  （Data/Scripts/003_Game processing/004_Interpreter_Commands.rb）
 
 Transfer Player parameters:
-  target map id: TBD
-  target x: TBD
-  target y: TBD
-  direction: TBD
+  [0] appointment：0 = 直接指定；1 = 变量指定（本 corpus 无；出现则 unsupported）
+  [1] target map id（正整数）
+  [2] target x（非负整数）
+  [3] target y（非负整数）
+  [4] direction
+  [5] fade：忽略
 
 retain-direction raw value -> null:
-TBD
+  parameters[4] === 0
+  官方 Scene_Map#transfer_player 的 case 只处理 2/4/6/8，0 表示不转向。
+
 fixed direction raw values -> 2/4/6/8:
-TBD
+  parameters[4] ∈ {2, 4, 6, 8} 原样写入 targetDirection
 ```
 
-支持模式必须列成穷举表，例如：
+Corpus 方向直方图（168 条 201）：`0:74, 2:15, 4:8, 6:19, 8:52`。
+
+支持模式穷举表。page selection 一律用 Section 16.2。不在下表的 event → 不投影（fail closed，不写进 steps/contacts）。
 
 ```text
 Pattern E-STEP-1
-  trigger = TBD
-  priority = TBD
-  through = TBD
-  page selection = TBD
-  command requirements = TBD
-  output = StepTransfer
+  trigger = 1          # player touch
+  always_on_top = false
+  through = true
+  page selection = Section 16.2 选出的静态页
+  command requirements =
+    该页恰好一条 indent===0 的 code 201
+    且 parameters[0]===0
+    不得有 indent!==0 的 201
+    其余 indent-0 命令不执行、不解释（常见：0/106/208/223/250）
+  output = 一条 StepTransfer
+    x = event.fields["@x"]
+    y = event.fields["@y"]
+    targetMapId = parameters[1]
+    targetX = parameters[2]
+    targetY = parameters[3]
+    targetDirection = parameters[4]===0 ? null : parameters[4]
+
+  官方对应：through=true 不挡住 Game_Character#passable?；
+  玩家走入 event 格后，Game_Player#update_event_triggering
+  调用 check_event_trigger_here([1,2])。
+  Runtime 在 finishStep() 查 steps。
+
+  真实样本：
+    Map049 event 4 "Hole" (12,7) → Map050 (12,7) targetDirection null
+    Map034 event 6 "Hole" (22,14) → Map034 (16,30) targetDirection null
 
 Pattern E-CONTACT-1
-  trigger = TBD
-  priority = TBD
-  through = TBD
-  page selection = TBD
-  command requirements = TBD
-  contact player coordinate formula = TBD
-  output = ContactTransfer
+  trigger = 1          # player touch
+  always_on_top = false
+  through = false      # 实心，玩家不能占领 event 格
+  page selection = Section 16.2 选出的静态页
+  command requirements = 与 E-STEP-1 相同（恰好一条 indent-0 直接 201）
+  其余命令忽略（本 corpus 常见 0/106/108/121/122/208/209/210/223/250/355/408/509，
+    含 Followers.follow_into_door；不实现这些副作用）
+  contact player coordinate formula:
+    delta(2)=(0,1)  delta(4)=(-1,0)  delta(6)=(1,0)  delta(8)=(0,-1)
+    对每个 direction ∈ {2,4,6,8}:
+      playerX = event.x - dx
+      playerY = event.y - dy
+      若 (playerX,playerY) 落在当前 map bounds 内：
+        发射一条 ContactTransfer(playerX, playerY, direction, target...)
+  output = 1..4 条 ContactTransfer（四邻格，不是“只从南面”）
+
+  官方对应：Game_Player#move_generic 在 can_move_in_direction? 失败后
+  调用 check_event_trigger_touch(dir)，检查面前格是否为 trigger 1/2 的 event。
+  Runtime 在 in-bounds attempt 上、canMove() 之前查 contacts。
+
+  真实样本：Map066 event 1 "Door" (12,7) 见 16.5。
 ```
 
-不在支持表的 event → fail closed。
+本 corpus 静态投影结果：109 个 E-CONTACT-1、2 个 E-STEP-1。其余含 201 的 event 因 trigger/through/分支 201 不合格，不投影。
+
+明确 unsupported（举例，非穷尽）：
+
+- `parameters[0] !== 0`（变量预约）
+- indent!==0 的 201（Show Choices / Conditional Branch 内，如 Map003 Warp tile、Map020 Exit、Map067 Counter(4)）
+- trigger ∈ {0,2,3,4}（action / event touch / autorun / parallel）
+- always_on_top === true
+- 16.2 选不出静态页
 
 ### 16.2 E2 — 多 page 静态选择
 
-必须写死：
+官方 `Game_Event#refresh` 按 `@event.pages.reverse` 找第一页满足 condition 的 page。
+
+本刀不做 page evaluator、不读 `$game_switches`。静态快照 = **所有 switch/variable/self-switch 均为关/未达**：
 
 ```text
-page count/conditions 如何判断可静态投影: TBD
-选择哪个 page: TBD
-哪些 condition 允许: TBD
-哪些组合直接 unsupported: TBD
+page count/conditions 如何判断可静态投影:
+  一页可静态命中 iff 其 @condition 四个 valid 全是 false：
+    switch1_valid === false
+    switch2_valid === false
+    variable_valid === false
+    self_switch_valid === false
+  valid===false 时 *_id / variable_value / self_switch_ch 是编辑器默认值，忽略
+    （例：Map066 Door page 0 的 switch1_id=8 不生效）
+
+选择哪个 page:
+  在可静态命中的 pages 里取 pageIndex 最大者
+  （等于 reverse 扫描时跳过所有 valid===true 的页之后命中的第一页）
+
+哪些 condition 允许:
+  仅四个 valid 全 false。这就是“游戏开局 / 无开关”下官方会选的页。
+
+哪些组合直接 unsupported:
+  没有任何可静态命中的 page
+  选中页不满足 E-STEP-1 或 E-CONTACT-1
+  选中页没有恰好一条 indent-0 直接 201
 ```
 
-不得留给 Runtime 或 implementation agent 选择。
+later 页即使有 switch1_valid（如 Map066 Door page 1：trigger=3 autorun，switch1_id=22，Followers.hide / setTempSwitchOn("A")，无 201）也不参与本刀投影。那是到达动画，本刀忽略。
 
 ### 16.3 C1 — `map_connections` grammar 与坐标公式
 
-必须写死：
+PBS：`[resource]PBS/map_connections.txt`。官方 `compile_connections` schema `"iyiiyi"`（`002_Compiler_CompilePBS.rb:104-137`）。`#` 行与空行跳过。编译产物是 Array of 6-tuple，与 PBS 行一一对应。
 
 ```text
-line fields: TBD
-edge names/encoding: TBD
-offset sign semantics: TBD
+line fields:
+  mapA, edgeA, offsetA, mapB, edgeB, offsetB
 
-N -> S:
-  source coordinate formula: TBD
-  target coordinate formula: TBD
-  valid overlap range: TBD
+edge names/encoding:
+  PBS 允许 N|North / S|South / E|East / W|West，编译后一律 "N"|"S"|"E"|"W"
+  本 pack 的 19 行已经是单字母。
+  编译器强制配对：N↔S、S↔N、E↔W、W↔E，否则 raise。
 
-S -> N:
-  ... TBD
-
-E -> W:
-  ... TBD
-
-W -> E:
-  ... TBD
+offset sign semantics:
+  offset 是非负整数，表示该地图在连接边上的对齐起点。
+  N/S：offset 成为该图的 x；E/W：offset 成为该图的 y。
+  本 pack 全部 offset ≥ 0，值为
+    0,1,2,4,5,6,8,10,11,12,18,21,32,43,77,78
+  没有负 offset。不得发明负 offset 语义。
 ```
 
-必须附至少一个正 offset、一个负 offset、一个边界 overlap 的真实/官方测试向量。
+官方 `MapFactoryHelper.getMapConnections` 把每条 6-tuple **就地改写成两端的 (x,y)**，然后 `getNewMap` 用改写后的数字：
+
+```text
+getMapEdge(map, edge):
+  N 或 W → 0
+  E → map.width
+  S → map.height
+
+convert(conn):
+  若 edgeA ∈ {N,S}: x1 = offsetA; y1 = getMapEdge(mapA, edgeA)
+  若 edgeA ∈ {E,W}: x1 = getMapEdge(mapA, edgeA); y1 = offsetA
+  对 mapB/edgeB/offsetB 同样得到 x2,y2
+
+官方玩家是先走进越界格 (afterX,afterY)，再在 Game_Map#update 里 setCurrentMap。
+本刀 Runtime 人仍站在最后一格合法格上做 out-of-bounds attempt，因此：
+
+delta(2)=(0,1) delta(4)=(-1,0) delta(6)=(1,0) delta(8)=(0,-1)
+afterX,afterY = standingX + dx, standingY + dy   # 已越界
+
+若当前 map === mapA:
+  targetMapId = mapB
+  targetX = x2 - x1 + afterX
+  targetY = y2 - y1 + afterY
+若当前 map === mapB:
+  targetMapId = mapA
+  targetX = x1 - x2 + afterX
+  targetY = y1 - y2 + afterY
+
+valid overlap:
+  0 ≤ targetX < target.width 且 0 ≤ targetY < target.height
+  再经 Section 16.4 的 target 0x0F 过滤后才写入 EdgeTransfer。
+  几何 overlap 为空的 PBS 行（本 pack：`7,E,0,23,W,78` 与 `21,E,77,47,W,0`）
+  不报错，只是不产生 EdgeTransfer。
+```
+
+四向展开（只对“这一脚会越界”的 standing 边）：
+
+```text
+N -> S  （PBS 第一图朝北，第二图朝南；玩家 dir=8）
+  站在 mapA 的 (x, 0) 向 8：after=(x,-1)
+  target = (x2 - x1 + x, y2 - y1 - 1)  落在 mapB
+  站在 mapB 的 (x, heightB-1) 向 2：对称用 mapB 分支
+
+S -> N
+  站在南沿 (x, height-1) 向 2：after=(x, height)
+
+E -> W
+  站在东沿 (width-1, y) 向 6：after=(width, y)
+
+W -> E
+  站在西沿 (0, y) 向 4：after=(-1, y)
+```
+
+测试向量（本地 PBS 行号 + 地图尺寸）：
+
+```text
+零 offset（可走）：
+  PBS L18  2,W,0,66,E,0
+  Map002 32×21，Map066 22×21
+  convert: x1=0,y1=0, x2=22,y2=0
+  Map066 (21,8) dir 6 → Map002 (0,8)
+  Map002 (0,8) dir 4 → Map066 (21,8)
+
+正 / 不对称 offset（可走）：
+  PBS L12  7,S,0,5,N,2
+  Map007 60×43，Map005 36×24
+  convert: x1=0,y1=43, x2=2,y2=0
+  Map007 (16,42) dir 2 → Map005 (18,0)
+  Map005 (18,0) dir 8 → Map007 (16,42)
+
+大 offset / 窄 overlap（几何 4 格，落地全 0x0F，过滤后 0 条）：
+  PBS L8   44,S,43,5,N,0
+  Map044 45×38，Map005 36×24
+  convert: x1=43,y1=38, x2=0,y2=0
+  几何：Map044 (43,37) dir 2 → Map005 (0,0) 等 4 格
+  落地 passage&0x0F==0x0F，不写 EdgeTransfer
+
+几何 overlap 为空：
+  PBS L24  7,E,0,23,W,78
+  Map007 60×43，Map023 41×41
+  convert: x1=60,y1=0, x2=0,y2=78  → 0 条 EdgeTransfer
+
+负 offset：
+  本 pack 不存在。不要编。
+```
+
+同一条 PBS 行必须同时展开到 mapA 与 mapB 的 `struct.MapTransfer`（官方把同一 conn 对象推进两张图的数组）。
 
 ### 16.4 C2 — Connection crossing passage / direction
 
-必须写死：
+官方 `Game_Player#passable?` 在目标格超出当前 map 时 **不调用 super**，只走 `MapFactory#isPassableFromEdge?` → `getNewMap` + `isPassable?` → 目标图 `passable?(targetX,targetY,0)`。
 
 ```text
-source passage check: TBD
-target reverse passage check: TBD
-other target passage check: TBD
-crossing direction after commit: TBD
+source passage check:
+  无。不得对 source 调用现有 canMove()。
+  官方 edge 分支不检查 source 方向 bit。
+
+target reverse passage check:
+  无。d=0 时 directional bit 为 0，0x01/0x02/0x04/0x08 不参与。
+
+other target passage check:
+  仅目标格“完全不可通行”：
+    越界 → 不发射
+    对 z in [2,1,0]:
+      tileId = Map.data[targetX, targetY, z]
+      tileId === 0 → continue
+      tileId 越出 Tileset.passages/priorities → 不发射
+      (passage & 0x0F) === 0x0F → 不发射
+      priority === 0 → 通过
+    三层都 skip 完 → 通过
+  本刀 TilesetRecord 无 terrain_tags：忽略 Neutral.ignore_passability / surf / bridge。
+  本刀无 NPC：忽略目标格 event 碰撞。
+  该过滤在 Importer 写 EdgeTransfer 时完成。
+
+Runtime 验证（对应 7.1 C）:
+  edges.find(x,y,direction) 命中 → 通过并 startTransfer
+  未命中 → blocked standing
+  不得为此加载目标 map，不得对 source 做 canMove()
+
+crossing direction after commit:
+  保持 attempted direction。
+  官方 setCurrentMap 只 moveto，不 turn。
+  EdgeTransfer 无 targetDirection 字段，beginTransfer 的 Edge 分支方向不变。
 ```
+
+样本：PBS L10 `66,N,18,5,S,0` 几何 8 格（Map066 x=18..21 y=0 dir 8 ↔ Map005 x=0..3 y=23 dir 2），落地 tile 800/801/808/809 的 passage=15=0x0F、terrain=0，过滤后 **0 条**。不要拿这条做 acceptance。
 
 ### 16.5 A1 — 真实 acceptance fixtures
 
-Event transfer：
+Event transfer（contact，A→B→A）：
 
 ```text
-source mapId: TBD
-source player start x/y: TBD
-attempt/step direction: TBD
-boundary type: step | contact = TBD
-target mapId: TBD
-target x/y: TBD
-target direction: TBD
-reciprocal return rule: TBD
+source mapId: 66
+source player start x/y: 12, 8
+attempt/step direction: 8
+boundary type: contact
+target mapId: 67
+target x/y: 4, 7
+target direction: 8
+reciprocal return rule:
+  Map067 event 1 "Exit" at (4,8)，1 page，E-CONTACT-1
+  站在 (4,7) 向 2 接触 → Map066 (12,7) targetDirection null（parameters[4]=0，保留朝下）
+  不因 spawn 在目标格上自动弹回
 ```
 
-Map connection：
+证据：`Map066.rxdata` event 1 `"Door"` at (12,7)，2 pages，静态选 page 0（trigger=1, through=false, always_on_top=false）；201 参数 `[0,67,4,7,8,1]`。Map066 尺寸 22×21。page 1 为 switch 22 autorun 到达动画，忽略。`game.json` 初始点 Map066 (8,7)，可走到 (12,8)。Map067 尺寸 20×15。
+
+Map connection（零 offset，可走，A→B→A）：
 
 ```text
-source mapId: TBD
-source edge x/y/direction: TBD
-target mapId: TBD
-target x/y/direction: TBD
-expected reciprocal crossing: TBD
+source mapId: 66
+source edge x/y/direction: 21, 8, 6
+target mapId: 2
+target x/y: 0, 8
+target direction: 6   # 保持 attempted；EdgeTransfer 无该字段，commit 后方向仍为 6
+expected reciprocal crossing:
+  Map002 (0, 8) direction 4 → Map066 (21, 8) direction 4
+  PBS L18：2,W,0,66,E,0
 ```
 
-记录的 fixture 必须来自实际 Essentials v21.1 FSDB/source，而不是自造 fake map。
+记录的 fixture 来自实际 Essentials v21.1 FSDB/source，不是自造 fake map。
 
 ---
 
@@ -1171,9 +1372,8 @@ Essentials v21.1 source
                                                     walking + layering continue normally
 ```
 
-当 Section 16 全部由真实 v21.1 证据填满、所有 `TBD` 清零后：
+Section 16 已由真实 v21.1 证据填满，顶部状态为 `Frozen for implementation`。
 
-1. 将顶部状态改为 `Frozen for implementation`；
-2. 不再修改 Sections 1–15、17–18 的架构/状态机/file scope/harness/gate；
-3. implementation agent 按 Section 15 机械实施；
-4. 任意冲突均 STOP 返回设计。
+1. 不再修改 Sections 1–15、17–18 的架构/状态机/file scope/harness/gate；
+2. implementation agent 按 Section 15 机械实施；
+3. 任意冲突均 STOP 返回设计。
