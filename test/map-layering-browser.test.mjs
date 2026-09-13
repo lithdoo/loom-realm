@@ -112,6 +112,20 @@ async function openPage() {
     sprite.receiveRenderContext({ resources });
     window.__view = view;
     window.__sprite = sprite;
+    window.__tileDestX = () => {
+      const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
+      if (!canvas) return null;
+      const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, 1).data;
+      let left = -1;
+      let right = -1;
+      for (let x = 0; x < canvas.width; x += 1) {
+        if (data[x * 4 + 3] !== 255) continue;
+        if (left < 0) left = x;
+        right = x;
+      }
+      if (left < 0) return null;
+      return left === 0 ? right + 1 - 32 : left;
+    };
   });
   return page;
 }
@@ -434,17 +448,25 @@ test("walking interpolates integer pixels then snaps to target and stops rAF", {
     spritePayload: walkingSprite({}),
   });
   await waitUntil(page, () => {
+    const destX = window.__tileDestX();
     const top = Number.parseFloat(document.querySelector("lr-map-sprite")?.style.top ?? "");
-    return Number.isInteger(top) && top > 0 && top < 32;
-  }, "intermediate integer sprite top");
+    return Number.isInteger(destX) && destX >= -31 && destX <= -1
+      && Number.isInteger(top) && top > 0 && top < 32;
+  }, "integer camera and sprite mid-step");
   await waitUntil(page, () => {
+    const view = document.querySelector("lr-map-view");
     const sprite = document.querySelector("lr-map-sprite");
-    return sprite?.style.top === "32px" && sprite._raf === undefined;
-  }, "progress 1 target and rAF stop");
+    return window.__tileDestX() === null
+      && sprite?.style.top === "32px"
+      && view?._raf === undefined
+      && sprite?._raf === undefined;
+  }, "progress 1 camera and sprite target and rAF stop");
   const box = await spriteBox(page);
   assert.equal(box.top, "32px");
   assert.equal(Number.isInteger(Number.parseFloat(box.left)), true);
   assert.equal(box.raf, undefined);
+  assert.equal(await page.evaluate(() => window.__view._raf), undefined);
+  assert.equal(await page.evaluate(() => window.__tileDestX()), null);
 });
 
 test("standing latest state snaps pattern 0 and cancels motion", { timeout: 30_000 }, async (t) => {
@@ -583,4 +605,33 @@ test("late decode catches up from receivedAt and skips rAF after 250ms", { timeo
     return sprite?.style.top === "32px" && sprite._raf === undefined;
   }, "late decode lands on target without rAF");
   assert.deepEqual(await spritePixel(page), [0, 0, 255, 255]);
+});
+
+test("late tileset decode catches up from receivedAt and skips MapView rAF", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const delayedRef = { namespace: "resource.Graphics", key: "Tilesets/blue", contentVersion: "late" };
+  await delayTileset(page, delayedRef);
+  await page.evaluate(({ viewPayload }) => window.__view.receiveRenderData(viewPayload), {
+    viewPayload: viewData({
+      depth: 0,
+      tileset: delayedRef,
+      cameraX: 32,
+      cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+      tiles: [{ x: 1, y: 0, z: 0, tileId: 384, depth: 0 }],
+    }),
+  });
+  await waitForPendingImage(page, delayedRef, "__view");
+  await page.evaluate(async () => {
+    const started = performance.now();
+    while (performance.now() - started < 260) await new Promise((resolve) => requestAnimationFrame(resolve));
+  });
+  await settlePendingImage(page, delayedRef, "resolve", "__view");
+  await waitUntil(page, () => {
+    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
+    if (!canvas) return false;
+    const [r, g, b, a] = canvas.getContext("2d").getImageData(5, 5, 1, 1).data;
+    return a === 255 && r === 0 && g === 0 && b === 255 && document.querySelector("lr-map-view")._raf === undefined;
+  }, "late tileset decode lands on target camera without rAF");
+  assert.equal(await page.evaluate(() => window.__tileDestX()), 0);
 });

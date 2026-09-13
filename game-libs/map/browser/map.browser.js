@@ -9,10 +9,6 @@
     return value && typeof value === "object" && [value.namespace, value.key, value.contentVersion].every((part) => typeof part === "string" && part.length > 0);
   }
 
-  function characterVisualDepth(y, frameHeight) {
-    return y * 32 + 32 + (frameHeight > 32 ? 31 : 0);
-  }
-
   function tileStackValue(depth) {
     return depth * 2;
   }
