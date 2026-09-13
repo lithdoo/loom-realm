@@ -239,6 +239,21 @@ async function delayTileset(page, ref) {
   }, identityOf(ref));
 }
 
+async function warmPresentation(page) {
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: viewData({ depth: 0 }), spritePayload: spriteData(0) });
+  await waitPainted(page, "0");
+  await page.evaluate(async ({ tilesetId, spriteId }) => {
+    const tileset = window.__view._images.get(tilesetId);
+    const sprite = window.__sprite._images.get(spriteId);
+    if (!tileset || !sprite) throw new Error("warmPresentation missing decoded images");
+    await tileset;
+    await sprite;
+  }, { tilesetId: identityOf(tilesetRef("v1")), spriteId: identityOf(spriteRef) });
+}
+
 test("A. MapView shadow DOM has no entities wrapper and canvases precede slot", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
@@ -407,11 +422,7 @@ test("H. tile depth and player y validate synchronously", { timeout: 30_000 }, a
 test("walking uses four pattern source rects and swaps at half step", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
-  await page.evaluate(({ viewPayload, spritePayload }) => {
-    window.__view.receiveRenderData(viewPayload);
-    window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: viewData({ depth: 0 }), spritePayload: spriteData(0) });
-  await waitPainted(page, "0");
+  await warmPresentation(page);
   assert.deepEqual(await spritePixel(page), [255, 0, 0, 255]);
 
   await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), { spritePayload: walkingSprite({ pattern: 1, screenY: 0, fromScreenY: 0, y: 0, fromY: 0 }) });
@@ -440,6 +451,7 @@ test("walking uses four pattern source rects and swaps at half step", { timeout:
 test("walking interpolates integer pixels then snaps to target and stops rAF", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
+  await warmPresentation(page);
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
@@ -493,6 +505,7 @@ test("standing latest state snaps pattern 0 and cancels motion", { timeout: 30_0
 test("moving depth is below the tile before the boundary pixel and above at it", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
+  await warmPresentation(page);
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
@@ -512,6 +525,7 @@ test("moving depth is below the tile before the boundary pixel and above at it",
 test("newer walking replaces old motion and standing cancel still wins", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
+  await warmPresentation(page);
   await page.evaluate(({ viewPayload, first, second }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(first);
@@ -538,6 +552,7 @@ test("newer walking replaces old motion and standing cancel still wins", { timeo
 test("disconnect cancels rAF so a stale callback cannot paint", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
+  await warmPresentation(page);
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
