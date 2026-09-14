@@ -208,8 +208,8 @@ test("map view clears full state and delayed same-resource decode paints only la
     let release; const gate = new Promise((resolve) => { release = resolve; });
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
     const tileset = { namespace: "resource.Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
-    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [{ x: 0, y: 0, z: 0, tileId: 384 }] });
-    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [{ x: 1, y: 0, z: 0, tileId: 385 }] });
+    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, autotiles: [null,null,null,null,null,null,null], tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 0, blit: { kind: "regular", sourceIndex: 0 } }], cameraMotion: null });
+    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, autotiles: [null,null,null,null,null,null,null], tiles: [{ x: 1, y: 0, z: 0, tileId: 385, depth: 0, blit: { kind: "regular", sourceIndex: 1 } }], cameraMotion: null });
     release();
     const context = view.shadowRoot.querySelector("canvas").getContext("2d");
     const deadline = performance.now() + 5_000;
@@ -220,7 +220,7 @@ test("map view clears full state and delayed same-resource decode paints only la
       await new Promise((resolve) => requestAnimationFrame(resolve));
     }
     const stale = [...context.getImageData(5, 5, 1, 1).data]; const latest = [...context.getImageData(37, 5, 1, 1).data];
-    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, tiles: [] });
+    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, autotiles: [null,null,null,null,null,null,null], tiles: [], cameraMotion: null });
     const cleared = [...context.getImageData(37, 5, 1, 1).data];
     return { stale, latest, cleared };
   }, { bytes: [...tileset], version: hash(tileset) });

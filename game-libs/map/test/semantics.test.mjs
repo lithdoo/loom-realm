@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canMove, computeCamera, mapTilePassable, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
+import { AUTOTILE_QUARTERS, assertProjectable, assertRenderableTileId, autotileCorners, canMove, computeCamera, mapTilePassable, projectTileBlit, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -11,7 +11,7 @@ function fixture() {
   const priorities = Array(386).fill(0); priorities[0] = 5;
   return {
     map: { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, values) },
-    tileset: { id: 1, tileset_name: "m14_tileset", passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
   };
 }
 
@@ -29,7 +29,7 @@ test("Table, camera and visible projection follow frozen ordering", () => {
   assert.equal(tableAt(map.data, 12, 8, 0), 385);
   assert.deepEqual(computeCamera(map, 10, 8), { cameraX: 16, cameraY: 32 });
   const tiles = projectVisibleTiles(map, tileset, 16, 32);
-  assert.deepEqual(tiles[0], { x: 0, y: 0, z: 0, tileId: 384, depth: 0 });
+  assert.deepEqual(tiles[0], { x: 0, y: 0, z: 0, tileId: 384, depth: 0, blit: { kind: "regular", sourceIndex: 0 } });
   assert.ok(tiles.find((tile) => tile.x === 12 && tile.y === 8 && tile.tileId === 385));
 });
 
@@ -203,4 +203,61 @@ test("validateMapTransferRecord returns a detached deep-frozen record", () => {
   assert.ok(Object.isFrozen(record));
   assert.ok(Object.isFrozen(record.steps));
   assert.ok(Object.isFrozen(record.steps[0]));
+});
+
+
+test("autotileCorners covers all 48 variants with the frozen quarter table", () => {
+  assert.equal(AUTOTILE_QUARTERS.length, 48);
+  for (let variant = 0; variant < 48; variant += 1) {
+    const corners = autotileCorners(variant);
+    assert.equal(corners.length, 4);
+    for (let index = 0; index < 4; index += 1) {
+      const q = AUTOTILE_QUARTERS[variant][index] - 1;
+      assert.deepEqual(corners[index], { sx: (q % 6) * 16, sy: Math.floor(q / 6) * 16 });
+    }
+  }
+  assert.throws(() => autotileCorners(-1), /0 through 47/);
+  assert.throws(() => autotileCorners(48), /0 through 47/);
+});
+
+test("Map002 ids project Flowers1 autotile blit", () => {
+  const passages = Array(4400).fill(0);
+  const priorities = Array(4400).fill(0);
+  const tileset = validateTilesetRecord({
+    id: 1,
+    tileset_name: "Outside",
+    autotile_names: ["Sea", "Sea without shore", "Sea deep", "Sand shore", "Flowers1", "Water rock", "Fountain1"],
+    passages: table(1, 4400, 1, 1, passages),
+    priorities: table(1, 4400, 1, 1, priorities),
+  }, 1);
+  const samples = [
+    [260, 20], [268, 28], [274, 34], [276, 36], [278, 38], [280, 40],
+  ];
+  for (const [tileId, variant] of samples) {
+    const blit = projectTileBlit(tileId, tileset);
+    assert.equal(blit.kind, "autotile");
+    assert.equal(blit.slot, 4);
+    assert.deepEqual(blit.corners, autotileCorners(variant));
+  }
+  assert.throws(() => assertRenderableTileId(1, tileset), /Unsupported map tile id 1/);
+  assert.throws(() => projectTileBlit(260, validateTilesetRecord({
+    id: 1, tileset_name: "Outside",
+    autotile_names: [null, null, null, null, null, null, null],
+    passages: table(1, 4400, 1, 1, passages),
+    priorities: table(1, 4400, 1, 1, priorities),
+  }, 1)), /Unsupported map tile id 260/);
+});
+
+test("assertProjectable and projectVisibleTiles share the same invalid tile failure", () => {
+  const values = Array(2 * 2 * 3).fill(0);
+  values[0] = 274;
+  const map = validateMapRecord({ tileset_id: 1, width: 2, height: 2, data: table(3, 2, 2, 3, values) });
+  const tileset = validateTilesetRecord({
+    id: 1, tileset_name: "Outside",
+    autotile_names: [null, null, null, null, null, null, null],
+    passages: table(1, 4400, 1, 1, Array(4400).fill(0)),
+    priorities: table(1, 4400, 1, 1, Array(4400).fill(0)),
+  }, 1);
+  assert.throws(() => assertProjectable(map, tileset), /Unsupported map tile id 274/);
+  assert.throws(() => projectVisibleTiles(map, tileset, 0, 0), /Unsupported map tile id 274/);
 });

@@ -11,7 +11,7 @@ function fixture() {
   const priorities = Array(386).fill(0); priorities[0] = 5;
   return {
     map: { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, values) },
-    tileset: { id: 1, tileset_name: "m14_tileset", passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
   };
 }
 
@@ -26,7 +26,7 @@ function secondMap() {
   const priorities = Array(386).fill(0);
   return {
     map: { tileset_id: 2, width: 24, height: 18, data: table(3, 24, 18, 3, values) },
-    tileset: { id: 2, tileset_name: "target_tileset", passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 2, tileset_name: "target_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
     transfer: emptyTransfer(2),
   };
 }

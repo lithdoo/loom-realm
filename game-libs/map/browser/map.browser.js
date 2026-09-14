@@ -48,6 +48,34 @@
       && Number.isFinite(value.fromScreenY);
   }
 
+  function validCorner(value) {
+    return exactObject(value, ["sx", "sy"])
+      && Number.isSafeInteger(value.sx) && value.sx >= 0
+      && Number.isSafeInteger(value.sy) && value.sy >= 0;
+  }
+
+  function validBlit(value, autotiles) {
+    if (!value || typeof value !== "object") return false;
+    if (value.kind === "regular") {
+      return exactObject(value, ["kind", "sourceIndex"])
+        && Number.isSafeInteger(value.sourceIndex) && value.sourceIndex >= 0;
+    }
+    if (value.kind === "autotile") {
+      return exactObject(value, ["kind", "slot", "corners"])
+        && Number.isSafeInteger(value.slot) && value.slot >= 0 && value.slot <= 6
+        && Array.isArray(value.corners) && value.corners.length === 4
+        && value.corners.every(validCorner)
+        && validRef(autotiles[value.slot]);
+    }
+    return false;
+  }
+
+  function classifyAutotileLayout(image) {
+    if (image.height === 128 && image.width >= 96 && image.width % 96 === 0) return "block";
+    if (image.height === 32 && image.width >= 32 && image.width % 32 === 0) return "cell";
+    return "invalid";
+  }
+
   class ResourceElement extends HTMLElement {
     constructor() {
       super();
@@ -137,42 +165,80 @@
 
     receiveRenderData(data) {
       if (
-        !data
+        !exactObject(data, ["mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles", "tiles", "cameraMotion"])
+        || !Number.isSafeInteger(data.mapId) || data.mapId <= 0
+        || !Number.isSafeInteger(data.mapWidth) || data.mapWidth <= 0
+        || !Number.isSafeInteger(data.mapHeight) || data.mapHeight <= 0
         || !Number.isSafeInteger(data.cameraX) || data.cameraX < 0
         || !Number.isSafeInteger(data.cameraY) || data.cameraY < 0
         || !Array.isArray(data.tiles)
         || !validRef(data.tileset)
+        || !Array.isArray(data.autotiles) || data.autotiles.length !== 7
+        || !data.autotiles.every((item) => item === null || validRef(item))
         || !validCameraMotion(data.cameraMotion)
       ) throw new TypeError("Invalid MapViewRenderData");
       for (const tile of data.tiles) {
         if (
-          !tile || typeof tile !== "object"
+          !exactObject(tile, ["x", "y", "z", "tileId", "depth", "blit"])
           || !Number.isSafeInteger(tile.x) || tile.x < 0
           || !Number.isSafeInteger(tile.y) || tile.y < 0
           || ![0, 1, 2].includes(tile.z)
-          || !Number.isSafeInteger(tile.tileId) || tile.tileId < 384
+          || !Number.isSafeInteger(tile.tileId) || tile.tileId <= 0
           || !Number.isSafeInteger(tile.depth) || tile.depth < 0
+          || !validBlit(tile.blit, data.autotiles)
         ) {
-          throw new TypeError("Invalid visible regular tile");
+          throw new TypeError("Invalid visible tile");
         }
       }
       this._cancelRaf();
       this._latestData = data;
+      this._paintEpoch = (this._paintEpoch ?? 0) + 1;
       const receivedAt = performance.now();
-      void this._paintLatest(data, receivedAt);
+      void this._paintLatest(data, receivedAt, this._paintEpoch);
     }
 
-    async _paintLatest(requested, receivedAt) {
+    async _paintLatest(requested, receivedAt, epoch) {
       this._ensureLayer(0);
-      let image;
-      try {
-        image = await this._image(requested.tileset);
-      } catch {
-        if (this._latestData !== requested) return;
-        this._clearLayers();
-        return;
+      const required = [];
+      const seen = new Set();
+      let needsTileset = false;
+      for (const tile of requested.tiles) {
+        if (tile.blit.kind === "regular") needsTileset = true;
+        else {
+          const identity = resourceIdentity(requested.autotiles[tile.blit.slot]);
+          if (!seen.has(identity)) {
+            seen.add(identity);
+            required.push({ slot: tile.blit.slot, ref: requested.autotiles[tile.blit.slot] });
+          }
+        }
       }
-      if (this._latestData !== requested || !this.isConnected) return;
+      if (needsTileset) required.push({ slot: null, ref: requested.tileset });
+
+      let decoded = [];
+      if (required.length > 0) {
+        try {
+          decoded = await Promise.all(required.map(async (item) => ({ ...item, image: await this._image(item.ref) })));
+        } catch {
+          if (this._latestData !== requested || epoch !== this._paintEpoch) return;
+          this._clearLayers();
+          return;
+        }
+      }
+      if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
+
+      const tilesetImage = decoded.find((item) => item.slot === null)?.image;
+      const autotileImages = new Map();
+      const layouts = new Map();
+      for (const item of decoded) {
+        if (item.slot === null) continue;
+        const layout = classifyAutotileLayout(item.image);
+        if (layout === "invalid") {
+          this._clearLayers();
+          return;
+        }
+        autotileImages.set(item.slot, item.image);
+        layouts.set(item.slot, layout);
+      }
 
       const motion = requested.cameraMotion;
       const progress = motion ? clamp((performance.now() - receivedAt) / motion.durationMs, 0, 1) : 1;
@@ -192,23 +258,39 @@
       const groups = [...buckets.entries()]
         .sort(([leftDepth], [rightDepth]) => leftDepth - rightDepth);
 
+      for (const layer of this._layers) {
+        layer.context.clearRect(0, 0, 640, 480);
+        layer.canvas.hidden = true;
+      }
+
       for (let index = 0; index < groups.length; index += 1) {
         const [depth, tiles] = groups[index];
         const layer = this._ensureLayer(index);
+        layer.canvas.hidden = false;
         layer.context.clearRect(0, 0, 640, 480);
         layer.canvas.style.zIndex = String(tileStackValue(depth));
 
         for (const tile of tiles) {
-          const source = tile.tileId - 384;
-          const sx = (source % 8) * 32;
-          const sy = Math.floor(source / 8) * 32;
-          layer.context.drawImage(
-            image,
-            sx, sy, 32, 32,
-            tile.x * 32 - cameraX,
-            tile.y * 32 - cameraY,
-            32, 32,
-          );
+          const dx = tile.x * 32 - cameraX;
+          const dy = tile.y * 32 - cameraY;
+          if (tile.blit.kind === "regular") {
+            const source = tile.blit.sourceIndex;
+            const sx = (source % 8) * 32;
+            const sy = Math.floor(source / 8) * 32;
+            layer.context.drawImage(tilesetImage, sx, sy, 32, 32, dx, dy, 32, 32);
+            continue;
+          }
+          const image = autotileImages.get(tile.blit.slot);
+          const layout = layouts.get(tile.blit.slot);
+          if (layout === "cell") {
+            layer.context.drawImage(image, 0, 0, 32, 32, dx, dy, 32, 32);
+            continue;
+          }
+          const [tl, tr, bl, br] = tile.blit.corners;
+          layer.context.drawImage(image, tl.sx, tl.sy, 16, 16, dx, dy, 16, 16);
+          layer.context.drawImage(image, tr.sx, tr.sy, 16, 16, dx + 16, dy, 16, 16);
+          layer.context.drawImage(image, bl.sx, bl.sy, 16, 16, dx, dy + 16, 16, 16);
+          layer.context.drawImage(image, br.sx, br.sy, 16, 16, dx + 16, dy + 16, 16, 16);
         }
       }
 
@@ -216,8 +298,8 @@
       if (motion && progress < 1) {
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
-          if (this._latestData !== requested || !this.isConnected) return;
-          void this._paintLatest(requested, receivedAt);
+          if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
+          void this._paintLatest(requested, receivedAt, epoch);
         });
         return;
       }

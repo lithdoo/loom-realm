@@ -1312,6 +1312,15 @@
     "struct.Tileset/1": {
       "id": 1,
       "tileset_name": "m14_tileset",
+      "autotile_names": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
       "passages": {
         "dimensions": 1,
         "xSize": 386,
@@ -2100,6 +2109,12 @@
           0
         ]
       }
+    },
+    "struct.MapTransfer/1": {
+      "id": 1,
+      "steps": [],
+      "contacts": [],
+      "edges": []
     }
   },
   "expectedPixels": {

@@ -6,6 +6,11 @@ import { mapCanonicalDataset } from "./lib/fsdb/mapper.mjs";
 const table = (dimensions, xSize, ySize, zSize, values) => ({ kind: "Table", dimensions, xSize, ySize, zSize, values: Int16Array.from(values), rubyObjectId: 1, ivars: {} });
 const object = (className, fields) => ({ kind: "RmxpObject", className, fields, extraIvars: {}, rubyObjectId: 2 });
 const string = (text) => ({ kind: "RubyString", text, bytes: Buffer.from(text), ivars: {} });
+const autotileNames = (...names) => ({
+  kind: "Array",
+  items: names.map((name) => (name === null ? null : string(name))),
+});
+const NULL_AUTOTILES = [null, null, null, null, null, null, null];
 
 test("projects MapNNN and Tables to exact ordinary JSON consumer records", () => {
   const values = Array(4 * 3 * 3).fill(0);
@@ -21,19 +26,64 @@ test("projects MapNNN and Tables to exact ordinary JSON consumer records", () =>
 });
 
 test("projects Tilesets by source index and rejects id mismatch", () => {
-  const make = (id) => object("RPG::Tileset", {
+  const make = (id, names = NULL_AUTOTILES) => object("RPG::Tileset", {
     "@id": id, "@tileset_name": string("m14_tileset"),
+    "@autotile_names": autotileNames(...names),
     "@passages": table(1, 386, 1, 1, Array(386).fill(0)),
     "@priorities": table(1, 386, 1, 1, Array(386).fill(0)),
   });
   const projected = projectTilesetRecords({ filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, make(1)] } });
-  assert.deepEqual(Object.keys(projected[0].value), ["id", "tileset_name", "passages", "priorities"]);
+  assert.deepEqual(Object.keys(projected[0].value), ["id", "tileset_name", "autotile_names", "passages", "priorities"]);
+  assert.deepEqual(projected[0].value.autotile_names, NULL_AUTOTILES);
   assert.throws(() => projectTilesetRecords({ filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, make(2)] } }), /does not match/);
+});
+
+test("projects Outside-style autotile_names and normalizes empty strings to null", () => {
+  const outside = object("RPG::Tileset", {
+    "@id": 1, "@tileset_name": string("Outside"),
+    "@autotile_names": autotileNames("Sea", "Sea without shore", "Sea deep", "Sand shore", "Flowers1", "Water rock", "Fountain1"),
+    "@passages": table(1, 1, 1, 1, [0]), "@priorities": table(1, 1, 1, 1, [0]),
+  });
+  const projected = projectTilesetRecords({ filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, outside] } });
+  assert.deepEqual(projected[0].value.autotile_names, [
+    "Sea", "Sea without shore", "Sea deep", "Sand shore", "Flowers1", "Water rock", "Fountain1",
+  ]);
+  const withEmpty = object("RPG::Tileset", {
+    "@id": 1, "@tileset_name": string("Outside"),
+    "@autotile_names": autotileNames("Sea", "", null, "Sand shore", "Flowers1", "Water rock", "Fountain1"),
+    "@passages": table(1, 1, 1, 1, [0]), "@priorities": table(1, 1, 1, 1, [0]),
+  });
+  assert.deepEqual(
+    projectTilesetRecords({ filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, withEmpty] } })[0].value.autotile_names,
+    ["Sea", null, null, "Sand shore", "Flowers1", "Water rock", "Fountain1"],
+  );
+});
+
+test("fails closed for malformed autotile_names", () => {
+  const badLength = object("RPG::Tileset", {
+    "@id": 1, "@tileset_name": string("Outside"),
+    "@autotile_names": { kind: "Array", items: [null, null] },
+    "@passages": table(1, 1, 1, 1, [0]), "@priorities": table(1, 1, 1, 1, [0]),
+  });
+  assert.throws(
+    () => projectTilesetRecords({ filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, badLength] } }),
+    /length 7/,
+  );
+  const badElement = object("RPG::Tileset", {
+    "@id": 1, "@tileset_name": string("Outside"),
+    "@autotile_names": { kind: "Array", items: [null, null, null, null, 4, null, null] },
+    "@passages": table(1, 1, 1, 1, [0]), "@priorities": table(1, 1, 1, 1, [0]),
+  });
+  assert.throws(
+    () => projectTilesetRecords({ filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, badElement] } }),
+    /nil or a Ruby string/,
+  );
 });
 
 test("omits only unreferenced empty-name v21.1 placeholders and rejects referenced ones", () => {
   const empty = object("RPG::Tileset", {
     "@id": 1, "@tileset_name": string(""),
+    "@autotile_names": autotileNames(...NULL_AUTOTILES),
     "@passages": table(1, 1, 1, 1, [0]), "@priorities": table(1, 1, 1, 1, [0]),
   });
   const entry = { filename: "Tilesets.rxdata", root: { kind: "Array", items: [null, empty] } };

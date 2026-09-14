@@ -95,21 +95,28 @@ Consumer value contains exactly：
 {
   id: number,
   tileset_name: string,
+  autotile_names: readonly (string | null)[], // exact length 7
   passages: ProjectedTable,
   priorities: ProjectedTable
 }
 ```
 
-Do not materialize first-slice-unused Tileset members such as：
+`autotile_names` comes from `RPG::Tileset.@autotile_names`：
+
+```text
+must be Ruby Array length 7
+null / nil / empty RubyString → null
+non-empty RubyString → original text (no trim)
+other element kinds → M14_CONSUMER_PROJECTION_FAILURE
+```
+
+Do not materialize still-unused Tileset members such as：
 
 ```text
 name
-autotile_names
 panorama / fog / battleback
 terrain_tags
 ```
-
-M14 canonical rendering does not require them.
 
 ### 2.3 Explicitly deferred record families
 
@@ -330,7 +337,7 @@ Map001.rxdata → Map/1
 Tilesets.rxdata[i] → Tileset/{i}
 Tileset id/index mismatch fails
 Map consumer value has only tileset_id/width/height/data
-Tileset consumer value has only id/tileset_name/passages/priorities
+Tileset consumer value has only id/tileset_name/autotile_names/passages/priorities
 safe integer / required text failure rules
 Table exact shape + non-zero coordinate ordering
 Map.data zSize exactly 3 for selected M14 record

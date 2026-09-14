@@ -51,6 +51,18 @@ export function projectMapRecord(entry) {
   return Object.freeze({ key: String(id), value: Object.freeze({ tileset_id, width, height, data }) });
 }
 
+function projectAutotileNames(value, label) {
+  if (value?.kind !== "Array") invalid(`${label} must be a Ruby Array`);
+  if (value.items.length !== 7) invalid(`${label} must have length 7`);
+  return Object.freeze(value.items.map((item, index) => {
+    if (item === null || item === undefined) return null;
+    if (item?.kind !== "RubyString" || typeof item.text !== "string") {
+      invalid(`${label}[${index}] must be nil or a Ruby string`);
+    }
+    return item.text.length === 0 ? null : item.text;
+  }));
+}
+
 export function projectTilesetRecords(entry, requiredIds = new Set()) {
   if (entry?.filename !== "Tilesets.rxdata") return undefined;
   if (entry.root?.kind !== "Array") invalid("Tilesets.rxdata root must be an Array");
@@ -64,12 +76,13 @@ export function projectTilesetRecords(entry, requiredIds = new Set()) {
     if (id !== index) invalid(`Tilesets.rxdata[${index}] id ${id} does not match its source index`);
     if (root.fields["@tileset_name"]?.kind === "RubyString" && root.fields["@tileset_name"].text === "" && !requiredIds.has(index)) continue;
     const tileset_name = projectRequiredText(root.fields["@tileset_name"], `Tileset[${index}].tileset_name`);
+    const autotile_names = projectAutotileNames(root.fields["@autotile_names"], `Tileset[${index}].autotile_names`);
     const passages = projectTable(root.fields["@passages"], `Tileset[${index}].passages`);
     const priorities = projectTable(root.fields["@priorities"], `Tileset[${index}].priorities`);
     for (const [name, table] of [["passages", passages], ["priorities", priorities]]) {
       if (table.dimensions !== 1 || table.ySize !== 1 || table.zSize !== 1) invalid(`Tileset[${index}].${name} must be a 1D Table`);
     }
-    records.push(Object.freeze({ key: String(index), value: Object.freeze({ id, tileset_name, passages, priorities }) }));
+    records.push(Object.freeze({ key: String(index), value: Object.freeze({ id, tileset_name, autotile_names, passages, priorities }) }));
   }
   return Object.freeze(records);
 }

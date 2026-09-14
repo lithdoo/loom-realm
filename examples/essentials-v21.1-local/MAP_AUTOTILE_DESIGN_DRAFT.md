@@ -1,13 +1,13 @@
 # 地图 Autotile First-Slice 改造适配冻结稿
 
-> 状态：Frozen for implementation（2026-09-14）  
+> 状态：Feature implementation complete（2026-09-14；re-freeze：补入 height===32 single-cell，覆盖 Map002 Flowers1；`--force` 重导入 `[FSDB]Essentials v21.1`）  
 > 目录：`examples/essentials-v21.1-local`  
 > 需求来源：`MAP_BEHAVIOR_REQUIREMENTS.md` 第 3 节（地图跳转 Product Closed）+ 第 1 节（遮挡在目标图上仍成立）  
 > 触发缺陷：Map066 东侧边缘进入 Map002 时程序关窗退出  
-> 证据基线：本地 Essentials v21.1 FSDB（`[FSDB]Essentials v21.1 2`）+ `Maruno17/pokemon-essentials@ea7b5d56` + RMXP/RGSS1 标准 48-variant autotile quarter 表  
+> 证据基线：本地 Essentials v21.1 FSDB（`[FSDB]Essentials v21.1`）+ `Maruno17/pokemon-essentials@ea7b5d56` + RMXP/RGSS1 标准 48-variant autotile quarter 表 + 本地 Autotiles PNG 几何  
 > 前置能力：layering / walking / map-transfer 已进入 `main`。
 
-本文冻结 M14 之后最小的 RMXP autotile 适配刀：不重开 framework Runtime/Renderer/Data，不引入通用 TileEngine，只补足真实 Map002 所需的 **7 槽、48 variant、标准 96×128 block autotile、第 0 动画帧**，并保持既有 map authority / walking / layering / transfer 语义不变。
+本文冻结 M14 之后最小的 RMXP autotile 适配刀：不重开 framework Runtime/Renderer/Data，不引入通用 TileEngine，只补足真实 Map002 所需的 **7 槽、48 variant、两种官方 bitmap layout（96×128 block + 32px-high single-cell）、第 0 动画帧**，并保持既有 map authority / walking / layering / transfer 语义不变。
 
 ## 实施合同
 
@@ -55,11 +55,17 @@ Map002 中 0 < tileId < 384 的唯一集合：
 全部属于：
   slot = 4 (Flowers1)
   variants = 20, 28, 34, 36, 38, 40
+
+本地 Autotiles PNG 几何（Outside 相关）：
+  Flowers1.png / Flowers2.png = 160×32   ← single-cell（本刀必须支持）
+  Sea.png / Sand shore / Water rock = 768×128  ← standard block
+  Fountain1.png = 480×128                  ← standard block
 ```
 
 Map066 / Map067 不含 `0 < tileId < 384`，因此门往返正常而 Map002 首帧失败。
 
-结论：MapTransfer authority、Map/Tileset/MapTransfer content 读取不是根因；缺口是 M14 故意推迟的 autotile consumer/render slice。
+结论：MapTransfer authority、Map/Tileset/MapTransfer content 读取不是根因；缺口是 M14 故意推迟的 autotile consumer/render slice。  
+仅支持 96×128 block **不够**：Map002 验收视野依赖的 Flowers1 是 **160×32 single-cell**，必须同时冻结。
 
 ---
 
@@ -68,26 +74,29 @@ Map066 / Map067 不含 `0 < tileId < 384`，因此门往返正常而 Map002 首�
 ### 1.1 必须完成
 
 - `struct.Tileset` 增加 `autotile_names[7]`；
-- `tileId 48..383` 的标准 RMXP block autotile 可被 Runtime 投影为确定 blit；
-- Runtime 保持 `tileId → slot/variant → quarter` authority；Browser 只执行 blit；
+- `tileId 48..383` 可被 Runtime 投影为确定 autotile blit（含 slot + 48-variant corners 数据）；
+- 支持两种官方 bitmap layout，并由 Browser 在 decode 后按几何分流绘制：
+  - **block**：`height === 128 && width >= 96 && width % 96 === 0` → 四角 16×16；
+  - **single-cell**：`height === 32 && width >= 32 && width % 32 === 0` → 整格 32×32（frame 0）；
+- Runtime 保持 `tileId → slot/variant → corners` 结构 authority；Browser **不**从邻接关系重算 variant，但 **可以且必须** 按 Section 3.4 用已 decode 的 bitmap 宽高选择 block / single-cell 画法；
 - `projectVisibleTiles` 与 transfer preflight 使用同一个 tile 可渲染 invariant；
 - transfer target 的结构性 tile projection failure 必须发生在 `current = target` 之前；
 - Browser 多图资源必须先全部 decode，再一次性 paint，旧 request 不得部分覆盖新 request；
-- Map002 Flowers1 与人物 layering 共存；
+- Map002 Flowers1（160×32 single-cell）可见，并与人物 layering 共存；
 - Map066 ↔ Map067 与 Map066 ↔ Map002 真人往返都成立。
 
 ### 1.2 明确不做
 
 本刀不实现：
 
-- autotile 动画计时/帧切换；
-- 32×32 单格 autotile layout；
+- autotile 动画计时/帧切换（任何 layout 都只画 frame 0）；
+- 除 Section 3.4 两种几何以外的第三种 autotile bitmap layout；
 - `tileId 1..47`；
 - panorama / fog / battleback / terrain_tags；
 - hue；
 - framework `packages/*` 修改；
 - MapTransfer trigger/state-machine 重设计；
-- Browser-side variant table；
+- Browser-side 48-variant / 邻接表（corners 仍由 Runtime 给出）；
 - 通用 TileEngine / AutotileService / AnimationTimeline。
 
 ### 1.3 authority
@@ -101,7 +110,7 @@ M14 consumer projection
 @loomrealm-game/map semantics
   → tileId partition
   → standard 48-variant quarter table
-  → TileBlit
+  → TileBlit { kind:"autotile", slot, corners }
   ↓
 Runtime
   → map-wide structural preflight
@@ -110,10 +119,12 @@ Runtime
   ↓
 Browser
   → decode current request resources
-  → execute TileBlit only
+  → classify bitmap: block | single-cell | invalid
+  → execute draw path for that class
 ```
 
-Browser 不读取 RmxpRoot，不从相邻 tile 推导 variant，不拥有 autotile 邻接语义。
+Browser 不读取 RmxpRoot，不从相邻 tile 推导 variant。  
+single-cell 路径 **忽略** Runtime 下发的 `corners`（仍必须通过 exact 校验存在），只按 slot 图像素画 frame0 的 32×32。
 
 ---
 
@@ -290,9 +301,14 @@ sy = floor(index / 6) * 16
 - 返回 deep-frozen `AutotileCorners`；
 - 无其他分支。
 
-### 3.4 Standard block bitmap contract
+对 **所有** `48..383` tile（含 single-cell 素材槽）Runtime 仍调用本表生成 `corners`。  
+single-cell 只在 Browser paint 时忽略 corners；semantics/Runtime 不因素材几何分支两套 TileBlit。
 
-本刀只支持标准 block autotile：
+### 3.4 Autotile bitmap layout contract（两种）
+
+Browser 在资源 decode 成功后，对**本帧实际使用**的每个 autotile bitmap 分类：
+
+#### A. Standard block
 
 ```text
 height === 128
@@ -300,16 +316,37 @@ width >= 96
 width % 96 === 0
 ```
 
-每个 96×128 block 是一帧；本刀永远取 frame 0，因此 quarter `sx` 只在 `0..95`。
+- 每个 96×128 block 是一帧；本刀永远取 frame 0；
+- quarter `sx` 只在 `0..95`；
+- 绘制走 Section 5.3 **block** 四角路径。
 
-若某个**本帧实际使用**的 autotile bitmap 不满足该 contract：
+真实样本：`Sea.png` 768×128、`Fountain1.png` 480×128。
+
+#### B. Single-cell（32px-high）
+
+```text
+height === 32
+width >= 32
+width % 32 === 0
+```
+
+- 每一帧是横向排列的 32×32 格；本刀永远取 frame 0，即源矩形 `(sx, sy, sw, sh) = (0, 0, 32, 32)`；
+- **忽略**该 tile 的 `corners` 与 variant 邻接含义（地图里仍可出现非 0 variant，如 Flowers1 的 20/28/34…；绘制不因 variant 改取样）；
+- 绘制走 Section 5.3 **single-cell** 路径。
+
+真实样本（Map002 验收必需）：`Flowers1.png` **160×32**（5 帧 × 32；frame0 = 最左一格）。  
+同格式：`Flowers2.png` 160×32。
+
+#### C. Invalid
+
+不满足 A 且不满足 B：
 
 ```text
 latest request → clear layers + return
 stale request  → return
 ```
 
-不通知 Runtime，不自动兼容 32×32 单格 autotile。
+不通知 Runtime；不得猜测第三种 layout。
 
 ### 3.5 单一结构 invariant
 
@@ -492,7 +529,8 @@ sx / sy
 - slot ∈ 0..6；
 - corners length 4；
 - autotile blit 的 `autotiles[slot]` 不得为 null；
-- Runtime 已给定 `corners`，Browser 不重新查 48 表。
+- Runtime 已给定 `corners`，Browser 不重新查 48 表；
+- single-cell 路径仍要求 `corners` 字段 exact 合法，但绘制不使用其数值。
 
 ### 5.2 Decode transaction：先全量准备，再 paint
 
@@ -515,14 +553,15 @@ sx / sy
    _latestData === requested && isConnected
    否则 return
 
-5. 校验本次实际使用 autotile bitmap 的 Section 3.4 geometry。
-   invalid latest → _clearLayers(); return
+5. 对本次实际使用的每个 autotile bitmap 做 Section 3.4 分类：
+   - block / single-cell → 记录 layout class，供 step 7 使用
+   - 任一 invalid 且仍是 latest → _clearLayers(); return
 
 6. 计算 camera progress。
 
 7. 按 depth bucket 一次同步 paint：
    clear bucket canvas
-   draw bucket 全部 tile
+   draw bucket 全部 tile（regular / block autotile / single-cell autotile）
 
 8. trim layers。
 
@@ -542,7 +581,7 @@ sy = floor(source / 8) * 32
 drawImage(tilesetImage, sx, sy, 32,32, dx,dy,32,32)
 ```
 
-Autotile：
+Autotile **block**（Section 3.4-A）：
 
 ```text
 image = decoded image for autotiles[slot]
@@ -550,9 +589,18 @@ TL corner → dest (dx,dy)
 TR        → (dx+16,dy)
 BL        → (dx,dy+16)
 BR        → (dx+16,dy+16)
-每次 drawImage 16×16
+每次 drawImage 16×16（使用 blit.corners）
 ```
 
+Autotile **single-cell**（Section 3.4-B）：
+
+```text
+image = decoded image for autotiles[slot]
+drawImage(image, 0, 0, 32, 32, dx, dy, 32, 32)
+忽略 blit.corners
+```
+
+同一 depth bucket 内若混有 block 与 single-cell，按各 tile 所属 slot 的 layout class 分别走上述路径。  
 现有 depth bucket 排序、`tileStackValue`、`characterStackValue`、camera rAF contract 不变。
 
 ---
@@ -613,7 +661,13 @@ MAP_TRANSFER_DESIGN_DRAFT.md
   trigger/state machine 不变
 ```
 
-仍然**不声称 full autotile support**；本刀只支持标准 block layout、第 0 帧、48 variants。
+仍然**不声称 full autotile support**；本刀只支持：
+
+```text
+标准 96×128 block（多帧宽条取 frame0）
+32px-high single-cell（多帧宽条取 frame0）
+48 variants 结构投影
+```
 
 不得修改 `packages/*` 或重新打开 M14/M15 framework qualification contract。
 
@@ -701,10 +755,10 @@ Browser：
 
 - existing regular drawing unchanged；
 - exact RenderData validation；
-- 4 quarters 位置正确；
-- standard 96×128 block frame0；
-- animated-width bitmap只读首 96px；
-- invalid autotile geometry latest → clear；
+- block：4 quarters 位置正确；standard 96×128 frame0；animated-width 只读首 96px；
+- single-cell：`height===32` 时画 `(0,0,32,32)`，忽略 corners；`Flowers1` 160×32 样本可见；
+- 同屏混用 block + single-cell 时按 slot layout class 分流；
+- invalid autotile geometry（非 A 非 B）latest → clear；
 - tileset/autotile 多资源任一 delayed 时，在 Promise.all 完成前 canvas 不发生 partial paint；
 - stale old autotile resolve/reject 不覆盖 latest data；
 - depth 与 character occlusion regression 保持。
@@ -821,9 +875,11 @@ Browser collect required refs
         ↓
 Promise.all decode + latest check
         ↓
+classify each autotile bitmap: block | single-cell | invalid
+        ↓
 synchronous depth-bucket paint
         ↓
-Map002 Flowers1 visible
+Map002 Flowers1 (160×32 single-cell) visible
 ```
 
 ---
@@ -863,13 +919,15 @@ Map002 必须至少正确投影/绘制：
 280 → slot4 variant40
 ```
 
-进入 `(0,8)` 的首帧必须可见 Flowers1；不得 throw、不得留透明洞、不得关窗。
+素材：`Graphics/Autotiles/Flowers1.png` = **160×32** → Section 3.4-B single-cell。  
+进入 `(0,8)` 的首帧必须可见 Flowers1（frame0 整格 32×32）；不得 throw、不得因误用 block 四角留洞、不得关窗。  
+Runtime 仍为这些 tile 生成 corners；Browser single-cell 路径忽略 corners。
 
-### 11.3 48 table evidence
+### 11.3 48 table / layout evidence
 
-Section 3.3 的 48-entry quarter table是本稿 implementation authority。它与长期使用的 RMXP/RGSS1 compatible Tilemap 实现中的标准表一致；implementation agent 不再寻找其它表，也不做视觉猜测。
+Section 3.3 的 48-entry quarter table 是 **block** 绘制的 implementation authority。它与长期使用的 RMXP/RGSS1 compatible Tilemap 实现中的标准表一致；implementation agent 不再寻找其它表，也不做视觉猜测。
 
-quarter grid 固定为：
+block quarter grid 固定为：
 
 ```text
 6 columns × 8 rows
@@ -877,16 +935,24 @@ quarter size = 16×16
 frame size = 96×128
 ```
 
-动画素材横向追加 96px frame；本刀 frameOffset 恒为 0。
+block 动画素材横向追加 96px frame；本刀 frameOffset 恒为 0。
+
+single-cell 证据：
+
+```text
+Flowers1.png / Flowers2.png = 160×32
+frame size = 32×32
+frame0 source = (0,0,32,32)
+```
 
 ### 11.4 Unsupported cases
 
 ```text
 tileId 1..47
-32×32 single-cell autotile layout
-autotile animation timing
+第三种 autotile bitmap layout（非 block 且非 single-cell）
+autotile animation timing / 非 frame0
 null slot referenced by map
-malformed standard block bitmap
+malformed bitmap（decode 失败或几何落在 Section 3.4-C）
 ```
 
 这些不是“画个近似”的许可。结构型错误 Runtime fail closed；bitmap decode/layout 错误 Browser clear latest presentation。
@@ -898,10 +964,10 @@ malformed standard block bitmap
 本文已经是：
 
 ```text
-Frozen for implementation
+Feature implementation complete
 ```
 
-implementation agent 只执行 Section 8.7。
+implementation 已按 Section 8.7 落地；targeted gates + `test:fixtures` / `test:m14` 均 green；本地 FSDB 已 `--force` 重导入并含 `autotile_names`。
 
 后续状态：
 

@@ -16,9 +16,14 @@ function executablePath() {
 
 const tilesetRef = (contentVersion) => ({ namespace: "resource.Graphics", key: "Tilesets/blue", contentVersion });
 const spriteRef = Object.freeze({ namespace: "resource.Graphics", key: "Characters/red", contentVersion: "v1" });
+const NULL_AUTOTILES = Object.freeze([null, null, null, null, null, null, null]);
 const identityOf = (ref) => `${ref.namespace}\u0000${ref.key}\u0000${ref.contentVersion}`;
 
-function viewData({ depth = 0, tileset = tilesetRef("v1"), tiles, cameraX = 0, cameraY = 0, cameraMotion = null } = {}) {
+function regularTile({ x = 0, y = 0, z = 0, tileId = 384, depth = 0 } = {}) {
+  return { x, y, z, tileId, depth, blit: { kind: "regular", sourceIndex: tileId - 384 } };
+}
+
+function viewData({ depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles, cameraX = 0, cameraY = 0, cameraMotion = null } = {}) {
   return {
     mapId: 1,
     mapWidth: 24,
@@ -26,7 +31,8 @@ function viewData({ depth = 0, tileset = tilesetRef("v1"), tiles, cameraX = 0, c
     cameraX,
     cameraY,
     tileset,
-    tiles: tiles ?? [{ x: 0, y: 0, z: 0, tileId: 384, depth }],
+    autotiles,
+    tiles: tiles ?? [regularTile({ depth })],
     cameraMotion,
   };
 }
@@ -324,11 +330,11 @@ test("E. stale buckets hide and clear leftover canvases", { timeout: 30_000 }, a
   }, {
     first: viewData({
       tiles: [
-        { x: 0, y: 0, z: 0, tileId: 384, depth: 0 },
-        { x: 1, y: 0, z: 0, tileId: 384, depth: 64 },
+        regularTile({ depth: 0 }),
+        regularTile({ x: 1, depth: 64 }),
       ],
     }),
-    second: viewData({ tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 0 }] }),
+    second: viewData({ tiles: [regularTile({ depth: 0 })] }),
     spritePayload: spriteData(0),
   });
   await waitUntil(page, () => {
@@ -403,11 +409,11 @@ test("H. tile depth and player y validate synchronously", { timeout: 30_000 }, a
     };
     const negativeDepth = throwsSync(() => window.__view.receiveRenderData({
       ...validView,
-      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: -1 }],
+      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: -1, blit: { kind: "regular", sourceIndex: 0 } }],
     }));
     const nonIntegerDepth = throwsSync(() => window.__view.receiveRenderData({
       ...validView,
-      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 1.5 }],
+      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 1.5, blit: { kind: "regular", sourceIndex: 0 } }],
     }));
     const negativeY = throwsSync(() => window.__sprite.receiveRenderData({ ...sprite, y: -1 }));
     const nonIntegerY = throwsSync(() => window.__sprite.receiveRenderData({ ...sprite, y: 0.5 }));
@@ -633,7 +639,7 @@ test("late tileset decode catches up from receivedAt and skips MapView rAF", { t
       tileset: delayedRef,
       cameraX: 32,
       cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
-      tiles: [{ x: 1, y: 0, z: 0, tileId: 384, depth: 0 }],
+      tiles: [regularTile({ x: 1, depth: 0 })],
     }),
   });
   await waitForPendingImage(page, delayedRef, "__view");
@@ -664,7 +670,7 @@ test("late source tileset decode cannot overwrite a newer map-transfer target", 
     viewPayload: { ...viewData({
       depth: 64,
       tileset: sourceRef,
-      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 64 }],
+      tiles: [regularTile({ depth: 64 })],
     }), mapId: 66 },
     spritePayload: spriteData(0),
   });
@@ -675,7 +681,7 @@ test("late source tileset decode cannot overwrite a newer map-transfer target", 
     viewPayload: { ...viewData({
       depth: 0,
       tileset: targetRef,
-      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 0 }],
+      tiles: [regularTile({ depth: 0 })],
     }), mapId: 2 },
   });
   await waitPainted(page, "0", "65");

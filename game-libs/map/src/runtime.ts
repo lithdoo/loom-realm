@@ -1,5 +1,6 @@
 import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomainState, type SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import {
+  assertProjectable,
   canMove,
   computeCamera,
   directionForCode,
@@ -29,6 +30,7 @@ interface LoadedMap {
   readonly map: MapRecord;
   readonly tileset: TilesetRecord;
   readonly tilesetRef: ResourceRef;
+  readonly autotileRefs: readonly (ResourceRef | null)[];
   readonly transfers: MapTransferRecord;
 }
 
@@ -93,12 +95,19 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         const map = validateMapRecord((await scope.content.record("struct.Map", String(mapId), { signal: frame.signal })).value);
         const transfers = validateMapTransferRecord((await scope.content.record("struct.MapTransfer", String(mapId), { signal: frame.signal })).value, mapId);
         const tileset = validateTilesetRecord((await scope.content.record("struct.Tileset", String(map.tileset_id), { signal: frame.signal })).value, map.tileset_id);
+        assertProjectable(map, tileset);
         const tilesetResource = await scope.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`, { signal: frame.signal });
+        const autotileRefs = Object.freeze(await Promise.all(tileset.autotile_names.map(async (name) => {
+          if (name === null) return null;
+          const resource = await scope.content.resource("resource.Graphics", `Autotiles/${name}`, { signal: frame.signal });
+          return ref("resource.Graphics", `Autotiles/${name}`, resource.contentVersion);
+        })));
         return Object.freeze({
           mapId,
           map,
           tileset,
           tilesetRef: ref("resource.Graphics", `Tilesets/${tileset.tileset_name}`, tilesetResource.contentVersion),
+          autotileRefs,
           transfers,
         });
       };
@@ -127,7 +136,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
               data: {
                 mapId: current.mapId, mapWidth: current.map.width, mapHeight: current.map.height,
                 cameraX: targetCamera.cameraX, cameraY: targetCamera.cameraY, tileset: current.tilesetRef,
-                tiles: projectVisibleTiles(current.map, current.tileset, targetCamera.cameraX, targetCamera.cameraY),
+                autotiles: current.autotileRefs,
+                tiles: projectVisibleTiles(current.map, current.tileset, targetCamera.cameraX, targetCamera.cameraY) as unknown as [],
                 cameraMotion: Object.freeze({
                   id: activeMove.id,
                   durationMs: WALK_STEP_MS,
@@ -161,7 +171,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             data: {
               mapId: current.mapId, mapWidth: current.map.width, mapHeight: current.map.height,
               cameraX, cameraY, tileset: current.tilesetRef,
-              tiles: projectVisibleTiles(current.map, current.tileset, cameraX, cameraY),
+              autotiles: current.autotileRefs,
+              tiles: projectVisibleTiles(current.map, current.tileset, cameraX, cameraY) as unknown as [],
               cameraMotion: null,
             },
             children: [{
