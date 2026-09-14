@@ -18,6 +18,23 @@ const tilesetRef = (contentVersion) => ({ namespace: "resource.Graphics", key: "
 const spriteRef = Object.freeze({ namespace: "resource.Graphics", key: "Characters/red", contentVersion: "v1" });
 const NULL_AUTOTILES = Object.freeze([null, null, null, null, null, null, null]);
 const identityOf = (ref) => `${ref.namespace}\u0000${ref.key}\u0000${ref.contentVersion}`;
+const autotileRef = (key, contentVersion = "v1") => ({ namespace: "resource.Graphics", key, contentVersion });
+const AUTOTILE_CORNERS = Object.freeze([
+  Object.freeze({ sx: 0, sy: 0 }),
+  Object.freeze({ sx: 16, sy: 0 }),
+  Object.freeze({ sx: 0, sy: 16 }),
+  Object.freeze({ sx: 16, sy: 16 }),
+]);
+
+function autotilesAt(entries) {
+  const list = [null, null, null, null, null, null, null];
+  for (const [slot, ref] of entries) list[slot] = ref;
+  return list;
+}
+
+function autotileTile({ x = 0, y = 0, z = 0, tileId = 48, depth = 0, slot = 0, corners = AUTOTILE_CORNERS } = {}) {
+  return { x, y, z, tileId, depth, blit: { kind: "autotile", slot, corners } };
+}
 
 function regularTile({ x = 0, y = 0, z = 0, tileId = 384, depth = 0 } = {}) {
   return { x, y, z, tileId, depth, blit: { kind: "regular", sourceIndex: tileId - 384 } };
@@ -73,9 +90,35 @@ after(async () => {
   await new Promise((resolve) => server?.close(resolve));
 });
 
-async function openPage() {
+async function openPage({ clock = false } = {}) {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
+  if (clock) await page.clock.install({ time: Date.now() });
   await page.goto(origin);
+  if (clock) {
+    await page.clock.pauseAt(Date.now() + 24 * 60 * 60 * 1000);
+    await page.evaluate(() => {
+      // Playwright fake rAF is 16ms-quantized and cannot hit exact duration
+      // boundaries; clock tests still drive time with runFor via 0-delay timeouts.
+      const scheduled = new Map();
+      let nextId = 1;
+      window.requestAnimationFrame = (callback) => {
+        const id = nextId++;
+        const timer = window.setTimeout(() => {
+          scheduled.delete(id);
+          callback(performance.now());
+        }, 0);
+        scheduled.set(id, timer);
+        return id;
+      };
+      window.cancelAnimationFrame = (id) => {
+        const timer = scheduled.get(id);
+        if (timer !== undefined) {
+          window.clearTimeout(timer);
+          scheduled.delete(id);
+        }
+      };
+    });
+  }
   await page.addScriptTag({ url: `${origin}/map.browser.js` });
   await page.evaluate(async () => {
     const pngBytes = async (width, height, r, g, b) => {
@@ -87,6 +130,8 @@ async function openPage() {
       return new Uint8Array(await blob.arrayBuffer());
     };
     window.__mapLayering = {
+      resourceBytes: new Map(),
+      fetchCount: 0,
       tilesetBytes: await pngBytes(32, 32, 0, 0, 255),
       characterBytes: await (async () => {
         const canvas = new OffscreenCanvas(128, 128);
@@ -104,7 +149,9 @@ async function openPage() {
     const resources = {
       async resource(namespace, key, contentVersion) {
         const id = `${namespace}\u0000${key}\u0000${contentVersion}`;
+        window.__mapLayering.fetchCount += 1;
         if (window.__mapLayering.delayed.has(id)) return window.__mapLayering.delayed.get(id).promise;
+        if (window.__mapLayering.resourceBytes.has(key)) return { bytes: window.__mapLayering.resourceBytes.get(key), mime: "image/png" };
         if (key.startsWith("Tilesets/")) return { bytes: window.__mapLayering.tilesetBytes, mime: "image/png" };
         if (key.startsWith("Characters/")) return { bytes: window.__mapLayering.characterBytes, mime: "image/png" };
         throw new Error(`missing resource ${namespace}/${key}`);
@@ -177,6 +224,44 @@ async function settlePendingImage(page, ref, outcome, host = "__view") {
     else delayed.reject(new Error("stale tileset failed"));
     await pending.then(() => undefined, () => undefined);
   }, { imageId: id, outcome, host });
+}
+
+async function tilePixel(page, x = 8, y = 8) {
+  return page.evaluate(({ x: sampleX, y: sampleY }) => {
+    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
+    if (!canvas) return null;
+    return [...canvas.getContext("2d").getImageData(sampleX, sampleY, 1, 1).data];
+  }, { x, y });
+}
+
+async function makeStrip(page, frameWidth, frameHeight, colors) {
+  return page.evaluate(async ({ frameWidth: width, frameHeight: height, colors: fills }) => {
+    const canvas = new OffscreenCanvas(width * fills.length, height);
+    const context = canvas.getContext("2d");
+    for (let index = 0; index < fills.length; index += 1) {
+      context.fillStyle = fills[index];
+      context.fillRect(index * width, 0, width, height);
+    }
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  }, { frameWidth, frameHeight, colors });
+}
+
+async function installAutotile(page, key, bytes) {
+  await page.evaluate(({ key: resourceKey, bytes: raw }) => {
+    window.__mapLayering.resourceBytes.set(resourceKey, Uint8Array.from(raw));
+  }, { key, bytes });
+}
+
+async function paintAutotile(page, viewPayload) {
+  await page.evaluate((payload) => window.__view.receiveRenderData(payload), viewPayload);
+  await waitUntil(page, () => {
+    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
+    if (!canvas) return false;
+    const data = canvas.getContext("2d").getImageData(0, 0, 32, 32).data;
+    for (let index = 3; index < data.length; index += 4) if (data[index] === 255) return true;
+    return false;
+  }, "autotile first paint");
 }
 
 async function spritePixel(page, x = 5, y = 5) {
@@ -690,4 +775,241 @@ test("late source tileset decode cannot overwrite a newer map-transfer target", 
   const visibleZ = info.zIndex.filter((_, index) => info.hidden[index] === false);
   assert.deepEqual(visibleZ, ["0"]);
   assert.deepEqual(await compositeCenter(page), [255, 0, 0, 255]);
+});
+
+const CELL_COLORS = ["rgb(255, 0, 0)", "rgb(0, 255, 0)", "rgb(0, 0, 255)", "rgb(255, 255, 0)", "rgb(255, 0, 255)"];
+const CELL_PIXELS = [
+  [255, 0, 0, 255],
+  [0, 255, 0, 255],
+  [0, 0, 255, 255],
+  [255, 255, 0, 255],
+  [255, 0, 255, 255],
+];
+
+function cellView(ref, extra = {}) {
+  return viewData({
+    autotiles: autotilesAt([[0, ref]]),
+    tiles: [autotileTile({ slot: 0, tileId: 48 })],
+    ...extra,
+  });
+}
+
+test("single-cell autotile advances one 32px frame per duration on a paused clock", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Flowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, cellView(ref));
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[0]);
+  for (const expected of [1, 2, 3, 4, 0]) {
+    await page.clock.runFor(50);
+    assert.deepEqual(await tilePixel(page), CELL_PIXELS[expected]);
+  }
+  const sample = await page.evaluate(() => {
+    const canvas = document.querySelector("lr-map-view").shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    const data = canvas.getContext("2d").getImageData(0, 0, 32, 32).data;
+    const colors = new Set();
+    for (let index = 0; index < data.length; index += 4) {
+      if (data[index + 3] !== 255) continue;
+      colors.add(`${data[index]},${data[index + 1]},${data[index + 2]}`);
+    }
+    return [...colors];
+  });
+  assert.deepEqual(sample, ["255,0,0"]);
+});
+
+test("single-cell autotile smoke observes two frames under real rAF", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Flowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, cellView(ref));
+  const first = await tilePixel(page);
+  await page.evaluate((pixel) => { window.__firstAutotilePixel = pixel; }, first);
+  await waitUntil(page, () => {
+    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
+    if (!canvas) return false;
+    const [r, g, b, a] = canvas.getContext("2d").getImageData(8, 8, 1, 1).data;
+    const firstPixel = window.__firstAutotilePixel;
+    return a === 255 && (r !== firstPixel[0] || g !== firstPixel[1] || b !== firstPixel[2]);
+  }, "a second autotile frame");
+});
+
+test("block autotile keeps variant corners and only shifts the 96px frame base", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Sea [1]");
+  const corners = [
+    { sx: 0, sy: 0 },
+    { sx: 16, sy: 0 },
+    { sx: 0, sy: 16 },
+    { sx: 16, sy: 16 },
+  ];
+  await installAutotile(page, ref.key, await makeStrip(page, 96, 128, ["rgb(255, 0, 0)", "rgb(0, 255, 0)", "rgb(0, 0, 255)"]));
+  await paintAutotile(page, viewData({
+    autotiles: autotilesAt([[3, ref]]),
+    tiles: [autotileTile({ slot: 3, tileId: 192, corners })],
+  }));
+  const samples = async () => page.evaluate(() => {
+    const canvas = document.querySelector("lr-map-view").shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    const context = canvas.getContext("2d");
+    return {
+      tl: [...context.getImageData(4, 4, 1, 1).data],
+      tr: [...context.getImageData(20, 4, 1, 1).data],
+      bl: [...context.getImageData(4, 20, 1, 1).data],
+      br: [...context.getImageData(20, 20, 1, 1).data],
+    };
+  });
+  const first = await samples();
+  assert.deepEqual(first.tl, [255, 0, 0, 255]);
+  assert.deepEqual(first.tr, first.tl);
+  assert.deepEqual(first.bl, first.tl);
+  assert.deepEqual(first.br, first.tl);
+  await page.clock.runFor(50);
+  const second = await samples();
+  assert.deepEqual(second.tl, [0, 255, 0, 255]);
+  assert.deepEqual(second.tr, second.tl);
+  assert.deepEqual(second.bl, second.tl);
+  assert.deepEqual(second.br, second.tl);
+});
+
+test("different slots modulo their own frameCount", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const five = autotileRef("Autotiles/Five [1]");
+  const four = autotileRef("Autotiles/Four [1]");
+  await installAutotile(page, five.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await installAutotile(page, four.key, await makeStrip(page, 32, 32, CELL_COLORS.slice(0, 4)));
+  await paintAutotile(page, viewData({
+    autotiles: autotilesAt([[0, five], [1, four]]),
+    tiles: [
+      autotileTile({ slot: 0, tileId: 48 }),
+      autotileTile({ x: 1, slot: 1, tileId: 96 }),
+    ],
+  }));
+  await page.clock.runFor(200);
+  assert.deepEqual(await tilePixel(page, 8, 8), CELL_PIXELS[4]);
+  assert.deepEqual(await tilePixel(page, 40, 8), CELL_PIXELS[0]);
+});
+
+test("aliased ResourceRef decodes once and paints every used slot", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const shared = autotileRef("Autotiles/Shared [1]");
+  await installAutotile(page, shared.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await page.evaluate(() => { window.__mapLayering.fetchCount = 0; });
+  await paintAutotile(page, viewData({
+    autotiles: autotilesAt([[2, shared], [5, shared]]),
+    tiles: [
+      autotileTile({ slot: 2, tileId: 144 }),
+      autotileTile({ x: 1, slot: 5, tileId: 288 }),
+    ],
+  }));
+  assert.equal(await page.evaluate(() => window.__mapLayering.fetchCount), 1);
+  await page.clock.runFor(50);
+  assert.deepEqual(await tilePixel(page, 8, 8), CELL_PIXELS[1]);
+  assert.deepEqual(await tilePixel(page, 40, 8), CELL_PIXELS[1]);
+});
+
+async function assertAutotileDuration(t, key, holdMs) {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef(key);
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, cellView(ref));
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[0]);
+  await page.clock.runFor(holdMs);
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[0]);
+  await page.clock.runFor(1);
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
+}
+
+test("autotile duration uses default 250ms, [1], [ 2 ], and unmatched names", { timeout: 60_000 }, async (t) => {
+  await assertAutotileDuration(t, "Autotiles/PlainSea", 249);
+  await assertAutotileDuration(t, "Autotiles/Tick [1]", 49);
+  await assertAutotileDuration(t, "Autotiles/Spaced [ 2 ]", 99);
+  await assertAutotileDuration(t, "Autotiles/Name[2]tail", 249);
+});
+
+test("illegal autotile duration fail-closed clears layers and stops RAF", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  for (const key of ["Autotiles/Bad [0]", "Autotiles/Huge [9007199254740992]"]) {
+    const ref = autotileRef(key);
+    await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+    await page.evaluate((payload) => window.__view.receiveRenderData(payload), cellView(ref));
+    await waitUntil(page, () => {
+      const view = document.querySelector("lr-map-view");
+      const canvases = [...(view?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])];
+      return canvases.length > 0 && canvases.every((canvas) => canvas.hidden) && view._raf === undefined;
+    }, `fail-closed ${key}`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("walking RenderData does not reset autotile phase", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Flowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, cellView(ref));
+  await page.clock.runFor(50);
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
+  await page.evaluate((payload) => window.__view.receiveRenderData(payload), cellView(ref, {
+    cameraX: 32,
+    cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+  }));
+  await waitUntil(page, () => {
+    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
+    if (!canvas) return false;
+    const [r, g, b, a] = canvas.getContext("2d").getImageData(8, 8, 1, 1).data;
+    return a === 255 && r === 0 && g === 255 && b === 0;
+  }, "same autotile frame after walking RenderData");
+  await page.clock.runFor(50);
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[2]);
+});
+
+test("stale animated prepared loop cannot paint after a newer map", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Flowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, { ...cellView(ref), mapId: 66 });
+  await page.clock.runFor(50);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: { ...viewData({ depth: 0 }), mapId: 2 }, spritePayload: spriteData(0) });
+  await waitPainted(page, "0");
+  await page.clock.runFor(200);
+  assert.deepEqual(await tilePixel(page), [0, 0, 255, 255]);
+  assert.deepEqual(await compositeCenter(page), [255, 0, 0, 255]);
+});
+
+test("single-frame idle autotile does not keep a permanent RAF", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Still");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, ["rgb(0, 128, 0)"]));
+  await paintAutotile(page, cellView(ref));
+  assert.equal(await page.evaluate(() => window.__view._raf), undefined);
+});
+
+test("synchronous reparent keeps the original animated prepared loop", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Flowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, cellView(ref));
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[0]);
+  await page.evaluate(() => {
+    const view = window.__view;
+    view.remove();
+    document.body.append(view);
+  });
+  await page.clock.runFor(50);
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
+  assert.notEqual(await page.evaluate(() => window.__view._raf), undefined);
 });

@@ -1,10 +1,10 @@
 # 地图数据格式 / Autotile 动画实现设计
 
-> 状态：Frozen for implementation
+> 状态：Product Closed（2026-09-15；`--force` 重导入后 play.bat 真人走通 Map066↔Map067、Map002 Flowers1 多帧、Map069 Waterfall/crest/bottom 与水面多帧）
 > 目录：`examples/essentials-v21.1-local`  
 > 文件名沿用 `MAP_DATA_FORMAT_REQUIREMENTS.md`，本文语义已从“需求清单”升级为“基于当前实现的实现设计”。
 > 证据基线：本地 Essentials v21.1 FSDB（`[FSDB]Essentials v21.1`，由官方 ZIP `--force` 导入）+ `Maruno17/pokemon-essentials@ea7b5d56` + 当前 `docs/map-autotile-adaptation` 分支实现。  
-> 前置：layering / walking / map-transfer 已落地；`MAP_AUTOTILE_DESIGN_DRAFT.md` first-slice 已支持 `tileId 48..383`、48 variant、block / single-cell 两类 bitmap layout，但 Browser 仍固定绘制 frame 0。
+> 前置：layering / walking / map-transfer 已落地；`MAP_AUTOTILE_DESIGN_DRAFT.md` first-slice 已支持 `tileId 48..383`、48 variant、block / single-cell 两类 bitmap layout。本刀把 Browser 从固定 frame 0 升级为 presentation-only 多帧动画。
 
 本文设计目标只有两项：
 
@@ -1128,3 +1128,17 @@ node scripts/init-fsdb.mjs --force
 6. 上述场景的 walking、遮挡和 transfer 均无 regression。
 
 以上场景全部成立即为 Product Closed。无需保存具体 animation phase；未来读档只要求进入目标图后动画继续正常运行。
+
+```text
+Product Closed
+```
+
+`--force` 重导入后，`play.bat` 真人窗口已走通：
+
+```text
+Map066 (12,8) dir8 → Map067 (4,7) → 垫子北侧 dir2 → Map066 (12,7)
+Map066 (21,8) dir6 → Map002 (0,8) Flowers1 连续换帧 → 可走回
+Map002 南缘 → Map069 Waterfall / crest / bottom 与水池多帧在动
+```
+
+Map069 tileset 2 含 Sea / Sea deep，瀑布水池即 block 水面多帧证据。Map070 是 Map069 的 `dive_map_id`，MapTransfer 为空；本刀不实现 dive，walking 不可达。walking / 遮挡 / transfer 在上述路径无 regression。

@@ -1,6 +1,6 @@
 # 地图 Autotile First-Slice 改造适配冻结稿
 
-> 状态：Feature implementation complete（2026-09-14；re-freeze：补入 height===32 single-cell，覆盖 Map002 Flowers1；`--force` 重导入 `[FSDB]Essentials v21.1`）  
+> 状态：Product Closed（2026-09-14；play.bat 真人走通 Map066↔Map067 与 Map066↔Map002；Map002 Flowers1 160×32 single-cell 可见且未关窗）  
 > 目录：`examples/essentials-v21.1-local`  
 > 需求来源：`MAP_BEHAVIOR_REQUIREMENTS.md` 第 3 节（地图跳转 Product Closed）+ 第 1 节（遮挡在目标图上仍成立）  
 > 触发缺陷：Map066 东侧边缘进入 Map002 时程序关窗退出  
@@ -964,18 +964,25 @@ malformed bitmap（decode 失败或几何落在 Section 3.4-C）
 本文已经是：
 
 ```text
-Feature implementation complete
+Product Closed
 ```
 
-implementation 已按 Section 8.7 落地；targeted gates + `test:fixtures` / `test:m14` 均 green；本地 FSDB 已 `--force` 重导入并含 `autotile_names`。
+implementation 已按 Section 8.7 落地。Feature implementation complete 的 targeted gates 全绿；`test:fixtures` 全绿；`test:m14` 沿用 map-transfer 已记录的 clean-main baseline exception（`@loomrealm/main` bootstrap / Hostra hang），故不是 Strict Implementation Complete。
 
-后续状态：
+本地 `[FSDB]Essentials v21.1` 已 `--force` 重导入：Tileset 1 `autotile_names` 为 Sea / Sea without shore / Sea deep / Sand shore / Flowers1 / Water rock / Fountain1；`Flowers1.png` 为 160×32。Runtime 在真实 Map/MapTransfer/Tileset 上走通门与东缘；`play.bat` 真人窗口完成 Section 11 两条往返：
+
+```text
+Map066 (12,8) dir8 → Map067 (4,7) → Exit dir2 → Map066 (12,7)
+Map066 (21,8) dir6 → Map002 (0,8) Flowers1 可见 → dir4 → Map066 (21,8)
+```
+
+进入 Map002 未 throw、未关窗；Flowers1 按 single-cell frame0 整格绘制，与人物 layering 共存。
+
+状态链（已到达终点）：
 
 ```text
 Frozen for implementation
 → Feature implementation complete
-→ Strict Implementation Complete（若 baseline exceptions 已清）
+→ Strict Implementation Complete（若 baseline exceptions 已清；尚未）
 → Product Closed
 ```
-
-不得在真人 Map066↔Map002 未走通前写 `Product Closed`。

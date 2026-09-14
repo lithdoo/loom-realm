@@ -1,6 +1,9 @@
 (function registerLoomRealmMapElements() {
   "use strict";
 
+  const AUTOTILE_TICK_MS = 50;
+  const DEFAULT_AUTOTILE_FRAME_TICKS = 5;
+
   function resourceIdentity(ref) {
     return `${ref.namespace}\u0000${ref.key}\u0000${ref.contentVersion}`;
   }
@@ -76,6 +79,20 @@
     return "invalid";
   }
 
+  function autotileFrameDurationMs(ref) {
+    const name = ref.key.slice(ref.key.lastIndexOf("/") + 1);
+    const match = /\[\s*(\d+)\s*\]\s*$/.exec(name);
+    if (!match) return DEFAULT_AUTOTILE_FRAME_TICKS * AUTOTILE_TICK_MS;
+    const ticks = Number(match[1]);
+    if (!Number.isSafeInteger(ticks) || ticks <= 0) return null;
+    return ticks * AUTOTILE_TICK_MS;
+  }
+
+  function autotileFrameIndex(now, startedAt, frameCount, durationMs) {
+    if (frameCount <= 1) return 0;
+    return Math.floor((now - startedAt) / durationMs) % frameCount;
+  }
+
   class ResourceElement extends HTMLElement {
     constructor() {
       super();
@@ -98,7 +115,9 @@
     }
 
     disconnectedCallback() {
-      this._cancelRaf();
+      queueMicrotask(() => {
+        if (!this.isConnected) this._cancelRaf();
+      });
     }
 
     async _image(ref) {
@@ -128,6 +147,8 @@
       this._layers = [];
       this._slot = document.createElement("slot");
       shadow.append(style, this._slot);
+      this._animationStartedAt = performance.now();
+      this._lastPaintToken = undefined;
     }
 
     _ensureLayer(index) {
@@ -149,6 +170,7 @@
     }
 
     _clearLayers() {
+      this._lastPaintToken = undefined;
       for (const layer of this._layers) {
         layer.context.clearRect(0, 0, 640, 480);
         layer.canvas.hidden = true;
@@ -193,31 +215,37 @@
       this._cancelRaf();
       this._latestData = data;
       this._paintEpoch = (this._paintEpoch ?? 0) + 1;
+      this._lastPaintToken = undefined;
       const receivedAt = performance.now();
       void this._paintLatest(data, receivedAt, this._paintEpoch);
     }
 
     async _paintLatest(requested, receivedAt, epoch) {
       this._ensureLayer(0);
-      const required = [];
-      const seen = new Set();
+      const usedSlots = [];
+      const seenSlots = new Set();
+      const uniqueRefs = new Map();
       let needsTileset = false;
       for (const tile of requested.tiles) {
-        if (tile.blit.kind === "regular") needsTileset = true;
-        else {
-          const identity = resourceIdentity(requested.autotiles[tile.blit.slot]);
-          if (!seen.has(identity)) {
-            seen.add(identity);
-            required.push({ slot: tile.blit.slot, ref: requested.autotiles[tile.blit.slot] });
-          }
+        if (tile.blit.kind === "regular") {
+          needsTileset = true;
+          continue;
         }
+        const slot = tile.blit.slot;
+        const ref = requested.autotiles[slot];
+        if (!seenSlots.has(slot)) {
+          seenSlots.add(slot);
+          usedSlots.push({ slot, ref });
+        }
+        const identity = resourceIdentity(ref);
+        if (!uniqueRefs.has(identity)) uniqueRefs.set(identity, ref);
       }
-      if (needsTileset) required.push({ slot: null, ref: requested.tileset });
+      if (needsTileset) uniqueRefs.set(resourceIdentity(requested.tileset), requested.tileset);
 
-      let decoded = [];
-      if (required.length > 0) {
+      let decoded = new Map();
+      if (uniqueRefs.size > 0) {
         try {
-          decoded = await Promise.all(required.map(async (item) => ({ ...item, image: await this._image(item.ref) })));
+          decoded = new Map(await Promise.all([...uniqueRefs.entries()].map(async ([identity, ref]) => [identity, await this._image(ref)])));
         } catch {
           if (this._latestData !== requested || epoch !== this._paintEpoch) return;
           this._clearLayers();
@@ -226,24 +254,54 @@
       }
       if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
 
-      const tilesetImage = decoded.find((item) => item.slot === null)?.image;
-      const autotileImages = new Map();
-      const layouts = new Map();
-      for (const item of decoded) {
-        if (item.slot === null) continue;
-        const layout = classifyAutotileLayout(item.image);
-        if (layout === "invalid") {
+      const autotiles = new Map();
+      for (const { slot, ref } of usedSlots) {
+        const image = decoded.get(resourceIdentity(ref));
+        const layout = classifyAutotileLayout(image);
+        const durationMs = autotileFrameDurationMs(ref);
+        if (layout === "invalid" || durationMs === null) {
           this._clearLayers();
           return;
         }
-        autotileImages.set(item.slot, item.image);
-        layouts.set(item.slot, layout);
+        const frameWidth = layout === "block" ? 96 : 32;
+        autotiles.set(slot, { image, layout, frameCount: image.width / frameWidth, frameWidth, durationMs });
       }
+      this._paintPrepared(requested, receivedAt, epoch, {
+        tilesetImage: needsTileset ? decoded.get(resourceIdentity(requested.tileset)) : undefined,
+        autotiles,
+      });
+    }
 
+    _paintPrepared(requested, receivedAt, epoch, prepared) {
+      if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
+
+      const now = performance.now();
       const motion = requested.cameraMotion;
-      const progress = motion ? clamp((performance.now() - receivedAt) / motion.durationMs, 0, 1) : 1;
+      const progress = motion ? clamp((now - receivedAt) / motion.durationMs, 0, 1) : 1;
       const cameraX = motion ? Math.round(lerp(motion.fromCameraX, requested.cameraX, progress)) : requested.cameraX;
       const cameraY = motion ? Math.round(lerp(motion.fromCameraY, requested.cameraY, progress)) : requested.cameraY;
+      const frames = [...prepared.autotiles.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([slot, item]) => `${slot}:${autotileFrameIndex(now, this._animationStartedAt, item.frameCount, item.durationMs)}`);
+      const paintToken = `${epoch}|${cameraX},${cameraY}|${frames.join(",")}`;
+      let hasAnimatedAutotile = false;
+      for (const item of prepared.autotiles.values()) {
+        if (item.frameCount > 1) hasAnimatedAutotile = true;
+      }
+      const needsNextFrame = Boolean(motion && progress < 1) || hasAnimatedAutotile;
+
+      if (paintToken === this._lastPaintToken) {
+        if (needsNextFrame) {
+          this._raf = requestAnimationFrame(() => {
+            this._raf = undefined;
+            this._paintPrepared(requested, receivedAt, epoch, prepared);
+          });
+        } else {
+          this._raf = undefined;
+        }
+        return;
+      }
+      this._lastPaintToken = paintToken;
 
       const buckets = new Map();
       for (const tile of requested.tiles) {
@@ -277,29 +335,29 @@
             const source = tile.blit.sourceIndex;
             const sx = (source % 8) * 32;
             const sy = Math.floor(source / 8) * 32;
-            layer.context.drawImage(tilesetImage, sx, sy, 32, 32, dx, dy, 32, 32);
+            layer.context.drawImage(prepared.tilesetImage, sx, sy, 32, 32, dx, dy, 32, 32);
             continue;
           }
-          const image = autotileImages.get(tile.blit.slot);
-          const layout = layouts.get(tile.blit.slot);
-          if (layout === "cell") {
-            layer.context.drawImage(image, 0, 0, 32, 32, dx, dy, 32, 32);
+          const item = prepared.autotiles.get(tile.blit.slot);
+          const frameIndex = autotileFrameIndex(now, this._animationStartedAt, item.frameCount, item.durationMs);
+          if (item.layout === "cell") {
+            layer.context.drawImage(item.image, frameIndex * 32, 0, 32, 32, dx, dy, 32, 32);
             continue;
           }
+          const frameX = frameIndex * 96;
           const [tl, tr, bl, br] = tile.blit.corners;
-          layer.context.drawImage(image, tl.sx, tl.sy, 16, 16, dx, dy, 16, 16);
-          layer.context.drawImage(image, tr.sx, tr.sy, 16, 16, dx + 16, dy, 16, 16);
-          layer.context.drawImage(image, bl.sx, bl.sy, 16, 16, dx, dy + 16, 16, 16);
-          layer.context.drawImage(image, br.sx, br.sy, 16, 16, dx + 16, dy + 16, 16, 16);
+          layer.context.drawImage(item.image, frameX + tl.sx, tl.sy, 16, 16, dx, dy, 16, 16);
+          layer.context.drawImage(item.image, frameX + tr.sx, tr.sy, 16, 16, dx + 16, dy, 16, 16);
+          layer.context.drawImage(item.image, frameX + bl.sx, bl.sy, 16, 16, dx, dy + 16, 16, 16);
+          layer.context.drawImage(item.image, frameX + br.sx, br.sy, 16, 16, dx + 16, dy + 16, 16, 16);
         }
       }
 
       this._trimLayers(groups.length);
-      if (motion && progress < 1) {
+      if (needsNextFrame) {
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
-          if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
-          void this._paintLatest(requested, receivedAt, epoch);
+          this._paintPrepared(requested, receivedAt, epoch, prepared);
         });
         return;
       }
