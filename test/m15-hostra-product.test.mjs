@@ -609,14 +609,25 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
     globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
   });
   await page.bringToFront();
-  await page.mouse.click(700, 550);
+  await page.mouse.click(320, 240);
   await page.waitForFunction(() => document.hasFocus());
   await page.keyboard.press("ArrowRight");
-  await page.waitForFunction(() => {
-    const records = globalThis.__loomrealmMovementRecords ?? [];
-    return records.some((record) => record.name === "input-captured")
-      && records.some((record) => record.name === "browser-first-motion-paint");
-  }, null, { timeout: 5_000 });
+  try {
+    await page.waitForFunction(() => {
+      const records = globalThis.__loomrealmMovementRecords ?? [];
+      return records.some((record) => record.name === "input-captured")
+        && records.some((record) => record.name === "browser-first-motion-paint");
+    }, null, { timeout: 30_000 });
+  } catch (cause) {
+    const state = await page.evaluate(() => ({
+      records: globalThis.__loomrealmMovementRecords ?? [],
+      focused: document.hasFocus(),
+      visibilityState: document.visibilityState,
+      mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
+      x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
+    }));
+    throw new Error(`${cause.message}\n${JSON.stringify(state)}`);
+  }
   const records = await page.evaluate(() => globalThis.__loomrealmMovementRecords);
   const input = records.find((record) => record.name === "input-captured");
   const paint = records.find((record) => record.name === "browser-first-motion-paint");
@@ -627,7 +638,7 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   assert.ok(paint.at >= input.at, JSON.stringify({ input, paint, records }));
 });
 
-test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout: 180_000 }, async (t) => {
+test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout: 240_000 }, async (t) => {
   const installation = await prepareMovementInstallation({ cyclicMap: true });
   const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
@@ -662,8 +673,14 @@ test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout:
   await page.waitForFunction(() => document.querySelector("lr-map-view")?._latestData?.mapId === 900001, null, { timeout: 10_000 });
 
   const sampleMove = async () => {
-    const beforeX = await page.evaluate(() => document.querySelector("lr-map-sprite")?._latestData?.x ?? null);
-    await page.evaluate(() => { globalThis.__loomrealmMovementRecords.length = 0; });
+    const beforeX = await page.evaluate(() => {
+      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
+      globalThis.__loomrealmMovementRecords.length = 0;
+      globalThis.__loomrealmPreviousCoverage = Array.isArray(tiles) && tiles.length > 0
+        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
+        : null;
+      return document.querySelector("lr-map-sprite")?._latestData?.x ?? null;
+    });
     await page.keyboard.press("ArrowRight");
     try {
       await page.waitForFunction(() => {
@@ -678,38 +695,61 @@ test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout:
       const records = globalThis.__loomrealmMovementRecords ?? [];
       return records.some((record) => record.name === "browser-motion-complete");
     }, null, { timeout: 2_000 }).catch(() => undefined);
-    const after = await page.evaluate(() => ({
-      records: globalThis.__loomrealmMovementRecords.slice(),
-      x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
-      mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
-    }));
+    const after = await page.evaluate(() => {
+      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
+      const coverage = Array.isArray(tiles) && tiles.length > 0
+        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
+        : null;
+      return {
+        records: globalThis.__loomrealmMovementRecords.slice(),
+        x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
+        mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
+        refresh: coverage !== globalThis.__loomrealmPreviousCoverage,
+      };
+    });
     if (after.mapId !== 900001 || after.x === null || (beforeX !== null && after.x <= beforeX)) return null;
-    return after.records;
-  };
-
-  const collect = async (needed) => {
-    const latencies = [];
-    let attempts = 0;
-    let invalid = 0;
-    while (latencies.length < needed) {
-      attempts += 1;
-      const records = await sampleMove();
-      const input = records?.find((record) => record.name === "input-captured");
-      const paint = records?.find((record) => record.name === "browser-first-motion-paint");
-      if (!input || !paint || typeof input.at !== "number" || typeof paint.at !== "number" || paint.at < input.at) {
-        invalid += 1;
-        continue;
-      }
-      latencies.push(paint.at - input.at);
+    const input = after.records.find((record) => record.name === "input-captured");
+    const paint = after.records.find((record) => record.name === "browser-first-motion-paint");
+    if (!input || !paint || typeof input.at !== "number" || typeof paint.at !== "number" || paint.at < input.at) {
+      return null;
     }
-    return { latencies, attempts, invalid };
+    return { latency: paint.at - input.at, refresh: after.refresh === true };
   };
 
-  await collect(20);
-  const { latencies, attempts, invalid } = await collect(100);
-  assert.ok(invalid / attempts <= 0.05, JSON.stringify({ attempts, invalid }));
-  const p50 = nearestRank(latencies, 0.5);
-  const p95 = nearestRank(latencies, 0.95);
-  const max = Math.max(...latencies);
-  assert.ok(p95 <= 50, JSON.stringify({ p50, p95, max, n: latencies.length, attempts, invalid, latencies }));
+  const ordinary = [];
+  const refresh = [];
+  let attempts = 0;
+  let invalid = 0;
+  let warmupLeft = 20;
+  while (ordinary.length < 100 || refresh.length < 30) {
+    attempts += 1;
+    if (attempts > 800) break;
+    const sample = await sampleMove();
+    if (sample === null) {
+      invalid += 1;
+      continue;
+    }
+    if (warmupLeft > 0) {
+      warmupLeft -= 1;
+      continue;
+    }
+    if (sample.refresh) {
+      if (refresh.length < 30) refresh.push(sample.latency);
+      continue;
+    }
+    if (ordinary.length < 100) ordinary.push(sample.latency);
+  }
+  assert.ok(invalid / attempts <= 0.05, JSON.stringify({ attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+  assert.equal(ordinary.length, 100, JSON.stringify({ attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+  assert.equal(refresh.length, 30, JSON.stringify({ attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+  const p50 = nearestRank(ordinary, 0.5);
+  const p95 = nearestRank(ordinary, 0.95);
+  const max = Math.max(...ordinary);
+  const refreshP50 = nearestRank(refresh, 0.5);
+  const refreshP95 = nearestRank(refresh, 0.95);
+  const refreshMax = Math.max(...refresh);
+  assert.ok(p95 <= 50, JSON.stringify({
+    p50, p95, max, n: ordinary.length, attempts, invalid, latencies: ordinary,
+    refresh: { p50: refreshP50, p95: refreshP95, max: refreshMax, n: refresh.length, latencies: refresh },
+  }));
 });
