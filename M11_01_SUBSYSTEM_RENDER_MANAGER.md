@@ -1,6 +1,6 @@
 # M11 / 01 — Subsystem RenderManager
 
-> 状态：旧 executable subject **Implemented / Qualified**；ADR 0035 target **Accepted / Implementation Pending**
+> 状态：旧 executable subject **Implemented / Qualified**；本 implementation subject **Requalification Pending**
 > 阶段：M11 Render  
 > 落地顺序：01  
 > 最近复核：2026-09-15
@@ -11,7 +11,7 @@
 
 > **M11/01 只建立 business Render authority。publication、Renderer replica、presentation 与 Content 均不属于本步。**
 
-> **Current notice：** ADR 0035 已接受下述 target surface，但 docs-only acceptance 不表示当前 package 已实现 `update()`。旧 executable subject 的历史 qualification 保留；实现进入 Current 分支时建立新 subject 并转为 `Requalification Pending`。
+> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已在本分支实现。旧 executable subject 的历史 Closed 仍有效；本 implementation subject 在同一 SHA 完成 local + hosted Node 20/24 `npm run test:m11` 前为 `Requalification Pending`，不得用旧 evidence 证明新 subject。
 
 ---
 

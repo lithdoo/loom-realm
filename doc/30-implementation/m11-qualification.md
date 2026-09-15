@@ -1,13 +1,13 @@
 # M11 Render Qualification
 
-> 状态：旧 executable subject **Implemented / Qualified / Closed**；ADR 0035 target **Accepted / Implementation Pending**
+> 状态：旧 executable subject **Implemented / Qualified / Closed**；本 implementation subject **Requalification Pending**
 > 日期：2026-09-15
 > 规范入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 > 最终评审：[M11 Render 最终闭环评审结论](./m11-final-closure-review.md)
 > 协议：`loomrealm.render-update / 1`
 > Fixture：`fixtureSetRevision = 1`
 
-> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 是 docs-only accepted correction；本页现有 PASS 只证明旧 executable subject，不证明 `RenderDomain.update()` 已实现或 Qualified。PR 2 进入 Current 后，本页必须先标记 `Requalification Pending`，最终 evidence 必须记录统一 implementation subject SHA。
+> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 的 `RenderDomain.update()` 已实现。本页现有 PASS 只证明旧 executable subject。本 implementation subject 为 `Requalification Pending`，最终 evidence 必须记录统一 SHA。
 
 M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并重新通过最终闭环评审。
 

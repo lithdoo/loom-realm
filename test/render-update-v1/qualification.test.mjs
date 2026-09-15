@@ -32,6 +32,8 @@ for (const { fixture, roles } of fixtureCatalog) {
   if (roles.length === 2) assert.notEqual(senderEvidence.get(fixture), receiverEvidence.get(fixture));
 }
 
+assert.equal(typeof evidenceByGroup.patch.get("update-data-set"), "function");
+
 for (const [group, evidence] of Object.entries(evidenceByGroup)) {
   qualify(group, "Frozen Render Update v1 fixture-specific semantic evidence", async ({ prove, fixtures }) => {
     assert.deepEqual([...evidence.keys()].sort(), [...fixtures].sort());

@@ -1,7 +1,7 @@
 # `@loomrealm/subsystem`
 
-> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 old subject Closed；ADR 0035 target Accepted / Implementation Pending**
-> 阶段：M11 accepted capability evolution / preimplementation
+> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 implementation subject Requalification Pending**
+> 阶段：M11 accepted capability evolution / implementation subject Requalification Pending
 > 最近复核：2026-09-15
 > 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md) · [Rendering System](../../doc/10-architecture/rendering-system.md)  
 > 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md) · [Render Update v1](../../doc/15-contracts/render-update-v1.md)  
@@ -12,7 +12,7 @@
 
 > **业务只表达业务；SDK把 Frozen protocol 投影为窄 author capability。M11 不新增 Platform Port、service locator、public RenderManager、EventBus 或第二份 Frame/Input/Render authority。**
 
-> **Current notice：** ADR 0035 docs-only acceptance冻结了 target surface，但当前 package 在实现 commit 前仍是旧 executable subject。本文的 target declaration不得被解读为代码已落地；PR 2 进入 Current 时转为 `Requalification Pending`。
+> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已实现。本文 Current surface 含 `RenderDomainUpdate` 与 `update()`。本 implementation subject 为 `Requalification Pending`，不得从本文推导新 subject 已 Closed。
 
 ---
 
@@ -374,7 +374,7 @@ M11 RenderManager同样不参与 Data acquire/reconnect policy；它只接收 cu
 
 ---
 
-## 15. Render / Content Targets — M11 Current + Accepted Target
+## 15. Render / Content Targets — M11 Current
 
 Exact M11 author declarations以 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为唯一详细事实源。概念形状：
 

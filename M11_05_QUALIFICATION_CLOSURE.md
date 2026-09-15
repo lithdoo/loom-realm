@@ -1,6 +1,6 @@
 # M11 / 05 — Qualification and Closure
 
-> 状态：旧 executable subject **Implemented / Qualified / Closed**；ADR 0035 target **Accepted / Implementation Pending**
+> 状态：旧 executable subject **Implemented / Qualified / Closed**；本 implementation subject **Requalification Pending**
 > 阶段：M11 Render  
 > 落地顺序：05  
 > 最近复核：2026-09-15
@@ -12,7 +12,7 @@
 
 > **M11 closure = Subsystem-owned business Render Domains 经 current generation/current Data publication为 Registry + per-Domain authoritative commits，Renderer只维护 current replica；Frame/Data 不取得 Render ownership，fresh carrier以 fresh baseline恢复，transient Event不 replay。**
 
-> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 已重开并冻结 target author capability，但该 Accepted docs-only correction 不声称 `update()` 已实现。实现进入 Current 后建立新 qualification subject；以下 closure gate 对新 target 全量重跑，旧 evidence 不能证明新实现 Closed。
+> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 的 `RenderDomain.update()` 已实现。以下 closure gate 对新 target 全量重跑；本 implementation subject 为 `Requalification Pending`，旧 evidence 不能证明新实现 Closed。
 
 2026-09-07 最终复核确认 production architecture仍成立；Render representation validation、formal role evidence、hard-limit matrix 与 fail-closed catalog 已按固定 checklist 补齐并重新通过 closure gate。
 
@@ -26,7 +26,7 @@
 M10 fixtureSetRevision 2 qualification = pass
 M10 = Implemented / Qualified / Closed
 M11 implementation plan = Frozen / Ready
-ADR 0035 target correction = Accepted / Implementation Pending
+ADR 0035 target correction = Requalification Pending
 ```
 
 M11 不重新打开 M10 authority、Input 或 Data lifecycle 设计。
@@ -354,6 +354,6 @@ qualification/root-gate shape
 M11 Render = Implemented / Qualified / Closed
 ```
 
-ADR 0035 实现进入 Current 后，状态必须先变为 `Requalification Pending`；只有 `npm run test:m11` 在同一最终 subject 上完成 local + hosted Node 20/24 PASS，且本文件新增的 update/publication/queue invariants 全部有判别性 evidence，才恢复上述 Closed。Render transport-equivalence claim仍留到 M16。
+ADR 0035 实现已进入本分支，状态为 `Requalification Pending`；只有 `npm run test:m11` 在同一最终 subject 上完成 local + hosted Node 20/24 PASS，且本文件新增的 update/publication/queue invariants 全部有判别性 evidence，才恢复上述 Closed。Render transport-equivalence claim仍留到 M16。
 
 Current evidence record见 [M11 qualification](doc/30-implementation/m11-qualification.md)，独立 CI 为 `.github/workflows/m11.yml`。

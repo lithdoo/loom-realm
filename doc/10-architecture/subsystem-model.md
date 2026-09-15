@@ -182,9 +182,9 @@ Fresh Activation不复用 old Input State/Event；fresh Data carrier隐藏地 re
 
 ---
 
-## 8. Render Author Projection — M11 Closed
+## 8. Render Author Projection — M11 Requalification Pending
 
-> **Current / target split（2026-09-15）：** 下方 code block仍描述旧 executable subject 的 Current surface，该 subject保持历史 Closed。[ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 已接受 next subject 的 existing-node `RenderDomain.update()`；docs-only acceptance 不表示代码已实现。PR 2 进入 Current 时，本节必须切换为 [M11/01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 冻结的 exact five-export target并标记 `Requalification Pending`。
+> **Current：** `RenderDomain.update()` 已实现。旧 executable subject 的历史 Closed 仍可引用；本 implementation subject 在同一 SHA 完成 local + hosted Node 20/24 `npm run test:m11` 前为 `Requalification Pending`。
 
 Exact surface：
 
@@ -194,18 +194,28 @@ export interface RenderDomainState {
   readonly roots: readonly RenderNode[];
 }
 
+export interface RenderDomainUpdate {
+  readonly zIndex?: number;
+  readonly nodes?: readonly {
+    readonly key: string;
+    readonly attrs?: { readonly set?: Readonly<Record<string, string>>; readonly remove?: readonly string[] };
+    readonly data?: { readonly set?: Readonly<Record<string, unknown>>; readonly remove?: readonly string[] };
+  }[];
+}
+
 interface SubsystemScope {
   createRenderDomain(initialState: RenderDomainState): RenderDomain;
 }
 
 interface RenderDomain {
   replace(state: RenderDomainState): void;
+  update(update: RenderDomainUpdate): void;
   emit(event: RenderEvent): void;
   close(): void;
 }
 ```
 
-Accepted target 只增加 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)` operation，覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members；结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变下述 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
+Accepted target 的 Current 实现已包含 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)`；它覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members，结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变下述 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
 
 所有 author operations synchronous local-only：
 
