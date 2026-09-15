@@ -234,6 +234,14 @@ export function createDesktopRendererInputSource(target: Window): RendererInputS
         if (!usable || !event.isTrusted || !isKeyboardCode(event.code)) return;
         const code = event.code as KeyboardCodeV1;
         const repeat = held.has(code);
+        if (!repeat && (code === "ArrowUp" || code === "ArrowDown" || code === "ArrowLeft" || code === "ArrowRight")) {
+          const hook = (target as Window & { __loomrealmMovementQualification?: unknown }).__loomrealmMovementQualification;
+          if (typeof hook === "function") {
+            try {
+              hook({ name: "input-captured", at: target.performance.now(), detail: { code } });
+            } catch { /* qualification must not change product behavior */ }
+          }
+        }
         if (!repeat) { held.add(code); keyboardState(); }
         send({ kind: "event", channel: "keyboard.event", payload: { action: "down", code, repeat } });
       };
