@@ -1,7 +1,7 @@
 # Render 移动延迟与核心链路改造设计
 
 > 状态：Implementation Specification Frozen；ADR 0035 Accepted，PR 0 治理传播已完成  
-> Freeze Gate：Pending — 等待本规范与 PR 0 治理基线纳入版本控制  
+> Freeze Gate：Passed — PR 0 governance baseline `59fcd6fb3d4e6e70943780d994d750ac4f26a34e`  
 > 日期：2026-09-15  
 > 范围：`@loomrealm/subsystem`、`@loomrealm/renderer`、`@loomrealm-game/map`、`examples/essentials-v21.1-local`；`@loomrealm/data` / `@loomrealm/wire` 只做现有协议回归，不在本计划中优化  
 > 目标：消除本地地图移动从方向键按下到首个可见像素变化之间的高延迟，同时保持现有 authority、Render Update v1、碰撞、换图、重连和最终收敛语义。
@@ -47,7 +47,7 @@ ADR 0035 已 Accepted；在该状态形成前只允许进行测量、原型和�
 
 ### 1.2 冻结声明与执行方式
 
-本文从本次修订起冻结实现选择、错误分类、状态转换、文件名、算法顺序和验收口径。执行者不得把 `MUST` / “必须”条款改成启发式，也不得自行增加本文未授权的抽象或优化。ADR 0035 与 PR 0 文档传播已经完成；唯一尚未满足的是本规范/治理基线的版本控制事实，完成后按第 19 节记录 baseline SHA。
+本文从本次修订起冻结实现选择、错误分类、状态转换、文件名、算法顺序和验收口径。执行者不得把 `MUST` / “必须”条款改成启发式，也不得自行增加本文未授权的抽象或优化。ADR 0035、PR 0 文档传播与版本控制基线已经在 header 所列 SHA 完成；执行从 PR 1 开始。
 
 低判断力 agent 按第 14 节逐 PR 执行，并遵守以下规则：
 
@@ -1031,6 +1031,8 @@ frame duration 使用相邻 Map-owned animation rAF callback 的 monotonic times
 
 ### PR 0：设计治理闭环
 
+> 状态：Complete — governance baseline `59fcd6fb3d4e6e70943780d994d750ac4f26a34e`；执行 agent 不重复本阶段。
+
 ```text
 docs(render): reopen and freeze existing-node author update capability
 docs(subsystem): update M11 author surface and qualification closure
@@ -1224,7 +1226,7 @@ PR 0 执行 `npm run docs:check-links`；PR 1 执行 `npm run build:m15`、`node
 
 ### 19.1 文档静态 gate
 
-- [ ] 本文件已纳入版本控制，不再是 untracked worktree 文件。
+- [x] 本文件已纳入版本控制，不再是 untracked worktree 文件；PR 0 governance baseline 为 `59fcd6fb3d4e6e70943780d994d750ac4f26a34e`。
 - [x] `doc/decisions/0035-render-domain-existing-node-update.md` 已由维护者标记 `Accepted`，ADR README 已链接。
 - [x] M11 author/publication 文档、Subsystem DESIGN/IMPLEMENTATION-REVIEW 和 M11 closure contract 已冻结新的 target surface；`subsystem-model.md`、M11 qualification ledger 与全局计划导航已加入 Accepted-but-not-implemented notice，没有提前声称 Current code 已有 `update()`，并明确区分旧 executable subject 的历史 Closed 与新演进尚未 Qualified。M14/M15 Current/evidence 文档随最终 subject 实现同步，不是 PR 2 前置 gate。
 - [x] 文档中不存在 angle-bracket placeholder、待办/待定标记、未定文件名或需要实现者判断的主观规范性分支；TypeScript generic syntax 不计为 placeholder。
@@ -1255,4 +1257,4 @@ PR 0 执行 `npm run docs:check-links`；PR 1 执行 `npm run build:m15`、`node
 - [x] PR 0～4 每一阶段都有独立测试命令、完成条件和失败停止点。
 - [x] 实施 agent 被明确告知不得自行更改本文；发现矛盾时停止并报告文档行号。
 
-全部 checkbox 由维护者确认后，在本文 header 下追加 `Freeze Gate：Passed` 并写入确认时的完整 Git commit SHA。没有该行时，本文内容虽已冻结，但执行仍停在 PR 0/静态检查，不得直接进入代码实施。
+全部 checkbox 已由维护者基于 header 所列 PR 0 governance baseline确认；本次只写入 gate evidence/status 的 docs-only descendant不改变该 normative baseline。此后任何修改本规范 normative content 的 commit 都使 Freeze Gate失效，必须重新完成静态/治理复核并记录新的 baseline SHA；未修改本规范的 PR 1～4 实现不改变 specification baseline。执行 agent从 PR 1开始，发现规范矛盾时停止并报告，不自行改写本文件。
