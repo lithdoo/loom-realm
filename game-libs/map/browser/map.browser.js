@@ -28,6 +28,13 @@
     return Math.min(max, Math.max(min, value));
   }
 
+  function qualify(name, detail) {
+    const hook = globalThis.__loomrealmMovementQualification;
+    if (typeof hook === "function") {
+      try { hook({ name, at: performance.now(), detail }); } catch { /* qualification must not change product behavior */ }
+    }
+  }
+
   function exactObject(value, keys) {
     return Boolean(value) && typeof value === "object" && keys.every((key) => key in value) && Object.keys(value).length === keys.length;
   }
@@ -73,6 +80,81 @@
     return false;
   }
 
+  function autotileIdentities(autotiles) {
+    return autotiles.map((item) => (item === null ? null : resourceIdentity(item)));
+  }
+
+  function sameIdentities(left, right) {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+
+  function validVisibleTile(tile, autotiles) {
+    return exactObject(tile, ["x", "y", "z", "tileId", "depth", "blit"])
+      && Number.isSafeInteger(tile.x) && tile.x >= 0
+      && Number.isSafeInteger(tile.y) && tile.y >= 0
+      && [0, 1, 2].includes(tile.z)
+      && Number.isSafeInteger(tile.tileId) && tile.tileId > 0
+      && Number.isSafeInteger(tile.depth) && tile.depth >= 0
+      && validBlit(tile.blit, autotiles);
+  }
+
+  function prepareTileStatic(data) {
+    const buckets = new Map();
+    const usedSlots = [];
+    const seenSlots = new Set();
+    const uniqueRefs = new Map();
+    let needsTileset = false;
+    for (const tile of data.tiles) {
+      let bucket = buckets.get(tile.depth);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(tile.depth, bucket);
+      }
+      bucket.push(tile);
+      if (tile.blit.kind === "regular") {
+        needsTileset = true;
+        continue;
+      }
+      const slot = tile.blit.slot;
+      const ref = data.autotiles[slot];
+      if (!seenSlots.has(slot)) {
+        seenSlots.add(slot);
+        usedSlots.push({ slot, ref });
+      }
+      const identity = resourceIdentity(ref);
+      if (!uniqueRefs.has(identity)) uniqueRefs.set(identity, ref);
+    }
+    if (needsTileset) uniqueRefs.set(resourceIdentity(data.tileset), data.tileset);
+    return {
+      tileset: resourceIdentity(data.tileset),
+      autotiles: autotileIdentities(data.autotiles),
+      buckets,
+      usedSlots,
+      uniqueRefs,
+      needsTileset,
+    };
+  }
+
+  function tilesCacheHit(element, data) {
+    return data.tiles === element._preparedTilesSource
+      && element._preparedTileStatic !== undefined
+      && resourceIdentity(data.tileset) === element._preparedTileStatic.tileset
+      && sameIdentities(autotileIdentities(data.autotiles), element._preparedTileStatic.autotiles);
+  }
+
+  function acceptMotion(current, motion, fingerprint) {
+    if (current == null) {
+      if (motion == null) return null;
+      return { id: motion.id, fingerprint, startedAt: performance.now() };
+    }
+    if (motion == null) return null;
+    if (motion.id === current.id) {
+      if (fingerprint === current.fingerprint) return current;
+      throw new TypeError("Invalid map motion identity");
+    }
+    return { id: motion.id, fingerprint, startedAt: performance.now() };
+  }
+
   function classifyAutotileLayout(image) {
     if (image.height === 128 && image.width >= 96 && image.width % 96 === 0) return "block";
     if (image.height === 32 && image.width >= 32 && image.width % 32 === 0) return "cell";
@@ -100,6 +182,8 @@
       this._images = new Map();
       this._latestData = undefined;
       this._raf = undefined;
+      this._paintEpoch = 0;
+      this._activeMotion = null;
     }
 
     receiveRenderContext(context) {
@@ -116,7 +200,11 @@
 
     disconnectedCallback() {
       queueMicrotask(() => {
-        if (!this.isConnected) this._cancelRaf();
+        if (!this.isConnected) {
+          this._cancelRaf();
+          this._paintEpoch += 1;
+          this._activeMotion = null;
+        }
       });
     }
 
@@ -149,6 +237,9 @@
       shadow.append(style, this._slot);
       this._animationStartedAt = performance.now();
       this._lastPaintToken = undefined;
+      this._lastPaintedCamera = undefined;
+      this._preparedTilesSource = undefined;
+      this._preparedTileStatic = undefined;
     }
 
     _ensureLayer(index) {
@@ -199,49 +290,39 @@
         || !data.autotiles.every((item) => item === null || validRef(item))
         || !validCameraMotion(data.cameraMotion)
       ) throw new TypeError("Invalid MapViewRenderData");
-      for (const tile of data.tiles) {
-        if (
-          !exactObject(tile, ["x", "y", "z", "tileId", "depth", "blit"])
-          || !Number.isSafeInteger(tile.x) || tile.x < 0
-          || !Number.isSafeInteger(tile.y) || tile.y < 0
-          || ![0, 1, 2].includes(tile.z)
-          || !Number.isSafeInteger(tile.tileId) || tile.tileId <= 0
-          || !Number.isSafeInteger(tile.depth) || tile.depth < 0
-          || !validBlit(tile.blit, data.autotiles)
-        ) {
-          throw new TypeError("Invalid visible tile");
+      const cacheHit = tilesCacheHit(this, data);
+      let preparedStatic = this._preparedTileStatic;
+      if (!cacheHit) {
+        for (const tile of data.tiles) {
+          if (!validVisibleTile(tile, data.autotiles)) throw new TypeError("Invalid visible tile");
         }
+        preparedStatic = prepareTileStatic(data);
+      }
+      const motion = data.cameraMotion;
+      const fingerprint = motion === null ? null : JSON.stringify([
+        motion.id,
+        motion.durationMs,
+        motion.fromCameraX,
+        motion.fromCameraY,
+        data.cameraX,
+        data.cameraY,
+      ]);
+      const nextActive = acceptMotion(this._activeMotion, motion, fingerprint);
+      this._latestData = data;
+      this._activeMotion = nextActive;
+      if (!cacheHit) {
+        this._preparedTilesSource = data.tiles;
+        this._preparedTileStatic = preparedStatic;
       }
       this._cancelRaf();
-      this._latestData = data;
-      this._paintEpoch = (this._paintEpoch ?? 0) + 1;
-      this._lastPaintToken = undefined;
-      const receivedAt = performance.now();
-      void this._paintLatest(data, receivedAt, this._paintEpoch);
+      this._paintEpoch += 1;
+      qualify("presentation-received", { element: "map-view", motionId: motion?.id ?? null });
+      void this._paintLatest(data, this._paintEpoch, preparedStatic);
     }
 
-    async _paintLatest(requested, receivedAt, epoch) {
+    async _paintLatest(requested, epoch, preparedStatic) {
       this._ensureLayer(0);
-      const usedSlots = [];
-      const seenSlots = new Set();
-      const uniqueRefs = new Map();
-      let needsTileset = false;
-      for (const tile of requested.tiles) {
-        if (tile.blit.kind === "regular") {
-          needsTileset = true;
-          continue;
-        }
-        const slot = tile.blit.slot;
-        const ref = requested.autotiles[slot];
-        if (!seenSlots.has(slot)) {
-          seenSlots.add(slot);
-          usedSlots.push({ slot, ref });
-        }
-        const identity = resourceIdentity(ref);
-        if (!uniqueRefs.has(identity)) uniqueRefs.set(identity, ref);
-      }
-      if (needsTileset) uniqueRefs.set(resourceIdentity(requested.tileset), requested.tileset);
-
+      const uniqueRefs = preparedStatic.uniqueRefs;
       let decoded = new Map();
       if (uniqueRefs.size > 0) {
         try {
@@ -255,7 +336,7 @@
       if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
 
       const autotiles = new Map();
-      for (const { slot, ref } of usedSlots) {
+      for (const { slot, ref } of preparedStatic.usedSlots) {
         const image = decoded.get(resourceIdentity(ref));
         const layout = classifyAutotileLayout(image);
         const durationMs = autotileFrameDurationMs(ref);
@@ -266,18 +347,20 @@
         const frameWidth = layout === "block" ? 96 : 32;
         autotiles.set(slot, { image, layout, frameCount: image.width / frameWidth, frameWidth, durationMs });
       }
-      this._paintPrepared(requested, receivedAt, epoch, {
-        tilesetImage: needsTileset ? decoded.get(resourceIdentity(requested.tileset)) : undefined,
+      this._paintPrepared(requested, epoch, {
+        tilesetImage: preparedStatic.needsTileset ? decoded.get(resourceIdentity(requested.tileset)) : undefined,
         autotiles,
+        buckets: preparedStatic.buckets,
       });
     }
 
-    _paintPrepared(requested, receivedAt, epoch, prepared) {
+    _paintPrepared(requested, epoch, prepared) {
       if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
 
       const now = performance.now();
       const motion = requested.cameraMotion;
-      const progress = motion ? clamp((now - receivedAt) / motion.durationMs, 0, 1) : 1;
+      const active = this._activeMotion;
+      const progress = active && motion ? clamp((now - active.startedAt) / motion.durationMs, 0, 1) : 1;
       const cameraX = motion ? Math.round(lerp(motion.fromCameraX, requested.cameraX, progress)) : requested.cameraX;
       const cameraY = motion ? Math.round(lerp(motion.fromCameraY, requested.cameraY, progress)) : requested.cameraY;
       const frames = [...prepared.autotiles.entries()]
@@ -294,7 +377,7 @@
         if (needsNextFrame) {
           this._raf = requestAnimationFrame(() => {
             this._raf = undefined;
-            this._paintPrepared(requested, receivedAt, epoch, prepared);
+            this._paintPrepared(requested, epoch, prepared);
           });
         } else {
           this._raf = undefined;
@@ -303,17 +386,7 @@
       }
       this._lastPaintToken = paintToken;
 
-      const buckets = new Map();
-      for (const tile of requested.tiles) {
-        let bucket = buckets.get(tile.depth);
-        if (!bucket) {
-          bucket = [];
-          buckets.set(tile.depth, bucket);
-        }
-        bucket.push(tile);
-      }
-
-      const groups = [...buckets.entries()]
+      const groups = [...prepared.buckets.entries()]
         .sort(([leftDepth], [rightDepth]) => leftDepth - rightDepth);
 
       for (const layer of this._layers) {
@@ -354,10 +427,21 @@
       }
 
       this._trimLayers(groups.length);
+      const previous = this._lastPaintedCamera;
+      if (!previous || previous.x !== cameraX || previous.y !== cameraY) {
+        qualify("browser-first-motion-paint", {
+          element: "map-view",
+          motionId: motion?.id ?? null,
+          visualX: cameraX,
+          visualY: cameraY,
+        });
+        this._lastPaintedCamera = { x: cameraX, y: cameraY };
+      }
+      if (motion && progress >= 1) qualify("browser-motion-complete", { element: "map-view", motionId: motion.id, visualX: cameraX, visualY: cameraY });
       if (needsNextFrame) {
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
-          this._paintPrepared(requested, receivedAt, epoch, prepared);
+          this._paintPrepared(requested, epoch, prepared);
         });
         return;
       }
@@ -375,6 +459,7 @@
       shadow.append(style, this._canvas);
       this._context = this._canvas.getContext("2d", { alpha: true });
       this._context.imageSmoothingEnabled = false;
+      this._lastPaintedScreen = undefined;
     }
 
     receiveRenderData(data) {
@@ -391,24 +476,42 @@
         || (data.motion === null && data.pattern !== 0)
         || (data.motion !== null && data.pattern !== 1 && data.pattern !== 3)
       ) throw new TypeError("Invalid MapSpriteRenderData");
-      this._cancelRaf();
+      const motion = data.motion;
+      const fingerprint = motion === null ? null : JSON.stringify([
+        motion.id,
+        motion.durationMs,
+        motion.fromY,
+        motion.fromScreenX,
+        motion.fromScreenY,
+        data.x,
+        data.y,
+        data.screenX,
+        data.screenY,
+        data.direction,
+        data.pattern,
+      ]);
+      const nextActive = acceptMotion(this._activeMotion, motion, fingerprint);
       this._latestData = data;
-      const receivedAt = performance.now();
-      void this._paintLatest(data, receivedAt);
+      this._activeMotion = nextActive;
+      this._cancelRaf();
+      this._paintEpoch += 1;
+      qualify("presentation-received", { element: "map-sprite", motionId: motion?.id ?? null });
+      void this._paintLatest(data, this._paintEpoch);
     }
 
-    async _paintLatest(requested, receivedAt) {
+    async _paintLatest(requested, epoch) {
       let image;
       try { image = await this._image(requested.sprite); } catch {
-        if (this._latestData !== requested) return;
+        if (this._latestData !== requested || epoch !== this._paintEpoch) return;
         return;
       }
-      if (this._latestData !== requested || !this.isConnected) return;
+      if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
       const frameWidth = image.width / 4;
       const frameHeight = image.height / 4;
       if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) throw new TypeError("Character sheet must be 4 by 4");
       const motion = requested.motion;
-      const progress = motion ? clamp((performance.now() - receivedAt) / motion.durationMs, 0, 1) : 1;
+      const active = this._activeMotion;
+      const progress = active && motion ? clamp((performance.now() - active.startedAt) / motion.durationMs, 0, 1) : 1;
       const pattern = motion ? (progress < 0.5 ? requested.pattern : (requested.pattern + 1) % 4) : 0;
       const screenX = motion ? Math.round(lerp(motion.fromScreenX, requested.screenX, progress)) : requested.screenX;
       const screenY = motion ? Math.round(lerp(motion.fromScreenY, requested.screenY, progress)) : requested.screenY;
@@ -424,11 +527,22 @@
       this.style.width = `${frameWidth}px`;
       this.style.height = `${frameHeight}px`;
       this.style.zIndex = String(characterStackValue(depth));
+      const previous = this._lastPaintedScreen;
+      if (!previous || previous.x !== screenX || previous.y !== screenY) {
+        qualify("browser-first-motion-paint", {
+          element: "map-sprite",
+          motionId: motion?.id ?? null,
+          visualX: screenX,
+          visualY: screenY,
+        });
+        this._lastPaintedScreen = { x: screenX, y: screenY };
+      }
+      if (motion && progress >= 1) qualify("browser-motion-complete", { element: "map-sprite", motionId: motion.id, visualX: screenX, visualY: screenY });
       if (motion && progress < 1) {
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
-          if (this._latestData !== requested || !this.isConnected) return;
-          void this._paintLatest(requested, receivedAt);
+          if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
+          void this._paintLatest(requested, epoch);
         });
         return;
       }
