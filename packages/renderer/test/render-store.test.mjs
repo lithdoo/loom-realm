@@ -158,3 +158,69 @@ test("fresh generation creates a fresh Domain and Node identity universe", () =>
   assert.deepEqual(freshStore.onDomains(domains("d1")), { kind: "accepted" });
   assert.deepEqual(freshStore.onSnapshot(snapshot("d1", 1, [node("same")])), { kind: "accepted" });
 });
+
+test("update-only Patch shares untouched large data and clones the path once", () => {
+  const store = new RendererRenderStore(1);
+  store.beginCarrier();
+  store.onDomains(domains("d1"));
+  const keep = { blob: "x".repeat(64) };
+  store.onSnapshot(snapshot("d1", 1, [node("root", [node("leaf")], { x: "1" }, { keep, n: 1 })]));
+  const before = store.snapshotForQualification().domains[0].roots[0];
+  assert.deepEqual(store.onPatch({
+    type: "render.patch",
+    domainId: "d1",
+    baseRevision: 1,
+    revision: 2,
+    ops: [
+      { op: "update", key: "root", data: { set: { n: 2 } } },
+      { op: "update", key: "root", attrs: { set: { x: "9" } } },
+    ],
+  }), { kind: "accepted" });
+  const after = store.snapshotForQualification().domains[0].roots[0];
+  assert.notEqual(after, before);
+  assert.equal(after.children[0], before.children[0]);
+  assert.equal(after.data.keep, before.data.keep);
+  assert.equal(after.data.n, 2);
+  assert.equal(after.attrs.x, "9");
+  assert.equal(store.snapshotForQualification().domains[0].revision, 2);
+});
+
+test("zIndex-only Patch reuses roots identity", () => {
+  const store = new RendererRenderStore(1);
+  store.beginCarrier();
+  store.onDomains(domains("d1"));
+  store.onSnapshot(snapshot("d1", 1, [node("root")], 1));
+  const before = store.snapshotForQualification().domains[0].roots;
+  assert.deepEqual(store.onPatch({
+    type: "render.patch",
+    domainId: "d1",
+    baseRevision: 1,
+    revision: 2,
+    zIndex: 4,
+    ops: [],
+  }), { kind: "accepted" });
+  const view = store.snapshotForQualification().domains[0];
+  assert.equal(view.zIndex, 4);
+  assert.equal(view.roots, before);
+});
+
+test("update-only Patch is protocol-fatal on intermediate over-limit even if a later op would shrink", () => {
+  const store = new RendererRenderStore(1);
+  store.beginCarrier();
+  store.onDomains(domains("d1"));
+  store.onSnapshot(snapshot("d1", 1, [node("root", [], "sprite", {}, { n: 1 })]));
+  const before = JSON.stringify(store.snapshotForQualification().domains[0]);
+  const tooBig = { value: "x".repeat(262_144) };
+  const disposition = store.onPatch({
+    type: "render.patch",
+    domainId: "d1",
+    baseRevision: 1,
+    revision: 2,
+    ops: [
+      { op: "update", key: "root", data: { set: { value: tooBig.value } } },
+      { op: "update", key: "root", data: { remove: ["value"] } },
+    ],
+  });
+  assert.equal(disposition.kind, "protocol-fatal");
+  assert.equal(JSON.stringify(store.snapshotForQualification().domains[0]), before);
+});
