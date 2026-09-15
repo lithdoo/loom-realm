@@ -7,7 +7,7 @@
 > 协议：`loomrealm.render-update / 1`
 > Fixture：`fixtureSetRevision = 1`
 
-> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 的 `RenderDomain.update()` 已实现。本页现有 PASS 只证明旧 executable subject。本 implementation subject 为 `Requalification Pending`，最终 evidence 必须记录统一 SHA。
+> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 的 `RenderDomain.update()` 已实现。本页现有 PASS 只证明旧 executable subject。本 implementation subject 为 `4c34058729ec9170526511f9e05cba0f06651f71`，状态 `Requalification Pending`；local `npm run test:m11` 已通过，hosted Node 20/24 evidence 尚未取得。
 
 M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并重新通过最终闭环评审。
 

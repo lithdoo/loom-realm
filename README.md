@@ -67,7 +67,7 @@ M17 PWA full E2E                            pending
 
 M14/M15 formal evidence lives in [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md) and [`m15-qualification.md`](./doc/30-implementation/m15-qualification.md)。
 
-> **Accepted evolution notice（2026-09-15）：** 上表 Closed 仍指向当前旧 executable subjects。ADR 0035 已接受 `RenderDomain.update()` target，但 docs-only acceptance 不声称该 API 已实现；第一个 executable/qualification-input change 将使对应 M11/M14/M15 新 subject进入 `Requalification Pending`。最终必须在同一 subject SHA 上按 M11 → M14 → M15 重新关闭，之后才恢复无条件 Closed 并继续 M16。
+> **Accepted evolution notice（2026-09-15）：** 上表 Closed 仍指向当前旧 executable subjects。`RenderDomain.update()` 已在 `feat/render-movement-latency` 实现；implementation subject `4c34058729ec9170526511f9e05cba0f06651f71` 为 `Requalification Pending`，必须在同一 SHA 上按 M11 → M14 → M15 重新关闭（含 hosted Node 20/24 与 hosted frozen-Hostra）后才恢复无条件 Closed。
 
 M15 的 Main/Data/Renderer/Input/Presentation/game logical intent保持冻结；此前 standalone Electron implementation作为历史/迁移证据保留。Canonical physical host已经由 ADR 0034纠正为：
 
