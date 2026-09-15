@@ -17,8 +17,8 @@ function peer(generation = 1, hooks = {}) {
   const messages = [];
   const send = async (message) => {
     messages.push(message);
-    await hooks.send?.(message);
-    return { kind: "sent" };
+    const result = await hooks.send?.(message);
+    return result ?? { kind: "sent" };
   };
   return {
     binding: { subsystemKey: "demo", generation, dataProfile: "loomrealm.renderer-data/1" },
@@ -28,6 +28,7 @@ function peer(generation = 1, hooks = {}) {
       sendPatch: send,
       sendEvent: send,
     },
+    close: async () => {},
     messages,
   };
 }
@@ -49,6 +50,7 @@ test("RenderDomain commits detached local authority and enforces lifetime identi
   domain.close();
   domain.close();
   assert.throws(() => domain.replace(state([])), /closed/);
+  assert.throws(() => domain.update({ zIndex: 1 }), /closed/);
   assert.throws(() => domain.emit({ targetKey: "root", name: "hit", data: {} }), /closed/);
 });
 
@@ -283,4 +285,223 @@ test("an unemitted create-close lifecycle never publishes stale Domain presence"
   assert.ok(current.messages.every((message) =>
     message.type !== "render.domains" || message.domains.length === 0));
   assert.equal(current.messages.some(({ type }) => type === "render.snapshot"), false);
+});
+
+test("RenderDomain.update mutates existing node attrs/data/zIndex without a Snapshot after baseline", async () => {
+  const manager = new RenderManager();
+  const nested = { value: 1, keep: { huge: "x".repeat(32) } };
+  const domain = manager.createDomain(state([node("root", [node("child")], "sprite", { x: "1" }, nested)]));
+  const current = peer();
+  manager.setDataPeer(current);
+  await settle();
+  const before = manager.snapshotForQualification().domains[0].state.roots[0];
+  domain.update({
+    zIndex: 9,
+    nodes: [{
+      key: "root",
+      attrs: { set: { x: "2" }, remove: [] },
+      data: { set: { value: 7 } },
+    }],
+  });
+  const source = { zIndex: 3, nodes: [{ key: "root", data: { set: { value: 8 } } }] };
+  domain.update(source);
+  source.nodes[0].data.set.value = 99;
+  await settle();
+  const patches = current.messages.filter(({ type }) => type === "render.patch");
+  assert.equal(current.messages.filter(({ type }) => type === "render.snapshot").length, 1);
+  assert.equal(patches.length, 2);
+  assert.equal(patches[0].baseRevision, 1);
+  assert.equal(patches[0].revision, 2);
+  assert.equal(patches[0].zIndex, 9);
+  assert.equal(patches[0].ops[0].op, "update");
+  assert.equal(patches[0].ops[0].key, "root");
+  assert.equal(patches[0].ops[0].attrs.set.x, "2");
+  assert.deepEqual(patches[0].ops[0].attrs.remove, []);
+  assert.equal(patches[0].ops[0].data.set.value, 7);
+  assert.equal(patches[1].ops[0].data.set.value, 8);
+  const after = manager.snapshotForQualification().domains[0].state.roots[0];
+  assert.equal(after.attrs.x, "2");
+  assert.equal(after.data.value, 8);
+  assert.equal(after.data.keep.huge, before.data.keep.huge);
+  assert.equal(after.children[0].key, "child");
+});
+
+test("RenderDomain.update is local-atomic and distinguishes missing from explicit undefined", () => {
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root", [], "sprite", { x: "1" }, { n: 1 })], 4));
+  assert.throws(() => domain.update({}), TypeError);
+  assert.throws(() => domain.update({ zIndex: undefined }), TypeError);
+  assert.throws(() => domain.update({ nodes: undefined }), TypeError);
+  assert.throws(() => domain.update({ nodes: [] }), TypeError);
+  assert.throws(() => domain.update({ nodes: [{ key: "missing", data: { set: { n: 2 } } }] }), TypeError);
+  assert.throws(() => domain.update({ nodes: [{ key: "root", data: { remove: ["missing"] } }] }), TypeError);
+  assert.throws(() => domain.update({
+    nodes: [
+      { key: "root", data: { set: { n: 2 } } },
+      { key: "root", attrs: { set: { x: "9" } } },
+    ],
+  }), TypeError);
+  const extra = []; extra[0] = { key: "root", data: { set: { n: 2 } } }; extra.foo = true;
+  assert.throws(() => domain.update({ nodes: extra }), TypeError);
+  const accessor = { nodes: [{ key: "root", data: { set: { n: 2 } } }] };
+  Object.defineProperty(accessor, "zIndex", { get() { return 1; }, enumerable: true });
+  assert.throws(() => domain.update(accessor), TypeError);
+  assert.throws(() => domain.update({ zIndex: 2_147_483_648 }), RangeError);
+  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].attrs.x, "1");
+  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 1);
+  assert.equal(manager.snapshotForQualification().domains[0].state.zIndex, 4);
+  domain.update({ zIndex: 4 });
+  assert.equal(manager.snapshotForQualification().domains[0].state.zIndex, 4);
+});
+
+test("baseline in-flight update stays a Snapshot and later updates become Patches", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")], 1));
+  const current = peer(1, {
+    async send(message) {
+      if (message.type === "render.snapshot") await gate;
+    },
+  });
+  manager.setDataPeer(current);
+  domain.update({ nodes: [{ key: "root", data: { set: { phase: "during-baseline" } } }] });
+  await turn();
+  assert.equal(current.messages.some(({ type }) => type === "render.patch"), false);
+  release();
+  await settle();
+  domain.update({ nodes: [{ key: "root", data: { set: { phase: "after" } } }] });
+  await settle();
+  const types = current.messages.map(({ type }) => type);
+  assert.deepEqual(types, ["render.domains", "render.snapshot", "render.patch"]);
+  assert.equal(current.messages[1].roots[0].data.phase, "during-baseline");
+  assert.equal(current.messages[2].ops[0].data.set.phase, "after");
+  assert.equal(current.messages[2].baseRevision, 1);
+});
+
+test("Event barrier keeps later updates from coalescing into an earlier Snapshot", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")]));
+  const current = peer(1, {
+    async send(message) {
+      if (message.type === "render.snapshot" && message.roots[0].attrs.phase === "first") await gate;
+    },
+  });
+  manager.setDataPeer(current);
+  await settle();
+  domain.replace(state([node("root", [], "sprite", { phase: "first" })]));
+  domain.emit({ targetKey: "root", name: "barrier", data: {} });
+  domain.update({ nodes: [{ key: "root", attrs: { set: { phase: "after" } } }] });
+  await turn();
+  release();
+  await settle();
+  const tail = current.messages.slice(-3);
+  assert.deepEqual(tail.map(({ type }) => type), ["render.snapshot", "render.event", "render.patch"]);
+  assert.equal(tail[0].roots[0].attrs.phase, "first");
+  assert.equal(tail[2].ops[0].attrs.set.phase, "after");
+});
+
+test("full queue coalesces same-Domain updates to the latest Snapshot", async () => {
+  let release;
+  let blockSnapshots = false;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")]));
+  const current = peer(1, {
+    async send(message) {
+      if (blockSnapshots && message.type === "render.snapshot") await gate;
+    },
+  });
+  manager.setDataPeer(current);
+  await settle();
+  blockSnapshots = true;
+  domain.replace(state([node("root", [], "sprite", { phase: "hold" })]));
+  await turn();
+  await turn();
+  for (let index = 0; index < 1_024; index += 1) {
+    domain.update({ nodes: [{ key: "root", data: { set: { n: index } } }] });
+  }
+  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  domain.update({ nodes: [{ key: "root", data: { set: { n: 2048 } } }] });
+  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  release();
+  await settle();
+  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 2048);
+});
+
+test("zIndex-only update maps to an empty-ops Patch", async () => {
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")], 1));
+  const current = peer();
+  manager.setDataPeer(current);
+  await settle();
+  domain.update({ zIndex: 8 });
+  await settle();
+  const patch = current.messages.find(({ type }) => type === "render.patch");
+  assert.equal(patch.zIndex, 8);
+  assert.deepEqual(patch.ops, []);
+});
+
+test("send failure invalidates the old peer instead of retrying a Patch", async () => {
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")]));
+  let calls = 0;
+  const current = peer(1, {
+    async send() {
+      calls += 1;
+      if (calls > 2) return { kind: "terminal", terminal: { kind: "carrier-lost" } };
+      return { kind: "sent" };
+    },
+  });
+  manager.setDataPeer(current);
+  await settle();
+  domain.update({ nodes: [{ key: "root", data: { set: { n: 1 } } }] });
+  await settle();
+  domain.update({ nodes: [{ key: "root", data: { set: { n: 2 } } }] });
+  await settle();
+  assert.equal(manager.snapshotForQualification().pendingWork, 0);
+});
+
+test("update op count accepts 4096 and rejects 4097 atomically", () => {
+  const roots = Array.from({ length: 4096 }, (_, index) => node(`n${index}`));
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state(roots));
+  domain.update({
+    nodes: roots.map((item) => ({ key: item.key, data: { set: { n: 1 } } })),
+  });
+  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 1);
+  const overflow = Array.from({ length: 4097 }, (_, index) => node(`k${index}`));
+  const other = manager.createDomain(state(overflow));
+  assert.throws(() => other.update({
+    nodes: overflow.map((item) => ({ key: item.key, data: { set: { n: 1 } } })),
+  }), RangeError);
+  assert.equal(manager.snapshotForQualification().domains[1].state.roots[0].data.n, undefined);
+});
+
+test("full queue drops the oldest Event before coalescing authoritative work", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root")]));
+  const current = peer(1, {
+    async send(message) {
+      if (message.type === "render.snapshot" && message.roots[0].data?.hold === 1) await gate;
+    },
+  });
+  manager.setDataPeer(current);
+  await settle();
+  domain.replace(state([node("root", [], "sprite", {}, { hold: 1 })]));
+  await turn();
+  for (let index = 0; index < 1_024; index += 1) {
+    domain.emit({ targetKey: "root", name: "pulse", data: { index } });
+  }
+  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  domain.update({ nodes: [{ key: "root", data: { set: { hold: 2 } } }] });
+  assert.ok(manager.snapshotForQualification().pendingWork <= 1_024);
+  release();
+  await settle();
+  assert.equal(current.messages.at(-1).type, "render.patch");
+  assert.equal(current.messages.at(-1).ops[0].data.set.hold, 2);
 });

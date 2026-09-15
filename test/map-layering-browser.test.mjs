@@ -1013,3 +1013,102 @@ test("synchronous reparent keeps the original animated prepared loop", { timeout
   assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
   assert.notEqual(await page.evaluate(() => window.__view._raf), undefined);
 });
+
+test("motion state machine keeps startedAt for same id/fingerprint and rejects drift", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await warmPresentation(page);
+  const walking = walkingSprite({ id: 1, screenY: 32, fromScreenY: 0 });
+  const drifted = walkingSprite({ id: 1, screenY: 64, fromScreenY: 0, y: 2, fromY: 0 });
+  const standing = spriteData(1);
+  const result = await page.evaluate(async ({ walking: first, drifted: second, standing: rest }) => {
+    const throwsSync = (run) => {
+      try {
+        run();
+        return { threw: false };
+      } catch (error) {
+        return { threw: true, name: error.name };
+      }
+    };
+    window.__sprite.receiveRenderData(first);
+    const startedAt = window.__sprite._activeMotion.startedAt;
+    const epoch = window.__sprite._paintEpoch;
+    window.__sprite.receiveRenderData(first);
+    const same = {
+      startedAtUnchanged: window.__sprite._activeMotion.startedAt === startedAt,
+      epochAdvanced: window.__sprite._paintEpoch === epoch + 1,
+      id: window.__sprite._activeMotion.id,
+    };
+    const drift = throwsSync(() => window.__sprite.receiveRenderData(second));
+    const afterDrift = {
+      startedAt: window.__sprite._activeMotion.startedAt,
+      latestY: window.__sprite._latestData.y,
+      epoch: window.__sprite._paintEpoch,
+    };
+    window.__sprite.receiveRenderData(rest);
+    return {
+      same,
+      drift,
+      afterDrift,
+      cleared: window.__sprite._activeMotion === null,
+      latestY: window.__sprite._latestData.y,
+    };
+  }, { walking, drifted, standing });
+  assert.equal(result.same.startedAtUnchanged, true);
+  assert.equal(result.same.epochAdvanced, true);
+  assert.equal(result.same.id, 1);
+  assert.equal(result.drift.threw, true);
+  assert.equal(result.drift.name, "TypeError");
+  assert.equal(result.afterDrift.latestY, 1);
+  assert.equal(result.cleared, true);
+  assert.equal(result.latestY, 1);
+});
+
+test("null to null motion snaps without a timeline", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await page.evaluate(({ first, second }) => {
+    window.__sprite.receiveRenderData(first);
+    window.__sprite.receiveRenderData(second);
+  }, { first: spriteData(0), second: spriteData(2) });
+  await waitUntil(page, () => document.querySelector("lr-map-sprite")?.style.top === "64px", "standing snap to y=2");
+  assert.equal(await page.evaluate(() => window.__sprite._activeMotion), null);
+  assert.equal(await page.evaluate(() => window.__sprite._raf), undefined);
+});
+
+test("tiles identity cache skips schema rebuild until tileset identity changes", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const tiles = [regularTile({ depth: 0 })];
+  const first = viewData({ tiles, cameraX: 0 });
+  const sameTiles = viewData({ tiles, cameraX: 32, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } });
+  const newTileset = viewData({ tiles, tileset: tilesetRef("v2"), cameraX: 32 });
+  const info = await page.evaluate(({ first: a, sameTiles: b, newTileset: c }) => {
+    window.__view.receiveRenderData(a);
+    const staticA = window.__view._preparedTileStatic;
+    const sourceA = window.__view._preparedTilesSource;
+    window.__view.receiveRenderData(b);
+    const hit = window.__view._preparedTileStatic === staticA && window.__view._preparedTilesSource === sourceA;
+    window.__view.receiveRenderData(c);
+    return {
+      hit,
+      sourceIsTiles: window.__view._preparedTilesSource === a.tiles,
+      rebuilt: window.__view._preparedTileStatic !== staticA,
+    };
+  }, { first, sameTiles, newTileset });
+  assert.equal(info.hit, true);
+  assert.equal(info.sourceIsTiles, true);
+  assert.equal(info.rebuilt, true);
+});
+
+test("disconnect increments paint epoch so stale rAF cannot paint", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await warmPresentation(page);
+  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), { spritePayload: walkingSprite({}) });
+  await waitUntil(page, () => document.querySelector("lr-map-sprite")?._raf !== undefined, "rAF started");
+  const before = await page.evaluate(() => window.__sprite._paintEpoch);
+  await page.evaluate(() => window.__sprite.remove());
+  await waitUntil(page, () => window.__sprite._raf === undefined, "rAF cancelled after disconnect");
+  assert.ok(await page.evaluate((epoch) => window.__sprite._paintEpoch > epoch && window.__sprite._activeMotion === null, before));
+});

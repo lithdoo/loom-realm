@@ -194,7 +194,9 @@ function applyDelta<T extends string | JsonValue>(
   delta: { readonly set?: Readonly<Record<string, T>>; readonly remove?: readonly string[] },
 ): void {
   if (delta.set !== undefined) {
-    for (const key of Object.keys(delta.set)) target[key] = cloneJson(delta.set[key] as JsonValue) as T;
+    for (const key of Object.keys(delta.set)) {
+      target[key] = freezeJson(cloneJson(delta.set[key] as JsonValue)) as T;
+    }
   }
   if (delta.remove !== undefined) {
     for (const key of delta.remove) {
@@ -372,6 +374,10 @@ export class RendererRenderStore {
       return fatal("Patch revision continuity failure");
     }
     try {
+      if (message.ops.every((op) => op.op === "update")) {
+        this.commitUpdateOnlyPatch(current, message);
+        return accepted;
+      }
       const roots = current.roots.map(cloneNode);
       const sourceIdentity = this.identities.get(message.domainId);
       if (sourceIdentity === undefined) throw new Error("Missing Domain identity state");
@@ -442,6 +448,118 @@ export class RendererRenderStore {
         zIndex: domain.zIndex,
         roots: domain.roots as readonly RenderNodeV1[],
       }))),
+    });
+  }
+
+  private commitUpdateOnlyPatch(current: DomainReplica, message: RenderPatchV1): void {
+    if (message.ops.length === 0) {
+      if (message.zIndex === undefined) throw new Error("empty");
+      this.domains.set(current.domainId, {
+        domainId: current.domainId,
+        baselined: true,
+        revision: message.revision,
+        zIndex: message.zIndex,
+        roots: current.roots,
+      });
+      return;
+    }
+    const created = new Set<object>();
+    const cloneByOriginal = new WeakMap<object, MutableNode>();
+    const builderByKey = new Map<string, MutableNode>();
+    const cloneNodeShallow = (node: MutableNode): MutableNode => {
+      const known = builderByKey.get(node.key);
+      if (known !== undefined) return known;
+      const clone: MutableNode = {
+        key: node.key,
+        tag: node.tag,
+        attrs: node.attrs,
+        data: node.data,
+        children: node.children,
+      };
+      cloneByOriginal.set(node, clone);
+      builderByKey.set(node.key, clone);
+      created.add(clone);
+      return clone;
+    };
+    const clonePathTo = (node: MutableNode, key: string): MutableNode | null => {
+      if (node.key === key) return cloneNodeShallow(node);
+      for (let index = 0; index < node.children.length; index += 1) {
+        const child = node.children[index];
+        if (child === undefined) continue;
+        const found = clonePathTo(child, key);
+        if (found === null) continue;
+        const parent = cloneNodeShallow(node);
+        if (!created.has(parent.children)) {
+          parent.children = parent.children.slice();
+          created.add(parent.children);
+        }
+        parent.children[index] = cloneNodeShallow(child);
+        return found;
+      }
+      return null;
+    };
+    const touch = <T extends Record<string, string> | Record<string, JsonValue>>(container: T): T => {
+      if (created.has(container)) return container;
+      const copy = Object.create(null) as T;
+      for (const key of Object.keys(container)) (copy as Record<string, string | JsonValue>)[key] = container[key] as string | JsonValue;
+      created.add(copy);
+      return copy;
+    };
+    let roots = current.roots;
+    for (const op of message.ops) {
+      if (op.op !== "update") throw new Error("Update-only Patch expected");
+      let node = builderByKey.get(op.key);
+      if (node === undefined) {
+        let found: MutableNode | null = null;
+        let rootIndex = -1;
+        for (let index = 0; index < roots.length; index += 1) {
+          const root = roots[index];
+          if (root === undefined) continue;
+          found = clonePathTo(root, op.key);
+          if (found === null) continue;
+          rootIndex = index;
+          break;
+        }
+        if (found === null || rootIndex < 0) throw new Error("Updated Render node is missing");
+        if (!created.has(roots)) {
+          roots = roots.slice();
+          created.add(roots);
+        }
+        roots[rootIndex] = cloneNodeShallow(roots[rootIndex] as MutableNode);
+        node = found;
+      }
+      if (op.attrs !== undefined) {
+        node.attrs = touch(node.attrs);
+        applyDelta(node.attrs, op.attrs);
+        if (Object.keys(node.attrs).length > MAX_ATTRS) throw new Error("Render attrs limit exceeded");
+        for (const [key, value] of Object.entries(node.attrs)) {
+          const keyBytes = byteLength(key);
+          const valueBytes = byteLength(value);
+          if (keyBytes < 1 || keyBytes > 128 || valueBytes > 4096) throw new Error("Render attrs string limit exceeded");
+        }
+      }
+      if (op.data !== undefined) {
+        node.data = touch(node.data);
+        applyDelta(node.data, op.data);
+        validateData(node.data);
+      }
+    }
+    const freezeCreated = (value: object): void => {
+      if (!created.has(value) || Object.isFrozen(value)) return;
+      if (Array.isArray(value)) {
+        for (const child of value) if (child !== null && typeof child === "object") freezeCreated(child);
+      } else {
+        for (const child of Object.values(value)) if (child !== null && typeof child === "object") freezeCreated(child as object);
+      }
+      Object.freeze(value);
+    };
+    freezeCreated(roots);
+    this.domains.set(current.domainId, {
+      domainId: current.domainId,
+      baselined: true,
+      revision: message.revision,
+      zIndex: message.zIndex ?? current.zIndex,
+      roots,
     });
   }
 

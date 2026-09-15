@@ -264,8 +264,8 @@ accepted event
 → set facing
 → evaluate passability
 → update x/y when passable
-→ recompute camera + visible tiles
-→ RenderDomain.replace(current full state)
+→ recompute camera; reuse or refresh retained tile projection window
+→ RenderDomain.update(player/camera, tiles only when coverage is insufficient)
 → return
 ```
 
@@ -483,7 +483,7 @@ screenX=playerX*32-cameraX
 screenY=playerY*32-cameraY
 ```
 
-Runtime publishes current full `RenderDomainState` through `replace(...)`；M14 defines no map delta protocol。M11/M13 may optimize transport internally；WC receives current full node data per M13 ABI。
+Ordinary walking/standing completion publishes through `RenderDomain.update(...)` and reuses the generic M11 existing-node author surface；M14 defines no map-specific delta protocol。Initial load, collision, transfer, and reconnect still `replace(...)` a full baseline。WC receives current full node data per M13 ABI。
 
 ## 15. Map-owned Web Components
 

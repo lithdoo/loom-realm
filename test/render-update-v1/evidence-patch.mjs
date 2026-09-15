@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {
-  assertAccepted, assertFatal, baseline, chain, committedDomain, expectAtomicFatal,
-  expectOutboundAccepted, expectOutboundRejected, flatNodes, nestedData, node,
-  objectMembers, patch, snapshot,
+  assertAccepted, assertFatal, baseline, chain, committedDomain, connectedSender, expectAtomicFatal,
+  expectOutboundAccepted, expectOutboundRejected, flatNodes, nestedData, newStore, node,
+  objectMembers, patch, settle, snapshot,
 } from "./helpers/render-fixtures.mjs";
 
 const insert = (key, parentKey = null, beforeKey = null, children = []) => ({
@@ -20,6 +20,21 @@ const keys = (store, domainId = "d1") => {
 const apply = (store, ops, overrides = {}) => store.onPatch(patch(ops, overrides));
 const baseTree = () => baseline([node("root", [node("a"), node("b")], { old: "1" }, { old: 1 })]);
 const atomicReject = (ops, pattern, store = baseTree()) => expectAtomicFatal(store, () => apply(store, ops), pattern);
+
+async function authorUpdateReceived(update) {
+  const connected = await connectedSender();
+  const store = newStore();
+  assertAccepted(store.onDomains(connected.messages[0]));
+  assertAccepted(store.onSnapshot(connected.messages[1]));
+  connected.domain.update(update);
+  await settle();
+  const message = connected.messages.at(-1);
+  assert.equal(message.type, "render.patch");
+  assert.equal(message.baseRevision, 1);
+  assert.equal(message.revision, 2);
+  assertAccepted(store.onPatch(message));
+  return { store, message };
+}
 
 function exactDataBytes() {
   const overhead = Buffer.byteLength(JSON.stringify({ value: "" }));
@@ -86,7 +101,15 @@ export const patchEvidence = new Map([
 
   ["update-attrs-set", () => { const store = baseTree(); assertAccepted(apply(store, [update("root", { set: { fresh: "2" } })])); assert.equal(committedDomain(store).roots[0].attrs.fresh, "2"); }],
   ["update-attrs-remove", () => { const store = baseTree(); assertAccepted(apply(store, [update("root", { remove: ["old"] })])); assert.equal("old" in committedDomain(store).roots[0].attrs, false); }],
-  ["update-data-set", () => { const store = baseTree(); assertAccepted(apply(store, [update("root", undefined, { set: { fresh: 2 } })])); assert.equal(committedDomain(store).roots[0].data.fresh, 2); }],
+  ["update-data-set", async () => {
+    const store = baseTree();
+    assertAccepted(apply(store, [update("root", undefined, { set: { fresh: 2 } })]));
+    assert.equal(committedDomain(store).roots[0].data.fresh, 2);
+    const vertical = await authorUpdateReceived({ nodes: [{ key: "root", data: { set: { fresh: 2 } } }] });
+    assert.equal(vertical.message.ops[0].op, "update");
+    assert.equal(vertical.message.ops[0].data.set.fresh, 2);
+    assert.equal(committedDomain(vertical.store).roots[0].data.fresh, 2);
+  }],
   ["update-data-remove", () => { const store = baseTree(); assertAccepted(apply(store, [update("root", undefined, { remove: ["old"] })])); assert.equal("old" in committedDomain(store).roots[0].data, false); }],
   ["update-missing-attrs-and-data-rejected", () => expectOutboundRejected(patch([update("root")]), /empty update/)],
   ["update-empty-attrs-delta-rejected", () => expectOutboundRejected(patch([update("root", {})]), /Delta|empty|set/)],

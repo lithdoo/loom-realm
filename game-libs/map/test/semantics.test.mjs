@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AUTOTILE_QUARTERS, assertProjectable, assertRenderableTileId, autotileCorners, canMove, computeCamera, mapTilePassable, projectTileBlit, projectVisibleTiles, tableAt, tileVisualDepth, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord } from "../dist/semantics.js";
+import { AUTOTILE_QUARTERS, assertProjectable, assertRenderableTileId, autotileCorners, boundsContain, canMove, computeCamera, expandTileBounds, mapTilePassable, projectTileBlit, projectTilesInBounds, projectVisibleTiles, tableAt, tileVisualDepth, unionTileBounds, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -44,6 +44,42 @@ test("visible projection clamps one-tile overscan to map bounds", () => {
   const far = projectVisibleTiles(map, tileset, map.width * 32, map.height * 32);
   assert.equal(far.some((tile) => tile.x >= map.width || tile.y >= map.height), false);
   assert.ok(far.find((tile) => tile.x === map.width - 1 && tile.y === map.height - 1));
+});
+
+test("projectTilesInBounds is the only traversal and matches visible overscan", () => {
+  const { map: raw, tileset: rawTileset } = fixture();
+  const map = validateMapRecord(raw);
+  const tileset = validateTilesetRecord(rawTileset, 1);
+  const camera = computeCamera(map, 10, 8);
+  const visible = projectVisibleTiles(map, tileset, camera.cameraX, camera.cameraY);
+  const bounds = expandTileBounds(viewportTileBounds(map, camera.cameraX, camera.cameraY), 1, map);
+  assert.deepEqual(projectTilesInBounds(map, tileset, bounds), visible);
+  assert.equal(bounds.minTileX, Math.max(0, Math.floor(camera.cameraX / 32) - 1));
+});
+
+test("viewport union margin and clamp formulas are inclusive integer bounds", () => {
+  const { map: raw, tileset: rawTileset } = fixture();
+  const map = validateMapRecord(raw);
+  const tileset = validateTilesetRecord(rawTileset, 1);
+  const origin = viewportTileBounds(map, 0, 0);
+  assert.deepEqual(origin, { minTileX: 0, minTileY: 0, maxTileX: 19, maxTileY: 14 });
+  const unaligned = viewportTileBounds(map, 1, 1);
+  assert.deepEqual(unaligned, { minTileX: 0, minTileY: 0, maxTileX: 20, maxTileY: 15 });
+  const far = viewportTileBounds(map, map.width * 32, map.height * 32);
+  assert.equal(far.maxTileX, map.width - 1);
+  assert.equal(far.maxTileY, map.height - 1);
+  const expanded = expandTileBounds(origin, 4, map);
+  assert.deepEqual(expanded, { minTileX: 0, minTileY: 0, maxTileX: 23, maxTileY: 17 });
+  const source = viewportTileBounds(map, 16, 32);
+  const target = viewportTileBounds(map, 48, 32);
+  const union = unionTileBounds(source, target);
+  assert.equal(union.minTileX, Math.min(source.minTileX, target.minTileX));
+  assert.equal(union.maxTileX, Math.max(source.maxTileX, target.maxTileX));
+  assert.equal(boundsContain(expandTileBounds(union, 1, map), union), true);
+  assert.equal(boundsContain(origin, expandTileBounds(origin, 1, map)), false);
+  const tiles = projectTilesInBounds(map, tileset, origin);
+  assert.equal(tiles.every((tile) => tile.z === 0 || tile.z === 1 || tile.z === 2), true);
+  assert.ok(tiles[0].blit);
 });
 
 test("target camera overscan covers the previous step's source camera edge", () => {

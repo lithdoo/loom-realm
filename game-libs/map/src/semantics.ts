@@ -77,6 +77,13 @@ export interface VisibleTile {
   readonly blit: TileBlit;
 }
 
+export interface TileProjectionBounds {
+  readonly minTileX: number;
+  readonly minTileY: number;
+  readonly maxTileX: number;
+  readonly maxTileY: number;
+}
+
 const TILE_SIZE = 32;
 
 export const AUTOTILE_QUARTERS = [
@@ -328,26 +335,71 @@ export function assertProjectable(map: MapRecord, tileset: TilesetRecord): void 
   }
 }
 
+export function viewportTileBounds(map: MapRecord, cameraX: number, cameraY: number): TileProjectionBounds {
+  return Object.freeze({
+    minTileX: Math.max(0, Math.floor(cameraX / 32)),
+    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + 639) / 32)),
+    minTileY: Math.max(0, Math.floor(cameraY / 32)),
+    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + 479) / 32)),
+  });
+}
+
+export function expandTileBounds(
+  bounds: TileProjectionBounds,
+  margin: number,
+  map: MapRecord,
+): TileProjectionBounds {
+  return Object.freeze({
+    minTileX: Math.max(0, bounds.minTileX - margin),
+    maxTileX: Math.min(map.width - 1, bounds.maxTileX + margin),
+    minTileY: Math.max(0, bounds.minTileY - margin),
+    maxTileY: Math.min(map.height - 1, bounds.maxTileY + margin),
+  });
+}
+
+export function unionTileBounds(left: TileProjectionBounds, right: TileProjectionBounds): TileProjectionBounds {
+  return Object.freeze({
+    minTileX: Math.min(left.minTileX, right.minTileX),
+    maxTileX: Math.max(left.maxTileX, right.maxTileX),
+    minTileY: Math.min(left.minTileY, right.minTileY),
+    maxTileY: Math.max(left.maxTileY, right.maxTileY),
+  });
+}
+
+export function boundsContain(outer: TileProjectionBounds, inner: TileProjectionBounds): boolean {
+  return outer.minTileX <= inner.minTileX
+    && outer.maxTileX >= inner.maxTileX
+    && outer.minTileY <= inner.minTileY
+    && outer.maxTileY >= inner.maxTileY;
+}
+
+export function projectTilesInBounds(
+  map: MapRecord,
+  tileset: TilesetRecord,
+  bounds: TileProjectionBounds,
+): readonly VisibleTile[] {
+  const tiles: VisibleTile[] = [];
+  for (const z of [0, 1, 2] as const) {
+    for (let y = bounds.minTileY; y <= bounds.maxTileY; y += 1) {
+      for (let x = bounds.minTileX; x <= bounds.maxTileX; x += 1) {
+        const tileId = tableAt(map.data, x, y, z);
+        if (tileId === 0) continue;
+        assertRenderableTileId(tileId, tileset);
+        const blit = projectTileBlit(tileId, tileset);
+        const priority = tableAt(tileset.priorities, tileId);
+        const depth = tileVisualDepth(y, priority);
+        tiles.push(Object.freeze({ x, y, z, tileId, depth, blit }));
+      }
+    }
+  }
+  return Object.freeze(tiles);
+}
+
 export function projectVisibleTiles(
   map: MapRecord,
   tileset: TilesetRecord,
   cameraX: number,
   cameraY: number,
 ): readonly VisibleTile[] {
-  const overscan = 1;
-  const minX = Math.max(0, Math.floor(cameraX / 32) - overscan);
-  const maxX = Math.min(map.width - 1, Math.floor((cameraX + 639) / 32) + overscan);
-  const minY = Math.max(0, Math.floor(cameraY / 32) - overscan);
-  const maxY = Math.min(map.height - 1, Math.floor((cameraY + 479) / 32) + overscan);
-  const tiles: VisibleTile[] = [];
-  for (const z of [0, 1, 2] as const) for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
-    const tileId = tableAt(map.data, x, y, z);
-    if (tileId === 0) continue;
-    assertRenderableTileId(tileId, tileset);
-    const blit = projectTileBlit(tileId, tileset);
-    const priority = tableAt(tileset.priorities, tileId);
-    const depth = tileVisualDepth(y, priority);
-    tiles.push(Object.freeze({ x, y, z, tileId, depth, blit }));
-  }
-  return Object.freeze(tiles);
+  return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map));
 }

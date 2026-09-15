@@ -1,6 +1,6 @@
 # M11 / 02 — Render Publication
 
-> 状态：旧 executable subject **Implemented / Qualified**；ADR 0035 target **Accepted / Implementation Pending**
+> 状态：旧 executable subject **Implemented / Qualified**；本 implementation subject **Requalification Pending**
 > 阶段：M11 Render  
 > 落地顺序：02  
 > 最近复核：2026-09-15
@@ -10,7 +10,7 @@
 
 > **publication state 是 generation/carrier-local projection，不是第二份 business authority。**
 
-> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 已接受 existing-node author update 与下述 Patch publication target；当前实现/evidence 在代码变更前仍属于旧 subject。Render Update v1 wire schema不变。
+> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 的 existing-node author update 与下述 Patch publication 已实现。Render Update v1 wire schema不变。本 implementation subject 为 `Requalification Pending`，不得从本页推导新 subject 已 Closed。
 
 ---
 
