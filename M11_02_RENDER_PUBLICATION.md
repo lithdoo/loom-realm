@@ -1,14 +1,16 @@
 # M11 / 02 — Render Publication
 
-> 状态：**Implemented / Qualified**
+> 状态：旧 executable subject **Implemented / Qualified**；ADR 0035 target **Accepted / Implementation Pending**
 > 阶段：M11 Render  
 > 落地顺序：02  
-> 最近复核：2026-09-07  
+> 最近复核：2026-09-15
 > 前置：[M11 / 01](M11_01_SUBSYSTEM_RENDER_MANAGER.md)  
 > 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)  
 > 目标：把 Subsystem-owned desired Render state 投影到 current Data peer；只实现 Frozen Render Update v1 publication lifecycle。
 
 > **publication state 是 generation/carrier-local projection，不是第二份 business authority。**
+
+> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 已接受 existing-node author update 与下述 Patch publication target；当前实现/evidence 在代码变更前仍属于旧 subject。Render Update v1 wire schema不变。
 
 ---
 
@@ -152,15 +154,22 @@ close() local commit
 
 Foundation/Data 不保证取消已经开始的 `send()`。因此 close 前已经 started 的 send MAY 在 close 后才 resolve；若它成功，则其 emitted position逻辑上仍先于后续 Registry removal。close 不等待 send completion，也不把该 race 暴露给 author。
 
-`replace()` 不对应固定 Patch。publication 可基于 `lastEmittedRevision`：
+ADR 0035 后，author operation 到 ordinary publication 的选择固定为：
 
 ```text
-emit next Patch
-OR
-emit full Snapshot fallback
+replace(full authoritative state)
+→ Snapshot
+
+update(existing-node/zIndex authoritative delta)
+    Domain unbaselined or baseline Snapshot in-flight
+    → latest full Snapshot after the required barrier
+
+update(existing-node/zIndex authoritative delta)
+    Domain baselined at R with no state send in-flight
+    → RenderPatchV1 R→R+1
 ```
 
-第一版允许保守使用 Snapshot；Patch-vs-Snapshot heuristic 是 private optimization。
+若 state message 正在 in-flight，后续 state work 不预分配 revision，待成功 cursor 后 materialize。只有 bounded queue capacity coalescing 可以把多个尚未 started 的 authoritative work收敛为一个 latest Snapshot；ordinary update 不得任意降级为 Snapshot，否则会重新引入已确认的完整 retained-state 热路径。`replace()` 的 full Snapshot语义、fresh carrier recovery和 wire protocol均不变。
 
 ---
 
@@ -221,6 +230,23 @@ not-started desired authoritative changes coalesce to latest representable state
 Snapshot fallback
 Event drop before send starts under pressure
 ```
+
+ADR 0035 target 的满队列准入完整闭合为：
+
+```text
+incoming Event + pending Event exists
+→ drop oldest pending Event; append incoming Event
+
+incoming Event + no pending Event
+→ drop incoming Event
+
+incoming Registry/Snapshot/update
+→ drop oldest pending Event first
+→ if still full, coalesce same-Domain not-started state work to latest Snapshot
+→ invariant breach invalidates old peer; authoritative local state remains recoverable
+```
+
+该规则是现有 `RenderManager` private responsibility，不要求 generic admission queue/result abstraction。Retained Event 仍是同 Domain barrier；Event 被 drop 时 barrier 同时消失。
 
 禁止：
 
@@ -301,6 +327,8 @@ same-generation reconnect keeps emitted identity history
 old carrier cursor/pending output retired
 fresh-generation wire reset by sender-role fixture
 revision continuity + Snapshot fallback
+post-baseline ordinary author update emits existing Patch R→R+1
+baseline queued/in-flight update converges through latest Snapshot without invalid baseRevision
 revision exhaustion never wraps and rolls to one fresh private wire domainId
 business close starts no new Domain sends and discards pending/not-started Domain work
 already-started send settles before Registry removal ordering
@@ -308,6 +336,7 @@ Domain removal publication barrier
 no-carrier Event never crosses into future carrier
 prebaseline retained Event follows establishing Snapshot
 Event no replay / bounded drop / barrier semantics
+full-queue incoming Event oldest-drop/no-Event-drop behavior
 publication pressure never becomes author API error
 Data terminal keeps business Domains and does not fail Runtime/Frame
 outbound preflight prevents illegal v1 message

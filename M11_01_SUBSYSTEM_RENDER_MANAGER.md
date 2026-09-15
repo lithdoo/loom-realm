@@ -1,14 +1,17 @@
 # M11 / 01 — Subsystem RenderManager
 
-> 状态：**Implemented / Qualified**
+> 状态：旧 executable subject **Implemented / Qualified**；ADR 0035 target **Accepted / Implementation Pending**
 > 阶段：M11 Render  
 > 落地顺序：01  
-> 最近复核：2026-09-07  
+> 最近复核：2026-09-15
 > 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)  
 > 架构：[渲染系统](doc/10-architecture/rendering-system.md)  
+> Target correction：[ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md)
 > 目标：冻结 Subsystem-owned business Render Domain 的 exact author surface 与 local correctness；编码阶段只允许 private realization choices。
 
 > **M11/01 只建立 business Render authority。publication、Renderer replica、presentation 与 Content 均不属于本步。**
+
+> **Current notice：** ADR 0035 已接受下述 target surface，但 docs-only acceptance 不表示当前 package 已实现 `update()`。旧 executable subject 的历史 qualification 保留；实现进入 Current 分支时建立新 subject 并转为 `Requalification Pending`。
 
 ---
 
@@ -29,13 +32,14 @@ Subsystem 是 business Render authority。Main、Renderer、Frame、Data carrier
 
 ## 2. Minimal Exact Author Surface
 
-M11 root-export **只新增**：
+ADR 0035 target 的 M11 root exports 精确为：
 
 ```text
 RenderNode
 RenderDomainState
 RenderEvent
 RenderDomain
+RenderDomainUpdate
 ```
 
 以及 `SubsystemScope.createRenderDomain(...)`。
@@ -43,8 +47,9 @@ RenderDomain
 Exact shape：
 
 ```ts
-// implementation-private declaration dependency; not a root re-export
+// implementation-private declaration dependencies; not root re-exports
 import type { RenderEventV1, RenderNodeV1 } from "@loomrealm/data";
+import type { JsonValue } from "@loomrealm/wire";
 
 export type RenderNode = RenderNodeV1;
 
@@ -59,8 +64,30 @@ export interface RenderEvent {
   readonly data: RenderEventV1["data"];
 }
 
+interface RenderStringDelta {
+  readonly set?: Readonly<Record<string, string>>;
+  readonly remove?: readonly string[];
+}
+
+interface RenderDataDelta {
+  readonly set?: Readonly<Record<string, JsonValue>>;
+  readonly remove?: readonly string[];
+}
+
+interface RenderNodeUpdate {
+  readonly key: string;
+  readonly attrs?: RenderStringDelta;
+  readonly data?: RenderDataDelta;
+}
+
+export interface RenderDomainUpdate {
+  readonly zIndex?: number;
+  readonly nodes?: readonly RenderNodeUpdate[];
+}
+
 export interface RenderDomain {
   replace(state: RenderDomainState): void;
+  update(update: RenderDomainUpdate): void;
   emit(event: RenderEvent): void;
   close(): void;
 }
@@ -72,7 +99,9 @@ interface SubsystemScope {
 }
 ```
 
-不 root-export supporting aliases 只为对称性服务。`RenderNode` 直接投影 Frozen `RenderNodeV1`，不复制第二套 recursive tree schema。`RenderManager` 是 SDK internal implementation，不是 author service。
+`RenderStringDelta`、`RenderDataDelta`、`RenderNodeUpdate` 不从 package root 导出；不得为对称性增加 supporting root aliases。`RenderNode` 直接投影 Frozen `RenderNodeV1`，不复制第二套 recursive tree schema。`RenderManager` 是 SDK internal implementation，不是 author service。
+
+`update()` 只修改 Domain `zIndex` 与已存在 node 的 attrs/data 顶层 members；node key/tag/children 和 tree structure 不可修改。结构变化继续使用 `replace()`。zIndex-only update 合法，因为 `zIndex` 已是 Domain-level authoritative state；删除它会留下只能靠完整 roots replace 表达的能力缺口。完整 input shape、presence、4096 node-op 和 representability规则以 ADR 0035 与 frozen implementation specification为准。
 
 Author 不提供、不观察、不管理：
 
@@ -95,6 +124,7 @@ carrier identity
 ```text
 createRenderDomain
 replace
+update
 emit
 close
 ```
@@ -128,7 +158,7 @@ retain caller-owned mutable object by reference
 
 任何成功 local commit 都必须能无损表示为合法 Frozen Render Update v1 application state/event。
 
-因此 `createRenderDomain` / `replace` / `emit` 在 local commit 前验证相应：
+因此 `createRenderDomain` / `replace` / `update` / `emit` 在 local commit 前验证相应：
 
 ```text
 plain JSON representation
@@ -159,6 +189,7 @@ hard-limit overflow                                  → RangeError
 ```text
 invalid create  → no Domain created; no publication caused by this call
 invalid replace → previous authoritative state unchanged; no publication caused by this call
+invalid update  → previous authoritative state/work unchanged; no publication caused by this call
 invalid emit    → no Event intent queued/sent
 ```
 
@@ -194,7 +225,7 @@ Data retire   != Domain destroy
 idempotent
 atomically removes the Domain from RenderManager live business Registry
 atomically ends the business Domain lifetime
-all later replace/emit → TypeError
+all later replace/update/emit → TypeError
 Runtime terminal → eventually closes every still-live Domain
 ```
 
@@ -254,6 +285,7 @@ RenderDomain handles
 Domain records
 minimal tree/index validation helpers
 minimal detached immutable authoritative snapshots
+minimal existing-node COW candidate helpers
 private domainId minting
 ```
 
@@ -280,12 +312,13 @@ cross-Domain transaction framework
 M11/01 必须证明：
 
 ```text
-exact four Render root exports + createRenderDomain compile
+exact five Render root exports + createRenderDomain compile
 all author operations synchronous local-only
 caller-owned values detached before commit
 live Domain count bound
-create/replace validation local-atomic
-replace/emit after close reject; close idempotent
+create/replace/update validation local-atomic
+zIndex-only and existing-node attrs/data update accepted; structural update rejected
+replace/update/emit after close reject; close idempotent
 close immediately removes Domain from live desired business Registry
 SDK domainId valid and never reused within Runtime instance
 Node identity/tag/one-shot invariants
@@ -295,4 +328,4 @@ Runtime cleanup
 Business Definition depends only on @loomrealm/subsystem
 ```
 
-编码阶段不得再讨论 public author shape、lifetime、identity、validation/error model；除非证明本冻结文档与 Frozen Render v1 存在 correctness contradiction。
+ADR 0035 已按真实 M14 workload evidence 显式重开并重新冻结 target public author shape。编码阶段不得再次讨论 public shape、lifetime、identity、validation/error model；除非证明 ADR 0035、本冻结文档与 Frozen Render v1 存在 correctness contradiction。

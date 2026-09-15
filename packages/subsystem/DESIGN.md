@@ -1,15 +1,18 @@
 # `@loomrealm/subsystem`
 
-> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 Render Implemented / Qualified**
-> 阶段：M11 Render closed / M12 Content pending
-> 最近复核：2026-09-07  
+> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 old subject Closed；ADR 0035 target Accepted / Implementation Pending**
+> 阶段：M11 accepted capability evolution / preimplementation
+> 最近复核：2026-09-15
 > 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md) · [Rendering System](../../doc/10-architecture/rendering-system.md)  
 > 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md) · [Render Update v1](../../doc/15-contracts/render-update-v1.md)  
 > Input correction：[ADR 0029](../../doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > Exact M10 surface：[M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md)  
 > Exact M11 surface：[M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md)  
+> M11 correction：[ADR 0035](../../doc/decisions/0035-render-domain-existing-node-update.md)
 
 > **业务只表达业务；SDK把 Frozen protocol 投影为窄 author capability。M11 不新增 Platform Port、service locator、public RenderManager、EventBus 或第二份 Frame/Input/Render authority。**
+
+> **Current notice：** ADR 0035 docs-only acceptance冻结了 target surface，但当前 package 在实现 commit 前仍是旧 executable subject。本文的 target declaration不得被解读为代码已落地；PR 2 进入 Current 时转为 `Requalification Pending`。
 
 ---
 
@@ -101,6 +104,7 @@ RenderNode
 RenderDomainState
 RenderEvent
 RenderDomain
+RenderDomainUpdate
 ```
 
 以及：
@@ -109,7 +113,7 @@ RenderDomain
 SubsystemScope.createRenderDomain(initialState)
 ```
 
-不 root-export `RenderManager`、protocol envelope、domainId/generation/revision、Snapshot/Patch、supporting JSON aliases或 presentation types。
+不 root-export `RenderManager`、protocol envelope、domainId/generation/revision、Snapshot/Patch、`RenderStringDelta` / `RenderDataDelta` / `RenderNodeUpdate` supporting declarations、其他 JSON aliases或 presentation types。
 
 Host surface保持：
 
@@ -370,7 +374,7 @@ M11 RenderManager同样不参与 Data acquire/reconnect policy；它只接收 cu
 
 ---
 
-## 15. Render / Content Targets — Implemented M11
+## 15. Render / Content Targets — M11 Current + Accepted Target
 
 Exact M11 author declarations以 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为唯一详细事实源。概念形状：
 
@@ -391,6 +395,7 @@ export interface RenderEvent {
 
 export interface RenderDomain {
   replace(state: RenderDomainState): void;
+  update(update: RenderDomainUpdate): void;
   emit(event: RenderEvent): void;
   close(): void;
 }
@@ -402,7 +407,7 @@ export interface RenderDomain {
 createRenderDomain(initialState: RenderDomainState): RenderDomain;
 ```
 
-所有 author operations 是 synchronous local-only：
+`RenderDomainUpdate` 的 exact nested declaration以 M11/01 为准；只支持 Domain zIndex 与 existing-node attrs/data 顶层 members，结构变化继续 `replace()`。所有 author operations 是 synchronous local-only：
 
 ```text
 validate Frozen Render v1 representability
@@ -434,7 +439,7 @@ Frame close/suspend != Domain destroy/hide
 Data retire          != business Domain destroy
 ```
 
-`close()` idempotent；close 后 replace/emit → TypeError。`emit` 要求 targetKey 当前存在于 business authoritative state。
+`close()` idempotent；close 后 replace/update/emit → TypeError。`emit` 要求 targetKey 当前存在于 business authoritative state。
 
 Fresh Data：
 
@@ -443,6 +448,8 @@ render.domains(current Registry)
 → fresh Snapshot each current Domain
 → Patch/Snapshot/Event
 ```
+
+Baseline 后 ordinary `update()` 固定映射为 existing `RenderPatchV1`；baseline queued/in-flight 时收敛为 latest Snapshot。`replace()` 继续使用完整 Snapshot。满队列 Event drop、authoritative coalescing、in-flight、failure、rollover 的唯一语义见 M11/02；不得新增 generic admission/replication abstraction。
 
 no current Data 的 Event不带到 future carrier；current unbaselined carrier MAY bounded-pend Event behind establishing Snapshot；carrier loss/Domain removal丢弃 pending Event。Event不 replay。
 
@@ -514,7 +521,7 @@ Qualification见根目录 `M10_05_QUALIFICATION_CLOSURE.md`。完整 Hostra/PWA 
 
 ---
 
-## 18. M11 Implementation Freeze
+## 18. M11 Implementation Freeze / ADR 0035 Correction
 
 M11 coding 只允许选择：
 
@@ -522,10 +529,10 @@ M11 coding 只允许选择：
 private files/classes/data structures
 private domainId representation meeting frozen invariants
 finite queue capacities within protocol bounds
-Patch-vs-Snapshot heuristic
+replace Snapshot / post-baseline update Patch 的 private materialization mechanics
 internal test wiring
 ```
 
-不得重新设计 root Render exports、sync author semantics、validation/error model、Domain/Node lifetime/identity、Data publication lifecycle。只有证明 Frozen Render v1 或 M11 implementation plan 存在 correctness contradiction 才按治理流程重新打开设计。
+ADR 0035 已按真实 M14 workload evidence显式修正并重新冻结 root Render exports和 update publication。实现不得再次设计 public surface、sync author semantics、validation/error model、Domain/Node lifetime/identity或 Data publication lifecycle。只有证明 Frozen Render v1、ADR 0035 或 implementation specification 存在 correctness contradiction 才按治理流程重新打开设计。
 
 Qualification见根目录 `M11_05_QUALIFICATION_CLOSURE.md`。

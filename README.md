@@ -39,6 +39,8 @@ Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
 - [ADR 0032：Game Library / Example Boundary](./doc/decisions/0032-game-library-example-boundary.md)
 - [ADR 0034：Hostra owns Desktop Electron composition](./doc/decisions/0034-hostra-owned-desktop-composition.md)
 - [ADR 0033：historical direct-Electron Runner compatibility](./doc/decisions/0033-electron-hostra-run-as-node.md)
+- [ADR 0035：RenderDomain existing-node authoritative update](./doc/decisions/0035-render-domain-existing-node-update.md)
+- [Render movement latency capability evolution](./RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md)
 - [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
 - [Testing Strategy](./doc/30-implementation/testing-strategy.md)
 - [M14 qualification record](./doc/30-implementation/m14-qualification.md)
@@ -65,6 +67,8 @@ M17 PWA full E2E                            pending
 
 M14/M15 formal evidence lives in [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md) and [`m15-qualification.md`](./doc/30-implementation/m15-qualification.md)。
 
+> **Accepted evolution notice（2026-09-15）：** 上表 Closed 仍指向当前旧 executable subjects。ADR 0035 已接受 `RenderDomain.update()` target，但 docs-only acceptance 不声称该 API 已实现；第一个 executable/qualification-input change 将使对应 M11/M14/M15 新 subject进入 `Requalification Pending`。最终必须在同一 subject SHA 上按 M11 → M14 → M15 重新关闭，之后才恢复无条件 Closed 并继续 M16。
+
 M15 的 Main/Data/Renderer/Input/Presentation/game logical intent保持冻结；此前 standalone Electron implementation作为历史/迁移证据保留。Canonical physical host已经由 ADR 0034纠正为：
 
 ```text
@@ -87,9 +91,9 @@ shutdown grace 1000 ms
 
 当前 M15 physical SSOT 是 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)。ADR 0033只保留 historical direct-Electron compatibility relevance。
 
-M15 is Closed on the frozen Hostra subject. Only a real Hostra baseline or frozen LoomRealm contract contradiction may reopen the physical design。
+M15 old executable subject is Closed on the frozen Hostra baseline。ADR 0035 downstream implementation will require a new evidence subject but does not reopen physical design；only a real Hostra baseline or frozen LoomRealm contract contradiction may do that。
 
-Last formally closed milestone gate：
+Last formally closed old-subject milestone gate：
 
 ```text
 npm run test:m15

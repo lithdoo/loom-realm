@@ -1,9 +1,9 @@
 # M11 / 05 — Qualification and Closure
 
-> 状态：**Implemented / Qualified / Closed**
+> 状态：旧 executable subject **Implemented / Qualified / Closed**；ADR 0035 target **Accepted / Implementation Pending**
 > 阶段：M11 Render  
 > 落地顺序：05  
-> 最近复核：2026-09-07  
+> 最近复核：2026-09-15
 > 前置：[M11 / 01](M11_01_SUBSYSTEM_RENDER_MANAGER.md) → [M11 / 02](M11_02_RENDER_PUBLICATION.md) → [M11 / 03](M11_03_RENDERER_STORE.md) → [M11 / 04](M11_04_VERTICAL_INTEGRATION.md)  
 > 正式协议：[Render Update v1](doc/15-contracts/render-update-v1.md)  
 > Conformance：[Render Update v1 Conformance](doc/15-contracts/render-update-conformance-v1.md)  
@@ -11,6 +11,8 @@
 > 目标：冻结 M11 唯一 implementation/qualification closure；实现阶段不得以便利重新设计 authority、API、lifetime、error 或 conformance shape。
 
 > **M11 closure = Subsystem-owned business Render Domains 经 current generation/current Data publication为 Registry + per-Domain authoritative commits，Renderer只维护 current replica；Frame/Data 不取得 Render ownership，fresh carrier以 fresh baseline恢复，transient Event不 replay。**
+
+> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 已重开并冻结 target author capability，但该 Accepted docs-only correction 不声称 `update()` 已实现。实现进入 Current 后建立新 qualification subject；以下 closure gate 对新 target 全量重跑，旧 evidence 不能证明新实现 Closed。
 
 2026-09-07 最终复核确认 production architecture仍成立；Render representation validation、formal role evidence、hard-limit matrix 与 fail-closed catalog 已按固定 checklist 补齐并重新通过 closure gate。
 
@@ -24,6 +26,7 @@
 M10 fixtureSetRevision 2 qualification = pass
 M10 = Implemented / Qualified / Closed
 M11 implementation plan = Frozen / Ready
+ADR 0035 target correction = Accepted / Implementation Pending
 ```
 
 M11 不重新打开 M10 authority、Input 或 Data lifecycle 设计。
@@ -36,9 +39,10 @@ M11 不重新打开 M10 authority、Input 或 Data lifecycle 设计。
 
 ```text
 @loomrealm/subsystem
-    exact RenderNode / RenderDomainState / RenderEvent / RenderDomain root surface
+    exact RenderNode / RenderDomainState / RenderEvent / RenderDomain / RenderDomainUpdate root surface
     SubsystemScope.createRenderDomain
     synchronous validate → detach → local commit
+    existing-node attrs/data + Domain zIndex update; no structural author mutation
     business Domain authority / identity / lifecycle
 
 existing @loomrealm/data
@@ -48,6 +52,7 @@ existing @loomrealm/data
     one RenderManager authority responsibility
     bounded generation/current-carrier publication responsibility
     Registry + Snapshot/Patch/Event
+    post-baseline author update → existing RenderPatchV1
 
 @loomrealm/renderer
     internal replica state on existing Data slot
@@ -104,6 +109,7 @@ transport role 包含 Hostra/PWA application-trace equivalence，留到 M16。
 ```text
 business Render authority only in Subsystem
 exact author API is synchronous local-only
+existing-node/zIndex update is detached, representable and local-atomic
 successful author values always representable by Frozen Render v1
 publication absence/backpressure never becomes author API error
 Frame close != Domain destroy
@@ -119,10 +125,12 @@ fresh carrier starts Registry + per-Domain Snapshot baseline
 Domain/Node emitted one-shot history holds within wire lifetime
 live Node key keeps stable tag
 Patch continuity is carrier-local R→R+1
+ordinary post-baseline author update materializes as Patch; prebaseline/in-flight update converges through Snapshot
 revision never wraps; exhaustion rolls one still-live business Domain to one fresh private wire domainId
 Snapshot/Patch commit atomically
 Event ordered/transient/no replay
 prebaseline retained Event follows establishing Snapshot
+full-queue incoming Event and authoritative work have one deterministic bounded admission policy
 old carrier cannot mutate current replica
 Renderer replica state remains internal
 Render stream failure != Runtime terminal / Frame unwind
@@ -306,23 +314,23 @@ Node 20 + Node 24 必须执行同一 root gate并通过。
 本轮只允许改变：
 
 ```text
-private validation helpers inside existing Data/Subsystem responsibilities
+private validation/COW helpers inside existing Data/Subsystem responsibilities
 private class/function/file names
 whether internal responsibilities share one object or use small private records/helpers
 private Map/tree/index representation
 private domainId mint/current-wire-id representation meeting frozen invariants
 finite local queue capacities within protocol bounds
-Patch-vs-Snapshot heuristic
+replace Snapshot / post-baseline update Patch materialization mechanics frozen by ADR 0035
 internal test/observation wiring
 qualification evidence tables keyed by role+fixture
 M11-specific hard-limit test data generators
 ```
 
-不得重新讨论：
+ADR 0035 已显式修正旧 exact author surface 和 sender realization。Target 实现期间不得重新讨论：
 
 ```text
 Render authority owner
-exact Subsystem author API / sync semantics
+exact ADR 0035 Subsystem author API / sync semantics
 business/wire/carrier lifetime relationship
 identity one-shot rules
 validation/error classification
@@ -340,12 +348,12 @@ qualification/root-gate shape
 
 ## 10. Closure Claim
 
-最终固定状态：
+旧 executable subject 的当前固定状态保持：
 
 ```text
 M11 Render = Implemented / Qualified / Closed
 ```
 
-M11 Closed 后进入 M12 Content；Render transport-equivalence claim仍留到 M16。
+ADR 0035 实现进入 Current 后，状态必须先变为 `Requalification Pending`；只有 `npm run test:m11` 在同一最终 subject 上完成 local + hosted Node 20/24 PASS，且本文件新增的 update/publication/queue invariants 全部有判别性 evidence，才恢复上述 Closed。Render transport-equivalence claim仍留到 M16。
 
 Current evidence record见 [M11 qualification](doc/30-implementation/m11-qualification.md)，独立 CI 为 `.github/workflows/m11.yml`。

@@ -6,6 +6,8 @@
 > Merge gate: every required PR check on the final head MUST complete successfully.  
 > This review does **not** claim M8/M10/M11/M12 capability completion.
 
+> **2026-09-15 M11 governance notice：** [ADR 0035](../../doc/decisions/0035-render-domain-existing-node-update.md) 已接受 `RenderDomain.update()` target capability；该 docs-only acceptance 不改变本文件的历史 M4 verdict，也不声称当前 package 已实现新 surface。PR 2 实现进入 Current 后必须在本文件追加独立 M11 implementation review，覆盖 exact author surface、local atomicity、Patch publication、bounded queue/in-flight recovery、Renderer regression 与 abstraction budget，并在同一最终 subject 完成 M11 requalification 后才能恢复 Closed。
+
 ## Review standard
 
 The implementation is accepted only when it is simultaneously **simple, elegant, and closed**.

@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-11
+> 最近复核：2026-09-15
 
 ADR记录“为什么”；Current可实现事实以 architecture / formal contract / current milestone SSOT / qualification为准。历史 ADR不得覆盖后续 accepted correction。
 
@@ -45,6 +45,7 @@ ADR记录“为什么”；Current可实现事实以 architecture / formal contr
 32. [ADR 0032：Framework / Game Library / Example Boundary](./0032-game-library-example-boundary.md)
 33. [ADR 0033：Electron-hosted Hostra Runner uses the current executable in Node mode](./0033-electron-hostra-run-as-node.md)
 34. [ADR 0034：Hostra owns Desktop Electron composition; LoomRealm runs as HOSTRA_SUBCMD](./0034-hostra-owned-desktop-composition.md)
+35. [ADR 0035：RenderDomain existing-node authoritative update](./0035-render-domain-existing-node-update.md)
 
 ---
 
@@ -94,9 +95,18 @@ ADR 0034
     → LoomRealm RuntimeHosting owns Runner beneath that child
     → Hostra RPC remains host-control only
     → direct-Electron M15 topology becomes historical/migration evidence
+
+ADR 0035
+    accepted M11 author-capability correction
+    → RenderDomain.update(existing-node/zIndex authoritative delta)
+    → existing RenderPatchV1 publication; no wire v2
+    → old executable subject remains historical Closed until implementation changes
+    → new M11/M14/M15 subject requires same-SHA requalification
 ```
 
 ADR0033 remains valid as a conditional RuntimeHosting fact；ADR0034 supersedes only the assumption that canonical M15 LoomRealm Desktop itself is the Electron composition process。
+
+ADR0035 partially supersedes only M11/01 exact `replace/emit/close` author-surface freeze and M11/02 sender-realization choice。It does not supersede ADR0022 wire semantics、ADR0032 ownership or ADR0034 physical composition；Accepted docs do not claim `update()` is already implemented。
 
 ---
 
@@ -143,6 +153,7 @@ ADR 0016
 → ADR 0028 / M9 physical Data
 → ADR 0029 / M10 Input closure
 → M11 Render replication closure
+→ ADR 0035 accepted existing-node author update correction
 → ADR 0031
 → Web Presentation Config v1 + Web Presentation API v1
 → M13 Web Presentation

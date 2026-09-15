@@ -12,6 +12,8 @@
 > reconnect/old-stream/Runtime/Frame/Domain removal proof 已接入共享的真实 Desktop/Hostra vertical；
 > application bytes、global JSON depth、zIndex 的 outbound/inbound matrix cells 已补齐。
 
+> **2026-09-15 supersession notice：** 本页 `Closed / Requalified` 只属于旧 executable subject。[ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 已接受新的 `RenderDomain.update()` target，但 docs-only acceptance 不构成实现证据；PR 2 后必须针对最终统一 subject 追加新评审并重新运行 M11 root gate。本页旧 checklist 仍是 retained regression，不得用来推导新 subject 已 Closed。
+
 本评审不重新设计 M11，不修改 Frozen Render Update v1 authority、wire schema、lifetime、revision、Event 或 failure semantics。Production architecture 仍成立；评审发现的 **Render representation validation 实现闭环** 与 **formal qualification evidence 真实性闭环** 已按本文固定计划修复。
 
 因此当前准确状态为：
@@ -551,7 +553,7 @@ M11 claims sender + receiver only
 M16 owns transport equivalence
 ```
 
-因此本轮属于 implementation correctness + qualification evidence correction，不需要新协议版本，也不需要为 Frozen semantic change新增 ADR。
+因此 2026-09-07 本轮属于 implementation correctness + qualification evidence correction，不需要新协议版本，也不需要为当时未改变的 Frozen semantic新增 ADR。该历史判断不覆盖 2026-09-15 已 Accepted 的 ADR 0035 author-surface correction；ADR 0035 仍不创建新 wire protocol version。
 
 如果修复过程中发现必须改变上述任一 Frozen fact，必须停止本计划并按文档治理显式 reopen；不得在测试代码中暗改语义。
 

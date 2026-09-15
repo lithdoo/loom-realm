@@ -1,11 +1,13 @@
 # M11 Render Qualification
 
-> 状态：**Implemented / Qualified / Closed**
-> 日期：2026-09-07
+> 状态：旧 executable subject **Implemented / Qualified / Closed**；ADR 0035 target **Accepted / Implementation Pending**
+> 日期：2026-09-15
 > 规范入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 > 最终评审：[M11 Render 最终闭环评审结论](./m11-final-closure-review.md)
 > 协议：`loomrealm.render-update / 1`
 > Fixture：`fixtureSetRevision = 1`
+
+> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 是 docs-only accepted correction；本页现有 PASS 只证明旧 executable subject，不证明 `RenderDomain.update()` 已实现或 Qualified。PR 2 进入 Current 后，本页必须先标记 `Requalification Pending`，最终 evidence 必须记录统一 implementation subject SHA。
 
 M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并重新通过最终闭环评审。
 
@@ -50,6 +52,20 @@ JSON depth preflight；修复仅位于现有 private profile codec，没有增�
 
 不得为本次修复引入新的 Render authority、Runtime/Session/Connection abstraction、generic validator service、scenario DSL 或 conformance framework。
 
+ADR 0035 新 subject 还必须增加判别性 evidence：
+
+```text
+exact five Render root exports including RenderDomainUpdate
+update existing-node attrs/data and Domain zIndex local-atomic validation
+zIndex-only Patch and 4096/4097 update-op boundaries
+prebaseline / baseline-in-flight / post-baseline update publication
+full-queue incoming Event oldest-drop / no-Event incoming-drop
+authoritative coalescing, send failure, reconnect and revision rollover
+Renderer update-only COW result equivalence and per-op hard-limit atomicity
+```
+
+这些项目扩展现有 M11 sender/receiver/root gate，不创建第二个 qualification framework。最终 `npm run test:m11` 必须在 Node 20 + Node 24 对同一 subject SHA 通过。
+
 ## Implemented Boundaries Retained
 
 ```text
@@ -68,7 +84,7 @@ JSON depth preflight；修复仅位于现有 private profile codec，没有增�
     no public Render Store/subscription API
 ```
 
-Sender v1 继续使用 Frozen v1 允许的 full-Snapshot fallback，不引入 diff/reconciler。Renderer Receiver 继续实现完整 Frozen Patch semantics。
+旧 sender subject 使用 Frozen v1 允许的 full-Snapshot fallback。ADR 0035 target 中 `replace()` 与 fresh recovery 继续 full Snapshot；ordinary post-baseline `update()` 固定使用 existing Patch，baseline queued/in-flight 与 bounded capacity coalescing才使用 latest Snapshot。仍不引入 diff/reconciler，Renderer Receiver 继续实现完整 Frozen Patch semantics。
 
 ## Vertical Evidence Retained
 

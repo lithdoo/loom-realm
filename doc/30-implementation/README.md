@@ -2,10 +2,10 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M15 Qualified / Closed  
+> 稳定程度：旧 executable subjects M1–M15 Qualified / Closed；ADR 0035 evolution Accepted / Implementation Pending
 > 主要定义：current implementation fact-source、delivery route、qualification entry points  
-> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-12
+> 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0035](../decisions/0035-render-domain-existing-node-update.md)
+> 最近复核：2026-09-15
 
 实施层只落地 current architecture/contracts；不反向创造 authority、lifecycle、recovery 或 framework abstraction。精确 milestone closure由 `phase-1-delivery-plan.md` 与对应 qualification record决定。
 
@@ -27,6 +27,7 @@ M15 → m15-qualification.md
 - [M14 Map Game qualification](./m14-qualification.md) — M14 formal status/evidence authority；
 - [M15 Desktop qualification](./m15-qualification.md) — current Hostra-owned M15 evidence ledger；
 - [ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md) + root [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md) — current M15 physical SSOT。
+- [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) + root [`RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md`](https://github.com/lithdoo/loom-realm/blob/main/RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md) — accepted M11 capability evolution and frozen implementation/qualification route。
 
 Historical direct-Electron M15 evidence可作为 migration/regression oracle，但不拥有 current closure claim。
 
@@ -62,6 +63,8 @@ npm run test:m15
 
 M14/M15 implementation/consumer/physical semantics remain frozen；formal status only follows the designated qualification records。
 
+> **Accepted evolution notice：** 上表 Closed 只描述当前旧 executable subjects；ADR 0035 docs-only acceptance不声称 `RenderDomain.update()` 已实现。第一个 executable/qualification-input change使受影响的 M11/M14/M15新 subject转为 `Requalification Pending`；最终在同一 SHA 上按 M11 → M14 → M15重新关闭。
+
 ---
 
 ## 3. Current Phase Route
@@ -78,7 +81,7 @@ M16 PWA Runtime                            Pending
 M17 PWA Full E2E / Equivalence             Pending
 ```
 
-Next implementable milestone is M16. Do not reopen M14/M15 without a real contradiction against the frozen contracts or Hostra baseline。
+ADR 0035 capability evolution 作为 M16 前的 accepted cross-milestone correction先行；它保持 M14 ownership 与 M15 physical design冻结，只重新 qualification downstream executable subjects。该 evolution重新 Closed 后，next implementable milestone恢复为 M16。Do not reopen M14 ownership/M15 physical design without a real contradiction against the frozen contracts or Hostra baseline。
 
 ---
 
