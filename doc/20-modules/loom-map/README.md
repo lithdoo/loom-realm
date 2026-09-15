@@ -132,7 +132,7 @@ non-repeat Arrow key down
 → passability
 → x/y
 → camera
-→ full RenderDomain.replace(...)
+→ RenderDomain.update(...) for ordinary movement; replace(...) for load/collision/transfer
 ```
 
 Blocked movement changes facing but not position。No EventQueue、game-loop Scheduler、PlayerController or MovementManager is introduced。
@@ -186,7 +186,7 @@ lr-map-view
 
 View data carries current map/camera/resource/visible-tile facts。Sprite data carries current world/screen/direction/resource facts。
 
-Runtime uses full-state `RenderDomain.replace(...)`。M14 defines no map delta protocol。
+Ordinary walking reuses M11 `RenderDomain.update(...)`；M14 defines no map-specific delta protocol。Load, collision, transfer, and reconnect still `replace(...)`。
 
 ## Presentation
 

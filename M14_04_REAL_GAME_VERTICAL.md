@@ -71,7 +71,7 @@ ArrowRight down repeat=false
 → remains (11,8), facing 6/right
 ```
 
-The movement handler follows M14/02 synchronous ordering and finishes authoritative `RenderDomain.replace(...)` before returning。`keyup`、repeat、timer或 keyboard.state polling are not substitutes。
+The movement handler follows M14/02 synchronous ordering and finishes authoritative `RenderDomain.update(...)` for ordinary movement, or `replace(...)` for collision/transfer, before returning。`keyup`、repeat、timer或 keyboard.state polling are not substitutes。
 
 ## 3. Content / Table evidence
 
