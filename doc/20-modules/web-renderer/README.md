@@ -1,11 +1,12 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient / M13 Web Presentation **Implemented + Qualified**
-> 稳定程度：M13 **Implemented / Qualified / Closed**
+> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient / M13 Web Presentation **historical Implemented + Qualified**；revised four-child `/1` / Viewport **Not Implemented / Docs Freeze HOLD**  
+> 稳定程度：M13 **Implemented / Qualified / Closed**（仅历史 executable subject）；Viewport 是待实施的独立能力，不继承 M13 PASS  
 > 主要定义：Renderer currentness、per-subsystem Render Store、trusted ResourceClient、M13 package-private reevaluation + Projector placement  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  
-> 最近复核：2026-09-09
+> Viewport 候选：[修订后 Profile `/1`](../../15-contracts/renderer-data-profile-v1.md) · [Viewport child](../../15-contracts/viewport-state-v1.md) · [Data 精确增量](../../../packages/data/VIEWPORT_V1_IMPLEMENTATION_DELTA.md) · [唯一 Core ledger](../../30-implementation/viewport-profile-v1-qualification.md)  
+> 最近复核：2026-09-16（仅投影 Viewport sender 与产品 source；M13 冻结正文保留）
 
 ---
 
@@ -34,6 +35,8 @@ concrete Renderer Window composition
     → window.onload
     → start presentation
 ```
+
+**修订后 `/1` 待实施的最小附加 seam（非上述历史已实现结构）：** current `RendererDataPeer.viewport.sendState(ViewportStateV1)` 使用同一个 Data reader/writer；trusted Renderer/Product physical composition 只指定一个稳定 logical presentation surface，当前 Desktop/PWA 选 document layout viewport，并以 `Window.innerWidth/innerHeight` 的 CSS logical floor 尺寸供给有界 latest publisher。首次合法样本、resize/恢复、source replacement、carrier replacement按[Viewport child](../../15-contracts/viewport-state-v1.md) fencing 与 fresh baseline；无合法样本不造默认。Sender 不改变 Main authority，不建立新连接、第二 reader/writer、InputTarget bypass、M13 trigger 或 Map policy。产品端一致构建由 [rollout ledger](../../30-implementation/viewport-profile-v1-qualification.md) 管理，不能从同一个 `/1` 字符串判断旧新 binary。
 
 M13复用现有 authority/currentness facts；DOM/WC existence不 mint authority。
 
@@ -72,6 +75,8 @@ Store facts ──────┘
 Failed Store mutation / RenderEvent → no projection effect。Business不可订阅。
 
 Implementation可同步或 bounded/coalesced local scheduling；不得新增 EventBus/public observer/topology registry。
+
+Viewport update **不增加第三类 M13 reevaluation source**。只有业务据此通过既有 RenderDomain 提交成功并抵达 current Store，M13 才按 B 触发既有路径。
 
 ---
 
@@ -248,3 +253,5 @@ M13_01_WEB_PRESENTATION_BOOTSTRAP.md
 Real Chromium必须覆盖 Session/DataAuthority/generation transitions、per-subsystem reconnect、Custom Element lifecycle、body ordering、unknown-tag zero-mutation preflight、real M12 resource bytes与 Window teardown。
 
 设计已冻结；只有 implementation correctness contradiction 或 real consumer failure允许 reopen。
+
+**本节 Frozen/Closed 仅指 M13 既有设计及旧资格，不包括修订后四-child Profile `/1` 或 Viewport。** 后者的实施顺序、cohort、fixture revision3 和受影响回归以[唯一 Core ledger](../../30-implementation/viewport-profile-v1-qualification.md)为准。
