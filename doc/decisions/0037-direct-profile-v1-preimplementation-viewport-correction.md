@@ -1,6 +1,6 @@
 # ADR 0037 — 首次发布前直接修正 Renderer Data Profile v1
 
-> 状态：**Accepted / preimplementation design correction；兼容性核查与 Docs Freeze 尚未签署**  
+> 状态：**Accepted / preimplementation design correction；npm consumer 项已按项目负责人确认解除，其他兼容性与 Docs Freeze 尚未签署**  
 > 日期：2026-09-16  
 > 更新：[ADR0036](./0036-viewport-state-and-renderer-data-profile-v2.md) 的「必须另建 Profile v2」结论；保留其中 viewport 不属于 User Input 的问题证明。  
 > 依据：[文档治理 §4–7](../00-overview/document-governance.md) · [业务边界 Review](../30-implementation/viewport-business-boundary-review-2026-09-16.md) · [Profile v1](../15-contracts/renderer-data-profile-v1.md)
@@ -9,7 +9,9 @@
 
 当前产品仍处于首次发布前；Repository 中 `/1` 为已经冻结并实现的内部基线，候选 `/2` 尚未实现或冻结。Viewport 的真实 Core gap 是 Renderer geometry 不受 User Input 的 InputTarget/Activation 约束，而不是必须产生一个新 profile number。单为 pre-release correction 同时维持 `/1` 和 `/2` 造成两套 acceptance、profile rollout、currentness、测试及 fallback 管理，与首次实现治理的「无真实兼容性义务时直接修正 first-version」冲突。
 
-**未发布不是完整的零兼容义务证明。** 在签署更改后的 Frozen v1 前，负责发布者 MUST 核对并归档：GitHub Releases/正式版本声明、registry alpha/tarball 或私有分发、独立接入者/分支与下游、持久化历史 profile identity 与任何承诺。当前已核查仓库 Releases 无条目、候选 `/2` 尚未实现；这不能证明 npm/私有外部使用不存在。若发现真实依赖，STOP direct reset，另起兼容性/迁移决策；不得将本 ADR 解释成可以静默破坏已发布 wire。
+**项目负责人确认（2026-09-16）：不存在 npm 消费者，明确要求不要再验证 npm；npm 消费者兼容性核查从本 ADR 与 Core Docs Freeze 准入条件中移除。** 此项证据类型为 owner attestation，而非 registry 查询、分发渠道扫描或第三方验证；文档不得将其改写为“已检查 npm registry / alpha / tarball”，不得重新要求 npm 查询、npm 分发证明或 npm consumer 签署，也不得把该项以“兼容性总核查”名义重新引入 Freeze 阻塞。唯一 live 状态由 [v1 qualification ledger §2](../30-implementation/viewport-profile-v1-qualification.md) 记录。
+
+**未发布及 npm 无消费者并不自动证明其他兼容性义务不存在。** 非 npm 的明确旧 `/1` 协议/身份承诺、独立对接者、持久化 profile identity、正在运行的旧 peer 或 rolling/rollback/mixed cohort 需求仍须按 ledger 的限定范围由相应负责人确认。项目如确有此类需要互操作的旧 `/1` peer，STOP direct reset，另起兼容性/迁移决策；不得将本 ADR 解释成可以静默破坏已部署 wire。不得将 npm 调查作为这些独立项目的隐含前置。
 
 ## 决定
 
@@ -26,4 +28,4 @@
 
 ## 状态与重新开启条件
 
-ADR decision Accepted，不等于改正后的 Profile-v1 已 Frozen/Implemented/Qualified。Docs Freeze HOLD 直至兼容性证据、完整修订与 cross-review 签署；代码尚未变更时不得将 revised `/1` 描述为当前 executable。若真实外部兼容义务存在或多个 independently interoperating surfaces 被证实，重新评审显式 version/migration。若 map 证明独立 lifecycle seam 缺失，应另立 consumer-evidence ADR，不塞入 Viewport。
+ADR decision Accepted，且 npm consumer 兼容项已由项目负责人确认不阻塞；这**不等于**改正后的 Profile-v1 已 Frozen/Implemented/Qualified。Docs Freeze HOLD 仅剩限定范围的非 npm 兼容义务确认、完整修订与 cross-review 签署；代码尚未变更时不得将 revised `/1` 描述为当前 executable。若真实旧 peer 混版义务存在或多个 independently interoperating surfaces 被证实，重新评审显式 version/migration。若 map 证明独立 lifecycle seam 缺失，应另立 consumer-evidence ADR，不塞入 Viewport。
