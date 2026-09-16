@@ -1,206 +1,43 @@
 # Renderer Data Application Profile v1 Conformance
 
-> 层级：正式契约 / Conformance  
-> 状态：Active / Normative / Frozen  
-> Profile 版本：1  
-> fixtureSetRevision：2  
-> 适用 Profile：`loomrealm.renderer-data/1`  
-> 依赖：[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[Data Connection v1 Conformance](./renderer-subsystem-data-connection-conformance-v1.md)、[User Input v1 Conformance](./user-input-conformance-v1.md)、[Render Update v1 Conformance](./render-update-conformance-v1.md)、[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> 最近复核：2026-09-07
+> 层级：正式契约 / Conformance Specification  
+> 状态：**Revised preimplementation / Executable-ready Candidate / Not Frozen**  
+> Profile：`loomrealm.renderer-data/1`；`fixtureSetRevision = 3`（revision 1/2及其 PASS 为 historical，不得冒充修正版）  
+> Contract：[Profile v1](./renderer-data-profile-v1.md) · [Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  
+> Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；最近复核：2026-09-16
 
-本文件验证 `loomrealm.renderer-data/1` 的组合层 obligations；child protocol 的完整语义仍由各自 Conformance 定义。
+**Docs Freeze只要求可执行的规范/预期断言与兼容核查；实际 command、environment、raw PASS与 executable SHA属于实现后的 qualification。** 本次 revision 3保留 revision 2 User Input correction义务，并增加独立 Viewport child；不创建 Profile `/2` 或双实现。
 
----
+## 1. Profile identity / compatibility gate
 
-## 1. Profile Binding
+Exact identity `/1 = Connection1 + Input1 + Render1 + Viewport1`，四个 child必须完整支持。No `/2` advertised/selected/accepted、无 optional capability/feature negotiation。旧三 child 的 `/1` executable不可与修正后 peer混配；测试 harness必须识别并拒绝 mixed-old/new setup，不能把历史 `/1` PASS当 current proof。已存在真实外部兼容义务时 STOP direct reset、另评版本/迁移。
 
-```text
-loomrealm.renderer-data/1
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
-```
+Main owns `(S,G,P)` selection；exact Broker matching，unsupported peer→Data absent，不自动 Runtime failure、不 mint authority。Profile自身不要求所有 arbitrary Subsystem共享 rollout：**当前产品统一部署 `/1`**仅归实施 ledger/产品 integration test。未来真实 identity replacement fresh generation规则仍沿 Connection v1。
 
-Current child conformance：
+## 2. Unit / routing / common gates
 
-```text
-User Input protocolVersion = 1 / fixtureSetRevision = 2
-```
+Hostra one WebSocket text unit、PWA `postMessage(string)`；one UTF-8 JSON text string = one exact child JSON object；not binary/structured object/Batch。Actual bytes≤1MiB、depth≤64、Wire representation/parser与child exact preflight MUST before mutation；non-string、wrong role/type、unknown type、malformed child均 first-wins Data-fatal。Instrumentation：`carrier.messages()` calls恰1、每合法入站 unit仅命中一个 child、无 raw bypass。Direction：Subsystem→Renderer `input.interest,render.domains/snapshot/patch/event`；Renderer→Subsystem `input.state/event/reset,viewport.state`。
 
-Profile identity不因 fixture revision变化；ADR 0029 没有改变 Data Profile wire/version combination。
+## 3. Reader/child isolation/diagnostics
 
----
+Exact `input.* / render.* / viewport.state` dispatcher；unknown type/wrong direction→Profile terminal；Input/Render child malformed沿既有 family；识别后的 Viewport invalid→`protocol:"viewport"`；common/unknown→`"profile"`。Well-formed stale Input按 Input contract drop，malformed不能跨 child吞掉。Viewport只更新 author retained observation，不通过 Renderer Store/Projector或 Input Manager，亦不修改 Main InputTarget/Activation。Listener throw/returned rejection必须独立 containment、不进入 Data reader error路径。
 
-## 2. Required Claims
+## 4. Single writer/backpressure
 
-完整 Profile claim至少证明：
+每 peer仅一 serialized writer，`max concurrent carrier.send=1`，admission order=send order；old-carrier pending不 replay/migrate；any terminal settle once。保留 Input revision2 sender bounded/coalescing与 Render ordering/barrier。Viewport在 writer admission前每 carrier至多一个 admitted/in-flight + 一个 latest pending slot；阻塞 writer、连续合法 resize burst（当前实现 fixture使用超过 `MAX_PENDING_SENDS=1024` 的样本，但 1024 **不是协议上限**）、穿插合法 Input/Render→Viewport队列不随 burst线性增长，不因 viewport 自身填爆 writer、Input/Render不被永久饿死；释放 writer后最终 size收敛。不得为测试改 writer limit、priority scheduler或 Input/Render语义。完整 sender assertions参照 [Viewport conformance](./viewport-state-conformance-v1.md)。
 
-```text
-exact profile identity/version binding
-one inbound reader / exact namespace routing
-one serialized outbound writer
-role-exact direction legality
-first-wins terminal / fail-closed carrier retirement
-fresh-carrier Input + Render baseline reset/republication
-all current child conformance obligations
-Hostra/PWA abstract transport equivalence
-```
+## 5. Independent baselines/currentness
 
-仅通过 Data Connection、Input 或 Render其中一部分不构成完整 Profile conformance。
+Fresh current carrier：Input empty remote Interest/State/Event history→full current interest+fresh State/Event future-only；Render first `render.domains`→snapshots→ordinary work；Viewport有合法 sample发送fresh baseline，否则等首次合法 sample。无跨 child固定先后/事务；same G reconnect不重启 Runtime/Frame/InputListener/Domain/Viewport；old-carrier queued receive/send fenced。Fresh G/Renderer匹配新 current authority后 old source不可污染；Viewport current retained equal baseline无 callback、changed once；无 sample last value只是历史 observation。
 
----
+## 6. Failure/authority
 
-## 3. Harness Observables
+Malformed Input/Render/Viewport分别 child Data-fatal，carrier retire而不自动 Frame unwind/Runtime fail/RenderDomain destroy/Main authority change。First-wins terminal、best-effort close、pending settlement once；callback本地异常不能作为 malformed remote；Control/Data无 total order、没有 ACK/replay/join。
 
-至少观察：
+## 7. Platform/product qualification（实现后）
 
-```text
-carrier.messages() call count
-max concurrent carrier.send count
-sent application-unit order
-role dispatch target
-terminal fact / close request
-pending send settlement
-fresh-peer child publication state
-```
+同一 executable SHA实测：original Connection/Input/Render regression，revised `/1` four-child suite，Viewport child conformance，Main selection/paired broker，Desktop designated layout viewport source、Hostra product；PWA在对应里程碑验证相同 abstract CSS logical size。必须存命令、Node20/24（如适用）、Chromium/Hostra环境、raw logs/artifacts/subject SHA。仅 current product integration断言所有当前 DataAuthorities统一采用 `/1`；不得把该 rollout政策反写为通用 Profile MUST。Map resize/menus/camera/chunks/latency由独立 map qualification证明，不是 Profile conformance。
 
-Application unit始终是 one UTF-8 JSON text string。
+## 8. Revision history
 
----
-
-## 4. Identity / Direction
-
-Required：
-
-```text
-profile-exact-identity
-profile-unsupported-rejected-before-read/write
-profile-change-requires-fresh-generation
-subsystem-outbound: input.interest + render.* only
-renderer-outbound: input.state/event/reset only
-wrong-direction-message-protocol-fatal
-```
-
-不得通过 MessagePort structured object拓宽 application model。
-
----
-
-## 5. Reader / Dispatcher
-
-Required：
-
-```text
-one-reader-per-peer
-input.* exact input dispatcher
-render.* exact render dispatcher
-unknown profile namespace rejected
-one inbound unit dispatches exactly once
-handler protocol-fatal retires current peer
-handler throw/local-fatal retires peer unless child contract explicitly contains it before returning
-```
-
-M10 InputManager必须 containment business handler failure，使其不逃逸到 Data dispatch；Profile runtime无需识别 business callback。
-
----
-
-## 6. Writer
-
-Required：
-
-```text
-one serialized writer
-max concurrent carrier.send = 1
-exact outbound profile validation before send
-terminal first-wins
-no retry/replay/duplicate after failed send
-```
-
-Generic Data writer的 finite capacity是 fail-closed mechanical bound；User Input v1 revision 2要求 Renderer在进入该 writer前执行自身 bounded coalescing/drop policy，普通 Input backlog不得依赖 generic writer overflow作为 backpressure策略。
-
----
-
-## 7. Child Ordering Independence
-
-Input 与 Render共享 physical writer order但不共享 authority/revision/transaction。
-
-Required：
-
-```text
-input ordering obeys User Input v1
-render ordering obeys Render Update v1
-input message does not advance Render revision
-render message does not change Input lease/Interest
-child failure classification maps to correct DataTerminal.protocol family
-```
-
----
-
-## 8. Fresh Carrier
-
-每个 fresh current peer：
-
-```text
-Input remote Interest/State/Event history = empty
-Render remote Domain/Snapshot/Patch chain = empty
-```
-
-Role-local desired business state MAY survive according to child lifetime rules and MUST re-establish current baselines through the fresh peer。
-
-Required：
-
-```text
-fresh-carrier-input-interest-republication
-fresh-carrier-input-state-baseline/no-event-replay
-fresh-carrier-render-domains/snapshots
-same-generation-reconnect-fresh-child-publication
-fresh-generation-replacement-fresh-child-publication
-fresh-carrier-does-not-restart-runtime/frame
-```
-
----
-
-## 9. Terminal / Failure Boundary
-
-Required：
-
-```text
-malformed/profile-invalid → profile protocol-fatal
-input-invalid → input protocol-fatal
-render-invalid → render protocol-fatal
-carrier close/loss → carrier terminal
-terminal first-wins
-terminal closes current carrier best-effort
-Data terminal != Runtime failure / Frame unwind
-```
-
-Fresh current carrier reacquisition由 role/Platform lifecycle负责，不属于 Profile retry/reconnect mechanics。
-
----
-
-## 10. Platform Equivalence
-
-完整 conformance要求：
-
-```text
-Hostra WebSocket text
-PWA MessagePort string
-→ same profile application trace semantics
-```
-
-Adapter不得 retry、duplicate、reorder或将 structured object直接交给 Profile Core。
-
-M10可以在 Hostra/Desktop Data physical lifecycle完成 current platform-independent Input role qualification；full Profile Hostra/PWA equivalence直到 M16。
-
----
-
-## 11. Revision 2
-
-Profile `fixtureSetRevision = 2` 的唯一新增组合义务来自 current User Input revision 2：
-
-```text
-mutation-gate State convergence remains inside Subsystem Input role
-business handler failure is contained before Data dispatch failure
-Renderer Input backlog is bounded/coalesced before generic Data writer overflow
-```
-
-Profile identity、Data Connection version、Render Update version均不变；revision 1结果不得冒充 current complete `loomrealm.renderer-data/1` conformance。
+Revision 1：初始 Input+Render；Revision 2：User Input mutation-gate/handler containment/sender bounded proof；Revision 3：ADR0037首次发布前直接在 `/1` 添加独立 Viewport v1及其 currentness/backpressure/diagnostics，不新增 `/2`。旧版本历史证据保留但非 current PASS。
