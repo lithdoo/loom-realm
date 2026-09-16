@@ -2,224 +2,70 @@
 
 > 层级：系统架构  
 > 状态：Active Design / Candidate for Freeze  
-> 稳定程度：ADR 0036 accepted；formal contracts pending freeze  
-> 主要定义：Viewport observation authority、single-surface Renderer boundary、Runtime-scoped author projection、Renderer Data Profile v2 composition、physical realization boundary  
-> 依赖：[系统架构总览](./system-overview.md)、[Renderer⇄Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)、[Subsystem 模型](./subsystem-model.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
-> 候选正式契约：[Viewport State v1](../15-contracts/viewport-state-v1.md)、[Renderer Data Profile v2](../15-contracts/renderer-data-profile-v2.md)  
+> 稳定程度：ADR0036 Accepted；Viewport v1/Profile v2 formal contracts revised / Not Frozen；qualification pending  
+> 主要定义：geometry ownership、single-surface authority、Runtime-scoped author observation 与 data/physical lifetime  
+> 依赖：[System overview](./system-overview.md) · [Protocol layers](./renderer-subsystem-protocol-layers.md) · [Subsystem model](./subsystem-model.md) · [ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
+> Normative candidates：[Viewport State v1](../15-contracts/viewport-state-v1.md) · [Renderer Data Profile v2](../15-contracts/renderer-data-profile-v2.md)  
 > 最近复核：2026-09-16
 
----
+本文只固定 owner 与 dependency，不重复正式 wire/callback细节；有冲突以 formal contract为准并停止实施。
 
-## 1. Problem Boundary
+## 1. Capability gap / narrow solution
 
-Viewport 是 current Renderer presentation surface 的逻辑 CSS geometry fact，不是 ordinary user input。
-
-```text
-visible/suspended Frame may still own a live RenderDomain
-child Frame may be the only InputTarget
-Window/surface may resize during that suspension
-```
-
-因此：
+Map Frame在 child menu/dialog取得 InputTarget时可能仍有可见 live RenderDomain；Window resize属于 Renderer presentation geometry，不属于 InputTarget/Activation/Interest。因此禁止 `x.*.state` User Input与 viewport-specific Input bypass。Browser-only geometry不足以驱动 Runtime authoritative camera/projection；永久最大视口 envelope又让小窗口承担 1080p payload/validation。增加一个 Renderer→Subsystem **readonly、retained、Runtime-scoped size capability**，map仍根据实际 accepted size选择投影。
 
 ```text
-Viewport observation must survive InputTarget changes
-Viewport does not create or widen Input authority
+current Renderer document layout viewport
+  → trusted physical size observation
+  → Viewport State v1 / Profile v2 on each current Subsystem Data carrier
+  → Subsystem host last accepted observation
+  → scope.viewport readonly
+  → business map policy/camera/chunks
+  → existing Render author API / Store / WC
 ```
 
----
+## 2. Authority and lifetime
 
-## 2. Authority Map
+| Owner | Owns | Does NOT own |
+|---|---|---|
+| Main | Session/Renderer currentness, DataAuthority `{S,G,P}`, Frame/InputTarget | width/height, map camera |
+| Renderer | one current document layout viewport physical observation and publisher | map projection, InputTarget, Main authority |
+| Data Profile v2 | exact child routing, ordered carrier, terminal | size/camera business policy, cross-child transaction |
+| Subsystem host | Runtime-scoped last successfully accepted size + subscribers | DOM object, layout engine, physical source |
+| Business map | normalized accepted viewport, camera/window/Render policy | Renderer physical sample/currentness |
+| Business WC | derived raster/layout/physical retry | Store/Render authoritative desired state |
 
-```text
-Main
-    owns DataAuthority {subsystemKey,generation,dataProfile}
-    does NOT own width/height
+Viewport object lifetime为 Subsystem Runtime；wire publication cursor为 per current Data carrier；physical source为 current Renderer document。Data retire保留 last observation；fresh carrier/fresh Renderer仅 matching `(S,G,P)` source可重新基线收敛；old queued callback/carrier must inert。Frame suspend/close和 Activation变化不清空 capability。`current !== null`不证明 carrier/Renderer/paintability存在。
 
-Renderer physical realization
-    observes current presentation-surface logical CSS size
+## 3. Exactly one layout viewport in v1
 
-Viewport State v1
-    copies that retained observation over current Data carrier
+v1同一 Renderer participant只有一个 logical presentation surface：当前 document的 **layout viewport `window.innerWidth/innerHeight` CSS logical pixels，floor到 positive safe integers**。Desktop/PWA都遵守该 observable定义，不能混用 visualViewport、screen、DPR或任意 element box。每个 current `/2` Subsystem connection获得相同 raw size。未观察到合法 size时不合成 0/null/default wire；已观察的最后值在短暂失联期间保留。多 window/pane独立尺寸属于未来显式新版，不给 v1增加 `surfaceId`、Frame routing。
 
-Subsystem Host
-    retains last successfully accepted observation
-
-SubsystemScope.viewport
-    readonly Runtime-scoped author projection
-
-Business Runtime
-    owns what viewport means for camera/projection/layout policy
-```
-
-Viewport is not DOM authority, Render authority, Frame authority or presentation currentness authority.
-
----
-
-## 3. Single-surface v1 Boundary
-
-Viewport v1 assumes one current logical presentation surface per current Renderer participant：
-
-```text
-one current Renderer participant
-→ at most one current logical viewport value
-→ same raw viewport value is published to each current Subsystem Data connection
-```
-
-v1 does not identify or multiplex multiple windows/panes/surfaces。
-
-如果未来真实 consumer需要：
-
-```text
-one Renderer participant
-→ multiple independently sized presentation surfaces
-```
-
-则必须以新的 explicit compatibility/design boundary处理；不得给 frozen v1 偷加 `surfaceId`、DOM handle或 per-Frame surface routing。
-
----
-
-## 4. Lifetime Model
-
-```text
-Viewport object lifetime
-    = Subsystem Runtime / SubsystemScope lifetime
-
-Viewport retained value lifetime
-    = last successfully accepted observation across Data carrier replacements
-
-Physical publication lifetime
-    = current Data carrier
-```
-
-Orthogonal lifetimes：
-
-```text
-Frame / Activation / InputTarget changes
-    do not clear viewport
-
-Data carrier loss
-    does not clear retained author value
-
-fresh carrier
-    establishes a fresh physical baseline
-
-Runtime terminal
-    ends author callbacks
-```
-
-A non-null retained value is not proof that a carrier exists, a Renderer is current, or the surface is presently paintable.
-
----
-
-## 5. Profile Composition
-
-```text
-loomrealm.renderer-data/1
-    Connection1 + Input1 + Render1
-    Frozen compatibility profile
-
-loomrealm.renderer-data/2
-    Connection1 + Input1 + Render1 + Viewport1
-    candidate current target profile
-```
-
-Target product policy for the implementation subject chooses profile v2 for current DataAuthorities. Profile selection is Main application authority; physical broker only realizes the selected `(S,G,P)`.
-
-No carrier negotiation, downgrade handshake, Game Entry feature declaration or per-Subsystem profile preference is introduced in this slice.
-
----
-
-## 6. Author Projection
+## 4. Narrow author API
 
 ```ts
-export interface ViewportSize {
-  readonly width: number;
-  readonly height: number;
-}
-
-export interface Viewport {
+interface ViewportSize { readonly width: number; readonly height: number }
+interface Viewport {
   readonly current: ViewportSize | null;
-  subscribe(listener: (viewport: ViewportSize | null) => void): () => void;
+  subscribe(listener: (value: ViewportSize | null) => void): () => void;
 }
-
-export interface SubsystemScope {
-  readonly viewport: Viewport;
-}
+interface SubsystemScope { readonly viewport: Viewport }
 ```
 
-Semantics：
+`current`是 detatched/immutable last accepted value；`subscribe`同步首发一次（含 null），然后仅 structural change；callback前已经更新current。unsubscribe幂等，callback throw/thenable reject各自 local containment，不阻塞 Data reader/其他 listener，Runtime terminal后 inert。不增 `get()+onChange`、manager、source、Renderer identity或 transport到 public author API。Profile `/1` explicit compatibility中若从未接受 v2 observation，stable capability为 null；canonical `/2`无 silent downgrade。
 
-```text
-initial current = null until first accepted baseline
-accepted state is detached/immutable
-subscribe synchronously delivers current once
-future delivery only on structural value change
-unsubscribe idempotent
-callback throw/rejection local-contained
-callback result never controls Data reader/backpressure
-```
+## 5. Publication / loss / recovery
 
-The public surface intentionally contains no manager, source, transport, generation, Renderer id or wire message.
+Viewport是 self-contained latest retained state，非事件流。每 current carrier最多一个 writer-admitted/in-flight viewport unit + 一个未 admitted latest slot；resize覆盖 pending，已 admitted不可撤回，fresh carrier独立发送 admission时最新合法 baseline。普通合法 burst不得靠填满 shared writer触发 Data fatal，也不得永久阻断 Input/Render。具体 admission/terminal、diagnostic `protocol:"viewport"` 由正式 contracts定义；不增 ACK、revision、generic priority/Env service。
 
----
+Fresh carrier/Renderer尺寸相同不重复通知author，不同则更新/通知；fresh合法样本尚未到达时保留last或初始null，不以旧值声称当前可绘制。Control/Viewport/Render之间没有 super-snapshot/事务。真正改变地图画面须 map Runtime用既有 RenderDomain API提交，而非 viewport receiver直接改 Store/Projector。
 
-## 7. Physical Source Boundary
+## 6. Failure and scope guard
 
-Concrete Renderer composition owns a narrow trusted source. Desktop first realization observes `window.innerWidth/innerHeight` as positive integer CSS pixels and coalesces resize publication; focus/blur and keyboard availability do not control viewport semantics.
+Malformed viewport child Data-fatal，仅 retire Data，不自动 Runtime/Frame failure；callback失败局部 containment。Viewport callback不能代替 suspended Frame的 gameplay mutation permit：它可依据**已提交 world facts**更新 live RenderDomain的 presentation projection，但不能驱动移动、collision、transfer、Frame call；没有足够生命周期信号则 map必须明确 STOP/单独最小 capability review，不得偷读 Main/DOM或放宽 Input gate。Browser raster failure自己重试既收数据，same-generation reconnect不保证再次投递 equal RenderData。
 
-PWA may use a different physical event source but must produce the same logical CSS-pixel meaning.
+## 7. Freeze route / non-goals
 
-Excluded from v1：
+Core Docs Freeze只检查 ADR、architecture、两份 formal contract和**可执行测试规范**，不等待实现 PASS；其 subject由 [qualification ledger](../30-implementation/viewport-profile-v2-qualification.md) 记录。之后实现/hosted/product通过才称 capability Qualified。Map payload/Core full-state validation/Browser raster/latency必须经 map PR0独立证明才能 Map Docs Freeze。
 
-```text
-devicePixelRatio
-orientation
-screen/display id
-safe-area
-focus/visibility
-DOM element rect
-surface/window id
-fullscreen mode
-render scale
-```
-
-Each has different authority/lifetime and requires independent evidence before any future capability expansion.
-
----
-
-## 8. Failure / Recovery
-
-```text
-malformed viewport.state
-    → Viewport child protocol fatal
-    → retire current Data carrier
-    → not automatic Runtime/Frame failure
-
-carrier loss
-    → preserve last accepted viewport observation
-
-fresh carrier
-    → Renderer publishes current legal baseline when available
-    → equal baseline: no author callback
-    → changed baseline: update + callback
-
-listener failure
-    → local containment only
-```
-
-Viewport has no replay log, ACK, sequence/revision or historical event semantics.
-
----
-
-## 9. Final Invariants
-
-1. Viewport is Renderer-observed environment state, not User Input.
-2. Main owns only DataAuthority selection/currentness, not viewport values.
-3. v1 defines one logical viewport per current Renderer participant.
-4. `SubsystemScope.viewport` is Runtime-scoped and readonly.
-5. Frame suspension/InputTarget loss cannot block viewport convergence.
-6. Data carrier replacement resets wire baseline but not retained author value.
-7. Profile v1 remains Frozen; profile v2 is an explicit new compatibility boundary.
-8. Business packages own viewport policy; Core owns only bounded raw state replication.
-9. No generic environment/service-locator or multi-surface routing abstraction is introduced.
+严禁：Main几何镜像、InputTarget bypass、per-Frame viewport、generic Environment manager、跨 child ACK/barrier、profile negotiation、DPR bundle、多 surface routing、map-specific Core fast path、修改 Frozen `/1` acceptance。
