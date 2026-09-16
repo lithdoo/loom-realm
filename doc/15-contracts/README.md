@@ -1,23 +1,20 @@
 # LoomRealm 正式契约目录
 
-> 层级：正式契约索引  
-> 状态：Active Design  
-> 稳定程度：M10–M13 current v1 contracts frozen/closed；Viewport State v1 / Renderer Data Profile v2 为 **Draft / Candidate for Freeze**；M14/M15 milestone status ledger-owned  
-> 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[Viewport Capability](../10-architecture/viewport-capability.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
+> 层级：正式契约索引 · 状态：Active Design  
+> 稳定程度：current-v1 contracts按各自 Frozen状态；Viewport v1 / Renderer Data Profile v2 **Draft / Candidate for Freeze / Not Implemented**；M14/M15 status由各自 ledger拥有  
+> 定义：cross-role contracts、version/compatibility、maturity与唯一 Freeze证据入口  
+> 依赖：[System overview](../10-architecture/system-overview.md) · [Rendering](../10-architecture/rendering-system.md) · [Viewport](../10-architecture/viewport-capability.md) · [ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
 > 最近复核：2026-09-16
 
-契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。
+契约层仅冻结跨角色/实现必须一致的 observable semantics；physical provisioning/Process/Worker/endpoint/ticket/Port不自动形成 application protocol。本索引不维护 M14/M15 第二份 PASS/Closed。Docs Freeze只表示规范完整，不证明实现存在。
 
----
-
-## 1. Contract Map
+## 1. Current contract map
 
 ```text
 Frame / Call v1                         Active / Normative / Frozen
 Main ⇄ Renderer Control v1              Active / Normative / Frozen
-Renderer Data Application Profile v1    Active / Normative / Frozen
 Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
+Renderer Data Application Profile v1    Active / Normative / Frozen
 User Input v1                           Active / Normative / Frozen
 Render Update v1                        Active / Normative / Frozen
 Viewport State v1                       Draft / Normative Candidate / Not Frozen
@@ -28,206 +25,63 @@ Web Presentation Config v1              Active / Normative / Frozen
 Web Presentation API v1                 Active / Normative / Frozen
 ```
 
-Profile relationship：
+Profile identities：
 
 ```text
-loomrealm.renderer-data/1
-= Connection1 + Input1 + Render1
-
-loomrealm.renderer-data/2   [candidate]
-= Connection1 + Input1 + Render1 + Viewport1
+loomrealm.renderer-data/1 [Frozen compatibility]
+ = Connection1 + Input1 + Render1
+loomrealm.renderer-data/2 [candidate target]
+ = Connection1 + Input1 + Render1 + Viewport1
 ```
 
-Profile v2 是显式 compatibility boundary；不得把 `viewport.state` 静默塞进 frozen `/1`。
+`/2`是完整的新 compatible identity，不能把 viewport悄悄塞进 `/1`；Control v1的 `dataProfile:string`与 Connection v1的 fresh-generation profile replacement足以支持新组合，旧文“Phase 1=/1”只是当时 executable baseline，不改变 v1 acceptance。
 
----
+## 2. Viewport candidate SSOT and maturity
 
-## 2. Viewport Candidate Closure
+- [ADR0036：decision/why](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)
+- [Viewport architecture：ownership/lifetime](../10-architecture/viewport-capability.md)
+- [Viewport State v1：exact child/author semantics](./viewport-state-v1.md)
+- [Renderer Data Profile v2：exact complete composition](./renderer-data-profile-v2.md)
+- [Viewport executable-ready conformance spec](./viewport-state-conformance-v1.md)
+- [Profile v2 executable-ready conformance spec](./renderer-data-profile-conformance-v2.md)
+- [Core Docs Freeze Review：CF-01..07 closure progress](../30-implementation/viewport-core-docs-freeze-review-2026-09-16.md)
+- [唯一 Viewport/Profile v2 qualification ledger](../30-implementation/viewport-profile-v2-qualification.md)
 
-正式候选：
+候选设计简述：Viewport不是 User Input；Runtime-scoped readonly last observation；one Renderer document layout viewport (`innerWidth/innerHeight` CSS pixels)，per-carrier bounded latest sender，fresh carrier baseline，Main只选择所有 canonical current DataAuthorities `/2`、不保存 width/height；不谈 per-Subsystem negotiation。非法 Viewport child在 `/2`报告 `protocol:"viewport"`，retire Data而非 Frame/Runtime failure。Map的 camera/chunk/render/latency完全独立治理。
 
-- [Viewport State v1](./viewport-state-v1.md)
-- [Viewport State v1 Conformance](./viewport-state-conformance-v1.md)
-- [Renderer Data Profile v2](./renderer-data-profile-v2.md)
-- [Renderer Data Profile v2 Conformance](./renderer-data-profile-conformance-v2.md)
+**当前状态**：原 Core review七项已作规范修订，最终 cross-review与 docs-only SHA sign-off仍待记录。Formal contract仍 Not Frozen；implementation尚未开始。Docs Freeze只要求两份完整可执行测试规范及 cross-document一致性，不能要求实现前提供 raw executable PASS；后续 qualification须新 executable subject SHA/环境/日志。Map Draft还有自己的 MF-01生命周期与 PR0性能 gate，不得借 Core Freeze宣称 map已通过。
 
-Architecture / provenance：
-
-- [Viewport Capability](../10-architecture/viewport-capability.md)
-- [ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)
-
-冻结候选边界：
+## 3. M13 rendering authority and Web Presentation
 
 ```text
-Viewport != User Input
-Viewport author capability = Runtime-scoped readonly retained state
-Main owns profile selection/DataAuthority, not width/height
-profile /1 unchanged
-profile /2 = /1 + Viewport State v1
-profile change requires fresh generation
-canonical target subject selects /2; no per-Subsystem negotiation in this slice
+Main Control snapshot: current Session/DataAuthority topology
+Renderer per-subsystem Store: current authoritative Render replica
+Web Projector: current Control + eligible Store的唯一 managed DOM mutation
+Business WC: read-only managed projection consumer;
+             owns ShadowDOM/Canvas/WebGL/private presentation/retry
 ```
 
-在 Viewport/Profile v2 formal contracts 与 conformance 未通过 Freeze Gate 前，dynamic viewport map 文档不得声称 Core capability 已 Frozen/Implemented。
+Presentation reevaluation只有 committed current Control topology change或 successful current Render Store commit；Viewport physical observation不是第三个 Projector authority，业务必须先通过 Render author API提交。Data generation change退役旧 element universe；same-generation Data carrier loss保留/冻结 affected DOM，fresh complete baseline reconcile一次；structurally equal RenderData重连不会自动 `receiveRenderData()`，Browser retry自己负责。
 
----
+## 4. Frozen Web Presentation Config/API
 
-## 3. M13 Authority Summary
+[Web Presentation Config v1](./web-presentation-config-v1.md)：product-private source→exact `{formatVersion,scripts,styles}` Window ordered refs→prepared Content→JS MIME `text/javascript`、CSS MIME `text/css`→ordered link/classic script→`window.onload`→presentation starts once。Missing/unparseable/wrong MIME bootstrap failure，不 sniff/fallback。Hostra top-level trusted shell不修改此契约。
+
+[Web Presentation API v1](./web-presentation-api-v1.md)：optional `receiveRenderContext` Window-lifetime before first managed insertion、每 HTMLElement最多一次；optional `receiveRenderData` initial+只在 retained JSON变化时交付。identity `(Session,subsystemKey,generation,domainId,key)`，same identity same HTMLElement；fresh Session/G fresh universe。PresentationResourceClient仅 logical resource/version，Window teardown后 valid `resource()` reject `CONTENT_CANCELLED`。Unregistered tag preflight结构 failure必须 reconciliation zero DOM mutation，Window-local管理失败按 frozen rule退役。
+
+## 5. Currentness and evidence owners
 
 ```text
-Main / Renderer Control snapshot
-    owns current Session + DataAuthority topology
-
-Renderer per-subsystem Store
-    owns current authoritative Render replica
-
-Web Projector
-    reads current topology + eligible Store facts
-    owns only LoomRealm-managed DOM mutation
-
-Business WC
-    read-only consumer of managed projection
-    owns Shadow DOM / Canvas / WebGL / private presentation state
+DataAuthority removed → affected subsystem DOM remove without Render commit
+fresh generation → retire old element universe; new awaits matching carrier/baseline
+same G carrier loss → retain/freeze only affected DOM; partial baseline hidden
+Control transport loss without replacement snapshot → preserve last, no fake empty authority
 ```
 
-Viewport 不改变这条链：Renderer physical realization只观察 surface geometry，并经 Data Profile v2 向 Subsystem复制 readonly state；它不成为 Render/DOM desired-state authority。
+Viewport last observation在 Data loss时保留，不等于 current carrier/Renderer/paintable证明；matching fresh baseline收敛，equal size不重复 author callback。M15 reload=fresh Renderer；Data-only reconnect=same Renderer。M11当前重验与 M14/M15 executable statuses只看各自 qualification ledgers，不因 docs-only修改宣称 PASS。
 
-Presentation reevaluation只有两类 production source：
+## 6. Freeze governance
 
-```text
-committed current Control Session/DataAuthority topology change
-successful current Render Store commit
-```
+Frozen contract只有 demonstrated correctness/security contradiction、cross-contract conflict、real consumer capability failure或real compatibility boundary才可显式 reopen。ADR0036是真实 map consumer capability gap，所以添加独立 Profile v2而不修改 Frozen `/1`。不得以 API symmetry、假想 future feature、平台物理对称或测试方便为由引入 Environment service locator、第二 Store/topology/currentness、generic component loader、layout/layer authority、DOM rollback framework或 RenderEvent WC ABI。
 
-Viewport author observation本身不直接改 DOM；业务 Runtime若据此提交新的 Render state，仍通过既有 Render authority链进入 presentation。
-
----
-
-## 4. Web Presentation Config Frozen Rules
-
-正式契约：[Web Presentation Config v1](./web-presentation-config-v1.md)。
-
-```text
-Config source acquisition
-→ product/platform-private
-
-WebPresentationConfigV1
-→ exact {formatVersion,scripts,styles}
-→ Window-level ordered refs
-→ M12 prepared Content
-→ scripts MIME essence = text/javascript
-→ styles MIME essence = text/css
-→ ordered <link> / classic <script>
-→ window.onload
-→ presentation starts once
-```
-
-MIME parameters不参与 compatibility；missing/unparseable/wrong MIME直接 bootstrap failure，不做 sniff/fallback。
-
-M15的 top-level-navigation-only trusted shell lifetime属于 Desktop physical composition；它不得改变 Config v1 value contract或 M13 `window.onload` presentation semantics。
-
----
-
-## 5. Web Presentation API Frozen Rules
-
-正式契约：[Web Presentation API v1](./web-presentation-api-v1.md)。
-
-两个独立 optional receiver：
-
-```text
-receiveRenderContext
-→ Window-lifetime capability
-→ before first managed insertion
-→ at most once per HTMLElement
-
-receiveRenderData
-→ current retained full data
-→ initial + only when retained JSON value changes
-```
-
-完整 live identity：
-
-```text
-(Session, subsystemKey, generation, domainId, key)
-```
-
-same identity → same HTMLElement；fresh Session/fresh generation → fresh element universe。
-
-`PresentationResourceClient`只暴露 logical resource identity/version。Window teardown取消在途 reads；teardown后 well-formed `resource()` MUST reject `CONTENT_CANCELLED`。
-
----
-
-## 6. Currentness / Failure Frozen Rules
-
-```text
-DataAuthority removed
-→ remove affected subsystem DOM without waiting Render commit
-
-generation changed
-→ old element universe retires immediately
-→ new generation waits matching carrier + complete baseline
-
-same-generation Data carrier loss
-→ preserve/freeze only affected subsystem DOM
-→ same Renderer logical participant remains current
-→ partial rebaseline hidden
-→ complete baseline reconciles once
-
-Control transport loss without committed replacement snapshot
-→ preserve/freeze last presentation
-→ do not invent empty authority
-```
-
-Viewport candidate follows a compatible but distinct retained observation rule：Data carrier loss preserves last accepted `scope.viewport.current`; fresh carrier republishes a fresh physical viewport baseline。该 retained value不是 current carrier/Renderer/paintability proof。
-
-M15 reload is a fresh Renderer logical participant；M15 Data-only reconnect is not。These physical scenarios consume the contracts rather than redefining them。
-
-Unregistered tag remains projection-time structural failure：preflight before first DOM mutation；failure means zero mutation for that reconciliation and permanent Window-local managed-DOM failure until fresh Window/document lifetime according to the current product composition。
-
----
-
-## 7. Implementation / Milestone Route
-
-This contract index intentionally does not publish a second live milestone ledger。Current authoritative status sources：
-
-```text
-M10–M13
-    closed qualification records
-
-M14
-    ../30-implementation/m14-qualification.md
-
-M15
-    ../30-implementation/m15-qualification.md
-    + ../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
-```
-
-Current summary for navigation only：
-
-```text
-M10, M12–M13  Closed
-M11      Requalification Pending → ../30-implementation/m11-qualification.md
-M14      Requalification Pending → ../30-implementation/m14-qualification.md
-M15      Requalification Pending → ../30-implementation/m15-qualification.md
-Viewport/Profile v2  Draft / preimplementation closure pending
-M16–M17  pending
-```
-
-Viewport/Profile v2 executable behavior一旦落地，会建立新 qualification subject；受影响 milestone必须按该 SHA 重跑，不能复用旧 PASS。
-
----
-
-## 8. Freeze Governance
-
-Frozen contract只有以下事实才能 reopen：
-
-```text
-demonstrated correctness/security contradiction
-cross-contract conflict
-real consumer capability failure
-real compatibility boundary requiring explicit migration/versioning
-```
-
-ADR0036 的 viewport gap 属于 real consumer capability failure，因此通过**新 Profile v2**扩展，而不是原地修改 v1。
-
-不得以 API symmetry、目录对称、future speculation、Hostra/PWA physical symmetry或 test convenience 为理由增加 public Environment service locator、第二份 Store/topology/currentness、generic loader/registry、layout/layer authority、DOM rollback framework或 RenderEvent WC ABI。
+Review→docs-only Freeze SHA→implementation new executable SHA→conformance/v1 regression/hosted/M13/M14/M15 product evidence→ledger Qualified 是唯一有效状态链。M16/M17 PWA平台证据按后续 milestone独立取得。
