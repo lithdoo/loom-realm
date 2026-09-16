@@ -1,57 +1,39 @@
-# Viewport Core Docs Freeze Review — 2026-09-16
+# Viewport Core Docs Freeze Review — 2026-09-16（历史审查与后续处置）
 
-> 状态：**Specification corrections applied / final cross-review and Docs Freeze sign-off PENDING**  
-> Original audit subject：`8d8523cd0aff48d98b3632a5e7a3a30f5125977a`（docs-only）  
-> 修订证据：本次 Core contracts/ADR/architecture/conformance/ledger与 map draft后续 docs-only commits；本报告不独立发布 Frozen/PASS。  
-> 审查范围：ADR0036、Viewport architecture、Viewport State v1、Profile v2、Subsystem model、protocol layers、system overview；交叉核对 Frozen Control/Connection/Profile v1、两份 conformance、map draft与现有 package source。
+> 状态：**Original `/2` subject superseded / Not a Freeze signoff**  
+> Original subject：`8d8523cd0aff48d98b3632a5e7a3a30f5125977a`；原报告在 Git history可核  
+> 后续：[业务边界 Review](./viewport-business-boundary-review-2026-09-16.md) · [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [唯一 live revised-v1 ledger](./viewport-profile-v1-qualification.md)  
+> 日期：2026-09-16
 
-## 1. Findings / disposition
+这是当时 Profile `/2`候选的历史审查，不再是 current `/2`规范、实施计划或冻结签署。原始详细报告与中间 CF-01..07 修订可查本文件 Git history；后续 ADR0037撤销 `/2`，改为首次发布前**显式修正唯一 `/1`**。不得用本历史页恢复双解析器、历史 PASS或 v2 rollout。
 
-Authority direction保留 ADR0036：Main只选择 DataAuthority/profile，Renderer观察其单一 document layout viewport，Viewport State独立于 InputTarget复制 retained geometry，Subsystem Runtime只读 `scope.viewport`，map拥有 camera/chunk/business Render，Browser拥有 raster/physical retry。拒绝 User Input bypass、max-1080p预发布、Main relay、Environment service、per-Subsystem negotiation及跨 child ACK。修订正式规范不等于 executable capability存在；当前 `/2`尚未实现，未运行新的 local/hosted/product tests。**Core Docs Freeze可在规范终审后独立签署，Map Docs Freeze另受 MF-01/PR0阻塞。**
+## 1. 仍有效的基础 findings
 
-## 2. Core CF-01..07 resolution ledger
+Viewport不是 User Input；Renderer physical geometry独立 InputTarget，经readonly retained Subsystem Runtime capability交付，Main只保留DataAuthority、不存尺寸。Map决定camera/projection/Render；WC决定raster/physical retry。避免永久 max-envelope的方向成立，但不等于性能已经PASS。拒绝Main relay、Environment manager、ACK/super-snapshot、多 surface router、map Core fast path。
 
-| Finding | Document resolution | State |
-|---|---|---|
-| CF-01 P0 Docs Freeze ↔ executable PASS circularity | 两份 conformance改为 executable-ready **test specification**；ledger区分 Docs Freeze docs SHA与后续 implementation executable SHA/raw PASS；Profile/Viewport/ADR与 architecture同义 | Spec corrected，待最终 sign-off |
-| CF-02 P0 latest-wins only MAY, writer overflow | Viewport v1 §3对每 carrier强制 1 writer-admitted/in-flight + 1 not-admitted pending latest；不撤已 admitted、不迁移旧 queue；Profile v2/architecture同步；conformance新增 blocked writer + >1024 resize + Input/Render并发 + eventual convergence | Spec corrected，待 executable proof |
-| CF-03 P1 v1 compatibility text | Profile v2 §1–2解释 Control v1 `dataProfile:string`、Connection v1 fresh G、“Phase 1 `/1`”为历史实现基线、v1 specialized type；旧 acceptance不变，canonical all-current `/2`、Data absent不 silent fallback；explicit `/1`未曾观测则 capability null | Spec corrected，待 regression |
-| CF-04 P1 protocol diagnostic | Profile v2 §7锁定 recognized malformed viewport→`protocol:"viewport"`，common invalid→`"profile"`，v2可单独 terminal union、不扩大 `/1` peer observable type；conformance同步 | Spec corrected，待 executable proof |
-| CF-05 P1 geometry/source identity | Viewport v1 §1/§5统一 current Renderer document **layout viewport** `window.innerWidth/innerHeight` floor CSS pixels；Desktop/PWA同义，非 visualViewport/element rect/DPR；old participant/source/rAF/carrier fenced | Spec corrected，待 physical proof |
-| CF-06 P1 fresh G/Renderer | Viewport v1 §4 transition matrix明确 last observation、same G、fresh G、fresh Renderer、无合法 sample、terminal、no super-snapshot；Profile和两份 architecture同步 | Spec corrected，待 conformance |
-| CF-07 P1 subscribe/bootstrap | Viewport v1 §6锁定 synchronous first (含 null)、getter before callback、detached value、local containment/unsubscribe/terminal；map §3明确先 state/domain后 subscribe、首发同值 no-op | Spec corrected，待 conformance |
+## 2. CF-01..07 原问题的 current disposition
 
-**没有编辑旧 Frozen Control/Connection/Profile v1 schema/acceptance；新 Profile v2对旧“Phase 1”作兼容性解读。** 新 `/2`专用端口/terminal实现细节须在第一个 executable subject里完成，不在 docs-only阶段伪造。Review原则禁止借这七项引入 generic queue priority/ACK、Main geometry或 environment manager。
+| Finding | 当前修正落点 |
+|---|---|
+| CF-01：Docs Freeze与 executable PASS循环依赖 | Docs Freeze只要兼容证据/完整规范+executable-ready conformance，PASS在实施后新SHA |
+| CF-02：resize burst writer overflow | Viewport每carrier≤1 admitted/in-flight +≤1 pending latest，writer背压/收敛测试 |
+| CF-03：旧`/1`与`/2`冲突 | **ADR0037取代当时的处理方案**：不发`/2`，修正现有`/1`四child；新增外部兼容义务核查及旧/新executable不可混配 |
+| CF-04：diagnostic缺口 | corrected `/1`上 recognized malformed viewport→`protocol:"viewport"`；common/unknown→profile |
+| CF-05：物理尺寸/source fencing | Core designated single CSS logical surface；当前Desktop/PWA产品选document layout viewport与Window采样；old source/carrier fenced |
+| CF-06：fresh G/Renderer retained semantics | last不代表paintable，只接收matching current baseline，无跨plane barrier |
+| CF-07：synchronous subscribe/bootstrap | 立即首发含null、先更新getter、异常隔离/终止inert；Map先建domain/state再subscribe |
 
-## 3. Simplicity and central problem assessment
+此表说明**文本纠正方向**，不宣称compatibility assessment已签署或测试通过。唯一状态和Freeze SHA见 [revised-v1 ledger](./viewport-profile-v1-qualification.md)。
 
-最小 Core shape是 exact 3-field `viewport.state`、per-carrier bounded latest sender、Runtime last accepted value+subscribers、Main `/2` identity、Renderer trusted single layout source。没有多 surface/RenderNode/Frame id、DPR/focus、环境 service locator或自己的一套 currentness。它在结构上解决了非 InputTarget map Frame无法得到尺寸的 correctness gap，并使 Runtime按实际视口投影、不必恒定传最大 1080p envelope。**它不承诺 RenderDomain full-state validation、Browser receive/raster或产品 P95已经达标。**
+## 3. Map Track边界后续修正
 
-## 4. Map Track MF-01..03（不阻塞 Core Docs Freeze，阻塞 Map Freeze）
+原 MF-01：`finishStep`持有按键时可能自动chain下一步，且Frame无suspend getter；真实风险须记录，但当前具体示例仅map Subsystem，菜单/对话并非现行已接受验收。Core只承诺geometry不mint gameplay/Frame mutation authority；menu连续行走在正式接纳consumer时单独movement/lifecycle review，不再凭假设要求Frame API或阻塞不含菜单的当前map slice。
 
-### MF-01 — OPEN: suspended gameplay vs Runtime viewport observation
+原 MF-02：Domain一次提交不保证View/Sprite两个WC async physical stage同步；由map package-private one-sync-task stage gate设计并在PR2实测，不上升Framework ACK。原 MF-03：历史640 refresh P95 96.3ms>50ms，PR0必须测exact dense1080 payload、Core full-state validation residual、Browser receive/raster/memory、single-clock stimulus→paint，未测不得称性能完成。
 
-Map draft §7已精确定义 suspended Frame仅可基于已提交 world facts更新 viewport/camera/chunk/Render presentation，不能通过 resize继续 movement/collision/transfer/call。真实代码 `frame()`拥有heldDirections与stepTimer，`finishStep`有自动 attempt；public `Frame`仅id/params/signal/call、`InputListener`仅on/setChannels/close，无直接 Activation suspend observation。**因此不声称已经实现 no-step-on-suspend。** 必须以实际 trace证明 existing legal seam能保留 cadence/turn buffer又阻止暂停后的自动连走；否则 STOP，独立最小生命周期 author capability评审，不得借 viewport绕过 InputTarget。测试 hold→child suspend→timer→resize→no next step→fresh Activation rebaseline。
+## 4. Current status
 
-### MF-02 — algorithm CLOSED; executable evidence PENDING
-
-Map draft §9已定义 parent MapView与managed child MapSprite各自 prepare same visualEpoch detached candidate；两者都ready/current时同一同步 JS task原子切换完整 depth stage、logical clip-size与 child shadow sprite stage；parent-first/child-first都保留旧完整stage，失败使用 Window-local private retry，旧 async/fresh G被 fence。普通 movement共享 browser monotonic motion sample，避免 camera/sprite drift。禁止跨 component wire ACK、DOM managed mutations。仍须 PR2 frame/video tests证明无 mixed epoch paint。
-
-### MF-03 — OPEN: performance proof
-
-Map draft §12 PR0必须测真实 dense640/720/1080 exact serialized View node bytes（<196608 B），`RenderDomain.update` full-node validation/snapshot residual、Browser ordinary `receiveRenderData`是否重复验证 stable chunks、wire/Store、raster overlap/entering-only、Canvas allocation/peak memory、resize burst→final visual commit，以及 Hostra单 clock stimulus→paint三轮 P50/P95/max。旧 640 refresh P95 96.3ms >50ms仍是 historical FAIL。任何预算或 Core residual失败STOP相应独立 review，不能提高 limits/跳过验证或宣称性能解决。
-
-## 5. Next governance actions
-
-```text
-Final docs-only cross-review of revised exact contract+architecture+conformance
-→ record explicit PASS decision and current docs-only subject SHA in dedicated ledger
-→ only then change formal contracts to Frozen for implementation
-→ implement profile /2 + sender/source/receiver/author/Main policy on new executable SHA
-→ v1 regression + v2/Hostra qualification
-→ map PR0 evidence + resolve MF-01 (+ MF-02 executable tests)
-→ Map Docs Freeze
-→ PR1 fixed 640 → PR2 dynamic viewport → PR3 affected milestones qualification
-```
-
-As of this report revision：**Core semantics corrected, final Freeze sign-off not yet recorded; Map Freeze HOLD, implementation NOT STARTED, tests NOT RUN**。唯一 live qualification status在 `viewport-profile-v2-qualification.md`及各旧 milestone ledger，不能把 docs-only SHA等同 executable subject。
+- Revised Profile `/1` / Viewport State v1：formal candidates，Docs Freeze HOLD，compatibility evidence与最终cross-review PENDING。
+- Original `/2` proposal/conformance/ledger：Superseded historical，never implemented/released。
+- Map：current viewport/chunks/raster/atomic stage及PR0仍独立治理；future menu另验证。
+- No new local/hosted executable PASS；旧M11/M13/M14/M15证据不得跨subject挪用。
