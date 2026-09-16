@@ -12,18 +12,19 @@
 ## 1. Current snapshot
 
 ```text
-ADR0037 direction                Accepted, external compatibility evidence pending
-Revised Profile /1 + Viewport v1 Draft normative candidates / Docs Freeze HOLD
-Profile /2                       Superseded / never implemented or released
-Old three-child /1 code         Historical executable still in current source
-Main/Renderer/Subsystem/Desktop  revised four-child not implemented
-Profile v1 fixtureSetRevision    3 spec only / not executed
-Compatibility assessment         NOT VERIFIED
-Connection current-composition projection  correction/review pending
-Delivery-plan / exact API preservation     correction/review pending
-Product build-cohort proof       NOT VERIFIED
-Docs Freeze subject SHA          PENDING
-Executable subject / tests       PENDING / NOT RUN
+ADR0037 direction                 Accepted; external compatibility evidence pending
+Revised Profile /1 + Viewport v1  Draft normative candidates / Docs Freeze HOLD
+Profile /2                        Superseded / never implemented or released
+Old three-child /1 code          Historical executable still in current source
+Main/Renderer/Subsystem/Desktop   revised four-child not implemented
+Profile v1 fixtureSetRevision     3 spec only / not executed
+Compatibility assessment          NOT VERIFIED
+Connection projection              corrected 9fb2c72; final cross-review pending
+Phase plan                         current route synchronized 3fb882e
+Exact Data/Subsystem API           restored 5b1eb1d/488fa34; broader audit pending
+Product build-cohort proof        NOT VERIFIED
+Docs Freeze subject SHA           PENDING
+Executable subject / tests        PENDING / NOT RUN
 ```
 
 ## 2. Frozen-preimplementation external compatibility assessment
@@ -45,17 +46,17 @@ Compatibility conclusion: NOT VERIFIED
 
 ## 3. Docs Freeze gate（不需实现前PASS）
 
-- [ ] ADR0037/历史ADR0025/0036 partial supersession、索引与旧`/2`历史状态一致；No dual parser/alias。
-- [ ] Revised `/1` four-child exact direction/shape/preflight/diagnostic，single reader/writer、Control/Connection current authority不冲突；原Input/Render/Control/Connection wire不改。
-- [ ] Connection v1 §1与§22旧三child投影完成纯编辑修正，§22只委托 Profile v1 §8 定义 Input/Render/Viewport fresh baseline；原 Connection 不受影响的 Frozen body完整保全，并审查确切 diff。
-- [ ] `packages/data/DESIGN.md`、其他大幅精简的模块/架构文档完成 [protected semantics audit](./viewport-v1-final-freeze-closure-2026-09-16.md#3-受保护语义保全检查不得因为简写而丢失)：原 public peer/type/terminal/errors/ordering/测试各有有效定义入口，不能用“其他保持不变”遮盖已删除的 API 规范。
-- [ ] [phase-1-delivery-plan.md](./phase-1-delivery-plan.md) 的 current route 明确 C0→C1→Map PR0→PR1/PR2→M11/M13/M14/M15 受影响回归，不把 ADR0035 旧 subject 当作修正版 `/1` 的新证据。
-- [ ] Viewport single designated CSS logical surface、floor/invalid size转换、bounded latest、source/carrier fencing、retained/fresh/terminal matrix一致。
-- [ ] `scope.viewport`同步首发含null、getter更新先于callback、异常隔离/退订/终态可测试。
-- [ ] Core不硬编码Window DOM、不包含map尺寸cap/camera/settle/chunks/menu policy；产品统一rollout归此ledger。
-- [ ] Revised Profile v1 conformance fixtureSetRevision3 + Viewport child conformance executable-ready，旧revision2 PASS不继承。
+- [ ] ADR0037/历史ADR0025/0036 partial supersession、索引与旧`/2`历史状态一致；No dual parser/alias。最终 cross-review待签署。
+- [ ] Revised `/1` four-child exact direction/shape/preflight/diagnostic，single reader/writer、Control/Connection current authority不冲突；原Input/Render/Control/Connection wire不改。最终 cross-review待签署。
+- [x] Connection v1 §1/§9/§22当前组合投影编辑修正完成，[确切 diff](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)已核查只涉及下游组合说明/metadata，未改变原 authority/current-retired/wire/limits；正式整体签署仍见最后一项。
+- [ ] Data package及其他大幅精简的模块/架构文档完成 [protected semantics audit](./viewport-v1-final-freeze-closure-2026-09-16.md#3-protected-semantics-audit恢复精确入口不造并列-wire-ssot)；`packages/data/DESIGN.md`精确 peer/type/terminal/errors/tests与Subsystem legacy author projection已恢复，但更广泛的内容保全终审尚未完成。
+- [x] [phase-1-delivery-plan.md](./phase-1-delivery-plan.md) 已明确 C0→C1→Map PR0→PR1/PR2→M11/M13/M14/M15 受影响回归，并区分 ADR0035 历史 subject 与新修正 `/1` executable。
+- [ ] Viewport single designated CSS logical surface、floor/invalid size转换、bounded latest、source/carrier fencing、retained/fresh/terminal matrix一致；最终 cross-review待签署。
+- [ ] `scope.viewport`同步首发含null、getter更新先于callback、异常隔离/退订/终态可测试；最终 cross-review待签署。
+- [ ] Core不硬编码Window DOM、不包含map尺寸cap/camera/settle/chunks/menu policy；产品统一rollout归此ledger；最终 cross-review待签署。
+- [ ] Revised Profile v1 conformance fixtureSetRevision3 + Viewport child conformance executable-ready，旧revision2 PASS不继承；最终 cross-review待签署。
 - [ ] §2兼容性证据签署，§4 coherent deploy方式可行且不存在必须混版需求。
-- [ ] 完成cross-contract/link/status review，记录docs-only SHA、reviewer/date；Map PR0/运动同步不作为 Core Freeze 代替项。
+- [ ] 完成所有 affected cross-contract/link/status/内容保全复核，记录docs-only SHA、reviewer/date；Map PR0/运动同步不作为 Core Freeze 代替项。
 
 ```text
 Docs Freeze subject SHA: PENDING
@@ -77,7 +78,7 @@ Rollout owner: PENDING
 
 ## 5. Current delivery order and implementation qualification（Docs Freeze后）
 
-最终实施依赖及归属首先见 [freeze remediation §2](./viewport-v1-final-freeze-closure-2026-09-16.md#2-唯一当前实施路线供-phase-plan-同步)，应同时反映到 [phase-1 plan](./phase-1-delivery-plan.md)。执行顺序：
+最终实施依赖以 [phase-1 plan ADR0037 current route](./phase-1-delivery-plan.md#adr0037-current-route--revised-first-release-1--viewport--map-performance) 为执行入口，详见 [freeze remediation §2](./viewport-v1-final-freeze-closure-2026-09-16.md#2-唯一当前实施路线已同步-phase-plan)。
 
 ```text
 Core C0: compatibility + docs propagation/preservation + cross-review → Docs Freeze SHA
@@ -101,13 +102,14 @@ Executable subject SHA: PENDING
 | Gate | Subject | Result |
 |---|---|---|
 | External compatibility | PENDING | NOT VERIFIED |
-| Frozen Connection §1/§22 editorial sync | PENDING | OPEN |
-| Phase plan / protected API preservation | PENDING | OPEN |
+| Frozen Connection §1/§22 editorial sync | `9fb2c72` | DOC CORRECTED / cross-review pending |
+| Phase plan | `3fb882e` | DOC CORRECTED |
+| Data/Subsystem exact API preservation | `5b1eb1d` / `488fa34` | KEY SURFACES RESTORED / broader audit pending |
 | Coherent deployment cohort | PENDING | NOT VERIFIED |
 | Core Docs Freeze | PENDING | HOLD |
 | revised `/1` + Viewport + old regression | PENDING | NOT RUN |
 | Desktop/Hostra + M13/M14/M15 | PENDING | NOT RUN |
 | PWA source equivalence | PENDING | NOT RUN |
-| Map PR0 / Map Freeze | separate Map subject | HOLD |
+| Map motion integration / PR0 / Map Freeze | separate Map subject | CANDIDATE / NOT RUN / HOLD |
 
 任何schema/currentness/source/diagnostic变化需new docs subject；executable变更需new executable SHA与affected rerun。
