@@ -1,71 +1,73 @@
 # Viewport / revised Data Profile v1 — 最终冻结整改与语义保全
 
-> 状态：**Freeze Review remediation / HOLD；非 Freeze 签署、非测试 PASS**  
-> 审查基线：`3fd84d724e8ac5055ea226dcee52237aff084870`（2026-09-16）  
-> 唯一状态：[Viewport/Profile v1 qualification ledger](./viewport-profile-v1-qualification.md)；决策：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
+> 状态：**Review remediation applied in part / Docs Freeze HOLD；非 Freeze 签署、非测试 PASS**  
+> 原审查基线：`3fd84d724e8ac5055ea226dcee52237aff084870`（2026-09-16）  
+> 唯一 live status：[Viewport/Profile v1 qualification ledger](./viewport-profile-v1-qualification.md)；决策：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 当前规范：[Profile v1](../15-contracts/renderer-data-profile-v1.md) · [Viewport v1](../15-contracts/viewport-state-v1.md) · [Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)
 
-本文只记录当前审查的**delta、来源归属及验收证据**，不是第二份 wire、Main authority、milestone 或 Map 性能 SSOT。保留 Frozen Connection v1 的全文及所有原有状态机/错误/平台限制，不以一次简化重写覆盖它。旧三 child `/1`、旧 `/2` 提案只作历史；当前唯一目标 `/1 = Connection1 + Input1 + Render1 + Viewport1`。
+本文只记录此次审查的**delta、源归属与验收**，不是第二份 wire、Main authority、milestone 或 Map 性能 SSOT。Frozen Connection v1 的 state machine/authority/terminal/limits必须保留；旧三child `/1`与旧`/2`只作历史，唯一目标 `/1=Connection1+Input1+Render1+Viewport1`。Docs Frozen≠可执行实现≠Qualification。
 
 ## 1. Freeze-blocking closure
 
-| 编号 | 问题 | 必须满足的关闭条件 | 现状 |
+| 编号 | 问题 | 当前整改/证据 | 状态 |
 |---|---|---|---|
-| F-01 | 同身份直接修正 `/1` 的实际兼容义务尚无完整证据 | 发布负责人按 ledger §2 核验 Releases、registry/alpha、私有分发、下游/独立实现、persisted identity、rolling/rollback/coexistence，归档证据和签字；若存在真实义务 STOP 并新 ADR | **OPEN，外部证据不可由 docs-only 推断** |
-| F-02 | Frozen Connection v1 §1 / §22 历史三 child 投影与当前完整 Profile 不一致 | 将 child 目录/图补为 Input+Render+Viewport；§22只陈述 fresh boundary 并链接 Profile v1 §8 作为三个 child baseline 唯一来源；保留 Connection zero-message、single-current、G/P、terminal/cutover 原文，确定 editorial-only diff | OPEN；在冻结前核对精确合同正文 |
-| F-03 | 第一阶段交付计划仍以 ADR0035 的 requalification 路线为唯一当前执行说明 | 将本文 §2 的 Core C0→C1→Map PR0→PR1/PR2→受影响 requalification 加入 phase plan；区分历史 M11/M14/M15 evidence 与新 executable subject | OPEN；本文件先固定此次路线供同步 |
-| F-04 | 大规模精简可能遗漏旧 exact API / behavior | 按 §3 逐项对比原 `508d08ab` 与修正 `3fd84d7`；无变更部分保留由完整 frozen contract 或 exact package API baseline 定义，缺口补齐，不能仅称“接口保持不变” | OPEN；见 §3 |
-| M-01 | Map ordinary motion 与 visual stage epoch 的同步不足 | 以 map package-private movement token / shared anchor + 同一可见状态交接定义先后收到、resize、scene transfer、late async 和失效规则；用 current render data 与截图/trace测试 | OPEN；交由 Map draft，不升 Core |
-| M-02 | 1080p payload / Core validation residual / Browser paint 延迟没有 PR0 实测 | 严守 Map draft PR0，同单调时钟采样；未通过不得 Map Freeze | OPEN；不能以文档替代 |
+| F-01 | 同身份直接修正 `/1` 的实际兼容义务未知 | 发布负责人仍须按 ledger §2核验 Releases、registry/alpha、私有分发、下游/独立实现、persisted identity及rolling/rollback/coexistence，归档owner/date/signoff；真实义务出现即STOP并新ADR | **OPEN / Docs Freeze blocker** |
+| F-02 | Frozen Connection v1 §1/§22只列 Input+Render | [编辑修正 `9fb2c72`](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)：§1图加Viewport；§9 candidate禁止所有child baseline；§22将三个child具体baseline唯一委托Profile v1 §8。审查commit diff仅涉及这些投影/metadata，未动zero-message、S/G/P、cutover或terminal行为 | **文档修复已提交；最终交叉签署待完成** |
+| F-03 | Phase plan仅以 ADR0035旧subject指示路线 | [计划修正 `3fb882e`](https://github.com/lithdoo/loom-realm/commit/3fb882e6b94360a41ef27a7a6fde76ca82396f6a)：明确C0→C1→Map PR0→PR1/PR2→受影响M11/M13/M14/M15同SHA回归；历史`c642...`不得替新executable背书 | **文档修复已提交；最终交叉签署待完成** |
+| F-04 | 上轮大幅精简可能删掉旧 exact API/行为 | [Data package exact API恢复 `5b1eb1d`](https://github.com/lithdoo/loom-realm/commit/5b1eb1d47612ec1f0c9efc7eea63ee9eb388917c)，保全三child wire family、terminal/outcome union、双role peer、reader/writer/errors/tests；[Subsystem投影保全 `488fa34`](https://github.com/lithdoo/loom-realm/commit/488fa34ca71509c0db69b0daba70f3b99492c75b)恢复原 Domain/node key不同lifetime、≤256 domains、Input/Content error细节。M13 renderer module原/新对照，关键Projector/Store/structural failure/ABI/Window lifetime均保留于当前模块或Frozen M13 Formal | **重点模块已修；其他大改文件的差异保全终审仍待签署** |
+| M-01 | Ordinary movement `visualEpoch`不变但两个WC不同步 | 新 [Map-private motion stage closure](../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)以`motionId`+scene/visual配对、shared frame time、先后回调/失败/resize/transfer fencing和测试精确化；[Map module](../20-modules/loom-map/README.md)已导航；**主dynamic draft还需吸收并在PR2实测** | **候选语义已补；Map Freeze仍OPEN** |
+| M-02 | 1080p payload/Core validation residual/Browser paint不具实测 | Map draft PR0单时钟及真实dense measurement维持；历史refresh P95失败不能当PASS | **OPEN / Map Freeze blocker** |
 
-F-02/F-03/F-04 修复后须逐文件复审实际 diff，尤其防止删去旧 Frozen 语义。F-01 必须由可获取外部分发事实的负责人签署，不能因为 Repo 无 Releases 自动勾选。**Core Docs Freeze 只依 F-01..04 与完整 conformance 规范；M-01/M-02 是 Map Freeze 独立 gate。**
+F-02/F-03/F-04的文档编辑本身不等于 F-01真实兼容性签署或最终 Core Docs Freeze。F-04须完成整个受影响 diff 的最终审阅，尤其不能因为把内容移入其他SSOT就无证据删除原已冻结行为。**Core Docs Freeze只依F-01..04与正式conformance一致；M-01/M-02是独立Map Freeze gate。**
 
-## 2. 唯一当前实施路线（供 phase plan 同步）
+## 2. 唯一当前实施路线（已同步 phase plan）
 
 ```text
-C0  ADR0037外部compat证据+Connection组合说明编辑修正
+C0  ADR0037 external compat证据+Connection组合编辑修正
     + exact API/受保护行为保全+Profile/Viewport/conformance交叉复核
-    → 记录新的 docs-only SHA，Core Docs Freeze（不要求 executable PASS）
-C1  同一 coordinated build cohort 更新既有 /1：
+    → 记录 docs-only SHA，Core Docs Freeze（不要求 executable PASS）
+C1  同一个coordinated build cohort更新唯一 /1：
     @loomrealm/data codec/demux/terminal/sender
     → Renderer trusted physical source
     → Subsystem retained scope.viewport
     → Main/product DataAuthority/physical rollout
     → revised /1 fixture revision3 + Viewport + Frozen Input/Render/Connection regression
-    → M13/Desktop/Hostra affected qualification；PWA 在所属里程碑
+    → M13/Desktop/Hostra affected qualification；PWA后续对应里程碑
 PR0 单独测 dense1080 exact bytes / RenderDomain.update full-state validation
     / Browser receive/raster/peak memory / single-clock stimulus-to-paint
-PR1 固定640 chunk+raster+sprite 性能优化
-PR2 dynamic viewport+one-paint View/Sprite stage+movement coordination
-PR3 同一受治理 executable SHA 完成 M11/M13/M14/M15 受影响回归
+PR1 fixed640 chunk/raster/sprite performance
+PR2 dynamic viewport+one-paint View/Sprite/motion coordination
+PR3 同一受治理 executable SHA 重新资格 M11/M13/M14/M15
 ```
 
-`C0` 不等于 `C1`；新 Core 代码不能继承旧三 child `/1` PASS，Map PR0 不因 Core Docs Freeze 获得性能 PASS。若 F-01 发现混合部署/外部兼容要求，停止直接重置 v1，不允许通过新的握手/feature-bit在本路线私下补救。
+`C0`不等于`C1`；新Core代码不能继承旧三child`/1`PASS，Map PR0不因Core Docs Freeze获得性能PASS。F-01发现混版/外部兼容要求就STOP direct v1 reset，不能私下追加handshake/feature bits绕行。
 
-## 3. 受保护语义保全检查（不得因为简写而丢失）
+## 3. Protected-semantics audit（恢复精确入口，不造并列 wire SSOT）
 
-| 主题 | 原先定义入口及精确保全项 | 当前权威 owner / 复核方式 |
-|---|---|---|
-| Profile identity/binding | `packages/data/DESIGN.md` 原 §4：常量、`DataCurrentBindingV1`、preflight零副作用、S/G/P binding | package exact API/既有源码 + revised Profile v1 §1–2；保留原错误与角色边界 |
-| Wire model | 原 §5：Input/Render精确类型、`JsonValue`、exact schema、runtime grammar limits | Frozen child contract是 wire SSOT；新增仅 Viewport 三字段，不得用宽松 union/`unknown` 代替 |
-| Terminal/outcomes | 原 §6：`DataTerminal`、`DataSendOutcome`、`DataInboundDisposition` discriminants | 当前仅追加 family `viewport`；保持其它 enum/kind/错误区分，旧 executable 类型不等于候选最终类型 |
-| Subsystem/Renderer peers | 原 §7–8：role-specific handlers、outbound send、`terminal`、`close`和限制方向 | 保留完整原 surface，**仅**增加 Subsystem `onViewportState`与 Renderer `viewport.sendState`；不能凭简写删除旧方法 |
-| Reader/writer | 原 §9–10：有序 settle、local invalid/fatal 分类、FIFO、单 send、禁止在 writer coalesce child | Frozen Profile v1 §5–9+package exact surface；viewport producer在 shared writer admission 之前合并 |
-| lifecycle/errors/tests | 原 §11–17：first-wins、fresh peer、M8/M10/M11 owner、TypeError/RangeError、旧 qualification/test matrix | 原 milestone 继续历史，新的 four-child fixture revision3另取新 executable SHA；不得把历史 PASS 复制 |
-| Frozen Connection | v1 §1–28 的 authority/broker/zero message/current-retired/terminal等 | 保持全部正文；只更正 §1/§22 的**下游 Profile 当前组合说明**，不扩大 Connection acceptance |
-| M13 | Control+Store 两种 Projector reevaluation、same-G equal RenderData不强制重送 | M13 Formal + Renderer module；Viewport source不是第三 Projector authority |
-| Map | movement、tile rendering、WC pair、`sceneEpoch/visualEpoch` | Map draft 与其业务设计；绝不可升格为 Profile/Frame universal MUST |
+| 原有约束 | 当前定义入口 / 本次保全结果 |
+|---|---|
+| Profile identity/binding、preflight零副作用 | [`packages/data/DESIGN.md` §2](../../packages/data/DESIGN.md) + revised Profile v1 §1–2，原S/G/P、TypeError零side effect保留 |
+| Input/Render wire types / static exact constraints | Data DESIGN §3恢复原type family列表；schema/limits继续归Frozen Input/Render；新Viewport三字段独立，不扩大两者 |
+| Terminal/outcomes | Data DESIGN §4重列`DataProtocolFamily/DataTerminal/DataSendOutcome/DataInboundDisposition`，只在family加`viewport` |
+| Subsystem/Renderer peers | Data DESIGN §5–6逐项重列旧handlers/typed outbound sends/terminal/close，仅增加`onViewportState`与`viewport.sendState` |
+| Reader/writer/terminal/errors/tests | Data DESIGN §7–8保留ordered disposition/FIFO/child producer admission前coalesce、first-wins、fresh/no replay、TypeError/Role failures及M8/M10/M11资格 |
+| Frame/Input author | [Subsystem model §3–4](../10-architecture/subsystem-model.md)保留mutation gate、known-no-commit State convergence、dormant registration和async containment |
+| Render/Content author | Subsystem model §6–7恢复≤256 live Domains、Runtime domainId never reuse、Domain-lifetime node key、Event bounded offer、Content selector非公开/TypeError/缓存隔离 |
+| Frozen Connection | §1/§9/§22只修current composition投影；authority、candidate、zero app messages、retired、error、generation、transport、conformance原文保留。真实diff见F-02 commit |
+| M13 Web Renderer | [current renderer module](../20-modules/web-renderer/README.md)保留Control+Store两类reevaluation、element identity、one-time context/retained-data equality、structural latch、Window resource lifetime；精确行为归Web Presentation API v1/M13 docs |
+| Map | [dynamic draft](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)仍拥有camera/chunks/render/PR0；[motion closure](../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)只属于map，不升格为Core |
 
-**审查判准：** 对每项给出稳定的 Current SSOT 链接或恢复精确 API 定义；旧文档 SHA 作为 diff provenance，不把整份历史文件复活为并列规范。不得为了让表格看上去全绿而声称已经运行代码测试。
+其他在 `508d08ab...3fd84d7` 中大幅精简的 governance/platform/overview/index/模块投影仍须完成**内容保全终审**，形成逐项“已由现行SSOT覆盖/需恢复”证据；不要仅凭本表声称仓库所有旧行为已经验证。实际代码还未升级且尚未执行新的测试。
 
-## 4. 尚未满足的签署格式
+## 4. Freeze签署状态（唯一正式状态仍在ledger）
 
 ```text
-Compatibility owner/date/evidence/conclusion: PENDING
-Connection exact editorial diff reviewed: PENDING
-Phase-plan current route synchronized: PENDING
-API protected-behavior diff reviewed: PENDING
+Compatibility owner/date/evidence/conclusion: PENDING / NOT VERIFIED
+Connection editorial diff: checked for scope in 9fb2c72; final cross-review PENDING
+Phase-plan current route: synchronized in 3fb882e; final cross-review PENDING
+Key package/Subsystem API restoration: committed; broader protected diff audit PENDING
 Core cross-reviewer/date: PENDING
 Core Docs Freeze subject SHA: PENDING
+Map main draft motion integration: PENDING
 Map PR0 executable measurements: NOT RUN
 ```
