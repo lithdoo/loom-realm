@@ -1,7 +1,7 @@
 # Viewport State v1 / Revised Renderer Data Profile v1 Qualification Ledger
 
 > 层级：Implementation / Qualification Ledger（**唯一 Core live status**）  
-> 状态：**Core Docs Frozen / Core Implemented / Not Qualified**；2026-09-16。项目负责人已确认 npm 无消费者，并在同一日确认非 npm 无混配义务与统一修正后 `/1` cohort；npm consumer 验证不再构成 Freeze gate。  
+> 状态：**Core Docs Frozen / Core Implemented / Core Qualified (Desktop + shared `/1` contracts)**；2026-09-16。PWA / M16 / M17 = **OUT OF SCOPE**（不是 PASS，也不是本次失败）。项目负责人已确认 npm 无消费者，并在同一日确认非 npm 无混配义务与统一修正后 `/1` cohort；npm consumer 验证不再构成 Freeze gate。  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Contract：[Viewport v1](../15-contracts/viewport-state-v1.md) · [corrected Profile `/1`](../15-contracts/renderer-data-profile-v1.md)；Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile `/1` fixture revision3](../15-contracts/renderer-data-profile-conformance-v1.md)。  
 > Reviews：[独立 Docs Freeze 签署](./viewport-core-docs-freeze-independent-review-2026-09-16.md) · [本轮 Core 技术终审与修复逐项证据](./viewport-core-final-review-2026-09-16.md) · [历史 Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [整改历史](./viewport-v1-final-freeze-closure-2026-09-16.md) · [范围收缩及完整原文 crosswalk](./viewport-scope-repair-2026-09-16.md)。Map [实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)和[PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)单独拥有状态。
 
@@ -11,11 +11,11 @@
 
 ```text
 ADR0037 direction                  Accepted; npm no-consumer owner attestation RECORDED
-Revised Profile /1 + Viewport v1   Core Docs Frozen; Core Implemented; Not Qualified
+Revised Profile /1 + Viewport v1   Core Docs Frozen; Core Implemented; Core Qualified (Desktop)
 Old 3-child /1 source              superseded on this branch by four-child /1; do not mix binaries
 /2                                 superseded proposal; never shipped/implemented
 Main/Renderer/Subsystem/Desktop    four-child /1 IMPLEMENTED on feat/core-viewport-v1
-Profile /1 fixtureSetRevision      3 EXECUTED on Node 24; Node 20 NOT RUN
+Profile /1 fixtureSetRevision      3 EXECUTED on Node 24 and portable Node v20.19.5
 npm consumer compatibility         OWNER CONFIRMED / NON-BLOCKING; no npm lookup
 GitHub Releases channel           API returned [] on 2026-09-16; other channels not implied
 Other non-npm compatibility        OWNER ATTESTED no mixed-binary / no independent old /1 peer, 2026-09-16
@@ -28,10 +28,10 @@ C1 production executable SHA       dc024e8963cf6970cca8b28a9de396ee9d0f203c
 Qualification harness SHA          f159b80bab595f4c9a5d8521f271452fa618ad88
 Evidence/ledger commit             3aca363ce410adccf708aba1ee3df82667917413
 Product cohort                     workspace 0.1.0-alpha.0 from the same git tree; no renderer-data/2
-Map Docs Freeze / PR0 evidence     separate Map-owned HOLD / NOT RUN
-PWA                                no PWA app in this repository; NOT RUN
-Node 20                            NOT RUN locally (host only had v24.19.0)
-Core executable qualification      NOT Qualified (Node 20 and PWA still open)
+Map Docs Freeze / PR0 evidence     Map-owned HOLD; PR0 RAN on feat/map-viewport-pr0 `7718446`/`af4ad51`; dense 720/1080 canvas STOP
+PWA                                OUT OF SCOPE for this Desktop/Map task; not PASS; not a Core Qualified blocker
+Node 20                            PASS portable v20.19.5 (not the host PATH Node 24)
+Core executable qualification      Qualified for Desktop + shared four-child `/1` contracts
 ```
 
 ## 2. Frozen-preimplementation compatibility: owner decision and remaining scope
@@ -195,8 +195,8 @@ Hostra (M15 pin / product): HOSTRA_SOURCE_DIR=.qualification/hostra at d863beab3
 | M14 vertical | `node --test test/m14-vertical.test.mjs` | Node 24 + Chromium | 0 | 3 pass | PASS (consumer still 2-arg holder) |
 | M15 desktop + pin | `npm run test:m15:desktop` with frozen Hostra SHA | Node 24 / `HOSTRA_SOURCE_DIR` | 0 | 14 pass | PASS |
 | M15 Hostra product | `npm run test:m15:hostra` | Node 24 / frozen Hostra + Electron | 0 | 10 pass, ~291s | PASS Desktop/Hostra product; **not** Map Docs Freeze |
-| Node 20 matrix | n/a | no Node 20 on this host | — | — | **NOT RUN** |
-| PWA CSS logical source | n/a | no PWA app package | — | — | **NOT RUN** |
+| Node 20 matrix | portable `.qualification/node-v20.19.5-win-x64/node.exe -v` → `v20.19.5`; then `node --test` on Viewport+Profile r3, data, subsystem, renderer, M10/M11 qualification, desktop viewport tests | Node 20.19.5 / production `dc024e8` tree | 0 | viewport 11, data 33, subsystem 61, renderer 51, m10 16, m11 10, desktop-viewport 2; all pass | **PASS** |
+| PWA CSS logical source | n/a | no PWA app; this Desktop/Map task forbids PWA work | — | — | **OUT OF SCOPE** (not PASS, not FAIL) |
 | Umbrella `npm run test:m15` | includes full `test:m14`/`test:m13`/`test:m12`/`test:regression` | not invoked as one command | — | slices above ran | **NOT RUN** as umbrella |
 | npm consumer re-query | forbidden | — | — | — | NOT PERFORMED |
 
@@ -215,13 +215,11 @@ M15 Hostra movement P95 on this host is a **product residual**, not Map qualific
 | Main profile-only, no size relay | Verified; no Main width/height added |
 | Core Docs Frozen | Yes (`4cbf620` + independent review) |
 | Core Implemented | Yes (`dc024e8`) |
-| Core Qualified | **No** |
-| Map Docs Freeze | HOLD / independent; this ledger does not change it |
+| Core Qualified | **Yes — Desktop + shared four-child `/1` contracts** (PWA OUT OF SCOPE) |
+| Map Docs Freeze | HOLD; PR0 RAN (`7718446`) with dense 720/1080 128MiB canvas STOP; this ledger does not freeze Map |
 
-**Remaining blockers to Core Qualified:**
+**Core Qualified for this Desktop task:** Node 20 portable v20.19.5 executed the Viewport/Profile r3 catalog and the Data/Subsystem/Renderer/M10/M11/Desktop viewport slices with exit 0. PWA is **OUT OF SCOPE** and is not recorded as PASS. Umbrella `npm run test:m15` as one nested command remains unused; affected Desktop slices already ran on Node 24.
 
-1. Node 20: local host only had v24.19.0. Record **NOT RUN**. PR CI for Data/Renderer/Subsystem/M10 is the intended Node 20 evidence; until those checks pass, do not write Qualified.
-2. PWA: no PWA application in this repository; physical-source acceptance stays **NOT RUN** at that platform milestone.
-3. Umbrella `npm run test:m15` / full `test:regression` as a single nested gate: **NOT RUN** (affected slices did run).
+Map PR1/PR2/PR3 remain stopped until a design owner revises the 128MiB backing rule against the dense 720/1080 fixture and an independent reviewer signs Map Docs Freeze.
 
 Normative schema/currentness/diagnostic change→new docs-only SHA review；code change→new executable SHA + affected rerun。
