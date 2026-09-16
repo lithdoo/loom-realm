@@ -1,6 +1,6 @@
 # M11 / 01 — Subsystem RenderManager
 
-> 状态：旧 executable subject **Implemented / Qualified**；本 implementation subject **Requalification Pending**
+> 状态：**Implemented / Qualified / Closed**（implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`）
 > 阶段：M11 Render  
 > 落地顺序：01  
 > 最近复核：2026-09-15
@@ -11,7 +11,7 @@
 
 > **M11/01 只建立 business Render authority。publication、Renderer replica、presentation 与 Content 均不属于本步。**
 
-> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已在本分支实现。旧 executable subject 的历史 Closed 仍有效；本 implementation subject 在同一 SHA 完成 local + hosted Node 20/24 `npm run test:m11` 前为 `Requalification Pending`，不得用旧 evidence 证明新 subject。
+> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已在 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上 requalified。hosted Node 20/24 `npm run test:m11`：[M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265)。
 
 ---
 

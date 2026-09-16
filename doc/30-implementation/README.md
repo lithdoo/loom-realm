@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：旧 executable subjects M1–M15 Qualified / Closed；ADR 0035 implementation subject **Requalification Pending**
+> 稳定程度：M1–M15 Qualified / Closed；ADR 0035 implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` **Closed**
 > 主要定义：current implementation fact-source、delivery route、qualification entry points  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0035](../decisions/0035-render-domain-existing-node-update.md)
 > 最近复核：2026-09-15
@@ -63,7 +63,7 @@ npm run test:m15
 
 M14/M15 implementation/consumer/physical semantics remain frozen；formal status only follows the designated qualification records。
 
-> **Accepted evolution notice：** 上表 Closed 只描述当前旧 executable subjects。`RenderDomain.update()` 已实现；受影响的 M11/M14/M15 新 subject `4c34058729ec9170526511f9e05cba0f06651f71` 为 `Requalification Pending`，最终在同一 SHA 上按 M11 → M14 → M15 重新关闭。
+> **Accepted evolution notice：** ADR 0035 `RenderDomain.update()` 已在 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上按 M11 → M14 → M15 重新 Closed。上表 Closed 描述该 subject。
 
 ---
 

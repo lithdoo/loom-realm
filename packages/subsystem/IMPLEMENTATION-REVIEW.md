@@ -6,7 +6,7 @@
 > Merge gate: every required PR check on the final head MUST complete successfully.  
 > This review does **not** claim M8/M10/M11/M12 capability completion.
 
-> **2026-09-15 M11 governance notice：** [ADR 0035](../../doc/decisions/0035-render-domain-existing-node-update.md) 的 `RenderDomain.update()` 已实现。该实现不改变本文件的历史 M4 verdict。本 implementation subject 为 `Requalification Pending`；必须覆盖 exact author surface、local atomicity、Patch publication、bounded queue/in-flight recovery、Renderer regression 与 abstraction budget，并在同一最终 subject 完成 M11 requalification 后才能恢复 Closed。
+> **2026-09-16 M11 governance notice：** [ADR 0035](../../doc/decisions/0035-render-domain-existing-node-update.md) 的 `RenderDomain.update()` 已在 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上 requalified。该实现不改变本文件的历史 M4 verdict。
 
 ## Review standard
 

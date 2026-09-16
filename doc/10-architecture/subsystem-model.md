@@ -182,9 +182,9 @@ Fresh Activation不复用 old Input State/Event；fresh Data carrier隐藏地 re
 
 ---
 
-## 8. Render Author Projection — M11 Requalification Pending
+## 8. Render Author Projection — M11 Closed
 
-> **Current：** `RenderDomain.update()` 已实现。旧 executable subject 的历史 Closed 仍可引用；本 implementation subject 在同一 SHA 完成 local + hosted Node 20/24 `npm run test:m11` 前为 `Requalification Pending`。
+> **Current：** `RenderDomain.update()` 已在 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上 requalified。hosted Node 20/24 `npm run test:m11`：[M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265)。
 
 Exact surface：
 

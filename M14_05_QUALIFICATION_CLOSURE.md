@@ -1,7 +1,9 @@
 # M14 / 05 — Qualification Closure
 
-> 状态：**Closure contract frozen; new subject Requalification Pending**
+> 状态：**Closure contract frozen; current subject Closed**
 > Evidence authority：`doc/30-implementation/m14-qualification.md` is the single source of truth for the current qualification subject, run IDs, local evidence and formal M14 status. This file defines the gate; it does not mirror live PASS checkmarks.
+>
+> **Current notice：** subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` is Closed in the ledger. Dedicated hosted M14 Node 20 hung and was cancelled; Node 24 `test:m14` passed, and the same aggregate passed as the first stage of hosted M15 Node 24.
 
 ## 1. Closure unit
 

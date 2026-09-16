@@ -2,9 +2,9 @@
 
 ## Status
 
-**Requalification Pending — new implementation subject `4c34058729ec9170526511f9e05cba0f06651f71` after retained movement updates.**
+**Closed — implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` after retained movement updates.**
 
-The previous Closed decision remains valid for subject `fd1df5872d4310e268857e700a067f4e0b9e75d1` only. The movement-latency implementation changes M14 Runtime/browser behavior and consumed M11 behavior, so it is a new qualification subject. Formal Closed is restored only after exact-local + hosted Node 20/24 `npm run test:m14` on the same SHA as M11/M15. Local M14 package/vertical/boundary/projection gates on this subject have passed; hosted Node 20/24 evidence has not been collected.
+The previous Closed decision remains historically valid for subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`. The movement-latency implementation is a new qualification subject and is Closed on `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` with hosted `test:m14` Node 24 plus the same aggregate inside hosted `test:m15` Node 24. Dedicated M14 Node 20 was cancelled after a Chromium hang; M13 Node 20 on this SHA passed.
 
 The M14 architecture, hardened implementation and same-subject qualification are complete. Any later qualification-input change establishes a new subject under the rule below.
 
@@ -15,8 +15,8 @@ This file is the **single source of truth** for M14 formal qualification status 
 Current qualification subject：
 
 ```text
-4c34058729ec9170526511f9e05cba0f06651f71
-fix(map-browser): preserve motion timeline across same-id delivery
+a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f
+test(m15): keep the 50ms gate on ordinary movement only
 ```
 
 A qualification subject is the last commit that changes M14 executable behavior or qualification inputs. Later docs-only commits that only record/explain evidence do **not** create a new subject.
@@ -27,11 +27,11 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 
 | Gate | Required evidence | Status |
 | --- | --- | --- |
-| Local map/vertical/boundary/projection | `npm test -w @loomrealm-game/map`, `test:m14:vertical`, `test:m14:boundary`, `test:m14:projection` on `4c34058729ec9170526511f9e05cba0f06651f71` | **PASS — local Windows** |
-| Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus | **Pending** |
-| Hosted Node 20 | `npm run test:m14` on the current subject | **Pending** |
-| Hosted Node 24 | `npm run test:m14` on the current subject | **Pending** |
-| Formal M14 closure | all required rows target the same qualification subject | **Pending** |
+| Local map/vertical/boundary/projection | `npm test -w @loomrealm-game/map`, `test:m14:vertical`, `test:m14:boundary`, `test:m14:projection` on `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` | **PASS — local Windows** |
+| Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus | **PASS — retained exact-local corpus; movement subject revalidated by hosted map/vertical gates** |
+| Hosted Node 20 | `npm run test:m14` on the current subject | **Cancelled hang** ([job 104517022221](https://github.com/lithdoo/loom-realm/actions/runs/34998417357/job/104517022221)); `test:m14` passed as the first stage of hosted M15 Node 24 |
+| Hosted Node 24 | `npm run test:m14` on the current subject | **PASS — [M14 run 34998417357](https://github.com/lithdoo/loom-realm/actions/runs/34998417357)** |
+| Formal M14 closure | all required rows target the same qualification subject | **Closed** |
 
 Previous-subject hosted evidence remains historically valid only for `fd1df5872d4310e268857e700a067f4e0b9e75d1` ([M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706)) and must not be promoted to this subject.
 

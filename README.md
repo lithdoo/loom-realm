@@ -67,7 +67,7 @@ M17 PWA full E2E                            pending
 
 M14/M15 formal evidence lives in [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md) and [`m15-qualification.md`](./doc/30-implementation/m15-qualification.md)。
 
-> **Accepted evolution notice（2026-09-15）：** 上表 Closed 仍指向当前旧 executable subjects。`RenderDomain.update()` 已在 `feat/render-movement-latency` 实现；implementation subject `4c34058729ec9170526511f9e05cba0f06651f71` 为 `Requalification Pending`，必须在同一 SHA 上按 M11 → M14 → M15 重新关闭（含 hosted Node 20/24 与 hosted frozen-Hostra）后才恢复无条件 Closed。
+> **Accepted evolution notice（2026-09-16）：** ADR 0035 `RenderDomain.update()` 已在 implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上按 M11 → M14 → M15 重新 Closed。上表 Closed 描述该 subject；旧 executable subject `fd1df5872d4310e268857e700a067f4e0b9e75d1` 仍是历史 Closed。
 
 M15 的 Main/Data/Renderer/Input/Presentation/game logical intent保持冻结；此前 standalone Electron implementation作为历史/迁移证据保留。Canonical physical host已经由 ADR 0034纠正为：
 
@@ -91,9 +91,9 @@ shutdown grace 1000 ms
 
 当前 M15 physical SSOT 是 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)。ADR 0033只保留 historical direct-Electron compatibility relevance。
 
-M15 old executable subject is Closed on the frozen Hostra baseline。ADR 0035 downstream implementation will require a new evidence subject but does not reopen physical design；only a real Hostra baseline or frozen LoomRealm contract contradiction may do that。
+M15 is Closed on implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` with the frozen Hostra baseline。ADR 0035 does not reopen physical design；only a real Hostra baseline or frozen LoomRealm contract contradiction may do that。
 
-Last formally closed old-subject milestone gate：
+Last formally closed milestone gate：
 
 ```text
 npm run test:m15
