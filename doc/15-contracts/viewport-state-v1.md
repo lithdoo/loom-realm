@@ -4,7 +4,7 @@
 > 状态：Draft / Normative Candidate / Not Frozen  
 > 协议版本：1  
 > 协议标识：`loomrealm.viewport-state/1`  
-> 主要定义：Renderer→Subsystem current presentation-surface logical viewport retained state、fresh-carrier baseline、validation、coalescing、failure/currentness boundary  
+> 主要定义：Renderer→Subsystem single-surface current presentation viewport retained state、fresh-carrier baseline、validation、coalescing、failure/currentness boundary  
 > 依赖：[Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
 > 组合：[Renderer Data Profile v2](./renderer-data-profile-v2.md)  
 > Conformance：[Viewport State v1 Conformance](./viewport-state-conformance-v1.md)  
@@ -19,10 +19,20 @@
 Viewport State v1只复制一个事实：
 
 ```text
-current Renderer presentation surface logical CSS width/height
+current Renderer participant 的单一 logical presentation surface CSS width/height
 ```
 
-它不表达用户动作、Frame focus、DOM element geometry或 render scale。
+v1 cardinality：
+
+```text
+one current Renderer participant
+→ 0..1 current legal viewport observation
+→ same observation published independently to each current Subsystem Data connection
+```
+
+它不表达用户动作、Frame focus、DOM element geometry、render scale或 multi-surface routing。
+
+如果未来一个 Renderer participant需要多个独立 viewport，必须新设计/version；v1 MUST NOT被扩展 `surfaceId`、window id或 per-Frame surface选择。
 
 唯一方向：
 
@@ -84,6 +94,7 @@ safe integer
 devicePixelRatio
 physical display pixels
 screen/display id
+surface/window id
 orientation
 safe-area
 focus/visibility
@@ -108,7 +119,7 @@ viewport.state(W,H)
 
 Sender MAY 在尚未进入 shared serialized writer emission boundary 前 coalesce 中间尺寸，只保留 latest state。相同 `{width,height}` MAY suppress。
 
-一旦一个 viewport message已进入 Profile 定义的 emitted/ordered-send boundary，后续 coalescing不得撤回或重排它。
+一旦 viewport message已进入 Profile 定义的 emitted/ordered-send boundary，后续 coalescing不得撤回或重排它。
 
 Receiver只保留 latest successfully accepted viewport value；不建立 history、event log、ACK、replay cursor 或跨 carrier revision continuity。
 
@@ -179,15 +190,15 @@ Input Interest
 keyboard/pointer/gamepad producer availability
 ```
 
-A visible map Frame may be suspended behind a child Frame and still receive viewport convergence through its Subsystem Runtime's current Data connection.
+A visible map Frame may be suspended behind a child Frame and still receive viewport convergence through its Subsystem Runtime's current Data connection。
 
-Viewport publication MUST NOT create or widen ordinary input authority.
+Viewport publication MUST NOT create or widen ordinary input authority。
 
 ---
 
 ## 7. Physical Source Requirements
 
-Renderer-side source MUST normalize to positive safe-integer logical CSS pixels before publication.
+Renderer-side source MUST normalize to positive safe-integer logical CSS pixels before publication。
 
 Desktop realization SHOULD：
 
@@ -199,15 +210,17 @@ coalesce resize burst before emission
 suppress unchanged sample
 ```
 
-Zero/invalid physical samples MUST NOT be serialized as legal `viewport.state`; they do not erase last legal retained source observation.
+Zero/invalid physical samples MUST NOT be serialized as legal `viewport.state`; they do not erase last legal retained source observation。
 
-Focus/blur MUST NOT control viewport state availability. Hidden/visible transitions MAY trigger a resample for convergence but visibility itself is not payload state.
+Focus/blur MUST NOT control viewport state availability。Hidden/visible transitions MAY trigger a resample for convergence but visibility itself is not payload state。
+
+The physical source MUST represent the one logical presentation surface associated with the current Renderer participant。If a concrete platform cannot unambiguously identify that single surface, it does not conform to v1 and must not invent selection semantics。
 
 ---
 
 ## 8. Validation / Failure
 
-Profile receiver performs common representation preflight before child dispatch. Viewport child then exact-validates message kind/shape/value.
+Profile receiver performs common representation preflight before child dispatch。Viewport child then exact-validates message kind/shape/value。
 
 Malformed Viewport message is protocol-invalid：
 
@@ -225,7 +238,7 @@ User Input reset
 Render Domain destroy
 ```
 
-Well-formed duplicate/same-value state is accepted and MAY produce no author callback.
+Well-formed duplicate/same-value state is accepted and MAY produce no author callback。
 
 ---
 
@@ -256,25 +269,26 @@ unsubscribe idempotent
 Runtime terminal ends future callbacks
 ```
 
-Listener synchronous throw MUST be contained. If a callback returns a thenable despite the `void` author type, its completion MUST NOT become Data-reader/backpressure flow control; rejection MUST be locally contained/reported rather than becoming an unhandled protocol failure.
+Listener synchronous throw MUST be contained。If a callback returns a thenable despite the `void` author type, its completion MUST NOT become Data-reader/backpressure flow control；rejection MUST be locally contained/reported rather than becoming an unhandled protocol failure。
 
 ---
 
 ## 10. Limits
 
-Viewport State v1 inherits Profile v2 common application-unit / JSON-depth gates. It defines no larger custom payload budget because its exact message is constant-size apart from decimal number representation.
+Viewport State v1 inherits Profile v2 common application-unit / JSON-depth gates。It defines no larger custom payload budget because its exact message is constant-size apart from decimal number representation。
 
-Implementations MUST NOT add arbitrary metadata/extensions under this v1 message.
+Implementations MUST NOT add arbitrary metadata/extensions under this v1 message。
 
 ---
 
 ## 11. Final Invariants
 
-1. Viewport State v1 is retained state, not an event stream.
-2. It is independent of Frame/Activation/InputTarget/Input Interest.
-3. It uses logical CSS pixels only.
-4. Carrier replacement creates a fresh wire baseline but does not clear retained author observation.
-5. No revision/ACK/replay/history exists.
-6. Malformed viewport data retires Data, not Runtime/Frame authority.
-7. Main never transports or owns the width/height value.
-8. Business policy such as min/max/settle/camera remains outside this protocol.
+1. Viewport State v1 is retained state, not an event stream。
+2. One current Renderer participant has at most one logical viewport in v1。
+3. Viewport is independent of Frame/Activation/InputTarget/Input Interest。
+4. It uses logical CSS pixels only。
+5. Carrier replacement creates a fresh wire baseline but does not clear retained author observation。
+6. No revision/ACK/replay/history/multi-surface routing exists。
+7. Malformed viewport data retires Data, not Runtime/Frame authority。
+8. Main never transports or owns the width/height value。
+9. Business policy such as min/max/settle/camera remains outside this protocol。
