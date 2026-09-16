@@ -6,6 +6,7 @@
 
 ```text
 Base:     947e9b3 Implement Map PR2 dynamic viewport, Essentials letterbox, and 720/1080 Chromium gates
+Subject:  26fc25a Close Map dynamic viewport on Desktop with official Hostra 640/720/1080 P95
 Branch:   feat/map-viewport-pr2
 Node 24:  v24.19.0 (PATH)
 Node 20:  v20.19.5 (.qualification/node-v20.19.5-win-x64/node.exe)

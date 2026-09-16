@@ -13,7 +13,7 @@ This closes the Map dynamic-viewport delivery that started from `origin/main` `4
 | Map Docs Freeze | `b75caf1` / `fc0f05c` | design/test contract only |
 | PR1 | `164d88b` | fixed 640 chunk schema + 640 Hostra P95 |
 | PR2 | `947e9b3` | dynamic viewport + Chromium 720/1080 |
-| PR3 | this commit on `feat/map-viewport-pr2` | harness + official Hostra 640/720/1080 table |
+| PR3 | `26fc25a` on `feat/map-viewport-pr2` | harness + official Hostra 640/720/1080 table |
 
 Contract: [MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md](./MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md). Evidence: [PR0](./MAP_VIEWPORT_PR0_EVIDENCE.md), [PR1](./MAP_VIEWPORT_PR1_EVIDENCE.md), [PR2](./MAP_VIEWPORT_PR2_EVIDENCE.md), [PR3](./MAP_VIEWPORT_PR3_EVIDENCE.md).
 
