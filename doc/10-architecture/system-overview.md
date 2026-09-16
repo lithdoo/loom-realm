@@ -2,14 +2,14 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：M10–M15 closed baseline；M15 physical realization remains ADR 0034 + recomposition SSOT  
-> 主要定义：logical roles、bootstrap boundary、authority/currentness、Render/Web presentation placement、Platform composition  
+> 稳定程度：M10–M13 frozen baseline；M11/M14/M15 current subjects requalification-ledger owned；Viewport/Profile v2 candidate under ADR0036  
+> 主要定义：logical roles、bootstrap boundary、authority/currentness、Renderer Data/Input/Viewport/Render、Web presentation placement、Platform composition  
 > 依赖：[产品设计总览](../00-overview/product-vision.md)、[文档治理](../00-overview/document-governance.md)  
-> 细化：[平台组合系统](./platform-composition-system.md)、[渲染系统](./rendering-system.md)  
-> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)  
-> 最近复核：2026-09-11
+> 细化：[平台组合系统](./platform-composition-system.md)、[Renderer⇄Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)、[Viewport Capability](./viewport-capability.md)、[渲染系统](./rendering-system.md)  
+> 相关：[Web Presentation Config v1](../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
+> 最近复核：2026-09-16
 
-本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone closure拥有。M15 exact Desktop physical realization由 `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md` + ADR 0034拥有。
+本文只描述 system-level responsibility / authority / topology。精确 browser/ABI/error/qualification semantics由 formal contracts与 milestone/qualification SSOT拥有。M15 exact Desktop physical realization由 `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md` + ADR0034拥有；Viewport/Profile v2 maturity由其 formal contracts与 dedicated qualification ledger拥有。
 
 ---
 
@@ -30,6 +30,7 @@ Main
 Subsystem Runtime
     business state
     Input Interest
+    retained Viewport observation [candidate]
     authoritative Render Domains
     author-facing ContentClient
 
@@ -37,6 +38,7 @@ Renderer
     read-only Main authority mirror
     per-subsystem Data consumers
     Input producer gate
+    presentation-surface Viewport observation [candidate]
     current Render replicas
     thin physical Web projection
 
@@ -95,11 +97,19 @@ Config source、prepared Content selection、private browser binding、Window/do
 
 Main唯一拥有 Session、Runtime/Frame/Stack/Activation、InputTarget、DataAuthority generation/profile 与 failure unwind，并向 Renderer发布 committed authority snapshot。
 
-Web presentation currentness仍由 current Control snapshot + current Renderer Store决定；Platform/Host不得复制第二份 presentation topology authority。
+Main可以选择 Data Application Profile identity，但不拥有或转发 child payload：
+
+```text
+Input state/event
+Viewport width/height
+Render state/event
+```
+
+Web presentation currentness仍由 current Control snapshot + current Renderer Store决定；Platform/Host/Viewport source不得复制第二份 presentation topology authority。
 
 ---
 
-## 4. Renderer Data / Input / Render
+## 4. Renderer Data / Input / Viewport / Render
 
 Current Data identity：
 
@@ -120,7 +130,33 @@ same-generation Data-only reconnect
 
 因此 Data carrier loss不得隐式升级为 Renderer replacement 或第二份 Renderer currentness。
 
-Input继续受 current Data × Main InputTarget × active Activation × Subsystem Interest × physical Producer gate约束。
+Profiles：
+
+```text
+loomrealm.renderer-data/1
+    Frozen: Connection1 + Input1 + Render1
+
+loomrealm.renderer-data/2
+    Candidate: /1 + Viewport State v1
+```
+
+目标 implementation subject按 ADR0036固定选择 `/2`；v1保持 Frozen compatibility profile，profile replacement要求 fresh generation。
+
+Input继续受：
+
+```text
+current Data × Main InputTarget × active Activation × Subsystem Interest × physical Producer
+```
+
+Viewport明确不受该 gate：
+
+```text
+Renderer observes presentation surface logical CSS size
+→ Viewport State v1
+→ Runtime-scoped SubsystemScope.viewport retained observation
+```
+
+它不携 Frame/Activation/InputTarget/DPR/focus/visibility，也不直接修改 DOM/Render Store。Map等业务 consumer自行决定 viewport如何影响 camera/projection并通过普通 Render author API提交结果。
 
 Render：
 
@@ -150,6 +186,8 @@ Window/document bootstrap
 
 Same-generation transport loss不等于 authority removal；fresh Session/generation结束旧 identity universe。
 
+Viewport physical observation不成为第三个 Projector desired-state source；只有 business Runtime据 viewport提交 Render state后，既有 Store→Projector路径才更新 managed projection。
+
 ---
 
 ## 6. Projection / Business Boundary
@@ -158,11 +196,17 @@ Same full live wire-node identity保持 same HTMLElement。Business WC 对 manag
 
 Projector只注入 Web Presentation API 定义的 narrow context/data/resource capability，不创建 component library、AssetManager、dynamic loader、global service locator或 RenderEvent WC ABI。
 
+`SubsystemScope.viewport`属于 Subsystem author API，不是 Web Component→Runtime reverse channel；DOM/ResizeObserver object本身永不暴露给 business Runtime。
+
 ---
 
 ## 7. Failure / Lifetime Boundary
 
 Presentation/bootstrap runtime failure保持 Window-local，不 rollback Store、不 mutate Main/Subsystem、不自动 fail Runtime/Frame。
+
+Viewport malformed data属于 Data child/profile failure并退休 carrier，不自动 unwind Frame/Runtime；Viewport subscriber failure local-contained。
+
+Data carrier loss时 retained `scope.viewport.current`保留最后 observation，但该值不是“当前 carrier/Renderer/paintability存在”的证明。Fresh carrier负责重新建立 wire baseline并最终收敛。
 
 Desktop physical terminal trigger必须由 concrete platform composition映射到 existing Main/RuntimeHosting owner chain；System layer不定义第二份 Runtime failure/kill authority。
 
@@ -194,10 +238,13 @@ Business WC → Store/Data carrier/Content credential
 Renderer → DOM reverse-sync Store
 public PresentationState / second Store/topology
 component registry / AssetManager / dynamic loader
-layout/layer authority / global service locator
+generic Environment service locator
+layout/layer authority
 packages/framework → game-libs/examples reverse dependency
 runtime game/game-lib → tools/* dependency
 ```
+
+Viewport v1只新增 narrow size capability，不作为未来任意 environment facts 的容器。
 
 ---
 
@@ -208,10 +255,12 @@ examples/essentials-v21.1
     consumes
         ↓
 game-libs/map
-    @loomrealm-game/map
+    consumes public @loomrealm/subsystem APIs
 ```
 
 M14只 materialize当前消费者需要的 RMXP/Essentials Map/Tileset facts到 prepared Content；Runtime只通过 M12 ContentClient读取普通 JsonValue，不依赖 importer/Marshal/tooling representation。
+
+Dynamic viewport设计证明 Core capability gap后，通过 ADR0036最小 reopen `SubsystemScope.viewport`；camera/chunk/autotile/map vocabulary仍属于 `game-libs/map`，不得反向进入 framework。
 
 M14 qualification可使用 test-owned composition harness + real Chromium；完整 Hostra-owned Desktop composition属于 M15。
 
@@ -233,17 +282,15 @@ Runner
 Subsystem Runtime
 ```
 
-`@loomrealm/game-launcher-hostra` 在文档中称为 **Hostra launch profile**，表示 PREPARE + Runner realization；它不等于 external Hostra shell。
+`@loomrealm/game-launcher-hostra` 称为 Hostra launch profile，表示 PREPARE + Runner realization；它不等于 external Hostra shell。
 
-M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem、M9–M14 logical semantics。
+M15只纠正 outer physical owner，不改变 Main/Renderer/Subsystem logical semantics。Viewport Desktop source属于 Renderer-side physical realization：它可读取 Window logical CSS size，但不拥有 Main/Data/Frame/Render authority。
 
-Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；same-generation Data-only reconnect保持当前 Renderer identity，只替换 Data physical pair。Hostra window/RPC/OS-signal/failure终态汇入一个 LoomRealm Desktop cancellation/cleanup owner chain。精确 rendezvous/navigation-only bootstrap/shutdown sequence与 frozen Hostra baseline由 M15 physical SSOT拥有。
-
-ADR 0033只保留 historical direct-Electron compatibility relevance；canonical M15 composition由 ADR 0034决定。
+Document reload保持同一 Hostra physical Window但产生 fresh Renderer logical participant；same-generation Data-only reconnect保持当前 Renderer identity，只替换 Data physical pair。精确 rendezvous/navigation-only bootstrap/shutdown由 M15 physical SSOT拥有。
 
 ---
 
-## 11. Phase Route
+## 11. Phase / Evidence Route
 
 ```text
 M10 Input
@@ -256,6 +303,14 @@ M10 Input
 → M17 PWA Full E2E / Equivalence
 ```
 
-M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
+Viewport/Profile v2 是 M14 real consumer暴露的跨 M8–M15 capability correction，不创建新的 application authority milestone。
 
-当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M14/M15 architecture/design 保持冻结，current-subject formal status 为 Requalification Pending；Architecture docs不独立发布 milestone evidence。
+其 closure独立记录于：
+
+```text
+doc/30-implementation/viewport-profile-v2-qualification.md
+```
+
+Map dynamic viewport的 PR0/performance Freeze仍由其 local draft拥有；Core docs Freeze与 executable qualification不得被 map draft替代。
+
+当前 milestone/evidence状态由各 qualification ledger与 `phase-1-delivery-plan.md` 汇总；Architecture docs不独立发布 PASS/Closed 证据。
