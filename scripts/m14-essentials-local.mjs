@@ -147,8 +147,9 @@ async function browserQualification(renderState, resources) {
       const view = document.querySelector("lr-map-view"); const sprite = document.querySelector("lr-map-sprite");
       let tileVisible = false; let playerVisible = false;
       for (let attempt = 0; attempt < 500 && (!tileVisible || !playerVisible); attempt += 1) {
-        const mapCanvas = view?.shadowRoot?.querySelector("canvas"); const spriteCanvas = sprite?.shadowRoot?.querySelector("canvas");
-        if (mapCanvas) tileVisible = visible(mapCanvas.getContext("2d").getImageData(0, 0, 640, 480).data);
+        const mapCanvas = view?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden]), canvas");
+        const spriteCanvas = sprite?.shadowRoot?.querySelector("canvas");
+        if (mapCanvas?.width && mapCanvas?.height) tileVisible = visible(mapCanvas.getContext("2d").getImageData(0, 0, mapCanvas.width, mapCanvas.height).data);
         if (spriteCanvas?.width && spriteCanvas?.height) playerVisible = visible(spriteCanvas.getContext("2d").getImageData(0, 0, spriteCanvas.width, spriteCanvas.height).data);
         if (!tileVisible || !playerVisible) await new Promise((resolve) => setTimeout(resolve, 10));
       }
@@ -172,7 +173,8 @@ try {
   const tilesetResult = await production.content.record("struct.Tileset", String(map.tileset_id));
   const tileset = tilesetResult.value;
   assert.deepEqual(Object.keys(map), ["tileset_id", "width", "height", "data"]);
-  assert.deepEqual(Object.keys(tileset), ["id", "tileset_name", "passages", "priorities"]);
+  assert.deepEqual(Object.keys(tileset), ["id", "tileset_name", "autotile_names", "passages", "priorities"]);
+  assert.ok(Array.isArray(tileset.autotile_names) && tileset.autotile_names.length === 7);
   const tilesetResource = await production.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`);
   const playerResource = await production.content.resource("resource.Graphics", `Characters/${options["character-name"]}`);
   assert.equal(tilesetResource.mime, "image/png");

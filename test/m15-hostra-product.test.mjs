@@ -192,6 +192,36 @@ function nearestRank(values, p) {
   return sorted[Math.max(0, Math.ceil(p * sorted.length) - 1)];
 }
 
+async function setLogicalViewport(page, width, height) {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setDeviceMetricsOverride", {
+    width,
+    height,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await page.waitForFunction(([innerWidth, innerHeight]) => window.innerWidth === innerWidth && window.innerHeight === innerHeight, [width, height], { timeout: 10_000 });
+  await page.waitForFunction(([boxWidth, boxHeight]) => {
+    const data = document.querySelector("lr-map-view")?._latestData;
+    return data?.viewportWidth === boxWidth && data?.viewportHeight === boxHeight;
+  }, [width, height], { timeout: 10_000 });
+}
+
+async function mapPixel(page, sx = 352, sy = 240) {
+  return page.evaluate(({ x: sx0, y: sy0 }) => {
+    const canvases = [...(document.querySelector("lr-map-view")?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].filter((canvas) => !canvas.hidden);
+    for (const canvas of canvases) {
+      const left = Number.parseFloat(canvas.style.left) || 0;
+      const top = Number.parseFloat(canvas.style.top) || 0;
+      const x = sx0 - left;
+      const y = sy0 - top;
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
+      return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data];
+    }
+    return [0, 0, 0, 0];
+  }, { x: sx, y: sy });
+}
+
 async function rmBusy(target) {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     try {
@@ -226,21 +256,21 @@ async function prepareMovementInstallation({ cyclicMap = false } = {}) {
   if (cyclicMap) {
     await writeFile(path.join(fsdb, "[struct]Map", "900001.json"), JSON.stringify({
       tileset_id: 1,
-      width: 128,
+      width: 512,
       height: 8,
       data: {
         dimensions: 3,
-        xSize: 128,
+        xSize: 512,
         ySize: 8,
         zSize: 3,
-        values: [...Array(1024).fill(384), ...Array(2048).fill(0)],
+        values: [...Array(4096).fill(384), ...Array(8192).fill(0)],
       },
     }));
     await writeFile(path.join(transferDir, "900001.json"), JSON.stringify({
       id: 900001,
       steps: [],
       contacts: [],
-      edges: Array.from({ length: 8 }, (_, y) => ({ x: 127, y, direction: 6, targetMapId: 900001, targetX: 0, targetY: y })),
+      edges: Array.from({ length: 8 }, (_, y) => ({ x: 511, y, direction: 6, targetMapId: 900001, targetX: 0, targetY: y })),
     }));
     await writeFile(path.join(transferDir, "1.json"), JSON.stringify({
       id: 1,
@@ -390,6 +420,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
     const state = await page.evaluate(() => ({ url: location.href, html: document.documentElement.outerHTML.slice(0, 4000), dataset: { ...document.documentElement.dataset } })).catch((error) => ({ error: error.message }));
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
   }
+  await setLogicalViewport(page, 640, 480);
   await waitFor(async () => (await events(eventLog)).some(({ type }) => type === "data-current"), "initial Data candidate");
   const rpc = await connectRpc(ready.data.rpcEndpoint, hostra.rpcToken);
   const hostState = await rpc.call("getHostState");
@@ -422,34 +453,40 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   assert.equal(await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity), firstIdentity);
   assert.equal((await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length, firstDocuments);
 
-  const mapPixel = () => page.locator("lr-map-view").evaluate((element) => {
-    const canvas = element.shadowRoot.querySelector("canvas");
-    return [...canvas.getContext("2d").getImageData(352, 240, 1, 1).data];
-  });
+  const mapPixelAt = () => mapPixel(page, 352, 240);
   await page.bringToFront();
-  await page.mouse.click(700, 550);
+  await page.mouse.click(320, 240);
   await page.waitForFunction(() => document.hasFocus());
-  assert.deepEqual((await mapPixel()).slice(0, 3), [220, 40, 40]);
+  assert.deepEqual((await mapPixelAt()).slice(0, 3), [220, 40, 40]);
   await page.keyboard.press("ArrowRight");
   await page.waitForFunction(() => {
-    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas");
-    return canvas && [...canvas.getContext("2d").getImageData(352, 240, 1, 1).data].slice(0, 3).join(",") === "40,80,220";
+    const canvases = [...(document.querySelector("lr-map-view")?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].filter((canvas) => !canvas.hidden);
+    for (const canvas of canvases) {
+      const left = Number.parseFloat(canvas.style.left) || 0;
+      const top = Number.parseFloat(canvas.style.top) || 0;
+      const x = 352 - left;
+      const y = 240 - top;
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
+      return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data].slice(0, 3).join(",") === "40,80,220";
+    }
+    return false;
   });
-  const moved = await mapPixel();
+  const moved = await mapPixelAt();
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(100);
-  assert.deepEqual(await mapPixel(), moved);
+  assert.deepEqual(await mapPixelAt(), moved);
   await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { code: "ArrowLeft" })));
   await page.waitForTimeout(100);
-  assert.deepEqual(await mapPixel(), moved);
+  assert.deepEqual(await mapPixelAt(), moved);
 
   await page.reload();
   await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
   await page.waitForSelector("lr-map-view lr-map-sprite");
+  await setLogicalViewport(page, 640, 480);
   await waitFor(async () => (await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length > firstDocuments, "fresh document bootstrap");
   const secondIdentity = await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity);
   assert.notEqual(secondIdentity, firstIdentity);
-  assert.deepEqual(await mapPixel(), moved);
+  assert.deepEqual(await mapPixelAt(), moved);
 
   await page.evaluate(() => {
     document.documentElement.dataset.fetchInterceptions = "0";
@@ -479,12 +516,20 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   assert.equal(await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity), secondIdentity);
   await page.waitForTimeout(500);
   await page.bringToFront();
-  await page.mouse.click(700, 550);
+  await page.mouse.click(320, 240);
   await page.waitForFunction(() => document.hasFocus());
   await page.keyboard.press("ArrowLeft");
   await page.waitForFunction(() => {
-    const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas");
-    return canvas && [...canvas.getContext("2d").getImageData(352, 240, 1, 1).data].slice(0, 3).join(",") === "220,40,40";
+    const canvases = [...(document.querySelector("lr-map-view")?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].filter((canvas) => !canvas.hidden);
+    for (const canvas of canvases) {
+      const left = Number.parseFloat(canvas.style.left) || 0;
+      const top = Number.parseFloat(canvas.style.top) || 0;
+      const x = 352 - left;
+      const y = 240 - top;
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
+      return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data].slice(0, 3).join(",") === "220,40,40";
+    }
+    return false;
   });
   assert.deepEqual(await page.evaluate(() => ({
     fetch: document.documentElement.dataset.fetchInterceptions,
@@ -603,6 +648,7 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
   await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
   await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  await setLogicalViewport(page, 640, 480);
   await page.evaluate(() => {
     const records = [];
     globalThis.__loomrealmMovementRecords = records;
@@ -643,7 +689,7 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   assert.equal(beforePixels.equals(afterPixels), false, "logical first paint must produce a screenshot pixel difference within one display frame");
 });
 
-test("M15 128x8 ordinary and refresh movement first-paint P95 stay within 50ms", { timeout: 600_000 }, async (t) => {
+test("M15 Hostra 640/720/1080 ordinary and refresh first-paint P95", { timeout: 3_600_000 }, async (t) => {
   const installation = await prepareMovementInstallation({ cyclicMap: true });
   const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
@@ -678,11 +724,12 @@ test("M15 128x8 ordinary and refresh movement first-paint P95 stay within 50ms",
   await page.waitForFunction(() => document.querySelector("lr-map-view")?._latestData?.mapId === 900001, null, { timeout: 10_000 });
   const sampleMove = async () => {
     const beforeX = await page.evaluate(() => {
-      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
+      const view = document.querySelector("lr-map-view");
+      const data = view?._latestData;
       globalThis.__loomrealmMovementRecords.length = 0;
-      globalThis.__loomrealmPreviousCoverage = Array.isArray(tiles) && tiles.length > 0
-        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
-        : null;
+      globalThis.__loomrealmPreviousVisualEpoch = data?.visualEpoch ?? null;
+      globalThis.__loomrealmPreviousDraws = view?._tileDrawCount ?? 0;
+      globalThis.__loomrealmPreviousCameraOnly = view?._cameraOnlyCommits ?? 0;
       return document.querySelector("lr-map-sprite")?._latestData?.x ?? null;
     });
     await page.keyboard.press("ArrowRight");
@@ -700,15 +747,19 @@ test("M15 128x8 ordinary and refresh movement first-paint P95 stay within 50ms",
       return records.some((record) => record.name === "browser-motion-complete");
     }, null, { timeout: 2_000 }).catch(() => undefined);
     const after = await page.evaluate(() => {
-      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
-      const coverage = Array.isArray(tiles) && tiles.length > 0
-        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
-        : null;
+      const view = document.querySelector("lr-map-view");
+      const data = view?._latestData;
+      const draws = view?._tileDrawCount ?? 0;
+      const cameraOnly = view?._cameraOnlyCommits ?? 0;
       return {
         records: globalThis.__loomrealmMovementRecords.slice(),
         x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
-        mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
-        refresh: coverage !== globalThis.__loomrealmPreviousCoverage,
+        mapId: data?.mapId ?? null,
+        viewportWidth: data?.viewportWidth ?? null,
+        viewportHeight: data?.viewportHeight ?? null,
+        refresh: data?.visualEpoch !== globalThis.__loomrealmPreviousVisualEpoch,
+        cameraOnlyDelta: cameraOnly - (globalThis.__loomrealmPreviousCameraOnly ?? 0),
+        tileDrawsDelta: draws - (globalThis.__loomrealmPreviousDraws ?? 0),
       };
     });
     if (after.mapId !== 900001 || after.x === null || (beforeX !== null && after.x <= beforeX)) return null;
@@ -720,55 +771,97 @@ test("M15 128x8 ordinary and refresh movement first-paint P95 stay within 50ms",
     return {
       latency: paint.at - input.at,
       refresh: after.refresh === true,
+      cameraOnlyDelta: after.cameraOnlyDelta,
+      tileDrawsDelta: after.tileDrawsDelta,
+      viewportWidth: after.viewportWidth,
+      viewportHeight: after.viewportHeight,
     };
   };
 
-  const rounds = [];
-  for (let round = 1; round <= 3; round += 1) {
-    const ordinary = [];
-    const refresh = [];
-    let attempts = 0;
-    let invalid = 0;
-    let warmupLeft = 20;
-    while (ordinary.length < 100 || refresh.length < 30) {
-      attempts += 1;
-      if (attempts > 800) break;
-      const sample = await sampleMove();
-      if (sample === null) {
-        invalid += 1;
-        continue;
+  const sizes = [
+    { width: 640, height: 480, refreshMs: 50 },
+    { width: 1280, height: 720, refreshMs: 75 },
+    { width: 1920, height: 1080, refreshMs: 100 },
+  ];
+  const table = [];
+  for (const size of sizes) {
+    await setLogicalViewport(page, size.width, size.height);
+    await page.mouse.click(Math.min(320, size.width - 8), Math.min(240, size.height - 8));
+    await page.waitForFunction(() => document.hasFocus());
+    const rounds = [];
+    for (let round = 1; round <= 3; round += 1) {
+      const ordinary = [];
+      const refresh = [];
+      const ordinaryCameraOnly = [];
+      const ordinaryTileDraws = [];
+      let attempts = 0;
+      let invalid = 0;
+      let warmupLeft = 20;
+      while (ordinary.length < 100 || refresh.length < 30) {
+        attempts += 1;
+        if (attempts > 1500) break;
+        if (attempts % 25 === 0) {
+          await page.mouse.click(Math.min(320, size.width - 8), Math.min(240, size.height - 8));
+          await page.waitForFunction(() => document.hasFocus()).catch(() => undefined);
+          const progress = { size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length };
+          t.diagnostic(JSON.stringify(progress));
+          process.stdout.write(`M15_P95_PROGRESS ${JSON.stringify(progress)}\n`);
+        }
+        const sample = await sampleMove();
+        if (sample === null) {
+          invalid += 1;
+          continue;
+        }
+        if (sample.viewportWidth !== size.width || sample.viewportHeight !== size.height) {
+          invalid += 1;
+          continue;
+        }
+        if (warmupLeft > 0) {
+          warmupLeft -= 1;
+          continue;
+        }
+        if (sample.refresh) {
+          if (refresh.length < 30) refresh.push(sample.latency);
+          continue;
+        }
+        if (ordinary.length < 100) {
+          ordinary.push(sample.latency);
+          ordinaryCameraOnly.push(sample.cameraOnlyDelta);
+          ordinaryTileDraws.push(sample.tileDrawsDelta);
+        }
       }
-      if (warmupLeft > 0) {
-        warmupLeft -= 1;
-        continue;
-      }
-      if (sample.refresh) {
-        if (refresh.length < 30) refresh.push(sample.latency);
-        continue;
-      }
-      if (ordinary.length < 100) ordinary.push(sample.latency);
+      assert.ok(invalid / attempts <= 0.05, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+      assert.equal(ordinary.length, 100, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+      assert.equal(refresh.length, 30, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+      rounds.push({ round, attempts, invalid, ordinary, refresh, ordinaryCameraOnly, ordinaryTileDraws });
     }
-    assert.ok(invalid / attempts <= 0.05, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-    assert.equal(ordinary.length, 100, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-    assert.equal(refresh.length, 30, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-    rounds.push({ round, attempts, invalid, ordinary, refresh });
+    const ordinary = rounds.flatMap((round) => round.ordinary);
+    const refresh = rounds.flatMap((round) => round.refresh);
+    const ordinaryCameraOnly = rounds.flatMap((round) => round.ordinaryCameraOnly);
+    const ordinaryTileDraws = rounds.flatMap((round) => round.ordinaryTileDraws);
+    const cameraOnlyHits = ordinaryCameraOnly.filter((delta) => delta >= 1).length;
+    const zeroTileDrawHits = ordinaryTileDraws.filter((delta) => delta === 0).length;
+    const row = {
+      viewport: `${size.width}x${size.height}`,
+      refreshGateMs: size.refreshMs,
+      ordinary: { p50: nearestRank(ordinary, 0.5), p95: nearestRank(ordinary, 0.95), max: Math.max(...ordinary), n: ordinary.length },
+      refresh: { p50: nearestRank(refresh, 0.5), p95: nearestRank(refresh, 0.95), max: Math.max(...refresh), n: refresh.length },
+      cameraOnly: { hits: cameraOnlyHits, n: ordinaryCameraOnly.length, zeroTileDrawHits },
+      rounds,
+    };
+    table.push(row);
+    assert.ok(row.ordinary.p95 <= 50, JSON.stringify(row.ordinary));
+    assert.ok(row.refresh.p95 <= size.refreshMs, JSON.stringify(row.refresh));
+    assert.ok(cameraOnlyHits / ordinaryCameraOnly.length >= 0.95, JSON.stringify(row.cameraOnly));
+    assert.ok(zeroTileDrawHits / ordinaryTileDraws.length >= 0.95, JSON.stringify(row.cameraOnly));
   }
-  const ordinary = rounds.flatMap((round) => round.ordinary);
-  const refresh = rounds.flatMap((round) => round.refresh);
-  const p50 = nearestRank(ordinary, 0.5);
-  const p95 = nearestRank(ordinary, 0.95);
-  const max = Math.max(...ordinary);
-  const refreshP50 = nearestRank(refresh, 0.5);
-  const refreshP95 = nearestRank(refresh, 0.95);
-  const refreshMax = Math.max(...refresh);
   const report = {
     subject: process.env.GITHUB_SHA ?? "local-worktree",
+    clock: "same Browser Window performance.now(); input-captured.at to browser-first-motion-paint.at",
     platform: { node: process.version, os: `${process.platform} ${os.release()}`, cpu: os.cpus()[0]?.model ?? "unknown" },
-    rounds,
-    ordinary: { p50, p95, max, n: ordinary.length, latencies: ordinary },
-    refresh: { p50: refreshP50, p95: refreshP95, max: refreshMax, n: refresh.length, latencies: refresh },
+    table,
   };
+  await fs.mkdir(path.join(repository, "artifacts"), { recursive: true });
+  await writeFile(path.join(repository, "artifacts", "map-viewport-pr3-hostra.json"), `${JSON.stringify(report, null, 2)}\n`);
   process.stdout.write(`M15_MOVEMENT_QUALIFICATION ${JSON.stringify(report)}\n`);
-  assert.ok(p95 <= 50, JSON.stringify(report));
-  assert.ok(refreshP95 <= 50, JSON.stringify(report));
 });

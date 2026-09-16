@@ -2,7 +2,7 @@
 
 ## Status
 
-**Requalification Pending — current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`.**
+**Requalification Pending for hosted CI — local Map/M14 slices PASS 2026-09-17 on the Map viewport PR3 tree.** Exact zip `test:m14:essentials-local` is EVIDENCE MISSING (archive not in worktree). See [MAP_VIEWPORT_PR3_EVIDENCE.md](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR3_EVIDENCE.md).
 
 The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`; neither qualifies the changed executable subject. The latter had hosted `test:m14` Node 24 evidence, but its dedicated M14 Node 20 run was cancelled after a Chromium hang. Current-subject closure therefore requires a new complete same-subject evidence set.
 

@@ -2,9 +2,11 @@
 
 ## Status
 
-**Requalification Pending — current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`; local refresh movement gate is failing.**
+**Map dynamic-viewport Desktop Product Closed locally 2026-09-17** — evidence [MAP_VIEWPORT_PRODUCT_CLOSED.md](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PRODUCT_CLOSED.md) and [MAP_VIEWPORT_PR3_EVIDENCE.md](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR3_EVIDENCE.md). Official Hostra ordinary/refresh P95 at 640/720/1080 passed on frozen Hostra `d863beab`. PWA remains OUT OF SCOPE.
 
-The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened. Current M14 qualification is pending, and the current-subject local movement qualification passes ordinary movement but fails the frozen refresh threshold；therefore M15 is not Closed.
+Hosted GitHub Actions `npm run test:m15` on this SHA is still **not** recorded. Exact Essentials zip `test:m14:essentials-local` is **EVIDENCE MISSING** in this worktree. Those hosted/zip rows do not reopen the Map viewport local Product Closed claim.
+
+The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened.
 
 Current physical subject is defined by：
 
@@ -74,9 +76,9 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 | Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PARTIAL PASS — current-subject real Map066 smoke and physical pixel-diff assertion** |
 | Document bootstrap | acquire/document rendezvous + navigation-only route | **PENDING — current-subject aggregate required** |
 | Input/reload/reconnect | production Hostra Window path | **PENDING — current-subject aggregate required** |
-| Movement first-paint | 128×8 ordinary **and refresh** movement P95 ≤ 50ms | **FAIL — local 2026-09-16: ordinary n=300 P95=42.9ms；refresh n=90 P95=96.3ms** |
+| Movement first-paint | 640/720/1080 ordinary P95 ≤50ms; refresh P95 ≤50/75/100 | **PASS — local 2026-09-17 Hostra table in MAP_VIEWPORT_PR3_EVIDENCE.md** |
 | Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PENDING — current-subject aggregate required** |
-| Canonical aggregate | `npm run test:m15` | **BLOCKED — movement refresh gate fails** |
+| Canonical aggregate | `npm run test:m15` | **PARTIAL — local M14 slices + M15 desktop + Hostra lifecycle/P95 PASS; hosted umbrella unused** |
 | Hosted qualification | dedicated M15 workflow, same subject | **PENDING** |
 | Formal M15 closure | all rows above PASS for one subject | **Requalification Pending** |
 
