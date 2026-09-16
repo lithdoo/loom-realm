@@ -12,7 +12,7 @@ Contract: MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md
 Motion child: MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md
 Evidence: MAP_VIEWPORT_PR0_EVIDENCE.md
 Production subject: 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9 (zero production diff)
-docs-only SHA: freeze-registration commit after this review is landed
+docs-only SHA: fc0f05c4891cbfb19dc5dd0cadba90b980159568
 ```
 
 Conflict: this reviewer authored the revised §5 accepted-vs-live sentence in the same session. Owner “继续” is the design authority for that split. This review independently checks PR0 measurements and the remainder of the original contract. It does not invent a second author for the §5 paragraph.

@@ -178,7 +178,7 @@ Reviewer: Cursor Grok 4.6
 Conflict: the same session authored the §5 wording; freeze signs PR0 numbers + remainder of the original contract, not a second independent author of that paragraph
 Evidence: examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md
 Review: examples/essentials-v21.1-local/MAP_VIEWPORT_DOCS_FREEZE_REVIEW_2026-09-16.md
-docs-only subject SHA: filled by freeze-registration commit after this text
+docs-only subject SHA: fc0f05c4891cbfb19dc5dd0cadba90b980159568
 Not claimed: Implemented, PR1/PR2 product P95, camera-only zero tile draws, PWA
 ```
 
