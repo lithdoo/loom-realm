@@ -5,9 +5,9 @@
 > 主要定义：Subsystem/Definition/Frame/Runtime 边界、Input/Render/Content/Viewport author projection与 lifetime/error ownership  
 > 依赖：[System overview](./system-overview.md) · [Runtime hosting](./runtime-hosting-system.md) · [Stack runtime](./stack-runtime-system.md) · [Rendering](./rendering-system.md) · [Viewport](./viewport-capability.md)  
 > Formal：[Input v1](../15-contracts/user-input-v1.md) · [Render v1](../15-contracts/render-update-v1.md) · [Content v1](../15-contracts/content-api-v1.md) · [Viewport v1](../15-contracts/viewport-state-v1.md) · [Revised Profile v1](../15-contracts/renderer-data-profile-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> 最近复核：2026-09-16
+> 最近复核：2026-09-16（旧冻结 author 约束保全）
 
-本文件管理角色、author API ownership与通用 mutation/lifetime，不定义地图 gameplay 或物理 DOM sampling；wire/currentness/callback细节以 formal contracts为准。旧 Profile v2已 Superseded。
+本文件管理角色、author API ownership与通用 mutation/lifetime，不定义地图 gameplay 或物理 DOM sampling；exact wire/currentness/callback细节以 formal contracts为准。旧 Profile v2已 Superseded。**压缩架构描述不得改写原 M10/M11/M12 已冻结的 author surface、limit 或错误语义。**
 
 ## 1. Role/dependency and authority
 
@@ -27,7 +27,7 @@ Runner preflight→capabilities→Runtime Control hello/identified→Definition.
 
 ## 3. Frame outcome / ordinary mutation gate（通用）
 
-Public `Frame`：`id / params / signal / call(subsystem,params)`，不公开 Activation id、Data G/P或 DOM。FrameOutcome：completed/cancelled/failed。Accepted child call suspend caller/revoke Activation；child完成后幸存 caller取得 fresh Activation。Local Frame Context mutation gate拦住 pending call/return、administrative suspension、closing/closed、Runtime terminal期间的 **ordinary Frame business mutation**。Input State在 same-current-Activation pending mutation期 retains latest/suppresses business delivery，Event drop；known-no-commit reopen先converge State。RenderDomain是独立 Runtime resource，Frame close/suspend不会隐式 destroy/hide Domain。
+Public `Frame`：`id / params / signal / call(subsystem,params)`，不公开 Activation id、Data G/P或 DOM。FrameOutcome：completed/cancelled/failed。Accepted child call suspend caller/revoke Activation；child完成后幸存 caller取得 fresh Activation。Local Frame Context mutation gate拦住 pending call/return、administrative suspension、closing/closed、Runtime terminal期间的 **ordinary Frame business mutation**。Input State在 same-current-Activation pending mutation期 retains latest/suppresses business delivery，Event drop；known-no-commit reopen先converge State，才暴露 recoverable rejection。RenderDomain是独立 Runtime resource，Frame close/suspend不会隐式 destroy/hide Domain。
 
 **通用不变量：** Runtime viewport observation可以在 Frame suspend时更新，但 observation 本身不授予新的 Frame mutation permit、InputTarget/Activation，也不直接提交 Render desired state。业务决定是否根据已提交 facts用既有 RenderDomain更新 presentation。此架构不指定人物行走/碰撞/地图转场、不要求 Frame拥有新 suspend getter。某个真实 consumer若证明现有合法 seam无法满足已接受行为需求，必须单独提交 consumer evidence评审最小 lifecycle能力，不可从 viewport 存在直接推出要扩 public Frame API。Current example只有 map Subsystem，未将 menu/dialog gameplay语义列为该 slice必需验收。
 
@@ -37,7 +37,7 @@ Public `Frame`：`id / params / signal / call(subsystem,params)`，不公开 Act
 scope.createInputListener({frame,channels})
 ```
 
-Channels/setChannels为 Frame Desired Interest；`on`/unsubscribe注册回调；close幂等。State detached/immutable，Event never replay，stable handler ordering；async Promise不作为 Data reader backpressure。Fresh Activation不复用旧 State/Event；fresh carrier重发 desired Interest并等待 State baseline。Viewport绝不伪装成 custom input channel。
+Channels/setChannels为 Frame Desired Interest；`on`/unsubscribe注册回调，setChannels保留 dormant registrations；close/unsubscribe幂等。State detached/immutable，Event never replay，stable handler snapshot/order；async Promise不作为 Data reader backpressure。Fresh Activation不复用旧 State/Event；fresh carrier重发 desired Interest并等待 State baseline。Viewport绝不伪装成 custom input channel；具体 channel/error/handler order以 [Input v1](../15-contracts/user-input-v1.md)和 M10 author surface为准。
 
 ## 5. Viewport author API（候选）
 
@@ -59,13 +59,26 @@ Runtime-scoped detached/immutable last accepted value，initial null；Data loss
 
 该能力在**修正后的唯一 `/1`**下提供；旧三 child `/1`当前代码不满足它，必须整套 implementation qualification，不设计 `/2`/compatibility null mode。Exact value/source、diagnostic/terminal参照 [Viewport v1](../15-contracts/viewport-state-v1.md)。
 
-## 6. Render author projection（M11 frozen surface）
+## 6. Render author projection（M11 Frozen surface，旧语义全部保留）
 
 ```ts
-interface RenderDomainState { readonly zIndex: number; readonly roots: readonly RenderNode[] }
+interface RenderDomainState {
+  readonly zIndex: number;
+  readonly roots: readonly RenderNode[];
+}
 interface RenderDomainUpdate {
   readonly zIndex?: number;
-  readonly nodes?: readonly RenderNodeUpdate[];
+  readonly nodes?: readonly {
+    readonly key: string;
+    readonly attrs?: {
+      readonly set?: Readonly<Record<string, string>>;
+      readonly remove?: readonly string[];
+    };
+    readonly data?: {
+      readonly set?: Readonly<Record<string, unknown>>;
+      readonly remove?: readonly string[];
+    };
+  }[];
 }
 interface RenderDomain {
   replace(state: RenderDomainState): void;
@@ -76,11 +89,11 @@ interface RenderDomain {
 // scope.createRenderDomain(initialState): RenderDomain
 ```
 
-`update`仅 zIndex和 existing-node attrs/data top-level members；structural mutation用 `replace`。业务不见 Domain id/revision/Patch/carrier。Author API operations synchronous validate→detach→local atomic commit；Domain keys Runtime-lifetime one-shot；Frame close/suspend或 Data retire不自动关闭 Domain。既有具体 limits和 qualification归 Render v1/M11，不因 viewport改动提高。
+`update`仅 Domain zIndex和 existing-node attrs/data top-level members；structural mutation用 `replace`。业务不见 Domain id/revision/Patch/carrier。Author API operations synchronous local-only validate→detach→atomic local commit/bounded Event offer。**live domains≤256；domainId 为 Runtime-instance SDK-owned、never reuse；node key 则为 Domain-lifetime one-shot，不得把两种 identity/lifetime 混写。** Frame close/suspend、Data retire均不自动 destroy Domain，Event无 future-carrier replay。既有具体限制/校验/qualification归 Render v1/M11，不因 viewport改动提高。
 
-## 7. Content author projection（M12 frozen）
+## 7. Content author projection（M12 Frozen）
 
-`scope.content` readonly Client仅 `record/resource`和对应 returned values/options/errors；不泄漏 installationId、raw FSDB/HTTP/path/token。read failure由业务决定 fallback/retry/outcome，不自动 Frame/Runtime failure。
+`scope.content` readonly Client仅 `record/resource`和对应 returned values/options/errors；不泄漏 installationId、contentVersion请求 selector、raw FSDB/HTTP/path/token。Returned value/cache ownership隔离；普通 read rejection由业务自行 fallback/retry/outcome，不自动 Frame/Runtime failure。Exact shape/error由 [Content v1](../15-contracts/content-api-v1.md) owns。
 
 ## 8. Lifetime / Data profile integration
 
@@ -96,6 +109,6 @@ Subsystem SDK一个 connection-wide `SubsystemDataBinding → @loomrealm/data co
 
 ## 9. Error/portability boundary
 
-Business outcome→FrameOutcome.failed；precommit call rejection→typed local error；Input/Viewport subscriber error→local containment；Render author misuse/limit→TypeError/RangeError；ordinary Content read→ContentReadError caller-local；Control fatal→Runtime failure；Data child/profile fatal→Data retirement；module/capability bootstrap failure→Runtime bootstrap failure。Platform path/token/DOM不得泄漏到 business author。
+Business validation/outcome→FrameOutcome.failed；precommit call rejection→typed local error；Input/Viewport subscriber error→local containment；Render author misuse/limit→TypeError/RangeError；Content author misuse→synchronous TypeError，ordinary Content read→ContentReadError caller-local；Control fatal→Runtime failure；Data child/profile fatal→Data retirement；module/capability bootstrap failure→Runtime bootstrap failure。Platform path/token/ticket/DOM/internal stack不得泄漏到 business author。
 
 Framework不能反向依赖 map/example，不建立 Environment/Viewport manager、map-specific mutation exception或未被真实消费者证明的 Frame lifecycle public API。Docs Freeze只依 [revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md) 且包含兼容核查；Map验收独立。
