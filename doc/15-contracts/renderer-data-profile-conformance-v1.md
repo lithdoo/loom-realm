@@ -2,42 +2,41 @@
 
 > 层级：正式契约 / Conformance Specification  
 > 状态：**Revised preimplementation / Executable-ready Candidate / Not Frozen**  
-> Profile：`loomrealm.renderer-data/1`；`fixtureSetRevision = 3`（revision 1/2及其 PASS 为 historical，不得冒充修正版）  
+> Profile identity：`loomrealm.renderer-data/1`；`fixtureSetRevision = 3`  
 > Contract：[Profile v1](./renderer-data-profile-v1.md) · [Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；最近复核：2026-09-16
 
-**Docs Freeze只要求可执行的规范/预期断言与兼容核查；实际 command、environment、raw PASS与 executable SHA属于实现后的 qualification。** 本次 revision 3保留 revision 2 User Input correction义务，并增加独立 Viewport child；不创建 Profile `/2` 或双实现。
+**Docs Freeze要求 executable-ready specification +真实兼容核查，不需要尚未实施的PASS。** 实际 logs/environment/executable SHA归implementation ledger。Revision 3保留revision2 Input correction，给同一首版`/1`增加Viewport v1；`/2`草案Superseded，不实现双模式。
 
-## 1. Profile identity / compatibility gate
+## 1. Exact identity + coordinated first-release cohort
 
-Exact identity `/1 = Connection1 + Input1 + Render1 + Viewport1`，四个 child必须完整支持。No `/2` advertised/selected/accepted、无 optional capability/feature negotiation。旧三 child 的 `/1` executable不可与修正后 peer混配；测试 harness必须识别并拒绝 mixed-old/new setup，不能把历史 `/1` PASS当 current proof。已存在真实外部兼容义务时 STOP direct reset、另评版本/迁移。
+```text
+loomrealm.renderer-data/1
+= Connection1 + Input1 + Render1 + Viewport1
+```
 
-Main owns `(S,G,P)` selection；exact Broker matching，unsupported peer→Data absent，不自动 Runtime failure、不 mint authority。Profile自身不要求所有 arbitrary Subsystem共享 rollout：**当前产品统一部署 `/1`**仅归实施 ledger/产品 integration test。未来真实 identity replacement fresh generation规则仍沿 Connection v1。
+Revised `/1` 的完整支持是conformant claim的必要条件。旧三-child `/1` executable不能被认定为新版合格或自动继承旧PASS。**相同 `/1`字符串及 `(S,G,P)` tuple不能分辨旧三child/新四child；没有handshake、feature bit或wire-level mixed-peer detection。** 因此产品部署必须在连接之前用 release/build provenance和受治理product composition确保Main/Renderer/Subsystem/Data peers来自同一修正版实现，记录artifact set/subject SHA/版本和运行路径，不得声称Data Broker会“识别并拒绝旧 `/1`”或静默自动升级。一旦存在必须混版/rolling upgrade的真实要求，STOP direct-v1 reset，另作版本与迁移ADR；不能靠单一identity满足互操作。
 
-## 2. Unit / routing / common gates
+Main拥有`{S,G,P}` authority，Broker exact paired matching只检验**逻辑authority**而非同identity binary版本。若profile身份真正不匹配/endpoints不支持按Connection规则Data absent；本次canonical product统一部署修正 `/1`属于[implementation ledger](../30-implementation/viewport-profile-v1-qualification.md)，不写成任意conformant endpoint对其他所有Subsystem的通用MUST。
 
-Hostra one WebSocket text unit、PWA `postMessage(string)`；one UTF-8 JSON text string = one exact child JSON object；not binary/structured object/Batch。Actual bytes≤1MiB、depth≤64、Wire representation/parser与child exact preflight MUST before mutation；non-string、wrong role/type、unknown type、malformed child均 first-wins Data-fatal。Instrumentation：`carrier.messages()` calls恰1、每合法入站 unit仅命中一个 child、无 raw bypass。Direction：Subsystem→Renderer `input.interest,render.domains/snapshot/patch/event`；Renderer→Subsystem `input.state/event/reset,viewport.state`。
+## 2. Application unit/common gates/role direction
 
-## 3. Reader/child isolation/diagnostics
+Hostra one WebSocket text / PWA `postMessage(string)`；one UTF-8 JSON text string对应one exact child object；binary、structured object、Batch非法。Actual bytes≤1MiB、depth≤64、Wire representation/parser与exact type/direction/child preflight须先于mutation；non-string、unknown/wrong-role、invalid shape均Data-fatal。Instrumentation须证明一个`carrier.messages()` logical reader、每合法unit恰好一个child handler且ordered disposition，无raw bypass。
 
-Exact `input.* / render.* / viewport.state` dispatcher；unknown type/wrong direction→Profile terminal；Input/Render child malformed沿既有 family；识别后的 Viewport invalid→`protocol:"viewport"`；common/unknown→`"profile"`。Well-formed stale Input按 Input contract drop，malformed不能跨 child吞掉。Viewport只更新 author retained observation，不通过 Renderer Store/Projector或 Input Manager，亦不修改 Main InputTarget/Activation。Listener throw/returned rejection必须独立 containment、不进入 Data reader error路径。
+Subsystem→Renderer：`input.interest; render.domains/snapshot/patch/event`；Renderer→Subsystem：`input.state/event/reset; viewport.state`。已识别Viewport child-invalid/explicit fatal→`protocol:"viewport"`；Input/Render沿旧family；common/unknown→`"profile"`。Viewport不会作为Input或Render消息消费、不直接写Renderer Store/Projector或mint InputTarget。
 
-## 4. Single writer/backpressure
+## 3. One writer and bounded child producer
 
-每 peer仅一 serialized writer，`max concurrent carrier.send=1`，admission order=send order；old-carrier pending不 replay/migrate；any terminal settle once。保留 Input revision2 sender bounded/coalescing与 Render ordering/barrier。Viewport在 writer admission前每 carrier至多一个 admitted/in-flight + 一个 latest pending slot；阻塞 writer、连续合法 resize burst（当前实现 fixture使用超过 `MAX_PENDING_SENDS=1024` 的样本，但 1024 **不是协议上限**）、穿插合法 Input/Render→Viewport队列不随 burst线性增长，不因 viewport 自身填爆 writer、Input/Render不被永久饿死；释放 writer后最终 size收敛。不得为测试改 writer limit、priority scheduler或 Input/Render语义。完整 sender assertions参照 [Viewport conformance](./viewport-state-conformance-v1.md)。
+Single serialized writer max concurrent physical `carrier.send=1`，admitted FIFO、terminal first-wins、pending once-settle/no replay/retry/migration。保留Input revision2 bounded coalescing、Input State/Event/Reset barrier和Render own ordering。Viewport admission前每current carrier≤1 viewport admitted/in-flight +≤1 latest pending；hold writer、连续远多于其具体capacity（目前可以`>1024`作为stress fixture，**并非协议容量**）的合法尺寸与交错Input/Render→Viewport自身无queue线性增长/overflow fatal/永久饿死其他child，释放writer后最终latest收敛；不可撤回已admitted或改generic writer limits/scheduler。具体见[Viewport conformance §3](./viewport-state-conformance-v1.md)。
 
-## 5. Independent baselines/currentness
+## 4. Independent baseline/currentness
 
-Fresh current carrier：Input empty remote Interest/State/Event history→full current interest+fresh State/Event future-only；Render first `render.domains`→snapshots→ordinary work；Viewport有合法 sample发送fresh baseline，否则等首次合法 sample。无跨 child固定先后/事务；same G reconnect不重启 Runtime/Frame/InputListener/Domain/Viewport；old-carrier queued receive/send fenced。Fresh G/Renderer匹配新 current authority后 old source不可污染；Viewport current retained equal baseline无 callback、changed once；无 sample last value只是历史 observation。
+Fresh current carrier：Input remote Interest/State/Event empty，re-publish current full interest/effective State，Event future-only；Render first `render.domains`→current snapshots→ordinary work；Viewport有合法size时fresh baseline否则首次合法时发。没有跨child固定顺序/atomic super-snapshot。Same G reconnect保留business InputListener/Domain/Viewport object、fresh per-carrier publication；fresh G/Renderer old traffic/source fenced；Viewport equal baseline suppress callback、changed先更新current再通知。Old pending不迁到fresh，retained nonnull非paintability。
 
-## 6. Failure/authority
+## 5. Failure/authority/child containment
 
-Malformed Input/Render/Viewport分别 child Data-fatal，carrier retire而不自动 Frame unwind/Runtime fail/RenderDomain destroy/Main authority change。First-wins terminal、best-effort close、pending settlement once；callback本地异常不能作为 malformed remote；Control/Data无 total order、没有 ACK/replay/join。
+Malformed Input/Render/Viewport分别child Data-fatal，common/profile错归profile；只retire Data，不自动Runtime/Frame fail、RenderDomain destroy或Main mutation。Well-formed stale Input按其合同drop；Viewport subscriber throw/thenable reject local containment、不阻塞reader或终止Data。Control/Data无global total order或cross-child ACK/join。
 
-## 7. Platform/product qualification（实现后）
+## 6. Qualification after Docs Freeze
 
-同一 executable SHA实测：original Connection/Input/Render regression，revised `/1` four-child suite，Viewport child conformance，Main selection/paired broker，Desktop designated layout viewport source、Hostra product；PWA在对应里程碑验证相同 abstract CSS logical size。必须存命令、Node20/24（如适用）、Chromium/Hostra环境、raw logs/artifacts/subject SHA。仅 current product integration断言所有当前 DataAuthorities统一采用 `/1`；不得把该 rollout政策反写为通用 Profile MUST。Map resize/menus/camera/chunks/latency由独立 map qualification证明，不是 Profile conformance。
-
-## 8. Revision history
-
-Revision 1：初始 Input+Render；Revision 2：User Input mutation-gate/handler containment/sender bounded proof；Revision 3：ADR0037首次发布前直接在 `/1` 添加独立 Viewport v1及其 currentness/backpressure/diagnostics，不新增 `/2`。旧版本历史证据保留但非 current PASS。
+同一新executable subject与**cohort evidence**运行Connection/Input/Render original regression、revised `/1` fixture revision3、Viewport v1、Main policy/Broker currentness、Desktop/Hostra product、M13/M14/M15受影响回归；PWA在自身平台里程碑验证CSS logical source。记录build artifact inventory、Node/Chromium/Hostra版本、commands/raw logs/subject SHA。Map resize/menus/chunks/P95属于Map自身qualification，不可由Core conformance推定PASS。历史revision1/2仅provenance、不能冒充current。
