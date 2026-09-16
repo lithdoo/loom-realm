@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10、M12–M13 Closed 历史资格；ADR0035 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的 M11/M14/M15 **Requalification Pending**；新增 ADR0037 revised `/1`/Viewport **Docs Freeze HOLD / Not Implemented**；M15 physical design remains ADR0034 + recomposition SSOT  
+> 稳定程度：M10、M12–M13 Closed 历史资格；ADR0035 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的 M11/M14/M15 **Requalification Pending**；新增 ADR0037 revised `/1`/Viewport **Core Docs Frozen / Not Implemented / Not Qualified**；M15 physical design remains ADR0034 + recomposition SSOT  
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary及 viewport/direct-v1 当前实施插入顺序  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0035](../decisions/0035-render-domain-existing-node-update.md)、[ADR 0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16
@@ -47,7 +47,7 @@ Do not prebuild fake v2、deprecated aliases or generic frameworks for hypotheti
 
 ## ADR0037 current route — revised first-release `/1` / Viewport / Map performance
 
-这是一项跨既有 M8/M10/M11/M14/M15 的**新候选改造**，不是重新定义原 milestone 的历史 Closed，也不是恢复 Profile v2。直接修正的唯一目标为 `renderer-data/1 = Connection1 + Input1 + Render1 + Viewport1`；旧 executable三 child `/1`及其 PASS 只作历史。当前所有新阶段均未 Freeze/实施/运行。外部兼容义务不能仅凭产品未发布推断为零；如果有混版/独立 consumer，STOP direct reset并新ADR。
+这是一项跨既有 M8/M10/M11/M14/M15 的**新候选改造**，不是重新定义原 milestone 的历史 Closed，也不是恢复 Profile v2。直接修正的唯一目标为 `renderer-data/1 = Connection1 + Input1 + Render1 + Viewport1`；旧 executable三 child `/1`及其 PASS 只作历史。当前所有新阶段均未实施/运行。外部兼容义务与独立 Docs Freeze 已在 [Core ledger](./viewport-profile-v1-qualification.md) 关闭；如果后来发现混版/独立 consumer，STOP direct reset并新ADR。
 
 ```text
 Core C0  外部兼容义务调查并由发布负责人签署

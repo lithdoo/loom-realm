@@ -1,6 +1,6 @@
 # `@loomrealm/data` 设计
 
-> 状态：**旧三-child `/1` Package-local Core Baseline Implemented / M8 Role Integration Qualified（历史 subject）；修订后四-child `/1` / Viewport Candidate / Not Implemented / Docs Freeze HOLD**  
+> 状态：**旧三-child `/1` Package-local Core Baseline Implemented / M8 Role Integration Qualified（历史 subject）；修订后四-child `/1` / Viewport Frozen / Not Implemented / Not Qualified**  
 > 阶段：旧 M8 package-local core + real Renderer/Subsystem role integration qualified；新的四-child 实施须按 C1 新 executable SHA 重验，不能继承历史 PASS  
 > 最近复核：2026-09-16（仅明确 subject 与 Viewport 增量入口；旧 M8 exact API 正文保留）  
 > 目标：保留已实现的 Frozen Data Connection v1、User Input v1、Render Update v1 及**旧三-child Renderer Data Profile v1** transport-independent、role-typed、可测试 mechanics；修订后四-child `/1` 唯一候选仅增加 Viewport，不建立 physical connection，不拥有 Main/Subsystem/Renderer application authority。  

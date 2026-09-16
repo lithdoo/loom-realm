@@ -1,6 +1,6 @@
 # Viewport / revised Renderer Data Profile v1 — Core 文档终审及整改验收
 
-> **技术终审与 CR-01/02/04/05 文档整改复核完成；正式 Core Docs Freeze 仍 HOLD（未批准）。** 日期：2026-09-16。  
+> **技术终审与 CR-01/02/04/05 文档整改复核完成；正式 Core Docs Freeze 已由独立审查在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 批准，见 [independent review](./viewport-core-docs-freeze-independent-review-2026-09-16.md)。本页仍不是 executable PASS。** 日期：2026-09-16。  
 > 原始受审 SHA：`8cd6c78f593df61112883c277aec8280f5604c04`；本轮整改正文对照 SHA：`7db45f29e1bf30261468ef03ec7acd80ae3b8b8d`。终审报告及 ledger 等后续状态编辑本身不构成新实现/独立签署。  
 > 审查者：ChatGPT（技术交叉核对，同一修复执行者，**不能冒充独立人工审查者、发布/部署负责人或他们的签字**）。唯一 live status：[Core qualification ledger](./viewport-profile-v1-qualification.md)；[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；[protected crosswalk](./viewport-scope-repair-2026-09-16.md)。  
 > 项目负责人已确认无 npm 消费者；**不查询 npm、不以 npm 阻塞 Freeze**。其他旧二进制共存与外部身份承诺独立判断。
@@ -42,4 +42,4 @@ Git compare `a71be9c...7db45f2` 对源码中的受保护正文显示：协议分
 - 独立 reviewer须针对**最终 docs-only SHA**记录姓名/日期/复核范围及签署；本修复作者不能冒充独立 reviewer。该流程属于正式冻结本身，技术报告仅提供证据。
 - 本技术终审和上述关闭项均**不要求**尚未实现的 C1 executable PASS、Map PR0/性能。实现后 new executable SHA 才运行 fixture3、Viewport、Input/Render/Connection 回归和产品 cohort proof。
 
-**当前处理：技术文本整改完成；正式 Docs Freeze 未获批准。** 只有 CR-03 facts、最终 SHA 与有效独立/owner 签署落实，才能在[唯一 Core ledger](./viewport-profile-v1-qualification.md)将 HOLD 改为 Frozen。不能因为用户要求冻结，就把未调查的非 npm 情况写成“已验证没有”或伪造其他人的批准。
+**当前处理：技术文本整改完成；正式 Docs Freeze 由独立审查在 `4cbf620` 批准。** Implemented/Qualified 仍须 C1 新 executable SHA。不能把 Frozen 写成已实现或把未运行测试写成 PASS。

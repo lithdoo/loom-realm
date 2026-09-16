@@ -1,13 +1,13 @@
 # Renderer Data Application Profile v1 Conformance
 
 > 层级：正式契约 / Conformance Specification  
-> 状态：**Revised preimplementation / Executable-ready Candidate / Not Frozen**  
+> 状态：**Frozen / Executable-ready / Not Implemented / Not Qualified**  
 > Profile identity：`loomrealm.renderer-data/1`；`fixtureSetRevision = 3`  
 > Contract：[Profile v1](./renderer-data-profile-v1.md) · [Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  
 > 完整历史断言基线：[fixture revision-2 原文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [受保护规则与范围](../30-implementation/viewport-scope-repair-2026-09-16.md)  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；最近复核：2026-09-16
 
-**Docs Freeze要求 executable-ready specification + 真实兼容核查，不需要尚未实施的 PASS。** 实际 logs/environment/executable SHA 归 implementation ledger。Revision 3 **完整继承 revision-2 的所有未冲突断言、harness observables、Input revision-2 correction和测试场景**，只增加第四 Viewport child、相关方向/demux/diag/baseline/bounded producer 与 cohort gate；`/2` 草案 Superseded，不实现双模式。旧 revision-2 原文的三-child closed set、fixture revision 编号及「新增必须另起profile」历史判断仅在上述 ADR0037 精确覆盖处失效；原 §2–§11 其他具体测试不可因为此文件简短而删除。旧 fixture 结果不能冒充 revision-3 PASS。任何未列出冲突 STOP 交设计者裁定，而非由测试 agent 挑选较容易的验收。
+**Docs Freeze已在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 签署。** 实际 logs/environment/executable SHA 归 implementation ledger。Revision 3 **完整继承 revision-2 的所有未冲突断言、harness observables、Input revision-2 correction和测试场景**，只增加第四 Viewport child、相关方向/demux/diag/baseline/bounded producer 与 cohort gate；`/2` 草案 Superseded，不实现双模式。旧 revision-2 原文的三-child closed set、fixture revision 编号及「新增必须另起profile」历史判断仅在上述 ADR0037 精确覆盖处失效；原 §2–§11 其他具体测试不可因为此文件简短而删除。旧 fixture 结果不能冒充 revision-3 PASS。任何未列出冲突 STOP 交设计者裁定，而非由测试 agent 挑选较容易的验收。
 
 ## 1. Exact identity + coordinated first-release cohort
 

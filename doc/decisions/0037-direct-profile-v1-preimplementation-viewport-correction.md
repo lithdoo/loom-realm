@@ -1,6 +1,6 @@
 # ADR 0037 — 首次发布前直接修正 Renderer Data Profile v1
 
-> 状态：**Accepted / preimplementation design correction；npm consumer 项已按项目负责人确认解除，其他兼容性与 Docs Freeze 尚未签署**  
+> 状态：**Accepted / Core Docs Frozen on subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9`；Not Implemented / Not Qualified**  
 > 日期：2026-09-16  
 > 更新：[ADR0036](./0036-viewport-state-and-renderer-data-profile-v2.md) 的「必须另建 Profile v2」结论；保留其中 viewport 不属于 User Input 的问题证明。  
 > 依据：[文档治理 §4–7](../00-overview/document-governance.md) · [业务边界 Review](../30-implementation/viewport-business-boundary-review-2026-09-16.md) · [Profile v1](../15-contracts/renderer-data-profile-v1.md)
@@ -28,4 +28,4 @@
 
 ## 状态与重新开启条件
 
-ADR decision Accepted，且 npm consumer 兼容项已由项目负责人确认不阻塞；这**不等于**改正后的 Profile-v1 已 Frozen/Implemented/Qualified。Docs Freeze HOLD 仅剩限定范围的非 npm 兼容义务确认、完整修订与 cross-review 签署；代码尚未变更时不得将 revised `/1` 描述为当前 executable。若真实旧 peer 混版义务存在或多个 independently interoperating surfaces 被证实，重新评审显式 version/migration。若 map 证明独立 lifecycle seam 缺失，应另立 consumer-evidence ADR，不塞入 Viewport。
+ADR decision Accepted。npm consumer 兼容项与非 npm 无混配/统一修正后 `/1` cohort 已由项目负责人 2026-09-16 确认；独立审查已批准 docs-only subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9`。这**不等于**改正后的 Profile-v1 已 Implemented/Qualified。代码尚未变更时不得将 revised `/1` 描述为当前 executable。若真实旧 peer 混版义务后来被证实或多个 independently interoperating surfaces 被证实，重新评审显式 version/migration。若 map 证明独立 lifecycle seam 缺失，应另立 consumer-evidence ADR，不塞入 Viewport。

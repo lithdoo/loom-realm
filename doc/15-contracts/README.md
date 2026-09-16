@@ -2,12 +2,12 @@
 
 > 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed historical subjects**；revised four-child Profile `/1` + Viewport **Docs Freeze HOLD / not implemented**；M14/M15 milestone status ledger-owned  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed historical subjects**；revised four-child Profile `/1` + Viewport **Core Docs Frozen / not implemented / not qualified**；M14/M15 milestone status ledger-owned  
 > 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16（仅新增 Viewport 导航；既有 M13/Frozen 正文原样保全）
 
-**Viewport 变更导航（仅此段为新增修正）：** [当前修正 Profile `/1` 候选](./renderer-data-profile-v1.md) · [revision-3 Conformance 候选](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md) · [Viewport Conformance](./viewport-state-conformance-v1.md) · [旧 Profile 完整原文](./renderer-data-profile-v1-previewport-baseline.md) · [旧 Conformance 完整原文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [范围修复及继承规则](../30-implementation/viewport-scope-repair-2026-09-16.md) · [唯一当期 Core ledger](../30-implementation/viewport-profile-v1-qualification.md)。旧三-child `/1` Frozen/PASS 仅适用于原实现；ADR0037 已将其作为未发布首版修正为四-child 候选。`/2` 提案 superseded，不发布。原有 Input/Render/Connection/Control wire、M13 Projector 规则未变；Map PR0/P95 不属于 Core Docs Freeze。旧索引中的 Frozen 字样必须按本段及当前 ledger 限定至历史 subject。
+**Viewport 变更导航（仅此段为新增修正）：** [当前修正 Profile `/1`](./renderer-data-profile-v1.md) · [revision-3 Conformance](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md) · [Viewport Conformance](./viewport-state-conformance-v1.md) · [旧 Profile 完整原文](./renderer-data-profile-v1-previewport-baseline.md) · [旧 Conformance 完整原文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [范围修复及继承规则](../30-implementation/viewport-scope-repair-2026-09-16.md) · [唯一当期 Core ledger](../30-implementation/viewport-profile-v1-qualification.md) · [独立 Freeze 签署](../30-implementation/viewport-core-docs-freeze-independent-review-2026-09-16.md)。旧三-child `/1` Frozen/PASS 仅适用于原实现；ADR0037 已将其作为未发布首版修正为四-child `/1`。`/2` 提案 superseded，不发布。原有 Input/Render/Connection/Control wire、M13 Projector 规则未变；Map PR0/P95 不属于 Core Docs Freeze。Core Docs Frozen ≠ Implemented ≠ Qualified。
 
 契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。
 
@@ -19,8 +19,8 @@
 Frame / Call v1                         Active / Normative / Frozen
 Main ⇄ Renderer Control v1              Active / Normative / Frozen
 Renderer Data Application Profile v1    original three-child Frozen historical;
-                                        revised four-child /1 Candidate / Docs Freeze HOLD
-Viewport State v1                       Candidate / Docs Freeze HOLD / not implemented
+                                        revised four-child /1 Frozen / not implemented
+Viewport State v1                       Frozen / not implemented / not qualified
 Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen (composition projection editorial correction)
 User Input v1                           Active / Normative / Frozen
 Render Update v1                        Active / Normative / Frozen

@@ -1,11 +1,11 @@
 # Viewport State v1 Conformance
 
 > 层级：正式契约 / Conformance Specification  
-> 状态：Draft / Executable-ready Candidate / Not Frozen  
+> 状态：**Frozen / Executable-ready / Not Implemented / Not Qualified**  
 > Contract：[Viewport State v1](./viewport-state-v1.md) · [修正后的 Profile v1](./renderer-data-profile-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16
 
-Docs Freeze冻结可实施的 observable assertions而非要求实现前有 PASS；实际 subject SHA、commands、环境及 logs归 implementation qualification。Core 测试不得依赖 `game-libs/map`、假设当前例子已经有 menu/dialog，也不得把当前 Desktop 的 DOM API 变成 wire 子协议义务。
+Docs Freeze已在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 签署；实际 subject SHA、commands、环境及 logs归 implementation qualification。Core 测试不得依赖 `game-libs/map`、假设当前例子已经有 menu/dialog，也不得把当前 Desktop 的 DOM API 变成 wire 子协议义务。
 
 ## 1. Exact representation / direction
 

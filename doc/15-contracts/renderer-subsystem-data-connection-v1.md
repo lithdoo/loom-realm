@@ -7,7 +7,7 @@
 > 稳定程度：Frozen  
 > 主要定义：Renderer 与单个 Subsystem Runtime 之间 Data Connection 的 authority identity、candidate/install/current/retired 边界、唯一性、替换、重连、退役与 Platform Broker responsibility  
 > 上游 authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)  
-> 组合 Profile：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)（ADR0037 修正后的四 child 首次版本候选；未实现/未冻结）  
+> 组合 Profile：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)（ADR0037 修正后的四 child `/1`；**Docs Frozen / Not Implemented / Not Qualified**）  
 > Current child projection：[User Input v1](./user-input-v1.md)、[Render Update v1](./render-update-v1.md)、[Viewport State v1](./viewport-state-v1.md)；**精确组合与 fresh child baseline 均由 Profile v1 拥有**  
 > Conformance：[Data Connection v1 Conformance Profile](./renderer-subsystem-data-connection-conformance-v1.md)  
 > 决策：[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)；组合修正：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
@@ -40,13 +40,13 @@ Platform candidate pair
 Data Connection v1
  │   current → retired
  ▼
-Renderer Data Application Profile v1 (revised candidate)
+Renderer Data Application Profile v1 (Frozen / not implemented)
      ├── User Input v1
      ├── Render Update v1
      └── Viewport State v1
 ```
 
-此图只投影[当前完整 Profile v1](./renderer-data-profile-v1.md) 的子协议集合，不把 child schema、尺寸、sender、callback 或 baseline 规则提升成 Connection v1 的新职责。旧三 child `/1` 可执行基线和修正后四 child `/1` 不可混配，直接修正尚受 ADR0037 的兼容性核查及 Docs Freeze gate 限制。
+此图只投影[当前完整 Profile v1](./renderer-data-profile-v1.md) 的子协议集合，不把 child schema、尺寸、sender、callback 或 baseline 规则提升成 Connection v1 的新职责。旧三 child `/1` 可执行基线和修正后四 child `/1` 不可混配。
 
 必须保持：
 
