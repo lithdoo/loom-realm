@@ -8,6 +8,7 @@
 Owner / recorder: engineering agent (Cursor Grok 4.6); independent Map Docs Freeze reviewer: NOT SIGNED
 Timestamp: 2026-09-16
 Git base / production SHA: 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9 (origin/main; production zero diff)
+PR0 harness SHA: 771844657497a3cf1e8dc1460c89ce3081b11503
 PR0 harness files: test/map-viewport-pr0.test.mjs, test/map-viewport-pr0-hostra.test.mjs, this ledger
 Build mode: npm run build:m14 (exit 0) then node --test
 Node: v24.19.0 (C:\Program Files\nodejs\node.exe)
@@ -172,7 +173,7 @@ PR0要求**设计可行性、数值风险归因、真实输入合法和无未解
 
 ```text
 阶段: C PR0 complete / D Map Docs Freeze HOLD
-subject SHA: production 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9; PR0 harness on feat/map-viewport-pr0
+subject SHA: production 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9; PR0 harness 771844657497a3cf1e8dc1460c89ce3081b11503
 失败文件与章节: MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md §5 canvas backing ≤128MiB;
                  test/map-viewport-pr0.test.mjs "dense 720/1080 visible+detached canvas backing vs 128MiB budget"
 fixture: hosted dense 128×96×3, player (64,48), viewports 1280×720 and 1920×1080
