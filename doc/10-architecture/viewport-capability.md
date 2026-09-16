@@ -3,7 +3,7 @@
 > 层级：系统架构  
 > 状态：Active Design / Candidate for Freeze  
 > 稳定程度：ADR 0036 accepted；formal contracts pending freeze  
-> 主要定义：Viewport observation authority、Runtime-scoped author projection、Renderer Data Profile v2 composition、physical realization boundary  
+> 主要定义：Viewport observation authority、single-surface Renderer boundary、Runtime-scoped author projection、Renderer Data Profile v2 composition、physical realization boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[Renderer⇄Subsystem 协议分层](./renderer-subsystem-protocol-layers.md)、[Subsystem 模型](./subsystem-model.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
 > 候选正式契约：[Viewport State v1](../15-contracts/viewport-state-v1.md)、[Renderer Data Profile v2](../15-contracts/renderer-data-profile-v2.md)  
 > 最近复核：2026-09-16
@@ -56,7 +56,30 @@ Viewport is not DOM authority, Render authority, Frame authority or presentation
 
 ---
 
-## 3. Lifetime Model
+## 3. Single-surface v1 Boundary
+
+Viewport v1 assumes one current logical presentation surface per current Renderer participant：
+
+```text
+one current Renderer participant
+→ at most one current logical viewport value
+→ same raw viewport value is published to each current Subsystem Data connection
+```
+
+v1 does not identify or multiplex multiple windows/panes/surfaces。
+
+如果未来真实 consumer需要：
+
+```text
+one Renderer participant
+→ multiple independently sized presentation surfaces
+```
+
+则必须以新的 explicit compatibility/design boundary处理；不得给 frozen v1 偷加 `surfaceId`、DOM handle或 per-Frame surface routing。
+
+---
+
+## 4. Lifetime Model
 
 ```text
 Viewport object lifetime
@@ -89,7 +112,7 @@ A non-null retained value is not proof that a carrier exists, a Renderer is curr
 
 ---
 
-## 4. Profile Composition
+## 5. Profile Composition
 
 ```text
 loomrealm.renderer-data/1
@@ -107,7 +130,7 @@ No carrier negotiation, downgrade handshake, Game Entry feature declaration or p
 
 ---
 
-## 5. Author Projection
+## 6. Author Projection
 
 ```ts
 export interface ViewportSize {
@@ -141,7 +164,7 @@ The public surface intentionally contains no manager, source, transport, generat
 
 ---
 
-## 6. Physical Source Boundary
+## 7. Physical Source Boundary
 
 Concrete Renderer composition owns a narrow trusted source. Desktop first realization observes `window.innerWidth/innerHeight` as positive integer CSS pixels and coalesces resize publication; focus/blur and keyboard availability do not control viewport semantics.
 
@@ -156,6 +179,7 @@ screen/display id
 safe-area
 focus/visibility
 DOM element rect
+surface/window id
 fullscreen mode
 render scale
 ```
@@ -164,7 +188,7 @@ Each has different authority/lifetime and requires independent evidence before a
 
 ---
 
-## 7. Failure / Recovery
+## 8. Failure / Recovery
 
 ```text
 malformed viewport.state
@@ -188,13 +212,14 @@ Viewport has no replay log, ACK, sequence/revision or historical event semantics
 
 ---
 
-## 8. Final Invariants
+## 9. Final Invariants
 
 1. Viewport is Renderer-observed environment state, not User Input.
 2. Main owns only DataAuthority selection/currentness, not viewport values.
-3. `SubsystemScope.viewport` is Runtime-scoped and readonly.
-4. Frame suspension/InputTarget loss cannot block viewport convergence.
-5. Data carrier replacement resets wire baseline but not retained author value.
-6. Profile v1 remains Frozen; profile v2 is an explicit new compatibility boundary.
-7. Business packages own viewport policy; Core owns only bounded raw state replication.
-8. No generic environment/service-locator abstraction is introduced.
+3. v1 defines one logical viewport per current Renderer participant.
+4. `SubsystemScope.viewport` is Runtime-scoped and readonly.
+5. Frame suspension/InputTarget loss cannot block viewport convergence.
+6. Data carrier replacement resets wire baseline but not retained author value.
+7. Profile v1 remains Frozen; profile v2 is an explicit new compatibility boundary.
+8. Business packages own viewport policy; Core owns only bounded raw state replication.
+9. No generic environment/service-locator or multi-surface routing abstraction is introduced.
