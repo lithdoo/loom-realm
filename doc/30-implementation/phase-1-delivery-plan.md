@@ -1,68 +1,95 @@
 # 第一阶段交付计划
 
 > 层级：实施计划  
-> 状态：Tracking；M10、M12–M13 历史 Closed，M11/M14/M15 current subject Requalification Pending；ADR0037 corrected `/1` **Core Docs Freeze HOLD / Not Implemented**；Map dynamic **Map Docs Freeze HOLD / PR0 NOT RUN**。  
-> 定义：M1–M17顺序、当期 `/1`/Map插入路线与已存在milestone的owner/证据边界。  
-> 依赖：[渲染系统](../10-architecture/rendering-system.md) · [Package architecture](./package-architecture.md) · [Contracts](../15-contracts/README.md) · [ADR0032](../decisions/0032-game-library-example-boundary.md) · [ADR0034](../decisions/0034-hostra-owned-desktop-composition.md) · [ADR0035](../decisions/0035-render-domain-existing-node-update.md) · [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)。最近复核2026-09-16。
+> 状态：Tracking  
+> 稳定程度：M10、M12–M13 Closed 历史资格；ADR0035 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的 M11/M14/M15 **Requalification Pending**；新增 ADR0037 revised `/1`/Viewport **Docs Freeze HOLD / Not Implemented**；M15 physical design remains ADR0034 + recomposition SSOT  
+> 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary及 viewport/direct-v1 当前实施插入顺序  
+> 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0035](../decisions/0035-render-domain-existing-node-update.md)、[ADR 0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
+> 最近复核：2026-09-16
 
-**Live status没有第二份：** corrected `/1`与Viewport只看 [v1 ledger](./viewport-profile-v1-qualification.md)；M11/M14/M15分别看各自`m11-qualification.md`、`m14-qualification.md`、`m15-qualification.md`。旧 `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的ADR0035 M11→M14→M15历史qualification尚未全部通过，M15 refresh P95=96.3ms仍FAIL；旧 [RENDER_MOVEMENT_LATENCY_CORE_REFACTOR](https://github.com/lithdoo/loom-realm/blob/main/RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md)继续记录当时subject，不是新 `/1`/Map的资格SSOT。M15 physical owner仍是[Hostra recomposition](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)+ADR0034，不因Map改动重新选择。
+实施状态与正式 closure 必须分开记录。M14 的 current qualification subject/live evidence 只以 [`m14-qualification.md`](./m14-qualification.md) 为准；M15 current physical composition 只以根目录 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md) + ADR0034 为准。**新的 revised Renderer Data Profile `/1` + Viewport v1 maturity 只看 [v1 qualification ledger](./viewport-profile-v1-qualification.md)，本计划不复制其签署状态。**
+
+ADR0035 是历史 current executable subject 的 accepted cross-milestone capability evolution：`c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 上 M11→M14→M15 的资格未全部通过，M15 refresh latency gate失败。原 [`RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md`](https://github.com/lithdoo/loom-realm/blob/main/RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md) 仍拥有其原 subject/performance证据，但**不能覆盖新增 ADR0037 four-child `/1` 的当期实施依赖、替新的 executable SHA 背书或令原 P95失败变为 PASS**。当前插入路线以本文“ADR0037 current route”、[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)和各自资格 ledger 为准。
 
 ## Delivery order
 
 ```text
-Foundation/Wire → Game document → Runtime Control → Subsystem Runtime/Frame
-→ Main authority → Hostra Runtime profile → Renderer Control → Data role seam
-→ Desktop Data Broker → Input → Render Replication → Content → Web Presentation
-→ Map Game Library/First Real Game → Hostra-owned Desktop E2E
-→ PWA Runtime → PWA E2E/Equivalence
+Foundation / Wire
+→ Game document
+→ Runtime Control
+→ Subsystem Runtime / Frame
+→ Main authority
+→ Hostra Runtime profile
+→ Renderer Control
+→ Data role seam
+→ Desktop Data Broker
+→ Input
+→ Render Replication
+→ Content
+→ Web Presentation
+→ Map Game Library + First Real Game
+→ Hostra-owned Desktop Full E2E
+→ PWA Runtime
+→ PWA Full E2E / Equivalence
 ```
 
-`Package Scope != Implementable Slice != Milestone Closure`；`Framework Package != Game Library != Concrete Game`；`Implementation complete != Qualification closed`。不得为假想后续消费者预制Profile v2/deprecated alias/通用框架。
+Rules：
+
+```text
+Package Scope != Implementable Slice != Milestone Closure
+Framework Package != Game Library != Concrete Game
+Implementation complete != Qualification closed
+```
+
+Do not prebuild fake v2、deprecated aliases or generic frameworks for hypothetical later consumers。
 
 ---
 
-## ADR0037 current route — corrected first-release `/1` + Map dynamic/performance
+## ADR0037 current route — revised first-release `/1` / Viewport / Map performance
 
-此路线上下游均为**新候选**，不重新定义旧milestone历史Closed。唯一目标`renderer-data/1 = Connection1+Input1+Render1+Viewport1`；旧三child可执行代码与PASS只是历史，不建`/2`/dual parser。外部兼容义务未核查，产品未发布不能代替签署；若需要mixed version/rolling rollback/独立consumer，STOP direct reset新ADR。
+这是一项跨既有 M8/M10/M11/M14/M15 的**新候选改造**，不是重新定义原 milestone 的历史 Closed，也不是恢复 Profile v2。直接修正的唯一目标为 `renderer-data/1 = Connection1 + Input1 + Render1 + Viewport1`；旧 executable三 child `/1`及其 PASS 只作历史。当前所有新阶段均未 Freeze/实施/运行。外部兼容义务不能仅凭产品未发布推断为零；如果有混版/独立 consumer，STOP direct reset并新ADR。
 
 ```text
-Core C0  release owner外部兼容核查/owner+date+raw evidence+signoff
-         → Connection旧三child组合投影仅编辑更正（已提交）
-         → 原完整API/受保护行为diff终审
-         → ADR/Profile v1/Viewport v1/conformance/architecture/index cross-review
-         → Core Docs Freeze subject SHA（不要求先有新executable PASS）
-Core C1  coherent single `/1` build cohort：data codec/peers/bounded sender
-         + Renderer physical single-surface source + Subsystem scope.viewport
-         + Main/Platform/product deployment一致
-         → 新executable SHA revised Profile fixture revision3 + Viewport conformance
-         + original Connection/Input/Render regressions + M13/Desktop/Hostra受影响证明
-         → PWA物理source在其后续平台milestone验证
-Map PR0 production-zero **feasibility**, not optimized-product PASS：
-         fixed dense hosted + real local Map002/066 1080p exact data/JSON bytes
+Core C0  外部兼容义务调查并由发布负责人签署
+         → Frozen Connection v1 §1/§22仅编辑性同步 current composition
+         → package exact API/旧 Frozen行为保全审查
+         → revised Profile v1/Viewport v1/两份 conformance + 架构/索引 cross-review
+         → 记录 docs-only SHA；Core Docs Freeze（不要求预先 executable PASS）
+Core C1  协调同一 coherent build cohort：
+         @loomrealm/data 唯一 /1 codec/demux/terminal/bounded publisher
+         → Renderer current physical single-surface source
+         → Subsystem Runtime-scoped readonly scope.viewport
+         → Main/product DataAuthority/Platform coordinated deployment
+         → new executable SHA：Profile fixture revision3 + Viewport conformance
+         + original Connection/Input/Render regression + M13/Desktop/Hostra affected proof
+         → PWA source在其自身平台里程碑测试
+Map PR0 **production-zero feasibility / pre-Freeze evidence only**：
+         fixed hosted dense1080 + real local Map002/066 exact UTF-8 MapView data
          + RenderDomain.update full-state residual + M13 structural equality cost
-         + existing Browser baseline/Canvas memory + Chromium private-only CSS stacking oracle
-         + current same-Browser-clock historical latency baseline（真实720/1080未实施仅prototype-only）
-         → evidence complete + no unresolved schema/Core/M13/stacking blocker
-         → Map design reviewer/date/docs SHA **Docs Freeze**；
-           不要求尚未实施的camera-rAF zero-draw或优化后P95 PASS
-Map PR1 fixed640 exact chunks/raster/paired stage → 640pixel parity +640目标P95
-Map PR2 dynamic viewport + mid-motion rebase → 720/1080 real product/visual/memory/P95
-Map PR3 same governed latest executable/cohort SHA + M11/M13/M14/M15 regression
-         + final product latency/functional/memory gates → each designated ledger sign
-         → only then continue M16
+         + old Browser raster/Canvas/decoded memory + Chromium private-only CSS stacking pixel oracle
+         + existing Hostra one-Browser-clock historical latency baseline
+         → true inputs/schema/limits/stacking feasible and no unresolved Core/M13 blocker
+         → Map Docs Freeze owner/date/docs SHA；不要求尚未实施的zero tile draw
+           或 PR1/PR2优化后的 640/720/1080 P95提前PASS
+Map PR1 固定640 chunk/raster/paired-stage优化 → 640 pixel parity/性能gate
+Map PR2 true dynamic viewport + map-private View/Sprite mid-motion rebase
+         → 720/1080真实产品尺寸/像素/内存/P95 gate
+PR3      同一受治理 current executable SHA 完成受影响 M11/M13/M14/M15 regression
+         + real Hostra产品所有性能和功能gate
+         → 每个 milestone 各自 ledger签署后才继续 M16
 ```
 
-Map各刀的精确schema、真实测试命令/fixture、受控文件范围、PR0合格与PR1/PR2后P95门槛，**唯一以[Map机械实施合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md) §0–§14为准**；[Map motion子规范](../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)仅属于Map-private细节。此前“PR0要已达到未来PR1/PR2真实性能才能Freeze”口径**已废止**，但PR0仍要对payload/Core/M13/Browser/stacking做真实反证，失败STOP。Core Docs Freeze不等于Map PR0 PASS；Map Docs Freeze不等于Map Implementation/Product Closed。细节状态与受保护语义见[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)；旧历史subject不可转给新cohort。
+精确 Freeze blocking checklist 与 protected-semantic审查见 [final remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)；Profile/Viewport事实由正式 contracts独占；[Map实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)唯一拥有map最终schema、窗口/camera/chunks/payload、PR0固定fixture/调查边界、PR1/PR2后性能和STOP。Map-private [motion-stage child](../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)只细化其§8。**旧“PR0必须先通过PR1/PR2的终局 P95才能签Map Docs Freeze”口径废止；PR0真实可行性证据仍必须完成。** Core Docs Freeze不要求Map PR0，Map Docs Freeze不声称优化代码/性能已PASS。历史 `c642...`与新 four-child executable SHA不得混作同一受治理 subject。
 
 ---
 
-## M1–M9 — Foundation / Runtime Profile / Data ✅ historical
+## M1–M9 — Foundation / Runtime Profile / Data ✅
 
 ```text
-M1 Foundation+Wire
+M1 Foundation + Wire
 M2 Game Package
 M3 Runtime Control
-M4 Subsystem Runtime/Frame
+M4 Subsystem Runtime / Frame
 M5 Main Core
 M6 Hostra launch-profile Runtime
 M7 Renderer Control
@@ -70,157 +97,491 @@ M8 Renderer Data
 M9 Desktop Data Broker
 ```
 
-Closed on historical mainline implementation/qualification path；M8 Closed专指原三child `/1`，**不代表当前修正后四child已完成**。ADR0033记录conditional Electron run-as-node兼容决策；ADR0034取代其作为canonical M15外部物理owner的假设，不改变M6普通Node launch profile或底层协议。
+Closed on the existing mainline implementation/qualification path。ADR0033 records the historical direct-Electron run-as-node compatibility decision；ADR0034 supersedes that embedding assumption for canonical M15 without reopening M6 application/protocol semantics or ordinary Node-hosted launch-profile behavior。**这里的 M8 Closed仅为历史三-child `/1`代码，不是修正后 `/1`的完成声明。**
 
 ---
 
-## M10 — User Input ✅ Closed historical
+## M10 — User Input ✅ Closed
 
-Canonical gate：`npm run test:m10`。Frozen `InputListener`、Main InputTarget/Activation authority、Renderer producer/gate seam。
+Canonical gate：
 
 ```text
-M14       existing/synthetic RendererInputSource for consumer qualification
-M15       real Hostra BrowserWindow DOM Keyboard/Pointer/Gamepad physical producer
-M17       equivalent PWA Window producer
+npm run test:m10
 ```
 
-旧说M14负责真实Desktop DOM input已Superseded；新增Viewport独立InputTarget，绝不改Frozen Input wire或继承旧M10 PASS充当新Profile完整PASS。
+Frozen result：Subsystem `InputListener`、Main InputTarget/Activation authority、Renderer producer/gate seam。
+
+Physical producer placement：
+
+```text
+M14
+→ existing/synthetic RendererInputSource for consumer qualification
+
+M15 Desktop
+→ real Hostra-owned BrowserWindow DOM Keyboard/Pointer/Gamepad RendererInputSource
+
+M17 PWA
+→ equivalent physical Window producer semantics
+```
+
+Older wording assigning real Desktop DOM input to M14 is superseded；M10 API is unchanged。新增 Viewport不能 gate 于 InputTarget、改 Input wire或继承 M10 旧 PASS作为 revised `/1`全套 PASS。
 
 ---
 
 ## M11 — Render Replication ⏳ Requalification Pending
 
-Canonical gate：`npm run test:m11`。既有已实现/Frozen：Subsystem authoritative RenderDomain、Render Update v1、Renderer Store、one-shot node identity、fresh-carrier baseline、Event transient。Consumer author surface：
+Canonical gate：
 
 ```text
-scope.createRenderDomain(initialState) → SDK chooses opaque domainId
+npm run test:m11
+```
+
+Implemented and contract-frozen：Subsystem authoritative RenderDomain、Render Update v1、Renderer Store、one-shot node identity、reconnect baseline semantics and Event transient behavior。Current-subject qualification remains pending。
+
+M14 constraint：
+
+```text
+createRenderDomain(initialState)
+→ SDK assigns opaque domainId
 RenderDomain.replace(state)
 RenderDomain.update(update)
 RenderDomain.emit(event)
 RenderDomain.close()
 ```
 
-Map不得选择domainId或重开Render wire。ADR0035的existing-node update旧executable subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`仅历史：本地`npm run test:m11`曾通过，hosted Node20/24待复验；[旧M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265)不能给新executable背书。Map PR0发现full-state validation独立瓶颈须另行设计review，不能偷改Frozen limits。
+Business authors do not choose `domainId`；M14 does not reopen this surface。
+
+ADR0035 的 `RenderDomain.update()` historical executable subject 是 `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`；本地 `npm run test:m11`曾通过，hosted Node20/24 尚待复验。旧 [M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265)只证明历史 subject；修正版 `/1`再实施后还需在新subject上重新取得受影响证据。
 
 ---
 
-## M12 — Content ✅ Closed historical
+## M12 — Content ✅ Closed
 
-Canonical gate：`npm run test:m12`；readonly Content Service/FSDB、Subsystem ContentClient、Renderer trusted/private resource、version/credential boundary已闭合。M14复用`ContentClient.record()`/`ContentClient.resource()`/`PresentationResourceClient`；不能为首consumer加metadata/HEAD author API。M15浏览器物理组合的Content/Data私有client要在业务JS之前capture/bind权威browser primitives；这是原M12/M9 physical hardening，不是新逻辑协议。
-
----
-
-## M13 — Web Presentation ✅ Closed historical / new subject regression pending
-
-Canonical gate：`npm run test:m13`；Frozen Web Presentation Config v1、Web Presentation API v1、ADR0031、M13_01–05。流程：
+Canonical gate：
 
 ```text
-prepared Content → ordered <link>/classic <script> → business customElements register
-→ window.onload → thin Web Projector → business WCs
+npm run test:m12
 ```
 
-Live identity=`(Session,subsystemKey,generation,domainId,key)`；same identity same HTMLElement，fresh Session/G新element universe。M13不建第二Store/loader/registry/map SDK。Viewport source本身不是第三种Projector reevaluation trigger；Map必须先经existing RenderDomain提交。Map PR0必须量测M13 frozen structural JSON equality的CPU residual，不许map刀直接改Projector；新four-child executable要跑受影响M13 regression。
+Closed：readonly Content Service/FSDB path、Subsystem `ContentClient`、Renderer trusted/private resource path、version/credential boundary。
+
+M14 reuses：
+
+```text
+ContentClient.record()
+ContentClient.resource()
+PresentationResourceClient
+```
+
+No new metadata/HEAD author API is added merely for the first game consumer。
+
+M15 trusted browser composition still requires private Content/Data clients to capture/bind authority-bearing browser primitives before business JS；this is physical hardening of the same M12/M9 capability boundaries, not a new logical protocol。
+
+---
+
+## M13 — Web Presentation ✅ Closed
+
+Canonical gate：
+
+```text
+npm run test:m13
+```
+
+Formal frozen surface：
+
+```text
+Web Presentation Config v1
+Web Presentation API v1
+ADR 0031
+M13_01..05 landing docs
+```
+
+Core flow：
+
+```text
+prepared M12 Content
+→ ordered <link> / classic <script>
+→ business customElements registration
+→ window.onload
+→ thin Web Projector
+→ business WC
+```
+
+Frozen identity/currentness：
+
+```text
+identity = (Session, subsystemKey, generation, domainId, key)
+same identity → same HTMLElement
+fresh Session/generation → fresh element universe
+```
+
+M14 consumes this surface；it does not introduce a second presentation store、loader、component registry or map SDK in Renderer。Viewport source不是第三个 Projector re-evaluation authority；新 four-child subject仍须跑 M13 affected regression。
 
 ---
 
 ## M14 — Map Game Library + First Real Game ⏳ Requalification Pending
 
-旧M14 subject证明 Input/Render/Content/M13可供独立game-domain consumer；此前full retained snapshot暴露可测performance gap，ADR0035只补existing-node author update，不改repository owner；新dynamic extension与M14历史Frozen scope严格分开。
+旧 M14 subject证明了 M10–M13 可以支持真实独立 business consumer且没有吸收 Map业务语义。后续实测同时暴露完整 retained Snapshot 的可测性能缺口；ADR0035 因而增加一个通用 existing-node author capability，但不改变下述 repository ownership、consumer direction 或 Map-private vocabulary：
 
 ```text
-examples/essentials-v21.1 (private concrete game)
-→ game-libs/map / @loomrealm-game/map (reusable domain library)
-→ public @loomrealm/subsystem author API
-→ M10 Input + M11 Render + M12 Content + M13 Presentation
-→ playable RMXP-compatible map slice
+examples/essentials-v21.1
+    ↓
+game-libs/map
+@loomrealm-game/map
+    ↓
+@loomrealm/subsystem public author APIs
+    ↓
+M10 Input + M11 Render + M12 Content + M13 Presentation
+    ↓
+observable playable RMXP-compatible map slice
 ```
 
-Current qualification subject以[`m14-qualification.md`](./m14-qualification.md)为准；旧`c642...` Requalification Pending，旧PASS不证明dynamic1080。原M14 landing order依次`M14_01_WORKSPACE_BOUNDARY.md`→`M14_02_MAP_GAME_LIBRARY.md`→`M14_03_ESSENTIALS_EXAMPLE.md`→`M14_04_REAL_GAME_VERTICAL.md`→`M14_05_QUALIFICATION_CLOSURE.md`；consumer projection事实归`tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`。
+The architecture/consumer contract remains frozen. Previous subjects remain historically Closed, but historical current subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` is Requalification Pending in [`m14-qualification.md`](./m14-qualification.md)。本次 dynamic map extension另受 Core `/1`与 Map PR0 gating；历史 M14 first-slice PASS不证明新动态视口或1080p。
 
-### Workspace/author boundary
+Normative landing order：
 
 ```text
-packages/* → @loomrealm/* framework
-game-libs/* → @loomrealm-game/* business library
-examples/* → private concrete games
+M14_01_WORKSPACE_BOUNDARY.md
+→ M14_02_MAP_GAME_LIBRARY.md
+→ M14_03_ESSENTIALS_EXAMPLE.md
+→ M14_04_REAL_GAME_VERTICAL.md
+→ M14_05_QUALIFICATION_CLOSURE.md
 ```
 
-无Framework→game/example反向依赖。一个subsystemKey=`map`、一个business RenderDomain（domainId由SDK分配）。Source projection选择Map/{id} `tileset_id,width,height,data`、Tileset/{id}`id,tileset_name,passages,priorities`；经prepared Content按`struct.Map/struct.Tileset/resource.Graphics`使用，未消费MapInfo/Event/Metadata/Color/Tone/AudioFile不因viewport逆向扩 importer。Original first slice input=`keyboard.event`/non-repeat Arrow、一步attempt、directional passage bits z2→1→0、source+target reverse passability；fixed tile32、viewport640×480、nominal20×15、Runtime camera和旧DOM无resize反馈**只是历史first-slice**，新候选可经已治理`scope.viewport`改变。Managed tree仍`lr-map-view > lr-map-sprite`，Browser JS/CSS由prepared Content经M13 classic bootstrap。
+Consumer projection authority：
 
-### Example/vertical/gates
+```text
+tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
+```
 
-`examples/essentials-v21.1/game.json`原参数`{mapId:1,x:10,y:8,characterName:"m14_player"}`；CI使用repository-author fixtures+PNGs，外部exact Essentials v21.1 corpus须本地单独证据且不commit第三方bytes。Vertical：game.json→long-livedMapFrame→Map/Tileset Content→initial full Render→M13 bootstrap→real Chromium tile+Sprite→ArrowRight `(10,8)→(11,8)`→第二次 blocked `(12,8)`；M14用synthetic/test-ownedRenderer producer，真实Hostra physical归M15。
+### M14/01 — workspace ownership
 
-Hosted：`npm run test:m14`。Exact local：
+```text
+packages/*   → @loomrealm/* framework
+game-libs/*  → @loomrealm-game/* reusable game-domain libraries
+examples/*   → private concrete games
+```
+
+No framework reverse dependency on game libraries/examples。
+
+### M14/02 — exact map first slice
+
+Logical topology：
+
+```text
+one business subsystemKey = "map"
+→ @loomrealm-game/map Definition
+
+one business RenderDomain
+→ SDK-assigned opaque wire domainId
+```
+
+Selective Content path：
+
+```text
+RMXP/Essentials source semantics
+→ existing importer/lossless representation
+→ selective consumer projection
+→ Map/{id}: tileset_id,width,height,data
+→ Tileset/{id}: id,tileset_name,passages,priorities
+→ prepared Content
+→ ContentClient
+→ map Runtime
+```
+
+At the public M12 seam these records/resources are read through `struct.Map`、`struct.Tileset` and `resource.Graphics`。Unused MapInfo/Event/MapMetadata/Color/Tone/AudioFile facts remain outside the first consumer view until real behavior consumes them。
+
+Input first slice：
+
+```text
+keyboard.event
+non-repeat Arrow key down
+→ synchronous one-tile movement attempt
+```
+
+RMXP passability uses frozen directional passage bits、top-down source layers/priorities and source-direction + target reverse passability checks。
+
+Fixed presentation constants：
+
+```text
+tileSize = 32
+CSS viewport = 640×480
+nominal grid = 20×15
+```
+
+Runtime owns logical camera；no DOM→Runtime resize/layout feedback **属于旧 first-slice fixed-640事实，不限制新已治理的 `scope.viewport`候选**。
+
+Exact managed tree：
+
+```text
+lr-map-view
+└── lr-map-sprite
+```
+
+Map browser JS/CSS are standalone package artifacts loaded through prepared Content + M13 classic bootstrap。
+
+### M14/03 — concrete example / fixture
+
+`examples/essentials-v21.1/game.json` initial input：
+
+```text
+{ mapId:1, x:10, y:8, characterName:"m14_player" }
+```
+
+Canonical CI uses repository-author-owned semantic fixture + PNGs。Exact external Essentials v21.1 corpus remains separate local compatibility evidence；third-party bytes are never committed。
+
+### M14/04 — real consumer vertical
+
+Required chain：
+
+```text
+game.json validation
+→ long-lived map Frame
+→ selective Map/Tileset Content reads
+→ initial full Render state
+→ M13 bootstrap
+→ real Chromium
+→ tile pixels + player sprite
+→ first ArrowRight: (10,8) → (11,8)
+→ second ArrowRight: blocked at target (12,8)
+```
+
+M14 uses existing/synthetic RendererInputSource and test-owned physical composition。Real Hostra shell/BrowserWindow/DOM physical input/reload-shutdown belong to M15。
+
+### M14/05 — closure
+
+Canonical hosted gate：
+
+```text
+npm run test:m14
+```
+
+Exact-local gate：
 
 ```text
 npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root> --map-id 66 --x 8 --y 7 --character-name trainer_POKEMONTRAINER_Red
 ```
 
-原M14 closure需要**one behavior-affecting subject SHA + exact-local PASS + hosted Node20 PASS + hosted Node24 PASS**；当前PASS/PENDING只看M14 ledger。Map新viewport还受独立Core C0/C1与Map PR0→PR1/PR2→PR3 gate；旧Frozen gameplay/transfer/animation不可因新性能方案被削弱。
+Formal closure：
+
+```text
+one behavior-affecting subject SHA
++ exact-local PASS
++ hosted Node 20 PASS
++ hosted Node 24 PASS
+→ M14 Closed
+```
+
+Current subject and live PASS/PENDING state are recorded only in `m14-qualification.md`。
 
 ---
 
 ## M15 — Hostra-owned Desktop Full E2E ⏳ Requalification Pending
 
-历史`c642...` ordinary P95 42.9ms≤50而refresh P95 96.3ms>50 FAIL；[旧run34998417264](https://github.com/lithdoo/loom-realm/actions/runs/34998417264)只证明历史。ADR0034与M15 physical frozen，不因Map性能差错重选outer owner。
+Historical subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的 ordinary movement P95 `42.9ms` 通过，但 refresh P95 `96.3ms` 未达到 `<=50ms`。ADR0034、Hostra baseline 和 physical design继续冻结；旧 [M15 run 34998417264](https://github.com/lithdoo/loom-realm/actions/runs/34998417264)只证明历史 subject。新 Core `/1`及 Map extension需自己的 current executable+PR0可行性和PR1/PR2/PR3真实产品性能证据，历史P95不能挪用。
+
+ADR0034 corrects only the outer physical owner：
 
 ```text
-Hostra shell (sole Electron/BrowserWindow/RPC)
-└── HOSTRA_SUBCMD LoomRealm Desktop plain Node process
-    ├── Main
-    ├── RuntimeHosting → Runner
-    ├── Desktop Data Broker
-    ├── Content + trusted shell
-    ├── Renderer Control loopback carrier
-    └── Data settlement loopback carrier
-Hostra-owned BrowserWindow → trusted Renderer → real DOM Input → M13 → M14 game
+Hostra shell
+├─ Electron / BrowserWindow / RPC
+└─ HOSTRA_SUBCMD
+     ↓
+LoomRealm Desktop plain Node process
+├─ Main
+├─ RuntimeHosting → Runner
+├─ Desktop Data Broker
+├─ Content + trusted shell
+├─ Renderer Control loopback carrier
+└─ Data settlement loopback carrier
+
+Hostra-owned BrowserWindow
+→ trusted Renderer
+→ real DOM input
+→ existing M13 presentation
+→ same M14 game
 ```
 
-**不采用**LoomRealm-owned Electron app/BrowserWindow、preload、MessageChannelMain、ADR0033 embedding。Physical SSOT为`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`+ADR0034；冻结baseline `hostra@1.0.1-beta.1`、source`d863beab3c59c3bd4f271514a228fa8fee0bf5b6`、Electron44.1.1、shutdown grace1000ms；旧M15_01–05仅保留supersession matrix明确的逻辑/input意图。
+Canonical M15 does **not** use LoomRealm-owned Electron app/BrowserWindow、LoomRealm preload、`MessageChannelMain` or ADR0033 run-as-node embedding。
 
-Physical invariants：Hostra shell唯一Electron/window owner；LoomRealm Desktop是实际HOSTRA_SUBCMD child，Runner是LoomRealm RuntimeHosting child；Hostra RPC仅host-control；Control/Data settlement/Data application/Content分开；M9 Broker唯一candidate/current owner；reload=freshRenderer identity；same-generation Data-only reconnect保留Renderer identity；M10/M13/M14逻辑路径不变。Bootstrap bounded `pendingAcquire 0..1 / pendingDocument 0..1 / currentDocument 0..1`，Main acquire与合法top-level document navigation whichever first；fetch(location.href)/XHR/subframe/resource不得mint/retire Renderer。
+Frozen physical SSOT：
 
-Reload链：sameHostra windowId→retire old document/Renderer→fresh acquire+rendezvous→newRenderer material，Main/Runner/Subsystem truth继续。Data reconnect链：same Renderer Control participant→physical pair replace→fresh `RendererDataBinding.acquire()`→sameRenderer identity恢复；不可把Data loss当全Window重启。
+```text
+M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
+ADR 0034
+```
 
-唯一idempotent terminal owner：window.closed/SIGTERM/SIGINT/host.shuttingDown/RPC terminal/programmatic close/Main or Runner fatal/startup failure→`beginTermination`→abort runMain→Main/RuntimeHosting convergence→finally close Control/Data/Content/document→LoomRealm exit。必须在Hostra1000ms grace下证明没有orphan Runner；Desktop不得增加第二direct Runner kill authority。迁移期间Slices1–6 canonical Hostra不依赖legacy Electron owner；legacy可隔离作regression oracle；**只有Hostra vertical合格后**删除legacy direct-Electron production ownership并要求 canonical apps/desktop Electron owner/import=FAIL，不能提前强制全仓删除。
+Frozen Hostra baseline：
 
-Canonical gate：`npm run test:m15`，内部先`test:m14`再real Hostra boundary/build/E2E/input/reload/Data-reconnect/lifecycle。正式status只看[`m15-qualification.md`](./m15-qualification.md)。新改造P95用相同Browser Window clock `input-captured→browser-first-motion-paint`和真实pixel oracle，严禁跨进程减performance.now或以CDP screenshot round-trip计入原50ms指标；screenshots是独立正确性证据。失败须维持FAIL、按Map contract的新设计/实现资格路径收口，不能重开M15 Hostra physical design。
+```text
+hostra@1.0.1-beta.1
+source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+bundled Electron 44.1.1
+shutdown grace 1000 ms
+```
+
+Old `M15_01`–`M15_05` retain logical/input intent only where explicitly preserved by the supersession matrix。
+
+### Required physical invariants
+
+```text
+Hostra shell is sole Electron/BrowserWindow owner
+LoomRealm Desktop is actual HOSTRA_SUBCMD Node child
+Runner is LoomRealm RuntimeHosting child
+Hostra RPC is host-control only
+Control/Data settlement/Data application/Content remain separated
+M9 Broker remains sole Data candidate/current owner
+reload replaces Renderer identity
+same-generation Data-only reconnect preserves Renderer identity
+M10/M13/M14 logical paths remain unchanged
+```
+
+### Document/reload invariant
+
+Single-window bootstrap uses only bounded state：
+
+```text
+pendingAcquire   0..1
+pendingDocument  0..1
+currentDocument  0..1
+```
+
+Main acquire and top-level document navigation rendezvous whichever arrives first。Only valid top-level main-document navigation may create a fresh Renderer document；ordinary `fetch(location.href)`、XHR、subframe or resource requests cannot retire/mint Renderer lifetime。
+
+Reload：
+
+```text
+same Hostra windowId
+→ old Renderer/document retires
+→ fresh document/acquire rendezvous
+→ fresh Renderer identity/material
+→ Main/Runner/Subsystem/game truth unchanged
+```
+
+Data-only reconnect：
+
+```text
+same Renderer Control participant
+→ Data physical pair replacement only
+→ fresh RendererDataBinding.acquire()
+→ same Renderer identity resumes current truth
+```
+
+### Termination invariant
+
+All terminal triggers use one idempotent owner path：
+
+```text
+window.closed
+SIGTERM/SIGINT
+host.shuttingDown
+RPC terminal
+programmatic close
+Main/Runner fatal
+startup partial failure
+    ↓
+beginTermination
+    ↓
+abort runMain
+    ↓
+Main/RuntimeHosting convergence
+    ↓
+finally close Control/Data/Content/document resources
+    ↓
+LoomRealm process exit
+```
+
+This is required because frozen Hostra may signal the `HOSTRA_SUBCMD` during final-window shutdown；M15 must prove no orphan Runner remains under its 1000 ms grace。Desktop不得补第二份 direct Runner kill authority。
+
+### Migration staging
+
+```text
+Slices 1–6
+    canonical Hostra path does not depend on Electron ownership
+    legacy direct-Electron path may remain isolated as regression oracle
+
+Final replacement
+    Hostra vertical qualified
+    → delete legacy direct-Electron production ownership
+    → repository-wide canonical apps/desktop Electron ownership/import = FAIL
+```
+
+Do not require repository-wide Electron deletion before the replacement vertical exists。
+
+### Closure
+
+Canonical M15 gate remains：
+
+```text
+npm run test:m15
+```
+
+It must run current `test:m14` first and then real frozen-Hostra boundary/build/E2E/input/reload/Data-only reconnect/lifecycle evidence。Formal M15 status is Requalification Pending in [`m15-qualification.md`](./m15-qualification.md)。
+
+M15 implementation is retained, but qualification is incomplete because the frozen refresh performance gate fails. This does not reopen physical design；follow-up optimization requires a separate frozen design。
 
 ---
 
 ## M16 — PWA Runtime — pending
 
-只闭合PWA runtime host：PWA PREPARE→Dedicated Worker Runner→RuntimeHosting→Runtime Control MessagePort→Main/Worker/Subsystem lifecycle与termination/failure；不要求PWA Renderer/Data/Content/Web presentation，现有Subsystem可先用普通Content unavailable capability等待M17。M15 Hostra shell/HOSTRA_SUBCMD/loopback皆Desktop-only。
+Close only PWA Runtime hosting mechanics：
+
+```text
+PWA PREPARE
+→ Dedicated Worker Runner
+→ RuntimeHosting
+→ Runtime Control MessagePort
+→ Main ↔ Worker ↔ Subsystem lifecycle
+→ termination/failure
+```
+
+PWA Renderer/Data/Content/Web presentation are not required for M16 closure。Existing Subsystem host can expose the normal unavailable Content capability until M17 supplies a physical ContentClient。
+
+M15 Hostra-shell / HOSTRA_SUBCMD / loopback mechanics are Desktop-only and do not become PWA requirements。
 
 ---
 
 ## M17 — PWA Full E2E / Equivalence — pending
 
+Complete：
+
 ```text
-Window Renderer Control → PWA Data broker/provisioning → PWA Content
-→ physical Window Input → Render → M13 presentation → same M14 concrete game/WCs
-→ Hostra/PWA shared logical business outcomes equivalence
+Window Renderer Control
+→ PWA Data broker / provisioning
+→ PWA Content
+→ physical Window input
+→ Render
+→ M13 presentation
+→ same concrete M14 game/business WC
+→ Hostra/PWA logical-outcome equivalence
 ```
 
-等价比较logical semantics/business outcomes，不要求同PID/Worker或WebSocket/MessagePort或physical storage。
+Equivalence compares shared logical semantics/business outcomes, not identical PID/Worker、WebSocket/MessagePort or physical storage implementation。
 
 ---
 
 ## Current status
 
 ```text
-M1–M9                              ✅ historical
-M10 Input                          ✅ Closed historical
-M11 Render                         ⏳ Requalification Pending
-M12 Content                        ✅ Closed 2026-09-08
-M13 Web Presentation               ✅ historical Closed; new SHA regression pending
-M14 Map                            ⏳ Requalification Pending
-M15 Desktop E2E                    ⏳ Requalification Pending
-Viewport + corrected /1            ⏳ Core Docs Freeze HOLD / Not Implemented
-Map dynamic/performance             ⏳ Map Docs Freeze HOLD / PR0 NOT RUN
-M16 PWA Runtime                     pending until all required earlier closure
-M17 PWA Full E2E                    pending
+M1–M9                                      ✅ historical baseline
+M10 User Input                             ✅ Closed historical baseline
+M11 Render Replication                     ⏳ Requalification Pending
+M12 Content                                ✅ Closed 2026-09-08
+M13 Web Presentation                       ✅ Closed 2026-09-09; new subject regression pending
+M14 Map Game Library + First Real Game     ⏳ Requalification Pending
+M15 Desktop Full E2E                       ⏳ Requalification Pending
+Viewport + corrected /1                  ⏳ Docs Freeze HOLD / Not Implemented
+Map dynamic viewport/performance          ⏳ Map Freeze HOLD / PR0 NOT RUN
+M16 PWA Runtime                            blocked by current requalification
+M17 PWA Full E2E / Equivalence             pending
 ```
 
-Last unaffected historical milestone gate `npm run test:m13`，不是新four-child完整PASS。Live evidence分别归[Core v1](./viewport-profile-v1-qualification.md)、[M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md) ledger。Refresh历史失败要求STOP/report及单独冻结follow-up，不授予改M14 business ownership或M15物理owner的权力。**当前路由已修正为：C0→C1→PR0可行性→Map Docs Freeze→PR1/PR2真实优化和P95→PR3同SHA全资格→才继续M16。**
+Last unaffected formally closed milestone gate：
+
+```text
+npm run test:m13
+```
+
+Live evidence remains in the designated ledgers. The refresh latency failure requires stop/report plus a separately frozen follow-up；it does not authorize reopening M14 ownership or M15 physical design。
+
+**Current route**：ADR0037 external compatibility/Docs Freeze → coherent revised `/1` executable subject + revised conformance/old regression → Map PR0 **feasibility, not postoptimization P95** → Map Docs Freeze → Map PR1/PR2 իրական product/优化P95 → PR3 affected M11/M13/M14/M15 qualification → only after formal closure resume M16。ADR0035 的旧 `c642...`及历史 M11/M14/M15证据仅作为基线，不再覆盖本次新subject；唯一 live status 分别看 [viewport v1 ledger](./viewport-profile-v1-qualification.md)、[M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md)。
