@@ -145,6 +145,7 @@ test("fresh source State and paired transition flow only through gate and curren
         received.push(message);
         return accepted();
       },
+      onViewportState: accepted,
     },
   });
   let sourceEmit;
@@ -218,6 +219,7 @@ test("Control generation replacement retires old Data before new Input facts ent
           onInputState(message) { received.push(message); return accepted(); },
           onInputEvent(message) { received.push(message); return accepted(); },
           onInputReset(message) { received.push(message); return accepted(); },
+          onViewportState: accepted,
         },
       });
       acquisitions.push({ generation, received, subsystem });

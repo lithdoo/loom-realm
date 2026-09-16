@@ -454,6 +454,7 @@ class SubsystemHost {
             this.currentDataPeer === peer
               ? this.input.onReset(message)
               : acceptedDataMessage,
+          onViewportState: () => acceptedDataMessage,
         },
       });
     } catch {

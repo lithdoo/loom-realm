@@ -299,7 +299,7 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
       const peer = createSubsystemDataPeer({
         binding: { carrier: pair.left, subsystemKey, generation, dataProfile },
         handlers: {
-          onInputState: () => ({ kind: "accepted" }), onInputEvent: () => ({ kind: "accepted" }), onInputReset: () => ({ kind: "accepted" }),
+          onInputState: () => ({ kind: "accepted" }), onInputEvent: () => ({ kind: "accepted" }), onInputReset: () => ({ kind: "accepted" }), onViewportState: () => ({ kind: "accepted" }),
         },
       });
       peers.push({ subsystemKey, generation, peer });
