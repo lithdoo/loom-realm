@@ -1,811 +1,274 @@
 # 地图动态视口与大屏呈现性能改造草案
 
-> 状态：**Draft for review；Core architecture 已拆分，Map Freeze 仍受 PR0 证据阻塞**
->
-> 日期：2026-09-16
->
-> 生产代码基线：`3c10ae8`（其后的相关变更截至本文均为文档设计）
->
-> 适用范围：`game-libs/map` Runtime/Browser presentation、Essentials local presentation；Core Viewport capability 只作为前置依赖引用
->
-> 核心目标：使用独立于 Frame / Activation / InputTarget 的 `SubsystemScope.viewport` 支持动态逻辑视口，同时把地图移动、chunk refresh、autotile 与大屏 raster 的持续成本从 camera rAF 的全 tile 重画中移除。
+> 状态：**Draft for review / Map Freeze HOLD**（Core contracts仍 Candidate；MF-01 lifecycle seam与 MF-03 PR0实测尚未关闭）  
+> 日期：2026-09-16；原有生产代码基线：`3c10ae8`（冻结前必须重新核实际 executable subject）  
+> 范围：`game-libs/map` Runtime/Browser presentation与 Essentials local physical composition；Core只作为正式 contract依赖  
+> 目标：在非 InputTarget 的可见 map Frame也能按实际 320×240..1920×1080 viewport投影；movement/autotile/refresh不再在 camera rAF全量绘图；在性能与资格证据未通过前不声称已解决。
 
-本文是 map slice 的候选实施合同。Core viewport wire/profile/author API 不再由本文定义；对应 SSOT：
-
-- `doc/decisions/0036-viewport-state-and-renderer-data-profile-v2.md`
-- `doc/10-architecture/viewport-capability.md`
-- `doc/15-contracts/viewport-state-v1.md`
-- `doc/15-contracts/renderer-data-profile-v2.md`
-- 对应两份 conformance 文档
-
-如本文与上述 Core SSOT 冲突，以 Core SSOT 为准并停止实施，不允许在 map 层自行修协议。
-
-本文继续覆盖：
-
-- `M14_02_MAP_GAME_LIBRARY.md` 固定 `640×480` viewport 与旧逐 tile RenderData；
-- `MAP_MOVEMENT_LATENCY_REFACTOR_DRAFT.md` 的 Browser static backing / camera-only frame / sprite raster-placement slice；movement cadence、turn buffer、collision、transfer trigger 仍由 movement 文档拥有；
-- `MAP_AUTOTILE_ANIMATION_DESIGN_DRAFT.md` 的 async prepare + sync paint 方向，但以 dirty-cell repaint 取代整层 repaint；
-- `MAP_LAYERING_DESIGN_DRAFT.md` 的 depth/equal-depth/z-index 规则保持不变；
-- `RenderDomain.update()` / Render Patch/currentness沿用既有 Core，不在本文 reopen Render Update v1。
+Core SSOT：[ADR0036](../../doc/decisions/0036-viewport-state-and-renderer-data-profile-v2.md) · [Viewport architecture](../../doc/10-architecture/viewport-capability.md) · [Viewport v1](../../doc/15-contracts/viewport-state-v1.md) · [Profile v2](../../doc/15-contracts/renderer-data-profile-v2.md) · [qualification ledger](../../doc/30-implementation/viewport-profile-v2-qualification.md)。此处不重新定义 Core wire/profile/author callback；冲突时 STOP、按 Core SSOT修正。与已有 M14 map baseline、movement latency、autotile animation、layering draft重叠的部分，以各自专属语义 owner为准：movement doc拥有 cadence/turn buffer/collision/transfer；本文拥有 dynamic viewport/projection/raster和跨文档一致性；既有 Render Update v1不得在本改造中reopen。
 
 ---
 
-## 1. 已决定的整体数据流
+## 1. Exact data flow / ownership
 
 ```text
-Renderer physical surface
-  → Viewport State v1 / Renderer Data Profile v2       [Core SSOT]
-  → SubsystemScope.viewport                            [Core SSOT]
-  → Map Runtime accepted viewport                      [本文]
-  → chunk-aligned current ProjectionWindow             [本文]
-  → RenderDomain.update / replace                      [既有 Core]
-  → Renderer Store / Web Projector                     [既有 Core]
-  → lr-map-view / lr-map-sprite                        [本文]
-  → world raster + placement-only camera rAF           [本文]
+Renderer current document layout viewport
+→ Core Viewport State v1 / Profile v2 (independent of InputTarget)
+→ Runtime-scoped scope.viewport retained observation
+→ Map business accepted viewport / camera / current ProjectionWindow
+→ existing RenderDomain.update/replace
+→ Renderer Store → existing Web Projector
+→ lr-map-view parent / lr-map-sprite managed child
+→ business-owned detached raster + local synchronized presentation commit
 ```
 
-冻结候选原则：
+Core只提供 raw CSS logical size；Map独占 min/max/settle、camera、projection、tile semantics和 letterbox；Browser独占 decoded resources、current-window prepared/raster、physical retry和 motion timeline。Business WC不得反向修改 Store/managed light DOM；Main不存 width/height。不用 `x.loomrealm.viewport.state`、InputTarget bypass、Browser-local authoritative camera、permanent max-1080p projection envelope、generic Viewport/Environment/Chunk manager或 map-special Core path。
 
-1. Viewport 不是 User Input；map 不再声明 `x.loomrealm.viewport.state`。
-2. Core提供 raw positive CSS logical size；map拥有 min/max、settle、camera、projection与 letterbox policy。
-3. Runtime拥有 accepted viewport、camera target、current ProjectionWindow、map scene/visual epoch。
-4. Browser拥有 decoded resources、current-window prepared representation、world raster、motion timeline与 private physical-realization cursor。
-5. Browser/DOM不得反向写 Runtime/Store。
-6. camera rAF只做 placement；tile raster不随 camera pixel移动重复执行。
-7. current ProjectionWindow就是 Runtime bounded chunk cache；不建 LoadedMap-wide历史 cache。
-8. refresh必须 overlap pixel reuse + entering-only raster；autotile必须 dirty-cell-only；sprite raster与placement分离。
-9. 不新增 generic ViewportManager/ChunkManager/SceneManager/RenderLoop/Environment service locator。
+## 2. Existing problem / historical baseline
+
+Current implementation：camera/bounds和 MapView固定 640×480；camera interpolation 每 rAF全 tile clear/traversal/drawImage，MapSprite每 rAF resize/clear/redraw；refresh重新投影/序列化/prepare/raster，autotile重画 depth layers。历史 Essentials：Map066 491 tiles/3 depths/约43116B；Map002 753 tiles/6 depths/约66875B。历史 ordinary P95 42.9ms（≤50）；refresh P95 96.3ms（>50 FAIL）。不同 measurement seam不能直接相互比较；必须按 §13 重测。**Viewport capability正确并不代表这些成本已被消除。**
 
 ---
 
-## 2. 问题基线
-
-当前 production 性能耦合：
-
-```text
-computeCamera / viewportTileBounds 固定 640×480
-MapView CSS/canvas 固定 640×480
-camera interpolation 每 rAF：clear + full projected tile traversal + drawImage
-MapSprite movement 每 rAF：resize/clear/redraw crop
-window refresh：重新投影/序列化/校验/分桶/full raster
-autotile frame change：重画所有 depth layer
-```
-
-历史 Essentials 证据：
-
-| 场景 | camera | projected tiles | depth layers | tile JSON约值 |
-|---|---|---:|---:|---:|
-| Map066 `(8,7)` | clamp `0,0` | 491 | 3 | 43,116 B |
-| Map002 `(16,10)` | `208→240` | 753 | 6 | 66,875 B |
-
-历史 qualification：
-
-```text
-ordinary update P95 = 42.9ms
-refresh update  P95 = 96.3ms
-refresh gate         = 50ms FAIL
-```
-
-这些数字必须在 §13 canonical measurement seam 下重测；旧 seam 若不同，只作为历史证据。
-
----
-
-## 3. Map viewport policy
-
-Core `scope.viewport.current` 语义由正式候选 contract拥有；map只消费它。
+## 3. Map viewport policy and safe initialization
 
 ```ts
-interface ViewportSize {
-  readonly width: number;
-  readonly height: number;
-}
-
 const DEFAULT_VIEWPORT = Object.freeze({ width: 640, height: 480 });
-const MIN_VIEWPORT_WIDTH = 320;
-const MIN_VIEWPORT_HEIGHT = 240;
-const MAX_VIEWPORT_WIDTH = 1920;
-const MAX_VIEWPORT_HEIGHT = 1080;
-const VIEWPORT_RESIZE_SETTLE_MS = 100;
+const MIN_WIDTH = 320, MIN_HEIGHT = 240;
+const MAX_WIDTH = 1920, MAX_HEIGHT = 1080;
+const RESIZE_SETTLE_MS = 100;
 ```
 
-Map Frame启动：
+Core size是 positive safe CSS integer layout viewport，不是 WC element box；map detach并 clamp到 min/max。初始 `scope.viewport.current ?? DEFAULT_VIEWPORT`；不把 `null`写回 Core。`acceptedViewport / pendingViewport? / resizeTimer?`仅 map business state；第一份真实合法且不同的 size在安全 boundary可立即尝试，后续 burst采用 100ms trailing settle、latest wins。相同 normalized size不提交。Movement step in-flight时 timer只记录 pending，在下一 motion baseline之前完成尺寸候选 commit；不得用 viewport callback并行破坏当前 motion。视口小于下限按 map policy clamp，大于1920×1080 cap并由外层 letterbox；DPR不进入 Runtime/RenderData或放大所有 Canvas backing。
+
+**Mandatory initialization order（修正 synchronous subscribe reentrancy）：**
 
 ```text
-scope.viewport.current == null
-→ acceptedViewport = DEFAULT_VIEWPORT
-
-scope.viewport.current != null
-→ normalize/clamp
-→ initial candidate may commit immediately
+read scope.viewport.current to choose initial detached size
+→ load/validate content and initial world facts
+→ build initial projection + RenderDomain and commit local map state
+→ establish map render/movement owners
+→ subscribe(viewportListener), synchronous first delivery must be compare/no-op if equal
+→ accept future changed sizes under settle policy
 ```
 
-Runtime只需：
-
-```text
-acceptedViewport
-pendingViewport?      // latest normalized candidate
-resizeTimer?
-```
-
-Normalization：positive safe integer raw size → clamp min/max。Core已经拒绝 malformed wire；map仍不能信任 arbitrary consumer-side object mutation，因此使用 detached local value。
-
-Transition：
-
-```text
-first legal normalized sample different from accepted
-→ tryCommitViewport immediately
-
-later changed sample
-→ pendingViewport = latest
-→ reset 100ms trailing timer
-
-timer fires while no movement step is in-flight
-→ tryCommitViewport
-
-timer fires during a movement step
-→ keep pending only
-
-movement step boundary
-→ commit pending before next motion baseline
-```
-
-Map被 child Frame suspend / 失去 InputTarget 时，`scope.viewport`仍可通知。Viewport callback不依赖 Input Interest；若当前 map RenderDomain仍 live，standing 状态可按同一 settle/commit policy更新画面。
-
-同 normalized size不 commit。Frame/runtime cleanup取消 timer/subscription；late callback inert。
+不允许 `subscribe`首发时引用尚未初始化的 `domain/current/window`，不得初始 size被读一次、callback同值又重复投影/commit。若 read→subscribe间有新 viewport，Core同步首发最新值，map必须检测并收敛到该值。Frame/runtime terminal取消 subscription/timer、旧 async成果 inert。
 
 ---
 
-## 4. Camera / visible bounds
+## 4. Camera and bounds
 
 ```ts
-export function computeCamera(
-  map: MapRecord,
-  playerX: number,
-  playerY: number,
-  viewport: ViewportSize = DEFAULT_VIEWPORT,
-): Readonly<{ cameraX: number; cameraY: number }>;
-
-export function viewportTileBounds(
-  map: MapRecord,
-  cameraX: number,
-  cameraY: number,
-  viewport: ViewportSize = DEFAULT_VIEWPORT,
-): TileProjectionBounds;
+computeCamera(map, playerX, playerY, viewport = DEFAULT_VIEWPORT)
+viewportTileBounds(map, cameraX, cameraY, viewport = DEFAULT_VIEWPORT)
 ```
-
-公式：
 
 ```text
 anchorX = floor((viewport.width  - 32) / 2)
 anchorY = floor((viewport.height - 32) / 2)
-
-cameraX = clamp(playerX*32-anchorX, 0, max(map.width*32 -viewport.width,  0))
-cameraY = clamp(playerY*32-anchorY, 0, max(map.height*32-viewport.height, 0))
-
-minTileX = max(0, floor(cameraX/32))
-maxTileX = min(map.width-1,  floor((cameraX+viewport.width -1)/32))
-minTileY = max(0, floor(cameraY/32))
-maxTileY = min(map.height-1, floor((cameraY+viewport.height-1)/32))
+cameraX = clamp(playerX*32-anchorX, 0, max(map.width*32-viewport.width,0))
+cameraY = clamp(playerY*32-anchorY, 0, max(map.height*32-viewport.height,0))
+minX = max(0,floor(cameraX/32))
+maxX = min(map.width-1,floor((cameraX+viewport.width-1)/32))
+minY = max(0,floor(cameraY/32))
+maxY = min(map.height-1,floor((cameraY+viewport.height-1)/32))
 ```
 
-`640×480`必须严格退化为当前 anchor `304/224` 与 inclusive bounds语义。Walking coverage使用 source/target viewport bounds union。
+640×480必须严格退化为 old 304/224 anchor和 inclusive bounds；四边、small map、odd viewport、walking source/target interpolated coverage union均测试。Viewport只改变 presentation camera/projection，不改变 player world position。
 
 ---
 
-## 5. Dense projection contract
-
-### 5.1 Constants / ordering
+## 5. Dense current ProjectionWindow / exact RenderData
 
 ```ts
-const TILE_SIZE = 32;
-const CHUNK_TILES = 8;
+const TILE_SIZE = 32, CHUNK_TILES = 8;
 const CHUNK_CELL_COUNT = 8 * 8 * 3; // 192
 const CHUNK_OVERSCAN = 1;
 const MAX_PROJECTED_DATA_BYTES = 196_608;
 ```
 
-chunk coordinate：
-
-```text
-chunkX = floor(tileX/8)
-chunkY = floor(tileY/8)
-```
-
-`chunks` canonical order：`chunkY` ascending，然后 `chunkX` ascending。
-
-`cells` exact length 192：
-
-```text
-((z*8+localY)*8)+localX
-z=0,1,2
-```
-
-地图外 cell `0`；非空值为原始 tileId。
-
-### 5.2 RenderData
+Chunk `(chunkX=floor(tileX/8), chunkY=floor(tileY/8))`按 Y再X升序；cells exact 192，index `((z*8+localY)*8)+localX`，z 0..2，map外填0，非空为 source tileId。`tileVisuals[tileId]`当前 Tileset冻结一次 canonical dictionary：nonrenderable/null、regular `[depthBias,kind=0,sourceIndex]` 或 autotile `[depthBias,kind=1,slot,tlSx,tlSy,trSx,trSy,blSx,blSy,brSx,brSy]`；priority0→depthBias=-1，priority>0→(priority+1)*32。Browser消费 blit/depth instruction，不读取 Tileset record或重做 RMXP semantic判断。
 
 ```ts
 type ProjectedChunk = Readonly<{
-  chunkX: number;
-  chunkY: number;
-  cells: readonly number[];
+  chunkX: number; chunkY: number; cells: readonly number[];
 }>;
-
-type TileVisual =
-  | null
-  | readonly [depthBias: number, kind: 0, sourceIndex: number]
-  | readonly [
-      depthBias: number, kind: 1, slot: number,
-      tlSx: number, tlSy: number,
-      trSx: number, trSy: number,
-      blSx: number, blSy: number,
-      brSx: number, brSy: number,
-    ];
-
 type MapViewRenderData = Readonly<{
-  sceneEpoch: number;
-  visualEpoch: number;
-  viewportWidth: number;
-  viewportHeight: number;
-  mapId: number;
-  mapWidth: number;
-  mapHeight: number;
-  cameraX: number;
-  cameraY: number;
-  tileset: ResourceRef;
-  autotiles: readonly (ResourceRef | null)[];
-  tileVisuals: readonly TileVisual[];
-  chunks: readonly ProjectedChunk[];
+  sceneEpoch: number; visualEpoch: number;
+  viewportWidth: number; viewportHeight: number;
+  mapId: number; mapWidth: number; mapHeight: number;
+  cameraX: number; cameraY: number;
+  tileset: ResourceRef; autotiles: readonly (ResourceRef | null)[];
+  tileVisuals: readonly TileVisual[]; chunks: readonly ProjectedChunk[];
   cameraMotion: CameraMotion | null;
 }>;
-
 type MapSpriteRenderData = Readonly<{
   visualEpoch: number;
   // existing resource/world/screen/direction/pattern/motion fields
 }>;
 ```
 
-这里刻意使用 `Epoch` 而不是 `Revision`：Render Update v1 的 Domain revision已有严格协议含义。Map `sceneEpoch/visualEpoch`只是 business RenderData identity，不是 Store/domain/Main revision、ACK或 replay cursor。
+Map `sceneEpoch/visualEpoch`是 Runtime-instance-scoped positive safe monotonic business identities，never wrap/reuse；不能借 Main Session/G生成，也不能冒充 Render Domain wire revision/ACK。`sceneEpoch`只随成功 scene transfer；`visualEpoch`只随 chunk refresh、accepted viewport change、scene transfer；ordinary movement与Browser retry/autotile rAF不增加 epoch。
 
-Epoch scope：
-
-```text
-one live map Runtime instance
-positive safe integer
-monotonic within that instance
-never wrap/reuse
-```
-
-不得读取 Main Session/generation来生成。
-
-### 5.3 tileVisuals
-
-每次 `loadMap()` 为当前 Tileset构造冻结一次：
-
-```text
-index = tileId
-0 / reserved non-renderable → null
-regular → sourceIndex
-animated autotile → slot + precomputed four-corner source coordinates
-priority 0 → depthBias = -1
-priority >0 → depthBias = (priority+1)*32
-```
-
-Browser只执行投影后的 blit/depth instruction，不读取 Tileset record、不计算 priority/autotile semantics。
+Window selection：camera source/target tile bounds union→required chunk coverage→1-chunk overscan→map bounds clamp。当前 window就是唯一 Runtime bounded chunk cache：交集 reuse同冻结 chunk object，entering project一次，leaving drop；evicted future reentry可 reproject。不建 LoadedMap-wide history。若当前window覆盖新的 required bounds，ordinary movement不更新 chunks。map-side full JSON byte guard仅 initial baseline、transfer、viewport commit、refresh；ordinary retained movement不重复作者侧 stringify，但 **Core RenderDomain.update full-node validation residual仍真实存在，必须测**。
 
 ---
 
-## 6. Current ProjectionWindow
+## 6. Runtime candidate / publication atomicity
 
-Runtime不维护 LoadedMap-wide chunk history。
-
-```text
-new required window ∩ old window
-→ reuse same frozen ProjectedChunk object
-
-new - old
-→ project entering chunk once
-
-old - new
-→ drop
-```
-
-内存 `O(current window)`；evicted chunk未来重新进入允许 reproject。
-
-Window selection：source/target union tile bounds → required chunk bounds → each side `CHUNK_OVERSCAN=1` → map chunk bounds clamp。
-
-如果 current window仍包含新的 required bounds，ordinary movement不更新 `chunks`。
-
-Map-side explicit byte preflight只在：
+Common rule：先构造 candidate camera/window/RenderData、验证 196608B guard和 Core accepted shape，成功后才更新 acceptedViewport/world/window/epoch并发布。失败保留前一 complete business/Render state；不能发布新 player position却留下旧 projection，也不能偷偷降 overscan或提高 Core limit。
 
 ```text
-initial baseline
-scene transfer
-accepted viewport commit
-chunk window refresh
+ordinary movement:
+  MapView set cameraX/cameraY/cameraMotion
+  MapSprite set world/screen/direction/pattern/motion
+  no chunks/tileVisuals/resources/viewport/epochs set
+
+chunk refresh:
+  retained chunks reuse + entering projection + byte preflight
+  visualEpoch+=1
+  one domain.update(View.visualEpoch/camera/chunks/motion,
+                    Sprite.visualEpoch/player/motion)
+
+accepted viewport commit:
+  construct resized camera/window + byte preflight
+  visualEpoch+=1
+  one domain.update(View.epoch/viewport/camera/chunks,
+                    Sprite.epoch/new screen pose)
+
+scene transfer:
+  full new scene/resources/window validated against acceptedViewport
+  sceneEpoch+=1; visualEpoch+=1
+  one domain.replace(full scene)
 ```
 
-ordinary retained-window movement不重复 map自己的 `JSON.stringify` guard。
+Transfer不复用旧 scene pixels/resources/prepared chunks；pending resize另按安全 boundary提交，不能未经验证顺手塞到 replace。若容量溢出，走现有 map business/Frame failed path并归档证据，不能称 Browser physical failure。`RenderDomain.update()`本身可能因 complete final state失败，候选不得先改 map权威状态而不处理该同步失败。
 
 ---
 
-## 7. Runtime publication / epochs
+## 7. Suspended Frame boundary — MF-01 (OPEN / Map Freeze blocker)
 
-### 7.1 Epoch rules
+Core viewport receiver属于 Runtime，不受 InputTarget/Activation门控；**但这不是允许 suspended Frame进行普通 gameplay mutation。** 当 map Frame存活、Domain仍 live且被 child menu/dialog suspend时，viewport listener最多依据**已提交 world facts**重算 viewport、camera、chunk与 Render presentation；不能从 resize触发 input attempt、held-direction step、collision、transfer或 Frame call。已授权动作的 Browser视觉插值可依其既有已提交事实完成，但没有 fresh input authority不得开始下一 gameplay step。frame.signal abort/terminal须取消 pending timeout、subscription、async load，late callback inert。
 
-```text
-sceneEpoch
-    only changes when a new map scene successfully becomes authoritative
-
-visualEpoch
-    changes when MapView/MapSprite must atomically switch visual backing:
-    - chunk window refresh
-    - accepted viewport change
-    - successful scene transfer
-```
-
-ordinary retained-window movement不增加 epoch。
-
-### 7.2 Ordinary movement
+**当前源码/API缺口：** map移动定时器保留 heldDirections并在 `finishStep`中可能自动 `attempt()`；public `Frame`仅有 `id/params/signal/call`，`InputListener`只有 `on/setChannels/close`，没有能准确观察 Activation revoke/suspend的 author API。`frame.signal`不能被臆测为 suspend signal。仅测试“Viewport在 suspend收到事件”不足以证明 gameplay gate。必须先选一种并用 executable trace验证：
 
 ```text
-MapView node:
-    set cameraX/cameraY/cameraMotion
-
-MapSprite node:
-    set x/y/screenX/screenY/direction/pattern/motion
+A. existing already-frozen author seam can prove that step chaining is suppressed
+   across suspension without losing required held-movement cadence;
+OR
+B. evidence proves no such seam: STOP Map Freeze; separately review one narrow
+   Frame/Input eligibility observation capability, with explicit authority/lifetime,
+   without weakening InputTarget or packaging it inside Viewport.
 ```
 
-不重复 set `chunks/tileVisuals/resources/viewport size/epochs`。
-
-### 7.3 Chunk refresh
-
-```text
-construct candidate window
-→ reuse retained chunks
-→ project entering chunks
-→ payload preflight
-→ visualEpoch += 1
-→ one domain.update()
-```
-
-同一个 update：
-
-```text
-MapView   visualEpoch/camera/chunks/motion
-MapSprite visualEpoch/player/motion
-```
-
-如果同 accepted viewport下 candidate超过 `196,608 B`：
-
-```text
-MUST NOT commit player/camera authoritative state with stale projection
-MUST NOT shrink overscan ad hoc
-MUST NOT call this Browser presentation failure
-→ map-library projection capacity/invariant failure
-→ resolve through existing map business/Frame failure path
-```
-
-### 7.4 Viewport commit
-
-Candidate viewport必须先构造 camera + candidate ProjectionWindow + payload并通过 guard，然后：
-
-```text
-visualEpoch += 1
-→ one domain.update()
-```
-
-```text
-MapView:
-  visualEpoch/viewportWidth/viewportHeight/camera/chunks
-MapSprite:
-  visualEpoch/screenX/screenY
-```
-
-失败：acceptedViewport/current window/epoch/Render state全部不变。后续较小 candidate仍可尝试。
-
-### 7.5 Scene transfer
-
-```text
-construct complete new scene candidate using current acceptedViewport
-→ content/resources/tileVisuals/window/camera/player all valid
-→ sceneEpoch += 1
-→ visualEpoch += 1
-→ domain.replace(full scene)
-```
-
-新 scene不复用旧 pixels/prepared chunks/resource-derived raster。Pending viewport若另有变化，按合法 boundary独立 commit；不得把未验证 resize顺手塞入 scene replacement。
+目前没有证据证明 A；不提前引入 B 的未评审 API，也不牺牲 movement cadence/turn buffer以假装修复。所需测试：hold direction→movement in flight→child取得 InputTarget→rapid resize→timer deadline→no next gameplay step/transfer→child return/fresh Activation→fresh eligible input convergence→可按原 cadence正确继续；Frame terminal/late timers inert。MF-01在此之前明确 OPEN，Core Docs Freeze不以此为前提。
 
 ---
 
-## 8. Browser world-space raster
+## 8. Browser raster model / no full work on rAF
 
-固定三个阶段，不冻结 cache/helper class：
-
-```text
-validate/prepare
-→ exact RenderData validation
-→ reuse same-scene decoded resources
-→ build/update current-window instructions + animated-cell index
-
-raster
-→ world-space depth backing
-→ refresh copies overlap + rasters entering chunks only
-→ autotile repaints dirty cells only
-
-placement
-→ camera rAF only moves existing depth canvases
-```
-
-rAF callback禁止：
+Browser为 current scene/window准备 decoded resource、tile instructions与 animated-cell index，world-space depth raster保持当前 window相关的 bounded backing；每实际 visual depth最多一个 live canvas，其 backing按该depth current content最小 world-pixel bounds选择，scale=1、保留既有 tile/player layering/equal-depth/zIndex。不能把全部 depth预分配为最大 1080p envelope，不能给共同 ancestor transform破坏 interleave。
 
 ```text
-await / Content request / image decode
-chunk validation
-full tile traversal
-full canvas clear
-any tile drawImage when autotile frame unchanged
-canvas width/height assignment
+validate/prepare (async resources allowed)
+→ retained instructions reuse / entering prepare once
+→ stage raster (detached; copy old overlap + draw entering)
+→ commit latest matching stage
+→ camera rAF placement only (O(live layers))
 ```
 
-每个实际 visual depth最多一个 live canvas；canvas使用该 depth当前 tile的最小 world-pixel bounding rectangle，backing scale 1，zIndex沿既有 layering规则。
+rAF禁止 await/Content request/decode、chunk validation、full tile traversal/clear、unchanged autotile时 tile drawImage、canvas width/height assignment。Canvas placement例：world origin style left/top + `translate3d(-cameraX,-cameraY,0)`，不得改 managed attrs/data/children/order。Refresh仅 retained overlap pixel-copy、entering raster，修正 overlap里因 autotile frame变化而 stale的 animated cells；leaving prepared state drop。同一 retained `(sceneEpoch,chunkX,chunkY)`内容变更 fail closed，evicted reentry重新验证。Autotile index `slot→depth→cell→ordered draw instructions`，changed slot才 clear/repaint受影响32×32 cells、同 tick去重，no animation则无 permanent rAF。Sprite相同 resource+direction+effective pattern不重建 raster；仅位置/深度变化只 placement，不 resize/clear/redraw crop。
 
-Placement：
-
-```js
-canvas.style.left = `${originX}px`;
-canvas.style.top = `${originY}px`;
-canvas.style.transform = `translate3d(${-cameraX}px, ${-cameraY}px, 0)`;
-```
-
-不得给全部 depth共同 ancestor加 transform而破坏 tile/player interleave stacking。
+Browser普通 `receiveRenderData`即使 chunks引用未变也要测成本：不得每次 complete chunks/tileVisuals revalidation、redecode、rebuild instruction/raster；只处理变更的 camera/motion/player fields并利用 RenderData structural/scene epoch与已验证 frozen current-window identity。Core仍可能对完整 Render node data做 full-state validation，此 residual不能靠 Browser缓存消除。
 
 ---
 
-## 9. Refresh / autotile / sprite invariants
+## 9. View/Sprite one-paint atomic presentation — MF-02 (design closed, evidence pending)
 
-Same-scene window refresh：
-
-1. validate new chunks；
-2. diff retained/entering/leaving；
-3. retained prepared instructions reuse；entering prepare一次；
-4. build detached blank depth backings；
-5. copy old world-bounds overlap；
-6. raster entering chunks only；
-7. 按 current autotile frame修正 overlap内 stale animated cells；
-8. latest scene/visual/currentness checks；
-9. replace live layers；
-10. drop leaving prepared state。
-
-仍 retained 的 `(sceneEpoch,chunkX,chunkY)` 若 content突变，fail closed。Evicted后重新进入重新 validate，不要求历史 fingerprint。
-
-Animated autotile index：
+现有真实 Render tree是 `lr-map-view` managed parent → `lr-map-sprite` managed child。**一个 `domain.update()`保证authoritative Render commit原子，但不保证两个 WC async preparation或paint原子。** 必须用 package-private parent/child presentation coordination做**一套旧完整stage→一套新完整stage的同步提交**，不做 framework ACK/revision join。冻结 observable算法，不固定内部class名称：
 
 ```text
-slot → depth → world cell → canonical ordered draw instructions
+MapView new (sceneEpoch,visualEpoch): validate, prepare detached depth raster
+MapSprite same visualEpoch: prepare detached crop/pose and supply private ready signal
+Either receiver may arrive first; neither makes new live content visible alone
+Parent retains previous complete accepted View+Sprite stage while waiting
+When both candidates are ready, current/connected, matching scene+visual epoch,
+latest desired data/motion still valid:
+  in ONE synchronous JS task (no await/rAF boundary between swaps)
+  → switch map depth stage / logical host clipping-size
+  → invoke child-owned private sprite stage commit synchronously
+  → advance parent acceptedVisualEpoch
+  → only then allow new-epoch placement/animation
 ```
 
-Frame tick只 clear/repaint changed slot影响的 `(depth,cell)` 32×32 region；同 tick cell去重。Single-frame autotile无 permanent rAF。
+若 child新 data先于 parent，则只 pending；parent新 raster先于 child则不提前切层；**不能**出现新尺寸map配旧 screenX/Y sprite，也不能显示新人物配旧地图。旧完整 stage保持显示（初次 baseline无旧 stage则整体保持不显示），直到两者一同ready。改变 host clip尺寸与两者stage在同一 JS task，浏览器不会在其中间 paint。Parent只能读取既有 managed parent/child关系、调用 map package-private child method；child只修改自己的 ShadowDOM/Canvas、parent只修改自己的 ShadowDOM/Canvas/自身业务 presentation，双方不得改 LoomRealm-managed attrs/data/light DOM topology。禁止 Window-global registry。
 
-Sprite：
+新 epoch/scene或 fresh generation抢先到达：invalidate/abort旧 detached work，旧 stage保持到新共同 ready；旧 async resolve不得覆盖新 desired；terminal/disconnected/removed managed subtree cleanup后全部 inert。发生 prepare失败保留完整旧stage，对**已收到的同一 data**执行 bounded Window-local private retry并做最新性检查；same-generation reconnect的 structurally equal data不会被当作 retry signal。跨 fresh Session/G DOM identity按 M13换 element universe，不跨 universe复用 stage。
 
-```text
-same resource + direction + effective pattern
-→ reuse sprite raster
-
-position/depth change
-→ placement only
-→ MUST NOT resize/clear/redraw same crop
-```
+Ordinary movement epoch不变：MapView camera与Sprite pose仍来自同一当前 Render facts；共享按 movement id与同一 Browser monotonic time计算 motion sample（package-private parent camera sample可供 child只读消费），不让两套独立 rAF clock把 camera/sprite插值错开。所有 rAF仅placement，不修改 Store。Conformance必须在 parent-first、child-first、async resource failure、rapid A→B→C、scene transfer、disconnect/reconnect、single-paint screenshot/recorded frame下证明没有混合stage。MF-02算法设计在此闭合，但 executable evidence尚待 PR2。
 
 ---
 
-## 10. Atomic visual commit
+## 10. CSS / physical resizing
 
-`visualEpoch`只协调两个 map-owned Web Components的 physical realization。
-
-MapView处理更高 `visualEpoch`：
-
-```text
-validate
-→ prepare/decode
-→ detached raster
-→ latest data + sceneEpoch + visualEpoch + connected/currentness check
-→ commit live layers/stage
-→ acceptedVisualEpoch = visualEpoch   // private browser cursor
-```
-
-MapSprite：
-
-```text
-sprite.visualEpoch < parent accepted → stale/drop
-sprite.visualEpoch > parent accepted → retain latest pending/do not paint
-sprite.visualEpoch = parent accepted → paint/placement
-```
-
-`acceptedVisualEpoch`：
-
-```text
-private WC physical-realization cursor only
-!= Renderer Store authority
-!= Render Update revision
-!= ACK
-!= Runtime-observable state
-```
-
-MapView↔MapSprite private coordination不得 create/remove/reparent/reorder LoomRealm-managed light-DOM nodes，不得修改 managed attrs/data，不得建立 Window-global component registry，不得 reverse-sync Store。
-
-Failure保留上一 accepted stage/layers/player，不先 clear live canvas。
-
-**same-generation Data reconnect不是 UI retry trigger。** Structurally equal retained RenderData不会仅因 reconnect再次调用 receiver。Temporary resource/raster failure若要重试，只能由 WC对已经交付的 value做 Window-local private retry，或等待 structurally different data / fresh Window。
+`lr-map-view` host `display:block; position:relative; overflow:hidden; image-rendering:pixelated`，原默认 640×480 fallback/Essentials centered。只有共同 visual stage commit后才同步应用 accepted viewport logical width/height。Physical surface超cap时 map viewport最多1920×1080，外层letterbox；min clamp按 map policy。DPR-only change不触发 Runtime/RenderData改变，不把 canvas backing乘 DPR。Transient size变化在 Core publisher端有界latest-wins，在 map端独立100ms settle；不能把后者误当 Core writer背压保护。
 
 ---
 
-## 11. CSS / large-screen policy
+## 11. Ownership / forbidden scope
 
-`lr-map-view`不再写死 640×480：
-
-```css
-lr-map-view {
-  display: block;
-  position: relative;
-  overflow: hidden;
-  image-rendering: pixelated;
-}
-```
-
-Essentials local presentation保留首帧 `640×480` fallback与居中。首份 accepted RenderData后，MapView按 accepted viewport同步 host/stage logical size。
-
-超过 `1920×1080` 的 physical surface由 map cap保持最大 logical viewport，外部自然 letterbox。
-
-DPR不进入 Runtime/RenderData，不把 canvas backing乘 DPR；DPR-only change不得改变 logical coverage或 backing pixel count。
+Core Track可能动 `packages/data/renderer/subsystem/main` 和 Desktop/PWA trusted source，仅按已冻结 Core contracts实现 profile/authority，不加入 map vocabulary。Map Track限 `game-libs/map/src/{semantics,runtime}.ts`、`game-libs/map/browser/{map.browser.js,map.css}`、Essentials local受治理 build/presentation outputs和针对性测试。严禁借本改造修改 `packages/wire` payload/limits、fixture importer semantics、Content、Frozen User Input v1、Render Update v1、Main Frame/Activation/InputTarget authority。若 MF-01真实证明缺少 lifecycle capability，先单独 Core review与兼容治理，不能偷偷在 map或 viewport加旁路。
 
 ---
 
-## 12. Ownership / file scope
+## 12. Canonical measurement and PR0 gate
 
-### Core Track（前置，本文不定义 semantics）
+Formal product stimulus→paint必须使用 Hostra product harness单一 monotonic clock，不能跨进程减两个 `performance.now()`。Release-like build归档 SHA、Node/Electron/Chromium/CPU/GPU/DPR/map/position/viewport；每档三轮报告各轮与合并 P50/P95/max，ordinary/refresh/autotile分桶。Browser/Runtime marks只同进程诊断。
 
-可能修改：
-
-```text
-packages/data/**
-packages/renderer/**
-packages/subsystem/**
-packages/main/**     // only canonical profile selection/currentness policy
-platform composition / apps/desktop viewport physical source
-formal docs/conformance
-```
-
-只允许实现 ADR0036 / Viewport State v1 / Profile v2；不得加入 map-specific vocabulary。
-
-### Map Track
-
-```text
-game-libs/map/src/semantics.ts
-game-libs/map/src/runtime.ts
-game-libs/map/browser/map.browser.js
-game-libs/map/browser/map.css
-examples/essentials-v21.1-local presentation/build-sync outputs as governed
-```
-
-测试覆盖 map semantics/runtime/browser/product harness。
-
-### 禁止借 map 性能改造修改
-
-```text
-packages/wire/** payload model/limits
-tools/fixtures/essentials-v21.1 importer semantics
-Content contract
-User Input v1
-Render Update v1
-Main Frame/Activation/InputTarget authority
-```
-
-若只有修改这些才能过 gate，STOP并返回证据。
-
----
-
-## 13. Measurement / performance gates
-
-### 13.1 Canonical latency seam
-
-跨进程 `performance.now()` 不可直接相减。
-
-Formal product latency：Hostra product harness单一 monotonic clock domain，从 stimulus dispatch到 Browser observation hook确认目标 presentation commit/paint。Browser/Runtime内部时间戳只能做同进程诊断。
-
-Release-like build；记录 subject SHA、Node/Electron/Chromium、CPU/GPU、DPR、viewport、map/position。每档三轮，报告每轮与合并 P50/P95/max；ordinary/chunk refresh/autotile分桶。
-
-### 13.2 Gates
-
-| 指标 | 640×480 | 1280×720 | 1920×1080 |
+| Gate | 640×480 | 1280×720 | 1920×1080 |
 |---|---:|---:|---:|
-| ordinary movement stimulus→paint P95 | ≤50ms | ≤50ms | ≤50ms |
-| chunk refresh stimulus→paint P95 | ≤50ms | ≤75ms | ≤100ms |
-| active movement `>33.4ms` frame ratio | <1% | <1% | <2% |
-| complete visual step drop | 0 | 0 | 0 |
-| camera-only tile drawImage/rAF | 0 | 0 | 0 |
-| map view node data bytes | <196,608 | <196,608 | <196,608 |
+| ordinary stimulus→paint P95 | ≤50ms | ≤50ms | ≤50ms |
+| refresh stimulus→paint P95 | ≤50ms | ≤75ms | ≤100ms |
+| active movement frame >33.4ms | <1% | <1% | <2% |
+| complete visual step dropped | 0 | 0 | 0 |
+| camera-only tile drawImage per rAF | 0 | 0 | 0 |
+| exact MapView node serialized bytes | <196608 | <196608 | <196608 |
 
-额外：
+Additional: Map002 640 refresh≤50ms、dense 1080p guard真实 PASS、idle无autotile无 permanent rAF、DPR-only backing pixel total不变。必须用 dense real `tileVisuals`+chunks测 exact UTF-8 bytes，不用192-cell粗算当 PASS。分别测 640/720/1080 exact size、`RenderDomain.update` author total/full final state validation/snapshot-or-patch representability、wire/Store、Browser ordinary `receiveRenderData` invariant processing、chunk refresh prepare/overlap raster、Canvas allocations/peak depth backing memory、resize burst-to-final-visual-commit。旧 96.3ms refresh FAIL只能当历史证据，不能沿用为成功。
 
-```text
-Map002 640 refresh ≤50ms on canonical seam
-dense synthetic 1080p fixture passes map payload guard
-idle + no animated autotile → no permanent rAF
-DPR change → backing pixel total unchanged
-```
-
-### 13.3 Core RenderDomain residual
-
-`RenderDomain.update()`仍可能对最终完整 node data做 validation/snapshot representability probe，即使 ordinary patch很小。
-
-PR0必须分别测 640/720p/1080p dense payload下：
-
-```text
-author update total
-full-state validation
-snapshot/patch representability probe
-full node bytes
-```
-
-如果 Browser工作量 invariant已满足，但 Core residual单独导致 latency gate失败：
-
-```text
-STOP
-archive profile/payload/latency evidence
-return Core design review
-```
-
-不得在 map中跳过 validation、绕开 RenderDomain或提高 framework limit。
+若 exact payload过 guard，STOP map package-private representation review；若 Core residual单独破 gate，STOP单独 Core design review；若 Browser仍 full raster/validation，STOP修 Browser阶段。不得降低语义、关 autotile、提高 framework limit或跳过 validation造假过关。
 
 ---
 
-## 14. Test matrix
+## 13. Test matrix
 
-尺寸：`320×240 / 640×480 / 800×600 / 960×540 / 1280×720 / 1920×1080`。
+尺寸：320×240、640×480、800×600、960×540、1280×720、1920×1080。必须覆盖 initial null/default与同步 subscribe、latest resize/no-op、movement-boundary commit、suspended non-InputTarget geometry与 MF-01 gameplay gate；camera four edges/small map/odd/inclusive -1/source-target union；chunk 192 padding/order、regular/autotile/priority，reuse/entering once/eviction；ordinary movement no chunk/epoch mutation，refresh/viewport View+Sprite同 update，transfer full replace，guard failure保留全部前状态。
 
-必须覆盖：
-
-- `scope.viewport` initial null/default、initial immediate commit、later trailing settle、latest pending、same-size no commit、suspended/non-InputTarget map仍可 resize；
-- camera four-edge clamp、small map、odd viewport、inclusive `-1` bounds、source/target union；
-- chunk edge padding/order/192-cell index、tileVisual regular/autotile/priority；
-- retained chunk object reuse、entering once、leaving drop、evicted re-entry allowed reproject；
-- ordinary retained movement不更新 chunks/epochs；
-- chunk refresh increments `visualEpoch` once并同 update发布 View/Sprite；
-- viewport commit atomic；budget reject preserves all prior business/render state；
-- transfer increments `sceneEpoch + visualEpoch` and uses full replace；
-- 640 pixel oracle、all viewport edge seamless、priority/equal-depth/tall sprite；
-- rapid resize A→B→C only latest accepted visual state survives；
-- transfer/resize/async prepare interleaving cannot let old scene overwrite new；
-- reconnect rebuild Store/DOM baseline但不作为 WC retry trigger；
-- camera placement samples：chunk validation 0、full traversal 0、tile drawImage 0、canvas resize 0；
-- autotile only dirty cells/depth；
-- refresh semantic retained projection 0 + overlap copy + entering raster once；
-- real Essentials：Map066 resize、Map066→Map002 long camera path、Map002 Flowers1+walking+resize、Map066↔Map067 transfer、child menu/dialog while resize、minimize/reconnect、rapid 640→720p→1080p→640、over-cap letterbox。
+Browser：640 pixel oracle、all edges seamless、priority/equal-depth/tall sprite、dirty autotile、camera rAF counters zero tile draw/resize、retained overlap copy、parent-first/child-first stage、async failed prepare private retry、scene/resize crossing、same-generation reconnect不重新调用equal receiver、fresh generation no old stage、DPR invariance。Real Essentials：Map066 resize、Map066→Map002 long camera、Map002 Flowers1+walk+resize、Map066↔Map067 transfer、child menu/dialog+held movement+resize、minimize/reconnect、640→720p→1080p→640、over-cap letterbox。每项同时检验 physical-frame无混合stage及 qualification seam。
 
 ---
 
-## 15. Implementation / Freeze route
-
-### Core Track C0 — 文档 closure（当前阶段）
-
-必须完成：
+## 14. Implementation and Freeze route
 
 ```text
-ADR0036 Accepted
-Viewport architecture SSOT
-Viewport State v1 contract + conformance
-Renderer Data Profile v2 contract + conformance
-Subsystem model / protocol-layer architecture aligned
+Core C0: ADR/architecture/formal contracts/conformance cross-review
+→ Core Docs Freeze on docs-only SHA (executable PASS not prerequisite)
+→ Core C1 implementation: /2 peer/sender/receiver/author API/Main policy/Desktop
+→ /1 regression + /2 conformance + product qualification on executable SHA
+
+Map PR0: exact dense payload/Core residual/Browser receive/raster/memory/latency evidence
+→ resolve MF-01 existing-seam proof or separately approved narrow lifecycle reopen
+→ resolve MF-02 design tests and verify performance values
+→ Map Docs Freeze on current docs+PR0 evidence SHA
+→ PR1 fixed 640 chunks/raster/sprite optimization
+→ PR2 dynamic viewport/epochs/synchronous two-WC stage gate
+→ PR3 M11/M13/M14/M15 affected requalification on governed executable subject
 ```
 
-然后做一次 cross-contract review，确认 v1 acceptance集合未变化、Main Control wire不需升级、profile selection/currentness无歧义。通过后 Core docs可标记 `Frozen for implementation`。
+PR0可以与 Core implementation并行准备数据，但 map dynamic production implementation不得先于 Core contract Freeze和 usable subject。若冻结前真实代码/fixture不一致，STOP归档最小复现，不回写虚假 baseline SHA。
 
-### Map Track PR0 — 只做证据，不改变画面 semantics
+## 15. Freeze gate/status
 
-- canonical single-clock baseline；
-- 640/720p/1080p exact dense RenderData bytes；
-- `RenderDomain.update()` residual分解；
-- current camera rAF validation/traversal/drawImage/canvas resize counters；
-- source/dist/FSDB baseline hashes。
+**Core Docs**：由 [viewport qualification ledger](../../doc/30-implementation/viewport-profile-v2-qualification.md) 记录；不由本 map draft重复签署。**Map Docs** 必须：PR0 exact dense1080 bytes PASS；Core residual/Browser ordinary callback/latency gate可行；MF-01 suspended Frame no gameplay authority有合法可实现的 seam/单独评审解决；MF-02同步 stage规范+可验证 test；8×8/overscan1/100ms/sizes/196608B一致；movement/autotile/layering无 ownership冲突；no reconnect-as-retry；当前 importer/requalification blockers独立治理。未满足之前状态保持 Draft/HOLD。完成后重新核真实 production baseline SHA、PR0 evidence和冻结 docs subject，才标 `Frozen for implementation`，不冒充 executable PASS。
 
-PR0结束后，如果 §13 payload/Core residual可满足 gates，本文才允许从 Draft改为 `Frozen for implementation`。
-
-### Core implementation C1
-
-按 Frozen Core contracts实现：
-
-```text
-Profile v2 peer/dispatch
-Viewport State sender/receiver
-SubsystemScope.viewport
-Desktop physical source
-Main canonical dataProfile=/2 policy
-conformance + v1 regression
-```
-
-不得顺手实现 map/chunk逻辑。
-
-### Map PR1 — fixed 640 performance model
-
-在 640×480下先完成：dense chunks/tileVisuals、current ProjectionWindow reuse、world raster overlap copy、entering-only raster、dirty autotile、sprite raster/placement split，并证明 pixel/layering baseline相同与 640 refresh gate通过。
-
-### Map PR2 — dynamic viewport
-
-消费 Frozen `scope.viewport`，参数化 camera/bounds，加入 accepted/pending/100ms settle、`sceneEpoch/visualEpoch` publication、atomic Browser gate、dynamic CSS/stage size。
-
-### PR3 — qualification / governance
-
-完整 §14/§13 矩阵、三轮 metrics、M11/M13/M14/M15受影响 requalification、frozen docs回写、删除未被 gate使用的调试 hook。
-
----
-
-## 16. Freeze Gate
-
-### Core Freeze
-
-- [ ] ADR0036 与 architecture/contract无 authority矛盾；
-- [ ] Viewport State exact schema/direction/currentness/failure闭合；
-- [ ] Profile v2 exact composition/direction/reader-writer/fresh-carrier/terminal闭合；
-- [ ] canonical target policy固定 `/2`，无实现者自选 negotiation；
-- [ ] v1 contract/acceptance集合明确保持不变；
-- [ ] `SubsystemScope.viewport` exact API/lifetime/callback semantics闭合；
-- [ ] no-carrier/fresh-carrier/fresh Renderer/Runtime terminal测试矩阵一一对应；
-- [ ] Desktop/PWA author-visible CSS logical semantics平台无关。
-
-### Map Freeze
-
-- [ ] PR0 canonical seam可复现；
-- [ ] dense 1080p exact `MapViewRenderData <196,608 B`；
-- [ ] Core full-state residual已测且不会单独破 gate；
-- [ ] chunk size 8、overscan 1、viewport min/max、settle 100ms、payload guard单一一致；
-- [ ] movement/autotile/layering文档无双重 ownership；
-- [ ] `sceneEpoch/visualEpoch` tests与 publication一一对应；
-- [ ] Browser state只 bounded by current window；
-- [ ] no reconnect-as-retry依赖；
-- [ ] 当前 qualification blockers被单独治理，不借本 refactor顺手修改 importer/framework limit。
-
-全部 PASS 后才把本文头部改为：
-
-```text
-状态：Frozen for implementation
-生产基线：<当时重新核对的 production SHA>
-证据：<PR0 subject SHA / raw artifacts>
-```
-
----
-
-## 17. 明确拒绝
-
-```text
-viewport as User Input / InputTarget bypass
-Browser-local camera authority that removes Runtime projection correctness
-permanent max-1080p projection envelope just to avoid Core capability
-camera rAF full raster + throttle
-full VisibleTile[] limit raise
-chunk Render node / <lr-map-chunk>
-LoadedMap-wide unbounded history cache
-Browser reads Map/Tileset business records
-generic Environment/Viewport/Chunk/Scene manager framework
-map-specific Core fast path
-cross-component ACK/event queue
-DPR-scaled all-layer backing
-clear live canvas before async prepare
-same-generation reconnect as receiveRenderData retry
-turn off autotile/layering/validation to pass performance
-raise framework payload limits without independent Core review
-```
-
-当前允许的最小核心概念：
-
-```text
-Core: Viewport State v1 + Profile v2 + SubsystemScope.viewport
-Map: accepted/pending ViewportSize
-     ProjectedChunk + TileVisual
-     current ProjectionWindow
-     sceneEpoch + visualEpoch
-Browser: current-window prepared state + world raster + private acceptedVisualEpoch
-```
-
-任何执行者若发现合同与生产代码不符、dense 1080p超预算、Core residual单独失败、或必须触碰明确禁止边界，唯一正确行为是停止并返回最小复现/测量证据。
+**仅允许最小概念：** Core `viewport.state` + `/2` + `scope.viewport`；Map accepted/pending size + chunks/tileVisuals + current window + sceneEpoch/visualEpoch；Browser current-window prepared/raster + private synchronized acceptedVisualEpoch。拒绝 per-map Core fast path、generic manager、max-envelope、map chunk Render node、全量 tile rAF、cross-component wire ACK、UI reconnect重试机制、framework limit raise及未经证据宣称性能完成。
