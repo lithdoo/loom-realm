@@ -9,7 +9,7 @@ export function createDesktopRendererViewportSource(target: Window): RendererVie
   const removeDocument = document.removeEventListener.bind(document);
   const requestFrame = target.requestAnimationFrame.bind(target);
   const cancelFrame = target.cancelAnimationFrame.bind(target);
-  let subscribed = false;
+      let subscribed = false;
 
   return Object.freeze({
     start(emit: (sample: RendererViewportLogicalSample) => void): () => void {
@@ -18,29 +18,33 @@ export function createDesktopRendererViewportSource(target: Window): RendererVie
       subscribed = true;
       let active = true;
       let animationFrame: number | null = null;
+      let lastWidth: number | null = null;
+      let lastHeight: number | null = null;
 
-      const sample = (): void => {
+      const sample = (force: boolean): void => {
         if (!active) return;
-        emit(Object.freeze({
-          width: target.innerWidth,
-          height: target.innerHeight,
-        }));
+        const width = target.innerWidth;
+        const height = target.innerHeight;
+        if (!force && lastWidth === width && lastHeight === height) return;
+        lastWidth = width;
+        lastHeight = height;
+        emit(Object.freeze({ width, height }));
       };
 
       const schedule = (): void => {
         if (!active || animationFrame !== null) return;
         animationFrame = requestFrame(() => {
           animationFrame = null;
-          sample();
+          sample(false);
         });
       };
 
       const onVisibility = (): void => {
         if (!active) return;
-        if (document.visibilityState === "visible") sample();
+        if (document.visibilityState === "visible") sample(true);
       };
 
-      sample();
+      sample(true);
       addWindow("resize", schedule);
       addDocument("visibilitychange", onVisibility);
 
