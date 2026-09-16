@@ -5,7 +5,7 @@
 > 日期：2026-09-16；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > Contracts：[Viewport v1](../15-contracts/viewport-state-v1.md) · [Revised Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile v1 revision 3](../15-contracts/renderer-data-profile-conformance-v1.md)  
-> Reviews：[Core historical](./viewport-core-docs-freeze-review-2026-09-16.md) · [Business boundary](./viewport-business-boundary-review-2026-09-16.md)
+> Reviews：[Core historical](./viewport-core-docs-freeze-review-2026-09-16.md) · [Business boundary](./viewport-business-boundary-review-2026-09-16.md) · [Final freeze remediation and protected semantics](./viewport-v1-final-freeze-closure-2026-09-16.md)
 
 **Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`被ADR0037取消，[old v2 ledger](./viewport-profile-v2-qualification.md)为历史指针，不得形成第二状态源。旧三child`/1` executable PASS不可转给新四child`/1`。
 
@@ -19,6 +19,8 @@ Old three-child /1 code         Historical executable still in current source
 Main/Renderer/Subsystem/Desktop  revised four-child not implemented
 Profile v1 fixtureSetRevision    3 spec only / not executed
 Compatibility assessment         NOT VERIFIED
+Connection current-composition projection  correction/review pending
+Delivery-plan / exact API preservation     correction/review pending
 Product build-cohort proof       NOT VERIFIED
 Docs Freeze subject SHA          PENDING
 Executable subject / tests       PENDING / NOT RUN
@@ -45,12 +47,15 @@ Compatibility conclusion: NOT VERIFIED
 
 - [ ] ADR0037/历史ADR0025/0036 partial supersession、索引与旧`/2`历史状态一致；No dual parser/alias。
 - [ ] Revised `/1` four-child exact direction/shape/preflight/diagnostic，single reader/writer、Control/Connection current authority不冲突；原Input/Render/Control/Connection wire不改。
+- [ ] Connection v1 §1与§22旧三child投影完成纯编辑修正，§22只委托 Profile v1 §8 定义 Input/Render/Viewport fresh baseline；原 Connection 不受影响的 Frozen body完整保全，并审查确切 diff。
+- [ ] `packages/data/DESIGN.md`、其他大幅精简的模块/架构文档完成 [protected semantics audit](./viewport-v1-final-freeze-closure-2026-09-16.md#3-受保护语义保全检查不得因为简写而丢失)：原 public peer/type/terminal/errors/ordering/测试各有有效定义入口，不能用“其他保持不变”遮盖已删除的 API 规范。
+- [ ] [phase-1-delivery-plan.md](./phase-1-delivery-plan.md) 的 current route 明确 C0→C1→Map PR0→PR1/PR2→M11/M13/M14/M15 受影响回归，不把 ADR0035 旧 subject 当作修正版 `/1` 的新证据。
 - [ ] Viewport single designated CSS logical surface、floor/invalid size转换、bounded latest、source/carrier fencing、retained/fresh/terminal matrix一致。
 - [ ] `scope.viewport`同步首发含null、getter更新先于callback、异常隔离/退订/终态可测试。
 - [ ] Core不硬编码Window DOM、不包含map尺寸cap/camera/settle/chunks/menu policy；产品统一rollout归此ledger。
 - [ ] Revised Profile v1 conformance fixtureSetRevision3 + Viewport child conformance executable-ready，旧revision2 PASS不继承。
 - [ ] §2兼容性证据签署，§4 coherent deploy方式可行且不存在必须混版需求。
-- [ ] 完成cross-contract/link/status review，记录docs-only SHA、reviewer/date。
+- [ ] 完成cross-contract/link/status review，记录docs-only SHA、reviewer/date；Map PR0/运动同步不作为 Core Freeze 代替项。
 
 ```text
 Docs Freeze subject SHA: PENDING
@@ -70,7 +75,18 @@ Rollout owner: PENDING
 
 当前Desktop/PWA Web product指定document layout viewport，用`Window.innerWidth/innerHeight` floor CSS logical px观察；必须测试actual map content box、center/letterbox与source对应，hidden→visible/fresh source fencing。该DOM采样是本次物理composition实现，不进入通用Viewport wire；其他物理source必须明确同一single surface identity且有真实consumer证据。
 
-## 5. Implementation/qualification（Docs Freeze后）
+## 5. Current delivery order and implementation qualification（Docs Freeze后）
+
+最终实施依赖及归属首先见 [freeze remediation §2](./viewport-v1-final-freeze-closure-2026-09-16.md#2-唯一当前实施路线供-phase-plan-同步)，应同时反映到 [phase-1 plan](./phase-1-delivery-plan.md)。执行顺序：
+
+```text
+Core C0: compatibility + docs propagation/preservation + cross-review → Docs Freeze SHA
+Core C1: coordinated revised /1 executable → revised v1 revision3 + Viewport
+         + original Connection/Input/Render regression + Desktop/Hostra affected qualification
+Map PR0: exact 1080 bytes / Core validation residual / Browser raster / single-clock latency
+Map PR1/PR2: fixed640 optimization → dynamic viewport + View/Sprite synchronization
+PR3: governed current executable SHA → affected M11/M13/M14/M15 requalification
+```
 
 ```text
 Executable subject SHA: PENDING
@@ -85,6 +101,8 @@ Executable subject SHA: PENDING
 | Gate | Subject | Result |
 |---|---|---|
 | External compatibility | PENDING | NOT VERIFIED |
+| Frozen Connection §1/§22 editorial sync | PENDING | OPEN |
+| Phase plan / protected API preservation | PENDING | OPEN |
 | Coherent deployment cohort | PENDING | NOT VERIFIED |
 | Core Docs Freeze | PENDING | HOLD |
 | revised `/1` + Viewport + old regression | PENDING | NOT RUN |
