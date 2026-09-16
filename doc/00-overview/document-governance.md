@@ -1,392 +1,144 @@
 # 文档分层与变更规则
 
-> 层级：产品总览  
-> 状态：Active / Normative  
-> 稳定程度：Stable  
-> 主要定义：文档层级、主要定义依赖、设计稳定状态、真实 compatibility boundary、首次实现前 current-v1 收口与版本治理  
-> 最近复核：2026-09-11
+> 层级：产品总览 / Normative · 稳定程度：Stable  
+> 主要定义：主要定义依赖、状态、真实compatibility boundary、首次版本与Frozen preimplementation correction、变更传播和唯一evidence owner  
+> 最近复核：2026-09-16（记录ADR0037 direct Profile v1 correction）
 
-LoomRealm仍处于 first-implementation阶段。治理目标同时满足：
+LoomRealm仍处首次实现阶段；治理目标是**真实兼容义务尚未存在时允许纠正错误设计，同时不把 Frozen/Normative降级为可静默重写的标签**。产品未正式发布仅是兼容核查输入之一，不自动证明没有npm/private/downstream消费者。
 
-```text
-允许在没有真实 compatibility obligation 时修正错误设计
-AND
-不让 Frozen / Normative 退化成可以静默改写的标签
-```
-
----
-
-## 1. 文档层级
+## 1. Document layers
 
 ```text
-00-overview
-    product / governance
-        ↓
-10-architecture
-    authority / responsibility / topology
-        ↓
-15-contracts
-    interoperable application contracts/profiles
-        ↓
-20-modules
-    role/module realization
-        ↓
-30-implementation
-    packages/tests/delivery/qualification
+00-overview     product / governance
+10-architecture roles / authority / responsibility / topology
+15-contracts    cross-role interoperable contracts/profiles
+20-modules      module/role realization
+30-implementation packages / tests / delivery / qualification
 ```
 
-下层细化上层，不得反向定义上层 authority。
+下层细化上层，不能以实现反向定义authority。`decisions/`记录provenance，不是第二份formal wire SSOT。
 
----
+## 2. Primary-definition dependencies must form DAG
 
-## 2. 主要定义依赖必须是 DAG
+Metadata：依赖=本文建立其上；正式化=下层Contract formalizes；被细化=下层Architecture展开；被实现=Module/Implementation；相关=横向reference而非主要定义dependency。两个Current文件不得互相拥有同一事实并形成循环。
 
-Metadata语义：
-
-```text
-依赖
-    本文定义建立在该文档之上
-
-正式化
-    下层 Contract formalizes本文
-
-被细化
-    下层 Architecture展开本文
-
-被实现
-    Module/Implementation realization
-
-相关
-    横向参考，不构成主要定义 dependency
-```
-
-不得让两个 Current 文档互相依赖而形成双事实源。
-
----
-
-## 3. Document Status / Stability
+## 3. Document status / maturity
 
 | 状态 | 含义 |
 |---|---|
-| Normative | 当前实现/设计必须遵守 |
-| Active Design | 当前有效但仍允许演进 |
-| Draft | 尚未形成稳定实现承诺 |
-| Reference | 背景/外部格式资料 |
-| Tracking | 实施/开放问题追踪 |
-| Superseded | 已被后续决策取代，仅保留历史 |
+| Normative | 当前设计/实现必须遵守的规范（候选应明确Not Frozen/Not Implemented） |
+| Active Design | 当前有效但仍可演进 |
+| Draft | 尚无稳定实现承诺 |
+| Reference | 背景/外部格式 |
+| Tracking | 实施/未闭合项 |
+| Superseded | 被后续明确决策替代，仅历史 |
 
-稳定等级：
+稳定度：Frozen/Stable=语义默认关闭；Stabilizing=核心已收、限额/验证中；Evolving=方向清楚可变化；Experimental=验证阶段。**Frozen design != automatically shipped compatibility boundary。Docs Frozen != executable implemented != qualified。** 各事实归各自SSOT/ledger，不得用历史PASS填新subject。
 
-```text
-Frozen / Stable
-    semantic design closed by default
+## 4. Real compatibility boundary
 
-Stabilizing
-    core closed; completing limits/conformance/implementation validation
-
-Evolving
-    direction clear; fields/process may change
-
-Experimental
-    validation stage; large redesign expected
-```
-
-```text
-Frozen design
-!= automatically shipped compatibility boundary
-```
-
-Frozen仍要求显式治理；但真正版本兼容义务取决于是否已形成 real compatibility boundary。
-
----
-
-## 4. Real Compatibility Boundary
-
-至少出现一种：
+任何一项可形成真实兼容义务：
 
 ```text
 conformant implementation shipped/used
-multiple independent implementations interoperate
+multiple independent interoperating implementations
 third-party implementation relies on wire
 persisted/on-disk/network data requires compatibility
-public release explicitly promises protocol version
+public release explicitly promises protocol identity/version
 ```
 
-形成后，incompatible schema/identity/state/order/error/recovery/limit/encoding change必须 version 或显式 migration；不能用“文档可修改”规避。
+发布核查不能只查GitHub Releases，还须在相关变更中检查npm/pre-release tarballs、私有分发、下游/分支、持久化资料及运行中多版本共存/rollback。形成义务后 incompatible schema/identity/state/order/error/recovery/limit/encoding变化须explicit version或migration；不能以“文档没发版”规避。
 
----
+## 5. First-implementation rule
 
-## 5. First Implementation Rule
-
-真实 compatibility boundary形成前：
+尚无真实兼容义务时：
 
 ```text
-design correction
-→ update current first-version model directly
-→ no fake v2 / deprecated alias / dual parser
-→ update all dependent Current docs/tests/navigation
-→ preserve provenance in ADR/Git
+incorrect/incomplete first-version design
+→ correct current first-version model directly
+→ no fake v2 / deprecated aliases / dual parser
+→ update all current dependent docs/tests/navigation
+→ retain provenance in ADR/Git
 ```
 
-Frozen preimplementation correction还必须满足下一节。
+若曾Frozen，还必须满足§6；仅用户声明不发布v2不能自动代替兼容证据或Freeze签署。
 
----
+## 6. Frozen preimplementation correction gate
 
-## 6. Frozen Preimplementation Correction
+任何Frozen incompatible correction仅在尚无真实compatibility obligation且同时满足时可实施：
 
-Frozen incompatible correction只有在尚无真实 compatibility obligation时才允许，并必须同时满足：
+1. Accepted ADR解释旧model为什么错误/不足、consumer gap与为何 direct correction。
+2. 明确compatibility核查责任、范围、证据与结论；若有真实义务立即STOP并重评 version/migration。
+3. Scope最小，列出未改变contracts/authority和业务/平台boundary。
+4. 当前first-version model直接更新；旧implementation shape不得继续作为current，禁止假v2/deprecated dual mode。
+5. Formal conformance及fixtures/evidence revision同步；未有formal fixture时以current qualification matrix承接；旧PASS不可迁移。
+6. 所有dependent Current docs/modules/implementation/tests/navigation状态与链接同步传播。
+7. ADR index与historical docs明确partial supersession；Docs Freeze记录docs-only subject SHA，implementation/qualification另立 executable SHA。
+
+[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)是当前此类修正：原已Frozen的`renderer-data/1`三child计划直接更新为四child（增加独立Viewport State v1），旧`/2` proposal取消。其**外部compatibility核查仍PENDING**；当前authoritative maturity以 [revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md) 为准，不能把ADR Accepted当Docs Frozen/Implemented。
+
+## 7. Non-Frozen current-v1 direct reset
+
+对于Stabilizing/Evolving且无真实compatibility obligation的incorrect current-v1：major修改需Accepted ADR，然后直接更新v1及Current docs/tests，不创造兼容表面；ADR0019/ADR0030为先例。
+
+## 8. Ordinary changes to Frozen
+
+无需协议reopen的修改：editorial clarification、correct link/current profile reference、historical ADR关系、non-semantic example cleanup、已定义行为的额外conformance evidence。默认不能静默修改method/field legality、identity/lifecycle、commit/causal order、error/recovery、limits、encoding/mapping、version binding、已Frozen physical owner。
+
+## 9. Change propagation
 
 ```text
-1. Accepted ADR说明 current model 为什么错误/不闭环
-2. ADR声明 correction boundary 尚无真实 compatibility obligation
-3. correction scope最小并列出未改变内容
-4. current first-version model直接更新，不保留 deprecated dual model
-5. 已存在 formal conformance revision 时同步 fixture/evidence
-6. 所有 dependent Current docs同步传播
-7. navigation/ADR index明确 supersession/update
+Overview change → Architecture → affected Contract → Module → Implementation/Tests/Navigation
+Contract/Profile change → ADR when major → current Contract → contract index/Profile
+                        → Architecture → Modules → packages/roadmap/tests → navigation
+Platform ownership change → Product/Platform architecture → Launcher/RuntimeHosting
+                          → affected Contract wording → Modules → plan/tests/ADR index
 ```
 
-没有 formal fixture revision时，第5项由 current qualification matrix/evidence承担；不为了治理形式预造第二套 protocol。
+不能只改milestone SSOT，却让别的Current projection保持旧owner chain；业务consumer规则不得为了传播便捷反向上升为Core MUST。真正physical source/rollout属于product composition；formal wire只放跨角色不可缺少的observable事实。
 
----
+## 10. Conflict resolution
 
-## 7. Non-Frozen Current-v1 Direct Reset
+首先找主题的主要定义源而非机械以最新commit覆盖：Product scope/governance→topic Architecture→Current Normative Contract→current Accepted ADR→current milestone physical SSOT（仅其具体实现）→Modules→Implementation。Superseded/historical ADR不得覆盖current。
 
-对于 Stabilizing/Evolving 且尚无 compatibility obligation 的 boundary：
+Current runtime chain：Product/Platform architecture→Game Package+Launcher Profiles→ADR0019/0020/0026→RuntimeHosting。Conditional Electron事实：只有trusted RuntimeHosting composition process本身为Electron时ADR0033适用；canonical M15由ADR0034覆盖其作为主拓扑的假设：Hostra shell owns Electron/BrowserWindow/direct HOSTRA_SUBCMD，LoomRealm Desktop plain Node child，RuntimeHosting owns Runner。
+
+## 11. ADR governance
+
+ADR写 why、what changed、superseded/updated/clarified对象、unchanged范围与re-evaluation条件；Major breaking/preimplementation correction必须有ADR。ADR不是wire正文。被替代者明确Superseded或partially updated，historical reasoning可保留但current navigation必须展示最新关系。
+
+## 12. Current reset history
 
 ```text
-incorrect/incomplete current-v1 design
-→ Accepted ADR when major
-→ update current v1 directly
-→ propagate through Current docs/tests
-→ no fake compatibility surface
+ADR0018: Desktop-first Game/Runner + SDK/Data initial cleanup
+ADR0019: Game Descriptor {key,module}→{key}, Hostra/PWA separate manifests,
+         exact join/zero-side-effect PREPARE/Main logical launch(key)
+ADR0030: M12 prepared installation, readonly FSDB, no generic repository framework,
+         hierarchical ResourceKey + exact contentVersion
+ADR0033: conditional Electron Runner execPath + ELECTRON_RUN_AS_NODE
+ADR0034: canonical M15 external Hostra Electron/BrowserWindow/HOSTRA_SUBCMD;
+         LoomRealm Desktop plain Node, Runner RuntimeHosting child
+ADR0037: explicit frozen-preimplementation Profile /1 correction:
+         Connection1+Input1+Render1+Viewport1, no release of /2;
+         uniform rollout & Window physical source stay product-owned;
+         map gameplay/performance stay game-library-owned;
+         external-compatibility evidence + new qualification required
 ```
 
-ADR0019、ADR0030是该类 first-implementation correction 示例。
+ADR0033仍在自身Electron precondition成立时有效；ADR0034只supersede其作为canonical M15 product topology的使用。ADR0036关于Viewport不是Input的事实保留，其“必须Profile `/2`”decision由ADR0037 supersede。
 
----
+## 13. Superseded cleanup
 
-## 8. Frozen 允许的普通修改
+新模型接管时：Current入口/交叉引用全部更新；旧实现shape不可与新current长期并列；ADR/Git保存真实演进；partial updates显式；navigation不伪装history为current；tests/fixtures不能让legacy path冒充；qualification ledger分离historical和current subject。
 
-可直接修改：
+## 14. Authoritative tree
 
 ```text
-editorial clarification
-correct link/current Profile reference
-historical ADR relationship
-non-semantic example cleanup
-additional conformance evidence for already-defined behavior
+00-overview → 10-architecture → 15-contracts → 20-modules → 30-implementation
 ```
 
-默认不可静默修改：
+`decisions/`保存原因，topic主定义依赖构成DAG：product/governance→system overview→platform composition→runtime hosting→stack/communication→rendering/storage-content→subsystem model→contracts→modules→implementation。
 
-```text
-method/field legality
-identity/lifecycle
-commit/causal order
-error/recovery
-limits
-encoding/mapping
-version binding
-physical owner when that ownership is frozen
-```
+## 15. Final rules
 
----
-
-## 9. Change Propagation
-
-Overview change：
-
-```text
-Overview
-→ Architecture
-→ Contracts when observable semantics are affected
-→ Modules
-→ Implementation/Tests/Navigation
-```
-
-Contract/Profile change：
-
-```text
-ADR when major
-→ current Contract
-→ contract index/enclosing Profile
-→ Architecture projection
-→ Modules
-→ package/roadmap/tests
-→ navigation
-```
-
-Platform launch/host ownership change：
-
-```text
-Product/Platform architecture
-→ Launcher/RuntimeHosting projection
-→ affected Contract/Profile wording
-→ Modules
-→ package/repository layout
-→ milestone plan/testing/qualification
-→ navigation/ADR index
-```
-
-不能只修改 milestone SSOT 而让其他 Current projection继续旧 owner chain。
-
----
-
-## 10. Conflict Resolution
-
-优先判断主题的主要定义源，不按“最近 commit”机械覆盖：
-
-```text
-Product scope/governance
-→ topic Architecture
-→ Current Normative Contract
-→ Accepted current ADR
-→ current milestone SSOT when it owns concrete physical realization
-→ Modules
-→ Implementation
-```
-
-Superseded/historical ADR不得覆盖 current source。
-
-Current executable/runtime chain：
-
-```text
-Product/Platform architecture
-→ Game Package + Platform Launcher Profiles
-→ ADR0019 / ADR0020 / ADR0026 provenance
-→ RuntimeHosting
-```
-
-Conditional Electron composition fact：
-
-```text
-trusted RuntimeHosting composition process is Electron
-→ ADR0033 applies to Runner execution mode
-```
-
-Canonical M15 Desktop outer composition：
-
-```text
-ADR0034
-→ Hostra shell owns Electron / BrowserWindow / direct HOSTRA_SUBCMD
-→ LoomRealm Desktop plain Node child
-→ existing RuntimeHosting owns Runner
-```
-
-ADR0033 must not override ADR0034 by reintroducing LoomRealm-owned Electron main into canonical M15。
-
----
-
-## 11. ADR Governance
-
-ADR记录：
-
-```text
-why
-what changed
-which old decision is superseded/updated/clarified
-what remains unchanged
-re-evaluation conditions
-```
-
-Major breaking/preimplementation correction必须有 ADR。ADR不是协议正文；Current Contract/Architecture/Milestone SSOT仍是实现依据。
-
-被取代 ADR必须明确标记 Superseded 或 partial update；历史推理可以保留，但 current navigation必须展示最新关系。
-
----
-
-## 12. Current Reset History
-
-当前主要 direct-current-v1 / frozen-preimplementation corrections：
-
-```text
-ADR0018
-    early Desktop-first Game/Runner + SDK/Data cleanup
-
-ADR0019
-    Game Descriptor {key,module} → {key}
-    Hostra/PWA independent Launch Manifests
-    exact key-set join
-    zero-side-effect PlatformLaunchPlan PREPARE
-    Main logical launch(key) boundary
-
-ADR0030
-    M12 prepared installation view
-    @loomrealm/fsdb readonly core
-    no mandatory generic content/repository framework
-    hierarchical ResourceKey + exact contentVersion
-
-ADR0033
-    conditional Electron composition correction
-    process.execPath remains Runner executable
-    Electron composition synthesizes ELECTRON_RUN_AS_NODE=1
-    no configurable Node executable / UtilityProcess second RuntimeHosting
-
-ADR0034
-    canonical M15 outer-host correction
-    external lithdoo/hostra owns Electron/BrowserWindow/direct child
-    LoomRealm Desktop is plain Node HOSTRA_SUBCMD
-    Runner remains existing LoomRealm RuntimeHosting child
-    Hostra RPC remains host-control only
-    M10–M14 logical/business contracts remain unchanged
-```
-
-ADR0033 remains valid when its Electron-composition precondition exists；ADR0034 supersedes its use as the canonical M15 product topology。
-
----
-
-## 13. Superseded Cleanup
-
-新模型接管后：
-
-1. Current入口/交叉引用全部更新；
-2. 旧完整实现 shape不得作为 current implementation长期并列；
-3. ADR/Git保留真实设计演进；
-4. Superseded/partial update必须显式；
-5. navigation不得把历史 decision伪装成 current；
-6. tests/fixtures不得让 legacy path冒充 current behavior；
-7. qualification ledger必须明确 historical evidence 与 current subject。
-
----
-
-## 14. Current Authoritative Tree
-
-```text
-00-overview
-10-architecture
-15-contracts
-20-modules
-30-implementation
-```
-
-`decisions/`保存 provenance。主架构 DAG目标：
-
-```text
-product/governance
-→ system overview
-→ platform composition
-→ runtime hosting
-→ stack / communication
-→ rendering / storage-content
-→ subsystem model
-→ contracts
-→ modules
-→ implementation
-```
-
----
-
-## 15. Final Rules
-
-1. Current first implementation只有一个模型；
-2. 无真实 compatibility boundary时不制造虚假版本；
-3. Frozen是设计关闭承诺，但 compatibility obligation决定版本迁移义务；
-4. Frozen incompatible preimplementation correction必须显式 ADR + evidence + 全树传播；
-5. Stabilizing/Evolving major reset也必须保留 provenance 并传播；
-6. 有真实 compatibility obligation后 incompatible change必须 version/migrate；
-7. 主要定义 dependency必须 DAG；
-8. Superseded/history不能覆盖 Current source；
-9. 下层实现不得反向重写上层 authority；
-10. conditional physical correction不得被误写成不满足其 precondition 的 canonical product topology；
-11. live milestone状态只由 designated qualification/delivery sources拥有，不在 index docs维护第二套 ledger。
+当前首次版本仅有一个模型；无真实兼容边界不造fake version；Frozen需显式治理但compatibility obligation决定版本迁移；Frozen preimplementation必须ADR+compat evidence+全树传播；Evolving major reset也留provenance；有真实义务后incompatible change必须version/migrate；依赖必须DAG；Superseded不能覆盖Current；implementation不反向重写authority；conditional physical不能伪装canonical；live milestone只由designated ledgers拥有。
