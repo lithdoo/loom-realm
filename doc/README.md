@@ -1,173 +1,68 @@
 # LoomRealm 设计文档
 
-本文只做 **current source-of-truth 导航**，不重复定义协议字段、状态机或 milestone evidence。
+本文只提供 **current source-of-truth 导航**，不重复协议字段、状态机或 milestone evidence。阅读优先级：Architecture topic → Current Formal Contract → Accepted current ADR → Module placement → Implementation plan / qualification；任何历史 ADR 或过期 proposal不得覆盖 current事实。
 
-阅读优先级：
-
-```text
-Architecture topic
-→ Formal Contract
-→ Accepted current ADR
-→ Module placement
-→ Implementation plan / qualification
-```
-
-Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/phase-1-delivery-plan.md)。M14 formal status/evidence只看 [`M14 Qualification Record`](./30-implementation/m14-qualification.md)；M15 implementation/qualification evidence只看 [`M15 Qualification Record`](./30-implementation/m15-qualification.md)。索引页不维护第二套 dated PASS/Closed ledger。
-
----
+Live milestone summary看 [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)；M11/M14/M15实际证据分别看专属资格记录。本导航不发布第二套 dated PASS/Closed ledger。
 
 ## 推荐阅读顺序
 
-1. [产品设计总览](./00-overview/product-vision.md)
-2. [文档分层与变更规则](./00-overview/document-governance.md)
-3. [系统架构总览](./10-architecture/system-overview.md)
-4. [平台组合系统](./10-architecture/platform-composition-system.md)
-5. [运行承载系统](./10-architecture/runtime-hosting-system.md)
-6. [栈式运行系统](./10-architecture/stack-runtime-system.md)
-7. [通信系统](./10-architecture/communication-system.md)
-8. [渲染系统](./10-architecture/rendering-system.md)
-9. [Subsystem 模型](./10-architecture/subsystem-model.md)
-10. [存储与内容系统](./10-architecture/storage-system.md)
-11. [正式契约目录](./15-contracts/README.md)
-12. [Render Update v1](./15-contracts/render-update-v1.md)
-13. [Readonly Content API v1](./15-contracts/content-api-v1.md)
-14. [Web Presentation Config v1](./15-contracts/web-presentation-config-v1.md)
-15. [Web Presentation API v1](./15-contracts/web-presentation-api-v1.md)
-16. [模块设计目录](./20-modules/README.md)
-17. [Hostra Desktop Composition](./20-modules/desktop-host/README.md)
-18. [Web Renderer](./20-modules/web-renderer/README.md)
-19. [Map Game Library](./20-modules/loom-map/README.md)
-20. [独立分包与发布架构](./30-implementation/package-architecture.md)
-21. [仓库与目录方案](./30-implementation/repository-layout.md)
-22. [测试策略](./30-implementation/testing-strategy.md)
-23. [第一阶段交付计划](./30-implementation/phase-1-delivery-plan.md)
-24. [M14 Qualification Record](./30-implementation/m14-qualification.md)
-25. [M15 Qualification Record](./30-implementation/m15-qualification.md)
-26. [ADR 索引](./decisions/README.md)
-27. [ADR 0032：Framework / Game Library / Example Boundary](./decisions/0032-game-library-example-boundary.md)
-28. [ADR 0034：Hostra owns Desktop Electron composition](./decisions/0034-hostra-owned-desktop-composition.md)
-29. [M15 Hostra Desktop Recomposition Plan](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
+1. [产品设计总览](./00-overview/product-vision.md) · [文档治理](./00-overview/document-governance.md)
+2. [系统架构总览](./10-architecture/system-overview.md) · [平台组合](./10-architecture/platform-composition-system.md)
+3. [Runtime Hosting](./10-architecture/runtime-hosting-system.md) · [栈](./10-architecture/stack-runtime-system.md) · [通信](./10-architecture/communication-system.md)
+4. [渲染](./10-architecture/rendering-system.md) · [Subsystem model](./10-architecture/subsystem-model.md) · [存储内容](./10-architecture/storage-system.md)
+5. [正式契约目录](./15-contracts/README.md) · [Render Update v1](./15-contracts/render-update-v1.md) · [Content API v1](./15-contracts/content-api-v1.md)
+6. [Web Presentation Config v1](./15-contracts/web-presentation-config-v1.md) · [Web Presentation API v1](./15-contracts/web-presentation-api-v1.md)
+7. [模块设计目录](./20-modules/README.md) · [Hostra Desktop](./20-modules/desktop-host/README.md) · [Web Renderer](./20-modules/web-renderer/README.md) · [Map Game Library](./20-modules/loom-map/README.md)
+8. [Package architecture](./30-implementation/package-architecture.md) · [Repository layout](./30-implementation/repository-layout.md) · [Testing strategy](./30-implementation/testing-strategy.md)
+9. [Phase 1 delivery](./30-implementation/phase-1-delivery-plan.md) · [M14 qualification](./30-implementation/m14-qualification.md) · [M15 qualification](./30-implementation/m15-qualification.md)
+10. [ADR index](./decisions/README.md) · [ADR0032 game library boundary](./decisions/0032-game-library-example-boundary.md) · [ADR0034 Hostra physical owner](./decisions/0034-hostra-owned-desktop-composition.md) · [M15 recomposition plan](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
 
-ADR 0033 仍保留 Electron-main composition 的历史/conditional provenance，但不再定义 canonical M15 physical topology。
+ADR0033仅在conditional Electron composition成立时有效，不定义当前 canonical M15 Hostra topology。
 
----
-
-## 当前 closed / frozen / requalification 主干
+## 当前 Viewport / Data profile 首发修正（未 Frozen/实施）
 
 ```text
-M10 User Input             Closed
-M11 Render Replication     Requalification Pending
-M12 Content                Closed
-M13 Web Presentation       Closed
-M14 Map Game Library       Requalification Pending
-M15 Desktop Full E2E       Requalification Pending
+ADR0037: approved direction for direct first-version correction
+    ↓
+Renderer Data Profile /1 = Connection1 + Input1 + Render1 + Viewport1
+    ↓
+Viewport State v1 + corrected Profile v1 conformance revision 3
+    ↓
+compatibility evidence + Docs Freeze review SHA [PENDING]
+    ↓
+new executable implementation/qualification SHA [PENDING]
 ```
 
-M14/M15 formal evidence remains in their qualification ledgers；本文不复制 run ID。
+入口：[ADR0037](./decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [Viewport architecture](./10-architecture/viewport-capability.md) · [revised Profile v1](./15-contracts/renderer-data-profile-v1.md) · [Viewport State v1](./15-contracts/viewport-state-v1.md) · [唯一 live qualification ledger](./30-implementation/viewport-profile-v1-qualification.md) · [Map dynamic draft](../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
 
----
+**没有 current Profile v2。** 历史 ADR0036/Profile-v2/v2-conformance/v2-ledger均 Superseded；原旧三-child `/1`是 historical executable，不和新四-child `/1`混配，旧 PASS不能转移。未发布不能代替真实 compatibility assessment。Profile uniform deployment与 Web DOM source是产品物理/实施选择，地图 cap/camera/menu/Canvas/PR0留给消费者。
 
-## Current M14 Source Map
+## 当前 milestone 与实物 owner
 
 ```text
-ADR 0032
-M14_01_WORKSPACE_BOUNDARY.md
-M14_02_MAP_GAME_LIBRARY.md
-M14_03_ESSENTIALS_EXAMPLE.md
-M14_04_REAL_GAME_VERTICAL.md
-M14_05_QUALIFICATION_CLOSURE.md
-doc/30-implementation/m14-qualification.md
-tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
+M10 Input               Closed historical baseline
+M11 Render              Requalification Pending
+M12 Content             Closed
+M13 Web Presentation    Closed historical baseline
+M14 Map                 Requalification Pending
+M15 Hostra E2E          Requalification Pending
+M16–17 PWA              planned
 ```
 
-Repository placement：
+M14来源：[ADR0032](./decisions/0032-game-library-example-boundary.md)、`M14_01..05`、[M14 qualification](./30-implementation/m14-qualification.md)、`tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md`。Packages为framework，`game-libs/map`为可重用业务，`examples/essentials-v21.1`为私有具体游戏；只投影实际使用 Map/Tileset facts，不建 universal schema。
+
+M15 current physical chain：
 
 ```text
-packages/      LoomRealm framework/runtime
-game-libs/map  @loomrealm-game/map
-examples/essentials-v21.1  private concrete game
-```
-
-M14 first slice只 materialize current consumer读取的 Map/Tileset facts；不建立 universal map schema。
-
----
-
-## Current M15 Source Map
-
-Canonical Desktop physical owner chain：
-
-```text
-Hostra shell
-    owns Electron / BrowserWindow / direct HOSTRA_SUBCMD process
-        ↓
-LoomRealm Desktop plain Node process
-    owns LoomRealm Control/Data/Content/trusted-shell composition
-        ↓ RuntimeHosting
+Hostra shell: Electron / BrowserWindow / direct HOSTRA_SUBCMD
+    ↓
+LoomRealm Desktop plain Node child: Control/Data/Content/trusted shell
+    ↓ RuntimeHosting
 Runner
 ```
 
-Current source-of-truth：
+M15 reload=same Hostra Window/fresh logical Renderer；Data-only reconnect=same Renderer/fresh physical Data pair；终态统一 funnel。M15 physical owner以[ADR0034](./decisions/0034-hostra-owned-desktop-composition.md)与 [recomposition SSOT](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)为准；standalone Electron旧方案只作迁移历史。M16仅Worker Runtime，M17完成PWA Renderer/Data/Input/Content/Web Presentation与logical equivalence。
 
-```text
-ADR 0034
-M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
-M15_01..05 retained/superseded landing docs
-doc/20-modules/desktop-host/README.md
-doc/30-implementation/m15-qualification.md
-```
+## Governance
 
-Frozen distinctions：
-
-```text
-reload
-    → same Hostra Window
-    → fresh Renderer logical participant
-
-same-generation Data-only reconnect
-    → same Renderer logical participant
-    → fresh Data physical pair only
-
-terminal triggers
-    → one idempotent LoomRealm termination funnel
-```
-
-Historical standalone Electron M15 remains migration evidence only。
-
----
-
-## Platform Route
-
-```text
-M6   Hostra launch-profile Runtime / Runner / Control
-M7   Renderer Control
-M8   logical Data role seam
-M9   Desktop Data Broker
-M10  User Input
-M11  Render Replication
-M12  Content
-M13  Web Presentation
-M14  Map Game Library + First Real Game
-M15  Hostra-owned Desktop Full E2E
-M16  PWA Runtime
-M17  PWA Full E2E / Equivalence
-```
-
-Current summary：
-
-```text
-M1–M10, M12–M13  closed baseline
-M11     Requalification Pending → m11-qualification.md
-M14     Requalification Pending → m14-qualification.md
-M15     Requalification Pending → m15-qualification.md
-M16–17  planned
-```
-
-M16 remains Worker Runtime-only；M17 completes PWA Renderer/Data/Input/Content/Web Presentation and cross-platform logical-outcome equivalence。M15 Hostra shell/HOSTRA_SUBCMD/loopback mechanics不得升级为 PWA contracts。
-
----
-
-## Documentation Governance
-
-Summary/index docs只描述 ownership、placement、milestone route 和 links。Exact schema/lifetime/order/failure semantics留在 formal contracts 或 current frozen milestone SSOT；live evidence留在 designated qualification ledger。
-
-Frozen authority、identity、lifecycle/order、failure/recovery 或 public surface 只能按 governance reopen；implementation不得静默扩张或恢复 superseded direct-Electron topology。
+Summary/index只写 navigation；exact schema、lifetime/order/failure去 formal contract；产品物理实现去 composition/implementation；map需求去 game library；真实证据去 designated ledger。Frozen authority/identity等只按 [governance](./00-overview/document-governance.md) explicit ADR + compatibility review重开；不能静默扩张、依赖未发布无消费者推断或恢复 superseded `/2`与Electron topology。
