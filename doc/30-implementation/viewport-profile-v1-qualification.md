@@ -3,9 +3,9 @@
 > 层级：Implementation / Qualification Ledger（**唯一 Core live status**）  
 > 状态：**Preimplementation / Docs Closure In Progress / Not Frozen**；2026-09-16。  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Contract：[Viewport v1](../15-contracts/viewport-state-v1.md) · [corrected Profile `/1`](../15-contracts/renderer-data-profile-v1.md)；Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile `/1` fixture revision3](../15-contracts/renderer-data-profile-conformance-v1.md)。  
-> Reviews：[历史Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [当前freeze整改](./viewport-v1-final-freeze-closure-2026-09-16.md)；[Map机械实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)与[Map PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)另有独立owner/status。
+> Reviews：[历史Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [最终freeze整改](./viewport-v1-final-freeze-closure-2026-09-16.md) · [最新范围收缩及原文保全](./viewport-scope-repair-2026-09-16.md)。Map [实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)与[PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)另有独立owner/status。
 
-**Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`已由ADR0037取消，旧[v2 ledger](./viewport-profile-v2-qualification.md)仅历史；旧三child`/1` executable PASS不能充当新四child`/1`证据。
+**Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`由ADR0037取消，[v2 ledger](./viewport-profile-v2-qualification.md)仅历史；旧三-child`/1` executable PASS不可转给新四-child`/1`。原始长篇规范已恢复/归档，不代表四-child交叉复核已经签署。
 
 ## 1. Current snapshot
 
@@ -18,8 +18,13 @@ Main/Renderer/Subsystem/Desktop    revised four-child NOT IMPLEMENTED
 Profile /1 fixtureSetRevision      3 spec only; NOT EXECUTED
 Compatibility assessment           NOT VERIFIED
 Connection projection              corrected 9fb2c72; final cross-review pending
-Phase plan current route           amended eb518d6 (preserved old M1–M17 detail)
-Data/Subsystem exact API           restored 5b1eb1d / 488fa34; broader diff audit pending
+Phase plan current route           amended eb518d6 (old M1–M17 preserved)
+Original governance/architecture/  restored exact a71be9c blobs, byte identity verified
+module/Data text
+Original three-child Profile/      archived exact original blob; revised /1 keeps current identity
+Conformance longform
+Data /1 new API                     separate additive packages/data/VIEWPORT_V1_IMPLEMENTATION_DELTA.md
+Protected cross-review            restoration done; clause-by-clause signoff PENDING
 Product build cohort               NOT VERIFIED
 Core Docs Freeze subject SHA       PENDING
 Executable subject + raw tests     NOT RUN
@@ -45,13 +50,14 @@ Compatibility conclusion: NOT VERIFIED
 
 ## 3. Core Docs Freeze gate（不要求实现前test PASS）
 
-- [ ] ADR0037/历史ADR0025/0036的partial supersession、index与旧`/2`历史状态一致，完整cross-review签署。
+- [ ] ADR0037/历史ADR0025/0036 partial supersession、index与旧`/2`历史状态一致，完整cross-review签署；ADR0025/0036历史正文已恢复，索引已导航最新纠正。
 - [ ] Corrected `/1`四child exact direction/schema/preflight/diagnostics/reader/writer/current authority与Control/Connection一致，旧Input/Render/Control/Connection wire不修改。
 - [x] Connection §1/§9/§22仅组合投影编辑修正，[diff `9fb2c72`](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)未动zero-message/current-retired/generation/limits；总cross-review仍待签署。
-- [ ] [Protected semantics](./viewport-v1-final-freeze-closure-2026-09-16.md)最终逐文件旧→新SSOT审计：Data exact peer/terminal restored、Subsystem author projection restored，但governance/platform/overview/index/其他module的完整diff检查仍PENDING。
-- [x] [phase-1 delivery plan](./phase-1-delivery-plan.md)已同步C0→C1→Map PR0**可行性**→Map Docs Freeze→PR1/PR2实现后P95→PR3同SHA资格，并保留既有M1–M17详尽历史实施约束；旧ADR0035 subject不冒充新evidence。
+- [x] [范围修复](./viewport-scope-repair-2026-09-16.md)：治理、平台、总体架构、协议分层、Subsystem、两个模块、Data及索引旧长篇原文以原blob恢复；原Profile `/1`和旧Conformance完整基线同目录归档；Data新Viewport exact API为单独delta。不把此勾选解释为当前四-child的审查PASS。
+- [ ] 对归档Profile/Conformance逐条核对当前候选的继承/覆盖清单、原Frozen不变量、链接及索引状态，形成独立reviewer/date证据。恢复历史原文不是此项最终signoff。
+- [x] [phase-1 delivery plan](./phase-1-delivery-plan.md)已同步C0→C1→Map PR0**可行性**→Map Docs Freeze→PR1/PR2实现后P95→PR3同SHA资格，并保留M1–M17原详细约束；旧ADR0035 subject不冒充新evidence。
 - [ ] Viewport single designated logical surface、floor/invalid conversion、bounded publisher、source/carrier fence、retained/fresh/terminal matrix cross-review签署。
-- [ ] `scope.viewport`同步首发含null、current getter先更新、throw/rejected thenable隔离、unsubscribe/terminal inert的assertions完成cross-review。
+- [ ] `scope.viewport`同步首发含null、current getter先更新、throw/rejected thenable隔离、unsubscribe/terminal inert assertions cross-review。
 - [ ] Core不硬编码Window DOM、map cap/camera/chunks/settle/menu；产品统一rollout属本ledger，最终cross-review签署。
 - [ ] Revised `/1` fixtureSetRevision3与Viewport conformance executable-ready，旧revision2 PASS不继承，最终cross-review签署。
 - [ ] §2 compatibility evidence签署，§4 coherent deployment可行且不需要mixed peer。
@@ -64,7 +70,7 @@ Reviewer/decision/date: PENDING
 
 ## 4. Product rollout & physical source（不是通用协议）
 
-本产品预定所有本次实际部署的 DataAuthority由Main选择同一**修正后** `loomrealm.renderer-data/1`。Main仍独占Profile选择，Broker以 `(Session,Renderer,S,G,P)` exact match但**P没有build fingerprint**：旧三child binary与四child binary都宣称`/1`，wire无法自动识别/拒绝混版。必须在连接前协调Main、Data peer、Renderer、Subsystem、Desktop/PWA相关adapter同一受治理release/build cohort，归档artifact provenance/subject SHA与测试记录；需要rolling/rollback共存立即STOP按§2决策，不得偷偷加dual parser。旧peer遇新`viewport.state`可能Data-fatal，那是错误部署不是合格迁移。
+本产品预定所有本次实际部署的DataAuthority由Main选择同一**修正后** `loomrealm.renderer-data/1`。Main仍独占Profile选择，Broker以 `(Session,Renderer,S,G,P)` exact match但**P没有build fingerprint**：旧三-child binary与四-child binary都宣称`/1`，wire无法自动识别/拒绝混版。必须在连接前协调Main、Data peer、Renderer、Subsystem、Desktop/PWA相关adapter同一受治理release/build cohort，归档artifact provenance/subject SHA与测试记录；需要rolling/rollback共存立即STOP按§2决策，不得偷偷加dual parser。旧peer遇新`viewport.state`可能Data-fatal，那是错误部署不是合格迁移。
 
 ```text
 Release cohort manifest and SHA: PENDING
@@ -77,7 +83,7 @@ Rollout owner/signoff: PENDING
 
 ## 5. Docs Freeze之后唯一实施和资格路线
 
-Current execution owner：[phase plan ADR0037 route](./phase-1-delivery-plan.md)；[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)记录历史diff；Map每刀/性能精确规范只看[Map主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
+Current execution owner：[phase plan ADR0037 route](./phase-1-delivery-plan.md)；[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)保留整改历史，[范围修复](./viewport-scope-repair-2026-09-16.md)为最新原文保全记录；Map每刀/性能精确规范只看[Map主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
 
 ```text
 C0 external compat / documentation + cross-review → Core Docs Freeze SHA
@@ -104,7 +110,8 @@ Executable subject SHA: PENDING
 | External compatibility owner/signoff | PENDING | NOT VERIFIED |
 | Connection editorial projection | `9fb2c72` | DOC CORRECTED / final review pending |
 | Phase plan corrected PR0 route | `eb518d6` | DOC CORRECTED / historic detail retained |
-| Data/Subsystem exact API | `5b1eb1d` / `488fa34` | KEY SURFACES RESTORED / broader audit pending |
+| Original governance/architecture/module/Data texts | restoration commit; see [scope repair](./viewport-scope-repair-2026-09-16.md) | ORIGINAL BLOBS RESTORED / final reviewer pending |
+| Original Profile `/1`/Conformance texts | archived exact blobs, current amendments separate | PRESERVED / full traceability review pending |
 | Cohort manifest and no mixed binary | PENDING | NOT VERIFIED |
 | Core Docs Freeze / docs SHA | PENDING | HOLD |
 | Four-child `/1` executable / all conformance + old regressions | PENDING | NOT RUN |
