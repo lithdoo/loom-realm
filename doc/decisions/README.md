@@ -2,8 +2,8 @@
 
 > 层级：设计决策记录  
 > 状态：Active  
-> 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-15
+> 主要定义：重大架构决策背景、取舍、current-v1/v2 provenance 与 reopen 条件  
+> 最近复核：2026-09-16
 
 ADR记录“为什么”；Current可实现事实以 architecture / formal contract / current milestone SSOT / qualification为准。历史 ADR不得覆盖后续 accepted correction。
 
@@ -46,6 +46,7 @@ ADR记录“为什么”；Current可实现事实以 architecture / formal contr
 33. [ADR 0033：Electron-hosted Hostra Runner uses the current executable in Node mode](./0033-electron-hostra-run-as-node.md)
 34. [ADR 0034：Hostra owns Desktop Electron composition; LoomRealm runs as HOSTRA_SUBCMD](./0034-hostra-owned-desktop-composition.md)
 35. [ADR 0035：RenderDomain existing-node authoritative update](./0035-render-domain-existing-node-update.md)
+36. [ADR 0036：Viewport State v1 与 Renderer Data Profile v2](./0036-viewport-state-and-renderer-data-profile-v2.md)
 
 ---
 
@@ -62,7 +63,7 @@ ADR 0021
     Runtime Control mechanics
 
 ADR 0022–0025
-    Render / Input / Data Connection / Renderer Data Profile closure
+    Render / Input / Data Connection / Renderer Data Profile v1 closure
 
 ADR 0027
     Renderer Control + M7 closure
@@ -84,29 +85,31 @@ ADR 0032
 
 ADR 0033
     conditional Electron-composition Runner execution correction
-    → when the trusted RuntimeHosting composition process itself is Electron
-    → canonical process.execPath enters Node mode via host-synthesized ELECTRON_RUN_AS_NODE=1
-    → no configurable Node executable / UtilityProcess second RuntimeHosting
 
 ADR 0034
     canonical M15 outer physical-owner correction
-    → external lithdoo/hostra owns Electron / BrowserWindow / direct subprocess
-    → LoomRealm Desktop runs as plain Node HOSTRA_SUBCMD
-    → LoomRealm RuntimeHosting owns Runner beneath that child
-    → Hostra RPC remains host-control only
-    → direct-Electron M15 topology becomes historical/migration evidence
 
 ADR 0035
     accepted M11 author-capability correction
     → RenderDomain.update(existing-node/zIndex authoritative delta)
     → existing RenderPatchV1 publication; no wire v2
-    → old executable subject remains historical Closed until implementation changes
     → new M11/M14/M15 subject requires same-SHA requalification
+
+ADR 0036
+    accepted Renderer→Subsystem environment-state capability correction
+    → viewport is NOT User Input and does not inherit InputTarget lifetime
+    → add Viewport State v1 as a narrow retained-state child protocol
+    → keep frozen renderer-data/1 unchanged
+    → add explicit renderer-data/2 = Connection1 + Input1 + Render1 + Viewport1
+    → canonical target subject selects /2 through Main DataAuthority policy
+    → no per-Subsystem negotiation or generic Environment service locator
 ```
 
 ADR0033 remains valid as a conditional RuntimeHosting fact；ADR0034 supersedes only the assumption that canonical M15 LoomRealm Desktop itself is the Electron composition process。
 
-ADR0035 partially supersedes only M11/01 exact `replace/emit/close` author-surface freeze and M11/02 sender-realization choice。It does not supersede ADR0022 wire semantics、ADR0032 ownership or ADR0034 physical composition；Accepted docs do not claim `update()` is already implemented。
+ADR0035 partially supersedes only M11/01 exact `replace/emit/close` author-surface freeze and M11/02 sender-realization choice。It does not supersede ADR0022 wire semantics、ADR0032 ownership or ADR0034 physical composition。
+
+ADR0036 does not modify User Input v1、Render Update v1、Data Connection v1 or Renderer Control v1 wire schema。它新增新的 Profile identity，而不是修改 frozen `/1`。
 
 ---
 
@@ -144,7 +147,7 @@ ADR 0009 → 0010–0015 → 0021
 → Subsystem Control + Frame/Call + Runtime Control Profile
 ```
 
-### Renderer Data / Input / Render / Web Presentation
+### Renderer Data / Input / Render / Viewport / Web Presentation
 
 ```text
 ADR 0016
@@ -153,10 +156,16 @@ ADR 0016
 → ADR 0028 / M9 physical Data
 → ADR 0029 / M10 Input closure
 → M11 Render replication closure
-→ ADR 0035 accepted existing-node author update correction
-→ ADR 0031
-→ Web Presentation Config v1 + Web Presentation API v1
-→ M13 Web Presentation
+→ ADR 0035 existing-node author update
+→ ADR 0036 Viewport State + Renderer Data Profile v2
+→ ADR 0031 Web Presentation
+```
+
+Compatibility chain：
+
+```text
+renderer-data/1  Frozen compatibility profile
+renderer-data/2  candidate explicit successor for target subject
 ```
 
 ### Content
@@ -173,11 +182,9 @@ ADR 0003
 ```text
 ADR 0032
 → M14 game-libs/map + concrete example
-→ ADR 0034
-→ M15 Hostra-owned Desktop product
+→ ADR 0036 viewport capability gap exposed by map
+→ ADR 0034 M15 Hostra-owned Desktop product
 ```
-
-ADR0033 does not define this outer product topology。
 
 ---
 
@@ -186,7 +193,6 @@ ADR0033 does not define this outer product topology。
 ```text
 Hostra Game Launcher / Node Subsystem Runner Profile v1
     Runtime PREPARE / Runner / provisioning physical contract
-    ADR0033 applies only when its Electron-composition precondition exists
 
 Web Presentation Config v1
     startup JS/CSS / prepared Content / browser ready semantics
@@ -194,9 +200,14 @@ Web Presentation Config v1
 Web Presentation API v1
     Projector ↔ WC context/data/resource ABI
 
+Renderer Data Profile v1
+    Frozen Connection1 + Input1 + Render1
+
+Viewport State v1 / Renderer Data Profile v2
+    Draft / Candidate for Freeze under ADR0036
+
 M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
     canonical M15 Hostra-owned physical composition
-    frozen implementation baseline / lifecycle / qualification subject
 ```
 
 ---
@@ -214,7 +225,7 @@ real consumer proves Frozen capability cannot express required semantics
 real compatibility boundary requires explicit migration/versioning
 ```
 
-ADR0033和ADR0034都是 permitted preimplementation corrections，但作用域不同：前者修正 Electron-process Runner execution；后者修正 M15 outer host ownership。Implementation不得把两者重新合并成“LoomRealm Electron main owns Hostra Runner”的旧模型。
+ADR0036正是 real consumer capability failure 的显式 versioned response：它不改 `/1`，而建立 `/2`。
 
 ---
 
@@ -229,6 +240,14 @@ Architecture topic source
 → current milestone physical SSOT when applicable
 → Module projection
 → implementation plan/tests
+```
+
+对尚未 Frozen 的 Viewport/Profile v2：
+
+```text
+ADR0036 + viewport-capability architecture
+→ candidate formal contracts
+→ dynamic map draft as downstream consumer
 ```
 
 历史 ADR/Git保留演进；旧 shape不得覆盖 Current Contract 或后续 Accepted correction。
