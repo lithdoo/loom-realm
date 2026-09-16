@@ -18,7 +18,7 @@ test("renderer keeps the additive source seam and frozen dependency boundary", a
   const control = await read("packages/renderer/dist/control.d.ts");
   const input = await read("packages/renderer/dist/input.d.ts");
   const manifest = JSON.parse(await read("packages/renderer/package.json"));
-  assert.match(control, /createRendererControlHolder\(data\?: RendererDataBinding, input\?: RendererInputSource\)/);
+  assert.match(control, /createRendererControlHolder\(data\?: RendererDataBinding, input\?: RendererInputSource, viewport\?: RendererViewportSource\)/);
   assert.match(input, /interface RendererInputSource/);
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
     "@loomrealm/data",
