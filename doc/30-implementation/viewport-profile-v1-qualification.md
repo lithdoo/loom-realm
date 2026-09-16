@@ -1,115 +1,115 @@
 # Viewport State v1 / Revised Renderer Data Profile v1 Qualification Ledger
 
-> 层级：Implementation / Qualification Ledger（唯一 live status）  
-> 状态：**Preimplementation / Docs Closure In Progress / Not Frozen**  
-> 日期：2026-09-16；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> Contracts：[Viewport v1](../15-contracts/viewport-state-v1.md) · [Revised Profile v1](../15-contracts/renderer-data-profile-v1.md)  
-> Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile v1 revision 3](../15-contracts/renderer-data-profile-conformance-v1.md)  
-> Reviews：[Core historical](./viewport-core-docs-freeze-review-2026-09-16.md) · [Business boundary](./viewport-business-boundary-review-2026-09-16.md) · [Final freeze remediation and protected semantics](./viewport-v1-final-freeze-closure-2026-09-16.md)
+> 层级：Implementation / Qualification Ledger（**唯一 Core live status**）  
+> 状态：**Preimplementation / Docs Closure In Progress / Not Frozen**；2026-09-16。  
+> Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Contract：[Viewport v1](../15-contracts/viewport-state-v1.md) · [corrected Profile `/1`](../15-contracts/renderer-data-profile-v1.md)；Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile `/1` fixture revision3](../15-contracts/renderer-data-profile-conformance-v1.md)。  
+> Reviews：[历史Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [当前freeze整改](./viewport-v1-final-freeze-closure-2026-09-16.md)；[Map机械实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)与[Map PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)另有独立owner/status。
 
-**Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`被ADR0037取消，[old v2 ledger](./viewport-profile-v2-qualification.md)为历史指针，不得形成第二状态源。旧三child`/1` executable PASS不可转给新四child`/1`。
+**Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`已由ADR0037取消，旧[v2 ledger](./viewport-profile-v2-qualification.md)仅历史；旧三child`/1` executable PASS不能充当新四child`/1`证据。
 
 ## 1. Current snapshot
 
 ```text
-ADR0037 direction                 Accepted; external compatibility evidence pending
-Revised Profile /1 + Viewport v1  Draft normative candidates / Docs Freeze HOLD
-Profile /2                        Superseded / never implemented or released
-Old three-child /1 code          Historical executable still in current source
-Main/Renderer/Subsystem/Desktop   revised four-child not implemented
-Profile v1 fixtureSetRevision     3 spec only / not executed
-Compatibility assessment          NOT VERIFIED
+ADR0037 direction                  Accepted; external compatibility evidence PENDING
+Revised Profile /1 + Viewport v1   Draft normative candidate / Core Docs Freeze HOLD
+Old 3-child /1 source              historical executable, still current production code
+/2                                 superseded proposal; never shipped/implemented
+Main/Renderer/Subsystem/Desktop    revised four-child NOT IMPLEMENTED
+Profile /1 fixtureSetRevision      3 spec only; NOT EXECUTED
+Compatibility assessment           NOT VERIFIED
 Connection projection              corrected 9fb2c72; final cross-review pending
-Phase plan                         current route synchronized 3fb882e
-Exact Data/Subsystem API           restored 5b1eb1d/488fa34; broader audit pending
-Product build-cohort proof        NOT VERIFIED
-Docs Freeze subject SHA           PENDING
-Executable subject / tests        PENDING / NOT RUN
+Phase plan current route           updated 3087653; Map PR0 feasibility vs target P95 separated
+Data/Subsystem exact API           restored 5b1eb1d / 488fa34; broader diff audit pending
+Product build cohort               NOT VERIFIED
+Core Docs Freeze subject SHA       PENDING
+Executable subject + raw tests     NOT RUN
+Map Docs Freeze / PR0 evidence     separate Map-owned HOLD / NOT RUN
 ```
 
-## 2. Frozen-preimplementation external compatibility assessment
+## 2. Frozen-preimplementation external compatibility investigation
 
-发布负责人逐项归档证据、owner/date/signoff，不因产品尚未正式发布或Repo Releases为空自动推断没人依赖：
+发布负责人核证各来源并记录owner/date/raw source/signoff，不能仅因产品未发布或Repo没有GitHub Releases就推断`/1`无现实兼容义务：
 
-- [ ] GitHub Releases与任何公开协议/版本承诺（Repo Releases无条目只覆盖此渠道）；
-- [ ] npm alpha/pre-release tarball、私有分发及其他下游消费者；
-- [ ] 独立互操作实现、下游仓库/forks；
-- [ ] persisted profile identity、运行中旧peer、rollback/rolling upgrade/多版本共存需求；
-- [ ] 明确无真实旧三child `/1`兼容义务，负责人签署结论。
+- [ ] GitHub Releases及其他已公开的协议/身份承诺（Releases只覆盖该渠道）。
+- [ ] npm alpha/prerelease、private registry、tarball及其他分发/下游consumer。
+- [ ] 独立实现、第三方或其他repo/forks使用。
+- [ ] Persisted profile identity、仍运行中的旧peer、rolling/rollback/mixed cohort需求。
+- [ ] 发布负责人给出明确无真实义务结论、date、证据引用和签名。
 
 ```text
-Compatibility owner/evidence: PENDING
+Compatibility owner/date/raw evidence: PENDING
 Compatibility conclusion: NOT VERIFIED
 ```
 
-**发现任何真实外部/混版义务→STOP direct v1 reset，重新评审显式profile version/migration。** 不得用未发GitHub Release或双方都声称 `/1`作兼容证明。
+若发现任何真实外部/混版义务，**STOP direct v1 reset并重开显式version/migration ADR**，不能用同P字符串作build fingerprint、补隐式握手/feature flag或将新旧binary混配后称自动迁移。
 
-## 3. Docs Freeze gate（不需实现前PASS）
+## 3. Core Docs Freeze gate（不要求实现前test PASS）
 
-- [ ] ADR0037/历史ADR0025/0036 partial supersession、索引与旧`/2`历史状态一致；No dual parser/alias。最终 cross-review待签署。
-- [ ] Revised `/1` four-child exact direction/shape/preflight/diagnostic，single reader/writer、Control/Connection current authority不冲突；原Input/Render/Control/Connection wire不改。最终 cross-review待签署。
-- [x] Connection v1 §1/§9/§22当前组合投影编辑修正完成，[确切 diff](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)已核查只涉及下游组合说明/metadata，未改变原 authority/current-retired/wire/limits；正式整体签署仍见最后一项。
-- [ ] Data package及其他大幅精简的模块/架构文档完成 [protected semantics audit](./viewport-v1-final-freeze-closure-2026-09-16.md#3-protected-semantics-audit恢复精确入口不造并列-wire-ssot)；`packages/data/DESIGN.md`精确 peer/type/terminal/errors/tests与Subsystem legacy author projection已恢复，但更广泛的内容保全终审尚未完成。
-- [x] [phase-1-delivery-plan.md](./phase-1-delivery-plan.md) 已明确 C0→C1→Map PR0→PR1/PR2→M11/M13/M14/M15 受影响回归，并区分 ADR0035 历史 subject 与新修正 `/1` executable。
-- [ ] Viewport single designated CSS logical surface、floor/invalid size转换、bounded latest、source/carrier fencing、retained/fresh/terminal matrix一致；最终 cross-review待签署。
-- [ ] `scope.viewport`同步首发含null、getter更新先于callback、异常隔离/退订/终态可测试；最终 cross-review待签署。
-- [ ] Core不硬编码Window DOM、不包含map尺寸cap/camera/settle/chunks/menu policy；产品统一rollout归此ledger；最终 cross-review待签署。
-- [ ] Revised Profile v1 conformance fixtureSetRevision3 + Viewport child conformance executable-ready，旧revision2 PASS不继承；最终 cross-review待签署。
-- [ ] §2兼容性证据签署，§4 coherent deploy方式可行且不存在必须混版需求。
-- [ ] 完成所有 affected cross-contract/link/status/内容保全复核，记录docs-only SHA、reviewer/date；Map PR0/运动同步不作为 Core Freeze 代替项。
-
-```text
-Docs Freeze subject SHA: PENDING
-Review decision/date: PENDING
-```
-
-## 4. Product rollout and physical composition（不是通用协议）
-
-本产品计划对全部**本次实际部署的** current DataAuthorities选择同一个修正后`loomrealm.renderer-data/1`，Main仍独占profile identity，Broker只按`(Session,Renderer,S,G,P)` exact match。但**P是逻辑profile，不含build fingerprint：旧三child与新四child都叫`/1`，wire无法自动鉴别或拒绝混版；没有handshake/feature bits。** 部署必须在连接前用受治理的同一个coherent release/build cohort，协调Main、Data peer、Renderer、Subsystem、Desktop/相应PWA，归档全部artifact provenance、subject SHA与测试路径。若必须rolling update、运行旧/新peer共存或独立第三方实现，则此direct reset不适用，转§2 STOP。旧peer收到viewport可能Data-fatal，那是错误部署，不是自动迁移成功；不得谎称Broker会根据P拒绝旧binary。
+- [ ] ADR0037/历史ADR0025/0036的partial supersession、index与旧`/2`历史状态一致，完整cross-review签署。
+- [ ] Corrected `/1`四child exact direction/schema/preflight/diagnostics/reader/writer/current authority与Control/Connection一致，旧Input/Render/Control/Connection wire不修改。
+- [x] Connection §1/§9/§22仅组合投影编辑修正，[diff `9fb2c72`](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)未动zero-message/current-retired/generation/limits；总cross-review仍待签署。
+- [ ] [Protected semantics](./viewport-v1-final-freeze-closure-2026-09-16.md#3-受保护语义审核范围)最终逐文件旧→新SSOT审计：Data exact peer/terminal restored、Subsystem author projection restored，但governance/platform/overview/index/其他module的完整diff检查仍PENDING。
+- [x] [phase-1 delivery plan](./phase-1-delivery-plan.md)已同步C0→C1→Map PR0**可行性**→Map Docs Freeze→PR1/PR2实现后P95→PR3同SHA资格，旧ADR0035 subject不冒充新evidence。
+- [ ] Viewport single designated logical surface、floor/invalid conversion、bounded publisher、source/carrier fence、retained/fresh/terminal matrix cross-review签署。
+- [ ] `scope.viewport`同步首发含null、current getter先更新、throw/rejected thenable隔离、unsubscribe/terminal inert的assertions完成cross-review。
+- [ ] Core不硬编码Window DOM、map cap/camera/chunks/settle/menu；产品统一rollout属本ledger，最终cross-review签署。
+- [ ] Revised `/1` fixtureSetRevision3与Viewport conformance executable-ready，旧revision2 PASS不继承，最终cross-review签署。
+- [ ] §2 compatibility evidence签署，§4 coherent deployment可行且不需要mixed peer。
+- [ ] Affected index/link/status/全量protected diff复核通过、reviewer/date及docs-only SHA记录，Map PR0和motion不代替Core签署。
 
 ```text
-Release cohort manifest + SHA: PENDING
-Main/Data/Renderer/Subsystem/adapter artifacts: PENDING
-No mixed-version deployment proof: PENDING
-Rollout owner: PENDING
+Core Docs Freeze subject SHA: PENDING
+Reviewer/decision/date: PENDING
 ```
 
-当前Desktop/PWA Web product指定document layout viewport，用`Window.innerWidth/innerHeight` floor CSS logical px观察；必须测试actual map content box、center/letterbox与source对应，hidden→visible/fresh source fencing。该DOM采样是本次物理composition实现，不进入通用Viewport wire；其他物理source必须明确同一single surface identity且有真实consumer证据。
+## 4. Product rollout & physical source（不是通用协议）
 
-## 5. Current delivery order and implementation qualification（Docs Freeze后）
-
-最终实施依赖以 [phase-1 plan ADR0037 current route](./phase-1-delivery-plan.md#adr0037-current-route--revised-first-release-1--viewport--map-performance) 为执行入口，详见 [freeze remediation §2](./viewport-v1-final-freeze-closure-2026-09-16.md#2-唯一当前实施路线已同步-phase-plan)。
+本产品预定所有本次实际部署的 DataAuthority由Main选择同一**修正后** `loomrealm.renderer-data/1`。Main仍独占Profile选择，Broker以 `(Session,Renderer,S,G,P)` exact match但**P没有build fingerprint**：旧三child binary与四child binary都宣称`/1`，wire无法自动识别/拒绝混版。必须在连接前协调Main、Data peer、Renderer、Subsystem、Desktop/PWA相关adapter同一受治理release/build cohort，归档artifact provenance/subject SHA与测试记录；需要rolling/rollback共存立即STOP按§2决策，不得偷偷加dual parser。旧peer遇新`viewport.state`可能Data-fatal，那是错误部署不是合格迁移。
 
 ```text
-Core C0: compatibility + docs propagation/preservation + cross-review → Docs Freeze SHA
-Core C1: coordinated revised /1 executable → revised v1 revision3 + Viewport
-         + original Connection/Input/Render regression + Desktop/Hostra affected qualification
-Map PR0: exact 1080 bytes / Core validation residual / Browser raster / single-clock latency
-Map PR1/PR2: fixed640 optimization → dynamic viewport + View/Sprite synchronization
-PR3: governed current executable SHA → affected M11/M13/M14/M15 requalification
+Release cohort manifest and SHA: PENDING
+Main/Data/Renderer/Subsystem/adapter artifact inventory: PENDING
+No-mixed-version deployment proof: PENDING
+Rollout owner/signoff: PENDING
 ```
+
+当前Desktop/PWA physical composition指定document layout viewport，使用`Window.innerWidth/innerHeight`的CSS logical px floor；实际map content box、centering、letterbox、hidden→visible recovery、fresh source fencing、DPR-only须产品验收。这个DOM采样属产品实现，不升Core wire；其他platform source也须明示一个stable logical surface及真实consumer证据。
+
+## 5. Docs Freeze之后唯一实施和资格路线
+
+Current execution owner：[phase plan ADR0037 route](./phase-1-delivery-plan.md#adr0037-current-route--corrected-first-release-1--map-dynamicperformance)；[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)记录历史diff；Map每刀/性能精确规范只看[Map主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
+
+```text
+C0 external compat / documentation + cross-review → Core Docs Freeze SHA
+C1 coherent corrected /1 executable → revised fixture3 + Viewport + Frozen regressions
+Map PR0 production-zero hosted/local exact dense1080 + Core/M13 residual + Browser
+        + private-only CSS stacking/128/256MiB proof → Map Docs Freeze SHA
+Map PR1 fixed640 chunks/raster/paired-stage functional +640 performance
+Map PR2 dynamic viewport/resize/1080 real-product proof
+Map PR3 same executable/cohort SHA M11/M13/M14/M15/product P95/requalification
+```
+
+PR0**不要求PR1/2尚未存在的性能优化P95**，只要求设计可行性和没有未解Core/M13/Stacking阻塞；所有实际结果由[Map PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)记录，仍NOT RUN。新Core C1最小实现为`@loomrealm/data`唯一`/1` codec/demux/`protocol:"viewport"`/有界sender、Renderer physical source、Subsystem retained `scope.viewport`、Main product组合+coordinated Desktop/PWA平台。禁止`/2`、dual parser、generic Environment、map-special Core path、改Frozen limits/wire。
+
+Executable新subject须列cohort artifacts、Node20/24（适用时）、Chromium/Hostra、commands/exit/raw logs：corrected Profile fixture3、Viewport conformance、旧Connection/Input/Render regressions、Main/Broker authority及cohort证明、blocked writer burst/fresh carrier+source、M13/M14/M15 affected qualification；PWA其平台milestone验证。Map PR0 bytes/Core validation/M13 compare/Browser baseline与产品P95都不是Core conformance PASS。
 
 ```text
 Executable subject SHA: PENDING
 ```
 
-最小实施：`@loomrealm/data`唯一`/1` codec/peers/dispatch/`protocol:"viewport"`/bounded sender、Renderer physical source、Subsystem retained author API、Main product `/1`组合、Desktop source/PWA对应平台。绝不创建`/2`、dual parser、Environment manager、map-special Core path或修改Frozen Input/Render/Connection/Control wire。
-
-新executable SHA提供完整cohort artifact inventory、Node20/24（适用时）、Chromium/Hostra环境、commands/raw logs：revised `/1` fixture revision3 + Viewport conformance +原Connection/Input/Render regression，Main/Broker logical tuple与cohort composition，blocked writer burst/fresh source/carrier，M13/M14/M15受影响回归；PWA按后续平台里程碑验证。Map PR0 dense1080 payload/Core full-state validation/Browser raster/latency是独立Map证据，不得转写Core PASS。
-
 ## 6. Evidence table
 
 | Gate | Subject | Result |
 |---|---|---|
-| External compatibility | PENDING | NOT VERIFIED |
-| Frozen Connection §1/§22 editorial sync | `9fb2c72` | DOC CORRECTED / cross-review pending |
-| Phase plan | `3fb882e` | DOC CORRECTED |
-| Data/Subsystem exact API preservation | `5b1eb1d` / `488fa34` | KEY SURFACES RESTORED / broader audit pending |
-| Coherent deployment cohort | PENDING | NOT VERIFIED |
-| Core Docs Freeze | PENDING | HOLD |
-| revised `/1` + Viewport + old regression | PENDING | NOT RUN |
-| Desktop/Hostra + M13/M14/M15 | PENDING | NOT RUN |
+| External compatibility owner/signoff | PENDING | NOT VERIFIED |
+| Connection editorial projection | `9fb2c72` | DOC CORRECTED / final review pending |
+| Phase plan corrected PR0 route | `3087653` | DOC CORRECTED |
+| Data/Subsystem exact API | `5b1eb1d` / `488fa34` | KEY SURFACES RESTORED / broader audit pending |
+| Cohort manifest and no mixed binary | PENDING | NOT VERIFIED |
+| Core Docs Freeze / docs SHA | PENDING | HOLD |
+| Four-child `/1` executable / all conformance + old regressions | PENDING | NOT RUN |
+| Desktop/Hostra/M13/M14/M15 current requalification | PENDING | NOT RUN |
 | PWA source equivalence | PENDING | NOT RUN |
-| Map motion integration / PR0 / Map Freeze | separate Map subject | CANDIDATE / NOT RUN / HOLD |
+| Map PR0/Map Docs Freeze | separate Map subject | EVIDENCE TEMPLATE / NOT RUN / HOLD |
 
-任何schema/currentness/source/diagnostic变化需new docs subject；executable变更需new executable SHA与affected rerun。
+Contract schema/currentness/source/diagnostic变更→new docs-only SHA review；代码变更→new executable SHA + affected rerun。**只有实际签署才能改PENDING/HOLD，不能因本次文档修改自动变PASS。**
