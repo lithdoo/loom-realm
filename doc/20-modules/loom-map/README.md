@@ -4,7 +4,7 @@
 > 状态：**M14 first-slice fixed-640 implementation/design historical Frozen；current executable requalification pending；dynamic viewport/performance extension Draft / Map Freeze HOLD**  
 > 首次landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
 > 唯一M14资格：[m14-qualification](../../30-implementation/m14-qualification.md) · [ADR0032](../../decisions/0032-game-library-example-boundary.md)  
-> 新候选：[map dynamic viewport/performance draft](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md) · [ADR0037](../../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
+> 新候选：[dynamic viewport/performance draft](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md) · [Map-private motion-stage closure](../../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md) · [ADR0037](../../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16
 
 **以下 first-slice固定640事实为已实现的历史基线，不是对未来候选dynamic viewport的永久限制；两个阶段的状态不能互相覆盖。** Map是game-domain consumer，不是framework module：Framework owns authority/transport/general read-only viewport capability；Map owns tile-RPG camera, world/projection, resource, raster/Canvas and game-specific policies。Core revised Profile `/1`与Viewport v1尚未 Frozen/实现，不声称map已支持动态视口；旧 `/2`方案被ADR0037撤销。
@@ -40,10 +40,10 @@ One business RenderDomain/opaque SDK wire id；managed tree `lr-map-view → lr-
 
 Viewport observation独立InputTarget不意味着允许Frame gameplay mutation；map callback只能基于已提交world facts做presentation projection，绝不从resize启动movement/collision/transfer/call。现有example `game.json`仅map，menu/dialog不是当前已接受该slice需求；future hold→child overlay→timer behavior需要独立真实consumer acceptance/evidence和必要时独立最小lifecycle review，不能假设必须新增Framework Frame API或通过viewport绕过gate。Frame/Runtime terminal cleanup与late async inert仍需当前实现测试。
 
-WC pair async prepare与Store author原子性不同：map own View/Sprite必须保留旧完整stage，直到同scene/visualEpoch双方ready在同一JS task切换；WC physical retry已交付数据，不依赖same-G reconnect重发 equal RenderData。该逻辑完全位于game library，不需要Renderer ACK/store rollback或通用layer manager。
+WC pair async prepare与Store author原子性不同：map own View/Sprite必须保留旧完整stage，直到同scene/visualEpoch双方ready在同一JS task切换；WC physical retry已交付数据，不依赖same-G reconnect重发 equal RenderData。**Ordinary movement不增长visualEpoch，因此其双 WC 同步另须满足 [Map motion-stage closure](../../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)：同一次 movement 的 View/Sprite 携带 Map-private matching `motionId`，Sprite还携带sceneEpoch；收到一半不启动单侧动画，双方准备后共享同一帧时间采样，standing/blocked的Sprite-only更新有明确例外。** 该文仍为候选、必须被最终 dynamic draft 吸收并通过截图/trace才能 Map Freeze。此逻辑完全属于 game library，不需要Renderer ACK/store rollback或通用layer manager。
 
 ## 5. Scope discipline / qualification
 
 首slice预算：small Map/Tileset validators、tableAt/passability、computeCamera、projectTiles、renderState、one definition/twoWC/browser JS CSS/test composition。新扩展仅根据PR0证明添加current ProjectionWindow/chunks/raster/epoch/private stage，不建MapRepository/Bundle、GameLibrary framework、AssetManager、SceneGraph/LayerManager、PlayerController、Context service、generic responsive viewport、Tick/EventQueue/Universal schema。
 
-旧M14 qualifying facts留在 [m14 ledger](../../30-implementation/m14-qualification.md)；新的Core `/1`视口资格看 [dedicated ledger](../../30-implementation/viewport-profile-v1-qualification.md)，Map PR0与Map Freeze看 dynamic draft，不用旧M14 PASS推断1080p和Browser性能已通过。未取得Core Docs Freeze/usable implementation、新payload/CPU/latency证据前，dynamic设计保持Draft/HOLD。
+旧M14 qualifying facts留在 [m14 ledger](../../30-implementation/m14-qualification.md)；新的Core `/1`视口资格看 [dedicated ledger](../../30-implementation/viewport-profile-v1-qualification.md)，Map PR0与Map Freeze看 dynamic draft及motion closure，不用旧M14 PASS推断1080p和Browser性能已通过。未取得Core Docs Freeze/usable implementation、新payload/CPU/latency证据前，dynamic设计保持Draft/HOLD。
