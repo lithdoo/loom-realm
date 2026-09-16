@@ -26,7 +26,7 @@ Core Docs Freeze approved SHA      4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9
 Freeze-registration commit         171e58cd0885edc8fa21a4b2b4558245045eda1d
 C1 production executable SHA       dc024e8963cf6970cca8b28a9de396ee9d0f203c
 Qualification harness SHA          f159b80bab595f4c9a5d8521f271452fa618ad88
-Evidence/ledger commit             the commit that records this C1 evidence; not a protocol SHA
+Evidence/ledger commit             3aca363ce410adccf708aba1ee3df82667917413
 Product cohort                     workspace 0.1.0-alpha.0 from the same git tree; no renderer-data/2
 Map Docs Freeze / PR0 evidence     separate Map-owned HOLD / NOT RUN
 PWA                                no PWA app in this repository; NOT RUN
@@ -141,13 +141,13 @@ Branch: `feat/core-viewport-v1` from freeze subject `4cbf620ebe8aec0e7fb33743813
 | Step | Commit | Purpose |
 |---|---|---|
 | C0 | `171e58cd0885edc8fa21a4b2b4558245045eda1d` | Register real independent Docs Freeze; not a protocol SHA |
-| C1-A | `b0dd538` | Data ViewportStateV1 codec, family, demux, bounded latest sender |
-| C1-B | `d4359c2` | Runtime-scoped readonly `scope.viewport` |
-| C1-C | `7cb819c` | Renderer source/publisher + Desktop document-layout adapter |
-| C1-D | `45dd700` | Desktop `renderer-entry` composes Data+Input+Viewport on one holder |
+| C1-A | `b0dd5386051139b077e31ea3cc6ba64bac01f7e9` | Data ViewportStateV1 codec, family, demux, bounded latest sender |
+| C1-B | `d4359c203e57e381ee59191f4371206f60fbea7f` | Runtime-scoped readonly `scope.viewport` |
+| C1-C | `7cb819cbe49f19977fde9181defc83529dbba962` | Renderer source/publisher + Desktop document-layout adapter |
+| C1-D | `45dd70068b61160df21b7e8f2621ff5e40e2ef13` | Desktop `renderer-entry` composes Data+Input+Viewport on one holder |
 | C1-C fix | `dc024e8963cf6970cca8b28a9de396ee9d0f203c` | Skip resize samples that do not change CSS logical size |
 | Qualification harness | `f159b80bab595f4c9a5d8521f271452fa618ad88` | Profile fixture revision 3 + Viewport v1 executable catalog |
-| Evidence | this ledger commit | Records commands/exits; not a Frozen docs subject |
+| Evidence | `3aca363ce410adccf708aba1ee3df82667917413` | Records commands/exits; not a Frozen docs subject |
 
 **Production executable SHA** for the four-child Core is `dc024e8963cf6970cca8b28a9de396ee9d0f203c`. Later harness/ledger commits add tests and status only.
 
