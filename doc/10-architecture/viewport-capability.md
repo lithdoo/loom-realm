@@ -1,47 +1,47 @@
 # Renderer → Subsystem Viewport Capability
 
 > 层级：系统架构  
-> 状态：Active Design / Candidate for Freeze  
-> 稳定程度：ADR0036 Accepted；Viewport v1/Profile v2 formal contracts revised / Not Frozen；qualification pending  
-> 主要定义：geometry ownership、single-surface authority、Runtime-scoped author observation 与 data/physical lifetime  
-> 依赖：[System overview](./system-overview.md) · [Protocol layers](./renderer-subsystem-protocol-layers.md) · [Subsystem model](./subsystem-model.md) · [ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
-> Normative candidates：[Viewport State v1](../15-contracts/viewport-state-v1.md) · [Renderer Data Profile v2](../15-contracts/renderer-data-profile-v2.md)  
-> 最近复核：2026-09-16
+> 状态：**Active Design / Direct-v1 Docs Freeze HOLD**  
+> 决策：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；原 [ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md) 的 v2 identity部分已被撤销。  
+> Formal SSOT：[Viewport v1](../15-contracts/viewport-state-v1.md) · [revised Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
+> Qualification：[唯一 v1 ledger](../30-implementation/viewport-profile-v1-qualification.md)；最近复核：2026-09-16
 
-本文只固定 owner 与 dependency，不重复正式 wire/callback细节；有冲突以 formal contract为准并停止实施。
+此架构文档**只**负责 authority/role/lifetime/surface boundary；exact wire、diagnostic和callback以正式契约为准，产品部署和具体 DOM source由物理 composition拥有，地图算法由 game library拥有。旧 `/2` proposal仅历史记录。
 
-## 1. Capability gap / narrow solution
+## 1. Real cross-role capability gap
 
-Map Frame在 child menu/dialog取得 InputTarget时可能仍有可见 live RenderDomain；Window resize属于 Renderer presentation geometry，不属于 InputTarget/Activation/Interest。因此禁止 `x.*.state` User Input与 viewport-specific Input bypass。Browser-only geometry不足以驱动 Runtime authoritative camera/projection；永久最大视口 envelope又让小窗口承担 1080p payload/validation。增加一个 Renderer→Subsystem **readonly、retained、Runtime-scoped size capability**，map仍根据实际 accepted size选择投影。
+Frame可被另一 Frame取走 InputTarget而仍有可见 live RenderDomain。Renderer的presentation geometry在此期间仍可能变化；User Input的 Data×InputTarget×Activation×Interest×producer gate不能承担这份非用户动作的环境事实。Browser自有 geometry不足以驱动业务 Runtime的 authoritative presentation projection，永久 max-envelope又增加不必要的消费者 payload。**需要的是只读尺寸观测，不是 Input bypass或 Environment framework。**
 
 ```text
-current Renderer document layout viewport
-  → trusted physical size observation
-  → Viewport State v1 / Profile v2 on each current Subsystem Data carrier
-  → Subsystem host last accepted observation
-  → scope.viewport readonly
-  → business map policy/camera/chunks
-  → existing Render author API / Store / WC
+Renderer physical composition designates one logical surface
+→ Renderer observes its CSS logical size
+→ Viewport State v1 over revised renderer-data/1
+→ Subsystem Runtime retains last accepted observation
+→ readonly scope.viewport
+→ individual business consumers decide presentation policy
+→ existing RenderDomain author API → Renderer Store/Projector/WC
 ```
 
-## 2. Authority and lifetime
+## 2. Ownership matrix
 
-| Owner | Owns | Does NOT own |
+| Owner | Owns | Does not own |
 |---|---|---|
-| Main | Session/Renderer currentness, DataAuthority `{S,G,P}`, Frame/InputTarget | width/height, map camera |
-| Renderer | one current document layout viewport physical observation and publisher | map projection, InputTarget, Main authority |
-| Data Profile v2 | exact child routing, ordered carrier, terminal | size/camera business policy, cross-child transaction |
-| Subsystem host | Runtime-scoped last successfully accepted size + subscribers | DOM object, layout engine, physical source |
-| Business map | normalized accepted viewport, camera/window/Render policy | Renderer physical sample/currentness |
-| Business WC | derived raster/layout/physical retry | Store/Render authoritative desired state |
+| Main | current Session/Renderer/Frame/InputTarget/DataAuthority/profile identity | geometry sample, map camera, rollout internals |
+| Renderer + trusted physical composition | one explicitly designated surface, raw observation + publication | map policy, Input authority |
+| Data Profile v1 | full four-child combination, preflight, exact demux, single writer/terminal | geometry business interpretation, cross-child transaction |
+| Subsystem host | Runtime-scoped last accepted geometry + subscriber delivery | physical Window/DOM, map algorithm |
+| Business runtime | decides presentation state based on its own committed business facts | physical geometry authority, Main identity |
+| Business WC | physical realization/ShadowDOM/Canvas and local resource retry | authoritative Store/managed DOM mutation |
 
-Viewport object lifetime为 Subsystem Runtime；wire publication cursor为 per current Data carrier；physical source为 current Renderer document。Data retire保留 last observation；fresh carrier/fresh Renderer仅 matching `(S,G,P)` source可重新基线收敛；old queued callback/carrier must inert。Frame suspend/close和 Activation变化不清空 capability。`current !== null`不证明 carrier/Renderer/paintability存在。
+`/1`是唯一目标完整身份（Connection1+Input1+Render1+Viewport1）；旧三-child `/1`是 historical executable，不能与新版 peer混配；不创建 `/2`或双模式。Main拥有 profile选择这一通用 authority；本次产品统一部署修正版 `/1`是 [implementation ledger §4](../30-implementation/viewport-profile-v1-qualification.md) 的 rollout，不是所有兼容 Profile 实现的 protocol MUST。
 
-## 3. Exactly one layout viewport in v1
+## 3. Single designated surface / physical source split
 
-v1同一 Renderer participant只有一个 logical presentation surface：当前 document的 **layout viewport `window.innerWidth/innerHeight` CSS logical pixels，floor到 positive safe integers**。Desktop/PWA都遵守该 observable定义，不能混用 visualViewport、screen、DPR或任意 element box。每个 current `/2` Subsystem connection获得相同 raw size。未观察到合法 size时不合成 0/null/default wire；已观察的最后值在短暂失联期间保留。多 window/pane独立尺寸属于未来显式新版，不给 v1增加 `surfaceId`、Frame routing。
+**Core承诺：** 当前 Renderer participant只有一个物理 composition明确指定、同身份期内稳定的 logical presentation surface；传其 positive safe integer CSS logical width/height；每 current Subsystem获得同 raw值；不携带 DPR/focus/map、无多 pane/router/`surfaceId`。不同 surface切换不得在同 Renderer participant内静默重绑定。
 
-## 4. Narrow author API
+**当前 Web product决定：** Desktop/PWA composition指定 document layout viewport，用 `Window.innerWidth/innerHeight` floor进行观察，source stop、queued callback、fresh Renderer/source identity都必须 fenced；实际分配给业务的 content box/居中与letterbox由该产品/业务集成测试验证。这**不是**通用 Viewport child wire要求任何实现依赖 DOM Window；也不能声称任意 sidebar/host box总等于 layout viewport。未取得合法样本不造0/null/default，DPR-only不改逻辑尺寸。
+
+## 4. Runtime observation & lifetime
 
 ```ts
 interface ViewportSize { readonly width: number; readonly height: number }
@@ -52,20 +52,16 @@ interface Viewport {
 interface SubsystemScope { readonly viewport: Viewport }
 ```
 
-`current`是 detatched/immutable last accepted value；`subscribe`同步首发一次（含 null），然后仅 structural change；callback前已经更新current。unsubscribe幂等，callback throw/thenable reject各自 local containment，不阻塞 Data reader/其他 listener，Runtime terminal后 inert。不增 `get()+onChange`、manager、source、Renderer identity或 transport到 public author API。Profile `/1` explicit compatibility中若从未接受 v2 observation，stable capability为 null；canonical `/2`无 silent downgrade。
+Viewport object Runtime-scoped，initial null；current是 detached/immutable last accepted observation而非 current carrier/Renderer/paintability证明。Data loss保留 last、fresh carrier自己发布最新合法 baseline；fresh G/Renderer只允许 matching current authority traffic更新，old rAF/carrier inert。同值无callback、异值先更新再callback；subscribe同步首次含null、throw/rejection隔离、unsubscribe幂等、terminal inert。Frame suspend/InputTarget/Interest/physical keyboard focus不影响 geometry delivery。
 
-## 5. Publication / loss / recovery
+每 current carrier publisher至多一个 writer-admitted/in-flight viewport unit + 一个 pending latest size，未 admitted burst覆盖 pending，fresh cursor不迁移；不能仅靠下游map settle避免 shared writer overflow。无 ACK、revision、global priority manager、Control/Data atomic barrier。
 
-Viewport是 self-contained latest retained state，非事件流。每 current carrier最多一个 writer-admitted/in-flight viewport unit + 一个未 admitted latest slot；resize覆盖 pending，已 admitted不可撤回，fresh carrier独立发送 admission时最新合法 baseline。普通合法 burst不得靠填满 shared writer触发 Data fatal，也不得永久阻断 Input/Render。具体 admission/terminal、diagnostic `protocol:"viewport"` 由正式 contracts定义；不增 ACK、revision、generic priority/Env service。
+## 5. Cross-layer permission boundary
 
-Fresh carrier/Renderer尺寸相同不重复通知author，不同则更新/通知；fresh合法样本尚未到达时保留last或初始null，不以旧值声称当前可绘制。Control/Viewport/Render之间没有 super-snapshot/事务。真正改变地图画面须 map Runtime用既有 RenderDomain API提交，而非 viewport receiver直接改 Store/Projector。
+Receiving geometry **never grants Frame mutation or Input authority**，也不让 viewport receiver直接提交 Store/Projector/DOM。业务若要改变 presentation，只通过已有 RenderDomain。此处不定义玩家移动、碰撞、菜单暂停、转场、map-special Frame lifecycle API；有真实消费端证据后单独在业务/lifecycle review处理，不能偷在 Viewport里加 Frame permit。WC resource/raster retry归 Web Presentation consumer；same-generation reconnect不是 UI retry trigger。
 
-## 6. Failure and scope guard
+## 6. Governance / non-goals
 
-Malformed viewport child Data-fatal，仅 retire Data，不自动 Runtime/Frame failure；callback失败局部 containment。Viewport callback不能代替 suspended Frame的 gameplay mutation permit：它可依据**已提交 world facts**更新 live RenderDomain的 presentation projection，但不能驱动移动、collision、transfer、Frame call；没有足够生命周期信号则 map必须明确 STOP/单独最小 capability review，不得偷读 Main/DOM或放宽 Input gate。Browser raster failure自己重试既收数据，same-generation reconnect不保证再次投递 equal RenderData。
+Core Docs Freeze：外部兼容义务核查、ADR0037 supersession、formal `/1`+Viewport v1、两份 executable-ready conformance、跨文档一致与 docs SHA；不要求先有 executable PASS。实现后新 SHA/资格 ledger证明，map自己的 payload/Core residual/Browser latency PR0单独处理。
 
-## 7. Freeze route / non-goals
-
-Core Docs Freeze只检查 ADR、architecture、两份 formal contract和**可执行测试规范**，不等待实现 PASS；其 subject由 [qualification ledger](../30-implementation/viewport-profile-v2-qualification.md) 记录。之后实现/hosted/product通过才称 capability Qualified。Map payload/Core full-state validation/Browser raster/latency必须经 map PR0独立证明才能 Map Docs Freeze。
-
-严禁：Main几何镜像、InputTarget bypass、per-Frame viewport、generic Environment manager、跨 child ACK/barrier、profile negotiation、DPR bundle、多 surface routing、map-specific Core fast path、修改 Frozen `/1` acceptance。
+拒绝：另发 `/2`、old three-child compatibility parser、Main width mirror、Input bypass、Frame viewport interest、generic Environment/manager、multiple surfaces/router、DPR bundle、cross-child ACK、map-specific Core fast path或以产品统一部署上升为 universal protocol MUST。
