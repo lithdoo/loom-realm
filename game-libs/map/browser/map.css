@@ -11,4 +11,5 @@ lr-map-sprite {
   display: block;
   position: absolute;
   image-rendering: pixelated;
+  pointer-events: none;
 }

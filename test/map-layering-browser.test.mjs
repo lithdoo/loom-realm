@@ -40,26 +40,74 @@ function regularTile({ x = 0, y = 0, z = 0, tileId = 384, depth = 0 } = {}) {
   return { x, y, z, tileId, depth, blit: { kind: "regular", sourceIndex: tileId - 384 } };
 }
 
-function viewData({ depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles, cameraX = 0, cameraY = 0, cameraMotion = null } = {}) {
+function visualFromTile(tile) {
+  const depthBias = tile.depth === 0 ? -1 : tile.depth - tile.y * 32;
+  if (tile.blit.kind === "regular") return [tile.tileId, depthBias, 0, tile.blit.sourceIndex];
+  const corners = tile.blit.corners;
+  return [
+    tile.tileId, depthBias, 1, tile.blit.slot,
+    corners[0].sx, corners[0].sy, corners[1].sx, corners[1].sy,
+    corners[2].sx, corners[2].sy, corners[3].sx, corners[3].sy,
+  ];
+}
+
+function chunksFromTiles(tiles) {
+  const chunkMap = new Map();
+  for (const tile of tiles) {
+    const chunkX = Math.floor(tile.x / 8);
+    const chunkY = Math.floor(tile.y / 8);
+    const key = `${chunkX},${chunkY}`;
+    let chunk = chunkMap.get(key);
+    if (!chunk) {
+      chunk = { chunkX, chunkY, cells: Array(192).fill(0) };
+      chunkMap.set(key, chunk);
+    }
+    const localX = tile.x - chunkX * 8;
+    const localY = tile.y - chunkY * 8;
+    chunk.cells[((tile.z * 8 + localY) * 8) + localX] = tile.tileId;
+  }
+  return [...chunkMap.values()].sort((left, right) => left.chunkY - right.chunkY || left.chunkX - right.chunkX);
+}
+
+function viewData({ depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles, cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1, mapId = 1 } = {}) {
+  const tileList = tiles ?? [regularTile({ depth })];
+  const seen = new Set();
+  const tileVisuals = [];
+  for (const tile of tileList) {
+    if (seen.has(tile.tileId)) continue;
+    seen.add(tile.tileId);
+    tileVisuals.push(visualFromTile(tile));
+  }
+  tileVisuals.sort((left, right) => left[0] - right[0]);
   return {
-    mapId: 1,
+    sceneEpoch,
+    visualEpoch,
+    motionId: cameraMotion?.id ?? null,
+    viewportWidth: 640,
+    viewportHeight: 480,
+    mapId,
     mapWidth: 24,
     mapHeight: 18,
     cameraX,
     cameraY,
     tileset,
     autotiles,
-    tiles: tiles ?? [regularTile({ depth })],
+    tileVisuals,
+    chunks: chunksFromTiles(tileList),
     cameraMotion,
   };
 }
 
 function spriteData(y = 0) {
-  return { x: 0, y, screenX: 0, screenY: y * 32, direction: 2, pattern: 0, sprite: spriteRef, motion: null };
+  return {
+    sceneEpoch: 1, visualEpoch: 1, motionId: null,
+    x: 0, y, screenX: 0, screenY: y * 32, direction: 2, pattern: 0, sprite: spriteRef, motion: null,
+  };
 }
 
 function walkingSprite({ y = 1, fromY = 0, screenX = 0, screenY = 32, fromScreenX = 0, fromScreenY = 0, pattern = 1, id = 1, sprite = spriteRef, direction = 2 } = {}) {
   return {
+    sceneEpoch: 1, visualEpoch: 1, motionId: id,
     x: 0, y, screenX, screenY, direction, pattern, sprite,
     motion: { id, durationMs: 250, fromY, fromScreenX, fromScreenY },
   };
@@ -168,16 +216,9 @@ async function openPage({ clock = false } = {}) {
     window.__tileDestX = () => {
       const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
       if (!canvas) return null;
-      const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, 1).data;
-      let left = -1;
-      let right = -1;
-      for (let x = 0; x < canvas.width; x += 1) {
-        if (data[x * 4 + 3] !== 255) continue;
-        if (left < 0) left = x;
-        right = x;
-      }
-      if (left < 0) return null;
-      return left === 0 ? right + 1 - 32 : left;
+      const left = Number.parseFloat(canvas.style.left);
+      if (!Number.isFinite(left) || left <= -32) return null;
+      return left;
     };
   });
   return page;
@@ -197,7 +238,7 @@ async function waitPainted(page, tileZIndex, spriteZIndex = "65") {
     const view = document.querySelector("lr-map-view");
     const sprite = document.querySelector("lr-map-sprite");
     const visible = [...(view?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].filter((canvas) => !canvas.hidden);
-    return visible.some((canvas) => canvas.style.zIndex === tileZ) && sprite?.style.zIndex === spriteZ;
+    return visible.some((canvas) => canvas.style.zIndex === tileZ) && getComputedStyle(sprite).zIndex === spriteZ;
   }, { tileZ: String(tileZIndex), spriteZ: String(spriteZIndex) }))) {
     if (Date.now() >= deadline) assert.fail(`Timed out waiting for tile z-index ${tileZIndex} and sprite z-index ${spriteZIndex}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -274,7 +315,7 @@ async function spritePixel(page, x = 5, y = 5) {
 async function spriteBox(page) {
   return page.evaluate(() => {
     const sprite = document.querySelector("lr-map-sprite");
-    return { left: sprite.style.left, top: sprite.style.top, zIndex: sprite.style.zIndex, raf: sprite._raf };
+    return { left: getComputedStyle(sprite).left, top: getComputedStyle(sprite).top, zIndex: getComputedStyle(sprite).zIndex, raf: sprite._raf };
   });
 }
 
@@ -307,7 +348,7 @@ async function layerInfo(page) {
       canvasCount: canvases.length,
       hidden: canvases.map((canvas) => canvas.hidden),
       zIndex: canvases.map((canvas) => canvas.style.zIndex),
-      spriteZIndex: document.querySelector("lr-map-sprite").style.zIndex,
+      spriteZIndex: getComputedStyle(document.querySelector("lr-map-sprite")).zIndex,
     };
   });
 }
@@ -315,7 +356,7 @@ async function layerInfo(page) {
 async function secondLayerCleared(page) {
   return page.evaluate(() => {
     const canvas = document.querySelector("lr-map-view").shadowRoot.querySelectorAll("canvas.tile-layer")[1];
-    const data = canvas.getContext("2d").getImageData(0, 0, 640, 480).data;
+    const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
     for (let index = 0; index < data.length; index += 1) if (data[index] !== 0) return false;
     return canvas.hidden === true;
   });
@@ -416,7 +457,7 @@ test("E. stale buckets hide and clear leftover canvases", { timeout: 30_000 }, a
     first: viewData({
       tiles: [
         regularTile({ depth: 0 }),
-        regularTile({ x: 1, depth: 64 }),
+        regularTile({ x: 1, tileId: 385, depth: 64 }),
       ],
     }),
     second: viewData({ tiles: [regularTile({ depth: 0 })] }),
@@ -494,11 +535,11 @@ test("H. tile depth and player y validate synchronously", { timeout: 30_000 }, a
     };
     const negativeDepth = throwsSync(() => window.__view.receiveRenderData({
       ...validView,
-      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: -1, blit: { kind: "regular", sourceIndex: 0 } }],
+      tileVisuals: [[384, 0.5, 0, 0]],
     }));
     const nonIntegerDepth = throwsSync(() => window.__view.receiveRenderData({
       ...validView,
-      tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 1.5, blit: { kind: "regular", sourceIndex: 0 } }],
+      chunks: [{ chunkX: 0, chunkY: 0, cells: Array(191).fill(0) }],
     }));
     const negativeY = throwsSync(() => window.__sprite.receiveRenderData({ ...sprite, y: -1 }));
     const nonIntegerY = throwsSync(() => window.__sprite.receiveRenderData({ ...sprite, y: 0.5 }));
@@ -516,7 +557,13 @@ test("walking uses four pattern source rects and swaps at half step", { timeout:
   await warmPresentation(page);
   assert.deepEqual(await spritePixel(page), [255, 0, 0, 255]);
 
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), { spritePayload: walkingSprite({ pattern: 1, screenY: 0, fromScreenY: 0, y: 0, fromY: 0 }) });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
+    spritePayload: walkingSprite({ pattern: 1, screenY: 0, fromScreenY: 0, y: 0, fromY: 0 }),
+  });
   await waitUntil(page, () => {
     const canvas = document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas");
     if (!canvas) return false;
@@ -528,7 +575,13 @@ test("walking uses four pattern source rects and swaps at half step", { timeout:
     return r === 0 && g === 0 && b === 255;
   }, "startPattern 1 second half");
 
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), { spritePayload: walkingSprite({ pattern: 3, screenY: 0, fromScreenY: 0, y: 0, fromY: 0, id: 2 }) });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: viewData({ depth: 0, cameraMotion: { id: 2, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
+    spritePayload: walkingSprite({ pattern: 3, screenY: 0, fromScreenY: 0, y: 0, fromY: 0, id: 2 }),
+  });
   await waitUntil(page, () => {
     const [r, g] = document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data;
     return r === 255 && g === 255;
@@ -552,7 +605,7 @@ test("walking interpolates integer pixels then snaps to target and stops rAF", {
   });
   await waitUntil(page, () => {
     const destX = window.__tileDestX();
-    const top = Number.parseFloat(document.querySelector("lr-map-sprite")?.style.top ?? "");
+    const top = Number.parseFloat(getComputedStyle(document.querySelector("lr-map-sprite")).top);
     return Number.isInteger(destX) && destX >= -31 && destX <= -1
       && Number.isInteger(top) && top > 0 && top < 32;
   }, "integer camera and sprite mid-step");
@@ -560,7 +613,7 @@ test("walking interpolates integer pixels then snaps to target and stops rAF", {
     const view = document.querySelector("lr-map-view");
     const sprite = document.querySelector("lr-map-sprite");
     return window.__tileDestX() === null
-      && sprite?.style.top === "32px"
+      && getComputedStyle(sprite).top === "32px"
       && view?._raf === undefined
       && sprite?._raf === undefined;
   }, "progress 1 camera and sprite target and rAF stop");
@@ -578,8 +631,8 @@ test("standing latest state snaps pattern 0 and cancels motion", { timeout: 30_0
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: viewData({ depth: 0 }), spritePayload: walkingSprite({}) });
-  await waitUntil(page, () => document.querySelector("lr-map-sprite")?.style.top !== "", "walking paint started");
+  }, { viewPayload: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }), spritePayload: walkingSprite({}) });
+  await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-sprite")).top !== "auto" && getComputedStyle(document.querySelector("lr-map-sprite")).top !== "0px" || document.querySelector("lr-map-sprite")._lastPaintedScreen, "walking paint started");
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
@@ -589,7 +642,7 @@ test("standing latest state snaps pattern 0 and cancels motion", { timeout: 30_0
     const canvas = sprite?.shadowRoot?.querySelector("canvas");
     if (!sprite || !canvas) return false;
     const [r, g, b] = canvas.getContext("2d").getImageData(5, 5, 1, 1).data;
-    return sprite.style.top === "32px" && sprite._raf === undefined && r === 255 && g === 0 && b === 0;
+    return getComputedStyle(sprite).top === "32px" && sprite._raf === undefined && r === 255 && g === 0 && b === 0;
   }, "standing snap");
 });
 
@@ -601,15 +654,26 @@ test("moving depth is below the tile before the boundary pixel and above at it",
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
   }, {
-    viewPayload: viewData({ depth: 48 }),
+    viewPayload: viewData({ depth: 48, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
     spritePayload: walkingSprite({ y: 1, fromY: 0, screenY: 0, fromScreenY: 0, pattern: 3 }),
   });
   await waitUntil(page, () => {
-    const z = Number(document.querySelector("lr-map-sprite")?.style.zIndex ?? 0);
-    return z > 0 && z < 97;
+    const z = Number(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex);
+    const tileZ = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])")?.style.zIndex;
+    return z > 0 && z < 97 && tileZ === "96";
   }, "character still below tile depth 48");
-  assert.deepEqual(await compositeCenter(page), [0, 0, 255, 255]);
-  await waitUntil(page, () => Number(document.querySelector("lr-map-sprite")?.style.zIndex ?? 0) >= 97, "character reached tile depth 48");
+  let belowPixel;
+  const belowDeadline = Date.now() + 200;
+  while (Date.now() < belowDeadline) {
+    const z = await page.evaluate(() => Number(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex));
+    if (z > 0 && z < 97) {
+      belowPixel = await compositeCenter(page);
+      if (belowPixel[2] === 255 && belowPixel[0] === 0) break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(belowPixel, [0, 0, 255, 255]);
+  await waitUntil(page, () => Number(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex) >= 97, "character reached tile depth 48");
   assert.deepEqual(await compositeCenter(page), [255, 0, 0, 255]);
 });
 
@@ -617,26 +681,31 @@ test("newer walking replaces old motion and standing cancel still wins", { timeo
   const page = await openPage();
   t.after(() => page.close());
   await warmPresentation(page);
-  await page.evaluate(({ viewPayload, first, second }) => {
-    window.__view.receiveRenderData(viewPayload);
+  await page.evaluate(({ firstView, secondView, first, second }) => {
+    window.__view.receiveRenderData(firstView);
     window.__sprite.receiveRenderData(first);
+    window.__view.receiveRenderData(secondView);
     window.__sprite.receiveRenderData(second);
   }, {
-    viewPayload: viewData({ depth: 0 }),
+    firstView: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
+    secondView: viewData({ depth: 0, cameraMotion: { id: 2, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
     first: walkingSprite({ id: 1, screenY: 32 }),
     second: walkingSprite({ id: 2, y: 2, fromY: 1, screenY: 64, fromScreenY: 32, pattern: 3 }),
   });
   await waitUntil(page, () => {
-    const top = Number.parseFloat(document.querySelector("lr-map-sprite")?.style.top ?? "");
+    const top = Number.parseFloat(getComputedStyle(document.querySelector("lr-map-sprite")).top);
     return Number.isInteger(top) && top > 32 && top < 64;
   }, "newer walking in progress");
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), { spritePayload: spriteData(2) });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: viewData({ depth: 0 }), spritePayload: spriteData(2) });
   await waitUntil(page, () => {
     const sprite = document.querySelector("lr-map-sprite");
     const canvas = sprite?.shadowRoot?.querySelector("canvas");
     if (!sprite || !canvas) return false;
     const [r, g, b] = canvas.getContext("2d").getImageData(5, 5, 1, 1).data;
-    return sprite.style.top === "64px" && sprite._raf === undefined && r === 255 && g === 0 && b === 0;
+    return getComputedStyle(sprite).top === "64px" && sprite._raf === undefined && r === 255 && g === 0 && b === 0;
   }, "standing latest state");
 });
 
@@ -647,7 +716,7 @@ test("disconnect cancels rAF so a stale callback cannot paint", { timeout: 30_00
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: viewData({ depth: 0 }), spritePayload: walkingSprite({}) });
+  }, { viewPayload: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }), spritePayload: walkingSprite({}) });
   await waitUntil(page, () => document.querySelector("lr-map-sprite")?._raf !== undefined, "rAF started");
   await page.evaluate(() => {
     const sprite = window.__sprite;
@@ -667,25 +736,37 @@ test("stale sprite image success and failure do not override newer walking", { t
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: viewData({ depth: 0 }), spritePayload: walkingSprite({ sprite: firstRef, screenY: 32 }) });
+  }, { viewPayload: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }), spritePayload: walkingSprite({ sprite: firstRef, screenY: 32 }) });
   await waitForPendingImage(page, firstRef, "__sprite");
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), {
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: viewData({ depth: 0, cameraMotion: { id: 2, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
     spritePayload: walkingSprite({ sprite: secondRef, id: 2, y: 2, fromY: 1, screenY: 64, fromScreenY: 32, pattern: 3 }),
   });
-  await waitUntil(page, () => document.querySelector("lr-map-sprite")?.style.top === "64px", "newer sprite painted");
+  await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-sprite")).top === "64px", "newer sprite painted");
   await settlePendingImage(page, firstRef, "resolve", "__sprite");
   assert.equal((await spriteBox(page)).top, "64px");
 
   const failRef = { namespace: "resource.Graphics", key: "Characters/red", contentVersion: "fail" };
   await delayTileset(page, failRef);
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), {
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: viewData({ depth: 0, cameraMotion: { id: 3, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
     spritePayload: walkingSprite({ sprite: failRef, id: 3, y: 3, fromY: 2, screenY: 96, fromScreenY: 64, pattern: 1 }),
   });
   await waitForPendingImage(page, failRef, "__sprite");
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), {
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: viewData({ depth: 0, cameraMotion: { id: 4, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
     spritePayload: walkingSprite({ sprite: secondRef, id: 4, y: 2, fromY: 1, screenY: 64, fromScreenY: 32, pattern: 3 }),
   });
-  await waitUntil(page, () => document.querySelector("lr-map-sprite")?.style.top === "64px", "replacement after failed stale request");
+  await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-sprite")).top === "64px", "replacement after failed stale request");
   const before = await spriteBox(page);
   await settlePendingImage(page, failRef, "reject", "__sprite");
   assert.equal((await spriteBox(page)).top, before.top);
@@ -699,7 +780,7 @@ test("late decode catches up from receivedAt and skips rAF after 250ms", { timeo
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: viewData({ depth: 0 }), spritePayload: walkingSprite({ sprite: delayedRef }) });
+  }, { viewPayload: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }), spritePayload: walkingSprite({ sprite: delayedRef }) });
   await waitForPendingImage(page, delayedRef, "__sprite");
   await page.evaluate(async () => {
     const started = performance.now();
@@ -708,7 +789,7 @@ test("late decode catches up from receivedAt and skips rAF after 250ms", { timeo
   await settlePendingImage(page, delayedRef, "resolve", "__sprite");
   await waitUntil(page, () => {
     const sprite = document.querySelector("lr-map-sprite");
-    return sprite?.style.top === "32px" && sprite._raf === undefined;
+    return getComputedStyle(sprite).top === "32px" && sprite._raf === undefined;
   }, "late decode lands on target without rAF");
   assert.deepEqual(await spritePixel(page), [0, 0, 255, 255]);
 });
@@ -981,7 +1062,8 @@ test("stale animated prepared loop cannot paint after a newer map", { timeout: 3
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: { ...viewData({ depth: 0 }), mapId: 2 }, spritePayload: spriteData(0) });
+  }, { viewPayload: { ...viewData({ depth: 0, visualEpoch: 2 }), mapId: 2 }, spritePayload: { ...spriteData(0), visualEpoch: 2 } });
+  await page.clock.runFor(1);
   await waitPainted(page, "0");
   await page.clock.runFor(200);
   assert.deepEqual(await tilePixel(page), [0, 0, 255, 255]);
@@ -1067,45 +1149,83 @@ test("motion state machine keeps startedAt for same id/fingerprint and rejects d
 test("null to null motion snaps without a timeline", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
-  await page.evaluate(({ first, second }) => {
+  await page.evaluate(({ firstView, secondView, first, second }) => {
+    window.__view.receiveRenderData(firstView);
     window.__sprite.receiveRenderData(first);
+    window.__view.receiveRenderData(secondView);
     window.__sprite.receiveRenderData(second);
-  }, { first: spriteData(0), second: spriteData(2) });
-  await waitUntil(page, () => document.querySelector("lr-map-sprite")?.style.top === "64px", "standing snap to y=2");
+  }, {
+    firstView: viewData({ depth: 0 }),
+    secondView: viewData({ depth: 0 }),
+    first: spriteData(0),
+    second: spriteData(2),
+  });
+  await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-sprite")).top === "64px", "standing snap to y=2");
   assert.equal(await page.evaluate(() => window.__sprite._activeMotion), null);
   assert.equal(await page.evaluate(() => window.__sprite._raf), undefined);
 });
 
-test("tiles identity cache skips schema rebuild until tileset identity changes", { timeout: 30_000 }, async (t) => {
+test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
   const tiles = [regularTile({ depth: 0 })];
-  const first = viewData({ tiles, cameraX: 0 });
-  const sameTiles = viewData({ tiles, cameraX: 32, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } });
-  const newTileset = viewData({ tiles, tileset: tilesetRef("v2"), cameraX: 32 });
-  const info = await page.evaluate(({ first: a, sameTiles: b, newTileset: c }) => {
-    window.__view.receiveRenderData(a);
-    const staticA = window.__view._preparedTileStatic;
-    const sourceA = window.__view._preparedTilesSource;
-    window.__view.receiveRenderData(b);
-    const hit = window.__view._preparedTileStatic === staticA && window.__view._preparedTilesSource === sourceA;
-    window.__view.receiveRenderData(c);
-    return {
-      hit,
-      sourceIsTiles: window.__view._preparedTilesSource === a.tiles,
-      rebuilt: window.__view._preparedTileStatic !== staticA,
-    };
-  }, { first, sameTiles, newTileset });
-  assert.equal(info.hit, true);
-  assert.equal(info.sourceIsTiles, true);
-  assert.equal(info.rebuilt, true);
+  const first = viewData({ tiles, cameraX: 0, visualEpoch: 1 });
+  const refreshed = viewData({ tiles, tileset: tilesetRef("v2"), cameraX: 32, visualEpoch: 2 });
+  await page.evaluate((payload) => window.__view.receiveRenderData(payload), first);
+  await waitUntil(page, () => {
+    const view = document.querySelector("lr-map-view");
+    return (view?._tileDrawCount ?? 0) > 0 && view.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])")?.width > 0;
+  }, "first raster");
+  const info = await page.evaluate(async (next) => {
+    const view = window.__view;
+    const canvas = view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    const snapshot = () => ({
+      width: canvas.width,
+      height: canvas.height,
+      left: canvas.style.left,
+      draws: view._tileDrawCount,
+      clears: view._tileClearCount,
+      resizes: view._tileResizeCount,
+      cameraOnly: view._cameraOnlyCommits,
+    });
+    const before = snapshot();
+    const accepted = view._latestData;
+    view.receiveRenderData({
+      ...accepted,
+      cameraX: accepted.cameraX + 32,
+    });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const afterCamera = snapshot();
+    view.receiveRenderData(next);
+    const deadline = performance.now() + 2_000;
+    while (view._tileDrawCount === afterCamera.draws && performance.now() < deadline) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    return { before, afterCamera, afterRefresh: snapshot() };
+  }, refreshed);
+  assert.equal(info.before.draws > 0, true);
+  assert.equal(info.afterCamera.draws, info.before.draws);
+  assert.equal(info.afterCamera.clears, info.before.clears);
+  assert.equal(info.afterCamera.resizes, info.before.resizes);
+  assert.equal(info.afterCamera.width, info.before.width);
+  assert.equal(info.afterCamera.height, info.before.height);
+  assert.equal(info.afterCamera.cameraOnly, info.before.cameraOnly + 1);
+  assert.equal(info.afterCamera.left, "-32px");
+  assert.ok(info.afterRefresh.draws > info.afterCamera.draws, JSON.stringify(info));
+  assert.ok(info.afterRefresh.resizes > info.afterCamera.resizes, JSON.stringify(info));
 });
 
 test("disconnect increments paint epoch so stale rAF cannot paint", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
   await warmPresentation(page);
-  await page.evaluate(({ spritePayload }) => window.__sprite.receiveRenderData(spritePayload), { spritePayload: walkingSprite({}) });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: viewData({ depth: 0, cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
+    spritePayload: walkingSprite({}),
+  });
   await waitUntil(page, () => document.querySelector("lr-map-sprite")?._raf !== undefined, "rAF started");
   const before = await page.evaluate(() => window.__sprite._paintEpoch);
   await page.evaluate(() => window.__sprite.remove());

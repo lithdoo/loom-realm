@@ -813,50 +813,17 @@ test("Chromium private ::slotted sprite stacking pixel oracle", { timeout: 60_00
   report.stacking = { status: "PASS", cases: result };
 });
 
-test("current Browser 640 raster/receive baseline on dense old tiles payload", { timeout: 60_000 }, async () => {
+test("PR1 Browser 640 raster/camera-only on dense chunk payload", { timeout: 60_000 }, async () => {
   assert.equal(existsSync(mapBrowserPath), true, "map.browser.js dist missing; run npm run build:m14");
   const loaded = denseMap();
   const viewport = { width: 640, height: 480 };
-  const camera = cameraFor(viewport, loaded.map, 64, 48);
-  const bounds = requiredTileBounds(loaded.map, camera, viewport);
-  const tiles = [];
-  for (const z of [0, 1, 2]) {
-    for (let y = bounds.minTileY; y <= bounds.maxTileY; y += 1) {
-      for (let x = bounds.minTileX; x <= bounds.maxTileX; x += 1) {
-        const tileId = tableAt(loaded.map.data, x, y, z);
-        if (tileId === 0) continue;
-        const priority = tableAt(loaded.tileset.priorities, tileId);
-        const depth = tileVisualDepth(y, priority);
-        const blit = tileId >= 384
-          ? { kind: "regular", sourceIndex: tileId - 384 }
-          : {
-            kind: "autotile",
-            slot: Math.floor((tileId - 48) / 48),
-            corners: autotileCorners((tileId - 48) % 48),
-          };
-        tiles.push({ x, y, z, tileId, depth, blit });
-      }
-    }
-  }
-  const oldView = {
-    mapId: 1,
-    mapWidth: 128,
-    mapHeight: 96,
-    cameraX: camera.cameraX,
-    cameraY: camera.cameraY,
-    tileset: resourceRef("Tilesets/dense-pr0"),
-    autotiles: [resourceRef("Autotiles/slot0"), null, null, null, null, null, null],
-    tiles,
-    cameraMotion: null,
-  };
-  const oldSprite = {
-    x: 64, y: 48, screenX: 64 * 32 - camera.cameraX, screenY: 48 * 32 - camera.cameraY,
-    direction: 2, pattern: 0, sprite: resourceRef("Characters/red"), motion: null,
-  };
+  const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
+  const viewPayload = projection.data;
+  const spritePayload = playerSprite(projection, 64, 48);
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
   await page.goto(origin);
   await page.addScriptTag({ url: `${origin}/map.browser.js` });
-  const timing = await page.evaluate(async ({ viewPayload, spritePayload }) => {
+  const timing = await page.evaluate(async ({ viewPayload: firstView, spritePayload: firstSprite }) => {
     const pngBytes = async (width, height, r, g, b) => {
       const canvas = new OffscreenCanvas(width, height);
       const context = canvas.getContext("2d");
@@ -883,37 +850,62 @@ test("current Browser 640 raster/receive baseline on dense old tiles payload", {
     view.receiveRenderContext({ resources });
     sprite.receiveRenderContext({ resources });
     const receiveStart = performance.now();
-    view.receiveRenderData(viewPayload);
-    sprite.receiveRenderData(spritePayload);
+    view.receiveRenderData(firstView);
+    sprite.receiveRenderData(firstSprite);
     const receiveEnd = performance.now();
     const deadline = performance.now() + 10_000;
     while (performance.now() < deadline) {
       const painted = [...(view.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].some((canvas) => !canvas.hidden);
-      if (painted) {
+      if (painted && view._tileDrawCount > 0) {
         const paintAt = performance.now();
         const canvases = [...view.shadowRoot.querySelectorAll("canvas.tile-layer")];
         let backing = 0;
         for (const canvas of canvases) backing += canvas.width * canvas.height * 4;
         backing += 32 * 32 * 4;
+        const before = {
+          draws: view._tileDrawCount,
+          clears: view._tileClearCount,
+          resizes: view._tileResizeCount,
+          cameraOnly: view._cameraOnlyCommits,
+        };
+        const accepted = view._latestData;
+        view.receiveRenderData({
+          ...accepted,
+          cameraX: accepted.cameraX + 32,
+        });
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         return {
           receiveMs: receiveEnd - receiveStart,
           receiveToPaintMs: paintAt - receiveStart,
           canvasCount: canvases.length,
           backingBytes: backing,
           hostSpriteZ: sprite.style.zIndex,
+          cameraOnly: {
+            before,
+            after: {
+              draws: view._tileDrawCount,
+              clears: view._tileClearCount,
+              resizes: view._tileResizeCount,
+              cameraOnly: view._cameraOnlyCommits,
+            },
+          },
         };
       }
       await new Promise((resolve) => requestAnimationFrame(resolve));
     }
-    throw new Error("current browser did not paint dense 640 payload");
-  }, { viewPayload: oldView, spritePayload: oldSprite });
+    throw new Error("PR1 browser did not paint dense 640 chunk payload");
+  }, { viewPayload, spritePayload });
   await page.close();
   report.raster = {
-    oldViewBytes: utf8Bytes(oldView),
-    newViewBytes: utf8Bytes(projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 }).data),
+    viewBytes: utf8Bytes(viewPayload),
     ...timing,
     clock: "same Browser Window performance.now(); receive-to-paint excludes screenshot",
-    note: "Current production still uses per-tile tiles[] and host style z-index. This is baseline, not PR1 PASS.",
+    note: "PR1 production chunk schema + camera-only identity path.",
   };
   assert.equal(typeof timing.receiveToPaintMs, "number");
+  assert.equal(timing.hostSpriteZ, "");
+  assert.equal(timing.cameraOnly.after.draws, timing.cameraOnly.before.draws);
+  assert.equal(timing.cameraOnly.after.clears, timing.cameraOnly.before.clears);
+  assert.equal(timing.cameraOnly.after.resizes, timing.cameraOnly.before.resizes);
+  assert.equal(timing.cameraOnly.after.cameraOnly, timing.cameraOnly.before.cameraOnly + 1);
 });

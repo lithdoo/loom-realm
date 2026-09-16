@@ -27,6 +27,21 @@ function executablePath() {
   return [process.env.LOOMREALM_CHROMIUM_PATH, "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
 }
 
+async function sampleVisibleTilePixel(page, sx, sy) {
+  return page.evaluate(({ x: sx0, y: sy0 }) => {
+    const canvases = [...(document.querySelector("lr-map-view")?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].filter((canvas) => !canvas.hidden);
+    for (const canvas of canvases) {
+      const left = Number.parseFloat(canvas.style.left) || 0;
+      const top = Number.parseFloat(canvas.style.top) || 0;
+      const x = sx0 - left;
+      const y = sy0 - top;
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
+      return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data];
+    }
+    return [0, 0, 0, 0];
+  }, { x: sx, y: sy });
+}
+
 async function waitFor(predicate, label, timeout = 10_000) {
   const deadline = Date.now() + timeout;
   while (!(await predicate())) {
@@ -170,13 +185,14 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
   t.after(detach);
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.cameraX === 16, "initial map Render state");
   await browserDelivery;
-  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(373, 229, 1, 1).data[3] === 255), "initial Canvas paint");
-  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
-  const initial = await page.evaluate(() => {
+  await waitFor(async () => (await sampleVisibleTilePixel(page, 373, 229))[3] === 255, "initial Canvas paint");
+  await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
+  const initial = await page.evaluate(async () => {
     const view = document.querySelector("lr-map-view"); const sprite = document.querySelector("lr-map-sprite");
     view.instance = 1; sprite.instance = 2;
-    return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], tile: [...view.shadowRoot.querySelector("canvas").getContext("2d").getImageData(373, 229, 1, 1).data], player: [...sprite.shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data] };
+    return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], player: [...sprite.shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data] };
   });
+  initial.tile = await sampleVisibleTilePixel(page, 373, 229);
   assert.deepEqual(initial.size, ["640px", "480px"]); assert.equal(initial.children, 1); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
 
   inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
@@ -208,20 +224,48 @@ test("map view clears full state and delayed same-resource decode paints only la
     let release; const gate = new Promise((resolve) => { release = resolve; });
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
     const tileset = { namespace: "resource.Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
-    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, autotiles: [null,null,null,null,null,null,null], tiles: [{ x: 0, y: 0, z: 0, tileId: 384, depth: 0, blit: { kind: "regular", sourceIndex: 0 } }], cameraMotion: null });
-    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, autotiles: [null,null,null,null,null,null,null], tiles: [{ x: 1, y: 0, z: 0, tileId: 385, depth: 0, blit: { kind: "regular", sourceIndex: 1 } }], cameraMotion: null });
+    const autotiles = [null, null, null, null, null, null, null];
+    const cellsAt = (tileId, localX) => {
+      const cells = Array(192).fill(0);
+      cells[localX] = tileId;
+      return cells;
+    };
+    const viewPayload = (visualEpoch, localX, tileId, sourceIndex) => ({
+      sceneEpoch: 1, visualEpoch, motionId: null,
+      viewportWidth: 640, viewportHeight: 480,
+      mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0,
+      tileset, autotiles,
+      tileVisuals: sourceIndex === null ? [] : [[tileId, -1, 0, sourceIndex]],
+      chunks: sourceIndex === null ? [] : [{ chunkX: 0, chunkY: 0, cells: cellsAt(tileId, localX) }],
+      cameraMotion: null,
+    });
+    const sample = (sx, sy) => {
+      const canvases = [...view.shadowRoot.querySelectorAll("canvas.tile-layer")].filter((canvas) => !canvas.hidden);
+      for (const canvas of canvases) {
+        const left = Number.parseFloat(canvas.style.left) || 0;
+        const top = Number.parseFloat(canvas.style.top) || 0;
+        const x = sx - left;
+        const y = sy - top;
+        if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
+        return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data];
+      }
+      return [0, 0, 0, 0];
+    };
+    view.receiveRenderData(viewPayload(1, 0, 384, 0));
+    view.receiveRenderData(viewPayload(2, 1, 385, 1));
     release();
-    const context = view.shadowRoot.querySelector("canvas").getContext("2d");
     const deadline = performance.now() + 5_000;
-    while (true) {
-      const pixel = context.getImageData(37, 5, 1, 1).data;
-      if (pixel[0] === 40 && pixel[1] === 80 && pixel[2] === 220 && pixel[3] === 255) break;
-      if (performance.now() >= deadline) throw new Error("Timed out waiting for latest map paint");
+    let latest;
+    while (performance.now() < deadline) {
+      latest = sample(37, 5);
+      if (latest[0] === 40 && latest[1] === 80 && latest[2] === 220 && latest[3] === 255) break;
+      latest = undefined;
       await new Promise((resolve) => requestAnimationFrame(resolve));
     }
-    const stale = [...context.getImageData(5, 5, 1, 1).data]; const latest = [...context.getImageData(37, 5, 1, 1).data];
-    view.receiveRenderData({ mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0, tileset, autotiles: [null,null,null,null,null,null,null], tiles: [], cameraMotion: null });
-    const cleared = [...context.getImageData(37, 5, 1, 1).data];
+    if (!latest) throw new Error("Timed out waiting for latest map paint");
+    const stale = sample(5, 5);
+    view.receiveRenderData(viewPayload(3, 0, 0, null));
+    const cleared = sample(37, 5);
     return { stale, latest, cleared };
   }, { bytes: [...tileset], version: hash(tileset) });
   assert.equal(result.stale[3], 0); assert.deepEqual(result.latest, [40, 80, 220, 255]); assert.equal(result.cleared[3], 0);

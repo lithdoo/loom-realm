@@ -85,6 +85,29 @@ export interface TileProjectionBounds {
 }
 
 const TILE_SIZE = 32;
+export const CHUNK_SIZE = 8;
+export const CHUNK_CELLS = CHUNK_SIZE * CHUNK_SIZE * 3;
+export const CHUNK_OVERSCAN = 1;
+export const VIEW_DATA_GUARD = 196_608;
+export const DEFAULT_VIEWPORT = Object.freeze({ width: 640, height: 480 });
+
+export type ViewportSize = Readonly<{ width: number; height: number }>;
+export type VisualRegular = readonly [tileId: number, depthBias: number, kind: 0, sourceIndex: number];
+export type VisualAutotile = readonly [
+  tileId: number, depthBias: number, kind: 1, slot: number,
+  tlSx: number, tlSy: number, trSx: number, trSy: number,
+  blSx: number, blSy: number, brSx: number, brSy: number,
+];
+export type TileVisual = VisualRegular | VisualAutotile;
+export type ProjectedChunk = Readonly<{ chunkX: number; chunkY: number; cells: readonly number[] }>;
+export type ProjectionWindow = Readonly<{
+  minTileX: number;
+  minTileY: number;
+  maxTileX: number;
+  maxTileY: number;
+  chunks: readonly ProjectedChunk[];
+  tileVisuals: readonly TileVisual[];
+}>;
 
 export const AUTOTILE_QUARTERS = [
   [27, 28, 33, 34], [5, 28, 33, 34], [27, 6, 33, 34], [5, 6, 33, 34],
@@ -290,10 +313,12 @@ export function canMove(map: MapRecord, tileset: TilesetRecord, x: number, y: nu
   return mapTilePassable(map, tileset, x, y, direction) && mapTilePassable(map, tileset, x + dx, y + dy, (10 - direction) as Direction);
 }
 
-export function computeCamera(map: MapRecord, playerX: number, playerY: number) {
+export function computeCamera(map: MapRecord, playerX: number, playerY: number, viewport: ViewportSize = DEFAULT_VIEWPORT) {
+  const anchorX = Math.floor((viewport.width - TILE_SIZE) / 2);
+  const anchorY = Math.floor((viewport.height - TILE_SIZE) / 2);
   return Object.freeze({
-    cameraX: Math.min(Math.max(playerX * 32 - 304, 0), Math.max(map.width * 32 - 640, 0)),
-    cameraY: Math.min(Math.max(playerY * 32 - 224, 0), Math.max(map.height * 32 - 480, 0)),
+    cameraX: Math.min(Math.max(playerX * TILE_SIZE - anchorX, 0), Math.max(map.width * TILE_SIZE - viewport.width, 0)),
+    cameraY: Math.min(Math.max(playerY * TILE_SIZE - anchorY, 0), Math.max(map.height * TILE_SIZE - viewport.height, 0)),
   });
 }
 
@@ -335,12 +360,17 @@ export function assertProjectable(map: MapRecord, tileset: TilesetRecord): void 
   }
 }
 
-export function viewportTileBounds(map: MapRecord, cameraX: number, cameraY: number): TileProjectionBounds {
+export function viewportTileBounds(
+  map: MapRecord,
+  cameraX: number,
+  cameraY: number,
+  viewport: ViewportSize = DEFAULT_VIEWPORT,
+): TileProjectionBounds {
   return Object.freeze({
-    minTileX: Math.max(0, Math.floor(cameraX / 32)),
-    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + 639) / 32)),
-    minTileY: Math.max(0, Math.floor(cameraY / 32)),
-    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + 479) / 32)),
+    minTileX: Math.max(0, Math.floor(cameraX / TILE_SIZE)),
+    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + viewport.width - 1) / TILE_SIZE)),
+    minTileY: Math.max(0, Math.floor(cameraY / TILE_SIZE)),
+    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + viewport.height - 1) / TILE_SIZE)),
   });
 }
 
@@ -402,4 +432,91 @@ export function projectVisibleTiles(
   cameraY: number,
 ): readonly VisibleTile[] {
   return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map));
+}
+
+export function tileVisualDepthBias(priority: number): number {
+  return priority === 0 ? -1 : (priority + 1) * TILE_SIZE;
+}
+
+export function tileVisualForId(tileId: number, tileset: TilesetRecord): TileVisual {
+  const blit = projectTileBlit(tileId, tileset);
+  const depthBias = tileVisualDepthBias(tableAt(tileset.priorities, tileId));
+  if (blit.kind === "regular") {
+    return Object.freeze([tileId, depthBias, 0, blit.sourceIndex]) as VisualRegular;
+  }
+  const [tl, tr, bl, br] = blit.corners;
+  return Object.freeze([
+    tileId, depthBias, 1, blit.slot,
+    tl.sx, tl.sy, tr.sx, tr.sy, bl.sx, bl.sy, br.sx, br.sy,
+  ]) as VisualAutotile;
+}
+
+export function projectChunk(map: MapRecord, chunkX: number, chunkY: number): ProjectedChunk {
+  const cells = new Array<number>(CHUNK_CELLS);
+  for (let z = 0; z < 3; z += 1) {
+    for (let localY = 0; localY < CHUNK_SIZE; localY += 1) {
+      for (let localX = 0; localX < CHUNK_SIZE; localX += 1) {
+        const x = chunkX * CHUNK_SIZE + localX;
+        const y = chunkY * CHUNK_SIZE + localY;
+        const index = ((z * CHUNK_SIZE + localY) * CHUNK_SIZE) + localX;
+        cells[index] = (x < 0 || y < 0 || x >= map.width || y >= map.height) ? 0 : tableAt(map.data, x, y, z);
+      }
+    }
+  }
+  return Object.freeze({ chunkX, chunkY, cells: Object.freeze(cells) });
+}
+
+export function chunkCoordsForBounds(map: MapRecord, bounds: TileProjectionBounds): readonly { chunkX: number; chunkY: number }[] {
+  const minChunkX = Math.max(0, Math.floor(bounds.minTileX / CHUNK_SIZE) - CHUNK_OVERSCAN);
+  const maxChunkX = Math.min(Math.floor((map.width - 1) / CHUNK_SIZE), Math.floor(bounds.maxTileX / CHUNK_SIZE) + CHUNK_OVERSCAN);
+  const minChunkY = Math.max(0, Math.floor(bounds.minTileY / CHUNK_SIZE) - CHUNK_OVERSCAN);
+  const maxChunkY = Math.min(Math.floor((map.height - 1) / CHUNK_SIZE), Math.floor(bounds.maxTileY / CHUNK_SIZE) + CHUNK_OVERSCAN);
+  const coords: { chunkX: number; chunkY: number }[] = [];
+  for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY += 1) {
+    for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
+      coords.push({ chunkX, chunkY });
+    }
+  }
+  return coords;
+}
+
+export function projectChunkWindow(
+  map: MapRecord,
+  tileset: TilesetRecord,
+  bounds: TileProjectionBounds,
+  previous?: ProjectionWindow,
+): ProjectionWindow {
+  const coords = chunkCoordsForBounds(map, bounds);
+  const reused = new Map<string, ProjectedChunk>();
+  if (previous) {
+    for (const chunk of previous.chunks) reused.set(`${chunk.chunkX},${chunk.chunkY}`, chunk);
+  }
+  const chunks = Object.freeze(coords.map(({ chunkX, chunkY }) => {
+    const hit = reused.get(`${chunkX},${chunkY}`);
+    return hit ?? projectChunk(map, chunkX, chunkY);
+  }));
+  const used = new Set<number>();
+  for (const chunk of chunks) {
+    for (const tileId of chunk.cells) {
+      if (tileId !== 0) {
+        assertRenderableTileId(tileId, tileset);
+        used.add(tileId);
+      }
+    }
+  }
+  const tileVisuals = Object.freeze([...used].sort((a, b) => a - b).map((tileId) => tileVisualForId(tileId, tileset)));
+  return Object.freeze({
+    minTileX: bounds.minTileX,
+    minTileY: bounds.minTileY,
+    maxTileX: bounds.maxTileX,
+    maxTileY: bounds.maxTileY,
+    chunks,
+    tileVisuals,
+  });
+}
+
+export function sameChunkSet(left: ProjectionWindow, right: ProjectionWindow): boolean {
+  if (left.chunks === right.chunks) return true;
+  if (left.chunks.length !== right.chunks.length) return false;
+  return left.chunks.every((chunk, index) => chunk === right.chunks[index]);
 }

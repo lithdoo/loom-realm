@@ -174,7 +174,7 @@ test("PR0 records Hostra/local environment before product timing", () => {
   }
 });
 
-test("current Hostra 640 ordinary/refresh historical-seam baseline", { timeout: 600_000 }, async (t) => {
+test("PR1 Hostra 640 ordinary/refresh product gates", { timeout: 600_000 }, async (t) => {
   const status = environmentStatus();
   if (status.missing.length > 0) {
     t.diagnostic(`EVIDENCE MISSING: ${status.missing.join("; ")}`);
@@ -214,11 +214,12 @@ test("current Hostra 640 ordinary/refresh historical-seam baseline", { timeout: 
   await page.waitForFunction(() => document.querySelector("lr-map-view")?._latestData?.mapId === 900001, null, { timeout: 10_000 });
   const sampleMove = async () => {
     const beforeX = await page.evaluate(() => {
-      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
+      const view = document.querySelector("lr-map-view");
+      const data = view?._latestData;
       globalThis.__loomrealmMovementRecords.length = 0;
-      globalThis.__loomrealmPreviousCoverage = Array.isArray(tiles) && tiles.length > 0
-        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
-        : null;
+      globalThis.__loomrealmPreviousVisualEpoch = data?.visualEpoch ?? null;
+      globalThis.__loomrealmPreviousDraws = view?._tileDrawCount ?? 0;
+      globalThis.__loomrealmPreviousCameraOnly = view?._cameraOnlyCommits ?? 0;
       return document.querySelector("lr-map-sprite")?._latestData?.x ?? null;
     });
     await page.keyboard.press("ArrowRight");
@@ -236,15 +237,18 @@ test("current Hostra 640 ordinary/refresh historical-seam baseline", { timeout: 
       return records.some((record) => record.name === "browser-motion-complete");
     }, null, { timeout: 2_000 }).catch(() => undefined);
     const after = await page.evaluate(() => {
-      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
-      const coverage = Array.isArray(tiles) && tiles.length > 0
-        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
-        : null;
+      const view = document.querySelector("lr-map-view");
+      const data = view?._latestData;
+      const draws = view?._tileDrawCount ?? 0;
+      const cameraOnly = view?._cameraOnlyCommits ?? 0;
       return {
         records: globalThis.__loomrealmMovementRecords.slice(),
         x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
-        mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
-        refresh: coverage !== globalThis.__loomrealmPreviousCoverage,
+        mapId: view?._latestData?.mapId ?? null,
+        visualEpoch: data?.visualEpoch ?? null,
+        refresh: data?.visualEpoch !== globalThis.__loomrealmPreviousVisualEpoch,
+        cameraOnlyDelta: cameraOnly - (globalThis.__loomrealmPreviousCameraOnly ?? 0),
+        tileDrawsDelta: draws - (globalThis.__loomrealmPreviousDraws ?? 0),
       };
     });
     if (after.mapId !== 900001 || after.x === null || (beforeX !== null && after.x <= beforeX)) return null;
@@ -256,6 +260,8 @@ test("current Hostra 640 ordinary/refresh historical-seam baseline", { timeout: 
     return {
       latency: paint.at - input.at,
       refresh: after.refresh === true,
+      cameraOnlyDelta: after.cameraOnlyDelta,
+      tileDrawsDelta: after.tileDrawsDelta,
     };
   };
 
@@ -263,6 +269,8 @@ test("current Hostra 640 ordinary/refresh historical-seam baseline", { timeout: 
   for (let round = 1; round <= 3; round += 1) {
     const ordinary = [];
     const refresh = [];
+    const ordinaryCameraOnly = [];
+    const ordinaryTileDraws = [];
     let attempts = 0;
     let invalid = 0;
     let warmupLeft = 20;
@@ -282,29 +290,42 @@ test("current Hostra 640 ordinary/refresh historical-seam baseline", { timeout: 
         if (refresh.length < 30) refresh.push(sample.latency);
         continue;
       }
-      if (ordinary.length < 100) ordinary.push(sample.latency);
+      if (ordinary.length < 100) {
+        ordinary.push(sample.latency);
+        ordinaryCameraOnly.push(sample.cameraOnlyDelta);
+        ordinaryTileDraws.push(sample.tileDrawsDelta);
+      }
     }
     assert.ok(invalid / attempts <= 0.05, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
     assert.equal(ordinary.length, 100, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
     assert.equal(refresh.length, 30, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-    rounds.push({ round, attempts, invalid, ordinary, refresh });
+    rounds.push({ round, attempts, invalid, ordinary, refresh, ordinaryCameraOnly, ordinaryTileDraws });
   }
   const ordinary = rounds.flatMap((round) => round.ordinary);
   const refresh = rounds.flatMap((round) => round.refresh);
+  const ordinaryCameraOnly = rounds.flatMap((round) => round.ordinaryCameraOnly);
+  const ordinaryTileDraws = rounds.flatMap((round) => round.ordinaryTileDraws);
+  const cameraOnlyHits = ordinaryCameraOnly.filter((delta) => delta >= 1).length;
+  const zeroTileDrawHits = ordinaryTileDraws.filter((delta) => delta === 0).length;
   const report = {
     subject: process.env.GITHUB_SHA ?? "local-worktree",
     clock: "same Browser Window performance.now(); input-captured.at to browser-first-motion-paint.at",
     platform: { node: process.version, os: `${process.platform} ${os.release()}`, cpu: os.cpus()[0]?.model ?? "unknown" },
     hostraRoot,
-    viewport: "640x480 current product; 720/1080 product path OUT OF SCOPE for this baseline",
+    viewport: "640x480 PR1 fixed viewport; 720/1080 OUT OF SCOPE until PR2",
     rounds,
     ordinary: { p50: nearestRank(ordinary, 0.5), p95: nearestRank(ordinary, 0.95), max: Math.max(...ordinary), n: ordinary.length, latencies: ordinary },
     refresh: { p50: nearestRank(refresh, 0.5), p95: nearestRank(refresh, 0.95), max: Math.max(...refresh), n: refresh.length, latencies: refresh },
-    note: "PR0 baseline only. Does not claim PR1/PR2 camera-only or 720/1080 PASS.",
+    cameraOnly: { hits: cameraOnlyHits, n: ordinaryCameraOnly.length, zeroTileDrawHits },
+    note: "PR1 640 product gates. Does not claim 720/1080 PASS.",
   };
   await fs.mkdir(path.join(repository, "artifacts"), { recursive: true });
   await writeFile(path.join(repository, "artifacts", "map-viewport-pr0-hostra.json"), `${JSON.stringify(report, null, 2)}\n`);
-  process.stdout.write(`MAP_VIEWPORT_PR0_HOSTRA ${JSON.stringify(report)}\n`);
+  process.stdout.write(`MAP_VIEWPORT_PR1_HOSTRA ${JSON.stringify(report)}\n`);
   assert.equal(report.ordinary.n, 300);
   assert.equal(report.refresh.n, 90);
+  assert.ok(report.ordinary.p95 <= 50, JSON.stringify(report.ordinary));
+  assert.ok(report.refresh.p95 <= 50, JSON.stringify(report.refresh));
+  assert.ok(cameraOnlyHits / ordinaryCameraOnly.length >= 0.95, JSON.stringify(report.cameraOnly));
+  assert.ok(zeroTileDrawHits / ordinaryTileDraws.length >= 0.95, JSON.stringify(report.cameraOnly));
 });

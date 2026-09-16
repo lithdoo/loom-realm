@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import mapDefinition from "@loomrealm-game/map";
-import { computeCamera, expandTileBounds, projectTilesInBounds, projectVisibleTiles, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { computeCamera, projectChunkWindow, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -245,6 +245,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.emitEvent(down("ArrowRight"));
     const walked = frame.latestState();
     assert.deepEqual(player(walked), {
+      sceneEpoch: 1, visualEpoch: 1, motionId: 1,
       x: 11, y: 8, screenX: 304, screenY: 224, direction: 6, pattern: 1,
       sprite: { namespace: "resource.Graphics", key: "Characters/m14_player", contentVersion: "v-image" },
       motion: { id: 1, durationMs: 250, fromY: 8, fromScreenX: 304, fromScreenY: 224 },
@@ -430,35 +431,35 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(frame.domainClosed(), true);
   });
 
-  test("ordinary walking updates player/camera without replacing tiles identity", async (t) => {
+  test("ordinary walking updates player/camera without replacing chunks identity", async (t) => {
     const frame = await startFrame(t);
-    const spawnTiles = view(frame.latestState()).tiles;
+    const spawnChunks = view(frame.latestState()).chunks;
     await frame.emitEvent(down("ArrowRight"));
     const lastUpdate = frame.updates.at(-1);
     assert.ok(lastUpdate, "expected RenderDomain.update after walking");
-    assert.equal("tiles" in viewportSet(lastUpdate), false);
+    assert.equal("chunks" in viewportSet(lastUpdate), false);
     assert.equal("cameraX" in viewportSet(lastUpdate), true);
     assert.equal("x" in playerSet(lastUpdate), true);
     assert.equal(frame.replaces.length, 0);
-    assert.deepEqual(view(frame.latestState()).tiles, spawnTiles);
+    assert.deepEqual(view(frame.latestState()).chunks, spawnChunks);
     assert.equal(player(frame.latestState()).x, 11);
     assert.equal(player(frame.latestState()).motion.id, 1);
     frame.abort();
     await frame.pending;
   });
 
-  test("standing spawn window covers margin 4 and walking stays inside it", async (t) => {
+  test("standing spawn window uses one-chunk overscan and walking stays inside it", async (t) => {
     const frame = await startFrame(t);
     const { map: raw, tileset: rawTileset } = fixture();
     const map = validateMapRecord(raw);
     const tileset = validateTilesetRecord(rawTileset, 1);
     const camera = computeCamera(map, 10, 8);
-    const visible = projectVisibleTiles(map, tileset, camera.cameraX, camera.cameraY);
-    const spawnTiles = view(frame.latestState()).tiles;
-    assert.ok(spawnTiles.length > visible.length);
-    assert.ok(spawnTiles.some((tile) => tile.x === map.width - 1));
+    const required = viewportTileBounds(map, camera.cameraX, camera.cameraY);
+    const expected = projectChunkWindow(map, tileset, required);
+    const spawnChunks = view(frame.latestState()).chunks;
+    assert.equal(spawnChunks.length, expected.chunks.length);
     await frame.emitEvent(down("ArrowRight"));
-    assert.equal("tiles" in viewportSet(frame.updates.at(-1)), false);
+    assert.equal("chunks" in viewportSet(frame.updates.at(-1)), false);
     frame.abort();
     await frame.pending;
   });
@@ -489,7 +490,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("window refresh includes tiles exactly once when coverage is insufficient", async (t) => {
+  test("window refresh includes chunks exactly once when coverage is insufficient", async (t) => {
     const wide = wideMap();
     const frame = await startFrame(t, {
       params: { x: 8, y: 8 },
@@ -498,18 +499,18 @@ describe("map runtime walking", { concurrency: false }, () => {
         "struct.Tileset/1": wide.tileset,
       },
     });
-    const spawnMaxX = Math.max(...view(frame.latestState()).tiles.map((tile) => tile.x));
+    const spawnMaxX = Math.max(...view(frame.latestState()).chunks.map((chunk) => chunk.chunkX));
     await frame.emitEvent(down("ArrowRight"));
     for (let step = 0; step < 16; step += 1) frame.fireNextTimer();
-    const refreshUpdates = frame.updates.filter((update) => "tiles" in viewportSet(update));
-    assert.ok(refreshUpdates.length >= 1, "expected a tiles refresh update");
+    const refreshUpdates = frame.updates.filter((update) => "chunks" in viewportSet(update));
+    assert.ok(refreshUpdates.length >= 1, "expected a chunks refresh update");
     const latestRefresh = refreshUpdates.at(-1);
-    assert.ok(Math.max(...viewportSet(latestRefresh).tiles.map((tile) => tile.x)) > spawnMaxX);
+    assert.ok(Math.max(...viewportSet(latestRefresh).chunks.map((chunk) => chunk.chunkX)) > spawnMaxX);
     frame.abort();
     await frame.pending;
   });
 
-  test("projection window falls back from margin 4 to 1 under Map-owned budget", async (t) => {
+  test("projection window uses exact one-chunk overscan under Map-owned budget", async (t) => {
     const filled = autotileFilledMap();
     const frame = await startFrame(t, {
       records: {
@@ -521,16 +522,14 @@ describe("map runtime walking", { concurrency: false }, () => {
     const tileset = validateTilesetRecord(filled.tileset, 1);
     const camera = computeCamera(map, 10, 8);
     const required = viewportTileBounds(map, camera.cameraX, camera.cameraY);
-    const margin1 = projectTilesInBounds(map, tileset, expandTileBounds(required, 1, map));
-    const margin4 = projectTilesInBounds(map, tileset, expandTileBounds(required, 4, map));
-    assert.ok(margin4.length > margin1.length);
-    assert.deepEqual(view(frame.latestState()).tiles, margin1);
+    const expected = projectChunkWindow(map, tileset, required);
+    assert.deepEqual(view(frame.latestState()).chunks, expected.chunks);
     frame.abort();
     await frame.pending;
   });
 
   test("projection budget exceeded fails activation before Domain create", async (t) => {
-    const filled = autotileFilledMap({ name: "x".repeat(12_000) });
+    const filled = autotileFilledMap({ name: "x".repeat(30_000) });
     const frame = await startFrame(t, {
       expectActivationFailure: true,
       records: {
