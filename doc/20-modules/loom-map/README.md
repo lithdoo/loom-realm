@@ -1,49 +1,45 @@
 # Map Game Library 设计
 
-> 层级：Game Library 设计  
-> 状态：**M14 first-slice fixed-640 implementation/design historical Frozen；current executable requalification pending；dynamic viewport/performance extension Draft / Map Freeze HOLD**  
-> 首次landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
-> 唯一M14资格：[m14-qualification](../../30-implementation/m14-qualification.md) · [ADR0032](../../decisions/0032-game-library-example-boundary.md)  
-> 新候选：[dynamic viewport/performance draft](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md) · [Map-private motion-stage closure](../../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md) · [ADR0037](../../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> 最近复核：2026-09-16
+> 层级：Game Library 模块投影；状态：**历史 M14 fixed640 已实现；新的动态视口/性能方案为 Design candidate / Map Docs Freeze HOLD / Not Implemented**。M14/M15的当期正式资格看各自ledger。2026-09-16。
+> 当前唯一新主合同：[Map 机械实施合同](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)；[Map-private motion子规范](../../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)仅细化其§8，不是另一个协议。Core [ADR0037](../../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [corrected `/1` ledger](../../30-implementation/viewport-profile-v1-qualification.md)。历史M14：[ADR0032](../../decisions/0032-game-library-example-boundary.md) · [qualification](../../30-implementation/m14-qualification.md)。
 
-**以下 first-slice固定640事实为已实现的历史基线，不是对未来候选dynamic viewport的永久限制；两个阶段的状态不能互相覆盖。** Map是game-domain consumer，不是framework module：Framework owns authority/transport/general read-only viewport capability；Map owns tile-RPG camera, world/projection, resource, raster/Canvas and game-specific policies。Core revised Profile `/1`与Viewport v1尚未 Frozen/实现，不声称map已支持动态视口；旧 `/2`方案被ADR0037撤销。
-
-## 1. Package identity/dependency
+## 1. Boundaries
 
 ```text
-RMXP/Essentials source semantics
-→ selective importer consumer projection
-→ prepared FSDB / M12 ContentClient
-→ game-libs/map / @loomrealm-game/map Runtime
-→ public @loomrealm/subsystem Input/Render/(candidate)Viewport
-→ M13 map-owned browser Web Components
+RMXP / Essentials material → selective importer projection → prepared FSDB / Content
+→ game-libs/map @loomrealm-game/map Runtime (world, movement, camera, projection)
+→ public @loomrealm/subsystem Input / Render / candidate readonly Viewport
+→ Frozen Renderer Store / M13 Projector
+→ map-owned lr-map-view > lr-map-sprite ShadowDOM, Canvas, private stage
 ```
 
-Package exports：runtime root/default SubsystemDefinitionFactory、`@loomrealm-game/map/browser/map.browser.js` classic JS、`@loomrealm-game/map/browser/map.css`；prepared Content使用package subpaths，不reach private dist。Runtime只import public Subsystem，不依赖DOM/Renderer/Main/Platform/tooling；Browser仅拥有`lr-map-view`/`lr-map-sprite`、private Canvas/slot/sprite/PresentationResourceClient，不取得业务authority或Content credentials。M14 qualification test-owned Chromium harness可复用受治理M13 internals作为测试设施而非production author seam；Desktop Window belongs M15。
+Framework仅拥有general authority/transport/readonly Viewport；Map独占tile-RPG business、min/max/settle、camera、chunks、resource-specific raster/placement/epochs、两WC physical stage。Core没有map术语、Main不存size、Renderer Store/M13不增加map快路/ACK；Map Runtime不读取DOM/Main/Data/Content credentials。Browser不成为world/transfer authority。Current product指定document layout viewport，但具体 `Window.innerWidth/innerHeight`和example centering/letterbox归physical composition，不升通用wire。
 
-## 2. Selective source facts
+Package exports root SubsystemDefinitionFactory及classic JS `@loomrealm-game/map/browser/map.browser.js`、CSS `@loomrealm-game/map/browser/map.css`；Runtime只依赖public Subsystem，Browser只用M13 resource context和自身ShadowDOM/Canvas。Importer不因为改viewport而增加universal map schema/event interpreter。M14 test-owned Chromium harness可复用测试设施但不成为production author seam。
 
-首slice只投影 `Map/{id}`的`tileset_id,width,height,data`和`Tileset/{id}`的`id,tileset_name,passages,priorities`。`Map.data` RGSS table `dimensions=3,xSize=Map.width,ySize=Map.height,zSize=3,index=x+y*xSize+z*xSize*ySize`。未消费events、BGM/BGS、encounters、autotile names、terrain、MapInfo/Metadata等留在lossless/importer证据；真实行为需要时才小幅新增。Runtime不得接收Ruby/Marshal/RMXP decoder wrappers，不造MapNormalizedV1、universal map/repository schema。
+## 2. 历史已实现 first slice 不可误标为新功能
 
-## 3. Frozen M14 first-slice gameplay/baseline（historical）
+历史first slice初始参数`{mapId,x,y,characterName}`、tile32 CSSpx、fixed640×480、anchor304/224；Map/Tileset按既有 FSDB读，Frame内一个RenderDomain，tree=`lr-map-view > lr-map-sprite`，Input non-repeat Arrow尝试一步、passability/camera/Render最新状态。后续 walking、layering、autotile、transfer有各自已治理需求/实现；其250ms cadence、latest-state transport coalescing、transfer失败不能因为viewport改造而改变。现有Browser会因camera rAF反复清理/遍历/绘制640 Canvas，现有Runtime仍是 `VisibleTile[]` 和无 `scope.viewport`；旧资格与历史refresh P95=96.3ms FAIL均不能证明当前新候选已实现/达标。
 
-Initial params `{mapId,x,y,characterName}`，direction down=2、pattern0。Frame activate→load/validateMap/Tileset/resource versions→Frame-bound keyboard.event listener→one RenderDomain→publish initial full state→Frame remains pending。Non-repeat Arrow key→one tile attempt→facing/passability/x-y/camera→RenderDomain update；blocked changes facing only。Passage bits down0x01/left0x02/right0x04/up0x08，layers z2→1→0 and source direction + target reverse passability。原first slice不含event collision/through/terrain/transfer；后续业务文档另拥有transfer/movement/autotile扩展。
+## 3. 新候选职责与精确委托
 
-First-slice fixed viewport：tile32 CSSpx，viewport640×480，nominal20×15，example CSS固定 host尺寸，Runtime无DOM resize observation。Camera：`cameraX=clamp(playerX*32-304,0,max(mapW*32-640,0))`、`cameraY=clamp(playerY*32-224,0,max(mapH*32-480,0))`；可见projection包含所有与viewport相交的tile，包括非对齐camera额外边行。Canonical `(10,8)→(11,8)` player screen origin `(304,224)`、camera `16→48`，背景左移32。
+新[主合同](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)独占：default640、map cap320×240..1920×1080、100ms trailing settle、viewport read/subscribe安全初始化、camera公式、8×8×3 chunks+1chunk overscan、当前窗口used-tile紧凑visual table、<196608B MapView data guard、scene/visual/motion identity、128MiB Canvas/256MiB total estimated pixel memory、dirty autotile/overlap raster、private-only DOM layering、pair commit/retry和测试。冻结前**不得凭此前的短草案要求实现者选择`TileVisual`、Sprite fields、站立/重基准算法或时钟**；它们已在主合同§4/§8中给出候选精确语义，并须由PR0反证/负责人签署。
 
-One business RenderDomain/opaque SDK wire id；managed tree `lr-map-view → lr-map-sprite`，View data为map/camera/resources/visible tiles，Sprite为world/screen/direction/resource。Ordinary walking使用Frozen M11 `update`、structural/new scene使用`replace`；无map-specific delta protocol。Old Browser实现View 640×480 Canvas full clear/draw retained tiles order、Sprite sheet crop；0transparent、≥384 regular tileset、48..383 autotile不要求首slice CI。Async decode必须按latest RenderData/generation检查，不能凭resource version equality绘旧camera。
+Viewport observation不mint Frame gameplay mutation/InputTarget/Activation；resize只重算已提交world的presentation。现example只有map，没有accepted menu/dialog held-input需求，不因假想overlay扩公共Frame生命周期。Map Frame terminal必须取消其订阅/timer/async。M13不保证View/Sprite同时回调；配对Stage用map-private motionId与相同scene/visual，保留旧完整stage到双方ready才同一task切换。Frozen walking允许背压合并中间未显示transition：必须记录suppressed、保证最新状态收敛和无混帧，不得发明逐步replay/ACK或与旧行为冲突的zero-skipped-steps指标。Frozen walking的receipt clock要求图片decode不延长250ms；新pair统一最早receipt而非ready后重新计时。
 
-## 4. Proposed dynamic viewport extension（consumer-owned / not implemented）
+## 4. 无循环交付/冻结状态
 
-[dynamic draft](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md) owns default640×480、cap320×240..1920×1080、100ms settle、camera anchor/ProjectionWindow、8×8×3 chunks、1 overscan、196608B map guard、sceneEpoch/visualEpoch、WC private two-stage/single-paint sync、rAF placement-only/dirty autotile/overlap reuse、PR0性能gate。It **consumes** revised `scope.viewport` over single Profile `/1`，不使framework了解tiles/chunks、window DOM API、map gameplay或example letterbox。具体产品布局由example/page owns；测试Renderer source观察与map WC实际content box的关系。
+```text
+Core C0: external /1 compat签署 + cross-review → Core Docs Freeze
+Core C1: corrected /1 current cohort implementation + revised conformances/regressions
+Map PR0: production-zero feasibility：固定dense1080 exact bytes、Core full update、M13 equality、
+         Browser baseline、private CSS stacking pixel proof、128/256MiB、真实Map002/066证据
+→ design owner复核主合同与子规范、签 Map Docs Freeze SHA（无须PR1/PR2性能PASS）
+Map PR1: fixed640 chunk/raster/paired stage +640 parity/performance
+Map PR2: true dynamic viewport、in-flight resize rebase、720/1080 real product
+Map PR3: same executable SHA M11/M13/M14/M15 + product latency/memory/pixel gate
+```
 
-Viewport observation独立InputTarget不意味着允许Frame gameplay mutation；map callback只能基于已提交world facts做presentation projection，绝不从resize启动movement/collision/transfer/call。现有example `game.json`仅map，menu/dialog不是当前已接受该slice需求；future hold→child overlay→timer behavior需要独立真实consumer acceptance/evidence和必要时独立最小lifecycle review，不能假设必须新增Framework Frame API或通过viewport绕过gate。Frame/Runtime terminal cleanup与late async inert仍需当前实现测试。
+PR0的720/1080若仅synthetic/prototype必须写`prototype-only`，不能冒充真实产品；PR0不要求尚未实施的camera-only 0 tile draws、full P95 PASS。目标性能属于PR1/PR2/PR3，**不是Map Docs Freeze的循环前置证据**。PR0缺真实local FSDB、schema超guard、独立Core/M13瓶颈或private-only layering不可行，必须STOP而不能签Freeze。Source code和newPR0 harness、文件边界、具体fixture/命令及STOP模板见主合同§9–§14。
 
-WC pair async prepare与Store author原子性不同：map own View/Sprite必须保留旧完整stage，直到同scene/visualEpoch双方ready在同一JS task切换；WC physical retry已交付数据，不依赖same-G reconnect重发 equal RenderData。**Ordinary movement不增长visualEpoch，因此其双 WC 同步另须满足 [Map motion-stage closure](../../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)：同一次 movement 的 View/Sprite 携带 Map-private matching `motionId`，Sprite还携带sceneEpoch；收到一半不启动单侧动画，双方准备后共享同一帧时间采样，standing/blocked的Sprite-only更新有明确例外。** 该文仍为候选、必须被最终 dynamic draft 吸收并通过截图/trace才能 Map Freeze。此逻辑完全属于 game library，不需要Renderer ACK/store rollback或通用layer manager。
-
-## 5. Scope discipline / qualification
-
-首slice预算：small Map/Tileset validators、tableAt/passability、computeCamera、projectTiles、renderState、one definition/twoWC/browser JS CSS/test composition。新扩展仅根据PR0证明添加current ProjectionWindow/chunks/raster/epoch/private stage，不建MapRepository/Bundle、GameLibrary framework、AssetManager、SceneGraph/LayerManager、PlayerController、Context service、generic responsive viewport、Tick/EventQueue/Universal schema。
-
-旧M14 qualifying facts留在 [m14 ledger](../../30-implementation/m14-qualification.md)；新的Core `/1`视口资格看 [dedicated ledger](../../30-implementation/viewport-profile-v1-qualification.md)，Map PR0与Map Freeze看 dynamic draft及motion closure，不用旧M14 PASS推断1080p和Browser性能已通过。未取得Core Docs Freeze/usable implementation、新payload/CPU/latency证据前，dynamic设计保持Draft/HOLD。
+历史M14 ledger、Core revised `/1` ledger、Map PR0证据和PR3最终qualification各管自己的状态；没有新实现/测试/负责人签署时持续HOLD。禁止 Map Repository/AssetManager/SceneGraph/LayerManager/Environment/通用Tick或把游戏策略上移Core。
