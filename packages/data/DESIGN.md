@@ -1,21 +1,26 @@
 # `@loomrealm/data` 设计
 
-> 状态：Package-local Core Baseline Implemented / M8 Role Integration Qualified / Maintenance  
-> 阶段：M8 package-local core + real Renderer/Subsystem role integration qualified；M9 physical Broker realization pending  
-> 最近复核：2026-09-04  
-> 目标：把 Frozen Data Connection v1、User Input v1、Render Update v1 与 Renderer Data Profile v1 落成 transport-independent、role-typed、可测试的 shared Data application mechanics；不建立 physical connection，不拥有 Main/Subsystem/Renderer application authority。  
-> 正式 Profile：[Renderer Data Application Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)  
-> Profile Conformance：[Renderer Data Profile v1 Conformance](../../doc/15-contracts/renderer-data-profile-conformance-v1.md)  
+> 状态：**旧三-child `/1` Package-local Core Baseline Implemented / M8 Role Integration Qualified（历史 subject）；修订后四-child `/1` / Viewport Candidate / Not Implemented / Docs Freeze HOLD**  
+> 阶段：旧 M8 package-local core + real Renderer/Subsystem role integration qualified；新的四-child 实施须按 C1 新 executable SHA 重验，不能继承历史 PASS  
+> 最近复核：2026-09-16（仅明确 subject 与 Viewport 增量入口；旧 M8 exact API 正文保留）  
+> 目标：保留已实现的 Frozen Data Connection v1、User Input v1、Render Update v1 及**旧三-child Renderer Data Profile v1** transport-independent、role-typed、可测试 mechanics；修订后四-child `/1` 唯一候选仅增加 Viewport，不建立 physical connection，不拥有 Main/Subsystem/Renderer application authority。  
+> 当前正式 Profile：[Renderer Data Application Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)（四-child candidate）  
+> Profile Conformance：[Renderer Data Profile v1 Conformance](../../doc/15-contracts/renderer-data-profile-conformance-v1.md)（revision3 candidate）  
+> **唯一新增 Data API 与实现边界：[VIEWPORT_V1_IMPLEMENTATION_DELTA.md](./VIEWPORT_V1_IMPLEMENTATION_DELTA.md)；本篇下述旧 exact API 代码块保留历史 M8 基线，不作为当前完整四-child 类型声明。**  
+> 仅历史完整版：[旧 Profile 三-child Frozen 原文](../../doc/15-contracts/renderer-data-profile-v1-previewport-baseline.md)；[旧 Conformance revision2 原文](../../doc/15-contracts/renderer-data-profile-conformance-v1-previewport-baseline.md)。  
 > Connection：[Data Connection v1](../../doc/15-contracts/renderer-subsystem-data-connection-v1.md)  
 > Input：[User Input v1](../../doc/15-contracts/user-input-v1.md)  
 > Render：[Render Update v1](../../doc/15-contracts/render-update-v1.md)  
-> 首次实现前收口：[ADR 0025](../../doc/decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
+> Viewport：[Viewport State v1](../../doc/15-contracts/viewport-state-v1.md)；[ADR0037](../../doc/decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；[唯一资格 ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md)  
+> 首次实现前原收口：[ADR 0025](../../doc/decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)（由 ADR0037 部分修正）  
 > 实现评审：[IMPLEMENTATION-REVIEW.md](./IMPLEMENTATION-REVIEW.md)  
 > 实施：[第一阶段交付计划](../../doc/30-implementation/phase-1-delivery-plan.md)
 
 核心原则：
 
 > **`@loomrealm/data` 拥有“如何正确承载 Renderer Data Profile v1”的 connection-local mechanics；Main/Platform拥有 DataAuthority/current installation，Subsystem/Renderer role managers拥有 Input/Render application state。业务作者不直接消费本包。**
+
+**当前实施阅读顺序：** 本文旧 M8 exact exports/reader/writer/terminal 不得删除；[Data Viewport-only 增量](./VIEWPORT_V1_IMPLEMENTATION_DELTA.md)只追加 `ViewportStateV1`、`onViewportState`、`viewport.sendState` 和 `DataProtocolFamily:"viewport"` 等显式变更，所有其余 API、status、replay/terminal/ordering 仍继承旧正文。旧代码仍是三-child、不能宣称满足修订后的 `/1`。Map/Window 业务不属于此包。没有 `/2`、双 parser、新 subpath 或 npm 消费者核查冻结要求。
 
 ---
 
@@ -809,3 +814,5 @@ Desktop DataConnectionBroker complete
 ```
 
 M9 负责 physical Broker/paired installation realization；M10/M11 分别负责 User Input / Render business-state qualification。`@loomrealm/data` 在这些后续 milestone 中保持 shared connection-local mechanics owner，而不是重新承担 Platform 或 role authority。
+
+**上述 closure 仅适用于旧三-child M8 历史 executable。** 修订后四-child `/1` 的唯一实施合同是[Viewport-only API delta](./VIEWPORT_V1_IMPLEMENTATION_DELTA.md)，资格须按[唯一 Core ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md)在新 subject 上完成；本文件旧代码块不是新接口的完整定义。
