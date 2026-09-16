@@ -7,11 +7,11 @@
 > 稳定程度：Frozen  
 > 主要定义：Renderer 与单个 Subsystem Runtime 之间 Data Connection 的 authority identity、candidate/install/current/retired 边界、唯一性、替换、重连、退役与 Platform Broker responsibility  
 > 上游 authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)  
-> 组合 Profile：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)  
-> Child protocols：[User Input v1](./user-input-v1.md)、[Render Update v1](./render-update-v1.md)  
+> 组合 Profile：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)（ADR0037 修正后的四 child 首次版本候选；未实现/未冻结）  
+> Current child projection：[User Input v1](./user-input-v1.md)、[Render Update v1](./render-update-v1.md)、[Viewport State v1](./viewport-state-v1.md)；**精确组合与 fresh child baseline 均由 Profile v1 拥有**  
 > Conformance：[Data Connection v1 Conformance Profile](./renderer-subsystem-data-connection-conformance-v1.md)  
-> 决策：[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)  
-> 最近复核：2026-08-21
+> 决策：[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)；组合修正：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
+> 最近编辑性复核：2026-09-16（仅同步下游 Profile projection；本 Connection wire/currentness/Frozen conformance 不变）
 
 本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
 
@@ -40,10 +40,13 @@ Platform candidate pair
 Data Connection v1
  │   current → retired
  ▼
-Renderer Data Application Profile v1
+Renderer Data Application Profile v1 (revised candidate)
      ├── User Input v1
-     └── Render Update v1
+     ├── Render Update v1
+     └── Viewport State v1
 ```
+
+此图只投影[当前完整 Profile v1](./renderer-data-profile-v1.md) 的子协议集合，不把 child schema、尺寸、sender、callback 或 baseline 规则提升成 Connection v1 的新职责。旧三 child `/1` 可执行基线和修正后四 child `/1` 不可混配，直接修正尚受 ADR0037 的兼容性核查及 Docs Freeze gate 限制。
 
 必须保持：
 
@@ -332,7 +335,7 @@ candidate 在 installation commit 前：
 MUST NOT be exposed as current
 MUST NOT send child-protocol application traffic
 MUST NOT accept received child traffic as current authority
-MUST NOT establish Input/Render baseline
+MUST NOT establish child publication baseline
 MUST NOT consume cardinality slot
 ```
 
@@ -724,31 +727,9 @@ MUST NOT by itself retire the fresh current connection
 
 每条 newly installed current Connection instance都是 fresh application publication boundary。
 
-Connection v1只定义这个 boundary；child具体 baseline由 Renderer Data Profile v1拥有。
+**Connection v1 仅定义这条边界；所有当前 child baseline 的具体语义、顺序和恢复由 [Renderer Data Profile v1 §8](./renderer-data-profile-v1.md#8-independent-ordering--fresh-carrier) 独占。** 修正后的当前 Profile 有 Input、Render、Viewport 三种 child，每条 fresh carrier各自重建 baseline（Viewport 有合法样本则发布 fresh size，否则等待首次合法样本）；不存在 Connection 自己的 `viewport.ready`、统一 snapshot 或跨 child barrier。这是下游组合说明的编辑性同步，不修改 Connection v1 的 zero-message/fresh-current 边界。
 
-当前 Profile v1：
-
-### User Input
-
-```text
-remote Interest Registry = empty
-retained Input State = empty
-Event history = empty
-```
-
-如仍需要 Input，Subsystem重新发布 current desired Interest；State重新 baseline；Event future-only。
-
-### Render Update
-
-```text
-first Render message = current render.domains
-→ fresh Snapshot for each current Domain
-→ Patch/Event
-```
-
-same-generation reconnect不允许继承 old carrier publication cursor作为 fresh authority。
-
-注意：fresh carrier publication state不等于 business lifetime reset。Frame/Desired Interest/Render business Domain可按其各自 contract继续存在。
+same-generation reconnect不允许继承 old carrier publication cursor作为 fresh authority。Fresh carrier publication state不等于 business lifetime reset：Frame/Desired Interest/Render business Domain/Runtime-scoped Viewport object各遵其独立 contract继续存在。Old carrier unsent不迁移，late retired traffic只 drop；profile/child currentness仍须匹配 §23。
 
 ---
 
