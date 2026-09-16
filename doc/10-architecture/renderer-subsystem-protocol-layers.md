@@ -1,407 +1,89 @@
 # Renderer ⇄ Subsystem 协议分层
 
-> 层级：系统架构  
-> 状态：Active Design  
-> 稳定程度：current v1 Frozen；Viewport/Profile v2 Candidate for Freeze  
-> 主要定义：Renderer Control、DataAuthority、Renderer Data Profile v1/v2、User Input、Render Update、Viewport State 与 Platform Broker 的分层关系  
-> 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)、[Viewport Capability](./viewport-capability.md)  
-> 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Renderer Data Profile v2](../15-contracts/renderer-data-profile-v2.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)  
-> 决策：[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
-> 最近复核：2026-09-16
+> 层级：系统架构 / Active Design  
+> 稳定程度：Control、Connection、Input、Render、Profile v1 Frozen；Viewport v1/Profile v2 Candidate/Not Frozen  
+> 主要定义：Control authority、Data current connection、Profile v1/v2、Input/Viewport/Render child ownership与 Platform provisioning分层  
+> 依赖：[System overview](./system-overview.md) · [Viewport architecture](./viewport-capability.md) · [Platform composition](./platform-composition-system.md)  
+> Formal：[Control v1](../15-contracts/main-renderer-control-v1.md) · [Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md) · [Profile v1](../15-contracts/renderer-data-profile-v1.md) · [Profile v2](../15-contracts/renderer-data-profile-v2.md) · [Input v1](../15-contracts/user-input-v1.md) · [Render v1](../15-contracts/render-update-v1.md) · [Viewport v1](../15-contracts/viewport-state-v1.md)  
+> Decision：[ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)；最近复核：2026-09-16
 
----
+本文件是 authority/role map；exact wire、validation、callback、terminal与 source freshness以各 formal contract为准。保持 v1 immutable，不在 architecture层另造协议。
 
-## 1. Layer Map
+## 1. Layer map
 
 ```text
-Main
- │
- │ Renderer Control v1
- │   Runtime / Stack / Activation / InputTarget
- │   DataAuthority {S,G,dataProfile}
+Main (Session / Runtime / Frame / Stack / Activation / InputTarget / DataAuthority)
+ │ Renderer Control v1, committed authority snapshots
  ▼
-Renderer
- │
- │ Platform DataConnectionBroker realizes current authority
- │
+Renderer (readonly Main mirror, input producer, layout viewport observation, Render replica)
+ │ Broker paired installation according to exact (Session,Renderer,S,G,P)
  ▼
-Renderer Data Application Profile
-├── /1 Frozen
-│   ├── Data Connection v1   Frozen
-│   ├── User Input v1        Frozen
-│   └── Render Update v1     Frozen
-│
-└── /2 Candidate
-    ├── Data Connection v1   Frozen
-    ├── User Input v1        Frozen
-    ├── Render Update v1     Frozen
-    └── Viewport State v1    Candidate
- │
+Renderer Data Profile
+ ├─ /1 Frozen   Connection1 + Input1 + Render1
+ └─ /2 Candidate Connection1 + Input1 + Render1 + Viewport1
+ │ one reader/dispatcher, one serialized writer, shared Data-local terminal
  ▼
-Subsystem
+Subsystem Runtime (Input Interest, retained viewport, Render Domains)
 ```
 
-Main不转发 ordinary User Input、Viewport State 或 Render Update。共享 Data carrier只共享 transport/order/terminal，不合并 child-protocol authority。
+Main不转发 Input、Viewport width/height或 Render payload；Broker不拥有 profile generation；physical transport不创造 authority。
 
----
+## 2. DataAuthority and profile selection
 
-## 2. Authority Separation
+Main发布 `{subsystemKey,generation,dataProfile:string}`；同一 Session/current Renderer/subsystemKey最多 0..1 current Data Connection。candidate在 paired readiness+commit-time authority revalidation成功前不可发送/接受应用消息。`P1→P2`需要 fresh generation；same G/P可换 carrier并重建 publication baselines，不重建业务 Runtime/Frame/Domain。Control与Data无 global total order。
+
+Frozen Control v1 §13/Connection v1 §6 的“Phase 1 profile=/1”是当时实现基线，而不是限制 Control `dataProfile:string`未来永远只能 `/1`；Profile v1的专用类型仍只适用于 v1 peer。Target implementation subject Main policy对其所有 current Subsystem DataAuthorities统一选 `/2`，broker exact配对；不做 per-Subsystem profile preference、Game Entry request、feature negotiation或 silent `/1` fallback。若端点不共同支持当前 `/2`，Data absent而非偷偷降级。v1 exact acceptance集合保持不变。
+
+## 3. Shared Profile mechanics / exact direction
 
 ```text
-Main
-    Frame / Activation / InputTarget
-    DataAuthority generation/profile
-
-Subsystem
-    Desired Interest[F]
-    retained viewport observation
-    Render Domain authoritative business state
-
-Renderer
-    read-only Main mirror
-    Input Producer availability
-    presentation-surface viewport observation
-    Render replica/presentation
-
-Platform
-    physical Data endpoint/provisioning
-    trusted physical viewport event source realization
+one unit = one UTF-8 JSON text string
+common preflight: 1 MiB UTF-8 / JSON depth ≤64 / Wire representation
+one connection-wide ordered inbound reader + exact type dispatcher
+one serialized bounded writer (no direct child raw carrier writer)
+terminal first-wins; old carrier queued work not replayed/migrated
 ```
 
-核心约束：
+Direction：Subsystem→Renderer `input.interest; render.domains/snapshot/patch/event`；Renderer→Subsystem `input.state/event/reset; viewport.state`（最后一种仅 `/2`）。Unknown/extra/known wrong direction Data-fatal；child exact-validation先于 semantic mutation。Input/Render/Viewport共享的是 unit ordering/reader/writer/terminal，**不是** revision、transaction、ACK、barrier、cross-plane causal join。`viewport.state`对 `/1` 必须 fatal而不是可忽略 optional extension。
+
+Profile-v2 diagnostic：common/unknown `protocol:"profile"`，Input/Render沿 Frozen v1，已识别 `viewport.state` 后 child malformed/fatal统一 `protocol:"viewport"`。v2可用新的 terminal union表达而不扩大 v1 peer的 observable terminal类型；任一 Data child fatal只退休 Data，不自动 Main authority mutation、Runtime fail或 Frame unwind。Listener本地失败不是 protocol-invalid。
+
+## 4. User Input: separate three lifetimes
 
 ```text
-Control authority != Input Interest
-Input Interest     != Producer availability
-Viewport state     != Input authority
-Data authority     != physical carrier
-Data carrier       != ordinary input authority
-Frame authority    != Render Domain authority
-Viewport observation != Render/DOM desired-state authority
+Desired Interest[F]       Frame-scoped / Subsystem-owned
+Input lease(F,A)          Activation-scoped / Main InputTarget-owned / one-shot
+wire publication state    current carrier-scoped Interest Registry + State + Event
 ```
 
----
+`Effective = current Data(S,G,P) ∧ Main InputTarget(S,F,A) ∧ local/mirrored current active Activation ∧ channel in Interest[F] ∧ Producer available`。Interest/Producer只能缩小，不能从 DOM focus/component existence/Render status mint InputTarget。Subsystem再做本地 gate；well-formed stale input drop-only。
 
-## 3. DataAuthority / Connection
+Input `.state` self-contained/latest-wins/coalescible before emitted；`.event` transient/ordered/no replay；`input.reset(F,A)`清 old lease retained State、不改 Interest、构成 global State coalescing barrier。标准 Keyboard/Pointer/Gamepad sibling state/event都 effective时，physical transition先 post-transition State后 Event。Direct A1→A2 old lease ends→best-effort Reset(A1)→A2 ordinary Input。Frozen标准输入只有 keyboard physical codes、Renderer input surface normalized fixed-point pointer、standard gamepad normalized values；不复制 DOM/OS API object。无法映射的其他能力可用 `x.*` ordinary channel，但 viewport的不同 lifetime已证明它不能如此表达。
 
-Main发布：
+## 5. Viewport: independent Runtime observation
 
-```ts
-interface RendererDataAuthorityV1 {
-  subsystemKey: string;
-  generation: number;
-  dataProfile: string;
-}
-```
+v1一个 current Renderer participant只观察其**document layout viewport** `innerWidth/innerHeight` floor positive safe integer CSS pixels，所有 current `/2` Subsystem连接得到同 raw size；不支持 multi-surface identity。Viewport object为 Subsystem Runtime-scoped；author `current` = last accepted observation，wire cursor per current Data carrier。Frame suspend/InputTarget loss、blur/focus、Input Interest/Producer不 gate viewport。`current` non-null不证明 carrier/Renderer/paintability。
 
-Compatibility/current target：
+每 carrier Viewport sender至多一个 admitted/in-flight unit + 一个 not-yet-admitted latest slot。合法 resize burst覆盖 pending而不填满 shared writer，已 admitted不能撤回，fresh carrier独立取最新合法 sample作为 baseline；不能触动 frozen `/1` writer或加入 generic priority。旧 source/old carrier/old generation queued callbacks被 current identity fence；fresh Renderer同一 Runtime可短暂保留 last observation，必须由 matching fresh baseline最终收敛。无合法 sample不发0/null/default。详见 [Viewport State v1](../15-contracts/viewport-state-v1.md)。
+
+Viewport value只能由业务据已提交 world facts决定如何投影，然后通过普通 RenderDomain提交；Viewport receiver不直接修改 Store/Projector，更不允许 suspended Frame借 resize自动进行 movement/transfer/call。
+
+## 6. Fresh carrier / failure
 
 ```text
-loomrealm.renderer-data/1  Frozen compatibility
-loomrealm.renderer-data/2  candidate target subject
+Input: fresh remote Interest registry, fresh State baseline, Event future-only
+Render: first render.domains registry → snapshots → ordinary patch/event
+Viewport (/2): fresh legal sample baseline when available; otherwise first legal later
 ```
 
-DataAuthority只授权 current Renderer为 `(S,G,P)` 建立/持有 Data Connection，不携 endpoint/ticket/MessagePort/Interest/Input/Viewport/Render state。
+三 child baseline独立，无 atomic super-snapshot或固定先后；Control/Data可任意相对顺序但按各 owner/currentness收敛。Same G reconnect不重建 business Domain/InputListener/Viewport capability；Render wire Domain lifetime沿 Frozen v1；Viewport last value保留，等值 baseline无 callback。fresh G Render wire universe遵循 Frozen语义，Viewport retained value在同 Runtime存活时保留等待新 current baseline。
 
-Data Connection cardinality：
+Well-formed authority-inapplicable Input按 Frozen规则 drop；Input/Render/Viewport malformed各自 child fatal退休 Data；不自动创建 Frame unwind/Runtime failure/RenderDomain destroy。Data retire不使旧 renderer Store变第二份 authority；presentation保持/冻结沿 M13当前性规则。
 
-```text
-(Session, current Renderer, subsystemKey)
-    → 0..1 current Data Connection
-```
+## 7. Platform realization / exclusions
 
-一个 carrier承载多个 Frame/Input contexts 与 Render Domains，并在 v2 中额外承载一个 Subsystem-scoped current viewport state stream；它仍不是 per-Frame/per-Activation/per-Domain connection。
+Hostra Broker通过 Runner provisioning IPC→Data WebSocket，PWA通过 MessageChannel→transferred Ports；只供 physical paired establishment，应用 payload都以 string unit传。Desktop/PWA viewport source均实现同一 layout-viewport CSS pixels观察，可独立于 keyboard focus；不暴露 DOM object给 Runtime、不存 width/height于 Main。窗口 reload=fresh Renderer participant；same-generation Data-only reconnect=同 Renderer逻辑身份、新 carrier。禁止 Environment service locator、viewport interest、InputTarget bypass、Main geometry mirror、cross-child ACK、generic queue manager或 multi-window routing。
 
-Profile改变必须 fresh Data generation。
+## 8. Governance
 
----
-
-## 4. Data Application Profiles
-
-```text
-loomrealm.renderer-data/1
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
-
-loomrealm.renderer-data/2
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
-+ Viewport State v1
-```
-
-Profile固定 shared carrier mechanics：
-
-```text
-one carrier unit = one UTF-8 JSON text string
-common 1 MiB / depth-64 preflight
-one connection-wide inbound reader / ordered dispatcher
-one connection-wide outbound serialized writer
-exact direction + namespace demux
-fresh-carrier child baseline
-terminal first-wins / no retry-replay-migration
-```
-
-Profile v1保持 Frozen。Profile v2 是显式 successor candidate；不得把 `viewport.state` 当 v1 optional extension。
-
-目标 implementation subject 的 canonical Main policy选择 `/2`；当前 slice不引入 carrier negotiation、Game Entry requested profile、per-Subsystem capability flags或自动 downgrade。
-
----
-
-## 5. User Input: Three Lifetimes
-
-User Input有三个正交 lifetime：
-
-```text
-Desired Interest[F]
-    Frame-scoped
-    Subsystem-owned
-
-Input Lease(F,A)
-    Activation-scoped
-    Main InputTarget-owned
-    one-shot
-
-Wire Publication State
-    current Data carrier scoped
-    Interest Registry + retained State + Event stream
-```
-
-因此 fresh Activation可复用 Desired Interest但不可复用 old State/Event；fresh Data carrier重新建立 remote publication baseline。
-
----
-
-## 6. User Input Effective Gate
-
-对 `(S,F,A,C)`：
-
-```text
-Effective(F,A,C)
-=
-current Data(S,G,P)
-∧ Main InputTarget == (S,F,A)
-∧ mirrored/local F active/current A
-∧ C ∈ Interest[F]
-∧ Producer(C) available
-```
-
-Interest/Producer只能缩小，不能创建 Main authority。Renderer不得从 DOM focus、Render focus、component lifetime、carrier existence或 cached Activation生成 InputTarget。
-
-Subsystem receiver仍做 local Frame/Activation/Interest gate；well-formed stale input只 drop。
-
----
-
-## 7. Viewport State: Independent Runtime Observation
-
-Viewport State不是 User Input 的第四种 producer。
-
-```text
-Viewport object lifetime
-    Subsystem Runtime-scoped
-
-Viewport author retained value
-    last successfully accepted observation
-
-Viewport wire publication baseline
-    current Data carrier-scoped
-```
-
-因此：
-
-```text
-Frame suspend / InputTarget loss
-    MUST NOT block viewport convergence
-
-Data carrier loss
-    MUST NOT clear retained author viewport
-
-fresh carrier
-    fresh viewport wire baseline when legal sample available
-```
-
-Viewport payload只含 logical CSS `width/height`；DPR/focus/visibility/screen/DOMRect不进入 v1。
-
-Main只选择 Data profile/currentness，不拥有 width/height。Business Runtime决定 viewport如何影响 camera/projection/layout policy。
-
----
-
-## 8. Control / Data Cross-plane Ordering
-
-Renderer Control 与 Data独立，无 global total order。
-
-合法：
-
-```text
-Interest[F] before Control knows F
-Control/InputTarget before Interest[F]
-Viewport state before/after Render baseline
-```
-
-收敛由各 child retained/currentness规则完成，不增加：
-
-```text
-cross-plane ACK
-revision join
-barrier message
-subscription handshake
-atomic Input+Viewport+Render super-snapshot
-```
-
----
-
-## 9. User Input State / Event / Reset
-
-```text
-State
-    self-contained
-    latest wins
-    coalescible before emitted
-
-Event
-    ordered
-    transient
-    no replay
-    may drop before emitted
-
-Reset(F,A)
-    clears retained State for old lease
-    does not modify Interest
-    global State coalescing barrier
-```
-
-标准 Keyboard/Pointer/Gamepad sibling State/Event同时 Effective时，physical transition保持 post-transition State → Event。
-
-same-carrier direct InputTarget `A1 → A2`：old lease ends → best-effort Reset(A1) → first A2 ordinary input。
-
----
-
-## 10. Canonical Standard Input
-
-Frozen User Input v1不复制 Platform API object。
-
-```text
-Keyboard  physical-control code set, not text/IME
-Pointer   normalized fixed-point Renderer input-surface coordinates
-Gamepad   fixed standard logical layout
-```
-
-无法可靠映射到标准模型的能力使用 `x.*` custom channel或未来版本。Viewport已证明具有不同 lifetime，因此不得再以 custom input channel承载。
-
----
-
-## 11. Fresh Data Carrier
-
-old current carrier retired时，各 child wire publication baseline结束。
-
-fresh carrier：
-
-### User Input
-
-```text
-remote Interest Registry = {}
-retained State = {}
-Event history = none
-→ republish current Desired Interest
-→ State fresh baseline
-→ Event future-only
-```
-
-### Render
-
-```text
-first Render message = current Registry
-→ fresh Snapshot each current Domain
-→ ordinary commit/Event
-```
-
-### Viewport (/2 only)
-
-```text
-Renderer has legal current sample
-→ promptly enqueue fresh viewport.state baseline
-
-no legal sample yet
-→ no synthetic null/0/default message
-→ first legal sample publishes later
-```
-
-Subsystem `scope.viewport.current` retains the last accepted observation across carrier loss; equal fresh baseline need not create an author callback。
-
-same-generation reconnect：Input/Render/Viewport wire baselines fresh；Render wire Domain lifetime preserved；business InputListener/RenderDomain/Viewport capability objects不因 carrier替换自动重建。
-
----
-
-## 12. Failure Boundaries
-
-User Input区分 protocol-invalid、well-formed authority-inapplicable、unknown/stale Interest与 Producer loss/return；既有规则不变。
-
-Viewport：
-
-```text
-malformed viewport.state
-    → child protocol fatal
-    → retire Data carrier
-
-well-formed same value
-    → accept / no callback required
-
-listener throw/rejection
-    → local containment
-    → not Data reader flow control
-```
-
-任一 Data child protocol fatal都不直接等于 Runtime failure或 Frame unwind。
-
----
-
-## 13. Render Independence
-
-Render Update复制 Subsystem-owned authoritative presentation state。
-
-```text
-Frame close != Domain destroy
-Activation change != Domain lifecycle
-Input Interest != Render visibility
-Viewport observation != Render commit
-Data retire != authoritative business Domain destroy
-```
-
-Viewport变化只有在 business Runtime据其 policy提交新 Render state后才影响 Store/DOM；Core viewport receiver不直接修改 presentation。
-
----
-
-## 14. Platform Provisioning / Physical Viewport
-
-Broker建立物理 Data carrier因平台不同：
-
-```text
-Hostra
-    Broker → Runner provisioning IPC → Data WebSocket
-
-PWA
-    Broker → MessageChannel → transfer Ports
-```
-
-最终产生 role-local `RendererDataBinding` / `SubsystemDataBinding` 并安装匹配 `(S,G,P)` 的 carrier。
-
-Viewport physical source同样可因平台不同：Desktop可观察 Renderer Window CSS size；PWA可使用对应浏览器 surface source。Physical source不拥有 Main/Data/Frame/Render authority，也不向 business暴露 DOM object。
-
----
-
-## 15. Final Invariants
-
-1. Main Control authority、Subsystem desired/retained state、Renderer local observation/replica、Platform physical topology分离；
-2. DataAuthority使用 `(S,G,dataProfile)`，physical carrier不拥有 generation/profile；
-3. `/1` = Frozen Connection1 + Input1 + Render1；`/2` = candidate `/1` + Viewport1；
-4. Profile replacement需要 fresh generation；
-5. Data connection per-Subsystem，不 per-Frame/Activation/Domain；
-6. User Input = current Data × Main InputTarget × Interest[F] × Producer；
-7. Viewport State独立于 InputTarget/Interest/Producer，author capability Runtime-scoped；
-8. Control/Data无跨连接 total order；各 child独立收敛；
-9. fresh Data carrier重新建立所有 Profile child publication baseline；
-10. shared reader/writer/order/terminal不创建 shared child revision/transaction；
-11. protocol-invalid child traffic retire Data，well-formed stale input按既有 contract drop；
-12. carrier loss不清空 retained viewport observation，也不销毁 business RenderDomain；
-13. Platform provisioning/source只提供 physical capability，不拥有 application authority；
-14. 当前 slice不建立 generic Environment service locator或 profile negotiation framework。
+Core Docs Freeze需要 formal contract + executable-ready conformance + docs-only SHA cross review；implementation PASS另在新的 executable subject资格 ledger记录。Map PR0性能证据是独立 Map Freeze gate，不能把 Core protocol自洽当作 payload/latency PASS。
