@@ -18,7 +18,7 @@ Main/Renderer/Subsystem/Desktop    revised four-child NOT IMPLEMENTED
 Profile /1 fixtureSetRevision      3 spec only; NOT EXECUTED
 Compatibility assessment           NOT VERIFIED
 Connection projection              corrected 9fb2c72; final cross-review pending
-Phase plan current route           updated 3087653; Map PR0 feasibility vs target P95 separated
+Phase plan current route           amended eb518d6 (preserved old M1–M17 detail)
 Data/Subsystem exact API           restored 5b1eb1d / 488fa34; broader diff audit pending
 Product build cohort               NOT VERIFIED
 Core Docs Freeze subject SHA       PENDING
@@ -48,8 +48,8 @@ Compatibility conclusion: NOT VERIFIED
 - [ ] ADR0037/历史ADR0025/0036的partial supersession、index与旧`/2`历史状态一致，完整cross-review签署。
 - [ ] Corrected `/1`四child exact direction/schema/preflight/diagnostics/reader/writer/current authority与Control/Connection一致，旧Input/Render/Control/Connection wire不修改。
 - [x] Connection §1/§9/§22仅组合投影编辑修正，[diff `9fb2c72`](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)未动zero-message/current-retired/generation/limits；总cross-review仍待签署。
-- [ ] [Protected semantics](./viewport-v1-final-freeze-closure-2026-09-16.md#3-受保护语义审核范围)最终逐文件旧→新SSOT审计：Data exact peer/terminal restored、Subsystem author projection restored，但governance/platform/overview/index/其他module的完整diff检查仍PENDING。
-- [x] [phase-1 delivery plan](./phase-1-delivery-plan.md)已同步C0→C1→Map PR0**可行性**→Map Docs Freeze→PR1/PR2实现后P95→PR3同SHA资格，旧ADR0035 subject不冒充新evidence。
+- [ ] [Protected semantics](./viewport-v1-final-freeze-closure-2026-09-16.md)最终逐文件旧→新SSOT审计：Data exact peer/terminal restored、Subsystem author projection restored，但governance/platform/overview/index/其他module的完整diff检查仍PENDING。
+- [x] [phase-1 delivery plan](./phase-1-delivery-plan.md)已同步C0→C1→Map PR0**可行性**→Map Docs Freeze→PR1/PR2实现后P95→PR3同SHA资格，并保留既有M1–M17详尽历史实施约束；旧ADR0035 subject不冒充新evidence。
 - [ ] Viewport single designated logical surface、floor/invalid conversion、bounded publisher、source/carrier fence、retained/fresh/terminal matrix cross-review签署。
 - [ ] `scope.viewport`同步首发含null、current getter先更新、throw/rejected thenable隔离、unsubscribe/terminal inert的assertions完成cross-review。
 - [ ] Core不硬编码Window DOM、map cap/camera/chunks/settle/menu；产品统一rollout属本ledger，最终cross-review签署。
@@ -77,7 +77,7 @@ Rollout owner/signoff: PENDING
 
 ## 5. Docs Freeze之后唯一实施和资格路线
 
-Current execution owner：[phase plan ADR0037 route](./phase-1-delivery-plan.md#adr0037-current-route--corrected-first-release-1--map-dynamicperformance)；[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)记录历史diff；Map每刀/性能精确规范只看[Map主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
+Current execution owner：[phase plan ADR0037 route](./phase-1-delivery-plan.md)；[freeze remediation](./viewport-v1-final-freeze-closure-2026-09-16.md)记录历史diff；Map每刀/性能精确规范只看[Map主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。
 
 ```text
 C0 external compat / documentation + cross-review → Core Docs Freeze SHA
@@ -103,7 +103,7 @@ Executable subject SHA: PENDING
 |---|---|---|
 | External compatibility owner/signoff | PENDING | NOT VERIFIED |
 | Connection editorial projection | `9fb2c72` | DOC CORRECTED / final review pending |
-| Phase plan corrected PR0 route | `3087653` | DOC CORRECTED |
+| Phase plan corrected PR0 route | `eb518d6` | DOC CORRECTED / historic detail retained |
 | Data/Subsystem exact API | `5b1eb1d` / `488fa34` | KEY SURFACES RESTORED / broader audit pending |
 | Cohort manifest and no mixed binary | PENDING | NOT VERIFIED |
 | Core Docs Freeze / docs SHA | PENDING | HOLD |
