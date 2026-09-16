@@ -83,7 +83,7 @@ export interface SubsystemScope {
 }
 ```
 
-Object lifetime=Runtime/Scope；`current`与delivered snapshots detached/immutable。Subscribe同步恰好初次交付调用时latest committed current（含null），以后只structural size变化通知；callback前getter已更新。Synchronous throw局部隔离且返回unsubscribe；returned rejecting thenable局部catch/report、不阻塞reader或产生unhandled rejection/terminal；unsubscribe幂等，调用后不再交付；Runtime terminal/abort后late delivery inert。禁止第二套`get()+onChange`竞态API或暴露Window/Renderer identity/transport。
+Object lifetime=Runtime/Scope；`current`与delivered snapshots detached/immutable。Subscribe同步恰好初次交付调用时latest committed current（含null），以后只structural size变化通知；callback前getter已更新。Synchronous throw局部隔离且返回unsubscribe；returned rejecting thenable局部catch/report、不阻塞reader或产生unhandled rejection/terminal；unsubscribe幂等，调用后不再交付；Runtime terminal/abort后late delivery inert。**若调用者在Runtime terminal/abort后仍持有Viewport引用并调用`subscribe`，MUST直接返回inert、幂等的unsubscribe且不得执行初始或后续listener callback；`current`若仍可读取也仅为历史值，不证明可用性。同步初始交付规则只适用于Runtime存活期间。** 禁止第二套`get()+onChange`竞态API或暴露Window/Renderer identity/transport。
 
 ## 7. Governance
 
