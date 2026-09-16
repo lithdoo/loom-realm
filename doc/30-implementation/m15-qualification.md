@@ -2,16 +2,16 @@
 
 ## Status
 
-**Closed — implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` after retained movement updates.**
+**Requalification Pending — current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`; local refresh movement gate is failing.**
 
-The previous Closed decision remains historically valid for subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened. M14 is Closed on this subject. Local `test:m15:desktop` / `test:m15:hostra` and hosted frozen-Hostra `npm run test:m15` passed against Hostra `d863beab3c59c3bd4f271514a228fa8fee0bf5b6`.
+The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`. Physical design, ADR 0034, and the frozen Hostra baseline are not reopened. Current M14 qualification is pending, and the current-subject local movement qualification passes ordinary movement but fails the frozen refresh threshold；therefore M15 is not Closed.
 
 Current physical subject is defined by：
 
 ```text
 ADR 0034
 + M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
-+ LoomRealm implementation a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f
++ LoomRealm implementation c642cda9cee2b318b3aa8f6285de05d6b6ed6bea
 ```
 
 The previous direct-Electron implementation is not the current qualification subject。
@@ -43,8 +43,8 @@ M14 formally Closed
 The current qualifying implementation subject is：
 
 ```text
-a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f
-test(m15): keep the 50ms gate on ordinary movement only
+c642cda9cee2b318b3aa8f6285de05d6b6ed6bea
+fix(render): preserve update closure invariants
 ```
 
 It is the landed LoomRealm tree containing：
@@ -67,18 +67,18 @@ The Hostra identity is frozen above；any later behavior-affecting change to M15
 
 | Gate | Evidence | Status |
 | --- | --- | --- |
-| Existing milestone prerequisite | current `npm run test:m14` on same tree | **PASS — hosted M14 Node 24 and nested inside M15 Node 24** |
-| Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PASS** |
+| Existing milestone prerequisite | current `npm run test:m14` on same tree | **PASS — local Windows, 2026-09-16；hosted rows remain pending in M14 ledger** |
+| Formal M14 prerequisite | `m14-qualification.md` status `Closed` | **PENDING — M14 is Requalification Pending** |
 | Frozen M15 design | ADR 0034 + recomposition SSOT + frozen Hostra baseline | **PASS / PREIMPLEMENTATION CLOSED** |
-| M15 boundary/build | no canonical LoomRealm Electron ownership | **PASS — local `test:m15:desktop`** |
-| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PASS — local `test:m15:hostra`** |
-| Document bootstrap | acquire/document rendezvous + navigation-only route | **PASS — local `test:m15:hostra`** |
-| Input/reload/reconnect | production Hostra Window path | **PASS — local `test:m15:hostra`** |
-| Movement first-paint | 128×8 ordinary movement P95 ≤ 50ms | **PASS — local and hosted `test:m15:hostra`** |
-| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PASS — local and hosted** |
-| Canonical aggregate | `npm run test:m15` | **PASS — hosted frozen-Hostra Node 24** |
-| Hosted qualification | dedicated M15 workflow, same subject | **PASS — [M15 run 34998417264](https://github.com/lithdoo/loom-realm/actions/runs/34998417264)** |
-| Formal M15 closure | all rows above PASS for one subject | **Closed** |
+| M15 boundary/build | no canonical LoomRealm Electron ownership | **PARTIAL PASS — current-subject `npm run build:m15`; full gate pending** |
+| Real Hostra vertical | frozen Hostra → HOSTRA_SUBCMD LoomRealm → Hostra-owned Window | **PARTIAL PASS — current-subject real Map066 smoke and physical pixel-diff assertion** |
+| Document bootstrap | acquire/document rendezvous + navigation-only route | **PENDING — current-subject aggregate required** |
+| Input/reload/reconnect | production Hostra Window path | **PENDING — current-subject aggregate required** |
+| Movement first-paint | 128×8 ordinary **and refresh** movement P95 ≤ 50ms | **FAIL — local 2026-09-16: ordinary n=300 P95=42.9ms；refresh n=90 P95=96.3ms** |
+| Termination/failure | signals/window/RPC/fatal/startup failure → one termination funnel | **PENDING — current-subject aggregate required** |
+| Canonical aggregate | `npm run test:m15` | **BLOCKED — movement refresh gate fails** |
+| Hosted qualification | dedicated M15 workflow, same subject | **PENDING** |
+| Formal M15 closure | all rows above PASS for one subject | **Requalification Pending** |
 
 `getHostState/getAllWindows` may observe that a Window is Hostra-owned；they are not production authority/currentness mechanisms。
 
@@ -188,6 +188,26 @@ same-generation physical Data loss
 ```
 
 Qualification MUST assert Renderer logical identity is unchanged during Data-only reconnect。This is intentionally different from reload, which creates a fresh Renderer identity。
+
+### 5.1 Current movement measurement — 2026-09-16
+
+Current-subject local command：
+
+```text
+node --test --test-concurrency=1 --test-name-pattern="M15 128x8 ordinary and refresh" test/m15-hostra-product.test.mjs
+```
+
+Environment：Windows 10.0.19044、Node 22.12.0、Intel i5-11500、frozen Hostra `d863beab3c59c3bd4f271514a228fa8fee0bf5b6`。
+
+```text
+ordinary: n=300, P50=26.5ms, P95=42.9ms, max=61.0ms   PASS
+refresh:  n=90,  P50=75.6ms, P95=96.3ms, max=129.7ms FAIL
+round 1: attempts=161, invalid=1
+round 2: attempts=164, invalid=1
+round 3: attempts=164, invalid=1
+```
+
+All rounds remain below the frozen 5% invalid-sample cap. A separate real Map066 smoke also proved that one logical movement produces a physical screenshot pixel difference. The failure is therefore the refresh latency threshold, not an invalid-sample or no-paint loophole。
 
 ---
 
@@ -302,9 +322,9 @@ npm run test:m14
 
 ---
 
-## 10. Current Implementation Evidence — 2026-09-11
+## 10. Historical Implementation Evidence — 2026-09-11
 
-The landed implementation subject completed the seven recomposition slices, the qualification cleanup, and the canonical aggregate locally：
+The then-current implementation subject completed the seven recomposition slices, the qualification cleanup, and the canonical aggregate locally. These results are retained as historical regression evidence and do not qualify `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`：
 
 ```text
 Windows
@@ -342,7 +362,7 @@ former Content/listener port refuses connections after process exit
 
 The frozen Hostra baseline uses catchable POSIX signals for its 1000 ms final-window grace path，while its own upstream signal test is skipped on Windows。The hosted Ubuntu qualification supplied the required `window.closed` / `host.shuttingDown` / SIGTERM ordering and terminal cleanup evidence。
 
-The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。[M15 run 34998417264](https://github.com/lithdoo/loom-realm/actions/runs/34998417264) completed the canonical gate and uploaded its qualification report for implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。Previous-subject hosted evidence remains historically valid only for `fd1df5872d4310e268857e700a067f4e0b9e75d1` ([M15 run 34621764146](https://github.com/lithdoo/loom-realm/actions/runs/34621764146))。
+The workflow checks out the exact frozen Hostra commit and sets `HOSTRA_SOURCE_DIR`；it does not install a moving Hostra version or patch Hostra runtime source。[M15 run 34998417264](https://github.com/lithdoo/loom-realm/actions/runs/34998417264) is historical evidence only for subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。The older [M15 run 34621764146](https://github.com/lithdoo/loom-realm/actions/runs/34621764146) likewise proves only `fd1df5872d4310e268857e700a067f4e0b9e75d1`；neither may be promoted to the current subject.
 
 ---
 
@@ -366,8 +386,8 @@ Current state：
 M10–M14 logical/business contracts   frozen
 historical standalone Electron M15   implemented + migration-qualified
 M15 Hostra physical design           Implementation Frozen / Preimplementation Closed
-M15 Hostra implementation            complete + locally qualified
-formal M15 milestone                 Closed
+M15 Hostra implementation            complete / local refresh performance gate failing
+formal M15 milestone                 Requalification Pending
 ```
 
-No further architecture/design pass is required。Only evidence of a real contradiction with the frozen Hostra baseline or a frozen LoomRealm contract may reopen M15 physical design。
+No further architecture/design pass is authorized by this performance failure。Keep the correct current implementation and frozen 50ms ordinary/refresh gate；record a separate follow-up design before attempting backing canvas, dynamic retained margins, a new scheduler, or any other optimization outside the frozen refactor scope。

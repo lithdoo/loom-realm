@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M1–M15 Qualified / Closed；ADR 0035 implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` **Closed**
+> 稳定程度：M1–M10、M12–M13 Closed；current ADR 0035 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 使 M11/M14/M15 **Requalification Pending**
 > 主要定义：current implementation fact-source、delivery route、qualification entry points  
 > 依赖：[平台组合系统](../10-architecture/platform-composition-system.md)、[模块设计目录](../20-modules/README.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0035](../decisions/0035-render-domain-existing-node-update.md)
 > 最近复核：2026-09-15
@@ -46,42 +46,43 @@ M7  Renderer Control                          ✅ Qualified
 M8  Data role integration                     ✅ Qualified
 M9  Desktop Data Broker                       ✅ Qualified
 M10 User Input                                ✅ Closed
-M11 Render Replication                        ✅ Closed
+M11 Render Replication                        ⏳ Requalification Pending
 M12 Content                                   ✅ Closed
 M13 Web Presentation                          ✅ Closed
-M14 Map Game Library + First Real Game        ✅ Closed
-M15 Hostra-owned Desktop Full E2E             ✅ Closed
+M14 Map Game Library + First Real Game        ⏳ Requalification Pending
+M15 Hostra-owned Desktop Full E2E             ⏳ Requalification Pending（refresh gate failing）
 M16 PWA Runtime                               pending
 M17 PWA Full E2E / Equivalence                pending
 ```
 
-Last formally closed milestone gate remains：
+Last unaffected formally closed milestone gate remains：
 
 ```text
-npm run test:m15
+npm run test:m13
 ```
 
 M14/M15 implementation/consumer/physical semantics remain frozen；formal status only follows the designated qualification records。
 
-> **Accepted evolution notice：** ADR 0035 `RenderDomain.update()` 已在 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上按 M11 → M14 → M15 重新 Closed。上表 Closed 描述该 subject。
+> **Accepted evolution notice：** current subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 修正 ADR 0035 实现闭环后，M11 → M14 → M15 必须取得新的同一 subject evidence。旧 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 只保留历史 Closed 证据。
 
 ---
 
 ## 3. Current Phase Route
 
 ```text
-M1–M13                                      Closed
+M1–M10, M12–M13                            Closed
+M11 Render Replication                     Requalification Pending
 ↓
-M14 Map Game Library + First Real Game     Closed
+M14 Map Game Library + First Real Game     Requalification Pending
 ↓
-M15 Hostra-owned Desktop Full E2E          Closed
+M15 Hostra-owned Desktop Full E2E          Requalification Pending
 ↓
-M16 PWA Runtime                            Pending
+M16 PWA Runtime                            Blocked by M11/M14/M15 requalification
 ↓
 M17 PWA Full E2E / Equivalence             Pending
 ```
 
-ADR 0035 capability evolution 作为 M16 前的 accepted cross-milestone correction先行；它保持 M14 ownership 与 M15 physical design冻结，只重新 qualification downstream executable subjects。该 evolution重新 Closed 后，next implementable milestone恢复为 M16。Do not reopen M14 ownership/M15 physical design without a real contradiction against the frozen contracts or Hostra baseline。
+ADR 0035 capability evolution 作为 M16 前的 accepted cross-milestone correction先行；它保持 M14 ownership 与 M15 physical design冻结，只重新 qualification downstream executable subjects。current subject 的 ordinary movement 已通过，但 refresh P95 `96.3ms` 未达到 `<=50ms`；按冻结计划停止并报告，另立 follow-up 后才能继续优化。该 evolution重新 Closed 后，next implementable milestone恢复为 M16。
 
 ---
 

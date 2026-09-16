@@ -1,7 +1,7 @@
 # `@loomrealm/subsystem`
 
-> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 Implemented / Qualified / Closed**
-> 阶段：M11 accepted capability evolution / Closed
+> 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 Implemented / Requalification Pending**
+> 阶段：M11 accepted capability evolution / current subject requalification
 > 最近复核：2026-09-15
 > 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md) · [Rendering System](../../doc/10-architecture/rendering-system.md)  
 > 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md) · [Render Update v1](../../doc/15-contracts/render-update-v1.md)  
@@ -12,7 +12,7 @@
 
 > **业务只表达业务；SDK把 Frozen protocol 投影为窄 author capability。M11 不新增 Platform Port、service locator、public RenderManager、EventBus 或第二份 Frame/Input/Render authority。**
 
-> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已实现。本文 Current surface 含 `RenderDomainUpdate` 与 `update()`。本 implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 已 Closed。
+> **Current notice：** ADR 0035 的 `RenderDomain.update()` 已实现，本文 Current surface 含 `RenderDomainUpdate` 与 `update()`。current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的本地 `npm run test:m11` 已通过，hosted Node 20/24 待复验；旧 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 仅保留历史 Closed 记录。
 
 ---
 

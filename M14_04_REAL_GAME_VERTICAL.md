@@ -1,6 +1,6 @@
 # M14 / 04 — First Real Game Vertical
 
-> 状态：**Implemented / contract frozen; formal Closed**
+> 状态：**Implemented / contract frozen; current subject Requalification Pending**
 > Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented canonical vertical/evidence shape; it does not independently claim milestone closure.
 
 ## Objective

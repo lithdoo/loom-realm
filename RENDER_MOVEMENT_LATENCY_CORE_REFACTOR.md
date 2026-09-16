@@ -2,11 +2,14 @@
 
 > 状态：Implementation Specification Frozen；ADR 0035 Accepted，PR 0 治理传播已完成  
 > Freeze Gate：Passed — PR 0 governance baseline `59fcd6fb3d4e6e70943780d994d750ac4f26a34e`  
+> Implementation Status：**Requalification Pending** — current subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`；ordinary movement P95 `42.9ms` PASS，window-refresh movement P95 `96.3ms` FAIL（gate `<=50ms`）
 > 日期：2026-09-15  
 > 范围：`@loomrealm/subsystem`、`@loomrealm/renderer`、`@loomrealm-game/map`、`examples/essentials-v21.1-local`；`@loomrealm/data` / `@loomrealm/wire` 只做现有协议回归，不在本计划中优化  
 > 目标：消除本地地图移动从方向键按下到首个可见像素变化之间的高延迟，同时保持现有 authority、Render Update v1、碰撞、换图、重连和最终收敛语义。
 
 本文基于当前仓库代码、Map066 实际数据和 Hostra/Electron 本地链路测量。本文覆盖 `examples/essentials-v21.1-local/MAP_MOVEMENT_LATENCY_REFACTOR_DRAFT.md` 中关于问题根因、实施顺序和核心模块触发条件的结论；旧文档不得继续作为实现依据。Autotile、layering、transfer 文档中与本问题不冲突的既有约束继续有效。
+
+> **执行结果记录（非规范性状态）：** current subject 已完成 revision rollover、closed-shape validation、单次 COW 与真实截图 smoke 修正。本地三轮合并样本为 ordinary `n=300 / P95=42.9ms`、refresh `n=90 / P95=96.3ms`，三轮 invalid 均为 `1` 且低于 5%。因此严格触发第 9.4 节“保留正确实现，停止并报告”；不得降低门槛或在本文范围内追加 backing canvas、动态 margin、新 scheduler。该状态记录不修改冻结的 normative clauses，也不改变 PR 0 baseline。
 
 ---
 

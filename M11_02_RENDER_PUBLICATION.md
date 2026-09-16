@@ -1,6 +1,6 @@
 # M11 / 02 — Render Publication
 
-> 状态：**Implemented / Qualified / Closed**（implementation subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`）
+> 状态：**Implemented / Requalification Pending**（current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`；`a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 仅为历史 Closed subject）
 > 阶段：M11 Render  
 > 落地顺序：02  
 > 最近复核：2026-09-15
@@ -10,7 +10,7 @@
 
 > **publication state 是 generation/carrier-local projection，不是第二份 business authority。**
 
-> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 的 existing-node author update 与下述 Patch publication 已在 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 上 requalified。Render Update v1 wire schema不变。
+> **Current notice：** [ADR 0035](doc/decisions/0035-render-domain-existing-node-update.md) 的 existing-node author update 与下述 Patch publication 已在 current subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 上修正；Render Update v1 wire schema不变。旧 subject 的 qualification 不可转用于 current subject，hosted Node 20/24 尚待复验。
 
 ---
 

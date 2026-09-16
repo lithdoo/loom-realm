@@ -1,9 +1,9 @@
 # M14 / 05 — Qualification Closure
 
-> 状态：**Closure contract frozen; current subject Closed**
+> 状态：**Closure contract frozen; current subject Requalification Pending**
 > Evidence authority：`doc/30-implementation/m14-qualification.md` is the single source of truth for the current qualification subject, run IDs, local evidence and formal M14 status. This file defines the gate; it does not mirror live PASS checkmarks.
 >
-> **Current notice：** subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` is Closed in the ledger. Dedicated hosted M14 Node 20 hung and was cancelled; Node 24 `test:m14` passed, and the same aggregate passed as the first stage of hosted M15 Node 24.
+> **Current notice：** current subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` consumes changed M11/Renderer behavior and must requalify this frozen gate. Subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` remains historical evidence only；its dedicated hosted M14 Node 20 run was cancelled and therefore cannot close the new subject.
 
 ## 1. Closure unit
 
@@ -41,7 +41,7 @@ Pure documentation corrections that only record or explain already-observed evid
 
 ```text
 npm run test:m14
-npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root>
+npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root> --map-id 66 --x 8 --y 7 --character-name trainer_POKEMONTRAINER_Red
 ```
 
 `test:m14` is the CI-safe synthetic + real Chromium qualification. `test:m14:essentials-local` is the exact Pokémon Essentials v21.1 corpus qualification.
@@ -109,16 +109,10 @@ Third-party Essentials assets do not enter repository CI.
 ### Invocation
 
 ```text
-npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root>
+npm run test:m14:essentials-local -- --source <path-to-exact-v21.1-root> --map-id 66 --x 8 --y 7 --character-name trainer_POKEMONTRAINER_Red
 ```
 
-Environment fallback is allowed：
-
-```text
-LOOMREALM_M14_ESSENTIALS_SOURCE=<path>
-```
-
-CLI `--source` takes precedence.
+The script has no environment fallback. All five CLI arguments are mandatory；the four frozen game-selection values above must not be guessed or omitted.
 
 ### Exact-source requirement
 
