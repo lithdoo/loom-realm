@@ -1,190 +1,41 @@
 # Renderer Data Profile v2 Conformance
 
-> 层级：正式契约 / Conformance  
-> 状态：Draft / Candidate  
-> 对应 Profile：[Renderer Data Profile v2](./renderer-data-profile-v2.md)  
+> 层级：正式契约 / Conformance Specification  
+> 状态：Draft / Executable-ready Candidate / Not Frozen  
+> Contract：[Renderer Data Profile v2](./renderer-data-profile-v2.md) · [Viewport State v1](./viewport-state-v1.md)  
 > 最近复核：2026-09-16
 
-本文定义 Profile v2 Freeze 前最低可执行证据。Profile v1 的 Frozen conformance继续独立成立；v2测试不能替代 v1 regression。
+Docs Freeze要求完整 expected assertions，而不是 executable PASS。下述 test suite在**实现后**依同一 executable subject运行；v1 conformance必须作为独立 regression保留。
 
----
+## 1. Identity / Main profile selection
 
-## 1. Profile Identity
+`/1` binding只启用 v1 exact acceptance；`/2` binding启用四 child；unknown profile拒绝按既有 boundary处理。canonical target Main对**所有** current Renderer⇄Subsystem DataAuthorities选 `/2`；Broker两端 exact `(Session,Renderer,S,G,P)`匹配。不得按 subsystemKey/map presence自行混配、carrier negotiation/downgrade。`/1→/2`必须 fresh G；same-generation change拒绝/不能 install。若 `/2` endpoints未同时具备，Data absent，不自动回退 `/1`。Explicit `/1` compatibility中新 SDK `scope.viewport.current`从未接受 v2时为 null；存活 Runtime从 v2迁回 v1不得隐式发生。
 
-必须证明：
-
-```text
-binding profile /1 → v1 peer semantics only
-binding profile /2 → v2 peer semantics
-unknown profile     → peer/install rejection according to existing authority boundary
-```
-
-`/1 → /2` replacement必须使用 fresh generation；same-generation profile replacement必须被拒绝/不安装。
-
-Canonical target product subject的 Main/DataAuthority projection必须发布 `/2`，且 broker pairing两端 exact match `(S,G,P)`。
-
----
-
-## 2. Namespace / Direction Matrix
-
-Profile v2必须接受 exact legal direction：
+## 2. Exact namespace/direction and diagnostics
 
 ```text
-Subsystem → Renderer
-  input.interest
-  render.domains
-  render.snapshot
-  render.patch
-  render.event
-
-Renderer → Subsystem
-  input.state
-  input.event
-  input.reset
-  viewport.state
+Subsystem → Renderer: input.interest; render.domains/snapshot/patch/event
+Renderer → Subsystem: input.state/event/reset; viewport.state
 ```
 
-每个 known type在反方向发送必须 Data-fatal。Unknown top-level type必须 Data-fatal。
+每个合法 kind只命中对应 child；反方向/unknown type Data-fatal。Common malformed/unknown type terminal `protocol:"profile"`；Input/Render child error沿 v1 family；**已识别的 viewport.state malformed/child-fatal → protocol:"viewport"**。Profile-v1 peer的 diagnostic类型和 acceptance集合不变：`viewport.state`在 `/1` 必须 fatal，不得忽略。
 
-Profile v1 regression必须证明 `viewport.state` 在 `/1` carrier中无效，而不是被忽略。
+## 3. Reader / writer / common preflight
 
----
+Instrumentation证明每 peer一个 raw reader、有序 dispatcher、一个 serialized writer。child不得绕过 writer，concurrent sends不交错 JSON。每 unit必须 UTF-8 JSON string；non-string、>1MiB、depth>64、invalid JSON/representation在child mutation前拒绝。Viewport不得另建 parser/limit bypass。任一 child protocol-fatal terminal first-wins、pending work恰一次 settle、late units inert；Data failure本身不创建 Runtime fail/Frame unwind/Main authority变更。
 
-## 3. Reader / Writer Ownership
+## 4. Bounded Viewport under shared writer
 
-Instrumentation必须证明：
+运行 [Viewport Conformance §3](./viewport-state-conformance-v1.md) 的 blocked writer、>1024 resizes、interleaved Input/Render；确认最多一个 Viewport writer-admitted/in-flight加一个未 admitted latest slot，普通 burst不引发 writer overflow、最终值收敛、Input/Render无永久饥饿；不增加 generic priority scheduler，不改变 v1 writer/child barriers。old-carrier pending不迁移。单靠 100ms map-side settle不能作为本测试的替代。
 
-```text
-one inbound carrier reader per peer
-one ordered dispatcher
-one serialized outbound writer
-```
+## 5. Fresh-carrier child independence
 
-Input/Render/Viewport manager不得直接竞争 raw `receive()`；各 child sender不得绕过 serialized writer。
+安装 fresh current carrier实际记录每方向 order；Input fresh Interest+State/Event future-only，Render首个 `render.domains`+snapshots，Viewport有合法样本则 fresh current baseline、无合法样本则以后首次合法时发布。无固定 cross-child ordering/atomic super-snapshot。same G reconnect保留 business InputListener/Domain/Viewport对象，Viewport retained equal不重复 callback、changed callback一次；fresh G/Renderer fenced旧 traffic而收敛新尺寸，保留旧 size时不能声称 paintability。测试 Data-only reconnect、fresh Renderer reload和未取得合法样本。
 
-并发 child sends必须按 writer提交顺序产生完整 application units，不 interleave JSON bytes/object fragments。
+## 6. Child isolation / failure
 
----
+Viewport只更新 readonly observation，绝不能自发 Renderer Store commit或改变 InputTarget/Interest；malformed viewport不 reset Input、不 destroy Render Domain、不自动 Frame unwind。Malformed Input/Render不通过 Viewport handler；Viewport subscriber throw/rejection local-contained且不阻塞 reader或终止 Data。
 
-## 4. Common Preflight
+## 7. Cross-version regression (implementation evidence)
 
-继承/重跑 v1 common gates：
-
-```text
-non-string carrier unit rejected
->1 MiB UTF-8 rejected before child mutation
-malformed JSON rejected
-representation-invalid rejected
-depth >64 rejected
-```
-
-Viewport也必须经过同一 common preflight，不得建立 special parser/limit bypass。
-
----
-
-## 5. Child Isolation
-
-合法消息只调用对应 child handler。
-
-```text
-viewport.state
-→ exactly Viewport handler
-→ zero Input/Render semantic mutation
-```
-
-Malformed viewport不得触发 Input reset；malformed Input不得清空 viewport；malformed Render不得改变 viewport retained value before carrier retirement。
-
----
-
-## 6. Fresh Carrier Baselines
-
-对 fresh carrier记录实际 outbound order并验证 child-independent convergence：
-
-```text
-Input Desired Interest republished
-Render Registry/Snapshots republished
-Viewport current legal state published when available
-```
-
-测试不得假设固定 cross-child order或 atomic super-snapshot。
-
-Same-generation reconnect：
-
-```text
-Input publication baseline fresh
-Render publication baseline fresh with same wire Domain identity semantics
-Viewport publication baseline fresh
-Subsystem author viewport retained value not reset
-```
-
-Fresh generation：
-
-```text
-all carrier publication baseline fresh
-Render wire universe fresh per existing contract
-Viewport author capability object remains Runtime-scoped if Runtime itself survives
-```
-
----
-
-## 7. Terminal First-wins
-
-为 Input / Render / Viewport 各注入 protocol-invalid消息，证明：
-
-```text
-first child protocol fatal
-→ one terminal result
-→ queued/late child traffic cannot resurrect carrier
-→ role cleanup idempotent
-```
-
-同时证明 Data terminal本身不直接创建 Main Frame unwind/Runtime failure。
-
----
-
-## 8. Profile Selection Policy
-
-目标 subject必须有测试锁定：
-
-```text
-Main canonical DataAuthority dataProfile == "loomrealm.renderer-data/2"
-```
-
-对所有该 subject current Renderer⇄Subsystem authorities一致使用 `/2`；测试中不得根据 subsystem name/map presence动态选择 profile。
-
-若保留 v1 compatibility construction seam，必须独立测试且不能成为 canonical target subject的隐式 fallback。
-
----
-
-## 9. Cross-version Regression
-
-Freeze packet必须同时包括：
-
-```text
-renderer-data-profile-conformance-v1 PASS
-renderer-data-profile-conformance-v2 PASS
-user-input-v1 PASS
-render-update-v1 PASS
-viewport-state-v1 PASS
-renderer-subsystem-data-connection-v1 PASS
-```
-
-v2 implementation不得修改 v1 wire acceptance集合。
-
----
-
-## 10. Freeze Evidence
-
-记录：
-
-```text
-subject SHA
-all role-local test commands
-Node 20/24 where repository governance requires
-Desktop/Hostra product subject for physical pairing
-raw logs/artifacts
-profile selection snapshot evidence
-fresh-carrier/reconnect evidence
-```
-
-任何 Profile composition/direction/currentness change都建立新 subject并重跑完整矩阵。
+同 executable subject归档：Profile v1 conformance、Profile v2 conformance、Connection v1、User Input v1、Render Update v1、Viewport State v1、Main authority selection；按治理要求 Node20/24、Desktop/Hostra product实际 pairing/physical-source traces。只在这些命令、raw logs、环境与 subject SHA均可核验时由 qualification ledger宣称 PASS/Closed；Docs Freeze不等待这些实现后 artifacts。
