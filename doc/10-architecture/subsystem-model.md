@@ -1,114 +1,375 @@
 # 模块子系统模型
 
-> 层级：系统架构 / Active Design  
-> 稳定程度：Frame/Input、Render、Content沿既有 Frozen/Evolving contracts；Viewport v1与修正 Profile `/1` 为 preimplementation candidates / Not Frozen  
-> 主要定义：Subsystem/Definition/Frame/Runtime 边界、Input/Render/Content/Viewport author projection与 lifetime/error ownership  
-> 依赖：[System overview](./system-overview.md) · [Runtime hosting](./runtime-hosting-system.md) · [Stack runtime](./stack-runtime-system.md) · [Rendering](./rendering-system.md) · [Viewport](./viewport-capability.md)  
-> Formal：[Input v1](../15-contracts/user-input-v1.md) · [Render v1](../15-contracts/render-update-v1.md) · [Content v1](../15-contracts/content-api-v1.md) · [Viewport v1](../15-contracts/viewport-state-v1.md) · [Revised Profile v1](../15-contracts/renderer-data-profile-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> 最近复核：2026-09-16（旧冻结 author 约束保全）
+> 层级：系统架构  
+> 状态：Active Design  
+> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**
+> 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input/Render/Content author projections与 error/lifetime boundary  
+> 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)、[存储与内容系统](./storage-system.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
+> 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
+> 正式 Render：[Render Update v1](../15-contracts/render-update-v1.md)  
+> 正式 Content：[Content API v1](../15-contracts/content-api-v1.md)  
+> 最近复核：2026-09-08
 
-本文件管理角色、author API ownership与通用 mutation/lifetime，不定义地图 gameplay 或物理 DOM sampling；exact wire/currentness/callback细节以 formal contracts为准。旧 Profile v2已 Superseded。**压缩架构描述不得改写原 M10/M11/M12 已冻结的 author surface、limit 或错误语义。**
+---
 
-## 1. Role/dependency and authority
+## 1. Role Boundary
+
+Subsystem Runtime负责：
+
+```text
+business state
+Runtime-level business initialization/cleanup
+local Frame Context + mutation gate
+Frame-scoped Desired Input Interest
+retained author-safe Input State + business delivery
+outbound Frame call/return role
+business Render Domain authoritative state + transient Event intent
+readonly ContentClient usage
+```
+
+Subsystem不负责 Game/Platform manifest、executable selection、Process/Worker、Main public authority、Renderer hosting、DataConnectionBroker、Content physical service/credential/storage。
+
+---
+
+## 2. Definition Module / Platform Boundary
 
 ```text
 Platform LaunchPlan
 → selected Definition Module
-→ Host-owned Runner / role-local capabilities
+→ Host-owned Runner
+→ role-local capabilities
 → @loomrealm/subsystem/host
 → Business Definition
 ```
 
-Business Definition只依赖 public `@loomrealm/subsystem`，不得直接依赖 `/host`、Data/RuntimeControl、fsdb、Platform ports/launcher、Node/Browser DOM或 credentials；Hostra/PWA采用相同 author semantics。Main独占 Session/Runtime public lifecycle、Frame/Stack/Activation/InputTarget/DataAuthority/failure unwind；Subsystem拥有 business state、本地 Frame mutation gate、Desired Input Interest/local delivery、authoritative Render Domains、readonly ContentClient与候选 Runtime viewport observation；Renderer拥有 readonly Control mirror、Input producer、Render replica和 current logical surface观测；Platform拥有物理 process/carrier/source provisioning。没有第二份 Main/Render authority。
-
-## 2. Startup / scope
-
-Runner preflight→capabilities→Runtime Control hello/identified→Definition.initialize→ready。`ready`不能推断 Data/Renderer/Viewport/Render baseline已存在；Viewport object在 Runtime/Scope创建、初始值 null。Framework不得要求游戏因为需要 geometry直接持有 DOM或物理端点。
-
-## 3. Frame outcome / ordinary mutation gate（通用）
-
-Public `Frame`：`id / params / signal / call(subsystem,params)`，不公开 Activation id、Data G/P或 DOM。FrameOutcome：completed/cancelled/failed。Accepted child call suspend caller/revoke Activation；child完成后幸存 caller取得 fresh Activation。Local Frame Context mutation gate拦住 pending call/return、administrative suspension、closing/closed、Runtime terminal期间的 **ordinary Frame business mutation**。Input State在 same-current-Activation pending mutation期 retains latest/suppresses business delivery，Event drop；known-no-commit reopen先converge State，才暴露 recoverable rejection。RenderDomain是独立 Runtime resource，Frame close/suspend不会隐式 destroy/hide Domain。
-
-**通用不变量：** Runtime viewport observation可以在 Frame suspend时更新，但 observation 本身不授予新的 Frame mutation permit、InputTarget/Activation，也不直接提交 Render desired state。业务决定是否根据已提交 facts用既有 RenderDomain更新 presentation。此架构不指定人物行走/碰撞/地图转场、不要求 Frame拥有新 suspend getter。某个真实 consumer若证明现有合法 seam无法满足已接受行为需求，必须单独提交 consumer evidence评审最小 lifecycle能力，不可从 viewport 存在直接推出要扩 public Frame API。Current example只有 map Subsystem，未将 menu/dialog gameplay语义列为该 slice必需验收。
-
-## 4. Input author API（M10 Frozen）
+Business Definition source只依赖：
 
 ```text
-scope.createInputListener({frame,channels})
+@loomrealm/subsystem
 ```
 
-Channels/setChannels为 Frame Desired Interest；`on`/unsubscribe注册回调，setChannels保留 dormant registrations；close/unsubscribe幂等。State detached/immutable，Event never replay，stable handler snapshot/order；async Promise不作为 Data reader backpressure。Fresh Activation不复用旧 State/Event；fresh carrier重发 desired Interest并等待 State baseline。Viewport绝不伪装成 custom input channel；具体 channel/error/handler order以 [Input v1](../15-contracts/user-input-v1.md)和 M10 author surface为准。
+不得直接依赖：
 
-## 5. Viewport author API（候选）
-
-```ts
-export interface ViewportSize {
-  readonly width: number;
-  readonly height: number;
-}
-export interface Viewport {
-  readonly current: ViewportSize | null;
-  subscribe(listener: (viewport: ViewportSize | null) => void): () => void;
-}
-export interface SubsystemScope {
-  readonly viewport: Viewport;
-}
+```text
+@loomrealm/subsystem/host
+@loomrealm/data / runtime-control
+@loomrealm/fsdb / fsdb-http
+platform-ports
+game-package / launcher
+Node/Browser transport
 ```
 
-Runtime-scoped detached/immutable last accepted value，initial null；Data loss保留 last，matching fresh carrier/G/Renderer baseline收敛，equal不重复 callback。Subscribe同步首发含null，callback前更新 getter，throw/rejected Promise local containment，unsubscribe幂等，Runtime terminal后 inert。Frame suspend/close或 InputTarget/Activation变化不替换 Runtime capability。Author不见 Window/DOM、Renderer identity、profile/G、DPR或传输；physical source由 Renderer composition指定 single CSS logical surface。
+Hostra/PWA artifact可以不同，但 author ABI和 business-observable semantics必须相同。
 
-该能力在**修正后的唯一 `/1`**下提供；旧三 child `/1`当前代码不满足它，必须整套 implementation qualification，不设计 `/2`/compatibility null mode。Exact value/source、diagnostic/terminal参照 [Viewport v1](../15-contracts/viewport-state-v1.md)。
+---
 
-## 6. Render author projection（M11 Frozen surface，旧语义全部保留）
+## 3. Authority Boundary
+
+```text
+Main
+    Runtime public lifecycle
+    Frame / Stack / Activation / InputTarget
+    transaction/failure unwind
+    DataAuthority
+
+Subsystem
+    business state
+    local Frame Context + mutation gate
+    Desired Interest[F]
+    retained Input State / delivery
+    business Render Domains
+
+Platform
+    executable + physical hosting/provisioning
+    Content service/binding/credential
+```
+
+Runner/module/transport/Content ownership都不能产生第二份 Frame/Input/Render authority。
+
+---
+
+## 4. Runtime / Frame
+
+Startup：
+
+```text
+Runner loads planned module
+→ validates ABI
+→ constructs required role capabilities including M12 ContentClient
+→ acquire Runtime Control
+→ hello / identified
+→ definition.initialize
+→ ready
+```
+
+如果 required ContentClient在 business initialize前无法构造，属于 Runtime bootstrap failure。
+
+`ready != Data exists != Renderer exists != Input/Render baseline exists`。
+
+Frame author capability只暴露：
+
+```text
+id
+params
+signal
+call(subsystem, params)
+```
+
+Author不见 activationId/generation/platform material。
+
+---
+
+## 5. FrameOutcome / Call
+
+业务结果：
+
+```text
+completed(value)
+cancelled()
+failed(error)
+```
+
+Accepted child call会 suspend/revoke caller Activation，child完成后 surviving caller使用 fresh Activation。
+
+只有明确 pre-commit recoverable rejection可以 typed reject并确认 same current Activation继续；timeout/loss/divergence等 ambiguous/fatal绝不重新进入业务 continuation。
+
+M10已冻结：known-no-commit + same Activation reopen时 retained Input State synchronous local convergence先于 recoverable `frame.call` rejection observable。
+
+---
+
+## 6. Mutation Gate
+
+每个 local Frame Context有 commit-sensitive mutation gate。pending call/return、administrative suspend、closing/closed、Runtime terminal阻止 ordinary business mutation。
+
+Input：
+
+```text
+same-current-Activation pending mutation
+    .state → retain latest, suppress delivery
+    .event → drop
+
+known-no-commit reopen
+    → deliver current retained State
+    → then recoverable rejection observable
+```
+
+Render Domain lifecycle不由 mutation gate/Frame自动创建或销毁。
+
+---
+
+## 7. Input Author Projection — M10 Closed
+
+唯一 creation seam：
+
+```text
+SubsystemScope.createInputListener({frame,channels})
+```
+
+固定：
+
+```text
+channels/setChannels = Interest contribution
+on/unsubscribe       = callback registration
+setChannels preserves dormant registrations
+close/unsubscribe idempotent
+retained State detached/immutable
+Event never replay
+stable handler snapshot/order
+async handler Promise never becomes Data-reader flow control
+```
+
+Fresh Activation不复用 old Input State/Event；fresh Data carrier隐藏地 republish current Desired Interest并等待 fresh State baseline。
+
+---
+
+## 8. Render Author Projection — M11 Surface Frozen / Current Subject Requalification Pending
+
+> **Current：** `RenderDomain.update()` 的 current implementation subject 是 `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`，author surface 保持冻结，本地 `npm run test:m11` 已通过，hosted Node 20/24 尚待复验。旧 [M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265) 仅证明 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。
+
+Exact surface：
 
 ```ts
-interface RenderDomainState {
+export interface RenderDomainState {
   readonly zIndex: number;
   readonly roots: readonly RenderNode[];
 }
-interface RenderDomainUpdate {
+
+export interface RenderDomainUpdate {
   readonly zIndex?: number;
   readonly nodes?: readonly {
     readonly key: string;
-    readonly attrs?: {
-      readonly set?: Readonly<Record<string, string>>;
-      readonly remove?: readonly string[];
-    };
-    readonly data?: {
-      readonly set?: Readonly<Record<string, unknown>>;
-      readonly remove?: readonly string[];
-    };
+    readonly attrs?: { readonly set?: Readonly<Record<string, string>>; readonly remove?: readonly string[] };
+    readonly data?: { readonly set?: Readonly<Record<string, unknown>>; readonly remove?: readonly string[] };
   }[];
 }
+
+interface SubsystemScope {
+  createRenderDomain(initialState: RenderDomainState): RenderDomain;
+}
+
 interface RenderDomain {
   replace(state: RenderDomainState): void;
   update(update: RenderDomainUpdate): void;
   emit(event: RenderEvent): void;
   close(): void;
 }
-// scope.createRenderDomain(initialState): RenderDomain
 ```
 
-`update`仅 Domain zIndex和 existing-node attrs/data top-level members；structural mutation用 `replace`。业务不见 Domain id/revision/Patch/carrier。Author API operations synchronous local-only validate→detach→atomic local commit/bounded Event offer。**live domains≤256；domainId 为 Runtime-instance SDK-owned、never reuse；node key 则为 Domain-lifetime one-shot，不得把两种 identity/lifetime 混写。** Frame close/suspend、Data retire均不自动 destroy Domain，Event无 future-carrier replay。既有具体限制/校验/qualification归 Render v1/M11，不因 viewport改动提高。
+Accepted target 的 Current 实现已包含 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)`；它覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members，结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变下述 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
 
-## 7. Content author projection（M12 Frozen）
-
-`scope.content` readonly Client仅 `record/resource`和对应 returned values/options/errors；不泄漏 installationId、contentVersion请求 selector、raw FSDB/HTTP/path/token。Returned value/cache ownership隔离；普通 read rejection由业务自行 fallback/retry/outcome，不自动 Frame/Runtime failure。Exact shape/error由 [Content v1](../15-contracts/content-api-v1.md) owns。
-
-## 8. Lifetime / Data profile integration
+所有 author operations synchronous local-only：
 
 ```text
-Frame       Frame Context / frame.signal / ordinary mutation gate
-Activation  Main InputTarget one-shot lease facts
-Runtime     SubsystemScope / ContentClient / Viewport / RenderDomain registry
-Data        per-carrier Input / Render / Viewport publication cursors
-Renderer    physical designated surface / presentation document
+validate → detach caller value → atomic local commit / bounded Event offer
 ```
 
-Subsystem SDK一个 connection-wide `SubsystemDataBinding → @loomrealm/data corrected Profile /1 peer → Input/Render/Viewport role behaviors`，child不竞争 reader；Content不在 Profile。Data reconnect不替换 Runtime resources；fresh G只需 new matching baseline，不自行创建 Frame/Activation。Runtime terminal settles/aborts owned work。Main profile-change fresh G规则不因本次 doc correction放宽。
+固定：
 
-## 9. Error/portability boundary
+```text
+live business Domains <= 256
+SDK domainId author-invisible / Runtime-instance no reuse
+business Node key Domain-lifetime one-shot
+Frame close/suspend != Domain destroy/hide
+Data retire != Domain destroy
+Event no future-carrier replay
+```
 
-Business validation/outcome→FrameOutcome.failed；precommit call rejection→typed local error；Input/Viewport subscriber error→local containment；Render author misuse/limit→TypeError/RangeError；Content author misuse→synchronous TypeError，ordinary Content read→ContentReadError caller-local；Control fatal→Runtime failure；Data child/profile fatal→Data retirement；module/capability bootstrap failure→Runtime bootstrap failure。Platform path/token/ticket/DOM/internal stack不得泄漏到 business author。
+M11 Renderer Store internal-only；DOM/Canvas/WebGL presentation属于 M14。
 
-Framework不能反向依赖 map/example，不建立 Environment/Viewport manager、map-specific mutation exception或未被真实消费者证明的 Frame lifecycle public API。Docs Freeze只依 [revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md) 且包含兼容核查；Map验收独立。
+---
+
+## 9. Content Author Projection — M12 Frozen
+
+`SubsystemScope` exact新增：
+
+```ts
+readonly content: ContentClient;
+```
+
+M12 author root只暴露：
+
+```text
+ContentClient.record(namespace,key,{signal?})
+ContentClient.resource(namespace,hierarchicalResourceKey,{signal?})
+ContentRecord / ContentResource
+ContentReadOptions
+ContentReadError / ContentReadErrorCode
+```
+
+Author不提供：
+
+```text
+installationId
+contentVersion request selector
+manifest()/group()/head()
+raw fetch / Response / Headers
+URL builder / bearer
+filesystem path / FSDB handle
+```
+
+返回 `contentVersion` 精确为：
+
+```text
+sha256:<64 lowercase hex>
+```
+
+Local arguments在 HTTP前同步验证；invalid usage → `TypeError` + zero HTTP。Already-aborted valid signal → returned Promise rejects `ContentReadError("CONTENT_CANCELLED")` + zero HTTP。
+
+Returned JSON/`Uint8Array`必须与 internal cache ownership隔离；caller mutation不能改变 future reads。
+
+普通 Content rejection：
+
+```text
+!= Runtime failure
+!= Frame failure
+!= automatic Frame unwind
+```
+
+Business自行决定 fallback/retry/failed outcome。
+
+如果 M13出现第一个真实 `group()` author consumer，再显式最小 reopen；不得 raw Content/FSDB旁路。
+
+---
+
+## 10. Lifetime Matrix
+
+```text
+Frame lifetime
+    owns Frame Context / frame.signal
+
+Activation lifetime
+    owns effective Input lease facts
+
+Runtime lifetime
+    owns SubsystemScope / ContentClient / business RenderDomain registry
+
+Data carrier lifetime
+    owns connection-local Input/Render publication baseline
+```
+
+因此：
+
+```text
+Frame suspend/close != ContentClient replacement
+Activation change   != ContentClient replacement
+Data reconnect       != ContentClient replacement
+Frame close          != RenderDomain close
+Data retire          != business RenderDomain destroy
+```
+
+Runtime terminal最终 settle/abort owned work并清理 live author resources。
+
+---
+
+## 11. Data Plane
+
+Subsystem SDK只有一个 connection-wide Data peer/reader：
+
+```text
+SubsystemDataBinding
+→ @loomrealm/data peer
+→ InputManager / RenderManager role behavior
+```
+
+Input/Render managers不得竞争 raw carrier。Content不是 Data application protocol，也不复用 M9 Data provisioning IPC。
+
+---
+
+## 12. Portability / Error Boundary
+
+Business portability target：
+
+```text
+@loomrealm/map → @loomrealm/subsystem
+```
+
+错误分域：
+
+```text
+business validation            → FrameOutcome.failed
+pre-commit call rejection      → typed local error
+Input handler failure          → local containment
+Render author misuse/limit     → TypeError / RangeError
+Content author misuse          → synchronous TypeError
+Content ordinary read failure  → ContentReadError, caller-local
+Control ambiguity/fatal        → Runtime failure
+Data protocol fatal            → Data retirement
+module/capability bootstrap     → Runtime bootstrap failure
+```
+
+Platform path/token/ticket/internal stack不得泄漏给业务。
+
+---
+
+## 13. Final Invariants
+
+1. Subsystem role platform-neutral；
+2. Main独占 public Frame/Activation/InputTarget/DataAuthority；
+3. Business Definition只依赖 `@loomrealm/subsystem`；
+4. M10 Input、M11 Render、M12 Content使用不同但清晰的 lifetime/ownership；
+5. ContentClient是 Runtime-scoped readonly capability，不是 Repository/service locator；
+6. Content与 executable/FSDB/HTTP physical capability分离；
+7. Render authoritative Domain独立于 Frame/Data carrier；
+8. ordinary Input callback/Render author/Content read failure不自动升级 Runtime/Frame；
+9. Hostra/PWA physical差异不得改变 author-visible semantics；
+10. M13作为真实业务 consumer验证这些冻结边界，而不是重新定义它们。

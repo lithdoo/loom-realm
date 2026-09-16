@@ -1,45 +1,265 @@
 # Map Game Library 设计
 
-> 层级：Game Library 模块投影；状态：**历史 M14 fixed640 已实现；新的动态视口/性能方案为 Design candidate / Map Docs Freeze HOLD / Not Implemented**。M14/M15的当期正式资格看各自ledger。2026-09-16。
-> 当前唯一新主合同：[Map 机械实施合同](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)；[Map-private motion子规范](../../../examples/essentials-v21.1-local/MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)仅细化其§8，不是另一个协议。Core [ADR0037](../../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [corrected `/1` ledger](../../30-implementation/viewport-profile-v1-qualification.md)。历史M14：[ADR0032](../../decisions/0032-game-library-example-boundary.md) · [qualification](../../30-implementation/m14-qualification.md)。
+> 层级：Game Library 设计  
+> 状态：**Implemented / contract frozen; current subject Requalification Pending**
+> 稳定程度：M10–M13 consumed boundaries closed；M14 map design/implementation frozen  
+> 精确 landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
+> Formal qualification source：[`m14-qualification.md`](../../30-implementation/m14-qualification.md)  
+> 决策：[ADR 0032](../../decisions/0032-game-library-example-boundary.md)
 
-## 1. Boundaries
+## Core principle
 
-```text
-RMXP / Essentials material → selective importer projection → prepared FSDB / Content
-→ game-libs/map @loomrealm-game/map Runtime (world, movement, camera, projection)
-→ public @loomrealm/subsystem Input / Render / candidate readonly Viewport
-→ Frozen Renderer Store / M13 Projector
-→ map-owned lr-map-view > lr-map-sprite ShadowDOM, Canvas, private stage
-```
-
-Framework仅拥有general authority/transport/readonly Viewport；Map独占tile-RPG business、min/max/settle、camera、chunks、resource-specific raster/placement/epochs、两WC physical stage。Core没有map术语、Main不存size、Renderer Store/M13不增加map快路/ACK；Map Runtime不读取DOM/Main/Data/Content credentials。Browser不成为world/transfer authority。Current product指定document layout viewport，但具体 `Window.innerWidth/innerHeight`和example centering/letterbox归physical composition，不升通用wire。
-
-Package exports root SubsystemDefinitionFactory及classic JS `@loomrealm-game/map/browser/map.browser.js`、CSS `@loomrealm-game/map/browser/map.css`；Runtime只依赖public Subsystem，Browser只用M13 resource context和自身ShadowDOM/Canvas。Importer不因为改viewport而增加universal map schema/event interpreter。M14 test-owned Chromium harness可复用测试设施但不成为production author seam。
-
-## 2. 历史已实现 first slice 不可误标为新功能
-
-历史first slice初始参数`{mapId,x,y,characterName}`、tile32 CSSpx、fixed640×480、anchor304/224；Map/Tileset按既有 FSDB读，Frame内一个RenderDomain，tree=`lr-map-view > lr-map-sprite`，Input non-repeat Arrow尝试一步、passability/camera/Render最新状态。后续 walking、layering、autotile、transfer有各自已治理需求/实现；其250ms cadence、latest-state transport coalescing、transfer失败不能因为viewport改造而改变。现有Browser会因camera rAF反复清理/遍历/绘制640 Canvas，现有Runtime仍是 `VisibleTile[]` 和无 `scope.viewport`；旧资格与历史refresh P95=96.3ms FAIL均不能证明当前新候选已实现/达标。
-
-## 3. 新候选职责与精确委托
-
-新[主合同](../../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)独占：default640、map cap320×240..1920×1080、100ms trailing settle、viewport read/subscribe安全初始化、camera公式、8×8×3 chunks+1chunk overscan、当前窗口used-tile紧凑visual table、<196608B MapView data guard、scene/visual/motion identity、128MiB Canvas/256MiB total estimated pixel memory、dirty autotile/overlap raster、private-only DOM layering、pair commit/retry和测试。冻结前**不得凭此前的短草案要求实现者选择`TileVisual`、Sprite fields、站立/重基准算法或时钟**；它们已在主合同§4/§8中给出候选精确语义，并须由PR0反证/负责人签署。
-
-Viewport observation不mint Frame gameplay mutation/InputTarget/Activation；resize只重算已提交world的presentation。现example只有map，没有accepted menu/dialog held-input需求，不因假想overlay扩公共Frame生命周期。Map Frame terminal必须取消其订阅/timer/async。M13不保证View/Sprite同时回调；配对Stage用map-private motionId与相同scene/visual，保留旧完整stage到双方ready才同一task切换。Frozen walking允许背压合并中间未显示transition：必须记录suppressed、保证最新状态收敛和无混帧，不得发明逐步replay/ACK或与旧行为冲突的zero-skipped-steps指标。Frozen walking的receipt clock要求图片decode不延长250ms；新pair统一最早receipt而非ready后重新计时。
-
-## 4. 无循环交付/冻结状态
+Map 是 LoomRealm 的真实 game-domain consumer，不是 framework module：
 
 ```text
-Core C0: external /1 compat签署 + cross-review → Core Docs Freeze
-Core C1: corrected /1 current cohort implementation + revised conformances/regressions
-Map PR0: production-zero feasibility：固定dense1080 exact bytes、Core full update、M13 equality、
-         Browser baseline、private CSS stacking pixel proof、128/256MiB、真实Map002/066证据
-→ design owner复核主合同与子规范、签 Map Docs Freeze SHA（无须PR1/PR2性能PASS）
-Map PR1: fixed640 chunk/raster/paired stage +640 parity/performance
-Map PR2: true dynamic viewport、in-flight resize rebase、720/1080 real product
-Map PR3: same executable SHA M11/M13/M14/M15 + product latency/memory/pixel gate
+RMXP/Essentials source semantics
+→ selective importer consumer projection
+→ prepared FSDB
+→ M12 ContentClient
+→ @loomrealm-game/map Runtime
+→ M10 Input + M11 Render
+→ M13 map-owned Web Components
 ```
 
-PR0的720/1080若仅synthetic/prototype必须写`prototype-only`，不能冒充真实产品；PR0不要求尚未实施的camera-only 0 tile draws、full P95 PASS。目标性能属于PR1/PR2/PR3，**不是Map Docs Freeze的循环前置证据**。PR0缺真实local FSDB、schema超guard、独立Core/M13瓶颈或private-only layering不可行，必须STOP而不能签Freeze。Source code和newPR0 harness、文件边界、具体fixture/命令及STOP模板见主合同§9–§14。
+Framework owns transport/authority contracts。Map library owns concrete tile-RPG business semantics and presentation vocabulary。
 
-历史M14 ledger、Core revised `/1` ledger、Map PR0证据和PR3最终qualification各管自己的状态；没有新实现/测试/负责人签署时持续HOLD。禁止 Map Repository/AssetManager/SceneGraph/LayerManager/Environment/通用Tick或把游戏策略上移Core。
+## Package identity
+
+```text
+game-libs/map
+@loomrealm-game/map
+```
+
+Consumer seams：
+
+```text
+@loomrealm-game/map
+    → Runtime root/default SubsystemDefinitionFactory
+
+@loomrealm-game/map/browser/map.browser.js
+    → classic browser artifact
+
+@loomrealm-game/map/browser/map.css
+    → component CSS artifact
+```
+
+Prepared Content tooling resolves package subpaths and does not reach through private source/`dist/` paths。
+
+## Runtime / browser split
+
+```text
+Runtime side
+→ imports public @loomrealm/subsystem only
+→ owns map/world state, Content, Input, Render
+
+Browser side
+→ lr-map-view
+→ lr-map-sprite
+→ private Canvas / slot / sprite mechanics
+→ M13 PresentationResourceClient
+```
+
+Runtime does not import DOM/Renderer/Main/Platform/tooling。Browser side does not obtain business-authority objects or physical Content credentials。
+
+Repository-owned M14 qualification may reuse already-qualified M13 internal Window-composition mechanics only as test infrastructure。That is not an author/product seam；real Desktop Window composition belongs to M15。
+
+## Selective content boundary
+
+M14 does not define `MapNormalizedV1` or recursively project the RMXP object graph。
+
+First-slice consumer records exactly：
+
+```text
+Map/{id}
+    tileset_id
+    width
+    height
+    data
+
+Tileset/{id}
+    id
+    tileset_name
+    passages
+    priorities
+```
+
+`Map.data` is a projected RGSS Table：
+
+```text
+dimensions=3
+xSize=Map.width
+ySize=Map.height
+zSize=3
+index=x+y*xSize+z*xSize*ySize
+```
+
+Unused events、BGM/BGS、encounters、autotile names、terrain tags、MapInfo/MapMetadata and other known RMXP objects remain in existing importer/lossless evidence until a real behavior consumes them。
+
+Runtime never receives Ruby/Marshal/RMXP decoder wrappers。
+
+## First-slice gameplay
+
+Initial input：
+
+```text
+{ mapId, x, y, characterName }
+```
+
+Initial state：
+
+```text
+direction=2/down
+pattern=0
+```
+
+Initial Frame remains alive through gameplay input：
+
+```text
+activate
+→ load/validate Map + Tileset + resource versions
+→ create one Frame-bound keyboard.event listener
+→ create one business RenderDomain
+→ publish initial full state
+→ remain pending while Frame is live
+```
+
+Directional input：
+
+```text
+non-repeat Arrow key down
+→ one synchronous tile movement attempt
+→ facing
+→ passability
+→ x/y
+→ camera
+→ RenderDomain.update(...) for ordinary movement; replace(...) for load/collision/transfer
+```
+
+Blocked movement changes facing but not position。No EventQueue、game-loop Scheduler、PlayerController or MovementManager is introduced。
+
+## Passability subset
+
+Directional passage bits：
+
+```text
+down  0x01
+left  0x02
+right 0x04
+up    0x08
+```
+
+Coordinate evaluation scans map layers `z=2 → 1 → 0` and uses `passages/priorities`。Movement requires source-direction + target reverse-direction passability。
+
+M14 excludes event collision、through/debug behavior、terrain effects and map transitions。
+
+## Fixed viewport / camera
+
+```text
+tile size         32 CSS px
+viewport          640×480 CSS px
+nominal full grid 20×15
+```
+
+Example CSS fixes host size。Runtime receives no DOM layout/resize facts。
+
+Camera：
+
+```text
+cameraX=clamp(playerX*32-304,0,max(mapWidth*32-640,0))
+cameraY=clamp(playerY*32-224,0,max(mapHeight*32-480,0))
+```
+
+Visible projection includes every tile cell intersecting the viewport；a non-tile-aligned camera can therefore intersect an extra edge column/row。
+
+Canonical `(10,8)→(11,8)` movement keeps player screen origin `(304,224)` while camera shifts `16→48` and map pixels move left 32px。
+
+## Render ownership
+
+Exactly one business RenderDomain；SDK owns opaque wire id。
+
+Exact managed tree：
+
+```text
+lr-map-view
+└── lr-map-sprite
+```
+
+View data carries current map/camera/resource/visible-tile facts。Sprite data carries current world/screen/direction/resource facts。
+
+Ordinary walking reuses M11 `RenderDomain.update(...)`；M14 defines no map-specific delta protocol。Load, collision, transfer, and reconnect still `replace(...)`。
+
+## Presentation
+
+`lr-map-view` owns private：
+
+```text
+640×480 tile Canvas
+clipping
+tileset decode/cache
+entity overlay + slot
+```
+
+Exact private Shadow wrapper/class topology is not normative。
+
+Every current full-state map paint：
+
+```text
+clear full logical 640×480 Canvas
+→ draw current retained tiles[] in canonical order
+```
+
+No dirty rectangles、tile patch state or per-tile Custom Elements。
+
+Regular tile subset：
+
+```text
+0       → omitted/transparent
+>=384   → regular 32×32 tileset tile
+48..383 → autotile not required by canonical M14 CI
+```
+
+`lr-map-sprite` owns the player character-sheet crop/placement。
+
+Async decode completion may cache a matching resource, but repaint must use latest retained render data or an equivalent current generation check。Resource-version equality alone cannot authorize old camera/tiles/direction paint。
+
+## Implementation budget
+
+A good M14 implementation should stay close to：
+
+```text
+small Map/Tileset validators
+tableAt(...)
+mapTilePassable(...)
+computeCamera(...)
+projectVisibleTiles(...)
+renderState(...)
+one map Definition
+two Custom Elements
+standalone browser JS/CSS
+one small repository qualification composition
+```
+
+Not justified without new evidence：
+
+```text
+MapRepository / MapBundle
+GameLibrary framework
+AssetManager / ResourceProvider
+SceneGraph / LayerManager / component registry
+PlayerController / MovementManager
+Context/Service layer
+responsive viewport service
+Tick/Scheduler/EventQueue
+universal map schema
+generic recursive RMXP consumer model
+```
+
+## Qualification
+
+The map design and implementation are frozen；formal milestone status is intentionally not duplicated here.
+
+Canonical CI uses checked-in selective Map/Tileset facts + author-owned graphics and proves one passable + one blocked movement through real Chromium。
+
+Exact local Essentials v21.1 evidence uses the same importer projection、prepared Content、Runtime and browser implementation against real source。
+
+Precise executable criteria live in M14/03–05；the current qualification subject and PASS/PENDING evidence live only in `doc/30-implementation/m14-qualification.md`。
