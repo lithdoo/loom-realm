@@ -2,64 +2,35 @@
 
 > 层级：正式契约 / Child Protocol  
 > 状态：Draft / Normative Candidate / Not Frozen  
-> 协议版本：1  
-> 协议标识：`loomrealm.viewport-state/1`  
-> 主要定义：Renderer→Subsystem single-surface current presentation viewport retained state、fresh-carrier baseline、validation、coalescing、failure/currentness boundary  
-> 依赖：[Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)  
-> 组合：[Renderer Data Profile v2](./renderer-data-profile-v2.md)  
+> 协议版本：1；标识：`loomrealm.viewport-state/1`  
+> 主要定义：单一 Renderer layout viewport 的 readonly retained observation、bounded publication、fresh-carrier/currentness 与 failure  
+> 依赖：[Data Connection v1](./renderer-subsystem-data-connection-v1.md)、[ADR 0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)、[Profile v2](./renderer-data-profile-v2.md)  
 > Conformance：[Viewport State v1 Conformance](./viewport-state-conformance-v1.md)  
-> 最近复核：2026-09-16
+> 最近复核：2026-09-16（Core Freeze Review CF-01..07 closure candidate）
 
-本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达候选规范强度。Freeze 前这些关键字仍可经设计评审修订；实现不得把本文 Draft 状态冒充已冻结 Current。
+`MUST / MUST NOT / SHOULD / MAY` 是候选规范约束；只有 Docs Freeze subject 归档后才可标 Frozen。本文是 child wire 与 author observation 的唯一正式语义源；map min/max、settle、camera 与 Render 内容不属于本文。
 
 ---
 
-## 1. Scope
+## 1. Scope / single-surface meaning
 
-Viewport State v1只复制一个事实：
+每个 current Renderer participant 恰有一个可选择的逻辑 presentation surface；v1 只观察该 participant **当前 document 的 layout viewport**。尺寸取该 document 对应 Window 的 `innerWidth/innerHeight`（CSS logical pixels，包括其定义内的 scrollbar 区域），向下取整得到 positive safe integers。Desktop 与 PWA 必须采用同一 observable 定义；不得以 `visualViewport.width/height`、`screen.*`、`devicePixelRatio`、任意 host element `getBoundingClientRect()` 或 business WC box 代替。没有合法 surface/sample时没有新消息，不合成默认尺寸。Map 的 cap/居中/letterbox 只属于 map policy。
 
-```text
-current Renderer participant 的单一 logical presentation surface CSS width/height
-```
-
-v1 cardinality：
+Cardinality：
 
 ```text
 one current Renderer participant
-→ 0..1 current legal viewport observation
-→ same observation published independently to each current Subsystem Data connection
+→ 0..1 legal current layout viewport sample
+→ same observed size replicated on each current /2 Subsystem Data carrier
 ```
 
-它不表达用户动作、Frame focus、DOM element geometry、render scale或 multi-surface routing。
-
-如果未来一个 Renderer participant需要多个独立 viewport，必须新设计/version；v1 MUST NOT被扩展 `surfaceId`、window id或 per-Frame surface选择。
-
-唯一方向：
-
-```text
-Renderer → Subsystem
-```
-
-唯一消息：
-
-```text
-viewport.state
-```
-
-不存在：
-
-```text
-viewport.event
-viewport.reset
-viewport.interest
-viewport.request
-viewport.ack
-viewport.revision
-```
+未来若一个 Renderer 同时需要多个独立 viewport，必须另起 design/profile version；v1 不能增加 `surfaceId/windowId/Frame id`、多 surface 路由或选择算法。Viewport 不表达用户动作、Input authority、DOM desired tree 或 paintability。
 
 ---
 
-## 2. Exact Message
+## 2. Exact message / direction
+
+唯一方向 Renderer → Subsystem，唯一消息：
 
 ```ts
 interface ViewportStateV1 {
@@ -69,226 +40,85 @@ interface ViewportStateV1 {
 }
 ```
 
-Top-level MUST exact-own only：
+JSON object 顶层 exact-own `{type,width,height}`；两个值 MUST 都是 positive, finite, safe integers。单位固定为 layout viewport CSS logical pixel。不得添加 DPR、focus、visibility、timestamp、revision、sequence、Renderer/Session/Frame/Activation、map/camera 或其他 metadata。无 `viewport.event/reset/interest/request/ack/revision`。
 
-```text
-type
-width
-height
-```
-
-`width` / `height` MUST：
-
-```text
-finite
-integer
-positive
-safe integer
-```
-
-语义单位固定为 logical CSS pixel。
-
-不得携带或隐式编码：
-
-```text
-devicePixelRatio
-physical display pixels
-screen/display id
-surface/window id
-orientation
-safe-area
-focus/visibility
-DOMRect/element identity
-Frame/Activation/InputTarget
-subsystem business id
-sequence/revision/timestamp
-camera/tile/chunk/map policy
-```
+Profile v2 的 common UTF-8 1MiB / JSON depth-64 / representation preflight 和 direction validation 先于 child semantic mutation；malformed message 是 Viewport child protocol-fatal，retire 当前 Data carrier（不自动 fail Runtime/Frame、不 destroy RenderDomain）。同值合法消息可以无 author callback。
 
 ---
 
-## 3. State Semantics
+## 3. Bounded latest-state publisher（性能与正确性约束）
 
-每个消息是 self-contained current truth：
+每份 state 都是 self-contained current truth；不要求传递每一个中间 resize。对**每个 current carrier**，Viewport sender MUST 满足：
 
 ```text
-viewport.state(W,H)
+at most one viewport unit admitted to the shared writer / awaiting its send outcome
+AND at most one not-yet-admitted pending latest-size slot
 ```
 
-不依赖 earlier viewport message。
+新的合法样本覆盖 pending slot，不向 writer逐个 enqueue resize；相同尺寸不必再发布。当前 writer admission 的消息不能撤回/重排；其发送结算后，如 pending 与最后已提交尺寸不同，提交最新值；直到收敛。若 writer长期阻塞，pending 仍至多一份；普通合法 resize burst本身 MUST NOT造成无界排队或 shared writer overflow/Data-fatal，也不得永久阻塞已有 Input/Render child。不得为此改变 Frozen Profile v1 writer、创建 generic priority scheduler、丢弃已 admitted 的 unit 或重传到 fresh carrier。
 
-Sender MAY 在尚未进入 shared serialized writer emission boundary 前 coalesce 中间尺寸，只保留 latest state。相同 `{width,height}` MAY suppress。
-
-一旦 viewport message已进入 Profile 定义的 emitted/ordered-send boundary，后续 coalescing不得撤回或重排它。
-
-Receiver只保留 latest successfully accepted viewport value；不建立 history、event log、ACK、replay cursor 或跨 carrier revision continuity。
+`carrier.send()` 成功只证明该 carrier接纳此 unit，不是 author ACK。发送 terminal时丢弃该 carrier的 admitted/pending publication cursor；物理 source可继续保留 latest observation，只有 fresh carrier自己的 baseline可重新发布。Renderer MUST 把 fresh carrier的第一份 viewport发送作为该 carrier的 baseline，以 admission 当时最新合法样本为准；baseline尚未完成时发生 resize，按同一 bounded latest rule继续收敛。不存在跨 carrier历史事件、revision 或 replay。
 
 ---
 
-## 4. Fresh Carrier Baseline
+## 4. Currentness / transitions
 
-每个 fresh current Data carrier都有独立 Viewport publication baseline。
+Subsystem host维护 Runtime-scoped、detached/immutable 的**最后成功接受的 observation**，独立于 carrier publication cursor。唯一初值为 `null`（从未接受过 baseline），不能因 ordinary loss/invalid zero source伪造 `null`。下表是规范 transition：
 
-如果 Renderer physical source已经拥有合法 current viewport，Renderer MUST promptly enqueue一份 fresh `viewport.state` baseline。该 baseline不要求 width/height 与上一 carrier不同。
+| Situation | Wire behavior | Author `current` / callback |
+|---|---|---|
+| Runtime startup，尚无合法 baseline | 无消息 | `null`；新 subscriber同步收到 `null` |
+| 首次合法 size A | 发送/接受 `viewport.state(A)` | current=A；通知变化 |
+| 同 carrier A→A | 可以 suppress或接收相同状态 | current=A；不重复通知 |
+| 同 carrier A→B→C burst | 未 admission 的中间值 latest-wins | 最终收敛到 C；不要求通知 B |
+| current carrier retire/loss | old publication cursor清空，不迁移 | 保留最后值，不通知 `null` |
+| same-generation fresh carrier，size仍 A | MUST 发布 fresh A baseline | 接受等值，不通知变化 |
+| fresh carrier 的合法 baseline 是 B | MUST 发布 B baseline | 更新 B，然后通知一次 |
+| fresh generation，**同一 Runtime仍存活** | fresh carrier/baseline，旧 generation traffic fenced | 同一 capability保留 last value，等值不通知、异值通知 |
+| fresh Renderer participant，Runtime仍存活 | 只接受新 current `(S,G,P)` carrier的 fresh observation | 可能短暂保留旧 size，合法新 baseline后收敛 |
+| fresh Renderer 尚无合法 sample | 不发 zero/null/default | last value保留；从未观测则仍 `null` |
+| Runtime terminal / scope signal abort | 停止订阅回调，retire owned resources | 后续 delivery inert |
 
-如果 fresh carrier安装时尚无合法 physical sample：
-
-```text
-no synthetic 0/null/default viewport.state is sent
-```
-
-Renderer MUST在首次取得合法 sample 时 promptly publish。Subsystem author retained value可以仍是 `null`（从未见过 baseline）或上一 carrier最后成功 observation；absence of fresh viewport message本身不代表 value reset。
-
-Viewport baseline与 Input/Render child baseline共享 carrier ordering，但不创建 cross-child atomic transaction/barrier。
-
----
-
-## 5. Carrier Loss / Replacement
-
-Viewport wire publication state是 carrier-scoped；Subsystem author retained observation不是。
-
-```text
-current carrier lost/retired
-→ wire baseline ends
-→ author retained viewport remains unchanged
-```
-
-fresh carrier：
-
-```text
-fresh viewport baseline equal retained value
-→ accepted
-→ no author-visible change required
-
-fresh viewport baseline differs
-→ replace retained value
-→ notify author subscribers
-```
-
-A retained non-null viewport MUST NOT be interpreted as proof that：
-
-```text
-a current carrier exists
-a Renderer participant is current
-the presentation surface is paintable
-DOM is connected
-```
-
-Those currentness facts belong to their existing authorities.
+不得把非 `null` 解释为 current carrier、Renderer participant、DOM 连接或可绘制证明。Control、Viewport、Render 分别收敛：fresh Renderer/ generation 的 baseline前可能短暂显示旧业务 Render truth；**不承诺跨 Control/Viewport/Render 原子 super-snapshot、barrier或 fixed order**。只有与 exact current authority匹配的 carrier消息可更改 retained value。旧 Renderer source、旧 carrier已 queued callback/rAF、retired generation在替换后 MUST inert，不能覆盖当前 observation。
 
 ---
 
-## 6. Input / Frame Independence
+## 5. Input/Frame independence / physical source
 
-Viewport State v1 MUST NOT be gated by：
+Viewport publication与 receive MUST NOT受 Main InputTarget、Activation、Frame active/suspended、Input Interest、keyboard/pointer/gamepad available、blur/focus 门控。一个 map Frame 被 child menu/dialog suspend 时，其 Subsystem Runtime仍可更新 viewport observation；这**不授予** suspended Frame进行玩家移动、collision、transfer或 Frame call 的业务 mutation authority。
 
-```text
-Main InputTarget
-Frame active/suspended state
-Activation id
-Input Interest
-keyboard/pointer/gamepad producer availability
-```
-
-A visible map Frame may be suspended behind a child Frame and still receive viewport convergence through its Subsystem Runtime's current Data connection。
-
-Viewport publication MUST NOT create or widen ordinary input authority。
+Trusted physical source 在 current Renderer document生存期观察上文 exact layout viewport：initial sample、resize burst/coalesce、必要时 hidden→visible resample。无效/zero/fractional/unsafe physical值不发布，不清除上次合法 source observation。DPR-only change不构成 viewport语义变化。source stop/Renderer replacement必须解除 listener与 rAF，并以 identity/current binding fence所有 late callbacks；Data-only reconnect可复用当前 Renderer物理样本，但 publication queue是新 carrier独立的。PWA 必须与 Desktop observable CSS unit/geometry相同。
 
 ---
 
-## 7. Physical Source Requirements
+## 6. Author projection / callback contract
 
-Renderer-side source MUST normalize to positive safe-integer logical CSS pixels before publication。
-
-Desktop realization SHOULD：
-
-```text
-sample window.innerWidth / window.innerHeight
-floor to integer
-publish initial legal sample
-coalesce resize burst before emission
-suppress unchanged sample
-```
-
-Zero/invalid physical samples MUST NOT be serialized as legal `viewport.state`; they do not erase last legal retained source observation。
-
-Focus/blur MUST NOT control viewport state availability。Hidden/visible transitions MAY trigger a resample for convergence but visibility itself is not payload state。
-
-The physical source MUST represent the one logical presentation surface associated with the current Renderer participant。If a concrete platform cannot unambiguously identify that single surface, it does not conform to v1 and must not invent selection semantics。
-
----
-
-## 8. Validation / Failure
-
-Profile receiver performs common representation preflight before child dispatch。Viewport child then exact-validates message kind/shape/value。
-
-Malformed Viewport message is protocol-invalid：
-
-```text
-→ Viewport child protocol fatal
-→ current Data carrier terminal/retired according to Profile v2
-```
-
-It is NOT：
-
-```text
-Runtime automatic failure
-Frame automatic failure/unwind
-User Input reset
-Render Domain destroy
-```
-
-Well-formed duplicate/same-value state is accepted and MAY produce no author callback。
-
----
-
-## 9. Author Projection Requirement
-
-A conforming Subsystem host exposes retained Viewport state through the `@loomrealm/subsystem` Runtime-scoped projection：
+`@loomrealm/subsystem` 的 exact author surface：
 
 ```ts
 export interface ViewportSize {
   readonly width: number;
   readonly height: number;
 }
-
 export interface Viewport {
   readonly current: ViewportSize | null;
   subscribe(listener: (viewport: ViewportSize | null) => void): () => void;
 }
+export interface SubsystemScope {
+  readonly viewport: Viewport;
+}
 ```
 
-Required semantics：
+`Viewport` object lifetime = Runtime/Scope lifetime。`current` getter返回 detached/immutable snapshot；listener不得通过 object mutation改变 retained value/future deliveries。
 
-```text
-initial current = null until first accepted state
-accepted value detached/immutable
-subscribe synchronously delivers current exactly once
-future callback only when retained structural value changes
-unsubscribe idempotent
-Runtime terminal ends future callbacks
-```
+`subscribe(listener)` MUST 同步交付恰好一次调用时已提交的 `current`（包括 `null`），之后只在 structural `{width,height}` 变化时通知；任何 callback调用前 MUST 已更新 `current`。第一次交付中同步 throw须被局部隔离，不能阻止订阅结果或其他 listener。每个 listener独立 containment；returned thenable不成为 Data reader/backpressure，异步 rejection被局部捕获/报告，不能变成 unhandled rejection 或 Data/Runtime terminal。unsubscribe幂等，调用后不得再给该订阅交付；Runtime terminal后所有订阅及延迟异步通知 inert。不新增 `get()+onChange` 第二套可竞态 API。
 
-Listener synchronous throw MUST be contained。If a callback returns a thenable despite the `void` author type, its completion MUST NOT become Data-reader/backpressure flow control；rejection MUST be locally contained/reported rather than becoming an unhandled protocol failure。
+在 `/1` explicit compatibility composition中，新 SDK仍可提供同一 stable capability；若该 Runtime从未成功接收 v2 observation，则 `current=null` 且无虚构 viewport。目标 canonical `/2` composition没有 silent `/2→/1` fallback。**已有非 null observation的 Runtime如被明确迁移到 `/1`，其 retained-value migration policy 不属于本 slice，必须单独设计，不能偷偷静默降级。**
 
 ---
 
-## 10. Limits
+## 7. Conformance / Freeze boundary
 
-Viewport State v1 inherits Profile v2 common application-unit / JSON-depth gates。It defines no larger custom payload budget because its exact message is constant-size apart from decimal number representation。
+本 contract适用的测试断言定义于 [Viewport Conformance](./viewport-state-conformance-v1.md)。**Docs Freeze要求完整、可实施的 conformance specification，不要求实现前有 executable PASS。** Docs Freeze subject只记录 docs SHA 与 review closure；实现/ qualification在独立 executable subject上记录命令、环境、PASS原始证据。不得因未实现而把本候选标作已 Implemented/Qualified。
 
-Implementations MUST NOT add arbitrary metadata/extensions under this v1 message。
-
----
-
-## 11. Final Invariants
-
-1. Viewport State v1 is retained state, not an event stream。
-2. One current Renderer participant has at most one logical viewport in v1。
-3. Viewport is independent of Frame/Activation/InputTarget/Input Interest。
-4. It uses logical CSS pixels only。
-5. Carrier replacement creates a fresh wire baseline but does not clear retained author observation。
-6. No revision/ACK/replay/history/multi-surface routing exists。
-7. Malformed viewport data retires Data, not Runtime/Frame authority。
-8. Main never transports or owns the width/height value。
-9. Business policy such as min/max/settle/camera remains outside this protocol。
+Final invariants：单一 layout viewport；exact 3-field message；per-carrier bounded latest pending；独立 Input lease；Runtime retained observation；fresh baseline；无 ACK/history；malformed Data-fatal而非 Frame-fatal；Main 不拥有尺寸；business自主决定 camera/projection。
