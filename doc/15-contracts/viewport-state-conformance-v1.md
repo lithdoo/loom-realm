@@ -22,7 +22,7 @@ accept B(800,600) → getter already B inside L1(B), one callback
 subscribe(L2) after B → synchronously L2(B) once
 ```
 
-这些尺寸只是 synthetic fixture值，不是 Core default/min/max。Returned snapshot detached/immutable、mutating consumer不能改 current/future；get→subscribe race须靠同步最新首发收敛。Listener synchronous throw隔离仍获得 unsubscribe；returned rejecting Promise被 local catch/report，不阻塞 Data reader、不产生 terminal/unhandled rejection。Unsubscribe idempotent/after unsubscribe no delivery，Runtime terminal/late task inert。
+这些尺寸只是 synthetic fixture值，不是 Core default/min/max。Returned snapshot detached/immutable、mutating consumer不能改 current/future；get→subscribe race须靠同步最新首发收敛。Listener synchronous throw隔离仍获得 unsubscribe；returned rejecting Promise被 local catch/report，不阻塞 Data reader、不产生 terminal/unhandled rejection。Unsubscribe idempotent/after unsubscribe no delivery，Runtime terminal/late task inert。**新增 exact terminal fixture：在存活期取得并保留Viewport引用，Runtime terminal/abort后调用`subscribe(L3)`→同步返回inert、幂等unsubscribe；L3初次及后续调用次数始终为0，原有listener也无late delivery。终止后若`current`可读，只代表历史值。**
 
 ## 3. Bounded publisher under backpressure
 
