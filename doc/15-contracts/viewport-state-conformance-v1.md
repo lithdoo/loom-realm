@@ -2,74 +2,58 @@
 
 > 层级：正式契约 / Conformance Specification  
 > 状态：Draft / Executable-ready Candidate / Not Frozen  
-> Contract：[Viewport State v1](./viewport-state-v1.md)；Profile：[Renderer Data Profile v2](./renderer-data-profile-v2.md)  
+> Contract：[Viewport State v1](./viewport-state-v1.md) · [修正后的 Profile v1](./renderer-data-profile-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16
 
-本文冻结的是**可执行测试规范和期望断言**，不是要求在 Docs Freeze 前已有实现/PASS。raw logs、环境与 executable subject SHA 只属于后续 implementation qualification packet。测试命名不限，但 observable assertions不能删减。
+Docs Freeze冻结可实施的 observable assertions而非要求实现前有 PASS；实际 subject SHA、commands、环境及 logs归 implementation qualification。Core 测试不得依赖 `game-libs/map`、假设当前例子已经有 menu/dialog，也不得把当前 Desktop 的 DOM API 变成 wire 子协议义务。
 
-## 1. Representation / direction
+## 1. Exact representation / direction
 
-接受仅 `{type:"viewport.state",width,height}`；拒绝额外/缺失字段、非数值、非整数、非 finite、zero/negative/unsafe integers、wrong type/direction、超过 common bytes/depth/representation gates。`/1` 拒绝 viewport，`/2` 只路由 Viewport child。识别出 `viewport.state` 后 child-invalid MUST retire current carrier并在 v2 terminal报告 `protocol:"viewport"`；unknown type/common preflight报告 `"profile"`。任何 malformed都不得当 Input event/reset或 Render mutation。
+仅 Renderer→Subsystem `{type:"viewport.state",width,height}` exact own fields；两个值 positive finite safe integer CSS logical px。额外/缺少字段、wrong type/direction、string/fraction/zero/negative/unsafe、non-string unit、invalid JSON、common >1MiB/depth64/representation gate全部拒绝，**无任何 child mutation**。Common/unknown type terminal `protocol:"profile"`；exact recognized viewport child invalid/explicit fatal `protocol:"viewport"`；只 Data retire、不会自动 Runtime/Frame fail/RenderDomain destroy。修正后唯一 Profile `/1` 必须支持四 child，禁止测试虚构 `/2` 或双模式。
 
-## 2. Retained state / callback
-
-```text
-Runtime starts: current=null
-subscribe(L1): synchronously L1(null), exactly once
-accept A=640×480: getter already A inside L1(A), one change callback
-accept A again: no duplicate callback
-accept B=800×600: getter already B inside L1(B), one change callback
-subscribe(L2) after B: synchronously L2(B), exactly once
-```
-
-Caller/listener修改 delivered value不影响 retained/future值：snapshot detached/immutable。subscribe首发的同步 throw被 containment，其他 listener仍交付，subscribe不因该 throw丢失返回的 unsubscribe；returned rejecting Promise被 catch/report但不阻塞 reader、不产生 unhandled rejection/terminal。unsubscribe幂等且此后无 delivery；Runtime terminal后 timer/queued callback一律 inert。必须覆盖订阅前后接受新状态的 get→subscribe race：同步首发观察最新已提交值，不漏掉变化。
-
-## 3. Bounded publisher / writer backpressure（必须实测）
-
-在 current `/2` carrier阻塞 shared writer `carrier.send` 的情况下：
+## 2. Retained API / callback
 
 ```text
-publish first viewport A
-→ hold its send unresolved
-→ trigger >1024 legal resizes B1..Bn interleaved with Input/Render traffic
-→ viewport-specific not-yet-admitted pending <=1, always latest Bn
-→ no overflow fatal caused solely by viewport burst
-→ no unbounded viewport tasks/queue/callback growth
-→ release held writer
-→ previously admitted units remain ordered, final Bn eventually published
-→ Input/Render can progress and are not indefinitely starved
+Runtime start: current=null
+subscribe(L1) → synchronously L1(null) exactly once
+accept A(640,480) → getter already A inside L1(A), one callback
+accept A again → no duplicate callback
+accept B(800,600) → getter already B inside L1(B), one callback
+subscribe(L2) after B → synchronously L2(B) once
 ```
 
-必须区分 sender pending-slot count与 shared writer total queue，确认每 carrier最多一份 viewport admitted/in-flight加一个 pending latest。不能因 viewport coalescing撤回已 admitted或改变 Frozen Input State/Event/Reset、Render barrier/order。old carrier terminal时 pending和admitted未发送记录不得迁移；fresh carrier取 fresh legal baseline并独立收敛。resize in-flight A→B→C需最终 C，不保证每个中间值交付。
+这些尺寸只是 synthetic fixture值，不是 Core default/min/max。Returned snapshot detached/immutable、mutating consumer不能改 current/future；get→subscribe race须靠同步最新首发收敛。Listener synchronous throw隔离仍获得 unsubscribe；returned rejecting Promise被 local catch/report，不阻塞 Data reader、不产生 terminal/unhandled rejection。Unsubscribe idempotent/after unsubscribe no delivery，Runtime terminal/late task inert。
 
-## 4. Carrier / authority transition matrix
+## 3. Bounded publisher under backpressure
 
-| Setup | Mandatory observation |
+Hold current carrier `send()` unresolved→触发远多于**该实现 shared writer capacity**的合法 geometry changes，并穿插 Input/Render traffic→Viewport writer-admitted/in-flight≤1、not-yet-admitted pending≤1且值始终最新；viewport自身不得线性扩充 shared queue、造成 writer overflow terminal或永久饿死 Input/Render；release后已 admitted顺序不变、latest最终收敛。当前实现可使用 >1024 resizes作为具体 stress fixture，`1024`绝非跨实现协议容量。不能修改 Frozen Input/Render barrier、已 admitted顺序或增加 generic scheduler。A→B→C可以跳过 B但必须最终到 C；old carrier pending/in-flight不迁入 fresh，fresh independent baseline。
+
+## 4. Authority/lifetime transition table
+
+| Scenario | Required result |
 |---|---|
-| Start no legal sample | no wire synthetic null/zero/default；author current null |
-| Fresh legal A | exact baseline A，author current A |
-| Carrier A retired | current保持 A，wire pending清零，旧读/写 fenced |
-| same G/P new carrier still A | fresh A wire baseline，author无等值 callback |
-| same G/P new carrier now B | fresh B，先更新 current 再通知一次 |
-| fresh G, same Runtime | `scope.viewport` same object；fresh baseline；old G traffic inert；old value可短暂保留 |
-| fresh Renderer, same Runtime, new size B | old participant source/rAF不能覆盖新；current只随 matching new carrier合法 B收敛 |
-| fresh Renderer has no legal sample | no synthetic baseline；保留 last或从未观测 null |
-| Runtime terminal | no further callback/read ownership |
+| start without valid observation | no synthetic wire, current null |
+| first A | fresh accepted A, notify once |
+| current carrier retired | retain last A, discard sender cursor, old read/write inert |
+| same G/P fresh carrier still A | fresh wire baseline A; no author duplicate |
+| same G/P fresh carrier B | fresh B; getter updated before one callback |
+| fresh G, same Runtime | same `scope.viewport` object, old G fenced, new baseline converges |
+| fresh Renderer, same Runtime | old source/rAF/binding fenced, retained last not paintability |
+| fresh source no valid sample | no synthetic 0/null/default; historical value or initial null |
+| Runtime terminal | no later callback |
 
-不要求 Control/Viewport/Render跨 plane atomic baseline/fixed order；retained non-null不能当作 current Renderer/carrier/paintable证明。测试 legacy Render replica恢复仍按 v1规则，而不是以 viewport发布修改 Store。
+Control/Viewport/Render不要求 fixed baseline order、atomic super-snapshot或 barrier；只匹配 exact current authority的 input可修改 retained observation。Same-generation reconnect不能被当作业务 WC重试信号。
 
-## 5. Frame / Input independence
+## 5. Input/Frame independence — synthetic only
 
-建立 map Frame active/InputTarget→child menu/dialog取得 InputTarget并 suspend map→尺寸 A→B。Map Subsystem scope仍收敛 B，无 map Input Interest、新 Input authority、input.reset/state/event。测试 blur/focus、keyboard availability不改变 viewport；resize callback不能绕过 Frame mutation gate执行 movement/collision/transfer/call（map侧更细断言另见 map draft）。
+两个 synthetic Subsystem/Frame：A原为 InputTarget，随后 B成为 current InputTarget或 A suspended；A所属 Runtime仍接受 legal viewport B，且 InputTarget、Activation、Interest与 Input producer state**不被 viewport修改**。无 Frame-specific interest/bypass、不将消息路由为 `x.*.state`。测试 focus/blur/Input producer unavailable不能 gate geometry；接收 observation本身不直接提交 Render state或 mint mutation permit。不得在 Core conformance提及玩家、collision、menu、transfer；它们留给消费端验收。
 
-## 6. Physical layout viewport / identity fencing
+## 6. Logical surface & physical composition split
 
-Desktop与 PWA在同等 layout viewport尺寸下提供同值：Window `innerWidth/innerHeight` floor为 CSS integers，不能改用 visualViewport、host rect、screen或DPR；initial legal publish、rapid resize latest wins、同值 suppress、zero/invalid保留 last、不传 null/0、hidden→visible重采样、blur/focus独立、DPR-only不变。Renderer participant stop/replacement、旧 source已 queued rAF、Data retire/reconnect后旧 binding emission均 inert；reconnect fresh baseline取新 carrier admission时 current physical legal size。多独立 surface作为 v1 nonconforming而不是隐式挑一个。
+Core synthetic source指定一个 logical presentation surface、CSS logical width/height/floor positive safe integers，所有同 Renderer current Subsystem看到一致 raw尺寸，替换 source/Renderer与 queued callback后旧值不得注入 fresh identity。禁止同一 participant偷偷换另一个独立 surface、多 parallel surface、DPR混进单位。Invalid/zero不产生新消息、不清 last；同值 suppress；initial及 recovery resample可收敛。
 
-## 7. Failure and cross-profile
+**另设产品物理验收**：当前 Desktop/PWA指定 document layout viewport并用 `Window.innerWidth/innerHeight`采样；验证实际 viewport、CSS content box与该产品自己的 centering/letterbox规则关系，hidden→visible、rAF fencing、DPR-only invariance。此处不据此要求任意 Core 实现依赖 Window/DOM API。
 
-Malformed viewport→v2 terminal `protocol:"viewport"`、Data retire，Frame stack/Runtime/RenderDomain不自动退出；malformed Input/Render不得清空 viewport retained value。Profile `/1` 仍拒绝 viewport；wrong-direction/unknown type Data-fatal。v2 current profile Main policy、paired S/G/P与 Profile v2 conformance联测。
+## 7. Qualified evidence（实现后）
 
-## 8. Qualification evidence（**实现后**）
-
-Docs Freeze只记录规范 review与 docs-only SHA。完成实现后另记录 executable subject SHA、Node版本、Desktop/Chromium/Hostra环境、命令、raw logs/artifacts、v1 regression和本矩阵 PASS；任何语义变更建立新 subject，旧 PASS不得迁移。
+新 executable SHA运行本矩阵、revised Profile v1 fixture revision3与原 Input/Render/Connection regression；记录 commands、环境、raw evidence，Desktop/Hostra及后续 PWA依各阶段测试。Core合格不代表 map PR0 payload/latency或尚未存在的真实 menu 场景PASS。
