@@ -1,14 +1,14 @@
 # Renderer ⇄ Subsystem Data Application Profile v1
 
 > 层级：正式契约 / Application Profile  
-> 状态：**Revised Frozen-preimplementation candidate / Docs Freeze HOLD / Not Implemented**（原三-child Frozen baseline被ADR0037显式reopen）  
+> 状态：**Frozen / Not Implemented / Not Qualified**（原三-child Frozen baseline被ADR0037显式reopen并在 docs-only subject `4cbf620` 重新冻结为四-child `/1`）  
 > 唯一目标 Profile identity：`loomrealm.renderer-data/1`；版本：1  
 > Composition：Data Connection v1 + User Input v1 + Render Update v1 + Viewport State v1  
 > 依赖：[Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  
 > Authority：[Control v1](./main-renderer-control-v1.md)；Conformance：[Profile v1 revision3](./renderer-data-profile-conformance-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)（部分更新ADR0025/0036）  
 > 受保护完整原文：[原三-child Profile v1 baseline](./renderer-data-profile-v1-previewport-baseline.md)；[范围修复/逐项继承](../30-implementation/viewport-scope-repair-2026-09-16.md)。最近复核：2026-09-16
 
-**本文件是一项显式治理的首次发布前 Frozen 设计纠正，绝不声称已发布系统可静默接受新的相同 identity。** 若兼容核查发现任何真实外部使用/共存义务，STOP direct reset并另行 version/migrate。当前旧三-child `/1`代码仍存在、候选修正尚未实现；不生产`/2`。以下 MUST 等为 Docs Freeze 候选最终行为。
+**本文件是一项显式治理的首次发布前 Frozen 设计纠正，绝不声称已发布系统可静默接受新的相同 identity。** 若兼容核查发现任何真实外部使用/共存义务，STOP direct reset并另行 version/migrate。当前旧三-child `/1`代码仍存在、候选修正尚未实现；不生产`/2`。以下 MUST 等为 Frozen 行为。代码尚未实现。
 
 **原文保全规则：** 原三-child 完整基线是本修订的受保护语义来源，而非另一个 current profile。它的 §2 identity/authority、§3 UTF-8 JSON encoding/Wire/parser/limits、§5 one-reader ordered demux（除新增 viewport branch）、§6 serialized writer、§7 原 Input/Render handler outcome、§8 independent ordering、§9 原 Input/Render fresh baseline、§10 first-wins Data-local terminal、§11 bounded backpressure中所有未明确改变的逐项约束继续适用；原 §13 revision-2 obligations 不因 revision-3 而撤销。**唯一覆盖旧文的范围**是：§1/§4/§14 原「只含三 child」的 closed set改为四 child；§5/§6 增加 viewport demux和有界 producer；§7/§9/§10 增加独立 Viewport 语义与 diagnostic；§12/§13 接受 ADR0037 授权的发布前直接修正及 fixture revision-3。原文关于未来真实不同 profile identity 的 fresh-generation规则不变。任何未列入此 delta 的冲突必须 STOP 并由设计者处理，执行者不得擅自删掉旧规则。旧基线标题的 Frozen 只证明旧实现历史状态，不宣称本候选已冻结。
 
@@ -90,4 +90,4 @@ Carrier close/loss、common/profile violation、child invalid/explicit fatal、w
 
 ## 10. Conformance and Freeze
 
-[Profile `/1` fixtureSetRevision3](./renderer-data-profile-conformance-v1.md)与[Viewport conformance](./viewport-state-conformance-v1.md)共同定义期望断言，原 Connection/Input/Render 测试继续作为 regression。Docs Freeze 需[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)外部 compatibility 调查、完整 cross-review+可执行测试规范、docs-only SHA 签署；不需要实现前虚构 PASS。之后新 executable SHA 提供**全端一致的 build/deployment cohort 证据**、four-child revised `/1` suite、原三-child regression、Desktop/Hostra 及后续 PWA。唯一资格状态见[revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md)；Map PR0 独立。最终不发布 `/2`、不修改 Frozen Input/Render/Connection/Control wire、Main 不存 size、Core 不实现 map 政策。
+[Profile `/1` fixtureSetRevision3](./renderer-data-profile-conformance-v1.md)与[Viewport conformance](./viewport-state-conformance-v1.md)共同定义期望断言，原 Connection/Input/Render 测试继续作为 regression。Docs Freeze 已在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 签署；之后新 executable SHA 提供**全端一致的 build/deployment cohort 证据**、four-child revised `/1` suite、原三-child regression、Desktop/Hostra 及后续 PWA。唯一资格状态见[revised-v1 ledger](../30-implementation/viewport-profile-v1-qualification.md)；Map PR0 独立。最终不发布 `/2`、不修改 Frozen Input/Render/Connection/Control wire、Main 不存 size、Core 不实现 map 政策。

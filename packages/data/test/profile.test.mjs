@@ -25,6 +25,7 @@ test("routes Input and Render over one shared profile connection", async () => {
       onInputState(message) { seen.push(["state", message.channel]); return accepted(); },
       onInputEvent: accepted,
       onInputReset: accepted,
+      onViewportState: accepted,
     },
   });
   const renderer = createRendererDataPeer({
@@ -70,7 +71,7 @@ test("wrong-direction inbound message fails the current Data peer closed", async
   const pair = createMemoryCarrierPair();
   const subsystem = createSubsystemDataPeer({
     binding: binding(pair.left),
-    handlers: { onInputState: accepted, onInputEvent: accepted, onInputReset: accepted },
+    handlers: { onInputState: accepted, onInputEvent: accepted, onInputReset: accepted, onViewportState: accepted },
   });
   await pair.right.send(JSON.stringify({ type: "render.domains", domains: [] }));
   const terminal = await subsystem.terminal;
@@ -82,7 +83,7 @@ test("invalid local message becomes local-fatal without wire emission", async ()
   const pair = createMemoryCarrierPair();
   const subsystem = createSubsystemDataPeer({
     binding: binding(pair.left),
-    handlers: { onInputState: accepted, onInputEvent: accepted, onInputReset: accepted },
+    handlers: { onInputState: accepted, onInputEvent: accepted, onInputReset: accepted, onViewportState: accepted },
   });
   const result = await subsystem.input.sendInterest({
     type: "input.interest",
@@ -111,7 +112,7 @@ test("shared writer keeps at most one carrier.send pending", async () => {
   };
   const subsystem = createSubsystemDataPeer({
     binding: binding(carrier),
-    handlers: { onInputState: accepted, onInputEvent: accepted, onInputReset: accepted },
+    handlers: { onInputState: accepted, onInputEvent: accepted, onInputReset: accepted, onViewportState: accepted },
   });
   const [render, input] = await Promise.all([
     subsystem.render.sendDomains({ type: "render.domains", domains: [] }),

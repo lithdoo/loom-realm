@@ -30,6 +30,7 @@ test("invalid trusted binding fails before claiming the carrier reader", () => {
         onInputState: accepted,
         onInputEvent: accepted,
         onInputReset: accepted,
+        onViewportState: accepted,
       },
     }),
     TypeError,
@@ -61,6 +62,7 @@ test("one Data peer claims exactly one logical carrier reader", async () => {
       onInputState: accepted,
       onInputEvent: accepted,
       onInputReset: accepted,
+      onViewportState: accepted,
     },
   });
   await new Promise((resolve) => setImmediate(resolve));

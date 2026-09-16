@@ -1,7 +1,7 @@
 # Renderer → Subsystem Viewport State v1
 
 > 层级：正式契约 / Child Protocol  
-> 状态：**Draft / Normative Candidate / Not Frozen / Not Implemented**  
+> 状态：**Frozen / Not Implemented / Not Qualified**  
 > 标识：`loomrealm.viewport-state/1`；唯一 parent：[revised Renderer Data Profile `/1`](./renderer-data-profile-v1.md)  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Conformance：[Viewport v1](./viewport-state-conformance-v1.md)  
 > 最近复核：2026-09-16
@@ -87,4 +87,4 @@ Object lifetime=Runtime/Scope；`current`与delivered snapshots detached/immutab
 
 ## 7. Governance
 
-唯一parent是**修正后的Profile `/1`**，没有`/2`/dual mode/compatibility fallback。Docs Freeze需[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)真实兼容核查、[conformance](./viewport-state-conformance-v1.md)与Profile v1 revision3 executable-ready、cross-review/docs SHA；不要求实现前PASS。实现后新executable/coherent product cohort evidence记录到[唯一资格ledger](../30-implementation/viewport-profile-v1-qualification.md)。Map cap/settle/camera/chunks/Canvas/性能和未来菜单另行治理。
+唯一parent是**修正后的Profile `/1`**，没有`/2`/dual mode/compatibility fallback。Docs Freeze已在 subject `4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9` 签署。实现后新executable/coherent product cohort evidence记录到[唯一资格ledger](../30-implementation/viewport-profile-v1-qualification.md)。Map cap/settle/camera/chunks/Canvas/性能和未来菜单另行治理。

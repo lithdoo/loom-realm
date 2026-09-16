@@ -1,7 +1,7 @@
 # Web 渲染端模块设计
 
 > 层级：模块设计  
-> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient / M13 Web Presentation **historical Implemented + Qualified**；revised four-child `/1` / Viewport **Not Implemented / Docs Freeze HOLD**  
+> 状态：M8 Data / M10 Input / M11 Render / M12 ResourceClient / M13 Web Presentation **historical Implemented + Qualified**；revised four-child `/1` / Viewport **Core Docs Frozen / Not Implemented / Not Qualified**  
 > 稳定程度：M13 **Implemented / Qualified / Closed**（仅历史 executable subject）；Viewport 是待实施的独立能力，不继承 M13 PASS  
 > 主要定义：Renderer currentness、per-subsystem Render Store、trusted ResourceClient、M13 package-private reevaluation + Projector placement  
 > 依赖：[渲染系统](../../10-architecture/rendering-system.md)、[Web Presentation Config v1](../../15-contracts/web-presentation-config-v1.md)、[Web Presentation API v1](../../15-contracts/web-presentation-api-v1.md)、[ADR 0031](../../decisions/0031-business-owned-web-component-projection.md)  

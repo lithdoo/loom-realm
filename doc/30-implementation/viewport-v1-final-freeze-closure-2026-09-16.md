@@ -1,16 +1,16 @@
 # Viewport / revised Data Profile v1 — 冻结整改沿革及最新处置
 
-> **历史整改记录，最新状态以[唯一 Core ledger](./viewport-profile-v1-qualification.md)及[最终技术审查](./viewport-core-final-review-2026-09-16.md)为准；Core Formal Docs Freeze HOLD / Map Docs Freeze HOLD。** 日期：2026-09-16。  
+> **历史整改记录，最新状态以[唯一 Core ledger](./viewport-profile-v1-qualification.md)及[独立 Freeze 签署](./viewport-core-docs-freeze-independent-review-2026-09-16.md)为准；Core Formal Docs Freeze APPROVED on `4cbf620` / Map Docs Freeze HOLD。** 日期：2026-09-16。  
 > 本页不是第二份 wire SSOT、测试 PASS 或独立审查签署。项目负责人已确认无 npm 消费者；不验证 npm，也不以 npm consumer 兼容核查阻塞冻结。
 
 ## 1. Core 冻结前项（已整改文本与仍缺外部批准分开）
 
 | Issue | 已提交的范围内修复 | 最新未完成证据 |
 |---|---|---|
-| F-01 `/1` compatibility | ADR0037 规定同 identity coherent rollout；项目负责人 2026-09-16 确认 npm 无消费者，该项 **CLOSED/NON-BLOCKING**；已查 GitHub Releases API 返回 `[]`，仅证明该渠道无 Release。 | **仅独立非 npm 事实 OPEN**：已知 profile 对外承诺、独立实现、持久化旧身份、运行中旧 peer、rolling/mixed 需求；发布/部署负责人结论/date/批准，绝不重新要求 npm 查询。 |
-| F-02 Frozen Connection 三-child 投影 | [编辑性 diff `9fb2c72`](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)只修正 §1/9/22 的组合和 baseline 委托；zero-message/S/G/P/current/retired/terminal 仍原样。 | **技术文本核对完成**；正式独立签署仍待。 |
+| F-01 `/1` compatibility | ADR0037 规定同 identity coherent rollout；项目负责人 2026-09-16 确认 npm 无消费者，该项 **CLOSED/NON-BLOCKING**；已查 GitHub Releases API 返回 `[]`，仅证明该渠道无 Release。 | **非 npm 无混配/统一 cohort：owner attestation 2026-09-16 CLOSED。** |
+| F-02 Frozen Connection 三-child 投影 | [编辑性 diff `9fb2c72`](https://github.com/lithdoo/loom-realm/commit/9fb2c72a6dff03001ab13978ab38dea0a4454e02)只修正 §1/9/22 的组合和 baseline 委托；zero-message/S/G/P/current/retired/terminal 仍原样。 | **技术文本核对完成**；独立签署见 [independent review](./viewport-core-docs-freeze-independent-review-2026-09-16.md)。 |
 | F-03 Phase plan / PR0 循环 | [`eb518d6`](https://github.com/lithdoo/loom-realm/commit/eb518d60542040ee6dfd42ce540098f37b7ed225) 保留原里程碑细节，并明确 PR0 只做可行性、PR1/2 后才性能验收。 | Core freeze 无 Map PR0/P95 gate。 |
-| F-04 误压缩及交叉文件冲突 | [scope repair](./viewport-scope-repair-2026-09-16.md)先恢复原文，后按 [technical final review](./viewport-core-final-review-2026-09-16.md)的 CR-01/02/04/05 定点修正 protocol layers、Subsystem、Renderer、Data status/seam、terminal-after-subscribe 和旧 Frozen wrapper；原 Profile/fixture 以 exact blob 全文保留。 | 技术修复 **TEXT VERIFIED**；最终 reviewer独立身份/date/docs-only SHA 与 §2 非 npm owner conclusion 尚缺，不能冒充 Freeze。 |
+| F-04 误压缩及交叉文件冲突 | [scope repair](./viewport-scope-repair-2026-09-16.md)先恢复原文，后按 [technical final review](./viewport-core-final-review-2026-09-16.md)的 CR-01/02/04/05 定点修正 protocol layers、Subsystem、Renderer、Data status/seam、terminal-after-subscribe 和旧 Frozen wrapper；原 Profile/fixture 以 exact blob 全文保留。 | 技术修复 **TEXT VERIFIED**；独立签署见 [independent review](./viewport-core-docs-freeze-independent-review-2026-09-16.md)。 |
 
 Core Docs Freeze 只需要**真实非 npm 独立兼容条件及独立文档批准**，不需要先有 executable PASS、Map PR0 或 npm 查询。修订后唯一目标 `/1 = Connection1+Input1+Render1+Viewport1`；旧 executable 历史 PASS 不继承，`/2` Superseded。
 
@@ -45,11 +45,11 @@ Core Docs Freeze 只需要**真实非 npm 独立兼容条件及独立文档批�
 Core technical corrective review: COMPLETE / TEXT VERIFIED (see final review)
 npm consumer: PROJECT OWNER / NO CONSUMERS / NON-BLOCKING / no npm verification
 GitHub Releases: [] in that channel only
-Non-npm compatibility / no-mixed rollout owner conclusion: PENDING
-Independent reviewer/date/final docs-only SHA: PENDING
-Core Formal Docs Freeze: HOLD / NOT APPROVED
+Non-npm compatibility / no-mixed rollout owner conclusion: APPROVED 2026-09-16 / owner attestation
+Independent reviewer/date/final docs-only SHA: Cursor Grok 4.6 / 2026-09-16 / 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9
+Core Formal Docs Freeze: APPROVED for that subject; Not Implemented / Not Qualified
 Map PR0 / Map Docs Freeze: NOT RUN / HOLD
 Core/Map executable/performance tests: NOT RUN
 ```
 
-C0 owner fact + independent approval → Core Docs Freeze；C1 coherent four-child implementation+new SHA conformance；Map PR0 → Map Docs Freeze → PR1/2/3。本文只收口整改沿革，不得把“技术复核通过”改写成“已正式冻结”。
+C0 owner fact + independent approval → Core Docs Freeze subject `4cbf620`；C1 coherent four-child implementation+new SHA conformance；Map PR0 → Map Docs Freeze → PR1/2/3。本文只收口整改沿革。 Frozen ≠ Implemented ≠ Qualified。

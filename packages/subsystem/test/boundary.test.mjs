@@ -39,6 +39,7 @@ test("M12 author declarations expose only the frozen Content projection", async 
   assert.match(content, /resource\(/);
   for (const forbidden of ["manifest(", "group(", "fetch(", "installationId", "token", "URL"]) assert.equal(content.includes(forbidden), false);
   assert.match(model, /readonly content: ContentClient/);
+  assert.match(model, /readonly viewport: Viewport/);
 });
 
 test("trusted host keeps the exact M8 protocol and port dependency direction", async () => {
@@ -73,4 +74,13 @@ test("M10 author declarations expose the exact minimal Input surface", async () 
   assert.match(input, /type KeyboardStateInput = KeyboardStatePayloadV1/);
   assert.match(input, /type InputPayload<C extends InputChannel>/);
   assert.match(model, /createInputListener\(options: CreateInputListenerOptions\): InputListener/);
+});
+
+test("author declarations expose Runtime-scoped readonly Viewport", async () => {
+  const index = await readFile(new URL("../dist/index.d.ts", import.meta.url), "utf8");
+  const model = await readFile(new URL("../dist/model.d.ts", import.meta.url), "utf8");
+  for (const name of ["Viewport", "ViewportSize", "ViewportListener"]) {
+    assert.match(index, new RegExp(`\\b${name}\\b`));
+  }
+  assert.match(model, /readonly viewport: Viewport/);
 });

@@ -8,3 +8,7 @@ export type {
   RendererInputSource,
   RendererInputSourceChange,
 } from "./input.js";
+export type {
+  RendererViewportLogicalSample,
+  RendererViewportSource,
+} from "./viewport.js";

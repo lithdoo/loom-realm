@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Docs Freeze HOLD / Not Implemented**  
+> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Core Docs Frozen / Not Implemented / Not Qualified**  
 > 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update、Viewport State 与 Platform Broker 的分层关系  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)  
 > 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)  
@@ -144,7 +144,7 @@ fresh-carrier independent child baselines
 terminal first-wins / no retry-replay-migration
 ```
 
-Data Connection v1、User Input v1、Render Update v1 各自仍 Frozen；修订后的 **Profile v1 与 Viewport State v1 仍为 Docs Freeze HOLD**。后续实现须证明修订后完整 Profile 的 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。Viewport producer 仅在 shared writer admission 前有界 latest-wins，不改变 Frozen writer 或其他 child ordering。
+Data Connection v1、User Input v1、Render Update v1 各自仍 Frozen；修订后的 **Profile v1 与 Viewport State v1 为 Core Docs Frozen / Not Implemented**。后续实现须证明修订后完整 Profile 的 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。Viewport producer 仅在 shared writer admission 前有界 latest-wins，不改变 Frozen writer 或其他 child ordering。
 
 **真正不同的 Profile identity** 变更必须 fresh Data generation。本次同一 `/1` 的首次发布前纠正不是运行时 Profile replacement；产品必须先保证 coherent build/deployment cohort，不能依靠 `(S,G,P)` 识别旧新二进制。见 [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) 和 [qualifications](../30-implementation/viewport-profile-v1-qualification.md)。
 

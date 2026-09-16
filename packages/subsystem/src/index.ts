@@ -49,3 +49,8 @@ export type {
   ContentRecord,
   ContentResource,
 } from "./content.js";
+export type {
+  Viewport,
+  ViewportListener,
+  ViewportSize,
+} from "./viewport.js";
