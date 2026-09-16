@@ -304,10 +304,16 @@ function validateEventShape(value: unknown): RenderEvent {
 function denseArray(value: unknown, max: number, label: string): readonly unknown[] {
   if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
   if (value.length > max) throw new RangeError(`${label} length limit exceeded`);
-  const keys = Object.keys(value);
-  if (keys.length !== value.length) throw new TypeError(`${label} must be a dense array`);
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes("length")) {
+    throw new TypeError(`${label} must be a dense array`);
+  }
   for (let index = 0; index < value.length; index += 1) {
-    if (!hasOwn(value, String(index))) throw new TypeError(`${label} must be a dense array`);
+    const key = String(index);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      throw new TypeError(`${label} must be a dense array`);
+    }
   }
   return value;
 }
@@ -411,17 +417,6 @@ function applyDataDelta(
   }
   validateJsonData(next, "RenderNode data");
   return Object.freeze(next) as JsonObject;
-}
-
-function findNode(state: RenderDomainState, key: string): RenderNode | undefined {
-  const stack = [...state.roots];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (node === undefined) continue;
-    if (node.key === key) return node;
-    stack.push(...node.children);
-  }
-  return undefined;
 }
 
 function freezeNode(node: {
@@ -647,15 +642,11 @@ export class RenderManager {
         if (seen.has(key)) throw new TypeError("Duplicate RenderNodeUpdate key");
         seen.add(key);
         if (!domain.liveKeys.has(key)) throw new TypeError("Updated Render node is missing");
-        const current = findNode(domain.state, key);
-        if (current === undefined) throw new TypeError("Updated Render node is missing");
         const attrsRaw = optionalMember<unknown>(item, "attrs", "RenderNodeUpdate.attrs");
         const dataRaw = optionalMember<unknown>(item, "data", "RenderNodeUpdate.data");
         if (attrsRaw === undefined && dataRaw === undefined) throw new TypeError("RenderNodeUpdate is empty");
         const attrs = attrsRaw === undefined ? undefined : validateDelta(attrsRaw, "attrs", "attrs") as StringDelta;
         const data = dataRaw === undefined ? undefined : validateDelta(dataRaw, "data", "data") as DataDelta;
-        if (attrs !== undefined) applyStringDelta(current.attrs, attrs);
-        if (data !== undefined) applyDataDelta(current.data, data);
         nodes.push({
           key,
           ...(attrs === undefined ? {} : { attrs }),
@@ -860,7 +851,7 @@ export class RenderManager {
         this.nextSerial += 1n;
         this.cursors.delete(work.domain);
         this.work = this.work.filter((item) => item.kind === "registry" || item.domain !== work.domain);
-        this.work.unshift({ kind: "snapshot", domain: work.domain, state: work.state });
+        this.work.unshift({ kind: "snapshot", domain: work.domain, state: work.domain.state });
         this.work.unshift({ kind: "registry", message: this.registryMessage() });
         if (oldId === work.domain.wireId) throw new Error("Render wire identity rollover failed");
         this.pump();

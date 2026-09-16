@@ -611,6 +611,8 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   await page.bringToFront();
   await page.mouse.click(320, 240);
   await page.waitForFunction(() => document.hasFocus());
+  const viewport = page.locator("lr-map-view");
+  const beforePixels = await viewport.screenshot();
   await page.keyboard.press("ArrowRight");
   try {
     await page.waitForFunction(() => {
@@ -631,14 +633,17 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   const records = await page.evaluate(() => globalThis.__loomrealmMovementRecords);
   const input = records.find((record) => record.name === "input-captured");
   const paint = records.find((record) => record.name === "browser-first-motion-paint");
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+  const afterPixels = await viewport.screenshot();
   assert.equal(input.detail.code, "ArrowRight");
   assert.equal(typeof input.at, "number");
   assert.equal(typeof paint.detail.visualX, "number");
   assert.equal(typeof paint.detail.visualY, "number");
   assert.ok(paint.at >= input.at, JSON.stringify({ input, paint, records }));
+  assert.equal(beforePixels.equals(afterPixels), false, "logical first paint must produce a screenshot pixel difference within one display frame");
 });
 
-test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout: 240_000 }, async (t) => {
+test("M15 128x8 ordinary and refresh movement first-paint P95 stay within 50ms", { timeout: 600_000 }, async (t) => {
   const installation = await prepareMovementInstallation({ cyclicMap: true });
   const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
@@ -671,7 +676,6 @@ test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout:
   await page.waitForFunction(() => document.hasFocus());
   await page.keyboard.press("ArrowUp");
   await page.waitForFunction(() => document.querySelector("lr-map-view")?._latestData?.mapId === 900001, null, { timeout: 10_000 });
-
   const sampleMove = async () => {
     const beforeX = await page.evaluate(() => {
       const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
@@ -713,43 +717,58 @@ test("M15 128x8 ordinary movement first-paint P95 stays within 50ms", { timeout:
     if (!input || !paint || typeof input.at !== "number" || typeof paint.at !== "number" || paint.at < input.at) {
       return null;
     }
-    return { latency: paint.at - input.at, refresh: after.refresh === true };
+    return {
+      latency: paint.at - input.at,
+      refresh: after.refresh === true,
+    };
   };
 
-  const ordinary = [];
-  const refresh = [];
-  let attempts = 0;
-  let invalid = 0;
-  let warmupLeft = 20;
-  while (ordinary.length < 100 || refresh.length < 30) {
-    attempts += 1;
-    if (attempts > 800) break;
-    const sample = await sampleMove();
-    if (sample === null) {
-      invalid += 1;
-      continue;
+  const rounds = [];
+  for (let round = 1; round <= 3; round += 1) {
+    const ordinary = [];
+    const refresh = [];
+    let attempts = 0;
+    let invalid = 0;
+    let warmupLeft = 20;
+    while (ordinary.length < 100 || refresh.length < 30) {
+      attempts += 1;
+      if (attempts > 800) break;
+      const sample = await sampleMove();
+      if (sample === null) {
+        invalid += 1;
+        continue;
+      }
+      if (warmupLeft > 0) {
+        warmupLeft -= 1;
+        continue;
+      }
+      if (sample.refresh) {
+        if (refresh.length < 30) refresh.push(sample.latency);
+        continue;
+      }
+      if (ordinary.length < 100) ordinary.push(sample.latency);
     }
-    if (warmupLeft > 0) {
-      warmupLeft -= 1;
-      continue;
-    }
-    if (sample.refresh) {
-      if (refresh.length < 30) refresh.push(sample.latency);
-      continue;
-    }
-    if (ordinary.length < 100) ordinary.push(sample.latency);
+    assert.ok(invalid / attempts <= 0.05, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+    assert.equal(ordinary.length, 100, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+    assert.equal(refresh.length, 30, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+    rounds.push({ round, attempts, invalid, ordinary, refresh });
   }
-  assert.ok(invalid / attempts <= 0.05, JSON.stringify({ attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-  assert.equal(ordinary.length, 100, JSON.stringify({ attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-  assert.equal(refresh.length, 30, JSON.stringify({ attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+  const ordinary = rounds.flatMap((round) => round.ordinary);
+  const refresh = rounds.flatMap((round) => round.refresh);
   const p50 = nearestRank(ordinary, 0.5);
   const p95 = nearestRank(ordinary, 0.95);
   const max = Math.max(...ordinary);
   const refreshP50 = nearestRank(refresh, 0.5);
   const refreshP95 = nearestRank(refresh, 0.95);
   const refreshMax = Math.max(...refresh);
-  assert.ok(p95 <= 50, JSON.stringify({
-    p50, p95, max, n: ordinary.length, attempts, invalid, latencies: ordinary,
+  const report = {
+    subject: process.env.GITHUB_SHA ?? "local-worktree",
+    platform: { node: process.version, os: `${process.platform} ${os.release()}`, cpu: os.cpus()[0]?.model ?? "unknown" },
+    rounds,
+    ordinary: { p50, p95, max, n: ordinary.length, latencies: ordinary },
     refresh: { p50: refreshP50, p95: refreshP95, max: refreshMax, n: refresh.length, latencies: refresh },
-  }));
+  };
+  process.stdout.write(`M15_MOVEMENT_QUALIFICATION ${JSON.stringify(report)}\n`);
+  assert.ok(p95 <= 50, JSON.stringify(report));
+  assert.ok(refreshP95 <= 50, JSON.stringify(report));
 });

@@ -464,7 +464,6 @@ export class RendererRenderStore {
       return;
     }
     const created = new Set<object>();
-    const cloneByOriginal = new WeakMap<object, MutableNode>();
     const builderByKey = new Map<string, MutableNode>();
     const cloneNodeShallow = (node: MutableNode): MutableNode => {
       const known = builderByKey.get(node.key);
@@ -476,7 +475,6 @@ export class RendererRenderStore {
         data: node.data,
         children: node.children,
       };
-      cloneByOriginal.set(node, clone);
       builderByKey.set(node.key, clone);
       created.add(clone);
       return clone;

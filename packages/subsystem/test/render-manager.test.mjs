@@ -159,6 +159,36 @@ test("revision exhaustion rolls one live business Domain to a fresh wire identit
   assert.deepEqual(current.messages.at(-2).domains, [replacement.domainId]);
 });
 
+test("revision exhaustion publishes the latest authority when later state work is pending", async () => {
+  let releaseEvent;
+  const eventGate = new Promise((resolve) => { releaseEvent = resolve; });
+  let blockEvent = false;
+  const manager = new RenderManager();
+  const domain = manager.createDomain(state([node("root", [], "sprite", {}, { n: 0 })]));
+  const current = peer(1, {
+    async send(message) {
+      if (blockEvent && message.type === "render.event") await eventGate;
+    },
+  });
+  manager.setDataPeer(current);
+  await settle();
+  const oldId = current.messages[1].domainId;
+  blockEvent = true;
+  domain.emit({ targetKey: "root", name: "hold", data: {} });
+  await turn();
+  manager.setRevisionForQualification(oldId, Number.MAX_SAFE_INTEGER);
+  domain.update({ nodes: [{ key: "root", data: { set: { n: 1 } } }] });
+  domain.update({ nodes: [{ key: "root", data: { set: { n: 2 } } }] });
+  releaseEvent();
+  await settle();
+  const replacement = current.messages.at(-1);
+  assert.equal(replacement.type, "render.snapshot");
+  assert.notEqual(replacement.domainId, oldId);
+  assert.equal(replacement.revision, 1);
+  assert.equal(replacement.roots[0].data.n, 2);
+  assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.n, 2);
+});
+
 test("Runtime cleanup closes every still-live RenderDomain", () => {
   const manager = new RenderManager();
   const domain = manager.createDomain(state([node("root")]));
@@ -343,6 +373,35 @@ test("RenderDomain.update is local-atomic and distinguishes missing from explici
   }), TypeError);
   const extra = []; extra[0] = { key: "root", data: { set: { n: 2 } } }; extra.foo = true;
   assert.throws(() => domain.update({ nodes: extra }), TypeError);
+  const hidden = [{ key: "root", data: { set: { n: 2 } } }];
+  Object.defineProperty(hidden, "hidden", { value: true });
+  assert.throws(() => domain.update({ nodes: hidden }), TypeError);
+  const symbolic = [{ key: "root", data: { set: { n: 2 } } }];
+  symbolic[Symbol("extra")] = true;
+  assert.throws(() => domain.update({ nodes: symbolic }), TypeError);
+  let observed = 0;
+  const indexedAccessor = [];
+  Object.defineProperty(indexedAccessor, "0", {
+    enumerable: true,
+    get() {
+      observed += 1;
+      return { key: "root", data: { set: { n: 2 } } };
+    },
+  });
+  indexedAccessor.length = 1;
+  assert.throws(() => domain.update({ nodes: indexedAccessor }), TypeError);
+  assert.equal(observed, 0);
+  const removeAccessor = [];
+  Object.defineProperty(removeAccessor, "0", {
+    enumerable: true,
+    get() {
+      observed += 1;
+      return "n";
+    },
+  });
+  removeAccessor.length = 1;
+  assert.throws(() => domain.update({ nodes: [{ key: "root", data: { remove: removeAccessor } }] }), TypeError);
+  assert.equal(observed, 0);
   const accessor = { nodes: [{ key: "root", data: { set: { n: 2 } } }] };
   Object.defineProperty(accessor, "zIndex", { get() { return 1; }, enumerable: true });
   assert.throws(() => domain.update(accessor), TypeError);
