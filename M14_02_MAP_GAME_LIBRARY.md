@@ -1,6 +1,6 @@
 # M14 / 02 — Map Game Library
 
-> 状态：**Implemented / contract frozen; formal Closed**
+> 状态：**Implemented / contract frozen; current subject Requalification Pending**
 > Closure authority：formal M14 status and current qualification evidence live only in `doc/30-implementation/m14-qualification.md`. This file freezes the implemented map consumer contract; it does not independently claim milestone closure.
 > 规范优先级：本文是 M14 map consumer 的 implementation freeze；更早 milestone 中 future-looking 的 Desktop input、author-chosen RenderDomain id 等表述，以本文和 M14/04–05 为准。
 
@@ -264,8 +264,8 @@ accepted event
 → set facing
 → evaluate passability
 → update x/y when passable
-→ recompute camera + visible tiles
-→ RenderDomain.replace(current full state)
+→ recompute camera; reuse or refresh retained tile projection window
+→ RenderDomain.update(player/camera, tiles only when coverage is insufficient)
 → return
 ```
 
@@ -483,7 +483,7 @@ screenX=playerX*32-cameraX
 screenY=playerY*32-cameraY
 ```
 
-Runtime publishes current full `RenderDomainState` through `replace(...)`；M14 defines no map delta protocol。M11/M13 may optimize transport internally；WC receives current full node data per M13 ABI。
+Ordinary walking/standing completion publishes through `RenderDomain.update(...)` and reuses the generic M11 existing-node author surface；M14 defines no map-specific delta protocol。Initial load, collision, transfer, and reconnect still `replace(...)` a full baseline。WC receives current full node data per M13 ABI。
 
 ## 15. Map-owned Web Components
 

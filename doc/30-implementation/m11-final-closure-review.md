@@ -1,7 +1,7 @@
 # M11 Render 最终闭环评审结论
 
 > 层级：实施评审 / Closure Review  
-> 状态：**Closed / Requalified**
+> 状态：**Historical Closed Review / Current Subject Requalification Pending**
 > 日期：2026-09-07  
 > 适用范围：M11 Render implementation + qualification closure  
 > 正式协议：[Render Update v1](../15-contracts/render-update-v1.md)  
@@ -12,7 +12,7 @@
 > reconnect/old-stream/Runtime/Frame/Domain removal proof 已接入共享的真实 Desktop/Hostra vertical；
 > application bytes、global JSON depth、zIndex 的 outbound/inbound matrix cells 已补齐。
 
-> **2026-09-15 supersession notice：** 本页 `Closed / Requalified` 只属于旧 executable subject。[ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 已接受新的 `RenderDomain.update()` target，但 docs-only acceptance 不构成实现证据；PR 2 后必须针对最终统一 subject 追加新评审并重新运行 M11 root gate。本页旧 checklist 仍是 retained regression，不得用来推导新 subject 已 Closed。
+> **2026-09-16 current-subject notice：** 本页的完整 closure review 与 [M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265) 只证明历史 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。current executable subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 修正了 M11 behavior；架构结论保留，本地 `npm run test:m11` 已通过，但 formal qualification 仍须取得 hosted Node 20/24 evidence。
 
 本评审不重新设计 M11，不修改 Frozen Render Update v1 authority、wire schema、lifetime、revision、Event 或 failure semantics。Production architecture 仍成立；评审发现的 **Render representation validation 实现闭环** 与 **formal qualification evidence 真实性闭环** 已按本文固定计划修复。
 
@@ -21,14 +21,14 @@
 ```text
 M11 production architecture        implemented / retained
 M11 production Render core         implemented / validation closed
-M11 formal qualification claim     requalified / closed
+M11 formal qualification claim     historical Closed / current subject Pending
 M11 transport-equivalence          still M16
 ```
 
-本文定义的唯一 closure plan 与 `npm run test:m11` 已全量通过，当前结论为：
+本文定义的唯一 closure plan 已在历史 subject 上全量通过；current subject 的准确结论为：
 
 ```text
-M11 Render = Implemented / Qualified / Closed
+M11 Render = Implemented / Requalification Pending
 ```
 
 ---
@@ -584,7 +584,7 @@ M11 再次声明 Closed 前，评审只使用以下固定 checklist，不再增�
 [x] transport role remains unclaimed
 ```
 
-满足全部项目后，本评审结论为：
+以上勾选项记录历史 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 的完成状态；current subject 不得复用这些运行结果。满足 current-subject 全部项目后，本评审才可重新得出：
 
 ```text
 M11 Render = Implemented / Qualified / Closed

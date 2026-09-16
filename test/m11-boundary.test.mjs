@@ -14,7 +14,10 @@ test("Subsystem exposes the exact frozen M11 Render author projection", async ()
   }
   assert.match(render, /type RenderNode = RenderNodeV1/);
   assert.match(render, /replace\(state: RenderDomainState\): void/);
+  assert.match(render, /update\(update: RenderDomainUpdate\): void/);
   assert.match(render, /emit\(event: RenderEvent\): void/);
+  assert.match(index, /\bRenderDomainUpdate\b/);
+  assert.doesNotMatch(index, /\bRenderStringDelta\b|\bRenderDataDelta\b|\bRenderNodeUpdate\b/);
   assert.match(render, /close\(\): void/);
   assert.match(model, /createRenderDomain\(initialState: RenderDomainState\): RenderDomain/);
   assert.doesNotMatch(index, /(?:RenderManager|RenderStore|RenderSnapshot|RenderPatch|domainId|generation|revision)/);

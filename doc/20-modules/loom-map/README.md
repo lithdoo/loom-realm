@@ -1,7 +1,7 @@
 # Map Game Library 设计
 
 > 层级：Game Library 设计  
-> 状态：**Implemented / contract frozen; formal Closed**
+> 状态：**Implemented / contract frozen; current subject Requalification Pending**
 > 稳定程度：M10–M13 consumed boundaries closed；M14 map design/implementation frozen  
 > 精确 landing：根目录 `M14_01_WORKSPACE_BOUNDARY.md`–`M14_05_QUALIFICATION_CLOSURE.md`  
 > Formal qualification source：[`m14-qualification.md`](../../30-implementation/m14-qualification.md)  
@@ -132,7 +132,7 @@ non-repeat Arrow key down
 → passability
 → x/y
 → camera
-→ full RenderDomain.replace(...)
+→ RenderDomain.update(...) for ordinary movement; replace(...) for load/collision/transfer
 ```
 
 Blocked movement changes facing but not position。No EventQueue、game-loop Scheduler、PlayerController or MovementManager is introduced。
@@ -186,7 +186,7 @@ lr-map-view
 
 View data carries current map/camera/resource/visible-tile facts。Sprite data carries current world/screen/direction/resource facts。
 
-Runtime uses full-state `RenderDomain.replace(...)`。M14 defines no map delta protocol。
+Ordinary walking reuses M11 `RenderDomain.update(...)`；M14 defines no map-specific delta protocol。Load, collision, transfer, and reconnect still `replace(...)`。
 
 ## Presentation
 

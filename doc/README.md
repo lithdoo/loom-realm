@@ -52,15 +52,15 @@ ADR 0033 仍保留 Electron-main composition 的历史/conditional provenance，
 
 ---
 
-## 当前 closed / frozen 主干
+## 当前 closed / frozen / requalification 主干
 
 ```text
 M10 User Input             Closed
-M11 Render Replication     Closed
+M11 Render Replication     Requalification Pending
 M12 Content                Closed
 M13 Web Presentation       Closed
-M14 Map Game Library       Closed
-M15 Desktop Full E2E       Closed
+M14 Map Game Library       Requalification Pending
+M15 Desktop Full E2E       Requalification Pending
 ```
 
 M14/M15 formal evidence remains in their qualification ledgers；本文不复制 run ID。
@@ -155,9 +155,10 @@ M17  PWA Full E2E / Equivalence
 Current summary：
 
 ```text
-M1–M13  closed baseline
-M14     Closed → m14-qualification.md
-M15     Closed → m15-qualification.md
+M1–M10, M12–M13  closed baseline
+M11     Requalification Pending → m11-qualification.md
+M14     Requalification Pending → m14-qualification.md
+M15     Requalification Pending → m15-qualification.md
 M16–17  planned
 ```
 

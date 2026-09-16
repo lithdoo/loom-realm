@@ -1,13 +1,13 @@
 # M11 Render Qualification
 
-> 状态：旧 executable subject **Implemented / Qualified / Closed**；ADR 0035 target **Accepted / Implementation Pending**
+> 状态：**Implemented / Requalification Pending**（current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`）
 > 日期：2026-09-15
 > 规范入口：仓库根目录 `M11_05_QUALIFICATION_CLOSURE.md`
 > 最终评审：[M11 Render 最终闭环评审结论](./m11-final-closure-review.md)
 > 协议：`loomrealm.render-update / 1`
 > Fixture：`fixtureSetRevision = 1`
 
-> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 是 docs-only accepted correction；本页现有 PASS 只证明旧 executable subject，不证明 `RenderDomain.update()` 已实现或 Qualified。PR 2 进入 Current 后，本页必须先标记 `Requalification Pending`，最终 evidence 必须记录统一 implementation subject SHA。
+> **Current notice：** [ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 的 current executable subject 是 `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`。本地 `npm run test:m11` 已通过；hosted Node 20/24 尚待同一 subject 复验。旧 [M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265) 只证明历史 subject `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。
 
 M11 production architecture、Render representation validation、Subsystem-owned business Render authority、current Data publication、Renderer internal replica 与 Hostra/Desktop same-generation Render vertical 已实现并重新通过最终闭环评审。
 
@@ -115,6 +115,6 @@ npm run test:m11
 最终必须在 Node 20 + Node 24 对同一 root gate通过，并由 executable output重新生成 current qualification record。
 
 ```text
-M11 Render = Implemented / Qualified / Closed
+M11 Render = Implemented / Requalification Pending
 M16 transport-equivalence = not claimed
 ```

@@ -258,4 +258,4 @@ M10 Input
 
 M15–M17只 materialize各自 physical platform职责，不复制 M14 business semantics。
 
-当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M14/M15 已 Closed；Architecture docs不独立发布 milestone Closed日期。
+当前 milestone/evidence 状态由 [`phase-1-delivery-plan.md`](../30-implementation/phase-1-delivery-plan.md) 汇总。M14/M15 architecture/design 保持冻结，current-subject formal status 为 Requalification Pending；Architecture docs不独立发布 milestone evidence。

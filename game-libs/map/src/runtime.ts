@@ -1,13 +1,17 @@
 import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomainState, type SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import {
   assertProjectable,
+  boundsContain,
   canMove,
   computeCamera,
   directionForCode,
-  projectVisibleTiles,
+  expandTileBounds,
+  projectTilesInBounds,
+  unionTileBounds,
   validateMapRecord,
   validateMapTransferRecord,
   validateTilesetRecord,
+  viewportTileBounds,
   type ContactTransfer,
   type Direction,
   type EdgeTransfer,
@@ -15,6 +19,7 @@ import {
   type MapTransferRecord,
   type StepTransfer,
   type TilesetRecord,
+  type VisibleTile,
 } from "./semantics.js";
 
 interface InitialInput { mapId: number; x: number; y: number; characterName: string }
@@ -36,7 +41,30 @@ interface LoadedMap {
 
 type TransferRule = StepTransfer | ContactTransfer | EdgeTransfer;
 
+interface TileProjectionWindow {
+  readonly source: LoadedMap;
+  readonly minTileX: number;
+  readonly minTileY: number;
+  readonly maxTileX: number;
+  readonly maxTileY: number;
+  readonly tiles: readonly VisibleTile[];
+}
+
+interface RenderFacts {
+  readonly loaded: LoadedMap;
+  readonly window: TileProjectionWindow;
+  readonly x: number;
+  readonly y: number;
+  readonly direction: Direction;
+  readonly activeMove: ActiveMove | null;
+  readonly playerRef: ResourceRef;
+}
+
 const WALK_STEP_MS = 250;
+const VIEWPORT_KEY = "viewport";
+const PLAYER_KEY = "player";
+const MAX_PROJECTED_DATA_BYTES = 196_608;
+const PROJECTION_MARGINS = [4, 3, 2, 1] as const;
 const stepDelta: Record<Direction, { readonly dx: number; readonly dy: number }> = {
   2: { dx: 0, dy: 1 },
   4: { dx: -1, dy: 0 },
@@ -73,6 +101,113 @@ function ref(namespace: string, key: string, contentVersion: string): ResourceRe
 
 function inBounds(map: MapRecord, x: number, y: number) {
   return x >= 0 && y >= 0 && x < map.width && y < map.height;
+}
+
+function viewportPayload(
+  loaded: LoadedMap,
+  window: TileProjectionWindow,
+  cameraX: number,
+  cameraY: number,
+  cameraMotion: unknown,
+): RenderDomainState["roots"][number]["data"] {
+  return {
+    mapId: loaded.mapId,
+    mapWidth: loaded.map.width,
+    mapHeight: loaded.map.height,
+    cameraX,
+    cameraY,
+    tileset: loaded.tilesetRef,
+    autotiles: loaded.autotileRefs,
+    tiles: window.tiles,
+    cameraMotion,
+  } as unknown as RenderDomainState["roots"][number]["data"];
+}
+
+function projectionBytes(data: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(data)).byteLength;
+}
+
+function selectProjectionWindow(
+  loaded: LoadedMap,
+  required: ReturnType<typeof viewportTileBounds>,
+  cameraX: number,
+  cameraY: number,
+  cameraMotion: unknown,
+): TileProjectionWindow {
+  let selected: TileProjectionWindow | undefined;
+  for (const margin of PROJECTION_MARGINS) {
+    const bounds = expandTileBounds(required, margin, loaded.map);
+    const tiles = projectTilesInBounds(loaded.map, loaded.tileset, bounds);
+    const candidate: TileProjectionWindow = Object.freeze({
+      source: loaded,
+      minTileX: bounds.minTileX,
+      minTileY: bounds.minTileY,
+      maxTileX: bounds.maxTileX,
+      maxTileY: bounds.maxTileY,
+      tiles,
+    });
+    if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion)) <= MAX_PROJECTED_DATA_BYTES) {
+      selected = candidate;
+      break;
+    }
+  }
+  if (selected === undefined) throw new RangeError("Map projection budget exceeded");
+  return selected;
+}
+
+function renderState(facts: RenderFacts): RenderDomainState {
+  const { loaded, window, x, y, direction, activeMove, playerRef } = facts;
+  if (activeMove) {
+    const fromCamera = computeCamera(loaded.map, activeMove.fromX, activeMove.fromY);
+    const targetCamera = computeCamera(loaded.map, x, y);
+    const fromScreenX = activeMove.fromX * 32 - fromCamera.cameraX;
+    const fromScreenY = activeMove.fromY * 32 - fromCamera.cameraY;
+    const screenX = x * 32 - targetCamera.cameraX;
+    const screenY = y * 32 - targetCamera.cameraY;
+    return {
+      zIndex: 0,
+      roots: [{
+        key: VIEWPORT_KEY, tag: "lr-map-view", attrs: {},
+        data: viewportPayload(loaded, window, targetCamera.cameraX, targetCamera.cameraY, Object.freeze({
+          id: activeMove.id,
+          durationMs: WALK_STEP_MS,
+          fromCameraX: fromCamera.cameraX,
+          fromCameraY: fromCamera.cameraY,
+        })),
+        children: [{
+          key: PLAYER_KEY, tag: "lr-map-sprite", attrs: {},
+          data: {
+            x, y, screenX, screenY, direction,
+            pattern: activeMove.startPattern, sprite: playerRef,
+            motion: Object.freeze({
+              id: activeMove.id,
+              durationMs: WALK_STEP_MS,
+              fromY: activeMove.fromY,
+              fromScreenX,
+              fromScreenY,
+            }),
+          },
+          children: [],
+        }],
+      }],
+    };
+  }
+  const { cameraX, cameraY } = computeCamera(loaded.map, x, y);
+  return {
+    zIndex: 0,
+    roots: [{
+      key: VIEWPORT_KEY, tag: "lr-map-view", attrs: {},
+      data: viewportPayload(loaded, window, cameraX, cameraY, null),
+      children: [{
+        key: PLAYER_KEY, tag: "lr-map-sprite", attrs: {},
+        data: {
+          x, y, screenX: x * 32 - cameraX, screenY: y * 32 - cameraY, direction,
+          pattern: 0, sprite: playerRef, motion: null,
+        },
+        children: [],
+      }],
+    }],
+  };
 }
 
 export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope) => ({
@@ -113,6 +248,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       let current!: LoadedMap;
+      let window!: TileProjectionWindow;
       let x = 0;
       let y = 0;
       let direction: Direction = 2;
@@ -121,70 +257,19 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       let heldDirections: Direction[] = [];
       let playerRef!: ResourceRef;
 
-      const renderState = (): RenderDomainState => {
-        if (activeMove) {
-          const fromCamera = computeCamera(current.map, activeMove.fromX, activeMove.fromY);
-          const targetCamera = computeCamera(current.map, x, y);
-          const fromScreenX = activeMove.fromX * 32 - fromCamera.cameraX;
-          const fromScreenY = activeMove.fromY * 32 - fromCamera.cameraY;
-          const screenX = x * 32 - targetCamera.cameraX;
-          const screenY = y * 32 - targetCamera.cameraY;
-          return {
-            zIndex: 0,
-            roots: [{
-              key: "viewport", tag: "lr-map-view", attrs: {},
-              data: {
-                mapId: current.mapId, mapWidth: current.map.width, mapHeight: current.map.height,
-                cameraX: targetCamera.cameraX, cameraY: targetCamera.cameraY, tileset: current.tilesetRef,
-                autotiles: current.autotileRefs,
-                tiles: projectVisibleTiles(current.map, current.tileset, targetCamera.cameraX, targetCamera.cameraY) as unknown as [],
-                cameraMotion: Object.freeze({
-                  id: activeMove.id,
-                  durationMs: WALK_STEP_MS,
-                  fromCameraX: fromCamera.cameraX,
-                  fromCameraY: fromCamera.cameraY,
-                }),
-              },
-              children: [{
-                key: "player", tag: "lr-map-sprite", attrs: {},
-                data: {
-                  x, y, screenX, screenY, direction,
-                  pattern: activeMove.startPattern, sprite: playerRef,
-                  motion: Object.freeze({
-                    id: activeMove.id,
-                    durationMs: WALK_STEP_MS,
-                    fromY: activeMove.fromY,
-                    fromScreenX,
-                    fromScreenY,
-                  }),
-                },
-                children: [],
-              }],
-            }],
-          };
-        }
-        const { cameraX, cameraY } = computeCamera(current.map, x, y);
-        return {
-          zIndex: 0,
-          roots: [{
-            key: "viewport", tag: "lr-map-view", attrs: {},
-            data: {
-              mapId: current.mapId, mapWidth: current.map.width, mapHeight: current.map.height,
-              cameraX, cameraY, tileset: current.tilesetRef,
-              autotiles: current.autotileRefs,
-              tiles: projectVisibleTiles(current.map, current.tileset, cameraX, cameraY) as unknown as [],
-              cameraMotion: null,
-            },
-            children: [{
-              key: "player", tag: "lr-map-sprite", attrs: {},
-              data: {
-                x, y, screenX: x * 32 - cameraX, screenY: y * 32 - cameraY, direction,
-                pattern: 0, sprite: playerRef, motion: null,
-              },
-              children: [],
-            }],
-          }],
-        };
+      const facts = (overrides: Partial<RenderFacts> = {}): RenderFacts => ({
+        loaded: overrides.loaded ?? current,
+        window: overrides.window ?? window,
+        x: overrides.x ?? x,
+        y: overrides.y ?? y,
+        direction: overrides.direction ?? direction,
+        activeMove: overrides.activeMove === undefined ? activeMove : overrides.activeMove,
+        playerRef: overrides.playerRef ?? playerRef,
+      });
+
+      const standingWindow = (loaded: LoadedMap, tileX: number, tileY: number) => {
+        const camera = computeCamera(loaded.map, tileX, tileY);
+        return selectProjectionWindow(loaded, viewportTileBounds(loaded.map, camera.cameraX, camera.cameraY), camera.cameraX, camera.cameraY, null);
       };
 
       const failTransfer = (error: unknown) => {
@@ -196,89 +281,181 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         }));
       };
 
-      const beginTransfer = async (rule: TransferRule): Promise<void> => {
+      const beginTransfer = async (rule: TransferRule, attemptedDirection: Direction): Promise<void> => {
         if (frame.signal.aborted || transitioning) return;
         transitioning = true;
-        activeMove = null;
-        if (stepTimer !== null) {
-          clearTimeout(stepTimer);
-          stepTimer = null;
+        try {
+          const standing = facts({ activeMove: null });
+          domain!.replace(renderState(standing));
+          activeMove = null;
+          if (stepTimer !== null) {
+            clearTimeout(stepTimer);
+            stepTimer = null;
+          }
+          nextStartPattern = 1;
+          const target = await loadMap(rule.targetMapId);
+          if (frame.signal.aborted || !transitioning) {
+            transitioning = false;
+            return;
+          }
+          if (!inBounds(target.map, rule.targetX, rule.targetY)) throw new TypeError("Map transfer target lies outside the loaded Map");
+          const nextDirection = "targetDirection" in rule ? rule.targetDirection ?? attemptedDirection : attemptedDirection;
+          const nextWindow = standingWindow(target, rule.targetX, rule.targetY);
+          const nextFacts = facts({
+            loaded: target,
+            window: nextWindow,
+            x: rule.targetX,
+            y: rule.targetY,
+            direction: nextDirection,
+            activeMove: null,
+          });
+          domain!.replace(renderState(nextFacts));
+          current = target;
+          window = nextWindow;
+          x = rule.targetX;
+          y = rule.targetY;
+          direction = nextDirection;
+          activeMove = null;
+          nextStartPattern = 1;
+          transitioning = false;
+          if (frame.signal.aborted) return;
+          if (heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        } catch (error) {
+          transitioning = false;
+          throw error;
         }
-        nextStartPattern = 1;
-        domain!.replace(renderState());
-        const target = await loadMap(rule.targetMapId);
-        if (frame.signal.aborted || !transitioning) return;
-        if (!inBounds(target.map, rule.targetX, rule.targetY)) throw new TypeError("Map transfer target lies outside the loaded Map");
-        current = target;
-        x = rule.targetX;
-        y = rule.targetY;
-        if ("targetDirection" in rule) direction = rule.targetDirection ?? direction;
-        activeMove = null;
-        nextStartPattern = 1;
-        transitioning = false;
-        if (frame.signal.aborted) return;
-        domain!.replace(renderState());
-        if (heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       };
 
-      const startTransfer = (rule: TransferRule) => {
+      const startTransfer = (rule: TransferRule, attemptedDirection: Direction) => {
         if (frame.signal.aborted || transitioning) return;
-        void beginTransfer(rule).catch(failTransfer);
+        void beginTransfer(rule, attemptedDirection).catch(failTransfer);
+      };
+
+      const publishBlocked = (nextDirection: Direction) => {
+        const nextWindow = window.source === current ? window : standingWindow(current, x, y);
+        domain!.replace(renderState(facts({ direction: nextDirection, window: nextWindow, activeMove: null })));
+        direction = nextDirection;
+        window = nextWindow;
+        activeMove = null;
+      };
+
+      const publishMovementUpdate = (nextX: number, nextY: number, nextDirection: Direction, nextMove: ActiveMove | null) => {
+        const fromX = nextMove?.fromX ?? x;
+        const fromY = nextMove?.fromY ?? y;
+        const sourceCamera = computeCamera(current.map, fromX, fromY);
+        const targetCamera = computeCamera(current.map, nextX, nextY);
+        const required = nextMove === null
+          ? viewportTileBounds(current.map, targetCamera.cameraX, targetCamera.cameraY)
+          : unionTileBounds(
+            viewportTileBounds(current.map, sourceCamera.cameraX, sourceCamera.cameraY),
+            viewportTileBounds(current.map, targetCamera.cameraX, targetCamera.cameraY),
+          );
+        const coverage = expandTileBounds(required, 1, current.map);
+        let nextWindow = window;
+        let includeTiles = false;
+        if (!(window.source === current && boundsContain(window, coverage))) {
+          const cameraMotion = nextMove === null ? null : Object.freeze({
+            id: nextMove.id,
+            durationMs: WALK_STEP_MS,
+            fromCameraX: sourceCamera.cameraX,
+            fromCameraY: sourceCamera.cameraY,
+          });
+          nextWindow = selectProjectionWindow(current, required, targetCamera.cameraX, targetCamera.cameraY, cameraMotion);
+          includeTiles = true;
+        }
+        const screenX = nextX * 32 - targetCamera.cameraX;
+        const screenY = nextY * 32 - targetCamera.cameraY;
+        const fromScreenX = fromX * 32 - sourceCamera.cameraX;
+        const fromScreenY = fromY * 32 - sourceCamera.cameraY;
+        const viewportSet: Record<string, unknown> = {
+          cameraX: targetCamera.cameraX,
+          cameraY: targetCamera.cameraY,
+          cameraMotion: nextMove === null ? null : Object.freeze({
+            id: nextMove.id,
+            durationMs: WALK_STEP_MS,
+            fromCameraX: sourceCamera.cameraX,
+            fromCameraY: sourceCamera.cameraY,
+          }),
+        };
+        if (includeTiles) viewportSet.tiles = nextWindow.tiles;
+        domain!.update({
+          nodes: [
+            { key: VIEWPORT_KEY, data: { set: viewportSet } },
+            {
+              key: PLAYER_KEY,
+              data: {
+                set: {
+                  x: nextX,
+                  y: nextY,
+                  screenX,
+                  screenY,
+                  direction: nextDirection,
+                  pattern: nextMove === null ? 0 : nextMove.startPattern,
+                  motion: nextMove === null ? null : Object.freeze({
+                    id: nextMove.id,
+                    durationMs: WALK_STEP_MS,
+                    fromY: nextMove.fromY,
+                    fromScreenX,
+                    fromScreenY,
+                  }),
+                },
+              },
+            },
+          ],
+        });
+        window = nextWindow;
+        x = nextX;
+        y = nextY;
+        direction = nextDirection;
+        activeMove = nextMove;
       };
 
       const attempt = (next: Direction) => {
         if (frame.signal.aborted || transitioning) return;
-        direction = next;
         const { dx, dy } = stepDelta[next];
         const nx = x + dx;
         const ny = y + dy;
         if (inBounds(current.map, nx, ny)) {
-          const contact = current.transfers.contacts.find((rule) => rule.x === x && rule.y === y && rule.direction === direction);
+          const contact = current.transfers.contacts.find((rule) => rule.x === x && rule.y === y && rule.direction === next);
           if (contact) {
-            startTransfer(contact);
+            startTransfer(contact, next);
             return;
           }
-          if (!canMove(current.map, current.tileset, x, y, direction, dx, dy)) {
-            activeMove = null;
+          if (!canMove(current.map, current.tileset, x, y, next, dx, dy)) {
             if (stepTimer !== null) {
               clearTimeout(stepTimer);
               stepTimer = null;
             }
             nextStartPattern = 1;
-            domain!.replace(renderState());
+            publishBlocked(next);
             return;
           }
-          const fromX = x;
-          const fromY = y;
-          x += dx;
-          y += dy;
-          const moveId = nextMoveId++;
-          activeMove = { id: moveId, fromX, fromY, startPattern: nextStartPattern };
-          domain!.replace(renderState());
+          const moveId = nextMoveId;
+          const nextMove: ActiveMove = { id: moveId, fromX: x, fromY: y, startPattern: nextStartPattern };
+          publishMovementUpdate(nx, ny, next, nextMove);
+          nextMoveId += 1;
           stepTimer = setTimeout(() => finishStep(moveId), WALK_STEP_MS);
           return;
         }
-        const edge = current.transfers.edges.find((rule) => rule.x === x && rule.y === y && rule.direction === direction);
+        const edge = current.transfers.edges.find((rule) => rule.x === x && rule.y === y && rule.direction === next);
         if (edge) {
-          startTransfer(edge);
+          startTransfer(edge, next);
           return;
         }
-        activeMove = null;
         if (stepTimer !== null) {
           clearTimeout(stepTimer);
           stepTimer = null;
         }
         nextStartPattern = 1;
-        domain!.replace(renderState());
+        publishBlocked(next);
       };
 
       const finishStep = (moveId: number) => {
         if (frame.signal.aborted || activeMove?.id !== moveId) return;
         stepTimer = null;
-        activeMove = null;
         const step = current.transfers.steps.find((rule) => rule.x === x && rule.y === y);
         if (step) {
-          startTransfer(step);
+          startTransfer(step, direction);
           return;
         }
         if (heldDirections.length > 0) {
@@ -286,14 +463,27 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           attempt(heldDirections[heldDirections.length - 1]!);
         } else {
           nextStartPattern = 1;
-          domain!.replace(renderState());
+          publishMovementUpdate(x, y, direction, null);
         }
       };
 
-      current = await loadMap(input.mapId);
-      if (!inBounds(current.map, input.x, input.y)) throw new TypeError("Map spawn lies outside the loaded Map");
+      const loaded = await loadMap(input.mapId);
+      if (!inBounds(loaded.map, input.x, input.y)) throw new TypeError("Map spawn lies outside the loaded Map");
       const playerResource = await scope.content.resource("resource.Graphics", `Characters/${input.characterName}`, { signal: frame.signal });
       playerRef = ref("resource.Graphics", `Characters/${input.characterName}`, playerResource.contentVersion);
+      const spawnWindow = standingWindow(loaded, input.x, input.y);
+      const initial = renderState({
+        loaded,
+        window: spawnWindow,
+        x: input.x,
+        y: input.y,
+        direction: 2,
+        activeMove: null,
+        playerRef,
+      });
+      domain = scope.createRenderDomain(initial);
+      current = loaded;
+      window = spawnWindow;
       x = input.x;
       y = input.y;
       direction = 2;
@@ -301,8 +491,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       nextStartPattern = 1;
       heldDirections = [];
       transitioning = false;
-
-      domain = scope.createRenderDomain(renderState());
+      activeMove = null;
       listener = scope.createInputListener({ frame, channels: ["keyboard.event", "keyboard.state"] });
       listener.on("keyboard.event", (event) => {
         const movement = directionForCode(event.code);

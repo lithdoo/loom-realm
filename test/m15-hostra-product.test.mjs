@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync, promises as fs } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -8,10 +9,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import WebSocket from "ws";
+import { syncMapPresentation } from "../examples/essentials-v21.1-local/scripts/sync-map-presentation.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = path.resolve(repository, "..");
-const defaultHostra = path.join(workspace, "hostra");
+const qualificationHostra = path.join(repository, ".qualification", "hostra");
+const siblingHostra = path.join(workspace, "hostra");
+const defaultHostra = existsSync(path.join(qualificationHostra, "packages", "hostra", "scripts", "hostra.js"))
+  ? qualificationHostra
+  : siblingHostra;
 const hostraRoot = process.env.HOSTRA_SOURCE_DIR ? path.resolve(process.env.HOSTRA_SOURCE_DIR) : defaultHostra;
 const hostraScript = path.join(hostraRoot, "packages", "hostra", "scripts", "hostra.js");
 const desktopEntry = path.join(repository, "apps", "desktop", "dist", "main-entry.js");
@@ -165,18 +171,198 @@ async function connectInspector(endpoint) {
   };
 }
 
+const distJsPath = path.join(repository, "game-libs", "map", "dist", "browser", "map.browser.js");
+const distCssPath = path.join(repository, "game-libs", "map", "dist", "browser", "map.css");
+
+async function presentationFixture() {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-sync-map-"));
+  const exampleRoot = path.join(temporary, "example");
+  const fsdbRoot = path.join(exampleRoot, "[FSDB]sync");
+  const mapDir = path.join(fsdbRoot, "[resource]Presentation", "map");
+  await fs.mkdir(mapDir, { recursive: true });
+  const targetJs = path.join(mapDir, "map.browser.js.js");
+  const targetCss = path.join(mapDir, "map.css.css");
+  await writeFile(targetJs, "stale-js");
+  await writeFile(targetCss, "stale-css");
+  return { temporary, exampleRoot, fsdbRoot, targetJs, targetCss };
+}
+
+function nearestRank(values, p) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(p * sorted.length) - 1)];
+}
+
+async function rmBusy(target) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    try {
+      await rm(target, { recursive: true, force: true });
+      return;
+    } catch (cause) {
+      if (cause && (cause.code === "EBUSY" || cause.code === "EPERM") && attempt < 11) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+        continue;
+      }
+      throw cause;
+    }
+  }
+}
+
+async function prepareMovementInstallation({ cyclicMap = false } = {}) {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-movement-install-"));
+  const exampleRoot = path.join(temporary, "essentials-v21.1");
+  await fs.cp(path.join(repository, "examples", "essentials-v21.1"), exampleRoot, { recursive: true });
+  await fs.symlink(path.join(repository, "node_modules"), path.join(exampleRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+  await syncMapPresentation({ repoRoot: repository, exampleRoot, runBuild: false });
+  const fsdb = path.join(exampleRoot, "[FSDB]essentials-v21.1");
+  const tilesetPath = path.join(fsdb, "[struct]Tileset", "1.json");
+  const tileset = JSON.parse(await readFile(tilesetPath, "utf8"));
+  if (!Object.hasOwn(tileset, "autotile_names")) {
+    tileset.autotile_names = [null, null, null, null, null, null, null];
+    await writeFile(tilesetPath, `${JSON.stringify(tileset)}\n`);
+  }
+  const transferDir = path.join(fsdb, "[struct]MapTransfer");
+  await fs.mkdir(transferDir, { recursive: true });
+  await writeFile(path.join(transferDir, ".info.meta"), "{}\n");
+  if (cyclicMap) {
+    await writeFile(path.join(fsdb, "[struct]Map", "900001.json"), JSON.stringify({
+      tileset_id: 1,
+      width: 128,
+      height: 8,
+      data: {
+        dimensions: 3,
+        xSize: 128,
+        ySize: 8,
+        zSize: 3,
+        values: [...Array(1024).fill(384), ...Array(2048).fill(0)],
+      },
+    }));
+    await writeFile(path.join(transferDir, "900001.json"), JSON.stringify({
+      id: 900001,
+      steps: [],
+      contacts: [],
+      edges: Array.from({ length: 8 }, (_, y) => ({ x: 127, y, direction: 6, targetMapId: 900001, targetX: 0, targetY: y })),
+    }));
+    await writeFile(path.join(transferDir, "1.json"), JSON.stringify({
+      id: 1,
+      steps: [],
+      contacts: [{ x: 10, y: 8, direction: 8, targetMapId: 900001, targetX: 8, targetY: 4, targetDirection: 6 }],
+      edges: [],
+    }));
+  } else {
+    await writeFile(path.join(transferDir, "1.json"), JSON.stringify({ id: 1, steps: [], contacts: [], edges: [] }));
+  }
+  return { temporary, exampleRoot };
+}
+
+test("syncMapPresentation replaces both Presentation files from map dist", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    assert.deepEqual(await readFile(fixture.targetJs), await readFile(distJsPath));
+    assert.deepEqual(await readFile(fixture.targetCss), await readFile(distCssPath));
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation --check reports mismatch without writing", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await assert.rejects(
+      () => syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false, checkOnly: true }),
+      /hash/,
+    );
+    assert.equal(await readFile(fixture.targetJs, "utf8"), "stale-js");
+    assert.equal(await readFile(fixture.targetCss, "utf8"), "stale-css");
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation rolls back both files if the second rename fails", async () => {
+  const fixture = await presentationFixture();
+  let stagingToTarget = 0;
+  try {
+    await assert.rejects(() => syncMapPresentation({
+      repoRoot: repository,
+      exampleRoot: fixture.exampleRoot,
+      runBuild: false,
+      fileOps: {
+        ...fs,
+        rename: async (from, to) => {
+          if (String(from).includes(".loomrealm-sync.") && String(from).endsWith(".tmp")) {
+            stagingToTarget += 1;
+            if (stagingToTarget === 2) throw new Error("injected second rename failure");
+          }
+          return fs.rename(from, to);
+        },
+      },
+    }), /injected second rename failure/);
+    assert.equal(await readFile(fixture.targetJs, "utf8"), "stale-js");
+    assert.equal(await readFile(fixture.targetCss, "utf8"), "stale-css");
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation rejects a Presentation symlink", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await assert.rejects(() => syncMapPresentation({
+      repoRoot: repository,
+      exampleRoot: fixture.exampleRoot,
+      runBuild: false,
+      fileOps: {
+        ...fs,
+        lstat: async (target) => {
+          const stat = await fs.lstat(target);
+          if (String(target) === fixture.targetJs) {
+            return Object.assign(stat, {
+              isSymbolicLink: () => true,
+              isFile: () => false,
+              isDirectory: () => false,
+            });
+          }
+          return stat;
+        },
+      },
+    }), /symlink/);
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation restores a stale backup before replacing", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await writeFile(`${fixture.targetJs}.loomrealm-sync.backup`, "backup-js");
+    await writeFile(`${fixture.targetCss}.loomrealm-sync.backup`, "backup-css");
+    await writeFile(fixture.targetJs, "interrupted-js");
+    await writeFile(fixture.targetCss, "interrupted-css");
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    assert.deepEqual(await readFile(fixture.targetJs), await readFile(distJsPath));
+    assert.deepEqual(await readFile(fixture.targetCss), await readFile(distCssPath));
+    await assert.rejects(() => fs.lstat(`${fixture.targetJs}.loomrealm-sync.backup`));
+    await assert.rejects(() => fs.lstat(`${fixture.targetCss}.loomrealm-sync.backup`));
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
 test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_000 }, async (t) => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-hostra-m15-"));
-  const eventLog = path.join(temporary, "events.jsonl");
+  const installation = await prepareMovementInstallation();
+  const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
-  const hostra = launchHostra(eventLog, path.join(temporary, "hostra-user-data"));
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
   let browser = null;
   t.after(async () => {
     try {
       await browser?.close().catch(() => {});
       await terminateChild(hostra.child);
     } finally {
-      await rm(temporary, { recursive: true, force: true });
+      await rmBusy(installation.temporary);
     }
   });
   const ready = await hostra.ready;
@@ -198,7 +384,12 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
     const state = await page.evaluate(() => ({ url: location.href, html: document.documentElement.outerHTML, dataset: { ...document.documentElement.dataset } })).catch((error) => ({ error: error.message }));
     throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
   }
-  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  try {
+    await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  } catch (cause) {
+    const state = await page.evaluate(() => ({ url: location.href, html: document.documentElement.outerHTML.slice(0, 4000), dataset: { ...document.documentElement.dataset } })).catch((error) => ({ error: error.message }));
+    throw new Error(`${cause.message}\n${JSON.stringify(state)}\n${browserMessages.join("\n")}\n${hostra.output()}\n${JSON.stringify(await events(eventLog))}`);
+  }
   await waitFor(async () => (await events(eventLog)).some(({ type }) => type === "data-current"), "initial Data candidate");
   const rpc = await connectRpc(ready.data.rpcEndpoint, hostra.rpcToken);
   const hostState = await rpc.call("getHostState");
@@ -322,17 +513,19 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
 });
 
 test("M15 Runner fatal converges through Main and the one product funnel", { timeout: 90_000 }, async (t) => {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-hostra-fatal-"));
-  const eventLog = path.join(temporary, "events.jsonl");
+  const installation = await prepareMovementInstallation();
+  const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
-  const hostra = launchHostra(eventLog, path.join(temporary, "hostra-user-data"));
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
   let browser = null;
   t.after(async () => {
     try {
       await browser?.close().catch(() => {});
       await terminateChild(hostra.child);
     } finally {
-      await rm(temporary, { recursive: true, force: true });
+      await rmBusy(installation.temporary);
     }
   });
   const ready = await hostra.ready;
@@ -385,4 +578,197 @@ test("M15 startup failure closes partial resources and lets Hostra converge", { 
   assert.equal(final.some(({ type }) => type === "product-closed"), true);
   assert.equal(final.some(({ stage }) => stage === "window-open"), false);
   assert.equal(await portClosed(rpcPort), true);
+});
+
+test("M15 movement latency harness records input-to-paint traces", { timeout: 90_000 }, async (t) => {
+  const installation = await prepareMovementInstallation();
+  const eventLog = path.join(installation.temporary, "events.jsonl");
+  await writeFile(eventLog, "");
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
+  let browser = null;
+  t.after(async () => {
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rmBusy(installation.temporary);
+    }
+  });
+  const ready = await hostra.ready;
+  browser = await chromium.connectOverCDP(ready.data.cdpEndpoint);
+  const context = browser.contexts()[0];
+  await waitFor(() => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())), "latency Window");
+  const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
+  await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
+  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  await page.evaluate(() => {
+    const records = [];
+    globalThis.__loomrealmMovementRecords = records;
+    globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+  });
+  await page.bringToFront();
+  await page.mouse.click(320, 240);
+  await page.waitForFunction(() => document.hasFocus());
+  const viewport = page.locator("lr-map-view");
+  const beforePixels = await viewport.screenshot();
+  await page.keyboard.press("ArrowRight");
+  try {
+    await page.waitForFunction(() => {
+      const records = globalThis.__loomrealmMovementRecords ?? [];
+      return records.some((record) => record.name === "input-captured")
+        && records.some((record) => record.name === "browser-first-motion-paint");
+    }, null, { timeout: 30_000 });
+  } catch (cause) {
+    const state = await page.evaluate(() => ({
+      records: globalThis.__loomrealmMovementRecords ?? [],
+      focused: document.hasFocus(),
+      visibilityState: document.visibilityState,
+      mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
+      x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
+    }));
+    throw new Error(`${cause.message}\n${JSON.stringify(state)}`);
+  }
+  const records = await page.evaluate(() => globalThis.__loomrealmMovementRecords);
+  const input = records.find((record) => record.name === "input-captured");
+  const paint = records.find((record) => record.name === "browser-first-motion-paint");
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+  const afterPixels = await viewport.screenshot();
+  assert.equal(input.detail.code, "ArrowRight");
+  assert.equal(typeof input.at, "number");
+  assert.equal(typeof paint.detail.visualX, "number");
+  assert.equal(typeof paint.detail.visualY, "number");
+  assert.ok(paint.at >= input.at, JSON.stringify({ input, paint, records }));
+  assert.equal(beforePixels.equals(afterPixels), false, "logical first paint must produce a screenshot pixel difference within one display frame");
+});
+
+test("M15 128x8 ordinary and refresh movement first-paint P95 stay within 50ms", { timeout: 600_000 }, async (t) => {
+  const installation = await prepareMovementInstallation({ cyclicMap: true });
+  const eventLog = path.join(installation.temporary, "events.jsonl");
+  await writeFile(eventLog, "");
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
+  let browser = null;
+  t.after(async () => {
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rmBusy(installation.temporary);
+    }
+  });
+  const ready = await hostra.ready;
+  browser = await chromium.connectOverCDP(ready.data.cdpEndpoint);
+  const context = browser.contexts()[0];
+  await waitFor(() => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())), "128x8 Window");
+  const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
+  await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
+  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+  await page.evaluate(() => {
+    const records = [];
+    globalThis.__loomrealmMovementRecords = records;
+    globalThis.__loomrealmMovementQualification = (record) => { records.push(record); };
+  });
+  await page.bringToFront();
+  await page.mouse.click(320, 240);
+  await page.waitForFunction(() => document.hasFocus());
+  await page.keyboard.press("ArrowUp");
+  await page.waitForFunction(() => document.querySelector("lr-map-view")?._latestData?.mapId === 900001, null, { timeout: 10_000 });
+  const sampleMove = async () => {
+    const beforeX = await page.evaluate(() => {
+      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
+      globalThis.__loomrealmMovementRecords.length = 0;
+      globalThis.__loomrealmPreviousCoverage = Array.isArray(tiles) && tiles.length > 0
+        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
+        : null;
+      return document.querySelector("lr-map-sprite")?._latestData?.x ?? null;
+    });
+    await page.keyboard.press("ArrowRight");
+    try {
+      await page.waitForFunction(() => {
+        const records = globalThis.__loomrealmMovementRecords ?? [];
+        return records.some((record) => record.name === "input-captured")
+          && records.some((record) => record.name === "browser-first-motion-paint");
+      }, null, { timeout: 1_000 });
+    } catch {
+      return null;
+    }
+    await page.waitForFunction(() => {
+      const records = globalThis.__loomrealmMovementRecords ?? [];
+      return records.some((record) => record.name === "browser-motion-complete");
+    }, null, { timeout: 2_000 }).catch(() => undefined);
+    const after = await page.evaluate(() => {
+      const tiles = document.querySelector("lr-map-view")?._latestData?.tiles;
+      const coverage = Array.isArray(tiles) && tiles.length > 0
+        ? `${Math.min(...tiles.map((tile) => tile.x))},${Math.min(...tiles.map((tile) => tile.y))},${Math.max(...tiles.map((tile) => tile.x))},${Math.max(...tiles.map((tile) => tile.y))},${tiles.length}`
+        : null;
+      return {
+        records: globalThis.__loomrealmMovementRecords.slice(),
+        x: document.querySelector("lr-map-sprite")?._latestData?.x ?? null,
+        mapId: document.querySelector("lr-map-view")?._latestData?.mapId ?? null,
+        refresh: coverage !== globalThis.__loomrealmPreviousCoverage,
+      };
+    });
+    if (after.mapId !== 900001 || after.x === null || (beforeX !== null && after.x <= beforeX)) return null;
+    const input = after.records.find((record) => record.name === "input-captured");
+    const paint = after.records.find((record) => record.name === "browser-first-motion-paint");
+    if (!input || !paint || typeof input.at !== "number" || typeof paint.at !== "number" || paint.at < input.at) {
+      return null;
+    }
+    return {
+      latency: paint.at - input.at,
+      refresh: after.refresh === true,
+    };
+  };
+
+  const rounds = [];
+  for (let round = 1; round <= 3; round += 1) {
+    const ordinary = [];
+    const refresh = [];
+    let attempts = 0;
+    let invalid = 0;
+    let warmupLeft = 20;
+    while (ordinary.length < 100 || refresh.length < 30) {
+      attempts += 1;
+      if (attempts > 800) break;
+      const sample = await sampleMove();
+      if (sample === null) {
+        invalid += 1;
+        continue;
+      }
+      if (warmupLeft > 0) {
+        warmupLeft -= 1;
+        continue;
+      }
+      if (sample.refresh) {
+        if (refresh.length < 30) refresh.push(sample.latency);
+        continue;
+      }
+      if (ordinary.length < 100) ordinary.push(sample.latency);
+    }
+    assert.ok(invalid / attempts <= 0.05, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+    assert.equal(ordinary.length, 100, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+    assert.equal(refresh.length, 30, JSON.stringify({ round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+    rounds.push({ round, attempts, invalid, ordinary, refresh });
+  }
+  const ordinary = rounds.flatMap((round) => round.ordinary);
+  const refresh = rounds.flatMap((round) => round.refresh);
+  const p50 = nearestRank(ordinary, 0.5);
+  const p95 = nearestRank(ordinary, 0.95);
+  const max = Math.max(...ordinary);
+  const refreshP50 = nearestRank(refresh, 0.5);
+  const refreshP95 = nearestRank(refresh, 0.95);
+  const refreshMax = Math.max(...refresh);
+  const report = {
+    subject: process.env.GITHUB_SHA ?? "local-worktree",
+    platform: { node: process.version, os: `${process.platform} ${os.release()}`, cpu: os.cpus()[0]?.model ?? "unknown" },
+    rounds,
+    ordinary: { p50, p95, max, n: ordinary.length, latencies: ordinary },
+    refresh: { p50: refreshP50, p95: refreshP95, max: refreshMax, n: refresh.length, latencies: refresh },
+  };
+  process.stdout.write(`M15_MOVEMENT_QUALIFICATION ${JSON.stringify(report)}\n`);
+  assert.ok(p95 <= 50, JSON.stringify(report));
+  assert.ok(refreshP95 <= 50, JSON.stringify(report));
 });

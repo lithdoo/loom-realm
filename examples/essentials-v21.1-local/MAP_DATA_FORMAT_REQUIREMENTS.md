@@ -698,7 +698,7 @@ Runtime 已提供 slot/corners，Tileset 已提供 7 个 resource name，Browser
 scripts/map-data-format-essentials-local.mjs
 ```
 
-它不是 M14/M15 qualification，不写进 protocol contract，不替换真人 Product Closed。
+它不是 M14/M15 qualification，不写进 protocol contract，也不替代对应 ledger 的 live status。
 
 ### 6.1 Audit 必须证明
 

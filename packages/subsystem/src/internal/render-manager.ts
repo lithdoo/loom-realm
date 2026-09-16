@@ -1,6 +1,8 @@
 import type {
   RenderDomainsV1,
   RenderEventV1,
+  RenderNodeUpdateV1,
+  RenderPatchV1,
   RenderSnapshotV1,
   SubsystemDataPeer,
 } from "@loomrealm/data";
@@ -15,7 +17,9 @@ import {
 import type {
   RenderDomain,
   RenderDomainState,
+  RenderDomainUpdate,
   RenderEvent,
+  RenderNode,
 } from "../render.js";
 
 const MAX_DOMAINS = 256;
@@ -27,6 +31,8 @@ const MAX_DATA_BYTES = 262_144;
 const MAX_DATA_DEPTH = 32;
 const MAX_MESSAGE_BYTES = 1_048_576;
 const MAX_PENDING_WORK = 1_024;
+const MAX_NODE_OPS = 4_096;
+const PROBE_DOMAIN_ID = "d".repeat(128);
 
 interface DomainRecord {
   wireId: string;
@@ -36,14 +42,49 @@ interface DomainRecord {
   closed: boolean;
 }
 
+type StateWork =
+  | { readonly kind: "snapshot"; readonly domain: DomainRecord; state: RenderDomainState }
+  | {
+      readonly kind: "update";
+      readonly domain: DomainRecord;
+      state: RenderDomainState;
+      readonly ops: readonly RenderNodeUpdateV1[];
+      readonly zIndex?: number;
+    };
+
 type Work =
   | { readonly kind: "registry"; message: RenderDomainsV1 }
-  | { readonly kind: "snapshot"; readonly domain: DomainRecord; state: RenderDomainState }
+  | StateWork
   | { readonly kind: "event"; readonly domain: DomainRecord; readonly event: RenderEvent };
+
+type PublicationMessage = RenderDomainsV1 | RenderSnapshotV1 | RenderPatchV1 | RenderEventV1;
+
+interface InFlightPublication {
+  readonly epoch: number;
+  readonly peer: SubsystemDataPeer;
+  readonly work: Work;
+  readonly message: PublicationMessage;
+}
 
 interface CarrierCursor {
   revision: number;
   baselined: boolean;
+}
+
+interface StringDelta {
+  readonly set?: Readonly<Record<string, string>>;
+  readonly remove?: readonly string[];
+}
+
+interface DataDelta {
+  readonly set?: Readonly<Record<string, JsonValue>>;
+  readonly remove?: readonly string[];
+}
+
+interface ValidatedNodeUpdate {
+  readonly key: string;
+  readonly attrs?: StringDelta;
+  readonly data?: DataDelta;
 }
 
 function ownDataObject(value: unknown, label: string): asserts value is Record<string, unknown> {
@@ -69,6 +110,17 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   if (keys.length !== required.length || keys.some((key, index) => key !== required[index])) {
     throw new TypeError(`${label} has invalid members`);
   }
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function optionalMember<T>(value: Record<string, unknown>, key: string, label: string): T | undefined {
+  if (!hasOwn(value, key)) return undefined;
+  const member = value[key];
+  if (member === undefined) throw new TypeError(`${label} cannot be undefined`);
+  return member as T;
 }
 
 function scalarString(value: unknown, min: number, max: number, label: string): string {
@@ -124,6 +176,34 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
   }
 }
 
+function validateJsonValue(value: unknown, label: string): JsonValue {
+  try {
+    assertJsonValue(value);
+  } catch {
+    throw new TypeError(`${label} must be plain JSON`);
+  }
+  const walk = (current: JsonValue): void => {
+    if (typeof current === "string") {
+      scalarString(current, 0, Number.POSITIVE_INFINITY, `${label} string`);
+      return;
+    }
+    if (current === null || typeof current !== "object") return;
+    if (Array.isArray(current)) {
+      if (current.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} array limit exceeded`);
+      for (const child of current) walk(child);
+      return;
+    }
+    const keys = Object.keys(current);
+    if (keys.length > MAX_CONTAINER_MEMBERS) throw new RangeError(`${label} member limit exceeded`);
+    for (const key of keys) {
+      scalarString(key, 0, 256, `${label} key`);
+      walk((current as JsonObject)[key] as JsonValue);
+    }
+  };
+  walk(value as JsonValue);
+  return value as JsonValue;
+}
+
 function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
   if (value === null || typeof value !== "object") return value;
   const prior = seen.get(value);
@@ -143,6 +223,17 @@ function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
     }
   }
   return Object.freeze(output) as T;
+}
+
+function probeLimit(value: unknown, label: string): void {
+  try {
+    assertJsonValue(value);
+  } catch {
+    throw new TypeError(`${label} must be plain JSON`);
+  }
+  if (jsonDepth(value as JsonValue) > 64 || utf8ByteLength(stringifyJson(value as JsonValue)) > MAX_MESSAGE_BYTES) {
+    throw new RangeError(`${label} message limit exceeded`);
+  }
 }
 
 function validateStateShape(value: unknown): {
@@ -189,21 +280,13 @@ function validateStateShape(value: unknown): {
   };
   for (const root of value.roots) visit(root, 1);
   const detached = detachedFrozen(value as unknown as RenderDomainState);
-  const probe = {
+  probeLimit({
     type: "render.snapshot",
-    domainId: "d".repeat(128),
+    domainId: PROBE_DOMAIN_ID,
     revision: Number.MAX_SAFE_INTEGER,
     zIndex: detached.zIndex,
     roots: detached.roots,
-  } as const;
-  try {
-    assertJsonValue(probe);
-  } catch {
-    throw new TypeError("Render state must be plain JSON");
-  }
-  if (jsonDepth(probe) > 64 || utf8ByteLength(stringifyJson(probe)) > MAX_MESSAGE_BYTES) {
-    throw new RangeError("Render Snapshot message limit exceeded");
-  }
+  }, "Render Snapshot");
   return { state: detached, keys, tags };
 }
 
@@ -214,11 +297,197 @@ function validateEventShape(value: unknown): RenderEvent {
   scalarString(value.name, 1, 128, "RenderEvent name");
   validateJsonData(value.data, "RenderEvent data");
   const detached = detachedFrozen(value as unknown as RenderEvent);
-  const probe = { type: "render.event", domainId: "d".repeat(128), ...detached } as const;
-  if (jsonDepth(probe) > 64 || utf8ByteLength(stringifyJson(probe)) > MAX_MESSAGE_BYTES) {
-    throw new RangeError("Render Event message limit exceeded");
-  }
+  probeLimit({ type: "render.event", domainId: PROBE_DOMAIN_ID, ...detached }, "Render Event");
   return detached;
+}
+
+function denseArray(value: unknown, max: number, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array`);
+  if (value.length > max) throw new RangeError(`${label} length limit exceeded`);
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes("length")) {
+    throw new TypeError(`${label} must be a dense array`);
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const key = String(index);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      throw new TypeError(`${label} must be a dense array`);
+    }
+  }
+  return value;
+}
+
+function validateDelta(
+  raw: unknown,
+  kind: "attrs" | "data",
+  label: string,
+): StringDelta | DataDelta {
+  ownDataObject(raw, label);
+  const allowed = new Set(["set", "remove"]);
+  for (const key of Object.keys(raw)) {
+    if (!allowed.has(key)) throw new TypeError(`${label} has invalid members`);
+  }
+  const setRaw = optionalMember<unknown>(raw, "set", `${label}.set`);
+  const removeRaw = optionalMember<unknown>(raw, "remove", `${label}.remove`);
+  if (setRaw === undefined && removeRaw === undefined) throw new TypeError(`${label} is empty`);
+  let set: Record<string, string> | Record<string, JsonValue> | undefined;
+  if (setRaw !== undefined) {
+    ownDataObject(setRaw, `${label}.set`);
+    const copied = Object.create(null) as Record<string, string | JsonValue>;
+    for (const key of Object.keys(setRaw)) {
+      if (kind === "attrs") {
+        scalarString(key, 1, 128, `${label}.set key`);
+        copied[key] = scalarString(setRaw[key], 0, 4096, `${label}.set value`);
+      } else {
+        scalarString(key, 1, 256, `${label}.set key`);
+        copied[key] = detachedFrozen(validateJsonValue(setRaw[key], `${label}.set value`));
+      }
+    }
+    if (Object.keys(copied).length === 0 && removeRaw === undefined) throw new TypeError(`${label} is empty`);
+    set = copied;
+  }
+  let remove: string[] | undefined;
+  if (removeRaw !== undefined) {
+    const items = denseArray(removeRaw, MAX_CONTAINER_MEMBERS, `${label}.remove`);
+    if (items.length === 0 && setRaw === undefined) throw new TypeError(`${label} is empty`);
+    remove = items.map((item, index) => scalarString(item, 1, kind === "attrs" ? 128 : 256, `${label}.remove[${index}]`));
+  }
+  if ((set === undefined || Object.keys(set).length === 0) && (remove === undefined || remove.length === 0)) {
+    throw new TypeError(`${label} is empty`);
+  }
+  const removed = new Set(remove ?? []);
+  if (set !== undefined) {
+    for (const key of Object.keys(set)) {
+      if (removed.has(key)) throw new TypeError(`${label} set/remove overlap`);
+    }
+  }
+  return {
+    ...(set === undefined ? {} : { set: Object.freeze(set) }),
+    ...(remove === undefined ? {} : { remove: Object.freeze(remove) }),
+  } as StringDelta | DataDelta;
+}
+
+function validateAttrs(attrs: Readonly<Record<string, string>>): void {
+  const keys = Object.keys(attrs);
+  if (keys.length > MAX_ATTRS) throw new RangeError("RenderNode attrs limit exceeded");
+  for (const key of keys) {
+    scalarString(key, 1, 128, "RenderNode attr key");
+    scalarString(attrs[key], 0, 4096, "RenderNode attr value");
+  }
+}
+
+function applyStringDelta(
+  current: Readonly<Record<string, string>>,
+  delta: StringDelta,
+): Readonly<Record<string, string>> {
+  const next = Object.create(null) as Record<string, string>;
+  for (const key of Object.keys(current)) {
+    if (delta.remove?.includes(key)) continue;
+    next[key] = current[key] as string;
+  }
+  if (delta.remove) {
+    for (const key of delta.remove) {
+      if (!hasOwn(current, key)) throw new TypeError("Delta removes missing member");
+    }
+  }
+  if (delta.set) {
+    for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as string;
+  }
+  validateAttrs(next);
+  return Object.freeze(next);
+}
+
+function applyDataDelta(
+  current: JsonObject,
+  delta: DataDelta,
+): JsonObject {
+  const next = Object.create(null) as Record<string, JsonValue>;
+  for (const key of Object.keys(current)) {
+    if (delta.remove?.includes(key)) continue;
+    next[key] = current[key] as JsonValue;
+  }
+  if (delta.remove) {
+    for (const key of delta.remove) {
+      if (!hasOwn(current, key)) throw new TypeError("Delta removes missing member");
+    }
+  }
+  if (delta.set) {
+    for (const key of Object.keys(delta.set)) next[key] = delta.set[key] as JsonValue;
+  }
+  validateJsonData(next, "RenderNode data");
+  return Object.freeze(next) as JsonObject;
+}
+
+function freezeNode(node: {
+  readonly key: string;
+  readonly tag: string;
+  readonly attrs: Readonly<Record<string, string>>;
+  readonly data: JsonObject;
+  readonly children: readonly RenderNode[];
+}): RenderNode {
+  return Object.freeze({
+    key: node.key,
+    tag: node.tag,
+    attrs: node.attrs,
+    data: node.data,
+    children: node.children,
+  }) as RenderNode;
+}
+
+function applyCow(
+  state: RenderDomainState,
+  zIndex: number,
+  updates: readonly ValidatedNodeUpdate[],
+): RenderDomainState {
+  const pending = new Map(updates.map((item) => [item.key, item]));
+  const seen = new Set<string>();
+  const visit = (node: RenderNode): RenderNode => {
+    const children = node.children.map(visit);
+    const childrenChanged = children.some((child, index) => child !== node.children[index]);
+    const delta = pending.get(node.key);
+    if (delta === undefined) {
+      if (!childrenChanged) return node;
+      return freezeNode({
+        key: node.key,
+        tag: node.tag,
+        attrs: node.attrs,
+        data: node.data,
+        children: Object.freeze(children),
+      });
+    }
+    seen.add(node.key);
+    return freezeNode({
+      key: node.key,
+      tag: node.tag,
+      attrs: delta.attrs === undefined ? node.attrs : applyStringDelta(node.attrs, delta.attrs),
+      data: delta.data === undefined ? node.data : applyDataDelta(node.data, delta.data),
+      children: childrenChanged ? Object.freeze(children) : node.children,
+    });
+  };
+  const roots = state.roots.map(visit);
+  if (seen.size !== pending.size) throw new TypeError("Updated Render node is missing");
+  const rootsChanged = roots.some((node, index) => node !== state.roots[index]);
+  return Object.freeze({
+    zIndex,
+    roots: rootsChanged ? Object.freeze(roots) : state.roots,
+  });
+}
+
+function toWireOps(nodes: readonly ValidatedNodeUpdate[]): readonly RenderNodeUpdateV1[] {
+  return Object.freeze(nodes.map((node) => {
+    const op: RenderNodeUpdateV1 = {
+      op: "update",
+      key: node.key,
+      ...(node.attrs === undefined ? {} : { attrs: node.attrs }),
+      ...(node.data === undefined ? {} : { data: node.data }),
+    };
+    return op;
+  }));
+}
+
+function isStateWork(work: Work): work is StateWork {
+  return work.kind === "snapshot" || work.kind === "update";
 }
 
 export interface RenderManagerSnapshot {
@@ -239,7 +508,7 @@ export class RenderManager {
   private generation: number | null = null;
   private readonly cursors = new Map<DomainRecord, CarrierCursor>();
   private work: Work[] = [];
-  private sending = false;
+  private inFlight: InFlightPublication | null = null;
   private closed = false;
 
   createDomain(initialState: RenderDomainState): RenderDomain {
@@ -258,18 +527,18 @@ export class RenderManager {
     this.domains.add(record);
     this.enqueueRegistry();
     this.enqueueSnapshot(record, record.state);
-    const handle: RenderDomain = Object.freeze({
+    return Object.freeze({
       replace: (state: RenderDomainState) => this.replace(record, state),
+      update: (update: RenderDomainUpdate) => this.update(record, update),
       emit: (event: RenderEvent) => this.emit(record, event),
       close: () => this.closeDomain(record),
     });
-    return handle;
   }
 
   setDataPeer(peer: SubsystemDataPeer | null): void {
     this.peerEpoch += 1;
     this.peer = peer;
-    this.sending = false;
+    this.inFlight = null;
     this.work = [];
     this.cursors.clear();
     if (peer === null || this.closed) return;
@@ -286,9 +555,9 @@ export class RenderManager {
     this.domains.clear();
     this.peerEpoch += 1;
     this.peer = null;
+    this.inFlight = null;
     this.work = [];
     this.cursors.clear();
-    this.sending = false;
   }
 
   snapshotForQualification(): RenderManagerSnapshot {
@@ -336,7 +605,75 @@ export class RenderManager {
     domain.liveKeys.clear();
     for (const key of validated.keys) domain.liveKeys.add(key);
     domain.state = validated.state;
-    this.enqueueSnapshot(domain, domain.state);
+    this.enqueueState(domain, "snapshot");
+  }
+
+  private update(domain: DomainRecord, raw: RenderDomainUpdate): void {
+    this.requireLive(domain);
+    ownDataObject(raw, "RenderDomainUpdate");
+    for (const key of Object.keys(raw)) {
+      if (key !== "zIndex" && key !== "nodes") throw new TypeError("RenderDomainUpdate has invalid members");
+    }
+    const zIndexRaw = optionalMember<unknown>(raw as unknown as Record<string, unknown>, "zIndex", "zIndex");
+    const nodesRaw = optionalMember<unknown>(raw as unknown as Record<string, unknown>, "nodes", "nodes");
+    if (zIndexRaw === undefined && (nodesRaw === undefined || (Array.isArray(nodesRaw) && nodesRaw.length === 0))) {
+      throw new TypeError("RenderDomainUpdate is empty");
+    }
+    let zIndex: number | undefined;
+    if (zIndexRaw !== undefined) {
+      if (!Number.isInteger(zIndexRaw)) throw new TypeError("zIndex must be an integer");
+      if ((zIndexRaw as number) < -2_147_483_648 || (zIndexRaw as number) > 2_147_483_647) {
+        throw new RangeError("zIndex limit exceeded");
+      }
+      zIndex = zIndexRaw as number;
+    }
+    const nodes: ValidatedNodeUpdate[] = [];
+    if (nodesRaw !== undefined) {
+      const list = denseArray(nodesRaw, MAX_NODE_OPS, "nodes");
+      const seen = new Set<string>();
+      for (const item of list) {
+        ownDataObject(item, "RenderNodeUpdate");
+        for (const key of Object.keys(item)) {
+          if (key !== "key" && key !== "attrs" && key !== "data") {
+            throw new TypeError("RenderNodeUpdate has invalid members");
+          }
+        }
+        const key = scalarString(optionalMember(item, "key", "RenderNodeUpdate.key"), 1, 128, "RenderNodeUpdate key");
+        if (seen.has(key)) throw new TypeError("Duplicate RenderNodeUpdate key");
+        seen.add(key);
+        if (!domain.liveKeys.has(key)) throw new TypeError("Updated Render node is missing");
+        const attrsRaw = optionalMember<unknown>(item, "attrs", "RenderNodeUpdate.attrs");
+        const dataRaw = optionalMember<unknown>(item, "data", "RenderNodeUpdate.data");
+        if (attrsRaw === undefined && dataRaw === undefined) throw new TypeError("RenderNodeUpdate is empty");
+        const attrs = attrsRaw === undefined ? undefined : validateDelta(attrsRaw, "attrs", "attrs") as StringDelta;
+        const data = dataRaw === undefined ? undefined : validateDelta(dataRaw, "data", "data") as DataDelta;
+        nodes.push({
+          key,
+          ...(attrs === undefined ? {} : { attrs }),
+          ...(data === undefined ? {} : { data }),
+        });
+      }
+    }
+    const nextState = applyCow(domain.state, zIndex ?? domain.state.zIndex, nodes);
+    probeLimit({
+      type: "render.snapshot",
+      domainId: PROBE_DOMAIN_ID,
+      revision: Number.MAX_SAFE_INTEGER,
+      zIndex: nextState.zIndex,
+      roots: nextState.roots,
+    }, "Render Snapshot");
+    const ops = toWireOps(nodes);
+    const patch: Record<string, unknown> = {
+      type: "render.patch",
+      domainId: PROBE_DOMAIN_ID,
+      baseRevision: Number.MAX_SAFE_INTEGER - 1,
+      revision: Number.MAX_SAFE_INTEGER,
+      ops,
+    };
+    if (zIndex !== undefined) patch.zIndex = zIndex;
+    probeLimit(patch, "Render Patch");
+    domain.state = nextState;
+    this.enqueueState(domain, "update", ops, zIndex);
   }
 
   private emit(domain: DomainRecord, raw: RenderEvent): void {
@@ -344,8 +681,24 @@ export class RenderManager {
     const event = validateEventShape(raw);
     if (!domain.liveKeys.has(event.targetKey)) throw new TypeError("Stale Render Event target");
     if (this.peer === null) return;
-    if (this.work.length >= MAX_PENDING_WORK && !this.dropOldestEvent()) return;
-    this.work.push({ kind: "event", domain, event });
+    if (this.work.length >= MAX_PENDING_WORK) {
+      if (!this.dropOldestEvent()) return;
+    }
+    const cursor = this.cursors.get(domain);
+    const baselined = cursor?.baselined === true;
+    if (!baselined) {
+      let insertAt = this.work.length;
+      for (let index = this.work.length - 1; index >= 0; index -= 1) {
+        const item = this.work[index];
+        if (item !== undefined && isStateWork(item) && item.domain === domain) {
+          insertAt = index + 1;
+          break;
+        }
+      }
+      this.work.splice(insertAt, 0, { kind: "event", domain, event });
+    } else {
+      this.work.push({ kind: "event", domain, event });
+    }
     this.pump();
   }
 
@@ -380,13 +733,28 @@ export class RenderManager {
       item.message = message;
       updated = true;
     }
-    if (updated) this.pump();
-    else this.makeRoomForAuthoritative() && this.work.push({ kind: "registry", message });
+    if (updated) {
+      this.pump();
+      return;
+    }
+    if (this.makeRoomForAuthoritative()) this.work.push({ kind: "registry", message });
     this.pump();
   }
 
   private enqueueSnapshot(domain: DomainRecord, state: RenderDomainState): void {
+    this.enqueueState(domain, "snapshot", undefined, undefined, state);
+  }
+
+  private enqueueState(
+    domain: DomainRecord,
+    kind: "snapshot" | "update",
+    ops?: readonly RenderNodeUpdateV1[],
+    zIndex?: number,
+    state = domain.state,
+  ): void {
     if (this.peer === null || domain.closed) return;
+    const cursor = this.cursors.get(domain);
+    const baselined = cursor?.baselined === true;
     const lastBarrier = this.lastBarrierIndex(domain);
     for (let index = this.work.length - 1; index > lastBarrier; index -= 1) {
       const item = this.work[index];
@@ -396,7 +764,10 @@ export class RenderManager {
         return;
       }
     }
-    if (this.makeRoomForAuthoritative()) this.work.push({ kind: "snapshot", domain, state });
+    const work: Work = !baselined || kind === "snapshot" || ops === undefined
+      ? { kind: "snapshot", domain, state }
+      : { kind: "update", domain, state, ops, ...(zIndex === undefined ? {} : { zIndex }) };
+    if (this.makeRoomForAuthoritative()) this.work.push(work);
     this.pump();
   }
 
@@ -410,15 +781,40 @@ export class RenderManager {
 
   private makeRoomForAuthoritative(): boolean {
     while (this.work.length >= MAX_PENDING_WORK) {
-      if (!this.dropOldestEvent()) {
-        const redundant = this.work.findIndex((item, index) =>
-          item.kind === "snapshot" && this.work.slice(index + 1).some((later) =>
-            later.kind === "snapshot" && later.domain === item.domain));
-        if (redundant < 0) return false;
-        this.work.splice(redundant, 1);
+      if (this.dropOldestEvent()) continue;
+      let candidate = -1;
+      for (let index = 0; index < this.work.length; index += 1) {
+        const item = this.work[index];
+        if (item === undefined || !isStateWork(item)) continue;
+        const later = this.work.slice(index + 1).some((entry) => isStateWork(entry) && entry.domain === item.domain);
+        if (later) {
+          candidate = index;
+          break;
+        }
+      }
+      if (candidate < 0) {
+        this.invalidateOldPeer(true);
+        return false;
+      }
+      const domain = (this.work[candidate] as StateWork).domain;
+      const indices: number[] = [];
+      for (let index = 0; index < this.work.length; index += 1) {
+        const item = this.work[index];
+        if (item !== undefined && isStateWork(item) && item.domain === domain) indices.push(index);
+      }
+      const lastIndex = indices[indices.length - 1];
+      if (lastIndex === undefined) {
+        this.invalidateOldPeer(true);
+        return false;
+      }
+      const last = this.work[lastIndex] as StateWork;
+      this.work[lastIndex] = { kind: "snapshot", domain, state: last.state };
+      for (let index = indices.length - 2; index >= 0; index -= 1) {
+        const removeAt = indices[index];
+        if (removeAt !== undefined) this.work.splice(removeAt, 1);
       }
     }
-    return true;
+    return this.peer !== null;
   }
 
   private dropOldestEvent(): boolean {
@@ -428,50 +824,66 @@ export class RenderManager {
     return true;
   }
 
+  private invalidateOldPeer(closePeer: boolean): void {
+    const oldPeer = this.peer;
+    this.peer = null;
+    this.peerEpoch += 1;
+    this.inFlight = null;
+    this.work = [];
+    this.cursors.clear();
+    if (closePeer && oldPeer !== null) void oldPeer.close();
+  }
+
   private pump(): void {
     const peer = this.peer;
-    if (peer === null || this.sending || this.work.length === 0) return;
+    if (peer === null || this.inFlight !== null || this.work.length === 0) return;
     const work = this.work.shift();
     if (work === undefined) return;
     if (work.kind !== "registry" && (work.domain.closed || !this.domains.has(work.domain))) {
       this.pump();
       return;
     }
-    if (work.kind === "snapshot") {
+    if (isStateWork(work)) {
       const cursor = this.cursors.get(work.domain);
       if (cursor?.revision === Number.MAX_SAFE_INTEGER) {
         const oldId = work.domain.wireId;
         work.domain.wireId = `d${this.nextSerial.toString(36)}`;
         this.nextSerial += 1n;
         this.cursors.delete(work.domain);
-        this.work = this.work.filter((item) =>
-          item.kind !== "registry" && item.domain !== work.domain);
-        this.work.unshift({ kind: "snapshot", domain: work.domain, state: work.state });
+        this.work = this.work.filter((item) => item.kind === "registry" || item.domain !== work.domain);
+        this.work.unshift({ kind: "snapshot", domain: work.domain, state: work.domain.state });
         this.work.unshift({ kind: "registry", message: this.registryMessage() });
         if (oldId === work.domain.wireId) throw new Error("Render wire identity rollover failed");
         this.pump();
         return;
       }
     }
-    const epoch = this.peerEpoch;
     const message = this.materialize(work);
     if (message === null) {
       this.pump();
       return;
     }
-    this.sending = true;
+    const inFlight: InFlightPublication = {
+      epoch: this.peerEpoch,
+      peer,
+      work,
+      message,
+    };
+    this.inFlight = inFlight;
     const operation = message.type === "render.domains"
       ? peer.render.sendDomains(message)
       : message.type === "render.snapshot"
       ? peer.render.sendSnapshot(message)
+      : message.type === "render.patch"
+      ? peer.render.sendPatch(message)
       : peer.render.sendEvent(message);
     void operation.then(
-      (outcome) => this.finishSend(epoch, peer, work, message, outcome.kind === "sent"),
-      () => this.finishSend(epoch, peer, work, message, false),
+      (outcome) => this.finishSend(inFlight, outcome.kind === "sent"),
+      () => this.finishSend(inFlight, false),
     );
   }
 
-  private materialize(work: Work): RenderDomainsV1 | RenderSnapshotV1 | RenderEventV1 | null {
+  private materialize(work: Work): PublicationMessage | null {
     if (work.kind === "registry") return work.message;
     if (work.domain.closed) return null;
     if (work.kind === "event") {
@@ -486,7 +898,17 @@ export class RenderManager {
       };
     }
     const cursor = this.cursors.get(work.domain);
-    const revision = cursor === undefined ? 1 : cursor.revision + 1;
+    if (work.kind === "update" && cursor?.baselined === true) {
+      return {
+        type: "render.patch",
+        domainId: work.domain.wireId,
+        baseRevision: cursor.revision,
+        revision: cursor.revision + 1,
+        ...(work.zIndex === undefined ? {} : { zIndex: work.zIndex }),
+        ops: work.ops,
+      };
+    }
+    const revision = cursor === undefined || !cursor.baselined ? 1 : cursor.revision + 1;
     return {
       type: "render.snapshot",
       domainId: work.domain.wireId,
@@ -496,20 +918,19 @@ export class RenderManager {
     };
   }
 
-  private finishSend(
-    epoch: number,
-    peer: SubsystemDataPeer,
-    work: Work,
-    message: RenderDomainsV1 | RenderSnapshotV1 | RenderEventV1,
-    sent: boolean,
-  ): void {
-    if (epoch !== this.peerEpoch || peer !== this.peer) return;
-    this.sending = false;
+  private finishSend(inFlight: InFlightPublication, sent: boolean): void {
+    if (this.inFlight !== inFlight || inFlight.epoch !== this.peerEpoch || inFlight.peer !== this.peer) return;
+    this.inFlight = null;
     if (!sent) {
-      this.work = [];
+      this.invalidateOldPeer(false);
       return;
     }
-    if (work.kind === "snapshot" && message.type === "render.snapshot" && !work.domain.closed) {
+    const { work, message } = inFlight;
+    if (
+      (message.type === "render.snapshot" || message.type === "render.patch")
+      && work.kind !== "registry"
+      && !work.domain.closed
+    ) {
       this.cursors.set(work.domain, { baselined: true, revision: message.revision });
     }
     this.pump();

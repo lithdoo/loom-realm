@@ -68,17 +68,12 @@ if not exist "%REPO%\node_modules\" (
   popd
 )
 
-if not exist "%DESKTOP_ENTRY%" (
-  echo 正在构建 Desktop / Map...
-  pushd "%REPO%"
-  call npm run build:m15
-  if errorlevel 1 (
-    popd
-    echo npm run build:m15 失败。
-    pause
-    exit /b 1
-  )
-  popd
+echo 正在同步 Map Presentation...
+"%NODE%" "%EXAMPLE%\scripts\sync-map-presentation.mjs"
+if errorlevel 1 (
+  echo Map Presentation 同步失败。
+  pause
+  exit /b 1
 )
 
 set "HOSTRA_RPC_PORT=0"

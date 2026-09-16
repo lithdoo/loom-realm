@@ -2,9 +2,11 @@
 
 ## Status
 
-**Closed — exact-local and hosted Node 20/24 qualification PASS.**
+**Requalification Pending — current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`.**
 
-The M14 architecture, hardened implementation and same-subject qualification are complete. Any later qualification-input change establishes a new subject under the rule below.
+The previous Closed decisions remain historical records for subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`; neither qualifies the changed executable subject. The latter had hosted `test:m14` Node 24 evidence, but its dedicated M14 Node 20 run was cancelled after a Chromium hang. Current-subject closure therefore requires a new complete same-subject evidence set.
+
+The M14 architecture and consumer contract remain frozen. The current implementation is complete, while same-subject qualification is pending under the rule below.
 
 This file is the **single source of truth** for M14 formal qualification status and evidence. `M14_01`–`M14_04` freeze implemented contracts/behavior; `M14_05` defines the closure gate. Those documents must not independently mirror a live `Qualified / Closed` claim.
 
@@ -13,8 +15,8 @@ This file is the **single source of truth** for M14 formal qualification status 
 Current qualification subject：
 
 ```text
-fd1df5872d4310e268857e700a067f4e0b9e75d1
-ci: configure frozen Hostra sandbox
+c642cda9cee2b318b3aa8f6285de05d6b6ed6bea
+fix(render): preserve update closure invariants
 ```
 
 A qualification subject is the last commit that changes M14 executable behavior or qualification inputs. Later docs-only commits that only record/explain evidence do **not** create a new subject.
@@ -25,14 +27,29 @@ Any later change to M14 Runtime/importer/browser behavior, prepared Content, fix
 
 | Gate | Required evidence | Status |
 | --- | --- | --- |
-| Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus, canonical Content + M10 paths | **PASS** |
-| Hosted Node 20 | `npm run test:m14` on the current subject | **PASS — run 34621763706 / job 103337200632** |
-| Hosted Node 24 | `npm run test:m14` on the current subject | **PASS — run 34621763706 / job 103337200362** |
-| Formal M14 closure | all three rows above target the same qualification subject | **PASS — 2026-09-12** |
+| Local map/vertical/boundary/projection | `npm test -w @loomrealm-game/map`, `test:m14:vertical`, `test:m14:boundary`, `test:m14:projection` on `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` | **PASS — local Windows `npm run test:m14`, 2026-09-16** |
+| Exact Essentials v21.1 local | `npm run test:m14:essentials-local` against exact corpus | **FAIL — import + FSDB validation PASS；qualification script expects obsolete Tileset shape without `autotile_names`** |
+| Hosted Node 20 | `npm run test:m14` on the current subject | **PENDING** |
+| Hosted Node 24 | `npm run test:m14` on the current subject | **PENDING** |
+| Formal M14 closure | all required rows target the same qualification subject | **Requalification Pending** |
 
-Hosted evidence: [M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706) completed successfully for the docs-only descendant carrying subject `fd1df5872d4310e268857e700a067f4e0b9e75d1`；both Node 20 and Node 24 executed the complete canonical `npm run test:m14` gate。The later ledger-only descendant `920d5f410975e0b6cb1bd9431ceb100fc2993698` reconfirmed the same gate in [M14 run 34622237560](https://github.com/lithdoo/loom-realm/actions/runs/34622237560)。
+Previous-subject hosted evidence remains historically valid only for `fd1df5872d4310e268857e700a067f4e0b9e75d1` ([M14 run 34621763706](https://github.com/lithdoo/loom-realm/actions/runs/34621763706)) and `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` ([M14 run 34998417357](https://github.com/lithdoo/loom-realm/actions/runs/34998417357)); it must not be promoted to the current subject.
 
-No historical CI run may be promoted into a PASS for the current subject merely because an older implementation passed the same command.
+### Current exact-local blocker — 2026-09-16
+
+The exact corpus run used the frozen Map066 selection (`mapId=66`, `x=8`, `y=7`, `characterName=trainer_POKEMONTRAINER_Red`) and the existing local Essentials v21.1 archive. Import completed with `7677/7677` physical files classified and FSDB validation PASS. The run then failed in `scripts/m14-essentials-local.mjs` before gameplay because the assertion expected：
+
+```text
+[id, tileset_name, passages, priorities]
+```
+
+while the current `struct.Tileset` record correctly exposed：
+
+```text
+[id, tileset_name, autotile_names, passages, priorities]
+```
+
+That script is outside the frozen movement-refactor file list. Do not hide this by filtering `autotile_names` or weakening closed-shape evidence. A separately authorized qualification-input correction must align the exact-local assertion with the current Tileset contract, establish a new subject `S`, and rerun the complete downstream evidence chain。
 
 ## Why requalification was required
 
@@ -155,7 +172,7 @@ This evidence demonstrates that the pre-hardening implementation was healthy, bu
 M14 may return to `Closed` only when this record contains hosted Node 20 and Node 24 PASS evidence for the current subject in addition to the current exact-local PASS：
 
 ```text
-subject fd1df5872d4310e268857e700a067f4e0b9e75d1
+current subject S
 +
 exact v21.1 local PASS
 +
@@ -170,9 +187,9 @@ The resulting status is：
 ```text
 architecture / contracts     frozen
 implementation               complete + hardened
-exact-local qualification    PASS
-current hosted qualification PASS — Node 20 + Node 24
-formal M14 milestone         Closed
+exact-local qualification    FAIL — stale qualification assertion
+current hosted qualification PENDING — Node 20 + Node 24
+formal M14 milestone         Requalification Pending
 ```
 
-No further M14 implementation optimization is required merely to change the status label. If hosted requalification exposes a real behavioral failure, fix the concrete failure and establish a new qualification subject；otherwise only record the hosted evidence here and then synchronize the milestone status to `Closed`.
+No M14 architecture or consumer redesign is authorized merely to change the status label. Run the frozen local and hosted gates on the current subject；if they expose a real behavioral failure, fix that concrete failure and establish a new qualification subject. Only after all same-subject evidence passes may this ledger and repository projections return to `Closed`.

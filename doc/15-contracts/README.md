@@ -159,13 +159,14 @@ M15
 Current summary for navigation only：
 
 ```text
-M10–M13  Closed
-M14      Closed → ../30-implementation/m14-qualification.md
-M15      Closed → ../30-implementation/m15-qualification.md
+M10, M12–M13  Closed
+M11      Requalification Pending → ../30-implementation/m11-qualification.md
+M14      Requalification Pending → ../30-implementation/m14-qualification.md
+M15      Requalification Pending → ../30-implementation/m15-qualification.md
 M16–M17  pending
 ```
 
-M13 landing docs remain `M13_01`–`M13_05`。M14/M15 formal Closed claims must come from their designated evidence ledgers, not this index。
+M13 landing docs remain `M13_01`–`M13_05`。M11/M14/M15 formal status must come from their designated evidence ledgers, not this index；the protocol contracts themselves remain frozen。
 
 ---
 

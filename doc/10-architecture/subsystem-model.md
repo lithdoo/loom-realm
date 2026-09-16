@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / **M10 Input + M11 Render closed / M12 Content author slice frozen**  
+> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**
 > 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input/Render/Content author projections与 error/lifetime boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)、[存储与内容系统](./storage-system.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
@@ -182,9 +182,9 @@ Fresh Activation不复用 old Input State/Event；fresh Data carrier隐藏地 re
 
 ---
 
-## 8. Render Author Projection — M11 Closed
+## 8. Render Author Projection — M11 Surface Frozen / Current Subject Requalification Pending
 
-> **Current / target split（2026-09-15）：** 下方 code block仍描述旧 executable subject 的 Current surface，该 subject保持历史 Closed。[ADR 0035](../decisions/0035-render-domain-existing-node-update.md) 已接受 next subject 的 existing-node `RenderDomain.update()`；docs-only acceptance 不表示代码已实现。PR 2 进入 Current 时，本节必须切换为 [M11/01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 冻结的 exact five-export target并标记 `Requalification Pending`。
+> **Current：** `RenderDomain.update()` 的 current implementation subject 是 `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`，author surface 保持冻结，本地 `npm run test:m11` 已通过，hosted Node 20/24 尚待复验。旧 [M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265) 仅证明 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。
 
 Exact surface：
 
@@ -194,18 +194,28 @@ export interface RenderDomainState {
   readonly roots: readonly RenderNode[];
 }
 
+export interface RenderDomainUpdate {
+  readonly zIndex?: number;
+  readonly nodes?: readonly {
+    readonly key: string;
+    readonly attrs?: { readonly set?: Readonly<Record<string, string>>; readonly remove?: readonly string[] };
+    readonly data?: { readonly set?: Readonly<Record<string, unknown>>; readonly remove?: readonly string[] };
+  }[];
+}
+
 interface SubsystemScope {
   createRenderDomain(initialState: RenderDomainState): RenderDomain;
 }
 
 interface RenderDomain {
   replace(state: RenderDomainState): void;
+  update(update: RenderDomainUpdate): void;
   emit(event: RenderEvent): void;
   close(): void;
 }
 ```
 
-Accepted target 只增加 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)` operation，覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members；结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变下述 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
+Accepted target 的 Current 实现已包含 `RenderDomainUpdate` root type 与 `RenderDomain.update(update)`；它覆盖 Domain zIndex 和 existing-node attrs/data 顶层 members，结构变化仍 `replace()`。它不暴露 domainId/revision/Patch/carrier，不改变下述 authority/lifetime，也不把 Map camera/tiles/motion带入 architecture contract。
 
 所有 author operations synchronous local-only：
 

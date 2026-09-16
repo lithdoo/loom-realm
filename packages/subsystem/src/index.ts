@@ -40,6 +40,7 @@ export type {
   RenderDomainState,
   RenderEvent,
   RenderDomain,
+  RenderDomainUpdate,
 } from "./render.js";
 export type {
   ContentClient,

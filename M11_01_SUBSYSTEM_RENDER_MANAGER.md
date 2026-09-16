@@ -1,6 +1,6 @@
 # M11 / 01 — Subsystem RenderManager
 
-> 状态：旧 executable subject **Implemented / Qualified**；ADR 0035 target **Accepted / Implementation Pending**
+> 状态：**Implemented / Requalification Pending**（current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`；`a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 仅为历史 Closed subject）
 > 阶段：M11 Render  
 > 落地顺序：01  
 > 最近复核：2026-09-15
@@ -11,7 +11,7 @@
 
 > **M11/01 只建立 business Render authority。publication、Renderer replica、presentation 与 Content 均不属于本步。**
 
-> **Current notice：** ADR 0035 已接受下述 target surface，但 docs-only acceptance 不表示当前 package 已实现 `update()`。旧 executable subject 的历史 qualification 保留；实现进入 Current 分支时建立新 subject 并转为 `Requalification Pending`。
+> **Current notice：** subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 修复 revision rollover 收敛、数组 closed-shape 校验和单次 COW 应用；本地 `npm run test:m11` 已通过，hosted Node 20/24 尚待同一 subject 复验。旧 [M11 run 34998417265](https://github.com/lithdoo/loom-realm/actions/runs/34998417265) 只证明 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f`。
 
 ---
 
