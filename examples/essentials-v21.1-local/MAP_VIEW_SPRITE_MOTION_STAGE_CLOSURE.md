@@ -1,6 +1,6 @@
 # Map View/Sprite 成对运动：主合同 §7–§9 的私有实施细则
 
-> 状态：**Map design candidate / Map Docs Freeze HOLD / Not implemented or measured**。唯一上级：[Map 机械实施主合同](./MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。本文件只拥有Map-private paired stage state-machine细节；一旦与上级或Frozen walking/Render/M13相抵触立即 STOP 请求设计修订，不得自行决定。Core/Profile/Input/Frame/Projector接口不变。
+> 状态：**Frozen with Map Docs Freeze 2026-09-16 as design/test contract only / Not implemented or measured**。唯一上级：[Map 机械实施主合同](./MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。本文件只拥有Map-private paired stage state-machine细节；一旦与上级或Frozen walking/Render/M13相抵触立即 STOP 请求设计修订，不得自行决定。Core/Profile/Input/Frame/Projector接口不变。
 
 ## 1. 精确身份与既有语义
 

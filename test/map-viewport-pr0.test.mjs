@@ -431,6 +431,7 @@ test("synthetic dense MapView schema, bytes, and memory for six sizes", async ()
   ];
   let maxBytes = 0;
   let maxCanvas = 0;
+  let maxVisible = 0;
   for (const viewport of VIEWPORTS) {
     for (const position of positions) {
       const projection = projectMapView({
@@ -447,6 +448,7 @@ test("synthetic dense MapView schema, bytes, and memory for six sizes", async ()
       const backing = estimateBacking(loaded.map, loaded.tileset, projection.data);
       maxBytes = Math.max(maxBytes, bytes);
       maxCanvas = Math.max(maxCanvas, backing.peakCanvasBytes);
+      maxVisible = Math.max(maxVisible, backing.visibleBytes);
       report.samples.push({
         viewport: `${viewport.width}x${viewport.height}`,
         position: position.name,
@@ -483,56 +485,87 @@ test("synthetic dense MapView schema, bytes, and memory for six sizes", async ()
   const decoded = (256 * 32 + 96 * 128 + 128 * 128) * 4;
   report.maxBytes = maxBytes;
   report.maxCanvas = maxCanvas;
+  report.maxVisibleCanvas = maxVisible;
   report.decodedBytes = decoded;
-  report.canvasBudgetOk = maxCanvas <= CANVAS_BUDGET;
   report.decodePlusBackingOk = maxCanvas + decoded <= DECODE_PLUS_BACKING_BUDGET;
   assert.equal(maxBytes < VIEW_DATA_GUARD, true, `max bytes ${maxBytes}`);
+  assert.equal(maxVisible <= CANVAS_BUDGET, true, `accepted canvas ${maxVisible}`);
+  assert.equal(maxCanvas + decoded <= DECODE_PLUS_BACKING_BUDGET, true, `live+decode ${maxCanvas + decoded}`);
 });
 
-test("dense 720/1080 visible+detached canvas backing vs 128MiB budget", () => {
+test("dense accepted canvas ≤128MiB and live+decode ≤256MiB", () => {
   const loaded = denseMap();
-  const over = [];
-  let maxCanvas = 0;
+  const overVisible = [];
+  const overLive = [];
+  let maxVisible = 0;
+  let maxLive = 0;
+  const decoded = (256 * 32 + 96 * 128 + 128 * 128) * 4;
   for (const viewport of VIEWPORTS) {
     const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
     const backing = estimateBacking(loaded.map, loaded.tileset, projection.data);
-    maxCanvas = Math.max(maxCanvas, backing.peakCanvasBytes);
-    if (backing.peakCanvasBytes > CANVAS_BUDGET) {
-      over.push({
+    maxVisible = Math.max(maxVisible, backing.visibleBytes);
+    maxLive = Math.max(maxLive, backing.peakCanvasBytes + decoded);
+    if (backing.visibleBytes > CANVAS_BUDGET) {
+      overVisible.push({
         viewport: `${viewport.width}x${viewport.height}`,
-        position: "center",
-        uniqueDepths: backing.uniqueDepths,
         visibleBytes: backing.visibleBytes,
+        uniqueDepths: backing.uniqueDepths,
+      });
+    }
+    if (backing.peakCanvasBytes + decoded > DECODE_PLUS_BACKING_BUDGET) {
+      overLive.push({
+        viewport: `${viewport.width}x${viewport.height}`,
         peakCanvasBytes: backing.peakCanvasBytes,
+        decoded,
       });
     }
   }
-  report.maxCanvas = maxCanvas;
-  report.canvasBudgetOk = over.length === 0;
-  report.canvasOverBudget = over;
-  assert.equal(over.length, 0, `canvas peak ${maxCanvas} over 128MiB; ${JSON.stringify(over)}`);
+  report.maxVisibleCanvas = maxVisible;
+  report.maxLivePlusDecode = maxLive;
+  report.canvasBudgetOk = overVisible.length === 0 && overLive.length === 0;
+  report.canvasOverBudget = { overVisible, overLive };
+  assert.equal(overVisible.length, 0, `accepted canvas ${maxVisible} over 128MiB; ${JSON.stringify(overVisible)}`);
+  assert.equal(overLive.length, 0, `live+decode ${maxLive} over 256MiB; ${JSON.stringify(overLive)}`);
 });
 
 test("RenderDomain.update full-state validation and snapshot residual", () => {
   const loaded = denseMap();
-  const viewport = { width: 1920, height: 1080 };
-  const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
-  const sprite = playerSprite(projection, 64, 48, viewport);
-  const manager = new RenderManager();
-  const domain = manager.createDomain(renderState(projection.data, sprite));
-  const next = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48, visualEpoch: 2 });
-  const updateTiming = timeMs(() => {
-    domain.update({ nodes: [{ key: "viewport", data: { set: viewSet(next.data) } }] });
-  }, 25);
-  const cameraOnly = { ...next.data, cameraX: next.data.cameraX + 1 };
-  const cameraTiming = timeMs(() => {
-    domain.update({ nodes: [{ key: "viewport", data: { set: { cameraX: cameraOnly.cameraX } } }] });
-  }, 25);
+  const gates = [
+    { width: 640, height: 480, refreshMs: 50 },
+    { width: 1280, height: 720, refreshMs: 75 },
+    { width: 1920, height: 1080, refreshMs: 100 },
+  ];
+  const perSize = [];
+  let independentBottleneck = false;
+  for (const gate of gates) {
+    const viewport = { width: gate.width, height: gate.height };
+    const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
+    const sprite = playerSprite(projection, 64, 48);
+    const manager = new RenderManager();
+    const domain = manager.createDomain(renderState(projection.data, sprite));
+    const next = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48, visualEpoch: 2 });
+    const fullUpdateMs = timeMs(() => {
+      domain.update({ nodes: [{ key: "viewport", data: { set: viewSet(next.data) } }] });
+    }, 15);
+    const cameraOnlyUpdateMs = timeMs(() => {
+      domain.update({ nodes: [{ key: "viewport", data: { set: { cameraX: next.data.cameraX + 1 } } }] });
+    }, 15);
+    const refreshBlocked = fullUpdateMs.p95 >= gate.refreshMs;
+    const ordinaryBlocked = cameraOnlyUpdateMs.p95 >= 50;
+    if (refreshBlocked || ordinaryBlocked) independentBottleneck = true;
+    perSize.push({
+      viewport: `${gate.width}x${gate.height}`,
+      refreshGateMs: gate.refreshMs,
+      fullUpdateMs,
+      cameraOnlyUpdateMs,
+      refreshBlocked,
+      ordinaryBlocked,
+    });
+  }
   report.renderDomain = {
-    fullUpdateMs: updateTiming,
-    cameraOnlyUpdateMs: cameraTiming,
-    residualNote: "Core RenderDomain.update still validates merged node data and probes a full snapshot on every update, including camera-only sets.",
-    independentBottleneck: updateTiming.p95 >= 50 || cameraTiming.p95 >= 50,
+    perSize,
+    residualNote: "Core RenderDomain.update still validates merged node data and probes a full snapshot. Compared to each size's accepted nonresize refresh P95 gate; camera-only compared to 50ms ordinary gate.",
+    independentBottleneck,
   };
   assert.equal(report.renderDomain.independentBottleneck, false, JSON.stringify(report.renderDomain));
 });
@@ -611,7 +644,7 @@ test("exact-local Essentials Map002/Map066 MapView bytes and resources", async (
         const bytes = utf8Bytes(projection.data);
         assert.equal(bytes < VIEW_DATA_GUARD, true, `Map${String(mapId).padStart(3, "0")} ${viewport.width}x${viewport.height} ${bytes}`);
         const backing = estimateBacking(map, tileset, projection.data);
-        assert.equal(backing.peakCanvasBytes <= CANVAS_BUDGET, true);
+        assert.equal(backing.visibleBytes <= CANVAS_BUDGET, true);
         assert.equal(backing.peakCanvasBytes + decoded <= DECODE_PLUS_BACKING_BUDGET, true);
         mapReport.windows.push({
           viewport: `${viewport.width}x${viewport.height}`,

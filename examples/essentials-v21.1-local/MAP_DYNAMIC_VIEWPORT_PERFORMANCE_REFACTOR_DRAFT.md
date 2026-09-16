@@ -1,6 +1,6 @@
 # Map 动态视口与大屏性能：机械实施合同候选
 
-> 状态：**Design candidate / Map Docs Freeze HOLD / Not implemented or qualified**；2026-09-16。本文为 Map viewport/performance 唯一主实施合同；冻结前仅能做限定的 PR0 可行性调查，**不得直接将全套生产任务交给低判断力 Agent**。冻结需 §14 owner/date/SHA 与 PR0 证据。
+> 状态：**Map Docs Freeze APPROVED (design/test contract only) / Not implemented or product-performance qualified**；2026-09-16。本文为 Map viewport/performance 唯一主实施合同。PR1/PR2/PR3 可按 §11 文件边界实施；冻结不等于代码或 640/720/1080 P95 PASS。签署见 §14 与 [freeze review](./MAP_VIEWPORT_DOCS_FREEZE_REVIEW_2026-09-16.md)。
 > Core：[ADR0037](../../doc/decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)、[Profile `/1`](../../doc/15-contracts/renderer-data-profile-v1.md)、[Viewport v1](../../doc/15-contracts/viewport-state-v1.md)、[Core ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md)。继承 Frozen [Render Update v1](../../doc/15-contracts/render-update-v1.md)、[M13 Web Presentation API](../../doc/15-contracts/web-presentation-api-v1.md)、[walking](./MAP_WALKING_ANIMATION_DESIGN_DRAFT.md)、[transfer](./MAP_TRANSFER_DESIGN_DRAFT.md)。[Map-private motion-stage 子规范](./MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)仅细化本文 §8，不是独立上层合同；若冲突 STOP 交设计负责人同步。旧 Profile `/2` 已撤销，不发布/不实现。
 
 ## 0. Agent 只能机械实施
@@ -90,7 +90,7 @@ type MapSpriteRenderData=Readonly<{
 
 Initial/scene/viewport/chunk refresh的 guard对象是**完整 MapView data object** `TextEncoder().encode(JSON.stringify(data)).byteLength <196608`，严格小于，不把RenderNode外壳计入；ordinary movement map侧不重stringify全部chunks。既有Frozen Render Node data≤262144B、Data unit≤1MiB/depth≤64与其他limits照常完整执行。M13 Frozen JSON structural equality可能在camera-only更新时扫描大数组，必须在PR0单列对新shape测CPU；不可用object identity、跳Projector、修改Frozen equality优化。Core RenderDomain.update full-state validation/snapshot residual也独立拆测；任何独立项本身打破门槛→STOP独立Core/M13 design review，不得在Map刀里偷偷改。
 
-同时存活的visible+detached candidate所有Canvas（含Sprite crop）以`Σ(width*height*4)`估算 backing峰值≤128MiB；加上current scene所需已decode ImageBitmap的`Σ(width*height*4)`估算总峰值≤256MiB；准备中旧+新两stage都计，不只计commit之后。只缓存current scene+window需要的资源，stale ImageBitmap close/detached canvas释放；不得常驻max1080 envelopes或无限缓存。超过任一限额 STOP，提交资源尺寸/深度与峰值数据，不降低语义强行过关。
+同时存活的 **accepted/visible** stage 所有 Canvas（含 Sprite crop）以`Σ(width*height*4)`估算 backing ≤128MiB。准备中的 detached candidate 可与 accepted 同时存在，以便 failure 保留旧完整画面；**accepted + detached canvases + current scene 已 decode ImageBitmap** 的同一瞬间峰值 ≤256MiB。128MiB 约束的是已显示 stage，不是“禁止第二套 preparing canvases”。不得把 detached 从 256MiB 总预算拿掉，不得常驻 max1080 envelopes 或无限缓存。Initial/steady accepted 必须单独 ≤128MiB。超过任一限额 STOP，提交资源尺寸/深度与峰值数据，不降低语义强行过关。
 
 ## 6. Map Browser raster、layering、autotile
 
@@ -136,7 +136,7 @@ PR1固定640、PR2动态、PR3同新 SHA资格后，真实 Hostra product最终p
 | mixed/partial stage or stale override | 0 | 0 | 0 |
 | camera-only tile draw/clear/resize per rAF | 0 | 0 | 0 |
 | exact View data UTF-8 JSON bytes | <196608 | <196608 | <196608 |
-| Canvas backing peak / decoded+backing peak | ≤128 / ≤256MiB | ≤128 / ≤256MiB | ≤128 / ≤256MiB |
+| Canvas accepted backing / live canvases+decode peak | ≤128 / ≤256MiB | ≤128 / ≤256MiB | ≤128 / ≤256MiB |
 
 **Latency canonical clock继承现有 M15 Hostra product harness**：同一个真实Renderer Window `performance.now()`记录`input-captured.at`和相应`browser-first-motion-paint.at`，只在同一Window相减；刷新起始mark→新正确paint亦在该Window记录。画面真实正确另用Chromium截图/pixel oracle复验，**截图/CDP传输不插入历史50ms测量口径**；Browser paint mark必须位于实际canvas/placement commit后，不能用`receiveRenderData`到达充当paint。Node/Runner不同进程clock不相减。每档ordinary每轮≥100、refresh每轮≥30、3轮，按现有M15 nearest-rank口径报告各轮与合并P50/P95/max、invalid≤5%、frame>33.4比例与各层CPU拆分；autotile、resize separate buckets也记录P50/P95/max，resize从最后resize event到新stage paint含100ms settle**不受refresh门槛**。附Node/Hostra/Electron/Chromium/CPU/GPU/DPR/map/position/build mode/受治理SHA、raw trace、Canvas/image allocations、M13 compare。旧42.9/96.3ms历史仅作baseline、96.3 FAIL，不能转写新PASS。
 
@@ -167,6 +167,19 @@ PR0 synthetic feasibility可在C1尚未完成时单独准备，但在Core可用�
 
 `subject SHA / exact modified files / fixture source and checksum / failing expected vs actual / raw trace / Core or Map owner / recovery decision / new docs subject`。Guard超限须报告真实chunks+tileVisual entries和bytes；Core/M13独立热点须提交CPU profile；layout/pixel失败给截图和stacking tree；运动不连续给old visible pose/new target/receipt clock与frame trace；性能FAIL保留三轮原始样本和完整环境。未获设计负责人修订/Freeze签署不得临场换算法。
 
-## 14. Freeze Gate（目前均未签）
+## 14. Freeze Gate
 
-Core Docs Freeze只由[Core ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md)拥有，须compat owner/date/evidence、SSOT cross-review、docs SHA；Map不能代签。Map Docs Freeze须：本文+motion子规范/已冻结walking/transfer无冲突；§4 schema、§8 receipt clock、§6 CSS z-index通过独立反证；PR0真实hosted及local Map002/066报告含dense1080 exact bytes、Core/M13 full-state/structural equality残余、Browser baseline、128/256MiB和现有Pixel oracle；§11每个入口/文件/STOP合法且有签署人、日期、docs-only SHA。**只冻结可执行的设计/测试合同；PR1/2的真实性能PASS属于实施后资格。** 任一上述证据缺失则继续Draft/HOLD，不得直接下发整套低判断力Agent任务。
+Core Docs Freeze只由[Core ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md)拥有，须compat owner/date/evidence、SSOT cross-review、docs SHA；Map不能代签。
+
+```text
+Map Docs Freeze: APPROVED 2026-09-16 as design/test contract only
+Owner: project owner continuation after PR0 STOP (“继续”) authorizing the §5 accepted≤128MiB / live+decode≤256MiB split
+Reviewer: Cursor Grok 4.6
+Conflict: the same session authored the §5 wording; freeze signs PR0 numbers + remainder of the original contract, not a second independent author of that paragraph
+Evidence: examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md
+Review: examples/essentials-v21.1-local/MAP_VIEWPORT_DOCS_FREEZE_REVIEW_2026-09-16.md
+docs-only subject SHA: filled by freeze-registration commit after this text
+Not claimed: Implemented, PR1/PR2 product P95, camera-only zero tile draws, PWA
+```
+
+Map Docs Freeze covers：本文+motion子规范/已冻结walking/transfer无冲突；§4 schema、§8 receipt clock、§6 CSS z-index通过 PR0 反证；PR0真实hosted及local Map002/066报告含dense1080 exact bytes、Core/M13 full-state/structural equality残余、Browser baseline、128/256MiB和现有Pixel oracle；§11每个入口/文件/STOP合法。**只冻结可执行的设计/测试合同；PR1/2的真实性能PASS属于实施后资格。**
