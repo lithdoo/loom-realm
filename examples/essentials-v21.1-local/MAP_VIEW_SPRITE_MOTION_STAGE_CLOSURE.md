@@ -1,65 +1,80 @@
-# Map View/Sprite motion-stage 实施细则（主合同 §7–§9 的子规范）
+# Map View/Sprite 成对运动：主合同 §7–§9 的私有实施细则
 
-> 状态：**Map candidate / Map Docs Freeze HOLD / no executable PASS**，2026-09-16。
-> 唯一上级：[动态视口与性能主合同](./MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。本文件不改变 Core、Frozen Render/Web Presentation、walking/transfer 的 authority；不独立发布 Freeze 或设置另一套性能门槛。若与主合同相抵触 STOP，由设计负责人同步修订，不留给实施者自行选择。
+> 状态：**Map design candidate / Map Docs Freeze HOLD / Not implemented or measured**。唯一上级：[Map 机械实施主合同](./MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)。本文件只拥有Map-private paired stage state-machine细节；一旦与上级或Frozen walking/Render/M13相抵触立即 STOP 请求设计修订，不得自行决定。Core/Profile/Input/Frame/Projector接口不变。
 
-## 1. Identity 和受保护的 walking 语义
+## 1. 精确身份与既有语义
 
 ```text
-sceneEpoch     初始1，仅成功 scene transfer 增，Runtime 内正安全整数不可回绕
-visualEpoch    初始1，仅成功刷新chunk/accepted viewport/transfer增
-motionId       初始null，每次成功movement分配唯一正安全整数；standing/transfer为null
-paired token   (current HTMLElement universe, sceneEpoch, visualEpoch, motionId|null)
+sceneEpoch  Runtime内初始1，仅成功scene transfer递增且不回绕
+visualEpoch Runtime内初始1，仅chunk refresh/accepted resize/transfer成功递增
+motionId    初始null；每次成功walking step分配唯一positive safe整数
+pairToken   (actual same managed parent/child HTMLElement universe,
+             sceneEpoch,visualEpoch,motionId|null)
 ```
 
-View 与 Sprite 必须同时拥有 sceneEpoch/visualEpoch/motionId。View 的 cameraMotion 与 Sprite 的 motion 都必须同为 null 或同为 non-null；non-null 的 `id=motionId`、duration=250。Camera 被 map edge clamp 时 View 数据的 `motionId` 仍改变，保证 M13 两端都收到新数据；仅改变 `motionId` 不允许触发静态 chunk 重验证/raster。Frozen walking `MAP_WALKING_ANIMATION_DESIGN_DRAFT.md` §3 允许尚未 emitted 的中间步进被 latest state coalesce，不承诺拥塞下逐步完整播放；本次实施**不新增 replay queue/ACK**。因此旧文档里的“B替代A却不得丢任何完整步进”的矛盾已裁定：A尚未真正 accepted/paint，则可记 `superseded-before-paint`，只保证 latest world/presentation 收敛及无 mixed stage；不得把它统计成“每步完整播放”的 PASS。Frozen 250ms logical step cadence、held direction/blocked/transfer均不修改。
+Runtime对一次成功`domain.update`分别给View和Sprite写入匹配的三字段token。若camera clamp不动也改View.motionId，使M13按JSON structural change交付新回调；sceneEpoch必须在Sprite上明确存在。CameraMotion和SpriteMotion必须都null或都non-null且各自id=motionId、durationMs=250。普通步进不增加visualEpoch。Failed候选不能成为已提交id/epoch；fresh Session/G新元素绝不复用旧stage。
 
-## 2. 一份由父 MapView 拥有的物理协调状态
+**Frozen walking §3允许backpressure时跳过尚未发出/尚未呈现的中间transition，保证latest-state convergence，而非每步重放。** 如果A从未可见而B更新成最新目标，可废弃A的pending画面并记录`suppressed-before-paint`；不能伪装为完整逐步播放，也不能引入ACK/replay queue。已经显示的A画面不能由A的late async覆盖B。保持逻辑250ms step timer和world coordinates已提交的规则。
+
+## 2. 唯一 MapView parent-coordinator 状态
 
 ```ts
-type StageStatus='EMPTY'|'VISIBLE'|'PREPARING'|'RETRY_WAIT'|'DISPOSED';
-interface PairToken {
-  readonly sceneEpoch:number; readonly visualEpoch:number;
-  readonly motionId:number|null;
-}
-// MapView private: status; desiredView?; desiredSprite?; acceptedPair?;
-// candidateView?; candidateSprite?; localSequence; parentRaf?; retryAttempt;
+type State='EMPTY'|'VISIBLE'|'PREPARING'|'RETRY_WAIT'|'DISPOSED';
+// Private to current lr-map-view instance:
+// desiredView?: {data, receivedAt, token}
+// desiredSprite?: {data, receivedAt, token}
+// acceptedPair?: {token, canvases, sprite, motionStart, motionEnd, displayedPose}
+// candidateView?, candidateSprite? (at most one latest per endpoint)
+// sequence, parentRaf, retries (at most one timer)
 ```
 
-Component universe 来自当前 managed parent + direct slotted child 的实际 DOM identity/lifetime；不得读取 Main/Store/Data generation 私有状态，也不能跨 fresh Session/G 元素复用 stage。每端 `receiveRenderData` 先 exact validate，将最新 data 交 parent private coordinator；parent 记录各端 latest desired 并令 `localSequence++`，使以前开始的异步准备/queued rAF失效。同一 token 的 parent/child 数据在两个回调都到达前不能单侧 paint；任一先到只进入 PREPARING，保持旧完整 acceptedPair。若新 callback 在旧图片解码期间出现，用 latest 两份 desired 从头检查匹配并重新准备，禁止旧 promise凭resource identity恰好相等覆盖新状态。`desiredView`/`desiredSprite`各保留最新一份，candidate各最多一个，不能积压历史队列。Exact matching 是同一 HTMLElement universe 与同一(scene,visual,motion)，不能只看 visualEpoch。
+两个`receiveRenderData`回调各自先exact validate，再提交parent的自己一端latest data及同一Window `performance.now()` receipt时刻，更新sequence令所有早期promise/candidate/rAF inert。若两端token不匹配，只保留旧完整acceptedPair/EMPTY，不让一端独自开始physical paint或motion；一旦matching则根据两份latest data**重建**当前sequence的配对候选。由于第二个callback也会更新sequence，允许重建，不得把已作废的第一个异步prepare误判为current。准备完成前再检查same element identity/isConnected/desired token/sequence，方可commit；不能凭同资源contentVersion/JS对象 identity冒充current。
 
-**Structural-equal data没有强制 M13 重投递**：失败只能用本 WC已收到的数据做有界私有retry，不能依赖同 G carrier reconnect、重复 `receiveRenderData`或访问 Store。
+历史M13同值不会自动再次`receiveRenderData`；WC-local retry必须用已经收到的latest数据，不以same-G carrier重连充当重试通知。Parent不得读取Renderer Store/Main/Data G私有对象；只读其被管理的实际DOM parent/child关系和自身Map render data。
 
-## 3. Parent-owned paired commit（两个 WC 可以先后到达）
+## 3. 一次同步paired physical commit
 
 ```text
-EMPTY + first endpoint → PREPARING; entire map stage hidden
-VISIBLE + new desired → PREPARING; keep previous complete stage
-matching latest desired + both detached preparations ready + same connected pair
-→ one synchronous JS task (no await/rAF split):
-     swap parent-owned depth canvases + viewport clip/dimensions
-     call child's explicitly package-private commit for its own Shadow canvas
-     update acceptedPair and invalidate older private work
-→ next parent requestAnimationFrame reads performance.now once
-→ camera and sprite compute one identical progress and apply their own private placement
+EMPTY + 仅一端→PREPARING，初始整组隐藏
+VISIBLE + 更新→PREPARING，保留上一份完整可见pair
+同pair最新token、两端资源/bitmap/depth raster ready、still connected
+→ 同一JS task且两个commit之间不能await/rAF：
+   parent swap自己的ShadowDOM canvases / viewport clip / 私有stylesheet
+   child通过Map-package-private method swap自己的ShadowDOM sprite bitmap/pose
+   更新acceptedPair并fence所有旧候选
+→ parent拥有唯一后续rAF；child无独立motion rAF
 ```
 
-Child不得在自己的 data callback、资源 resolve 或独立 rAF中先启动动画。Parent只操作自己的 ShadowDOM/style 和调用 child private method，Child只操作自己的 ShadowDOM canvas；**不得写 `this.style`/host attrs、M13-managed lightDOM/children/order**。Parent 私有 `::slotted(lr-map-sprite)` CSS rule 提供 sprite-host z-index（动态改的是 parent-owned stylesheet，不改 host），child Shadow canvas负责内部绝对定位。Tile layers与 Sprite按主合同 tileDepth*2 / characterDepth*2+1 同一 stacking context交错；Chromium pixel oracle不匹配则 STOP，不能“临时”回到 host `style`写入。初次 pair未ready不显示单边，fresh element universe不显示旧 universe canvas。
+不改parent/child的host `this.style`、M13-managed attrs/data/lightDOM/children/order。Parent自己的Shadow CSS `::slotted(lr-map-sprite)`规则给slotted Sprite host设置position与动态zIndex，Child只改自身Shadow canvas位置；和tile depth canvases共用stacking context。深度关系与样本的确切oracle归主合同§4/§6，PR0若private CSS无法满足像素遮挡，冻结继续HOLD，不能让Agent私改Host。Fresh element universe尚未complete pair一律不显示、旧元素不得迁移。
 
-当 M13 仅回调 Sprite 的 standing/facing 值，允许不等待新 View 回调的 **全部**条件：已接受 View 在 t 确实 cameraMotion null、当前 parent 无 active/pending pair、View的 scene/visual/viewport/camera本次未改变且 Sprite motion=null。其他情形绝不走 Sprite-only fast path；相机虽然数值clamp不动、但其 cameraMotion 非 null 的 step同样必须成对。上一个 camera motion未结束时，standing必须等待其完成边界或在同一配对 commit 中同时停止 camera 与 Sprite；不得出现 Sprite已站定但背景继续走。该 fast path不为普通新 movement 提供单侧启动捷径。
+**Sprite-only standing/facing fast path全部条件**：accepted View的cameraMotion=null、parent没有任何active/pending paired animation、新data不改scene/visual/viewport/camera且Sprite motion=null。任一不满足（含camera clamp但逻辑step仍有motion）则等paired stage或当前motion完成；绝不能Sprite已站定而背景继续移动。站立需要同时停止camera时使用完整pair。
 
-## 4. 共享时钟和确定性重基准
+## 4. 250ms receipt clock / decode catch-up（不得延长已Frozen步时）
 
-Parent仅持有一条当前配对 rAF 和该配对 `startTime/endTime`。两端不得继续使用当前旧 Browser 的独立 `acceptMotion(...performance.now())` 时钟。新的 paired motion在**第一次共同帧**取一次 `t=performance.now()`，记录 `startTime=t`、`endTime=t+250`；每帧同一 `p=clamp((now-startTime)/(endTime-startTime),0,1)`，camera/sprite分别按 Frozen 规则 lerp→round；layering sprite visualPixelY等亦使用同一个 p。资源准备时间不反向更改 logical step timer，最新数据比旧更重要；首次 render赶不上250ms时仍须正确最终收敛/记录 latency，不宣称所有步进完整呈现。
+已冻结walking要求“image decode不能重新开始250ms”，所以**不要在双方准备完成的第一帧设`startTime=now`**。同一match token的第一端`receiveRenderData`回调时，由parent记录`pairReceivedAt`；第二端回调沿用此相同起点。即使候选在等待资源时sequence重建，也不重置同pair第一receipt。Pair在t准备好时立刻采用`p=clamp((performance.now()-pairReceivedAt)/250,0,1)`；若准备耗时≥250ms直接target，不多播250ms。下一次parent rAF仅取一份Window `now`，camera/sprite/depth用同一p执行Frozen lerp→round；同pair不许以各自callback/解码时刻启动两个时钟。与原walking“两端可差一帧”的物理 seam只改为same-pair共同起点，**不改变逻辑移动节奏、pattern或transport latest-state coalescing**。`motionEnd=pairReceivedAt+250`。
 
-中途 accepted viewport/chunk refresh，但**仍属同一 active logical step**：在即将切换的共同帧 t，先用旧 accepted pair 当前实际 p 计算已显示 cameraX/Y、sprite screenX/Y、pattern、visualDepth；以这些 CSS logical coordinates为新的 paired `from`，新 viewport+authoritative target为共同 `to`；`remainingMs=max(0,oldEndTime-t)`，双方同一 remainingMs，值为0则直接显示最新target。若新 callback 表示**后续新 step**，从上个已显示 pose重基准到最新 step target、duration重新为250ms；任何未显示的旧候选废弃，`superseded-before-paint`计数增加。Scene transfer不能跨不同 map scene插值：保留上一完整stage直至新 scene资源双方ready，在一个 task原子替换全 scene，旧像素绝不能进入新 stage。最新 standing按 Frozen 规则可以直接 snap target，但**必须在配对切换时一起取消旧 camera/sprite motion**，不能只更新一边。
+当当前pair运动中途收到同一motionId的新visualEpoch（resize/chunk refresh）时，在将要切换的共同帧t读取旧pair**实际上已显示**camera/sprite screen pose/pattern/depth作为新`from`，target由最新world+accepted viewport计算。两端共享`remainingMs=max(0,oldMotionEnd-t)`以及同一rebase时刻t；remaining=0直接完整target。若后续step B插队，则从旧可见pose向B target，时长=250ms，起点=B pair第一receipt（decode不得延长）；A未显示的pending可废弃并计数。若当前`acceptedPair`不存在，**没有合法old visible pose**：第一次完整匹配stage一准备好就显示latest authoritative target，不捏造看不见的A/B source，记录`initial-motion-not-shown`。如果旧pair存在但已被同scene较新的standing覆盖，standing的完整commit可按Frozen walking直接snap target并一起取消camera/sprite rAF，不允许只停一边。
 
-Newer token、component disconnect、fresh generation/Session universe、Frame/Runtime terminal均 cancel parent rAF/retry、`localSequence++` fence async；late tasks不得复活旧 stage。DPR-only不能触发新 logical stage、改变canvas backing尺寸。
+Scene transfer不跨场景lerp/复制像素；旧完整scene保留到fresh scene两端ready，新pair同task整体换入。Old scene/tile/resource work在scene/identity转换之后一律inert。DPR-only不触发logical stage/canvas backing rebuild。
 
-## 5. 有界失败处理与内存
+## 5. Retry/terminal/boundedness
 
-任一 endpoint prepare error：保持上一个已接受完整 stage（如果初始为空则保持全隐藏），同latest data进入 RETRY_WAIT；等待 100/200/400ms 分别retry，最多三次，任何 newer callback/terminal/disconnect使旧 retry失效。三次仍失败→明确FAIL并保持旧pair或EMPTY，不无限重试，不改authoritative Store，也不要求相同 data重发；新实际 data或fresh元素才有新候选。Parent/Child pending各最多一个latest；旧 detached canvas/image资源及时 release/`ImageBitmap.close()`，两级内存门槛取主合同 §5，包含旧+候选同时存活的峰值。
+任一最新pair图片/prepare失败，旧完整acceptedPair保持（初始则保持全隐藏）；进入RETRY_WAIT，100、200、400ms各重试一次**共最多三次**。每次核latest token/sequence/element currentness，期间更新/terminal/disconnect取消旧timer。三次失败停止retry、记录资格FAIL、旧pair保持/EMPTY；只有更晚真实data或fresh组件才重新候选，不无限自发retry。每端最多一个candidate，只有当前scene/window有效资源，stale `ImageBitmap.close()`/detachedCanvas释放；Canvas/decoded估算峰值限额见主合同§5。Parent disconnect/Runtime terminal取消rAF/retry并fence all async；不改Core Store/RenderEvent/ACK。
 
-## 6. 硬验收（非 Core Conformance）
+## 6. Exhaustive regression vectors（Map-owned, not Core）
 
-测试同一个 real Chromium M13 managed tree，固定 View-first、Sprite-first、camera clamped、standing while camera active、两段 step A→B被transport coalesce、resize中途连续rebase、chunk refresh、scene transfer、image failure三次耗尽与后续新数据恢复、disconnect/reconnect/fresh G、DPR-only、priority0..5/equal-depth/tall-sprite。截图/trace须显示：zero mixed stage、zero stale overwrite、final latest world/camera/pose convergence、no old scene resource leakage。对于被coalesce的 logical step只记录 `superseded-before-paint`，不可一边允许合并、一边坚持每步播放 gate。PR0完成前本文件仅为候选设计；PR1/PR2/PR3在同一新 executable SHA得到证据后才可谈实施合格。未来 menu/dialog 不作为现有 map-only viewport 任务隐藏验收项。
+| 输入/到达顺序 | 唯一结果 |
+|---|---|
+| View先/Child后，或Child先/View后 | 先保持旧完整pair，两端ready后一次同步切换 |
+| Camera clamped的新step | View.motionId仍变化，收到双回调并共享250ms clock |
+| 两端之间decode慢>250ms | 最初receipt计时，直接target，不新增250ms |
+| Step A pending、B更新 | A候选作废；B从可见pose连贯到latest，记录suppressed；无旧pair则latest target |
+| Active camera时收到standing | paired停止或completion boundary，不能Sprite单边停 |
+| Active motion中accepted viewport | 旧实际显示pose→新target，用remainingMs；无mixed尺寸 |
+| Transfer A→B→A | fresh scene双资源stage，旧pixels不可进入新scene |
+| 两端prepare一端失败 | 保留旧完整pair/EMPTY，三次bounded retry，耗尽FAIL |
+| same-G reconnect equal full data | M13无需回调，WC自有retry；无连接级恢复依赖 |
+| Fresh element universe / disconnect / late image | 旧候选与旧rAF永不影响新元素 |
+| DPR-only/仅autotile帧变化 | 不改logical viewport/camera motion；dirty autotile另计 |
+
+Pixel/trace必须证明zero mixed stage、zero stale override、latest convergence；丢失的中间transport transition以suppressed counter如实记，不再施加与Frozen walking相矛盾的“所有step都必须完整显示”门槛。完整功能/性能与终局PASS归主合同§9–§14和各资格ledger，本文件仅候选设计，不是假称已实现。
