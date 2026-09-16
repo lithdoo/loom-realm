@@ -1,528 +1,104 @@
 # Renderer ⇄ Subsystem Data Application Profile v1
 
 > 层级：正式契约 / Application Profile  
-> 状态：Active / Normative / Frozen  
-> Profile 版本：1  
-> Profile 标识：`loomrealm.renderer-data/1`  
-> 稳定程度：Frozen  
-> 主要定义：Renderer ⇄ Subsystem current Data Connection 上 Data Connection v1、User Input v1 与 Render Update v1 的固定版本组合、application-unit mapping、单 reader/dispatcher、单 writer、方向约束、fresh-carrier 组合与 Data-local terminal boundary  
-> 依赖：[Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)、[User Input v1](./user-input-v1.md)、[Render Update v1](./render-update-v1.md)  
-> 上游 authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)  
-> Conformance：[Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md)  
-> 决策：[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)  
-> 最近复核：2026-09-07
+> 状态：**Revised preimplementation normative candidate / Docs Freeze HOLD**（原三-child Frozen baseline已被 ADR0037 显式 reopen；当前 executable仍为旧版）  
+> Profile 版本：1；标识：`loomrealm.renderer-data/1`（唯一目标 identity）  
+> 主要定义：Data Connection v1 + User Input v1 + Render Update v1 + Viewport State v1 的唯一完整组合、unit mapping、role direction、single reader/writer、currentness与Data-local terminal  
+> 依赖：[Data Connection v1](./renderer-subsystem-data-connection-v1.md) · [User Input v1](./user-input-v1.md) · [Render Update v1](./render-update-v1.md) · [Viewport State v1](./viewport-state-v1.md)  
+> Authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)；测试：[Profile v1 Conformance](./renderer-data-profile-conformance-v1.md)；决定：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)（更新 [ADR0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)/[ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md)）  
+> 最近复核：2026-09-16
 
-本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。
-
-核心原则：
-
-> **DataAuthority 选择一套完整 Data Application Profile；Profile v1 静态绑定 Connection 1 + User Input 1 + Render Update 1。一个 current carrier 只有一个 inbound reader/dispatcher 与一个 outbound serialized writer；共享 carrier 只共享 application-unit ordering 与 terminal boundary，不创建跨 child protocol authority、revision、transaction、ACK 或 replay。**
+**这是一项有记录、尚未完成实现与兼容核查的 Frozen preimplementation correction，不是声称旧 `/1` executable 已支持 viewport，也不是在已发布系统上静默修改协议。** 若有真实外部兼容义务，立即停止直接重置并重新评审版本/迁移。`MUST / MUST NOT / SHOULD / MAY` 表达候选的最终约束。
 
 ---
 
-## 1. Composition / Identity
-
-```text
-Renderer Data Application Profile v1
-├── Data Connection Contract v1
-├── User Input Protocol v1
-└── Render Update Protocol v1
-```
-
-固定版本：
-
-```text
-Data Connection = 1
-User Input      = 1
-Render Update   = 1
-```
-
-Profile 标识固定：
+## 1. 唯一完整 Profile / 版本与职责
 
 ```text
 loomrealm.renderer-data/1
+├── Renderer ⇄ Subsystem Data Connection v1
+├── User Input v1
+├── Render Update v1
+└── Viewport State v1        [新增 child，独立于 InputTarget]
 ```
 
-任何实现声明支持本 Profile，MUST完整支持三个 frozen component；不得只支持其中一部分仍宣称 `loomrealm.renderer-data/1`。
+任何声称实现**修正后** `/1` 的 peer MUST 完整支持四个 child；旧只实现三个 child 的 `/1` peer是 historical implementation，**不得与修正后 peer混配或宣称 conformant**。不发布 `/2`，不建 compatibility parser、deprecated alias、feature bits、profile negotiation或 silent fallback。npm semver、Profile identity、child versions、conformance fixture revision彼此独立。现有代码/历史 PASS不得充当修正后资格证据。
+
+## 2. Main selection / current binding
+
+Main唯一拥有 Session、Renderer participant、DataAuthority `{subsystemKey,generation,dataProfile}`及 profile selection；其 Control v1 wire `dataProfile: string` 不改变。Platform Broker仅建立经过 paired readiness和 commit-time current revalidation 的 exact `(Session,Renderer,S,G,P)` carrier；不 mint/upgrade/downgrade authority，也不从 Subsystem 名称或 map presence选择 profile。Profile peer仅消费已安装 current carrier；不能创建 Frame、InputTarget、Render authority。
+
+**跨 consumer 协议义务：** 当 authority 指定 `loomrealm.renderer-data/1`，两端 MUST完整实现本修正版，身份不匹配或 endpoints不支持时 Data absent；Data absent本身不等于 Runtime/Frame failure。**当前产品部署决定**（统一选择 `/1`、协调升级全部 endpoints）属于 [Viewport qualification/implementation ledger](../30-implementation/viewport-profile-v1-qualification.md)，不是 profile 自身的 universal rollout MUST。旧 executable `/1` 与修正 `/1` 不允许运行时混搭；新 executable subject/资格证明后才启用。未来真正 P1→P2 仍遵守 Frozen Connection profile-replacement→fresh generation；本次首次实现前文档 correction不假装发生了一个 `/1→/2` 迁移。
+
+## 3. Application unit / common preflight（原有机制不变）
 
 ```text
-npm package semver
-!=
-Data Profile version
-!=
-child protocol version
+one carrier application unit = one UTF-8 JSON text string = one child message object
+Hostra WebSocket: one complete text message; binary forbidden
+PWA MessagePort: postMessage(string); structured clone/transfer仅 Platform bootstrap
 ```
 
----
+Receiver MUST 在任何 child semantic mutation前进行：unit为 string→**actual UTF-8 bytes ≤1,048,576**→现有 Wire `parseJsonText`/representation gate→JSON container depth ≤64→exact top-level `type`/role direction→child exact validation。不得先无界 buffer/parse；不得改变既有 identifier/payload/Render limit。`undefined`、BigInt、NaN/Infinity、Function/Symbol、host objects、ArrayBuffer/Blob、JSON-RPC Batch与单 unit 多消息非法。Duplicate JSON keys沿既有 Wire/ECMAScript JSON.parse observable规则；不另造 parser。Viewport不能绕过通用前置验证。
 
-## 2. Selection / Authority Boundary
-
-Main 通过 Renderer Control 发布：
-
-```ts
-interface RendererDataAuthorityV1 {
-  readonly subsystemKey: string;
-  readonly generation: number;
-  readonly dataProfile: "loomrealm.renderer-data/1";
-}
-```
-
-`dataProfile` 是 complete application-stack identity，不是 transport、endpoint 或 credential。
+## 4. Exact kind / direction
 
 ```text
-dataProfile != websocket
-dataProfile != messageport
-dataProfile != endpoint/ticket/Port
-```
-
-Profile不 mint / mutate：
-
-```text
-Session
-Renderer participant
-subsystemKey
-generation
-dataProfile
-InputTarget
-Frame/Activation
-Render Domain business authority
-```
-
-只有 Platform DataConnectionBroker 完成 paired installation、并且 exact current `S/G/P` authority 仍成立后，该 carrier 才能交给 Profile mechanics 作为 current application carrier。
-
-如果当前 `dataProfile` 无法由两端实现：
-
-```text
-Data Connection remains absent
-```
-
-这本身不等于 Runtime failure，也不改变 Frame authority。
-
-Profile replacement：
-
-```text
-P1 → P2
-```
-
-MUST 作为 DataAuthority replacement，并使用 fresh generation；不得同 generation 静默换 application semantics。
-
----
-
-## 3. Application Unit / Common Preflight
-
-每个 current carrier application unit 固定为：
-
-```text
-one carrier application unit
-=
-one UTF-8 JSON text string
-=
-one child-protocol message object
-```
-
-### Hostra / WebSocket
-
-```text
-one complete WebSocket text message
-=
-one application unit
-```
-
-binary message不得承载本 Profile application traffic。
-
-### PWA / MessagePort
-
-```text
-postMessage(string)
-=
-one application unit
-```
-
-不得直接 `postMessage(object)` 扩大 application value model；Structured Clone / Transferable 只用于 Platform bootstrap/provisioning，例如转移 `MessagePort` 本身。
-
-### Common hard gate
-
-User Input v1 与 Render Update v1 已共同冻结：
-
-```text
-max application unit UTF-8 bytes      1,048,576
-max JSON container nesting depth      64
-```
-
-因此 Profile receiver MUST在 child semantic handling 前统一执行：
-
-```text
-carrier unit is string
-→ actual UTF-8 bytes <= 1 MiB
-→ Wire parseJsonText
-→ Wire representation validation
-→ JSON container depth <= 64
-→ top-level type discrimination
-→ child exact validation
-```
-
-不得先无界 buffer/parse 后再拒绝。
-
-其余 identifier/count/payload/structural limits继续由对应 frozen child protocol拥有；Profile不建立第二套相互冲突的业务 limits。
-
-禁止 application model：
-
-```text
-undefined
-BigInt
-NaN / Infinity
-ArrayBuffer / Blob
-MessagePort / Host object
-Function / Symbol
-JSON-RPC Batch
-multiple application messages in one carrier unit
-```
-
-source duplicate JSON members继续遵循 frozen Wire / ECMAScript `JSON.parse` observable semantics；Profile不得增加第二 tokenizer/parser。
-
----
-
-## 4. Exact Namespace / Direction Surface
-
-Profile v1 只有两个 application namespace：
-
-```text
-input.*   → User Input v1
-render.*  → Render Update v1
-```
-
-exact message kinds：
-
-```text
-Subsystem → Renderer
+Subsystem → Renderer:
     input.interest
-    render.domains
-    render.snapshot
-    render.patch
-    render.event
+    render.domains | render.snapshot | render.patch | render.event
 
-Renderer → Subsystem
-    input.state
-    input.event
-    input.reset
+Renderer → Subsystem:
+    input.state | input.event | input.reset
+    viewport.state
 ```
 
-以下均为 protocol-invalid / Data-fatal：
+三个 namespace：`input.*`、`render.*`、`viewport.*`。`viewport.state` 的 exact own three fields `{type,width,height}`、CSS logical positive safe integers、retained/latest/fresh baseline等以 [Viewport State v1](./viewport-state-v1.md) 为唯一 child SSOT。Unknown type、known wrong direction、cross-namespace masquerade、malformed JSON、child exact-invalid均 Data protocol-fatal；不得忽略当可选扩展。将来改变 child 组合/方向/编码/identity须在形成兼容性义务后显式 version/migration，不能以本 preimplementation 例外无限静默修改。
+
+## 5. Single reader and ordered dispatcher
+
+每 current carrier恰有**一个** logical `carrier.messages()` reader：
 
 ```text
-unknown top-level type
-known type in wrong role direction
-cross-namespace shape masquerading as another type
-malformed JSON
-child exact-schema/representation/limit invalid
+common preflight → exact type/direction discriminator
+    input.*    → Input role handler
+    render.*   → Render role handler
+    viewport.* → Viewport role handler (Subsystem receive only)
 ```
 
-不得猜测、downgrade、ignore 为“未知扩展”。
+任何 child不得竞争 raw reader；一份合法 unit只 dispatch到对应 child一次。Profile不是 JSON-RPC，无请求相关性。接收端先验证再 mutation；合法但过时 Input按 Frozen Input规则 drop，不能伪装为 Viewport reset。Viewport observation只更新 Subsystem readonly retained capability，不直接写 Renderer Store、Projector或 Main。
 
-未来增加第三 namespace、第五 Render message、第五 Input message，或改变方向，都需要新的 child protocol/Profile combination。
+## 6. Single serialized writer / viewport bounded publisher
 
----
+每 carrier每方向恰有一个 shared serialized writer，任一时刻最多一次 `carrier.send(string)` pending；所有 child走同一 validated writer，已 admitted顺序不可重排，不能 raw bypass/retry/duplicate/跨 carrier搬运。单 writer只授予同方向 unit顺序，不创建跨 child authority、transaction、revision、ACK、barrier或 replay。Input State/Event/Reset、Render publication自己的 barrier/priority由各 child维持。
 
-## 5. One Connection-wide Reader / Dispatcher
+Viewport sender **在进入 shared writer 前**实行 [Viewport v1 §3](./viewport-state-v1.md) 的小范围规则：每 current carrier至多一个 viewport unit writer-admitted/in-flight + 一个 not-yet-admitted latest slot，新的合法 size覆盖 slot；发送结算后继续最新值直到收敛。合法 burst不得单独线性填满 shared writer导致 terminal、无界积累或永久饿死 Input/Render。不修改既有 writer的 bounded capacity/fail-closed规则，不做 generic priority scheduler。发送成功不是 author ACK。
 
-每个 current Data carrier MUST恰有一个 logical inbound reader：
+## 7. Child semantic outcome / diagnostic
+
+Input唯一拥有 Interest/Activation/effective gate、State/Event/Reset与 stale-drop；Render唯一拥有 Domain registry、baseline/revision/patch/identity与 stale Event；Viewport唯一拥有 retained size、sender coalescing、source/currentness/author callback。Profile只拥有 common mapping、routing、writer、Data terminal。已通过 static validation的 child handler可 `accepted`（含各 child定义的 stale-drop）或显式 `protocol-fatal`；ordinary business/WC exception不等于 remote malformed。
+
+Terminal diagnostic family：common preflight/unknown type→`protocol:"profile"`；Input/Render malformed或 explicit child-fatal→原有 `"input"/"render"`；exact `viewport.state` 已识别、child shape/value invalid或其 explicit fatal→`protocol:"viewport"`。修正后 `/1` 实现可扩展其终态类型为四种 family；旧 `/1` executable仍是历史、必须整体重验。Viewport listener throw/reject须在 author side containment，不变成 Data terminal。
+
+## 8. Ordering / independent publication baselines
+
+每方向保持 admitted application-unit顺序，不赋予跨方向或跨 child业务因果。Control/Data无 global total order。Fresh current carrier retire旧 reader/writer/publication cursor、丢弃 old not-emitted units、不 replay/migrate，并独立建立：
 
 ```text
-carrier.messages()
-        ↓
-one reader
-        ↓
-common preflight / parse
-        ↓
-type discrimination
-       / \
- input.* render.*
+Input: remote Interest empty → full desired registry → fresh effective State; Event future-only
+Render: first render.domains → each current Domain snapshot → ordinary patch/event
+Viewport: 有合法 current physical sample则 fresh baseline；否则首次合法出现时发布
 ```
 
-Input 与 Render 实现 MUST NOT各自调用 `carrier.messages()` 竞争消费同一 stream。
+不同方向/child没有固定 baseline 排列、atomic super-snapshot或 cross-child barrier。same-generation Data reconnect不自动重建 business Frame/InputListener/Domain/Viewport object；Render revision baseline遵 Frozen规则，Viewport保留 last observation，fresh equal size不通知、different size更新后通知。Fresh generation/Renderer同一 Runtime幸存时旧 carrier/source fenced、新 matching carrier fresh baseline最终收敛；未收到新合法 sample可暂留历史 size，但不代表当前 Renderer paintability。
 
-Dispatcher 固定：
+## 9. Terminal / failure / bounded backpressure
 
-```text
-input.interest/state/event/reset
-    → User Input role handler
+Carrier close/loss、common/profile violation、child protocol-invalid/fatal、send failure、local mechanics fatal均 first-wins终止当前 peer：停止读写、pending operations只 settle一次、locally fatal时 best-effort close。只退休 Data binding，不自动 Runtime terminal/Frame unwind/InputTarget mutation/DataAuthority replacement/Renderer participant failure。仍 current 的 `(S,G,P)`可由 Platform另建 fresh paired carrier；Profile自身不负责 reconnect。
 
-render.domains/snapshot/patch/event
-    → Render role handler
-```
+Writer/child queues须 bounded，terminal不得被 backlog无限阻塞；已 sent/admitted消息不可撤回/重排。Viewport的具体 slot限额是该 child的 producer obligation，**不是**把某一实现的 `MAX_PENDING_SENDS` 值冻结成通用协议参数。
 
-Response/RPC correlation 不存在；Data Profile不是 JSON-RPC profile。
+## 10. Conformance / Freeze governance
 
-child role handler可以维护自己的 authority/state machine，但不能绕过 shared reader 重新读取 carrier。
+当前测试 SSOT：[Profile v1 Conformance](./renderer-data-profile-conformance-v1.md)及各 child conformance；对应 fixture revision随本次 explicit correction递增。Docs Freeze只要求 compatibility assessment + cross-document一致 + executable-ready规范 + docs SHA，不要求提前捏造测试 PASS。实施后在新 executable SHA上重跑原 v1三 child、修正 `/1` 四 child、Main/paired carrier、Desktop/Hostra及后续 PWA适用测试，按 [唯一 qualification ledger](../30-implementation/viewport-profile-v1-qualification.md)归档。任何旧历史 PASS均不自动迁移。
 
----
-
-## 6. One Connection-wide Serialized Writer
-
-每个 current Data carrier MUST恰有一个 logical outbound serialized writer。
-
-所有 outbound Input/Render units：
-
-```text
-child message validated/materialized
-→ shared writer queue
-→ carrier.send(string)
-```
-
-要求：
-
-```text
-at most one carrier.send pending from Profile writer at a time
-accepted send order == writer dequeue order
-no adapter/profile-created retry
-no duplicate send
-no verbatim migration to a fresh carrier
-```
-
-此 single writer 的目的仅是稳定 shared carrier ordering 和 bounded terminal behavior；它 **不创建**：
-
-```text
-shared Input/Render revision
-cross-child transaction
-cross-child atomic commit
-cross-child ACK
-cross-child replay cursor
-```
-
-Child protocol自己的 barrier/coalescing规则仍由 child sender mechanics拥有，例如 Input State/Event/Reset barrier、Render Event/authoritative-state barrier。Profile writer不得打乱 child 已决定的 emission order。
-
----
-
-## 7. Child Semantic Outcome Boundary
-
-Profile负责 representation、namespace/direction、shared dispatch/writer 与 Data-local terminal mechanics。
-
-Child protocol继续拥有自己的 stateful semantics：
-
-```text
-User Input
-    Interest/Activation/current-gate applicability
-    State/Event/Reset semantics
-    stale input drop
-
-Render Update
-    Domain registry/baseline/revision continuity
-    Patch atomicity/one-shot identity
-    stale Event drop
-```
-
-因此 child handler对一个**已通过 Profile/static child validation**的 message有两类显式结果：
-
-```text
-accepted / handled
-    includes well-formed stale/inapplicable drop when child contract says drop
-
-protocol-fatal
-    stateful child semantic violation that frozen child contract says must retire Data
-```
-
-普通 business/presentation handler exception不是“远端协议无效”的证据；不得自动伪造成 protocol-invalid peer input。Role implementation应在 child protocol boundary内按其本地 policy处理。
-
----
-
-## 8. Ordering Boundary
-
-Data carrier每方向保持 application-unit order。
-
-同方向已 emitted Input/Render message具有物理顺序，但 Profile不赋予跨 child application meaning。
-
-```text
-User Input ordering/recovery
-    → User Input v1 owns
-
-Render ordering/recovery
-    → Render Update v1 owns
-```
-
-不得引入：
-
-```text
-shared Data revision
-Input↔Render ACK join
-cross-domain transaction
-resume-from-revision
-Control/Data barrier RPC
-```
-
-Renderer Control Connection 与 Data Connection依旧没有 global total order。
-
----
-
-## 9. Fresh Current Carrier Boundary
-
-每个 newly installed current Connection instance都是 fresh Profile publication boundary。
-
-旧 carrier retired 后：
-
-```text
-stop reader
-stop trusting inbound traffic
-stop accepting new outbound child sends
-pending not-yet-emitted old-carrier units become obsolete
-no replay / no migration onto fresh carrier
-```
-
-### User Input fresh baseline
-
-```text
-remote Frame Interest Registry = empty
-retained Input State = empty
-Event history = empty
-```
-
-Subsystem如仍有 Desired Interest，重新发布 current full Registry；重新 Effective 的 `.state` 建 fresh baseline；`.event` future-only。
-
-### Render fresh baseline
-
-```text
-first Render message = current render.domains
-→ fresh render.snapshot for each current Domain
-→ ordinary Patch/Event
-```
-
-same-generation reconnect不得继承 old carrier publication cursor/revision base作为 fresh authority。
-
-### Independence
-
-```text
-fresh Input publication != fresh Frame lifetime
-fresh Render publication != business Domain recreation
-same-generation reconnect != Runtime restart
-fresh Data generation != automatic Activation replacement
-```
-
----
-
-## 10. Terminal / Failure Boundary
-
-Profile application mechanics一旦发生以下任一事实，当前 Profile peer MUST进入 terminal，停止继续处理该 carrier：
-
-```text
-carrier closed/lost
-common preflight/JSON/profile namespace violation
-child static schema/representation/limit invalid
-child explicit stateful protocol-fatal result
-writer send terminal/failure
-local profile mechanics fatal
-```
-
-实现 MUST：
-
-```text
-terminal first-wins
-stop accepting ordinary child operations
-settle pending writer work exactly once
-best-effort close current carrier when locally detecting protocol/local fatal
-never parse/send further current traffic after terminal
-```
-
-Profile terminal只说明：
-
-```text
-this Data application binding is unusable
-```
-
-它不得直接提交：
-
-```text
-Runtime terminal
-Frame unwind
-InputTarget mutation
-DataAuthority replacement
-Renderer participant failure
-```
-
-这些属于 Main/Supervisor/Platform更高层 authority/policy。
-
-当前 Connection Core最终把当前 carrier视为 retired；如果 `S/G/P` authority仍 current，Platform可建立 same-generation fresh current carrier。
-
----
-
-## 11. Bounded Backpressure
-
-Profile writer queue与 child sender queues MUST bounded。
-
-Profile不规定一个跨 child 的固定 queue capacity，但必须保证：
-
-```text
-no unbounded accumulation
-terminal/authority teardown cannot be permanently blocked by backlog
-no Profile-created retry/replay
-child-prescribed priority/barrier remains enforceable
-```
-
-Input/Render child contract可以在 emitted 前按各自规则 coalesce/drop；一旦 `carrier.send()` accepted，该 unit属于当前 carrier history，不得 retract/reorder/migrate。
-
----
-
-## 12. Version Evolution
-
-以下任一改变都不能在 `loomrealm.renderer-data/1` 下静默发生：
-
-```text
-Data Connection version
-User Input version
-Render Update version
-application-unit encoding/mapping
-namespace ownership/direction
-one-reader dispatcher requirement
-one-writer serialization requirement
-fresh-carrier composition
-common terminal/fail-closed behavior
-```
-
-不同组合必须使用明确的新 Data Profile identity。
-
----
-
-## 13. Conformance
-
-Normative qualification由 [Renderer Data Profile v1 Conformance](./renderer-data-profile-conformance-v1.md) `fixtureSetRevision = 2` 固定。
-
-Revision 2 只更新 current conformance evidence，来自 User Input v1 revision 2 的组合义务；它不改变 `loomrealm.renderer-data/1` identity、Data Connection version、User Input wire version或 Render Update version。
-
-至少证明：
-
-```text
-profile-exact-identity-and-version-binding
-one-json-text-unit
-common-1mib-depth64-preflight
-single-reader-dispatcher
-single-serialized-writer
-exact-role-direction
-input-render-type-routing
-unknown-type-fail-closed
-child-protocol-fatal-retires-profile-peer
-fresh-carrier-child-baselines
-old-unsent-not-migrated
-terminal-first-wins
-no-profile-retry-replay
-control-data-no-total-order
-hostra-pwa-same-data-profile-trace
-```
-
-Executable fixture materialization属于 M8 implementation qualification；current complete Profile conformance还必须满足 revision 2 child/composition obligations。不得改变本 Frozen observable contract。
-
----
-
-## 14. Final Invariants
-
-1. `loomrealm.renderer-data/1` = Connection1 + Input1 + Render1；
-2. Profile不新增 Data handshake/RPC/ACK/revision；
-3. `dataProfile` 是 complete application stack identity，不是 transport/credential；
-4. Profile change必须 fresh Data generation；
-5. one carrier unit = one UTF-8 JSON text string；
-6. common preflight = 1 MiB + depth 64 + frozen Wire parse/representation；
-7. exactly one connection-wide reader/dispatcher；
-8. exactly one connection-wide serialized writer；
-9. direction fixed：Subsystem 发 Interest+Render，Renderer 发 ordinary Input；
-10. User Input 与 Render保持独立 authority/state/recovery；
-11. fresh current carrier重建两个 child publication baseline，不 replay/migrate旧 carrier traffic；
-12. Data/Profile terminal不等于 Runtime/Frame failure；
-13. Platform Broker拥有 physical candidate/paired installation，Profile mechanics只消费 already-current carrier；
-14. incompatible observable change需要新 Profile/child protocol version。
+**Final invariants：** `/1` 是唯一目标完整 Profile；四个 child，固定 unit/preflight、one reader/writer、role-exact direction、child独立 authority与fresh baseline、Data-local terminal、Viewport readonly/bounded、Main不保存 size；绝不引入 `/2`、Input bypass或 map vocabulary。
