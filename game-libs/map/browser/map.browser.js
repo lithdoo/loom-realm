@@ -274,6 +274,19 @@
       this._cameraOnlyCommits = 0;
     }
 
+    _hostRule() {
+      const sheet = this._style.sheet;
+      if (!sheet) return undefined;
+      return [...sheet.cssRules].find((rule) => rule.selectorText === ":host");
+    }
+
+    _applyViewportBox(width, height) {
+      const rule = this._hostRule();
+      if (!rule) return;
+      rule.style.width = `${width}px`;
+      rule.style.height = `${height}px`;
+    }
+
     _spriteRule() {
       const sheet = this._style.sheet;
       if (!sheet) return undefined;
@@ -494,15 +507,38 @@
     _commit(prepared, sequence, rasterTiles = true) {
       if (sequence !== this._sequence || !this.isConnected) return;
       const fingerprint = prepared.sprite ? motionFingerprint(prepared.view, prepared.sprite) : JSON.stringify([prepared.view.motionId, prepared.view.cameraMotion]);
+      const now = performance.now();
       if (this._activeMotion && prepared.view.motionId === this._activeMotion.id && fingerprint !== this._activeMotion.fingerprint) {
-        throw new TypeError("Invalid map motion identity");
-      }
-      if (!this._activeMotion && prepared.view.motionId !== null) {
-        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt };
+        const previous = this._accepted;
+        const sameVisual = previous
+          && previous.view.visualEpoch === prepared.view.visualEpoch
+          && previous.view.viewportWidth === prepared.view.viewportWidth
+          && previous.view.viewportHeight === prepared.view.viewportHeight;
+        if (sameVisual) throw new TypeError("Invalid map motion identity");
+        const remaining = Math.max(0, this._activeMotion.startedAt + (this._activeMotion.durationMs ?? 250) - now);
+        const visibleCamera = this._lastPaintedCamera;
+        const visibleSprite = this._desiredSprite?.sprite?._lastPaintedScreen;
+        if (prepared.view.cameraMotion && visibleCamera) {
+          prepared.view = {
+            ...prepared.view,
+            cameraMotion: { ...prepared.view.cameraMotion, fromCameraX: visibleCamera.x, fromCameraY: visibleCamera.y },
+          };
+        }
+        if (prepared.sprite?.motion && visibleSprite) {
+          prepared.sprite = {
+            ...prepared.sprite,
+            motion: { ...prepared.sprite.motion, fromScreenX: visibleSprite.x, fromScreenY: visibleSprite.y },
+          };
+        }
+        this._activeMotion = remaining === 0
+          ? { id: prepared.view.motionId, fingerprint, startedAt: now - 250, durationMs: 250 }
+          : { id: prepared.view.motionId, fingerprint, startedAt: now, durationMs: remaining };
+      } else if (!this._activeMotion && prepared.view.motionId !== null) {
+        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt, durationMs: 250 };
       } else if (prepared.view.motionId === null) {
         this._activeMotion = null;
       } else if (this._activeMotion && prepared.view.motionId !== this._activeMotion.id) {
-        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt };
+        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt, durationMs: 250 };
       }
       this._accepted = prepared;
       this._state = "VISIBLE";
@@ -517,10 +553,11 @@
       const sprite = prepared.sprite;
       const motion = view.cameraMotion;
       const active = this._activeMotion;
-      const duration = motion?.durationMs ?? sprite?.motion?.durationMs ?? 250;
+      const duration = active?.durationMs ?? motion?.durationMs ?? sprite?.motion?.durationMs ?? 250;
       const progress = active && (motion || sprite?.motion) ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
       const cameraX = motion ? Math.round(lerp(motion.fromCameraX, view.cameraX, progress)) : view.cameraX;
       const cameraY = motion ? Math.round(lerp(motion.fromCameraY, view.cameraY, progress)) : view.cameraY;
+      this._applyViewportBox(view.viewportWidth, view.viewportHeight);
       const groups = [...prepared.buckets.entries()].sort(([left], [right]) => left - right);
       let hasAnimatedAutotile = false;
       const frames = new Map();

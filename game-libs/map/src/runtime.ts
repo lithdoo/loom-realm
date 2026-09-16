@@ -1,18 +1,20 @@
-import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomainState, type SubsystemDefinitionFactory } from "@loomrealm/subsystem";
+import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import {
   assertProjectable,
   canMove,
   chunkCoordsForBounds,
+  clampViewport,
   computeCamera,
-  DEFAULT_VIEWPORT,
   directionForCode,
   projectChunkWindow,
+  RESIZE_SETTLE_MS,
   unionTileBounds,
   validateMapRecord,
   validateMapTransferRecord,
   validateTilesetRecord,
   VIEW_DATA_GUARD,
   viewportTileBounds,
+  viewportsEqual,
   type ContactTransfer,
   type Direction,
   type EdgeTransfer,
@@ -21,6 +23,7 @@ import {
   type ProjectionWindow,
   type StepTransfer,
   type TilesetRecord,
+  type ViewportSize,
 } from "./semantics.js";
 
 interface InitialInput { mapId: number; x: number; y: number; characterName: string }
@@ -56,12 +59,13 @@ interface RenderFacts {
   readonly playerRef: ResourceRef;
   readonly sceneEpoch: number;
   readonly visualEpoch: number;
+  readonly viewport: ViewportSize;
 }
 
+type RenderDataSet = NonNullable<NonNullable<NonNullable<RenderDomainUpdate["nodes"]>[number]["data"]>["set"]>;
 const WALK_STEP_MS = 250;
 const VIEWPORT_KEY = "viewport";
 const PLAYER_KEY = "player";
-const VIEWPORT = DEFAULT_VIEWPORT;
 const stepDelta: Record<Direction, { readonly dx: number; readonly dy: number }> = {
   2: { dx: 0, dy: 1 },
   4: { dx: -1, dy: 0 },
@@ -109,13 +113,14 @@ function viewportPayload(
   sceneEpoch: number,
   visualEpoch: number,
   motionId: number | null,
+  viewport: ViewportSize,
 ): RenderDomainState["roots"][number]["data"] {
   return {
     sceneEpoch,
     visualEpoch,
     motionId,
-    viewportWidth: VIEWPORT.width,
-    viewportHeight: VIEWPORT.height,
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
     mapId: loaded.mapId,
     mapWidth: loaded.map.width,
     mapHeight: loaded.map.height,
@@ -135,9 +140,9 @@ function playerPayload(
   cameraY: number,
   motionId: number | null,
 ): RenderDomainState["roots"][number]["children"][number]["data"] {
-  const { x, y, direction, activeMove, playerRef, sceneEpoch, visualEpoch } = facts;
+  const { x, y, direction, activeMove, playerRef, sceneEpoch, visualEpoch, viewport } = facts;
   if (activeMove) {
-    const fromCamera = computeCamera(facts.loaded.map, activeMove.fromX, activeMove.fromY);
+    const fromCamera = computeCamera(facts.loaded.map, activeMove.fromX, activeMove.fromY, viewport);
     return {
       sceneEpoch,
       visualEpoch,
@@ -195,7 +200,8 @@ function selectProjectionWindow(
   sceneEpoch: number,
   visualEpoch: number,
   motionId: number | null,
-  previous?: TileProjectionWindow,
+  previous: TileProjectionWindow | undefined,
+  viewport: ViewportSize,
 ): TileProjectionWindow {
   const projected = projectChunkWindow(
     loaded.map,
@@ -204,27 +210,27 @@ function selectProjectionWindow(
     previous?.source === loaded ? previous : undefined,
   );
   const candidate: TileProjectionWindow = Object.freeze({ source: loaded, ...projected });
-  if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId)) >= VIEW_DATA_GUARD) {
+  if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, viewport)) >= VIEW_DATA_GUARD) {
     throw new RangeError("Map projection budget exceeded");
   }
   return candidate;
 }
 
 function renderState(facts: RenderFacts): RenderDomainState {
-  const { loaded, window, activeMove, sceneEpoch, visualEpoch } = facts;
+  const { loaded, window, activeMove, sceneEpoch, visualEpoch, viewport } = facts;
   const motionId = activeMove?.id ?? null;
-  const camera = computeCamera(loaded.map, facts.x, facts.y);
+  const camera = computeCamera(loaded.map, facts.x, facts.y, viewport);
   const cameraMotion = activeMove === null ? null : Object.freeze({
     id: activeMove.id,
     durationMs: WALK_STEP_MS,
-    fromCameraX: computeCamera(loaded.map, activeMove.fromX, activeMove.fromY).cameraX,
-    fromCameraY: computeCamera(loaded.map, activeMove.fromX, activeMove.fromY).cameraY,
+    fromCameraX: computeCamera(loaded.map, activeMove.fromX, activeMove.fromY, viewport).cameraX,
+    fromCameraY: computeCamera(loaded.map, activeMove.fromX, activeMove.fromY, viewport).cameraY,
   });
   return {
     zIndex: 0,
     roots: [{
       key: VIEWPORT_KEY, tag: "lr-map-view", attrs: {},
-      data: viewportPayload(loaded, window, camera.cameraX, camera.cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId),
+      data: viewportPayload(loaded, window, camera.cameraX, camera.cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, viewport),
       children: [{
         key: PLAYER_KEY, tag: "lr-map-sprite", attrs: {},
         data: playerPayload(facts, camera.cameraX, camera.cameraY, motionId),
@@ -237,8 +243,10 @@ function renderState(facts: RenderFacts): RenderDomainState {
 export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope) => ({
   async frame(frame: Frame) {
     let listener;
-    let domain;
+    let domain: RenderDomain | undefined;
     let stepTimer: ReturnType<typeof setTimeout> | null = null;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let unsubscribeViewport: (() => void) | null = null;
     let activeMove: ActiveMove | null = null;
     let transitioning = false;
     let cleanedUp = false;
@@ -282,6 +290,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       let playerRef!: ResourceRef;
       let sceneEpoch = 1;
       let visualEpoch = 1;
+      let acceptedViewport: ViewportSize = clampViewport(scope.viewport.current);
+      let pendingViewport: ViewportSize | null = null;
+      let settledResize = false;
 
       const facts = (overrides: Partial<RenderFacts> = {}): RenderFacts => ({
         loaded: overrides.loaded ?? current,
@@ -293,20 +304,127 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         playerRef: overrides.playerRef ?? playerRef,
         sceneEpoch: overrides.sceneEpoch ?? sceneEpoch,
         visualEpoch: overrides.visualEpoch ?? visualEpoch,
+        viewport: overrides.viewport ?? acceptedViewport,
       });
 
-      const standingWindow = (loaded: LoadedMap, tileX: number, tileY: number, scene: number, visual: number) => {
-        const camera = computeCamera(loaded.map, tileX, tileY);
+      const standingWindow = (loaded: LoadedMap, tileX: number, tileY: number, scene: number, visual: number, viewport: ViewportSize = acceptedViewport) => {
+        const camera = computeCamera(loaded.map, tileX, tileY, viewport);
         return selectProjectionWindow(
           loaded,
-          viewportTileBounds(loaded.map, camera.cameraX, camera.cameraY),
+          viewportTileBounds(loaded.map, camera.cameraX, camera.cameraY, viewport),
           camera.cameraX,
           camera.cameraY,
           null,
           scene,
           visual,
           null,
+          undefined,
+          viewport,
         );
+      };
+
+      const clearResizeTimer = () => {
+        if (resizeTimer !== null) {
+          clearTimeout(resizeTimer);
+          resizeTimer = null;
+        }
+      };
+
+      const commitViewportResize = () => {
+        if (frame.signal.aborted || transitioning || !domain || pendingViewport === null) return;
+        const nextViewport = pendingViewport;
+        pendingViewport = null;
+        clearResizeTimer();
+        if (viewportsEqual(nextViewport, acceptedViewport)) return;
+        const nextVisual = visualEpoch + 1;
+        const camera = computeCamera(current.map, x, y, nextViewport);
+        const required = viewportTileBounds(current.map, camera.cameraX, camera.cameraY, nextViewport);
+        const nextWindow = selectProjectionWindow(
+          current,
+          required,
+          camera.cameraX,
+          camera.cameraY,
+          null,
+          sceneEpoch,
+          nextVisual,
+          null,
+          window,
+          nextViewport,
+        );
+        const screenX = x * 32 - camera.cameraX;
+        const screenY = y * 32 - camera.cameraY;
+        try {
+          domain.update({
+            nodes: [
+              {
+                key: VIEWPORT_KEY,
+                data: {
+                  set: {
+                    visualEpoch: nextVisual,
+                    viewportWidth: nextViewport.width,
+                    viewportHeight: nextViewport.height,
+                    cameraX: camera.cameraX,
+                    cameraY: camera.cameraY,
+                    cameraMotion: null,
+                    motionId: null,
+                    chunks: nextWindow.chunks,
+                    tileVisuals: nextWindow.tileVisuals,
+                  },
+                },
+              },
+              {
+                key: PLAYER_KEY,
+                data: {
+                  set: {
+                    visualEpoch: nextVisual,
+                    screenX,
+                    screenY,
+                    motion: null,
+                    motionId: null,
+                    pattern: 0,
+                  },
+                },
+              },
+            ],
+          });
+        } catch {
+          pendingViewport = nextViewport;
+          return;
+        }
+        acceptedViewport = nextViewport;
+        window = nextWindow;
+        visualEpoch = nextVisual;
+        settledResize = true;
+        if (activeMove !== null) {
+          if (stepTimer !== null) {
+            clearTimeout(stepTimer);
+            stepTimer = null;
+          }
+          activeMove = null;
+          nextStartPattern = 1;
+        }
+      };
+
+      const noteViewport = (value: { readonly width: number; readonly height: number } | null) => {
+        if (frame.signal.aborted || transitioning || !domain) return;
+        if (value === null) return;
+        const next = clampViewport(value);
+        if (viewportsEqual(next, acceptedViewport)) {
+          if (pendingViewport !== null && viewportsEqual(next, pendingViewport)) pendingViewport = null;
+          return;
+        }
+        pendingViewport = next;
+        if (activeMove !== null) return;
+        if (!settledResize) {
+          commitViewportResize();
+          return;
+        }
+        clearResizeTimer();
+        resizeTimer = setTimeout(() => {
+          resizeTimer = null;
+          if (activeMove !== null) return;
+          commitViewportResize();
+        }, RESIZE_SETTLE_MS);
       };
 
       const failTransfer = (error: unknown) => {
@@ -385,13 +503,13 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       const publishMovementUpdate = (nextX: number, nextY: number, nextDirection: Direction, nextMove: ActiveMove | null) => {
         const fromX = nextMove?.fromX ?? x;
         const fromY = nextMove?.fromY ?? y;
-        const sourceCamera = computeCamera(current.map, fromX, fromY);
-        const targetCamera = computeCamera(current.map, nextX, nextY);
+        const sourceCamera = computeCamera(current.map, fromX, fromY, acceptedViewport);
+        const targetCamera = computeCamera(current.map, nextX, nextY, acceptedViewport);
         const required = nextMove === null
-          ? viewportTileBounds(current.map, targetCamera.cameraX, targetCamera.cameraY)
+          ? viewportTileBounds(current.map, targetCamera.cameraX, targetCamera.cameraY, acceptedViewport)
           : unionTileBounds(
-            viewportTileBounds(current.map, sourceCamera.cameraX, sourceCamera.cameraY),
-            viewportTileBounds(current.map, targetCamera.cameraX, targetCamera.cameraY),
+            viewportTileBounds(current.map, sourceCamera.cameraX, sourceCamera.cameraY, acceptedViewport),
+            viewportTileBounds(current.map, targetCamera.cameraX, targetCamera.cameraY, acceptedViewport),
           );
         const motionId = nextMove?.id ?? null;
         const cameraMotion = nextMove === null ? null : Object.freeze({
@@ -415,6 +533,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             nextVisual,
             motionId,
             window,
+            acceptedViewport,
           );
           refresh = true;
         }
@@ -452,8 +571,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         }
         domain!.update({
           nodes: [
-            { key: VIEWPORT_KEY, data: { set: viewportSet } },
-            { key: PLAYER_KEY, data: { set: playerSet } },
+            { key: VIEWPORT_KEY, data: { set: viewportSet as RenderDataSet } },
+            { key: PLAYER_KEY, data: { set: playerSet as RenderDataSet } },
           ],
         });
         window = nextWindow;
@@ -507,6 +626,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       const finishStep = (moveId: number) => {
         if (frame.signal.aborted || activeMove?.id !== moveId) return;
         stepTimer = null;
+        activeMove = null;
+        if (pendingViewport !== null) commitViewportResize();
         const step = current.transfers.steps.find((rule) => rule.x === x && rule.y === y);
         if (step) {
           startTransfer(step, direction);
@@ -525,7 +646,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       if (!inBounds(loaded.map, input.x, input.y)) throw new TypeError("Map spawn lies outside the loaded Map");
       const playerResource = await scope.content.resource("resource.Graphics", `Characters/${input.characterName}`, { signal: frame.signal });
       playerRef = ref("resource.Graphics", `Characters/${input.characterName}`, playerResource.contentVersion);
-      const spawnWindow = standingWindow(loaded, input.x, input.y, 1, 1);
+      const spawnWindow = standingWindow(loaded, input.x, input.y, 1, 1, acceptedViewport);
       const initial = renderState({
         loaded,
         window: spawnWindow,
@@ -536,6 +657,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         playerRef,
         sceneEpoch: 1,
         visualEpoch: 1,
+        viewport: acceptedViewport,
       });
       domain = scope.createRenderDomain(initial);
       current = loaded;
@@ -550,6 +672,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       heldDirections = [];
       transitioning = false;
       activeMove = null;
+      unsubscribeViewport = scope.viewport.subscribe((value) => noteViewport(value));
       listener = scope.createInputListener({ frame, channels: ["keyboard.event", "keyboard.state"] });
       listener.on("keyboard.event", (event) => {
         const movement = directionForCode(event.code);
@@ -582,6 +705,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       ]);
       if (!cleanedUp) {
         cleanedUp = true;
+        unsubscribeViewport?.();
+        unsubscribeViewport = null;
+        clearResizeTimer();
         listener.close();
         if (stepTimer !== null) {
           clearTimeout(stepTimer);
@@ -595,6 +721,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
     } catch (error) {
       if (!cleanedUp) {
         cleanedUp = true;
+        unsubscribeViewport?.();
+        unsubscribeViewport = null;
+        if (resizeTimer !== null) {
+          clearTimeout(resizeTimer);
+          resizeTimer = null;
+        }
         listener?.close();
         if (stepTimer !== null) {
           clearTimeout(stepTimer);

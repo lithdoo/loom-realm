@@ -90,8 +90,23 @@ export const CHUNK_CELLS = CHUNK_SIZE * CHUNK_SIZE * 3;
 export const CHUNK_OVERSCAN = 1;
 export const VIEW_DATA_GUARD = 196_608;
 export const DEFAULT_VIEWPORT = Object.freeze({ width: 640, height: 480 });
+export const MIN_VIEWPORT = Object.freeze({ width: 320, height: 240 });
+export const MAX_VIEWPORT = Object.freeze({ width: 1920, height: 1080 });
+export const RESIZE_SETTLE_MS = 100;
 
 export type ViewportSize = Readonly<{ width: number; height: number }>;
+
+export function clampViewport(size: ViewportSize | null | undefined): ViewportSize {
+  if (size == null) return DEFAULT_VIEWPORT;
+  const width = Math.min(MAX_VIEWPORT.width, Math.max(MIN_VIEWPORT.width, Math.floor(Number(size.width))));
+  const height = Math.min(MAX_VIEWPORT.height, Math.max(MIN_VIEWPORT.height, Math.floor(Number(size.height))));
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
+  return Object.freeze({ width, height });
+}
+
+export function viewportsEqual(left: ViewportSize, right: ViewportSize): boolean {
+  return left.width === right.width && left.height === right.height;
+}
 export type VisualRegular = readonly [tileId: number, depthBias: number, kind: 0, sourceIndex: number];
 export type VisualAutotile = readonly [
   tileId: number, depthBias: number, kind: 1, slot: number,

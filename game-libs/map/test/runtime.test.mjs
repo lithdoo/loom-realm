@@ -115,11 +115,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     let nextId = 1;
     let lastCallback = null;
     globalThis.setTimeout = (callback, delay) => {
-      assert.equal(delay, 250);
+      if (delay !== 250 && delay !== 100) return realSetTimeout(callback, delay);
       const id = nextId;
       nextId += 1;
       lastCallback = callback;
-      queued.push({ id, callback });
+      queued.push({ id, callback, delay });
       return id;
     };
     globalThis.clearTimeout = (id) => {
@@ -136,6 +136,12 @@ describe("map runtime walking", { concurrency: false }, () => {
       fireNextTimer() {
         const item = queued.shift();
         assert.ok(item, "expected a pending 250ms step timer");
+        item.callback();
+      },
+      fireTimer(delay) {
+        const index = queued.findIndex((item) => item.delay === delay);
+        assert.ok(index >= 0, `expected a pending ${delay}ms timer`);
+        const [item] = queued.splice(index, 1);
         item.callback();
       },
     };
@@ -163,8 +169,25 @@ describe("map runtime walking", { concurrency: false }, () => {
     let listenerClosed = false;
     let domainClosed = false;
     const timers = installTimers(t);
+    const viewport = options.viewport ?? (() => {
+      let current = options.viewportCurrent ?? null;
+      const listeners = new Set();
+      return {
+        get current() { return current; },
+        subscribe(listener) {
+          listeners.add(listener);
+          listener(current);
+          return () => listeners.delete(listener);
+        },
+        publish(value) {
+          current = value;
+          for (const listener of [...listeners]) listener(value);
+        },
+      };
+    })();
     const definition = mapDefinition({
       signal: new AbortController().signal,
+      viewport,
       content: {
         async record(namespace, key) {
           const id = `${namespace}/${key}`;
@@ -227,7 +250,9 @@ describe("map runtime walking", { concurrency: false }, () => {
       latestState: () => states.at(-1),
       abort() { controller.abort(); },
       pending,
+      viewport,
       fireNextTimer: timers.fireNextTimer,
+      fireTimer: timers.fireTimer,
       lastCallback: timers.lastCallback,
       queued: timers.queued,
       listenerClosed: () => listenerClosed,
@@ -543,6 +568,64 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.match(outcome.error.message, /Map projection budget exceeded/);
     assert.equal(frame.states.length, 0);
   });
+
+  test("null Core viewport keeps Frozen 640 and same-size samples do not update", async (t) => {
+    const frame = await startFrame(t);
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [640, 480]);
+    const updates = frame.updates.length;
+    frame.viewport.publish(null);
+    frame.viewport.publish({ width: 640, height: 480 });
+    assert.equal(frame.updates.length, updates);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("first legal different viewport commits immediately and later bursts settle at 100ms", async (t) => {
+    const frame = await startFrame(t);
+    const spawnVisual = view(frame.latestState()).visualEpoch;
+    frame.viewport.publish({ width: 1280, height: 720 });
+    const first = view(frame.latestState());
+    assert.equal(first.visualEpoch, spawnVisual + 1);
+    assert.deepEqual([first.viewportWidth, first.viewportHeight], [1280, 720]);
+    assert.equal(player(frame.latestState()).motionId, null);
+    frame.viewport.publish({ width: 1920, height: 1080 });
+    assert.equal(view(frame.latestState()).viewportWidth, 1280);
+    frame.fireTimer(100);
+    const settled = view(frame.latestState());
+    assert.equal(settled.viewportWidth, 1920);
+    assert.equal(settled.viewportHeight, 1080);
+    assert.equal(settled.visualEpoch, first.visualEpoch + 1);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("viewport samples clamp to 320x240 and 1920x1080", async (t) => {
+    const frame = await startFrame(t);
+    frame.viewport.publish({ width: 10, height: 10 });
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [320, 240]);
+    frame.viewport.publish({ width: 4000, height: 4000 });
+    frame.fireTimer(100);
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [1920, 1080]);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("active step stores latest pending viewport until the completion boundary", async (t) => {
+    const frame = await startFrame(t);
+    await frame.emitEvent(down("ArrowRight"));
+    const walking = view(frame.latestState());
+    assert.equal(walking.motionId, 1);
+    frame.viewport.publish({ width: 1280, height: 720 });
+    assert.equal(view(frame.latestState()).viewportWidth, 640);
+    await frame.emitEvent(up("ArrowRight"));
+    frame.fireNextTimer();
+    const after = view(frame.latestState());
+    assert.equal(after.viewportWidth, 1280);
+    assert.equal(after.viewportHeight, 720);
+    assert.equal(player(frame.latestState()).motionId, null);
+    frame.abort();
+    await frame.pending;
+  });
 });
 
 describe("map runtime transfer", { concurrency: false }, () => {
@@ -553,11 +636,11 @@ describe("map runtime transfer", { concurrency: false }, () => {
     let nextId = 1;
     let lastCallback = null;
     globalThis.setTimeout = (callback, delay) => {
-      assert.equal(delay, 250);
+      if (delay !== 250 && delay !== 100) return realSetTimeout(callback, delay);
       const id = nextId;
       nextId += 1;
       lastCallback = callback;
-      queued.push({ id, callback });
+      queued.push({ id, callback, delay });
       return id;
     };
     globalThis.clearTimeout = (id) => {
@@ -574,6 +657,12 @@ describe("map runtime transfer", { concurrency: false }, () => {
       fireNextTimer() {
         const item = queued.shift();
         assert.ok(item, "expected a pending 250ms step timer");
+        item.callback();
+      },
+      fireTimer(delay) {
+        const index = queued.findIndex((item) => item.delay === delay);
+        assert.ok(index >= 0, `expected a pending ${delay}ms timer`);
+        const [item] = queued.splice(index, 1);
         item.callback();
       },
     };
@@ -601,8 +690,25 @@ describe("map runtime transfer", { concurrency: false }, () => {
     let listenerClosed = false;
     let domainClosed = false;
     const timers = installTimers(t);
+    const viewport = options.viewport ?? (() => {
+      let current = options.viewportCurrent ?? null;
+      const listeners = new Set();
+      return {
+        get current() { return current; },
+        subscribe(listener) {
+          listeners.add(listener);
+          listener(current);
+          return () => listeners.delete(listener);
+        },
+        publish(value) {
+          current = value;
+          for (const listener of [...listeners]) listener(value);
+        },
+      };
+    })();
     const definition = mapDefinition({
       signal: new AbortController().signal,
+      viewport,
       content: {
         async record(namespace, key) {
           const id = `${namespace}/${key}`;
@@ -665,7 +771,9 @@ describe("map runtime transfer", { concurrency: false }, () => {
       latestState: () => states.at(-1),
       abort() { controller.abort(); },
       pending,
+      viewport,
       fireNextTimer: timers.fireNextTimer,
+      fireTimer: timers.fireTimer,
       lastCallback: timers.lastCallback,
       queued: timers.queued,
       listenerClosed: () => listenerClosed,

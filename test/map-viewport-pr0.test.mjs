@@ -909,3 +909,94 @@ test("PR1 Browser 640 raster/camera-only on dense chunk payload", { timeout: 60_
   assert.equal(timing.cameraOnly.after.resizes, timing.cameraOnly.before.resizes);
   assert.equal(timing.cameraOnly.after.cameraOnly, timing.cameraOnly.before.cameraOnly + 1);
 });
+
+test("PR2 Browser 720 and 1080 dense paint, host box, camera-only, and backing", { timeout: 120_000 }, async () => {
+  assert.equal(existsSync(mapBrowserPath), true, "map.browser.js dist missing; run npm run build:m14");
+  const loaded = denseMap();
+  const results = [];
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }]) {
+    const projection = projectMapView({ ...loaded, viewport, playerX: 64, playerY: 48 });
+    const viewPayload = projection.data;
+    assert.ok(utf8Bytes(viewPayload) < 196608, JSON.stringify({ viewport, bytes: utf8Bytes(viewPayload) }));
+    const spritePayload = playerSprite(projection, 64, 48);
+    const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 });
+    await page.goto(origin);
+    await page.addScriptTag({ url: `${origin}/map.browser.js` });
+    const timing = await page.evaluate(async ({ viewPayload: firstView, spritePayload: firstSprite, box }) => {
+      const pngBytes = async (width, height, r, g, b) => {
+        const canvas = new OffscreenCanvas(width, height);
+        const context = canvas.getContext("2d");
+        context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        context.fillRect(0, 0, width, height);
+        const blob = await canvas.convertToBlob({ type: "image/png" });
+        return new Uint8Array(await blob.arrayBuffer());
+      };
+      const tilesetBytes = await pngBytes(256, 32, 0, 0, 255);
+      const autotileBytes = await pngBytes(96, 128, 0, 128, 0);
+      const characterBytes = await pngBytes(128, 128, 255, 0, 0);
+      const resources = {
+        async resource(namespace, key) {
+          if (key.startsWith("Tilesets/")) return { bytes: tilesetBytes, mime: "image/png" };
+          if (key.startsWith("Autotiles/")) return { bytes: autotileBytes, mime: "image/png" };
+          if (key.startsWith("Characters/")) return { bytes: characterBytes, mime: "image/png" };
+          throw new Error(`missing ${namespace}/${key}`);
+        },
+      };
+      const view = document.createElement("lr-map-view");
+      const sprite = document.createElement("lr-map-sprite");
+      view.append(sprite);
+      document.body.replaceChildren(view);
+      view.receiveRenderContext({ resources });
+      sprite.receiveRenderContext({ resources });
+      const receiveStart = performance.now();
+      view.receiveRenderData(firstView);
+      sprite.receiveRenderData(firstSprite);
+      const deadline = performance.now() + 10_000;
+      while (performance.now() < deadline) {
+        const painted = [...(view.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].some((canvas) => !canvas.hidden);
+        if (painted && view._tileDrawCount > 0) {
+          const paintAt = performance.now();
+          const canvases = [...view.shadowRoot.querySelectorAll("canvas.tile-layer")];
+          let backing = 0;
+          for (const canvas of canvases) backing += canvas.width * canvas.height * 4;
+          backing += 32 * 32 * 4;
+          const visible = canvases.find((canvas) => !canvas.hidden);
+          const sample = visible.getContext("2d").getImageData(1, 1, 1, 1).data;
+          const boxRect = view.getBoundingClientRect();
+          const before = { draws: view._tileDrawCount, clears: view._tileClearCount, resizes: view._tileResizeCount, cameraOnly: view._cameraOnlyCommits };
+          const accepted = view._latestData;
+          view.receiveRenderData({ ...accepted, cameraX: accepted.cameraX + 32 });
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return {
+            receiveToPaintMs: paintAt - receiveStart,
+            host: [getComputedStyle(view).width, getComputedStyle(view).height],
+            hostBox: [boxRect.width, boxRect.height],
+            pixel: [sample[0], sample[1], sample[2], sample[3]],
+            backingBytes: backing,
+            canvasCount: canvases.length,
+            cameraOnly: {
+              before,
+              after: { draws: view._tileDrawCount, clears: view._tileClearCount, resizes: view._tileResizeCount, cameraOnly: view._cameraOnlyCommits },
+            },
+            expected: [`${box.width}px`, `${box.height}px`],
+          };
+        }
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      throw new Error(`PR2 browser did not paint dense ${box.width}x${box.height}`);
+    }, { viewPayload, spritePayload, box: viewport });
+    await page.close();
+    assert.deepEqual(timing.host, timing.expected);
+    assert.deepEqual(timing.hostBox, [viewport.width, viewport.height]);
+    assert.equal(timing.pixel[3], 255);
+    assert.ok(timing.pixel[0] + timing.pixel[1] + timing.pixel[2] > 0, JSON.stringify(timing.pixel));
+    assert.equal(timing.cameraOnly.after.draws, timing.cameraOnly.before.draws);
+    assert.equal(timing.cameraOnly.after.clears, timing.cameraOnly.before.clears);
+    assert.equal(timing.cameraOnly.after.resizes, timing.cameraOnly.before.resizes);
+    assert.equal(timing.cameraOnly.after.cameraOnly, timing.cameraOnly.before.cameraOnly + 1);
+    assert.ok(timing.backingBytes <= 128 * 1024 * 1024, JSON.stringify({ viewport, backing: timing.backingBytes }));
+    assert.equal(typeof timing.receiveToPaintMs, "number");
+    results.push({ viewport, ...timing, viewBytes: utf8Bytes(viewPayload) });
+  }
+  report.pr2Raster = results;
+});

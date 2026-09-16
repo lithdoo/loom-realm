@@ -1215,6 +1215,29 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
   assert.ok(info.afterRefresh.resizes > info.afterCamera.resizes, JSON.stringify(info));
 });
 
+test("viewportWidth/Height set host CSS box without host style attributes", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = viewData({ depth: 0 });
+  await page.evaluate((payload) => window.__view.receiveRenderData(payload), first);
+  await waitUntil(page, () => document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])"), "first raster");
+  const before = await page.evaluate(() => ({
+    size: [getComputedStyle(document.querySelector("lr-map-view")).width, getComputedStyle(document.querySelector("lr-map-view")).height],
+    hostWidth: document.querySelector("lr-map-view").style.width,
+  }));
+  assert.deepEqual(before.size, ["640px", "480px"]);
+  assert.equal(before.hostWidth, "");
+  const next = { ...first, visualEpoch: 2, viewportWidth: 1280, viewportHeight: 720 };
+  await page.evaluate((payload) => window.__view.receiveRenderData(payload), next);
+  await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-view")).width === "1280px", "720p host box");
+  const after = await page.evaluate(() => ({
+    size: [getComputedStyle(document.querySelector("lr-map-view")).width, getComputedStyle(document.querySelector("lr-map-view")).height],
+    hostWidth: document.querySelector("lr-map-view").style.width,
+  }));
+  assert.deepEqual(after.size, ["1280px", "720px"]);
+  assert.equal(after.hostWidth, "");
+});
+
 test("disconnect increments paint epoch so stale rAF cannot paint", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AUTOTILE_QUARTERS, assertProjectable, assertRenderableTileId, autotileCorners, boundsContain, canMove, computeCamera, expandTileBounds, mapTilePassable, projectTileBlit, projectTilesInBounds, projectVisibleTiles, tableAt, tileVisualDepth, unionTileBounds, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { AUTOTILE_QUARTERS, assertProjectable, assertRenderableTileId, autotileCorners, boundsContain, canMove, clampViewport, computeCamera, DEFAULT_VIEWPORT, expandTileBounds, mapTilePassable, MAX_VIEWPORT, MIN_VIEWPORT, projectTileBlit, projectTilesInBounds, projectVisibleTiles, tableAt, tileVisualDepth, unionTileBounds, validateMapRecord, validateMapTransferRecord, validateTable, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -20,6 +20,13 @@ test("tileVisualDepth matches the frozen RMXP vectors", () => {
   assert.equal(tileVisualDepth(0, 1), 64);
   assert.equal(tileVisualDepth(1, 1), 96);
   assert.equal(tileVisualDepth(0, 2), 96);
+});
+
+test("Map clamps Core viewport samples to 320x240 through 1920x1080", () => {
+  assert.deepEqual(clampViewport(null), DEFAULT_VIEWPORT);
+  assert.deepEqual(clampViewport({ width: 10, height: 10 }), MIN_VIEWPORT);
+  assert.deepEqual(clampViewport({ width: 4000, height: 4000 }), MAX_VIEWPORT);
+  assert.deepEqual(clampViewport({ width: 1280, height: 720 }), { width: 1280, height: 720 });
 });
 
 test("Table, camera and visible projection follow frozen ordering", () => {

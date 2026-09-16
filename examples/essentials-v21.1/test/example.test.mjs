@@ -26,9 +26,11 @@ test("checked-in presentation config resolves map artifacts only through package
   ]);
 });
 
-test("example is private and fixed to a 640 by 480 viewport", async () => {
+test("example page letterboxes and does not pin the map to 640 by 480", async () => {
   const packageJson = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
   assert.equal(packageJson.private, true); assert.equal(packageJson.type, "module");
   const css = await readFile(new URL("presentation.css", root), "utf8");
-  assert.match(css, /width:\s*640px/); assert.match(css, /height:\s*480px/);
+  assert.match(css, /place-items:\s*center/);
+  assert.match(css, /overflow:\s*hidden/);
+  assert.doesNotMatch(css, /lr-map-view\s*\{[^}]*width:\s*640px/);
 });
