@@ -7,6 +7,7 @@ import {
   prepareRendererHelloResultV1,
 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../dist/index.js";
+import { normalizeViewportSample } from "../dist/internal/viewport-publisher.js";
 
 const authority = {
   subsystemKey: "demo",
@@ -149,6 +150,83 @@ test("invalid-only samples never synthesize zero, default, or null viewport.stat
   await turn();
   assert.deepEqual(received, []);
   publisher.retire();
+});
+
+test("normalizeViewportSample floors finite fractions and rejects illegal samples", () => {
+  assert.deepEqual(normalizeViewportSample({ width: 640.9, height: 480.1 }), { width: 640, height: 480 });
+  assert.equal(normalizeViewportSample(null), null);
+  assert.equal(normalizeViewportSample("640x480"), null);
+  assert.equal(normalizeViewportSample({ height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: 640 }), null);
+  assert.equal(normalizeViewportSample({ width: "640", height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: Number.NaN, height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: Number.POSITIVE_INFINITY, height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: Number.NEGATIVE_INFINITY, height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: 0, height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: -1, height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: 0.9, height: 480 }), null);
+  assert.equal(normalizeViewportSample({ width: Number.MAX_SAFE_INTEGER + 1, height: 480 }), null);
+});
+
+test("fresh Renderer does not republish the previous Renderer observation on a silent source", async () => {
+  const received = [];
+  let starts = 0;
+  let emitB;
+  const source = {
+    start(next) {
+      starts += 1;
+      if (starts === 1) {
+        next({ width: 640, height: 480 });
+        return () => {};
+      }
+      emitB = next;
+      return () => {};
+    },
+  };
+  const holder = createRendererControlHolder({
+    async acquire(_key, generation) {
+      const pair = createMemoryCarrierPair();
+      const local = [];
+      createSubsystemDataPeer({
+        binding: {
+          carrier: pair.left,
+          subsystemKey: "demo",
+          generation,
+          dataProfile: "loomrealm.renderer-data/1",
+        },
+        handlers: {
+          onInputState: () => ({ kind: "accepted" }),
+          onInputEvent: () => ({ kind: "accepted" }),
+          onInputReset: () => ({ kind: "accepted" }),
+          onViewportState(message) {
+            local.push(message);
+            received.push({ generation, message });
+            return { kind: "accepted" };
+          },
+        },
+      });
+      return pair.right;
+    },
+  }, undefined, source);
+  const a = createMemoryCarrierPair();
+  main(a, "a");
+  await holder.connect({ carrier: a.right, rendererControlToken: "a" });
+  await waitFor(() => received.length === 1, "renderer A baseline");
+  const b = createMemoryCarrierPair();
+  main(b, "b");
+  await holder.connect({ carrier: b.right, rendererControlToken: "b" });
+  await waitFor(() => starts === 2, "renderer B source started");
+  await turn();
+  await turn();
+  assert.deepEqual(received, [
+    { generation: 1, message: { type: "viewport.state", width: 640, height: 480 } },
+  ]);
+  emitB({ width: 800, height: 600 });
+  await waitFor(() => received.length === 2, "renderer B legal baseline");
+  assert.deepEqual(received[1], {
+    generation: 1,
+    message: { type: "viewport.state", width: 800, height: 600 },
+  });
 });
 
 test("fresh Renderer fences the old source and queued callback", async () => {

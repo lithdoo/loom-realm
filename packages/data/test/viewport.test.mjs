@@ -238,3 +238,52 @@ test("fresh renderer peer does not inherit the previous carrier viewport cursor"
   );
   await second.close();
 });
+
+test("same-size sendState after terminal does not return a synthetic sent", async () => {
+  const carrier = createWriterCarrier();
+  const renderer = createRendererDataPeer({
+    binding: binding(carrier),
+    handlers: rendererHandlers,
+  });
+  assert.deepEqual(await renderer.viewport.sendState(viewport(640, 480)), { kind: "sent" });
+  await renderer.close();
+  const same = await renderer.viewport.sendState(viewport(640, 480));
+  const next = await renderer.viewport.sendState(viewport(800, 600));
+  assert.equal(same.kind, "terminal");
+  assert.equal(next.kind, "terminal");
+  assert.equal(same.terminal.kind, "carrier-closed");
+  assert.equal(next.terminal.kind, "carrier-closed");
+  assert.equal(carrier.sent.length, 1);
+});
+
+test("pending viewport waiters settle exactly once when the carrier terminals", async () => {
+  const carrier = createWriterCarrier();
+  carrier.holdSend();
+  const renderer = createRendererDataPeer({
+    binding: binding(carrier),
+    handlers: rendererHandlers,
+  });
+  const first = renderer.viewport.sendState(viewport(320, 240));
+  await waitFor(() => carrier.maxActive === 1);
+  const pending = renderer.viewport.sendState(viewport(800, 600));
+  const late = renderer.viewport.sendState(viewport(1024, 768));
+  const seen = [];
+  const track = (promise, label) => promise.then((outcome) => {
+    seen.push(label);
+    return outcome;
+  });
+  const firstTracked = track(first, "first");
+  const pendingTracked = track(pending, "pending");
+  const lateTracked = track(late, "late");
+  await renderer.close();
+  const [pendingResult, lateResult] = await Promise.all([pendingTracked, lateTracked]);
+  carrier.releaseSend();
+  const firstResult = await firstTracked;
+  assert.equal(pendingResult.kind, "terminal");
+  assert.equal(lateResult.kind, "terminal");
+  assert.equal(pendingResult.terminal, lateResult.terminal);
+  assert.ok(firstResult.kind === "sent" || firstResult.kind === "terminal");
+  assert.deepEqual([...seen].sort(), ["first", "late", "pending"].sort());
+  assert.equal(seen.filter((label) => label === "pending").length, 1);
+  assert.equal(seen.filter((label) => label === "late").length, 1);
+});

@@ -69,6 +69,17 @@ test("ViewportManager delivers null first, updates getter before callback, and i
   assert.deepEqual(after, []);
 });
 
+test("ViewportManager ignores illegal internal samples without clearing retained current", () => {
+  const manager = new ViewportManager();
+  manager.accept({ type: "viewport.state", width: 640, height: 480 });
+  assert.deepEqual(manager.current, { width: 640, height: 480 });
+  manager.accept({ type: "viewport.state", width: 0, height: 480 });
+  manager.accept({ type: "viewport.state", width: Number.NaN, height: 480 });
+  manager.accept({ type: "viewport.state", width: -8, height: 480 });
+  manager.accept({ type: "viewport.state" });
+  assert.deepEqual(manager.current, { width: 640, height: 480 });
+});
+
 test("post-terminal subscribe is inert even if current still holds history", async () => {
   const manager = new ViewportManager();
   manager.accept({ type: "viewport.state", width: 320, height: 240 });
