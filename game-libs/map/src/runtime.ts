@@ -333,27 +333,30 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       const commitViewportResize = () => {
         if (frame.signal.aborted || transitioning || !domain || pendingViewport === null) return;
         const nextViewport = pendingViewport;
-        pendingViewport = null;
+        if (viewportsEqual(nextViewport, acceptedViewport)) {
+          pendingViewport = null;
+          clearResizeTimer();
+          return;
+        }
         clearResizeTimer();
-        if (viewportsEqual(nextViewport, acceptedViewport)) return;
-        const nextVisual = visualEpoch + 1;
-        const camera = computeCamera(current.map, x, y, nextViewport);
-        const required = viewportTileBounds(current.map, camera.cameraX, camera.cameraY, nextViewport);
-        const nextWindow = selectProjectionWindow(
-          current,
-          required,
-          camera.cameraX,
-          camera.cameraY,
-          null,
-          sceneEpoch,
-          nextVisual,
-          null,
-          window,
-          nextViewport,
-        );
-        const screenX = x * 32 - camera.cameraX;
-        const screenY = y * 32 - camera.cameraY;
         try {
+          const nextVisual = visualEpoch + 1;
+          const camera = computeCamera(current.map, x, y, nextViewport);
+          const required = viewportTileBounds(current.map, camera.cameraX, camera.cameraY, nextViewport);
+          const nextWindow = selectProjectionWindow(
+            current,
+            required,
+            camera.cameraX,
+            camera.cameraY,
+            null,
+            sceneEpoch,
+            nextVisual,
+            null,
+            window,
+            nextViewport,
+          );
+          const screenX = x * 32 - camera.cameraX;
+          const screenY = y * 32 - camera.cameraY;
           domain.update({
             nodes: [
               {
@@ -387,26 +390,19 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
               },
             ],
           });
+          pendingViewport = null;
+          acceptedViewport = nextViewport;
+          window = nextWindow;
+          visualEpoch = nextVisual;
+          settledResize = true;
         } catch {
-          pendingViewport = nextViewport;
-          return;
+          // Keep pendingViewport so a later sample or step boundary can retry.
+          // Do not restart the settle timer here: that would retry forever.
         }
-        acceptedViewport = nextViewport;
-        window = nextWindow;
-        visualEpoch = nextVisual;
-        settledResize = true;
       };
 
-      const noteViewport = (value: { readonly width: number; readonly height: number } | null) => {
-        if (frame.signal.aborted || transitioning || !domain) return;
-        if (value === null) return;
-        const next = clampViewport(value);
-        if (viewportsEqual(next, acceptedViewport)) {
-          if (pendingViewport !== null && viewportsEqual(next, pendingViewport)) pendingViewport = null;
-          return;
-        }
-        pendingViewport = next;
-        if (activeMove !== null) return;
+      const scheduleSettledResize = () => {
+        if (activeMove !== null || transitioning) return;
         if (!settledResize) {
           commitViewportResize();
           return;
@@ -414,9 +410,23 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         clearResizeTimer();
         resizeTimer = setTimeout(() => {
           resizeTimer = null;
-          if (activeMove !== null) return;
+          if (frame.signal.aborted || transitioning || activeMove !== null) return;
           commitViewportResize();
         }, RESIZE_SETTLE_MS);
+      };
+
+      const noteViewport = (value: { readonly width: number; readonly height: number } | null) => {
+        if (frame.signal.aborted || !domain) return;
+        if (value === null) return;
+        const next = clampViewport(value);
+        if (viewportsEqual(next, acceptedViewport)) {
+          pendingViewport = null;
+          clearResizeTimer();
+          return;
+        }
+        pendingViewport = next;
+        if (transitioning) return;
+        scheduleSettledResize();
       };
 
       const failTransfer = (error: unknown) => {
@@ -441,7 +451,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           const nextDirection = "targetDirection" in rule ? rule.targetDirection ?? attemptedDirection : attemptedDirection;
           const nextScene = sceneEpoch + 1;
           const nextVisual = visualEpoch + 1;
-          const nextWindow = standingWindow(target, rule.targetX, rule.targetY, nextScene, nextVisual);
+          const liveViewport = pendingViewport ?? clampViewport(scope.viewport.current);
+          const nextWindow = standingWindow(target, rule.targetX, rule.targetY, nextScene, nextVisual, liveViewport);
           const nextFacts = facts({
             loaded: target,
             window: nextWindow,
@@ -451,6 +462,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             activeMove: null,
             sceneEpoch: nextScene,
             visualEpoch: nextVisual,
+            viewport: liveViewport,
           });
           domain!.replace(renderState(nextFacts));
           current = target;
@@ -460,6 +472,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           direction = nextDirection;
           sceneEpoch = nextScene;
           visualEpoch = nextVisual;
+          acceptedViewport = liveViewport;
+          pendingViewport = null;
+          clearResizeTimer();
           activeMove = null;
           if (stepTimer !== null) {
             clearTimeout(stepTimer);

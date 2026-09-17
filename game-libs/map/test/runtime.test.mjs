@@ -107,6 +107,14 @@ function playerSet(update) {
   return update?.nodes?.find((node) => node.key === "player")?.data?.set ?? {};
 }
 
+function assertPairedTokens(state) {
+  const currentView = view(state);
+  const currentPlayer = player(state);
+  assert.equal(currentView.sceneEpoch, currentPlayer.sceneEpoch);
+  assert.equal(currentView.visualEpoch, currentPlayer.visualEpoch);
+  assert.equal(currentView.motionId, currentPlayer.motionId);
+}
+
 describe("map runtime walking", { concurrency: false }, () => {
   function installTimers(t) {
     const realSetTimeout = globalThis.setTimeout;
@@ -218,7 +226,12 @@ describe("map runtime walking", { concurrency: false }, () => {
         states.push(structuredClone(initial));
         const handle = renderHandle(states, () => { domainClosed = true; }, updates, replaces);
         if (options.throwOnUpdate) {
-          handle.update = () => { throw new TypeError("injected author failure"); };
+          const apply = handle.update;
+          handle.update = (delta) => {
+            const blocked = typeof options.throwOnUpdate === "function" ? options.throwOnUpdate() : true;
+            if (blocked) throw new TypeError("injected author failure");
+            apply(delta);
+          };
         }
         if (options.throwOnReplace) {
           handle.replace = () => { throw new TypeError("injected author failure"); };
@@ -236,11 +249,13 @@ describe("map runtime walking", { concurrency: false }, () => {
     if (options.expectActivationFailure) {
       return { pending, reads, states, updates, replaces, listenerClosed: () => listenerClosed, domainClosed: () => domainClosed };
     }
-    for (let attempt = 0; attempt < 40 && (states.length === 0 || !handlers.has("keyboard.event") || !handlers.has("keyboard.state")); attempt += 1) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    assert.ok(states.length >= 1, "expected initial standing RenderDomain");
-    return {
+    const ready = async () => {
+      for (let attempt = 0; attempt < 40 && (states.length === 0 || !handlers.has("keyboard.event") || !handlers.has("keyboard.state")); attempt += 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.ok(states.length >= 1, "expected initial standing RenderDomain");
+    };
+    const attached = {
       emitEvent(payload) { return handlers.get("keyboard.event")(payload); },
       emitState(payload) { return handlers.get("keyboard.state")(payload); },
       states,
@@ -257,7 +272,11 @@ describe("map runtime walking", { concurrency: false }, () => {
       queued: timers.queued,
       listenerClosed: () => listenerClosed,
       domainClosed: () => domainClosed,
+      ready,
     };
+    if (options.attachOnly) return attached;
+    await ready();
+    return attached;
   }
 
   const down = (code) => ({ action: "down", code, repeat: false });
@@ -588,6 +607,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(first.visualEpoch, spawnVisual + 1);
     assert.deepEqual([first.viewportWidth, first.viewportHeight], [1280, 720]);
     assert.equal(player(frame.latestState()).motionId, null);
+    assertPairedTokens(frame.latestState());
     frame.viewport.publish({ width: 1920, height: 1080 });
     assert.equal(view(frame.latestState()).viewportWidth, 1280);
     frame.fireTimer(100);
@@ -595,6 +615,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(settled.viewportWidth, 1920);
     assert.equal(settled.viewportHeight, 1080);
     assert.equal(settled.visualEpoch, first.visualEpoch + 1);
+    assertPairedTokens(frame.latestState());
     frame.abort();
     await frame.pending;
   });
@@ -620,9 +641,18 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.emitEvent(up("ArrowRight"));
     frame.fireNextTimer();
     const after = view(frame.latestState());
+    const afterPlayer = player(frame.latestState());
     assert.equal(after.viewportWidth, 1280);
     assert.equal(after.viewportHeight, 720);
-    assert.equal(player(frame.latestState()).motionId, null);
+    assert.equal(afterPlayer.motionId, null);
+    assert.equal(after.motionId, null);
+    assertPairedTokens(frame.latestState());
+    const { map: raw } = fixture();
+    const camera = computeCamera(validateMapRecord(raw), 11, 8, { width: 1280, height: 720 });
+    assert.equal(after.cameraX, camera.cameraX);
+    assert.equal(after.cameraY, camera.cameraY);
+    assert.equal(afterPlayer.screenX, 11 * 32 - camera.cameraX);
+    assert.equal(afterPlayer.screenY, 8 * 32 - camera.cameraY);
     frame.abort();
     await frame.pending;
   });
@@ -645,6 +675,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(after.viewportHeight, 1080);
     assert.equal(after.visualEpoch, walkingVisual + 1);
     assert.equal(player(frame.latestState()).motionId, null);
+    assertPairedTokens(frame.latestState());
     const publishedWidths = frame.updates
       .map((update) => viewportSet(update).viewportWidth)
       .filter((width) => width !== undefined);
@@ -662,6 +693,121 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(view(frame.latestState()).visualEpoch, before.visualEpoch);
     assert.equal(player(frame.latestState()).motionId, null);
     assert.equal(frame.updates.length, 0);
+    assert.equal(frame.queued.filter((item) => item.delay === 100).length, 0);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("A to B to A within 100ms cancels pending B and never commits it", async (t) => {
+    const frame = await startFrame(t);
+    frame.viewport.publish({ width: 1280, height: 720 });
+    const accepted = view(frame.latestState());
+    assert.deepEqual([accepted.viewportWidth, accepted.viewportHeight], [1280, 720]);
+    frame.viewport.publish({ width: 1920, height: 1080 });
+    assert.equal(view(frame.latestState()).viewportWidth, 1280);
+    assert.equal(frame.queued.filter((item) => item.delay === 100).length, 1);
+    frame.viewport.publish({ width: 1280, height: 720 });
+    assert.equal(frame.queued.filter((item) => item.delay === 100).length, 0);
+    assert.equal(view(frame.latestState()).viewportWidth, 1280);
+    assert.equal(view(frame.latestState()).visualEpoch, accepted.visualEpoch);
+    assertPairedTokens(frame.latestState());
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("standing A to B to C coalesces to trailing latest after 100ms", async (t) => {
+    const frame = await startFrame(t);
+    frame.viewport.publish({ width: 800, height: 600 });
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [800, 600]);
+    const firstVisual = view(frame.latestState()).visualEpoch;
+    frame.viewport.publish({ width: 1280, height: 720 });
+    frame.viewport.publish({ width: 1920, height: 1080 });
+    assert.equal(view(frame.latestState()).viewportWidth, 800);
+    frame.fireTimer(100);
+    const settled = view(frame.latestState());
+    assert.deepEqual([settled.viewportWidth, settled.viewportHeight], [1920, 1080]);
+    assert.equal(settled.visualEpoch, firstVisual + 1);
+    assertPairedTokens(frame.latestState());
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("mid-step A to B to A does not commit B at the step boundary", async (t) => {
+    const frame = await startFrame(t);
+    await frame.emitEvent(down("ArrowRight"));
+    const walkingVisual = view(frame.latestState()).visualEpoch;
+    frame.viewport.publish({ width: 1280, height: 720 });
+    frame.viewport.publish({ width: 640, height: 480 });
+    await frame.emitEvent(up("ArrowRight"));
+    frame.fireNextTimer();
+    const after = view(frame.latestState());
+    assert.equal(after.viewportWidth, 640);
+    assert.equal(after.viewportHeight, 480);
+    assert.equal(after.visualEpoch, walkingVisual);
+    assert.equal(player(frame.latestState()).x, 11);
+    assertPairedTokens(frame.latestState());
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("initial current viewport is used at spawn and matching subscribe is a no-op", async (t) => {
+    const frame = await startFrame(t, { viewportCurrent: { width: 1280, height: 720 } });
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [1280, 720]);
+    assert.equal(frame.updates.length, 0);
+    assert.equal(frame.states.length, 1);
+    assertPairedTokens(frame.latestState());
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("viewport that changes during load converges on subscribe", async (t) => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const frame = await startFrame(t, { attachOnly: true, gates: { "struct.Map/1": gate } });
+    frame.viewport.publish({ width: 1280, height: 720 });
+    release();
+    await frame.ready();
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [1280, 720]);
+    assertPairedTokens(frame.latestState());
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("NaN viewport samples do not start a projection", async (t) => {
+    const frame = await startFrame(t);
+    const updates = frame.updates.length;
+    frame.viewport.publish({ width: Number.NaN, height: Number.NaN });
+    assert.equal(frame.updates.length, updates);
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [640, 480]);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("late resize timer after abort does not mutate a closed Frame", async (t) => {
+    const frame = await startFrame(t);
+    frame.viewport.publish({ width: 1280, height: 720 });
+    frame.viewport.publish({ width: 1920, height: 1080 });
+    const late = frame.lastCallback();
+    frame.abort();
+    await frame.pending;
+    assert.doesNotThrow(() => late());
+    assert.equal(view(frame.latestState()).viewportWidth, 1280);
+    assert.equal(view(frame.latestState()).viewportHeight, 720);
+  });
+
+  test("failed resize can recover on a later sample without auto-retry", async (t) => {
+    let fail = true;
+    const frame = await startFrame(t, { throwOnUpdate: () => fail });
+    const before = view(frame.latestState());
+    frame.viewport.publish({ width: 1280, height: 720 });
+    assert.equal(view(frame.latestState()).viewportWidth, 640);
+    assert.equal(view(frame.latestState()).visualEpoch, before.visualEpoch);
+    assert.equal(frame.queued.filter((item) => item.delay === 100).length, 0);
+    fail = false;
+    frame.viewport.publish({ width: 1280, height: 720 });
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [1280, 720]);
+    assert.equal(view(frame.latestState()).visualEpoch, before.visualEpoch + 1);
+    assertPairedTokens(frame.latestState());
     frame.abort();
     await frame.pending;
   });
@@ -1199,6 +1345,38 @@ describe("map runtime transfer", { concurrency: false }, () => {
     assert.notEqual(view(frame.latestState()).mapId, spawnMapId);
     assert.ok(frame.replaces.length >= 1);
     assert.equal(view(frame.latestState()).tileset.key, "Tilesets/target_tileset");
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("resize during transfer is applied on the successful target replace", async (t) => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const frame = await startFrame(t, {
+      gates: { "struct.Map/2": gate },
+      records: {
+        "struct.MapTransfer/1": {
+          id: 1,
+          steps: [],
+          contacts: [{ x: 10, y: 8, direction: 6, targetMapId: 2, targetX: 4, targetY: 7, targetDirection: null }],
+          edges: [],
+        },
+      },
+    });
+    await frame.emitEvent(down("ArrowRight"));
+    assert.equal(view(frame.latestState()).mapId, 1);
+    assert.equal(view(frame.latestState()).viewportWidth, 640);
+    frame.viewport.publish({ width: 1280, height: 720 });
+    assert.equal(view(frame.latestState()).viewportWidth, 640);
+    await frame.emitEvent(up("ArrowRight"));
+    release();
+    await flush();
+    const latest = frame.latestState();
+    assert.equal(view(latest).mapId, 2);
+    assert.deepEqual([view(latest).viewportWidth, view(latest).viewportHeight], [1280, 720]);
+    assert.equal(player(latest).x, 4);
+    assert.equal(player(latest).y, 7);
+    assertPairedTokens(latest);
     frame.abort();
     await frame.pending;
   });
