@@ -60,6 +60,14 @@ export class DataRuntime {
     }, (cause) => this.commit({ kind: "carrier-lost", cause }, false));
   }
 
+  isTerminated(): boolean {
+    return this.terminalValue !== undefined;
+  }
+
+  peekTerminal(): DataTerminal | undefined {
+    return this.terminalValue;
+  }
+
   async send(message: RendererDataMessageV1): Promise<DataSendOutcome> {
     if (this.terminalValue) return freeze({ kind: "terminal", terminal: this.terminalValue });
     let text: string;

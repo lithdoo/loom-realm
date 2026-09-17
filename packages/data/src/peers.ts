@@ -63,7 +63,11 @@ export function createRendererDataPeer(options: RendererDataPeerOptions): Render
     if (message.type === "render.event") return options.handlers.onRenderEvent(message);
     return accepted;
   });
-  const viewport = new ViewportLatestSender((message: ViewportStateV1) => runtime.send(message));
+  const viewport = new ViewportLatestSender(
+    (message: ViewportStateV1) => runtime.send(message),
+    () => runtime.peekTerminal(),
+  );
+  void runtime.terminal.then((terminal) => viewport.noteTerminal(terminal));
   return Object.freeze({
     binding,
     input: Object.freeze({

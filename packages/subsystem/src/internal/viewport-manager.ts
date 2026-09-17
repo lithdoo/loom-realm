@@ -17,10 +17,16 @@ export class ViewportManager implements Viewport {
 
   accept(message: ViewportStateV1): void {
     if (this.terminated) return;
-    if (this.value !== null && this.value.width === message.width && this.value.height === message.height) {
+    if (message === null || typeof message !== "object") return;
+    const width = (message as { width?: unknown }).width;
+    const height = (message as { height?: unknown }).height;
+    if (!Number.isSafeInteger(width) || Number(width) <= 0 || !Number.isSafeInteger(height) || Number(height) <= 0) {
       return;
     }
-    const snapshot = Object.freeze({ width: message.width, height: message.height });
+    if (this.value !== null && this.value.width === width && this.value.height === height) {
+      return;
+    }
+    const snapshot = Object.freeze({ width: width as number, height: height as number });
     this.value = snapshot;
     for (const registration of [...this.listeners]) {
       if (registration.active) this.deliver(registration, snapshot);
