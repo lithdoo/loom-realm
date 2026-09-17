@@ -10,6 +10,7 @@ Branch: cursor/main
 Remediation start HEAD: 0d694bc6c99289914ab6ef30e9f2e2e8fdfae0fe
 Merge-base with local main: 75f5370 (origin/main 4cbf620)
 Final executable SHA: 66d4ea35f76a25e4eb556bf41572c91362ff2e0a
+Qualification docs SHA: 59fba24cb5ecfeec33a99ccec90dbc7756916b88
 Hostra freeze: .qualification/hostra @ d863beab / 1.0.1-beta.1 / Electron 44.1.1
 Machine: win32 10.0.26200; Node v24.19.0; AMD Ryzen AI 9 365 w/ Radeon 880M
 ```
