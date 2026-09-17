@@ -120,6 +120,10 @@ PR0不要求尚未实施的 PR1/2 优化结果；Map 证据仍 NOT RUN。C1最�
 ```text
 Executable subject SHA: 3966aa5df99baca58effad2cfd7bf830443ab3ee (glm/main; recording commits:
   freeze registration 5a4e5fe / signoff 828169b / C1-A b53263c / C1-B 4bbe9a4 / C1-C 866d151 / C1-D 3966aa5)
+独立评审整改（2026-09-17）: 737a4bd fix(core) — fresh Renderer participant 不得重发旧 participant
+  的 viewport baseline（同 participant carrier 重连仍即时重发；Subsystem retained 不变）。
+  新 executable 链 = 3966aa5 + 737a4bd（+本 ledger 记录提交）。复跑：renderer 55/55、
+  subsystem 68/68、test:data（rev3 7/7）、m10 16/16、m11 10/10、desktop 29/29 — exit 0。
 Data / Subsystem / Renderer / Desktop composition: IMPLEMENTED
 Profile fixture revision3 + Viewport conformance: EXECUTED, local PASS (7 tests / 38 fixtures; 10+7 viewport tests)
 Old Connection/Input/Render + Main/Broker + M13/M14/M15-desktop regressions: EXECUTED, local PASS
