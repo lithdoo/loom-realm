@@ -1,7 +1,7 @@
 # Renderer → Subsystem Viewport Capability
 
 > 层级：系统架构  
-> 状态：**Active Design / Direct-v1 Core Docs Frozen 2026-09-17（subject `4cbf620`）**  
+> 状态：**Active Design / Direct-v1 Core Docs Frozen 2026-09-17（subject `4cbf620`）/ C1 Implemented 2026-09-17（glm/main）**  
 > 决策：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；原 [ADR0036](../decisions/0036-viewport-state-and-renderer-data-profile-v2.md) 的 v2 identity部分已被撤销。  
 > Formal SSOT：[Viewport v1](../15-contracts/viewport-state-v1.md) · [revised Data Profile v1](../15-contracts/renderer-data-profile-v1.md)  
 > Qualification：[唯一 v1 ledger](../30-implementation/viewport-profile-v1-qualification.md)；最近复核：2026-09-16

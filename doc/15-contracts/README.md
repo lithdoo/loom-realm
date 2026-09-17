@@ -2,7 +2,7 @@
 
 > 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed historical subjects**；revised four-child Profile `/1` + Viewport **Core Docs Frozen 2026-09-17（subject `4cbf620`，owner 签署）/ not implemented**；M14/M15 milestone status ledger-owned  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed historical subjects**；revised four-child Profile `/1` + Viewport **Core Docs Frozen 2026-09-17（subject `4cbf620`）/ C1 Implemented 2026-09-17（glm/main，证据见[qualification ledger](../30-implementation/viewport-profile-v1-qualification.md)）**；M14/M15 milestone status ledger-owned  
 > 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16（仅新增 Viewport 导航；既有 M13/Frozen 正文原样保全）
@@ -20,7 +20,7 @@ Frame / Call v1                         Active / Normative / Frozen
 Main ⇄ Renderer Control v1              Active / Normative / Frozen
 Renderer Data Application Profile v1    original three-child Frozen historical;
                                         revised four-child /1 Normative / Core Docs Frozen 2026-09-17
-Viewport State v1                       Normative / Core Docs Frozen 2026-09-17 / not implemented
+Viewport State v1                       Normative / Core Docs Frozen 2026-09-17 / C1 implemented (glm/main)
 Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen (composition projection editorial correction)
 User Input v1                           Active / Normative / Frozen
 Render Update v1                        Active / Normative / Frozen

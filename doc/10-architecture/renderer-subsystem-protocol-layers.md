@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Core Docs Frozen 2026-09-17 subject `4cbf620` / Not Implemented**  
+> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Core Docs Frozen 2026-09-17 subject `4cbf620` / C1 Implemented 2026-09-17（glm/main）**  
 > 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update、Viewport State 与 Platform Broker 的分层关系  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)  
 > 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)  
