@@ -21,6 +21,7 @@ import {
   type RendererPresentationView,
 } from "./internal/presentation-seam.js";
 import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
+import { normalizeViewportSample, type RendererViewportSource } from "./viewport.js";
 
 export interface RendererControlCurrent {
   readonly peer: RendererControlPeer;
@@ -114,10 +115,28 @@ function validateRendererInputSource(
   if (!valid) throw new TypeError("Invalid RendererInputSource");
 }
 
+function validateRendererViewportSource(
+  viewport: RendererViewportSource | undefined,
+): void {
+  if (viewport === undefined) return;
+  let valid = false;
+  try {
+    valid = viewport !== null && typeof viewport === "object" &&
+      typeof viewport.start === "function";
+  } catch {
+    // Accessor-backed integration objects are not valid source capabilities.
+  }
+  if (!valid) throw new TypeError("Invalid RendererViewportSource");
+}
+
 interface SourceSubscription {
   readonly peer: RendererControlPeer;
   phase: "starting" | "current" | "invalid";
   readonly staged: RendererInputSourceChange[];
+  stop: (() => void) | null;
+}
+
+interface ViewportSourceSubscription {
   stop: (() => void) | null;
 }
 
@@ -129,6 +148,8 @@ class ControlHolder implements RendererControlHolder {
   private readonly renderHistories = new Map<string, RendererRenderStore>();
   private readonly inputGate = new RendererInputGate();
   private sourceSubscription: SourceSubscription | null = null;
+  private viewportSubscription: ViewportSourceSubscription | null = null;
+  private viewportLatest: { readonly width: number; readonly height: number } | null = null;
   private presentationEffect: RendererPresentationEffect | null = null;
   private readonly presentationSource: RendererPresentationSource = Object.freeze({
     read: () => this.readPresentation(),
@@ -137,6 +158,7 @@ class ControlHolder implements RendererControlHolder {
   constructor(
     private readonly data?: RendererDataBinding,
     private readonly input?: RendererInputSource,
+    private readonly viewport?: RendererViewportSource,
   ) {}
 
   current(): RendererControlCurrent | null {
@@ -175,6 +197,7 @@ class ControlHolder implements RendererControlHolder {
       this.currentValue = null;
       this.clearAllData();
       this.stopInputSource();
+      this.stopViewportSource();
       this.inputGate.setControl(null);
     }
     this.prepareRenderSession(outcome.snapshot.sessionId);
@@ -182,6 +205,7 @@ class ControlHolder implements RendererControlHolder {
     this.currentValue = installed;
     this.inputGate.setControl(outcome.snapshot);
     this.startInputSource(peer);
+    this.startViewportSource();
     this.reconcileData(peer, outcome.snapshot);
     this.notifyPresentation();
     void this.consume(peer);
@@ -190,6 +214,7 @@ class ControlHolder implements RendererControlHolder {
       this.currentValue = null;
       this.clearAllData();
       this.stopInputSource();
+      this.stopViewportSource();
       this.inputGate.setControl(null);
     });
     return Object.freeze({ kind: "installed", current: installed });
@@ -381,6 +406,7 @@ class ControlHolder implements RendererControlHolder {
     slot.pending = null;
     slot.current = { identity: attempt.identity, peer };
     this.inputGate.installData(attempt.identity.subsystemKey, peer);
+    this.publishViewportBaseline(peer);
     void peer.terminal.then(() => {
       if (slot.current?.peer !== peer) return;
       this.inputGate.retireData(attempt.identity.subsystemKey, peer);
@@ -404,6 +430,72 @@ class ControlHolder implements RendererControlHolder {
     slot.pending = null;
     if (attempt.controller.signal.aborted || !this.isDesired(attempt.identity)) return;
     slot.failed = attempt.identity;
+  }
+
+  /**
+   * Viewport State v1 publisher: the trusted physical source reports the
+   * single designated logical presentation surface in CSS logical pixels.
+   * Illegal samples are discarded (no zero/default/null fabrication); legal
+   * changed sizes update the retained latest and are published to every
+   * current Data peer through the per-carrier bounded sender. Receiving a
+   * peer fresh after replacement republishes the retained latest as that
+   * carrier's independent baseline. Source lifetime follows the Renderer
+   * Control participant: replacement/retirement fences late emits and
+   * removes listeners.
+   */
+  private startViewportSource(): void {
+    const source = this.viewport;
+    if (source === undefined) return;
+    const subscription: ViewportSourceSubscription = { stop: null };
+    this.viewportSubscription = subscription;
+    const emit = (sample: unknown): void => {
+      if (this.viewportSubscription !== subscription) return;
+      const size = normalizeViewportSample(sample);
+      if (size === null) return;
+      if (
+        this.viewportLatest !== null &&
+        this.viewportLatest.width === size.width &&
+        this.viewportLatest.height === size.height
+      ) {
+        return;
+      }
+      this.viewportLatest = size;
+      for (const slot of this.dataSlots.values()) {
+        const current = slot.current?.peer;
+        if (current === undefined) continue;
+        void current.viewport.sendState({ type: "viewport.state", width: size.width, height: size.height });
+      }
+    };
+
+    try {
+      const stop = source.start(emit);
+      if (typeof stop !== "function") throw new TypeError("Viewport source start must return stop function");
+      subscription.stop = stop;
+    } catch {
+      if (this.viewportSubscription === subscription) this.viewportSubscription = null;
+      try {
+        subscription.stop?.();
+      } catch {
+        // Failed source bootstrap cleanup is locally contained.
+      }
+    }
+  }
+
+  private stopViewportSource(): void {
+    const subscription = this.viewportSubscription;
+    if (subscription === null) return;
+    this.viewportSubscription = null;
+    try {
+      subscription.stop?.();
+    } catch {
+      // Local stop failure cannot restore a retired source.
+    }
+  }
+
+  private publishViewportBaseline(peer: RendererDataPeer): void {
+    const latest = this.viewportLatest;
+    if (latest === null) return;
+    void peer.viewport.sendState({ type: "viewport.state", width: latest.width, height: latest.height });
   }
 
   private commitRenderMessage(
@@ -603,8 +695,10 @@ class ControlHolder implements RendererControlHolder {
 export function createRendererControlHolder(
   data?: RendererDataBinding,
   input?: RendererInputSource,
+  viewport?: RendererViewportSource,
 ): RendererControlHolder {
   validateRendererDataBinding(data);
   validateRendererInputSource(input);
-  return new ControlHolder(data, input);
+  validateRendererViewportSource(viewport);
+  return new ControlHolder(data, input, viewport);
 }

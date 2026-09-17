@@ -11,6 +11,7 @@ import {
 import { DESKTOP_BOOTSTRAP_CHANNEL, type DesktopRendererBootstrapEnvelope } from "./desktop-bootstrap.js";
 import { connectBrowserControlCarrier } from "./browser-control-carrier.js";
 import { createDesktopRendererInputSource } from "./renderer-input-source.js";
+import { createDesktopRendererViewportSource } from "./renderer-viewport-source.js";
 import { connectLoopbackRendererDataBinding } from "./window-data-binding.js";
 
 const NativeURL = URL;
@@ -70,7 +71,8 @@ void (async () => {
     connectLoopbackRendererDataBinding(envelope.dataSettlementEndpoint, NativeWebSocket),
   ]);
   const inputSource = createDesktopRendererInputSource(window);
-  const holder = createRendererControlHolder(dataBinding, inputSource);
+  const viewportSource = createDesktopRendererViewportSource(window);
+  const holder = createRendererControlHolder(dataBinding, inputSource, viewportSource);
   const prepared = await prepareWebPresentationV1(
     envelope.presentation,
     (ref) => resolveBootstrapResource(envelope, ref, objectUrls),
