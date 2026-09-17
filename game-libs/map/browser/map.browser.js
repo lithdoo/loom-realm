@@ -416,6 +416,48 @@
     return true;
   }
 
+  function cellKey(depth, x, y) {
+    return `${depth}:${x}:${y}`;
+  }
+
+  function stacksByCell(buckets) {
+    const stacks = new Map();
+    if (!buckets) return stacks;
+    for (const tiles of buckets.values()) {
+      for (const tile of tiles) {
+        const key = cellKey(tile.depth, tile.x, tile.y);
+        let list = stacks.get(key);
+        if (!list) {
+          list = [];
+          stacks.set(key, list);
+        }
+        list.push(tile);
+      }
+    }
+    for (const list of stacks.values()) {
+      list.sort((left, right) => left.z - right.z || left.y - right.y || left.x - right.x);
+    }
+    return stacks;
+  }
+
+  function sameTileStack(left, right) {
+    if (!left || !right || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      const previous = left[index];
+      const next = right[index];
+      if (previous.z !== next.z || !sameProjectedTile(previous, next)) return false;
+    }
+    return true;
+  }
+
+  function autotileFramesMatch(stack, previousFrames, nextFrames) {
+    for (const tile of stack) {
+      if (tile.visual[2] !== 1) continue;
+      if (!previousFrames || previousFrames.get(tile.visual[3]) !== nextFrames.get(tile.visual[3])) return false;
+    }
+    return true;
+  }
+
   function overlapWorld(prev, next) {
     const x0 = Math.max(prev.worldX, next.worldX);
     const y0 = Math.max(prev.worldY, next.worldY);
@@ -779,7 +821,7 @@
       }
       const groups = [...prepared.buckets.entries()].sort(([left], [right]) => left - right);
       const previousByDepth = new Map();
-      const previousTiles = new Map();
+      const previousStacks = new Map();
       const sameScene = Boolean(
         this._accepted
         && this._accepted.view.sceneEpoch === prepared.view.sceneEpoch
@@ -788,10 +830,9 @@
       );
       if (sameScene) {
         for (const layer of this._layers) previousByDepth.set(layer.depth, layer);
-        for (const tiles of this._accepted.buckets.values()) {
-          for (const tile of tiles) previousTiles.set(`${tile.depth}:${tile.x}:${tile.y}`, tile);
-        }
+        for (const [key, stack] of stacksByCell(this._accepted.buckets)) previousStacks.set(key, stack);
       }
+      const currentStacks = stacksByCell(prepared.buckets);
       const layers = [];
       for (let index = 0; index < groups.length; index += 1) {
         const [depth, tiles] = groups[index];
@@ -815,16 +856,28 @@
             );
           }
         }
+        if (copied) {
+          for (const [key, stack] of previousStacks) {
+            const sample = stack[0];
+            if (!sample || sample.depth !== depth || currentStacks.has(key)) continue;
+            if (!tileInsideOverlap(sample, copied)) continue;
+            this._clearCell(layer, sample.x, sample.y);
+          }
+        }
+        const seen = new Set();
         for (const tile of tiles) {
           fault("draw", { sequence, index, depth, tile, connected: layer.canvas.isConnected, hostHasCanvas: this.shadowRoot.contains(layer.canvas) });
-          const previousTile = previousTiles.get(`${depth}:${tile.x}:${tile.y}`);
-          if (copied && tileInsideOverlap(tile, copied) && tile.visual[2] !== 1 && sameProjectedTile(previousTile, tile)) continue;
-          if (copied && tileInsideOverlap(tile, copied) && tile.visual[2] === 1) {
-            const dx = tile.x * 32 - layer.worldX;
-            const dy = tile.y * 32 - layer.worldY;
-            layer.context.clearRect(dx, dy, 32, 32);
-          }
-          this._blitTile(layer, tile, prepared, frames);
+          const key = cellKey(depth, tile.x, tile.y);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const stack = currentStacks.get(key) ?? [tile];
+          const reusable = copied
+            && tileInsideOverlap(tile, copied)
+            && sameTileStack(previousStacks.get(key), stack)
+            && autotileFramesMatch(stack, previous?.frames, frames);
+          if (reusable) continue;
+          if (copied && tileInsideOverlap(tile, copied)) this._clearCell(layer, tile.x, tile.y);
+          for (const item of stack) this._blitTile(layer, item, prepared, frames);
         }
         layer.frames = frames;
         layers.push(layer);
@@ -1019,15 +1072,35 @@
     }
 
     _drawDirtyAutotiles(layer, tiles, prepared, frames) {
+      const stacks = new Map();
       for (const tile of tiles) {
-        if (tile.visual[2] !== 1) continue;
-        if (layer.frames && layer.frames.get(tile.visual[3]) === frames.get(tile.visual[3])) continue;
-        const dx = tile.x * 32 - layer.worldX;
-        const dy = tile.y * 32 - layer.worldY;
-        this._tileClearCount += 1;
-        layer.context.clearRect(dx, dy, 32, 32);
-        this._blitTile(layer, tile, prepared, frames);
+        const key = `${tile.x}:${tile.y}`;
+        let list = stacks.get(key);
+        if (!list) {
+          list = [];
+          stacks.set(key, list);
+        }
+        list.push(tile);
       }
+      for (const stack of stacks.values()) {
+        stack.sort((left, right) => left.z - right.z || left.y - right.y || left.x - right.x);
+        let dirty = false;
+        for (const tile of stack) {
+          if (tile.visual[2] !== 1) continue;
+          if (!layer.frames || layer.frames.get(tile.visual[3]) !== frames.get(tile.visual[3])) {
+            dirty = true;
+            break;
+          }
+        }
+        if (!dirty) continue;
+        this._clearCell(layer, stack[0].x, stack[0].y);
+        for (const tile of stack) this._blitTile(layer, tile, prepared, frames);
+      }
+    }
+
+    _clearCell(layer, x, y) {
+      this._tileClearCount += 1;
+      layer.context.clearRect(x * 32 - layer.worldX, y * 32 - layer.worldY, 32, 32);
     }
 
     _blitTile(layer, tile, prepared, frames) {

@@ -364,6 +364,60 @@ async function installAutotile(page, key, bytes) {
   }, { key, bytes });
 }
 
+const stackTilesetRef = (contentVersion = "v1") => ({ namespace: "resource.Graphics", key: "Tilesets/stack", contentVersion });
+
+async function makeIndexedTileset(page) {
+  return page.evaluate(async () => {
+    const canvas = new OffscreenCanvas(256, 32);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "rgb(255, 0, 255)";
+    context.fillRect(0, 0, 32, 32);
+    context.fillStyle = "rgb(255, 255, 0)";
+    context.fillRect(32, 0, 32, 32);
+    context.fillStyle = "rgb(255, 255, 0)";
+    context.fillRect(64, 0, 16, 16);
+    context.fillStyle = "rgb(0, 255, 255)";
+    context.fillRect(96, 0, 32, 32);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  });
+}
+
+async function installTileset(page, key, bytes) {
+  await page.evaluate(({ key: resourceKey, bytes: raw }) => {
+    window.__mapLayering.resourceBytes.set(resourceKey, Uint8Array.from(raw));
+  }, { key, bytes });
+}
+
+async function paintPair(page, viewPayload) {
+  await page.evaluate(({ viewPayload: view, spritePayload }) => {
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
+  await waitUntil(page, () => {
+    const view = document.querySelector("lr-map-view");
+    return view?._state === "VISIBLE" && view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+  }, "paired map paint");
+}
+
+async function cellPixel(page, tileX, tileY, sampleX = 8, sampleY = 8) {
+  return page.evaluate(({ tileX: x, tileY: y, sampleX: sx, sampleY: sy }) => {
+    const view = document.querySelector("lr-map-view");
+    const worldX = x * 32 + sx;
+    const worldY = y * 32 + sy;
+    let found = [0, 0, 0, 0];
+    for (const layer of view._layers ?? []) {
+      if (!layer.canvas || layer.canvas.hidden) continue;
+      const dx = worldX - layer.worldX;
+      const dy = worldY - layer.worldY;
+      if (dx < 0 || dy < 0 || dx >= layer.canvas.width || dy >= layer.canvas.height) continue;
+      const pixel = [...layer.context.getImageData(dx, dy, 1, 1).data];
+      if (pixel[3] !== 0) found = pixel;
+    }
+    return found;
+  }, { tileX, tileY, sampleX, sampleY });
+}
+
 async function paintAutotile(page, viewPayload) {
   await page.evaluate(({ viewPayload: view, spritePayload }) => {
     window.__view.receiveRenderData(view);
@@ -1660,4 +1714,137 @@ test("closed Map schema rejects extra keys, illegal tiles, chunk sets, and camer
   const camera = await throwsReceive(page, { ...base, cameraX: base.mapWidth * 32 });
   assert.equal(camera.threw, true);
   assert.equal(await page.evaluate(() => window.__view._accepted), undefined);
+});
+
+function stackedView(tiles, extra = {}) {
+  return viewData({
+    tileset: stackTilesetRef(),
+    tiles,
+    ...extra,
+  });
+}
+
+test("same-depth z0 and z1 regular tiles keep the overlay after overlap refresh", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const tiles = [
+    regularTile({ z: 0, tileId: 384, depth: 0 }),
+    regularTile({ z: 1, tileId: 385, depth: 0 }),
+  ];
+  const first = stackedView(tiles, { visualEpoch: 1, cameraX: 0 });
+  await paintPair(page, first);
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+  const refreshed = stackedView(tiles, { visualEpoch: 2, cameraX: 32 });
+  await paintPair(page, refreshed);
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+});
+
+test("same-depth z0 change recomposes the overlay instead of covering it", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const first = stackedView([
+    regularTile({ z: 0, tileId: 384, depth: 0 }),
+    regularTile({ z: 1, tileId: 385, depth: 0 }),
+  ], { visualEpoch: 1 });
+  await paintPair(page, first);
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+  const changed = stackedView([
+    regularTile({ z: 0, tileId: 387, depth: 0 }),
+    regularTile({ z: 1, tileId: 385, depth: 0 }),
+  ], { visualEpoch: 2, cameraX: 32 });
+  await paintPair(page, changed);
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+});
+
+test("autotile frame change keeps the same-depth regular overlay", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const ref = autotileRef("Autotiles/OverlayFlowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  const view = viewData({
+    tileset: stackTilesetRef(),
+    autotiles: autotilesAt([[0, ref]]),
+    tiles: [
+      autotileTile({ z: 0, tileId: 48, depth: 0, slot: 0 }),
+      regularTile({ z: 1, tileId: 386, depth: 0 }),
+    ],
+  });
+  await paintPair(page, view);
+  assert.deepEqual(await cellPixel(page, 0, 0, 8, 8), [255, 255, 0, 255]);
+  assert.deepEqual(await cellPixel(page, 0, 0, 24, 24), CELL_PIXELS[0]);
+  await page.clock.runFor(50);
+  assert.deepEqual(await cellPixel(page, 0, 0, 8, 8), [255, 255, 0, 255]);
+  assert.deepEqual(await cellPixel(page, 0, 0, 24, 24), CELL_PIXELS[1]);
+});
+
+test("cross-chunk stacked cells stay composited after overlap refresh", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const tiles = [
+    regularTile({ x: 7, z: 0, tileId: 384, depth: 0 }),
+    regularTile({ x: 7, z: 1, tileId: 385, depth: 0 }),
+    regularTile({ x: 8, z: 0, tileId: 384, depth: 0 }),
+    regularTile({ x: 8, z: 1, tileId: 385, depth: 0 }),
+  ];
+  await paintPair(page, stackedView(tiles, { visualEpoch: 1, cameraX: 0 }));
+  assert.deepEqual(await cellPixel(page, 7, 0), [255, 255, 0, 255]);
+  assert.deepEqual(await cellPixel(page, 8, 0), [255, 255, 0, 255]);
+  await paintPair(page, stackedView(tiles, { visualEpoch: 2, cameraX: 32 }));
+  assert.deepEqual(await cellPixel(page, 7, 0), [255, 255, 0, 255]);
+  assert.deepEqual(await cellPixel(page, 8, 0), [255, 255, 0, 255]);
+});
+
+test("leaving and re-entering a stacked cell restores the full composite", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const stacked = [
+    regularTile({ z: 0, tileId: 384, depth: 0 }),
+    regularTile({ z: 1, tileId: 385, depth: 0 }),
+  ];
+  const distant = [regularTile({ x: 20, z: 0, tileId: 387, depth: 0 })];
+  await paintPair(page, stackedView(stacked, { visualEpoch: 1, cameraX: 0, mapWidth: 64 }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+  await paintPair(page, stackedView(distant, { visualEpoch: 2, cameraX: 512, mapWidth: 64 }));
+  assert.deepEqual(await cellPixel(page, 20, 0), [0, 255, 255, 255]);
+  await paintPair(page, stackedView(stacked, { visualEpoch: 3, cameraX: 0, mapWidth: 64 }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+});
+
+test("scene A to B to A does not reuse the previous scene composite", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const stacked = [
+    regularTile({ z: 0, tileId: 384, depth: 0 }),
+    regularTile({ z: 1, tileId: 385, depth: 0 }),
+  ];
+  await paintPair(page, stackedView(stacked, { mapId: 1, sceneEpoch: 1, visualEpoch: 1 }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+  await paintPair(page, stackedView([regularTile({ z: 0, tileId: 387, depth: 0 })], {
+    mapId: 2, sceneEpoch: 2, visualEpoch: 1,
+  }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [0, 255, 255, 255]);
+  await paintPair(page, stackedView(stacked, { mapId: 1, sceneEpoch: 3, visualEpoch: 1 }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+});
+
+test("multi-depth building layer survives an overlap refresh of the ground", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/stack", await makeIndexedTileset(page));
+  const tiles = [
+    regularTile({ z: 0, tileId: 384, depth: 0 }),
+    regularTile({ z: 1, tileId: 385, depth: 64 }),
+  ];
+  await paintPair(page, stackedView(tiles, { visualEpoch: 1, cameraX: 0 }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+  await paintPair(page, stackedView(tiles, { visualEpoch: 2, cameraX: 32 }));
+  assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
+  const layers = await page.evaluate(() => window.__view._layers.map((layer) => layer.depth).sort((left, right) => left - right));
+  assert.deepEqual(layers, [0, 64]);
 });
