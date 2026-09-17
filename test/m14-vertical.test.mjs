@@ -230,15 +230,28 @@ test("map view clears full state and delayed same-resource decode paints only la
       cells[localX] = tileId;
       return cells;
     };
-    const viewPayload = (visualEpoch, localX, tileId, sourceIndex) => ({
-      sceneEpoch: 1, visualEpoch, motionId: null,
-      viewportWidth: 640, viewportHeight: 480,
-      mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0,
-      tileset, autotiles,
-      tileVisuals: sourceIndex === null ? [] : [[tileId, -1, 0, sourceIndex]],
-      chunks: sourceIndex === null ? [] : [{ chunkX: 0, chunkY: 0, cells: cellsAt(tileId, localX) }],
-      cameraMotion: null,
-    });
+    const expectedChunks = () => {
+      const chunks = [];
+      for (let chunkY = 0; chunkY <= 2; chunkY += 1) {
+        for (let chunkX = 0; chunkX <= 2; chunkX += 1) {
+          chunks.push({ chunkX, chunkY, cells: Array(192).fill(0) });
+        }
+      }
+      return chunks;
+    };
+    const viewPayload = (visualEpoch, localX, tileId, sourceIndex) => {
+      const chunks = expectedChunks();
+      if (sourceIndex !== null) chunks[0].cells = cellsAt(tileId, localX);
+      return {
+        sceneEpoch: 1, visualEpoch, motionId: null,
+        viewportWidth: 640, viewportHeight: 480,
+        mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0,
+        tileset, autotiles,
+        tileVisuals: sourceIndex === null ? [] : [[tileId, -1, 0, sourceIndex]],
+        chunks,
+        cameraMotion: null,
+      };
+    };
     const sample = (sx, sy) => {
       const canvases = [...view.shadowRoot.querySelectorAll("canvas.tile-layer")].filter((canvas) => !canvas.hidden);
       for (const canvas of canvases) {
