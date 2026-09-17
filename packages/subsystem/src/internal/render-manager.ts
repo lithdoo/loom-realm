@@ -8,8 +8,6 @@ import type {
 } from "@loomrealm/data";
 import {
   assertJsonValue,
-  jsonDepth,
-  stringifyJson,
   utf8ByteLength,
   type JsonObject,
   type JsonValue,
@@ -141,6 +139,36 @@ function scalarString(value: unknown, min: number, max: number, label: string): 
   return value;
 }
 
+/**
+ * Depth of an already assertJsonValue-validated JSON tree.
+ * Counting matches wire jsonDepth (each container adds one) without re-running
+ * assertJsonValue inside the walker.
+ */
+function depthOfValidatedJson(value: JsonValue): number {
+  let maximum = 0;
+  const stack: Array<{ readonly value: JsonValue; readonly depth: number }> = [
+    { value, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    if (entry === undefined || entry.value === null || typeof entry.value !== "object") {
+      continue;
+    }
+    const containerDepth = entry.depth + 1;
+    if (containerDepth > maximum) maximum = containerDepth;
+    if (Array.isArray(entry.value)) {
+      for (let index = 0; index < entry.value.length; index += 1) {
+        stack.push({ value: entry.value[index] as JsonValue, depth: containerDepth });
+      }
+    } else {
+      for (const child of Object.values(entry.value)) {
+        stack.push({ value: child, depth: containerDepth });
+      }
+    }
+  }
+  return maximum;
+}
+
 function validateJsonData(value: unknown, label: string): asserts value is JsonObject {
   try {
     assertJsonValue(value);
@@ -150,7 +178,7 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be a JSON object`);
   }
-  if (jsonDepth(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
+  if (depthOfValidatedJson(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
   const stack: JsonValue[] = [value];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -171,7 +199,7 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
       }
     }
   }
-  if (utf8ByteLength(stringifyJson(value)) > MAX_DATA_BYTES) {
+  if (utf8ByteLength(JSON.stringify(value)) > MAX_DATA_BYTES) {
     throw new RangeError(`${label} byte limit exceeded`);
   }
 }
@@ -231,7 +259,8 @@ function probeLimit(value: unknown, label: string): void {
   } catch {
     throw new TypeError(`${label} must be plain JSON`);
   }
-  if (jsonDepth(value as JsonValue) > 64 || utf8ByteLength(stringifyJson(value as JsonValue)) > MAX_MESSAGE_BYTES) {
+  const json = value as JsonValue;
+  if (depthOfValidatedJson(json) > 64 || utf8ByteLength(JSON.stringify(json)) > MAX_MESSAGE_BYTES) {
     throw new RangeError(`${label} message limit exceeded`);
   }
 }
