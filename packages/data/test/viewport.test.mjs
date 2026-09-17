@@ -124,7 +124,7 @@ test("recognized invalid viewport.state is protocol-fatal viewport with no handl
   assert.equal(calls, 0);
 });
 
-test("unknown viewport.* type is protocol-fatal viewport", async () => {
+test("unknown viewport.* type is protocol-fatal profile", async () => {
   const pair = createMemoryCarrierPair();
   const subsystem = createSubsystemDataPeer({
     binding: binding(pair.left),
@@ -133,7 +133,19 @@ test("unknown viewport.* type is protocol-fatal viewport", async () => {
   await pair.right.send(JSON.stringify({ type: "viewport.reset", width: 1, height: 1 }));
   const terminal = await subsystem.terminal;
   assert.equal(terminal.kind, "protocol-fatal");
-  assert.equal(terminal.protocol, "viewport");
+  assert.equal(terminal.protocol, "profile");
+});
+
+test("unknown viewport.foo type is protocol-fatal profile", async () => {
+  const pair = createMemoryCarrierPair();
+  const subsystem = createSubsystemDataPeer({
+    binding: binding(pair.left),
+    handlers: subsystemHandlers,
+  });
+  await pair.right.send(JSON.stringify({ type: "viewport.foo" }));
+  const terminal = await subsystem.terminal;
+  assert.equal(terminal.kind, "protocol-fatal");
+  assert.equal(terminal.protocol, "profile");
 });
 
 test("wrong-direction viewport.state fails as viewport protocol-fatal", async () => {

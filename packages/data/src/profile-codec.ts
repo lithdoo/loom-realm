@@ -23,7 +23,7 @@ export type DataRole = "subsystem" | "renderer";
 export function protocolFamilyOfType(type: string): DataProtocolFamily {
   if (type.startsWith("input.")) return "input";
   if (type.startsWith("render.")) return "render";
-  if (type.startsWith("viewport.")) return "viewport";
+  if (type === "viewport.state") return "viewport";
   return "profile";
 }
 

@@ -68,3 +68,32 @@ test("Desktop viewport source samples document layout viewport, resamples visibl
   window.document.dispatch("visibilitychange");
   assert.equal(samples.length, before);
 });
+
+test("Desktop viewport source coalesces a resize burst to the last size and drops late rAF after stop", () => {
+  const window = fakeWindow();
+  const samples = [];
+  const source = createDesktopRendererViewportSource(window);
+  const stop = source.start((sample) => samples.push({ ...sample }));
+  assert.equal(samples.length, 1);
+
+  window.innerWidth = 700;
+  window.innerHeight = 500;
+  window.dispatch("resize");
+  window.innerWidth = 900;
+  window.innerHeight = 700;
+  window.dispatch("resize");
+  window.innerWidth = 1280;
+  window.innerHeight = 720;
+  window.dispatch("resize");
+  assert.equal(samples.length, 1);
+  window.runFrame();
+  assert.deepEqual(samples.at(-1), { width: 1280, height: 720 });
+  assert.equal(samples.length, 2);
+
+  window.dispatch("resize");
+  stop();
+  window.innerWidth = 320;
+  window.innerHeight = 240;
+  window.runFrame();
+  assert.equal(samples.length, 2);
+});

@@ -245,7 +245,7 @@ qualify("wire-schema", "exact Viewport State v1 representation and diagnostics",
     await pair.right.send(JSON.stringify({ type: "viewport.reset", width: 1, height: 1 }));
     const terminal = await subsystem.terminal;
     assert.equal(terminal.kind, "protocol-fatal");
-    assert.equal(terminal.protocol, "viewport");
+    assert.equal(terminal.protocol, "profile");
   });
 
   await prove("recognized-invalid-protocol-viewport", async () => {
