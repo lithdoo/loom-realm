@@ -454,6 +454,10 @@ class SubsystemHost {
             this.currentDataPeer === peer
               ? this.input.onReset(message)
               : acceptedDataMessage,
+          // Viewport State v1 ingress is accepted for protocol accounting;
+          // Runtime-scoped retention (scope.viewport) lands with the
+          // Subsystem cut (C1-B) and replaces this drop-through handler.
+          onViewportState: () => acceptedDataMessage,
         },
       });
     } catch {

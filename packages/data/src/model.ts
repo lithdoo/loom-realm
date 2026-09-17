@@ -105,9 +105,22 @@ export type RenderPatchOpV1 = RenderNodeInsertV1 | RenderNodeRemoveV1 | RenderNo
 export interface RenderPatchV1 { readonly type: "render.patch"; readonly domainId: string; readonly baseRevision: number; readonly revision: number; readonly zIndex?: number; readonly ops: readonly RenderPatchOpV1[]; }
 export interface RenderEventV1 { readonly type: "render.event"; readonly domainId: string; readonly targetKey: string; readonly name: string; readonly data: JsonObject; }
 export type RenderUpdateMessageV1 = RenderDomainsV1 | RenderSnapshotV1 | RenderPatchV1 | RenderEventV1;
-export type RendererDataMessageV1 = UserInputMessageV1 | RenderUpdateMessageV1;
 
-export type DataProtocolFamily = "profile" | "input" | "render";
+/**
+ * Viewport State v1 — the sole new fourth child of the revised profile `/1`
+ * (ADR0037). Exact own keys `{type,width,height}`; width/height are positive
+ * finite safe integers in CSS logical pixels; direction is Renderer→Subsystem
+ * only. Normalization (floor of a raw finite positive fraction) belongs to the
+ * trusted physical source, never to this wire value.
+ */
+export interface ViewportStateV1 {
+  readonly type: "viewport.state";
+  readonly width: number;
+  readonly height: number;
+}
+export type RendererDataMessageV1 = UserInputMessageV1 | RenderUpdateMessageV1 | ViewportStateV1;
+
+export type DataProtocolFamily = "profile" | "input" | "render" | "viewport";
 export type DataTerminal =
   | { readonly kind: "carrier-closed" }
   | { readonly kind: "carrier-lost"; readonly cause?: unknown }
@@ -120,6 +133,7 @@ export interface SubsystemDataHandlers {
   onInputState(message: InputStateV1): DataInboundDisposition | Promise<DataInboundDisposition>;
   onInputEvent(message: InputEventV1): DataInboundDisposition | Promise<DataInboundDisposition>;
   onInputReset(message: InputResetV1): DataInboundDisposition | Promise<DataInboundDisposition>;
+  onViewportState(message: ViewportStateV1): DataInboundDisposition | Promise<DataInboundDisposition>;
 }
 export interface SubsystemDataPeerOptions { readonly binding: DataCurrentBindingV1; readonly handlers: SubsystemDataHandlers; }
 export interface SubsystemInputDataPeer { sendInterest(message: InputInterestV1): Promise<DataSendOutcome>; }
@@ -151,9 +165,19 @@ export interface RendererInputDataPeer {
   sendEvent(message: InputEventV1): Promise<DataSendOutcome>;
   sendReset(message: InputResetV1): Promise<DataSendOutcome>;
 }
+/**
+ * Renderer-side viewport sender. Entering the shared writer is preceded by a
+ * per-carrier bounded latest-state merge: at most one writer-admitted/in-flight
+ * unit plus at most one not-yet-admitted pending latest slot. Superseded and
+ * equal-suppressed calls settle with the outcome of the converging admission.
+ */
+export interface RendererViewportDataPeer {
+  sendState(message: ViewportStateV1): Promise<DataSendOutcome>;
+}
 export interface RendererDataPeer {
   readonly binding: Readonly<DataBindingViewV1>;
   readonly input: RendererInputDataPeer;
+  readonly viewport: RendererViewportDataPeer;
   readonly terminal: Promise<DataTerminal>;
   close(): Promise<void>;
 }

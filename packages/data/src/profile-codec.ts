@@ -8,6 +8,7 @@ import {
   validateRenderPatch,
   validateRenderSnapshot,
 } from "./render-codec.js";
+import { validateViewportState } from "./viewport-codec.js";
 import {
   assertBoundedJson,
   fail,
@@ -24,6 +25,19 @@ function typeOfObject(raw: unknown): string {
   return stringValue(o.type, "profile", "type");
 }
 
+/**
+ * Child family classification for a recognized message type. `input.*` and
+ * `render.*` keep their frozen prefix rule; the revised fourth child family
+ * applies only to the exact recognized `viewport.state` type — any other
+ * unknown top-level type stays a common `"profile"` failure.
+ */
+export function familyOf(type: string): "input" | "render" | "viewport" | "profile" {
+  if (type === "viewport.state") return "viewport";
+  if (type.startsWith("input.")) return "input";
+  if (type.startsWith("render.")) return "render";
+  return "profile";
+}
+
 function validateByType(raw: unknown): RendererDataMessageV1 {
   const type = typeOfObject(raw);
   if (type === "input.interest") return validateInputInterest(raw);
@@ -34,22 +48,20 @@ function validateByType(raw: unknown): RendererDataMessageV1 {
   if (type === "render.snapshot") return validateRenderSnapshot(raw);
   if (type === "render.patch") return validateRenderPatch(raw);
   if (type === "render.event") return validateRenderEvent(raw);
-  fail(
-    type.startsWith("input.") ? "input" : type.startsWith("render.") ? "render" : "profile",
-    "unknown data message type",
-  );
+  if (type === "viewport.state") return validateViewportState(raw);
+  fail(familyOf(type), "unknown data message type");
 }
 
 function inboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
-    ? type === "input.state" || type === "input.event" || type === "input.reset"
+    ? type === "input.state" || type === "input.event" || type === "input.reset" || type === "viewport.state"
     : type === "input.interest" || type.startsWith("render.");
 }
 
 function outboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
     ? type === "input.interest" || type.startsWith("render.")
-    : type === "input.state" || type === "input.event" || type === "input.reset";
+    : type === "input.state" || type === "input.event" || type === "input.reset" || type === "viewport.state";
 }
 
 export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV1 {
@@ -66,7 +78,7 @@ export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV
   const message = validateByType(parsed);
   const t = (message as { type: string }).type;
   if (!inboundAllowed(role, t)) {
-    fail(t.startsWith("input.") ? "input" : "render", "message direction invalid for role");
+    fail(familyOf(t), "message direction invalid for role");
   }
   return message;
 }
@@ -75,7 +87,7 @@ export function encodeForRole(message: RendererDataMessageV1, role: DataRole): s
   const validated = validateByType(message);
   const t = (validated as { type: string }).type;
   if (!outboundAllowed(role, t)) {
-    fail(t.startsWith("input.") ? "input" : "render", "outbound direction invalid for role");
+    fail(familyOf(t), "outbound direction invalid for role");
   }
   assertJsonValue(validated as unknown);
   if (jsonDepth(validated as unknown as JsonValue) > MAX_JSON_DEPTH) {
