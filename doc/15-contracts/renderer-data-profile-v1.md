@@ -1,7 +1,7 @@
 # Renderer ⇄ Subsystem Data Application Profile v1
 
 > 层级：正式契约 / Application Profile  
-> 状态：**Revised Frozen-preimplementation candidate / Docs Freeze HOLD / Not Implemented**（原三-child Frozen baseline被ADR0037显式reopen）  
+> 状态：**Revised Frozen / Core Docs Frozen 2026-09-17 subject `4cbf620`（owner 签署，见[冻结登记](../30-implementation/viewport-core-docs-freeze-registration-2026-09-17.md)）/ Not Implemented**（原三-child Frozen baseline被ADR0037显式reopen）  
 > 唯一目标 Profile identity：`loomrealm.renderer-data/1`；版本：1  
 > Composition：Data Connection v1 + User Input v1 + Render Update v1 + Viewport State v1  
 > 依赖：[Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  

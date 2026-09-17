@@ -7,7 +7,7 @@
 > 稳定程度：Frozen  
 > 主要定义：Renderer 与单个 Subsystem Runtime 之间 Data Connection 的 authority identity、candidate/install/current/retired 边界、唯一性、替换、重连、退役与 Platform Broker responsibility  
 > 上游 authority：[Main ⇄ Renderer Control v1](./main-renderer-control-v1.md)  
-> 组合 Profile：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)（ADR0037 修正后的四 child 首次版本候选；未实现/未冻结）  
+> 组合 Profile：[Renderer Data Application Profile v1](./renderer-data-profile-v1.md)（ADR0037 修正后的四 child 首次版本候选；未实现/文档已于 2026-09-17 冻结 subject `4cbf620`）  
 > Current child projection：[User Input v1](./user-input-v1.md)、[Render Update v1](./render-update-v1.md)、[Viewport State v1](./viewport-state-v1.md)；**精确组合与 fresh child baseline 均由 Profile v1 拥有**  
 > Conformance：[Data Connection v1 Conformance Profile](./renderer-subsystem-data-connection-conformance-v1.md)  
 > 决策：[ADR 0024](../decisions/0024-renderer-subsystem-data-connection-v1-semantic-closure.md)；组合修正：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  

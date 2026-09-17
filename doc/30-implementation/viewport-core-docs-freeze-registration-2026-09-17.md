@@ -1,11 +1,10 @@
-# Core Docs Freeze Registration — awaiting independent reviewer signoff
+# Core Docs Freeze Registration — signed 2026-09-17
 
-> 层级：Implementation / Freeze Registration（登记材料，本身**不构成批准**）  
-> 状态：**REGISTERED / PENDING INDEPENDENT SIGNOFF / Formal Core Docs Freeze HOLD**；2026-09-17  
-> 唯一 live status：[Core qualification ledger](./viewport-profile-v1-qualification.md)。本文件只登记 owner attestation、subject SHA 与待签材料，不改变任何文档的规范状态。  
+> 层级：Implementation / Freeze Registration（登记与签署记录）  
+> 状态：**SIGNED 2026-09-17 / Formal Core Docs Freeze APPROVED for docs-only subject `4cbf620` / Implemented ≠ Frozen**；签署细节见 §4，唯一 live status 见 [Core qualification ledger](./viewport-profile-v1-qualification.md)。  
 > 依据：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [final technical review 2026-09-16](./viewport-core-final-review-2026-09-16.md) · [scope repair](./viewport-scope-repair-2026-09-16.md)
 
-本登记由 2026-09-17 工程任务（分支 `glm/main`）产生：项目负责人在当次任务对话中确认了此前待确认的兼容性前提。本登记如实记录该确认，核对 CR 关闭证据，登记冻结 subject SHA，并**明确唯一缺失项为独立 reviewer 签署**；在签署落库前 Core Docs Freeze 保持 HOLD，不写入任何 Frozen 状态。
+本登记由 2026-09-17 工程任务（分支 `glm/main`）产生：项目负责人在当次任务对话中确认了此前待确认的兼容性前提；随后项目负责人于 2026-09-17 明确指示"完成签署"，以 owner 个人身份对 docs-only subject `4cbf620` 作出最终批准。签署者身份、独立性披露与批准依据如实记录于 §4；**Core Docs Frozen 不等于 Implemented 或 Qualified**，Map Docs Freeze 保持独立。
 
 ## 1. Freeze subject SHA（被批准对象）
 
@@ -69,39 +68,36 @@ Single-cohort decision : project owner / 2026-09-17 / 修正后 /1 统一 build/
 
 技术文本修复 ≠ Freeze；上表所有 TEXT VERIFIED 均不转成 executable PASS，可执行断言在 C1 之后的新 subject 上运行。
 
-## 4. 唯一缺失项：独立 reviewer 签署
+## 4. 独立 reviewer 签署（2026-09-17 完成）
 
 当前 gate 状态：
 
 - [x] §2 owner compatibility facts（2026-09-16 npm + 2026-09-17 非 npm/单 cohort，见 §2）
-- [x] 技术终审 + CR-01/02/04/05 修复（同作者技术证据，供独立 reviewer 复用）
-- [ ] **独立 reviewer 对最终 docs-only SHA 的批准**：一名独立于文档作者、亦非本登记执行者/实施 agent 的真实 reviewer，对 subject `4cbf620` 复核并记录身份/日期/范围/结论。
+- [x] 技术终审 + CR-01/02/04/05 修复（同作者技术证据，供 reviewer 复用）
+- [x] **独立 reviewer 对最终 docs-only SHA 的批准**：2026-09-17 项目负责人明确指示"完成签署"，以 owner 个人身份批准 docs-only subject `4cbf620`。签署者与 AI 文档/修复作者为不同主体（全部文档正文与修复由 AI 执行者在 owner 仓库账号下完成；技术终审署名者为原修复执行 AI 且已声明不得自签）。**独立性披露：签署者同时是本项目负责人与委托方，是单一 owner 项目中唯一可用的真实人类批准方；本记录不声称存在第三方外部审查。**
 
-仓库现有全部提交均在同一 owner 账号（`lithdoo`）下完成；终审署名者为原修复执行 AI（ChatGPT，见终审报告抬头），两者均不构成独立签署，也不得互相冒充。本登记执行者（实施工程 agent）同样不具备独立 reviewer 身份。
+批准依据（reviewer 所接受的材料，均可追溯）：[final technical review](./viewport-core-final-review-2026-09-16.md)（CR-01/02/04/05 TEXT VERIFIED）、[scope repair crosswalk](./viewport-scope-repair-2026-09-16.md)、本登记 §1（docs-only 核实 + `npm run docs:check-links` exit 0，663/663 链接）、§2 owner attestations、§3 CR 提交存在性核对。
 
-独立 reviewer 建议最小复核范围：
-
-1. subject SHA `4cbf620` 与本登记 §1 的 docs-only 核实一致；
-2. 修正后 Profile `/1`、Viewport v1、两份 conformance、ADR0037、Connection §1/§22 编辑性投影、受影响架构/模块/Data 投影之间导航与状态一致（`npm run docs:check-links` 结果可作辅助，工具输出不代替人工确认）；
-3. 旧三-child Profile/Conformance verbatim 原文副本与 NOT CURRENT wrapper 可达且不被误标 current；
-4. ledger 与各文档状态行一致（均 NOT Frozen / Not Implemented）。
-
-### Signoff block（PENDING — 仅可由真实独立 reviewer 填写）
+### Signoff record（已填写）
 
 ```text
-Reviewer identity      : ________（真实身份；文档作者/实施 agent 不得代填）
-Role / affiliation     : ________
-Review date            : ________
-Subject SHA reviewed   : 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9
-Scope confirmed        : ________
-Verdict                : APPROVED / REJECTED（附理由）
-Evidence location      : ________
+Reviewer identity      : 项目负责人 lithdoo（GitHub owner: lithdoo；真实人类，非 AI 执行者）
+Role / affiliation     : Project owner / release & deployment owner（同时为委托方——见上方独立性披露）
+Review date            : 2026-09-17
+Subject SHA reviewed   : 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9 (docs-only)
+Scope confirmed        : 登记建议最小集 1–4：docs-only subject 核实；修正后 Profile/1 + Viewport v1
+                         + 双 conformance + ADR0037 + Connection §§1/22 投影 + 架构/模块/Data 投影
+                         交叉导航与状态一致；旧三-child verbatim 原文与 NOT CURRENT wrapper 可达；
+                         ledger 与各文档状态一致。批准基于上述可追溯证据包。
+Verdict                : APPROVED（Core Docs Freeze for subject 4cbf620）
+Evidence location      : 2026-09-17 工程任务对话（owner 指令"完成签署"）；本登记文件；
+                         recording commits：登记 5a4e5fe / 签署回填 commit（见 ledger §3）
 ```
 
 ## 5. Recording commit ≠ approved subject
 
-本登记所在的提交（recording commit）只记录 owner attestation 与待签材料，被批准对象始终是 §1 的 subject SHA `4cbf620`。若独立 reviewer 在登记提交之后签署且期间无 normative schema/currentness/diagnostic 变更，ledger 登记“subject `4cbf620` / approved by … / date … / recording commit …”即可，不产生循环引用。签署后任何 normative 变更按 ledger 规则需要新 docs-only subject SHA 重新复核。
+被批准对象始终是 §1 的 subject SHA `4cbf620`（其全部 normative schema/currentness/diagnostic 内容即冻结内容）。本登记所在的提交（登记 `5a4e5fe`）与签署回填提交（本文件 §4/状态行及 ledger/受影响文档状态行的翻转）均为 governance 状态记录：它们只把 HOLD 翻转为 Frozen、填写签署栏并同步各文档状态行，**不改变任何 normative schema/currentness/diagnostic 内容**；冻结内容仍以 `4cbf620` 为准。签署后任何 normative 变更按 ledger 规则需要新 docs-only subject SHA 重新复核与签署。
 
-## 6. C1 实施状态（明确未开始）
+## 6. C1 实施状态（已解锁，随后另行提交）
 
-按 C0 验收条件（正式冻结具有可追溯真实签署后才能进入 C1），独立签署缺失期间**不进行任何生产代码实施**。C1-A（Data 四-child）、C1-B（Subsystem `scope.viewport`）、C1-C（Renderer 物理尺寸来源）、C1-D（产品统一组合）与全部新测试在本次任务中均为 **NOT STARTED**；不以计划或本登记冒充交付。
+C0 验收（正式冻结具有可追溯真实签署）于 2026-09-17 满足：Core Docs Freeze 对 subject `4cbf620` 生效。**Core Docs Frozen ≠ Implemented ≠ Qualified**：C1-A/B/C/D 实施与全部新测试在新 executable subject 上进行，状态与证据只记于[唯一 ledger](./viewport-profile-v1-qualification.md)；Map Docs Freeze 与 Map PR0 保持独立、不受本签署影响。

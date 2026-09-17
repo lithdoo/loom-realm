@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Docs Freeze HOLD / Not Implemented**  
+> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Core Docs Frozen 2026-09-17 subject `4cbf620` / Not Implemented**  
 > 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update、Viewport State 与 Platform Broker 的分层关系  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)  
 > 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)  
@@ -25,7 +25,7 @@ Renderer
  │ Platform DataConnectionBroker realizes current authority
  │
  ▼
-Renderer Data Application Profile v1  Revised candidate / Docs Freeze HOLD
+Renderer Data Application Profile v1  Normative / Core Docs Frozen 2026-09-17
 ├── Data Connection v1                 Frozen (wire/currentness unchanged)
 ├── User Input v1                      Frozen (wire unchanged)
 ├── Render Update v1                   Frozen (wire unchanged)
@@ -144,7 +144,7 @@ fresh-carrier independent child baselines
 terminal first-wins / no retry-replay-migration
 ```
 
-Data Connection v1、User Input v1、Render Update v1 各自仍 Frozen；修订后的 **Profile v1 与 Viewport State v1 仍为 Docs Freeze HOLD**。后续实现须证明修订后完整 Profile 的 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。Viewport producer 仅在 shared writer admission 前有界 latest-wins，不改变 Frozen writer 或其他 child ordering。
+Data Connection v1、User Input v1、Render Update v1 各自仍 Frozen；修订后的 **Profile v1 与 Viewport State v1 已于 2026-09-17 完成 Core Docs Freeze（subject `4cbf620`），仍 Not Implemented**。后续实现须证明修订后完整 Profile 的 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。Viewport producer 仅在 shared writer admission 前有界 latest-wins，不改变 Frozen writer 或其他 child ordering。
 
 **真正不同的 Profile identity** 变更必须 fresh Data generation。本次同一 `/1` 的首次发布前纠正不是运行时 Profile replacement；产品必须先保证 coherent build/deployment cohort，不能依靠 `(S,G,P)` 识别旧新二进制。见 [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) 和 [qualifications](../30-implementation/viewport-profile-v1-qualification.md)。
 
@@ -457,7 +457,7 @@ Provisioning material不是 Data application payload，也不拥有 Input/Render
 
 1. Main Control authority、Subsystem desired state、Renderer local producer/replica、Platform physical topology分离；
 2. DataAuthority使用 `(S,G,dataProfile)`，physical carrier不拥有 generation/profile；
-3. current revised Profile `/1` = Frozen Connection1 + Frozen Input1 + Frozen Render1 + candidate Viewport1；**Profile/Viewport Docs Freeze HOLD、Not Implemented**；旧三-child `/1` Frozen 仅为历史 executable；
+3. current revised Profile `/1` = Frozen Connection1 + Frozen Input1 + Frozen Render1 + Frozen(docs) Viewport1；**Profile/Viewport Core Docs Frozen 2026-09-17、Not Implemented**；旧三-child `/1` Frozen 仅为历史 executable；
 4. Data connection per-Subsystem，不 per-Frame/Activation/Domain；
 5. User Input = current Data × Main InputTarget × Interest[F] × Producer；**Viewport geometry不受该 gate 控制**；
 6. Desired Interest、Activation input lease、carrier publication state是三个独立 lifetime；

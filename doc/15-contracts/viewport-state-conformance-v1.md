@@ -1,7 +1,7 @@
 # Viewport State v1 Conformance
 
 > 层级：正式契约 / Conformance Specification  
-> 状态：Draft / Executable-ready Candidate / Not Frozen  
+> 状态：Normative / Executable-ready / Core Docs Frozen 2026-09-17 subject `4cbf620`（未执行）  
 > Contract：[Viewport State v1](./viewport-state-v1.md) · [修正后的 Profile v1](./renderer-data-profile-v1.md)；Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16
 

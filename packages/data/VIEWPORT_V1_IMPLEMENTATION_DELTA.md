@@ -1,7 +1,7 @@
 # `@loomrealm/data` 设计
 
 > 层级：Package-local implementation/role seam  
-> 状态：**旧三-child `/1` M8 historical Implemented/Qualified；修正后四-child `/1` Candidate / Not implemented / Docs Freeze HOLD**  
+> 状态：**旧三-child `/1` M8 historical Implemented/Qualified；修正后四-child `/1` Docs Frozen 2026-09-17（subject `4cbf620`）/ Not implemented**  
 > 当前规范：[Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [Viewport v1](../../doc/15-contracts/viewport-state-v1.md) · [Connection v1](../../doc/15-contracts/renderer-subsystem-data-connection-v1.md) · [Input v1](../../doc/15-contracts/user-input-v1.md) · [Render v1](../../doc/15-contracts/render-update-v1.md)  
 > ADR：[ADR0025 partial update](../../doc/decisions/0025-renderer-data-profile-v1-preimplementation-closure.md) · [ADR0037](../../doc/decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；[唯一资格 ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md) · [保全审查](../../doc/30-implementation/viewport-v1-final-freeze-closure-2026-09-16.md)  
 > 最近复核：2026-09-16

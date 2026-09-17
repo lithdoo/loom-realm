@@ -1,7 +1,7 @@
 # Renderer Data Application Profile v1 Conformance
 
 > 层级：正式契约 / Conformance Specification  
-> 状态：**Revised preimplementation / Executable-ready Candidate / Not Frozen**  
+> 状态：**Revised / Executable-ready / Core Docs Frozen 2026-09-17 subject `4cbf620`（未执行）**  
 > Profile identity：`loomrealm.renderer-data/1`；`fixtureSetRevision = 3`  
 > Contract：[Profile v1](./renderer-data-profile-v1.md) · [Connection v1](./renderer-subsystem-data-connection-v1.md) · [Input v1](./user-input-v1.md) · [Render v1](./render-update-v1.md) · [Viewport v1](./viewport-state-v1.md)  
 > 完整历史断言基线：[fixture revision-2 原文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [受保护规则与范围](../30-implementation/viewport-scope-repair-2026-09-16.md)  

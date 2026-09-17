@@ -2,7 +2,7 @@
 
 > 层级：实施计划  
 > 状态：Tracking  
-> 稳定程度：M10、M12–M13 Closed 历史资格；ADR0035 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的 M11/M14/M15 **Requalification Pending**；新增 ADR0037 revised `/1`/Viewport **Docs Freeze HOLD / Not Implemented**；M15 physical design remains ADR0034 + recomposition SSOT  
+> 稳定程度：M10、M12–M13 Closed 历史资格；ADR0035 subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 的 M11/M14/M15 **Requalification Pending**；新增 ADR0037 revised `/1`/Viewport **Core Docs Frozen 2026-09-17（subject `4cbf620`）/ Not Implemented**；M15 physical design remains ADR0034 + recomposition SSOT  
 > 主要定义：M1–M17 实现顺序、current closure、M14 consumer proof、Desktop/PWA qualification boundary及 viewport/direct-v1 当前实施插入顺序  
 > 依赖：[渲染系统](../10-architecture/rendering-system.md)、[独立分包与发布架构](./package-architecture.md)、[正式契约目录](../15-contracts/README.md)、[ADR 0032](../decisions/0032-game-library-example-boundary.md)、[ADR 0034](../decisions/0034-hostra-owned-desktop-composition.md)、[ADR 0035](../decisions/0035-render-domain-existing-node-update.md)、[ADR 0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
 > 最近复核：2026-09-16
@@ -570,7 +570,7 @@ M12 Content                                ✅ Closed 2026-09-08
 M13 Web Presentation                       ✅ Closed 2026-09-09; new subject regression pending
 M14 Map Game Library + First Real Game     ⏳ Requalification Pending
 M15 Desktop Full E2E                       ⏳ Requalification Pending
-Viewport + corrected /1                  ⏳ Docs Freeze HOLD / Not Implemented
+Viewport + corrected /1                  ⏳ Core Docs Frozen 2026-09-17 / Not Implemented
 Map dynamic viewport/performance          ⏳ Map Freeze HOLD / PR0 NOT RUN
 M16 PWA Runtime                            blocked by current requalification
 M17 PWA Full E2E / Equivalence             pending

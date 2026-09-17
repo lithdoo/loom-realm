@@ -1,7 +1,7 @@
 # Renderer → Subsystem Viewport State v1
 
 > 层级：正式契约 / Child Protocol  
-> 状态：**Draft / Normative Candidate / Not Frozen / Not Implemented**  
+> 状态：**Normative / Core Docs Frozen 2026-09-17 subject `4cbf620` / Not Implemented**  
 > 标识：`loomrealm.viewport-state/1`；唯一 parent：[revised Renderer Data Profile `/1`](./renderer-data-profile-v1.md)  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Conformance：[Viewport v1](./viewport-state-conformance-v1.md)  
 > 最近复核：2026-09-16
