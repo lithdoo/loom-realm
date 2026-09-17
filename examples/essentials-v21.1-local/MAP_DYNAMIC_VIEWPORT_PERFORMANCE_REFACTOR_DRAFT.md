@@ -1,6 +1,6 @@
 # Map 动态视口与大屏性能：机械实施合同候选
 
-> 状态：**Map Docs Freeze APPROVED (design/test contract only)**；2026-09-16。2026-09-17：**Product Closeout Reopened / Qualification Pending** — Frozen 设计正文未改；实施正在按合同补齐 detached atomic stage、resource eviction、exact Browser validation、single-endpoint pair fence、overlap refresh copy。冻结不等于代码或 640/720/1080 P95 PASS。签署见 §14 与 [freeze review](./MAP_VIEWPORT_DOCS_FREEZE_REVIEW_2026-09-16.md)。
+> 状态：**Map Docs Freeze APPROVED (design/test contract only)**；2026-09-16。2026-09-17：**Product Closed** on Desktop for remediation executable `66d4ea3` + frozen Hostra `1.0.1-beta.1` (`d863beab`) 640/720/1080 P95 on this machine — Frozen 设计正文未改。Hosted CI / secondary hardware = NOT RUN。签署见 §14 与 [freeze review](./MAP_VIEWPORT_DOCS_FREEZE_REVIEW_2026-09-16.md)；closeout [PRODUCT_CLOSED](./MAP_VIEWPORT_PRODUCT_CLOSED.md)。
 > Core：[ADR0037](../../doc/decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)、[Profile `/1`](../../doc/15-contracts/renderer-data-profile-v1.md)、[Viewport v1](../../doc/15-contracts/viewport-state-v1.md)、[Core ledger](../../doc/30-implementation/viewport-profile-v1-qualification.md)。继承 Frozen [Render Update v1](../../doc/15-contracts/render-update-v1.md)、[M13 Web Presentation API](../../doc/15-contracts/web-presentation-api-v1.md)、[walking](./MAP_WALKING_ANIMATION_DESIGN_DRAFT.md)、[transfer](./MAP_TRANSFER_DESIGN_DRAFT.md)。[Map-private motion-stage 子规范](./MAP_VIEW_SPRITE_MOTION_STAGE_CLOSURE.md)仅细化本文 §8，不是独立上层合同；若冲突 STOP 交设计负责人同步。旧 Profile `/2` 已撤销，不发布/不实现。
 
 ## 0. Agent 只能机械实施
