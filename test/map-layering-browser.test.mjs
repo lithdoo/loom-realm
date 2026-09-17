@@ -1220,6 +1220,20 @@ test("single-frame idle autotile does not keep a permanent RAF", { timeout: 30_0
   await installAutotile(page, ref.key, await makeStrip(page, 32, 32, ["rgb(0, 128, 0)"]));
   await paintAutotile(page, cellView(ref));
   assert.equal(await page.evaluate(() => window.__view._raf), undefined);
+  assert.equal(await page.evaluate(() => window.__view._autotileTimer), undefined);
+});
+
+test("standing animated autotile uses a slot timer instead of permanent rAF", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const ref = autotileRef("Autotiles/Test Flowers [1]");
+  await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
+  await paintAutotile(page, cellView(ref));
+  assert.equal(await page.evaluate(() => window.__view._raf), undefined);
+  assert.notEqual(await page.evaluate(() => window.__view._autotileTimer), undefined);
+  await page.clock.runFor(50);
+  assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
+  assert.equal(await page.evaluate(() => window.__view._raf), undefined);
 });
 
 test("synchronous reparent keeps the original animated prepared loop", { timeout: 30_000 }, async (t) => {
@@ -1236,7 +1250,8 @@ test("synchronous reparent keeps the original animated prepared loop", { timeout
   });
   await page.clock.runFor(50);
   assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
-  assert.notEqual(await page.evaluate(() => window.__view._raf), undefined);
+  assert.equal(await page.evaluate(() => window.__view._raf), undefined);
+  assert.notEqual(await page.evaluate(() => window.__view._autotileTimer), undefined);
 });
 
 test("motion state machine keeps startedAt for same id/fingerprint and rejects drift", { timeout: 30_000 }, async (t) => {

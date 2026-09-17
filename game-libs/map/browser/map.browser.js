@@ -572,6 +572,7 @@
       this._accepted = undefined;
       this._raf = undefined;
       this._retry = undefined;
+      this._autotileTimer = undefined;
       this._retryAttempts = 0;
       this._activeMotion = null;
       this._latestData = undefined;
@@ -613,6 +614,13 @@
       if (sprite) sprite._raf = undefined;
     }
 
+    _cancelAutotileTimer() {
+      if (this._autotileTimer !== undefined) {
+        clearTimeout(this._autotileTimer);
+        this._autotileTimer = undefined;
+      }
+    }
+
     _cancelRetry() {
       if (this._retry !== undefined) {
         clearTimeout(this._retry);
@@ -634,6 +642,7 @@
         if (!this.isConnected) {
           this._sequence += 1;
           this._cancelRaf();
+          this._cancelAutotileTimer();
           this._cancelRetry();
           this._activeMotion = null;
           this._state = "DISPOSED";
@@ -651,6 +660,7 @@
       this._sequence += 1;
       this._paintEpoch = this._sequence;
       this._cancelRetry();
+      this._cancelAutotileTimer();
       this._retryAttempts = 0;
       this._disown(this._candidateOwner(this._sequence - 1));
       qualify("presentation-received", { element: "map-view", motionId: data.motionId });
@@ -662,6 +672,7 @@
       this._sequence += 1;
       this._paintEpoch = this._sequence;
       this._cancelRetry();
+      this._cancelAutotileTimer();
       this._retryAttempts = 0;
       this._disown(this._candidateOwner(this._sequence - 1));
       void this._prepare(this._sequence);
@@ -700,6 +711,7 @@
         this._accepted = prepared;
         this._state = "VISIBLE";
         this._cancelRaf();
+        this._cancelAutotileTimer();
         this._tickAccepted(prepared, sequence, false);
         return;
       }
@@ -787,6 +799,7 @@
     _failPrepare(sequence) {
       if (sequence !== this._sequence) return;
       this._cancelRaf();
+      this._cancelAutotileTimer();
       if (!this._accepted) this._state = "EMPTY";
       else this._state = "VISIBLE";
       if (this._retryAttempts >= RETRY_MS.length) {
@@ -965,6 +978,7 @@
       this._accepted = prepared;
       this._state = "VISIBLE";
       this._cancelRaf();
+      this._cancelAutotileTimer();
       this._tickAccepted(prepared, sequence, true);
     }
 
@@ -1047,8 +1061,9 @@
         this._lastPaintedCamera = { x: cameraX, y: cameraY };
       }
       if (motion && progress >= 1) qualify("browser-motion-complete", { element: "map-view", motionId: motion.id, visualX: cameraX, visualY: cameraY });
-      const needsNextFrame = Boolean((motion || sprite?.motion) && progress < 1) || hasAnimatedAutotile;
-      if (needsNextFrame) {
+      this._cancelAutotileTimer();
+      const needsMotionFrame = Boolean((motion || sprite?.motion) && progress < 1);
+      if (needsMotionFrame) {
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
           this._tickAccepted(prepared, sequence, false);
@@ -1060,6 +1075,28 @@
       this._raf = undefined;
       const child = this._spriteChild();
       if (child) child._raf = undefined;
+      if (hasAnimatedAutotile) this._scheduleAutotileTick(prepared, sequence, now);
+    }
+
+    _nextAutotileDelayMs(prepared, now) {
+      let next = Infinity;
+      for (const item of prepared.autotiles.values()) {
+        if (item.frameCount <= 1 || !item.durationMs) continue;
+        const elapsed = Math.max(0, now - this._animationStartedAt);
+        const remainder = elapsed % item.durationMs;
+        const delay = remainder === 0 ? item.durationMs : item.durationMs - remainder;
+        if (delay < next) next = delay;
+      }
+      return Number.isFinite(next) ? Math.max(1, next) : null;
+    }
+
+    _scheduleAutotileTick(prepared, sequence, now) {
+      const delay = this._nextAutotileDelayMs(prepared, now);
+      if (delay === null) return;
+      this._autotileTimer = setTimeout(() => {
+        this._autotileTimer = undefined;
+        this._tickAccepted(prepared, sequence, false);
+      }, delay);
     }
 
     _autotileFrameDirty(layer, frames, tiles) {
