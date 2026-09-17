@@ -240,6 +240,7 @@ function movementPayload(
     viewportSet.chunks = window.chunks;
   }
   const playerSet: Record<string, unknown> = {
+    visualEpoch,
     x: nextX,
     y: nextY,
     screenX,
@@ -480,7 +481,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           nodes: [
             {
               key: VIEWPORT_KEY,
-              data: { set: includeProjection ? viewportSet : { ...viewportSet, visualEpoch } },
+              data: { set: viewportSet },
             },
             { key: PLAYER_KEY, data: { set: playerSet } },
           ],

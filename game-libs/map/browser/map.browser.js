@@ -382,7 +382,7 @@
       this._resources = null;
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = ":host{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas{position:absolute;left:0;top:0}";
+      style.textContent = ":host{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas{display:block}";
       shadow.append(style);
     }
     receiveRenderContext(context) {
@@ -845,6 +845,27 @@
 
     __clampCameraX(cameraX) { return cameraX; }
 
+    /** Screen-space pixel sampler for qualification harnesses: composites the
+     * depth buckets at viewport coordinates (canvas-space of the accepted
+     * world raster minus camera). Product code never calls this. */
+    __sampleScreen(x, y) {
+      const accepted = this._accepted;
+      if (accepted === null) return null;
+      const sorted = [...accepted.buckets.entries()].sort((a, b) => a[0] - b[0]);
+      for (const [depth, bucket] of sorted) {
+        const cameraX = accepted.view.cameraMotion === null ? accepted.view.cameraX : Math.round(accepted.view.cameraMotion.fromCameraX + (accepted.view.cameraX - accepted.view.cameraMotion.fromCameraX) * 1);
+        void cameraX;
+        void depth;
+        const cx = x + accepted.view.cameraX - bucket.worldX;
+        const cy = y + accepted.view.cameraY - bucket.worldY;
+        if (cx < 0 || cy < 0 || cx >= bucket.canvas.width || cy >= bucket.canvas.height) continue;
+        const data = bucket.canvas.getContext("2d").getImageData(cx, cy, 1, 1).data;
+        if (data[3] === 0) continue;
+        return [data[0], data[1], data[2]];
+      }
+      return null;
+    }
+
     __spritePoseFor(spriteData, progress) {
       const motion = spriteData.motion;
       let screenX = spriteData.screenX;
@@ -913,6 +934,10 @@
     }
   }
 
-  if (customElements.get("lr-map-view") === undefined) customElements.define("lr-map-view", LoomRealmMapView);
-  if (customElements.get("lr-map-sprite") === undefined) customElements.define("lr-map-sprite", LoomRealmMapSprite);
+  if (customElements.get("lr-map-view") !== undefined || customElements.get("lr-map-sprite") !== undefined) {
+    // Fail closed when an owned tag is already registered.
+    throw new TypeError("LoomRealm map element tag already registered");
+  }
+  customElements.define("lr-map-view", LoomRealmMapView);
+  customElements.define("lr-map-sprite", LoomRealmMapSprite);
 })();
