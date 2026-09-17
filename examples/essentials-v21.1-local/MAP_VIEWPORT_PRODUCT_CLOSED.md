@@ -1,8 +1,20 @@
-# Map Viewport — Product Closed (Desktop / Map)
+# Map Viewport — Product Closeout Reopened / Qualification Pending
 
-> 状态：**Product Closed for Desktop Map dynamic viewport**；2026-09-17。PWA / M16 / M17 = OUT OF SCOPE (not PASS, not FAIL).
+> 状态：**Product Closeout Reopened / Qualification Pending**；2026-09-17 remediation。PWA / M16 / M17 = OUT OF SCOPE (not PASS, not FAIL).
+> 前一版 2026-09-17 “Product Closed”结论对本 SHA **不再无条件成立**。PR1/PR2/PR3 历史 PASS 数字保留为当时 subject 的 evidence，不得改写成从未发生，也不得直接转给本轮 remediation executable。
 
-This closes the Map dynamic-viewport delivery that started from `origin/main` `4cbf620` through Core Viewport C1, Map Docs Freeze, PR1 640, PR2 dynamic 720/1080 Chromium, and PR3 same-tree M11/M13/M14/M15/Hostra P95.
+This is **not** a redesign. Closeout is reopened until the mechanical contract gaps below are remediating **and** the final executable subject is requalified.
+
+## Why closeout is reopened
+
+- detached complete candidate stage + one synchronous atomic pair commit (no live Shadow DOM canvas mutation during prepare)
+- bounded ImageBitmap ownership / stale decode eviction (`bitmap.close()`)
+- exact Browser closed-schema validation (ResourceRef / TileVisual / chunks / camera)
+- pair single-endpoint fencing (View-only / Sprite-only must stay OLD/EMPTY)
+- refresh overlap-copy alignment with the frozen Map contract
+- requalification on the remediation SHA (hosted CI and secondary hardware remain NOT RUN until actually executed)
+
+Historical delivery that started from `origin/main` `4cbf620` through Core Viewport C1, Map Docs Freeze, PR1 640, PR2 dynamic 720/1080 Chromium, and PR3 same-tree M11/M13/M14/M15/Hostra P95 remains the provenance chain. Remediation evidence: [MAP_VIEWPORT_REMEDIATION_EVIDENCE.md](./MAP_VIEWPORT_REMEDIATION_EVIDENCE.md).
 
 ## Subject chain
 
@@ -17,9 +29,9 @@ This closes the Map dynamic-viewport delivery that started from `origin/main` `4
 
 Contract: [MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md](./MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md). Evidence: [PR0](./MAP_VIEWPORT_PR0_EVIDENCE.md), [PR1](./MAP_VIEWPORT_PR1_EVIDENCE.md), [PR2](./MAP_VIEWPORT_PR2_EVIDENCE.md), [PR3](./MAP_VIEWPORT_PR3_EVIDENCE.md).
 
-## Product gates (local Windows)
+## Product gates (historical PR3 subject — not current closeout)
 
-Official Hostra table (same Browser Window `performance.now()`, input-captured → first-motion-paint):
+Official Hostra table from the prior Product Closed write-up (same Browser Window `performance.now()`, input-captured → first-motion-paint). **These numbers are historical evidence for `26fc25a` / then-current Cursor machine. They are not a requalification of the remediation SHA.**
 
 | Viewport | Ordinary P95 | Refresh P95 | Camera-only ordinary | Status |
 |---|---:|---:|---:|---|

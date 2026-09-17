@@ -71,7 +71,7 @@ Owner continuation after the original STOP split the budget: **accepted/visible*
 | 1280×720 center | 74498048 (71.0 MiB) | 149012480 (142.1 MiB) | PASS / PASS |
 | 1920×1080 center | **124502016 (118.7 MiB)** | **249020416 (237.5 MiB)** | PASS / PASS |
 
-Synthetic decode 147456 B. `maxLivePlusDecode` 249167872. `canvasBudgetOk: true`, `decodePlusBackingOk: true`, `overVisible: []`, `overLive: []`. Dense 1080 accepted stays under 128MiB; the previous STOP was the 2× detached count against the accepted-only cap.
+Synthetic decode 147456 B. `maxLivePlusDecode` 249167872. `canvasBudgetOk: true`, `decodePlusBackingOk: true`, `overVisible: []`, `overLive: []`. Dense 1080 accepted stays under 128MiB. The previous STOP (dense 720/1080 live backing counted against a single 128MiB cap, including the 2× detached candidate) is **real STOP evidence under that then-current contract interpretation**, not a test/harness error. The later design revision split **accepted/visible ≤128MiB** from **accepted + detached candidate + current-scene decode ≤256MiB**. Independent-review-branch numbers such as GLM `178.13MiB > 128MiB` are not Cursor-host measurements and must not be rewritten as Cursor data.
 
 ### 2.3 Core `RenderDomain.update` residual — PASS vs per-size refresh gates
 
