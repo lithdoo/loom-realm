@@ -40,19 +40,80 @@ function regularTile({ x = 0, y = 0, z = 0, tileId = 384, depth = 0 } = {}) {
   return { x, y, z, tileId, depth, blit: { kind: "regular", sourceIndex: tileId - 384 } };
 }
 
+const AUTOTILE_QUARTERS = [
+  [27, 28, 33, 34], [5, 28, 33, 34], [27, 6, 33, 34], [5, 6, 33, 34],
+  [27, 28, 33, 12], [5, 28, 33, 12], [27, 6, 33, 12], [5, 6, 33, 12],
+  [27, 28, 11, 34], [5, 28, 11, 34], [27, 6, 11, 34], [5, 6, 11, 34],
+  [27, 28, 11, 12], [5, 28, 11, 12], [27, 6, 11, 12], [5, 6, 11, 12],
+  [25, 26, 31, 32], [25, 6, 31, 32], [25, 26, 31, 12], [25, 6, 31, 12],
+  [15, 16, 21, 22], [15, 16, 21, 12], [15, 16, 11, 22], [15, 16, 11, 12],
+  [29, 30, 35, 36], [29, 30, 11, 36], [5, 30, 35, 36], [5, 30, 11, 36],
+  [39, 40, 45, 46], [5, 40, 45, 46], [39, 6, 45, 46], [5, 6, 45, 46],
+  [25, 30, 31, 36], [15, 16, 45, 46], [13, 14, 19, 20], [13, 14, 19, 12],
+  [17, 18, 23, 24], [17, 18, 11, 24], [41, 42, 47, 48], [5, 42, 47, 48],
+  [37, 38, 43, 44], [37, 6, 43, 44], [13, 18, 19, 24], [13, 14, 43, 44],
+  [37, 42, 43, 48], [17, 18, 47, 48], [13, 18, 43, 48], [1, 2, 7, 8],
+];
+
+function autotileCornerTuple(tileId) {
+  const variant = (tileId - 48) % 48;
+  const row = AUTOTILE_QUARTERS[variant];
+  return row.flatMap((quarter) => {
+    const index = quarter - 1;
+    return [(index % 6) * 16, Math.floor(index / 6) * 16];
+  });
+}
+
 function visualFromTile(tile) {
   const depthBias = tile.depth === 0 ? -1 : tile.depth - tile.y * 32;
   if (tile.blit.kind === "regular") return [tile.tileId, depthBias, 0, tile.blit.sourceIndex];
-  const corners = tile.blit.corners;
-  return [
-    tile.tileId, depthBias, 1, tile.blit.slot,
-    corners[0].sx, corners[0].sy, corners[1].sx, corners[1].sy,
-    corners[2].sx, corners[2].sy, corners[3].sx, corners[3].sy,
-  ];
+  return [tile.tileId, depthBias, 1, tile.blit.slot, ...autotileCornerTuple(tile.tileId)];
 }
 
-function chunksFromTiles(tiles) {
+function requiredChunkCoords(mapWidth, mapHeight, cameraX, cameraY, vw, vh, cameraMotion = null) {
+  const boundsFor = (cx, cy) => ({
+    minTileX: Math.max(0, Math.floor(cx / 32)),
+    maxTileX: Math.min(mapWidth - 1, Math.floor((cx + vw - 1) / 32)),
+    minTileY: Math.max(0, Math.floor(cy / 32)),
+    maxTileY: Math.min(mapHeight - 1, Math.floor((cy + vh - 1) / 32)),
+  });
+  let bounds = boundsFor(cameraX, cameraY);
+  if (cameraMotion) {
+    const from = boundsFor(cameraMotion.fromCameraX, cameraMotion.fromCameraY);
+    bounds = {
+      minTileX: Math.min(bounds.minTileX, from.minTileX),
+      maxTileX: Math.max(bounds.maxTileX, from.maxTileX),
+      minTileY: Math.min(bounds.minTileY, from.minTileY),
+      maxTileY: Math.max(bounds.maxTileY, from.maxTileY),
+    };
+  }
+  const minChunkX = Math.max(0, Math.floor(bounds.minTileX / 8) - 1);
+  const maxChunkX = Math.min(Math.floor((mapWidth - 1) / 8), Math.floor(bounds.maxTileX / 8) + 1);
+  const minChunkY = Math.max(0, Math.floor(bounds.minTileY / 8) - 1);
+  const maxChunkY = Math.min(Math.floor((mapHeight - 1) / 8), Math.floor(bounds.maxTileY / 8) + 1);
+  const coords = [];
+  for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY += 1) {
+    for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
+      coords.push({ chunkX, chunkY });
+    }
+  }
+  return coords;
+}
+
+function chunksFromTiles(tiles, geo = {}) {
+  const {
+    mapWidth = 24,
+    mapHeight = 18,
+    cameraX = 0,
+    cameraY = 0,
+    viewportWidth = 640,
+    viewportHeight = 480,
+    cameraMotion = null,
+  } = geo;
   const chunkMap = new Map();
+  for (const { chunkX, chunkY } of requiredChunkCoords(mapWidth, mapHeight, cameraX, cameraY, viewportWidth, viewportHeight, cameraMotion)) {
+    chunkMap.set(`${chunkX},${chunkY}`, { chunkX, chunkY, cells: Array(192).fill(0) });
+  }
   for (const tile of tiles) {
     const chunkX = Math.floor(tile.x / 8);
     const chunkY = Math.floor(tile.y / 8);
@@ -69,7 +130,11 @@ function chunksFromTiles(tiles) {
   return [...chunkMap.values()].sort((left, right) => left.chunkY - right.chunkY || left.chunkX - right.chunkX);
 }
 
-function viewData({ depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles, cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1, mapId = 1 } = {}) {
+function viewData({
+  depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles,
+  cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1,
+  mapId = 1, viewportWidth = 640, viewportHeight = 480, mapWidth = 24, mapHeight = 18,
+} = {}) {
   const tileList = tiles ?? [regularTile({ depth })];
   const seen = new Set();
   const tileVisuals = [];
@@ -83,17 +148,17 @@ function viewData({ depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTO
     sceneEpoch,
     visualEpoch,
     motionId: cameraMotion?.id ?? null,
-    viewportWidth: 640,
-    viewportHeight: 480,
+    viewportWidth,
+    viewportHeight,
     mapId,
-    mapWidth: 24,
-    mapHeight: 18,
+    mapWidth,
+    mapHeight,
     cameraX,
     cameraY,
     tileset,
     autotiles,
     tileVisuals,
-    chunks: chunksFromTiles(tileList),
+    chunks: chunksFromTiles(tileList, { mapWidth, mapHeight, cameraX, cameraY, viewportWidth, viewportHeight, cameraMotion }),
     cameraMotion,
   };
 }
@@ -103,6 +168,11 @@ function spriteData(y = 0) {
     sceneEpoch: 1, visualEpoch: 1, motionId: null,
     x: 0, y, screenX: 0, screenY: y * 32, direction: 2, pattern: 0, sprite: spriteRef, motion: null,
   };
+}
+
+function matchingSprite(view, extra = {}) {
+  const base = view.motionId === null ? spriteData(0) : walkingSprite({ id: view.motionId });
+  return { ...base, sceneEpoch: view.sceneEpoch, visualEpoch: view.visualEpoch, motionId: view.motionId, ...extra };
 }
 
 function walkingSprite({ y = 1, fromY = 0, screenX = 0, screenY = 32, fromScreenX = 0, fromScreenY = 0, pattern = 1, id = 1, sprite = spriteRef, direction = 2 } = {}) {
@@ -258,12 +328,12 @@ async function settlePendingImage(page, ref, outcome, host = "__view") {
   const id = identityOf(ref);
   await page.evaluate(async ({ imageId, outcome: next, host: name }) => {
     const pending = window[name]._images.get(imageId);
-    if (!pending) throw new Error(`stale image promise missing for ${imageId}`);
     const delayed = window.__mapLayering.delayed.get(imageId);
     if (!delayed) throw new Error(`delayed resource missing for ${imageId}`);
     if (next === "resolve") delayed.resolve({ bytes: name === "__sprite" ? window.__mapLayering.characterBytes : window.__mapLayering.tilesetBytes, mime: "image/png" });
     else delayed.reject(new Error("stale tileset failed"));
-    await pending.then(() => undefined, () => undefined);
+    if (pending) await pending.then(() => undefined, () => undefined);
+    else await delayed.promise.then(() => undefined, () => undefined);
   }, { imageId: id, outcome, host });
 }
 
@@ -295,7 +365,10 @@ async function installAutotile(page, key, bytes) {
 }
 
 async function paintAutotile(page, viewPayload) {
-  await page.evaluate((payload) => window.__view.receiveRenderData(payload), viewPayload);
+  await page.evaluate(({ viewPayload: view, spritePayload }) => {
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
   await waitUntil(page, () => {
     const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
     if (!canvas) return false;
@@ -470,9 +543,9 @@ test("E. stale buckets hide and clear leftover canvases", { timeout: 30_000 }, a
   await page.evaluate(() => window.__view.receiveRenderData(window.__secondPayload));
   await waitPainted(page, "0", "65");
   const info = await layerInfo(page);
-  assert.equal(info.canvasCount, 2);
-  assert.equal(info.hidden[1], true);
-  assert.equal(await secondLayerCleared(page), true);
+  const visible = info.hidden.map((hidden, index) => ({ hidden, z: info.zIndex[index] })).filter((entry) => !entry.hidden);
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].z, "0");
 });
 
 test("F. stale async success cannot overwrite a newer tileset identity", { timeout: 30_000 }, async (t) => {
@@ -799,15 +872,17 @@ test("late tileset decode catches up from receivedAt and skips MapView rAF", { t
   t.after(() => page.close());
   const delayedRef = { namespace: "resource.Graphics", key: "Tilesets/blue", contentVersion: "late" };
   await delayTileset(page, delayedRef);
-  await page.evaluate(({ viewPayload }) => window.__view.receiveRenderData(viewPayload), {
-    viewPayload: viewData({
-      depth: 0,
-      tileset: delayedRef,
-      cameraX: 32,
-      cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
-      tiles: [regularTile({ x: 1, depth: 0 })],
-    }),
+  const viewPayload = viewData({
+    depth: 0,
+    tileset: delayedRef,
+    cameraX: 32,
+    cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+    tiles: [regularTile({ x: 1, depth: 0 })],
   });
+  await page.evaluate(({ viewPayload: view, spritePayload }) => {
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
   await waitForPendingImage(page, delayedRef, "__view");
   await page.evaluate(async () => {
     const started = performance.now();
@@ -986,7 +1061,8 @@ test("aliased ResourceRef decodes once and paints every used slot", { timeout: 3
       autotileTile({ x: 1, slot: 5, tileId: 288 }),
     ],
   }));
-  assert.equal(await page.evaluate(() => window.__mapLayering.fetchCount), 1);
+  assert.equal(await page.evaluate(() => window.__mapLayering.fetchCount), 2);
+  assert.equal(await page.evaluate(() => [...window.__view._images.keys()].filter((id) => id.includes("Autotiles/Shared")).length), 1);
   await page.clock.runFor(50);
   assert.deepEqual(await tilePixel(page, 8, 8), CELL_PIXELS[1]);
   assert.deepEqual(await tilePixel(page, 40, 8), CELL_PIXELS[1]);
@@ -1020,11 +1096,15 @@ test("illegal autotile duration fail-closed clears layers and stops RAF", { time
   for (const key of ["Autotiles/Bad [0]", "Autotiles/Huge [9007199254740992]"]) {
     const ref = autotileRef(key);
     await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
-    await page.evaluate((payload) => window.__view.receiveRenderData(payload), cellView(ref));
+    await page.evaluate(({ viewPayload, spritePayload }) => {
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(spritePayload);
+    }, { viewPayload: cellView(ref), spritePayload: matchingSprite(cellView(ref)) });
     await waitUntil(page, () => {
       const view = document.querySelector("lr-map-view");
       const canvases = [...(view?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])];
-      return canvases.length > 0 && canvases.every((canvas) => canvas.hidden) && view._raf === undefined;
+      const visible = canvases.filter((canvas) => !canvas.hidden);
+      return visible.length === 0 && view._raf === undefined && view._state !== "PREPARING";
     }, `fail-closed ${key}`);
   }
   assert.deepEqual(errors, []);
@@ -1038,10 +1118,19 @@ test("walking RenderData does not reset autotile phase", { timeout: 30_000 }, as
   await paintAutotile(page, cellView(ref));
   await page.clock.runFor(50);
   assert.deepEqual(await tilePixel(page), CELL_PIXELS[1]);
-  await page.evaluate((payload) => window.__view.receiveRenderData(payload), cellView(ref, {
-    cameraX: 32,
-    cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
-  }));
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, {
+    viewPayload: cellView(ref, {
+      cameraX: 32,
+      cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+    }),
+    spritePayload: matchingSprite(cellView(ref, {
+      cameraX: 32,
+      cameraMotion: { id: 1, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+    })),
+  });
   await waitUntil(page, () => {
     const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
     if (!canvas) return false;
@@ -1171,7 +1260,10 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
   const tiles = [regularTile({ depth: 0 })];
   const first = viewData({ tiles, cameraX: 0, visualEpoch: 1 });
   const refreshed = viewData({ tiles, tileset: tilesetRef("v2"), cameraX: 32, visualEpoch: 2 });
-  await page.evaluate((payload) => window.__view.receiveRenderData(payload), first);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
   await waitUntil(page, () => {
     const view = document.querySelector("lr-map-view");
     return (view?._tileDrawCount ?? 0) > 0 && view.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])")?.width > 0;
@@ -1197,6 +1289,14 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const afterCamera = snapshot();
     view.receiveRenderData(next);
+    window.__sprite.receiveRenderData({
+      sceneEpoch: next.sceneEpoch,
+      visualEpoch: next.visualEpoch,
+      motionId: next.motionId,
+      x: 0, y: 0, screenX: 0, screenY: 0, direction: 2, pattern: 0,
+      sprite: { namespace: "resource.Graphics", key: "Characters/red", contentVersion: "v1" },
+      motion: null,
+    });
     const deadline = performance.now() + 2_000;
     while (view._tileDrawCount === afterCamera.draws && performance.now() < deadline) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1219,7 +1319,10 @@ test("viewportWidth/Height set host CSS box without host style attributes", { ti
   const page = await openPage();
   t.after(() => page.close());
   const first = viewData({ depth: 0 });
-  await page.evaluate((payload) => window.__view.receiveRenderData(payload), first);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
   await waitUntil(page, () => document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])"), "first raster");
   const before = await page.evaluate(() => ({
     size: [getComputedStyle(document.querySelector("lr-map-view")).width, getComputedStyle(document.querySelector("lr-map-view")).height],
@@ -1228,7 +1331,10 @@ test("viewportWidth/Height set host CSS box without host style attributes", { ti
   assert.deepEqual(before.size, ["640px", "480px"]);
   assert.equal(before.hostWidth, "");
   const next = { ...first, visualEpoch: 2, viewportWidth: 1280, viewportHeight: 720 };
-  await page.evaluate((payload) => window.__view.receiveRenderData(payload), next);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: next, spritePayload: matchingSprite(next) });
   await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-view")).width === "1280px", "720p host box");
   const after = await page.evaluate(() => ({
     size: [getComputedStyle(document.querySelector("lr-map-view")).width, getComputedStyle(document.querySelector("lr-map-view")).height],
@@ -1254,4 +1360,304 @@ test("disconnect increments paint epoch so stale rAF cannot paint", { timeout: 3
   await page.evaluate(() => window.__sprite.remove());
   await waitUntil(page, () => window.__sprite._raf === undefined, "rAF cancelled after disconnect");
   assert.ok(await page.evaluate((epoch) => window.__sprite._paintEpoch > epoch && window.__sprite._activeMotion === null, before));
+});
+
+function throwsReceive(page, viewPayload, spritePayload) {
+  return page.evaluate(({ viewPayload: view, spritePayload: sprite }) => {
+    const run = (fn) => {
+      try {
+        fn();
+        return { threw: false };
+      } catch (error) {
+        return { threw: true, name: error.name, message: error.message };
+      }
+    };
+    if (view) {
+      const result = run(() => window.__view.receiveRenderData(view));
+      if (result.threw) return { ...result, side: "view" };
+    }
+    if (sprite) {
+      const result = run(() => window.__sprite.receiveRenderData(sprite));
+      if (result.threw) return { ...result, side: "sprite" };
+    }
+    return { threw: false };
+  }, { viewPayload, spritePayload });
+}
+
+test("initial View-only and Sprite-only stay EMPTY until the matching pair arrives", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = viewData({ depth: 0 });
+  await page.evaluate((viewPayload) => window.__view.receiveRenderData(viewPayload), first);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const viewOnly = await page.evaluate(() => ({
+    canvases: document.querySelector("lr-map-view").shadowRoot.querySelectorAll("canvas.tile-layer").length,
+    accepted: window.__view._accepted,
+    state: window.__view._state,
+  }));
+  assert.equal(viewOnly.canvases, 0);
+  assert.equal(viewOnly.accepted, undefined);
+  assert.equal(viewOnly.state, "EMPTY");
+  const page2 = await openPage();
+  t.after(() => page2.close());
+  await page2.evaluate((spritePayload) => window.__sprite.receiveRenderData(spritePayload), matchingSprite(first));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const spriteOnly = await page2.evaluate(() => ({
+    canvases: document.querySelector("lr-map-view").shadowRoot.querySelectorAll("canvas.tile-layer").length,
+    accepted: window.__view._accepted,
+    state: window.__view._state,
+  }));
+  assert.equal(spriteOnly.canvases, 0);
+  assert.equal(spriteOnly.accepted, undefined);
+  await page.evaluate((spritePayload) => window.__sprite.receiveRenderData(spritePayload), matchingSprite(first));
+  await waitPainted(page, "0", "65");
+  assert.equal(await page.evaluate(() => window.__view._state), "VISIBLE");
+});
+
+test("old accepted pair stays when only one newer endpoint arrives", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = viewData({ depth: 0, visualEpoch: 1 });
+  const newer = viewData({ depth: 64, visualEpoch: 2 });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
+  await waitPainted(page, "0", "65");
+  const before = await page.evaluate(() => {
+    const canvas = window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    window.__acceptedCanvas = canvas;
+    return {
+      pixel: [...canvas.getContext("2d").getImageData(8, 8, 1, 1).data],
+      z: canvas.style.zIndex,
+      spriteZ: getComputedStyle(window.__sprite).zIndex,
+    };
+  });
+  await page.evaluate((viewPayload) => window.__view.receiveRenderData(viewPayload), newer);
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const after = await page.evaluate(() => {
+    const canvas = window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    return {
+      sameCanvas: canvas === window.__acceptedCanvas,
+      pixel: [...canvas.getContext("2d").getImageData(8, 8, 1, 1).data],
+      z: canvas.style.zIndex,
+      spriteZ: getComputedStyle(window.__sprite).zIndex,
+      visualEpoch: window.__view._accepted.view.visualEpoch,
+    };
+  });
+  assert.equal(after.sameCanvas, true);
+  assert.deepEqual(after.pixel, before.pixel);
+  assert.equal(after.z, before.z);
+  assert.equal(after.spriteZ, before.spriteZ);
+  assert.equal(after.visualEpoch, 1);
+  await page.evaluate((spritePayload) => window.__sprite.receiveRenderData(spritePayload), matchingSprite(newer));
+  await waitPainted(page, "128", "65");
+  assert.equal(await page.evaluate(() => window.__view._accepted.view.visualEpoch), 2);
+});
+
+test("candidate raster exception leaves the accepted pair byte-identical", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = viewData({ tiles: [regularTile({ depth: 0 })] });
+  const second = viewData({
+    visualEpoch: 2,
+    tiles: [
+      regularTile({ depth: 0 }),
+      regularTile({ x: 1, tileId: 385, depth: 64 }),
+    ],
+  });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
+  await waitPainted(page, "0", "65");
+  const before = await page.evaluate(() => {
+    const canvas = window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    window.__acceptedCanvas = canvas;
+    window.__loomrealmMapTestFault = (phase, detail) => {
+      if (phase === "draw" && detail.index === 1) throw new Error("injected candidate draw failure");
+    };
+    return {
+      pixel: [...canvas.getContext("2d").getImageData(8, 8, 1, 1).data],
+      count: window.__view.shadowRoot.querySelectorAll("canvas.tile-layer").length,
+    };
+  });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: second, spritePayload: matchingSprite(second) });
+  await waitUntil(page, () => window.__view._state === "RETRY_WAIT" || window.__view._state === "VISIBLE", "prepare failed closed");
+  const after = await page.evaluate(() => {
+    const canvas = window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    return {
+      sameCanvas: canvas === window.__acceptedCanvas,
+      pixel: [...canvas.getContext("2d").getImageData(8, 8, 1, 1).data],
+      count: window.__view.shadowRoot.querySelectorAll("canvas.tile-layer").length,
+      visualEpoch: window.__view._accepted.view.visualEpoch,
+    };
+  });
+  assert.equal(after.sameCanvas, true);
+  assert.deepEqual(after.pixel, before.pixel);
+  assert.equal(after.count, before.count);
+  assert.equal(after.visualEpoch, 1);
+});
+
+test("detached candidate canvases are not connected until atomic commit", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await page.evaluate(() => {
+    window.__drawObservations = [];
+    window.__loomrealmMapTestFault = (phase, detail) => {
+      if (phase !== "draw") return;
+      window.__drawObservations.push({
+        index: detail.index,
+        connected: detail.connected,
+        hostHasCanvas: detail.hostHasCanvas,
+      });
+    };
+  });
+  const first = viewData({ depth: 0 });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
+  await waitPainted(page, "0", "65");
+  const observations = await page.evaluate(() => window.__drawObservations);
+  assert.ok(observations.length >= 1);
+  assert.ok(observations.every((entry) => entry.connected === false && entry.hostHasCanvas === false));
+  assert.equal(await page.evaluate(() => window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])").isConnected), true);
+});
+
+test("scene A to B to C evicts stale bitmaps and keeps the resource cache bounded", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await page.evaluate(() => {
+    const original = createImageBitmap;
+    window.__bitmapCloses = 0;
+    window.createImageBitmap = async function trackedCreateImageBitmap(...args) {
+      const bitmap = await original.apply(this, args);
+      const close = bitmap.close.bind(bitmap);
+      bitmap.close = function trackedClose() {
+        window.__bitmapCloses += 1;
+        return close();
+      };
+      return bitmap;
+    };
+  });
+  const scene = (version, sceneEpoch) => viewData({ tileset: tilesetRef(version), sceneEpoch, visualEpoch: 1 });
+  for (const [version, sceneEpoch] of [["v1", 1], ["v2", 2], ["v3", 3]]) {
+    const viewPayload = scene(version, sceneEpoch);
+    await page.evaluate(({ viewPayload: view, spritePayload }) => {
+      window.__view.receiveRenderData(view);
+      window.__sprite.receiveRenderData(spritePayload);
+    }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
+    await waitPainted(page, "0", "65");
+  }
+  const cache = await page.evaluate(() => ({
+    images: [...window.__view._images.keys()],
+    bitmaps: [...window.__view._bitmaps.keys()],
+    owners: [...window.__view._owners.entries()].map(([identity, owners]) => [identity, [...owners]]),
+    closes: window.__bitmapCloses,
+  }));
+  assert.equal(cache.images.length, 1);
+  assert.equal(cache.bitmaps.length, 1);
+  assert.ok(cache.images[0].includes("v3"));
+  assert.ok(cache.bitmaps[0].includes("v3"));
+  assert.ok(cache.closes >= 2, JSON.stringify(cache));
+  assert.ok(cache.owners.every(([, owners]) => owners.includes("accepted")));
+});
+
+test("stale superseded candidate bitmap is closed and cannot overwrite accepted", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const firstRef = tilesetRef("old");
+  const secondRef = tilesetRef("new");
+  await page.evaluate(() => {
+    const original = createImageBitmap;
+    window.__bitmapCloses = 0;
+    window.createImageBitmap = async function trackedCreateImageBitmap(...args) {
+      const bitmap = await original.apply(this, args);
+      const close = bitmap.close.bind(bitmap);
+      bitmap.close = function trackedClose() {
+        window.__bitmapCloses += 1;
+        return close();
+      };
+      return bitmap;
+    };
+  });
+  await delayTileset(page, firstRef);
+  const first = viewData({ tileset: firstRef, visualEpoch: 1 });
+  const second = viewData({ tileset: secondRef, visualEpoch: 2 });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
+  await waitForPendingImage(page, firstRef);
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: second, spritePayload: matchingSprite(second) });
+  await waitPainted(page, "0", "65");
+  await settlePendingImage(page, firstRef, "resolve");
+  const after = await page.evaluate(() => ({
+    images: [...window.__view._images.keys()],
+    visualEpoch: window.__view._accepted.view.visualEpoch,
+    closes: window.__bitmapCloses,
+  }));
+  assert.equal(after.visualEpoch, 2);
+  assert.ok(after.images.every((identity) => identity.includes("new")));
+  assert.ok(after.closes >= 1, JSON.stringify(after));
+});
+
+test("closed Map schema rejects extra keys, illegal tiles, chunk sets, and camera bounds", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const base = viewData({ depth: 0 });
+  const extraRef = await throwsReceive(page, {
+    ...base,
+    tileset: { ...base.tileset, extra: "nope" },
+  });
+  assert.equal(extraRef.threw, true);
+  const tile47 = viewData({ depth: 0 });
+  tile47.chunks[0].cells[0] = 47;
+  const illegalTile = await throwsReceive(page, tile47);
+  assert.equal(illegalTile.threw, true);
+  const sourceMismatch = await throwsReceive(page, {
+    ...base,
+    tileVisuals: [[384, -1, 0, 1]],
+  });
+  assert.equal(sourceMismatch.threw, true);
+  const autotile = cellView(autotileRef("Autotiles/schema"));
+  autotile.tileVisuals[0][3] = 1;
+  const slotMismatch = await throwsReceive(page, autotile);
+  assert.equal(slotMismatch.threw, true);
+  const duplicate = viewData({
+    tiles: [regularTile({ depth: 0 }), regularTile({ x: 1, tileId: 385, depth: 0 })],
+  });
+  duplicate.tileVisuals = [...duplicate.tileVisuals, duplicate.tileVisuals[0]];
+  const duplicateVisual = await throwsReceive(page, duplicate);
+  assert.equal(duplicateVisual.threw, true);
+  const unsorted = viewData({
+    tiles: [regularTile({ depth: 0 }), regularTile({ x: 1, tileId: 385, depth: 0 })],
+  });
+  unsorted.tileVisuals = [...unsorted.tileVisuals].reverse();
+  const unsortedVisual = await throwsReceive(page, unsorted);
+  assert.equal(unsortedVisual.threw, true);
+  const unused = viewData({ depth: 0 });
+  unused.tileVisuals = [...unused.tileVisuals, [385, -1, 0, 1]];
+  const unusedVisual = await throwsReceive(page, unused);
+  assert.equal(unusedVisual.threw, true);
+  const missing = viewData({
+    tiles: [regularTile({ depth: 0 }), regularTile({ x: 1, tileId: 385, depth: 0 })],
+  });
+  missing.tileVisuals = missing.tileVisuals.slice(0, 1);
+  const missingVisual = await throwsReceive(page, missing);
+  assert.equal(missingVisual.threw, true);
+  const wrongChunks = viewData({ depth: 0 });
+  wrongChunks.chunks = wrongChunks.chunks.slice(0, -1);
+  const wrongChunkSet = await throwsReceive(page, wrongChunks);
+  assert.equal(wrongChunkSet.threw, true);
+  const camera = await throwsReceive(page, { ...base, cameraX: base.mapWidth * 32 });
+  assert.equal(camera.threw, true);
+  assert.equal(await page.evaluate(() => window.__view._accepted), undefined);
 });

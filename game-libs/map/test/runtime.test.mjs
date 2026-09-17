@@ -626,6 +626,45 @@ describe("map runtime walking", { concurrency: false }, () => {
     frame.abort();
     await frame.pending;
   });
+
+  test("active step coalesces A/B/C resize burst to latest pending only", async (t) => {
+    const frame = await startFrame(t);
+    await frame.emitEvent(down("ArrowRight"));
+    assert.equal(view(frame.latestState()).motionId, 1);
+    const walkingVisual = view(frame.latestState()).visualEpoch;
+    frame.viewport.publish({ width: 800, height: 600 });
+    frame.viewport.publish({ width: 1280, height: 720 });
+    frame.viewport.publish({ width: 1920, height: 1080 });
+    assert.equal(view(frame.latestState()).viewportWidth, 640);
+    assert.equal(view(frame.latestState()).visualEpoch, walkingVisual);
+    assert.equal(player(frame.latestState()).motionId, 1);
+    await frame.emitEvent(up("ArrowRight"));
+    frame.fireNextTimer();
+    const after = view(frame.latestState());
+    assert.equal(after.viewportWidth, 1920);
+    assert.equal(after.viewportHeight, 1080);
+    assert.equal(after.visualEpoch, walkingVisual + 1);
+    assert.equal(player(frame.latestState()).motionId, null);
+    const publishedWidths = frame.updates
+      .map((update) => viewportSet(update).viewportWidth)
+      .filter((width) => width !== undefined);
+    assert.deepEqual(publishedWidths, [1920]);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("viewport resize author failure does not mutate accepted viewport or epochs", async (t) => {
+    const frame = await startFrame(t, { throwOnUpdate: true });
+    const before = view(frame.latestState());
+    frame.viewport.publish({ width: 1280, height: 720 });
+    assert.equal(view(frame.latestState()).viewportWidth, 640);
+    assert.equal(view(frame.latestState()).viewportHeight, 480);
+    assert.equal(view(frame.latestState()).visualEpoch, before.visualEpoch);
+    assert.equal(player(frame.latestState()).motionId, null);
+    assert.equal(frame.updates.length, 0);
+    frame.abort();
+    await frame.pending;
+  });
 });
 
 describe("map runtime transfer", { concurrency: false }, () => {
