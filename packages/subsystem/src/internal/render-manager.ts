@@ -8,8 +8,6 @@ import type {
 } from "@loomrealm/data";
 import {
   assertJsonValue,
-  jsonDepth,
-  stringifyJson,
   utf8ByteLength,
   type JsonObject,
   type JsonValue,
@@ -150,7 +148,7 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be a JSON object`);
   }
-  if (jsonDepth(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
+  if (depthOfValidatedJson(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
   const stack: JsonValue[] = [value];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -171,7 +169,7 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
       }
     }
   }
-  if (utf8ByteLength(stringifyJson(value)) > MAX_DATA_BYTES) {
+  if (utf8ByteLength(JSON.stringify(value)) > MAX_DATA_BYTES) {
     throw new RangeError(`${label} byte limit exceeded`);
   }
 }
@@ -225,13 +223,68 @@ function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
   return Object.freeze(output) as T;
 }
 
+/**
+ * Depth of an ALREADY assertJsonValue-validated JSON tree.
+ *
+ * Counting semantics are identical to wire `jsonDepth` (every container adds
+ * one; primitives contribute none) with the redundant internal re-validation
+ * removed — probeLimit validates once up front. Cross-checked against wire
+ * jsonDepth by packages/subsystem/test/render-probe-equivalence.test.mjs.
+ */
+function depthOfValidatedJson(value: JsonValue): number {
+  let maximum = 0;
+  const stack: Array<{ readonly value: JsonValue; readonly depth: number }> = [
+    { value, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    if (entry === undefined || entry.value === null || typeof entry.value !== "object") {
+      continue;
+    }
+    const containerDepth = entry.depth + 1;
+    if (containerDepth > maximum) maximum = containerDepth;
+    if (Array.isArray(entry.value)) {
+      for (let index = 0; index < entry.value.length; index += 1) {
+        stack.push({ value: entry.value[index] as JsonValue, depth: containerDepth });
+      }
+    } else {
+      for (const child of Object.values(entry.value)) {
+        stack.push({ value: child, depth: containerDepth });
+      }
+    }
+  }
+  return maximum;
+}
+
+/**
+ * Full-state invariant probe: JSON validity, maximum depth and serialized
+ * byte limit of the WHOLE next state.
+ *
+ * Owner-approved generic optimization (STOP A): the previous implementation
+ * traversed the state three times for validation alone (probeLimit +
+ * jsonDepth + stringifyJson each re-ran assertJsonValue internally) and used
+ * the iterative wire serializer whose output for any validated input is
+ * byte-identical to native JSON.stringify (wire stringifyJson delegates all
+ * primitive/key encoding to JSON.stringify and enumerates in the same
+ * [[OwnPropertyKeys]] order; every input where native behavior would differ
+ * — sparse arrays, undefined/symbol/non-finite members, accessors, wrapper
+ * objects, custom toJSON prototypes, cycles — is rejected by the upfront
+ * validation). Equivalence is proven by property/boundary tests in
+ * packages/subsystem/test/render-probe-equivalence.test.mjs.
+ *
+ * Unchanged semantics: identical accept/reject set, identical depth
+ * boundary, identical serialized byte counts, identical error
+ * classification (TypeError for non-JSON, RangeError for limit violations),
+ * evaluation order depth-before-serialization preserved.
+ */
 function probeLimit(value: unknown, label: string): void {
   try {
     assertJsonValue(value);
   } catch {
     throw new TypeError(`${label} must be plain JSON`);
   }
-  if (jsonDepth(value as JsonValue) > 64 || utf8ByteLength(stringifyJson(value as JsonValue)) > MAX_MESSAGE_BYTES) {
+  const json = value as JsonValue;
+  if (depthOfValidatedJson(json) > 64 || utf8ByteLength(JSON.stringify(json)) > MAX_MESSAGE_BYTES) {
     throw new RangeError(`${label} message limit exceeded`);
   }
 }
