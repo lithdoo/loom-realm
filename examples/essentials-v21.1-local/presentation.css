@@ -11,7 +11,11 @@ body {
   overflow: hidden;
 }
 
+/* The map allocates its accepted logical viewport inside the centered
+   content box; the host element owns its size (set by map.browser.js from
+   viewportWidth/viewportHeight), so the page never stretches or letterboxes
+   it — the content box centers whatever accepted size the map publishes. */
 lr-map-view {
-  width: 640px;
-  height: 480px;
+  max-width: 100vw;
+  max-height: 100vh;
 }

@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import mapDefinition from "@loomrealm-game/map";
 import { chunkBoundsForTileBounds, clampChunkBounds, computeCamera, expandChunkBounds, projectChunksInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
@@ -165,6 +165,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     const timers = installTimers(t);
     const definition = mapDefinition({
       signal: new AbortController().signal,
+      viewport: { current: options.initialViewport ?? null, subscribe(listener) { if (options.initialViewport && options.viewportImmediate !== false) listener(options.initialViewport); return () => {}; } },
       content: {
         async record(namespace, key) {
           const id = `${namespace}/${key}`;
@@ -644,6 +645,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
     const timers = installTimers(t);
     const definition = mapDefinition({
       signal: new AbortController().signal,
+      viewport: { current: options.initialViewport ?? null, subscribe(listener) { if (options.initialViewport && options.viewportImmediate !== false) listener(options.initialViewport); return () => {}; } },
       content: {
         async record(namespace, key) {
           const id = `${namespace}/${key}`;

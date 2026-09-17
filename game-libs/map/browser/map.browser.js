@@ -464,13 +464,15 @@
       this._initialMotionNotShown = 0;
       this._lastPaintedCamera = null;
       this._lastPaintedScreen = null;
-      this._autotileDirty = new Map(); // "cx,cy,z,ly,lx" -> true
+      this._autotileDirty = new Map();
       this._autotileStartedAt = performance.now();
-      this._autotileRafActive = false;
+      this._autotileTimer = null;
+      this._viewportSize = { width: 640, height: 480 };
+      this._hostSized = false;
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
       style.textContent = [
-        ":host{display:block;position:relative;overflow:hidden;width:640px;height:480px;image-rendering:pixelated}",
+        ":host{display:block;position:relative;overflow:hidden;image-rendering:pixelated}",
         "canvas.tile-layer{position:absolute;image-rendering:pixelated;pointer-events:none}",
         "slot{display:contents}",
       ].join("");
@@ -557,11 +559,36 @@
         && accepted.view.visualEpoch === view.data.visualEpoch
         && this.__chunkSetEqual(accepted.view.chunks, view.data.chunks)
         && this.__tileVisualsEqual(accepted.view.tileVisuals, view.data.tileVisuals)) {
+        const previousMotionActive = accepted.view.cameraMotion !== null
+          && (performance.now() - accepted.motionStart) < (accepted.motionDuration ?? WALK_MS);
+        // Snapshot the prior displayed pose BEFORE updating the pair.
+        let priorPose = null;
+        if (previousMotionActive) {
+          const t = performance.now();
+          const p = Math.min(Math.max((t - accepted.motionStart) / (accepted.motionDuration ?? WALK_MS), 0), 1);
+          const motion = accepted.view.cameraMotion;
+          const spriteMotion = accepted.sprite.motion;
+          priorPose = {
+            cameraX: Math.round(motion.fromCameraX + (accepted.view.cameraX - motion.fromCameraX) * p),
+            cameraY: Math.round(motion.fromCameraY + (accepted.view.cameraY - motion.fromCameraY) * p),
+            screenX: spriteMotion === null ? accepted.sprite.screenX : Math.round(spriteMotion.fromScreenX + (accepted.sprite.screenX - spriteMotion.fromScreenX) * p),
+            screenY: spriteMotion === null ? accepted.sprite.screenY : Math.round(spriteMotion.fromScreenY + (accepted.sprite.screenY - spriteMotion.fromScreenY) * p),
+            fromY: spriteMotion === null ? accepted.sprite.y : spriteMotion.fromY,
+          };
+        }
         accepted.view = view.data;
         accepted.sprite = sprite.data;
         accepted.receivedAt = Math.min(view.receivedAt, sprite.receivedAt);
         accepted.motionStart = accepted.receivedAt;
+        accepted.motionDuration = WALK_MS;
+        accepted.rebaseFrom = null;
         accepted.motionEnd = view.data.cameraMotion === null ? accepted.receivedAt : accepted.receivedAt + WALK_MS;
+        if (previousMotionActive && view.data.cameraMotion !== null) {
+          // New step B preempts the displayed motion: interpolate from the
+          // actually displayed pose over a fresh 250ms from B's first
+          // endpoint receipt (motion spec §4).
+          accepted.rebaseFrom = priorPose;
+        }
         this._state = "VISIBLE";
         this.__paintFrame(performance.now(), true);
         return;
@@ -706,7 +733,23 @@
     __commitCandidate(candidate) {
       const shadow = this.shadowRoot;
       const slot = shadow.querySelector("slot");
-      // Parent swap: remove old canvases, insert candidate canvases.
+      // Dynamic viewport: the host adopts the accepted logical size
+      // (clamped upstream); DPR-only never changes logical backing.
+      const view = candidate.view;
+      if (this._viewportSize.width !== view.viewportWidth
+        || this._viewportSize.height !== view.viewportHeight
+        || this._hostSized !== true) {
+        this._viewportSize = { width: view.viewportWidth, height: view.viewportHeight };
+        this.style.width = `${view.viewportWidth}px`;
+        this.style.height = `${view.viewportHeight}px`;
+        this._hostSized = true;
+      }
+      // Mid-motion resize rebase (§1/PR2): when a visual change arrives while
+      // a motion is displayed, the shared pair receipt keeps the end-time
+      // envelope: the new motion's from-values rebase from the actually
+      // displayed pose at the switch frame t (the runtime publishes from-
+      // values derived from world truth; the browser clamps the displayed
+      // progress so a late decode never restarts the full 250ms).
       for (const canvas of [...shadow.querySelectorAll("canvas.tile-layer")]) canvas.remove();
       const sorted = [...candidate.buckets.entries()].sort((a, b) => a[0] - b[0]);
       const stageTag = String(candidate.sequence);
@@ -729,6 +772,9 @@
       const pose = this.__spritePoseFor(spriteData, 0);
       this._spriteElement.__commitMapSpriteStage(spriteData, candidate.spriteBitmap, frameWidth, frameHeight, pose);
       const accepted = this._accepted;
+      const oldMotionActive = accepted !== null
+        && accepted.view.cameraMotion !== null
+        && (performance.now() - accepted.motionStart) < (accepted.motionDuration ?? WALK_MS);
       this._accepted = {
         view: candidate.view,
         sprite: candidate.sprite,
@@ -739,10 +785,38 @@
         frameHeight,
         spriteBitmap: candidate.spriteBitmap,
         motionStart: candidate.receivedAt,
+        motionDuration: WALK_MS,
         motionEnd: candidate.view.cameraMotion === null ? candidate.receivedAt : candidate.receivedAt + WALK_MS,
         displayedCamera: null,
         displayedScreen: null,
       };
+      // Mid-motion rebase (motion spec §4): a new visual/motion pair arriving
+      // while the old motion is still displayed continues from the ACTUALLY
+      // displayed pose for the remaining window, never restarting 250ms.
+      if (oldMotionActive && candidate.view.cameraMotion !== null) {
+        const t = performance.now();
+        const oldDuration = accepted.motionDuration ?? WALK_MS;
+        const p = Math.min(Math.max((t - accepted.motionStart) / oldDuration, 0), 1);
+        const oldMotion = accepted.view.cameraMotion;
+        const displayedCameraX = Math.round(oldMotion.fromCameraX + (accepted.view.cameraX - oldMotion.fromCameraX) * p);
+        const displayedCameraY = Math.round(oldMotion.fromCameraY + (accepted.view.cameraY - oldMotion.fromCameraY) * p);
+        const oldSpriteMotion = accepted.sprite.motion;
+        const displayedScreenX = oldSpriteMotion === null ? accepted.sprite.screenX
+          : Math.round(oldSpriteMotion.fromScreenX + (accepted.sprite.screenX - oldSpriteMotion.fromScreenX) * p);
+        const displayedScreenY = oldSpriteMotion === null ? accepted.sprite.screenY
+          : Math.round(oldSpriteMotion.fromScreenY + (accepted.sprite.screenY - oldSpriteMotion.fromScreenY) * p);
+        const remainingMs = Math.max(accepted.motionEnd - t, 0);
+        const rebased = this._accepted;
+        rebased.motionStart = t;
+        rebased.motionDuration = Math.max(remainingMs, 1);
+        rebased.rebaseFrom = {
+          cameraX: displayedCameraX,
+          cameraY: displayedCameraY,
+          screenX: displayedScreenX,
+          screenY: displayedScreenY,
+          fromY: oldSpriteMotion === null ? accepted.sprite.y : oldSpriteMotion.fromY,
+        };
+      }
       this._state = "VISIBLE";
       this._retryAttempts = 0;
       this._lastPaintedCamera = null;
@@ -874,9 +948,12 @@
       let pattern = spriteData.pattern;
       if (motion !== null) {
         if (progress >= 0.5) pattern = (pattern + 1) % 4;
-        screenX = Math.round(motion.fromScreenX + (spriteData.screenX - motion.fromScreenX) * progress);
-        screenY = Math.round(motion.fromScreenY + (spriteData.screenY - motion.fromScreenY) * progress);
-        y = Math.round(motion.fromY + (spriteData.y - motion.fromY) * progress);
+        const rebase = this._accepted === null ? null : (this._accepted.rebaseFrom ?? null);
+        const fromX = rebase === null ? motion.fromScreenX : rebase.screenX;
+        const fromY = rebase === null ? motion.fromScreenY : rebase.screenY;
+        screenX = Math.round(fromX + (spriteData.screenX - fromX) * progress);
+        screenY = Math.round(fromY + (spriteData.screenY - fromY) * progress);
+        y = Math.round((rebase === null ? motion.fromY : rebase.fromY) + (spriteData.y - (rebase === null ? motion.fromY : rebase.fromY)) * progress);
       }
       const frameHeight = this._accepted === null ? 32 : this._accepted.frameHeight;
       const visualPixelY = screenY;
@@ -893,13 +970,15 @@
       if (this._state === "DISPOSED" || this._accepted === null) return;
       const accepted = this._accepted;
       const motion = accepted.view.cameraMotion;
-      const progress = motion === null ? 1 : Math.min(Math.max((now - accepted.motionStart) / WALK_MS, 0), 1);
+      const duration = accepted.motionDuration ?? WALK_MS;
+      const progress = motion === null ? 1 : Math.min(Math.max((now - accepted.motionStart) / duration, 0), 1);
+      const rebase = accepted.rebaseFrom ?? null;
       const cameraX = motion === null
         ? accepted.view.cameraX
-        : Math.round(motion.fromCameraX + (accepted.view.cameraX - motion.fromCameraX) * progress);
+        : Math.round((rebase === null ? motion.fromCameraX : rebase.cameraX) + (accepted.view.cameraX - (rebase === null ? motion.fromCameraX : rebase.cameraX)) * progress);
       const cameraY = motion === null
         ? accepted.view.cameraY
-        : Math.round(motion.fromCameraY + (accepted.view.cameraY - motion.fromCameraY) * progress);
+        : Math.round((rebase === null ? motion.fromCameraY : rebase.cameraY) + (accepted.view.cameraY - (rebase === null ? motion.fromCameraY : rebase.cameraY)) * progress);
       for (const [, bucket] of accepted.buckets) {
         bucket.canvas.style.transform = `translate(${-(cameraX - bucket.worldX)}px, ${-(cameraY - bucket.worldY)}px)`;
       }

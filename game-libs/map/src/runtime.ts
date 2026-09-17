@@ -72,12 +72,14 @@ interface RenderFacts {
 
 const WALK_STEP_MS = 250;
 const TILE = 32;
-const VIEWPORT_WIDTH = 640;
-const VIEWPORT_HEIGHT = 480;
 const VIEWPORT_KEY = "viewport";
 const PLAYER_KEY = "player";
 const MAX_PROJECTED_DATA_BYTES = 196_608;
 const WINDOW_MARGIN_CHUNKS = [2, 1, 0] as const;
+const VIEWPORT_DEFAULT = Object.freeze({ width: 640, height: 480 });
+const VIEWPORT_MIN = Object.freeze({ width: 320, height: 240 });
+const VIEWPORT_MAX = Object.freeze({ width: 1920, height: 1080 });
+const RESIZE_SETTLE_MS = 100;
 const stepDelta: Record<Direction, { readonly dx: number; readonly dy: number }> = {
   2: { dx: 0, dy: 1 },
   4: { dx: -1, dy: 0 },
@@ -116,10 +118,19 @@ function inBounds(map: MapRecord, x: number, y: number) {
   return x >= 0 && y >= 0 && x < map.width && y < map.height;
 }
 
+function clampViewportSize(width: number, height: number) {
+  return Object.freeze({
+    width: Math.min(Math.max(width, VIEWPORT_MIN.width), VIEWPORT_MAX.width),
+    height: Math.min(Math.max(height, VIEWPORT_MIN.height), VIEWPORT_MAX.height),
+  });
+}
+
 interface ViewPayloadOptions {
   readonly motionId: number | null;
   readonly cameraMotion: unknown;
   readonly includeProjection: boolean;
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
 }
 
 function viewportPayload(
@@ -135,8 +146,8 @@ function viewportPayload(
     sceneEpoch,
     visualEpoch,
     motionId: options.motionId,
-    viewportWidth: VIEWPORT_WIDTH,
-    viewportHeight: VIEWPORT_HEIGHT,
+    viewportWidth: options.viewportWidth,
+    viewportHeight: options.viewportHeight,
     mapId: loaded.mapId,
     mapWidth: loaded.map.width,
     mapHeight: loaded.map.height,
@@ -164,6 +175,7 @@ function selectProjectionWindow(
   sceneEpoch: number,
   visualEpoch: number,
   cameraMotion: unknown,
+  viewport: { width: number; height: number },
 ): ChunkProjectionWindow {
   let selected: ChunkProjectionWindow | undefined;
   for (const margin of WINDOW_MARGIN_CHUNKS) {
@@ -180,6 +192,8 @@ function selectProjectionWindow(
       motionId: null,
       cameraMotion,
       includeProjection: true,
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
     });
     if (projectionBytes(probe) < MAX_PROJECTED_DATA_BYTES) {
       selected = candidate;
@@ -190,12 +204,12 @@ function selectProjectionWindow(
   return selected;
 }
 
-function cameraFor(loaded: LoadedMap, x: number, y: number) {
-  return computeCamera(loaded.map, x, y, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+function cameraFor(loaded: LoadedMap, x: number, y: number, viewport: { width: number; height: number }) {
+  return computeCamera(loaded.map, x, y, viewport.width, viewport.height);
 }
 
-function tileBoundsFor(loaded: LoadedMap, cameraX: number, cameraY: number) {
-  return viewportTileBounds(loaded.map, cameraX, cameraY, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+function tileBoundsFor(loaded: LoadedMap, cameraX: number, cameraY: number, viewport: { width: number; height: number }) {
+  return viewportTileBounds(loaded.map, cameraX, cameraY, viewport.width, viewport.height);
 }
 
 interface MovementPayload {
@@ -215,9 +229,10 @@ function movementPayload(
   sceneEpoch: number,
   visualEpoch: number,
   includeProjection: boolean,
+  viewport: { width: number; height: number },
 ): MovementPayload {
-  const sourceCamera = cameraFor(loaded, fromX, fromY);
-  const targetCamera = cameraFor(loaded, nextX, nextY);
+  const sourceCamera = cameraFor(loaded, fromX, fromY, viewport);
+  const targetCamera = cameraFor(loaded, nextX, nextY, viewport);
   const screenX = nextX * TILE - targetCamera.cameraX;
   const screenY = nextY * TILE - targetCamera.cameraY;
   const fromScreenX = fromX * TILE - sourceCamera.cameraX;
@@ -259,13 +274,13 @@ function movementPayload(
   return { viewportSet, playerSet };
 }
 
-function renderState(facts: RenderFacts): RenderDomainState {
+function renderState(facts: RenderFacts, viewport: { width: number; height: number }): RenderDomainState {
   const { loaded, window, x, y, direction, activeMove, playerRef, sceneEpoch, visualEpoch } = facts;
-  const camera = cameraFor(loaded, x, y);
+  const camera = cameraFor(loaded, x, y, viewport);
   const screenX = x * TILE - camera.cameraX;
   const screenY = y * TILE - camera.cameraY;
   const motionId = activeMove === null ? null : activeMove.id;
-  const sourceCamera = activeMove === null ? camera : cameraFor(loaded, activeMove.fromX, activeMove.fromY);
+  const sourceCamera = activeMove === null ? camera : cameraFor(loaded, activeMove.fromX, activeMove.fromY, viewport);
   return {
     zIndex: 0,
     roots: [{
@@ -279,6 +294,8 @@ function renderState(facts: RenderFacts): RenderDomainState {
           fromCameraY: sourceCamera.cameraY,
         }),
         includeProjection: true,
+        viewportWidth: viewport.width,
+        viewportHeight: viewport.height,
       }),
       children: [{
         key: PLAYER_KEY, tag: "lr-map-sprite", attrs: {},
@@ -308,9 +325,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
     let listener;
     let domain;
     let stepTimer: ReturnType<typeof setTimeout> | null = null;
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let pendingResize: { width: number; height: number } | null = null;
     let activeMove: ActiveMove | null = null;
     let transitioning = false;
     let cleanedUp = false;
+    let unsubscribeViewportEarly: (() => void) | null = null;
     try {
       const input = initialInput(frame.params);
       let resolveTerminal!: (outcome: FrameOutcome) => void;
@@ -351,6 +371,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       let visualEpoch = 1;
       let heldDirections: Direction[] = [];
       let playerRef!: ResourceRef;
+      let viewport = clampViewportSize(VIEWPORT_DEFAULT.width, VIEWPORT_DEFAULT.height);
 
       const facts = (overrides: Partial<RenderFacts> = {}): RenderFacts => ({
         loaded: overrides.loaded ?? current,
@@ -365,11 +386,11 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       });
 
       const requiredChunksFor = (loaded: LoadedMap, fromX: number, fromY: number, toX: number, toY: number): ChunkBounds => {
-        const sourceCamera = cameraFor(loaded, fromX, fromY);
-        const targetCamera = cameraFor(loaded, toX, toY);
+        const sourceCamera = cameraFor(loaded, fromX, fromY, viewport);
+        const targetCamera = cameraFor(loaded, toX, toY, viewport);
         const requiredTiles = unionTileBounds(
-          tileBoundsFor(loaded, sourceCamera.cameraX, sourceCamera.cameraY),
-          tileBoundsFor(loaded, targetCamera.cameraX, targetCamera.cameraY),
+          tileBoundsFor(loaded, sourceCamera.cameraX, sourceCamera.cameraY, viewport),
+          tileBoundsFor(loaded, targetCamera.cameraX, targetCamera.cameraY, viewport),
         );
         // Clamp to the map before containment: chunks outside the map do not
         // exist and must not force a window refresh (main contract §3).
@@ -377,9 +398,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const standingWindow = (loaded: LoadedMap, tileX: number, tileY: number, nextSceneEpoch: number, nextVisualEpoch: number) => {
-        const camera = cameraFor(loaded, tileX, tileY);
-        const required = chunkBoundsForTileBounds(tileBoundsFor(loaded, camera.cameraX, camera.cameraY));
-        return selectProjectionWindow(loaded, required, camera.cameraX, camera.cameraY, nextSceneEpoch, nextVisualEpoch, null);
+        const camera = cameraFor(loaded, tileX, tileY, viewport);
+        const required = chunkBoundsForTileBounds(tileBoundsFor(loaded, camera.cameraX, camera.cameraY, viewport));
+        return selectProjectionWindow(loaded, required, camera.cameraX, camera.cameraY, nextSceneEpoch, nextVisualEpoch, null, viewport);
       };
 
       const failTransfer = (error: unknown) => {
@@ -395,7 +416,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         if (frame.signal.aborted || transitioning) return;
         transitioning = true;
         try {
-          domain!.replace(renderState(facts({ activeMove: null })));
+          domain!.replace(renderState(facts({ activeMove: null }), viewport));
           activeMove = null;
           if (stepTimer !== null) {
             clearTimeout(stepTimer);
@@ -422,7 +443,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             sceneEpoch: nextSceneEpoch,
             visualEpoch: nextVisualEpoch,
           });
-          domain!.replace(renderState(nextFacts));
+          domain!.replace(renderState(nextFacts, viewport));
           current = target;
           window = nextWindow;
           x = rule.targetX;
@@ -448,7 +469,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
 
       const publishBlocked = (nextDirection: Direction) => {
         const nextWindow = window.source === current ? window : standingWindow(current, x, y, sceneEpoch, visualEpoch);
-        domain!.replace(renderState(facts({ direction: nextDirection, window: nextWindow, activeMove: null })));
+        domain!.replace(renderState(facts({ direction: nextDirection, window: nextWindow, activeMove: null }), viewport));
         direction = nextDirection;
         window = nextWindow;
         activeMove = null;
@@ -462,20 +483,20 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         let includeProjection = false;
         let nextVisualEpoch = visualEpoch;
         if (!(window.source === current && chunkBoundsContain(window.bounds, required))) {
-          const targetCamera = cameraFor(current, nextX, nextY);
+          const targetCamera = cameraFor(current, nextX, nextY, viewport);
           const cameraMotion = nextMove === null ? null : Object.freeze({
             id: nextMove.id,
             durationMs: WALK_STEP_MS,
-            fromCameraX: cameraFor(current, fromX, fromY).cameraX,
-            fromCameraY: cameraFor(current, fromX, fromY).cameraY,
+            fromCameraX: cameraFor(current, fromX, fromY, viewport).cameraX,
+            fromCameraY: cameraFor(current, fromX, fromY, viewport).cameraY,
           });
           nextVisualEpoch = visualEpoch + 1;
-          nextWindow = selectProjectionWindow(current, required, targetCamera.cameraX, targetCamera.cameraY, sceneEpoch, nextVisualEpoch, cameraMotion);
+          nextWindow = selectProjectionWindow(current, required, targetCamera.cameraX, targetCamera.cameraY, sceneEpoch, nextVisualEpoch, cameraMotion, viewport);
           includeProjection = true;
         }
         const { viewportSet, playerSet } = movementPayload(
           current, nextWindow, fromX, fromY, nextX, nextY, nextDirection, nextMove,
-          sceneEpoch, nextVisualEpoch, includeProjection,
+          sceneEpoch, nextVisualEpoch, includeProjection, viewport,
         );
         domain!.update({
           nodes: [
@@ -542,6 +563,29 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           startTransfer(step, direction);
           return;
         }
+        // Step-completion boundary: an accepted pending resize commits here
+        // (authoritative boundary per main contract §1). The completing
+        // move must be cleared first so the boundary commit is not treated
+        // as another active step.
+        if (pendingResize !== null) {
+          activeMove = null;
+          const queued = pendingResize;
+          pendingResize = null;
+          if (heldDirections.length > 0) {
+            // Keep continuity: apply the resize first, then continue the
+            // held tail from the post-resize world truth.
+            acceptViewport(queued);
+            if (frame.signal.aborted) return;
+            nextStartPattern = nextStartPattern === 1 ? 3 : 1;
+            attempt(heldDirections[heldDirections.length - 1]!);
+            return;
+          }
+          acceptViewport(queued);
+          if (frame.signal.aborted) return;
+          nextStartPattern = 1;
+          publishMovementUpdate(x, y, direction, null);
+          return;
+        }
         if (heldDirections.length > 0) {
           nextStartPattern = nextStartPattern === 1 ? 3 : 1;
           attempt(heldDirections[heldDirections.length - 1]!);
@@ -555,6 +599,10 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       if (!inBounds(loaded.map, input.x, input.y)) throw new TypeError("Map spawn lies outside the loaded Map");
       const playerResource = await scope.content.resource("resource.Graphics", `Characters/${input.characterName}`, { signal: frame.signal });
       playerRef = ref("resource.Graphics", `Characters/${input.characterName}`, playerResource.contentVersion);
+      // Viewport initial read precedes any projection: the spawn window uses
+      // the accepted current size (scope.viewport.current ?? DEFAULT).
+      const initialViewportSample = scope.viewport.current;
+      if (initialViewportSample !== null) viewport = clampViewportSize(initialViewportSample.width, initialViewportSample.height);
       const spawnWindow = standingWindow(loaded, input.x, input.y, 1, 1);
       const initial = renderState({
         loaded,
@@ -566,7 +614,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         playerRef,
         sceneEpoch: 1,
         visualEpoch: 1,
-      });
+      }, viewport);
       domain = scope.createRenderDomain(initial);
       current = loaded;
       window = spawnWindow;
@@ -580,6 +628,55 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       heldDirections = [];
       transitioning = false;
       activeMove = null;
+
+      /**
+       * Accepted viewport resize (main contract §1/PR2): clamped, same-size
+       * no-op, 100ms trailing latest-wins settle, authoritative commit at a
+       * safe boundary. While a logical step is active the accepted size is
+       * stored as pending and committed at the step-completion boundary;
+       * the rebase target/pose derive from world truth, and the shared
+       * motion clock keeps the original remainingMs semantics by publishing
+       * a fresh motion pair whose from-values rebase from the actually
+       * displayed pose (browser-side receipt clock preserves the end time
+       * envelope; frozen walking semantics unchanged).
+       */
+      const acceptViewport = (next: { width: number; height: number }) => {
+        if (frame.signal.aborted || transitioning) return;
+        const clamped = clampViewportSize(next.width, next.height);
+        if (clamped.width === viewport.width && clamped.height === viewport.height) return;
+        if (activeMove !== null) {
+          // Active logical step: defer to the completion boundary.
+          pendingResize = clamped;
+          return;
+        }
+        viewport = clamped;
+        const nextVisualEpoch = visualEpoch + 1;
+        const nextWindow = standingWindow(current, x, y, sceneEpoch, nextVisualEpoch);
+        domain!.replace(renderState(facts({ window: nextWindow, activeMove: null, visualEpoch: nextVisualEpoch }), viewport));
+        window = nextWindow;
+        visualEpoch = nextVisualEpoch;
+      };
+      const scheduleViewportResize = (next: { width: number; height: number }) => {
+        pendingResize = next;
+        if (resizeTimer !== null) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          resizeTimer = null;
+          const queued = pendingResize;
+          pendingResize = null;
+          if (queued !== null) acceptViewport(queued);
+        }, RESIZE_SETTLE_MS);
+      };
+      // Initial read -> subscribe convergence (contract §1): a change
+      // between the first read and the synchronous first delivery is
+      // impossible by construction (same callback), but a later differing
+      // sample converges through the same settle path.
+      const initialViewport = scope.viewport.current;
+      void initialViewport;
+      const unsubscribeViewport = scope.viewport.subscribe((value) => {
+        if (frame.signal.aborted || value === null) return;
+        scheduleViewportResize(value);
+      });
+      unsubscribeViewportEarly = unsubscribeViewport;
       listener = scope.createInputListener({ frame, channels: ["keyboard.event", "keyboard.state"] });
       listener.on("keyboard.event", (event) => {
         const movement = directionForCode(event.code);
@@ -613,6 +710,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       if (!cleanedUp) {
         cleanedUp = true;
         listener.close();
+        unsubscribeViewport();
+        if (resizeTimer !== null) {
+          clearTimeout(resizeTimer);
+          resizeTimer = null;
+        }
+        pendingResize = null;
         if (stepTimer !== null) {
           clearTimeout(stepTimer);
           stepTimer = null;
@@ -626,6 +729,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       if (!cleanedUp) {
         cleanedUp = true;
         listener?.close();
+        unsubscribeViewportEarly?.();
+        if (resizeTimer !== null) {
+          clearTimeout(resizeTimer);
+          resizeTimer = null;
+        }
+        pendingResize = null;
         if (stepTimer !== null) {
           clearTimeout(stepTimer);
           stepTimer = null;
