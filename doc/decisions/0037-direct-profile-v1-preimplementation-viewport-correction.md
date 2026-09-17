@@ -1,6 +1,6 @@
 # ADR 0037 — 首次发布前直接修正 Renderer Data Profile v1
 
-> 状态：**Accepted / preimplementation design correction；npm consumer 项已按项目负责人确认解除，其他兼容性与 Docs Freeze 尚未签署**  
+> 状态：**Accepted / preimplementation design correction；npm（2026-09-16）与非 npm 兼容前提及单 cohort 策略（2026-09-17）均已按项目负责人 attestation 解除并记录于[冻结登记](../30-implementation/viewport-core-docs-freeze-registration-2026-09-17.md)；Core Docs Freeze 仍待独立 reviewer 签署**  
 > 日期：2026-09-16  
 > 更新：[ADR0036](./0036-viewport-state-and-renderer-data-profile-v2.md) 的「必须另建 Profile v2」结论；保留其中 viewport 不属于 User Input 的问题证明。  
 > 依据：[文档治理 §4–7](../00-overview/document-governance.md) · [业务边界 Review](../30-implementation/viewport-business-boundary-review-2026-09-16.md) · [Profile v1](../15-contracts/renderer-data-profile-v1.md)
@@ -11,7 +11,7 @@
 
 **项目负责人确认（2026-09-16）：不存在 npm 消费者，明确要求不要再验证 npm；npm 消费者兼容性核查从本 ADR 与 Core Docs Freeze 准入条件中移除。** 此项证据类型为 owner attestation，而非 registry 查询、分发渠道扫描或第三方验证；文档不得将其改写为“已检查 npm registry / alpha / tarball”，不得重新要求 npm 查询、npm 分发证明或 npm consumer 签署，也不得把该项以“兼容性总核查”名义重新引入 Freeze 阻塞。唯一 live 状态由 [v1 qualification ledger §2](../30-implementation/viewport-profile-v1-qualification.md) 记录。
 
-**未发布及 npm 无消费者并不自动证明其他兼容性义务不存在。** 非 npm 的明确旧 `/1` 协议/身份承诺、独立对接者、持久化 profile identity、正在运行的旧 peer 或 rolling/rollback/mixed cohort 需求仍须按 ledger 的限定范围由相应负责人确认。项目如确有此类需要互操作的旧 `/1` peer，STOP direct reset，另起兼容性/迁移决策；不得将本 ADR 解释成可以静默破坏已部署 wire。不得将 npm 调查作为这些独立项目的隐含前置。
+**未发布及 npm 无消费者并不自动证明其他兼容性义务不存在。** 非 npm 的明确旧 `/1` 协议/身份承诺、独立对接者、持久化 profile identity、正在运行的旧 peer 或 rolling/rollback/mixed cohort 需求仍须按 ledger 的限定范围由相应负责人确认。项目如确有此类需要互操作的旧 `/1` peer，STOP direct reset，另起兼容性/迁移决策；不得将本 ADR 解释成可以静默破坏已部署 wire。不得将 npm 调查作为这些独立项目的隐含前置。**2026-09-17 更新：项目负责人已在工程任务对话中以 owner attestation 确认上述非 npm 前提（无已知承诺/独立 peer/持久化身份/混版需求）并批准修正后 `/1` 单一 build/deployment cohort；见[冻结登记 §2](../30-implementation/viewport-core-docs-freeze-registration-2026-09-17.md)与[唯一 ledger §2](../30-implementation/viewport-profile-v1-qualification.md)。该记录不是外部渠道扫描或运行结果；独立 Docs Freeze 签署仍待完成。**
 
 ## 决定
 

@@ -1,16 +1,16 @@
 # Viewport State v1 / Revised Renderer Data Profile v1 Qualification Ledger
 
 > 层级：Implementation / Qualification Ledger（**唯一 Core live status**）  
-> 状态：**Preimplementation / Technical Document Remediation Verified / Formal Docs Freeze HOLD**；2026-09-16。项目负责人已确认 npm 无消费者，npm consumer 验证不再构成 Freeze gate。  
+> 状态：**Preimplementation / Technical Document Remediation Verified / Formal Docs Freeze HOLD**；2026-09-17 更新：npm（2026-09-16）与非 npm 兼容前提及单 cohort 策略（2026-09-17）均已由项目负责人 attestation 记录于[冻结登记](./viewport-core-docs-freeze-registration-2026-09-17.md)；**唯一剩余正式 gate 为独立 reviewer 对 docs-only subject `4cbf620` 的签署**。不查询 npm，npm consumer 验证不构成 Freeze gate。  
 > Decision：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；Contract：[Viewport v1](../15-contracts/viewport-state-v1.md) · [corrected Profile `/1`](../15-contracts/renderer-data-profile-v1.md)；Conformance：[Viewport](../15-contracts/viewport-state-conformance-v1.md) · [Profile `/1` fixture revision3](../15-contracts/renderer-data-profile-conformance-v1.md)。  
-> Reviews：[本轮 Core 技术终审与修复逐项证据](./viewport-core-final-review-2026-09-16.md) · [历史 Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [整改历史](./viewport-v1-final-freeze-closure-2026-09-16.md) · [范围收缩及完整原文 crosswalk](./viewport-scope-repair-2026-09-16.md)。Map [实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)和[PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)单独拥有状态。
+> Reviews：[本轮 Core 技术终审与修复逐项证据](./viewport-core-final-review-2026-09-16.md) · [历史 Core review](./viewport-core-docs-freeze-review-2026-09-16.md) · [业务归属](./viewport-business-boundary-review-2026-09-16.md) · [整改历史](./viewport-v1-final-freeze-closure-2026-09-16.md) · [范围收缩及完整原文 crosswalk](./viewport-scope-repair-2026-09-16.md) · [冻结登记/待签材料 2026-09-17](./viewport-core-docs-freeze-registration-2026-09-17.md)。Map [实施主合同](../../examples/essentials-v21.1-local/MAP_DYNAMIC_VIEWPORT_PERFORMANCE_REFACTOR_DRAFT.md)和[PR0 evidence](../../examples/essentials-v21.1-local/MAP_VIEWPORT_PR0_EVIDENCE.md)单独拥有状态。
 
 **Docs Frozen ≠ implemented ≠ qualified/closed。** `/2`由ADR0037取消；旧三-child`/1` executable PASS不可转给新四-child`/1`。本轮已补原文、模块接缝、历史入口和 terminal fixture，**但技术审查作者不能代替发布/部署负责人及独立签署者批准 Freeze**。不查询 npm，不以 npm 消费者核查阻塞。
 
 ## 1. Current snapshot
 
 ```text
-ADR0037 direction                  Accepted; npm no-consumer owner attestation RECORDED
+ADR0037 direction                  Accepted; npm + non-npm owner attestations RECORDED (2026-09-16/17)
 Revised Profile /1 + Viewport v1   Normative candidate / Formal Core Docs Freeze HOLD
 Old 3-child /1 source              historical executable; still current production code
 /2                                 superseded proposal; never shipped/implemented
@@ -18,7 +18,7 @@ Main/Renderer/Subsystem/Desktop    revised four-child NOT IMPLEMENTED
 Profile /1 fixtureSetRevision      3 spec only; NOT EXECUTED
 npm consumer compatibility         OWNER CONFIRMED / NON-BLOCKING; no npm lookup
 GitHub Releases channel           API returned [] on 2026-09-16; other channels not implied
-Other non-npm compatibility        PENDING owner facts/decision (§2)
+Other non-npm compatibility        OWNER ATTESTED 2026-09-17 (registration §2); no mixed-binary requirement
 Connection projection              corrected 9fb2c72; technical text review complete
 Phase plan current route           corrected eb518d6; M1–M17 detail retained
 Original governance/platform/     old source restored; affected architecture/module/Data now
@@ -26,9 +26,9 @@ architecture/module/Data text      have narrow additive projection, NOT all byte
 Original Profile/Conformance       warning wrappers + verbatim original blob copies verified
 Data /1 new API                     additive packages/data/VIEWPORT_V1_IMPLEMENTATION_DELTA.md
 CR-01/02/04/05 technical repairs   TEXT VERIFIED; see final review, subject 7db45f29
-Independent final reviewer         NOT SIGNED
+Independent final reviewer         NOT SIGNED (sole remaining formal gate)
 Product coherent cohort           strategy specified; actual artifact manifest NOT YET BUILT
-Core Docs Freeze approved SHA      PENDING / HOLD
+Core Docs Freeze subject SHA       REGISTERED 4cbf620 (docs-only) / SIGNOFF PENDING / HOLD
 Executable subject + raw tests     NOT RUN (after Docs Freeze)
 Map Docs Freeze / PR0 evidence     separate Map-owned HOLD / NOT RUN
 ```
@@ -40,16 +40,18 @@ Map Docs Freeze / PR0 evidence     separate Map-owned HOLD / NOT RUN
 - [x] npm consumer compatibility: OWNER ATTESTED NO CONSUMERS / NON-BLOCKING, 2026-09-16; no npm lookup performed or required.
 - [x] GitHub Releases channel: REST `GET /repos/lithdoo/loom-realm/releases` returned `[]` on 2026-09-16. **Only** this channel checked; does not establish absence of all public identity commitments.
 
-**Still independent, never a disguised npm check:** Same-identity pre-release `/1` correction is unsafe if any real other old-binary interoperability requirement exists. A release/deployment owner must record a bounded decision about **known non-npm** published identity promises/independent peers, persisted profile identity or still-running old peer, and whether this product needs rolling/rollback/mixed-binary coexistence. Do not manufacture these facts from missing Releases or the npm owner statement.
+**Closed 2026-09-17, not pending:** Same-identity pre-release `/1` correction requires a bounded owner decision about **known non-npm** published identity promises/independent peers, persisted profile identity or still-running old peer, and rolling/rollback/mixed-binary coexistence requirements. The project owner recorded that decision on 2026-09-17 in the engineering task conversation, transcribed in [freeze registration §2](./viewport-core-docs-freeze-registration-2026-09-17.md): **owner attestation** type (not registry query, channel scan, third-party proof or executed test), confirming no known commitments/peers and approving a single corrected-`/1` build/deployment cohort with no mixed old/new binaries.
 
-- [ ] Non-npm explicit profile/identity commitments and any known independent implementations: owner conclusion/date; only relevant known channels, not npm investigation.
-- [ ] Persisted identity, current old peers, rolling/rollback/mixed cohort requirements: deployment owner conclusion/date; design permits only a coherent new cohort, no mixed peer.
-- [ ] Owner records the combined **non-npm** compatibility decision and exact evidence/assumptions; if real old `/1` interoperability exists STOP direct reset and reopen version/migration ADR.
+- [x] Non-npm explicit profile/identity commitments and any known independent implementations: owner attested none known, 2026-09-17 (registration §2); no channel scan performed or implied.
+- [x] Persisted identity, current old peers, rolling/rollback/mixed cohort requirements: owner attested none; product requires no cross-version interoperation, 2026-09-17; design permits only a coherent new cohort, no mixed peer.
+- [x] Owner recorded the combined **non-npm** compatibility decision, evidence type and assumptions, 2026-09-17 (registration §2). STOP/ADR-reopen condition unchanged if real old `/1` interoperability later emerges.
 
 ```text
 npm owner/date: project owner / 2026-09-16 / non-blocking
 GitHub Releases: [] / 2026-09-16 / this channel only
-Non-npm compatibility owner/decision/date: PENDING
+Non-npm compatibility owner/decision/date: project owner / 2026-09-17 /
+  no known commitments, peers, persisted identity or mixed-binary requirement;
+  single corrected-/1 cohort (owner attestation; source = task conversation, not external scan)
 ```
 
 This does not defer npm verification. Actual *future* artifact SHAs and per-component manifest are a separate **C1 implementation qualification**; before Docs Freeze only owner must approve the feasible single-cohort strategy and confirm no known mixed-binary requirement.
@@ -72,13 +74,14 @@ This does not defer npm verification. Actual *future* artifact SHAs and per-comp
 
 **Formal Freeze gate still unfulfilled:**
 
-- [ ] §2 non-npm compatibility / no real old `/1` mixed-binary requirement concluded by release/deployment owner, with date and assumption/evidence; coherent strategy agreed. **Do not require actual future artifact manifest before implementation.**
-- [ ] A reviewer independent of the document author checks the **final post-fix docs-only SHA**, records identity/date and confirms cross-file normative navigation/affected links. The self-authored technical report is evidence, **not a second independent person**.
+- [x] §2 non-npm compatibility / no real old `/1` mixed-binary requirement concluded by owner, 2026-09-17 (owner attestation, [registration §2](./viewport-core-docs-freeze-registration-2026-09-17.md)); single corrected-`/1` cohort strategy approved. No artifact manifest required before implementation.
+- [ ] **Sole remaining gate:** a reviewer independent of the document author checks the **final post-fix docs-only SHA `4cbf620`** (registered with docs-only verification in [registration §1](./viewport-core-docs-freeze-registration-2026-09-17.md)), records identity/date/scope and approves. The self-authored technical report and this registration's executing agent are evidence/preparation, **not an independent person**.
 - [ ] Approved final Docs Freeze subject SHA and signoff entered here and reflected in current Profile/Viewport/conformance statuses. If evidence is not present, keep HOLD; no invented signatures.
 
 ```text
 Technical review subject: 7db45f29e1bf30261468ef03ec7acd80ae3b8b8d
-Final docs-only SHA / independent reviewer / approval date: PENDING
+Registered docs-only subject SHA: 4cbf620ebe8aec0e7fb33743813c5d1f2885e6a9 (2026-09-17 registration)
+Final docs-only SHA / independent reviewer / approval date: 4cbf620 / PENDING / PENDING
 Formal Core Docs Freeze: HOLD
 ```
 
@@ -87,11 +90,11 @@ Formal Core Docs Freeze: HOLD
 当前产品预定所有本次实际部署的DataAuthority由Main选择同一**修正后** `loomrealm.renderer-data/1`。Main独占profile选择；Broker `(Session,Renderer,S,G,P)` exact matching只有**逻辑 authority**、没有build fingerprint，不能识别旧三-child与四-child二进制。必须在连接前协调Main、Data peer、Renderer、Subsystem、Desktop/PWA相应adapter同一受治理release/build cohort，不允许混配。需要rolling/rollback共存必须先按§2另行决策，不得加隐式feature flag或双解析器。
 
 ```text
-Single-cohort rollout design: specified in ADR0037, awaiting owner approval under §2
+Single-cohort rollout design: specified in ADR0037; owner approved 2026-09-17 (registration §2)
 Release cohort artifact manifest and SHA: PENDING (C1 implementation evidence)
 Main/Data/Renderer/Subsystem/adapter inventory: PENDING (C1)
 No-mixed-version executable proof: PENDING (C1)
-Rollout owner/signoff on no mixed requirement: PENDING (C0)
+Rollout owner decision on no mixed requirement: RECORDED 2026-09-17 (owner attestation); independent Freeze signoff pending
 ```
 
 Desktop/PWA physical composition指定document layout viewport，采用`Window.innerWidth/innerHeight` CSS logical px floor；实际业务 content box/center/letterbox、hidden→visible、fresh source fence和DPR-only属于产品实现/验收，不是通用 child wire。其他平台须指定自己的唯一稳定 logical surface及消费端证据。
@@ -122,14 +125,15 @@ Executable subject SHA: PENDING / NOT RUN
 |---|---|---|
 | npm consumer | Owner's explicit statement, 2026-09-16 | CLOSED NON-BLOCKING; no npm verification |
 | GitHub Releases | Public REST `GET /releases`, 2026-09-16 | `[]`, no Releases in that channel |
-| Non-npm compatibility / no-mixed requirement | Release/deployment owner | PENDING / BLOCKING |
+| Non-npm compatibility / no-mixed requirement | Project owner attestation, 2026-09-17 ([registration §2](./viewport-core-docs-freeze-registration-2026-09-17.md)) | CLOSED (owner attestation; not an external scan); single cohort approved |
 | Connection composition projection | `9fb2c72` and technical review | TEXT VERIFIED; Frozen mechanics preserved |
 | Protocol-layer / Subsystem / Renderer / Data status and seam | `ce57cf1` / `feb1054` / `ccb5304` / `2556dfc` | TEXT VERIFIED; no code |
 | Original Profile/fixture preservation and wrapper navigation | original blob SHAs + `047e4ba` / `eb2e488` / `66b2009` | HISTORICAL ORIGINAL INTACT / TEXT VERIFIED |
 | Viewport terminal contract + fixture | `b896173` / `a8ff94e` | TEXT VERIFIED / NOT RUN |
 | Protected normative crosswalk | [scope repair](./viewport-scope-repair-2026-09-16.md), [final technical review](./viewport-core-final-review-2026-09-16.md) | TECHNICAL REVIEW COMPLETE; independent signoff pending |
+| Docs navigation auxiliary check | `npm run docs:check-links` @ `4cbf620`, exit 0, 2026-09-17 | 663/663 relative links OK; link reachability only, not normative review |
 | Product cohort manifest/verification | future C1 executable | NOT BUILT / NOT VERIFIED; not preimplementation doc PASS |
-| Core Docs Freeze docs SHA + valid signoff | PENDING | HOLD |
+| Core Docs Freeze docs SHA + valid signoff | subject `4cbf620` registered 2026-09-17 ([registration §1/§4](./viewport-core-docs-freeze-registration-2026-09-17.md)) | HOLD — independent reviewer signoff missing (sole gate) |
 | Four-child executable/fixture3/old regression | future C1 | NOT RUN |
 | Map PR0 / Map Docs Freeze | separate Map ledger | NOT RUN / HOLD |
 
