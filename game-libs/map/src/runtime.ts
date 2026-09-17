@@ -395,14 +395,6 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         window = nextWindow;
         visualEpoch = nextVisual;
         settledResize = true;
-        if (activeMove !== null) {
-          if (stepTimer !== null) {
-            clearTimeout(stepTimer);
-            stepTimer = null;
-          }
-          activeMove = null;
-          nextStartPattern = 1;
-        }
       };
 
       const noteViewport = (value: { readonly width: number; readonly height: number } | null) => {
@@ -440,14 +432,6 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         if (frame.signal.aborted || transitioning) return;
         transitioning = true;
         try {
-          const standing = facts({ activeMove: null });
-          domain!.replace(renderState(standing));
-          activeMove = null;
-          if (stepTimer !== null) {
-            clearTimeout(stepTimer);
-            stepTimer = null;
-          }
-          nextStartPattern = 1;
           const target = await loadMap(rule.targetMapId);
           if (frame.signal.aborted || !transitioning) {
             transitioning = false;
@@ -477,6 +461,10 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           sceneEpoch = nextScene;
           visualEpoch = nextVisual;
           activeMove = null;
+          if (stepTimer !== null) {
+            clearTimeout(stepTimer);
+            stepTimer = null;
+          }
           nextStartPattern = 1;
           transitioning = false;
           if (frame.signal.aborted) return;
@@ -626,8 +614,10 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       const finishStep = (moveId: number) => {
         if (frame.signal.aborted || activeMove?.id !== moveId) return;
         stepTimer = null;
-        activeMove = null;
-        if (pendingViewport !== null) commitViewportResize();
+        const hadPendingResize = pendingViewport !== null;
+        if (hadPendingResize) commitViewportResize();
+        const resizeCommitted = hadPendingResize && pendingViewport === null;
+        if (resizeCommitted) activeMove = null;
         const step = current.transfers.steps.find((rule) => rule.x === x && rule.y === y);
         if (step) {
           startTransfer(step, direction);
@@ -636,10 +626,10 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         if (heldDirections.length > 0) {
           nextStartPattern = nextStartPattern === 1 ? 3 : 1;
           attempt(heldDirections[heldDirections.length - 1]!);
-        } else {
-          nextStartPattern = 1;
-          publishMovementUpdate(x, y, direction, null);
+          return;
         }
+        nextStartPattern = 1;
+        if (!resizeCommitted) publishMovementUpdate(x, y, direction, null);
       };
 
       const loaded = await loadMap(input.mapId);
