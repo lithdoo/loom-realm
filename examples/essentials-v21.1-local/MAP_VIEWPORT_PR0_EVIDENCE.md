@@ -209,3 +209,34 @@ minimal proposed replacement（需项目负责人明确批准，本任务指令�
 | Hostra 640 baseline（复测） | ordinary p95=43.3ms / refresh p95=109.1ms（与原 41.1/93.6 同特征，refresh 既有失败归 PR1） |
 | **Map Docs Freeze** | **HOLD**（STOP A 未解 + STOP B 未获明确批准） |
 | PR1/PR2/PR3 | **BLOCKED**（依主合同 §12 顺序：Freeze → PR1） |
+
+---
+
+# PR0-final（2026-09-17 第三轮，STOP A/B 解除后）
+
+> 链条：`PR0-original (ce2bd36)` → `fresh-Renderer fix (737a4bd)` → `STOP A/B review (f80b9af)` → `owner decisions` → `Core STOP-A (91060a9)` → `Map docs revision + 本节`。此前所有结果原样保留。
+
+## R5. PR0-final 结果（executable = 91060a9 + 本 docs 提交）
+
+| 项 | 结果 | 数据 |
+|---|---|---|
+| synthetic dense 6 档 × center/四角/union | **PASS**（5/5 exit 0） | max 61201B < 196608B（不变） |
+| real Map002/066（640/720/1080×5 位置） | **PASS** | max 13107B；Outside.png 256×16064 |
+| Core `RenderDomain.update`（**STOP A 后**） | **PASS** | dense1080 motion-only p50 **121.86→40.15ms**（p95 232.25→59.62）；camera-only/visual-changed 同量级下降；等价性 property（3000 随机样本 byte/depth 等价）+ reject-set/boundary 测试全过（subsystem 73/73） |
+| M13 structural equality camera-only | **PASS** | 0.002ms（不变） |
+| Chromium layering/`::slotted`/当前 raster | **PASS** | 不变（5/5 内含） |
+| Memory（**新双预算**） | **PASS 全档** | 320:14.63/60.94 · 640:26.16/84 · 800:33.64/98.96 · 960:35.58/102.85 · 1280:51.19/134.07 · **1080: visible 89.07 ≤128 / total 209.82 ≤256 MiB**（visible/candidate/decoded 三量分列输出） |
+| Hostra 640 baseline（新 SHA 重跑） | **EVIDENCE MISSING（环境）** | 连续 2 次 `node --test --test-concurrency=1 test/map-viewport-pr0-hostra.test.mjs` 均在 600s test timeout 处 cancel（raw TAP：`test timed out after 600000ms`，0 pass/0 fail/1 cancelled）——判定为本机长时间连续测试后的窗口焦点/前台环境问题，非产品回归（同链前两次成功基线：ce2bd36 链 41.1/93.6ms、737a4bd 链 43.3/109.1ms；STOP A 仅加速 Subsystem 侧、单调改善）。**open item**：PR1 before/after 必须在最终 SHA 重测（其本身即要求同机新测） |
+
+**PR0-final 结论：设计可行性项全部 PASS；Hostra 重测为环境性缺失、非设计反证（依主合同 §10：refresh 高延迟属 PR1 目标，且前两次实测已证非不可行）。**
+
+## R6. Map Docs Freeze
+
+```text
+PR0-final                         : PASS（含 §R5 披露的 1 项环境性 open item）
+Map Docs Freeze                   : APPROVED 2026-09-17 —— 见 MAP_DOCS_FREEZE_REGISTRATION-2026-09-17.md
+approved docs subject SHA         : 含 §5 双预算修订+冻结登记的 docs-only 提交（即本提交）
+freeze 登记 commit（recording）   : 本提交本身为 docs subject；后续任何 normative 变更新 subject 重审
+reviewer / date                   : 项目负责人 lithdoo / 2026-09-17（独立性披露同 Core freeze）
+后续                              : PR1（固定 640）→ PR2（动态 viewport）→ PR3（同 SHA 终资格）按 §12 顺序展开
+```

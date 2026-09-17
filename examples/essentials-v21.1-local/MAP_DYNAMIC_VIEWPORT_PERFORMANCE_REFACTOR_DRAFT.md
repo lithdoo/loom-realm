@@ -90,7 +90,15 @@ type MapSpriteRenderData=Readonly<{
 
 Initial/scene/viewport/chunk refresh的 guard对象是**完整 MapView data object** `TextEncoder().encode(JSON.stringify(data)).byteLength <196608`，严格小于，不把RenderNode外壳计入；ordinary movement map侧不重stringify全部chunks。既有Frozen Render Node data≤262144B、Data unit≤1MiB/depth≤64与其他limits照常完整执行。M13 Frozen JSON structural equality可能在camera-only更新时扫描大数组，必须在PR0单列对新shape测CPU；不可用object identity、跳Projector、修改Frozen equality优化。Core RenderDomain.update full-state validation/snapshot residual也独立拆测；任何独立项本身打破门槛→STOP独立Core/M13 design review，不得在Map刀里偷偷改。
 
-同时存活的visible+detached candidate所有Canvas（含Sprite crop）以`Σ(width*height*4)`估算 backing峰值≤128MiB；加上current scene所需已decode ImageBitmap的`Σ(width*height*4)`估算总峰值≤256MiB；准备中旧+新两stage都计，不只计commit之后。只缓存current scene+window需要的资源，stale ImageBitmap close/detached canvas释放；不得常驻max1080 envelopes或无限缓存。超过任一限额 STOP，提交资源尺寸/深度与峰值数据，不降低语义强行过关。
+同时存活的内存按三量核算（owner 2026-09-17 capacity revision 批准，替代原"所有同时存活 Canvas ≤128MiB"单一限额；测量时点=每次 stage 准备/提交/释放动作后即时，单位=字节，Canvas 按 `width*height*4`、decoded image 按 bitmap `width*height*4`）：
+
+```text
+visibleCanvasBytes                                    <= 128MiB
+visibleCanvasBytes + detachedCandidateCanvasBytes
+                      + decodedImageBytes (peak)      <= 256MiB
+```
+
+准备中旧+新两stage及缓存资源都计入，不只计commit之后。candidate 状态机固定为 `EMPTY → preparing detached candidate → complete candidate ready → atomic accept/swap → old accepted disposed`；candidate 失败/superseded/stale 必须**立即**释放其 Canvas/resource 引用且 accepted 完整 stage 不受影响，任意时刻不得出现无界历史 candidate。资源缓存必须 bounded 且具 current scene/window 所有权：定义 `load → retain(candidate ownership) → accept(accepted ownership) → evict(window/scene) → transfer(scene 切换清理) → disconnect(清理) → stale ImageBitmap.close()`；只缓存 current scene+window 需要的资源，不得常驻 max1080 envelopes 或无限缓存；memory accounting 必须包含 accepted、detached candidate、decoded images，不得遗漏第二套 stage 或缓存资源。若真实实现 peak 超过任一限额 STOP，提交资源尺寸/深度与峰值数据，不得再次自行提高预算或降低语义强行过关。
 
 ## 6. Map Browser raster、layering、autotile
 

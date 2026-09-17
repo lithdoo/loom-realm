@@ -733,23 +733,26 @@ test("PR0 canvas backing and decoded+backing peak estimates vs budgets (exact bu
       backingPixels += worldW * bucketH;
     }
     // visible stage + one detached candidate stage + 32x32 sprite crop
-    const backingPeak = backingPixels * 4 * 2 + 32 * 32 * 4;
+    const visibleCanvasBytes = backingPixels * 4 + 32 * 32 * 4;
+    const detachedCandidateCanvasBytes = backingPixels * 4;
     // decoded: real Essentials Tileset/Outside.png 256x16064 + autotile +
     // character, old+new scene during transfer preparation
-    const decoded = (256 * 16064 + 192 * 128 + 128 * 128) * 4 * 2;
+    const decodedImageBytes = (256 * 16064 + 192 * 128 + 128 * 128) * 4 * 2;
     report.push({
       size: `${width}x${height}`, world: `${worldW}x${worldH}`,
       depthBuckets: bucketRows.size,
-      backingMiB: +(backingPeak / MIB).toFixed(2),
-      decodedPlusBackingMiB: +((backingPeak + decoded) / MIB).toFixed(2),
+      visibleMiB: +(visibleCanvasBytes / MIB).toFixed(2),
+      candidateMiB: +(detachedCandidateCanvasBytes / MIB).toFixed(2),
+      decodedMiB: +(decodedImageBytes / MIB).toFixed(2),
+      totalPeakMiB: +((visibleCanvasBytes + detachedCandidateCanvasBytes + decodedImageBytes) / MIB).toFixed(2),
     });
   }
   process.stdout.write(`MAP_VIEWPORT_PR0_MEMORY ${JSON.stringify(report)}\n`);
-  // The budget check is recorded per size; an over-budget finding on the
-  // adversarial dense fixture is PR0 evidence for the freeze reviewer, not a
-  // silent pass. 320..720 must stay within budgets; 960+ reported as-is.
-  for (const row of report.slice(0, 3)) {
-    assert.ok(row.backingMiB <= 128, `${row.size} backing peak ${row.backingMiB}MiB > 128MiB`);
-    assert.ok(row.decodedPlusBackingMiB <= 256, `${row.size} decoded+backing ${row.decodedPlusBackingMiB}MiB > 256MiB`);
+  // Owner-approved dual budget (2026-09-17, main contract SS5 revision):
+  // visible <= 128MiB AND visible+detached+decoded peak <= 256MiB, at every
+  // size including adversarial dense 1920x1080.
+  for (const row of report) {
+    assert.ok(row.visibleMiB <= 128, `${row.size} visible ${row.visibleMiB}MiB > 128MiB`);
+    assert.ok(row.totalPeakMiB <= 256, `${row.size} total peak ${row.totalPeakMiB}MiB > 256MiB`);
   }
 });
