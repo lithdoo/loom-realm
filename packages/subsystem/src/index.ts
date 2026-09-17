@@ -35,6 +35,7 @@ export type {
   CreateInputListenerOptions,
   InputListener,
 } from "./input.js";
+export type { ViewportSize, Viewport } from "./viewport.js";
 export type {
   RenderNode,
   RenderDomainState,
