@@ -173,7 +173,7 @@ test("same-authority fresh carrier republishes the retained latest as its own ba
   assert.deepEqual(harness.viewportSeen[1], [1280, 720]);
 });
 
-test("renderer replacement fences the old source and its late emits", async () => {
+test("renderer replacement fences the old source, its late emits, and the old participant baseline", async () => {
   const harness = viewportDataHarness();
   const { source, state } = fakeSource();
   const a = createMemoryCarrierPair();
@@ -183,21 +183,45 @@ test("renderer replacement fences the old source and its late emits", async () =
   const holder = createRendererControlHolder(harness.binding, undefined, source);
   await holder.connect({ carrier: a.right, rendererControlToken: "a" });
   await waitFor(() => harness.subsystemPeers.length === 1, "first data peer");
-  state.emit({ width: 640, height: 480 });
+  state.emit({ width: 800, height: 600 });
   await waitFor(() => harness.viewportSeen.length === 1, "first size");
   const lateEmit = state.emit;
   await holder.connect({ carrier: b.right, rendererControlToken: "b" });
   await waitFor(() => state.stopCalls === 1, "old source stopped");
   await waitFor(() => harness.subsystemPeers.length === 2, "fresh data peer under new session");
-  // The fresh session's data peer republishes the retained latest as its own
-  // baseline; wait for that before probing the fenced late emit.
-  await waitFor(() => harness.viewportSeen.length === 2, "fresh session baseline");
-  const seenBeforeLate = harness.viewportSeen.length;
-  // Old source's late emit is fenced by the holder subscription identity.
+  // Fresh Renderer participant B: its physical source has NOT produced a
+  // legal sample yet. The old participant's 800x600 must NOT be republished
+  // as B's baseline (independent-review corrected expectation).
+  await turn();
+  await turn();
+  assert.deepEqual(harness.viewportSeen, [[800, 600]]);
+  assert.equal(state.started, 2);
+  // Late emit from A's retired source stays fenced.
   lateEmit?.({ width: 42, height: 42 });
   await turn();
-  assert.equal(harness.viewportSeen.length, seenBeforeLate);
-  assert.equal(state.started, 2);
+  assert.deepEqual(harness.viewportSeen, [[800, 600]]);
+  // Only B's first legal sample becomes B's baseline.
+  state.emit({ width: 1024, height: 768 });
+  await waitFor(() => harness.viewportSeen.length === 2, "B first sample");
+  assert.deepEqual(harness.viewportSeen[1], [1024, 768]);
+});
+
+test("same Renderer participant: carrier reconnect immediately republishes retained 800x600 baseline", async () => {
+  const harness = viewportDataHarness();
+  const { source, state } = fakeSource();
+  const pair = createMemoryCarrierPair();
+  void main(pair, "s1", [authority()]);
+  const holder = createRendererControlHolder(harness.binding, undefined, source);
+  await holder.connect({ carrier: pair.right, rendererControlToken: "t" });
+  await waitFor(() => harness.subsystemPeers.length === 1, "data peer install");
+  state.emit({ width: 800, height: 600 });
+  await waitFor(() => harness.viewportSeen.length === 1, "sample published");
+  // Same participant, same-generation carrier replacement: retained latest
+  // is still this participant's current truth -> fresh carrier baseline.
+  await harness.subsystemPeers[0].close();
+  await waitFor(() => harness.subsystemPeers.length === 2, "fresh data peer install");
+  await waitFor(() => harness.viewportSeen.length === 2, "fresh carrier baseline");
+  assert.deepEqual(harness.viewportSeen[1], [800, 600]);
 });
 
 test("viewport source bootstrap failure is contained and leaves no subscription", async () => {

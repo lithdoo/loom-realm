@@ -198,6 +198,12 @@ class ControlHolder implements RendererControlHolder {
       this.clearAllData();
       this.stopInputSource();
       this.stopViewportSource();
+      // Fresh Renderer participant: the wire-level retained viewport
+      // observation belongs to the retiring participant and must not be
+      // republished as the new participant's baseline. Same-generation
+      // carrier replacement under one participant keeps it (see
+      // publishViewportBaseline via installDataAcquire).
+      this.viewportLatest = null;
       this.inputGate.setControl(null);
     }
     this.prepareRenderSession(outcome.snapshot.sessionId);
@@ -215,6 +221,9 @@ class ControlHolder implements RendererControlHolder {
       this.clearAllData();
       this.stopInputSource();
       this.stopViewportSource();
+      // Retired participant: its retained viewport observation is fenced;
+      // a later fresh participant must not inherit it as a baseline.
+      this.viewportLatest = null;
       this.inputGate.setControl(null);
     });
     return Object.freeze({ kind: "installed", current: installed });

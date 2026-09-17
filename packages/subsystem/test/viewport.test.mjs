@@ -124,6 +124,26 @@ test("same-size fresh baseline after carrier replacement does not re-notify", ()
   assert.deepEqual(seen, [null, { width: 640, height: 480 }]);
 });
 
+test("renderer participant replacement: retained observation stays readable until the new participant samples", () => {
+  // Subsystem-side contract (Viewport v1 SS4): carrier/participant loss
+  // never nulls the retained observation; a fresh Renderer's first legal
+  // sample then updates it normally. The Renderer-side publisher is
+  // responsible for not fabricating the new participant's baseline
+  // (covered in packages/renderer/test/viewport.test.mjs).
+  const manager = new ViewportManager();
+  manager.onState(state(800, 600));
+  assert.deepEqual(manager.viewport.current, { width: 800, height: 600 });
+  // Renderer A retired; Renderer B connected but has not sampled yet:
+  // no onState call happens; the historical value remains readable.
+  assert.deepEqual(manager.viewport.current, { width: 800, height: 600 });
+  // B's first legal sample arrives and updates exactly once.
+  let calls = 0;
+  manager.viewport.subscribe(() => { calls += 1; });
+  manager.onState(state(1024, 768));
+  assert.deepEqual(manager.viewport.current, { width: 1024, height: 768 });
+  assert.equal(calls, 2); // initial 800x600 + the one structural change
+});
+
 const scheduler = {
   schedule(ms, callback) {
     const timer = setTimeout(callback, ms);
