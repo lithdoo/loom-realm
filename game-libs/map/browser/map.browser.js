@@ -994,13 +994,24 @@
         this._slottedRule.style.zIndex = characterStackValue(pose.depth);
         this._lastPaintedScreen = [pose.screenX, pose.screenY];
       }
-      const cameraChanged = this._lastPaintedCamera === null || this._lastPaintedCamera[0] !== cameraX || this._lastPaintedCamera[1] !== cameraY;
+      const previousPaintExisted = this._lastPaintedCamera !== null;
+      const cameraChanged = previousPaintExisted && (this._lastPaintedCamera[0] !== cameraX || this._lastPaintedCamera[1] !== cameraY);
+      const screenChanged = this._lastPaintedScreen !== null && (this._lastPaintedScreen[0] !== pose.screenX || this._lastPaintedScreen[1] !== pose.screenY);
+      // "browser-first-motion-paint" fires on the FIRST paint of each NEW
+      // motion pair (motionId change) and on later changed interpolation
+      // frames: the input->paint latency is measured to the first paint of
+      // the new motion, which must not depend on camera clamping (a fully
+      // clamped camera never changes value) or on rAF frame timing. Standing
+      // commits (motionId null) never register the marker.
+      const motionPaint = accepted.view.motionId !== null || accepted.sprite.motion !== null;
+      const newMotionPaint = motionPaint && this._lastPaintedMotionId !== accepted.view.motionId;
       this._lastPaintedCamera = [cameraX, cameraY];
-      if (cameraChanged || first) {
+      this._lastPaintedMotionId = accepted.view.motionId;
+      if (newMotionPaint || (motionPaint && cameraChanged)) {
         qualify("browser-first-motion-paint", { element: "map-view", motionId: accepted.view.motionId, visualX: cameraX, visualY: cameraY });
       }
-      if (this._lastPaintedScreen !== null && (first || cameraChanged)) {
-        qualify("browser-first-motion-paint", { element: "map-sprite", motionId: accepted.sprite.motionId, visualX: this._lastPaintedScreen[0], visualY: this._lastPaintedScreen[1] });
+      if (newMotionPaint || (motionPaint && (cameraChanged || screenChanged))) {
+        qualify("browser-first-motion-paint", { element: "map-sprite", motionId: accepted.sprite.motionId, visualX: pose.screenX, visualY: pose.screenY });
       }
       if (motion !== null && progress < 1) {
         this._raf = requestAnimationFrame(() => this.__paintFrame(performance.now(), false));
