@@ -290,10 +290,18 @@ export function canMove(map: MapRecord, tileset: TilesetRecord, x: number, y: nu
   return mapTilePassable(map, tileset, x, y, direction) && mapTilePassable(map, tileset, x + dx, y + dy, (10 - direction) as Direction);
 }
 
-export function computeCamera(map: MapRecord, playerX: number, playerY: number) {
+export function computeCamera(
+  map: MapRecord,
+  playerX: number,
+  playerY: number,
+  viewportWidth = 640,
+  viewportHeight = 480,
+) {
+  const anchorX = Math.floor((viewportWidth - 32) / 2);
+  const anchorY = Math.floor((viewportHeight - 32) / 2);
   return Object.freeze({
-    cameraX: Math.min(Math.max(playerX * 32 - 304, 0), Math.max(map.width * 32 - 640, 0)),
-    cameraY: Math.min(Math.max(playerY * 32 - 224, 0), Math.max(map.height * 32 - 480, 0)),
+    cameraX: Math.min(Math.max(playerX * 32 - anchorX, 0), Math.max(map.width * 32 - viewportWidth, 0)),
+    cameraY: Math.min(Math.max(playerY * 32 - anchorY, 0), Math.max(map.height * 32 - viewportHeight, 0)),
   });
 }
 
@@ -335,12 +343,18 @@ export function assertProjectable(map: MapRecord, tileset: TilesetRecord): void 
   }
 }
 
-export function viewportTileBounds(map: MapRecord, cameraX: number, cameraY: number): TileProjectionBounds {
+export function viewportTileBounds(
+  map: MapRecord,
+  cameraX: number,
+  cameraY: number,
+  viewportWidth = 640,
+  viewportHeight = 480,
+): TileProjectionBounds {
   return Object.freeze({
     minTileX: Math.max(0, Math.floor(cameraX / 32)),
-    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + 639) / 32)),
+    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + viewportWidth - 1) / 32)),
     minTileY: Math.max(0, Math.floor(cameraY / 32)),
-    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + 479) / 32)),
+    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + viewportHeight - 1) / 32)),
   });
 }
 
@@ -402,4 +416,154 @@ export function projectVisibleTiles(
   cameraY: number,
 ): readonly VisibleTile[] {
   return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map));
+}
+
+/* ------------------------------------------------------------------ */
+/* Frozen chunked projection (main contract §3/§4, PR1+)               */
+/* ------------------------------------------------------------------ */
+
+export const CHUNK_SIZE = 8;
+export const CHUNK_CELLS = 192; // 8*8*3, index ((z*8+localY)*8)+localX
+
+export interface ChunkBounds {
+  readonly minChunkX: number;
+  readonly minChunkY: number;
+  readonly maxChunkX: number;
+  readonly maxChunkY: number;
+}
+
+export interface ProjectedChunk {
+  readonly chunkX: number;
+  readonly chunkY: number;
+  readonly cells: readonly number[];
+}
+
+export type TileVisual =
+  | readonly [tileId: number, depthBias: number, kind: 0, sourceIndex: number]
+  | readonly [
+    tileId: number, depthBias: number, kind: 1, slot: number,
+    tlSx: number, tlSy: number, trSx: number, trSy: number,
+    blSx: number, blSy: number, brSx: number, brSy: number,
+  ];
+
+/** depthBias: priority 0 -> -1; priority>0 -> (priority+1)*32 (§4). */
+export function depthBiasOf(priority: number): number {
+  return priority === 0 ? -1 : (priority + 1) * 32;
+}
+
+/** tileDepth equals the frozen legacy tileVisualDepth(worldY, priority). */
+export function tileDepthOf(worldY: number, priority: number): number {
+  return priority === 0 ? 0 : worldY * 32 + depthBiasOf(priority);
+}
+
+/** Required tile bounds -> containing chunk coords -> +1 full chunk overscan (§3). */
+export function chunkBoundsForTileBounds(bounds: TileProjectionBounds): ChunkBounds {
+  return Object.freeze({
+    minChunkX: Math.floor(bounds.minTileX / CHUNK_SIZE) - 1,
+    minChunkY: Math.floor(bounds.minTileY / CHUNK_SIZE) - 1,
+    maxChunkX: Math.floor(bounds.maxTileX / CHUNK_SIZE) + 1,
+    maxChunkY: Math.floor(bounds.maxTileY / CHUNK_SIZE) + 1,
+  });
+}
+
+export function clampChunkBounds(map: MapRecord, bounds: ChunkBounds): ChunkBounds {
+  const maxChunkX = Math.floor((map.width - 1) / CHUNK_SIZE);
+  const maxChunkY = Math.floor((map.height - 1) / CHUNK_SIZE);
+  return Object.freeze({
+    minChunkX: Math.max(0, bounds.minChunkX),
+    minChunkY: Math.max(0, bounds.minChunkY),
+    maxChunkX: Math.min(maxChunkX, bounds.maxChunkX),
+    maxChunkY: Math.min(maxChunkY, bounds.maxChunkY),
+  });
+}
+
+export function unionChunkBounds(left: ChunkBounds, right: ChunkBounds): ChunkBounds {
+  return Object.freeze({
+    minChunkX: Math.min(left.minChunkX, right.minChunkX),
+    minChunkY: Math.min(left.minChunkY, right.minChunkY),
+    maxChunkX: Math.max(left.maxChunkX, right.maxChunkX),
+    maxChunkY: Math.max(left.maxChunkY, right.maxChunkY),
+  });
+}
+
+export function chunkBoundsContain(outer: ChunkBounds, inner: ChunkBounds): boolean {
+  return outer.minChunkX <= inner.minChunkX && outer.minChunkY <= inner.minChunkY &&
+    outer.maxChunkX >= inner.maxChunkX && outer.maxChunkY >= inner.maxChunkY;
+}
+
+export function expandChunkBounds(bounds: ChunkBounds, marginChunks: number, map: MapRecord): ChunkBounds {
+  return clampChunkBounds(map, {
+    minChunkX: bounds.minChunkX - marginChunks,
+    minChunkY: bounds.minChunkY - marginChunks,
+    maxChunkX: bounds.maxChunkX + marginChunks,
+    maxChunkY: bounds.maxChunkY + marginChunks,
+  });
+}
+
+/**
+ * Project the exact chunk set for clamped chunk bounds in strict Y/X order.
+ * Each chunk carries 192 cells indexed ((z*8+localY)*8)+localX; cells outside
+ * the map pad 0. Non-zero ids are validated fail-closed exactly like the
+ * legacy tile projection.
+ */
+export function projectChunksInBounds(
+  map: MapRecord,
+  tileset: TilesetRecord,
+  bounds: ChunkBounds,
+): readonly ProjectedChunk[] {
+  const chunks: ProjectedChunk[] = [];
+  for (let chunkY = bounds.minChunkY; chunkY <= bounds.maxChunkY; chunkY += 1) {
+    for (let chunkX = bounds.minChunkX; chunkX <= bounds.maxChunkX; chunkX += 1) {
+      const cells = new Array<number>(CHUNK_CELLS).fill(0);
+      for (let z = 0; z < 3; z += 1) {
+        for (let localY = 0; localY < CHUNK_SIZE; localY += 1) {
+          const worldY = chunkY * CHUNK_SIZE + localY;
+          if (worldY >= map.height) continue;
+          for (let localX = 0; localX < CHUNK_SIZE; localX += 1) {
+            const worldX = chunkX * CHUNK_SIZE + localX;
+            if (worldX >= map.width) continue;
+            const tileId = tableAt(map.data, worldX, worldY, z);
+            if (tileId === 0) continue;
+            assertRenderableTileId(tileId, tileset);
+            cells[(z * CHUNK_SIZE + localY) * CHUNK_SIZE + localX] = tileId;
+          }
+        }
+      }
+      chunks.push(Object.freeze({ chunkX, chunkY, cells: Object.freeze(cells) }));
+    }
+  }
+  return Object.freeze(chunks);
+}
+
+/**
+ * TileVisual table for a projected chunk set: every non-zero cell id exactly
+ * once, strictly ascending by tileId. Regular sourceIndex = id-384; autotile
+ * slot = floor((id-48)/48) with the frozen 48-variant corner table.
+ */
+export function buildTileVisuals(
+  chunks: readonly ProjectedChunk[],
+  tileset: TilesetRecord,
+): readonly TileVisual[] {
+  const used = new Set<number>();
+  for (const chunk of chunks) {
+    for (const id of chunk.cells) {
+      if (id !== 0) used.add(id);
+    }
+  }
+  const visuals: TileVisual[] = [...used].sort((a, b) => a - b).map((tileId) => {
+    const priority = tableAt(tileset.priorities, tileId);
+    const bias = depthBiasOf(priority);
+    if (tileId >= 384) {
+      return [tileId, bias, 0, tileId - 384] as TileVisual;
+    }
+    const slot = Math.floor((tileId - 48) / 48);
+    const variant = (tileId - 48) % 48;
+    const [tl, tr, bl, br] = autotileCorners(variant);
+    return [
+      tileId, bias, 1, slot,
+      tl.sx, tl.sy, tr.sx, tr.sy,
+      bl.sx, bl.sy, br.sx, br.sy,
+    ] as TileVisual;
+  });
+  return Object.freeze(visuals);
 }

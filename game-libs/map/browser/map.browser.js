@@ -1,555 +1,918 @@
+/**
+ * LoomRealm Map Browser elements — frozen chunked raster architecture
+ * (main contract §4–§8, PR1+):
+ *
+ *  - exact semantic validation of MapView/MapSprite RenderData (§4);
+ *  - one depth bucket per tileDepth value; canvas per bucket sized to the
+ *    bucket's world pixel bounds; zIndex = tileDepth*2 (§6);
+ *  - Map-private parent coordinator: detached candidate stage, View+Sprite
+ *    paired atomic commit in one JS task, sequence fencing of stale async,
+ *    bounded 100/200/400ms retry, parent-owned ::slotted sprite rule (§7/§8);
+ *  - overlap-copy refresh: entering chunks raster once, unchanged buckets
+ *    copied by world coordinates from the accepted stage, leaving dropped,
+ *    never across scenes (§6);
+ *  - camera-only rAF updates CSS translate + sprite placement only — zero
+ *    tile draw/clear/canvas resize (§6);
+ *  - dirty-cell autotile animation with tick dedupe (§6);
+ *  - bounded resource cache with scene/window ownership, eviction,
+ *    ImageBitmap.close(), transfer/disconnect cleanup (§5).
+ */
 (function registerLoomRealmMapElements() {
   "use strict";
 
+  const TILE = 32;
+  const CHUNK = 8;
+  const WALK_MS = 250;
   const AUTOTILE_TICK_MS = 50;
   const DEFAULT_AUTOTILE_FRAME_TICKS = 5;
-
-  function resourceIdentity(ref) {
-    return `${ref.namespace}\u0000${ref.key}\u0000${ref.contentVersion}`;
-  }
-
-  function validRef(value) {
-    return value && typeof value === "object" && [value.namespace, value.key, value.contentVersion].every((part) => typeof part === "string" && part.length > 0);
-  }
-
-  function tileStackValue(depth) {
-    return depth * 2;
-  }
-
-  function characterStackValue(depth) {
-    return depth * 2 + 1;
-  }
-
-  function lerp(from, to, progress) {
-    return from + (to - from) * progress;
-  }
-
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-  }
+  const RETRY_DELAYS_MS = [100, 200, 400];
+  const VIEW_FIELDS = ["sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
+    "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
+    "tileVisuals", "chunks", "cameraMotion"];
+  const SPRITE_FIELDS = ["sceneEpoch", "visualEpoch", "motionId", "x", "y", "screenX", "screenY",
+    "direction", "pattern", "sprite", "motion"];
 
   function qualify(name, detail) {
     const hook = globalThis.__loomrealmMovementQualification;
     if (typeof hook === "function") {
-      try { hook({ name, at: performance.now(), detail }); } catch { /* qualification must not change product behavior */ }
+      try { hook({ name, at: performance.now(), detail }); } catch { /* qualification must not change behavior */ }
     }
   }
 
-  function exactObject(value, keys) {
-    return Boolean(value) && typeof value === "object" && keys.every((key) => key in value) && Object.keys(value).length === keys.length;
+  function isFiniteNumber(value) { return typeof value === "number" && Number.isFinite(value); }
+  function isSafeInteger(value) { return typeof value === "number" && Number.isSafeInteger(value); }
+
+  function exactKeys(value, fields, label) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`Invalid ${label}`);
+    for (const key of Object.keys(value)) if (!fields.includes(key)) throw new TypeError(`Invalid ${label}`);
+    for (const field of fields) if (!(field in value)) throw new TypeError(`Invalid ${label}`);
   }
 
-  function validCameraMotion(value) {
-    if (value === null) return true;
-    if (!exactObject(value, ["id", "durationMs", "fromCameraX", "fromCameraY"])) return false;
-    return Number.isSafeInteger(value.id) && value.id > 0
-      && value.durationMs === 250
-      && Number.isSafeInteger(value.fromCameraX) && value.fromCameraX >= 0
-      && Number.isSafeInteger(value.fromCameraY) && value.fromCameraY >= 0;
+  function validRef(value, label) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`Invalid ${label}`);
+    const keys = Object.keys(value);
+    if (keys.length !== 3 || !keys.includes("namespace") || !keys.includes("key") || !keys.includes("contentVersion")) throw new TypeError(`Invalid ${label}`);
+    if (typeof value.namespace !== "string" || typeof value.key !== "string" || typeof value.contentVersion !== "string") throw new TypeError(`Invalid ${label}`);
+    if (value.namespace.length === 0 || value.key.length === 0 || value.contentVersion.length === 0) throw new TypeError(`Invalid ${label}`);
+    return `${value.namespace}\0${value.key}\0${value.contentVersion}`;
   }
 
-  function validPlayerMotion(value) {
-    if (value === null) return true;
-    if (!exactObject(value, ["id", "durationMs", "fromY", "fromScreenX", "fromScreenY"])) return false;
-    return Number.isSafeInteger(value.id) && value.id > 0
-      && value.durationMs === 250
-      && Number.isSafeInteger(value.fromY) && value.fromY >= 0
-      && Number.isFinite(value.fromScreenX)
-      && Number.isFinite(value.fromScreenY);
+  function validMotion(value, label) {
+    if (value === null) return null;
+    if (value === null || typeof value !== "object") throw new TypeError(`Invalid ${label}`);
+    const keys = Object.keys(value);
+    if (!keys.includes("id") || !keys.includes("durationMs")) throw new TypeError(`Invalid ${label}`);
+    if (!isSafeInteger(value.id) || value.id <= 0) throw new TypeError(`Invalid ${label}`);
+    if (value.durationMs !== WALK_MS) throw new TypeError(`Invalid ${label}`);
+    const rest = keys.filter((key) => key !== "id" && key !== "durationMs");
+    return { id: value.id, extra: rest };
   }
 
-  function validCorner(value) {
-    return exactObject(value, ["sx", "sy"])
-      && Number.isSafeInteger(value.sx) && value.sx >= 0
-      && Number.isSafeInteger(value.sy) && value.sy >= 0;
-  }
+  /* ---------------- exact semantic validation (§4) ---------------- */
 
-  function validBlit(value, autotiles) {
-    if (!value || typeof value !== "object") return false;
-    if (value.kind === "regular") {
-      return exactObject(value, ["kind", "sourceIndex"])
-        && Number.isSafeInteger(value.sourceIndex) && value.sourceIndex >= 0;
+  function validateViewData(data) {
+    exactKeys(data, VIEW_FIELDS, "MapViewRenderData");
+    const v = data;
+    if (!isSafeInteger(v.sceneEpoch) || v.sceneEpoch < 1) throw new TypeError("Invalid sceneEpoch");
+    if (!isSafeInteger(v.visualEpoch) || v.visualEpoch < 1) throw new TypeError("Invalid visualEpoch");
+    if (v.motionId !== null && !isSafeInteger(v.motionId)) throw new TypeError("Invalid motionId");
+    if (!isSafeInteger(v.viewportWidth) || v.viewportWidth < 1) throw new TypeError("Invalid viewportWidth");
+    if (!isSafeInteger(v.viewportHeight) || v.viewportHeight < 1) throw new TypeError("Invalid viewportHeight");
+    if (!isSafeInteger(v.mapId) || v.mapId <= 0) throw new TypeError("Invalid mapId");
+    if (!isSafeInteger(v.mapWidth) || v.mapWidth < 1) throw new TypeError("Invalid mapWidth");
+    if (!isSafeInteger(v.mapHeight) || v.mapHeight < 1) throw new TypeError("Invalid mapHeight");
+    if (!isSafeInteger(v.cameraX) || v.cameraX < 0 || v.cameraX > v.mapWidth * TILE) throw new TypeError("Invalid cameraX");
+    if (!isSafeInteger(v.cameraY) || v.cameraY < 0 || v.cameraY > v.mapHeight * TILE) throw new TypeError("Invalid cameraY");
+    if (v.cameraX > Math.max(v.mapWidth * TILE - v.viewportWidth, 0)) throw new TypeError("cameraX exceeds clamp");
+    if (v.cameraY > Math.max(v.mapHeight * TILE - v.viewportHeight, 0)) throw new TypeError("cameraY exceeds clamp");
+    validRef(v.tileset, "tileset ref");
+    if (!Array.isArray(v.autotiles) || v.autotiles.length !== 7) throw new TypeError("Invalid autotiles");
+    for (const ref of v.autotiles) if (ref !== null) validRef(ref, "autotile ref");
+    const cameraMotionId = validMotion(v.cameraMotion, "cameraMotion");
+    if (v.cameraMotion !== null) {
+      const keys = Object.keys(v.cameraMotion);
+      if (!keys.includes("fromCameraX") || !keys.includes("fromCameraY")) throw new TypeError("Invalid cameraMotion");
+      if (!isSafeInteger(v.cameraMotion.fromCameraX) || !isSafeInteger(v.cameraMotion.fromCameraY)) throw new TypeError("Invalid cameraMotion");
+      if (v.cameraMotion.id !== v.motionId) throw new TypeError("cameraMotion id must equal motionId");
+    } else if (v.motionId !== null) {
+      throw new TypeError("motionId requires cameraMotion");
     }
-    if (value.kind === "autotile") {
-      return exactObject(value, ["kind", "slot", "corners"])
-        && Number.isSafeInteger(value.slot) && value.slot >= 0 && value.slot <= 6
-        && Array.isArray(value.corners) && value.corners.length === 4
-        && value.corners.every(validCorner)
-        && validRef(autotiles[value.slot]);
-    }
-    return false;
-  }
-
-  function autotileIdentities(autotiles) {
-    return autotiles.map((item) => (item === null ? null : resourceIdentity(item)));
-  }
-
-  function sameIdentities(left, right) {
-    return left.length === right.length && left.every((value, index) => value === right[index]);
-  }
-
-  function validVisibleTile(tile, autotiles) {
-    return exactObject(tile, ["x", "y", "z", "tileId", "depth", "blit"])
-      && Number.isSafeInteger(tile.x) && tile.x >= 0
-      && Number.isSafeInteger(tile.y) && tile.y >= 0
-      && [0, 1, 2].includes(tile.z)
-      && Number.isSafeInteger(tile.tileId) && tile.tileId > 0
-      && Number.isSafeInteger(tile.depth) && tile.depth >= 0
-      && validBlit(tile.blit, autotiles);
-  }
-
-  function prepareTileStatic(data) {
-    const buckets = new Map();
-    const usedSlots = [];
-    const seenSlots = new Set();
-    const uniqueRefs = new Map();
-    let needsTileset = false;
-    for (const tile of data.tiles) {
-      let bucket = buckets.get(tile.depth);
-      if (!bucket) {
-        bucket = [];
-        buckets.set(tile.depth, bucket);
+    if (!Array.isArray(v.tileVisuals)) throw new TypeError("Invalid tileVisuals");
+    let lastId = -1;
+    const visualIds = new Set();
+    for (const visual of v.tileVisuals) {
+      if (!Array.isArray(visual)) throw new TypeError("Invalid TileVisual");
+      const id = visual[0];
+      if (!isSafeInteger(id) || id < 48) throw new TypeError("Invalid TileVisual id");
+      if (id <= lastId) throw new TypeError("tileVisuals must ascend");
+      if (visualIds.has(id)) throw new TypeError("duplicate tileVisual");
+      visualIds.add(id);
+      lastId = id;
+      const bias = visual[1];
+      if (!isSafeInteger(bias) || (bias !== -1 && (bias < 32 || bias > 192 || bias % 32 !== 0))) throw new TypeError("Invalid depthBias");
+      if (visual[2] === 0) {
+        if (visual.length !== 4) throw new TypeError("Invalid regular TileVisual");
+        if (!isSafeInteger(visual[3]) || visual[3] < 0) throw new TypeError("Invalid sourceIndex");
+        if (id < 384 || visual[3] !== id - 384) throw new TypeError("regular sourceIndex must derive from id");
+      } else if (visual[2] === 1) {
+        if (visual.length !== 12) throw new TypeError("Invalid autotile TileVisual");
+        if (id >= 384) throw new TypeError("autotile id out of range");
+        const slot = Math.floor((id - 48) / 48);
+        if (visual[3] !== slot) throw new TypeError("autotile slot must derive from id");
+        for (let index = 4; index < 12; index += 1) {
+          if (!isSafeInteger(visual[index]) || visual[index] < 0 || visual[index] > 65535) throw new TypeError("Invalid autotile corner");
+        }
+      } else {
+        throw new TypeError("Invalid TileVisual kind");
       }
-      bucket.push(tile);
-      if (tile.blit.kind === "regular") {
-        needsTileset = true;
-        continue;
+    }
+    if (!Array.isArray(v.chunks)) throw new TypeError("Invalid chunks");
+    let lastY = -1; let lastX = -1;
+    const chunkSet = new Set();
+    const usedIds = new Set();
+    for (const chunk of v.chunks) {
+      if (chunk === null || typeof chunk !== "object") throw new TypeError("Invalid ProjectedChunk");
+      const keys = Object.keys(chunk);
+      if (keys.length !== 3 || !keys.includes("chunkX") || !keys.includes("chunkY") || !keys.includes("cells")) throw new TypeError("Invalid ProjectedChunk");
+      if (!isSafeInteger(chunk.chunkX) || chunk.chunkX < 0 || chunk.chunkX > Math.floor((v.mapWidth - 1) / CHUNK)) throw new TypeError("Invalid chunkX");
+      if (!isSafeInteger(chunk.chunkY) || chunk.chunkY < 0 || chunk.chunkY > Math.floor((v.mapHeight - 1) / CHUNK)) throw new TypeError("Invalid chunkY");
+      if (chunk.chunkY < lastY || (chunk.chunkY === lastY && chunk.chunkX <= lastX)) throw new TypeError("chunks must ascend in Y/X order");
+      if (chunkSet.has(`${chunk.chunkX},${chunk.chunkY}`)) throw new TypeError("duplicate chunk");
+      chunkSet.add(`${chunk.chunkX},${chunk.chunkY}`);
+      lastY = chunk.chunkY; lastX = chunk.chunkX;
+      if (!Array.isArray(chunk.cells) || chunk.cells.length !== CHUNK * CHUNK * 3) throw new TypeError("Invalid chunk cells");
+      for (const id of chunk.cells) {
+        if (!isSafeInteger(id) || id < 0) throw new TypeError("Invalid chunk cell");
+        if (id >= 1 && id <= 47) throw new TypeError("Unsupported chunk cell id");
+        if (id !== 0) {
+          if (!visualIds.has(id)) throw new TypeError("chunk cell id missing from tileVisuals");
+          usedIds.add(id);
+        }
       }
-      const slot = tile.blit.slot;
-      const ref = data.autotiles[slot];
-      if (!seenSlots.has(slot)) {
-        seenSlots.add(slot);
-        usedSlots.push({ slot, ref });
+    }
+    for (const id of visualIds) {
+      if (!usedIds.has(id)) throw new TypeError("tileVisual id unused by chunks");
+    }
+    // Required projection window: every containing chunk of the visible tile
+    // bounds must be present (overscan chunks may extend further).
+    const minTileX = Math.max(0, Math.floor(v.cameraX / TILE));
+    const maxTileX = Math.min(v.mapWidth - 1, Math.floor((v.cameraX + v.viewportWidth - 1) / TILE));
+    const minTileY = Math.max(0, Math.floor(v.cameraY / TILE));
+    const maxTileY = Math.min(v.mapHeight - 1, Math.floor((v.cameraY + v.viewportHeight - 1) / TILE));
+    for (let cy = Math.floor(minTileY / CHUNK); cy <= Math.floor(maxTileY / CHUNK); cy += 1) {
+      for (let cx = Math.floor(minTileX / CHUNK); cx <= Math.floor(maxTileX / CHUNK); cx += 1) {
+        if (!chunkSet.has(`${cx},${cy}`)) throw new TypeError(`missing required chunk ${cx},${cy}`);
       }
-      const identity = resourceIdentity(ref);
-      if (!uniqueRefs.has(identity)) uniqueRefs.set(identity, ref);
     }
-    if (needsTileset) uniqueRefs.set(resourceIdentity(data.tileset), data.tileset);
-    return {
-      tileset: resourceIdentity(data.tileset),
-      autotiles: autotileIdentities(data.autotiles),
-      buckets,
-      usedSlots,
-      uniqueRefs,
-      needsTileset,
-    };
+    return { cameraMotionId };
   }
 
-  function tilesCacheHit(element, data) {
-    return data.tiles === element._preparedTilesSource
-      && element._preparedTileStatic !== undefined
-      && resourceIdentity(data.tileset) === element._preparedTileStatic.tileset
-      && sameIdentities(autotileIdentities(data.autotiles), element._preparedTileStatic.autotiles);
-  }
-
-  function acceptMotion(current, motion, fingerprint) {
-    if (current == null) {
-      if (motion == null) return null;
-      return { id: motion.id, fingerprint, startedAt: performance.now() };
+  function validateSpriteData(data) {
+    exactKeys(data, SPRITE_FIELDS, "MapSpriteRenderData");
+    const s = data;
+    if (!isSafeInteger(s.sceneEpoch) || s.sceneEpoch < 1) throw new TypeError("Invalid sceneEpoch");
+    if (!isSafeInteger(s.visualEpoch) || s.visualEpoch < 1) throw new TypeError("Invalid visualEpoch");
+    if (s.motionId !== null && !isSafeInteger(s.motionId)) throw new TypeError("Invalid motionId");
+    if (!isSafeInteger(s.x) || !isSafeInteger(s.y)) throw new TypeError("Invalid x/y");
+    if (![2, 4, 6, 8].includes(s.direction)) throw new TypeError("Invalid direction");
+    if (![0, 1, 2, 3].includes(s.pattern)) throw new TypeError("Invalid pattern");
+    if (!isFiniteNumber(s.screenX) || !isFiniteNumber(s.screenY)) throw new TypeError("Invalid screenX/screenY");
+    validRef(s.sprite, "sprite ref");
+    validMotion(s.motion, "motion");
+    if (s.motion !== null) {
+      const keys = Object.keys(s.motion);
+      if (!keys.includes("fromY") || !keys.includes("fromScreenX") || !keys.includes("fromScreenY")) throw new TypeError("Invalid motion");
+      if (s.motion.id !== s.motionId) throw new TypeError("motion id must equal motionId");
+      if (![1, 3].includes(s.pattern)) throw new TypeError("walking pattern must be 1 or 3");
+    } else {
+      if (s.pattern !== 0) throw new TypeError("standing pattern must be 0");
+      if (s.motionId !== null) throw new TypeError("motionId requires motion");
     }
-    if (motion == null) return null;
-    if (motion.id === current.id) {
-      if (fingerprint === current.fingerprint) return current;
-      throw new TypeError("Invalid map motion identity");
+    return true;
+  }
+
+  /* ---------------- bounded resource cache (§5) ---------------- */
+
+  class ResourceCache {
+    constructor(resources) {
+      this.resources = resources;
+      this.accepted = new Map(); // identity -> ImageBitmap
+      this.pending = new Map(); // identity -> Promise
+      this.pendingObjects = new Map(); // identity -> {promise, resolve, reject}
     }
-    return { id: motion.id, fingerprint, startedAt: performance.now() };
+    get(identity, ref) {
+      return this.accepted.get(identity) ?? null;
+    }
+    load(identity, ref) {
+      const cached = this.accepted.get(identity);
+      if (cached !== undefined) return Promise.resolve(cached);
+      const pending = this.pending.get(identity);
+      if (pending !== undefined) return pending;
+      const record = {};
+      const promise = Promise.resolve()
+        .then(() => this.resources.resource(ref.namespace, ref.key, ref.contentVersion))
+        .then(async (resource) => {
+          if (resource.mime !== "image/png") throw new TypeError("Map resource must be PNG");
+          const bitmap = await createImageBitmap(new Blob([resource.bytes], { type: "image/png" }));
+          record.bitmap = bitmap;
+          return bitmap;
+        });
+      record.promise = promise;
+      this.pending.set(identity, promise);
+      this.pendingObjects.set(identity, record);
+      return promise;
+    }
+    /** Promote candidate-decoded bitmaps into the accepted generation. */
+    promote(identities) {
+      for (const identity of identities) {
+        const record = this.pendingObjects.get(identity);
+        if (record !== undefined && record.bitmap !== undefined) {
+          this.pending.delete(identity);
+          this.pendingObjects.delete(identity);
+          this.accepted.set(identity, record.bitmap);
+        }
+      }
+    }
+    /** Close candidate bitmaps that were not accepted (candidate discard). */
+    discardPending() {
+      for (const [identity, record] of this.pendingObjects) {
+        this.pending.delete(identity);
+        if (record.bitmap !== undefined && !this.accepted.has(identity)) {
+          try { record.bitmap.close(); } catch { /* already closed */ }
+        }
+      }
+      this.pendingObjects.clear();
+    }
+    /** Evict accepted bitmaps outside the retained identity set (§5). */
+    evictExcept(retainedIdentities) {
+      for (const [identity, bitmap] of this.accepted) {
+        if (!retainedIdentities.has(identity)) {
+          this.accepted.delete(identity);
+          try { bitmap.close(); } catch { /* already closed */ }
+        }
+      }
+    }
+    dispose() {
+      for (const bitmap of this.accepted.values()) {
+        try { bitmap.close(); } catch { /* already closed */ }
+      }
+      this.accepted.clear();
+      this.discardPending();
+    }
   }
 
-  function classifyAutotileLayout(image) {
-    if (image.height === 128 && image.width >= 96 && image.width % 96 === 0) return "block";
-    if (image.height === 32 && image.width >= 32 && image.width % 32 === 0) return "cell";
-    return "invalid";
+  /* ---------------- shared raster helpers ---------------- */
+
+  function tileStackValue(depth) { return String(depth * 2); }
+  function characterStackValue(depth) { return String(depth * 2 + 1); }
+
+  function autotileLayout(bitmap) {
+    if (bitmap.height === 128 && bitmap.width % 96 === 0) return { kind: "block", frames: bitmap.width / 96 };
+    if (bitmap.height === 32 && bitmap.width % 32 === 0) return { kind: "cell", frames: bitmap.width / 32 };
+    return null;
   }
 
-  function autotileFrameDurationMs(ref) {
-    const name = ref.key.slice(ref.key.lastIndexOf("/") + 1);
-    const match = /\[\s*(\d+)\s*\]\s*$/.exec(name);
-    if (!match) return DEFAULT_AUTOTILE_FRAME_TICKS * AUTOTILE_TICK_MS;
-    const ticks = Number(match[1]);
-    if (!Number.isSafeInteger(ticks) || ticks <= 0) return null;
+  function autotileFrameDuration(key) {
+    const match = /\[(\d+)\]$/.exec(key);
+    if (match === null) return DEFAULT_AUTOTILE_FRAME_TICKS * AUTOTILE_TICK_MS;
+    const ticks = Number.parseInt(match[1], 10);
+    if (!Number.isSafeInteger(ticks) || ticks < 1) return DEFAULT_AUTOTILE_FRAME_TICKS * AUTOTILE_TICK_MS;
     return ticks * AUTOTILE_TICK_MS;
   }
 
-  function autotileFrameIndex(now, startedAt, frameCount, durationMs) {
-    if (frameCount <= 1) return 0;
-    return Math.floor((now - startedAt) / durationMs) % frameCount;
+  /**
+   * Build the per-depth world-space raster for a validated MapView payload.
+   * Returns { buckets: Map<depth, {worldX, worldY, w, h, canvas}> } — fully
+   * detached canvases; nothing here touches the accepted stage.
+   */
+  function rasterCandidate(data, tileVisualsById, bitmaps, autotileBitmaps, acceptedBuckets, acceptedChunkKeys) {
+    const buckets = new Map(); // depth -> { worldX, worldY, w, h, canvas }
+    const chunkKeySet = new Set(acceptedChunkKeys ?? []);
+    const drawTile = (ctx, tileId, worldX, worldY, depth) => {
+      const visual = tileVisualsById.get(tileId);
+      if (visual === undefined) return;
+      const dx = worldX * TILE - 0;
+      const dy = worldY * TILE - 0;
+      if (visual[2] === 0) {
+        const bitmap = bitmaps.tileset;
+        if (bitmap === null) return;
+        const sx = (visual[3] % 8) * TILE;
+        const sy = Math.floor(visual[3] / 8) * TILE;
+        ctx.drawImage(bitmap, sx, sy, TILE, TILE, dx, dy, TILE, TILE);
+      } else {
+        const bitmap = autotileBitmaps.get(visual[3]);
+        if (bitmap === undefined) return;
+        const layout = autotileLayout(bitmap);
+        const frameIndex = 0;
+        if (layout.kind === "cell") {
+          ctx.drawImage(bitmap, frameIndex * TILE, 0, TILE, TILE, dx, dy, TILE, TILE);
+        } else {
+          const frameX = frameIndex * 96;
+          ctx.drawImage(bitmap, frameX + visual[4], visual[5], 16, 16, dx, dy, 16, 16);
+          ctx.drawImage(bitmap, frameX + visual[6], visual[7], 16, 16, dx + 16, dy, 16, 16);
+          ctx.drawImage(bitmap, frameX + visual[8], visual[9], 16, 16, dx, dy + 16, 16, 16);
+          ctx.drawImage(bitmap, frameX + visual[10], visual[11], 16, 16, dx + 16, dy + 16, 16, 16);
+        }
+      }
+    };
+    // Pass 1: collect world bounds per depth and the cells to raster.
+    const cellsByDepth = new Map(); // depth -> [{tileId, worldX, worldY}]
+    for (const chunk of data.chunks) {
+      for (let z = 0; z < 3; z += 1) {
+        for (let ly = 0; ly < CHUNK; ly += 1) {
+          const worldY = chunk.chunkY * CHUNK + ly;
+          for (let lx = 0; lx < CHUNK; lx += 1) {
+            const worldX = chunk.chunkX * CHUNK + lx;
+            const tileId = chunk.cells[(z * CHUNK + ly) * CHUNK + lx];
+            if (tileId === 0) continue;
+            const visual = tileVisualsById.get(tileId);
+            if (visual === undefined) continue;
+            const bias = visual[1];
+            const depth = bias === -1 ? 0 : worldY * TILE + bias;
+            let cells = cellsByDepth.get(depth);
+            if (cells === undefined) { cells = []; cellsByDepth.set(depth, cells); }
+            cells.push({ tileId, worldX, worldY, chunkKey: `${chunk.chunkX},${chunk.chunkY}` });
+          }
+        }
+      }
+    }
+    // Pass 2: per depth, allocate the bucket canvas over its world bounds and
+    // either copy the whole accepted bucket (overlap-copy) or raster only
+    // entering chunks.
+    for (const [depth, cells] of cellsByDepth) {
+      let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+      for (const cell of cells) {
+        minX = Math.min(minX, cell.worldX); minY = Math.min(minY, cell.worldY);
+        maxX = Math.max(maxX, cell.worldX); maxY = Math.max(maxY, cell.worldY);
+      }
+      const worldX = minX * TILE; const worldY = minY * TILE;
+      const w = (maxX - minX + 1) * TILE; const h = (maxY - minY + 1) * TILE;
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.className = "tile-layer";
+      const ctx = canvas.getContext("2d", { alpha: true });
+      ctx.imageSmoothingEnabled = false;
+      const accepted = acceptedBuckets.get(depth);
+      if (accepted !== undefined && accepted.canvas.width > 0 && accepted.canvas.height > 0) {
+        // Overlap-copy by identical world coordinates (§6): same-scene only.
+        ctx.drawImage(accepted.canvas, accepted.worldX - worldX, accepted.worldY - worldY);
+      }
+      for (const cell of cells) {
+        if (chunkKeySet.has(cell.chunkKey)) continue; // carried over via overlap copy
+        drawTile(ctx, cell.tileId, cell.worldX - minX, cell.worldY - minY, depth);
+      }
+      buckets.set(depth, { worldX, worldY, w, h, canvas });
+    }
+    return buckets;
   }
 
-  class ResourceElement extends HTMLElement {
+  /* ---------------- Map Sprite (child) ---------------- */
+
+  const spriteElements = new WeakSet();
+
+  class LoomRealmMapSprite extends HTMLElement {
     constructor() {
       super();
-      this._resources = undefined;
-      this._images = new Map();
-      this._latestData = undefined;
-      this._raf = undefined;
-      this._paintEpoch = 0;
-      this._activeMotion = null;
+      this._parent = null;
+      this._latestData = null;
+      this._canvas = null;
+      this._bitmap = null;
+      this._frameWidth = 0;
+      this._frameHeight = 0;
+      this._resources = null;
+      const shadow = this.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = ":host{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas{position:absolute;left:0;top:0}";
+      shadow.append(style);
     }
-
     receiveRenderContext(context) {
-      if (!context || !context.resources || typeof context.resources.resource !== "function") throw new TypeError("Map presentation requires PresentationResourceClient");
+      if (context === null || typeof context !== "object"
+        || typeof (context.resources?.resource) !== "function") {
+        throw new TypeError("Invalid Map render context");
+      }
       this._resources = context.resources;
     }
-
-    _cancelRaf() {
-      if (this._raf !== undefined) {
-        cancelAnimationFrame(this._raf);
-        this._raf = undefined;
-      }
+    connectedCallback() {
+      this._parent = this.closest("lr-map-view");
     }
-
     disconnectedCallback() {
-      queueMicrotask(() => {
-        if (!this.isConnected) {
-          this._cancelRaf();
-          this._paintEpoch += 1;
-          this._activeMotion = null;
-        }
-      });
-    }
-
-    async _image(ref) {
-      if (!validRef(ref)) throw new TypeError("Invalid map resource reference");
-      if (!this._resources) throw new TypeError("Map presentation has no resource context");
-      const identity = resourceIdentity(ref);
-      let pending = this._images.get(identity);
-      if (!pending) {
-        pending = (async () => {
-          const resource = await this._resources.resource(ref.namespace, ref.key, ref.contentVersion);
-          if (resource.mime !== "image/png") throw new TypeError("M14 map resources must be image/png");
-          return createImageBitmap(new Blob([resource.bytes], { type: resource.mime }));
-        })();
-        this._images.set(identity, pending);
-        pending.catch(() => this._images.delete(identity));
+      if (this._parent !== null && typeof this._parent.__unregisterSprite === "function") {
+        this._parent.__unregisterSprite(this);
       }
-      return pending;
+      this._parent = null;
+    }
+    receiveRenderData(data) {
+      if (this._resources === null) throw new TypeError("Map sprite requires render context");
+      validateSpriteData(data);
+      this._latestData = data;
+      qualify("presentation-received", { element: "map-sprite" });
+      const parent = this._parent ?? this.closest("lr-map-view");
+      if (parent !== null && parent !== undefined && typeof parent.__deliverSpriteData === "function") {
+        parent.__deliverSpriteData(this, data);
+      }
+    }
+    /** Package-private: the parent coordinator swaps the child stage (§7). */
+    __commitMapSpriteStage(data, bitmap, frameWidth, frameHeight, pose) {
+      this._latestData = data;
+      const shadow = this.shadowRoot;
+      if (this._canvas === null) {
+        this._canvas = document.createElement("canvas");
+        this._canvas.getContext("2d", { alpha: true }).imageSmoothingEnabled = false;
+        shadow.append(this._canvas);
+      }
+      const canvas = this._canvas;
+      const sizeChanged = canvas.width !== frameWidth || canvas.height !== frameHeight;
+      if (sizeChanged) {
+        canvas.width = frameWidth;
+        canvas.height = frameHeight;
+      }
+      // Crop raster reuse (§6): redraw only when the sheet cell or bitmap
+      // changed; pure placement/depth changes never clear the child canvas.
+      const cropKey = `${pose.sheetX},${pose.sheetY},${bitmap === null ? "none" : "bitmap"}`;
+      if (sizeChanged || this._cropKey !== cropKey || this._bitmap !== bitmap) {
+        const ctx = canvas.getContext("2d", { alpha: true });
+        ctx.imageSmoothingEnabled = false;
+        ctx.clearRect(0, 0, frameWidth, frameHeight);
+        if (bitmap !== null) {
+          ctx.drawImage(bitmap, pose.sheetX, pose.sheetY, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
+        }
+        this._cropKey = cropKey;
+        this._bitmap = bitmap;
+      }
     }
   }
 
-  class LoomRealmMapView extends ResourceElement {
+  /* ---------------- Map View (parent coordinator) ---------------- */
+
+  class LoomRealmMapView extends HTMLElement {
     constructor() {
       super();
+      this._resources = null;
+      this._cache = null;
+      this._slottedSheet = null;
+      this._slottedRule = null;
+      this._state = "EMPTY";
+      this._desiredView = null;
+      this._desiredSprite = null;
+      this._spriteElement = null;
+      this._accepted = null;
+      this._sequence = 0;
+      this._raf = null;
+      this._retryTimer = null;
+      this._retryAttempts = 0;
+      this._supersededBeforePaint = 0;
+      this._initialMotionNotShown = 0;
+      this._lastPaintedCamera = null;
+      this._lastPaintedScreen = null;
+      this._autotileDirty = new Map(); // "cx,cy,z,ly,lx" -> true
+      this._autotileStartedAt = performance.now();
+      this._autotileRafActive = false;
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = ":host{display:block;position:relative;overflow:hidden;width:640px;height:480px}canvas.tile-layer{position:absolute;inset:0;display:block;width:640px;height:480px;image-rendering:pixelated;pointer-events:none}canvas.tile-layer[hidden]{display:none}slot{display:contents}";
-      this._layers = [];
-      this._slot = document.createElement("slot");
-      shadow.append(style, this._slot);
-      this._animationStartedAt = performance.now();
-      this._lastPaintToken = undefined;
-      this._lastPaintedCamera = undefined;
-      this._preparedTilesSource = undefined;
-      this._preparedTileStatic = undefined;
+      style.textContent = [
+        ":host{display:block;position:relative;overflow:hidden;width:640px;height:480px;image-rendering:pixelated}",
+        "canvas.tile-layer{position:absolute;image-rendering:pixelated;pointer-events:none}",
+        "slot{display:contents}",
+      ].join("");
+      shadow.append(style, document.createElement("slot"));
     }
-
-    _ensureLayer(index) {
-      const existing = this._layers[index];
-      if (existing) {
-        existing.canvas.hidden = false;
-        return existing;
+    receiveRenderContext(context) {
+      if (context === null || typeof context !== "object"
+        || typeof (context.resources?.resource) !== "function") {
+        throw new TypeError("Invalid Map render context");
       }
-      const canvas = document.createElement("canvas");
-      canvas.className = "tile-layer";
-      canvas.width = 640;
-      canvas.height = 480;
-      const context = canvas.getContext("2d", { alpha: true });
-      context.imageSmoothingEnabled = false;
-      this.shadowRoot.insertBefore(canvas, this._slot);
-      const layer = { canvas, context };
-      this._layers.push(layer);
-      return layer;
+      this._resources = context.resources;
+      this._cache = new ResourceCache(context.resources);
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync("::slotted(lr-map-sprite){position:absolute;left:0;top:0;z-index:1}");
+      this._slottedSheet = sheet;
+      this.shadowRoot.adoptedStyleSheets = [sheet];
+      this._slottedRule = sheet.cssRules[0];
     }
-
-    _clearLayers() {
-      this._lastPaintToken = undefined;
-      for (const layer of this._layers) {
-        layer.context.clearRect(0, 0, 640, 480);
-        layer.canvas.hidden = true;
-      }
+    connectedCallback() {}
+    disconnectedCallback() {
+      this.__dispose();
     }
-
-    _trimLayers(count) {
-      for (let index = count; index < this._layers.length; index += 1) {
-        const layer = this._layers[index];
-        layer.context.clearRect(0, 0, 640, 480);
-        layer.canvas.hidden = true;
+    __dispose() {
+      this._state = "DISPOSED";
+      if (this._raf !== null) { cancelAnimationFrame(this._raf); this._raf = null; }
+      if (this._retryTimer !== null) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+      this.__stopAutotileAnimation();
+      this._cache?.dispose();
+      this._accepted = null;
+      this._desiredView = null;
+      this._desiredSprite = null;
+    }
+    __unregisterSprite(element) {
+      if (this._spriteElement === element) {
+        this._spriteElement = null;
+        this._desiredSprite = null;
       }
     }
+    get _images() { return this._cache === null ? new Map() : this._cache.accepted; }
+    get _latestData() { return this._desiredView === null ? null : this._desiredView.data; }
+    get _paintEpoch() { return this._desiredView === null ? 0 : this._desiredView.data.visualEpoch; }
+    get _activeMotion() {
+      if (this._accepted === null) return null;
+      return this._accepted.view.cameraMotion;
+    }
+    get _raf2() { return this._raf; }
 
     receiveRenderData(data) {
-      if (
-        !exactObject(data, ["mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles", "tiles", "cameraMotion"])
-        || !Number.isSafeInteger(data.mapId) || data.mapId <= 0
-        || !Number.isSafeInteger(data.mapWidth) || data.mapWidth <= 0
-        || !Number.isSafeInteger(data.mapHeight) || data.mapHeight <= 0
-        || !Number.isSafeInteger(data.cameraX) || data.cameraX < 0
-        || !Number.isSafeInteger(data.cameraY) || data.cameraY < 0
-        || !Array.isArray(data.tiles)
-        || !validRef(data.tileset)
-        || !Array.isArray(data.autotiles) || data.autotiles.length !== 7
-        || !data.autotiles.every((item) => item === null || validRef(item))
-        || !validCameraMotion(data.cameraMotion)
-      ) throw new TypeError("Invalid MapViewRenderData");
-      const cacheHit = tilesCacheHit(this, data);
-      let preparedStatic = this._preparedTileStatic;
-      if (!cacheHit) {
-        for (const tile of data.tiles) {
-          if (!validVisibleTile(tile, data.autotiles)) throw new TypeError("Invalid visible tile");
-        }
-        preparedStatic = prepareTileStatic(data);
-      }
-      const motion = data.cameraMotion;
-      const fingerprint = motion === null ? null : JSON.stringify([
-        motion.id,
-        motion.durationMs,
-        motion.fromCameraX,
-        motion.fromCameraY,
-        data.cameraX,
-        data.cameraY,
-      ]);
-      const nextActive = acceptMotion(this._activeMotion, motion, fingerprint);
-      this._latestData = data;
-      this._activeMotion = nextActive;
-      if (!cacheHit) {
-        this._preparedTilesSource = data.tiles;
-        this._preparedTileStatic = preparedStatic;
-      }
-      this._cancelRaf();
-      this._paintEpoch += 1;
-      qualify("presentation-received", { element: "map-view", motionId: motion?.id ?? null });
-      void this._paintLatest(data, this._paintEpoch, preparedStatic);
+      if (this._resources === null) throw new TypeError("Map view requires render context");
+      validateViewData(data);
+      qualify("presentation-received", { element: "map-view" });
+      this._desiredView = { data, receivedAt: performance.now(), sequence: ++this._sequence };
+      this._retryAttempts = 0;
+      this.__scheduleAdvance();
+    }
+    __deliverSpriteData(element, data) {
+      this._spriteElement = element;
+      this._desiredSprite = { element, data, receivedAt: performance.now(), sequence: ++this._sequence };
+      this._retryAttempts = 0;
+      this.__scheduleAdvance();
     }
 
-    async _paintLatest(requested, epoch, preparedStatic) {
-      this._ensureLayer(0);
-      const uniqueRefs = preparedStatic.uniqueRefs;
-      let decoded = new Map();
-      if (uniqueRefs.size > 0) {
-        try {
-          decoded = new Map(await Promise.all([...uniqueRefs.entries()].map(async ([identity, ref]) => [identity, await this._image(ref)])));
-        } catch {
-          if (this._latestData !== requested || epoch !== this._paintEpoch) return;
-          this._clearLayers();
-          return;
-        }
-      }
-      if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
+    __tokensMatch() {
+      const view = this._desiredView;
+      const sprite = this._desiredSprite;
+      if (view === null || sprite === null) return false;
+      return view.data.sceneEpoch === sprite.data.sceneEpoch
+        && view.data.visualEpoch === sprite.data.visualEpoch
+        && view.data.motionId === sprite.data.motionId;
+    }
 
-      const autotiles = new Map();
-      for (const { slot, ref } of preparedStatic.usedSlots) {
-        const image = decoded.get(resourceIdentity(ref));
-        const layout = classifyAutotileLayout(image);
-        const durationMs = autotileFrameDurationMs(ref);
-        if (layout === "invalid" || durationMs === null) {
-          this._clearLayers();
+    __scheduleAdvance() {
+      if (this._state === "DISPOSED") return;
+      if (!this.__tokensMatch()) return;
+      const view = this._desiredView;
+      const sprite = this._desiredSprite;
+      const sequence = Math.max(view.sequence, sprite.sequence);
+      // MotionId-only fast path (§6): same scene+visual epochs and identical
+      // chunk/visual projection — no revalidation of raster, no new canvases,
+      // only motion/placement continues from the pair receipt clock.
+      const accepted = this._accepted;
+      if (accepted !== null
+        && accepted.view.sceneEpoch === view.data.sceneEpoch
+        && accepted.view.visualEpoch === view.data.visualEpoch
+        && this.__chunkSetEqual(accepted.view.chunks, view.data.chunks)
+        && this.__tileVisualsEqual(accepted.view.tileVisuals, view.data.tileVisuals)) {
+        accepted.view = view.data;
+        accepted.sprite = sprite.data;
+        accepted.receivedAt = Math.min(view.receivedAt, sprite.receivedAt);
+        accepted.motionStart = accepted.receivedAt;
+        accepted.motionEnd = view.data.cameraMotion === null ? accepted.receivedAt : accepted.receivedAt + WALK_MS;
+        this._state = "VISIBLE";
+        this.__paintFrame(performance.now(), true);
+        return;
+      }
+      const previousState = this._state;
+      this._state = "PREPARING";
+      void this.__prepareCandidate(view, sprite, sequence).then((candidate) => {
+        if (this._state === "DISPOSED") return;
+        if (candidate === null) {
+          // Prepare failure: keep old complete stage, bounded retry (§8).
+          if (previousState === "VISIBLE" || this._accepted !== null) {
+            this._state = "RETRY_WAIT";
+            this.__scheduleRetry(view, sprite, sequence);
+          } else {
+            this._state = "EMPTY";
+            this.__scheduleRetry(view, sprite, sequence);
+          }
           return;
         }
-        const frameWidth = layout === "block" ? 96 : 32;
-        autotiles.set(slot, { image, layout, frameCount: image.width / frameWidth, frameWidth, durationMs });
-      }
-      this._paintPrepared(requested, epoch, {
-        tilesetImage: preparedStatic.needsTileset ? decoded.get(resourceIdentity(requested.tileset)) : undefined,
-        autotiles,
-        buckets: preparedStatic.buckets,
+        if (candidate.sequence !== Math.max(this._desiredView?.sequence ?? 0, this._desiredSprite?.sequence ?? 0)
+          || !this.__tokensMatch() || this._spriteElement === null || !this._spriteElement.isConnected) {
+          // Stale candidate: discard without touching the accepted stage.
+          this._cache.discardPending();
+          this._state = this._accepted === null ? "EMPTY" : "VISIBLE";
+          return;
+        }
+        this.__commitCandidate(candidate);
+      }, () => {
+        if (this._state === "DISPOSED") return;
+        this._state = this._accepted === null ? "EMPTY" : "VISIBLE";
+        this.__scheduleRetry(view, sprite, sequence);
       });
     }
 
-    _paintPrepared(requested, epoch, prepared) {
-      if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
-
-      const now = performance.now();
-      const motion = requested.cameraMotion;
-      const active = this._activeMotion;
-      const progress = active && motion ? clamp((now - active.startedAt) / motion.durationMs, 0, 1) : 1;
-      const cameraX = motion ? Math.round(lerp(motion.fromCameraX, requested.cameraX, progress)) : requested.cameraX;
-      const cameraY = motion ? Math.round(lerp(motion.fromCameraY, requested.cameraY, progress)) : requested.cameraY;
-      const frames = [...prepared.autotiles.entries()]
-        .sort(([left], [right]) => left - right)
-        .map(([slot, item]) => `${slot}:${autotileFrameIndex(now, this._animationStartedAt, item.frameCount, item.durationMs)}`);
-      const paintToken = `${epoch}|${cameraX},${cameraY}|${frames.join(",")}`;
-      let hasAnimatedAutotile = false;
-      for (const item of prepared.autotiles.values()) {
-        if (item.frameCount > 1) hasAnimatedAutotile = true;
+    __chunkSetEqual(left, right) {
+      if (left === right) return true;
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+      for (let index = 0; index < left.length; index += 1) {
+        const a = left[index];
+        const b = right[index];
+        if (a.chunkX !== b.chunkX || a.chunkY !== b.chunkY) return false;
+        if (a.cells.length !== b.cells.length) return false;
+        for (let cell = 0; cell < a.cells.length; cell += 1) {
+          if (a.cells[cell] !== b.cells[cell]) return false;
+        }
       }
-      const needsNextFrame = Boolean(motion && progress < 1) || hasAnimatedAutotile;
+      return true;
+    }
 
-      if (paintToken === this._lastPaintToken) {
-        if (needsNextFrame) {
-          this._raf = requestAnimationFrame(() => {
-            this._raf = undefined;
-            this._paintPrepared(requested, epoch, prepared);
-          });
+    __tileVisualsEqual(left, right) {
+      if (left === right) return true;
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+      for (let index = 0; index < left.length; index += 1) {
+        const a = left[index];
+        const b = right[index];
+        if (a.length !== b.length) return false;
+        for (let cell = 0; cell < a.length; cell += 1) {
+          if (a[cell] !== b[cell]) return false;
+        }
+      }
+      return true;
+    }
+
+    __scheduleRetry(view, sprite, sequence) {
+      if (this._retryTimer !== null || this._retryAttempts >= RETRY_DELAYS_MS.length) {
+        if (this._retryAttempts >= RETRY_DELAYS_MS.length) {
+          // Retries exhausted: qualification FAIL signal; keep old stage.
+          qualify("map-prepare-retry-exhausted", { sceneEpoch: view.data.sceneEpoch, visualEpoch: view.data.visualEpoch });
+        }
+        return;
+      }
+      const delay = RETRY_DELAYS_MS[this._retryAttempts];
+      this._retryAttempts += 1;
+      this._state = "RETRY_WAIT";
+      this._retryTimer = setTimeout(() => {
+        this._retryTimer = null;
+        if (this._state === "DISPOSED") return;
+        const currentSequence = Math.max(this._desiredView?.sequence ?? 0, this._desiredSprite?.sequence ?? 0);
+        if (currentSequence !== sequence || !this.__tokensMatch()) return;
+        this.__scheduleAdvance();
+      }, delay);
+    }
+
+    async __prepareCandidate(view, sprite, sequence) {
+      const data = view.data;
+      const cache = this._cache;
+      const identities = [];
+      const tilesetIdentity = validRef(data.tileset, "tileset ref");
+      identities.push(tilesetIdentity);
+      const autotileIdentities = [];
+      const autotileSlots = new Set();
+      for (const visual of data.tileVisuals) {
+        if (visual[2] === 1) autotileSlots.add(visual[3]);
+      }
+      for (const ref of data.autotiles) {
+        if (ref === null) continue;
+        const identity = validRef(ref, "autotile ref");
+        autotileIdentities.push(identity);
+      }
+      const spriteIdentity = validRef(sprite.data.sprite, "sprite ref");
+      identities.push(spriteIdentity);
+      // Decode required resources (candidate ownership).
+      const tilesetBitmap = await cache.load(tilesetIdentity, data.tileset);
+      const autotileBitmaps = new Map();
+      const slotRefs = data.autotiles;
+      for (let slot = 0; slot < 7; slot += 1) {
+        if (!autotileSlots.has(slot)) continue;
+        const ref = slotRefs[slot];
+        if (ref === null) continue;
+        const identity = validRef(ref, "autotile ref");
+        autotileBitmaps.set(slot, await cache.load(identity, ref));
+      }
+      const spriteBitmap = await cache.load(spriteIdentity, sprite.data.sprite);
+      if (spriteBitmap.width % 4 !== 0 || spriteBitmap.height % 4 !== 0) {
+        throw new TypeError("Character sheet must be 4 by 4");
+      }
+      const tileVisualsById = new Map();
+      for (const visual of data.tileVisuals) tileVisualsById.set(visual[0], visual);
+      const acceptedBuckets = this._accepted !== null && this._accepted.view.sceneEpoch === data.sceneEpoch
+        ? this._accepted.buckets
+        : new Map();
+      const acceptedChunkKeys = this._accepted !== null && this._accepted.view.sceneEpoch === data.sceneEpoch
+        ? this._accepted.chunkKeys
+        : new Set();
+      const buckets = rasterCandidate(data, tileVisualsById, { tileset: tilesetBitmap }, autotileBitmaps, acceptedBuckets, acceptedChunkKeys);
+      const chunkKeys = new Set(data.chunks.map((chunk) => `${chunk.chunkX},${chunk.chunkY}`));
+      const retained = new Set([tilesetIdentity, spriteIdentity, ...autotileIdentities]);
+      return {
+        sequence,
+        view: data,
+        sprite: sprite.data,
+        receivedAt: Math.min(view.receivedAt, sprite.receivedAt),
+        buckets,
+        chunkKeys,
+        retainedIdentities: retained,
+        spriteBitmap,
+        spriteIdentity,
+      };
+    }
+
+    /** Atomic whole-stage swap in one synchronous JS task (§7). */
+    __commitCandidate(candidate) {
+      const shadow = this.shadowRoot;
+      const slot = shadow.querySelector("slot");
+      // Parent swap: remove old canvases, insert candidate canvases.
+      for (const canvas of [...shadow.querySelectorAll("canvas.tile-layer")]) canvas.remove();
+      const sorted = [...candidate.buckets.entries()].sort((a, b) => a[0] - b[0]);
+      const stageTag = String(candidate.sequence);
+      for (const [depth, bucket] of sorted) {
+        bucket.canvas.style.zIndex = tileStackValue(depth);
+        bucket.canvas.dataset.worldX = String(bucket.worldX);
+        bucket.canvas.dataset.worldY = String(bucket.worldY);
+        bucket.canvas.dataset.stage = stageTag;
+        bucket.canvas.style.transform = "translate(" + (-this.__clampCameraX(candidate.view.cameraX) + 0) + "px,0)";
+        shadow.insertBefore(bucket.canvas, slot);
+      }
+      // Promote candidate resources; evict everything else (§5 lifecycle).
+      const identities = [...candidate.retainedIdentities];
+      this._cache.promote(identities);
+      this._cache.evictExcept(candidate.retainedIdentities);
+      // Child swap via the package-private seam.
+      const spriteData = candidate.sprite;
+      const frameWidth = candidate.spriteBitmap.width / 4;
+      const frameHeight = candidate.spriteBitmap.height / 4;
+      const pose = this.__spritePoseFor(spriteData, 0);
+      this._spriteElement.__commitMapSpriteStage(spriteData, candidate.spriteBitmap, frameWidth, frameHeight, pose);
+      const accepted = this._accepted;
+      this._accepted = {
+        view: candidate.view,
+        sprite: candidate.sprite,
+        receivedAt: candidate.receivedAt,
+        buckets: candidate.buckets,
+        chunkKeys: candidate.chunkKeys,
+        frameWidth,
+        frameHeight,
+        spriteBitmap: candidate.spriteBitmap,
+        motionStart: candidate.receivedAt,
+        motionEnd: candidate.view.cameraMotion === null ? candidate.receivedAt : candidate.receivedAt + WALK_MS,
+        displayedCamera: null,
+        displayedScreen: null,
+      };
+      this._state = "VISIBLE";
+      this._retryAttempts = 0;
+      this._lastPaintedCamera = null;
+      this._lastPaintedScreen = null;
+      this.__startAutotileAnimation();
+      this.__paintFrame(performance.now(), true);
+    }
+
+    /* Dirty-cell autotile animation (§6): only animated cells repaint, on
+     * their own tick clock with dedupe; no permanent rAF without animated
+     * cells; pure camera work never touches it. */
+    __startAutotileAnimation() {
+      this.__stopAutotileAnimation();
+      const accepted = this._accepted;
+      if (accepted === null) return;
+      const animatedCells = [];
+      const frameDurations = [];
+      const visuals = new Map(accepted.view.tileVisuals.map((visual) => [visual[0], visual]));
+      for (const chunk of accepted.view.chunks) {
+        for (let z = 0; z < 3; z += 1) {
+          for (let ly = 0; ly < CHUNK; ly += 1) {
+            const worldY = chunk.chunkY * CHUNK + ly;
+            for (let lx = 0; lx < CHUNK; lx += 1) {
+              const worldX = chunk.chunkX * CHUNK + lx;
+              const tileId = chunk.cells[(z * CHUNK + ly) * CHUNK + lx];
+              if (tileId === 0) continue;
+              const visual = visuals.get(tileId);
+              if (visual === undefined || visual[2] !== 1) continue;
+              const slot = visual[3];
+              const ref = accepted.view.autotiles[slot];
+              if (ref === null) continue;
+              animatedCells.push({ tileId, visual, worldX, worldY });
+              frameDurations.push(autotileFrameDuration(ref.key));
+            }
+          }
+        }
+      }
+      if (animatedCells.length === 0) return;
+      accepted.autotileCells = animatedCells;
+      accepted.autotileFrameMs = Math.max(...frameDurations);
+      const tick = () => {
+        if (this._state === "DISPOSED" || this._accepted !== accepted) return;
+        this.__paintAutotileFrame();
+        this._autotileTimer = setTimeout(tick, accepted.autotileFrameMs);
+      };
+      this._autotileTimer = setTimeout(tick, accepted.autotileFrameMs);
+    }
+
+    __stopAutotileAnimation() {
+      if (this._autotileTimer !== null) {
+        clearTimeout(this._autotileTimer);
+        this._autotileTimer = null;
+      }
+    }
+
+    __paintAutotileFrame() {
+      const accepted = this._accepted;
+      if (accepted === null || !Array.isArray(accepted.autotileCells)) return;
+      const frameCount = Math.max(1, Math.floor((performance.now() - this._autotileStartedAt) / accepted.autotileFrameMs));
+      for (const cell of accepted.autotileCells) {
+        const bucket = this.__bucketForCell(cell);
+        if (bucket === null) continue;
+        const bitmap = this.__autotileBitmapForSlot(cell.visual[3]);
+        if (bitmap === null) continue;
+        const layout = autotileLayout(bitmap);
+        if (layout === null || layout.frames <= 1) continue;
+        const frameIndex = frameCount % layout.frames;
+        const ctx = bucket.canvas.getContext("2d", { alpha: true });
+        ctx.imageSmoothingEnabled = false;
+        const dx = cell.worldX * TILE - bucket.worldX;
+        const dy = cell.worldY * TILE - bucket.worldY;
+        if (layout.kind === "cell") {
+          ctx.clearRect(dx, dy, TILE, TILE);
+          ctx.drawImage(bitmap, frameIndex * TILE, 0, TILE, TILE, dx, dy, TILE, TILE);
         } else {
-          this._raf = undefined;
-        }
-        return;
-      }
-      this._lastPaintToken = paintToken;
-
-      const groups = [...prepared.buckets.entries()]
-        .sort(([leftDepth], [rightDepth]) => leftDepth - rightDepth);
-
-      for (const layer of this._layers) {
-        layer.context.clearRect(0, 0, 640, 480);
-        layer.canvas.hidden = true;
-      }
-
-      for (let index = 0; index < groups.length; index += 1) {
-        const [depth, tiles] = groups[index];
-        const layer = this._ensureLayer(index);
-        layer.canvas.hidden = false;
-        layer.context.clearRect(0, 0, 640, 480);
-        layer.canvas.style.zIndex = String(tileStackValue(depth));
-
-        for (const tile of tiles) {
-          const dx = tile.x * 32 - cameraX;
-          const dy = tile.y * 32 - cameraY;
-          if (tile.blit.kind === "regular") {
-            const source = tile.blit.sourceIndex;
-            const sx = (source % 8) * 32;
-            const sy = Math.floor(source / 8) * 32;
-            layer.context.drawImage(prepared.tilesetImage, sx, sy, 32, 32, dx, dy, 32, 32);
-            continue;
-          }
-          const item = prepared.autotiles.get(tile.blit.slot);
-          const frameIndex = autotileFrameIndex(now, this._animationStartedAt, item.frameCount, item.durationMs);
-          if (item.layout === "cell") {
-            layer.context.drawImage(item.image, frameIndex * 32, 0, 32, 32, dx, dy, 32, 32);
-            continue;
-          }
+          ctx.clearRect(dx, dy, TILE, TILE);
           const frameX = frameIndex * 96;
-          const [tl, tr, bl, br] = tile.blit.corners;
-          layer.context.drawImage(item.image, frameX + tl.sx, tl.sy, 16, 16, dx, dy, 16, 16);
-          layer.context.drawImage(item.image, frameX + tr.sx, tr.sy, 16, 16, dx + 16, dy, 16, 16);
-          layer.context.drawImage(item.image, frameX + bl.sx, bl.sy, 16, 16, dx, dy + 16, 16, 16);
-          layer.context.drawImage(item.image, frameX + br.sx, br.sy, 16, 16, dx + 16, dy + 16, 16, 16);
+          ctx.drawImage(bitmap, frameX + cell.visual[4], cell.visual[5], 16, 16, dx, dy, 16, 16);
+          ctx.drawImage(bitmap, frameX + cell.visual[6], cell.visual[7], 16, 16, dx + 16, dy, 16, 16);
+          ctx.drawImage(bitmap, frameX + cell.visual[8], cell.visual[9], 16, 16, dx, dy + 16, 16, 16);
+          ctx.drawImage(bitmap, frameX + cell.visual[10], cell.visual[11], 16, 16, dx + 16, dy + 16, 16, 16);
         }
       }
+    }
 
-      this._trimLayers(groups.length);
-      const previous = this._lastPaintedCamera;
-      if (!previous || previous.x !== cameraX || previous.y !== cameraY) {
-        qualify("browser-first-motion-paint", {
-          element: "map-view",
-          motionId: motion?.id ?? null,
-          visualX: cameraX,
-          visualY: cameraY,
-        });
-        this._lastPaintedCamera = { x: cameraX, y: cameraY };
+    __bucketForCell(cell) {
+      const accepted = this._accepted;
+      const bias = cell.visual[1];
+      const depth = bias === -1 ? 0 : cell.worldY * TILE + bias;
+      return accepted.buckets.get(depth) ?? null;
+    }
+
+    __autotileBitmapForSlot(slot) {
+      const accepted = this._accepted;
+      const ref = accepted.view.autotiles[slot];
+      if (ref === null) return null;
+      const identity = `${ref.namespace}\0${ref.key}\0${ref.contentVersion}`;
+      return this._cache.get(identity, ref);
+    }
+
+    __clampCameraX(cameraX) { return cameraX; }
+
+    __spritePoseFor(spriteData, progress) {
+      const motion = spriteData.motion;
+      let screenX = spriteData.screenX;
+      let screenY = spriteData.screenY;
+      let y = spriteData.y;
+      let pattern = spriteData.pattern;
+      if (motion !== null) {
+        if (progress >= 0.5) pattern = (pattern + 1) % 4;
+        screenX = Math.round(motion.fromScreenX + (spriteData.screenX - motion.fromScreenX) * progress);
+        screenY = Math.round(motion.fromScreenY + (spriteData.screenY - motion.fromScreenY) * progress);
+        y = Math.round(motion.fromY + (spriteData.y - motion.fromY) * progress);
       }
-      if (motion && progress >= 1) qualify("browser-motion-complete", { element: "map-view", motionId: motion.id, visualX: cameraX, visualY: cameraY });
-      if (needsNextFrame) {
-        this._raf = requestAnimationFrame(() => {
-          this._raf = undefined;
-          this._paintPrepared(requested, epoch, prepared);
-        });
-        return;
+      const frameHeight = this._accepted === null ? 32 : this._accepted.frameHeight;
+      const visualPixelY = screenY;
+      const depth = Math.round(visualPixelY) + 32 + (frameHeight > 32 ? 31 : 0);
+      return {
+        screenX, screenY, pattern, depth,
+        sheetX: pattern * (this._accepted === null ? 32 : this._accepted.frameWidth),
+        sheetY: ((spriteData.direction - 2) / 2) * frameHeight,
+      };
+    }
+
+    /** One rAF frame: camera-only translate + sprite placement (§6). */
+    __paintFrame(now, first) {
+      if (this._state === "DISPOSED" || this._accepted === null) return;
+      const accepted = this._accepted;
+      const motion = accepted.view.cameraMotion;
+      const progress = motion === null ? 1 : Math.min(Math.max((now - accepted.motionStart) / WALK_MS, 0), 1);
+      const cameraX = motion === null
+        ? accepted.view.cameraX
+        : Math.round(motion.fromCameraX + (accepted.view.cameraX - motion.fromCameraX) * progress);
+      const cameraY = motion === null
+        ? accepted.view.cameraY
+        : Math.round(motion.fromCameraY + (accepted.view.cameraY - motion.fromCameraY) * progress);
+      for (const [, bucket] of accepted.buckets) {
+        bucket.canvas.style.transform = `translate(${-(cameraX - bucket.worldX)}px, ${-(cameraY - bucket.worldY)}px)`;
       }
-      this._raf = undefined;
+      const pose = this.__spritePoseFor(accepted.sprite, progress);
+      const frameWidth = accepted.frameWidth;
+      const frameHeight = accepted.frameHeight;
+      const host = this._spriteElement;
+      if (host !== null && host.isConnected) {
+        host.__commitMapSpriteStage(accepted.sprite, accepted.spriteBitmap, frameWidth, frameHeight, pose);
+        // Parent-owned ::slotted rule positions the sprite host (§6).
+        this._slottedRule.style.left = `${pose.screenX + (32 - frameWidth) / 2}px`;
+        this._slottedRule.style.top = `${pose.screenY + 32 - frameHeight}px`;
+        this._slottedRule.style.zIndex = characterStackValue(pose.depth);
+        this._lastPaintedScreen = [pose.screenX, pose.screenY];
+      }
+      const cameraChanged = this._lastPaintedCamera === null || this._lastPaintedCamera[0] !== cameraX || this._lastPaintedCamera[1] !== cameraY;
+      this._lastPaintedCamera = [cameraX, cameraY];
+      if (cameraChanged || first) {
+        qualify("browser-first-motion-paint", { element: "map-view", motionId: accepted.view.motionId, visualX: cameraX, visualY: cameraY });
+      }
+      if (this._lastPaintedScreen !== null && (first || cameraChanged)) {
+        qualify("browser-first-motion-paint", { element: "map-sprite", motionId: accepted.sprite.motionId, visualX: this._lastPaintedScreen[0], visualY: this._lastPaintedScreen[1] });
+      }
+      if (motion !== null && progress < 1) {
+        this._raf = requestAnimationFrame(() => this.__paintFrame(performance.now(), false));
+      } else {
+        if (this._raf !== null) { cancelAnimationFrame(this._raf); }
+        this._raf = null;
+        qualify("browser-motion-complete", { element: "map-view", motionId: accepted.view.motionId });
+        qualify("browser-motion-complete", { element: "map-sprite", motionId: accepted.sprite.motionId });
+      }
     }
   }
 
-  class LoomRealmMapSprite extends ResourceElement {
-    constructor() {
-      super();
-      const shadow = this.attachShadow({ mode: "open" });
-      const style = document.createElement("style");
-      style.textContent = ":host{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas{display:block;image-rendering:pixelated}";
-      this._canvas = document.createElement("canvas");
-      shadow.append(style, this._canvas);
-      this._context = this._canvas.getContext("2d", { alpha: true });
-      this._context.imageSmoothingEnabled = false;
-      this._lastPaintedScreen = undefined;
-    }
-
-    receiveRenderData(data) {
-      if (
-        !data
-        || !Number.isSafeInteger(data.x) || data.x < 0
-        || !Number.isSafeInteger(data.y) || data.y < 0
-        || ![2, 4, 6, 8].includes(data.direction)
-        || ![0, 1, 2, 3].includes(data.pattern)
-        || !Number.isFinite(data.screenX)
-        || !Number.isFinite(data.screenY)
-        || !validRef(data.sprite)
-        || !validPlayerMotion(data.motion)
-        || (data.motion === null && data.pattern !== 0)
-        || (data.motion !== null && data.pattern !== 1 && data.pattern !== 3)
-      ) throw new TypeError("Invalid MapSpriteRenderData");
-      const motion = data.motion;
-      const fingerprint = motion === null ? null : JSON.stringify([
-        motion.id,
-        motion.durationMs,
-        motion.fromY,
-        motion.fromScreenX,
-        motion.fromScreenY,
-        data.x,
-        data.y,
-        data.screenX,
-        data.screenY,
-        data.direction,
-        data.pattern,
-      ]);
-      const nextActive = acceptMotion(this._activeMotion, motion, fingerprint);
-      this._latestData = data;
-      this._activeMotion = nextActive;
-      this._cancelRaf();
-      this._paintEpoch += 1;
-      qualify("presentation-received", { element: "map-sprite", motionId: motion?.id ?? null });
-      void this._paintLatest(data, this._paintEpoch);
-    }
-
-    async _paintLatest(requested, epoch) {
-      let image;
-      try { image = await this._image(requested.sprite); } catch {
-        if (this._latestData !== requested || epoch !== this._paintEpoch) return;
-        return;
-      }
-      if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
-      const frameWidth = image.width / 4;
-      const frameHeight = image.height / 4;
-      if (!Number.isInteger(frameWidth) || !Number.isInteger(frameHeight)) throw new TypeError("Character sheet must be 4 by 4");
-      const motion = requested.motion;
-      const active = this._activeMotion;
-      const progress = active && motion ? clamp((performance.now() - active.startedAt) / motion.durationMs, 0, 1) : 1;
-      const pattern = motion ? (progress < 0.5 ? requested.pattern : (requested.pattern + 1) % 4) : 0;
-      const screenX = motion ? Math.round(lerp(motion.fromScreenX, requested.screenX, progress)) : requested.screenX;
-      const screenY = motion ? Math.round(lerp(motion.fromScreenY, requested.screenY, progress)) : requested.screenY;
-      const visualPixelY = motion ? Math.round(lerp(motion.fromY * 32, requested.y * 32, progress)) : requested.y * 32;
-      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
-      this._canvas.width = frameWidth;
-      this._canvas.height = frameHeight;
-      this._context.imageSmoothingEnabled = false;
-      this._context.clearRect(0, 0, frameWidth, frameHeight);
-      this._context.drawImage(image, pattern * frameWidth, ((requested.direction - 2) / 2) * frameHeight, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
-      this.style.left = `${screenX + (32 - frameWidth) / 2}px`;
-      this.style.top = `${screenY + 32 - frameHeight}px`;
-      this.style.width = `${frameWidth}px`;
-      this.style.height = `${frameHeight}px`;
-      this.style.zIndex = String(characterStackValue(depth));
-      const previous = this._lastPaintedScreen;
-      if (!previous || previous.x !== screenX || previous.y !== screenY) {
-        qualify("browser-first-motion-paint", {
-          element: "map-sprite",
-          motionId: motion?.id ?? null,
-          visualX: screenX,
-          visualY: screenY,
-        });
-        this._lastPaintedScreen = { x: screenX, y: screenY };
-      }
-      if (motion && progress >= 1) qualify("browser-motion-complete", { element: "map-sprite", motionId: motion.id, visualX: screenX, visualY: screenY });
-      if (motion && progress < 1) {
-        this._raf = requestAnimationFrame(() => {
-          this._raf = undefined;
-          if (this._latestData !== requested || epoch !== this._paintEpoch || !this.isConnected) return;
-          void this._paintLatest(requested, epoch);
-        });
-        return;
-      }
-      this._raf = undefined;
-    }
-  }
-
-  customElements.define("lr-map-view", LoomRealmMapView);
-  customElements.define("lr-map-sprite", LoomRealmMapSprite);
+  if (customElements.get("lr-map-view") === undefined) customElements.define("lr-map-view", LoomRealmMapView);
+  if (customElements.get("lr-map-sprite") === undefined) customElements.define("lr-map-sprite", LoomRealmMapSprite);
 })();

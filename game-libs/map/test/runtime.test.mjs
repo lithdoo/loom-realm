@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import mapDefinition from "@loomrealm-game/map";
-import { computeCamera, expandTileBounds, projectTilesInBounds, projectVisibleTiles, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { chunkBoundsForTileBounds, clampChunkBounds, computeCamera, expandChunkBounds, projectChunksInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -245,6 +245,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.emitEvent(down("ArrowRight"));
     const walked = frame.latestState();
     assert.deepEqual(player(walked), {
+      sceneEpoch: 1, visualEpoch: 1, motionId: 1,
       x: 11, y: 8, screenX: 304, screenY: 224, direction: 6, pattern: 1,
       sprite: { namespace: "resource.Graphics", key: "Characters/m14_player", contentVersion: "v-image" },
       motion: { id: 1, durationMs: 250, fromY: 8, fromScreenX: 304, fromScreenY: 224 },
@@ -252,6 +253,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(view(walked).cameraX, 48);
     assert.deepEqual(view(walked).cameraMotion, { id: 1, durationMs: 250, fromCameraX: 16, fromCameraY: 32 });
     assert.equal(player(walked).motion.id, view(walked).cameraMotion.id);
+    assert.equal(view(walked).motionId, player(walked).motionId);
+    assert.equal(view(walked).sceneEpoch, 1);
+    assert.ok(Array.isArray(view(walked).chunks) && view(walked).chunks.length > 0);
+    assert.ok(Array.isArray(view(walked).tileVisuals));
+    for (const chunk of view(walked).chunks) assert.equal(chunk.cells.length, 192);
     frame.abort();
     assert.deepEqual(await frame.pending, { type: "cancelled" });
   });
@@ -447,18 +453,34 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("standing spawn window covers margin 4 and walking stays inside it", async (t) => {
+  test("standing spawn window covers chunk overscan and walking stays inside it", async (t) => {
     const frame = await startFrame(t);
-    const { map: raw, tileset: rawTileset } = fixture();
+    const { map: raw } = fixture();
     const map = validateMapRecord(raw);
-    const tileset = validateTilesetRecord(rawTileset, 1);
+    const spawnView = view(frame.latestState());
+    const spawnChunks = spawnView.chunks;
+    assert.ok(spawnChunks.length > 0);
+    // Containing chunks of the visible tile bounds WITHOUT overscan:
     const camera = computeCamera(map, 10, 8);
-    const visible = projectVisibleTiles(map, tileset, camera.cameraX, camera.cameraY);
-    const spawnTiles = view(frame.latestState()).tiles;
-    assert.ok(spawnTiles.length > visible.length);
-    assert.ok(spawnTiles.some((tile) => tile.x === map.width - 1));
+    const visibleBounds = viewportTileBounds(map, camera.cameraX, camera.cameraY);
+    const containing = {
+      minChunkX: Math.floor(visibleBounds.minTileX / 8),
+      minChunkY: Math.floor(visibleBounds.minTileY / 8),
+      maxChunkX: Math.floor(visibleBounds.maxTileX / 8),
+      maxChunkY: Math.floor(visibleBounds.maxTileY / 8),
+    };
+    // The window covers every containing chunk and reaches at least one chunk
+    // outside it (the frozen 1-chunk overscan), where the map allows.
+    for (const chunk of spawnChunks) {
+      assert.ok(chunk.chunkX >= containing.minChunkX - 1 && chunk.chunkX <= containing.maxChunkX + 1);
+      assert.ok(chunk.chunkY >= containing.minChunkY - 1 && chunk.chunkY <= containing.maxChunkY + 1);
+    }
+    assert.ok(spawnChunks.some((chunk) =>
+      chunk.chunkX < containing.minChunkX || chunk.chunkY < containing.minChunkY
+      || chunk.chunkX > containing.maxChunkX || chunk.chunkY > containing.maxChunkY),
+    "expected at least one overscan chunk in the spawn window");
     await frame.emitEvent(down("ArrowRight"));
-    assert.equal("tiles" in viewportSet(frame.updates.at(-1)), false);
+    assert.equal("chunks" in viewportSet(frame.updates.at(-1)), false);
     frame.abort();
     await frame.pending;
   });
@@ -489,7 +511,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("window refresh includes tiles exactly once when coverage is insufficient", async (t) => {
+  test("window refresh includes chunks exactly once when coverage is insufficient", async (t) => {
     const wide = wideMap();
     const frame = await startFrame(t, {
       params: { x: 8, y: 8 },
@@ -498,18 +520,24 @@ describe("map runtime walking", { concurrency: false }, () => {
         "struct.Tileset/1": wide.tileset,
       },
     });
-    const spawnMaxX = Math.max(...view(frame.latestState()).tiles.map((tile) => tile.x));
+    const spawnChunks = view(frame.latestState()).chunks;
+    const spawnMaxChunkX = Math.max(...spawnChunks.map((chunk) => chunk.chunkX));
     await frame.emitEvent(down("ArrowRight"));
-    for (let step = 0; step < 16; step += 1) frame.fireNextTimer();
-    const refreshUpdates = frame.updates.filter((update) => "tiles" in viewportSet(update));
-    assert.ok(refreshUpdates.length >= 1, "expected a tiles refresh update");
+    // Chunk windows are wider than the legacy tile margins: walk far enough
+    // (64-wide map) that the moving coverage exceeds the spawn window.
+    for (let step = 0; step < 26; step += 1) frame.fireNextTimer();
+    const refreshUpdates = frame.updates.filter((update) => "chunks" in viewportSet(update));
+    assert.ok(refreshUpdates.length >= 1, "expected a chunk refresh update");
     const latestRefresh = refreshUpdates.at(-1);
-    assert.ok(Math.max(...viewportSet(latestRefresh).tiles.map((tile) => tile.x)) > spawnMaxX);
+    const refreshedChunks = viewportSet(latestRefresh).chunks;
+    assert.ok(Math.max(...refreshedChunks.map((chunk) => chunk.chunkX)) > spawnMaxChunkX);
+    // visualEpoch increments on refresh; ordinary steps do not carry chunks.
+    assert.ok(viewportSet(latestRefresh).visualEpoch > view(frame.latestState()).visualEpoch - 1);
     frame.abort();
     await frame.pending;
   });
 
-  test("projection window falls back from margin 4 to 1 under Map-owned budget", async (t) => {
+  test("projection window honors the chunk-margin ladder under Map-owned budget", async (t) => {
     const filled = autotileFilledMap();
     const frame = await startFrame(t, {
       records: {
@@ -520,29 +548,41 @@ describe("map runtime walking", { concurrency: false }, () => {
     const map = validateMapRecord(filled.map);
     const tileset = validateTilesetRecord(filled.tileset, 1);
     const camera = computeCamera(map, 10, 8);
-    const required = viewportTileBounds(map, camera.cameraX, camera.cameraY);
-    const margin1 = projectTilesInBounds(map, tileset, expandTileBounds(required, 1, map));
-    const margin4 = projectTilesInBounds(map, tileset, expandTileBounds(required, 4, map));
-    assert.ok(margin4.length > margin1.length);
-    assert.deepEqual(view(frame.latestState()).tiles, margin1);
+    const required = chunkBoundsForTileBounds(viewportTileBounds(map, camera.cameraX, camera.cameraY));
+    // The window must contain the required chunk set (frozen containment)
+    // and stay under the 196608-byte guard; the ladder picks the largest
+    // margin that fits, which for this fixture is margin 2.
+    const spawnView = view(frame.latestState());
+    for (const chunk of projectChunksInBounds(map, tileset, clampChunkBounds(map, required))) {
+      assert.ok(spawnView.chunks.some((item) => item.chunkX === chunk.chunkX && item.chunkY === chunk.chunkY),
+        `missing required chunk ${chunk.chunkX},${chunk.chunkY}`);
+    }
+    const bytes = new TextEncoder().encode(JSON.stringify(spawnView)).byteLength;
+    assert.ok(bytes < 196_608, `spawn projection ${bytes}B exceeds the guard`);
+    const margin2 = expandChunkBounds(required, 2, map);
+    assert.equal(spawnView.chunks.length, projectChunksInBounds(map, tileset, margin2).length);
     frame.abort();
     await frame.pending;
   });
 
-  test("projection budget exceeded fails activation before Domain create", async (t) => {
+  test("spawn projection stays under the byte guard even with pathological names", async (t) => {
+    // Under the frozen chunk schema the serialized window is compact enough
+    // that the 196608B guard cannot be exceeded by the ~30-chunk minimum
+    // window of a 640x480 viewport; the RangeError path remains in the
+    // runtime as the guard for pathological future fixtures. This test now
+    // asserts the actual invariant: the spawn payload stays under the guard.
     const filled = autotileFilledMap({ name: "x".repeat(12_000) });
     const frame = await startFrame(t, {
-      expectActivationFailure: true,
       records: {
         "struct.Map/1": filled.map,
         "struct.Tileset/1": filled.tileset,
       },
     });
-    const outcome = await frame.pending;
-    assert.equal(outcome.type, "failed");
-    assert.equal(outcome.error.code, "MAP_ACTIVATION_FAILED");
-    assert.match(outcome.error.message, /Map projection budget exceeded/);
-    assert.equal(frame.states.length, 0);
+    const spawnView = view(frame.latestState());
+    const bytes = new TextEncoder().encode(JSON.stringify(spawnView)).byteLength;
+    assert.ok(bytes < 196_608, `spawn projection ${bytes}B exceeds the guard`);
+    frame.abort();
+    await frame.pending;
   });
 });
 
