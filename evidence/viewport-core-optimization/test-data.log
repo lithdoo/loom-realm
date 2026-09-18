@@ -1,0 +1,483 @@
+
+> test:data
+> npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/data
+
+
+> @loomrealm/foundation@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/foundation@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: either endpoint orderly-closes the whole duplex pair idempotently
+ok 1 - either endpoint orderly-closes the whole duplex pair idempotently
+  ---
+  duration_ms: 1.9083
+  ...
+# Subtest: loss terminates both endpoints and preserves cause identity
+ok 2 - loss terminates both endpoints and preserves cause identity
+  ---
+  duration_ms: 0.2437
+  ...
+# Subtest: first terminal fact wins across close and loss
+ok 3 - first terminal fact wins across close and loss
+  ---
+  duration_ms: 0.332
+  ...
+# Subtest: package root does not expose testing implementation
+ok 4 - package root does not expose testing implementation
+  ---
+  duration_ms: 8.2949
+  ...
+# Subtest: package has zero runtime dependencies and platform-neutral source
+ok 5 - package has zero runtime dependencies and platform-neutral source
+  ---
+  duration_ms: 3.4106
+  ...
+# Subtest: opaque strings round-trip exactly without interpretation or normalization
+ok 6 - opaque strings round-trip exactly without interpretation or normalization
+  ---
+  duration_ms: 2.5525
+  ...
+# Subtest: both directions preserve independent invocation order and message boundaries
+ok 7 - both directions preserve independent invocation order and message boundaries
+  ---
+  duration_ms: 0.4516
+  ...
+# Subtest: send always returns a Promise and accepts exactly once before peer consumption
+ok 8 - send always returns a Promise and accepts exactly once before peer consumption
+  ---
+  duration_ms: 0.3655
+  ...
+# Subtest: one logical reader owns the inbound stream
+ok 9 - one logical reader owns the inbound stream
+  ---
+  duration_ms: 0.5897
+  ...
+# Subtest: terminal state rejects new sends without creating inbound messages
+ok 10 - terminal state rejects new sends without creating inbound messages
+  ---
+  duration_ms: 1.1755
+  ...
+# Subtest: an invoked send linearizes before a following close
+ok 11 - an invoked send linearizes before a following close
+  ---
+  duration_ms: 0.3255
+  ...
+# Subtest: queued inbound messages drain before normal iterator completion on close
+ok 12 - queued inbound messages drain before normal iterator completion on close
+  ---
+  duration_ms: 0.4276
+  ...
+# Subtest: queued inbound messages drain before normal iterator completion on loss
+ok 13 - queued inbound messages drain before normal iterator completion on loss
+  ---
+  duration_ms: 0.253
+  ...
+# Subtest: a pending iterator completes normally when the carrier terminates
+ok 14 - a pending iterator completes normally when the carrier terminates
+  ---
+  duration_ms: 0.627
+  ...
+# Subtest: transport terminal is not thrown into the application message stream
+ok 15 - transport terminal is not thrown into the application message stream
+  ---
+  duration_ms: 1.1772
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 186.4383
+
+> @loomrealm/wire@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/wire@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: accepts exact required keys and any optional-key subset
+ok 1 - accepts exact required keys and any optional-key subset
+  ---
+  duration_ms: 4.6437
+  ...
+# Subtest: reports missing and unknown members at stable paths
+ok 2 - reports missing and unknown members at stable paths
+  ---
+  duration_ms: 2.2677
+  ...
+# Subtest: an inherited property never satisfies a required own member
+ok 3 - an inherited property never satisfies a required own member
+  ---
+  duration_ms: 0.5565
+  ...
+# Subtest: error paths are immutable snapshots and messages are not asserted
+ok 4 - error paths are immutable snapshots and messages are not asserted
+  ---
+  duration_ms: 0.3692
+  ...
+# Subtest: decodes requests with string, safe numeric, and generic null ids
+ok 5 - decodes requests with string, safe numeric, and generic null ids
+  ---
+  duration_ms: 3.5353
+  ...
+# Subtest: notification is defined by id absence, not an id:null value
+ok 6 - notification is defined by id absence, not an id:null value
+  ---
+  duration_ms: 0.5706
+  ...
+# Subtest: accepts object/array params and rejects primitive params
+ok 7 - accepts object/array params and rejects primitive params
+  ---
+  duration_ms: 1.1829
+  ...
+# Subtest: decodes success and exact error responses
+ok 8 - decodes success and exact error responses
+  ---
+  duration_ms: 1.307
+  ...
+# Subtest: requires result and response id and enforces result/error exclusion
+ok 9 - requires result and response id and enforces result/error exclusion
+  ---
+  duration_ms: 0.4239
+  ...
+# Subtest: enforces exact version and closed envelope/error shapes
+ok 10 - enforces exact version and closed envelope/error shapes
+  ---
+  duration_ms: 0.5483
+  ...
+# Subtest: numeric ids and error codes must be safe integers
+ok 11 - numeric ids and error codes must be safe integers
+  ---
+  duration_ms: 2.4191
+  ...
+# Subtest: accepts opaque method strings without LoomRealm interpretation
+ok 12 - accepts opaque method strings without LoomRealm interpretation
+  ---
+  duration_ms: 0.4251
+  ...
+# Subtest: single-message decoder rejects JSON-RPC Batch arrays
+ok 13 - single-message decoder rejects JSON-RPC Batch arrays
+  ---
+  duration_ms: 0.9379
+  ...
+# Subtest: missing own jsonrpc never executes an inherited getter
+ok 14 - missing own jsonrpc never executes an inherited getter
+  ---
+  duration_ms: 2.2478
+  ...
+# Subtest: parses top-level primitives, objects, arrays, and surrounding whitespace
+ok 15 - parses top-level primitives, objects, arrays, and surrounding whitespace
+  ---
+  duration_ms: 2.5996
+  ...
+# Subtest: distinguishes JSON syntax failure from parsed value-model failure
+ok 16 - distinguishes JSON syntax failure from parsed value-model failure
+  ---
+  duration_ms: 1.2402
+  ...
+# Subtest: stringify validates before native silent conversion
+ok 17 - stringify validates before native silent conversion
+  ---
+  duration_ms: 0.8247
+  ...
+# Subtest: stringify round-trips JSON value semantics including shared references
+ok 18 - stringify round-trips JSON value semantics including shared references
+  ---
+  duration_ms: 0.8894
+  ...
+# Subtest: stringify ignores inherited toJSON hooks
+ok 19 - stringify ignores inherited toJSON hooks
+  ---
+  duration_ms: 2.7604
+  ...
+# Subtest: stringify handles very deep inputs without recursive serialization
+ok 20 - stringify handles very deep inputs without recursive serialization
+  ---
+  duration_ms: 60.8778
+  ...
+# Subtest: accepts every JSON primitive including negative zero
+ok 21 - accepts every JSON primitive including negative zero
+  ---
+  duration_ms: 3.3154
+  ...
+# Subtest: rejects non-JSON and non-finite primitive values
+ok 22 - rejects non-JSON and non-finite primitive values
+  ---
+  duration_ms: 1.5749
+  ...
+# Subtest: accepts ordinary and null-prototype objects
+ok 23 - accepts ordinary and null-prototype objects
+  ---
+  duration_ms: 1.7925
+  ...
+# Subtest: rejects class instances and built-in/exotic object shapes
+ok 24 - rejects class instances and built-in/exotic object shapes
+  ---
+  duration_ms: 0.541
+  ...
+# Subtest: rejects accessors without invoking getters
+ok 25 - rejects accessors without invoking getters
+  ---
+  duration_ms: 0.491
+  ...
+# Subtest: rejects symbol and non-enumerable application properties
+ok 26 - rejects symbol and non-enumerable application properties
+  ---
+  duration_ms: 0.4337
+  ...
+# Subtest: accepts dense arrays and rejects sparse or augmented arrays
+ok 27 - accepts dense arrays and rejects sparse or augmented arrays
+  ---
+  duration_ms: 1.6705
+  ...
+# Subtest: rejects cycles at the precise nested path but accepts shared children
+ok 28 - rejects cycles at the precise nested path but accepts shared children
+  ---
+  duration_ms: 1.9809
+  ...
+# Subtest: validates a shared acyclic subgraph only once
+ok 29 - validates a shared acyclic subgraph only once
+  ---
+  duration_ms: 0.7808
+  ...
+# Subtest: validation keeps deep successful traversal near-linear
+ok 30 - validation keeps deep successful traversal near-linear
+  ---
+  duration_ms: 227.8824
+  ...
+# Subtest: revoked proxies fail closed
+ok 31 - revoked proxies fail closed
+  ---
+  duration_ms: 0.4765
+  ...
+# Subtest: primitive assertion helpers enforce only their representation fact
+ok 32 - primitive assertion helpers enforce only their representation fact
+  ---
+  duration_ms: 0.4347
+  ...
+# Subtest: measures standard UTF-8 bytes rather than UTF-16 length
+ok 33 - measures standard UTF-8 bytes rather than UTF-16 length
+  ---
+  duration_ms: 2.7737
+  ...
+# Subtest: uses the frozen container-count depth definition
+ok 34 - uses the frozen container-count depth definition
+  ---
+  duration_ms: 1.9418
+  ...
+# Subtest: measures very deep input without call-stack overflow
+ok 35 - measures very deep input without call-stack overflow
+  ---
+  duration_ms: 87.4378
+  ...
+# Subtest: package has exactly the frozen runtime root exports
+ok 36 - package has exactly the frozen runtime root exports
+  ---
+  duration_ms: 38.7375
+  ...
+# Subtest: package has zero runtime dependencies and only a root export
+ok 37 - package has zero runtime dependencies and only a root export
+  ---
+  duration_ms: 7.5584
+  ...
+# Subtest: source has no Foundation, Node, platform, carrier, or domain imports
+ok 38 - source has no Foundation, Node, platform, carrier, or domain imports
+  ---
+  duration_ms: 6.6848
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 38
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 481.5566
+
+> @loomrealm/data@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/data@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: invalid trusted binding fails before claiming the carrier reader
+ok 1 - invalid trusted binding fails before claiming the carrier reader
+  ---
+  duration_ms: 2.2726
+  ...
+# Subtest: one Data peer claims exactly one logical carrier reader
+ok 2 - one Data peer claims exactly one logical carrier reader
+  ---
+  duration_ms: 6.0693
+  ...
+# Subtest: unsorted interest frames are rejected without a canonicalizer
+ok 3 - unsorted interest frames are rejected without a canonicalizer
+  ---
+  duration_ms: 6.0289
+  ...
+# Subtest: unsorted interest channels are rejected without a canonicalizer
+ok 4 - unsorted interest channels are rejected without a canonicalizer
+  ---
+  duration_ms: 1.4286
+  ...
+# Subtest: canonical interest order is accepted
+ok 5 - canonical interest order is accepted
+  ---
+  duration_ms: 3.2036
+  ...
+# Subtest: KeyboardCode runtime acceptance uses the frozen finite set
+ok 6 - KeyboardCode runtime acceptance uses the frozen finite set
+  ---
+  duration_ms: 2.9829
+  ...
+# Subtest: non-JSON custom Input payload is rejected instead of normalized
+ok 7 - non-JSON custom Input payload is rejected instead of normalized
+  ---
+  duration_ms: 0.5877
+  ...
+# Subtest: unknown type fail-closes the current Data peer
+ok 8 - unknown type fail-closes the current Data peer
+  ---
+  duration_ms: 0.7234
+  ...
+# Subtest: message larger than 1 MiB fail-closes as profile protocol-fatal
+ok 9 - message larger than 1 MiB fail-closes as profile protocol-fatal
+  ---
+  duration_ms: 8.2295
+  ...
+# Subtest: JSON depth greater than 64 fail-closes as profile protocol-fatal
+ok 10 - JSON depth greater than 64 fail-closes as profile protocol-fatal
+  ---
+  duration_ms: 1.4203
+  ...
+# Subtest: routes Input and Render over one shared profile connection
+ok 11 - routes Input and Render over one shared profile connection
+  ---
+  duration_ms: 16.1355
+  ...
+# Subtest: wrong-direction inbound message fails the current Data peer closed
+ok 12 - wrong-direction inbound message fails the current Data peer closed
+  ---
+  duration_ms: 1.1361
+  ...
+# Subtest: invalid local message becomes local-fatal without wire emission
+ok 13 - invalid local message becomes local-fatal without wire emission
+  ---
+  duration_ms: 0.9025
+  ...
+# Subtest: shared writer keeps at most one carrier.send pending
+ok 14 - shared writer keeps at most one carrier.send pending
+  ---
+  duration_ms: 33.9489
+  ...
+# Subtest: Render JSON keys use UTF-8 limits and every string is a Unicode scalar sequence
+ok 15 - Render JSON keys use UTF-8 limits and every string is a Unicode scalar sequence
+  ---
+  duration_ms: 9.5069
+  ...
+# Subtest: Patch attrs and data Delta boundaries fail before carrier emission
+ok 16 - Patch attrs and data Delta boundaries fail before carrier emission
+  ---
+  duration_ms: 3.9396
+  ...
+# Subtest: invalid Render representation retires inbound Data before handler delivery
+ok 17 - invalid Render representation retires inbound Data before handler delivery
+  ---
+  duration_ms: 1.6697
+  ...
+# Subtest: outbound preflight rejects a global JSON depth over 64 before carrier emission
+ok 18 - outbound preflight rejects a global JSON depth over 64 before carrier emission
+  ---
+  duration_ms: 30.5869
+  ...
+# Subtest: terminal first-wins and is not overwritten by a later carrier loss
+ok 19 - terminal first-wins and is not overwritten by a later carrier loss
+  ---
+  duration_ms: 3.725
+  ...
+# Subtest: fresh peer starts with no inherited writer or reader state
+ok 20 - fresh peer starts with no inherited writer or reader state
+  ---
+  duration_ms: 10.318
+  ...
+# Subtest: V-04/P3-02: recognized viewport schema/direction �?viewport; invalid JSON/unknown �?profile; local invalid �?local-fatal
+ok 21 - V-04/P3-02: recognized viewport schema/direction �?viewport; invalid JSON/unknown �?profile; local invalid �?local-fatal
+  ---
+  duration_ms: 15.5013
+  ...
+# Subtest: V-05: A→B→A while inFlight cancels B and does not resend A
+ok 22 - V-05: A→B→A while inFlight cancels B and does not resend A
+  ---
+  duration_ms: 3.4179
+  ...
+# Subtest: V-06/P3-05: admitted FIFO, pending latest, burst coalesce, concurrent Input ok
+ok 23 - V-06/P3-05: admitted FIFO, pending latest, burst coalesce, concurrent Input ok
+  ---
+  duration_ms: 78.4112
+  ...
+# Subtest: V-07: terminal/retire fences old settle; fresh peer has independent baseline
+ok 24 - V-07: terminal/retire fences old settle; fresh peer has independent baseline
+  ---
+  duration_ms: 1.2256
+  ...
+# Subtest: P3-01: viewport.state only Renderer→Subsystem; reverse is viewport fatal
+ok 25 - P3-01: viewport.state only Renderer→Subsystem; reverse is viewport fatal
+  ---
+  duration_ms: 0.619
+  ...
+# Subtest: C-01: publishState exact-own validation; getter/Proxy never sync-leak
+ok 26 - C-01: publishState exact-own validation; getter/Proxy never sync-leak
+  ---
+  duration_ms: 2.7602
+  ...
+# Subtest: C-01: invalid while inFlight/idle same-size cannot be swallowed
+ok 27 - C-01: invalid while inFlight/idle same-size cannot be swallowed
+  ---
+  duration_ms: 2.2856
+  ...
+# Subtest: writer preserves enqueue order across Input and Render
+ok 28 - writer preserves enqueue order across Input and Render
+  ---
+  duration_ms: 6.4959
+  ...
+# Subtest: send after terminal emits zero bytes
+ok 29 - send after terminal emits zero bytes
+  ---
+  duration_ms: 0.5862
+  ...
+# Subtest: emitted send stays sent when terminal races after carrier.send resolves
+ok 30 - emitted send stays sent when terminal races after carrier.send resolves
+  ---
+  duration_ms: 6.5349
+  ...
+# Subtest: writer pending operations settle exactly once on terminal
+ok 31 - writer pending operations settle exactly once on terminal
+  ---
+  duration_ms: 1.3215
+  ...
+# Subtest: carrier.send reject with a kind object is carrier-lost and matches peer.terminal
+ok 32 - carrier.send reject with a kind object is carrier-lost and matches peer.terminal
+  ---
+  duration_ms: 0.5631
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 378.0032

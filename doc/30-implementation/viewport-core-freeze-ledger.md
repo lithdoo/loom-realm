@@ -1,7 +1,7 @@
 # Viewport Core：Docs Freeze、Agent 执行与资格唯一账本
 
-> 层级：Implementation / approval ledger；状态：**DOCS FROZEN / ARCHITECTURE QUALIFIED on `d42bc6e…` / Desktop-Map product OUT OF SCOPE**；2026-09-18。  
-> [Accepted ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)；唯一正式语义：[完整 Profile](../15-contracts/renderer-data-profile-v1.md)、[Viewport](../15-contracts/viewport-state-v1.md)；[完整 Profile revision3 conformance](../15-contracts/renderer-data-profile-conformance-v1.md)、[Viewport conformance](../15-contracts/viewport-state-conformance-v1.md)；[通信架构](../10-architecture/communication-system.md)、[Subsystem 架构](../10-architecture/subsystem-model.md)、[模块落点](../20-modules/viewport-core.md)、[Data 包窄修订单](../../packages/data/VIEWPORT-V1-CORRECTION.md)；[Agent 入口](../../VIEWPORT_CORE_INTERFACE_DESIGN_DRAFT.md)。
+> 层级：Implementation / approval ledger；状态：**DOCS FROZEN / ARCHITECTURE QUALIFIED on `a0f664f…` (Cursor optimization re-qualified; prior `d42bc6e…` retained as pre-hardening executable) / Desktop-Map product OUT OF SCOPE**；2026-09-18。  
+> [Accepted ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)；唯一正式语义：[完整 Profile](../15-contracts/renderer-data-profile-v1.md)、[Viewport](../15-contracts/viewport-state-v1.md)；[完整 Profile revision3 conformance](../15-contracts/renderer-data-profile-conformance-v1.md)、[Viewport conformance](../15-contracts/viewport-state-conformance-v1.md)；[通信架构](../10-architecture/communication-system.md)、[Subsystem 架构](../10-architecture/subsystem-model.md)、[模块落点](../20-modules/viewport-core.md)、[Data 包窄修订单](../../packages/data/VIEWPORT-V1-CORRECTION.md)；[Agent 入口](../../VIEWPORT_CORE_INTERFACE_DESIGN_DRAFT.md)；[Cursor 优化清单](./viewport-core-cursor-optimization.md)。
 
 ## 1. 冻结状态与可追溯主体
 
@@ -17,6 +17,7 @@
 | G2 独立技术复核 | **APPROVE（正式契约）+ 架构对齐 FOLLOW-UP** | Primary：Independent Agent `8bd3570b-ed89-4059-9b84-7aa576d03a3b` 审 `5d74590…` → APPROVE（1–5、7 PASS；item 6 CONCERN 已对账）。Parallel：`2a008819-1e57-4680-a660-2f303cc5aff0` 同 SHA → REQUEST CHANGES：`renderer-subsystem-protocol-layers.md` 仍断言三-child Frozen current；G1 link log 当时账本未写。正式 Profile/Viewport/conformance 两审均未否定。架构文档已在实现后对齐四-child；link-check 有 exit 0 raw log。 |
 | G3 Owner Docs Freeze | **APPROVED / 2026-09-18** | 项目负责人在实施会话中明确批准 exact SHA `5d74590fcde6d79d815f774cc1c6cffe33fd2952`（原文「批准，继续完成所有任务」）；本账本登记可追溯。 |
 | C1–C4 architecture implementation | **PASS / executable `d42bc6e7755330e74263d1ec55a14998e3718d43`** | revision3/Viewport/`npm run test:viewport`、旧 Data/Renderer/Subsystem、m10/m11/m13、build:desktop-stack、test:regression 均 exit 0；raw logs：`.viewport-freeze-evidence/logs/`。 |
+| Cursor optimization C-01…C-03 + T-01…T-03 re-qualification | **PASS / executable `a0f664f29e687fc35e966fcc7675c7f2db808a3c`** | Plan subject `13c79d1…`；RED→fix for publishState exact-own/getter isolation、listener then-getter isolation、symbol ownKeys；real P3/V runners；split V-14 vertical；same-SHA docs/data/subsystem/renderer/viewport/m10/m11/m13/desktop-stack/regression all exit 0；raw logs：`evidence/viewport-core-optimization/`。 |
 | Desktop / Map product | **OUT OF SCOPE / NOT RUN** | 独立后续验收；不宣称已实现 `play.bat` 真拖窗、地图覆盖、行走性能。 |
 
 ```text
@@ -29,9 +30,12 @@ Architecture follow-up: doc/10-architecture/renderer-subsystem-protocol-layers.m
 Reviewed exact SHA / date: 5d74590… / 2026-09-18
 Owner formal freeze approval / exact SHA / date: APPROVED / 5d74590… / 2026-09-18
 Approved Docs Freeze subject: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
-Implementation executable SHA: d42bc6e7755330e74263d1ec55a14998e3718d43
-Commands / raw logs: .viewport-freeze-evidence/SUMMARY.md and logs/
-Architecture Qualified: YES (architecture vertical + regressions on same SHA; Desktop/Map product NOT claimed)
+Implementation executable SHA (initial C1–C4): d42bc6e7755330e74263d1ec55a14998e3718d43
+Cursor optimization plan subject: 13c79d102a0496965fa043fe2d84c3ac8526dbc3
+Implementation executable SHA (post C-01…C-03 / T-01…T-03): a0f664f29e687fc35e966fcc7675c7f2db808a3c
+Commands / raw logs (initial): .viewport-freeze-evidence/SUMMARY.md and logs/
+Commands / raw logs (optimization): evidence/viewport-core-optimization/SUMMARY.md
+Architecture Qualified: YES on a0f664f… after re-run (architecture vertical + regressions on same SHA; Desktop/Map product NOT claimed)
 ```
 
 **冻结操作：** 检查 candidate diff docs-only scope → 在该 subject 运行 `npm run docs:check-links` 留证 → 独立 reviewer 审同一 SHA → 缺陷修正则新 subject、新审查 → owner 在 Git 中批准精确 immutable SHA → 后续只在本账本补写真实批准事实/链接。元数据提交不需要等于受批准 subject，但绝不可虚构 reviewer/批准。新语义改动重新开启 Docs Freeze。

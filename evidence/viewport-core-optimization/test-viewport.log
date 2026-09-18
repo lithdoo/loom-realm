@@ -1,0 +1,281 @@
+
+> test:viewport
+> npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer && node --test packages/data/test/viewport.test.mjs packages/renderer/test/viewport-source.test.mjs packages/subsystem/test/viewport.test.mjs test/viewport-core-vertical.test.mjs test/viewport-state-v1/qualification.test.mjs test/renderer-data-profile-v1/revision3.test.mjs
+
+
+> @loomrealm/foundation@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/wire@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/platform-ports@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/runtime-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/renderer-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/data@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/subsystem@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/renderer@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: V-04/P3-02: recognized viewport schema/direction �?viewport; invalid JSON/unknown �?profile; local invalid �?local-fatal
+ok 1 - V-04/P3-02: recognized viewport schema/direction �?viewport; invalid JSON/unknown �?profile; local invalid �?local-fatal
+  ---
+  duration_ms: 16.3989
+  ...
+# Subtest: V-05: A→B→A while inFlight cancels B and does not resend A
+ok 2 - V-05: A→B→A while inFlight cancels B and does not resend A
+  ---
+  duration_ms: 3.3309
+  ...
+# Subtest: V-06/P3-05: admitted FIFO, pending latest, burst coalesce, concurrent Input ok
+ok 3 - V-06/P3-05: admitted FIFO, pending latest, burst coalesce, concurrent Input ok
+  ---
+  duration_ms: 106.3782
+  ...
+# Subtest: V-07: terminal/retire fences old settle; fresh peer has independent baseline
+ok 4 - V-07: terminal/retire fences old settle; fresh peer has independent baseline
+  ---
+  duration_ms: 2.9766
+  ...
+# Subtest: P3-01: viewport.state only Renderer→Subsystem; reverse is viewport fatal
+ok 5 - P3-01: viewport.state only Renderer→Subsystem; reverse is viewport fatal
+  ---
+  duration_ms: 0.7558
+  ...
+# Subtest: C-01: publishState exact-own validation; getter/Proxy never sync-leak
+ok 6 - C-01: publishState exact-own validation; getter/Proxy never sync-leak
+  ---
+  duration_ms: 4.4448
+  ...
+# Subtest: C-01: invalid while inFlight/idle same-size cannot be swallowed
+ok 7 - C-01: invalid while inFlight/idle same-size cannot be swallowed
+  ---
+  duration_ms: 4.6669
+  ...
+# Subtest: V-01: normalize trusted raw samples; ignore illegal; no getter reads
+ok 8 - V-01: normalize trusted raw samples; ignore illegal; no getter reads
+  ---
+  duration_ms: 2.7409
+  ...
+# Subtest: V-02: sync bootstrap sample and deferred first measurable sample
+ok 9 - V-02: sync bootstrap sample and deferred first measurable sample
+  ---
+  duration_ms: 23.3768
+  ...
+# Subtest: V-03: start failure local; late old callback inert after participant replace
+ok 10 - V-03: start failure local; late old callback inert after participant replace
+  ---
+  duration_ms: 6.464
+  ...
+# Subtest: V-08: same participant two peers each get baseline; source not restarted on reconnect
+ok 11 - V-08: same participant two peers each get baseline; source not restarted on reconnect
+  ---
+  duration_ms: 8.3729
+  ...
+# Subtest: C-03: extra symbol own-key sample ignored; getter not executed
+ok 12 - C-03: extra symbol own-key sample ignored; getter not executed
+  ---
+  duration_ms: 0.6082
+  ...
+# Subtest: V-09: sync initial, getter-before-callback, equal suppress, detached + host wire
+ok 13 - V-09: sync initial, getter-before-callback, equal suppress, detached + host wire
+  ---
+  duration_ms: 28.2678
+  ...
+# Subtest: V-10: listener throw/reject contained; reentrant subscribe/unsubscribe
+ok 14 - V-10: listener throw/reject contained; reentrant subscribe/unsubscribe
+  ---
+  duration_ms: 1.8361
+  ...
+# Subtest: V-11: Data loss retains size; equal fresh baseline suppresses; different notifies
+ok 15 - V-11: Data loss retains size; equal fresh baseline suppresses; different notifies
+  ---
+  duration_ms: 8.6718
+  ...
+# Subtest: V-12: post-terminal subscribe is inert without initial callback
+ok 16 - V-12: post-terminal subscribe is inert without initial callback
+  ---
+  duration_ms: 4.0808
+  ...
+# Subtest: V-13: viewport updates independent of Frame/InputTarget changes
+ok 17 - V-13: viewport updates independent of Frame/InputTarget changes
+  ---
+  duration_ms: 12.4966
+  ...
+# Subtest: C-02: thenable then-getter throw isolated with sync throw and Promise.reject
+ok 18 - C-02: thenable then-getter throw isolated with sync throw and Promise.reject
+  ---
+  duration_ms: 1.8616
+  ...
+# Subtest: P3-01: /1 four children; viewport.state Renderer→Subsystem only
+ok 19 - P3-01: /1 four children; viewport.state Renderer→Subsystem only
+  ---
+  duration_ms: 14.7509
+  ...
+# Subtest: P3-02: invalid JSON→profile; recognized viewport violations→viewport; local invalid→local-fatal
+ok 20 - P3-02: invalid JSON→profile; recognized viewport violations→viewport; local invalid→local-fatal
+  ---
+  duration_ms: 6.6586
+  ...
+# Subtest: P3-03: one reader dispatches a valid viewport unit exactly once
+ok 21 - P3-03: one reader dispatches a valid viewport unit exactly once
+  ---
+  duration_ms: 3.2462
+  ...
+# Subtest: P3-04: single serialized writer FIFO and concurrency ≤ 1 across Input and Viewport
+ok 22 - P3-04: single serialized writer FIFO and concurrency ≤ 1 across Input and Viewport
+  ---
+  duration_ms: 1.5709
+  ...
+# Subtest: P3-05: bounded viewport burst with concurrent Input and Render traffic
+ok 23 - P3-05: bounded viewport burst with concurrent Input and Render traffic
+  ---
+  duration_ms: 122.3857
+  ...
+# Subtest: P3-06: fresh peers republish equal baseline; old pending never migrates
+ok 24 - P3-06: fresh peers republish equal baseline; old pending never migrates
+  ---
+  duration_ms: 4.8239
+  ...
+# Subtest: P3-07: terminal families exact, first-wins, retire only Data
+ok 25 - P3-07: terminal families exact, first-wins, retire only Data
+  ---
+  duration_ms: 2.8975
+  ...
+# Subtest: P3-08: revision2 + Input/Render child suites run on the same final SHA (marker)
+ok 26 - P3-08: revision2 + Input/Render child suites run on the same final SHA (marker)
+  ---
+  duration_ms: 0.3053
+  ...
+# Subtest: P3-09: holder-driven real peers deliver viewport.state to a Subsystem handler
+ok 27 - P3-09: holder-driven real peers deliver viewport.state to a Subsystem handler
+  ---
+  duration_ms: 8.3003
+  ...
+# Subtest: V-14: sync initial sample inside start(emit) + latest-only staging; deferred first sample
+ok 28 - V-14: sync initial sample inside start(emit) + latest-only staging; deferred first sample
+  ---
+  duration_ms: 49.581
+  ...
+# Subtest: V-14: blocked writer + 10000 size changes with real Input/Render; admission/wire/concurrency/FIFO
+ok 29 - V-14: blocked writer + 10000 size changes with real Input/Render; admission/wire/concurrency/FIFO
+  ---
+  duration_ms: 124.241
+  ...
+# Subtest: V-14: same-generation reconnect resends wire baseline without duplicate business callback
+ok 30 - V-14: same-generation reconnect resends wire baseline without duplicate business callback
+  ---
+  duration_ms: 7.9766
+  ...
+# Subtest: V-14: new generation installs fresh peers with independent cursors
+ok 31 - V-14: new generation installs fresh peers with independent cursors
+  ---
+  duration_ms: 7.4914
+  ...
+# Subtest: V-14: Control participant replace fences old source/peer; Viewport object identity stable
+ok 32 - V-14: Control participant replace fences old source/peer; Viewport object identity stable
+  ---
+  duration_ms: 9.1279
+  ...
+# Subtest: V-14: Runtime terminal — no new callbacks; subscribe inert; current retained
+ok 33 - V-14: Runtime terminal — no new callbacks; subscribe inert; current retained
+  ---
+  duration_ms: 5.2494
+  ...
+# Subtest: V-01: trusted raw sample normalize; illegal ignored; getter not executed
+ok 34 - V-01: trusted raw sample normalize; illegal ignored; getter not executed
+  ---
+  duration_ms: 3.3737
+  ...
+# Subtest: V-02: sync bootstrap sample in start(emit) reaches wire as floor-normalized baseline
+ok 35 - V-02: sync bootstrap sample in start(emit) reaches wire as floor-normalized baseline
+  ---
+  duration_ms: 20.4441
+  ...
+# Subtest: V-03: start throw marks local unavailable; participant replace fences old emit
+ok 36 - V-03: start throw marks local unavailable; participant replace fences old emit
+  ---
+  duration_ms: 7.6049
+  ...
+# Subtest: V-04: inbound families + trusted local invalid → local-fatal
+ok 37 - V-04: inbound families + trusted local invalid → local-fatal
+  ---
+  duration_ms: 1.9144
+  ...
+# Subtest: V-05: inFlight A then B→A cancels B and does not resend A
+ok 38 - V-05: inFlight A then B→A cancels B and does not resend A
+  ---
+  duration_ms: 1.2446
+  ...
+# Subtest: V-06: burst coalesce under shared writer with concurrent Input; concurrency ≤ 1
+ok 39 - V-06: burst coalesce under shared writer with concurrent Input; concurrency ≤ 1
+  ---
+  duration_ms: 91.8885
+  ...
+# Subtest: V-07: terminal/retire fences old settle; fresh peer independent baseline
+ok 40 - V-07: terminal/retire fences old settle; fresh peer independent baseline
+  ---
+  duration_ms: 1.487
+  ...
+# Subtest: V-08: same participant two Data peers each receive an independent baseline
+ok 41 - V-08: same participant two Data peers each receive an independent baseline
+  ---
+  duration_ms: 2.904
+  ...
+# Subtest: V-09: sync initial, getter-before-callback, equal suppress, detached size
+ok 42 - V-09: sync initial, getter-before-callback, equal suppress, detached size
+  ---
+  duration_ms: 0.6828
+  ...
+# Subtest: V-10: listener sync throw / Promise.reject / then-getter throw isolated
+ok 43 - V-10: listener sync throw / Promise.reject / then-getter throw isolated
+  ---
+  duration_ms: 1.757
+  ...
+# Subtest: V-11: equal size after Data peer refresh suppresses business notification
+ok 44 - V-11: equal size after Data peer refresh suppresses business notification
+  ---
+  duration_ms: 0.3315
+  ...
+# Subtest: V-12: post-terminal subscribe is inert without initial callback
+ok 45 - V-12: post-terminal subscribe is inert without initial callback
+  ---
+  duration_ms: 0.1645
+  ...
+# Subtest: V-13: viewport updates remain independent of Frame lifecycle
+ok 46 - V-13: viewport updates remain independent of Frame lifecycle
+  ---
+  duration_ms: 11.6454
+  ...
+# Subtest: V-14: compact real vertical — fake source → holder → peers → host → scope.viewport
+ok 47 - V-14: compact real vertical — fake source → holder → peers → host → scope.viewport
+  ---
+  duration_ms: 5.1687
+  ...
+1..47
+# tests 47
+# suites 0
+# pass 47
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 503.3297

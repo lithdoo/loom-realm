@@ -1,0 +1,10 @@
+docs-check-links exit=0 log=evidence/viewport-core-optimization/docs-check-links.log
+test-data exit=0 log=evidence/viewport-core-optimization/test-data.log
+test-subsystem exit=0 log=evidence/viewport-core-optimization/test-subsystem.log
+test-renderer exit=0 log=evidence/viewport-core-optimization/test-renderer.log
+test-viewport exit=0 log=evidence/viewport-core-optimization/test-viewport.log
+test-m10 exit=0 log=evidence/viewport-core-optimization/test-m10.log
+test-m11 exit=0 log=evidence/viewport-core-optimization/test-m11.log
+test-m13 exit=0 log=evidence/viewport-core-optimization/test-m13.log
+build-desktop-stack exit=0 log=evidence/viewport-core-optimization/build-desktop-stack.log
+test-regression exit=0 log=evidence/viewport-core-optimization/test-regression.log

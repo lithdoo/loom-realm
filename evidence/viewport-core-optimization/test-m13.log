@@ -1,0 +1,47 @@
+
+> test:m13:qualification
+> npm run build -w @loomrealm/renderer && npm run test:m13:qualification:run
+
+
+> @loomrealm/renderer@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> test:m13:qualification:run
+> node --test test/web-presentation-v1/qualification.test.mjs
+
+TAP version 13
+# Subtest: real Chromium proves ordered bootstrap, Custom Element registration, load barrier and evaluation failure
+ok 1 - real Chromium proves ordered bootstrap, Custom Element registration, load barrier and evaluation failure
+  ---
+  duration_ms: 2669.1959
+  ...
+# Subtest: real Chromium proves Projector identity, receiver ordering, currentness and permanent structural freeze
+ok 2 - real Chromium proves Projector identity, receiver ordering, currentness and permanent structural freeze
+  ---
+  duration_ms: 933.8231
+  ...
+# Subtest: real Control/Data/Store commits drive the real Chromium Projector with per-subsystem currentness
+ok 3 - real Control/Data/Store commits drive the real Chromium Projector with per-subsystem currentness
+  ---
+  duration_ms: 1135.9794
+  ...
+# Subtest: real Chromium proves structural data delivery and independent optional receivers
+ok 4 - real Chromium proves structural data delivery and independent optional receivers
+  ---
+  duration_ms: 1090.3445
+  ...
+# Subtest: real Chromium business context reaches Renderer-private resource bytes and dies with Window presentation
+ok 5 - real Chromium business context reaches Renderer-private resource bytes and dies with Window presentation
+  ---
+  duration_ms: 1108.2479
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8224.1114

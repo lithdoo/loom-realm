@@ -1,0 +1,5 @@
+
+> docs:check-links
+> node scripts/run-python.mjs scripts/check-doc-links.py
+
+Documentation links OK: 533 relative link(s) across 103 Markdown file(s).

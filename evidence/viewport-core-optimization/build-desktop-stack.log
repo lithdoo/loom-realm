@@ -1,0 +1,64 @@
+
+> build:desktop-stack
+> npm run build -w @loomrealm/fsdb -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/main -w @loomrealm/game-launcher-hostra -w @loomrealm/desktop
+
+
+> @loomrealm/fsdb@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/foundation@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/wire@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/game-package@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/platform-ports@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/runtime-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/renderer-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/data@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/subsystem@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/renderer@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/main@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/game-launcher-hostra@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/desktop@0.1.0-alpha.0 prebuild
+> npm run build -w @loomrealm/fsdb
+
+
+> @loomrealm/fsdb@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/desktop@0.1.0-alpha.0 build
+> tsc -p tsconfig.json && node scripts/build.mjs
+

@@ -1,0 +1,130 @@
+
+> test:m10:qualification
+> npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer && npm run test:m10:qualification:run
+
+
+> @loomrealm/foundation@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/wire@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/platform-ports@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/runtime-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/renderer-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/data@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/subsystem@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/renderer@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> test:m10:qualification:run
+> node --test test/user-input-v1/qualification.test.mjs
+
+TAP version 13
+# Subtest: wire-schema-limits-channel: closed wire schema, byte/depth limits, and exact channel grammar
+ok 1 - wire-schema-limits-channel: closed wire schema, byte/depth limits, and exact channel grammar
+  ---
+  duration_ms: 282.2846
+  ...
+# Subtest: keyboard: standard keyboard state/event payload matrix
+ok 2 - keyboard: standard keyboard state/event payload matrix
+  ---
+  duration_ms: 5.597
+  ...
+# Subtest: pointer: standard pointer state/event payload matrix
+ok 3 - pointer: standard pointer state/event payload matrix
+  ---
+  duration_ms: 23.2298
+  ...
+# Subtest: gamepad: standard gamepad state/event payload matrix
+ok 4 - gamepad: standard gamepad state/event payload matrix
+  ---
+  duration_ms: 26.0116
+  ...
+# Subtest: custom: custom channels remain bounded JSON objects with State/Event semantics
+ok 5 - custom: custom channels remain bounded JSON objects with State/Event semantics
+  ---
+  duration_ms: 4.5178
+  ...
+# Subtest: interest-author-usage: full Registry replacement, canonical limits, and atomic author updates
+ok 6 - interest-author-usage: full Registry replacement, canonical limits, and atomic author updates
+  ---
+  duration_ms: 73.7635
+  ...
+# Subtest: lifetime-fresh-carrier: Frame, Activation, and Data carrier lifetimes remain independent
+ok 7 - lifetime-fresh-carrier: Frame, Activation, and Data carrier lifetimes remain independent
+  ---
+  duration_ms: 3.6714
+  ...
+# Subtest: authority: Effective input is the conjunction of current authority facts
+ok 8 - authority: Effective input is the conjunction of current authority facts
+  ---
+  duration_ms: 1.4154
+  ...
+# Subtest: mutation-gate: revision 2 retains State, drops Event, and converges only the current Activation
+ok 9 - mutation-gate: revision 2 retains State, drops Event, and converges only the current Activation
+  ---
+  duration_ms: 1.6124
+  ...
+# Subtest: state-event-reset: State current truth, Event future-only, and Reset clearing
+ok 10 - state-event-reset: State current truth, Event future-only, and Reset clearing
+  ---
+  duration_ms: 3.109
+  ...
+# Subtest: barrier-backpressure: causal ordering, global barriers, and finite publisher queues
+ok 11 - barrier-backpressure: causal ordering, global barriers, and finite publisher queues
+  ---
+  duration_ms: 12.7897
+  ...
+# Subtest: input-target-replacement: lease revocation and same-carrier Reset ordering
+ok 12 - input-target-replacement: lease revocation and same-carrier Reset ordering
+  ---
+  duration_ms: 2.2154
+  ...
+# Subtest: producer: producer loss/return and authority epoch isolation
+ok 13 - producer: producer loss/return and authority epoch isolation
+  ---
+  duration_ms: 2.127
+  ...
+# Subtest: listener: listener union, retained baselines, snapshots, and business isolation
+ok 14 - listener: listener union, retained baselines, snapshots, and business isolation
+  ---
+  duration_ms: 2.784
+  ...
+# Subtest: failure: protocol-invalid retires Data while stale and business failures stay local
+ok 15 - failure: protocol-invalid retires Data while stale and business failures stay local
+  ---
+  duration_ms: 8.3572
+  ...
+# Subtest: fixtureSetRevision 2 catalog and executable fixture evidence have exact coverage
+ok 16 - fixtureSetRevision 2 catalog and executable fixture evidence have exact coverage
+  ---
+  duration_ms: 0.792
+  ...
+1..16
+# tests 16
+# suites 0
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 603.3418

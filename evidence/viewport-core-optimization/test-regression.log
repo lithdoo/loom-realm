@@ -1,0 +1,2232 @@
+
+> test:regression
+> npm test -w @loomrealm/fsdb -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/main -w @loomrealm/game-launcher-hostra -w @loomrealm/fsdb-http -w @loomrealm/desktop
+
+
+> @loomrealm/fsdb@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/fsdb@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: core exposes a detached deterministic descriptor and fresh snapshot identity
+ok 1 - core exposes a detached deterministic descriptor and fresh snapshot identity
+  ---
+  duration_ms: 30.2997
+  ...
+# Subtest: ordinary entries and metadata use one immutable logical snapshot
+ok 2 - ordinary entries and metadata use one immutable logical snapshot
+  ---
+  duration_ms: 18.2886
+  ...
+# Subtest: validation, abort, source drift, and close drain fail closed
+ok 3 - validation, abort, source drift, and close drain fail closed
+  ---
+  duration_ms: 29.1789
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 187.1111
+
+> @loomrealm/foundation@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/foundation@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: either endpoint orderly-closes the whole duplex pair idempotently
+ok 1 - either endpoint orderly-closes the whole duplex pair idempotently
+  ---
+  duration_ms: 1.9198
+  ...
+# Subtest: loss terminates both endpoints and preserves cause identity
+ok 2 - loss terminates both endpoints and preserves cause identity
+  ---
+  duration_ms: 0.2506
+  ...
+# Subtest: first terminal fact wins across close and loss
+ok 3 - first terminal fact wins across close and loss
+  ---
+  duration_ms: 0.2954
+  ...
+# Subtest: package root does not expose testing implementation
+ok 4 - package root does not expose testing implementation
+  ---
+  duration_ms: 6.0463
+  ...
+# Subtest: package has zero runtime dependencies and platform-neutral source
+ok 5 - package has zero runtime dependencies and platform-neutral source
+  ---
+  duration_ms: 4.3712
+  ...
+# Subtest: opaque strings round-trip exactly without interpretation or normalization
+ok 6 - opaque strings round-trip exactly without interpretation or normalization
+  ---
+  duration_ms: 2.5487
+  ...
+# Subtest: both directions preserve independent invocation order and message boundaries
+ok 7 - both directions preserve independent invocation order and message boundaries
+  ---
+  duration_ms: 0.6062
+  ...
+# Subtest: send always returns a Promise and accepts exactly once before peer consumption
+ok 8 - send always returns a Promise and accepts exactly once before peer consumption
+  ---
+  duration_ms: 0.4026
+  ...
+# Subtest: one logical reader owns the inbound stream
+ok 9 - one logical reader owns the inbound stream
+  ---
+  duration_ms: 0.6222
+  ...
+# Subtest: terminal state rejects new sends without creating inbound messages
+ok 10 - terminal state rejects new sends without creating inbound messages
+  ---
+  duration_ms: 0.7698
+  ...
+# Subtest: an invoked send linearizes before a following close
+ok 11 - an invoked send linearizes before a following close
+  ---
+  duration_ms: 0.2621
+  ...
+# Subtest: queued inbound messages drain before normal iterator completion on close
+ok 12 - queued inbound messages drain before normal iterator completion on close
+  ---
+  duration_ms: 0.3712
+  ...
+# Subtest: queued inbound messages drain before normal iterator completion on loss
+ok 13 - queued inbound messages drain before normal iterator completion on loss
+  ---
+  duration_ms: 0.1958
+  ...
+# Subtest: a pending iterator completes normally when the carrier terminates
+ok 14 - a pending iterator completes normally when the carrier terminates
+  ---
+  duration_ms: 0.4754
+  ...
+# Subtest: transport terminal is not thrown into the application message stream
+ok 15 - transport terminal is not thrown into the application message stream
+  ---
+  duration_ms: 0.5895
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 145.1929
+
+> @loomrealm/wire@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/wire@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: accepts exact required keys and any optional-key subset
+ok 1 - accepts exact required keys and any optional-key subset
+  ---
+  duration_ms: 3.373
+  ...
+# Subtest: reports missing and unknown members at stable paths
+ok 2 - reports missing and unknown members at stable paths
+  ---
+  duration_ms: 2.5409
+  ...
+# Subtest: an inherited property never satisfies a required own member
+ok 3 - an inherited property never satisfies a required own member
+  ---
+  duration_ms: 0.3512
+  ...
+# Subtest: error paths are immutable snapshots and messages are not asserted
+ok 4 - error paths are immutable snapshots and messages are not asserted
+  ---
+  duration_ms: 0.27
+  ...
+# Subtest: decodes requests with string, safe numeric, and generic null ids
+ok 5 - decodes requests with string, safe numeric, and generic null ids
+  ---
+  duration_ms: 4.0574
+  ...
+# Subtest: notification is defined by id absence, not an id:null value
+ok 6 - notification is defined by id absence, not an id:null value
+  ---
+  duration_ms: 0.7272
+  ...
+# Subtest: accepts object/array params and rejects primitive params
+ok 7 - accepts object/array params and rejects primitive params
+  ---
+  duration_ms: 1.3628
+  ...
+# Subtest: decodes success and exact error responses
+ok 8 - decodes success and exact error responses
+  ---
+  duration_ms: 1.4707
+  ...
+# Subtest: requires result and response id and enforces result/error exclusion
+ok 9 - requires result and response id and enforces result/error exclusion
+  ---
+  duration_ms: 0.5762
+  ...
+# Subtest: enforces exact version and closed envelope/error shapes
+ok 10 - enforces exact version and closed envelope/error shapes
+  ---
+  duration_ms: 0.5787
+  ...
+# Subtest: numeric ids and error codes must be safe integers
+ok 11 - numeric ids and error codes must be safe integers
+  ---
+  duration_ms: 2.2221
+  ...
+# Subtest: accepts opaque method strings without LoomRealm interpretation
+ok 12 - accepts opaque method strings without LoomRealm interpretation
+  ---
+  duration_ms: 0.3863
+  ...
+# Subtest: single-message decoder rejects JSON-RPC Batch arrays
+ok 13 - single-message decoder rejects JSON-RPC Batch arrays
+  ---
+  duration_ms: 0.8659
+  ...
+# Subtest: missing own jsonrpc never executes an inherited getter
+ok 14 - missing own jsonrpc never executes an inherited getter
+  ---
+  duration_ms: 1.9864
+  ...
+# Subtest: parses top-level primitives, objects, arrays, and surrounding whitespace
+ok 15 - parses top-level primitives, objects, arrays, and surrounding whitespace
+  ---
+  duration_ms: 2.7866
+  ...
+# Subtest: distinguishes JSON syntax failure from parsed value-model failure
+ok 16 - distinguishes JSON syntax failure from parsed value-model failure
+  ---
+  duration_ms: 0.7276
+  ...
+# Subtest: stringify validates before native silent conversion
+ok 17 - stringify validates before native silent conversion
+  ---
+  duration_ms: 0.4908
+  ...
+# Subtest: stringify round-trips JSON value semantics including shared references
+ok 18 - stringify round-trips JSON value semantics including shared references
+  ---
+  duration_ms: 0.5532
+  ...
+# Subtest: stringify ignores inherited toJSON hooks
+ok 19 - stringify ignores inherited toJSON hooks
+  ---
+  duration_ms: 1.4139
+  ...
+# Subtest: stringify handles very deep inputs without recursive serialization
+ok 20 - stringify handles very deep inputs without recursive serialization
+  ---
+  duration_ms: 56.5323
+  ...
+# Subtest: accepts every JSON primitive including negative zero
+ok 21 - accepts every JSON primitive including negative zero
+  ---
+  duration_ms: 1.6953
+  ...
+# Subtest: rejects non-JSON and non-finite primitive values
+ok 22 - rejects non-JSON and non-finite primitive values
+  ---
+  duration_ms: 0.9531
+  ...
+# Subtest: accepts ordinary and null-prototype objects
+ok 23 - accepts ordinary and null-prototype objects
+  ---
+  duration_ms: 0.4879
+  ...
+# Subtest: rejects class instances and built-in/exotic object shapes
+ok 24 - rejects class instances and built-in/exotic object shapes
+  ---
+  duration_ms: 0.2769
+  ...
+# Subtest: rejects accessors without invoking getters
+ok 25 - rejects accessors without invoking getters
+  ---
+  duration_ms: 0.2082
+  ...
+# Subtest: rejects symbol and non-enumerable application properties
+ok 26 - rejects symbol and non-enumerable application properties
+  ---
+  duration_ms: 0.9048
+  ...
+# Subtest: accepts dense arrays and rejects sparse or augmented arrays
+ok 27 - accepts dense arrays and rejects sparse or augmented arrays
+  ---
+  duration_ms: 0.45
+  ...
+# Subtest: rejects cycles at the precise nested path but accepts shared children
+ok 28 - rejects cycles at the precise nested path but accepts shared children
+  ---
+  duration_ms: 1.2169
+  ...
+# Subtest: validates a shared acyclic subgraph only once
+ok 29 - validates a shared acyclic subgraph only once
+  ---
+  duration_ms: 0.502
+  ...
+# Subtest: validation keeps deep successful traversal near-linear
+ok 30 - validation keeps deep successful traversal near-linear
+  ---
+  duration_ms: 186.8502
+  ...
+# Subtest: revoked proxies fail closed
+ok 31 - revoked proxies fail closed
+  ---
+  duration_ms: 0.9709
+  ...
+# Subtest: primitive assertion helpers enforce only their representation fact
+ok 32 - primitive assertion helpers enforce only their representation fact
+  ---
+  duration_ms: 0.8418
+  ...
+# Subtest: measures standard UTF-8 bytes rather than UTF-16 length
+ok 33 - measures standard UTF-8 bytes rather than UTF-16 length
+  ---
+  duration_ms: 1.5519
+  ...
+# Subtest: uses the frozen container-count depth definition
+ok 34 - uses the frozen container-count depth definition
+  ---
+  duration_ms: 1.0461
+  ...
+# Subtest: measures very deep input without call-stack overflow
+ok 35 - measures very deep input without call-stack overflow
+  ---
+  duration_ms: 68.1725
+  ...
+# Subtest: package has exactly the frozen runtime root exports
+ok 36 - package has exactly the frozen runtime root exports
+  ---
+  duration_ms: 19.5953
+  ...
+# Subtest: package has zero runtime dependencies and only a root export
+ok 37 - package has zero runtime dependencies and only a root export
+  ---
+  duration_ms: 1.9708
+  ...
+# Subtest: source has no Foundation, Node, platform, carrier, or domain imports
+ok 38 - source has no Foundation, Node, platform, carrier, or domain imports
+  ---
+  duration_ms: 9.5351
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 38
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 426.0739
+
+> @loomrealm/game-package@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/game-package@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: GamePackageError copies and freezes its structural path
+ok 1 - GamePackageError copies and freezes its structural path
+  ---
+  duration_ms: 2.0156
+  ...
+# Subtest: expected invalid inputs never leak Wire errors
+ok 2 - expected invalid inputs never leak Wire errors
+  ---
+  duration_ms: 2.7129
+  ...
+# Subtest: accepts exact non-empty keys without normalization and preserves order
+ok 3 - accepts exact non-empty keys without normalization and preserves order
+  ---
+  duration_ms: 5.3493
+  ...
+# Subtest: accepts the 256-byte key boundary
+ok 4 - accepts the 256-byte key boundary
+  ---
+  duration_ms: 0.8088
+  ...
+# Subtest: rejects empty, non-string, oversized, and ill-formed Unicode keys
+ok 5 - rejects empty, non-string, oversized, and ill-formed Unicode keys
+  ---
+  duration_ms: 2.6116
+  ...
+# Subtest: reports the later duplicate only after descriptor validation
+ok 6 - reports the later duplicate only after descriptor validation
+  ---
+  duration_ms: 1.0465
+  ...
+# Subtest: requires the initial target to be declared
+ok 7 - requires the initial target to be declared
+  ---
+  duration_ms: 0.4912
+  ...
+# Subtest: classifies format versions exactly
+ok 8 - classifies format versions exactly
+  ---
+  duration_ms: 0.9108
+  ...
+# Subtest: package has exactly the frozen runtime root exports
+ok 9 - package has exactly the frozen runtime root exports
+  ---
+  duration_ms: 36.9469
+  ...
+# Subtest: package has only the Wire runtime dependency and a root export
+ok 10 - package has only the Wire runtime dependency and a root export
+  ---
+  duration_ms: 2.1015
+  ...
+# Subtest: source remains platform-neutral and does not acquire runtime authority
+ok 11 - source remains platform-neutral and does not acquire runtime authority
+  ---
+  duration_ms: 2.6041
+  ...
+# Subtest: declarations expose the complete frozen type surface
+ok 12 - declarations expose the complete frozen type surface
+  ---
+  duration_ms: 3.3338
+  ...
+# Subtest: parses a valid minimal Game Entry
+ok 13 - parses a valid minimal Game Entry
+  ---
+  duration_ms: 4.8601
+  ...
+# Subtest: maps malformed JSON and runtime non-string input
+ok 14 - maps malformed JSON and runtime non-string input
+  ---
+  duration_ms: 1.2484
+  ...
+# Subtest: follows JSON.parse duplicate-member semantics
+ok 15 - follows JSON.parse duplicate-member semantics
+  ---
+  duration_ms: 0.3858
+  ...
+# Subtest: requires closed top-level, initial, and descriptor schemas
+ok 16 - requires closed top-level, initial, and descriptor schemas
+  ---
+  duration_ms: 6.8019
+  ...
+# Subtest: reports required members before unknown members in normative order
+ok 17 - reports required members before unknown members in normative order
+  ---
+  duration_ms: 0.3997
+  ...
+# Subtest: platform-looking names remain ordinary data inside initial.input
+ok 18 - platform-looking names remain ordinary data inside initial.input
+  ---
+  duration_ms: 0.8692
+  ...
+# Subtest: missing own schema members never read inherited getters
+ok 19 - missing own schema members never read inherited getters
+  ---
+  duration_ms: 0.6013
+  ...
+# Subtest: maps representation failures before schema failures
+ok 20 - maps representation failures before schema failures
+  ---
+  duration_ms: 0.771
+  ...
+# Subtest: rejects invalid container kinds at their structural paths
+ok 21 - rejects invalid container kinds at their structural paths
+  ---
+  duration_ms: 0.7155
+  ...
+# Subtest: rejects accessor, sparse, exotic, and cyclic input without invoking accessors
+ok 22 - rejects accessor, sparse, exotic, and cyclic input without invoking accessors
+  ---
+  duration_ms: 0.946
+  ...
+# Subtest: returns a detached deeply frozen snapshot without freezing the source
+ok 23 - returns a detached deeply frozen snapshot without freezing the source
+  ---
+  duration_ms: 4.4463
+  ...
+# Subtest: preserves negative zero and prototype-looking data members safely
+ok 24 - preserves negative zero and prototype-looking data members safely
+  ---
+  duration_ms: 2.1231
+  ...
+# Subtest: handles very deep input without recursive validation or copying
+ok 25 - handles very deep input without recursive validation or copying
+  ---
+  duration_ms: 150.4236
+  ...
+# Subtest: does not exponentially expand a shared acyclic graph
+ok 26 - does not exponentially expand a shared acyclic graph
+  ---
+  duration_ms: 1.1044
+  ...
+# Subtest: does not invoke inherited toJSON
+ok 27 - does not invoke inherited toJSON
+  ---
+  duration_ms: 0.6162
+  ...
+1..27
+# tests 27
+# suites 0
+# pass 27
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 399.7047
+
+> @loomrealm/platform-ports@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/platform-ports@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: M7 ports expose opaque material and candidate carrier shapes without legacy alias
+ok 1 - M7 ports expose opaque material and candidate carrier shapes without legacy alias
+  ---
+  duration_ms: 5.4505
+  ...
+# Subtest: M8 exposes only the two exact role-facing Data Binding seams
+ok 2 - M8 exposes only the two exact role-facing Data Binding seams
+  ---
+  duration_ms: 1.4512
+  ...
+# Subtest: M9 exposes the exact Main-to-Platform Data authority sink
+ok 3 - M9 exposes the exact Main-to-Platform Data authority sink
+  ---
+  duration_ms: 1.0704
+  ...
+# Subtest: platform-ports keeps its one-way Foundation-only runtime dependency
+ok 4 - platform-ports keeps its one-way Foundation-only runtime dependency
+  ---
+  duration_ms: 1.5066
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 112.0502
+
+> @loomrealm/runtime-control@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/runtime-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: hello, ordered status, bidirectional Frame RPC, and shutdown form a closed session
+ok 1 - hello, ordered status, bidirectional Frame RPC, and shutdown form a closed session
+  ---
+  duration_ms: 17.3469
+  ...
+# Subtest: unsupported protocol is rejected before authentication
+ok 2 - unsupported protocol is rejected before authentication
+  ---
+  duration_ms: 1.3438
+  ...
+# Subtest: a second subsystem mutation is local-fatal without a second send
+ok 3 - a second subsystem mutation is local-fatal without a second send
+  ---
+  duration_ms: 3.082
+  ...
+# Subtest: root has exactly the frozen runtime exports
+ok 4 - root has exactly the frozen runtime exports
+  ---
+  duration_ms: 51.7719
+  ...
+# Subtest: manifest keeps the frozen dependency and export boundary
+ok 5 - manifest keeps the frozen dependency and export boundary
+  ---
+  duration_ms: 3.7322
+  ...
+# Subtest: declarations expose exactly the frozen named surface
+ok 6 - declarations expose exactly the frozen named surface
+  ---
+  duration_ms: 4.4542
+  ...
+# Subtest: source remains transport- and platform-neutral
+ok 7 - source remains transport- and platform-neutral
+  ---
+  duration_ms: 3.5578
+  ...
+# Subtest: duplicate hello versions are rejected before carrier ownership
+ok 8 - duplicate hello versions are rejected before carrier ownership
+  ---
+  duration_ms: 8.1672
+  ...
+# Subtest: unpaired surrogate and cyclic business data fail closed locally
+ok 9 - unpaired surrogate and cyclic business data fail closed locally
+  ---
+  duration_ms: 7.4371
+  ...
+# Subtest: outbound shared DAG is measured by serialized occurrence
+ok 10 - outbound shared DAG is measured by serialized occurrence
+  ---
+  duration_ms: 5.006
+  ...
+# Subtest: deep input is rejected iteratively without stack overflow
+ok 11 - deep input is rejected iteratively without stack overflow
+  ---
+  duration_ms: 1.3547
+  ...
+# Subtest: syntax and envelope failures map to distinct fatal diagnostics
+ok 12 - syntax and envelope failures map to distinct fatal diagnostics
+  ---
+  duration_ms: 5.531
+  ...
+# Subtest: responses are correlated while an ordered inbound handler is awaiting
+ok 13 - responses are correlated while an ordered inbound handler is awaiting
+  ---
+  duration_ms: 8.4545
+  ...
+# Subtest: response barrier blocks the next ordered dispatch until afterResponse completes
+ok 14 - response barrier blocks the next ordered dispatch until afterResponse completes
+  ---
+  duration_ms: 10.1275
+  ...
+# Subtest: deadline starts before a stalled send and timeout wins exactly once
+ok 15 - deadline starts before a stalled send and timeout wins exactly once
+  ---
+  duration_ms: 2.3441
+  ...
+# Subtest: remote request IDs are positive and strictly increasing
+ok 16 - remote request IDs are positive and strictly increasing
+  ---
+  duration_ms: 1.0234
+  ...
+# Subtest: invalid correlated response remains pending until terminal cleanup settles it
+ok 17 - invalid correlated response remains pending until terminal cleanup settles it
+  ---
+  duration_ms: 0.94
+  ...
+# Subtest: Frame profile-state errors settle as terminal, never as FrameRpcErrorData
+ok 18 - Frame profile-state errors settle as terminal, never as FrameRpcErrorData
+  ---
+  duration_ms: 0.8969
+  ...
+# Subtest: terminal between Response acceptance and continuation skips afterResponse
+ok 19 - terminal between Response acceptance and continuation skips afterResponse
+  ---
+  duration_ms: 2.0231
+  ...
+# Subtest: main shutdown intent rejects inbound Frame before stopping status
+ok 20 - main shutdown intent rejects inbound Frame before stopping status
+  ---
+  duration_ms: 1.2482
+  ...
+# Subtest: all seven frozen Frame methods route only to their owning role
+ok 21 - all seven frozen Frame methods route only to their owning role
+  ---
+  duration_ms: 15.762
+  ...
+# Subtest: recoverable Frame errors release the mutation gate
+ok 22 - recoverable Frame errors release the mutation gate
+  ---
+  duration_ms: 2.5713
+  ...
+# Subtest: fatal Frame semantics terminate and stopping requires shutdown authority
+ok 23 - fatal Frame semantics terminate and stopping requires shutdown authority
+  ---
+  duration_ms: 1.7329
+  ...
+# Subtest: failed status prevents every later subsystem Frame send
+ok 24 - failed status prevents every later subsystem Frame send
+  ---
+  duration_ms: 1.1839
+  ...
+# Subtest: FrameFailure.code follows the frozen Frame v1 grammar
+ok 25 - FrameFailure.code follows the frozen Frame v1 grammar
+  ---
+  duration_ms: 1.7572
+  ...
+# Subtest: main shutdown intent blocks new Frame before stopping status
+ok 26 - main shutdown intent blocks new Frame before stopping status
+  ---
+  duration_ms: 2.6951
+  ...
+# Subtest: onShutdown handler may report stopping before its Response
+ok 27 - onShutdown handler may report stopping before its Response
+  ---
+  duration_ms: 3.2951
+  ...
+1..27
+# tests 27
+# suites 0
+# pass 27
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 411.7576
+
+> @loomrealm/renderer-control@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/renderer-control@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: concrete peers perform one-shot hello and lazy initial handoff
+ok 1 - concrete peers perform one-shot hello and lazy initial handoff
+  ---
+  duration_ms: 8.0882
+  ...
+# Subtest: protocol peer rejects unsupported version before authority acceptance
+ok 2 - protocol peer rejects unsupported version before authority acceptance
+  ---
+  duration_ms: 1.6084
+  ...
+# Subtest: renderer peer fail-closes revision regression
+ok 3 - renderer peer fail-closes revision regression
+  ---
+  duration_ms: 2.7664
+  ...
+# Subtest: publication holds one in-flight and only latest pending Snapshot
+ok 4 - publication holds one in-flight and only latest pending Snapshot
+  ---
+  duration_ms: 8.0208
+  ...
+# Subtest: retirement wins once, clears pending, and never starts a post-retirement send
+ok 5 - retirement wins once, clears pending, and never starts a post-retirement send
+  ---
+  duration_ms: 2.8165
+  ...
+# Subtest: package root exposes only peer constructors and exact hello preflight at runtime
+ok 6 - package root exposes only peer constructors and exact hello preflight at runtime
+  ---
+  duration_ms: 2.8296
+  ...
+# Subtest: whole Snapshot validation returns detached frozen exact state
+ok 7 - whole Snapshot validation returns detached frozen exact state
+  ---
+  duration_ms: 3.5743
+  ...
+# Subtest: closed schema and current relations fail closed
+ok 8 - closed schema and current relations fail closed
+  ---
+  duration_ms: 0.5879
+  ...
+# Subtest: exact outbound preflight rejects actual messages beyond one MiB
+ok 9 - exact outbound preflight rejects actual messages beyond one MiB
+  ---
+  duration_ms: 96.123
+  ...
+# Subtest: profile rejects JSON container depth 65
+ok 10 - profile rejects JSON container depth 65
+  ---
+  duration_ms: 1.7509
+  ...
+# Subtest: profile rejects a container with 16,385 members
+ok 11 - profile rejects a container with 16,385 members
+  ---
+  duration_ms: 60.238
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 362.361
+
+> @loomrealm/data@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/data@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: invalid trusted binding fails before claiming the carrier reader
+ok 1 - invalid trusted binding fails before claiming the carrier reader
+  ---
+  duration_ms: 2.0519
+  ...
+# Subtest: one Data peer claims exactly one logical carrier reader
+ok 2 - one Data peer claims exactly one logical carrier reader
+  ---
+  duration_ms: 6.0186
+  ...
+# Subtest: unsorted interest frames are rejected without a canonicalizer
+ok 3 - unsorted interest frames are rejected without a canonicalizer
+  ---
+  duration_ms: 8.2215
+  ...
+# Subtest: unsorted interest channels are rejected without a canonicalizer
+ok 4 - unsorted interest channels are rejected without a canonicalizer
+  ---
+  duration_ms: 0.6402
+  ...
+# Subtest: canonical interest order is accepted
+ok 5 - canonical interest order is accepted
+  ---
+  duration_ms: 1.8999
+  ...
+# Subtest: KeyboardCode runtime acceptance uses the frozen finite set
+ok 6 - KeyboardCode runtime acceptance uses the frozen finite set
+  ---
+  duration_ms: 1.9552
+  ...
+# Subtest: non-JSON custom Input payload is rejected instead of normalized
+ok 7 - non-JSON custom Input payload is rejected instead of normalized
+  ---
+  duration_ms: 0.3879
+  ...
+# Subtest: unknown type fail-closes the current Data peer
+ok 8 - unknown type fail-closes the current Data peer
+  ---
+  duration_ms: 0.5912
+  ...
+# Subtest: message larger than 1 MiB fail-closes as profile protocol-fatal
+ok 9 - message larger than 1 MiB fail-closes as profile protocol-fatal
+  ---
+  duration_ms: 7.2489
+  ...
+# Subtest: JSON depth greater than 64 fail-closes as profile protocol-fatal
+ok 10 - JSON depth greater than 64 fail-closes as profile protocol-fatal
+  ---
+  duration_ms: 1.4809
+  ...
+# Subtest: routes Input and Render over one shared profile connection
+ok 11 - routes Input and Render over one shared profile connection
+  ---
+  duration_ms: 12.0683
+  ...
+# Subtest: wrong-direction inbound message fails the current Data peer closed
+ok 12 - wrong-direction inbound message fails the current Data peer closed
+  ---
+  duration_ms: 0.5926
+  ...
+# Subtest: invalid local message becomes local-fatal without wire emission
+ok 13 - invalid local message becomes local-fatal without wire emission
+  ---
+  duration_ms: 0.4328
+  ...
+# Subtest: shared writer keeps at most one carrier.send pending
+ok 14 - shared writer keeps at most one carrier.send pending
+  ---
+  duration_ms: 35.5008
+  ...
+# Subtest: Render JSON keys use UTF-8 limits and every string is a Unicode scalar sequence
+ok 15 - Render JSON keys use UTF-8 limits and every string is a Unicode scalar sequence
+  ---
+  duration_ms: 7.0831
+  ...
+# Subtest: Patch attrs and data Delta boundaries fail before carrier emission
+ok 16 - Patch attrs and data Delta boundaries fail before carrier emission
+  ---
+  duration_ms: 2.4013
+  ...
+# Subtest: invalid Render representation retires inbound Data before handler delivery
+ok 17 - invalid Render representation retires inbound Data before handler delivery
+  ---
+  duration_ms: 0.9727
+  ...
+# Subtest: outbound preflight rejects a global JSON depth over 64 before carrier emission
+ok 18 - outbound preflight rejects a global JSON depth over 64 before carrier emission
+  ---
+  duration_ms: 27.4364
+  ...
+# Subtest: terminal first-wins and is not overwritten by a later carrier loss
+ok 19 - terminal first-wins and is not overwritten by a later carrier loss
+  ---
+  duration_ms: 2.5136
+  ...
+# Subtest: fresh peer starts with no inherited writer or reader state
+ok 20 - fresh peer starts with no inherited writer or reader state
+  ---
+  duration_ms: 6.9462
+  ...
+# Subtest: V-04/P3-02: recognized viewport schema/direction �?viewport; invalid JSON/unknown �?profile; local invalid �?local-fatal
+ok 21 - V-04/P3-02: recognized viewport schema/direction �?viewport; invalid JSON/unknown �?profile; local invalid �?local-fatal
+  ---
+  duration_ms: 12.5401
+  ...
+# Subtest: V-05: A→B→A while inFlight cancels B and does not resend A
+ok 22 - V-05: A→B→A while inFlight cancels B and does not resend A
+  ---
+  duration_ms: 2.3951
+  ...
+# Subtest: V-06/P3-05: admitted FIFO, pending latest, burst coalesce, concurrent Input ok
+ok 23 - V-06/P3-05: admitted FIFO, pending latest, burst coalesce, concurrent Input ok
+  ---
+  duration_ms: 70.9183
+  ...
+# Subtest: V-07: terminal/retire fences old settle; fresh peer has independent baseline
+ok 24 - V-07: terminal/retire fences old settle; fresh peer has independent baseline
+  ---
+  duration_ms: 1.1256
+  ...
+# Subtest: P3-01: viewport.state only Renderer→Subsystem; reverse is viewport fatal
+ok 25 - P3-01: viewport.state only Renderer→Subsystem; reverse is viewport fatal
+  ---
+  duration_ms: 0.3839
+  ...
+# Subtest: C-01: publishState exact-own validation; getter/Proxy never sync-leak
+ok 26 - C-01: publishState exact-own validation; getter/Proxy never sync-leak
+  ---
+  duration_ms: 2.9152
+  ...
+# Subtest: C-01: invalid while inFlight/idle same-size cannot be swallowed
+ok 27 - C-01: invalid while inFlight/idle same-size cannot be swallowed
+  ---
+  duration_ms: 1.7727
+  ...
+# Subtest: writer preserves enqueue order across Input and Render
+ok 28 - writer preserves enqueue order across Input and Render
+  ---
+  duration_ms: 6.3572
+  ...
+# Subtest: send after terminal emits zero bytes
+ok 29 - send after terminal emits zero bytes
+  ---
+  duration_ms: 0.2945
+  ...
+# Subtest: emitted send stays sent when terminal races after carrier.send resolves
+ok 30 - emitted send stays sent when terminal races after carrier.send resolves
+  ---
+  duration_ms: 6.771
+  ...
+# Subtest: writer pending operations settle exactly once on terminal
+ok 31 - writer pending operations settle exactly once on terminal
+  ---
+  duration_ms: 2.0055
+  ...
+# Subtest: carrier.send reject with a kind object is carrier-lost and matches peer.terminal
+ok 32 - carrier.send reject with a kind object is carrier-lost and matches peer.terminal
+  ---
+  duration_ms: 0.5409
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 355.2876
+
+> @loomrealm/subsystem@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/subsystem@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: author helpers keep the M4 surface explicit and validated
+ok 1 - author helpers keep the M4 surface explicit and validated
+  ---
+  duration_ms: 9.7768
+  ...
+# Subtest: RenderDomain author surface includes update without exposing publication types
+ok 2 - RenderDomain author surface includes update without exposing publication types
+  ---
+  duration_ms: 1.6862
+  ...
+# Subtest: author root and trusted host surface stay separated
+ok 3 - author root and trusted host surface stay separated
+  ---
+  duration_ms: 2.5834
+  ...
+# Subtest: M12 author declarations expose only the frozen Content projection
+ok 4 - M12 author declarations expose only the frozen Content projection
+  ---
+  duration_ms: 7.4724
+  ...
+# Subtest: trusted host keeps the exact M8 protocol and port dependency direction
+ok 5 - trusted host keeps the exact M8 protocol and port dependency direction
+  ---
+  duration_ms: 1.8482
+  ...
+# Subtest: M10 author declarations expose the exact minimal Input surface
+ok 6 - M10 author declarations expose the exact minimal Input surface
+  ---
+  duration_ms: 4.6297
+  ...
+# Subtest: ContentReadError and author surface have the exact frozen shape
+ok 7 - ContentReadError and author surface have the exact frozen shape
+  ---
+  duration_ms: 2.3402
+  ...
+# Subtest: local validation is synchronous and starts zero HTTP requests
+ok 8 - local validation is synchronous and starts zero HTTP requests
+  ---
+  duration_ms: 32.9204
+  ...
+# Subtest: record/resource reads map errors, versions, hierarchy, cancellation, and value ownership
+ok 9 - record/resource reads map errors, versions, hierarchy, cancellation, and value ownership
+  ---
+  duration_ms: 63.297
+  ...
+# Subtest: listener contributions own Interest while registrations remain independent
+ok 10 - listener contributions own Interest while registrations remain independent
+  ---
+  duration_ms: 16.154
+  ...
+# Subtest: invalid configuration is atomic and preserves the previous contribution
+ok 11 - invalid configuration is atomic and preserves the previous contribution
+  ---
+  duration_ms: 2.1144
+  ...
+# Subtest: retained State is detached, deeply immutable, replayed synchronously, and cleared on true union removal
+ok 12 - retained State is detached, deeply immutable, replayed synchronously, and cleared on true union removal
+  ---
+  duration_ms: 1.5169
+  ...
+# Subtest: retained State preserves an own __proto__ JSON member without prototype mutation
+ok 13 - retained State preserves an own __proto__ JSON member without prototype mutation
+  ---
+  duration_ms: 0.8185
+  ...
+# Subtest: dormant handlers reactivate with baseline while another contribution keeps State live
+ok 14 - dormant handlers reactivate with baseline while another contribution keeps State live
+  ---
+  duration_ms: 0.764
+  ...
+# Subtest: reactivation baselines use a stable registration snapshot
+ok 15 - reactivation baselines use a stable registration snapshot
+  ---
+  duration_ms: 0.5167
+  ...
+# Subtest: handler delivery uses global registration order, a stable snapshot, and async isolation
+ok 16 - handler delivery uses global registration order, a stable snapshot, and async isolation
+  ---
+  duration_ms: 2.7349
+  ...
+# Subtest: mutation gate retains latest State, drops Event, and converges State on reopen
+ok 17 - mutation gate retains latest State, drops Event, and converges State on reopen
+  ---
+  duration_ms: 1.2556
+  ...
+# Subtest: Reset clears suppressed State and multi-channel convergence is canonical
+ok 18 - Reset clears suppressed State and multi-channel convergence is canonical
+  ---
+  duration_ms: 1.5555
+  ...
+# Subtest: Interest publisher keeps only the latest full Registry behind one in-flight send
+ok 19 - Interest publisher keeps only the latest full Registry behind one in-flight send
+  ---
+  duration_ms: 4.0616
+  ...
+# Subtest: RenderDomain commits detached local authority and enforces lifetime identity
+ok 20 - RenderDomain commits detached local authority and enforces lifetime identity
+  ---
+  duration_ms: 7.9778
+  ...
+# Subtest: Render author validation is atomic and classifies shape versus hard limits
+ok 21 - Render author validation is atomic and classifies shape versus hard limits
+  ---
+  duration_ms: 2.0501
+  ...
+# Subtest: Render author validation rejects non-scalar strings in generic data synchronously
+ok 22 - Render author validation rejects non-scalar strings in generic data synchronously
+  ---
+  duration_ms: 1.9351
+  ...
+# Subtest: fresh carrier publishes Registry then baseline and orders Event after target
+ok 23 - fresh carrier publishes Registry then baseline and orders Event after target
+  ---
+  duration_ms: 10.4772
+  ...
+# Subtest: close discards pending Domain work and waits for an already-started send before removal
+ok 24 - close discards pending Domain work and waits for an already-started send before removal
+  ---
+  duration_ms: 5.3352
+  ...
+# Subtest: revision exhaustion rolls one live business Domain to a fresh wire identity
+ok 25 - revision exhaustion rolls one live business Domain to a fresh wire identity
+  ---
+  duration_ms: 2.8242
+  ...
+# Subtest: revision exhaustion publishes the latest authority when later state work is pending
+ok 26 - revision exhaustion publishes the latest authority when later state work is pending
+  ---
+  duration_ms: 7.6796
+  ...
+# Subtest: Runtime cleanup closes every still-live RenderDomain
+ok 27 - Runtime cleanup closes every still-live RenderDomain
+  ---
+  duration_ms: 1.3199
+  ...
+# Subtest: Domain count and publication pressure remain bounded without rejecting valid author commits
+ok 28 - Domain count and publication pressure remain bounded without rejecting valid author commits
+  ---
+  duration_ms: 133.4463
+  ...
+# Subtest: retained Event is an authoritative coalescing barrier
+ok 29 - retained Event is an authoritative coalescing barrier
+  ---
+  duration_ms: 3.4008
+  ...
+# Subtest: an Event is a coalescing barrier only for its own Domain
+ok 30 - an Event is a coalescing barrier only for its own Domain
+  ---
+  duration_ms: 2.2587
+  ...
+# Subtest: an unemitted create-close lifecycle never publishes stale Domain presence
+ok 31 - an unemitted create-close lifecycle never publishes stale Domain presence
+  ---
+  duration_ms: 0.8036
+  ...
+# Subtest: RenderDomain.update mutates existing node attrs/data/zIndex without a Snapshot after baseline
+ok 32 - RenderDomain.update mutates existing node attrs/data/zIndex without a Snapshot after baseline
+  ---
+  duration_ms: 2.4178
+  ...
+# Subtest: RenderDomain.update is local-atomic and distinguishes missing from explicit undefined
+ok 33 - RenderDomain.update is local-atomic and distinguishes missing from explicit undefined
+  ---
+  duration_ms: 2.5078
+  ...
+# Subtest: baseline in-flight update stays a Snapshot and later updates become Patches
+ok 34 - baseline in-flight update stays a Snapshot and later updates become Patches
+  ---
+  duration_ms: 3.7436
+  ...
+# Subtest: Event barrier keeps later updates from coalescing into an earlier Snapshot
+ok 35 - Event barrier keeps later updates from coalescing into an earlier Snapshot
+  ---
+  duration_ms: 2.8423
+  ...
+# Subtest: full queue coalesces same-Domain updates to the latest Snapshot
+ok 36 - full queue coalesces same-Domain updates to the latest Snapshot
+  ---
+  duration_ms: 142.5795
+  ...
+# Subtest: zIndex-only update maps to an empty-ops Patch
+ok 37 - zIndex-only update maps to an empty-ops Patch
+  ---
+  duration_ms: 1.0543
+  ...
+# Subtest: send failure invalidates the old peer instead of retrying a Patch
+ok 38 - send failure invalidates the old peer instead of retrying a Patch
+  ---
+  duration_ms: 2.0947
+  ...
+# Subtest: update op count accepts 4096 and rejects 4097 atomically
+ok 39 - update op count accepts 4096 and rejects 4097 atomically
+  ---
+  duration_ms: 864.5048
+  ...
+# Subtest: full queue drops the oldest Event before coalescing authoritative work
+ok 40 - full queue drops the oldest Event before coalescing authoritative work
+  ---
+  duration_ms: 43.7821
+  ...
+# Subtest: ready Data acquisition is non-blocking and terminal reacquires a fresh peer
+ok 41 - ready Data acquisition is non-blocking and terminal reacquires a fresh peer
+  ---
+  duration_ms: 23.6956
+  ...
+# Subtest: shutdown aborts pending Data and closes a late carrier without changing Runtime result
+ok 42 - shutdown aborts pending Data and closes a late carrier without changing Runtime result
+  ---
+  duration_ms: 3.1411
+  ...
+# Subtest: trusted Data construction failure stops acquisition only for the host lifetime
+ok 43 - trusted Data construction failure stops acquisition only for the host lifetime
+  ---
+  duration_ms: 4.3529
+  ...
+# Subtest: throwing carrier close getter stays isolated during Subsystem construction failure
+ok 44 - throwing carrier close getter stays isolated during Subsystem construction failure
+  ---
+  duration_ms: 2.9103
+  ...
+# Subtest: Data Binding rejection does not fail Runtime and is not retried for the host lifetime
+ok 45 - Data Binding rejection does not fail Runtime and is not retried for the host lifetime
+  ---
+  duration_ms: 4.8504
+  ...
+# Subtest: hanging Data close shares the Runtime cleanup deadline and cannot replace graceful result
+ok 46 - hanging Data close shares the Runtime cleanup deadline and cannot replace graceful result
+  ---
+  duration_ms: 22.8216
+  ...
+# Subtest: initialize creates context, activate starts once, and graceful shutdown aborts without waiting for late handler
+ok 47 - initialize creates context, activate starts once, and graceful shutdown aborts without waiting for late handler
+  ---
+  duration_ms: 6.2149
+  ...
+# Subtest: accepted child call resumes only after frame.resume ACK and returns exactly one outcome
+ok 48 - accepted child call resumes only after frame.resume ACK and returns exactly one outcome
+  ---
+  duration_ms: 10.2367
+  ...
+# Subtest: recoverable call rejection is catchable and keeps the current activation usable
+ok 49 - recoverable call rejection is catchable and keeps the current activation usable
+  ---
+  duration_ms: 8.9172
+  ...
+# Subtest: recoverable frame.call converges retained State before business observes rejection
+ok 50 - recoverable frame.call converges retained State before business observes rejection
+  ---
+  duration_ms: 11.3057
+  ...
+# Subtest: committed frame.call discards suppressed old-Activation State
+ok 51 - committed frame.call discards suppressed old-Activation State
+  ---
+  duration_ms: 12.057
+  ...
+# Subtest: Runtime-fatal call never re-enters the business continuation
+ok 52 - Runtime-fatal call never re-enters the business continuation
+  ---
+  duration_ms: 5.0391
+  ...
+# Subtest: Runtime Control request timeout has one Host-owned failure classification
+ok 53 - Runtime Control request timeout has one Host-owned failure classification
+  ---
+  duration_ms: 1015.2465
+  ...
+# Subtest: administrative suspend aborts the Frame and discards a late handler result
+ok 54 - administrative suspend aborts the Frame and discards a late handler result
+  ---
+  duration_ms: 2.6406
+  ...
+# Subtest: uncaught business exception becomes a sanitized failed Frame outcome
+ok 55 - uncaught business exception becomes a sanitized failed Frame outcome
+  ---
+  duration_ms: 4.8796
+  ...
+# Subtest: terminal cleanup is bounded and hook failure never replaces the primary cause
+ok 56 - terminal cleanup is bounded and hook failure never replaces the primary cause
+  ---
+  duration_ms: 0.8242
+  ...
+# Subtest: a hanging shutdown hook cannot keep runSubsystem pending forever
+ok 57 - a hanging shutdown hook cannot keep runSubsystem pending forever
+  ---
+  duration_ms: 35.7695
+  ...
+# Subtest: V-09: sync initial, getter-before-callback, equal suppress, detached + host wire
+ok 58 - V-09: sync initial, getter-before-callback, equal suppress, detached + host wire
+  ---
+  duration_ms: 17.0334
+  ...
+# Subtest: V-10: listener throw/reject contained; reentrant subscribe/unsubscribe
+ok 59 - V-10: listener throw/reject contained; reentrant subscribe/unsubscribe
+  ---
+  duration_ms: 1.3909
+  ...
+# Subtest: V-11: Data loss retains size; equal fresh baseline suppresses; different notifies
+ok 60 - V-11: Data loss retains size; equal fresh baseline suppresses; different notifies
+  ---
+  duration_ms: 8.8933
+  ...
+# Subtest: V-12: post-terminal subscribe is inert without initial callback
+ok 61 - V-12: post-terminal subscribe is inert without initial callback
+  ---
+  duration_ms: 3.0685
+  ...
+# Subtest: V-13: viewport updates independent of Frame/InputTarget changes
+ok 62 - V-13: viewport updates independent of Frame/InputTarget changes
+  ---
+  duration_ms: 10.879
+  ...
+# Subtest: C-02: thenable then-getter throw isolated with sync throw and Promise.reject
+ok 63 - C-02: thenable then-getter throw isolated with sync throw and Promise.reject
+  ---
+  duration_ms: 1.8719
+  ...
+1..63
+# tests 63
+# suites 0
+# pass 63
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1530.2739
+
+> @loomrealm/renderer@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/renderer@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: Renderer exposes the additive M10 construction seam and unchanged dependencies
+ok 1 - Renderer exposes the additive M10 construction seam and unchanged dependencies
+  ---
+  duration_ms: 14.8177
+  ...
+# Subtest: M12 ResourceClient stays off the Renderer root surface
+ok 2 - M12 ResourceClient stays off the Renderer root surface
+  ---
+  duration_ms: 100.1361
+  ...
+# Subtest: holder atomically installs initial peer+Snapshot before consuming later state
+ok 3 - holder atomically installs initial peer+Snapshot before consuming later state
+  ---
+  duration_ms: 17.468
+  ...
+# Subtest: public holder factory keeps old M8 calls valid while accepting the M10 source seam
+ok 4 - public holder factory keeps old M8 calls valid while accepting the M10 source seam
+  ---
+  duration_ms: 1.1618
+  ...
+# Subtest: replacement identity ignores old late state and old terminal
+ok 5 - replacement identity ignores old late state and old terminal
+  ---
+  duration_ms: 7.5148
+  ...
+# Subtest: concurrent connect on one holder fails fast without creating local currentness
+ok 6 - concurrent connect on one holder fails fast without creating local currentness
+  ---
+  duration_ms: 2.1701
+  ...
+# Subtest: Data reconciliation acquires exact authority, aborts removal, and closes late results
+ok 7 - Data reconciliation acquires exact authority, aborts removal, and closes late results
+  ---
+  duration_ms: 6.9812
+  ...
+# Subtest: Data terminal reacquires while one slot failure remains isolated until Control changes
+ok 8 - Data terminal reacquires while one slot failure remains isolated until Control changes
+  ---
+  duration_ms: 9.1036
+  ...
+# Subtest: trusted Renderer Data construction failure closes the carrier and suppresses same-identity retry
+ok 9 - trusted Renderer Data construction failure closes the carrier and suppresses same-identity retry
+  ---
+  duration_ms: 5.1412
+  ...
+# Subtest: throwing carrier close getter stays isolated during Renderer construction failure
+ok 10 - throwing carrier close getter stays isolated during Renderer construction failure
+  ---
+  duration_ms: 2.4289
+  ...
+# Subtest: same-Session Control participant replacement preserves retired Domain identity history
+ok 11 - same-Session Control participant replacement preserves retired Domain identity history
+  ---
+  duration_ms: 15.007
+  ...
+# Subtest: same-Session Control participant replacement preserves Node one-shot history
+ok 12 - same-Session Control participant replacement preserves Node one-shot history
+  ---
+  duration_ms: 12.0633
+  ...
+# Subtest: Interest-first and authority-first both produce one fresh State baseline
+ok 13 - Interest-first and authority-first both produce one fresh State baseline
+  ---
+  duration_ms: 9.3735
+  ...
+# Subtest: State snapshots preserve own __proto__ and keep non-JSON prototypes invalid
+ok 14 - State snapshots preserve own __proto__ and keep non-JSON prototypes invalid
+  ---
+  duration_ms: 1.184
+  ...
+# Subtest: publisher coalesces State only within Event barriers and keeps one send in flight
+ok 15 - publisher coalesces State only within Event barriers and keeps one send in flight
+  ---
+  duration_ms: 11.1546
+  ...
+# Subtest: same-carrier lease replacement emits Reset before the fresh lease baseline
+ok 16 - same-carrier lease replacement emits Reset before the fresh lease baseline
+  ---
+  duration_ms: 4.5335
+  ...
+# Subtest: state producer loss Reset-rebaselines remaining effective State
+ok 17 - state producer loss Reset-rebaselines remaining effective State
+  ---
+  duration_ms: 1.8771
+  ...
+# Subtest: retired Data publisher discards not-started work and cannot resurrect
+ok 18 - retired Data publisher discards not-started work and cannot resurrect
+  ---
+  duration_ms: 1.8546
+  ...
+# Subtest: Event overflow is bounded and surviving not-yet-emitted Events preserve order
+ok 19 - Event overflow is bounded and surviving not-yet-emitted Events preserve order
+  ---
+  duration_ms: 19.8874
+  ...
+# Subtest: producer return requires fresh State while Event return remains future-only
+ok 20 - producer return requires fresh State while Event return remains future-only
+  ---
+  duration_ms: 1.3113
+  ...
+# Subtest: source is Control-epoch scoped, restarts on replacement, and ignores late old emit
+ok 21 - source is Control-epoch scoped, restarts on replacement, and ignores late old emit
+  ---
+  duration_ms: 28.8563
+  ...
+# Subtest: source start failure discards staged facts, keeps Control current, and does not retry in epoch
+ok 22 - source start failure discards staged facts, keeps Control current, and does not retry in epoch
+  ---
+  duration_ms: 9.5504
+  ...
+# Subtest: fresh source State and paired transition flow only through gate and current Data
+ok 23 - fresh source State and paired transition flow only through gate and current Data
+  ---
+  duration_ms: 18.2101
+  ...
+# Subtest: Control generation replacement retires old Data before new Input facts enter the gate
+ok 24 - Control generation replacement retires old Data before new Input facts enter the gate
+  ---
+  duration_ms: 13.2661
+  ...
+# Subtest: presentation resource façade maps errors and returns caller-owned bytes
+ok 25 - presentation resource façade maps errors and returns caller-owned bytes
+  ---
+  duration_ms: 12.5003
+  ...
+# Subtest: presentation resource lifetime and caller cancellation both close reads
+ok 26 - presentation resource lifetime and caller cancellation both close reads
+  ---
+  duration_ms: 1.465
+  ...
+# Subtest: post-teardown well-formed reads cancel before the private client is called
+ok 27 - post-teardown well-formed reads cancel before the private client is called
+  ---
+  duration_ms: 0.5817
+  ...
+# Subtest: malformed signal-like input is rejected before the private client is called
+ok 28 - malformed signal-like input is rejected before the private client is called
+  ---
+  duration_ms: 0.8652
+  ...
+# Subtest: presentation seam reads current Control/Store facts and only observes successful commits
+ok 29 - presentation seam reads current Control/Store facts and only observes successful commits
+  ---
+  duration_ms: 27.7955
+  ...
+# Subtest: Registry and Snapshot establish one atomic current replica
+ok 30 - Registry and Snapshot establish one atomic current replica
+  ---
+  duration_ms: 8.1428
+  ...
+# Subtest: production presentation reads only narrow current Store facts
+ok 31 - production presentation reads only narrow current Store facts
+  ---
+  duration_ms: 0.7954
+  ...
+# Subtest: Patch applies insert, move, update and remove in order with one final commit
+ok 32 - Patch applies insert, move, update and remove in order with one final commit
+  ---
+  duration_ms: 2.2479
+  ...
+# Subtest: failed Patch leaves the committed replica unchanged
+ok 33 - failed Patch leaves the committed replica unchanged
+  ---
+  duration_ms: 0.8579
+  ...
+# Subtest: node and Domain one-shot identity survives same-generation carrier replacement
+ok 34 - node and Domain one-shot identity survives same-generation carrier replacement
+  ---
+  duration_ms: 0.9854
+  ...
+# Subtest: well-formed stale Events are accepted and dropped
+ok 35 - well-formed stale Events are accepted and dropped
+  ---
+  duration_ms: 0.5522
+  ...
+# Subtest: continuity violations are protocol-fatal
+ok 36 - continuity violations are protocol-fatal
+  ---
+  duration_ms: 0.6033
+  ...
+# Subtest: logical stacking uses zIndex then UTF-8 lexical domain identity
+ok 37 - logical stacking uses zIndex then UTF-8 lexical domain identity
+  ---
+  duration_ms: 1.4518
+  ...
+# Subtest: fresh generation creates a fresh Domain and Node identity universe
+ok 38 - fresh generation creates a fresh Domain and Node identity universe
+  ---
+  duration_ms: 1.4428
+  ...
+# Subtest: update-only Patch shares untouched large data and clones the path once
+ok 39 - update-only Patch shares untouched large data and clones the path once
+  ---
+  duration_ms: 4.4043
+  ...
+# Subtest: zIndex-only Patch reuses roots identity
+ok 40 - zIndex-only Patch reuses roots identity
+  ---
+  duration_ms: 0.5291
+  ...
+# Subtest: update-only Patch is protocol-fatal on intermediate over-limit even if a later op would shrink
+ok 41 - update-only Patch is protocol-fatal on intermediate over-limit even if a later op would shrink
+  ---
+  duration_ms: 2.9828
+  ...
+# Subtest: Renderer resource client validates locally before HTTP
+ok 42 - Renderer resource client validates locally before HTTP
+  ---
+  duration_ms: 34.3189
+  ...
+# Subtest: expected version, hierarchical routing, and immutable cache identity are enforced
+ok 43 - expected version, hierarchical routing, and immutable cache identity are enforced
+  ---
+  duration_ms: 49.879
+  ...
+# Subtest: client captures native fetch before business globals can be replaced
+ok 44 - client captures native fetch before business globals can be replaced
+  ---
+  duration_ms: 10.3361
+  ...
+# Subtest: V-01: normalize trusted raw samples; ignore illegal; no getter reads
+ok 45 - V-01: normalize trusted raw samples; ignore illegal; no getter reads
+  ---
+  duration_ms: 2.8431
+  ...
+# Subtest: V-02: sync bootstrap sample and deferred first measurable sample
+ok 46 - V-02: sync bootstrap sample and deferred first measurable sample
+  ---
+  duration_ms: 16.0747
+  ...
+# Subtest: V-03: start failure local; late old callback inert after participant replace
+ok 47 - V-03: start failure local; late old callback inert after participant replace
+  ---
+  duration_ms: 3.8709
+  ...
+# Subtest: V-08: same participant two peers each get baseline; source not restarted on reconnect
+ok 48 - V-08: same participant two peers each get baseline; source not restarted on reconnect
+  ---
+  duration_ms: 4.7065
+  ...
+# Subtest: C-03: extra symbol own-key sample ignored; getter not executed
+ok 49 - C-03: extra symbol own-key sample ignored; getter not executed
+  ---
+  duration_ms: 0.4511
+  ...
+# Subtest: Web Presentation Config v1 accepts only its closed frozen shape
+ok 50 - Web Presentation Config v1 accepts only its closed frozen shape
+  ---
+  duration_ms: 3.0333
+  ...
+# Subtest: validation completes before prepared Content resolution begins
+ok 51 - validation completes before prepared Content resolution begins
+  ---
+  duration_ms: 1.5311
+  ...
+# Subtest: preparation fixes declaration order, versions and exact MIME essence
+ok 52 - preparation fixes declaration order, versions and exact MIME essence
+  ---
+  duration_ms: 2.9132
+  ...
+1..52
+# tests 52
+# suites 0
+# pass 52
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 515.307
+
+> @loomrealm/main@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/main@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: Main root exposes only one-shot Session runtime values
+ok 1 - Main root exposes only one-shot Session runtime values
+  ---
+  duration_ms: 1.2963
+  ...
+# Subtest: Main public declaration surface does not depend on Game Package, launcher, or concrete Platform types
+ok 2 - Main public declaration surface does not depend on Game Package, launcher, or concrete Platform types
+  ---
+  duration_ms: 3.7391
+  ...
+# Subtest: deterministic Binding creates no participant without a slot and binds exactly one candidate
+ok 3 - deterministic Binding creates no participant without a slot and binds exactly one candidate
+  ---
+  duration_ms: 2.1269
+  ...
+# Subtest: deterministic Binding abort cancellation cannot yield a late live carrier
+ok 4 - deterministic Binding abort cancellation cannot yield a late live carrier
+  ---
+  duration_ms: 0.5978
+  ...
+# Subtest: Main boots required Runtimes and drives a nested cross-Subsystem Frame to root outcome
+ok 5 - Main boots required Runtimes and drives a nested cross-Subsystem Frame to root outcome
+  ---
+  duration_ms: 23.103
+  ...
+# Subtest: Main preserves __proto__ as ordinary business JSON data
+ok 6 - Main preserves __proto__ as ordinary business JSON data
+  ---
+  duration_ms: 3.9522
+  ...
+# Subtest: same-Subsystem recursion closes through Response-before-dependent-RPC without reentrant deadlock
+ok 7 - same-Subsystem recursion closes through Response-before-dependent-RPC without reentrant deadlock
+  ---
+  duration_ms: 5.3816
+  ...
+# Subtest: undeclared call target is recoverable and keeps the current Activation usable
+ok 8 - undeclared call target is recoverable and keeps the current Activation usable
+  ---
+  duration_ms: 4.4472
+  ...
+# Subtest: failed child Runtime unwinds the doomed suffix and fresh-resumes its healthy Caller
+ok 9 - failed child Runtime unwinds the doomed suffix and fresh-resumes its healthy Caller
+  ---
+  duration_ms: 9.4911
+  ...
+# Subtest: root Runtime loss becomes a failed root outcome without re-entering old business continuation
+ok 10 - root Runtime loss becomes a failed root outcome without re-entering old business continuation
+  ---
+  duration_ms: 1.7694
+  ...
+# Subtest: duplicate bootstrap token material fails closed before launching the second Runtime
+ok 11 - duplicate bootstrap token material fails closed before launching the second Runtime
+  ---
+  duration_ms: 2.4868
+  ...
+# Subtest: ill-formed bootstrap token fails closed before any Runtime launch
+ok 12 - ill-formed bootstrap token fails closed before any Runtime launch
+  ---
+  duration_ms: 0.4351
+  ...
+# Subtest: bootstrap token generation failure is attributed to the required Runtime
+ok 13 - bootstrap token generation failure is attributed to the required Runtime
+  ---
+  duration_ms: 0.4095
+  ...
+# Subtest: later Runtime launch failure gracefully cleans an already-ready Runtime
+ok 14 - later Runtime launch failure gracefully cleans an already-ready Runtime
+  ---
+  duration_ms: 1.7865
+  ...
+# Subtest: declared but failed call target is recoverable as unavailable
+ok 15 - declared but failed call target is recoverable as unavailable
+  ---
+  duration_ms: 5.7456
+  ...
+# Subtest: middle Runtime failure closes a healthy descendant and resumes the root
+ok 16 - middle Runtime failure closes a healthy descendant and resumes the root
+  ---
+  duration_ms: 6.0572
+  ...
+# Subtest: runMain rejects invalid policy and LogicalGameBootstrap before side effects
+ok 17 - runMain rejects invalid policy and LogicalGameBootstrap before side effects
+  ---
+  duration_ms: 0.3437
+  ...
+# Subtest: Runtime launch that never settles is bounded by the bootstrap deadline
+ok 18 - Runtime launch that never settles is bounded by the bootstrap deadline
+  ---
+  duration_ms: 23.9442
+  ...
+# Subtest: already-aborted Session never launches a Runtime
+ok 19 - already-aborted Session never launches a Runtime
+  ---
+  duration_ms: 0.4603
+  ...
+# Subtest: external abort produces graceful Session shutdown and bounded Runtime cleanup
+ok 20 - external abort produces graceful Session shutdown and bounded Runtime cleanup
+  ---
+  duration_ms: 2.0864
+  ...
+# Subtest: failed Runtime termination request can be retried by terminal cleanup
+ok 21 - failed Runtime termination request can be retried by terminal cleanup
+  ---
+  duration_ms: 1.8014
+  ...
+# Subtest: termination observation rejection is not accepted as physical termination proof
+ok 22 - termination observation rejection is not accepted as physical termination proof
+  ---
+  duration_ms: 2.488
+  ...
+# Subtest: optional Renderer Binding drives a real candidate hello and committed projection
+ok 23 - optional Renderer Binding drives a real candidate hello and committed projection
+  ---
+  duration_ms: 7.5586
+  ...
+# Subtest: M9 projects immutable full Data authority views with exact Runtime identity and terminal null
+ok 24 - M9 projects immutable full Data authority views with exact Runtime identity and terminal null
+  ---
+  duration_ms: 5.2407
+  ...
+# Subtest: current Renderer token stays live for opaque-material duplicate defense only
+ok 25 - current Renderer token stays live for opaque-material duplicate defense only
+  ---
+  duration_ms: 4.1006
+  ...
+# Subtest: M8 deterministic vertical installs real paired Data peers and recovers under generation 1
+ok 26 - M8 deterministic vertical installs real paired Data peers and recovers under generation 1
+  ---
+  duration_ms: 14.3934
+  ...
+# Subtest: non-abort Renderer Binding rejection is Session-local and does not fail Runtime business
+ok 27 - non-abort Renderer Binding rejection is Session-local and does not fail Runtime business
+  ---
+  duration_ms: 2.224
+  ...
+# Subtest: active Renderer replacement is atomic and stale terminal cannot clear the new holder
+ok 28 - active Renderer replacement is atomic and stale terminal cannot clear the new holder
+  ---
+  duration_ms: 5.4027
+  ...
+# Subtest: connected Renderer mirrors committed frame.call and frame.return through fresh caller resume
+ok 29 - connected Renderer mirrors committed frame.call and frame.return through fresh caller resume
+  ---
+  duration_ms: 10.9306
+  ...
+# Subtest: M10 input follows real Main nested InputTarget replacement and fresh caller Activation
+ok 30 - M10 input follows real Main nested InputTarget replacement and fresh caller Activation
+  ---
+  duration_ms: 15.3786
+  ...
+# Subtest: connected Renderer mirrors fixed-point failure unwind without changing Main outcome
+ok 31 - connected Renderer mirrors fixed-point failure unwind without changing Main outcome
+  ---
+  duration_ms: 9.1205
+  ...
+# Subtest: unrepresentable candidate and current publication fail closed without replacing Main authority
+ok 32 - unrepresentable candidate and current publication fail closed without replacing Main authority
+  ---
+  duration_ms: 446.5496
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 853.2934
+
+> @loomrealm/game-launcher-hostra@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/game-launcher-hostra@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: public runtime surface stays narrow
+ok 1 - public runtime surface stays narrow
+  ---
+  duration_ms: 4.0549
+  ...
+# Subtest: prepared installation projection is confined to the trusted integration subpath
+ok 2 - prepared installation projection is confined to the trusted integration subpath
+  ---
+  duration_ms: 11.8301
+  ...
+# Subtest: declarations expose no Runner bootstrap or mutable attempt state
+ok 3 - declarations expose no Runner bootstrap or mutable attempt state
+  ---
+  duration_ms: 3.7686
+  ...
+# Subtest: package keeps the frozen dependency and authority boundary
+ok 4 - package keeps the frozen dependency and authority boundary
+  ---
+  duration_ms: 13.8146
+  ...
+# Subtest: host treats child.send false as flow control and waits for the IPC callback/message outcome
+ok 5 - host treats child.send false as flow control and waits for the IPC callback/message outcome
+  ---
+  duration_ms: 4.1508
+  ...
+# Subtest: host treats child.send callback error as authoritative IPC terminal failure
+ok 6 - host treats child.send callback error as authoritative IPC terminal failure
+  ---
+  duration_ms: 3.0775
+  ...
+# Subtest: runner IPC disconnect rejects a pending Data acquire without terminating Runtime Control
+ok 7 - runner IPC disconnect rejects a pending Data acquire without terminating Runtime Control
+  ---
+  duration_ms: 1.1983
+  ...
+# Subtest: runner IPC disconnect closes committed-undelivered Data material
+ok 8 - runner IPC disconnect closes committed-undelivered Data material
+  ---
+  duration_ms: 93.1803
+  ...
+# Subtest: real Main ↔ Hostra Runner vertical preserves the M5 nested Frame outcome
+ok 9 - real Main ↔ Hostra Runner vertical preserves the M5 nested Frame outcome
+  ---
+  duration_ms: 588.7268
+  ...
+# Subtest: business module load failure converges through existing Main bootstrap authority
+ok 10 - business module load failure converges through existing Main bootstrap authority
+  ---
+  duration_ms: 256.5408
+  ...
+# Subtest: unexpected Runner code-0 exit after identification reaches Main Runtime authority
+ok 11 - unexpected Runner code-0 exit after identification reaches Main Runtime authority
+  ---
+  duration_ms: 226.6056
+  ...
+# Subtest: PREPARE validates, joins, resolves, and deeply freezes the plan
+ok 12 - PREPARE validates, joins, resolves, and deeply freezes the plan
+  ---
+  duration_ms: 38.1624
+  ...
+# Subtest: PREPARE rejects closed-manifest violations and exact-set mismatches
+ok 13 - PREPARE rejects closed-manifest violations and exact-set mismatches
+  ---
+  duration_ms: 16.1932
+  ...
+# Subtest: PREPARE preserves common Game Package validation authority
+ok 14 - PREPARE preserves common Game Package validation authority
+  ---
+  duration_ms: 17.4287
+  ...
+# Subtest: PREPARE rejects invalid module paths, missing files, and directories
+ok 15 - PREPARE rejects invalid module paths, missing files, and directories
+  ---
+  duration_ms: 32.5625
+  ...
+# Subtest: PREPARE rejects a symlink that escapes the canonical installation
+ok 16 - PREPARE rejects a symlink that escapes the canonical installation # SKIP symlink privilege is unavailable
+  ---
+  duration_ms: 19.0614
+  ...
+# Subtest: PREPARE rejects a directory symlink or Windows junction escape
+ok 17 - PREPARE rejects a directory symlink or Windows junction escape
+  ---
+  duration_ms: 25.8616
+  ...
+# Subtest: PREPARE rejects an in-installation .mjs symlink to .js
+ok 18 - PREPARE rejects an in-installation .mjs symlink to .js # SKIP symlink privilege is unavailable
+  ---
+  duration_ms: 13.9932
+  ...
+# Subtest: PREPARE rejects an in-installation .mjs symlink to .cjs
+ok 19 - PREPARE rejects an in-installation .mjs symlink to .cjs # SKIP symlink privilege is unavailable
+  ---
+  duration_ms: 15.6076
+  ...
+# Subtest: PREPARE accepts an in-installation .mjs symlink to .mjs
+ok 20 - PREPARE accepts an in-installation .mjs symlink to .mjs # SKIP symlink privilege is unavailable
+  ---
+  duration_ms: 15.9888
+  ...
+# Subtest: PREPARE validates the exact Runner policy domain before filesystem work
+ok 21 - PREPARE validates the exact Runner policy domain before filesystem work
+  ---
+  duration_ms: 1.8595
+  ...
+# Subtest: successful PREPARE does not import business code or spawn the Runner
+ok 22 - successful PREPARE does not import business code or spawn the Runner
+  ---
+  duration_ms: 19.425
+  ...
+# Subtest: Runner bootstrap validation is closed and deeply immutable
+ok 23 - Runner bootstrap validation is closed and deeply immutable
+  ---
+  duration_ms: 3.4896
+  ...
+# Subtest: Runner environment uses the exact allowlist and reserved bootstrap
+ok 24 - Runner environment uses the exact allowlist and reserved bootstrap
+  ---
+  duration_ms: 2.1742
+  ...
+# Subtest: RuntimeHosting launches the package Runner, acquires once, and observes actual exit
+ok 25 - RuntimeHosting launches the package Runner, acquires once, and observes actual exit
+  ---
+  duration_ms: 339.1149
+  ...
+# Subtest: RuntimeHosting hands off an exact child-bound Data provisioner before launch resolves
+ok 26 - RuntimeHosting hands off an exact child-bound Data provisioner before launch resolves
+  ---
+  duration_ms: 232.6385
+  ...
+# Subtest: throwing Runtime Data provisioner handoff fails launch after child convergence
+ok 27 - throwing Runtime Data provisioner handoff fails launch after child convergence
+  ---
+  duration_ms: 37.0996
+  ...
+# Subtest: RuntimeHosting rejects an already-aborted launch without side effects
+ok 28 - RuntimeHosting rejects an already-aborted launch without side effects
+  ---
+  duration_ms: 15.6443
+  ...
+# Subtest: acquire abort closes the listener while HostedRuntime remains terminable
+ok 29 - acquire abort closes the listener while HostedRuntime remains terminable
+  ---
+  duration_ms: 243.0012
+  ...
+# Subtest: wrong capability paths do not consume the one valid connection
+ok 30 - wrong capability paths do not consume the one valid connection
+  ---
+  duration_ms: 97.4611
+  ...
+# Subtest: spawn failure is mapped without returning HostedRuntime
+ok 31 - spawn failure is mapped without returning HostedRuntime
+  ---
+  duration_ms: 13.5966
+  ...
+# Subtest: oversized bootstrap rejection closes the already-created attempt listener
+ok 32 - oversized bootstrap rejection closes the already-created attempt listener
+  ---
+  duration_ms: 14.2475
+  ...
+# Subtest: launch abort while pending rejects and converges child cleanup
+ok 33 - launch abort while pending rejects and converges child cleanup
+  ---
+  duration_ms: 13.342
+  ...
+# Subtest: termination grace escalates a POSIX child that ignores the normal request
+ok 34 - termination grace escalates a POSIX child that ignores the normal request # SKIP
+  ---
+  duration_ms: 0.1967
+  ...
+# Subtest: normal termination request failure still commits and runs force convergence
+ok 35 - normal termination request failure still commits and runs force convergence
+  ---
+  duration_ms: 68.5703
+  ...
+# Subtest: a post-listening WS server error fails inside the attempt without crashing the host
+ok 36 - a post-listening WS server error fails inside the attempt without crashing the host
+  ---
+  duration_ms: 16.537
+  ...
+# Subtest: WebSocket carrier preserves text message order and closes idempotently
+ok 37 - WebSocket carrier preserves text message order and closes idempotently
+  ---
+  duration_ms: 73.9451
+  ...
+# Subtest: WebSocket carrier treats a binary application unit as lost
+ok 38 - WebSocket carrier treats a binary application unit as lost
+  ---
+  duration_ms: 18.3902
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 33
+# fail 0
+# cancelled 0
+# skipped 5
+# todo 0
+# duration_ms 1564.6183
+
+> @loomrealm/fsdb-http@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/fsdb-http@0.1.0-alpha.0 prebuild
+> npm run build -w @loomrealm/fsdb
+
+
+> @loomrealm/fsdb@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/fsdb-http@0.1.0-alpha.0 build
+> node scripts/clean-dist.mjs && tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: API-001, API-002, API-003, FDB-001, FDB-005, FDB-006, FDB-008, FDB-009, FDB-010, LIFE-001: opens a Unicode Well-formed snapshot
+ok 1 - API-001, API-002, API-003, FDB-001, FDB-005, FDB-006, FDB-008, FDB-009, FDB-010, LIFE-001: opens a Unicode Well-formed snapshot
+  ---
+  duration_ms: 57.2671
+  ...
+# Subtest: FDB-003, FDB-007, FDB-011: rejects normalization, ResourceKey, and structured-content ambiguity
+ok 2 - FDB-003, FDB-007, FDB-011: rejects normalization, ResourceKey, and structured-content ambiguity
+  ---
+  duration_ms: 86.7188
+  ...
+# Subtest: FDB-002, FDB-004, FDB-008, FDB-009, FDB-012: canonicalizes physical spelling and validates reserved names/text
+ok 3 - FDB-002, FDB-004, FDB-008, FDB-009, FDB-012: canonicalizes physical spelling and validates reserved names/text
+  ---
+  duration_ms: 96.9618
+  ...
+# Subtest: ROOT-001, ROOT-003: resolves a relative root once and rejects bad root identity
+ok 4 - ROOT-001, ROOT-003: resolves a relative root once and rejects bad root identity
+  ---
+  duration_ms: 24.1313
+  ...
+# Subtest: SAFE-001, SAFE-002: recognized indirection fails while auxiliary indirection is ignored
+ok 5 - SAFE-001, SAFE-002: recognized indirection fails while auxiliary indirection is ignored # SKIP host cannot create symlinks
+  ---
+  duration_ms: 11.3032
+  ...
+# Subtest: ROOT-002, SAFE-001, SAFE-002: root junction resolves once and recognized descendant junction fails
+ok 6 - ROOT-002, SAFE-001, SAFE-002: root junction resolves once and recognized descendant junction fails
+  ---
+  duration_ms: 47.0905
+  ...
+# Subtest: HTTP-002, HTTP-003, HTTP-004, HTTP-005, HTTP-006, HTTP-008, STATUS-002, STATUS-003, STATUS-004, STATUS-005, STATUS-007, MIME-001, RESP-001, RESP-002, RESP-003, CACHE-001, CACHE-003: serves deterministic Unicode routes, metadata, bytes, status precedence, and HEAD
+ok 7 - HTTP-002, HTTP-003, HTTP-004, HTTP-005, HTTP-006, HTTP-008, STATUS-002, STATUS-003, STATUS-004, STATUS-005, STATUS-007, MIME-001, RESP-001, RESP-002, RESP-003, CACHE-001, CACHE-003: serves deterministic Unicode routes, metadata, bytes, status precedence, and HEAD
+  ---
+  duration_ms: 130.8042
+  ...
+# Subtest: HTTP-001, HTTP-007, HTTP-009, HTTP-010, HTTP-011, HTTP-012, STATUS-001, SAFE-003, SAFE-004: enforces raw request-target spelling and traversal safety
+ok 8 - HTTP-001, HTTP-007, HTTP-009, HTTP-010, HTTP-011, HTTP-012, STATUS-001, SAFE-003, SAFE-004: enforces raw request-target spelling and traversal safety
+  ---
+  duration_ms: 62.4575
+  ...
+# Subtest: MIME-002, MIME-003, MIME-004, MIME-005: uses the frozen deterministic charset-free Resource MIME table
+ok 9 - MIME-002, MIME-003, MIME-004, MIME-005: uses the frozen deterministic charset-free Resource MIME table
+  ---
+  duration_ms: 135.9954
+  ...
+# Subtest: COND-001, COND-002, COND-003, COND-004, COND-005, COND-006, COND-007, CACHE-002, CACHE-005: implements snapshot validators, preconditions, ignored dates/ranges, and reopen
+ok 10 - COND-001, COND-002, COND-003, COND-004, COND-005, COND-006, COND-007, CACHE-002, CACHE-005: implements snapshot validators, preconditions, ignored dates/ranges, and reopen
+  ---
+  duration_ms: 3077.9399
+  ...
+# Subtest: SAFE-005, LIFE-002, LIFE-003, LIFE-007, STATUS-006, CACHE-004: makes replacement stale before preconditions and closes idempotently
+ok 11 - SAFE-005, LIFE-002, LIFE-003, LIFE-007, STATUS-006, CACHE-004: makes replacement stale before preconditions and closes idempotently
+  ---
+  duration_ms: 29.1943
+  ...
+# Subtest: API-005, API-007, API-008, API-009, HTTP-014: owns standalone lifecycle and rejects CONNECT authority-form
+ok 12 - API-005, API-007, API-008, API-009, HTTP-014: owns standalone lifecycle and rejects CONNECT authority-form
+  ---
+  duration_ms: 22.3024
+  ...
+# Subtest: API-004, LIFE-004, BOUNDARY-002: handler borrows db and new files stay invisible until reopen
+ok 13 - API-004, LIFE-004, BOUNDARY-002: handler borrows db and new files stay invisible until reopen
+  ---
+  duration_ms: 3050.3377
+  ...
+# Subtest: LIFE-005, LIFE-006, LIFE-007, LIFE-009: close drains admitted reads and client abort does not make source stale
+ok 14 - LIFE-005, LIFE-006, LIFE-007, LIFE-009: close drains admitted reads and client abort does not make source stale
+  ---
+  duration_ms: 103.1003
+  ...
+# Subtest: HTTP-013, STATUS-007, RESP-003: request content is ignored and errors are body/path safe
+ok 15 - HTTP-013, STATUS-007, RESP-003: request content is ignored and errors are body/path safe
+  ---
+  duration_ms: 40.7439
+  ...
+# Subtest: API-006: standalone listen failure rejects without retaining the owned server
+ok 16 - API-006: standalone listen failure rejects without retaining the owned server
+  ---
+  duration_ms: 55.153
+  ...
+# Subtest: API-009: wildcard bind reports address but no fabricated client origin
+ok 17 - API-009: wildcard bind reports address but no fabricated client origin
+  ---
+  duration_ms: 30.6455
+  ...
+# Subtest: FDB-008, FDB-011: validates JSON Schema roots and .extend.meta record fields
+ok 18 - FDB-008, FDB-011: validates JSON Schema roots and .extend.meta record fields
+  ---
+  duration_ms: 69.2522
+  ...
+# Subtest: SAFE-006: serves bytes admitted through the core same-handle read lease
+ok 19 - SAFE-006: serves bytes admitted through the core same-handle read lease
+  ---
+  duration_ms: 38.7573
+  ...
+# Subtest: LIFE-008: attributes source failure to drift and marks the shared core stale
+ok 20 - LIFE-008: attributes source failure to drift and marks the shared core stale
+  ---
+  duration_ms: 35.7556
+  ...
+# Subtest: API-007, API-008, LIFE-006: service.close waits for an already-started external server.close
+ok 21 - API-007, API-008, LIFE-006: service.close waits for an already-started external server.close
+  ---
+  duration_ms: 4125.4118
+  ...
+# Subtest: BOUNDARY-001, BOUNDARY-003: has no runtime framework dependency or higher-layer authority
+ok 22 - BOUNDARY-001, BOUNDARY-003: has no runtime framework dependency or higher-layer authority
+  ---
+  duration_ms: 1.8588
+  ...
+# Subtest: every mandatory conformance ID is attached to an executable behavioral test
+ok 23 - every mandatory conformance ID is attached to an executable behavioral test
+  ---
+  duration_ms: 1.352
+  ...
+# Subtest: test\\helpers.mjs
+ok 2 - test\\helpers.mjs
+  ---
+  duration_ms: 73.069
+  ...
+1..24
+# tests 24
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 11491.1544
+
+> @loomrealm/desktop@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/desktop@0.1.0-alpha.0 prebuild
+> npm run build -w @loomrealm/fsdb
+
+
+> @loomrealm/fsdb@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+
+> @loomrealm/desktop@0.1.0-alpha.0 build
+> tsc -p tsconfig.json && node scripts/build.mjs
+
+TAP version 13
+# Subtest: prepared view serves deterministic manifest and the complete logical FSDB projection
+ok 1 - prepared view serves deterministic manifest and the complete logical FSDB projection
+  ---
+  duration_ms: 378.3333
+  ...
+# Subtest: trusted shell mints a document lifetime only for a real GET navigation
+ok 2 - trusted shell mints a document lifetime only for a real GET navigation
+  ---
+  duration_ms: 119.1176
+  ...
+# Subtest: authorization, route validation, method, HEAD, cache, and confidentiality semantics are closed
+ok 3 - authorization, route validation, method, HEAD, cache, and confidentiality semantics are closed
+  ---
+  duration_ms: 294.3284
+  ...
+# Subtest: deployment limits and source drift map to bounded Content failures
+ok 4 - deployment limits and source drift map to bounded Content failures
+  ---
+  duration_ms: 191.9276
+  ...
+# Subtest: bounded concurrent admission reports 429 without corrupting the admitted read
+ok 5 - bounded concurrent admission reports 429 without corrupting the admitted read
+  ---
+  duration_ms: 146.5002
+  ...
+# Subtest: paired candidate installs once and relays opaque text in both directions
+ok 6 - paired candidate installs once and relays opaque text in both directions
+  ---
+  duration_ms: 128.7826
+  ...
+# Subtest: one pending owner rejects newcomers and exact Runtime replacement invalidates stale work
+ok 7 - one pending owner rejects newcomers and exact Runtime replacement invalidates stale work
+  ---
+  duration_ms: 16.9244
+  ...
+# Subtest: different subsystem slots install and retire independently
+ok 8 - different subsystem slots install and retire independently
+  ---
+  duration_ms: 125.5337
+  ...
+# Subtest: pre-install application traffic disposes the candidate without creating current
+ok 9 - pre-install application traffic disposes the candidate without creating current
+  ---
+  duration_ms: 20.1669
+  ...
+# Subtest: Renderer token and S/G/P replacement synchronously revoke stale pending material
+ok 10 - Renderer token and S/G/P replacement synchronously revoke stale pending material
+  ---
+  duration_ms: 12.6108
+  ...
+# Subtest: post-install Runner commit failure retires B and never resurrects A
+ok 11 - post-install Runner commit failure retires B and never resurrects A
+  ---
+  duration_ms: 52.158
+  ...
+# Subtest: proactive same-generation replacement cuts over from A to B exactly once
+ok 12 - proactive same-generation replacement cuts over from A to B exactly once
+  ---
+  duration_ms: 61.5211
+  ...
+# Subtest: Renderer authority transition closes and forgets the retired token binding
+ok 13 - Renderer authority transition closes and forgets the retired token binding
+  ---
+  duration_ms: 25.9856
+  ...
+# Subtest: finite role-undelivered buffer overflow retires the whole pair and permits fresh same-generation install
+ok 14 - finite role-undelivered buffer overflow retires the whole pair and permits fresh same-generation install
+  ---
+  duration_ms: 39.2101
+  ...
+# Subtest: test\\helpers\\m11-render-vertical.mjs
+ok 3 - test\\helpers\\m11-render-vertical.mjs
+  ---
+  duration_ms: 579.6784
+  ...
+# Subtest: Control rendezvous converges in both arrival orders with one-shot endpoints
+ok 16 - Control rendezvous converges in both arrival orders with one-shot endpoints
+  ---
+  duration_ms: 102.5746
+  ...
+# Subtest: Control rendezvous cancellation does not consume the opposite side
+ok 17 - Control rendezvous cancellation does not consume the opposite side
+  ---
+  duration_ms: 13.866
+  ...
+# Subtest: real M10 Main → Desktop → Hostra vertical rebaselines business input after Data reconnect
+ok 18 - real M10 Main → Desktop → Hostra vertical rebaselines business input after Data reconnect
+  ---
+  duration_ms: 613.884
+  ...
+# Subtest: real M11 Main → Desktop → Hostra Render vertical converges and rebaselines
+ok 19 - real M11 Main → Desktop → Hostra Render vertical converges and rebaselines
+  ---
+  duration_ms: 681.7918
+  ...
+# Subtest: M12 Vertical A: production prepare → FSDB → Desktop HTTP → Hostra child → scope.content
+ok 20 - M12 Vertical A: production prepare → FSDB → Desktop HTTP → Hostra child → scope.content
+  ---
+  duration_ms: 628.562
+  ...
+# Subtest: M12 Vertical B: production prepare → FSDB → Desktop HTTP → Renderer ResourceClient
+ok 21 - M12 Vertical B: production prepare → FSDB → Desktop HTTP → Renderer ResourceClient
+  ---
+  duration_ms: 85.7706
+  ...
+# Subtest: real M9 Main → Desktop Broker → Hostra Runner vertical installs and recovers fresh Data peers
+ok 22 - real M9 Main → Desktop Broker → Hostra Runner vertical installs and recovers fresh Data peers
+  ---
+  duration_ms: 609.72
+  ...
+# Subtest: programmatic product close uses the one cleanup funnel
+ok 23 - programmatic product close uses the one cleanup funnel
+  ---
+  duration_ms: 242.4832
+  ...
+# Subtest: Hostra RPC terminal is product-terminal
+ok 24 - Hostra RPC terminal is product-terminal
+  ---
+  duration_ms: 122.2883
+  ...
+# Subtest: openWindow failure preserves the cause and closes partial resources
+ok 25 - openWindow failure preserves the cause and closes partial resources
+  ---
+  duration_ms: 165.1502
+  ...
+# Subtest: Desktop input source preserves trust, State-before-Event and physical mappings
+ok 26 - Desktop input source preserves trust, State-before-Event and physical mappings
+  ---
+  duration_ms: 9.1716
+  ...
+1..26
+# tests 26
+# suites 0
+# pass 26
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1625.0536

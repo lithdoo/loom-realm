@@ -1,0 +1,333 @@
+
+> @loomrealm/subsystem@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/subsystem@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: author helpers keep the M4 surface explicit and validated
+ok 1 - author helpers keep the M4 surface explicit and validated
+  ---
+  duration_ms: 5.2812
+  ...
+# Subtest: RenderDomain author surface includes update without exposing publication types
+ok 2 - RenderDomain author surface includes update without exposing publication types
+  ---
+  duration_ms: 1.7051
+  ...
+# Subtest: author root and trusted host surface stay separated
+ok 3 - author root and trusted host surface stay separated
+  ---
+  duration_ms: 2.4777
+  ...
+# Subtest: M12 author declarations expose only the frozen Content projection
+ok 4 - M12 author declarations expose only the frozen Content projection
+  ---
+  duration_ms: 10.7951
+  ...
+# Subtest: trusted host keeps the exact M8 protocol and port dependency direction
+ok 5 - trusted host keeps the exact M8 protocol and port dependency direction
+  ---
+  duration_ms: 2.2226
+  ...
+# Subtest: M10 author declarations expose the exact minimal Input surface
+ok 6 - M10 author declarations expose the exact minimal Input surface
+  ---
+  duration_ms: 4.1067
+  ...
+# Subtest: ContentReadError and author surface have the exact frozen shape
+ok 7 - ContentReadError and author surface have the exact frozen shape
+  ---
+  duration_ms: 2.0375
+  ...
+# Subtest: local validation is synchronous and starts zero HTTP requests
+ok 8 - local validation is synchronous and starts zero HTTP requests
+  ---
+  duration_ms: 36.624
+  ...
+# Subtest: record/resource reads map errors, versions, hierarchy, cancellation, and value ownership
+ok 9 - record/resource reads map errors, versions, hierarchy, cancellation, and value ownership
+  ---
+  duration_ms: 75.181
+  ...
+# Subtest: listener contributions own Interest while registrations remain independent
+ok 10 - listener contributions own Interest while registrations remain independent
+  ---
+  duration_ms: 16.4237
+  ...
+# Subtest: invalid configuration is atomic and preserves the previous contribution
+ok 11 - invalid configuration is atomic and preserves the previous contribution
+  ---
+  duration_ms: 1.5797
+  ...
+# Subtest: retained State is detached, deeply immutable, replayed synchronously, and cleared on true union removal
+ok 12 - retained State is detached, deeply immutable, replayed synchronously, and cleared on true union removal
+  ---
+  duration_ms: 0.9399
+  ...
+# Subtest: retained State preserves an own __proto__ JSON member without prototype mutation
+ok 13 - retained State preserves an own __proto__ JSON member without prototype mutation
+  ---
+  duration_ms: 0.506
+  ...
+# Subtest: dormant handlers reactivate with baseline while another contribution keeps State live
+ok 14 - dormant handlers reactivate with baseline while another contribution keeps State live
+  ---
+  duration_ms: 0.4779
+  ...
+# Subtest: reactivation baselines use a stable registration snapshot
+ok 15 - reactivation baselines use a stable registration snapshot
+  ---
+  duration_ms: 0.5315
+  ...
+# Subtest: handler delivery uses global registration order, a stable snapshot, and async isolation
+ok 16 - handler delivery uses global registration order, a stable snapshot, and async isolation
+  ---
+  duration_ms: 3.5067
+  ...
+# Subtest: mutation gate retains latest State, drops Event, and converges State on reopen
+ok 17 - mutation gate retains latest State, drops Event, and converges State on reopen
+  ---
+  duration_ms: 1.2041
+  ...
+# Subtest: Reset clears suppressed State and multi-channel convergence is canonical
+ok 18 - Reset clears suppressed State and multi-channel convergence is canonical
+  ---
+  duration_ms: 1.743
+  ...
+# Subtest: Interest publisher keeps only the latest full Registry behind one in-flight send
+ok 19 - Interest publisher keeps only the latest full Registry behind one in-flight send
+  ---
+  duration_ms: 3.8456
+  ...
+# Subtest: RenderDomain commits detached local authority and enforces lifetime identity
+ok 20 - RenderDomain commits detached local authority and enforces lifetime identity
+  ---
+  duration_ms: 7.9249
+  ...
+# Subtest: Render author validation is atomic and classifies shape versus hard limits
+ok 21 - Render author validation is atomic and classifies shape versus hard limits
+  ---
+  duration_ms: 1.2453
+  ...
+# Subtest: Render author validation rejects non-scalar strings in generic data synchronously
+ok 22 - Render author validation rejects non-scalar strings in generic data synchronously
+  ---
+  duration_ms: 1.6479
+  ...
+# Subtest: fresh carrier publishes Registry then baseline and orders Event after target
+ok 23 - fresh carrier publishes Registry then baseline and orders Event after target
+  ---
+  duration_ms: 12.6546
+  ...
+# Subtest: close discards pending Domain work and waits for an already-started send before removal
+ok 24 - close discards pending Domain work and waits for an already-started send before removal
+  ---
+  duration_ms: 3.0369
+  ...
+# Subtest: revision exhaustion rolls one live business Domain to a fresh wire identity
+ok 25 - revision exhaustion rolls one live business Domain to a fresh wire identity
+  ---
+  duration_ms: 3.3113
+  ...
+# Subtest: revision exhaustion publishes the latest authority when later state work is pending
+ok 26 - revision exhaustion publishes the latest authority when later state work is pending
+  ---
+  duration_ms: 5.5987
+  ...
+# Subtest: Runtime cleanup closes every still-live RenderDomain
+ok 27 - Runtime cleanup closes every still-live RenderDomain
+  ---
+  duration_ms: 0.6178
+  ...
+# Subtest: Domain count and publication pressure remain bounded without rejecting valid author commits
+ok 28 - Domain count and publication pressure remain bounded without rejecting valid author commits
+  ---
+  duration_ms: 138.4224
+  ...
+# Subtest: retained Event is an authoritative coalescing barrier
+ok 29 - retained Event is an authoritative coalescing barrier
+  ---
+  duration_ms: 3.3456
+  ...
+# Subtest: an Event is a coalescing barrier only for its own Domain
+ok 30 - an Event is a coalescing barrier only for its own Domain
+  ---
+  duration_ms: 8.746
+  ...
+# Subtest: an unemitted create-close lifecycle never publishes stale Domain presence
+ok 31 - an unemitted create-close lifecycle never publishes stale Domain presence
+  ---
+  duration_ms: 1.263
+  ...
+# Subtest: RenderDomain.update mutates existing node attrs/data/zIndex without a Snapshot after baseline
+ok 32 - RenderDomain.update mutates existing node attrs/data/zIndex without a Snapshot after baseline
+  ---
+  duration_ms: 2.4367
+  ...
+# Subtest: RenderDomain.update is local-atomic and distinguishes missing from explicit undefined
+ok 33 - RenderDomain.update is local-atomic and distinguishes missing from explicit undefined
+  ---
+  duration_ms: 2.8276
+  ...
+# Subtest: baseline in-flight update stays a Snapshot and later updates become Patches
+ok 34 - baseline in-flight update stays a Snapshot and later updates become Patches
+  ---
+  duration_ms: 2.6875
+  ...
+# Subtest: Event barrier keeps later updates from coalescing into an earlier Snapshot
+ok 35 - Event barrier keeps later updates from coalescing into an earlier Snapshot
+  ---
+  duration_ms: 2.4282
+  ...
+# Subtest: full queue coalesces same-Domain updates to the latest Snapshot
+ok 36 - full queue coalesces same-Domain updates to the latest Snapshot
+  ---
+  duration_ms: 161.3993
+  ...
+# Subtest: zIndex-only update maps to an empty-ops Patch
+ok 37 - zIndex-only update maps to an empty-ops Patch
+  ---
+  duration_ms: 1.6273
+  ...
+# Subtest: send failure invalidates the old peer instead of retrying a Patch
+ok 38 - send failure invalidates the old peer instead of retrying a Patch
+  ---
+  duration_ms: 1.9765
+  ...
+# Subtest: update op count accepts 4096 and rejects 4097 atomically
+ok 39 - update op count accepts 4096 and rejects 4097 atomically
+  ---
+  duration_ms: 655.9438
+  ...
+# Subtest: full queue drops the oldest Event before coalescing authoritative work
+ok 40 - full queue drops the oldest Event before coalescing authoritative work
+  ---
+  duration_ms: 62.387
+  ...
+# Subtest: ready Data acquisition is non-blocking and terminal reacquires a fresh peer
+ok 41 - ready Data acquisition is non-blocking and terminal reacquires a fresh peer
+  ---
+  duration_ms: 25.8086
+  ...
+# Subtest: shutdown aborts pending Data and closes a late carrier without changing Runtime result
+ok 42 - shutdown aborts pending Data and closes a late carrier without changing Runtime result
+  ---
+  duration_ms: 5.0143
+  ...
+# Subtest: trusted Data construction failure stops acquisition only for the host lifetime
+ok 43 - trusted Data construction failure stops acquisition only for the host lifetime
+  ---
+  duration_ms: 5.7479
+  ...
+# Subtest: throwing carrier close getter stays isolated during Subsystem construction failure
+ok 44 - throwing carrier close getter stays isolated during Subsystem construction failure
+  ---
+  duration_ms: 2.6166
+  ...
+# Subtest: Data Binding rejection does not fail Runtime and is not retried for the host lifetime
+ok 45 - Data Binding rejection does not fail Runtime and is not retried for the host lifetime
+  ---
+  duration_ms: 3.7783
+  ...
+# Subtest: hanging Data close shares the Runtime cleanup deadline and cannot replace graceful result
+ok 46 - hanging Data close shares the Runtime cleanup deadline and cannot replace graceful result
+  ---
+  duration_ms: 31.047
+  ...
+# Subtest: initialize creates context, activate starts once, and graceful shutdown aborts without waiting for late handler
+ok 47 - initialize creates context, activate starts once, and graceful shutdown aborts without waiting for late handler
+  ---
+  duration_ms: 15.8175
+  ...
+# Subtest: accepted child call resumes only after frame.resume ACK and returns exactly one outcome
+ok 48 - accepted child call resumes only after frame.resume ACK and returns exactly one outcome
+  ---
+  duration_ms: 11.4289
+  ...
+# Subtest: recoverable call rejection is catchable and keeps the current activation usable
+ok 49 - recoverable call rejection is catchable and keeps the current activation usable
+  ---
+  duration_ms: 8.6156
+  ...
+# Subtest: recoverable frame.call converges retained State before business observes rejection
+ok 50 - recoverable frame.call converges retained State before business observes rejection
+  ---
+  duration_ms: 16.4144
+  ...
+# Subtest: committed frame.call discards suppressed old-Activation State
+ok 51 - committed frame.call discards suppressed old-Activation State
+  ---
+  duration_ms: 12.6758
+  ...
+# Subtest: Runtime-fatal call never re-enters the business continuation
+ok 52 - Runtime-fatal call never re-enters the business continuation
+  ---
+  duration_ms: 6.6366
+  ...
+# Subtest: Runtime Control request timeout has one Host-owned failure classification
+ok 53 - Runtime Control request timeout has one Host-owned failure classification
+  ---
+  duration_ms: 1012.705
+  ...
+# Subtest: administrative suspend aborts the Frame and discards a late handler result
+ok 54 - administrative suspend aborts the Frame and discards a late handler result
+  ---
+  duration_ms: 3.1087
+  ...
+# Subtest: uncaught business exception becomes a sanitized failed Frame outcome
+ok 55 - uncaught business exception becomes a sanitized failed Frame outcome
+  ---
+  duration_ms: 5.1309
+  ...
+# Subtest: terminal cleanup is bounded and hook failure never replaces the primary cause
+ok 56 - terminal cleanup is bounded and hook failure never replaces the primary cause
+  ---
+  duration_ms: 0.4705
+  ...
+# Subtest: a hanging shutdown hook cannot keep runSubsystem pending forever
+ok 57 - a hanging shutdown hook cannot keep runSubsystem pending forever
+  ---
+  duration_ms: 21.1369
+  ...
+# Subtest: V-09: sync initial, getter-before-callback, equal suppress, detached + host wire
+ok 58 - V-09: sync initial, getter-before-callback, equal suppress, detached + host wire
+  ---
+  duration_ms: 27.0054
+  ...
+# Subtest: V-10: listener throw/reject contained; reentrant subscribe/unsubscribe
+ok 59 - V-10: listener throw/reject contained; reentrant subscribe/unsubscribe
+  ---
+  duration_ms: 2.3767
+  ...
+# Subtest: V-11: Data loss retains size; equal fresh baseline suppresses; different notifies
+ok 60 - V-11: Data loss retains size; equal fresh baseline suppresses; different notifies
+  ---
+  duration_ms: 7.946
+  ...
+# Subtest: V-12: post-terminal subscribe is inert without initial callback
+ok 61 - V-12: post-terminal subscribe is inert without initial callback
+  ---
+  duration_ms: 4.4124
+  ...
+# Subtest: V-13: viewport updates independent of Frame/InputTarget changes
+ok 62 - V-13: viewport updates independent of Frame/InputTarget changes
+  ---
+  duration_ms: 17.9998
+  ...
+# Subtest: C-02: thenable then-getter throw isolated with sync throw and Promise.reject
+ok 63 - C-02: thenable then-getter throw isolated with sync throw and Promise.reject
+  ---
+  duration_ms: 8.121
+  ...
+1..63
+# tests 63
+# suites 0
+# pass 63
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1519.1394

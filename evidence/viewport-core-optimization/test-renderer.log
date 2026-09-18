@@ -1,0 +1,278 @@
+
+> @loomrealm/renderer@0.1.0-alpha.0 test
+> npm run build && node --test
+
+
+> @loomrealm/renderer@0.1.0-alpha.0 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: Renderer exposes the additive M10 construction seam and unchanged dependencies
+ok 1 - Renderer exposes the additive M10 construction seam and unchanged dependencies
+  ---
+  duration_ms: 11.5362
+  ...
+# Subtest: M12 ResourceClient stays off the Renderer root surface
+ok 2 - M12 ResourceClient stays off the Renderer root surface
+  ---
+  duration_ms: 99.4412
+  ...
+# Subtest: holder atomically installs initial peer+Snapshot before consuming later state
+ok 3 - holder atomically installs initial peer+Snapshot before consuming later state
+  ---
+  duration_ms: 17.4831
+  ...
+# Subtest: public holder factory keeps old M8 calls valid while accepting the M10 source seam
+ok 4 - public holder factory keeps old M8 calls valid while accepting the M10 source seam
+  ---
+  duration_ms: 1.766
+  ...
+# Subtest: replacement identity ignores old late state and old terminal
+ok 5 - replacement identity ignores old late state and old terminal
+  ---
+  duration_ms: 7.4335
+  ...
+# Subtest: concurrent connect on one holder fails fast without creating local currentness
+ok 6 - concurrent connect on one holder fails fast without creating local currentness
+  ---
+  duration_ms: 2.2318
+  ...
+# Subtest: Data reconciliation acquires exact authority, aborts removal, and closes late results
+ok 7 - Data reconciliation acquires exact authority, aborts removal, and closes late results
+  ---
+  duration_ms: 5.7922
+  ...
+# Subtest: Data terminal reacquires while one slot failure remains isolated until Control changes
+ok 8 - Data terminal reacquires while one slot failure remains isolated until Control changes
+  ---
+  duration_ms: 8.8728
+  ...
+# Subtest: trusted Renderer Data construction failure closes the carrier and suppresses same-identity retry
+ok 9 - trusted Renderer Data construction failure closes the carrier and suppresses same-identity retry
+  ---
+  duration_ms: 5.5259
+  ...
+# Subtest: throwing carrier close getter stays isolated during Renderer construction failure
+ok 10 - throwing carrier close getter stays isolated during Renderer construction failure
+  ---
+  duration_ms: 3.1497
+  ...
+# Subtest: same-Session Control participant replacement preserves retired Domain identity history
+ok 11 - same-Session Control participant replacement preserves retired Domain identity history
+  ---
+  duration_ms: 13.6082
+  ...
+# Subtest: same-Session Control participant replacement preserves Node one-shot history
+ok 12 - same-Session Control participant replacement preserves Node one-shot history
+  ---
+  duration_ms: 10.7277
+  ...
+# Subtest: Interest-first and authority-first both produce one fresh State baseline
+ok 13 - Interest-first and authority-first both produce one fresh State baseline
+  ---
+  duration_ms: 7.2439
+  ...
+# Subtest: State snapshots preserve own __proto__ and keep non-JSON prototypes invalid
+ok 14 - State snapshots preserve own __proto__ and keep non-JSON prototypes invalid
+  ---
+  duration_ms: 1.4591
+  ...
+# Subtest: publisher coalesces State only within Event barriers and keeps one send in flight
+ok 15 - publisher coalesces State only within Event barriers and keeps one send in flight
+  ---
+  duration_ms: 12.5635
+  ...
+# Subtest: same-carrier lease replacement emits Reset before the fresh lease baseline
+ok 16 - same-carrier lease replacement emits Reset before the fresh lease baseline
+  ---
+  duration_ms: 2.155
+  ...
+# Subtest: state producer loss Reset-rebaselines remaining effective State
+ok 17 - state producer loss Reset-rebaselines remaining effective State
+  ---
+  duration_ms: 1.5899
+  ...
+# Subtest: retired Data publisher discards not-started work and cannot resurrect
+ok 18 - retired Data publisher discards not-started work and cannot resurrect
+  ---
+  duration_ms: 1.2183
+  ...
+# Subtest: Event overflow is bounded and surviving not-yet-emitted Events preserve order
+ok 19 - Event overflow is bounded and surviving not-yet-emitted Events preserve order
+  ---
+  duration_ms: 18.4029
+  ...
+# Subtest: producer return requires fresh State while Event return remains future-only
+ok 20 - producer return requires fresh State while Event return remains future-only
+  ---
+  duration_ms: 1.4395
+  ...
+# Subtest: source is Control-epoch scoped, restarts on replacement, and ignores late old emit
+ok 21 - source is Control-epoch scoped, restarts on replacement, and ignores late old emit
+  ---
+  duration_ms: 17.7534
+  ...
+# Subtest: source start failure discards staged facts, keeps Control current, and does not retry in epoch
+ok 22 - source start failure discards staged facts, keeps Control current, and does not retry in epoch
+  ---
+  duration_ms: 5.2345
+  ...
+# Subtest: fresh source State and paired transition flow only through gate and current Data
+ok 23 - fresh source State and paired transition flow only through gate and current Data
+  ---
+  duration_ms: 17.1034
+  ...
+# Subtest: Control generation replacement retires old Data before new Input facts enter the gate
+ok 24 - Control generation replacement retires old Data before new Input facts enter the gate
+  ---
+  duration_ms: 9.541
+  ...
+# Subtest: presentation resource façade maps errors and returns caller-owned bytes
+ok 25 - presentation resource façade maps errors and returns caller-owned bytes
+  ---
+  duration_ms: 7.9093
+  ...
+# Subtest: presentation resource lifetime and caller cancellation both close reads
+ok 26 - presentation resource lifetime and caller cancellation both close reads
+  ---
+  duration_ms: 1.4115
+  ...
+# Subtest: post-teardown well-formed reads cancel before the private client is called
+ok 27 - post-teardown well-formed reads cancel before the private client is called
+  ---
+  duration_ms: 0.6433
+  ...
+# Subtest: malformed signal-like input is rejected before the private client is called
+ok 28 - malformed signal-like input is rejected before the private client is called
+  ---
+  duration_ms: 0.8811
+  ...
+# Subtest: presentation seam reads current Control/Store facts and only observes successful commits
+ok 29 - presentation seam reads current Control/Store facts and only observes successful commits
+  ---
+  duration_ms: 26.3302
+  ...
+# Subtest: Registry and Snapshot establish one atomic current replica
+ok 30 - Registry and Snapshot establish one atomic current replica
+  ---
+  duration_ms: 4.5701
+  ...
+# Subtest: production presentation reads only narrow current Store facts
+ok 31 - production presentation reads only narrow current Store facts
+  ---
+  duration_ms: 0.7604
+  ...
+# Subtest: Patch applies insert, move, update and remove in order with one final commit
+ok 32 - Patch applies insert, move, update and remove in order with one final commit
+  ---
+  duration_ms: 2.0808
+  ...
+# Subtest: failed Patch leaves the committed replica unchanged
+ok 33 - failed Patch leaves the committed replica unchanged
+  ---
+  duration_ms: 0.7946
+  ...
+# Subtest: node and Domain one-shot identity survives same-generation carrier replacement
+ok 34 - node and Domain one-shot identity survives same-generation carrier replacement
+  ---
+  duration_ms: 0.961
+  ...
+# Subtest: well-formed stale Events are accepted and dropped
+ok 35 - well-formed stale Events are accepted and dropped
+  ---
+  duration_ms: 0.7428
+  ...
+# Subtest: continuity violations are protocol-fatal
+ok 36 - continuity violations are protocol-fatal
+  ---
+  duration_ms: 1.2323
+  ...
+# Subtest: logical stacking uses zIndex then UTF-8 lexical domain identity
+ok 37 - logical stacking uses zIndex then UTF-8 lexical domain identity
+  ---
+  duration_ms: 0.9009
+  ...
+# Subtest: fresh generation creates a fresh Domain and Node identity universe
+ok 38 - fresh generation creates a fresh Domain and Node identity universe
+  ---
+  duration_ms: 1.0631
+  ...
+# Subtest: update-only Patch shares untouched large data and clones the path once
+ok 39 - update-only Patch shares untouched large data and clones the path once
+  ---
+  duration_ms: 2.0144
+  ...
+# Subtest: zIndex-only Patch reuses roots identity
+ok 40 - zIndex-only Patch reuses roots identity
+  ---
+  duration_ms: 0.6001
+  ...
+# Subtest: update-only Patch is protocol-fatal on intermediate over-limit even if a later op would shrink
+ok 41 - update-only Patch is protocol-fatal on intermediate over-limit even if a later op would shrink
+  ---
+  duration_ms: 3.361
+  ...
+# Subtest: Renderer resource client validates locally before HTTP
+ok 42 - Renderer resource client validates locally before HTTP
+  ---
+  duration_ms: 35.5916
+  ...
+# Subtest: expected version, hierarchical routing, and immutable cache identity are enforced
+ok 43 - expected version, hierarchical routing, and immutable cache identity are enforced
+  ---
+  duration_ms: 53.2841
+  ...
+# Subtest: client captures native fetch before business globals can be replaced
+ok 44 - client captures native fetch before business globals can be replaced
+  ---
+  duration_ms: 11.2981
+  ...
+# Subtest: V-01: normalize trusted raw samples; ignore illegal; no getter reads
+ok 45 - V-01: normalize trusted raw samples; ignore illegal; no getter reads
+  ---
+  duration_ms: 2.2083
+  ...
+# Subtest: V-02: sync bootstrap sample and deferred first measurable sample
+ok 46 - V-02: sync bootstrap sample and deferred first measurable sample
+  ---
+  duration_ms: 14.9236
+  ...
+# Subtest: V-03: start failure local; late old callback inert after participant replace
+ok 47 - V-03: start failure local; late old callback inert after participant replace
+  ---
+  duration_ms: 5.1909
+  ...
+# Subtest: V-08: same participant two peers each get baseline; source not restarted on reconnect
+ok 48 - V-08: same participant two peers each get baseline; source not restarted on reconnect
+  ---
+  duration_ms: 7.7515
+  ...
+# Subtest: C-03: extra symbol own-key sample ignored; getter not executed
+ok 49 - C-03: extra symbol own-key sample ignored; getter not executed
+  ---
+  duration_ms: 0.4219
+  ...
+# Subtest: Web Presentation Config v1 accepts only its closed frozen shape
+ok 50 - Web Presentation Config v1 accepts only its closed frozen shape
+  ---
+  duration_ms: 4.3671
+  ...
+# Subtest: validation completes before prepared Content resolution begins
+ok 51 - validation completes before prepared Content resolution begins
+  ---
+  duration_ms: 1.7567
+  ...
+# Subtest: preparation fixes declaration order, versions and exact MIME essence
+ok 52 - preparation fixes declaration order, versions and exact MIME essence
+  ---
+  duration_ms: 2.4219
+  ...
+1..52
+# tests 52
+# suites 0
+# pass 52
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 503.4161
