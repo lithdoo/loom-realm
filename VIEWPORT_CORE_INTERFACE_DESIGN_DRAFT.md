@@ -17,6 +17,6 @@
 
 ## Agent 指令与 STOP
 
-冻结账本记录正式受审 subject SHA 与批准之前，**禁止开始生产协议实现**。签署后按 ledger C1 Data → C2 Renderer → C3 Subsystem → C4 real vertical 分阶段实施。API/wire/state machine 只能依完整正式契约；不得按旧 package DESlGN、历史 draft/Map 方案自行扩展 schema、queue、lifecycle 或测试门槛。发现设计矛盾、需要越界、无法证明 currentness/boundedness，应保留现场、提交最小 fixture、文件行号、expected/actual 并通过新设计提交重新冻结；不得删旧测试或用 mock-only 代替真实架构 vertical。
+冻结账本记录正式受审 subject SHA 与批准之前，**禁止开始生产协议实现**。签署后按 ledger C1 Data → C2 Renderer → C3 Subsystem → C4 real vertical 分阶段实施。API/wire/state machine 只能依完整正式契约；不得按旧 package DESIGN、历史 draft/Map 方案自行扩展 schema、queue、lifecycle 或测试门槛。发现设计矛盾、需要越界、无法证明 currentness/boundedness，应保留现场、提交最小 fixture、文件行号、expected/actual 并通过新设计提交重新冻结；不得删旧测试或用 mock-only 代替真实架构 vertical。
 
 **状态严格区分：** Docs Frozen（独立审查+owner 批准同一文档 SHA）≠ implemented（新代码）≠ architecture qualified（同一 executable SHA 的真 holder+peers+host 和回归 PASS）≠ Desktop/Map product closed。当前均未完成；这次没有实现 `play.bat` 真拖窗。
