@@ -30,5 +30,9 @@ DOCS_FREEZE_SHA: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
 - test/viewport-state-v1/qualification.test.mjs
 - test/renderer-data-profile-v1/revision3.test.mjs
 
-## Out of scope / NOT RUN as product
-- Map / Desktop real window source / play.bat dynamic resize / walking performance
+IMPLEMENTATION_SHA (code): d42bc6e7755330e74263d1ec55a14998e3718d43
+LEDGER_SHA (docs-only follow-up): 28fec87ac286b76df575985e78b09337dd6d5d94
+Branch tip: 28fec87ac286b76df575985e78b09337dd6d5d94
+Pushed: origin/cursor/resize-viewport
+Architecture Qualified: YES (on d42bc6e code + listed regressions)
+Desktop/Map product: OUT OF SCOPE / NOT RUN
