@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 test("Renderer exposes the additive M10 construction seam and unchanged dependencies", async () => {
   const declaration = await readFile(new URL("../dist/control.d.ts", import.meta.url), "utf8");
-  assert.match(declaration, /createRendererControlHolder\(data\?: RendererDataBinding, input\?: RendererInputSource\): RendererControlHolder/);
+  assert.match(declaration, /createRendererControlHolder\(data\?: RendererDataBinding, input\?: RendererInputSource, viewport\?: RendererViewportSource\): RendererControlHolder/);
   assert.doesNotMatch(declaration, /(RendererPlatform|RendererServices|registerDataBinding)/);
 
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
@@ -17,6 +17,9 @@ test("Renderer exposes the additive M10 construction seam and unchanged dependen
   assert.match(input, /interface RendererInputSource/);
   assert.match(input, /type RendererInputSourceChange/);
   assert.match(input, /from "@loomrealm\/data"/);
+  const viewport = await readFile(new URL("../dist/viewport.d.ts", import.meta.url), "utf8");
+  assert.match(viewport, /interface RendererViewportSource/);
+  assert.doesNotMatch(viewport, /(window|Window|devicePixelRatio|document)/);
 });
 
 test("M12 ResourceClient stays off the Renderer root surface", async () => {

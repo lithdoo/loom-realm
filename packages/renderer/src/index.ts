@@ -8,3 +8,4 @@ export type {
   RendererInputSource,
   RendererInputSourceChange,
 } from "./input.js";
+export type { RendererViewportSource } from "./viewport.js";

@@ -8,6 +8,7 @@ import {
   validateRenderPatch,
   validateRenderSnapshot,
 } from "./render-codec.js";
+import { validateViewportState } from "./viewport-codec.js";
 import {
   assertBoundedJson,
   fail,
@@ -34,6 +35,9 @@ function validateByType(raw: unknown): RendererDataMessageV1 {
   if (type === "render.snapshot") return validateRenderSnapshot(raw);
   if (type === "render.patch") return validateRenderPatch(raw);
   if (type === "render.event") return validateRenderEvent(raw);
+  if (type === "viewport.state") return validateViewportState(raw);
+  // Unknown `viewport.*` kinds (for example `viewport.foo`) are namespace-level
+  // unknowns and stay in the `profile` family together with every other unknown type.
   fail(
     type.startsWith("input.") ? "input" : type.startsWith("render.") ? "render" : "profile",
     "unknown data message type",
@@ -42,14 +46,20 @@ function validateByType(raw: unknown): RendererDataMessageV1 {
 
 function inboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
-    ? type === "input.state" || type === "input.event" || type === "input.reset"
+    ? type === "input.state" || type === "input.event" || type === "input.reset" || type === "viewport.state"
     : type === "input.interest" || type.startsWith("render.");
 }
 
 function outboundAllowed(role: DataRole, type: string): boolean {
   return role === "subsystem"
     ? type === "input.interest" || type.startsWith("render.")
-    : type === "input.state" || type === "input.event" || type === "input.reset";
+    : type === "input.state" || type === "input.event" || type === "input.reset" || type === "viewport.state";
+}
+
+function familyOfType(type: string): "input" | "render" | "viewport" {
+  if (type.startsWith("input.")) return "input";
+  if (type.startsWith("render.")) return "render";
+  return "viewport";
 }
 
 export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV1 {
@@ -66,7 +76,7 @@ export function decodeForRole(raw: string, role: DataRole): RendererDataMessageV
   const message = validateByType(parsed);
   const t = (message as { type: string }).type;
   if (!inboundAllowed(role, t)) {
-    fail(t.startsWith("input.") ? "input" : "render", "message direction invalid for role");
+    fail(familyOfType(t), "message direction invalid for role");
   }
   return message;
 }
@@ -75,7 +85,7 @@ export function encodeForRole(message: RendererDataMessageV1, role: DataRole): s
   const validated = validateByType(message);
   const t = (validated as { type: string }).type;
   if (!outboundAllowed(role, t)) {
-    fail(t.startsWith("input.") ? "input" : "render", "outbound direction invalid for role");
+    fail(familyOfType(t), "outbound direction invalid for role");
   }
   assertJsonValue(validated as unknown);
   if (jsonDepth(validated as unknown as JsonValue) > MAX_JSON_DEPTH) {

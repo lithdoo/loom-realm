@@ -21,6 +21,7 @@ import {
   type RendererPresentationView,
 } from "./internal/presentation-seam.js";
 import type { RendererInputSource, RendererInputSourceChange } from "./input.js";
+import { normalizeViewportSample, type RendererViewportSource, type ViewportSample } from "./viewport.js";
 
 export interface RendererControlCurrent {
   readonly peer: RendererControlPeer;
@@ -114,10 +115,31 @@ function validateRendererInputSource(
   if (!valid) throw new TypeError("Invalid RendererInputSource");
 }
 
+function validateRendererViewportSource(
+  viewport: RendererViewportSource | undefined,
+): void {
+  if (viewport === undefined) return;
+  let valid = false;
+  try {
+    valid = viewport !== null && typeof viewport === "object" &&
+      typeof viewport.start === "function";
+  } catch {
+    // Accessor-backed integration objects are not valid source capabilities.
+  }
+  if (!valid) throw new TypeError("Invalid RendererViewportSource");
+}
+
 interface SourceSubscription {
   readonly peer: RendererControlPeer;
   phase: "starting" | "current" | "invalid";
   readonly staged: RendererInputSourceChange[];
+  stop: (() => void) | null;
+}
+
+interface ViewportSourceSubscription {
+  readonly peer: RendererControlPeer;
+  phase: "starting" | "current" | "invalid";
+  staged: ViewportSample | null;
   stop: (() => void) | null;
 }
 
@@ -129,6 +151,8 @@ class ControlHolder implements RendererControlHolder {
   private readonly renderHistories = new Map<string, RendererRenderStore>();
   private readonly inputGate = new RendererInputGate();
   private sourceSubscription: SourceSubscription | null = null;
+  private viewportSubscription: ViewportSourceSubscription | null = null;
+  private latestViewport: ViewportSample | null = null;
   private presentationEffect: RendererPresentationEffect | null = null;
   private readonly presentationSource: RendererPresentationSource = Object.freeze({
     read: () => this.readPresentation(),
@@ -137,6 +161,7 @@ class ControlHolder implements RendererControlHolder {
   constructor(
     private readonly data?: RendererDataBinding,
     private readonly input?: RendererInputSource,
+    private readonly viewportSource?: RendererViewportSource,
   ) {}
 
   current(): RendererControlCurrent | null {
@@ -175,6 +200,7 @@ class ControlHolder implements RendererControlHolder {
       this.currentValue = null;
       this.clearAllData();
       this.stopInputSource();
+      this.stopViewportSource();
       this.inputGate.setControl(null);
     }
     this.prepareRenderSession(outcome.snapshot.sessionId);
@@ -182,6 +208,7 @@ class ControlHolder implements RendererControlHolder {
     this.currentValue = installed;
     this.inputGate.setControl(outcome.snapshot);
     this.startInputSource(peer);
+    this.startViewportSource(peer);
     this.reconcileData(peer, outcome.snapshot);
     this.notifyPresentation();
     void this.consume(peer);
@@ -190,6 +217,7 @@ class ControlHolder implements RendererControlHolder {
       this.currentValue = null;
       this.clearAllData();
       this.stopInputSource();
+      this.stopViewportSource();
       this.inputGate.setControl(null);
     });
     return Object.freeze({ kind: "installed", current: installed });
@@ -381,6 +409,16 @@ class ControlHolder implements RendererControlHolder {
     slot.pending = null;
     slot.current = { identity: attempt.identity, peer };
     this.inputGate.installData(attempt.identity.subsystemKey, peer);
+    const viewportBaseline = this.latestViewport;
+    if (viewportBaseline !== null) {
+      // Fresh current peer: fresh publisher cursor; always resend the
+      // participant's latest valid size as the wire baseline.
+      peer.viewport.publishState({
+        type: "viewport.state",
+        width: viewportBaseline.width,
+        height: viewportBaseline.height,
+      });
+    }
     void peer.terminal.then(() => {
       if (slot.current?.peer !== peer) return;
       this.inputGate.retireData(attempt.identity.subsystemKey, peer);
@@ -566,6 +604,80 @@ class ControlHolder implements RendererControlHolder {
     }
   }
 
+  private startViewportSource(peer: RendererControlPeer): void {
+    const source = this.viewportSource;
+    this.latestViewport = null;
+    if (source === undefined) return;
+    const subscription: ViewportSourceSubscription = {
+      peer,
+      phase: "starting",
+      staged: null,
+      stop: null,
+    };
+    this.viewportSubscription = subscription;
+    const emit = (sample: Readonly<{ width: number; height: number }>): void => {
+      if (this.viewportSubscription !== subscription || subscription.phase === "invalid") return;
+      const normalized = normalizeViewportSample(sample);
+      if (normalized === null) return;
+      if (subscription.phase === "starting") {
+        subscription.staged = normalized;
+        return;
+      }
+      this.applyViewportSample(normalized);
+    };
+
+    try {
+      const stop = source.start(emit);
+      if (typeof stop !== "function") {
+        throw new TypeError("Viewport source start must return stop function");
+      }
+      subscription.stop = stop;
+      subscription.phase = "current";
+      const staged = subscription.staged;
+      subscription.staged = null;
+      if (staged !== null) this.applyViewportSample(staged);
+    } catch {
+      subscription.phase = "invalid";
+      subscription.staged = null;
+      if (this.viewportSubscription === subscription) this.viewportSubscription = null;
+      this.latestViewport = null;
+      try {
+        subscription.stop?.();
+      } catch {
+        // Failed viewport source bootstrap cleanup is locally contained.
+      }
+    }
+  }
+
+  private stopViewportSource(): void {
+    const subscription = this.viewportSubscription;
+    this.latestViewport = null;
+    if (subscription === null) return;
+    this.viewportSubscription = null;
+    subscription.phase = "invalid";
+    subscription.staged = null;
+    try {
+      subscription.stop?.();
+    } catch {
+      // Local stop failure cannot restore the retired viewport source.
+    }
+  }
+
+  private applyViewportSample(sample: ViewportSample): void {
+    const latest = this.latestViewport;
+    if (latest !== null && latest.width === sample.width && latest.height === sample.height) return;
+    this.latestViewport = sample;
+    for (const slot of this.dataSlots.values()) {
+      const current = slot.current;
+      if (current === null) continue;
+      current.peer.viewport.publishState({
+        type: "viewport.state",
+        width: sample.width,
+        height: sample.height,
+      });
+    }
+  }
+
   private validateSourceChange(change: RendererInputSourceChange): void {
     if (change === null || typeof change !== "object") {
       throw new TypeError("Invalid Renderer input source change");
@@ -603,8 +715,10 @@ class ControlHolder implements RendererControlHolder {
 export function createRendererControlHolder(
   data?: RendererDataBinding,
   input?: RendererInputSource,
+  viewport?: RendererViewportSource,
 ): RendererControlHolder {
   validateRendererDataBinding(data);
   validateRendererInputSource(input);
-  return new ControlHolder(data, input);
+  validateRendererViewportSource(viewport);
+  return new ControlHolder(data, input, viewport);
 }

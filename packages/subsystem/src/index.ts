@@ -18,6 +18,8 @@ export type {
   SubsystemDefinition,
   SubsystemDefinitionFactory,
   SubsystemScope,
+  ViewportSize,
+  Viewport,
 } from "./model.js";
 export type {
   InputStateChannel,

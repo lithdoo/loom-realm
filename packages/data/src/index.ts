@@ -10,7 +10,8 @@ export type {
   RenderDomainsV1, RenderNodeV1, RenderSnapshotV1, RenderNodeInsertV1, RenderNodeRemoveV1,
   RenderNodeMoveV1, StringMapDeltaV1, JsonObjectDeltaV1, RenderNodeUpdateV1, RenderPatchOpV1,
   RenderPatchV1, RenderEventV1, RenderUpdateMessageV1, RendererDataMessageV1,
+  ViewportStateV1,
   DataProtocolFamily, DataTerminal, DataSendOutcome, DataInboundDisposition,
   SubsystemDataHandlers, SubsystemDataPeerOptions, SubsystemInputDataPeer, SubsystemRenderDataPeer, SubsystemDataPeer,
-  RendererDataHandlers, RendererDataPeerOptions, RendererInputDataPeer, RendererDataPeer,
+  RendererDataHandlers, RendererDataPeerOptions, RendererInputDataPeer, RendererViewportDataPeer, RendererDataPeer,
 } from "./model.js";

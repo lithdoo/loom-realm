@@ -30,9 +30,25 @@ export interface Frame<TParams extends JsonValue = JsonValue> {
   ): Promise<FrameOutcome<TResult>>;
 }
 
+/**
+ * Immutable, detached Renderer logical presentation viewport size in CSS
+ * logical pixels. Historical after Data loss; never a paintability proof.
+ */
+export interface ViewportSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Runtime-scoped, read-only retained observation of the Renderer viewport. */
+export interface Viewport {
+  readonly current: ViewportSize | null;
+  subscribe(listener: (value: ViewportSize | null) => void): () => void;
+}
+
 export interface SubsystemScope {
   readonly signal: AbortSignal;
   readonly content: ContentClient;
+  readonly viewport: Viewport;
   createInputListener(options: CreateInputListenerOptions): InputListener;
   createRenderDomain(initialState: RenderDomainState): RenderDomain;
 }

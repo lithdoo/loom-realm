@@ -6,12 +6,17 @@ import type {
   DataSendOutcome,
   DataTerminal,
   RendererDataMessageV1,
+  ViewportStateV1,
 } from "./model.js";
 import { DataProtocolError } from "./validation-common.js";
 import { decodeForRole, encodeForRole, type DataRole } from "./profile-codec.js";
 
 const MAX_PENDING_SENDS = 1024;
 type Handler = (message: RendererDataMessageV1) => DataInboundDisposition | Promise<DataInboundDisposition>;
+
+function sameViewportSize(left: ViewportStateV1, right: ViewportStateV1): boolean {
+  return left.width === right.width && left.height === right.height;
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,6 +47,14 @@ export class DataRuntime {
   private terminalValue?: DataTerminal;
   private writer: Promise<void> = Promise.resolve();
   private pendingSends = 0;
+  // Viewport State v1 bounded publisher cursor (Viewport State v1 §4): at most one
+  // admitted/unsettled in-flight state and one latest unadmitted pending state.
+  // `inFlight` is set before the send call; every async continuation re-validates
+  // the settling message identity so late resolutions of a retired cursor stay inert.
+  private viewportActive = true;
+  private viewportLastSent: ViewportStateV1 | null = null;
+  private viewportInFlight: ViewportStateV1 | null = null;
+  private viewportPending: ViewportStateV1 | null = null;
 
   constructor(
     private readonly carrier: MessageCarrier,
@@ -100,6 +113,61 @@ export class DataRuntime {
     await this.terminal;
   }
 
+  /**
+   * Offer one Viewport State to this peer's bounded publisher. Returns void: a
+   * coalesced sample has no per-sample fulfillment and no remote ACK. Trusted
+   * local callers with invalid messages follow the existing local-fatal send
+   * rule inside `send()`; remote outcomes never surface as rejections here.
+   */
+  publishViewportState(message: ViewportStateV1): void {
+    if (!this.viewportActive) return;
+    const inFlight = this.viewportInFlight;
+    if (inFlight === null) {
+      if (this.viewportLastSent !== null && sameViewportSize(this.viewportLastSent, message)) {
+        this.viewportPending = null;
+        return;
+      }
+      this.viewportPending = null;
+      this.viewportInFlight = message;
+      this.viewportAdmit(message);
+      return;
+    }
+    // Last observation replaces any prior pending; A→B→A cancels B.
+    this.viewportPending = sameViewportSize(inFlight, message) ? null : message;
+  }
+
+  private viewportAdmit(message: ViewportStateV1): void {
+    void this.send(message).then(
+      (outcome) => this.viewportSettled(message, outcome),
+      () => this.viewportSettled(message, {
+        kind: "terminal",
+        terminal: freeze({ kind: "carrier-lost", cause: new Error("viewport send rejected") }),
+      }),
+    );
+  }
+
+  private viewportSettled(message: ViewportStateV1, outcome: DataSendOutcome): void {
+    if (!this.viewportActive || this.viewportInFlight !== message) return;
+    if (outcome.kind === "terminal") {
+      this.viewportRetire();
+      return;
+    }
+    this.viewportLastSent = message;
+    this.viewportInFlight = null;
+    const pending = this.viewportPending;
+    this.viewportPending = null;
+    if (pending !== null && !sameViewportSize(pending, this.viewportLastSent)) {
+      this.viewportInFlight = pending;
+      this.viewportAdmit(pending);
+    }
+  }
+
+  private viewportRetire(): void {
+    this.viewportActive = false;
+    this.viewportInFlight = null;
+    this.viewportPending = null;
+  }
+
   private async readLoop(): Promise<void> {
     try {
       for await (const raw of this.carrier.messages()) {
@@ -117,7 +185,7 @@ export class DataRuntime {
             const type = (message as { type: string }).type;
             this.commit({
               kind: "protocol-fatal",
-              protocol: type.startsWith("input.") ? "input" : "render",
+              protocol: type.startsWith("input.") ? "input" : type.startsWith("render.") ? "render" : "viewport",
               ...(disposition.cause === undefined ? {} : { cause: disposition.cause }),
             });
             break;
@@ -136,6 +204,7 @@ export class DataRuntime {
     if (this.terminalValue) return this.terminalValue;
     const terminal = freeze(value);
     this.terminalValue = terminal;
+    this.viewportRetire();
     this.terminalDeferred.resolve(terminal);
     if (closeCarrier) void this.carrier.close().catch(() => undefined);
     return terminal;

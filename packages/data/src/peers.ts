@@ -17,7 +17,7 @@ function requireFunction(object: object, key: string): void {
 }
 function validateSubsystemHandlers(handlers: SubsystemDataHandlers): void {
   if (handlers === null || typeof handlers !== "object") throw new TypeError("Invalid handlers");
-  for (const key of ["onInputState","onInputEvent","onInputReset"]) requireFunction(handlers, key);
+  for (const key of ["onInputState","onInputEvent","onInputReset","onViewportState"]) requireFunction(handlers, key);
 }
 function validateRendererHandlers(handlers: RendererDataHandlers): void {
   if (handlers === null || typeof handlers !== "object") throw new TypeError("Invalid handlers");
@@ -32,6 +32,7 @@ export function createSubsystemDataPeer(options: SubsystemDataPeerOptions): Subs
     if (message.type === "input.state") return options.handlers.onInputState(message);
     if (message.type === "input.event") return options.handlers.onInputEvent(message);
     if (message.type === "input.reset") return options.handlers.onInputReset(message);
+    if (message.type === "viewport.state") return options.handlers.onViewportState(message);
     return accepted;
   });
   return Object.freeze({
@@ -66,6 +67,9 @@ export function createRendererDataPeer(options: RendererDataPeerOptions): Render
       sendState: (message: import("./model.js").InputStateV1) => runtime.send(message),
       sendEvent: (message: import("./model.js").InputEventV1) => runtime.send(message),
       sendReset: (message: import("./model.js").InputResetV1) => runtime.send(message),
+    }),
+    viewport: Object.freeze({
+      publishState: (message: import("./model.js").ViewportStateV1) => runtime.publishViewportState(message),
     }),
     terminal: runtime.terminal,
     close: () => runtime.close(),

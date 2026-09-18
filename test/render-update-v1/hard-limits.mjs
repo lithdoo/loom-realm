@@ -16,7 +16,7 @@ async function outbound(message, accepted, label = message.type) {
   carrier.send = async (raw) => { sent.push(raw); };
   const peer = createSubsystemDataPeer({
     binding: { carrier, subsystemKey: "demo", generation: 1, dataProfile: "loomrealm.renderer-data/1" },
-    handlers: { onInputState: () => ({ kind: "accepted" }), onInputEvent: () => ({ kind: "accepted" }), onInputReset: () => ({ kind: "accepted" }) },
+    handlers: { onInputState: () => ({ kind: "accepted" }), onInputEvent: () => ({ kind: "accepted" }), onInputReset: () => ({ kind: "accepted" }), onViewportState: () => ({ kind: "accepted" }) },
   });
   const outcome = await peer.render[methodFor(message)](message);
   assert.equal(outcome.kind, accepted ? "sent" : "terminal", label);
