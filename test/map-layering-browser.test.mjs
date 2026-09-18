@@ -255,6 +255,7 @@ async function openPage({ clock = false } = {}) {
           scheduled.delete(id);
         }
       };
+      window.__mapLayeringFakeClock = true;
     });
   }
   await page.addScriptTag({ url: `${origin}/map.browser.js` });
@@ -414,6 +415,7 @@ async function paintPair(page, viewPayload) {
     window.__view.receiveRenderData(view);
     window.__sprite.receiveRenderData(spritePayload);
   }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
+  if (await page.evaluate(() => window.__mapLayeringFakeClock === true)) await page.clock.runFor(0);
   await waitUntil(page, () => {
     const view = document.querySelector("lr-map-view");
     return view?._state === "VISIBLE" && view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
@@ -443,6 +445,7 @@ async function paintAutotile(page, viewPayload) {
     window.__view.receiveRenderData(view);
     window.__sprite.receiveRenderData(spritePayload);
   }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
+  if (await page.evaluate(() => window.__mapLayeringFakeClock === true)) await page.clock.runFor(0);
   await waitUntil(page, () => {
     const canvas = document.querySelector("lr-map-view")?.shadowRoot?.querySelector("canvas.tile-layer:not([hidden])");
     if (!canvas) return false;
