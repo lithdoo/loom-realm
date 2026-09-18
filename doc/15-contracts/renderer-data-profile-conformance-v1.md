@@ -6,7 +6,7 @@
 > fixtureSetRevision：3  
 > 适用 Profile：`loomrealm.renderer-data/1`  
 > 依赖：[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[Data Connection v1 Conformance](./renderer-subsystem-data-connection-conformance-v1.md)、[User Input v1 Conformance](./user-input-conformance-v1.md)、[Render Update v1 Conformance](./render-update-conformance-v1.md)、[Viewport State v1 Conformance](./viewport-state-conformance-v1.md)、[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)、[ADR 0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)  
-> 最近复核：2026-09-18；签署及资格：[Viewport Core Freeze Ledger](../30-implementation/viewport-core-freeze-ledger.md)。
+> 最近复核：2026-09-18；冻结及资格：[Viewport Core Freeze Ledger](../30-implementation/viewport-core-freeze-ledger.md)。
 
 本文件完整规定 `loomrealm.renderer-data/1` 的当前组合层 qualification；child protocol 的完整语义由各自 Conformance 定义。Revision 3 在原 revision 2 基础上增加 Viewport，保留原有全部义务。旧 revision 2 的可追溯全文留在 Git 历史；旧 executable 的 PASS 不自动转移到本修订。本文是待冻结的目标，不表示生产代码已支持四个 child。
 
