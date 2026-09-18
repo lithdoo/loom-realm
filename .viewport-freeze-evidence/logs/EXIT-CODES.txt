@@ -8,3 +8,5 @@ test:m13:qualification exit=0
 build:desktop-stack exit=0
 test:regression exit=0
 test:viewport exit=0
+final-tip-recheck test:viewport:run exit=0 (tip 44247ac, code identical to ba1135d)
+final-tip-recheck docs:check-links exit=0 (tip 44247ac)
