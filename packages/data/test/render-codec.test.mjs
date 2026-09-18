@@ -21,6 +21,8 @@ function outboundHarness() {
       onInputState: () => ({ kind: "accepted" }),
       onInputEvent: () => ({ kind: "accepted" }),
       onInputReset: () => ({ kind: "accepted" }),
+      onViewportState: () => ({ kind: "accepted" }),
+      onViewportState: () => ({ kind: "accepted" }),
     },
   });
   return { peer, sent };

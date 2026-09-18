@@ -18,6 +18,8 @@ const subsystemHandlers = {
   onInputState: accepted,
   onInputEvent: accepted,
   onInputReset: accepted,
+  onViewportState: accepted,
+  onViewportState: accepted,
 };
 const rendererHandlers = {
   onInputInterest: accepted,

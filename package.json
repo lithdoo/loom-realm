@@ -48,7 +48,12 @@
     "docs:dev": "vitepress dev doc",
     "docs:build": "vitepress build doc",
     "docs:preview": "vitepress preview doc",
-    "docs:check-links": "node scripts/run-python.mjs scripts/check-doc-links.py"
+    "docs:check-links": "node scripts/run-python.mjs scripts/check-doc-links.py",
+    "build:viewport-core": "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer",
+    "test:viewport:revision3": "npm run build:viewport-core && node --test packages/data/test/viewport.test.mjs test/viewport-core/real-vertical.test.mjs",
+    "test:viewport:state": "npm run build:viewport-core && node --test packages/renderer/test/viewport.test.mjs packages/subsystem/test/viewport.test.mjs",
+    "test:viewport:vertical": "npm run build:viewport-core && node --test test/viewport-core/real-vertical.test.mjs",
+    "test:viewport:qualification": "npm run build:viewport-core && node --test packages/data/test/viewport.test.mjs packages/renderer/test/viewport.test.mjs packages/subsystem/test/viewport.test.mjs test/viewport-core/real-vertical.test.mjs"
   },
   "packageManager": "npm@10.9.2",
   "engines": {

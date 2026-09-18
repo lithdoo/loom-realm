@@ -61,6 +61,8 @@ function renderDataHarness() {
           onInputState: () => ({ kind: "accepted" }),
           onInputEvent: () => ({ kind: "accepted" }),
           onInputReset: () => ({ kind: "accepted" }),
+          onViewportState: () => ({ kind: "accepted" }),
+          onViewportState: () => ({ kind: "accepted" }),
         },
       });
       peers.push(peer);
@@ -84,7 +86,7 @@ test("holder atomically installs initial peer+Snapshot before consuming later st
 });
 
 test("public holder factory keeps old M8 calls valid while accepting the M10 source seam", () => {
-  assert.equal(createRendererControlHolder.length, 2);
+  assert.equal(createRendererControlHolder.length, 3);
   assert.ok(createRendererControlHolder());
   assert.throws(() => createRendererControlHolder(null), /Invalid RendererDataBinding/);
   assert.throws(() => createRendererControlHolder({}), /Invalid RendererDataBinding/);
@@ -93,6 +95,7 @@ test("public holder factory keeps old M8 calls valid while accepting the M10 sou
     /Invalid RendererDataBinding/,
   );
   assert.throws(() => createRendererControlHolder(undefined, null), /Invalid RendererInputSource/);
+  assert.throws(() => createRendererControlHolder(undefined, undefined, null), /Invalid RendererViewportSource/);
 });
 
 test("replacement identity ignores old late state and old terminal", async () => {

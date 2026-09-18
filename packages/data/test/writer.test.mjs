@@ -16,6 +16,8 @@ const handlers = {
   onInputState: accepted,
   onInputEvent: accepted,
   onInputReset: accepted,
+  onViewportState: accepted,
+  onViewportState: accepted,
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 

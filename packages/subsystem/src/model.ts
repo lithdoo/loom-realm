@@ -30,9 +30,20 @@ export interface Frame<TParams extends JsonValue = JsonValue> {
   ): Promise<FrameOutcome<TResult>>;
 }
 
+export interface ViewportSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface Viewport {
+  readonly current: ViewportSize | null;
+  subscribe(listener: (value: ViewportSize | null) => void): () => void;
+}
+
 export interface SubsystemScope {
   readonly signal: AbortSignal;
   readonly content: ContentClient;
+  readonly viewport: Viewport;
   createInputListener(options: CreateInputListenerOptions): InputListener;
   createRenderDomain(initialState: RenderDomainState): RenderDomain;
 }

@@ -8,7 +8,7 @@ import type {
   RendererDataMessageV1,
 } from "./model.js";
 import { DataProtocolError } from "./validation-common.js";
-import { decodeForRole, encodeForRole, type DataRole } from "./profile-codec.js";
+import { decodeForRole, encodeForRole, protocolFamilyForType, type DataRole } from "./profile-codec.js";
 
 const MAX_PENDING_SENDS = 1024;
 type Handler = (message: RendererDataMessageV1) => DataInboundDisposition | Promise<DataInboundDisposition>;
@@ -117,7 +117,7 @@ export class DataRuntime {
             const type = (message as { type: string }).type;
             this.commit({
               kind: "protocol-fatal",
-              protocol: type.startsWith("input.") ? "input" : "render",
+              protocol: protocolFamilyForType(type),
               ...(disposition.cause === undefined ? {} : { cause: disposition.cause }),
             });
             break;
