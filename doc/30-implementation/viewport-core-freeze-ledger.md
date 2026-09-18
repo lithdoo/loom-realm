@@ -1,6 +1,6 @@
 # Viewport Core：Docs Freeze、Agent 执行与资格唯一账本
 
-> 层级：Implementation / freeze ledger；状态：**DOCS CANDIDATE PREPARED / FORMAL FREEZE HOLD / PRODUCTION NOT IMPLEMENTED / TESTS NOT RUN**；2026-09-18。  
+> 层级：Implementation / freeze ledger；状态：**DOCS FROZEN（负责人批准 2026-09-18）/ IMPLEMENTED / ARCHITECTURE QUALIFIED @ `047f758` / DESKTOP-MAP PRODUCT OUT OF SCOPE**；2026-09-18。  
 > [Accepted ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)；唯一正式语义：[完整 Profile](../15-contracts/renderer-data-profile-v1.md)、[Viewport](../15-contracts/viewport-state-v1.md)；[完整 Profile revision3 conformance](../15-contracts/renderer-data-profile-conformance-v1.md)、[Viewport conformance](../15-contracts/viewport-state-conformance-v1.md)；[通信架构](../10-architecture/communication-system.md)、[Subsystem 架构](../10-architecture/subsystem-model.md)、[模块落点](../20-modules/viewport-core.md)、[Data 包窄修订单](../../packages/data/VIEWPORT-V1-CORRECTION.md)；[Agent 入口](../../VIEWPORT_CORE_INTERFACE_DESIGN_DRAFT.md)。
 
 ## 1. 冻结状态与文档主体
@@ -60,5 +60,43 @@ Implementation executable SHA / commands / raw logs: NONE / NOT RUN
 根 `package.json` 已有：`npm run test:data`、`npm test -w @loomrealm/subsystem`、`npm test -w @loomrealm/renderer`、`npm run test:m10:qualification`、`npm run test:m11:qualification`、`npm run test:m13:qualification`、`npm run build:desktop-stack`、`npm run test:regression`、`npm run docs:check-links`。实施者新增明确 revision3/Viewport runner，记录真正入口名称，不猜测旧 runner 自动覆盖新增 child。
 
 全部结论基于同一最终 executable/cohort SHA，记录命令、exit、Node/OS、fixture/source SHA、raw stdout/stderr、branch diff；代码变化后重跑受影响 suite。Fake source vertical 仅证明架构，不证明 Desktop/Map 真实窗口功能。
+
+## 5. Docs Freeze 批准与实施资格（2026-09-18 真实记录）
+
+**冻结主体：** 契约正文 `5d74590fcde6d79d815f774cc1c6cffe33fd2952`，由 metadata-only 重钉提交 `72de3ef` 登记；G2 独立审查确认两者契约字节一致（差异仅账本登记）。冻结批准不使用、也未核实任何其他分支上的旧批准声称（旧 PASS/批准不转移）。
+
+**G1 真实证据：** `npm run docs:check-links` 分别对 `5d74590`、`72de3ef`、`6015076` 三个精确 subject 运行，均 exit 0；输出 `Documentation links OK: 523 relative link(s) across 102 Markdown file(s).`。原始日志：`%TEMP%\opencode\viewport-freeze-evidence\g1-candidate-5d74590.log`、`g1-repin-72de3ef.log`、`g1-head-6015076.log`。
+
+**G2 独立审查：** 审查者为独立 opencode general-purpose subagent（session `ses_f4c2cebe3ffeZFB6AqPLEPfuj6`，非规范撰写者），2026-09-18 17:32 +08:00 对 `5d74590` 完成审查：契约检查 8 项全部 PASS（自包含 Profile/conformance、P3-02/V-04 三分类、publisher 状态机与有界性、lifecycle、Scope 语义、跨文档一致性、真实 vertical 要求）；流程记录 D1（该 SHA 树内账本仍 pin `f938fb7`，重钉在其后 metadata 提交 `72de3ef`）与两处非阻断措辞。报告：`%TEMP%\opencode\viewport-freeze-evidence\g2-independent-review.md`。
+
+**G3 负责人批准：** 项目负责人审阅上述 G1/G2 证据后，于 2026-09-18 在本实施会话（session `ses_f4c475a21ffdzEuyg4KsJzjygk`）明确批准冻结并指示完成任务；该批准以本节落入 Git 账本。批准针对契约主体 `5d74590` / 登记提交 `72de3ef`；本记录不虚构签名，也不代表第三方独立 CI。
+
+**实施与资格（同一最终 executable SHA）：**
+
+```text
+IMPLEMENTATION_SHA = 047f758fbbe866b252689eafbd8a9eaf910fe91b
+branch = deepseek/resize-viewport
+Node v22.12.0 / Windows 10.0.19044
+```
+
+| 命令 | 结果 |
+|---|---|
+| `npm run docs:check-links` | exit 0；523 links / 102 files |
+| `npm run test:data` | exit 0；foundation 15 + wire 38 + data 52 全 PASS |
+| `npm test -w @loomrealm/subsystem` | exit 0；63/63 PASS |
+| `npm test -w @loomrealm/renderer` | exit 0；55/55 PASS |
+| `npm run test:m10:qualification` | exit 0；16/16 PASS |
+| `npm run test:m11:qualification` | exit 0；10/10 PASS |
+| `npm run test:m13:qualification` | exit 0；5/5 PASS |
+| `npm run build:desktop-stack` | exit 0 |
+| `npm run test:regression` | exit 0；全部 workspace suite fail=0 |
+| `npm run test:viewport:revision3` | exit 0；33 tests（P3-01…P3-09）PASS |
+| `npm run test:viewport:state` | exit 0；14 tests（V-01…V-13）PASS |
+| `npm run test:viewport:vertical` | exit 0；6/6 PASS（P3-09/V-14 真 holder + 真 Data peers + 真 carrier + 真 host，fake source） |
+| `npm run test:viewport:qualification` | exit 0；47/47 PASS |
+
+原始日志与退出码：`%TEMP%\opencode\viewport-freeze-evidence\final-047f758\*.log` 与 `SUMMARY.txt`。真实 vertical 覆盖 initial/equal/change/invalid、10,000 burst、背压（阻塞 carrier）、并发 Input/Render、断线重连、generation 与 participant 更换、旧回调和 Runtime terminal；未使用 mock manager 或只断言 emit。
+
+**边界：** fake source 仅代表尚未实现的物理窗口采样；本次 **不** 宣称 Desktop/Map 真实 source、`play.bat` 动态地图覆盖或行走性能已验收（OUT OF SCOPE / NOT RUN）。旧 Input/Render wire、writer capacity、Control/Connection 行为未改变；未引入 `/2`、双解析器、ACK、第二 reader/writer 或无界队列。
 
 Agent STOP：任一规范冲突、不可实现或需要越界，记录文件/最小 fixture/expected/actual，经新的 docs SHA 重跑 G1 后重新冻结；不得以文档修订、旧 CI 或 mock-only 测试替代资格。
