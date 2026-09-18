@@ -86,4 +86,4 @@ Only handler for `this.currentDataPeer===peer` and live Runtime can update retai
 
 ## 7. Boundary / release
 
-Only `packages/data`, `packages/renderer`, `packages/subsystem` production code and their tests; no `game-libs/map`, Desktop/PWA adapter, Main, M13, platform-port edits. See [freeze ledger](../30-implementation/viewport-core-freeze-ledger.md) for exact files, identity gating, test IDs, stop conditions, signed docs SHA. Formal Docs Freeze not implied by this candidate's existence。
+Only `packages/data`, `packages/renderer`, `packages/subsystem` production code and their tests; no `game-libs/map`, Desktop/PWA adapter, Main, M13, platform-port edits. See [freeze ledger](../30-implementation/viewport-core-freeze-ledger.md) for exact files, identity gating, test IDs, stop conditions, docs SHA. Formal Docs Freeze not implied by this candidate's existence。

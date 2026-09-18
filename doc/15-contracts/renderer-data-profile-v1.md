@@ -12,7 +12,7 @@
 > 决策：[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)、[ADR 0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)  
 > 最近复核：2026-09-18；冻结与实施状态只看[唯一账本](../30-implementation/viewport-core-freeze-ledger.md)。
 
-本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。本文是**自包含的新版组合合同**：保留旧 Profile 的全部不变语义，明确替换 closed child set、方向、fresh baseline 与 conformance；旧实现仍是三 child，本次文本不是代码已实现或正式批准。旧正文可通过 Git 历史追溯，不是另一份 current normative contract。
+本文使用 `MUST`、`MUST NOT`、`SHOULD`、`MAY` 表达规范强度。本文是**自包含的新版组合合同**：保留旧 Profile 的全部不变语义，明确替换 closed child set、方向、fresh baseline 与 conformance；旧实现仍是三 child，本次文本不是代码已实现，也不表示 Docs Frozen。旧正文可通过 Git 历史追溯，不是另一份 current normative contract。
 
 核心原则：
 

@@ -2,7 +2,7 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving；Viewport 为待签署、未实施的 Profile /1 修订目标  
+> 稳定程度：Evolving；Viewport 为待冻结、未实施的 Profile /1 修订目标  
 > 主要定义：Control Plane、Renderer Data Plane、Content Plane、carrier/application mapping、authority/recovery 与 communication-facing Platform responsibilities  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[运行承载系统](./runtime-hosting-system.md)  
 > 被以下文档细化：[渲染系统](./rendering-system.md)、[Subsystem 模型](./subsystem-model.md)、[运行时启动系统](./runtime-bootstrap-system.md)  
@@ -153,7 +153,7 @@ single connection-wide serialized writer
 fresh-carrier child baseline
 ```
 
-Connection Core 本身 zero application messages。旧 executable 仍为三个 child，旧/新 `/1` 不可混连，必须同一 build cohort 协调升级。Viewport source 注入 Renderer，size 经 Data peer 到 Subsystem `scope.viewport`，不经 InputTarget/Frame gate、不修改 Store/Projector。详细契约及签署状态分别见 [Profile](../15-contracts/renderer-data-profile-v1.md) 与[账本](../30-implementation/viewport-core-freeze-ledger.md)。
+Connection Core 本身 zero application messages。旧 executable 仍为三个 child，旧/新 `/1` 不可混连，必须同一 build cohort 协调升级。Viewport source 注入 Renderer，size 经 Data peer 到 Subsystem `scope.viewport`，不经 InputTarget/Frame gate、不修改 Store/Projector。详细契约及冻结状态分别见 [Profile](../15-contracts/renderer-data-profile-v1.md) 与[账本](../30-implementation/viewport-core-freeze-ledger.md)。
 
 ---
 

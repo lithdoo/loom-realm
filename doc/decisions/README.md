@@ -116,7 +116,7 @@ ADR0033 remains valid as a conditional RuntimeHosting fact；ADR0034 supersedes 
 
 ADR0035 partially supersedes only M11/01 exact `replace/emit/close` author-surface freeze and M11/02 sender-realization choice。It does not supersede ADR0022 wire semantics、ADR0032 ownership or ADR0034 physical composition；Accepted docs do not claim `update()` is already implemented。
 
-ADR0036 仅修订 ADR0025 的首次发布前 Profile closed set、路由、Viewport API 和诊断；不修改 Connection/Input/Render 原有协议和 Main/Frame/Store/Projector/Map/Desktop authority。它是已授权设计方向，仍需独立 Docs Freeze SHA 审批，不可当作生产落地证据。
+ADR0036 仅修订 ADR0025 的首次发布前 Profile closed set、路由、Viewport API 和诊断；不修改 Connection/Input/Render 原有协议和 Main/Frame/Store/Projector/Map/Desktop authority。它是已授权设计方向，仍需 Docs Freeze（`docs:check-links`），不可当作生产落地证据。
 
 ---
 

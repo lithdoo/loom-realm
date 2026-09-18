@@ -7,7 +7,7 @@
 > 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
 > 最近复核：2026-09-18
 
-契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。Viewport 的正式签署与资格仅见[唯一冻结账本](../30-implementation/viewport-core-freeze-ledger.md)。
+契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation 默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。Viewport 的冻结与资格仅见[唯一冻结账本](../30-implementation/viewport-core-freeze-ledger.md)。
 
 ---
 
@@ -193,4 +193,4 @@ real consumer capability failure
 
 不得以 API symmetry、目录对称、future speculation、Hostra/PWA physical symmetry 或 test convenience 为理由增加 public presentation package、第二份 Store/topology/currentness、generic loader/registry、layout/layer authority、DOM rollback framework 或 RenderEvent WC ABI。
 
-本次 Viewport 预发布修订由 [ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md) 显式治理；材料准备不等于 Frozen。经正式文档 SHA 复核/批准后才能开放 Agent 生产实现。
+本次 Viewport 预发布修订由 [ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md) 显式治理；材料准备不等于 Frozen。经正式文档 SHA 的 `docs:check-links` 通过后才能开放 Agent 生产实现。

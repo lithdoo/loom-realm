@@ -1,6 +1,6 @@
 # ADR 0036：首次发布前直接修正 Profile /1，增加独立 Viewport State
 
-> 决策：**Accepted — protocol correction decision / 2026-09-18**。项目负责人已明确授权原地修改现有协议；**独立技术终审、正式契约 Docs Freeze、生产实现及测试均未完成**，以[唯一冻结账本](../30-implementation/viewport-core-freeze-ledger.md)记录。  
+> 决策：**Accepted — protocol correction decision / 2026-09-18**。项目负责人已明确授权原地修改现有协议；**正式契约 Docs Freeze、生产实现及测试均未完成**，以[唯一冻结账本](../30-implementation/viewport-core-freeze-ledger.md)记录。  
 > 更新：[ADR 0025](./0025-renderer-data-profile-v1-preimplementation-closure.md) 仅在首次发布前 Profile child closed set 及相应路由、接口、诊断范围；原 Input/Render/Connection/Control 其他义务保持。  
 > 当前规范：[Renderer Data Profile /1](../15-contracts/renderer-data-profile-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)；版本与测试资格不从本 ADR 单独推出。
 
@@ -20,4 +20,4 @@ Control 的 Session/Renderer/DataAuthority/Generation、Connection current carri
 
 ## 取舍与正式冻结条件
 
-`x.*` 错误继承 Input/Frame gate；Main width relay 扩大 authority；将 DOM API 暴露 Core 破坏平台抽象；`/2` 和双解析器在当前已授权的首次发布前协调修订范围内增加额外互操作表面。此次 accepted **只是设计决策**：必须同步正式 Profile、Viewport child、两份 conformance、受影响 architecture/module/nav，经过独立 reviewer 审核最终 docs-only SHA、负责人对同一 SHA 签署后才可标记 Docs Frozen 并交付 Agent 开始生产实施。Docs Freeze、implemented、architecture qualified、Desktop/Map product closed 为不同 gate；不虚构审批、构建、测试、实际窗口缩放。
+`x.*` 错误继承 Input/Frame gate；Main width relay 扩大 authority；将 DOM API 暴露 Core 破坏平台抽象；`/2` 和双解析器在当前已授权的首次发布前协调修订范围内增加额外互操作表面。此次 accepted **只是设计决策**：必须同步正式 Profile、Viewport child、两份 conformance、受影响 architecture/module/nav，在最终 docs-only SHA 上完成 `docs:check-links` 后才可标记 Docs Frozen 并交付 Agent 开始生产实施。Docs Freeze、implemented、architecture qualified、Desktop/Map product closed 为不同 gate；不虚构链接检查、构建、测试、实际窗口缩放。
