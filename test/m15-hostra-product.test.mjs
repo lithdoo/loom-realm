@@ -207,7 +207,7 @@ async function setLogicalViewport(page, width, height) {
   }, [width, height], { timeout: 10_000 });
 }
 
-async function mapPixel(page, sx = 352, sy = 240) {
+async function mapPixel(page, sx = 352, sy = 224) {
   return page.evaluate(({ x: sx0, y: sy0 }) => {
     const canvases = [...(document.querySelector("lr-map-view")?.shadowRoot?.querySelectorAll("canvas.tile-layer") ?? [])].filter((canvas) => !canvas.hidden);
     for (const canvas of canvases) {
@@ -453,7 +453,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
   assert.equal(await page.evaluate(() => document.documentElement.dataset.loomrealmRendererIdentity), firstIdentity);
   assert.equal((await events(eventLog)).filter(({ type }) => type === "document-bootstrap").length, firstDocuments);
 
-  const mapPixelAt = () => mapPixel(page, 352, 240);
+  const mapPixelAt = () => mapPixel(page, 352, 224);
   await page.bringToFront();
   await page.mouse.click(320, 240);
   await page.waitForFunction(() => document.hasFocus());
@@ -465,7 +465,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
       const left = Number.parseFloat(canvas.style.left) || 0;
       const top = Number.parseFloat(canvas.style.top) || 0;
       const x = 352 - left;
-      const y = 240 - top;
+      const y = 224 - top;
       if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
       return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data].slice(0, 3).join(",") === "40,80,220";
     }
@@ -525,7 +525,7 @@ test("M15 frozen Hostra owns the Window and reaches the M14 map", { timeout: 90_
       const left = Number.parseFloat(canvas.style.left) || 0;
       const top = Number.parseFloat(canvas.style.top) || 0;
       const x = 352 - left;
-      const y = 240 - top;
+      const y = 224 - top;
       if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) continue;
       return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data].slice(0, 3).join(",") === "220,40,40";
     }
