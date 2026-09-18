@@ -2,17 +2,17 @@
 
 本文只做 **current source-of-truth 导航**，不重复定义协议字段、状态机或 milestone evidence。
 
-阅读优先级：Architecture topic → Formal Contract → Accepted current ADR → Module placement → Implementation plan / qualification。Live milestone summary 只看 [`第一阶段交付计划`](./30-implementation/phase-1-delivery-plan.md)；M14 formal status/evidence 只看 [`M14 Qualification Record`](./30-implementation/m14-qualification.md)；M15 implementation/qualification evidence 只看 [`M15 Qualification Record`](./30-implementation/m15-qualification.md)。索引页不维护第二套 dated PASS/Closed ledger。
+阅读优先级：
 
-## Viewport Core 本轮设计入口（Docs Freeze HOLD）
+```text
+Architecture topic
+→ Formal Contract
+→ Accepted current ADR
+→ Module placement
+→ Implementation plan / qualification
+```
 
-- [ADR 0036：首次发布前原地修订 Data Profile /1](./decisions/0036-preimplementation-viewport-profile-v1-correction.md)：已获协议修订方向授权；不等于文档已正式冻结。
-- [通信系统](./10-architecture/communication-system.md) / [Subsystem 模型](./10-architecture/subsystem-model.md)：上游职责投影，不自创第二套 wire/API。
-- [Renderer Data Application Profile /1](./15-contracts/renderer-data-profile-v1.md) + [Viewport State v1](./15-contracts/viewport-state-v1.md)：待签署的正式目标语义；旧三-child executable 尚未更新。
-- [Profile revision3 conformance](./15-contracts/renderer-data-profile-conformance-v1.md) + [Viewport conformance](./15-contracts/viewport-state-conformance-v1.md)：待转为真实 executable fixture 的验收规格，不代表测试通过。
-- [唯一冻结与 Agent 执行账本](./30-implementation/viewport-core-freeze-ledger.md)；[仓库根实施入口](../VIEWPORT_CORE_INTERFACE_DESIGN_DRAFT.md)：签署状态与允许修改范围，只允许 Data/Renderer/Subsystem 架构包，本轮不改 Map/Desktop。
-
-**当前：仅 docs candidate；独立终审、负责人对最终 SHA 的 Docs Freeze 签署、实现、架构测试均未完成。** 不从本索引推导产品窗口缩放已经实现。
+Live milestone summary只看 [`第一阶段交付计划`](./30-implementation/phase-1-delivery-plan.md)。M14 formal status/evidence只看 [`M14 Qualification Record`](./30-implementation/m14-qualification.md)；M15 implementation/qualification evidence只看 [`M15 Qualification Record`](./30-implementation/m15-qualification.md)。索引页不维护第二套 dated PASS/Closed ledger。
 
 ---
 
@@ -63,7 +63,7 @@ M14 Map Game Library       Requalification Pending
 M15 Desktop Full E2E       Requalification Pending
 ```
 
-M14/M15 formal evidence remains in their qualification ledgers；本文不复制 run ID。Viewport 另见上方独立账本，不混入既有 milestone qualification。
+M14/M15 formal evidence remains in their qualification ledgers；本文不复制 run ID。
 
 ---
 
@@ -80,7 +80,15 @@ doc/30-implementation/m14-qualification.md
 tools/fixtures/essentials-v21.1/M14_CONSUMER_PROJECTION.md
 ```
 
-Repository placement：`packages/` LoomRealm framework/runtime；`game-libs/map` @loomrealm-game/map；`examples/essentials-v21.1` private concrete game。M14 first slice 只 materialize current consumer 读取的 Map/Tileset facts；不建立 universal map schema。本轮 Viewport Core 设计不更改 Map 源码或 M14 门槛。
+Repository placement：
+
+```text
+packages/      LoomRealm framework/runtime
+game-libs/map  @loomrealm-game/map
+examples/essentials-v21.1  private concrete game
+```
+
+M14 first slice只 materialize current consumer读取的 Map/Tileset facts；不建立 universal map schema。
 
 ---
 
@@ -98,9 +106,32 @@ LoomRealm Desktop plain Node process
 Runner
 ```
 
-Current source-of-truth：ADR 0034；`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`；M15_01..05 retained/superseded landing docs；`doc/20-modules/desktop-host/README.md`；`doc/30-implementation/m15-qualification.md`。
+Current source-of-truth：
 
-Frozen distinctions：reload → same Hostra Window → fresh Renderer logical participant；same-generation Data-only reconnect → same Renderer logical participant → fresh Data physical pair only；terminal triggers → one idempotent LoomRealm termination funnel。Historical standalone Electron M15 remains migration evidence only。
+```text
+ADR 0034
+M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
+M15_01..05 retained/superseded landing docs
+doc/20-modules/desktop-host/README.md
+doc/30-implementation/m15-qualification.md
+```
+
+Frozen distinctions：
+
+```text
+reload
+    → same Hostra Window
+    → fresh Renderer logical participant
+
+same-generation Data-only reconnect
+    → same Renderer logical participant
+    → fresh Data physical pair only
+
+terminal triggers
+    → one idempotent LoomRealm termination funnel
+```
+
+Historical standalone Electron M15 remains migration evidence only。
 
 ---
 
@@ -121,10 +152,22 @@ M16  PWA Runtime
 M17  PWA Full E2E / Equivalence
 ```
 
-Current summary：M1–M10、M12–M13 closed baseline；M11 Requalification Pending → m11-qualification.md；M14 Requalification Pending → m14-qualification.md；M15 Requalification Pending → m15-qualification.md；M16–17 planned。M16 remains Worker Runtime-only；M17 completes PWA Renderer/Data/Input/Content/Web Presentation and cross-platform logical-outcome equivalence。M15 Hostra shell/HOSTRA_SUBCMD/loopback mechanics 不得升级为 PWA contracts。
+Current summary：
+
+```text
+M1–M10, M12–M13  closed baseline
+M11     Requalification Pending → m11-qualification.md
+M14     Requalification Pending → m14-qualification.md
+M15     Requalification Pending → m15-qualification.md
+M16–17  planned
+```
+
+M16 remains Worker Runtime-only；M17 completes PWA Renderer/Data/Input/Content/Web Presentation and cross-platform logical-outcome equivalence。M15 Hostra shell/HOSTRA_SUBCMD/loopback mechanics不得升级为 PWA contracts。
 
 ---
 
 ## Documentation Governance
 
-Summary/index docs 只描述 ownership、placement、milestone route 和 links。Exact schema/lifetime/order/failure semantics 留在 formal contracts 或 current frozen milestone SSOT；live evidence 留在 designated qualification ledger。Frozen authority、identity、lifecycle/order、failure/recovery 或 public surface 只能按 governance reopen；implementation 不得静默扩张或恢复 superseded direct-Electron topology。本次 Viewport 是已授权但**尚未完成独立 review/owner Docs Freeze** 的 preimplementation correction，不得以导航更新冒充签署。
+Summary/index docs只描述 ownership、placement、milestone route 和 links。Exact schema/lifetime/order/failure semantics留在 formal contracts 或 current frozen milestone SSOT；live evidence留在 designated qualification ledger。
+
+Frozen authority、identity、lifecycle/order、failure/recovery 或 public surface 只能按 governance reopen；implementation不得静默扩张或恢复 superseded direct-Electron topology。
