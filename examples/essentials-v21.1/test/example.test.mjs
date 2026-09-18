@@ -26,11 +26,12 @@ test("checked-in presentation config resolves map artifacts only through package
   ]);
 });
 
-test("example page letterboxes and does not pin the map to 640 by 480", async () => {
+test("example page fills the window and does not pin the map to 640 by 480", async () => {
   const packageJson = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
   assert.equal(packageJson.private, true); assert.equal(packageJson.type, "module");
   const css = await readFile(new URL("presentation.css", root), "utf8");
-  assert.match(css, /place-items:\s*center/);
+  assert.doesNotMatch(css, /place-items:\s*center/);
   assert.match(css, /overflow:\s*hidden/);
+  assert.match(css, /lr-map-view\s*\{[^}]*width:\s*100vw[^}]*height:\s*100vh/s);
   assert.doesNotMatch(css, /lr-map-view\s*\{[^}]*width:\s*640px/);
 });

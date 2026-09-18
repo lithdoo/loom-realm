@@ -1,7 +1,10 @@
 lr-map-view {
-  display: block;
+  display: flex;
   position: relative;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
+  background: #000;
   image-rendering: pixelated;
 }
 

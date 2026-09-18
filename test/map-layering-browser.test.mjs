@@ -163,6 +163,26 @@ function viewData({
   };
 }
 
+function responsiveViewData(options = {}) {
+  const legacy = viewData(options);
+  const tiles = options.tiles ?? [regularTile({ depth: options.depth ?? 0 })];
+  const { tileVisuals: _tileVisuals, chunks: _chunks, ...base } = legacy;
+  return {
+    ...base,
+    barHeight: 32,
+    contentWidth: 640,
+    contentHeight: 448,
+    columns: 20,
+    rows: 14,
+    logicalWidth: 640,
+    logicalHeight: 448,
+    scaleX: 1,
+    scaleY: 1,
+    mapName: String(legacy.mapId),
+    tiles: tiles.map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]),
+  };
+}
+
 function spriteData(y = 0) {
   return {
     sceneEpoch: 1, visualEpoch: 1, motionId: null,
@@ -464,13 +484,14 @@ async function compositeCenter(page) {
 async function layerInfo(page) {
   return page.evaluate(() => {
     const root = document.querySelector("lr-map-view").shadowRoot;
+    const world = root.querySelector(".map-world");
     const slot = root.querySelector("slot");
     const canvases = [...root.querySelectorAll("canvas.tile-layer")];
-    const children = [...root.children];
+    const children = [...world.children];
     return {
       entities: Boolean(root.querySelector(".entities")),
       slotDisplay: getComputedStyle(slot).display,
-      tileLayersDirect: canvases.every((canvas) => canvas.parentNode === root),
+      tileLayersDirect: canvases.every((canvas) => canvas.parentNode === world),
       canvasesBeforeSlot: canvases.every((canvas) => children.indexOf(canvas) >= 0 && children.indexOf(canvas) < children.indexOf(slot)),
       canvasCount: canvases.length,
       hidden: canvases.map((canvas) => canvas.hidden),
@@ -527,6 +548,29 @@ test("A. MapView shadow DOM has no entities wrapper and canvases precede slot", 
   assert.equal(info.tileLayersDirect, true);
   assert.equal(info.canvasesBeforeSlot, true);
   assert.ok(info.canvasCount >= 1);
+});
+
+test("responsive tuple payload commits DOM content, world transform and footer atomically", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const viewPayload = responsiveViewData({ tiles: [regularTile({ x: 1, y: 1, depth: 0 })] });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload, spritePayload: matchingSprite(viewPayload, { screenX: 32, screenY: 32 }) });
+  await waitPainted(page, "0");
+  const result = await page.evaluate(() => {
+    const view = window.__view;
+    const root = view.shadowRoot;
+    return {
+      state: view.dataset.mapVisualState,
+      content: [root.querySelector(".map-content").clientWidth, root.querySelector(".map-content").clientHeight],
+      world: [root.querySelector(".map-world").clientWidth, root.querySelector(".map-world").clientHeight],
+      footer: [root.querySelector("footer").clientHeight, root.querySelector(".map-name").textContent],
+      canvasParent: root.querySelector("canvas.tile-layer").parentElement.className,
+    };
+  });
+  assert.deepEqual(result, { state: "ready", content: [640, 448], world: [640, 448], footer: [32, "1"], canvasParent: "map-world" });
 });
 
 test("B. equal depth stacks character above tile", { timeout: 30_000 }, async (t) => {

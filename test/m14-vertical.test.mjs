@@ -146,13 +146,15 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
 
   const hub = createDataHub();
   let inputEmit;
+  let viewportEmit;
   const inputSource = Object.freeze({ start(emit) { inputEmit = emit; emit({ kind: "availability", channel: "keyboard.event", available: true }); return () => {}; } });
+  const viewportSource = Object.freeze({ start(emit) { viewportEmit = emit; emit({ width: 800, height: 600 }); return () => {}; } });
   let holder;
   const rendererControl = Object.freeze({
     acquire(token, signal) {
       if (holder) return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
       const pair = createMemoryCarrierPair();
-      holder = createRendererControlHolder(hub.rendererBinding, inputSource);
+      holder = createRendererControlHolder(hub.rendererBinding, inputSource, viewportSource);
       void holder.connect({ carrier: pair.right, rendererControlToken: token });
       return Promise.resolve(pair.left);
     },
@@ -183,31 +185,77 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
   let browserDelivery = Promise.resolve(); let latestView;
   const detach = attachRendererPresentation(holder, { reevaluate(source) { latestView = structuredClone(source.read()); browserDelivery = browserDelivery.then(() => page.evaluate((view) => globalThis.applyM14View(view), latestView)); } });
   t.after(detach);
-  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.cameraX === 16, "initial map Render state");
+  await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.data?.viewportWidth === 800, "initial map Render state");
   await browserDelivery;
-  await waitFor(async () => (await sampleVisibleTilePixel(page, 373, 229))[3] === 255, "initial Canvas paint");
+  await waitFor(async () => (await sampleVisibleTilePixel(page, 400, 268))[3] === 255, "initial Canvas paint");
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas")?.getContext("2d")?.getImageData(5, 5, 1, 1).data[3] === 255), "initial player paint");
   const initial = await page.evaluate(async () => {
     const view = document.querySelector("lr-map-view"); const sprite = document.querySelector("lr-map-sprite");
     view.instance = 1; sprite.instance = 2;
     return { size: [getComputedStyle(view).width, getComputedStyle(view).height], children: view.children.length, tags: [view.tagName, sprite.tagName], player: [...sprite.shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data] };
   });
-  initial.tile = await sampleVisibleTilePixel(page, 373, 229);
-  assert.deepEqual(initial.size, ["640px", "480px"]); assert.equal(initial.children, 1); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
+  initial.tile = await sampleVisibleTilePixel(page, 400, 268);
+  assert.deepEqual(initial.size, ["800px", "600px"]); assert.equal(initial.children, 1); assert.deepEqual(initial.tags, ["LR-MAP-VIEW", "LR-MAP-SPRITE"]); assert.deepEqual(initial.tile, fixture.expectedPixels.tile385); assert.deepEqual(initial.player, fixture.expectedPixels.playerDown);
+  assert.deepEqual(await page.evaluate(() => {
+    const root = document.querySelector("lr-map-view").shadowRoot;
+    const footer = root.querySelector("footer");
+    const content = root.querySelector(".map-content");
+    return [getComputedStyle(content).height, getComputedStyle(footer).height, footer.textContent];
+  }), ["568px", "32px", "1"]);
 
   inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.x === 11, "first movement commit"); await browserDelivery;
   const moved = latestView.subsystems[0].domains[0].roots[0];
-  assert.equal(moved.data.cameraX, 48); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [304, 224, 6]);
+  assert.equal(moved.data.cameraX, 0); assert.deepEqual([moved.children[0].data.screenX, moved.children[0].data.screenY, moved.children[0].data.direction], [352, 256, 6]);
   await waitFor(() => page.evaluate(() => document.querySelector("lr-map-sprite")?.shadowRoot?.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data[2] === 240), "right-facing player crop");
   assert.deepEqual(await page.evaluate(() => [...document.querySelector("lr-map-sprite").shadowRoot.querySelector("canvas").getContext("2d").getImageData(5, 5, 1, 1).data]), fixture.expectedPixels.playerRight);
   assert.deepEqual(await page.evaluate(() => [document.querySelector("lr-map-view").instance, document.querySelector("lr-map-sprite").instance]), [1, 2]);
   inputEmit({ kind: "event", channel: "keyboard.event", payload: { action: "down", code: "ArrowRight", repeat: false } });
   await waitFor(() => latestView?.subsystems[0]?.domains[0]?.roots[0]?.children[0]?.data?.direction === 6, "blocked movement render"); await new Promise((resolve) => setTimeout(resolve, 20));
   const blocked = latestView.subsystems[0].domains[0].roots[0];
-  assert.equal(blocked.children[0].data.x, 11); assert.equal(blocked.data.cameraX, 48);
+  assert.equal(blocked.children[0].data.x, 11); assert.equal(blocked.data.cameraX, 0);
   assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-view lr-map-sprite").length), 1);
   assert.equal(await page.evaluate(() => document.querySelectorAll("lr-map-tile").length), 0);
+
+  for (const expected of [
+    { width: 640, height: 480, contentHeight: 448, barHeight: 32, columns: 20, rows: 14 },
+    { width: 1280, height: 720, contentHeight: 672, barHeight: 48, columns: 40, rows: 21 },
+    { width: 1920, height: 1080, contentHeight: 1032, barHeight: 48, columns: 60, rows: 33 },
+    { width: 1920, height: 480, contentHeight: 448, barHeight: 32, columns: 60, rows: 14 },
+    { width: 640, height: 1080, contentHeight: 1032, barHeight: 48, columns: 20, rows: 33 },
+  ]) {
+    await page.setViewportSize({ width: expected.width, height: expected.height });
+    viewportEmit({ width: expected.width, height: expected.height });
+    await waitFor(() => {
+      const data = latestView?.subsystems[0]?.domains[0]?.roots[0]?.data;
+      return data?.viewportWidth === expected.width && data?.viewportHeight === expected.height;
+    }, `responsive ${expected.width}x${expected.height} Render state`);
+    await browserDelivery;
+    await waitFor(async () => (await page.evaluate(() => document.querySelector("lr-map-view")?.dataset.mapVisualState)) === "ready", "responsive browser commit");
+    const actual = await page.evaluate(() => {
+      const view = document.querySelector("lr-map-view");
+      const root = view.shadowRoot;
+      const content = root.querySelector(".map-content");
+      const footer = root.querySelector("footer");
+      const world = root.querySelector(".map-world");
+      return {
+        inner: [innerWidth, innerHeight],
+        host: [view.clientWidth, view.clientHeight],
+        content: [content.clientWidth, content.clientHeight],
+        footer: [footer.clientWidth, footer.clientHeight, footer.textContent],
+        world: [world.clientWidth, world.clientHeight],
+        transform: getComputedStyle(world).transform,
+        state: view.dataset.mapVisualState,
+      };
+    });
+    assert.deepEqual(actual.inner, [expected.width, expected.height]);
+    assert.deepEqual(actual.host, [expected.width, expected.height]);
+    assert.deepEqual(actual.content, [expected.width, expected.contentHeight]);
+    assert.deepEqual(actual.footer, [expected.width, expected.barHeight, "1"]);
+    assert.deepEqual(actual.world, [expected.columns * 32, expected.rows * 32]);
+    assert.notEqual(actual.transform, "none");
+    assert.equal(actual.state, "ready");
+  }
   controller.abort(new Error("M14 qualification complete"));
   await main;
 });
@@ -278,7 +326,13 @@ test("map view clears full state and delayed same-resource decode paints only la
     if (!latest) throw new Error("Timed out waiting for latest map paint");
     const stale = sample(5, 5);
     view.receiveRenderData(viewPayload(3, 0, 0, null));
-    const cleared = sample(37, 5);
+    let cleared;
+    const clearDeadline = performance.now() + 5_000;
+    while (performance.now() < clearDeadline) {
+      cleared = sample(37, 5);
+      if (cleared[3] === 0) break;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
     return { stale, latest, cleared };
   }, { bytes: [...tileset], version: hash(tileset) });
   assert.equal(result.stale[3], 0); assert.deepEqual(result.latest, [40, 80, 220, 255]); assert.equal(result.cleared[3], 0);

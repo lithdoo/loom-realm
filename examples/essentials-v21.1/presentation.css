@@ -7,7 +7,10 @@ body {
 }
 
 body {
-  display: grid;
-  place-items: center;
   overflow: hidden;
+}
+
+lr-map-view {
+  width: 100vw;
+  height: 100vh;
 }

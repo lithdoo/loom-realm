@@ -1,9 +1,10 @@
 lr-map-view {
-  display: block;
+  display: flex;
   position: relative;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
-  width: 640px;
-  height: 480px;
+  background: #000;
   image-rendering: pixelated;
 }
 
@@ -11,4 +12,5 @@ lr-map-sprite {
   display: block;
   position: absolute;
   image-rendering: pixelated;
+  pointer-events: none;
 }

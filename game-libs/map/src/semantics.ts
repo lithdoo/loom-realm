@@ -95,6 +95,12 @@ export const MAX_VIEWPORT = Object.freeze({ width: 1920, height: 1080 });
 export const RESIZE_SETTLE_MS = 100;
 
 export type ViewportSize = Readonly<{ width: number; height: number }>;
+export type LogicalViewport = Readonly<{
+  width?: number;
+  height?: number;
+  logicalWidth?: number;
+  logicalHeight?: number;
+}>;
 
 export function clampViewport(size: ViewportSize | null | undefined): ViewportSize {
   if (size == null) return DEFAULT_VIEWPORT;
@@ -328,12 +334,22 @@ export function canMove(map: MapRecord, tileset: TilesetRecord, x: number, y: nu
   return mapTilePassable(map, tileset, x, y, direction) && mapTilePassable(map, tileset, x + dx, y + dy, (10 - direction) as Direction);
 }
 
-export function computeCamera(map: MapRecord, playerX: number, playerY: number, viewport: ViewportSize = DEFAULT_VIEWPORT) {
-  const anchorX = Math.floor((viewport.width - TILE_SIZE) / 2);
-  const anchorY = Math.floor((viewport.height - TILE_SIZE) / 2);
+function logicalDimensions(viewport: LogicalViewport): Readonly<{ width: number; height: number }> {
+  const width = viewport.logicalWidth ?? viewport.width;
+  const height = viewport.logicalHeight ?? viewport.height;
+  if (!Number.isSafeInteger(width) || Number(width) <= 0 || !Number.isSafeInteger(height) || Number(height) <= 0) {
+    throw new TypeError("Logical viewport dimensions must be positive safe integers");
+  }
+  return { width: Number(width), height: Number(height) };
+}
+
+export function computeCamera(map: MapRecord, playerX: number, playerY: number, viewport: LogicalViewport = DEFAULT_VIEWPORT) {
+  const logical = logicalDimensions(viewport);
+  const anchorX = (logical.width - TILE_SIZE) / 2;
+  const anchorY = (logical.height - TILE_SIZE) / 2;
   return Object.freeze({
-    cameraX: Math.min(Math.max(playerX * TILE_SIZE - anchorX, 0), Math.max(map.width * TILE_SIZE - viewport.width, 0)),
-    cameraY: Math.min(Math.max(playerY * TILE_SIZE - anchorY, 0), Math.max(map.height * TILE_SIZE - viewport.height, 0)),
+    cameraX: Math.min(Math.max(playerX * TILE_SIZE - anchorX, 0), Math.max(map.width * TILE_SIZE - logical.width, 0)),
+    cameraY: Math.min(Math.max(playerY * TILE_SIZE - anchorY, 0), Math.max(map.height * TILE_SIZE - logical.height, 0)),
   });
 }
 
@@ -379,13 +395,14 @@ export function viewportTileBounds(
   map: MapRecord,
   cameraX: number,
   cameraY: number,
-  viewport: ViewportSize = DEFAULT_VIEWPORT,
+  viewport: LogicalViewport = DEFAULT_VIEWPORT,
 ): TileProjectionBounds {
+  const logical = logicalDimensions(viewport);
   return Object.freeze({
     minTileX: Math.max(0, Math.floor(cameraX / TILE_SIZE)),
-    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + viewport.width - 1) / TILE_SIZE)),
+    maxTileX: Math.min(map.width - 1, Math.floor((cameraX + logical.width - 1) / TILE_SIZE)),
     minTileY: Math.max(0, Math.floor(cameraY / TILE_SIZE)),
-    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + viewport.height - 1) / TILE_SIZE)),
+    maxTileY: Math.min(map.height - 1, Math.floor((cameraY + logical.height - 1) / TILE_SIZE)),
   });
 }
 

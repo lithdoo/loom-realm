@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import mapDefinition from "@loomrealm-game/map";
-import { computeCamera, projectChunkWindow, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { computeCamera, expandTileBounds, projectTilesInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { calculateLayout } from "../dist/layout.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
 function fixture() {
@@ -28,6 +29,17 @@ function wideMap(width = 64, height = 18) {
   return {
     map: { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
     tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+  };
+}
+
+function denseAutotileMap(width = 80, height = 50) {
+  const values = Array.from({ length: width * height * 3 }, (_, index) => 48 + (index % 336));
+  const passages = Array(384).fill(0);
+  const priorities = Array.from({ length: 384 }, (_, index) => index % 6);
+  priorities[0] = 5;
+  return {
+    map: { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
+    tileset: { id: 1, tileset_name: "dense", autotile_names: ["a0", "a1", "a2", "a3", "a4", "a5", "a6"], passages: table(1, 384, 1, 1, passages), priorities: table(1, 384, 1, 1, priorities) },
   };
 }
 
@@ -178,10 +190,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     let domainClosed = false;
     const timers = installTimers(t);
     const viewport = options.viewport ?? (() => {
-      let current = options.viewportCurrent ?? null;
+      let current = Object.hasOwn(options, "viewportCurrent") ? options.viewportCurrent : { width: 640, height: 480 };
       const listeners = new Set();
       return {
         get current() { return current; },
+        get subscriberCount() { return listeners.size; },
         subscribe(listener) {
           listeners.add(listener);
           listener(current);
@@ -290,12 +303,12 @@ describe("map runtime walking", { concurrency: false }, () => {
     const walked = frame.latestState();
     assert.deepEqual(player(walked), {
       sceneEpoch: 1, visualEpoch: 1, motionId: 1,
-      x: 11, y: 8, screenX: 304, screenY: 224, direction: 6, pattern: 1,
+      x: 11, y: 8, screenX: 304, screenY: 208, direction: 6, pattern: 1,
       sprite: { namespace: "resource.Graphics", key: "Characters/m14_player", contentVersion: "v-image" },
-      motion: { id: 1, durationMs: 250, fromY: 8, fromScreenX: 304, fromScreenY: 224 },
+      motion: { id: 1, durationMs: 250, fromY: 8, fromScreenX: 304, fromScreenY: 208 },
     });
     assert.equal(view(walked).cameraX, 48);
-    assert.deepEqual(view(walked).cameraMotion, { id: 1, durationMs: 250, fromCameraX: 16, fromCameraY: 32 });
+    assert.deepEqual(view(walked).cameraMotion, { id: 1, durationMs: 250, fromCameraX: 16, fromCameraY: 48 });
     assert.equal(player(walked).motion.id, view(walked).cameraMotion.id);
     frame.abort();
     assert.deepEqual(await frame.pending, { type: "cancelled" });
@@ -308,11 +321,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(player(walked).x, 10);
     assert.equal(player(walked).y, 9);
     assert.equal(player(walked).motion.fromScreenX, 10 * 32 - 16);
-    assert.equal(player(walked).motion.fromScreenY, 8 * 32 - 32);
+    assert.equal(player(walked).motion.fromScreenY, 8 * 32 - 48);
     assert.equal(player(walked).screenX, 10 * 32 - 16);
-    assert.equal(player(walked).screenY, 9 * 32 - 64);
-    assert.equal(view(walked).cameraY, 64);
-    assert.equal(view(walked).cameraMotion.fromCameraY, 32);
+    assert.equal(player(walked).screenY, 9 * 32 - 80);
+    assert.equal(view(walked).cameraY, 80);
+    assert.equal(view(walked).cameraMotion.fromCameraY, 48);
     frame.abort();
     await frame.pending;
   });
@@ -475,35 +488,36 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(frame.domainClosed(), true);
   });
 
-  test("ordinary walking updates player/camera without replacing chunks identity", async (t) => {
+  test("ordinary walking updates player/camera without replacing tiles identity", async (t) => {
     const frame = await startFrame(t);
-    const spawnChunks = view(frame.latestState()).chunks;
+    const spawnTiles = view(frame.latestState()).tiles;
     await frame.emitEvent(down("ArrowRight"));
     const lastUpdate = frame.updates.at(-1);
     assert.ok(lastUpdate, "expected RenderDomain.update after walking");
-    assert.equal("chunks" in viewportSet(lastUpdate), false);
+    assert.equal("tiles" in viewportSet(lastUpdate), false);
     assert.equal("cameraX" in viewportSet(lastUpdate), true);
     assert.equal("x" in playerSet(lastUpdate), true);
     assert.equal(frame.replaces.length, 0);
-    assert.deepEqual(view(frame.latestState()).chunks, spawnChunks);
+    assert.deepEqual(view(frame.latestState()).tiles, spawnTiles);
     assert.equal(player(frame.latestState()).x, 11);
     assert.equal(player(frame.latestState()).motion.id, 1);
     frame.abort();
     await frame.pending;
   });
 
-  test("standing spawn window uses one-chunk overscan and walking stays inside it", async (t) => {
+  test("standing spawn window uses bounded tile prefetch and walking stays inside it", async (t) => {
     const frame = await startFrame(t);
     const { map: raw, tileset: rawTileset } = fixture();
     const map = validateMapRecord(raw);
     const tileset = validateTilesetRecord(rawTileset, 1);
-    const camera = computeCamera(map, 10, 8);
-    const required = viewportTileBounds(map, camera.cameraX, camera.cameraY);
-    const expected = projectChunkWindow(map, tileset, required);
-    const spawnChunks = view(frame.latestState()).chunks;
-    assert.equal(spawnChunks.length, expected.chunks.length);
+    const layout = calculateLayout(640, 480);
+    const camera = computeCamera(map, 10, 8, layout);
+    const required = viewportTileBounds(map, camera.cameraX, camera.cameraY, layout);
+    const expectedBounds = expandTileBounds(required, 4, map);
+    const spawnTiles = view(frame.latestState()).tiles;
+    assert.ok(spawnTiles.every(([x, y]) => x >= expectedBounds.minTileX && x <= expectedBounds.maxTileX && y >= expectedBounds.minTileY && y <= expectedBounds.maxTileY));
     await frame.emitEvent(down("ArrowRight"));
-    assert.equal("chunks" in viewportSet(frame.updates.at(-1)), false);
+    assert.equal("tiles" in viewportSet(frame.updates.at(-1)), false);
     frame.abort();
     await frame.pending;
   });
@@ -534,7 +548,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("window refresh includes chunks exactly once when coverage is insufficient", async (t) => {
+  test("window refresh includes tiles exactly once when coverage is insufficient", async (t) => {
     const wide = wideMap();
     const frame = await startFrame(t, {
       params: { x: 8, y: 8 },
@@ -543,18 +557,18 @@ describe("map runtime walking", { concurrency: false }, () => {
         "struct.Tileset/1": wide.tileset,
       },
     });
-    const spawnMaxX = Math.max(...view(frame.latestState()).chunks.map((chunk) => chunk.chunkX));
+    const spawnMaxX = Math.max(...view(frame.latestState()).tiles.map((tile) => tile[0]));
     await frame.emitEvent(down("ArrowRight"));
     for (let step = 0; step < 16; step += 1) frame.fireNextTimer();
-    const refreshUpdates = frame.updates.filter((update) => "chunks" in viewportSet(update));
-    assert.ok(refreshUpdates.length >= 1, "expected a chunks refresh update");
+    const refreshUpdates = frame.updates.filter((update) => "tiles" in viewportSet(update));
+    assert.ok(refreshUpdates.length >= 1, "expected a tiles refresh update");
     const latestRefresh = refreshUpdates.at(-1);
-    assert.ok(Math.max(...viewportSet(latestRefresh).chunks.map((chunk) => chunk.chunkX)) > spawnMaxX);
+    assert.ok(Math.max(...viewportSet(latestRefresh).tiles.map((tile) => tile[0])) > spawnMaxX);
     frame.abort();
     await frame.pending;
   });
 
-  test("projection window uses exact one-chunk overscan under Map-owned budget", async (t) => {
+  test("projection window uses four-tile prefetch under Map-owned budget", async (t) => {
     const filled = autotileFilledMap();
     const frame = await startFrame(t, {
       records: {
@@ -564,10 +578,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     });
     const map = validateMapRecord(filled.map);
     const tileset = validateTilesetRecord(filled.tileset, 1);
-    const camera = computeCamera(map, 10, 8);
-    const required = viewportTileBounds(map, camera.cameraX, camera.cameraY);
-    const expected = projectChunkWindow(map, tileset, required);
-    assert.deepEqual(view(frame.latestState()).chunks, expected.chunks);
+    const layout = calculateLayout(640, 480);
+    const camera = computeCamera(map, 10, 8, layout);
+    const required = viewportTileBounds(map, camera.cameraX, camera.cameraY, layout);
+    const expected = projectTilesInBounds(map, tileset, expandTileBounds(required, 4, map)).map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]);
+    assert.deepEqual(view(frame.latestState()).tiles, expected);
     frame.abort();
     await frame.pending;
   });
@@ -588,7 +603,54 @@ describe("map runtime walking", { concurrency: false }, () => {
     assert.equal(frame.states.length, 0);
   });
 
-  test("null Core viewport keeps Frozen 640 and same-size samples do not update", async (t) => {
+  test("null Core viewport waits for the first valid sample", async (t) => {
+    const frame = await startFrame(t, { attachOnly: true, viewportCurrent: null });
+    for (let attempt = 0; attempt < 40 && frame.viewport.subscriberCount === 0; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(frame.viewport.subscriberCount, 1);
+    assert.equal(frame.states.length, 0);
+    for (let attempt = 0; attempt < 10 && frame.states.length === 0; attempt += 1) {
+      frame.viewport.publish({ width: 800, height: 600 });
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.ok(frame.reads.length > 0, `expected content reads after viewport, got ${JSON.stringify(frame.reads)}`);
+    await frame.ready();
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [800, 600]);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("cancelling while waiting for the first viewport unsubscribes without creating a domain", async (t) => {
+    const frame = await startFrame(t, { attachOnly: true, viewportCurrent: null });
+    for (let attempt = 0; attempt < 40 && frame.viewport.subscriberCount === 0; attempt += 1) await new Promise((resolve) => setImmediate(resolve));
+    frame.abort();
+    assert.deepEqual(await frame.pending, { type: "cancelled" });
+    assert.equal(frame.states.length, 0);
+    assert.equal(frame.viewport.subscriberCount, 0);
+  });
+
+  test("maximum 60x33 dense three-layer viewport keeps every required tile under the hard limit", async (t) => {
+    const dense = denseAutotileMap();
+    const frame = await startFrame(t, {
+      viewportCurrent: { width: 1920, height: 1080 },
+      params: { x: 40, y: 25 },
+      records: { "struct.Map/1": dense.map, "struct.Tileset/1": dense.tileset },
+    });
+    const data = view(frame.latestState());
+    assert.deepEqual([data.columns, data.rows, data.logicalWidth, data.logicalHeight], [60, 33, 1920, 1056]);
+    const camera = { cameraX: data.cameraX, cameraY: data.cameraY };
+    const required = viewportTileBounds(validateMapRecord(dense.map), camera.cameraX, camera.cameraY, calculateLayout(1920, 1080));
+    const requiredCount = (required.maxTileX - required.minTileX + 1) * (required.maxTileY - required.minTileY + 1) * 3;
+    const requiredTiles = data.tiles.filter(([x, y]) => x >= required.minTileX && x <= required.maxTileX && y >= required.minTileY && y <= required.maxTileY);
+    assert.equal(requiredTiles.length, requiredCount);
+    assert.ok(new TextEncoder().encode(JSON.stringify(data)).byteLength < 196_608);
+    assert.equal(new Set(requiredTiles.map((tile) => tile[3])).size, 336);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("null and same-size samples do not update an active layout", async (t) => {
     const frame = await startFrame(t);
     assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [640, 480]);
     const updates = frame.updates.length;
@@ -620,13 +682,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("viewport samples clamp to 320x240 and 1920x1080", async (t) => {
+  test("invalid viewport samples preserve the last accepted layout", async (t) => {
     const frame = await startFrame(t);
     frame.viewport.publish({ width: 10, height: 10 });
-    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [320, 240]);
-    frame.viewport.publish({ width: 4000, height: 4000 });
-    frame.fireTimer(100);
-    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [1920, 1080]);
+    frame.viewport.publish({ width: Number.NaN, height: 480 });
+    assert.deepEqual([view(frame.latestState()).viewportWidth, view(frame.latestState()).viewportHeight], [640, 480]);
     frame.abort();
     await frame.pending;
   });
@@ -876,7 +936,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
     let domainClosed = false;
     const timers = installTimers(t);
     const viewport = options.viewport ?? (() => {
-      let current = options.viewportCurrent ?? null;
+      let current = Object.hasOwn(options, "viewportCurrent") ? options.viewportCurrent : { width: 640, height: 480 };
       const listeners = new Set();
       return {
         get current() { return current; },

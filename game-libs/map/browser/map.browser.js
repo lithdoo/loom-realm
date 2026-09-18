@@ -8,6 +8,13 @@
     "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
     "tileVisuals", "chunks", "cameraMotion",
   ];
+  const RESPONSIVE_VIEW_KEYS = [
+    "sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
+    "barHeight", "contentWidth", "contentHeight", "columns", "rows",
+    "logicalWidth", "logicalHeight", "scaleX", "scaleY", "mapName",
+    "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
+    "tiles", "cameraMotion",
+  ];
   const SPRITE_KEYS = [
     "sceneEpoch", "visualEpoch", "motionId", "x", "y", "screenX", "screenY",
     "direction", "pattern", "sprite", "motion",
@@ -134,15 +141,17 @@
   }
 
   function requiredBoundsForView(data) {
-    const current = tileBounds(data.cameraX, data.cameraY, data.viewportWidth, data.viewportHeight, data.mapWidth, data.mapHeight);
+    const width = data.logicalWidth ?? data.viewportWidth;
+    const height = data.logicalHeight ?? data.viewportHeight;
+    const current = tileBounds(data.cameraX, data.cameraY, width, height, data.mapWidth, data.mapHeight);
     if (!data.cameraMotion) return current;
     return unionBounds(
       current,
       tileBounds(
         data.cameraMotion.fromCameraX,
         data.cameraMotion.fromCameraY,
-        data.viewportWidth,
-        data.viewportHeight,
+        width,
+        height,
         data.mapWidth,
         data.mapHeight,
       ),
@@ -183,9 +192,25 @@
       && chunk.cells.every((cell) => Number.isSafeInteger(cell) && cell >= 0);
   }
 
+  function validTileTuple(tile, data) {
+    if (!Array.isArray(tile) || tile.length !== 5) return false;
+    const [x, y, z, tileId, depth] = tile;
+    if (!Number.isSafeInteger(x) || x < 0 || x >= data.mapWidth
+      || !Number.isSafeInteger(y) || y < 0 || y >= data.mapHeight
+      || ![0, 1, 2].includes(z)
+      || !Number.isSafeInteger(tileId) || tileId <= 0 || (tileId >= 1 && tileId <= 47)
+      || !Number.isSafeInteger(depth) || depth < 0) return false;
+    if (tileId >= 48 && tileId <= 383) {
+      const slot = Math.floor((tileId - 48) / 48);
+      if (slot < 0 || slot > 6 || !validRef(data.autotiles[slot])) return false;
+    }
+    return true;
+  }
+
   function assertMapViewData(data) {
+    const responsive = exactObject(data, RESPONSIVE_VIEW_KEYS);
     if (
-      !exactObject(data, VIEW_KEYS)
+      !(responsive || exactObject(data, VIEW_KEYS))
       || !Number.isSafeInteger(data.sceneEpoch) || data.sceneEpoch <= 0
       || !Number.isSafeInteger(data.visualEpoch) || data.visualEpoch <= 0
       || !(data.motionId === null || (Number.isSafeInteger(data.motionId) && data.motionId > 0))
@@ -199,15 +224,43 @@
       || !validRef(data.tileset)
       || !Array.isArray(data.autotiles) || data.autotiles.length !== 7
       || !data.autotiles.every((item) => item === null || validRef(item))
-      || !Array.isArray(data.tileVisuals)
-      || !Array.isArray(data.chunks)
+      || (responsive ? !Array.isArray(data.tiles) : (!Array.isArray(data.tileVisuals) || !Array.isArray(data.chunks)))
       || !validCameraMotion(data.cameraMotion)
       || (data.cameraMotion === null) !== (data.motionId === null)
       || (data.cameraMotion !== null && data.cameraMotion.id !== data.motionId)
     ) throw new TypeError("Invalid MapViewRenderData");
-    const maxCameraX = Math.max(data.mapWidth * TILE - data.viewportWidth, 0);
-    const maxCameraY = Math.max(data.mapHeight * TILE - data.viewportHeight, 0);
+    if (responsive) {
+      const expectedBar = data.viewportHeight < 480 ? 24 : data.viewportHeight < 720 ? 32 : 48;
+      if (!Number.isSafeInteger(data.barHeight) || data.barHeight !== expectedBar
+        || data.contentWidth !== data.viewportWidth || data.contentHeight !== data.viewportHeight - data.barHeight
+        || !Number.isSafeInteger(data.columns) || data.columns <= 0
+        || !Number.isSafeInteger(data.rows) || data.rows < 14 || data.rows > 33
+        || data.logicalWidth !== data.columns * TILE || data.logicalHeight !== data.rows * TILE
+        || !Number.isFinite(data.scaleX) || data.scaleX <= 0
+        || !Number.isFinite(data.scaleY) || data.scaleY <= 0
+        || Math.abs(data.scaleX * data.logicalWidth - data.contentWidth) > 1e-7
+        || Math.abs(data.scaleY * data.logicalHeight - data.contentHeight) > 1e-7
+        || typeof data.mapName !== "string" || data.mapName.length === 0
+        || data.mapName !== String(data.mapId)) throw new TypeError("Invalid MapViewRenderData");
+    }
+    const logicalWidth = data.logicalWidth ?? data.viewportWidth;
+    const logicalHeight = data.logicalHeight ?? data.viewportHeight;
+    const maxCameraX = Math.max(data.mapWidth * TILE - logicalWidth, 0);
+    const maxCameraY = Math.max(data.mapHeight * TILE - logicalHeight, 0);
     if (data.cameraX > maxCameraX || data.cameraY > maxCameraY) throw new TypeError("Invalid MapViewRenderData");
+    if (responsive) {
+      let previous = null;
+      for (const tile of data.tiles) {
+        if (!validTileTuple(tile, data)) throw new TypeError("Invalid MapViewRenderData");
+        if (previous && (tile[2] < previous[2]
+          || (tile[2] === previous[2] && tile[1] < previous[1])
+          || (tile[2] === previous[2] && tile[1] === previous[1] && tile[0] <= previous[0]))) {
+          throw new TypeError("Invalid MapViewRenderData");
+        }
+        previous = tile;
+      }
+      return;
+    }
     const expected = expectedChunkCoords(requiredBoundsForView(data), data.mapWidth, data.mapHeight);
     if (data.chunks.length !== expected.length) throw new TypeError("Invalid MapViewRenderData");
     const seenChunks = new Set();
@@ -294,6 +347,15 @@
   }
 
   function expandTiles(data) {
+    if (Array.isArray(data.tiles)) {
+      return data.tiles.map(([x, y, z, tileId, depth]) => {
+        const depthBias = depth === 0 ? -1 : depth - y * TILE;
+        const visual = tileId >= 384
+          ? [tileId, depthBias, 0, tileId - 384]
+          : [tileId, depthBias, 1, Math.floor((tileId - 48) / 48), ...autotileCornerTuple((tileId - 48) % 48)];
+        return { x, y, z, tileId, depth, visual };
+      });
+    }
     const visuals = new Map();
     for (const visual of data.tileVisuals) visuals.set(visual[0], visual);
     const tiles = [];
@@ -560,17 +622,36 @@
       super();
       const shadow = this.attachShadow({ mode: "open" });
       const style = document.createElement("style");
-      style.textContent = ":host{display:block;position:relative;overflow:hidden;width:640px;height:480px}canvas.tile-layer{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas.tile-layer[hidden]{display:none}slot{display:contents}::slotted(lr-map-sprite){display:block;position:absolute;image-rendering:pixelated;pointer-events:none}";
+      style.textContent = ":host{display:flex;flex-direction:column;position:relative;overflow:hidden;width:100vw;height:100vh;background:#000;color:#fff;font:14px/1.2 system-ui,sans-serif}.map-content{position:relative;flex:none;overflow:hidden;background:#000}.map-world{position:relative;transform-origin:0 0}.map-footer{box-sizing:border-box;flex:none;display:flex;align-items:center;padding:0 12px;background:#171717;color:#fff;white-space:nowrap;overflow:hidden}.map-name{overflow:hidden;text-overflow:ellipsis}.map-error{position:absolute;inset:0;z-index:2147483647;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.72);color:#ffb4b4;text-align:center}.map-error[aria-hidden=false]{display:flex}canvas.tile-layer{position:absolute;display:block;image-rendering:pixelated;pointer-events:none}canvas.tile-layer[hidden]{display:none}slot{display:contents}::slotted(lr-map-sprite){display:block;position:absolute;image-rendering:pixelated;pointer-events:none}";
       this._style = style;
       this._layers = [];
+      this._content = document.createElement("div");
+      this._content.className = "map-content";
+      this._world = document.createElement("div");
+      this._world.className = "map-world";
       this._slot = document.createElement("slot");
-      shadow.append(style, this._slot);
+      this._error = document.createElement("div");
+      this._error.className = "map-error";
+      this._error.setAttribute("role", "status");
+      this._error.setAttribute("aria-hidden", "true");
+      this._error.textContent = "Map visual failed to load";
+      this._footer = document.createElement("footer");
+      this._footer.className = "map-footer";
+      this._mapName = document.createElement("span");
+      this._mapName.className = "map-name";
+      this._footer.append(this._mapName);
+      this._world.append(this._slot);
+      this._content.append(this._world, this._error);
+      shadow.append(style, this._content, this._footer);
+      this._slot.addEventListener("slotchange", () => { this._sequence += 1; void this._prepare(this._sequence); });
       this._animationStartedAt = performance.now();
       this._sequence = 0;
       this._desiredView = undefined;
       this._desiredSprite = undefined;
       this._accepted = undefined;
       this._raf = undefined;
+      this._commitRaf = undefined;
+      this._pendingCommit = undefined;
       this._retry = undefined;
       this._autotileTimer = undefined;
       this._retryAttempts = 0;
@@ -599,6 +680,23 @@
       rule.style.height = `${height}px`;
     }
 
+    _applyLayout(view) {
+      this._applyViewportBox(view.viewportWidth, view.viewportHeight);
+      const contentWidth = view.contentWidth ?? view.viewportWidth;
+      const contentHeight = view.contentHeight ?? view.viewportHeight;
+      const logicalWidth = view.logicalWidth ?? contentWidth;
+      const logicalHeight = view.logicalHeight ?? contentHeight;
+      this._content.style.width = `${contentWidth}px`;
+      this._content.style.height = `${contentHeight}px`;
+      this._world.style.width = `${logicalWidth}px`;
+      this._world.style.height = `${logicalHeight}px`;
+      this._world.style.transform = `scale(${view.scaleX ?? 1}, ${view.scaleY ?? 1})`;
+      this._footer.style.width = `${view.viewportWidth}px`;
+      this._footer.style.height = `${view.barHeight ?? 0}px`;
+      this._footer.hidden = !(view.barHeight > 0);
+      this._mapName.textContent = view.mapName ?? String(view.mapId);
+    }
+
     _spriteRule() {
       const sheet = this._style.sheet;
       if (!sheet) return undefined;
@@ -612,6 +710,19 @@
       }
       const sprite = this._spriteChild();
       if (sprite) sprite._raf = undefined;
+    }
+
+    _cancelCommit() {
+      if (this._commitRaf !== undefined) {
+        cancelAnimationFrame(this._commitRaf);
+        this._commitRaf = undefined;
+      }
+      const pending = this._pendingCommit;
+      this._pendingCommit = undefined;
+      if (pending) {
+        this._disown(pending.owner);
+        pending.spriteEl?._disown(pending.owner);
+      }
     }
 
     _cancelAutotileTimer() {
@@ -642,6 +753,7 @@
         if (!this.isConnected) {
           this._sequence += 1;
           this._cancelRaf();
+          this._cancelCommit();
           this._cancelAutotileTimer();
           this._cancelRetry();
           this._activeMotion = null;
@@ -655,6 +767,7 @@
 
     receiveRenderData(data) {
       assertMapViewData(data);
+      this._cancelCommit();
       this._latestData = data;
       this._desiredView = { data, receivedAt: performance.now() };
       this._sequence += 1;
@@ -668,6 +781,7 @@
     }
 
     _receiveSprite(sprite, data, receivedAt) {
+      this._cancelCommit();
       this._desiredSprite = { sprite, data, receivedAt };
       this._sequence += 1;
       this._paintEpoch = this._sequence;
@@ -695,8 +809,8 @@
         this._accepted
         && this._accepted.view.sceneEpoch === view.data.sceneEpoch
         && this._accepted.view.visualEpoch === view.data.visualEpoch
-        && this._accepted.view.chunks === view.data.chunks
-        && this._accepted.view.tileVisuals === view.data.tileVisuals
+        && (this._accepted.view.tiles ?? this._accepted.view.chunks) === (view.data.tiles ?? view.data.chunks)
+        && (!view.data.tileVisuals || this._accepted.view.tileVisuals === view.data.tileVisuals)
         && resourceIdentity(this._accepted.view.tileset) === resourceIdentity(view.data.tileset)
       ) {
         const prepared = {
@@ -793,7 +907,13 @@
         if (sprite) sprite.sprite._disown(owner);
         return;
       }
-      this._commitAtomic(prepared, sequence);
+      this._pendingCommit = prepared;
+      this._commitRaf = requestAnimationFrame(() => {
+        this._commitRaf = undefined;
+        if (this._pendingCommit !== prepared) return;
+        this._pendingCommit = undefined;
+        this._commitAtomic(prepared, sequence);
+      });
     }
 
     _failPrepare(sequence) {
@@ -803,6 +923,8 @@
       if (!this._accepted) this._state = "EMPTY";
       else this._state = "VISIBLE";
       if (this._retryAttempts >= RETRY_MS.length) {
+        this.dataset.mapVisualState = "failed";
+        this._error.setAttribute("aria-hidden", "false");
         qualify("map-prepare-exhausted", { element: "map-view" });
         return;
       }
@@ -968,7 +1090,7 @@
       }
       for (const layer of incoming) {
         layer.canvas.hidden = false;
-        this.shadowRoot.insertBefore(layer.canvas, this._slot);
+        this._world.insertBefore(layer.canvas, this._slot);
       }
       this._layers = incoming;
       if (prepared.spriteCanvas && prepared.spriteEl) {
@@ -977,6 +1099,8 @@
       this._promoteResources(prepared);
       this._accepted = prepared;
       this._state = "VISIBLE";
+      this.dataset.mapVisualState = "ready";
+      this._error.setAttribute("aria-hidden", "true");
       this._cancelRaf();
       this._cancelAutotileTimer();
       this._tickAccepted(prepared, sequence, true);
@@ -1030,7 +1154,7 @@
       const progress = active && (motion || sprite?.motion) ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
       const cameraX = motion ? Math.round(lerp(motion.fromCameraX, view.cameraX, progress)) : view.cameraX;
       const cameraY = motion ? Math.round(lerp(motion.fromCameraY, view.cameraY, progress)) : view.cameraY;
-      this._applyViewportBox(view.viewportWidth, view.viewportHeight);
+      this._applyLayout(view);
       const frames = new Map();
       let hasAnimatedAutotile = false;
       for (const [slot, item] of prepared.autotiles.entries()) {

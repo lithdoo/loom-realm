@@ -47,7 +47,8 @@ const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize,
 const fixture = {
   records: {
     "struct.Map/1": { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, mapValues) },
-    "struct.Tileset/1": { id: 1, tileset_name: "m14_tileset", passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) }
+    "struct.Tileset/1": { id: 1, tileset_name: "m14_tileset", autotile_names: [null, null, null, null, null, null, null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    "struct.MapTransfer/1": { id: 1, steps: [], contacts: [], edges: [] }
   },
   expectedPixels: { tile384: [220, 40, 40, 255], tile385: [40, 80, 220, 255], playerDown: [240, 160, 30, 255], playerRight: [30, 110, 240, 255] }
 };
@@ -65,6 +66,7 @@ const fsdb = new URL("../[FSDB]essentials-v21.1/", import.meta.url);
 await rm(fsdb, { recursive: true, force: true });
 const directories = [
   "[struct]Map/",
+  "[struct]MapTransfer/",
   "[struct]Tileset/",
   "[resource]Graphics/Tilesets/",
   "[resource]Graphics/Characters/",
@@ -75,6 +77,8 @@ await Promise.all(directories.map((directory) => mkdir(new URL(directory, fsdb),
 await Promise.all([
   writeFile(new URL("[struct]Map/.info.meta", fsdb), "{}\n"),
   writeFile(new URL("[struct]Map/1.json", fsdb), `${JSON.stringify(fixture.records["struct.Map/1"])}\n`),
+  writeFile(new URL("[struct]MapTransfer/.info.meta", fsdb), "{}\n"),
+  writeFile(new URL("[struct]MapTransfer/1.json", fsdb), `${JSON.stringify(fixture.records["struct.MapTransfer/1"])}\n`),
   writeFile(new URL("[struct]Tileset/.info.meta", fsdb), "{}\n"),
   writeFile(new URL("[struct]Tileset/1.json", fsdb), `${JSON.stringify(fixture.records["struct.Tileset/1"])}\n`),
   writeFile(new URL("[resource]Graphics/.desc.meta", fsdb), "M15 canonical game resources.\n"),
