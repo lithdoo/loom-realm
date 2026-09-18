@@ -5,8 +5,8 @@
 > 稳定程度：Stabilizing  
 > 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update 与 Platform Broker 的分层关系  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)  
-> 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)  
-> 最近复核：2026-08-26
+> 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)  
+> 最近复核：2026-08-26（2026-09-18 对齐 ADR0036 四-child 修订候选）
 
 ---
 
@@ -24,16 +24,17 @@ Renderer
  │ Platform DataConnectionBroker realizes current authority
  │
  ▼
-Renderer Data Application Profile v1  Frozen
+Renderer Data Application Profile v1
 ├── Data Connection v1                 Frozen
 ├── User Input v1                      Frozen
-└── Render Update v1                   Frozen
+├── Render Update v1                   Frozen
+└── Viewport State v1                  Normative candidate
  │
  ▼
 Subsystem
 ```
 
-Main不转发 ordinary User Input/Render Update。共享 Data carrier只共享 transport/order，不合并 child-protocol authority。
+Main不转发 ordinary User Input/Render Update，也不持有/转发 Viewport size。共享 Data carrier只共享 transport/order，不合并 child-protocol authority。Profile v1 经[ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md) 批准首次发布前修订为四 child（新增 Renderer→Subsystem 只读 `viewport.state`）；修订候选的签署与实施状态以[冻结账本](../30-implementation/viewport-core-freeze-ledger.md)为准，旧三-child executable 与新四-child `/1` 不得混连。
 
 ---
 
@@ -125,6 +126,7 @@ loomrealm.renderer-data/1
 = Data Connection v1
 + User Input v1
 + Render Update v1
++ Viewport State v1
 ```
 
 Profile固定 shared carrier mechanics：
@@ -134,12 +136,12 @@ one carrier unit = one UTF-8 JSON text string
 common 1 MiB / depth-64 preflight
 one connection-wide inbound reader / ordered dispatcher
 one connection-wide outbound serialized writer
-input.* / render.* exact direction + demux
+input.* / render.* / viewport.state exact direction + demux
 fresh-carrier child baseline
 terminal first-wins / no retry-replay-migration
 ```
 
-Data Connection v1、User Input v1、Render Update v1 与 Data Profile v1 均已 Frozen。后续实现只能证明这些 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。
+Data Connection v1、User Input v1、Render Update v1 已 Frozen；Profile v1 的现行修订目标为 ADR0036 四-child 组合（含唯一 Renderer→Subsystem `viewport.state`），其候选/冻结/实施状态以[冻结账本](../30-implementation/viewport-core-freeze-ledger.md)为准，旧/新 `/1` 必须同一 build cohort，不得混连。后续实现只能证明这些 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。
 
 Profile改变必须 fresh Data generation。
 
@@ -352,6 +354,14 @@ first Render message = current Registry
 → ordinary commit/Event
 ```
 
+### Viewport
+
+```text
+fresh RendererDataPeer publisher cursor = empty
+→ republish participant latest valid size as baseline
+→ Runtime retained size not cleared on Data loss
+```
+
 same-generation reconnect：
 
 ```text
@@ -441,7 +451,7 @@ Provisioning material不是 Data application payload，也不拥有 Input/Render
 
 1. Main Control authority、Subsystem desired state、Renderer local producer/replica、Platform physical topology分离；
 2. DataAuthority使用 `(S,G,dataProfile)`，physical carrier不拥有 generation/profile；
-3. current Profile v1 = Frozen Connection1 + Frozen Input1 + Frozen Render1；Profile composition/mechanics 也已 Frozen；
+3. current Profile v1 = Frozen Connection1 + Frozen Input1 + Frozen Render1 + ADR0036 修订候选 Viewport State 1（签署状态见[冻结账本](../30-implementation/viewport-core-freeze-ledger.md)）；Profile composition/mechanics 的修订同样受账本治理；
 4. Data connection per-Subsystem，不 per-Frame/Activation/Domain；
 5. User Input = current Data × Main InputTarget × Interest[F] × Producer；
 6. Desired Interest、Activation input lease、carrier publication state是三个独立 lifetime；
