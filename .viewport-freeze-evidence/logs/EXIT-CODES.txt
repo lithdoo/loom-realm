@@ -1,0 +1,10 @@
+﻿docs:check-links exit=0 sha=ba1135d130d29a9b1bb3b3d7daceaad3ad0ac02c
+test:data exit=0 sha=ba1135d130d29a9b1bb3b3d7daceaad3ad0ac02c
+npm test -w @loomrealm/subsystem exit=0
+npm test -w @loomrealm/renderer exit=0
+test:m10:qualification exit=0
+test:m11:qualification exit=0
+test:m13:qualification exit=0
+build:desktop-stack exit=0
+test:regression exit=0
+test:viewport exit=0

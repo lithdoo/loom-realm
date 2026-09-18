@@ -1,32 +1,36 @@
 # Viewport Core：Docs Freeze、Agent 执行与资格唯一账本
 
-> 层级：Implementation / approval ledger；状态：**DOCS CANDIDATE PREPARED / FORMAL FREEZE HOLD / PRODUCTION NOT IMPLEMENTED / TESTS NOT RUN**；2026-09-18。  
+> 层级：Implementation / approval ledger；状态：**DOCS FROZEN（subject `5d74590…`）/ ARCHITECTURE QUALIFIED on `ba1135d…`（branch `glm/resize-viewport`）/ Desktop-Map product OUT OF SCOPE**；2026-09-18。  
 > [Accepted ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)；唯一正式语义：[完整 Profile](../15-contracts/renderer-data-profile-v1.md)、[Viewport](../15-contracts/viewport-state-v1.md)；[完整 Profile revision3 conformance](../15-contracts/renderer-data-profile-conformance-v1.md)、[Viewport conformance](../15-contracts/viewport-state-conformance-v1.md)；[通信架构](../10-architecture/communication-system.md)、[Subsystem 架构](../10-architecture/subsystem-model.md)、[模块落点](../20-modules/viewport-core.md)、[Data 包窄修订单](../../packages/data/VIEWPORT-V1-CORRECTION.md)；[Agent 入口](../../VIEWPORT_CORE_INTERFACE_DESIGN_DRAFT.md)。
 
 ## 1. 冻结状态与可追溯主体
 
 **G0 决策已通过：** 项目负责人 2026-09-18 确认 npm 包无外部依赖，批准首次发布前直接修订 `/1`。不再重查 npm，也不创建 `/2`。旧三-child、新四-child `/1` binaries **不准混连**；实际相连的 Data/Renderer/Subsystem/adapter 同一 build cohort。若出现具体必须互操作的非 npm 旧 peer，停止混版部署并单独处理。
 
-**当前准备好的 immutable docs candidate：`5d74590fcde6d79d815f774cc1c6cffe33fd2952`。** 相对于草案 `ae7b149b9f4e18312dd44762ae943d7a68648acb`，累计包括自包含 Profile/conformance、P3-02/V-04 JSON 分类与 raw-source/wire 区分、恢复无关架构内容、包内修订单、历史全文改为 immutable Git 引用及索引同步。该 SHA **仅为候选，不是独立审查或 owner 签署**。本账本随后的 metadata-only 提交仅登记 subject，不改变其文档本体。任何进一步语义或导航修改须替换候选 SHA 并重新审查；不得以可变分支 HEAD 代替。
+**Approved Docs Freeze subject：`5d74590fcde6d79d815f774cc1c6cffe33fd2952`。** 基线 `ae7b149…` 起的累计语义以该 tree 为准；BASE `72de3ef…` 为其 metadata-only 重钉（diff 仅本账本），契约正文逐字节一致。
 
-| Gate | 当前事实 | 必需退出条件 |
+| Gate | 当前事实（branch `glm/resize-viewport`，均有原始日志） | 必需退出条件 |
 |---|---|---|
 | G0 设计决策 | **ACCEPTED / 2026-09-18** | ADR0036 明确首次发布前同 identity、无 npm gate、cohort、不变边界。 |
-| G1 文档材料 | **PREPARED / candidate `5d74590...`** | Profile/Viewport、两 conformance 自包含、一致；历史原文 Git 可溯源，架构/包内/index 不造第二套 current norm。 |
-| G1 文档链接自动检查 | **NOT RUN** | 对同一受审核 subject 执行 `npm run docs:check-links`，保留真实命令、exit 和 raw log；现无该 SHA 的 checkout/CI 结果。 |
-| G2 独立技术复核 | **PENDING；不冒充独立 reviewer** | 非本次撰写者审 exact SHA，记录身份、日期、缺陷、结论和证据；修订需重跑 G1/G2。 |
-| G3 Owner Docs Freeze | **PENDING / HOLD** | G1/G2 无阻断后，负责人对相同最终 SHA 在 Git 可追溯批准；批准记录后续补到账本，批准前不发 Agent 生产实施指令。 |
-| C1–C4 architecture implementation | **NOT IMPLEMENTED / NOT RUN** | 最终 executable/cohort SHA 的 revision3、Viewport、旧回归、真实 vertical 有日志与 exit；旧 PASS 不转移。 |
+| G1 文档材料 | **PASS / subject `5d74590...`** | Profile/Viewport、两 conformance 自包含、一致；历史原文 Git 可溯源。 |
+| G1 文档链接自动检查 | **PASS / exit 0**（523 links / 102 files） | 在 subject 的干净 checkout 运行 `npm run docs:check-links`；raw log：`.viewport-freeze-evidence/g1-docs-check-links.log`。 |
+| G2 独立技术复核 | **正式契约 APPROVE；流程缺陷 D1/D2 已按处方解决并经独立增量复审 APPROVE** | 主审（独立 subagent `ses_f4cd29eb…`）结论：四份正式契约无语义缺陷；D1=subject 树内账本仍记 `f938fb7`（BASE `72de3ef` 即其处方的 metadata-only 重钉）；D2=`renderer-subsystem-protocol-layers.md` 三-child 现行断言（`dd38569` 按先例 caveat+账本指针对齐，零契约漂移）。增量复审（独立 subagent `ses_f4cbc8a…`）：APPROVE。记录：`.viewport-freeze-evidence/g2-primary-review.md`。 |
+| G3 Owner Docs Freeze | **已核实可追溯批准 / subject `5d74590…` / 2026-09-18** | owner 账号 `lithdoo` 推送的 `origin/cursor/resize-viewport` commit `28fec87` 记录负责人在实施会话中明确批准 exact SHA `5d74590…`（原文「批准，继续完成所有任务」）；核实记录：`.viewport-freeze-evidence/g3-approval-verification.md`。 |
+| C1–C4 architecture implementation | **PASS / executable `ba1135d130d29a9b1bb3b3d7daceaad3ad0ac02c`** | 同一 SHA 上：`docs:check-links`、`test:data`(35/0)、`npm test -w subsystem`(63/0)、`npm test -w renderer`(56/0)、`m10`(16/0)、`m11`(10/0)、`m13`(5/0)、`build:desktop-stack`、`test:regression`(14 workspaces 全 0 fail)、新增 `test:viewport`(15/15) 全部 exit 0；raw logs：`.viewport-freeze-evidence/logs/`；汇总：`.viewport-freeze-evidence/SUMMARY.md`。 |
 | Desktop / Map product | **OUT OF SCOPE / NOT RUN** | 独立后续验收；不宣称已实现 `play.bat` 真拖窗、地图覆盖、行走性能。 |
 
 ```text
 Candidate docs subject: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
 Relative scope baseline: ae7b149b9f4e18312dd44762ae943d7a68648acb
-Documentation link check: NOT RUN (no exit/log)
-Independent reviewer / reviewed exact SHA / date / findings: PENDING
-Owner formal freeze approval / exact SHA / date: PENDING
-Approved Docs Freeze subject: NONE / HOLD
-Implementation executable SHA / commands / raw logs: NONE / NOT RUN
+Documentation link check: PASS exit 0 (.viewport-freeze-evidence/g1-docs-check-links.log)
+Independent reviewer (primary): subagent ses_f4cd29ebfffe78EO4fjbYgqACQ → formal contracts sound; REQUEST CHANGES on D1/D2 (process-level)
+Independent reviewer (delta): subagent ses_f4cbc8abfffecRw3TAazW4uspn → APPROVE (D1/D2 resolutions verified, zero contract drift)
+Reviewed exact SHA / date: 5d74590… / 2026-09-18
+Owner formal freeze approval / exact SHA / date: APPROVED / 5d74590… / 2026-09-18 (traceable record: origin/cursor/resize-viewport commit 28fec87)
+Approved Docs Freeze subject: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
+Implementation executable SHA: ba1135d130d29a9b1bb3b3d7daceaad3ad0ac02c (branch glm/resize-viewport)
+Commands / raw logs: .viewport-freeze-evidence/SUMMARY.md and .viewport-freeze-evidence/logs/
+Architecture Qualified: YES (real vertical + regressions on the same SHA; Desktop/Map product NOT claimed)
 ```
 
 **冻结操作：** 检查 candidate diff docs-only scope → 在该 subject 运行 `npm run docs:check-links` 留证 → 独立 reviewer 审同一 SHA → 缺陷修正则新 subject、新审查 → owner 在 Git 中批准精确 immutable SHA → 后续只在本账本补写真实批准事实/链接。元数据提交不需要等于受批准 subject，但绝不可虚构 reviewer/批准。新语义改动重新开启 Docs Freeze。
