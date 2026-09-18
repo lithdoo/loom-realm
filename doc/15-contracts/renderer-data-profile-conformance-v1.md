@@ -1,206 +1,28 @@
-# Renderer Data Application Profile v1 Conformance
+# Renderer Data Application Profile v1 Conformance — revision 3
 
-> 层级：正式契约 / Conformance  
-> 状态：Active / Normative / Frozen  
-> Profile 版本：1  
-> fixtureSetRevision：2  
-> 适用 Profile：`loomrealm.renderer-data/1`  
-> 依赖：[Renderer Data Profile v1](./renderer-data-profile-v1.md)、[Data Connection v1 Conformance](./renderer-subsystem-data-connection-conformance-v1.md)、[User Input v1 Conformance](./user-input-conformance-v1.md)、[Render Update v1 Conformance](./render-update-conformance-v1.md)、[ADR 0025](../decisions/0025-renderer-data-profile-v1-preimplementation-closure.md)、[ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> 最近复核：2026-09-07
+> 层级：正式 conformance；状态：**revision3 candidate / Docs Freeze HOLD / not executed**；2026-09-18。
+> [Profile /1](./renderer-data-profile-v1.md) · [Viewport conformance](./viewport-state-conformance-v1.md) · [原 revision2 全文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [freeze ledger](../30-implementation/viewport-core-freeze-ledger.md)。
 
-本文件验证 `loomrealm.renderer-data/1` 的组合层 obligations；child protocol 的完整语义仍由各自 Conformance 定义。
+**继承规则：** 原 revision2 §§1–11 每条 fixture/observable/old child obligation 原样保留，以下只覆盖 closed child set/direction/fresh/terminal family，新增 revision3 assertions。不得删掉原 revision2 容量、ordering、Input mutation-gate、Render publication、Hostra/PWA equivalence 等义务。旧已执行 PASS 只属于旧 executable，不转移给新版。
 
----
+## 1. Revised composition
 
-## 1. Profile Binding
+`loomrealm.renderer-data/1 = Connection1 + Input1 + Render1 + Viewport1`；fixtureSetRevision=3 是测试集修订，不是新的 identity/child版本。Subsystem outbound 仍只有 `input.interest` 和四个 `render.*`；Renderer outbound 是三条 `input.*` 加唯一 `viewport.state`。必须有一个 reader、一个 serialized writer，共同 text JSON actual UTF-8≤1MiB/depth≤64 预检；所有旧 Input/Render 规则不变。
 
-```text
-loomrealm.renderer-data/1
-= Data Connection v1
-+ User Input v1
-+ Render Update v1
-```
+## 2. Exact 新增测试 ID
 
-Current child conformance：
+| ID | 输入/断言 |
+|---|---|
+| P3-01 | 新 `/1` 四 child 完整；Renderer outbound viewport 合法，反方向 fatal `viewport`；old peer 混版禁止资格声明，不做 `/2`/dual mode。 |
+| P3-02 | `viewport.state` valid exact only；missing/extra/inherited/wire fraction/negative/zero/NaN/unsafe value fatal `viewport`；unknown `viewport.foo` fatal `profile`。 |
+| P3-03 | `carrier.messages()` 每 peer 一次；Viewport 与 Input/Render exact 一次 dispatch；先 common gate 再 child，invalid 不产生任何 role state mutation。 |
+| P3-04 | 所有 outbound 共用一个 writer，concurrent physical send≤1，admitted FIFO 不撤回、不重排，Viewport burst 不填满 generic writer queue、Input/Render 不因其饥饿。 |
+| P3-05 | Viewport 每 carrier≤1 inFlight + ≤1 pending；阻塞 send 注入 10000 changes 和并发 Input/Render，最终 latest 收敛；A→B→A 去掉 B；B admitted 后 C 必须等 B settle。 |
+| P3-06 | fresh peer 即使与旧 size 相同仍发独立 baseline；不继承 old pending/cursor；same-G/new-G/Renderer source callback 均 fenced；Scope equal callback suppress。 |
+| P3-07 | recognized viewport child invalid/explicit protocol-fatal→DataTerminal.protocol=`viewport`；common/unknown=`profile`；Input/Render 分别旧 family；first-wins terminal 仅退休当前 Data。 |
+| P3-08 | 旧 revision2 全量 suite + Connection/Input/Render child conformance 原样保留；不得改旧测试期望掩盖回归。 |
+| P3-09 | fake source→真正 Renderer holder→Data peer→Subsystem host→scope.viewport 的 currentness、backpressure、terminal 全链；只 mock 组件不算通过。 |
 
-```text
-User Input protocolVersion = 1 / fixtureSetRevision = 2
-```
+## 3. 资格和证据
 
-Profile identity不因 fixture revision变化；ADR 0029 没有改变 Data Profile wire/version combination。
-
----
-
-## 2. Required Claims
-
-完整 Profile claim至少证明：
-
-```text
-exact profile identity/version binding
-one inbound reader / exact namespace routing
-one serialized outbound writer
-role-exact direction legality
-first-wins terminal / fail-closed carrier retirement
-fresh-carrier Input + Render baseline reset/republication
-all current child conformance obligations
-Hostra/PWA abstract transport equivalence
-```
-
-仅通过 Data Connection、Input 或 Render其中一部分不构成完整 Profile conformance。
-
----
-
-## 3. Harness Observables
-
-至少观察：
-
-```text
-carrier.messages() call count
-max concurrent carrier.send count
-sent application-unit order
-role dispatch target
-terminal fact / close request
-pending send settlement
-fresh-peer child publication state
-```
-
-Application unit始终是 one UTF-8 JSON text string。
-
----
-
-## 4. Identity / Direction
-
-Required：
-
-```text
-profile-exact-identity
-profile-unsupported-rejected-before-read/write
-profile-change-requires-fresh-generation
-subsystem-outbound: input.interest + render.* only
-renderer-outbound: input.state/event/reset only
-wrong-direction-message-protocol-fatal
-```
-
-不得通过 MessagePort structured object拓宽 application model。
-
----
-
-## 5. Reader / Dispatcher
-
-Required：
-
-```text
-one-reader-per-peer
-input.* exact input dispatcher
-render.* exact render dispatcher
-unknown profile namespace rejected
-one inbound unit dispatches exactly once
-handler protocol-fatal retires current peer
-handler throw/local-fatal retires peer unless child contract explicitly contains it before returning
-```
-
-M10 InputManager必须 containment business handler failure，使其不逃逸到 Data dispatch；Profile runtime无需识别 business callback。
-
----
-
-## 6. Writer
-
-Required：
-
-```text
-one serialized writer
-max concurrent carrier.send = 1
-exact outbound profile validation before send
-terminal first-wins
-no retry/replay/duplicate after failed send
-```
-
-Generic Data writer的 finite capacity是 fail-closed mechanical bound；User Input v1 revision 2要求 Renderer在进入该 writer前执行自身 bounded coalescing/drop policy，普通 Input backlog不得依赖 generic writer overflow作为 backpressure策略。
-
----
-
-## 7. Child Ordering Independence
-
-Input 与 Render共享 physical writer order但不共享 authority/revision/transaction。
-
-Required：
-
-```text
-input ordering obeys User Input v1
-render ordering obeys Render Update v1
-input message does not advance Render revision
-render message does not change Input lease/Interest
-child failure classification maps to correct DataTerminal.protocol family
-```
-
----
-
-## 8. Fresh Carrier
-
-每个 fresh current peer：
-
-```text
-Input remote Interest/State/Event history = empty
-Render remote Domain/Snapshot/Patch chain = empty
-```
-
-Role-local desired business state MAY survive according to child lifetime rules and MUST re-establish current baselines through the fresh peer。
-
-Required：
-
-```text
-fresh-carrier-input-interest-republication
-fresh-carrier-input-state-baseline/no-event-replay
-fresh-carrier-render-domains/snapshots
-same-generation-reconnect-fresh-child-publication
-fresh-generation-replacement-fresh-child-publication
-fresh-carrier-does-not-restart-runtime/frame
-```
-
----
-
-## 9. Terminal / Failure Boundary
-
-Required：
-
-```text
-malformed/profile-invalid → profile protocol-fatal
-input-invalid → input protocol-fatal
-render-invalid → render protocol-fatal
-carrier close/loss → carrier terminal
-terminal first-wins
-terminal closes current carrier best-effort
-Data terminal != Runtime failure / Frame unwind
-```
-
-Fresh current carrier reacquisition由 role/Platform lifecycle负责，不属于 Profile retry/reconnect mechanics。
-
----
-
-## 10. Platform Equivalence
-
-完整 conformance要求：
-
-```text
-Hostra WebSocket text
-PWA MessagePort string
-→ same profile application trace semantics
-```
-
-Adapter不得 retry、duplicate、reorder或将 structured object直接交给 Profile Core。
-
-M10可以在 Hostra/Desktop Data physical lifecycle完成 current platform-independent Input role qualification；full Profile Hostra/PWA equivalence直到 M16。
-
----
-
-## 11. Revision 2
-
-Profile `fixtureSetRevision = 2` 的唯一新增组合义务来自 current User Input revision 2：
-
-```text
-mutation-gate State convergence remains inside Subsystem Input role
-business handler failure is contained before Data dispatch failure
-Renderer Input backlog is bounded/coalesced before generic Data writer overflow
-```
-
-Profile identity、Data Connection version、Render Update version均不变；revision 1结果不得冒充 current complete `loomrealm.renderer-data/1` conformance。
+Profile 组合测试不能替代 [Viewport conformance](./viewport-state-conformance-v1.md) 的 source/Scope 详细 fixture；后者不能替代本规范旧 child regressions。实施阶段新增显式 revision3/Viewport test runner，记录测试目录、命令、退出码、最终**同一个** executable/cohort SHA、原始日志，不能只复用 revision2 PASS。架构资格不证明 Desktop/PWA 真 source、`play.bat` 动态地图或运动性能。
