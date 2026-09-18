@@ -287,3 +287,21 @@ test("V-08: same participant two peers each get baseline; source not restarted o
   await turn();
   assert.equal(seen2.length, 1);
 });
+
+test("C-03: extra symbol own-key sample ignored; getter not executed", () => {
+  const sample = { width: 640, height: 480 };
+  sample[Symbol("extra")] = 1;
+  assert.equal(normalizeViewportSample(sample), null);
+
+  let getterHits = 0;
+  const withSymbolAndGetter = { height: 480 };
+  Object.defineProperty(withSymbolAndGetter, "width", {
+    enumerable: true,
+    get() { getterHits += 1; return 640; },
+  });
+  withSymbolAndGetter[Symbol("x")] = true;
+  assert.equal(normalizeViewportSample(withSymbolAndGetter), null);
+  assert.equal(getterHits, 0);
+
+  assert.deepEqual(normalizeViewportSample({ width: 100.9, height: 50.1 }), { width: 100, height: 50 });
+});

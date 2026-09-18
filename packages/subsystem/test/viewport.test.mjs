@@ -330,3 +330,32 @@ test("V-13: viewport updates independent of Frame/InputTarget changes", async ()
   await session.main.frame.closeFrame({ frameId: "root" });
   await shutdown(session);
 });
+
+test("C-02: thenable then-getter throw isolated with sync throw and Promise.reject", async () => {
+  const manager = new ViewportManager();
+  const ok = [];
+  const unhandled = [];
+  const onUnhandled = (reason) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    manager.viewport.subscribe(() => { throw new Error("sync boom"); });
+    manager.viewport.subscribe(() => Promise.reject(new Error("async boom")));
+    manager.viewport.subscribe(() => {
+      const evil = {};
+      Object.defineProperty(evil, "then", {
+        enumerable: true,
+        get() { throw new Error("then getter boom"); },
+      });
+      return evil;
+    });
+    manager.viewport.subscribe((value) => { ok.push(value); });
+    assert.deepEqual(ok, [null]);
+    assert.doesNotThrow(() => manager.applyState(7, 8));
+    assert.ok(ok.some((v) => v && v.width === 7 && v.height === 8));
+    await tick();
+    assert.equal(unhandled.length, 0);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    manager.close();
+  }
+});

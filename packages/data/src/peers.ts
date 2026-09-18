@@ -11,6 +11,7 @@ import type {
   ViewportStateV1,
 } from "./model.js";
 import { DataRuntime, validateBinding } from "./runtime.js";
+import { validateViewportState } from "./viewport-codec.js";
 
 const accepted = Object.freeze({ kind: "accepted" } as const);
 
@@ -37,15 +38,27 @@ function sameSize(
   return left.width === right.width && left.height === right.height;
 }
 
-function isAdmissibleViewport(message: unknown): message is ViewportStateV1 {
-  if (message === null || typeof message !== "object") return false;
-  const value = message as Record<string, unknown>;
-  return value.type === "viewport.state" &&
-    Number.isSafeInteger(value.width) &&
-    (value.width as number) > 0 &&
-    Number.isSafeInteger(value.height) &&
-    (value.height as number) > 0 &&
-    Object.keys(value).length === 3;
+/** Classify before any merge/dedupe. Never throws; copies numeric size on success. */
+function tryAdmitViewport(
+  message: unknown,
+): { ok: true; width: number; height: number } | { ok: false } {
+  try {
+    if (message === null || typeof message !== "object") return { ok: false };
+    const keys = Reflect.ownKeys(message);
+    if (keys.length !== 3 || !keys.includes("type") || !keys.includes("width") || !keys.includes("height")) {
+      return { ok: false };
+    }
+    for (const key of ["type", "width", "height"] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(message, key);
+      if (descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined) {
+        return { ok: false };
+      }
+    }
+    const validated = validateViewportState(message);
+    return { ok: true, width: validated.width, height: validated.height };
+  } catch {
+    return { ok: false };
+  }
 }
 
 class ViewportPublisher {
@@ -60,11 +73,12 @@ class ViewportPublisher {
 
   publishState(message: ViewportStateV1): void {
     if (!this.active) return;
-    if (!isAdmissibleViewport(message)) {
+    const admitted = tryAdmitViewport(message);
+    if (!admitted.ok) {
       void this.send(message).catch(() => undefined);
       return;
     }
-    this.offer({ width: message.width, height: message.height });
+    this.offer({ width: admitted.width, height: admitted.height });
   }
 
   retire(): void {

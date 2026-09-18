@@ -15,21 +15,20 @@ function sameSize(left: ViewportSize | null, right: ViewportSize | null): boolea
 }
 
 function deliver(listener: Listener, value: ViewportSize | null): void {
-  let result: unknown;
   try {
-    result = listener(value);
+    const result: unknown = listener(value);
+    if (
+      result !== null &&
+      typeof result === "object" &&
+      typeof (result as { then?: unknown }).then === "function"
+    ) {
+      void Promise.resolve(result as PromiseLike<unknown>).then(
+        () => undefined,
+        () => undefined,
+      );
+    }
   } catch {
     return;
-  }
-  if (
-    result !== null &&
-    typeof result === "object" &&
-    typeof (result as { then?: unknown }).then === "function"
-  ) {
-    void Promise.resolve(result as PromiseLike<unknown>).then(
-      () => undefined,
-      () => undefined,
-    );
   }
 }
 

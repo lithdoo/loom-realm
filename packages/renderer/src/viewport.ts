@@ -26,9 +26,9 @@ function isDataProperty(
 /** Trusted raw source sample → normalized CSS logical size, or null if ignored. */
 export function normalizeViewportSample(sample: unknown): NormalizedViewportSize | null {
   if (sample === null || typeof sample !== "object") return null;
-  let ownKeys: string[];
+  let ownKeys: Array<string | symbol>;
   try {
-    ownKeys = Object.getOwnPropertyNames(sample);
+    ownKeys = Reflect.ownKeys(sample);
   } catch {
     return null;
   }
