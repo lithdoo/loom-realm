@@ -2,12 +2,11 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Stabilizing；原三-child `/1` 为历史已实现基线，修订后的四-child `/1` **Docs Freeze HOLD / Not Implemented**  
-> 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update、Viewport State 与 Platform Broker 的分层关系  
+> 稳定程度：Stabilizing  
+> 主要定义：Renderer Control、DataAuthority、Renderer Data Profile、User Input、Render Update 与 Platform Broker 的分层关系  
 > 依赖：[系统架构总览](./system-overview.md)、[平台组合系统](./platform-composition-system.md)、[通信系统](./communication-system.md)  
-> 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)、[Viewport State v1](../15-contracts/viewport-state-v1.md)  
-> 纠正：[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)；[唯一当前资格状态](../30-implementation/viewport-profile-v1-qualification.md)  
-> 最近复核：2026-09-16（仅订正 Profile 组合及 Viewport 投影；既有 Input/Render/Control/Connection 约束保留）
+> 正式化：[Renderer Control v1](../15-contracts/main-renderer-control-v1.md)、[Renderer Data Profile v1](../15-contracts/renderer-data-profile-v1.md)、[Data Connection v1](../15-contracts/renderer-subsystem-data-connection-v1.md)、[User Input v1](../15-contracts/user-input-v1.md)、[Render Update v1](../15-contracts/render-update-v1.md)  
+> 最近复核：2026-08-26
 
 ---
 
@@ -25,17 +24,16 @@ Renderer
  │ Platform DataConnectionBroker realizes current authority
  │
  ▼
-Renderer Data Application Profile v1  Revised candidate / Docs Freeze HOLD
-├── Data Connection v1                 Frozen (wire/currentness unchanged)
-├── User Input v1                      Frozen (wire unchanged)
-├── Render Update v1                   Frozen (wire unchanged)
-└── Viewport State v1                  New child / candidate
+Renderer Data Application Profile v1  Frozen
+├── Data Connection v1                 Frozen
+├── User Input v1                      Frozen
+└── Render Update v1                   Frozen
  │
  ▼
 Subsystem
 ```
 
-Main不转发 ordinary User Input/Render Update/Viewport State。共享 Data carrier只共享 transport/order，不合并 child-protocol authority。原三-child `/1` executable及其历史 PASS 不能冒充修订后四-child `/1`；同名旧新 binary 不可混配。`/2` 提案已由 ADR0037 取消。
+Main不转发 ordinary User Input/Render Update。共享 Data carrier只共享 transport/order，不合并 child-protocol authority。
 
 ---
 
@@ -68,8 +66,6 @@ Data authority     != physical carrier
 Data carrier       != ordinary input authority
 Frame authority    != Render Domain authority
 ```
-
-Viewport 是 Renderer 所指定单一 logical surface 的 CSS logical geometry observation；Main 不持有尺寸，接收观察值不产生 InputTarget/Activation/Frame mutation permit。具体 author API、订阅和 lifetime 见 [Viewport State v1](../15-contracts/viewport-state-v1.md)。Desktop/PWA 的 DOM physical source 是产品组合策略，map camera/chunks/raster/P95 是 consumer 策略，均不属于 Data Connection 或 Main authority。
 
 ---
 
@@ -125,11 +121,10 @@ Data Connection cardinality：
 ## 4. Data Application Profile
 
 ```text
-loomrealm.renderer-data/1  (revised candidate; NOT Frozen/Implemented)
+loomrealm.renderer-data/1
 = Data Connection v1
 + User Input v1
 + Render Update v1
-+ Viewport State v1
 ```
 
 Profile固定 shared carrier mechanics：
@@ -139,14 +134,14 @@ one carrier unit = one UTF-8 JSON text string
 common 1 MiB / depth-64 preflight
 one connection-wide inbound reader / ordered dispatcher
 one connection-wide outbound serialized writer
-input.* / render.* / viewport.state exact direction + demux
-fresh-carrier independent child baselines
+input.* / render.* exact direction + demux
+fresh-carrier child baseline
 terminal first-wins / no retry-replay-migration
 ```
 
-Data Connection v1、User Input v1、Render Update v1 各自仍 Frozen；修订后的 **Profile v1 与 Viewport State v1 仍为 Docs Freeze HOLD**。后续实现须证明修订后完整 Profile 的 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。Viewport producer 仅在 shared writer admission 前有界 latest-wins，不改变 Frozen writer 或其他 child ordering。
+Data Connection v1、User Input v1、Render Update v1 与 Data Profile v1 均已 Frozen。后续实现只能证明这些 observable semantics；不得通过 package/Platform convenience 反向重新解释组成契约。
 
-**真正不同的 Profile identity** 变更必须 fresh Data generation。本次同一 `/1` 的首次发布前纠正不是运行时 Profile replacement；产品必须先保证 coherent build/deployment cohort，不能依靠 `(S,G,P)` 识别旧新二进制。见 [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) 和 [qualifications](../30-implementation/viewport-profile-v1-qualification.md)。
+Profile改变必须 fresh Data generation。
 
 ---
 
@@ -357,21 +352,11 @@ first Render message = current Registry
 → ordinary commit/Event
 ```
 
-### Viewport State（新增独立 baseline）
-
-```text
-latest legal physical size available → publish fresh viewport.state
-no legal sample yet → wait for first legal sample; never synthesize zero/default
-old carrier pending/in-flight bytes → never migrate/replay
-Runtime retained current → keep last historical observation; equal baseline no author callback
-```
-
 same-generation reconnect：
 
 ```text
 Input publication baseline fresh
 Render publication baseline fresh
-Viewport publication baseline fresh
 Render wire Domain lifetime preserved
 ```
 
@@ -380,10 +365,9 @@ fresh generation：
 ```text
 Input publication baseline fresh
 Render wire universe fresh
-Viewport publication baseline fresh; old carrier/source fenced
 ```
 
-Business Frame/InputListener/RenderDomain/Runtime Viewport object不因 carrier替换自动重建。不创建跨 child fixed baseline order、ACK 或 atomic super-snapshot。
+Business Frame/InputListener/RenderDomain object不因 carrier替换自动重建。
 
 ---
 
@@ -457,15 +441,15 @@ Provisioning material不是 Data application payload，也不拥有 Input/Render
 
 1. Main Control authority、Subsystem desired state、Renderer local producer/replica、Platform physical topology分离；
 2. DataAuthority使用 `(S,G,dataProfile)`，physical carrier不拥有 generation/profile；
-3. current revised Profile `/1` = Frozen Connection1 + Frozen Input1 + Frozen Render1 + candidate Viewport1；**Profile/Viewport Docs Freeze HOLD、Not Implemented**；旧三-child `/1` Frozen 仅为历史 executable；
+3. current Profile v1 = Frozen Connection1 + Frozen Input1 + Frozen Render1；Profile composition/mechanics 也已 Frozen；
 4. Data connection per-Subsystem，不 per-Frame/Activation/Domain；
-5. User Input = current Data × Main InputTarget × Interest[F] × Producer；**Viewport geometry不受该 gate 控制**；
+5. User Input = current Data × Main InputTarget × Interest[F] × Producer；
 6. Desired Interest、Activation input lease、carrier publication state是三个独立 lifetime；
 7. Control/Data无跨连接 total order；Interest-first/Authority-first都安全收敛；
 8. fresh Activation可复用 Desired Interest但不复用 State/Event；
-9. fresh Data carrier分别重新建立 Input/Render/Viewport publication baseline；
+9. fresh Data carrier重新建立 Input/Render publication baseline；
 10. Data Profile使用 one ordered reader/dispatcher + one serialized writer，但不创建 shared child revision/transaction；
 11. standard stateful Input遵循 post-transition State-before-Event；
-12. protocol-invalid Input/Render/Profile/Viewport retire Data，well-formed stale child input/event按各自 contract drop-only；
-13. Frame/Input/Data/Render/Viewport authority与lifecycle相互不拥有彼此；
+12. protocol-invalid Input/Render/Profile retire Data，well-formed stale child input/event按各自 contract drop-only；
+13. Frame/Input/Data/Render authority与lifecycle相互不拥有彼此；
 14. Platform provisioning只建立 physical carrier，不拥有 application authority。

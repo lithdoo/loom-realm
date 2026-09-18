@@ -2,14 +2,13 @@
 
 > 层级：系统架构  
 > 状态：Active Design  
-> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**；Viewport v1 **candidate / Docs Freeze HOLD / not implemented**  
+> 稳定程度：Evolving overall / **M10 Input closed + M11 Render surface frozen/current subject requalification pending / M12 Content author slice frozen**
 > 主要定义：Subsystem logical role、Definition Module ABI、Runtime/Frame local context、FrameOutcome、Input/Render/Content author projections与 error/lifetime boundary  
 > 依赖：[系统架构总览](./system-overview.md)、[运行承载系统](./runtime-hosting-system.md)、[栈式运行系统](./stack-runtime-system.md)、[渲染系统](./rendering-system.md)、[存储与内容系统](./storage-system.md)、[ADR 0030](../decisions/0030-freeze-m12-content-preimplementation-closure.md)  
 > 正式 Input：[User Input v1](../15-contracts/user-input-v1.md) · [ADR 0029](../decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
 > 正式 Render：[Render Update v1](../15-contracts/render-update-v1.md)  
 > 正式 Content：[Content API v1](../15-contracts/content-api-v1.md)  
-> Viewport 候选：[Viewport State v1](../15-contracts/viewport-state-v1.md) · [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) · [唯一 Core ledger](../30-implementation/viewport-profile-v1-qualification.md)  
-> 最近复核：2026-09-16（仅新增 Viewport seam；历史 Input/Render/Content 原文保留）
+> 最近复核：2026-09-08
 
 ---
 
@@ -27,8 +26,6 @@ outbound Frame call/return role
 business Render Domain authoritative state + transient Event intent
 readonly ContentClient usage
 ```
-
-新增的**待实施**角色能力：Runtime-scoped retained readonly `scope.viewport`；只保留当前 Renderer 经修订四-child `/1` 发布的最后合法 CSS logical size，不拥有物理 Window、Map camera 或 Frame/Input authority。精确 API 与 terminal 行为以[Viewport v1](../15-contracts/viewport-state-v1.md)为准，不将此能力误写成已实现。
 
 Subsystem不负责 Game/Platform manifest、executable selection、Process/Worker、Main public authority、Renderer hosting、DataConnectionBroker、Content physical service/credential/storage。
 
@@ -88,8 +85,6 @@ Platform
 ```
 
 Runner/module/transport/Content ownership都不能产生第二份 Frame/Input/Render authority。
-
-Viewport observation独立 InputTarget/Activation/Frame gate；收到尺寸本身不授权 ordinary business mutation，也不直接写 Renderer Store/Projector 或创建新的 Render authority。业务有权在现有 mutation gate 内按自身规则使用 observation 更新 RenderDomain；Core 不规定地图策略。
 
 ---
 
@@ -296,21 +291,6 @@ Business自行决定 fallback/retry/failed outcome。
 
 ---
 
-## 9a. Viewport Author Projection — revised `/1` candidate, not implemented
-
-```ts
-interface ViewportSize { readonly width: number; readonly height: number }
-interface Viewport {
-  readonly current: ViewportSize | null;
-  subscribe(listener: (value: ViewportSize | null) => void): () => void;
-}
-interface SubsystemScope { readonly viewport: Viewport }
-```
-
-Object 与 Scope 同 Runtime lifetime，初始 `current=null`，存活期订阅同步交付最新值（含 null）；值先更新再调用；同步 throw/返回 rejected thenable 局部隔离；取消订阅幂等。Runtime terminal 后既有 callback inert，旧引用再次 `subscribe` 只返回 inert unsubscribe，**不首发**。Data loss保留历史值不等于当前画面可用；fresh carrier独立 baseline，old authority/source fenced。尺寸观察绝不创建 Frame mutation permit、InputTarget 或 Render commit；业务仅通过既有 author API 渲染。[完整边界](../15-contracts/viewport-state-v1.md)与[可执行断言](../15-contracts/viewport-state-conformance-v1.md)拥有精确行为。
-
----
-
 ## 10. Lifetime Matrix
 
 ```text
@@ -326,8 +306,6 @@ Runtime lifetime
 Data carrier lifetime
     owns connection-local Input/Render publication baseline
 ```
-
-Viewport object/retained last value属 Runtime lifetime；Viewport 的 outbound publication cursor属各 current Data carrier，二者不得混同。
 
 因此：
 
@@ -353,7 +331,7 @@ SubsystemDataBinding
 → InputManager / RenderManager role behavior
 ```
 
-修订后 `/1` 仅在相同 reader/peer 后追加 Viewport retained role handler；见[Data add-only exact seam](../../packages/data/VIEWPORT_V1_IMPLEMENTATION_DELTA.md)。Input/Render managers不得竞争 raw carrier。Content不是 Data application protocol，也不复用 M9 Data provisioning IPC。
+Input/Render managers不得竞争 raw carrier。Content不是 Data application protocol，也不复用 M9 Data provisioning IPC。
 
 ---
 
@@ -395,5 +373,3 @@ Platform path/token/ticket/internal stack不得泄漏给业务。
 8. ordinary Input callback/Render author/Content read failure不自动升级 Runtime/Frame；
 9. Hostra/PWA physical差异不得改变 author-visible semantics；
 10. M13作为真实业务 consumer验证这些冻结边界，而不是重新定义它们。
-
-Viewport v1 是另行候选的 Runtime readonly 增量，不改变以上十项或将历史 M10–M13 PASS 解释为修订后四-child `/1` 合格。

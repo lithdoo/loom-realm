@@ -3,7 +3,7 @@
 > 层级：设计决策记录  
 > 状态：Active  
 > 主要定义：重大架构决策背景、取舍、current-v1 provenance 与 reopen 条件  
-> 最近复核：2026-09-16（仅追加 ADR0036/0037 导航）
+> 最近复核：2026-09-15
 
 ADR记录“为什么”；Current可实现事实以 architecture / formal contract / current milestone SSOT / qualification为准。历史 ADR不得覆盖后续 accepted correction。
 
@@ -35,7 +35,7 @@ ADR记录“为什么”；Current可实现事实以 architecture / formal contr
 22. [ADR 0022：Render Update v1 freeze closure](./0022-render-update-v1-freeze-closure.md)
 23. [ADR 0023：User Input v1 semantic closure（部分由 ADR 0029 更新）](./0023-user-input-v1-semantic-closure.md)
 24. [ADR 0024：Renderer ⇄ Subsystem Data Connection v1 semantic closure](./0024-renderer-subsystem-data-connection-v1-semantic-closure.md)
-25. [ADR 0025：Renderer Data Profile v1 preimplementation closure（部分由 ADR0037 修订）](./0025-renderer-data-profile-v1-preimplementation-closure.md)
+25. [ADR 0025：Renderer Data Profile v1 preimplementation closure](./0025-renderer-data-profile-v1-preimplementation-closure.md)
 26. [ADR 0026：Concrete Platform 是 Session Composition Object，Launcher 是 Platform 内部 PREPARE Component](./0026-session-scoped-platform-instance.md)
 27. [ADR 0027：冻结 Renderer Control v1 与 M7 Preimplementation Closure](./0027-freeze-renderer-control-v1-preimplementation.md)
 28. [ADR 0028：冻结 M9 Desktop DataConnectionBroker / Late Provisioning Core 首次实现边界](./0028-freeze-m9-desktop-data-broker-preimplementation.md)
@@ -46,8 +46,6 @@ ADR记录“为什么”；Current可实现事实以 architecture / formal contr
 33. [ADR 0033：Electron-hosted Hostra Runner uses the current executable in Node mode](./0033-electron-hostra-run-as-node.md)
 34. [ADR 0034：Hostra owns Desktop Electron composition; LoomRealm runs as HOSTRA_SUBCMD](./0034-hostra-owned-desktop-composition.md)
 35. [ADR 0035：RenderDomain existing-node authoritative update](./0035-render-domain-existing-node-update.md)
-36. [ADR 0036：Viewport child 独立于 Input；其 Profile-v2 选择已由 ADR0037 修订](./0036-viewport-state-and-renderer-data-profile-v2.md)
-37. [ADR 0037：首次发布前直接修正 Profile v1，取消 v2 current 路线](./0037-direct-profile-v1-preimplementation-viewport-correction.md)
 
 ---
 
@@ -104,12 +102,6 @@ ADR 0035
     → existing RenderPatchV1 publication; no wire v2
     → old executable subject remains historical Closed until implementation changes
     → new M11/M14/M15 subject requires same-SHA requalification
-
-ADR 0025 → ADR 0036 → ADR 0037
-    original three-child Profile /1 Frozen is historical executable baseline
-    → ADR0036 separates Viewport from Input, originally proposed /2
-    → ADR0037 explicitly cancels /2 and adopts governed pre-release four-child /1 correction
-    → compatibility investigation, docs freeze and new executable qualification remain OPEN
 ```
 
 ADR0033 remains valid as a conditional RuntimeHosting fact；ADR0034 supersedes only the assumption that canonical M15 LoomRealm Desktop itself is the Electron composition process。
@@ -166,8 +158,6 @@ ADR 0016
 → Web Presentation Config v1 + Web Presentation API v1
 → M13 Web Presentation
 ```
-
-Viewport addition to this existing stack follows ADR0037 and the [revised `/1` contract](../15-contracts/renderer-data-profile-v1.md); it does not change User Input/Render/Control/Connection wire or M13 Projector authority. Exact current status is in [the viewport qualification ledger](../30-implementation/viewport-profile-v1-qualification.md).
 
 ### Content
 

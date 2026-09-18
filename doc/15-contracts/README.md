@@ -2,12 +2,10 @@
 
 > 层级：正式契约索引  
 > 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed historical subjects**；revised four-child Profile `/1` + Viewport **Docs Freeze HOLD / not implemented**；M14/M15 milestone status ledger-owned  
+> 稳定程度：M10–M13 **Implemented / Qualified / Closed**；M14/M15 milestone status ledger-owned  
 > 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> 最近复核：2026-09-16（仅新增 Viewport 导航；既有 M13/Frozen 正文原样保全）
-
-**Viewport 变更导航（仅此段为新增修正）：** [当前修正 Profile `/1` 候选](./renderer-data-profile-v1.md) · [revision-3 Conformance 候选](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md) · [Viewport Conformance](./viewport-state-conformance-v1.md) · [旧 Profile 完整原文](./renderer-data-profile-v1-previewport-baseline.md) · [旧 Conformance 完整原文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [范围修复及继承规则](../30-implementation/viewport-scope-repair-2026-09-16.md) · [唯一当期 Core ledger](../30-implementation/viewport-profile-v1-qualification.md)。旧三-child `/1` Frozen/PASS 仅适用于原实现；ADR0037 已将其作为未发布首版修正为四-child 候选。`/2` 提案 superseded，不发布。原有 Input/Render/Connection/Control wire、M13 Projector 规则未变；Map PR0/P95 不属于 Core Docs Freeze。旧索引中的 Frozen 字样必须按本段及当前 ledger 限定至历史 subject。
+> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)  
+> 最近复核：2026-09-11
 
 契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。
 
@@ -18,10 +16,8 @@
 ```text
 Frame / Call v1                         Active / Normative / Frozen
 Main ⇄ Renderer Control v1              Active / Normative / Frozen
-Renderer Data Application Profile v1    original three-child Frozen historical;
-                                        revised four-child /1 Candidate / Docs Freeze HOLD
-Viewport State v1                       Candidate / Docs Freeze HOLD / not implemented
-Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen (composition projection editorial correction)
+Renderer Data Application Profile v1    Active / Normative / Frozen
+Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen
 User Input v1                           Active / Normative / Frozen
 Render Update v1                        Active / Normative / Frozen
 Readonly Content API v1                 Active / Normative / Evolving
@@ -149,11 +145,8 @@ Unregistered tag remains projection-time structural failure：preflight before f
 This contract index intentionally does not publish a second live milestone ledger。Current authoritative status sources：
 
 ```text
-Revised Profile /1 + Viewport
-    ../30-implementation/viewport-profile-v1-qualification.md
-
 M10–M13
-    closed qualification records for historical subjects
+    closed qualification records
 
 M14
     ../30-implementation/m14-qualification.md
@@ -166,14 +159,14 @@ M15
 Current summary for navigation only：
 
 ```text
-M10, M12–M13  Closed for historical subjects; revised /1 affected rerun pending
+M10, M12–M13  Closed
 M11      Requalification Pending → ../30-implementation/m11-qualification.md
 M14      Requalification Pending → ../30-implementation/m14-qualification.md
 M15      Requalification Pending → ../30-implementation/m15-qualification.md
 M16–M17  pending
 ```
 
-M13 landing docs remain `M13_01`–`M13_05`。M11/M14/M15 formal status must come from their designated evidence ledgers, not this index；the protocol contracts themselves remain frozen except the explicitly reopened pre-release Profile-v1 composition tracked by ADR0037 and its ledger。
+M13 landing docs remain `M13_01`–`M13_05`。M11/M14/M15 formal status must come from their designated evidence ledgers, not this index；the protocol contracts themselves remain frozen。
 
 ---
 

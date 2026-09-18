@@ -1,8 +1,0 @@
-# Historical-only: original three-child Renderer Data Profile v1
-
-> **ARCHIVED HISTORICAL EVIDENCE — NOT a current contract, NOT an implementation target, NOT revised `/1` Freeze approval.**  
-> Original state: Frozen for the 2026-09-07 three-child executable only. Original exact Git blob: `1a8aaefe166ad86dc1f5653bd2d0154bc2d125be` at pre-Viewport revision `a71be9c46c7eb70c335246f87282ef545d364e19`.  
-> Complete, unchanged 528-line original: [verbatim historical Profile v1](./renderer-data-profile-v1-previewport-verbatim-original.md) (identical original blob; only its filename changed).  
-> **ONLY CURRENT IMPLEMENTATION TARGET:** [corrected four-child Profile `/1`](./renderer-data-profile-v1.md), [revision-3 conformance](./renderer-data-profile-conformance-v1.md), [ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md) and [single qualification ledger](../30-implementation/viewport-profile-v1-qualification.md).
-
-The old verbatim original retains its dated Frozen heading and three-child closed set **solely as historical evidence**. Its relative links now point to current documents and do not convert its historical statements into current obligations. Current `/1` inherits its unchanged exact reader/writer/Input/Render/terminal obligations subject only to the enumerated correction in [current Profile](./renderer-data-profile-v1.md) and [protected section crosswalk](../30-implementation/viewport-scope-repair-2026-09-16.md). Do not implement `/2`, dual-mode parsing, fallback or an old three-child `/1` compatibility path. Do not claim historical executable PASS applies to the new four-child cohort. Any unintended clash outside the explicit correction is STOP + design-owner review, not an implementer choice.
