@@ -14,7 +14,7 @@
 | G0 设计决策 | **ACCEPTED / 2026-09-18** | ADR0036 明确首次发布前同 identity、无 npm gate、cohort、不变边界。 |
 | G1 文档材料 | **PASS / subject `5d74590...`** | Profile/Viewport、两 conformance 自包含、一致；历史原文 Git 可溯源，架构/包内/index 不造第二套 current norm。 |
 | G1 文档链接自动检查 | **PASS / exit 0** | `npm run docs:check-links` → `Documentation links OK: 523 relative link(s) across 102 Markdown file(s).`；raw log：`.viewport-freeze-evidence/g1-docs-check-links.log`。 |
-| G2 独立技术复核 | **APPROVE / 2026-09-18** | Independent Agent (`generalPurpose` subagent `8bd3570b-ed89-4059-9b84-7aa576d03a3b`) 审 exact SHA `5d74590…`；checklist 1–5、7 PASS；item 6 CONCERN（账本当时仍写 NOT RUN，现已用真实 log 对账）；overall APPROVE；明确非 G3。 |
+| G2 独立技术复核 | **APPROVE（正式契约）+ 架构对齐 FOLLOW-UP** | Primary：Independent Agent `8bd3570b-ed89-4059-9b84-7aa576d03a3b` 审 `5d74590…` → APPROVE（1–5、7 PASS；item 6 CONCERN 已对账）。Parallel：`2a008819-1e57-4680-a660-2f303cc5aff0` 同 SHA → REQUEST CHANGES：`renderer-subsystem-protocol-layers.md` 仍断言三-child Frozen current；G1 link log 当时账本未写。正式 Profile/Viewport/conformance 两审均未否定。架构文档已在实现后对齐四-child；link-check 有 exit 0 raw log。 |
 | G3 Owner Docs Freeze | **APPROVED / 2026-09-18** | 项目负责人在实施会话中明确批准 exact SHA `5d74590fcde6d79d815f774cc1c6cffe33fd2952`（原文「批准，继续完成所有任务」）；本账本登记可追溯。 |
 | C1–C4 architecture implementation | **PASS / executable `d42bc6e7755330e74263d1ec55a14998e3718d43`** | revision3/Viewport/`npm run test:viewport`、旧 Data/Renderer/Subsystem、m10/m11/m13、build:desktop-stack、test:regression 均 exit 0；raw logs：`.viewport-freeze-evidence/logs/`。 |
 | Desktop / Map product | **OUT OF SCOPE / NOT RUN** | 独立后续验收；不宣称已实现 `play.bat` 真拖窗、地图覆盖、行走性能。 |
@@ -23,8 +23,10 @@
 Candidate docs subject: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
 Relative scope baseline: ae7b149b9f4e18312dd44762ae943d7a68648acb
 Documentation link check: PASS exit 0 (.viewport-freeze-evidence/g1-docs-check-links.log)
-Independent reviewer: Independent Agent (generalPurpose 8bd3570b-ed89-4059-9b84-7aa576d03a3b)
-Reviewed exact SHA / date / conclusion: 5d74590… / 2026-09-18 / APPROVE (tech only)
+Independent reviewer (primary): Independent Agent (generalPurpose 8bd3570b-ed89-4059-9b84-7aa576d03a3b) → APPROVE
+Independent reviewer (parallel): Independent Agent (generalPurpose 2a008819-1e57-4680-a660-2f303cc5aff0) → REQUEST CHANGES on architecture three-child current assertion
+Architecture follow-up: doc/10-architecture/renderer-subsystem-protocol-layers.md aligned to four-child / ADR0036 (post-implementation docs fix; formal contracts subject SHA unchanged)
+Reviewed exact SHA / date: 5d74590… / 2026-09-18
 Owner formal freeze approval / exact SHA / date: APPROVED / 5d74590… / 2026-09-18
 Approved Docs Freeze subject: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
 Implementation executable SHA: d42bc6e7755330e74263d1ec55a14998e3718d43
