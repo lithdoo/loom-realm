@@ -150,7 +150,7 @@ export async function realSenderPeer(carrier, generation = 1) {
     handlers: {
       onInputState: () => ({ kind: "accepted" }),
       onInputEvent: () => ({ kind: "accepted" }),
-      onInputReset: () => ({ kind: "accepted" }),
+      onInputReset: () => ({ kind: "accepted" }), onViewportState: () => ({ kind: "accepted" }),
     },
   });
 }

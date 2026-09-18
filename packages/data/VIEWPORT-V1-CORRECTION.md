@@ -1,6 +1,6 @@
 # `@loomrealm/data` Viewport /1 实施修订单
 
-> 状态：Target design only / Docs Freeze HOLD / not implemented。2026-09-18。  
+> 状态：Implemented on `cursor/resize-viewport` / Docs Frozen subject `5d74590…` / architecture qualification pending final SHA evidence。2026-09-18。  
 > 唯一规范：[Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md)、[Viewport State v1](../../doc/15-contracts/viewport-state-v1.md)、[Profile revision3 conformance](../../doc/15-contracts/renderer-data-profile-conformance-v1.md)；[冻结与 Agent 账本](../../doc/30-implementation/viewport-core-freeze-ledger.md)。
 
 `DESIGN.md` 是已实现 M8 三-child 的 package-local **历史实现说明**；不应拿其中 `DataProtocolFamily = profile|input|render`、`Subsystem inbound only ordinary User Input`、`Renderer outbound only Input`、旧 `RendererDataMessageV1` union、原 Profile revision2 等旧代码截面覆盖本修订的目标。无需为纠正上述过期段落重写其余 20KB M8 实现叙述，也不得因此宣称现有代码已经支持 Viewport。

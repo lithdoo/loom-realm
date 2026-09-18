@@ -1,5 +1,6 @@
 import type {
   DataInboundDisposition,
+  DataSendOutcome,
   RendererDataHandlers,
   RendererDataMessageV1,
   RendererDataPeer,
@@ -7,6 +8,7 @@ import type {
   SubsystemDataHandlers,
   SubsystemDataPeer,
   SubsystemDataPeerOptions,
+  ViewportStateV1,
 } from "./model.js";
 import { DataRuntime, validateBinding } from "./runtime.js";
 
@@ -17,11 +19,107 @@ function requireFunction(object: object, key: string): void {
 }
 function validateSubsystemHandlers(handlers: SubsystemDataHandlers): void {
   if (handlers === null || typeof handlers !== "object") throw new TypeError("Invalid handlers");
-  for (const key of ["onInputState","onInputEvent","onInputReset"]) requireFunction(handlers, key);
+  for (const key of ["onInputState", "onInputEvent", "onInputReset", "onViewportState"]) {
+    requireFunction(handlers, key);
+  }
 }
 function validateRendererHandlers(handlers: RendererDataHandlers): void {
   if (handlers === null || typeof handlers !== "object") throw new TypeError("Invalid handlers");
-  for (const key of ["onInputInterest","onRenderDomains","onRenderSnapshot","onRenderPatch","onRenderEvent"]) requireFunction(handlers, key);
+  for (const key of ["onInputInterest", "onRenderDomains", "onRenderSnapshot", "onRenderPatch", "onRenderEvent"]) {
+    requireFunction(handlers, key);
+  }
+}
+
+function sameSize(
+  left: { readonly width: number; readonly height: number },
+  right: { readonly width: number; readonly height: number },
+): boolean {
+  return left.width === right.width && left.height === right.height;
+}
+
+function isAdmissibleViewport(message: unknown): message is ViewportStateV1 {
+  if (message === null || typeof message !== "object") return false;
+  const value = message as Record<string, unknown>;
+  return value.type === "viewport.state" &&
+    Number.isSafeInteger(value.width) &&
+    (value.width as number) > 0 &&
+    Number.isSafeInteger(value.height) &&
+    (value.height as number) > 0 &&
+    Object.keys(value).length === 3;
+}
+
+class ViewportPublisher {
+  private active = true;
+  private lastSent: { width: number; height: number } | null = null;
+  private inFlight: { width: number; height: number } | null = null;
+  private pending: { width: number; height: number } | null = null;
+
+  constructor(
+    private readonly send: (message: ViewportStateV1) => Promise<DataSendOutcome>,
+  ) {}
+
+  publishState(message: ViewportStateV1): void {
+    if (!this.active) return;
+    if (!isAdmissibleViewport(message)) {
+      void this.send(message).catch(() => undefined);
+      return;
+    }
+    this.offer({ width: message.width, height: message.height });
+  }
+
+  retire(): void {
+    this.active = false;
+    this.inFlight = null;
+    this.pending = null;
+  }
+
+  private offer(V: { width: number; height: number }): void {
+    if (!this.active) return;
+    if (this.inFlight === null) {
+      if (this.lastSent !== null && sameSize(this.lastSent, V)) {
+        this.pending = null;
+        return;
+      }
+      this.pending = null;
+      this.inFlight = V;
+      void this.admit(V);
+      return;
+    }
+    this.pending = sameSize(this.inFlight, V) ? null : V;
+  }
+
+  private async admit(V: { width: number; height: number }): Promise<void> {
+    let outcome: DataSendOutcome;
+    try {
+      outcome = await this.send({
+        type: "viewport.state",
+        width: V.width,
+        height: V.height,
+      });
+    } catch {
+      if (!this.active) return;
+      this.active = false;
+      this.inFlight = null;
+      this.pending = null;
+      return;
+    }
+    if (!this.active) return;
+    if (this.inFlight === null || !sameSize(this.inFlight, V)) return;
+    if (outcome.kind === "terminal") {
+      this.active = false;
+      this.inFlight = null;
+      this.pending = null;
+      return;
+    }
+    this.lastSent = V;
+    this.inFlight = null;
+    const pending = this.pending;
+    this.pending = null;
+    if (pending !== null && !sameSize(pending, this.lastSent)) {
+      this.inFlight = pending;
+      void this.admit(pending);
+    }
+  }
 }
 
 export function createSubsystemDataPeer(options: SubsystemDataPeerOptions): SubsystemDataPeer {
@@ -32,6 +130,7 @@ export function createSubsystemDataPeer(options: SubsystemDataPeerOptions): Subs
     if (message.type === "input.state") return options.handlers.onInputState(message);
     if (message.type === "input.event") return options.handlers.onInputEvent(message);
     if (message.type === "input.reset") return options.handlers.onInputReset(message);
+    if (message.type === "viewport.state") return options.handlers.onViewportState(message);
     return accepted;
   });
   return Object.freeze({
@@ -60,12 +159,17 @@ export function createRendererDataPeer(options: RendererDataPeerOptions): Render
     if (message.type === "render.event") return options.handlers.onRenderEvent(message);
     return accepted;
   });
+  const publisher = new ViewportPublisher((message) => runtime.send(message));
+  void runtime.terminal.then(() => publisher.retire());
   return Object.freeze({
     binding,
     input: Object.freeze({
       sendState: (message: import("./model.js").InputStateV1) => runtime.send(message),
       sendEvent: (message: import("./model.js").InputEventV1) => runtime.send(message),
       sendReset: (message: import("./model.js").InputResetV1) => runtime.send(message),
+    }),
+    viewport: Object.freeze({
+      publishState: (message: ViewportStateV1) => publisher.publishState(message),
     }),
     terminal: runtime.terminal,
     close: () => runtime.close(),

@@ -15,7 +15,7 @@ const binding = (carrier) => ({
 const handlers = {
   onInputState: accepted,
   onInputEvent: accepted,
-  onInputReset: accepted,
+  onInputReset: accepted, onViewportState: accepted,
 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 

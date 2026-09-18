@@ -15,6 +15,8 @@
     "test:game-package": "npm test -w @loomrealm/wire -w @loomrealm/game-package",
     "test:runtime-control": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/runtime-control",
     "test:data": "npm test -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/data",
+    "test:viewport": "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer && node --test packages/data/test/viewport.test.mjs packages/renderer/test/viewport-source.test.mjs packages/subsystem/test/viewport.test.mjs test/viewport-core-vertical.test.mjs test/viewport-state-v1/qualification.test.mjs test/renderer-data-profile-v1/revision3.test.mjs",
+    "test:viewport:conformance": "npm run test:viewport",
     "build:desktop-stack": "npm run build -w @loomrealm/fsdb -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/main -w @loomrealm/game-launcher-hostra -w @loomrealm/desktop",
     "test:regression": "npm test -w @loomrealm/fsdb -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/main -w @loomrealm/game-launcher-hostra -w @loomrealm/fsdb-http -w @loomrealm/desktop",
     "test:m9": "npm run build:desktop-stack && node --test apps/desktop/test/data-broker.test.mjs apps/desktop/test/m9-vertical.test.mjs",

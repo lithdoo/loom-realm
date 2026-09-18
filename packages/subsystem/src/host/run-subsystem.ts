@@ -27,6 +27,7 @@ import type { CreateInputListenerOptions } from "../input.js";
 import { FrameRuntime } from "../internal/frame-runtime.js";
 import { InputManager } from "../internal/input-manager.js";
 import { RenderManager } from "../internal/render-manager.js";
+import { ViewportManager } from "../internal/viewport-manager.js";
 import type { RenderDomainState } from "../render.js";
 import { ContentReadError, type ContentClient } from "../content.js";
 
@@ -243,6 +244,7 @@ class SubsystemHost {
   private dataCleanup: Promise<void> = Promise.resolve();
   private readonly input = new InputManager();
   private readonly render = new RenderManager();
+  private readonly viewport = new ViewportManager();
 
   constructor(private readonly options: RunSubsystemOptions) {}
 
@@ -261,6 +263,7 @@ class SubsystemHost {
     const scope: SubsystemScope = Object.freeze({
       signal: this.scopeController.signal,
       content: this.options.content ?? unavailableContent,
+      viewport: this.viewport.viewport,
       createInputListener: (options: CreateInputListenerOptions) =>
         this.input.createListener(options),
       createRenderDomain: (state: RenderDomainState) =>
@@ -454,6 +457,13 @@ class SubsystemHost {
             this.currentDataPeer === peer
               ? this.input.onReset(message)
               : acceptedDataMessage,
+          onViewportState: (message) => {
+            if (this.currentDataPeer !== peer || this.terminal !== null) {
+              return acceptedDataMessage;
+            }
+            this.viewport.applyState(message.width, message.height);
+            return acceptedDataMessage;
+          },
         },
       });
     } catch {
@@ -555,6 +565,7 @@ class SubsystemHost {
     this.frames?.abortAll();
     this.input.closeAll();
     this.render.closeAll();
+    this.viewport.close();
     void this.finishFatal(primary);
   }
 
@@ -564,6 +575,7 @@ class SubsystemHost {
     this.frames?.abortAll();
     this.input.closeAll();
     this.render.closeAll();
+    this.viewport.close();
     await this.bounded(this.bestEffortStatus({ state: "stopping" }));
     await this.bounded(
       Promise.allSettled([

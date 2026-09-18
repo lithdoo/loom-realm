@@ -41,7 +41,7 @@ test("presentation seam reads current Control/Store facts and only observes succ
         handlers: {
           onInputState: () => ({ kind: "accepted" }),
           onInputEvent: () => ({ kind: "accepted" }),
-          onInputReset: () => ({ kind: "accepted" }),
+          onInputReset: () => ({ kind: "accepted" }), onViewportState: () => ({ kind: "accepted" }),
         },
       });
       dataPeers.push(peer);

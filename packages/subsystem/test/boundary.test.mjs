@@ -39,6 +39,7 @@ test("M12 author declarations expose only the frozen Content projection", async 
   assert.match(content, /resource\(/);
   for (const forbidden of ["manifest(", "group(", "fetch(", "installationId", "token", "URL"]) assert.equal(content.includes(forbidden), false);
   assert.match(model, /readonly content: ContentClient/);
+  assert.match(model, /readonly viewport: Viewport/);
 });
 
 test("trusted host keeps the exact M8 protocol and port dependency direction", async () => {
@@ -64,6 +65,7 @@ test("M10 author declarations expose the exact minimal Input surface", async () 
     "GamepadStateInput", "GamepadEventInput",
     "InputPayload", "InputHandler", "Unsubscribe",
     "CreateInputListenerOptions", "InputListener",
+    "Viewport", "ViewportSize",
   ]) assert.match(index, new RegExp(`\\b${name}\\b`));
   for (const supporting of [
     "KeyboardCode", "PointerSample", "PointerButton", "PointerKind",
