@@ -1,6 +1,6 @@
 # Viewport Core：Docs Freeze、Agent 执行与资格唯一账本
 
-> 层级：Implementation / approval ledger；状态：**DOCS FROZEN / PRODUCTION IMPLEMENTATION IN PROGRESS**；2026-09-18。  
+> 层级：Implementation / approval ledger；状态：**DOCS FROZEN / ARCHITECTURE QUALIFIED on `d42bc6e…` / Desktop-Map product OUT OF SCOPE**；2026-09-18。  
 > [Accepted ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)；唯一正式语义：[完整 Profile](../15-contracts/renderer-data-profile-v1.md)、[Viewport](../15-contracts/viewport-state-v1.md)；[完整 Profile revision3 conformance](../15-contracts/renderer-data-profile-conformance-v1.md)、[Viewport conformance](../15-contracts/viewport-state-conformance-v1.md)；[通信架构](../10-architecture/communication-system.md)、[Subsystem 架构](../10-architecture/subsystem-model.md)、[模块落点](../20-modules/viewport-core.md)、[Data 包窄修订单](../../packages/data/VIEWPORT-V1-CORRECTION.md)；[Agent 入口](../../VIEWPORT_CORE_INTERFACE_DESIGN_DRAFT.md)。
 
 ## 1. 冻结状态与可追溯主体
@@ -16,7 +16,7 @@
 | G1 文档链接自动检查 | **PASS / exit 0** | `npm run docs:check-links` → `Documentation links OK: 523 relative link(s) across 102 Markdown file(s).`；raw log：`.viewport-freeze-evidence/g1-docs-check-links.log`。 |
 | G2 独立技术复核 | **APPROVE / 2026-09-18** | Independent Agent (`generalPurpose` subagent `8bd3570b-ed89-4059-9b84-7aa576d03a3b`) 审 exact SHA `5d74590…`；checklist 1–5、7 PASS；item 6 CONCERN（账本当时仍写 NOT RUN，现已用真实 log 对账）；overall APPROVE；明确非 G3。 |
 | G3 Owner Docs Freeze | **APPROVED / 2026-09-18** | 项目负责人在实施会话中明确批准 exact SHA `5d74590fcde6d79d815f774cc1c6cffe33fd2952`（原文「批准，继续完成所有任务」）；本账本登记可追溯。 |
-| C1–C4 architecture implementation | **IN PROGRESS** | 最终 executable/cohort SHA 的 revision3、Viewport、旧回归、真实 vertical 有日志与 exit；旧 PASS 不转移。 |
+| C1–C4 architecture implementation | **PASS / executable `d42bc6e7755330e74263d1ec55a14998e3718d43`** | revision3/Viewport/`npm run test:viewport`、旧 Data/Renderer/Subsystem、m10/m11/m13、build:desktop-stack、test:regression 均 exit 0；raw logs：`.viewport-freeze-evidence/logs/`。 |
 | Desktop / Map product | **OUT OF SCOPE / NOT RUN** | 独立后续验收；不宣称已实现 `play.bat` 真拖窗、地图覆盖、行走性能。 |
 
 ```text
@@ -27,7 +27,9 @@ Independent reviewer: Independent Agent (generalPurpose 8bd3570b-ed89-4059-9b84-
 Reviewed exact SHA / date / conclusion: 5d74590… / 2026-09-18 / APPROVE (tech only)
 Owner formal freeze approval / exact SHA / date: APPROVED / 5d74590… / 2026-09-18
 Approved Docs Freeze subject: 5d74590fcde6d79d815f774cc1c6cffe33fd2952
-Implementation executable SHA / commands / raw logs: PENDING (in progress on cursor/resize-viewport)
+Implementation executable SHA: d42bc6e7755330e74263d1ec55a14998e3718d43
+Commands / raw logs: .viewport-freeze-evidence/SUMMARY.md and logs/
+Architecture Qualified: YES (architecture vertical + regressions on same SHA; Desktop/Map product NOT claimed)
 ```
 
 **冻结操作：** 检查 candidate diff docs-only scope → 在该 subject 运行 `npm run docs:check-links` 留证 → 独立 reviewer 审同一 SHA → 缺陷修正则新 subject、新审查 → owner 在 Git 中批准精确 immutable SHA → 后续只在本账本补写真实批准事实/链接。元数据提交不需要等于受批准 subject，但绝不可虚构 reviewer/批准。新语义改动重新开启 Docs Freeze。
