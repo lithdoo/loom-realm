@@ -1,9 +1,9 @@
 # Viewport Core 模块落点：Data / Renderer / Subsystem
 
 > 层级：模块设计；状态：**Implementation target / Docs Freeze HOLD / not implemented**；2026-09-18。
-> 上游：[通信系统](../10-architecture/communication-system.md)、[Subsystem 模型](../10-architecture/subsystem-model.md)、[ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)。唯一正式语义：[Profile /1](../15-contracts/renderer-data-profile-v1.md)、[Viewport child](../15-contracts/viewport-state-v1.md)；[conformance](../15-contracts/viewport-state-conformance-v1.md)；[批准及资格账本](../30-implementation/viewport-core-freeze-ledger.md)。
+> 上游：[通信系统](../10-architecture/communication-system.md)、[Subsystem 模型](../10-architecture/subsystem-model.md)、[ADR0036](../decisions/0036-preimplementation-viewport-profile-v1-correction.md)。唯一正式语义：[完整 Profile /1](../15-contracts/renderer-data-profile-v1.md)、[Viewport child](../15-contracts/viewport-state-v1.md)；[conformance](../15-contracts/viewport-state-conformance-v1.md)；[批准及资格账本](../30-implementation/viewport-core-freeze-ledger.md)。
 
-本文件只定位实现，不重复定义 wire/schema/状态机/测试门槛。现有 packages 中 Input+Render-only 代码与各包已完成历史资格属于**改造前现状**，不代表新 Viewport 已实现。
+本文件只定位实现，不重复定义 wire/schema/状态机/测试门槛。M8 历史代码与 `packages/data/DESIGN.md` 描述的旧 Input+Render-only 模型是**改造前实现现状**，不代表本次四-child 已实现；其受影响接口的确切增量见 [Data 包窄修订单](../../packages/data/VIEWPORT-V1-CORRECTION.md)，其他既有实现责任不变。
 
 ## 唯一运行链
 
