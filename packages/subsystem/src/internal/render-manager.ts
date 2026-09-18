@@ -8,8 +8,6 @@ import type {
 } from "@loomrealm/data";
 import {
   assertJsonValue,
-  jsonDepth,
-  stringifyJson,
   utf8ByteLength,
   type JsonObject,
   type JsonValue,
@@ -150,7 +148,7 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be a JSON object`);
   }
-  if (jsonDepth(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
+  if (depthOfValidatedJson(value) > MAX_DATA_DEPTH) throw new RangeError(`${label} depth limit exceeded`);
   const stack: JsonValue[] = [value];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -171,7 +169,7 @@ function validateJsonData(value: unknown, label: string): asserts value is JsonO
       }
     }
   }
-  if (utf8ByteLength(stringifyJson(value)) > MAX_DATA_BYTES) {
+  if (utf8ByteLength(stringifyValidatedJson(value)) > MAX_DATA_BYTES) {
     throw new RangeError(`${label} byte limit exceeded`);
   }
 }
@@ -225,13 +223,121 @@ function detachedFrozen<T>(value: T, seen = new WeakMap<object, object>()): T {
   return Object.freeze(output) as T;
 }
 
+function validatedChildren(value: JsonObject | readonly JsonValue[]): JsonValue[] {
+  if (Array.isArray(value)) {
+    const children: JsonValue[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+        throw new TypeError("Validated JSON array changed during inspection");
+      }
+      children.push(descriptor.value as JsonValue);
+    }
+    return children;
+  }
+  const children: JsonValue[] = [];
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      throw new TypeError("Validated JSON object changed during inspection");
+    }
+    children.push(descriptor.value as JsonValue);
+  }
+  return children;
+}
+
+/** Depth of an already assertJsonValue-validated JSON tree. */
+function depthOfValidatedJson(value: JsonValue): number {
+  let maximum = 0;
+  const stack: Array<{ readonly value: JsonValue; readonly depth: number }> = [
+    { value, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    if (entry === undefined || entry.value === null || typeof entry.value !== "object") continue;
+    const containerDepth = entry.depth + 1;
+    if (containerDepth > maximum) maximum = containerDepth;
+    for (const child of validatedChildren(entry.value)) {
+      stack.push({ value: child, depth: containerDepth });
+    }
+  }
+  return maximum;
+}
+
+interface ValidatedValueTask {
+  readonly kind: "value";
+  readonly value: JsonValue;
+}
+
+interface ValidatedTextTask {
+  readonly kind: "text";
+  readonly text: string;
+}
+
+/**
+ * Wire-compatible serialization for an already validated tree.
+ *
+ * Native JSON.stringify cannot be used here: assertJsonValue permits normal
+ * objects and arrays, so an inherited Object.prototype/Array.prototype
+ * `toJSON` would be invoked by the native serializer. Wire stringifyJson does
+ * not invoke inherited methods. Keeping the iterative serializer local removes
+ * its redundant validation without weakening that behavior or its mutation
+ * checks.
+ */
+function stringifyValidatedJson(value: JsonValue): string {
+  const output: string[] = [];
+  const stack: Array<ValidatedValueTask | ValidatedTextTask> = [{ kind: "value", value }];
+  while (stack.length > 0) {
+    const task = stack.pop();
+    if (task === undefined) break;
+    if (task.kind === "text") {
+      output.push(task.text);
+      continue;
+    }
+    const current = task.value;
+    if (current === null || typeof current !== "object") {
+      output.push(current === null ? "null" : typeof current === "boolean" ? (current ? "true" : "false") : JSON.stringify(current));
+      continue;
+    }
+    if (Array.isArray(current)) {
+      stack.push({ kind: "text", text: "]" });
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
+        if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+          throw new TypeError("Validated JSON array changed during serialization");
+        }
+        stack.push({ kind: "value", value: descriptor.value as JsonValue });
+        if (index > 0) stack.push({ kind: "text", text: "," });
+      }
+      stack.push({ kind: "text", text: "[" });
+      continue;
+    }
+    const keys = Object.keys(current);
+    stack.push({ kind: "text", text: "}" });
+    for (let index = keys.length - 1; index >= 0; index -= 1) {
+      const key = keys[index];
+      if (key === undefined) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(current, key);
+      if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+        throw new TypeError("Validated JSON object changed during serialization");
+      }
+      stack.push({ kind: "value", value: descriptor.value as JsonValue });
+      stack.push({ kind: "text", text: `${JSON.stringify(key)}:` });
+      if (index > 0) stack.push({ kind: "text", text: "," });
+    }
+    stack.push({ kind: "text", text: "{" });
+  }
+  return output.join("");
+}
+
 function probeLimit(value: unknown, label: string): void {
   try {
     assertJsonValue(value);
   } catch {
     throw new TypeError(`${label} must be plain JSON`);
   }
-  if (jsonDepth(value as JsonValue) > 64 || utf8ByteLength(stringifyJson(value as JsonValue)) > MAX_MESSAGE_BYTES) {
+  const json = value as JsonValue;
+  if (depthOfValidatedJson(json) > 64 || utf8ByteLength(stringifyValidatedJson(json)) > MAX_MESSAGE_BYTES) {
     throw new RangeError(`${label} message limit exceeded`);
   }
 }
