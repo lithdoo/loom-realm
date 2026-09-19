@@ -114,6 +114,7 @@ async function prepareMovementInstallation() {
   const exampleRoot = path.join(temporary, "essentials-v21.1");
   await fs.cp(path.join(repository, "examples", "essentials-v21.1"), exampleRoot, { recursive: true });
   await fs.symlink(path.join(repository, "node_modules"), path.join(exampleRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+  await writeFile(path.join(exampleRoot, "[FSDB]essentials-v21.1", "[resource]Presentation", "page.css.css"), "fixture-page-css");
   await syncMapPresentation({ repoRoot: repository, exampleRoot, runBuild: false });
   const fsdb = path.join(exampleRoot, "[FSDB]essentials-v21.1");
   const tilesetPath = path.join(fsdb, "[struct]Tileset", "1.json");

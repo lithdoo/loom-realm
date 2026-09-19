@@ -173,6 +173,7 @@ async function connectInspector(endpoint) {
 
 const distJsPath = path.join(repository, "game-libs", "map", "dist", "browser", "map.browser.js");
 const distCssPath = path.join(repository, "game-libs", "map", "dist", "browser", "map.css");
+const pageCssPath = path.join(repository, "examples", "essentials-v21.1-local", "presentation.css");
 
 async function presentationFixture() {
   const temporary = await mkdtemp(path.join(os.tmpdir(), "loomrealm-sync-map-"));
@@ -182,9 +183,13 @@ async function presentationFixture() {
   await fs.mkdir(mapDir, { recursive: true });
   const targetJs = path.join(mapDir, "map.browser.js.js");
   const targetCss = path.join(mapDir, "map.css.css");
+  const targetPageCss = path.join(fsdbRoot, "[resource]Presentation", "page.css.css");
+  const unrelated = path.join(fsdbRoot, "[resource]Presentation", "user-content.txt");
   await writeFile(targetJs, "stale-js");
   await writeFile(targetCss, "stale-css");
-  return { temporary, exampleRoot, fsdbRoot, targetJs, targetCss };
+  await writeFile(targetPageCss, "stale-page-css");
+  await writeFile(unrelated, "preserve-user-content");
+  return { temporary, exampleRoot, fsdbRoot, targetJs, targetCss, targetPageCss, unrelated };
 }
 
 function nearestRank(values, p) {
@@ -242,6 +247,7 @@ async function prepareMovementInstallation({ cyclicMap = false } = {}) {
   const exampleRoot = path.join(temporary, "essentials-v21.1");
   await fs.cp(path.join(repository, "examples", "essentials-v21.1"), exampleRoot, { recursive: true });
   await fs.symlink(path.join(repository, "node_modules"), path.join(exampleRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+  await writeFile(path.join(exampleRoot, "[FSDB]essentials-v21.1", "[resource]Presentation", "page.css.css"), "fixture-page-css");
   await syncMapPresentation({ repoRoot: repository, exampleRoot, runBuild: false });
   const fsdb = path.join(exampleRoot, "[FSDB]essentials-v21.1");
   const tilesetPath = path.join(fsdb, "[struct]Tileset", "1.json");
@@ -284,32 +290,72 @@ async function prepareMovementInstallation({ cyclicMap = false } = {}) {
   return { temporary, exampleRoot };
 }
 
-test("syncMapPresentation replaces both Presentation files from map dist", async () => {
+async function prepareLocalPresentationInstallation() {
+  const installation = await prepareMovementInstallation();
+  const fsdb = path.join(installation.exampleRoot, "[FSDB]essentials-v21.1");
+  await fs.copyFile(
+    path.join(repository, "examples", "essentials-v21.1-local", "presentation.json"),
+    path.join(installation.exampleRoot, "presentation.json"),
+  );
+  await writeFile(path.join(fsdb, "[struct]Map", "1.json"), JSON.stringify({
+    tileset_id: 1,
+    width: 80,
+    height: 50,
+    data: {
+      dimensions: 3,
+      xSize: 80,
+      ySize: 50,
+      zSize: 3,
+      values: [...Array(4000).fill(384), ...Array(8000).fill(0)],
+    },
+  }));
+  return installation;
+}
+
+test("syncMapPresentation atomically replaces all three Presentation resources", async () => {
   const fixture = await presentationFixture();
   try {
     await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
     assert.deepEqual(await readFile(fixture.targetJs), await readFile(distJsPath));
     assert.deepEqual(await readFile(fixture.targetCss), await readFile(distCssPath));
+    assert.deepEqual(await readFile(fixture.targetPageCss), await readFile(pageCssPath));
+    assert.equal(await readFile(fixture.unrelated, "utf8"), "preserve-user-content");
   } finally {
     await rm(fixture.temporary, { recursive: true, force: true });
   }
 });
 
-test("syncMapPresentation --check reports mismatch without writing", async () => {
+test("syncMapPresentation updates changed page CSS without reinitializing FSDB", async () => {
   const fixture = await presentationFixture();
   try {
-    await assert.rejects(
-      () => syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false, checkOnly: true }),
-      /hash/,
-    );
-    assert.equal(await readFile(fixture.targetJs, "utf8"), "stale-js");
-    assert.equal(await readFile(fixture.targetCss, "utf8"), "stale-css");
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    await writeFile(fixture.targetPageCss, "old-page-css");
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    assert.deepEqual(await readFile(fixture.targetPageCss), await readFile(pageCssPath));
   } finally {
     await rm(fixture.temporary, { recursive: true, force: true });
   }
 });
 
-test("syncMapPresentation rolls back both files if the second rename fails", async () => {
+test("syncMapPresentation --check identifies a page CSS mismatch without writing", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    await writeFile(fixture.targetPageCss, "stale-page-css");
+    await assert.rejects(
+      () => syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false, checkOnly: true }),
+      (cause) => /FSDB hash \(page CSS\)/u.test(cause.message)
+        && cause.message.includes(`target page CSS: ${fixture.targetPageCss}`)
+        && /expected page CSS SHA-256: [a-f0-9]{64}/u.test(cause.message)
+        && /actual page CSS SHA-256: [a-f0-9]{64}/u.test(cause.message),
+    );
+    assert.equal(await readFile(fixture.targetPageCss, "utf8"), "stale-page-css");
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation rolls back all three files if the third replacement fails", async () => {
   const fixture = await presentationFixture();
   let stagingToTarget = 0;
   try {
@@ -322,14 +368,16 @@ test("syncMapPresentation rolls back both files if the second rename fails", asy
         rename: async (from, to) => {
           if (String(from).includes(".loomrealm-sync.") && String(from).endsWith(".tmp")) {
             stagingToTarget += 1;
-            if (stagingToTarget === 2) throw new Error("injected second rename failure");
+            if (stagingToTarget === 3) throw new Error("injected third rename failure");
           }
           return fs.rename(from, to);
         },
       },
-    }), /injected second rename failure/);
+    }), /injected third rename failure/);
     assert.equal(await readFile(fixture.targetJs, "utf8"), "stale-js");
     assert.equal(await readFile(fixture.targetCss, "utf8"), "stale-css");
+    assert.equal(await readFile(fixture.targetPageCss, "utf8"), "stale-page-css");
+    assert.equal(await readFile(fixture.unrelated, "utf8"), "preserve-user-content");
   } finally {
     await rm(fixture.temporary, { recursive: true, force: true });
   }
@@ -367,15 +415,130 @@ test("syncMapPresentation restores a stale backup before replacing", async () =>
   try {
     await writeFile(`${fixture.targetJs}.loomrealm-sync.backup`, "backup-js");
     await writeFile(`${fixture.targetCss}.loomrealm-sync.backup`, "backup-css");
+    await writeFile(`${fixture.targetPageCss}.loomrealm-sync.backup`, "backup-page-css");
     await writeFile(fixture.targetJs, "interrupted-js");
     await writeFile(fixture.targetCss, "interrupted-css");
+    await writeFile(fixture.targetPageCss, "interrupted-page-css");
     await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
     assert.deepEqual(await readFile(fixture.targetJs), await readFile(distJsPath));
     assert.deepEqual(await readFile(fixture.targetCss), await readFile(distCssPath));
+    assert.deepEqual(await readFile(fixture.targetPageCss), await readFile(pageCssPath));
     await assert.rejects(() => fs.lstat(`${fixture.targetJs}.loomrealm-sync.backup`));
     await assert.rejects(() => fs.lstat(`${fixture.targetCss}.loomrealm-sync.backup`));
+    await assert.rejects(() => fs.lstat(`${fixture.targetPageCss}.loomrealm-sync.backup`));
   } finally {
     await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation is idempotent when all three hashes already match", async () => {
+  const fixture = await presentationFixture();
+  let renameCount = 0;
+  try {
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    await syncMapPresentation({
+      repoRoot: repository,
+      exampleRoot: fixture.exampleRoot,
+      runBuild: false,
+      fileOps: {
+        ...fs,
+        rename: async (...args) => { renameCount += 1; return fs.rename(...args); },
+      },
+    });
+    assert.equal(renameCount, 0);
+    assert.equal(await readFile(fixture.unrelated, "utf8"), "preserve-user-content");
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("Local page CSS owns the full viewport without a fixed 640x480 host", async () => {
+  const css = await readFile(pageCssPath, "utf8");
+  const play = await readFile(path.join(repository, "examples", "essentials-v21.1-local", "play.bat"), "utf8");
+  assert.match(css, /lr-map-view\s*\{[^}]*width:\s*100vw;[^}]*height:\s*100vh;/su);
+  assert.doesNotMatch(css, /(?:width:\s*640px|height:\s*480px|place-items|display:\s*grid)/u);
+  assert.ok(play.indexOf("scripts\\sync-map-presentation.mjs") > 0);
+  assert.ok(play.indexOf("scripts\\sync-map-presentation.mjs") < play.indexOf('"%NODE%" "%HOSTRA_JS%"'));
+});
+
+test("Local Presentation fills six real Hostra viewports and keeps the footer visible", { timeout: 120_000 }, async (t) => {
+  const installation = await prepareLocalPresentationInstallation();
+  const eventLog = path.join(installation.temporary, "events.jsonl");
+  await writeFile(eventLog, "");
+  const hostra = launchHostra(eventLog, path.join(installation.temporary, "hostra-user-data"), {
+    LOOMREALM_DESKTOP_INSTALLATION_ROOT: installation.exampleRoot,
+  });
+  let browser = null;
+  t.after(async () => {
+    try {
+      await browser?.close().catch(() => {});
+      await terminateChild(hostra.child);
+    } finally {
+      await rmBusy(installation.temporary);
+    }
+  });
+  const ready = await hostra.ready;
+  browser = await chromium.connectOverCDP(ready.data.cdpEndpoint);
+  const context = browser.contexts()[0];
+  await waitFor(() => context.pages().some((candidate) => /\/_lr\/window\//u.test(candidate.url())), "Local Hostra Window");
+  const page = context.pages().find((candidate) => /\/_lr\/window\//u.test(candidate.url()));
+  await page.waitForFunction(() => document.documentElement.dataset.loomrealmRenderer === "installed", null, { timeout: 30_000 });
+  await page.waitForSelector("lr-map-view lr-map-sprite", { timeout: 20_000 });
+
+  const matrix = [
+    { width: 640, height: 480, contentHeight: 448, barHeight: 32, columns: 20, rows: 14 },
+    { width: 800, height: 600, contentHeight: 568, barHeight: 32, columns: 25, rows: 18 },
+    { width: 1280, height: 720, contentHeight: 672, barHeight: 48, columns: 40, rows: 21 },
+    { width: 1920, height: 1080, contentHeight: 1032, barHeight: 48, columns: 60, rows: 33 },
+    { width: 1920, height: 480, contentHeight: 448, barHeight: 32, columns: 60, rows: 14 },
+    { width: 640, height: 1080, contentHeight: 1032, barHeight: 48, columns: 20, rows: 33 },
+  ];
+  for (const expected of matrix) {
+    await setLogicalViewport(page, expected.width, expected.height);
+    await page.waitForFunction(({ width, height }) => {
+      const view = document.querySelector("lr-map-view");
+      const footer = view?.shadowRoot?.querySelector(".map-footer");
+      return view?.getBoundingClientRect().width === width
+        && view.getBoundingClientRect().height === height
+        && footer?.getBoundingClientRect().bottom === height;
+    }, expected, { timeout: 10_000 });
+    const actual = await page.evaluate(() => {
+      const view = document.querySelector("lr-map-view");
+      const sprite = document.querySelector("lr-map-sprite");
+      const content = view.shadowRoot.querySelector(".map-content");
+      const footer = view.shadowRoot.querySelector(".map-footer");
+      const world = view.shadowRoot.querySelector(".map-world");
+      const rect = (element) => {
+        const value = element.getBoundingClientRect();
+        return [value.left, value.top, value.width, value.height, value.right, value.bottom];
+      };
+      return {
+        inner: [window.innerWidth, window.innerHeight],
+        host: rect(view),
+        content: rect(content),
+        footer: rect(footer),
+        world: rect(world),
+        sprite: rect(sprite),
+        data: view._latestData,
+        footerText: footer.textContent,
+        body: rect(document.body),
+      };
+    });
+    assert.deepEqual(actual.inner, [expected.width, expected.height]);
+    assert.deepEqual(actual.host, [0, 0, expected.width, expected.height, expected.width, expected.height]);
+    assert.deepEqual(actual.content, [0, 0, expected.width, expected.contentHeight, expected.width, expected.contentHeight]);
+    assert.deepEqual(actual.footer, [0, expected.contentHeight, expected.width, expected.barHeight, expected.width, expected.height]);
+    assert.deepEqual(actual.body, [0, 0, expected.width, expected.height, expected.width, expected.height]);
+    assert.equal(actual.sprite[5] <= actual.footer[1], true, JSON.stringify(actual));
+    assert.equal(actual.footerText.trim(), "1");
+    assert.deepEqual(
+      [actual.data.viewportWidth, actual.data.viewportHeight, actual.data.contentWidth, actual.data.contentHeight,
+        actual.data.barHeight, actual.data.columns, actual.data.rows],
+      [expected.width, expected.height, expected.width, expected.contentHeight,
+        expected.barHeight, expected.columns, expected.rows],
+    );
+    assert.equal(actual.world[2], expected.width);
+    assert.equal(actual.world[3], expected.contentHeight);
   }
 });
 

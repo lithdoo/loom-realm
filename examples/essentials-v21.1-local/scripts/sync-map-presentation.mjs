@@ -7,10 +7,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BACKUP_SUFFIX = ".loomrealm-sync.backup";
-const TARGET_RELATIVE = Object.freeze([
-  ["js", join("[resource]Presentation", "map", "map.browser.js.js")],
-  ["css", join("[resource]Presentation", "map", "map.css.css")],
-]);
+const TARGET_RELATIVE = Object.freeze({
+  js: join("[resource]Presentation", "map", "map.browser.js.js"),
+  css: join("[resource]Presentation", "map", "map.css.css"),
+  pageCss: join("[resource]Presentation", "page.css.css"),
+});
 const DIST_RELATIVE = Object.freeze({
   js: join("game-libs", "map", "dist", "browser", "map.browser.js"),
   css: join("game-libs", "map", "dist", "browser", "map.css"),
@@ -18,7 +19,9 @@ const DIST_RELATIVE = Object.freeze({
 const SOURCE_RELATIVE = Object.freeze({
   js: join("game-libs", "map", "browser", "map.browser.js"),
   css: join("game-libs", "map", "browser", "map.css"),
+  pageCss: join("examples", "essentials-v21.1-local", "presentation.css"),
 });
+const RESOURCE_LABELS = Object.freeze({ js: "map browser JS", css: "map CSS", pageCss: "page CSS" });
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -38,21 +41,22 @@ function defaultFileOps() {
 }
 
 function fail(phase, details, cause) {
+  const resourceLines = Object.keys(RESOURCE_LABELS).flatMap((key) => {
+    const resource = details.resources[key];
+    return [
+      `source ${RESOURCE_LABELS[key]}: ${resource.source}`,
+      `dist ${RESOURCE_LABELS[key]}: ${resource.dist ?? "(source is authoritative)"}`,
+      `target ${RESOURCE_LABELS[key]}: ${resource.target ?? "(unresolved)"}`,
+      `expected ${RESOURCE_LABELS[key]} SHA-256: ${resource.expected ?? "(uncomputed)"}`,
+      `actual ${RESOURCE_LABELS[key]} SHA-256: ${resource.actual ?? "(uncomputed)"}`,
+    ];
+  });
   const error = new Error([
     `Map presentation sync failed during ${phase}`,
     `repo: ${details.repoRoot}`,
     `example: ${details.exampleRoot}`,
     `FSDB: ${details.fsdbRoot ?? "(unresolved)"}`,
-    `source js: ${details.sourceJs}`,
-    `source css: ${details.sourceCss}`,
-    `dist js: ${details.distJs}`,
-    `dist css: ${details.distCss}`,
-    `target js: ${details.targetJs ?? "(unresolved)"}`,
-    `target css: ${details.targetCss ?? "(unresolved)"}`,
-    `expected js SHA-256: ${details.expectedJs ?? "(uncomputed)"}`,
-    `actual js SHA-256: ${details.actualJs ?? "(uncomputed)"}`,
-    `expected css SHA-256: ${details.expectedCss ?? "(uncomputed)"}`,
-    `actual css SHA-256: ${details.actualCss ?? "(uncomputed)"}`,
+    ...resourceLines,
     `retry: node "${join(details.exampleRoot, "scripts", "sync-map-presentation.mjs")}"`,
     cause instanceof Error ? cause.message : cause ? String(cause) : "",
   ].filter(Boolean).join("\n"));
@@ -145,16 +149,17 @@ async function removeStaleStaging(fileOps, directory) {
     fileOps.unlink(join(directory, name)).catch(() => undefined)));
 }
 
-async function replacePair(fileOps, targets, staging) {
+async function replaceSet(fileOps, targets, staging, verify) {
   const backups = targets.map((target) => `${target}${BACKUP_SUFFIX}`);
   try {
-    await fileOps.rename(targets[0], backups[0]);
-    await fileOps.rename(staging[0], targets[0]);
-    await fileOps.rename(targets[1], backups[1]);
-    await fileOps.rename(staging[1], targets[1]);
+    for (const [index, target] of targets.entries()) {
+      await fileOps.rename(target, backups[index]);
+      await fileOps.rename(staging[index], target);
+    }
+    await verify();
   } catch (cause) {
     for (const [index, target] of targets.entries()) {
-      try { await restoreBackup(fileOps, target); } catch { /* keep attempting the pair */ }
+      try { await restoreBackup(fileOps, target); } catch { /* keep attempting the set */ }
       try { await fileOps.unlink(staging[index]); } catch { /* staging may already be gone */ }
     }
     throw cause;
@@ -175,56 +180,70 @@ export async function syncMapPresentation({
     repoRoot,
     exampleRoot,
     fsdbRoot: undefined,
-    sourceJs: join(repoRoot, SOURCE_RELATIVE.js),
-    sourceCss: join(repoRoot, SOURCE_RELATIVE.css),
-    distJs: join(repoRoot, DIST_RELATIVE.js),
-    distCss: join(repoRoot, DIST_RELATIVE.css),
-    targetJs: undefined,
-    targetCss: undefined,
-    expectedJs: undefined,
-    expectedCss: undefined,
-    actualJs: undefined,
-    actualCss: undefined,
+    resources: Object.fromEntries(Object.keys(RESOURCE_LABELS).map((key) => [key, {
+      source: join(repoRoot, SOURCE_RELATIVE[key]),
+      dist: DIST_RELATIVE[key] ? join(repoRoot, DIST_RELATIVE[key]) : undefined,
+      target: undefined,
+      expected: undefined,
+      actual: undefined,
+    }])),
   };
   try {
     if (runBuild) await runNpmBuild(repoRoot);
     const fsdbRoot = await discoverFsdb(exampleRoot, fileOps);
     details.fsdbRoot = fsdbRoot;
-    const targetJs = join(fsdbRoot, TARGET_RELATIVE[0][1]);
-    const targetCss = join(fsdbRoot, TARGET_RELATIVE[1][1]);
-    details.targetJs = targetJs;
-    details.targetCss = targetCss;
-    const targetDir = dirname(targetJs);
+    const keys = Object.keys(RESOURCE_LABELS);
+    const targets = keys.map((key) => join(fsdbRoot, TARGET_RELATIVE[key]));
+    for (const [index, key] of keys.entries()) details.resources[key].target = targets[index];
     if (!checkOnly) {
-      await restoreBackup(fileOps, targetJs);
-      await restoreBackup(fileOps, targetCss);
-      await removeStaleStaging(fileOps, targetDir);
+      for (const target of targets) await restoreBackup(fileOps, target);
+      for (const directory of new Set(targets.map(dirname))) await removeStaleStaging(fileOps, directory);
     }
-    const sourceJs = await readRegularFile(fileOps, details.sourceJs, "map browser JS source");
-    const sourceCss = await readRegularFile(fileOps, details.sourceCss, "map CSS source");
-    const distJs = await readRegularFile(fileOps, details.distJs, "map browser JS dist");
-    const distCss = await readRegularFile(fileOps, details.distCss, "map CSS dist");
-    details.expectedJs = sha256(distJs);
-    details.expectedCss = sha256(distCss);
-    if (sha256(sourceJs) !== details.expectedJs || sha256(sourceCss) !== details.expectedCss) {
-      details.actualJs = sha256(sourceJs);
-      details.actualCss = sha256(sourceCss);
-      fail("source/dist hash", details);
+
+    const expectedBytes = [];
+    for (const key of keys) {
+      const resource = details.resources[key];
+      const source = await readRegularFile(fileOps, resource.source, `${RESOURCE_LABELS[key]} source`);
+      if (resource.dist === undefined) {
+        expectedBytes.push(source);
+        resource.expected = sha256(source);
+        continue;
+      }
+      const dist = await readRegularFile(fileOps, resource.dist, `${RESOURCE_LABELS[key]} dist`);
+      expectedBytes.push(dist);
+      resource.expected = sha256(dist);
+      resource.actual = sha256(source);
+      if (resource.actual !== resource.expected) fail(`source/dist hash (${RESOURCE_LABELS[key]})`, details);
     }
-    if (!checkOnly) {
-      const stagingJs = `${targetJs}.loomrealm-sync.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
-      const stagingCss = `${targetCss}.loomrealm-sync.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
-      await writeStaging(fileOps, stagingJs, distJs);
-      await writeStaging(fileOps, stagingCss, distCss);
-      await replacePair(fileOps, [targetJs, targetCss], [stagingJs, stagingCss]);
+
+    for (const [index, key] of keys.entries()) {
+      const bytes = await readRegularFile(fileOps, targets[index], `FSDB ${RESOURCE_LABELS[key]}`);
+      details.resources[key].actual = sha256(bytes);
     }
-    const actualJs = await readRegularFile(fileOps, targetJs, "FSDB map browser JS");
-    const actualCss = await readRegularFile(fileOps, targetCss, "FSDB map CSS");
-    details.actualJs = sha256(actualJs);
-    details.actualCss = sha256(actualCss);
-    if (details.actualJs !== details.expectedJs || details.actualCss !== details.expectedCss) {
-      fail("source/dist/FSDB hash", details);
+    const mismatched = keys.filter((key) => details.resources[key].actual !== details.resources[key].expected);
+    if (checkOnly && mismatched.length > 0) {
+      fail(`FSDB hash (${mismatched.map((key) => RESOURCE_LABELS[key]).join(", ")})`, details);
     }
+    if (checkOnly || mismatched.length === 0) return;
+
+    const staging = targets.map((target) => `${target}.loomrealm-sync.${process.pid}.${randomBytes(8).toString("hex")}.tmp`);
+    try {
+      for (const [index, path] of staging.entries()) await writeStaging(fileOps, path, expectedBytes[index]);
+    } catch (cause) {
+      for (const path of staging) {
+        try { await fileOps.unlink(path); } catch { /* best-effort staging cleanup */ }
+      }
+      throw cause;
+    }
+    await replaceSet(fileOps, targets, staging, async () => {
+      for (const [index, key] of keys.entries()) {
+        const bytes = await readRegularFile(fileOps, targets[index], `FSDB ${RESOURCE_LABELS[key]}`);
+        details.resources[key].actual = sha256(bytes);
+        if (details.resources[key].actual !== details.resources[key].expected) {
+          fail(`post-replace hash (${RESOURCE_LABELS[key]})`, details);
+        }
+      }
+    });
   } catch (cause) {
     if (cause && cause.message?.startsWith("Map presentation sync failed")) throw cause;
     fail("discover/build/replace", details, cause);
