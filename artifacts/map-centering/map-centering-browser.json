@@ -1,0 +1,919 @@
+[
+  {
+    "width": 640,
+    "height": 480,
+    "layout": {
+      "windowWidth": 640,
+      "windowHeight": 480,
+      "barHeight": 32,
+      "contentWidth": 640,
+      "contentHeight": 448,
+      "columns": 20,
+      "rows": 14,
+      "logicalWidth": 640,
+      "logicalHeight": 448,
+      "scaleX": 1,
+      "scaleY": 1
+    },
+    "result": {
+      "geometry": {
+        "originX": 160,
+        "originY": 96,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 640,
+          "y1": 448
+        },
+        "mapRect": {
+          "x0": 160,
+          "y0": 96,
+          "x1": 480,
+          "y1": 352
+        },
+        "visibleMap": {
+          "x0": 160,
+          "y0": 96,
+          "x1": 480,
+          "y1": 352
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 640,
+            "y1": 96
+          },
+          {
+            "x0": 0,
+            "y0": 352,
+            "x1": 640,
+            "y1": 448
+          },
+          {
+            "x0": 0,
+            "y0": 96,
+            "x1": 160,
+            "y1": 352
+          },
+          {
+            "x0": 480,
+            "y0": 96,
+            "x1": 640,
+            "y1": 352
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 640,
+        "height": 448
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 640,
+        "height": 448
+      },
+      "canvases": [
+        {
+          "left": 160,
+          "top": 96,
+          "width": 32,
+          "height": 32
+        },
+        {
+          "left": 160,
+          "top": 96,
+          "width": 32,
+          "height": 32
+        }
+      ],
+      "sprite": {
+        "left": 192,
+        "top": 128,
+        "width": 32,
+        "height": 32
+      },
+      "footer": {
+        "top": 448,
+        "width": 640,
+        "height": 32
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 160,
+      "right": 160,
+      "top": 96,
+      "bottom": 96
+    }
+  },
+  {
+    "width": 800,
+    "height": 600,
+    "layout": {
+      "windowWidth": 800,
+      "windowHeight": 600,
+      "barHeight": 32,
+      "contentWidth": 800,
+      "contentHeight": 568,
+      "columns": 25,
+      "rows": 18,
+      "logicalWidth": 800,
+      "logicalHeight": 576,
+      "scaleX": 1,
+      "scaleY": 0.9861111111111112
+    },
+    "result": {
+      "geometry": {
+        "originX": 240,
+        "originY": 160,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 800,
+          "y1": 576
+        },
+        "mapRect": {
+          "x0": 240,
+          "y0": 160,
+          "x1": 560,
+          "y1": 416
+        },
+        "visibleMap": {
+          "x0": 240,
+          "y0": 160,
+          "x1": 560,
+          "y1": 416
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 800,
+            "y1": 160
+          },
+          {
+            "x0": 0,
+            "y0": 416,
+            "x1": 800,
+            "y1": 576
+          },
+          {
+            "x0": 0,
+            "y0": 160,
+            "x1": 240,
+            "y1": 416
+          },
+          {
+            "x0": 560,
+            "y0": 160,
+            "x1": 800,
+            "y1": 416
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 800,
+        "height": 568
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 800,
+        "height": 568
+      },
+      "canvases": [
+        {
+          "left": 240,
+          "top": 157.77777099609375,
+          "width": 32,
+          "height": 31.555557250976562
+        },
+        {
+          "left": 240,
+          "top": 157.77777099609375,
+          "width": 32,
+          "height": 31.555557250976562
+        }
+      ],
+      "sprite": {
+        "left": 272,
+        "top": 189.3333282470703,
+        "width": 32,
+        "height": 31.555557250976562
+      },
+      "footer": {
+        "top": 568,
+        "width": 800,
+        "height": 32
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 240,
+      "right": 240,
+      "top": 157.77777777777777,
+      "bottom": 157.77777777777777
+    }
+  },
+  {
+    "width": 1280,
+    "height": 720,
+    "layout": {
+      "windowWidth": 1280,
+      "windowHeight": 720,
+      "barHeight": 48,
+      "contentWidth": 1280,
+      "contentHeight": 672,
+      "columns": 40,
+      "rows": 21,
+      "logicalWidth": 1280,
+      "logicalHeight": 672,
+      "scaleX": 1,
+      "scaleY": 1
+    },
+    "result": {
+      "geometry": {
+        "originX": 480,
+        "originY": 208,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 1280,
+          "y1": 672
+        },
+        "mapRect": {
+          "x0": 480,
+          "y0": 208,
+          "x1": 800,
+          "y1": 464
+        },
+        "visibleMap": {
+          "x0": 480,
+          "y0": 208,
+          "x1": 800,
+          "y1": 464
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 1280,
+            "y1": 208
+          },
+          {
+            "x0": 0,
+            "y0": 464,
+            "x1": 1280,
+            "y1": 672
+          },
+          {
+            "x0": 0,
+            "y0": 208,
+            "x1": 480,
+            "y1": 464
+          },
+          {
+            "x0": 800,
+            "y0": 208,
+            "x1": 1280,
+            "y1": 464
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 1280,
+        "height": 672
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 1280,
+        "height": 672
+      },
+      "canvases": [
+        {
+          "left": 480,
+          "top": 208,
+          "width": 32,
+          "height": 32
+        },
+        {
+          "left": 480,
+          "top": 208,
+          "width": 32,
+          "height": 32
+        }
+      ],
+      "sprite": {
+        "left": 512,
+        "top": 240,
+        "width": 32,
+        "height": 32
+      },
+      "footer": {
+        "top": 672,
+        "width": 1280,
+        "height": 48
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 480,
+      "right": 480,
+      "top": 208,
+      "bottom": 208
+    }
+  },
+  {
+    "width": 1920,
+    "height": 1080,
+    "layout": {
+      "windowWidth": 1920,
+      "windowHeight": 1080,
+      "barHeight": 48,
+      "contentWidth": 1920,
+      "contentHeight": 1032,
+      "columns": 60,
+      "rows": 33,
+      "logicalWidth": 1920,
+      "logicalHeight": 1056,
+      "scaleX": 1,
+      "scaleY": 0.9772727272727273
+    },
+    "result": {
+      "geometry": {
+        "originX": 800,
+        "originY": 400,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 1920,
+          "y1": 1056
+        },
+        "mapRect": {
+          "x0": 800,
+          "y0": 400,
+          "x1": 1120,
+          "y1": 656
+        },
+        "visibleMap": {
+          "x0": 800,
+          "y0": 400,
+          "x1": 1120,
+          "y1": 656
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 1920,
+            "y1": 400
+          },
+          {
+            "x0": 0,
+            "y0": 656,
+            "x1": 1920,
+            "y1": 1056
+          },
+          {
+            "x0": 0,
+            "y0": 400,
+            "x1": 800,
+            "y1": 656
+          },
+          {
+            "x0": 1120,
+            "y0": 400,
+            "x1": 1920,
+            "y1": 656
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 1032
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 1032
+      },
+      "canvases": [
+        {
+          "left": 800,
+          "top": 390.9090881347656,
+          "width": 32,
+          "height": 31.272735595703125
+        },
+        {
+          "left": 800,
+          "top": 390.9090881347656,
+          "width": 32,
+          "height": 31.272735595703125
+        }
+      ],
+      "sprite": {
+        "left": 832,
+        "top": 422.18182373046875,
+        "width": 32,
+        "height": 31.272735595703125
+      },
+      "footer": {
+        "top": 1032,
+        "width": 1920,
+        "height": 48
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 800,
+      "right": 800,
+      "top": 390.90909090909093,
+      "bottom": 390.9090909090909
+    }
+  },
+  {
+    "width": 1920,
+    "height": 480,
+    "layout": {
+      "windowWidth": 1920,
+      "windowHeight": 480,
+      "barHeight": 32,
+      "contentWidth": 1920,
+      "contentHeight": 448,
+      "columns": 60,
+      "rows": 14,
+      "logicalWidth": 1920,
+      "logicalHeight": 448,
+      "scaleX": 1,
+      "scaleY": 1
+    },
+    "result": {
+      "geometry": {
+        "originX": 800,
+        "originY": 96,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 1920,
+          "y1": 448
+        },
+        "mapRect": {
+          "x0": 800,
+          "y0": 96,
+          "x1": 1120,
+          "y1": 352
+        },
+        "visibleMap": {
+          "x0": 800,
+          "y0": 96,
+          "x1": 1120,
+          "y1": 352
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 1920,
+            "y1": 96
+          },
+          {
+            "x0": 0,
+            "y0": 352,
+            "x1": 1920,
+            "y1": 448
+          },
+          {
+            "x0": 0,
+            "y0": 96,
+            "x1": 800,
+            "y1": 352
+          },
+          {
+            "x0": 1120,
+            "y0": 96,
+            "x1": 1920,
+            "y1": 352
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 448
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 448
+      },
+      "canvases": [
+        {
+          "left": 800,
+          "top": 96,
+          "width": 32,
+          "height": 32
+        },
+        {
+          "left": 800,
+          "top": 96,
+          "width": 32,
+          "height": 32
+        }
+      ],
+      "sprite": {
+        "left": 832,
+        "top": 128,
+        "width": 32,
+        "height": 32
+      },
+      "footer": {
+        "top": 448,
+        "width": 1920,
+        "height": 32
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 800,
+      "right": 800,
+      "top": 96,
+      "bottom": 96
+    }
+  },
+  {
+    "width": 640,
+    "height": 1080,
+    "layout": {
+      "windowWidth": 640,
+      "windowHeight": 1080,
+      "barHeight": 48,
+      "contentWidth": 640,
+      "contentHeight": 1032,
+      "columns": 20,
+      "rows": 33,
+      "logicalWidth": 640,
+      "logicalHeight": 1056,
+      "scaleX": 1,
+      "scaleY": 0.9772727272727273
+    },
+    "result": {
+      "geometry": {
+        "originX": 160,
+        "originY": 400,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 640,
+          "y1": 1056
+        },
+        "mapRect": {
+          "x0": 160,
+          "y0": 400,
+          "x1": 480,
+          "y1": 656
+        },
+        "visibleMap": {
+          "x0": 160,
+          "y0": 400,
+          "x1": 480,
+          "y1": 656
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 640,
+            "y1": 400
+          },
+          {
+            "x0": 0,
+            "y0": 656,
+            "x1": 640,
+            "y1": 1056
+          },
+          {
+            "x0": 0,
+            "y0": 400,
+            "x1": 160,
+            "y1": 656
+          },
+          {
+            "x0": 480,
+            "y0": 400,
+            "x1": 640,
+            "y1": 656
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 640,
+        "height": 1032
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 640,
+        "height": 1032
+      },
+      "canvases": [
+        {
+          "left": 160,
+          "top": 390.9090881347656,
+          "width": 32,
+          "height": 31.272735595703125
+        },
+        {
+          "left": 160,
+          "top": 390.9090881347656,
+          "width": 32,
+          "height": 31.272735595703125
+        }
+      ],
+      "sprite": {
+        "left": 192,
+        "top": 422.18182373046875,
+        "width": 32,
+        "height": 31.272735595703125
+      },
+      "footer": {
+        "top": 1032,
+        "width": 640,
+        "height": 48
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 160,
+      "right": 160,
+      "top": 390.90909090909093,
+      "bottom": 390.9090909090909
+    }
+  },
+  {
+    "width": 801,
+    "height": 601,
+    "layout": {
+      "windowWidth": 801,
+      "windowHeight": 601,
+      "barHeight": 32,
+      "contentWidth": 801,
+      "contentHeight": 569,
+      "columns": 26,
+      "rows": 18,
+      "logicalWidth": 832,
+      "logicalHeight": 576,
+      "scaleX": 0.9627403846153846,
+      "scaleY": 0.9878472222222222
+    },
+    "result": {
+      "geometry": {
+        "originX": 256,
+        "originY": 160,
+        "viewport": {
+          "x0": 0,
+          "y0": 0,
+          "x1": 832,
+          "y1": 576
+        },
+        "mapRect": {
+          "x0": 256,
+          "y0": 160,
+          "x1": 576,
+          "y1": 416
+        },
+        "visibleMap": {
+          "x0": 256,
+          "y0": 160,
+          "x1": 576,
+          "y1": 416
+        },
+        "fillRects": [
+          {
+            "x0": 0,
+            "y0": 0,
+            "x1": 832,
+            "y1": 160
+          },
+          {
+            "x0": 0,
+            "y0": 416,
+            "x1": 832,
+            "y1": 576
+          },
+          {
+            "x0": 0,
+            "y0": 160,
+            "x1": 256,
+            "y1": 416
+          },
+          {
+            "x0": 576,
+            "y0": 160,
+            "x1": 832,
+            "y1": 416
+          }
+        ]
+      },
+      "content": {
+        "left": 0,
+        "top": 0,
+        "width": 801,
+        "height": 569
+      },
+      "world": {
+        "left": 0,
+        "top": 0,
+        "width": 801,
+        "height": 569
+      },
+      "canvases": [
+        {
+          "left": 246.46153259277344,
+          "top": 158.05555725097656,
+          "width": 30.807693481445312,
+          "height": 31.611099243164062
+        },
+        {
+          "left": 246.46153259277344,
+          "top": 158.05555725097656,
+          "width": 30.807693481445312,
+          "height": 31.611099243164062
+        }
+      ],
+      "sprite": {
+        "left": 277.26922607421875,
+        "top": 189.66665649414062,
+        "width": 30.80767822265625,
+        "height": 31.611114501953125
+      },
+      "footer": {
+        "top": 569,
+        "width": 801,
+        "height": 32
+      },
+      "background": "rgb(255, 255, 255)"
+    },
+    "pixels": [
+      [
+        255,
+        255,
+        255,
+        255
+      ],
+      [
+        0,
+        0,
+        0,
+        255
+      ],
+      [
+        0,
+        0,
+        255,
+        255
+      ]
+    ],
+    "margins": {
+      "left": 246.46153846153845,
+      "right": 246.46153846153845,
+      "top": 158.05555555555554,
+      "bottom": 158.05555555555554
+    }
+  }
+]

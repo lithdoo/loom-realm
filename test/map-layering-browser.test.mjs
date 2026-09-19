@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import test, { after, before } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { calculateLayout } from "../game-libs/map/dist/layout.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const mapBrowserPath = path.join(root, "game-libs", "map", "dist", "browser", "map.browser.js");
@@ -167,17 +168,28 @@ function responsiveViewData(options = {}) {
   const legacy = viewData(options);
   const tiles = options.tiles ?? [regularTile({ depth: options.depth ?? 0 })];
   const { tileVisuals: _tileVisuals, chunks: _chunks, ...base } = legacy;
+  const viewportWidth = options.viewportWidth ?? 640;
+  const viewportHeight = options.viewportHeight ?? 480;
+  const barHeight = viewportHeight < 480 ? 24 : viewportHeight < 720 ? 32 : 48;
+  const contentWidth = viewportWidth;
+  const contentHeight = viewportHeight - barHeight;
+  const columns = options.columns ?? 20;
+  const rows = options.rows ?? 14;
+  const logicalWidth = columns * 32;
+  const logicalHeight = rows * 32;
   return {
     ...base,
-    barHeight: 32,
-    contentWidth: 640,
-    contentHeight: 448,
-    columns: 20,
-    rows: 14,
-    logicalWidth: 640,
-    logicalHeight: 448,
-    scaleX: 1,
-    scaleY: 1,
+    viewportWidth,
+    viewportHeight,
+    barHeight,
+    contentWidth,
+    contentHeight,
+    columns,
+    rows,
+    logicalWidth,
+    logicalHeight,
+    scaleX: contentWidth / logicalWidth,
+    scaleY: contentHeight / logicalHeight,
     mapName: String(legacy.mapId),
     tiles: tiles.map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]),
   };
@@ -484,6 +496,20 @@ async function compositeCenter(page) {
   }, pngBytes.toString("base64"));
 }
 
+async function compositePixels(page, points) {
+  const pngBytes = await page.locator("lr-map-view").screenshot();
+  return page.evaluate(async ({ b64, samples }) => {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(bitmap, 0, 0);
+    return samples.map(({ x, y }) => [...context.getImageData(Math.floor(x), Math.floor(y), 1, 1).data]);
+  }, { b64: pngBytes.toString("base64"), samples: points });
+}
+
 async function layerInfo(page) {
   return page.evaluate(() => {
     const root = document.querySelector("lr-map-view").shadowRoot;
@@ -576,6 +602,136 @@ test("responsive tuple payload commits DOM content, world transform and footer a
   assert.deepEqual(result, { state: "ready", content: [640, 448], world: [640, 448], footer: [32, "1"], canvasParent: "map-world" });
 });
 
+test("presentation geometry centers each small axis and partitions the matrix with half-open rectangles", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const cases = [
+    { logicalWidth: 21 * 32, logicalHeight: 18 * 32, mapWidth: 20, mapHeight: 15, cameraX: 0, cameraY: 0, origin: [16, 48] },
+    { logicalWidth: 20 * 32, logicalHeight: 14 * 32, mapWidth: 10, mapHeight: 8, cameraX: 0, cameraY: 0, origin: [160, 96] },
+    { logicalWidth: 20 * 32, logicalHeight: 14 * 32, mapWidth: 20, mapHeight: 14, cameraX: 0, cameraY: 0, origin: [0, 0] },
+    { logicalWidth: 20 * 32, logicalHeight: 14 * 32, mapWidth: 25, mapHeight: 12, cameraX: 80, cameraY: 0, origin: [0, 32] },
+    { logicalWidth: 20 * 32, logicalHeight: 14 * 32, mapWidth: 19, mapHeight: 20, cameraX: 0, cameraY: 96, origin: [16, 0] },
+    { logicalWidth: 60 * 32, logicalHeight: 33 * 32, mapWidth: 1, mapHeight: 1, cameraX: 0, cameraY: 0, origin: [944, 512] },
+    { logicalWidth: 20 * 32, logicalHeight: 14 * 32, mapWidth: 18, mapHeight: 12, cameraX: 0, cameraY: 0, origin: [32, 32] },
+  ];
+  const geometries = await page.evaluate((inputs) => inputs.map((input) => window.__view._presentationGeometry(input)), cases);
+  const area = (rect) => (rect.x1 - rect.x0) * (rect.y1 - rect.y0);
+  const overlap = (left, right) => Math.max(0, Math.min(left.x1, right.x1) - Math.max(left.x0, right.x0))
+    * Math.max(0, Math.min(left.y1, right.y1) - Math.max(left.y0, right.y0));
+  for (let index = 0; index < cases.length; index += 1) {
+    const geometry = geometries[index];
+    const input = cases[index];
+    assert.deepEqual([geometry.originX, geometry.originY], input.origin);
+    const rectangles = [geometry.visibleMap, ...geometry.fillRects].filter(Boolean);
+    assert.equal(rectangles.reduce((sum, rect) => sum + area(rect), 0), input.logicalWidth * input.logicalHeight);
+    for (let left = 0; left < rectangles.length; left += 1) {
+      for (let right = left + 1; right < rectangles.length; right += 1) assert.equal(overlap(rectangles[left], rectangles[right]), 0);
+    }
+  }
+  assert.equal(geometries[1].fillRects.length, 4);
+  assert.equal(geometries[2].fillRects.length, 0);
+  assert.equal(2 * geometries[0].originX + cases[0].mapWidth * 32, cases[0].logicalWidth);
+  assert.equal(2 * geometries[6].originX + cases[6].mapWidth * 32, cases[6].logicalWidth);
+  const invalid = await page.evaluate(() => {
+    try {
+      window.__view._presentationGeometry({ logicalWidth: 640, logicalHeight: 448, mapWidth: Number.MAX_SAFE_INTEGER, mapHeight: 1, cameraX: 0, cameraY: 0 });
+      return false;
+    } catch { return true; }
+  });
+  assert.equal(invalid, true);
+});
+
+test("small-map fill, transparent interior, tile depths, and slotted sprite share one scaled origin", { timeout: 90_000 }, async (t) => {
+  const windows = [[640, 480], [800, 600], [1280, 720], [1920, 1080], [1920, 480], [640, 1080], [801, 601]];
+  const evidence = [];
+  const evidenceDirectory = process.env.LOOMREALM_MAP_CENTERING_EVIDENCE_DIR;
+  if (evidenceDirectory) await mkdir(evidenceDirectory, { recursive: true });
+  for (const [width, height] of windows) {
+    const page = await openPage();
+    t.after(() => page.close());
+    await page.setViewportSize({ width, height });
+    const layout = calculateLayout(width, height);
+    const tiles = [
+      regularTile({ x: 0, y: 0, z: 0, depth: 0 }),
+      regularTile({ x: 0, y: 0, z: 1, depth: 64 }),
+    ];
+    const payload = responsiveViewData({
+      viewportWidth: width,
+      viewportHeight: height,
+      columns: layout.columns,
+      rows: layout.rows,
+      mapWidth: 10,
+      mapHeight: 8,
+      tiles,
+    });
+    await page.evaluate(({ viewPayload, spritePayload }) => {
+      window.__view.receiveRenderData(viewPayload);
+      window.__sprite.receiveRenderData(spritePayload);
+    }, { viewPayload: payload, spritePayload: matchingSprite(payload, { x: 1, y: 1, screenX: 32, screenY: 32 }) });
+    await waitPainted(page, "128", "129");
+    const result = await page.evaluate(() => {
+      const view = window.__view;
+      const root = view.shadowRoot;
+      const content = root.querySelector(".map-content").getBoundingClientRect();
+      const world = root.querySelector(".map-world").getBoundingClientRect();
+      const canvases = [...root.querySelectorAll("canvas.tile-layer:not([hidden])")]
+        .map((item) => item.getBoundingClientRect())
+        .map((rect) => ({ left: rect.left, top: rect.top, width: rect.width, height: rect.height }));
+      const sprite = window.__sprite.getBoundingClientRect();
+      const footer = root.querySelector("footer").getBoundingClientRect();
+      return {
+        geometry: view._accepted.geometry,
+        content: { left: content.left, top: content.top, width: content.width, height: content.height },
+        world: { left: world.left, top: world.top, width: world.width, height: world.height },
+        canvases,
+        sprite: { left: sprite.left, top: sprite.top, width: sprite.width, height: sprite.height },
+        footer: { top: footer.top, width: footer.width, height: footer.height },
+        background: getComputedStyle(root.querySelector(".map-world")).backgroundColor,
+      };
+    });
+    const { originX, originY } = result.geometry;
+    const scaleX = layout.scaleX;
+    const scaleY = layout.scaleY;
+    const near = (actual, expected) => assert.ok(Math.abs(actual - expected) <= 0.02, JSON.stringify({ width, height, actual, expected }));
+    near(result.world.width, width);
+    near(result.world.height, layout.contentHeight);
+    assert.equal(result.canvases.length, 2);
+    for (const canvas of result.canvases) {
+      near(canvas.left, originX * scaleX);
+      near(canvas.top, originY * scaleY);
+    }
+    near(result.sprite.left, (originX + 32) * scaleX);
+    near(result.sprite.top, (originY + 32) * scaleY);
+    near(result.footer.top, layout.contentHeight);
+    near(result.footer.width, width);
+    near(result.footer.height, layout.barHeight);
+    assert.equal(result.background, "rgb(255, 255, 255)");
+    const mapLeft = originX * scaleX;
+    const mapTop = originY * scaleY;
+    const mapWidth = 10 * 32 * scaleX;
+    const mapHeight = 8 * 32 * scaleY;
+    const pixels = await compositePixels(page, [
+      { x: mapLeft / 2, y: mapTop + mapHeight / 2 },
+      { x: mapLeft + mapWidth / 2, y: mapTop + mapHeight / 2 },
+      { x: mapLeft + 8 * scaleX, y: mapTop + 8 * scaleY },
+    ]);
+    assert.deepEqual(pixels[0], [255, 255, 255, 255]);
+    assert.deepEqual(pixels[1], [0, 0, 0, 255]);
+    assert.deepEqual(pixels[2], [0, 0, 255, 255]);
+    const right = width - (mapLeft + mapWidth);
+    const bottom = layout.contentHeight - (mapTop + mapHeight);
+    assert.ok(Math.abs(mapLeft - right) <= 0.02);
+    assert.ok(Math.abs(mapTop - bottom) <= 0.02);
+    evidence.push({ width, height, layout, result, pixels, margins: { left: mapLeft, right, top: mapTop, bottom } });
+    if (evidenceDirectory && width === 800 && height === 600) {
+      await page.locator("lr-map-view").screenshot({ path: path.join(evidenceDirectory, "map-centering-800x600.png") });
+    }
+  }
+  if (evidenceDirectory) {
+    await writeFile(path.join(evidenceDirectory, "map-centering-browser.json"), `${JSON.stringify(evidence, null, 2)}\n`);
+  }
+});
+
 test("B. equal depth stacks character above tile", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
@@ -642,7 +798,7 @@ test("E. stale buckets hide and clear leftover canvases", { timeout: 30_000 }, a
     return canvases.length === 2 && canvases[0].style.zIndex === "0" && canvases[1].style.zIndex === "128";
   }, "two visible depth buckets");
   await page.evaluate(() => window.__view.receiveRenderData(window.__secondPayload));
-  await waitPainted(page, "0", "65");
+  await waitUntil(page, () => window.__view._accepted?.view === window.__secondPayload, "second depth bucket commit");
   const info = await layerInfo(page);
   const visible = info.hidden.map((hidden, index) => ({ hidden, z: info.zIndex[index] })).filter((entry) => !entry.hidden);
   assert.equal(visible.length, 1);
@@ -940,7 +1096,9 @@ test("stale sprite image success and failure do not override newer walking", { t
     viewPayload: viewData({ depth: 0, cameraMotion: { id: 4, durationMs: 250, fromCameraX: 0, fromCameraY: 0 } }),
     spritePayload: walkingSprite({ sprite: secondRef, id: 4, y: 2, fromY: 1, screenY: 64, fromScreenY: 32, pattern: 3 }),
   });
-  await waitUntil(page, () => getComputedStyle(document.querySelector("lr-map-sprite")).top === "64px", "replacement after failed stale request");
+  await waitUntil(page, () => window.__view._accepted?.view.motionId === 4
+    && window.__sprite._raf === undefined
+    && getComputedStyle(document.querySelector("lr-map-sprite")).top === "64px", "replacement after failed stale request");
   const before = await spriteBox(page);
   await settlePendingImage(page, failRef, "reject", "__sprite");
   assert.equal((await spriteBox(page)).top, before.top);
@@ -1431,6 +1589,62 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
   assert.ok(info.afterRefresh.resizes > info.afterCamera.resizes, JSON.stringify(info));
 });
 
+test("camera-only resize fast path commits new origin, underlay, canvases, and sprite together", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const first = responsiveViewData({ mapWidth: 20, mapHeight: 14, tiles: [regularTile({ depth: 0 })] });
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: first, spritePayload: matchingSprite(first) });
+  await waitUntil(page, () => window.__view._accepted?.geometry.originX === 0, "equal-size origin commit");
+  const result = await page.evaluate(async () => {
+    const view = window.__view;
+    const before = {
+      draws: view._tileDrawCount,
+      resizes: view._tileResizeCount,
+      cameraOnly: view._cameraOnlyCommits,
+    };
+    const accepted = view._accepted.view;
+    view.receiveRenderData({
+      ...accepted,
+      viewportWidth: 800,
+      viewportHeight: 600,
+      barHeight: 32,
+      contentWidth: 800,
+      contentHeight: 568,
+      columns: 25,
+      rows: 18,
+      logicalWidth: 800,
+      logicalHeight: 576,
+      scaleX: 1,
+      scaleY: 568 / 576,
+    });
+    const deadline = performance.now() + 2_000;
+    while ((view._accepted.geometry.originX !== 80 || view._accepted.geometry.originY !== 64) && performance.now() < deadline) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    const canvas = view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])");
+    const sprite = window.__sprite;
+    const world = view.shadowRoot.querySelector(".map-world");
+    return {
+      before,
+      after: { draws: view._tileDrawCount, resizes: view._tileResizeCount, cameraOnly: view._cameraOnlyCommits },
+      origin: [view._accepted.geometry.originX, view._accepted.geometry.originY],
+      canvas: [canvas.style.left, canvas.style.top],
+      sprite: [getComputedStyle(sprite).left, getComputedStyle(sprite).top],
+      background: [world.style.backgroundPosition, world.style.backgroundSize, world.style.backgroundColor],
+    };
+  });
+  assert.deepEqual(result.origin, [80, 64]);
+  assert.deepEqual(result.canvas, ["80px", "64px"]);
+  assert.deepEqual(result.sprite, ["80px", "64px"]);
+  assert.deepEqual(result.background, ["80px 64px", "640px 448px", "rgb(255, 255, 255)"]);
+  assert.equal(result.after.draws, result.before.draws);
+  assert.equal(result.after.resizes, result.before.resizes);
+  assert.equal(result.after.cameraOnly, result.before.cameraOnly + 1);
+});
+
 test("viewportWidth/Height set host CSS box without host style attributes", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
@@ -1574,9 +1788,11 @@ test("old accepted pair stays when only one newer endpoint arrives", { timeout: 
 test("candidate raster exception leaves the accepted pair byte-identical", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
-  const first = viewData({ tiles: [regularTile({ depth: 0 })] });
-  const second = viewData({
+  const first = responsiveViewData({ mapWidth: 10, mapHeight: 8, tiles: [regularTile({ depth: 0 })] });
+  const second = responsiveViewData({
     visualEpoch: 2,
+    mapWidth: 12,
+    mapHeight: 10,
     tiles: [
       regularTile({ depth: 0 }),
       regularTile({ x: 1, tileId: 385, depth: 64 }),
@@ -1596,6 +1812,7 @@ test("candidate raster exception leaves the accepted pair byte-identical", { tim
     return {
       pixel: [...canvas.getContext("2d").getImageData(8, 8, 1, 1).data],
       count: window.__view.shadowRoot.querySelectorAll("canvas.tile-layer").length,
+      background: window.__view.shadowRoot.querySelector(".map-world").getAttribute("style"),
     };
   });
   await page.evaluate(({ viewPayload, spritePayload }) => {
@@ -1610,11 +1827,13 @@ test("candidate raster exception leaves the accepted pair byte-identical", { tim
       pixel: [...canvas.getContext("2d").getImageData(8, 8, 1, 1).data],
       count: window.__view.shadowRoot.querySelectorAll("canvas.tile-layer").length,
       visualEpoch: window.__view._accepted.view.visualEpoch,
+      background: window.__view.shadowRoot.querySelector(".map-world").getAttribute("style"),
     };
   });
   assert.equal(after.sameCanvas, true);
   assert.deepEqual(after.pixel, before.pixel);
   assert.equal(after.count, before.count);
+  assert.equal(after.background, before.background);
   assert.equal(after.visualEpoch, 1);
 });
 
@@ -1664,10 +1883,11 @@ test("scene A to B to C evicts stale bitmaps and keeps the resource cache bounde
   for (const [version, sceneEpoch] of [["v1", 1], ["v2", 2], ["v3", 3]]) {
     const viewPayload = scene(version, sceneEpoch);
     await page.evaluate(({ viewPayload: view, spritePayload }) => {
+      window.__expectedSceneEpoch = view.sceneEpoch;
       window.__view.receiveRenderData(view);
       window.__sprite.receiveRenderData(spritePayload);
     }, { viewPayload, spritePayload: matchingSprite(viewPayload) });
-    await waitPainted(page, "0", "65");
+    await waitUntil(page, () => window.__view._accepted?.view.sceneEpoch === window.__expectedSceneEpoch, `scene ${sceneEpoch} commit`);
   }
   const cache = await page.evaluate(() => ({
     images: [...window.__view._images.keys()],

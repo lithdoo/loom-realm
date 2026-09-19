@@ -59,6 +59,62 @@
     return Math.min(max, Math.max(min, value));
   }
 
+  function intersectHalfOpen(left, right) {
+    const result = {
+      x0: Math.max(left.x0, right.x0),
+      y0: Math.max(left.y0, right.y0),
+      x1: Math.min(left.x1, right.x1),
+      y1: Math.min(left.y1, right.y1),
+    };
+    return result.x0 < result.x1 && result.y0 < result.y1 ? Object.freeze(result) : null;
+  }
+
+  function subtractRect(outer, inner) {
+    if (!inner) return Object.freeze([outer]);
+    const candidates = [
+      { x0: outer.x0, y0: outer.y0, x1: outer.x1, y1: inner.y0 },
+      { x0: outer.x0, y0: inner.y1, x1: outer.x1, y1: outer.y1 },
+      { x0: outer.x0, y0: inner.y0, x1: inner.x0, y1: inner.y1 },
+      { x0: inner.x1, y0: inner.y0, x1: outer.x1, y1: inner.y1 },
+    ];
+    return Object.freeze(candidates
+      .filter((rect) => rect.x0 < rect.x1 && rect.y0 < rect.y1)
+      .map((rect) => Object.freeze(rect)));
+  }
+
+  function presentationGeometry(view) {
+    const logicalWidth = view.logicalWidth ?? view.viewportWidth;
+    const logicalHeight = view.logicalHeight ?? view.viewportHeight;
+    const mapPixelWidth = view.mapWidth * TILE;
+    const mapPixelHeight = view.mapHeight * TILE;
+    if (!Number.isSafeInteger(logicalWidth) || logicalWidth <= 0
+      || !Number.isSafeInteger(logicalHeight) || logicalHeight <= 0
+      || !Number.isSafeInteger(mapPixelWidth) || mapPixelWidth <= 0
+      || !Number.isSafeInteger(mapPixelHeight) || mapPixelHeight <= 0
+      || !Number.isSafeInteger(view.cameraX) || view.cameraX < 0
+      || !Number.isSafeInteger(view.cameraY) || view.cameraY < 0) {
+      throw new TypeError("Invalid map presentation geometry");
+    }
+    const viewport = Object.freeze({ x0: 0, y0: 0, x1: logicalWidth, y1: logicalHeight });
+    const originX = Math.max(0, (logicalWidth - mapPixelWidth) / 2);
+    const originY = Math.max(0, (logicalHeight - mapPixelHeight) / 2);
+    const mapRect = Object.freeze({
+      x0: originX - view.cameraX,
+      y0: originY - view.cameraY,
+      x1: originX - view.cameraX + mapPixelWidth,
+      y1: originY - view.cameraY + mapPixelHeight,
+    });
+    const visibleMap = intersectHalfOpen(viewport, mapRect);
+    return Object.freeze({
+      originX,
+      originY,
+      viewport,
+      mapRect,
+      visibleMap,
+      fillRects: subtractRect(viewport, visibleMap),
+    });
+  }
+
   function qualify(name, detail) {
     const hook = globalThis.__loomrealmMovementQualification;
     if (typeof hook === "function") {
@@ -248,6 +304,7 @@
     const maxCameraX = Math.max(data.mapWidth * TILE - logicalWidth, 0);
     const maxCameraY = Math.max(data.mapHeight * TILE - logicalHeight, 0);
     if (data.cameraX > maxCameraX || data.cameraY > maxCameraY) throw new TypeError("Invalid MapViewRenderData");
+    presentationGeometry(data);
     if (responsive) {
       let previous = null;
       for (const tile of data.tiles) {
@@ -680,7 +737,7 @@
       rule.style.height = `${height}px`;
     }
 
-    _applyLayout(view) {
+    _applyLayout(view, geometry) {
       this._applyViewportBox(view.viewportWidth, view.viewportHeight);
       const contentWidth = view.contentWidth ?? view.viewportWidth;
       const contentHeight = view.contentHeight ?? view.viewportHeight;
@@ -691,10 +748,24 @@
       this._world.style.width = `${logicalWidth}px`;
       this._world.style.height = `${logicalHeight}px`;
       this._world.style.transform = `scale(${view.scaleX ?? 1}, ${view.scaleY ?? 1})`;
+      this._world.style.backgroundColor = "#fff";
+      if (geometry.visibleMap) {
+        const rect = geometry.visibleMap;
+        this._world.style.backgroundImage = "linear-gradient(#000,#000)";
+        this._world.style.backgroundPosition = `${rect.x0}px ${rect.y0}px`;
+        this._world.style.backgroundSize = `${rect.x1 - rect.x0}px ${rect.y1 - rect.y0}px`;
+        this._world.style.backgroundRepeat = "no-repeat";
+      } else {
+        this._world.style.backgroundImage = "none";
+      }
       this._footer.style.width = `${view.viewportWidth}px`;
       this._footer.style.height = `${view.barHeight ?? 0}px`;
       this._footer.hidden = !(view.barHeight > 0);
       this._mapName.textContent = view.mapName ?? String(view.mapId);
+    }
+
+    _presentationGeometry(view) {
+      return presentationGeometry(view);
     }
 
     _spriteRule() {
@@ -804,6 +875,7 @@
       if (sprite && ((view.data.cameraMotion === null) !== (sprite.data.motion === null) || view.data.motionId !== sprite.data.motionId)) {
         throw new TypeError("Invalid map motion identity");
       }
+      const geometry = presentationGeometry(view.data);
       this._state = "PREPARING";
       if (
         this._accepted
@@ -819,6 +891,7 @@
           sprite: sprite?.data ?? this._accepted.sprite,
           pairReceivedAt: sprite ? Math.min(view.receivedAt, sprite.receivedAt) : view.receivedAt,
           layers: this._layers,
+          geometry,
         };
         this._cameraOnlyCommits += 1;
         this._commitMotion(prepared, sequence);
@@ -892,6 +965,7 @@
         spriteResourceId: sprite ? resourceIdentity(sprite.data.sprite) : null,
         spriteEl: sprite?.sprite,
         owner,
+        geometry,
       };
       try {
         prepared.layers = this._rasterDetached(prepared, sequence);
@@ -1154,7 +1228,7 @@
       const progress = active && (motion || sprite?.motion) ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
       const cameraX = motion ? Math.round(lerp(motion.fromCameraX, view.cameraX, progress)) : view.cameraX;
       const cameraY = motion ? Math.round(lerp(motion.fromCameraY, view.cameraY, progress)) : view.cameraY;
-      this._applyLayout(view);
+      this._applyLayout(view, prepared.geometry);
       const frames = new Map();
       let hasAnimatedAutotile = false;
       for (const [slot, item] of prepared.autotiles.entries()) {
@@ -1170,8 +1244,8 @@
         layer.frames = frames;
         layer.canvas.hidden = false;
         layer.canvas.style.zIndex = String(tileStackValue(layer.depth));
-        layer.canvas.style.left = `${bounds.minX - cameraX}px`;
-        layer.canvas.style.top = `${bounds.minY - cameraY}px`;
+        layer.canvas.style.left = `${bounds.minX - cameraX + prepared.geometry.originX}px`;
+        layer.canvas.style.top = `${bounds.minY - cameraY + prepared.geometry.originY}px`;
       }
       if (sprite) this._paintSprite(sprite, prepared, progress);
       const previous = this._lastPaintedCamera;
@@ -1299,8 +1373,8 @@
       const frameWidth = size.width;
       const frameHeight = size.height;
       const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
-      const left = screenX + (32 - frameWidth) / 2;
-      const top = screenY + 32 - frameHeight;
+      const left = screenX + prepared.geometry.originX + (32 - frameWidth) / 2;
+      const top = screenY + prepared.geometry.originY + 32 - frameHeight;
       const rule = this._spriteRule();
       if (rule) {
         rule.style.left = `${left}px`;
