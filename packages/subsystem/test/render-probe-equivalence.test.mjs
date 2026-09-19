@@ -1,8 +1,7 @@
 /**
- * Equivalence proof for the generic RenderManager probe optimization:
- * after one assertJsonValue, depthOfValidatedJson matches wire jsonDepth and
- * JSON.stringify is byte-identical to stringifyJson. Domain accept/reject,
- * error class, and snapshot immutability stay unchanged.
+ * Equivalence proof for the safe RenderManager probe optimization: validated
+ * depth and serialization match Wire without invoking inherited toJSON.
+ * Domain accept/reject, error class, and snapshot immutability stay unchanged.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -14,6 +13,10 @@ import {
   utf8ByteLength,
 } from "@loomrealm/wire";
 import { RenderManager } from "../dist/internal/render-manager.js";
+
+const MAX_DATA_BYTES = 262_144;
+const MAX_MESSAGE_BYTES = 1_048_576;
+const PROBE_DOMAIN_ID = "d".repeat(128);
 
 const PRIMITIVES = [
   null, true, false, 0, -0, 1, -1, 0.5, -0.5, 1e308, 5e-324, Number.MAX_VALUE,
@@ -61,10 +64,16 @@ function depthOfValidated(value) {
     if (containerDepth > maximum) maximum = containerDepth;
     if (Array.isArray(entry.value)) {
       for (let index = 0; index < entry.value.length; index += 1) {
-        stack.push({ value: entry.value[index], depth: containerDepth });
+        const descriptor = Object.getOwnPropertyDescriptor(entry.value, String(index));
+        assert.ok(descriptor && "value" in descriptor);
+        stack.push({ value: descriptor.value, depth: containerDepth });
       }
     } else {
-      for (const child of Object.values(entry.value)) stack.push({ value: child, depth: containerDepth });
+      for (const key of Object.keys(entry.value)) {
+        const descriptor = Object.getOwnPropertyDescriptor(entry.value, key);
+        assert.ok(descriptor && "value" in descriptor);
+        stack.push({ value: descriptor.value, depth: containerDepth });
+      }
     }
   }
   return maximum;
@@ -78,7 +87,7 @@ function percentile(sorted, fraction) {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
 }
 
-test("native JSON.stringify is byte-identical to wire stringifyJson for every valid input", () => {
+test("3,000 valid JSON values preserve depth and serialized byte equivalence", () => {
   for (let iteration = 0; iteration < 3000; iteration += 1) {
     const value = randomValid(6, 6);
     assertJsonValue(value);
@@ -173,10 +182,10 @@ test("depth and byte limits still reject at exactly the same boundaries", () => 
   assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ d: deep(33) })] }), RangeError);
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.d.length, 1);
 
-  const dataBytes = (count) => utf8ByteLength(JSON.stringify({ s: "x".repeat(count) }));
-  const exact = 262_144 - dataBytes(0);
-  assert.equal(dataBytes(exact), 262_144);
-  assert.ok(dataBytes(exact + 1) > 262_144);
+  const dataBytes = (count) => utf8ByteLength(stringifyJson({ s: "x".repeat(count) }));
+  const exact = MAX_DATA_BYTES - dataBytes(0);
+  assert.equal(dataBytes(exact), MAX_DATA_BYTES);
+  assert.ok(dataBytes(exact + 1) > MAX_DATA_BYTES);
   domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(exact) })] });
   assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(exact + 1) })] }), RangeError);
   assert.throws(() => domain.replace({ zIndex: 0, roots: [node({ s: "x".repeat(300_000) })] }), RangeError);
@@ -207,6 +216,125 @@ test("accepted domain snapshots stay detached and frozen", () => {
   domain.replace({ zIndex: 3, roots: [node({ nested: { value: 4 } })] });
   assert.equal(snapshot.roots[0].data.nested.value, 1);
   assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.nested.value, 4);
+});
+
+const stateWithRoots = (roots, zIndex = 0) => ({ zIndex, roots });
+const keyedNode = (key, data = {}, children = []) => ({
+  key,
+  tag: "sprite",
+  attrs: {},
+  data,
+  children,
+});
+
+function messageBoundaryState() {
+  const empty = stateWithRoots(Array.from({ length: 4 }, (_, index) => keyedNode(`n${index}`, { s: "" })));
+  const emptyMessage = {
+    type: "render.snapshot",
+    domainId: PROBE_DOMAIN_ID,
+    revision: Number.MAX_SAFE_INTEGER,
+    zIndex: empty.zIndex,
+    roots: empty.roots,
+  };
+  let remaining = MAX_MESSAGE_BYTES - utf8ByteLength(stringifyJson(emptyMessage));
+  const lengths = [];
+  for (let index = 0; index < 4; index += 1) {
+    const length = Math.min(MAX_DATA_BYTES - utf8ByteLength('{"s":""}'), remaining);
+    lengths.push(length);
+    remaining -= length;
+  }
+  assert.equal(remaining, 0);
+  return stateWithRoots(lengths.map((length, index) => keyedNode(`n${index}`, { s: "x".repeat(length) })));
+}
+
+test("whole-message byte limit accepts exactly 1048576 bytes and rejects the next byte atomically", () => {
+  const exact = messageBoundaryState();
+  const probe = {
+    type: "render.snapshot",
+    domainId: PROBE_DOMAIN_ID,
+    revision: Number.MAX_SAFE_INTEGER,
+    zIndex: exact.zIndex,
+    roots: exact.roots,
+  };
+  assert.equal(utf8ByteLength(stringifyJson(probe)), MAX_MESSAGE_BYTES);
+  const manager = new RenderManager();
+  const domain = manager.createDomain(stateWithRoots(exact.roots.map((item) => keyedNode(item.key))));
+  domain.replace(exact);
+  const overflow = structuredClone(exact);
+  overflow.roots[3].data.s += "x";
+  assert.throws(() => domain.replace(overflow), RangeError);
+  assert.equal(
+    manager.snapshotForQualification().domains[0].state.roots[3].data.s.length,
+    exact.roots[3].data.s.length,
+  );
+});
+
+test("Object.prototype toJSON is ignored by Wire and RenderManager", { concurrency: false }, () => {
+  const original = Object.getOwnPropertyDescriptor(Object.prototype, "toJSON");
+  let calls = 0;
+  try {
+    Object.defineProperty(Object.prototype, "toJSON", {
+      configurable: true,
+      writable: true,
+      value() {
+        calls += 1;
+        this.mutatedByToJSON = true;
+        return 0;
+      },
+    });
+    const sample = { safe: { value: 1 } };
+    assertJsonValue(sample);
+    assert.equal(stringifyJson(sample), '{"safe":{"value":1}}');
+    assert.equal(JSON.stringify(sample), "0");
+    assert.equal(calls, 1);
+    calls = 0;
+
+    const manager = new RenderManager();
+    const domain = manager.createDomain(stateWithRoots([keyedNode("root", { value: 1 })]));
+    domain.replace(stateWithRoots([keyedNode("root", { value: 2 })]));
+    domain.update({ nodes: [{ key: "root", data: { set: { value: 3 } } }] });
+    assert.equal(calls, 0);
+    assert.equal(manager.snapshotForQualification().domains[0].state.roots[0].data.value, 3);
+
+    const overflow = messageBoundaryState();
+    overflow.roots[3].data.s += "x";
+    assert.throws(() => domain.replace(overflow), RangeError);
+    assert.equal(calls, 0);
+  } finally {
+    if (original === undefined) delete Object.prototype.toJSON;
+    else Object.defineProperty(Object.prototype, "toJSON", original);
+  }
+});
+
+test("Array.prototype toJSON is ignored and never invokes external code", { concurrency: false }, () => {
+  const original = Object.getOwnPropertyDescriptor(Array.prototype, "toJSON");
+  let calls = 0;
+  try {
+    Object.defineProperty(Array.prototype, "toJSON", {
+      configurable: true,
+      writable: true,
+      value() {
+        calls += 1;
+        throw new Error("external toJSON must not run");
+      },
+    });
+    const sample = { values: [1, 2, 3] };
+    assertJsonValue(sample);
+    assert.equal(stringifyJson(sample), '{"values":[1,2,3]}');
+    assert.throws(() => JSON.stringify(sample), /external toJSON/);
+    assert.equal(calls, 1);
+    calls = 0;
+
+    const manager = new RenderManager();
+    const domain = manager.createDomain(stateWithRoots([keyedNode("root", { values: [1, 2, 3] })]));
+    domain.replace(stateWithRoots([keyedNode("root", { values: [4, 5, 6] })]));
+    domain.update({ nodes: [{ key: "root", data: { set: { values: [7, 8] } } }] });
+    assert.equal(calls, 0);
+    assert.deepEqual(manager.snapshotForQualification().domains[0].state.roots[0].data.values, [7, 8]);
+  } finally {
+    if (original === undefined) delete Array.prototype.toJSON;
+    else Object.defineProperty(Array.prototype, "toJSON", original);
+  }
 });
 
 test("same dense fixture: probe before/after and motion-only RenderDomain.update", () => {
