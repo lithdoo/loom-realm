@@ -1879,7 +1879,7 @@ CI workflow: `.github/workflows/essentials-fixture.yml` (`npm run test:fixtures`
 | Run | SHA | Result | Notes |
 |---|---|---|---|
 | [35499223917](https://github.com/lithdoo/loom-realm/actions/runs/35499223917) | `faf4c649a2fd16e88d20f34c41baf8b1ca64afd6` | **failure** (exit 1) | ubuntu-latest. 106 tests, 99 pass, **1 fail**, **6 skip**. Failure: `EV-SAFETY-01` `forensicRelPath` on a Windows drive-letter string expected `Data/Map021.rxdata`; POSIX `path.basename` left backslashes intact. The 6 skips are live FSDB tests. skip is not PASS. |
-| follow-up (this commit) | SHA after forensicRelPath POSIX redaction | pending `workflow_dispatch` | `forensicRelPath` now normalizes backslashes and strips drive letters before taking parent/file. EV-SAFETY-01 also asserts a POSIX absolute path. FG-05 stays **OPEN**: license unsigned; live skip is not PASS even if synthetics go green. |
+| [35499617524](https://github.com/lithdoo/loom-realm/actions/runs/35499617524) | `5b550b43ef622d3182c50bcf4f340e5ccf2c726f` | **success** (exit 0) | ubuntu-latest, workflow_dispatch. 106 tests, **100 pass**, 0 fail, **6 skip**. Skips are live FSDB-only tests (E2E-21 four groups, Map7 extract, incomplete Map007 fixture, Map21 extract, independent recount, LD47-06). skip is not PASS. Synthetics including EV-SAFETY-01 passed. FG-05 stays **OPEN**: license unsigned. |
 
 ### 16.5 Tests recorded this session
 

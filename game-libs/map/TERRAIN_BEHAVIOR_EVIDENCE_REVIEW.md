@@ -60,4 +60,4 @@ node tools/fixtures/essentials-v21.1/map-evidence-independent-check.mjs 7 21 47
 
 **验收输出模板：** `item / source+SHA / map-event-page-command or tile xyz / rule+固定源码 / input+initial state / expected+actual / evidence grade / exact test command+exit+pass-fail-skip / CI run+SHA / unresolved owner / reviewer`。任何 `STATIC-INFERRED` 与 `DYNAMIC-OBSERVED` 必须分列；数据完整性、行为原版保真、合法可重放和资格是四种不同结论。
 
-最终状态：**Map 7/21/47 静态记录 + E2E-21 统一静态 replay + Map47 404 语义已在本机闭合（§16）。CI `35499223917` 在 `faf4c64` 失败（EV-SAFETY-01 POSIX 路径），属本地可修并已修。RGSS 动态、素材再分发许可、授权 reviewer 仍为外部阻碍。FG-01～06 全部 OPEN。FREEZE CANDIDATE COMPLETE / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**
+最终状态：**Map 7/21/47 静态记录 + E2E-21 统一静态 replay + Map47 404 语义已在本机闭合（§16）。CI 失败 `35499223917` 已修；绿 run `35499617524` on `5b550b4` 为 100 pass / 6 skip（live FSDB）。RGSS 动态、素材再分发许可、授权 reviewer 仍为外部阻碍。FG-01～06 全部 OPEN。FREEZE CANDIDATE COMPLETE / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**

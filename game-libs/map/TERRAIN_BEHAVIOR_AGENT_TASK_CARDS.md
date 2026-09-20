@@ -38,7 +38,7 @@
 
 先审现有 `TERRAIN_BEHAVIOR_EVIDENCE.md` 附录 A 的原文许可与最小保留原则，记录权利依据或待处理决定；若未确认，继续只提交手工合成的非侵权极小用例、SHA、生成程序，实图 live 只能在有素材的本地跑并报告 CI 缺口。工作流应让合成回归**确实执行**，对 live 断言 skip 明确报告，不能把“workflow 绿 + 全 live skip”算 FG-05 PASS。测试包括坏 table、source/target mapId、事件触发、状态拼接、Map47 规则与无素材行为。记录 Git SHA、workflow ID/run URL、Job 结论与 skip；更新 M14/M15 subject 差异但**不改写历史 ledger**。停止线：无法获得许可或 CI 数据时 FG-05 OPEN。
 
-已记录：run [35499223917](https://github.com/lithdoo/loom-realm/actions/runs/35499223917) on `faf4c64` 为 **failure**（`EV-SAFETY-01` POSIX `forensicRelPath`）。该路径脱敏已修；许可与 live skip 仍使 FG-05 OPEN。
+已记录：失败 run [35499223917](https://github.com/lithdoo/loom-realm/actions/runs/35499223917) on `faf4c64`；绿 run [35499617524](https://github.com/lithdoo/loom-realm/actions/runs/35499617524) on `5b550b4` 为 100 pass / 0 fail / 6 skip。许可与 live skip 仍使 FG-05 OPEN。
 
 ## FZ-05：唯一合同 V1 候选决策与跨模块 ABI 评审
 
