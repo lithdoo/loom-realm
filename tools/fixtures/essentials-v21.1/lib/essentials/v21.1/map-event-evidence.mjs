@@ -10,11 +10,43 @@ import { projectMapRecord, projectTilesetRecords } from "./m14-consumer.mjs";
 import { projectedD0Passable } from "./map-transfer-consumer.mjs";
 
 export const DEFAULT_MAP_ID = 7;
+export const ALLOWED_EVIDENCE_MAP_IDS = Object.freeze([7, 21]);
 export const BRIDGE_TERRAIN_TAG = 15;
 export const SCRIPT_START_CODE = 355;
 export const SCRIPT_CONTINUE_CODE = 655;
 export const TRANSFER_PLAYER_CODE = 201;
 export const COMMON_EVENT_CODE = 117;
+export const SET_MOVE_ROUTE_CODE = 209;
+export const MOVE_ROUTE_CONTINUE_CODE = 509;
+export const MOVE_COMMAND_SCRIPT_CODE = 45;
+export const CONDITIONAL_BRANCH_CODE = 111;
+export const CONDITIONAL_BRANCH_SCRIPT_TYPE = 12;
+export const SIZE_NAME_PATTERN = /size\((\d+),(\d+)\)/iu;
+export const HIDDEN_ITEM_PATTERN = /hiddenitem/iu;
+
+export const COMPLETENESS = Object.freeze({
+  COMPLETE: "COMPLETE",
+  INCOMPLETE: "INCOMPLETE",
+});
+
+export const VANILLA_SOURCE = Object.freeze({
+  tag: "v21.1",
+  commit: "ea7b5d56d2436591160983c4e641a2ceee2d875a",
+  tree: "https://github.com/Maruno17/pokemon-essentials/tree/ea7b5d56d2436591160983c4e641a2ceee2d875a",
+  sizeParser: "Data/Scripts/004_Game classes/007_Game_Event.rb Game_Event#initialize",
+  occupiedTiles: "Data/Scripts/004_Game classes/006_Game_Character.rb Game_Character#each_occupied_tile / #at_coordinate?",
+  overTrigger: "Data/Scripts/004_Game classes/007_Game_Event.rb Game_Event#over_trigger?",
+  playerTouch: "Data/Scripts/004_Game classes/008_Game_Player.rb Game_Player#check_event_trigger_touch / #check_event_trigger_here / #update_event_triggering",
+  passableEvents: "Data/Scripts/004_Game classes/006_Game_Character.rb Game_Character#passable?",
+  command355: "Data/Scripts/003_Game processing/004_Interpreter_Commands.rb Interpreter#command_355",
+  command117: "Data/Scripts/003_Game processing/004_Interpreter_Commands.rb Interpreter#command_117",
+  command111: "Data/Scripts/003_Game processing/004_Interpreter_Commands.rb Interpreter#command_111 type 12",
+  command209: "Data/Scripts/003_Game processing/004_Interpreter_Commands.rb Interpreter#command_209",
+  moveRouteScript: "Data/Scripts/004_Game classes/006_Game_Character.rb Game_Character#move_type_custom code 45",
+  pbBridge: "Data/Scripts/012_Overworld/001_Overworld.rb pbBridgeOn / pbBridgeOff",
+  transferOff: "Data/Scripts/003_Game processing/002_Scene_Map.rb Scene_Map#transfer_player",
+  playerPassable: "Data/Scripts/004_Game classes/004_Game_Map.rb Game_Map#playerPassable?",
+});
 
 export const TRIGGER_SEMANTICS = Object.freeze({
   0: "action-button",
@@ -138,6 +170,61 @@ function requireInteger(value, label, { positive = false, nonNegative = false } 
   return value;
 }
 
+export function assertAllowedMapId(mapId, label = "mapId") {
+  requireInteger(mapId, label, { positive: true });
+  if (!ALLOWED_EVIDENCE_MAP_IDS.includes(mapId)) {
+    evidenceFail(`this extractor only reads Maps ${ALLOWED_EVIDENCE_MAP_IDS.join(" and ")}; refused map ${mapId}`);
+  }
+  return mapId;
+}
+
+function rubyStringText(value) {
+  if (value?.kind === "RubyString") return value.text ?? "";
+  if (typeof value === "string") return value;
+  if (value?.kind === "RubyString" || value?.text != null) return String(value.text);
+  return null;
+}
+
+export function parseEventSize(name) {
+  const match = SIZE_NAME_PATTERN.exec(name ?? "");
+  if (!match) {
+    return Object.freeze({ present: false, width: 1, height: 1, raw: null });
+  }
+  return Object.freeze({
+    present: true,
+    width: Number(match[1]),
+    height: Number(match[2]),
+    raw: match[0],
+    source: VANILLA_SOURCE.sizeParser,
+  });
+}
+
+export function occupiedTiles(x, y, width = 1, height = 1) {
+  requireInteger(x, "occupiedTiles.x");
+  requireInteger(y, "occupiedTiles.y");
+  requireInteger(width, "occupiedTiles.width", { positive: true });
+  requireInteger(height, "occupiedTiles.height", { positive: true });
+  const tiles = [];
+  for (let i = 0; i < width; i += 1) {
+    for (let j = 0; j < height; j += 1) {
+      tiles.push(Object.freeze({ x: x + i, y: y - height + 1 + j }));
+    }
+  }
+  return Object.freeze(tiles);
+}
+
+export function classifyScriptUncertainty(text) {
+  const source = text ?? "";
+  const reasons = [];
+  if (/\b(eval|instance_eval|instance_exec|class_eval|module_eval|send|__send__|public_send|method|const_get)\s*[\(\[]/u.test(source)) {
+    reasons.push("dynamic-ruby-send-or-eval");
+  }
+  if (/#\{/u.test(source)) reasons.push("string-interpolation");
+  if (/\bpbCommonEvent\s*\(/u.test(source)) reasons.push("script-calls-pbCommonEvent");
+  if (/\bpbBridge(?!On\b|Off\b)/u.test(source)) reasons.push("pbBridge-identifier-not-On-or-Off");
+  return Object.freeze(reasons);
+}
+
 function requireBoolean(value, label) {
   if (typeof value !== "boolean") evidenceFail(`${label} must be a boolean`);
   return value;
@@ -237,6 +324,61 @@ export function concatenateScriptCommands(commands) {
   return Object.freeze(groups);
 }
 
+export function extractMoveCommandScript(moveCommand, origin) {
+  if (moveCommand?.kind !== "RmxpObject" || moveCommand.className !== "RPG::MoveCommand") {
+    return Object.freeze({ origin, isScript: false, decodeError: "not-RPG::MoveCommand" });
+  }
+  const code = moveCommand.fields["@code"];
+  if (code !== MOVE_COMMAND_SCRIPT_CODE) {
+    return Object.freeze({ origin, isScript: false, code });
+  }
+  const parameters = moveCommand.fields["@parameters"];
+  const text = rubyStringText(parameters?.items?.[0]) ?? "";
+  return Object.freeze({
+    origin,
+    isScript: true,
+    code,
+    scriptText: text,
+    matchesBridgePattern: BRIDGE_SCRIPT_PATTERN.test(text),
+    uncertainty: classifyScriptUncertainty(text),
+  });
+}
+
+export function extractMoveRouteScripts(moveRoute, origin) {
+  if (moveRoute == null) return Object.freeze([]);
+  if (moveRoute?.kind !== "RmxpObject" || moveRoute.className !== "RPG::MoveRoute") {
+    return Object.freeze([{ origin, isScript: false, decodeError: "not-RPG::MoveRoute" }]);
+  }
+  const list = moveRoute.fields["@list"];
+  if (list?.kind !== "Array") return Object.freeze([{ origin, isScript: false, decodeError: "MoveRoute.list-not-Array" }]);
+  return Object.freeze(list.items.map((item, index) => extractMoveCommandScript(item, `${origin}.list[${index}]`)).filter((item) => item.isScript || item.decodeError));
+}
+
+function extractRawCommandScriptExtras(rawCommand, commandIndex) {
+  const code = rawCommand.fields["@code"];
+  const parameters = rawCommand.fields["@parameters"];
+  const extras = { moveRouteScripts: [], conditionalBranchScripts: [] };
+  if (code === SET_MOVE_ROUTE_CODE) {
+    extras.moveRouteScripts = extractMoveRouteScripts(parameters?.items?.[1], `command[${commandIndex}].move-route`);
+  } else if (code === MOVE_ROUTE_CONTINUE_CODE) {
+    const extracted = extractMoveCommandScript(parameters?.items?.[0], `command[${commandIndex}].move-command`);
+    extras.moveRouteScripts = extracted.isScript || extracted.decodeError ? [extracted] : [];
+  } else if (code === CONDITIONAL_BRANCH_CODE) {
+    const type = parameters?.items?.[0];
+    if (type === CONDITIONAL_BRANCH_SCRIPT_TYPE) {
+      const text = rubyStringText(parameters?.items?.[1]) ?? "";
+      extras.conditionalBranchScripts = [Object.freeze({
+        origin: `command[${commandIndex}].conditional-branch-script`,
+        commandIndex,
+        scriptText: text,
+        matchesBridgePattern: BRIDGE_SCRIPT_PATTERN.test(text),
+        uncertainty: classifyScriptUncertainty(text),
+      })];
+    }
+  }
+  return extras;
+}
+
 function commandFacts(command, index) {
   const code = requireInteger(command.fields["@code"], `EventCommand[${index}].code`, { nonNegative: true });
   const indent = requireInteger(command.fields["@indent"], `EventCommand[${index}].indent`, { nonNegative: true });
@@ -298,12 +440,22 @@ function pageFacts(page, pageIndex, pageCount) {
   requireRmxp(page, "RPG::Event::Page", `event page[${pageIndex}]`);
   const list = page.fields["@list"];
   if (list?.kind !== "Array") evidenceFail(`event page[${pageIndex}].list must be an Array`);
+  const moveRouteScripts = [...extractMoveRouteScripts(page.fields["@move_route"], `page[${pageIndex}].autonomous-move-route`)];
+  const conditionalBranchScripts = [];
   const commands = list.items.map((item, index) => {
     requireRmxp(item, "RPG::EventCommand", `event page[${pageIndex}] command[${index}]`);
+    const extras = extractRawCommandScriptExtras(item, index);
+    moveRouteScripts.push(...extras.moveRouteScripts);
+    conditionalBranchScripts.push(...extras.conditionalBranchScripts);
     return commandFacts(item, index);
   });
   const trigger = requireInteger(page.fields["@trigger"], `page[${pageIndex}].trigger`, { nonNegative: true });
   const concatenatedScripts = concatenateScriptCommands(commands);
+  const allScriptTexts = [
+    ...concatenatedScripts.map((group) => group.joinedWithNewlines),
+    ...moveRouteScripts.filter((item) => item.isScript).map((item) => item.scriptText),
+    ...conditionalBranchScripts.map((item) => item.scriptText),
+  ];
   return Object.freeze({
     pageIndex,
     pageCount,
@@ -322,6 +474,10 @@ function pageFacts(page, pageIndex, pageCount) {
     direction_fix: page.fields["@direction_fix"],
     commands: Object.freeze(commands),
     concatenatedScripts,
+    moveRouteScripts: Object.freeze(moveRouteScripts),
+    conditionalBranchScripts: Object.freeze(conditionalBranchScripts),
+    hasBridgeScript: allScriptTexts.some((text) => BRIDGE_SCRIPT_PATTERN.test(text)),
+    scriptUncertainty: Object.freeze(allScriptTexts.flatMap((text) => [...classifyScriptUncertainty(text)])),
     extraIvars: Object.freeze(Object.fromEntries(
       Object.keys(page.extraIvars ?? {}).sort().map((name) => [name, jsonValue(page.extraIvars[name])]),
     )),
@@ -334,12 +490,18 @@ function eventFacts(event, mapId) {
   if (pagesValue?.kind !== "Array") evidenceFail("RPG::Event @pages must be an Array");
   const pages = pagesValue.items.map((page, pageIndex) => pageFacts(page, pageIndex, pagesValue.items.length));
   const name = rubyText(event.fields["@name"], "RPG::Event @name");
+  const nameText = name.text ?? "";
+  const size = parseEventSize(nameText);
+  const x = requireInteger(event.fields["@x"], "RPG::Event @x", { nonNegative: true });
+  const y = requireInteger(event.fields["@y"], "RPG::Event @y", { nonNegative: true });
   return Object.freeze({
     mapId,
     eventId: requireInteger(event.fields["@id"], "RPG::Event @id", { positive: true }),
-    name: name.text ?? "",
-    x: requireInteger(event.fields["@x"], "RPG::Event @x", { nonNegative: true }),
-    y: requireInteger(event.fields["@y"], "RPG::Event @y", { nonNegative: true }),
+    name: nameText,
+    x,
+    y,
+    size,
+    occupiedTiles: occupiedTiles(x, y, size.width, size.height),
     pageCount: pages.length,
     pages,
     extraIvars: Object.freeze(Object.fromEntries(
@@ -447,6 +609,9 @@ function pageSummary(page) {
       character_name: page.graphic.character_name,
     }),
     concatenatedScripts: page.concatenatedScripts,
+    moveRouteScriptTexts: Object.freeze((page.moveRouteScripts ?? []).filter((item) => item.isScript).map((item) => item.scriptText)),
+    conditionalBranchScriptTexts: Object.freeze((page.conditionalBranchScripts ?? []).map((item) => item.scriptText)),
+    hasBridgeScript: pageHasBridgeScript(page),
     commentTexts: Object.freeze(commentTexts(page)),
     transferCommands: Object.freeze(page.commands.filter((command) => command.code === TRANSFER_PLAYER_CODE).map((command) => Object.freeze({
       index: command.index,
@@ -465,15 +630,50 @@ function bboxOf(cells) {
   });
 }
 
-export function collectBridgeCells(mapFacts, terrainTags) {
+export function collectBridgeCells(mapFacts, terrainTags, options = {}) {
+  const strict = options.strict === true;
+  const issues = [];
+  if (terrainTags?.kind !== "Table") {
+    if (strict) evidenceFail("terrain_tags must be a Table to prove Bridge cell counts");
+    return Object.freeze({
+      tagId: BRIDGE_TERRAIN_TAG,
+      cellCount: 0,
+      cells: Object.freeze([]),
+      tileIds: Object.freeze([]),
+      placedBridgeTaggedTiles: 0,
+      bbox: null,
+      scanStatus: COMPLETENESS.INCOMPLETE,
+      issues: Object.freeze(["terrain_tags missing or not a Table"]),
+      outOfRange: Object.freeze([]),
+    });
+  }
+  const data = mapFacts.data;
+  if (data?.kind !== "Table") {
+    if (strict) evidenceFail("Map.data must be a Table to scan Bridge cells");
+    issues.push("Map.data missing or not a Table");
+  } else {
+    if (data.dimensions !== 3 || data.xSize !== mapFacts.width || data.ySize !== mapFacts.height || data.zSize !== 3) {
+      issues.push(`Map.data shape ${data.dimensions}D ${data.xSize}x${data.ySize}x${data.zSize} does not match ${mapFacts.width}x${mapFacts.height}x3`);
+    }
+    const expected = data.xSize * data.ySize * data.zSize;
+    if (data.values.length !== expected) issues.push(`Map.data values length ${data.values.length} != ${expected}`);
+  }
+  if (strict && issues.length > 0) evidenceFail(issues[0]);
+
   const cells = [];
   const tileIds = new Set();
+  const outOfRange = [];
+  const tagLimit = terrainTags.xSize;
   for (let y = 0; y < mapFacts.height; y += 1) {
     for (let x = 0; x < mapFacts.width; x += 1) {
       const layers = [];
       for (const z of [2, 1, 0]) {
-        const tileId = tableAt(mapFacts.data, x, y, z);
+        const tileId = data?.kind === "Table" ? tableAt(data, x, y, z) : undefined;
         if (!Number.isSafeInteger(tileId) || tileId <= 0) continue;
+        if (tileId >= tagLimit) {
+          outOfRange.push(Object.freeze({ x, y, z, tileId, tagLimit }));
+          continue;
+        }
         const tag = tableAt(terrainTags, tileId);
         if (tag === BRIDGE_TERRAIN_TAG) {
           layers.push(Object.freeze({ z, tileId, terrainTag: tag }));
@@ -483,27 +683,52 @@ export function collectBridgeCells(mapFacts, terrainTags) {
       if (layers.length > 0) cells.push(Object.freeze({ x, y, layers: Object.freeze(layers) }));
     }
   }
+  if (outOfRange.length > 0) issues.push(`${outOfRange.length} placed tile IDs are outside terrain_tags.xSize ${tagLimit}`);
+  const scanStatus = issues.length > 0 ? COMPLETENESS.INCOMPLETE : COMPLETENESS.COMPLETE;
+  if (strict && scanStatus === COMPLETENESS.INCOMPLETE) {
+    evidenceFail(issues[0], outOfRange.slice(0, 8));
+  }
+  let placed = 0;
+  for (const cell of cells) placed += cell.layers.length;
   return Object.freeze({
     tagId: BRIDGE_TERRAIN_TAG,
     cellCount: cells.length,
     cells: Object.freeze(cells),
     tileIds: Object.freeze([...tileIds].sort((left, right) => left - right)),
+    placedBridgeTaggedTiles: placed,
+    bbox: bboxOf(cells),
+    scanStatus,
+    issues: Object.freeze(issues),
+    outOfRange: Object.freeze(outOfRange),
   });
 }
 
-function adjacentToBridge(x, y, bridgeCells) {
+function adjacentToBridge(tiles, bridgeCells) {
   const hits = [];
-  for (const cell of bridgeCells.cells) {
-    const dx = Math.abs(cell.x - x);
-    const dy = Math.abs(cell.y - y);
-    if (dx === 0 && dy === 0) hits.push(Object.freeze({ relation: "on-bridge-cell", x: cell.x, y: cell.y }));
-    else if (dx + dy === 1) hits.push(Object.freeze({ relation: "orthogonally-adjacent", x: cell.x, y: cell.y }));
+  const seen = new Set();
+  for (const tile of tiles) {
+    for (const cell of bridgeCells.cells) {
+      const dx = Math.abs(cell.x - tile.x);
+      const dy = Math.abs(cell.y - tile.y);
+      let relation = null;
+      if (dx === 0 && dy === 0) relation = "on-bridge-cell";
+      else if (dx + dy === 1) relation = "orthogonally-adjacent";
+      if (!relation) continue;
+      const key = `${relation}:${cell.x},${cell.y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push(Object.freeze({ relation, x: cell.x, y: cell.y, fromEventTile: Object.freeze({ x: tile.x, y: tile.y }) }));
+    }
   }
   return Object.freeze(hits);
 }
 
 function pageHasBridgeScript(page) {
-  return page.concatenatedScripts.some((group) => BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines));
+  if (page.hasBridgeScript === true) return true;
+  if (page.concatenatedScripts.some((group) => BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines))) return true;
+  if ((page.moveRouteScripts ?? []).some((item) => item.matchesBridgePattern === true)) return true;
+  if ((page.conditionalBranchScripts ?? []).some((item) => item.matchesBridgePattern === true)) return true;
+  return false;
 }
 
 function pageCommonEventIds(page) {
@@ -519,27 +744,33 @@ export function classifyCandidates(events, bridgeCells, commonEventBridgeIds = n
   for (const event of events) {
     const reasons = [];
     if (BRIDGE_NAME_PATTERN.test(event.name)) reasons.push("event-name-matches-bridge");
-    const terrainHits = adjacentToBridge(event.x, event.y, bridgeCells);
-    if (terrainHits.some((item) => item.relation === "on-bridge-cell")) reasons.push("event-tile-has-bridge-terrain");
-    else if (terrainHits.length > 0) reasons.push("event-tile-orthogonally-adjacent-to-bridge-terrain");
+    const tiles = event.occupiedTiles ?? occupiedTiles(event.x, event.y, event.size?.width ?? 1, event.size?.height ?? 1);
+    const terrainHits = adjacentToBridge(tiles, bridgeCells);
+    if (terrainHits.some((item) => item.relation === "on-bridge-cell")) reasons.push("event-occupied-tile-has-bridge-terrain");
+    else if (terrainHits.length > 0) reasons.push("event-occupied-tile-orthogonally-adjacent-to-bridge-terrain");
     const scriptPages = event.pages.filter(pageHasBridgeScript);
     if (scriptPages.length > 0) reasons.push("page-script-calls-pbBridgeOn-or-pbBridgeOff");
     const commonPages = event.pages.filter((page) => pageCommonEventIds(page).some((id) => commonEventBridgeIds.has(id)));
-    if (commonPages.length > 0) reasons.push("page-calls-common-event-with-pbBridgeOn-or-pbBridgeOff");
+    if (commonPages.length > 0) reasons.push("page-calls-common-event-reachable-to-pbBridgeOn-or-pbBridgeOff");
     const transferNearBridge = event.pages.some((page) => pageTransferCommands(page).length > 0) && terrainHits.length > 0;
     if (transferNearBridge) reasons.push("transfer-player-near-bridge-terrain");
+    const uncertainty = event.pages.flatMap((page) => page.scriptUncertainty ?? []);
+    if (uncertainty.length > 0) reasons.push("page-has-unverified-indirect-ruby");
     if (reasons.length === 0) continue;
     const confirmed = reasons.includes("page-script-calls-pbBridgeOn-or-pbBridgeOff")
-      || reasons.includes("page-calls-common-event-with-pbBridgeOn-or-pbBridgeOff");
+      || reasons.includes("page-calls-common-event-reachable-to-pbBridgeOn-or-pbBridgeOff");
     candidates.push(Object.freeze({
       mapId: event.mapId,
       eventId: event.eventId,
       name: event.name,
       x: event.x,
       y: event.y,
+      size: event.size,
+      occupiedTiles: tiles,
       status: confirmed ? "confirmed-bridge-script" : "unconfirmed-candidate",
       reasons: Object.freeze(reasons),
       terrainHits,
+      uncertainty: Object.freeze([...new Set(uncertainty)]),
       event,
     }));
   }
@@ -555,12 +786,23 @@ export function extractCommonEventFacts(root) {
     requireRmxp(item, "RPG::CommonEvent", `CommonEvents[${index}]`);
     const list = item.fields["@list"];
     if (list?.kind !== "Array") evidenceFail(`CommonEvents[${index}].list must be an Array`);
+    const moveRouteScripts = [];
+    const conditionalBranchScripts = [];
     const commands = list.items.map((command, commandIndex) => {
       requireRmxp(command, "RPG::EventCommand", `CommonEvents[${index}] command[${commandIndex}]`);
+      const extras = extractRawCommandScriptExtras(command, commandIndex);
+      moveRouteScripts.push(...extras.moveRouteScripts);
+      conditionalBranchScripts.push(...extras.conditionalBranchScripts);
       return commandFacts(command, commandIndex);
     });
     const concatenatedScripts = concatenateScriptCommands(commands);
     const name = rubyText(item.fields["@name"], `CommonEvents[${index}].name`);
+    const calledCommonEventIds = Object.freeze(commands.filter((command) => command.code === COMMON_EVENT_CODE).map((command) => command.parameters[0]));
+    const allTexts = [
+      ...concatenatedScripts.map((group) => group.joinedWithNewlines),
+      ...moveRouteScripts.filter((item) => item.isScript).map((item) => item.scriptText),
+      ...conditionalBranchScripts.map((item) => item.scriptText),
+    ];
     events.push(Object.freeze({
       id: requireInteger(item.fields["@id"], `CommonEvents[${index}].id`, { positive: true }),
       name: name.text ?? "",
@@ -568,10 +810,60 @@ export function extractCommonEventFacts(root) {
       switch_id: item.fields["@switch_id"],
       commands: Object.freeze(commands),
       concatenatedScripts,
-      hasBridgeScript: concatenatedScripts.some((group) => BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines)),
+      moveRouteScripts: Object.freeze(moveRouteScripts),
+      conditionalBranchScripts: Object.freeze(conditionalBranchScripts),
+      calledCommonEventIds,
+      hasBridgeScript: allTexts.some((text) => BRIDGE_SCRIPT_PATTERN.test(text)),
+      scriptUncertainty: Object.freeze(allTexts.flatMap((text) => [...classifyScriptUncertainty(text)])),
     }));
   }
   return Object.freeze(events);
+}
+
+export function walkCommonEventGraph(startIds, commonEvents) {
+  const index = new Map(commonEvents.map((event) => [event.id, event]));
+  const reachable = [];
+  const visited = new Set();
+  const missing = [];
+  const cycles = [];
+
+  function visit(id, path) {
+    if (path.includes(id)) {
+      cycles.push(Object.freeze([...path, id]));
+      return;
+    }
+    if (visited.has(id)) return;
+    const event = index.get(id);
+    if (!event) {
+      missing.push(id);
+      return;
+    }
+    visited.add(id);
+    reachable.push(event);
+    const nextPath = [...path, id];
+    for (const child of event.calledCommonEventIds) visit(child, nextPath);
+  }
+
+  for (const id of startIds) visit(id, []);
+  const bridgeIds = new Set(reachable.filter((event) => event.hasBridgeScript).map((event) => event.id));
+  return Object.freeze({
+    startIds: Object.freeze([...startIds]),
+    reachableIds: Object.freeze(reachable.map((event) => event.id)),
+    visitedCount: visited.size,
+    missing: Object.freeze(missing),
+    cycles: Object.freeze(cycles),
+    bridgeIds,
+    reachableHasBridge: bridgeIds.size > 0,
+    uncertainty: Object.freeze(reachable.flatMap((event) => [...event.scriptUncertainty])),
+  });
+}
+
+export function commonEventIdsCalledFromEvents(events) {
+  const ids = [];
+  for (const event of events) {
+    for (const page of event.pages) ids.push(...pageCommonEventIds(page));
+  }
+  return Object.freeze(ids);
 }
 
 export function decodeRxdataBytes(bytes, sourceLabel) {
@@ -594,8 +886,7 @@ async function firstExisting(candidates) {
 }
 
 export async function resolveMapSource(sourceInput, mapId = DEFAULT_MAP_ID) {
-  requireInteger(mapId, "mapId", { positive: true });
-  if (mapId !== DEFAULT_MAP_ID) evidenceFail(`this extractor only reads Map ${DEFAULT_MAP_ID}; refused map ${mapId}`);
+  assertAllowedMapId(mapId);
   const filename = padMapId(mapId);
   const source = resolve(sourceInput);
   const info = await stat(source);
@@ -643,22 +934,63 @@ export function scanCoverage(events) {
   let pages = 0;
   let commands = 0;
   let scriptCommands = 0;
+  let moveRouteScriptCount = 0;
+  let conditionalBranchScriptCount = 0;
+  let commonEventCallCount = 0;
   const scripts = [];
+  const unknownCommandCodes = new Set();
+  const unverified = [];
   for (const event of events) {
     pages += event.pageCount;
     for (const page of event.pages) {
       commands += page.commands.length;
       scriptCommands += page.commands.filter((command) => command.code === SCRIPT_START_CODE || command.code === SCRIPT_CONTINUE_CODE).length;
+      moveRouteScriptCount += (page.moveRouteScripts ?? []).filter((item) => item.isScript).length;
+      conditionalBranchScriptCount += (page.conditionalBranchScripts ?? []).length;
+      commonEventCallCount += pageCommonEventIds(page).length;
+      for (const command of page.commands) {
+        if (command.label.startsWith("unknown-code-")) unknownCommandCodes.add(command.code);
+      }
       for (const group of page.concatenatedScripts) {
         scripts.push(Object.freeze({
           eventId: event.eventId,
           name: event.name,
           pageIndex: page.pageIndex,
+          kind: "event-command-355-655",
           startCommandIndex: group.startCommandIndex,
           endCommandIndex: group.endCommandIndex,
           joinedWithNewlines: group.joinedWithNewlines,
           matchesBridgePattern: BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines),
+          uncertainty: classifyScriptUncertainty(group.joinedWithNewlines),
         }));
+      }
+      for (const item of page.moveRouteScripts ?? []) {
+        if (!item.isScript) continue;
+        scripts.push(Object.freeze({
+          eventId: event.eventId,
+          name: event.name,
+          pageIndex: page.pageIndex,
+          kind: "move-route-script-45",
+          origin: item.origin,
+          joinedWithNewlines: `${item.scriptText}\n`,
+          matchesBridgePattern: item.matchesBridgePattern === true,
+          uncertainty: item.uncertainty ?? [],
+        }));
+      }
+      for (const item of page.conditionalBranchScripts ?? []) {
+        scripts.push(Object.freeze({
+          eventId: event.eventId,
+          name: event.name,
+          pageIndex: page.pageIndex,
+          kind: "conditional-branch-script",
+          origin: item.origin,
+          joinedWithNewlines: `${item.scriptText}\n`,
+          matchesBridgePattern: item.matchesBridgePattern === true,
+          uncertainty: item.uncertainty ?? [],
+        }));
+      }
+      for (const reason of page.scriptUncertainty ?? []) {
+        unverified.push(Object.freeze({ eventId: event.eventId, pageIndex: page.pageIndex, reason }));
       }
     }
   }
@@ -667,8 +999,22 @@ export function scanCoverage(events) {
     pageCount: pages,
     commandCount: commands,
     scriptCommandCount: scriptCommands,
+    moveRouteScriptCount,
+    conditionalBranchScriptCount,
+    commonEventCallCount,
     allPagesScanned: events.every((event) => event.pages.length === event.pageCount),
     eventIdsInOrder: Object.freeze(events.map((event) => event.eventId)),
+    unknownCommandCodes: Object.freeze([...unknownCommandCodes].sort((left, right) => left - right)),
+    unverified: Object.freeze(unverified),
+    scannedEntrances: Object.freeze([
+      "all-events",
+      "all-pages-original-order",
+      "all-commands-original-order",
+      "script-355-655-concat-like-command_355",
+      "move-route-209-509-and-page-autonomous-list-code-45",
+      "conditional-branch-111-type-12",
+      "common-event-117-call-graph-with-cycle-detection",
+    ]),
     scripts: Object.freeze(scripts),
   });
 }
@@ -688,8 +1034,15 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
   const files = (await readdir(dataDirectory)).filter((name) => MAP_FILE.test(name)).sort();
   const mapInfosPath = optionalPath(dataDirectory, "MapInfos.rxdata");
   const tilesetsPath = optionalPath(dataDirectory, "Tilesets.rxdata");
+  const commonEventsPath = optionalPath(dataDirectory, "CommonEvents.rxdata");
+  const completenessIssues = [];
+  if (!mapInfosPath) completenessIssues.push("MapInfos.rxdata missing; corpus cannot prove map-name negatives");
+  if (!tilesetsPath) completenessIssues.push("Tilesets.rxdata missing; Bridge cell counts are INCOMPLETE and must not be treated as zero");
+  if (!commonEventsPath) completenessIssues.push("CommonEvents.rxdata missing; nested common-event bridge scripts are INCOMPLETE");
   const infosRoot = mapInfosPath ? (await readDecoded(mapInfosPath)).decoded.root : null;
   const tilesetsRoot = tilesetsPath ? (await readDecoded(tilesetsPath)).decoded.root : null;
+  const commonEvents = commonEventsPath ? extractCommonEventFacts((await readDecoded(commonEventsPath)).decoded.root) : Object.freeze([]);
+  const commonBridgeIds = new Set(commonEvents.filter((event) => event.hasBridgeScript).map((event) => event.id));
   const tilesetCache = new Map();
   const tilesetCatalog = tilesetsRoot ? extractTilesetBridgeCatalog(tilesetsRoot) : Object.freeze([]);
   const mapsWithBridgeScripts = [];
@@ -760,6 +1113,7 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
               x: event.x,
               y: event.y,
               pageIndex: page.pageIndex,
+              kind: "event-command-355-655",
               trigger: page.trigger,
               triggerSemantics: page.triggerSemantics,
               through: page.through,
@@ -769,6 +1123,34 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
               startCommandIndex: group.startCommandIndex,
               endCommandIndex: group.endCommandIndex,
               joinedWithNewlines: group.joinedWithNewlines,
+            }));
+          }
+        }
+        for (const item of page.moveRouteScripts ?? []) {
+          if (item.matchesBridgePattern === true) {
+            scriptHits.push(Object.freeze({
+              eventId: event.eventId,
+              name: event.name,
+              x: event.x,
+              y: event.y,
+              pageIndex: page.pageIndex,
+              kind: "move-route-script-45",
+              origin: item.origin,
+              joinedWithNewlines: `${item.scriptText}\n`,
+            }));
+          }
+        }
+        for (const item of page.conditionalBranchScripts ?? []) {
+          if (item.matchesBridgePattern === true) {
+            scriptHits.push(Object.freeze({
+              eventId: event.eventId,
+              name: event.name,
+              x: event.x,
+              y: event.y,
+              pageIndex: page.pageIndex,
+              kind: "conditional-branch-script",
+              origin: item.origin,
+              joinedWithNewlines: `${item.scriptText}\n`,
             }));
           }
         }
@@ -800,17 +1182,26 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
       mapsWithBridgeScripts.push(Object.freeze({ mapId, name, filename: file, hits: Object.freeze(scriptHits) }));
     }
 
-    let bridgeCells = Object.freeze({ tagId: BRIDGE_TERRAIN_TAG, cellCount: 0, cells: Object.freeze([]), tileIds: Object.freeze([]) });
+    let bridgeCells = Object.freeze({
+      tagId: BRIDGE_TERRAIN_TAG,
+      cellCount: 0,
+      cells: Object.freeze([]),
+      tileIds: Object.freeze([]),
+      scanStatus: tilesetsRoot ? COMPLETENESS.COMPLETE : COMPLETENESS.INCOMPLETE,
+      issues: Object.freeze(tilesetsRoot ? [] : ["Tilesets.rxdata missing"]),
+      outOfRange: Object.freeze([]),
+      placedBridgeTaggedTiles: 0,
+      bbox: null,
+    });
     if (tilesetsRoot) {
-      const bridgeIds = bridgeTileIdSet(tilesetsRoot, facts.tilesetId, tilesetCache);
+      bridgeTileIdSet(tilesetsRoot, facts.tilesetId, tilesetCache);
       bridgeCells = collectBridgeCells(facts, extractTilesetTerrain(tilesetsRoot, facts.tilesetId).terrain_tags);
-      let placed = 0;
-      for (const cell of bridgeCells.cells) placed += cell.layers.length;
+      if (bridgeCells.scanStatus === COMPLETENESS.INCOMPLETE) completenessIssues.push(`map ${mapId}: ${bridgeCells.issues.join("; ")}`);
       if (bridgeCells.cellCount > 0) {
         row.hasBridgeTiles = true;
         row.uniqueCellCount = bridgeCells.cellCount;
-        row.placedBridgeTaggedTiles = placed;
-        row.bbox = bboxOf(bridgeCells.cells);
+        row.placedBridgeTaggedTiles = bridgeCells.placedBridgeTaggedTiles;
+        row.bbox = bridgeCells.bbox;
         row.tileIds = bridgeCells.tileIds;
         mapsUsingBridgeTiles.push(Object.freeze({
           mapId,
@@ -820,9 +1211,10 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
           width: facts.width,
           height: facts.height,
           uniqueCellCount: bridgeCells.cellCount,
-          placedBridgeTaggedTiles: placed,
+          placedBridgeTaggedTiles: bridgeCells.placedBridgeTaggedTiles,
           bbox: row.bbox,
           tileIds: bridgeCells.tileIds,
+          scanStatus: bridgeCells.scanStatus,
           sample: Object.freeze(bridgeCells.cells.slice(0, 8).map((cell) => Object.freeze({
             x: cell.x,
             y: cell.y,
@@ -830,16 +1222,21 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
           }))),
         }));
       }
+    } else {
+      row.terrainScanStatus = COMPLETENESS.INCOMPLETE;
     }
 
+    const graph = walkCommonEventGraph(commonEventIdsCalledFromEvents(facts.events), commonEvents);
+    const reachableBridgeIds = new Set([...commonBridgeIds, ...graph.bridgeIds]);
     const relevant = row.hasBridgeTiles || row.hasBridgeScripts || row.hasBridgeEventName || row.hasBridgeComment;
     if (relevant) {
-      const candidates = classifyCandidates(facts.events, bridgeCells, new Set());
+      const candidates = classifyCandidates(facts.events, bridgeCells, reachableBridgeIds);
       row.candidates = Object.freeze(candidates.map((candidate) => Object.freeze({
         eventId: candidate.eventId,
         name: candidate.name,
         x: candidate.x,
         y: candidate.y,
+        size: candidate.size,
         status: candidate.status,
         reasons: candidate.reasons,
         terrainHits: candidate.terrainHits,
@@ -856,8 +1253,26 @@ export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = 
   return Object.freeze({
     mapsScanned: files.length,
     mapInfoEntries: infosRoot?.kind === "Hash" ? infosRoot.entries.length : 0,
+    completeness: Object.freeze({
+      status: completenessIssues.length > 0 ? COMPLETENESS.INCOMPLETE : COMPLETENESS.COMPLETE,
+      issues: Object.freeze(completenessIssues),
+      requiredPresent: Object.freeze({
+        mapInfos: Boolean(mapInfosPath),
+        tilesets: Boolean(tilesetsPath),
+        commonEvents: Boolean(commonEventsPath),
+      }),
+    }),
+    scannedEntrances: Object.freeze([
+      "all-Map-star-rxdata",
+      "script-355-655",
+      "move-route-45",
+      "conditional-branch-111-type-12",
+      "common-event-117-graph",
+      "terrain-tag-15-when-tilesets-present",
+      "event-name-comment-mapinfo-name",
+    ]),
     excludeFullEventDump: true,
-    note: "Corpus inventory of Bridge-tagged tiles, pbBridgeOn/Off scripts, event names, and comments. Full command lists are included only for candidate events on maps that matched. This is not a substitute for Map 7 extraction.",
+    note: "Corpus inventory of Bridge-tagged tiles and pbBridgeOn/Off across 355/655, move-route scripts, conditional-branch scripts, and reachable CommonEvents. Zero Bridge cells are only proven when completeness.status is COMPLETE.",
     tilesetsWithBridgeTags: Object.freeze(tilesetCatalog.filter((item) => item.bridgeTileCount > 0)),
     tilesetsWithoutBridgeTags: Object.freeze(tilesetCatalog.filter((item) => item.bridgeTileCount === 0).map((item) => Object.freeze({ id: item.id, name: item.name, tileset_name: item.tileset_name }))),
     mapsWithBridgeInfoNames: Object.freeze(mapsWithBridgeInfoNames),
@@ -878,24 +1293,59 @@ function uniqueActivePage(event) {
   return selected;
 }
 
-export function analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transferRecord) {
+function uniqueDirectTransferFromPage(page) {
+  const indent0 = page.commands.filter((command) => command.code === TRANSFER_PLAYER_CODE && command.indent === 0);
+  if (indent0.length !== 1) return undefined;
+  const params = indent0[0].parameters;
+  if (params[0] !== 0) return undefined;
+  return Object.freeze({
+    targetMapId: params[1],
+    targetX: params[2],
+    targetY: params[3],
+    targetDirection: params[4] === 0 ? null : params[4],
+  });
+}
+
+export function wouldProjectEventAsTransfer(event) {
+  if (HIDDEN_ITEM_PATTERN.test(event.name) || SIZE_NAME_PATTERN.test(event.name)) {
+    return Object.freeze({ projected: false, reason: "name-matches-hiddenitem-or-size", mirrors: "map-transfer-consumer.projectEvent" });
+  }
+  const page = uniqueActivePage(event);
+  if (!page) return Object.freeze({ projected: false, reason: "no-always-active-static-page", mirrors: "selectStaticPage" });
+  if (page.trigger !== 1) return Object.freeze({ projected: false, reason: "trigger-not-player-touch", pageIndex: page.pageIndex });
+  if (page.always_on_top !== false) return Object.freeze({ projected: false, reason: "always_on_top", pageIndex: page.pageIndex });
+  const transfer = uniqueDirectTransferFromPage(page);
+  if (!transfer) return Object.freeze({ projected: false, reason: "no-unique-indent0-direct-transfer-player", pageIndex: page.pageIndex });
+  if (page.through === true) {
+    return Object.freeze({ projected: true, kind: "step-if-d0-passable", transfer, pageIndex: page.pageIndex, mirrors: "emitStep" });
+  }
+  if (page.graphic.character_name.length > 0) {
+    return Object.freeze({ projected: true, kind: "contacts", transfer, pageIndex: page.pageIndex, mirrors: "emitContacts" });
+  }
+  if (page.graphic.character_name.length === 0 && page.graphic.tile_id === 0) {
+    return Object.freeze({ projected: true, kind: "step-or-contacts-depending-on-d0", transfer, pageIndex: page.pageIndex, mirrors: "emitStep-or-emitContacts" });
+  }
+  return Object.freeze({ projected: false, reason: "through-false-nonempty-tile-graphic-without-character", pageIndex: page.pageIndex });
+}
+
+export function analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transferRecord, mapId = DEFAULT_MAP_ID) {
   const notes = [];
   for (const candidate of candidates) {
-    const d0 = projectedD0Passable(mapRecord, tilesetRecord, candidate.x, candidate.y);
+    const d0 = mapRecord && tilesetRecord ? projectedD0Passable(mapRecord, tilesetRecord, candidate.x, candidate.y) : null;
+    const projection = wouldProjectEventAsTransfer(candidate.event);
     const staticPage = uniqueActivePage(candidate.event);
     const transfers = candidate.event.pages.flatMap((page) => page.commands.filter((command) => command.code === TRANSFER_PLAYER_CODE));
     notes.push(Object.freeze({
       eventId: candidate.eventId,
       x: candidate.x,
       y: candidate.y,
+      size: candidate.size,
       projectedD0Passable: d0,
       staticAlwaysActivePageIndex: staticPage?.pageIndex ?? null,
       staticPageTrigger: staticPage?.trigger ?? null,
       transferCommandCount: transfers.length,
-      wouldBeMapTransferCandidate: staticPage?.trigger === 1 && transfers.length === 1 && staticPage.condition.alwaysActive,
-      classification: transfers.length === 0
-        ? "not-a-map-transfer-event-map-transfer-consumer-does-not-project-it"
-        : "has-transfer-player-see-existing-maptransfer-record",
+      projection,
+      wouldBeMapTransferCandidate: projection.projected === true,
     }));
   }
   return Object.freeze({
@@ -903,22 +1353,160 @@ export function analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transf
     candidateTileNotes: Object.freeze(notes),
     distinction: Object.freeze({
       proven: transferRecord
-        ? "FSDB MapTransfer/7.json is the importer output already produced for this corpus"
-        : "no FSDB MapTransfer/7.json was present beside the source",
-      potential: "projectedD0Passable ignores Neutral/Bridge/player bridgeLevel; it can statically drop step/edge transfers whose destination is only passable after bridge state changes",
-      unproven: "whether any Map 7 edge or future MapAction was already dropped solely because of bridge tiles requires comparing these notes to the real Map 7 cells; do not treat potential filtering as a completed runtime failure",
+        ? `FSDB MapTransfer/${mapId}.json is the importer output already produced for this corpus`
+        : `no FSDB MapTransfer/${mapId}.json was present beside the source`,
+      potential: "projectedD0Passable ignores Neutral/Bridge/player bridgeLevel; expandConnection drops an edge when the destination cell is not D0-passable. SIZE_EVENT names are skipped entirely by projectEvent.",
+      unproven: "A dropped record is only '已证实误删' when a source transfer/edge exists, the importer omitted it, and the omission is because of D0/size/static-page rules. Potential risk is not a reproduction.",
     }),
   });
 }
 
-export async function collectMap7Evidence(sourceInput, options = {}) {
-  const mapId = options.mapId ?? DEFAULT_MAP_ID;
+function passageAndPriority(tilesetRecord, tileId) {
+  if (!tilesetRecord || tileId == null) return null;
+  if (tileId < 0 || tileId >= tilesetRecord.passages.xSize || tileId >= tilesetRecord.priorities.xSize) {
+    return Object.freeze({ tileId, outOfRange: true });
+  }
+  const passage = tilesetRecord.passages.values[tileId];
+  const priority = tilesetRecord.priorities.values[tileId];
+  return Object.freeze({
+    tileId,
+    passage,
+    priority,
+    blockedAll: (passage & 0x0f) === 0x0f,
+    stopsAtPriorityZero: priority === 0,
+  });
+}
+
+export function auditMapTransferAgainstFacts({ mapId, events, mapRecord, tilesetRecord, transferRecord, bridgeCells }) {
+  const eventAudits = events.map((event) => {
+    const pagesWithTransfer = event.pages.filter((page) => page.commands.some((command) => command.code === TRANSFER_PLAYER_CODE));
+    const projection = wouldProjectEventAsTransfer(event);
+    return Object.freeze({
+      eventId: event.eventId,
+      name: event.name,
+      x: event.x,
+      y: event.y,
+      size: event.size,
+      hasTransferPlayer: pagesWithTransfer.length > 0,
+      projection,
+      verdict: pagesWithTransfer.length === 0
+        ? "excluded-no-transfer-player"
+        : projection.projected
+          ? "projected-or-would-project"
+          : `not-projected:${projection.reason}`,
+    });
+  });
+  const transferEvents = eventAudits.filter((item) => item.hasTransferPlayer);
+  const skippedBecauseSize = transferEvents.filter((item) => item.projection.reason === "name-matches-hiddenitem-or-size");
+  const actualSteps = transferRecord?.steps ?? [];
+  const actualContacts = transferRecord?.contacts ?? [];
+  const actualEdges = transferRecord?.edges ?? [];
+
+  const bridgeDestRisks = [];
+  if (bridgeCells?.cells?.length && mapRecord && tilesetRecord) {
+    for (const cell of bridgeCells.cells) {
+      let d0;
+      try {
+        d0 = projectedD0Passable(mapRecord, tilesetRecord, cell.x, cell.y);
+      } catch (error) {
+        d0 = `error:${error instanceof Error ? error.message : String(error)}`;
+      }
+      const layers = cell.layers.map((layer) => passageAndPriority(tilesetRecord, layer.tileId));
+      bridgeDestRisks.push(Object.freeze({
+        x: cell.x,
+        y: cell.y,
+        projectedD0Passable: d0,
+        layers,
+        note: d0 === false
+          ? "this Bridge cell is D0-impassable; an incoming edge/step targeting it would be dropped"
+          : "D0 currently passable; Bridge overlay did not by itself make this cell a static drop",
+      }));
+    }
+  }
+
+  const incomingEdgesOntoBridge = actualEdges.filter((edge) => (
+    bridgeCells?.cells?.some((cell) => cell.x === edge.targetX && cell.y === edge.targetY) === true
+  ));
+  const localEdgesFromBridge = actualEdges.filter((edge) => (
+    bridgeCells?.cells?.some((cell) => cell.x === edge.x && cell.y === edge.y) === true
+  ));
+
+  const findings = [];
+  if (skippedBecauseSize.length > 0) {
+    findings.push(Object.freeze({
+      status: "potential-not-reproduced-as-lost-bridge-exit",
+      detail: `${skippedBecauseSize.length} Transfer Player event(s) skipped because the name matches size()/hiddenitem. That is projectEvent behavior, independent of Bridge tiles.`,
+      eventIds: Object.freeze(skippedBecauseSize.map((item) => item.eventId)),
+    }));
+  }
+  if (incomingEdgesOntoBridge.length > 0) {
+    findings.push(Object.freeze({
+      status: "needs-dest-check",
+      detail: "MapTransfer already contains edges whose destination sits on a Bridge cell; they were not dropped.",
+      count: incomingEdgesOntoBridge.length,
+    }));
+  }
+  const d0FalseBridgeCells = bridgeDestRisks.filter((item) => item.projectedD0Passable === false);
+  if (d0FalseBridgeCells.length > 0) {
+    findings.push(Object.freeze({
+      status: "potential-risk-not-reproduced",
+      detail: `${d0FalseBridgeCells.length} Bridge cells are D0-impassable. Incoming edges/steps targeting those cells would be dropped by expandConnection/emitStep. This is not by itself a proven omitted MapTransfer record.`,
+      sample: Object.freeze(d0FalseBridgeCells.slice(0, 12)),
+    }));
+  }
+  if (transferEvents.length === 0 && actualSteps.length === 0 && actualContacts.length === 0) {
+    findings.push(Object.freeze({
+      status: "excluded-for-bridge-events",
+      detail: `Map ${mapId} has no Transfer Player commands among scanned events, matching empty steps/contacts. Bridge On/Off events are not MapTransfer records.`,
+    }));
+  }
+
+  return Object.freeze({
+    mapId,
+    actual: Object.freeze({
+      stepCount: actualSteps.length,
+      contactCount: actualContacts.length,
+      edgeCount: actualEdges.length,
+      edges: Object.freeze(actualEdges),
+    }),
+    transferEvents: Object.freeze(transferEvents),
+    skippedBecauseSize: Object.freeze(skippedBecauseSize),
+    localEdgesFromBridge: Object.freeze(localEdgesFromBridge),
+    incomingEdgesOntoBridge: Object.freeze(incomingEdgesOntoBridge),
+    bridgeCellD0: Object.freeze({
+      scanned: bridgeDestRisks.length,
+      d0False: d0FalseBridgeCells.length,
+      sample: Object.freeze(d0FalseBridgeCells.slice(0, 8)),
+    }),
+    findings: Object.freeze(findings),
+  });
+}
+
+function emptyBridgeScan(issues) {
+  return Object.freeze({
+    tagId: BRIDGE_TERRAIN_TAG,
+    cellCount: 0,
+    cells: Object.freeze([]),
+    tileIds: Object.freeze([]),
+    placedBridgeTaggedTiles: 0,
+    bbox: null,
+    scanStatus: COMPLETENESS.INCOMPLETE,
+    issues: Object.freeze(issues),
+    outOfRange: Object.freeze([]),
+    missing: true,
+    provenNegative: false,
+  });
+}
+
+export async function collectMapEvidence(sourceInput, options = {}) {
+  const mapId = assertAllowedMapId(options.mapId ?? DEFAULT_MAP_ID);
   const located = await resolveMapSource(sourceInput, mapId);
   const mapFile = await readDecoded(located.mapRxdata);
   const mapFacts = extractMapFacts(mapFile.decoded.root, mapId, basename(located.mapRxdata));
   const tilesetsPath = optionalPath(located.dataDirectory, "Tilesets.rxdata");
   const mapInfosPath = optionalPath(located.dataDirectory, "MapInfos.rxdata");
   const commonEventsPath = optionalPath(located.dataDirectory, "CommonEvents.rxdata");
+  const completenessIssues = [];
   const files = {
     map: Object.freeze({ path: mapFile.path, sha256: mapFile.sha256, size: mapFile.size }),
   };
@@ -928,21 +1516,34 @@ export async function collectMap7Evidence(sourceInput, options = {}) {
     const infos = await readDecoded(mapInfosPath);
     files.mapInfos = Object.freeze({ path: infos.path, sha256: infos.sha256, size: infos.size });
     mapName = extractMapInfoName(infos.decoded.root, mapId);
+  } else {
+    completenessIssues.push("MapInfos.rxdata missing");
   }
 
-  let bridgeCells = Object.freeze({ tagId: BRIDGE_TERRAIN_TAG, cellCount: 0, cells: Object.freeze([]), tileIds: Object.freeze([]), missing: true });
+  let bridgeCells = emptyBridgeScan(["Tilesets.rxdata missing"]);
   let tilesetMeta;
   let mapRecord;
   let tilesetRecord;
+  let terrain;
   if (tilesetsPath) {
     const tilesets = await readDecoded(tilesetsPath);
     files.tilesets = Object.freeze({ path: tilesets.path, sha256: tilesets.sha256, size: tilesets.size });
-    const terrain = extractTilesetTerrain(tilesets.decoded.root, mapFacts.tilesetId);
-    tilesetMeta = Object.freeze({ id: terrain.id, name: terrain.name, tileset_name: terrain.tileset_name });
+    terrain = extractTilesetTerrain(tilesets.decoded.root, mapFacts.tilesetId);
+    tilesetMeta = Object.freeze({
+      id: terrain.id,
+      name: terrain.name,
+      tileset_name: terrain.tileset_name,
+      terrainTagCount: terrain.terrain_tags.xSize,
+      passageCount: terrain.passages?.xSize,
+      priorityCount: terrain.priorities?.xSize,
+    });
     bridgeCells = collectBridgeCells(mapFacts, terrain.terrain_tags);
+    if (bridgeCells.scanStatus === COMPLETENESS.INCOMPLETE) completenessIssues.push(...bridgeCells.issues);
     mapRecord = projectMapRecord({ filename: basename(located.mapRxdata), root: mapFile.decoded.root })?.value;
     const projectedTilesets = projectTilesetRecords({ filename: "Tilesets.rxdata", root: tilesets.decoded.root }, new Set([mapFacts.tilesetId]));
     tilesetRecord = projectedTilesets?.find((entry) => entry.key === String(mapFacts.tilesetId))?.value;
+  } else {
+    completenessIssues.push("Tilesets.rxdata missing; Bridge cell count is INCOMPLETE and not a proven zero");
   }
 
   let commonEvents = Object.freeze([]);
@@ -950,9 +1551,17 @@ export async function collectMap7Evidence(sourceInput, options = {}) {
     const common = await readDecoded(commonEventsPath);
     files.commonEvents = Object.freeze({ path: common.path, sha256: common.sha256, size: common.size });
     commonEvents = extractCommonEventFacts(common.decoded.root);
+  } else {
+    completenessIssues.push("CommonEvents.rxdata missing; nested common-event graph is INCOMPLETE");
   }
-  const commonBridgeIds = new Set(commonEvents.filter((event) => event.hasBridgeScript).map((event) => event.id));
-  const candidates = classifyCandidates(mapFacts.events, bridgeCells, commonBridgeIds);
+  const calledIds = commonEventIdsCalledFromEvents(mapFacts.events);
+  const commonGraph = walkCommonEventGraph(calledIds, commonEvents);
+  if (commonGraph.missing.length > 0) completenessIssues.push(`common event ids missing: ${commonGraph.missing.join(",")}`);
+  const reachableBridgeIds = new Set([
+    ...commonEvents.filter((event) => event.hasBridgeScript).map((event) => event.id),
+    ...commonGraph.bridgeIds,
+  ]);
+  const candidates = classifyCandidates(mapFacts.events, bridgeCells, reachableBridgeIds);
 
   let transferRecord;
   const transferPath = await firstExisting([
@@ -964,23 +1573,42 @@ export async function collectMap7Evidence(sourceInput, options = {}) {
     files.mapTransfer = Object.freeze({ path: transferPath, sha256: await sha256File(transferPath) });
   }
 
-  const importer = mapRecord && tilesetRecord
-    ? analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transferRecord)
-    : Object.freeze({ existingMapTransferRecord: transferRecord ?? null, candidateTileNotes: Object.freeze([]), distinction: Object.freeze({ proven: "tileset/map projection unavailable", potential: "cannot evaluate projectedD0Passable", unproven: "decode Tilesets.rxdata to evaluate" }) });
+  const importer = analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transferRecord, mapId);
+  const transferAudit = auditMapTransferAgainstFacts({
+    mapId,
+    events: mapFacts.events,
+    mapRecord,
+    tilesetRecord,
+    transferRecord,
+    bridgeCells,
+  });
 
   const corpusScan = options.corpusScan === true
     ? await scanSiblingMapsForBridgeEvidence(located.dataDirectory)
     : null;
 
+  const coverage = scanCoverage(mapFacts.events);
+  const completenessStatus = completenessIssues.length > 0 ? COMPLETENESS.INCOMPLETE : COMPLETENESS.COMPLETE;
+  const confirmed = candidates.filter((item) => item.status === "confirmed-bridge-script");
+  const provenNegative = completenessStatus === COMPLETENESS.COMPLETE
+    && bridgeCells.scanStatus === COMPLETENESS.COMPLETE
+    && bridgeCells.cellCount === 0
+    && confirmed.length === 0
+    && coverage.scripts.every((item) => item.matchesBridgePattern === false)
+    && reachableBridgeIds.size === 0
+    && coverage.unverified.length === 0;
+
   const { data: _omitData, ...mapWithoutTiles } = mapFacts;
   return Object.freeze({
     extractor: Object.freeze({
-      id: "map7-bridge-evidence",
+      id: "map-event-evidence",
       defaultMapId: DEFAULT_MAP_ID,
+      allowedMapIds: ALLOWED_EVIDENCE_MAP_IDS,
       mapId,
       doesNotExecuteRuby: true,
       doesNotModifySource: true,
       corpusScan: options.corpusScan === true,
+      vanillaSource: VANILLA_SOURCE,
     }),
     source: Object.freeze({
       input: sourceInput,
@@ -988,18 +1616,36 @@ export async function collectMap7Evidence(sourceInput, options = {}) {
       kind: located.kind,
       files: Object.freeze(files),
     }),
+    completeness: Object.freeze({
+      status: completenessStatus,
+      issues: Object.freeze(completenessIssues),
+      provenNegativeBridge: provenNegative,
+    }),
     map: Object.freeze({
       ...mapWithoutTiles,
       name: mapName,
       tileset: tilesetMeta,
     }),
-    coverage: scanCoverage(mapFacts.events),
-    bridgeTerrain: bridgeCells,
+    coverage,
+    bridgeTerrain: Object.freeze({
+      ...bridgeCells,
+      provenNegative: provenNegative && bridgeCells.cellCount === 0,
+    }),
+    commonEvents: Object.freeze({
+      count: commonEvents.length,
+      withBridgeScript: Object.freeze(commonEvents.filter((event) => event.hasBridgeScript)),
+      graph: commonGraph,
+    }),
     commonEventsWithBridgeScript: Object.freeze(commonEvents.filter((event) => event.hasBridgeScript)),
     candidates,
     importer,
+    transferAudit,
     corpusScan,
   });
+}
+
+export async function collectMap7Evidence(sourceInput, options = {}) {
+  return collectMapEvidence(sourceInput, { ...options, mapId: options.mapId ?? DEFAULT_MAP_ID });
 }
 
 export function parseEvidenceArguments(argv) {
@@ -1021,8 +1667,7 @@ export function parseEvidenceArguments(argv) {
     else result.mapId = Number(value);
     index += 1;
   }
-  requireInteger(result.mapId, "--map", { positive: true });
-  if (result.mapId !== DEFAULT_MAP_ID) evidenceFail(`this extractor only reads Map ${DEFAULT_MAP_ID}`);
+  assertAllowedMapId(result.mapId, "--map");
   return result;
 }
 

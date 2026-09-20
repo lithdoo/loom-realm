@@ -4,13 +4,13 @@
 >
 > 架构决策：**内部易扩展、暂不开放外部扩展**。保持 LoomRealm `tools/` → prepared FSDB → M12 Content → `game-libs/map` Runtime → map-owned Browser 权责；禁止插件、外部 handler 注册、行为 DSL、万能事件解释器或将地图玩法下沉到 framework/Renderer/Hostra。
 >
-> **地图职责已纠正：Map 7 Cedolan City = 无桥负例/门和地图连接回归；Map 21 Route 2 = Bridge 正例待完整取证；Map 47 Route 7 = Ledge 正例待取证；Map 27 Day Care 不是桥样本。** 现有取证工具在 69 张本地地图内只发现 Map 21 放置 Bridge 图块并直接调用桥脚本，这是限定扫描范围内的记录，尚未排除所有间接 Ruby 调用，亦未做 Map 21 逐帧验收。
+> **地图职责：Map 7 = 无桥负例；Map 21 = Bridge 正例（静态取证见证据 §14）；Map 47 = Ledge 待取证；Map 27 不是桥样本。** 69 图 corpus 在严格扫描下仍仅 Map 21 放置 tag 15 并直接调用桥脚本。未排除方法体内间接 Ruby；未做 Map 21 逐帧验收；未实现 Bridge 玩法。
 
 ## 1. 目标、非目标和事实纠错
 
 目标：将原版来源事实、数据校验、地形识别、通行、事件、一次移动、桥状态和图层呈现贯通；未来扩展水域或冰面时在内部职责相应层扩充，不在 `canMove`、`attempt`、Browser 写散落的 map/tile ID 特判。不通过篡改原版 passages 掩盖缺口，不执行素材中的任意 Ruby/JS，也不一次实现 18 种玩法。
 
-原版 `Game_Player#move_generic` 先 `can_move_in_direction?`；失败才尝试 `check_event_trigger_touch`，成功后按 Ledge 选择 jump/普通走路。`Game_Event#start` 只启动待处理事件，不是直接同步执行脚本。旧流程“先 contact 修改 bridgeLevel，再立即重算同一次方向输入”不符合已核实的调用骨架，不得冻结。Map 7 没有桥脚本，故桥状态真正改变的时点、`size(w,h)` 命中及下次输入需依**Map 21 和 v21.1 原版源码/运行证据**确认，不能靠 Map 7 证明；尚未运行的逐帧行为标 UNVERIFIED。
+原版 `move_generic` 先通行判断；失败才 `check_event_trigger_touch`（**跳过** `over_trigger?` 事件）。成功走路后 `check_event_trigger_here` 才启动 walk-on 事件。Map 21 八个桥事件是空图形 `size()`：SOURCE-PROVEN 为走上去之后 `start`，不是 bump。`start` 不同步执行脚本。禁止“同一次输入因 contact 立即重算通行”。逐帧仍 UNVERIFIED。
 
 ## 2. 数据：保留全部标签，只落地本轮承诺行为
 
@@ -49,11 +49,9 @@
 
 ## 4. 事件与导入：不能静态删除动态事实
 
-`map-transfer-consumer.mjs` 用不知 Neutral/Bridge/player state 的 `projectedD0Passable` 静态处理 step/contact/edge，升级 Runtime 后可能形成永久误删。**目前风险尚未在 Map 21 真数据对照中被证实，禁止写成“已发生”。** 冻结需列来源事件→旧投影→保留策略/Runtime 规则，静态可证明与需要依桥状态延迟判断的条件分开；Map 7 门和边连接是普通传送回归基线。
+`projectedD0Passable` 仍不知 Neutral/Bridge。Map 21 对照（证据 §14.7）：**无已证实误删**；67 格 D0-false 为潜在风险未复现。冻结前仍须把动态桥状态留给 Runtime，不得在本轮改 importer。
 
-保留既有 MapTransfer 与**狭义**桥头 MapAction 不同的内容身份，共用低层事件解析能力而不造通用解释器。Map 21 记录已有 8 个直接 `pbBridgeOn/Off` 事件、2 个因邻桥列入但脚本非桥的候选；正式投影前须核实 map/event/page ID、所有命令和参数/缩进/顺序、页面条件与优先级、trigger、through、图形和 `size(w,h)` 在 v21.1 的真实碰撞机制。事件格本身可不含 tag 15，不能只筛事件站在桥格。无关 NPC/剧情不令整图报错；**确认为本轮桥候选但无法保真**时报告 map/event/page/原因并停止相关实现。不执行 FSDB 中 Ruby，不硬编码 Map 21 事件 ID/坐标到运行时。
-
-原证据 Map 7 零桥调用的确定性结论尚须完成移动路线内脚本、可达 CommonEvent、坏表与间接调用的严格扫描复核；缺素材或存在未知入口记 INCOMPLETE，不可计为零。Map 21 完整命令、桥端输入时序和素材许可见 [证据复核任务](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)。
+Map 21 八个桥事件的命令、`size()` 占用和 walk-on 机制已记录。事件格无 tag 15。进化事件 1/2 不得投影为桥。不执行 Ruby，不硬编码 Map 21 ID 到 Runtime。Map 7 严格扫描后仍为零桥。
 
 ## 5. 规则与时间
 
@@ -67,9 +65,10 @@
 
 ```text
 input → direction / 原版通行判断
-    ├─ blocked → 符合条件则 touch start → 解释器后续执行 → 本次移动尝试结束
-    └─ passable → Ledge + final landing ? single jump : walk
-                 → 动作完成 → 合法抵达事件 / transfer → 下一输入
+    ├─ blocked → 非 over_trigger 才可能 touch start → 解释器后续执行 → 本次结束（Map 21 桥事件走不到这条）
+    └─ passable → Ledge ? jump : walk
+                 → 步完成后 check_event_trigger_here（空图形 size() 桥带在此 start）
+                 → 之后 interpreter eval pbBridgeOn/Off → 下一输入才用新 bridge
 ```
 
 `start`、执行、状态变更、下一输入是四个不同检查点；step/edge/同格事件冲突和 held input 以原版/现有回归定准。当前 Runtime 的 ContactTransfer 先于 canMove，仅是需兼容审计的现状，不能作为桥事件保真模板。

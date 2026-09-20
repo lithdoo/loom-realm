@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { ImportFailure } from "./lib/errors.mjs";
 import {
-  collectMap7Evidence,
+  collectMapEvidence,
   defaultLocalFsdb,
   parseEvidenceArguments,
 } from "./lib/essentials/v21.1/map-event-evidence.mjs";
@@ -20,11 +20,12 @@ const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 function printSummary(evidence) {
   const lines = [
     `Map ${evidence.map.mapId} ${evidence.map.name ?? "(name unknown)"}`,
+    `completeness=${evidence.completeness?.status ?? "?"} provenNegative=${evidence.completeness?.provenNegativeBridge ?? "?"}`,
     `rxdata: ${evidence.source.files.map.path}`,
     `SHA-256: ${evidence.source.files.map.sha256}`,
     `size: ${evidence.map.width}x${evidence.map.height} tileset ${evidence.map.tilesetId}`,
     `events=${evidence.coverage.eventCount} pages=${evidence.coverage.pageCount} commands=${evidence.coverage.commandCount} scripts=${evidence.coverage.scriptCommandCount}`,
-    `bridge terrain cells=${evidence.bridgeTerrain.cellCount} tileIds=${evidence.bridgeTerrain.tileIds.join(",") || "(none)"}`,
+    `bridge terrain scan=${evidence.bridgeTerrain.scanStatus ?? "?"} cells=${evidence.bridgeTerrain.cellCount} tileIds=${evidence.bridgeTerrain.tileIds.join(",") || "(none)"}`,
     `candidates=${evidence.candidates.length}`,
     `scriptsMatchingPbBridge=${evidence.coverage.scripts.filter((item) => item.matchesBridgePattern).length}`,
   ];
@@ -55,7 +56,7 @@ function printSummary(evidence) {
 try {
   const options = parseEvidenceArguments(process.argv.slice(2));
   const source = options.source ?? defaultLocalFsdb(repoRoot);
-  const evidence = await collectMap7Evidence(source, { mapId: options.mapId, corpusScan: options.corpusScan });
+  const evidence = await collectMapEvidence(source, { mapId: options.mapId, corpusScan: options.corpusScan });
   const json = `${JSON.stringify(evidence, null, 2)}\n`;
   if (options.output) await writeFile(resolve(options.output), json);
   else process.stdout.write(json);

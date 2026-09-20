@@ -2,7 +2,7 @@
 
 > 状态：**Implementation plan / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 负证据复核修订。[设计草案](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md) 管架构，[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入，[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) 记观察，[证据复核与后续交接](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 记扫描边界。本计划不是代码实施或资格通过声明，不追溯改写 M14 历史合同。
 >
-> **地图职责：Map 7 Cedolan City = Bridge 负例、门 contact/edge 及 Neutral 回归；Map 21 Route 2 = Bridge 正例待完整取证；Map 47 Route 7 = Ledge 正例待取证；Map 27 Day Care 不是桥样本。** Map 21 已有 93 格/8 个直接桥脚本的清单，但缺命令级、`size`/时序和可重放路线，不能把已定位等同已验收。
+> **地图职责：Map 7 = Bridge 负例；Map 21 = Bridge 正例（静态取证见证据 §14，动态未跑）；Map 47 = Ledge 待取证；Map 27 不是桥样本。** 不得把静态取证写成玩法已实现或规格已冻结。
 
 ## 1. 全链路与三个交叉断点
 
@@ -19,9 +19,9 @@ Essentials v21.1 原 Map / Tileset / Event
  → Map 7 负例 + Map 21 桥正例 + Map 47 悬崖正例 + M14/M15 回归
 ```
 
-**事件：** 旧“先执行 contact 改状态并立即重算本次移动”不得实现。v21.1 `move_generic` 先查通行，失败时才检查 touch；`Game_Event#start` 不同步运行脚本。具体桥端 `size(w,h)` 碰撞、start→interpreter→bridgeLevel→后续输入须以真实 Map 21 加固定源码和（可运行时的）动态证据证明；既有 Runtime `ContactTransfer` 在通行前触发须另作兼容审计，不能直接套给桥事件。
+**事件：** 不得实现“先 contact 再立即重算本次移动”。Map 21 桥事件是空图形 `size()` walk-on：成功踏入占用格后 `start`，解释器随后 `eval`；失败 touch 跳过 `over_trigger`。动态逐帧仍缺。Runtime `ContactTransfer` 先于 `canMove` 不能当桥模板。
 
-**传送：** `map-transfer-consumer.mjs` 的 `projectedD0Passable` 不理解 Neutral/Bridge/玩家状态，但参与 step/contact/edge 筛选。只有经 Map 21 源事件→现有投影→状态对照，才能断言真实记录被误删；目前是**潜在风险**。静态不可判定的状态相关事实须保留到 Runtime；无关 NPC 不令整图失败，相关无法保真的候选带 map/event/page 报错。
+**传送：** Map 21 审计（证据 §14.7）：**无已证实误删**。67 个 D0-false 桥格是潜在风险未复现；连接 `21,E,77,47` 因偏移越界不产生 edge。本轮不改 importer。
 
 **运动：** Runtime/Browser 的普通 walk 校验、启动、重入及插值多处固定 250ms；jump 是一个动作而非两次 walk，双方冻结完整 kind/duration/ID/epoch/坐标时点/相机/帧/resize/取消协议。bridgeLevel 原地切换也要失效桥 depth 缓存并与人物同更新；Browser 不掌握碰撞。
 
@@ -29,13 +29,13 @@ Essentials v21.1 原 Map / Tileset / Event
 
 | 子项 | 执行及可审查产物 | 未达成时的约束 |
 |---|---|---|
-| **0A Map 7 严格复核** | 对已记录的 11 events/19 pages/521 commands、0 Bridge 格/0 直接桥脚本补齐 355/655、209/509 内脚本、可达 CommonEvent/间接调用的扫描覆盖；缺 Tilesets/Table/越界/解析异常 fail 或明确 INCOMPLETE；记录 SHA、命令、退出码、pass/fail/skip | 不把没扫描/缺表/skip 算作零命中或 PASS；Map 7 不要求桥头 event ID |
-| **0B Map 21 Bridge 正例** | Map021/MapInfos/Tilesets/CommonEvents/MapTransfer 来源 SHA；全地图事件/所有页/全部命令、8 个直接桥脚本及 2 个邻接非桥候选；原版 `size(w,h)` 命名→占用→touch 调用链，四对 On/Off 的位置/方向/trigger/bridgeLevel/通行/遮挡/传送最小路线；静态与动态观察分开 | 目前只有清单、不是完整证据；不可硬编码 Map21 坐标作为 Runtime 规则 |
-| **0C Map 47 Ledge** | 真实起点、面向 tag、源格通行、`jumpForward(2)` 最终落点与事件、正向/逆向/阻挡/边界、跨地图支持边界和输入序列；原版源码对照 | 不把中间格当作第二次普通 walk；无证据项列待证 |
-| **0D 导入对照** | Map 7 普通 door/edge 基线及 Map 21 `projectedD0Passable`、`selectStaticPage`、`emitStep`/`emitContacts`/`expandConnection` 源→当前→期望记录，明确已证实误删与潜在误删 | 未实际对照不能声称已复现误删 |
-| **0E 许可/测试/资格** | 原始 FSDB SHA、许可核查、可分发最小派生 fixture/可重复脚本；做不到则列本地与 CI 缺口；记录正式 M14/M15 ledger、旧 autotile_names 断言及 CI run/exact SHA | live test 在无 FSDB 时会 skip；skip≠PASS；历史资格≠新 subject 资格 |
+| **0A Map 7 严格复核** | 已完成：11/19/521 不变；cells=0；provenNegative=true；新入口已扫 | 方法体内间接 Ruby 仍 UNVERIFIED |
+| **0B Map 21 Bridge 正例** | 静态已完成（证据 §14）。动态 RGSS 未跑 | 不可硬编码 Map21 坐标到 Runtime；动态路线仍待证 |
+| **0C Map 47 Ledge** | **下一轮** | 不把中间格当第二次 walk |
+| **0D 导入对照** | Map 21 已审计：无已证实误删 | 不在本轮改传送规则 |
+| **0E 许可/测试/资格** | 附录 L：不提交 Map 21 全文；本机 18 pass；CI skip 缺口仍在 | skip≠PASS |
 
-[Map 7 证据附录](./TERRAIN_BEHAVIOR_EVIDENCE.md) 含较多原始事件命令；下一轮先核查复制/派生素材许可，未明确前不继续向公开仓库复制整张 Map 21 的大段原始命令。可在本地生成完整转储，在仓库提交必要的结构化摘录、指纹、覆盖计数和重放办法，许可情况与移除/压缩已有附录的决定须记录。
+许可结论见证据附录 L：保留既有 Map 7 附录 A；Map 21 完整命令只留 `.local/`。
 
 **阶段出口：** 证据行均指向 `原始文件指纹 + map/event/page/command 或 tile x,y,z + v21.1 符号 + 观察方式 + 事实/推论/待证 + test ID`，Map 21 与 Map 47 路线可复现；[FG-01～06](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 全部实际 PASS 且审查签核，才建立唯一规范 `TERRAIN_BEHAVIOR_CONTRACT_V1.md` 并标 `Contract Frozen / Implementation Pending`。模板与取证命令不能代替实际结果。
 
@@ -76,4 +76,4 @@ Essentials v21.1 原 Map / Tileset / Event
 
 每测试记录 Given/When/Then、FSDB digest、环境、命令、commit、退出码、pass/fail/skip、覆盖差距；合成单测不能替代真实 Map 21/47。已有命令如 `npm run build:m14`、`npm run test:m14:projection`、`npm run test:m14`、`npm run test:m15` 也仅运行后才能报告 PASS。Agent 卡须固定 base SHA、合同、允许/禁止文件、依赖、准确 test IDs 和停止线。缺素材、未知间接 Ruby、`size()` 无法取证、ABI/许可/测试冲突时暂停受影响项，报 `事实→冲突条款→可选修正→下游影响`，不造假或放松校验。
 
-**下一步真实顺序：** 严格扫描补证与 Map7/corpus 重跑 → Map21 桥正例完整取证 → Map47 Ledge 取证 → 导入/时序/ABI 契约 → 许可明确 fixtures、真实测试、资格基线 → FG-01～06 审核签核 → 四实施任务卡。现在仍全部 OPEN。
+**下一步真实顺序：** Map 47 Ledge 取证 →（可选）RGSS 动态日志 → ABI/fixtures/合同 → 签核。现在 FG-01～06 仍全部 OPEN。

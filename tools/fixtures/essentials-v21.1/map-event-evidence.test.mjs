@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,14 +8,20 @@ import test from "node:test";
 import { ImportFailure } from "./lib/errors.mjs";
 import {
   BRIDGE_TERRAIN_TAG,
+  COMPLETENESS,
   classifyCandidates,
   collectBridgeCells,
   collectMap7Evidence,
+  collectMapEvidence,
   concatenateScriptCommands,
   defaultLocalFsdb,
   extractMapFacts,
+  occupiedTiles,
   parseEvidenceArguments,
+  parseEventSize,
   scanCoverage,
+  walkCommonEventGraph,
+  wouldProjectEventAsTransfer,
 } from "./lib/essentials/v21.1/map-event-evidence.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -79,7 +85,27 @@ function page(fields) {
     "@through": fields.through ?? false,
     "@always_on_top": fields.alwaysOnTop ?? false,
     "@trigger": fields.trigger ?? 1,
+    "@move_route": fields.moveRoute ?? object("RPG::MoveRoute", {
+      "@repeat": false,
+      "@skippable": false,
+      "@list": array([object("RPG::MoveCommand", { "@code": 0, "@parameters": array([]) })]),
+    }),
     "@list": array(fields.commands ?? [command(0, 0, [])]),
+  });
+}
+
+function moveCommand(code, parameters = []) {
+  return object("RPG::MoveCommand", {
+    "@code": code,
+    "@parameters": array(parameters),
+  });
+}
+
+function moveRoute(commands) {
+  return object("RPG::MoveRoute", {
+    "@repeat": false,
+    "@skippable": true,
+    "@list": array(commands),
   });
 }
 
@@ -103,7 +129,7 @@ function mapRoot(events, width = 4, height = 3, tilesetId = 1) {
   });
 }
 
-test("CLI defaults to Map 7 and refuses any other map id", () => {
+test("CLI defaults to Map 7, allows Map 21, and refuses any other map id", () => {
   assert.deepEqual(parseEvidenceArguments([]), { source: undefined, output: undefined, mapId: 7, corpusScan: false });
   assert.deepEqual(parseEvidenceArguments(["--source", "fsdb", "--output", "out.json"]), {
     source: "fsdb",
@@ -117,9 +143,15 @@ test("CLI defaults to Map 7 and refuses any other map id", () => {
     mapId: 7,
     corpusScan: true,
   });
+  assert.deepEqual(parseEvidenceArguments(["--map", "21"]), {
+    source: undefined,
+    output: undefined,
+    mapId: 21,
+    corpusScan: false,
+  });
   assert.throws(
     () => parseEvidenceArguments(["--map", "27"]),
-    (error) => error instanceof ImportFailure && error.category === "MAP_EVENT_EVIDENCE_FAILURE" && /only reads Map 7/.test(error.message),
+    (error) => error instanceof ImportFailure && error.category === "MAP_EVENT_EVIDENCE_FAILURE" && /only reads Maps 7 and 21/.test(error.message),
   );
   assert.throws(
     () => parseEvidenceArguments(["--unknown"]),
@@ -167,6 +199,8 @@ test("extracts every page in original order and concatenates 355/655 scripts lik
   assert.equal(coverage.scripts.length, 1);
   assert.equal(coverage.scripts[0].joinedWithNewlines, "pbBridgeOn\n(2)\npbBridgeOff\n");
   assert.equal(coverage.scripts[0].matchesBridgePattern, true);
+  assert.equal(coverage.scripts[0].kind, "event-command-355-655");
+  assert.ok(coverage.scannedEntrances.includes("move-route-209-509-and-page-autonomous-list-code-45"));
 });
 
 test("concatenateScriptCommands keeps original command order and does not eval Ruby", () => {
@@ -222,7 +256,7 @@ test("bridge scan keeps unnamed script events and does not silently drop adjacen
   assert.equal(byId.get(11).status, "confirmed-bridge-script");
   assert.ok(byId.get(11).reasons.includes("page-script-calls-pbBridgeOn-or-pbBridgeOff"));
   assert.equal(byId.get(12).status, "unconfirmed-candidate");
-  assert.ok(byId.get(12).reasons.includes("event-tile-orthogonally-adjacent-to-bridge-terrain"));
+  assert.ok(byId.get(12).reasons.includes("event-occupied-tile-orthogonally-adjacent-to-bridge-terrain"));
   assert.equal(byId.has(10), false);
 });
 
@@ -244,6 +278,9 @@ test("local Map 7 FSDB extraction is deterministic when the official corpus is p
   assert.equal(first.coverage.allPagesScanned, true);
   assert.equal(first.coverage.eventCount, 11);
   assert.equal(first.coverage.pageCount, 19);
+  assert.equal(first.completeness.status, "COMPLETE");
+  assert.equal(first.completeness.provenNegativeBridge, true);
+  assert.equal(first.bridgeTerrain.scanStatus, "COMPLETE");
   assert.equal(first.bridgeTerrain.cellCount, 0);
   assert.equal(first.candidates.length, 0);
   assert.deepEqual(first.coverage.eventIdsInOrder, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12]);
@@ -271,6 +308,8 @@ test("local Map 7 FSDB extraction is deterministic when the official corpus is p
   assert.equal(scanned.corpusScan.mapsWithBridgeInfoNames.length, 0);
   assert.equal(scanned.corpusScan.inventory[0].candidates.filter((item) => item.status === "confirmed-bridge-script").length, 8);
   assert.equal(scanned.corpusScan.inventory[0].candidates.filter((item) => item.status === "unconfirmed-candidate").length, 2);
+  assert.equal(scanned.corpusScan.completeness.status, "COMPLETE");
+  assert.ok(scanned.coverage.scannedEntrances.includes("common-event-117-call-graph-with-cycle-detection"));
   assert.ok(first.coverage.pageCount >= first.coverage.eventCount);
   assert.equal(JSON.stringify(first.candidates.map((item) => item.eventId)), JSON.stringify(second.candidates.map((item) => item.eventId)));
   assert.equal(JSON.stringify(first.coverage), JSON.stringify(second.coverage));
@@ -287,4 +326,160 @@ test("resolveMapSource finds FSDB [resource]Data without depending on a machine-
     () => collectMap7Evidence(temporary),
     (error) => error instanceof ImportFailure && (error.category === "MARSHAL_INVALID" || error.category === "MAP_EVENT_EVIDENCE_FAILURE"),
   );
+});
+
+test("size(w,h) occupancy uses vanilla width east and height north from the named origin tile", () => {
+  assert.deepEqual(parseEventSize("EV004 size(1,4)"), { present: true, width: 1, height: 4, raw: "size(1,4)", source: parseEventSize("EV004 size(1,4)").source });
+  assert.deepEqual(occupiedTiles(20, 49, 1, 4), [
+    { x: 20, y: 46 },
+    { x: 20, y: 47 },
+    { x: 20, y: 48 },
+    { x: 20, y: 49 },
+  ]);
+  assert.deepEqual(occupiedTiles(14, 32, 3, 1), [
+    { x: 14, y: 32 },
+    { x: 15, y: 32 },
+    { x: 16, y: 32 },
+  ]);
+});
+
+test("move-route command 45 scripts are scanned and confirm bridge candidates", () => {
+  const facts = extractMapFacts(mapRoot([[1, event(1, "Hidden", 0, 0, [page({
+    commands: [
+      command(209, 0, [0, moveRoute([moveCommand(45, [string("pbBridgeOn")]), moveCommand(0, [])])]),
+      command(509, 0, [moveCommand(45, [string("pbBridgeOn")])]),
+      command(0, 0, []),
+    ],
+  })])]]), 7, "Map007.rxdata");
+  assert.equal(facts.events[0].pages[0].moveRouteScripts.some((item) => item.matchesBridgePattern), true);
+  const coverage = scanCoverage(facts.events);
+  assert.ok(coverage.scripts.some((item) => item.kind === "move-route-script-45" && item.matchesBridgePattern === true));
+  const candidates = classifyCandidates(facts.events, { cells: [] });
+  assert.equal(candidates[0].status, "confirmed-bridge-script");
+});
+
+test("conditional-branch type 12 scripts are scanned even on inactive pages", () => {
+  const facts = extractMapFacts(mapRoot([[1, event(1, "Gate", 0, 0, [
+    page({
+      condition: condition({ switch1: true, switch1Id: 99 }),
+      commands: [
+        command(111, 0, [12, string("pbBridgeOff")]),
+        command(0, 0, []),
+      ],
+    }),
+  ])]]), 7, "Map007.rxdata");
+  assert.equal(facts.events[0].pages[0].condition.alwaysActive, false);
+  assert.equal(facts.events[0].pages[0].conditionalBranchScripts[0].matchesBridgePattern, true);
+  const candidates = classifyCandidates(facts.events, { cells: [] });
+  assert.equal(candidates[0].status, "confirmed-bridge-script");
+});
+
+test("nested common events detect cycles and reachable bridge scripts", () => {
+  const graph = walkCommonEventGraph([1], [
+    { id: 1, calledCommonEventIds: [2], hasBridgeScript: false, scriptUncertainty: [] },
+    { id: 2, calledCommonEventIds: [1, 3], hasBridgeScript: false, scriptUncertainty: [] },
+    { id: 3, calledCommonEventIds: [], hasBridgeScript: true, scriptUncertainty: [] },
+  ]);
+  assert.equal(graph.reachableHasBridge, true);
+  assert.ok(graph.cycles.some((cycle) => cycle.includes(1) && cycle.includes(2)));
+  assert.deepEqual(graph.reachableIds.slice().sort((left, right) => left - right), [1, 2, 3]);
+});
+
+test("missing Tilesets or out-of-range tile IDs cannot be reported as a proven zero Bridge count", () => {
+  const facts = extractMapFacts(mapRoot([[1, event(1, "NPC", 0, 0, [page({ commands: [command(0, 0, [])] })])]], 2, 2), 7, "Map007.rxdata");
+  const missing = collectBridgeCells(facts, null);
+  assert.equal(missing.scanStatus, COMPLETENESS.INCOMPLETE);
+  assert.equal(missing.provenNegative, undefined);
+  assert.ok(missing.issues.length > 0);
+  const values = Array(2 * 2 * 3).fill(0);
+  values[0] = 9000;
+  const bad = collectBridgeCells(
+    { ...facts, data: table(3, 2, 2, 3, values) },
+    table(1, 10, 1, 1, Array(10).fill(0)),
+  );
+  assert.equal(bad.scanStatus, COMPLETENESS.INCOMPLETE);
+  assert.equal(bad.cellCount, 0);
+  assert.ok(bad.outOfRange.length >= 1);
+  assert.throws(
+    () => collectBridgeCells(
+      { ...facts, data: table(3, 2, 2, 3, values) },
+      table(1, 10, 1, 1, Array(10).fill(0)),
+      { strict: true },
+    ),
+    (error) => error instanceof ImportFailure && error.category === "MAP_EVENT_EVIDENCE_FAILURE",
+  );
+});
+
+test("a Map file without Tilesets/MapInfos/CommonEvents is INCOMPLETE, not a proven zero", async (t) => {
+  const fsdb = defaultLocalFsdb(repoRoot);
+  const official = join(fsdb, "[resource]Data", "Map007.rxdata");
+  if (!existsSync(official)) {
+    t.skip("local official Map007.rxdata is not present");
+    return;
+  }
+  const temporary = await mkdtemp(join(tmpdir(), "map7-incomplete-"));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const data = join(temporary, "[resource]Data");
+  await mkdir(data);
+  await copyFile(official, join(data, "Map007.rxdata"));
+  const evidence = await collectMap7Evidence(temporary);
+  assert.equal(evidence.completeness.status, COMPLETENESS.INCOMPLETE);
+  assert.equal(evidence.completeness.provenNegativeBridge, false);
+  assert.equal(evidence.bridgeTerrain.scanStatus, COMPLETENESS.INCOMPLETE);
+  assert.ok(evidence.completeness.issues.some((issue) => /Tilesets/.test(issue)));
+});
+
+test("unknown indirect Ruby is recorded as UNVERIFIED rather than a silent zero", () => {
+  const facts = extractMapFacts(mapRoot([[1, event(1, "Mystery", 1, 1, [page({
+    commands: [command(355, 0, [string("send(:pbBridgeOn)")]), command(0, 0, [])],
+  })])]]), 7, "Map007.rxdata");
+  const coverage = scanCoverage(facts.events);
+  assert.ok(coverage.unverified.some((item) => item.reason === "dynamic-ruby-send-or-eval"));
+  const candidates = classifyCandidates(facts.events, { cells: [] });
+  assert.equal(candidates[0].status, "confirmed-bridge-script");
+  assert.ok(candidates[0].reasons.includes("page-has-unverified-indirect-ruby"));
+});
+
+test("size() transfer events are skipped by the MapTransfer projector, matching projectEvent", () => {
+  const facts = extractMapFacts(mapRoot([[4, event(4, "EV004 size(1,4)", 20, 49, [page({
+    trigger: 1,
+    through: false,
+    commands: [command(201, 0, [0, 7, 1, 1, 8]), command(0, 0, [])],
+  })])]]), 21, "Map021.rxdata");
+  const projection = wouldProjectEventAsTransfer(facts.events[0]);
+  assert.equal(projection.projected, false);
+  assert.equal(projection.reason, "name-matches-hiddenitem-or-size");
+});
+
+test("live Map 21 FSDB extraction records Route 2 bridge events when the official corpus is present", async (t) => {
+  const fsdb = defaultLocalFsdb(repoRoot);
+  const mapPath = join(fsdb, "[resource]Data", "Map021.rxdata");
+  if (!existsSync(mapPath)) {
+    t.skip("local examples/essentials-v21.1-local/[FSDB]Essentials v21.1 is not present");
+    return;
+  }
+  const evidence = await collectMapEvidence(fsdb, { mapId: 21 });
+  assert.equal(evidence.map.mapId, 21);
+  assert.equal(evidence.map.name, "Route 2");
+  assert.equal(evidence.map.width, 39);
+  assert.equal(evidence.map.height, 77);
+  assert.equal(evidence.map.tilesetId, 1);
+  assert.equal(evidence.completeness.status, "COMPLETE");
+  assert.equal(evidence.completeness.provenNegativeBridge, false);
+  assert.equal(evidence.bridgeTerrain.scanStatus, "COMPLETE");
+  assert.equal(evidence.bridgeTerrain.cellCount, 93);
+  assert.equal(evidence.bridgeTerrain.placedBridgeTaggedTiles, 93);
+  assert.equal(evidence.source.files.map.sha256, "cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575");
+  const confirmed = evidence.candidates.filter((item) => item.status === "confirmed-bridge-script");
+  const unconfirmed = evidence.candidates.filter((item) => item.status === "unconfirmed-candidate");
+  assert.equal(confirmed.length, 8);
+  assert.deepEqual(confirmed.map((item) => item.eventId).sort((left, right) => left - right), [4, 7, 10, 20, 22, 23, 25, 28]);
+  assert.ok(unconfirmed.some((item) => item.eventId === 1));
+  assert.ok(unconfirmed.some((item) => item.eventId === 2));
+  assert.equal(evidence.transferAudit.actual.stepCount, 0);
+  assert.equal(evidence.transferAudit.actual.contactCount, 0);
+  assert.equal(evidence.coverage.allPagesScanned, true);
+  const second = await collectMapEvidence(fsdb, { mapId: 21 });
+  assert.equal(JSON.stringify(evidence.coverage), JSON.stringify(second.coverage));
+  assert.equal(evidence.source.files.map.sha256, second.source.files.map.sha256);
 });

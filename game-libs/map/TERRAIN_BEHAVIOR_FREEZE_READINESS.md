@@ -1,8 +1,8 @@
 # 地形行为系统：规格冻结门禁与 Agent 实施交接
 
-> 状态：**Freeze preparation / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 Map 7 负证据后复核修订。本文管理门禁，不是已冻结合同或已实现代码。原始记录见 [证据](./TERRAIN_BEHAVIOR_EVIDENCE.md)，复核边界及 Map 21 后续交接见 [证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)。[设计草案](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md) 是背景，[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管交付。
+> 状态：**Freeze preparation / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 Map 21 静态取证后修订。本文管理门禁，不是已冻结合同或已实现代码。原始记录见 [证据](./TERRAIN_BEHAVIOR_EVIDENCE.md)（含 §14），复核见 [证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)。
 >
-> 架构不变：内部易扩展，无外部插件/handler/DSL/通用 RMXP 解释器；`tools` 导入、`game-libs/map` 掌握规则和业务状态，Browser 消费严格投影，不独立推导碰撞。**样本职责：Map 7 Cedolan City = Bridge 负例/普通传送回归；Map 21 Route 2 = Bridge 正例待完整取证；Map 47 Route 7 = Ledge 正例待取证；Map 27 Day Care 不作桥样本。** 不得再请求 Map 7 上不存在的桥头事件 ID。
+> **样本职责：Map 7 = Bridge 负例；Map 21 = Bridge 正例（静态取证已记录，动态未跑）；Map 47 = Ledge 正例待取证；Map 27 不作桥样本。** 不得再索取 Map 7 桥头事件。不得把静态取证写成 FG-01 PASS。
 
 ## 1. 冻结的准确含义和证据分级
 
@@ -10,24 +10,24 @@ Agent 给定固定 base SHA、唯一规范版本、原版证据、可取得 fixt
 
 拟议唯一规范性增量入口 `TERRAIN_BEHAVIOR_CONTRACT_V1.md` **尚未创建**；不以草案、计划、证据或本清单冒充合同。历史 M14 first-slice 的原适用范围不追溯改写，但当前 Tileset 已有 `autotile_names`、新增 `terrain_tags` 拟形成新的 qualification subject；按文档治理记录 schema 和资格基线漂移。
 
-事实强度必须分开：`OBSERVED`（指定原始文件/源码/实际运行、带指纹与位置）、`INFERRED`（基于事实的静态推论）、`UNVERIFIED`（尚待验证）、`INCOMPLETE`（缺数据/扫描未覆盖）。负结论同时写清扫描分母与所有未检查入口。原证据的 Map 7 无直接桥调用／无 Bridge 格是**指定 corpus 和当前扫描范围的记录**；移动路线内脚本、嵌套调用、缺表/坏引用的严格性尚待 [复核文档 §2](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 补证，不能用无条件的“所有调用已排除”代替。
+事实强度必须分开：`SOURCE-PROVEN` / `STATIC-INFERRED` / `DYNAMIC-OBSERVED` / `UNVERIFIED` / `INCOMPLETE`。Map 7 零桥在本轮严格扫描（含 move-route 45、111 type 12、117 图、表齐全）下仍成立，`provenNegativeBridge=true`；方法体内间接 Ruby 仍 UNVERIFIED。
 
 ## 2. FG-01～FG-06（全部 OPEN）
 
 | Gate | 必须提供的证据与冻结条件 | 状态 |
 |---|---|---|
-| **FG-01 原版事实** | Map 7：负例、11 事件/19 页/521 命令的已记录扫描及严格性补强；**Map 21**：桥格、8 个直接脚本事件及其他候选的 map/event/page/命令、`size(w,h)` 碰撞和桥端路线完整取证；Map 47：Ledge 起点/落点/边界/事件；v21.1 源码与逐帧时序可复核 | **OPEN**：Map 7 原始记录有；移动路线/间接脚本与坏数据扫描边界未闭；Map 21 目前只有清单/页摘要；Map 47 和原版动态跟踪未完成 |
-| **FG-02 数据和导入** | 当前 Tileset keys + exact terrain_tags Table/引用/迁移；MapTransfer 与狭义 MapAction schema/producer/consumer；Map 21 真实 `projectedD0Passable` 静态筛选差异；相关候选 fail-closed、无关事件排除 | **OPEN**：未给出字段级合同，Map 21 传送误删仅是潜在风险，不能宣称已复现 |
-| **FG-03 事件/状态** | `can_move` 成功/失败、touch start 与解释器执行分离、桥端 `size` 命中、step/edge/transfer/held input、bridgeLevel 进入/离开/跨图/Frame、碰撞支持边界和原子失败 | **OPEN**：Map 21 时序/`size()` 与状态机未证；禁止 contact 执行后立即重算同一次输入 |
-| **FG-04 运动及呈现** | walk/jump exact ABI；Runtime/Browser 所有 250ms 路径、ID/epoch/duration/相机/resize/取消；桥深度缓存失效及同次 RenderDomain 提交 | **OPEN**：精确字段和双方验证尚无定稿 |
-| **FG-05 验收可重放** | Map 7 **负例**、Map 21 **桥正例**、Map 47 **Ledge 正例**分别固定原始指纹、可复现起点/输入/expected；许可明确的最小派生 fixture，实际测试命令/结果/skip，CI 与本地差距 | **OPEN**：既有 live test 无素材会 skip；无完整测试日志、可分发 golden fixture 或 Map 21/47 路线；不得把 skip 写 PASS |
-| **FG-06 Agent/资格交接** | 固定 base SHA、合同版本、AG-01～04 精确路径/交付/验收/停工卡、历史 ledger 与当前 CI 的 SHA/运行记录、schema 漂移策略、Reviewer 签核 | **OPEN**：尚无冻结任务卡和资格闭环 |
+| **FG-01 原版事实** | Map 7 负例严格扫描；Map 21 桥格/事件/命令/`size()`/静态路线；Map 47 Ledge；v21.1 源码与逐帧 | **OPEN**。已消除：Map 7 假零扫描缺口；Map 21 静态正例（证据 §14）。剩余：Map 47、动态逐帧、方法体内间接 Ruby |
+| **FG-02 数据和导入** | terrain_tags 合同；MapTransfer/MapAction；Map 21 D0 筛选对照 | **OPEN**。本轮审计：**无已证实误删**；67 格 D0-false 为潜在风险未复现；`21,E,77,47` 几何越界已排除 |
+| **FG-03 事件/状态** | 成功走/失败 touch 分路、`size` 占用、start≠execute、跨图 `pbBridgeOff` | **OPEN**。静态：空图形 `size()` 为 walk-on（`check_event_trigger_here`），失败 touch 会跳过。动态帧对齐 UNVERIFIED。禁止同次输入立即重算 |
+| **FG-04 运动及呈现** | walk/jump ABI 与桥 depth | **OPEN** |
+| **FG-05 验收可重放** | 三图 fixture 与 CI | **OPEN**。本机提取测试 18 pass；无合法 CI rxdata。不得标 PASS |
+| **FG-06 Agent/资格交接** | 合同、任务卡、签核 | **OPEN** |
 
-Map 7 子项不是一个要求查出桥头 ID 的正例任务。证据 §13 记录 corpus 69/69 张地图扫描，Map 21 有 93 个 Bridge 格和 8 个 `pbBridgeOn/Off` 直接脚本事件，另有 2 个因邻接列入、脚本非桥的候选；这些属于**已记录扫描观察**，不是 Map 21 完整事件、动态行为或桥功能测试已通过。Map 7 的 32 条 door contacts/四条 edge 是传送基线，未证明该图因桥误删出口。所有门禁保持 OPEN，不能因任一文档新增就标 PASS。
+Map 7 仍不是桥正例。Map 21 静态取证已进入证据 §14，仍不是动态验收或 Bridge 实现。所有门禁保持 OPEN。
 
 ## 3. 三个 P0 设计断点及本次新增取证质量门槛
 
-**P0-A 事件时序。** v21.1 `Game_Player#move_generic` 先判方向通行，失败才检查面前 touch，`Game_Event#start` 只是待执行标记；冻结时要记录 `input → check → start → interpreter → bridgeLevel → following input` 与成功行走后事件路径，原版真正逐帧观察缺失时写 UNVERIFIED。Map 7 没桥脚本，须以 Map 21 证据验证桥头，不能凭避免死锁而立即重算同一次输入。现有 Runtime `ContactTransfer` 先于 `canMove` 是待兼容审计的当前行为，不是原版依据。
+**P0-A 事件时序。** 源码骨架不变。Map 21 八个桥事件是空图形 `size()`：**SOURCE-PROVEN** 走通占用格后 `check_event_trigger_here` 才 `start`，失败 bump 不会切桥层。逐帧仍 UNVERIFIED。禁止同一次 `can_move` 因 contact 立即重算。Runtime `ContactTransfer` 先于 `canMove` 仍只是待审计现状。
 
 **P0-B 导入时不能删动态事实。** `projectedD0Passable` 仅知道 passages/priorities，现有 step/contact/edge 过滤需与 Map 21 的**实际输入和投影记录**核对，列源事实→当前投影→正确保留范围。仅确定性静态事实可过滤；动态桥状态须延后 Runtime。无关 NPC/剧情事件不令整图失败；已识别且无法保真的桥候选带 map/event/page 与原因 fail-closed。仅潜在风险不得称已复现。
 
@@ -77,4 +77,4 @@ Schema/ABI owners, qualification ledger/run/SHA, unsupported, reviewer: <逐项�
 Status: Contract Frozen / Implementation Pending（仅全部 PASS、签核后填写）
 ```
 
-**执行顺序**：补强现有取证器并重跑 Map 7/corpus → 以 Map 21 完成真实桥正例及 `size`/触发/传送取证 → Map 47 悬崖取证 → 数据和运动 ABI／两张状态矩阵 → 许可明确的 fixtures 与实际测试 → M14/M15 当前资格基线 → 定稿合同、四卡和签核。若新证据推翻拟议规范，先修规范/测试/任务卡并重新审查；直到所有门禁真实 PASS，始终保持 NOT FROZEN。
+**执行顺序**：Map 7 严格扫描与 Map 21 静态取证已完成 → **下一步 Map 47 Ledge** → 动态 RGSS（可选）→ ABI/合同/fixtures → 签核。直到 FG-01～06 真实 PASS，始终 NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。
