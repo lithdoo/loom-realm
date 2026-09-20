@@ -1,6 +1,6 @@
 # Terrain Behavior：可直接执行的 AG-01～04 任务卡
 
-> **IMPLEMENTATION AUTHORIZED / FOUR PR DELIVERY / PRODUCT NOT YET IMPLEMENTED**。仓库所有者已授权停止无限期冻结准备并转向开发验收。本文件替换旧“必须六 FG PASS 才能派单”的**实施准入规则**；[交付合同](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md) 是准入及产品 Done 权威，[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管顺序，[候选合同](./TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md) 管 C-01～08 设计细节，[门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 仍管正式 CONTRACT_V1／原版行为资格。历史 FZ-00～06 记录在[冻结执行](./TERRAIN_BEHAVIOR_FREEZE_EXECUTION.md)与[Issue #42](https://github.com/lithdoo/loom-realm/issues/42)，**不再阻止实施**。初始交接证据 SHA `62938013103b94c3b69786b66216440b1d49fb1c`；每个 PR 实际开始必须重新锁定最新目标 base SHA。
+> **IMPLEMENTATION AUTHORIZED / PRODUCT IMPLEMENTED ON WORKING BRANCH / BEHAVIOR QUALIFICATION PENDING**。AG-01～04 已按依赖落地；正式合入与 CI run 以提交后的 GitHub Actions 为准。CONTRACT_V1 与 FG-01～06 仍待资格。工作基线 `d6e3f5961fa7293fe89971f749904941d02315b4`。
 
 ## 共用 Agent 工作协议（以下四卡均已获范围授权）
 

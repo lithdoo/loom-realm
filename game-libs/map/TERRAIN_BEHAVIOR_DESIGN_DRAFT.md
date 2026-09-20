@@ -1,6 +1,6 @@
 # Terrain Behavior：最小架构设计（Essentials v21.1）
 
-> **DESIGN BASELINE FOR IMPLEMENTATION / NOT FORMALLY FROZEN / NOT IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING**。用户已授权从准备转入开发。实施准入、PR 完成条件与必须使用的产品端到端验收以[实施交付合同](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md)为准；[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md)分配 PR；[候选合同](./TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md) C-01～08 提供字段级设计；[门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)仅管正式原版行为资格，六 FG 仍 OPEN。当前设计不是已经存在的 TypeScript API，也不宣称已获 RGSS 动态证据。
+> **DESIGN BASELINE / PRODUCT IMPLEMENTED / NOT FORMALLY FROZEN / BEHAVIOR QUALIFICATION PENDING**。实际代码 API 已存在于 `game-libs/map/src/semantics.ts`、`runtime.ts` 与 `browser/map.browser.js`。schema `struct.Tileset/v2-terrain-tags`、`struct.MapAction/v1-bridge`、`map-motion/v1-walk-jump-bridge`。jump 400ms / peak `distancePx * 3 / 8` 为 `PROJECT-DECISION-PROVISIONAL`。`over_trigger?` 使用投影的 `through`/`emptyGraphic` 加 Runtime 通行，不执行 Ruby。Map21 八事件为 empty graphic + through=false。
 
 ## 1. 范围与数据流：一个状态中心，两项纯查询，一种运动协议
 

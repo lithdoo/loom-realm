@@ -1,6 +1,6 @@
 # Terrain Behavior：四 PR 实施与验收计划（Essentials v21.1）
 
-> **IMPLEMENTATION AUTHORIZED / NOT IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING**。本文件管理**实施顺序**；[实施准入与端到端交付合同](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md) 管准入、共享 ABI 和完成标准；[合同候选](./TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md) C-01～08 是字段和设计基线；[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) FG-01～06 管**最终原版行为资格及正式规格冻结**，不再作为编码前置条件。已授权开始 AG-01，不意味着已冻结 CONTRACT_V1 或已取得 RGSS 实测。取证与 CI 基线 `62938013103b94c3b69786b66216440b1d49fb1c`；每 PR 以实际最新目标分支 SHA 固定自身 base，不硬 reset。
+> **IMPLEMENTATION AUTHORIZED / PRODUCT IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING**。AG-01～04 已在工作分支实现。实际 API：`validateTilesetRecord` / `migrateLegacyTilesetRecord`、`struct.MapAction/v1-bridge`、`resolveEffectiveTerrainTag`、`evaluatePassability`、`planMovement`、Runtime `bridgeLevel ∈ {0,2}`、jump 400ms。FG-01～06 仍 OPEN。本文件仍管实施顺序；合入主分支以实际 PR 为准。
 
 ## 1. 一个功能链，而非五个独立系统
 

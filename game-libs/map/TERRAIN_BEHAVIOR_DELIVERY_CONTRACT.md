@@ -1,6 +1,6 @@
 # Terrain Behavior：实施准入与端到端交付合同
 
-> **IMPLEMENTATION AUTHORIZED / NOT IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING / NOT FORMALLY FROZEN**。仓库所有者已明确授权从过度的预开发门禁转入开发验证闭环。本文件是**实施过程的权威入口**，不是原版动态行为已被证明、也不将 `TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md` 改称正式冻结的 V1。审查起点：`62938013103b94c3b69786b66216440b1d49fb1c`；开始每张 PR 时以实际目标分支 HEAD 绑定不可漂移的 base SHA，记录到 PR，不硬重置仓库。
+> **IMPLEMENTATION AUTHORIZED / PRODUCT IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING / NOT FORMALLY FROZEN**。AG-01～04 已在 `feat/map-terrain-behavior` 落地为真实 importer→Content→Map→Runtime→Browser 链。schema：`struct.Tileset/v2-terrain-tags`（subject `map-tileset-terrain-tags-v1`）、`struct.MapAction/v1-bridge`、motion ABI `map-motion/v1-walk-jump-bridge`。walk=250ms 为既有产品事实；jump `JUMP_DURATION_MS=400`、`JUMP_PEAK_RULE=distancePx * 3 / 8` 为 `PROJECT-DECISION-PROVISIONAL`。FG-01～06 与 CONTRACT_V1 仍未签核，不得称为原版逐帧保真。审查起点：`62938013103b94c3b69786b66216440b1d49fb1c`；本轮工作基线 `d6e3f5961fa7293fe89971f749904941d02315b4`。
 >
 > 规格细节：[合同候选](./TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md) C-01～08；历史事实：[证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) §15–16、[复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)；[设计](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md)；[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md)；[门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)。冻结准备 FZ-00～06 和 [Issue #42](https://github.com/lithdoo/loom-realm/issues/42) 是**历史与最终原版保真资格证据**，不再是实施准入阻断器。
 
@@ -9,7 +9,7 @@
 | 判定 | 现在 | 改变条件 |
 |---|---|---|
 | **实施准入** | **AUTHORIZED**：只限本页的 AG-01→04、Map/Tools/Content/自有 Browser 具体范围 | 用户已授权；每 PR 固定基线及接口/测试；不要求预先取得原版 Game.exe、真图 CI 再分发许可、六道 FG PASS |
-| **代码交付** | NOT IMPLEMENTED | 四个纵向 PR 各自合入、真实产品端到端通过，回归及当前代码 SHA 的 CI 有证据后，才称 IMPLEMENTED |
+| **代码交付** | **IMPLEMENTED**（产品 E2E 与合成/真图对照测试已绿；合入主分支以实际 PR 为准） | 四个纵向 PR 各自合入、真实产品端到端通过，回归及当前代码 SHA 的 CI 有证据后，才称已合入主分支 |
 | **原版行为资格／正式冻结** | NOT QUALIFIED / NOT FORMALLY FROZEN | 原版动态对照、素材许可范围、授权 reviewer 对 FG/DEC 签核全部如实满足后另行升级；CI live skip 仍只是 skip |
 
 **允许开始编码 ≠ 允许标 FG PASS；没有 RGSS 不意味着禁止构建 LoomRealm 可验证的产品功能。** 对无法从源码、FSDB、现有产品代码确定的帧数或调度策略，写明 `PROJECT-DECISION-PROVISIONAL`、来源和可替换点，建立产品测试；不得称 `DYNAMIC-OBSERVED`。原版环境日后可用时对比差异并开限界修正，不倒逼预开发无限取证。
@@ -67,3 +67,19 @@ AG-01→AG-02→AG-03→AG-04 **顺序集成**；AG-04 的纯 planner 可在 AG-
 - **单 PR 暂停条件**：当前代码/数据与候选字段直接矛盾而导致可能破坏已有行为、未知相关事件无法安全投影、产品测试实际失败、安全或许可问题。限定受影响 PR，先修/写最小可复现反例，不重新启动全项目取证。
 - **功能 Done**：四 PR 与实际产品 E2E、反例和回归在当前环境全绿，文档依实际 API 和测试结果更新；无 RGSS 时只能叫 `IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING`，不可宣称原版逐帧复刻或正式 CONTRACT FROZEN。
 - **避免重复确认**：Agent 在上述边界内自行做最小可逆技术决策并记录，不逐卡要求用户确认；仅当必须更改项目范围、分发授权或破坏性公开 ABI 且无兼容方案时才请求明确决策。
+
+## 7. 本轮已落地的实际 API 与产品策略
+
+| 项 | 实际值 |
+|---|---|
+| Tileset schema | `struct.Tileset/v2-terrain-tags`，subject `map-tileset-terrain-tags-v1`；旧五字段只经 `migrateLegacyTilesetRecord` |
+| MapAction schema | `struct.MapAction/v1-bridge`；字段含 `occupied`/`through`/`emptyGraphic`/`op`；无关 NPC 省略，相关不透明进 `opaqueRelated` |
+| Motion ABI | `map-motion/v1-walk-jump-bridge`；walk durationMs=250；jump durationMs=400、peakPx=`distancePx * 3 / 8`（`PROJECT-DECISION-PROVISIONAL`） |
+| Queries | `resolveEffectiveTerrainTag` 与 `evaluatePassability` 分离；`planMovement` → `blocked` \| `walk` \| `jump` |
+| Runtime | 唯一 `bridgeLevel ∈ {0,2}`；On execute→2，Off execute 与 transfer→0；非法值 fail-closed |
+| over_trigger | `through===true` 或（`emptyGraphic` 且格子通行）；空图形不是自动 walk-on |
+| 事件策略 | 到达后 start/execute；同一 size 占用带不重复 execute；execute 后本检查点不消费 held 键（下一次输入） |
+| 注释命令 | 108/408 在 confirmable 桥页面视为可忽略（`PROJECT-DECISION-PROVISIONAL`） |
+| 跨图 jump | 落点越界 → `blocked`，不拆两次 walk |
+
+原版 RGSS 逐帧、真图 CI 再分发许可、FG 签核仍为 `BEHAVIOR QUALIFICATION PENDING`。
