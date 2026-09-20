@@ -11,7 +11,7 @@ function fixture() {
   const priorities = Array(386).fill(0); priorities[0] = 5;
   return {
     map: { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, values) },
-    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities), terrain_tags: table(1, 386, 1, 1, Array(386).fill(0)) },
   };
 }
 
@@ -272,6 +272,7 @@ test("Map002 ids project Flowers1 autotile blit", () => {
     autotile_names: ["Sea", "Sea without shore", "Sea deep", "Sand shore", "Flowers1", "Water rock", "Fountain1"],
     passages: table(1, 4400, 1, 1, passages),
     priorities: table(1, 4400, 1, 1, priorities),
+    terrain_tags: table(1, 4400, 1, 1, Array(4400).fill(0)),
   }, 1);
   const samples = [
     [260, 20], [268, 28], [274, 34], [276, 36], [278, 38], [280, 40],
@@ -288,6 +289,7 @@ test("Map002 ids project Flowers1 autotile blit", () => {
     autotile_names: [null, null, null, null, null, null, null],
     passages: table(1, 4400, 1, 1, passages),
     priorities: table(1, 4400, 1, 1, priorities),
+    terrain_tags: table(1, 4400, 1, 1, Array(4400).fill(0)),
   }, 1)), /Unsupported map tile id 260/);
 });
 
@@ -300,6 +302,7 @@ test("assertProjectable and projectVisibleTiles share the same invalid tile fail
     autotile_names: [null, null, null, null, null, null, null],
     passages: table(1, 4400, 1, 1, Array(4400).fill(0)),
     priorities: table(1, 4400, 1, 1, Array(4400).fill(0)),
+    terrain_tags: table(1, 4400, 1, 1, Array(4400).fill(0)),
   }, 1);
   assert.throws(() => assertProjectable(map, tileset), /Unsupported map tile id 274/);
   assert.throws(() => projectVisibleTiles(map, tileset, 0, 0), /Unsupported map tile id 274/);
