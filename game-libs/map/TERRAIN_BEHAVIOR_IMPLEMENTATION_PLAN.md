@@ -33,10 +33,10 @@
 | `E2E-21` | 统一 replay 从 Map7 `(40,0)` 物化边进入，四组走到 tag15 并反向归零；独立 tableAt 核对；等级 STATIC-INFERRED | 不得升级 DYNAMIC；RGSS 对照仍缺 |
 | `EV-MAP47` | 30 跳、逆向 0、`(16,9)→(16,11)`；404=`show-choices-branch-end` 且不在 Ledge 格；合成负例分标 | 动态帧/相机 BLOCKED；跨图 jump 不支持 |
 | `DYN-21/47` | 固定 v21.1 源码证明关键条件及 start≠execute | 原版 RGSS 实测桥 On/Off、重复输入/事件调度、地图连接、Ledge 一次跳跃/落点事件/帧、相机；保留场景、初值、逐帧输入/状态/日志与素材 SHA。若环境缺失，写 `BLOCKED` 和可执行复现方案；现行 FG-01 要求逐帧，**不得悄悄降级为可选**。 |
-| `FIXTURE/CI` | 本地 Agent 记录 `36 pass / 0 fail / 0 skip`；统计独立核对脚本可用 | 解决素材分发许可，包括既有 Map7 附录 A；建立合法、能在 CI 执行真实正例的最小 fixture；提供实际 run URL、commit SHA、pass/fail/skip。无条件则 FG-05 OPEN。 |
+| `FIXTURE/CI` | 合成 fixture 已提交；本机冻结测试 54 pass（有 FSDB）；CI run `35499223917` 在 `faf4c64` **failure**（EV-SAFETY-01 POSIX `forensicRelPath`），已修 | 许可仍无书面依据。绿合成 CI 仍须记 skip 数；live skip ≠ PASS。无许可则 FG-05 OPEN。 |
 | `SPEC/QUAL` | 设计、C-01～08 目录和四 PR 分工草案 | 先冻结字段级 ABI/错误/生产消费与状态矩阵，核 M14/M15 ledger、迁移 subject，再由 reviewer 逐一签核六门禁；`CONTRACT_V1` 尚不存在，不能提前标 Frozen。 |
 
-**核心质量规则：** 独立核对器当前只确认 Map21 图块/脚本 IDs 和 Map47 图块统计，不能冒充对事件时序和 E2E 路线的独立检查。提交中的 36/36 是当时本地运行记录；本次文档更新没有重跑；CI 无 FSDB 时 skip ≠ PASS。§14.6 旧坐标草图不是逐步事实，§15.3 新片段也未与 edge 跨图模拟拼成一个完整状态轨迹。
+**核心质量规则：** E2E 独立核对器（`map21-e2e-independent-check.mjs`）验证邻接、物化边成员、tag15 集合与 start≠execute，**不**重算 `over_trigger?` 或 RGSS 帧。旧 `map-evidence-independent-check.mjs` 只重算图块/脚本 IDs。§14.6 草图与 §15.3 分段 `buildMap21BridgeRoutes` **不是** E2E；§16 统一 `replayWorld` 才是静态闭环。CI 无 FSDB 时 skip ≠ PASS。
 
 ## 3. 单次复现与验收格式
 

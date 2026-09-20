@@ -68,6 +68,6 @@ bridgeLevel 变化即使坐标和 camera 静止，也必须使桥面 depth 缓�
 
 ## 7. 交付顺序与资格
 
-当前取证器 REVIEW-01～04 的静态修复、Map7/21/47 记录、**E2E-21 统一静态 replay** 及合成 fixture 已提交；**不是正式行为闭环**。后续：原版 RGSS 动态逐帧（BLOCKED 直至有 Game.exe）→ 许可与 CI run 签核 → reviewer 签 `CONTRACT_V1` → 才授权 AG-01～04。
+当前取证器 REVIEW-01～04 的静态修复、Map7/21/47 记录、**E2E-21 统一静态 replay** 及合成 fixture 已提交；**不是正式行为闭环**。CI `35499223917` 在 `faf4c64` 失败（EV-SAFETY-01），POSIX `forensicRelPath` 已修。后续：原版 RGSS 动态逐帧（BLOCKED 直至有 Game.exe）→ 许可与绿 CI（live skip 仍 ≠ PASS）→ reviewer 签 `CONTRACT_V1` → 才授权 AG-01～04。
 
 旧 18 pass、本次本地 Agent 36 pass、CI skip 和原版玩法验收是不同概念。任何实施 PR 尚未开始；六道 FG 均 OPEN，状态 **NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。

@@ -20,7 +20,7 @@
 | **FG-02 数据/导入** | 取证器区分 source/target mapId，Map21 3 PBS 行生成 7 edge，67/93 桥格 D0=false 的潜在风险已分开记录 | C-01/03 中 terrain_tags exact Table+旧 fixture 迁移+Content、MapTransfer 保留动态事实、MapAction exact schema/筛选与生产消费合同。**无已证实 Map21 误删**，不得以风险冒充 bug | **OPEN** |
 | **FG-03 事件/状态** | v21.1 已证先通行、`start`≠execute；八事件 here 是静态计算；跨图清桥源码分支已查 | held input、多事件优先级、重复触发、脚本真实生效/下一输入、bridgeLevel 初始/合法范围/Frame/失败原子性的精确状态矩阵与验证 | **OPEN** |
 | **FG-04 运动/画面** | 已定位 Runtime/Browser 普通 walk 250ms、已有 scene/visual epoch 与 depth 缓存断点 | blocked/walk/jump exact on-wire payload、ID/duration/epoch、逻辑提交与相机弧线、resize/cancel/transfer/旧包、原地桥层变化的单次 RenderDomain 投影共同签核与测试 | **OPEN** |
-| **FG-05 可重放/CI/许可** | Map7/21/47 digest、Agent 历史 36 pass、独立图块统计 | FZ-01 完整 golden expected 不能只留 `.local/`；可合法分发的最小 fixture 与许可依据、Map7 附录 A 处理、CI workflow/run/exact SHA 和 live skip 区分 | **OPEN** |
+| **FG-05 可重放/CI/许可** | Map7/21/47 digest、合成 fixture、本机 54 pass（有 FSDB）；CI `35499223917` 在 `faf4c64` **failure**（EV-SAFETY-01） | 许可仍无书面依据；live skip ≠ PASS；POSIX `forensicRelPath` 修复后须另有绿 run，且不得把 skip 写成 PASS | **OPEN** |
 | **FG-06 资格/Agent** | 已有设计分期和本轮候选合同、准备卡、Issue #42 | C-01～08 唯一正式版本、DEC-01～07 实际裁决、固定实施 base SHA、AG-01～04 精确正式任务卡、M14/M15 资格 subject/ledger/CI 关联、授权 reviewer 逐 gate 签核 | **OPEN** |
 
 所有 FG 的具体输入/命令/错误等级、退出标准以 [执行记录](./TERRAIN_BEHAVIOR_FREEZE_EXECUTION.md) 为本次准备清单；**Gate 状态仍以本文件为准**，不能仅凭 issue checkbox 关闭。

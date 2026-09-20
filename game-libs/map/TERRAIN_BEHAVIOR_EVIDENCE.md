@@ -1874,12 +1874,21 @@ Affected gates until then: FG-01, FG-03, FG-04 remain OPEN. This Agent will not 
 
 Original rxdata / PBS / appendix A are not treated as redistributable. Synthetic worlds in `terrain-behavior-synthetic-world.mjs` are original and intended for CI. Live tests skip when FSDB is absent (`skip` is not PASS).
 
-CI workflow: `.github/workflows/essentials-fixture.yml` (`npm run test:fixtures`). Run ID is recorded after push plus `workflow_dispatch`. Until that run exists, FG-05 stays OPEN.
+CI workflow: `.github/workflows/essentials-fixture.yml` (`npm run test:fixtures`).
 
-### 16.5 Tests recorded this session (pre-commit)
+| Run | SHA | Result | Notes |
+|---|---|---|---|
+| [35499223917](https://github.com/lithdoo/loom-realm/actions/runs/35499223917) | `faf4c649a2fd16e88d20f34c41baf8b1ca64afd6` | **failure** (exit 1) | ubuntu-latest. 106 tests, 99 pass, **1 fail**, **6 skip**. Failure: `EV-SAFETY-01` `forensicRelPath` on a Windows drive-letter string expected `Data/Map021.rxdata`; POSIX `path.basename` left backslashes intact. The 6 skips are live FSDB tests. skip is not PASS. |
+| follow-up (this commit) | SHA after forensicRelPath POSIX redaction | pending `workflow_dispatch` | `forensicRelPath` now normalizes backslashes and strips drive letters before taking parent/file. EV-SAFETY-01 also asserts a POSIX absolute path. FG-05 stays **OPEN**: license unsigned; live skip is not PASS even if synthetics go green. |
 
-Working tree baseline `9228903`. Exact post-commit SHA is the freeze-candidate commit on this branch.
+### 16.5 Tests recorded this session
+
+Working tree baseline `9228903`. Freeze-candidate commit `faf4c64`. CI-fix commit is the SHA that contains the `forensicRelPath` POSIX redaction.
 
 | Command | Result |
 |---|---|
-| Combined terrain freeze tests (`map-event-evidence`, `map-evidence-acceptance`, `map-e2e-21`, `map47-ledge-acceptance`) | **54 pass / 0 fail / 0 skip** on this machine with official FSDB present. Node v22.12.0. Not CI. Live items were executed, not skipped. |
+| Combined terrain freeze tests (`map-event-evidence`, `map-evidence-acceptance`, `map-e2e-21`, `map47-ledge-acceptance`) on `faf4c64` | **54 pass / 0 fail / 0 skip** on this machine with official FSDB present. Node v22.12.0. Not CI. Live items were executed, not skipped. |
+| `node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs` after forensicRelPath fix | **37 pass / 0 fail / 0 skip** (includes EV-SAFETY-01 POSIX assertion). Windows host. |
+| `npm run test:fixtures` after forensicRelPath fix | **106 pass / 0 fail / 0 skip** locally because official FSDB is present. This is not the CI skip profile. |
+| `npm test` in `game-libs/map` | **78 pass / 0 fail / 0 skip**. |
+| `npm run docs:check-links` | OK: 693 relative links across 116 Markdown files. |

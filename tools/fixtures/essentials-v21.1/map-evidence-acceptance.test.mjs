@@ -331,6 +331,8 @@ test("EV-TRANSFER-02 D0 drop is classified separately from a present record", ()
 test("EV-SAFETY-01 extractor refuses unlisted maps and does not put drive paths in forensicRelPath", () => {
   assert.throws(() => parseEvidenceArguments(["--map", "99"]));
   assert.equal(forensicRelPath("E:\\\\Repo\\\\Data\\\\Map021.rxdata"), "Data/Map021.rxdata");
+  assert.equal(forensicRelPath("/repo/Data/Map021.rxdata"), "Data/Map021.rxdata");
+  assert.equal(forensicRelPath("E:\\\\Repo\\\\Data\\\\Map021.rxdata").includes(":"), false);
 });
 
 test("EV-REPLAY-01 synthetic walk stays continuous", () => {

@@ -200,12 +200,14 @@ export function assertAllowedMapId(mapId, label = "mapId") {
   return mapId;
 }
 
-export function forensicRelPath(absPath, dataDirectory) {
+export function forensicRelPath(absPath, _dataDirectory) {
   if (typeof absPath !== "string" || absPath.length === 0) return null;
-  const parent = basename(dirname(absPath));
-  const file = basename(absPath);
-  if (dataDirectory && dirname(absPath) === dataDirectory) return `${parent}/${file}`;
-  return `${parent}/${file}`;
+  const normalized = absPath.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
+  const parts = normalized.split("/").filter((part) => part.length > 0 && part !== ".");
+  if (parts.length === 0) return null;
+  const file = parts[parts.length - 1];
+  const parent = parts.length >= 2 ? parts[parts.length - 2] : "";
+  return parent ? `${parent}/${file}` : file;
 }
 
 function rubyStringText(value) {

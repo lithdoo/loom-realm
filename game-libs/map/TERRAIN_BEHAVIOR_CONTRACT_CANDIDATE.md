@@ -210,7 +210,7 @@ type CandidateMovementPlan =
 |---|---|
 | 新 subject | 增加 `terrain_tags` 后必须新 Tileset schema subject；不改历史 M14 first-slice / M15 ledger |
 | 本地取证 | `map-event-evidence` + acceptance：36+1（404 标签）及 E2E/LD47 新文件；有 FSDB 时 live 实跑，无 FSDB 时 skip ≠ PASS |
-| CI | `.github/workflows/essentials-fixture.yml` → `npm run test:fixtures`。本分支 push 后以 workflow_dispatch 记录 run ID。无 run 前 FG-05 不得 PASS |
+| CI | `.github/workflows/essentials-fixture.yml` → `npm run test:fixtures`。已记录 run [35499223917](https://github.com/lithdoo/loom-realm/actions/runs/35499223917) on `faf4c64`：**failure**（EV-SAFETY-01 POSIX `forensicRelPath`）。修复后须另有 run。live skip ≠ PASS。无许可则 FG-05 不得 PASS |
 | 许可 | 合成 fixture `SYNTHETIC_FIXTURE_LICENSE` 可分发；原始 Essentials 地图/PBS/附录 A **未获再分发许可**。附录 A 保持原样不扩大 |
 | 审查 | CONTRACT_V1 仅在授权 reviewer 逐项签核 FG-01～06 后创建 |
 
@@ -223,7 +223,7 @@ type CandidateMovementPlan =
 | DEC-03 Map47 | 30 格；`(16,9)→(16,11)`；30 逆向均失败；404=show-choices-branch-end，EV007/013 不在 Ledge 格；合成负例单独标注；跨图 jump 不支持 | `map47-ledge-acceptance.test.mjs` LD47-01..06 | 静态闭合；动态仍缺 |
 | DEC-04 schema | C-01/C-03 上文。旧五字段拒绝。MapTransfer 不加桥字段 | `validateCandidateTilesetRecord` / MapAction | PROJECT DECISION 待签 |
 | DEC-05 motion | C-06。jump duration UNVERIFIED | 现有 runtime walk 测试 + LD47 静态一次两格 | PROJECT DECISION 待 runtime/browser 签 |
-| DEC-06 fixture/CI | 合成世界可提交；真图 live 留本机。附录 A 不扩大 | `npm run test:fixtures`；CI run 见冻结执行记录 | FG-05 **OPEN** 直至 CI run + 许可签核 |
+| DEC-06 fixture/CI | 合成世界可提交；真图 live 留本机。附录 A 不扩大 | `npm run test:fixtures`；失败 run `35499223917` 已记；POSIX 脱敏已修 | FG-05 **OPEN** 直至绿 CI **且** 许可签核；live skip ≠ PASS |
 | DEC-07 签核 | Agent 不得自签 | 授权 reviewer | **OPEN** |
 
 ## 测试命令
@@ -240,7 +240,7 @@ node tools/fixtures/essentials-v21.1/map21-e2e-evidence.mjs --source "examples/e
 
 1. **RGSS 动态日志：** 合法 v21.1 `Game.exe` + 可恢复测试存档。复现：从 Map7 `(40,0)` 向上进入 Map21，四组 Off/On/tag15/折返；记录逐帧 x/y/bridgeLevel/start/execute；Map47 `(16,9)` 向下跳。完成后填 DYNAMIC-OBSERVED 并对照静态 trace。
 2. **素材再分发许可：** 法务/维护者书面允许 CI 使用 Map007/021/047 或其最小派生。否则 FG-05 保持 OPEN，CI 只跑合成。
-3. **CI workflow run：** 本分支 `essentials-fixture.yml` 的 run ID + SHA + pass/fail/skip。
+3. **CI workflow run：** 失败 run `35499223917` 已记录。需要修复后的 `essentials-fixture.yml` 绿 run ID + SHA + 明确 skip 数。绿合成 ≠ FG-05 PASS。
 4. **授权 reviewer 签核** DEC-01～07 与 FG-01～06。本 Agent 不能签署。
 
 **在上述 1–4 完成前，禁止创建 `TERRAIN_BEHAVIOR_CONTRACT_V1.md`，禁止把状态改为 CONTRACT FROZEN。**
