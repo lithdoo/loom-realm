@@ -81,6 +81,6 @@ AG-01→AG-02→AG-03→AG-04 **顺序集成**；AG-04 的纯 planner 可在 AG-
 | 事件策略 | 到达后 start/execute；同一 size 占用带不重复 execute；execute 后本检查点不消费 held 键（下一次输入） |
 | 注释命令 | 108/408 在 confirmable 桥页面视为可忽略（`PROJECT-DECISION-PROVISIONAL`） |
 | 跨图 jump | 落点越界 → `blocked`，不拆两次 walk |
-| 真图产品对照 | 官方 FSDB 抽样在 `test/terrain-behavior-live-product.test.mjs`（M14 vertical）。`game-libs/map` 源与测试不得 import `tools/`，以免破坏既有 M14 边界门禁。素材缺失时该项 SKIP，不等于 PASS。 |
+| 真图产品对照 | 官方 FSDB 抽样在 `test/terrain-behavior-live-product.test.mjs`，由 `@loomrealm-example/essentials-v21.1` 测试顺序执行。`game-libs/map` 源与测试不得 import `tools/`，以免破坏既有 M14 边界门禁。素材缺失时该项 SKIP，不等于 PASS。 |
 
 原版 RGSS 逐帧、真图 CI 再分发许可、FG 签核仍为 `BEHAVIOR QUALIFICATION PENDING`。

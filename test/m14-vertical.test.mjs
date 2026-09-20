@@ -298,6 +298,7 @@ test("map view clears full state and delayed same-resource decode paints only la
         tileVisuals: sourceIndex === null ? [] : [[tileId, -1, 0, sourceIndex]],
         chunks,
         cameraMotion: null,
+        bridgeLevel: 0,
       };
     };
     const sample = (sx, sy) => {
