@@ -1,90 +1,80 @@
 # 地图地形行为系统：实施闭环与验收计划（Essentials v21.1）
 
-> 状态：**Implementation plan / NOT Implemented / NOT Qualified**。本文是 [地形行为设计草案](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md) 的实施配套文档；问题及真实地图身份见 [Ledge / Bridge 通行缺口分析](./LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md)。2026-09-20 制定。本文只规定交付顺序和验收，不表示已经改动代码、执行测试或通过 qualification；不追溯修改冻结的 M14 first-slice 合同。
+> 状态：**Implementation plan / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 多维度一致性复核修订。本文依赖 [设计草案](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md)，冻结条件见 [冻结准备](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)。不是已执行的代码计划或资格通过声明；不追溯修改 M14 历史合同。
 >
-> 确定的范围：**内部易扩展，暂不支持外部扩展**。不提供插件 API、动态注册、行为 DSL、任意 Ruby/JS 执行器或通用 RMXP 事件解释器。桥和悬崖是第一批真实用例；冰面、水域等只保留数据和未来扩展方向。
+> 范围：内部可扩展、无外部插件或动态 handler；只实现 Neutral、Bridge、Ledge 的本轮所需行为，其他 TerrainTag 保留数据。桥验 Map 7 Cedolan City，悬崖验 Map 47 Route 7；Map 27 Day Care 不是桥样本。
 
-## 1. 闭环的定义与唯一执行链
-
-“完成”必须贯通原版数据 → 可校验投影 → Map Library 语义 → Runtime 事件和动作 → 同步渲染 → 真实地图玩法 → 自动化回归。只有接口、合成单测或静态画面均不算完成。
+## 1. 完整交付链及当前纠错
 
 ```text
-原版 RMXP Map / Tileset / Map 7 桥头事件
-  -> fixture consumer：严格投影 terrain_tags、狭义 MapAction
-  -> Content：加载/校验 Map、Tileset、MapAction
-  -> Map Library：有效地形解析与通行策略（含 bridgeLevel）
-  -> event dispatch：按原版时序决定接触/踏入/边缘动作
-  -> movement planner：blocked / walk / jump
-  -> Runtime executor：验证后启动一个动作，统一更新状态
-  -> render projection：同一状态生成 bridge depth、player/camera motion
-  -> browser renderer：按受校验协议绘制，不重新推断地形玩法
-  -> 验收：Map 7 / Map 47 实际路径 + 合成/集成/浏览器/回归测试
+Essentials v21.1 源 Map/Tileset/Event
+ → 逐项取证；selective importer 保留 terrain_tags 和运行时必需事件事实
+ → prepared FSDB / M12 ContentClient 的严格结构校验
+ → 两种内部查询：有效地形、逐层通行（含桥层）
+ → 玩家按原版顺序作方向通行判断；失败才检查面前 touch
+ → 成功则选择 walk / 单次两格 jump
+ → Runtime 执行动作；完成后结算应触发事件/transfer/下一输入
+ → 同次 RenderDomain 更新人物、camera 和桥面深度
+ → Browser 严格校验、原子呈现；Map 7/47 + 回归验证
 ```
 
-**Runtime 是人物位置、方向、`bridgeLevel`、活动动作和事件进度的唯一权威状态。** 事件仅改变声明的状态；行为模块读取状态并计算结果；Renderer 只消费投影数据。禁止在 Map ID、坐标、tile ID 或 Renderer 中二次写死碰撞逻辑。代码可由少量内部纯函数/静态分发构成，不设计所有地形通用的巨型 handler 接口。
+**删除旧设计假设**：“contact 动作先执行并立即重新求本次通行”不是 v21.1 `move_generic` 的既定行为，不得实现。原版先检查 `can_move_in_direction?`，失败才 `check_event_trigger_touch`；`Game_Event#start` 标记待执行，不是同步执行脚本。具体事件调度、桥头切换时间和再输入由真实 Map 7 证据决定。已有 Runtime `ContactTransfer` 在 `canMove` 前启动的路径需做兼容性审计，避免把既有简化实现当原版依据。
 
-## 2. 实施前取证门禁（不可跳过）
+**另一个交叉断点**：`map-transfer-consumer.mjs` 使用不含 terrain/player state 的 `projectedD0Passable` 在导入时过滤 step、contact 和 edge。不能一边增加 runtime 桥层判断，一边让 importer 在此前永久丢弃状态相关出口。需划清可静态证明的筛选和必须延迟到 Runtime 的事件事实；补充普通传送和桥附近传送回归。
 
-1. 用本地 Essentials v21.1 FSDB 读取 **Map 7 Cedolan City** 桥头的实际事件 ID、坐标、页面条件、触发类型、through、指令码及执行顺序，留取可复现的事件摘录/测试素材。**Map 27 是 Day Care 室内，不当作运河桥样本。** 未读取真实事件前，不声称任何特定桥头采用 contact 或 step。
-2. 对照 v21.1 原版 `Game_Map#playerPassable?`、`Game_Player#move_generic`、`Game_Character#jump`/`jumpForward`、桥状态函数及 TilemapRenderer，记录判断先后、状态转移、绘制深度。尤其明确：原版跳跃先通过面前方向判断，再由 `jump` 判断最终落点；**不能额外要求跨越格可以按普通一步通行**。其他角色/事件阻挡、地图边界与跳跃联通规则以原版证据确定，不凭设计预设。
-3. 建立一张事实表：原版证据位置、原始数据/事件、目标内部语义、覆盖测试及暂不支持项。遇到条件事件、混合指令、未知 trigger 或无法核实的事件分支，按 map/event/page ID 报告并阻止该行为被错误投影，不能静默忽略。
-4. 检查现有 M14 严格 Tileset 合同及实际 fixture 生成路径，决定 schema 与历史 fixture 的显式迁移方式。**完整保留 0–17 标签不等于本轮支持 18 类玩法**；未知/不支持标签不得擅自转换为 Neutral 或无条件放行。
+## 2. 阶段 0：冻结前取证与基线记录
 
-原版证据入口：[TerrainTag](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/010_Data/001_Hardcoded%20data/011_TerrainTag.rb)、[Game_Map](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/004_Game_Map.rb)、[Game_Player](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/008_Game_Player.rb)、[Game_Character](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/006_Game_Character.rb)、[Overworld](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/012_Overworld/001_Overworld.rb)、[TilemapRenderer](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/006_Map%20renderer/001_TilemapRenderer.rb)。本地 FSDB 可能未提交到 Git；若 CI 无法访问，需提交合法的最小派生 fixture/断言及其来源说明，而非伪造全地图统计。
+1. 从可访问的本地 Essentials v21.1 FSDB 提取 Map 7 **每个相关**桥头事件的 map/event/page ID、坐标、完整页面条件与选页优先级、trigger、through/graphic、命令码/参数/缩进/顺序；辨明脚本开始与实际生效时间。原版 Ruby 证据固定在 v21.1 tag/blob。**未提取之前不写死坐标、trigger 或事件命令。**
+2. Map 47 固定可复现的起点、朝向、输入序列、面前 tag、源格方向通行、最终落点、落点事件/角色、反向和阻挡负例。`jumpForward(2)` 先有方向检查，`jump` 校验最终落点；不得额外把中间格当第二次普通走路。图外及跨连接地图的情况需确证或明确不支持。
+3. 审计 `projectedD0Passable`、`selectStaticPage`、`emitStep`、`emitContacts`、`expandConnection` 对 Neutral/Bridge、页面条件和状态依赖的误分类/丢弃；列旧输入→原记录→期望输出差异。无关 NPC/剧情事件不构成全图 fail；相关桥头候选解析不完整须报 map/event/page 和原因。
+4. 记录当前 base SHA、正式 M14/M15 ledger 状态及实际可取得的 CI/本地证据。当前代码已有 Tileset `autotile_names`，历史四字段断言漂移必须单列；不可悄悄削减 schema、篡改旧资格或用旧 subject PASS 证明新 subject。对 CI 某项 PASS，只声称该 workflow 在指定 SHA 通过，不自动宣称正式 Closed。
+5. 依法确认真实素材的使用/分发条件：能提交则提供最小派生 fixture、来源指纹与生成过程；不能提交则标记 CI 覆盖缺口并保持相关冻结门禁 OPEN，不能造假的原版路线。
 
-## 3. 四个实施 PR：每个都可独立审查，功能只在纵向切片结束后宣称完成
+**阶段出口**：`TERRAIN_BEHAVIOR_EVIDENCE.md` 逐条事实/源链接/事件摘录/测试编号真实填写；`TERRAIN_BEHAVIOR_CONTRACT_V1.md` 只在字段/时序/fixture 审查完成后作为唯一增量规范冻结。模板不是证据，状态不得提前改为 Frozen。
 
-| PR / 依赖 | 代码落点及最小产物 | 必须通过的门禁 | 完成声明 |
+## 3. 四个实施 PR（以冻结合同为唯一实施依据）
+
+| PR | 依赖 / 改动边界 | 可审查产物 | 合并门槛及允许的完成声明 |
 |---|---|---|---|
-| **1. 数据贯通**（独立） | `tools/fixtures/essentials-v21.1/.../m14-consumer.mjs` → `struct.Tileset.terrain_tags`；`game-libs/map/src/semantics.ts` 合同与校验；fixture 生成与 Content 实际读取 | 0–17 原始值、表维度/范围、tile ID 引用、旧 fixture 迁移与负例；可查 Map 7 / 47 真实 tag | 仅数据可用，不宣称桥/悬崖已可玩 |
-| **2. 最小行为骨架**（依赖 1） | 内部 `resolveTerrain`、`evaluatePassability`、`planMovement` 纯函数；`bridgeLevel` 数值状态语义；`blocked/walk/jump` 内部计划，Runtime 普通行走接入口 | Neutral 多图层、桥层两种状态、双向方向位/priority、越界、普通走路与既有 transfer 回归 | 仅规则及动作计划正确；桥尚未完成 |
-| **3. 桥纵向闭环**（依赖 2） | 窄范围 MapAction/桥头事件投影及 Content 加载；事件分发、状态变更、桥 tile 深度与人物同步发布 | Map 7 两端上/下桥、桥下穿行、折返、接触/踏入时序、传送或重入后的状态语义，画面遮挡正确 | 验收通过后才可声明 Bridge 完成 |
-| **4. 悬崖纵向闭环**（依赖 2；应在 3 的共用运行时协议稳定后集成） | 依原版规划一次两格 `jump`；落点/事件规则；单动作 ID、镜头/人物 motion、跳跃弧线 | Map 47 合法跳下、反向阻挡、落点受阻不穿墙、跨越格无误触发、连续输入/resize/transfer 回归 | 验收通过后才可声明 Ledge 完成 |
+| **1 数据与投影** | 冻结合同；`m14-consumer.mjs`、`map-transfer-consumer.mjs`、`semantics.ts`、fixture/Content 测试；不改 Core | `terrain_tags` 精确投影/校验；传送静态筛选与动态事实保留规则修正；旧 fixtures 按明确迁移 | 0–17 数据可查，坏表拒绝，相关传送不被误删；只宣称数据准备就绪 |
+| **2 内部规则与普通一步** | PR 1；Map Library 内部纯函数及 Runtime 最小接线 | `resolveEffectiveTerrainTag` 与 `evaluatePassability` 分离；Neutral/Bridge、源格/目标格 passage；完整 MovementPlan 类型冻结，执行器仅 `blocked/walk` | 多层、双向、None/NoEffect、旧一格步进/普通 transfer 回归通过；不可宣称桥已完成 |
+| **3 Bridge 纵向闭环** | PR 2；事件 consumer、狭义 MapAction、Runtime、投影与必要 Browser 修改 | Map 7 白名单桥事件、选页/调度所需最小语义、数值 bridgeLevel、桥面深度缓存失效和同更新 | 真实 Map 7 桥两端、桥下、折返、桥头碰撞、附近传送、遮挡；通过后才宣称 Bridge 完成 |
+| **4 Ledge 纵向闭环** | PR 2 + PR 3 已稳定的共用运动协议；Ledge planner、Runtime、Browser、测试 | 原版方向+落点双阶段检查；一次 jump、统一 motion ID、动画弧线、事件结算 | Map 47 正向/反向/阻挡/中间事件、连续输入、resize、切图通过；通过后才宣称 Ledge 完成 |
 
-建议 PR 1、2 首先分别合并数据与内核；PR 3 为第一个用户可见的完整纵向切片；PR 4 用第二种行为检验内核能否复用。若 PR 4 要在 `attempt` / Renderer 到处追加 ledge 判断，应收敛职责后再合并，而非将其解释为“扩展性已经实现”。PR 划分是目标，不要求为了数量强拆不可单独验证的半功能。
+PR 1、2 应按依赖合并；PR 3 是第一个完整玩家可见纵向切片；PR 4 检验同一内核能否复用。PR 4 可提前开展独立规划器测试，但共享 `runtime.ts`／`map.browser.js` 的最终集成需在 PR 3 motion 协议稳定后进行，禁止两个 Agent 无审查覆盖同一文件。若真实证据要求调整 PR 划分，先更改规格和任务卡，不为凑四个 PR 强拆半功能。
 
-## 4. 行为与事件边界：明确谁判断、何时执行
+## 4. 必须落实到精确合同的交叉边界
 
-- **Terrain resolution**：读取 z=2→1→0 的原始 tile/tag/passage/priority；`Neutral` 忽略**该图层通行**而不是使全坐标自动放行。桥下 `bridgeLevel===0` 跳过 Bridge 并继续下层；桥上 `bridgeLevel>0` 使用 Bridge passage 并结束该格判定。`None` 与 `NoEffect` 都不能被误当 Neutral。
-- **Passability**：保留现有出发格方向与目的格反方向检验；Bridge 是通行层选择策略，不是 jump 动画特例。普通地图与传送不因抽象改变规则。
-- **Event projection**：复用现有 RMXP 事件结构读取能力，**不把 MapTransfer 偷换成 MapAction**，可以提取共享事件解析工具。仅在确认真实 Map 7 页面、触发/条件、指令顺序后白名单解析 `pbBridgeOn`/`pbBridgeOn(支持的整数)`/`pbBridgeOff`，按原值投影 `set-bridge-level`。未知混合脚本报 unsupported 并附带 map/event/page ID。
-- **Event dispatch**：接触触发在原版规定的碰撞/尝试阶段处理，踏入触发在动作完成阶段处理；必要时执行接触状态动作后重新求一次通行结果，避免“状态未切换导致永远不能进入桥头”。不要默认所有事件均到达后触发。桥状态跨地图保留或重置须按原版验证，不能每次加载强制清零。
-- **Jump planner**：原版前进方向判断通过且面前为 Ledge 时，产生一个两格 jump；沿用原版最终落点与事件碰撞语义，不能把它拆成两次 walk，也不能额外要求跨越格走路可通。完整动作失败保持起点；跨越格不得意外触发普通 step transfer。确切的跨地图边缘跳跃行为另按源代码和真实场景验收。
-
-接口只要求最小的内部结果类型，例如 `blocked`、`walk(to)`、`jump(to,distance:2)`。未来的滑行、水域状态和踩灰地图修改依所属阶段加入，不预注册空 handler。
-
-## 5. Runtime / Browser 同步协议门禁（防止“碰撞对了、画面错了”）
-
-当前 `game-libs/map/src/runtime.ts` 在动作开始时把位置更新为目标格并发布相机/人物 motion，普通步进是 `WALK_STEP_MS=250`；`game-libs/map/browser/map.browser.js` 的严格校验将 player/camera motion 的 `durationMs` 限定为 250。跳跃不能只增加 Runtime 的 `kind: jump`：需要同时定义、验证及消费**同一个** motion ID、类型、持续时间和起终点；新的持续时间须受有界校验，不任意放开。Renderer 通过 motion kind 算跳跃弧线，不通过 terrain tag 判断动作种类。动作完成后再按原版时序处理抵达事件及 held input，阻挡动作不会留下半个状态。resize、取消、切图时不得残留动画或定时器。
-
-桥面深度目前在图块投影中按 `priority` 计算，Runtime 又会复用已覆盖视口的 tile projection window。**`bridgeLevel` 改变必须令相关渲染投影失效或重新投影**，即使坐标与 camera 均未变；同次 domain 更新中发布桥面深度及玩家状态，不能先撞击状态更新、下一帧再调整遮挡。若 depth 或 sprite plane 方案需改浏览器严格 payload schema，应同步补全验证和正反例测试；不能靠提高所有玩家的全局 `z-index` 破坏其他建筑和树木遮挡。
-
-## 6. 自动化验收矩阵与质量门禁
-
-| 层级 | 断言示例 | 证据/运行入口 |
+| 合同项 | Producer → Consumer | 必须冻结的内容 |
 |---|---|---|
-| 投影契约 | v21.1 18 个标签原值；不合法维度、缺表、越界 tile、未知事件形式拒绝；旧 fixtures 明确迁移 | `npm run test:m14:projection` + 新投影负例 |
-| 语义单测 | Neutral overlay `0x0F` 不堵下层；桥层启闭与两侧方向位；普通地面、边界、NoEffect 区别；跳跃只按原版前置/最终落点条件 | `@loomrealm-game/map` 测试 + 独立行为纯函数测试 |
-| Runtime 集成 | contact/step/edge 次序；桥 level 设置、失败动作零部分提交、jump 单 ID、落点只触发一次；连续输入、resize、切图后状态一致 | Map Library 集成测试；新增专用 terrain behavior 测试 |
-| 浏览器呈现 | 桥下遮住人物、桥上人物可见、桥层切换同更新；跳跃抛物线、相机联动、duration/epoch/motion ID 严格匹配及错误 payload 拒绝 | Browser renderer 测试 + 可复现的帧/截图断言 |
-| 真地图纵向 | **Map 7** 双端上/下桥、桥下通过、折返、切图；**Map 47** 合法跳下、反向受阻、落点受阻、跨越事件不过早触发 | 真实素材驱动自动化测试；必要时附本地人工试玩记录，不能用合成示例替代真实地图 |
-| 历史回归 | 普通一步、原有 MapTransfer、角色相机、held input、viewport resize、包构建 | `npm run build:m14`、`npm run test:m14`、`npm run test:m15`，必要时新增专项命令 |
+| Data | RMXP → importer → FSDB → `TilesetRecord` | `terrain_tags` exact key/shape/长度/值域/引用、None/Neutral/NoEffect、旧数据迁移/错误 |
+| Transfer | Event → importer → MapTransfer/MapAction → Runtime | 静态筛选 vs 动态判定；页面/trigger/through/图形、事件顺序、重复冲突、缺 Content 记录、相关未知候选拒绝 |
+| Terrain | validated map+tileset → internal rules | 有效标签查询与逐层 passage 查询分离；Neutral 仅忽略本层；桥上/下策略；源格/目标格双向 passage |
+| Event time | directional input → Runtime event dispatch | 先判通行；失败 touch 的 start 与脚本生效分离；成功运动完成后 step；edge、transfer、held input 与冲突优先级 |
+| State | Runtime → passability + projection | `bridgeLevel` 初始/合法值/跨图/重入/Frame 生命周期、变更时机、失败原子性；原四字段 initial input 不擅自扩大 |
+| Motion | Runtime projection → Browser | walk/jump kind、起终点、duration 单位和精确范围、单 ID、scene/visual epoch、camera/人物一致进度、弧线与帧、resize/取消/切图/重入/非法包 |
+| Depth | bridgeLevel → tile window → Browser | 桥状态变化时不论镜头是否移动均使缓存失效；桥面 depth + 人物同一次 domain update、同 epoch 接受；禁止全局玩家置顶 |
+| Support | source facts → current supported subset | 其他地形只保留源标签，不执行完整水域/冰面等玩法；不把未实现功能伪装为 Neutral/永远可走 |
 
-`test:m14` / `test:m15` 是否通过须以实际运行记录为准；当前文档不声明任何测试已通过。真实 FSDB 若不可在 CI 重现，至少提供合法可提交的最小派生 fixture 与对应校验，明确本地全量试玩和 CI 覆盖之间的差距。
+冻结合同必须写出 TypeScript exact types、JSON 正反样例、状态转换矩阵和事件次数。不得仅用“原子”“同步”“复刻原版”等自然语言让 Agent 自己决定。普通 walk 保持既有 250ms 行为；Browser 在 validator、启动、续接和插值多处固定 250，jump 不能只修改 payload 校验；时长/弧线取证后确定。原版事件碰撞数据若超出最小投影，需按证据决定收窄支持范围或增加必要事实，不可测试声称全 NPC 阻挡却不载入 NPC。
 
-### PR 合并检查表（每项均须给出证据）
+## 5. 验收矩阵与新 subject 规则
 
-- [ ] 取证：原版相关实现与 Map 7 事件页面/命令留有可复现来源；不支持项列明。
-- [ ] 数据：schema、consumer、fixtures、Content、校验与迁移一致；没有丢失 terrain tag。
-- [ ] 规则：源格/目标格、Neutral、Bridge、jump 的判定在纯函数测试中与原版一致。
-- [ ] 时序：contact/step/edge、动作开始/完成、转图、held input 不产生重复或遗漏事件。
-- [ ] 呈现：Runtime 与 Browser motion 协议同步；桥层改变会使投影更新；跳跃是一个连续动作。
-- [ ] 端到端：Map 7、Map 47 对应真实路线和负例完成；给出 fixture、脚本或可复现步骤。
-- [ ] 回归：记录实际执行命令、结果和未覆盖项；旧 M14 qualification 不被事后篡改。
-- [ ] 文档：根据通过的验收更新设计文档的实施状态、PR/提交、仍不支持的功能；只有达标才将 Bridge / Ledge 标记为已实现。
+| 测试族 | 必须覆盖 |
+|---|---|
+| `DATA-*` | 原始 18 tag、Table 坏 shape/短表/非法引用、现有 autotile_names、迁移、真实 Content 读取 |
+| `TR-*` | importer 中旧错误静态过滤的对照负例、条件/页面白名单、step/contact/edge、跨图出口不丢失 |
+| `BR-PASS-*` | None/Neutral/NoEffect 区别；桥上/下、双向 passage、桥头阻挡与普通地面回归 |
+| `BR-EVENT-*` | Map 7 真实事件执行一次、start 与生效分离、状态改变、传送重入、相关未知候选显式失败 |
+| `BR-RENDER-*` | 桥深度变更即使原地不动也更新，与人物同次/同 epoch；树冠、屋檐遮挡不退化 |
+| `LD-JUMP-*` | 面前可通+有效 Ledge、最终落点、逆向、阻挡、边界、中间格事件不误触发 |
+| `MOTION-*` | 原版对应的 jump 单动作、弧线、相机与人物共同进度，ID/时长/epoch 正反例、resize/切图/取消 |
+| `REG-*` | 普通一步、现有 transfers/held input、viewport、M14/M15 已存在路径、包边界 |
 
-## 7. 明确的停工线与交付声明
+真实 Map 7／47 必须提供固定起点、输入序列与逐步 expected（mapId、x/y、朝向、bridgeLevel、动作、事件计数、桥面/人物遮挡）；合成测试与人工试玩均不能取代真实可复现集成证据。测试命令以 package.json 当前存在的入口为准（如 `npm run build:m14`、`npm run test:m14:projection`、`npm run test:m14`、`npm run test:m15`）；专项命令只有创建并实际运行后才列作通过。报告每条命令、Git SHA、环境、结果与未覆盖项；历史 qualifier 的 Closed 与新 subject 的资格严格分开。
 
-若取不到真实桥头事件，先交付规则及明确的待验证项，**不得编造 map/event ID、触发时机或自称桥已闭环**。若发现原版跳跃与当前规划假设冲突，先补证据和测试再修改规划器。若 renderer 无法与 Runtime 同更新表现，桥验收不得通过。不得以修改原始 `passages`、地图专属坐标 hack 或关闭负例测试作为修复。
+## 6. 每个实施 PR 的停止线与完成报告
 
-**最终交付陈述应包含：** 数据与代码变更位置、原版事实表、Map 7 / 47 实测结果、自动化命令及执行结果、当前不支持项、设计文档状态更新。所有验收完成之前，本文件始终保持 `NOT Implemented / NOT Qualified`。
+任务卡固定 base SHA、合同版本、依赖、允许/禁止路径、规则/测试 ID、实际命令、错误处理、交接人。遇到缺失 FSDB、原版事实矛盾、事件无法保真、schema/ABI 冲突、测试不可合法复现、旧基线已失败时，只暂停受影响工作并提交 `事实及可复现证据 → 冲突条款 → 备选方案 → 下游与测试影响`；不能放宽校验、删负例、编造桥坐标或改 passages。其他已冻结且独立任务可继续。
+
+完成报告须含变更文件与 commit、规则和 fixture 引用、Map 7/47 结果、实际执行的构建/测试、正式资格影响和仍不支持项。**设计冻结≠功能实现≠qualification Closed；PR #41 仍然只改文档，没有完成 Map 7 本地取证或代码测试。**
