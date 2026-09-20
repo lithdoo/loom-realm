@@ -2,7 +2,7 @@
 
 > 状态：**Evidence record / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。
 > 本文只记录已经从本地官方 corpus 和固定 tag `v21.1` 源码读到的事实。它不是冻结合同，不是实施计划，也不证明任何 Runtime 行为已经实现。
-> 范围：Map 7 Cedolan City 负例全事件取证（含本轮严格扫描复核）；Map 21 Route 2 桥正例正式取证（§14）；同 corpus 69 张地图清单。Map 47 Route 7 悬崖路线尚未取证。Map 27 Pokémon Day Care 不是桥样本。未运行原版 RGSS。
+> 范围：Map 7 Cedolan City 负例全事件取证；Map 21 Route 2 桥正例（§14 历史指纹 + **§15 本轮 REVIEW-01～04 重跑**）；Map 47 Route 7 悬崖静态取证（§15.4）；同 corpus 69 张地图清单。Map 27 Pokémon Day Care 不是桥样本。未运行原版 RGSS。
 
 ## 1. 取证范围、日期、仓库 HEAD、原始素材
 
@@ -47,8 +47,10 @@ Map 21 正式对象指纹见 §14.1。清单阶段记录的 SHA-256 与本轮复
 - 取证库：`tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-event-evidence.mjs`
 - CLI：`tools/fixtures/essentials-v21.1/map7-bridge-evidence.mjs`（默认 Map 7）
 - CLI：`tools/fixtures/essentials-v21.1/map21-bridge-evidence.mjs`（只允许 Map 21）
+- CLI：`tools/fixtures/essentials-v21.1/map47-ledge-evidence.mjs`（只允许 Map 47）
+- 独立核对：`tools/fixtures/essentials-v21.1/map-evidence-independent-check.mjs`（直接 decode Table，不比较 collectMapEvidence JSON 自身）
 
-白名单仅 Map **7 和 21**。其它 ID（含 27、47）立即失败。`--corpus-scan` 要求 MapInfos/Tilesets/CommonEvents 存在，否则 corpus completeness=INCOMPLETE，不得把缺表零命中当成证明。扫描含 355/655、移动路线 code 45、111 type 12、117 嵌套图。不执行 Ruby，不是通用事件解释器。
+白名单仅 Map **7、21、47**。其它 ID（含 27）立即失败。`--corpus-scan` 要求 MapInfos/Tilesets/CommonEvents 存在，否则 corpus completeness=INCOMPLETE，不得把缺表零命中当成证明。扫描含 355/655、移动路线 code 45、111 type 12、117 嵌套图。不执行 Ruby，不是通用事件解释器。
 
 脚本拼接与 v21.1 `Interpreter#command_355` 一致：从 code 355 起，把后续连续 355 与 655 用 `\n` 连接。
 
@@ -181,11 +183,11 @@ v21.1 `Game_Event#refresh` 从最后一页向前选第一张条件满足的页�
 
 ### 未解决问题
 
-1. Map 47 悬崖路线。
-2. Map 21 动态逐帧 RGSS 未跑；§14.6 路线是静态推论。
-3. 合法可分发的 CI fixture 仍无；附录 A 许可边界见附录 L。
-4. Map 47 Ledge 未取证。
-4. 未运行原版游戏。
+1. 原版 RGSS 动态逐帧未跑；§15 路线与 over_trigger 结果都是 STATIC-INFERRED，不是 DYNAMIC-OBSERVED。
+2. 合法可分发的 CI fixture 仍无；附录 A 许可边界见附录 L。
+3. 解释器是否在同一次输入周期内跑完短 pbBridgeOn/Off 脚本：未动态验证。
+4. 跨连接地图跳跃、Map 47 中间格有真实事件的样本：本图没有现成原始事件。
+
 
 ## 11. 事实 → 设计规则候选 → 将来测试 ID
 
@@ -195,7 +197,7 @@ v21.1 `Game_Event#refresh` 从最后一页向前选第一张条件满足的页�
 | 全 corpus 仅 Map 21 有桥 | 真实桥正例须单独立项 Map 21 | `BR-EVENT-MAP21-*`（未授权实施） |
 | Tileset 1/2/6 有 tag 15 定义 | 投影 terrain_tags 与是否放置是两件事 | `DATA-TAG-15-*` |
 | `move_generic` 先通行后 touch | 禁止「contact 后立即重算本次移动」 | `BR-EVENT-ORDER-*` |
-| Map 21 确认事件 trigger 1、through false、空图形、`size()` | 桥头是不可见扩大碰撞的 player-touch，不是门图形 | `BR-EVENT-SIZE-*` |
+| Map 21 确认事件 trigger 1、through false、空图形、`size()` | 形态是不可见占用带；是否 here 取决于 passable?(d=0)。本轮八事件计算结果为 here | `BR-EVENT-SIZE-*` |
 | 邻接桥面的 Yamask 进化事件无 pbBridge | 邻接 ≠ 桥脚本；不得误投影 | `BR-EVENT-ADJ-NEG-*` |
 
 ## 12. 取证结论与覆盖范围
@@ -264,7 +266,7 @@ v21.1 `Game_Event#refresh` 从最后一页向前选第一张条件满足的页�
 | 横条 size(2,1) @ x=22 | Event 22 (22,57) `pbBridgeOn` | Event 20 (22,58) `pbBridgeOff` |
 | 横条 size(2,1) @ x=14 | Event 25 (14,68) `pbBridgeOn` | Event 23 (14,69) `pbBridgeOff` |
 
-注释说明 `size()` 用一个事件覆盖整条通路。完整命令级事实、`size()` 源码链、四组路线和传送审计见 **§14**。本节表格保留为 corpus 清单摘要，不再当作「尚未取证」。
+注释说明 `size()` 用一个事件覆盖整条通路。完整命令级事实见 **§14**；本轮触发矩阵与连续路线见 **§15**。本节表格保留为 corpus 清单摘要。
 
 ### 13.4 Map 21 未确认候选（不得当成桥脚本）
 
@@ -395,11 +397,11 @@ Tileset 1 passage/priority 随 tile ID 变化；67/93 格在 importer `projected
 | 切图清零 | `003_Game processing/002_Scene_Map.rb` | `Scene_Map#transfer_player` | 始终 `pbBridgeOff` |
 | 桥通行 | `004_Game classes/004_Game_Map.rb` | `#playerPassable?` | `bridge==0` 跳过 Bridge 层；`bridge>0` 只信桥面 passage |
 
-因此 Map 21 这 8 个事件是 **走上占用格之后** 启动，不是「移动失败后的面前 touch」。不得把空图形 `size()` 带写成 bump-to-start。`over_trigger?` 使用的 `passable?(..., 0, ...)` 方向位在 RGSS 中的精确位移 **UNVERIFIED**；事件注释写明它们覆盖通路，STATIC-INFERRED 占用格可走。
+空图形 `size()` **只取得** `over_trigger?` 的资格，不是结果。v21.1 `playerPassable?` 对 `d=0` 使用 Ruby 1.8 `1 << ((0/2)-1)` 右移，bit=0（忽略方向位，仍检查 `0x0f` 与 priority）。本轮对八事件**全部占用格**逐层计算后，bridgeLevel 0 与 2 均为 `over_trigger?=true`，分支 **here**（STATIC-INFERRED）。占用格是地面（如 tile 387），不是 tag 15，故桥层不改变该结果。失败 bump **不会** start：`check_event_trigger_touch` 跳过 over_trigger 事件（SOURCE-PROVEN）。详见 §15.2。不得把空图形写成未经计算的 bump-to-start 或必然 walk-on。
 
-从不同方向命中：玩家只要 **成功走进** 任一占用格即 `at_coordinate?` 为真。横向 3×1 带从东/西/南/北踏入均可；竖向 1×4 带同理。失败 bump 不会 start。
+从不同方向命中：玩家只要 **成功走进** 任一占用格即 `at_coordinate?` 为真。横向 3×1 带从东/西/南/北踏入均可；竖向 1×4 带同理。失败 bump 不会 start 这些 here 事件。上桥必须从 Off（陆地）外侧走向 On；中北组陆地在北，见 §15.3。
 
-### 14.6 四组桥端最小路线（静态）
+### 14.6 四组桥端最小路线（静态；已被 §15.3 取代为连续输入）
 
 下列坐标与输入是 STATIC-INFERRED。桥层切换时机的源码骨架是 SOURCE-PROVEN。逐帧日志 DYNAMIC-OBSERVED=无。未跑原版不得当作已动态验证。
 
@@ -446,7 +448,7 @@ input dir
 
 On y=68 更靠近北侧簇 5 (y=64–66)；Off y=69 更靠近南缘。
 
-1. 从 Map 7 北缘进入后向北上桥：MapTransfer 边 `(19–22, 76) dir=2 → Map 7 (40–43, 0)` 的反向是 Map 7 北走入 Map 21 南缘。`Scene_Map#transfer_player` SOURCE-PROVEN 会 `pbBridgeOff`，故入图 `bridge=0`。从 `(14,70), dir=8` → (14,69) Off → (14,68) On → 北至簇 5。
+1. 从 Map 7 北缘进入后向北上桥：反向连接是 Map 7 `(40–43,0)` dir=8 → Map 21 `(19–22,76)`。`transfer_player` SOURCE-PROVEN 会 `pbBridgeOff`，故入图 `bridge=0`。**不得从 (14,70) 起跳称端到端。** 本轮连续 11 步见 §15.3 南组。
 2. 从簇 5 向南下桥再出图：`(14,67), dir=2, bridge=2` → (14,68) On → (14,69) Off → 继续南至 y=76，东列 x=19–22 的 edge 进入 Map 7。切图再次 `pbBridgeOff`。
 3. x=15 同事件。
 
@@ -1685,3 +1687,114 @@ setTempSwitchOn("A")
 029 indent=0 code=0 empty-or-end params=[]
 ```
 
+
+## 15. 2026-09-20 取证器修复后重跑（本轮）
+
+> 状态仍是 **Evidence record / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。
+> 本节覆盖 REVIEW-01～04 修复后的同一套规则。§14 保留历史指纹与命令级摘录；与本节冲突处以本节为准。
+> 证据等级：SOURCE-PROVEN = 固定 tag v21.1 / commit `ea7b5d56d2436591160983c4e641a2ceee2d875a` 源码条件；FSDB-OBSERVED = 官方本地 rxdata 解码；STATIC-INFERRED = 未运行 RGSS 的逐格计算；DYNAMIC-OBSERVED = 无。
+
+### 15.1 环境与命令
+
+| 项 | 值 |
+|---|---|
+| 日期 | 2026-09-20 |
+| 分支 | `docs/map-terrain-behavior-freeze-handoff` |
+| 文档修订基线 | `240d084ceba236c6006afc89d7d4957991cf4992` |
+| OS / Node | Windows 10 / v22.12.0 |
+| 原版游戏 | **未运行** |
+| 本轮测试 | `node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs` → 36 pass / 0 fail / 0 skip（本机有 FSDB） |
+| 独立核对 | `map-evidence-independent-check.mjs`：Map 21 unique Bridge 93 且脚本 ID 4,7,10,20,22,23,25,28；Map 47 Ledge 30。不复用 `collectMapEvidence` JSON |
+
+```text
+node tools/fixtures/essentials-v21.1/map7-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --corpus-scan --output ".local/map7-bridge-evidence.json"
+node tools/fixtures/essentials-v21.1/map21-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map21-bridge-evidence.json"
+node tools/fixtures/essentials-v21.1/map47-ledge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map47-ledge-evidence.json"
+node tools/fixtures/essentials-v21.1/map-evidence-independent-check.mjs 7 21 47
+```
+
+完整 JSON 留在 gitignored `.local/`。仓库不提交原始 FSDB。CI 无 FSDB 时 live 项 skip ≠ PASS。旧 18/18 仅为 `5e71c7e` 历史。
+
+本轮比上一轮更严：逐层移植 `playerPassable?(d=0)`；占用格全部列出；Common Event 按调用入口可达；传送带 source/target mapId；COMPLETE/provenNegative fail-closed；路线从上桥陆地侧进入且断言 `bridgeLevel`。
+
+### 15.2 Map 21 八事件触发矩阵（REVIEW-01）
+
+Map021 SHA-256 `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575`，28708 字节，39×77，Tileset 1，events 17 / pages 22 / commands 132。Bridge unique=placed=93，tile IDs 1616,1617,1618,1627,1635,1643。独立核对一致。
+
+| eventId | 脚本 | 原点 | 占用 | over_trigger 0 | over_trigger 2 | 分支 | 等级 |
+|---:|---|---|---|---|---|---|---|
+| 4 | On | (20,49) size(1,4) | x=20 y=46–49 | true | true | here | STATIC-INFERRED |
+| 28 | Off | (19,49) size(1,4) | x=19 y=46–49 | true | true | here | STATIC-INFERRED |
+| 7 | Off | (14,31) size(3,1) | x=14–16 y=31 | true | true | here | STATIC-INFERRED |
+| 10 | On | (14,32) size(3,1) | x=14–16 y=32 | true | true | here | STATIC-INFERRED |
+| 20 | Off | (22,58) size(2,1) | x=22–23 y=58 | true | true | here | STATIC-INFERRED |
+| 22 | On | (22,57) size(2,1) | x=22–23 y=57 | true | true | here | STATIC-INFERRED |
+| 23 | Off | (14,69) size(2,1) | x=14–15 y=69 | true | true | here | STATIC-INFERRED |
+| 25 | On | (14,68) size(2,1) | x=14–15 y=68 | true | true | here | STATIC-INFERRED |
+
+占用格地面例：EV004 (20,46) z=0 tile 387，passage 0，priority 0，`d=0` bit 0 → return-true-priority-0。Event IDs 1、2 为 `pbEvolutionEvent(2)`，不是桥脚本。
+
+`start` 仅当 `@list.size > 1` 置位。八事件 listSize=11。解释器 `eval` 是否同一步完成 = STATIC-INFERRED。未实测 DYNAMIC。
+
+### 15.3 四组连续静态路线（ROUTE-21）
+
+公共连接：Map 7 `(40,0)/(41,0)/(42,0)/(43,0)` dir=8 → Map 21 `(19,76)/(20,76)/(21,76)/(22,76)`。入图 `bridge=0`（SOURCE-PROVEN `pbBridgeOff`）。BFS 起点一律 `(19,76)`。生成器：`map21-bridge-routes.mjs`。**上桥从 Off 外侧走向 On，结束 bridgeLevel=2；下桥反向结束 0。** 全部 STATIC-INFERRED / `notALiveRun`。
+
+**南组 EV025 On / EV023 Off（完整 11 步到桥头）**
+
+1. 连接落入 mapId=21 `(19,76)` dir=8 bridge=0。
+2. 输入 `up,up,up,up,up,up,left,left,left,left,left` → `(14,70)`（11 步，连续）。
+3. `up` → `(14,69)` 命中 EV023 Off，here start，推论 execute `pbBridgeOff`，仍 0。
+4. `up` → `(14,68)` 命中 EV025 On，here start，推论 execute `pbBridgeOn`，**2**。
+5. 沿 On 带 `right` → `(15,68)` 再次 start On（size 占用内重复启动，无 Wait）。
+6. 折返：从 `(14,68)` `down,down` → Off 然后陆地，bridge=0。
+7. 桥下：从 `(14,70)` `left,left`，不踏 On。
+8. 南缘负例：从 `(19,76)` 向南为地图外/不可走（STATIC-INFERRED）。
+
+**中南组 EV022 On / EV020 Off**
+
+- BFS `(19,76)` → 陆地 `(22,59)`：20 步。
+- `up,up`：`(22,58)` Off → `(22,57)` On，final bridge=2。
+- 反向两步下桥到 0。
+
+**中北组 EV010 On / EV007 Off**
+
+- Off 在 y=31（北），On 在 y=32（南）。陆地在北。
+- BFS `(19,76)` → `(14,30)`：73 步。
+- `down,down`：`(14,31)` Off → `(14,32)` On，final bridge=2。
+- 旧生成器从 `(14,33)` 向北会先 On 再 Off，结束 0；那是下桥，本轮已改正。
+
+**北跨组 EV004 On / EV028 Off**
+
+- BFS `(19,76)` → 陆地 `(18,46)`：37 步。
+- `right,right`：`(19,46)` Off → `(20,46)` On，final bridge=2。
+- 沿 On 带南走 y=47–49，每步再 start On。
+- 该陆地格有 blocked-or-touch 邻格（组级负例）。
+
+每一步字段（mapId、起终点、input、通行、占用、over_trigger/here/touch、start/execute、bridgeLevel）由 `replayInputs` 生成，完整逐步 JSON 在 `.local/round-map21-routes.json`。不得把该 JSON 当成原版运行日志。
+
+### 15.4 Map 7 负例与 Map 47 Ledge
+
+**Map 7** SHA `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7`，37559 字节，60×43。COMPLETE；provenNegativeBridge=true；11/19/521；Bridge 格 0；候选 0；117 调用 0。**证明范围**：本 corpus Map 7 全部事件页及已扫描 355/655/209/509/111-12/117 入口内无桥。不证明 autorun Common Event / 其他地图 eval。同图另有 5 个 Ledge 格（y=32 x=4–8），与桥负例无关。
+
+**Map 47 Route 7** SHA `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e`，32107 字节，70×43，Tileset 1。events 12 / pages 17 / commands 250。未知命令 **404** 已记录，未当空脚本。Bridge 0；Ledge unique=placed=30，tile 1194/1198/1212，bbox (14–45,10–18)。独立核对一致。
+
+合法两格跳样本（STATIC-INFERRED）：起点 `(16,9)` dir=2，越过 Ledge `(16,10)` tile 1194，落点 `(16,11)` `passable?(d=0)` true。中间格不占用。逆向从落点向北：`can_move` 失败，不跳。样本 Ledge 上无原版事件；中间格有事件的负例是合成规则，不是 Map 47 原始事件。跨连接跳跃 UNVERIFIED。无 DYNAMIC 跳跃日志。
+
+### 15.5 传送审计（REVIEW-04）
+
+PBS 涉及 Map 21 的三条：
+
+| 原始连接 | 期望边 | MapTransfer/21.json | D0 会丢（潜在） | 越界 | 结论 |
+|---|---:|---|---:|---:|---|
+| `21,E,0,23,W,1` | 3 | 匹配 3 | 有对照 | 0 | 无已证实误删 |
+| `21,S,0,7,N,21` | 4 | 匹配 4 | 35 | 193 | 入图落点 (19–22,76) 保留 |
+| `21,E,77,47,W,0` | 0 | 0 | 0 | 232 | 几何越界，不是 D0 误删 |
+
+源格与源图比较，目标格加载目标地图 Tileset。同坐标不同地图不可互换（`EV-TRANSFER-01`）。
+
+### 15.6 Common Event（REVIEW-03）与严格校验（REVIEW-02）
+
+本 corpus CommonEvents 无 `pbBridgeOn/Off`。Map 7/21 地图 117 调用 0。嵌套 A→B→C 由合成测试覆盖。Autorun/parallel CE 与未扫描地图的 `eval` 不在负例范围内。
+
+负 tile ≠ 空 0；短 Table、非 1D terrain_tags、orphan 655、111 缺参、117 非整数：不能 provenNegative，见 `EV-VALID-01`～`06`。

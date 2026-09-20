@@ -32,6 +32,10 @@ function printSummary(evidence) {
     `scriptsMatchingPbBridge=${evidence.coverage.scripts.filter((item) => item.matchesBridgePattern).length}`,
     `transferAudit steps=${evidence.transferAudit.actual.stepCount} contacts=${evidence.transferAudit.actual.contactCount} edges=${evidence.transferAudit.actual.edgeCount} d0FalseBridgeCells=${evidence.transferAudit.bridgeCellD0.d0False}`,
   ];
+  for (const row of evidence.triggerMatrix ?? []) {
+    const d0 = row.byBridgeLevel?.[0];
+    lines.push(`  trigger event ${row.eventId} overTrigger@bridge0=${d0?.overTrigger} branch=${d0?.branch} grade=${d0?.grade}`);
+  }
   if (evidence.completeness.issues.length > 0) {
     for (const issue of evidence.completeness.issues) lines.push(`  INCOMPLETE: ${issue}`);
   }

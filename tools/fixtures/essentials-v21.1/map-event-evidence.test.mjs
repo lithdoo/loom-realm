@@ -129,7 +129,7 @@ function mapRoot(events, width = 4, height = 3, tilesetId = 1) {
   });
 }
 
-test("CLI defaults to Map 7, allows Map 21, and refuses any other map id", () => {
+test("CLI defaults to Map 7, allows Map 21 and Map 47, and refuses any other map id", () => {
   assert.deepEqual(parseEvidenceArguments([]), { source: undefined, output: undefined, mapId: 7, corpusScan: false });
   assert.deepEqual(parseEvidenceArguments(["--source", "fsdb", "--output", "out.json"]), {
     source: "fsdb",
@@ -149,9 +149,15 @@ test("CLI defaults to Map 7, allows Map 21, and refuses any other map id", () =>
     mapId: 21,
     corpusScan: false,
   });
+  assert.deepEqual(parseEvidenceArguments(["--map", "47"]), {
+    source: undefined,
+    output: undefined,
+    mapId: 47,
+    corpusScan: false,
+  });
   assert.throws(
     () => parseEvidenceArguments(["--map", "27"]),
-    (error) => error instanceof ImportFailure && error.category === "MAP_EVENT_EVIDENCE_FAILURE" && /only reads Maps 7 and 21/.test(error.message),
+    (error) => error instanceof ImportFailure && error.category === "MAP_EVENT_EVIDENCE_FAILURE" && /only reads Maps 7, 21, 47/.test(error.message),
   );
   assert.throws(
     () => parseEvidenceArguments(["--unknown"]),
@@ -389,7 +395,7 @@ test("missing Tilesets or out-of-range tile IDs cannot be reported as a proven z
   const facts = extractMapFacts(mapRoot([[1, event(1, "NPC", 0, 0, [page({ commands: [command(0, 0, [])] })])]], 2, 2), 7, "Map007.rxdata");
   const missing = collectBridgeCells(facts, null);
   assert.equal(missing.scanStatus, COMPLETENESS.INCOMPLETE);
-  assert.equal(missing.provenNegative, undefined);
+  assert.equal(missing.provenNegative, false);
   assert.ok(missing.issues.length > 0);
   const values = Array(2 * 2 * 3).fill(0);
   values[0] = 9000;

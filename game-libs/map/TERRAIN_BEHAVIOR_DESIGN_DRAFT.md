@@ -1,8 +1,8 @@
 # 地图地形行为系统设计草案（Essentials v21.1）
 
-> 状态：**Design draft / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 取证提交 `5e71c7e` 后续复核修订。本文仅为增量设计背景，不是冻结合同。[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管交付、[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入、[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) 记 FSDB 观察、[后续证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 记**尚未修复的 REVIEW-01～04 / ROUTE-21**。原始证据 §14.5～14.6 中无条件的 walk-on/路线断言必须以复核文档收窄，不得直接用于实现合同。
+> 状态：**Design draft / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。本轮已修复取证器 REVIEW-01～04 并重跑 Map 7/21/47。本文仍只是增量设计背景，不是冻结合同。[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管交付、[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入、[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) 记 FSDB 观察（§14 历史指纹 + **§15 本轮重跑**）、[证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 记修复结果。Gate 仍全部 OPEN。
 >
-> 架构：**内部易扩展，不开放外部扩展**。保留 `tools` importer → prepared FSDB → M12 Content → `game-libs/map` Runtime → map-owned Browser 权责；不建插件、动态 handler、行为 DSL、万能事件解释器，不向 framework/Renderer/Hostra 下沉地图玩法。Map 7 是 Bridge 负例；Map 21 是 Bridge 正例（已有静态素材，触发和完整路线待复核）；Map 47 是 Ledge 待取证；Map 27 不是桥样本。
+> 架构：**内部易扩展，不开放外部扩展**。保留 `tools` importer → prepared FSDB → M12 Content → `game-libs/map` Runtime → map-owned Browser 权责；不建插件、动态 handler、行为 DSL、万能事件解释器，不向 framework/Renderer/Hostra 下沉地图玩法。Map 7 是 Bridge 负例；Map 21 是 Bridge 正例（静态触发矩阵与连续陆地侧路线已重算，仍缺动态 RGSS）；Map 47 是 Ledge 正例（静态 30 格已抽出）；Map 27 不是桥样本。
 
 ## 1. 目标及证据约束
 
@@ -10,7 +10,7 @@
 
 已可从 v21.1 源码确定的**条件骨架**：`Game_Player#move_generic` 先 `can_move_in_direction?`；失败才检查面前 touch；成功后走路或按规则选择 Ledge，移动完成后 `update_event_triggering` 才可能检查抵达事件。`Game_Event#start` 只置 `@starting`，脚本经之后解释器运行，不在同一次 `can_move` 后立即重算。
 
-**关键条件不能省略：** `Game_Player#check_event_trigger_here` 除要求玩家在事件占用格、trigger 匹配外，还要求 `event.over_trigger?`。v21.1 `Game_Event#over_trigger?` 对空图形事件进一步检查至少一个占用格 `map.passable?(i,j,0,$game_player)` 为真；图形名、through、hiddenitem 等也是条件。Map 21 八个空图形 `size()` 事件具备候选形态，**但尚未逐事件计算 `over_trigger?`，不能断言八个必然 walk-on，也不能断言每个失败 bump 一定不触发**；两条分支依具体结果确定。方向 `d=0` 的原版调用结果要用固定源码和本地地图事实核实。参见[复核 REVIEW-01](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)。
+**关键条件不能省略：** `Game_Player#check_event_trigger_here` 除要求玩家在事件占用格、trigger 匹配外，还要求 `event.over_trigger?`。v21.1 `Game_Event#over_trigger?` 对空图形事件进一步检查至少一个占用格 `map.passable?(i,j,0,$game_player)` 为真；图形名、through、hiddenitem 等也是条件。空图形只取得 over_trigger **资格**，不是结果。本轮对 Map 21 八个事件全部占用格按原版逐层 `playerPassable?(d=0)` 算出 `over_trigger?=true`、分支 **here**（STATIC-INFERRED）。失败 bump **不会** start 这些事件，因为 `check_event_trigger_touch` 跳过 `over_trigger?`（SOURCE-PROVEN）。`d=0` 在 Ruby 1.8 中 `1 << -1` 为右移，bit=0。参见[复核 REVIEW-01](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 与证据 §15。
 
 ## 2. 数据：保留全部 terrain tags，按需实现
 
@@ -27,7 +27,7 @@
 | 16 | Puddle：保留原值 |
 | 17 | NoEffect：不等于 Neutral，仍参与普通通行 |
 
-`0x40` bush 与 `0x80` counter 属于 passages，不是新 TerrainTag。本轮未实施标签不可偷偷改成 Neutral 或无条件通行。严格**取证工具**还需要修正：terrain_tags 应强制 1D / shape / 实际长度一致，负 tile ID 和坏移动路线解析不可得到 `COMPLETE`；调用 Common Event 必须把可达桥命中传播回祖先。旧 `provenNegativeBridge` 仅是旧扫描器结果，须按 REVIEW-02/03 重跑后再作严格零证明。
+`0x40` bush 与 `0x80` counter 属于 passages，不是新 TerrainTag。本轮未实施标签不可偷偷改成 Neutral 或无条件通行。取证器已 fail-closed：terrain_tags 必须 1D 且 values.length=xSize；负 tile ID、orphan 655、坏 111/117 不能 `provenNegativeBridge=true`。Common Event 按**调用入口可达闭包**归类，不只扫 CE 自身。Map 7 按新规则重跑仍为严格零桥（仅覆盖本图已扫描入口）。
 
 ## 3. 内部职责与两种不同的查询
 
@@ -50,9 +50,9 @@ MovementContext 携带验证过的地图/tileset、坐标方向、bridgeLevel �
 
 `projectedD0Passable` 只根据 passages/priorities 作静态判断，不知道 Neutral、Bridge 或玩家桥层。不能在导入阶段永久丢掉依运行时状态决定的传送事实；MapTransfer 和狭义 MapAction 是不同记录身份，可共享最小 RMXP 提取器，不建通用解释器。无关 NPC/剧情按 selective 范围排除，相关未知桥候选无法保真则报告 map/event/page 及理由并停止该分支。
 
-Map 21 旧取证记录 93 个 Bridge 格、8 个直接桥脚本事件、2 个邻接但执行 `pbEvolutionEvent(2)` 的非桥候选；事件格本身不含 Bridge tag。**这是素材事实，不等于八事件触发结果已确认。** Map 21 传送审计中 67 个 Bridge 格 D0=false 只是潜在风险，**无已证实误删**。另须修正审计器将 edge.targetX/Y（目标地图坐标）与本地图 bridgeCells 比较的问题：源端按本图，目标端必须按 targetMapId 加载目标图；缺图标 INCOMPLETE。几何越界连接 `21,E,77,47` 与 D0 过滤是不同原因。详见 REVIEW-04。
+Map 21 素材事实仍是 93 个 Bridge 格、8 个直接桥脚本、2 个邻接进化事件；事件占用格本身是地面而非 tag 15。本轮已按占用格 `passable?(d=0)` 算出 here/walk-on。传送审计按 `(sourceMapId,x,y)` / `(targetMapId,x,y)` 分开；D0 对照是潜在风险，**无已证实误删**。`21,E,77,47` 是几何越界，与 D0 过滤分开。详见 REVIEW-04 与证据 §15。
 
-Map 7 是无桥负例及普通门/边界传送基线；Map 47 待悬崖取证。不得将 Map 21 事件 ID、size 原点或测试坐标写入 Runtime 业务规则。
+Map 7 是无桥负例及普通门/边界传送基线；Map 47 已静态抽出 30 个 Ledge 格（SHA `5f4ee232…df043e`），合法两格跳样本如 `(16,9)→(16,11)`，仍缺动态 RGSS。不得将 Map 21 事件 ID、size 原点或测试坐标写入 Runtime 业务规则。
 
 ## 5. 行为与时序（待正式证明的条件分支）
 
@@ -72,7 +72,7 @@ input → 方向通行判定
          → 后续 interpreter 执行并改变 bridgeLevel → 后续输入使用已生效状态
 ```
 
-`start` 与执行、状态变更、后续输入是不同检查点；不能从空图形直接决定走入还是撞击。**REVIEW-01 必须逐事件验证**。原始证据 §14.6 的四组是关键点草图：例如 Map 7→Map 21 接入 x=19–22，不能跳步假设到 (14,70)；须按 ROUTE-21 给逐方向输入、逐格通行、事件次数和状态表。原版动态观察未发生，不得填 DYNAMIC-OBSERVED。
+`start` 与执行、状态变更、后续输入是不同检查点；不能从空图形直接决定走入还是撞击。本轮已逐事件计算 over_trigger，并给出从 Map 7 `(40–43,0)` 落入 `(19–22,76)` 再到各组陆地侧桥头的连续静态输入（§15）。解释器同一步内是否跑完仍为推论。原版动态观察未发生，不得填 DYNAMIC-OBSERVED。
 
 ## 6. Motion 与 Browser 渲染协议
 
@@ -82,4 +82,4 @@ bridgeLevel 改变即使人物/camera 原地不动，也必须使桥面 depth �
 
 ## 7. 验收和资格
 
-推进次序：**先修 REVIEW-01～04 + ROUTE-21，实际重跑并直接回填原始证据；然后 Map 47 取证；之后规范/许可 fixture/资格基线签核 → PR 1 terrain_tags 与传送 → PR 2 规则与普通步 → PR 3 Bridge → PR 4 Ledge。** 不能把旧本地取证测试 18 pass 或未跑的测试名冒充新测试、CI PASS、玩法实现或合同冻结。历史 M14/M15 ledger 不追溯篡改；旧 exact-local Tileset 断言漂移需单列，新代码/fixture/test 输入另立 subject。六道 FG 仍 OPEN，NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。
+推进次序：**取证器 REVIEW-01～04 / ROUTE-21 / Map 47 静态取证已在本轮完成并回填；下一步是动态 RGSS（有环境时）、合法可分发 fixture、exact CONTRACT_V1 与签核 → PR 1 terrain_tags 与传送 → PR 2 规则与普通步 → PR 3 Bridge → PR 4 Ledge。** 不能把旧本地取证测试 18 pass、本轮 36 pass 或 CI skip 冒充 Gate PASS、玩法实现或合同冻结。历史 M14/M15 ledger 不追溯篡改。六道 FG 仍 OPEN，NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。
