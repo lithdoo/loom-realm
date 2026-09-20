@@ -1,24 +1,33 @@
-import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemDefinitionFactory } from "@loomrealm/subsystem";
+import { cancelled, ContentReadError, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemDefinitionFactory } from "@loomrealm/subsystem";
 import {
   assertProjectable,
   boundsContain,
-  canMove,
   computeCamera,
   directionForCode,
+  emptyMapActionRecord,
+  evaluatePassability,
   expandTileBounds,
+  JUMP_DURATION_MS,
+  planMovement,
   projectTilesInBounds,
   RESIZE_SETTLE_MS,
   unionTileBounds,
+  validateMapActionRecord,
   validateMapRecord,
   validateMapTransferRecord,
   validateTilesetRecord,
   VIEW_DATA_GUARD,
   viewportTileBounds,
+  WALK_DURATION_MS,
+  type BridgeLevel,
   type ContactTransfer,
   type Direction,
   type EdgeTransfer,
+  type MapAction,
+  type MapActionRecord,
   type MapRecord,
   type MapTransferRecord,
+  type MovementPlan,
   type TileProjectionBounds,
   type StepTransfer,
   type TilesetRecord,
@@ -32,6 +41,9 @@ interface ActiveMove {
   readonly fromX: number;
   readonly fromY: number;
   readonly startPattern: 1 | 3;
+  readonly durationMs: number;
+  readonly kind: "walk" | "jump";
+  readonly peakPx?: number;
 }
 interface LoadedMap {
   readonly mapId: number;
@@ -40,6 +52,7 @@ interface LoadedMap {
   readonly tilesetRef: ResourceRef;
   readonly autotileRefs: readonly (ResourceRef | null)[];
   readonly transfers: MapTransferRecord;
+  readonly actions: MapActionRecord;
 }
 
 type TransferRule = StepTransfer | ContactTransfer | EdgeTransfer;
@@ -63,10 +76,44 @@ interface RenderFacts {
   readonly sceneEpoch: number;
   readonly visualEpoch: number;
   readonly layout: MapLayout;
+  readonly bridgeLevel: BridgeLevel;
+}
+
+function assertBridgeLevel(value: number): asserts value is BridgeLevel {
+  if (value !== 0 && value !== 2) throw new TypeError("MAP_BRIDGE_LEVEL_INVALID: legal values are 0 and 2");
+}
+
+function isMissingMapAction(error: unknown): boolean {
+  if (error instanceof ContentReadError && error.code === "CONTENT_NOT_FOUND") return true;
+  return error instanceof TypeError && /missing struct\.MapAction/u.test(error.message);
+}
+
+function occupies(action: Pick<MapAction, "occupied">, tileX: number, tileY: number): boolean {
+  return action.occupied.some((tile) => tile.x === tileX && tile.y === tileY);
+}
+
+function playerMotionPayload(activeMove: ActiveMove, fromScreenX: number, fromScreenY: number) {
+  if (activeMove.kind === "jump") {
+    return Object.freeze({
+      id: activeMove.id,
+      durationMs: activeMove.durationMs,
+      fromY: activeMove.fromY,
+      fromScreenX,
+      fromScreenY,
+      kind: "jump",
+      peakPx: activeMove.peakPx ?? 0,
+    });
+  }
+  return Object.freeze({
+    id: activeMove.id,
+    durationMs: activeMove.durationMs,
+    fromY: activeMove.fromY,
+    fromScreenX,
+    fromScreenY,
+  });
 }
 
 type RenderDataSet = NonNullable<NonNullable<NonNullable<RenderDomainUpdate["nodes"]>[number]["data"]>["set"]>;
-const WALK_STEP_MS = 250;
 const VIEWPORT_KEY = "viewport";
 const PLAYER_KEY = "player";
 const stepDelta: Record<Direction, { readonly dx: number; readonly dy: number }> = {
@@ -117,6 +164,7 @@ function viewportPayload(
   visualEpoch: number,
   motionId: number | null,
   layout: MapLayout,
+  bridgeLevel: BridgeLevel,
 ): RenderDomainState["roots"][number]["data"] {
   return {
     sceneEpoch,
@@ -143,6 +191,7 @@ function viewportPayload(
     autotiles: loaded.autotileRefs,
     tiles: window.tiles,
     cameraMotion,
+    bridgeLevel,
   } as unknown as RenderDomainState["roots"][number]["data"];
 }
 
@@ -152,7 +201,7 @@ function playerPayload(
   cameraY: number,
   motionId: number | null,
 ): RenderDomainState["roots"][number]["children"][number]["data"] {
-  const { x, y, direction, activeMove, playerRef, sceneEpoch, visualEpoch, layout } = facts;
+  const { x, y, direction, activeMove, playerRef, sceneEpoch, visualEpoch, layout, bridgeLevel } = facts;
   if (activeMove) {
     const fromCamera = computeCamera(facts.loaded.map, activeMove.fromX, activeMove.fromY, layout);
     return {
@@ -166,13 +215,8 @@ function playerPayload(
       direction,
       pattern: activeMove.startPattern,
       sprite: playerRef,
-      motion: Object.freeze({
-        id: activeMove.id,
-        durationMs: WALK_STEP_MS,
-        fromY: activeMove.fromY,
-        fromScreenX: activeMove.fromX * 32 - fromCamera.cameraX,
-        fromScreenY: activeMove.fromY * 32 - fromCamera.cameraY,
-      }),
+      motion: playerMotionPayload(activeMove, activeMove.fromX * 32 - fromCamera.cameraX, activeMove.fromY * 32 - fromCamera.cameraY),
+      bridgeLevel,
     } as unknown as RenderDomainState["roots"][number]["children"][number]["data"];
   }
   return {
@@ -187,6 +231,7 @@ function playerPayload(
     pattern: 0,
     sprite: playerRef,
     motion: null,
+    bridgeLevel,
   } as unknown as RenderDomainState["roots"][number]["children"][number]["data"];
 }
 
@@ -233,7 +278,7 @@ function selectProjectionWindow(
       tile.depth,
     ]) as TileTuple));
     const candidate: TileProjectionWindow = Object.freeze({ source: loaded, bounds, tiles });
-    if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, layout)) < VIEW_DATA_GUARD) {
+    if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, layout, 0)) < VIEW_DATA_GUARD) {
       return candidate;
     }
   }
@@ -241,12 +286,12 @@ function selectProjectionWindow(
 }
 
 function renderState(facts: RenderFacts): RenderDomainState {
-  const { loaded, window, activeMove, sceneEpoch, visualEpoch, layout } = facts;
+  const { loaded, window, activeMove, sceneEpoch, visualEpoch, layout, bridgeLevel } = facts;
   const motionId = activeMove?.id ?? null;
   const camera = computeCamera(loaded.map, facts.x, facts.y, layout);
   const cameraMotion = activeMove === null ? null : Object.freeze({
     id: activeMove.id,
-    durationMs: WALK_STEP_MS,
+    durationMs: activeMove.durationMs,
     fromCameraX: computeCamera(loaded.map, activeMove.fromX, activeMove.fromY, layout).cameraX,
     fromCameraY: computeCamera(loaded.map, activeMove.fromX, activeMove.fromY, layout).cameraY,
   });
@@ -254,7 +299,7 @@ function renderState(facts: RenderFacts): RenderDomainState {
     zIndex: 0,
     roots: [{
       key: VIEWPORT_KEY, tag: "lr-map-view", attrs: {},
-      data: viewportPayload(loaded, window, camera.cameraX, camera.cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, layout),
+      data: viewportPayload(loaded, window, camera.cameraX, camera.cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, layout, bridgeLevel),
       children: [{
         key: PLAYER_KEY, tag: "lr-map-sprite", attrs: {},
         data: playerPayload(facts, camera.cameraX, camera.cameraY, motionId),
@@ -287,6 +332,13 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         const transfers = validateMapTransferRecord((await scope.content.record("struct.MapTransfer", String(mapId), { signal: frame.signal })).value, mapId);
         const tileset = validateTilesetRecord((await scope.content.record("struct.Tileset", String(map.tileset_id), { signal: frame.signal })).value, map.tileset_id);
         assertProjectable(map, tileset);
+        let actions: MapActionRecord;
+        try {
+          actions = validateMapActionRecord((await scope.content.record("struct.MapAction", String(mapId), { signal: frame.signal })).value, mapId);
+        } catch (error) {
+          if (!isMissingMapAction(error)) throw error;
+          actions = emptyMapActionRecord(mapId);
+        }
         const tilesetResource = await scope.content.resource("resource.Graphics", `Tilesets/${tileset.tileset_name}`, { signal: frame.signal });
         const autotileRefs = Object.freeze(await Promise.all(tileset.autotile_names.map(async (name) => {
           if (name === null) return null;
@@ -300,6 +352,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           tilesetRef: ref("resource.Graphics", `Tilesets/${tileset.tileset_name}`, tilesetResource.contentVersion),
           autotileRefs,
           transfers,
+          actions,
         });
       };
 
@@ -314,6 +367,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       let playerRef!: ResourceRef;
       let sceneEpoch = 1;
       let visualEpoch = 1;
+      let bridgeLevel: BridgeLevel = 0;
+      let lastStarted: { readonly eventId: number; readonly x: number; readonly y: number } | null = null;
+      let eventBusy = false;
       let latestLayout = layoutFromViewport(scope.viewport.current);
       let acceptedLayout: MapLayout | null = null;
       let pendingLayout: MapLayout | null = null;
@@ -332,6 +388,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         sceneEpoch: overrides.sceneEpoch ?? sceneEpoch,
         visualEpoch: overrides.visualEpoch ?? visualEpoch,
         layout: overrides.layout ?? acceptedLayout!,
+        bridgeLevel: overrides.bridgeLevel ?? bridgeLevel,
       });
 
       const standingWindow = (loaded: LoadedMap, tileX: number, tileY: number, scene: number, visual: number, layout: MapLayout = acceptedLayout!) => {
@@ -407,6 +464,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
                     cameraMotion: null,
                     motionId: null,
                     tiles: nextWindow.tiles,
+                    bridgeLevel,
                   },
                 },
               },
@@ -420,6 +478,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
                     motion: null,
                     motionId: null,
                     pattern: 0,
+                    bridgeLevel,
                   },
                 },
               },
@@ -501,6 +560,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             sceneEpoch: nextScene,
             visualEpoch: nextVisual,
             layout: liveLayout,
+            bridgeLevel: 0,
           });
           domain!.replace(renderState(nextFacts));
           current = target;
@@ -514,6 +574,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           pendingLayout = null;
           clearResizeTimer();
           activeMove = null;
+          bridgeLevel = 0;
+          lastStarted = null;
+          eventBusy = false;
           if (stepTimer !== null) {
             clearTimeout(stepTimer);
             stepTimer = null;
@@ -555,7 +618,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         const motionId = nextMove?.id ?? null;
         const cameraMotion = nextMove === null ? null : Object.freeze({
           id: nextMove.id,
-          durationMs: WALK_STEP_MS,
+          durationMs: nextMove.durationMs,
           fromCameraX: sourceCamera.cameraX,
           fromCameraY: sourceCamera.cameraY,
         });
@@ -587,6 +650,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           cameraY: targetCamera.cameraY,
           cameraMotion,
           motionId,
+          bridgeLevel,
         };
         const playerSet: Record<string, unknown> = {
           x: nextX,
@@ -595,14 +659,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           screenY,
           direction: nextDirection,
           pattern: nextMove === null ? 0 : nextMove.startPattern,
-          motion: nextMove === null ? null : Object.freeze({
-            id: nextMove.id,
-            durationMs: WALK_STEP_MS,
-            fromY: nextMove.fromY,
-            fromScreenX,
-            fromScreenY,
-          }),
+          motion: nextMove === null ? null : playerMotionPayload(nextMove, fromScreenX, fromScreenY),
           motionId,
+          bridgeLevel,
         };
         if (refresh) {
           viewportSet.visualEpoch = nextVisual;
@@ -623,8 +682,70 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         activeMove = nextMove;
       };
 
+      const failOpaque = (tileX: number, tileY: number): boolean => {
+        const hit = current.actions.opaqueRelated.find((action) => occupies(action, tileX, tileY));
+        if (!hit) return false;
+        if (frame.signal.aborted || terminalSettled) return true;
+        terminalSettled = true;
+        resolveTerminal(failed({
+          code: "MAP_ACTION_OPAQUE_RELATED",
+          message: `${hit.reason} at map ${hit.mapId} event ${hit.eventId} page ${hit.pageIndex}`,
+        }));
+        return true;
+      };
+
+      const hereActions = (tileX: number, tileY: number) => current.actions.actions
+        .filter((action): action is Extract<MapAction, { kind: "bridge" }> => (
+          action.kind === "bridge" && action.trigger === 1 && occupies(action, tileX, tileY)
+        ))
+        .sort((left, right) => left.eventId - right.eventId);
+
+      const occupyingLastStarted = () => (
+        lastStarted !== null && hereActions(x, y).some((action) => action.eventId === lastStarted!.eventId)
+      );
+
+      const releaseLastStartedIfLeft = () => {
+        if (!lastStarted) return;
+        if (occupyingLastStarted()) return;
+        if (lastStarted.x === x && lastStarted.y === y) return;
+        lastStarted = null;
+      };
+
+      const overTrigger = (action: Extract<MapAction, { kind: "bridge" }>, tileX: number, tileY: number) => {
+        // PROJECT-DECISION-PROVISIONAL: Essentials over_trigger? using projected through/emptyGraphic + runtime passability.
+        if (action.through === true) return true;
+        if (action.emptyGraphic !== true) return false;
+        const pass = evaluatePassability(current.map, current.tileset, tileX, tileY, 0, bridgeLevel);
+        return pass.status === "decided" && pass.passable;
+      };
+
+      const executeAction = (action: Extract<MapAction, { kind: "bridge" }>) => {
+        eventBusy = true;
+        const nextLevel: BridgeLevel = action.op === "bridge-on" ? 2 : 0;
+        assertBridgeLevel(nextLevel);
+        bridgeLevel = nextLevel;
+        domain!.update({
+          nodes: [
+            { key: VIEWPORT_KEY, data: { set: { bridgeLevel } as RenderDataSet } },
+            { key: PLAYER_KEY, data: { set: { bridgeLevel } as RenderDataSet } },
+          ],
+        });
+        eventBusy = false;
+      };
+
+      const startHereOrFront = (tileX: number, tileY: number, requireOverTrigger: boolean): boolean => {
+        if (failOpaque(tileX, tileY)) return true;
+        releaseLastStartedIfLeft();
+        const candidates = hereActions(tileX, tileY).filter((action) => !requireOverTrigger || overTrigger(action, tileX, tileY));
+        const action = candidates.find((item) => lastStarted?.eventId !== item.eventId);
+        if (!action) return false;
+        lastStarted = { eventId: action.eventId, x, y };
+        executeAction(action);
+        return true;
+      };
+
       const attempt = (next: Direction) => {
-        if (frame.signal.aborted || transitioning) return;
+        if (frame.signal.aborted || transitioning || eventBusy) return;
         const { dx, dy } = stepDelta[next];
         const nx = x + dx;
         const ny = y + dy;
@@ -634,33 +755,33 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             startTransfer(contact, next);
             return;
           }
-          if (!canMove(current.map, current.tileset, x, y, next, dx, dy)) {
-            if (stepTimer !== null) {
-              clearTimeout(stepTimer);
-              stepTimer = null;
+        }
+        const plan: MovementPlan = planMovement(current.map, current.tileset, x, y, next, bridgeLevel);
+        if (plan.kind === "blocked") {
+          if (inBounds(current.map, nx, ny)) {
+            startHereOrFront(nx, ny, false);
+          } else {
+            const edge = current.transfers.edges.find((rule) => rule.x === x && rule.y === y && rule.direction === next);
+            if (edge) {
+              startTransfer(edge, next);
+              return;
             }
-            nextStartPattern = 1;
-            publishBlocked(next);
-            return;
           }
-          const moveId = nextMoveId;
-          const nextMove: ActiveMove = { id: moveId, fromX: x, fromY: y, startPattern: nextStartPattern };
-          publishMovementUpdate(nx, ny, next, nextMove);
-          nextMoveId += 1;
-          stepTimer = setTimeout(() => finishStep(moveId), WALK_STEP_MS);
+          if (stepTimer !== null) {
+            clearTimeout(stepTimer);
+            stepTimer = null;
+          }
+          nextStartPattern = 1;
+          publishBlocked(next);
           return;
         }
-        const edge = current.transfers.edges.find((rule) => rule.x === x && rule.y === y && rule.direction === next);
-        if (edge) {
-          startTransfer(edge, next);
-          return;
-        }
-        if (stepTimer !== null) {
-          clearTimeout(stepTimer);
-          stepTimer = null;
-        }
-        nextStartPattern = 1;
-        publishBlocked(next);
+        const moveId = nextMoveId;
+        const nextMove: ActiveMove = plan.kind === "jump"
+          ? { id: moveId, fromX: x, fromY: y, startPattern: nextStartPattern, durationMs: JUMP_DURATION_MS, kind: "jump", peakPx: plan.peakPx }
+          : { id: moveId, fromX: x, fromY: y, startPattern: nextStartPattern, durationMs: WALK_DURATION_MS, kind: "walk" };
+        publishMovementUpdate(plan.toX, plan.toY, next, nextMove);
+        nextMoveId += 1;
+        stepTimer = setTimeout(() => finishStep(moveId), nextMove.durationMs);
       };
 
       const finishStep = (moveId: number) => {
@@ -675,6 +796,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         if (hadPendingResize) commitViewportResize();
         const resizeCommitted = hadPendingResize && pendingLayout === null;
         if (resizeCommitted) activeMove = null;
+        const started = startHereOrFront(x, y, true);
+        if (started || eventBusy) {
+          nextStartPattern = 1;
+          if (!resizeCommitted) publishMovementUpdate(x, y, direction, null);
+          return;
+        }
         if (heldDirections.length > 0) {
           nextStartPattern = nextStartPattern === 1 ? 3 : 1;
           attempt(heldDirections[heldDirections.length - 1]!);
@@ -712,6 +839,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         sceneEpoch: 1,
         visualEpoch: 1,
         layout: acceptedLayout,
+        bridgeLevel: 0,
       });
       domain = scope.createRenderDomain(initial);
       current = loaded;
@@ -726,6 +854,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       heldDirections = [];
       transitioning = false;
       activeMove = null;
+      bridgeLevel = 0;
+      lastStarted = null;
+      eventBusy = false;
       listener = scope.createInputListener({ frame, channels: ["keyboard.event", "keyboard.state"] });
       listener.on("keyboard.event", (event) => {
         const movement = directionForCode(event.code);
@@ -734,12 +865,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (event.repeat) return;
           heldDirections = heldDirections.filter((item) => item !== movement.direction);
           heldDirections.push(movement.direction);
-          if (activeMove === null) attempt(heldDirections[heldDirections.length - 1]!);
+          if (activeMove === null && !eventBusy) attempt(heldDirections[heldDirections.length - 1]!);
           return;
         }
         if (event.action !== "up") return;
         heldDirections = heldDirections.filter((item) => item !== movement.direction);
-        if (activeMove === null && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        if (activeMove === null && !eventBusy && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       listener.on("keyboard.state", (state) => {
         const down = new Set(Array.isArray(state?.down) ? state.down : []);
@@ -750,7 +881,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (!movement || heldDirections.includes(movement.direction)) continue;
           heldDirections.push(movement.direction);
         }
-        if (activeMove === null && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        if (activeMove === null && !eventBusy && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       const outcome = await Promise.race([
         terminal,

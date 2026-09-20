@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import mapDefinition from "@loomrealm-game/map";
-import { computeCamera, expandTileBounds, projectTilesInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { computeCamera, expandTileBounds, JUMP_DURATION_MS, MAP_ACTION_SCHEMA_VERSION, projectTilesInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 import { calculateLayout } from "../dist/layout.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
@@ -13,7 +13,7 @@ function fixture() {
   const priorities = Array(386).fill(0); priorities[0] = 5;
   return {
     map: { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, values) },
-    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities), terrain_tags: table(1, 386, 1, 1, Array(386).fill(0)) },
   };
 }
 
@@ -28,7 +28,7 @@ function wideMap(width = 64, height = 18) {
   const priorities = Array(386).fill(0);
   return {
     map: { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
-    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 1, tileset_name: "m14_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities), terrain_tags: table(1, 386, 1, 1, Array(386).fill(0)) },
   };
 }
 
@@ -39,7 +39,7 @@ function denseAutotileMap(width = 80, height = 50) {
   priorities[0] = 5;
   return {
     map: { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
-    tileset: { id: 1, tileset_name: "dense", autotile_names: ["a0", "a1", "a2", "a3", "a4", "a5", "a6"], passages: table(1, 384, 1, 1, passages), priorities: table(1, 384, 1, 1, priorities) },
+    tileset: { id: 1, tileset_name: "dense", autotile_names: ["a0", "a1", "a2", "a3", "a4", "a5", "a6"], passages: table(1, 384, 1, 1, passages), priorities: table(1, 384, 1, 1, priorities), terrain_tags: table(1, 384, 1, 1, Array(384).fill(0)) },
   };
 }
 
@@ -55,6 +55,7 @@ function autotileFilledMap({ width = 80, height = 40, name = "grass" } = {}) {
       autotile_names: [name, name, name, name, name, name, name],
       passages: table(1, 386, 1, 1, passages),
       priorities: table(1, 386, 1, 1, priorities),
+      terrain_tags: table(1, 386, 1, 1, Array(386).fill(0)),
     },
   };
 }
@@ -66,7 +67,7 @@ function secondMap() {
   const priorities = Array(386).fill(0);
   return {
     map: { tileset_id: 2, width: 24, height: 18, data: table(3, 24, 18, 3, values) },
-    tileset: { id: 2, tileset_name: "target_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities) },
+    tileset: { id: 2, tileset_name: "target_tileset", autotile_names: [null,null,null,null,null,null,null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities), terrain_tags: table(1, 386, 1, 1, Array(386).fill(0)) },
     transfer: emptyTransfer(2),
   };
 }
@@ -125,6 +126,7 @@ function assertPairedTokens(state) {
   assert.equal(currentView.sceneEpoch, currentPlayer.sceneEpoch);
   assert.equal(currentView.visualEpoch, currentPlayer.visualEpoch);
   assert.equal(currentView.motionId, currentPlayer.motionId);
+  assert.equal(currentView.bridgeLevel, currentPlayer.bridgeLevel);
 }
 
 describe("map runtime walking", { concurrency: false }, () => {
@@ -135,7 +137,7 @@ describe("map runtime walking", { concurrency: false }, () => {
     let nextId = 1;
     let lastCallback = null;
     globalThis.setTimeout = (callback, delay) => {
-      if (delay !== 250 && delay !== 100) return realSetTimeout(callback, delay);
+      if (delay !== 250 && delay !== 100 && delay !== 400) return realSetTimeout(callback, delay);
       const id = nextId;
       nextId += 1;
       lastCallback = callback;
@@ -294,6 +296,11 @@ describe("map runtime walking", { concurrency: false }, () => {
 
   const down = (code) => ({ action: "down", code, repeat: false });
   const up = (code) => ({ action: "up", code, repeat: false });
+  async function stepOnce(frame, code, delay = 250) {
+    await frame.emitEvent(down(code));
+    await frame.emitEvent(up(code));
+    frame.fireTimer(delay);
+  }
 
   test("step start commits target tile, walking pattern and shared motion ids", async (t) => {
     const frame = await startFrame(t);
@@ -306,6 +313,7 @@ describe("map runtime walking", { concurrency: false }, () => {
       x: 11, y: 8, screenX: 304, screenY: 208, direction: 6, pattern: 1,
       sprite: { namespace: "resource.Graphics", key: "Characters/m14_player", contentVersion: "v-image" },
       motion: { id: 1, durationMs: 250, fromY: 8, fromScreenX: 304, fromScreenY: 208 },
+      bridgeLevel: 0,
     });
     assert.equal(view(walked).cameraX, 48);
     assert.deepEqual(view(walked).cameraMotion, { id: 1, durationMs: 250, fromCameraX: 16, fromCameraY: 48 });
@@ -871,6 +879,506 @@ describe("map runtime walking", { concurrency: false }, () => {
     frame.abort();
     await frame.pending;
   });
+
+  test("product walk publishes bridgeLevel 0 and keeps 250ms duration", async (t) => {
+    const frame = await startFrame(t);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    assert.equal(view(frame.latestState()).bridgeLevel, 0);
+    await frame.emitEvent(down("ArrowRight"));
+    assert.equal(player(frame.latestState()).motion.durationMs, 250);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    frame.fireTimer(250);
+    assert.equal(player(frame.latestState()).x, 11);
+    frame.abort();
+    await frame.pending;
+  });
+
+  function terrainTables(length, apply) {
+    const passages = Array(length).fill(0);
+    const priorities = Array(length).fill(0);
+    const tags = Array(length).fill(0);
+    apply?.(passages, priorities, tags);
+    return {
+      passages: table(1, length, 1, 1, passages),
+      priorities: table(1, length, 1, 1, priorities),
+      terrain_tags: table(1, length, 1, 1, tags),
+    };
+  }
+
+  test("product Bridge On execute changes bridgeLevel atomically and does not re-plan the same walk", async (t) => {
+    const width = 8;
+    const height = 8;
+    const values = Array(width * height * 3).fill(0);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) values[x + y * width] = 384;
+    values[3 + 2 * width + 2 * width * height] = 387;
+    const tables = terrainTables(400, (passages, _p, tags) => {
+      tags[387] = 15;
+      passages[387] = 0x01;
+    });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
+        "struct.Tileset/1": {
+          id: 1, tileset_name: "m14_tileset", autotile_names: [null, null, null, null, null, null, null], ...tables,
+        },
+        "struct.MapAction/1": {
+          id: 1,
+          schemaVersion: MAP_ACTION_SCHEMA_VERSION,
+          actions: [{
+            kind: "bridge", mapId: 1, eventId: 4, pageIndex: 0, commandIndex: 0, trigger: 1,
+            occupied: [{ x: 3, y: 3 }], op: "bridge-on", height: 2, through: false, emptyGraphic: true,
+          }],
+          opaqueRelated: [],
+        },
+      },
+    });
+    await frame.emitEvent(down("ArrowUp"));
+    assert.equal(player(frame.latestState()).y, 3);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    frame.fireTimer(250);
+    assert.equal(player(frame.latestState()).y, 3);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    assert.equal(view(frame.latestState()).bridgeLevel, 2);
+    await frame.emitEvent(up("ArrowUp"));
+    await frame.emitEvent(down("ArrowUp"));
+    assert.equal(player(frame.latestState()).y, 3);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    assert.equal(player(frame.latestState()).motion, null);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("product Ledge jump is one 400ms motion skipping the middle tile", async (t) => {
+    const width = 8;
+    const height = 8;
+    const values = Array(width * height * 3).fill(0);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) values[x + y * width] = 384;
+    values[3 + 3 * width] = 386;
+    const tables = terrainTables(400, (passages, _p, tags) => {
+      tags[386] = 1;
+      passages[386] = 0x01;
+    });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 2, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
+        "struct.Tileset/1": {
+          id: 1, tileset_name: "m14_tileset", autotile_names: [null, null, null, null, null, null, null], ...tables,
+        },
+        "struct.MapAction/1": {
+          id: 1,
+          schemaVersion: MAP_ACTION_SCHEMA_VERSION,
+          actions: [{
+            kind: "bridge", mapId: 1, eventId: 9, pageIndex: 0, commandIndex: 0, trigger: 1,
+            occupied: [{ x: 3, y: 3 }], op: "bridge-on", height: 2, through: false, emptyGraphic: true,
+          }],
+          opaqueRelated: [],
+        },
+      },
+    });
+    await frame.emitEvent(down("ArrowDown"));
+    const jumping = player(frame.latestState());
+    assert.equal(jumping.y, 4);
+    assert.equal(jumping.motion.kind, "jump");
+    assert.equal(jumping.motion.durationMs, JUMP_DURATION_MS);
+    assert.equal(jumping.motion.peakPx, 24);
+    assert.equal(view(frame.latestState()).cameraMotion.durationMs, JUMP_DURATION_MS);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    await frame.emitEvent(up("ArrowDown"));
+    frame.fireTimer(400);
+    assert.equal(player(frame.latestState()).y, 4);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    frame.abort();
+    await frame.pending;
+  });
+
+  function openTerrain(width, height, apply) {
+    const values = Array(width * height * 3).fill(0);
+    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) values[x + y * width] = 384;
+    apply?.(values, width, height);
+    return {
+      map: { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
+      tileset: {
+        id: 1,
+        tileset_name: "m14_tileset",
+        autotile_names: [null, null, null, null, null, null, null],
+        ...terrainTables(400, (passages, _p, tags) => {
+          tags[386] = 1;
+          passages[386] = 0x01;
+          tags[387] = 15;
+          passages[387] = 0;
+        }),
+      },
+    };
+  }
+
+  function bridgeAction({ eventId, occupied, op, through = false, emptyGraphic = true }) {
+    return {
+      kind: "bridge",
+      mapId: 1,
+      eventId,
+      pageIndex: 0,
+      commandIndex: 0,
+      trigger: 1,
+      occupied,
+      op,
+      height: op === "bridge-on" ? 2 : null,
+      through,
+      emptyGraphic,
+    };
+  }
+
+  function actionRecord(actions, opaqueRelated = []) {
+    return { id: 1, schemaVersion: MAP_ACTION_SCHEMA_VERSION, actions, opaqueRelated };
+  }
+
+  test("product Bridge Off execute returns bridgeLevel 0 after On", async (t) => {
+    const world = openTerrain(8, 8, (values, width) => {
+      values[3 + 2 * width + 2 * width * 8] = 387;
+    });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+          bridgeAction({ eventId: 28, occupied: [{ x: 3, y: 1 }], op: "bridge-off" }),
+        ]),
+      },
+    });
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    await stepOnce(frame, "ArrowUp");
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).y, 1);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    assert.equal(view(frame.latestState()).bridgeLevel, 0);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("product size band does not re-execute the same On while still occupying it", async (t) => {
+    const world = openTerrain(8, 8);
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({
+            eventId: 4,
+            occupied: [{ x: 3, y: 3 }, { x: 3, y: 2 }, { x: 3, y: 1 }],
+            op: "bridge-on",
+          }),
+        ]),
+      },
+    });
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).y, 2);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("held input after On execute waits for the next input instead of replanning", async (t) => {
+    const world = openTerrain(8, 8, (values, width) => {
+      values[3 + 2 * width + 2 * width * 8] = 387;
+    });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+        ]),
+      },
+    });
+    await frame.emitEvent(down("ArrowUp"));
+    frame.fireTimer(250);
+    assert.equal(player(frame.latestState()).y, 3);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    assert.equal(player(frame.latestState()).motion, null);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("empty graphic is not walk-on unless the tile is passable; named graphic needs front touch", async (t) => {
+    const world = openTerrain(8, 8);
+    const named = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 9, occupied: [{ x: 3, y: 3 }], op: "bridge-on", emptyGraphic: false }),
+        ]),
+      },
+    });
+    await named.emitEvent(down("ArrowUp"));
+    await named.emitEvent(up("ArrowUp"));
+    named.fireTimer(250);
+    assert.equal(player(named.latestState()).y, 3);
+    assert.equal(player(named.latestState()).bridgeLevel, 0);
+    named.abort();
+    await named.pending;
+
+    const blockedWorld = openTerrain(8, 8, (values, width) => {
+      values[3 + 3 * width] = 385;
+    });
+    const tables = terrainTables(400, (passages) => { passages[385] = 0x0f; });
+    const touch = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": blockedWorld.map,
+        "struct.Tileset/1": { ...blockedWorld.tileset, ...tables },
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 9, occupied: [{ x: 3, y: 3 }], op: "bridge-on", emptyGraphic: false }),
+        ]),
+      },
+    });
+    await touch.emitEvent(down("ArrowUp"));
+    assert.equal(player(touch.latestState()).y, 4);
+    assert.equal(player(touch.latestState()).bridgeLevel, 2);
+    touch.abort();
+    await touch.pending;
+  });
+
+  test("product four On/Off groups change bridgeLevel without hardcoding those ids in Runtime", async (t) => {
+    const groups = [
+      { onId: 4, offId: 28, x: 1 },
+      { onId: 10, offId: 7, x: 3 },
+      { onId: 22, offId: 20, x: 5 },
+      { onId: 25, offId: 23, x: 7 },
+    ];
+    const width = 10;
+    const height = 8;
+    const world = openTerrain(width, height, (values) => {
+      for (const group of groups) values[group.x + 3 * width + 2 * width * height] = 387;
+    });
+    const actions = groups.flatMap((group) => [
+      bridgeAction({ eventId: group.onId, occupied: [{ x: group.x, y: 4 }], op: "bridge-on" }),
+      bridgeAction({ eventId: group.offId, occupied: [{ x: group.x, y: 2 }], op: "bridge-off" }),
+    ]);
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 1, y: 5, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord(actions),
+      },
+    });
+    for (const group of groups) {
+      while (player(frame.latestState()).x !== group.x) {
+        await stepOnce(frame, player(frame.latestState()).x < group.x ? "ArrowRight" : "ArrowLeft");
+      }
+      while (player(frame.latestState()).y > 5) await stepOnce(frame, "ArrowDown");
+      while (player(frame.latestState()).y < 5) await stepOnce(frame, "ArrowUp");
+      await stepOnce(frame, "ArrowUp");
+      assert.equal(player(frame.latestState()).y, 4, `arrive On ${group.onId}`);
+      assert.equal(player(frame.latestState()).bridgeLevel, 2, `On ${group.onId}`);
+      await stepOnce(frame, "ArrowUp");
+      await stepOnce(frame, "ArrowUp");
+      assert.equal(player(frame.latestState()).y, 2, `arrive Off ${group.offId}`);
+      assert.equal(player(frame.latestState()).bridgeLevel, 0, `Off ${group.offId}`);
+      await stepOnce(frame, "ArrowDown");
+      await stepOnce(frame, "ArrowDown");
+      await stepOnce(frame, "ArrowDown");
+    }
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("transfer after On clears bridgeLevel to 0", async (t) => {
+    const world = openTerrain(8, 8);
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+        ]),
+        "struct.MapTransfer/1": {
+          id: 1,
+          steps: [{ x: 3, y: 2, targetMapId: 2, targetX: 4, targetY: 7, targetDirection: null }],
+          contacts: [],
+          edges: [],
+        },
+      },
+    });
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    await stepOnce(frame, "ArrowUp");
+    await flush();
+    assert.equal(view(frame.latestState()).mapId, 2);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    assert.equal(view(frame.latestState()).bridgeLevel, 0);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("jump skips a middle event and fires a landing event once", async (t) => {
+    const world = openTerrain(8, 8, (values, width) => {
+      values[3 + 3 * width] = 386;
+    });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 2, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 8, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+          bridgeAction({ eventId: 9, occupied: [{ x: 3, y: 4 }], op: "bridge-on" }),
+        ]),
+      },
+    });
+    await frame.emitEvent(down("ArrowDown"));
+    assert.equal(player(frame.latestState()).y, 4);
+    assert.equal(player(frame.latestState()).motion.kind, "jump");
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    await frame.emitEvent(up("ArrowDown"));
+    frame.fireTimer(400);
+    assert.equal(player(frame.latestState()).y, 4);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("stale jump completion after abort cannot move a later scene", async (t) => {
+    const world = openTerrain(8, 8, (values, width) => {
+      values[3 + 3 * width] = 386;
+    });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 2, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+      },
+    });
+    await frame.emitEvent(down("ArrowDown"));
+    const late = frame.lastCallback();
+    frame.abort();
+    await frame.pending;
+    assert.doesNotThrow(() => late());
+  });
+
+  test("live Map21 On at EV004 occupancy changes bridgeLevel (SKIP when FSDB missing)", async (t) => {
+    const { existsSync } = await import("node:fs");
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { decodeRxdataBytes, defaultLocalFsdb } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-event-evidence.mjs");
+    const { projectMapRecord, projectTilesetRecords } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs");
+    const { projectMapActionRecord } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-action-consumer.mjs");
+    const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+    const fsdb = defaultLocalFsdb(repoRoot);
+    const mapPath = join(fsdb, "[resource]Data", "Map021.rxdata");
+    if (!existsSync(mapPath)) {
+      t.skip("local official FSDB is not present; synthetic Bridge product tests still ran");
+      return;
+    }
+    const data = join(fsdb, "[resource]Data");
+    const mapRoot = decodeRxdataBytes(await readFile(mapPath), "Map021.rxdata").root;
+    const map = projectMapRecord({ filename: "Map021.rxdata", root: mapRoot }).value;
+    const tilesets = projectTilesetRecords({
+      filename: "Tilesets.rxdata",
+      root: decodeRxdataBytes(await readFile(join(data, "Tilesets.rxdata")), "Tilesets.rxdata").root,
+    });
+    const tileset = tilesets.find((record) => Number(record.key) === map.tileset_id).value;
+    const actions = projectMapActionRecord({ filename: "Map021.rxdata", root: mapRoot }).value;
+    const on = actions.actions.find((action) => action.eventId === 4 && action.op === "bridge-on");
+    assert.ok(on, "Map21 event 4 must project as bridge-on");
+    const frame = await startFrame(t, {
+      params: { mapId: 21, x: 21, y: 47, characterName: "m14_player" },
+      records: {
+        "struct.Map/21": map,
+        "struct.Tileset/1": tileset,
+        "struct.MapTransfer/21": emptyTransfer(21),
+        "struct.MapAction/21": actions,
+      },
+    });
+    await frame.emitEvent(down("ArrowLeft"));
+    frame.fireTimer(250);
+    await frame.emitEvent(up("ArrowLeft"));
+    assert.equal(player(frame.latestState()).x, 20);
+    assert.equal(player(frame.latestState()).y, 47);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    assert.equal(view(frame.latestState()).bridgeLevel, 2);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("live Map47 (16,9) product jump lands on (16,11) (SKIP when FSDB missing)", async (t) => {
+    const { existsSync } = await import("node:fs");
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { decodeRxdataBytes, defaultLocalFsdb } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-event-evidence.mjs");
+    const { projectMapRecord, projectTilesetRecords } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs");
+    const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+    const fsdb = defaultLocalFsdb(repoRoot);
+    const mapPath = join(fsdb, "[resource]Data", "Map047.rxdata");
+    if (!existsSync(mapPath)) {
+      t.skip("local official FSDB is not present; synthetic Ledge product tests still ran");
+      return;
+    }
+    const data = join(fsdb, "[resource]Data");
+    const map = projectMapRecord({
+      filename: "Map047.rxdata",
+      root: decodeRxdataBytes(await readFile(mapPath), "Map047.rxdata").root,
+    }).value;
+    const tilesets = projectTilesetRecords({
+      filename: "Tilesets.rxdata",
+      root: decodeRxdataBytes(await readFile(join(data, "Tilesets.rxdata")), "Tilesets.rxdata").root,
+    });
+    const tileset = tilesets.find((record) => Number(record.key) === map.tileset_id).value;
+    const frame = await startFrame(t, {
+      params: { mapId: 47, x: 16, y: 9, characterName: "m14_player" },
+      records: {
+        "struct.Map/47": map,
+        "struct.Tileset/1": tileset,
+        "struct.MapTransfer/47": emptyTransfer(47),
+        "struct.MapAction/47": { id: 47, schemaVersion: MAP_ACTION_SCHEMA_VERSION, actions: [], opaqueRelated: [] },
+      },
+    });
+    await frame.emitEvent(down("ArrowDown"));
+    await frame.emitEvent(up("ArrowDown"));
+    assert.equal(player(frame.latestState()).y, 11);
+    assert.equal(player(frame.latestState()).motion.kind, "jump");
+    assert.equal(player(frame.latestState()).motion.durationMs, JUMP_DURATION_MS);
+    frame.fireTimer(400);
+    assert.equal(player(frame.latestState()).y, 11);
+    assert.equal(player(frame.latestState()).motion, null);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("opaque-related occupancy fails closed without loading the whole map for unrelated tiles", async (t) => {
+    const frame = await startFrame(t, {
+      records: {
+        "struct.MapAction/1": {
+          id: 1,
+          schemaVersion: MAP_ACTION_SCHEMA_VERSION,
+          actions: [],
+          opaqueRelated: [{
+            kind: "opaque-related", mapId: 1, eventId: 12, pageIndex: 0,
+            occupied: [{ x: 11, y: 8 }], reason: "bridge-script-not-statically-confirmable",
+          }],
+        },
+      },
+    });
+    await frame.emitEvent(down("ArrowRight"));
+    frame.fireTimer(250);
+    const outcome = await frame.pending;
+    assert.equal(outcome.type, "failed");
+    assert.equal(outcome.error.code, "MAP_ACTION_OPAQUE_RELATED");
+    assert.match(outcome.error.message, /bridge-script-not-statically-confirmable/);
+  });
 });
 
 describe("map runtime transfer", { concurrency: false }, () => {
@@ -881,7 +1389,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
     let nextId = 1;
     let lastCallback = null;
     globalThis.setTimeout = (callback, delay) => {
-      if (delay !== 250 && delay !== 100) return realSetTimeout(callback, delay);
+      if (delay !== 250 && delay !== 100 && delay !== 400) return realSetTimeout(callback, delay);
       const id = nextId;
       nextId += 1;
       lastCallback = callback;
@@ -1031,10 +1539,11 @@ describe("map runtime transfer", { concurrency: false }, () => {
 
   test("initial load reads Map then MapTransfer then Tileset", async (t) => {
     const frame = await startFrame(t);
-    assert.deepEqual(frame.reads.slice(0, 4), [
+    assert.deepEqual(frame.reads.slice(0, 5), [
       "struct.Map/1",
       "struct.MapTransfer/1",
       "struct.Tileset/1",
+      "struct.MapAction/1",
       "resource:Tilesets/m14_tileset",
     ]);
     assert.equal(view(frame.latestState()).mapId, 1);

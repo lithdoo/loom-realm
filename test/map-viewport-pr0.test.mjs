@@ -12,6 +12,8 @@ import { RenderManager } from "../packages/subsystem/dist/internal/render-manage
 import {
   assertProjectable,
   autotileCorners,
+  migrateLegacyTilesetRecord,
+  oneDimensionalIndexTable,
   tableAt,
   tileVisualDepth,
   validateMapRecord,
@@ -37,11 +39,11 @@ const VIEWPORTS = Object.freeze([
 const VIEW_KEYS = Object.freeze([
   "sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
   "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
-  "tileVisuals", "chunks", "cameraMotion",
+  "tileVisuals", "chunks", "cameraMotion", "bridgeLevel",
 ]);
 const SPRITE_KEYS = Object.freeze([
   "sceneEpoch", "visualEpoch", "motionId", "x", "y", "screenX", "screenY",
-  "direction", "pattern", "sprite", "motion",
+  "direction", "pattern", "sprite", "motion", "bridgeLevel",
 ]);
 const LOCAL_FSDB = path.join(root, "examples", "essentials-v21.1-local", "[FSDB]Essentials v21.1");
 const ARTIFACT_DIR = path.join(root, "artifacts");
@@ -133,6 +135,7 @@ function denseMap() {
     autotile_names: ["slot0", null, null, null, null, null, null],
     passages: { dimensions: 1, xSize: 392, ySize: 1, zSize: 1, values: passages },
     priorities: { dimensions: 1, xSize: 392, ySize: 1, zSize: 1, values: priorities },
+    terrain_tags: { dimensions: 1, xSize: 392, ySize: 1, zSize: 1, values: Array(392).fill(0) },
   }, 1);
   assertProjectable(map, tileset);
   return { map, tileset, mapId: 1 };
@@ -254,6 +257,7 @@ function projectMapView({
     tileVisuals,
     chunks,
     cameraMotion,
+    bridgeLevel: 0,
   };
   exactKeys(data, VIEW_KEYS, "MapViewRenderData");
   return { data, camera, bounds, chunks, tileVisuals };
@@ -272,6 +276,7 @@ function playerSprite(projection, playerX, playerY) {
     pattern: 0,
     sprite: resourceRef("Characters/red"),
     motion: null,
+    bridgeLevel: 0,
   };
   exactKeys(data, SPRITE_KEYS, "MapSpriteRenderData");
   return data;
@@ -601,7 +606,14 @@ test("exact-local Essentials Map002/Map066 MapView bytes and resources", async (
     const map = validateMapRecord(JSON.parse(mapJson.toString("utf8")));
     const tilesetJson = await readFile(path.join(LOCAL_FSDB, "[struct]Tileset", `${map.tileset_id}.json`));
     hash.update(tilesetJson);
-    const tileset = validateTilesetRecord(JSON.parse(tilesetJson.toString("utf8")), map.tileset_id);
+    const rawTileset = JSON.parse(tilesetJson.toString("utf8"));
+    const tileset = Object.hasOwn(rawTileset, "terrain_tags")
+      ? validateTilesetRecord(rawTileset, map.tileset_id)
+      : migrateLegacyTilesetRecord(
+        rawTileset,
+        oneDimensionalIndexTable(Array(rawTileset.passages.xSize).fill(0)),
+        map.tileset_id,
+      );
     assertProjectable(map, tileset);
     const tilesetPngPath = path.join(LOCAL_FSDB, "[resource]Graphics", "Tilesets", `${tileset.tileset_name}.png`);
     const tilesetPng = pngSize(await readFile(tilesetPngPath));

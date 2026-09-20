@@ -135,6 +135,7 @@ function viewData({
   depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles,
   cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1,
   mapId = 1, viewportWidth = 640, viewportHeight = 480, mapWidth = 24, mapHeight = 18,
+  bridgeLevel = 0,
 } = {}) {
   const tileList = tiles ?? [regularTile({ depth })];
   const seen = new Set();
@@ -161,6 +162,7 @@ function viewData({
     tileVisuals,
     chunks: chunksFromTiles(tileList, { mapWidth, mapHeight, cameraX, cameraY, viewportWidth, viewportHeight, cameraMotion }),
     cameraMotion,
+    bridgeLevel,
   };
 }
 
@@ -199,12 +201,13 @@ function spriteData(y = 0) {
   return {
     sceneEpoch: 1, visualEpoch: 1, motionId: null,
     x: 0, y, screenX: 0, screenY: y * 32, direction: 2, pattern: 0, sprite: spriteRef, motion: null,
+    bridgeLevel: 0,
   };
 }
 
 function matchingSprite(view, extra = {}) {
   const base = view.motionId === null ? spriteData(0) : walkingSprite({ id: view.motionId });
-  return { ...base, sceneEpoch: view.sceneEpoch, visualEpoch: view.visualEpoch, motionId: view.motionId, ...extra };
+  return { ...base, sceneEpoch: view.sceneEpoch, visualEpoch: view.visualEpoch, motionId: view.motionId, bridgeLevel: view.bridgeLevel ?? 0, ...extra };
 }
 
 function walkingSprite({ y = 1, fromY = 0, screenX = 0, screenY = 32, fromScreenX = 0, fromScreenY = 0, pattern = 1, id = 1, sprite = spriteRef, direction = 2 } = {}) {
@@ -212,6 +215,7 @@ function walkingSprite({ y = 1, fromY = 0, screenX = 0, screenY = 32, fromScreen
     sceneEpoch: 1, visualEpoch: 1, motionId: id,
     x: 0, y, screenX, screenY, direction, pattern, sprite,
     motion: { id, durationMs: 250, fromY, fromScreenX, fromScreenY },
+    bridgeLevel: 0,
   };
 }
 
@@ -1570,6 +1574,7 @@ test("camera-only update keeps tile canvas backing", { timeout: 30_000 }, async 
       x: 0, y: 0, screenX: 0, screenY: 0, direction: 2, pattern: 0,
       sprite: { namespace: "resource.Graphics", key: "Characters/red", contentVersion: "v1" },
       motion: null,
+      bridgeLevel: accepted.bridgeLevel ?? 0,
     });
     const deadline = performance.now() + 2_000;
     while (view._tileDrawCount === afterCamera.draws && performance.now() < deadline) {
@@ -2129,4 +2134,52 @@ test("multi-depth building layer survives an overlap refresh of the ground", { t
   assert.deepEqual(await cellPixel(page, 0, 0), [255, 255, 0, 255]);
   const layers = await page.evaluate(() => window.__view._layers.map((layer) => layer.depth).sort((left, right) => left - right));
   assert.deepEqual(layers, [0, 64]);
+});
+
+test("jump motion uses 400ms and a peak arc without two walks", { timeout: 30_000 }, async (t) => {
+  const page = await openPage({ clock: true });
+  t.after(() => page.close());
+  const viewPayload = viewData({
+    cameraMotion: { id: 7, durationMs: 400, fromCameraX: 0, fromCameraY: 0 },
+    cameraY: 64,
+  });
+  const spritePayload = {
+    ...matchingSprite(viewPayload),
+    y: 2,
+    screenY: 64,
+    pattern: 1,
+    motion: {
+      id: 7,
+      durationMs: 400,
+      fromY: 0,
+      fromScreenX: 0,
+      fromScreenY: 0,
+      kind: "jump",
+      peakPx: 24,
+    },
+  };
+  await page.evaluate(({ viewPayload: view, spritePayload: sprite }) => {
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(sprite);
+  }, { viewPayload, spritePayload });
+  await page.clock.runFor(0);
+  await page.clock.runFor(200);
+  const mid = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector("lr-map-sprite")).top));
+  assert.ok(Number.isFinite(mid), "sprite top is numeric during jump");
+  await page.clock.runFor(200);
+  const end = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.querySelector("lr-map-sprite")).top));
+  assert.ok(end > mid, "jump arc is higher at mid-duration than at landing");
+});
+
+test("bridgeLevel 2 raises sprite stack without a permanent max z-index", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  await installTileset(page, "Tilesets/blue", await makeIndexedTileset(page));
+  await paintPair(page, viewData({ bridgeLevel: 0 }));
+  const atGround = await page.evaluate(() => Number.parseInt(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex, 10));
+  await paintPair(page, viewData({ bridgeLevel: 2 }));
+  const onBridge = await page.evaluate(() => Number.parseInt(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex, 10));
+  assert.ok(Number.isFinite(atGround) && Number.isFinite(onBridge), "sprite z-index must be numeric");
+  assert.ok(onBridge > atGround, "bridgeLevel 2 must raise character depth");
+  assert.ok(onBridge < 100_000, "must not use a permanent max z-index");
 });

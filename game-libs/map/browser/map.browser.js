@@ -6,18 +6,18 @@
   const VIEW_KEYS = [
     "sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
     "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
-    "tileVisuals", "chunks", "cameraMotion",
+    "tileVisuals", "chunks", "cameraMotion", "bridgeLevel",
   ];
   const RESPONSIVE_VIEW_KEYS = [
     "sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
     "barHeight", "contentWidth", "contentHeight", "columns", "rows",
     "logicalWidth", "logicalHeight", "scaleX", "scaleY", "mapName",
     "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
-    "tiles", "cameraMotion",
+    "tiles", "cameraMotion", "bridgeLevel",
   ];
   const SPRITE_KEYS = [
     "sceneEpoch", "visualEpoch", "motionId", "x", "y", "screenX", "screenY",
-    "direction", "pattern", "sprite", "motion",
+    "direction", "pattern", "sprite", "motion", "bridgeLevel",
   ];
   const RETRY_MS = [100, 200, 400];
   const CHUNK = 8;
@@ -136,17 +136,30 @@
       && [value.namespace, value.key, value.contentVersion].every((part) => typeof part === "string" && part.length > 0);
   }
 
+  function validDuration(value) {
+    return value === 250 || value === 400;
+  }
+
   function validCameraMotion(value) {
     if (value === null) return true;
     if (!exactObject(value, ["id", "durationMs", "fromCameraX", "fromCameraY"])) return false;
     return Number.isSafeInteger(value.id) && value.id > 0
-      && value.durationMs === 250
+      && validDuration(value.durationMs)
       && Number.isSafeInteger(value.fromCameraX) && value.fromCameraX >= 0
       && Number.isSafeInteger(value.fromCameraY) && value.fromCameraY >= 0;
   }
 
   function validPlayerMotion(value) {
     if (value === null) return true;
+    if (value.kind === "jump") {
+      if (!exactObject(value, ["id", "durationMs", "fromY", "fromScreenX", "fromScreenY", "kind", "peakPx"])) return false;
+      return Number.isSafeInteger(value.id) && value.id > 0
+        && value.durationMs === 400
+        && Number.isSafeInteger(value.fromY) && value.fromY >= 0
+        && Number.isFinite(value.fromScreenX)
+        && Number.isFinite(value.fromScreenY)
+        && Number.isFinite(value.peakPx) && value.peakPx >= 0;
+    }
     if (!exactObject(value, ["id", "durationMs", "fromY", "fromScreenX", "fromScreenY"])) return false;
     return Number.isSafeInteger(value.id) && value.id > 0
       && value.durationMs === 250
@@ -284,6 +297,7 @@
       || !validCameraMotion(data.cameraMotion)
       || (data.cameraMotion === null) !== (data.motionId === null)
       || (data.cameraMotion !== null && data.cameraMotion.id !== data.motionId)
+      || (data.bridgeLevel !== 0 && data.bridgeLevel !== 2)
     ) throw new TypeError("Invalid MapViewRenderData");
     if (responsive) {
       const expectedBar = data.viewportHeight < 480 ? 24 : data.viewportHeight < 720 ? 32 : 48;
@@ -376,6 +390,7 @@
       || (data.motion !== null && data.pattern !== 1 && data.pattern !== 3)
       || (data.motion === null) !== (data.motionId === null)
       || (data.motion !== null && data.motion.id !== data.motionId)
+      || (data.bridgeLevel !== 0 && data.bridgeLevel !== 2)
     ) throw new TypeError("Invalid MapSpriteRenderData");
   }
 
@@ -492,7 +507,8 @@
   function tokensEqual(view, sprite) {
     return view.sceneEpoch === sprite.sceneEpoch
       && view.visualEpoch === sprite.visualEpoch
-      && view.motionId === sprite.motionId;
+      && view.motionId === sprite.motionId
+      && view.bridgeLevel === sprite.bridgeLevel;
   }
 
   function motionFingerprint(view, sprite) {
@@ -872,7 +888,7 @@
         if (!sprite) return;
         if (!tokensEqual(view.data, sprite.data)) return;
       }
-      if (sprite && ((view.data.cameraMotion === null) !== (sprite.data.motion === null) || view.data.motionId !== sprite.data.motionId)) {
+      if (sprite && ((view.data.cameraMotion === null) !== (sprite.data.motion === null) || view.data.motionId !== sprite.data.motionId || view.data.bridgeLevel !== sprite.data.bridgeLevel)) {
         throw new TypeError("Invalid map motion identity");
       }
       const geometry = presentationGeometry(view.data);
@@ -1183,6 +1199,7 @@
     _commitMotion(prepared, sequence) {
       const fingerprint = prepared.sprite ? motionFingerprint(prepared.view, prepared.sprite) : JSON.stringify([prepared.view.motionId, prepared.view.cameraMotion]);
       const now = performance.now();
+      const duration = prepared.sprite?.motion?.durationMs ?? prepared.view.cameraMotion?.durationMs ?? 250;
       if (this._activeMotion && prepared.view.motionId === this._activeMotion.id && fingerprint !== this._activeMotion.fingerprint) {
         const previous = this._accepted;
         const sameVisual = previous
@@ -1190,7 +1207,7 @@
           && previous.view.viewportWidth === prepared.view.viewportWidth
           && previous.view.viewportHeight === prepared.view.viewportHeight;
         if (sameVisual) throw new TypeError("Invalid map motion identity");
-        const remaining = Math.max(0, this._activeMotion.startedAt + (this._activeMotion.durationMs ?? 250) - now);
+        const remaining = Math.max(0, this._activeMotion.startedAt + (this._activeMotion.durationMs ?? duration) - now);
         const visibleCamera = this._lastPaintedCamera;
         const visibleSprite = this._desiredSprite?.sprite?._lastPaintedScreen;
         if (prepared.view.cameraMotion && visibleCamera) {
@@ -1206,14 +1223,14 @@
           };
         }
         this._activeMotion = remaining === 0
-          ? { id: prepared.view.motionId, fingerprint, startedAt: now - 250, durationMs: 250 }
+          ? { id: prepared.view.motionId, fingerprint, startedAt: now - duration, durationMs: duration }
           : { id: prepared.view.motionId, fingerprint, startedAt: now, durationMs: remaining };
       } else if (!this._activeMotion && prepared.view.motionId !== null) {
-        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt, durationMs: 250 };
+        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt, durationMs: duration };
       } else if (prepared.view.motionId === null) {
         this._activeMotion = null;
       } else if (this._activeMotion && prepared.view.motionId !== this._activeMotion.id) {
-        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt, durationMs: 250 };
+        this._activeMotion = { id: prepared.view.motionId, fingerprint, startedAt: prepared.pairReceivedAt, durationMs: duration };
       }
     }
 
@@ -1366,13 +1383,14 @@
       if (!sprite || !prepared.spriteImage) return;
       const motion = data.motion;
       const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : 0;
+      const arc = motion?.kind === "jump" ? 4 * (motion.peakPx ?? 0) * progress * (1 - progress) : 0;
       const screenX = motion ? Math.round(lerp(motion.fromScreenX, data.screenX, progress)) : data.screenX;
-      const screenY = motion ? Math.round(lerp(motion.fromScreenY, data.screenY, progress)) : data.screenY;
+      const screenY = motion ? Math.round(lerp(motion.fromScreenY, data.screenY, progress) - arc) : data.screenY;
       const visualPixelY = motion ? Math.round(lerp(motion.fromY * 32, data.y * 32, progress)) : data.y * 32;
       const size = sprite._blitPatternSync(prepared.spriteImage, data.direction, pattern, resourceIdentity(data.sprite));
       const frameWidth = size.width;
       const frameHeight = size.height;
-      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
+      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0) + (data.bridgeLevel === 2 ? TILE : 0);
       const left = screenX + prepared.geometry.originX + (32 - frameWidth) / 2;
       const top = screenY + prepared.geometry.originY + 32 - frameHeight;
       const rule = this._spriteRule();
