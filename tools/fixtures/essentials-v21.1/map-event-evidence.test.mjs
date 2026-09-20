@@ -226,6 +226,12 @@ test("unknown command codes are preserved rather than dropped", () => {
   assert.equal(facts.events[0].pages[0].commands[0].indent, 2);
 });
 
+test("command 404 is labeled show-choices-branch-end and is not treated as empty", () => {
+  const facts = extractMapFacts(mapRoot([[1, event(1, "Choices", 0, 0, [page({ commands: [command(404, 0, []), command(0, 0, [])] })])]]), 47, "Map047.rxdata");
+  assert.equal(facts.events[0].pages[0].commands[0].code, 404);
+  assert.equal(facts.events[0].pages[0].commands[0].label, "show-choices-branch-end");
+});
+
 test("RMXP move-route continuation code 509 is labeled and kept in order", () => {
   const facts = extractMapFacts(mapRoot([[1, event(1, "Door", 0, 0, [page({ commands: [command(209, 0, []), command(509, 0, []), command(0, 0, [])] })])]]), 7, "Map007.rxdata");
   assert.deepEqual(facts.events[0].pages[0].commands.map((item) => [item.code, item.label]), [

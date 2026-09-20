@@ -1798,3 +1798,88 @@ PBS 涉及 Map 21 的三条：
 本 corpus CommonEvents 无 `pbBridgeOn/Off`。Map 7/21 地图 117 调用 0。嵌套 A→B→C 由合成测试覆盖。Autorun/parallel CE 与未扫描地图的 `eval` 不在负例范围内。
 
 负 tile ≠ 空 0；短 Table、非 1D terrain_tags、orphan 655、111 缺参、117 非整数：不能 provenNegative，见 `EV-VALID-01`～`06`。
+
+
+## 16. Freeze-candidate execution (2026-09-20, this machine)
+
+Status: **FREEZE CANDIDATE COMPLETE / NOT FROZEN**. This section is a new log. It does not rewrite §14 or §15.
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-20 |
+| Branch | `docs/map-terrain-behavior-freeze-handoff` |
+| Work baseline | `922890356cd505d06350cc3f67510a2482d65f11` |
+| OS / Node | Windows 10 19044 / v22.12.0 win32 x64 |
+| Local FSDB | `examples/essentials-v21.1-local/[FSDB]Essentials v21.1` present |
+| Vanilla RGSS | **BLOCKED**. No `Game.exe` / `RGSS*.dll` under the repo or examples tree. `examples/*/play.bat` launches Hostra/Electron, not RGSS. |
+| Grade of all traces below | STATIC-INFERRED / notALiveRun. Never DYNAMIC-OBSERVED. |
+
+Input SHA-256 rechecked this run:
+
+| File | Bytes | SHA-256 |
+|---|---:|---|
+| Map007.rxdata | 37559 | `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7` |
+| Map021.rxdata | 28708 | `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575` |
+| Map047.rxdata | 32107 | `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e` |
+| Tilesets.rxdata | 163802 | `433033b45527c0f07b781c862724df64d6a416c0ac2ed71907f645c0b2219fa6` |
+| CommonEvents.rxdata | 2566 | `196c5ee7f51e656b79514ce203f4077f4b12ff55192ebdf4dd0aefdd7734de12` |
+| MapInfos.rxdata | 3377 | `8ed090fb27db75e046755896e0d4dbb53fa6de6279d21865315dd60f868d5007` |
+| PBS/map_connections.txt | 1121 | `a81c0a2cfad6ead0358384bdeea00353c796bb98c1b996b4b3b2be1233ee3cb0` |
+| MapTransfer/7.json | 4050 | `8fe855894055ea026c9da590fdd3d2c178f938cd392f2bebe91918568dd6f449` |
+| MapTransfer/21.json | 545 | `f5bbed3a4a61f2e70f1831928c4cb8a774d524e83839943ae1c2f58ccd1d20bd` |
+
+### 16.1 E2E-21 unified replay (closes the segmented-tracer gap)
+
+Old `buildMap21BridgeRoutes` still exists as a probe. Acceptance is now `map-world-replay.mjs#replayWorld` + `map21-e2e-replay.mjs`: one state vector from a **materialized** MapTransfer/7 edge, not a hand-built Map21 landing.
+
+Materialized edges used: Map7 `(40,0)` dir=8 to Map21 `(19,76)`; reverse `(19,76)` dir=2 to `(40,0)`. Three sibling edges `(41-43,0)` to `(20-22,76)` exist; groups used the first edge that could reach the land approach.
+
+| Group | On/Off | enter | tag15 cell | steps/inputs | On start/exec | Off start/exec | continuous | independent | return Map7 bridge=0 |
+|---|---|---|---|---|---|---|---|---|---|
+| south-canal | 25/23 | (14,70) up | (18,66) tile 1643 | 48/42 | 4/4 | 2/2 | true | true | true |
+| mid-south | 22/20 | (22,59) up | (23,64) tile 1627 | 90/84 | 4/4 | 2/2 | true | true | true |
+| mid-north | 10/7 | (14,30) down | (17,35) tile 1627 | 182/166 | 8/8 | 4/4 | true | true | true |
+| north-span | 4/28 | (18,46) right | (20,37) tile 1643 | 140/130 | 8/8 | 2/2 | true | true | true |
+
+Notes:
+
+- Start and execute are separate checkpoints. `start.execute` is never true. Interpreter tick is STATIC-ASSUMPTION for Wait-free `pbBridgeOn/Off`.
+- Independent checker uses `tableAt` plus MapTransfer edge membership plus adjacency. It does not import `traceWorldStep` / `replayWorld` / `bfsWalkWorld`. Unique tag15 recount = 93, matching collectMapEvidence.
+- mid-north land is north of Off. The south landing cannot reach that cell without walking other On/Off bands; incidental starts are counted (On 8/8). This is recorded, not hidden.
+- `traceStep.transfer` remains null (old tracer). `traceWorldStep` records real transfer plus `pbBridgeOff`.
+- Commands: `node --test tools/fixtures/essentials-v21.1/map-e2e-21.test.mjs` (this run: pass, including live four groups). CLI: `node tools/fixtures/essentials-v21.1/map21-e2e-evidence.mjs`.
+
+### 16.2 Map47 (static) and command 404
+
+Legal static jumps: 30. Reverse jumped: 0. Start-blocked samples: 90. Landing-blocked: 0. Boundary: 0. Mid-tile original events: 0. Historical `(16,9)` to `(16,11)` still legal on this SHA.
+
+Command 404 is labeled `show-choices-branch-end`, not empty, not `unknown-code-404`. Present on Map47 EV007 Purify expert `(18,22)` and EV013 Weather controller `(49,20)`, not on Ledge cells. `affectsLedgePhysics=false`. Choice control flow is fail-closed (this tracer does not execute it). Cross-map jump unsupported.
+
+Synthetic legal/reverse/start-block/landing-block/boundary/mid-event/landing-event cases are labeled `sampleKind=synthetic` and `notOriginalMap47=true`.
+
+### 16.3 RGSS BLOCKED recipe
+
+Checked: repo plus `examples/**` for `Game.exe`, `RGSS301.dll`, `RGSS300.dll`, `RGSS102J.dll`, `mkxp-z.exe` → none. `play.bat` requires Hostra `electron.exe`.
+
+After a legal v21.1 install is available:
+
+1. Copy the game to a disposable debug tree. Do not modify the FSDB used by this repo.
+2. Start at Map7 `(40,0)` facing north. Record frames for the four E2E groups and Map47 `(16,9)` dir=2.
+3. Keep input, frame index, x/y/direction, event start flag, interpreter index, `$PokemonGlobal.bridge`, and version `ea7b5d56`.
+4. Diff against the STATIC-INFERRED traces. Do not promote static traces to DYNAMIC-OBSERVED without that diff.
+
+Affected gates until then: FG-01, FG-03, FG-04 remain OPEN. This Agent will not mark the dynamic requirement optional.
+
+### 16.4 Fixtures, license, CI
+
+Original rxdata / PBS / appendix A are not treated as redistributable. Synthetic worlds in `terrain-behavior-synthetic-world.mjs` are original and intended for CI. Live tests skip when FSDB is absent (`skip` is not PASS).
+
+CI workflow: `.github/workflows/essentials-fixture.yml` (`npm run test:fixtures`). Run ID is recorded after push plus `workflow_dispatch`. Until that run exists, FG-05 stays OPEN.
+
+### 16.5 Tests recorded this session (pre-commit)
+
+Working tree baseline `9228903`. Exact post-commit SHA is the freeze-candidate commit on this branch.
+
+| Command | Result |
+|---|---|
+| Combined terrain freeze tests (`map-event-evidence`, `map-evidence-acceptance`, `map-e2e-21`, `map47-ledge-acceptance`) | **54 pass / 0 fail / 0 skip** on this machine with official FSDB present. Node v22.12.0. Not CI. Live items were executed, not skipped. |

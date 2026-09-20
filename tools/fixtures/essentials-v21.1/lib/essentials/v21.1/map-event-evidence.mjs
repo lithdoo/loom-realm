@@ -84,6 +84,7 @@ export const COMMAND_LABELS = Object.freeze({
   102: "show-choices",
   402: "when-choice",
   403: "when-cancel",
+  404: "show-choices-branch-end",
   103: "input-number",
   104: "change-text-options",
   105: "button-input",

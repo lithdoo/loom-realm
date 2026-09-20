@@ -1,115 +1,246 @@
 # Terrain Behavior：CONTRACT_V1 候选审查稿（非规范、不可派单）
 
-> **FREEZE CANDIDATE ONLY / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。依据取证代码提交 `e60e4a521a726233bbda0bb1892f6d25bc47573d`，冻结准备起点 `b26a4d68d1cbe4136242e0b4fd09dd2d617e56a6`。本文件只是供逐项决策的**候选**，不是 `TERRAIN_BEHAVIOR_CONTRACT_V1.md`，不授权玩法实现；任何带 `PROPOSED`、`OPEN` 的字段和时序均不得被 Agent 默认为已签核。
+> **FREEZE CANDIDATE COMPLETE / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。
 >
-> 上游固定 Pokémon Essentials v21.1 commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`；原始素材指纹与本地重跑记录见 [证据 §15](./TERRAIN_BEHAVIOR_EVIDENCE.md)、[证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)；签核顺序见 [冻结执行](./TERRAIN_BEHAVIOR_FREEZE_EXECUTION.md) 和 [门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)。
+> 本文件是 C-01～08 的精确候选。它不是 `TERRAIN_BEHAVIOR_CONTRACT_V1.md`，不授权 AG-01～04 玩法实现，不能由本 Agent 代签。可执行校验器见 `tools/fixtures/essentials-v21.1/lib/essentials/v21.1/terrain-behavior-contract-candidate.mjs`。
+>
+> 上游 Pokémon Essentials v21.1 commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`。当前代码合同只存在于 `src/semantics.ts`、`src/runtime.ts`、`browser/map.browser.js` 与 importer/Content 的已实现字段。下列 TypeScript 在签核前不得被当成已存在 API。
 
-## 0. 权威来源与修改策略
+## 0. 状态、证据等级与禁止事项
 
-- 当前**已存在的代码合同**只能从 `src/semantics.ts`、`src/runtime.ts`、`browser/map.browser.js` 和 producer/Content 的实际实现读取。新内容不得悄悄替换既有字段，也不得修改 M14/M15 历史资格记录。
-- 原始 v21.1 源码规定行为的条件分支；有 SHA-256 的 Map7/21/47 规定样本事实；静态 JS 移植/BFS 是 `STATIC-INFERRED`，不是 RGSS 原版实际运行。遇冲突须修正候选，不准让实现自己选择。
-- 新增 `terrain_tags`、MapAction、bridgeLevel、motion ABI 均须新 subject/schema 版本与兼容性策略。修改 `struct.Tileset` 精确字段集会导致旧校验器不再接受旧数据；不可直接使历史 fixture 自动被视为新合格。
-- 本稿的 TypeScript 是**审查提议**，不是已经存在的源码。`OPEN` 决策未填充时不可重命名为 `CONTRACT_V1` 或开始 AG-01～04。
+| 等级 | 含义 |
+|---|---|
+| SOURCE-PROVEN | 固定 v21.1 源码条件分支 |
+| FSDB-OBSERVED | 带 SHA-256 的原始素材抽取 |
+| STATIC-INFERRED | JS 规则移植、BFS、统一 replay；**不是 RGSS** |
+| STATIC-ASSUMPTION | Wait-free `pbBridgeOn/Off` 在下一次方向输入前完成；**不是帧日志** |
+| DYNAMIC-OBSERVED | 原版 RGSS 逐帧。本机 **BLOCKED** |
+| PROJECT DECISION | LoomRealm 设计选择，待 reviewer 签核后才能进入 V1 |
 
-## C-01 数据：已知形状与待签核字段
+禁止：提前实施玩法；为过关改 Runtime/Browser；提交原始 rxdata/完整受限地图 JSON；把静态 execute 写成 RGSS 实测；把 live skip 写成 PASS；Agent 自签 `CONTRACT FROZEN`。
 
-当前 `semantics.ts` 中 `ProjectedTable = {dimensions,xSize,ySize,zSize,values: readonly number[]}`；`MapRecord = {tileset_id,width,height,data}`；`TilesetRecord` 精确 keys 为 `id,tileset_name,autotile_names,passages,priorities`，`autotile_names` 为长度 7 的 `(string|null)[]`。`Map.data` 校验为 3D 且 `xSize=width,ySize=height,zSize=3`。**这几项是当前代码事实，不是候选新增实现。**
+## 1. 已核验基线（FZ-00）
 
-以下是唯一推荐的最小**增量候选**（仍 OPEN）：
+| 项 | 值 | 等级 |
+|---|---|---|
+| 分支 | `docs/map-terrain-behavior-freeze-handoff` | git |
+| 准备起点 SHA | `922890356cd505d06350cc3f67510a2482d65f11` | git |
+| OS / Node | Windows 10 19044 / Node v22.12.0 | 本机 |
+| 本地 FSDB | `examples/essentials-v21.1-local/[FSDB]Essentials v21.1` | 存在 |
+| Map007.rxdata | `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7` / 37559 B | FSDB-OBSERVED |
+| Map021.rxdata | `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575` / 28708 B | FSDB-OBSERVED |
+| Map047.rxdata | `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e` / 32107 B | FSDB-OBSERVED |
+| Tilesets.rxdata | `433033b45527c0f07b781c862724df64d6a416c0ac2ed71907f645c0b2219fa6` / 163802 B | FSDB-OBSERVED |
+| CommonEvents.rxdata | `196c5ee7f51e656b79514ce203f4077f4b12ff55192ebdf4dd0aefdd7734de12` / 2566 B | FSDB-OBSERVED |
+| MapInfos.rxdata | `8ed090fb27db75e046755896e0d4dbb53fa6de6279d21865315dd60f868d5007` / 3377 B | FSDB-OBSERVED |
+| PBS map_connections.txt | `a81c0a2cfad6ead0358384bdeea00353c796bb98c1b996b4b3b2be1233ee3cb0` / 1121 B | FSDB-OBSERVED |
+| MapTransfer/7.json | `8fe855894055ea026c9da590fdd3d2c178f938cd392f2bebe91918568dd6f449` / 4050 B | FSDB-OBSERVED |
+| MapTransfer/21.json | `f5bbed3a4a61f2e70f1831928c4cb8a774d524e83839943ae1c2f58ccd1d20bd` / 545 B | FSDB-OBSERVED |
+| RGSS Game.exe / RGSS*.dll | 本仓库与 examples 树中不存在 | BLOCKED |
+| `examples/*/play.bat` | Hostra/Electron 产品入口，**不是**原版 RGSS | SOURCE-PROVEN 本仓库 |
+
+## C-01 Data
+
+**事实依据：** 当前 `TilesetRecord` keys 仅为 `id,tileset_name,autotile_names,passages,priorities`。RMXP `RPG::Tileset.@terrain_tags` 存在于 decoder class-registry。旧 fixture 是五字段。
+
+**备选：** (A) 原地加第六字段并拒绝旧记录；(B) 双读兼容期；(C) 新 Content namespace。
+
+**PROJECT DECISION（待签核）：** 选 (A)。保留全部现有字段，**恰好**增加 `terrain_tags`。旧五字段记录 **拒绝**，由 AG-01 显式 migrator 重写；不在 Runtime 暗中默认 `[]`。`autotile_names` 仍为长度 7。三张 1D 表 `xSize` 必须相同。tag 值域 **0～17** 的整数；18、负数、非安全整数 fail-closed。未知未来标签不允许。缺 Tileset、短表、3D terrain_tags、地图非零 tile 无法索引三表之一：错误码 `TILESET_RECORD_INVALID` / `MAP_TILE_INDEX_INVALID`。
 
 ```ts
-// PROPOSED ONLY: 保留现有 TilesetRecord 全部字段，新增恰好一个字段。
+interface ProjectedTable {
+  readonly dimensions: number;
+  readonly xSize: number;
+  readonly ySize: number;
+  readonly zSize: number;
+  readonly values: readonly number[];
+}
 interface CandidateTilesetRecord {
-  readonly id: number;
+  readonly id: number;                     // positive safe integer
   readonly tileset_name: string;
-  readonly autotile_names: readonly (string | null)[]; // length 7; existing
-  readonly passages: ProjectedTable;                  // existing 1D
-  readonly priorities: ProjectedTable;                // existing 1D
-  readonly terrain_tags: ProjectedTable;              // NEW 1D; values indexed by tileId
+  readonly autotile_names: readonly (string | null)[]; // length === 7
+  readonly passages: ProjectedTable;       // dimensions=1, ySize=zSize=1, values.length=xSize
+  readonly priorities: ProjectedTable;
+  readonly terrain_tags: ProjectedTable;   // NEW; same xSize; each value in 0..17
 }
 ```
 
-签核前须决定：`terrain_tags` 形状 `dimensions=1,ySize=zSize=1,values.length=xSize`；对每个地图非零 tile ID 同时验证 terrain/passages/priorities 都可索引，tag 限定 0～17（是否允许未来未知标签，必须明示）；负 ID、非安全整数、缺字段、错误 table 长度、Tileset key 与 Content key 不一致均 fail-closed，并给精确路径/错误码。旧 records 是拒绝并要求迁移、版本化保留旧 validator，还是双读阶段兼容？由 C-01 审查决定，不可臆测。Producer `m14-consumer.mjs` → prepared `struct.Tileset` → Content → Map Library 的具体 namespace/版本/测试逐段标记 owner。
+**正例：** `CANDIDATE_JSON_EXAMPLES.tilesetOk`。
+**反例：** 缺 `autotile_names`；五字段旧记录；短 1D；3D tags；tag=18。测试：`map-e2e-21.test.mjs` C-01 段；`validateCandidateTilesetRecord`。
 
-**必须审核的正反例**：完整六字段且三张表同索引通过；只给新字段而丢 `autotile_names` 拒绝；旧五字段是否走显式迁移；短 1D、3D terrain_tags、负 tile、越界 tile、tag=18、无 Tileset、地图 3D 长度不符拒绝。合成 fixture 不能顶替真实 Map21 素材的合法来源。
+**Producer / consumer**
 
-## C-02 地形/通行（签名候选；语义规则待逐例签）
+| 字段 | Producer | Consumer |
+|---|---|---|
+| 现有五字段 | `m14-consumer.mjs#projectTilesetRecords` | Content `struct.Tileset` → Map Library `validateTilesetRecord` |
+| `terrain_tags` | **未实现**；AG-01 才改 producer | AG-01 起 Map Library；在此之前 Runtime 不得读取 |
+
+**默认值：** 无。缺字段不是 0。
+**迁移：** 新 schema subject；不改写历史 M14 ledger。
+**验收：** `DATA-01` 六字段同索引通过；`DATA-02` 旧五字段拒绝；`DATA-03` 非法 table 拒绝。
+
+## C-02 Semantics
+
+**事实依据：** `vanilla-map-rules.mjs#playerPassableTrace` 移植 `Game_Map#playerPassable?`。None(0) 非空 tile 仍走 passage；Neutral(13) `ignore_passability` **只跳过该层**；NoEffect(17) 不是 Neutral；Bridge(15) 在 `bridgeLevel===0` 跳过桥层，`bridgeLevel>0` 由桥层 passage 决策；Ledge(1) 由 `move_generic` 另支。`d=0` 仅用于 `over_trigger?` / jump 落点，使用 Ruby 1.8 负移位，bit=0。
+
+**备选：** 合并 tag+passage 单函数；或两查询。
+
+**PROJECT DECISION：** 两查询必须分开。签名（尚未存在于 `semantics.ts`）：
 
 ```ts
-// PROPOSED ONLY; 返回是否有足够数据而非把未知当 false/true。
-type CandidateTerrainResult =
-  | Readonly<{ status: 'known'; tag: number; sourceLayer: 0 | 1 | 2 | null }>
+type TerrainQuery =
+  | Readonly<{ status: 'known'; tag: number; id: string; sourceLayer: 0 | 1 | 2 | null }>
   | Readonly<{ status: 'invalid'; reason: string }>;
-type CandidatePassability =
-  | Readonly<{ status: 'decided'; passable: boolean; reason: string }>
+type PassabilityQuery =
+  | Readonly<{ status: 'decided'; passable: boolean; reason: string; bit: number }>
   | Readonly<{ status: 'invalid'; reason: string }>;
-// resolveEffectiveTerrainTag(context, x, y) 和 evaluatePassability(context, from, direction, bridgeLevel)
-// 必须是两个不同查询。以上只是候选返回值，不得作为现有 API。
+// resolveEffectiveTerrainTag(context, x, y, bridgeLevel)
+// evaluatePassability(context, x, y, direction, bridgeLevel)
 ```
 
-行为审核矩阵必须覆盖：非空 tag 0 仍执行 passage；tag 13 Neutral **忽略该层**并继续下层；tag 17 NoEffect 不等于 Neutral；tag 15 桥下 `bridgeLevel=0` 跳过桥层、桥上数值大于零时由桥层 passage 决策；源格方向与目标格反向均需审原版，方向为 2/4/6/8。`d=0` 是 `over_trigger?` 特殊查询，**不是正常方向输入**：v21.1 负移位结果 bit=0，仍有全阻/priority/其他分支。地图边界、tile 0、未知标签、冲浪/骑车/动态 NPC 的支持边界不得暗中复刻不全却报告原版一致。验收 ID `DATA-*`, `BR-PASS-*`, `REG-*`。
+方向仅 `2|4|6|8` 为行走输入。边界外 `passable:false` / `reason:'invalid-coordinates'`。tile 0 跳过。冲浪/骑车/NPC 动态碰撞 **本轮不承诺**。
 
-## C-03 事件事实与 MapTransfer 分离
+**验收：** 既有 `EV-TRIGGER-01/02`、`BR-PASS-*` 合成 Neutral/Bridge；不得把未知 tag 当 None 而不记 invalid。
 
-**现有已冻结范围的记录形状（代码事实）**：`struct.MapTransfer` 在 `semantics.ts` 为 `{id,steps,contacts,edges}`，步骤 `(x,y,targetMapId,targetX,targetY,targetDirection)`、接触增加 `direction`、边界记录 `(x,y,direction,targetMapId,targetX,targetY)`；`validateMapTransferRecord` 拒绝多余字段及重复源键。不能在未升级 schema 时偷偷附加 `bridgeLevel` 或 `action`。
+## C-03 Event / MapTransfer / MapAction
 
-**狭义 MapAction 候选**（尚未有正式 producer/schema/Content key）：
+**事实依据：** `MapTransferRecord = {id,steps,contacts,edges}`。edge `(x,y,direction,targetMapId,targetX,targetY)`。不得在未升 schema 时附加 `bridgeLevel`。Map21 物化：Map7→21 四条 `(40–43,0) dir=8 → (19–22,76)`；反向 `(19–22,76) dir=2 → (40–43,0)`。D0 潜在丢边 ≠ 已证实误删。
+
+Map21 桥事件（本 SHA，page 0 常开、trigger=1、through、空图形）：
+
+| ID | 脚本 | origin | occupied | size |
+|---:|---|---|---|---|
+| 4 | On | (20,49) | x=20 y=46–49 | (1,4) |
+| 28 | Off | (19,49) | x=19 y=46–49 | (1,4) |
+| 10 | On | (14,32) | x=14–16 y=32 | (3,1) |
+| 7 | Off | (14,31) | x=14–16 y=31 | (3,1) |
+| 22 | On | (22,57) | x=22–23 y=57 | (2,1) |
+| 20 | Off | (22,58) | x=22–23 y=58 | (2,1) |
+| 25 | On | (14,68) | x=14–15 y=68 | (2,1) |
+| 23 | Off | (14,69) | x=14–15 y=69 | (2,1) |
+
+`over_trigger?` 在 bridgeLevel 0/2 为 true、here：**STATIC-INFERRED**。空图形 ≠ 自动 walk-on。
+
+**备选：** 通用事件解释器；或狭义 MapAction。
+
+**PROJECT DECISION：** 狭义 MapAction，不执行 Ruby。namespace 待 AG-01 放入 prepared FSDB（建议 `struct.MapAction`，key=`${mapId}` 列表）。唯一键 `(mapId,eventId,pageIndex,commandIndex)`。只投影 trigger=1 且脚本可静态识别为 `pbBridgeOn`/`pbBridgeOff` 的页面。`pbBridgeOn` height **恰好 2**。命令白名单：355/655 且文本匹配 `pbBridgeOn`/`pbBridgeOff`，加终止 0。未知相关桥候选 fail-closed（不投影、不在 Runtime 硬编码 Map21 ID）。404 是 Show Choices branch-end，**不得当空**；Map47 的 404 在 EV007/EV013，不在 Ledge 格上，不改变 jump 物理。
 
 ```ts
-// PROPOSED ONLY. JSON 里的 event/page/command 必须从取证来源验证，不能在 Runtime 硬编码 Map21 ID。
 type CandidateMapAction = Readonly<{
-  mapId: number; eventId: number; pageIndex: number; commandIndex: number;
-  trigger: 1; // 当前桥样本为 player-touch；不声明支持任意事件 trigger
+  mapId: number;
+  eventId: number;
+  pageIndex: number;
+  commandIndex: number;
+  trigger: 1;
   occupied: readonly Readonly<{ x: number; y: number }>[];
   op: 'bridge-on' | 'bridge-off';
-  height: number | null; // on: 默认值 2 的显式投影决策尚待签；off: null
+  height: 2 | null; // on: 2; off: null
 }>;
 ```
 
-签核前明确：namespace/key、列表排序和唯一键、`size(w,h)` 与原点占用、选择页面倒序及条件投影范围、图形/through/hiddenitem/`over_trigger?` 所需事实、桥脚本严格可接受命令白名单、多个冲突事件优先级、未知相关事件 fail-closed 的范围。不投影/执行通用 Ruby 或无关剧情 NPC。Map21 的八事件 0/2 `over_trigger?=true` 是静态推导而非空图形必然成立；若任何状态/页面变体未被表示，须清晰标注不支持。
+**JSON 正例：** `mapActionOn` / `mapActionOff`。反例：trigger≠1；on 且 height≠2。
+**MapTransfer 过滤：** 保持现有投影；不得因“潜在 D0 风险”删除已物化 Map7/21 edge。新增 eligibility 字段须升 schema。
+**验收：** `E2E-21-02` 无物化边 fail-closed；`wouldProjectEventAsTransfer` size/hiddenitem 跳过。
 
-**MapTransfer 过滤决策 OPEN**：`projectedD0Passable` 不知道 bridgeLevel，只有可以证明所有相关合法状态均不可走的事实才可导入期永久删除；源端 `(sourceMapId,x,y)` 与目标端 `(targetMapId,x,y)` 单独查。既有 Map21 三条 PBS 中 7 条已物化 edge 无已证实误删；67/93 桥格 D0-false 仅是潜在风险。拟变更保留全部候选、标 eligibility 或增加独立未过滤记录时，需要 exact schema、兼容/迁移与回归清单后才能签。
+## C-04 Time
 
-## C-04 事件时序（当前确定条件与未证时刻）
+**SOURCE-PROVEN：** `can_move` 先于事件；失败才 front touch；成功移动完成后 `check_event_trigger_here`。`Game_Event#start` 只置 `@starting`（且 `@list.size > 1`）。解释器运行中 here/touch 立即返回。
 
-**SOURCE-PROVEN 分支**：方向 `can_move` 先判定；失败时按条件检测 front touch，成功动作完成才可能 `check_event_trigger_here`；`over_trigger?` 除图形等条件，还要求至少一个占用格 `map.passable?(x,y,0,player)`；`Game_Event#start` 只置 starting，不是同一函数内同步执行脚本。Map21 八事件逐占用格 0/2 的 true 属 `STATIC-INFERRED`。禁止 contact 后对**同次输入**立即重算通行。
+**STATIC-ASSUMPTION（本轮静态合同，不是 RGSS）：** 统一 replay 把 start 与 interpreter-execute 分成两步。Wait-free `pbBridgeOn/Off` 在下一次方向输入前被 `advance()` 插入的 `interpreter-tick` 结算。`nextInputAvailable=false` 直到 execute 完成。held input 在 execute 之后可以再次 start。同一次 walk 的 start 记录 `execute:false`。
 
-**OPEN：** `Game_Player` 的 held-input、事件重入/重复启动、多事件先后、解释器调度与动作完成的帧边界、transfer 与 step/edge/arrival 的优先级；须由逐帧原版日志或经 reviewer 明示批准的静态替代标准确定。`map-route-trace.mjs#applyStarts` 会直接模拟脚本完成并将 `busy` 复零，仅可当离散步骤的静态预测，不是原版帧调度。
+**仍须 DYNAMIC-OBSERVED 才能冻结为原版时序：** 帧边界、Wait 命令、多事件优先级、解释器未完成时的 held input 吞键。在取得 RGSS 日志或正式门禁变更前，C-04 的“帧精确”条款保持 **OPEN**；静态 replay 不得自称 DYNAMIC。
 
-## C-05 bridgeLevel 生命周期（OPEN 部分明确列出）
+**Given/When/Then**
 
-原版 `pbBridgeOn(height=2)`、`pbBridgeOff` 及 `Scene_Map#transfer_player` 调用链提供数值行为骨架。候选：Runtime 独占 bridgeLevel；进入样本初始 0；On 设置 2；Off/跨图归零；下一次通行与 tile depth 读取**已完成脚本**后的状态。仍须冻结：输入 Frame 创建/销毁、异常、取消、动态转图、非 0/2 数值如何合法、同帧投影事务失败时如何回滚及 snapshot 策略。不得未经审查扩大现有 `InitialInput` 四字段 `{mapId,x,y,characterName}`。
+1. Given Map7 `(40,0)` dir=8 bridge=0；When input `up`；Then kind=`transfer`，target Map21 `(19,76)`，`bridgeLevel=0`（`Scene_Map#transfer_player` → `pbBridgeOff`）。
+2. Given 走到 On 占用格且 over_trigger；When walk 完成；Then start checkpoint `started=true, execute=false`，`pendingExecute` 置位；下一方向输入前先 execute，bridgeLevel→2。
+3. Given 面前有非 through 有名 NPC；When can_move 失败；Then kind=`blocked-or-touch`，可 touch start，不改变 x/y。
 
-## C-06 Motion / RenderDomain ABI（先列实际存在的与新提议）
+## C-05 State
 
-当前 `runtime.ts` 已有 `ActiveMove {id,fromX,fromY,startPattern}`、`WALK_STEP_MS=250`、根与人物 `sceneEpoch/visualEpoch/motionId`；viewport `cameraMotion {id,durationMs,fromCameraX,fromCameraY}`，player `motion {id,durationMs,fromY,fromScreenX,fromScreenY}`；`beginTransfer` 通过 `domain.replace` 切图并递增 scene/visual epoch；resize 一次 `domain.update` 同时写 viewport 与 player。**现有字段是事实，不等于 jump ABI 已冻结。**
+**SOURCE-PROVEN：** `pbBridgeOn(height=2)`；`pbBridgeOff`；`transfer_player` 总是 `pbBridgeOff`。
+
+**PROJECT DECISION：** Runtime **独占** `bridgeLevel`。合法值本轮仅 `{0,2}`；其它值 fail-closed，不静默钳制。初值 0。On execute 后为 2；Off execute 或任何 transfer 后为 0。不扩展现有 `InitialInput` `{mapId,x,y,characterName}`；bridgeLevel 不进启动输入，进图后为 0。Frame 失败须回滚到执行前 snapshot（AG-03 实现时测试）。depth 缓存在 bridgeLevel 变化时必须与人物同次 `domain.update` 失效。
+
+**矩阵（静态）**
+
+| 前态 bridge | 事件 | 后态 | 通行 |
+|---:|---|---:|---|
+| 0 | none | 0 | 跳过 tag15 层 |
+| 0 | On execute | 2 | 使用桥层 passage |
+| 2 | Off execute | 0 | 跳过桥层 |
+| 任意 | transfer | 0 | 目标图按 0 |
+
+## C-06 Motion / RenderDomain
+
+**已存在（不得假装已含 jump）：** `WALK_STEP_MS=250`；`ActiveMove {id,fromX,fromY,startPattern}`；viewport/player `sceneEpoch,visualEpoch,motionId`；walk 时 `domain.update` 同时写 viewport+player；`beginTransfer` 用 `domain.replace` 且 scene+visual 同增。
+
+**备选：** jump=两次 walk；或一次 jump 计划。
+
+**PROJECT DECISION：** jump **一次** `jumpForward(2)`，逻辑坐标跳过中间格。不得拆成两次 walk。on-wire 在 AG-04 前 **不存在**；候选内部计划：
 
 ```ts
-// PROPOSED conceptual internal plan, not on-wire and not existing TS:
 type CandidateMovementPlan =
   | Readonly<{ kind: 'blocked'; direction: 2 | 4 | 6 | 8 }>
-  | Readonly<{ kind: 'walk'; fromX: number; fromY: number; toX: number; toY: number; direction: 2 | 4 | 6 | 8 }>
-  | Readonly<{ kind: 'jump'; fromX: number; fromY: number; toX: number; toY: number; direction: 2 | 4 | 6 | 8; skippedX: number; skippedY: number }>;
+  | Readonly<{ kind: 'walk'; fromX: number; fromY: number; toX: number; toY: number; direction: 2 | 4 | 6 | 8; durationMs: 250 }>
+  | Readonly<{ kind: 'jump'; fromX: number; fromY: number; toX: number; toY: number; skippedX: number; skippedY: number; direction: 2 | 4 | 6 | 8;
+      durationMs: 'UNVERIFIED-pending-RGSS'; peakRule: 'distance * TILE_HEIGHT * 3 / 8' }>;
 ```
 
-签核前需要确定**真正 on-wire 的 exact payload**（kind/from/to/duration、motion ID、epoch、camera/player 同步、jump 弧线/人物图案、逻辑坐标提交时刻），resize/transfer/cancel/abort/old completion/重入/无效包逐项预期。不要把两个 walk 拼成一次 jump，也不要仅为跳跃修 Browser 一侧。bridgeLevel 即使玩家/相机原地不动仍使桥深度重投影，需同次 RenderDomain 更新及 scene/visual epoch 原子一致；不得通过全局提升玩家 zIndex 规避。
+**epoch 规则（现有 walk/transfer 事实 + 候选）：** 新 motion 分配新 `motionId`；resize 一次 update 写 viewport+player 且 visualEpoch+1；transfer `replace` 且 sceneEpoch 与 visualEpoch 同增；过期 completion（motionId 不匹配）丢弃；cancel/abort 清 ActiveMove 且 visualEpoch+1。jump duration **不可写死为 250**，须 RGSS 或 reviewer 明示。相机跟随 jump 弧线与人物同一 motionId。
 
-## C-07 支持矩阵与 C-08 资格
+**状态矩阵（实现必须遵守；动态单元格仍 BLOCKED）**
 
-只承诺 Neutral(13)、Bridge(15)、Ledge(1) 的审定行为；其余 0～17 原值保留，不假称完整水/冰行为。NPC 位置/碰撞若未投影，则相关动态交互必须标为不支持或另获最小事实。`Map7` 仅桥负例与普通门/连接回归，`Map21` 桥正例，`Map47` Ledge 正例；其他地图不能凭“69 张图均扫描”自动获得原版动态资格。
+| 状态 \ 事件 | 方向输入 | motion complete | resize | transfer | cancel |
+|---|---|---|---|---|---|
+| idle | 可开始 walk/jump/blocked | ignore | visual+1 同次 update | replace+清 bridge | ignore |
+| walking | 忽略或排队：**OPEN/RGSS** | 提交逻辑格，here 检测 | 同次 update，不改逻辑格 | 见 AG-03 冲突表 | 清 motion |
+| jumping | 忽略 | 提交落点，中间格不占用 | 同次 update | **UNVERIFIED** | 清 motion |
+| transitioning | 忽略 | 落地 bridge=0 | 禁止半截 | n/a | n/a |
+| event-running | 忽略直到 execute 完（静态假设） | n/a | 允许 visual | 以 transfer 规则为准 | n/a |
+| aborted | 回到 idle | ignore | visual+1 | 允许 | ignore |
 
-资格闭环：固定实现 base SHA → producer 内容版本/schema diff → TypeScript 构建 → 本地/CI 对应 exact run/SHA → M14 first-slice 与 M15 适用范围差异 → 新 subject 报告 → reviewer 审核。不得把本地 Agent 记录的取证 36/36、CI skip、历史 M14 通过或旧字段断言当新 subject 资格 PASS。许可未确定时完整 FSDB 留本地；合法可分发最小 fixture 及 CI 验证为 FG-05 实际条件。
+## C-07 Support
 
-## 合同签核缺口与决策记录（全部 OPEN）
+本轮只承诺 Neutral(13)、Bridge(15)、Ledge(1)。0～17 原值保留。不承诺水/冰/冲浪/骑车。NPC 碰撞仅当事件被投影为阻塞/touch 时；未投影 NPC **不支持**。跨图 jump **不支持**（`Game_Character#jump` 落点在当前地图 `passable?`）。Map7＝桥负例+普通连接回归；Map21＝桥正例；Map47＝Ledge 正例。69 图扫描 ≠ 动态资格。
 
-| 决策 | 需要的证据/确定性输出 | 负责复核对象 | 当前 |
+## C-08 Qualification
+
+| 项 | 决定 |
+|---|---|
+| 新 subject | 增加 `terrain_tags` 后必须新 Tileset schema subject；不改历史 M14 first-slice / M15 ledger |
+| 本地取证 | `map-event-evidence` + acceptance：36+1（404 标签）及 E2E/LD47 新文件；有 FSDB 时 live 实跑，无 FSDB 时 skip ≠ PASS |
+| CI | `.github/workflows/essentials-fixture.yml` → `npm run test:fixtures`。本分支 push 后以 workflow_dispatch 记录 run ID。无 run 前 FG-05 不得 PASS |
+| 许可 | 合成 fixture `SYNTHETIC_FIXTURE_LICENSE` 可分发；原始 Essentials 地图/PBS/附录 A **未获再分发许可**。附录 A 保持原样不扩大 |
+| 审查 | CONTRACT_V1 仅在授权 reviewer 逐项签核 FG-01～06 后创建 |
+
+## DEC-01～07
+
+| 决策 | 事实 / 备选 / 决定 | 验收 | 冻结状态 |
 |---|---|---|---|
-| DEC-01 | `E2E-21` **单一状态**：Map7 edge→Map21 落点→BFS→Off→On→实际 Bridge tag 格→Off→折返；完整 trace 与事件次数 | source/map reviewer | OPEN |
-| DEC-02 | 原版 RGSS bridge/ledge/transfer/held-input/frame 日志；如环境缺失，只能正式 BLOCKED 并由审查者决定是否修改 FG-01，不能自行降级 | original-behavior reviewer | OPEN |
-| DEC-03 | Map47 落点/边界/事件支持与运动/相机实际依据及不能证明部分 | movement reviewer | OPEN |
-| DEC-04 | terrain_tags schema 及 Content/fixture/旧字段迁移、MapTransfer 不丢动态事实、MapAction exact producer/consumer | data reviewer | OPEN |
-| DEC-05 | 真实 TypeScript/JSON on-wire Motion/RenderDomain ABI + 状态矩阵与浏览器共同签核 | runtime/browser reviewers | OPEN |
-| DEC-06 | 可合法分发 fixture 及 CI run/SHA；Map7 附录 A 许可处理 | provenance/qualification reviewer | OPEN |
-| DEC-07 | C-01～08 逐项批准、AG 任务卡固定 baseline、M14/M15 ledger 正确核对与签名 | specification reviewer | OPEN |
+| DEC-01 E2E-21 | 已用单一 `replayWorld` 从物化 Map7 edge 连续到 tag15、下桥、反向 transfer。输入搜索的 BFS 只生成输入；验收对象是 unified trace。独立核对：`tableAt` 桥格 + MapTransfer 边成员 + 邻接，不导入 `traceWorldStep`/`replayWorld`。 | `map-e2e-21.test.mjs` E2E-21-01..08；CLI `map21-e2e-evidence.mjs`。等级 **STATIC-INFERRED** | 静态闭合；动态仍缺 |
+| DEC-02 RGSS | 本机无 Game.exe/RGSS*.dll。play.bat=Hostra。 | 见 §RGSS BLOCKED。Gate 不降级 | **OPEN / BLOCKED** |
+| DEC-03 Map47 | 30 格；`(16,9)→(16,11)`；30 逆向均失败；404=show-choices-branch-end，EV007/013 不在 Ledge 格；合成负例单独标注；跨图 jump 不支持 | `map47-ledge-acceptance.test.mjs` LD47-01..06 | 静态闭合；动态仍缺 |
+| DEC-04 schema | C-01/C-03 上文。旧五字段拒绝。MapTransfer 不加桥字段 | `validateCandidateTilesetRecord` / MapAction | PROJECT DECISION 待签 |
+| DEC-05 motion | C-06。jump duration UNVERIFIED | 现有 runtime walk 测试 + LD47 静态一次两格 | PROJECT DECISION 待 runtime/browser 签 |
+| DEC-06 fixture/CI | 合成世界可提交；真图 live 留本机。附录 A 不扩大 | `npm run test:fixtures`；CI run 见冻结执行记录 | FG-05 **OPEN** 直至 CI run + 许可签核 |
+| DEC-07 签核 | Agent 不得自签 | 授权 reviewer | **OPEN** |
 
-**禁止将本候选直接重命名为正式 `CONTRACT_V1`。** 冻结时应以各项决策的已验证最终结果重写唯一规范文件、写定版本和实现 SHA、记录审查者，并在 FG-01～06 实际 PASS 后才可标 `Contract Frozen / Implementation Pending`。
+## 测试命令
+
+```text
+node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs tools/fixtures/essentials-v21.1/map-e2e-21.test.mjs tools/fixtures/essentials-v21.1/map47-ledge-acceptance.test.mjs
+npm run test:fixtures
+node tools/fixtures/essentials-v21.1/map21-e2e-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1"
+```
+
+无官方 FSDB 时 live 子测试 skip，必须报告 skip 数，不得写 PASS。
+
+## 仅剩外部阻碍（解除后即可签 V1）
+
+1. **RGSS 动态日志：** 合法 v21.1 `Game.exe` + 可恢复测试存档。复现：从 Map7 `(40,0)` 向上进入 Map21，四组 Off/On/tag15/折返；记录逐帧 x/y/bridgeLevel/start/execute；Map47 `(16,9)` 向下跳。完成后填 DYNAMIC-OBSERVED 并对照静态 trace。
+2. **素材再分发许可：** 法务/维护者书面允许 CI 使用 Map007/021/047 或其最小派生。否则 FG-05 保持 OPEN，CI 只跑合成。
+3. **CI workflow run：** 本分支 `essentials-fixture.yml` 的 run ID + SHA + pass/fail/skip。
+4. **授权 reviewer 签核** DEC-01～07 与 FG-01～06。本 Agent 不能签署。
+
+**在上述 1–4 完成前，禁止创建 `TERRAIN_BEHAVIOR_CONTRACT_V1.md`，禁止把状态改为 CONTRACT FROZEN。**

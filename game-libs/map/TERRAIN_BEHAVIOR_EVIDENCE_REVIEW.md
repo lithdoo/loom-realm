@@ -22,19 +22,17 @@
 | REVIEW-03 CE 间接调用 | `common-event-reachability.mjs` 从调用入口计算嵌套可达集合和路径；直接/多层/循环/缺目标及独立 autorun 入口测试 `EV-CALL-*` | 本 corpus Map 7/21 的 117 调用为零，未发现 CE 桥脚本；autorun/parallel、任意方法体 `eval/send` 不由地图事件可达性结论全部排除。 |
 | REVIEW-04 跨图坐标 | `map-connection-audit.mjs` 使用源/目标 mapId 分别取得地图与 Tileset，按 PBS 候选与物化 edge 核对；`EV-TRANSFER-*` | Map 21 的 3 条 PBS 连接对应现有 7 条 edge，`21,E,77,47` 为几何越界；67 个 D0-false Bridge 格仅是**潜在过滤风险**，没有已证实真实误删。 |
 
-独立脚本 `map-evidence-independent-check.mjs` 用 decoder 重新计算 Map 21 Bridge 格、8 个脚本 ID、Map 47 Ledge 格；**独立性只覆盖这些统计，不覆盖八事件触发分类、路径可行性或逐帧时序**。不应写成全部行为已经双实现验证。
+独立脚本 `map-evidence-independent-check.mjs` 用 decoder 重新计算 Map 21 Bridge 格、8 个脚本 ID、Map 47 Ledge 格。另增 `map21-e2e-independent-check.mjs`：用 `tableAt` 与物化 MapTransfer 边成员核对 **unified** 逐步邻接、transfer 非 null、transfer 后 bridge=0、start 不得标记 execute。该独立性仍不覆盖 `over_trigger?` 逐格重算或 RGSS 帧。不应写成全部行为已经双实现验证。
 
 ## 3. ROUTE-21：连续静态片段与真正跨图闭环必须分开
 
 `map21-bridge-routes.mjs` 从 Map 7→21 的合法落点样本选择 Map 21 `(19,76)`，对四组桥头 BFS 寻路；分别 `replayInputs` 计算两步 Off→On、On→Off 和部分带内/负例。§15.3 的南组报告 11 步到 `(14,70)`，中南组 20 步、中北组 73 步、北跨组 37 步。它们是**静态路径搜索记录**，不是 RGSS 输入日志。
 
-**当前实现边界（不要表述为已验证的完整端到端路线）：** `fromMap7Landing.bfs` 与 `ontoBridge` 是分别生成的段；`ontoBridge` 以指定桥头 `bridgeLevel=0` 重新初始化，没有把 BFS 终态（方向、bridgeLevel、事件结果）直接传入并合并重放。`map-route-trace.mjs` 对动作的 `transfer` 返回 `null`，并没有在同一次模拟中实际执行 Map 7→21 的 edge/转图重置。因此 `bfs.found=true`、`ontoBridge.continuous=true` 和上桥最终 `bridgeLevel=2` **分别成立时，仍不能自动推出 Map 7→桥面的一条完整原版可重放轨迹**。旧 §14.6 只保留作历史关键点草图；§15.3 是改进后的静态片段，但不能升级为 `DYNAMIC-OBSERVED`。
-
-关闭端到端子项需：选取真实 Map 7 起点 → 原始连接边 → Map 21 落点，检查两段交界状态完全一致；从落点连续 replay BFS+Off→On+桥面+On→Off+折返，逐步断言位置、方向、bridgeLevel、事件 start/execute、transfer 和下一次输入；验证每组是否真的接触 Bridge-tagged deck，而不仅仅踏上 On 事件带。随后用原版 RGSS 日志核对帧与执行顺序。若只能运行静态 tracer，诚实标 `STATIC-INFERRED`，不可改写为整项 PASS。
+**2026-09-20 静态闭环：** 旧 `buildMap21BridgeRoutes` 仍是分段探针，**不能**当 E2E。验收改为 `map-world-replay.mjs#replayWorld`：从物化 MapTransfer/7 `(40,0)` dir=8 进入 Map21 `(19,76)`，单一 state 连续 Off→On→真实 tag15→下桥→反向 transfer。四组 live 均 `continuous=true`、`walkedTag15=true`、回 Map7 且 `bridgeLevel=0`，独立核对通过。等级仍是 **STATIC-INFERRED**。`traceStep.transfer` 保持 null 以证明旧模型不足。BFS 只用于生成输入，不作为 expected 与 actual 的同一函数。mid-north 陆地在 Off 北侧，从南落点必须经过其他桥事件，On start/execute 记为 8/8，不得隐瞒。原版 RGSS 对照仍缺，E2E 不得标 DYNAMIC 或 Gate PASS。
 
 ## 4. Map 47：静态样本已取得，运动验收尚未开始
 
-证据 §15.4 与 `map47-ledge-routes.mjs` 的静态结果包含方向、前方 Ledge、最终落点、逆向样本和候选阻挡/边界集合。现成样本 `(16,9)` 向下越过 `(16,10)` 至 `(16,11)` 是**起点合法性与最终落点的静态推断**。若某负例集合为空，应如实记录“本地图无该类实物样本”，改用标明来源的合成规则测试，不得虚构地图坐标。中途事件实物样本未找到；跨图跳跃、原版跳跃弧线/相机、每帧到达事件仍未验证。未知 404 须查原版命令语义或列出明确支持排除理由，不能因统计数量正确就假定完整事件行为可解释。
+证据 §15.4 / §16.2 与 `map47-ledge-routes.mjs`：30 个合法静态两格跳；30 个逆向均失败；`(16,9)→(16,11)` 仍成立。本图无中间格原版事件、无边界 Ledge 样本；合成负例单独标注 `sampleKind=synthetic`。404 现已标注为 `show-choices-branch-end`（Show Choices 分支结束），不是空命令；Map47 EV007/EV013 含 404 但不在 Ledge 格上，不改变 `jumpForward(2)` 物理。跨图 jump 与 RGSS 弧线/相机仍 UNVERIFIED/BLOCKED。
 
 ## 5. 测试、复现和许可证据
 
@@ -62,4 +60,4 @@ node tools/fixtures/essentials-v21.1/map-evidence-independent-check.mjs 7 21 47
 
 **验收输出模板：** `item / source+SHA / map-event-page-command or tile xyz / rule+固定源码 / input+initial state / expected+actual / evidence grade / exact test command+exit+pass-fail-skip / CI run+SHA / unresolved owner / reviewer`。任何 `STATIC-INFERRED` 与 `DYNAMIC-OBSERVED` 必须分列；数据完整性、行为原版保真、合法可重放和资格是四种不同结论。
 
-最终状态：**Map 7/21/47 的静态原始记录已形成，REVIEW-01～04 的静态修复已提交；完整跨图 replay、动态与 fixture/合同/签核仍开放。FG-01～06 全部 OPEN，NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**
+最终状态：**Map 7/21/47 静态记录 + E2E-21 统一静态 replay + Map47 404 语义已在本机闭合（§16）。RGSS 动态、素材再分发许可、CI run 签核、授权 reviewer 仍为外部阻碍。FG-01～06 全部 OPEN。FREEZE CANDIDATE COMPLETE / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**

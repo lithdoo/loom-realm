@@ -8,7 +8,50 @@ function inBounds(context, x, y) {
   return x >= 0 && y >= 0 && x < context.width && y < context.height;
 }
 
-export function buildMap47LedgeRoutes(context, evidence) {
+export function inventoryMapCommands(events) {
+  const codes = new Map();
+  for (const event of events ?? []) {
+    for (const page of event.pages ?? []) {
+      for (const command of page.commands ?? []) {
+        const key = command.code;
+        const entry = codes.get(key) ?? { code: key, label: command.label, count: 0, events: [] };
+        entry.count += 1;
+        if (!entry.events.includes(event.eventId)) entry.events.push(event.eventId);
+        codes.set(key, entry);
+      }
+    }
+  }
+  return Object.freeze([...codes.values()].sort((left, right) => left.code - right.code));
+}
+
+export function command404Impact(events, ledgeCells) {
+  const hits = [];
+  for (const event of events ?? []) {
+    const pages = (event.pages ?? []).filter((page) => (page.commands ?? []).some((command) => command.code === 404));
+    if (pages.length === 0) continue;
+    const occupied = event.occupiedTiles ?? [];
+    const onLedge = occupied.some((tile) => (ledgeCells ?? []).some((cell) => cell.x === tile.x && cell.y === tile.y));
+    hits.push(Object.freeze({
+      eventId: event.eventId,
+      name: event.name,
+      occupied,
+      onLedgeCell: onLedge,
+      pageIndexes: pages.map((page) => page.pageIndex),
+      label: "show-choices-branch-end",
+      treatedAsEmpty: false,
+      note: "404 is Show Choices branch-end, not a no-op. This tracer does not execute choice control flow. Ledge jumpForward(2) is a Game_Player movement rule and does not eval event 404.",
+    }));
+  }
+  return Object.freeze({
+    present: hits.length > 0,
+    hits: Object.freeze(hits),
+    affectsLedgePhysics: false,
+    failClosedForChoiceFlow: hits.length > 0,
+    grade: "SOURCE-PROVEN-LABEL",
+  });
+}
+
+export function buildMap47LedgeRoutes(context, evidence, options = {}) {
   const cells = evidence.ledgeTerrain?.cells ?? [];
   const legal = [];
   const reverseFailed = [];
@@ -31,7 +74,9 @@ export function buildMap47LedgeRoutes(context, evidence) {
           landing,
           startOob,
           landOob,
-          note: "Map 47 real ledge near map edge; jump is not taken when start or landing is out of bounds",
+          note: (options.sampleKind ?? evidence.sampleKind) === "synthetic"
+            ? "synthetic ledge near map edge; not a Map 47 original cell"
+            : "Map 47 real ledge near map edge; jump is not taken when start or landing is out of bounds",
         }));
         continue;
       }
@@ -88,7 +133,15 @@ export function buildMap47LedgeRoutes(context, evidence) {
     midEventSyntheticNote: "Map 47 sample ledges have no occupying events on the jumped-over tile in this corpus; a synthetic middle-event case is not a Map 47 original event.",
     crossMapJump: Object.freeze({
       supportedInThisTracer: false,
-      vanillaRule: "Game_Character#jump landing uses passable? on the current map; connection-crossing jump is UNVERIFIED",
+      supportedInVanillaThisRound: false,
+      vanillaRule: "Game_Character#jump landing uses passable? on the current map; connection-crossing jump is UNVERIFIED and not promised",
+    }),
+    commandInventory: inventoryMapCommands(context.events ?? evidence.map?.events ?? []),
+    command404: command404Impact(context.events ?? evidence.map?.events ?? [], cells),
+    sampleKind: options.sampleKind ?? evidence.sampleKind ?? "unspecified",
+    jumpIsNotTwoWalks: Object.freeze({
+      rule: "Game_Player#move_generic jumps once by jumpForward(2); logical coordinates skip the middle tile",
+      grade: "SOURCE-PROVEN",
     }),
     grade: "STATIC-INFERRED",
     notALiveRun: true,

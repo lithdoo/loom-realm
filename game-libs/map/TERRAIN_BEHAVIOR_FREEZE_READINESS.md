@@ -33,7 +33,7 @@
 | REVIEW-02 | 1D/长度、负 tile、孤立 655、坏 111/117 等 fail-closed；Map7 限定范围零桥 | 实际异常覆盖分母与未知入口不得扩大证明范围 |
 | REVIEW-03 | Common Event 按调用入口递归可达闭包+合成测试 | autorun/parallel、方法体动态间接调用仅按已证明范围处理 |
 | REVIEW-04 | 传送源/目标分别按 mapId 查；Map21 几何越界与 D0 过滤区别 | 未复现真实误删；需 C-03 明确动态保留策略 |
-| **E2E-21** | `fromMap7Landing.bfs.found`、`ontoBridge.continuous` 等**分段**静态预测 | `buildMap21BridgeRoutes` BFS 与 On 分别重建状态，`offBridge` 未消费 `onBand.final`；`traceStep.transfer=null`。必须从 Map7 实际已物化 edge 入图、唯一 state 连续到真实 tag15 桥面、Off/返程，验证坐标+朝向+桥层+事件次数+独立 passability；新测试让旧分段模型失败 |
+| **E2E-21** | 统一 `replayWorld` 从物化 Map7 edge 到 tag15/下桥/反向；四组 live STATIC-INFERRED | 不得当 RGSS；分段 `buildMap21BridgeRoutes` 仍禁止当 E2E |
 | **LD-47** | Map47 30 格与静态 `(16,9)→(16,11)` 两格样本 | 源/落点阻挡、边界/中间事件实际或合成范围、跨图支持、动态帧/相机；未取得日志不得填 DYNAMIC-OBSERVED |
 
 静态 `map-route-trace.mjs#applyStarts` 将脚本执行作为离散步骤的推测并立即清 busy，**并非**原版帧对齐模型。`bfsWalk` 若经过 ledge jump，须显式禁止或标注，不得默称普通步。完整验收在 FZ-01 和 FZ-02 卡，原证据 §14 历史草图、§15 分段 trace 不能直接充当端到端实现合同。
@@ -75,4 +75,4 @@ FG-01..06: <逐项 PASS/证据/授权 reviewer/日期>
 Status: NOT FROZEN（只有六项真实 PASS 后方能更改）
 ```
 
-**当前正式结论：六 Gate 全 OPEN；准备文档与 Issue 已建立，但 E2E-21、动态原版、合法 fixture/CI 与唯一合同尚未通过。`NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED`。**
+**当前正式结论：六 Gate 全 OPEN；E2E-21/Map47 静态候选已闭合（§16），RGSS/许可/CI/签核仍为外部阻碍。`FREEZE CANDIDATE COMPLETE / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED`。**

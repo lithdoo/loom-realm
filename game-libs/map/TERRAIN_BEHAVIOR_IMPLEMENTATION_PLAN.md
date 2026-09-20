@@ -30,8 +30,8 @@
 |---|---|---|
 | `EV-MAP7` | 当前 Agent 报告 Map7 11/19/521、零桥、限定入口内 COMPLETE，已补 bad Table/脚本/CE 测试 | 保留输入 SHA、扫描范围和未覆盖入口，作为负例；不索取不存在的 Map7 桥头事件。 |
 | `REVIEW-01～04` | 0/2 触发矩阵、fail-closed、Common Event 可达闭包、跨图坐标及 PBS 对照，静态代码与合成测试已提交 | 静态子项可供审查；不能从这些测试推出原版解释器逐帧行为、全方法体覆盖或 CI/资格 PASS。 |
-| `E2E-21` **仍 OPEN** | §15.3 的 BFS 从 Map7→21 落点 `(19,76)` 到四组陆地侧桥头，另有 Off→On/On→Off 静态片段 | **同一初始状态连续 replay**：真实 Map7 输入/edge/转图归零→Map21 BFS→Off→On→真实 Bridge-tagged deck→离桥/返程。合并状态、方向、bridgeLevel、事件启动与执行、路径正确性；新增会让“只分别验证两段”的旧实现失败的测试。当前 `traceStep.transfer=null`、On 段重新初始化，不能写端到端 PASS。 |
-| `EV-MAP47` | Map047 指纹及 30 Ledge 格、静态合法样本 `(16,9)→(16,11)`，未知命令 404 被保留 | 落点/边界/正反阻挡完整矩阵；确认 404 在原版语义或明确列为本轮不涉及的结构码；真实 Map47 无中间事件时只用标明的合成负例，不造数据。 |
+| `E2E-21` | 统一 replay 从 Map7 `(40,0)` 物化边进入，四组走到 tag15 并反向归零；独立 tableAt 核对；等级 STATIC-INFERRED | 不得升级 DYNAMIC；RGSS 对照仍缺 |
+| `EV-MAP47` | 30 跳、逆向 0、`(16,9)→(16,11)`；404=`show-choices-branch-end` 且不在 Ledge 格；合成负例分标 | 动态帧/相机 BLOCKED；跨图 jump 不支持 |
 | `DYN-21/47` | 固定 v21.1 源码证明关键条件及 start≠execute | 原版 RGSS 实测桥 On/Off、重复输入/事件调度、地图连接、Ledge 一次跳跃/落点事件/帧、相机；保留场景、初值、逐帧输入/状态/日志与素材 SHA。若环境缺失，写 `BLOCKED` 和可执行复现方案；现行 FG-01 要求逐帧，**不得悄悄降级为可选**。 |
 | `FIXTURE/CI` | 本地 Agent 记录 `36 pass / 0 fail / 0 skip`；统计独立核对脚本可用 | 解决素材分发许可，包括既有 Map7 附录 A；建立合法、能在 CI 执行真实正例的最小 fixture；提供实际 run URL、commit SHA、pass/fail/skip。无条件则 FG-05 OPEN。 |
 | `SPEC/QUAL` | 设计、C-01～08 目录和四 PR 分工草案 | 先冻结字段级 ABI/错误/生产消费与状态矩阵，核 M14/M15 ledger、迁移 subject，再由 reviewer 逐一签核六门禁；`CONTRACT_V1` 尚不存在，不能提前标 Frozen。 |
@@ -43,7 +43,8 @@
 固定素材：Map007 SHA `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7`；Map021 SHA `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575`；Map047 SHA `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e`。其它依赖指纹在证据 §1、§14、§15。实际运行必须再核对输入 SHA，不得直接复制旧测试数字。
 
 ```text
-node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs
+node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs tools/fixtures/essentials-v21.1/map-e2e-21.test.mjs tools/fixtures/essentials-v21.1/map47-ledge-acceptance.test.mjs
+node tools/fixtures/essentials-v21.1/map21-e2e-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1"
 node tools/fixtures/essentials-v21.1/map7-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --corpus-scan --output ".local/map7-bridge-evidence.json"
 node tools/fixtures/essentials-v21.1/map21-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map21-bridge-evidence.json"
 node tools/fixtures/essentials-v21.1/map47-ledge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map47-ledge-evidence.json"

@@ -2,7 +2,7 @@
 
 > **Design draft / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。当前取证基线 [`e60e4a52`](https://github.com/lithdoo/loom-realm/commit/e60e4a521a726233bbda0bb1892f6d25bc47573d)。[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) §14 是历史事实快照，§15 是最新静态重跑；[证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 明确独立核对范围和**未完成的 E2E-21 连续状态拼接**；[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入，[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管任务。草案及静态取证均不是已冻结 ABI。
 >
-> 样本职责：**Map7 Cedolan City＝Bridge 负例；Map21 Route2＝Bridge 正例（93 格、8 事件、静态触发矩阵）；Map47 Route7＝Ledge 正例（30 格、静态跳样本）；Map27 Day Care 非桥样本**。当前所有 Gate OPEN。架构保持内部易扩展、暂不开放外部扩展；不引入插件、动态 handler、行为 DSL、万能事件解释器，不向 framework/Renderer/Hostra 下沉地图业务。
+> 样本职责：**Map7 Cedolan City＝Bridge 负例；Map21 Route2＝Bridge 正例（93 格、8 事件、静态触发矩阵）；Map47 Route7＝Ledge 正例（30 格、静态跳样本）；Map27 Day Care 非桥样本**。当前所有 Gate OPEN。E2E-21 统一静态 replay 见证据 §16，不是 RGSS。架构保持内部易扩展、暂不开放外部扩展；不引入插件、动态 handler、行为 DSL、万能事件解释器，不向 framework/Renderer/Hostra 下沉地图业务。
 
 ## 1. 目标、证据与本轮承诺边界
 
@@ -68,6 +68,6 @@ bridgeLevel 变化即使坐标和 camera 静止，也必须使桥面 depth 缓�
 
 ## 7. 交付顺序与资格
 
-当前取证器 REVIEW-01～04 的静态修复、Map7/21/47 记录及本地取证测试已提交；**不是正式行为闭环**。后续依次：E2E-21 合并重放和 Map47 剩余动态支持证据 → 原版 RGSS 动态逐帧（没有运行条件时标 BLOCKED，不得暗改门禁）→ 许可与合法最小 fixture/真实 CI → C-01～08 exact CONTRACT_V1/ABI、M14/M15 ledger 新 subject 审查、六门禁签核 → PR1 数据/导入 → PR2 规则与 walk → PR3 Bridge → PR4 Ledge。
+当前取证器 REVIEW-01～04 的静态修复、Map7/21/47 记录、**E2E-21 统一静态 replay** 及合成 fixture 已提交；**不是正式行为闭环**。后续：原版 RGSS 动态逐帧（BLOCKED 直至有 Game.exe）→ 许可与 CI run 签核 → reviewer 签 `CONTRACT_V1` → 才授权 AG-01～04。
 
 旧 18 pass、本次本地 Agent 36 pass、CI skip 和原版玩法验收是不同概念。任何实施 PR 尚未开始；六道 FG 均 OPEN，状态 **NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。

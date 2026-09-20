@@ -62,3 +62,76 @@
 | AG-04 Ledge 纵向实现 | PR4，AG-02 且共享 ABI 审核后；map-owned planner、Runtime、Browser 与 tests | Map47 合法跳跃与失败矩阵、完整 jump motion/resize/transfer ABI | 一个 jump≠两个 walk；与 AG-03 共享文件不得无审查并发覆写 |
 
 每张正式 AG 卡派单时**重新填入**实际冻结 `baseline SHA / CONTRACT_V1 version / dependency commit / exact allowed+forbidden paths / deliverables / expected assertions / commands / stop+rollback policy / owner+reviewer`。上表仅给范围，不是固定数值合同。最终状态由 FZ-06 审查者签，不由 Agent 自证通过。
+
+---
+
+## AG-01～04 交接卡（准备完成，尚未授权实施）
+
+Contract version: **none** (`TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md` only).
+Exact base SHA: **not authorized**. Bind to `CONTRACT_V1` freeze SHA after FG-01～06 reviewer PASS.
+Reviewer: specification / data / runtime / browser owners — **unsigned**.
+Definition of Done: not applicable until authorized. Stop condition: freeze not signed.
+
+### AG-01 Data
+
+| Field | Value |
+|---|---|
+| Task ID | AG-01 |
+| Dependencies | CONTRACT_V1 frozen |
+| Allowed files | `tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs` and Tileset/MapAction producer tests; Content schema for `struct.Tileset` / `struct.MapAction`; `game-libs/map/src/semantics.ts` validators only |
+| Forbidden files | `src/runtime.ts`; `browser/map.browser.js`; original FSDB; M14/M15 historical ledgers |
+| Producer/consumer | importer → prepared `struct.Tileset` (six fields) + `struct.MapAction` list → Content → `validateTilesetRecord` / future MapAction validator |
+| Scope | Add `terrain_tags` 1D Table; reject legacy five-field records via explicit migrator; project Wait-free pbBridgeOn/Off pages only; do not add bridgeLevel onto MapTransfer |
+| Required tests | `DATA-01..03`; MapAction JSON examples; existing `m14-consumer.test.mjs` plus new six-field cases |
+| Regression | current five-field fixtures must fail new validator until migrated |
+| CI | `essentials-fixture.yml` + map package test |
+| Artifacts | schema subject id, migrator, golden synthetic Tileset JSON |
+| Stop | any undocumented extra Tileset key; hard-coded Map21 IDs |
+
+### AG-02 Semantics and walk
+
+| Field | Value |
+|---|---|
+| Task ID | AG-02 |
+| Dependencies | AG-01 merged |
+| Allowed files | `game-libs/map/src/semantics.ts`, `src/runtime.ts` walk/blocked only, map tests |
+| Forbidden files | Browser jump; MapAction execute; original passages |
+| Producer/consumer | Content Tileset/Map → `resolveEffectiveTerrainTag` / `evaluatePassability` → `canMove` walk/blocked |
+| Scope | Neutral skip-layer; Bridge skip at 0 / use layer at 2; blocked vs walk; no jump execution |
+| Required tests | Neutral/Bridge passability matrix; Map7 connection regression |
+| Regression | existing layout/runtime walk tests |
+| CI | map package + essentials-fixture |
+| Artifacts | MovementPlan walk/blocked types wired |
+| Stop | implementing jump or bridge events |
+
+### AG-03 Bridge
+
+| Field | Value |
+|---|---|
+| Task ID | AG-03 |
+| Dependencies | AG-02; E2E-21 static traces as golden *shape* (not RGSS) |
+| Allowed files | map-owned Runtime bridgeLevel; MapAction consume; Browser depth reproject tests |
+| Forbidden files | hard-coded map/event/tile IDs; generic interpreter |
+| Producer/consumer | MapAction → Runtime bridgeLevel → RenderDomain depth |
+| Scope | start vs execute split as in candidate C-04 static assumption until RGSS exists; transfer clears bridge |
+| Required tests | synthetic On/Off; transfer clear; Map7 negative |
+| Regression | walk 250ms; transfer replace epochs |
+| CI | map package + desktop not required this PR |
+| Artifacts | bridgeLevel×passability matrix tests |
+| Stop | RGSS conflict; expanding InitialInput without review |
+
+### AG-04 Ledge
+
+| Field | Value |
+|---|---|
+| Task ID | AG-04 |
+| Dependencies | AG-02; shared motion ABI review with AG-03 |
+| Allowed files | planner jump kind; Runtime jump motion; Browser jump interpolation |
+| Forbidden files | two-walk fake jump; cross-map jump |
+| Producer/consumer | MovementPlan jump → Runtime ActiveMove → Browser sprite/camera same motionId |
+| Scope | one jumpForward(2); reverse/start/land failures; duration not 250 unless RGSS says so |
+| Required tests | LD47 synthetic + live skip; reverse; mid-event synthetic |
+| Regression | walk/resize/transfer |
+| CI | map package + renderer tests if Browser changes |
+| Artifacts | jump payload JSON examples |
+| Stop | duration guessed; concurrent overwrite with AG-03 |
