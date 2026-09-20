@@ -2,13 +2,13 @@
 
 > 状态：**Design draft / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 一致性复核修订。本文是增量设计背景，不是冻结实现合同；[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管交付，[冻结准备](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管门禁。问题基线见 [桥与悬崖缺口分析](./LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md)。
 >
-> 决策：**内部易扩展、暂不支持外部扩展**。保留 LoomRealm `tools/` 导入 → prepared FSDB → M12 Content → `game-libs/map` Runtime → map-owned Browser 的权责；不建插件、外部注册表、行为 DSL、通用事件解释器，不向 framework、Renderer 或 Hostra 下沉地图玩法。Map 7 Cedolan City 验桥，Map 47 Route 7 验悬崖；Map 27 Day Care 不作为桥样本。
+> 决策：**内部易扩展、暂不支持外部扩展**。保留 LoomRealm `tools/` 导入 → prepared FSDB → M12 Content → `game-libs/map` Runtime → map-owned Browser 的权责；不建插件、外部注册表、行为 DSL、通用事件解释器，不向 framework、Renderer 或 Hostra 下沉地图玩法。Map 47 Route 7 验悬崖；Map 27 Day Care 不作为桥样本。**Map 7 Cedolan City 在本官方 v21.1 corpus 中不是桥头正例**（无 Bridge 图块、无 `pbBridgeOn/Off`）；详见 [TERRAIN_BEHAVIOR_EVIDENCE.md](./TERRAIN_BEHAVIOR_EVIDENCE.md)。
 
 ## 1. 目标、非目标和设计纠错
 
 目标是让源事实、通行、事件、单次移动和画面形成闭环；后续扩展冰面或水域时按职责增添内部规则，不在 `canMove`、`attempt` 或 Browser 中散落地图 ID/tile ID 特判。不得修改原版 `passages` 来掩盖缺口，不执行 RMXP 任意 Ruby/JS，不一次实现 18 种玩法。
 
-**2026-09-20 复核后的纠错**：旧流程图将“检查面前事件”放在通行判断之前，实施计划又提出“执行 contact 后立即重算本次通行”。均不得冻结。Essentials `Game_Player#move_generic` 先判 `can_move_in_direction?`，成功才识别面前 Ledge；失败才调用 `check_event_trigger_touch`。`Game_Event#start` 标记事件启动，并不意味着脚本已经同步执行。事件命令的真正执行、下一次输入和桥层改变必须结合原版调度与真实 Map 7 事件确定。不能以避免桥头死锁为由凭空改变原版顺序。
+**2026-09-20 复核后的纠错**：旧流程图将“检查面前事件”放在通行判断之前，实施计划又提出“执行 contact 后立即重算本次通行”。均不得冻结。Essentials `Game_Player#move_generic` 先判 `can_move_in_direction?`，成功才识别面前 Ledge；失败才调用 `check_event_trigger_touch`。`Game_Event#start` 标记事件启动，并不意味着脚本已经同步执行。事件命令的真正执行、下一次输入和桥层改变必须结合原版调度确定。**真实 Map 7 事件不含桥脚本，不能用来确认桥层改变的帧**。不能以避免桥头死锁为由凭空改变原版顺序。
 
 ## 2. 数据：保留原始标签，但按需实现行为
 
@@ -60,7 +60,7 @@ Essentials 原始 Map / Tileset / Event
 
 既有 `map-transfer-consumer.mjs` 的 `projectedD0Passable` 不含 Neutral/Bridge/人物状态，却在导入时决定某些 step/contact/edge 是否生成。升级 Runtime 通行而不修复这条导入链，会让合法出口先被静态筛掉。因此必须同一次设计审计：哪些静态条件永远成立，哪些事件事实需保留到 Runtime 依状态判定。**静态投影不能把动态不可判定误写成永久不可进入。** Existing `MapTransfer` 与狭义桥头 `MapAction` 保持不同业务身份，可共享 RMXP 事件读取工具；不重造通用事件引擎。
 
-只识别证据证明需要的桥头候选：逐项核验 map/event/page ID、完整命令、参数、trigger、through、图形、页面条件与优先级、缩进、命令顺序。允许形式由真实 Map 7 决定，可将已验证的 `pbBridgeOn(height=2)`、`pbBridgeOff` 投影成声明式 `set-bridge-level`，绝不执行源 Ruby。无关 NPC/剧情事件按 selective consumer 范围排除；**相关桥事件候选**若无法完整保真解析，则报告 map/event/page 和具体原因，不静默丢弃。条件页、动态实体碰撞需要的最小事实由实物取证决定；若未纳入，不能承诺对应负例已被支持。
+只识别证据证明需要的桥头候选：逐项核验 map/event/page ID、完整命令、参数、trigger、through、图形、页面条件与优先级、缩进、命令顺序。**本 corpus 的 Map 7 没有可投影的 `pbBridgeOn`/`pbBridgeOff`。** 全 corpus 69 张地图扫描后，唯一放置 Bridge 图块并调用这些方法的是 Map 21 Route 2（见 [证据 §13](./TERRAIN_BEHAVIOR_EVIDENCE.md)）；若将来授权以它为桥正例，再把已验证调用投影成声明式 `set-bridge-level`，绝不执行源 Ruby。无关 NPC/剧情事件按 selective consumer 范围排除；**相关桥事件候选**若无法完整保真解析，则报告 map/event/page 和具体原因，不静默丢弃。条件页、动态实体碰撞需要的最小事实由实物取证决定；若未纳入，不能承诺对应负例已被支持。
 
 ## 5. 行为与时间语义
 
@@ -96,11 +96,11 @@ Runtime 现有 walk 在动作开始更新逻辑目标坐标、发布 camera/play
 
 ## 7. 交付边界与资格
 
-按 [实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 的规格冻结 → PR 1 数据和传送投影 → PR 2 内核/普通步 → PR 3 桥闭环 → PR 4 悬崖闭环推进。Map 7 验桥两端、桥下、折返、遮挡和出口；Map 47 验合法/逆向/阻挡跳跃、单动画和中间事件。合成单测不能代替真实样本；真实 FSDB 不可分发时需合法可复现最小派生 fixture、指纹和覆盖差距。
+按 [实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 的规格冻结 → PR 1 数据和传送投影 → PR 2 内核/普通步 → PR 3 桥闭环 → PR 4 悬崖闭环推进。桥闭环的真实事件样本 **不能** 再默认写成 Map 7；Map 7 可作门传送/Neutral 数据负例。Map 47 仍验合法/逆向/阻挡跳跃。合成单测不能代替真实样本；真实 FSDB 不可分发时需合法可复现最小派生 fixture、指纹和覆盖差距。
 
-保留原 M14 历史合同和 qualification 记录；正式资格状态由 `doc/30-implementation/m14-qualification.md` / `m15-qualification.md` 管理。已知旧的 exact-local Tileset 断言漂移需单独记录并在获授权的资格输入改动中纠正；近期某个 CI workflow PASS 也不自动等于全部正式资格 Closed。任何执行代码/fixture/测试输入变动建立新 subject 并重新收集对应证据。当前未作代码修改、未实施本设计、未读取本地 Map 7 FSDB、未完成冻结门禁。
+保留原 M14 历史合同和 qualification 记录；正式资格状态由 `doc/30-implementation/m14-qualification.md` / `m15-qualification.md` 管理。已知旧的 exact-local Tileset 断言漂移需单独记录并在获授权的资格输入改动中纠正；近期某个 CI workflow PASS 也不自动等于全部正式资格 Closed。任何执行代码/fixture/测试输入变动建立新 subject 并重新收集对应证据。当前未实施本设计、未完成冻结门禁。Map 7 本地 FSDB 已读取，结论为负证据，见 [TERRAIN_BEHAVIOR_EVIDENCE.md](./TERRAIN_BEHAVIOR_EVIDENCE.md)。
 
 ## 8. 证据入口
 
 - [Essentials v21.1 TerrainTag](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/010_Data/001_Hardcoded%20data/011_TerrainTag.rb)、[Game_Map](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/004_Game_Map.rb)、[Game_Player](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/008_Game_Player.rb)、[Game_Character](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/006_Game_Character.rb)、[Game_Event](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/007_Game_Event.rb)、[Overworld](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/012_Overworld/001_Overworld.rb)、[TilemapRenderer](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/006_Map%20renderer/001_TilemapRenderer.rb)。
-- 本仓库：[Tileset importer](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs)、[MapTransfer importer](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs)、[semantics](./src/semantics.ts)、[Runtime](./src/runtime.ts)、[Browser](./browser/map.browser.js)、[ADR 0032](../../doc/decisions/0032-game-library-example-boundary.md)、[文档治理](../../doc/00-overview/document-governance.md)。
+- 本仓库：[Tileset importer](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs)、[MapTransfer importer](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs)、[Map 7 事件取证](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-event-evidence.mjs)、[semantics](./src/semantics.ts)、[Runtime](./src/runtime.ts)、[Browser](./browser/map.browser.js)、[证据](./TERRAIN_BEHAVIOR_EVIDENCE.md)、[ADR 0032](../../doc/decisions/0032-game-library-example-boundary.md)、[文档治理](../../doc/00-overview/document-governance.md)。

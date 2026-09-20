@@ -1,0 +1,1031 @@
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { fail } from "../../errors.mjs";
+import { decodeMarshal } from "../../marshal/decoder.mjs";
+import { decodeRmxpGraph } from "../../rmxp/decoder.mjs";
+import { sha256File } from "../../source/fingerprint.mjs";
+import { projectMapRecord, projectTilesetRecords } from "./m14-consumer.mjs";
+import { projectedD0Passable } from "./map-transfer-consumer.mjs";
+
+export const DEFAULT_MAP_ID = 7;
+export const BRIDGE_TERRAIN_TAG = 15;
+export const SCRIPT_START_CODE = 355;
+export const SCRIPT_CONTINUE_CODE = 655;
+export const TRANSFER_PLAYER_CODE = 201;
+export const COMMON_EVENT_CODE = 117;
+
+export const TRIGGER_SEMANTICS = Object.freeze({
+  0: "action-button",
+  1: "player-touch",
+  2: "event-touch",
+  3: "autorun",
+  4: "parallel-process",
+});
+
+export const COMMAND_LABELS = Object.freeze({
+  0: "empty-or-end",
+  101: "show-text",
+  401: "show-text-line",
+  102: "show-choices",
+  402: "when-choice",
+  403: "when-cancel",
+  103: "input-number",
+  104: "change-text-options",
+  105: "button-input",
+  106: "wait",
+  111: "conditional-branch",
+  411: "else",
+  412: "branch-end",
+  112: "loop",
+  413: "repeat-above",
+  113: "break-loop",
+  115: "exit-event-processing",
+  116: "erase-event",
+  117: "call-common-event",
+  118: "label",
+  119: "jump-to-label",
+  121: "control-switches",
+  122: "control-variables",
+  123: "control-self-switch",
+  201: "transfer-player",
+  202: "set-event-location",
+  203: "scroll-map",
+  204: "change-map-settings",
+  205: "change-fog-color-tone",
+  206: "change-fog-opacity",
+  207: "show-animation",
+  208: "change-transparent-flag",
+  209: "set-move-route",
+  509: "move-route-continuation",
+  210: "wait-for-move-completion",
+  221: "prepare-for-transition",
+  222: "execute-transition",
+  223: "change-screen-color-tone",
+  224: "screen-flash",
+  225: "screen-shake",
+  231: "show-picture",
+  232: "move-picture",
+  233: "rotate-picture",
+  234: "change-picture-color-tone",
+  235: "erase-picture",
+  236: "set-weather-effects",
+  241: "play-bgm",
+  242: "fade-out-bgm",
+  245: "play-bgs",
+  246: "fade-out-bgs",
+  247: "memorize-bgm-bgs",
+  248: "restore-bgm-bgs",
+  249: "play-me",
+  250: "play-se",
+  251: "stop-se",
+  301: "battle-processing",
+  601: "if-win",
+  602: "if-escape",
+  603: "if-lose",
+  302: "shop-processing",
+  303: "name-input-processing",
+  311: "change-hp",
+  312: "change-sp",
+  313: "change-state",
+  314: "recover-all",
+  315: "change-exp",
+  316: "change-level",
+  317: "change-parameters",
+  318: "change-skills",
+  319: "change-equipment",
+  320: "change-actor-name",
+  321: "change-actor-class",
+  322: "change-actor-graphic",
+  331: "change-enemy-hp",
+  332: "change-enemy-sp",
+  333: "change-enemy-state",
+  334: "enemy-recover-all",
+  335: "enemy-appear",
+  336: "enemy-transform",
+  337: "show-battle-animation",
+  338: "deal-damage",
+  339: "force-action",
+  340: "abort-battle",
+  351: "call-menu-screen",
+  352: "call-save-screen",
+  353: "game-over",
+  354: "return-to-title",
+  355: "script",
+  655: "script-continuation",
+  108: "comment",
+  408: "comment-continuation",
+});
+
+const BRIDGE_SCRIPT_PATTERN = /\bpbBridge(?:On|Off)\s*(?:\(|\b)/u;
+const BRIDGE_NAME_PATTERN = /bridge/iu;
+const MAP_FILE = /^Map(\d+)\.rxdata$/iu;
+const FSDB_NAME = /^\[FSDB\].+$/u;
+
+function evidenceFail(message, details) {
+  fail("MAP_EVENT_EVIDENCE_FAILURE", message, details);
+}
+
+function padMapId(mapId) {
+  return `Map${String(mapId).padStart(3, "0")}.rxdata`;
+}
+
+function requireInteger(value, label, { positive = false, nonNegative = false } = {}) {
+  if (!Number.isSafeInteger(value) || (positive && value <= 0) || (nonNegative && value < 0)) {
+    evidenceFail(`${label} must be a ${positive ? "positive " : nonNegative ? "non-negative " : ""}safe integer`);
+  }
+  return value;
+}
+
+function requireBoolean(value, label) {
+  if (typeof value !== "boolean") evidenceFail(`${label} must be a boolean`);
+  return value;
+}
+
+function requireRmxp(value, className, label) {
+  if (value?.kind !== "RmxpObject" || value.className !== className) {
+    evidenceFail(`${label} must be ${className}`);
+  }
+  return value;
+}
+
+function rubyText(value, label) {
+  if (value?.kind !== "RubyString") evidenceFail(`${label} must be a RubyString`);
+  return value;
+}
+
+export function jsonValue(value, seen = new WeakSet()) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean" || typeof value === "string") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) evidenceFail(`non-finite number cannot be serialized: ${value}`);
+    return value;
+  }
+  if (typeof value === "bigint") return Object.freeze({ kind: "bigint", value: value.toString() });
+  if (typeof value !== "object") evidenceFail(`unsupported parameter type ${typeof value}`);
+  if (seen.has(value)) return Object.freeze({ kind: "cycle-ref" });
+  seen.add(value);
+  if (Buffer.isBuffer(value)) return Object.freeze({ kind: "bytes", base64: value.toString("base64") });
+  if (ArrayBuffer.isView(value)) return Object.freeze({ kind: "typed-array", values: Array.from(value) });
+  if (value.kind === "RubyString") {
+    return Object.freeze({
+      kind: "RubyString",
+      text: value.text ?? null,
+      bytesBase64: value.text == null ? Buffer.from(value.bytes ?? []).toString("base64") : undefined,
+    });
+  }
+  if (value.kind === "RubySymbol") return Object.freeze({ kind: "RubySymbol", name: value.name });
+  if (value.kind === "Tone") {
+    return Object.freeze({ kind: "Tone", red: value.red, green: value.green, blue: value.blue, gray: value.gray });
+  }
+  if (value.kind === "Color") {
+    return Object.freeze({ kind: "Color", red: value.red, green: value.green, blue: value.blue, alpha: value.alpha });
+  }
+  if (value.kind === "Table") {
+    return Object.freeze({
+      kind: "Table",
+      dimensions: value.dimensions,
+      xSize: value.xSize,
+      ySize: value.ySize,
+      zSize: value.zSize,
+      values: Object.freeze(Array.from(value.values)),
+    });
+  }
+  if (value.kind === "Array") return Object.freeze({ kind: "Array", items: Object.freeze(value.items.map((item) => jsonValue(item, seen))) });
+  if (value.kind === "Hash") {
+    return Object.freeze({
+      kind: "Hash",
+      entries: Object.freeze(value.entries.map(([key, item]) => Object.freeze([jsonValue(key, seen), jsonValue(item, seen)]))),
+    });
+  }
+  if (value.kind === "RmxpObject") {
+    const fields = {};
+    for (const name of Object.keys(value.fields).sort()) fields[name] = jsonValue(value.fields[name], seen);
+    return Object.freeze({ kind: "RmxpObject", className: value.className, fields: Object.freeze(fields) });
+  }
+  if (value.kind === "GenericRubyObject") {
+    const ivars = {};
+    for (const name of Object.keys(value.ivars).sort()) ivars[name] = jsonValue(value.ivars[name], seen);
+    return Object.freeze({ kind: "GenericRubyObject", className: value.className, ivars: Object.freeze(ivars) });
+  }
+  evidenceFail(`unserializable RMXP value kind ${value.kind ?? typeof value}`);
+}
+
+export function tableAt(table, x, y = 0, z = 0) {
+  return table.values[x + y * table.xSize + z * table.xSize * table.ySize];
+}
+
+export function concatenateScriptCommands(commands) {
+  const groups = [];
+  for (let index = 0; index < commands.length; index += 1) {
+    const command = commands[index];
+    if (command.code !== SCRIPT_START_CODE) continue;
+    const parts = [command.scriptText ?? ""];
+    let end = index;
+    while (end + 1 < commands.length && [SCRIPT_START_CODE, SCRIPT_CONTINUE_CODE].includes(commands[end + 1].code)) {
+      end += 1;
+      parts.push(commands[end].scriptText ?? "");
+    }
+    groups.push(Object.freeze({
+      startCommandIndex: index,
+      endCommandIndex: end,
+      joinedWithNewlines: `${parts.join("\n")}\n`,
+    }));
+    index = end;
+  }
+  return Object.freeze(groups);
+}
+
+function commandFacts(command, index) {
+  const code = requireInteger(command.fields["@code"], `EventCommand[${index}].code`, { nonNegative: true });
+  const indent = requireInteger(command.fields["@indent"], `EventCommand[${index}].indent`, { nonNegative: true });
+  const parameters = command.fields["@parameters"];
+  if (parameters?.kind !== "Array") evidenceFail(`EventCommand[${index}].parameters must be an Array`);
+  const scriptText = code === SCRIPT_START_CODE || code === SCRIPT_CONTINUE_CODE
+    ? rubyText(parameters.items[0], `EventCommand[${index}] script text`).text ?? ""
+    : undefined;
+  return Object.freeze({
+    index,
+    code,
+    indent,
+    label: COMMAND_LABELS[code] ?? `unknown-code-${code}`,
+    parameters: Object.freeze(parameters.items.map((item) => jsonValue(item))),
+    scriptText,
+    extraIvars: Object.freeze(Object.fromEntries(
+      Object.keys(command.extraIvars ?? {}).sort().map((name) => [name, jsonValue(command.extraIvars[name])]),
+    )),
+  });
+}
+
+function conditionFacts(condition) {
+  requireRmxp(condition, "RPG::Event::Page::Condition", "page condition");
+  const switch1Valid = requireBoolean(condition.fields["@switch1_valid"], "condition.switch1_valid");
+  const switch2Valid = requireBoolean(condition.fields["@switch2_valid"], "condition.switch2_valid");
+  const variableValid = requireBoolean(condition.fields["@variable_valid"], "condition.variable_valid");
+  const selfSwitchValid = requireBoolean(condition.fields["@self_switch_valid"], "condition.self_switch_valid");
+  return Object.freeze({
+    switch1_valid: switch1Valid,
+    switch2_valid: switch2Valid,
+    variable_valid: variableValid,
+    self_switch_valid: selfSwitchValid,
+    switch1_id: switch1Valid ? requireInteger(condition.fields["@switch1_id"], "condition.switch1_id", { positive: true }) : condition.fields["@switch1_id"],
+    switch2_id: switch2Valid ? requireInteger(condition.fields["@switch2_id"], "condition.switch2_id", { positive: true }) : condition.fields["@switch2_id"],
+    variable_id: variableValid ? requireInteger(condition.fields["@variable_id"], "condition.variable_id", { positive: true }) : condition.fields["@variable_id"],
+    variable_value: variableValid ? requireInteger(condition.fields["@variable_value"], "condition.variable_value") : condition.fields["@variable_value"],
+    self_switch_ch: selfSwitchValid ? rubyText(condition.fields["@self_switch_ch"], "condition.self_switch_ch").text : (
+      condition.fields["@self_switch_ch"]?.kind === "RubyString" ? condition.fields["@self_switch_ch"].text : condition.fields["@self_switch_ch"]
+    ),
+    alwaysActive: switch1Valid === false && switch2Valid === false && variableValid === false && selfSwitchValid === false,
+  });
+}
+
+function graphicFacts(graphic) {
+  requireRmxp(graphic, "RPG::Event::Page::Graphic", "page graphic");
+  const name = rubyText(graphic.fields["@character_name"], "graphic.character_name");
+  return Object.freeze({
+    tile_id: requireInteger(graphic.fields["@tile_id"], "graphic.tile_id", { nonNegative: true }),
+    character_name: name.text ?? "",
+    character_hue: graphic.fields["@character_hue"],
+    direction: graphic.fields["@direction"],
+    pattern: graphic.fields["@pattern"],
+    opacity: graphic.fields["@opacity"],
+    blend_type: graphic.fields["@blend_type"],
+  });
+}
+
+function pageFacts(page, pageIndex, pageCount) {
+  requireRmxp(page, "RPG::Event::Page", `event page[${pageIndex}]`);
+  const list = page.fields["@list"];
+  if (list?.kind !== "Array") evidenceFail(`event page[${pageIndex}].list must be an Array`);
+  const commands = list.items.map((item, index) => {
+    requireRmxp(item, "RPG::EventCommand", `event page[${pageIndex}] command[${index}]`);
+    return commandFacts(item, index);
+  });
+  const trigger = requireInteger(page.fields["@trigger"], `page[${pageIndex}].trigger`, { nonNegative: true });
+  const concatenatedScripts = concatenateScriptCommands(commands);
+  return Object.freeze({
+    pageIndex,
+    pageCount,
+    originalOrder: pageIndex,
+    condition: conditionFacts(page.fields["@condition"]),
+    graphic: graphicFacts(page.fields["@graphic"]),
+    trigger,
+    triggerSemantics: TRIGGER_SEMANTICS[trigger] ?? `unknown-trigger-${trigger}`,
+    through: requireBoolean(page.fields["@through"], `page[${pageIndex}].through`),
+    always_on_top: requireBoolean(page.fields["@always_on_top"], `page[${pageIndex}].always_on_top`),
+    move_type: page.fields["@move_type"],
+    move_speed: page.fields["@move_speed"],
+    move_frequency: page.fields["@move_frequency"],
+    walk_anime: page.fields["@walk_anime"],
+    step_anime: page.fields["@step_anime"],
+    direction_fix: page.fields["@direction_fix"],
+    commands: Object.freeze(commands),
+    concatenatedScripts,
+    extraIvars: Object.freeze(Object.fromEntries(
+      Object.keys(page.extraIvars ?? {}).sort().map((name) => [name, jsonValue(page.extraIvars[name])]),
+    )),
+  });
+}
+
+function eventFacts(event, mapId) {
+  requireRmxp(event, "RPG::Event", "map event");
+  const pagesValue = event.fields["@pages"];
+  if (pagesValue?.kind !== "Array") evidenceFail("RPG::Event @pages must be an Array");
+  const pages = pagesValue.items.map((page, pageIndex) => pageFacts(page, pageIndex, pagesValue.items.length));
+  const name = rubyText(event.fields["@name"], "RPG::Event @name");
+  return Object.freeze({
+    mapId,
+    eventId: requireInteger(event.fields["@id"], "RPG::Event @id", { positive: true }),
+    name: name.text ?? "",
+    x: requireInteger(event.fields["@x"], "RPG::Event @x", { nonNegative: true }),
+    y: requireInteger(event.fields["@y"], "RPG::Event @y", { nonNegative: true }),
+    pageCount: pages.length,
+    pages,
+    extraIvars: Object.freeze(Object.fromEntries(
+      Object.keys(event.extraIvars ?? {}).sort().map((name) => [name, jsonValue(event.extraIvars[name])]),
+    )),
+  });
+}
+
+export function extractMapFacts(root, mapId, filename) {
+  requireRmxp(root, "RPG::Map", `${filename} root`);
+  const eventsValue = root.fields["@events"];
+  const events = [];
+  if (eventsValue != null) {
+    if (eventsValue.kind !== "Hash") evidenceFail(`${filename} @events must be a Hash`);
+    for (const [key, event] of eventsValue.entries) {
+      const fact = eventFacts(event, mapId);
+      if (key !== fact.eventId) evidenceFail(`${filename} event hash key ${key} does not equal @id ${fact.eventId}`);
+      events.push(fact);
+    }
+  }
+  events.sort((left, right) => left.eventId - right.eventId);
+  return Object.freeze({
+    mapId,
+    filename,
+    tilesetId: requireInteger(root.fields["@tileset_id"], "Map.tileset_id", { positive: true }),
+    width: requireInteger(root.fields["@width"], "Map.width", { positive: true }),
+    height: requireInteger(root.fields["@height"], "Map.height", { positive: true }),
+    data: root.fields["@data"],
+    events: Object.freeze(events),
+  });
+}
+
+export function extractMapInfoName(root, mapId) {
+  if (root?.kind !== "Hash") evidenceFail("MapInfos.rxdata root must be a Hash");
+  for (const [key, info] of root.entries) {
+    if (key !== mapId) continue;
+    requireRmxp(info, "RPG::MapInfo", `MapInfos[${mapId}]`);
+    return rubyText(info.fields["@name"], `MapInfos[${mapId}].name`).text ?? "";
+  }
+  return null;
+}
+
+export function extractTilesetTerrain(root, tilesetId) {
+  if (root?.kind !== "Array") evidenceFail("Tilesets.rxdata root must be an Array");
+  const tileset = root.items[tilesetId];
+  requireRmxp(tileset, "RPG::Tileset", `Tilesets[${tilesetId}]`);
+  const id = requireInteger(tileset.fields["@id"], "Tileset.id", { positive: true });
+  if (id !== tilesetId) evidenceFail(`Tilesets[${tilesetId}] id ${id} does not match index`);
+  const tags = tileset.fields["@terrain_tags"];
+  if (tags?.kind !== "Table") evidenceFail("Tileset.terrain_tags must be a Table");
+  const name = tileset.fields["@name"]?.kind === "RubyString" ? tileset.fields["@name"].text : null;
+  const tilesetName = rubyText(tileset.fields["@tileset_name"], "Tileset.tileset_name").text;
+  return Object.freeze({
+    id,
+    name,
+    tileset_name: tilesetName,
+    terrain_tags: tags,
+    passages: tileset.fields["@passages"],
+    priorities: tileset.fields["@priorities"],
+  });
+}
+
+export function extractTilesetBridgeCatalog(root) {
+  if (root?.kind !== "Array") evidenceFail("Tilesets.rxdata root must be an Array");
+  const catalog = [];
+  for (let index = 1; index < root.items.length; index += 1) {
+    if (root.items[index] == null) continue;
+    const terrain = extractTilesetTerrain(root, index);
+    const tileIds = [];
+    for (let tileId = 0; tileId < terrain.terrain_tags.xSize; tileId += 1) {
+      if (tableAt(terrain.terrain_tags, tileId) === BRIDGE_TERRAIN_TAG) tileIds.push(tileId);
+    }
+    catalog.push(Object.freeze({
+      id: terrain.id,
+      name: terrain.name,
+      tileset_name: terrain.tileset_name,
+      bridgeTileCount: tileIds.length,
+      bridgeTileIds: Object.freeze(tileIds),
+    }));
+  }
+  return Object.freeze(catalog);
+}
+
+function commentTexts(page) {
+  const texts = [];
+  for (const command of page.commands) {
+    if (command.code !== 108 && command.code !== 408) continue;
+    const first = command.parameters[0];
+    if (first?.kind === "RubyString" && typeof first.text === "string") texts.push(first.text);
+  }
+  return texts;
+}
+
+function pageSummary(page) {
+  return Object.freeze({
+    pageIndex: page.pageIndex,
+    pageCount: page.pageCount,
+    trigger: page.trigger,
+    triggerSemantics: page.triggerSemantics,
+    through: page.through,
+    always_on_top: page.always_on_top,
+    condition: page.condition,
+    graphic: Object.freeze({
+      tile_id: page.graphic.tile_id,
+      character_name: page.graphic.character_name,
+    }),
+    concatenatedScripts: page.concatenatedScripts,
+    commentTexts: Object.freeze(commentTexts(page)),
+    transferCommands: Object.freeze(page.commands.filter((command) => command.code === TRANSFER_PLAYER_CODE).map((command) => Object.freeze({
+      index: command.index,
+      parameters: command.parameters,
+    }))),
+  });
+}
+
+function bboxOf(cells) {
+  if (cells.length === 0) return null;
+  return Object.freeze({
+    minX: Math.min(...cells.map((cell) => cell.x)),
+    maxX: Math.max(...cells.map((cell) => cell.x)),
+    minY: Math.min(...cells.map((cell) => cell.y)),
+    maxY: Math.max(...cells.map((cell) => cell.y)),
+  });
+}
+
+export function collectBridgeCells(mapFacts, terrainTags) {
+  const cells = [];
+  const tileIds = new Set();
+  for (let y = 0; y < mapFacts.height; y += 1) {
+    for (let x = 0; x < mapFacts.width; x += 1) {
+      const layers = [];
+      for (const z of [2, 1, 0]) {
+        const tileId = tableAt(mapFacts.data, x, y, z);
+        if (!Number.isSafeInteger(tileId) || tileId <= 0) continue;
+        const tag = tableAt(terrainTags, tileId);
+        if (tag === BRIDGE_TERRAIN_TAG) {
+          layers.push(Object.freeze({ z, tileId, terrainTag: tag }));
+          tileIds.add(tileId);
+        }
+      }
+      if (layers.length > 0) cells.push(Object.freeze({ x, y, layers: Object.freeze(layers) }));
+    }
+  }
+  return Object.freeze({
+    tagId: BRIDGE_TERRAIN_TAG,
+    cellCount: cells.length,
+    cells: Object.freeze(cells),
+    tileIds: Object.freeze([...tileIds].sort((left, right) => left - right)),
+  });
+}
+
+function adjacentToBridge(x, y, bridgeCells) {
+  const hits = [];
+  for (const cell of bridgeCells.cells) {
+    const dx = Math.abs(cell.x - x);
+    const dy = Math.abs(cell.y - y);
+    if (dx === 0 && dy === 0) hits.push(Object.freeze({ relation: "on-bridge-cell", x: cell.x, y: cell.y }));
+    else if (dx + dy === 1) hits.push(Object.freeze({ relation: "orthogonally-adjacent", x: cell.x, y: cell.y }));
+  }
+  return Object.freeze(hits);
+}
+
+function pageHasBridgeScript(page) {
+  return page.concatenatedScripts.some((group) => BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines));
+}
+
+function pageCommonEventIds(page) {
+  return page.commands.filter((command) => command.code === COMMON_EVENT_CODE).map((command) => command.parameters[0]);
+}
+
+function pageTransferCommands(page) {
+  return page.commands.filter((command) => command.code === TRANSFER_PLAYER_CODE);
+}
+
+export function classifyCandidates(events, bridgeCells, commonEventBridgeIds = new Set()) {
+  const candidates = [];
+  for (const event of events) {
+    const reasons = [];
+    if (BRIDGE_NAME_PATTERN.test(event.name)) reasons.push("event-name-matches-bridge");
+    const terrainHits = adjacentToBridge(event.x, event.y, bridgeCells);
+    if (terrainHits.some((item) => item.relation === "on-bridge-cell")) reasons.push("event-tile-has-bridge-terrain");
+    else if (terrainHits.length > 0) reasons.push("event-tile-orthogonally-adjacent-to-bridge-terrain");
+    const scriptPages = event.pages.filter(pageHasBridgeScript);
+    if (scriptPages.length > 0) reasons.push("page-script-calls-pbBridgeOn-or-pbBridgeOff");
+    const commonPages = event.pages.filter((page) => pageCommonEventIds(page).some((id) => commonEventBridgeIds.has(id)));
+    if (commonPages.length > 0) reasons.push("page-calls-common-event-with-pbBridgeOn-or-pbBridgeOff");
+    const transferNearBridge = event.pages.some((page) => pageTransferCommands(page).length > 0) && terrainHits.length > 0;
+    if (transferNearBridge) reasons.push("transfer-player-near-bridge-terrain");
+    if (reasons.length === 0) continue;
+    const confirmed = reasons.includes("page-script-calls-pbBridgeOn-or-pbBridgeOff")
+      || reasons.includes("page-calls-common-event-with-pbBridgeOn-or-pbBridgeOff");
+    candidates.push(Object.freeze({
+      mapId: event.mapId,
+      eventId: event.eventId,
+      name: event.name,
+      x: event.x,
+      y: event.y,
+      status: confirmed ? "confirmed-bridge-script" : "unconfirmed-candidate",
+      reasons: Object.freeze(reasons),
+      terrainHits,
+      event,
+    }));
+  }
+  return Object.freeze(candidates);
+}
+
+export function extractCommonEventFacts(root) {
+  if (root?.kind !== "Array") evidenceFail("CommonEvents.rxdata root must be an Array");
+  const events = [];
+  for (let index = 1; index < root.items.length; index += 1) {
+    const item = root.items[index];
+    if (item == null) continue;
+    requireRmxp(item, "RPG::CommonEvent", `CommonEvents[${index}]`);
+    const list = item.fields["@list"];
+    if (list?.kind !== "Array") evidenceFail(`CommonEvents[${index}].list must be an Array`);
+    const commands = list.items.map((command, commandIndex) => {
+      requireRmxp(command, "RPG::EventCommand", `CommonEvents[${index}] command[${commandIndex}]`);
+      return commandFacts(command, commandIndex);
+    });
+    const concatenatedScripts = concatenateScriptCommands(commands);
+    const name = rubyText(item.fields["@name"], `CommonEvents[${index}].name`);
+    events.push(Object.freeze({
+      id: requireInteger(item.fields["@id"], `CommonEvents[${index}].id`, { positive: true }),
+      name: name.text ?? "",
+      trigger: item.fields["@trigger"],
+      switch_id: item.fields["@switch_id"],
+      commands: Object.freeze(commands),
+      concatenatedScripts,
+      hasBridgeScript: concatenatedScripts.some((group) => BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines)),
+    }));
+  }
+  return Object.freeze(events);
+}
+
+export function decodeRxdataBytes(bytes, sourceLabel) {
+  const marshal = decodeMarshal(bytes, { source: sourceLabel });
+  return decodeRmxpGraph(marshal);
+}
+
+async function readDecoded(path) {
+  const bytes = await readFile(path);
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  const decoded = decodeRxdataBytes(bytes, path);
+  return Object.freeze({ path, sha256: digest, size: bytes.length, decoded });
+}
+
+async function firstExisting(candidates) {
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+export async function resolveMapSource(sourceInput, mapId = DEFAULT_MAP_ID) {
+  requireInteger(mapId, "mapId", { positive: true });
+  if (mapId !== DEFAULT_MAP_ID) evidenceFail(`this extractor only reads Map ${DEFAULT_MAP_ID}; refused map ${mapId}`);
+  const filename = padMapId(mapId);
+  const source = resolve(sourceInput);
+  const info = await stat(source);
+  if (info.isFile()) {
+    const match = MAP_FILE.exec(basename(source));
+    if (!match || Number(match[1]) !== mapId) evidenceFail(`source file ${source} is not ${filename}`);
+    return Object.freeze({
+      kind: "rxdata-file",
+      source,
+      mapRxdata: source,
+      dataDirectory: dirname(source),
+    });
+  }
+  if (!info.isDirectory()) evidenceFail(`source is not a file or directory: ${source}`);
+
+  const fsdbChildren = (await readdir(source, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && FSDB_NAME.test(entry.name))
+    .map((entry) => join(source, entry.name));
+  const mapRxdata = await firstExisting([
+    join(source, "[resource]Data", filename),
+    join(source, "Data", filename),
+    ...fsdbChildren.map((dir) => join(dir, "[resource]Data", filename)),
+    ...fsdbChildren.map((dir) => join(dir, "Data", filename)),
+  ]);
+  if (!mapRxdata) {
+    evidenceFail(`could not find ${filename} under ${source}`, [
+      join(source, "[resource]Data", filename),
+      join(source, "Data", filename),
+    ]);
+  }
+  return Object.freeze({
+    kind: "directory",
+    source,
+    mapRxdata,
+    dataDirectory: dirname(mapRxdata),
+  });
+}
+
+function optionalPath(directory, filename) {
+  const path = join(directory, filename);
+  return existsSync(path) ? path : undefined;
+}
+
+export function scanCoverage(events) {
+  let pages = 0;
+  let commands = 0;
+  let scriptCommands = 0;
+  const scripts = [];
+  for (const event of events) {
+    pages += event.pageCount;
+    for (const page of event.pages) {
+      commands += page.commands.length;
+      scriptCommands += page.commands.filter((command) => command.code === SCRIPT_START_CODE || command.code === SCRIPT_CONTINUE_CODE).length;
+      for (const group of page.concatenatedScripts) {
+        scripts.push(Object.freeze({
+          eventId: event.eventId,
+          name: event.name,
+          pageIndex: page.pageIndex,
+          startCommandIndex: group.startCommandIndex,
+          endCommandIndex: group.endCommandIndex,
+          joinedWithNewlines: group.joinedWithNewlines,
+          matchesBridgePattern: BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines),
+        }));
+      }
+    }
+  }
+  return Object.freeze({
+    eventCount: events.length,
+    pageCount: pages,
+    commandCount: commands,
+    scriptCommandCount: scriptCommands,
+    allPagesScanned: events.every((event) => event.pages.length === event.pageCount),
+    eventIdsInOrder: Object.freeze(events.map((event) => event.eventId)),
+    scripts: Object.freeze(scripts),
+  });
+}
+
+function bridgeTileIdSet(tilesetsRoot, tilesetId, cache) {
+  if (cache.has(tilesetId)) return cache.get(tilesetId);
+  const terrain = extractTilesetTerrain(tilesetsRoot, tilesetId);
+  const ids = new Set();
+  for (let tileId = 0; tileId < terrain.terrain_tags.xSize; tileId += 1) {
+    if (tableAt(terrain.terrain_tags, tileId) === BRIDGE_TERRAIN_TAG) ids.add(tileId);
+  }
+  cache.set(tilesetId, ids);
+  return ids;
+}
+
+export async function scanSiblingMapsForBridgeEvidence(dataDirectory, options = {}) {
+  const files = (await readdir(dataDirectory)).filter((name) => MAP_FILE.test(name)).sort();
+  const mapInfosPath = optionalPath(dataDirectory, "MapInfos.rxdata");
+  const tilesetsPath = optionalPath(dataDirectory, "Tilesets.rxdata");
+  const infosRoot = mapInfosPath ? (await readDecoded(mapInfosPath)).decoded.root : null;
+  const tilesetsRoot = tilesetsPath ? (await readDecoded(tilesetsPath)).decoded.root : null;
+  const tilesetCache = new Map();
+  const tilesetCatalog = tilesetsRoot ? extractTilesetBridgeCatalog(tilesetsRoot) : Object.freeze([]);
+  const mapsWithBridgeScripts = [];
+  const mapsUsingBridgeTiles = [];
+  const mapsWithBridgeEventNames = [];
+  const mapsWithBridgeComments = [];
+  const mapsWithBridgeInfoNames = [];
+  const inventoryById = new Map();
+
+  function inventory(mapId) {
+    if (!inventoryById.has(mapId)) {
+      inventoryById.set(mapId, {
+        mapId,
+        name: null,
+        filename: null,
+        tilesetId: null,
+        width: null,
+        height: null,
+        hasBridgeTiles: false,
+        hasBridgeScripts: false,
+        hasBridgeEventName: false,
+        hasBridgeComment: false,
+        uniqueCellCount: 0,
+        placedBridgeTaggedTiles: 0,
+        bbox: null,
+        tileIds: [],
+        scriptEventCount: 0,
+      });
+    }
+    return inventoryById.get(mapId);
+  }
+
+  if (infosRoot?.kind === "Hash") {
+    for (const [mapId] of infosRoot.entries) {
+      const name = extractMapInfoName(infosRoot, mapId);
+      if (name && BRIDGE_NAME_PATTERN.test(name)) {
+        mapsWithBridgeInfoNames.push(Object.freeze({ mapId, name }));
+        inventory(mapId).name = name;
+      }
+    }
+  }
+
+  for (const file of files) {
+    const mapId = Number(MAP_FILE.exec(file)[1]);
+    const decoded = decodeRxdataBytes(await readFile(join(dataDirectory, file)), file);
+    const facts = extractMapFacts(decoded.root, mapId, file);
+    const name = infosRoot ? extractMapInfoName(infosRoot, mapId) : null;
+    const row = inventory(mapId);
+    row.name = name;
+    row.filename = file;
+    row.tilesetId = facts.tilesetId;
+    row.width = facts.width;
+    row.height = facts.height;
+
+    const scriptHits = [];
+    const nameHits = [];
+    const commentHits = [];
+    for (const event of facts.events) {
+      if (BRIDGE_NAME_PATTERN.test(event.name)) {
+        nameHits.push(Object.freeze({ eventId: event.eventId, name: event.name, x: event.x, y: event.y }));
+      }
+      for (const page of event.pages) {
+        for (const group of page.concatenatedScripts) {
+          if (BRIDGE_SCRIPT_PATTERN.test(group.joinedWithNewlines)) {
+            scriptHits.push(Object.freeze({
+              eventId: event.eventId,
+              name: event.name,
+              x: event.x,
+              y: event.y,
+              pageIndex: page.pageIndex,
+              trigger: page.trigger,
+              triggerSemantics: page.triggerSemantics,
+              through: page.through,
+              always_on_top: page.always_on_top,
+              condition: page.condition,
+              graphic: Object.freeze({ tile_id: page.graphic.tile_id, character_name: page.graphic.character_name }),
+              startCommandIndex: group.startCommandIndex,
+              endCommandIndex: group.endCommandIndex,
+              joinedWithNewlines: group.joinedWithNewlines,
+            }));
+          }
+        }
+        for (const text of commentTexts(page)) {
+          if (BRIDGE_NAME_PATTERN.test(text)) {
+            commentHits.push(Object.freeze({
+              eventId: event.eventId,
+              name: event.name,
+              x: event.x,
+              y: event.y,
+              pageIndex: page.pageIndex,
+              text,
+            }));
+          }
+        }
+      }
+    }
+    if (nameHits.length > 0) {
+      row.hasBridgeEventName = true;
+      mapsWithBridgeEventNames.push(Object.freeze({ mapId, name, filename: file, hits: Object.freeze(nameHits) }));
+    }
+    if (commentHits.length > 0) {
+      row.hasBridgeComment = true;
+      mapsWithBridgeComments.push(Object.freeze({ mapId, name, filename: file, hits: Object.freeze(commentHits) }));
+    }
+    if (scriptHits.length > 0) {
+      row.hasBridgeScripts = true;
+      row.scriptEventCount = new Set(scriptHits.map((item) => item.eventId)).size;
+      mapsWithBridgeScripts.push(Object.freeze({ mapId, name, filename: file, hits: Object.freeze(scriptHits) }));
+    }
+
+    let bridgeCells = Object.freeze({ tagId: BRIDGE_TERRAIN_TAG, cellCount: 0, cells: Object.freeze([]), tileIds: Object.freeze([]) });
+    if (tilesetsRoot) {
+      const bridgeIds = bridgeTileIdSet(tilesetsRoot, facts.tilesetId, tilesetCache);
+      bridgeCells = collectBridgeCells(facts, extractTilesetTerrain(tilesetsRoot, facts.tilesetId).terrain_tags);
+      let placed = 0;
+      for (const cell of bridgeCells.cells) placed += cell.layers.length;
+      if (bridgeCells.cellCount > 0) {
+        row.hasBridgeTiles = true;
+        row.uniqueCellCount = bridgeCells.cellCount;
+        row.placedBridgeTaggedTiles = placed;
+        row.bbox = bboxOf(bridgeCells.cells);
+        row.tileIds = bridgeCells.tileIds;
+        mapsUsingBridgeTiles.push(Object.freeze({
+          mapId,
+          name,
+          filename: file,
+          tilesetId: facts.tilesetId,
+          width: facts.width,
+          height: facts.height,
+          uniqueCellCount: bridgeCells.cellCount,
+          placedBridgeTaggedTiles: placed,
+          bbox: row.bbox,
+          tileIds: bridgeCells.tileIds,
+          sample: Object.freeze(bridgeCells.cells.slice(0, 8).map((cell) => Object.freeze({
+            x: cell.x,
+            y: cell.y,
+            layers: cell.layers,
+          }))),
+        }));
+      }
+    }
+
+    const relevant = row.hasBridgeTiles || row.hasBridgeScripts || row.hasBridgeEventName || row.hasBridgeComment;
+    if (relevant) {
+      const candidates = classifyCandidates(facts.events, bridgeCells, new Set());
+      row.candidates = Object.freeze(candidates.map((candidate) => Object.freeze({
+        eventId: candidate.eventId,
+        name: candidate.name,
+        x: candidate.x,
+        y: candidate.y,
+        status: candidate.status,
+        reasons: candidate.reasons,
+        terrainHits: candidate.terrainHits,
+        pages: Object.freeze(candidate.event.pages.map(pageSummary)),
+      })));
+    }
+  }
+
+  const inventoryRows = Object.freeze([...inventoryById.values()]
+    .filter((row) => row.hasBridgeTiles || row.hasBridgeScripts || row.hasBridgeEventName || row.hasBridgeComment)
+    .sort((left, right) => left.mapId - right.mapId)
+    .map((row) => Object.freeze(row)));
+
+  return Object.freeze({
+    mapsScanned: files.length,
+    mapInfoEntries: infosRoot?.kind === "Hash" ? infosRoot.entries.length : 0,
+    excludeFullEventDump: true,
+    note: "Corpus inventory of Bridge-tagged tiles, pbBridgeOn/Off scripts, event names, and comments. Full command lists are included only for candidate events on maps that matched. This is not a substitute for Map 7 extraction.",
+    tilesetsWithBridgeTags: Object.freeze(tilesetCatalog.filter((item) => item.bridgeTileCount > 0)),
+    tilesetsWithoutBridgeTags: Object.freeze(tilesetCatalog.filter((item) => item.bridgeTileCount === 0).map((item) => Object.freeze({ id: item.id, name: item.name, tileset_name: item.tileset_name }))),
+    mapsWithBridgeInfoNames: Object.freeze(mapsWithBridgeInfoNames),
+    mapsWithBridgeScripts: Object.freeze(mapsWithBridgeScripts),
+    mapsUsingBridgeTiles: Object.freeze(mapsUsingBridgeTiles),
+    mapsWithBridgeEventNames: Object.freeze(mapsWithBridgeEventNames),
+    mapsWithBridgeComments: Object.freeze(mapsWithBridgeComments),
+    inventory: inventoryRows,
+    requestedBy: options.requestedBy ?? "corpus-scan",
+  });
+}
+
+function uniqueActivePage(event) {
+  let selected;
+  for (const page of event.pages) {
+    if (page.condition.alwaysActive) selected = page;
+  }
+  return selected;
+}
+
+export function analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transferRecord) {
+  const notes = [];
+  for (const candidate of candidates) {
+    const d0 = projectedD0Passable(mapRecord, tilesetRecord, candidate.x, candidate.y);
+    const staticPage = uniqueActivePage(candidate.event);
+    const transfers = candidate.event.pages.flatMap((page) => page.commands.filter((command) => command.code === TRANSFER_PLAYER_CODE));
+    notes.push(Object.freeze({
+      eventId: candidate.eventId,
+      x: candidate.x,
+      y: candidate.y,
+      projectedD0Passable: d0,
+      staticAlwaysActivePageIndex: staticPage?.pageIndex ?? null,
+      staticPageTrigger: staticPage?.trigger ?? null,
+      transferCommandCount: transfers.length,
+      wouldBeMapTransferCandidate: staticPage?.trigger === 1 && transfers.length === 1 && staticPage.condition.alwaysActive,
+      classification: transfers.length === 0
+        ? "not-a-map-transfer-event-map-transfer-consumer-does-not-project-it"
+        : "has-transfer-player-see-existing-maptransfer-record",
+    }));
+  }
+  return Object.freeze({
+    existingMapTransferRecord: transferRecord ?? null,
+    candidateTileNotes: Object.freeze(notes),
+    distinction: Object.freeze({
+      proven: transferRecord
+        ? "FSDB MapTransfer/7.json is the importer output already produced for this corpus"
+        : "no FSDB MapTransfer/7.json was present beside the source",
+      potential: "projectedD0Passable ignores Neutral/Bridge/player bridgeLevel; it can statically drop step/edge transfers whose destination is only passable after bridge state changes",
+      unproven: "whether any Map 7 edge or future MapAction was already dropped solely because of bridge tiles requires comparing these notes to the real Map 7 cells; do not treat potential filtering as a completed runtime failure",
+    }),
+  });
+}
+
+export async function collectMap7Evidence(sourceInput, options = {}) {
+  const mapId = options.mapId ?? DEFAULT_MAP_ID;
+  const located = await resolveMapSource(sourceInput, mapId);
+  const mapFile = await readDecoded(located.mapRxdata);
+  const mapFacts = extractMapFacts(mapFile.decoded.root, mapId, basename(located.mapRxdata));
+  const tilesetsPath = optionalPath(located.dataDirectory, "Tilesets.rxdata");
+  const mapInfosPath = optionalPath(located.dataDirectory, "MapInfos.rxdata");
+  const commonEventsPath = optionalPath(located.dataDirectory, "CommonEvents.rxdata");
+  const files = {
+    map: Object.freeze({ path: mapFile.path, sha256: mapFile.sha256, size: mapFile.size }),
+  };
+
+  let mapName = null;
+  if (mapInfosPath) {
+    const infos = await readDecoded(mapInfosPath);
+    files.mapInfos = Object.freeze({ path: infos.path, sha256: infos.sha256, size: infos.size });
+    mapName = extractMapInfoName(infos.decoded.root, mapId);
+  }
+
+  let bridgeCells = Object.freeze({ tagId: BRIDGE_TERRAIN_TAG, cellCount: 0, cells: Object.freeze([]), tileIds: Object.freeze([]), missing: true });
+  let tilesetMeta;
+  let mapRecord;
+  let tilesetRecord;
+  if (tilesetsPath) {
+    const tilesets = await readDecoded(tilesetsPath);
+    files.tilesets = Object.freeze({ path: tilesets.path, sha256: tilesets.sha256, size: tilesets.size });
+    const terrain = extractTilesetTerrain(tilesets.decoded.root, mapFacts.tilesetId);
+    tilesetMeta = Object.freeze({ id: terrain.id, name: terrain.name, tileset_name: terrain.tileset_name });
+    bridgeCells = collectBridgeCells(mapFacts, terrain.terrain_tags);
+    mapRecord = projectMapRecord({ filename: basename(located.mapRxdata), root: mapFile.decoded.root })?.value;
+    const projectedTilesets = projectTilesetRecords({ filename: "Tilesets.rxdata", root: tilesets.decoded.root }, new Set([mapFacts.tilesetId]));
+    tilesetRecord = projectedTilesets?.find((entry) => entry.key === String(mapFacts.tilesetId))?.value;
+  }
+
+  let commonEvents = Object.freeze([]);
+  if (commonEventsPath) {
+    const common = await readDecoded(commonEventsPath);
+    files.commonEvents = Object.freeze({ path: common.path, sha256: common.sha256, size: common.size });
+    commonEvents = extractCommonEventFacts(common.decoded.root);
+  }
+  const commonBridgeIds = new Set(commonEvents.filter((event) => event.hasBridgeScript).map((event) => event.id));
+  const candidates = classifyCandidates(mapFacts.events, bridgeCells, commonBridgeIds);
+
+  let transferRecord;
+  const transferPath = await firstExisting([
+    join(dirname(dirname(located.dataDirectory)), "[struct]MapTransfer", `${mapId}.json`),
+    join(located.source, "[struct]MapTransfer", `${mapId}.json`),
+  ]);
+  if (transferPath) {
+    transferRecord = JSON.parse(await readFile(transferPath, "utf8"));
+    files.mapTransfer = Object.freeze({ path: transferPath, sha256: await sha256File(transferPath) });
+  }
+
+  const importer = mapRecord && tilesetRecord
+    ? analyzeImporterRisk(mapRecord, tilesetRecord, candidates, transferRecord)
+    : Object.freeze({ existingMapTransferRecord: transferRecord ?? null, candidateTileNotes: Object.freeze([]), distinction: Object.freeze({ proven: "tileset/map projection unavailable", potential: "cannot evaluate projectedD0Passable", unproven: "decode Tilesets.rxdata to evaluate" }) });
+
+  const corpusScan = options.corpusScan === true
+    ? await scanSiblingMapsForBridgeEvidence(located.dataDirectory)
+    : null;
+
+  const { data: _omitData, ...mapWithoutTiles } = mapFacts;
+  return Object.freeze({
+    extractor: Object.freeze({
+      id: "map7-bridge-evidence",
+      defaultMapId: DEFAULT_MAP_ID,
+      mapId,
+      doesNotExecuteRuby: true,
+      doesNotModifySource: true,
+      corpusScan: options.corpusScan === true,
+    }),
+    source: Object.freeze({
+      input: sourceInput,
+      resolved: located.source,
+      kind: located.kind,
+      files: Object.freeze(files),
+    }),
+    map: Object.freeze({
+      ...mapWithoutTiles,
+      name: mapName,
+      tileset: tilesetMeta,
+    }),
+    coverage: scanCoverage(mapFacts.events),
+    bridgeTerrain: bridgeCells,
+    commonEventsWithBridgeScript: Object.freeze(commonEvents.filter((event) => event.hasBridgeScript)),
+    candidates,
+    importer,
+    corpusScan,
+  });
+}
+
+export function parseEvidenceArguments(argv) {
+  const result = { source: undefined, output: undefined, mapId: DEFAULT_MAP_ID, corpusScan: false };
+  const seen = new Set();
+  for (let index = 0; index < argv.length; index += 1) {
+    const name = argv[index];
+    if (!["--source", "--output", "--map", "--corpus-scan"].includes(name)) evidenceFail(`Unknown argument: ${name}`);
+    if (seen.has(name)) evidenceFail(`Duplicate argument: ${name}`);
+    seen.add(name);
+    if (name === "--corpus-scan") {
+      result.corpusScan = true;
+      continue;
+    }
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) evidenceFail(`Missing value for ${name}`);
+    if (name === "--source") result.source = value;
+    else if (name === "--output") result.output = value;
+    else result.mapId = Number(value);
+    index += 1;
+  }
+  requireInteger(result.mapId, "--map", { positive: true });
+  if (result.mapId !== DEFAULT_MAP_ID) evidenceFail(`this extractor only reads Map ${DEFAULT_MAP_ID}`);
+  return result;
+}
+
+export function defaultLocalFsdb(repoRoot) {
+  return join(repoRoot, "examples", "essentials-v21.1-local", "[FSDB]Essentials v21.1");
+}
