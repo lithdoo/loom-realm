@@ -1,139 +1,106 @@
 # 地图地形行为系统设计草案（Essentials v21.1）
 
-> 状态：**Design draft / NOT Implemented / NOT Qualified**。本文记录 2026-09-20 对桥、悬崖以及后续特殊地形的内部架构方向；不是已落地的接口承诺，也不变更 M14 first-slice 的冻结范围。问题诊断与样本地图见 [Ledge / Bridge 通行缺口分析](./LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md)。
+> 状态：**Design draft / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 一致性复核修订。本文是增量设计背景，不是冻结实现合同；[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管交付，[冻结准备](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管门禁。问题基线见 [桥与悬崖缺口分析](./LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md)。
 >
-> 决策：**内部易扩展，暂不支持外部扩展**。桥与悬崖作为首批行为接入同一套内部机制；不为单张地图、单个 tile ID 写死玩法，也不提前建立插件、脚本或外部注册 API。
+> 决策：**内部易扩展、暂不支持外部扩展**。保留 LoomRealm `tools/` 导入 → prepared FSDB → M12 Content → `game-libs/map` Runtime → map-owned Browser 的权责；不建插件、外部注册表、行为 DSL、通用事件解释器，不向 framework、Renderer 或 Hostra 下沉地图玩法。Map 7 Cedolan City 验桥，Map 47 Route 7 验悬崖；Map 27 Day Care 不作为桥样本。
 
-## 1. 目标与非目标
+## 1. 目标、非目标和设计纠错
 
-目标：保留 Essentials v21.1 的原始地形事实，在 Map Library 内分离地形识别、通行规则、移动规划、事件状态与画面表现。新增冰面、水域等内部行为时，应能增加独立规则，而不是不断把分支堆进 `canMove` / `attempt`。桥、悬崖必须以 Map 7 Cedolan City、Map 47 Route 7 的真实素材和对应原版规则验收。
+目标是让源事实、通行、事件、单次移动和画面形成闭环；后续扩展冰面或水域时按职责增添内部规则，不在 `canMove`、`attempt` 或 Browser 中散落地图 ID/tile ID 特判。不得修改原版 `passages` 来掩盖缺口，不执行 RMXP 任意 Ruby/JS，不一次实现 18 种玩法。
 
-非目标：不允许游戏内容注册自定义地形处理器；不执行导入素材中的任意 Ruby/JS；不建立通用 RMXP 事件解释器；不同时实现全部 18 种地形玩法；不修改原版 `passages` 来掩盖碰撞缺口；不宣称 M14 历史合同已包含 terrain effects。地图身份以分析文档为准：Map 27 是 Day Care 室内，不充当户外桥的正式样本。
+**2026-09-20 复核后的纠错**：旧流程图将“检查面前事件”放在通行判断之前，实施计划又提出“执行 contact 后立即重算本次通行”。均不得冻结。Essentials `Game_Player#move_generic` 先判 `can_move_in_direction?`，成功才识别面前 Ledge；失败才调用 `check_event_trigger_touch`。`Game_Event#start` 标记事件启动，并不意味着脚本已经同步执行。事件命令的真正执行、下一次输入和桥层改变必须结合原版调度与真实 Map 7 事件确定。不能以避免桥头死锁为由凭空改变原版顺序。
 
-## 2. 数据基础：完整保留、按需实现
+## 2. 数据：保留原始标签，但按需实现行为
 
-`RPG::Tileset.@terrain_tags` 应通过 Essentials fixture consumer 投影到 `struct.Tileset`，与既有 `passages`、`priorities` 同为按 tile ID 查询的一维表。扩展 `TilesetRecord`、严格校验、fixture 生成及实际 Content 读取路径；检查维度、整数范围、表长度/引用 tile ID 一致性，并给旧版严格夹具明确的迁移路径。**完整导入不代表所有地形行为已经实现**。不要把不认识的已定义标签静默当作 `Neutral` 或改成可通行。
+从 `RPG::Tileset.@terrain_tags` 增量投影 `struct.Tileset.terrain_tags`，为 tile ID 索引的一维 RGSS Table。与 `passages`、`priorities` 一起在 importer、`TilesetRecord`、严格校验、fixture、prepared FSDB 和 M12 Content 路径闭合；长度、维度、值域、引用与历史 fixture 迁移规则需在冻结合同逐字段确定。既有 Tileset 实现**已经有 `autotile_names`**，不能把历史四字段文档当成当前代码 schema；新增属性会形成新的 qualification subject，不能追溯宣称旧 M14 已支持特殊地形。
 
-v21.1 原版 `GameData::TerrainTag` 内置标签如下：
+| ID | Essentials v21.1 标签 | 本轮承诺 |
+|---:|---|---|
+| 0 | None | 普通图块仍按 passage/priority 参与通行 |
+| 1 | Ledge | 实现原版单动作两格跳跃 |
+| 2 | Grass | 只保留标签 |
+| 3 | Sand | 只保留标签 |
+| 4 | Rock | 只保留标签 |
+| 5 | DeepWater | 只保留标签 |
+| 6 | StillWater | 只保留标签 |
+| 7 | Water | 只保留标签 |
+| 8 | Waterfall | 只保留标签 |
+| 9 | WaterfallCrest | 只保留标签 |
+| 10 | TallGrass | 只保留标签 |
+| 11 | UnderwaterGrass | 只保留标签 |
+| 12 | Ice | 只保留标签 |
+| 13 | Neutral | 实现本图层 `ignore_passability` |
+| 14 | SootGrass | 只保留标签 |
+| 15 | Bridge | 实现桥层通行、事件和遮挡 |
+| 16 | Puddle | 只保留标签 |
+| 17 | NoEffect | 不是 Neutral；仍按普通图块参与通行 |
 
-| ID | 标签 | 原版涉及的属性或用途 | 本轮行为范围 |
-|---:|---|---|---|
-| 0 | None | 默认、无特殊属性 | 保留；普通通行 |
-| 1 | Ledge | 面前悬崖，单次前跳两格 | **实现** |
-| 2 | Grass | 草晃动、陆地遭遇 | 仅保留数据 |
-| 3 | Sand | 战斗环境 | 仅保留数据 |
-| 4 | Rock | 战斗环境 | 仅保留数据 |
-| 5 | DeepWater | 冲浪、钓鱼、潜水 | 仅保留数据 |
-| 6 | StillWater | 冲浪、钓鱼、倒影 | 仅保留数据 |
-| 7 | Water | 冲浪、钓鱼 | 仅保留数据 |
-| 8 | Waterfall | 瀑布移动 | 仅保留数据 |
-| 9 | WaterfallCrest | 瀑布顶、下行行为 | 仅保留数据 |
-| 10 | TallGrass | 深草、遭遇、步行限制 | 仅保留数据 |
-| 11 | UnderwaterGrass | 水下遭遇 | 仅保留数据 |
-| 12 | Ice | 连续滑行、骑车限制 | 仅保留数据 |
-| 13 | Neutral | `ignore_passability`，跳过本图层 | **实现** |
-| 14 | SootGrass | 踩踏清除图块、收集灰 | 仅保留数据 |
-| 15 | Bridge | 依桥层状态使用/忽略桥面 | **实现** |
-| 16 | Puddle | 倒影、战斗环境 | 仅保留数据 |
-| 17 | NoEffect | 无特殊属性，但不是 Neutral | 保留；不得当成忽略图层 |
+`passages` 的 `0x40` bush 和 `0x80` counter 不是 TerrainTag；另列未来切片。未实现标签保留原值、按本轮已定义的通行子集处理，**不等于把它改写成 Neutral、无条件放行或声称完整水域/冰面语义**。未知数值标签、缺表与错误引用采用冻结合同的确定性校验，不由 Agent 猜测。
 
-另外，`passages` 中的 `0x40` 草丛标记和 `0x80` 柜台标记**不是 TerrainTag**；分别关联人物草丛遮挡与隔柜台互动探测，另列待办。本版不假定存在 StairLeft/StairRight 等插件标签。
-
-证据：Essentials v21.1 的 `011_TerrainTag.rb`、`004_Game_Map.rb`、`008_Game_Player.rb`、`001_Overworld.rb`；对应源码路径见文末链接。是否有某标签出现在本地全部地图，以及出现次数，需要另用本地 FSDB 扫描，不能由标签定义推断。
-
-## 3. Map Library 内部分层
-
-推荐以明确的职责和内部静态分发组织，不建立可由外部调用的 `registerTerrainHandler()`：
+## 3. 内部职责：区分地形名称与能否通过
 
 ```text
-Essentials RMXP source
-  -> fixture consumer: Map / Tileset(terrain_tags) / narrow projected MapAction
-  -> Map Library: terrain resolution (依图层和人物状态选有效地形)
-  -> passability policy (源格/目标格、方向位、Neutral、Bridge)
-  -> movement planner (blocked / walk / jump；未来可加入 slide)
-  -> runtime executor (原子提交坐标、计时、到达事件和状态)
-  -> render projection (运动种类、桥面遮挡状态)
-  -> browser renderer (只负责呈现，不推断地形玩法)
+Essentials 原始 Map / Tileset / Event
+  -> selective importer 保留地形与必要事件事实
+  -> prepared FSDB / M12 ContentClient
+  -> 经过校验的 Map / Tileset / event records
+  -> resolveEffectiveTerrainTag（判面前是什么地形）
+  -> evaluatePassability（逐层、源格/目标格方向检查）
+  -> movement planner（blocked / walk / jump）
+  -> Runtime（唯一人物、桥层、事件及运动权威）
+  -> RenderDomain 投影（桥深度、人物/相机同次更新）
+  -> Browser（严格校验和绘制；不推导玩法）
 ```
 
-**地形解析**：提供内部查询，从 z=2→1→0 遍历 tile ID、terrain tag、passage、priority；区分“该层忽略通行”（Neutral）、“桥下忽略 Bridge、继续下层”和“桥上使用 Bridge passage 并结束判定”。`None` / `NoEffect` 不等价于 `Neutral`。所有读取都应复用 Tileset 表校验，不能只根据画面贴图猜地形。
+**两种查询不能合并**：`resolveEffectiveTerrainTag` 为 Ledge 等询问有效标签，依原版跳过 None、Neutral 和桥下被忽略的 Bridge；`evaluatePassability` 独立逐层检查 tile ID、方向 passage、`0x0f` 和 priority。非空 None 图块仍可阻挡，NoEffect 不等于 Neutral。二者共享经过验证的底层图层读取器，但不能用“有效标签为 None”跳过该层的 passage。Bridge 在 `bridgeLevel=0` 下忽略桥图层继续下层；`bridgeLevel>0` 使用桥面 passage 并依原版结束该格判定。保留出发格方向与抵达格反方向检查及现有边界语义。
 
-**通行策略**：保留 RMXP 方向位、`0x0F`、priority 的基本规则，增加明确的 `MovementContext`（当前坐标、方向、地图、tileset、玩家状态）。桥属于影响通行层选择的策略，不应被塞进“跳跃动画”的分支。
+内部 `MovementContext` 包含地图、tileset、当前坐标、方向、`bridgeLevel` 与被本轮支持的事件碰撞事实。`MovementPlan` 可表示 `blocked`、`walk(to)`、`jump(to,distance=2)`，但此处仅是类型草图：完整字段、错误与状态转换须在正式合同冻结。PR 2 冻结类型、执行 `blocked/walk`；PR 4 才实现 jump。无空 slide 实现、万能 TerrainBehavior 回调或外部 API。
 
-**移动规划**：从单一 `boolean canMove` 上方引入 Map Library 内部动作计划。示意类型如下（字段、命名和精确边界待代码实现确认）：
+## 4. 事件投影与传送：不能在导入阶段删除运行时事实
 
-```ts
-// 示意：非公开 API，也不是已实现的类型。
-type MovementPlan =
-  | { kind: "blocked" }
-  | { kind: "walk"; toX: number; toY: number }
-  | { kind: "jump"; toX: number; toY: number; distance: 2 };
+既有 `map-transfer-consumer.mjs` 的 `projectedD0Passable` 不含 Neutral/Bridge/人物状态，却在导入时决定某些 step/contact/edge 是否生成。升级 Runtime 通行而不修复这条导入链，会让合法出口先被静态筛掉。因此必须同一次设计审计：哪些静态条件永远成立，哪些事件事实需保留到 Runtime 依状态判定。**静态投影不能把动态不可判定误写成永久不可进入。** Existing `MapTransfer` 与狭义桥头 `MapAction` 保持不同业务身份，可共享 RMXP 事件读取工具；不重造通用事件引擎。
 
-// 冰面等将来确有需求时再追加 slide，先不造未被消费的占位分支。
-```
+只识别证据证明需要的桥头候选：逐项核验 map/event/page ID、完整命令、参数、trigger、through、图形、页面条件与优先级、缩进、命令顺序。允许形式由真实 Map 7 决定，可将已验证的 `pbBridgeOn(height=2)`、`pbBridgeOff` 投影成声明式 `set-bridge-level`，绝不执行源 Ruby。无关 NPC/剧情事件按 selective consumer 范围排除；**相关桥事件候选**若无法完整保真解析，则报告 map/event/page 和具体原因，不静默丢弃。条件页、动态实体碰撞需要的最小事实由实物取证决定；若未纳入，不能承诺对应负例已被支持。
 
-首批内部规则可以是 `resolveTerrain` / `evaluatePassability` / `planLedgeMove` / `planRegularMove` 等独立模块或纯函数；由单个内部入口按已定义语义调用。无动态注册表、插件生命周期、扩展 manifest 或外部行为 DSL。对于同时影响多个阶段的标签（Bridge），在对应阶段定义职责，不强行要求所有地形实现相同的万能回调。
+## 5. 行为与时间语义
 
-**Runtime 执行**：先得到计划并验证，再一次性启动动作；将位置、camera/viewport 和 player motion 一致地发布。动画可以由内部 motion kind 表示，但 renderer 不读取 TerrainTag 决定“玩家应该怎么走”。现有普通一格移动和 MapTransfer 行为不应退化。
+### Neutral
 
-## 4. 第一批行为的具体语义
+仅忽略该图层通行并继续下层；不可无条件通行，需验证多图层、方向位、priority、None/NoEffect 的区别。
 
-### 4.1 Neutral
+### Bridge
 
-`terrain tag 13` 表示该图层不贡献通行判定，继续向下找下一层；不得把它的 `0x0F` 当成墙，也不得直接把整个坐标无条件判定为可走。补充多图层、方向位和优先级组合测试。
+内部 `bridgeLevel` 是数值而非布尔；原版 `pbBridgeOn(height=2)` 设置数值、`pbBridgeOff` 设置 0。桥下忽略 Bridge 的通行图层、桥面可在人物上方；桥上以 Bridge passage 为准、桥面按原版 depth 降层。状态由 Runtime 唯一持有，同一状态决定碰撞和画面。初值、合法范围、事件真正执行时机、跨地图传送、Frame 重建/重入必须先取证再冻结；不得改动原四字段 initial input 来随意注入新状态。
 
-### 4.2 Bridge
+### Ledge
 
-将原版 `$PokemonGlobal.bridge` 对应为 Map Library 内部玩家状态 `bridgeLevel`（**保留数值，不仅是 boolean**；原版 `pbBridgeOn(height = 2)`、`pbBridgeOff` 分别设置高度和 0）。桥下 `bridgeLevel === 0` 忽略 Bridge 图层，改查下层；桥上 `bridgeLevel > 0` 采用桥面 passage 并结束该格的通行判定。角色与桥 tile 的前后关系必须读取同一状态：桥下桥遮住角色，桥上桥 tile 不再盖住角色；不得用全局 z-index 暴力覆盖其他遮挡。
+普通方向通行检查通过且面前有效地形为 Ledge 才尝试 `jumpForward(2)`；`Game_Character#jump` 另校验最终落点。跨越格**不是第二次普通 walk**。跳跃为一个动作 ID；失败不产生半次位移或中间格 step transfer。原版对地图边界、事件阻挡和特殊相邻地图跳跃的精确结果须取证并列明支持范围；不擅自增加比原版更严的路径检查。
 
-桥头状态来自**地图事件投影**，不来自 Map ID / 硬编码坐标，也不靠自动识别桥图形切换。导入工具仅白名单识别已核实的原版脚本形式 `pbBridgeOn` / `pbBridgeOn(<受支持整数>)` / `pbBridgeOff`，以及它们实际所在的事件页面、触发条件和命令顺序，转换为狭义 `MapAction`（示例 `{ kind: "set-bridge-level", level: 2 }`）。原版 Map 7 桥头的实际事件命令、事件页、trigger、through、接触/踏入时机须先取证；若涉及不支持的分支、开关、其他命令或触发形式，报出带地图/事件 ID 的未支持结果，不得仅用文本包含匹配就假装已导入。沿用现有 MapTransfer 的事件解析基础，但不将桥事件误识别成传送。
-
-触发顺序按**真实事件语义**确定：接触触发可在目标格因碰撞失败时检查；踏入触发在有效移动完成时执行。不能一律放在抵达后，避免“未上桥→无法抵达桥头→永远无法上桥”的死锁。事件动作、运动和视觉状态应保持一致；传送到桥附近、跨地图及返回时的 bridgeLevel 继承/重置也要按原版行为测试，不能无条件初始化为 0。
-
-### 4.3 Ledge
-
-识别面对方向上的 Ledge，并遵循原版“先判断这一方向可以移动，再执行 `jumpForward(2)`”的触发次序。由 planner 构建**一个**两格 jump 动作，而不是两次普通 walk；对跨越格、落点、图边界、角色/地图事件以及相邻地图边缘按原版跳跃行为核对校验。完整动作通过后才提交，失败停在起点，不在跨越格错误触发普通踏入事件或传送。Runtime 使用单个动作 ID 与时间区间，browser 根据 motion kind 绘制平滑跳跃及抛物线位移；最终落点、人物、相机状态一致。不可通过直接修改 ledge 的 passage 来伪造普通一格行走。
-
-## 5. 行为阶段与事件优先级
-
-以下为**实现目标流程，尚非已验证的原版逐帧次序**：
+### 方向输入时序骨架（不是 Map 7 事件逐帧证明）
 
 ```text
-接收方向输入
-  -> 检查面前事件：按原版区分 contact / step / edge
-  -> 地形解析与源格/目标格通行策略
-  -> movement planner 生成 blocked / walk / jump
-  -> 校验该完整动作（含地图边界与事件）
-  -> Runtime 原子发布移动状态和视图
-  -> 动作完成后处理原版应在抵达时触发的事件与后续输入
+方向输入 → 朝向 / 既有边界规则
+  ├─ 前进方向不可通 → 按原版检查面前 touch 事件 → 事件 start/后续调度 → 此次尝试结束
+  └─ 可通 → 面前是否 Ledge → 落点校验 → 单次 jump 或普通 walk
+                              → 动作完成 → 按原版触发同格/抵达事件
+                              → 决定 transfer / 下一次 held input
 ```
 
-把事件分类和优先级列为需对照 Map 7 原始事件的未决验证项，不凭设计图直接宣布准确。桥高度状态、移动动作和渲染投影应由同一个 Runtime 权威状态推导，避免碰撞/遮挡相差一帧。任何新增 `Player.motion` / `Viewport` 字段须同步修改 browser 的严格 payload 验证和测试。
+`start` 和脚本真正生效的时间必须分别建模；不得先执行 contact、立即重算并在同一次输入里穿过桥头。既有 ContactTransfer 在当前 Runtime 中先于 `canMove` 执行，其兼容性须明确审计，不能直接作为桥事件的保真模板。step、edge、同格事件的冲突优先级以原版取证及现有回归确定。
 
-## 6. 交付切片与验收
+## 6. Runtime／Browser 是一份完整 motion 协议
 
-| 切片 | 变更 | 验收要点 |
-|---|---|---|
-| A：完整数据 | `terrain_tags` 投影、Tileset schema、fixture 与校验；明确不支持的行为 | 标签 0–17 可读取，错误表/引用拒绝；旧 M14 资格不被误改 |
-| B：最小内部行为骨架 | 地形解析、桥层通行、Neutral、动作计划接口；普通走路回归 | 多层 + 双向 passage、普通一步、越界保持正确 |
-| C：桥头和画面 | 真实桥头事件投影、`bridgeLevel`、运行时事件次序、渲染层次 | Map 7 可在桥下穿行、两端上下桥、往返时人物遮挡正确 |
-| D：悬崖跳跃 | Ledge 计划、完整跳跃校验、单动作动画 | Map 47 能合法跳下、逆向阻挡、落点受阻不穿墙、不触发跨越格事件 |
+Runtime 现有 walk 在动作开始更新逻辑目标坐标、发布 camera/player motion，普通计时 250ms；Browser 的校验、动画启动、续接和插值多处使用此值。jump 需两端一起冻结：kind、起终点、duration、单一 motion ID、scene/visual epoch、逻辑提交及抵达事件时点、弧线和人物帧、camera 进度、resize/切图/取消/旧包处理、非法 payload 拒绝。既有 walk 不作无关改变；不能靠改一个字段或让 Browser 读取 TerrainTag 推断 jump。
 
-各切片均需合成夹具 + 原版真实地图场景测试；针对动作 ID、运动完成、连续按键、resize、传送和旧一格行走做回归。若真实地图事件超出本轮白名单，新增明确的支持范围/测试，而非悄悄跳过。本文件不声称实现、测试或 qualification 已经完成。
+桥层变化即使相机和坐标不变，也必须令包含桥面 depth 的投影缓存失效；相关 tile depth 与人物投影通过**同一次 RenderDomain 更新**发布，Browser 以匹配 epoch 原子接受。不准将玩家永久置顶，破坏树冠/屋檐遮挡。RenderDomain 仍是唯一业务渲染权威，不新增主进程／浏览器业务状态。
 
-## 7. 后续能力如何接入（仅设计预留）
+## 7. 交付边界与资格
 
-- **Ice**：未来由独立 planner / 连续移动状态消费 `tag 12`，不是修改原始碰撞为永远可走。
-- **水域/瀑布**：需人物冲浪、潜水和瀑布状态、互动和地图转换；行为系统提供语义入口，当前不实现完整玩法。
-- **TallGrass / Grass / SootGrass / Puddle**：分别关联移动方式限制、遭遇、踩踏后地图变更、倒影，不应塞入 `mapTilePassable` 的单一布尔逻辑。
-- **柜台/草丛 passage flags**：`0x80` 互动与 `0x40` 人物渲染另开明确切片；不是新 TerrainTag。
+按 [实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 的规格冻结 → PR 1 数据和传送投影 → PR 2 内核/普通步 → PR 3 桥闭环 → PR 4 悬崖闭环推进。Map 7 验桥两端、桥下、折返、遮挡和出口；Map 47 验合法/逆向/阻挡跳跃、单动画和中间事件。合成单测不能代替真实样本；真实 FSDB 不可分发时需合法可复现最小派生 fixture、指纹和覆盖差距。
 
-在实际新增这些功能前，不为了猜测未来需求抽象出公共 SDK。当前仅承诺内部的职责边界与受测试约束的扩展路径。
+保留原 M14 历史合同和 qualification 记录；正式资格状态由 `doc/30-implementation/m14-qualification.md` / `m15-qualification.md` 管理。已知旧的 exact-local Tileset 断言漂移需单独记录并在获授权的资格输入改动中纠正；近期某个 CI workflow PASS 也不自动等于全部正式资格 Closed。任何执行代码/fixture/测试输入变动建立新 subject 并重新收集对应证据。当前未作代码修改、未实施本设计、未读取本地 Map 7 FSDB、未完成冻结门禁。
 
-## 8. 原版证据与本仓库位置
+## 8. 证据入口
 
-- [Essentials v21.1 TerrainTag 原始定义](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/010_Data/001_Hardcoded%20data/011_TerrainTag.rb)
-- [Essentials v21.1 Game_Map 通行与标签查询](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/004_Game_Map.rb)
-- [Essentials v21.1 Game_Player 悬崖与移动](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/008_Game_Player.rb)
-- [Essentials v21.1 Overworld 桥状态与冰面](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/012_Overworld/001_Overworld.rb)
-- [本仓库数据投影](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs)、[事件投影](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs)、[地图语义](./src/semantics.ts)、[Runtime](./src/runtime.ts)、[browser](./browser/map.browser.js)
+- [Essentials v21.1 TerrainTag](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/010_Data/001_Hardcoded%20data/011_TerrainTag.rb)、[Game_Map](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/004_Game_Map.rb)、[Game_Player](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/008_Game_Player.rb)、[Game_Character](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/006_Game_Character.rb)、[Game_Event](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/004_Game%20classes/007_Game_Event.rb)、[Overworld](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/012_Overworld/001_Overworld.rb)、[TilemapRenderer](https://github.com/Maruno17/pokemon-essentials/blob/v21.1/Data/Scripts/006_Map%20renderer/001_TilemapRenderer.rb)。
+- 本仓库：[Tileset importer](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs)、[MapTransfer importer](../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-transfer-consumer.mjs)、[semantics](./src/semantics.ts)、[Runtime](./src/runtime.ts)、[Browser](./browser/map.browser.js)、[ADR 0032](../../doc/decisions/0032-game-library-example-boundary.md)、[文档治理](../../doc/00-overview/document-governance.md)。
