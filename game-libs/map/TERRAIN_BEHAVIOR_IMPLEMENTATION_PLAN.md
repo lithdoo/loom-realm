@@ -1,79 +1,76 @@
 # 地图地形行为系统：实施闭环与验收计划（Essentials v21.1）
 
-> 状态：**Implementation plan / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 负证据复核修订。[设计草案](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md) 管架构，[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入，[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) 记观察，[证据复核与后续交接](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 记扫描边界。本计划不是代码实施或资格通过声明，不追溯改写 M14 历史合同。
+> 状态：**Implementation plan / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。2026-09-20 对 `5e71c7e` Map 21 取证作后续审查修订。[设计草案](./TERRAIN_BEHAVIOR_DESIGN_DRAFT.md) 管架构、[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入、[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) 记抽取观察、[最新证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 记录待修正结论。此文件不是代码实现或资格 PASS 声明，不追溯更改 M14 历史合同。
 >
-> **地图职责：Map 7 = Bridge 负例；Map 21 = Bridge 正例（静态取证见证据 §14，动态未跑）；Map 47 = Ledge 待取证；Map 27 不是桥样本。** 不得把静态取证写成玩法已实现或规格已冻结。
+> 地图职责：**Map 7 Bridge 负例；Map 21 Bridge 正例（已有素材观察，但 `over_trigger?` 与路线尚未完整证明）；Map 47 Ledge 正例待取证；Map 27 不作桥样本。** 原始证据 §14.5～14.6 和旧设计中“空图形 size 必然 walk-on”“全部失败 bump 不触发”的无条件句子，在 REVIEW-01 验证前不是合同依据。
 
-## 1. 全链路与三个交叉断点
+## 1. 全链路与交叉断点
 
 ```text
-Essentials v21.1 原 Map / Tileset / Event
- → 取证（明确扫描范围、未覆盖入口、源指纹、许可）
- → selective importer 保留 terrain_tags、传送和必要桥事件事实
+固定版本 v21.1 Map / Tileset / Event
+ → 严格取证（扫描边界、源指纹、路径/触发条件、许可）
+ → selective importer 保留 terrain_tags、传送与必要桥事件事实
  → prepared FSDB → M12 Content 严格校验
- → resolveEffectiveTerrainTag + evaluatePassability 两类独立查询
- → 原版方向通行检查：失败才按规则 touch start；成功选 walk/jump
- → 解释器执行／Runtime 更新桥层、移动、到达事件
- → 人物／相机／桥深度同次 RenderDomain 更新
- → Browser 严格校验并呈现
- → Map 7 负例 + Map 21 桥正例 + Map 47 悬崖正例 + M14/M15 回归
+ → resolveEffectiveTerrainTag / evaluatePassability 两个独立查询
+ → 方向 can_move；成功选择 walk/jump，失败按条件检查 front touch
+ → 动作完成时按条件检查 arrival event；解释器后续执行与 bridgeLevel 生效
+ → Runtime 同次投影人物／相机／桥深度 → Browser 严格接受并呈现
+ → Map 7 负例 + Map 21 桥 + Map 47 悬崖 + M14/M15 回归
 ```
 
-**事件：** 不得实现“先 contact 再立即重算本次移动”。Map 21 桥事件是空图形 `size()` walk-on：成功踏入占用格后 `start`，解释器随后 `eval`；失败 touch 跳过 `over_trigger`。动态逐帧仍缺。Runtime `ContactTransfer` 先于 `canMove` 不能当桥模板。
+**事件断点：** v21.1 `Game_Event#over_trigger?` 对空图形进一步检查所有占用格中至少一格 `map.passable?(x,y,0,$game_player)`。成功抵达是否 `check_event_trigger_here→start`，失败 touch 是否跳过，需要逐事件、逐桥状态计算。`start` 仅置位，脚本后续执行。严禁“先 contact、立刻重算同次移动”；既有 Runtime ContactTransfer 先于 canMove 仅为待审计现状。
 
-**传送：** Map 21 审计（证据 §14.7）：**无已证实误删**。67 个 D0-false 桥格是潜在风险未复现；连接 `21,E,77,47` 因偏移越界不产生 edge。本轮不改 importer。
+**传送断点：** `projectedD0Passable` 不了解 Neutral/Bridge/player state，静态永久过滤可能丢信息，但 Map 21 当前**没有已证实误删**。67 个 Bridge 格 D0=false 是假设出现相应落点时的潜在风险；`21,E,77,47` 是几何越界。取证器 `incomingEdgesOntoBridge` 还把目标地图坐标与本地图桥格比较，须先按 `targetMapId` 修正，再形成字段级合同。
 
-**运动：** Runtime/Browser 的普通 walk 校验、启动、重入及插值多处固定 250ms；jump 是一个动作而非两次 walk，双方冻结完整 kind/duration/ID/epoch/坐标时点/相机/帧/resize/取消协议。bridgeLevel 原地切换也要失效桥 depth 缓存并与人物同更新；Browser 不掌握碰撞。
+**运动断点：** Runtime 和 Browser 在 validator/启动/续接/插值多处写死普通 walk 250ms；jump 一次动作不是两个 walk；bridgeLevel 即使原地变化也须令 tile-depth 缓存失效、RenderDomain 与人物同更新。Browser 不掌握碰撞。
 
-## 2. 阶段 0：规格冻结前必须完成的真实取证
+## 2. 阶段 0：当前先后顺序及真实出口
 
-| 子项 | 执行及可审查产物 | 未达成时的约束 |
+| 子项 | 现状 / 必须交付 | 不满足时 |
 |---|---|---|
-| **0A Map 7 严格复核** | 已完成：11/19/521 不变；cells=0；provenNegative=true；新入口已扫 | 方法体内间接 Ruby 仍 UNVERIFIED |
-| **0B Map 21 Bridge 正例** | 静态已完成（证据 §14）。动态 RGSS 未跑 | 不可硬编码 Map21 坐标到 Runtime；动态路线仍待证 |
-| **0C Map 47 Ledge** | **下一轮** | 不把中间格当第二次 walk |
-| **0D 导入对照** | Map 21 已审计：无已证实误删 | 不在本轮改传送规则 |
-| **0E 许可/测试/资格** | 附录 L：不提交 Map 21 全文；本机 18 pass；CI skip 缺口仍在 | skip≠PASS |
+| **0A REVIEW-01 / P0 触发判定** | 对 Map 21 八个桥事件所有占用格，在相关 bridgeLevel 下计算 `map.passable?(x,y,0,player)`、`over_trigger?`、here/touch；固定源码位置、状态表、必要时动态日志 | **不得宣称八事件全部 walk-on；不得按旧 §14.5 的无条件语句冻结 MapAction** |
+| **0B REVIEW-02 / P1 严格扫描** | terrain_tags 1D/声明长度/values 长度校验，负 tile ID、move-route decodeError/坏脚本参数不能报 COMPLETE；新测试实际运行 | 旧 Map7 `provenNegativeBridge=true` 只视为旧扫描记录，不作为加强后的证明 |
+| **0C REVIEW-03 / P1 Common Event** | A→B→bridge 对 A 的调用者传递命中；环、缺 ID、不透明脚本标识；端到端反例 | 不能声称间接桥调用完整排除 |
+| **0D REVIEW-04 / P1 传送空间** | 本图 edge source 对比本图桥格；targetX/Y 按 targetMapId 加载目标图桥格；缺图为 INCOMPLETE；双图同坐标反例 | 不能用当前 incomingEdgesOntoBridge 推断桥目标格是否被保留 |
+| **0E ROUTE-21 / P1 路线** | 四组桥端从合法起点开始逐步列方向、双向通行、事件 start/execute、bridgeLevel、传送；Map7 接入 x=19–22 至 (14,70) 不能跳步 | §14.6 只能称关键点草图，不能视为可重放输入序列 |
+| **0F 回填/复验** | 修工具与测试后真实重跑 Map7、Map21 和 69 图 corpus，记录环境/commit/退出码/pass/fail/skip/输入 SHA，直接纠正原始证据 §14 与设计/门禁；合法派生 fixture 或明确 CI 缺口 | 当前仅有上一提交记录本机 18/18 pass，此次文档修订无新测试 |
+| **0G Map47 Ledge** | 取证原版方向、起点、面前 tag、源格 passage、最终落点、阻挡、反向、边界、中间事件和逐步路线 | 不能把 jump 当两个 walk 或伪造 Map47 坐标 |
+| **0H 合同/资格** | 实际数据/事件/运动字段及 producer-consumer、合法 golden fixture、M14/M15 资格 baseline、审查签核 | 六道 FG 全 OPEN；不得创建虚假的 frozen v1 |
 
-许可结论见证据附录 L：保留既有 Map 7 附录 A；Map 21 完整命令只留 `.local/`。
+**本轮任务的下一执行入口为 0A～0F，随后才是 0G。** 不能因为上次取证写了“静态已完成”，就把尚未解决的 P0 触发条件跳过。源数据路径、SHA 和事件 ID 是已记录观察；是否实际触发、路线可走和测试通过属于独立命题。
 
-**阶段出口：** 证据行均指向 `原始文件指纹 + map/event/page/command 或 tile x,y,z + v21.1 符号 + 观察方式 + 事实/推论/待证 + test ID`，Map 21 与 Map 47 路线可复现；[FG-01～06](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 全部实际 PASS 且审查签核，才建立唯一规范 `TERRAIN_BEHAVIOR_CONTRACT_V1.md` 并标 `Contract Frozen / Implementation Pending`。模板与取证命令不能代替实际结果。
+## 3. 四个实施 PR（须全部冻结后派单）
 
-## 3. 四个代码 PR：冻结后派单，当前只是草案
-
-| PR | 依赖/边界 | 可审查交付和完成条件 |
+| PR | 依赖与边界 | 可审查交付及准许的完成声明 |
 |---|---|---|
-| **PR 1 数据与投影** | 冻结合同；`m14-consumer.mjs`、`map-transfer-consumer.mjs`、schema/Content/fixture；不改 Core/原始 passages | terrain_tags 0–17 精确 Table 校验/迁移，基于已证实差异修正静态筛选、保留状态相关事件事实；只声称数据就绪 |
-| **PR 2 内核/普通一步** | PR 1，Map Library 纯规则+Runtime 最小接线 | 有效 tag 与逐层 passage 分离、Neutral/Bridge/None/NoEffect 和源目标双向规则；MovementPlan 全类型冻结但只执行 blocked/walk，旧 transfer 回归；不建空 jump 执行器 |
-| **PR 3 Bridge 纵向闭环** | PR 2 + **Map 21 正式证据**；狭义 MapAction、Runtime、桥投影/必要 Browser | Map 21 `size`/touch/start/execute/两端上下/折返/桥下/附近 transfer/depth 原地失效实测；Map 7 无桥负例；不得硬编码 map/event/tile ID |
-| **PR 4 Ledge 纵向闭环** | PR 2 + 已审查共享 Runtime/Browser motion 协议；planner、Runtime、Browser | Map 47 面前方向+最终落点、一次两格 jump、相机/弧线/事件、反向/边界/阻挡/held input/resize/切图实测 |
+| **PR 1 数据与投影** | 冻结合同；m14-consumer、map-transfer-consumer、Tileset schema/Content/fixture；不改 Core/原 passages | terrain_tags 0–17 Table 精确校验/迁移，按已证明的静态/动态差异保留传送和事件事实；只说数据就绪 |
+| **PR 2 内核与普通一步** | PR 1；Map Library 纯规则与 Runtime 最小接线 | 有效 tag 与逐层 passage 分离，Neutral/Bridge/None/NoEffect、源目标双向规则；MovementPlan 类型全冻结但仅执行 blocked/walk；旧转图回归 |
+| **PR 3 Bridge 纵向闭环** | PR 2 + REVIEW-01～04/ROUTE-21 修复证据；狭义 MapAction、Runtime、桥深度/必要 Browser | 用真实 Map21 的**已验证触发分支**做桥两端/桥上/桥下/折返/状态/遮挡/附近传送；Map7 零桥负例；禁止写死 map/event/tile ID |
+| **PR 4 Ledge 纵向闭环** | PR 2 + 已审查的共享运动协议；planner、Runtime、Browser | Map47 正反/阻挡/边界、一次两格 jump、落点事件、相机弧线、held input、resize/切图实测 |
 
-依赖 PR 1→2→3；PR 4 纯规划器可在 PR 2 后独立准备，最终 Runtime/Browser 集成以 PR 3 已稳定协议为基线，禁止无审查并发覆写同一文件。若证据改变切片，先改合同/任务卡，不为凑四 PR 拆半功能。
+PR 1→2→3；PR 4 纯规划器可在 PR 2 后单独开发，最终共享 Runtime/Browser 集成需以 PR 3 已稳定 ABI 为基线，禁止无审查并发覆写相同文件。若后续来源证据改变切片，先修合同和任务卡，不为凑四个 PR 半实现功能。
 
-## 4. C-01～C-08 跨模块精确合同
+## 4. 精确 C-01～C-08 合同项
 
-| 合同 | Producer → Consumer；冻结精度 |
+| 合同 | Producer → Consumer / 冻结要求 |
 |---|---|
-| C-01 Data | RMXP→importer→FSDB→Content/TilesetRecord：terrain_tags exact key/Table/长度/值域/非法引用、已有 autotile_names 与 fixture 迁移 |
-| C-02 Semantics | validated map/tileset→内部规则：有效标签与逐层通行独立，非空 None passage、Neutral 跳过本层、NoEffect 非 Neutral、Bridge 上下和源/目标方向位 |
-| C-03 Event | RMXP→选择性 importer→MapTransfer/MapAction→Runtime：Map 21 证实的 `size`/page/命令白名单、动态事实/静态筛选、未知候选与冲突、禁止执行 Ruby |
-| C-04 Time | input→passability→touch start/解释器或 walk/jump→arrival：状态改变时刻、event 次数、edge/step/held input/ContactTransfer 兼容 |
-| C-05 State | Runtime→通行和 depth：bridgeLevel 数值/初始/跨图/Frame 生命周期/同次投影；不擅自扩现有四字段 initial input |
-| C-06 Motion | Runtime→Browser：kind/from/to/duration/motion ID/scene+visual epoch、逻辑提交/动画帧/相机/resize/重播/取消/坏包 |
-| C-07 Support | Neutral/Bridge/Ledge 本轮子集；其他 tag 原值保留不承诺水域/冰面完整玩法；无 NPC 投影不承诺 NPC 碰撞负例 |
-| C-08 Qualification | 当前字段与 M14 historical first-slice 范围，正式 ledger/CI run/exact SHA、旧断言修正和新 subject 验收矩阵 |
+| C-01 Data | RMXP→importer→FSDB→Content/TilesetRecord：terrain_tags exact key、1D/长度/tag 0–17/坏值/非法引用、已有 autotile_names 与迁移 |
+| C-02 Semantics | validated map+tileset→规则：有效标签与逐层通行分开、非空 None passage、Neutral 忽略本层、NoEffect 非 Neutral、Bridge 上下/优先级/源目标方向位 |
+| C-03 Event | RMXP→selective importer→MapTransfer/MapAction→Runtime：真实 size/page/命令/trigger 与 over_trigger 条件、跨图 ID 空间、相关候选 fail-closed、不执行 Ruby |
+| C-04 Time | input→can_move→失败 front touch 或成功 walk/jump→arrival；start/execute 区分、条件触发事件次数、step/edge/held input/ContactTransfer 兼容 |
+| C-05 State | Runtime→通行/画面：数值 bridgeLevel 初值/跨图/Frame/实际生效/失效/重投影；不擅自扩大四字段启动输入 |
+| C-06 Motion | Runtime→Browser：kind/from/to/duration/单 ID/scene+visual epoch、逻辑提交/相机/弧线/resize/取消/切图/坏包 |
+| C-07 Support | 本轮仅 Neutral/Bridge/Ledge；其他标签原值保留不承诺完整水/冰；若无 NPC 投影则不承诺碰撞负例 |
+| C-08 Qualification | 当前 schema vs 历史 M14 first-slice、正式 M14/M15 ledger/CI run/exact SHA、旧断言修复与新 subject 验收 |
 
-合同必须给 exact TypeScript/JSON 正反例、字段生产者/消费者、bridgeLevel×passage×event 与运动状态×input/complete/resize/transfer/cancel 的矩阵，列明 mapId/x/y/朝向/bridgeLevel/event started/executed/motion/depth/下一输入，明确 RenderDomain 原子边界；不能让 Agent 从“同步/保真”等自然语言猜 ABI。
+冻结合同必须有 exact TypeScript/JSON 正反例、字段 producer/consumer 表、桥层×通行×事件和 movement 状态×输入/完成/resize/transfer/cancel 矩阵；给出 mapId/x/y/朝向/bridgeLevel/事件启动与执行次数/motion/depth/下一输入时刻、RenderDomain 原子边界。不能以“同步/复刻原版”等描述让 Agent 自定 ABI。
 
-## 5. 验收和停工
+## 5. 验收、停止线与资格记录
 
-| 测试族 | 正反例范围 |
-|---|---|
-| `DATA-*`/`TR-*` | 18 tag、错误 Table/迁移/Content，Map7 门与 edges，Map21 动态 transfer 过滤对照 |
-| `BR-PASS-*`/`BR-EVENT-*`/`BR-RENDER-*` | None/Neutral/NoEffect/上下桥；Map7 零桥负例与 Map21 真实桥端/状态/传送/遮挡、静止重投影 |
-| `LD-JUMP-*`/`MOTION-*` | Map47 两格最终落点/逆向/阻挡/中间事件，单动作弧线/相机、ID/duration/epoch、resize/切图/取消 |
-| `REG-*` | 原普通一步/held input/传送/viewport、M14/M15 包边界及新 subject 回归 |
+测试族：`DATA-*`、`TR-*`、`BR-PASS-*`、`BR-EVENT-*`、`BR-RENDER-*`、`LD-JUMP-*`、`MOTION-*`、`REG-*`，取证新增 REVIEW-01～04 与 ROUTE-21 明确负例。Map7 负例/门/edge；Map21 桥正例；Map47 悬崖正例。所有 Given/When/Then 精确给来源 digest、起点/输入/通行/事件/结果、实际执行命令、环境、commit、exit、pass/fail/skip；合成单测不能冒充真实图闭环，未运行不得写 PASS。
 
-每测试记录 Given/When/Then、FSDB digest、环境、命令、commit、退出码、pass/fail/skip、覆盖差距；合成单测不能替代真实 Map 21/47。已有命令如 `npm run build:m14`、`npm run test:m14:projection`、`npm run test:m14`、`npm run test:m15` 也仅运行后才能报告 PASS。Agent 卡须固定 base SHA、合同、允许/禁止文件、依赖、准确 test IDs 和停止线。缺素材、未知间接 Ruby、`size()` 无法取证、ABI/许可/测试冲突时暂停受影响项，报 `事实→冲突条款→可选修正→下游影响`，不造假或放松校验。
+合法性未确认前不提交 Map021.rxdata、完整 Map21 事件转储；旧 Map7 附录 A 的分发条件仍须核查。CI 无本地 FSDB 的 live skip ≠ PASS，FG-05 继续 OPEN。M14 历史记录及 M15 ledger 不改写；旧 Tileset 断言漂移和新增 subject 须分开报告。
 
-**下一步真实顺序：** Map 47 Ledge 取证 →（可选）RGSS 动态日志 → ABI/fixtures/合同 → 签核。现在 FG-01～06 仍全部 OPEN。
+遇未知间接 Ruby、`over_trigger?`/路径与预期矛盾、缺目标地图、坏表、许可/ABI/测试冲突时，只暂停受影响的实施项，报告`事实 → 冲突条款 → 修正选项 → 下游/测试影响`；不编造事件坐标、不弱化校验、不写插件或通用解释器。
+
+**下一步：先完成 REVIEW-01～04 + ROUTE-21，真实重跑并回填原始证据，再开展 Map47。当前 FG-01～06 全 OPEN，NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**
