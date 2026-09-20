@@ -1,73 +1,58 @@
-# 地图地形行为系统设计草案（Pokémon Essentials v21.1）
+# Terrain Behavior：最小架构设计（Essentials v21.1）
 
-> **Design draft / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。当前取证基线 [`e60e4a52`](https://github.com/lithdoo/loom-realm/commit/e60e4a521a726233bbda0bb1892f6d25bc47573d)。[原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) §14 是历史事实快照，§15 是最新静态重跑；[证据复核](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md) 明确独立核对范围和**未完成的 E2E-21 连续状态拼接**；[冻结门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 管准入，[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md) 管任务。草案及静态取证均不是已冻结 ABI。
->
-> 样本职责：**Map7 Cedolan City＝Bridge 负例；Map21 Route2＝Bridge 正例（93 格、8 事件、静态触发矩阵）；Map47 Route7＝Ledge 正例（30 格、静态跳样本）；Map27 Day Care 非桥样本**。当前所有 Gate OPEN。E2E-21 统一静态 replay 见证据 §16，不是 RGSS。架构保持内部易扩展、暂不开放外部扩展；不引入插件、动态 handler、行为 DSL、万能事件解释器，不向 framework/Renderer/Hostra 下沉地图业务。
+> **DESIGN BASELINE FOR IMPLEMENTATION / NOT FORMALLY FROZEN / NOT IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING**。用户已授权从准备转入开发。实施准入、PR 完成条件与必须使用的产品端到端验收以[实施交付合同](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md)为准；[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md)分配 PR；[候选合同](./TERRAIN_BEHAVIOR_CONTRACT_CANDIDATE.md) C-01～08 提供字段级设计；[门禁](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)仅管正式原版行为资格，六 FG 仍 OPEN。当前设计不是已经存在的 TypeScript API，也不宣称已获 RGSS 动态证据。
 
-## 1. 目标、证据与本轮承诺边界
-
-仅在 `game-libs/map` 的语义/Runtime/自有 Browser 与 `tools` importer、prepared FSDB、M12 Content 间建立可解释的行为链。不能按地图/事件/tile ID 在运行时硬编码，不修改原版 passages，不执行原始事件 Ruby/JS。保留全部原始 TerrainTag，但此次仅实施 Neutral、Bridge、Ledge 对应的有限行为；其余标签不自动获得完整水域/冰面玩法。
-
-证据等级不可混写：固定源码条件是 `SOURCE-PROVEN`，带 digest 的素材记录是 `FSDB-OBSERVED`，静态规则移植/BFS/trace 是 `STATIC-INFERRED`，真正的原版游戏日志才是 `DYNAMIC-OBSERVED`。本轮不存在原版 RGSS 动态日志。Agent 报告的本地 36 pass 是取证器测试，不等于玩法实现、CI、真实事件执行时序或整体 qualification。独立脚本只核对 Map21 桥格/事件 IDs 和 Map47 悬崖格计数，没有独立验证逐帧或所有路线。
-
-## 2. 数据投影与两个独立语义问题
-
-原版 `RPG::Tileset.@terrain_tags` 拟进入 `struct.Tileset.terrain_tags`，以 tile ID 索引的一维 RGSS Table，经 importer→prepared FSDB→M12 Content→严格 TilesetRecord；保留现有 `autotile_names`、passages、priorities。合同须锁 shape、长度、值域 0–17、引用、缺失/负值/越界、兼容迁移与 Content 错误。历史 M14 first-slice 四字段范围不能当成当前完整 schema；新增字段是新 qualification subject，不追溯改历史记录。
-
-| Tag | 必须保持的含义与本轮实现范围 |
-|---:|---|
-| 0 None | 非空 tile 即使有效标签为 None，仍可能由 passage/priority 阻挡 |
-| 1 Ledge | 满足原版方向及落点条件后，一次动作越过中间格、最终跨两格 |
-| 2–12 | 保存 Grass/Sand/Rock/Water/Ice 等各原值，不承诺各自完整业务 |
-| 13 Neutral | 只忽略**该图层** passage，继续看下层；不是整格无条件放行 |
-| 14 SootGrass | 保存，不实施附加行为 |
-| 15 Bridge | bridgeLevel=0 忽略桥面通行层；>0 使用桥层 passage；事件与绘制另行分工 |
-| 16 Puddle | 保存，不实施附加行为 |
-| 17 NoEffect | 不等于 Neutral；普通通行仍有效 |
-
-`0x40` bush 与 `0x80` counter 属 passages 标记，不是方向通行位或新增 TerrainTag。取证严格性已针对 1D/长度、负 tile、孤立 655、坏 111/117 等补校验，但工具 `COMPLETE` 只覆盖已声明输入及入口，不能扩展为整个 Ruby 运行时的保证。
-
-`resolveEffectiveTerrainTag` 回答“面前有效地形是什么”，`evaluatePassability` 回答“逐层、源格方向与目标格反向是否可通行”，**必须分开**。前者按原版覆盖/ignore/bridge 条件识别；后者对非空 tile、passage 四方向位与 `0x0f`、priority、Neutral、桥层和边界进行独立判断。没有正式合同前不可从这段自然语言猜确切 TS 接口或错误码。
-
-## 3. 内部权责与移动数据流
+## 1. 范围与数据流：一个状态中心，两项纯查询，一种运动协议
 
 ```text
-Essentials 原始 Map/Tileset/Event（固定素材指纹）
- → tools selective importer（仅取本轮能解释的事实，不执行 Ruby）
- → prepared FSDB → M12 Content（严格结构校验）
- → map-owned terrain tag + passability 查询
- → movement planner（blocked / walk / jump 类型）
- → game-libs/map Runtime（位置/方向/bridgeLevel/事件与 motion 唯一权威）
- → RenderDomain（人物、相机与桥面深度同次一致投影）
- → map-owned Browser（校验/显示，不自行推断玩法）
+原始固定 Essentials v21.1 Map/Tileset/Event/PBS（合法本地只读）
+ → tools selective importer（白名单、精确 fail-closed）
+ → prepared FSDB → M12 Content 校验
+ → map-owned resolveEffectiveTerrainTag 与 evaluatePassability（分离）
+ → 一输入一 MovementPlan：blocked | walk | jump
+ → map Runtime 唯一拥有 mapId / position / direction / bridgeLevel / 事件 / motionId
+ → 同次 RenderDomain 提交 tile depth + player + 必要 viewport/camera
+ → map-owned Browser 校验/播放，不决定碰撞或地形
 ```
 
-MovementContext 仅包含验证过的 map/tileset、玩家/桥状态和有证据支持的事件占用/碰撞事实。MovementPlan 全部类型须先冻结，PR2 只实现 blocked/walk，PR4 才实现完整 jump；不要创建可被误用的空 jump 执行器或万能 TerrainBehavior callback。
+不引入插件、外部 handler、行为 DSL、通用 RMXP/Ruby 解释器；不硬编码地图/事件/tile IDs、不改原版 passages、不把玩法下沉 framework/Renderer/Hostra、不扩充初始输入 `{mapId,x,y,characterName}`。**可扩展性由内部清晰数据边界和判别联合类型提供，不靠预建框架。**
 
-## 4. 原版事件、桥状态与跨地图的准确边界
+范围仅给 Neutral(13)、Bridge(15)、Ledge(1) 额外行为，其余 TerrainTag 0～17 原值保留但不承诺水/冰/草等完整玩法。Map7 Bridge 限定负例；Map21 93 tag15 格、八 Bridge 事件正例；Map47 30 Ledge 格正例；Map27 非桥正例。`SOURCE-PROVEN`（源码）、`FSDB-OBSERVED`（带 SHA 的文件）、`STATIC-INFERRED`（JS replay）、`PRODUCT-OBSERVED`（实际 LoomRealm）、`DYNAMIC-OBSERVED`（原版 RGSS）绝不能混用。
 
-固定 v21.1 `Game_Player#move_generic` **先通行判断**：失败才检查面前 touch；成功才进入 walk 或 Ledge 跳跃，并在动作完成后按条件检查抵达事件。`Game_Event#start` 仅置待执行标志，并不在同次通行判定中 eval 脚本。抵达分支必须同时满足触发类型、占用位置和 `over_trigger?`，不能只凭空图形或 `size()` 决定。
+## 2. Producer/consumer：只增加确需的结构
 
-`Game_Event#over_trigger?` 除图形/through/hiddenitem 条件，还要求至少一占用格 `map.passable?(x,y,0,player)` 成立。`d=0` 在原版 Ruby 负移位语义下方向 bit=0，但仍需逐层 passage、priority 和桥层。§15 对 Map21 八事件 bridgeLevel 0/2 的静态结果均为 true，故**预测**成功走入对应占用格后走 `here` 分支；失败前方 touch 会跳过 `over_trigger?=true` 事件。脚本实际执行相对于帧/held input 仍需原版运行证据，不可在 Runtime 做“contact→执行→立即重算同一次输入”。
+原版 `RPG::Tileset.@terrain_tags` 作为按 tileId 索引的 1D Table 添加到现有 `struct.Tileset`，**保留 `id,tileset_name,autotile_names,passages,priorities`**；三个 tile-index Table 的形状、长度、索引与 tag 0～17 范围严格校验。旧五字段数据由显式 migrator 和新 schema subject 处理，不能 Runtime 默默补空值，也不能改写 M14/M15 历史 ledger。正反例见 C-01。
 
-Map21 八事件命令是 `pbBridgeOn` / `pbBridgeOff`，`pbBridgeOn(height=2)` 默认将 bridgeLevel 设为 2、Off 设 0；源码有切图关桥分支。Runtime 持有数值状态，通行、事件和深度消费同一值。`size` 覆盖多占用格，与图块是否 tag15 是两回事；进化事件 1、2 只是邻接候选，不可误投影为桥动作。不可将原版任意脚本当可执行输入，MapAction 仅保存被明确证明且合同允许的狭义事实。
+MapTransfer 已有 `id/steps/contacts/edges`：源格与目标格分别带自己所属 mapId，静态 producer 只过滤可独立确定的无关事实，桥层/Neutral/player 动态状态交 Runtime 决策；Map21 67/93 tag15 D0-false 只是潜在误过滤风险，**没有证据证明当前真实 transfer 已误删**。MapAction 仅投影可从 v21.1 原始页面严格识别的 On/Off 狭义事实，保留事件占用/触发/页面依据；不 eval Ruby，关联不确定性以 map/event/page 精确失败，不因无关 NPC 让整个地图报错。新增数据结构必须在 AG-01 中完成 Content/schema/consumer 的同 PR 流通与测试。
 
-`projectedD0Passable` 静态知道 passage/priority，不知道桥层/Neutral/player state；Map21 已审计三条 PBS 连接与 7 条输出 edge，**没有已证实误删**。67 个 Bridge 格 D0=false 仅为条件性风险；`21,E,77,47` 的零边来自几何越界。传送源/目标必须分别带 mapId 和图块引用。只有确定不依赖动态状态的事实可静态过滤，状态相关判断留 Runtime，字段细节待 C-03 冻结。
+`resolveEffectiveTerrainTag` 解读标签，`evaluatePassability` 独立处理逐层 passage 和 priority：非空 tile 的 None(0) 仍可能阻挡；Neutral(13) 只跳过当前图层继续下层；NoEffect(17) 不是 Neutral；Bridge(15) 在 bridgeLevel=0 跳过桥面层，在 bridgeLevel=2 考虑桥面 passage；方向 `2|4|6|8` 的源格/目的格反向检查、越界/缺数据都要明确。`0x40` bush、`0x80` counter 属 passages，不能当方向或新的 TerrainTag。Ledge 判断是移动计划分支，不允许把普通 passage 查询里偷塞动画。
 
-## 5. Map21 路线与 Map47 跳跃：静态片段不是整体验收
+## 3. 时序与状态：先判通行，再启动事件，后执行脚本
 
-Map21 §15.3 已生成从 Map7→21 目标落点 `(19,76)` 向四组桥头陆地侧 BFS 的静态路径，以及 Off→On、On→Off 等单独重放片段。**仍缺 E2E-21**：当前代码没有将 BFS 终态接入 Off→On 段的初态，而是将桥带初态重新设为 bridgeLevel 0；`traceStep.transfer=null`，真实跨图 edge 也不在同一次模拟中执行。因此分段 `continuous=true` 不能证明整段 Map7→真实 Bridge-tagged deck→离桥→返程的状态/事件完全连续。待把连接、BFS、桥带、桥面、折返合并逐步 replay，并另用 RGSS 动态日志核对；详见[复核 §3](./TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md)。
+v21.1 源码已证明 `move_generic` 先做通行：失败走 front touch，成功执行 walk 或合法 Ledge 跳跃，到达满足条件后 `here` start；`Game_Event#start` 只设置待执行标志，不等于脚本即时执行。`over_trigger?` 除图形/through/hiddenitem，还要求占用区域内至少一格 `map.passable?(x,y,0,player)`；Map21 八事件 bridgeLevel=0/2 计算为 true 属**静态预测**，不是空图形天然 walk-on，也不是原版逐帧观测。
 
-Map47 静态计得 30 Ledge 格，合法样本 `(16,9)` 面朝下越过 `(16,10)` 落到 `(16,11)`。原版应先成功进行面前普通方向检查，再按有效 Ledge 规则一次 `jumpForward(2)`，最终由 `jump` 检查落点。中间格不能当第二次普通 walk，也不能自动触发其中间 step；原版动态弧线/相机、跨图跳跃和中间事件实物样本未验证；实际地图没有该类样本时只允许有明确标记的合成测试。未知命令 404 必须保留并核对其适用语义，不能默认为安全忽略。
+Runtime 唯一拥有 `bridgeLevel`：本 slice 初始 0，允许 `{0,2}`，On **execute** 后 2、Off **execute** 和 transfer 后 0。碰撞与渲染消费同一版本状态；单次输入不能先执行 On 再重新判定同次通行。事件 `start`、`execute` 分开记录，解释器 busy、held input、size 重复触发、多事件顺序与取消都需要确定的**产品策略和测试**；RGSS 时点缺失标 `PROJECT-DECISION-PROVISIONAL`，可实施但不得写原版精确一致。
 
-## 6. Motion/深度必须同一协议
+转图需要原子地清桥、运动、事件 pending、过时 timer/回调并更换 sceneEpoch；目标地图缺失/越界要走明确错误和回滚，不允许半切场景。非相关事件不会驱动桥脚本；未知相关页面失败范围须精确且可解释。
 
-现有 walk Runtime 在动作开始提交逻辑目标位置并发布人物/相机 motion；Runtime/Browser 多处硬编码 250ms。冻结 kind/from/to/duration/单 motion ID、scene/visual epoch、逻辑位置提交/动画结束、人物帧/跳跃弧线/相机、resize/切图/取消/乱序/坏包的 producer-consumer 与原子状态矩阵；Browser 只校验与呈现，不读 TerrainTag 作决策。
+## 4. 一个运动协议，逻辑与视觉不分家
 
-bridgeLevel 变化即使坐标和 camera 静止，也必须使桥面 depth 缓存失效，并与人物投影在同一次 RenderDomain 更新中提交和接收，不通过全局抬高玩家 z-index 遮住屋檐/树冠，也不把地图业务状态存入 Hostra。
+现有 Runtime/Browser walk=250ms 是**产品现状**，并非 jump 时长证据；现有 initial params 只有四字段。PR2 冻结 `blocked|walk|jump` 的判别联合类型，但只实施 blocked/walk；PR4 真正实施一个 `jumpForward(2)` 计划，逻辑位置跳过中间格、只在落点到达触发一次事件，不拆两次 walk 或两段动画。原版逻辑/图形差异未实测则标来源和暂定设计值。
 
-## 7. 交付顺序与资格
+Runtime 产生唯一 motionId、sceneEpoch/visualEpoch、数值 duration、from/to、相机数据，Browser 只执行 motion，旧 completion 不得复活前一动作。jump 的 duration 必须是**数值单一来源**，禁止将合同候选里的 `'UNVERIFIED-pending-RGSS'` 类型文字传进产品 payload。行走期间输入、resize、取消、transfer、过期通知须有一份共同状态矩阵和对应负例。resize 同次更新人物+viewport；切图 replace 并递增 epoch；Bridge level 在原地切换必须刷新 tile depth 与人物而非只修改全局 z-index。
 
-当前取证器 REVIEW-01～04 的静态修复、Map7/21/47 记录、**E2E-21 统一静态 replay** 及合成 fixture 已提交；**不是正式行为闭环**。CI 绿 run `35499617524` on `5b550b4` 为 100 pass / 6 skip（live）。后续：原版 RGSS 动态逐帧（BLOCKED 直至有 Game.exe）→ 许可签核（live skip 仍 ≠ PASS）→ reviewer 签 `CONTRACT_V1` → 才授权 AG-01～04。
+共享 Runtime/Browser 的 AG-03、AG-04 不可盲目并行；先在一个代码 PR 里通过测试固定共同 on-wire，再让下一 PR 消费或按明确版本更新。Browser 不读取地形来重新判方向、落点、桥层。
 
-旧 18 pass、本次本地 Agent 36 pass、CI skip 和原版玩法验收是不同概念。任何实施 PR 尚未开始；六道 FG 均 OPEN，状态 **NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。
+## 5. 地图事实、取证与产品 E2E 的准确分界
+
+[证据 §16](./TERRAIN_BEHAVIOR_EVIDENCE.md) 已补正旧 §15.3 的分段问题：一个 `replayWorld` 从 Map7 `(40,0)` 的**物化边**进入 Map21，走四组 Off→On→真实 tag15 桥面→下桥/折返→反向 transfer，独立检查物化边成员、邻接与 tag15；**E2E-21 统一静态回放已完成**。旧 `map-route-trace.mjs#traceStep.transfer=null`/`buildMap21BridgeRoutes` 只作为局部探针，不能再写“E2E 尚未拼接”，也不能把统一静态 replay 当原版 RGSS 动态日志。独立核对器没有重算 `over_trigger?` 或帧时序。
+
+Map47 静态报告 30 合法跳、逆向 0；`(16,9)→(16,11)` 是原始样本。404 是 `show-choices-branch-end`，位于 EV007/EV013、不是 Ledge 图块上的动作；真实样本缺少的边界、落点阻挡、中间事件以**原创合成用例**覆盖，明确与 FSDB 区分。跨图 jump 本 slice 不支持，不可把全部 tag1 格当作无条件跳跃。
+
+GitHub [CI 35499617524](https://github.com/lithdoo/loom-realm/actions/runs/35499617524) on `5b550b4` 为 100 pass / 0 fail / 6 live skip；本地 Agent 记录有 FSDB fixtures 106 pass、map 78 pass，都是**实施之前**的证据。原版 RGSS `Game.exe` 未在本机提供，合法真图 CI 再分发许可也未取得。不得把 skip 记 PASS，不得因此阻止 AG-01 开发。
+
+## 6. 交付与不扩范围原则
+
+[实施计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md)按 AG-01 数据→AG-02 语义/walk→AG-03 Bridge→AG-04 Ledge 串行集成。每 PR 实际合成测试、合法本地真实地图对照、受影响旧回归和对应 SHA 的 CI 必须通过；最终用**真实 LoomRealm Runtime+Browser**演示 Map7→Map21 桥上/桥下/四组、Map47 一次 jump/逆向/落点及相机/depth，且普通 walk/transfer/resize 不退化。不能以 forensic CLI 或协议草稿代替功能测试。
+
+开发期间 ABI 或产品策略与证据冲突，局部修复、补测试、记录选择；只有破坏性公共 ABI、许可或超出明确 slice 的问题才向 owner 请求决定。不重开整体取证，不伪造原版保真。产品验收后可记 **`IMPLEMENTED / BEHAVIOR QUALIFICATION PENDING`**；六道 FG 真正签核后才记 **`CONTRACT FROZEN / QUALIFIED`**。
