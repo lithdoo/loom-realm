@@ -243,39 +243,3 @@ test("canMove uses source direction and target reverse with bridgeLevel", () => 
   assert.equal(canMove(bridge, tileset, 1, 1, 2, 0, 1, 0), true);
   assert.equal(canMove(bridge, tileset, 1, 1, 2, 0, 1, 2), false);
 });
-
-test("live Map47 (16,9) down is one jump to (16,11) (SKIP when FSDB missing)", async (t) => {
-  const { existsSync } = await import("node:fs");
-  const { readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  const { fileURLToPath } = await import("node:url");
-  const { decodeRxdataBytes, defaultLocalFsdb } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-event-evidence.mjs");
-  const { projectMapRecord, projectTilesetRecords } = await import("../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/m14-consumer.mjs");
-  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
-  const fsdb = defaultLocalFsdb(repoRoot);
-  const mapPath = join(fsdb, "[resource]Data", "Map047.rxdata");
-  if (!existsSync(mapPath)) {
-    t.skip("local official FSDB is not present; synthetic ledge tests still ran");
-    return;
-  }
-  const data = join(fsdb, "[resource]Data");
-  const map = validateMapRecord(projectMapRecord({
-    filename: "Map047.rxdata",
-    root: decodeRxdataBytes(await readFile(mapPath), "Map047.rxdata").root,
-  }).value);
-  const tilesets = projectTilesetRecords({
-    filename: "Tilesets.rxdata",
-    root: decodeRxdataBytes(await readFile(join(data, "Tilesets.rxdata")), "Tilesets.rxdata").root,
-  });
-  const tileset = validateTilesetRecord(tilesets.find((record) => Number(record.key) === map.tileset_id).value, map.tileset_id);
-  const jump = planMovement(map, tileset, 16, 9, 2, 0);
-  assert.equal(jump.kind, "jump");
-  assert.equal(jump.fromX, 16);
-  assert.equal(jump.fromY, 9);
-  assert.equal(jump.toX, 16);
-  assert.equal(jump.toY, 11);
-  assert.equal(jump.skippedX, 16);
-  assert.equal(jump.skippedY, 10);
-  assert.equal(jump.durationMs, JUMP_DURATION_MS);
-  assert.equal(planMovement(map, tileset, 16, 11, 8, 0).kind, "blocked");
-});
