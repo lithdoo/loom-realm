@@ -1,75 +1,65 @@
-# 地形行为证据复核：REVIEW-01～04 本轮关闭状态
+# 地形行为取证：复核结论、证明边界与冻结交接
 
-> 状态：**Review / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。
-> 本文记录取证器修复后的**独立复核**，不是玩法实现，也不是 Gate PASS。
-> 原始观察与本轮新矩阵见 [TERRAIN_BEHAVIOR_EVIDENCE.md](./TERRAIN_BEHAVIOR_EVIDENCE.md) §14（历史指纹）与 **§15（本轮严格重跑）**。
-> 基线文档修订 SHA：`240d084ceba236c6006afc89d7d4957991cf4992`。本轮同时修改取证器、测试与证据正文。
+> 状态：**Evidence review / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。本文件复核取证提交 [`e60e4a52`](https://github.com/lithdoo/loom-realm/commit/e60e4a521a726233bbda0bb1892f6d25bc47573d)，不代表又一次本地 FSDB 读取、测试复跑或原版 RGSS 运行。原始数据与运行命令见 [原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) **§15**；§14 是先前的静态记录，若表述冲突，以带日期和输入指纹的 §15 及本文件的证明范围为准。门禁状态见 [冻结准备](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)，实施任务见 [计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md)。
 
-## 1. 地图职责
+## 1. 这次究竟完成了什么
 
-| 地图 | 职责 | 本轮结论 | 证据等级 |
-|---|---|---|---|
-| Map 7 Cedolan City | Bridge 负例 | 严格扫描后仍为 0 Bridge 格、0 桥候选、0 可达 Common Event 桥脚本。**证明范围**：本 corpus 的 Map 7 全部事件页/355/655/209/509/111-12/117 入口内无桥。不证明整个游戏没有 autorun/eval 间接入口。 | FSDB-OBSERVED + 扫描 COMPLETE |
-| Map 21 Route 2 | Bridge 正例 | 93 unique Bridge 格；8 个直接 `pbBridgeOn/Off` 事件。**逐占用格** `passable?(d=0)` 后八事件在 bridgeLevel 0 与 2 均为 `over_trigger?=true`，归类 **here / walk-on**。这是计算出来的结果，不是“空图形 ⇒ 必然 walk-on”。 | SOURCE-PROVEN 条件 + STATIC-INFERRED 结果 |
-| Map 47 Route 7 | Ledge 正例 | Map047 SHA-256 `5f4ee232…df043e`，70×43，Tileset 1；30 unique Ledge 格（tile 1194/1198/1212）；静态合法两格跳样本已抽出。未知命令 404 已记录，未当空脚本。 | FSDB-OBSERVED + STATIC-INFERRED 路线 |
-| Map 27 Day Care | 排除 | 不是桥样本 | — |
+| 对象 | 已有记录（限指定 v21.1 corpus） | 证据等级与边界 |
+|---|---|---|
+| Map 7 Cedolan City | Map007 SHA-256 `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7`；11 events / 19 pages / 521 commands；tag 15 格=0、桥候选=0 | 原始素材抽取 + 更新后扫描；**仅证明当前工具覆盖的 Map 7 事件/图块/调用入口**，不证明全游戏任意 Ruby 方法调用均无桥行为。`provenNegativeBridge` 是此限定谓词，不是通用数学证明。 |
+| Map 21 Route 2 | Map021 SHA-256 `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575`；93 unique/93 placed Bridge 格；8 个直接 On/Off 事件（4、7、10、20、22、23、25、28），另 1、2 是邻接进化事件 | FSDB 抽取；八事件在 bridgeLevel 0、2 的 `over_trigger?` 均由移植规则静态计算为 true，预测 `here`；**不是原版运行观察**。 |
+| Map 47 Route 7 | Map047 SHA-256 `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e`；70×43、30 unique/placed Ledge 格；静态样本 `(16,9) → (16,11)` | FSDB 抽取 + 静态规则计算；没有原版跳跃帧、相机或跨图行为实测。未知事件命令码 404 已保留，不能因不认识就默默当作空脚本。 |
+| 全 corpus | 此次报告为 69 张 `Map*.rxdata`；Bridge 格及直接 Bridge 脚本扫描仅发现 Map 21 | 结论仅限所用 corpus、输入指纹、扫描入口和完整性规则；没有证明其他发行版或未追踪 Ruby 方法体。 |
 
-未运行原版 RGSS：无 `DYNAMIC-OBSERVED`。skip ≠ PASS。`CONTRACT_V1` 仍不存在。旧 18/18 仅为 `5e71c7e` 历史记录。
+原版规则引用固定 `Maruno17/pokemon-essentials` tag v21.1，commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`。`SOURCE-PROVEN` 只用于源码条件及分支；`FSDB-OBSERVED` 是带指纹的素材记录；`STATIC-INFERRED` 是本地规则移植/路径搜索结果；`DYNAMIC-OBSERVED` 仅用于原版游戏真实日志。**本轮无 DYNAMIC-OBSERVED。**
 
-## 2. REVIEW-01～04：本轮修复结果
+## 2. REVIEW-01～04：静态修复完成，不等于端到端验收
 
-### REVIEW-01：已给出八事件矩阵（子项证据齐备，非整项 Gate PASS）
+| ID | 已提交的实际修复及交叉证据 | 已通过的静态边界 / 仍未解决 |
+|---|---|---|
+| REVIEW-01 触发分类 | `vanilla-map-rules.mjs` 逐层计算 `Game_Map#playerPassable?`；Ruby `d=0` 方向 bit 为 0；`buildEventTriggerMatrix` 逐占用格判定 8 个事件在 bridgeLevel 0、2 的 `over_trigger?`；`EV-TRIGGER-*` | 计算值均 true，预测成功抵达后 `check_event_trigger_here`；空图形自身**不是**充分条件。`Event#start` 置位和解释器实际执行的帧对齐未实测。 |
+| REVIEW-02 假 COMPLETE | Map/Tileset Table shape、负 tile ID、异常 355/655、111/117 参数及解析错误进入失败或 `INCOMPLETE`；`EV-VALID-01～06` | 重新扫描记录 Map 7 为限定范围内 COMPLETE/无桥；未知代码及脚本方法体覆盖范围仍应随报告保留。 |
+| REVIEW-03 CE 间接调用 | `common-event-reachability.mjs` 从调用入口计算嵌套可达集合和路径；直接/多层/循环/缺目标及独立 autorun 入口测试 `EV-CALL-*` | 本 corpus Map 7/21 的 117 调用为零，未发现 CE 桥脚本；autorun/parallel、任意方法体 `eval/send` 不由地图事件可达性结论全部排除。 |
+| REVIEW-04 跨图坐标 | `map-connection-audit.mjs` 使用源/目标 mapId 分别取得地图与 Tileset，按 PBS 候选与物化 edge 核对；`EV-TRANSFER-*` | Map 21 的 3 条 PBS 连接对应现有 7 条 edge，`21,E,77,47` 为几何越界；67 个 D0-false Bridge 格仅是**潜在过滤风险**，没有已证实真实误删。 |
 
-源码（tag v21.1 / `ea7b5d56`）：
+独立脚本 `map-evidence-independent-check.mjs` 用 decoder 重新计算 Map 21 Bridge 格、8 个脚本 ID、Map 47 Ledge 格；**独立性只覆盖这些统计，不覆盖八事件触发分类、路径可行性或逐帧时序**。不应写成全部行为已经双实现验证。
 
-- `Game_Event#over_trigger?`：非空图形且 `!through` → false；hiddenitem → false；否则任一占用格 `map.passable?(i,j,0,$game_player)`。
-- `Game_Map#playerPassable?`：`bit = (1 << ((d/2)-1)) & 0x0f`。Ruby 1.8 负移位是右移，故 **d=0 时 bit=0**（忽略方向位，仍检查 `0x0f` 全阻与 priority）。取证器按该分支逐层移植，不用自制等价式。
-- `check_event_trigger_here` 要求 `over_trigger?`；`check_event_trigger_touch` **跳过** `over_trigger?` 事件。二者互斥。
-- `Game_Event#start` 仅当 `@list.size > 1` 置 `@starting`，不等于 interpreter `eval`。
+## 3. ROUTE-21：连续静态片段与真正跨图闭环必须分开
 
-静态计算结果（占用格为地面 tile 387 等，**不是** tag 15，故 bridgeLevel 0/2 结果相同）：
+`map21-bridge-routes.mjs` 从 Map 7→21 的合法落点样本选择 Map 21 `(19,76)`，对四组桥头 BFS 寻路；分别 `replayInputs` 计算两步 Off→On、On→Off 和部分带内/负例。§15.3 的南组报告 11 步到 `(14,70)`，中南组 20 步、中北组 73 步、北跨组 37 步。它们是**静态路径搜索记录**，不是 RGSS 输入日志。
 
-| eventId | 脚本 | 原点 | 占用 | over_trigger 0/2 | 分支 |
-|---:|---|---|---|---|---|
-| 4 | On | (20,49) size(1,4) | x=20,y=46–49 | true / true | here |
-| 28 | Off | (19,49) size(1,4) | x=19,y=46–49 | true / true | here |
-| 7 | Off | (14,31) size(3,1) | x=14–16,y=31 | true / true | here |
-| 10 | On | (14,32) size(3,1) | x=14–16,y=32 | true / true | here |
-| 20 | Off | (22,58) size(2,1) | x=22–23,y=58 | true / true | here |
-| 22 | On | (22,57) size(2,1) | x=22–23,y=57 | true / true | here |
-| 23 | Off | (14,69) size(2,1) | x=14–15,y=69 | true / true | here |
-| 25 | On | (14,68) size(2,1) | x=14–15,y=68 | true / true | here |
+**当前实现边界（不要表述为已验证的完整端到端路线）：** `fromMap7Landing.bfs` 与 `ontoBridge` 是分别生成的段；`ontoBridge` 以指定桥头 `bridgeLevel=0` 重新初始化，没有把 BFS 终态（方向、bridgeLevel、事件结果）直接传入并合并重放。`map-route-trace.mjs` 对动作的 `transfer` 返回 `null`，并没有在同一次模拟中实际执行 Map 7→21 的 edge/转图重置。因此 `bfs.found=true`、`ontoBridge.continuous=true` 和上桥最终 `bridgeLevel=2` **分别成立时，仍不能自动推出 Map 7→桥面的一条完整原版可重放轨迹**。旧 §14.6 只保留作历史关键点草图；§15.3 是改进后的静态片段，但不能升级为 `DYNAMIC-OBSERVED`。
 
-**纠正历史措辞：** “空图形 size() ⇒ 必然 walk-on”改为“空图形只取得 over_trigger 资格；本轮对八事件占用格算出 passable(d=0)=true，故归 here”。失败 bump **不会** start 这些事件（SOURCE-PROVEN：touch 跳过 over_trigger）。解释器是否在同一步内跑完仍为 STATIC-INFERRED。独立核对：`map-evidence-independent-check.mjs` 重算 93 格与八个脚本 ID，不比较 `collectMapEvidence` JSON 自身。
+关闭端到端子项需：选取真实 Map 7 起点 → 原始连接边 → Map 21 落点，检查两段交界状态完全一致；从落点连续 replay BFS+Off→On+桥面+On→Off+折返，逐步断言位置、方向、bridgeLevel、事件 start/execute、transfer 和下一次输入；验证每组是否真的接触 Bridge-tagged deck，而不仅仅踏上 On 事件带。随后用原版 RGSS 日志核对帧与执行顺序。若只能运行静态 tracer，诚实标 `STATIC-INFERRED`，不可改写为整项 PASS。
 
-**路线方向：** 上桥必须从 Off（陆地）外侧走向 On（桥面）。EV010 On 在 y=32、EV007 Off 在 y=31，陆地在北，应从 `(14,30)` 向南踏入，而不是从南侧穿过 On 再踩 Off（那会把 bridgeLevel 清回 0）。旧生成器对 mid-north 用了错误南侧入口，本轮已改正。
+## 4. Map 47：静态样本已取得，运动验收尚未开始
 
-### REVIEW-02：已 fail-closed（子项证据齐备）
+证据 §15.4 与 `map47-ledge-routes.mjs` 的静态结果包含方向、前方 Ledge、最终落点、逆向样本和候选阻挡/边界集合。现成样本 `(16,9)` 向下越过 `(16,10)` 至 `(16,11)` 是**起点合法性与最终落点的静态推断**。若某负例集合为空，应如实记录“本地图无该类实物样本”，改用标明来源的合成规则测试，不得虚构地图坐标。中途事件实物样本未找到；跨图跳跃、原版跳跃弧线/相机、每帧到达事件仍未验证。未知 404 须查原版命令语义或列出明确支持排除理由，不能因统计数量正确就假定完整事件行为可解释。
 
-负 tile ID ≠ 空 0；terrain_tags/passages/priorities 必须 1D 且 values.length=xSize；短 Table、缺 Tilesets、orphan 655、111 type 12 缺参数、117 非整数目标均不能 `provenNegativeBridge=true`。测试：`EV-VALID-01`～`06`。Map 7 重跑仍 COMPLETE + provenNegative。
+## 5. 测试、复现和许可证据
 
-### REVIEW-03：已按调用入口做可达闭包（子项证据齐备）
+此次 Agent 在 Windows 10 / Node v22.12.0、有本地 FSDB 的条件下记录：
 
-`computeCommonEventReachability` 从每个 Common Event 计算能否到达自身或嵌套 `pbBridgeOn/Off`。地图事件 117 必须命中**可达**集合才确认候选，并输出 `event → A → B → C` 链。覆盖：直接、两层/三层、环有桥、环无桥、缺目标、动态调用、共享 CE。Autorun/parallel Common Event 列为**单独入口**，不能声称已证明全游戏无间接调用。本 corpus 无 CE 含桥脚本，Map 7/21 候选数未因该修复改变。
+```text
+node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs
+# 报告：36 pass / 0 fail / 0 skip
+node tools/fixtures/essentials-v21.1/map7-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --corpus-scan --output ".local/map7-bridge-evidence.json"
+node tools/fixtures/essentials-v21.1/map21-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map21-bridge-evidence.json"
+node tools/fixtures/essentials-v21.1/map47-ledge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map47-ledge-evidence.json"
+node tools/fixtures/essentials-v21.1/map-evidence-independent-check.mjs 7 21 47
+```
 
-### REVIEW-04：源/目标 mapId 已分开（子项证据齐备）
+上述为**提交内记录**，不是本次远程文档审查独立重跑；没有查到该取证 HEAD 对应的 PR workflow，不能宣称 CI PASS。旧 18/18 属于先前提交，不是本次测试分母。原始 FSDB、完整 Map21/47 JSON 放在 gitignored `.local/`，不假定其可合法分发；既有 Map7 附录 A 包含原始事件命令，许可核对未完成，FG-05 保持 OPEN。只向仓库提交最小结构化事实、指纹、短摘录和可再生成方法；不要将本地 JSON 误称为可公开 CI fixture。
 
-每条连接带 `(sourceMapId,sourceX,sourceY)` 与 `(targetMapId,targetX,targetY)`。目标 D0 用**目标地图** Tileset。Map 21 PBS 三条：
+## 6. 下一步单次验收交接与停工条件
 
-| 原始连接 | 结果 |
-|---|---|
-| `21,E,0,23,W,1` | 期望边 3 条均在 MapTransfer/21.json；另有 D0 会丢的对照，**不是已证实误删** |
-| `21,S,0,7,N,21` | 期望边 4 条匹配；Map 7→21 落点 `(19–22,76)` 已列出 |
-| `21,E,77,47,W,0` | 232 次越界，0 条期望边；与 D0 过滤分开 |
+| 工作包 | 必须拿到的证据 | 完成条件 / 阻碍时状态 |
+|---|---|---|
+| `E2E-21` | 贯通真实连接和 BFS/桥带/桥面/离开/反向的**同一次完整状态 replay**，四组各一条逐步 trace，真实 deck 命中与 start/execute 次数 | 静态 replay 全断言、边界/事件负例测试；动态结果另外记等级，不把一个 `continuous` 布尔值当闭环证明。 |
+| `DYN-21/47` | 原版 RGSS 上桥/下桥/held input/转图、两格 jump/落点事件/帧日志，固定输入与素材 SHA | 无合法 RGSS 环境则 `BLOCKED` 且列具体缺口；**当前 FG-01 明确要求逐帧，未经正式修改及审查不得改成“动态可选”**。 |
+| `FIXTURE/CI` | 核清原始素材与 Map7 附录 A 许可，合法最小 golden fixture，CI 实际 run URL/SHA、pass/fail/skip | 无分发授权不复制原地图；没有 CI 能执行的真实正例则 FG-05 OPEN。 |
+| `CONTRACT/ABI` | C-01～08 exact schema、producer/consumer、事件时序与 state/motion/depth 矩阵、M14/M15 正式 ledger 审查 | 所有 FG 各自满足后才签核 `CONTRACT_V1`；不得倒推旧资格或先派 AG-01～04。 |
 
-禁止把 D0 潜在风险写成误删。合成对照见 `EV-TRANSFER-01/02`。
+**验收输出模板：** `item / source+SHA / map-event-page-command or tile xyz / rule+固定源码 / input+initial state / expected+actual / evidence grade / exact test command+exit+pass-fail-skip / CI run+SHA / unresolved owner / reviewer`。任何 `STATIC-INFERRED` 与 `DYNAMIC-OBSERVED` 必须分列；数据完整性、行为原版保真、合法可重放和资格是四种不同结论。
 
-## 3. 路线与 Map 47
-
-四组连续静态路线由 `map21-bridge-routes.mjs` 生成：从 Map 7 北缘 `(40–43,0)` 北走落入 Map 21 `(19–22,76)`，BFS 到各组**陆地侧**桥头，再逐格踏入 Off→On。全部标 **STATIC-INFERRED / 非 RGSS 实测**。南组脚本：EV025 On / EV023 Off。中北组从 `(14,30)` 南走进 Off 再 On，结束 `bridgeLevel=2`。
-
-Map 47：30 Ledge 格；合法方向样本包括 `(16,9)` 朝下跳过 `(16,10)` 落到 `(16,11)`。中间格有事件的现成样本未在本图找到，合成负例与真实路线分开。跨连接跳跃未证明。
-
-## 4. 门禁（仍全部 OPEN）
-
-子项证据齐备 ≠ Gate PASS。FG-01～06 仍 OPEN：无原版动态日志、无 `CONTRACT_V1`、无合法可分发完整地图 fixture、无玩法实现。状态继续 **NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。
+最终状态：**Map 7/21/47 的静态原始记录已形成，REVIEW-01～04 的静态修复已提交；完整跨图 replay、动态与 fixture/合同/签核仍开放。FG-01～06 全部 OPEN，NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**
