@@ -344,6 +344,22 @@ CommonEvents.rxdata 中 command 209：**0**。
 
 ## 4. 宝可梦地图素材及引用
 
+### 4.0 补核：是否漏搜了“按物种命名的行走图”
+
+第一轮用文件名关键词（`poke|pokemon|follower`）筛 Characters，**可能漏掉** `PIKACHU.png`、`BULBASAUR.png` 这类物种 ID 文件。2026-09-21 补核如下，结论仍然成立，但证据面已补全。
+
+官方 ZIP 全部 `Graphics/` 一级目录（含目录条目的计数）：
+
+`Pokemon` 4713，`Items` 450，`UI` 386，`Characters` 212（含目录本身；PNG 211），`Battlebacks` 202，`Windowskins` 107，`Animations` 98，`Trainers` 77，`Battle animations` 72，`Transitions` 67，`Autotiles` 41，`Weather` 24，`Tilesets` 23，以及 Titles/Icons/Pictures/Fogs/Gameovers/Panoramas。
+
+`Graphics/Pokemon/` 子目录只有：`Front`、`Front shiny`、`Back`、`Back shiny`、`Icons`、`Footprints`、`Eggs`、`Shadow`。没有 `Followers`、`Overworld`、`Walk`。ZIP 内全部 PNG 都在 `Graphics/` 下（其它位置 0 张）。`Plugins/` 无插件内容。
+
+`PBS/pokemon.txt` 共 **896** 个物种段（`[BULBASAUR]` …）。字段只有 Name/Types/BaseStats/…/Pokedex 等战斗与图鉴数据，**没有** Overworld / WalkSprite / charset 字段。`pokemon_metrics.txt` 只有 `BackSprite`、`FrontSprite`、`ShadowX`、`ShadowSize`（战斗立绘偏移）。
+
+将 211 张 `Graphics/Characters` 文件名（去 `.png`）与 896 个物种 ID 做精确匹配及宽松匹配（忽略大小写、允许 `_female` 一类后缀）：**0 条命中**。不存在 `PIKACHU`、`MEW`、`DEOXYS` 这类按物种命名的 Characters 图。
+
+因此：官方 v21.1 **有** 宝可梦地图行走图，但只有下面 12 张编号 charset，不是一整套图鉴行走图。
+
 ### 4.1 `Graphics/Pokemon` 不是行走图
 
 对照源码 `Data/Scripts/010_Data/002_PBS data/009_Species_files.rb`（commit `ea7b5d56`）：
@@ -382,7 +398,9 @@ CommonEvents.rxdata 中 command 209：**0**。
 - `Pokemon 11`：192×192，16 格满，单帧 48×48
 - `Pokemon 12`（Deoxys，有地图引用）：64×64 帧，大于一格
 
-跟随宝可梦：对照源码有 `Game_Follower` / `Followers.add`，跟随者使用 **事件自己的 `character_name`**（Characters），**不是** `Graphics/Pokemon/Front`。本套地图事件 **没有** 把 `Pokemon 0N` 注册为 follower 的静态证据。官方包 **未发现** 可验证的跟随专用素材目录。
+这 12 张才是官方包里的**地图行走图**（Characters 4×4 charset），与 Front/Back 战斗立绘不是同一套文件。它们不绑定 PBS 物种 ID：事件写死文件名 `Pokemon 09`，而不是 `MEW`。
+
+跟随宝可梦：对照源码有 `Game_Follower` / `Followers.add`，跟随者使用 **事件自己的 `character_name`**（Characters），**不是** `Graphics/Pokemon/Front`。本套地图事件 **没有** 把 `Pokemon 0N` 注册为 follower 的静态证据。官方包 **没有** `Graphics/Pokemon/Followers` 这类按物种分文件的跟随/行走图包。社区常见的 Following Pokémon 素材包不在本 ZIP 内，不得并入 v21.1 结论。
 
 ---
 
@@ -508,7 +526,9 @@ CommonEvents.rxdata 中 command 209：**0**。
 列出本地 FSDB Graphics 与解码 69 张地图
 → Characters 211；尺寸直方图见 §5；move_type 687×0 + 1×3
 → command 209 = 416，位移目标仅玩家
-→ Pokemon 目录无 Followers；事件仅引用 Pokemon 09 与 12
+→ Pokemon 子目录仅 Front/Back/Icons/Footprints/Eggs/Shadow
+→ Characters 211 名与 896 物种 ID 交叉匹配为 0；行走图仅 Pokemon 01–12
+→ 事件仅引用 Pokemon 09 与 12
 ```
 
 临时脚本与 JSON **未提交**。
