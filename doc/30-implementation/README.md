@@ -6,12 +6,13 @@
 
 ## 根目录历史文档已清理
 
-2026-09-21 根目录 46 份 `M7_` 至 `M15_` 里程碑文件已全部迁移或删除，**不再保留根目录占位文件**：
+2026-09-21，**仓库根目录 Markdown 只保留 `README.md`**，不再保留过程报告或其占位文件：
 
-- 35 份 M7–M13 已完成过程报告从工作树删除。需要原始全文时，使用 [删除前固定提交](https://github.com/lithdoo/loom-realm/tree/2d465b8c8501566b26375dae55e1a78007606c40)和相关文档中的精确 Git 历史链接；不以旧报告冒充当前资格。
-- 10 份 M14/M15 尚涉及当期资格的底稿移至[资格底稿目录](./milestone-evidence/README.md)。它们不是第二份路线图或正式契约，精确结论只由对应 ledger 持有。
-- 当前 [Hostra 物理组合规范](../20-modules/desktop-host/hostra-composition.md)移入 Desktop 模块并迁移仓库内 Markdown 引用。正式合同、ADR、资格 ledger、fixture 和生产代码未删除。
+- 原根目录 46 份 M7–M15 里程碑文件均已迁出：35 份 M7–M13 已完成过程报告从当前工作树删除，原文通过[删除前固定 Git 提交](https://github.com/lithdoo/loom-realm/tree/2d465b8c8501566b26375dae55e1a78007606c40)及各处固定 permalink 查阅，不用旧报告冒充现行资格。
+- 10 份仍涉及 M14/M15 资格的工作底稿移至[资格底稿目录](./milestone-evidence/README.md)，不是第二份路线图、正式协议或资格结论；具体状态仅由 ledger 持有。
+- 当前 [Hostra 物理组合规范](../20-modules/desktop-host/hostra-composition.md)移入 Desktop 模块。
+- 原根目录 `RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md` 移至[运动延迟性能实施规格](./render-movement-latency-spec.md)，继续保留仍有效的约束，**未完成的 P95 测量和资格事项在路线图中登记**，历史数值不冒充当前测试结果。
 
-其他已完成且经 648 个受跟踪文本文件引用审计确认无文件名入链的三份过程报告，已由 [PR #45](https://github.com/lithdoo/loom-realm/pull/45) 删除；旧[第一阶段计划](./phase-1-delivery-plan.md)仅保留兼容入口。
+上述迁移同步修正 Markdown 引用；不删除正式合同、ADR、有效资格 ledger、fixture 或生产代码。另有三份经 648 个受跟踪文本文件引用审计、确认无文件名入链的已完成报告，已由 [PR #45](https://github.com/lithdoo/loom-realm/pull/45) 删除。旧[第一阶段计划](./phase-1-delivery-plan.md)仅保留外部链接兼容入口。
 
-PWA M16/M17、当前重新资格和原版 RGSS 地形保真统一在[路线图](./roadmap.md)登记下一步，不从历史过程文档派发工作。
+PWA M16/M17、当期重新资格、性能验证和原版 RGSS 地形保真统一在[路线图](./roadmap.md)登记，不从历史过程文档派发工作。
