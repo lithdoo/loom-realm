@@ -1,71 +1,19 @@
-# FSDB Content Service 模块设计 — Superseded
+# Content 与 FSDB（当前实现）
 
-> 层级：模块设计 / 历史 provenance  
-> 状态：**Superseded**  
-> 最近复核：2026-09-08  
-> 被取代：[M12 / 01 — Desktop Content Service](https://github.com/lithdoo/loom-realm/blob/main/M12_01_CONTENT_SERVICE.md) → [M12 / 05 — Qualification and Closure](https://github.com/lithdoo/loom-realm/blob/main/M12_05_QUALIFICATION_CLOSURE.md)
-> 正式契约：[Content API v1](../../15-contracts/content-api-v1.md)  
-> 决策：[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)
+> 当前：M12 已实现；旧 Installation Registry / Repository / StorageAdapter 提案已被 ADR 0030 取代。本页只记录当前模块归属，不恢复旧设计。
 
-本文保留 2026-08 阶段的设计演进背景，**不再是 Current implementable model**。
-
-旧稿曾预设：
+## 结构
 
 ```text
-Installation Registry
-fsdb.index.json / Package Index Loader
-ReadonlyContentStorage / Storage Adapter
-通用 Repository/cache 层
-单段 Resource key
-Renderer Blob/ImageBitmap/Audio/GPU resource cache
+Hostra PREPARE → immutable prepared installation
+→ @loomrealm/fsdb（Node-only 只读 FSDB core）
+→ apps/desktop Content Service（授权、Content HTTP）
+→ @loomrealm/subsystem ContentClient（游戏作者端）
+→ @loomrealm/renderer/resource-client（受信任的渲染集成端）
 ```
 
-M12 preimplementation closure 已证明这些不是当前 slice 的必要抽象，因此不再要求实现。
+`@loomrealm/fsdb-http` 是独立 FSDB HTTP 投影，不是第二套文件扫描器或通用应用 Content authority。资源按逻辑 identity、版本与能力取用：Content capability 不等于 executable resolver，URL 不等于真实文件路径。失败通过[Content API v1](../../15-contracts/content-api-v1.md)规定的错误表达，不自动结束 Runtime/Frame。
 
-Current Desktop M12 model唯一以以下链路为准：
+**源码：** `packages/fsdb/`、`packages/fsdb-http/`、`packages/subsystem/`、`packages/renderer/`、`apps/desktop/`。**验证：** `npm run test:m12`、`test:fixtures`、当前 CI。确切 schema/错误/资源生命周期以[Content API v1](../../15-contracts/content-api-v1.md)与[存储系统](../../10-architecture/storage-system.md)为准；历史决策见[ADR 0030](../../decisions/0030-freeze-m12-content-preimplementation-closure.md)。
 
-```text
-Hostra PREPARE
-→ current immutable prepared installation view
-→ @loomrealm/fsdb readonly logical core
-→ private immutable Content Index + normalized public manifest
-→ apps/desktop localhost Content Service
-→ Subsystem ContentClient / trusted Renderer integration-subpath ResourceClient
-```
-
-固定：
-
-```text
-Content capability != executable resolver
-URL logical identity != filesystem path
-record/group key = single logical segment
-resource key = hierarchical logical ResourceKey
-contentVersion = sha256:<64 lowercase hex>
-Desktop bearer = Host-private scoped material
-ordinary read failure != Runtime/Frame failure
-```
-
-Package ownership：
-
-```text
-@loomrealm/fsdb
-    readonly Node FSDB domain core
-
-@loomrealm/fsdb-http
-    standalone FSDB HTTP projection
-
-apps/desktop
-    LoomRealm Desktop Content Service/composition
-
-@loomrealm/subsystem
-    author-facing ContentClient
-
-@loomrealm/renderer
-    trusted integration-subpath ResourceClient
-```
-
-当前 **不存在** `@loomrealm/content-service`、generic Repository、StorageProvider、InstallationManager 或 AssetManager requirement。
-
-PWA 的 Service Worker/OPFS/Cache physical realization属于 M16；它遵守相同 logical Content API，但不复用 Node-only `@loomrealm/fsdb` storage mechanics。
-
-任何实施者不得从本文旧章节恢复已 supersede 的 registry/repository/storage-adapter 模型。需要实现细节时，只读取 M12_01–05、Content API v1、storage-system 和 ADR 0030。
+PWA Content 属后续 M17 physical realization，不能把 Node-only FSDB 机械复制为通用框架。交付与资格状态见[路线图](../../30-implementation/roadmap.md)。
