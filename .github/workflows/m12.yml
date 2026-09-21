@@ -1,7 +1,8 @@
 name: M12 Content qualification
 
+# PR runs are deduplicated in m12-m15-pr.yml; retain this exact canonical
+# closure on main and manual qualification runs.
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
