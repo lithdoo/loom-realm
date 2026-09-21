@@ -4,10 +4,15 @@
 
 持续有效的资料：[测试策略](./testing-strategy.md)、[分包边界](./package-architecture.md)、[仓库布局](./repository-layout.md)。M11/M14/M15/Viewport 的证据仍分别由 [M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md)和[Viewport](./viewport-profile-v1-qualification.md)资格记录拥有；旧 subject 的 PASS 不自动迁移到现在的 `main`。
 
-## 历史内容处理
+## 根目录历史文档已清理
 
-已完成且经 GitHub Actions 对 648 个受跟踪文本文件进行文件名引用审计、无其他文件按文件名引用的三份过程报告已经从工作树删除：旧 M5 实施审查、Viewport Cursor/GLM 集成执行计划及执行报告。完整内容在 [`main@78ba399`](https://github.com/lithdoo/loom-realm/tree/78ba3999f9064fbbfcf90e55c3b027d4fe25a397/doc/30-implementation)和 Git 历史中。
+2026-09-21，**仓库根目录 Markdown 只保留 `README.md`**，不再保留过程报告或其占位文件：
 
-仍被 ADR、模块设计、测试、qualification ledger 引用的历史报告保留**短归档入口**，避免删除后制造死链；当前 M14/M15 物理规范、正式契约、不可替代签核材料和 fixture 均不得因文件名中有 `plan`、`review` 或 `closure` 而误删。旧[第一阶段计划](./phase-1-delivery-plan.md)也是指向当前路线图的兼容入口。根目录互相引用的 `M##_...` 文件在安全迁移引用与保全仍有效约束前暂不整批删除。
+- 原根目录 46 份 M7–M15 里程碑文件均已迁出：35 份 M7–M13 已完成过程报告从当前工作树删除，原文通过[删除前固定 Git 提交](https://github.com/lithdoo/loom-realm/tree/2d465b8c8501566b26375dae55e1a78007606c40)及各处固定 permalink 查阅，不用旧报告冒充现行资格。
+- 10 份仍涉及 M14/M15 资格的工作底稿移至[资格底稿目录](./milestone-evidence/README.md)，不是第二份路线图、正式协议或资格结论；具体状态仅由 ledger 持有。
+- 当前 [Hostra 物理组合规范](../20-modules/desktop-host/hostra-composition.md)移入 Desktop 模块。
+- 原根目录 `RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md` 移至[运动延迟性能实施规格](./render-movement-latency-spec.md)，继续保留仍有效的约束，**未完成的 P95 测量和资格事项在路线图中登记**，历史数值不冒充当前测试结果。
 
-PWA M16/M17、当期重新资格和原版 RGSS 地形保真仅在[路线图](./roadmap.md)登记下一步；历史实施文档不再向开发者派发新工作。
+上述迁移同步修正 Markdown 引用；不删除正式合同、ADR、有效资格 ledger、fixture 或生产代码。另有三份经 648 个受跟踪文本文件引用审计、确认无文件名入链的已完成报告，已由 [PR #45](https://github.com/lithdoo/loom-realm/pull/45) 删除。旧[第一阶段计划](./phase-1-delivery-plan.md)仅保留外部链接兼容入口。
+
+PWA M16/M17、当期重新资格、性能验证和原版 RGSS 地形保真统一在[路线图](./roadmap.md)登记，不从历史过程文档派发工作。

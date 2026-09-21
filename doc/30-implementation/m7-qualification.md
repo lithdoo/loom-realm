@@ -2,7 +2,7 @@
 
 > Status: **Closed**
 > Date: 2026-09-03
-> Evidence source: [`M7_05_QUALIFICATION_CLOSURE.md`](https://github.com/lithdoo/loom-realm/blob/main/M7_05_QUALIFICATION_CLOSURE.md)
+> Evidence source: [`M7_05_QUALIFICATION_CLOSURE.md`](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M7_05_QUALIFICATION_CLOSURE.md)
 
 Baseline implementation: [`016721b`](https://github.com/lithdoo/loom-realm/commit/016721bfed31f7d64b902619ebf533fd6b03a382). Clean-run CI qualification: [`72e435d`](https://github.com/lithdoo/loom-realm/commit/72e435d38498afc8370249c44daa925145d89594).
 

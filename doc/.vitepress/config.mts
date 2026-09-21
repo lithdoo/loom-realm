@@ -17,7 +17,7 @@ export default defineConfig({
       md.renderer.rules.link_open = (tokens, index, options, env, self) => {
         const token = tokens[index]
         const href = token.attrGet('href')
-        if (href && /^(?:\.\.\/)+(?:examples|packages|\.github)\//.test(href)) {
+        if (href && /^(?:\.\.\/)+(?:examples|packages|apps|game-libs|tools|scripts|\.github)\//.test(href)) {
           const repoPath = href.replace(/^(?:\.\.\/)+/, '')
           token.attrSet('href', `https://github.com/lithdoo/loom-realm/blob/main/${repoPath}`)
         }

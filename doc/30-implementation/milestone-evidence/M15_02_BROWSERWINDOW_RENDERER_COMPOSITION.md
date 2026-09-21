@@ -1,12 +1,14 @@
+> 历史里程碑工作底稿；当前实现、正式契约和准确资格状态分别以模块目录、契约及资格 ledger 为准。本文原始路径已从仓库根目录移除。
+
 # M15 / 02 — BrowserWindow Renderer Composition
 
 > 状态：**Logical Renderer constraints retained / direct-Electron handoff superseded**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：02  
 > 最近复核：2026-09-11  
-> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
-> 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md)  
-> 依赖：[M13 Web Presentation](M13_05_QUALIFICATION_CLOSURE.md)、[M12 Renderer Resource Client](M12_03_RENDERER_RESOURCE_CLIENT.md)
+> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../20-modules/desktop-host/hostra-composition.md)
+> 前置：[M15 / 01](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md)
+> 依赖：[M13 Web Presentation](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M13_05_QUALIFICATION_CLOSURE.md)、[M12 Renderer Resource Client](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M12_03_RENDERER_RESOURCE_CLIENT.md)
 
 > **Supersession notice:** 本文继续拥有 Renderer/M13 integration、Control/Data/Content capability separation、trusted primitive capture 与 reload currentness intent；原 `MessageChannelMain`、LoomRealm preload、`webContents.postMessage`、direct BrowserWindow ownership/security configuration 已被 recomposition plan supersede。
 

@@ -1,11 +1,13 @@
+> 历史里程碑工作底稿；当前实现、正式契约和准确资格状态分别以模块目录、契约及资格 ledger 为准。本文原始路径已从仓库根目录移除。
+
 # M15 / 01 — Desktop Product Composition
 
 > 状态：**Logical intent retained / direct-Electron physical realization superseded**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：01  
 > 最近复核：2026-09-11  
-> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
-> 依赖：[Desktop Host design](doc/20-modules/desktop-host/README.md)、[Platform Composition](doc/10-architecture/platform-composition-system.md)、[M14 / 05](M14_05_QUALIFICATION_CLOSURE.md)
+> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../20-modules/desktop-host/hostra-composition.md)
+> 依赖：[Desktop Host design](../../20-modules/desktop-host/README.md)、[Platform Composition](../../10-architecture/platform-composition-system.md)、[M14 / 05](./M14_05_QUALIFICATION_CLOSURE.md)
 
 > **Supersession notice:** 本文关于 Main/Broker/Content ownership、Hostra-ready installation、无 shadow authority 的约束继续有效；关于 LoomRealm 自己拥有 Electron app、BrowserWindow、Electron-main Runner/run-as-node product topology 的 physical realization 已被 `M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md` supersede，不再作为实施要求。
 

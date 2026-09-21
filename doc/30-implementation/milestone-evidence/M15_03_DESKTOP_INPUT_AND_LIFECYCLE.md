@@ -1,13 +1,15 @@
+> 历史里程碑工作底稿；当前实现、正式契约和准确资格状态分别以模块目录、契约及资格 ledger 为准。本文原始路径已从仓库根目录移除。
+
 # M15 / 03 — Desktop Physical Input and Lifecycle
 
 > 状态：**Input semantics retained / lifecycle implemented and Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：03  
 > 最近复核：2026-09-11  
-> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
-> 当前决策：[ADR 0034](doc/decisions/0034-hostra-owned-desktop-composition.md)  
-> 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md)  
-> 依赖：[M10 User Input](M10_05_QUALIFICATION_CLOSURE.md)、[M13 Web Presentation](M13_05_QUALIFICATION_CLOSURE.md)
+> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../20-modules/desktop-host/hostra-composition.md)
+> 当前决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)
+> 前置：[M15 / 01](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](./M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md)
+> 依赖：[M10 User Input](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M10_05_QUALIFICATION_CLOSURE.md)、[M13 Web Presentation](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M13_05_QUALIFICATION_CLOSURE.md)
 
 > **Supersession notice:** Keyboard/Pointer/Gamepad canonical mapping、reload logical semantics、same-generation reconnect 与 single-cancellation ownership继续有效；原 LoomRealm-owned BrowserWindow/Electron exit mechanics 已被 ADR 0034 supersede。
 

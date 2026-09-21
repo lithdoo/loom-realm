@@ -42,7 +42,7 @@ export function mapTilePassable(map, tileset, x, y, direction): boolean {
 
 `canMove` 要求出发格方向 + 目标格反向同时可过。Runtime `attempt()` 在 `canMove` 失败时直接 `publishBlocked`，没有跳、没有桥状态。
 
-这与 [M14 Map Game Library](../../M14_02_MAP_GAME_LIBRARY.md) §9 一致：M14 first-slice **排除 terrain effects**。Importer 虽然认识 `RPG::Tileset.@terrain_tags`，M14 consumer 投影把它丢掉了。当前 Tileset 只有：
+这与 [M14 Map Game Library](../../doc/30-implementation/milestone-evidence/M14_02_MAP_GAME_LIBRARY.md) §9 一致：M14 first-slice **排除 terrain effects**。Importer 虽然认识 `RPG::Tileset.@terrain_tags`，M14 consumer 投影把它丢掉了。当前 Tileset 只有：
 
 ```text
 id, tileset_name, autotile_names, passages, priorities

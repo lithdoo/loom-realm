@@ -3,8 +3,8 @@
 > 状态：Accepted  
 > 日期：2026-09-15  
 > 影响范围：M11 Subsystem author surface、Render publication、Renderer private Patch realization、M14/M15 requalification  
-> 依赖：[ADR 0004](./0004-client-state-rendering-pipeline.md)、[ADR 0022](./0022-render-update-v1-freeze-closure.md)、[ADR 0032](./0032-game-library-example-boundary.md)  
-> 实施规范：[Render 移动延迟与核心链路改造设计](https://github.com/lithdoo/loom-realm/blob/main/RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md)
+> 依赖：[ADR 0004](./0004-client-state-rendering-pipeline.md)、[ADR 0022](./0022-render-update-v1-freeze-closure.md)、[ADR 0032](./0032-game-library-example-boundary.md)
+> 实施规范：[Render 移动延迟与核心链路改造设计](https://github.com/lithdoo/loom-realm/blob/main/doc/30-implementation/render-movement-latency-spec.md)
 
 ## Context
 

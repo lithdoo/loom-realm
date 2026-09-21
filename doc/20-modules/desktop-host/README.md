@@ -29,6 +29,8 @@ Hostra shell 负责 Electron 与 BrowserWindow；`apps/desktop` 不能重新创�
 
 ## 不复制的规范与验证
 
-精确生命周期、失败清理及固定外部 Hostra baseline 由[M15 资格记录](../../30-implementation/m15-qualification.md)、[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md) 和 [Desktop 物理设计源](https://github.com/lithdoo/loom-realm/blob/main/M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)拥有；逻辑 API 仍以[契约索引](../../15-contracts/README.md)为准。
+精确生命周期、失败清理及固定外部 Hostra baseline 由[M15 资格记录](../../30-implementation/m15-qualification.md)、[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md) 和 [Desktop 物理设计源](https://github.com/lithdoo/loom-realm/blob/main/doc/20-modules/desktop-host/hostra-composition.md)拥有；逻辑 API 仍以[契约索引](../../15-contracts/README.md)为准。
 
 验证覆盖 `npm run test:m15`、真正 Hostra/BrowserWindow E2E、reload/reconnect/失败清理，以及同一版本的 M14 游戏。旧 direct-Electron 测试仅作历史回归参考；不能继承其 PASS。当前可验收与待办只在[路线图](../../30-implementation/roadmap.md)追踪。
+
+实现细节：[Hostra 物理组合细节](./hostra-composition.md)。

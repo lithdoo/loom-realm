@@ -20,7 +20,7 @@
 与既有文档关系：
 
 - 覆盖 `M14_02_MAP_GAME_LIBRARY.md` §11 的固定 `640×480` viewport、§14 的旧 `MapViewRenderData` 形状，以及 §15 的每次 paint 全画布重画规则；
-- 继承 `RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md` 已落地的 `RenderDomain.update()` / Render patch / latest-state / copy-on-write / `zIndex` 语义；本设计新增 Viewport capability，但**不**借此修改 Render Update v1；
+- 继承 `../../doc/30-implementation/render-movement-latency-spec.md` 已落地的 `RenderDomain.update()` / Render patch / latest-state / copy-on-write / `zIndex` 语义；本设计新增 Viewport capability，但**不**借此修改 Render Update v1；
 - `MAP_MOVEMENT_LATENCY_REFACTOR_DRAFT.md` 中 input latency、movement cadence、turn buffer、collision、transfer trigger 等规则继续独立生效；其中 Browser static backing、camera-only frame、autotile repaint 与 sprite raster/placement 等呈现性能条款由本文统一替代；
 - 复用 `MAP_AUTOTILE_ANIMATION_DESIGN_DRAFT.md` 的“一次异步 prepare + 同步 paint”方向，但以本文 dirty-cell raster 规则替代动画帧变化时重画整层；
 - 保持 `MAP_LAYERING_DESIGN_DRAFT.md` 已冻结的 tile/player depth 与 equal-depth 规则；
