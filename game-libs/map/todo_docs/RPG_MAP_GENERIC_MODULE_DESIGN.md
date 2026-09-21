@@ -1,7 +1,7 @@
 # RPGMap 通用化设计讨论与待办
 
 > 状态：设计讨论记录 / TODO，**非冻结的完整协议、非已实现功能**  
-> 记录日期：2026-09-21；角色素材方向更新：2026-09-21  
+> 记录日期：2026-09-21；角色素材及内置地图行为方向更新：2026-09-21  
 > 基线：`main` @ `2d465b8c8501566b26375dae55e1a78007606c40`（创建本分支时）  
 > 范围：`game-libs/map`；本文记录方向、已确认边界、可行性依据及后续验证事项，不预先冻结 API 签名和 FSDB Schema。
 
@@ -32,23 +32,49 @@
 
 ## 3. FSDB 策略：地图沿用现有投影，NPC 数据自主定义
 
-**不从零设计整套地图格式。** 地图、Tileset、Transfer、狭义 MapAction 优先沿用并整理现有 Essentials v21.1 解析产物；先审计已被 Map 消费的字段，精简和补齐后形成版本化的 RPGMap 内容协议。不要把 RGSS 原始对象结构原封不动地变成通用协议，也不要为了抽象而强制重写所有数字 ID。
+**不从零设计整套地图格式。** 地图、Tileset、Transfer 优先沿用并整理现有 Essentials v21.1 解析产物；先审计已被 Map 消费的字段，精简和补齐后形成版本化的 RPGMap 内容协议。不要把 RGSS 原始对象结构原封不动地变成通用协议，也不要为了抽象而强制重写所有数字 ID。
 
-**NPC 是单独的设计决定：** NPC 的 FSDB 身份、定义与实例结构由本项目按业务需求自主设计，**不以 Essentials 的 Event/Page 结构为 NPC Schema**。Essentials 在 NPC 方向仅作为可合法使用的素材来源和格式验证样本；不要求兼容它的全部素材或事件行为。地图物品和建筑也不因原版事件结构而被强制纳入 NPC 定义。
+**地图行为是单独的设计决定：** 新版 RPGMap 正式内容协议**不要求也不设独立 `[struct]MapAction` 表**。桥梁、悬崖等属于 Map 模块内置行为；业务侧仅提供受支持的 `kind` 声明以及位置、触发条件等必需参数，不能向 Runtime 注入 Ruby、脚本或自定义执行代码。能从地图图块与 Tileset 地形标签推导的行为不必重复声明；不能仅靠地形推导的局部行为声明放在对应 `Map` 记录中。当前 `MapAction` 仍是旧实现和旧 FSDB 的事实，移除它需要显式迁移，见下文。
 
-目前已存在的关系：
+**NPC 是另一项独立设计决定：** NPC 的 FSDB 身份、定义与实例结构由本项目按业务需求自主设计，**不以 Essentials 的 Event/Page 结构为 NPC Schema**。Essentials 在 NPC 方向仅作为可合法使用的素材来源和格式验证样本；不要求兼容它的全部素材或事件行为。地图物品和建筑也不因原版事件结构而被强制纳入 NPC 定义。
+
+当前实现与旧投影的关系（**现状，不是新协议目标**）：
 
 ```text
 Map ID → struct.Map/{id} → tileset_id → struct.Tileset/{id}
                                └→ 图块、自动图块的逻辑资源引用
 Map ID → struct.MapTransfer/{id} → 目标 Map ID / 目标坐标
-Map ID → struct.MapAction/{id}   → 当前受支持的狭义事件（Bridge 等）
+Map ID → struct.MapAction/{id}   → 旧实现的桥梁动作及 opaque 防护
 图像资源 → resource.Graphics/...（Characters、Tilesets 等）
 ```
 
-当前 `Map` 保留三层 Tile Table；`Tileset` 包括贴图名、autotile、passages、priorities、terrain_tags。`terrain_tags` 与 Bridge/Ledge 等能力相关，不可仅以“原引擎字段”理由删除。`MapAction` 中的 opaque-related 标记有防止误执行未知脚本的校验作用，删除前必须明确替代失败策略。
+目标内容组织（**尚未实现；NPC 表名与结构待讨论**）：
+
+```text
+Map ID → struct.Map/{id} → tileset_id → struct.Tileset/{id}
+                            └→ 可选的内置行为声明（例如桥梁入口／出口）
+Map ID → struct.MapTransfer/{id} → 目标 Map ID / 目标坐标
+图像资源 → resource.Graphics/...（Characters、Tilesets 等）
+自定义 NPC 定义及地图实例 → 待确定的结构化记录
+```
+
+当前 `Map` 保留三层 Tile Table；`Tileset` 包括贴图名、autotile、passages、priorities、terrain_tags。`terrain_tags` 与 Bridge/Ledge 等能力相关，不可仅以“原引擎字段”理由删除。现有 `MapAction.opaqueRelated` 是防止误执行无法识别脚本的失败保护；**取消表不意味着可以取消这项安全约束**，新数据及迁移过程都必须有相应的拒绝策略。
 
 证据入口：[`semantics.ts`](../src/semantics.ts)、[`runtime.ts`](../src/runtime.ts)、[Essentials 实体数据调查](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[Player/NPC 素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。合成示例见 [`generate-fixtures.mjs`](../../../examples/essentials-v21.1/scripts/generate-fixtures.mjs)，不能将其当成原版素材证据。
+
+### 地图内置行为：声明与执行分离（已确认方向）
+
+- **内置行为集合**：由 `game-libs/map` 实现、测试并版本化；业务方只能选择支持的 `kind` 并填写与该行为相关的必要参数。未知 `kind`、缺失参数、非法位置或不支持的触发语义必须报错，不得忽略或执行脚本。
+- **Ledge／悬崖**：当前通行、跳跃与视觉规则可由 `Map.data` 中图块和 `Tileset.terrain_tags` 推导。第一版不为同一地形额外复制一组悬崖动作记录；Map 模块负责方向检查、落点、跳跃状态与动画。
+- **Bridge／桥梁**：桥梁图块仍依赖 `terrain_tags`，但仅凭图块标签不能还原当前入口 `bridge-on`、出口 `bridge-off` 的位置与触发条件。新版在对应 `Map` 内声明桥梁入口／出口的 `kind`、位置／占格及必要触发参数；Runtime 内部维护 `bridgeLevel` 等状态，执行业务逻辑、通行和层级投影。业务数据不必写内部状态数值或 Ruby 调用。
+- **示意而非 Schema**：`Map.behaviors: [{ kind: "bridge", operation: "on", occupied: [{ x: 10, y: 5 }] }, ...]` 仅展示行为位于 Map 内；字段名、触发时机、重复触发规则、位置表达及版本号都尚未冻结。尤其不能假定所有桥梁都只需踩格触发：当前还区分角色脚下触发、向前碰撞、`through`、`emptyGraphic` 与通行状态，应先审计并用清晰的内置触发规则替代原版事件字段。
+- **职责边界**：传送仍由 `MapTransfer` 表负责；NPC／对话／物品／建筑不因本决定变为内置地形行为。只有确认目标游戏需要且 Map 模块实际支持的新行为才进入内置集合，不为任意玩法建立脚本引擎。
+
+**当前实现与迁移要求：** `runtime.ts#loadMap` 仍读取 `struct.MapAction/{mapId}`，缺失时才使用空记录；`validateMapRecord` 仍严格要求 `tileset_id,width,height,data` 四个顶层字段。所以上述 `Map.behaviors` 当前不能直接写进现有 FSDB 并指望运行。后续实施必须同步更新 Map schema/version、数据校验、导入／迁移、运行时加载与测试；明确旧、新协议的读取边界，不能静默接受新旧字段混用。
+
+- 将旧 `MapAction.actions` 中**已确认**的桥梁入口／出口转换为 Map 内置行为声明，并验证数量、触发位置、操作和关键运行结果；具体迁移以真实 Essentials 数据及 Map 21 桥梁样本复核，不预先假设无损转换。
+- 对旧 `opaqueRelated`、无法确认的脚本或缺少语义映射的动作，**在导入／迁移阶段失败并输出可定位的诊断**；不得删除记录后默认为空行为，也不得回退执行原始 Ruby。
+- 迁移后回归 Bridge／Ledge 的通行、状态恢复、图层遮挡、跨图重置、触发时机与失败路径；在这些验证通过前，不能声称已经移除旧 `MapAction` 实现或已完全保留 Essentials 行为。
 
 ### 尚未形成完整契约的部分
 
@@ -102,17 +128,18 @@ Player 和自定义 NPC **只支持同一种角色行走图集格式**。不为�
 ## 6. TODO 与验证顺序
 
 - [x] **事实调查（设计输入，不代表实现完成）**：已完成 Essentials 实体数据及 Player/NPC 素材与运动调查，证据与局限分别见 [`ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md`](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[`PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md`](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。
-- [ ] **数据消费与清理审计**：基于已有调查最终逐字段确认 Map/Tileset/Transfer/MapAction 保留、待确认、可删除项目，特别保留 terrain、Bridge/Ledge 以及 opaque 失败策略。
+- [ ] **数据消费与清理审计**：逐字段核对 Map/Tileset/Transfer 的正式保留字段，以及旧 MapAction 的行为迁移输入；保留 terrain、Bridge/Ledge 语义及 opaque 失败保护，不把旧 MapAction 变成新协议必需目录。
+- [ ] **内置地图行为协议**：明确可用 `kind`、来自地形的隐式行为与 Map 内显式行为、参数和触发规则；修改 Map schema/version 与校验；验证未知 kind、非法位置、缺失参数的失败行为。
 - [ ] **角色素材约定与多实例验证**：按上述唯一 4×4 语义、解码尺寸除以 4、脚对齐和 1×1 默认占格验证；保留 128×128 合成 Demo 与 128×192 真实 Player 的兼容；选标准 NPC 素材验证独立节点位置、运动、遮挡。不为了少量特殊 PNG 扩展格式。
 - [ ] **NPC FSDB 最小协议**：自主确定定义与地图实例身份及素材引用，仅要求遵守统一角色图集约定；不继承 Essentials Event/Page Schema，不要求自动导入全量事件。
-- [ ] **FSDB 地图最小协议**：在现有 Map/Tileset/Transfer/Action 基线上确定身份、版本、引用与资源定位规则；明确哪些是必须数据，哪些属于特定玩法扩展。
+- [ ] **FSDB 地图最小协议**：以 Map（含可选内置行为）、Tileset、Transfer、Graphics 为基础确定身份、版本、引用及资源定位；新游戏无需准备独立 MapAction 表。
 - [ ] **Builder/Handler 契约**：只覆盖 Subsystem 内部的实例装配、命令、快照、事件、生命周期与失败语义；检查与现有 Definition API 的接合。
-- [ ] **实现与兼容迁移**：保住既有 Essentials 地图行为，逐步抽离数据来源硬编码；不无声更改旧数据协议。
-- [ ] **独立消费者验证**：另一套原创 FSDB 无需改 Map 库源码即可装配地图、加载资源、通过 ID 使用自主定义 NPC，控制玩家切图并收到正确事件；首版不要求 Building Record。
-- [ ] **回归及资格**：现有 walk、transfer、Bridge、Ledge、动态 viewport 与浏览器投影不能回归；数据错误/缺失、跨图取消、重复调用与异常提交要有针对性测试。记录实际测试结果，不将设计讨论视为已通过验收。
+- [ ] **实现与兼容迁移**：迁移已确认的旧桥梁动作到 Map 声明；无法确认的旧脚本／opaque 记录必须失败并可诊断；同步修改 importer、Runtime、测试，保住 Essentials 桥梁触发与层级行为，不无声更改旧数据协议。
+- [ ] **独立消费者验证**：另一套原创 FSDB 不提供 MapAction，也无需改 Map 库源码，即可装配地图、按内置 kind 声明必要行为、加载资源、通过 ID 使用自主定义 NPC，控制玩家切图并收到正确事件；首版不要求 Building Record。
+- [ ] **回归及资格**：现有 walk、transfer、Bridge、Ledge、动态 viewport 与浏览器投影不能回归；覆盖桥梁入口／出口、opaque 迁移失败、未知 kind、数据错误/缺失、跨图取消、重复调用与异常提交。记录实际测试结果，不将设计讨论视为已通过验收。
 
 ## 7. 统一验收问题
 
-> 一个新游戏是否能仅凭符合规范的 FSDB、Subsystem 内 Builder 配置和 Handler 调用，在不修改 `game-libs/map` 源码的条件下完成地图初始化、通过 ID 使用自主定义 NPC 与合规 4×4 角色素材、角色跳转与切图事件监听，同时保持现有 Essentials 地图功能？
+> 一个新游戏是否能仅凭符合规范的 FSDB（无需独立 MapAction 表）、Subsystem 内 Builder 配置和 Handler 调用，在不修改 `game-libs/map` 源码的条件下完成地图初始化、使用内置地图行为、通过 ID 使用自主定义 NPC 与合规 4×4 角色素材、角色跳转与切图事件监听，同时保持迁移后已确认的 Essentials 地图行为？
 
-这是通用化的核心验收标准。角色图集的唯一格式与尺寸计算方式已确定为设计方向；具体 NPC 数据结构与 TypeScript API 仍需结合独立消费者验证后收敛。
+这是通用化的核心验收标准。角色图集的唯一格式与尺寸计算方式、取消独立 MapAction 并将行为声明收纳进 Map，均已确定为**设计方向**；具体行为 Schema、NPC 数据结构与 TypeScript API 仍需结合迁移审计和独立消费者验证后收敛。
