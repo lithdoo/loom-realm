@@ -1,63 +1,41 @@
-# 地形行为取证：复核结论、证明边界与冻结交接
+# Terrain Behavior：证据复核、证明边界与交付状态
 
-> 状态：**Evidence review / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED**。本文件复核取证提交 [`e60e4a52`](https://github.com/lithdoo/loom-realm/commit/e60e4a521a726233bbda0bb1892f6d25bc47573d)，不代表又一次本地 FSDB 读取、测试复跑或原版 RGSS 运行。原始数据与运行命令见 [原始证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) **§15**；§14 是先前的静态记录，若表述冲突，以带日期和输入指纹的 §15 及本文件的证明范围为准。门禁状态见 [冻结准备](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md)，实施任务见 [计划](./TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md)。
+> 本文件是原版取证的历史复核，不代表本次重新运行原版 RGSS。当前**产品代码已实施，主分支合入仍以 PR/CI 为准**；`BEHAVIOR QUALIFICATION PENDING / NOT FORMALLY FROZEN`。结构化原始事实和再生成入口见 [证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) §1–16；实施/产品完成定义见 [交付合同](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md)。旧版本证据的完整 Map7 命令附录因再分发范围未获核清，已从当前发布版删去，改由合法本地 FSDB 再生成。不得将历史提交的记录当作最新 CI。
 
-## 1. 这次究竟完成了什么
+## 1. 原版事实与边界
 
-| 对象 | 已有记录（限指定 v21.1 corpus） | 证据等级与边界 |
+| 对象 | 固定证据 | 限制 |
 |---|---|---|
-| Map 7 Cedolan City | Map007 SHA-256 `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7`；11 events / 19 pages / 521 commands；tag 15 格=0、桥候选=0 | 原始素材抽取 + 更新后扫描；**仅证明当前工具覆盖的 Map 7 事件/图块/调用入口**，不证明全游戏任意 Ruby 方法调用均无桥行为。`provenNegativeBridge` 是此限定谓词，不是通用数学证明。 |
-| Map 21 Route 2 | Map021 SHA-256 `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575`；93 unique/93 placed Bridge 格；8 个直接 On/Off 事件（4、7、10、20、22、23、25、28），另 1、2 是邻接进化事件 | FSDB 抽取；八事件在 bridgeLevel 0、2 的 `over_trigger?` 均由移植规则静态计算为 true，预测 `here`；**不是原版运行观察**。 |
-| Map 47 Route 7 | Map047 SHA-256 `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e`；70×43、30 unique/placed Ledge 格；静态样本 `(16,9) → (16,11)` | FSDB 抽取 + 静态规则计算；没有原版跳跃帧、相机或跨图行为实测。未知事件命令码 404 已保留，不能因不认识就默默当作空脚本。 |
-| 全 corpus | 此次报告为 69 张 `Map*.rxdata`；Bridge 格及直接 Bridge 脚本扫描仅发现 Map 21 | 结论仅限所用 corpus、输入指纹、扫描入口和完整性规则；没有证明其他发行版或未追踪 Ruby 方法体。 |
+| Map7 | Map007 SHA `c34ddaaec265241fd35149d6d3758f8f08a5503b057c891e396c39b08518c6b7`；11 events/19 pages/521 commands；tag15 格和桥候选均为 0 | 只在受检 corpus 与入口内是负例；不证明全游戏 Ruby 方法体无桥 |
+| Map21 | Map021 SHA `cd226a09dbf5cbfd2207edd44fb7dd419327ae901a1f1c0f6ad35601df85c575`；93 个实际 tag15 格；8 个直接桥事件 IDs 4/7/10/20/22/23/25/28 | `over_trigger?` 在 0/2 均 true 是静态计算，原版逐帧未实测 |
+| Map47 | Map047 SHA `5f4ee232e4f4b8b44950f826b13cd601ffecb87e455c1dda92c5908152df043e`；30 Ledge 格；`(16,9)→(16,11)` | 静态跳跃样本；没有原版弧线/相机和跨图动态结果 |
+| corpus | 69 张 `Map*.rxdata`；在受检范围内仅 Map21 命中 Bridge | 不能外推其它发行版、动态 eval 或自动 Common Event |
 
-原版规则引用固定 `Maruno17/pokemon-essentials` tag v21.1，commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`。`SOURCE-PROVEN` 只用于源码条件及分支；`FSDB-OBSERVED` 是带指纹的素材记录；`STATIC-INFERRED` 是本地规则移植/路径搜索结果；`DYNAMIC-OBSERVED` 仅用于原版游戏真实日志。**本轮无 DYNAMIC-OBSERVED。**
+原版源码固定 Pokémon Essentials v21.1 commit `ea7b5d56d2436591160983c4e641a2ceee2d875a`。`SOURCE-PROVEN` 指源码，`FSDB-OBSERVED` 指带 digest 的本地文件，`STATIC-INFERRED` 指静态计算，`PRODUCT-OBSERVED` 指 LoomRealm 实际运行，`DYNAMIC-OBSERVED` 专指原版游戏帧日志；原版日志目前不存在。
 
-## 2. REVIEW-01～04：静态修复完成，不等于端到端验收
+## 2. REVIEW-01～04 结果
 
-| ID | 已提交的实际修复及交叉证据 | 已通过的静态边界 / 仍未解决 |
+| ID | 取证修复 | 边界 |
 |---|---|---|
-| REVIEW-01 触发分类 | `vanilla-map-rules.mjs` 逐层计算 `Game_Map#playerPassable?`；Ruby `d=0` 方向 bit 为 0；`buildEventTriggerMatrix` 逐占用格判定 8 个事件在 bridgeLevel 0、2 的 `over_trigger?`；`EV-TRIGGER-*` | 计算值均 true，预测成功抵达后 `check_event_trigger_here`；空图形自身**不是**充分条件。`Event#start` 置位和解释器实际执行的帧对齐未实测。 |
-| REVIEW-02 假 COMPLETE | Map/Tileset Table shape、负 tile ID、异常 355/655、111/117 参数及解析错误进入失败或 `INCOMPLETE`；`EV-VALID-01～06` | 重新扫描记录 Map 7 为限定范围内 COMPLETE/无桥；未知代码及脚本方法体覆盖范围仍应随报告保留。 |
-| REVIEW-03 CE 间接调用 | `common-event-reachability.mjs` 从调用入口计算嵌套可达集合和路径；直接/多层/循环/缺目标及独立 autorun 入口测试 `EV-CALL-*` | 本 corpus Map 7/21 的 117 调用为零，未发现 CE 桥脚本；autorun/parallel、任意方法体 `eval/send` 不由地图事件可达性结论全部排除。 |
-| REVIEW-04 跨图坐标 | `map-connection-audit.mjs` 使用源/目标 mapId 分别取得地图与 Tileset，按 PBS 候选与物化 edge 核对；`EV-TRANSFER-*` | Map 21 的 3 条 PBS 连接对应现有 7 条 edge，`21,E,77,47` 为几何越界；67 个 D0-false Bridge 格仅是**潜在过滤风险**，没有已证实真实误删。 |
+| REVIEW-01 | `vanilla-map-rules.mjs` 逐层模拟 `Game_Map#playerPassable?`；Bridge 八事件逐占用格 `over_trigger?` 在 0/2 静态均 true | `Event#start` 置位与解释器真正 execute 帧尚未原版动态验证 |
+| REVIEW-02 | Table shape、负 tile、异常 355/655 和 111/117 非法参数 fail-closed 或 INCOMPLETE | 未扫描 Ruby 方法体不能称 COMPLETE |
+| REVIEW-03 | CE A→B→C 可达性、循环/缺目标合成用例 | Map7/21 的 117 调用 0；不排除独立 autorun/parallel |
+| REVIEW-04 | 传送按源/目标 mapId 各自校验尺寸/Tileset；PBS 三条物化 7 edge | `(21,E,77,47)` 几何越界；67 个 D0-false 桥格仅潜在风险，未证实实际误删 |
 
-独立脚本 `map-evidence-independent-check.mjs` 用 decoder 重新计算 Map 21 Bridge 格、8 个脚本 ID、Map 47 Ledge 格。另增 `map21-e2e-independent-check.mjs`：用 `tableAt` 与物化 MapTransfer 边成员核对 **unified** 逐步邻接、transfer 非 null、transfer 后 bridge=0、start 不得标记 execute。该独立性仍不覆盖 `over_trigger?` 逐格重算或 RGSS 帧。不应写成全部行为已经双实现验证。
+独立脚本 `map-evidence-independent-check.mjs` 重读 Map21 桥格与八事件、Map47 Ledge；`map21-e2e-independent-check.mjs` 核对统一回放的边成员、邻接、tag15、部分 start/execute checkpoint。独立检查并未覆盖全部 `over_trigger?` 细节或 RGSS 逐帧。
 
-## 3. ROUTE-21：连续静态片段与真正跨图闭环必须分开
+## 3. E2E-21 静态连续路径
 
-`map21-bridge-routes.mjs` 从 Map 7→21 的合法落点样本选择 Map 21 `(19,76)`，对四组桥头 BFS 寻路；分别 `replayInputs` 计算两步 Off→On、On→Off 和部分带内/负例。§15.3 的南组报告 11 步到 `(14,70)`，中南组 20 步、中北组 73 步、北跨组 37 步。它们是**静态路径搜索记录**，不是 RGSS 输入日志。
+旧 `map21-bridge-routes.mjs` 分段 BFS/replay 只能生成输入，不可单独算 E2E。新 `map-world-replay.mjs#replayWorld` 从 Map7 `(40,0)` 的真实物化边进入 Map21 `(19,76)`，单状态连续经过 Off→On→真实 tag15→Off→反向传送。四组路线的静态 trace `continuous=true`、`walkedTag15=true`、返回 Map7 且 bridgeLevel=0，独立检查通过。中北组从南侧落点会经过其它桥事件，记录 On start/execute 8/8，不应隐去。所有上述结果均 `STATIC-INFERRED`，不是 RGSS 游戏输入录像。
 
-**2026-09-20 静态闭环：** 旧 `buildMap21BridgeRoutes` 仍是分段探针，**不能**当 E2E。验收改为 `map-world-replay.mjs#replayWorld`：从物化 MapTransfer/7 `(40,0)` dir=8 进入 Map21 `(19,76)`，单一 state 连续 Off→On→真实 tag15→下桥→反向 transfer。四组 live 均 `continuous=true`、`walkedTag15=true`、回 Map7 且 `bridgeLevel=0`，独立核对通过。等级仍是 **STATIC-INFERRED**。`traceStep.transfer` 保持 null 以证明旧模型不足。BFS 只用于生成输入，不作为 expected 与 actual 的同一函数。mid-north 陆地在 Off 北侧，从南落点必须经过其他桥事件，On start/execute 记为 8/8，不得隐瞒。原版 RGSS 对照仍缺，E2E 不得标 DYNAMIC 或 Gate PASS。
+## 4. Map47 Ledge 与未知命令
 
-## 4. Map 47：静态样本已取得，运动验收尚未开始
+真实样本 30 个合法两格静态跳、30 个反向失败；`(16,9)→(16,11)` 仍成立。中间事件、边界及落点阻挡缺原版真实样本，以 `sampleKind=synthetic` 的原创夹具验收，不能冒充 Map47 实测。404 已明确标注为 `show-choices-branch-end`，Map47 EV007/013 的该命令不在 Ledge 格；不把未知控制流当作可执行物理。跨图 jump 本轮不支持。
 
-证据 §15.4 / §16.2 与 `map47-ledge-routes.mjs`：30 个合法静态两格跳；30 个逆向均失败；`(16,9)→(16,11)` 仍成立。本图无中间格原版事件、无边界 Ledge 样本；合成负例单独标注 `sampleKind=synthetic`。404 现已标注为 `show-choices-branch-end`（Show Choices 分支结束），不是空命令；Map47 EV007/EV013 含 404 但不在 Ledge 格上，不改变 `jumpForward(2)` 物理。跨图 jump 与 RGSS 弧线/相机仍 UNVERIFIED/BLOCKED。
+## 5. 测试与许可边界
 
-## 5. 测试、复现和许可证据
+历史 Agent 记录 Windows 10/Node v22.12.0、有本地 FSDB：取证专项早期 36 pass、后续 37 pass；统一 freeze 合成/实图测试 54 pass；`npm run test:fixtures` 本地 106 pass。历史绿 CI [35499617524](https://github.com/lithdoo/loom-realm/actions/runs/35499617524) 属于 `5b550b4`，100 pass、6 live skip，不能代替当前实现分支的 CI。当前测试必须取当前 SHA 对应的 Actions。原版 FSDB、Map21/47 完整转储及 Map7 完整事件命令都不得以未核清的再分发资格提交；当前 [证据](./TERRAIN_BEHAVIOR_EVIDENCE.md) 已用精简索引替代原始命令附录。跳过的 live 测试只标 skip。
 
-此次 Agent 在 Windows 10 / Node v22.12.0、有本地 FSDB 的条件下记录：
+## 6. 实施与正式资格分开
 
-```text
-node --test tools/fixtures/essentials-v21.1/map-event-evidence.test.mjs tools/fixtures/essentials-v21.1/map-evidence-acceptance.test.mjs
-# 报告：36 pass / 0 fail / 0 skip
-node tools/fixtures/essentials-v21.1/map7-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --corpus-scan --output ".local/map7-bridge-evidence.json"
-node tools/fixtures/essentials-v21.1/map21-bridge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map21-bridge-evidence.json"
-node tools/fixtures/essentials-v21.1/map47-ledge-evidence.mjs --source "examples/essentials-v21.1-local/[FSDB]Essentials v21.1" --output ".local/map47-ledge-evidence.json"
-node tools/fixtures/essentials-v21.1/map-evidence-independent-check.mjs 7 21 47
-```
-
-上述为**提交内记录**，不是本次远程文档审查独立重跑；没有查到该取证 HEAD 对应的 PR workflow，不能宣称 CI PASS。旧 18/18 属于先前提交，不是本次测试分母。原始 FSDB、完整 Map21/47 JSON 放在 gitignored `.local/`，不假定其可合法分发；既有 Map7 附录 A 包含原始事件命令，许可核对未完成，FG-05 保持 OPEN。只向仓库提交最小结构化事实、指纹、短摘录和可再生成方法；不要将本地 JSON 误称为可公开 CI fixture。
-
-## 6. 下一步单次验收交接与停工条件
-
-| 工作包 | 必须拿到的证据 | 完成条件 / 阻碍时状态 |
-|---|---|---|
-| `E2E-21` | 贯通真实连接和 BFS/桥带/桥面/离开/反向的**同一次完整状态 replay**，四组各一条逐步 trace，真实 deck 命中与 start/execute 次数 | 静态 replay 全断言、边界/事件负例测试；动态结果另外记等级，不把一个 `continuous` 布尔值当闭环证明。 |
-| `DYN-21/47` | 原版 RGSS 上桥/下桥/held input/转图、两格 jump/落点事件/帧日志，固定输入与素材 SHA | 无合法 RGSS 环境则 `BLOCKED` 且列具体缺口；**当前 FG-01 明确要求逐帧，未经正式修改及审查不得改成“动态可选”**。 |
-| `FIXTURE/CI` | 核清原始素材与 Map7 附录 A 许可，合法最小 golden fixture，CI 实际 run URL/SHA、pass/fail/skip | 无分发授权不复制原地图；没有 CI 能执行的真实正例则 FG-05 OPEN。 |
-| `CONTRACT/ABI` | C-01～08 exact schema、producer/consumer、事件时序与 state/motion/depth 矩阵、M14/M15 正式 ledger 审查 | 所有 FG 各自满足后才签核 `CONTRACT_V1`；不得倒推旧资格或先派 AG-01～04。 |
-
-**验收输出模板：** `item / source+SHA / map-event-page-command or tile xyz / rule+固定源码 / input+initial state / expected+actual / evidence grade / exact test command+exit+pass-fail-skip / CI run+SHA / unresolved owner / reviewer`。任何 `STATIC-INFERRED` 与 `DYNAMIC-OBSERVED` 必须分列；数据完整性、行为原版保真、合法可重放和资格是四种不同结论。
-
-最终状态：**Map 7/21/47 静态记录 + E2E-21 统一静态 replay + Map47 404 语义已在本机闭合（§16）。CI 失败 `35499223917` 已修；绿 run `35499617524` on `5b550b4` 为 100 pass / 6 skip（live FSDB）。RGSS 动态、素材再分发许可、授权 reviewer 仍为外部阻碍。FG-01～06 全部 OPEN。FREEZE CANDIDATE COMPLETE / NOT FROZEN / NOT IMPLEMENTED / NOT QUALIFIED。**
+AG-01～04 的产品功能已在 `feat/map-terrain-behavior` 实施；相关 PR 合入与产品 CI 应另行验收。FG-01～06 的原版逐帧保真、素材分发、合同正式签署仍按 [冻结准备](./TERRAIN_BEHAVIOR_FREEZE_READINESS.md) 的独立资格标准保持 OPEN。用户的实施授权不代表 reviewer 已批准正式 `CONTRACT_V1`。取证之外的真实代码状态、最终 SHA、browser 及 CI 以 [交付合同](./TERRAIN_BEHAVIOR_DELIVERY_CONTRACT.md) 和对应提交为准。
