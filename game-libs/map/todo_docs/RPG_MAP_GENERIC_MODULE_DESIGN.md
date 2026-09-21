@@ -1,9 +1,9 @@
 # RPGMap 通用化设计讨论与待办
 
 > 状态：设计讨论记录 / TODO，**非冻结的完整协议、非已实现功能**  
-> 记录日期：2026-09-21；角色素材及内置地图行为方向更新：2026-09-21  
+> 记录日期：2026-09-21；角色素材、内置地图行为及 NPC 表类型方向更新：2026-09-21  
 > 基线：`main` @ `2d465b8c8501566b26375dae55e1a78007606c40`（创建本分支时）  
-> 范围：`game-libs/map`；本文记录方向、已确认边界、可行性依据及后续验证事项，不预先冻结 API 签名和 FSDB Schema。
+> 范围：`game-libs/map`；本文记录方向、已确认边界、可行性依据及后续验证事项，不预先冻结 API 签名和完整 FSDB Schema。
 
 ## 1. 目标与核心思路
 
@@ -36,7 +36,7 @@
 
 **地图行为是单独的设计决定：** 新版 RPGMap 正式内容协议**不要求也不设独立 `[struct]MapAction` 表**。桥梁、悬崖等属于 Map 模块内置行为；业务侧仅提供受支持的 `kind` 声明以及位置、触发条件等必需参数，不能向 Runtime 注入 Ruby、脚本或自定义执行代码。能从地图图块与 Tileset 地形标签推导的行为不必重复声明；不能仅靠地形推导的局部行为声明放在对应 `Map` 记录中。当前 `MapAction` 仍是旧实现和旧 FSDB 的事实，移除它需要显式迁移，见下文。
 
-**NPC 是另一项独立设计决定：** NPC 的 FSDB 身份、定义与实例结构由本项目按业务需求自主设计，**不以 Essentials 的 Event/Page 结构为 NPC Schema**。Essentials 在 NPC 方向仅作为可合法使用的素材来源和格式验证样本；不要求兼容它的全部素材或事件行为。地图物品和建筑也不因原版事件结构而被强制纳入 NPC 定义。
+**NPC 是另一项独立设计决定：** NPC 的 FSDB 身份、定义与实例结构由本项目按业务需求自主设计，**不以 Essentials 的 Event/Page 结构为 NPC Schema**。Essentials 在 NPC 方向仅作为可合法使用的素材来源和格式验证样本；不要求兼容它的全部素材或事件行为。地图物品和建筑也不因原版事件结构而被强制纳入 NPC 定义。NPC 定义使用 `[struct]NPC`，按地图归组的 NPC 放置使用 `[group]MapNPC`；这是 FSDB 表类型与组织方向，不代表行数据 Schema 已冻结或 Runtime 已实现。
 
 当前实现与旧投影的关系（**现状，不是新协议目标**）：
 
@@ -48,14 +48,15 @@ Map ID → struct.MapAction/{id}   → 旧实现的桥梁动作及 opaque 防护
 图像资源 → resource.Graphics/...（Characters、Tilesets 等）
 ```
 
-目标内容组织（**尚未实现；NPC 表名与结构待讨论**）：
+目标内容组织（**尚未实现；NPC 字段待讨论**）：
 
 ```text
 Map ID → struct.Map/{id} → tileset_id → struct.Tileset/{id}
                             └→ 可选的内置行为声明（例如桥梁入口／出口）
 Map ID → struct.MapTransfer/{id} → 目标 Map ID / 目标坐标
+NPC 定义 ID → struct.NPC/{npcId} → resource.Graphics/Characters/...
+Map ID → group.MapNPC/{mapId}（JSONL）→ 多个实例各自引用 NPC 定义 ID
 图像资源 → resource.Graphics/...（Characters、Tilesets 等）
-自定义 NPC 定义及地图实例 → 待确定的结构化记录
 ```
 
 当前 `Map` 保留三层 Tile Table；`Tileset` 包括贴图名、autotile、passages、priorities、terrain_tags。`terrain_tags` 与 Bridge/Ledge 等能力相关，不可仅以“原引擎字段”理由删除。现有 `MapAction.opaqueRelated` 是防止误执行无法识别脚本的失败保护；**取消表不意味着可以取消这项安全约束**，新数据及迁移过程都必须有相应的拒绝策略。
@@ -76,19 +77,43 @@ Map ID → struct.MapTransfer/{id} → 目标 Map ID / 目标坐标
 - 对旧 `opaqueRelated`、无法确认的脚本或缺少语义映射的动作，**在导入／迁移阶段失败并输出可定位的诊断**；不得删除记录后默认为空行为，也不得回退执行原始 Ruby。
 - 迁移后回归 Bridge／Ledge 的通行、状态恢复、图层遮挡、跨图重置、触发时机与失败路径；在这些验证通过前，不能声称已经移除旧 `MapAction` 实现或已完全保留 Essentials 行为。
 
+### NPC FSDB 表类型与分组：`[struct]NPC` + `[group]MapNPC`（已确认方向，字段未冻结）
+
+按照 [FSDB 目录结构规范](../../../doc/fsdb/FSDB目录结构详解.md)，`[struct]` 的每个 Key 是一个 JSON object 基础实体；`[group]` 的每个 Key 是一个 JSONL 文件，每个非空行是一条结构一致的 JSON object。**先按数据语义选表类型，不为迁就目前缺失的读取方法而把 NPC 实例列表包进 `[struct]MapNPC` 的 JSON 数组。**
+
+```text
+[FSDB]游戏数据/
+├── [struct]NPC/
+│   ├── .info.meta            # 必填：每个 NPC 定义 JSON object 的 JSON Schema
+│   └── guard.json            # 定义 ID = 文件 Key "guard"
+└── [group]MapNPC/
+    ├── .info.meta            # 必填：每一行实例 JSON object 的 JSON Schema
+    ├── .desc.meta            # 必填：说明以地图 ID 分组
+    ├── .extend.meta          # 可选：声明实例字段对 [struct]NPC 的引用
+    ├── 1.jsonl               # 分组 Key = 地图 ID "1"
+    └── 2.jsonl
+```
+
+- **NPC 定义**：`[struct]NPC/{npcId}.json` 按定义 ID 读取可复用内容，至少关联符合唯一 4×4 约定的角色素材逻辑引用；文件 Key 已提供定义 ID，不必强制在 JSON 内重复存 ID。名称、对话、AI 等字段是否属于 Map 需另行确认，不因 Essentials Event/Page 原样引入。
+- **地图 NPC 实例**：`[group]MapNPC/{mapId}.jsonl` 按地图 ID 分组，每个非空行是一个实例对象；文件 Key 已给出地图 ID，行记录无需重复 `mapId`，也没有 `{ id, instances: [...] }` 这样的外层 JSON 对象。一个定义可以被同一张地图或不同地图的多个实例引用，实例身份与定义身份独立。
+- **示意而非最终 Schema**：例如 `1.jsonl` 可包含 `{"instanceId":"gate_guard","npcId":"guard","x":10,"y":6,"direction":2}` 与 `{"instanceId":"east_guard","npcId":"guard","x":15,"y":6,"direction":4}` 两行；仅用来说明分组与复用。字段命名、方向及碰撞规则、实例生命周期等仍待讨论。
+- **元数据**：`[struct]NPC` 必须有 `.info.meta`；`[group]MapNPC` 必须同时有 `.info.meta` 与 `.desc.meta`，前者校验**单行对象**而非整组数组。可选 `.extend.meta` 以 JSONL 声明诸如 `npcId` 字段对 `[struct]NPC` 的引用；如果启用，引用字段在对应 `.info.meta` 中类型必须是 `string`。实例 ID 在同一组内唯一、定义引用有效、坐标处于地图边界内等跨记录／跨表约束须由相应完整性校验落实。
+- **静态内容与状态边界**：FSDB 只提供定义和实例初始放置；Runtime 保有各实例当前坐标、朝向、移动及生命周期状态，不反向修改 FSDB。`instanceId` 需在同一地图内稳定且唯一，Handler 应区分 `(mapId, instanceId)` 与 `npcId`；跨图重进时状态复位或保留的策略尚未冻结。无 NPC 地图缺失组或提供空组的处理约定也须确定。
+- **读取能力缺口**：[Content API v1](../../../doc/15-contracts/content-api-v1.md) 已定义 `group` 路由，但当前公开 [`ContentClient`](../../../packages/subsystem/src/content.ts) 只暴露 `record()` 与 `resource()`，没有 `group()`。实施前须通过公开 Subsystem/Content 契约补齐或核实可用的 Group 读取入口，并为 JSONL 解析、错误与取消语义补测试；不可在 Map 内绕过 Content 访问物理目录。上述结构目前无法直接由现有 Map Runtime 加载。
+
 ### 尚未形成完整契约的部分
 
 当前投影主要覆盖地图、Tileset、传送、受支持事件和 Graphics；**尚无完整的、可通过独立 ID 装配的自定义 NPC 定义与实例协议**，现有画面投影也主要面向玩家。NPC 的身份、放置与运行时状态需要按项目需求设计；不需要先把所有 Essentials Event 投影为 NPC。建筑如果只是静态背景，继续作为地图 Tile；只有真实需求要求整栋建筑独立引用/复用/交互时再讨论 Building 定义。
 
-待收敛的概念关系（不是现有 FSDB Schema）：
+已收敛的表关系（**表类型与组织方向已确认，非现有 Runtime Schema**）：
 
 ```text
-自定义 NPC 定义 ID → NPC 定义 → 符合本模块角色图集约定的逻辑资源引用
-地图上的 NPC 实例 → NPC 定义引用 + 位置及各自运行时状态
+NPC 定义 ID → struct.NPC/{npcId} → 符合本模块角色图集约定的逻辑资源引用
+地图 ID → group.MapNPC/{mapId} → 各实例引用 NPC 定义 ID + 初始放置
 逻辑资源引用 → 使用方提供的 FSDB 资源（通过 Content 解析）
 ```
 
-必须区分“定义 ID”和“地图中的实例身份”：同一 NPC 定义可被同一或不同地图多次使用；运行时实例位置与状态不等于只读 FSDB 定义。精确命名、文件布局、ID 类型和实体字段仍待后续设计，不把上述关系视为已经实现。
+必须区分“定义 ID”和“地图中的实例身份”：同一 NPC 定义可被同一或不同地图多次使用；运行时实例位置与状态不等于只读 FSDB 定义。表类型已选为 `struct.NPC` 和 `group.MapNPC`；具体字段、生命周期、资源引用表达和公开 API 仍待设计，不把上述关系视为已经实现。
 
 ### 角色素材 v1：唯一 4×4 约定，不限定图片像素尺寸（已确认方向）
 
@@ -123,7 +148,7 @@ Player 和自定义 NPC **只支持同一种角色行走图集格式**。不为�
 
 **架构方向可行，尚未完成实现/产品验证。** 已有 `game-libs/map` 业务库、Subsystem factory、ContentClient、地图/图块解析、移动、传送、Bridge/Ledge 与 Browser 投影，提供可演进的基础。新的 Builder/Handler 与内容规范可优先在 Map 库自身实现，不必先修改 Main 或 Renderer 公开契约。
 
-仍需解决的实际缺口：自定义 NPC 定义和实例数据、多 Sprite 独立定位与渲染、NPC 运动和碰撞；FSDB 来源定位与 ID 引用的一致性；旧 Essentials 地图投影迁移和兼容性；Handler 命令/事件在失败、取消、切图和异常时的状态一致性。**不把全量 Essentials NPC 事件、所有特殊素材或独立 Building 当作首版交付前置条件。** 当前实施与源引擎 RGSS 逐帧等价是不同的资格议题，不因通用化自动获得证明。
+仍需解决的实际缺口：自定义 NPC 定义和实例数据、`group.MapNPC` 的公开 Content 读取入口、多 Sprite 独立定位与渲染、NPC 运动和碰撞；FSDB 来源定位与 ID 引用的一致性；旧 Essentials 地图投影迁移和兼容性；Handler 命令/事件在失败、取消、切图和异常时的状态一致性。**不把全量 Essentials NPC 事件、所有特殊素材或独立 Building 当作首版交付前置条件。** 当前实施与源引擎 RGSS 逐帧等价是不同的资格议题，不因通用化自动获得证明。
 
 ## 6. TODO 与验证顺序
 
@@ -131,15 +156,16 @@ Player 和自定义 NPC **只支持同一种角色行走图集格式**。不为�
 - [ ] **数据消费与清理审计**：逐字段核对 Map/Tileset/Transfer 的正式保留字段，以及旧 MapAction 的行为迁移输入；保留 terrain、Bridge/Ledge 语义及 opaque 失败保护，不把旧 MapAction 变成新协议必需目录。
 - [ ] **内置地图行为协议**：明确可用 `kind`、来自地形的隐式行为与 Map 内显式行为、参数和触发规则；修改 Map schema/version 与校验；验证未知 kind、非法位置、缺失参数的失败行为。
 - [ ] **角色素材约定与多实例验证**：按上述唯一 4×4 语义、解码尺寸除以 4、脚对齐和 1×1 默认占格验证；保留 128×128 合成 Demo 与 128×192 真实 Player 的兼容；选标准 NPC 素材验证独立节点位置、运动、遮挡。不为了少量特殊 PNG 扩展格式。
-- [ ] **NPC FSDB 最小协议**：自主确定定义与地图实例身份及素材引用，仅要求遵守统一角色图集约定；不继承 Essentials Event/Page Schema，不要求自动导入全量事件。
+- [ ] **NPC FSDB 最小协议**：按 `[struct]NPC` 定义与 `[group]MapNPC` 按地图分组的方向，确定定义/实例身份、单行 schema、素材引用及实例唯一性；不继承 Essentials Event/Page Schema，不要求自动导入全量事件。
+- [ ] **Group 读取能力**：核实／补齐 Subsystem 公开 `ContentClient` 的 Group 读取接口，遵守既有 Content API v1、namespace/key、JSONL 校验及错误/取消语义；不得为 Map 直接访问 FSDB 文件路径或偷偷把 Group 变为 Record。
 - [ ] **FSDB 地图最小协议**：以 Map（含可选内置行为）、Tileset、Transfer、Graphics 为基础确定身份、版本、引用及资源定位；新游戏无需准备独立 MapAction 表。
 - [ ] **Builder/Handler 契约**：只覆盖 Subsystem 内部的实例装配、命令、快照、事件、生命周期与失败语义；检查与现有 Definition API 的接合。
 - [ ] **实现与兼容迁移**：迁移已确认的旧桥梁动作到 Map 声明；无法确认的旧脚本／opaque 记录必须失败并可诊断；同步修改 importer、Runtime、测试，保住 Essentials 桥梁触发与层级行为，不无声更改旧数据协议。
-- [ ] **独立消费者验证**：另一套原创 FSDB 不提供 MapAction，也无需改 Map 库源码，即可装配地图、按内置 kind 声明必要行为、加载资源、通过 ID 使用自主定义 NPC，控制玩家切图并收到正确事件；首版不要求 Building Record。
-- [ ] **回归及资格**：现有 walk、transfer、Bridge、Ledge、动态 viewport 与浏览器投影不能回归；覆盖桥梁入口／出口、opaque 迁移失败、未知 kind、数据错误/缺失、跨图取消、重复调用与异常提交。记录实际测试结果，不将设计讨论视为已通过验收。
+- [ ] **独立消费者验证**：另一套原创 FSDB 不提供 MapAction，也无需改 Map 库源码，即可装配地图、按内置 kind 声明必要行为、通过 `group.MapNPC` 按地图加载实例及其 NPC 定义与素材，控制玩家切图并收到正确事件；首版不要求 Building Record。
+- [ ] **回归及资格**：现有 walk、transfer、Bridge、Ledge、动态 viewport 与浏览器投影不能回归；覆盖桥梁入口／出口、opaque 迁移失败、未知 kind、Group 读取与非法/缺失引用、数据错误/缺失、跨图取消、重复调用与异常提交。记录实际测试结果，不将设计讨论视为已通过验收。
 
 ## 7. 统一验收问题
 
-> 一个新游戏是否能仅凭符合规范的 FSDB（无需独立 MapAction 表）、Subsystem 内 Builder 配置和 Handler 调用，在不修改 `game-libs/map` 源码的条件下完成地图初始化、使用内置地图行为、通过 ID 使用自主定义 NPC 与合规 4×4 角色素材、角色跳转与切图事件监听，同时保持迁移后已确认的 Essentials 地图行为？
+> 一个新游戏是否能仅凭符合规范的 FSDB（无需独立 MapAction 表，NPC 定义使用 `struct.NPC`，地图 NPC 实例使用 `group.MapNPC`）、Subsystem 内 Builder 配置和 Handler 调用，在不修改 `game-libs/map` 源码的条件下完成地图初始化、使用内置地图行为、通过 ID 使用自主定义 NPC 与合规 4×4 角色素材、角色跳转与切图事件监听，同时保持迁移后已确认的 Essentials 地图行为？
 
-这是通用化的核心验收标准。角色图集的唯一格式与尺寸计算方式、取消独立 MapAction 并将行为声明收纳进 Map，均已确定为**设计方向**；具体行为 Schema、NPC 数据结构与 TypeScript API 仍需结合迁移审计和独立消费者验证后收敛。
+这是通用化的核心验收标准。角色图集的唯一格式与尺寸计算方式、取消独立 MapAction 并将行为声明收纳进 Map，以及 NPC 定义与实例表类型，均已确定为**设计方向**；具体行为/NPC Schema 与 TypeScript API 仍需结合迁移审计、Group 读取能力及独立消费者验证后收敛。
