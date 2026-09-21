@@ -17,7 +17,7 @@
 | map47 | Map 47 | Route 7（岩石路线，西接 Cedolan、东接 Battle Frontier） | Tileset 1 Outside |
 | map27 | Map 27 | Lerucean Town Pokémon Day Care 室内 | Tileset 3 Interior general |
 
-Map 27 官方是 Day Care 室内；户外运河桥的典型样本是 Map 7 Cedolan City。桥上/桥下同时堵住的机制缺口与官方 Bridge terrain 一致，不依赖把 Day Care 误当成运河图。
+Map 27 官方是 Day Care 室内，不得当作运河桥样本。**2026-09-20 取证更正**：本官方 v21.1 corpus 的 Map 7 Cedolan City **没有** Bridge terrain，也 **没有** `pbBridgeOn`/`pbBridgeOff` 事件；同 corpus 中 Bridge 图块与桥脚本出现在 Map 21 Route 2（静态取证见 [TERRAIN_BEHAVIOR_EVIDENCE.md](./TERRAIN_BEHAVIOR_EVIDENCE.md) §14–§15）。桥上/桥下同时堵住的机制缺口仍与官方 Bridge terrain + `$PokemonGlobal.bridge` 一致，但不依赖把 Day Care 或 Map 7 误当成桥图。Runtime 玩法仍未实现。
 
 ---
 
@@ -96,7 +96,7 @@ next if terrain&.ignore_passability
 
 桥 overlay 被当成普通墙：桥下被上层挡住，桥上也走不上去。这与「上、下都不能过」一致。
 
-Day Care 室内更常见的是柜台（`passage & 0x80`）和家具。若试玩看到的是能钻过去的木桥，样本图是 Map 7 Cedolan；机制缺口相同。
+Day Care 室内更常见的是柜台（`passage & 0x80`）和家具。若试玩看到的是能钻过去的木桥，不要默认写成 Map 7 Cedolan；本 corpus 的 Map 7 没有 Bridge 图块。机制缺口（缺 tag、缺桥状态、缺事件投影）仍然成立，但正例地图需另证。
 
 ---
 

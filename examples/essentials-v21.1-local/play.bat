@@ -10,10 +10,9 @@ set "FSDB_COUNT=0"
 for /d %%D in ("%EXAMPLE%\[FSDB]*") do if exist "%%D\" set /a FSDB_COUNT+=1
 if not "%FSDB_COUNT%"=="1" (
   echo 还没有真实 FSDB。请先运行：
-  echo   node scripts\init-fsdb.mjs
-  echo 若自动下载被拦截，脚本会打开本机浏览器完成官方 ZIP 获取。
-  echo 也可指定本机源：
-  echo   node scripts\init-fsdb.mjs --source ^<Essentials v21.1 目录或 zip^>
+  echo   reimport.bat
+  echo 或指定本机源：
+  echo   reimport.bat "C:\path\to\Pokemon Essentials v21.1"
   pause
   exit /b 1
 )

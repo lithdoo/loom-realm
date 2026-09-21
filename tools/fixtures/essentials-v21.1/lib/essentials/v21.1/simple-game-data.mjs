@@ -12,6 +12,7 @@ import { VANILLA_REGISTRY_V21_1 } from "./vanilla-registry.mjs";
 import { compareV21Oracle } from "./oracle-v21.mjs";
 import { materializeCompiledDataDomains } from "./compiled-data.mjs";
 import { materializeM14ConsumerDomains } from "./m14-consumer.mjs";
+import { materializeMapActionRecords } from "./map-action-consumer.mjs";
 import { materializeMapTransferRecords } from "./map-transfer-consumer.mjs";
 
 const ID = /^(?![0-9])\w+$/u;
@@ -142,7 +143,8 @@ export async function buildCanonicalDataset(manifest) {
   const mapTransfers = materializeMapTransferRecords(rmxp.roots, m14.Map, m14.Tileset, remaining.domains.PbsDocuments ?? []);
   const pbsDomains = Object.freeze({ ...initialDomains, ...species.domains, ...remaining.domains });
   const compiledData = materializeCompiledDataDomains(rmxp.roots, pbsDomains);
-  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14, MapTransfer: mapTransfers });
+  const mapActions = materializeMapActionRecords(rmxp.roots);
+  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14, MapTransfer: mapTransfers, MapAction: mapActions });
   const semantic = classifyEssentialsSemantics(rmxp, VANILLA_REGISTRY_V21_1.compilerPasses);
   const oracleComparison = compareV21Oracle(canonicalDomains, rmxp.roots);
   const oracle = Object.freeze({ ...oracleComparison, compiledDataRootsCompared: compiledData.coverage.observedRoots.length });

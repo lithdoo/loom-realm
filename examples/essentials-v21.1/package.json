@@ -10,6 +10,6 @@
     "@loomrealm/game-package": "0.1.0-alpha.0"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs && node --test ../../test/terrain-behavior-live-product.test.mjs"
   }
 }

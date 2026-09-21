@@ -36,6 +36,7 @@ function tilesetValue({
     autotile_names,
     passages: table1d(size),
     priorities: table1d(size),
+    terrain_tags: table1d(size),
   };
 }
 

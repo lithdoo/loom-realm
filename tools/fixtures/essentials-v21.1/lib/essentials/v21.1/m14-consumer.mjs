@@ -79,10 +79,19 @@ export function projectTilesetRecords(entry, requiredIds = new Set()) {
     const autotile_names = projectAutotileNames(root.fields["@autotile_names"], `Tileset[${index}].autotile_names`);
     const passages = projectTable(root.fields["@passages"], `Tileset[${index}].passages`);
     const priorities = projectTable(root.fields["@priorities"], `Tileset[${index}].priorities`);
-    for (const [name, table] of [["passages", passages], ["priorities", priorities]]) {
+    const terrain_tags = projectTable(root.fields["@terrain_tags"], `Tileset[${index}].terrain_tags`);
+    for (const [name, table] of [["passages", passages], ["priorities", priorities], ["terrain_tags", terrain_tags]]) {
       if (table.dimensions !== 1 || table.ySize !== 1 || table.zSize !== 1) invalid(`Tileset[${index}].${name} must be a 1D Table`);
     }
-    records.push(Object.freeze({ key: String(index), value: Object.freeze({ id, tileset_name, autotile_names, passages, priorities }) }));
+    if (passages.xSize !== priorities.xSize || passages.xSize !== terrain_tags.xSize) {
+      invalid(`Tileset[${index}] passages, priorities, and terrain_tags xSize must match`);
+    }
+    for (const [offset, tag] of terrain_tags.values.entries()) {
+      if (!Number.isSafeInteger(tag) || tag < 0 || tag > 17) {
+        invalid(`Tileset[${index}].terrain_tags[${offset}] must be an integer from 0 through 17`);
+      }
+    }
+    records.push(Object.freeze({ key: String(index), value: Object.freeze({ id, tileset_name, autotile_names, passages, priorities, terrain_tags }) }));
   }
   return Object.freeze(records);
 }

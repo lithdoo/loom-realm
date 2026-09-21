@@ -21,6 +21,7 @@ export interface TilesetRecord {
   readonly autotile_names: readonly (string | null)[];
   readonly passages: ProjectedTable;
   readonly priorities: ProjectedTable;
+  readonly terrain_tags: ProjectedTable;
 }
 
 export type TargetDirection = Direction | null;
@@ -84,7 +85,26 @@ export interface TileProjectionBounds {
   readonly maxTileY: number;
 }
 
-const TILE_SIZE = 32;
+export const TILESET_SCHEMA_SUBJECT = "map-tileset-terrain-tags-v1";
+export const TILESET_SCHEMA_VERSION = "struct.Tileset/v2-terrain-tags";
+export const MAP_ACTION_SCHEMA_VERSION = "struct.MapAction/v1-bridge";
+/** PROJECT-DECISION-PROVISIONAL: single Runtime→Browser motion/event ABI. Not vanilla RGSS. */
+export const MOTION_ABI_VERSION = "map-motion/v1-walk-jump-bridge";
+export const TERRAIN_TAG_MIN = 0;
+export const TERRAIN_TAG_MAX = 17;
+export const TERRAIN_NONE = 0;
+export const TERRAIN_LEDGE = 1;
+export const TERRAIN_NEUTRAL = 13;
+export const TERRAIN_BRIDGE = 15;
+export const TERRAIN_NO_EFFECT = 17;
+export const WALK_DURATION_MS = 250;
+/** PROJECT-DECISION-PROVISIONAL: not a vanilla RGSS measurement. Shared by Runtime and Browser via motion.durationMs. */
+export const JUMP_DURATION_MS = 400;
+export const JUMP_PEAK_RULE = "distancePx * 3 / 8";
+export const TILE_SIZE_PX = 32;
+export const TILE_SIZE = TILE_SIZE_PX;
+export const LEGAL_BRIDGE_LEVELS = Object.freeze([0, 2] as const);
+export type BridgeLevel = 0 | 2;
 export const CHUNK_SIZE = 8;
 export const CHUNK_CELLS = CHUNK_SIZE * CHUNK_SIZE * 3;
 export const CHUNK_OVERSCAN = 1;
@@ -150,7 +170,8 @@ export const AUTOTILE_QUARTERS = [
   [37, 42, 43, 48], [17, 18, 47, 48], [13, 18, 43, 48], [1, 2, 7, 8],
 ] as const satisfies readonly AutotileQuarterRow[];
 
-export function tileVisualDepth(y: number, priority: number): number {
+export function tileVisualDepth(y: number, priority: number, tag: number = TERRAIN_NONE, bridgeLevel: number = 0): number {
+  if (tag === TERRAIN_BRIDGE && bridgeLevel === 2) return 0;
   if (priority === 0) return 0;
   return (y + priority + 1) * TILE_SIZE;
 }
@@ -172,6 +193,14 @@ function object(value: unknown, label: string): Record<string, unknown> {
 function integer(value: unknown, label: string, positive = true): number {
   if (!Number.isSafeInteger(value) || (positive ? Number(value) <= 0 : Number(value) < 0)) throw new TypeError(`${label} must be a ${positive ? "positive" : "non-negative"} safe integer`);
   return value as number;
+}
+
+function occupiedPoint(value: unknown, label: string): Readonly<{ x: number; y: number }> {
+  const point = exactObject(value, label, ["x", "y"]);
+  if (!Number.isSafeInteger(point.x) || !Number.isSafeInteger(point.y)) {
+    throw new TypeError(`${label} coordinates must be safe integers`);
+  }
+  return Object.freeze({ x: point.x as number, y: point.y as number });
 }
 
 export function validateTable(value: unknown, label: string): ProjectedTable {
@@ -286,7 +315,11 @@ export function validateMapTransferRecord(value: unknown, contentMapId: number):
 }
 
 export function validateTilesetRecord(value: unknown, contentId: number): TilesetRecord {
-  const input = exactObject(value, "Tileset", ["id", "tileset_name", "autotile_names", "passages", "priorities"]);
+  const keys = value !== null && typeof value === "object" && !Array.isArray(value) ? Object.keys(value as object) : [];
+  if (keys.length === 5 && ["id", "tileset_name", "autotile_names", "passages", "priorities"].every((key) => keys.includes(key))) {
+    throw new TypeError("TILESET_RECORD_INVALID: legacy five-field Tileset requires migrateLegacyTilesetRecord");
+  }
+  const input = exactObject(value, "Tileset", ["id", "tileset_name", "autotile_names", "passages", "priorities", "terrain_tags"]);
   const id = integer(input.id, "Tileset.id");
   if (id !== contentId) throw new TypeError("Tileset.id does not equal its Content key");
   if (typeof input.tileset_name !== "string" || input.tileset_name.length === 0) throw new TypeError("Tileset.tileset_name must be non-empty");
@@ -298,13 +331,35 @@ export function validateTilesetRecord(value: unknown, contentId: number): Tilese
   }));
   const passages = validateTable(input.passages, "Tileset.passages");
   const priorities = validateTable(input.priorities, "Tileset.priorities");
-  for (const [name, table] of [["passages", passages], ["priorities", priorities]] as const) {
+  const terrain_tags = validateTable(input.terrain_tags, "Tileset.terrain_tags");
+  for (const [name, table] of [["passages", passages], ["priorities", priorities], ["terrain_tags", terrain_tags]] as const) {
     if (table.dimensions !== 1 || table.ySize !== 1 || table.zSize !== 1) throw new TypeError(`Tileset.${name} must be a 1D Table`);
+  }
+  if (passages.xSize !== priorities.xSize || passages.xSize !== terrain_tags.xSize) {
+    throw new TypeError("TILESET_RECORD_INVALID: passages, priorities, and terrain_tags xSize must match");
   }
   if (priorities.values.some((entry) => entry < 0 || entry > 5)) {
     throw new TypeError("Tileset.priorities values must be integers from 0 through 5");
   }
-  return Object.freeze({ id, tileset_name: input.tileset_name, autotile_names, passages, priorities });
+  if (terrain_tags.values.some((entry) => !Number.isSafeInteger(entry) || entry < TERRAIN_TAG_MIN || entry > TERRAIN_TAG_MAX)) {
+    throw new TypeError("TILESET_RECORD_INVALID: terrain_tags values must be integers from 0 through 17");
+  }
+  return Object.freeze({ id, tileset_name: input.tileset_name, autotile_names, passages, priorities, terrain_tags });
+}
+
+export function oneDimensionalIndexTable(values: readonly number[]): ProjectedTable {
+  return validateTable({
+    dimensions: 1,
+    xSize: values.length,
+    ySize: 1,
+    zSize: 1,
+    values,
+  }, "index-table");
+}
+
+export function migrateLegacyTilesetRecord(value: unknown, terrain_tags: ProjectedTable, contentId: number): TilesetRecord {
+  const input = exactObject(value, "legacy Tileset", ["id", "tileset_name", "autotile_names", "passages", "priorities"]);
+  return validateTilesetRecord({ ...input, terrain_tags }, contentId);
 }
 
 export function tableAt(table: ProjectedTable, x: number, y = 0, z = 0): number {
@@ -321,17 +376,13 @@ export function mapTilePassable(map: MapRecord, tileset: TilesetRecord, x: numbe
   const bit = passageBits[direction];
   for (const z of [2, 1, 0] as const) {
     const tileId = tableAt(map.data, x, y, z);
-    if (!Number.isSafeInteger(tileId) || tileId < 0 || tileId >= tileset.passages.xSize || tileId >= tileset.priorities.xSize) return false;
+    if (!Number.isSafeInteger(tileId) || tileId < 0 || tileId >= tileset.passages.xSize || tileId >= tileset.priorities.xSize || tileId >= tileset.terrain_tags.xSize) return false;
     const passage = tableAt(tileset.passages, tileId);
     const priority = tableAt(tileset.priorities, tileId);
     if ((passage & bit) !== 0 || (passage & 0x0f) === 0x0f) return false;
     if (priority === 0) return true;
   }
   return true;
-}
-
-export function canMove(map: MapRecord, tileset: TilesetRecord, x: number, y: number, direction: Direction, dx: number, dy: number): boolean {
-  return mapTilePassable(map, tileset, x, y, direction) && mapTilePassable(map, tileset, x + dx, y + dy, (10 - direction) as Direction);
 }
 
 function logicalDimensions(viewport: LogicalViewport): Readonly<{ width: number; height: number }> {
@@ -364,8 +415,8 @@ export function autotileCorners(variant: number): AutotileCorners {
 
 export function assertRenderableTileId(tileId: number, tileset: TilesetRecord): void {
   if (!Number.isSafeInteger(tileId) || tileId <= 0) throw new TypeError(`Unsupported map tile id ${tileId}`);
-  if (tileId >= tileset.passages.xSize || tileId >= tileset.priorities.xSize) {
-    throw new TypeError(`Tileset has no entry for tile id ${tileId}`);
+  if (tileId >= tileset.passages.xSize || tileId >= tileset.priorities.xSize || tileId >= tileset.terrain_tags.xSize) {
+    throw new TypeError(`MAP_TILE_INDEX_INVALID: Tileset has no entry for tile id ${tileId}`);
   }
   if (tileId >= 1 && tileId <= 47) throw new TypeError(`Unsupported map tile id ${tileId}`);
   if (tileId >= 48 && tileId <= 383) {
@@ -439,6 +490,7 @@ export function projectTilesInBounds(
   map: MapRecord,
   tileset: TilesetRecord,
   bounds: TileProjectionBounds,
+  bridgeLevel: number = 0,
 ): readonly VisibleTile[] {
   const tiles: VisibleTile[] = [];
   for (const z of [0, 1, 2] as const) {
@@ -449,7 +501,8 @@ export function projectTilesInBounds(
         assertRenderableTileId(tileId, tileset);
         const blit = projectTileBlit(tileId, tileset);
         const priority = tableAt(tileset.priorities, tileId);
-        const depth = tileVisualDepth(y, priority);
+        const tag = tableAt(tileset.terrain_tags, tileId);
+        const depth = tileVisualDepth(y, priority, tag, bridgeLevel);
         tiles.push(Object.freeze({ x, y, z, tileId, depth, blit }));
       }
     }
@@ -462,8 +515,9 @@ export function projectVisibleTiles(
   tileset: TilesetRecord,
   cameraX: number,
   cameraY: number,
+  bridgeLevel: number = 0,
 ): readonly VisibleTile[] {
-  return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map));
+  return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map), bridgeLevel);
 }
 
 export function tileVisualDepthBias(priority: number): number {
@@ -551,4 +605,284 @@ export function sameChunkSet(left: ProjectionWindow, right: ProjectionWindow): b
   if (left.chunks === right.chunks) return true;
   if (left.chunks.length !== right.chunks.length) return false;
   return left.chunks.every((chunk, index) => chunk === right.chunks[index]);
+}
+
+export function rubyPassageBit(direction: number): number {
+  const shift = Math.trunc(Number(direction) / 2) - 1;
+  const raw = shift >= 0 ? (1 << shift) : (1 >> (-shift));
+  return raw & 0x0f;
+}
+
+export type TerrainQuery =
+  | Readonly<{ status: "known"; tag: number; id: string; sourceLayer: 0 | 1 | 2 | null }>
+  | Readonly<{ status: "invalid"; reason: string }>;
+
+export type PassabilityQuery =
+  | Readonly<{ status: "decided"; passable: boolean; reason: string; bit: number }>
+  | Readonly<{ status: "invalid"; reason: string }>;
+
+const TERRAIN_IDS: Record<number, string> = Object.freeze({
+  0: "None",
+  1: "Ledge",
+  2: "Grass",
+  3: "Sand",
+  4: "Rock",
+  5: "DeepWater",
+  6: "StillWater",
+  7: "Water",
+  8: "Waterfall",
+  9: "WaterfallCrest",
+  10: "TallGrass",
+  11: "UnderwaterGrass",
+  12: "Ice",
+  13: "Neutral",
+  14: "SootGrass",
+  15: "Bridge",
+  16: "Puddle",
+  17: "NoEffect",
+});
+
+function readTileIndex(tileset: TilesetRecord, tileId: number, label: string): { ok: true; passage: number; priority: number; tag: number } | { ok: false; reason: string } {
+  if (!Number.isSafeInteger(tileId)) return { ok: false, reason: `${label}: tileId is not a safe integer` };
+  if (tileId < 0) return { ok: false, reason: `MAP_TILE_INDEX_INVALID: negative tile ${tileId}` };
+  if (tileId >= tileset.passages.xSize || tileId >= tileset.priorities.xSize || tileId >= tileset.terrain_tags.xSize) {
+    return { ok: false, reason: `MAP_TILE_INDEX_INVALID: tile ${tileId} outside tileset tables` };
+  }
+  return {
+    ok: true,
+    passage: tableAt(tileset.passages, tileId),
+    priority: tableAt(tileset.priorities, tileId),
+    tag: tableAt(tileset.terrain_tags, tileId),
+  };
+}
+
+export function resolveEffectiveTerrainTag(map: MapRecord, tileset: TilesetRecord, x: number, y: number, bridgeLevel: number): TerrainQuery {
+  if (!Number.isSafeInteger(bridgeLevel) || (bridgeLevel !== 0 && bridgeLevel !== 2)) {
+    return Object.freeze({ status: "invalid", reason: "unsupported-bridgeLevel" });
+  }
+  if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x < 0 || y < 0 || x >= map.width || y >= map.height) {
+    return Object.freeze({ status: "invalid", reason: "invalid-coordinates" });
+  }
+  for (const z of [2, 1, 0] as const) {
+    const tileId = tableAt(map.data, x, y, z);
+    if (tileId === 0) continue;
+    const lookup = readTileIndex(tileset, tileId, "terrain");
+    if (!lookup.ok) return Object.freeze({ status: "invalid", reason: lookup.reason });
+    if (lookup.tag === TERRAIN_NONE || lookup.tag === TERRAIN_NEUTRAL) continue;
+    if (lookup.tag === TERRAIN_BRIDGE && bridgeLevel === 0) continue;
+    return Object.freeze({
+      status: "known",
+      tag: lookup.tag,
+      id: TERRAIN_IDS[lookup.tag] ?? "Unknown",
+      sourceLayer: z,
+    });
+  }
+  return Object.freeze({ status: "known", tag: TERRAIN_NONE, id: "None", sourceLayer: null });
+}
+
+export function evaluatePassability(map: MapRecord, tileset: TilesetRecord, x: number, y: number, direction: number, bridgeLevel: number): PassabilityQuery {
+  if (!Number.isSafeInteger(bridgeLevel) || (bridgeLevel !== 0 && bridgeLevel !== 2)) {
+    return Object.freeze({ status: "invalid", reason: "unsupported-bridgeLevel" });
+  }
+  if (![0, 2, 4, 6, 8].includes(direction)) {
+    return Object.freeze({ status: "invalid", reason: "invalid-direction" });
+  }
+  const bit = rubyPassageBit(direction);
+  if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x < 0 || y < 0 || x >= map.width || y >= map.height) {
+    return Object.freeze({ status: "decided", passable: false, reason: "invalid-coordinates", bit });
+  }
+  for (const z of [2, 1, 0] as const) {
+    const tileId = tableAt(map.data, x, y, z);
+    if (tileId === 0) continue;
+    const lookup = readTileIndex(tileset, tileId, "passability");
+    if (!lookup.ok) return Object.freeze({ status: "invalid", reason: lookup.reason });
+    if (lookup.tag === TERRAIN_BRIDGE && bridgeLevel === 0) continue;
+    if (lookup.tag === TERRAIN_BRIDGE && bridgeLevel > 0) {
+      const ok = (lookup.passage & bit) === 0 && (lookup.passage & 0x0f) !== 0x0f;
+      return Object.freeze({ status: "decided", passable: ok, reason: ok ? "bridge-layer-passable" : "bridge-layer-blocked", bit });
+    }
+    if (lookup.tag === TERRAIN_NEUTRAL) continue;
+    if ((lookup.passage & bit) !== 0 || (lookup.passage & 0x0f) === 0x0f) {
+      return Object.freeze({ status: "decided", passable: false, reason: "passage-blocked", bit });
+    }
+    if (lookup.priority === 0) {
+      return Object.freeze({ status: "decided", passable: true, reason: "priority-0", bit });
+    }
+  }
+  return Object.freeze({ status: "decided", passable: true, reason: "default-true-after-layers", bit });
+}
+
+export function canMove(
+  map: MapRecord,
+  tileset: TilesetRecord,
+  x: number,
+  y: number,
+  direction: Direction,
+  dx: number,
+  dy: number,
+  bridgeLevel: number = 0,
+): boolean {
+  const source = evaluatePassability(map, tileset, x, y, direction, bridgeLevel);
+  const target = evaluatePassability(map, tileset, x + dx, y + dy, (10 - direction) as Direction, bridgeLevel);
+  return source.status === "decided" && source.passable && target.status === "decided" && target.passable;
+}
+
+export type MovementPlan =
+  | Readonly<{ kind: "blocked"; direction: Direction }>
+  | Readonly<{ kind: "walk"; fromX: number; fromY: number; toX: number; toY: number; direction: Direction; durationMs: typeof WALK_DURATION_MS }>
+  | Readonly<{
+    kind: "jump";
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    skippedX: number;
+    skippedY: number;
+    direction: Direction;
+    durationMs: typeof JUMP_DURATION_MS;
+    peakPx: number;
+    peakRule: typeof JUMP_PEAK_RULE;
+  }>;
+
+function facingIsLedge(map: MapRecord, tileset: TilesetRecord, x: number, y: number, direction: Direction, bridgeLevel: number): boolean {
+  const { dx, dy } = { 2: { dx: 0, dy: 1 }, 4: { dx: -1, dy: 0 }, 6: { dx: 1, dy: 0 }, 8: { dx: 0, dy: -1 } }[direction];
+  const facing = resolveEffectiveTerrainTag(map, tileset, x + dx, y + dy, bridgeLevel);
+  return facing.status === "known" && facing.tag === TERRAIN_LEDGE;
+}
+
+export function planMovement(map: MapRecord, tileset: TilesetRecord, x: number, y: number, direction: Direction, bridgeLevel: number): MovementPlan {
+  const delta = { 2: { dx: 0, dy: 1 }, 4: { dx: -1, dy: 0 }, 6: { dx: 1, dy: 0 }, 8: { dx: 0, dy: -1 } }[direction];
+  const walkable = canMove(map, tileset, x, y, direction, delta.dx, delta.dy, bridgeLevel);
+  if (walkable && facingIsLedge(map, tileset, x, y, direction, bridgeLevel)) {
+    const skippedX = x + delta.dx;
+    const skippedY = y + delta.dy;
+    const toX = x + delta.dx * 2;
+    const toY = y + delta.dy * 2;
+    const landing = evaluatePassability(map, tileset, toX, toY, 0, bridgeLevel);
+    const inMap = toX >= 0 && toY >= 0 && toX < map.width && toY < map.height;
+    if (landing.status === "decided" && landing.passable && inMap) {
+      return Object.freeze({
+        kind: "jump",
+        fromX: x,
+        fromY: y,
+        toX,
+        toY,
+        skippedX,
+        skippedY,
+        direction,
+        durationMs: JUMP_DURATION_MS,
+        peakPx: jumpPeakPx(2),
+        peakRule: JUMP_PEAK_RULE,
+      });
+    }
+    return Object.freeze({ kind: "blocked", direction });
+  }
+  if (walkable) {
+    return Object.freeze({
+      kind: "walk",
+      fromX: x,
+      fromY: y,
+      toX: x + delta.dx,
+      toY: y + delta.dy,
+      direction,
+      durationMs: WALK_DURATION_MS,
+    });
+  }
+  return Object.freeze({ kind: "blocked", direction });
+}
+
+export type MapAction =
+  | Readonly<{
+    kind: "bridge";
+    mapId: number;
+    eventId: number;
+    pageIndex: number;
+    commandIndex: number;
+    trigger: 1;
+    occupied: readonly Readonly<{ x: number; y: number }>[];
+    op: "bridge-on" | "bridge-off";
+    height: 2 | null;
+    through: boolean;
+    emptyGraphic: boolean;
+  }>
+  | Readonly<{
+    kind: "opaque-related";
+    mapId: number;
+    eventId: number;
+    pageIndex: number;
+    occupied: readonly Readonly<{ x: number; y: number }>[];
+    reason: string;
+  }>;
+
+export interface MapActionRecord {
+  readonly id: number;
+  readonly schemaVersion: typeof MAP_ACTION_SCHEMA_VERSION;
+  readonly actions: readonly MapAction[];
+  readonly opaqueRelated: readonly Extract<MapAction, { kind: "opaque-related" }>[];
+}
+
+export function emptyMapActionRecord(mapId: number): MapActionRecord {
+  return Object.freeze({
+    id: mapId,
+    schemaVersion: MAP_ACTION_SCHEMA_VERSION,
+    actions: Object.freeze([]),
+    opaqueRelated: Object.freeze([]),
+  });
+}
+
+export function validateMapActionRecord(value: unknown, contentMapId: number): MapActionRecord {
+  const input = exactObject(value, "MapAction", ["id", "schemaVersion", "actions", "opaqueRelated"]);
+  const id = integer(input.id, "MapAction.id");
+  if (id !== contentMapId) throw new TypeError("MapAction.id does not equal its Content key");
+  if (input.schemaVersion !== MAP_ACTION_SCHEMA_VERSION) throw new TypeError("MAP_ACTION_INVALID: unsupported schemaVersion");
+  if (!Array.isArray(input.actions) || !Array.isArray(input.opaqueRelated)) throw new TypeError("MapAction actions/opaqueRelated must be arrays");
+  const actions = Object.freeze(input.actions.map((item, index) => {
+    const label = `MapAction.actions[${index}]`;
+    const record = object(item, label);
+    if (record.kind === "opaque-related") {
+      throw new TypeError(`${label} opaque-related entries belong in opaqueRelated`);
+    }
+    const action = exactObject(item, label, ["kind", "mapId", "eventId", "pageIndex", "commandIndex", "trigger", "occupied", "op", "height", "through", "emptyGraphic"]);
+    if (action.kind !== "bridge") throw new TypeError(`${label}.kind must be bridge`);
+    if (action.trigger !== 1) throw new TypeError(`${label}.trigger must be 1`);
+    if (action.op !== "bridge-on" && action.op !== "bridge-off") throw new TypeError(`${label}.op must be bridge-on or bridge-off`);
+    if (action.op === "bridge-on" && action.height !== 2) throw new TypeError(`${label} bridge-on height must be 2`);
+    if (action.op === "bridge-off" && action.height !== null) throw new TypeError(`${label} bridge-off height must be null`);
+    if (!Array.isArray(action.occupied) || action.occupied.length < 1) throw new TypeError(`${label}.occupied must be non-empty`);
+    if (typeof action.through !== "boolean") throw new TypeError(`${label}.through must be a boolean`);
+    if (typeof action.emptyGraphic !== "boolean") throw new TypeError(`${label}.emptyGraphic must be a boolean`);
+    return Object.freeze({
+      kind: "bridge" as const,
+      mapId: integer(action.mapId, `${label}.mapId`),
+      eventId: integer(action.eventId, `${label}.eventId`),
+      pageIndex: integer(action.pageIndex, `${label}.pageIndex`, false),
+      commandIndex: integer(action.commandIndex, `${label}.commandIndex`, false),
+      trigger: 1 as const,
+      occupied: Object.freeze(action.occupied.map((tile, tileIndex) => occupiedPoint(tile, `${label}.occupied[${tileIndex}]`))),
+      op: action.op,
+      height: action.height as 2 | null,
+      through: action.through,
+      emptyGraphic: action.emptyGraphic,
+    });
+  }));
+  const opaqueRelated = Object.freeze(input.opaqueRelated.map((item, index) => {
+    const label = `MapAction.opaqueRelated[${index}]`;
+    const record = exactObject(item, label, ["kind", "mapId", "eventId", "pageIndex", "occupied", "reason"]);
+    if (record.kind !== "opaque-related") throw new TypeError(`${label}.kind must be opaque-related`);
+    if (typeof record.reason !== "string" || record.reason.length === 0) throw new TypeError(`${label}.reason must be non-empty`);
+    if (!Array.isArray(record.occupied) || record.occupied.length < 1) throw new TypeError(`${label}.occupied must be non-empty`);
+    return Object.freeze({
+      kind: "opaque-related" as const,
+      mapId: integer(record.mapId, `${label}.mapId`),
+      eventId: integer(record.eventId, `${label}.eventId`),
+      pageIndex: integer(record.pageIndex, `${label}.pageIndex`, false),
+      occupied: Object.freeze(record.occupied.map((tile, tileIndex) => occupiedPoint(tile, `${label}.occupied[${tileIndex}]`))),
+      reason: record.reason,
+    });
+  }));
+  return Object.freeze({ id, schemaVersion: MAP_ACTION_SCHEMA_VERSION, actions, opaqueRelated });
+}
+
+export function jumpPeakPx(tileDistance = 2): number {
+  return (tileDistance * TILE_SIZE * 3) / 8;
 }
