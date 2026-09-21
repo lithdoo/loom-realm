@@ -46,6 +46,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Audit historical-document inbound references (temporary)
+        run: python3 scripts/doc-cleanup-audit.py
+
       - name: Validate Markdown links
         run: npm run docs:check-links
 
