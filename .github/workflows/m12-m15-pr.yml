@@ -1,0 +1,166 @@
+name: M12-M15 PR qualification
+
+on:
+  pull_request:
+
+# Superseded PR commits must not compete with the current head. Main and manual
+# canonical qualifications live in m12.yml through m15.yml and are unaffected.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  m12:
+    name: M12 / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Run the M12 closure and check PR coverage
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          (npm run test:m12 && node --test test/ci-pr-coverage.test.mjs) | tee artifacts/m12-content-node-${{ matrix.node }}.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m12-content-node-${{ matrix.node }}
+          path: artifacts/m12-content-node-${{ matrix.node }}.tap
+          if-no-files-found: error
+
+  m13:
+    name: M13 delta / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install qualification Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run M13-only tests, boundaries and package check
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          npm run test:m13:pr | tee artifacts/m13-web-presentation-node-${{ matrix.node }}.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m13-web-presentation-node-${{ matrix.node }}
+          path: artifacts/m13-web-presentation-node-${{ matrix.node }}.tap
+          if-no-files-found: error
+
+  m14:
+    name: M14 delta / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install qualification Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run M14-only tests, boundaries and package check
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          npm run test:m14:pr | tee artifacts/m14-map-node-${{ matrix.node }}.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m14-map-node-${{ matrix.node }}
+          path: artifacts/m14-map-node-${{ matrix.node }}.tap
+          if-no-files-found: error
+
+  m15:
+    name: M15 delta / Node 24
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Check out frozen Hostra
+        uses: actions/checkout@v6
+        with:
+          repository: lithdoo/hostra
+          ref: d863beab3c59c3bd4f271514a228fa8fee0bf5b6
+          path: .qualification/hostra
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install Chromium and frozen Hostra runtime
+        run: |
+          npx playwright install --with-deps chromium
+          npm ci --prefix .qualification/hostra --no-audit --no-fund
+          test -x .qualification/hostra/packages/hostra/electron_bin/electron
+          sandbox=.qualification/hostra/packages/hostra/electron_bin/chrome-sandbox
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
+      - name: Run M15-only Desktop and Hostra tests
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+          HOSTRA_SOURCE_DIR: ${{ github.workspace }}/.qualification/hostra
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          xvfb-run -a npm run test:m15:pr | tee artifacts/m15-desktop-node-24.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m15-desktop-node-24
+          path: artifacts/m15-desktop-node-24.tap
+          if-no-files-found: error
+
+  qualification:
+    name: M12-M15 PR qualification
+    runs-on: ubuntu-latest
+    needs: [m12, m13, m14, m15]
+    if: always()
+    env:
+      M12_RESULT: ${{ needs.m12.result }}
+      M13_RESULT: ${{ needs.m13.result }}
+      M14_RESULT: ${{ needs.m14.result }}
+      M15_RESULT: ${{ needs.m15.result }}
+    steps:
+      - name: Require every matrix and E2E job to succeed
+        run: |
+          for result in "$M12_RESULT" "$M13_RESULT" "$M14_RESULT" "$M15_RESULT"; do
+            if [ "$result" != success ]; then
+              printf 'A milestone job did not succeed: %s\n' "$result" >&2
+              exit 1
+            fi
+          done
