@@ -404,31 +404,98 @@ CommonEvents.rxdata 中 command 209：**0**。
 
 ---
 
-## 5. 图片尺寸与帧布局统计
+## 5. `Graphics/Characters` 211 张：哪些是行走图，哪些不是
 
-`Graphics/Characters` **211** 张（ZIP 与 FSDB 计数一致）。**全部** 宽高可被 4 整除。`$`/`!` 前缀 **0**。文件名含 `offset`：**2**（`boy_fish_offset`、`girl_fish_offset`，384×320 → 单帧 96×80）。无 `boy.png`（有 `boy_run`/`boy_bike`/`boy_surf`）。
+目录名是 Characters，**不等于**里面全是行走图。官方 v21.1 把事件能引用的地图图都丢进这个文件夹：人、宝可梦、门、树、球、墙、冲浪底座、钓鱼姿势、宝可梦中心治疗球。引擎对其中绝大多数仍按整图 `/4` 切帧，但**行/列的语义不是统一的“四向走步”**。
 
-| 尺寸 | 张数 | 4×4 单帧 | 主要含义（观察） |
+本次对 211 张全部做了 IHDR + RGBA 解码（含 4 位索引 `doors7.png`）、4×4 格占用、与 69 张地图事件 `character_name` 对账，并对门/球/浆果/卡比兽/电话人等抽样看图。占用哈希（8×8 剪影）会把外形接近的 16 格判成 `uniqueMasks=1`（如 `NPC 03`、`Object ball`、多数 `doors*`），**不能单靠占用断定是不是行走图**。
+
+### 5.1 引擎怎么切
+
+对照源码 `Sprite_Character`：非 tileset tile 时 `@cw = width/4`，`@ch = height/4`，`sx = pattern * cw`，`sy = ((direction-2)/2) * ch`。对照源码 **不再** 使用 RMXP 的“无 `$` 则一张图 8 个人物”。本套 `$`/`!` 前缀 **0**。
+
+例外（**不是** Sprite_Character 切 4×4）：
+
+- `berrytreedry` / `berrytreedamp` / `berrytreewet`：`BerryPlantMoistureSprite` 用 `IconSprite.setBitmap` **整图**当湿度图标（32×32）。若按 4×4 会切成 8×8 碎块。
+- `base_surf` / `base_dive`：`Sprite_SurfBase` 仍按 `/4` 切，但画在玩家**脚下**，用 `pattern_surf` 做起伏，不是玩家/NPC 行走图。
+
+“可被 4 整除”只说明当前 Browser **不会抛** `Character sheet must be 4 by 4`。不证明行=方向、列=走步。
+
+### 5.2 分类总表（211 = 119 行走图格式 + 92 其它）
+
+这里的“行走图格式”= 四行当作方向 2/4/6/8、列当作 pattern 的角色表（含跑/骑/冲浪/钓鱼姿势、坐姿、打电话）。不是说这些角色在本套地图上真的会走。
+
+| 类别 | 张数 | 是否行走图 | 典型尺寸 / 单帧 | 行、列实际含义 | 地图事件引用 |
+| --- | --- | ---: | --- | --- | --- |
+| `trainer_*` 训练家角色表 | 70 | **是** | 68×128×192（32×48）；2×192×192 | 四向走步 | 28 张被事件引用；Red/Leaf 是 PlayerMetadata WalkCharset，主角不是 Event |
+| `NPC 01`–`28` 人形 | 28 | **是** | 128×192（32×48） | 四向走步；`NPC 08` 为坐姿四向 | 18 张被引用 |
+| `phone001` | 1 | **是** | 128×192（32×48） | 打电话姿势的四向走步表 | 1 张地图、2 页 |
+| `Pokemon 01`–`12` | 12 | **是**（帧数不齐） | 见 §4.2 | 四向；部分缺列 | 仅 09、12 |
+| 玩家跑/骑/冲浪 | 8 | **是**（换动作，不是默认走） | run/surf 32×48；bike 48×48；fish 96×80 | 四向；钓鱼文件名含 `offset` | 事件 0；只在 PBS `RunCharset`/`CycleCharset`/`SurfCharset`/`FishCharset` |
+| `NPC 29` | 1 | **否**（名字叫 NPC） | 192×192（48×48） | 16 格同一只睡着的卡比兽 | 事件 0 |
+| `doors1`–`doors9` | 9 | **否** | 7×128×128；`doors8/9` 128×192 | 门样式/开门帧，不是人物朝向 | 8 张被引用；常配 command 201 |
+| `Object *` | 5 | **否** | 全部 128×128 | 球/岩/树；岩和树的**行是破坏阶段** | 5 张都有引用 |
+| `berrytree_*` 浆果生长表 | 67 | **否** | 128×256（32×64） | **行=生长阶段**（发芽/长高/开花/结果），列=摇晃 | 6 张静态写在事件上；运行时还可改名 |
+| `berrytreeplanted` | 1 | **否** | 128×256 | 刚种下的土堆，16 格同一图形 | 事件 0（`BerryPlantSprite` 运行时赋值） |
+| `berrytreedry/damp/wet` | 3 | **否** | 32×32 整图图标 | 土壤湿度，不切 4×4 | 事件 0 |
+| `Healing balls 1/2` | 2 | **否** | 256×192（64×48） | 宝可梦中心机台上的球 | 各 18 页 / 6 张地图；全部 `walk_anime=false` |
+| `e4wall` / `elevatorwall` | 2 | **否** | 256×256 / 128×320 | 墙/电梯门，多列空 | 有引用 |
+| `base_surf` / `base_dive` | 2 | **否** | 256×256（64×64） | 冲浪/潜水载具，四向起伏 | 事件 0；`Sprite_SurfBase` 硬编码路径 |
+
+无 `boy.png` / `girl.png`。默认走是 `trainer_POKEMONTRAINER_Red` / `_Leaf`。
+
+### 5.3 行走图（119 张）要记住的例外
+
+**真实数据 + 看图：**
+
+- `NPC 03`：小孩四向行走图，16 格剪影几乎一样，占用哈希会误判成“不是四向”。
+- `NPC 08`：坐在地上的四向表，不是站立走步，但仍是角色朝向表。
+- `NPC 29`：**不是行走图**。看图是睡着的卡比兽铺满 16 格，归入物体，见上表。
+- `phone001`：拿电话的人形 4×4，归入行走图格式。
+- `Pokemon 09`（Mew，有地图引用）：仅左两列有像素。看图左列偏灰、右列粉色，更像闪光/普通两套四向，而不是 4 帧走步（**像素观察**，未跑窗口）。
+- `Pokemon 12`（Deoxys，有地图引用）：4 行×3 列走步，第 4 列空；单帧 64×64。
+- `Pokemon 04/08`：第 4 列空（12 格有像素）。
+- 钓鱼 `boy_fish_offset` / `girl_fish_offset`：四向抛竿姿势，不是走步。原版 `character_name[/offset/i]` 时 `oy = ch-16`。当前 Browser **没有**该规则。
+
+PBS `metadata.txt` 玩家段（两名角色）引用的行走图文件：
+
+| 字段 | 玩家 1 | 玩家 2 |
+| --- | --- | --- |
+| `WalkCharset` | `trainer_POKEMONTRAINER_Red` | `trainer_POKEMONTRAINER_Leaf` |
+| `RunCharset` | `boy_run` | `girl_run` |
+| `CycleCharset` | `boy_bike` | `girl_bike` |
+| `SurfCharset` / `DiveCharset` | `boy_surf` | `girl_surf` |
+| `FishCharset` / `SurfFishCharset` | `boy_fish_offset` | `girl_fish_offset` |
+
+对照源码 `Game_Player#set_movement_type` 按上述字段换图。当前产品只加载 `game.json` 里的那一张 WalkCharset。
+
+训练家 70 张里，地图事件用到 28 张（`trainer_YOUNGSTER`、`trainer_SCIENTIST` 等）。其余 42 张在目录中，包括主角 Red/Leaf 和未投放的馆主/四天王等。
+
+### 5.4 明确不是行走图的 92 张
+
+**门（9）：** `doors1`–`doors9`。看图是门板/开门序列。`doors2` 无事件引用。有引用的 8 张里，多数页面带 command 201（进门传送）。占用上 16 格剪影几乎相同，因为门框差不多大。
+
+**地表物体（5+1）：** `Object ball`（16 格同一精灵球）、`Object boulder`、`Object rock`（行=砸碎阶段）、`Object tree 1/2`（行=砍树阶段）、以及误放在 NPC 名下的 `NPC 29`（睡着的卡比兽）。
+
+**浆果（71）：** 对照源码 `BerryPlantSprite#set_event_graphic`：`growth_stage` 1 → `berrytreeplanted` + `turn_down`；≥2 → `berrytree_{ITEM}`，并用 `turn_down/left/right/up` 选**生长阶段**，不是朝向。湿度三张是 32×32 整图图标。本套有 8 个名称含 `berryplant` 的事件、8 处脚本 `pbBerryPlant`；另有 6 张浆果生长图被直接写在事件页上。
+
+**机台 / 墙 / 载具（6）：** 治疗球、四天王墙、电梯墙、冲浪/潜水底座。`e4wall` 只有第 1 列有像素（4 格墙面）；`elevatorwall` 同样偏单列。
+
+### 5.5 尺寸直方图（与分类对照）
+
+| 尺寸 | 张数 | 4×4 单帧 | 实际内容 |
 | --- | --- | --- | --- |
-| 128×192 | 103 | 32×48 | 标准人形（Player、多数 NPC、训练家） |
-| 128×256 | 68 | 32×64 | 几乎全是 `berrytree_*` |
-| 128×128 | 21 | 32×32 | 物、部分 `Pokemon 0N`、部分门 |
-| 192×192 | 7 | 48×48 | 自行车、个别 NPC/Pokemon |
+| 128×192 | 103 | 32×48 | 人形行走图为主（NPC、trainer、run/surf、`phone001`）；**例外** `doors8/9` 是高门 |
+| 128×256 | 68 | 32×64 | 浆果生长表 67 + `berrytreeplanted` |
+| 128×128 | 21 | 32×32 | 门 7 张、物体 5、Pokemon 9 张 |
+| 192×192 | 7 | 48×48 | `boy/girl_bike`、`NPC 29`、部分 Pokemon/trainer |
 | 256×256 | 4 | 64×64 | `base_surf/dive`、`e4wall`、`Pokemon 12` |
 | 256×192 | 2 | 64×48 | `Healing balls 1/2` |
 | 384×320 | 2 | 96×80 | 钓鱼 offset |
-| 32×32 | 3 | 8×8 | 浆果状态小图 |
+| 32×32 | 3 | （整图图标） | 浆果湿度 |
 | 128×320 | 1 | 32×80 | `elevatorwall` |
 
-“可被 4 整除”只说明 Browser **不会抛** `Character sheet must be 4 by 4`。不证明：
-
-- 行=方向、列=走步
-- 空列不是有意的 2/3 帧表
-- 战斗图/图标/浆果树适用同一套行走规则
-
-对照源码 **不再** 使用 RMXP 的“无 `$` 则一张图 8 个人物”。`Sprite_Character` 对任意 Characters 图整张 `/4`。本套无 `$` 与该实现一致。
-
-`offset`：原版 `character_name[/offset/i]` 时 `oy = ch-16`。当前 Browser **没有** 该规则；用钓鱼图当 Player 会脚点偏低。**需要明确适配**（若要支持），或约定不把 offset 图当普通行走图。
+`offset`：若要支持钓鱼图当 Player，**需要明确适配**锚点；或约定不把 offset 图当普通行走图。
 
 ---
 
@@ -440,7 +507,7 @@ CommonEvents.rxdata 中 command 209：**0**。
 | 普通 NPC | `NPC 06`/`NPC 01` 128×192；`NPC 29` 192×192 | 同 4×4 公式 | 数学可切帧；**无第二 sprite** | 多实体、独立定位、碰撞是否仍 1×1 | **静态格式看似兼容，尚未运行验证** |
 | 实际移动 NPC | 仅 Map69 E4 游泳者 128×192 + `move_random_range(2,2)` | 素材同人形；移动靠 Ruby | Runtime 不跑该脚本、不画该事件 | NPC 运动模型；不可执行原版脚本 | 素材静态看似兼容；**运动未实现** |
 | 地图宝可梦 | 事件只用 `Pokemon 09`、`Pokemon 12`；另有未引用的 01–11 | 09 仅两列不透明；12 为 64×64 且缺第 4 列 | 硬切 4×4 会错切或空白帧 | 非 4 帧、非 32×48、页切换空图 | **需要明确适配**（09/12）；01 类 **静态看似兼容、无事件引用、未运行验证** |
-| 特殊尺寸 / 非角色 | 门 128×128；浆果 128×256；图标 128×64；战斗 160×160；钓鱼 384×320 | 门用“转向”做动画；图标是 2×64 横条；战斗图非 charset | 多数能通过整除检查但语义错误 | 素材类型、横条切帧、offset 锚点 | **需要明确适配** 或不当作角色素材 |
+| 特殊尺寸 / 非角色 | 门 9 张、物体 5 张、`NPC 29` 卡比兽、浆果 71、治疗球、墙、冲浪底座；`Graphics/Pokemon` 图标 128×64 / 战斗 160×160 | 浆果行=生长阶段；岩/树行=破坏阶段；湿度图整图不切 4×4 | 多数能通过整除检查但语义错误 | 素材类型；不要把 Characters 目录当成行走图目录 | **需要明确适配** 或不当作角色素材 |
 | 跟随宝可梦专用图 | 官方包中 **未发现** Followers 目录 | — | — | 若业务需要跟随，素材不在 v21.1 Pokemon 目录里 | **未发现** |
 
 ---
@@ -457,7 +524,7 @@ CommonEvents.rxdata 中 command 209：**0**。
 | 静止 / 行走动画配置 | 硬编码 pattern 0 与 1↔3 | 浆果 `step_anime`；原版每格两帧 | 原地动画、多帧走步无法表达 | 第一版 NPC 可复用 Player 两帧/步；`step_anime` 可后补 |
 | 视觉锚点与逻辑占格 | 锚点硬编码；占格恒 1×1 | 高精灵、offset 钓鱼图、`size(w,h)` 事件 | 大图踩格错、offset 脚点错 | **占格与贴图必须分开**。默认 1×1 占格 + 脚对齐格底，可覆盖多数 32×48 NPC |
 | 不同动作不同图 | 无；RunCharset 不切换 | `boy_run`/`boy_bike`/`boy_surf` 独立文件 | 不能跑/骑 | 第一版可不做；不要把多动作文件名写进必填字段 |
-| 格式版本 / 素材类型 | 无 | Characters 行走图 vs Pokemon Front vs Icons | 误把 160×160 当 charset | **建议有一个粗类型或约定目录**，哪怕只是文档约定 `character-sheet-4x4` |
+| 格式版本 / 素材类型 | 无 | Characters 里混着行走图、门、浆果、物体；另有 Pokemon Front / Icons | 误把 160×160 或 `doors7`、`berrytree_*` 当 charset | **建议有一个粗类型**，不要假设 `Characters/` = 行走图 |
 
 不要因为 Essentials 有 Event Page、`$` 前缀或 693 个 Item 就把它们塞进 NPC 素材协议。本套数据 **没有** `$` 前缀；Page 条件属于身份/状态，不在本次范围。
 
@@ -476,6 +543,7 @@ CommonEvents.rxdata 中 command 209：**0**。
 - 全库几乎无自主走格 NPC；唯一 move_type=3 是游泳者脚本；209 位移只作用于玩家。
 - 地图上的宝可梦行走图是 `Characters/Pokemon 0N`，不是 `Graphics/Pokemon/Front`。
 - 官方包无 Followers 图像目录。
+- `Graphics/Characters` 211 张里 **119** 张是四向角色表（含跑/骑/冲浪/钓鱼/坐姿/电话），**92** 张是门/物体/浆果/墙/机台/载具。`NPC 29` 虽叫 NPC，看图是睡着的卡比兽。`phone001` 是行走图格式。浆果湿度 32×32 走 IconSprite 整图，不切 4×4。
 
 ### 8.2 静态推论（未跑窗口）
 
@@ -524,11 +592,12 @@ CommonEvents.rxdata 中 command 209：**0**。
 ```text
 对官方 ZIP 再算 size/sha256 → 与 OFFICIAL_ARCHIVE_IDENTITY 一致
 列出本地 FSDB Graphics 与解码 69 张地图
-→ Characters 211；尺寸直方图见 §5；move_type 687×0 + 1×3
+→ Characters 211；尺寸直方图与分类见 §5；move_type 687×0 + 1×3
 → command 209 = 416，位移目标仅玩家
 → Pokemon 子目录仅 Front/Back/Icons/Footprints/Eggs/Shadow
-→ Characters 211 名与 896 物种 ID 交叉匹配为 0；行走图仅 Pokemon 01–12
-→ 事件仅引用 Pokemon 09 与 12
+→ Characters 211 名与 896 物种 ID 交叉匹配为 0
+→ 119 张行走图格式 + 92 张非行走图（门/物体/浆果/墙/机台/载具）
+→ 事件仅引用 Pokemon 09 与 12；NPC 29 为卡比兽不是行走图；phone001 是打电话角色表
 ```
 
 临时脚本与 JSON **未提交**。
