@@ -1,7 +1,8 @@
 name: M15 Desktop full E2E qualification
 
+# PR runs are deduplicated in m12-m15-pr.yml. Keep this full canonical
+# M12 -> M13 -> M14 -> M15 closure for main and manual release qualification.
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:

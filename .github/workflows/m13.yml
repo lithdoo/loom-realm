@@ -1,7 +1,8 @@
 name: M13 Web Presentation qualification
 
+# PR runs are deduplicated in m12-m15-pr.yml; this workflow retains the
+# historical full M12 -> M13 qualification on main and manual dispatch.
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
