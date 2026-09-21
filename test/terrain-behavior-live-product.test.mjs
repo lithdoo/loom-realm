@@ -217,8 +217,8 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
       },
     });
     await frame.emitEvent(down("ArrowLeft"));
-    frame.fireTimer(250);
     await frame.emitEvent(up("ArrowLeft"));
+    frame.fireTimer(250);
     assert.equal(player(frame.latestState()).x, 20);
     assert.equal(player(frame.latestState()).y, 47);
     assert.equal(player(frame.latestState()).bridgeLevel, 2);

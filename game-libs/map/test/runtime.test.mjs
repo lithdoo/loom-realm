@@ -1084,10 +1084,8 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
-  test("held input after On execute waits for the next input instead of replanning", async (t) => {
-    const world = openTerrain(8, 8, (values, width) => {
-      values[3 + 2 * width + 2 * width * 8] = 387;
-    });
+  test("held input after On execute starts the next walk at the new bridgeLevel", async (t) => {
+    const world = openTerrain(8, 8);
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
@@ -1100,9 +1098,72 @@ describe("map runtime walking", { concurrency: false }, () => {
     });
     await frame.emitEvent(down("ArrowUp"));
     frame.fireTimer(250);
-    assert.equal(player(frame.latestState()).y, 3);
+    assert.equal(player(frame.latestState()).y, 2);
     assert.equal(player(frame.latestState()).bridgeLevel, 2);
-    assert.equal(player(frame.latestState()).motion, null);
+    assert.equal(player(frame.latestState()).motion.durationMs, 250);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("held input walks adjacent On then Off without a second keydown", async (t) => {
+    const world = openTerrain(8, 8);
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": world.tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 22, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+          bridgeAction({ eventId: 20, occupied: [{ x: 3, y: 2 }], op: "bridge-off" }),
+        ]),
+      },
+    });
+    await frame.emitEvent(down("ArrowUp"));
+    frame.fireTimer(250);
+    assert.equal(player(frame.latestState()).y, 2);
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    frame.fireTimer(250);
+    assert.equal(player(frame.latestState()).y, 1);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    frame.abort();
+    await frame.pending;
+  });
+
+  test("On execute publishes bridge tile depth 0 and Off restores priority depth", async (t) => {
+    const world = openTerrain(8, 8, (values, width) => {
+      values[3 + 2 * width + 2 * width * 8] = 387;
+    });
+    const tileset = {
+      ...world.tileset,
+      ...terrainTables(400, (passages, priorities, tags) => {
+        tags[387] = 15;
+        passages[387] = 0;
+        priorities[387] = 4;
+      }),
+    };
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": tileset,
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+          bridgeAction({ eventId: 28, occupied: [{ x: 3, y: 1 }], op: "bridge-off" }),
+        ]),
+      },
+    });
+    const before = view(frame.latestState()).tiles.find((tile) => tile[0] === 3 && tile[1] === 2 && tile[3] === 387);
+    assert.equal(before[4], (2 + 4 + 1) * 32);
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).bridgeLevel, 2);
+    const onBridge = view(frame.latestState()).tiles.find((tile) => tile[0] === 3 && tile[1] === 2 && tile[3] === 387);
+    assert.equal(onBridge[4], 0);
+    assert.ok(view(frame.latestState()).visualEpoch > 1);
+    await stepOnce(frame, "ArrowUp");
+    await stepOnce(frame, "ArrowUp");
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    const offBridge = view(frame.latestState()).tiles.find((tile) => tile[0] === 3 && tile[1] === 2 && tile[3] === 387);
+    assert.equal(offBridge[4], (2 + 4 + 1) * 32);
     frame.abort();
     await frame.pending;
   });

@@ -2171,15 +2171,32 @@ test("jump motion uses 400ms and a peak arc without two walks", { timeout: 30_00
   assert.ok(end > mid, "jump arc is higher at mid-duration than at landing");
 });
 
-test("bridgeLevel 2 raises sprite stack without a permanent max z-index", { timeout: 30_000 }, async (t) => {
+test("bridgeLevel 2 is painted by lowered tile depth not a raised sprite stack", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
   await installTileset(page, "Tilesets/blue", await makeIndexedTileset(page));
-  await paintPair(page, viewData({ bridgeLevel: 0 }));
-  const atGround = await page.evaluate(() => Number.parseInt(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex, 10));
-  await paintPair(page, viewData({ bridgeLevel: 2 }));
-  const onBridge = await page.evaluate(() => Number.parseInt(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex, 10));
-  assert.ok(Number.isFinite(atGround) && Number.isFinite(onBridge), "sprite z-index must be numeric");
-  assert.ok(onBridge > atGround, "bridgeLevel 2 must raise character depth");
-  assert.ok(onBridge < 100_000, "must not use a permanent max z-index");
+  const overlay = regularTile({ depth: 160, tileId: 385 });
+  await paintPair(page, viewData({ tiles: [overlay], bridgeLevel: 0 }));
+  await waitPainted(page, 320, "65");
+  const under = await page.evaluate(() => {
+    const sprite = Number.parseInt(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex, 10);
+    const tiles = [...document.querySelector("lr-map-view").shadowRoot.querySelectorAll("canvas.tile-layer")]
+      .filter((canvas) => !canvas.hidden)
+      .map((canvas) => Number.parseInt(canvas.style.zIndex, 10));
+    return { sprite, tileMax: Math.max(...tiles) };
+  });
+  await paintPair(page, viewData({ tiles: [regularTile({ depth: 0, tileId: 385 })], bridgeLevel: 2, visualEpoch: 2 }));
+  await waitPainted(page, 0, "65");
+  const onBridge = await page.evaluate(() => {
+    const sprite = Number.parseInt(getComputedStyle(document.querySelector("lr-map-sprite")).zIndex, 10);
+    const tiles = [...document.querySelector("lr-map-view").shadowRoot.querySelectorAll("canvas.tile-layer")]
+      .filter((canvas) => !canvas.hidden)
+      .map((canvas) => Number.parseInt(canvas.style.zIndex, 10));
+    return { sprite, tileMax: Math.max(...tiles) };
+  });
+  assert.equal(under.sprite, 65);
+  assert.ok(under.tileMax > under.sprite, "priority-4 bridge must cover the sprite at bridgeLevel 0");
+  assert.equal(onBridge.sprite, 65, "sprite stack must not gain a bridge bonus");
+  assert.ok(onBridge.sprite > onBridge.tileMax, "lowered bridge tiles must sit under the sprite");
+  assert.ok(onBridge.sprite < 100_000, "must not use a permanent max z-index");
 });

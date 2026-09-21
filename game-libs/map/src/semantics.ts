@@ -170,7 +170,8 @@ export const AUTOTILE_QUARTERS = [
   [37, 42, 43, 48], [17, 18, 47, 48], [13, 18, 43, 48], [1, 2, 7, 8],
 ] as const satisfies readonly AutotileQuarterRow[];
 
-export function tileVisualDepth(y: number, priority: number): number {
+export function tileVisualDepth(y: number, priority: number, tag: number = TERRAIN_NONE, bridgeLevel: number = 0): number {
+  if (tag === TERRAIN_BRIDGE && bridgeLevel === 2) return 0;
   if (priority === 0) return 0;
   return (y + priority + 1) * TILE_SIZE;
 }
@@ -489,6 +490,7 @@ export function projectTilesInBounds(
   map: MapRecord,
   tileset: TilesetRecord,
   bounds: TileProjectionBounds,
+  bridgeLevel: number = 0,
 ): readonly VisibleTile[] {
   const tiles: VisibleTile[] = [];
   for (const z of [0, 1, 2] as const) {
@@ -499,7 +501,8 @@ export function projectTilesInBounds(
         assertRenderableTileId(tileId, tileset);
         const blit = projectTileBlit(tileId, tileset);
         const priority = tableAt(tileset.priorities, tileId);
-        const depth = tileVisualDepth(y, priority);
+        const tag = tableAt(tileset.terrain_tags, tileId);
+        const depth = tileVisualDepth(y, priority, tag, bridgeLevel);
         tiles.push(Object.freeze({ x, y, z, tileId, depth, blit }));
       }
     }
@@ -512,8 +515,9 @@ export function projectVisibleTiles(
   tileset: TilesetRecord,
   cameraX: number,
   cameraY: number,
+  bridgeLevel: number = 0,
 ): readonly VisibleTile[] {
-  return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map));
+  return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map), bridgeLevel);
 }
 
 export function tileVisualDepthBias(priority: number): number {

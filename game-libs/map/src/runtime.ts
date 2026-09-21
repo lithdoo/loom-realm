@@ -267,10 +267,11 @@ function selectProjectionWindow(
   motionId: number | null,
   _previous: TileProjectionWindow | undefined,
   layout: MapLayout,
+  bridgeLevel: BridgeLevel,
 ): TileProjectionWindow {
   for (const margin of [4, 3, 2, 1]) {
     const bounds = expandTileBounds(required, margin, loaded.map);
-    const tiles = Object.freeze(projectTilesInBounds(loaded.map, loaded.tileset, bounds).map((tile) => Object.freeze([
+    const tiles = Object.freeze(projectTilesInBounds(loaded.map, loaded.tileset, bounds, bridgeLevel).map((tile) => Object.freeze([
       tile.x,
       tile.y,
       tile.z,
@@ -278,7 +279,7 @@ function selectProjectionWindow(
       tile.depth,
     ]) as TileTuple));
     const candidate: TileProjectionWindow = Object.freeze({ source: loaded, bounds, tiles });
-    if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, layout, 0)) < VIEW_DATA_GUARD) {
+    if (projectionBytes(viewportPayload(loaded, candidate, cameraX, cameraY, cameraMotion, sceneEpoch, visualEpoch, motionId, layout, bridgeLevel)) < VIEW_DATA_GUARD) {
       return candidate;
     }
   }
@@ -391,7 +392,15 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         bridgeLevel: overrides.bridgeLevel ?? bridgeLevel,
       });
 
-      const standingWindow = (loaded: LoadedMap, tileX: number, tileY: number, scene: number, visual: number, layout: MapLayout = acceptedLayout!) => {
+      const standingWindow = (
+        loaded: LoadedMap,
+        tileX: number,
+        tileY: number,
+        scene: number,
+        visual: number,
+        layout: MapLayout = acceptedLayout!,
+        level: BridgeLevel = bridgeLevel,
+      ) => {
         const camera = computeCamera(loaded.map, tileX, tileY, layout);
         return selectProjectionWindow(
           loaded,
@@ -404,6 +413,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           null,
           undefined,
           layout,
+          level,
         );
       };
 
@@ -438,6 +448,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             null,
             window,
             nextLayout,
+            bridgeLevel,
           );
           const screenX = x * 32 - camera.cameraX;
           const screenY = y * 32 - camera.cameraY;
@@ -549,7 +560,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           const nextScene = sceneEpoch + 1;
           const nextVisual = visualEpoch + 1;
           const liveLayout = latestLayout ?? acceptedLayout!;
-          const nextWindow = standingWindow(target, rule.targetX, rule.targetY, nextScene, nextVisual, liveLayout);
+          const nextWindow = standingWindow(target, rule.targetX, rule.targetY, nextScene, nextVisual, liveLayout, 0);
           const nextFacts = facts({
             loaded: target,
             window: nextWindow,
@@ -638,6 +649,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             motionId,
             window,
             acceptedLayout!,
+            bridgeLevel,
           );
           refresh = true;
         }
@@ -723,11 +735,42 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         eventBusy = true;
         const nextLevel: BridgeLevel = action.op === "bridge-on" ? 2 : 0;
         assertBridgeLevel(nextLevel);
+        const levelChanged = nextLevel !== bridgeLevel;
         bridgeLevel = nextLevel;
+        if (levelChanged) {
+          visualEpoch += 1;
+          const camera = computeCamera(current.map, x, y, acceptedLayout!);
+          const required = viewportTileBounds(current.map, camera.cameraX, camera.cameraY, acceptedLayout!);
+          window = selectProjectionWindow(
+            current,
+            required,
+            camera.cameraX,
+            camera.cameraY,
+            null,
+            sceneEpoch,
+            visualEpoch,
+            null,
+            window,
+            acceptedLayout!,
+            bridgeLevel,
+          );
+          activeMove = null;
+        }
+        const viewportSet: Record<string, unknown> = { bridgeLevel };
+        const playerSet: Record<string, unknown> = { bridgeLevel };
+        if (levelChanged) {
+          viewportSet.visualEpoch = visualEpoch;
+          viewportSet.tiles = window.tiles;
+          viewportSet.cameraMotion = null;
+          viewportSet.motionId = null;
+          playerSet.visualEpoch = visualEpoch;
+          playerSet.motion = null;
+          playerSet.motionId = null;
+        }
         domain!.update({
           nodes: [
-            { key: VIEWPORT_KEY, data: { set: { bridgeLevel } as RenderDataSet } },
-            { key: PLAYER_KEY, data: { set: { bridgeLevel } as RenderDataSet } },
+            { key: VIEWPORT_KEY, data: { set: viewportSet as RenderDataSet } },
+            { key: PLAYER_KEY, data: { set: playerSet as RenderDataSet } },
           ],
         });
         eventBusy = false;
@@ -796,12 +839,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         if (hadPendingResize) commitViewportResize();
         const resizeCommitted = hadPendingResize && pendingLayout === null;
         if (resizeCommitted) activeMove = null;
-        const started = startHereOrFront(x, y, true);
-        if (started || eventBusy) {
-          nextStartPattern = 1;
-          if (!resizeCommitted) publishMovementUpdate(x, y, direction, null);
-          return;
-        }
+        startHereOrFront(x, y, true);
+        if (terminalSettled) return;
         if (heldDirections.length > 0) {
           nextStartPattern = nextStartPattern === 1 ? 3 : 1;
           attempt(heldDirections[heldDirections.length - 1]!);

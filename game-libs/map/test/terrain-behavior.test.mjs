@@ -20,7 +20,9 @@ import {
   migrateLegacyTilesetRecord,
   oneDimensionalIndexTable,
   planMovement,
+  projectTilesInBounds,
   resolveEffectiveTerrainTag,
+  tileVisualDepth,
   validateMapActionRecord,
   validateMapRecord,
   validateTilesetRecord,
@@ -242,4 +244,24 @@ test("canMove uses source direction and target reverse with bridgeLevel", () => 
   const bridge = paint(open, 1, 2, 2, 4);
   assert.equal(canMove(bridge, tileset, 1, 1, 2, 0, 1, 0), true);
   assert.equal(canMove(bridge, tileset, 1, 1, 2, 0, 1, 2), false);
+});
+
+test("Bridge tiles drop to depth 0 at bridgeLevel 2 and non-bridge priority is unchanged", () => {
+  const tileset = tilesetWith(400, (_passages, priorities, tags) => {
+    tags[385] = TERRAIN_BRIDGE;
+    priorities[385] = 4;
+    priorities[384] = 4;
+  });
+  const bounds = { minTileX: 1, maxTileX: 1, minTileY: 1, maxTileY: 1 };
+  const bridge = paint(ground(3, 3, 384), 1, 1, 2, 385);
+  const under = projectTilesInBounds(bridge, tileset, bounds, 0).find((tile) => tile.tileId === 385);
+  const on = projectTilesInBounds(bridge, tileset, bounds, 2).find((tile) => tile.tileId === 385);
+  assert.equal(under.depth, (1 + 4 + 1) * 32);
+  assert.equal(under.depth, tileVisualDepth(1, 4, TERRAIN_BRIDGE, 0));
+  assert.equal(on.depth, 0);
+  assert.equal(tileVisualDepth(1, 4, TERRAIN_BRIDGE, 2), 0);
+  const roof = projectTilesInBounds(ground(3, 3, 384), tileset, bounds, 0).find((tile) => tile.tileId === 384);
+  const roofOnBridge = projectTilesInBounds(ground(3, 3, 384), tileset, bounds, 2).find((tile) => tile.tileId === 384);
+  assert.equal(roof.depth, (1 + 4 + 1) * 32);
+  assert.equal(roofOnBridge.depth, roof.depth);
 });

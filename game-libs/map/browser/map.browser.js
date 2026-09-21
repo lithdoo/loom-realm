@@ -1390,7 +1390,7 @@
       const size = sprite._blitPatternSync(prepared.spriteImage, data.direction, pattern, resourceIdentity(data.sprite));
       const frameWidth = size.width;
       const frameHeight = size.height;
-      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0) + (data.bridgeLevel === 2 ? TILE : 0);
+      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
       const left = screenX + prepared.geometry.originX + (32 - frameWidth) / 2;
       const top = screenY + prepared.geometry.originY + 32 - frameHeight;
       const rule = this._spriteRule();
