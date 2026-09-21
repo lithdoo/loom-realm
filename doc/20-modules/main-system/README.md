@@ -1,246 +1,30 @@
-# 程序主系统模块设计
+# Main 与 Runtime：当前实现
 
-> 层级：模块设计  
-> 状态：M8 Implemented / Qualified；M9 Authority Feed Implementation Frozen  
-> 稳定程度：M5/M7/M8 Qualified Baseline / M9 Preimplementation Frozen  
-> 主要定义：Main authority/transaction/recovery、LogicalGameBootstrap、Main-facing narrow Platform view、Renderer authority projection/currentness、M8 DataAuthority policy、M9 Data physical authority projection  
-> 依赖：[系统架构总览](../../10-architecture/system-overview.md)、[平台组合系统](../../10-architecture/platform-composition-system.md)、[运行时启动系统](../../10-architecture/runtime-bootstrap-system.md)、[ADR 0026](../../decisions/0026-session-scoped-platform-instance.md)、[ADR 0027](../../decisions/0027-freeze-renderer-control-v1-preimplementation.md)、[ADR 0028](../../decisions/0028-freeze-m9-desktop-data-broker-preimplementation.md)、[Runtime Control Profile v1](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call v1](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control v1](../../15-contracts/main-renderer-control-v1.md)  
-> 最近复核：2026-09-04
+> 模块入口：`packages/main`、`packages/runtime-control`、`packages/subsystem`、`packages/platform-ports`。这里描述当前模块所有权，不维护旧 M5–M9 阶段签核表；当期验证与后续工作统一见[路线图](../../30-implementation/roadmap.md)。
 
-Main 是 Session / Runtime / Frame / Activation / InputTarget / Renderer currentness / AuthorityRevision / DataAuthority 的 application authority。M9 only projects current physical-binding facts to Platform；it does not move authority to Broker。
+## 所有权
 
----
-
-## 1. Module Shape Through M9
+Main 是唯一的 Session、Runtime、Frame/Stack、Activation、InputTarget、Renderer currentness、AuthorityRevision 和 DataAuthority 应用权威。它串行处理状态变更、运行时错误和终止收敛；平台、Renderer、Data Broker、Hostra 不能各自创建一份应用权威。
 
 ```text
-Main System
-├── LogicalGameBootstrap installer
-├── Runtime Registry / Launch Attempt authority
-├── Runtime Control integration
-├── Frame / Activation / Stack authority
-├── serialized mutation lane
-├── Runtime failure / fixed-point unwind
-├── Renderer authority projector                 // M7
-├── Renderer revision/current participant         // M7
-├── bounded Renderer candidate loop               // M7
-├── ready-derived DataAuthority projection        // M8
-├── current Renderer correlation token            // M9, inert after auth consume
-└── DataConnectionAuthoritySink projection        // M9
+Game Package + Platform PREPARE
+→ LogicalGameBootstrap（仅 logical subsystem key 与 initial input）
+→ Main Session / RuntimeHosting
+→ Runner / Subsystem Frame
+→ Renderer Control current participant
+→ Main DataAuthority → Platform Data provisioning
 ```
 
-No Renderer/Data shadow authority registry、EventBus、StateReplicator、ConnectionRegistry or DataAuthority manager。
+`Main` 只消费平台的窄 capability；不消费 Game Entry 文件路径、模块 URL、Node/Worker 对象、浏览器 DOM 或 Hostra RPC 内容。`DataConnectionAuthoritySink` 仅向平台发布当前权威视图；Desktop Broker 负责物理候选连接，不接管 logical generation/profile 决策。Data carrier 丢失不自动制造新 Session 或 DataAuthority。
 
----
+## 核心行为
 
-## 2. Logical Bootstrap Boundary
+- Runtime launch/auth/ready、Frame 激活与 InputTarget 由 Main 仲裁。`RendererControlBinding.acquire` 只建立物理候选，当前身份只能在合法 hello 事务后切换。
+- 一次 mutation 依照已有 causal barrier 提交；失败遵照固定点 unwind/terminal，不能在平台层额外维护重试、回滚或并行 authority。
+- `renderer-data/1` 的精确子项及当前兼容性见 [Renderer Data Profile](../../15-contracts/renderer-data-profile-v1.md) 和 [Viewport](../../15-contracts/viewport-state-v1.md)，不要引用旧三子项实现状态推断当前主线资格。
 
-Main still receives only：
+## 使用与验证
 
-```ts
-interface LogicalGameBootstrap {
-  readonly subsystemKeys: readonly string[];
-  readonly initial: {
-    readonly subsystemKey: string;
-    readonly input: JsonValue;
-  };
-}
-```
+入口以源码的 public exports 为准。完整可观察语义： [Runtime Control](../../15-contracts/runtime-control-profile-v1.md)、[Frame / Call](../../15-contracts/frame-call-protocol-v1.md)、[Renderer Control](../../15-contracts/main-renderer-control-v1.md)、[Data Connection](../../15-contracts/renderer-subsystem-data-connection-v1.md)。组织方式参阅[系统架构](../../10-architecture/system-overview.md)及[运行承载](../../10-architecture/runtime-hosting-system.md)。
 
-No GameEntry/formatVersion/LaunchPlan/module/path/Node/Worker/endpoint/ticket/provisioner material。
-
----
-
-## 3. Main-facing Platform View Through M9
-
-```ts
-interface MainPlatform {
-  readonly scheduler: DeadlineScheduler;
-  readonly opaqueMaterial: OpaqueMaterialGenerator;
-  readonly runtimeHosting: RuntimeHosting;
-  readonly rendererControl?: RendererControlBinding;
-  readonly dataConnections?: DataConnectionAuthoritySink;
-}
-```
-
-Both Renderer and Data physical capabilities remain optional。M6/headless providers need no fake values。
-
-`dataConnections` is a Main→Platform full-view fact sink, not a Broker/service API。
-
----
-
-## 4. Runtime / Frame Authority — Unchanged
-
-Main retains all M5 Frozen semantics：
-
-```text
-Runtime launch/auth/ready authority
-Frame/Stack/Activation/InputTarget authority
-Response/ACK causal barriers
-post-commit no rollback
-ambiguous mutation → Runtime failure
-fixed-point whole-suffix unwind
-Session terminal + physical termination convergence
-```
-
-Data/Renderer physical failures cannot directly alter these semantics。
-
----
-
-## 5. Renderer Control — M7 Baseline Preserved
-
-`RendererControlBinding.acquire(T,signal)` only arms a candidate physical carrier slot。Renderer-control peer owns hello/version mechanics；Main owns token/currentness/revision。
-
-Hello acceptance remains atomic：preflight exact Snapshot → consume token → install new current → retire old current from future publication。
-
-No second currentness lease/epoch/heartbeat。
-
----
-
-## 6. M8 DataAuthority
-
-Current reachable policy：
-
-```text
-Runtime ready
-→ DataAuthority(S,1,"loomrealm.renderer-data/1")
-
-otherwise
-→ no authority for S
-```
-
-No independent generation allocator/history/connection state。Data transport loss does not alter logical S/G/P or Renderer revision。
-
----
-
-## 7. M9 Current Renderer Correlation
-
-M9 keeps the accepted current Renderer token value only while that peer is current：
-
-```text
-hello acceptance consumes T as credential
-→ T can never authenticate again
-→ retain T only as inert Platform physical correlation
-```
-
-The retained current token participates in Main's live opaque-material duplicate defense。When currentness ends, drop it；no retired-token history。
-
-This is not a new authority field exposed to Renderer or Data application wire。
-
----
-
-## 8. M9 Data Physical Authority View
-
-When a current Renderer exists, Main projects：
-
-```ts
-interface DataConnectionAuthorityView {
-  readonly rendererControlToken: string;
-  readonly entries: readonly {
-    subsystemKey: string;
-    generation: number;
-    dataProfile: string;
-    runtime: HostedRuntime;
-  }[];
-}
-```
-
-Entry source：existing ready-derived Main DataAuthority + exact `RuntimeRecord.hosted` object。
-
-```text
-no current Renderer → null
-current Renderer + no DataAuthority → non-null view with empty entries
-current Renderer + ready S → exact S/1/P + exact HostedRuntime
-```
-
-Order deterministic, authority semantics order-independent。
-
----
-
-## 9. Sink Ordering
-
-Conforming `DataConnectionAuthoritySink.replace()` is synchronous、non-blocking、non-throwing and performs no network/IPC wait。
-
-Main call points：
-
-```text
-Session initialize → replace(null)
-Renderer accepted/replaced → replace(full current view)
-Runtime/DataAuthority visible change → replace(updated full view)
-current Renderer terminal → replace(null)
-Session terminal → replace(null)
-```
-
-All changes occur inside the existing serialized Main mutation/current-switch lane before it completes。
-
-Sink replacement itself does not bump `rendererRevision` and never enters Renderer Snapshot。
-
----
-
-## 10. Renderer Replacement / Data Invalidation
-
-When Main accepts Renderer B over A：
-
-```text
-M7: B becomes current / A loses current authority
-M9: retain B token / drop A token
-M9: replace full B Data authority view
-```
-
-Therefore A physical Data current/pending material becomes stale synchronously in the same Main mutation through the sink。Physical close can converge later。
-
-Old Control/Data late terminal events remain identity-safe and cannot clear B authority。
-
----
-
-## 11. Runtime / Session Invalidation
-
-Runtime leaves ready/fails/terminates：remove its DataAuthority and publish an updated full sink view if a Renderer is current。
-
-Current Renderer terminal without replacement：clear current token and send null。
-
-Session terminal：send null before asynchronous Renderer/Data/Runtime cleanup。Data sink cleanup does not delay Main result。
-
----
-
-## 12. Failure / Representation Isolation
-
-Renderer Control representation failure retains M7 semantics。Data sink transport/cleanup errors are absorbed by the conforming Platform sink and cannot throw through Main mutation。
-
-A provider that throws from `replace()` is non-conforming and fails M9 qualification；Main does not define a new Runtime/Frame recovery/error taxonomy for that contract violation。
-
----
-
-## 13. M9 Qualification
-
-Must prove：
-
-```text
-MainPlatform.dataConnections optional
-initial null
-full view exact current Renderer correlation
-current token auth-consumed yet retained inertly only while current
-live token duplicate-material defense
-exact HostedRuntime object identity in entries
-unique/deterministic exact S/G/P entries
-same-lane replacement on Renderer/Runtime/DataAuthority changes
-current Renderer terminal/session terminal null
-sink replacement does not bump Renderer revision
-M1–M8 paths unchanged when capability absent
-no Broker/ticket/endpoint/candidate state in Main
-```
-
----
-
-## 14. Final Invariants Through M9
-
-1. Main remains platform-neutral and the single Runtime/Frame/Renderer/Data authority owner；
-2. Game/LaunchPlan/transport material remain outside Main；
-3. M7 Renderer authentication/currentness semantics remain unchanged；
-4. M8 DataAuthority remains ready-derived S/1/P in current Phase 1 path；
-5. M9 retains current Renderer token only as inert physical correlation after authentication consumption；
-6. exact HostedRuntime object identifies current physical Data target without new wire identity；
-7. DataConnectionAuthoritySink is optional/full-view/synchronous/non-blocking/non-throwing；
-8. sink update shares existing Main serialized mutation discipline but does not create a new cross-plane protocol/revision；
-9. Data physical failure cannot directly change Runtime/Frame authority；
-10. no shadow authority/event/connection framework is introduced。
+验证使用对应 workspace 测试及当前提交的 M9–M12 集成/qualification；当前被测 SHA、缺口和正式状态仅见[路线图及资格记录](../../30-implementation/roadmap.md)。旧阶段设计与变更原因从 [ADR](../../decisions/README.md) 和 Git 历史追溯。

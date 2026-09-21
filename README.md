@@ -1,247 +1,28 @@
 # LoomRealm
 
-LoomRealm 是一个以 **platform-neutral logical Subsystem topology**、Main authority、capability-oriented role boundaries 与 cross-platform composition 为核心的模块化游戏运行平台。
+LoomRealm 是将逻辑游戏 Runtime 与平台物理组合分离的模块化游戏运行平台。Main 持有 Session/Runtime/InputTarget/DataAuthority，Subsystem 持有业务状态与 RenderDomain；Renderer 维护当前副本并投影。`game-libs/map` 是独立游戏业务库，不属于 framework；Hostra 是桌面的 Electron/BrowserWindow owner。
 
-Phase 1 使用 RPG Maker XP / Pokémon Essentials v21.1 compatibility corpus 验证真实 game consumer；M14 不再把 map 视为 framework package，而是通过 `game-libs/map` + `examples/essentials-v21.1` 验证 framework / game library / concrete game 分层。
+**[文档首页](./doc/index.md) · [已实现核心模块](./doc/20-modules/core/README.md) · [系统架构](./doc/10-architecture/system-overview.md) · [正式契约](./doc/15-contracts/README.md) · [下一阶段路线图](./doc/30-implementation/roadmap.md) · [ADR](./doc/decisions/README.md)**
 
----
-
-## Repository ownership
+## 仓库布局
 
 ```text
-packages/      LoomRealm framework/runtime
-game-libs/     reusable game-domain libraries (M14+)
-examples/      concrete games (M14+)
-apps/          Desktop/PWA product/platform compositions
-tools/         development/import/compatibility tooling
+packages/     通用运行框架、角色与协议实现
+game-libs/    可复用的具体游戏业务库（Map）
+examples/     具体游戏和合法的本地兼容性示例
+apps/         Desktop / 后续 PWA 物理产品组合
+tools/        导入、fixture 和开发工具
+doc/          唯一 VitePress 文档站源目录
 ```
 
-主依赖方向：
+依赖方向：`examples → game-libs → framework public author APIs`。跨模块 ABI 以契约为准；尚欠的 M11/M14/M15 当期资格、地形 RGSS 保真和 M16/M17 仅在路线图追踪，不在 README 维护另一个实时 PASS 表。
 
-```text
-examples → game-libs → public LoomRealm author APIs
-```
-
-Framework 不反向拥有 map/menu/dialogue/battle 等业务 vocabulary。
-
----
-
-## 当前入口
-
-- [产品设计总览](./doc/00-overview/product-vision.md)
-- [系统架构总览](./doc/10-architecture/system-overview.md)
-- [平台组合系统](./doc/10-architecture/platform-composition-system.md)
-- [渲染系统](./doc/10-architecture/rendering-system.md)
-- [正式契约目录](./doc/15-contracts/README.md)
-- [Web Presentation Config v1](./doc/15-contracts/web-presentation-config-v1.md)
-- [Web Presentation API v1](./doc/15-contracts/web-presentation-api-v1.md)
-- [ADR 0031：M13 Web Presentation Frozen Design](./doc/decisions/0031-business-owned-web-component-projection.md)
-- [ADR 0032：Game Library / Example Boundary](./doc/decisions/0032-game-library-example-boundary.md)
-- [ADR 0034：Hostra owns Desktop Electron composition](./doc/decisions/0034-hostra-owned-desktop-composition.md)
-- [ADR 0033：historical direct-Electron Runner compatibility](./doc/decisions/0033-electron-hostra-run-as-node.md)
-- [ADR 0035：RenderDomain existing-node authoritative update](./doc/decisions/0035-render-domain-existing-node-update.md)
-- [Render movement latency capability evolution](./RENDER_MOVEMENT_LATENCY_CORE_REFACTOR.md)
-- [Phase 1 交付计划](./doc/30-implementation/phase-1-delivery-plan.md)
-- [Testing Strategy](./doc/30-implementation/testing-strategy.md)
-- [M14 qualification record](./doc/30-implementation/m14-qualification.md)
-- [M15 Hostra Desktop Recomposition Plan — frozen physical SSOT](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)
-- [M15 qualification record](./doc/30-implementation/m15-qualification.md)
-- [Package Architecture](./doc/30-implementation/package-architecture.md)
-- [Desktop Host module design](./doc/20-modules/desktop-host/README.md)
-- [Map Game Library design](./doc/20-modules/loom-map/README.md)
-
----
-
-## 当前状态
-
-```text
-M10 User Input                              ✅ Closed
-M11 Render Replication                      ⏳ Requalification Pending
-M12 Content                                 ✅ Closed 2026-09-08
-M13 Web Presentation                        ✅ Closed 2026-09-09
-M14 Map Game Library + First Real Game      ⏳ Requalification Pending
-M15 Desktop full E2E                        ⏳ Requalification Pending（refresh gate failing）
-M16 PWA Runtime                             pending
-M17 PWA full E2E                            pending
-```
-
-M14/M15 formal evidence lives in [`m14-qualification.md`](./doc/30-implementation/m14-qualification.md) and [`m15-qualification.md`](./doc/30-implementation/m15-qualification.md)。
-
-> **Accepted evolution notice（2026-09-16）：** current implementation subject `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea` 修正了 ADR 0035 落地中的闭环缺口，必须重新取得 M11 → M14 → M15 同一 subject evidence。旧 subjects `fd1df5872d4310e268857e700a067f4e0b9e75d1` 与 `a838a4fa43fc57bdaaf4f52bf7bc076bb4771e9f` 仅保留历史 Closed 记录，不证明当前代码。
-
-M15 的 Main/Data/Renderer/Input/Presentation/game logical intent保持冻结；此前 standalone Electron implementation作为历史/迁移证据保留。Canonical physical host已经由 ADR 0034纠正为：
-
-```text
-Hostra shell
-    Electron / BrowserWindow / RPC owner
-        ↓ HOSTRA_SUBCMD
-LoomRealm Desktop plain Node process
-        ↓ RuntimeHosting
-Runner
-```
-
-M15 frozen Hostra baseline：
-
-```text
-hostra@1.0.1-beta.1
-source d863beab3c59c3bd4f271514a228fa8fee0bf5b6
-bundled Electron 44.1.1
-shutdown grace 1000 ms
-```
-
-当前 M15 physical SSOT 是 [`M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md`](./M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)。ADR 0033只保留 historical direct-Electron compatibility relevance。
-
-M15 physical design and the Hostra baseline remain frozen；formal status is Requalification Pending on `c642cda9cee2b318b3aa8f6285de05d6b6ed6bea`。The current local three-round measurement passes ordinary movement (`P95=42.9ms`) but fails refresh movement (`P95=96.3ms`, gate `<=50ms`)；this does not by itself reopen physical design。
-
-Last unaffected formally closed milestone gate：
-
-```text
-npm run test:m13
-```
-
----
-
-## Authority Boundary
-
-```text
-Main
-    Session / Runtime / Frame / Activation
-    InputTarget / DataAuthority
-
-Subsystem
-    business state / Input Interest
-    authoritative Render Domains
-    author-facing ContentClient
-
-Renderer
-    read-only Main mirror
-    per-subsystem Data consumers / current Render replicas
-    trusted/private ResourceClient
-    physical Web projection mutation
-
-Business Web Component
-    read-only projection consumer
-    Shadow DOM / Canvas / WebGL / private presentation owner
-
-Hostra shell
-    Electron / BrowserWindow / direct HOSTRA_SUBCMD process
-
-Platform / apps/*
-    LoomRealm Control/Data/Content physical composition
-    external-host adapters
-```
-
-一个 authority只允许一个 owner；DOM/Platform/Host physical ownership不产生第二份 application authority。
-
----
-
-## M13 Web Presentation — Implemented / Qualified / Closed
-
-M13 已完成生产实现与真实 Chromium qualification：
-
-```text
-Window bootstrap
-→ current Control Session/DataAuthority + Renderer Store
-→ package-private reevaluation
-→ thin Web Projector
-→ business-owned Custom Elements
-```
-
-Formal source：
-
-```text
-Web Presentation Config v1   Active / Normative / Frozen
-Web Presentation API v1      Active / Normative / Frozen
-ADR 0031                     Accepted / Frozen decision provenance
-```
-
-M13 closure gate remains：
-
-```text
-npm run test:m13
-```
-
-M13不建立 second Store/topology、public PresentationState、component registry/loader、AssetManager、layout/layer framework、global service locator或 mandatory presentation SDK/package。
-
----
-
-## M14 revised direction
-
-M14 implementation does not create `packages/map` / `@loomrealm/map`：
-
-```text
-examples/essentials-v21.1
-    ↓
-game-libs/map
-    @loomrealm-game/map
-        ↓
-@loomrealm/subsystem public author APIs
-        ↓
-M10 Input + M11 Render + M12 Content + M13 Presentation
-```
-
-M14只 materialize first-slice实际消费的 RMXP/Essentials facts 到 prepared FSDB records/resources。`@loomrealm-game/map` 只通过 M12 ContentClient消费普通 JsonValue和 resources，不依赖 Ruby Marshal/importer/tooling runtime representation。
-
-M14 qualification使用 test-owned physical harness + real Chromium；真实 Hostra shell/BrowserWindow/DOM physical input/reload/shutdown属于 M15。
-
----
-
-## M15 Desktop full E2E — Implemented / Requalification Pending
-
-Physical design and the Hostra ownership boundary remain frozen；current evidence and blockers are recorded only in [`m15-qualification.md`](./doc/30-implementation/m15-qualification.md)。
-
-Canonical topology：
-
-```text
-frozen Hostra shell
-├─ Electron app
-├─ Hostra preload/RPC
-├─ BrowserWindow owner
-└─ HOSTRA_SUBCMD
-     ↓
-LoomRealm Desktop plain Node process
-├─ concrete Hostra RPC adapter
-├─ Main / RuntimeHosting / Runner
-├─ Desktop Data Broker
-├─ Desktop Content + trusted shell
-├─ Renderer Control loopback carrier
-└─ Data settlement loopback carrier
-     ↓
-Hostra-owned BrowserWindow
-→ trusted Renderer
-→ real DOM input
-→ existing M13 presentation
-→ same M14 game
-```
-
-Frozen current boundaries：
-
-```text
-Hostra shell = sole Electron/BrowserWindow owner
-Hostra RPC = host-control only
-Control / Data settlement / Data application / Content remain separated
-M9 Broker = sole Data candidate/current owner
-trusted shell bootstrap = top-level-navigation-only
-Main acquire + document navigation = bounded 0..1 rendezvous
-reload = same Hostra Window + fresh Renderer logical participant
-Data-only reconnect = same Renderer identity + fresh Data physical pair
-window/signal/RPC/fatal/startup failure = one idempotent termination funnel
-Runner convergence remains existing Main/RuntimeHosting owner chain
-```
-
-Implementation不得为此引入 HostraManager、HostraSession、Window/Document manager、TransportRegistry、ConnectionManager、RecoveryManager或 generic WebSocket framework。
-
-Historical `M15_01`–`M15_05`仅保留 recomposition plan明确列出的 logical/input intent；发生 physical conflict时以 ADR 0034 + current plan 为准。
-
----
-
-## 本地文档
-
-Node.js 20+：
+## 本地文档检查
 
 ```bash
-npm install
-npm run docs:dev
-npm run docs:build
+npm ci
 npm run docs:check-links
+npm run docs:build
 ```
+
+产品测试请使用根 `package.json` 中存在的脚本和[测试策略](./doc/30-implementation/testing-strategy.md)。PR 的 M12–M15 使用增量任务并由汇总检查统一判定；`main`/手动入口保留完整 canonical 链，细节见[CI 说明](./.github/CI-QUALIFICATION.md)。实际完成状态以当前 SHA 的 GitHub Actions 为准，不能复用历史成功记录。
