@@ -1,3 +1,5 @@
+> 历史里程碑工作底稿；当前实现、正式契约和准确资格状态分别以模块目录、契约及资格 ledger 为准。本文原始路径已从仓库根目录移除。
+
 # M14 / 03 — Essentials v21.1 Concrete Example
 
 > 状态：**Implemented / contract frozen; formal Closed**

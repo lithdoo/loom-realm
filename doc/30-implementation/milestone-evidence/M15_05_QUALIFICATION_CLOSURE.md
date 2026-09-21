@@ -1,13 +1,15 @@
+> 历史里程碑工作底稿；当前实现、正式契约和准确资格状态分别以模块目录、契约及资格 ledger 为准。本文原始路径已从仓库根目录移除。
+
 # M15 / 05 — Qualification and Closure
 
 > 状态：**Physical design frozen; formal Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：05  
 > 最近复核：2026-09-11  
-> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
-> 当前决策：[ADR 0034](doc/decisions/0034-hostra-owned-desktop-composition.md)  
-> 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md) → [M15 / 04](M15_04_DESKTOP_FULL_E2E_VERTICAL.md)  
-> 依赖：[Testing Strategy](doc/30-implementation/testing-strategy.md)、[M14 qualification](doc/30-implementation/m14-qualification.md)
+> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../20-modules/desktop-host/hostra-composition.md)
+> 当前决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)
+> 前置：[M15 / 01](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](./M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](./M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md) → [M15 / 04](./M15_04_DESKTOP_FULL_E2E_VERTICAL.md)
+> 依赖：[Testing Strategy](../testing-strategy.md)、[M14 qualification](../m14-qualification.md)
 
 > **Supersession notice:** M14 formal prerequisite、single `npm run test:m15` gate、boundary discipline 与 evidence ownership继续有效；原 direct-Electron / MessageChannelMain / LoomRealm preload / Electron-main run-as-node qualification subject已被 ADR 0034 supersede。
 

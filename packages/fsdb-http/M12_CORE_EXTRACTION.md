@@ -3,8 +3,8 @@
 > 状态：**Frozen Contract Amendment**  
 > 生效：M12 Content preimplementation freeze  
 > 最近复核：2026-09-08  
-> 原合同：[DESIGN.md](./DESIGN.md)  
-> M12 冻结：[../../M12_01_CONTENT_SERVICE.md](../../M12_01_CONTENT_SERVICE.md)  
+> 原合同：[DESIGN.md](./DESIGN.md)
+> M12 冻结：[../../M12_01_CONTENT_SERVICE.md](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M12_01_CONTENT_SERVICE.md)
 > 决策：[ADR 0030](../../doc/decisions/0030-freeze-m12-content-preimplementation-closure.md)
 
 本文件只修订 `@loomrealm/fsdb-http` v1 原冻结合同中与 **package dependency / FSDB core ownership / valid database-handle producer** 有关的条款。除本文明确覆盖的内容外，`DESIGN.md` 与 `CONFORMANCE.md` 的 public API、HTTP observable behavior、安全不变量、lifecycle 和 conformance要求全部继续有效。

@@ -3,11 +3,11 @@
 > 状态：M4 Runtime/Frame + M8 Data Role + **M10 Input Implemented / Qualified** + **M11 Implemented / Requalification Pending**
 > 阶段：M11 accepted capability evolution / current subject requalification
 > 最近复核：2026-09-15
-> 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md) · [Rendering System](../../doc/10-architecture/rendering-system.md)  
-> 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md) · [Render Update v1](../../doc/15-contracts/render-update-v1.md)  
-> Input correction：[ADR 0029](../../doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)  
-> Exact M10 surface：[M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md)  
-> Exact M11 surface：[M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md)  
+> 架构：[Subsystem Model](../../doc/10-architecture/subsystem-model.md) · [Rendering System](../../doc/10-architecture/rendering-system.md)
+> 正式语义：[Runtime Control v1](../../doc/15-contracts/runtime-control-profile-v1.md) · [Frame / Call v1](../../doc/15-contracts/frame-call-protocol-v1.md) · [Renderer Data Profile v1](../../doc/15-contracts/renderer-data-profile-v1.md) · [User Input v1](../../doc/15-contracts/user-input-v1.md) · [Render Update v1](../../doc/15-contracts/render-update-v1.md)
+> Input correction：[ADR 0029](../../doc/decisions/0029-user-input-v1-mutation-gate-state-convergence.md)
+> Exact M10 surface：[M10 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M10_01_SUBSYSTEM_INPUT_MANAGER.md)
+> Exact M11 surface：[M11 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M11_01_SUBSYSTEM_RENDER_MANAGER.md)
 > M11 correction：[ADR 0035](../../doc/decisions/0035-render-domain-existing-node-update.md)
 
 > **业务只表达业务；SDK把 Frozen protocol 投影为窄 author capability。M11 不新增 Platform Port、service locator、public RenderManager、EventBus 或第二份 Frame/Input/Render authority。**
@@ -197,7 +197,7 @@ Frame close protocol success成立前，FrameRuntime必须要求 InputManager先
 
 ## 8. Minimal Exact Input Types
 
-M10 exact author types以 [M10 / 01](../../M10_01_SUBSYSTEM_INPUT_MANAGER.md) 为唯一详细事实源。
+M10 exact author types以 [M10 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M10_01_SUBSYSTEM_INPUT_MANAGER.md) 为唯一详细事实源。
 
 原则：
 
@@ -376,7 +376,7 @@ M11 RenderManager同样不参与 Data acquire/reconnect policy；它只接收 cu
 
 ## 15. Render / Content Targets — M11 Current
 
-Exact M11 author declarations以 [M11 / 01](../../M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为唯一详细事实源。概念形状：
+Exact M11 author declarations以 [M11 / 01](https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M11_01_SUBSYSTEM_RENDER_MANAGER.md) 为唯一详细事实源。概念形状：
 
 ```ts
 // internal/type-only aliases may reuse @loomrealm/data declarations

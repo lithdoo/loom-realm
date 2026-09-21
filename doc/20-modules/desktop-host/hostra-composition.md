@@ -1,7 +1,9 @@
+> 当前 Hostra Desktop 物理组合细节；以当前代码、正式契约与 M15 资格 ledger 核对，不将计划中的验证误写为通过。
+
 # M15 Hostra Desktop Recomposition Plan
 
 > 状态：**Physical SSOT frozen; implemented and Closed**  
-> 决策：[ADR 0034 — Hostra-owned Desktop composition](doc/decisions/0034-hostra-owned-desktop-composition.md)  
+> 决策：[ADR 0034 — Hostra-owned Desktop composition](../../decisions/0034-hostra-owned-desktop-composition.md)
 > 目标：把历史 standalone Electron M15 改造成真正由 Hostra 承载的 Desktop product  
 > 范围：只重做 M15 physical composition；M10–M14 logical/business contracts 不 reopen  
 > Hostra：`lithdoo/hostra` 保持既有 Electron / preload / RPC / subprocess 运行模型，不为 LoomRealm 定制

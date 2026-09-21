@@ -36,7 +36,7 @@ def main() -> None:
     assert subprocess.check_output(["git", "branch", "--show-current"], cwd=ROOT).decode().strip() == "docs/remove-root-milestone-reports", "wrong branch"
     originals = sorted(p for p in ROOT.iterdir() if p.is_file() and (PATTERN.fullmatch(p.name) or p.name == HOSTRA))
     assert len(originals) == 46, f"expected 46 top-level milestone files, found {len(originals)}"
-    groups = {f"M{i}": sum(p.name.startswith(f"M{i}_") for p in originals) for i in range(7, 16)}
+    groups = {f"M{i}": sum(p.name.startswith(f"M{i}_") and p.name != HOSTRA for p in originals) for i in range(7, 16)}
     assert all(n == 5 for n in groups.values()), f"unexpected milestone cohort: {groups}"
     old_to_new: dict[str, Path | None] = {}
     for p in originals:

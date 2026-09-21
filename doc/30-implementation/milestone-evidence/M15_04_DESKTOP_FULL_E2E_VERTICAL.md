@@ -1,13 +1,15 @@
+> 历史里程碑工作底稿；当前实现、正式契约和准确资格状态分别以模块目录、契约及资格 ledger 为准。本文原始路径已从仓库根目录移除。
+
 # M15 / 04 — Desktop Full E2E Vertical
 
 > 状态：**Business-visible Hostra vertical implemented and Closed**  
 > 阶段：M15 Desktop Full E2E  
 > 原落地顺序：04  
 > 最近复核：2026-09-11  
-> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md)  
-> 当前决策：[ADR 0034](doc/decisions/0034-hostra-owned-desktop-composition.md)  
-> 前置：[M15 / 01](M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)  
-> 依赖：[M14 / 04](M14_04_REAL_GAME_VERTICAL.md)
+> 当前 physical SSOT：[M15 Hostra Desktop Recomposition Plan](../../20-modules/desktop-host/hostra-composition.md)
+> 当前决策：[ADR 0034](../../decisions/0034-hostra-owned-desktop-composition.md)
+> 前置：[M15 / 01](./M15_01_DESKTOP_PRODUCT_COMPOSITION.md) → [M15 / 02](./M15_02_BROWSERWINDOW_RENDERER_COMPOSITION.md) → [M15 / 03](./M15_03_DESKTOP_INPUT_AND_LIFECYCLE.md)
+> 依赖：[M14 / 04](./M14_04_REAL_GAME_VERTICAL.md)
 
 > **Supersession notice:** 本文继续拥有同一 M14 gameplay outcome、real DOM input、reload、same-generation reconnect 与 owner-boundary evidence；原 direct-Electron canonical trace、Electron-main run-as-node、LoomRealm preload/MessagePort evidence 已被 ADR 0034 supersede。
 
