@@ -1,13 +1,13 @@
 # 交付与路线图
 
-**当前唯一待办入口：[下一阶段路线图](./roadmap.md)。** 已完成模块解释放入[核心模块总览](../20-modules/core/README.md)，正式规范放入[契约目录](../15-contracts/README.md)；历史阶段/逐轮 review 不再作为主导航或未来开发的 SSOT。
+**未完成事项唯一入口：[下一阶段路线图](./roadmap.md)。** 已实现模块见[核心模块](../20-modules/core/README.md)，正式规范见[契约目录](../15-contracts/README.md)；历史实施提示词、阶段报告和逐轮 review 不在 VitePress 主导航维护第二套状态。
 
-持续有效的操作资料：
+持续有效的资料：[测试策略](./testing-strategy.md)、[分包边界](./package-architecture.md)、[仓库布局](./repository-layout.md)。M11/M14/M15/Viewport 的证据仍分别由 [M11](./m11-qualification.md)、[M14](./m14-qualification.md)、[M15](./m15-qualification.md)和[Viewport](./viewport-profile-v1-qualification.md)资格记录拥有；旧 subject 的 PASS 不自动迁移到现在的 `main`。
 
-- [测试策略](./testing-strategy.md)：覆盖层次、环境与证据。
-- [分包与发布边界](./package-architecture.md)、[仓库目录归属](./repository-layout.md)：只有与代码相符的当前规则有效。
-- [M11 资格记录](./m11-qualification.md)、[M14 资格记录](./m14-qualification.md)、[M15 资格记录](./m15-qualification.md)、[Viewport 资格记录](./viewport-profile-v1-qualification.md)：精确测试 subject 与不可替代的证据；如其 subject 早于当前 `main`，状态就是**待更新**，不得用历史 PASS 冒充新版本。
+## 历史内容处理
 
-PWA M16/M17 和原版 RGSS 地形保真仍在路线图；它们不应继续夹在已完成项目的旧开发提示词或过期计划里。当前版本若存在另一个模块 blocker，在路线图记录可交付结果、验收方法和 owner，而不为它复制一个跨模块总计划。
+已完成且经 GitHub Actions 对 648 个受跟踪文本文件进行文件名引用审计、无其他文件按文件名引用的三份过程报告已经从工作树删除：旧 M5 实施审查、Viewport Cursor/GLM 集成执行计划及执行报告。完整内容在 [`main@78ba399`](https://github.com/lithdoo/loom-realm/tree/78ba3999f9064fbbfcf90e55c3b027d4fe25a397/doc/30-implementation)和 Git 历史中。
 
-历史 [`phase-1-delivery-plan.md`](./phase-1-delivery-plan.md) 保留一个短的迁移入口以免外部链接断裂；历史正文通过 Git 追溯，不再维护第二份阶段表。
+仍被 ADR、模块设计、测试、qualification ledger 引用的历史报告保留**短归档入口**，避免删除后制造死链；当前 M14/M15 物理规范、正式契约、不可替代签核材料和 fixture 均不得因文件名中有 `plan`、`review` 或 `closure` 而误删。旧[第一阶段计划](./phase-1-delivery-plan.md)也是指向当前路线图的兼容入口。根目录互相引用的 `M##_...` 文件在安全迁移引用与保全仍有效约束前暂不整批删除。
+
+PWA M16/M17、当期重新资格和原版 RGSS 地形保真仅在[路线图](./roadmap.md)登记下一步；历史实施文档不再向开发者派发新工作。
