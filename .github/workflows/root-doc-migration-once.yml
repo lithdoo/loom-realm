@@ -25,6 +25,7 @@ jobs:
       - name: Execute root cleanup and check diff
         shell: bash
         run: |
+          sed -i 's/p.name.startswith(f"M{i}_") for p in originals/p.name.startswith(f"M{i}_") and p.name != HOSTRA for p in originals/' scripts/relocate-root-milestones.py
           python3 scripts/relocate-root-milestones.py
           git diff --check
           test "$(find . -maxdepth 1 -type f -name 'M[0-9]*_*.md' | wc -l)" -eq 0
