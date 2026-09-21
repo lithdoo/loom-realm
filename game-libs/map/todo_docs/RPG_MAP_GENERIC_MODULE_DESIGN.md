@@ -1,7 +1,7 @@
 # RPGMap 通用化设计讨论与待办
 
-> 状态：设计讨论记录 / TODO，**非冻结协议、非已实现功能**  
-> 记录日期：2026-09-21  
+> 状态：设计讨论记录 / TODO，**非冻结的完整协议、非已实现功能**  
+> 记录日期：2026-09-21；角色素材方向更新：2026-09-21  
 > 基线：`main` @ `2d465b8c8501566b26375dae55e1a78007606c40`（创建本分支时）  
 > 范围：`game-libs/map`；本文记录方向、已确认边界、可行性依据及后续验证事项，不预先冻结 API 签名和 FSDB Schema。
 
@@ -30,9 +30,11 @@
 
 相关当前契约：[`SubsystemDefinitionFactory`](../../../packages/subsystem/src/model.ts)、[`ContentClient`](../../../packages/subsystem/src/content.ts)、[`Content API v1`](../../../doc/15-contracts/content-api-v1.md)、[Map 模块现况](../../../doc/20-modules/loom-map/README.md)。
 
-## 3. FSDB 策略：以现有 Essentials v21.1 已解析结果为基线
+## 3. FSDB 策略：地图沿用现有投影，NPC 数据自主定义
 
-**不从零设计整套地图格式。** 先审计已解析并实际被 Map 消费的 FSDB 数据，精简和补齐后形成版本化的 RPGMap 内容协议；不要把 RGSS 原始对象结构原封不动地变成通用协议，也不要为了抽象而强制重写所有数字 ID。
+**不从零设计整套地图格式。** 地图、Tileset、Transfer、狭义 MapAction 优先沿用并整理现有 Essentials v21.1 解析产物；先审计已被 Map 消费的字段，精简和补齐后形成版本化的 RPGMap 内容协议。不要把 RGSS 原始对象结构原封不动地变成通用协议，也不要为了抽象而强制重写所有数字 ID。
+
+**NPC 是单独的设计决定：** NPC 的 FSDB 身份、定义与实例结构由本项目按业务需求自主设计，**不以 Essentials 的 Event/Page 结构为 NPC Schema**。Essentials 在 NPC 方向仅作为可合法使用的素材来源和格式验证样本；不要求兼容它的全部素材或事件行为。地图物品和建筑也不因原版事件结构而被强制纳入 NPC 定义。
 
 目前已存在的关系：
 
@@ -46,26 +48,39 @@ Map ID → struct.MapAction/{id}   → 当前受支持的狭义事件（Bridge �
 
 当前 `Map` 保留三层 Tile Table；`Tileset` 包括贴图名、autotile、passages、priorities、terrain_tags。`terrain_tags` 与 Bridge/Ledge 等能力相关，不可仅以“原引擎字段”理由删除。`MapAction` 中的 opaque-related 标记有防止误执行未知脚本的校验作用，删除前必须明确替代失败策略。
 
-证据入口：[`semantics.ts`](../src/semantics.ts)、[`runtime.ts`](../src/runtime.ts)、[Essentials FSDB 示例](../../../examples/essentials-v21.1/%5BFSDB%5Dessentials-v21.1)、[`generate-fixtures.mjs`](../../../examples/essentials-v21.1/scripts/generate-fixtures.mjs)。
+证据入口：[`semantics.ts`](../src/semantics.ts)、[`runtime.ts`](../src/runtime.ts)、[Essentials 实体数据调查](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[Player/NPC 素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。合成示例见 [`generate-fixtures.mjs`](../../../examples/essentials-v21.1/scripts/generate-fixtures.mjs)，不能将其当成原版素材证据。
 
 ### 尚未形成完整契约的部分
 
-当前投影主要覆盖地图、Tileset、传送、受支持事件和 Graphics；**尚无完整的、可通过独立 ID 装配的 NPC 和 Building 定义协议**，现有画面投影也主要面向玩家。NPC/建筑的可复用定义、实例位置、图像、动画、碰撞和遮挡须通过实际消费者需求补足，不能因已有图片目录就认定 NPC/建筑已实现。
+当前投影主要覆盖地图、Tileset、传送、受支持事件和 Graphics；**尚无完整的、可通过独立 ID 装配的自定义 NPC 定义与实例协议**，现有画面投影也主要面向玩家。NPC 的身份、放置与运行时状态需要按项目需求设计；不需要先把所有 Essentials Event 投影为 NPC。建筑如果只是静态背景，继续作为地图 Tile；只有真实需求要求整栋建筑独立引用/复用/交互时再讨论 Building 定义。
 
-拟采用的基本关系是：
+待收敛的概念关系（不是现有 FSDB Schema）：
 
 ```text
-实体类型 + 定义 ID → 独立实体定义 → 逻辑资源引用
-地图定义 → 对实体定义 ID 的引用 + 地图内实例身份/放置信息
-逻辑资源引用 → 已提供 FSDB 中对应资源（由 Content 解析）
+自定义 NPC 定义 ID → NPC 定义 → 符合本模块角色图集约定的逻辑资源引用
+地图上的 NPC 实例 → NPC 定义引用 + 位置及各自运行时状态
+逻辑资源引用 → 使用方提供的 FSDB 资源（通过 Content 解析）
 ```
 
-必须区分“定义 ID”和“地图中的实例身份”：同一 NPC 定义可被同一或不同地图多次使用；运行时实例位置与状态不等于只读 FSDB 定义。建筑是否值得独立成实体，取决于是否需要被独立引用、复用或交互；纯背景建筑可继续使用地图图块表示。精确命名、文件布局、ID 类型和实体字段仍待审计后确定。
+必须区分“定义 ID”和“地图中的实例身份”：同一 NPC 定义可被同一或不同地图多次使用；运行时实例位置与状态不等于只读 FSDB 定义。精确命名、文件布局、ID 类型和实体字段仍待后续设计，不把上述关系视为已经实现。
+
+### 角色素材 v1：唯一 4×4 约定，不限定图片像素尺寸（已确认方向）
+
+Player 和自定义 NPC **只支持同一种角色行走图集格式**。不为了兼容 Essentials 所有资源引入多套布局、泛用切帧器或逐素材配置；诸如门、浆果、战斗立绘及特殊缺帧宝可梦图不属于本次 NPC 角色素材范围。
+
+- 一张角色 PNG 固定按 **4 列 × 4 行**排列：行方向依次为下（2）、左（4）、右（6）、上（8）；列为 `pattern 0..3`，必须真实符合四向四帧语义，不能只因图片尺寸可整除就当成角色图。
+- 解码后计算 `frameWidth = image.width / 4`、`frameHeight = image.height / 4`；要求图片宽、高均可被 4 整除，结果是正整数。**不规定**必须是 128×128、128×192 或其他固定像素尺寸，也不要求单帧宽高等于地图格宽高。
+- 沿用当前 Player 的基础帧规则：静止 `pattern = 0`；行走采用现有运动状态与 pattern 轮替规则。固定朝向/帧排列是图集语义约定，并非从 PNG 元数据推导。
+- 显示相对于逻辑地图格：单帧**水平居中、底部对齐格底**。在现有 32px 格下，水平偏移为 `(32 - frameWidth) / 2`，垂直放置为格子顶端加 `32 - frameHeight`；图片高于或宽于格子不自动扩大逻辑碰撞占格。第一版角色占格默认 1×1，独立于视觉帧尺寸。
+- 示例：128×128 → 单帧 32×32；128×192 → 32×48；192×192 → 48×48。三者共享上述计算规则，**只是几何上满足规则不等于内容一定是合格角色图**。
+- 未来 NPC FSDB 只需引用符合约定的角色素材；**不必存储图片总尺寸、单帧尺寸、图集行列数或方向帧映射**。这些由统一协议及解码后计算确定；资源引用仍遵守 Content 的逻辑 namespace + key。具体 NPC Record 字段未冻结。
+
+来源与限制：[Player/NPC 素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)证明当前 Browser 对图片按 4×4 切帧且由尺寸计算单帧，也证明真实 Characters 文件混有非角色图。当前产品**仍只有一个 Player Sprite**，因此共用素材计算规则不等于已经支持 NPC：还需完成多实例独立定位、绘制、运动及必要碰撞。Player 现有初始化入口继续兼容，不因为本约定强制新增 Player Record。以上是后续实施目标，不宣称完成验收。
 
 ### 数据清理原则
 
 - **保留**：当前被绘制、通行、传送、地形或事件消费的数据及必要引用。
-- **待确认**：当前未消费、但实现 NPC/建筑或兼容性验证必需的数据；先追踪原始来源和预期语义，不提前删减。
+- **待确认**：当前未消费、但实现既定目标或兼容性验证必需的数据；先追踪原始来源和预期语义，不提前删减；NPC 的 FSDB 数据结构不由 Essentials Event/Page 决定。
 - **移除出正式协议**：既不被目标能力消费、也不影响引用/安全校验的来源内部信息；必要时仍可保存在导入工具或诊断资料中。
 - 明确 schemaVersion、合法字段和引用失败语义；不静默把旧版五字段 Tileset 补成新版本。原始 Ruby/任意脚本不得作为通用模块默认可执行内容。
 - 原版素材遵守现有许可边界，不能因协议整理将受限制的原始 FSDB/图像直接提交仓库。
@@ -82,20 +97,22 @@ Map ID → struct.MapAction/{id}   → 当前受支持的狭义事件（Bridge �
 
 **架构方向可行，尚未完成实现/产品验证。** 已有 `game-libs/map` 业务库、Subsystem factory、ContentClient、地图/图块解析、移动、传送、Bridge/Ledge 与 Browser 投影，提供可演进的基础。新的 Builder/Handler 与内容规范可优先在 Map 库自身实现，不必先修改 Main 或 Renderer 公开契约。
 
-仍需解决的实际缺口：完整 NPC/独立建筑的数据与多实体渲染；FSDB 来源定位与 ID 引用的一致性；旧 Essentials 投影迁移和兼容性；Handler 命令/事件在失败、取消、切图和异常时的状态一致性。当前实施与源引擎 RGSS 逐帧等价是不同的资格议题，不因通用化自动获得证明。
+仍需解决的实际缺口：自定义 NPC 定义和实例数据、多 Sprite 独立定位与渲染、NPC 运动和碰撞；FSDB 来源定位与 ID 引用的一致性；旧 Essentials 地图投影迁移和兼容性；Handler 命令/事件在失败、取消、切图和异常时的状态一致性。**不把全量 Essentials NPC 事件、所有特殊素材或独立 Building 当作首版交付前置条件。** 当前实施与源引擎 RGSS 逐帧等价是不同的资格议题，不因通用化自动获得证明。
 
 ## 6. TODO 与验证顺序
 
-- [ ] **数据消费审计**：逐字段检查 importer/prepared FSDB、Map Runtime、Browser、测试对数据的实际依赖；形成保留、待确认、可删除清单，特别核对 Tileset terrain、Transfer、MapAction。
-- [ ] **FSDB 最小协议**：在现有 Map/Tileset/Transfer/Action 基线上确定身份、版本、引用与资源定位规则；明确哪些是必须数据，哪些属于特定玩法扩展。
-- [ ] **NPC/建筑缺口审计**：从已有 Essentials 来源表达及真实目标场景确认最小独立定义、地图实例和贴图要求，不先构造万能实体模型。
+- [x] **事实调查（设计输入，不代表实现完成）**：已完成 Essentials 实体数据及 Player/NPC 素材与运动调查，证据与局限分别见 [`ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md`](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[`PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md`](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。
+- [ ] **数据消费与清理审计**：基于已有调查最终逐字段确认 Map/Tileset/Transfer/MapAction 保留、待确认、可删除项目，特别保留 terrain、Bridge/Ledge 以及 opaque 失败策略。
+- [ ] **角色素材约定与多实例验证**：按上述唯一 4×4 语义、解码尺寸除以 4、脚对齐和 1×1 默认占格验证；保留 128×128 合成 Demo 与 128×192 真实 Player 的兼容；选标准 NPC 素材验证独立节点位置、运动、遮挡。不为了少量特殊 PNG 扩展格式。
+- [ ] **NPC FSDB 最小协议**：自主确定定义与地图实例身份及素材引用，仅要求遵守统一角色图集约定；不继承 Essentials Event/Page Schema，不要求自动导入全量事件。
+- [ ] **FSDB 地图最小协议**：在现有 Map/Tileset/Transfer/Action 基线上确定身份、版本、引用与资源定位规则；明确哪些是必须数据，哪些属于特定玩法扩展。
 - [ ] **Builder/Handler 契约**：只覆盖 Subsystem 内部的实例装配、命令、快照、事件、生命周期与失败语义；检查与现有 Definition API 的接合。
-- [ ] **实现与兼容迁移**：优先用适配层保住既有 Essentials 行为，逐步抽离数据来源硬编码；不无声更改旧数据协议。
-- [ ] **独立消费者验证**：另一套原创 FSDB 无需改 Map 库源码即可装配地图、加载资源、通过 ID 使用 NPC/必要建筑，控制玩家切图并收到正确事件。
+- [ ] **实现与兼容迁移**：保住既有 Essentials 地图行为，逐步抽离数据来源硬编码；不无声更改旧数据协议。
+- [ ] **独立消费者验证**：另一套原创 FSDB 无需改 Map 库源码即可装配地图、加载资源、通过 ID 使用自主定义 NPC，控制玩家切图并收到正确事件；首版不要求 Building Record。
 - [ ] **回归及资格**：现有 walk、transfer、Bridge、Ledge、动态 viewport 与浏览器投影不能回归；数据错误/缺失、跨图取消、重复调用与异常提交要有针对性测试。记录实际测试结果，不将设计讨论视为已通过验收。
 
 ## 7. 统一验收问题
 
-> 一个新游戏是否能仅凭符合规范的 FSDB、Subsystem 内 Builder 配置和 Handler 调用，在不修改 `game-libs/map` 源码的条件下完成地图初始化、按 ID 查找素材和实体、角色跳转与切图事件监听，同时保持现有 Essentials 功能？
+> 一个新游戏是否能仅凭符合规范的 FSDB、Subsystem 内 Builder 配置和 Handler 调用，在不修改 `game-libs/map` 源码的条件下完成地图初始化、通过 ID 使用自主定义 NPC 与合规 4×4 角色素材、角色跳转与切图事件监听，同时保持现有 Essentials 地图功能？
 
-这是通用化的核心验收标准。具体数据结构与 TypeScript API 以消费审计结果和第二个真实使用场景收敛后再冻结。
+这是通用化的核心验收标准。角色图集的唯一格式与尺寸计算方式已确定为设计方向；具体 NPC 数据结构与 TypeScript API 仍需结合独立消费者验证后收敛。
