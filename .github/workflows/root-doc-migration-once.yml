@@ -27,6 +27,14 @@ jobs:
         run: |
           sed -i 's/p.name.startswith(f"M{i}_") for p in originals/p.name.startswith(f"M{i}_") and p.name != HOSTRA for p in originals/' scripts/relocate-root-milestones.py
           python3 scripts/relocate-root-milestones.py
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ('packages/fsdb-http/M12_CORE_EXTRACTION.md', 'packages/subsystem/DESIGN.md'):
+              path = Path(name)
+              lines = path.read_text().splitlines(keepends=True)
+              lines = [line.rstrip(' \t\r\n') + '\n' if 'https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M' in line else line for line in lines]
+              path.write_text(''.join(lines))
+          PY
           git diff --check
           test "$(find . -maxdepth 1 -type f -name 'M[0-9]*_*.md' | wc -l)" -eq 0
           test "$(find . -maxdepth 1 -type f -name 'M15_HOSTRA*' | wc -l)" -eq 0
