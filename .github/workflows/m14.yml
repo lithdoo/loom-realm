@@ -1,7 +1,8 @@
 name: M14 Map Game qualification
 
+# PR runs are deduplicated in m12-m15-pr.yml; this workflow keeps the
+# historical full M12 -> M13 -> M14 qualification on main and manual dispatch.
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
