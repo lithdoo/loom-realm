@@ -57,7 +57,7 @@ jobs:
       - name: Validate Markdown links
         run: npm run docs:check-links
 
-      - name: Validate links to retired Map process docs across repository
+      - name: Validate links to retired process docs across repository
         run: python3 scripts/check-retired-doc-links.py
 
       - name: Build VitePress site

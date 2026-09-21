@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fail if tracked Markdown still links to retired Map process documents.
+"""Check references to retired process documents in every tracked Markdown file.
 
-This complements scripts/check-doc-links.py (VitePress doc/ links), and catches
-references elsewhere in the repository without treating Git history URLs as
-broken or changing qualification evidence.
+The VitePress link checker only scans doc/. This additionally guards retirement
+of example/package notes without claiming that all repository Markdown has been
+fully rewritten. GitHub historical permalinks are valid and are not blocked.
 """
 
 from __future__ import annotations
@@ -15,29 +15,30 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
-RETIRED = frozenset(
-    ROOT / "game-libs/map" / name
-    for name in (
-        "LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md",
-        "TERRAIN_BEHAVIOR_AGENT_TASK_CARDS.md",
-        "TERRAIN_BEHAVIOR_DESIGN_DRAFT.md",
-        "TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md",
-        "TERRAIN_BEHAVIOR_FREEZE_EXECUTION.md",
-        "TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md",
-    )
+RETIRED_RELATIVE = (
+    "game-libs/map/LEDGE_BRIDGE_PASSABILITY_ANALYSIS.md",
+    "game-libs/map/TERRAIN_BEHAVIOR_AGENT_TASK_CARDS.md",
+    "game-libs/map/TERRAIN_BEHAVIOR_DESIGN_DRAFT.md",
+    "game-libs/map/TERRAIN_BEHAVIOR_EVIDENCE_REVIEW.md",
+    "game-libs/map/TERRAIN_BEHAVIOR_FREEZE_EXECUTION.md",
+    "game-libs/map/TERRAIN_BEHAVIOR_IMPLEMENTATION_PLAN.md",
+    "examples/essentials-v21.1-local/MAP_BEHAVIOR_REQUIREMENTS.md",
+    "packages/data/IMPLEMENTATION-REVIEW.md",
+    "packages/subsystem/IMPLEMENTATION-REVIEW.md",
 )
+RETIRED = frozenset((ROOT / path).resolve() for path in RETIRED_RELATIVE)
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 
 
 def main() -> int:
-    result = subprocess.run(
+    tracked = subprocess.run(
         ["git", "ls-files", "-z", "--", "*.md"],
         cwd=ROOT,
         check=True,
         stdout=subprocess.PIPE,
     )
-    sources = [ROOT / path.decode("utf-8") for path in result.stdout.split(b"\0") if path]
-    broken: list[str] = []
+    sources = [ROOT / entry.decode("utf-8") for entry in tracked.stdout.split(b"\0") if entry]
+    errors = []
     checked = 0
     for source in sources:
         if not source.is_file():
@@ -60,15 +61,15 @@ def main() -> int:
                 if not parsed.path or parsed.scheme or parsed.netloc or target.startswith("#"):
                     continue
                 candidate = unquote(parsed.path)
-                resolved = (ROOT / candidate.lstrip("/")) if candidate.startswith("/") else (source.parent / candidate)
+                resolved = ROOT / candidate.lstrip("/") if candidate.startswith("/") else source.parent / candidate
                 checked += 1
                 if resolved.resolve() in RETIRED:
-                    broken.append(f"{source.relative_to(ROOT)}:{line_number}: {target}")
-    if broken:
-        print("Links to retired Map process documents remain:", file=sys.stderr)
-        print("\n".join(broken), file=sys.stderr)
+                    errors.append(f"{source.relative_to(ROOT)}:{line_number}: {target}")
+    if errors:
+        print("Links to retired process documents remain:", file=sys.stderr)
+        print("\n".join(errors), file=sys.stderr)
         return 1
-    print(f"Retired document links OK: {checked} relative links in {len(sources)} tracked Markdown paths.")
+    print(f"Retired document links OK: {checked} relative links across {len(sources)} tracked Markdown paths.")
     return 0
 
 
