@@ -1,15 +1,13 @@
 # RPGMap 通用化设计讨论与待办
 
-> 状态：设计讨论记录 / TODO，**非冻结的完整协议、非已实现功能**  
-> 记录日期：2026-09-21；角色素材、内置地图行为、NPC 定义／业务装配及 Map 最小扩展方向更新：2026-09-21  
-> 初始基线：`main` @ `2d465b8c8501566b26375dae55e1a78007606c40`（创建原设计分支时）  
-> 范围：`game-libs/map`；本文记录方向、现状、实现缺口和验证事项，不预先冻结 API 签名或未实现的行为 Schema。
+> 状态：Map 内置地形行为 v1 的**目标设计已收敛**；本文整体仍是设计记录 / TODO，**不是已实现的新协议或资格通过证明**。  
+> 记录日期：2026-09-21；Map `behaviors`、Bridge/Ledge 规则更新：2026-09-21。  
+> 初始基线：`main` @ `2d465b8c8501566b26375dae55e1a78007606c40`（创建原设计分支时）。  
+> 范围：`game-libs/map`；已经实现的源码以当前 `main` 为准；本文件区分目标契约、现有事实与仍待实现的部分。
 
 ## 1. 目标与核心思路
 
 将目前与 Essentials v21.1 具体数据和行为耦合的 Map，逐步改造成可供不同游戏复用的 **RPG 地图业务模块**。业务方准备符合规范的地图与 NPC 定义 FSDB 内容，在自己的 Subsystem 内通过 `RPGMapBuilder` 提供 Subsystem 环境、初始化条件及内容定位配置，构建 `RPGMapHandler`；之后通过 Handler 控制角色、切图、查询状态与监听地图事件，不触碰内部地图加载、运动或渲染实现。
-
-三个概念分工：
 
 | 组成 | 职责 |
 | --- | --- |
@@ -18,48 +16,46 @@
 | RPGMap Runtime | 地图与角色位置/运动的唯一权威，负责合法性、通行/传送、NPC 定义/素材解析、角色实例与 RenderDomain 更新。 |
 | RPGMap FSDB 规范 | 规定 Map 模块实际消费的 Map、Tileset、Transfer、NPC 定义和资源；**不规定 NPC 按地图的放置表或游戏玩法数据**。 |
 
-期望使用体验：调用方通过地图 ID 定位地图，通过 NPC 定义 ID 复用角色外观；进入地图时由业务方决定当次放置哪些 NPC，再经 Handler 传入 NPC 定义 ID 与各实例的初始信息。Map 不要求游戏采用固定的 `MapNPC` 表。Builder/Handler 不另造 Subsystem 生命周期管理器。
+调用方通过地图 ID 定位地图，通过 NPC 定义 ID 复用角色外观；业务方决定每次进入地图放置哪些 NPC，再向 Handler 提供实例信息。Map 不要求游戏采用固定的 `MapNPC` 表。Builder/Handler 不另造 Subsystem 生命周期管理器。
 
 ## 2. 已确认的责任边界
 
-1. **Handler 位于 Map Subsystem 内部**，服务该 Subsystem 的业务方。Handler 与其他 Subsystem/主进程的编排和通信不属于本次重构。
-2. **Map 不负责 FSDB 安装、数据生产或准备**。调用方提供符合 Map 内容规范的地图、NPC 定义和资源，以及可访问的来源；Runtime 按 ID 查找、校验并消费。
-3. 保留 LoomRealm 权威边界：Subsystem 使用公开 `scope.content`、Input、RenderDomain；Renderer/Browser 消费投影，不反向决定通行、事件或世界状态；业务数据不得暴露 Content 凭据。
-4. **物理目录与逻辑 Content 身份不是同一件事**。Map 按 `namespace + key` 访问自身需要的内容，不将其解释为任意文件系统路径；映射与安装属调用环境/现有 Content 机制。不得绕过 Content 边界。
-5. Map 规定 NPC 定义中自己需要的最小地图表现字段，**但不理解 NPC 的对话、任务、AI、商店、游戏方的放置数据 Schema 或 Group Key**；不创建地图/菜单/战斗共用的万能 Entity 框架。
+1. **Handler 位于 Map Subsystem 内部**，服务该 Subsystem 的业务方；跨 Subsystem/主进程编排不在本次重构范围内。
+2. **Map 不负责 FSDB 安装、数据生产或准备**。调用方提供地图、NPC 定义及资源和可访问的内容来源；Runtime 按 ID 校验、读取、消费。
+3. 保留 LoomRealm 权威边界：Subsystem 使用公开 `scope.content`、Input、RenderDomain；Renderer/Browser 消费投影，不反向决定通行、事件或世界状态；业务数据不暴露 Content 凭据。
+4. **物理目录与逻辑 Content 身份不同**。Map 通过 `namespace + key` 读取，不访问任意磁盘路径；目录映射/安装属调用环境与已有 Content 机制。
+5. Map 只定义 NPC 所需的最小地图表现数据，不理解 NPC 对话、任务、AI、商店、游戏方放置 Group/Schema；不建立通用 Entity 框架。
 
-相关当前契约：[`SubsystemDefinitionFactory`](../../../packages/subsystem/src/model.ts)、[`ContentClient`](../../../packages/subsystem/src/content.ts)、[`Content API v1`](../../../doc/15-contracts/content-api-v1.md)、[Map 模块现况](../../../doc/20-modules/loom-map/README.md)。
+当前契约：[`SubsystemDefinitionFactory`](../../../packages/subsystem/src/model.ts)、[`ContentClient`](../../../packages/subsystem/src/content.ts)、[`Content API v1`](../../../doc/15-contracts/content-api-v1.md)、[Map 模块现况](../../../doc/20-modules/loom-map/README.md)。
 
 ## 3. FSDB 策略：保留已实现的 Map，只补内置行为；NPC 定义由 Map 规定、放置归业务方
 
-**不重新设计整套地图格式。** `[struct]Map` 以现有可用的四字段实现为基线；Tileset、MapTransfer 沿用既有消费模型，保持实际使用的图块、通行、传送及地形语义。通用化的 Map 内容改动只聚焦在新增必需的内置行为声明及旧 `MapAction` 的显式迁移，而不是重做 Tile、坐标、索引或全量 RGSS 类型。其他字段清理须有独立证据，不是此轮设计的前置工作。
+**不重新设计整套地图格式。** `[struct]Map` 以已实现的四字段结构为基线；Tileset、MapTransfer 沿用既有消费模型。此轮 Map 内容协议只扩展必需的内置行为声明并显式迁移旧 `MapAction`，不重写 Tile Table、坐标、索引或全量 RGSS 对象。
 
-**地图行为已确认方向：** 新版 RPGMap 正式内容协议**不要求也不设独立 `[struct]MapAction` 表**。桥梁、悬崖等由 Map 模块内置；业务方只声明受支持的 `kind` 及位置、触发条件等必要参数，不向 Runtime 注入 Ruby、脚本或执行代码。能从 Tile 与 Tileset 地形标签推导的行为不重复声明；需要入口/出口等局部信息的声明放在对应 Map 记录。旧实现仍依赖 MapAction，须安全迁移。
+**内置地形行为 v1 已收敛的边界：** RPGMap 支持 Bridge（桥梁）和 Ledge（悬崖）两种内置地形行为。Ledge 从 `Map.data`、`Tileset.terrain_tags` 和现有通行规则隐式推导，**不写入 `behaviors`**。Bridge 的桥面也由地形标签辨识，但其入口/出口需要局部声明，所以新版 `Map.behaviors` **只允许 `kind: "bridge"`**；新版协议不再要求独立 `[struct]MapAction`。本节的 v1 是目标设计，不等于当前 Runtime 已支持新字段。
 
-**NPC 边界（修正前次误删）：** `[struct]NPC` **保留为 RPGMap 需要的可复用角色定义表**：业务方按 Map 规定的最小定义 Schema 准备 NPC，`setNPC` 通过 `npcId` 引用定义；Map 使用公开 Content 读取 `struct.NPC/{npcId}` 并解析素材。**不要求、不读取 `[group]MapNPC`**：当前地图要放置哪些 NPC、放在哪里，由游戏业务决定；它可自行读取 FSDB Group，也可从其他状态计算，再将 `{npcId, instanceId, x, y, direction, ...}` 等 Map 需要的放置信息交给 Handler。`[struct]NPC` 定义不等于地图 NPC 实例；Essentials Event/Page 不成为 NPC Schema，业务玩法信息不塞进最小定义。
+**NPC 边界：** `[struct]NPC` **保留为 RPGMap 需要的可复用定义表**。调用方按 Map 规定的最小 Schema 准备定义，`setNPC` 通过 `npcId` 引用 `struct.NPC/{npcId}`，Map 解析素材。Map **不要求、不读取 `[group]MapNPC`**：每张地图放置哪些 NPC、位置和玩法信息属于业务方，它可以自行读取 FSDB Group 或其他来源，再传 `{npcId, instanceId, x, y, direction, ...}` 等必要实例信息。Essentials Event/Page 不是 NPC Schema。
 
-当前实现与旧投影关系（**现状，不是新协议目标**）：
+当前实现与旧投影（**现状**）：
 
 ```text
 Map ID → struct.Map/{id} → tileset_id → struct.Tileset/{id}
-                               └→ 图块、自动图块的逻辑资源引用
-Map ID → struct.MapTransfer/{id} → 目标 Map ID / 目标坐标
-Map ID → struct.MapAction/{id}   → 旧实现的桥梁动作及 opaque 防护
+                               └→ 图块、自动图块资源
+Map ID → struct.MapTransfer/{id} → 目标 Map ID / 坐标
+Map ID → struct.MapAction/{id}   → 旧桥梁动作及 opaque 防护
 图像资源 → resource.Graphics/...（Characters、Tilesets 等）
 ```
 
-目标中 **Map 自己需要的 FSDB 组织**（尚未实现）：
+目标内容组织（**尚未实现**）：
 
 ```text
 Map ID → struct.Map/{id} → tileset_id → struct.Tileset/{id}
-                            └→ 可选 behaviors：内置地图行为声明
-Map ID → struct.MapTransfer/{id} → 目标 Map ID / 目标坐标
+                            └→ 可选 behaviors：Bridge 入口／出口
+Map ID → struct.MapTransfer/{id} → 目标 Map ID / 坐标
 NPC 定义 ID → struct.NPC/{npcId} → resource.Graphics/Characters/...
 图像资源 → resource.Graphics/...（Tilesets、Autotiles、Characters 等）
-业务方自行读取/决定地图 NPC 放置 → Handler.setNPC(npcId + 实例信息)
+业务方决定 NPC 放置 → Handler.setNPC(npcId + 实例信息)
 ```
-
-Map 内容目录示意：
 
 ```text
 [FSDB]游戏数据/
@@ -70,15 +66,15 @@ Map 内容目录示意：
 └── [resource]Graphics/
 ```
 
-`[struct]NPC` 采用 FSDB 的基础实体记录规则，须有 `.info.meta`；每个定义以文件 Key 作为 NPC 定义 ID，例如 `NPC/guard.json`。定义至少需要符合唯一 4×4 图集约定的角色素材**逻辑资源引用**；`sprite: { namespace: "resource.Graphics", key: "Characters/NPC 06" }` 仅是字段示例，最终 Schema、ID 类型、版本和资源错误语义待冻结。不必在记录里重复文件 Key，也不保存图片宽高、帧尺寸或业务放置坐标。业务方可自建 `[group]MapNPC`：如使用 FSDB Group，按其规范采用 JSONL 和必需 `.info.meta`、`.desc.meta`；该表的名称、字段、Key、分组语义完全由业务决定，**不能成为 Map 加载或 setNPC 的隐含依赖**。
+`[struct]NPC` 必须有 `.info.meta`，定义 ID 是文件 Key（如 `NPC/guard.json`），至少保存符合统一 4×4 图集约定的素材逻辑引用；`sprite: { namespace: "resource.Graphics", key: "Characters/NPC 06" }` 仍仅是**未冻结的 NPC 字段示例**。定义不复制 Key、图片尺寸或业务放置坐标。业务方如果自行采用 `[group]MapNPC`，应遵守 FSDB Group 的 JSONL 及 `.info.meta`、`.desc.meta` 规范，但其表名、Key 和行 Schema 不是 Map 协议。
 
-当前 Map 保留三层 Tile Table；Tileset 包括贴图名、autotile、passages、priorities、terrain_tags。`terrain_tags` 与 Bridge/Ledge 相关，不可仅以“原引擎字段”理由删除。现有 `MapAction.opaqueRelated` 是无法识别脚本的失败保护；取消表不等于取消这一安全约束。
+现有 Map 保留三层 Tile Table；Tileset 保留 `tileset_name`、`autotile_names`、`passages`、`priorities`、`terrain_tags` 等现有消费字段。`terrain_tags` 不能因来自原引擎而删除；旧 `MapAction.opaqueRelated` 的失败保护不得随独立表移除而丢失。
 
-证据入口：[`semantics.ts`](../src/semantics.ts)、[`runtime.ts`](../src/runtime.ts)、[Essentials 实体数据调查](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[Player/NPC 素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。合成示例见 [`generate-fixtures.mjs`](../../../examples/essentials-v21.1/scripts/generate-fixtures.mjs)，不能将其当作原版素材证据。
+证据入口：[`semantics.ts`](../src/semantics.ts)、[`runtime.ts`](../src/runtime.ts)、[Essentials 实体数据调查](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[Player/NPC 素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。合成示例见 [`generate-fixtures.mjs`](../../../examples/essentials-v21.1/scripts/generate-fixtures.mjs)，不能当作原版素材证据。
 
-### `[struct]Map`：以现有四字段为基线，仅新增可选行为（已确认设计范围）
+### 3.1 `[struct]Map`：四字段不变，仅新增可选 `behaviors`（v1 目标结构已确定）
 
-现有 [`semantics.ts`](../src/semantics.ts) 的 `MapRecord` 与 `validateMapRecord` 已明确下列四个顶层字段，且校验器目前**不接受第五个字段**。本轮保留字段名、类型及含义，不另建 Map 模型：
+当前 [`semantics.ts`](../src/semantics.ts) 的 `MapRecord` 与 `validateMapRecord` 只有四个顶层字段，校验器**不接受第五字段**：
 
 ```ts
 interface MapRecord {
@@ -89,12 +85,11 @@ interface MapRecord {
 }
 ```
 
-`tileset_id` 沿用既有 Tileset 引用；`width`、`height` 为正整数；`data` 继续是 `ProjectedTable`：`dimensions=3`、`xSize=width`、`ySize=height`、`zSize=3`，`values` 长度与尺寸乘积一致，沿用 `x + y*xSize + z*xSize*ySize` 索引。现有 Tileset 通行/priority/terrain tags、MapTransfer、相机和渲染投影行为都不是此次重新设计对象。
+`tileset_id` 沿用已有 Tileset 引用；`width`、`height` 为正安全整数；`data` 保留 `ProjectedTable` 的 `dimensions=3`、`xSize=width`、`ySize=height`、`zSize=3`，`values` 数量等于三维尺寸乘积，索引依旧是 `x + y*xSize + z*xSize*ySize`。不重设坐标、通行、相机、MapTransfer、渲染或 Tile Table 结构。
 
-目标是仅在原结构上增加可选的 `behaviors` 字段，承载无法仅从图块推导的**已实现内置行为**所需声明：
+**目标扩展只有以下可选第五字段**（TypeScript 是目标协议的等价描述，尚未进入源码）：
 
 ```ts
-// 目标形态示意，非当前源码、非已冻结行为 Schema
 interface MapRecord {
   readonly tileset_id: number;
   readonly width: number;
@@ -103,119 +98,122 @@ interface MapRecord {
   readonly behaviors?: readonly MapBehavior[];
 }
 
-type MapBehavior = BridgeBehavior; // 第一版仅列已确认有显式声明需要的 Bridge
-type BridgeBehavior = Readonly<{
+type MapBehavior = Readonly<{
   kind: "bridge";
   operation: "on" | "off";
   occupied: readonly Readonly<{ x: number; y: number }>[];
-  // 必需的触发条件等参数须对照当前 Bridge 行为后确定
 }>;
 ```
 
-- **最小改动**：原四字段不变，不改 Tile Table 的布局/索引、现有 Map/Tileset 引用与已实现的通行/渲染语义。`behaviors` 可选；无显式行为需求的地图不必配置 Bridge 等记录。
-- **`kind` 只描述显式内置行为**：Ledge 继续依据 `Map.data` + `Tileset.terrain_tags` 运行，不在 `behaviors` 中复制 Ledge 条目；Bridge 继续使用现有地形标签判别桥面，仅在 `behaviors` 中声明入口/出口的必要位置和触发信息。后续 `kind` 必须先有模块真实实现和测试，不支持任意脚本。
-- **字段尚未冻结**：上面的 `operation`/`occupied` 只是讨论中的写法，不是可直接导入的 FSDB Schema；触发模式、方向/碰撞语义、重复触发、重叠冲突、非法位置与错误诊断须以现有 MapAction/Runtime 和真实 Map21 场景复核后定稿，不为了对称性新增各种地形行为。
-- **新旧协议显式隔离**：本次不声称旧四字段 Map 在当前 Runtime 上已支持 `behaviors`。新增字段涉及 Map `.info.meta`/schemaVersion（具体版本标识待定）、`validateMapRecord`、导入/迁移与 Runtime 加载切换；旧 `MapAction` 及 `opaqueRelated` 安全失败路径不能静默丢弃。可选字段的默认/缺失语义须跟版本一起定义，避免把旧协议无声视为新协议。
+完整 JSON 保留原四字段；示例只展示新增部分，不是独立合法 Map 记录：
 
-### 地图内置行为：声明与执行分离（已确认方向）
-
-- **内置行为集合**：由 `game-libs/map` 实现、测试和版本化；业务方只能选支持的 `kind` 并提供相关必要参数。未知 `kind`、缺失参数、非法位置或不支持的触发语义必须报错，不能忽略或执行脚本。
-- **Ledge／悬崖**：通行、跳跃与视觉规则可由 `Map.data` 和 `Tileset.terrain_tags` 推导；第一版不为同一地形重复配置悬崖动作，Map 负责方向检查、落点、跳跃状态与动画。
-- **Bridge／桥梁**：桥梁图块仍依赖 `terrain_tags`；但入口 `bridge-on`、出口 `bridge-off` 的位置和触发条件无法仅由图块还原。新版在 Map 内声明桥梁 `kind`、位置/占格与必要触发参数；Runtime 内部维护 `bridgeLevel`、通行与层级投影。业务数据不必写内部状态数值或 Ruby 调用。
-- **示意而非 Schema**：`Map.behaviors: [{ kind: "bridge", operation: "on", occupied: [{ x: 10, y: 5 }] }, ...]` 只说明声明位于 Map；字段名、触发时机、重复触发、位置和版本仍待冻结。不能假定所有桥梁只靠踩格触发：当前还区分脚下触发、向前碰撞、`through`、`emptyGraphic` 和通行状态，须审计后以明确的内置规则替代原版事件字段。
-- **职责边界**：传送仍由 MapTransfer 负责；NPC、对话、物品、建筑不因此变为内置地形行为。只为实际需要且模块确实实现的行为扩展 `kind`，不建立通用脚本引擎。
-
-**现有实现与迁移：** `runtime.ts#loadMap` 仍读取 `struct.MapAction/{mapId}`，缺失时才用空记录；`validateMapRecord` 仍严格要求 `tileset_id,width,height,data` 四个顶层字段。因此目前不能直接在 FSDB 写入 `Map.behaviors` 并期望运行。实施须同步修改 Map schema/version、校验、导入/迁移、Runtime 和测试，明确新旧读取边界，不静默混用。
-
-- 仅将旧 `MapAction.actions` 中**确认语义**的桥梁入口/出口转换为 Map 内置声明，按真实 Map21 样本复核数量、位置、操作和运行结果；不预设无损转换。
-- 旧 `opaqueRelated`、无法确认的脚本或缺失映射的动作必须在导入/迁移时失败并给出可定位诊断；不得默认空行为或执行 Ruby。
-- 回归 Bridge/Ledge 通行、状态恢复、图层遮挡、跨图重置、触发时机和失败路径。验证完成前不得宣称旧实现已被移除或 Essentials 行为已完全保留。
-
-### NPC：模块管理定义，业务方装配实例（修正确认方向；API 待细化）
-
-**两种所有权不可混淆：** Map 规定并读取 `[struct]NPC` 的最小地图角色定义（以 `npcId` 定位其图集等必要表现信息）；游戏业务决定当前地图应出现哪些 NPC、各自的初始位置和用途，及对话/任务/AI 等额外业务数据。Map 不读取游戏方自定义的放置 Group 或依赖其字段。Runtime 独占实例进入地图后的坐标、朝向、运动/碰撞状态，不反向修改 FSDB。建筑若只是背景仍用 Tile，不为它强制建立角色实体。
-
-业务流程（**示意；不要求固定的放置表**）：
-
-```text
-角色请求进入目标地图
-  → Map 确认目标并开启进入准备阶段（尚未发出已进入事件）
-  → 业务方收到地图进入准备通知，自行读取 NPC 放置 Group/其他数据
-  → 业务方转换为 npcId + 实例信息，通过 Handler.setNPC(...) 提供
-  → Map 根据 npcId 读取/校验 struct.NPC 定义及角色素材，准备/提交地图与角色投影
-  → 地图进入成功后发布完成事实事件
+```json
+{
+  "behaviors": [
+    { "kind": "bridge", "operation": "on", "occupied": [{ "x": 22, "y": 57 }, { "x": 23, "y": 57 }] },
+    { "kind": "bridge", "operation": "off", "occupied": [{ "x": 22, "y": 58 }, { "x": 23, "y": 58 }] }
+  ]
+}
 ```
 
-- **准备通知与完成事件不同**：进入准备钩子（暂称 `mapEntering`）允许业务方异步装配；进入完成事件（暂称 `mapEntered`）只能表示地图、角色与投影已提交的事实。此前文档“事件表达完成事实”继续适用于普通完成事件；准备钩子须另行定义为可参与装配的生命周期入口，不能把普通完成事件当作初始化屏障。
-- **待解决的时序选择**：准备钩子返回角色放置输入，或通过绑定进入上下文的 `setNPC` 提交输入，二者何者为正式 API 尚未决定。必须避免准备钩子 `await setNPC` 时 `setNPC` 又等待地图已进入而死锁；明确准备完成条件、超时/取消、错误传播和切图重入，旧准备结果不得污染新场景。
-- **`setNPC` 按定义 ID 引用，不重复传贴图**：示意输入是 `{ instanceId, npcId, x, y, direction }`。`npcId` 解析 `struct.NPC/{npcId}`；`instanceId` 区分同一 NPC 定义在同一地图上的多次放置。业务方的 Group 行、对话、任务等额外字段不直接作为 Map 输入；素材引用在 NPC 定义内，业务放置时不重复提供 `sprite`。字段类型、身份作用域、批量模式、校验和失败语义尚未冻结。
-- **批量语义候选**：可考虑 `setNPC([...])` 整批替换某地图的 NPC 集合、`setNPC([])` 清空，任一实例或 NPC 定义/资源无效则整批拒绝；尚须决定准备阶段初始集合与已进入后的动态替换如何区分，以及旧实例运动和订阅如何处置。不要把候选写成已实现签名。
-- **实例身份与生命周期**：`npcId` 是可复用定义 ID，`instanceId` 是放置实例身份；后者至少在当前地图内唯一。占格、重进复位/保留、玩家与 NPC 碰撞、自主移动和是否触发 Transfer/Bridge/Ledge 均待进一步决定。
-- **Group 读取能力归属**：[Content API v1](../../../doc/15-contracts/content-api-v1.md) 已定义 Group 路由，公开 [`ContentClient`](../../../packages/subsystem/src/content.ts) 目前只有 `record()` / `resource()`。如果游戏业务在准备钩子中读取 FSDB Group，需要通过公开 API 补齐/核实 Group 能力及 JSONL、错误和取消语义；这是**业务放置数据读取**依赖，不是 Map 读取 `struct.NPC` 的前置条件。Map 不绕过 Content 访问物理目录。
+**v1 闭合字段集与含义：** `kind` 唯一允许 `"bridge"`；`operation` 只能是 `"on"` / `"off"`，分别把内部 `bridgeLevel` 设为 `2` / `0`；`occupied` 是非空地图格数组，一个条目内各格共享同一个操作。Map ID 来自 `[struct]Map` 的文件 Key，不在行为里重复存储；位置是零基地图格坐标。`bridgeLevel`、图层深度、执行脚本、原版 `eventId`、`pageIndex`、`commandIndex`、`trigger`、`height`、`through` 和 `emptyGraphic` 都不是新版行为的内容字段。将桥梁设为已有值属于有效、幂等的触发，但仍按区域重入规则去重。无需强制 on/off 数量相同，也不要求 `occupied` 本身为 Bridge tag15 图块：入口/出口可能位于桥旁陆地。
 
-### 尚未形成完整契约的部分
+**校验在场景提交前完成并 fail-closed：** 新协议只接受原四字段加可选 `behaviors`；缺失 `behaviors` 或 `[]` 均表示没有显式行为（**仅适用于经明确确认为新版的内容**）。`behaviors` 必须是数组，行为对象恰有 `kind,operation,occupied`；`occupied` 非空，每个点恰有 `x,y`，各坐标为安全整数，且 `0 <= x < width`、`0 <= y < height`。同一行为的重复格、不同 Bridge 行为的占用重叠一律拒绝，避免以数组顺序充当隐性优先级。未知 `kind`（包括显式 `"ledge"`）、未知操作、冗余字段、无效点或数组形态均拒绝，不跳过坏行或允许自定义 Ruby。行为唯一性/重叠以本地图所有显式行为为范围检查；数组顺序不是内容优先级，也无需持久化 `behaviorId`。
 
-当前 Runtime/Browser 主要面向单 Player Sprite；虽然 Map 本身有地图、Tileset、传送与桥/崖能力，尚未实现通过 `npcId` 装配多个 NPC 的定义读取、独立定位、绘制、运动和碰撞。地图进入准备、场景提交、完成通知与重复切图的时序也未冻结。
+### 3.2 内置行为的完整范围：Bridge 显式、Ledge 隐式（v1 目标语义已确定）
 
-一个 NPC 定义可被同一地图/不同地图复用；业务方提供每个实例的独立身份及放置，Map 将实例绑定到对应 NPC 定义并管理当前状态。业务表/游戏逻辑不受 Essentials Event/Page 约束；`struct.NPC` 最小定义 Schema 属于 Map，其他玩法数据及地图放置数据属于业务。
+| 行为 | 如何确定 | `Map.behaviors` | Runtime 责任 |
+| --- | --- | --- | --- |
+| Bridge（桥梁） | Bridge 地形标签 15 判别桥面；Map 显式列入口/出口格及 on/off | `kind: "bridge"`，唯一允许的显式 kind | 接收 Player 到达触发，切换内部桥层并同步通行/人物与地形深度投影。 |
+| Ledge（悬崖） | `Map.data` 与 `Tileset.terrain_tags` 中标签 1，结合方向通行/落点规则 | **不写** `kind: "ledge"`，也不要求任意 Ledge 行为数组 | 在移动计划中作两格 jump/blocked 决策；只在落点执行到达检查。 |
 
-### 角色素材 v1：唯一 4×4 约定，不限定图片像素尺寸（已确认方向）
+**Bridge 触发固定规则（无需通用 `trigger` 字段）：**
 
-Player 和业务设置的 NPC **只支持同一种角色行走图集格式**。不为了兼容 Essentials 所有资源引入多套布局、泛用切帧器或逐素材配置；门、浆果、战斗立绘、特殊缺帧宝可梦图不属于本次角色图集范围。
+1. v1 **仅 Player** 可触发显式 Bridge；NPC 是否参与地形行为是后续 NPC 运动契约议题，不因共用 Sprite 就自动赋权。
+2. Player 的方向移动成功并**完成到达** `occupied` 某格时检查；出生在该格、原地转向、受阻及仅与前方格接触均不触发。普通 walk 在完成时检查，jump 仅检查最终落点，不检查跳过的中间格。
+3. **优先级：**移动成功后，先按现有 `MapTransfer.steps` 检查落点；如果开始传送，不执行旧地图落点 Bridge。无传送才匹配当前 Map 的 Bridge。`MapTransfer.contacts/edges` 仍依照既有输入与边界逻辑执行，不被 Bridge 记录替代。
+4. 同一行为的连续占用区域只能触发一次；离开该行为全部占用格后再次进入，才重新允许触发。同地图另一个不重叠的 Bridge 区域可以随后触发。Runtime 用内部行为索引/进入态去重，不将旧 `eventId` 写回 FSDB；地图切换、重新装载时重置去重状态和 `bridgeLevel=0`。
+5. `on` 把桥层置 2、`off` 置 0；桥层已是目标值时不额外制造无意义深度更新，但该次到达仍计入本区域的触发去重。层改变时必须在**同一次 RenderDomain 提交**中同步角色、地形深度及必要相机投影，沿用现有 Runtime 语义；Browser 不能自行改桥层。一次方向输入不因层改变而重新评估另一行为。
 
-- 角色 PNG 按 **4 列 × 4 行**排列：行方向为下（2）、左（4）、右（6）、上（8）；列为 `pattern 0..3`，必须真实符合四向四帧语义，不能仅因尺寸可整除就当作角色图。
-- 解码后计算 `frameWidth = image.width / 4`、`frameHeight = image.height / 4`；图片宽高都须能被 4 整除，结果为正整数。**不规定**总图片尺寸必须是 128×128、128×192 等，也不要求单帧与地图格同尺寸。
-- 静止 `pattern = 0`；行走沿用当前 Player 运动状态与 pattern 轮替规则，不能无依据改成简单 0、1、2、3 循环。
-- 单帧相对逻辑地图格**水平居中、底部对齐格底**。当前 32px 格：水平偏移 `(32 - frameWidth) / 2`，纵向偏移 `32 - frameHeight`；宽/高超出格子不自动扩大逻辑占格，v1 默认 1×1。
-- 128×128 → 32×32；128×192 → 32×48；192×192 → 48×48。几何满足不保证实际图像是有效行走图。
-- `[struct]NPC` 定义保存角色素材的逻辑引用；`setNPC` 的实例输入只引用 `npcId`，**不重复记录图片总尺寸、帧尺寸、布局行列数、方向映射或素材路径**；由统一约定、定义和解码结果确定。
+**Ledge 固定规则：**在现有 `planMovement` 中，先检查当前方向相邻格的双向可通行性；若相邻有效地形是 Ledge（tag 1），再检查跨两格的最终落点边界与通行，合法则生成**一次 `jump`、一个 motionId**，非法则 `blocked`。中间格不算 walk 到达，既不触发中间格的 Bridge，也不触发中间格的到达 Transfer；最终落点按已有顺序先检查 Step Transfer 再检查 Bridge。jump 动画沿用当前 400ms / `distancePx * 3 / 8` 的暂定产品值，**不宣称原版 RGSS 帧级等价**；跨图 jump 不支持。不可由 `behaviors` 覆写 Ledge 方向、跳距或判定；特殊悬崖属于未来单独需求，不能偷渡进 v1。
 
-[素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)说明当前 Browser 的 4×4 切帧与尺寸计算，并证明真实 Characters 文件混有非角色图片。目前产品仍主要是单 Player Sprite，采用同一素材计算规则不代表已支持多 NPC；还要实现多实例位置、绘制、运动和必要碰撞。Player 现有初始化入口继续兼容，不强制新增 Player Record。
+本设计将“支持的内置地形行为”与“必须显式写入 `behaviors` 的种类”明确分开：**v1 支持 Bridge + Ledge，但 `MapBehavior` 只包含 Bridge**。`kind` 不充当万能事件解释器，NPC、对话、物品、建筑、传送都不作为新增 `kind`；传送保持 `MapTransfer` 负责。
 
-### 数据清理原则
+### 3.3 旧 MapAction → 新 Map 的安全迁移与协议边界（规则已明确，实施/验证未完成）
 
-- **保留**：当前被绘制、通行、传送、地形或事件消费的地图字段与必要引用，以及新协议中的最小 `struct.NPC` 定义。
-- **待确认**：未消费但实现既定目标/兼容性所需的字段，先审计原始来源与语义，不提前删减；NPC 最小定义自主设计，不继承 Essentials Event/Page。
-- **移除出正式 Map 协议**：目标能力不消费且不影响安全/引用校验的来源内部信息，必要时留在导入工具或诊断资料中；**NPC 放置 Group 不列为 Map 必需内容**，NPC 定义表仍保留。
-- 明确 schemaVersion、合法字段、引用与失败语义；不静默将旧五字段 Tileset 补成新版本。不执行原始 Ruby/任意脚本。
-- 原版素材遵守许可边界，不因协议整理将受限原始 FSDB/图像直接提交仓库。
+现状：`runtime.ts#loadMap` 仍读取 `struct.MapAction/{mapId}`（缺失时空记录），`validateMapRecord` 仍拒绝第五字段。旧 `MapAction` 的确认动作还包含 `trigger:1`、`through`、`emptyGraphic`、`eventId` 等；当前 Runtime 通过 `overTrigger` 判断脚下到达或受阻前方触发，使用 `lastStarted` 防重复。新版舍弃这些字段**只在可证明等价时**才允许；不是任意旧 Bridge 都能无条件压缩成三字段。
+
+- **迁移输入完整性：**枚举每张旧 Map 的所有 MapAction；任何 `opaqueRelated`、含未确认脚本/命令、无法确认的页或动作，都必须在导入/迁移时失败并输出可定位的 mapId/eventId/pageIndex/原因，不得将记录当作空行为或回退执行 Ruby。
+- **单条行为可转换条件：**旧动作必须是确认的 `bridge-on` 或 `bridge-off` 且 `trigger=1`；`occupied` 合法。针对每个占用格，在桥层 0 与 2 下按当前 Runtime 的 `through || (emptyGraphic && evaluatePassability(..., 0, bridgeLevel))` 复核 `overTrigger`。只有始终落在到达/here 分支、无需前方受阻触发时，才可去掉 `trigger/through/emptyGraphic`，映射 `bridge-on → operation:on`、`bridge-off → operation:off`、原占格 → `occupied`。无法确认的触发、动态条件、优先级依赖或不满足条件的输入应拒绝迁移，不默默改变语义。
+- **全图完整性：**迁移后检查无重复/重叠占用格；逐条比较旧新动作的数量、操作、位置与触发结果，并验证状态去重、传送优先级及图层投影。不能因为地图上有 Bridge tag15 就自动凭空生成入口/出口，也不能静默略去旧动作。
+- **真实证据边界：**[Map21 八事件矩阵](../TERRAIN_BEHAVIOR_EVIDENCE.md)显示其八个确认动作在桥层 0/2 静态重算均为 `here` 分支，支持对该样本实施上述压缩；这只是 `FSDB-OBSERVED + STATIC-INFERRED`，尚不是原版逐帧动态保真证明。Map7 桥负例、Map21 八动作/四组路线、Map47 Ledge 及原创合成的受阻/front、不合法 landing、重叠、opaque 和取消用例都需在新协议实现后复核。
+- **版本与新旧隔离：**新版 `[struct]Map` 的 `.info.meta` Schema 应只接受上述四字段及可选 `behaviors`，并由明确的内容版本/导入迁移标记证明来源已按新版规则审查。**不得**仅因一份旧 Map 也恰好只有四字段，就自动推断旧 `MapAction` 可忽略。版本标识与现有 Content/FSDB 接口的具体接线留给实现审计，但此处的准入规则不可放宽：未验证新版本或旧动作迁移未通过就拒绝启用“只读 Map”的新 Runtime。无需仅为此在 Map JSON 添加第六个 `schemaVersion` 字段。
+- **加载切换：**完成导入/校验与测试后，新 Runtime 才可以停止读取 `struct.MapAction`；新 Map 中 `behaviors` 缺失才真正代表无显式行为。不得在 Runtime 混读旧动作与新 behaviors，更不得在实现前向现有四字段校验器直接投放新版数据。
+
+以上完成的是**Bridge/Ledge 的 v1 目标数据结构、触发、校验和迁移准入规则设计**；未完成新 `.info.meta` 的落盘、版本接线、代码、动态测试或原版资格签署。后续新增显式 `kind` 必须有独立需求、校验、运行时实现、迁移与测试，不为对称性添加 `kind: "ledge"`。
+
+### 3.4 NPC：模块管理定义，业务方装配实例（边界已确定，API 待细化）
+
+**两种所有权不可混淆：**Map 规定并读取 `[struct]NPC` 的最小地图角色定义（以 `npcId` 定位其图集等表现信息）；业务方决定当前地图出现哪些 NPC、初始位置和对话/任务/AI 等业务用途。Map 不读取游戏方自定义放置 Group。Runtime 独占实例进入地图后的坐标、朝向、运动/碰撞状态，不回写 FSDB。建筑若只是背景仍使用 Tile。
+
+业务流程示意（不要求固定放置表）：
+
+```text
+请求进入目标地图 → Map 开启准备阶段
+  → 业务方收到准备通知，读取自有 NPC Group/业务状态
+  → 业务方按 npcId + 实例信息调用 Handler.setNPC(...)
+  → Map 读取/校验 struct.NPC 及素材，准备/提交地图与角色投影
+  → 发布地图进入完成事实事件
+```
+
+- 进入准备钩子（暂称 `mapEntering`）允许异步业务装配；`mapEntered` 仅表示已提交事实。决定回调返回角色输入还是经绑定进入上下文的 `setNPC` 提交仍待定；必须避免互相等待死锁，明确取消、错误、重入和过期结果屏障。
+- `setNPC` 通过 `npcId` 解析 `struct.NPC/{npcId}`；`instanceId` 表示地图中的独立放置。同一 `npcId` 可复用，放置输入不重复传 `sprite`。`{instanceId,npcId,x,y,direction}` 是示意，字段类型/作用域和操作签名未冻结。
+- 批量替换、空数组清空、整批失败原子性、进入后动态替换、重进复位/保留、碰撞/移动/地图行为参与仍待定，不能把讨论示例当作当前 API。
+- [Content API v1](../../../doc/15-contracts/content-api-v1.md) 有 Group 路由，但公开 [`ContentClient`](../../../packages/subsystem/src/content.ts) 目前只有 `record()`/`resource()`；如业务选择 Group，应由 Content/Subsystem 边界补齐公开接口，而**不是 Map 直接读取游戏放置 Group 或物理路径**。
+
+### 3.5 角色素材 v1：唯一 4×4 约定，不限定像素尺寸（已确认方向）
+
+Player 与 NPC 共用唯一 4 列×4 行 PNG 图集：方向行依次下 2、左 4、右 6、上 8；列 `pattern 0..3`。宽高分别可被 4 整除、单帧为正整数，帧尺寸为解码宽高各除以 4；不规定总图必须 128×128/128×192，也不因图片比格大自动改变默认 1×1 逻辑占格。静止 `pattern=0`，行走保持当前 Player 的模式，不改为无依据的 0→1→2→3 循环。以当前 32px 格水平居中、底部对齐，偏移 `(32-frameWidth)/2` 和 `32-frameHeight`。128×128→32×32、128×192→32×48、192×192→48×48；可整除不等于语义合格。门、浆果、立绘、特殊缺帧图不进入此协议。
+
+`[struct]NPC` 只需保存合规图集的逻辑资源引用；`setNPC` 不重复传贴图或帧大小。详见[素材与运动调查](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。当前产品仍主要只有单 Player Sprite，多 NPC 独立节点、位置、运动和遮挡尚未实现；Player 既有初始化入口继续兼容。
+
+### 3.6 数据清理原则
+
+- 保留现有被绘制、通行、传送、地形与事件消费的 Map/Tileset/Transfer 字段、必要引用及最小 `[struct]NPC` 定义；此轮不为通用化重做现有数据布局。
+- 来源字段若仍影响安全/行为，须先审计迁移再决定是否移除；旧 `opaqueRelated` 不可丢弃。独立 `MapAction` 与 NPC 放置 Group 不列为新版 Map 必需内容。
+- 以新版内容版本和严格 Schema 审查 Map 行为；旧 Tileset 五字段记录不可静默补为新版本；不得执行原始 Ruby/任意脚本。
+- Essentials 原始素材及 FSDB 遵守许可边界，不因整理协议提交受限内容。
 
 ## 4. Builder / Handler 的设计方向（尚不冻结签名）
 
-- Builder 接收 Subsystem 环境、地图初始化条件与 Map/NPC 定义可访问内容定位配置，在同一 Subsystem 内装配 Handler；不导入/安装内容，不决定其他 Subsystem topology，也不接收固定 NPC **放置 Group** 定位作为必填参数。
-- Handler 提供按 `npcId` 进行角色实例批量设置（暂称 `setNPC`）、玩家跳转/切图、必要的 NPC 地图操作、只读快照与事件/准备钩子。调用方不直接修改 Runtime 内部状态或触发渲染。
-- Map 为进入地图提供业务装配时机：准备阶段与已完成进入事实必须区分。普通事件只报告**完成提交的业务事实**，准备钩子另定参与和失败语义；不能先报告切图成功，再因必需的 NPC 定义/装配失败而将其视为失败。
-- `setNPC` 的实际输入、是批量替换还是其他语义、准备阶段如何安全调用、动态设置是否允许、回调顺序、取消/失效与定义/资源错误处理需独立收敛。不得让旧地图的异步业务结果更新新地图。
-- Handler 只在当前 Subsystem 内被业务调用；不引入跨 Runtime 对象引用、通用 RPC、全局 EventBus 或 Main 新公开接口。
-- 初始化、命令、状态和渲染的原子性及异常安全须审计；`new RPGMapBuilder(...).build()` 等仅为思路，不冻结 API 签名，也不宣称已实现。
+Builder 接收 Subsystem 环境、初始化条件、Map/NPC 定义内容定位配置，在同一 Subsystem 装配 Handler，不导入/安装数据，不接收固定 NPC 放置 Group 作为必填参数。Handler 提供按 `npcId` 设置 NPC 实例、玩家移动/切图、快照及准备钩子/完成事件；只服务本 Subsystem，不引入跨进程 RPC、全局 EventBus 或 Main 新公开接口。
 
-## 5. 可行性与缺口
+进入准备阶段与已完成进入事实必须区分；普通事件仅报告已提交事实，失败不得先报切图成功。`setNPC` 的签名、批量/动态语义、资源失败、取消/过期屏障、异常及 RenderDomain 提交原子性仍需单独设计。`new RPGMapBuilder(...).build()` 仅作意图示例，不声称当前已有此 API。
 
-**方向可行，尚未完成实现/产品验证。** 现有 `game-libs/map`、Subsystem factory、ContentClient、地图/图块解析、移动、传送、Bridge/Ledge 和 Browser 投影可作为基础。主要实现仍可放在 Map 库自身，不必预设 Main/Renderer 新公开契约。
+## 5. 可行性与实施缺口
 
-实际缺口：**Map 四字段已可直接作为基线，不重新设计；新增的只是可选 `behaviors` 的真实 Bridge 参数/触发语义、schema/version 和旧 MapAction 安全迁移。** 其余缺口为 `struct.NPC` 定义最小 Schema、按 ID 读取/校验及资源解析；进入准备钩子、业务异步放置、`setNPC` 的提交/替换/取消语义；多 Sprite 独立定位与渲染、NPC 运动碰撞；资源定位和 ID 规则；Handler 失败、切图与异常的状态一致性。如果业务选择 FSDB Group，则公开 Content Group 读取能力还需在所属 Content/Subsystem 边界补齐，**但不是 Map 的放置数据读取职责**。不把全量 Essentials NPC 事件、所有特殊素材或独立 Building 作为首版前置条件；已实现能力不等于 RGSS 逐帧保真资格。
+**Bridge/Ledge 目标行为设计已经收敛，代码迁移及验证尚未完成。** 当前地图四字段、Tileset 地形、MapTransfer、Bridge/Ledge 运动及 Browser 投影可沿用；新增行为的实现重点是 Map 校验/元数据、旧动作导入检查、Runtime 改读 Map.behaviors 及保留一致的行为/渲染更新。
+
+其它独立缺口：`[struct]NPC` 最小 Schema、定义读取及资源解析；业务地图进入准备钩子与 `setNPC` 语义；多 NPC Sprite、运动碰撞与生命周期；Handler 初始化、失败/取消与场景一致性。游戏如果使用 FSDB Group，须在 Content/Subsystem 补齐公开读取入口，但 Map 本身不读取放置表。本设计不实现全量 Essentials 事件、全部特殊素材或独立 Building；产品完成与 RGSS 逐帧保真资格分开记录。
 
 ## 6. TODO 与验证顺序
 
-- [x] **事实调查（设计输入，不代表实现完成）**：已完成 Essentials 实体数据与 Player/NPC 素材及运动调查，见 [`ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md`](./ESSENTIALS_V21_1_ENTITY_DATA_INVESTIGATION.md)、[`PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md`](./PLAYER_NPC_SPRITE_AND_MOTION_INVESTIGATION.md)。
-- [x] **Map 基线设计方向**：现有 `MapRecord` 的 `tileset_id,width,height,data` 与三层 `ProjectedTable` 原样保留；目标只扩展可选 `behaviors`，不重做地图格式。此项是设计决定，不是新字段已实现。
-- [x] **NPC 内容所有权方向**：保留 RPGMap 的 `[struct]NPC` 定义协议；取消 RPGMap 必需的 `group.MapNPC` 或任何固定放置 Schema。业务监听进入准备、自主读取/决定放置，通过 `npcId` 和独立实例信息调用 Handler；责任边界已确定，非实现。
-- [ ] **现有内容审计（仅针对迁移）**：聚焦旧 `MapAction` 桥梁动作、触发和 opaque 输入，明确其如何映射到 Map 的可选行为；保留现有 Map/Tileset/Transfer 和 Bridge/Ledge/渲染结果，不因通用化启动无关字段清理。
-- [ ] **NPC 定义最小协议**：冻结 `[struct]NPC` 的文件 Key/ID、`.info.meta`、唯一 4×4 素材逻辑引用、非法/缺失定义和资源失败语义；不纳入对话/任务/AI 或放置坐标。
-- [ ] **Map 内置行为最小扩展**：只为无法从 Tile/terrain tags 推导的已实现行为定义 `behaviors` 的 `kind`、必要参数与触发规则；第一版聚焦 Bridge，Ledge 保持隐式。更新 Map schema/version、严格校验和旧 MapAction 迁移，覆盖未知 kind、非法位置、重复/冲突及参数失败。
-- [ ] **地图进入装配协议**：定义进入准备钩子与进入完成事件的作用域/顺序、业务异步读取、取消与重入；决定准备回调返回 NPC 集合还是经进入上下文调用 `setNPC`，避免死锁和过期结果污染；明确空集合及准备失败行为。
-- [ ] **角色实例输入及 `setNPC` 语义**：冻结 `npcId`、实例身份、坐标/方向、批量替换或增量策略、定义/素材的整批校验、加载中与已进入后调用、清空/删除及失败原子性；不把业务 Group 行直接作为 Map 输入，不重复传 `sprite`。
-- [ ] **运动、碰撞与生命周期**：Player/NPC 占格与重叠、移动指令、地图行为参与、切图重进时实例状态复位/保留、销毁与过期运动回调；不预先建立完整 AI/存档框架。
-- [ ] **角色素材及多实例验证**：唯一 4×4、解码尺寸 /4、脚对齐和默认 1×1 占格；覆盖 128×128 合成 Demo、128×192 真实 Player 及标准 NPC 多节点运动/遮挡。
-- [ ] **FSDB 地图最小协议**：在既有 Map 四字段上加可选行为并确定版本/错误语义，沿用 Tileset、Transfer、NPC 定义和 Graphics 的实际引用；独立 MapAction、地图 NPC 放置 Group 非必需，不重建地图格式。
-- [ ] **业务 Group 读取（条件依赖，非 Map TODO）**：若示例游戏用 FSDB Group，自 Content/Subsystem 公开入口补齐/核实 `group()`、JSONL、错误/取消语义；Map 不消费 Group、不直接读文件路径。
-- [ ] **Builder/Handler 契约**：在上述语义明确后冻结 Subsystem 内装配、命令、快照、完成事件、准备钩子、生命周期与失败处理。
-- [ ] **实现与兼容迁移**：安全转换已确认旧桥梁动作；无法确认的脚本/opaque 必须可诊断失败；更新 importer、Runtime、测试，保证 Bridge/Ledge 回归。
-- [ ] **独立消费者验证**：原创游戏使用既有 Map/Tileset/Transfer 的数据形态加必要内置 kind、NPC 定义和 Graphics；业务从自选来源决定 NPC 放置并按 `npcId` 设置多个实例，无须重写地图格式或 Map 源码，也不强制 `[group]MapNPC` 或 Building Record。
-- [ ] **回归及资格**：覆盖 walk、transfer、Bridge、Ledge、动态 viewport、浏览器投影、过期异步装配、NPC 定义/实例错误和失败原子性；记录实际测试，不把设计讨论当验收通过。
+- [x] **事实调查**：Essentials 实体数据与 Player/NPC 素材/运动调查已完成；证据与局限见对应调查文档。
+- [x] **Map 基线与内置行为 v1 目标设计**：现有四字段不变，仅加可选 `behaviors`；Bridge 三字段结构、Player 到达触发、去重、冲突与失败规则已在 §3.1–3.3 确定；Ledge 明确为隐式行为，不添加 `kind: "ledge"`。这是设计完成，**不是功能实现或迁移验收通过**。
+- [x] **NPC 内容所有权方向**：保留 Map 必需的 `[struct]NPC` 定义；业务方决定放置，不要求 `[group]MapNPC`；尚未实现。
+- [ ] **Bridge 迁移证据及新 Map Schema/版本接线**：逐条验证旧 `overTrigger` 与 Map21 八动作、旧脚本/opaque 失败；生成新版 `[struct]Map/.info.meta`、明确版本来源，更新校验/导入；不得用旧四字段记录缺少 behaviors 推断无动作。
+- [ ] **Runtime 迁移与测试**：新 Runtime 只读新版 Map.behaviors、不混读 MapAction；验证桥层/投影同次提交、到达/受阻分支、区域重入、Transfer 优先级、Map7→Map21、Map47 Ledge、resize/cancel/异常。保留正确的 fail-closed 行为。
+- [ ] **NPC 最小定义协议**：冻结 `[struct]NPC` Key、`.info.meta`、4×4 素材引用、缺失/非法定义和资源失败语义；不纳入对话/任务/AI/位置。
+- [ ] **地图进入装配协议**：准备/完成钩子时序、业务异步读取、取消重入与过期结果，决定返回输入还是进入上下文 `setNPC`，避免死锁。
+- [ ] **角色实例 / `setNPC`**：冻结实例 ID、坐标/方向、定义解析、批量/清空/动态策略及错误原子性；不传业务 Group 整行或重复 sprite。
+- [ ] **运动、碰撞与生命周期**：Player/NPC 占格/重叠、移动、行为参与、跨图复位/保留、销毁与回调；不建完整 AI/存档框架。
+- [ ] **素材及多实例验证**：唯一 4×4、帧尺寸、脚对齐/1×1 逻辑占格；验证多 Sprite 位置、运动与遮挡。
+- [ ] **Group 读取（业务条件依赖，非 Map TODO）**：如游戏选 FSDB Group，在 Content/Subsystem 公开接口补齐 `group()`、JSONL、错误/取消，不在 Map 直接访问文件路径。
+- [ ] **Builder/Handler 契约**：收敛装配、命令、快照、事件、生命周期与错误。
+- [ ] **独立消费者与资格**：原创游戏沿用 Map/Tileset/Transfer 形态+Bridge 声明及 NPC 定义，不提供 MapAction 或固定放置 Group；验收 Bridge/Ledge/多 NPC、Browser 与安全迁移。测试结果和 RGSS 资格按执行 SHA 单独记录，不以设计完成替代通过。
 
 ## 7. 统一验收问题
 
-> 一个新游戏是否能沿用现有四字段 Map/三层 Tile 格式、Tileset、Transfer、NPC 定义与 Graphics，只对确有需要的地图添加受支持的内置 `kind` 声明（无需独立 MapAction 或指定 NPC **放置表**），在同一 Subsystem 内通过 Builder 装配、业务在进入准备阶段自行决定 NPC 放置并通过 `npcId` 与实例信息调用 Handler，完成定义读取、移动/碰撞、绘制、切图及完成事件，而无需修改 `game-libs/map` 源码，同时安全保留迁移后已确认的 Essentials 地图行为？
+> 新游戏能否沿用当前四字段 Map/三层 Tile、Tileset、Transfer、NPC 定义与 Graphics，仅对需要桥梁的地图加可选 `behaviors`（只含 `kind:"bridge"` 的入口/出口），让 Ledge 完全由地形推导；不提供独立 MapAction 或固定 NPC 放置表；通过同一 Subsystem 的 Builder/Handler 装配并由业务方安排 NPC 放置，完成地图状态、运动/碰撞、渲染、切图和事件，且无需修改 `game-libs/map` 源码，并对不能等价迁移的旧动作明确失败？
 
-**Map 的设计范围已收敛为「现有四字段不变 + 可选 `behaviors`」；不重构 Tile Table 或另造 Map Schema。** 角色图集唯一 4×4 约定、取消新协议独立 MapAction、保留 `struct.NPC` 定义而将 NPC 放置/业务 Group 交给调用方，也已确定为设计方向。`behaviors` 的精确 Bridge 字段、触发/冲突语义和版本、NPC 定义 Schema、准备/完成时序、`setNPC` API、角色碰撞/生命周期仍需收敛。文档更新不等于代码实现、迁移或资格通过。
+**已完成的是 Map 的最小扩展及 Bridge/Ledge v1 目标行为设计。** 旧四字段实现仍拒绝 `behaviors`，旧 Runtime 仍读 `MapAction`，迁移、元数据、版本接线、测试、NPC 定义及 Handler API 均未因设计文档更新而自动完成；不宣称原版 RGSS 动态保真资格。
