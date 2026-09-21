@@ -29,7 +29,7 @@ jobs:
           python3 scripts/relocate-root-milestones.py
           git diff --check
           test "$(find . -maxdepth 1 -type f -name 'M[0-9]*_*.md' | wc -l)" -eq 0
-          test ! -f M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
+          test "$(find . -maxdepth 1 -type f -name 'M15_HOSTRA*' | wc -l)" -eq 0
       - name: Build documentation with strict links
         uses: ./.github/actions/setup-workspace
         with:
