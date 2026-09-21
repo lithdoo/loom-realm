@@ -7,7 +7,24 @@ export default defineConfig({
   base: '/loom-realm/',
   cleanUrls: true,
   lastUpdated: true,
-  markdown: { lineNumbers: true },
+  markdown: {
+    lineNumbers: true,
+    config(md) {
+      // A link out of doc/ is valid on GitHub but has no equivalent VitePress page.
+      // Only the known repository-owned roots are rewritten; ordinary site links
+      // retain VitePress's dead-link validation and are never ignored.
+      const renderLink = md.renderer.rules.link_open
+      md.renderer.rules.link_open = (tokens, index, options, env, self) => {
+        const token = tokens[index]
+        const href = token.attrGet('href')
+        if (href && /^(?:\.\.\/)+(?:examples|packages|\.github)\//.test(href)) {
+          const repoPath = href.replace(/^(?:\.\.\/)+/, '')
+          token.attrSet('href', `https://github.com/lithdoo/loom-realm/blob/main/${repoPath}`)
+        }
+        return renderLink ? renderLink(tokens, index, options, env, self) : self.renderToken(tokens, index, options)
+      }
+    },
+  },
   themeConfig: {
     siteTitle: 'LoomRealm',
     nav: [
