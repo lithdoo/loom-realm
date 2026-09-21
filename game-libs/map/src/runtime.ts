@@ -779,7 +779,8 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       const startHereOrFront = (tileX: number, tileY: number, requireOverTrigger: boolean): boolean => {
         if (failOpaque(tileX, tileY)) return true;
         releaseLastStartedIfLeft();
-        const candidates = hereActions(tileX, tileY).filter((action) => !requireOverTrigger || overTrigger(action, tileX, tileY));
+        const wanted = requireOverTrigger;
+        const candidates = hereActions(tileX, tileY).filter((action) => overTrigger(action, tileX, tileY) === wanted);
         const action = candidates.find((item) => lastStarted?.eventId !== item.eventId);
         if (!action) return false;
         lastStarted = { eventId: action.eventId, x, y };

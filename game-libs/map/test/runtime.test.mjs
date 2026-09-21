@@ -1168,6 +1168,30 @@ describe("map runtime walking", { concurrency: false }, () => {
     await frame.pending;
   });
 
+  test("blocked bump onto a passable On tile does not start the bridge event", async (t) => {
+    const world = openTerrain(8, 8, (values, width) => {
+      values[3 + 4 * width] = 385;
+    });
+    const tables = terrainTables(400, (passages) => { passages[385] = 0x08; });
+    const frame = await startFrame(t, {
+      params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
+      records: {
+        "struct.Map/1": world.map,
+        "struct.Tileset/1": { ...world.tileset, ...tables },
+        "struct.MapAction/1": actionRecord([
+          bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
+        ]),
+      },
+    });
+    await frame.emitEvent(down("ArrowUp"));
+    assert.equal(player(frame.latestState()).y, 4);
+    assert.equal(player(frame.latestState()).motion, null);
+    assert.equal(player(frame.latestState()).bridgeLevel, 0);
+    assert.equal(view(frame.latestState()).bridgeLevel, 0);
+    frame.abort();
+    await frame.pending;
+  });
+
   test("empty graphic is not walk-on unless the tile is passable; named graphic needs front touch", async (t) => {
     const world = openTerrain(8, 8);
     const named = await startFrame(t, {
