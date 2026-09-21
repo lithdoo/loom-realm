@@ -4,11 +4,15 @@ on:
   pull_request:
     paths:
       - "doc/**"
+      - "game-libs/map/*.md"
+      - "examples/**/*.md"
+      - "packages/**/*.md"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
       - ".github/actions/setup-workspace/**"
       - "scripts/check-doc-links.py"
+      - "scripts/check-retired-doc-links.py"
       - "scripts/run-python.mjs"
       - ".github/workflows/docs.yml"
       - ".github/workflows/deploy-pages.yml"
@@ -17,11 +21,15 @@ on:
       - main
     paths:
       - "doc/**"
+      - "game-libs/map/*.md"
+      - "examples/**/*.md"
+      - "packages/**/*.md"
       - "package.json"
       - "package-lock.json"
       - ".npmrc"
       - ".github/actions/setup-workspace/**"
       - "scripts/check-doc-links.py"
+      - "scripts/check-retired-doc-links.py"
       - "scripts/run-python.mjs"
       - ".github/workflows/docs.yml"
       - ".github/workflows/deploy-pages.yml"
@@ -48,6 +56,9 @@ jobs:
 
       - name: Validate Markdown links
         run: npm run docs:check-links
+
+      - name: Validate links to retired Map process docs across repository
+        run: python3 scripts/check-retired-doc-links.py
 
       - name: Build VitePress site
         run: npm run docs:build
