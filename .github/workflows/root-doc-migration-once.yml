@@ -29,10 +29,10 @@ jobs:
           python3 scripts/relocate-root-milestones.py
           python3 - <<'PY'
           from pathlib import Path
-          for name in ('packages/fsdb-http/M12_CORE_EXTRACTION.md', 'packages/subsystem/DESIGN.md'):
-              path = Path(name)
+          targets = [Path('packages/fsdb-http/M12_CORE_EXTRACTION.md'), Path('packages/subsystem/DESIGN.md'), Path('doc/20-modules/desktop-host/hostra-composition.md'), *Path('doc/30-implementation/milestone-evidence').glob('M*.md')]
+          for path in targets:
               lines = path.read_text().splitlines(keepends=True)
-              lines = [line.rstrip(' \t\r\n') + '\n' if 'https://github.com/lithdoo/loom-realm/blob/2d465b8c8501566b26375dae55e1a78007606c40/M' in line else line for line in lines]
+              lines = [line.rstrip(' \t\r\n') + '\n' if '](' in line else line for line in lines]
               path.write_text(''.join(lines))
           PY
           git diff --check
