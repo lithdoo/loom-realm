@@ -1,3 +1,5 @@
+> 当前冻结实施规格及历史测量；**正式性能资格仍待验证**。当前待办以[统一路线图](./roadmap.md)为准，不把历史 42.9ms/96.3ms 冒充新版本指标。
+
 # Render 移动延迟与核心链路改造设计
 
 > 状态：Implementation Specification Frozen；ADR 0035 Accepted，PR 0 治理传播已完成  
