@@ -1,190 +1,24 @@
-# LoomRealm 正式契约目录
+# 当前正式契约
 
-> 层级：正式契约索引  
-> 状态：Active Design  
-> 稳定程度：M10–M13 **Implemented / Qualified / Closed historical subjects**；revised four-child Profile `/1` + Viewport **Core Docs Frozen / not implemented / not qualified**；M14/M15 milestone status ledger-owned  
-> 主要定义：current cross-role contracts、version/compatibility boundary、maturity  
-> 依赖：[系统架构总览](../10-architecture/system-overview.md)、[渲染系统](../10-architecture/rendering-system.md)、[ADR 0031](../decisions/0031-business-owned-web-component-projection.md)、[ADR0037](../decisions/0037-direct-profile-v1-preimplementation-viewport-correction.md)  
-> 最近复核：2026-09-16（仅新增 Viewport 导航；既有 M13/Frozen 正文原样保全）
+跨角色、跨进程可观察的身份、时序、失败和版本约束以相应契约正文为准。这里只提供导航：**不复制可能过期的实现 PASS/Closed 状态**。已实现的模块见[核心模块](../20-modules/core/README.md)，资格差距及 M16/M17 见[路线图](../30-implementation/roadmap.md)。
 
-**Viewport 变更导航（仅此段为新增修正）：** [当前修正 Profile `/1`](./renderer-data-profile-v1.md) · [revision-3 Conformance](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md) · [Viewport Conformance](./viewport-state-conformance-v1.md) · [旧 Profile 完整原文](./renderer-data-profile-v1-previewport-baseline.md) · [旧 Conformance 完整原文](./renderer-data-profile-conformance-v1-previewport-baseline.md) · [范围修复及继承规则](../30-implementation/viewport-scope-repair-2026-09-16.md) · [唯一当期 Core ledger](../30-implementation/viewport-profile-v1-qualification.md) · [独立 Freeze 签署](../30-implementation/viewport-core-docs-freeze-independent-review-2026-09-16.md)。旧三-child `/1` Frozen/PASS 仅适用于原实现；ADR0037 已将其作为未发布首版修正为四-child `/1`。`/2` 提案 superseded，不发布。原有 Input/Render/Connection/Control wire、M13 Projector 规则未变；Map PR0/P95 不属于 Core Docs Freeze。Core Docs Frozen ≠ Implemented ≠ Qualified。
+## Runtime、控制、数据
 
-契约层只冻结跨角色/跨实现必须一致的 observable semantics；physical provisioning、Process/Worker、endpoint/ticket/Port creation默认不形成 application protocol。本文不维护 M14/M15 的第二套 live PASS/Closed 状态。
+- [Game Package v1](./game-package-v1.md) · [Hostra Launcher / Node Runner](./nodejs-launcher-profile-v1.md) · [PWA Launcher / Worker Runner](./pwa-launcher-profile-v1.md)。
+- [Subsystem Control v1](./subsystem-control-protocol-v1.md) · [Runtime Control v1](./runtime-control-profile-v1.md) · [Frame / Call v1](./frame-call-protocol-v1.md)及[Conformance](./frame-call-conformance-v1.md)。
+- [Main ⇄ Renderer Control v1](./main-renderer-control-v1.md) · [Renderer ⇄ Subsystem Data Connection v1](./renderer-subsystem-data-connection-v1.md)。
+- [Renderer Data Profile `/1`](./renderer-data-profile-v1.md)及[Conformance](./renderer-data-profile-conformance-v1.md) · [Viewport State v1](./viewport-state-v1.md)及[Conformance](./viewport-state-conformance-v1.md)。现行四子项实现的精确证据见[Viewport 资格记录](../30-implementation/viewport-profile-v1-qualification.md)；旧三子项原文仅作历史证据，不得部署混配。
+- [User Input v1](./user-input-v1.md) · [Render Update v1](./render-update-v1.md) · [Readonly Content API v1](./content-api-v1.md)。
 
----
+## Web Presentation
 
-## 1. Current Contract Map
+[Config v1](./web-presentation-config-v1.md)描述资源脚本/样式引导；[API v1](./web-presentation-api-v1.md)描述只读投影 Context/Retained Data/ResourceClient。Renderer current Store 与 Main 的 authoritative topology 不因 DOM/业务组件而生成第二份权威。平台有不同物理资源绑定，但不创造第二套公开 Presentation API。
 
-```text
-Frame / Call v1                         Active / Normative / Frozen
-Main ⇄ Renderer Control v1              Active / Normative / Frozen
-Renderer Data Application Profile v1    original three-child Frozen historical;
-                                        revised four-child /1 Frozen / not implemented
-Viewport State v1                       Frozen / not implemented / not qualified
-Renderer ⇄ Subsystem Data Connection v1 Active / Normative / Frozen (composition projection editorial correction)
-User Input v1                           Active / Normative / Frozen
-Render Update v1                        Active / Normative / Frozen
-Readonly Content API v1                 Active / Normative / Evolving
-Hostra Game Launcher / Node Runner v1   Active / Normative / Frozen M6 slice
-Web Presentation Config v1              Active / Normative / Frozen
-Web Presentation API v1                 Active / Normative / Frozen
-```
+## 如何判断规范是否已交付
 
-M15 Hostra shell/HOSTRA_SUBCMD/window/bootstrap mechanics是 product physical composition，不新增 cross-role application protocol，也不修改上述 Renderer/Data/Content/Web Presentation contracts。
+- **Contract Frozen：** 规范语义被冻结，不自动代表实现或 CI 通过。
+- **Implemented：** 以当前源码和产品测试判断；新功能不能被旧文档中的“not implemented”否决。
+- **Qualified：** 必须有同一 executable subject、适用 Node/浏览器/桌面环境和有效签核；详见[M11](../30-implementation/m11-qualification.md)、[M14](../30-implementation/m14-qualification.md)、[M15](../30-implementation/m15-qualification.md)及[Viewport](../30-implementation/viewport-profile-v1-qualification.md)记录。
+- **历史设计：** [ADR 索引](../decisions/README.md)与 Git 历史保存原因；不将已取代草案当作接口规范。
 
----
-
-## 2. M13 Authority Summary
-
-```text
-Main / Renderer Control snapshot
-    owns current Session + DataAuthority topology
-
-Renderer per-subsystem Store
-    owns current authoritative Render replica
-
-Web Projector
-    reads current topology + eligible Store facts
-    owns only LoomRealm-managed DOM mutation
-
-Business WC
-    read-only consumer of managed projection
-    owns Shadow DOM / Canvas / WebGL / private presentation state
-```
-
-Presentation reevaluation只有两类 production source：
-
-```text
-committed current Control Session/DataAuthority topology change
-successful current Render Store commit
-```
-
-DOM、Presentation mapping 或 test harness不得成为第二份 topology/currentness/Render authority。
-
----
-
-## 3. Web Presentation Config Frozen Rules
-
-正式契约：[Web Presentation Config v1](./web-presentation-config-v1.md)。
-
-```text
-Config source acquisition
-→ product/platform-private
-
-WebPresentationConfigV1
-→ exact {formatVersion,scripts,styles}
-→ Window-level ordered refs
-→ M12 prepared Content
-→ scripts MIME essence = text/javascript
-→ styles MIME essence = text/css
-→ ordered <link> / classic <script>
-→ window.onload
-→ presentation starts once
-```
-
-MIME parameters不参与 compatibility；missing/unparseable/wrong MIME直接 bootstrap failure，不做 sniff/fallback。
-
-M15的 top-level-navigation-only trusted shell lifetime属于 Desktop physical composition；它不得改变 Config v1 value contract或 M13 `window.onload` presentation semantics。
-
----
-
-## 4. Web Presentation API Frozen Rules
-
-正式契约：[Web Presentation API v1](./web-presentation-api-v1.md)。
-
-两个独立 optional receiver：
-
-```text
-receiveRenderContext
-→ Window-lifetime capability
-→ before first managed insertion
-→ at most once per HTMLElement
-
-receiveRenderData
-→ current retained full data
-→ initial + only when retained JSON value changes
-```
-
-完整 live identity：
-
-```text
-(Session, subsystemKey, generation, domainId, key)
-```
-
-same identity → same HTMLElement；fresh Session/fresh generation → fresh element universe。
-
-`PresentationResourceClient`只暴露 logical resource identity/version。Window teardown取消在途 reads；teardown后 well-formed `resource()` MUST reject `CONTENT_CANCELLED`。
-
----
-
-## 5. Currentness / Failure Frozen Rules
-
-```text
-DataAuthority removed
-→ remove affected subsystem DOM without waiting Render commit
-
-generation changed
-→ old element universe retires immediately
-→ new generation waits matching carrier + complete baseline
-
-same-generation Data carrier loss
-→ preserve/freeze only affected subsystem DOM
-→ same Renderer logical participant remains current
-→ partial rebaseline hidden
-→ complete baseline reconciles once
-
-Control transport loss without committed replacement snapshot
-→ preserve/freeze last presentation
-→ do not invent empty authority
-```
-
-M15 reload is a fresh Renderer logical participant；M15 Data-only reconnect is not。These physical scenarios consume the frozen contracts rather than redefining them。
-
-Unregistered tag remains projection-time structural failure：preflight before first DOM mutation；failure means zero mutation for that reconciliation and permanent Window-local managed-DOM failure until fresh Window/document lifetime according to the current product composition。
-
----
-
-## 6. Implementation / Milestone Route
-
-This contract index intentionally does not publish a second live milestone ledger。Current authoritative status sources：
-
-```text
-Revised Profile /1 + Viewport
-    ../30-implementation/viewport-profile-v1-qualification.md
-
-M10–M13
-    closed qualification records for historical subjects
-
-M14
-    ../30-implementation/m14-qualification.md
-
-M15
-    ../30-implementation/m15-qualification.md
-    + ../../M15_HOSTRA_DESKTOP_RECOMPOSITION_PLAN.md
-```
-
-Current summary for navigation only：
-
-```text
-M10, M12–M13  Closed for historical subjects; revised /1 affected rerun pending
-M11      Requalification Pending → ../30-implementation/m11-qualification.md
-M14      Requalification Pending → ../30-implementation/m14-qualification.md
-M15      Requalification Pending → ../30-implementation/m15-qualification.md
-M16–M17  pending
-```
-
-M13 landing docs remain `M13_01`–`M13_05`。M11/M14/M15 formal status must come from their designated evidence ledgers, not this index；the protocol contracts themselves remain frozen except the explicitly reopened pre-release Profile-v1 composition tracked by ADR0037 and its ledger。
-
----
-
-## 7. Freeze Governance
-
-Frozen contract只有以下事实才能 reopen：
-
-```text
-demonstrated correctness/security contradiction
-cross-contract conflict
-real consumer capability failure
-```
-
-不得以 API symmetry、目录对称、future speculation、Hostra/PWA physical symmetry或 test convenience 为理由增加 public presentation package、第二份 Store/topology/currentness、generic loader/registry、layout/layer authority、DOM rollback framework或 RenderEvent WC ABI。
+本目录仅收敛导航、不修改上述契约正文或放松兼容义务。
