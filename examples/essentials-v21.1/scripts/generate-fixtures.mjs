@@ -44,12 +44,14 @@ mapValues[12 + 8 * 24] = 385;
 const passages = Array(386).fill(0); passages[385] = 0x02;
 const priorities = Array(386).fill(0); priorities[0] = 5;
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
+const mapSchema = { type: "object", additionalProperties: false, required: ["tileset_id", "width", "height", "data", "behaviors"], properties: { tileset_id: { type: "integer", minimum: 1 }, width: { type: "integer", minimum: 1 }, height: { type: "integer", minimum: 1 }, data: { type: "object" }, behaviors: { type: "array" } } };
+const npcSchema = { type: "object", additionalProperties: false, required: ["name", "sprite"], properties: { name: { type: "string", minLength: 1 }, sprite: { type: "object", additionalProperties: false, required: ["namespace", "key"], properties: { namespace: { const: "resource.Graphics" }, key: { type: "string", pattern: "^Characters/.+" } } } } };
 const fixture = {
   records: {
-    "struct.Map/1": { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, mapValues) },
+    "struct.Map/1": { tileset_id: 1, width: 24, height: 18, data: table(3, 24, 18, 3, mapValues), behaviors: [] },
     "struct.Tileset/1": { id: 1, tileset_name: "m14_tileset", autotile_names: [null, null, null, null, null, null, null], passages: table(1, 386, 1, 1, passages), priorities: table(1, 386, 1, 1, priorities), terrain_tags: table(1, 386, 1, 1, Array(386).fill(0)) },
     "struct.MapTransfer/1": { id: 1, steps: [], contacts: [], edges: [] },
-    "struct.MapAction/1": { id: 1, schemaVersion: "struct.MapAction/v1-bridge", actions: [], opaqueRelated: [] }
+    "struct.NPC/guide": { name: "Fixture Guide", sprite: { namespace: "resource.Graphics", key: "Characters/m14_npc" } }
   },
   expectedPixels: { tile384: [220, 40, 40, 255], tile385: [40, 80, 220, 255], playerDown: [240, 160, 30, 255], playerRight: [30, 110, 240, 255] }
 };
@@ -61,6 +63,14 @@ await writeFile(new URL("resources/m14_player.png", output), png(128, 128, (x, y
   const edge = x % 32 < 3 || x % 32 > 28 || y % 32 < 3 || y % 32 > 28;
   return edge ? [20, 20, 20, 255] : base;
 }));
+await writeFile(new URL("resources/m14_npc.png", output), png(128, 128, (x, y) => {
+  const column = Math.floor(x / 32);
+  const row = Math.floor(y / 32);
+  const colors = [[170, 60, 210, 255], [40, 190, 190, 255], [230, 80, 120, 255], [90, 210, 70, 255]];
+  const base = colors[(column + row) % colors.length];
+  const edge = x % 32 < 3 || x % 32 > 28 || y % 32 < 3 || y % 32 > 28;
+  return edge ? [20, 20, 20, 255] : base;
+}));
 
 const installation = new URL("../", import.meta.url);
 const fsdb = new URL("../[FSDB]essentials-v21.1/", import.meta.url);
@@ -68,7 +78,7 @@ await rm(fsdb, { recursive: true, force: true });
 const directories = [
   "[struct]Map/",
   "[struct]MapTransfer/",
-  "[struct]MapAction/",
+  "[struct]NPC/",
   "[struct]Tileset/",
   "[resource]Graphics/Tilesets/",
   "[resource]Graphics/Characters/",
@@ -77,17 +87,18 @@ const directories = [
 ];
 await Promise.all(directories.map((directory) => mkdir(new URL(directory, fsdb), { recursive: true })));
 await Promise.all([
-  writeFile(new URL("[struct]Map/.info.meta", fsdb), "{}\n"),
+  writeFile(new URL("[struct]Map/.info.meta", fsdb), `${JSON.stringify(mapSchema)}\n`),
   writeFile(new URL("[struct]Map/1.json", fsdb), `${JSON.stringify(fixture.records["struct.Map/1"])}\n`),
   writeFile(new URL("[struct]MapTransfer/.info.meta", fsdb), "{}\n"),
   writeFile(new URL("[struct]MapTransfer/1.json", fsdb), `${JSON.stringify(fixture.records["struct.MapTransfer/1"])}\n`),
-  writeFile(new URL("[struct]MapAction/.info.meta", fsdb), "{}\n"),
-  writeFile(new URL("[struct]MapAction/1.json", fsdb), `${JSON.stringify(fixture.records["struct.MapAction/1"])}\n`),
+  writeFile(new URL("[struct]NPC/.info.meta", fsdb), `${JSON.stringify(npcSchema)}\n`),
+  writeFile(new URL("[struct]NPC/guide.json", fsdb), `${JSON.stringify(fixture.records["struct.NPC/guide"])}\n`),
   writeFile(new URL("[struct]Tileset/.info.meta", fsdb), "{}\n"),
   writeFile(new URL("[struct]Tileset/1.json", fsdb), `${JSON.stringify(fixture.records["struct.Tileset/1"])}\n`),
   writeFile(new URL("[resource]Graphics/.desc.meta", fsdb), "M15 canonical game resources.\n"),
   writeFile(new URL("[resource]Graphics/Tilesets/m14_tileset.png", fsdb), await readFile(new URL("resources/m14_tileset.png", output))),
   writeFile(new URL("[resource]Graphics/Characters/m14_player.png", fsdb), await readFile(new URL("resources/m14_player.png", output))),
+  writeFile(new URL("[resource]Graphics/Characters/m14_npc.png", fsdb), await readFile(new URL("resources/m14_npc.png", output))),
   writeFile(new URL("[resource]Presentation/.desc.meta", fsdb), "M15 trusted presentation resources.\n"),
   writeFile(new URL("[resource]Presentation/map/map.css.css", fsdb), await readFile(new URL("../../game-libs/map/browser/map.css", installation))),
   writeFile(new URL("[resource]Presentation/map/map.browser.js.js", fsdb), await readFile(new URL("../../game-libs/map/browser/map.browser.js", installation))),

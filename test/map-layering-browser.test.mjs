@@ -41,146 +41,22 @@ function regularTile({ x = 0, y = 0, z = 0, tileId = 384, depth = 0 } = {}) {
   return { x, y, z, tileId, depth, blit: { kind: "regular", sourceIndex: tileId - 384 } };
 }
 
-const AUTOTILE_QUARTERS = [
-  [27, 28, 33, 34], [5, 28, 33, 34], [27, 6, 33, 34], [5, 6, 33, 34],
-  [27, 28, 33, 12], [5, 28, 33, 12], [27, 6, 33, 12], [5, 6, 33, 12],
-  [27, 28, 11, 34], [5, 28, 11, 34], [27, 6, 11, 34], [5, 6, 11, 34],
-  [27, 28, 11, 12], [5, 28, 11, 12], [27, 6, 11, 12], [5, 6, 11, 12],
-  [25, 26, 31, 32], [25, 6, 31, 32], [25, 26, 31, 12], [25, 6, 31, 12],
-  [15, 16, 21, 22], [15, 16, 21, 12], [15, 16, 11, 22], [15, 16, 11, 12],
-  [29, 30, 35, 36], [29, 30, 11, 36], [5, 30, 35, 36], [5, 30, 11, 36],
-  [39, 40, 45, 46], [5, 40, 45, 46], [39, 6, 45, 46], [5, 6, 45, 46],
-  [25, 30, 31, 36], [15, 16, 45, 46], [13, 14, 19, 20], [13, 14, 19, 12],
-  [17, 18, 23, 24], [17, 18, 11, 24], [41, 42, 47, 48], [5, 42, 47, 48],
-  [37, 38, 43, 44], [37, 6, 43, 44], [13, 18, 19, 24], [13, 14, 43, 44],
-  [37, 42, 43, 48], [17, 18, 47, 48], [13, 18, 43, 48], [1, 2, 7, 8],
-];
-
-function autotileCornerTuple(tileId) {
-  const variant = (tileId - 48) % 48;
-  const row = AUTOTILE_QUARTERS[variant];
-  return row.flatMap((quarter) => {
-    const index = quarter - 1;
-    return [(index % 6) * 16, Math.floor(index / 6) * 16];
-  });
-}
-
-function visualFromTile(tile) {
-  const depthBias = tile.depth === 0 ? -1 : tile.depth - tile.y * 32;
-  if (tile.blit.kind === "regular") return [tile.tileId, depthBias, 0, tile.blit.sourceIndex];
-  return [tile.tileId, depthBias, 1, tile.blit.slot, ...autotileCornerTuple(tile.tileId)];
-}
-
-function requiredChunkCoords(mapWidth, mapHeight, cameraX, cameraY, vw, vh, cameraMotion = null) {
-  const boundsFor = (cx, cy) => ({
-    minTileX: Math.max(0, Math.floor(cx / 32)),
-    maxTileX: Math.min(mapWidth - 1, Math.floor((cx + vw - 1) / 32)),
-    minTileY: Math.max(0, Math.floor(cy / 32)),
-    maxTileY: Math.min(mapHeight - 1, Math.floor((cy + vh - 1) / 32)),
-  });
-  let bounds = boundsFor(cameraX, cameraY);
-  if (cameraMotion) {
-    const from = boundsFor(cameraMotion.fromCameraX, cameraMotion.fromCameraY);
-    bounds = {
-      minTileX: Math.min(bounds.minTileX, from.minTileX),
-      maxTileX: Math.max(bounds.maxTileX, from.maxTileX),
-      minTileY: Math.min(bounds.minTileY, from.minTileY),
-      maxTileY: Math.max(bounds.maxTileY, from.maxTileY),
-    };
-  }
-  const minChunkX = Math.max(0, Math.floor(bounds.minTileX / 8) - 1);
-  const maxChunkX = Math.min(Math.floor((mapWidth - 1) / 8), Math.floor(bounds.maxTileX / 8) + 1);
-  const minChunkY = Math.max(0, Math.floor(bounds.minTileY / 8) - 1);
-  const maxChunkY = Math.min(Math.floor((mapHeight - 1) / 8), Math.floor(bounds.maxTileY / 8) + 1);
-  const coords = [];
-  for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY += 1) {
-    for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
-      coords.push({ chunkX, chunkY });
-    }
-  }
-  return coords;
-}
-
-function chunksFromTiles(tiles, geo = {}) {
-  const {
-    mapWidth = 24,
-    mapHeight = 18,
-    cameraX = 0,
-    cameraY = 0,
-    viewportWidth = 640,
-    viewportHeight = 480,
-    cameraMotion = null,
-  } = geo;
-  const chunkMap = new Map();
-  for (const { chunkX, chunkY } of requiredChunkCoords(mapWidth, mapHeight, cameraX, cameraY, viewportWidth, viewportHeight, cameraMotion)) {
-    chunkMap.set(`${chunkX},${chunkY}`, { chunkX, chunkY, cells: Array(192).fill(0) });
-  }
-  for (const tile of tiles) {
-    const chunkX = Math.floor(tile.x / 8);
-    const chunkY = Math.floor(tile.y / 8);
-    const key = `${chunkX},${chunkY}`;
-    let chunk = chunkMap.get(key);
-    if (!chunk) {
-      chunk = { chunkX, chunkY, cells: Array(192).fill(0) };
-      chunkMap.set(key, chunk);
-    }
-    const localX = tile.x - chunkX * 8;
-    const localY = tile.y - chunkY * 8;
-    chunk.cells[((tile.z * 8 + localY) * 8) + localX] = tile.tileId;
-  }
-  return [...chunkMap.values()].sort((left, right) => left.chunkY - right.chunkY || left.chunkX - right.chunkX);
-}
-
 function viewData({
   depth = 0, tileset = tilesetRef("v1"), autotiles = NULL_AUTOTILES, tiles,
   cameraX = 0, cameraY = 0, cameraMotion = null, sceneEpoch = 1, visualEpoch = 1,
   mapId = 1, viewportWidth = 640, viewportHeight = 480, mapWidth = 24, mapHeight = 18,
-  bridgeLevel = 0,
+  bridgeLevel = 0, columns = 20, rows = 14,
 } = {}) {
   const tileList = tiles ?? [regularTile({ depth })];
-  const seen = new Set();
-  const tileVisuals = [];
-  for (const tile of tileList) {
-    if (seen.has(tile.tileId)) continue;
-    seen.add(tile.tileId);
-    tileVisuals.push(visualFromTile(tile));
-  }
-  tileVisuals.sort((left, right) => left[0] - right[0]);
+  const barHeight = viewportHeight < 480 ? 24 : viewportHeight < 720 ? 32 : 48;
+  const contentWidth = viewportWidth;
+  const contentHeight = viewportHeight - barHeight;
+  const logicalWidth = columns * 32;
+  const logicalHeight = rows * 32;
   return {
     sceneEpoch,
     visualEpoch,
     motionId: cameraMotion?.id ?? null,
-    viewportWidth,
-    viewportHeight,
-    mapId,
-    mapWidth,
-    mapHeight,
-    cameraX,
-    cameraY,
-    tileset,
-    autotiles,
-    tileVisuals,
-    chunks: chunksFromTiles(tileList, { mapWidth, mapHeight, cameraX, cameraY, viewportWidth, viewportHeight, cameraMotion }),
-    cameraMotion,
-    bridgeLevel,
-  };
-}
-
-function responsiveViewData(options = {}) {
-  const legacy = viewData(options);
-  const tiles = options.tiles ?? [regularTile({ depth: options.depth ?? 0 })];
-  const { tileVisuals: _tileVisuals, chunks: _chunks, ...base } = legacy;
-  const viewportWidth = options.viewportWidth ?? 640;
-  const viewportHeight = options.viewportHeight ?? 480;
-  const barHeight = viewportHeight < 480 ? 24 : viewportHeight < 720 ? 32 : 48;
-  const contentWidth = viewportWidth;
-  const contentHeight = viewportHeight - barHeight;
-  const columns = options.columns ?? 20;
-  const rows = options.rows ?? 14;
-  const logicalWidth = columns * 32;
-  const logicalHeight = rows * 32;
-  return {
-    ...base,
     viewportWidth,
     viewportHeight,
     barHeight,
@@ -192,9 +68,24 @@ function responsiveViewData(options = {}) {
     logicalHeight,
     scaleX: contentWidth / logicalWidth,
     scaleY: contentHeight / logicalHeight,
-    mapName: String(legacy.mapId),
-    tiles: tiles.map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]),
+    mapName: String(mapId),
+    mapId,
+    mapWidth,
+    mapHeight,
+    cameraX,
+    cameraY,
+    tileset,
+    autotiles,
+    tiles: [...tileList]
+      .sort((left, right) => left.z - right.z || left.y - right.y || left.x - right.x)
+      .map((tile) => [tile.x, tile.y, tile.z, tile.tileId, tile.depth]),
+    cameraMotion,
+    bridgeLevel,
   };
+}
+
+function responsiveViewData(options = {}) {
+  return viewData(options);
 }
 
 function spriteData(y = 0) {
@@ -242,6 +133,92 @@ before(async () => {
 after(async () => {
   await browser?.close();
   await new Promise((resolve) => server?.close(resolve));
+});
+
+test("Browser renders 0/1/N independent sprites, preserves static pattern, and removes stale nodes", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const payload = viewData({ depth: 0 });
+  await page.evaluate(({ viewPayload, player, npcA, npcB }) => {
+    const view = window.__view;
+    const first = window.__sprite;
+    const second = document.createElement("lr-map-sprite");
+    const third = document.createElement("lr-map-sprite");
+    view.append(second, third);
+    const resources = first._resources;
+    second.receiveRenderContext({ resources });
+    third.receiveRenderContext({ resources });
+    view.receiveRenderData(viewPayload);
+    first.receiveRenderData(player);
+    second.receiveRenderData(npcA);
+    third.receiveRenderData(npcB);
+    window.__npcA = second;
+    window.__npcB = third;
+  }, {
+    viewPayload: payload,
+    player: matchingSprite(payload),
+    npcA: matchingSprite(payload, { x: 1, y: 1, screenX: 32, screenY: 32, motionId: null, motion: null, pattern: 2 }),
+    npcB: matchingSprite(payload, { x: 2, y: 2, screenX: 64, screenY: 64, motionId: null, motion: null, pattern: 3 }),
+  });
+  await waitUntil(page, () => [...document.querySelectorAll("lr-map-sprite")].every((sprite) => sprite._lastPaintedScreen), "three sprites painted");
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("lr-map-sprite")].map((sprite) => ({ left: sprite.style.left, top: sprite.style.top, crop: sprite._cropKey }))), [
+    { left: "0px", top: "0px", crop: `${identityOf(spriteRef)}|2|0|32x32` },
+    { left: "32px", top: "32px", crop: `${identityOf(spriteRef)}|2|2|32x32` },
+    { left: "64px", top: "64px", crop: `${identityOf(spriteRef)}|2|3|32x32` },
+  ]);
+  await page.evaluate(() => { window.__npcA.remove(); window.__npcB.remove(); });
+  await waitUntil(page, () => document.querySelectorAll("lr-map-sprite").length === 1, "NPC nodes removed");
+  await page.evaluate(() => window.__sprite.remove());
+  await waitUntil(page, () => document.querySelectorAll("lr-map-sprite").length === 0, "zero sprites supported");
+  assert.equal(await page.evaluate(() => window.__view.dataset.mapVisualState), "ready");
+});
+
+test("static NPC follows the current camera at animation start, midpoint, and end", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const viewPayload = viewData({
+    depth: 0,
+    cameraX: 32,
+    cameraMotion: { id: 41, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+  });
+  await page.evaluate(({ viewPayload: view, player, npc }) => {
+    const npcElement = document.createElement("lr-map-sprite");
+    window.__view.append(npcElement);
+    npcElement.receiveRenderContext({ resources: window.__sprite._resources });
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(player);
+    npcElement.receiveRenderData(npc);
+    window.__cameraNpc = npcElement;
+  }, {
+    viewPayload,
+    player: { ...walkingSprite({ id: 41, y: 1, fromY: 0, screenX: 0, screenY: 32, fromScreenX: 0, fromScreenY: 0 }), x: 1 },
+    npc: matchingSprite(viewPayload, { x: 5, y: 2, screenX: 128, screenY: 64, motionId: null, motion: null, pattern: 3 }),
+  });
+  await waitUntil(page, () => window.__view._accepted?.sprites?.length === 2, "camera motion with static NPC accepted");
+  const samples = await page.evaluate(() => {
+    const view = window.__view;
+    const prepared = view._accepted;
+    if (view._raf !== undefined) cancelAnimationFrame(view._raf);
+    view._activeMotion = { ...view._activeMotion, startedAt: 1_000, durationMs: 250 };
+    const sample = (elapsed) => {
+      view._activeMotion.startedAt = performance.now() - elapsed;
+      view._tickAccepted(prepared, view._sequence, false);
+      if (view._raf !== undefined) cancelAnimationFrame(view._raf);
+      view._raf = undefined;
+      for (const child of view._spriteChildren()) child._raf = undefined;
+      return {
+        npc: { ...window.__cameraNpc._lastPaintedScreen },
+        player: { ...window.__sprite._lastPaintedScreen },
+        crop: window.__cameraNpc._cropKey,
+        tileLeft: view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])")?.style.left,
+      };
+    };
+    return [sample(-1), sample(125), sample(300)];
+  });
+  assert.deepEqual(samples.map((sample) => sample.npc), [{ x: 160, y: 64 }, { x: 144, y: 64 }, { x: 128, y: 64 }]);
+  assert.deepEqual(samples.map((sample) => sample.player.x), [0, 0, 0], "Player retains its existing motion interpolation");
+  assert.deepEqual(samples.map((sample) => sample.tileLeft), ["0px", "-16px", "-32px"]);
+  assert.equal(samples.every((sample) => sample.crop === `${identityOf(spriteRef)}|2|3|32x32`), true);
 });
 
 async function openPage({ clock = false } = {}) {
@@ -869,11 +846,11 @@ test("H. tile depth and player y validate synchronously", { timeout: 30_000 }, a
     };
     const negativeDepth = throwsSync(() => window.__view.receiveRenderData({
       ...validView,
-      tileVisuals: [[384, 0.5, 0, 0]],
+      tiles: [[0, 0, 0, 384, -1]],
     }));
     const nonIntegerDepth = throwsSync(() => window.__view.receiveRenderData({
       ...validView,
-      chunks: [{ chunkX: 0, chunkY: 0, cells: Array(191).fill(0) }],
+      tiles: [[0, 0, 0, 384, 0.5]],
     }));
     const negativeY = throwsSync(() => window.__sprite.receiveRenderData({ ...sprite, y: -1 }));
     const nonIntegerY = throwsSync(() => window.__sprite.receiveRenderData({ ...sprite, y: 0.5 }));
@@ -1175,7 +1152,7 @@ test("late source tileset decode cannot overwrite a newer map-transfer target", 
       depth: 64,
       tileset: sourceRef,
       tiles: [regularTile({ depth: 64 })],
-    }), mapId: 66 },
+    }), mapId: 66, mapName: "66" },
     spritePayload: spriteData(0),
   });
   await waitForPendingImage(page, sourceRef);
@@ -1186,7 +1163,7 @@ test("late source tileset decode cannot overwrite a newer map-transfer target", 
       depth: 0,
       tileset: targetRef,
       tiles: [regularTile({ depth: 0 })],
-    }), mapId: 2 },
+    }), mapId: 2, mapName: "2" },
   });
   await waitPainted(page, "0", "65");
   await settlePendingImage(page, sourceRef, "resolve");
@@ -1409,12 +1386,12 @@ test("stale animated prepared loop cannot paint after a newer map", { timeout: 3
   t.after(() => page.close());
   const ref = autotileRef("Autotiles/Test Flowers [1]");
   await installAutotile(page, ref.key, await makeStrip(page, 32, 32, CELL_COLORS));
-  await paintAutotile(page, { ...cellView(ref), mapId: 66 });
+  await paintAutotile(page, { ...cellView(ref), mapId: 66, mapName: "66" });
   await page.clock.runFor(50);
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
-  }, { viewPayload: { ...viewData({ depth: 0, visualEpoch: 2 }), mapId: 2 }, spritePayload: { ...spriteData(0), visualEpoch: 2 } });
+  }, { viewPayload: { ...viewData({ depth: 0, visualEpoch: 2 }), mapId: 2, mapName: "2" }, spritePayload: { ...spriteData(0), visualEpoch: 2 } });
   await page.clock.runFor(1);
   await waitPainted(page, "0");
   await page.clock.runFor(200);
@@ -1665,7 +1642,7 @@ test("viewportWidth/Height set host CSS box without host style attributes", { ti
   }));
   assert.deepEqual(before.size, ["640px", "480px"]);
   assert.equal(before.hostWidth, "");
-  const next = { ...first, visualEpoch: 2, viewportWidth: 1280, viewportHeight: 720 };
+  const next = viewData({ depth: 0, visualEpoch: 2, viewportWidth: 1280, viewportHeight: 720 });
   await page.evaluate(({ viewPayload, spritePayload }) => {
     window.__view.receiveRenderData(viewPayload);
     window.__sprite.receiveRenderData(spritePayload);
@@ -1868,6 +1845,29 @@ test("detached candidate canvases are not connected until atomic commit", { time
   assert.equal(await page.evaluate(() => window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])").isConnected), true);
 });
 
+test("completed detached raster commits atomically without waiting an extra animation frame", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const payload = viewData();
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    window.__scheduledFrames = 0;
+    window.requestAnimationFrame = (callback) => {
+      window.__scheduledFrames += 1;
+      return nativeRequestAnimationFrame(callback);
+    };
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: payload, spritePayload: matchingSprite(payload) });
+  await waitUntil(page, () => window.__view._accepted?.view.visualEpoch === 1, "immediate detached candidate commit");
+  const result = await page.evaluate(() => ({
+    scheduledFrames: window.__scheduledFrames,
+    visibleLayers: [...window.__view.shadowRoot.querySelectorAll("canvas.tile-layer")].filter((canvas) => !canvas.hidden).length,
+    state: window.__view.dataset.mapVisualState,
+  }));
+  assert.deepEqual(result, { scheduledFrames: 0, visibleLayers: 1, state: "ready" });
+});
+
 test("scene A to B to C evicts stale bitmaps and keeps the resource cache bounded", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
@@ -1950,7 +1950,7 @@ test("stale superseded candidate bitmap is closed and cannot overwrite accepted"
   assert.ok(after.closes >= 1, JSON.stringify(after));
 });
 
-test("closed Map schema rejects extra keys, illegal tiles, chunk sets, and camera bounds", { timeout: 30_000 }, async (t) => {
+test("closed Map schema rejects extra keys, illegal or unordered tiles, and camera bounds", { timeout: 30_000 }, async (t) => {
   const page = await openPage();
   t.after(() => page.close());
   const base = viewData({ depth: 0 });
@@ -1959,45 +1959,20 @@ test("closed Map schema rejects extra keys, illegal tiles, chunk sets, and camer
     tileset: { ...base.tileset, extra: "nope" },
   });
   assert.equal(extraRef.threw, true);
-  const tile47 = viewData({ depth: 0 });
-  tile47.chunks[0].cells[0] = 47;
+  const tile47 = { ...base, tiles: [[0, 0, 0, 47, 0]] };
   const illegalTile = await throwsReceive(page, tile47);
   assert.equal(illegalTile.threw, true);
-  const sourceMismatch = await throwsReceive(page, {
-    ...base,
-    tileVisuals: [[384, -1, 0, 1]],
-  });
-  assert.equal(sourceMismatch.threw, true);
-  const autotile = cellView(autotileRef("Autotiles/schema"));
-  autotile.tileVisuals[0][3] = 1;
+  const autotile = { ...cellView(autotileRef("Autotiles/schema")), tiles: [[0, 0, 0, 96, 0]] };
   const slotMismatch = await throwsReceive(page, autotile);
   assert.equal(slotMismatch.threw, true);
-  const duplicate = viewData({
-    tiles: [regularTile({ depth: 0 }), regularTile({ x: 1, tileId: 385, depth: 0 })],
-  });
-  duplicate.tileVisuals = [...duplicate.tileVisuals, duplicate.tileVisuals[0]];
-  const duplicateVisual = await throwsReceive(page, duplicate);
-  assert.equal(duplicateVisual.threw, true);
-  const unsorted = viewData({
-    tiles: [regularTile({ depth: 0 }), regularTile({ x: 1, tileId: 385, depth: 0 })],
-  });
-  unsorted.tileVisuals = [...unsorted.tileVisuals].reverse();
-  const unsortedVisual = await throwsReceive(page, unsorted);
-  assert.equal(unsortedVisual.threw, true);
-  const unused = viewData({ depth: 0 });
-  unused.tileVisuals = [...unused.tileVisuals, [385, -1, 0, 1]];
-  const unusedVisual = await throwsReceive(page, unused);
-  assert.equal(unusedVisual.threw, true);
-  const missing = viewData({
-    tiles: [regularTile({ depth: 0 }), regularTile({ x: 1, tileId: 385, depth: 0 })],
-  });
-  missing.tileVisuals = missing.tileVisuals.slice(0, 1);
-  const missingVisual = await throwsReceive(page, missing);
-  assert.equal(missingVisual.threw, true);
-  const wrongChunks = viewData({ depth: 0 });
-  wrongChunks.chunks = wrongChunks.chunks.slice(0, -1);
-  const wrongChunkSet = await throwsReceive(page, wrongChunks);
-  assert.equal(wrongChunkSet.threw, true);
+  const duplicate = { ...base, tiles: [[0, 0, 0, 384, 0], [0, 0, 0, 385, 0]] };
+  assert.equal((await throwsReceive(page, duplicate)).threw, true);
+  const unsorted = { ...base, tiles: [[1, 0, 0, 385, 0], [0, 0, 0, 384, 0]] };
+  assert.equal((await throwsReceive(page, unsorted)).threw, true);
+  const wrongTuple = { ...base, tiles: [[0, 0, 0, 384]] };
+  assert.equal((await throwsReceive(page, wrongTuple)).threw, true);
+  const legacyField = { ...base, chunks: [] };
+  assert.equal((await throwsReceive(page, legacyField)).threw, true);
   const camera = await throwsReceive(page, { ...base, cameraX: base.mapWidth * 32 });
   assert.equal(camera.threw, true);
   assert.equal(await page.evaluate(() => window.__view._accepted), undefined);

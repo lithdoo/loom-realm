@@ -26,20 +26,24 @@ function integer(value, label, { positive = false, nonNegative = false } = {}) {
   return value;
 }
 
-function boolean(value, label) {
-  if (typeof value !== "boolean") invalid(`${label} must be a boolean`);
-  return value;
-}
-
 function pageEmptyGraphic(page) {
   const graphic = page.fields["@graphic"];
-  if (graphic == null) return true;
+  if (graphic == null) return false;
   if (graphic.kind !== "RmxpObject" || graphic.className !== "RPG::Event::Page::Graphic") {
-    invalid("page graphic must be RPG::Event::Page::Graphic");
+    return false;
   }
   const name = rubyText(graphic.fields["@character_name"]) ?? "";
   const tileId = graphic.fields["@tile_id"];
   return name.length === 0 && !(Number.isSafeInteger(tileId) && tileId > 0);
+}
+
+function pageAlwaysActive(page) {
+  const condition = page.fields["@condition"];
+  if (condition?.kind !== "RmxpObject" || condition.className !== "RPG::Event::Page::Condition") return false;
+  return condition.fields["@switch1_valid"] === false
+    && condition.fields["@switch2_valid"] === false
+    && condition.fields["@variable_valid"] === false
+    && condition.fields["@self_switch_valid"] === false;
 }
 
 export function occupiedTiles(x, y, width = 1, height = 1) {
@@ -82,12 +86,12 @@ function joinScripts(commands) {
     const firstParams = commands[index].fields["@parameters"];
     parts.push(rubyText(firstParams?.items?.[0]) ?? "");
     let end = index;
-    while (end + 1 < commands.length && [SCRIPT_START, SCRIPT_CONTINUE].includes(commands[end + 1].fields["@code"])) {
+    while (end + 1 < commands.length && commands[end + 1].fields["@code"] === SCRIPT_CONTINUE) {
       end += 1;
       const params = commands[end].fields["@parameters"];
       parts.push(rubyText(params?.items?.[0]) ?? "");
     }
-    groups.push(Object.freeze({ startCommandIndex: index, joined: parts.join("\n") }));
+    groups.push(Object.freeze({ startCommandIndex: index, endCommandIndex: end, joined: parts.join("\n") }));
     index = end;
   }
   return Object.freeze(groups);
@@ -111,42 +115,41 @@ function projectPage(mapId, eventId, eventX, eventY, eventName, page, pageIndex)
   const codes = commands.map((command) => command.fields["@code"]);
   const COMMENT_START = 108;
   const COMMENT_CONTINUE = 408;
-  const disallowed = codes.filter((code) => ![SCRIPT_START, SCRIPT_CONTINUE, COMMAND_END, COMMENT_START, COMMENT_CONTINUE].includes(code));
   const groups = joinScripts(commands);
   const classified = groups.map((group) => ({ ...group, ...classifyScript(group.joined) }));
   const related = classified.filter((item) => item.kind !== "unrelated");
-  if (related.length === 0) return null;
+  const rawBridgeMention = commands.some((command) => {
+    if (![SCRIPT_START, SCRIPT_CONTINUE].includes(command.fields["@code"])) return false;
+    return BRIDGE_MENTION.test(rubyText(command.fields["@parameters"]?.items?.[0]) ?? "");
+  });
+  if (related.length === 0 && !rawBridgeMention) return null;
   const size = parseSize(eventName);
   const occupied = occupiedTiles(eventX, eventY, size.width, size.height);
+  const opaque = (reason) => Object.freeze({ kind: "opaque-related", mapId, eventId, pageIndex, occupied, reason });
+  if (!pageAlwaysActive(page)) return opaque("bridge-candidate-page-condition-is-dynamic");
   if (trigger !== 1) {
-    return Object.freeze({
-      kind: "opaque-related",
-      mapId,
-      eventId,
-      pageIndex,
-      occupied,
-      reason: "bridge-candidate-trigger-is-not-player-touch",
-    });
+    return opaque("bridge-candidate-trigger-is-not-player-touch");
   }
+  if (page.fields["@through"] !== false) return opaque("bridge-candidate-through-must-be-false");
+  if (!pageEmptyGraphic(page)) return opaque("bridge-candidate-graphic-must-be-empty");
+  if (codes.length === 0 || codes.at(-1) !== COMMAND_END || codes.slice(0, -1).includes(COMMAND_END)) {
+    return opaque("bridge-page-command-terminator-is-invalid");
+  }
+  const scriptIndexes = new Set(groups.flatMap((group) => Array.from(
+    { length: group.endCommandIndex - group.startCommandIndex + 1 },
+    (_, offset) => group.startCommandIndex + offset,
+  )));
+  const disallowed = codes
+    .map((code, index) => ({ code, index }))
+    .filter(({ code, index }) => ![COMMAND_END, COMMENT_START, COMMENT_CONTINUE].includes(code) && !scriptIndexes.has(index));
   if (disallowed.length > 0) {
-    return Object.freeze({
-      kind: "opaque-related",
-      mapId,
-      eventId,
-      pageIndex,
-      occupied,
-      reason: `bridge-page-contains-non-whitelist-command-${disallowed[0]}`,
-    });
+    return opaque(`bridge-page-contains-non-whitelist-command-${disallowed[0].code}`);
+  }
+  if (groups.length !== 1 || classified.length !== 1) {
+    return opaque("bridge-page-contains-additional-ruby");
   }
   if (related.length !== 1 || (related[0].kind !== "bridge-on" && related[0].kind !== "bridge-off")) {
-    return Object.freeze({
-      kind: "opaque-related",
-      mapId,
-      eventId,
-      pageIndex,
-      occupied,
-      reason: related[0]?.reason ?? "bridge-page-not-a-single-confirmable-script",
-    });
+    return opaque(related[0]?.reason ?? "bridge-page-not-a-single-confirmable-script");
   }
   const hit = related[0];
   return Object.freeze({
@@ -154,14 +157,54 @@ function projectPage(mapId, eventId, eventX, eventY, eventName, page, pageIndex)
     mapId,
     eventId,
     pageIndex,
+    position: Object.freeze({ x: eventX, y: eventY }),
     commandIndex: hit.startCommandIndex,
     trigger: 1,
     occupied,
     op: hit.kind,
     height: hit.height,
-    through: boolean(page.fields["@through"], "page.through"),
-    emptyGraphic: pageEmptyGraphic(page),
+    through: false,
+    emptyGraphic: true,
   });
+}
+
+export const MAP21_BRIDGE_EVENTS = Object.freeze([
+  Object.freeze({ eventId: 4, op: "bridge-on", x: 20, y: 49, occupied: Object.freeze([[20, 46], [20, 47], [20, 48], [20, 49]]) }),
+  Object.freeze({ eventId: 28, op: "bridge-off", x: 19, y: 49, occupied: Object.freeze([[19, 46], [19, 47], [19, 48], [19, 49]]) }),
+  Object.freeze({ eventId: 7, op: "bridge-off", x: 14, y: 31, occupied: Object.freeze([[14, 31], [15, 31], [16, 31]]) }),
+  Object.freeze({ eventId: 10, op: "bridge-on", x: 14, y: 32, occupied: Object.freeze([[14, 32], [15, 32], [16, 32]]) }),
+  Object.freeze({ eventId: 20, op: "bridge-off", x: 22, y: 58, occupied: Object.freeze([[22, 58], [23, 58]]) }),
+  Object.freeze({ eventId: 22, op: "bridge-on", x: 22, y: 57, occupied: Object.freeze([[22, 57], [23, 57]]) }),
+  Object.freeze({ eventId: 23, op: "bridge-off", x: 14, y: 69, occupied: Object.freeze([[14, 69], [15, 69]]) }),
+  Object.freeze({ eventId: 25, op: "bridge-on", x: 14, y: 68, occupied: Object.freeze([[14, 68], [15, 68]]) }),
+]);
+
+export function assertMap21BridgeAudit(evidence) {
+  if (!evidence || evidence.id !== 21) invalid("mapId=21 eventId=unknown pageIndex=unknown: missing Bridge audit evidence");
+  if (evidence.opaqueRelated.length > 0) {
+    const item = evidence.opaqueRelated[0];
+    invalid(`mapId=21 eventId=${item.eventId} pageIndex=${item.pageIndex}: ${item.reason}`);
+  }
+  const byId = new Map();
+  for (const action of evidence.actions) {
+    if (byId.has(action.eventId)) invalid(`mapId=21 eventId=${action.eventId} pageIndex=${action.pageIndex}: duplicate Bridge event`);
+    byId.set(action.eventId, action);
+  }
+  for (const expected of MAP21_BRIDGE_EVENTS) {
+    const action = byId.get(expected.eventId);
+    if (!action) invalid(`mapId=21 eventId=${expected.eventId} pageIndex=unknown: missing Bridge event`);
+    const actualCells = action.occupied.map(({ x, y }) => [x, y]);
+    if (action.op !== expected.op) invalid(`mapId=21 eventId=${expected.eventId} pageIndex=${action.pageIndex}: operation mismatch`);
+    if (action.position?.x !== expected.x || action.position?.y !== expected.y) invalid(`mapId=21 eventId=${expected.eventId} pageIndex=${action.pageIndex}: event position mismatch`);
+    if (JSON.stringify(actualCells) !== JSON.stringify(expected.occupied)) invalid(`mapId=21 eventId=${expected.eventId} pageIndex=${action.pageIndex}: occupied cells mismatch`);
+    if (action.trigger !== 1 || action.through !== false || action.emptyGraphic !== true) invalid(`mapId=21 eventId=${expected.eventId} pageIndex=${action.pageIndex}: page shape mismatch`);
+    byId.delete(expected.eventId);
+  }
+  if (byId.size > 0 || evidence.actions.length !== MAP21_BRIDGE_EVENTS.length) {
+    const extra = byId.values().next().value;
+    invalid(`mapId=21 eventId=${extra?.eventId ?? "unknown"} pageIndex=${extra?.pageIndex ?? "unknown"}: unexpected Bridge event`);
+  }
+  return evidence;
 }
 
 function eventsOf(root, filename) {

@@ -231,7 +231,12 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
       return data?.viewportWidth === expected.width && data?.viewportHeight === expected.height;
     }, `responsive ${expected.width}x${expected.height} Render state`);
     await browserDelivery;
-    await waitFor(async () => (await page.evaluate(() => document.querySelector("lr-map-view")?.dataset.mapVisualState)) === "ready", "responsive browser commit");
+    await waitFor(async () => (await page.evaluate(({ width, height }) => {
+      const view = document.querySelector("lr-map-view");
+      return view?.dataset.mapVisualState === "ready"
+        && view?._accepted?.view?.viewportWidth === width
+        && view?._accepted?.view?.viewportHeight === height;
+    }, expected)), "responsive browser commit");
     const actual = await page.evaluate(() => {
       const view = document.querySelector("lr-map-view");
       const root = view.shadowRoot;
@@ -273,30 +278,16 @@ test("map view clears full state and delayed same-resource decode paints only la
     view.receiveRenderContext({ resources: { async resource() { await gate; return { bytes: Uint8Array.from(bytes), mime: "image/png", contentVersion: version }; } } });
     const tileset = { namespace: "resource.Graphics", key: "Tilesets/m14_tileset", contentVersion: version };
     const autotiles = [null, null, null, null, null, null, null];
-    const cellsAt = (tileId, localX) => {
-      const cells = Array(192).fill(0);
-      cells[localX] = tileId;
-      return cells;
-    };
-    const expectedChunks = () => {
-      const chunks = [];
-      for (let chunkY = 0; chunkY <= 2; chunkY += 1) {
-        for (let chunkX = 0; chunkX <= 2; chunkX += 1) {
-          chunks.push({ chunkX, chunkY, cells: Array(192).fill(0) });
-        }
-      }
-      return chunks;
-    };
     const viewPayload = (visualEpoch, localX, tileId, sourceIndex) => {
-      const chunks = expectedChunks();
-      if (sourceIndex !== null) chunks[0].cells = cellsAt(tileId, localX);
       return {
         sceneEpoch: 1, visualEpoch, motionId: null,
         viewportWidth: 640, viewportHeight: 480,
+        barHeight: 32, contentWidth: 640, contentHeight: 448,
+        columns: 20, rows: 14, logicalWidth: 640, logicalHeight: 448,
+        scaleX: 1, scaleY: 1, mapName: "1",
         mapId: 1, mapWidth: 24, mapHeight: 18, cameraX: 0, cameraY: 0,
         tileset, autotiles,
-        tileVisuals: sourceIndex === null ? [] : [[tileId, -1, 0, sourceIndex]],
-        chunks,
+        tiles: sourceIndex === null ? [] : [[localX, 0, 0, tileId, 0]],
         cameraMotion: null,
         bridgeLevel: 0,
       };

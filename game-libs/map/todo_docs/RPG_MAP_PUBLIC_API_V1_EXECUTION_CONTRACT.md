@@ -1,6 +1,6 @@
 # RPGMap v1 对外接口与执行契约
 
-> **状态：v1 实施设计契约冻结；源码、导出、测试尚待交付。** 本文是公开 API、生命周期、事务、错误、NPC 与 Renderer/Browser 接线的唯一权威。[主方案](./RPG_MAP_GENERIC_MODULE_DESIGN.md) 管数据和地形；[实施计划](./RPG_MAP_ESSENTIALS_LOCAL_TEST_PACKAGE_MIGRATION_PLAN.md) 管文件、命令和证据。Agent 不得用旧源码覆盖目标，也不得静默变更外部 ABI。
+> **状态：v1 契约已实现；公开导出、Runtime、Browser 与测试已在交付分支验收。** 本文是公开 API、生命周期、事务、错误、NPC 与 Renderer/Browser 接线的唯一权威。[主方案](./RPG_MAP_GENERIC_MODULE_DESIGN.md) 管数据和地形；[实施计划](./RPG_MAP_ESSENTIALS_LOCAL_TEST_PACKAGE_MIGRATION_PLAN.md) 管文件、命令和证据。Agent 不得用旧源码覆盖目标，也不得静默变更外部 ABI。
 
 ## 1. 冻结的公开入口与类型
 

@@ -73,6 +73,7 @@ export async function planRawResources(manifest, dependencies = {}) {
       resourceKey: key,
       extension: parsed.extension,
       size: object.size,
+      sha256: object.sha256,
       fingerprint: object.fingerprint,
     });
     const tableStats = stats.get(table);

@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   JUMP_DURATION_MS,
   JUMP_PEAK_RULE,
-  MAP_ACTION_SCHEMA_VERSION,
   MOTION_ABI_VERSION,
   TERRAIN_BRIDGE,
   TERRAIN_LEDGE,
@@ -14,7 +13,6 @@ import {
   TILESET_SCHEMA_VERSION,
   WALK_DURATION_MS,
   canMove,
-  emptyMapActionRecord,
   evaluatePassability,
   jumpPeakPx,
   migrateLegacyTilesetRecord,
@@ -23,7 +21,6 @@ import {
   projectTilesInBounds,
   resolveEffectiveTerrainTag,
   tileVisualDepth,
-  validateMapActionRecord,
   validateMapRecord,
   validateTilesetRecord,
 } from "../dist/semantics.js";
@@ -118,40 +115,6 @@ test("DATA-03 short Table, 3D tags, negative tile, tag 18, and missing field fai
   const tileset = tilesetWith(8);
   assert.equal(evaluatePassability(map, tileset, 0, 0, 2, 0).status, "invalid");
   assert.match(evaluatePassability(map, tileset, 0, 0, 2, 0).reason, /negative tile/);
-});
-
-test("MapAction validator accepts confirmable On/Off and rejects opaque entries in actions", () => {
-  const ok = validateMapActionRecord({
-    id: 21,
-    schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-    actions: [{
-      kind: "bridge", mapId: 21, eventId: 4, pageIndex: 0, commandIndex: 0, trigger: 1,
-      occupied: [{ x: 20, y: 49 }], op: "bridge-on", height: 2, through: false, emptyGraphic: true,
-    }, {
-      kind: "bridge", mapId: 21, eventId: 28, pageIndex: 0, commandIndex: 0, trigger: 1,
-      occupied: [{ x: 19, y: 49 }], op: "bridge-off", height: null, through: false, emptyGraphic: true,
-    }],
-    opaqueRelated: [{
-      kind: "opaque-related", mapId: 21, eventId: 9, pageIndex: 0,
-      occupied: [{ x: 1, y: 1 }], reason: "bridge-script-not-statically-confirmable",
-    }],
-  }, 21);
-  assert.equal(ok.actions[0].height, 2);
-  assert.equal(ok.actions[1].height, null);
-  assert.equal(emptyMapActionRecord(7).actions.length, 0);
-  assert.throws(() => validateMapActionRecord({
-    id: 21, schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-    actions: [{ kind: "opaque-related", mapId: 21, eventId: 1, pageIndex: 0, reason: "x" }],
-    opaqueRelated: [],
-  }, 21), /opaque-related entries belong in opaqueRelated/);
-  assert.throws(() => validateMapActionRecord({
-    id: 21, schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-    actions: [{
-      kind: "bridge", mapId: 21, eventId: 4, pageIndex: 0, commandIndex: 0, trigger: 2,
-      occupied: [{ x: 0, y: 0 }], op: "bridge-on", height: 2, through: true, emptyGraphic: true,
-    }],
-    opaqueRelated: [],
-  }, 21), /trigger must be 1/);
 });
 
 test("resolveEffectiveTerrainTag and evaluatePassability stay separate", () => {

@@ -1307,7 +1307,8 @@
           0,
           0
         ]
-      }
+      },
+      "behaviors": []
     },
     "struct.Tileset/1": {
       "id": 1,
@@ -2510,11 +2511,12 @@
       "contacts": [],
       "edges": []
     },
-    "struct.MapAction/1": {
-      "id": 1,
-      "schemaVersion": "struct.MapAction/v1-bridge",
-      "actions": [],
-      "opaqueRelated": []
+    "struct.NPC/guide": {
+      "name": "Fixture Guide",
+      "sprite": {
+        "namespace": "resource.Graphics",
+        "key": "Characters/m14_npc"
+      }
     }
   },
   "expectedPixels": {

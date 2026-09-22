@@ -13,7 +13,14 @@ export interface MapRecord {
   readonly width: number;
   readonly height: number;
   readonly data: ProjectedTable;
+  readonly behaviors: readonly MapBehavior[];
 }
+
+export type MapBehavior = Readonly<{
+  kind: "bridge";
+  operation: "on" | "off";
+  occupied: readonly Readonly<{ x: number; y: number }>[];
+}>;
 
 export interface TilesetRecord {
   readonly id: number;
@@ -87,7 +94,6 @@ export interface TileProjectionBounds {
 
 export const TILESET_SCHEMA_SUBJECT = "map-tileset-terrain-tags-v1";
 export const TILESET_SCHEMA_VERSION = "struct.Tileset/v2-terrain-tags";
-export const MAP_ACTION_SCHEMA_VERSION = "struct.MapAction/v1-bridge";
 /** PROJECT-DECISION-PROVISIONAL: single Runtime→Browser motion/event ABI. Not vanilla RGSS. */
 export const MOTION_ABI_VERSION = "map-motion/v1-walk-jump-bridge";
 export const TERRAIN_TAG_MIN = 0;
@@ -105,9 +111,6 @@ export const TILE_SIZE_PX = 32;
 export const TILE_SIZE = TILE_SIZE_PX;
 export const LEGAL_BRIDGE_LEVELS = Object.freeze([0, 2] as const);
 export type BridgeLevel = 0 | 2;
-export const CHUNK_SIZE = 8;
-export const CHUNK_CELLS = CHUNK_SIZE * CHUNK_SIZE * 3;
-export const CHUNK_OVERSCAN = 1;
 export const VIEW_DATA_GUARD = 196_608;
 export const DEFAULT_VIEWPORT = Object.freeze({ width: 640, height: 480 });
 export const MIN_VIEWPORT = Object.freeze({ width: 320, height: 240 });
@@ -133,23 +136,6 @@ export function clampViewport(size: ViewportSize | null | undefined): ViewportSi
 export function viewportsEqual(left: ViewportSize, right: ViewportSize): boolean {
   return left.width === right.width && left.height === right.height;
 }
-export type VisualRegular = readonly [tileId: number, depthBias: number, kind: 0, sourceIndex: number];
-export type VisualAutotile = readonly [
-  tileId: number, depthBias: number, kind: 1, slot: number,
-  tlSx: number, tlSy: number, trSx: number, trSy: number,
-  blSx: number, blSy: number, brSx: number, brSy: number,
-];
-export type TileVisual = VisualRegular | VisualAutotile;
-export type ProjectedChunk = Readonly<{ chunkX: number; chunkY: number; cells: readonly number[] }>;
-export type ProjectionWindow = Readonly<{
-  minTileX: number;
-  minTileY: number;
-  maxTileX: number;
-  maxTileY: number;
-  chunks: readonly ProjectedChunk[];
-  tileVisuals: readonly TileVisual[];
-}>;
-
 export const AUTOTILE_QUARTERS = [
   [27, 28, 33, 34], [5, 28, 33, 34], [27, 6, 33, 34], [5, 6, 33, 34],
   [27, 28, 33, 12], [5, 28, 33, 12], [27, 6, 33, 12], [5, 6, 33, 12],
@@ -224,12 +210,35 @@ export function validateTable(value: unknown, label: string): ProjectedTable {
 
 export function validateMapRecord(value: unknown): MapRecord {
   const input = object(value, "Map");
-  if (!(["tileset_id", "width", "height", "data"].every((key) => key in input)) || Object.keys(input).length !== 4) throw new TypeError("Map has an invalid field set");
+  const allowed = ["tileset_id", "width", "height", "data", "behaviors"];
+  if (!(["tileset_id", "width", "height", "data"].every((key) => key in input)) || Object.keys(input).some((key) => !allowed.includes(key))) throw new TypeError("Map has an invalid field set");
   const width = integer(input.width, "Map.width");
   const height = integer(input.height, "Map.height");
   const data = validateTable(input.data, "Map.data");
   if (data.dimensions !== 3 || data.xSize !== width || data.ySize !== height || data.zSize !== 3) throw new TypeError("Map.data has an invalid 3D shape");
-  return Object.freeze({ tileset_id: integer(input.tileset_id, "Map.tileset_id"), width, height, data });
+  const source = input.behaviors === undefined ? [] : input.behaviors;
+  if (!Array.isArray(source)) throw new TypeError("Map.behaviors must be an array");
+  const occupiedAcrossBehaviors = new Set<string>();
+  const behaviors = Object.freeze(source.map((value, index) => {
+    const label = `Map.behaviors[${index}]`;
+    const behavior = exactObject(value, label, ["kind", "operation", "occupied"]);
+    if (behavior.kind !== "bridge") throw new TypeError(`${label}.kind must be bridge`);
+    if (behavior.operation !== "on" && behavior.operation !== "off") throw new TypeError(`${label}.operation must be on or off`);
+    if (!Array.isArray(behavior.occupied) || behavior.occupied.length === 0) throw new TypeError(`${label}.occupied must be non-empty`);
+    const local = new Set<string>();
+    const occupied = Object.freeze(behavior.occupied.map((point, pointIndex) => {
+      const result = occupiedPoint(point, `${label}.occupied[${pointIndex}]`);
+      if (result.x < 0 || result.y < 0 || result.x >= width || result.y >= height) throw new TypeError(`${label}.occupied is outside Map bounds`);
+      const key = `${result.x},${result.y}`;
+      if (local.has(key)) throw new TypeError(`${label}.occupied contains a duplicate coordinate`);
+      if (occupiedAcrossBehaviors.has(key)) throw new TypeError("Map bridge behaviors overlap");
+      local.add(key);
+      occupiedAcrossBehaviors.add(key);
+      return result;
+    }));
+    return Object.freeze({ kind: "bridge" as const, operation: behavior.operation, occupied });
+  }));
+  return Object.freeze({ tileset_id: integer(input.tileset_id, "Map.tileset_id"), width, height, data, behaviors });
 }
 
 function transferDirection(value: unknown, label: string): Direction {
@@ -520,93 +529,6 @@ export function projectVisibleTiles(
   return projectTilesInBounds(map, tileset, expandTileBounds(viewportTileBounds(map, cameraX, cameraY), 1, map), bridgeLevel);
 }
 
-export function tileVisualDepthBias(priority: number): number {
-  return priority === 0 ? -1 : (priority + 1) * TILE_SIZE;
-}
-
-export function tileVisualForId(tileId: number, tileset: TilesetRecord): TileVisual {
-  const blit = projectTileBlit(tileId, tileset);
-  const depthBias = tileVisualDepthBias(tableAt(tileset.priorities, tileId));
-  if (blit.kind === "regular") {
-    return Object.freeze([tileId, depthBias, 0, blit.sourceIndex]) as VisualRegular;
-  }
-  const [tl, tr, bl, br] = blit.corners;
-  return Object.freeze([
-    tileId, depthBias, 1, blit.slot,
-    tl.sx, tl.sy, tr.sx, tr.sy, bl.sx, bl.sy, br.sx, br.sy,
-  ]) as VisualAutotile;
-}
-
-export function projectChunk(map: MapRecord, chunkX: number, chunkY: number): ProjectedChunk {
-  const cells = new Array<number>(CHUNK_CELLS);
-  for (let z = 0; z < 3; z += 1) {
-    for (let localY = 0; localY < CHUNK_SIZE; localY += 1) {
-      for (let localX = 0; localX < CHUNK_SIZE; localX += 1) {
-        const x = chunkX * CHUNK_SIZE + localX;
-        const y = chunkY * CHUNK_SIZE + localY;
-        const index = ((z * CHUNK_SIZE + localY) * CHUNK_SIZE) + localX;
-        cells[index] = (x < 0 || y < 0 || x >= map.width || y >= map.height) ? 0 : tableAt(map.data, x, y, z);
-      }
-    }
-  }
-  return Object.freeze({ chunkX, chunkY, cells: Object.freeze(cells) });
-}
-
-export function chunkCoordsForBounds(map: MapRecord, bounds: TileProjectionBounds): readonly { chunkX: number; chunkY: number }[] {
-  const minChunkX = Math.max(0, Math.floor(bounds.minTileX / CHUNK_SIZE) - CHUNK_OVERSCAN);
-  const maxChunkX = Math.min(Math.floor((map.width - 1) / CHUNK_SIZE), Math.floor(bounds.maxTileX / CHUNK_SIZE) + CHUNK_OVERSCAN);
-  const minChunkY = Math.max(0, Math.floor(bounds.minTileY / CHUNK_SIZE) - CHUNK_OVERSCAN);
-  const maxChunkY = Math.min(Math.floor((map.height - 1) / CHUNK_SIZE), Math.floor(bounds.maxTileY / CHUNK_SIZE) + CHUNK_OVERSCAN);
-  const coords: { chunkX: number; chunkY: number }[] = [];
-  for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY += 1) {
-    for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
-      coords.push({ chunkX, chunkY });
-    }
-  }
-  return coords;
-}
-
-export function projectChunkWindow(
-  map: MapRecord,
-  tileset: TilesetRecord,
-  bounds: TileProjectionBounds,
-  previous?: ProjectionWindow,
-): ProjectionWindow {
-  const coords = chunkCoordsForBounds(map, bounds);
-  const reused = new Map<string, ProjectedChunk>();
-  if (previous) {
-    for (const chunk of previous.chunks) reused.set(`${chunk.chunkX},${chunk.chunkY}`, chunk);
-  }
-  const chunks = Object.freeze(coords.map(({ chunkX, chunkY }) => {
-    const hit = reused.get(`${chunkX},${chunkY}`);
-    return hit ?? projectChunk(map, chunkX, chunkY);
-  }));
-  const used = new Set<number>();
-  for (const chunk of chunks) {
-    for (const tileId of chunk.cells) {
-      if (tileId !== 0) {
-        assertRenderableTileId(tileId, tileset);
-        used.add(tileId);
-      }
-    }
-  }
-  const tileVisuals = Object.freeze([...used].sort((a, b) => a - b).map((tileId) => tileVisualForId(tileId, tileset)));
-  return Object.freeze({
-    minTileX: bounds.minTileX,
-    minTileY: bounds.minTileY,
-    maxTileX: bounds.maxTileX,
-    maxTileY: bounds.maxTileY,
-    chunks,
-    tileVisuals,
-  });
-}
-
-export function sameChunkSet(left: ProjectionWindow, right: ProjectionWindow): boolean {
-  if (left.chunks === right.chunks) return true;
-  if (left.chunks.length !== right.chunks.length) return false;
-  return left.chunks.every((chunk, index) => chunk === right.chunks[index]);
-}
-
 export function rubyPassageBit(direction: number): number {
   const shift = Math.trunc(Number(direction) / 2) - 1;
   const raw = shift >= 0 ? (1 << shift) : (1 >> (-shift));
@@ -789,98 +711,6 @@ export function planMovement(map: MapRecord, tileset: TilesetRecord, x: number, 
     });
   }
   return Object.freeze({ kind: "blocked", direction });
-}
-
-export type MapAction =
-  | Readonly<{
-    kind: "bridge";
-    mapId: number;
-    eventId: number;
-    pageIndex: number;
-    commandIndex: number;
-    trigger: 1;
-    occupied: readonly Readonly<{ x: number; y: number }>[];
-    op: "bridge-on" | "bridge-off";
-    height: 2 | null;
-    through: boolean;
-    emptyGraphic: boolean;
-  }>
-  | Readonly<{
-    kind: "opaque-related";
-    mapId: number;
-    eventId: number;
-    pageIndex: number;
-    occupied: readonly Readonly<{ x: number; y: number }>[];
-    reason: string;
-  }>;
-
-export interface MapActionRecord {
-  readonly id: number;
-  readonly schemaVersion: typeof MAP_ACTION_SCHEMA_VERSION;
-  readonly actions: readonly MapAction[];
-  readonly opaqueRelated: readonly Extract<MapAction, { kind: "opaque-related" }>[];
-}
-
-export function emptyMapActionRecord(mapId: number): MapActionRecord {
-  return Object.freeze({
-    id: mapId,
-    schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-    actions: Object.freeze([]),
-    opaqueRelated: Object.freeze([]),
-  });
-}
-
-export function validateMapActionRecord(value: unknown, contentMapId: number): MapActionRecord {
-  const input = exactObject(value, "MapAction", ["id", "schemaVersion", "actions", "opaqueRelated"]);
-  const id = integer(input.id, "MapAction.id");
-  if (id !== contentMapId) throw new TypeError("MapAction.id does not equal its Content key");
-  if (input.schemaVersion !== MAP_ACTION_SCHEMA_VERSION) throw new TypeError("MAP_ACTION_INVALID: unsupported schemaVersion");
-  if (!Array.isArray(input.actions) || !Array.isArray(input.opaqueRelated)) throw new TypeError("MapAction actions/opaqueRelated must be arrays");
-  const actions = Object.freeze(input.actions.map((item, index) => {
-    const label = `MapAction.actions[${index}]`;
-    const record = object(item, label);
-    if (record.kind === "opaque-related") {
-      throw new TypeError(`${label} opaque-related entries belong in opaqueRelated`);
-    }
-    const action = exactObject(item, label, ["kind", "mapId", "eventId", "pageIndex", "commandIndex", "trigger", "occupied", "op", "height", "through", "emptyGraphic"]);
-    if (action.kind !== "bridge") throw new TypeError(`${label}.kind must be bridge`);
-    if (action.trigger !== 1) throw new TypeError(`${label}.trigger must be 1`);
-    if (action.op !== "bridge-on" && action.op !== "bridge-off") throw new TypeError(`${label}.op must be bridge-on or bridge-off`);
-    if (action.op === "bridge-on" && action.height !== 2) throw new TypeError(`${label} bridge-on height must be 2`);
-    if (action.op === "bridge-off" && action.height !== null) throw new TypeError(`${label} bridge-off height must be null`);
-    if (!Array.isArray(action.occupied) || action.occupied.length < 1) throw new TypeError(`${label}.occupied must be non-empty`);
-    if (typeof action.through !== "boolean") throw new TypeError(`${label}.through must be a boolean`);
-    if (typeof action.emptyGraphic !== "boolean") throw new TypeError(`${label}.emptyGraphic must be a boolean`);
-    return Object.freeze({
-      kind: "bridge" as const,
-      mapId: integer(action.mapId, `${label}.mapId`),
-      eventId: integer(action.eventId, `${label}.eventId`),
-      pageIndex: integer(action.pageIndex, `${label}.pageIndex`, false),
-      commandIndex: integer(action.commandIndex, `${label}.commandIndex`, false),
-      trigger: 1 as const,
-      occupied: Object.freeze(action.occupied.map((tile, tileIndex) => occupiedPoint(tile, `${label}.occupied[${tileIndex}]`))),
-      op: action.op,
-      height: action.height as 2 | null,
-      through: action.through,
-      emptyGraphic: action.emptyGraphic,
-    });
-  }));
-  const opaqueRelated = Object.freeze(input.opaqueRelated.map((item, index) => {
-    const label = `MapAction.opaqueRelated[${index}]`;
-    const record = exactObject(item, label, ["kind", "mapId", "eventId", "pageIndex", "occupied", "reason"]);
-    if (record.kind !== "opaque-related") throw new TypeError(`${label}.kind must be opaque-related`);
-    if (typeof record.reason !== "string" || record.reason.length === 0) throw new TypeError(`${label}.reason must be non-empty`);
-    if (!Array.isArray(record.occupied) || record.occupied.length < 1) throw new TypeError(`${label}.occupied must be non-empty`);
-    return Object.freeze({
-      kind: "opaque-related" as const,
-      mapId: integer(record.mapId, `${label}.mapId`),
-      eventId: integer(record.eventId, `${label}.eventId`),
-      pageIndex: integer(record.pageIndex, `${label}.pageIndex`, false),
-      occupied: Object.freeze(record.occupied.map((tile, tileIndex) => occupiedPoint(tile, `${label}.occupied[${tileIndex}]`))),
-      reason: record.reason,
-    });
-  }));
-  return Object.freeze({ id, schemaVersion: MAP_ACTION_SCHEMA_VERSION, actions, opaqueRelated });
 }
 
 export function jumpPeakPx(tileDistance = 2): number {
