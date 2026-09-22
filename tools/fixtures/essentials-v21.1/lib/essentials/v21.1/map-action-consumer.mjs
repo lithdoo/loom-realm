@@ -168,7 +168,7 @@ function projectPage(mapId, eventId, eventX, eventY, eventName, page, pageIndex)
   });
 }
 
-const MAP21_BRIDGE_EVENTS = Object.freeze([
+export const MAP21_BRIDGE_EVENTS = Object.freeze([
   Object.freeze({ eventId: 4, op: "bridge-on", x: 20, y: 49, occupied: Object.freeze([[20, 46], [20, 47], [20, 48], [20, 49]]) }),
   Object.freeze({ eventId: 28, op: "bridge-off", x: 19, y: 49, occupied: Object.freeze([[19, 46], [19, 47], [19, 48], [19, 49]]) }),
   Object.freeze({ eventId: 7, op: "bridge-off", x: 14, y: 31, occupied: Object.freeze([[14, 31], [15, 31], [16, 31]]) }),

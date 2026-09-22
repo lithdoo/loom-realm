@@ -50,7 +50,8 @@ if not exist "%REPO%\node_modules\" (
 )
 
 echo 将在独立 .local staging 中用当前 importer 重新生成候选库。
-echo 候选库会先验证完整生成清单、Map21 八桥、资源与 Presentation，再带恢复记录安全替换正式库。
+echo 候选库会先验证完整生成清单、Map21 八桥、资源与 Presentation，再用固定备份替换正式库。
+echo 运行前请关闭游戏，并确保没有其他重导入命令正在运行。
 if defined SOURCE goto :echo_source
 echo 未指定源：将尝试官方下载。被拦截时会打开本机浏览器。
 echo 也可传入本机 Essentials v21.1 目录或 zip：
@@ -72,11 +73,11 @@ exit /b 1
 :run_import
 echo 正在重导入 FSDB...
 if defined SOURCE goto :import_with_source
-"%NODE%" "%EXAMPLE%\scripts\init-fsdb.mjs" --force
+"%NODE%" "%EXAMPLE%\scripts\init-fsdb.mjs"
 goto :import_done
 
 :import_with_source
-"%NODE%" "%EXAMPLE%\scripts\init-fsdb.mjs" --force --source "%SOURCE%"
+"%NODE%" "%EXAMPLE%\scripts\init-fsdb.mjs" --source "%SOURCE%"
 
 :import_done
 if errorlevel 1 (

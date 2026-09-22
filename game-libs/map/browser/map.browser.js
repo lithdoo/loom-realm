@@ -5,11 +5,6 @@
   const DEFAULT_AUTOTILE_FRAME_TICKS = 5;
   const VIEW_KEYS = [
     "sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
-    "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
-    "tileVisuals", "chunks", "cameraMotion", "bridgeLevel",
-  ];
-  const RESPONSIVE_VIEW_KEYS = [
-    "sceneEpoch", "visualEpoch", "motionId", "viewportWidth", "viewportHeight",
     "barHeight", "contentWidth", "contentHeight", "columns", "rows",
     "logicalWidth", "logicalHeight", "scaleX", "scaleY", "mapName",
     "mapId", "mapWidth", "mapHeight", "cameraX", "cameraY", "tileset", "autotiles",
@@ -20,10 +15,7 @@
     "direction", "pattern", "sprite", "motion", "bridgeLevel",
   ];
   const RETRY_MS = [100, 200, 400];
-  const CHUNK = 8;
-  const CHUNK_CELLS = 192;
   const TILE = 32;
-  const OVERSCAN = 1;
   const AUTOTILE_QUARTERS = [
     [27, 28, 33, 34], [5, 28, 33, 34], [27, 6, 33, 34], [5, 6, 33, 34],
     [27, 28, 33, 12], [5, 28, 33, 12], [27, 6, 33, 12], [5, 6, 33, 12],
@@ -177,90 +169,6 @@
     });
   }
 
-  function tileBounds(cameraX, cameraY, vw, vh, mapWidth, mapHeight) {
-    return {
-      minTileX: Math.max(0, Math.floor(cameraX / TILE)),
-      maxTileX: Math.min(mapWidth - 1, Math.floor((cameraX + vw - 1) / TILE)),
-      minTileY: Math.max(0, Math.floor(cameraY / TILE)),
-      maxTileY: Math.min(mapHeight - 1, Math.floor((cameraY + vh - 1) / TILE)),
-    };
-  }
-
-  function unionBounds(left, right) {
-    return {
-      minTileX: Math.min(left.minTileX, right.minTileX),
-      maxTileX: Math.max(left.maxTileX, right.maxTileX),
-      minTileY: Math.min(left.minTileY, right.minTileY),
-      maxTileY: Math.max(left.maxTileY, right.maxTileY),
-    };
-  }
-
-  function expectedChunkCoords(bounds, mapWidth, mapHeight) {
-    const minChunkX = Math.max(0, Math.floor(bounds.minTileX / CHUNK) - OVERSCAN);
-    const maxChunkX = Math.min(Math.floor((mapWidth - 1) / CHUNK), Math.floor(bounds.maxTileX / CHUNK) + OVERSCAN);
-    const minChunkY = Math.max(0, Math.floor(bounds.minTileY / CHUNK) - OVERSCAN);
-    const maxChunkY = Math.min(Math.floor((mapHeight - 1) / CHUNK), Math.floor(bounds.maxTileY / CHUNK) + OVERSCAN);
-    const coords = [];
-    for (let chunkY = minChunkY; chunkY <= maxChunkY; chunkY += 1) {
-      for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX += 1) {
-        coords.push({ chunkX, chunkY });
-      }
-    }
-    return coords;
-  }
-
-  function requiredBoundsForView(data) {
-    const width = data.logicalWidth ?? data.viewportWidth;
-    const height = data.logicalHeight ?? data.viewportHeight;
-    const current = tileBounds(data.cameraX, data.cameraY, width, height, data.mapWidth, data.mapHeight);
-    if (!data.cameraMotion) return current;
-    return unionBounds(
-      current,
-      tileBounds(
-        data.cameraMotion.fromCameraX,
-        data.cameraMotion.fromCameraY,
-        width,
-        height,
-        data.mapWidth,
-        data.mapHeight,
-      ),
-    );
-  }
-
-  function validTileVisual(visual, autotiles) {
-    if (!Array.isArray(visual)) return false;
-    const tileId = visual[0];
-    if (!Number.isSafeInteger(tileId) || tileId <= 0) return false;
-    if (tileId >= 1 && tileId <= 47) return false;
-    if (!Number.isSafeInteger(visual[1])) return false;
-    if (visual[2] === 0) {
-      return visual.length === 4
-        && tileId >= 384
-        && Number.isSafeInteger(visual[3])
-        && visual[3] === tileId - 384;
-    }
-    if (visual[2] !== 1 || visual.length !== 12) return false;
-    if (tileId < 48 || tileId > 383) return false;
-    const slot = Math.floor((tileId - 48) / 48);
-    const variant = (tileId - 48) % 48;
-    if (visual[3] !== slot || slot < 0 || slot > 6) return false;
-    if (!validRef(autotiles[slot])) return false;
-    const expected = autotileCornerTuple(variant);
-    if (!expected) return false;
-    for (let index = 0; index < 8; index += 1) {
-      if (visual[4 + index] !== expected[index]) return false;
-    }
-    return true;
-  }
-
-  function validChunk(chunk) {
-    return exactObject(chunk, ["chunkX", "chunkY", "cells"])
-      && Number.isSafeInteger(chunk.chunkX) && chunk.chunkX >= 0
-      && Number.isSafeInteger(chunk.chunkY) && chunk.chunkY >= 0
-      && Array.isArray(chunk.cells) && chunk.cells.length === CHUNK_CELLS
-      && chunk.cells.every((cell) => Number.isSafeInteger(cell) && cell >= 0);
-  }
-
   function validTileTuple(tile, data) {
     if (!Array.isArray(tile) || tile.length !== 5) return false;
     const [x, y, z, tileId, depth] = tile;
@@ -277,9 +185,8 @@
   }
 
   function assertMapViewData(data) {
-    const responsive = exactObject(data, RESPONSIVE_VIEW_KEYS);
     if (
-      !(responsive || exactObject(data, VIEW_KEYS))
+      !exactObject(data, VIEW_KEYS)
       || !Number.isSafeInteger(data.sceneEpoch) || data.sceneEpoch <= 0
       || !Number.isSafeInteger(data.visualEpoch) || data.visualEpoch <= 0
       || !(data.motionId === null || (Number.isSafeInteger(data.motionId) && data.motionId > 0))
@@ -293,82 +200,39 @@
       || !validRef(data.tileset)
       || !Array.isArray(data.autotiles) || data.autotiles.length !== 7
       || !data.autotiles.every((item) => item === null || validRef(item))
-      || (responsive ? !Array.isArray(data.tiles) : (!Array.isArray(data.tileVisuals) || !Array.isArray(data.chunks)))
+      || !Array.isArray(data.tiles)
       || !validCameraMotion(data.cameraMotion)
       || (data.cameraMotion === null) !== (data.motionId === null)
       || (data.cameraMotion !== null && data.cameraMotion.id !== data.motionId)
       || (data.bridgeLevel !== 0 && data.bridgeLevel !== 2)
     ) throw new TypeError("Invalid MapViewRenderData");
-    if (responsive) {
-      const expectedBar = data.viewportHeight < 480 ? 24 : data.viewportHeight < 720 ? 32 : 48;
-      if (!Number.isSafeInteger(data.barHeight) || data.barHeight !== expectedBar
-        || data.contentWidth !== data.viewportWidth || data.contentHeight !== data.viewportHeight - data.barHeight
-        || !Number.isSafeInteger(data.columns) || data.columns <= 0
-        || !Number.isSafeInteger(data.rows) || data.rows < 14 || data.rows > 33
-        || data.logicalWidth !== data.columns * TILE || data.logicalHeight !== data.rows * TILE
-        || !Number.isFinite(data.scaleX) || data.scaleX <= 0
-        || !Number.isFinite(data.scaleY) || data.scaleY <= 0
-        || Math.abs(data.scaleX * data.logicalWidth - data.contentWidth) > 1e-7
-        || Math.abs(data.scaleY * data.logicalHeight - data.contentHeight) > 1e-7
-        || typeof data.mapName !== "string" || data.mapName.length === 0
-        || data.mapName !== String(data.mapId)) throw new TypeError("Invalid MapViewRenderData");
-    }
+    const expectedBar = data.viewportHeight < 480 ? 24 : data.viewportHeight < 720 ? 32 : 48;
+    if (!Number.isSafeInteger(data.barHeight) || data.barHeight !== expectedBar
+      || data.contentWidth !== data.viewportWidth || data.contentHeight !== data.viewportHeight - data.barHeight
+      || !Number.isSafeInteger(data.columns) || data.columns <= 0
+      || !Number.isSafeInteger(data.rows) || data.rows < 14 || data.rows > 33
+      || data.logicalWidth !== data.columns * TILE || data.logicalHeight !== data.rows * TILE
+      || !Number.isFinite(data.scaleX) || data.scaleX <= 0
+      || !Number.isFinite(data.scaleY) || data.scaleY <= 0
+      || Math.abs(data.scaleX * data.logicalWidth - data.contentWidth) > 1e-7
+      || Math.abs(data.scaleY * data.logicalHeight - data.contentHeight) > 1e-7
+      || typeof data.mapName !== "string" || data.mapName.length === 0
+      || data.mapName !== String(data.mapId)) throw new TypeError("Invalid MapViewRenderData");
     const logicalWidth = data.logicalWidth ?? data.viewportWidth;
     const logicalHeight = data.logicalHeight ?? data.viewportHeight;
     const maxCameraX = Math.max(data.mapWidth * TILE - logicalWidth, 0);
     const maxCameraY = Math.max(data.mapHeight * TILE - logicalHeight, 0);
     if (data.cameraX > maxCameraX || data.cameraY > maxCameraY) throw new TypeError("Invalid MapViewRenderData");
     presentationGeometry(data);
-    if (responsive) {
-      let previous = null;
-      for (const tile of data.tiles) {
-        if (!validTileTuple(tile, data)) throw new TypeError("Invalid MapViewRenderData");
-        if (previous && (tile[2] < previous[2]
-          || (tile[2] === previous[2] && tile[1] < previous[1])
-          || (tile[2] === previous[2] && tile[1] === previous[1] && tile[0] <= previous[0]))) {
-          throw new TypeError("Invalid MapViewRenderData");
-        }
-        previous = tile;
-      }
-      return;
-    }
-    const expected = expectedChunkCoords(requiredBoundsForView(data), data.mapWidth, data.mapHeight);
-    if (data.chunks.length !== expected.length) throw new TypeError("Invalid MapViewRenderData");
-    const seenChunks = new Set();
-    const usedIds = new Set();
-    for (let index = 0; index < data.chunks.length; index += 1) {
-      const chunk = data.chunks[index];
-      const want = expected[index];
-      if (!validChunk(chunk) || chunk.chunkX !== want.chunkX || chunk.chunkY !== want.chunkY) {
+    let previous = null;
+    for (const tile of data.tiles) {
+      if (!validTileTuple(tile, data)) throw new TypeError("Invalid MapViewRenderData");
+      if (previous && (tile[2] < previous[2]
+        || (tile[2] === previous[2] && tile[1] < previous[1])
+        || (tile[2] === previous[2] && tile[1] === previous[1] && tile[0] <= previous[0]))) {
         throw new TypeError("Invalid MapViewRenderData");
       }
-      const key = `${chunk.chunkX},${chunk.chunkY}`;
-      if (seenChunks.has(key)) throw new TypeError("Invalid MapViewRenderData");
-      seenChunks.add(key);
-      if (index > 0) {
-        const previous = data.chunks[index - 1];
-        if (chunk.chunkY < previous.chunkY || (chunk.chunkY === previous.chunkY && chunk.chunkX <= previous.chunkX)) {
-          throw new TypeError("Invalid MapViewRenderData");
-        }
-      }
-      for (const cell of chunk.cells) {
-        if (cell === 0) continue;
-        if (cell >= 1 && cell <= 47) throw new TypeError("Invalid MapViewRenderData");
-        usedIds.add(cell);
-      }
-    }
-    const seenVisuals = new Set();
-    let lastTileId = 0;
-    for (const visual of data.tileVisuals) {
-      if (!validTileVisual(visual, data.autotiles)) throw new TypeError("Invalid MapViewRenderData");
-      if (visual[0] <= lastTileId) throw new TypeError("Invalid MapViewRenderData");
-      lastTileId = visual[0];
-      if (seenVisuals.has(visual[0])) throw new TypeError("Invalid MapViewRenderData");
-      seenVisuals.add(visual[0]);
-    }
-    if (seenVisuals.size !== usedIds.size) throw new TypeError("Invalid MapViewRenderData");
-    for (const tileId of usedIds) {
-      if (!seenVisuals.has(tileId)) throw new TypeError("Invalid MapViewRenderData");
+      previous = tile;
     }
   }
 
@@ -413,45 +277,14 @@
     return Math.floor((now - startedAt) / durationMs) % frameCount;
   }
 
-  function tileDepth(y, visual) {
-    return visual[1] === -1 ? 0 : y * 32 + visual[1];
-  }
-
   function expandTiles(data) {
-    if (Array.isArray(data.tiles)) {
-      return data.tiles.map(([x, y, z, tileId, depth]) => {
-        const depthBias = depth === 0 ? -1 : depth - y * TILE;
-        const visual = tileId >= 384
-          ? [tileId, depthBias, 0, tileId - 384]
-          : [tileId, depthBias, 1, Math.floor((tileId - 48) / 48), ...autotileCornerTuple((tileId - 48) % 48)];
-        return { x, y, z, tileId, depth, visual };
-      });
-    }
-    const visuals = new Map();
-    for (const visual of data.tileVisuals) visuals.set(visual[0], visual);
-    const tiles = [];
-    for (const chunk of data.chunks) {
-      for (let z = 0; z < 3; z += 1) {
-        for (let localY = 0; localY < CHUNK; localY += 1) {
-          for (let localX = 0; localX < CHUNK; localX += 1) {
-            const tileId = chunk.cells[((z * CHUNK + localY) * CHUNK) + localX];
-            if (tileId === 0) continue;
-            const visual = visuals.get(tileId);
-            if (!visual) throw new TypeError("Invalid MapViewRenderData");
-            tiles.push({
-              x: chunk.chunkX * CHUNK + localX,
-              y: chunk.chunkY * CHUNK + localY,
-              z,
-              tileId,
-              visual,
-              depth: tileDepth(chunk.chunkY * CHUNK + localY, visual),
-            });
-          }
-        }
-      }
-    }
-    tiles.sort((left, right) => left.z - right.z || left.y - right.y || left.x - right.x);
-    return tiles;
+    return data.tiles.map(([x, y, z, tileId, depth]) => {
+      const depthBias = depth === 0 ? -1 : depth - y * TILE;
+      const visual = tileId >= 384
+        ? [tileId, depthBias, 0, tileId - 384]
+        : [tileId, depthBias, 1, Math.floor((tileId - 48) / 48), ...autotileCornerTuple((tileId - 48) % 48)];
+      return { x, y, z, tileId, depth, visual };
+    });
   }
 
   function bucketTiles(tiles) {
@@ -718,15 +551,12 @@
       this._slot.addEventListener("slotchange", () => {
         const children = new Set(this._spriteChildren());
         for (const sprite of this._desiredSprites?.keys() ?? []) if (!children.has(sprite)) this._desiredSprites.delete(sprite);
-        const first = this._spriteChildren()[0];
-        this._desiredSprite = first ? this._desiredSprites?.get(first) : undefined;
         this._sequence += 1;
         void this._prepare(this._sequence);
       });
       this._animationStartedAt = performance.now();
       this._sequence = 0;
       this._desiredView = undefined;
-      this._desiredSprite = undefined;
       this._desiredSprites = new Map();
       this._accepted = undefined;
       this._raf = undefined;
@@ -861,8 +691,6 @@
 
     _receiveSprite(sprite, data, receivedAt) {
       this._desiredSprites.set(sprite, { sprite, data, receivedAt });
-      const first = this._spriteChild();
-      this._desiredSprite = first ? this._desiredSprites.get(first) : undefined;
       this._sequence += 1;
       this._paintEpoch = this._sequence;
       this._cancelRetry();
@@ -878,12 +706,11 @@
       const spriteChildren = this._spriteChildren();
       const spriteEntries = spriteChildren.map((child) => this._desiredSprites.get(child));
       if (spriteEntries.some((entry) => !entry)) return;
-      const sprite = spriteEntries[0];
-      const extraSprites = spriteEntries.slice(1);
+      const player = spriteEntries[0];
       for (const entry of spriteEntries) {
         if (entry.data.sceneEpoch !== view.data.sceneEpoch || entry.data.visualEpoch !== view.data.visualEpoch || entry.data.bridgeLevel !== view.data.bridgeLevel) return;
       }
-      if (sprite && ((view.data.cameraMotion === null) !== (sprite.data.motion === null) || view.data.motionId !== sprite.data.motionId || view.data.bridgeLevel !== sprite.data.bridgeLevel)) {
+      if (player && ((view.data.cameraMotion === null) !== (player.data.motion === null) || view.data.motionId !== player.data.motionId || view.data.bridgeLevel !== player.data.bridgeLevel)) {
         throw new TypeError("Invalid map motion identity");
       }
       const geometry = presentationGeometry(view.data);
@@ -892,20 +719,16 @@
         this._accepted
         && this._accepted.view.sceneEpoch === view.data.sceneEpoch
         && this._accepted.view.visualEpoch === view.data.visualEpoch
-        && (this._accepted.view.tiles ?? this._accepted.view.chunks) === (view.data.tiles ?? view.data.chunks)
-        && (!view.data.tileVisuals || this._accepted.view.tileVisuals === view.data.tileVisuals)
+        && this._accepted.view.tiles === view.data.tiles
         && resourceIdentity(this._accepted.view.tileset) === resourceIdentity(view.data.tileset)
-        && Boolean(this._accepted.sprite) === Boolean(sprite)
-        && (!sprite || (this._accepted.spriteEl === sprite.sprite && resourceIdentity(this._accepted.sprite.sprite) === resourceIdentity(sprite.data.sprite)))
-        && (this._accepted.extraSprites?.length ?? 0) === extraSprites.length
-        && extraSprites.every((entry) => this._accepted.extraSprites?.some((old) => old.sprite === entry.sprite && resourceIdentity(old.data.sprite) === resourceIdentity(entry.data.sprite)))
+        && (this._accepted.sprites?.length ?? 0) === spriteEntries.length
+        && spriteEntries.every((entry) => this._accepted.sprites?.some((old) => old.sprite === entry.sprite && resourceIdentity(old.data.sprite) === resourceIdentity(entry.data.sprite)))
       ) {
         const prepared = {
           ...this._accepted,
           view: view.data,
-          sprite: sprite?.data ?? this._accepted.sprite,
-          extraSprites: extraSprites.map((entry) => ({ sprite: entry.sprite, data: entry.data, image: this._accepted.extraSprites?.find((old) => old.sprite === entry.sprite)?.image })),
-          pairReceivedAt: sprite ? Math.min(view.receivedAt, sprite.receivedAt) : view.receivedAt,
+          sprites: spriteEntries.map((entry) => ({ ...this._accepted.sprites.find((old) => old.sprite === entry.sprite), sprite: entry.sprite, data: entry.data })),
+          pairReceivedAt: player ? Math.min(view.receivedAt, player.receivedAt) : view.receivedAt,
           layers: this._layers,
           geometry,
         };
@@ -934,32 +757,26 @@
         }
       }
       let decoded = new Map();
+      let preparedSprites = [];
       try {
         for (const identity of resources.uniqueRefs.keys()) this._own(identity, owner);
         if (resources.uniqueRefs.size > 0) {
           decoded = new Map(await Promise.all([...resources.uniqueRefs.entries()].map(async ([identity, ref]) => [identity, await this._image(ref)])));
         }
-        if (sprite) {
-          const spriteId = resourceIdentity(sprite.data.sprite);
-          sprite.sprite._own(spriteId, owner);
-          decoded.set(spriteId, await sprite.sprite._image(sprite.data.sprite));
-        }
-        for (const entry of extraSprites) {
+        preparedSprites = await Promise.all(spriteEntries.map(async (entry) => {
           const spriteId = resourceIdentity(entry.data.sprite);
           entry.sprite._own(spriteId, owner);
-          decoded.set(spriteId, await entry.sprite._image(entry.data.sprite));
-        }
+          return { sprite: entry.sprite, data: entry.data, receivedAt: entry.receivedAt, image: await entry.sprite._image(entry.data.sprite), resourceId: spriteId };
+        }));
       } catch {
         this._disown(owner);
-        if (sprite) sprite.sprite._disown(owner);
-        for (const entry of extraSprites) entry.sprite._disown(owner);
+        for (const entry of spriteEntries) entry.sprite._disown(owner);
         this._failPrepare(sequence);
         return;
       }
       if (sequence !== this._sequence || !this.isConnected || this._desiredView !== view) {
         this._disown(owner);
-        if (sprite) sprite.sprite._disown(owner);
-        for (const entry of extraSprites) entry.sprite._disown(owner);
+        for (const entry of spriteEntries) entry.sprite._disown(owner);
         return;
       }
       const autotiles = new Map();
@@ -969,8 +786,7 @@
         const durationMs = autotileFrameDurationMs(ref);
         if (layout === "invalid" || durationMs === null) {
           this._disown(owner);
-          if (sprite) sprite.sprite._disown(owner);
-          for (const entry of extraSprites) entry.sprite._disown(owner);
+          for (const entry of spriteEntries) entry.sprite._disown(owner);
           this._failPrepare(sequence);
           return;
         }
@@ -982,35 +798,24 @@
         autotiles,
         buckets: bucketTiles(tiles),
         view: view.data,
-        sprite: sprite?.data,
-        spriteImage: sprite ? decoded.get(resourceIdentity(sprite.data.sprite)) : undefined,
-        pairReceivedAt: sprite ? Math.min(view.receivedAt, sprite.receivedAt) : view.receivedAt,
+        sprites: preparedSprites,
+        pairReceivedAt: player ? Math.min(view.receivedAt, player.receivedAt) : view.receivedAt,
         resourceIds: new Set(resources.uniqueRefs.keys()),
-        spriteResourceId: sprite ? resourceIdentity(sprite.data.sprite) : null,
-        spriteEl: sprite?.sprite,
-        extraSprites: extraSprites.map((entry) => ({
-          sprite: entry.sprite,
-          data: entry.data,
-          image: decoded.get(resourceIdentity(entry.data.sprite)),
-          resourceId: resourceIdentity(entry.data.sprite),
-        })),
         owner,
         geometry,
       };
       try {
         prepared.layers = this._rasterDetached(prepared, sequence);
-        if (sprite) prepared.spriteCanvas = this._rasterSpriteDetached(prepared);
+        if (player) prepared.spriteCanvas = this._rasterSpriteDetached(prepared);
       } catch {
         this._disown(owner);
-        if (sprite) sprite.sprite._disown(owner);
-        for (const entry of extraSprites) entry.sprite._disown(owner);
+        for (const entry of spriteEntries) entry.sprite._disown(owner);
         this._failPrepare(sequence);
         return;
       }
       if (sequence !== this._sequence || !this.isConnected || this._desiredView !== view) {
         this._disown(owner);
-        if (sprite) sprite.sprite._disown(owner);
-        for (const entry of extraSprites) entry.sprite._disown(owner);
+        for (const entry of spriteEntries) entry.sprite._disown(owner);
         return;
       }
       this._commitAtomic(prepared, sequence);
@@ -1121,9 +926,10 @@
     }
 
     _rasterSpriteDetached(prepared) {
-      const sprite = prepared.spriteEl;
-      const image = prepared.spriteImage;
-      const data = prepared.sprite;
+      const player = prepared.sprites[0];
+      const sprite = player?.sprite;
+      const image = player?.image;
+      const data = player?.data;
       if (!sprite || !image || !data) return undefined;
       const motion = data.motion;
       const now = performance.now();
@@ -1158,28 +964,16 @@
       }
       this._acceptedIds = nextIds;
       this._disown(prepared.owner);
-      const sprite = prepared.spriteEl;
-      if (sprite && prepared.spriteResourceId) {
-        sprite._own(prepared.spriteResourceId, "accepted");
-        for (const identity of [...(sprite._acceptedIds ?? [])]) {
-          if (identity === prepared.spriteResourceId) continue;
-          const owners = sprite._owners.get(identity);
-          owners?.delete("accepted");
-          if (!owners || owners.size === 0) {
-            sprite._release(identity);
-            sprite._images.delete(identity);
-          }
-        }
-        sprite._acceptedIds = new Set([prepared.spriteResourceId]);
-        sprite._disown(prepared.owner);
-      }
-      for (const entry of prepared.extraSprites ?? []) {
+      for (const entry of prepared.sprites) {
         entry.sprite._own(entry.resourceId, "accepted");
         for (const identity of [...(entry.sprite._acceptedIds ?? [])]) {
           if (identity === entry.resourceId) continue;
           const owners = entry.sprite._owners.get(identity);
           owners?.delete("accepted");
-          if (!owners || owners.size === 0) { entry.sprite._release(identity); entry.sprite._images.delete(identity); }
+          if (!owners || owners.size === 0) {
+            entry.sprite._release(identity);
+            entry.sprite._images.delete(identity);
+          }
         }
         entry.sprite._acceptedIds = new Set([entry.resourceId]);
         entry.sprite._disown(prepared.owner);
@@ -1189,8 +983,7 @@
     _commitAtomic(prepared, sequence) {
       if (sequence !== this._sequence || !this.isConnected) {
         this._disown(prepared.owner);
-        prepared.spriteEl?._disown(prepared.owner);
-        for (const entry of prepared.extraSprites ?? []) entry.sprite._disown(prepared.owner);
+        for (const entry of prepared.sprites) entry.sprite._disown(prepared.owner);
         return;
       }
       this._commitMotion(prepared, sequence);
@@ -1205,8 +998,8 @@
         this._world.insertBefore(layer.canvas, this._slot);
       }
       this._layers = incoming;
-      if (prepared.spriteCanvas && prepared.spriteEl) {
-        prepared.spriteEl._installCanvas(prepared.spriteCanvas.canvas, prepared.spriteCanvas.key);
+      if (prepared.spriteCanvas && prepared.sprites[0]) {
+        prepared.sprites[0].sprite._installCanvas(prepared.spriteCanvas.canvas, prepared.spriteCanvas.key);
       }
       this._promoteResources(prepared);
       this._accepted = prepared;
@@ -1219,9 +1012,10 @@
     }
 
     _commitMotion(prepared, sequence) {
-      const fingerprint = prepared.sprite ? motionFingerprint(prepared.view, prepared.sprite) : JSON.stringify([prepared.view.motionId, prepared.view.cameraMotion]);
+      const player = prepared.sprites[0]?.data;
+      const fingerprint = player ? motionFingerprint(prepared.view, player) : JSON.stringify([prepared.view.motionId, prepared.view.cameraMotion]);
       const now = performance.now();
-      const duration = prepared.sprite?.motion?.durationMs ?? prepared.view.cameraMotion?.durationMs ?? 250;
+      const duration = player?.motion?.durationMs ?? prepared.view.cameraMotion?.durationMs ?? 250;
       if (this._activeMotion && prepared.view.motionId === this._activeMotion.id && fingerprint !== this._activeMotion.fingerprint) {
         const previous = this._accepted;
         const sameVisual = previous
@@ -1231,17 +1025,17 @@
         if (sameVisual) throw new TypeError("Invalid map motion identity");
         const remaining = Math.max(0, this._activeMotion.startedAt + (this._activeMotion.durationMs ?? duration) - now);
         const visibleCamera = this._lastPaintedCamera;
-        const visibleSprite = this._desiredSprite?.sprite?._lastPaintedScreen;
+        const visibleSprite = this._accepted?.sprites[0]?.sprite?._lastPaintedScreen;
         if (prepared.view.cameraMotion && visibleCamera) {
           prepared.view = {
             ...prepared.view,
             cameraMotion: { ...prepared.view.cameraMotion, fromCameraX: visibleCamera.x, fromCameraY: visibleCamera.y },
           };
         }
-        if (prepared.sprite?.motion && visibleSprite) {
-          prepared.sprite = {
-            ...prepared.sprite,
-            motion: { ...prepared.sprite.motion, fromScreenX: visibleSprite.x, fromScreenY: visibleSprite.y },
+        if (player?.motion && visibleSprite) {
+          prepared.sprites[0] = {
+            ...prepared.sprites[0],
+            data: { ...player, motion: { ...player.motion, fromScreenX: visibleSprite.x, fromScreenY: visibleSprite.y } },
           };
         }
         this._activeMotion = remaining === 0
@@ -1260,11 +1054,11 @@
       if (sequence !== this._sequence || this._accepted !== prepared || !this.isConnected) return;
       const now = performance.now();
       const view = prepared.view;
-      const sprite = prepared.sprite;
+      const player = prepared.sprites[0]?.data;
       const motion = view.cameraMotion;
       const active = this._activeMotion;
-      const duration = active?.durationMs ?? motion?.durationMs ?? sprite?.motion?.durationMs ?? 250;
-      const progress = active && (motion || sprite?.motion) ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
+      const duration = active?.durationMs ?? motion?.durationMs ?? player?.motion?.durationMs ?? 250;
+      const progress = active && (motion || player?.motion) ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
       const cameraX = motion ? Math.round(lerp(motion.fromCameraX, view.cameraX, progress)) : view.cameraX;
       const cameraY = motion ? Math.round(lerp(motion.fromCameraY, view.cameraY, progress)) : view.cameraY;
       this._applyLayout(view, prepared.geometry);
@@ -1286,8 +1080,9 @@
         layer.canvas.style.left = `${bounds.minX - cameraX + prepared.geometry.originX}px`;
         layer.canvas.style.top = `${bounds.minY - cameraY + prepared.geometry.originY}px`;
       }
-      if (sprite) this._paintSprite(sprite, prepared, progress, undefined, undefined, cameraX, cameraY, false);
-      for (const entry of prepared.extraSprites ?? []) this._paintSprite(entry.data, prepared, 1, entry.sprite, entry.image, cameraX, cameraY, true);
+      for (const [index, entry] of prepared.sprites.entries()) {
+        this._paintSprite(entry.data, prepared, index === 0 ? progress : 1, entry.sprite, entry.image, cameraX, cameraY, index !== 0);
+      }
       const previous = this._lastPaintedCamera;
       if (!previous || previous.x !== cameraX || previous.y !== cameraY) {
         qualify("browser-first-motion-paint", {
@@ -1300,7 +1095,7 @@
       }
       if (motion && progress >= 1) qualify("browser-motion-complete", { element: "map-view", motionId: motion.id, visualX: cameraX, visualY: cameraY });
       this._cancelAutotileTimer();
-      const needsMotionFrame = Boolean((motion || sprite?.motion) && progress < 1);
+      const needsMotionFrame = Boolean((motion || player?.motion) && progress < 1);
       if (needsMotionFrame) {
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
@@ -1400,8 +1195,8 @@
     }
 
     _paintSprite(data, prepared, progress, spriteOverride, imageOverride, cameraX = prepared.view.cameraX, cameraY = prepared.view.cameraY, worldAnchored = false) {
-      const sprite = spriteOverride ?? this._desiredSprite?.sprite ?? this._spriteChild();
-      const spriteImage = imageOverride ?? prepared.spriteImage;
+      const sprite = spriteOverride ?? this._spriteChild();
+      const spriteImage = imageOverride ?? prepared.sprites[0]?.image;
       if (!sprite || !spriteImage) return;
       const motion = data.motion;
       const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : data.pattern;

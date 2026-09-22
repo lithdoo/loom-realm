@@ -151,15 +151,19 @@ async function removeStaleStaging(fileOps, directory) {
 
 async function replaceSet(fileOps, targets, staging, verify) {
   const backups = targets.map((target) => `${target}${BACKUP_SUFFIX}`);
+  const hadTargets = await Promise.all(targets.map((target) => exists(fileOps, target)));
   try {
     for (const [index, target] of targets.entries()) {
-      await fileOps.rename(target, backups[index]);
+      if (hadTargets[index]) await fileOps.rename(target, backups[index]);
       await fileOps.rename(staging[index], target);
     }
     await verify();
   } catch (cause) {
     for (const [index, target] of targets.entries()) {
-      try { await restoreBackup(fileOps, target); } catch { /* keep attempting the set */ }
+      try {
+        if (hadTargets[index]) await restoreBackup(fileOps, target);
+        else if (await exists(fileOps, target)) await fileOps.unlink(target);
+      } catch { /* keep attempting the set */ }
       try { await fileOps.unlink(staging[index]); } catch { /* staging may already be gone */ }
     }
     throw cause;
@@ -217,6 +221,11 @@ export async function syncMapPresentation({
     }
 
     for (const [index, key] of keys.entries()) {
+      if (!await exists(fileOps, targets[index])) {
+        if (checkOnly) await readRegularFile(fileOps, targets[index], `FSDB ${RESOURCE_LABELS[key]}`);
+        details.resources[key].actual = undefined;
+        continue;
+      }
       const bytes = await readRegularFile(fileOps, targets[index], `FSDB ${RESOURCE_LABELS[key]}`);
       details.resources[key].actual = sha256(bytes);
     }

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installCandidate, recoverReimport } from "../examples/essentials-v21.1-local/scripts/safe-reimport.mjs";
+import { backupPath, installCandidate } from "../examples/essentials-v21.1-local/scripts/safe-reimport.mjs";
 import { verifyReimport } from "../examples/essentials-v21.1-local/scripts/verify-reimport.mjs";
 
 async function fixture(t, { withOld = true } = {}) {
@@ -39,6 +39,13 @@ test("safe reimport validates staging then installs exactly one replacement cand
   assert.equal(await readFile(join(item.userDirectory, "marker"), "utf8"), "keep");
 });
 
+test("candidate validation failure leaves the previous formal FSDB untouched", async (t) => {
+  const item = await fixture(t);
+  await assert.rejects(installCandidate({ ...item, verify: async () => { throw new Error("invalid candidate"); } }), /invalid candidate/u);
+  assert.equal(await readFile(join(item.old, "marker"), "utf8"), "old");
+  assert.deepEqual(await formalNames(item), ["[FSDB]old"]);
+});
+
 test("failed post-switch validation restores the previous formal FSDB", async (t) => {
   const item = await fixture(t);
   let calls = 0;
@@ -51,7 +58,7 @@ test("failed post-switch validation restores the previous formal FSDB", async (t
   assert.deepEqual(await formalNames(item), ["[FSDB]old"]);
 });
 
-test("failed first-install validation safely returns to no formal FSDB and needs no backup", async (t) => {
+test("failed first-install validation returns to no formal FSDB without inventing a backup", async (t) => {
   const item = await fixture(t, { withOld: false });
   let calls = 0;
   await assert.rejects(installCandidate({ ...item, verify: async (rootPath) => {
@@ -60,44 +67,18 @@ test("failed first-install validation safely returns to no formal FSDB and needs
     throw new Error("injected initial post-switch failure");
   } }), /injected initial post-switch failure/u);
   assert.deepEqual(await formalNames(item), []);
-  await recoverReimport(item);
-  assert.deepEqual(await formalNames(item), []);
+  await assert.rejects(stat(backupPath(item.workRoot)), (error) => error?.code === "ENOENT");
 });
 
-for (const point of ["after-record", "after-install", "after-verify", "after-backup-cleanup"]) {
-  for (const withOld of [false, true]) {
-    test(`restart recovery is idempotent at ${point} (${withOld ? "replacement" : "first install"})`, async (t) => {
-      const item = await fixture(t, { withOld });
-      await assert.rejects(installCandidate({
-        ...item,
-        simulateCrash: true,
-        fault(name) { if (name === point) throw new Error(`crash:${point}`); },
-      }), new RegExp(`crash:${point}`, "u"));
-      await recoverReimport(item);
-      await recoverReimport(item);
-      const names = await formalNames(item);
-      if (point === "after-record") {
-        assert.deepEqual(names, withOld ? ["[FSDB]old"] : []);
-      } else {
-        assert.deepEqual(names, ["[FSDB]new"]);
-        assert.equal(await readFile(join(item.exampleRoot, "[FSDB]new", "marker"), "utf8"), "new");
-      }
-      assert.equal(await readFile(join(item.userDirectory, "marker"), "utf8"), "keep");
-    });
-  }
-}
-
-test("restart after old-library backup restores the complete original", async (t) => {
+test("an unresolved backup is never overwritten or adopted automatically", async (t) => {
   const item = await fixture(t);
-  await assert.rejects(installCandidate({
-    ...item,
-    simulateCrash: true,
-    fault(name) { if (name === "after-backup") throw new Error("crash:after-backup"); },
-  }), /crash:after-backup/u);
-  assert.deepEqual(await formalNames(item), []);
-  await recoverReimport(item);
-  assert.deepEqual(await formalNames(item), ["[FSDB]old"]);
+  const backup = backupPath(item.workRoot);
+  await mkdir(backup, { recursive: true });
+  await writeFile(join(backup, "marker"), "unresolved-old");
+  await assert.rejects(installCandidate(item), /Unresolved FSDB backup/u);
+  assert.equal(await readFile(join(backup, "marker"), "utf8"), "unresolved-old");
   assert.equal(await readFile(join(item.old, "marker"), "utf8"), "old");
+  assert.equal(await readFile(join(item.userDirectory, "marker"), "utf8"), "keep");
 });
 
 test("formal verification rejects a legacy MapAction table inside the FSDB", async (t) => {

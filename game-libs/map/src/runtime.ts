@@ -1,4 +1,4 @@
-import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemDefinitionFactory, type SubsystemScope } from "@loomrealm/subsystem";
+import { cancelled, defineSubsystem, failed, type Frame, type FrameOutcome, type InputListener, type RenderDomain, type RenderDomainState, type RenderDomainUpdate, type SubsystemDefinitionFactory, type SubsystemScope } from "@loomrealm/subsystem";
 import {
   assertProjectable,
   boundsContain,
@@ -334,7 +334,6 @@ function selectProjectionWindow(
   sceneEpoch: number,
   visualEpoch: number,
   motionId: number | null,
-  _previous: TileProjectionWindow | undefined,
   layout: MapLayout,
   bridgeLevel: BridgeLevel,
 ): TileProjectionWindow {
@@ -492,7 +491,7 @@ export class RPGMapBuilder {
 
 export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope) => ({
   async frame(frame: Frame) {
-    let listener;
+    let listener: InputListener | undefined;
     let domain: RenderDomain | undefined;
     let stepTimer: ReturnType<typeof setTimeout> | null = null;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -500,6 +499,24 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
     let activeMove: ActiveMove | null = null;
     let transitioning = false;
     let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      unsubscribeViewport?.();
+      unsubscribeViewport = null;
+      if (resizeTimer !== null) {
+        clearTimeout(resizeTimer);
+        resizeTimer = null;
+      }
+      listener?.close();
+      if (stepTimer !== null) {
+        clearTimeout(stepTimer);
+        stepTimer = null;
+      }
+      activeMove = null;
+      transitioning = false;
+      domain?.close();
+    };
     try {
       const api = runtimeBridges.get(frame);
       const input = api
@@ -514,6 +531,21 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         const failure = new RPGMapError("MAP_COMMIT_FAILED", error instanceof Error ? error.message : "Render commit failed");
         if (!terminalSettled) { terminalSettled = true; resolveTerminal(failed({ code: failure.code, message: failure.message })); }
         return failure;
+      };
+      const runtimeEnded = () => frame.signal.aborted || terminalSettled;
+      const operationBusy = () => transitioning || npcSetting || activeMove !== null || eventBusy;
+      const assertCommandReady = () => {
+        if (frame.signal.aborted) throw new RPGMapError("MAP_CANCELLED");
+        if (terminalSettled) throw new RPGMapError("MAP_INVALID_STATE");
+        if (operationBusy()) throw new RPGMapError("MAP_BUSY");
+      };
+      const replaceDomain = (state: RenderDomainState) => {
+        if (runtimeEnded() || !domain) throw new RPGMapError("MAP_INVALID_STATE");
+        try { domain.replace(state); } catch (error) { throw fatalCommit(error); }
+      };
+      const updateDomain = (update: RenderDomainUpdate) => {
+        if (runtimeEnded() || !domain) throw new RPGMapError("MAP_INVALID_STATE");
+        try { domain.update(update); } catch (error) { throw fatalCommit(error); }
       };
 
       const loadMap = async (mapId: number): Promise<LoadedMap> => {
@@ -616,7 +648,6 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           scene,
           visual,
           null,
-          undefined,
           layout,
           level,
         );
@@ -629,13 +660,13 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         }
       };
 
-      const commitViewportResize = () => {
-        if (frame.signal.aborted || terminalSettled || transitioning || npcSetting || !domain || pendingLayout === null || acceptedLayout === null) return;
+      const commitViewportResize = (): boolean => {
+        if (runtimeEnded() || transitioning || npcSetting || !domain || pendingLayout === null || acceptedLayout === null) return false;
         const nextLayout = pendingLayout;
         if (layoutsEqual(nextLayout, acceptedLayout)) {
           pendingLayout = null;
           clearResizeTimer();
-          return;
+          return true;
         }
         clearResizeTimer();
         try {
@@ -651,13 +682,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             sceneEpoch,
             nextVisual,
             null,
-            window,
             nextLayout,
             bridgeLevel,
           );
           const screenX = x * 32 - camera.cameraX;
           const screenY = y * 32 - camera.cameraY;
-          domain.update({
+          updateDomain({
             nodes: [
               {
                 key: VIEWPORT_KEY,
@@ -716,11 +746,13 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           window = nextWindow;
           visualEpoch = nextVisual;
           settledResize = true;
+          return true;
         } catch (error) {
           if (!terminalSettled) {
             terminalSettled = true;
             resolveTerminal(failed({ code: "MAP_COMMIT_FAILED", message: error instanceof Error ? error.message : "Viewport render commit failed" }));
           }
+          return false;
         }
       };
 
@@ -739,7 +771,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const noteViewport = (value: { readonly width: number; readonly height: number } | null) => {
-        if (frame.signal.aborted || terminalSettled) return;
+        if (runtimeEnded()) return;
         const next = layoutFromViewport(value);
         if (next === null) return;
         latestLayout = next;
@@ -756,7 +788,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const failTransfer = (error: unknown) => {
-        if (frame.signal.aborted || terminalSettled) return;
+        if (runtimeEnded()) return;
         terminalSettled = true;
         resolveTerminal(failed({
           code: error instanceof RPGMapError && error.code === "MAP_COMMIT_FAILED" ? "MAP_COMMIT_FAILED" : "MAP_TRANSFER_FAILED",
@@ -765,7 +797,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const beginTransfer = async (rule: TransferRule, attemptedDirection: Direction): Promise<void> => {
-        if (frame.signal.aborted || transitioning) return;
+        if (runtimeEnded() || transitioning) return;
         transitioning = true;
         try {
           const target = await loadMap(rule.targetMapId);
@@ -777,6 +809,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           const nextDirection = "targetDirection" in rule ? rule.targetDirection ?? attemptedDirection : attemptedDirection;
           const requestedNPCs = api ? await api.prepareNPC(target.mapId, current.mapId, frame.signal) : Object.freeze([]);
           const nextNPCs = await loadNPCs(requestedNPCs, target, rule.targetX, rule.targetY, false);
+          if (runtimeEnded() || !transitioning) return;
           const nextScene = sceneEpoch + 1;
           const nextVisual = visualEpoch + 1;
           const liveLayout = latestLayout ?? acceptedLayout!;
@@ -796,7 +829,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           });
           const nextState = renderState(nextFacts);
           assertRenderCapacity(nextState, nextNPCs.length > 0);
-          try { domain!.replace(nextState); } catch (error) { throw fatalCommit(error); }
+          replaceDomain(nextState);
           const fromMapId = current.mapId;
           current = target;
           window = nextWindow;
@@ -830,8 +863,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
 
       if (api) api.setCommands({
         enter: async (entry) => {
-          if (frame.signal.aborted) throw new RPGMapError("MAP_CANCELLED");
-          if (transitioning || npcSetting || activeMove !== null || eventBusy) throw new RPGMapError("MAP_BUSY");
+          assertCommandReady();
           const target = mapEntry(entry, direction);
           const rule: StepTransfer = { x, y, targetMapId: target.mapId, targetX: target.x, targetY: target.y, targetDirection: target.direction };
           try { await beginTransfer(rule, direction); } catch (error) {
@@ -840,8 +872,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           }
         },
         setNPC: async (placements) => {
-          if (frame.signal.aborted) throw new RPGMapError("MAP_CANCELLED");
-          if (transitioning || npcSetting || activeMove !== null || eventBusy) throw new RPGMapError("MAP_BUSY");
+          assertCommandReady();
           npcSetting = true;
           const epoch = sceneEpoch;
           const stableMap = current;
@@ -862,20 +893,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             if (transitioning || activeMove !== null || eventBusy || x !== stableX || y !== stableY || npcs !== stableNPCs) {
               throw new RPGMapError("MAP_STALE_SCENE");
             }
-            normalizeNPCs(nextNPCs.map(({ instanceId, npcId, x: npcX, y: npcY, direction: npcDirection, pattern }) => ({
-              instanceId,
-              npcId,
-              x: npcX,
-              y: npcY,
-              direction: npcDirection,
-              pattern,
-            })), current.map, x, y);
             const nextState = renderState(facts({ npcs: nextNPCs }));
             assertRenderCapacity(nextState, true);
-            try { domain!.replace(nextState); } catch (error) {
-              if (!terminalSettled) { terminalSettled = true; resolveTerminal(failed({ code: "MAP_COMMIT_FAILED", message: "NPC render commit failed" })); }
-              throw new RPGMapError("MAP_COMMIT_FAILED", error instanceof Error ? error.message : "NPC render commit failed");
-            }
+            replaceDomain(nextState);
             npcs = nextNPCs;
             api.updateSnapshot(currentSnapshot());
           } finally {
@@ -886,13 +906,13 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       });
 
       const startTransfer = (rule: TransferRule, attemptedDirection: Direction) => {
-        if (frame.signal.aborted || transitioning) return;
+        if (runtimeEnded() || transitioning) return;
         void beginTransfer(rule, attemptedDirection).catch(failTransfer);
       };
 
       const publishBlocked = (nextDirection: Direction) => {
         const nextWindow = window.source === current ? window : standingWindow(current, x, y, sceneEpoch, visualEpoch);
-        try { domain!.replace(renderState(facts({ direction: nextDirection, window: nextWindow, activeMove: null }))); } catch (error) { throw fatalCommit(error); }
+        replaceDomain(renderState(facts({ direction: nextDirection, window: nextWindow, activeMove: null })));
         direction = nextDirection;
         window = nextWindow;
         activeMove = null;
@@ -931,7 +951,6 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             sceneEpoch,
             nextVisual,
             motionId,
-            window,
             acceptedLayout!,
             bridgeLevel,
           );
@@ -964,7 +983,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           viewportSet.tiles = nextWindow.tiles;
           playerSet.visualEpoch = nextVisual;
         }
-        try { domain!.update({
+        updateDomain({
           nodes: [
             { key: VIEWPORT_KEY, data: { set: viewportSet as RenderDataSet } },
             { key: PLAYER_KEY, data: { set: playerSet as RenderDataSet } },
@@ -974,7 +993,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
               ...(refresh ? { visualEpoch: nextVisual } : {}),
             } as RenderDataSet } })),
           ],
-        }); } catch (error) { throw fatalCommit(error); }
+        });
         window = nextWindow;
         visualEpoch = nextVisual;
         x = nextX;
@@ -995,51 +1014,56 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
 
       const executeAction = (action: MapBehavior) => {
         eventBusy = true;
-        const nextLevel: BridgeLevel = action.operation === "on" ? 2 : 0;
-        assertBridgeLevel(nextLevel);
-        const levelChanged = nextLevel !== bridgeLevel;
-        bridgeLevel = nextLevel;
-        if (levelChanged) {
-          visualEpoch += 1;
-          const camera = computeCamera(current.map, x, y, acceptedLayout!);
-          const required = viewportTileBounds(current.map, camera.cameraX, camera.cameraY, acceptedLayout!);
-          window = selectProjectionWindow(
-            current,
-            required,
-            camera.cameraX,
-            camera.cameraY,
-            null,
-            sceneEpoch,
-            visualEpoch,
-            null,
-            window,
-            acceptedLayout!,
-            bridgeLevel,
-          );
-          activeMove = null;
+        try {
+          const nextLevel: BridgeLevel = action.operation === "on" ? 2 : 0;
+          assertBridgeLevel(nextLevel);
+          const levelChanged = nextLevel !== bridgeLevel;
+          const nextVisual = levelChanged ? visualEpoch + 1 : visualEpoch;
+          let nextWindow = window;
+          if (levelChanged) {
+            const camera = computeCamera(current.map, x, y, acceptedLayout!);
+            const required = viewportTileBounds(current.map, camera.cameraX, camera.cameraY, acceptedLayout!);
+            nextWindow = selectProjectionWindow(
+              current,
+              required,
+              camera.cameraX,
+              camera.cameraY,
+              null,
+              sceneEpoch,
+              nextVisual,
+              null,
+              acceptedLayout!,
+              nextLevel,
+            );
+          }
+          const viewportSet: Record<string, unknown> = { bridgeLevel: nextLevel };
+          const playerSet: Record<string, unknown> = { bridgeLevel: nextLevel };
+          if (levelChanged) {
+            viewportSet.visualEpoch = nextVisual;
+            viewportSet.tiles = nextWindow.tiles;
+            viewportSet.cameraMotion = null;
+            viewportSet.motionId = null;
+            playerSet.visualEpoch = nextVisual;
+            playerSet.motion = null;
+            playerSet.motionId = null;
+          }
+          updateDomain({
+            nodes: [
+              { key: VIEWPORT_KEY, data: { set: viewportSet as RenderDataSet } },
+              { key: PLAYER_KEY, data: { set: playerSet as RenderDataSet } },
+              ...npcs.map((npc) => ({ key: npc.renderKey, data: { set: {
+                bridgeLevel: nextLevel,
+                ...(levelChanged ? { visualEpoch: nextVisual, motion: null, motionId: null } : {}),
+              } as RenderDataSet } })),
+            ],
+          });
+          bridgeLevel = nextLevel;
+          visualEpoch = nextVisual;
+          window = nextWindow;
+          if (levelChanged) activeMove = null;
+        } finally {
+          eventBusy = false;
         }
-        const viewportSet: Record<string, unknown> = { bridgeLevel };
-        const playerSet: Record<string, unknown> = { bridgeLevel };
-        if (levelChanged) {
-          viewportSet.visualEpoch = visualEpoch;
-          viewportSet.tiles = window.tiles;
-          viewportSet.cameraMotion = null;
-          viewportSet.motionId = null;
-          playerSet.visualEpoch = visualEpoch;
-          playerSet.motion = null;
-          playerSet.motionId = null;
-        }
-        try { domain!.update({
-          nodes: [
-            { key: VIEWPORT_KEY, data: { set: viewportSet as RenderDataSet } },
-            { key: PLAYER_KEY, data: { set: playerSet as RenderDataSet } },
-            ...npcs.map((npc) => ({ key: npc.renderKey, data: { set: {
-              bridgeLevel,
-              ...(levelChanged ? { visualEpoch, motion: null, motionId: null } : {}),
-            } as RenderDataSet } })),
-          ],
-        }); } catch (error) { throw fatalCommit(error); }
-        eventBusy = false;
       };
 
       const startHere = (tileX: number, tileY: number): boolean => {
@@ -1052,7 +1076,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const attemptUnsafe = (next: Direction) => {
-        if (frame.signal.aborted || terminalSettled || transitioning || eventBusy || npcSetting) return;
+        if (runtimeEnded() || operationBusy()) return;
         const { dx, dy } = stepDelta[next];
         const nx = x + dx;
         const ny = y + dy;
@@ -1114,9 +1138,9 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           return;
         }
         const hadPendingResize = pendingLayout !== null;
-        if (hadPendingResize) commitViewportResize();
-        const resizeCommitted = hadPendingResize && pendingLayout === null;
-        if (resizeCommitted) activeMove = null;
+        const resizeCommitted = hadPendingResize && commitViewportResize();
+        if (terminalSettled) return;
+        activeMove = null;
         startHere(x, y);
         if (terminalSettled) return;
         if (heldDirections.length > 0) {
@@ -1189,12 +1213,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (event.repeat) return;
           heldDirections = heldDirections.filter((item) => item !== movement.direction);
           heldDirections.push(movement.direction);
-          if (activeMove === null && !eventBusy && !npcSetting) attempt(heldDirections[heldDirections.length - 1]!);
+          if (!operationBusy()) attempt(heldDirections[heldDirections.length - 1]!);
           return;
         }
         if (event.action !== "up") return;
         heldDirections = heldDirections.filter((item) => item !== movement.direction);
-        if (activeMove === null && !eventBusy && !npcSetting && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        if (!operationBusy() && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       listener.on("keyboard.state", (state) => {
         const down = new Set(Array.isArray(state?.down) ? state.down : []);
@@ -1205,45 +1229,16 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (!movement || heldDirections.includes(movement.direction)) continue;
           heldDirections.push(movement.direction);
         }
-        if (activeMove === null && !eventBusy && !npcSetting && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        if (!operationBusy() && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       const outcome = await Promise.race([
         terminal,
         waitForAbort(frame.signal).then(() => cancelled()),
       ]);
-      if (!cleanedUp) {
-        cleanedUp = true;
-        unsubscribeViewport?.();
-        unsubscribeViewport = null;
-        clearResizeTimer();
-        listener.close();
-        if (stepTimer !== null) {
-          clearTimeout(stepTimer);
-          stepTimer = null;
-        }
-        activeMove = null;
-        transitioning = false;
-        domain.close();
-      }
+      cleanup();
       return outcome;
     } catch (error) {
-      if (!cleanedUp) {
-        cleanedUp = true;
-        unsubscribeViewport?.();
-        unsubscribeViewport = null;
-        if (resizeTimer !== null) {
-          clearTimeout(resizeTimer);
-          resizeTimer = null;
-        }
-        listener?.close();
-        if (stepTimer !== null) {
-          clearTimeout(stepTimer);
-          stepTimer = null;
-        }
-        activeMove = null;
-        transitioning = false;
-        domain?.close();
-      }
+      cleanup();
       if (frame.signal.aborted) return cancelled();
       if (error instanceof RPGMapError && error.code === "MAP_COMMIT_FAILED") return failed({ code: error.code, message: error.message });
       return failed({ code: "MAP_ACTIVATION_FAILED", message: error instanceof Error ? error.message : "Map activation failed" });

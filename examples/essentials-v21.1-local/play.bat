@@ -43,16 +43,11 @@ for /f "delims=" %%I in ('where node') do (
 )
 :got_node
 
-"%NODE%" "%EXAMPLE%\scripts\recover-reimport.mjs"
+"%NODE%" "%EXAMPLE%\scripts\verify-reimport.mjs" "%EXAMPLE%" "%REPO%\.local\essentials-v21.1-reimport"
 if errorlevel 1 (
-  echo 无法安全恢复中断的 FSDB 切换；已保留备份以供诊断。
-  pause
-  exit /b 1
-)
-set "FSDB_COUNT=0"
-for /d %%D in ("%EXAMPLE%\[FSDB]*") do if exist "%%D\" set /a FSDB_COUNT+=1
-if not "%FSDB_COUNT%"=="1" (
-  echo 还没有真实 FSDB。请先运行 reimport.bat。
+  echo FSDB 不完整或存在未处理备份。请关闭游戏，检查正式库与：
+  echo   %REPO%\.local\essentials-v21.1-reimport\backup.fsdb
+  echo 确认旧备份后手工恢复或归档，再重新运行。
   pause
   exit /b 1
 )

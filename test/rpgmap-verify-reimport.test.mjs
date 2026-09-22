@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,8 @@ const audit = [
   occupied: occupied.map(([cellX, cellY]) => ({ x: cellX, y: cellY })),
   trigger: 1, through: false, emptyGraphic: true,
 }));
+
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 
 function map(width, height, behaviors = []) {
   return { tileset_id: 1, width, height, data: { dimensions: 3, xSize: width, ySize: height, zSize: 3, values: Array(width * height * 3).fill(0) }, behaviors };
@@ -49,8 +52,8 @@ async function fixture(t) {
     schemaVersion: "loomrealm.essentials-v21.1-generation/v1",
     tables: { Map: ["7", "21", "47", "66"], Tileset: ["1"], NPC: ["loomrealm-local-guide"] },
     resources: [
-      { table: "Graphics", key: "Characters/NPC 01", path: "Characters/NPC 01.png", size: "1", sha256: "fixture" },
-      { table: "Graphics", key: "Tilesets/tiles", path: "Tilesets/tiles.png", size: "1", sha256: "fixture" },
+      { table: "Graphics", key: "Characters/NPC 01", path: "Characters/NPC 01.png", size: "1", sha256: sha256("n") },
+      { table: "Graphics", key: "Tilesets/tiles", path: "Tilesets/tiles.png", size: "1", sha256: sha256("t") },
     ],
     map21BridgeAudit: audit,
   };
@@ -82,6 +85,12 @@ test("verify-reimport rejects a resource listed by the generation plan when it i
   const item = await fixture(t);
   await unlink(join(item.fsdb, "[resource]Graphics", "Characters", "NPC 01.png"));
   await assert.rejects(verifyReimport(item.root), /resource/u);
+});
+
+test("verify-reimport rejects a generated resource whose content hash drifted", async (t) => {
+  const item = await fixture(t);
+  await writeFile(join(item.fsdb, "[resource]Graphics", "Characters", "NPC 01.png"), "x");
+  await assert.rejects(verifyReimport(item.root), /hash differs/u);
 });
 
 test("verify-reimport rejects incomplete Presentation", async (t) => {

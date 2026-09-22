@@ -1,19 +1,13 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { access, readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { MAP21_BRIDGE_EVENTS } from "../../../tools/fixtures/essentials-v21.1/lib/essentials/v21.1/map-action-consumer.mjs";
+import { assertNoPendingBackup } from "./safe-reimport.mjs";
 
 const MANIFEST_VERSION = "loomrealm.essentials-v21.1-generation/v1";
-const EXPECTED_MAP21 = Object.freeze([
-  { eventId: 4, operation: "on", position: { x: 20, y: 49 }, occupied: [[20, 46], [20, 47], [20, 48], [20, 49]] },
-  { eventId: 28, operation: "off", position: { x: 19, y: 49 }, occupied: [[19, 46], [19, 47], [19, 48], [19, 49]] },
-  { eventId: 7, operation: "off", position: { x: 14, y: 31 }, occupied: [[14, 31], [15, 31], [16, 31]] },
-  { eventId: 10, operation: "on", position: { x: 14, y: 32 }, occupied: [[14, 32], [15, 32], [16, 32]] },
-  { eventId: 20, operation: "off", position: { x: 22, y: 58 }, occupied: [[22, 58], [23, 58]] },
-  { eventId: 22, operation: "on", position: { x: 22, y: 57 }, occupied: [[22, 57], [23, 57]] },
-  { eventId: 23, operation: "off", position: { x: 14, y: 69 }, occupied: [[14, 69], [15, 69]] },
-  { eventId: 25, operation: "on", position: { x: 14, y: 68 }, occupied: [[14, 68], [15, 68]] },
-]);
-
 const sorted = (values) => [...values].sort((left, right) => left.localeCompare(right));
 const cells = (occupied) => occupied.map(({ x, y }) => [x, y]);
 
@@ -33,22 +27,28 @@ function inside(root, relativePath) {
 }
 
 function validateMap21Audit(audit) {
-  if (!Array.isArray(audit) || audit.length !== EXPECTED_MAP21.length) throw new Error("Map21 Bridge audit must contain exactly eight events");
+  if (!Array.isArray(audit) || audit.length !== MAP21_BRIDGE_EVENTS.length) throw new Error("Map21 Bridge audit must contain exactly eight events");
   const byId = new Map();
   for (const item of audit) {
     exactKeys(item, ["eventId", "pageIndex", "position", "operation", "occupied", "trigger", "through", "emptyGraphic"], "Map21 Bridge audit entry");
     if (byId.has(item.eventId)) throw new Error(`Map21 Bridge event ${item.eventId} is duplicated`);
     byId.set(item.eventId, item);
   }
-  for (const expected of EXPECTED_MAP21) {
+  for (const expected of MAP21_BRIDGE_EVENTS) {
     const item = byId.get(expected.eventId);
     if (!item) throw new Error(`Map21 Bridge event ${expected.eventId} is missing`);
-    if (item.operation !== expected.operation || item.position?.x !== expected.position.x || item.position?.y !== expected.position.y
+    if (item.operation !== (expected.op === "bridge-on" ? "on" : "off") || item.position?.x !== expected.x || item.position?.y !== expected.y
       || item.trigger !== 1 || item.through !== false || item.emptyGraphic !== true
       || JSON.stringify(cells(item.occupied)) !== JSON.stringify(expected.occupied)) {
       throw new Error(`Map21 Bridge event ${expected.eventId} does not match canonical/oracle evidence`);
     }
   }
+}
+
+async function sha256File(path) {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(path), hash);
+  return hash.digest("hex");
 }
 
 function validateMap(map, name) {
@@ -112,6 +112,9 @@ export async function verifyReimport(exampleRoot) {
     const path = inside(join(fsdbRoot, `[resource]${resource.table}`), resource.path);
     const info = await stat(path);
     if (!info.isFile() || info.size !== Number(resource.size)) throw new Error(`generated resource is missing or has wrong size: ${resource.table}/${resource.key}`);
+    if (typeof resource.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(resource.sha256) || await sha256File(path) !== resource.sha256) {
+      throw new Error(`generated resource hash differs from the generation manifest: ${resource.table}/${resource.key}`);
+    }
   }
 
   const mapKeys = manifest.tables.Map;
@@ -152,6 +155,8 @@ export async function verifyReimport(exampleRoot) {
 async function main() {
   const exampleRoot = process.argv[2];
   if (!exampleRoot) throw new Error("missing example root");
+  const workRoot = process.argv[3];
+  if (workRoot) await assertNoPendingBackup(workRoot);
   const fsdbRoot = await verifyReimport(exampleRoot);
   process.stdout.write(`FSDB ready: ${fsdbRoot}\nChecked: generation manifest, complete Map/schema/resources, Map21 eight-event audit, no MapAction, NPC, Presentation\n`);
 }

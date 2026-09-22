@@ -11,7 +11,7 @@ import { EEVEE_EXPO_DOWNLOAD, OFFICIAL_ARCHIVE_IDENTITY } from "../../../tools/f
 import { ImportFailure } from "../../../tools/fixtures/essentials-v21.1/lib/errors.mjs";
 import { run } from "../../../tools/fixtures/essentials-v21.1/import.mjs";
 import { syncMapPresentation } from "./sync-map-presentation.mjs";
-import { installCandidate, recoverReimport, resetCandidateRoot } from "./safe-reimport.mjs";
+import { assertNoPendingBackup, installCandidate, resetCandidateRoot } from "./safe-reimport.mjs";
 import { verifyReimport } from "./verify-reimport.mjs";
 
 const exampleRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -20,10 +20,9 @@ const workRoot = join(repoRoot, ".local", "essentials-v21.1-reimport");
 const stagingExampleRoot = join(workRoot, "staging-example");
 
 function parse(argv) {
-  const result = { source: undefined, force: false };
+  const result = { source: undefined };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--force") result.force = true;
-    else if (argv[i] === "--source") {
+    if (argv[i] === "--source") {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) throw new Error("Missing value for --source");
       result.source = value;
@@ -99,9 +98,39 @@ async function importFsdb(source, outputRoot) {
   return await run(argv);
 }
 
+async function installLocalExampleNPC(fsdbRoot) {
+  const manifestPath = join(fsdbRoot, "[struct]测试信息", "生成清单.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const sprite = manifest.resources?.find((item) => item.table === "Graphics" && item.key === "Characters/NPC 01");
+  if (!sprite) throw new Error("The official source does not contain Graphics/Characters/NPC 01.png for the local guide");
+  const npcRoot = join(fsdbRoot, "[struct]NPC");
+  await mkdir(npcRoot);
+  const npcSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["name", "sprite"],
+    properties: {
+      name: { type: "string", minLength: 1 },
+      sprite: {
+        type: "object",
+        additionalProperties: false,
+        required: ["namespace", "key"],
+        properties: {
+          namespace: { const: "resource.Graphics" },
+          key: { type: "string", pattern: "^Characters/.+" },
+        },
+      },
+    },
+  };
+  await writeFile(join(npcRoot, ".info.meta"), `${JSON.stringify(npcSchema)}\n`);
+  await writeFile(join(npcRoot, "loomrealm-local-guide.json"), `${JSON.stringify({ name: "LoomRealm Local Guide", sprite: { namespace: "resource.Graphics", key: "Characters/NPC 01" } })}\n`);
+  manifest.tables.NPC = ["loomrealm-local-guide"];
+  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+}
+
 const options = parse(process.argv.slice(2));
 await mkdir(workRoot, { recursive: true });
-await recoverReimport({ exampleRoot, workRoot, verify: verifyReimport });
+await assertNoPendingBackup(workRoot);
 await resetCandidateRoot(stagingExampleRoot);
 
 if (options.source === undefined) {
@@ -126,21 +155,10 @@ try {
   }
 }
 
+await installLocalExampleNPC(fsdbRoot);
 const presentation = join(fsdbRoot, "[resource]Presentation");
 await mkdir(join(presentation, "map"), { recursive: true });
 await writeFile(join(presentation, ".desc.meta"), "Trusted presentation resources.\n");
-await writeFile(
-  join(presentation, "map", "map.css.css"),
-  await readFile(join(repoRoot, "game-libs/map/browser/map.css")),
-);
-await writeFile(
-  join(presentation, "map", "map.browser.js.js"),
-  await readFile(join(repoRoot, "game-libs/map/browser/map.browser.js")),
-);
-await writeFile(
-  join(presentation, "page.css.css"),
-  await readFile(join(exampleRoot, "presentation.css")),
-);
 await syncMapPresentation({ repoRoot, exampleRoot: stagingExampleRoot, runBuild: true });
 await syncMapPresentation({ repoRoot, exampleRoot: stagingExampleRoot, runBuild: false, checkOnly: true });
 await verifyReimport(stagingExampleRoot);

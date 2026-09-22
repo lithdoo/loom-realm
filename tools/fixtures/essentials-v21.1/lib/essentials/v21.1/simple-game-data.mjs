@@ -144,14 +144,6 @@ export async function buildCanonicalDataset(manifest) {
   const pbsDomains = Object.freeze({ ...initialDomains, ...species.domains, ...remaining.domains });
   const compiledData = materializeCompiledDataDomains(rmxp.roots, pbsDomains);
   const mapActions = materializeMapActionRecords(rmxp.roots);
-  const localGuideSprite = manifest.objects.find((object) => object.kind === "file" && object.relativePath === "Graphics/Characters/NPC 01.png");
-  const localNPCs = localGuideSprite
-    ? Object.freeze([Object.freeze({
-      id: "loomrealm-local-guide",
-      name: "LoomRealm Local Guide",
-      sprite: Object.freeze({ namespace: "resource.Graphics", key: "Characters/NPC 01" }),
-    })])
-    : Object.freeze([]);
   const actionsByMap = new Map(mapActions.map((record) => [record.key, record.value]));
   const maps = Object.freeze(m14.Map.map((record) => {
     const evidence = actionsByMap.get(record.key);
@@ -163,7 +155,7 @@ export async function buildCanonicalDataset(manifest) {
       : Object.freeze([]);
     return Object.freeze({ key: record.key, value: Object.freeze({ ...record.value, behaviors }) });
   }));
-  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14, Map: maps, MapTransfer: mapTransfers, MapAction: mapActions, NPC: localNPCs });
+  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14, Map: maps, MapTransfer: mapTransfers, MapAction: mapActions });
   const semantic = classifyEssentialsSemantics(rmxp, VANILLA_REGISTRY_V21_1.compilerPasses);
   const oracleComparison = compareV21Oracle(canonicalDomains, rmxp.roots);
   const oracle = Object.freeze({ ...oracleComparison, compiledDataRootsCompared: compiledData.coverage.observedRoots.length });

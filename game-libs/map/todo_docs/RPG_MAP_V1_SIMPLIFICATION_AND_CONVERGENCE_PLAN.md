@@ -1,6 +1,6 @@
 # RPGMap v1：减法优先的整体简化、结构收敛与最终验证方案
 
-> **文档状态：2026-09-22，待实施的优化决策与 Agent 执行依据；不是代码已修改或测试已通过的声明。** 审查基线为 `agent/rpgmap-v1-end-to-end` 的 `ae6d1460c450ea99afd8d66e334dda661897cc52`，当时 `main` 为 `79ac5ced6a73e61f5a874de58eb9036367e9e6bf`。执行前必须重新获取分支 HEAD、确认差异；以下代码观察只针对该基线。
+> **文档状态：2026-09-22，优化决策已实施；本文件保留为设计决策和验收依据。** 最终测试结果与提交 SHA 以交付记录为准，不能从本文状态文字推断。
 >
 > **本文件的定位：** 主方案 `RPG_MAP_GENERIC_MODULE_DESIGN.md` 仍是业务语义权威；`RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md` 仍是公开 API、Frame、Content、RenderDomain 和必要失败语义的权威。本文件**取代旧实施计划和闭环文档中关于本地 FSDB「自动崩溃恢复、锁所有权、多阶段日志、开机自动接管」的实施要求**，不修改 RPGMap 的公开接口、Bridge/NPC 业务语义或真实框架限制。实施时须同步修订旧文档的冲突文字与状态，不能让下一个 Agent 按旧计划重新造出被删除的机制。
 
@@ -12,17 +12,17 @@
 
 **每个保留的复杂机制应能回答三个问题：**它保护哪条已冻结业务语义或真实外部约束？去掉会在受支持使用方式下出现什么可复现失败？这项职责是否已由来源层、框架层或另一段代码承担？若回答不出，优先合并、删除或降级为本地使用说明，而非再创造抽象。不要用代码行数、单测数量或抽象数量作为单独目标。
 
-### 1.1 确认过的代码现象与待验证候选
+### 1.1 基线问题与实施结果
 
 | 位置 | 基线代码观察 | 本轮处理 |
 | --- | --- | --- |
-| `examples/essentials-v21.1-local/scripts/safe-reimport.mjs` | `prepared/backing-up/installing/verifying/cleanup`、`recovery.json`、lock、自动恢复、故障注入及首次安装/替换分支并存；恢复可删除锁，安装在持锁前恢复。 | **确定删减**：降低本地工具的可靠性承诺，采用一次性候选验证和简单备份切换；不继续修补锁系统。 |
-| `init-fsdb.mjs` 与 `sync-map-presentation.mjs` | 前者手动复制 JS/CSS 三文件，后者又构建并同步同一组 Presentation。后者目前会先读取目标文件。 | **确定消重、配套改造**：同步函数成为唯一写入者，并支持 staging 初次缺失目标文件，不能单独删掉前置复制导致失败。 |
-| `game-libs/map/browser/map.browser.js` | `chunks/tileVisuals` 与 `tiles` 两条 View 数据解码路径；`_desiredSprite` 与 `_desiredSprites`、`extraSprites` 并存。 | **优先收敛**：核对真实调用者后迁至唯一 v1 View 数据；多 Sprite 采用一套内部集合，保留 Player 专用运动规则。 |
-| `game-libs/map/src/runtime.ts` | `terminalSettled/transitioning/eventBusy/npcSetting/activeMove` 等多处组合判断；正常和异常分支重复清理；Bridge/resize/NPC 有分散 Domain 错误处理。 | **确定整理**：共同准入、共同提交终止屏障和一个清理出口；不要引入通用状态机或事务框架。 |
+| `examples/essentials-v21.1-local/scripts/safe-reimport.mjs` | 多阶段 journal、锁、自动恢复与故障注入。 | **已删减**：候选预验、固定备份、安装、后验和正常异常回滚；遗留备份一律拒绝并交由人工判断。 |
+| `init-fsdb.mjs` 与 `sync-map-presentation.mjs` | 两处写入相同 Presentation 文件。 | **已消重**：同步函数是唯一写入者；写模式可创建缺失目标，`checkOnly` 仍严格拒绝缺失。 |
+| `game-libs/map/browser/map.browser.js` | 两条 View 解码路径和两套 Sprite 内部状态。 | **已收敛**：生产只接受 `tiles`；Player 与 NPC 共用一套 Sprite 集合，Player 保留专用 motion。 |
+| `game-libs/map/src/runtime.ts` | 准入、Domain fatal 和清理规则分散。 | **已整理**：共同准入、共同 Domain 提交屏障和单一清理出口；未引入通用状态机。 |
 | Runtime 投影窗口 | overscan 依次尝试 `4/3/2/1`，每次构造和序列化候选；`selectProjectionWindow` 的 `_previous` 参数未使用。 | **测后决定**：先删除无用参数；固定窗口、缓存及投影策略的去留依据容量/性能测试，不凭代码长度武断删除。 |
-| 来源生成和本地消费者 | `loomrealm-local-guide` 与 `Characters/NPC 01` 是示例需求，但通用生成与正式验证存在专名依赖。 | **职责解耦**：来源生成器只负责通用事实；示例放置、可选演示定义的来源与检查归本地适配，保留合法真实资源验证。 |
-| Map21 和验收 | 八桥预期数据散见生成/验证/测试；多个测试命令有重复执行机会；闭环文档混有历史「尚未交付」与「已完成」状态。 | **单一权威、精简聚合**；不弱化固定八桥、原始 Oracle 或 M14/M15 行为断言。 |
+| 来源生成和本地消费者 | 示例 Guide 曾由通用生成器拥有。 | **已解耦**：通用生成器只负责来源事实；本地适配器增补 Guide 并验证真实资源清单。 |
+| Map21 和验收 | 八桥预期数据存在重复常量。 | **已单源**：验证器复用 Map21 权威规格；原始 Oracle 与 M14/M15 断言保留。 |
 
 以上为已查源码的结构观察，**不是「每处均已证明错误」**。额外需清点的范围包括：`semantics.ts` 未使用的旧协议导出/迁移 helper、Importer 最终数据与取证中间件的边界、Browser 重试/缓存/诊断计数、Fixture 与 E2E 重复验证。对这些只提出审计要求；未完成调用者、ABI 或性能证据前不得擅自删除。
 
@@ -92,9 +92,9 @@
 
 **不能删除的底线**：Renderer 同域已删除 key 不可复用；可预测容量失败须在调用 Domain 前拒绝；真实 Domain 抛错后 fail-stop；Frame 取消/迟到异步隔离；NPC 唯一身份、整批占格与阻挡；Map21 静态转换安全；候选校验与旧库备份；不泄露受限 Essentials 素材。这些是必要约束，不意味着要为每项各建一套通用抽象。
 
-## 7. 实施次序与文档治理
+## 7. 已执行的实施次序与文档治理
 
-在现有 `agent/rpgmap-v1-end-to-end` 分支操作；保护未提交工作，获取最新 `origin/main` 并确认 Battle 等新增文件影响，**不要重建分支、不要推送到 main 或强制推送**。以完整 Diff 而非单个补丁 commit 为审查对象。实施顺序：
+实施在现有 `agent/rpgmap-v1-end-to-end` 分支完成；未重建分支、未推送 main、未强制推送。完整 Diff 按以下顺序收敛：
 
 1. **文档先收敛**：修改旧实施计划第 3–5 节、闭环状态与 README，明确本地工具从自动恢复降为人工恢复前提，移除已过期的「计划新增测试命令／已全部执行」矛盾文字；主方案和公开 API 不随意改写。本文是减法决策，不是另一份 API 规范。
 2. **先删双写与过度工具**：简单 FSDB 替换、启动检查、Presentation 唯一写入者；更新少量对应测试。
@@ -123,4 +123,4 @@
 - `npm ci`、构建、聚合测试、包检查、Browser 与真实 E2E 的 PASS/FAIL/NOT RUN 实证；非零退出码不得掩盖。
 - 旧文档与当前代码一致、没有旧要求会让后续 Agent 重新创建已删系统；不存在无用抽象和双实现。
 
-**完成定义：**能用更少的概念解释相同的 v1 业务；现有框架与安全底线不退化；测试覆盖受支持行为；没有把本地示例工具做成部署平台。不要因极端场景不断加补丁，也不要以「简约」为由删除已经证明必要的行为。
+**完成定义：**能用更少的概念解释相同的 v1 业务；现有框架与安全底线不退化；测试覆盖受支持行为；没有把本地示例工具做成部署平台。本文不记录某次运行结果；精确命令、退出码与最终 SHA 由交付报告给出。

@@ -325,6 +325,33 @@ test("syncMapPresentation atomically replaces all three Presentation resources",
   }
 });
 
+test("syncMapPresentation creates missing staging Presentation resources", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await Promise.all([fixture.targetJs, fixture.targetCss, fixture.targetPageCss].map((target) => fs.unlink(target)));
+    await syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false });
+    assert.deepEqual(await readFile(fixture.targetJs), await readFile(distJsPath));
+    assert.deepEqual(await readFile(fixture.targetCss), await readFile(distCssPath));
+    assert.deepEqual(await readFile(fixture.targetPageCss), await readFile(pageCssPath));
+    assert.equal(await readFile(fixture.unrelated, "utf8"), "preserve-user-content");
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
+test("syncMapPresentation --check rejects a missing staging resource", async () => {
+  const fixture = await presentationFixture();
+  try {
+    await fs.unlink(fixture.targetJs);
+    await assert.rejects(
+      () => syncMapPresentation({ repoRoot: repository, exampleRoot: fixture.exampleRoot, runBuild: false, checkOnly: true }),
+      /Map presentation sync failed/u,
+    );
+  } finally {
+    await rm(fixture.temporary, { recursive: true, force: true });
+  }
+});
+
 test("syncMapPresentation updates changed page CSS without reinitializing FSDB", async () => {
   const fixture = await presentationFixture();
   try {

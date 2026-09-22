@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import mapDefinition from "@loomrealm-game/map";
-import { computeCamera, expandTileBounds, JUMP_DURATION_MS, MAP_ACTION_SCHEMA_VERSION, projectTilesInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
+import { computeCamera, expandTileBounds, JUMP_DURATION_MS, projectTilesInBounds, validateMapRecord, validateTilesetRecord, viewportTileBounds } from "../dist/semantics.js";
 import { calculateLayout } from "../dist/layout.js";
 
 const table = (dimensions, xSize, ySize, zSize, values) => ({ dimensions, xSize, ySize, zSize, values });
@@ -216,12 +216,7 @@ describe("map runtime walking", { concurrency: false }, () => {
           const id = `${namespace}/${key}`;
           reads.push(id);
           if (gates[id]) await gates[id];
-          let value = records[id];
-          if (namespace === "struct.Map" && value && records[`struct.MapAction/${key}`]) {
-            value = { ...value, behaviors: records[`struct.MapAction/${key}`].actions.map((action) => ({
-              kind: "bridge", operation: action.op === "bridge-on" ? "on" : "off", occupied: action.occupied,
-            })) };
-          }
+          const value = records[id];
           if (value === undefined) throw new TypeError(`missing ${id}`);
           return { value, contentVersion: "v-record" };
         },
@@ -926,18 +921,15 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
+        "struct.Map/1": {
+          tileset_id: 1,
+          width,
+          height,
+          data: table(3, width, height, 3, values),
+          behaviors: [{ kind: "bridge", operation: "on", occupied: [{ x: 3, y: 3 }] }],
+        },
         "struct.Tileset/1": {
           id: 1, tileset_name: "m14_tileset", autotile_names: [null, null, null, null, null, null, null], ...tables,
-        },
-        "struct.MapAction/1": {
-          id: 1,
-          schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-          actions: [{
-            kind: "bridge", mapId: 1, eventId: 4, pageIndex: 0, commandIndex: 0, trigger: 1,
-            occupied: [{ x: 3, y: 3 }], op: "bridge-on", height: 2, through: false, emptyGraphic: true,
-          }],
-          opaqueRelated: [],
         },
       },
     });
@@ -970,18 +962,15 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 2, characterName: "m14_player" },
       records: {
-        "struct.Map/1": { tileset_id: 1, width, height, data: table(3, width, height, 3, values) },
+        "struct.Map/1": {
+          tileset_id: 1,
+          width,
+          height,
+          data: table(3, width, height, 3, values),
+          behaviors: [{ kind: "bridge", operation: "on", occupied: [{ x: 3, y: 3 }] }],
+        },
         "struct.Tileset/1": {
           id: 1, tileset_name: "m14_tileset", autotile_names: [null, null, null, null, null, null, null], ...tables,
-        },
-        "struct.MapAction/1": {
-          id: 1,
-          schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-          actions: [{
-            kind: "bridge", mapId: 1, eventId: 9, pageIndex: 0, commandIndex: 0, trigger: 1,
-            occupied: [{ x: 3, y: 3 }], op: "bridge-on", height: 2, through: false, emptyGraphic: true,
-          }],
-          opaqueRelated: [],
         },
       },
     });
@@ -1037,8 +1026,15 @@ describe("map runtime walking", { concurrency: false }, () => {
     };
   }
 
-  function actionRecord(actions, opaqueRelated = []) {
-    return { id: 1, schemaVersion: MAP_ACTION_SCHEMA_VERSION, actions, opaqueRelated };
+  function mapWithActions(map, actions) {
+    return {
+      ...map,
+      behaviors: actions.map((action) => ({
+        kind: "bridge",
+        operation: action.op === "bridge-on" ? "on" : "off",
+        occupied: action.occupied,
+      })),
+    };
   }
 
   test("product Bridge Off execute returns bridgeLevel 0 after On", async (t) => {
@@ -1048,12 +1044,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
           bridgeAction({ eventId: 28, occupied: [{ x: 3, y: 1 }], op: "bridge-off" }),
         ]),
+        "struct.Tileset/1": world.tileset,
       },
     });
     await stepOnce(frame, "ArrowUp");
@@ -1072,15 +1067,14 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({
             eventId: 4,
             occupied: [{ x: 3, y: 3 }, { x: 3, y: 2 }, { x: 3, y: 1 }],
             op: "bridge-on",
           }),
         ]),
+        "struct.Tileset/1": world.tileset,
       },
     });
     await stepOnce(frame, "ArrowUp");
@@ -1097,11 +1091,10 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
         ]),
+        "struct.Tileset/1": world.tileset,
       },
     });
     await frame.emitEvent(down("ArrowUp"));
@@ -1118,12 +1111,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 22, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
           bridgeAction({ eventId: 20, occupied: [{ x: 3, y: 2 }], op: "bridge-off" }),
         ]),
+        "struct.Tileset/1": world.tileset,
       },
     });
     await frame.emitEvent(down("ArrowUp"));
@@ -1152,12 +1144,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
           bridgeAction({ eventId: 28, occupied: [{ x: 3, y: 1 }], op: "bridge-off" }),
         ]),
+        "struct.Tileset/1": tileset,
       },
     });
     const before = view(frame.latestState()).tiles.find((tile) => tile[0] === 3 && tile[1] === 2 && tile[3] === 387);
@@ -1184,11 +1175,10 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": { ...world.tileset, ...tables },
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
         ]),
+        "struct.Tileset/1": { ...world.tileset, ...tables },
       },
     });
     await frame.emitEvent(down("ArrowUp"));
@@ -1205,11 +1195,10 @@ describe("map runtime walking", { concurrency: false }, () => {
     const named = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 9, occupied: [{ x: 3, y: 3 }], op: "bridge-on", emptyGraphic: false }),
         ]),
+        "struct.Tileset/1": world.tileset,
       },
     });
     await named.emitEvent(down("ArrowUp"));
@@ -1227,11 +1216,10 @@ describe("map runtime walking", { concurrency: false }, () => {
     const touch = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": blockedWorld.map,
-        "struct.Tileset/1": { ...blockedWorld.tileset, ...tables },
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(blockedWorld.map, [
           bridgeAction({ eventId: 9, occupied: [{ x: 3, y: 3 }], op: "bridge-on", emptyGraphic: false }),
         ]),
+        "struct.Tileset/1": { ...blockedWorld.tileset, ...tables },
       },
     });
     await touch.emitEvent(down("ArrowUp"));
@@ -1260,9 +1248,8 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 1, y: 5, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
+        "struct.Map/1": mapWithActions(world.map, actions),
         "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord(actions),
       },
     });
     for (const group of groups) {
@@ -1291,11 +1278,10 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 4, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 4, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
         ]),
+        "struct.Tileset/1": world.tileset,
         "struct.MapTransfer/1": {
           id: 1,
           steps: [{ x: 3, y: 2, targetMapId: 2, targetX: 4, targetY: 7, targetDirection: null }],
@@ -1322,12 +1308,11 @@ describe("map runtime walking", { concurrency: false }, () => {
     const frame = await startFrame(t, {
       params: { mapId: 1, x: 3, y: 2, characterName: "m14_player" },
       records: {
-        "struct.Map/1": world.map,
-        "struct.Tileset/1": world.tileset,
-        "struct.MapAction/1": actionRecord([
+        "struct.Map/1": mapWithActions(world.map, [
           bridgeAction({ eventId: 8, occupied: [{ x: 3, y: 3 }], op: "bridge-on" }),
           bridgeAction({ eventId: 9, occupied: [{ x: 3, y: 4 }], op: "bridge-on" }),
         ]),
+        "struct.Tileset/1": world.tileset,
       },
     });
     await frame.emitEvent(down("ArrowDown"));
@@ -1462,12 +1447,7 @@ describe("map runtime transfer", { concurrency: false }, () => {
           const id = `${namespace}/${key}`;
           reads.push(id);
           if (gates[id]) await gates[id];
-          let value = records[id];
-          if (namespace === "struct.Map" && value && records[`struct.MapAction/${key}`]) {
-            value = { ...value, behaviors: records[`struct.MapAction/${key}`].actions.map((action) => ({
-              kind: "bridge", operation: action.op === "bridge-on" ? "on" : "off", occupied: action.occupied,
-            })) };
-          }
+          const value = records[id];
           if (value === undefined) throw new TypeError(`missing ${id}`);
           return { value, contentVersion: "v-record" };
         },
