@@ -1,0 +1,7 @@
+{
+  "name": "@loomrealm-game/battle",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "type": "module",
+  "description": "Design-only placeholder for the LoomRealm LLM-driven tactical battle game library"
+}
