@@ -31,6 +31,18 @@ async function fixture(t, { withOld = true } = {}) {
 
 const formalNames = async (item) => (await readdir(item.exampleRoot)).filter((name) => name.startsWith("[FSDB]"));
 
+test("Windows batch entrypoints use CRLF so cmd.exe does not merge Chinese command lines", async () => {
+  for (const relative of [
+    "examples/essentials-v21.1/play.bat",
+    "examples/essentials-v21.1-local/play.bat",
+    "examples/essentials-v21.1-local/reimport.bat",
+  ]) {
+    const bytes = await readFile(join(process.cwd(), relative));
+    const text = bytes.toString("latin1");
+    assert.equal(/(^|[^\r])\n/u.test(text), false, `${relative} contains a lone LF`);
+  }
+});
+
 test("safe reimport validates staging then installs exactly one replacement candidate", async (t) => {
   const item = await fixture(t);
   await installCandidate(item);
