@@ -25,4 +25,4 @@
 
 实施时需新建根 `npm run test:rpgmap:v1` 离线总入口（**目前不存在**），并迁移/核对已有 M14/M15 回归及 JS/类型导出。记录 SHA、命令、退出码、环境、PASS/FAIL/NOT RUN；Renderer key 清空后恢复、边界容量失败前不调用 Domain、正式 FSDB 失败/崩溃恢复与 Browser 实际显示都是强制证据。真实 v21.1 合法源、Hostra、Electron/浏览器不齐则真实 E2E 为 NOT RUN，**不能宣布完整产品闭环**。
 
-**当前状态：设计与外部框架接口约束已冻结为实施基线；PR A–D 源码/脚本/测试尚需交付。** 本次只更新文档，未执行代码或测试。后续不包含全部 Event/Page、NPC AI/移动、跨 Subsystem API、原版逐帧保真。
+**当前状态：PR A–D 已在同一交付分支完成，源码、脚本、公开包、合成/真实数据及故障恢复均已验证。** `npm run test:rpgmap:v1` 为离线总入口，并迁移核对既有 M14/M15 回归；后续仍不包含全部 Event/Page、NPC AI/移动、跨 Subsystem API、原版逐帧保真。

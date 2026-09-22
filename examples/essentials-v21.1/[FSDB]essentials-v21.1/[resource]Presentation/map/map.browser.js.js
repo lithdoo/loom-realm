@@ -386,7 +386,6 @@
       || !Number.isFinite(data.screenY)
       || !validRef(data.sprite)
       || !validPlayerMotion(data.motion)
-      || (data.motion === null && data.pattern !== 0)
       || (data.motion !== null && data.pattern !== 1 && data.pattern !== 3)
       || (data.motion === null) !== (data.motionId === null)
       || (data.motion !== null && data.motion.id !== data.motionId)
@@ -716,11 +715,19 @@
       this._world.append(this._slot);
       this._content.append(this._world, this._error);
       shadow.append(style, this._content, this._footer);
-      this._slot.addEventListener("slotchange", () => { this._sequence += 1; void this._prepare(this._sequence); });
+      this._slot.addEventListener("slotchange", () => {
+        const children = new Set(this._spriteChildren());
+        for (const sprite of this._desiredSprites?.keys() ?? []) if (!children.has(sprite)) this._desiredSprites.delete(sprite);
+        const first = this._spriteChildren()[0];
+        this._desiredSprite = first ? this._desiredSprites?.get(first) : undefined;
+        this._sequence += 1;
+        void this._prepare(this._sequence);
+      });
       this._animationStartedAt = performance.now();
       this._sequence = 0;
       this._desiredView = undefined;
       this._desiredSprite = undefined;
+      this._desiredSprites = new Map();
       this._accepted = undefined;
       this._raf = undefined;
       this._commitRaf = undefined;
@@ -795,8 +802,7 @@
         cancelAnimationFrame(this._raf);
         this._raf = undefined;
       }
-      const sprite = this._spriteChild();
-      if (sprite) sprite._raf = undefined;
+      for (const sprite of this._spriteChildren()) sprite._raf = undefined;
     }
 
     _cancelCommit() {
@@ -809,6 +815,7 @@
       if (pending) {
         this._disown(pending.owner);
         pending.spriteEl?._disown(pending.owner);
+        for (const entry of pending.extraSprites ?? []) entry.sprite._disown(pending.owner);
       }
     }
 
@@ -827,8 +834,12 @@
     }
 
     _spriteChild() {
+      return this._spriteChildren()[0];
+    }
+
+    _spriteChildren() {
       const assigned = this._slot.assignedElements ? this._slot.assignedElements() : [...this.children];
-      return assigned.find((node) => node.tagName === "LR-MAP-SPRITE");
+      return assigned.filter((node) => node.tagName === "LR-MAP-SPRITE");
     }
 
     _candidateOwner(sequence) {
@@ -846,8 +857,7 @@
           this._activeMotion = null;
           this._state = "DISPOSED";
           this._releaseAll();
-          const sprite = this._desiredSprite?.sprite;
-          if (sprite && typeof sprite._releaseAll === "function") sprite._releaseAll();
+          for (const sprite of this._spriteChildren()) if (typeof sprite._releaseAll === "function") sprite._releaseAll();
         }
       });
     }
@@ -869,7 +879,9 @@
 
     _receiveSprite(sprite, data, receivedAt) {
       this._cancelCommit();
-      this._desiredSprite = { sprite, data, receivedAt };
+      this._desiredSprites.set(sprite, { sprite, data, receivedAt });
+      const first = this._spriteChild();
+      this._desiredSprite = first ? this._desiredSprites.get(first) : undefined;
       this._sequence += 1;
       this._paintEpoch = this._sequence;
       this._cancelRetry();
@@ -882,11 +894,13 @@
     async _prepare(sequence) {
       const view = this._desiredView;
       if (!view || sequence !== this._sequence || !this.isConnected) return;
-      const spriteChild = this._spriteChild();
-      const sprite = this._desiredSprite && this._desiredSprite.sprite === spriteChild ? this._desiredSprite : undefined;
-      if (spriteChild) {
-        if (!sprite) return;
-        if (!tokensEqual(view.data, sprite.data)) return;
+      const spriteChildren = this._spriteChildren();
+      const spriteEntries = spriteChildren.map((child) => this._desiredSprites.get(child));
+      if (spriteEntries.some((entry) => !entry)) return;
+      const sprite = spriteEntries[0];
+      const extraSprites = spriteEntries.slice(1);
+      for (const entry of spriteEntries) {
+        if (entry.data.sceneEpoch !== view.data.sceneEpoch || entry.data.visualEpoch !== view.data.visualEpoch || entry.data.bridgeLevel !== view.data.bridgeLevel) return;
       }
       if (sprite && ((view.data.cameraMotion === null) !== (sprite.data.motion === null) || view.data.motionId !== sprite.data.motionId || view.data.bridgeLevel !== sprite.data.bridgeLevel)) {
         throw new TypeError("Invalid map motion identity");
@@ -900,11 +914,16 @@
         && (this._accepted.view.tiles ?? this._accepted.view.chunks) === (view.data.tiles ?? view.data.chunks)
         && (!view.data.tileVisuals || this._accepted.view.tileVisuals === view.data.tileVisuals)
         && resourceIdentity(this._accepted.view.tileset) === resourceIdentity(view.data.tileset)
+        && Boolean(this._accepted.sprite) === Boolean(sprite)
+        && (!sprite || (this._accepted.spriteEl === sprite.sprite && resourceIdentity(this._accepted.sprite.sprite) === resourceIdentity(sprite.data.sprite)))
+        && (this._accepted.extraSprites?.length ?? 0) === extraSprites.length
+        && extraSprites.every((entry) => this._accepted.extraSprites?.some((old) => old.sprite === entry.sprite && resourceIdentity(old.data.sprite) === resourceIdentity(entry.data.sprite)))
       ) {
         const prepared = {
           ...this._accepted,
           view: view.data,
           sprite: sprite?.data ?? this._accepted.sprite,
+          extraSprites: extraSprites.map((entry) => ({ sprite: entry.sprite, data: entry.data, image: this._accepted.extraSprites?.find((old) => old.sprite === entry.sprite)?.image })),
           pairReceivedAt: sprite ? Math.min(view.receivedAt, sprite.receivedAt) : view.receivedAt,
           layers: this._layers,
           geometry,
@@ -944,15 +963,22 @@
           sprite.sprite._own(spriteId, owner);
           decoded.set(spriteId, await sprite.sprite._image(sprite.data.sprite));
         }
+        for (const entry of extraSprites) {
+          const spriteId = resourceIdentity(entry.data.sprite);
+          entry.sprite._own(spriteId, owner);
+          decoded.set(spriteId, await entry.sprite._image(entry.data.sprite));
+        }
       } catch {
         this._disown(owner);
         if (sprite) sprite.sprite._disown(owner);
+        for (const entry of extraSprites) entry.sprite._disown(owner);
         this._failPrepare(sequence);
         return;
       }
       if (sequence !== this._sequence || !this.isConnected || this._desiredView !== view) {
         this._disown(owner);
         if (sprite) sprite.sprite._disown(owner);
+        for (const entry of extraSprites) entry.sprite._disown(owner);
         return;
       }
       const autotiles = new Map();
@@ -963,6 +989,7 @@
         if (layout === "invalid" || durationMs === null) {
           this._disown(owner);
           if (sprite) sprite.sprite._disown(owner);
+          for (const entry of extraSprites) entry.sprite._disown(owner);
           this._failPrepare(sequence);
           return;
         }
@@ -980,6 +1007,12 @@
         resourceIds: new Set(resources.uniqueRefs.keys()),
         spriteResourceId: sprite ? resourceIdentity(sprite.data.sprite) : null,
         spriteEl: sprite?.sprite,
+        extraSprites: extraSprites.map((entry) => ({
+          sprite: entry.sprite,
+          data: entry.data,
+          image: decoded.get(resourceIdentity(entry.data.sprite)),
+          resourceId: resourceIdentity(entry.data.sprite),
+        })),
         owner,
         geometry,
       };
@@ -989,12 +1022,14 @@
       } catch {
         this._disown(owner);
         if (sprite) sprite.sprite._disown(owner);
+        for (const entry of extraSprites) entry.sprite._disown(owner);
         this._failPrepare(sequence);
         return;
       }
       if (sequence !== this._sequence || !this.isConnected || this._desiredView !== view) {
         this._disown(owner);
         if (sprite) sprite.sprite._disown(owner);
+        for (const entry of extraSprites) entry.sprite._disown(owner);
         return;
       }
       this._pendingCommit = prepared;
@@ -1120,7 +1155,7 @@
       const active = this._activeMotion;
       const duration = active?.durationMs ?? motion?.durationMs ?? 250;
       const progress = active && motion ? clamp((now - active.startedAt) / duration, 0, 1) : 1;
-      const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : 0;
+      const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : data.pattern;
       const canvas = document.createElement("canvas");
       const frameWidth = image.width / 4;
       const frameHeight = image.height / 4;
@@ -1163,12 +1198,24 @@
         sprite._acceptedIds = new Set([prepared.spriteResourceId]);
         sprite._disown(prepared.owner);
       }
+      for (const entry of prepared.extraSprites ?? []) {
+        entry.sprite._own(entry.resourceId, "accepted");
+        for (const identity of [...(entry.sprite._acceptedIds ?? [])]) {
+          if (identity === entry.resourceId) continue;
+          const owners = entry.sprite._owners.get(identity);
+          owners?.delete("accepted");
+          if (!owners || owners.size === 0) { entry.sprite._release(identity); entry.sprite._images.delete(identity); }
+        }
+        entry.sprite._acceptedIds = new Set([entry.resourceId]);
+        entry.sprite._disown(prepared.owner);
+      }
     }
 
     _commitAtomic(prepared, sequence) {
       if (sequence !== this._sequence || !this.isConnected) {
         this._disown(prepared.owner);
         prepared.spriteEl?._disown(prepared.owner);
+        for (const entry of prepared.extraSprites ?? []) entry.sprite._disown(prepared.owner);
         return;
       }
       this._commitMotion(prepared, sequence);
@@ -1265,6 +1312,7 @@
         layer.canvas.style.top = `${bounds.minY - cameraY + prepared.geometry.originY}px`;
       }
       if (sprite) this._paintSprite(sprite, prepared, progress);
+      for (const entry of prepared.extraSprites ?? []) this._paintSprite(entry.data, prepared, 1, entry.sprite, entry.image);
       const previous = this._lastPaintedCamera;
       if (!previous || previous.x !== cameraX || previous.y !== cameraY) {
         qualify("browser-first-motion-paint", {
@@ -1283,13 +1331,11 @@
           this._raf = undefined;
           this._tickAccepted(prepared, sequence, false);
         });
-        const child = this._spriteChild();
-        if (child) child._raf = this._raf;
+        for (const child of this._spriteChildren()) child._raf = this._raf;
         return;
       }
       this._raf = undefined;
-      const child = this._spriteChild();
-      if (child) child._raf = undefined;
+      for (const child of this._spriteChildren()) child._raf = undefined;
       if (hasAnimatedAutotile) this._scheduleAutotileTick(prepared, sequence, now);
     }
 
@@ -1378,29 +1424,27 @@
       layer.context.drawImage(item.image, frameX + visual[10], visual[11], 16, 16, dx + 16, dy + 16, 16, 16);
     }
 
-    _paintSprite(data, prepared, progress) {
-      const sprite = this._desiredSprite?.sprite ?? this._spriteChild();
-      if (!sprite || !prepared.spriteImage) return;
+    _paintSprite(data, prepared, progress, spriteOverride, imageOverride) {
+      const sprite = spriteOverride ?? this._desiredSprite?.sprite ?? this._spriteChild();
+      const spriteImage = imageOverride ?? prepared.spriteImage;
+      if (!sprite || !spriteImage) return;
       const motion = data.motion;
-      const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : 0;
+      const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : data.pattern;
       const arc = motion?.kind === "jump" ? 4 * (motion.peakPx ?? 0) * progress * (1 - progress) : 0;
       const screenX = motion ? Math.round(lerp(motion.fromScreenX, data.screenX, progress)) : data.screenX;
       const screenY = motion ? Math.round(lerp(motion.fromScreenY, data.screenY, progress) - arc) : data.screenY;
       const visualPixelY = motion ? Math.round(lerp(motion.fromY * 32, data.y * 32, progress)) : data.y * 32;
-      const size = sprite._blitPatternSync(prepared.spriteImage, data.direction, pattern, resourceIdentity(data.sprite));
+      const size = sprite._blitPatternSync(spriteImage, data.direction, pattern, resourceIdentity(data.sprite));
       const frameWidth = size.width;
       const frameHeight = size.height;
-      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0) + (data.bridgeLevel === 2 ? TILE : 0);
+      const depth = visualPixelY + 32 + (frameHeight > 32 ? 31 : 0);
       const left = screenX + prepared.geometry.originX + (32 - frameWidth) / 2;
       const top = screenY + prepared.geometry.originY + 32 - frameHeight;
-      const rule = this._spriteRule();
-      if (rule) {
-        rule.style.left = `${left}px`;
-        rule.style.top = `${top}px`;
-        rule.style.width = `${frameWidth}px`;
-        rule.style.height = `${frameHeight}px`;
-        rule.style.zIndex = String(characterStackValue(depth));
-      }
+      sprite.style.left = `${left}px`;
+      sprite.style.top = `${top}px`;
+      sprite.style.width = `${frameWidth}px`;
+      sprite.style.height = `${frameHeight}px`;
+      sprite.style.zIndex = String(characterStackValue(depth));
       sprite._lastPaintedScreen = { x: screenX, y: screenY };
       if (!sprite._reportedMotion || sprite._reportedMotion !== `${screenX},${screenY}`) {
         qualify("browser-first-motion-paint", {

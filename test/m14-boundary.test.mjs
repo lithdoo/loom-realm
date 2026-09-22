@@ -29,7 +29,7 @@ test("M14 workspace identity and dependency direction are explicit", async () =>
   const example = await json("examples/essentials-v21.1/package.json");
   assert.equal(example.private, true); assert.equal(example.type, "module");
   assert.equal(typeof mapDefinition, "function");
-  assert.deepEqual(Object.keys(await import("@loomrealm-game/map")), ["default"]);
+  assert.deepEqual(Object.keys(await import("@loomrealm-game/map")), ["RPGMapBuilder", "RPGMapError", "default", "mapDefinition"]);
 });
 
 test("framework packages never acquire reverse game/example dependencies", async () => {

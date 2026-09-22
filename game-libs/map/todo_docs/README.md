@@ -1,6 +1,6 @@
 # RPGMap v1：设计与 Agent 实施阅读入口
 
-> **2026-09-22：第一版需求、接口与已知框架接线约束冻结，可直接作为 Agent 的实施基线；Runtime、数据生成、总验收及真实 E2E 还没有因此完成。** 旧 MapAction 回退、全图真实 Bridge 转换、非阻挡 NPC 和非 nullable 快照只留 Git 历史。
+> **2026-09-22：v1 已按冻结需求完成 Runtime、数据生成、安全重导入和总验收。** 旧 MapAction 回退、全图真实 Bridge 转换、非阻挡 NPC 和非 nullable 快照只留 Git 历史。
 
 按下列顺序阅读，避免多份文件重复定义同一接口：
 
@@ -11,4 +11,4 @@
 
 交付主链：全库新版 FSDB/Map21 安全转换与原创夹具 → 单 Runtime Builder/Handler → 静态阻挡 NPC + 4×4 帧 → RenderManager 合法拓扑/容量 → Browser 多 Sprite 实际可见 → 独立 staging 安全重导入 → 合成及真实 E2E 证据。
 
-**Agent 可连续实施，但不能一次无验证宣布成功。** `mapEntered` 不代表 Browser 绘制成功；新增 `test:rpgmap:v1` 仍是待实现命令；缺合法真实素材/Hostra/Electron 时本地项必须标记 NOT RUN，不能用合成测试替代。只有实际提交 SHA、运行命令、退出码与观察结果能证明产品交付。
+**交付证据必须来自实际验证。** `mapEntered` 不代表 Browser 绘制成功；`npm run test:rpgmap:v1` 是离线总入口，真实 v21.1 重导入与既有 M14/M15 回归提供独立证据。缺合法真实素材/Hostra/Electron 时本地项必须标记 NOT RUN，不能用合成测试替代；只有实际提交 SHA、运行命令、退出码与观察结果能证明产品交付。

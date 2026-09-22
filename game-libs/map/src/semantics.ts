@@ -13,7 +13,14 @@ export interface MapRecord {
   readonly width: number;
   readonly height: number;
   readonly data: ProjectedTable;
+  readonly behaviors: readonly MapBehavior[];
 }
+
+export type MapBehavior = Readonly<{
+  kind: "bridge";
+  operation: "on" | "off";
+  occupied: readonly Readonly<{ x: number; y: number }>[];
+}>;
 
 export interface TilesetRecord {
   readonly id: number;
@@ -224,12 +231,35 @@ export function validateTable(value: unknown, label: string): ProjectedTable {
 
 export function validateMapRecord(value: unknown): MapRecord {
   const input = object(value, "Map");
-  if (!(["tileset_id", "width", "height", "data"].every((key) => key in input)) || Object.keys(input).length !== 4) throw new TypeError("Map has an invalid field set");
+  const allowed = ["tileset_id", "width", "height", "data", "behaviors"];
+  if (!(["tileset_id", "width", "height", "data"].every((key) => key in input)) || Object.keys(input).some((key) => !allowed.includes(key))) throw new TypeError("Map has an invalid field set");
   const width = integer(input.width, "Map.width");
   const height = integer(input.height, "Map.height");
   const data = validateTable(input.data, "Map.data");
   if (data.dimensions !== 3 || data.xSize !== width || data.ySize !== height || data.zSize !== 3) throw new TypeError("Map.data has an invalid 3D shape");
-  return Object.freeze({ tileset_id: integer(input.tileset_id, "Map.tileset_id"), width, height, data });
+  const source = input.behaviors === undefined ? [] : input.behaviors;
+  if (!Array.isArray(source)) throw new TypeError("Map.behaviors must be an array");
+  const occupiedAcrossBehaviors = new Set<string>();
+  const behaviors = Object.freeze(source.map((value, index) => {
+    const label = `Map.behaviors[${index}]`;
+    const behavior = exactObject(value, label, ["kind", "operation", "occupied"]);
+    if (behavior.kind !== "bridge") throw new TypeError(`${label}.kind must be bridge`);
+    if (behavior.operation !== "on" && behavior.operation !== "off") throw new TypeError(`${label}.operation must be on or off`);
+    if (!Array.isArray(behavior.occupied) || behavior.occupied.length === 0) throw new TypeError(`${label}.occupied must be non-empty`);
+    const local = new Set<string>();
+    const occupied = Object.freeze(behavior.occupied.map((point, pointIndex) => {
+      const result = occupiedPoint(point, `${label}.occupied[${pointIndex}]`);
+      if (result.x < 0 || result.y < 0 || result.x >= width || result.y >= height) throw new TypeError(`${label}.occupied is outside Map bounds`);
+      const key = `${result.x},${result.y}`;
+      if (local.has(key)) throw new TypeError(`${label}.occupied contains a duplicate coordinate`);
+      if (occupiedAcrossBehaviors.has(key)) throw new TypeError("Map bridge behaviors overlap");
+      local.add(key);
+      occupiedAcrossBehaviors.add(key);
+      return result;
+    }));
+    return Object.freeze({ kind: "bridge" as const, operation: behavior.operation, occupied });
+  }));
+  return Object.freeze({ tileset_id: integer(input.tileset_id, "Map.tileset_id"), width, height, data, behaviors });
 }
 
 function transferDirection(value: unknown, label: string): Direction {

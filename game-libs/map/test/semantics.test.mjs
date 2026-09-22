@@ -145,6 +145,19 @@ test("consumer records fail closed instead of accepting alternate shapes", () =>
   assert.throws(() => validateTable({ ...map.data, surprise: true }, "Map.data"), /field set/);
 });
 
+test("Map.behaviors accepts strict non-overlapping bridges and rejects malformed regions", () => {
+  const base = { tileset_id: 1, width: 2, height: 2, data: table(3, 2, 2, 3, Array(12).fill(0)) };
+  const record = validateMapRecord({ ...base, behaviors: [{ kind: "bridge", operation: "on", occupied: [{ x: 1, y: 1 }] }] });
+  assert.deepEqual(record.behaviors, [{ kind: "bridge", operation: "on", occupied: [{ x: 1, y: 1 }] }]);
+  assert.equal(Object.isFrozen(record.behaviors), true);
+  assert.throws(() => validateMapRecord({ ...base, behaviors: [{ kind: "ledge", operation: "on", occupied: [{ x: 1, y: 1 }] }] }), /kind must be bridge/u);
+  assert.throws(() => validateMapRecord({ ...base, behaviors: [{ kind: "bridge", operation: "on", occupied: [{ x: 2, y: 1 }] }] }), /outside Map bounds/u);
+  assert.throws(() => validateMapRecord({ ...base, behaviors: [
+    { kind: "bridge", operation: "on", occupied: [{ x: 1, y: 1 }] },
+    { kind: "bridge", operation: "off", occupied: [{ x: 1, y: 1 }] },
+  ] }), /overlap/u);
+});
+
 test("passability covers every direction bit and the all-direction block", () => {
   const directionBits = [[2, 0x01], [4, 0x02], [6, 0x04], [8, 0x08]];
   for (const [direction, bit] of directionBits) {

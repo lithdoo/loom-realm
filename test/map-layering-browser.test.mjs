@@ -244,6 +244,44 @@ after(async () => {
   await new Promise((resolve) => server?.close(resolve));
 });
 
+test("Browser renders 0/1/N independent sprites, preserves static pattern, and removes stale nodes", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const payload = viewData({ depth: 0 });
+  await page.evaluate(({ viewPayload, player, npcA, npcB }) => {
+    const view = window.__view;
+    const first = window.__sprite;
+    const second = document.createElement("lr-map-sprite");
+    const third = document.createElement("lr-map-sprite");
+    view.append(second, third);
+    const resources = first._resources;
+    second.receiveRenderContext({ resources });
+    third.receiveRenderContext({ resources });
+    view.receiveRenderData(viewPayload);
+    first.receiveRenderData(player);
+    second.receiveRenderData(npcA);
+    third.receiveRenderData(npcB);
+    window.__npcA = second;
+    window.__npcB = third;
+  }, {
+    viewPayload: payload,
+    player: matchingSprite(payload),
+    npcA: matchingSprite(payload, { x: 1, y: 1, screenX: 32, screenY: 32, motionId: null, motion: null, pattern: 2 }),
+    npcB: matchingSprite(payload, { x: 2, y: 2, screenX: 64, screenY: 64, motionId: null, motion: null, pattern: 3 }),
+  });
+  await waitUntil(page, () => [...document.querySelectorAll("lr-map-sprite")].every((sprite) => sprite._lastPaintedScreen), "three sprites painted");
+  assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll("lr-map-sprite")].map((sprite) => ({ left: sprite.style.left, top: sprite.style.top, crop: sprite._cropKey }))), [
+    { left: "0px", top: "0px", crop: `${identityOf(spriteRef)}|2|0|32x32` },
+    { left: "32px", top: "32px", crop: `${identityOf(spriteRef)}|2|2|32x32` },
+    { left: "64px", top: "64px", crop: `${identityOf(spriteRef)}|2|3|32x32` },
+  ]);
+  await page.evaluate(() => { window.__npcA.remove(); window.__npcB.remove(); });
+  await waitUntil(page, () => document.querySelectorAll("lr-map-sprite").length === 1, "NPC nodes removed");
+  await page.evaluate(() => window.__sprite.remove());
+  await waitUntil(page, () => document.querySelectorAll("lr-map-sprite").length === 0, "zero sprites supported");
+  assert.equal(await page.evaluate(() => window.__view.dataset.mapVisualState), "ready");
+});
+
 async function openPage({ clock = false } = {}) {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
   if (clock) await page.clock.install({ time: Date.now() });

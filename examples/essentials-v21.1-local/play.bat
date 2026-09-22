@@ -6,17 +6,6 @@ cd /d "%~dp0"
 set "EXAMPLE=%cd%"
 for %%I in ("%EXAMPLE%\..\..") do set "REPO=%%~fI"
 
-set "FSDB_COUNT=0"
-for /d %%D in ("%EXAMPLE%\[FSDB]*") do if exist "%%D\" set /a FSDB_COUNT+=1
-if not "%FSDB_COUNT%"=="1" (
-  echo 还没有真实 FSDB。请先运行：
-  echo   reimport.bat
-  echo 或指定本机源：
-  echo   reimport.bat "C:\path\to\Pokemon Essentials v21.1"
-  pause
-  exit /b 1
-)
-
 if not defined HOSTRA_SOURCE_DIR if exist "%REPO%\.qualification\hostra\packages\hostra\scripts\hostra.js" set "HOSTRA_SOURCE_DIR=%REPO%\.qualification\hostra"
 if not defined HOSTRA_SOURCE_DIR if exist "%REPO%\..\hostra\packages\hostra\scripts\hostra.js" set "HOSTRA_SOURCE_DIR=%REPO%\..\hostra"
 
@@ -53,6 +42,20 @@ for /f "delims=" %%I in ('where node') do (
   goto :got_node
 )
 :got_node
+
+"%NODE%" "%EXAMPLE%\scripts\recover-reimport.mjs"
+if errorlevel 1 (
+  echo 无法安全恢复中断的 FSDB 切换；已保留备份以供诊断。
+  pause
+  exit /b 1
+)
+set "FSDB_COUNT=0"
+for /d %%D in ("%EXAMPLE%\[FSDB]*") do if exist "%%D\" set /a FSDB_COUNT+=1
+if not "%FSDB_COUNT%"=="1" (
+  echo 还没有真实 FSDB。请先运行 reimport.bat。
+  pause
+  exit /b 1
+)
 
 if not exist "%REPO%\node_modules\" (
   echo 正在安装 LoomRealm 依赖...

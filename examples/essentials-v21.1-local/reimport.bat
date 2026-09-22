@@ -50,7 +50,7 @@ if not exist "%REPO%\node_modules\" (
 )
 
 echo 将删除本目录下现有 [FSDB]*，并用当前 importer 重新生成。
-echo 新库需要包含 Tileset terrain_tags 与 struct.MapAction，才能在 play.bat 里验桥和崖。
+echo 候选库会先在 .local staging 中验证 Map.behaviors、Tileset terrain_tags 与 Presentation，再安全替换正式库。
 if defined SOURCE goto :echo_source
 echo 未指定源：将尝试官方下载。被拦截时会打开本机浏览器。
 echo 也可传入本机 Essentials v21.1 目录或 zip：
@@ -87,7 +87,7 @@ if errorlevel 1 (
 
 "%NODE%" "%EXAMPLE%\scripts\verify-reimport.mjs" "%EXAMPLE%"
 if errorlevel 1 (
-  echo 导入结果缺少 terrain_tags 或 [struct]MapAction。当前 importer 未写入本分支所需字段，play.bat 无法验桥和崖。
+  echo 重导入验证失败；原正式库已保留或恢复。
   pause
   exit /b 1
 )

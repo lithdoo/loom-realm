@@ -1,12 +1,12 @@
 # RPGMap 通用化设计：v1 主方案
 
-> 状态：**目标设计闭环，尚未实现或验收**。2026-09-21 整合修订。本文是数据与行为的权威说明；公开类型、调用阶段与错误语义只以 [接口执行契约](./RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md) 为准；实施任务和验收以 [测试包迁移计划](./RPG_MAP_ESSENTIALS_LOCAL_TEST_PACKAGE_MIGRATION_PLAN.md) 为准。[闭环与状态索引](./RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md)。旧讨论保留在 Git 历史，不再并列作为目标协议。
+> 状态：**v1 已在交付分支实现并通过总验收**。2026-09-22 交付修订。本文是数据与行为的权威说明；公开类型、调用阶段与错误语义只以 [接口执行契约](./RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md) 为准；实施任务和验收以 [测试包迁移计划](./RPG_MAP_ESSENTIALS_LOCAL_TEST_PACKAGE_MIGRATION_PLAN.md) 为准。[闭环与状态索引](./RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md)。旧讨论保留在 Git 历史，不再并列作为目标协议。
 
 ## 1. 目标、所有权与现状
 
 RPGMap 是同一个 Subsystem 内的可复用地图模块：业务用 `RPGMapBuilder` 装配 Player 和 Subsystem 环境，持有 `RPGMapHandler` 切图、装配 NPC、获取快照；Runtime 独占地图位置、运动、通行、行为与 RenderDomain 投影。Browser 仅显示投影。地图内容经公开 `scope.content` 读取逻辑 `namespace + key`，不读取物理路径、安装 FSDB、不暴露凭据，也不读取业务自有 NPC 放置 Group。不存在通用 Entity、Event/Page、Ruby 解释器、跨 Subsystem RPC 或另起的 Frame 生命周期。
 
-**现状与目标严格分离：**2026-09-21 基线的 `game-libs/map/src/index.ts` 仅导出 `mapDefinition`；`runtime.ts` 仍读取独立 `struct.MapAction`、仅渲染 Player，当前校验器不支持新 `behaviors`。下列均为待实现协议，不是当前包已有能力。保留旧 `mapDefinition` 导出时只能让它适配同一个新版 Runtime、读取新版数据，不维护第二套旧 Map 协议。
+**基线与交付严格分离：**2026-09-21 基线仅导出 `mapDefinition`、读取独立 `struct.MapAction` 且仅渲染 Player；本次交付已实现下列协议。保留的旧 `mapDefinition` 导出适配同一个新版 Runtime、读取新版 Map 数据，不维护第二套旧 Map 协议。
 
 ## 2. 唯一 Map 数据格式与生成边界
 

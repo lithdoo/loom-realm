@@ -160,7 +160,7 @@ test("unrelated NPCs do not fail the map; related opaque scripts fail closed per
   assert.ok(projected.value.opaqueRelated.some((item) => item.reason.startsWith("bridge-page-contains-non-whitelist-command-")));
 });
 
-test("maps without events still produce an empty MapAction record for Content", () => {
+test("maps without events still retain empty MapAction conversion evidence", () => {
   const projected = projectMapActionRecord({
     filename: "Map007.rxdata",
     root: object("RPG::Map", {
@@ -178,14 +178,12 @@ test("maps without events still produce an empty MapAction record for Content", 
   });
 });
 
-test("mapper writes MapAction as ordinary JSON", async () => {
+test("mapper retains MapAction evidence internally but never writes the legacy runtime table", async () => {
   const records = materializeMapActionRecords([mapEntry(21, [])]);
   const plan = mapCanonicalDataset({ domains: { MapAction: records } });
-  const objectPlan = plan.objects.find((item) => item.table === "MapAction");
-  const chunks = [];
-  for await (const chunk of objectPlan.open()) chunks.push(chunk);
-  const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  assert.deepEqual(Object.keys(value), ["id", "schemaVersion", "actions", "opaqueRelated"]);
+  assert.equal(records.length, 1);
+  assert.equal(plan.objects.some((item) => item.table === "MapAction"), false);
+  assert.equal(plan.tables.some((item) => item.name === "MapAction"), false);
 });
 
 test("live Map7/21/47 source sample: terrain_tags and MapAction (SKIP when FSDB missing)", async (t) => {

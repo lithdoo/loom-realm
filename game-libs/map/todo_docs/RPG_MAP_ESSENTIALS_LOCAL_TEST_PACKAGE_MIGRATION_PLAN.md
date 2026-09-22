@@ -1,6 +1,6 @@
 # RPGMap v1：Essentials Local 测试包与 Agent 完整实施计划
 
-> **状态：实施任务及验收契约冻结；源码/测试尚未依此交付。** [主方案](./RPG_MAP_GENERIC_MODULE_DESIGN.md) 规定数据与行为；[唯一接口契约](./RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md) 规定 Builder、错误、NPC 内部 key、容量、Browser 与 fatal；[闭环状态](./RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md) 规定完成条件。本文只给 Agent 文件、执行顺序和验收证据，不另立 API。
+> **状态：A–D 已在交付分支实施；离线总入口、既有 M14/M15 回归、真实重导入和恢复故障测试均已执行。** [主方案](./RPG_MAP_GENERIC_MODULE_DESIGN.md) 规定数据与行为；[唯一接口契约](./RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md) 规定 Builder、错误、NPC 内部 key、容量、Browser 与 fatal；[闭环状态](./RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md) 规定完成条件。本文只给 Agent 文件、执行顺序和验收证据，不另立 API。
 
 ## 1. 范围、角色与边界
 

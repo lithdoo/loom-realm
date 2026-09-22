@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import mapDefinition from "@loomrealm-game/map";
 import {
   JUMP_DURATION_MS,
-  MAP_ACTION_SCHEMA_VERSION,
   planMovement,
   validateMapRecord,
   validateTilesetRecord,
@@ -178,7 +177,10 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
     assert.ok(tilesetEntry, `tileset ${map.tileset_id} for Map${padded}`);
     const tileset = validateTilesetRecord(tilesetEntry.value, map.tileset_id);
     const actions = projectMapActionRecord({ filename, root: mapRoot }).value;
-    return { map, tileset, actions, mapRoot };
+    const behaviors = mapId === 21
+      ? actions.actions.map((action) => ({ kind: "bridge", operation: action.op === "bridge-on" ? "on" : "off", occupied: action.occupied }))
+      : [];
+    return { map: validateMapRecord({ ...map, behaviors }), tileset, actions, mapRoot };
   }
 
   test("live Map47 (16,9) down is one jump to (16,11)", async (t) => {
@@ -213,7 +215,6 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
         [`struct.Map/21`]: loaded.map,
         [`struct.Tileset/${loaded.map.tileset_id}`]: loaded.tileset,
         "struct.MapTransfer/21": emptyTransfer(21),
-        "struct.MapAction/21": loaded.actions,
       },
     });
     await frame.emitEvent(down("ArrowLeft"));
@@ -239,12 +240,6 @@ describe("terrain behavior live FSDB product (SKIP when official maps absent)", 
         "struct.Map/47": loaded.map,
         [`struct.Tileset/${loaded.map.tileset_id}`]: loaded.tileset,
         "struct.MapTransfer/47": emptyTransfer(47),
-        "struct.MapAction/47": {
-          id: 47,
-          schemaVersion: MAP_ACTION_SCHEMA_VERSION,
-          actions: [],
-          opaqueRelated: [],
-        },
       },
     });
     await frame.emitEvent(down("ArrowDown"));

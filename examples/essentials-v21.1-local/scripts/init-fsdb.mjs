@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -10,9 +10,14 @@ import { fileURLToPath } from "node:url";
 import { EEVEE_EXPO_DOWNLOAD, OFFICIAL_ARCHIVE_IDENTITY } from "../../../tools/fixtures/essentials-v21.1/lib/acquisition/eevee-expo.mjs";
 import { ImportFailure } from "../../../tools/fixtures/essentials-v21.1/lib/errors.mjs";
 import { run } from "../../../tools/fixtures/essentials-v21.1/import.mjs";
+import { syncMapPresentation } from "./sync-map-presentation.mjs";
+import { installCandidate, recoverReimport, resetCandidateRoot } from "./safe-reimport.mjs";
+import { verifyReimport } from "./verify-reimport.mjs";
 
 const exampleRoot = fileURLToPath(new URL("..", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const workRoot = join(repoRoot, ".local", "essentials-v21.1-reimport");
+const stagingExampleRoot = join(workRoot, "staging-example");
 
 function parse(argv) {
   const result = { source: undefined, force: false };
@@ -88,19 +93,16 @@ function manualSourceHint() {
   ].join("\n");
 }
 
-async function importFsdb(source) {
-  const argv = ["--output", exampleRoot];
+async function importFsdb(source, outputRoot) {
+  const argv = ["--output", outputRoot];
   if (source !== undefined) argv.push("--source", source);
   return await run(argv);
 }
 
 const options = parse(process.argv.slice(2));
-const existing = (await readdir(exampleRoot, { withFileTypes: true }))
-  .filter((entry) => entry.isDirectory() && /^\[FSDB\].+$/u.test(entry.name));
-if (existing.length && !options.force) {
-  throw new Error(`Already has ${existing.map((entry) => entry.name).join(", ")}. Re-run with --force.`);
-}
-for (const entry of existing) await rm(join(exampleRoot, entry.name), { recursive: true, force: true });
+await mkdir(workRoot, { recursive: true });
+await recoverReimport({ exampleRoot, workRoot });
+await resetCandidateRoot(stagingExampleRoot);
 
 if (options.source === undefined) {
   console.log("No --source given; downloading Pokémon Essentials v21.1 via tools/fixtures/essentials-v21.1.");
@@ -108,7 +110,7 @@ if (options.source === undefined) {
 
 let fsdbRoot;
 try {
-  fsdbRoot = await importFsdb(options.source);
+  fsdbRoot = await importFsdb(options.source, stagingExampleRoot);
 } catch (error) {
   if (!shouldUseBrowserFallback(error, options.source)) throw error;
   console.log("Node fetch was blocked by MediaFire/Cloudflare (HTTP 403). Opening a local browser to complete the official download...");
@@ -116,7 +118,7 @@ try {
   const archive = join(archiveRoot, "essentials-v21.1.zip");
   try {
     await downloadOfficialZipWithBrowser(archive);
-    fsdbRoot = await importFsdb(archive);
+    fsdbRoot = await importFsdb(archive, stagingExampleRoot);
   } catch (fallbackError) {
     throw new Error(`${manualSourceHint()}\n\nBrowser download failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
   } finally {
@@ -139,4 +141,8 @@ await writeFile(
   join(presentation, "page.css.css"),
   await readFile(join(exampleRoot, "presentation.css")),
 );
-console.log(`FSDB ready: ${fsdbRoot}`);
+await syncMapPresentation({ repoRoot, exampleRoot: stagingExampleRoot, runBuild: true });
+await syncMapPresentation({ repoRoot, exampleRoot: stagingExampleRoot, runBuild: false, checkOnly: true });
+await verifyReimport(stagingExampleRoot);
+await installCandidate({ exampleRoot, workRoot, candidateRoot: stagingExampleRoot, verify: verifyReimport });
+console.log(`FSDB ready: ${await verifyReimport(exampleRoot)}`);

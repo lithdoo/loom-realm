@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@loomrealm-game/map": "0.1.0-alpha.0"
+    "@loomrealm-game/map": "0.1.0-alpha.0",
+    "@loomrealm/subsystem": "0.1.0-alpha.0"
   }
 }
