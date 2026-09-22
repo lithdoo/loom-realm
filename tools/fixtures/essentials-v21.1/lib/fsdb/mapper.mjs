@@ -32,6 +32,8 @@ export function mapCanonicalDataset(canonicalDataset) {
     if (INTERNAL_DOMAINS.has(domain) || !Array.isArray(records)) continue;
     if (domain === "Map" || domain === "Tileset" || domain === "MapTransfer") {
       tableRecords.set(domain, records.map((record) => ({ key: record.key, value: record.value })));
+    } else if (domain === "NPC") {
+      tableRecords.set(domain, records.map((record) => ({ key: String(record.id), value: Object.freeze({ name: record.name, sprite: record.sprite }) })));
     } else {
       tableRecords.set(domain, records.map((record) => ({ key: String(record.id), value: record })));
     }
@@ -49,7 +51,7 @@ export function mapCanonicalDataset(canonicalDataset) {
     if (records.length === 0) continue;
     tables.push(Object.freeze({ kind: "struct", name, schema: schemaFor(name) }));
     for (const record of records) objects.push(
-      name === "Map" || name === "Tileset" || name === "MapTransfer"
+      name === "Map" || name === "Tileset" || name === "MapTransfer" || name === "NPC"
         ? jsonObject(name, record.key, record.value)
         : structuredObject(name, record.key, record.value, collectReferences(record.value)),
     );

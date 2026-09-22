@@ -282,6 +282,54 @@ test("Browser renders 0/1/N independent sprites, preserves static pattern, and r
   assert.equal(await page.evaluate(() => window.__view.dataset.mapVisualState), "ready");
 });
 
+test("static NPC follows the current camera at animation start, midpoint, and end", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const viewPayload = viewData({
+    depth: 0,
+    cameraX: 32,
+    cameraMotion: { id: 41, durationMs: 250, fromCameraX: 0, fromCameraY: 0 },
+  });
+  await page.evaluate(({ viewPayload: view, player, npc }) => {
+    const npcElement = document.createElement("lr-map-sprite");
+    window.__view.append(npcElement);
+    npcElement.receiveRenderContext({ resources: window.__sprite._resources });
+    window.__view.receiveRenderData(view);
+    window.__sprite.receiveRenderData(player);
+    npcElement.receiveRenderData(npc);
+    window.__cameraNpc = npcElement;
+  }, {
+    viewPayload,
+    player: { ...walkingSprite({ id: 41, y: 1, fromY: 0, screenX: 0, screenY: 32, fromScreenX: 0, fromScreenY: 0 }), x: 1 },
+    npc: matchingSprite(viewPayload, { x: 5, y: 2, screenX: 128, screenY: 64, motionId: null, motion: null, pattern: 3 }),
+  });
+  await waitUntil(page, () => window.__view._accepted?.extraSprites?.length === 1, "camera motion with static NPC accepted");
+  const samples = await page.evaluate(() => {
+    const view = window.__view;
+    const prepared = view._accepted;
+    if (view._raf !== undefined) cancelAnimationFrame(view._raf);
+    view._activeMotion = { ...view._activeMotion, startedAt: 1_000, durationMs: 250 };
+    const sample = (elapsed) => {
+      view._activeMotion.startedAt = performance.now() - elapsed;
+      view._tickAccepted(prepared, view._sequence, false);
+      if (view._raf !== undefined) cancelAnimationFrame(view._raf);
+      view._raf = undefined;
+      for (const child of view._spriteChildren()) child._raf = undefined;
+      return {
+        npc: { ...window.__cameraNpc._lastPaintedScreen },
+        player: { ...window.__sprite._lastPaintedScreen },
+        crop: window.__cameraNpc._cropKey,
+        tileLeft: view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])")?.style.left,
+      };
+    };
+    return [sample(-1), sample(125), sample(300)];
+  });
+  assert.deepEqual(samples.map((sample) => sample.npc), [{ x: 160, y: 64 }, { x: 144, y: 64 }, { x: 128, y: 64 }]);
+  assert.deepEqual(samples.map((sample) => sample.player.x), [0, 0, 0], "Player retains its existing motion interpolation");
+  assert.deepEqual(samples.map((sample) => sample.tileLeft), ["0px", "-16px", "-32px"]);
+  assert.equal(samples.every((sample) => sample.crop === `${identityOf(spriteRef)}|2|3|32x32`), true);
+});
+
 async function openPage({ clock = false } = {}) {
   const page = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: 1 });
   if (clock) await page.clock.install({ time: Date.now() });
@@ -1904,6 +1952,29 @@ test("detached candidate canvases are not connected until atomic commit", { time
   assert.ok(observations.length >= 1);
   assert.ok(observations.every((entry) => entry.connected === false && entry.hostHasCanvas === false));
   assert.equal(await page.evaluate(() => window.__view.shadowRoot.querySelector("canvas.tile-layer:not([hidden])").isConnected), true);
+});
+
+test("completed detached raster commits atomically without waiting an extra animation frame", { timeout: 30_000 }, async (t) => {
+  const page = await openPage();
+  t.after(() => page.close());
+  const payload = viewData();
+  await page.evaluate(({ viewPayload, spritePayload }) => {
+    const nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    window.__scheduledFrames = 0;
+    window.requestAnimationFrame = (callback) => {
+      window.__scheduledFrames += 1;
+      return nativeRequestAnimationFrame(callback);
+    };
+    window.__view.receiveRenderData(viewPayload);
+    window.__sprite.receiveRenderData(spritePayload);
+  }, { viewPayload: payload, spritePayload: matchingSprite(payload) });
+  await waitUntil(page, () => window.__view._accepted?.view.visualEpoch === 1, "immediate detached candidate commit");
+  const result = await page.evaluate(() => ({
+    scheduledFrames: window.__scheduledFrames,
+    visibleLayers: [...window.__view.shadowRoot.querySelectorAll("canvas.tile-layer")].filter((canvas) => !canvas.hidden).length,
+    state: window.__view.dataset.mapVisualState,
+  }));
+  assert.deepEqual(result, { scheduledFrames: 0, visibleLayers: 1, state: "ready" });
 });
 
 test("scene A to B to C evicts stale bitmaps and keeps the resource cache bounded", { timeout: 30_000 }, async (t) => {

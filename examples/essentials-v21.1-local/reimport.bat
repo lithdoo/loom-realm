@@ -49,8 +49,8 @@ if not exist "%REPO%\node_modules\" (
   popd
 )
 
-echo 将删除本目录下现有 [FSDB]*，并用当前 importer 重新生成。
-echo 候选库会先在 .local staging 中验证 Map.behaviors、Tileset terrain_tags 与 Presentation，再安全替换正式库。
+echo 将在独立 .local staging 中用当前 importer 重新生成候选库。
+echo 候选库会先验证完整生成清单、Map21 八桥、资源与 Presentation，再带恢复记录安全替换正式库。
 if defined SOURCE goto :echo_source
 echo 未指定源：将尝试官方下载。被拦截时会打开本机浏览器。
 echo 也可传入本机 Essentials v21.1 目录或 zip：

@@ -87,4 +87,9 @@ export async function materializeRawFixture(stagingPath, plan, acquisitionMode) 
     `${JSON.stringify({ name: "Pokémon Essentials", version: "21.1", purpose: "local fsdb-http integration fixture", acquisition: acquisitionMode }, null, 2)}\n`,
     { encoding: "utf8", flag: "wx" },
   );
+  await writeFile(
+    join(info, "生成清单.json"),
+    `${JSON.stringify(plan.generationManifest)}\n`,
+    { encoding: "utf8", flag: "wx" },
+  );
 }

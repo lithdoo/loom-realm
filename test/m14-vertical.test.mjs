@@ -231,7 +231,12 @@ test("M14 checked-in game traverses Main, Input, Render, Content and real Chromi
       return data?.viewportWidth === expected.width && data?.viewportHeight === expected.height;
     }, `responsive ${expected.width}x${expected.height} Render state`);
     await browserDelivery;
-    await waitFor(async () => (await page.evaluate(() => document.querySelector("lr-map-view")?.dataset.mapVisualState)) === "ready", "responsive browser commit");
+    await waitFor(async () => (await page.evaluate(({ width, height }) => {
+      const view = document.querySelector("lr-map-view");
+      return view?.dataset.mapVisualState === "ready"
+        && view?._accepted?.view?.viewportWidth === width
+        && view?._accepted?.view?.viewportHeight === height;
+    }, expected)), "responsive browser commit");
     const actual = await page.evaluate(() => {
       const view = document.querySelector("lr-map-view");
       const root = view.shadowRoot;

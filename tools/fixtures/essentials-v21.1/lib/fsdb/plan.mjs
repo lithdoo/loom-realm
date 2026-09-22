@@ -31,5 +31,31 @@ export async function buildFsdbPlan(rawPlan, canonicalDataset, coverage, depende
     fail("ORACLE_DIFFERENCE", `FSDB commit barrier rejected ${coverage.oracle.unclassified.length} unclassified Oracle difference(s)`, coverage.oracle.unclassified.slice(0, 50).map((difference) => `${difference.domain}/${difference.id}.${difference.field}`));
   }
   const integrity = validateKnownReferences(structured);
-  return Object.freeze({ ...rawPlan, structured, coverage: Object.freeze({ ...coverage, integrity }) });
+  const keysByTable = Object.fromEntries(structured.tables.map((table) => [
+    table.name,
+    Object.freeze(structured.objects.filter((object) => object.table === table.name).map((object) => object.key).sort()),
+  ]));
+  const map21Evidence = canonicalDataset.domains.MapAction?.find((record) => record.key === "21")?.value;
+  const generationManifest = Object.freeze({
+    schemaVersion: "loomrealm.essentials-v21.1-generation/v1",
+    tables: Object.freeze(keysByTable),
+    resources: Object.freeze(rawPlan.resources.map((resource) => Object.freeze({
+      table: resource.table,
+      key: resource.resourceKey,
+      path: resource.relativeSegments.join("/"),
+      size: resource.size.toString(),
+      sha256: resource.sha256 ?? null,
+    })).sort((left, right) => `${left.table}/${left.path}`.localeCompare(`${right.table}/${right.path}`))),
+    map21BridgeAudit: Object.freeze((map21Evidence?.actions ?? []).map((action) => Object.freeze({
+      eventId: action.eventId,
+      pageIndex: action.pageIndex,
+      position: action.position,
+      operation: action.op === "bridge-on" ? "on" : "off",
+      occupied: action.occupied,
+      trigger: action.trigger,
+      through: action.through,
+      emptyGraphic: action.emptyGraphic,
+    }))),
+  });
+  return Object.freeze({ ...rawPlan, structured, generationManifest, coverage: Object.freeze({ ...coverage, integrity }) });
 }

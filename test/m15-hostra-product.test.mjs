@@ -852,7 +852,13 @@ test("M15 movement latency harness records input-to-paint traces", { timeout: 90
   assert.equal(beforePixels.equals(afterPixels), false, "logical first paint must produce a screenshot pixel difference within one display frame");
 });
 
-test("M15 Hostra 640/720/1080 ordinary and refresh first-paint P95", { timeout: 3_600_000 }, async (t) => {
+const fullLatencyQualification = process.env.LOOMREALM_M15_FULL_QUALIFICATION === "1"
+  || process.env.npm_lifecycle_event === "test:m15:hostra:full";
+const latencyProfile = fullLatencyQualification
+  ? { mode: "full", rounds: 3, ordinary: 100, refresh: 30, warmup: 20, maxAttempts: 1500 }
+  : { mode: "pr", rounds: 1, ordinary: 20, refresh: 10, warmup: 5, maxAttempts: 300 };
+
+test(`M15 Hostra ${fullLatencyQualification ? "640/720/1080 full P95" : "640 PR median"} ordinary and refresh first-paint latency`, { timeout: 3_600_000 }, async (t) => {
   const installation = await prepareMovementInstallation({ cyclicMap: true });
   const eventLog = path.join(installation.temporary, "events.jsonl");
   await writeFile(eventLog, "");
@@ -941,28 +947,29 @@ test("M15 Hostra 640/720/1080 ordinary and refresh first-paint P95", { timeout: 
     };
   };
 
-  const sizes = [
+  const allSizes = [
     { width: 640, height: 480, refreshMs: 50 },
     { width: 1280, height: 720, refreshMs: 75 },
     { width: 1920, height: 1080, refreshMs: 100 },
   ];
+  const sizes = fullLatencyQualification ? allSizes : allSizes.slice(0, 1);
   const table = [];
   for (const size of sizes) {
     await setLogicalViewport(page, size.width, size.height);
     await page.mouse.click(Math.min(320, size.width - 8), Math.min(240, size.height - 8));
     await page.waitForFunction(() => document.hasFocus());
     const rounds = [];
-    for (let round = 1; round <= 3; round += 1) {
+    for (let round = 1; round <= latencyProfile.rounds; round += 1) {
       const ordinary = [];
       const refresh = [];
       const ordinaryCameraOnly = [];
       const ordinaryTileDraws = [];
       let attempts = 0;
       let invalid = 0;
-      let warmupLeft = 20;
-      while (ordinary.length < 100 || refresh.length < 30) {
+      let warmupLeft = latencyProfile.warmup;
+      while (ordinary.length < latencyProfile.ordinary || refresh.length < latencyProfile.refresh) {
         attempts += 1;
-        if (attempts > 1500) break;
+        if (attempts > latencyProfile.maxAttempts) break;
         if (attempts % 25 === 0) {
           await page.mouse.click(Math.min(320, size.width - 8), Math.min(240, size.height - 8));
           await page.waitForFunction(() => document.hasFocus()).catch(() => undefined);
@@ -984,18 +991,18 @@ test("M15 Hostra 640/720/1080 ordinary and refresh first-paint P95", { timeout: 
           continue;
         }
         if (sample.refresh) {
-          if (refresh.length < 30) refresh.push(sample.latency);
+          if (refresh.length < latencyProfile.refresh) refresh.push(sample.latency);
           continue;
         }
-        if (ordinary.length < 100) {
+        if (ordinary.length < latencyProfile.ordinary) {
           ordinary.push(sample.latency);
           ordinaryCameraOnly.push(sample.cameraOnlyDelta);
           ordinaryTileDraws.push(sample.tileDrawsDelta);
         }
       }
       assert.ok(invalid / attempts <= 0.05, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-      assert.equal(ordinary.length, 100, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
-      assert.equal(refresh.length, 30, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+      assert.equal(ordinary.length, latencyProfile.ordinary, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
+      assert.equal(refresh.length, latencyProfile.refresh, JSON.stringify({ size, round, attempts, invalid, ordinary: ordinary.length, refresh: refresh.length }));
       rounds.push({ round, attempts, invalid, ordinary, refresh, ordinaryCameraOnly, ordinaryTileDraws });
     }
     const ordinary = rounds.flatMap((round) => round.ordinary);
@@ -1013,18 +1020,24 @@ test("M15 Hostra 640/720/1080 ordinary and refresh first-paint P95", { timeout: 
       rounds,
     };
     table.push(row);
-    assert.ok(row.ordinary.p95 <= 50, JSON.stringify(row.ordinary));
-    assert.ok(row.refresh.p95 <= size.refreshMs, JSON.stringify(row.refresh));
+    const ordinaryGate = fullLatencyQualification ? row.ordinary.p95 : row.ordinary.p50;
+    const refreshGate = fullLatencyQualification ? row.refresh.p95 : row.refresh.p50;
+    assert.ok(ordinaryGate <= 50, JSON.stringify({ mode: latencyProfile.mode, ...row.ordinary }));
+    assert.ok(refreshGate <= size.refreshMs, JSON.stringify({ mode: latencyProfile.mode, ...row.refresh }));
     assert.ok(cameraOnlyHits / ordinaryCameraOnly.length >= 0.95, JSON.stringify(row.cameraOnly));
     assert.ok(zeroTileDrawHits / ordinaryTileDraws.length >= 0.95, JSON.stringify(row.cameraOnly));
   }
   const report = {
     subject: process.env.GITHUB_SHA ?? "local-worktree",
+    mode: latencyProfile.mode,
     clock: "same Browser Window performance.now(); input-captured.at to browser-first-motion-paint.at",
     platform: { node: process.version, os: `${process.platform} ${os.release()}`, cpu: os.cpus()[0]?.model ?? "unknown" },
     table,
   };
   await fs.mkdir(path.join(repository, "artifacts"), { recursive: true });
-  await writeFile(path.join(repository, "artifacts", "map-viewport-pr3-hostra.json"), `${JSON.stringify(report, null, 2)}\n`);
+  const reportName = fullLatencyQualification ? "map-viewport-pr3-hostra.json" : "map-viewport-pr3-hostra-pr.json";
+  if (fullLatencyQualification || process.env.LOOMREALM_QUALIFICATION_REPORT === "1") {
+    await writeFile(path.join(repository, "artifacts", reportName), `${JSON.stringify(report, null, 2)}\n`);
+  }
   process.stdout.write(`M15_MOVEMENT_QUALIFICATION ${JSON.stringify(report)}\n`);
 });

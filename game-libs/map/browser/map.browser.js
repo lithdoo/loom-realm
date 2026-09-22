@@ -730,8 +730,6 @@
       this._desiredSprites = new Map();
       this._accepted = undefined;
       this._raf = undefined;
-      this._commitRaf = undefined;
-      this._pendingCommit = undefined;
       this._retry = undefined;
       this._autotileTimer = undefined;
       this._retryAttempts = 0;
@@ -805,20 +803,6 @@
       for (const sprite of this._spriteChildren()) sprite._raf = undefined;
     }
 
-    _cancelCommit() {
-      if (this._commitRaf !== undefined) {
-        cancelAnimationFrame(this._commitRaf);
-        this._commitRaf = undefined;
-      }
-      const pending = this._pendingCommit;
-      this._pendingCommit = undefined;
-      if (pending) {
-        this._disown(pending.owner);
-        pending.spriteEl?._disown(pending.owner);
-        for (const entry of pending.extraSprites ?? []) entry.sprite._disown(pending.owner);
-      }
-    }
-
     _cancelAutotileTimer() {
       if (this._autotileTimer !== undefined) {
         clearTimeout(this._autotileTimer);
@@ -851,7 +835,6 @@
         if (!this.isConnected) {
           this._sequence += 1;
           this._cancelRaf();
-          this._cancelCommit();
           this._cancelAutotileTimer();
           this._cancelRetry();
           this._activeMotion = null;
@@ -864,7 +847,6 @@
 
     receiveRenderData(data) {
       assertMapViewData(data);
-      this._cancelCommit();
       this._latestData = data;
       this._desiredView = { data, receivedAt: performance.now() };
       this._sequence += 1;
@@ -878,7 +860,6 @@
     }
 
     _receiveSprite(sprite, data, receivedAt) {
-      this._cancelCommit();
       this._desiredSprites.set(sprite, { sprite, data, receivedAt });
       const first = this._spriteChild();
       this._desiredSprite = first ? this._desiredSprites.get(first) : undefined;
@@ -1032,13 +1013,7 @@
         for (const entry of extraSprites) entry.sprite._disown(owner);
         return;
       }
-      this._pendingCommit = prepared;
-      this._commitRaf = requestAnimationFrame(() => {
-        this._commitRaf = undefined;
-        if (this._pendingCommit !== prepared) return;
-        this._pendingCommit = undefined;
-        this._commitAtomic(prepared, sequence);
-      });
+      this._commitAtomic(prepared, sequence);
     }
 
     _failPrepare(sequence) {
@@ -1311,8 +1286,8 @@
         layer.canvas.style.left = `${bounds.minX - cameraX + prepared.geometry.originX}px`;
         layer.canvas.style.top = `${bounds.minY - cameraY + prepared.geometry.originY}px`;
       }
-      if (sprite) this._paintSprite(sprite, prepared, progress);
-      for (const entry of prepared.extraSprites ?? []) this._paintSprite(entry.data, prepared, 1, entry.sprite, entry.image);
+      if (sprite) this._paintSprite(sprite, prepared, progress, undefined, undefined, cameraX, cameraY, false);
+      for (const entry of prepared.extraSprites ?? []) this._paintSprite(entry.data, prepared, 1, entry.sprite, entry.image, cameraX, cameraY, true);
       const previous = this._lastPaintedCamera;
       if (!previous || previous.x !== cameraX || previous.y !== cameraY) {
         qualify("browser-first-motion-paint", {
@@ -1424,15 +1399,15 @@
       layer.context.drawImage(item.image, frameX + visual[10], visual[11], 16, 16, dx + 16, dy + 16, 16, 16);
     }
 
-    _paintSprite(data, prepared, progress, spriteOverride, imageOverride) {
+    _paintSprite(data, prepared, progress, spriteOverride, imageOverride, cameraX = prepared.view.cameraX, cameraY = prepared.view.cameraY, worldAnchored = false) {
       const sprite = spriteOverride ?? this._desiredSprite?.sprite ?? this._spriteChild();
       const spriteImage = imageOverride ?? prepared.spriteImage;
       if (!sprite || !spriteImage) return;
       const motion = data.motion;
       const pattern = motion ? (progress < 0.5 ? data.pattern : (data.pattern + 1) % 4) : data.pattern;
       const arc = motion?.kind === "jump" ? 4 * (motion.peakPx ?? 0) * progress * (1 - progress) : 0;
-      const screenX = motion ? Math.round(lerp(motion.fromScreenX, data.screenX, progress)) : data.screenX;
-      const screenY = motion ? Math.round(lerp(motion.fromScreenY, data.screenY, progress) - arc) : data.screenY;
+      const screenX = motion ? Math.round(lerp(motion.fromScreenX, data.screenX, progress)) : worldAnchored ? data.x * TILE - cameraX : data.screenX;
+      const screenY = motion ? Math.round(lerp(motion.fromScreenY, data.screenY, progress) - arc) : worldAnchored ? data.y * TILE - cameraY : data.screenY;
       const visualPixelY = motion ? Math.round(lerp(motion.fromY * 32, data.y * 32, progress)) : data.y * 32;
       const size = sprite._blitPatternSync(spriteImage, data.direction, pattern, resourceIdentity(data.sprite));
       const frameWidth = size.width;

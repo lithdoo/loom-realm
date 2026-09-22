@@ -12,7 +12,7 @@ import { VANILLA_REGISTRY_V21_1 } from "./vanilla-registry.mjs";
 import { compareV21Oracle } from "./oracle-v21.mjs";
 import { materializeCompiledDataDomains } from "./compiled-data.mjs";
 import { materializeM14ConsumerDomains } from "./m14-consumer.mjs";
-import { materializeMapActionRecords } from "./map-action-consumer.mjs";
+import { assertMap21BridgeAudit, materializeMapActionRecords } from "./map-action-consumer.mjs";
 import { materializeMapTransferRecords } from "./map-transfer-consumer.mjs";
 
 const ID = /^(?![0-9])\w+$/u;
@@ -144,20 +144,26 @@ export async function buildCanonicalDataset(manifest) {
   const pbsDomains = Object.freeze({ ...initialDomains, ...species.domains, ...remaining.domains });
   const compiledData = materializeCompiledDataDomains(rmxp.roots, pbsDomains);
   const mapActions = materializeMapActionRecords(rmxp.roots);
+  const localGuideSprite = manifest.objects.find((object) => object.kind === "file" && object.relativePath === "Graphics/Characters/NPC 01.png");
+  const localNPCs = localGuideSprite
+    ? Object.freeze([Object.freeze({
+      id: "loomrealm-local-guide",
+      name: "LoomRealm Local Guide",
+      sprite: Object.freeze({ namespace: "resource.Graphics", key: "Characters/NPC 01" }),
+    })])
+    : Object.freeze([]);
   const actionsByMap = new Map(mapActions.map((record) => [record.key, record.value]));
   const maps = Object.freeze(m14.Map.map((record) => {
     const evidence = actionsByMap.get(record.key);
     if (record.key === "21") {
-      if (!evidence || evidence.opaqueRelated.length > 0 || evidence.actions.length !== 8) {
-        throw new TypeError("Map21 Bridge audit must contain exactly eight safe events and no opaque pages");
-      }
+      assertMap21BridgeAudit(evidence);
     }
     const behaviors = record.key === "21"
       ? Object.freeze(evidence.actions.map((action) => Object.freeze({ kind: "bridge", operation: action.op === "bridge-on" ? "on" : "off", occupied: action.occupied })))
       : Object.freeze([]);
     return Object.freeze({ key: record.key, value: Object.freeze({ ...record.value, behaviors }) });
   }));
-  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14, Map: maps, MapTransfer: mapTransfers, MapAction: mapActions });
+  const canonicalDomains = Object.freeze({ ...pbsDomains, ...compiledData.domains, ...m14, Map: maps, MapTransfer: mapTransfers, MapAction: mapActions, NPC: localNPCs });
   const semantic = classifyEssentialsSemantics(rmxp, VANILLA_REGISTRY_V21_1.compilerPasses);
   const oracleComparison = compareV21Oracle(canonicalDomains, rmxp.roots);
   const oracle = Object.freeze({ ...oracleComparison, compiledDataRootsCompared: compiledData.coverage.observedRoots.length });

@@ -433,7 +433,7 @@ class RPGMapHandlerImpl implements RPGMapHandler, RuntimeBridge {
   onMapEntered(listener: (event: MapEnteredEvent) => void): () => void {
     if (this.runCalled || typeof listener !== "function") throw new RPGMapError("MAP_INVALID_STATE");
     this.enteredListeners.add(listener);
-    return () => { if (!this.runCalled) this.enteredListeners.delete(listener); };
+    return () => { this.enteredListeners.delete(listener); };
   }
   async prepareNPC(mapId: number, fromMapId: number | null, signal: AbortSignal): Promise<readonly NPCPlacement[]> {
     if (!this.entering) return Object.freeze([]);
@@ -553,6 +553,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       let nextNPCSerial = 1;
       let lastStarted: string | null = null;
       let eventBusy = false;
+      let npcSetting = false;
       let latestLayout = layoutFromViewport(scope.viewport.current);
       let acceptedLayout: MapLayout | null = null;
       let pendingLayout: MapLayout | null = null;
@@ -629,7 +630,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const commitViewportResize = () => {
-        if (frame.signal.aborted || terminalSettled || transitioning || !domain || pendingLayout === null || acceptedLayout === null) return;
+        if (frame.signal.aborted || terminalSettled || transitioning || npcSetting || !domain || pendingLayout === null || acceptedLayout === null) return;
         const nextLayout = pendingLayout;
         if (layoutsEqual(nextLayout, acceptedLayout)) {
           pendingLayout = null;
@@ -724,7 +725,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const scheduleSettledResize = () => {
-        if (activeMove !== null || transitioning) return;
+        if (activeMove !== null || transitioning || npcSetting) return;
         if (!settledResize) {
           commitViewportResize();
           return;
@@ -827,7 +828,6 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         }
       };
 
-      let npcSetting = false;
       if (api) api.setCommands({
         enter: async (entry) => {
           if (frame.signal.aborted) throw new RPGMapError("MAP_CANCELLED");
@@ -844,9 +844,32 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (transitioning || npcSetting || activeMove !== null || eventBusy) throw new RPGMapError("MAP_BUSY");
           npcSetting = true;
           const epoch = sceneEpoch;
+          const stableMap = current;
+          const stableX = x;
+          const stableY = y;
+          const stableNPCs = npcs;
           try {
-            const nextNPCs = await loadNPCs(placements, current, x, y, true);
-            if (epoch !== sceneEpoch) throw new RPGMapError("MAP_STALE_SCENE");
+            let nextNPCs: readonly RenderNPC[];
+            try {
+              nextNPCs = await loadNPCs(placements, stableMap, stableX, stableY, true);
+            } catch (error) {
+              if (error instanceof RPGMapError) throw error;
+              throw new RPGMapError("MAP_CONTENT_FAILED", error instanceof Error ? error.message : "NPC content failed");
+            }
+            if (frame.signal.aborted) throw new RPGMapError("MAP_CANCELLED");
+            if (terminalSettled) throw new RPGMapError("MAP_INVALID_STATE");
+            if (epoch !== sceneEpoch || current !== stableMap) throw new RPGMapError("MAP_STALE_SCENE");
+            if (transitioning || activeMove !== null || eventBusy || x !== stableX || y !== stableY || npcs !== stableNPCs) {
+              throw new RPGMapError("MAP_STALE_SCENE");
+            }
+            normalizeNPCs(nextNPCs.map(({ instanceId, npcId, x: npcX, y: npcY, direction: npcDirection, pattern }) => ({
+              instanceId,
+              npcId,
+              x: npcX,
+              y: npcY,
+              direction: npcDirection,
+              pattern,
+            })), current.map, x, y);
             const nextState = renderState(facts({ npcs: nextNPCs }));
             assertRenderCapacity(nextState, true);
             try { domain!.replace(nextState); } catch (error) {
@@ -855,7 +878,10 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
             }
             npcs = nextNPCs;
             api.updateSnapshot(currentSnapshot());
-          } finally { npcSetting = false; }
+          } finally {
+            npcSetting = false;
+            if (pendingLayout !== null && activeMove === null && !transitioning && !terminalSettled) scheduleSettledResize();
+          }
         },
       });
 
@@ -1026,7 +1052,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       };
 
       const attemptUnsafe = (next: Direction) => {
-        if (frame.signal.aborted || terminalSettled || transitioning || eventBusy) return;
+        if (frame.signal.aborted || terminalSettled || transitioning || eventBusy || npcSetting) return;
         const { dx, dy } = stepDelta[next];
         const nx = x + dx;
         const ny = y + dy;
@@ -1163,12 +1189,12 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (event.repeat) return;
           heldDirections = heldDirections.filter((item) => item !== movement.direction);
           heldDirections.push(movement.direction);
-          if (activeMove === null && !eventBusy) attempt(heldDirections[heldDirections.length - 1]!);
+          if (activeMove === null && !eventBusy && !npcSetting) attempt(heldDirections[heldDirections.length - 1]!);
           return;
         }
         if (event.action !== "up") return;
         heldDirections = heldDirections.filter((item) => item !== movement.direction);
-        if (activeMove === null && !eventBusy && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        if (activeMove === null && !eventBusy && !npcSetting && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       listener.on("keyboard.state", (state) => {
         const down = new Set(Array.isArray(state?.down) ? state.down : []);
@@ -1179,7 +1205,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
           if (!movement || heldDirections.includes(movement.direction)) continue;
           heldDirections.push(movement.direction);
         }
-        if (activeMove === null && !eventBusy && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
+        if (activeMove === null && !eventBusy && !npcSetting && heldDirections.length > 0) attempt(heldDirections[heldDirections.length - 1]!);
       });
       const outcome = await Promise.race([
         terminal,

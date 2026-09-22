@@ -101,7 +101,7 @@ async function importFsdb(source, outputRoot) {
 
 const options = parse(process.argv.slice(2));
 await mkdir(workRoot, { recursive: true });
-await recoverReimport({ exampleRoot, workRoot });
+await recoverReimport({ exampleRoot, workRoot, verify: verifyReimport });
 await resetCandidateRoot(stagingExampleRoot);
 
 if (options.source === undefined) {
