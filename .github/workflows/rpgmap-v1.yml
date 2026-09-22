@@ -1,0 +1,66 @@
+name: RPGMap v1 delta qualification
+
+# The existing m12-m15-pr.yml owns the full M12-M15 PR suite. This workflow
+# covers only RPGMap's additional importer, reimport and Browser tests.
+on:
+  push:
+    branches: [agent/rpgmap-v1-end-to-end]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/rpgmap-v1.yml
+      - game-libs/map/**
+      - examples/essentials-v21.1/**
+      - examples/essentials-v21.1-local/**
+      - tools/fixtures/essentials-v21.1/**
+      - test/rpgmap-*.test.mjs
+      - test/map-layering-browser.test.mjs
+      - package.json
+      - package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  delta:
+    name: RPGMap v1 / Node 24
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Install lockfile dependencies
+        uses: ./.github/actions/setup-workspace
+        with:
+          node-version: 24
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Build Map and its dependencies
+        run: npm run build:m14
+      - name: Generate original-asset-free fixture
+        run: node examples/essentials-v21.1/scripts/generate-fixtures.mjs
+      - name: Run RPGMap-specific importer, reimport and Browser tests
+        env:
+          LOOMREALM_QUALIFICATION_REPORT: "1"
+        run: |
+          mkdir -p artifacts
+          set -o pipefail
+          node --test \
+            tools/fixtures/essentials-v21.1/map-action-consumer.test.mjs \
+            tools/fixtures/essentials-v21.1/fsdb-plan.test.mjs \
+            test/rpgmap-safe-reimport.test.mjs \
+            test/rpgmap-verify-reimport.test.mjs \
+            test/rpgmap-local-consumer.test.mjs \
+            test/map-layering-browser.test.mjs \
+            | tee artifacts/rpgmap-v1-node-24.tap
+      - name: Upload qualification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpgmap-v1-node-24
+          path: artifacts/rpgmap-v1-node-24.tap
+          if-no-files-found: warn
