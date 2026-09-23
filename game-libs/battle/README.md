@@ -2,23 +2,27 @@
 
 > 状态：**Design only / 未实现**。当前只有包清单和设计文档，没有 `src/`、运行入口、导出、依赖、构建脚本或测试，不能当作可加载的 LoomRealm Subsystem。
 
-唯一主设计文档：[`docs/BATTLE_V0_DESIGN.md`](./docs/BATTLE_V0_DESIGN.md)（2026-09-23 修订）。文档取代早期轮流行动、一次走一格、Move/Skill/Wait 互斥的草案；旧方案不再是当前 v0 规则。
+唯一主设计文档：[`docs/BATTLE_V0_DESIGN.md`](./docs/BATTLE_V0_DESIGN.md)（2026-09-23 修订）。
 
 ## 一句话定位
 
-Battle 在同一个 Subsystem Frame 中承载两个**同时行动**的 AI Actor：复用 RPGMap 的地图、通行和 Sprite 运动；Battle 按 **200 ms/Tick** 管理时间、短期计划、格子预约冲突、施法、伤害、受击中断、无敌保护和胜负；LLM 的**实际调用耗时计入战斗时间并向上量化到 Tick**。一次模型请求产生一段短期计划，角色可连续逐格移动，并在途中进入射程时停步施法，不逐格调用模型。技能表现仅在命中格叠加贴图渐显渐隐。
+Battle 计划实现一个**独立的双 Actor 战斗运行时**：不复用 RPGMap Runtime，只沿用/兼容其地图、Tileset、Character Sprite 等素材形式及格子/通行/角色方向等地图角色逻辑概念。Battle 自己拥有地图坐标、占位、逐格移动、下一格预约和冲突权威。
 
-普通 v0 单体技能**建议**在合法起手时锁定目标 Actor：目标正常移动不会自动造成落空，技能仍可能因施法者有效受击而中断。冲突采用下一格预约；失败方停在最后合法位置，获得阻挡原因并重新决策。受击后取消旧计划，立即启动新 LLM 决策，并给予**有上限**的保护和短暂脱险机会。具体技能数值、移动惩罚、保护持续时间、Tick 相位边界和冲突平局算法尚待冻结，详见主文档。
+双方同时行动，Battle 以 **200 ms/Tick** 和**自有事件队列**统一调度 LLM 决策、移动完成、技能完成、受击中断和保护到期。LLM 的实际调用耗时计入战斗并向上量化到 Tick；网络/Promise 回调只登记事件，不能直接修改战斗状态。
 
-玩家未来以四选一提示卡指导我方；v0 可用固定 guidance 或跳过。提示词优化、跨战学习和长期记忆不属于当前核心闭环。
+一次 LLM 调用生成一段短期计划；角色可以连续逐格移动，并在起点或某格完成后进入技能射程时停止后续移动、开始施法。v0 普通单体技能建议锁定 Actor，目标普通移动不会自动让技能落空。
 
-## 当前真实依赖与待实现点
+v0 **不引入 MP 或固定技能资源系统**。技能以后可按需要增加冷却、次数、能量、弹药等限制。受到有效伤害时会中断旧计划/施法/决策并触发重新思考；受击保护期间允许思考和移动用于脱险，但**不能攻击/施法**，也不会因再次被攻击而刷新保护。
 
-- 当前可核对的 RPGMap 基线以单一 Player + 键盘移动为中心，规划的 RPGMap v1 NPC 仍为静态。Battle 需要额外的双可移动 Actor、受控逐格运动、下一格预约和同 Tick 冲突接口；不能宣称已有。
-- 现有 `SubsystemScope` 尚无公开 LLM 服务；Decision Adapter 的宿主、授权、密钥、取消、耗时计量和超时需要受控接口。
-- Web Presentation 只负责表现：技能格子贴图、双 Sprite 和未来的四选一输入映射需另行确定，不允许 DOM 直接改写战斗事实。
-- 这里只修订文档，未修改 Map、Main、Renderer、Hostra、示例或任何运行代码，也未运行测试。
+## 当前真实待实现点
+
+- Battle 自有地图/Actor Runtime 尚未实现；需要明确兼容哪些 RPGMap 地图/Tileset/Character 素材结构，但不再要求 RPGMap 提供双 Actor 移动 API。
+- 200 ms Tick、事件优先队列、代次取消、逐格预约、同 Tick 冲突、批量伤害和终局闸门均仍是设计。
+- `SubsystemScope` 尚无公开 LLM 服务；Decision Adapter 的宿主、授权、密钥、取消、真实耗时计量和超时需要受控接口。
+- Web Presentation 只负责表现：双 Sprite、地图投影和技能格子贴图需要消费 Battle 权威状态，不能由 DOM 反向修改战斗事实。
+- 玩家未来通过四选一提示卡指导我方；v0 可固定 guidance 或跳过。提示词优化、跨战学习和长期记忆不属于核心闭环。
+- 这里只修订文档，没有实现 Battle Runtime，也未运行构建、单测或 Browser E2E。
 
 ## npm workspace 遗留注意
 
-根 `package.json` 通过 `game-libs/*` 识别新包，但 Battle 包先前合入时未同步根 `package-lock.json`；此项仍需在具备仓库环境时执行 `npm install --package-lock-only --ignore-scripts`、提交更新并验证 `npm ci`。本次文档更新不解决锁文件问题，也不宣称构建通过。
+根 `package.json` 通过 `game-libs/*` 识别 Battle 包，但 Battle 包先前合入时未同步根 `package-lock.json`；此项仍需单独处理并验证 `npm ci`。本次文档更新不解决锁文件问题，也不宣称构建通过。
