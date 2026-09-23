@@ -2,7 +2,7 @@
 
 > 状态：**设计草案 / Design only；讨论整理于 2026-09-23。** 本文继续取代 2026-09-22 的传统交替回合旧方案，并进一步取消「复用 RPGMap Runtime」这一前提。
 > **范围声明：**这里区分「已形成方向」「建议的 v0 默认方案」「仍待定」。讨论结果不是现有 API、已完成源码、数值冻结或测试通过。
-> 优先事项：Battle 自有地图/Actor 运行逻辑、200 ms 离散时间、事件队列、短期 LLM 计划、逐格移动、施法、冲突、受击与表现；提示词优化、训练及长期记忆延后。
+> 优先事项：Battle 自有地图/Actor 运行逻辑、200 ms 离散时间、确定性事件队列、短期 LLM 计划、原子逐格移动、施法、冲突、受击与表现；提示词优化、训练及长期记忆延后。
 
 
 ## 1. 一句话定位与最小闭环
@@ -16,6 +16,7 @@ Battle 是一个**独立的双 Actor 战斗运行时**。它不运行或调用 R
 这里的「同时」不是多线程并发写状态，而是**同一个事件调度器在相同逻辑时间批量处理双方事件**。LLM、Promise、Browser 动画和 DOM 都没有权威状态提交权。
 
 
+
 ## 2. 决策状态：哪些已形成方向，哪些只是建议
 
 | 主题 | 讨论形成的方向 | 状态/边界 |
@@ -23,20 +24,22 @@ Battle 是一个**独立的双 Actor 战斗运行时**。它不运行或调用 R
 | 地图 | Battle 自己实现战斗地图/Actor 运行逻辑；仅沿用/兼容 RPGMap 的素材形式与地图角色逻辑概念 | 产品方向；不依赖 RPGMap Runtime |
 | 角色 | v0 我方、敌方各一名，均可自主移动及施法，角色占一格 | 产品方向 |
 | 并行行动 | 取消传统交替回合，Actor 独立思考、移动、施法 | 已取代旧回合方案 |
-| Tick | Battle 逻辑最小单位 200 ms；规则持续时间以整数 Tick 表示，LLM 实际耗时向上量化到 Tick | 产品方向；暂停/恢复细节待定 |
-| 事件队列 | 所有异步结果先登记为事件；每个 Tick 从队列取出到期事件，统一归并和结算，再安排未来事件 | 核心架构方向 |
-| 决策 | 一次 LLM 请求给一段短期计划，不逐格请求；冲突/受击/计划结束后重规划 | 产品方向 |
-| 移动与技能 | 移动逐格执行和预约；在起点或某格完成后发现目标入射程，则停止后续移动并开始施法 | 产品方向 |
+| Tick | Battle 逻辑最小单位 200 ms；规则持续时间以整数 Tick 表示，LLM 实际耗时向上量化到 Tick | 产品方向；暂停/恢复策略待定 |
+| 事件队列 | 异步结果先登记；只把**相同 dueTick** 的事件视为同时发生。宿主晚醒时必须按逻辑 Tick 逐个补处理，不能把不同 Tick 压成一批 | 实现前冻结规则 |
+| 决策 | 一次 LLM 请求返回一段短期计划；每个 Actor 同时最多一个有效 Decision Request | 实现前冻结规则 |
+| 路径 | 路径属于计划内容；优先由 Battle 构造当前快照下合法的候选 `planId`，候选显式包含 path，LLM 只选择计划 | 实现前冻结规则 |
+| 单格移动 | 一格是原子动作：起点继续占用、目标格被预约，`move_complete` 时才原子提交到目标格 | 实现前冻结规则 |
+| 移动受击 | 已经开始的单格移动继续完成；受击取消的是本格之后尚未开始的后续移动计划 | 实现前冻结规则 |
 | 碰撞 | 只预约下一格；同 Tick 争同格统一裁决，失败者结束当前计划并重新决策 | 产品方向；平局算法待定 |
 | 普通单体技能 | 合法起手后锁定 Actor；目标普通移动不会使该技能自动落空 | v0 建议默认 |
 | 技能限制 | v0 **不引入 MP**；以后可按技能选择冷却、次数、能量、弹药等限制形式 | 已明确移除 MP 前提 |
-| 受击 | 有效伤害中断当前计划/施法/旧决策并立即重规划；进入有上限的保护 | 产品方向 |
-| 保护行为 | 保护期间允许思考和移动，**不能开始攻击/施法**；免疫进一步伤害与中断，不刷新保护 | 当前 v0 规则 |
+| 受击保护 | 使用半开区间语义 `[hitTick + 1, protectedUntilTickExclusive)`；保护期间允许思考/移动，不能攻击/施法，不受伤、不再次中断、不刷新保护 | 实现前冻结规则 |
+| 保护中的攻击计划 | LLM 可返回带攻击意图的计划；保护只禁止 `cast_start`，移动仍可执行，保护结束后按最新战况重新检查是否起手 | 实现前冻结规则 |
+| 生命周期取消 | Frame abort / Battle cancel 属于控制平面，立即失效 Battle authority，不等待下一个 Tick | 实现前冻结规则 |
 | 技能视觉 | 结算后只在命中格叠一张贴图，按 Tick 阶段渐显渐隐 | 产品方向；具体 Browser 接口待定 |
 | 玩家指导 | 未来四选一指导影响我方下一次 LLM 请求；原型可固定 guidance 或跳过 | 后续交互设计 |
 
-**未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能射程/伤害/蓄力 Tick、保护 Tick 数等均需实测。当前唯一明确的基础时间粒度是 **200 ms/Tick**。
-
+**未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能射程/伤害/蓄力 Tick、保护 Tick 数等均需实测。当前明确冻结的是 **200 ms/Tick 的基础时间粒度和上述事件/动作语义**。
 
 ## 3. 权威归属与框架边界
 
@@ -66,9 +69,10 @@ Battle **不调用 `RPGMapBuilder`、`RPGMapHandler` 或 RPGMap Runtime 的移�
 因此，RPGMap 当前公开 API 是否支持两个可移动 Actor **不再是 Battle v0 的实现前置依赖**。实现前真正需要确认的是：哪些地图/角色资源 Schema 应作为兼容输入，以及 Battle 自己的地图加载与渲染投影怎样接 LoomRealm 的 Content/Presentation 契约。
 
 
+
 ## 5. 离散时间与事件队列：200 ms/Tick
 
-Battle 使用固定逻辑粒度 `tickDurationMs = 200`。真实世界的异步操作可以在任意时刻完成，但只能在对应的 Tick 边界转化为权威事件。
+Battle 使用固定逻辑粒度 `tickDurationMs = 200`。真实世界的异步操作可以在任意时刻完成，但只能映射到某个确定的逻辑 Tick，并在该 Tick 的统一归约中成为权威事实。
 
 ### 5.1 事件队列模型
 
@@ -87,38 +91,41 @@ BattleEvent
 
 典型事件包括：
 
-- `decision_ready`：LLM 结果可在某 Tick 使用；
-- `move_complete`：某一格移动到期；
-- `cast_complete`：技能蓄力到期，进入候选命中集合；
-- `protection_expire`：受击保护到期；
-- `timeout` / `cancel`：决策或外部生命周期事件。
+- `decision_ready`：LLM 结果最早可在某 Tick 被接收；
+- `move_complete`：某一格原子移动到期；
+- `cast_complete`：技能蓄力到期，进入该 Tick 候选命中集合；
+- 决策服务完成/错误的外部回调可登记状态和完成时刻，但不能直接改 Battle State。
 
-Promise/`setTimeout`/网络回调只负责**登记事件或记录完成时刻**，不得直接修改 Actor 坐标、HP、技能和胜负。
+**受击保护不依赖 `protection_expire` 业务事件来决定是否生效。**规则直接用 `protectedUntilTickExclusive` 与当前 Tick 比较，避免同 Tick 的“保护到期事件”和“技能命中事件”产生排序歧义。
 
-每个 Tick 的基本循环是：
+Promise/`setTimeout`/网络回调只负责登记完成事实或未来事件，不得直接修改 Actor 坐标、HP、技能和胜负。
+
+### 5.2 积压 Tick 必须逐 Tick 归约
+
+调度器读取单调时钟，计算真实世界已经推进到的目标逻辑 Tick。如果宿主晚醒，例如上一次处理到 Tick 10、当前时钟已经对应 Tick 14，则必须：
 
 ```text
-读取单调时钟
-  → 计算当前应推进到的逻辑 Tick
-  → 取出本 Tick 到期事件的固定快照
-  → 按确定规则归并/批量结算
-  → 更新一次权威状态
-  → 根据结果把未来事件加入队列
-  → 发布表现快照
+while lastProcessedTick < targetTick:
+  lastProcessedTick += 1
+  processTick(lastProcessedTick)
 ```
 
-处理某 Tick 时新产生的「未来动作」默认最早从后续 Tick 生效；不能不断重新抽取刚刚入队的同 Tick 事件形成零时间循环。伤害触发保护、代次失效等属于当前批次的同步状态归约，不通过递归事件回调抢跑。
+Tick 11、12、13、14 必须保持原有先后关系。**不能把所有 `dueTick <= 14` 的事件压成 Tick 14 的同时事件。**只有具有相同 `dueTick` 的事件才属于同一个逻辑时刻。
 
-### 5.2 时间量化
+是否允许宿主进入“暂停模式”、后台恢复时是继续补 Tick 还是把战斗时钟整体冻结，仍待生命周期设计确认；但一旦选择继续时间，积压 Tick 的归约必须按顺序进行。
+
+### 5.3 时间量化与 LLM 完成
 
 - 规则动作持续时间使用整数 Tick。
-- LLM 从请求开始时刻到响应完成时刻的**实际耗时计入战斗**。例如耗时 500 ms，则最早按 3 Tick / 600 ms 对齐使用。
+- LLM 的真实调用耗时计入战斗。例如从某请求起点起实际耗时 500 ms，则最早在向上对齐后的 600 ms / 3 Tick 边界可用。
+- Decision State 记录 `startedAtMonotonicMs`、`completedAtMonotonicMs?`、`deadlineMonotonicMs`、`dueTick?`，而不是依赖 timeout 与 decision-ready 两个回调谁先入队。
+- 如果 LLM 恰好在 deadline 完成，使用“`completedAt <= deadline` 即成功”的统一规则；只有完成时刻晚于 deadline 或直到 deadline 仍无完成事实才算 timeout。
+- 宿主事件循环晚处理一个已经完成的响应时，决策耗时应依据受信任的实际完成时刻/Adapter 完成时刻映射 Tick，而不是把本地回调被调度到的更晚时间误当成模型思考时间。具体 Adapter 如何提供该完成时刻必须在 LLM 接口设计中冻结。
 - 两个 Actor 的 LLM 请求互不暂停战斗；一方 Thinking 时另一方可以移动或施法。
-- 逻辑 Tick 不等于浏览器渲染帧。Browser 可以 60 FPS 插值，但规则只看整数 Tick 与整数格。
-- 所有同一 Tick 的到期事件先收集后处理，不能让 Promise 回调、网络返回或 DOM 帧先后决定胜负。
-- 调度器必须使用单调时间源。页面失焦、系统暂停、积压 Tick 是「补跑还是暂停战斗」仍待明确，但不能靠 `setInterval(200)` 的调用次数充当权威时钟。
+- Browser 可以高帧率插值，但规则只看整数 Tick、整数格和权威事件。
+- 调度器必须使用单调时间源，不能靠 `setInterval(200)` 被调用了多少次来累加 Battle 时间。
 
-### 5.3 时间计算示例（平衡参数非定稿）
+### 5.4 时间计算示例（平衡参数非定稿）
 
 | 事件 | 样例 |
 | --- | --- |
@@ -137,112 +144,184 @@ Promise/`setTimeout`/网络回调只负责**登记事件或记录完成时刻**�
 
 ```text
 thinking --decision_ready--> moving / casting / idle
-moving --move_complete--> [入射程] casting / [继续] moving / [计划结束] thinking
+moving --move_complete--> [入射程且可攻击] casting / [继续] moving / [计划结束] thinking
 casting --cast_complete--> thinking
 moving/casting/thinking --受到有效伤害且存活--> interrupted → thinking
-任意活动状态 --HP 归零或 Frame 取消--> dead / terminated
+任意活动状态 --HP 归零--> dead
+任意状态 --控制平面取消--> terminated
 ```
 
-`protectedUntilTick` 是叠加状态：保护期间 Actor 可以 Thinking 或 Moving，但**不得开始 Casting/Attack**。保护结束后，攻击能力恢复。
+### 6.1 受击保护区间
 
-取消使用代次而不是依赖「一定能从队列物理删除事件」：
+Actor 使用 `protectedUntilTickExclusive`，按半开区间判断保护：
+
+```text
+protected = currentTick < protectedUntilTickExclusive
+```
+
+例如 Tick 10 受击并获得 3 个完整保护 Tick，则 Tick 11、12、13 受保护，`protectedUntilTickExclusive = 14`，Tick 14 开始恢复正常。保护规则不依赖“先执行 expire 还是先执行 hit”的事件排序。
+
+### 6.2 代次取消
+
+取消使用代次，不依赖一定能从优先队列物理删除旧事件：
 
 - 每个行动使用 `actionGeneration`；
 - 每个 LLM 请求使用 `decisionGeneration`；
-- 受击、死亡、明确取消时增加对应代次；
-- 旧 `move_complete`、`cast_complete` 或迟到 LLM 结果即使仍在队列中，到期时发现代次不匹配就丢弃。
+- 受击、死亡、明确取消时增加相关代次；
+- 旧 `move_complete`、`cast_complete` 或迟到 LLM 结果即使仍在队列中，到期时发现代次不匹配就丢弃；
+- **已开始的原子单格移动是例外：受击不能撤销这一个 `move_complete`；它应使用已经开始的 step token 完成本格提交，受击只使后续路径/计划代次失效。**
+
+### 6.3 每个 Actor 同时最多一个有效 Decision Request
+
+Battle 对外只允许一个统一的 `ensureDecision(actorId, reason)` 语义：
+
+- 当前 generation 已有 pending request 时，不重复创建；
+- 计划结束、冲突、非法计划、timeout 等多个原因在同一 Tick 同时发生，也只能得到一个有效请求；
+- 受击会先使旧 `decisionGeneration` 失效，再创建且只创建一个新 generation 的请求；
+- 迟到旧请求只能记录诊断信息，不能再次启动计划。
 
 Battle 数据概念（非 TypeScript Schema）：
 
 ```text
 BattleSession
-  battleId / sceneEpoch / stateVersion / currentTick / tickDurationMs / status
+  battleId / battleEpoch / sceneEpoch / stateVersion
+  currentTick / tickDurationMs / status
   eventQueue
   map: Battle-owned map state
   actors[actorId]:
     team / hp / skills / actionState
     x / y / facing
     planId / actionGeneration / decisionGeneration / targetActorId
-    protectedUntilTick
+    activeStep? / protectedUntilTickExclusive
   decisions[actorId]:
-    requestId / startedAtMonotonicMs / startedAtTick
-    completedAtMonotonicMs? / dueTick? / status
-  reservations: next-tile claims for the current/future step
+    requestId / generation / status
+    startedAtMonotonicMs / deadlineMonotonicMs
+    completedAtMonotonicMs? / dueTick?
+  reservations: next-tile claim for each active step
   history: decisions, movements, casts, damage, collision, interruption, protection and results
   result: ally win / enemy win / simultaneous defeat / cancelled / failure
 ```
 
 v0 不包含 MP 字段。以后若增加技能资源/次数/冷却，应作为明确技能机制加入，而不是预先把所有技能绑定到 MP。
 
+
 ## 7. LLM → 短期计划 → 条件执行
 
-### 7.1 一次调用返回完整短期意图，不逐格提问
+### 7.1 路径属于计划，而不是 Battle 隐式替 AI 决策
 
-典型计划语义：「靠近敌人，最多移动若干格；沿途在**单格完成时**或起点发现敌人在该技能射程内，立即停步施法；否则继续，路线受阻或距离预算耗尽则重新决策。」途中不会每走一格都再次请求 LLM；目标提前进入射程，无需机械走到 `moveGoal`。
+路线本身会影响抢位、绕障碍、拉开距离和是否经过危险位置，因此不能只给 LLM 一个 `moveGoal`，再让 Battle 随意挑一条等价路径。
 
-示意（不是可直接执行的固定 JSON Schema）：
+v0 优先采用**合法候选计划集合**：Battle 根据当前快照、地图静态通行和短期移动预算生成有限个候选 `planId`。每个移动候选显式包含 path；LLM 只选择候选，不直接提交任意自然语言路线。
+
+示意：
 
 ```json
 {
+  "id": "plan-17",
   "targetActorId": "enemy",
-  "moveGoal": [4, 2],
-  "maxMoveSteps": 3,
+  "path": [[2,2], [3,2], [4,2]],
   "skillId": "firebolt",
   "castWhenInRange": true
 }
 ```
 
-允许的计划族至少包括接近并攻击、直接施法、只移动、原地保持/重新观察。具体候选组合与字段在动作契约阶段冻结：优先由 Battle/Map 构造候选 `planId`，LLM 只引用合法候选，或使用经严格 Schema 和规则验证的结构化计划；**绝不能把任意自然语言、虚构路线/技能或模型生成的伤害数值直接执行。**
+Battle 只保证这条 path 在**生成候选的当前快照**下合法，不承诺未来一定能走完。执行期间对手会移动，因此每一格仍必须重新检查占位和预约。
 
-### 7.2 执行时动态校验，不能因战场改变就无限重问
+允许的计划族至少包括：沿显式路径接近并攻击、直接施法、只移动、原地保持/重新观察。未来如果改用受限 Schema 参数，也必须保证路线选择权和技能意图不会被引擎暗中改写。
 
-输入包含 `battleId / actorId / decisionGeneration / decisionId / observation / legalPlans / recentEvents / guidance?`，观察含双方可见 HP、位置、地形、技能/耗时、正在思考/移动/蓄力的公开状态、保护剩余 Tick 与最近冲突原因。v0 不发送 MP，因为当前核心规则不包含 MP。与旧版只需 `actionId` 和严格 `stateVersion` 相比，现在需要**计划身份与有效请求代次**：
+### 7.2 动态执行
 
-1. 请求绑定当前 Actor 的 `decisionGeneration`。受击、死亡、退出或明确取消时立即使旧代次失效，迟到结果必须丢弃；取消信号尽力传递到 Adapter，但不能依赖网络取消一定生效。
-2. 接受结果时重新检查起始条件和当前 Map/战斗事实；**敌人在请求期间正常移动，不自动使整份战略意图作废**，否则双边同时移动会造成无休止的过期重问。
-3. 每步移动前重新检查通行与预约；每步落点提交后或在起点检查施法射程。条件不满足则继续预定短期移动；到达上限仍不满足时结束计划、重新决策。
-4. 若起始计划无效、冲突或目标消失，停止计划，以最新观察及失败原因重规划；防止同一逻辑时刻零耗时无限重新请求。
-5. 模型输出格式错误/非法候选可有限重试；超时/服务失败采用确定性保底（例如合法等待或安全保持），必须记录原因和真实耗时。**重试、超时、保底、下次可决策时刻与受击无敌上限需一并设计**，不能凭重试获得免费时间或无限保护。
+1. 请求绑定当前 Actor 的 `decisionGeneration`；旧 generation 永远不能提交计划。
+2. 接受结果时用最新战场检查计划起始条件。敌人在请求期间正常移动，不自动使整份战略意图失效。
+3. 执行 path 时，每一步开始前重新检查通行、占位和预约；每一步完成后检查是否进入技能射程。
+4. 如果提前进入射程并允许攻击，停止剩余 path、开始施法；如果受击保护尚未结束，则**保留该计划的攻击意图，但禁止 `cast_start`**。
+5. 保护期间仍可继续该计划允许的移动。保护到期后，在开始任何攻击前重新检查目标存活、射程和计划代次；仍合法则施法，不合法则继续剩余计划或结束并重新决策。
+6. 路线受阻、目标消失、路径耗尽或计划已失去意义时，停止计划并 `ensureDecision`；不能在同一 Tick 无限重试。
+7. 模型格式错误/非法候选允许有限重试；超时/服务失败采用确定性保底行为。重试不能凭空暂停 Battle，也不能延长受击保护。
 
-平台现状：当前公开 `SubsystemScope` 未提供 LLM API；Decision Adapter 的调用宿主、授权、密钥保护、超时和取消需另立设计，不能捏造 `scope.llm`，也不让 Browser 持有密钥。可用可控延迟的模拟 Adapter 先验证行为和时间语义。
+Decision Observation 至少包含双方公开 HP、整数格位置、当前 action state、技能耗时、保护剩余 Tick、对手是否正在施法/移动，以及最近冲突/失败原因。v0 不发送 MP。
 
-
-## 8. 移动：Battle 自有逐格执行与下一格预约
-
-- 一份短期计划可以包含多步移动，但 Battle 只按格推进。每次开始下一步前由 Battle 自己检查地图边界、通行、Actor 占位和预约。
-- **只预约下一格**，不一次锁住整条路线。预约从该步开始到 `move_complete` 或取消时释放。
-- 逻辑坐标在定义好的提交边界变化；Browser 的移动动画只做起点到终点的视觉插值。Battle 不存在「半格权威位置」。
-- 同一 Tick 两个 Actor 申请同一格时，先收集全部申请再统一裁决，最多一人成功；公平且可复现的平手算法待定，不依赖哪个异步回调先执行。
-- v0 禁止两个 Actor 在同一 Tick 直接交换相邻格而穿过彼此。
-- 预约失败者留在最后已提交合法格，结束当前计划，记录 `terrain / occupied / reserved / contested` 等原因，并发起新的 LLM 决策。
-- 冲突后的新移动最早从后续 Tick 开始，不能在同一 Tick 反复「失败→重决策→再次争同格」。
-- 受击只取消尚未完成的后续行动。某个已经开始的单步在受击边界是「提交目标格」还是「留在起点」必须在动作契约中选定一种无歧义规则；无论选择哪一种，都不能留下半格规则状态。
-
-移动本身已经有 Tick 时间成本。是否增加起步/转向额外 Tick、疲劳或连续移动递增惩罚，先留作后续平衡问题，不在 v0 强制。
+平台现状：当前公开 `SubsystemScope` 未提供 LLM API；Decision Adapter 的宿主、授权、密钥保护、完成时刻、deadline、取消需另立设计，不让 Browser 持有密钥。可先使用可控延迟的模拟 Adapter。
 
 
-## 9. 技能：途中可触发、锁定 Actor、v0 不使用 MP
+## 8. 移动：原子单格、起点占用与下一格预约
 
-### 9.1 施法条件与命中
+v0 将**单格移动冻结为原子动作**：
 
-- 在计划开始的起点以及每个 `move_complete` 后，Battle 用最新整数格位置检查技能射程；如果目标已在射程内，停止后续移动并开始施法。
-- v0 普通单体技能开始施法时验证技能存在、目标存活/合法、射程以及施法者当前**不处于受击保护**。通过后锁定 `targetActorId`，安排未来 `cast_complete` 事件。
-- v0 **不引入 MP 或通用技能资源条**。技能限制以后可以按技能采用冷却、次数、能量、弹药或其他规则。
-- 锁定型普通技能合法起手后，目标仅靠普通移动不会使技能自动落空。到期时如果施法没有被打断、目标仍有效且战斗未终止，则进入该 Tick 的候选命中集合。
-- 施法者蓄力期间不能移动；受到未被保护抵挡的有效伤害后，旧 `actionGeneration` 失效，未来 `cast_complete` 自动作废。
-- 保护期间不能开始新的攻击/施法。已经处于保护时，LLM 即使返回攻击计划也不能立即起手，应保留/重验计划或重新规划，精确策略待动作契约冻结。
-- 地形通行不自动等于技能 LOS。v0 可以先不做 LOS；固定格子 AOE、闪避、脱锁、抛射物、移动施法等后续扩展。
+```text
+Actor 当前占用 A
+  → 申请并获得 B 的预约
+  → 开始 A → B 的视觉运动
+  → 运动期间：A 仍是规则占位，B 是该 Actor 的预约目标
+  → move_complete 到期
+  → 原子提交：释放 A，占用 B，释放 B 的预约
+```
 
-技能验收样本仅需要：`skillId`、目标规则、射程、伤害、蓄力 Tick 与效果资源。所有具体数值均非定稿。
+Browser 可以在 A 与 B 之间平滑插值，但规则系统里不存在半格位置。
 
-### 9.2 效果表现
+具体规则：
 
-只在已经结算的技能事件上生成唯一 `effectId`，把一张贴图锚定到命中时目标的已提交格子；视觉阶段按 Tick 描述，Browser 可在阶段内部做平滑插值。
+- 一份短期计划可以包含多步 path，但任何时刻每个 Actor 最多只有一个 active step。
+- 下一步只能在上一格 `move_complete` 已提交之后启动。
+- 同一 Tick 多个 Actor 申请同一目标格时，先收集再统一裁决，最多一个成功；平手算法必须公平且可复现，不能依赖 Promise/回调先后。
+- v0 禁止两个 Actor 同一 Tick 直接交换相邻格穿过彼此。
+- 预约失败者仍在其原占位格，结束当前计划，记录 `terrain / occupied / reserved / contested` 等原因，并在后续 Tick 重新决策。
+- 冲突后的新移动最早从下一逻辑 Tick 开始，不能在同一 Tick 反复失败和重试。
+
+### 8.1 移动中受击
+
+已经开始的一格移动**不会因受击回滚或停在半格**：
+
+1. 本格 `move_complete` 仍按原 step token 到期并提交；
+2. 受击立即使整个旧计划和尚未开始的后续步骤失效；
+3. 新 LLM 决策可以在保护期内进行；
+4. 本格完成后，如果新计划已准备好，则从新位置继续执行其合法移动；否则保持在新位置等待。
+
+因此形成清晰边界：**单格移动不可拆；多格计划可被中断。施法仍然是可被有效受击打断的动作。**
+
+移动本身已经有 Tick 时间成本。是否增加起步/转向额外 Tick、疲劳或连续移动递增惩罚，继续留作后续平衡问题。
+
+
+## 9. 技能：途中触发、锁定 Actor、明确结算结果
+
+### 9.1 施法起手
+
+- 在计划起点以及每个 `move_complete` 提交后，Battle 用最新整数格位置检查计划中的技能射程。
+- 如果目标在射程内且施法者**不受保护**，则停止旧计划剩余移动并开始施法，锁定 `targetActorId`，安排未来 `cast_complete`。
+- 如果目标在射程内但施法者仍受保护，不丢弃攻击意图；继续允许计划中的合法移动，或等待保护结束。保护结束后必须重新检查射程和目标状态后才能 `cast_start`。
+- v0 不引入 MP 或通用技能资源条。
+- 锁定型普通技能合法起手后，目标普通移动不会让技能自动落空。
+- 施法者蓄力期间不能移动；受到有效伤害后 `actionGeneration` 失效，未来旧 `cast_complete` 作废。
+
+### 9.2 技能完成的统一结果
+
+`cast_complete` 到期时不直接返回简单 true/false，而至少归约为：
+
+```text
+hit      // 目标有效且没有保护：正常造成伤害
+immune   // 目标有效但处于受击保护：0 伤害，不触发中断，不刷新保护
+invalid  // 目标死亡、Battle 已结束、目标/行动代次无效等：不结算
+```
+
+建议表现：
+
+- `hit`：结算伤害，并在目标**本 Tick 完成移动后的最新已提交格**播放正常技能效果；
+- `immune`：不造成伤害，但仍可播放技能命中视觉（未来可叠加 IMMUNE 等提示），让玩家知道技能确实完成且被保护挡下；
+- `invalid`：不产生正常命中伤害或命中特效，可记录调试/战斗日志。
+
+地形通行不自动等于技能 LOS。v0 可以先不做 LOS；固定格子 AOE、闪避、脱锁、抛射物、移动施法等后续扩展。
+
+技能验收样本只要求：`skillId`、目标规则、射程、伤害、蓄力 Tick 与效果资源。所有具体数值均非定稿。
+
+### 9.3 效果表现
+
+只在结算结果要求表现时生成唯一 `effectId`，把贴图锚定到结算时目标最新已提交格；Browser 可在 Tick 阶段内部平滑插值。
 
 ```json
 {
   "effectId": "effect-00012",
   "sceneEpoch": 1,
+  "result": "hit",
   "tile": { "x": 4, "y": 3 },
   "image": {
     "namespace": "resource.Graphics",
@@ -255,95 +334,159 @@ v0 不包含 MP 字段。以后若增加技能资源/次数/冷却，应作为�
 }
 ```
 
-Browser 按 `effectId` 去重和清理。动画不决定伤害、生死、Tick 或战斗结果；Frame 终止时清理旧效果。具体地图 View/Custom Element 方案在 Presentation 设计阶段确认。
+Browser 按 `effectId` 去重和清理。动画不决定伤害、生死、Tick 或战斗结果；Frame 终止时清理旧效果。
 
 
-## 10. 受击：中断、重新决策和保护窗口
+## 10. 受击：中断、重新决策和固定保护区间
 
-受到真正造成伤害且未被保护抵挡的命中时，本 Tick 先按统一命中批次应用伤害并判断死亡。存活 Actor：
+受到 `hit` 且实际造成伤害的命中时，本 Tick 先按统一命中批次应用伤害并判断死亡。存活 Actor：
 
-1. 使当前移动计划、未完成施法和旧 LLM 请求的代次失效；
-2. 立即启动新的 LLM 决策；
-3. 进入有上限的受击保护；
-4. 在保护期间可以思考和移动用于脱险，**不能开始攻击/施法**；
-5. 保护期间后续攻击不造成伤害、不再次中断，也**不刷新/延长保护**；
-6. 保护到期后恢复正常受击与攻击能力。
+1. 使当前多格计划、未完成施法和旧 LLM 请求代次失效；
+2. **不撤销已经开始的原子单格移动**，该 step 仍会完成；
+3. 创建且只创建一个新的 Decision Request；
+4. 设置新的 `protectedUntilTickExclusive`；
+5. 保护期间可以思考和移动用于脱险，但不能 `cast_start`；
+6. 后续攻击若命中受保护 Actor，结算为 `immune`：不伤害、不再次中断、也不刷新/延长保护；
+7. Tick 到达 `protectedUntilTickExclusive` 后自然恢复正常攻击与受击能力。
 
-保护的最大持续时间必须由命中 Tick/配置决定，不能因为 LLM 长时间不返回而无限延长。LLM 超时后采用确定性保底行为，但具体超时 Tick、保护 Tick 数和保底动作仍待实测。
+保护最大持续时间由命中 Tick 与配置决定，不因为 LLM 长时间不返回而延长。LLM 超时后采用确定性保底行为。
 
-同一 Tick 的多次候选攻击按**该 Tick 命中批次开始前的保护状态**判断。此 Tick 新产生的保护只影响后续 Tick，不回溯抵消已经属于本批次的其他命中。因此同 Tick 双方都受到致命伤害时可以产生 simultaneous defeat。
-
-保护期间禁止攻击是当前 v0 明确规则；未来如果要加入格挡、反击、受击硬直或不同技能的无敌穿透，再作为独立机制扩展。
+同一 Tick 的多次候选攻击按**该 Tick 命中批次开始前的保护状态**判断。当前 Tick 新产生的保护只影响后续 Tick，不回溯抵消该批次中的其他命中，因此允许 simultaneous defeat。
 
 
 ## 11. Tick 事件循环与同时事件处理
 
-Battle 采用类似 JavaScript Event Loop 的思想，但不是把 JS 回调顺序当成游戏规则：**异步结果入 Battle 自有事件队列，固定 Tick 批量取出、统一归约。**
+Battle 采用类似 Event Loop 的思想，但异步回调顺序不是游戏规则。调度器先根据单调时钟逐 Tick 追到目标时间，每一个逻辑 Tick 分别执行一次确定性的 reducer。
 
-每个 Tick 建议执行以下流程：
+### 11.1 单个 Tick 的冻结处理顺序
 
-1. **截取到期事件快照**：取出 `dueTick <= currentTick` 且尚未处理的事件，形成这一 Tick 的固定输入集合。处理期间新排入的未来动作不重新进入本批次。
-2. **过滤失效代次**：丢弃已死亡 Actor、旧 `actionGeneration`、旧 `decisionGeneration`、已取消 Battle 对应的事件。
-3. **完成移动事件**：归并本 Tick 到期的 `move_complete`，按移动提交规则更新整数格位置、释放旧预约。
-4. **收集技能到期事件**：把有效 `cast_complete` 放入同一候选命中集合，而不是逐条立即扣 HP。
-5. **批量结算命中/伤害**：基于命中批次开始前的目标/保护状态统一计算，再同步应用 HP 变化；同 Tick 已经到期的双方攻击不会因代码处理顺序互相吞掉。
-6. **终局闸门**：如果本批次产生死亡/双亡并满足战斗结束条件，立即冻结新的游戏行为。后续只允许必要日志/表现/Frame 收尾，不再接受新决策或启动移动/技能。
-7. **处理受击后果**：对仍存活的受击者使旧代次失效、建立固定上限保护、安排新的决策请求；本 Tick 新保护不影响第 5 步。
-8. **接收 `decision_ready`**：验证仍然有效的 LLM 结果，以最新战场检查计划起始条件。迟到、被中断或属于旧代次的结果丢弃。
-9. **检查计划即时条件**：未死亡且未蓄力的 Actor 在当前整数格检查是否已可施法；受保护 Actor禁止起手攻击。
-10. **统一下一格预约**：其余移动计划同时申请下一格并裁决冲突；失败者记录原因并进入后续 Tick 的重新决策流程，成功者安排未来 `move_complete`。
-11. **安排未来事件并发布快照**：把技能完成、移动完成、保护到期、超时等事件加入队列，递增状态版本并投影到 Browser。
+对当前 `currentTick`：
 
-### 11.1 事件调度约束
+1. **截取当前 Tick 事件快照**：只取 `dueTick === currentTick` 的有效候选；更早 Tick 应在之前的逐 Tick补处理循环中已经结算。
+2. **过滤 Battle/Actor/代次失效事件**：死亡、旧 action generation、旧 decision generation 等不能继续提交。已开始原子移动的 step token 按第 8 节例外完成。
+3. **完成本 Tick 到期移动**：统一提交所有有效 `move_complete`，原子释放起点/占用终点/释放预约。
+4. **收集本 Tick 到期技能**：把有效 `cast_complete` 放入候选命中集合。
+5. **解析技能结果**：基于**移动完成后的最新位置**和本命中批次开始前的保护状态，把每次技能归约为 `hit / immune / invalid`。
+6. **批量应用 hit 伤害**：同步修改 HP；同 Tick 已经到期的双方攻击不会因代码处理顺序互相吞掉。
+7. **终局闸门**：如果产生死亡/双亡并达到结束条件，立即冻结新的游戏行为，只保留日志/表现/Frame 收尾。
+8. **处理存活受击者**：失效旧计划/施法/Decision generation，设置保护，并对每个 Actor 最多启动一个新 Decision Request。
+9. **接收本 Tick 可用的 Decision**：用实际完成时间、deadline、generation 和当前战场验证；timeout 与 ready 同 Tick 不按事件排序决定，而按 Decision State 的完成事实判断。
+10. **推进现有/新计划**：检查当前格是否满足技能起手；受保护 Actor 只禁止攻击，不禁止计划中的合法移动。
+11. **统一下一格预约**：其余移动计划同时申请下一格并裁决；成功者启动原子 step，失败者记录原因并安排后续 Tick 的重新决策。
+12. **安排未来事件并发布快照**：新增未来 `move_complete`、`cast_complete` 等；递增状态版本并投影到 Browser。
 
-- 事件处理必须确定性：同样初始状态、同样 LLM 完成时间和同样计划，应得到同样结果。
-- `eventId` 只用于稳定记录/平手排序，不能让网络到达顺序成为战斗优势。
-- 已被取消的未来事件可以留在优先队列中惰性丢弃，避免复杂的物理删除；代次检查是最终安全边界。
-- 事件循环不允许同一 Tick 无限重入。冲突后重新移动、非法计划后的再次尝试等至少跨过一个逻辑 Tick。
-- Tick 调度基于单调时钟，不依赖 `setInterval` 准点。若宿主晚醒，应按明确的暂停/追赶策略计算应该处理到哪个 Tick。
-- 同一个 Tick 内的纯状态后果（如伤害后设置保护、使旧代次失效）可以在一次 reducer 中完成，不必再排一个零延迟事件。
+处理期间新产生的未来动作不能重新进入当前 Tick 的事件快照，避免零时间递归。
 
-精确的移动提交边界、暂停/后台恢复、积压 Tick 是否逐个补跑或批量推进、同 Tick 多种事件的最终排序表，仍需用状态机契约和测试矩阵冻结。
+### 11.2 决策和 timeout 的确定性
+
+每个 Actor 同时最多一个有效请求。Decision Request 的最终状态来自其事实字段，而不是两个事件谁先跑：
+
+```text
+if completedAtMonotonicMs != null
+   && completedAtMonotonicMs <= deadlineMonotonicMs:
+  completed
+else if deadline reached:
+  timeout
+else:
+  pending
+```
+
+在同一个 Tick 内同时观察到 timeout 边界和模型完成事实时，上述规则唯一决定结果。
+
+### 11.3 生命周期/Abort 属于控制平面
+
+Frame abort、Battle cancel、Subsystem 退出不是普通 Battle Simulation Event，**不等待下一个 200 ms Tick**：
+
+```text
+abort/cancel
+  → 立即令 battleEpoch / status 失效
+  → 禁止任何后续规则提交
+  → AbortSignal 尽力取消 LLM/资源工作
+  → 停止 scheduler
+  → 清理 Presentation
+  → 完成 Frame 收尾
+```
+
+迟到 Promise 即使未来返回，也因为 `battleEpoch`/generation 不匹配而没有提交权。
+
+### 11.4 确定性回放与开发诊断
+
+事件队列天然适合做可复现战斗日志。v0 实现应至少记录：
+
+- 初始地图/Actor 配置标识；
+- 接受的 `planId` 与 path；
+- Decision 请求 generation、开始 Tick、实际完成时间/映射 dueTick、timeout；
+- 移动预约和冲突裁决；
+- 技能 `hit / immune / invalid` 结果；
+- 受击和保护区间；
+- Battle 结果。
+
+如果未来冲突裁决、技能或 AI 候选生成引入伪随机，Battle 必须记录 `battleSeed`，不能靠不可回放的随机源。
+
+开发/模拟环境建议额外统计但**不改变规则**：
+
+```text
+ticksSinceLastDamage
+ticksSinceLastPositionChange
+decisionCountWithoutProgress
+collisionRetryCount
+```
+
+这样可以区分“玩法上的长期追逐”和“事件循环/状态机真的卡死”。当前仍不强制设置战斗总时长上限。
+
 
 ## 12. 玩家指导、Frame 生命周期及退出
 
-未来玩家以「训练师」身份给我方下一次决策从四张**预配置**卡里选一张，指导仅成为本次 LLM 观察的一项临时文本：不直接修改 HP、伤害、位置、保护或其他战斗事实，也不保证模型一定遵从。v0 可先固定 guidance 或跳过；四卡生成/优化、长期人格、跨战记忆和战后训练不在当前闭环。
+未来玩家以「训练师」身份给我方下一次决策从四张**预配置**卡里选一张，指导只成为本次 LLM Observation 的临时字段：不直接修改 HP、伤害、位置、保护或其他战斗事实，也不保证模型一定遵从。v0 可先固定 guidance 或跳过。
 
-由于双方同时独立行动，**不得沿用**旧 `await_guidance → ally turn → enemy turn` 的全局回合状态机。指导如何不阻塞敌方时间轴、何时读取下一条指导以及用户按钮如何进入受控输入链，尚需设计；Web Presentation 只读事实，不允许 DOM 直接修改 BattleState。Frame 取消时应失效所有决策代次、停止动作与效果、清理订阅/资源，并按现有 `FrameOutcome` 合法形状返回；Battle 结束后禁止继续提交迟到动作或伤害。
+由于双方同时行动，不得沿用旧 `await_guidance → ally turn → enemy turn` 全局回合状态机。指导不能阻塞敌方 Battle 时间轴。
+
+Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle authority，而不是等待一个 Tick 后再取消。所有迟到决策、移动或技能事件都必须因 `battleEpoch`/generation 失效而无法提交。Web Presentation 只读事实，不允许 DOM reverse-sync BattleState。
+
 
 ## 13. MVP 验收与实施顺序
 
 ### 13.1 真实行为验收
 
-- 一张与既有素材/地图形式兼容的 Battle 地图、两个合法可见 Sprite；双方位置只源于 Battle 自有地图权威，均能执行多步计划，各单步有移动动画且不逐步请求 LLM。
-- 同一游戏时段一方移动、一方施法或思考；LLM 真实耗时 500 ms 从边界开始按 600 ms 生效，期间对手不暂停，过期/迟到请求不可执行。
-- 移动起点或途中进入射程，停止剩余步并开始蓄力；目标正常挪开后普通锁定技能仍能命中其最新位置，并正确显示格子渐显渐隐。
-- 双方同 Tick 争一格无重叠；失败方保留已走合法格子、收到原因、重新决策，不在同 Tick 无限重试。
-- 技能未完成时受伤中断并取消旧决策；受击保护期间不重复伤害/打断、可以思考和移动但不能开始攻击/施法，也不会因再次命中刷新保护；到期后恢复攻击和正常受击。
-- 同 Tick 双技能命中按批处理，无顺序作弊；双亡有明确结果。无效回答、超时、模型异常、取消、Browser 动画掉帧不篡改战场。
-- 真实 Browser 可见性用 Browser E2E 单独验收，不用 Domain 提交冒充画面 ACK。实际服务延迟、超时、Tick 调度和公平性需测量并记录，不把模拟适配器通过当真实 LLM 接入通过。
+- 一张与既有素材/地图形式兼容的 Battle 地图、两个合法可见 Sprite；双方位置只源于 Battle 自有地图权威。
+- 单格移动使用「起点占用 + 终点预约 + 到期原子提交」；Browser 没有反向提交半格位置。
+- 移动中受击时，本格仍完成；旧多格计划后续步骤取消，新计划从本格完成后的真实位置继续。
+- 宿主从 Tick 10 晚醒到 Tick 14 时，Tick 11/12/13/14 按序分别归约，不能把不同 dueTick 的事件当成同时发生。
+- 每个 Actor 同时最多一个有效 Decision Request；同 Tick 出现多个“需要重规划”的原因也不会重复发起 LLM。
+- LLM 实际耗时 500 ms 按最早 600 ms/Tick 边界生效；恰好 deadline 完成按统一 completed-time 规则处理，不由 timeout/ready 回调先后决定。
+- 合法候选 `planId` 显式携带 path；Battle 不暗中替 AI 选择等价路线；执行时每格重新检查动态占位/预约。
+- 保护期内可以沿计划移动、可以保留攻击意图，但不能开始施法；保护结束后重新检查射程，仍合法才起手。
+- 技能到期至少产生 `hit / immune / invalid` 三种确定结果；`immune` 不伤害、不打断、不刷新保护。
+- 同 Tick 先完成所有移动，再解析到期技能；锁定 Actor 的技能效果落在目标本 Tick 移动完成后的最新格。
+- 双方同 Tick 争一格无重叠；失败方收到原因并在后续 Tick 重决策，不发生零时间重试。
+- 同 Tick 双技能按批处理，无顺序作弊；双亡有明确结果。
+- Frame abort/cancel 立即停止提交权，不等待下个 Tick；迟到 Promise/LLM/事件不能篡改已终止 Battle。
+- 模拟器可以输出无进展诊断指标；回放不重新调用 LLM，而使用已记录的 plan/dueTick/冲突结果重现战斗。
+- 真实 Browser 可见性用 Browser E2E 单独验收，不把 Domain 提交当作视觉完成 ACK。
 
 ### 13.2 实施依赖顺序
 
-冻结 Battle 自有地图/Actor 输入 Schema 与素材兼容边界 → 实现/冻结 200 ms Tick + 事件队列 + Actor 状态机 → 实现逐格移动/预约/冲突 → 冻结受击保护与技能结算时序 → 确认 Browser 地图/技能贴图表现接口 → 用可控延迟模拟 Adapter 验证并发与故障 → 设计并接入受控 LLM 服务/玩家指导 → 实际 Hostra/Browser E2E。
+冻结 Battle 地图/Actor 输入 Schema 与素材兼容边界 → 实现 200 ms 单调时钟 + 逐 Tick scheduler + 事件队列 → 实现 Actor 状态/代次/单 Decision Request → 实现原子逐格移动和预约 → 实现 path-based 合法候选计划 → 实现技能 `hit/immune/invalid` 与保护语义 → 加入回放/诊断日志 → 确认 Browser 地图/技能贴图表现 → 用可控延迟模拟 Adapter 覆盖边界测试 → 接受控 LLM 服务/玩家指导 → Hostra/Browser E2E。
 
-**明确不在 v0：**传统交替回合、复用 RPGMap Runtime、逐格调用 LLM、MP/通用技能资源系统、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动、移动途中施法触发和 Battle 自有事件队列**已进入 v0**。
+**明确不在 v0：**传统交替回合、复用 RPGMap Runtime、逐格调用 LLM、MP/通用技能资源系统、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动、移动途中施法触发、事件队列、原子单格移动和显式 path 计划**已进入 v0**。
 
 
 ## 14. 尚需确认的关键问题（不得暗定）
 
-1. Battle 要兼容到什么程度的 RPGMap 地图/Tileset/Character 素材形式；哪些结构直接复用 Content Schema，哪些转换为 Battle 专用输入？
-2. 单格移动的权威提交点：开始移动即占新格、完成事件才提交，还是使用「起点占用 + 目标预约」双状态；受击发生在移动中时如何收束？
-3. 事件队列的数据结构、稳定排序键、单调时钟来源；宿主失焦/暂停后是暂停战斗、逐 Tick 追赶还是压缩推进积压 Tick？
-4. LLM 请求若从 Tick 边界发起，实际完成时间怎样映射 `dueTick`；超时、取消、服务错误及宿主事件循环延迟如何记录和量化？
-5. 合法计划是完全枚举 `planId`，还是受限 Schema 参数；默认最大移动步数与重新规划节奏如何控制调用成本？
-6. 同格预约冲突的公平平手算法、失败后最小重试 Tick，以及狭窄地形中反复争格的策略信息。
-7. 受击保护持续 Tick 数、LLM 超时与保护上限的关系；当前已明确保护期间不能攻击、不会被再次伤害/中断、也不会刷新保护。
-8. 技能射程度量、LOS、技能到期时目标死亡/保护/场景取消的统一有效性检查；未来技能限制采用何种机制不在 v0 预设。
-9. Browser 地图/双 Sprite/技能贴图的投影节点和生命周期；表现必须消费 Battle 权威状态，不反向提交。
-10. LLM 受控宿主/API/凭据/取消/响应计时，以及未来四选一指导如何通过现有授权 InputTarget。
-11. 长期无伤害追逐或 AI 持续无效规划目前不强制设置战斗时长上限；模拟测试必须能够识别并报告「长时间无进展」，之后再决定是否增加僵局规则。
-12. 工作区维护：Battle 包的根 `package-lock.json` 同步与 `npm ci` 仍需单独核验；本文档更新不代表运行代码已交付。
+以下问题仍可留到实现/模拟阶段决定；不要把已经冻结的事件语义重新列为开放问题：
 
-**执行约束：**先用可控时间的模拟决策器验证事件顺序、取消、冲突、保护与同时命中，再接真实 LLM。具体 API/数值只有在状态机契约、测试矩阵和真实运行证据具备后才算冻结。
+1. Battle 要兼容到什么程度的 RPGMap 地图/Tileset/Character 素材形式；哪些结构直接复用 Content Schema，哪些转换为 Battle 专用输入？
+2. 单格移动、技能蓄力、保护和一次计划最大 path 的具体 Tick 数值。
+3. 同格预约冲突的公平平手算法；若算法包含随机性必须使用并记录 `battleSeed`。
+4. 宿主失焦/用户主动暂停时，是冻结 Battle 单调时钟还是继续流逝；如果继续流逝，恢复后仍必须逐 Tick 顺序补算。
+5. Decision Adapter 如何可靠提供完成时刻、deadline、取消以及服务错误元数据；不同模型/网络的耗时差异是否需要产品层限制。
+6. 合法候选 path 的生成数量、去重和搜索预算；不能生成过多候选把 Prompt 撑爆，也不能只提供一个路线使 AI 无实际路线选择。
+7. 技能实际射程度量、是否做 LOS，以及以后不同技能的锁定/固定格/资源限制扩展。
+8. `immune` 的 Browser 表现是否只播放原技能效果，还是增加专门免疫提示。
+9. Browser 地图、双 Sprite、技能贴图的投影节点和生命周期。
+10. 四选一指导如何通过现有授权 InputTarget 进入下一个我方 Decision Observation。
+11. 长期无伤害追逐或 AI 持续无效规划暂不设置强制战斗总时长；根据 `ticksSinceLastDamage` 等诊断指标再决定是否增加僵局规则。
+12. Battle 包根 `package-lock.json` 同步与 `npm ci` 仍需单独核验；本文档更新不代表运行代码已经交付。
+
+**执行约束：**先用可控时间的模拟决策器和确定性事件日志验证：积压 Tick、timeout/ready 同刻、移动中受击、同 Tick 移动+命中、保护期攻击意图、重复重规划原因、冲突和同时致命攻击。通过后再接真实 LLM。
 
