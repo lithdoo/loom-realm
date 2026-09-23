@@ -1,115 +1,169 @@
-# Battle v0：核心战斗设计草案
+# Battle v0：双 Actor 同时行动与 200 ms Tick 战斗设计
 
-> 状态：Draft / design only；2026-09-22。本文整理产品讨论，不代表已经实现、接口已经冻结或通过测试。
-> 参照仓库 `main` 基线：`2b975a6598d58778d3e5e4c31d9b1f6b2deea161`。
-> 范围优先级：地图与 Actor 移动、技能释放及表现、Prompt → LLM → 合法行为 → 结算；提示词优化和训练体系延后。
+> 状态：**设计草案 / Design only；讨论整理于 2026-09-23。** 本文取代 2026-09-22 的「轮流行动、一次一格、Move/Skill/Wait 三选一」旧方案；旧方案不是并列规则。
+> **范围声明：**这里区分「已形成方向」「建议的 v0 默认方案」「仍待定」。讨论结果不是现有 API、已完成源码、数值冻结或测试通过。实现前须重新核对届时 RPGMap、Subsystem 和 Browser 的实际能力。
+> 优先事项：地图与双 Actor 行走、离散时间、短期 LLM 计划、施法、冲突、受击、表现；提示词优化、训练及长期记忆延后。
 
-## 1. 产品定位与首个可验收闭环
+## 1. 一句话定位与最小闭环
 
-Battle 是一个基于 RPGMap 场景的两角色、回合制、LLM 驱动战斗游戏库。地图中央有我方与敌方两个 Actor，双方轮流决策并执行一个行动。用户未来扮演「训练师」，以四选一的指导信息影响我方角色；v0 只要预留并验证单条临时指导能够进入本轮决策，不实现长期学习。
+在 **同一张 RPGMap 战斗地图**中放置我方和敌方各一个可移动 Actor。双方**同时**沿各自时间轴思考、移动和施法，不再等待对方结束回合。Battle 以 **1 Tick = 200 ms** 推进权威战斗事件：实际 LLM 调用耗时也计入战斗，返回结果只在 Tick 边界投入使用。LLM 提供一段短期战术计划，Map 管合法移动及格子预约，Battle 管技能、伤害、中断、受击保护与胜负，Browser 只呈现。
 
-最小闭环：加载一张 N×N RPGMap 战斗地图 → 出生两个 Actor → 我方回合获取战况与合法行动 → [可选]用户指导 → LLM 返回行动 ID → 验证、移动或施法 → 呈现 → 敌方以相同规则决策 → 轮转至一方 HP 归零 → 返回结果。
+最小闭环：加载经过 RPGMap 校验的地图与双方 Actor → 并发请求各自 LLM/模拟决策器 → 到 Tick 边界接受计划 → 连续逐格移动、途中进入射程停步施法 → 技能锁定 Actor、按蓄力时间结算，在命中格播放贴图渐显渐隐 → 受阻或受击取消旧计划并重新决策 → 双方持续并发行动，直到死亡/双亡/终止并产出结果。
 
-**既定边界：LLM 选择行动意图；Map 管地图和角色运动；Battle 管回合、战斗资源、技能规则及胜负；Browser 只呈现。** LLM 文本、DOM 或动画均不能直接修改权威战斗事实。
+这里的「同时」指两个 Actor **可在同一游戏时段分别移动、施法或思考**；不等于真正的多线程修改状态。所有影响权威状态的事件由一个 Battle Tick 协调器统一裁决。LLM、动画、DOM 均无直接提交权。
 
-## 2. 已讨论并暂定的产品决策
+## 2. 决策状态：哪些已形成方向，哪些只是建议
 
-| 主题 | v0 选择 | 限制/备注 |
+| 主题 | 讨论形成的方向 | 状态/边界 |
 | --- | --- | --- |
-| 地图 | 复用 RPGMap 地图数据、Tileset、通行、坐标、投影和 Sprite | 初始内容可选 8×8，N×N 是内容参数；不另造棋盘引擎 |
-| 角色 | 我方、敌方各一个 Actor，共用移动与技能规则 | `actorId` 唯一，不能把敌方写死为永远静止的 NPC |
-| 回合 | 顺序轮流；一方每次恰好选择 `move` / `skill` / `wait` 之一 | 暂无移动后施法组合或多行动点 |
-| 移动 | 采用 RPGMap 的方向、合法落点及运动表现 | v0 先以单次合法运动（普通一步；若地图支持则沿既有 ledge jump）为一个 `move`；移动力 3 格/多步寻路以后再定 |
-| 碰撞 | 不能越界、进入不通行格或占用格 | 合法运动由相同 Map 规则计算，不能只做曼哈顿半径校验 |
-| 技能 | 初版一个单目标攻击技能即可 | 技能表定义消耗、射程、目标、伤害；不由 LLM 生成数值 |
-| 技能表现 | 在目标格叠加贴图，透明度渐显再渐隐 | 暂无弹道、粒子、复杂 Timeline；视觉不决定命中 |
-| 模型 | 我方与敌方分别以当前可见战况选择合法行动 ID | 允许同一种决策协议、不同角色设定；不泄露另一方私有上下文 |
-| 用户指导 | 预留当前我方回合的指导输入 | 最终目标是四选一；生成策略、训练和永久记忆延后 |
+| 地图 | 复用 RPGMap 的数据、Tileset、格子坐标、通行和行走 Sprite，不另造棋盘引擎 | 产品方向；双 Actor 接口未实现 |
+| 角色 | v0 我方、敌方各一名，均可程序驱动移动及施法，角色占一格 | 产品方向 |
+| 并行行动 | 取消传统交替回合，Actor 独立思考、移动、施法 | 取代旧回合方案 |
+| Tick | Battle 逻辑最小单位 200 ms；规则动作持续时间是整数 Tick，LLM 实耗向上取整到 Tick | 已讨论的基准；暂停/时钟细节待定 |
+| 决策 | 一次 LLM 请求给短期计划，不逐格请求；失败/受击重规划 | 产品方向 |
+| 移动与技能 | 移动逐格验证、逐格预约；移动途中一旦目标入射程就在**格子边界**停下施法 | 产品方向 |
+| 碰撞 | 只预约下一格，同格冲突一方失败；失败者终止计划并重新决策 | 产品方向；平局裁决算法待定 |
+| 普通单体技能 | 开始施法时在射程内则锁定目标 Actor；目标正常移动不让该技能自动落空 | v0 建议默认；不同技能机制以后配置 |
+| 受击 | 有效伤害中断当前移动/未完成施法/旧决策，立即开始新决策；给有上限的保护及行动窗口 | 产品方向；精确持续时间/反击规则待定 |
+| 技能视觉 | 只在结算位置叠一张贴图，按 Tick 量化的阶段渐显渐隐 | 产品方向；具体渲染接口待定 |
+| 玩家指导 | 未来四选一指导影响我方下次 LLM 请求；原型允许固定 guidance 或跳过 | 后续交互设计，不延误战斗闭环 |
 
-上表中的具体数值和数据形状是设计选择，不等于当前 Map 或 LoomRealm 的公共契约。
+**过去例子不是冻结值：**8×8 地图、连续最多 3 格、走一格 200 ms、火焰弹射程 3、MP 2、伤害 3、施法 600 ms、调整 200 ms、无敌额外 2–3 Tick 等只是验证样本；唯一本轮明确提出作为基础粒度的是 200 ms/Tick。所有最终平衡值待实测。
 
-## 3. 所有权：一份战场，不做两套位置权威
+## 3. 权威归属与框架边界
 
-- **RPGMap 地图/运动权威**：地图内容、格子地形与通行、Actor 的已提交坐标与方向、一次运动的合法性和进度、地图投影。
-- **Battle 战斗权威**：当前行动方、阶段、回合序号、HP/MP、技能列表和消耗、技能结算、战斗日志、胜负状态。
-- **Decision Adapter**：接收冻结的战斗观察与合法行动，返回提议行动；没有状态提交权。
-- **Presentation**：消费提交后的地图、人物、技能效果与战斗 UI 数据，绘制动画；不 reverse-sync 坐标或 HP。
+- **RPGMap：**唯一地图、地形通行、已提交 Actor 格子位置/方向、单步运动和 Sprite 投影的来源；需扩展支持两个按 `actorId` 受控移动的 Actor。绝不维护两套各自可写的坐标。
+- **Battle：**唯一游戏 Tick/事件排序、Actor 行动状态与计划代次、HP/MP、技能规则、伤害、预约冲突的协调、受击保护、日志、胜负。Map 的移动/预约能力与 Battle 同一权威流程对接，不能在两边各自独立裁决占位。
+- **Decision Adapter：**输入当前观察和候选合法计划，调用对应 LLM；只提出计划，并报告实际延迟、失败或取消，没有战场写权限。
+- **Presentation：**读取已提交地图和战斗数据、播放行走/格子特效；渲染帧率可高于 5 FPS，不能用浏览器帧率、图片解码或动画完成回调决定命中、HP 和胜负。
+- **LoomRealm Main：**保留 Session、Activation、InputTarget、Frame 等既有权威。一场 Battle 在一个长生命周期 Subsystem Frame 内，复用同 Frame 的 Map 业务能力，不另开 Map Frame 或改 Hostra ABI。
 
-Battle 生成对 LLM 的观察时，组合 **Map 已提交的坐标快照**与 Battle 的战斗状态，不能长期维护第二份可独立修改的 Actor 坐标。技能改 HP 只写 Battle；移动成功只由 Map 确认位置后，Battle 才推进回合。
+Actor 坐标由 Map 一份权威快照给出；Battle 可存有效计划、下一格预约、技能锁定目标 ID 和命中时冻结的特效坐标，但不能暗中持有另一份可独立修改的 Actor 坐标。技能射程由 Battle 用 Map 已提交位置计算，不把地形通行直接当作攻击视线。
 
-LoomRealm Main 仍然拥有 Session/Runtime/Frame/Activation/InputTarget 权威；Battle 作为一个长生命周期 Frame 管理一场战斗。地图复用应作为 Battle 同一 Subsystem 内的业务模块，不应通过另开 Map Frame 制造两套战斗场景和生命周期。
+## 4. RPGMap 复用及真实依赖缺口
 
-## 4. RPGMap 复用前提与当前缺口
+原 `game-libs/map/src/index.ts` 基线仅导出 `mapDefinition`，现有 Runtime 以唯一 Player + 方向键移动为中心；RPGMap v1 文档规划的多 NPC 为静态阻挡者，不等于两个可移动战斗 Actor。**本文描述的多 Actor 和预约 API 均是需求，不是已交付接口。**实施时复核新版本源码/规范：
 
-RPGMap v1 的设计目标包含 `RPGMapBuilder`、`RPGMapHandler`、`getSnapshot()`、静态 NPC 和多 Sprite；截至本文基线，这些是尚待交付的实施设计，`game-libs/map/src/index.ts` 仍仅默认导出 `mapDefinition`。既有 Runtime 的可控移动围绕单一 Player 和键盘方向输入；规划中的 NPC 是静态阻挡物，**并无双 Actor 自动移动能力**。
+1. 同一 RPGMap 场景初始化两个合法、互不重叠的 Actor；复用 Character 资源、朝向、格子通行、Sprite 和行走动画。
+2. 提供同一已提交代次下的双方只读位置/方向/运动快照；查询指定 Actor 的合法下一步和按地形规则规划短路径。
+3. 在 Battle Tick 边界按 `actorId` 对**下一格**预约/占位进行原子裁决，并启动对应持续整数 Tick 的单步运动；运动完成正式提交落点，再可开始下一步。不能通过异步请求返回先后来裁决同刻冲突。
+4. 移动结果可表示完成、被占/被预约、地形阻挡、取消和不可恢复错误；未完成的运动可依受击规则中断，在已提交格子停止，不出现半格位置。
+5. 战斗场景不触发跨图 Transfer、Bridge 等探索玩法；通过明确场景内容/配置界定，不偷偷修改通用 RPGMap 规则。
 
-Battle 的目标复用接口（仅需求草案，非 RPGMap 已存在 API）：
+**不允许**用静态 `setNPC()` 冒充逐帧移动，也不允许 Battle 修改 Browser Sprite 坐标代替 Map 权威提交。多步路径只是复用 Map 合法单步的连续执行，不能在 Battle 另写独立的地形/寻路权威。双 Actor 同刻协调归谁的具体公开接口尚待 Map 设计决定。
 
-1. 初始化一张战斗地图并放置两个可移动 Actor，使用原有 Character Sprite 资源与方向规则。
-2. 获取包含双方已提交位置、方向、运动状态的只读一致快照；按 `actorId` 查询由 RPGMap 自身规则计算的合法单步运动集合。
-3. Battle 根据 LLM 选择的合法行动，命令指定 `actorId` 执行运动，并获知成功、被阻挡、取消或不可恢复失败；同一时刻不重叠运动。
-4. 地图/Actor 投影继续复用已有 View/Sprite 表现；不能为 Battle 绕过 RPGMap 的通行、碰撞、运动提交或资源校验。
-5. 战斗地图不触发跨图 Transfer、Bridge 玩法等 RPG 探索行为；采用内容配置/受控场景限制处理，具体复用边界在 Map 设计确认后冻结，不暗中禁用通用 Map 契约。
+参考现有 Map 文档：[`RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md`](../../map/todo_docs/RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md)、[`RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md`](../../map/todo_docs/RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md)、[`RPG_MAP_GENERIC_MODULE_DESIGN.md`](../../map/todo_docs/RPG_MAP_GENERIC_MODULE_DESIGN.md)。
 
-**禁止把静态 `setNPC()` 伪装成逐帧移动 API，或让 Battle 修改浏览器 Sprite 坐标代替 Runtime 移动。** 若 Map 公开接口暂不可用，Battle 包维持设计状态，不声明运行闭环已经存在。
+## 5. 离散时间模型：200 ms/Tick
 
-相关现有文档：[`RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md`](../../map/todo_docs/RPG_MAP_V1_FINAL_SCOPE_AND_CLOSURE.md)、[`RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md`](../../map/todo_docs/RPG_MAP_PUBLIC_API_V1_EXECUTION_CONTRACT.md)、[`RPG_MAP_GENERIC_MODULE_DESIGN.md`](../../map/todo_docs/RPG_MAP_GENERIC_MODULE_DESIGN.md)。实施时以当时主分支最新规范和源码复核，不把本草案反向当成 Map 冻结接口。
+- `tickDurationMs = 200` 是当前设计基准。位置占用、动作起止、射程判定、伤害、打断、无敌开始/到期、决策可用时刻与冲突裁决都在 Tick 边界发生；动作持续时间必须为非负整数 Tick，实际行动时间由 Battle 计。
+- LLM 可以在真实世界任意时刻返回，但只在下一个合法 Tick 边界接受。**例如从 Tick 边界开始请求，真实 500 ms 返回，实际占用 3 Tick / 600 ms**；不是 500 ms 时抢先执行，也不能把 500 ms 舍入成 400 ms。
+- LLM 实际等待**算入战斗时间**，对手可继续行动；这是有意识的游戏机制，与早期「模型等待不算游戏时间」建议相反。网络、服务商和模型速度因此可能产生战术差异；需统一测试条件、记录实际耗时，并确定超时预算。不能伪称不同模型天然公平。
+- 游戏逻辑 Tick ≠ 浏览器渲染帧。Browser 可做插值让 200 ms 的单步运动平滑，但不得用插值后的半格坐标参与占位/射程。
+- 同一时刻的事件按明确的相位和排序处理，避免 Promise 完成顺序、回调先后或 DOM 帧率决定胜负。暂停/后台节流后是追赶 Tick 还是暂停战斗、时间源及恢复语义，**尚待定**。
 
-## 5. Battle 数据概念（示意，不是代码 Schema）
+### 5.1 时间计算示例（平衡参数非定稿）
+
+| 事件 | 样例 |
+| --- | --- |
+| 单格移动 | 1 Tick（200 ms） |
+| 最多连续移动 | 3 格；一次计划至多 3 次单步，不是 3 次 LLM 调用 |
+| 火焰弹蓄力 | 3 Tick（600 ms） |
+| 停步/转向或重新起步 | 可设计为 1 Tick；是否纳入 v0 待测试 |
+| LLM 请求用时 500 ms | 3 Tick（600 ms）；从请求发起的 Tick 边界计 |
+| 技能渐显/停留/渐隐 | 示例各 1 Tick，共 600 ms；可在各阶段内平滑插值 |
+
+## 6. Actor 状态、计划和取消
+
+两个 Actor 各有独立状态，不能使用全局 `activeActorId`、`turnNumber` 或「我方回合→敌方回合」循环作为权威。建议状态：
+
+```text
+thinking --有效计划到达--> moving / casting / idle
+moving --每格完成--> [若入射程] casting / [继续] moving / [计划结束] thinking
+casting --蓄力到期并结算--> thinking
+moving/casting/thinking --受到有效伤害且存活--> interrupted → thinking
+任意活动状态 --HP 归零或 Frame 取消--> dead / terminated
+```
+
+`invulnerableUntilTick` 和「受击保护/脱险窗口」是可叠加在 `thinking/moving/casting` 上的状态，**不是额外占住角色不让其思考或移动的完整回合**。实际伤害/中断的先后见第 10 节。角色死亡后不接受新计划；另一方可以继续直至战斗统一结束，但不得在已结束战斗再提交新伤害或动作。
+
+Battle 数据概念（非 TypeScript Schema）：
 
 ```text
 BattleSession
-  battleId / stateVersion / turnNumber / phase / activeActorId
-  map: reference to one RPGMap scene
-  actors: ally + enemy, keyed by actorId
-    team / hp / maxHp / mp / maxMp / skillIds / statusEffects
-    position + facing: read from RPGMap snapshot, not independently writable
-  activeDecision: decisionId + frozen stateVersion + legal actions
-  history: committed action + authoritative outcome
-  result: optional winner/draw/failure
+  battleId / sceneEpoch / stateVersion / currentTick / tickDurationMs / status
+  map: reference to the sole RPGMap scene
+  actors[actorId]: team, hp/mp, skills, actionState, actionRemainingTicks
+    planId / decisionGeneration / targetActorId / movementProgress / protectionUntilTick
+    position + facing: read only from Map's committed snapshot
+  decisions[actorId]: requestId / startedAtTick / input snapshot / status / actualLatencyMs
+  reservations: next-tile claim(s), resolved centrally for each tick
+  history: committed movement, cast, damage, collision, interruption, decisions and results
+  result: ally win / enemy win / simultaneous defeat / cancelled / failure
 ```
 
-`Actor` 指棋盘上的角色；“玩家”专指选择提示卡的人。双方共用规则，观察范围可依各自可见信息配置；v0 可用完全公开战场信息，不引入战争迷雾。出生坐标必须合法、不重合。角色占一格。
+初版全图信息可公开给双方，但不泄露某方私有 Prompt 或服务凭据。出生位置合法且不重叠；单角色占一格。地图尺寸由 RPGMap `width/height` 决定，测试可用 8×8，不能写死 8×8 或再造战场矩阵。
 
-**地图尺寸**由 RPGMap 的 `width/height` 给定。初始测试可以选择 8×8，但不要硬编码 8×8 或另外维护一份独立矩阵。左上角原点和格子单位沿用 Map。距离和视线应由具体技能规则定义，不能拿 RPGMap 的通行定义直接等同技能射程。
+## 7. LLM → 短期计划 → 条件执行
 
-## 6. 一次行动：移动、技能、等待
+### 7.1 一次调用返回完整短期意图，不逐格提问
 
-### 6.1 共同规则
+典型计划语义：「靠近敌人，最多移动若干格；沿途在**单格完成时**或起点发现敌人在该技能射程内，立即停步施法；否则继续，路线受阻或距离预算耗尽则重新决策。」途中不会每走一格都再次请求 LLM；目标提前进入射程，无需机械走到 `moveGoal`。
 
-一次行动回合仅接受 `move`、`skill`、`wait` 中的一个；提交后轮到另一方。合法行动集合由规则系统先生成，LLM 只能引用集合里的 `actionId`。合法性检查至少绑定当前 `battleId + decisionId + stateVersion + actorId`。绝不执行自由文本中的额外命令。
-
-### 6.2 Move
-
-Battle 请求 Map 给出当前 Actor 在当前稳定场景下的合法运动选项。v0 一个选项对应一次 RPGMap 正常步行，或地图原有的单次跳跃结果（如启用）。LLM 选择目标行动 ID；Map 自己确认与执行运动，Battle 等待运动结束后再切换回合。不能把连续 3 格当一次行动，除非未来单独设计多步移动、路径和行动预算。
-
-### 6.3 Skill
-
-初版只需一个单目标攻击技能。以下为验收数据样本，不是永久平衡值：
+示意（不是可直接执行的固定 JSON Schema）：
 
 ```json
 {
+  "targetActorId": "enemy",
+  "moveGoal": [4, 2],
+  "maxMoveSteps": 3,
   "skillId": "firebolt",
-  "targetKind": "enemy-actor",
-  "range": 3,
-  "distanceRule": "manhattan",
-  "mpCost": 2,
-  "damage": 3,
-  "effectImage": "resource.Graphics/<configured-skill-effect>"
+  "castWhenInRange": true
 }
 ```
 
-Battle 根据已提交位置检查目标、范围、资源及其他条件；扣 MP、应用伤害、追加结算记录、检查 HP 是否归零。LLM 无权决定伤害、命中或凭空发明技能。v0 可以约定障碍只阻挡行走，技能暂不检查视线；这是明确的简化，后续可增加 LOS/范围技能。
+允许的计划族至少包括接近并攻击、直接施法、只移动、原地保持/重新观察。具体候选组合与字段在动作契约阶段冻结：优先由 Battle/Map 构造候选 `planId`，LLM 只引用合法候选，或使用经严格 Schema 和规则验证的结构化计划；**绝不能把任意自然语言、虚构路线/技能或模型生成的伤害数值直接执行。**
 
-技能目标以**目标格**定位特效：如果选定目标 Actor，则 Battle 在结算时先确定其已提交格子，冻结为本次效果坐标。只在合法、已结算的技能动作上发布效果，不因模型输出文字触发特效。
+### 7.2 执行时动态校验，不能因战场改变就无限重问
 
-### 6.4 Wait
+输入包含 `battleId / actorId / decisionGeneration / decisionId / observation / legalPlans / recentEvents / guidance?`，观察含双方可见 HP/MP、位置、地形、技能/耗时、正在思考/移动/蓄力的公开状态与保护剩余 Tick。与旧版只需 `actionId` 和严格 `stateVersion` 相比，现在需要**计划身份与有效请求代次**：
 
-始终可用，直接结束当前 Actor 行动回合；也用于无法获得有效 LLM 决策时的确定性兜底，并记录原因。未来是否将失败决策视为弃权或重试，可单独调整。
+1. 请求绑定当前 Actor 的 `decisionGeneration`。受击、死亡、退出或明确取消时立即使旧代次失效，迟到结果必须丢弃；取消信号尽力传递到 Adapter，但不能依赖网络取消一定生效。
+2. 接受结果时重新检查起始条件和当前 Map/战斗事实；**敌人在请求期间正常移动，不自动使整份战略意图作废**，否则双边同时移动会造成无休止的过期重问。
+3. 每步移动前重新检查通行与预约；每步落点提交后或在起点检查施法射程。条件不满足则继续预定短期移动；到达上限仍不满足时结束计划、重新决策。
+4. 若起始计划无效、冲突或目标消失，停止计划，以最新观察及失败原因重规划；防止同一逻辑时刻零耗时无限重新请求。
+5. 模型输出格式错误/非法候选可有限重试；超时/服务失败采用确定性保底（例如合法等待或安全保持），必须记录原因和真实耗时。**重试、超时、保底、下次可决策时刻与受击无敌上限需一并设计**，不能凭重试获得免费时间或无限保护。
 
-## 7. 技能视觉：目标格贴图渐显渐隐
+平台现状：当前公开 `SubsystemScope` 未提供 LLM API；Decision Adapter 的调用宿主、授权、密钥保护、超时和取消需另立设计，不能捏造 `scope.llm`，也不让 Browser 持有密钥。可用可控延迟的模拟 Adapter 先验证行为和时间语义。
 
-一次已结算技能产生表现描述（非业务伤害命令）：
+## 8. 移动：逐格执行与下一格预约
+
+- 一份短期计划可连续移动多个格子，移动预算是本计划上限（例如 3 格，非定稿），不是全局回合行动点；每次只开始**一个正常单步**，由 RPGMap 计算合法性、路线和动画。若 Map 支持 Ledge Jump 等特殊运动，战斗场景是否使用需单独约定。
+- **只预约下一格**，不预先锁住整条计划的目标路线；发起该步前同时确认目标不越界、不被地形/另一 Actor 占据、不已被预约。预约从成功起至该步完成/取消释放；对手不得抢入，角色已提交格子在到达前仍是权威位置。
+- 在同一 Tick 多人申请同一格时，统一裁决且最多一个成功；轮换优先权等公平且可复现的平局算法待定。不可依赖先发 Promise/网络快慢。敌我对穿互换格子在 v0 禁止。
+- 失败者留在最后已提交的合法格子，**立即结束当前计划**并触发重新决策；不等待目标格自动释放，不回滚已走的格子。反馈精确失败目标格及「terrain / occupied / reserved / contested」等原因。
+- 新观察应暂时排除尚未改变占位/预约事实的失败目标或加入短暂重试间隔；同一 Tick 不允许 `失败→零时间请求→再次失败` 无限循环。排除多久、最小重试 Tick 和冲突算法尚待定。
+- 行走中受伤导致中断时，停止后续未开始的步；已经开始的单步在规则边界完成/停在上一已提交格子的精确语义由 Map 接口确认，**不得保留半格权威位置**。第 10 节给出建议 Tick 内处理顺序。
+
+移动本身有时间成本；施法须停步，连续移动有短期计划长度上限。是否再引入转向/起步 1 Tick、疲劳或其他递增移动惩罚，**只属候选平衡方案**，尚未确定。不要为了惩罚奔跑而写死强制发呆；同速角色直线追逐能否接战还取决于地图边界、技能射程与速度。
+
+## 9. 技能：途中可触发、锁定 Actor、简单贴图
+
+### 9.1 施法条件与命中
+
+- 在计划开始的起点以及**每一格运动完成的 Tick 边界**，Battle 用双方最新已提交格子和技能规则检查射程。已在射程直接起手；途中进入射程立即停止**后续**移动并开始施法；不在两个格子的视觉插值中途触发，也不需要抵达原 `moveGoal`。
+- 普通 v0 单体技能开始施法时验证技能存在、目标存活/合法、射程和 MP。通过后停止移动、锁定 `targetActorId`，开始指定 Tick 蓄力并扣除 MP；LLM 不能决定命中、伤害、资源或持续时间。
+- 蓄力期间目标正常移动，**不会仅因改变格子或离开最初射程而让已经合法开始的普通锁定技能落空**。技能到期且未被打断、目标仍有效时，对锁定 Actor 结算伤害，并在其**命中时实际已提交格子**显示效果。已死亡/退出/技能被中断则不得再结算。
+- 施法者蓄力期间不能移动；受到未被保护抵挡的有效伤害则取消未完成的技能。建议 v0「起手扣 MP，中断不返还」；**这项费用策略是建议，仍需冻结**。
+- 地形阻挡运动不自动等于技能有视线障碍。v0 可先无 LOS；射程度量、地图障碍影响及特殊技能规则要由技能定义明确。固定格子 AOE、闪避、脱锁、抛射物、移动施法等属于后续扩展。
+
+技能验收样本，**数值非定稿**：`firebolt`，单体敌方目标，曼哈顿射程 3，MP 消耗 2，伤害 3，蓄力 3 Tick。受击中断与无敌优先于后续命中，参见统一结算规则。
+
+### 9.2 效果表现
+
+只在已结算的技能事件上生成唯一 `effectId`，读取真实资源版本，把一张贴图锚定到**命中时目标格**；视觉阶段透明度 `0 → 1 → 1 → 0`。示意 `fadeInTicks=1, holdTicks=1, fadeOutTicks=1`，共 600 ms；阶段持续时间按整数 Tick，Browser 可在阶段内做平滑透明度插值。建议覆盖地形与角色，但实际渲染层级须复核 Map View。
+
+示意表现消息（不是既有外部 ABI）：
 
 ```json
 {
@@ -117,81 +171,74 @@ Battle 根据已提交位置检查目标、范围、资源及其他条件；扣 
   "sceneEpoch": 1,
   "tile": { "x": 4, "y": 3 },
   "image": { "namespace": "resource.Graphics", "key": "<configured-effect-key>", "contentVersion": "<actual-content-version>" },
-  "fadeInMs": 150,
-  "holdMs": 200,
-  "fadeOutMs": 250
+  "fadeInTicks": 1,
+  "holdTicks": 1,
+  "fadeOutTicks": 1
 }
 ```
 
-这是内部拟议形状；素材引用需遵守既有 Content/Presentation Resource 契约，由 Runtime 提供正确版本，Browser 不直接访问本地路径。动画透明度 `0 → 1 → 1 → 0`，总时长示例 600ms，贴图锚定目标格，建议位于地形与角色之上。v0 不提供弹道、粒子、击退和复杂特效系统。
+Browser 按效果 ID 去重并清理；重复发送的完整投影不能重播旧动画。不要假定现有 `lr-map-view` 已支持效果叠图，也不要违反 RenderDomain 删除节点 key 不可复用等现有约束。结算与表现分离：**动画不决定伤害、生死、Tick 进度或战斗结局**；失焦或绘制失败不能改变已经提交的规则事实。Frame 终止时清理旧效果。
 
-表现应作为现有地图 View 的业务扩展或与其协调的 Battle 表现层；具体 RenderDomain 节点和 Browser Custom Element 方案待 Map 多 Sprite 实现确认，**不得假定现有 `lr-map-view` 已支持效果叠图**。可使用稳定存在的表现节点及带唯一 `effectId` 的数据记录，让 Browser 按 ID 去重，避免重复接收完整数据时重播；不能违反同一 RenderDomain 中被删除节点 key 不可复用的约束。
+## 10. 受击：中断、重新决策和保护窗口
 
-权威技能结算与动画分离：Battle 完成规则提交后可进入 `presenting` 阶段，以受控时长推进下回合；不得把 Browser 绘制、图片解码或 DOM 回调当成伤害/胜负确认。退出或 Frame 取消时终止待显示效果及后续决策。
+**方向：**受到真正造成伤害且未被免疫的命中，统一应用该 Tick 的伤害并先检查死亡；存活者中断尚未完成的移动计划/施法/旧 LLM 请求，增加 `decisionGeneration`，**同一个命中 Tick 边界**发起新决策，并进入受击保护。旧请求哪怕未来成功也不能执行。不是等下一轮「回合」。
 
-## 8. Prompt → LLM → Action 数据流
+保护期间建议同时免疫伤害和进一步的受击中断，避免受击锁死。为了给角色真实的逃离/反击机会，建议采用两段式、**有上限**的保护：
 
-```text
-已提交 Map 快照 + Battle 战斗数据
-    → Rule/LegalActionBuilder 生成合法行动
-    → 冻结 DecisionSnapshot（版本、当前 Actor、观察、近期历史、可选指导）
-    → DecisionAdapter 发送给对应 Actor 的 LLM
-    → 返回结构化 actionId
-    → 解析 + 决策 ID/版本/行动集合验证
-    → Map 执行 Move 或 Battle 结算 Skill/Wait
-    → 提交新状态 + 历史 + 表现
-```
+1. **受击思考保护**：覆盖从中断到新计划就绪的决策期，但有明确最大 Tick/超时；模型长期不返回时不能获得无限无敌。
+2. **脱险行动窗口**：计划有效可执行后额外保留少量 Tick，让 Actor 实际移动一两格或起手反击；示例 2–3 Tick，具体值待定。
 
-请求的最小字段：`battleId`、`decisionId`、`stateVersion`、`actorId`、`observation`、`legalActions`、`guidance`（可空）、`recentHistory`（可空）。`observation` 包含双方当前可见 HP/MP、坐标、当前角色技能/消耗、必要地形或障碍信息。地图不可只发送一张图片来代替规则信息；提示词格式和历史压缩策略以后优化。
+主动进入攻击/施法时**可考虑**提前结束剩余保护，形成逃跑安全与反击风险的取舍；这一条尚未冻结。也可选择允许保护期间反击，但必须防止双方反复无敌而不结束。保护既不强制角色发呆，也不能因一份超时请求无限延长。
 
-示意：
+同一 Tick 的多次攻击要先按**命中前统一保护状态**批量算伤害；此 Tick 新产生的保护只阻挡**后续 Tick**的攻击，不回溯抹去同 Tick 的其他命中。双亡在同 Tick 可以成为明确结果。保护对原始攻击命中事件的语义、技能中断 MP 费用与消耗型保护等扩展仍须最终确认。
 
-```json
-{
-  "battleId": "battle-001",
-  "decisionId": "decision-007",
-  "stateVersion": 11,
-  "actorId": "ally",
-  "observation": { "self": { "hp": 10, "mp": 5, "position": [1, 3] }, "enemy": { "hp": 6, "position": [3, 2] } },
-  "guidance": "优先主动进攻",
-  "legalActions": [
-    { "id": "move:1,2", "type": "move", "to": [1, 2] },
-    { "id": "skill:firebolt:enemy", "type": "skill", "skillId": "firebolt", "targetId": "enemy" },
-    { "id": "wait", "type": "wait" }
-  ],
-  "recentHistory": []
-}
-```
+## 11. 建议的 Tick 相位及同时事件处理（待接口验证）
 
-示意模型返回：`{"actionId":"skill:firebolt:enemy"}`。示例合法集合不代表演示坐标已通过真实 Map 规则。真实数据必须由运行时计算而不是从文档硬编码复制。
+以下是为了给实现/测试提供确定性的**建议顺序**，不是已经存在的 Runtime 事件循环。相同逻辑时间收集到的事件成批处理，不按异步回调到达先后抢跑：
 
-验证规则：回答只能引用冻结集合里的行动 ID；即使匹配，也须再次确认当前决策代次和已提交地图状态未过期。不存在的 ID、格式错误允许至多一次重问，随后 `wait`；超时/网络失败采用可追踪的 `wait`；Frame 取消直接丢弃响应并清理。不允许迟到响应覆盖下一回合。防止日志写入密钥或完整秘密提示词。
+1. **关账上段动作：**收集本边界到期的移动和施法；完成已预约单步的合法落点提交，释放完成的预约，位置保持整数格；到期未完成技能列入候选命中集。
+2. **命中与伤害批处理：**按结算时的已提交格子、目标 ID 和命中前保护状态，计算所有同 Tick 到期技能；先汇总伤害，再同步扣 HP，决定死亡/双亡。不同技能是否能互相打断同刻到期攻击：v0 建议**同刻先互相结算，不因先处理者阻止另一方已经到期的技能**。
+3. **受击中断及保护：**尚存活且本 Tick 承受有效伤害者取消后续动作与旧决策、释放尚未开始/仍持有的后续预约，启动有上限保护及新请求；本 Tick 新生保护不倒流抵消第 2 步伤害。检查既有保护的到期边界，不给过期保护多一个免费 Tick。
+4. **接收决策：**接收截至当前边界已经完成并满足耗时量化的有效 LLM 结果，验证 actor/代次/起始条件；受击取消的旧结果不接受。决定当前可启动的短期计划/保底行为。
+5. **即时条件检查：**为不在蓄力、未死亡的 Actor 检查起点或本 Tick 新落点是否达到计划技能射程；能施法者停掉剩余移动并起手，按耗时安排未来命中，不在当前边界凭空完成正耗时技能。
+6. **下一格预约：**其余移动计划统一申请下一格并裁决冲突；失败者终止计划，记录原因并安排新决策，不在同一 Tick 循环失败；成功者启动一格动画与 Tick 计时。
+7. **提交及表现：**产生版本化快照、行动/伤害/冲突日志、地图与技能效果投影；胜负/取消后不再启动新动作或 LLM 请求。
 
-**平台缺口：** 当前公开 `SubsystemScope` 不包含 LLM 服务。`DecisionAdapter` 是 Battle 需求概念，真实 LLM 接入的授权、传输、密钥、取消和 Hostra/PWA 适配须另立接口设计；不得把它写成现有 `scope.llm` 或让 Browser 持有模型密钥。原型可使用模拟 Adapter 先完成端到端语义验证。
+精确的「保护何时到期」「刚开始步行的当 Tick 是否允许受击打断已预约步」「同 Tick 到期施法与移动顺序」「LLM 耗时计入时钟的单调基准」「取消与失败的优先级」需在状态机/Map 动作接口定稿时落成无歧义表和测试，不能仅靠上面口头顺序声称已冻结。
 
-## 9. 回合/Frame 生命周期及 UI 输入
+## 12. 玩家指导、Frame 生命周期及退出
 
-建议阶段：`battle_start → await_guidance(仅我方，可跳过) → deciding → resolving → presenting → turn_end → [下一方] / battle_end`。敌方不等待玩家指导。每个阶段只接受相应命令，禁止决策与运动、结算并发重叠；进入 `battle_end` 后不再请求 LLM。一方 HP 归零则在完成当前技能结算后产生结果；可先只支持胜负，平局条件预留。
+未来玩家以「训练师」身份给我方下一次决策从四张**预配置**卡里选一张，指导仅成为本次 LLM 观察的一项临时文本：不直接改 MP/伤害/位置，也不保证模型一定遵从。v0 可先固定 guidance 或跳过；四卡生成/优化、长期人格、跨战记忆和战后训练不在当前闭环。
 
-用户最终可在我方每回合选四张**预配置**指导卡中的一张；卡片只是本轮 Prompt 的临时字段，不是指令保证，不直接增加伤害、修改位置或永久学习。四张卡的生成/优化、培养记忆、战斗后复盘均不在 v0。最小闭环可先使用固定的一条 guidance 或允许跳过来验证协议。
+由于双方同时独立行动，**不得沿用**旧 `await_guidance → ally turn → enemy turn` 的全局回合状态机。指导如何不阻塞敌方时间轴、何时读取下一条指导以及用户按钮如何进入受控输入链，尚需设计；Web Presentation 只读事实，不允许 DOM 直接修改 BattleState。Frame 取消时应失效所有决策代次、停止动作与效果、清理订阅/资源，并按现有 `FrameOutcome` 合法形状返回；Battle 结束后禁止继续提交迟到动作或伤害。
 
-现有 Web Presentation API 是只读投影，不意味着业务 Custom Element 可以直接调用 Battle Runtime。输入应经既有授权输入链（`Main InputTarget × active Activation × Subsystem Interest`）或以后明确设计的受控命令入口；不能从 DOM reverse-sync BattleState。当前公开输入支持键盘、指针与自定义通道，但**四选一按钮具体如何映射还没有完成契约**。
+## 13. MVP 验收与实施顺序
 
-Battle 以一个长生命周期 Subsystem Frame 承载一场战斗；Frame 取消及时终止待决策、运动等待和展示。Map Runtime/Browser 失败按其真实边界处理，不伪造 Browser 画面完成 ACK。Battle 结束返回现有 `FrameOutcome` 形状所允许的 JSON 结果，不自建 Main/Frame authority。
+### 13.1 真实行为验收
 
-## 10. MVP 验收与后续阶段
+- 一张 RPGMap 地图、两个合法可见 Sprite；双方位置只源于 Map 权威，均能执行多步计划，各单步有移动动画且不逐步请求 LLM。
+- 同一游戏时段一方移动、一方施法或思考；LLM 真实耗时 500 ms 从边界开始按 600 ms 生效，期间对手不暂停，过期/迟到请求不可执行。
+- 移动起点或途中进入射程，停止剩余步并开始蓄力；目标正常挪开后普通锁定技能仍能命中其最新位置，并正确显示格子渐显渐隐。
+- 双方同 Tick 争一格无重叠；失败方保留已走合法格子、收到原因、重新决策，不在同 Tick 无限重试。
+- 技能未完成时受伤中断并取消旧决策；受击保护期间不重复伤害/打断，存在有上限的脱险机会；到期后可再次受伤。
+- 同 Tick 双技能命中按批处理，无顺序作弊；双亡有明确结果。无效回答、超时、模型异常、取消、Browser 动画掉帧不篡改战场。
+- 真实 Browser 可见性用 Browser E2E 单独验收，不用 Domain 提交冒充画面 ACK。实际服务延迟、超时、Tick 调度和公平性需测量并记录，不把模拟适配器通过当真实 LLM 接入通过。
 
-可验收的基础场景：一张经过 RPGMap 校验的 N×N 地图；双方合法出生、Sprite 可见；双方可根据同一通行规则分别执行至少一次移动；火焰弹在合法范围内扣资源/HP 并在目标格正确渐显渐隐；LLM（或模拟 Adapter）在行动集合中选择后执行；非法回答、超时、迟到返回、退出取消均不会篡改状态；双方轮转并在 HP 为 0 时结束。浏览器实际可见性单独通过真实 Browser E2E 验证，不以 RenderDomain 提交代替视觉验收。
+### 13.2 实施依赖顺序
 
-实施依赖顺序：确认 RPGMap 多可移动 Actor 扩展边界 → 确认目标格特效与已有 Map View 的表现合同 → 冻结 Battle 动作/状态契约 → 先用模拟决策器验证 → 再接受控 LLM 服务与选择卡输入 → 进行真实 Hostra/Browser E2E。
+确认 RPGMap 多 Actor/单步预约/同刻裁决的扩展边界 → 冻结 Battle Tick/Actor 状态机/冲突/保护精确时序 → 确认 Map View 技能贴图扩展接口 → 用可控延迟模拟 Adapter 验证并发与故障 → 设计并接入受控 LLM 服务/玩家指导 → 实际 Hostra/Browser E2E。任何一步不许假设上一阶段尚未交付的 API 已存在。
 
-明确不在 v0：提示词优化和评测、训练档案及跨场战术记忆、模型微调、职业/装备/升级、多单位、多步寻路、移动后施法、AOE/状态效果复杂体系、技能弹道/粒子、自定义动画编辑器、跨图探索、棋盘规则另起炉灶。
+**明确不在 v0：**传统交替回合、另造棋盘引擎、逐格调用 LLM、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动**已进入 v0**，移动途中施法触发**已进入 v0**；不能继续把它们写在排除列表中。
 
-## 11. 待定而非暗定的问题
+## 14. 尚需确认的关键问题（不得暗定）
 
-- 双可移动 Actor 是在 RPGMap 公共接口上扩展，还是抽出内部通用 Actor-motion 能力供 Battle 装配；不得在已有静态 NPC API 上偷换语义。
-- 技能贴图如何与 Map View 的坐标和层级对齐，如何在 Browser 生命周期变化时取消旧效果。
-- 用户四选一的受控输入具体使用何种已有通道；是否需要新的业务命令契约。
-- LLM 受控服务的宿主位置、请求/取消、凭据与生产环境可用性。
+1. RPGMap 多 Actor 是扩展公共 Handler 还是复用内部 Actor-motion；如何提供权威同 Tick 预约、受击停止与位置原子快照？
+2. Tick 的单调计时器、暂停/失焦、积压 Tick 和请求从非边界时刻发起的量化、超时/网络错误是否仍持续计时，需精确规则。
+3. 合法计划是完全枚举 `planId` 还是限制 Schema 的结构化参数；默认移动上限与短期重规划节奏如何控制调用成本？
+4. 冲突平手的轮换/优先级、占位变化条件与失败后最小重试 Tick；不要靠竞态或永久排斥格子。
+5. 受击保护最大决策 Tick、脱险窗口长度、主动施法是否提前结束保护、技能中断 MP 是否返还，以及同刻事件的边界案例。
+6. 技能实际射程度量、LOS、目标死亡/技能取消、效果贴图层与 Browser 生命周期；v0 普通锁定技能是建议默认，之后可按技能区分。
+7. LLM 受控宿主/API/凭据/取消/响应计时及模型差异，四选一指导如何通过现有授权 InputTarget；不得杜撰现有接口。
+8. 工作区维护：Battle 包此前只是 npm workspace 占位，根 `package-lock.json` 同步与 `npm ci` 仍需在具备仓库环境时核验；文档修订不宣称修复此事。
 
-以上必须在实施前核对当时实际源码和现行 Map 规范，不能把目标设计视为已实现事实。
+**执行约束：**本文是产品与架构讨论整理，具体 API/行为冻结必须有接口契约、测试矩阵和真实运行证据。不要把尚待定的参数或例子伪装成当前源码事实。
