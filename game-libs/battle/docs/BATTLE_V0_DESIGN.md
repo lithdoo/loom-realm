@@ -7,7 +7,7 @@
 
 ## 1. 一句话定位与最小闭环
 
-Battle 是一个**独立的双 Actor 战斗运行时**。它不运行或调用 RPGMap Runtime，只沿用/兼容 LoomRealm 既有地图与角色素材的组织形式，以及格子、通行、角色朝向、Sprite 等地图角色逻辑概念。战斗地图、Actor 坐标、占位、路径执行和冲突均由 Battle 自己维护唯一权威。
+Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三层：**Simulation（行为/规则权威）**、**Presentation（纯表现）**、**Decision（可插拔决策）**。它不运行或调用 RPGMap Runtime，只沿用/兼容 LoomRealm 既有地图与角色素材的组织形式，以及格子、通行、角色朝向、Sprite 等地图角色逻辑概念。Actor 坐标、占位、路径执行、技能和冲突都只由 Simulation 维护权威事实。
 
 我方和敌方两个 Actor **同时**沿各自时间轴思考、移动和施法，不等待对方结束回合。Battle 以 **1 Tick = 200 ms** 作为权威逻辑时间粒度，并维护自己的**事件队列**。LLM 调用、移动完成、技能完成、受击中断、保护到期等都转换为按 Tick 对齐的事件；异步回调本身不能直接修改战斗状态。
 
@@ -21,6 +21,7 @@ Battle 是一个**独立的双 Actor 战斗运行时**。它不运行或调用 R
 
 | 主题 | 讨论形成的方向 | 状态/边界 |
 | --- | --- | --- |
+| 架构 | 三层：Simulation / Presentation / Decision；Simulation 是唯一权威，Presentation 只投影，Decision 只提计划 | 实现前冻结规则 |
 | 地图 | Battle 自己实现战斗地图/Actor 运行逻辑；仅沿用/兼容 RPGMap 的素材形式与地图角色逻辑概念 | 产品方向；不依赖 RPGMap Runtime |
 | 角色 | v0 我方、敌方各一名，均可自主移动及施法，角色占一格 | 产品方向 |
 | 并行行动 | 取消传统交替回合，Actor 独立思考、移动、施法 | 已取代旧回合方案 |
@@ -41,18 +42,208 @@ Battle 是一个**独立的双 Actor 战斗运行时**。它不运行或调用 R
 
 **未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能射程/伤害/蓄力 Tick、保护 Tick 数等均需实测。当前明确冻结的是 **200 ms/Tick 的基础时间粒度和上述事件/动作语义**。
 
-## 3. 权威归属与框架边界
 
-- **Battle Map/Actor Runtime：**唯一地图格子、地形通行、Actor 已提交坐标/方向、下一格预约、逐格移动进度与占位来源。Battle 不再把 RPGMap Runtime 当位置权威。
-- **Battle Combat：**唯一 Tick、事件队列、事件排序、Actor 行动状态/计划代次、HP、技能规则、伤害、中断、保护、日志与胜负来源。
-- **Decision Adapter：**根据当前观察与合法计划调用对应 LLM，只返回提议计划与调用元数据；没有状态提交权。
-- **Presentation：**读取 Battle 已提交的地图、Actor、动作和技能效果状态进行绘制。渲染帧率可高于 5 FPS，但动画回调不决定位置、命中、HP 或 Tick。
-- **LoomRealm Main：**保留 Session、Activation、InputTarget、Frame 等现有框架权威。一场 Battle 仍在一个长生命周期 Subsystem Frame 中运行，不改 Hostra/Main 的职责。
+## 3. 三层架构、接口与权威归属
 
-Battle 只维护**一份可写的 Actor 逻辑坐标**。Browser 可以根据「起点、终点、动作起止 Tick」插值绘制角色，但半格视觉位置不是规则位置。
+Battle v0 采用三个运行层，职责必须单向且可替换：
 
-技能射程、地图通行和角色占位都是 Battle 规则的一部分，但它们是不同概念：地形不可通行不自动等于技能存在 LOS 阻挡。
+```text
+                 ┌────────────────┐
+                 │    Decision    │
+                 │ Observation    │
+                 │ Legal Plans    │
+                 │ LLM / Mock     │
+                 └───────┬────────┘
+                         │ submit plan
+                         ▼
+                 ┌────────────────┐
+                 │   Simulation   │
+                 │ Tick / Queue   │
+                 │ Map / Actors   │
+                 │ Rules / Result │
+                 └───────┬────────┘
+                         │ snapshot / events / projection
+                         ▼
+                 ┌────────────────┐
+                 │  Presentation  │
+                 │ Map / Sprite   │
+                 │ Effect/Camera  │
+                 └────────────────┘
+```
 
+核心约束是：
+
+> **Decision 决定“想做什么”；Simulation 决定“能不能做、什么时候发生、结果是什么”；Presentation 决定“怎样显示”。**
+
+### 3.1 Simulation Layer（行为层 / 权威规则层）
+
+Simulation 是 Battle 的唯一业务权威。它负责：
+
+- Battle 单调时钟、200 ms Tick、事件队列与确定性归约；
+- 地图格子、静态通行、Actor 已提交坐标/朝向、下一格预约；
+- 原子单格移动、多格计划执行、冲突裁决；
+- 技能起手、蓄力、`hit / immune / invalid`、伤害、死亡；
+- 受击中断、保护区间、action/decision generation；
+- 合法计划候选、行为提交验证、Battle Result、事件日志与回放事实。
+
+Simulation 接受的是**行为意图/计划提交**，不是 Browser 动画命令。例如：
+
+```ts
+submitPlan(actorId, planId)
+getLegalPlans(actorId)
+getObservation(actorId)
+getSnapshot()
+subscribeEvents(listener)
+cancelBattle()
+```
+
+以上只是概念接口，不代表已经冻结 TypeScript ABI。
+
+`submitPlan` 的同步返回只表示“是否接受这份计划进入执行状态”，不能假装立即返回整个未来行为结果。因为一份计划可能跨多个 Tick：
+
+```text
+submit
+  → move_started
+  → move_complete
+  → cast_started
+  → cast_complete
+  → hit / immune / invalid
+```
+
+真实结果通过后续权威事件/快照产生。
+
+### 3.2 Presentation Layer（渲染/表现层）
+
+Presentation **与决策无关，也没有战斗规则提交权**。职责包括：
+
+- 地图、Tileset、角色 Sprite 绘制；
+- Actor 从起点格到终点格的移动插值动画；
+- 技能贴图、透明度时间线、命中/免疫视觉；
+- 摄像机跟随、焦点、缩放、Viewport/Layout；
+- 资源解析、绘制生命周期和表现清理。
+
+“Presentation 控制角色移动”只表示**播放从 A 到 B 的动画**，不表示它决定角色是否能移动或 Actor 当前权威坐标。即使 Browser 掉帧、动画未完成或资源加载失败，Simulation 的 Tick、位置、伤害和胜负也不能被反向改变。
+
+推荐 Presentation 只接受投影/表现控制，例如：
+
+```ts
+applyProjection(projection)
+playEffect(effect)
+setCamera(command)
+resize(viewport)
+dispose()
+```
+
+Presentation 可以产生 `animationFinished`、`assetFailed`、`viewportChanged` 等表现/诊断事件，但这些默认**不是战斗规则 ACK**。
+
+摄像机是 Presentation 自己的状态。Simulation 只关心地图格子与 Actor 规则位置，不关心 `cameraX / cameraY / zoom`。
+
+### 3.3 Decision Layer（决策层）
+
+Decision 是可拔插的计划生成器。删除或替换 Decision Layer 后，Simulation 仍必须能由测试/脚本/手动提交驱动正常运行。
+
+允许实现包括：
+
+```text
+MockDecision
+ScriptDecision
+ManualDecision
+RandomDecision
+LLMDecision
+```
+
+Decision 的工作流是：
+
+```text
+Simulation Observation
+    + Legal Plans
+    + Recent Events
+    + Optional Guidance
+      → Prompt / Strategy
+      → LLM or other policy
+      → choose planId
+      → Simulation.submitPlan(...)
+```
+
+**Decision 原则上只读取 Simulation 提供的 Observation / Snapshot / Legal Plans，不直接读取 Presentation 的 Sprite、DOM、camera 或动画进度作为战斗事实。**
+
+如果未来 AI 确实需要“可见区域”“角色当前动作”“玩家视野”等视觉相关语义，也应由 Simulation/Observation Builder 用明确字段输出，而不是让 Decision 直接依赖 Render State。这样不会出现“画面插值到 x=2.7，但规则坐标仍在格 2”时 AI 读取到两套冲突事实。
+
+### 3.4 Simulation Snapshot 与 Render Projection 必须分离
+
+至少区分两类数据：
+
+**Battle/Simulation Snapshot：规则事实**
+
+```text
+tick
+actors[actorId].tile
+actors[actorId].hp
+actors[actorId].actionState
+reservations
+protection
+battleStatus
+```
+
+只有 Simulation 能修改。
+
+**Render Projection：视觉描述**
+
+```text
+actorId
+fromTile / toTile
+animation
+startTick / endTick
+spriteRef
+effects
+camera hints?
+```
+
+Presentation 消费 Projection 来绘制；不能从插值后的 screen position 反推规则坐标并 reverse-sync 回 Simulation。
+
+### 3.5 Skill 的跨层数据流
+
+技能必须遵循同样的单向边界：
+
+```text
+Decision
+  → choose attack plan
+
+Simulation
+  → cast_started
+  → after N ticks: hit / immune / invalid
+  → update HP / state
+  → emit effect projection
+
+Presentation
+  → draw skill image / hit visual
+```
+
+Decision 不能直接调用 `renderer.fireball(...)`，Presentation 也不能因动画播放完成才通知 Simulation “现在可以扣血”。
+
+### 3.6 Contracts：公共契约，不是第四个运行层
+
+实现时建议提供很薄的公共类型/契约模块，例如：
+
+```text
+battle/contracts
+  BattleSnapshot
+  BattleObservation
+  LegalPlan
+  PlanSubmission
+  PlanAcceptance
+  BattleEvent
+  RenderProjection
+  SkillEffectProjection
+```
+
+Simulation、Presentation、Decision 都依赖这些契约，避免三者直接互相引用内部实现。Contracts 只是数据边界，不拥有运行状态，不是第四个业务层。
+
+### 3.7 LoomRealm 框架边界
+
+LoomRealm Main 继续拥有 Session、Activation、InputTarget、Frame 等现有框架权威。一场 Battle 在一个长生命周期 Subsystem Frame 中运行，不改 Hostra/Main 职责。
+
+玩家四选一指导属于外部输入，经受控 InputTarget/业务命令进入 Decision Observation；Browser DOM 不得直接改 Simulation State。
 
 ## 4. 地图/素材兼容边界：借形式，不复用 RPGMap Runtime
 
@@ -462,11 +653,13 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 - 同 Tick 双技能按批处理，无顺序作弊；双亡有明确结果。
 - Frame abort/cancel 立即停止提交权，不等待下个 Tick；迟到 Promise/LLM/事件不能篡改已终止 Battle。
 - 模拟器可以输出无进展诊断指标；回放不重新调用 LLM，而使用已记录的 plan/dueTick/冲突结果重现战斗。
-- 真实 Browser 可见性用 Browser E2E 单独验收，不把 Domain 提交当作视觉完成 ACK。
+- Simulation 在完全没有 Browser/Presentation 的测试环境中仍能完成整场战斗并得到确定结果；Decision 也可替换为 Script/Mock。
+- Presentation 掉帧、动画失败或 camera 改变不能改变 Simulation Snapshot、行为结果或胜负；Decision 不直接读取 DOM/Sprite/camera 作为战斗事实。
+- 真实 Browser 可见性用 Browser E2E 单独验收，不把 Domain 提交或动画完成当作规则 ACK。
 
 ### 13.2 实施依赖顺序
 
-冻结 Battle 地图/Actor 输入 Schema 与素材兼容边界 → 实现 200 ms 单调时钟 + 逐 Tick scheduler + 事件队列 → 实现 Actor 状态/代次/单 Decision Request → 实现原子逐格移动和预约 → 实现 path-based 合法候选计划 → 实现技能 `hit/immune/invalid` 与保护语义 → 加入回放/诊断日志 → 确认 Browser 地图/技能贴图表现 → 用可控延迟模拟 Adapter 覆盖边界测试 → 接受控 LLM 服务/玩家指导 → Hostra/Browser E2E。
+冻结 Contracts 与地图/Actor 输入 Schema → 先实现可无 Decision/无 Browser 独立运行的 Simulation（200 ms 单调时钟、逐 Tick scheduler、事件队列、Actor 状态、原子移动、预约、技能与保护）→ 实现 Render Projection 与独立 Presentation → 实现 path-based Legal Plans / Observation → 用 Mock/Script Decision 驱动 Simulation 覆盖边界测试 → 接受控 LLM Decision / 玩家指导 → Hostra/Browser E2E。
 
 **明确不在 v0：**传统交替回合、复用 RPGMap Runtime、逐格调用 LLM、MP/通用技能资源系统、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动、移动途中施法触发、事件队列、原子单格移动和显式 path 计划**已进入 v0**。
 
@@ -483,7 +676,7 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 6. 合法候选 path 的生成数量、去重和搜索预算；不能生成过多候选把 Prompt 撑爆，也不能只提供一个路线使 AI 无实际路线选择。
 7. 技能实际射程度量、是否做 LOS，以及以后不同技能的锁定/固定格/资源限制扩展。
 8. `immune` 的 Browser 表现是否只播放原技能效果，还是增加专门免疫提示。
-9. Browser 地图、双 Sprite、技能贴图的投影节点和生命周期。
+9. Presentation 的 RenderProjection 具体 Schema、地图/双 Sprite/技能贴图节点和生命周期；Camera 是否完全由 Presentation 自主，或接受 Simulation 的非权威 focus hint。
 10. 四选一指导如何通过现有授权 InputTarget 进入下一个我方 Decision Observation。
 11. 长期无伤害追逐或 AI 持续无效规划暂不设置强制战斗总时长；根据 `ticksSinceLastDamage` 等诊断指标再决定是否增加僵局规则。
 12. Battle 包根 `package-lock.json` 同步与 `npm ci` 仍需单独核验；本文档更新不代表运行代码已经交付。
