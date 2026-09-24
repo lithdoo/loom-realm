@@ -22,7 +22,10 @@ Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三�
 | 主题 | 讨论形成的方向 | 状态/边界 |
 | --- | --- | --- |
 | 架构 | 三层：Simulation / Presentation / Decision；Simulation 是唯一权威，Presentation 只投影，Decision 只提计划 | 实现前冻结规则 |
-| 地图 | Battle 自己实现战斗地图/Actor 运行逻辑；仅沿用/兼容 RPGMap 的素材形式与地图角色逻辑概念 | 产品方向；不依赖 RPGMap Runtime |
+| 地图/角色素材 | `struct.Map`、`struct.Tileset`、Tileset/Autotile/Character Graphics 沿用现有 RPGMap 内容形式；不复用 RPGMap Runtime | 实现前冻结方向 |
+| Battle Actor | 新增角色规则定义：名字、Character 资源、最大 HP、技能组；战斗中当前 HP/坐标/朝向属于 Runtime State | v0 Content 方向 |
+| Battle Skill | 新增技能规则定义：范围矩阵、基础伤害、前摇、后摇、tracking、效果引用 | v0 Content 方向 |
+| Battle Effect | 技能视觉效果单独定义并引用 `resource.Graphics/BattleEffects/...`；规则技能与表现素材分离 | v0 Content 方向 |
 | 角色 | v0 我方、敌方各一名，均可自主移动及施法，角色占一格 | 产品方向 |
 | 并行行动 | 取消传统交替回合，Actor 独立思考、移动、施法 | 已取代旧回合方案 |
 | Tick | Battle 逻辑最小单位 200 ms；规则持续时间以整数 Tick 表示，LLM 实际耗时向上量化到 Tick | 产品方向；暂停/恢复策略待定 |
@@ -40,7 +43,7 @@ Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三�
 | 技能视觉 | 结算后只在命中格叠一张贴图，按 Tick 阶段渐显渐隐 | 产品方向；具体 Browser 接口待定 |
 | 玩家指导 | 未来四选一指导影响我方下一次 LLM 请求；原型可固定 guidance 或跳过 | 后续交互设计 |
 
-**未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能射程/伤害/蓄力 Tick、保护 Tick 数等均需实测。当前明确冻结的是 **200 ms/Tick 的基础时间粒度和上述事件/动作语义**。
+**未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能射程/伤害/前摇 Tick、保护 Tick 数等均需实测。当前明确冻结的是 **200 ms/Tick 的基础时间粒度和上述事件/动作语义**。
 
 
 ## 3. 三层架构、接口与权威归属
@@ -106,7 +109,7 @@ submit
   → move_started
   → move_complete
   → cast_started
-  → cast_complete
+  → skill_resolve
   → hit / immune / invalid
 ```
 
@@ -245,21 +248,287 @@ LoomRealm Main 继续拥有 Session、Activation、InputTarget、Frame 等现有
 
 玩家四选一指导属于外部输入，经受控 InputTarget/业务命令进入 Decision Observation；Browser DOM 不得直接改 Simulation State。
 
-## 4. 地图/素材兼容边界：借形式，不复用 RPGMap Runtime
 
-Battle **不调用 `RPGMapBuilder`、`RPGMapHandler` 或 RPGMap Runtime 的移动实现**，也不要求 RPGMap 为 Battle 扩展双 Actor API。这样 Battle 的 200 ms Tick、预约、受击中断和多 Actor 并发不会受 RPGMap 单 Player/动画时序约束。
+## 4. Content 与素材定义：沿用 RPGMap 基础格式，只新增 Battle 规则内容
 
-需要复用的是「形式和规则语义」，不是运行时代码：
+Battle **不调用 `RPGMapBuilder`、`RPGMapHandler` 或 RPGMap Runtime 的移动实现**，但 Presentation 尽量直接兼容现有 RPGMap 的 Content/Graphics 形式，避免重复定义地图和 Character 素材格式。
 
-1. 地图仍采用 LoomRealm/RPGMap 相同或兼容的地图内容形式，保留宽高、Tileset、格子坐标、通行等概念；具体 Battle 输入 Schema 在实现前冻结。
-2. 角色继续使用既有 Character Sprite/方向/Pattern 等素材形式，让 Battle 与已有素材生产链兼容。
-3. Battle 自己实现指定 Actor 的逐格运动、短路径执行、下一格预约、碰撞与同 Tick 冲突裁决。
-4. Browser 表现可以沿用既有地图/角色的视觉约定，但 Battle 不通过修改 RPGMap DOM/Sprite 来代替规则提交。
-5. RPGMap 的 Transfer、Bridge、探索事件等行为不自动进入 Battle；若未来需要某项地图语义，应明确选择并在 Battle 中实现/兼容，而不是隐式调用 RPGMap Runtime。
+### 4.1 地图、Tileset、Autotile、Character 直接沿用现有形式
 
-因此，RPGMap 当前公开 API 是否支持两个可移动 Actor **不再是 Battle v0 的实现前置依赖**。实现前真正需要确认的是：哪些地图/角色资源 Schema 应作为兼容输入，以及 Battle 自己的地图加载与渲染投影怎样接 LoomRealm 的 Content/Presentation 契约。
+v0 不新增 `BattleMap`、`BattleTileset` 或 `BattleActorVisual`。
 
+继续使用现有：
 
+```text
+struct.Map
+struct.Tileset
+
+resource.Graphics/Tilesets/...
+resource.Graphics/Autotiles/...
+resource.Graphics/Characters/...
+```
+
+当前现有地图/角色视觉约定包括：
+
+- Map 使用现有格子宽高和三层 Tile Table；
+- Tileset/Autotile 使用现有 RPGMap 图像布局；
+- 基础 Tile 尺寸为 32×32；
+- Character Sprite 使用现有 4×4 atlas；
+- 方向继续使用 `2 / 4 / 6 / 8`；
+- Pattern 继续使用 `0 / 1 / 2 / 3`；
+- Graphics 资源仍以 `namespace + key + contentVersion` 作为确定资源身份。
+
+Battle 可以读取这些 Schema/资源并自行实现加载和绘制，但不调用 RPGMap Runtime 来移动角色、计算 Battle Tick、提交位置或处理战斗规则。
+
+RPGMap 的 Transfer、Bridge、探索事件等运行时语义也不会自动进入 Battle；未来若需要，应单独决定哪些语义进入 Simulation。
+
+### 4.2 `struct.BattleActor`：角色静态定义
+
+角色的“战斗规则定义”和“当前战斗实例状态”必须分离。
+
+v0 的角色静态定义建议保持很小：
+
+```json
+{
+  "id": "mage",
+  "name": "Mage",
+  "character": {
+    "namespace": "resource.Graphics",
+    "key": "Characters/Mage"
+  },
+  "max_hp": 10,
+  "skills": ["firebolt", "grab"]
+}
+```
+
+字段语义：
+
+- `id`：角色定义标识；
+- `name`：显示名；
+- `character`：直接引用现有 Character Graphics，不新增角色视觉格式；
+- `max_hp`：最大 HP；v0 默认开战满血，因此暂不增加独立 `initial_hp`；
+- `skills`：该角色可用的 `BattleSkill` id 列表。
+
+以下数据**不属于** `struct.BattleActor`，而属于每场 Battle 的 Actor Runtime State：
+
+```text
+actorId
+currentHp
+x / y
+direction
+actionState
+activePlan
+activeStep
+protectedUntilTickExclusive
+actionGeneration
+decisionGeneration
+```
+
+其中 `direction` 是 Simulation 权威规则状态，不只是 Sprite 表现，因为技能范围可以依赖朝向。
+
+### 4.3 `struct.BattleSkill`：最小技能规则定义
+
+v0 暂不加入 MP、冷却、暴击、命中率、元素、穿甲、技能次数等未来机制。基础定义只保留：
+
+```text
+id
+name
+range
+damage
+timing.windup_ticks
+timing.recovery_ticks
+tracking
+effect
+```
+
+示意：
+
+```json
+{
+  "id": "grab",
+  "name": "抓",
+  "range": [
+    [0, 1, 0],
+    [0, "↑", 0]
+  ],
+  "damage": 0,
+  "timing": {
+    "windup_ticks": 1,
+    "recovery_ticks": 2
+  },
+  "tracking": "revalidate_on_resolve",
+  "effect": "grab"
+}
+```
+
+这里 `effect` 引用独立的 `struct.BattleEffect`，不直接包含图片和渐隐参数。
+
+### 4.4 技能范围矩阵：一个矩阵同时表达原点、朝向、有效范围和系数
+
+v0 不采用 `origin + rotate_with_facing + mask` 这种多字段结构，也暂不拆分“可选择范围”和“最终影响范围”。
+
+`BattleSkill.range` 就是一张任意 **m×n 规则矩形矩阵**。Content 中所有技能统一按**施法者朝上**定义。
+
+单元格语义：
+
+```text
+"↑" = 施法者所在格，同时定义标准朝向为上
+0   = 无效区域
+> 0 = 有效目标格，同时该数字是效果系数
+矩阵之外 = 无效区域
+```
+
+例如：
+
+```json
+[
+  [0, 1, 0],
+  [0, 1, 0],
+  [0, "↑", 0]
+]
+```
+
+表示角色朝上时可以作用于正前方两格。
+
+Actor 实际方向改变时，Simulation 根据其 `direction` 旋转整个矩阵：
+
+```text
+朝上                  朝右
+
+0 1 0                 0 0 0
+0 1 0                 ↑ 1 1
+0 ↑ 0                 0 0 0
+```
+
+图中的其他方向箭头只用于说明；**Content 中永远只写 `"↑"`**。
+
+矩阵必须满足：
+
+1. 每一行长度相同，构成规则矩形；
+2. 必须且只能出现一个 `"↑"`；
+3. 其他单元格只能是有限、非负数字；
+4. `0` 永远表示无效；
+5. 大于 0 的数值表示该格合法，并作为效果系数；
+6. 矩阵之外永远无效。
+
+因此普通技能不再需要 `range = 3`、`front_only`、`shape = cone`、`rotate_with_facing` 等字段。
+
+例如只允许正前方一格：
+
+```json
+[
+  [0, 1, 0],
+  [0, "↑", 0]
+]
+```
+
+例如近处 100%、远处 50%：
+
+```json
+[
+  [0, 0.5, 0],
+  [0, 1,   0],
+  [0, "↑", 0]
+]
+```
+
+如果基础伤害为 10，则系数 1 的格子基础结果为 10，系数 0.5 的格子基础结果为 5。具体整数化/舍入规则仍需冻结。
+
+v0 的统一含义是：
+
+> **技能仍选择一个目标 Actor；目标 Actor 所在格映射到旋转后的 range 矩阵，若对应值大于 0，则该位置合法，该值就是对该目标的效果系数。**
+
+当前**不增加** `target.type`、`effect.type`、第二张 effect matrix、地面选点或 AOE 结构。以后真的需要“选一个格子再影响周边”“链式目标”“多 Actor AOE”等机制，再通过新的类型/结构扩展，而不是现在预埋。
+
+### 4.5 朝向与移动
+
+Actor 的 `direction` 同时服务于规则和 Presentation：
+
+- Simulation 用它旋转技能范围矩阵；
+- Presentation 用它选择 Character Sprite 的方向行。
+
+默认移动方向会更新 Actor 朝向。例如向右完成/开始移动时，Actor 朝向进入右侧方向。是否增加独立 `turn` 行为以及转向需要多少 Tick，目前仍待确认；v0 不允许通过 Presentation 自己旋转 Sprite 来改变规则朝向。
+
+### 4.6 技能时间：规则前摇/后摇与视觉持续时间分离
+
+普通 v0 技能暂不引入独立 `active_ticks`，规则时间简化为：
+
+```text
+windup
+  → 前摇结束时进行技能结算
+  → recovery
+  → 角色重新可开始正常后续行动
+```
+
+因此：
+
+- `windup_ticks`：技能结算前等待时间；
+- `recovery_ticks`：技能结算后的后摇时间；
+- 技能特效在屏幕上显示多久**不属于** Skill timing，而属于 Battle Effect 的 Presentation timing。
+
+前摇受到有效伤害时可以被现有中断规则取消。后摇期间具体允许哪些行为、受到有效伤害时是否立即结束后摇，仍待状态机下一轮冻结。
+
+### 4.7 `struct.BattleEffect`：独立表现素材
+
+技能效果视觉单独定义，不写进 Skill 规则。
+
+v0 建议新增：
+
+```text
+struct.BattleEffect
+resource.Graphics/BattleEffects/...
+```
+
+最小示意：
+
+```json
+{
+  "id": "firebolt",
+  "image": {
+    "namespace": "resource.Graphics",
+    "key": "BattleEffects/Firebolt"
+  },
+  "anchor": "tile-center",
+  "timing": {
+    "fade_in_ticks": 1,
+    "hold_ticks": 2,
+    "fade_out_ticks": 1
+  }
+}
+```
+
+第一版只要求单张图片及简单渐入/停留/渐出，不预先加入粒子、Shader、弹道或帧动画系统。
+
+这样同一份视觉效果可以被多个 Skill 复用；修改特效图片或显示时长不会改变 Simulation 的伤害、范围或技能前后摇。
+
+### 4.8 当前 Content 关系
+
+```text
+struct.Map / struct.Tileset
+        │
+        └──────────────→ Presentation
+
+resource.Graphics/Characters/...
+        ▲
+        │
+struct.BattleActor
+        │ skills[]
+        ▼
+struct.BattleSkill
+  range matrix
+  damage
+  windup / recovery
+  tracking
+  effect
+        │
+        ▼
+struct.BattleEffect
+        │
+        ▼
+resource.Graphics/BattleEffects/...
+```
+
+这里的 Schema 示例仍是设计层概念结构，不代表 Content Schema/TypeScript ABI 已经实现或注册。
 
 ## 5. 离散时间与事件队列：200 ms/Tick
 
@@ -284,7 +553,7 @@ BattleEvent
 
 - `decision_ready`：LLM 结果最早可在某 Tick 被接收；
 - `move_complete`：某一格原子移动到期；
-- `cast_complete`：技能蓄力到期，进入该 Tick 候选命中集合；
+- `skill_resolve`：技能前摇到期，进入该 Tick 候选命中集合；
 - 决策服务完成/错误的外部回调可登记状态和完成时刻，但不能直接改 Battle State。
 
 **受击保护不依赖 `protection_expire` 业务事件来决定是否生效。**规则直接用 `protectedUntilTickExclusive` 与当前 Tick 比较，避免同 Tick 的“保护到期事件”和“技能命中事件”产生排序歧义。
@@ -322,7 +591,7 @@ Tick 11、12、13、14 必须保持原有先后关系。**不能把所有 `dueTi
 | --- | --- |
 | 单格移动 | 1 Tick（200 ms），仅为样例 |
 | 一次计划最大移动 | 3 格，仅为样例；不是 3 次 LLM 调用 |
-| 技能蓄力 | 3 Tick（600 ms），仅为样例 |
+| 技能前摇 | 3 Tick（600 ms），仅为样例 |
 | LLM 实际用时 500 ms | 向上对齐为 3 Tick（600 ms） |
 | 技能渐显/停留/渐隐 | 可各 1 Tick，Browser 在阶段内平滑插值 |
 
@@ -334,10 +603,11 @@ Tick 11、12、13、14 必须保持原有先后关系。**不能把所有 `dueTi
 两个 Actor 各自拥有独立状态，不能使用全局 `activeActorId`、`turnNumber` 或「我方回合→敌方回合」循环。
 
 ```text
-thinking --decision_ready--> moving / casting / idle
-moving --move_complete--> [入射程且可攻击] casting / [继续] moving / [计划结束] thinking
-casting --cast_complete--> thinking
-moving/casting/thinking --受到有效伤害且存活--> interrupted → thinking
+thinking --decision_ready--> moving / windup / idle
+moving --move_complete--> [目标落在技能矩阵合法格且可攻击] windup / [继续] moving / [计划结束] thinking
+windup --skill_resolve--> recovery
+recovery --recovery_complete--> thinking / next plan
+moving/windup/thinking --受到有效伤害且存活--> interrupted → thinking
 任意活动状态 --HP 归零--> dead
 任意状态 --控制平面取消--> terminated
 ```
@@ -359,7 +629,7 @@ protected = currentTick < protectedUntilTickExclusive
 - 每个行动使用 `actionGeneration`；
 - 每个 LLM 请求使用 `decisionGeneration`；
 - 受击、死亡、明确取消时增加相关代次；
-- 旧 `move_complete`、`cast_complete` 或迟到 LLM 结果即使仍在队列中，到期时发现代次不匹配就丢弃；
+- 旧 `move_complete`、`skill_resolve` 或迟到 LLM 结果即使仍在队列中，到期时发现代次不匹配就丢弃；
 - **已开始的原子单格移动是例外：受击不能撤销这一个 `move_complete`；它应使用已经开始的 step token 完成本格提交，受击只使后续路径/计划代次失效。**
 
 ### 6.3 每个 Actor 同时最多一个有效 Decision Request
@@ -473,60 +743,88 @@ Browser 可以在 A 与 B 之间平滑插值，但规则系统里不存在半格
 移动本身已经有 Tick 时间成本。是否增加起步/转向额外 Tick、疲劳或连续移动递增惩罚，继续留作后续平衡问题。
 
 
-## 9. 技能：途中触发、锁定 Actor、明确结算结果
 
-### 9.1 施法起手
+## 9. 技能：范围矩阵、前摇结算、后摇与目标持续性
 
-- 在计划起点以及每个 `move_complete` 提交后，Battle 用最新整数格位置检查计划中的技能射程。
-- 如果目标在射程内且施法者**不受保护**，则停止旧计划剩余移动并开始施法，锁定 `targetActorId`，安排未来 `cast_complete`。
-- 如果目标在射程内但施法者仍受保护，不丢弃攻击意图；继续允许计划中的合法移动，或等待保护结束。保护结束后必须重新检查射程和目标状态后才能 `cast_start`。
+### 9.1 技能起手
+
+- 在计划起点以及每个 `move_complete` 提交后，Simulation 用施法者最新整数格坐标和 `direction` 旋转 Skill 的 `range` 矩阵。
+- 将目标 Actor 的相对坐标映射到旋转后的矩阵；对应单元格值大于 0 时目标位置合法，该值同时成为本次技能的效果系数。
+- 如果目标位置合法且施法者不受保护，则停止旧计划剩余移动并进入 `windup`。
+- 如果目标位置合法但施法者仍受保护，不丢弃攻击意图；继续允许计划中的合法移动或等待保护结束。保护结束后必须用最新坐标/朝向重新检查矩阵后才能开始 `windup`。
 - v0 不引入 MP 或通用技能资源条。
-- 锁定型普通技能合法起手后，目标普通移动不会让技能自动落空。
-- 施法者蓄力期间不能移动；受到有效伤害后 `actionGeneration` 失效，未来旧 `cast_complete` 作废。
+- 前摇期间施法者不能移动；受到有效伤害后，当前技能 action generation 失效，本次未结算技能取消。
 
-### 9.2 技能完成的统一结果
+角色的 `direction` 是规则输入。Presentation 显示的 Sprite 朝向不能反向改变技能矩阵方向。
 
-`cast_complete` 到期时不直接返回简单 true/false，而至少归约为：
+### 9.2 前摇、结算与后摇
+
+普通技能规则时间统一为：
 
 ```text
-hit      // 目标有效且没有保护：正常造成伤害
-immune   // 目标有效但处于受击保护：0 伤害，不触发中断，不刷新保护
-invalid  // 目标死亡、Battle 已结束、目标/行动代次无效等：不结算
+windup_ticks
+  → resolve
+  → recovery_ticks
+  → next action
 ```
+
+当前不设置独立 `active_ticks`。前摇结束的逻辑结算点产生本次技能候选结果；结算完成后进入 recovery。
+
+`tracking` 用来描述目标从技能起手到结算期间移动后是否仍保持有效。当前至少存在两类需求：
+
+- 普通锁定远程技能：合法起手后，目标普通移动不自动导致落空；
+- “抓”这类位置技能：结算时需要重新检查目标是否仍位于旋转后矩阵的合法格。
+
+字段名/枚举值与更细语义仍待下一轮 Contracts 冻结；当前文档不把所有技能强制成同一种 tracking。
+
+recovery 期间的移动、重新思考、以及受到有效伤害时是否立即结束 recovery，尚未冻结，不得由实现自行猜测。
+
+### 9.3 技能结算结果
+
+技能在结算点至少归约为：
+
+```text
+hit      // 目标有效且没有保护：按矩阵系数计算并造成效果/伤害
+immune   // 目标有效但处于受击保护：0 伤害，不中断，不刷新保护
+invalid  // 目标死亡、Battle 结束、tracking 校验失败、行动代次无效等：不结算
+```
+
+对于基础伤害技能，概念计算为：
+
+```text
+rawDamage = skill.damage × rangeCoefficient
+```
+
+最终 HP 伤害的整数化/舍入规则仍待确定，不能依赖 JavaScript 隐式转换。
 
 建议表现：
 
-- `hit`：结算伤害，并在目标**本 Tick 完成移动后的最新已提交格**播放正常技能效果；
-- `immune`：不造成伤害，但仍可播放技能命中视觉（未来可叠加 IMMUNE 等提示），让玩家知道技能确实完成且被保护挡下；
-- `invalid`：不产生正常命中伤害或命中特效，可记录调试/战斗日志。
+- `hit`：结算规则效果，并在目标本 Tick 最新已提交格播放 Skill 引用的 BattleEffect；
+- `immune`：不造成伤害，但可以播放命中/免疫视觉；
+- `invalid`：不产生正常命中伤害或命中特效，只记录规则/诊断日志。
 
-地形通行不自动等于技能 LOS。v0 可以先不做 LOS；固定格子 AOE、闪避、脱锁、抛射物、移动施法等后续扩展。
+v0 仍是单目标 Actor。范围矩阵只决定这个 Actor 是否在合法格以及效果系数；它不是 AOE effect matrix。
 
-技能验收样本只要求：`skillId`、目标规则、射程、伤害、蓄力 Tick 与效果资源。所有具体数值均非定稿。
+地形通行不自动等于技能 LOS。v0 暂不因矩阵存在而自动引入 LOS、固定地面目标、AOE、弹道等机制。
 
-### 9.3 效果表现
+### 9.4 Effect Presentation
 
-只在结算结果要求表现时生成唯一 `effectId`，把贴图锚定到结算时目标最新已提交格；Browser 可在 Tick 阶段内部平滑插值。
+Simulation 结算后只输出 effect identity、锚点目标/格子、开始 Tick、结果等事实。Presentation 根据对应 `struct.BattleEffect` 决定图片及渐入/停留/渐出。
+
+示意投影：
 
 ```json
 {
   "effectId": "effect-00012",
   "sceneEpoch": 1,
   "result": "hit",
+  "effect": "firebolt",
   "tile": { "x": 4, "y": 3 },
-  "image": {
-    "namespace": "resource.Graphics",
-    "key": "<configured-effect-key>",
-    "contentVersion": "<actual-content-version>"
-  },
-  "fadeInTicks": 1,
-  "holdTicks": 1,
-  "fadeOutTicks": 1
+  "startTick": 120
 }
 ```
 
-Browser 按 `effectId` 去重和清理。动画不决定伤害、生死、Tick 或战斗结果；Frame 终止时清理旧效果。
-
+Presentation 自己解析 `BattleEffect` 的 Graphics 和视觉时间线。动画不决定伤害、生死、Tick 或战斗结果；Frame 终止时清理旧效果。
 
 ## 10. 受击：中断、重新决策和固定保护区间
 
@@ -556,7 +854,7 @@ Battle 采用类似 Event Loop 的思想，但异步回调顺序不是游戏规�
 1. **截取当前 Tick 事件快照**：只取 `dueTick === currentTick` 的有效候选；更早 Tick 应在之前的逐 Tick补处理循环中已经结算。
 2. **过滤 Battle/Actor/代次失效事件**：死亡、旧 action generation、旧 decision generation 等不能继续提交。已开始原子移动的 step token 按第 8 节例外完成。
 3. **完成本 Tick 到期移动**：统一提交所有有效 `move_complete`，原子释放起点/占用终点/释放预约。
-4. **收集本 Tick 到期技能**：把有效 `cast_complete` 放入候选命中集合。
+4. **收集本 Tick 到期技能**：把有效 `skill_resolve` 放入候选命中集合。
 5. **解析技能结果**：基于**移动完成后的最新位置**和本命中批次开始前的保护状态，把每次技能归约为 `hit / immune / invalid`。
 6. **批量应用 hit 伤害**：同步修改 HP；同 Tick 已经到期的双方攻击不会因代码处理顺序互相吞掉。
 7. **终局闸门**：如果产生死亡/双亡并达到结束条件，立即冻结新的游戏行为，只保留日志/表现/Frame 收尾。
@@ -564,7 +862,7 @@ Battle 采用类似 Event Loop 的思想，但异步回调顺序不是游戏规�
 9. **接收本 Tick 可用的 Decision**：用实际完成时间、deadline、generation 和当前战场验证；timeout 与 ready 同 Tick 不按事件排序决定，而按 Decision State 的完成事实判断。
 10. **推进现有/新计划**：检查当前格是否满足技能起手；受保护 Actor 只禁止攻击，不禁止计划中的合法移动。
 11. **统一下一格预约**：其余移动计划同时申请下一格并裁决；成功者启动原子 step，失败者记录原因并安排后续 Tick 的重新决策。
-12. **安排未来事件并发布快照**：新增未来 `move_complete`、`cast_complete` 等；递增状态版本并投影到 Browser。
+12. **安排未来事件并发布快照**：新增未来 `move_complete`、`skill_resolve` 等；递增状态版本并投影到 Browser。
 
 处理期间新产生的未来动作不能重新进入当前 Tick 的事件快照，避免零时间递归。
 
@@ -639,7 +937,8 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 
 ### 13.1 真实行为验收
 
-- 一张与既有素材/地图形式兼容的 Battle 地图、两个合法可见 Sprite；双方位置只源于 Battle 自有地图权威。
+- `struct.Map` / `struct.Tileset` / Character Graphics 可直接沿用现有 RPGMap 内容形式，不新增 BattleMap/BattleActorVisual；一张兼容地图和两个合法可见 Character Sprite 可正常投影。
+- `BattleActor` 能引用 Character、max_hp 与 skills；`BattleSkill` 能用单一 m×n 范围矩阵表达朝向范围和系数；`BattleEffect` 可独立替换图片/视觉时间而不改变技能规则。
 - 单格移动使用「起点占用 + 终点预约 + 到期原子提交」；Browser 没有反向提交半格位置。
 - 移动中受击时，本格仍完成；旧多格计划后续步骤取消，新计划从本格完成后的真实位置继续。
 - 宿主从 Tick 10 晚醒到 Tick 14 时，Tick 11/12/13/14 按序分别归约，不能把不同 dueTick 的事件当成同时发生。
@@ -647,7 +946,8 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 - LLM 实际耗时 500 ms 按最早 600 ms/Tick 边界生效；恰好 deadline 完成按统一 completed-time 规则处理，不由 timeout/ready 回调先后决定。
 - 合法候选 `planId` 显式携带 path；Battle 不暗中替 AI 选择等价路线；执行时每格重新检查动态占位/预约。
 - 保护期内可以沿计划移动、可以保留攻击意图，但不能开始施法；保护结束后重新检查射程，仍合法才起手。
-- 技能到期至少产生 `hit / immune / invalid` 三种确定结果；`immune` 不伤害、不打断、不刷新保护。
+- 技能矩阵必须只有一个 `"↑"`，0/矩阵外无效，正数为合法格和效果系数；Actor 朝向变化时同一矩阵正确旋转。
+- 技能前摇结束至少产生 `hit / immune / invalid` 三种确定结果；`immune` 不伤害、不打断、不刷新保护。
 - 同 Tick 先完成所有移动，再解析到期技能；锁定 Actor 的技能效果落在目标本 Tick 移动完成后的最新格。
 - 双方同 Tick 争一格无重叠；失败方收到原因并在后续 Tick 重决策，不发生零时间重试。
 - 同 Tick 双技能按批处理，无顺序作弊；双亡有明确结果。
@@ -659,7 +959,7 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 
 ### 13.2 实施依赖顺序
 
-冻结 Contracts 与地图/Actor 输入 Schema → 先实现可无 Decision/无 Browser 独立运行的 Simulation（200 ms 单调时钟、逐 Tick scheduler、事件队列、Actor 状态、原子移动、预约、技能与保护）→ 实现 Render Projection 与独立 Presentation → 实现 path-based Legal Plans / Observation → 用 Mock/Script Decision 驱动 Simulation 覆盖边界测试 → 接受控 LLM Decision / 玩家指导 → Hostra/Browser E2E。
+冻结 RPGMap 兼容资源边界 + `BattleActor / BattleSkill / BattleEffect` Content 契约 → 实现范围矩阵解析/旋转与 Actor direction 规则 → 先实现可无 Decision/无 Browser 独立运行的 Simulation（200 ms 单调时钟、逐 Tick scheduler、事件队列、Actor 状态、原子移动、预约、技能前摇/结算/后摇与保护）→ 实现 Render Projection 与独立 Presentation → 实现 path-based Legal Plans / Observation → 用 Mock/Script Decision 驱动 Simulation 覆盖边界测试 → 接受控 LLM Decision / 玩家指导 → Hostra/Browser E2E。
 
 **明确不在 v0：**传统交替回合、复用 RPGMap Runtime、逐格调用 LLM、MP/通用技能资源系统、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动、移动途中施法触发、事件队列、原子单格移动和显式 path 计划**已进入 v0**。
 
@@ -668,14 +968,14 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 
 以下问题仍可留到实现/模拟阶段决定；不要把已经冻结的事件语义重新列为开放问题：
 
-1. Battle 要兼容到什么程度的 RPGMap 地图/Tileset/Character 素材形式；哪些结构直接复用 Content Schema，哪些转换为 Battle 专用输入？
-2. 单格移动、技能蓄力、保护和一次计划最大 path 的具体 Tick 数值。
+1. `BattleActor / BattleSkill / BattleEffect` 的正式 Content Schema subject/version、字段命名和 Content key/id 对齐规则；Map/Tileset/Character 基础素材已决定沿用现有 RPGMap 形式。
+2. 单格移动、技能前摇/后摇、保护和一次计划最大 path 的具体 Tick 数值；后摇期间允许哪些动作以及受击如何处理。
 3. 同格预约冲突的公平平手算法；若算法包含随机性必须使用并记录 `battleSeed`。
 4. 宿主失焦/用户主动暂停时，是冻结 Battle 单调时钟还是继续流逝；如果继续流逝，恢复后仍必须逐 Tick 顺序补算。
 5. Decision Adapter 如何可靠提供完成时刻、deadline、取消以及服务错误元数据；不同模型/网络的耗时差异是否需要产品层限制。
 6. 合法候选 path 的生成数量、去重和搜索预算；不能生成过多候选把 Prompt 撑爆，也不能只提供一个路线使 AI 无实际路线选择。
-7. 技能实际射程度量、是否做 LOS，以及以后不同技能的锁定/固定格/资源限制扩展。
-8. `immune` 的 Browser 表现是否只播放原技能效果，还是增加专门免疫提示。
+7. `tracking` 的正式枚举与结算语义；范围矩阵伤害系数的整数化/舍入规则；是否做 LOS。地面选点、AOE/第二张 effect matrix 与其他 target/effect type 暂不进入 v0。
+8. `BattleEffect` 的正式视觉 timing/anchor Schema，以及 `immune` 是复用原技能效果还是增加专门免疫提示。
 9. Presentation 的 RenderProjection 具体 Schema、地图/双 Sprite/技能贴图节点和生命周期；Camera 是否完全由 Presentation 自主，或接受 Simulation 的非权威 focus hint。
 10. 四选一指导如何通过现有授权 InputTarget 进入下一个我方 Decision Observation。
 11. 长期无伤害追逐或 AI 持续无效规划暂不设置强制战斗总时长；根据 `ticksSinceLastDamage` 等诊断指标再决定是否增加僵局规则。
