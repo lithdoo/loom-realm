@@ -44,9 +44,9 @@ Battle 不复用 RPGMap Runtime，但 **Map / Tileset / Autotile / Character Gra
 
 双方同时行动，Simulation 以 **200 ms/Tick** 和自有事件队列统一调度。宿主晚醒时逐 Tick 补算；单格移动采用**起点占用 + 终点预约 + `move_complete` 原子提交**。移动中受击不会取消已经开始的这一格，只取消后续计划。
 
-一次 Decision 调用产生一段短期计划。v0 优先使用显式 `planId + path` 的合法候选，让路线本身成为决策的一部分。每个 Actor 同时最多一个有效 Decision Request。
+一次 Decision 调用产生一段短期计划。v0 优先使用显式 `planId + path` 的合法候选，让路线本身成为决策的一部分；带技能候选额外携带 `minCoefficient`，让**出手时机**也保留为 Decision 的战术选择。每个 Actor 同时最多一个有效 Decision Request。
 
-v0 不引入 MP 或固定技能资源系统。技能用范围矩阵判断目标位置是否合法并得到效果系数；规则时间先只保留前摇和后摇，前摇结束时结算。目标移动后的持续有效性由 tracking 决定，具体枚举仍待冻结。结算至少区分 `hit / immune / invalid`。受到有效伤害后进入固定上限保护：保护期间可以思考和移动，但不能攻击/施法；再次命中为 `immune`，不会刷新保护。
+v0 不引入 MP 或固定技能资源系统。Skill 的范围矩阵只定义目标位置是否合法以及效果系数；**是否在当前合法位置立即出手属于 Plan 决策**。带技能的 LegalPlan 显式携带 `skillId + targetActorId + minCoefficient`：只有当前目标格系数达到本计划的 `minCoefficient` 才停止剩余移动并进入前摇，因此 AI 可以选择“远处尽快出手”或“继续靠近到更高系数再出手”。只移动计划不会因途中技能可用而自动攻击。规则时间先只保留前摇和后摇，前摇结束时结算。目标移动后的持续有效性由 tracking 决定，具体枚举仍待冻结。结算至少区分 `hit / immune / invalid`。受到有效伤害后进入固定上限保护：保护期间可以思考和移动，但不能攻击/施法；再次命中为 `immune`，不会刷新保护。
 
 Frame abort / Battle cancel 属于控制平面，立即终止 Simulation 提交权，不等待下一个 Tick。
 
@@ -54,7 +54,7 @@ Frame abort / Battle cancel 属于控制平面，立即终止 Simulation 提交�
 
 - 三层都尚未实现；Simulation 必须先做到**无 Browser、无 LLM 也能被 Mock/Script 驱动跑完整场战斗**。
 - Map/Tileset/Character 基础素材已决定沿用 RPGMap 格式；`BattleActor / BattleSkill / BattleEffect` 的正式 Content Schema subject/version、RenderProjection 和 Observation/LegalPlan Schema 尚未冻结。
-- 200 ms 单调时钟、逐 Tick scheduler、事件优先队列、代次取消、原子逐格预约、范围矩阵旋转/系数、技能前摇/后摇、同 Tick 冲突、批量伤害和终局闸门均仍是设计。
+- 200 ms 单调时钟、逐 Tick scheduler、事件优先队列、代次取消、原子逐格预约、范围矩阵旋转/系数、Plan `minCoefficient` 起手阈值、技能前摇/后摇、同 Tick 冲突、批量伤害和终局闸门均仍是设计。
 - Presentation 的地图/双 Sprite/`BattleEffect` 投影、camera API 和 Browser 生命周期尚待设计；表现事件默认不是规则 ACK。
 - `SubsystemScope` 尚无公开 LLM 服务；真实 LLM Decision 的宿主、授权、密钥、取消、完成时刻、deadline 和超时需要受控接口。
 - 玩家未来通过四选一提示卡指导我方；v0 可固定 guidance 或跳过。提示词优化、跨战学习和长期记忆不属于核心闭环。
