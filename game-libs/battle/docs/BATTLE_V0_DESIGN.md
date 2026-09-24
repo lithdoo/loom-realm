@@ -11,7 +11,7 @@ Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三�
 
 我方和敌方两个 Actor **同时**沿各自时间轴思考、移动和施法，不等待对方结束回合。Battle 以 **1 Tick = 200 ms** 作为权威逻辑时间粒度，并维护自己的**事件队列**。LLM 调用、移动完成、技能完成、受击中断、保护到期等都转换为按 Tick 对齐的事件；异步回调本身不能直接修改战斗状态。
 
-最小闭环：加载兼容的地图/素材数据 → 放置两个 Actor → 并发发起各自 LLM/模拟决策 → 把返回结果量化到 Tick 并入队 → Actor 根据短期计划逐格移动 → 途中进入射程则停止后续移动并施法 → 技能按事件到期统一结算 → 受阻或受击取消旧计划并重新决策 → 双方持续并发行动，直到一方/双方死亡或战斗被外部终止。
+最小闭环：加载兼容的地图/素材数据 → 放置两个 Actor → 并发发起各自 LLM/模拟决策 → 把返回结果量化到 Tick 并入队 → Actor 根据短期计划逐格移动 → 途中目标落入技能范围矩阵合法格则停止后续移动并进入前摇 → 前摇到期统一结算 → 进入后摇 → 受阻或受击按规则取消旧计划并重新决策 → 双方持续并发行动，直到一方/双方死亡或战斗被外部终止。
 
 这里的「同时」不是多线程并发写状态，而是**同一个事件调度器在相同逻辑时间批量处理双方事件**。LLM、Promise、Browser 动画和 DOM 都没有权威状态提交权。
 
@@ -38,12 +38,12 @@ Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三�
 | 普通单体技能 | 合法起手后锁定 Actor；目标普通移动不会使该技能自动落空 | v0 建议默认 |
 | 技能限制 | v0 **不引入 MP**；以后可按技能选择冷却、次数、能量、弹药等限制形式 | 已明确移除 MP 前提 |
 | 受击保护 | 使用半开区间语义 `[hitTick + 1, protectedUntilTickExclusive)`；保护期间允许思考/移动，不能攻击/施法，不受伤、不再次中断、不刷新保护 | 实现前冻结规则 |
-| 保护中的攻击计划 | LLM 可返回带攻击意图的计划；保护只禁止 `cast_start`，移动仍可执行，保护结束后按最新战况重新检查是否起手 | 实现前冻结规则 |
+| 保护中的攻击计划 | LLM 可返回带攻击意图的计划；保护只禁止 `windup_start`，移动仍可执行，保护结束后按最新战况重新检查是否起手 | 实现前冻结规则 |
 | 生命周期取消 | Frame abort / Battle cancel 属于控制平面，立即失效 Battle authority，不等待下一个 Tick | 实现前冻结规则 |
 | 技能视觉 | 结算后只在命中格叠一张贴图，按 Tick 阶段渐显渐隐 | 产品方向；具体 Browser 接口待定 |
 | 玩家指导 | 未来四选一指导影响我方下一次 LLM 请求；原型可固定 guidance 或跳过 | 后续交互设计 |
 
-**未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能射程/伤害/前摇 Tick、保护 Tick 数等均需实测。当前明确冻结的是 **200 ms/Tick 的基础时间粒度和上述事件/动作语义**。
+**未冻结的平衡值：**地图大小、一次计划最大移动格数、单格移动 Tick 数、技能范围矩阵/伤害/前摇与后摇 Tick、保护 Tick 数等均需实测。当前明确冻结的是 **200 ms/Tick 的基础时间粒度和上述事件/动作语义**。
 
 
 ## 3. 三层架构、接口与权威归属
@@ -85,7 +85,7 @@ Simulation 是 Battle 的唯一业务权威。它负责：
 - Battle 单调时钟、200 ms Tick、事件队列与确定性归约；
 - 地图格子、静态通行、Actor 已提交坐标/朝向、下一格预约；
 - 原子单格移动、多格计划执行、冲突裁决；
-- 技能起手、蓄力、`hit / immune / invalid`、伤害、死亡；
+- 技能起手、前摇、结算、后摇、`hit / immune / invalid`、伤害、死亡；
 - 受击中断、保护区间、action/decision generation；
 - 合法计划候选、行为提交验证、Battle Result、事件日志与回放事实。
 
@@ -108,9 +108,11 @@ cancelBattle()
 submit
   → move_started
   → move_complete
-  → cast_started
+  → windup_started
   → skill_resolve
   → hit / immune / invalid
+  → recovery_started
+  → recovery_complete
 ```
 
 真实结果通过后续权威事件/快照产生。
@@ -213,9 +215,11 @@ Decision
   → choose attack plan
 
 Simulation
-  → cast_started
-  → after N ticks: hit / immune / invalid
+  → windup_started
+  → after N ticks: skill_resolve
+  → hit / immune / invalid
   → update HP / state
+  → recovery_started
   → emit effect projection
 
 Presentation
@@ -554,6 +558,7 @@ BattleEvent
 - `decision_ready`：LLM 结果最早可在某 Tick 被接收；
 - `move_complete`：某一格原子移动到期；
 - `skill_resolve`：技能前摇到期，进入该 Tick 候选命中集合；
+- `recovery_complete`：技能后摇到期，Actor 可以离开 recovery 状态；
 - 决策服务完成/错误的外部回调可登记状态和完成时刻，但不能直接改 Battle State。
 
 **受击保护不依赖 `protection_expire` 业务事件来决定是否生效。**规则直接用 `protectedUntilTickExclusive` 与当前 Tick 比较，避免同 Tick 的“保护到期事件”和“技能命中事件”产生排序歧义。
@@ -694,13 +699,13 @@ Battle 只保证这条 path 在**生成候选的当前快照**下合法，不承
 
 1. 请求绑定当前 Actor 的 `decisionGeneration`；旧 generation 永远不能提交计划。
 2. 接受结果时用最新战场检查计划起始条件。敌人在请求期间正常移动，不自动使整份战略意图失效。
-3. 执行 path 时，每一步开始前重新检查通行、占位和预约；每一步完成后检查是否进入技能射程。
-4. 如果提前进入射程并允许攻击，停止剩余 path、开始施法；如果受击保护尚未结束，则**保留该计划的攻击意图，但禁止 `cast_start`**。
-5. 保护期间仍可继续该计划允许的移动。保护到期后，在开始任何攻击前重新检查目标存活、射程和计划代次；仍合法则施法，不合法则继续剩余计划或结束并重新决策。
+3. 执行 path 时，每一步开始前重新检查通行、占位和预约；每一步完成后根据当前 `direction` 旋转技能范围矩阵并检查目标是否落在合法格。
+4. 如果目标提前进入合法范围且允许攻击，停止剩余 path、进入技能前摇；如果受击保护尚未结束，则**保留该计划的攻击意图，但禁止 `windup_start`**。
+5. 保护期间仍可继续该计划允许的移动。保护到期后，在开始任何攻击前重新检查目标存活、范围矩阵、朝向和计划代次；仍合法则进入前摇，不合法则继续剩余计划或结束并重新决策。
 6. 路线受阻、目标消失、路径耗尽或计划已失去意义时，停止计划并 `ensureDecision`；不能在同一 Tick 无限重试。
 7. 模型格式错误/非法候选允许有限重试；超时/服务失败采用确定性保底行为。重试不能凭空暂停 Battle，也不能延长受击保护。
 
-Decision Observation 至少包含双方公开 HP、整数格位置、当前 action state、技能耗时、保护剩余 Tick、对手是否正在施法/移动，以及最近冲突/失败原因。v0 不发送 MP。
+Decision Observation 至少包含双方公开 HP、整数格位置/朝向、当前 action state、技能范围矩阵与前摇/后摇、保护剩余 Tick、对手是否正在移动/技能前摇/后摇，以及最近冲突/失败原因。v0 不发送 MP。
 
 平台现状：当前公开 `SubsystemScope` 未提供 LLM API；Decision Adapter 的宿主、授权、密钥保护、完成时刻、deadline、取消需另立设计，不让 Browser 持有密钥。可先使用可控延迟的模拟 Adapter。
 
@@ -834,7 +839,7 @@ Presentation 自己解析 `BattleEffect` 的 Graphics 和视觉时间线。动�
 2. **不撤销已经开始的原子单格移动**，该 step 仍会完成；
 3. 创建且只创建一个新的 Decision Request；
 4. 设置新的 `protectedUntilTickExclusive`；
-5. 保护期间可以思考和移动用于脱险，但不能 `cast_start`；
+5. 保护期间可以思考和移动用于脱险，但不能 `windup_start`；
 6. 后续攻击若命中受保护 Actor，结算为 `immune`：不伤害、不再次中断、也不刷新/延长保护；
 7. Tick 到达 `protectedUntilTickExclusive` 后自然恢复正常攻击与受击能力。
 
@@ -853,16 +858,16 @@ Battle 采用类似 Event Loop 的思想，但异步回调顺序不是游戏规�
 
 1. **截取当前 Tick 事件快照**：只取 `dueTick === currentTick` 的有效候选；更早 Tick 应在之前的逐 Tick补处理循环中已经结算。
 2. **过滤 Battle/Actor/代次失效事件**：死亡、旧 action generation、旧 decision generation 等不能继续提交。已开始原子移动的 step token 按第 8 节例外完成。
-3. **完成本 Tick 到期移动**：统一提交所有有效 `move_complete`，原子释放起点/占用终点/释放预约。
+3. **完成本 Tick 到期移动与既有后摇结束**：统一提交有效 `move_complete`，原子释放起点/占用终点/释放预约；处理本 Tick 到期且仍有效的 `recovery_complete`。后摇受击是否提前结束仍按第 9 节待确认规则处理。
 4. **收集本 Tick 到期技能**：把有效 `skill_resolve` 放入候选命中集合。
 5. **解析技能结果**：基于**移动完成后的最新位置**和本命中批次开始前的保护状态，把每次技能归约为 `hit / immune / invalid`。
 6. **批量应用 hit 伤害**：同步修改 HP；同 Tick 已经到期的双方攻击不会因代码处理顺序互相吞掉。
 7. **终局闸门**：如果产生死亡/双亡并达到结束条件，立即冻结新的游戏行为，只保留日志/表现/Frame 收尾。
-8. **处理存活受击者**：失效旧计划/施法/Decision generation，设置保护，并对每个 Actor 最多启动一个新 Decision Request。
+8. **处理存活受击者**：失效旧计划/未结算技能前摇/Decision generation，设置保护，并对每个 Actor 最多启动一个新 Decision Request。
 9. **接收本 Tick 可用的 Decision**：用实际完成时间、deadline、generation 和当前战场验证；timeout 与 ready 同 Tick 不按事件排序决定，而按 Decision State 的完成事实判断。
 10. **推进现有/新计划**：检查当前格是否满足技能起手；受保护 Actor 只禁止攻击，不禁止计划中的合法移动。
 11. **统一下一格预约**：其余移动计划同时申请下一格并裁决；成功者启动原子 step，失败者记录原因并安排后续 Tick 的重新决策。
-12. **安排未来事件并发布快照**：新增未来 `move_complete`、`skill_resolve` 等；递增状态版本并投影到 Browser。
+12. **安排未来事件并发布快照**：新增未来 `move_complete`、`skill_resolve`、`recovery_complete` 等；递增状态版本并投影到 Browser。
 
 处理期间新产生的未来动作不能重新进入当前 Tick 的事件快照，避免零时间递归。
 
@@ -945,7 +950,7 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 - 每个 Actor 同时最多一个有效 Decision Request；同 Tick 出现多个“需要重规划”的原因也不会重复发起 LLM。
 - LLM 实际耗时 500 ms 按最早 600 ms/Tick 边界生效；恰好 deadline 完成按统一 completed-time 规则处理，不由 timeout/ready 回调先后决定。
 - 合法候选 `planId` 显式携带 path；Battle 不暗中替 AI 选择等价路线；执行时每格重新检查动态占位/预约。
-- 保护期内可以沿计划移动、可以保留攻击意图，但不能开始施法；保护结束后重新检查射程，仍合法才起手。
+- 保护期内可以沿计划移动、可以保留攻击意图，但不能开始技能前摇；保护结束后重新检查朝向与范围矩阵，仍合法才起手。
 - 技能矩阵必须只有一个 `"↑"`，0/矩阵外无效，正数为合法格和效果系数；Actor 朝向变化时同一矩阵正确旋转。
 - 技能前摇结束至少产生 `hit / immune / invalid` 三种确定结果；`immune` 不伤害、不打断、不刷新保护。
 - 同 Tick 先完成所有移动，再解析到期技能；锁定 Actor 的技能效果落在目标本 Tick 移动完成后的最新格。
