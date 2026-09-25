@@ -112,7 +112,7 @@ README 和本索引只是导航，不覆盖上述规范。
 tile            权威整数格
 direction       2 | 4 | 6 | 8；不再另用 facing 表示同一字段
 path            PlanSubmission 中未来要进入的格，不包含当前格
-step            已经开始的一格原子移动
+step            已经开始的一格移动；受 damaging hit 时可被中断，永远不会停在半格
 PlanSubmission  Decision 提交、尚未被 Simulation 接受的计划
 accepted plan   Simulation 已接受并拥有的计划
 acceptedPlanId  Simulation 内部标识
@@ -157,10 +157,12 @@ protection      命中后的有限免疫区间
 - `path` 不含起点、四方向、默认 `maxPathSteps=6`；
 - `minCoefficient` 只控制技能起手；
 - coefficient 千分制、向下取整、允许 0 damage；
-- 原子逐格移动与 next-tile reservation；
+- 单格移动采用 committed origin + next-tile reservation + move_complete 原子提交；
+- move_start 瞬间更新 direction；
+- 保留独立原地 `turn` Action；turn 立即改 direction，但消耗本 Tick唯一新 Action 配额；
 - 同格冲突使用 `battleSeed` 的可回放等概率伪随机；
 - 直接 swap 禁止；
-- 非致命受击不撤销已启动 step；
+- active step 中受到 positive damage 会立即移动失败：释放 destination reservation，留在最后 committed tile；存活者进入 protection + 受击后 Decision，死亡者不再 Decision；
 - 无 `tracking`；resolve 读取当前相对位置；
 - 退到较低 coefficient 按当前倍率；范围外 `miss`；
 - `windup_ticks=0` 使用 bounded instant-resolve batch；
@@ -168,7 +170,11 @@ protection      命中后的有限免疫区间
 - protection 半开区间语义；
 - same-batch protection 不回溯，允许 simultaneous defeat；
 - move-only Plan 不自动攻击；
-- protection 中可移动/Thinking、不能 `windup_start`，攻击意图可保留并在结束后重检；
+- protection 中可移动/turn/Thinking、不能 `windup_start`，攻击意图可保留并在结束后重检；
+- `finalDamage=0` 的命中仍是 `hit`，但不触发 interruption/protection/redecision；
+- v0 不做 LOS，Tile passability 不阻挡技能；
+- pause/background 冻结 Battle clock；
+- v0 不设正式 stalemate / 最大战斗时长，只记录无进展 diagnostics；
 - abort/cancel 属于即时控制平面；
 - Replay 不重新调用 LLM；
 - Presentation/camera/DOM 无规则提交权；
@@ -176,18 +182,22 @@ protection      命中后的有限免疫区间
 - Guidance 只进入 Decision，不直接修改 Simulation；
 - 当前不强制总 Battle 时长，先记录无进展诊断。
 
-## 7. 当前明确 OPEN 的问题
+## 7. Core gameplay OPEN 状态
 
-核心 gameplay OPEN：
+此前列出的 6 个核心 OPEN 已全部冻结，不再允许 Runtime 自行选择行为：
 
-- `OPEN-DIR-001`：direction 在 move start 还是 move_complete 更新；v0 是否存在显式 `turn`。
-- `OPEN-MOVE-001`：Actor 在 active step 中被致命击杀后，该 step 是否仍提交。
-- `OPEN-HIT-001`：`finalDamage=0` 的 `hit` 是否触发 interruption/protection。
-- `OPEN-LOS-001`：v0 是否存在技能 LOS。
-- `OPEN-CLOCK-001`：Host pause/background 时冻结 Battle clock 还是继续/catch-up。
-- `OPEN-STALEMATE-001`：是否需要正式 stalemate 结果。
+| 原 OPEN | 当前冻结规则 |
+| --- | --- |
+| `OPEN-DIR-001` | `TURN-001 / MOVE-006`：move_start 瞬间转向；保留独立原地 turn Action |
+| `OPEN-MOVE-001` | `MOVE-007 / HIT-003`：damaging hit 立即中断 active step；死亡留在最后 committed tile |
+| `OPEN-HIT-001` | `HIT-007`：zero-damage hit 无受击 aftermath |
+| `OPEN-LOS-001` | `SKILL-006`：v0 不做 LOS |
+| `OPEN-CLOCK-001` | `TIME-004`：pause/background 冻结 Battle clock |
+| `OPEN-STALEMATE-001` | `RESULT-002`：v0 不设正式 stalemate/最大时长 |
 
-Contracts / Integration OPEN 见对应文档，不应在核心 Runtime 中自行猜测。
+**当前 Core gameplay 没有未冻结 OPEN 项。**
+
+仍存在的 OPEN 只属于 Contracts / Integration，例如 Content subject/version、BattleEffect/RenderProjection exact Schema、Decision Adapter、Guidance Host wiring；它们不得改变 Core 已冻结玩法语义。
 
 ## 8. 当前实施入口
 
