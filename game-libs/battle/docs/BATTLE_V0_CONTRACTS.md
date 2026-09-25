@@ -151,7 +151,7 @@ timing.recovery_ticks
 effect
 ```
 
-v0 does not contain `tracking`, MP, accuracy, critical hit, element, armor penetration, universal cooldown, ammo, or target/effect type fields.
+v0 does not contain `tracking`, `active_ticks`, MP, accuracy, critical hit, element, armor penetration, universal cooldown, ammo, or target/effect type fields. Visual effect duration belongs to BattleEffect/Presentation, not BattleSkill rule timing.
 
 Range validation follows `SKILL-001`:
 
