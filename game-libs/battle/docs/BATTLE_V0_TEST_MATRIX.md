@@ -23,6 +23,8 @@
 | T-TIME-004 | DEC-001 | Decision 实际耗时 500 ms | 最早 600 ms / 3 Tick 可用 |
 | T-TIME-005 | DEC-001 | completedAt == deadline | 判定完成成功 |
 | T-TIME-006 | DEC-001 | 模型 deadline 前完成，但 Host callback 更晚处理 | 使用 trusted completion time，不看 callback 顺序 |
+| T-TIME-007 | TIME-004 | Battle pause/background 期间现实经过 30 秒 | currentTick 不推进，不产生 150 个 catch-up Tick |
+| T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；pause freeze 不改变正常 catch-up 规则 |
 
 ## 3. PlanSubmission
 
@@ -40,20 +42,30 @@
 | T-PLAN-010 | DEC-002 | 旧 generation 响应迟到 | 无提交权 |
 | T-PLAN-011 | PLAN-007 | path 走完仍没达到 minCoefficient | 不自动降级用更低 coefficient 攻击 |
 | T-PLAN-012 | PLAN-008 | move-only plan 途中进入技能合法格 | 不自动施法 |
+| T-PLAN-013 | PLAN-003, PLAN-005 | 同时提交 turn + 非空 path | reject `turn_with_path` |
+| T-PLAN-014 | PLAN-003 | turn 使用非法 Direction | reject `invalid_turn` |
 
-## 4. Movement / Contention
+## 4. Turn / Movement / Contention
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
+| T-TURN-001 | TURN-001, STATE-004 | Actor 原地 turn right | committed tile 不变，direction 立即变 right，本 Tick不能再启动第二个 Action |
+| T-TURN-002 | TURN-001, PLAN-003 | Plan = turn right + skill intent | Tick N 只执行 turn；skill 最早后续 Tick重新校验后起手 |
+| T-TURN-003 | TURN-001, HIT-005 | protected Actor 执行 turn | 允许 turn；仍不能 windup |
+| T-TURN-004 | TURN-001, SKILL-004 | recovery Actor 尝试 turn | recovery 是 action lock，不能 turn |
 | T-MOVE-001 | MOVE-001 | Actor 视觉上处于 A→B 中间 | committed/occupied 仍是 A，B 被预约 |
-| T-MOVE-002 | MOVE-001 | `move_complete` 到期 | 原子释放 A、占用 B、释放 reservation |
+| T-MOVE-002 | MOVE-001 | `move_complete` 到期且 step 未被中断 | 原子释放 A、占用 B、释放 reservation |
 | T-MOVE-003 | MOVE-002 | path A→B→C | A→B 提交前不得启动 B→C |
 | T-MOVE-004 | MOVE-003, RNG-001 | A/B 同 Tick 抢同一格 | 只一个赢家；使用 seeded 等概率裁决 |
 | T-MOVE-005 | MOVE-003 | 相同 seed/Tick/tile/competitors Replay | 得到同一赢家 |
 | T-MOVE-006 | MOVE-003 | 改变 Promise/遍历顺序 | 裁决结果仍只由稳定输入决定 |
 | T-MOVE-007 | MOVE-004 | 相邻 Actor 同 Tick 直接 swap | v0 禁止 |
 | T-MOVE-008 | MOVE-005 | Actor 输掉 contested tile | 留原格、plan 结束、后续重规划，不同 Tick 零时间重试 |
-| T-MOVE-009 | MOVE-006 | active step 中受到非致命实际伤害 | 当前 step 仍完成，旧 path 后续取消 |
+| T-MOVE-009 | MOVE-006 | Actor 从 A 向右 move_start | direction 立即变 right，但 committed tile 仍是 A |
+| T-MOVE-010 | MOVE-007, HIT-003 | active step A→B 中受到非致命 positive damage | step 立即失败；释放 B reservation；留在 A；获得 protection；旧 plan/Decision 失效并创建一次受击后 Decision |
+| T-MOVE-011 | MOVE-007, HIT-003 | active step A→B 中受到致命 damage | step 立即失败；释放 B reservation；dead 留在 A；无新 protection/Decision |
+| T-MOVE-012 | MOVE-007, TICK-001 | Tick N phase 3 已成功 move_complete 到 B，随后 phase 5–7 被命中 | 伤害发生时 step 已完成，Actor 留在 B，不回滚到 A |
+| T-MOVE-013 | MOVE-006, MOVE-007 | move_start 向右后被中断 | committed tile 留 origin，但 direction 保持 right，不回滚 |
 
 ## 5. Skill Range / Coefficient
 
@@ -70,6 +82,7 @@
 | T-SKILL-009 | SKILL-003 | 1.0 起手，前摇中目标退到 0.5 | 按 resolve 时 0.5 结算 |
 | T-SKILL-010 | SKILL-003, HIT-001 | 前摇中目标离开矩阵 | `miss` |
 | T-SKILL-011 | SKILL-002, SKILL-003 | min=1.0 起手，resolve 时只剩 0.5 | 不二次检查 min；按 0.5 结算 |
+| T-SKILL-012 | SKILL-006 | caster 与 target 中间有不可通行 Tile，但 target 在正 coefficient 格 | v0 不做 LOS；范围规则仍合法 |
 
 ## 6. Instant Skill / Tick Batch
 
@@ -94,7 +107,9 @@
 | T-HIT-008 | HIT-004 | recovery 中收到 immune impact | recovery 继续 |
 | T-HIT-009 | HIT-006 | 同 batch 两个攻击命中同一未保护 target | 两个都按 batch-start protection 判断 |
 | T-HIT-010 | HIT-006 | 同 batch 双方都死亡 | simultaneous defeat |
-| T-HIT-011 | HIT-005, PLAN-007 | protected Actor 有 accepted attack plan | 可 Thinking/移动但不能 windup；保护结束后按最新状态和同一 threshold 重检 |
+| T-HIT-011 | HIT-005, PLAN-007 | protected Actor 有 accepted attack plan | 可 Thinking/移动/turn 但不能 windup；保护结束后按最新状态和同一 threshold 重检 |
+| T-HIT-012 | DAMAGE-001, HIT-007 | 几何命中但 finalDamage=0 | outcome 仍为 hit；HP 不变；不打断、不 protection、不 redecision |
+| T-HIT-013 | HIT-007 | recovery/moving Actor 收到 zero-damage hit | 当前 Action 正常继续 |
 
 ## 8. Decision / Recovery 并发
 
@@ -132,19 +147,13 @@
 | T-RESULT-002 | RESULT-001 | ally 单独 HP=0 | enemy win |
 | T-RESULT-003 | RESULT-001, HIT-006 | 双方同 batch HP=0 | simultaneous defeat |
 | T-RESULT-004 | CTRL-001, RESULT-001 | 外部 cancel | cancelled termination path |
+| T-RESULT-005 | RESULT-002, REPLAY-002 | 长时间无伤害/无进展 | v0 不自动 stalemate/timeout；只更新 diagnostics |
 
-## 12. OPEN Rule 测试占位
+## 12. Core OPEN 状态
 
-以下测试只有对应 Rule 冻结后才能写 Expected：
+当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
 
-| Placeholder | OPEN Rule | 问题 |
-| --- | --- | --- |
-| T-OPEN-DIR | OPEN-DIR-001 | direction 在 move start 还是 move_complete 更新？是否有显式 turn？ |
-| T-OPEN-LETHAL-MOVE | OPEN-MOVE-001 | active step 中被致命击杀是否还完成当前 step？ |
-| T-OPEN-ZERO-DAMAGE | OPEN-HIT-001 | finalDamage=0 的 hit 是否触发 interruption/protection？ |
-| T-OPEN-LOS | OPEN-LOS-001 | terrain 是否阻挡 skill？ |
-| T-OPEN-CLOCK | OPEN-CLOCK-001 | pause/background 时 freeze clock 还是 catch-up？ |
-| T-OPEN-STALEMATE | OPEN-STALEMATE-001 | 是否存在正式 stalemate result？ |
+Contracts / Integration 仍有 Schema、Presentation、Decision Adapter、Guidance 等 OPEN；这些在对应接口冻结后再增加集成测试，不在本 Core Rule Matrix 中暗定。
 
 ## 13. 接真实 LLM 前的最低 Gate
 
@@ -152,14 +161,21 @@
 
 - overdue Tick catch-up；
 - timeout/ready 同边界；
-- moving Actor 受击；
-- 同 Tick move completion + skill resolve；
+- turn-only / turn+skill 的 Action 配额；
+- move_start 瞬间转向；
+- moving Actor 被 positive damage 中断并留 committed origin；
+- moving Actor 被致命伤害时取消 step 且不新建 Decision；
+- 同 Tick move completion + 后续 skill resolve；
 - protection + retained attack intent；
+- zero-damage hit 无 aftermath；
 - recovery interruption；
 - target movement 导致 lower coefficient / miss；
+- no-LOS 行为；
 - 0-Tick instant batch；
 - seeded tile contention；
 - Plan reject + correction failure；
+- pause/background clock freeze；
+- 长时间无进展不自动 stalemate；
 - simultaneous lethal；
 - abort 后 late async completion。
 
