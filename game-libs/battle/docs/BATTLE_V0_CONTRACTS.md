@@ -1,12 +1,12 @@
-# Battle v0 Contracts
+# Battle v0 数据契约
 
-> Status: **Design-only contract specification**. This file defines canonical logical data boundaries for Battle v0. It does not claim TypeScript/Zod/JSON Schema code already exists.
+> 状态：**Design only / Contract 草案**。本文定义 Battle v0 的 canonical 数据边界，不代表 TypeScript/Zod/JSON Schema 已实现。
 >
-> Core gameplay semantics are defined only in [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md). This file must not redefine reducer behavior.
+> 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
-## 1. Contract boundary
+## 1. Contract 边界
 
-The shared contract layer is intentionally thin:
+建议提供很薄的共享模块：
 
 ```text
 battle/contracts
@@ -22,24 +22,26 @@ battle/contracts
   ReplayRecord
 ```
 
-Simulation, Decision, and Presentation may depend on these data contracts. The contract module owns no runtime state and is not a fourth Battle layer.
+Simulation / Decision / Presentation 可以依赖这些数据类型。
 
-## 2. Serialization status
+Contracts 自己不拥有运行状态，不是第四个 Runtime Layer。
 
-### CONTRACT-OPEN-001 — Content subject/version — OPEN
+## 2. Serialization 状态
 
-The following formal Content concerns are not yet frozen:
+### CONTRACT-OPEN-001 — Content subject/version 与命名 — OPEN
 
-- exact subject/version names, e.g. whether they are `struct.BattleActor/v1`;
-- global field naming convention;
-- whether Content key must equal an object-internal `id`;
-- exact reference encoding for `skills[]` and `effect`.
+尚未冻结：
 
-Schema version should represent structural compatibility, not balance changes such as damage 5 → 6.
+- 正式 subject/version，例如是否使用 `struct.BattleActor/v1`；
+- 全局字段命名风格；
+- Content key 是否必须等于对象内 `id`；
+- `skills[]`、`effect` 的正式引用编码。
 
-The logical semantics below are canonical even while serialization details remain open.
+Schema version 应代表**结构兼容性**，不应因为 Fireball damage 从 5 调成 6 就升级。
 
-## 3. Shared primitive concepts
+下面定义的是逻辑语义；正式序列化细节仍可调整。
+
+## 3. Shared primitives
 
 ### GridPosition
 
@@ -50,7 +52,7 @@ type GridPosition = {
 }
 ```
 
-Authoritative positions are integer tiles.
+权威位置只能是整数格。
 
 ### Direction
 
@@ -58,11 +60,11 @@ Authoritative positions are integer tiles.
 type Direction = 2 | 4 | 6 | 8
 ```
 
-Meaning is defined in `STATE-002`.
+语义见 `STATE-002`。
 
 ### ResourceRef
 
-Battle reuses LoomRealm's existing resource identity concept:
+Battle 直接复用 LoomRealm 已有资源身份概念：
 
 ```ts
 type ResourceRef = {
@@ -72,13 +74,13 @@ type ResourceRef = {
 }
 ```
 
-Exact existing common type should be reused rather than redefined if available.
+实现时应优先复用仓库已有公共类型，而不是再定义一套平行结构。
 
 ## 4. Battle Content
 
 ### 4.1 BattleActor
 
-Current conceptual Content shape:
+当前概念结构：
 
 ```json
 {
@@ -93,15 +95,15 @@ Current conceptual Content shape:
 }
 ```
 
-Logical fields:
+逻辑字段：
 
-- definition id;
-- display name;
-- Character Graphics reference;
-- positive integer max HP;
-- list of BattleSkill references.
+- definition id；
+- display name；
+- Character Graphics reference；
+- 正整数 max HP；
+- BattleSkill reference 列表。
 
-The following are Runtime State and MUST NOT be stored as static BattleActor Content:
+以下属于 Runtime State，**不得**写进静态 BattleActor Content：
 
 ```text
 currentHp
@@ -115,11 +117,11 @@ actionGeneration
 decisionGeneration
 ```
 
-v0 starts at full HP; no separate `initial_hp` Content field is required.
+v0 默认满血开战，不需要独立 `initial_hp`。
 
 ### 4.2 BattleSkill
 
-Current conceptual Content shape:
+当前概念结构：
 
 ```json
 {
@@ -139,7 +141,7 @@ Current conceptual Content shape:
 }
 ```
 
-Logical fields:
+逻辑字段：
 
 ```text
 id
@@ -151,18 +153,30 @@ timing.recovery_ticks
 effect
 ```
 
-v0 does not contain `tracking`, `active_ticks`, MP, accuracy, critical hit, element, armor penetration, universal cooldown, ammo, or target/effect type fields. Visual effect duration belongs to BattleEffect/Presentation, not BattleSkill rule timing.
+v0 不包含：
 
-Range validation follows `SKILL-001`:
+```text
+tracking
+active_ticks
+MP
+accuracy
+critical
+element
+armor penetration
+universal cooldown
+ammo
+target/effect type
+```
 
-- rectangular matrix;
-- exactly one `"↑"`;
-- other cells finite nonnegative values;
-- positive coefficient has at most 3 decimal places.
+视觉持续时间属于 BattleEffect/Presentation，不属于 BattleSkill Rule timing。
+
+Range Schema 校验遵循 `SKILL-001`。
 
 ### 4.3 BattleEffect
 
-BattleEffect is Presentation-only Content. Current conceptual shape:
+BattleEffect 只属于 Presentation Content。
+
+当前概念结构：
 
 ```json
 {
@@ -180,13 +194,15 @@ BattleEffect is Presentation-only Content. Current conceptual shape:
 }
 ```
 
-Its visual timing MUST NOT change Simulation windup/recovery/damage timing.
+BattleEffect 的视觉 timing 不得改变 Skill windup/recovery/damage timing。
 
-**CONTRACT-OPEN-002:** exact BattleEffect v1 image/timing/anchor schema and outcome-specific visuals are not frozen.
+### CONTRACT-OPEN-002 — BattleEffect v1 Schema — OPEN
+
+尚未冻结 exact image/timing/anchor 字段，以及 outcome-specific visuals。
 
 ## 5. BattleConfig
 
-Conceptual configuration:
+概念：
 
 ```ts
 type BattleConfig = {
@@ -202,15 +218,20 @@ type BattleConfig = {
 }
 ```
 
-Skill windup/recovery are BattleSkill Content values.
+`tickDurationMs=200` 和默认 `maxPathSteps=6` 已冻结。
 
-`tickDurationMs=200` and default `maxPathSteps=6` are frozen. Exact balance values such as `moveTicks`, `protectionTicks`, skill damage, skill range, windup/recovery values, and map size remain content/configuration tuning values.
+以下属于可调平衡参数，不属于 Contract 版本变化：
+
+- `moveTicks`；
+- `protectionTicks`；
+- Skill damage/range/windup/recovery；
+- map size。
 
 ## 6. PlanConstraints
 
-`PlanConstraints` tells Decision what it may generate; it does not enumerate tactics.
+`PlanConstraints` 告诉 Decision“允许生成什么”，不是给它列战术菜单。
 
-Conceptual shape:
+概念：
 
 ```ts
 type PlanConstraints = {
@@ -225,11 +246,13 @@ type PlanConstraints = {
 }
 ```
 
-`minCoefficients` is the distinct positive coefficient set actually present in the Skill range matrix. Implementations may additionally expose normalized integer units internally.
+`minCoefficients` 来自 Skill range matrix 实际存在的去重正 coefficient。
+
+Runtime 内部可以同时暴露/缓存规范化后的整数 units。
 
 ## 7. PlanSubmission
 
-Logical shape is frozen by `PLAN-003`:
+逻辑结构由 `PLAN-003` 冻结：
 
 ```ts
 type PlanSubmission = {
@@ -242,17 +265,17 @@ type PlanSubmission = {
 }
 ```
 
-Semantics:
+Contract 语义：
 
-- path excludes the current Actor tile;
-- path is cardinal;
-- empty path + no skill = hold/reobserve;
-- empty path + skill = direct cast;
-- no free-form execution fields.
+- path 不含当前 Actor tile；
+- path 只允许 cardinal step；
+- empty path + no skill = hold/reobserve；
+- empty path + skill = direct cast；
+- 不包含自由执行字段。
 
-### Plan rejection reasons
+### PlanRejectReason
 
-The contract SHOULD provide stable machine-readable codes, at minimum:
+至少应保留以下机器可读语义：
 
 ```text
 path_too_long
@@ -266,11 +289,11 @@ stale_decision_generation
 actor_not_ready
 ```
 
-Exact enum naming may be finalized with the runtime type implementation without changing their semantic distinctions.
+正式 enum 命名可以在实现类型时最终冻结，但不得合并掉这些不同失败原因。
 
 ## 8. PlanAcceptance
 
-Conceptual result:
+概念：
 
 ```ts
 type PlanAcceptance =
@@ -285,13 +308,13 @@ type PlanAcceptance =
     }
 ```
 
-Synchronous acceptance means only that the plan may enter execution. Future path steps or skill resolution may still fail because the battle changes.
+同步 acceptance 只表示当前可以进入执行，不保证未来 path/skill 一定成功。
 
 ## 9. BattleObservation
 
-Decision sees Simulation facts, not render state.
+Decision 看到的是 Simulation 事实，不是 Render State。
 
-Minimum useful observation fields:
+概念：
 
 ```ts
 type BattleObservation = {
@@ -304,23 +327,23 @@ type BattleObservation = {
 }
 ```
 
-Observed Actor data should include battle-relevant public facts such as:
+Observed Actor 至少应包含有战术意义的公开事实：
 
-- HP / max HP;
-- committed tile;
-- direction;
-- action state;
-- current protection remaining / boundary;
-- current movement/windup/recovery facts needed for tactical reasoning;
-- usable Skill definitions/range matrices.
+- HP / max HP；
+- committed tile；
+- direction；
+- action state；
+- protection 边界/剩余；
+- 当前 moving/windup/recovery 事实；
+- 可用 Skill 定义/range matrix。
 
-Observation MUST NOT contain interpolated Sprite coordinates as authoritative positions.
+不得把插值后的 Sprite 坐标作为权威 position。
 
-Exact prompt-oriented serialization and event history budget are implementation concerns.
+Prompt 面向的具体序列化与 RecentEvents budget 属于实现细节。
 
 ## 10. BattleSnapshot
 
-BattleSnapshot is authoritative state for host/debug/replay consumers, conceptually:
+BattleSnapshot 是权威状态快照，概念：
 
 ```ts
 type BattleSnapshot = {
@@ -339,13 +362,13 @@ type BattleSnapshot = {
 }
 ```
 
-ActorSnapshot should use the canonical field name `direction`, not `facing`.
+ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。
 
-A Snapshot is different from RenderProjection.
+BattleSnapshot 与 RenderProjection 是两类不同数据。
 
-## 11. Actor runtime concepts
+## 11. ActorRuntimeState
 
-Conceptual internal/authoritative fields:
+概念内部结构：
 
 ```ts
 type ActorRuntimeState = {
@@ -366,11 +389,22 @@ type ActorRuntimeState = {
 }
 ```
 
-ActionState must be able to distinguish at least thinking/idle, moving, windup, recovery, dead, and terminated concepts. Exact discriminated-union structure can be finalized during implementation.
+ActionState 至少要能区分：
+
+```text
+thinking/idle
+moving
+windup
+recovery
+dead
+terminated
+```
+
+最终 discriminated union 可在实现时正式化。
 
 ## 12. BattleEvent
 
-Conceptual event envelope:
+概念 envelope：
 
 ```ts
 type BattleEvent = {
@@ -384,7 +418,7 @@ type BattleEvent = {
 }
 ```
 
-Core event concepts include:
+核心事件概念：
 
 ```text
 decision_ready
@@ -393,11 +427,11 @@ skill_resolve
 recovery_complete
 ```
 
-Protection expiration is interval-derived and does not need a `protection_expire` business event.
+Protection 过期由 `protectedUntilTickExclusive` 推导，不需要 `protection_expire` 业务事件。
 
-## 13. Skill resolution result
+## 13. SkillResolveResult
 
-The shared outcome enum is:
+共享 outcome：
 
 ```ts
 type SkillResolveResult =
@@ -407,15 +441,15 @@ type SkillResolveResult =
   | "invalid"
 ```
 
-Semantics are defined only by `HIT-001` in the core spec.
+语义只由 `HIT-001` 定义。
 
-A skill resolve/replay event should carry the actual resolve coefficient (preferably normalized units internally) when relevant.
+相关 Event/Replay 应携带实际 resolve coefficient（Runtime 内优先使用 normalized units）。
 
 ## 14. RenderProjection
 
-RenderProjection is non-authoritative visual data.
+RenderProjection 是非权威视觉数据。
 
-Conceptual content may include:
+概念：
 
 ```ts
 type RenderProjection = {
@@ -427,13 +461,19 @@ type RenderProjection = {
 }
 ```
 
-Presentation may interpolate movement and choose camera behavior. RenderProjection MUST NOT be reverse-synchronized into Simulation.
+Presentation 可以自行插值和控制 camera，但不得 reverse-sync 回 Simulation。
 
-**CONTRACT-OPEN-003:** exact projection shape, node lifecycle, and whether Simulation emits optional non-authoritative camera focus hints are not frozen.
+### CONTRACT-OPEN-003 — Projection Schema — OPEN
+
+尚未冻结：
+
+- exact RenderProjection shape；
+- Browser node/effect lifecycle；
+- Simulation 是否输出非权威 camera focus hint。
 
 ## 15. SkillEffectProjection
 
-Conceptual projection:
+概念：
 
 ```ts
 type SkillEffectProjection = {
@@ -446,11 +486,11 @@ type SkillEffectProjection = {
 }
 ```
 
-Whether `miss` or `invalid` creates visible effects is Presentation policy and remains open.
+`miss / invalid` 是否产生可见效果属于 Presentation policy。
 
-## 16. Decision timing state
+## 16. DecisionTiming
 
-A Decision Adapter must eventually expose enough trusted timing metadata for the core rules:
+Decision Adapter 最终需要提供足够的受信时间事实：
 
 ```ts
 type DecisionTiming = {
@@ -464,31 +504,31 @@ type DecisionTiming = {
 }
 ```
 
-The exact adapter API and error/cancellation metadata are integration concerns; see BATTLE_V0_INTEGRATION.md.
+exact Adapter API、error/cancel metadata 在 Integration 文档维护。
 
 ## 17. ReplayRecord
 
-Replay must contain enough authoritative input/facts to execute without calling Decision/LLM again:
+Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 
 ```text
 initial config/content refs
 battleSeed
 accepted PlanSubmissions + acceptedPlanIds
 Decision timing/generation facts
-movement reservations/contention results
-skill resolve results + coefficient
-damage/protection facts
+movement reservation/contention
+skill outcomes + coefficient
+damage/protection
 BattleResult
 ```
 
-Exact file/serialization format remains an implementation choice.
+具体持久化格式可以在实现时选择。
 
-## 18. Contract open items
+## 18. Contracts OPEN
 
-- **CONTRACT-OPEN-001** Content subject/version, field naming, key/id alignment, reference encoding.
-- **CONTRACT-OPEN-002** BattleEffect v1 schema.
-- **CONTRACT-OPEN-003** RenderProjection/SkillEffectProjection exact schema and camera hint shape.
-- Exact discriminated unions/enums for runtime implementation.
-- Exact Observation history budget and prompt-facing representation.
+- **CONTRACT-OPEN-001**：Content subject/version、字段命名、key/id 对齐、引用编码。
+- **CONTRACT-OPEN-002**：BattleEffect v1 Schema。
+- **CONTRACT-OPEN-003**：RenderProjection / SkillEffectProjection exact Schema 与 camera hint。
+- Runtime 的 exact discriminated unions / enum names。
+- Observation history budget 与 prompt-facing representation。
 
-These open contract details MUST NOT change the frozen gameplay semantics in BATTLE_V0_SPEC.md.
+这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
