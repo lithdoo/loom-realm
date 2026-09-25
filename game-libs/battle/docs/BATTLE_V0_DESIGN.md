@@ -921,7 +921,7 @@ resolve 时目标离开矩阵
 
 这意味着前摇天然就是目标的规避窗口；不需要额外 `lock_actor / revalidate_range` 模式。
 
-`windup_ticks = 0` 表示不提供这个规避等待窗口：技能合法起手后直接进入 resolve。其精确 intra-Tick 批处理位置仍需与第 11 节事件顺序一起冻结，但不能通过同 Tick 递归产生无限 Action。
+`windup_ticks = 0` 表示不提供这个规避等待窗口：技能合法起手后在当前 Tick 的 bounded instant-resolve batch 中直接 resolve。第 11 节已经冻结它的批处理位置和“每 Actor 每 Tick最多启动一次新 Action”约束，因此不会产生同 Tick递归 Action。
 
 ### 9.3 技能结算结果
 
@@ -1154,9 +1154,9 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 **明确不在 v0：**传统交替回合、复用 RPGMap Runtime、逐格调用 LLM、MP/通用技能资源系统、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动、移动途中施法触发、事件队列、原子单格移动和显式 path 计划**已进入 v0**。
 
 
-## 14. 尚需确认的问题与建议推进顺序
+## 14. 已冻结边界与后续问题
 
-下面只列仍然没有冻结、且会影响后续实现的问题。已经确认的规则（例如 200 ms Tick、范围矩阵、`minCoefficient` 只负责起手、resolve 按当前 coefficient、`miss`、删除 tracking、Recovery 行动锁）不再重新列为开放问题。
+本节先汇总最近冻结、直接影响 Runtime 的边界，再列仍可留到 Schema / Runtime / Host 集成阶段继续决定的问题。已经冻结的行为语义不得在实现中自行改写。
 
 ### 14.1 已冻结的 Runtime 边界
 
