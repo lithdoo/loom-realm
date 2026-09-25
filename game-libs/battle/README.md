@@ -62,6 +62,19 @@ Frame abort / Battle cancel 属于控制平面，立即终止 Simulation 提交�
 - 玩家未来通过四选一提示卡指导我方；v0 可固定 guidance 或跳过。提示词优化、跨战学习和长期记忆不属于核心闭环。
 - 这里只修订文档，没有实现 Battle Runtime，也未运行构建、单测或 Browser E2E。
 
+## 下一步优先冻结
+
+当前真正会阻塞 Runtime / Decision 实现的问题已经收敛到四项：
+
+1. **coefficient 整数化/舍入**：例如 `7 × 0.5` 最终伤害如何取整，以及是否允许 0 伤害。建议评估固定精度整数 + `floor`，但尚未冻结。
+2. **`windup_ticks = 0` 的同 Tick 语义**：玩法上已定义为即时技能；还需决定如何进入当前 Tick 的统一结算批次，同时防止 `0 windup + 0 recovery` 零时间递归。
+3. **同格预约 tie-break**：两个 Actor 同 Tick 抢同一格时需要公平、确定、可 Replay 的裁决；建议优先评估基于 `battleSeed` 的 deterministic tie-break。
+4. **LegalPlan 候选预算/去重**：控制 `path × skill × minCoefficient` 组合规模，既不能撑爆 Prompt，也不能让 Decision 失去路线和出手时机选择。
+
+这四项冻结后，再正式定义 `BattleActor / BattleSkill / BattleEffect v1` 和核心 Contracts，然后进入 Content validator + headless Simulation reducer + Mock/Script Decision 测试。
+
+其他问题（LOS、BattleEffect 表现细节、暂停策略、Decision Adapter、RenderProjection、玩家 Guidance、僵局规则）可以随着对应 Runtime / Host 集成继续细化，不需要阻塞最初的 Simulation 实现。
+
 ## npm workspace 遗留注意
 
 根 `package.json` 通过 `game-libs/*` 识别 Battle 包，但 Battle 包先前合入时未同步根 `package-lock.json`；此项仍需单独处理并验证 `npm ci`。本次文档更新不解决锁文件问题，也不宣称构建通过。
