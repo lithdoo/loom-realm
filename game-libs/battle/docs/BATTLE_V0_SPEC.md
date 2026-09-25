@@ -53,7 +53,7 @@ Battle 可以消费 LoomRealm 已有 Map/Tileset/Autotile/Character 的 Content/
 - **PlanSubmission**：Decision 已产生、但尚未被 Simulation 接受的计划。
 - **accepted plan**：Simulation 已校验并接管执行的计划。
 - **Decision Request**：绑定某个 `decisionGeneration` 的一次异步决策请求。
-- **Action**：新启动的 move step、skill windup，或未来如果加入的显式 turn。
+- **Action**：新启动的 move step、原地 `turn`、或 skill windup。
 - **windup**：技能前摇。
 - **resolve**：技能产生权威 `hit / immune / miss / invalid` 的结算点。
 - **recovery**：技能结算后的行动锁。
@@ -165,6 +165,17 @@ while lastProcessedTick < targetTick:
 
 不同 `dueTick` 绝不能压成同一个“同时事件批次”。
 
+### TIME-004 — Pause / Background 冻结 Battle Clock — FROZEN
+
+当 Host 明确暂停 Battle，或 App/Host 进入需要暂停战斗的 background 状态时：
+
+- Battle monotonic clock 冻结；
+- `currentTick` 不推进；
+- pause/background 期间的现实时间不计入 Decision、move、windup、recovery 或 protection；
+- 恢复后从原逻辑时刻继续，不补算暂停期间对应的 Tick。
+
+TIME-003 的 catch-up 只用于**Battle clock 仍在运行时** scheduler/event loop 晚醒等情况。
+
 ### DEC-001 — Decision 延迟计入游戏时间 — FROZEN
 
 Decision/LLM 的真实耗时属于 Battle 时间。
@@ -209,6 +220,7 @@ Optional Guidance
 
 ```text
 PlanSubmission
+├── turn?: Direction
 ├── path: GridPosition[]
 └── skill?: {
       skillId
@@ -222,8 +234,11 @@ PlanSubmission
 - `path` 只包含未来目的格，不包含 Actor 当前格；
 - 只允许上下左右四方向，每一步 Manhattan distance = 1；
 - `path.length <= PlanConstraints.maxPathSteps`；
-- `path: []` 且无 skill = hold/reobserve；
-- `path: []` 且有 skill = direct cast；
+- `turn` 只表达**原地转向**，因此出现 `turn` 时 `path` 必须为空；
+- `path: []`、无 turn、无 skill = hold/reobserve；
+- `path: []`、无 turn、有 skill = direct cast；
+- `path: []`、有 turn、无 skill = pure turn；
+- `path: []`、有 turn、有 skill = 先原地 turn；本 Tick Action 配额耗尽，skill intent 保留到后续 Tick重新校验；
 - v0 不增加自由执行字段 `strategy/reason/priority/fallback/moveGoal`。
 
 ### PLAN-004 — minCoefficient 的合法值 — FROZEN
@@ -240,6 +255,7 @@ Simulation 在提交时校验：
 - 坐标为整数且不越界；
 - 四方向邻接；
 - 静态地形可通行；
+- `turn` 必须是合法 Direction，且不能与非空 path 同时出现；
 - skill 属于 Actor；
 - target 当前合法；
 - `minCoefficient` 合法；
@@ -261,6 +277,8 @@ path_too_long
 path_out_of_bounds
 path_not_adjacent
 terrain_blocked
+invalid_turn
+turn_with_path
 unknown_skill
 invalid_target
 invalid_min_coefficient
@@ -283,6 +301,7 @@ actor_not_ready
 accepted plan 在执行过程中持续面对实时战场：
 
 - 接受计划时用最新状态校验；Decision 思考期间普通敌方移动不会自动令整份战略意图失效；
+- 如果存在 pending `turn`，先把 turn 作为一个独立 Action 执行并标记完成；它消耗当前 Tick 的 Action 配额，因此同一 Tick 不能再 move 或 windup；若计划还带 skill intent，则后续 Tick按最新状态重新检查技能起手；
 - 每个 move step 开始前重新检查 passability/occupancy/reservation/lifecycle/generation；
 - 带 skill 的计划在 plan 起点、每次 `move_complete` 后、以及 protection 结束重新获得攻击资格时检查当前 coefficient；
 - coefficient 为 0/矩阵外或低于 `minCoefficient` 时不施法，只要剩余 path 合法就继续移动；
@@ -294,22 +313,39 @@ accepted plan 在执行过程中持续面对实时战场：
 
 没有 skill intent 的 Plan 永远不会因为途中进入某技能合法范围而自动施法。
 
-## 7. Movement
+## 7. Turn 与 Movement
 
-### MOVE-001 — 单格移动是原子 step — FROZEN
+### TURN-001 — 原地 Turn Action — FROZEN
+
+v0 保留独立 `turn` Action，用于 Actor 在**同一 committed tile** 上主动改变 direction。
+
+规则：
+
+- `turn` 立即把 Simulation `direction` 改为目标 Direction；
+- 不改变 committed tile、occupancy 或 reservation；
+- 不需要 `turn_complete` future event；
+- turn 本身占用 STATE-004 的“本 Tick唯一新 Action”配额；
+- 因此 turn 后同一 Tick不能再启动 move 或 skill windup；
+- protection 只禁止 skill windup，因此受保护 Actor可以 turn；
+- recovery 是 action lock，因此 recovery 中不能 turn；
+- pure turn 完成后计划结束；如果同一 Plan 还带 skill intent，则该 intent 留到后续 Tick重新校验。
+
+### MOVE-001 — 单格移动是原子提交 step — FROZEN
 
 A→B：
 
 ```text
 占用 A
-→ 预约 B
-→ 启动 A→B
-→ 移动期间 A 仍是 committed/occupied tile
+→ 申请/获得 B reservation
+→ move_start：direction 立即变为 A→B 的方向
+→ 移动期间 committed/occupied tile 仍是 A
 → move_complete
 → 释放 A
 → 占用 B
 → 释放 B reservation
 ```
+
+这里“原子”表示**只有完整提交到 B 或保持在 A，不存在权威半格位置**；不表示已经启动的移动不可中断。
 
 Presentation 可以平滑插值，但 Simulation 在完成前仍认为 Actor 位于 A。
 
@@ -343,13 +379,39 @@ Presentation 可以平滑插值，但 Simulation 在完成前仍认为 Actor 位
 
 不得同 Tick 零时间重试。
 
-### MOVE-006 — 移动途中非致命受击 — FROZEN
+### MOVE-006 — move_start 瞬间转向 — FROZEN
 
-有效伤害会使旧多格计划失效，但**不会回滚已经启动的原子 step**。
+移动 step 真正开始时，Actor 的 `direction` **立即**变为移动方向。
 
-存活 Actor 仍使用该 step token 完成本格；旧计划后续未启动 step 全部取消。
+位置仍保持原 committed tile，直到 `move_complete`。
 
-保护期内可以开始新 Decision；新计划从该 step 最终 committed 的真实位置继续。
+如果这次移动随后被受击中断，direction 不回滚；Actor 保持“刚才试图移动的方向”。
+
+### MOVE-007 — 移动中 damaging hit 立即中断 step — FROZEN
+
+Actor 在 active step 中受到 `finalDamage > 0` 的 `hit` 时，当前移动立即失败：
+
+- 取消 active step；
+- 取消对应未来 `move_complete` 的提交权；
+- 释放 destination reservation；
+- Actor 继续占用最后一个 committed origin tile，不会停在半格，也不会提交到 destination；
+- 旧 accepted plan / action generation 失效。
+
+如果 Actor **存活**：
+
+- 获得 protection；
+- 旧 Decision generation 失效；
+- 确保且只创建一个受击后的新 Decision Request；
+- 后续计划从该 committed origin tile 开始。
+
+如果 Actor **死亡**：
+
+- 保持 dead 在最后 committed tile；
+- 不获得新的行动机会；
+- 不创建新的 Decision Request；
+- Battle 按 terminal rule 结束或继续处理同时事件。
+
+如果 `move_complete` 已经在同一 Tick 的 reducer 前置阶段成功提交，然后本 Tick后续才受到 hit，则该 step 已经完成，不再属于“移动中受击”。
 
 ## 8. Skill Range 与 coefficient
 
@@ -461,6 +523,16 @@ Recovery 是**行动锁，不是思考锁**：
 
 `recovery_ticks = 0` 只表示没有额外 recovery Tick；受 STATE-004 限制，同 Tick 不会获得第二次 Action。
 
+### SKILL-006 — v0 不做 LOS — FROZEN
+
+v0 的技能范围只由 range matrix + caster direction + 当前双方 committed tile 决定。
+
+Tile passability **只控制移动**，不得自动推导“不可通行 Tile 会阻挡技能”。
+
+因此即使 caster 与 target 之间存在不可通行地形，只要 target 当前映射到 range matrix 的正 coefficient 格，技能在范围规则上仍然有效。
+
+未来如果需要墙体阻挡、弹道或视线，必须作为新的显式机制加入，而不是复用 movement passability。
+
 ## 9. Resolve、伤害、Protection 与中断
 
 ### HIT-001 — 四种技能结算结果 — FROZEN
@@ -497,18 +569,31 @@ Tick 14 恢复正常
 
 无需 `protection_expire` 业务事件。
 
-### HIT-003 — 实际伤害后的 aftermath — FROZEN
+### HIT-003 — damaging hit 的 aftermath — FROZEN
 
-一个存活 Actor 在 batch 中受到实际伤害后：
+`damaging hit` 定义为：
 
-- 旧多格 plan 失效；
-- 未结算 windup 失效；
-- recovery 被中断；
+```text
+outcome = hit
+&& finalDamage > 0
+```
+
+batch damage 应用后：
+
+如果 Actor **存活**：
+
+- 当前 Action 被中断：active movement 按 MOVE-007 失败；未结算 windup 取消；recovery 结束；
+- 旧 accepted plan / action generation 失效；
 - 旧 Decision generation 失效；
 - 获得 protection；
 - 确保且只确保一个新的 Decision Request。
 
-active atomic movement 例外遵循 MOVE-006。
+如果 Actor **死亡**：
+
+- 当前 Action 全部取消；
+- active movement 按 MOVE-007 留在最后 committed tile 并释放 reservation；
+- 不设置新的 protection；
+- 不创建新的 Decision Request。
 
 ### HIT-004 — immune 不产生受击 aftermath — FROZEN
 
@@ -540,6 +625,24 @@ Protection 阻止的是技能起手，不是 Thinking 或移动。
 
 因此允许 simultaneous defeat。
 
+### HIT-007 — zero-damage hit 不触发受击 aftermath — FROZEN
+
+如果技能几何/保护判断得到 `hit`，但 DAMAGE-001 计算出：
+
+```text
+finalDamage = 0
+```
+
+则 outcome 仍然是 `hit`，可以产生正常 hit Presentation / Replay 事实，但它**不是 damaging hit**：
+
+- HP 不变；
+- 不打断 movement / windup / recovery；
+- 不失效 accepted plan / Decision；
+- 不创建 protection；
+- 不触发受击后 redecision。
+
+未来若需要“0 damage 但有硬直/控制”，必须单独增加明确的 control/interrupt 机制。
+
 ## 10. Tick Reducer
 
 ### TICK-001 — 单 Tick 唯一处理顺序 — FROZEN
@@ -547,24 +650,25 @@ Protection 阻止的是技能起手，不是 Thinking 或移动。
 每个 `currentTick`：
 
 1. 截取 `dueTick === currentTick` 的事件快照。
-2. 过滤 Battle/Actor 生命周期和旧 generation 事件；active step 例外按 Movement 规则处理。
-3. 提交本 Tick 到期的 `move_complete`，并处理有效 `recovery_complete`。
+2. 过滤 Battle/Actor 生命周期、已取消 active step 和旧 generation 事件。
+3. 提交仍有效且在本 Tick 到期的 `move_complete`，并处理有效 `recovery_complete`。
 4. 收集此前已经启动、在本 Tick 到期的 `skill_resolve`。
 5. 用移动完成后的 committed position/direction 和 batch-start protection，把普通技能归约为 `hit / immune / miss / invalid`。
 6. 同步批量应用普通 `hit` damage。
-7. 执行普通批次 terminal gate；Battle 未结束时，对存活受伤 Actor 应用 hit aftermath。
-8. 接收本 Tick 可用 Decision；按完成时间/deadline/generation 判断，不看 callback 顺序。
-9. 推进 existing/new plan；每 Actor 最多产生一个“新 Action 意图”。
-10. 收集第 9 步新启动的 `windup_ticks=0` 技能，组成一次 bounded instant-resolve batch。
-11. 用与普通技能相同的 outcome / simultaneous damage / terminal / aftermath 规则结算即时批次。
-12. 只对经过即时批次后仍存活、计划仍有效的 movement intent 统一做 next-tile reservation。
-13. 安排未来 `move_complete / skill_resolve / recovery_complete`，发布 Snapshot/Projection。
+7. 对 `finalDamage > 0` 的目标应用 HIT-003 aftermath：包括中断 active movement、释放 reservation、失效 Action/Plan/Decision；死亡者不获得 protection 或新 Decision。
+8. 执行普通批次 terminal gate；如果 Battle 已结束，不再启动新的游戏 Action。
+9. 接收本 Tick 可用 Decision；按完成时间/deadline/generation 判断，不看 callback 顺序。
+10. 推进 existing/new plan；每 Actor 最多产生一个“新 Action 意图”。pending turn 在这里立即执行并消耗 Action 配额；skill/move 按规则产生后续意图。
+11. 收集第 10 步新启动的 `windup_ticks=0` 技能，组成一次 bounded instant-resolve batch。
+12. 用与普通技能相同的 outcome / simultaneous damage / HIT-003 aftermath / terminal 规则结算即时批次。
+13. 只对经过即时批次后仍存活、计划仍有效的 movement intent 统一做 next-tile reservation；预约成功即 `move_start`，并按 MOVE-006 立即更新 direction。
+14. 安排未来 `move_complete / skill_resolve / recovery_complete`，发布 Snapshot/Projection。
 
 ### TICK-002 — 当前 Tick 必须有界 — FROZEN
 
 本 Tick 新产生的事实不得递归重新进入已经处理过的阶段。
 
-即时 resolve、0 recovery、新 Decision、受击中断都不能让同一 Actor 回到第 9 步再启动第二个 Action。
+即时 resolve、0 recovery、新 Decision、受击中断或即时 turn 都不能让同一 Actor回到 Action-start 阶段再启动第二个 Action。
 
 ## 11. BattleResult 与控制平面
 
@@ -581,6 +685,12 @@ failure
 ```
 
 死亡/终局检查发生在 TICK-001 的 terminal gate。
+
+### RESULT-002 — v0 不设正式 stalemate / 最大时长 — FROZEN
+
+v0 不因为战斗持续过久或长时间无伤害而自动结束，也不设置强制最大 Battle Tick 数。
+
+只记录 REPLAY-002 的无进展 diagnostics；未来如果模拟数据证明需要，再通过新规则加入 `stalemate`，不得在 v0 Runtime 中暗加超时胜负。
 
 ### CTRL-001 — abort/cancel 是即时控制平面 — FROZEN
 
@@ -645,42 +755,17 @@ collisionRetryCount
 - Prompt 优化/评测作为 Battle Rule；
 - 跨战训练记忆 / 模型微调。
 
-## 14. OPEN：不得自行暗定
+## 14. Core OPEN 状态
 
-### OPEN-DIR-001 — direction 更新时间与 turn — OPEN
+此前的 6 个 core gameplay OPEN 已全部冻结：
 
-尚未冻结：
+- `OPEN-DIR-001` → TURN-001 + MOVE-006：move_start 瞬间转向，并保留独立原地 turn Action。
+- `OPEN-MOVE-001` → MOVE-007 + HIT-003：任何 damaging hit 都立即中断 active movement；死亡留在最后 committed tile。
+- `OPEN-HIT-001` → HIT-007：zero-damage hit 保持 `hit` outcome，但不触发 interruption/protection/redecision。
+- `OPEN-LOS-001` → SKILL-006：v0 不做 LOS。
+- `OPEN-CLOCK-001` → TIME-004：pause/background 冻结 Battle clock。
+- `OPEN-STALEMATE-001` → RESULT-002：v0 不设正式 stalemate / 最大战斗时长，只记录 diagnostics。
 
-- movement 在 step start 还是 `move_complete` 更新 direction；
-- v0 是否存在独立 `turn` Action；
-- 如果存在，turn 是否有 Tick 成本。
+**当前 Core gameplay 没有未冻结 OPEN 项。**
 
-### OPEN-MOVE-001 — active step 中的致命受击 — OPEN
-
-MOVE-006 只冻结了**存活 Actor**受击后的 step 完成语义。
-
-Actor 在 active step 中被致命击杀后，该 `move_complete` 是否仍提交，目前没有唯一规则。
-
-### OPEN-HIT-001 — finalDamage = 0 的 hit aftermath — OPEN
-
-`finalDamage = 0` 合法，但尚未冻结它是否触发 interruption/protection。
-
-现有 frozen aftermath 只明确适用于“实际造成伤害”的 hit。
-
-### OPEN-LOS-001 — Skill LOS — OPEN
-
-尚未冻结墙体/地形是否阻挡技能。
-
-当前建议是 v0 不做 LOS，但在正式冻结前实现不得自行推导“不可通行 = 阻挡技能”。
-
-### OPEN-CLOCK-001 — pause/background Battle clock — OPEN
-
-Host pause/background 时，是冻结 Battle monotonic clock，还是继续流逝并在恢复后逐 Tick catch-up，尚未冻结。
-
-### OPEN-STALEMATE-001 — 正式僵局规则 — OPEN
-
-当前不设置强制 Battle 总时长。
-
-是否未来把长期无进展升级为正式 `stalemate` BattleResult，待模拟数据决定。
-
-Content subject/version、BattleEffect 视觉细节、Decision Adapter API、Host/Browser 接口等不属于核心 gameplay OPEN，分别在 Contracts / Integration 文档维护。
+Content subject/version、BattleEffect 视觉细节、Decision Adapter API、Host/Browser 接口等仍分别在 Contracts / Integration 文档维护为 OPEN；这些不改变已经冻结的 Core gameplay 语义。
