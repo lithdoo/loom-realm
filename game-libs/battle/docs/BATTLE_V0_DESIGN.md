@@ -88,7 +88,7 @@ Simulation 是 Battle 的唯一业务权威。它负责：
 - Battle 单调时钟、200 ms Tick、事件队列与确定性归约；
 - 地图格子、静态通行、Actor 已提交坐标/朝向、下一格预约；
 - 原子单格移动、多格计划执行、冲突裁决；
-- 技能起手、前摇、结算、后摇、`hit / immune / invalid`、伤害、死亡；
+- 技能起手、前摇、结算、后摇、`hit / immune / miss / invalid`、伤害、死亡；
 - 受击中断、保护区间、action/decision generation；
 - 合法计划候选、行为提交验证、Battle Result、事件日志与回放事实。
 
@@ -113,7 +113,7 @@ submit
   → move_complete
   → windup_started
   → skill_resolve
-  → hit / immune / invalid
+  → hit / immune / miss / invalid
   → recovery_started
   → recovery_complete
 ```
@@ -220,7 +220,7 @@ Decision
 Simulation
   → windup_started
   → after N ticks: skill_resolve
-  → hit / immune / invalid
+  → hit / immune / miss / invalid
   → update HP / state
   → recovery_started
   → emit effect projection
