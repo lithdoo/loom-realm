@@ -46,9 +46,9 @@ Battle 不复用 RPGMap Runtime，但 **Map / Tileset / Autotile / Character Gra
 
 两个 Actor 同 Tick 争用同一目标格时，v0 使用基于 `battleSeed` 的**可回放伪随机公平裁决**。随机结果必须由稳定输入（例如 `battleSeed + tick + targetTile + sorted actorIds`）派生，不能直接依赖 `Math.random()` 或全局 RNG 调用次数。
 
-一次 Decision 调用直接产生一份结构化短期 `PlanSubmission`。AI 显式生成 path 和可选 skill intent；Simulation 不预枚举候选路线，也不让 AI 只选 `planId`。Simulation 只负责 Schema/规则校验、接受/拒绝和动态执行；接受后可分配内部 `acceptedPlanId` 用于日志/Replay。每个 Actor 同时最多一个有效 Decision Request。
+一次 Decision 调用直接产生一份结构化短期 `PlanSubmission`。AI 显式生成 path 和可选 skill intent；Simulation 不预枚举候选路线，也不让 AI 只选 `planId`。path 不包含当前起点，只允许四方向相邻格；`PlanConstraints.maxPathSteps` 默认 6、可由 Battle Config 调整。`minCoefficient` 只能取 Skill 矩阵中实际存在的正 coefficient。Simulation 只负责校验、接受/拒绝和动态执行；接受后分配内部 `acceptedPlanId` 用于日志/Replay。每个 Actor 同时最多一个有效 Decision Request。非法提交返回机器可读 reason；同一 decision generation 只允许一次修正重试，第二次仍非法则 Actor idle，最早下一 Tick再开新 generation。
 
-v0 不引入 MP 或固定技能资源系统。Skill 的范围矩阵只定义目标位置是否合法以及**确定性的效果倍率**；coefficient 不是命中概率。**是否在当前合法位置开始技能属于 Plan 决策**。带技能的 `PlanSubmission` 显式携带 `skillId + targetActorId + minCoefficient`：只有当前目标格系数达到本计划的 `minCoefficient` 才停止剩余移动并进入前摇，因此 AI 可以选择“远处尽快出手”或“继续靠近到更高系数再出手”。`minCoefficient` 只负责起手；技能一旦开始，resolve 时按目标当前实际位置重新读取 coefficient，范围内按当前倍率结算，范围外为 `miss`。v0 不设 `tracking`。规则时间只保留前摇和后摇；`windup_ticks = 0` 表示没有蓄力等待、直接进入结算。结算区分 `hit / immune / miss / invalid`。
+v0 不引入 MP 或固定技能资源系统。Skill 的范围矩阵只定义目标位置是否合法以及**确定性的效果倍率**；coefficient 不是命中概率。Content coefficient 最多 3 位小数，加载后统一转为千分制整数；伤害按 `floor(baseDamage × coefficientUnits / 1000)`，允许 0 伤害。**是否在当前合法位置开始技能属于 Plan 决策**。带技能的 `PlanSubmission` 显式携带 `skillId + targetActorId + minCoefficient`：只有当前目标格系数达到本计划的 `minCoefficient` 才停止剩余移动并进入前摇；`minCoefficient` 只负责起手，resolve 时按目标当前实际位置重新读取 coefficient，范围内按当前倍率结算，范围外为 `miss`。v0 不设 `tracking`。`windup_ticks = 0` 在起手 Tick 的 bounded instant-resolve batch 中即时结算；同一 Actor 每 Tick最多启动一次新 Action，因此 `0 windup + 0 recovery` 不会形成同 Tick连锁。结算区分 `hit / immune / miss / invalid`。
 
 Recovery 是**行动锁，不是思考锁**：期间可以继续 Thinking，也可以接收并暂存下一 Plan，但不能开始新的 move / turn / windup 等 Action；正常等到 `recovery_complete` 才继续执行。若 recovery 期间受到实际造成伤害的 `hit`，则立即中断 recovery、失效旧计划/旧 Decision generation，并进入正常保护与重新决策流程；`immune` 不会中断 recovery。
 
@@ -64,19 +64,15 @@ Frame abort / Battle cancel 属于控制平面，立即终止 Simulation 提交�
 - 玩家未来通过四选一提示卡指导我方；v0 可固定 guidance 或跳过。提示词优化、跨战学习和长期记忆不属于核心闭环。
 - 这里只修订文档，没有实现 Battle Runtime，也未运行构建、单测或 Browser E2E。
 
-## 下一步优先冻结
+## 下一步
 
-当前同格冲突已经不再是开放问题：v0 固定使用基于 `battleSeed` 的 deterministic random 公平裁决，可 Replay，不使用不可控运行时随机。
+此前三个主要 Runtime 阻塞项已经冻结：
 
-同时取消“Simulation 先生成 LegalPlan 候选、AI 再选 planId”的模式。Decision 现在直接生成结构化 `PlanSubmission`，因此原来的“LegalPlan 生成多少个/怎么去重”问题也消失。
+- **coefficient**：Content 最多 3 位小数，Runtime 千分制整数；伤害统一向下取整，允许 0。
+- **0 Tick 技能**：`windup_ticks = 0` 在起手 Tick 的 bounded instant-resolve batch 中结算；每 Actor 每 Tick最多启动一次新 Action。
+- **PlanSubmission**：最小结构为 `path + optional skill`；path 不含起点、四方向相邻；`maxPathSteps` 默认 6 可配置；非法提交同 generation 只允许一次修正。
 
-当前真正会阻塞 Runtime / Decision 实现的问题主要剩三项：
-
-1. **coefficient 整数化/舍入**：例如 `7 × 0.5` 最终伤害如何取整，以及是否允许 0 伤害。建议评估固定精度整数 + `floor`，但尚未冻结。
-2. **`windup_ticks = 0` 的同 Tick 语义**：玩法上已定义为即时技能；还需决定如何进入当前 Tick 的统一结算批次，同时防止 `0 windup + 0 recovery` 零时间递归。
-3. **PlanSubmission 边界**：正式 Schema、一次最大 path 长度、四方向邻接限制、`minCoefficient` 可接受值、空 path/hold 表达、非法提交重试次数与 deterministic fallback。
-
-这三项冻结后，再正式定义 `BattleActor / BattleSkill / BattleEffect v1` 和核心 Contracts，然后进入 Content validator + headless Simulation reducer + Mock/Script Decision 直接生成 `PlanSubmission` 的测试。
+因此下一阶段不再需要继续扩展行为规则，优先正式定义 `BattleActor / BattleSkill / BattleEffect v1` 和 `BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance` Contracts，然后进入 Content validator + headless Simulation reducer + Mock/Script Decision 测试。
 
 其他问题（LOS、BattleEffect 表现细节、暂停策略、Decision Adapter、RenderProjection、玩家 Guidance、僵局规则）可以随着对应 Runtime / Host 集成继续细化，不需要阻塞最初的 Simulation 实现。
 
