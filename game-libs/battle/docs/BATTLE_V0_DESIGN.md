@@ -24,7 +24,7 @@ Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三�
 | 架构 | 三层：Simulation / Presentation / Decision；Simulation 是唯一权威，Presentation 只投影，Decision 只提计划 | 实现前冻结规则 |
 | 地图/角色素材 | `struct.Map`、`struct.Tileset`、Tileset/Autotile/Character Graphics 沿用现有 RPGMap 内容形式；不复用 RPGMap Runtime | 实现前冻结方向 |
 | Battle Actor | 新增角色规则定义：名字、Character 资源、最大 HP、技能组；战斗中当前 HP/坐标/朝向属于 Runtime State | v0 Content 方向 |
-| Battle Skill | 新增技能规则定义：范围矩阵、基础伤害、前摇、后摇、tracking、效果引用 | v0 Content 方向 |
+| Battle Skill | 新增技能规则定义：范围矩阵、基础伤害、前摇、后摇、效果引用；v0 不设 `tracking` | v0 Content 方向 |
 | Battle Effect | 技能视觉效果单独定义并引用 `resource.Graphics/BattleEffects/...`；规则技能与表现素材分离 | v0 Content 方向 |
 | 角色 | v0 我方、敌方各一名，均可自主移动及施法，角色占一格 | 产品方向 |
 | 并行行动 | 取消传统交替回合，Actor 独立思考、移动、施法 | 已取代旧回合方案 |
@@ -32,14 +32,16 @@ Battle 是一个**独立的双 Actor 战斗系统**，运行时明确拆成三�
 | 事件队列 | 异步结果先登记；只把**相同 dueTick** 的事件视为同时发生。宿主晚醒时必须按逻辑 Tick 逐个补处理，不能把不同 Tick 压成一批 | 实现前冻结规则 |
 | 决策 | 一次 LLM 请求返回一段短期计划；每个 Actor 同时最多一个有效 Decision Request | 实现前冻结规则 |
 | 路径 | 路径属于计划内容；优先由 Battle 构造当前快照下合法的候选 `planId`，候选显式包含 path，LLM 只选择计划 | 实现前冻结规则 |
-| 技能出手阈值 | Skill 矩阵只定义客观合法范围/效果系数；带技能的计划用 `minCoefficient` 表达本次愿意在多高系数时出手，Simulation 不因首次进入任意合法格就强制释放 | v0 计划语义 |
+| 技能出手阈值 | Skill 矩阵只定义客观合法范围/效果系数；带技能的计划用 `minCoefficient` 表达本次愿意在多高系数时**开始技能**。一旦开始前摇，`minCoefficient` 不再约束最终效果；resolve 使用当时实际 coefficient | v0 计划语义 |
 | 单格移动 | 一格是原子动作：起点继续占用、目标格被预约，`move_complete` 时才原子提交到目标格 | 实现前冻结规则 |
 | 移动受击 | 已经开始的单格移动继续完成；受击取消的是本格之后尚未开始的后续移动计划 | 实现前冻结规则 |
 | 碰撞 | 只预约下一格；同 Tick 争同格统一裁决，失败者结束当前计划并重新决策 | 产品方向；平局算法待定 |
-| 普通单体技能 | 合法起手后锁定 Actor；目标普通移动不会使该技能自动落空 | v0 建议默认 |
+| 单体技能结算 | v0 不锁定命中位置、不设 `tracking`；起手后目标仍可移动，resolve 时按双方最新已提交位置/朝向重新读取范围矩阵。范围内按当时 coefficient 结算，范围外为 `miss` | v0 规则 |
 | 技能限制 | v0 **不引入 MP**；以后可按技能选择冷却、次数、能量、弹药等限制形式 | 已明确移除 MP 前提 |
 | 受击保护 | 使用半开区间语义 `[hitTick + 1, protectedUntilTickExclusive)`；保护期间允许思考/移动，不能攻击/施法，不受伤、不再次中断、不刷新保护 | 实现前冻结规则 |
 | 保护中的攻击计划 | LLM 可返回带攻击意图的计划；保护只禁止 `windup_start`，移动仍可执行，保护结束后按最新战况重新检查是否起手 | 实现前冻结规则 |
+| Recovery | recovery 是行动锁而不是思考锁：期间可 Thinking/接收并暂存下一 Plan，但不能开始新的 Action；受到实际造成伤害的 `hit` 时立即中断 recovery，并按正常受击流程重决策 | v0 规则 |
+| 系数语义 | range matrix 的正数 coefficient 是确定性的效果倍率，不是命中概率；v0 不因 coefficient 引入随机命中判定 | v0 规则 |
 | 生命周期取消 | Frame abort / Battle cancel 属于控制平面，立即失效 Battle authority，不等待下一个 Tick | 实现前冻结规则 |
 | 技能视觉 | 结算后只在命中格叠一张贴图，按 Tick 阶段渐显渐隐 | 产品方向；具体 Browser 接口待定 |
 | 玩家指导 | 未来四选一指导影响我方下一次 LLM 请求；原型可固定 guidance 或跳过 | 后续交互设计 |
@@ -342,7 +344,6 @@ range
 damage
 timing.windup_ticks
 timing.recovery_ticks
-tracking
 effect
 ```
 
@@ -358,10 +359,9 @@ effect
   ],
   "damage": 0,
   "timing": {
-    "windup_ticks": 1,
+    "windup_ticks": 0,
     "recovery_ticks": 2
   },
-  "tracking": "revalidate_on_resolve",
   "effect": "grab"
 }
 ```
@@ -437,11 +437,11 @@ Actor 实际方向改变时，Simulation 根据其 `direction` 旋转整个矩�
 ]
 ```
 
-如果基础伤害为 10，则系数 1 的格子基础结果为 10，系数 0.5 的格子基础结果为 5。具体整数化/舍入规则仍需冻结。
+如果基础伤害为 10，则系数 1 的格子基础结果为 10，系数 0.5 的格子基础结果为 5。coefficient 是确定性的效果倍率，**不是 100% / 50% 命中概率**。具体整数化/舍入规则仍需冻结。
 
 v0 的统一含义是：
 
-> **技能仍选择一个目标 Actor；目标 Actor 所在格映射到旋转后的 range 矩阵，若对应值大于 0，则该位置在技能规则上合法，该值就是对该目标的效果系数。是否在这个合法位置立即出手，由当前 Plan 的 `minCoefficient` 决定，而不是由 Skill 自动决定。**
+> **技能仍选择一个目标 Actor；目标 Actor 所在格映射到旋转后的 range 矩阵，若对应值大于 0，则该位置在技能规则上合法，该值就是对该目标的确定性效果倍率。是否在这个合法位置开始技能，由当前 Plan 的 `minCoefficient` 决定；技能一旦开始，最终 resolve 不再要求满足 `minCoefficient`，而是读取当时实际 coefficient。**
 
 当前**不增加** `target.type`、`effect.type`、第二张 effect matrix、地面选点或 AOE 结构。以后真的需要“选一个格子再影响周边”“链式目标”“多 Actor AOE”等机制，再通过新的类型/结构扩展，而不是现在预埋。
 
@@ -454,24 +454,38 @@ Actor 的 `direction` 同时服务于规则和 Presentation：
 
 默认移动方向会更新 Actor 朝向。例如向右完成/开始移动时，Actor 朝向进入右侧方向。是否增加独立 `turn` 行为以及转向需要多少 Tick，目前仍待确认；v0 不允许通过 Presentation 自己旋转 Sprite 来改变规则朝向。
 
+
 ### 4.6 技能时间：规则前摇/后摇与视觉持续时间分离
 
 普通 v0 技能暂不引入独立 `active_ticks`，规则时间简化为：
 
 ```text
 windup
-  → 前摇结束时进行技能结算
+  → resolve
   → recovery
   → 角色重新可开始正常后续行动
 ```
 
 因此：
 
-- `windup_ticks`：技能结算前等待时间；
+- `windup_ticks`：技能起手到规则结算之间的等待时间；
 - `recovery_ticks`：技能结算后的后摇时间；
 - 技能特效在屏幕上显示多久**不属于** Skill timing，而属于 Battle Effect 的 Presentation timing。
 
-前摇受到有效伤害时可以被现有中断规则取消。后摇期间具体允许哪些行为、受到有效伤害时是否立即结束后摇，仍待状态机下一轮冻结。
+v0 **不设置 `tracking`**。有前摇并不意味着“锁定目标”：前摇期间目标可以继续移动；resolve 时统一根据 caster/target 的最新已提交格和 caster 当前方向重新读取 range matrix。
+
+`windup_ticks = 0` 表示没有蓄力等待，适合“抓”等即时技能：合法起手后应直接进入该技能的 resolve，不需要额外的 lock/tracking 机制。它在单个 Tick reducer 中与其他同 Tick 技能如何组成统一结算批次，仍需在 Tick 顺序中单独冻结；不能因此允许零时间递归连续 Action。
+
+前摇受到实际造成伤害的 `hit` 时，本次未结算技能取消。
+
+Recovery 的 v0 语义冻结为：
+
+- recovery 是**行动锁，不是思考锁**；
+- recovery 期间可以发起/继续 Decision Thinking，也可以接收并暂存已经 ready 的下一 Plan；
+- recovery 期间不能开始新的 move / turn / windup 等 Simulation Action；
+- 正常情况下到 `recovery_complete` 后才能执行已经准备好的下一 Plan；
+- recovery 期间受到实际造成伤害的 `hit` 时，recovery 立即中断，旧计划/旧 Decision generation 按正常受击规则失效，并确保一次新的 Decision；
+- `immune` 不造成伤害，因此不会中断 recovery。
 
 ### 4.7 `struct.BattleEffect`：独立表现素材
 
@@ -523,7 +537,6 @@ struct.BattleSkill
   range matrix
   damage
   windup / recovery
-  tracking
   effect
         │
         ▼
@@ -610,10 +623,10 @@ Tick 11、12、13、14 必须保持原有先后关系。**不能把所有 `dueTi
 
 ```text
 thinking --decision_ready--> moving / windup / idle
-moving --move_complete--> [目标落在技能矩阵合法格且可攻击] windup / [继续] moving / [计划结束] thinking
+moving --move_complete--> [达到 Plan.minCoefficient 且可攻击] windup / [继续] moving / [计划结束] thinking
 windup --skill_resolve--> recovery
-recovery --recovery_complete--> thinking / next plan
-moving/windup/thinking --受到有效伤害且存活--> interrupted → thinking
+recovery --recovery_complete--> execute buffered plan / thinking
+moving/windup/recovery/thinking --受到实际造成伤害的 hit 且存活--> interrupted → thinking
 任意活动状态 --HP 归零--> dead
 任意状态 --控制平面取消--> terminated
 ```
@@ -694,9 +707,9 @@ v0 优先采用**合法候选计划集合**：Battle 根据当前快照、地图
 
 Battle 只保证这条 path 在**生成候选的当前快照**下合法，不承诺未来一定能走完。执行期间对手会移动，因此每一格仍必须重新检查占位和预约。
 
-对于带技能意图的计划，`minCoefficient` 属于 **LegalPlan / PlanSubmission 的执行约束**，不属于 `BattleSkill` Content。它表达：
+对于带技能意图的计划，`minCoefficient` 属于 **LegalPlan / PlanSubmission 的起手约束**，不属于 `BattleSkill` Content。它表达：
 
-> “这个技能客观上已经可以命中”不等于“这次计划现在就要出手”；只有当前目标格的效果系数达到本计划的 `minCoefficient`，才允许停止移动并开始技能前摇。
+> “这个技能客观上已经可以命中”不等于“这次计划现在就要出手”；只有当前目标格的效果系数达到本计划的 `minCoefficient`，才允许停止移动并开始技能前摇。**一旦技能已经起手，`minCoefficient` 的职责结束；resolve 时按目标当时实际所在格的 coefficient 结算。**
 
 例如某技能近处系数为 `1.0`、远处为 `0.5`，Legal Plan 可以同时提供：
 
@@ -718,7 +731,7 @@ P2: minCoefficient = 1.0  → 即使 0.5 已可命中也继续接近，直到达
 3. 执行 path 时，每一步开始前重新检查通行、占位和预约；在**计划起点、每个 `move_complete` 后，以及保护解除后重新获得攻击资格的检查点**，根据当前 `direction` 旋转 Skill 的范围矩阵并读取目标格系数。
 4. 若目标格系数为 0/矩阵外，或虽大于 0 但仍小于当前 Plan 的 `minCoefficient`，则**不触发技能**；只要 path 仍可执行就继续移动。Simulation 不能因为“已经进入 Skill 的最低合法范围”而提前替 Decision 出手。
 5. 若目标格系数 `>= minCoefficient` 且 Actor 当前允许攻击，则停止剩余 path 并进入技能前摇；如果受击保护尚未结束，则保留该计划的技能意图，但禁止 `windup_start`，继续该计划允许的合法移动或等待。
-6. 保护结束后必须使用最新 caster 坐标/朝向、target 坐标、计划代次和同一 `minCoefficient` 重新判断；之前曾达到阈值不产生未来出手权。若 path 已耗尽而阈值仍未达到，则本计划不能降级为较低系数攻击，应结束/保持并进入后续决策流程。路线受阻、目标消失或计划失去意义时同样停止计划并 `ensureDecision`；不能在同一 Tick 无限重试。
+6. 保护结束后，如果技能尚未起手，必须使用最新 caster 坐标/朝向、target 坐标、计划代次和同一 `minCoefficient` 重新判断；之前曾达到阈值不产生未来起手权。若 path 已耗尽而阈值仍未达到，则本计划不能降级为较低系数起手，应结束/保持并进入后续决策流程。技能一旦已经起手，后续 resolve 不再检查 `minCoefficient`，只读取当时实际 coefficient。路线受阻、目标消失或计划失去意义时同样停止计划并 `ensureDecision`；不能在同一 Tick 无限重试。
 7. 模型格式错误/非法候选允许有限重试；超时/服务失败采用确定性保底行为。重试不能凭空暂停 Battle，也不能延长受击保护。
 
 Decision Observation 至少包含双方公开 HP、整数格位置/朝向、当前 action state、技能范围矩阵与前摇/后摇、保护剩余 Tick、对手是否正在移动/技能前摇/后摇，以及最近冲突/失败原因。v0 不发送 MP。
@@ -765,70 +778,127 @@ Browser 可以在 A 与 B 之间平滑插值，但规则系统里不存在半格
 
 
 
-## 9. 技能：范围矩阵、前摇结算、后摇与目标持续性
+
+## 9. 技能：起手阈值、前摇躲避、当前系数结算与后摇
 
 ### 9.1 技能起手
 
-- 在计划起点以及每个 `move_complete` 提交后，Simulation 用施法者最新整数格坐标和 `direction` 旋转 Skill 的 `range` 矩阵。
-- 将目标 Actor 的相对坐标映射到旋转后的矩阵；对应单元格值大于 0 时目标位置合法，该值同时成为本次技能的效果系数。
-- 如果目标位置合法且施法者不受保护，则停止旧计划剩余移动并进入 `windup`。
-- 如果目标位置合法但施法者仍受保护，不丢弃攻击意图；继续允许计划中的合法移动或等待保护结束。保护结束后必须用最新坐标/朝向重新检查矩阵后才能开始 `windup`。
+- 在计划起点、每个 `move_complete` 提交后，以及保护结束重新获得攻击资格时，Simulation 用施法者最新整数格坐标和 `direction` 旋转 Skill 的 `range` 矩阵。
+- 将目标 Actor 的相对坐标映射到旋转后的矩阵，读取 `currentCoefficient`。
+- `currentCoefficient <= 0` 或矩阵外：技能当前不能起手。
+- `0 < currentCoefficient < Plan.minCoefficient`：技能客观上已经可以作用，但当前计划明确要求更高效果，因此不提前出手；path 仍可执行时继续移动。
+- `currentCoefficient >= Plan.minCoefficient` 且施法者当前允许攻击：停止旧计划剩余移动并进入 `windup`。
+- 如果已经达到起手阈值但施法者仍受保护，则保留技能意图，但不能 `windup_start`；继续允许计划中的合法移动或等待，之后重新按最新位置/朝向检查起手条件。
 - v0 不引入 MP 或通用技能资源条。
-- 前摇期间施法者不能移动；受到有效伤害后，当前技能 action generation 失效，本次未结算技能取消。
+- 前摇期间施法者不能移动；受到实际造成伤害的 `hit` 后，当前技能 action generation 失效，本次未结算技能取消。
+
+`minCoefficient` **只决定什么时候开始技能**。技能一旦开始前摇，它不再约束最终结算效果。
 
 角色的 `direction` 是规则输入。Presentation 显示的 Sprite 朝向不能反向改变技能矩阵方向。
 
-### 9.2 前摇、结算与后摇
+### 9.2 前摇与 resolve：v0 不使用 tracking
 
-普通技能规则时间统一为：
+v0 不定义 `tracking` 字段，也没有“合法起手后自动锁定最终命中”的默认规则。
+
+普通技能统一遵循：
 
 ```text
-windup_ticks
-  → resolve
-  → recovery_ticks
-  → next action
+达到 minCoefficient
+  → windup_start
+  → 前摇期间双方继续按各自规则行动
+  → resolve 时重新读取双方最新 committed tile + caster direction
+  → 得到 resolveCoefficient
 ```
 
-当前不设置独立 `active_ticks`。前摇结束的逻辑结算点产生本次技能候选结果；结算完成后进入 recovery。
+resolve 时只关心**此刻目标实际处在技能矩阵的什么位置**：
 
-`tracking` 用来描述目标从技能起手到结算期间移动后是否仍保持有效。当前至少存在两类需求：
+- `resolveCoefficient > 0`：目标仍在效果区域；按这个**当前 coefficient** 计算效果；
+- `resolveCoefficient <= 0` 或矩阵外：技能正常完成，但目标已经躲出效果区域，结果为 `miss`。
 
-- 普通锁定远程技能：合法起手后，目标普通移动不自动导致落空；
-- “抓”这类位置技能：结算时需要重新检查目标是否仍位于旋转后矩阵的合法格。
+因此，例如一个技能近处为 `1.0`、远处为 `0.5`：
 
-字段名/枚举值与更细语义仍待下一轮 Contracts 冻结；当前文档不把所有技能强制成同一种 tracking。
+```text
+起手时 coefficient = 1.0，Plan.minCoefficient = 1.0
+→ 可以开始 windup
 
-recovery 期间的移动、重新思考、以及受到有效伤害时是否立即结束 recovery，尚未冻结，不得由实现自行猜测。
+resolve 时目标仍在 1.0
+→ 按 1.0 结算
+
+resolve 时目标退到 0.5
+→ 仍命中，按 0.5 结算
+
+resolve 时目标离开矩阵
+→ miss
+```
+
+这意味着前摇天然就是目标的规避窗口；不需要额外 `lock_actor / revalidate_range` 模式。
+
+`windup_ticks = 0` 表示不提供这个规避等待窗口：技能合法起手后直接进入 resolve。其精确 intra-Tick 批处理位置仍需与第 11 节事件顺序一起冻结，但不能通过同 Tick 递归产生无限 Action。
 
 ### 9.3 技能结算结果
 
-技能在结算点至少归约为：
+技能在结算点归约为四类：
 
 ```text
-hit      // 目标有效且没有保护：按矩阵系数计算并造成效果/伤害
-immune   // 目标有效但处于受击保护：0 伤害，不中断，不刷新保护
-invalid  // 目标死亡、Battle 结束、tracking 校验失败、行动代次无效等：不结算
+hit      // 技能/目标有效，目标仍在效果区域且未受保护：按当前 coefficient 结算
+immune   // 技能/目标有效，目标仍在效果区域但处于保护：0 伤害，不中断，不刷新保护
+miss     // 技能正常完成、目标仍有效，但 resolve 时目标已在 0 / 矩阵外
+invalid  // Battle/行动已失效、目标死亡/不存在、技能已被中断等：本次结算本身不成立
 ```
+
+`miss` 与 `invalid` 必须区分：
+
+- `miss` 是正常战斗结果：技能成功释放，只是目标通过移动离开了效果区域；
+- `invalid` 是生命周期/目标有效性/代次等导致这次技能不应再进行正常结算。
 
 对于基础伤害技能，概念计算为：
 
 ```text
-rawDamage = skill.damage × rangeCoefficient
+rawDamage = skill.damage × resolveCoefficient
 ```
 
-最终 HP 伤害的整数化/舍入规则仍待确定，不能依赖 JavaScript 隐式转换。
+coefficient 是**确定性的效果倍率，不是命中概率**。v0 不因为 `0.5` 就执行“50% 随机命中”；它表示命中时按 0.5 倍效果结算。最终 HP 伤害的整数化/舍入规则仍待确定，不能依赖 JavaScript 隐式转换。
+
+结算判断建议按以下概念顺序：
+
+```text
+1. Battle / action / target 是否仍有效？
+   否 → invalid
+
+2. 用最新 committed tile + caster direction 读取 resolveCoefficient
+   <= 0 / 矩阵外 → miss
+
+3. target 是否 protected？
+   是 → immune
+
+4. 否则 → hit，按 resolveCoefficient 计算效果
+```
 
 建议表现：
 
 - `hit`：结算规则效果，并在目标本 Tick 最新已提交格播放 Skill 引用的 BattleEffect；
 - `immune`：不造成伤害，但可以播放命中/免疫视觉；
-- `invalid`：不产生正常命中伤害或命中特效，只记录规则/诊断日志。
+- `miss`：不产生目标命中效果；是否播放空挥/落空视觉由 Presentation 契约后续决定；
+- `invalid`：不产生正常技能命中表现，只记录规则/诊断日志。
 
-v0 仍是单目标 Actor。范围矩阵只决定这个 Actor 是否在合法格以及效果系数；它不是 AOE effect matrix。
+v0 仍是单目标 Actor。范围矩阵只决定这个 Actor 是否在效果区域以及当前效果系数；它不是 AOE effect matrix。
 
 地形通行不自动等于技能 LOS。v0 暂不因矩阵存在而自动引入 LOS、固定地面目标、AOE、弹道等机制。
 
-### 9.4 Effect Presentation
+### 9.4 Recovery
+
+技能 resolve 完成后进入 recovery。
+
+Recovery 是**行动锁，不是思考锁**：
+
+- 可以发起/继续 Decision Thinking；
+- 可以接收并暂存下一份 ready Plan；
+- 不可以开始新的 move / turn / windup 等 Action；
+- `recovery_complete` 后，如果暂存 Plan 仍合法，可以立即进入后续正常执行检查；
+- recovery 中受到实际造成伤害的 `hit` 时，立即中断 recovery，旧计划/旧 Decision generation 失效，进入正常受击保护与重新 Decision 流程；
+- `immune` 不造成实际伤害，因此不打断 recovery。
+
+### 9.5 Effect Presentation
 
 Simulation 结算后只输出 effect identity、锚点目标/格子、开始 Tick、结果等事实。Presentation 根据对应 `struct.BattleEffect` 决定图片及渐入/停留/渐出。
 
@@ -851,7 +921,7 @@ Presentation 自己解析 `BattleEffect` 的 Graphics 和视觉时间线。动�
 
 受到 `hit` 且实际造成伤害的命中时，本 Tick 先按统一命中批次应用伤害并判断死亡。存活 Actor：
 
-1. 使当前多格计划、未完成施法和旧 LLM 请求代次失效；
+1. 使当前多格计划、未完成前摇、recovery 和旧 LLM 请求代次失效；
 2. **不撤销已经开始的原子单格移动**，该 step 仍会完成；
 3. 创建且只创建一个新的 Decision Request；
 4. 设置新的 `protectedUntilTickExclusive`；
@@ -874,9 +944,9 @@ Battle 采用类似 Event Loop 的思想，但异步回调顺序不是游戏规�
 
 1. **截取当前 Tick 事件快照**：只取 `dueTick === currentTick` 的有效候选；更早 Tick 应在之前的逐 Tick补处理循环中已经结算。
 2. **过滤 Battle/Actor/代次失效事件**：死亡、旧 action generation、旧 decision generation 等不能继续提交。已开始原子移动的 step token 按第 8 节例外完成。
-3. **完成本 Tick 到期移动与既有后摇结束**：统一提交有效 `move_complete`，原子释放起点/占用终点/释放预约；处理本 Tick 到期且仍有效的 `recovery_complete`。后摇受击是否提前结束仍按第 9 节待确认规则处理。
+3. **完成本 Tick 到期移动与既有后摇结束**：统一提交有效 `move_complete`，原子释放起点/占用终点/释放预约；处理本 Tick 到期且仍有效的 `recovery_complete`。受到实际伤害的 recovery 已在受击流程中提前失效。
 4. **收集本 Tick 到期技能**：把有效 `skill_resolve` 放入候选命中集合。
-5. **解析技能结果**：基于**移动完成后的最新位置**和本命中批次开始前的保护状态，把每次技能归约为 `hit / immune / invalid`。
+5. **解析技能结果**：基于**移动完成后的最新位置、caster 当前 direction**和本命中批次开始前的保护状态，重新读取 resolveCoefficient，把每次技能归约为 `hit / immune / miss / invalid`。`minCoefficient` 不参与 resolve。
 6. **批量应用 hit 伤害**：同步修改 HP；同 Tick 已经到期的双方攻击不会因代码处理顺序互相吞掉。
 7. **终局闸门**：如果产生死亡/双亡并达到结束条件，立即冻结新的游戏行为，只保留日志/表现/Frame 收尾。
 8. **处理存活受击者**：失效旧计划/未结算技能前摇/Decision generation，设置保护，并对每个 Actor 最多启动一个新 Decision Request。
@@ -927,7 +997,7 @@ abort/cancel
 - 接受的 `planId`、path、`skillId`、`targetActorId` 与 `minCoefficient`；
 - Decision 请求 generation、开始 Tick、实际完成时间/映射 dueTick、timeout；
 - 移动预约和冲突裁决；
-- 技能 `hit / immune / invalid` 结果；
+- 技能 `hit / immune / miss / invalid` 结果以及 resolve 时实际 coefficient；
 - 受击和保护区间；
 - Battle 结果。
 
@@ -959,17 +1029,17 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 ### 13.1 真实行为验收
 
 - `struct.Map` / `struct.Tileset` / Character Graphics 可直接沿用现有 RPGMap 内容形式，不新增 BattleMap/BattleActorVisual；一张兼容地图和两个合法可见 Character Sprite 可正常投影。
-- `BattleActor` 能引用 Character、max_hp 与 skills；`BattleSkill` 能用单一 m×n 范围矩阵表达朝向范围和系数；`BattleEffect` 可独立替换图片/视觉时间而不改变技能规则。
+- `BattleActor` 能引用 Character、max_hp 与 skills；`BattleSkill` 能用单一 m×n 范围矩阵表达朝向范围和确定性效果倍率，且 v0 不需要 `tracking`；`BattleEffect` 可独立替换图片/视觉时间而不改变技能规则。
 - 单格移动使用「起点占用 + 终点预约 + 到期原子提交」；Browser 没有反向提交半格位置。
 - 移动中受击时，本格仍完成；旧多格计划后续步骤取消，新计划从本格完成后的真实位置继续。
 - 宿主从 Tick 10 晚醒到 Tick 14 时，Tick 11/12/13/14 按序分别归约，不能把不同 dueTick 的事件当成同时发生。
 - 每个 Actor 同时最多一个有效 Decision Request；同 Tick 出现多个“需要重规划”的原因也不会重复发起 LLM。
 - LLM 实际耗时 500 ms 按最早 600 ms/Tick 边界生效；恰好 deadline 完成按统一 completed-time 规则处理，不由 timeout/ready 回调先后决定。
 - 合法候选 `planId` 显式携带 path；带技能候选还显式携带 `skillId / targetActorId / minCoefficient`。Battle 不暗中替 AI 选择等价路线或更早出手；执行时每格重新检查动态占位/预约和技能阈值。
-- 保护期内可以沿计划移动、可以保留攻击意图，但不能开始技能前摇；保护结束后重新检查朝向、范围矩阵和原 Plan 的 `minCoefficient`，达到同一阈值才起手。
+- 保护期内可以沿计划移动、可以保留攻击意图，但不能开始技能前摇；保护结束后若技能尚未起手，重新检查朝向、范围矩阵和原 Plan 的 `minCoefficient`，达到同一阈值才起手。技能一旦起手，resolve 不再检查该阈值。
 - 技能矩阵必须只有一个 `"↑"`，0/矩阵外无效，正数为合法格和效果系数；Actor 朝向变化时同一矩阵正确旋转。测试必须覆盖“0.5 已合法但 Plan 要求 1.0，因此继续移动而不提前释放”的情况。
-- 技能前摇结束至少产生 `hit / immune / invalid` 三种确定结果；`immune` 不伤害、不打断、不刷新保护。
-- 同 Tick 先完成所有移动，再解析到期技能；锁定 Actor 的技能效果落在目标本 Tick 移动完成后的最新格。
+- 技能 resolve 产生 `hit / immune / miss / invalid` 四类确定结果：目标仍在矩阵内时使用 resolve 时的实际 coefficient；目标移动到 0/矩阵外为 `miss`；`immune` 不伤害、不打断、不刷新保护。
+- 同 Tick 先完成所有移动，再解析到期技能；技能不使用 tracking/锁定命中位置，而是按目标本 Tick 移动完成后的最新格与 caster 当前 direction 重新读取 coefficient。
 - 双方同 Tick 争一格无重叠；失败方收到原因并在后续 Tick 重决策，不发生零时间重试。
 - 同 Tick 双技能按批处理，无顺序作弊；双亡有明确结果。
 - Frame abort/cancel 立即停止提交权，不等待下个 Tick；迟到 Promise/LLM/事件不能篡改已终止 Battle。
@@ -990,12 +1060,12 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 以下问题仍可留到实现/模拟阶段决定；不要把已经冻结的事件语义重新列为开放问题：
 
 1. `BattleActor / BattleSkill / BattleEffect` 的正式 Content Schema subject/version、字段命名和 Content key/id 对齐规则；Map/Tileset/Character 基础素材已决定沿用现有 RPGMap 形式。
-2. 单格移动、技能前摇/后摇、保护和一次计划最大 path 的具体 Tick 数值；后摇期间允许哪些动作以及受击如何处理。
+2. 单格移动、技能前摇/后摇、保护和一次计划最大 path 的具体 Tick 数值；`windup_ticks = 0` 的技能在单 Tick reducer 中如何进入与其他技能一致的结算批次，需在不产生零时间递归的前提下冻结。
 3. 同格预约冲突的公平平手算法；若算法包含随机性必须使用并记录 `battleSeed`。
 4. 宿主失焦/用户主动暂停时，是冻结 Battle 单调时钟还是继续流逝；如果继续流逝，恢复后仍必须逐 Tick 顺序补算。
 5. Decision Adapter 如何可靠提供完成时刻、deadline、取消以及服务错误元数据；不同模型/网络的耗时差异是否需要产品层限制。
 6. 合法候选 path + `minCoefficient` 组合的生成数量、去重和搜索预算；不能为同一技能生成大量等价阈值把 Prompt 撑爆，也不能只提供一种路线/出手阈值使 AI 无实际战术选择。
-7. `tracking` 的正式枚举与结算语义；范围矩阵伤害系数的整数化/舍入规则；是否做 LOS。地面选点、AOE/第二张 effect matrix 与其他 target/effect type 暂不进入 v0。
+7. 范围矩阵 coefficient 的整数化/舍入规则；是否做 LOS。v0 已明确 coefficient 是确定性效果倍率、删除 `tracking`；地面选点、AOE/第二张 effect matrix 与其他 target/effect type 暂不进入 v0。
 8. `BattleEffect` 的正式视觉 timing/anchor Schema，以及 `immune` 是复用原技能效果还是增加专门免疫提示。
 9. Presentation 的 RenderProjection 具体 Schema、地图/双 Sprite/技能贴图节点和生命周期；Camera 是否完全由 Presentation 自主，或接受 Simulation 的非权威 focus hint。
 10. 四选一指导如何通过现有授权 InputTarget 进入下一个我方 Decision Observation。
