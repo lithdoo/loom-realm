@@ -305,7 +305,7 @@ Host background / explicit pause 时，需要在以下方案中冻结一种：
 
 当前 Tile passability 只明确控制 movement。
 
-### OPEN-LOS-001 — Skill LOS — OPEN
+### Skill LOS（引用 `OPEN-LOS-001`）
 
 墙体是否阻挡技能尚未冻结。
 
@@ -331,7 +331,7 @@ decisionCountWithoutProgress
 collisionRetryCount
 ```
 
-### OPEN-STALEMATE-001 — 正式僵局结果 — OPEN
+### 正式僵局结果（引用 `OPEN-STALEMATE-001`）
 
 只有模拟数据证明长期追逐/无效规划是实际问题后，再决定是否加入 `stalemate`。
 
