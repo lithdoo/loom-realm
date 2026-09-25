@@ -1,12 +1,12 @@
-# Battle v0 Integration Guide
+# Battle v0 集成说明
 
-> Status: **Design-only integration guide**. This document describes how the Battle core integrates with LoomRealm resources, Presentation, Decision adapters, Host/Frame lifecycle, and workspace tooling.
+> 状态：**Design only / Integration 草案**。本文说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成。
 >
-> Gameplay semantics live only in [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md). Data shapes live in [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md).
+> Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
-## 1. Responsibility boundary
+## 1. 集成职责边界
 
-Battle has three runtime layers:
+Battle 运行时保持三层：
 
 ```text
 Decision
@@ -16,21 +16,21 @@ Simulation
 Presentation
 ```
 
-The integration layer must preserve the following authority rules:
+集成层必须保持以下权威边界：
 
-- Decision proposes intent; it does not mutate battle facts.
-- Simulation validates, schedules, resolves, and owns BattleResult.
-- Presentation renders projections only.
-- Host/Frame owns lifecycle/authorization around the Battle subsystem.
-- Shared Contracts carry data but own no state.
+- Decision 只提出意图，不直接修改 Battle State；
+- Simulation 负责校验、调度、结算和 BattleResult；
+- Presentation 只消费 Projection；
+- Host/Frame 负责 Battle 外部生命周期和授权；
+- Contracts 只传数据，不拥有状态。
 
-## 2. RPGMap resource compatibility
+## 2. RPGMap Resource 兼容
 
-Battle deliberately reuses **resource/content form**, not RPGMap Runtime behavior.
+Battle 复用的是**素材/Content 形式**，不是 RPGMap Runtime 行为。
 
-### 2.1 Reused content/resource concepts
+### 2.1 复用的 Content / Resource 概念
 
-Battle may consume existing:
+Battle 可以读取现有：
 
 ```text
 struct.Map
@@ -41,24 +41,24 @@ resource.Graphics/Autotiles/...
 resource.Graphics/Characters/...
 ```
 
-Known existing conventions:
+当前已确认的兼容约定：
 
-- conceptual Map record fields include `tileset_id`, `width`, `height`, ProjectedTable-style tile `data`, and `behaviors`;
-- conceptual Tileset record fields include `id`, `tileset_name`, `autotile_names`, `passages`, `priorities`, and `terrain_tags`;
-- tile size is 32×32;
-- direction values are `2 / 4 / 6 / 8`;
-- Character walk pattern values are `0 / 1 / 2 / 3`;
-- Graphics resource identity follows `namespace + key + contentVersion`;
-- standard namespace is `resource.Graphics`;
-- Tileset key convention: `Tilesets/<tilesetName>`;
-- Autotile key convention: `Autotiles/<name>`;
-- Character key convention: `Characters/<characterName>`.
+- Map 概念字段包括 `tileset_id`、`width`、`height`、ProjectedTable 风格的 tile `data` 和 `behaviors`；
+- Tileset 概念字段包括 `id`、`tileset_name`、`autotile_names`、`passages`、`priorities`、`terrain_tags`；
+- tile size = 32×32；
+- direction 继续使用 `2 / 4 / 6 / 8`；
+- Character pattern 使用 `0 / 1 / 2 / 3`；
+- Graphics 资源身份沿用 `namespace + key + contentVersion`；
+- 常用 namespace 为 `resource.Graphics`；
+- Tileset key：`Tilesets/<tilesetName>`；
+- Autotile key：`Autotiles/<name>`；
+- Character key：`Characters/<characterName>`。
 
-Battle should reuse the repository's actual shared types/readers rather than duplicate these contracts when implementation begins.
+真正实现时，应优先复用仓库已有 shared type / reader，而不是平行复制一套结构。
 
-### 2.2 Character atlas compatibility
+### 2.2 Character atlas
 
-Existing Character images must be divisible into a 4×4 atlas (image width and height divisible by 4):
+Character 图片继续按 4×4 atlas 使用，图片宽高必须可被 4 整除：
 
 ```text
 frameWidth  = image.width  / 4
@@ -68,56 +68,58 @@ sourceX = pattern * frameWidth
 sourceY = ((direction - 2) / 2) * frameHeight
 ```
 
-Character frames may be larger than one 32×32 tile; Presentation should bottom-center the visible character on its authoritative tile.
+Character frame 可以大于 32×32，Presentation 应以 Actor tile 为基准做底部居中显示。
 
-### 2.3 Tileset/autotile compatibility
+### 2.3 Tileset / Autotile
 
-Ordinary Tileset tiles use the existing 32×32 layout (8 tiles per row in the current format). Existing Autotile block/cell layouts should be consumed as-is.
+普通 Tileset 沿用现有 32×32 tile 布局，当前格式每行 8 个 tile。
 
-These layout facts are Presentation/resource concerns. They MUST NOT define Battle movement or timing semantics.
+Autotile 继续使用现有 block/cell 形式。
 
-### 2.4 Runtime behavior explicitly not reused
+这些只是资源/渲染格式，不能反向定义 Battle movement/timing。
 
-Battle MUST NOT call or delegate battle authority to:
+### 2.4 明确不复用的 Runtime
 
-- `RPGMapBuilder`;
-- `RPGMapHandler`;
-- RPGMap movement/timer state;
-- RPGMap Transfer/Bridge/exploration runtime behavior;
-- RPGMap Browser movement completion as a rules ACK.
+Battle 不得把以下模块当作 Battle 权威：
 
-Existing `lr-map-view` / `lr-map-sprite` concepts are RPGMap Browser/runtime details and are not Battle authority.
+- `RPGMapBuilder`；
+- `RPGMapHandler`；
+- RPGMap movement/timer；
+- RPGMap Transfer / Bridge / exploration Runtime；
+- RPGMap Browser movement completion。
 
-If future Battle gameplay needs exploration semantics, they must be introduced explicitly into Simulation rather than inherited accidentally.
+`lr-map-view` / `lr-map-sprite` 属于 RPGMap Browser/Runtime 细节，不进入 Battle Core。
 
-## 3. Presentation integration
+如果未来 Battle 需要探索语义，必须明确加入 Simulation，而不是从 RPGMap Runtime 隐式继承。
 
-Presentation is display-only.
+## 3. Presentation 集成
 
-Its responsibilities include:
+Presentation 只负责显示。
 
-- Map/Tileset/Autotile rendering;
-- Character Sprite selection and animation;
-- interpolation for authoritative A→B steps;
-- skill/effect rendering;
-- camera follow/focus/zoom;
-- viewport/layout;
-- resource load/dispose lifecycle.
+职责包括：
 
-### 3.1 Position projection
+- Map/Tileset/Autotile 绘制；
+- Character Sprite；
+- authoritative A→B step 的插值；
+- BattleEffect；
+- camera follow/focus/zoom；
+- viewport/layout；
+- resource load/dispose 生命周期。
 
-During an active move step:
+### 3.1 Position Projection
+
+active move step 期间：
 
 ```text
 Simulation committed tile = origin
 Presentation screen position = interpolated origin→destination
 ```
 
-Presentation MUST NOT reverse-sync the interpolated position into Simulation.
+Presentation 不得把插值坐标 reverse-sync 回 Simulation。
 
 ### 3.2 Presentation diagnostics
 
-Presentation may emit diagnostics such as:
+Presentation 可以产生：
 
 ```text
 animationFinished
@@ -125,38 +127,46 @@ assetFailed
 viewportChanged
 ```
 
-These are not battle-rule acknowledgements.
+这些默认都不是 Battle Rule ACK。
 
-Simulation MUST NOT wait for animation completion before committing movement, damage, death, or BattleResult.
+Simulation 不得等待动画完成后才提交移动、扣血、死亡或 BattleResult。
 
 ### 3.3 Camera
 
-Camera state is Presentation-owned.
+Camera 完全属于 Presentation。
 
-Simulation does not own `cameraX / cameraY / zoom`.
+Simulation 不拥有：
 
-**INTEGRATION-OPEN-001:** whether RenderProjection may include a non-authoritative `focusHint` is not frozen.
+```text
+cameraX
+cameraY
+zoom
+```
 
-## 4. BattleEffect presentation
+### INTEGRATION-OPEN-001 — camera focus hint — OPEN
 
-BattleEffect is a Presentation-only Content concept.
+是否允许 RenderProjection 携带非权威 `focusHint` 尚未冻结。
 
-Current minimal direction:
+## 4. BattleEffect 表现
 
-- one Graphics reference;
-- one anchor concept;
-- simple fade-in / hold / fade-out timeline;
-- no particle/shader/projectile/animation-editor system in v0.
+BattleEffect 是 Presentation-only Content。
 
-Current Graphics convention:
+v0 当前最小方向：
+
+- 一张 Graphics；
+- 一个 anchor；
+- 简单 fade-in / hold / fade-out；
+- 不预埋 projectile、particle、Shader、复杂 animation editor。
+
+资源 key 约定：
 
 ```text
 resource.Graphics/BattleEffects/<EffectName>
 ```
 
-Simulation emits only authoritative effect identity/result/anchor facts; Presentation owns visual lifetime.
+Simulation 只输出 effect identity/result/anchor/startTick 等权威事实；视觉生命周期由 Presentation 自己处理。
 
-Conceptual projection:
+概念 Projection：
 
 ```json
 {
@@ -169,11 +179,19 @@ Conceptual projection:
 }
 ```
 
-**INTEGRATION-OPEN-002:** exact BattleEffect v1 anchor/timing schema, whether `immune` adds a separate immunity visual, and what `miss` displays are not frozen.
+### INTEGRATION-OPEN-002 — BattleEffect 视觉细节 — OPEN
 
-## 5. Decision implementations
+尚未冻结：
 
-Decision is replaceable. Expected implementations include:
+- exact anchor/timing Schema；
+- `immune` 是否有独立免疫视觉；
+- `miss` 是否播放空挥/落空效果；
+- `invalid` 是否完全无视觉；
+- Browser effect cleanup 生命周期。
+
+## 5. Decision 实现类型
+
+Decision 是可替换组件，预期可以有：
 
 ```text
 MockDecision
@@ -183,107 +201,128 @@ RandomDecision
 LLMDecision
 ```
 
-Simulation must be testable and able to complete a battle without Browser or a real LLM.
+Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
 ## 6. LLM Decision Adapter
 
-The repository's public subsystem surface does not currently establish the final Battle LLM service contract. The adapter must eventually solve:
+当前仓库公开的 Subsystem surface 还没有冻结 Battle 的最终 LLM 服务接口。
 
-- host location for LLM calls;
-- authorization/credentials;
-- cancellation/AbortSignal;
-- trusted completion timestamp;
-- deadline;
-- service/network error metadata;
-- structured output validation and one allowed correction retry.
+Adapter 最终需要解决：
 
-Browser code should not hold secret model credentials.
+- LLM 请求位于哪个 Host 层；
+- authorization / credential；
+- AbortSignal / cancel；
+- trusted completion timestamp；
+- deadline；
+- service/network error metadata；
+- structured output validation；
+- 同 generation 的一次 correction retry。
+
+Browser 不应持有模型密钥。
 
 ### 6.1 Completion time
 
-The adapter must provide a trustworthy actual completion time so Simulation can obey `DEC-001`.
+Adapter 必须提供可信的真实完成时间，以满足 `DEC-001`。
 
-Example:
+例如：
 
 ```text
-model completed at 480 ms
-host callback handled at 700 ms
-→ Battle timing should use the trusted 480 ms completion fact
+model completed = 480 ms
+host callback handled = 700 ms
+→ Battle 应按可信 480 ms 映射 dueTick
 ```
 
-Do not measure “thinking time” only from when the JavaScript callback happens to run.
+不能只把 JavaScript callback 真正被调度到的时刻当“模型思考时间”。
 
-### 6.2 Model/service differences
+### 6.2 Model / Service 差异
 
-Different model/network latencies may need product-level limits or deadlines. Those are integration/product decisions; they must not alter the deterministic mapping rule in the core spec.
+不同模型、网络、供应商可以有不同 deadline/product limit，但不得修改 Core 中“completion fact → dueTick”的确定性规则。
 
-**INTEGRATION-OPEN-003:** final Decision Adapter interface, error enum, cancellation guarantees, model limits, and deadline defaults are not frozen.
+### INTEGRATION-OPEN-003 — Decision Adapter API — OPEN
+
+尚未冻结：
+
+- exact Adapter interface；
+- error enum；
+- cancel guarantee；
+- default deadline；
+- model/service limit；
+- credential/authorization wiring。
 
 ## 7. Player Guidance
 
-Future player input acts like a trainer hint for the **next own-side Decision Observation**.
+未来玩家作为“训练师”给我方下一次 Decision 提供临时 Guidance。
 
-Guidance:
+Guidance：
 
-- enters through an authorized Host/InputTarget path;
-- becomes temporary Decision context;
-- does not directly mutate HP, position, protection, or damage;
-- does not pause the opponent timeline;
-- does not guarantee that the model follows it.
+- 必须从授权的 Host/InputTarget 路径进入；
+- 只成为下一次 Decision Observation/context；
+- 不直接修改 HP、position、protection、damage；
+- 不暂停对手时间轴；
+- 不保证 AI 一定遵从。
 
-The current product direction is a four-choice set of preconfigured guidance cards. v0 may use fixed guidance or omit guidance while the core loop is implemented.
+产品方向仍是四张预配置 Guidance 卡。v0 Core 开发阶段可以固定 Guidance 或完全跳过。
 
-**INTEGRATION-OPEN-004:** exact InputTarget/Host wiring and Guidance contract are not frozen.
+### INTEGRATION-OPEN-004 — Guidance Host Wiring — OPEN
 
-## 8. Frame, abort, and subsystem lifecycle
+InputTarget / Host / Guidance exact contract 尚未冻结。
 
-A Battle runs inside the LoomRealm subsystem/frame lifecycle.
+## 8. Frame / Abort / Subsystem 生命周期
 
-Frame abort / Battle cancel follows `CTRL-001`:
+Battle 运行在 LoomRealm Frame/Subsystem 生命周期中。
+
+Frame abort / Battle cancel 遵循 `CTRL-001`：
 
 ```text
 abort/cancel
-→ immediately invalidate battle authority/epoch
-→ stop scheduler
-→ best-effort cancel LLM/resource work
-→ clear Presentation
-→ finish Frame cleanup
+→ 立即失效 Battle authority/epoch
+→ 停 scheduler
+→ best-effort cancel LLM/resource
+→ Presentation cleanup
+→ Frame cleanup
 ```
 
-It is not delayed to the next 200 ms Tick.
+不等待下一个 200 ms Tick。
 
-All late decisions/events must fail generation/epoch validation.
+所有迟到 Decision/Event 都必须因 generation/epoch 校验失败而失去提交权。
 
-## 9. Pause/background behavior
+## 9. Pause / Background
 
-The sequential catch-up rule is frozen, but product pause behavior is not.
+逐 Tick catch-up 规则已经冻结，但产品如何定义 pause 仍未冻结。
 
-**INTEGRATION-OPEN-005 / OPEN-CLOCK-001:** when the host is backgrounded or explicitly paused, choose one policy:
+### INTEGRATION-OPEN-005 / OPEN-CLOCK-001 — Battle Clock — OPEN
 
-- freeze the Battle monotonic clock; or
-- let Battle time continue and process every overdue Tick sequentially on resume.
+Host background / explicit pause 时，需要在以下方案中冻结一种：
 
-If time continues, different dueTicks MUST NOT be collapsed.
+- 冻结 Battle monotonic clock；
+- Battle 时间继续流逝，恢复时逐 Tick 补算。
 
-Current product preference may favor freezing on explicit pause, but this is not normative yet.
+无论采用哪种方案，只要时间继续，绝不能把多个 dueTick 合并成一个批次。
 
-## 10. LOS and map behavior
+当前产品方向可以优先考虑“显式 pause 时冻结”，但这不是规范。
 
-Map passability currently controls movement only.
+## 10. LOS 与 Map 规则
 
-**OPEN-LOS-001:** whether walls block skills is not frozen. The current recommendation is **no LOS in v0**:
+当前 Tile passability 只明确控制 movement。
 
-- do not infer `unwalkable = blocks skill`;
-- range matrix alone decides positional skill reach;
-- add explicit LOS later only if a concrete mechanic needs it.
+### OPEN-LOS-001 — Skill LOS — OPEN
 
-Until frozen, implementation must not silently add path/terrain LOS.
+墙体是否阻挡技能尚未冻结。
 
-## 11. Stalemate diagnostics
+当前建议：
 
-v0 does not currently enforce a maximum Battle duration.
+- v0 不做 LOS；
+- 不推导 `unwalkable = blocks skill`；
+- range matrix 单独决定位置是否合法；
+- 未来有具体机制需求时，再显式加入 LOS。
 
-Use non-authoritative diagnostics:
+在冻结前，Runtime 不得自行增加 terrain LOS。
+
+## 11. Stalemate
+
+v0 当前没有 Battle 最大总时长。
+
+可以先记录非权威 diagnostics：
 
 ```text
 ticksSinceLastDamage
@@ -292,46 +331,46 @@ decisionCountWithoutProgress
 collisionRetryCount
 ```
 
-**OPEN-STALEMATE-001:** only add a formal `stalemate` result after simulations show a real need.
+### OPEN-STALEMATE-001 — 正式僵局结果 — OPEN
 
-## 12. Workspace/build status
+只有模拟数据证明长期追逐/无效规划是实际问题后，再决定是否加入 `stalemate`。
 
-Battle remains design-only.
+## 12. Workspace / Build 状态
 
-Current known engineering item:
+Battle 当前仍是 design-only。
 
-- root `package.json` recognizes `game-libs/*`;
-- Battle was introduced without a corresponding verified root `package-lock.json` synchronization;
-- `npm ci`, build, unit tests, and Browser E2E still require verification once Runtime code is added.
+已知工程项：
 
-Documentation changes must not be described as build/test success.
+- 根 `package.json` 通过 `game-libs/*` 识别 Battle；
+- Battle 合入时根 `package-lock.json` 尚未做对应同步验证；
+- Runtime 开发后必须单独验证 `npm ci`、build、unit test、Browser E2E。
 
-## 13. Recommended implementation sequence
+文档更新不能被描述成“构建/测试已经通过”。
 
-Use this order to keep rule authority testable:
+## 13. 推荐实施顺序
 
 ```text
-1. Finalize BattleActor / BattleSkill / BattleEffect v1 serialization schemas
-2. Finalize BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance contracts
-3. Implement Content validation
-4. Implement headless Simulation reducer + scheduler + event queue
-5. Drive it with Mock/Script Decision
-6. Cover deterministic rule matrix (coefficient, instant batch, rejection/retry, collision, protection, simultaneous defeat)
-7. Implement RenderProjection + Presentation
-8. Add real LLM Decision Adapter
-9. Add Guidance / Host integration
-10. Run package-lock, npm ci, unit, and Browser E2E verification
+1. 冻结 BattleActor / BattleSkill / BattleEffect v1 serialization schema
+2. 冻结 BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance
+3. 实现 Content validator
+4. 实现 headless Simulation reducer + scheduler + event queue
+5. 用 Mock/Script Decision 驱动
+6. 跑 frozen-rule deterministic Test Matrix
+7. 实现 RenderProjection + Presentation
+8. 接真实 LLM Decision Adapter
+9. 接 Guidance / Host
+10. 验证 package-lock / npm ci / unit / Browser E2E
 ```
 
-Do not make real LLM integration a prerequisite for validating Simulation.
+真实 LLM 不是验证 Simulation 正确性的前置条件。
 
-## 14. Integration open items
+## 14. Integration OPEN 汇总
 
-- **INTEGRATION-OPEN-001** camera focus hint contract.
-- **INTEGRATION-OPEN-002** BattleEffect visual schema/outcome presentation.
-- **INTEGRATION-OPEN-003** Decision Adapter API/timing/error/cancel defaults.
-- **INTEGRATION-OPEN-004** player Guidance Host/InputTarget wiring.
-- **INTEGRATION-OPEN-005** pause/background policy.
-- **OPEN-LOS-001** LOS policy.
-- **OPEN-STALEMATE-001** formal stalemate policy.
-- package-lock/build verification when implementation begins.
+- **INTEGRATION-OPEN-001**：camera focus hint。
+- **INTEGRATION-OPEN-002**：BattleEffect Schema / outcome visuals / cleanup。
+- **INTEGRATION-OPEN-003**：Decision Adapter API/timing/error/cancel/defaults。
+- **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
+- **INTEGRATION-OPEN-005**：pause/background product policy。
+- **OPEN-LOS-001**：Skill LOS。
+- **OPEN-STALEMATE-001**：正式 stalemate。
+- Runtime 开始后还需处理 package-lock / build 验证。
