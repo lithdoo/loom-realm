@@ -43,7 +43,8 @@ resource.Graphics/Characters/...
 
 Known existing conventions:
 
-- map content carries a Tileset id, width, height, tile table data, and behavior data;
+- conceptual Map record fields include `tileset_id`, `width`, `height`, ProjectedTable-style tile `data`, and `behaviors`;
+- conceptual Tileset record fields include `id`, `tileset_name`, `autotile_names`, `passages`, `priorities`, and `terrain_tags`;
 - tile size is 32×32;
 - direction values are `2 / 4 / 6 / 8`;
 - Character walk pattern values are `0 / 1 / 2 / 3`;
@@ -57,7 +58,7 @@ Battle should reuse the repository's actual shared types/readers rather than dup
 
 ### 2.2 Character atlas compatibility
 
-Existing Character images are treated as a 4×4 atlas:
+Existing Character images must be divisible into a 4×4 atlas (image width and height divisible by 4):
 
 ```text
 frameWidth  = image.width  / 4
