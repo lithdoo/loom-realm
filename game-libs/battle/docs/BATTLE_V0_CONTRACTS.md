@@ -239,6 +239,9 @@ type PlanConstraints = {
   movement: {
     cardinalOnly: true
   }
+  turn: {
+    allowed: true
+  }
   skills: Array<{
     skillId: string
     minCoefficients: number[]
@@ -256,6 +259,7 @@ Runtime 内部可以同时暴露/缓存规范化后的整数 units。
 
 ```ts
 type PlanSubmission = {
+  turn?: Direction
   path: GridPosition[]
   skill?: {
     skillId: string
@@ -267,10 +271,14 @@ type PlanSubmission = {
 
 Contract 语义：
 
+- `turn` 表示原地转向；
+- 出现 `turn` 时 path 必须为空；
 - path 不含当前 Actor tile；
 - path 只允许 cardinal step；
-- empty path + no skill = hold/reobserve；
-- empty path + skill = direct cast；
+- empty path + no turn + no skill = hold/reobserve；
+- empty path + no turn + skill = direct cast；
+- empty path + turn + no skill = pure turn；
+- empty path + turn + skill = turn-first plan；turn 消耗本 Tick Action，skill intent 留到后续 Tick；
 - 不包含自由执行字段。
 
 ### PlanRejectReason
@@ -282,6 +290,8 @@ path_too_long
 path_out_of_bounds
 path_not_adjacent
 terrain_blocked
+invalid_turn
+turn_with_path
 unknown_skill
 invalid_target
 invalid_min_coefficient
@@ -400,6 +410,8 @@ dead
 terminated
 ```
 
+`turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
+
 最终 discriminated union 可在实现时正式化。
 
 ## 12. BattleEvent
@@ -426,6 +438,8 @@ move_complete
 skill_resolve
 recovery_complete
 ```
+
+原地 `turn` 即时完成，不需要 `turn_complete` 事件。
 
 Protection 过期由 `protectedUntilTickExclusive` 推导，不需要 `protection_expire` 业务事件。
 
