@@ -155,7 +155,7 @@ recovery_complete
 
 ### TIME-003 — 积压 Tick 必须逐 Tick 归约 — FROZEN
 
-调度器晚醒时：
+Battle clock 正常运行期间，如果调度器晚醒：
 
 ```text
 while lastProcessedTick < targetTick:
@@ -167,7 +167,7 @@ while lastProcessedTick < targetTick:
 
 ### TIME-004 — Pause / Background 冻结 Battle Clock — FROZEN
 
-当 Host 明确暂停 Battle，或 App/Host 进入需要暂停战斗的 background 状态时：
+当 Host 明确暂停 Battle，或 App/Host 进入 background 状态时：
 
 - Battle monotonic clock 冻结；
 - `currentTick` 不推进；
@@ -610,12 +610,13 @@ Actor 处于 protection 时：
 
 - 可以继续 Decision Thinking；
 - accepted plan 中合法移动可以继续；
+- 可以执行合法的原地 turn；
 - **不能启动新的 skill windup**；
 - 原 attack intent 可以保留；
 - protection 结束后，必须用最新 caster tile/direction、target tile、plan generation 和同一 `minCoefficient` 重新检查起手；
 - 之前曾经达到阈值不产生未来出手权。
 
-Protection 阻止的是技能起手，不是 Thinking 或移动。
+Protection 阻止的是技能起手，不是 Thinking、移动或原地 turn。
 
 ### HIT-006 — 同一 hit batch 的 protection 快照 — FROZEN
 
