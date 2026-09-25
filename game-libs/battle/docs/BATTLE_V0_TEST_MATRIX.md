@@ -75,7 +75,7 @@
 | --- | --- | --- | --- |
 | T-INSTANT-001 | SKILL-005, TICK-001 | windup_ticks=0 skill starts at Tick N | Resolves in Tick N instant batch |
 | T-INSTANT-002 | STATE-004, TICK-002 | windup=0 and recovery=0 | Actor cannot start a second Action in the same Tick |
-| T-INSTANT-003 | SKILL-005, HIT-005 | Both Actors start lethal instant skills same Tick | Both instant skills are collected; simultaneous defeat remains possible |
+| T-INSTANT-003 | SKILL-005, HIT-006 | Both Actors start lethal instant skills same Tick | Both instant skills are collected; simultaneous defeat remains possible |
 | T-INSTANT-004 | TICK-001 | Instant skill kills an Actor that had a not-yet-started movement intent | Dead/invalid movement intent is not reserved in phase 12 |
 
 ## 7. Hit, protection, and recovery
@@ -90,8 +90,9 @@
 | T-HIT-006 | HIT-003 | Surviving Actor takes positive damage during windup | Windup invalidated; protection set; one new Decision generation |
 | T-HIT-007 | HIT-003, SKILL-004 | Surviving Actor takes positive damage during recovery | Recovery interrupted; new Decision flow |
 | T-HIT-008 | HIT-004 | Immune impact during recovery | Recovery continues |
-| T-HIT-009 | HIT-005 | Two attacks hit same unprotected target in one batch | Both use protection state from batch start |
-| T-HIT-010 | HIT-005 | Same-batch attacks kill both Actors | Simultaneous defeat supported |
+| T-HIT-009 | HIT-006 | Two attacks hit same unprotected target in one batch | Both use protection state from batch start |
+| T-HIT-010 | HIT-006 | Same-batch attacks kill both Actors | Simultaneous defeat supported |
+| T-HIT-011 | HIT-005, PLAN-007 | Protected Actor has an accepted attack plan | May think/move, cannot start windup; after protection ends recheck latest position/direction/target and same threshold |
 
 ## 8. Decision and recovery concurrency
 
@@ -127,7 +128,7 @@
 | --- | --- | --- | --- |
 | T-RESULT-001 | RESULT-001 | Enemy alone reaches 0 HP at terminal gate | Ally win |
 | T-RESULT-002 | RESULT-001 | Ally alone reaches 0 HP | Enemy win |
-| T-RESULT-003 | RESULT-001, HIT-005 | Both reach 0 in same batch | Simultaneous defeat |
+| T-RESULT-003 | RESULT-001, HIT-006 | Both reach 0 in same batch | Simultaneous defeat |
 | T-RESULT-004 | CTRL-001, RESULT-001 | External Battle cancel | Cancelled result/termination path |
 
 ## 12. Open-rule test placeholders
