@@ -57,7 +57,7 @@ Battle v0 采用三个运行层，职责必须单向且可替换：
                  ┌────────────────┐
                  │    Decision    │
                  │ Observation    │
-                 │ Legal Plans    │
+                 │ Constraints    │
                  │ LLM / Mock     │
                  └───────┬────────┘
                          │ submit plan
@@ -806,7 +806,7 @@ Browser 可以在 A 与 B 之间平滑插值，但规则系统里不存在半格
 
 - 一份短期计划可以包含多步 path，但任何时刻每个 Actor 最多只有一个 active step。
 - 下一步只能在上一格 `move_complete` 已提交之后启动。
-- 同一 Tick 多个 Actor 申请同一目标格时，先收集再统一裁决，最多一个成功；平手算法必须公平且可复现，不能依赖 Promise/回调先后。
+- 同一 Tick 多个 Actor 申请同一目标格时，先收集再统一裁决，最多一个成功；v0 在竞争者之间做**等概率伪随机选择**。随机必须由 `battleSeed + currentTick + targetTile + sorted competingActorIds` 等稳定输入派生，因此相同 Battle Replay 会得到相同赢家，不能依赖 Promise/回调先后、遍历顺序、`Math.random()` 或全局 RNG 已消费次数。
 - v0 禁止两个 Actor 同一 Tick 直接交换相邻格穿过彼此。
 - 预约失败者仍在其原占位格，结束当前计划，记录 `terrain / occupied / reserved / contested` 等原因，并在后续 Tick 重新决策。
 - 冲突后的新移动最早从下一逻辑 Tick 开始，不能在同一 Tick 反复失败和重试。
