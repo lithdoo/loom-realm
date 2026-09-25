@@ -288,41 +288,31 @@ abort/cancel
 
 ## 9. Pause / Background
 
-逐 Tick catch-up 规则已经冻结，但产品如何定义 pause 仍未冻结。
+Pause/background policy 已由 Core `TIME-004` 冻结：
 
-### INTEGRATION-OPEN-005 / OPEN-CLOCK-001 — Battle Clock — OPEN
+- Host 明确暂停 Battle，或 App/Host 进入需要暂停战斗的 background 状态时，Battle monotonic clock 一起冻结；
+- pause 期间不推进 `currentTick`；
+- pause 期间现实时间不计入 Decision latency、movement、windup、recovery 或 protection；
+- resume 后从原逻辑时刻继续，不补算 pause 期间 Tick。
 
-Host background / explicit pause 时，需要在以下方案中冻结一种：
-
-- 冻结 Battle monotonic clock；
-- Battle 时间继续流逝，恢复时逐 Tick 补算。
-
-无论采用哪种方案，只要时间继续，绝不能把多个 dueTick 合并成一个批次。
-
-当前产品方向可以优先考虑“显式 pause 时冻结”，但这不是规范。
+Core 的逐 Tick catch-up 仍保留，但只用于 Battle clock **仍在运行**时 scheduler/event loop 晚醒的情况。
 
 ## 10. LOS 与 Map 规则
 
-当前 Tile passability 只明确控制 movement。
+LOS 已由 Core `SKILL-006` 冻结为：**v0 不做 LOS**。
 
-### Skill LOS（引用 `OPEN-LOS-001`）
-
-墙体是否阻挡技能尚未冻结。
-
-当前建议：
-
-- v0 不做 LOS；
+- Tile passability 只影响 movement；
 - 不推导 `unwalkable = blocks skill`；
-- range matrix 单独决定位置是否合法；
-- 未来有具体机制需求时，再显式加入 LOS。
+- range matrix + direction + committed tiles 决定技能位置是否合法；
+- 即使中间存在不可通行 Tile，只要 target 落在正 coefficient 格，技能范围规则仍成立。
 
-在冻结前，Runtime 不得自行增加 terrain LOS。
+未来如需墙体阻挡、弹道或视线，必须加入新的显式机制。
 
 ## 11. Stalemate
 
-v0 当前没有 Battle 最大总时长。
+Core `RESULT-002` 已冻结：v0 **不设置正式 stalemate，也不设置强制 Battle 最大时长**。
 
-可以先记录非权威 diagnostics：
+继续记录非权威 diagnostics：
 
 ```text
 ticksSinceLastDamage
@@ -331,9 +321,9 @@ decisionCountWithoutProgress
 collisionRetryCount
 ```
 
-### 正式僵局结果（引用 `OPEN-STALEMATE-001`）
+这些数据只用于观察实际模拟是否存在长期追逐/无效规划，不改变当前 BattleResult。
 
-只有模拟数据证明长期追逐/无效规划是实际问题后，再决定是否加入 `stalemate`。
+如果以后确实需要 stalemate，应作为新版本规则显式加入。
 
 ## 12. Workspace / Build 状态
 
@@ -366,11 +356,12 @@ Battle 当前仍是 design-only。
 
 ## 14. Integration OPEN 汇总
 
+仍未冻结的集成项只包括：
+
 - **INTEGRATION-OPEN-001**：camera focus hint。
 - **INTEGRATION-OPEN-002**：BattleEffect Schema / outcome visuals / cleanup。
 - **INTEGRATION-OPEN-003**：Decision Adapter API/timing/error/cancel/defaults。
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
-- **INTEGRATION-OPEN-005**：pause/background product policy。
-- **OPEN-LOS-001**：Skill LOS。
-- **OPEN-STALEMATE-001**：正式 stalemate。
 - Runtime 开始后还需处理 package-lock / build 验证。
+
+Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
