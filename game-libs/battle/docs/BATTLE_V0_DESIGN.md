@@ -1055,22 +1055,275 @@ Frame/Subsystem 取消遵循第 11.3 节控制平面规则：立即终止 Battle
 **明确不在 v0：**传统交替回合、复用 RPGMap Runtime、逐格调用 LLM、MP/通用技能资源系统、职业/装备/升级、多单位、复杂状态/AOE/弹道/粒子/动画编辑器、跨图探索、提示词优化及评测、跨战训练档案、模型微调。多格移动、移动途中施法触发、事件队列、原子单格移动和显式 path 计划**已进入 v0**。
 
 
-## 14. 尚需确认的关键问题（不得暗定）
+## 14. 尚需确认的问题与建议推进顺序
 
-以下问题仍可留到实现/模拟阶段决定；不要把已经冻结的事件语义重新列为开放问题：
+下面只列仍然没有冻结、且会影响后续实现的问题。已经确认的规则（例如 200 ms Tick、范围矩阵、`minCoefficient` 只负责起手、resolve 按当前 coefficient、`miss`、删除 tracking、Recovery 行动锁）不再重新列为开放问题。
 
-1. `BattleActor / BattleSkill / BattleEffect` 的正式 Content Schema subject/version、字段命名和 Content key/id 对齐规则；Map/Tileset/Character 基础素材已决定沿用现有 RPGMap 形式。
-2. 单格移动、技能前摇/后摇、保护和一次计划最大 path 的具体 Tick 数值；`windup_ticks = 0` 的技能在单 Tick reducer 中如何进入与其他技能一致的结算批次，需在不产生零时间递归的前提下冻结。
-3. 同格预约冲突的公平平手算法；若算法包含随机性必须使用并记录 `battleSeed`。
-4. 宿主失焦/用户主动暂停时，是冻结 Battle 单调时钟还是继续流逝；如果继续流逝，恢复后仍必须逐 Tick 顺序补算。
-5. Decision Adapter 如何可靠提供完成时刻、deadline、取消以及服务错误元数据；不同模型/网络的耗时差异是否需要产品层限制。
-6. 合法候选 path + `minCoefficient` 组合的生成数量、去重和搜索预算；不能为同一技能生成大量等价阈值把 Prompt 撑爆，也不能只提供一种路线/出手阈值使 AI 无实际战术选择。
-7. 范围矩阵 coefficient 的整数化/舍入规则；是否做 LOS。v0 已明确 coefficient 是确定性效果倍率、删除 `tracking`；地面选点、AOE/第二张 effect matrix 与其他 target/effect type 暂不进入 v0。
-8. `BattleEffect` 的正式视觉 timing/anchor Schema，以及 `immune` 是复用原技能效果还是增加专门免疫提示。
-9. Presentation 的 RenderProjection 具体 Schema、地图/双 Sprite/技能贴图节点和生命周期；Camera 是否完全由 Presentation 自主，或接受 Simulation 的非权威 focus hint。
-10. 四选一指导如何通过现有授权 InputTarget 进入下一个我方 Decision Observation。
-11. 长期无伤害追逐或 AI 持续无效规划暂不设置强制战斗总时长；根据 `ticksSinceLastDamage` 等诊断指标再决定是否增加僵局规则。
-12. Battle 包根 `package-lock.json` 同步与 `npm ci` 仍需单独核验；本文档更新不代表运行代码已经交付。
+### 14.1 实现 Simulation / Decision 前优先冻结
 
-**执行约束：**先用可控时间的模拟决策器和确定性事件日志验证：积压 Tick、timeout/ready 同刻、移动中受击、同 Tick 移动+命中、保护期攻击意图、重复重规划原因、冲突和同时致命攻击。通过后再接真实 LLM。
+#### 14.1.1 coefficient 的整数化与伤害舍入
+
+当前已经冻结：
+
+- coefficient 是确定性的效果倍率，不是命中概率；
+- resolve 使用目标当时所在格的 coefficient。
+
+仍需决定：
+
+```text
+baseDamage = 7
+coefficient = 0.5
+→ 最终伤害是 3、4，还是允许 3.5？
+```
+
+以及：
+
+```text
+baseDamage = 1
+coefficient = 0.5
+→ 0 还是至少 1？
+```
+
+**建议方向（尚未冻结）：**
+
+- HP 与最终伤害保持整数；
+- Content 可继续写小数 coefficient；
+- 加载时把 coefficient 规范化为固定精度整数，例如千分制：
+  - `1.0 → 1000`
+  - `0.5 → 500`
+  - `1.25 → 1250`
+- 运行时按整数计算：
+  ```text
+  finalDamage = floor(baseDamage × coefficientUnits / 1000)
+  ```
+- 不暗加“最低 1 点伤害”；若以后需要 minimum damage，应作为单独机制定义。
+
+这样可以避免 JavaScript 浮点细节进入 Replay / 跨实现一致性。
+
+#### 14.1.2 `windup_ticks = 0` 的同 Tick 结算位置
+
+玩法语义已经冻结：
+
+> `windup_ticks = 0` 表示没有蓄力等待；合法起手后应直接进入 resolve。
+
+实现上仍需决定：如果 Actor 在 Tick N 的“推进 Plan”阶段才刚满足即时技能条件，这次 resolve 是：
+
+```text
+A. Tick N 内立即加入本 Tick 结算批次
+B. Tick N+1 才结算
+```
+
+**建议方向（尚未冻结）：**采用 A，使 0 Tick 真正表示即时生效；同时增加硬约束：
+
+> 单个 Actor 在一个 Tick 内最多启动一次新的主动 Action。
+
+这样可以支持即时“抓”等技能，又避免 `windup=0 + recovery=0` 导致同 Tick 无限递归。
+
+具体需要把即时技能插入第 11 节 reducer 的哪个阶段，必须与“同 Tick 批量伤害、同时致命”语义一起冻结。
+
+#### 14.1.3 同格预约冲突的 deterministic tie-break
+
+已冻结：
+
+- 两个 Actor 同 Tick 申请同一格时统一裁决；
+- 不能依赖 Promise/回调/遍历顺序；
+- 失败者留在原格并在后续 Tick 重规划。
+
+仍需决定：
+
+> 两者条件完全相同时，谁获得该格？
+
+可选方向：
+
+- 固定按 actorId：最简单，但可能长期偏袒某一方；
+- 基于 `battleSeed + tick + actorId` 的确定性伪随机：公平且可 Replay；
+- 轮换冲突优先权：也可避免长期偏袒，但需要额外状态。
+
+当前建议优先评估“带 seed 的确定性 tie-break”；若使用随机性，`battleSeed` 必须写入 Replay。
+
+#### 14.1.4 LegalPlan 候选预算与去重
+
+当前一个候选可能组合：
+
+```text
+path
++ skillId
++ targetActorId
++ minCoefficient
+```
+
+如果路径、技能和阈值全部做笛卡尔积，候选数会很快膨胀；但候选过少又会让 Decision 没有实际战术选择。
+
+仍需冻结：
+
+- 每次 Observation 最多生成多少个 LegalPlan；
+- path 如何判定“战术等价”并去重；
+- 同一 Skill 的 `minCoefficient` 取哪些值；
+- approach / direct cast / move-only / hold 各保留多少候选；
+- 搜索深度和计算预算。
+
+当前建议是：`minCoefficient` 只从该 Skill 矩阵中实际存在的正系数里选，不生成任意连续小数；候选总数保持一个小而明确的上限。具体上限需用 Mock/Script Decision 和真实 Prompt 大小实测后冻结。
+
+### 14.2 Content / Contracts 正式化
+
+#### 14.2.1 三个 Battle Content Schema
+
+概念已经形成：
+
+```text
+BattleActor
+BattleSkill
+BattleEffect
+```
+
+正式实现前仍需冻结：
+
+- subject/version，例如是否使用 `struct.BattleActor/v1`；
+- Content key 与对象内 `id` 是否必须一致；
+- 字段命名风格；
+- `skills[]`、`effect` 的引用方式；
+- range matrix 的 Schema 校验；
+- Graphics 引用是否直接沿用现有通用 Resource Ref Schema。
+
+Schema version 应表示**结构兼容性**，不应因为 Fireball damage 从 5 调到 6 就升级版本。
+
+#### 14.2.2 LOS 是否进入 v0
+
+当前 range matrix 只描述相对位置，没有规定墙体是否阻挡技能。
+
+例如：
+
+```text
+Actor  █ wall █  Target
+```
+
+即使矩阵覆盖 Target，也需要明确“能否作用”。
+
+**建议方向（尚未冻结）：v0 不做 LOS。**
+
+即：
+
+- Tile passability 只决定移动；
+- 不自动推导“不可通行 = 不可被技能穿过”；
+- 技能只按 range matrix 判断；
+- 未来确有需要再加入独立 LOS 规则。
+
+这样避免把 RPGMap 的通行语义错误扩展成技能遮挡语义。
+
+#### 14.2.3 BattleEffect v1 的最小表现能力
+
+当前已经明确 BattleEffect 是 Presentation-only，但还需冻结：
+
+- effect image 的正式引用字段；
+- timing 字段；
+- anchor 语义；
+- `hit / immune / miss` 各自是否播放；
+- effect cleanup 生命周期。
+
+建议 v0 保持最小：单图片 + 简单 timing + 一个明确锚点，不提前引入 projectile、轨迹、粒子、Shader 或复杂动画系统。
+
+#### 14.2.4 公共 Contracts
+
+仍需正式定义：
+
+```text
+BattleSnapshot
+BattleObservation
+LegalPlan
+PlanSubmission
+PlanAcceptance
+BattleEvent
+RenderProjection
+SkillEffectProjection
+```
+
+重点是把“Simulation 权威事实”和“Presentation 投影”彻底分开；Contracts 只是共享数据边界，不成为第四个运行层。
+
+### 14.3 可随 Runtime / Host 集成继续决定
+
+#### 14.3.1 暂停、后台与 Battle Clock
+
+如果浏览器失焦/系统暂停，需要决定：
+
+- 冻结 Battle 单调时钟；
+- 还是 Battle 时间继续流逝，恢复后补算。
+
+已冻结的底线是：
+
+> 只要选择继续流逝，积压 Tick 就必须逐 Tick 顺序补算，不能合并。
+
+产品方向上可优先考虑主动暂停时冻结 Battle clock，但此项尚未冻结。
+
+#### 14.3.2 Decision Adapter 的真实完成时间
+
+LLM 实际完成可能早于 JavaScript callback 被处理的时间。Decision Adapter 需要可靠提供：
+
+```text
+startedAt
+completedAt
+deadline
+cancel / abort
+error metadata
+```
+
+Simulation 用这些事实映射 `dueTick`，不能把 host event-loop 延迟误算成模型思考时间。
+
+Simulation 初期可以用 Mock/Script Decision 绕过这个集成问题。
+
+#### 14.3.3 Presentation / RenderProjection
+
+仍需决定：
+
+- 地图与双 Sprite 的投影格式；
+- movement projection；
+- effect projection；
+- camera API；
+- camera 是否接受 Simulation 的非权威 focus hint；
+- Browser 节点和资源生命周期。
+
+这些不应阻塞 headless Simulation 的实现。
+
+#### 14.3.4 玩家四选一 Guidance
+
+未来玩家 Guidance 应进入下一次 Decision Observation，而不是直接修改 Simulation。
+
+仍需决定它如何经过现有授权 InputTarget / Host 框架传入 Decision。
+
+#### 14.3.5 僵局处理
+
+当前不设置强制 Battle 总时长。
+
+先记录：
+
+```text
+ticksSinceLastDamage
+ticksSinceLastPositionChange
+decisionCountWithoutProgress
+collisionRetryCount
+```
+
+用模拟数据判断是否真的存在长期无伤害追逐/无效规划，再决定是否增加 `stalemate` 或总时长规则。
+
+#### 14.3.6 Workspace / package-lock
+
+Battle 当前仍是 design-only。根 `package-lock.json` 同步、`npm ci`、构建、单元测试和 Browser E2E 都需要在真正加入 Runtime 代码时单独验证；文档冻结不代表这些工程项已经完成。
+
+### 14.4 推荐实施顺序
+
+下一阶段建议按下面顺序推进：
+
+```text
+1. 冻结 coefficient 整数化/舍入
+2. 冻结 windup_ticks = 0 的同 Tick reducer 语义
+3. 冻结同格冲突 tie-break
+4. 冻结 LegalPlan 候选预算/去重
+5. 正式定义 BattleActor / BattleSkill / BattleEffect v1 Schema
+6. 定义核心 Contracts
+7. 实现 Content validator + headless Simulation reducer
+8. 用 Mock/Script Decision 覆盖边界测试
+9. 再接 Presentation
+10. 最后接真实 LLM Decision / Guidance / Host E2E
+```
+
+**执行约束：**在接真实 LLM 前，先用可控时间的模拟决策器和确定性事件日志验证：积压 Tick、timeout/ready 同刻、移动中受击、同 Tick 移动+命中、0 Tick 技能、保护期攻击意图、Recovery 受击、`miss`、重复重规划原因、同格冲突和同时致命攻击。
 
