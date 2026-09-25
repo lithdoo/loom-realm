@@ -1,164 +1,166 @@
-# Battle v0 Test Matrix
+# Battle v0 测试矩阵
 
-> Status: **Design-only acceptance matrix**. This document does not redefine Battle rules. Every expected result must trace back to Rule IDs in [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md).
+> 状态：**Design only / Acceptance Matrix**。本文不重新定义规则；每个 Expected 必须能追溯到 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule ID。
 >
-> Tests for OPEN rules are listed separately and must not assert a behavior until that rule is frozen.
+> OPEN Rule 只保留占位测试，冻结前不得断言具体结果。
 
-## 1. Architecture and authority
+## 1. Architecture / Authority
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-ARCH-001 | ARCH-001, ARCH-003 | Presentation animation finishes early/late | Simulation Tick, tile, HP, result are unchanged |
-| T-ARCH-002 | ARCH-002 | AI wants a route not precomputed by engine | Decision may submit explicit path; Simulation validates it rather than choosing another route |
-| T-ARCH-003 | ARCH-004 | Battle loads RPGMap-compatible Map/Character assets | Assets are reused; RPGMap Runtime movement/timers are not invoked |
-| T-ARCH-004 | ARCH-001, ARCH-003 | Browser camera/DOM/Sprite changes | No authoritative battle state changes |
+| T-ARCH-001 | ARCH-001, ARCH-003 | Presentation 动画提前/延后结束 | Simulation Tick、tile、HP、result 不变 |
+| T-ARCH-002 | ARCH-002 | AI 想走 Engine 未预生成的路线 | Decision 可直接提交 path；Simulation 只校验，不替换路线 |
+| T-ARCH-003 | ARCH-004 | Battle 加载 RPGMap-compatible Map/Character | 复用素材形式，不调用 RPGMap Runtime movement/timer |
+| T-ARCH-004 | ARCH-001, ARCH-003 | camera/DOM/Sprite 状态变化 | 不改变权威 Battle State |
 
-## 2. Time and scheduler
+## 2. Time / Scheduler
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-TIME-001 | TIME-001 | Advance one Battle Tick | Exactly 200 ms logical duration |
-| T-TIME-002 | TIME-003 | Last processed Tick 10; host wakes at target Tick 14 | Process 11, 12, 13, 14 in order |
-| T-TIME-003 | TIME-003 | Events due at 11 and 14 during catch-up | They are not treated as same-time events |
-| T-TIME-004 | DEC-001 | Decision completes in 500 ms | Earliest usable boundary is 600 ms / 3 ticks |
-| T-TIME-005 | DEC-001 | completedAt equals deadline | Decision succeeds |
-| T-TIME-006 | DEC-001 | Model completes before deadline but callback is handled later | Trusted completion time, not callback order, determines success |
+| T-TIME-001 | TIME-001 | 推进 1 Tick | 逻辑时长固定 200 ms |
+| T-TIME-002 | TIME-003 | 上次处理 Tick 10，Host 醒来时 target Tick 14 | 依次处理 11/12/13/14 |
+| T-TIME-003 | TIME-003 | catch-up 中事件分别 due 11 和 14 | 不视为同一批同时事件 |
+| T-TIME-004 | DEC-001 | Decision 实际耗时 500 ms | 最早 600 ms / 3 Tick 可用 |
+| T-TIME-005 | DEC-001 | completedAt == deadline | 判定完成成功 |
+| T-TIME-006 | DEC-001 | 模型 deadline 前完成，但 Host callback 更晚处理 | 使用 trusted completion time，不看 callback 顺序 |
 
 ## 3. PlanSubmission
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-PLAN-001 | PLAN-003 | Actor at (2,2), path starts [(3,2),(4,2)] | Valid shape; current tile is not repeated |
-| T-PLAN-002 | PLAN-003 | Path includes diagonal (3,3) from (2,2) | Reject `path_not_adjacent` |
-| T-PLAN-003 | PLAN-001, PLAN-003 | Path has 7 steps under default maxPathSteps=6 | Reject `path_too_long` |
-| T-PLAN-004 | PLAN-003 | Empty path, no skill | Hold/reobserve plan |
-| T-PLAN-005 | PLAN-003 | Empty path with valid skill | Direct-cast plan |
-| T-PLAN-006 | PLAN-004 | Skill coefficients are {0.5,1.0}, submission uses 0.73 | Reject `invalid_min_coefficient` |
-| T-PLAN-007 | PLAN-005 | Future path tile is currently dynamically occupied but statically walkable | Submission is not rejected solely for future dynamic occupancy |
-| T-PLAN-008 | PLAN-006 | First invalid submission | Return reason and allow one correction |
-| T-PLAN-009 | PLAN-006 | Corrected submission is invalid again | Generation fails; Actor idle; no new generation until a later Tick |
-| T-PLAN-010 | DEC-002 | Old generation result returns late | Cannot submit |
+| T-PLAN-001 | PLAN-003 | Actor 在 (2,2)，path 为 (3,2),(4,2) | 合法；path 不重复当前格 |
+| T-PLAN-002 | PLAN-003 | 从 (2,2) 直接走 (3,3) | reject `path_not_adjacent` |
+| T-PLAN-003 | PLAN-001, PLAN-003 | 默认 maxPathSteps=6 时提交 7 步 | reject `path_too_long` |
+| T-PLAN-004 | PLAN-003 | 空 path、无 skill | hold/reobserve |
+| T-PLAN-005 | PLAN-003 | 空 path、有合法 skill | direct cast |
+| T-PLAN-006 | PLAN-004 | Skill 只有 {0.5,1.0}，提交 0.73 | reject `invalid_min_coefficient` |
+| T-PLAN-007 | PLAN-005 | 未来 path 某格当前被动态占用，但静态可走 | 不仅因为未来动态占用就拒绝整份提交 |
+| T-PLAN-008 | PLAN-006 | 第一次非法提交 | 返回 machine-readable reason，允许一次修正 |
+| T-PLAN-009 | PLAN-006 | 修正后仍非法 | 当前 generation 失败；Actor idle；最早后续 Tick 新 generation |
+| T-PLAN-010 | DEC-002 | 旧 generation 响应迟到 | 无提交权 |
+| T-PLAN-011 | PLAN-007 | path 走完仍没达到 minCoefficient | 不自动降级用更低 coefficient 攻击 |
+| T-PLAN-012 | PLAN-008 | move-only plan 途中进入技能合法格 | 不自动施法 |
 
-## 4. Movement and contention
+## 4. Movement / Contention
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-MOVE-001 | MOVE-001 | Actor halfway through visual movement A→B | Committed/occupied tile remains A; B is reserved |
-| T-MOVE-002 | MOVE-001 | `move_complete` fires | Atomically release A, occupy B, release reservation |
-| T-MOVE-003 | MOVE-002 | Multi-step path A→B→C | C step cannot start before A→B commits |
-| T-MOVE-004 | MOVE-003, RNG-001 | A and B claim same tile same Tick | Exactly one wins via seeded equal-chance arbitration |
-| T-MOVE-005 | MOVE-003 | Replay same seed/Tick/tile/competitors | Same contention winner |
-| T-MOVE-006 | MOVE-003 | Change Promise or iteration order | Contention winner remains determined by stable inputs |
-| T-MOVE-007 | MOVE-004 | Adjacent Actors attempt direct swap same Tick | Swap is rejected in v0 |
-| T-MOVE-008 | MOVE-005 | Actor loses contested tile | Stays at origin, plan ends, replans later; no same-Tick retry |
-| T-MOVE-009 | MOVE-006 | Actor is moving and takes nonlethal damaging hit | Current step still completes; future old path steps cancel |
+| T-MOVE-001 | MOVE-001 | Actor 视觉上处于 A→B 中间 | committed/occupied 仍是 A，B 被预约 |
+| T-MOVE-002 | MOVE-001 | `move_complete` 到期 | 原子释放 A、占用 B、释放 reservation |
+| T-MOVE-003 | MOVE-002 | path A→B→C | A→B 提交前不得启动 B→C |
+| T-MOVE-004 | MOVE-003, RNG-001 | A/B 同 Tick 抢同一格 | 只一个赢家；使用 seeded 等概率裁决 |
+| T-MOVE-005 | MOVE-003 | 相同 seed/Tick/tile/competitors Replay | 得到同一赢家 |
+| T-MOVE-006 | MOVE-003 | 改变 Promise/遍历顺序 | 裁决结果仍只由稳定输入决定 |
+| T-MOVE-007 | MOVE-004 | 相邻 Actor 同 Tick 直接 swap | v0 禁止 |
+| T-MOVE-008 | MOVE-005 | Actor 输掉 contested tile | 留原格、plan 结束、后续重规划，不同 Tick 零时间重试 |
+| T-MOVE-009 | MOVE-006 | active step 中受到非致命实际伤害 | 当前 step 仍完成，旧 path 后续取消 |
 
-## 5. Skill range and coefficient
+## 5. Skill Range / Coefficient
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-SKILL-001 | SKILL-001 | Range matrix has no `"↑"` | Content validation fails |
-| T-SKILL-002 | SKILL-001 | Range matrix has two `"↑"` cells | Content validation fails |
-| T-SKILL-003 | SKILL-001 | Ragged matrix rows | Content validation fails |
-| T-SKILL-004 | SKILL-001, DAMAGE-001 | Coefficient has >3 decimals | Content validation fails; no implicit rounding |
-| T-SKILL-005 | DAMAGE-001 | baseDamage=7, coefficient=0.5 | coefficientUnits=500, finalDamage=3 |
+| T-SKILL-001 | SKILL-001 | range 没有 `"↑"` | Content validation fail |
+| T-SKILL-002 | SKILL-001 | range 有两个 `"↑"` | Content validation fail |
+| T-SKILL-003 | SKILL-001 | range 行长度不同 | Content validation fail |
+| T-SKILL-004 | SKILL-001, DAMAGE-001 | coefficient 超过 3 位小数 | validation fail，不隐式 rounding |
+| T-SKILL-005 | DAMAGE-001 | baseDamage=7, coefficient=0.5 | units=500，finalDamage=3 |
 | T-SKILL-006 | DAMAGE-001 | baseDamage=1, coefficient=0.5 | finalDamage=0 |
-| T-SKILL-007 | SKILL-002 | Current coefficient=0.5, plan min=1.0 | Do not start skill; continue legal path |
-| T-SKILL-008 | SKILL-002 | Current coefficient reaches 1.0, plan min=1.0 | Stop remaining path and start windup if attack is allowed |
-| T-SKILL-009 | SKILL-003 | Start at 1.0; target moves to 0.5 during windup | Resolve as in-range at 0.5 |
-| T-SKILL-010 | SKILL-003, HIT-001 | Target moves outside matrix before resolve | `miss` |
-| T-SKILL-011 | SKILL-003 | Skill already started at min=1.0; resolve coefficient is 0.5 | Do not reapply minCoefficient at resolve |
+| T-SKILL-007 | SKILL-002 | current=0.5, plan min=1.0 | 不起手；有合法剩余 path 则继续 |
+| T-SKILL-008 | SKILL-002 | current 达到 1.0, plan min=1.0 | Actor 可攻击时停止剩余 path 并开始 windup |
+| T-SKILL-009 | SKILL-003 | 1.0 起手，前摇中目标退到 0.5 | 按 resolve 时 0.5 结算 |
+| T-SKILL-010 | SKILL-003, HIT-001 | 前摇中目标离开矩阵 | `miss` |
+| T-SKILL-011 | SKILL-002, SKILL-003 | min=1.0 起手，resolve 时只剩 0.5 | 不二次检查 min；按 0.5 结算 |
 
-## 6. Instant skill and Tick batching
+## 6. Instant Skill / Tick Batch
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-INSTANT-001 | SKILL-005, TICK-001 | windup_ticks=0 skill starts at Tick N | Resolves in Tick N instant batch |
-| T-INSTANT-002 | STATE-004, TICK-002 | windup=0 and recovery=0 | Actor cannot start a second Action in the same Tick |
-| T-INSTANT-003 | SKILL-005, HIT-006 | Both Actors start lethal instant skills same Tick | Both instant skills are collected; simultaneous defeat remains possible |
-| T-INSTANT-004 | TICK-001 | Instant skill kills an Actor that had a not-yet-started movement intent | Dead/invalid movement intent is not reserved in phase 12 |
+| T-INSTANT-001 | SKILL-005, TICK-001 | windup=0 在 Tick N 起手 | Tick N instant batch 中 resolve |
+| T-INSTANT-002 | STATE-004, TICK-002 | windup=0 + recovery=0 | 同 Actor 本 Tick不能启动第二个 Action |
+| T-INSTANT-003 | SKILL-005, HIT-006 | 双方同 Tick 启动致命 instant skill | 两个技能都先收集；允许 simultaneous defeat |
+| T-INSTANT-004 | TICK-001 | instant skill 杀死原本有“尚未启动移动意图”的 Actor | phase 12 不再为其启动 reservation |
 
-## 7. Hit, protection, and recovery
+## 7. Hit / Protection / Recovery
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-HIT-001 | HIT-001 | Skill valid, target in range, unprotected | `hit` |
-| T-HIT-002 | HIT-001, HIT-004 | Target is protected and in range | `immune`, 0 damage, no interrupt, no refresh |
-| T-HIT-003 | HIT-001 | Target leaves range before resolve | `miss`, not `invalid` |
-| T-HIT-004 | HIT-001 | Target dead/missing/action invalid | `invalid` |
-| T-HIT-005 | HIT-002 | Tick 10 hit grants 3 full protection ticks | Ticks 11/12/13 protected; Tick 14 normal |
-| T-HIT-006 | HIT-003 | Surviving Actor takes positive damage during windup | Windup invalidated; protection set; one new Decision generation |
-| T-HIT-007 | HIT-003, SKILL-004 | Surviving Actor takes positive damage during recovery | Recovery interrupted; new Decision flow |
-| T-HIT-008 | HIT-004 | Immune impact during recovery | Recovery continues |
-| T-HIT-009 | HIT-006 | Two attacks hit same unprotected target in one batch | Both use protection state from batch start |
-| T-HIT-010 | HIT-006 | Same-batch attacks kill both Actors | Simultaneous defeat supported |
-| T-HIT-011 | HIT-005, PLAN-007 | Protected Actor has an accepted attack plan | May think/move, cannot start windup; after protection ends recheck latest position/direction/target and same threshold |
+| T-HIT-001 | HIT-001 | skill/target 有效、范围内、未保护 | `hit` |
+| T-HIT-002 | HIT-001, HIT-004 | target 在 protection 且范围内 | `immune`；0 damage、不中断、不刷新 |
+| T-HIT-003 | HIT-001 | target 在 resolve 前离开范围 | `miss`，不是 `invalid` |
+| T-HIT-004 | HIT-001 | target 已死/消失/action invalid | `invalid` |
+| T-HIT-005 | HIT-002 | Tick 10 hit 后给 3 个完整保护 Tick | 11/12/13 protected，14 normal |
+| T-HIT-006 | HIT-003 | windup 中受到正 damage | windup invalid；protection set；只创建一个新 Decision generation |
+| T-HIT-007 | HIT-003, SKILL-004 | recovery 中受到正 damage | recovery 中断并进入新 Decision 流程 |
+| T-HIT-008 | HIT-004 | recovery 中收到 immune impact | recovery 继续 |
+| T-HIT-009 | HIT-006 | 同 batch 两个攻击命中同一未保护 target | 两个都按 batch-start protection 判断 |
+| T-HIT-010 | HIT-006 | 同 batch 双方都死亡 | simultaneous defeat |
+| T-HIT-011 | HIT-005, PLAN-007 | protected Actor 有 accepted attack plan | 可 Thinking/移动但不能 windup；保护结束后按最新状态和同一 threshold 重检 |
 
-## 8. Decision and recovery concurrency
+## 8. Decision / Recovery 并发
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-DEC-001 | STATE-003 | Multiple same-Tick reasons call ensureDecision | At most one valid request for current generation |
-| T-DEC-002 | SKILL-004 | Actor in recovery | Thinking may continue/start |
-| T-DEC-003 | SKILL-004 | Decision becomes ready during recovery | Plan may buffer but no new Action starts until eligible |
-| T-DEC-004 | DEC-002 | Hit invalidates generation while LLM request is pending | Late old result cannot submit |
+| T-DEC-001 | STATE-003 | 同 Tick 多个原因调用 ensureDecision | 当前 generation 只存在一个有效 request |
+| T-DEC-002 | SKILL-004 | Actor 在 recovery | Thinking 可以继续/开始 |
+| T-DEC-003 | SKILL-004 | recovery 中 Decision ready | Plan 可暂存，但不能启动新 Action |
+| T-DEC-004 | DEC-002 | hit 使 generation 失效后旧 LLM 返回 | 无提交权 |
 
-## 9. Control plane and replay
+## 9. Control Plane / Replay
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-CTRL-001 | CTRL-001 | Frame abort between logical ticks | Authority invalidates immediately; no need to wait for next Tick |
-| T-CTRL-002 | CTRL-001 | LLM/Promise returns after Battle cancel | Cannot mutate ended Battle |
-| T-REPLAY-001 | REPLAY-001 | Replay recorded battle | Does not call LLM |
-| T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | Same winner/result |
-| T-REPLAY-003 | REPLAY-002 | Diagnostics change/logging enabled | Gameplay result unchanged |
+| T-CTRL-001 | CTRL-001 | 两个 Tick 之间 Frame abort | 立即失效 authority，不等下个 Tick |
+| T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
+| T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM |
+| T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
+| T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
 
-## 10. Presentation acceptance
+## 10. Presentation
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-PRES-001 | ARCH-003 | Browser drops frames | Simulation result unchanged |
-| T-PRES-002 | ARCH-003 | Effect asset load fails | Damage/result unchanged; diagnostic may be emitted |
-| T-PRES-003 | ARCH-003 | Camera zoom/focus changes | No Simulation state changes |
-| T-PRES-004 | STATE-001 | Character frame interpolates at x=2.7 | Decision/Simulation still observe committed integer tile |
+| T-PRES-001 | ARCH-003 | Browser 掉帧 | Simulation result 不变 |
+| T-PRES-002 | ARCH-003 | Effect asset load fail | damage/result 不变，可发 diagnostic |
+| T-PRES-003 | ARCH-003 | camera zoom/focus 改变 | 不改 Simulation State |
+| T-PRES-004 | STATE-001 | Sprite 插值位置 x=2.7 | Decision/Simulation 仍只看到 committed integer tile |
 
-## 11. Result and termination
+## 11. Result / Termination
 
-| Test ID | Rules | Scenario | Expected |
+| Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-RESULT-001 | RESULT-001 | Enemy alone reaches 0 HP at terminal gate | Ally win |
-| T-RESULT-002 | RESULT-001 | Ally alone reaches 0 HP | Enemy win |
-| T-RESULT-003 | RESULT-001, HIT-006 | Both reach 0 in same batch | Simultaneous defeat |
-| T-RESULT-004 | CTRL-001, RESULT-001 | External Battle cancel | Cancelled result/termination path |
+| T-RESULT-001 | RESULT-001 | enemy 单独在 terminal gate HP=0 | ally win |
+| T-RESULT-002 | RESULT-001 | ally 单独 HP=0 | enemy win |
+| T-RESULT-003 | RESULT-001, HIT-006 | 双方同 batch HP=0 | simultaneous defeat |
+| T-RESULT-004 | CTRL-001, RESULT-001 | 外部 cancel | cancelled termination path |
 
-## 12. Open-rule test placeholders
+## 12. OPEN Rule 测试占位
 
-These cases must be implemented only after the corresponding rule is frozen:
+以下测试只有对应 Rule 冻结后才能写 Expected：
 
-| Placeholder | Open rule | Question |
+| Placeholder | OPEN Rule | 问题 |
 | --- | --- | --- |
-| T-OPEN-DIR | OPEN-DIR-001 | Does direction change at move start or move_complete; does explicit turn exist? |
-| T-OPEN-LETHAL-MOVE | OPEN-MOVE-001 | Does a lethally hit Actor finish an already-started atomic step? |
-| T-OPEN-ZERO-DAMAGE | OPEN-HIT-001 | Does a `hit` with finalDamage=0 cause interruption/protection? |
-| T-OPEN-LOS | OPEN-LOS-001 | Does terrain block skill reach? |
-| T-OPEN-CLOCK | OPEN-CLOCK-001 | Freeze clock or catch up while backgrounded/paused? |
-| T-OPEN-STALEMATE | OPEN-STALEMATE-001 | Is there a formal stalemate result? |
+| T-OPEN-DIR | OPEN-DIR-001 | direction 在 move start 还是 move_complete 更新？是否有显式 turn？ |
+| T-OPEN-LETHAL-MOVE | OPEN-MOVE-001 | active step 中被致命击杀是否还完成当前 step？ |
+| T-OPEN-ZERO-DAMAGE | OPEN-HIT-001 | finalDamage=0 的 hit 是否触发 interruption/protection？ |
+| T-OPEN-LOS | OPEN-LOS-001 | terrain 是否阻挡 skill？ |
+| T-OPEN-CLOCK | OPEN-CLOCK-001 | pause/background 时 freeze clock 还是 catch-up？ |
+| T-OPEN-STALEMATE | OPEN-STALEMATE-001 | 是否存在正式 stalemate result？ |
 
-## 13. Minimum pre-LLM gate
+## 13. 接真实 LLM 前的最低 Gate
 
-Before real LLM integration, headless Mock/Script tests should demonstrate at least:
+至少应先用 headless Mock/Script 测通：
 
-- overdue Tick catch-up;
-- timeout/ready on the same boundary;
-- moving Actor hit;
-- move completion and skill resolve in one Tick;
-- protection plus retained attack intent;
-- recovery interruption;
-- target movement causing lower coefficient and `miss`;
-- 0-Tick instant batch;
-- seeded tile contention;
-- plan rejection/correction failure;
-- simultaneous lethal attacks;
-- abort with late async completion.
+- overdue Tick catch-up；
+- timeout/ready 同边界；
+- moving Actor 受击；
+- 同 Tick move completion + skill resolve；
+- protection + retained attack intent；
+- recovery interruption；
+- target movement 导致 lower coefficient / miss；
+- 0-Tick instant batch；
+- seeded tile contention；
+- Plan reject + correction failure；
+- simultaneous lethal；
+- abort 后 late async completion。
 
-Passing this matrix means the rule reducer is coherent; it does not by itself prove Browser integration or production LLM integration.
+通过这些测试代表 Rule reducer 的核心一致性成立；不代表 Browser 或真实 LLM 集成已经完成。
