@@ -290,7 +290,7 @@ abort/cancel
 
 Pause/background policy 已由 Core `TIME-004` 冻结：
 
-- Host 明确暂停 Battle，或 App/Host 进入需要暂停战斗的 background 状态时，Battle monotonic clock 一起冻结；
+- Host 明确暂停 Battle，或 App/Host 进入 background 状态时，Battle monotonic clock 一起冻结；
 - pause 期间不推进 `currentTick`；
 - pause 期间现实时间不计入 Decision latency、movement、windup、recovery 或 protection；
 - resume 后从原逻辑时刻继续，不补算 pause 期间 Tick。
