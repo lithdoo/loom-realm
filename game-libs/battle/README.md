@@ -37,7 +37,8 @@ README 与 DESIGN 索引不覆盖上述规范。
 - Simulation 是唯一业务权威；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
 - Decision 直接生成结构化 `PlanSubmission`，Simulation 只校验/执行；
-- 原子单格移动 + next-tile reservation；
+- 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
+- move_start 瞬间更新 direction；v0 保留独立原地 `turn` Action；
 - 同格竞争使用 `battleSeed` 的可回放等概率伪随机；
 - range matrix 同时表达方向相对范围与 deterministic coefficient；
 - `minCoefficient` 只控制技能起手，resolve 使用当前 coefficient；
@@ -46,22 +47,28 @@ README 与 DESIGN 索引不覆盖上述规范。
 - `windup_ticks=0` 使用 bounded instant-resolve batch；
 - Recovery 是行动锁，不是思考锁；
 - protection、同 Tick batch damage、simultaneous defeat 有确定语义；
+- `finalDamage=0` 的 `hit` 不触发 interruption/protection/redecision；
+- v0 不做 LOS；
+- pause/background 冻结 Battle clock；
+- v0 不设正式 stalemate / 最大战斗时长；
 - Presentation/Browser/camera 不反向修改 Simulation。
 
 具体语义请只查 SPEC Rule IDs。
 
 ## 当前 OPEN
 
-仍需明确的核心规则集中在 SPEC §14，包括：
+**Core gameplay 当前没有未冻结 OPEN 项。**
 
-- direction 更新时间 / 是否有显式 turn；
-- lethal hit 时 active move step 是否完成；
-- zero-damage hit 是否触发 interruption/protection；
-- LOS；
-- pause/background clock；
-- stalemate。
+此前关于 direction/turn、移动中致命受击、zero-damage hit、LOS、pause/background clock、stalemate 的问题都已经冻结进 SPEC。
 
-其他 Schema/Presentation/LLM/Host OPEN 分别在 CONTRACTS / INTEGRATION 中维护。
+仍待冻结的是数据/集成细节，例如：
+
+- Content subject/version、key/id 和正式 Schema；
+- BattleEffect / RenderProjection exact shape；
+- Decision Adapter error/cancel/deadline 接口；
+- Guidance Host/InputTarget wiring。
+
+这些 OPEN 不得改变已经冻结的 Core gameplay 语义。
 
 ## 下一阶段
 
