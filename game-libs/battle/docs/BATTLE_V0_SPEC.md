@@ -270,6 +270,22 @@ If the second submission is still invalid:
 
 Any corrective LLM call consumes normal battle time.
 
+### PLAN-007 — dynamic plan execution — FROZEN
+
+An accepted plan is revalidated against the live battle as it executes:
+
+- accepting a plan uses the latest battlefield; ordinary enemy movement during Decision latency does not automatically invalidate the whole strategic intent;
+- before each move step, revalidate passability, occupancy, reservation, Actor lifecycle, and plan generation;
+- for a skill plan, check the current range coefficient at plan start, after each `move_complete`, and after protection ends when attack eligibility returns;
+- if coefficient is 0/outside or below `minCoefficient`, do not cast; continue the remaining legal path when possible;
+- once coefficient reaches `minCoefficient` and the Actor may attack, stop unused path steps and start windup;
+- if the path is exhausted while the start threshold is still unmet, the plan MUST NOT silently downgrade to a lower-coefficient attack; end/hold and continue the Decision flow;
+- if the path becomes blocked, the target disappears, or the plan becomes meaningless, stop the plan and replan on a later eligible Tick; do not zero-time retry.
+
+### PLAN-008 — move-only never auto-attacks — FROZEN
+
+A submission with no skill intent is move/hold-only. Simulation MUST NOT opportunistically start an available skill merely because the Actor passes through a legal skill cell.
+
 ## 7. Movement
 
 ### MOVE-001 — atomic single-tile step — FROZEN
@@ -485,7 +501,20 @@ The active atomic movement exception is governed by MOVE-006.
 - no Decision invalidation;
 - no protection refresh/extension.
 
-### HIT-005 — protection state for simultaneous hits — FROZEN
+### HIT-005 — protected Actor permissions — FROZEN
+
+While protected:
+
+- Decision Thinking may continue;
+- movement from the accepted plan may continue when otherwise legal;
+- a new skill windup MUST NOT start;
+- an accepted attack intent may remain attached to the plan;
+- when protection ends, Simulation rechecks the latest caster tile/direction, target tile, plan generation, and the same `minCoefficient` before allowing windup;
+- having satisfied the threshold earlier does not create a future right to cast.
+
+Protection therefore blocks skill start, not tactical thinking or movement.
+
+### HIT-006 — protection state for simultaneous hits — FROZEN
 
 For all attacks in one hit batch, protection eligibility is evaluated from the protection state at the start of that batch.
 
