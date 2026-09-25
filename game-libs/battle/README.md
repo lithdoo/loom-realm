@@ -48,6 +48,8 @@ Battle 不复用 RPGMap Runtime，但 **Map / Tileset / Autotile / Character Gra
 
 v0 不引入 MP 或固定技能资源系统。Skill 的范围矩阵只定义目标位置是否合法以及**确定性的效果倍率**；coefficient 不是命中概率。**是否在当前合法位置开始技能属于 Plan 决策**。带技能的 LegalPlan 显式携带 `skillId + targetActorId + minCoefficient`：只有当前目标格系数达到本计划的 `minCoefficient` 才停止剩余移动并进入前摇，因此 AI 可以选择“远处尽快出手”或“继续靠近到更高系数再出手”。`minCoefficient` 只负责起手；技能一旦开始，resolve 时按目标当前实际位置重新读取 coefficient，范围内按当前倍率结算，范围外为 `miss`。v0 不设 `tracking`。规则时间只保留前摇和后摇；`windup_ticks = 0` 表示没有蓄力等待、直接进入结算。结算区分 `hit / immune / miss / invalid`。
 
+Recovery 是**行动锁，不是思考锁**：期间可以继续 Thinking，也可以接收并暂存下一 Plan，但不能开始新的 move / turn / windup 等 Action；正常等到 `recovery_complete` 才继续执行。若 recovery 期间受到实际造成伤害的 `hit`，则立即中断 recovery、失效旧计划/旧 Decision generation，并进入正常保护与重新决策流程；`immune` 不会中断 recovery。
+
 Frame abort / Battle cancel 属于控制平面，立即终止 Simulation 提交权，不等待下一个 Tick。
 
 ## 当前真实待实现点
