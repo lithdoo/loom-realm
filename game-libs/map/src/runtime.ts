@@ -29,7 +29,7 @@ import {
   type StepTransfer,
   type TilesetRecord,
 } from "./semantics.js";
-import { calculateLayout, type MapLayout } from "./layout.js";
+import { calculateLayout, tileViewportLayoutsEqual, type MapLayout } from "./layout.js";
 
 interface InitialInput { mapId: number; x: number; y: number; characterName: string }
 interface ResourceRef { readonly [name: string]: string; namespace: string; key: string; contentVersion: string }
@@ -315,10 +315,6 @@ function layoutFromViewport(value: { readonly width: number; readonly height: nu
   } catch {
     return null;
   }
-}
-
-function layoutsEqual(left: MapLayout, right: MapLayout): boolean {
-  return left.windowWidth === right.windowWidth && left.windowHeight === right.windowHeight;
 }
 
 function windowCovers(window: TileProjectionWindow, map: MapRecord, required: ReturnType<typeof viewportTileBounds>): boolean {
@@ -663,7 +659,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
       const commitViewportResize = (): boolean => {
         if (runtimeEnded() || transitioning || npcSetting || !domain || pendingLayout === null || acceptedLayout === null) return false;
         const nextLayout = pendingLayout;
-        if (layoutsEqual(nextLayout, acceptedLayout)) {
+        if (tileViewportLayoutsEqual(nextLayout, acceptedLayout)) {
           pendingLayout = null;
           clearResizeTimer();
           return true;
@@ -777,7 +773,7 @@ export const mapDefinition: SubsystemDefinitionFactory = defineSubsystem((scope)
         latestLayout = next;
         resolveFirstLayout(next);
         if (!domain || acceptedLayout === null) return;
-        if (layoutsEqual(next, acceptedLayout)) {
+        if (tileViewportLayoutsEqual(next, acceptedLayout)) {
           pendingLayout = null;
           clearResizeTimer();
           return;

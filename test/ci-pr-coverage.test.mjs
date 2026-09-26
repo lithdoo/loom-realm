@@ -8,7 +8,7 @@ const scripts = JSON.parse(await read("package.json")).scripts;
 const pr = await read(".github/workflows/m12-m15-pr.yml");
 
 const m13Only = "npm run test:m13:qualification:run && node --test test/m13-boundary.test.mjs && npm run test:m13:pack";
-const m14Only = "node --test test/m14-boundary.test.mjs && npm run test:m14:projection && npm test -w @loomrealm-game/map && npm test -w @loomrealm-example/essentials-v21.1 && npm run test:m14:vertical && npm run test:m14:pack";
+const m14Only = "node --test test/m14-boundary.test.mjs && npm run test:m14:projection && npm test -w @loomrealm-game/tile-presentation && npm test -w @loomrealm-game/map && npm test -w @loomrealm-example/essentials-v21.1 && npm run test:m14:vertical && npm run test:m14:pack";
 const m15Only = "npm run test:m15:desktop && npm run test:m15:hostra";
 
 test("M12 runs its original full regression, boundaries, fixtures and pack on PR", () => {
@@ -28,6 +28,7 @@ test("M13 canonical chain remains intact and its PR suite equals the exclusive M
 test("M14 canonical chain remains intact and its PR suite contains every exclusive M14 check", () => {
   assert.equal(scripts["test:m14"], "npm run test:m13 && npm run test:m14:pr");
   assert.equal(scripts["test:m14:pr"], `npm run build:m14 && ${m14Only}`);
+  assert.ok(scripts["build:m14"].indexOf("-w @loomrealm-game/tile-presentation") < scripts["build:m14"].indexOf("-w @loomrealm-game/map"));
   assert.ok(scripts["build:m14"].includes("-w @loomrealm-game/map"));
 });
 
@@ -42,7 +43,7 @@ test("one PR workflow runs M12 and each exclusive milestone on its full Node mat
   assert.match(pr, /^on:\s*\n\s+pull_request:/m);
   assert.match(pr, /cancel-in-progress: true/);
   for (const name of ["m12", "m13", "m14"]) {
-    const section = pr.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  (?:m12|m13|m14|m15|qualification):|$(?![\\s\\S]))`, "m"))?.[1];
+    const section = pr.match(new RegExp(`^  ${name}:\\r?\\n([\\s\\S]*?)(?=^  (?:m12|m13|m14|m15|qualification):|$(?![\\s\\S]))`, "m"))?.[1];
     assert.ok(section, `Missing ${name} job`);
     assert.match(section, /node: \[20, 24\]/);
     assert.match(section, new RegExp(`npm run test:${name}${name === "m12" ? "" : ":pr"}`));

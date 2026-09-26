@@ -386,7 +386,7 @@ Battle 当前仍是 design-only。
 
 已知工程项：
 
-- 根 `package.json` 通过 `game-libs/*` 识别 Battle；
+- 根 `package.json` 通过 `game-libs/*` 识别 Battle 和已落地的 `@loomrealm-game/tile-presentation`；
 - Battle 合入时根 `package-lock.json` 尚未做对应同步验证；
 - Runtime 开发后必须单独验证 `npm ci`、build、unit test、Browser E2E。
 
@@ -401,7 +401,7 @@ Battle 当前仍是 design-only。
 4. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
 5. 定义 DecisionPort，并用 Mock/Script Decision 注入 Simulation 验证完整 Battle
 6. 跑 frozen-rule deterministic Test Matrix
-7. 渲染前置：建立 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`，抽取 Map 已验证的通用 tile viewport layout primitive，并让 Map 先切换到 shared implementation + regression PASS
+7. 已完成渲染前置：建立 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`，抽取 Map 已验证的通用 tile viewport layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. 实现 BattleSceneInit / RenderProjection + 独立 PresentationPort/Presentation implementation，直接依赖 `@loomrealm-game/tile-presentation`
 9. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
 10. 接真实 LLM Decision Adapter，再接 Guidance / Host
@@ -420,6 +420,6 @@ Battle 当前仍是 design-only。
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-Presentation 实现前置已经确定为抽取 `@loomrealm-game/tile-presentation`；该任务不属于 Integration OPEN。viewport clamp/default/min/max 是否也升级为 shared entry policy 仍需后续明确。
+Presentation 实现前置 `@loomrealm-game/tile-presentation` 已落地，Map 已迁移；Battle Presentation 仍未实现。viewport clamp/default/min/max 是否也升级为 shared entry policy 仍需后续明确。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
