@@ -770,31 +770,77 @@ exact field naming 仍由 Contracts/Presentation Schema 冻结，但以下 v0 Pr
 
 HP 更新应与本次 visual commit 的其他节点使用同一个 `visualEpoch`。Browser HUD 不根据 HP 数值推导 damage、death、protection 或 interruption。
 
-### 14.2.2 复用算法，不复制长期分叉
+### 14.2.2 Presentation 实现前置：抽取共享 Tile Presentation primitive
 
-如果实现阶段 Map 与 Battle 都依赖同一套适配 policy，优先将与 RPGMap 无关的 layout 计算抽成共享纯视觉 primitive，例如概念上的：
+Battle Presentation **开始实现前**，先从现有 Map 中抽取与 RPGMap gameplay 无关的纯视觉 primitive，形成独立 game-lib：
+
+```text
+game-libs/tile-presentation
+@loomrealm-game/tile-presentation
+```
+
+依赖方向固定为：
+
+```text
+@loomrealm-game/tile-presentation
+        ↑                     ↑
+        │                     │
+@loomrealm-game/map   @loomrealm-game/battle
+```
+
+Battle 不通过依赖 `@loomrealm-game/map` 来获得这些能力。
+
+第一阶段只抽**纯函数、纯数据和无业务状态常量**，至少包括：
 
 ```text
 TileViewportLayout
-  ├─ Map Presentation
-  └─ Battle Presentation
+TILE_SIZE_PX = 32
+calculateTileViewportLayout(width, height)
+tileViewportLayoutsEqual(a, b)
+RESIZE_SETTLE_MS = 100
 ```
 
-当前 parity 的权威基线应是 **Map Runtime 实际调用的 `calculateLayout(width, height)` 行为**，而不是未被 Runtime 接入的 `clampViewport()` helper。
-
-如果 v0 为降低改动暂时不能抽取共享实现，则 Battle 的实现必须对 Map layout 建立 parity test，保证相同有效 viewport 输入得到相同：
+如果同时决定把 viewport normalization 正式统一，再由同一 package 提供：
 
 ```text
-barHeight
-contentWidth/contentHeight
-columns/rows
-logicalWidth/logicalHeight
-scaleX/scaleY
+normalizeTileViewport(size)
+DEFAULT_VIEWPORT
+MIN_VIEWPORT
+MAX_VIEWPORT
 ```
 
-若未来把 viewport clamp/default/min/max 升级为共享入口语义，则应同时修改 Map/Battle 并增加对应 parity test；不应只让一侧采用。
+但在该行为真正接入 Map Runtime 并通过 Map regression tests 前，不得把它描述成既有 Map Runtime 的当前语义。
 
-不应长期维护两份可独立漂移的算法。
+共享 package **不得**包含：
+
+```text
+RenderDomain
+SubsystemScope
+Frame
+Map camera policy
+Battle camera policy
+RPGMap movement / Transfer / Bridge / NPC
+Battle movement / damage / skill / HP rule
+Decision
+Presentation session lifecycle
+resize safe-commit state machine
+```
+
+其中 resize 的 `100 ms` constant 可以共享，但“什么时候可以安全 commit pending layout”仍由 Map/Battle 各自的 Presentation/session lifecycle 决定。
+
+实施顺序：
+
+```text
+1. 建立 @loomrealm-game/tile-presentation
+2. 从 Map 搬迁已验证的纯 layout/tile primitive
+3. Map 改为 import shared package
+4. Map 原有 layout/runtime regression tests 全绿
+5. Battle Presentation 再直接 import 同一 package
+```
+
+这样 Map 与 Battle 不需要长期维护两份 layout algorithm，也不需要把 parity test 当成防漂移的主要机制；两边直接消费同一个 implementation。
+
+当前 shared implementation 的事实基线仍是 **Map Runtime 实际调用的 `calculateLayout(width, height)` 行为**，而不是尚未接入 Runtime 的 `clampViewport()` helper。
 
 ### 14.2.3 Camera 不属于这次“完全复用”
 
@@ -1176,7 +1222,21 @@ RenderProjection forwarding loop
 
 Battle clock/tick 属于 Simulation；Projection 到 RenderDomain 的翻译属于 Presentation。
 
-## 17. 最低测试要求
+## 17. Presentation 实现 Gate
+
+在开始 Battle Browser Presentation / RenderDomain implementation 之前，必须先完成：
+
+1. 创建 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`；
+2. 将 Map 当前已验证的通用 tile viewport layout primitive 迁入该 package；
+3. 让 `@loomrealm-game/map` 改为依赖并使用 shared implementation；
+4. Map layout/runtime regression tests 保持通过；
+5. 再由 `@loomrealm-game/battle` Presentation 依赖同一 package。
+
+这是一项**渲染层实现前置任务**，不是 Battle Core gameplay 的前置任务。headless Simulation、DecisionPort 和 frozen-rule deterministic tests 不需要等待它。
+
+完成该 Gate 前，不应在 Battle package 内复制一份 Map `calculateLayout` 实现。
+
+## 18. 最低测试要求
 
 Presentation 可以完全脱离真实 Simulation/Decision 测试。
 
@@ -1202,7 +1262,7 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 18. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
 19. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
 
-## 18. 仍待冻结的 Presentation OPEN
+## 19. 仍待冻结的 Presentation OPEN
 
 本文不关闭以下现有 OPEN：
 
@@ -1212,9 +1272,8 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 - camera `focusHint`；
 - Browser node/effect cleanup exact contract；
 - Render Tree 各 node 的 exact data Schema 与 Browser custom-element tag/key；稳定的 Battle HUD logical slot/node、Map-compatible footer geometry 与 current/max HP 内容已确定；
-- Map/Battle 共用 viewport layout 的最终共享代码位置；
 - viewport clamp/default/min/max 是否升级为 Map/Battle 共用的 Presentation 入口规则；
-- tile/character 纯视觉 primitive 是否一并抽取；
+- 除首批 layout/tile primitive 外，character-atlas 等纯视觉 primitive 是否继续进入 `@loomrealm-game/tile-presentation`；
 - Host/Runtime Control suspend/resume 到 Battle pause/resume 的 exact wiring；
 - 多 Battle 同屏时的 viewport region / layout ownership。
 
