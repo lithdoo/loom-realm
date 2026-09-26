@@ -575,18 +575,14 @@ RenderDomain
     ├── battle:actor:<enemyActorId>
     │   tag = lr-battle-actor
     │
-    └── battle:effects
-        tag = lr-battle-effects
-```
-
-如果后续确认 HUD 需要独立 visual lifecycle，可以增加一个稳定节点：
-
-```text
+    ├── battle:effects
+    │   tag = lr-battle-effects
+    │
     └── battle:hud
         tag = lr-battle-hud
 ```
 
-HUD 是否独立成节点仍属于 Presentation UX/Schema 设计，不影响 gameplay authority。
+`battle:hud` 是 v0 的稳定节点，不再是 optional。它占用与 Map footer 完全相同的 footer 区域，用于显示双方 Actor 的 `当前 HP / 最大 HP`。HUD 只显示 Simulation 已经决定的 HP 事实，不计算 damage、death 或任何 gameplay transition。
 
 ### 14.1 为什么树必须稳定
 
@@ -626,13 +622,154 @@ domain.close()
 
 `domain.replace()` 应保留给真正的 Scene/结构重建，而不是 move、damage、turn、skill effect 等普通运行操作。
 
-### 14.2 lr-battle-view
+### 14.2 屏幕适配与 Footer：完整沿用 Map
+
+Battle v0 的 viewport/layout/footer 适配规则不再单独设计，直接沿用现有 Map 的规则。目标是保证 Map → Battle 切换时 tile 尺度、逻辑可视区域、缩放方式和 footer 高度保持一致。
+
+当前 Map 规则包括：
+
+```text
+tileSize = 32
+
+viewport:
+  default = 640 × 480
+  min     = 320 × 240
+  max     = 1920 × 1080
+
+barHeight:
+  height < 480  → 24
+  height < 720  → 32
+  otherwise     → 48
+
+contentWidth  = windowWidth
+contentHeight = windowHeight - barHeight
+
+rawColumns = ceil(contentWidth / 32)
+rawRows    = ceil(contentHeight / 32)
+
+rows = clamp(rawRows, 14, 33)
+
+columns =
+  rawRows < 14 || rawRows > 33
+    ? max(1, round(rows * contentWidth / contentHeight))
+    : rawColumns
+
+logicalWidth  = columns * 32
+logicalHeight = rows * 32
+
+scaleX = contentWidth / logicalWidth
+scaleY = contentHeight / logicalHeight
+
+resize settle = 100 ms
+```
+
+Battle 应保持这些规则与 Map 一致，包括：
+
+- viewport clamp/default/min/max；
+- 32×32 tile；
+- `barHeight` breakpoint；
+- `contentWidth / contentHeight`；
+- `minRows=14 / maxRows=33`；
+- columns/rows 计算；
+- `logicalWidth / logicalHeight`；
+- `scaleX / scaleY`；
+- resize settle policy；
+- Browser logical world 到实际 viewport 的缩放方式。
+
+Battle 不应另行发明一套 responsive breakpoint 或 logical grid 算法。
+
+### 14.2.1 Footer 的 Battle 内容
+
+Map 使用 footer 显示 Map 信息；Battle 复用**相同 footer 几何**，但替换为 Battle HUD 内容：
+
+```text
+┌────────────────────────────────────┐
+│                                    │
+│          Battle battlefield        │
+│                                    │
+├────────────────────────────────────┤
+│ Ally  87 / 100       Enemy 42 / 80 │
+└────────────────────────────────────┘
+                ↑
+          same barHeight
+```
+
+因此 Battle battlefield 的可绘制 content 区域与 Map 一样：
+
+```text
+contentHeight = viewportHeight - barHeight
+```
+
+`lr-battle-hud` 只负责显示双方：
+
+```text
+current HP / max HP
+```
+
+概念 data：
+
+```ts
+type BattleHudRenderData = {
+  sceneEpoch: number
+  visualEpoch: number
+
+  actors: readonly [
+    {
+      actorId: string
+      side: "ally"
+      hp: number
+      maxHp: number
+    },
+    {
+      actorId: string
+      side: "enemy"
+      hp: number
+      maxHp: number
+    },
+  ]
+}
+```
+
+exact field naming 仍由 Contracts/Presentation Schema 冻结，但“footer 固定存在并显示双方 current/max HP”是本文采用的 v0 Presentation 设计。
+
+HP 更新应与本次 visual commit 的其他节点使用同一个 `visualEpoch`。Browser HUD 不根据 HP 数值推导 damage、death、protection 或 interruption。
+
+### 14.2.2 复用算法，不复制长期分叉
+
+如果实现阶段 Map 与 Battle 都依赖同一套适配 policy，优先将与 RPGMap 无关的 layout 计算抽成共享纯视觉 primitive，例如概念上的：
+
+```text
+TileViewportLayout
+  ├─ Map Presentation
+  └─ Battle Presentation
+```
+
+如果 v0 为降低改动暂时不能抽取共享实现，则 Battle 的实现必须对 Map 的 layout algorithm 建立 parity test，保证相同 viewport 输入得到相同：
+
+```text
+barHeight
+contentWidth/contentHeight
+columns/rows
+logicalWidth/logicalHeight
+scaleX/scaleY
+```
+
+不应长期维护两份可独立漂移的算法。
+
+### 14.2.3 Camera 不属于这次“完全复用”
+
+完整复用的是 **viewport/layout/footer/scale/resize policy**，不是 Map 的单 Player camera policy。
+
+Map camera 以单个 Player 为中心；Battle 同时有两个 Actor，因此 Battle camera/focus 仍由 Battle Presentation 单独设计，例如双 Actor framing。Camera 不得因为复用 Map layout 而隐式跟随 ally。
+
+### 14.3 lr-battle-view
 
 `lr-battle-view` 对应 Map 的 `lr-map-view` 职责域，负责：
 
 ```text
 Map / Tileset / Autotile
 viewport geometry
+Map-compatible footer/content geometry
 logical coordinate space
 scale
 camera
@@ -650,6 +787,12 @@ type BattleViewRenderData = {
   viewportWidth: number
   viewportHeight: number
 
+  barHeight: number
+  contentWidth: number
+  contentHeight: number
+
+  columns: number
+  rows: number
   logicalWidth: number
   logicalHeight: number
   scaleX: number
@@ -669,7 +812,7 @@ type BattleViewRenderData = {
 
 Battle 可以复用/抽取 Map 已验证的纯视觉概念，例如 32×32 tile geometry、Tileset/Autotile projection、resource identity、pixelated rendering、viewport scaling；不得因此复用 RPGMap movement/Transfer/Bridge/Event authority。
 
-### 14.3 lr-battle-actor
+### 14.4 lr-battle-actor
 
 v0 固定两个 Actor，因此两个 actor node 从初始化到 close 都保持稳定。
 
@@ -693,8 +836,6 @@ type BattleActorRenderData = {
 
   sprite: ResourceRef
 
-  hp: number
-  maxHp: number
   life: "alive" | "dead"
 
   motion: BattleActorMotion | null
@@ -717,11 +858,13 @@ Browser actor element 内部可以负责：
 - movement interpolation；
 - walking pattern；
 - direction；
-- actor-local HP/death visual（如果最终 UX 选择 actor-local）。
+- actor-local death/pose visual。
+
+双方 `hp / maxHp` 的标准 v0 显示位置是固定 `lr-battle-hud` footer；Actor node 不需要为了 footer 再复制一份 HP display state。
 
 它不能根据 damage/effect 自己决定 gameplay movement 是否中断。
 
-### 14.4 lr-battle-effects
+### 14.5 lr-battle-effects
 
 技能/受击等 transient visual 不建议“一次 effect 一个 RenderNode”。
 
@@ -772,7 +915,7 @@ Map<effectId, ActiveVisualEffect>
 
 `effectId` 必须足够稳定，使相同 Projection 重复 render 时不会重复生成同一次 effect。
 
-### 14.5 普通 Battle 操作只更新 data
+### 14.6 普通 Battle 操作只更新 data
 
 例如双方同时开始移动，Tree 不变，只更新同一 visual epoch 下的节点 data：
 
@@ -815,6 +958,14 @@ domain.update({
         },
       },
     },
+    {
+      key: "battle:hud",
+      data: {
+        set: {
+          visualEpoch: 12,
+        },
+      },
+    },
   ],
 })
 ```
@@ -823,7 +974,7 @@ domain.update({
 
 `move_complete`、turn、HP change、death、move interruption 同样都应该优先表现为 node.data transition，而不是 remove/insert Actor node。
 
-### 14.6 move interruption 的 Tree 行为
+### 14.7 move interruption 的 Tree 行为
 
 当 Simulation 已经根据 Core Rule 决定 move 失效时，Render Tree 不发生结构变化：
 
@@ -836,15 +987,17 @@ before:
 after:
   same actor node
     tile = origin
-    hp = newHp
     motion = null
+
+  same hud node
+    actor hp = newHp
 ```
 
-如果同 Tick 还有受击特效，则同一 visual commit 更新固定 `battle:effects` 节点。
+如果同 Tick 还有受击特效，则同一 visual commit 同时更新固定 `battle:effects` 与 `battle:hud` 节点。
 
 Presentation 只执行 visual reconciliation；不得从“damage > 0”推导“所以 motion 应取消”。
 
-### 14.7 sceneEpoch / visualEpoch 一致性
+### 14.8 sceneEpoch / visualEpoch 一致性
 
 参考 Map 的 Browser fencing，建议一次视觉 commit 涉及的固定节点使用一致的：
 
@@ -860,17 +1013,22 @@ battle:view          visualEpoch=57
 battle:actor:ally    visualEpoch=57
 battle:actor:enemy   visualEpoch=57
 battle:effects       visualEpoch=57
+battle:hud           visualEpoch=57
 ```
 
 Browser implementation 可以拒绝/延后组合不一致的候选数据，从而避免同一画面混用不同 visual epoch。
 
 这仍然只是 Presentation consistency，不具有 gameplay commit authority。
 
-### 14.8 Map 可复用边界
+### 14.9 Map 可复用边界
 
 可以优先复用或抽取的纯表现能力：
 
 ```text
+Map viewport clamp/default/min/max
+Map calculateLayout policy
+Map footer/barHeight geometry
+Map resize settle policy
 32×32 tile geometry
 Tileset projection
 Autotile projection
@@ -890,7 +1048,7 @@ Actor placement
 actor-local concurrent motion
 visual epoch policy
 effect lifecycle
-HUD
+HUD content/styling
 ```
 
 不得复用为 Battle authority：
@@ -923,6 +1081,7 @@ browser/battle.css
 lr-battle-view
 lr-battle-actor
 lr-battle-effects
+lr-battle-hud
 ```
 
 exact tag 与节点结构不在本文冻结。
@@ -990,15 +1149,18 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 5. 新 Projection 取消旧 motion 时只做 visual reconciliation，不执行 gameplay rule；
 6. 相同 Projection 重复 render 不重复产生一次性 effect；
 7. stale `sceneEpoch / visualEpoch / motionId` 不污染新状态；
-8. viewport resize 只改变 layout/camera；
-9. pause/resume 冻结并恢复视觉时间；
-10. close 幂等，关闭 RenderDomain 并阻止 stale async write；
-11. 两个 PresentationHandler 同时存在时 visual/session state 不串场；
-12. 正常 move/turn/damage/effect 更新不改变稳定 Render Tree 结构；
-13. 两个 Actor 可以在同一 visual epoch 拥有不同 motionId 并同时插值；
-14. 重复提交相同 effectId 不重复创建 transient visual；
-15. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
-16. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
+8. 与 Map 对相同 viewport 输入产生相同 barHeight/content/rows/columns/logical size/scale；
+9. viewport resize 使用与 Map 相同的 clamp + 100 ms settle policy，只改变 Presentation layout/camera；
+10. footer 高度与 Map 一致，并持续显示双方 current/max HP；
+11. HP Projection 更新在同一 visualEpoch 更新固定 HUD，不改变 Render Tree 结构；
+12. pause/resume 冻结并恢复视觉时间；
+13. close 幂等，关闭 RenderDomain 并阻止 stale async write；
+14. 两个 PresentationHandler 同时存在时 visual/session state 不串场；
+15. 正常 move/turn/damage/effect 更新不改变稳定 Render Tree 结构；
+16. 两个 Actor 可以在同一 visual epoch 拥有不同 motionId 并同时插值；
+17. 重复提交相同 effectId 不重复创建 transient visual；
+18. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
+19. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
 
 ## 18. 仍待冻结的 Presentation OPEN
 
@@ -1009,8 +1171,8 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 - BattleEffect exact anchor/timing/outcome visuals；
 - camera `focusHint`；
 - Browser node/effect cleanup exact contract；
-- Render Tree/HUD exact node shape 与各 node data Schema；
-- 是否需要把 Map 的 tile/character 纯视觉 primitive 抽成共享实现；
+- Render Tree 各 node 的 exact data Schema（稳定 `battle:hud` 节点、Map-compatible footer geometry 与 current/max HP 内容已确定）；
+- Map/Battle 共用 viewport layout 的最终共享代码位置，以及 tile/character 纯视觉 primitive 是否一并抽取；
 - Host/Runtime Control suspend/resume 到 Battle pause/resume 的 exact wiring；
 - 多 Battle 同屏时的 viewport region / layout ownership。
 
