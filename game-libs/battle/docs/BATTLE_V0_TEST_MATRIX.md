@@ -12,16 +12,16 @@
 | T-ARCH-002 | ARCH-002 | AI 想走 Engine 未预生成的路线 | Decision 可直接提交 path；Simulation 只校验，不替换路线 |
 | T-ARCH-003 | ARCH-004 | Battle 加载 RPGMap-compatible Map/Character | 复用素材形式，不调用 RPGMap Runtime movement/timer |
 | T-ARCH-004 | ARCH-001, ARCH-003 | camera/DOM/Sprite 状态变化 | 不改变权威 Battle State |
-| T-ARCH-005 | ARCH-005 | 不创建任何 Presentation instance，只用 Script/Mock Plan 驱动 Simulation | Simulation 可完整 tick、结算 BattleResult、记录 Replay |
-| T-ARCH-006 | ARCH-005 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 Map/Actor 并表现 movement/effect；无需了解 Decision/Simulation 实现 |
-| T-ARCH-007 | ARCH-002, ARCH-005 | 将 ScriptDecision 换成 LLMDecision，但两者都只提交 PlanSubmission | Simulation 接口与 reducer 无需改变；Presentation 无感知 |
+| T-ARCH-005 | ARCH-005, TIME-001, TIME-002, TIME-003 | 业务只构造 Simulation + ScriptDecision + Null/Recording Presentation，并用可控 clock 推进时间；业务不调用 public tick | Simulation 自己按 200 ms scheduler / event queue / reducer 运行完整 Battle、结算 BattleResult 并记录 Replay |
+| T-ARCH-006 | ARCH-005 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 Map/Actor 并表现 movement/effect；无需了解 Decision/Simulation concrete implementation |
+| T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 LLMDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
 
 ## 2. Time / Scheduler
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
 | T-TIME-001 | TIME-001 | 推进 1 Tick | 逻辑时长固定 200 ms |
-| T-TIME-002 | TIME-003 | 上次处理 Tick 10，Host 醒来时 target Tick 14 | 依次处理 11/12/13/14 |
+| T-TIME-002 | TIME-003 | 上次处理 Tick 10，scheduler/event loop 晚醒时 target Tick 14 | 依次处理 11/12/13/14 |
 | T-TIME-003 | TIME-003 | catch-up 中事件分别 due 11 和 14 | 不视为同一批同时事件 |
 | T-TIME-004 | DEC-001 | Decision 实际耗时 500 ms | 最早 600 ms / 3 Tick 可用 |
 | T-TIME-005 | DEC-001 | completedAt == deadline | 判定完成成功 |

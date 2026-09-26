@@ -42,19 +42,19 @@ Presentation 决定“怎样显示”。
 
 Battle 可以消费 LoomRealm 已有 Map/Tileset/Autotile/Character 的 Content/Resource 形式，但不得把 RPGMap Runtime 的移动、计时器、Transfer/Bridge、探索状态作为 Battle 权威。
 
-### ARCH-005 — 三层实现解耦，由 Host 负责组装 — FROZEN
+### ARCH-005 — 三层模块独立导出，Simulation 自有运行循环 — FROZEN
 
-Decision、Simulation、Presentation 必须可以独立实现和测试；三者只共享稳定的数据 Contract，不得依赖彼此的 concrete implementation。
+Decision、Simulation、Presentation 必须可以作为独立模块实现、导出和测试。三者可以依赖共享 Contract/Port，但不得依赖彼此的 concrete implementation。
 
-依赖边界：
+依赖与运行边界：
 
-- Decision 只消费 `BattleObservation / PlanConstraints / RecentEvents / Optional Guidance`，只产出 `PlanSubmission`；它不知道 Simulation reducer 或 Presentation 如何实现。
-- Simulation 只接受结构化输入并维护权威 Battle State；它产出 `BattleSnapshot / BattleEvent / RenderProjection` 等纯数据事实，不直接调用 Presentation 业务方法，也不得等待动画、DOM 或 Browser ACK。
-- Presentation 只需要纯数据的 Scene 初始化描述与 RenderProjection/render command；它不知道 Decision 如何决策，也不需要 Simulation concrete instance 才能初始化或测试。
-- Host/Coordinator 负责组装三者：请求 Decision、向 Simulation 提交 Plan、推进 Tick，并把 Simulation 输出转交 Presentation。
-- Host/Coordinator 是集成编排边界，不是第四个 gameplay Runtime Layer，也没有 Battle Rule authority。
+- **Decision = Plan**：只根据 `BattleObservation / PlanConstraints / RecentEvents / Optional Guidance` 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
+- **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
+- **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
+- Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
+- 使用 Battle 的 Application/Subsystem 只负责选择 concrete implementation、构造/注入三层、提供 Host capability，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。它不是第四个 gameplay Runtime Layer，也不负责逐 Tick 实施 Battle。
 
-因此 headless Simulation 必须能在没有 Presentation 的情况下完整运行；Presentation 也必须能用 synthetic Scene/Projection 数据独立验证。
+因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
 
 ## 2. Canonical terminology
 

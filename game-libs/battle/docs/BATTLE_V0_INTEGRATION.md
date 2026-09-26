@@ -6,54 +6,68 @@
 
 ## 1. 集成职责边界
 
-Battle 运行时保持三层，但三层的 concrete implementation 彼此解耦。典型 orchestration sequence：
+`game-libs/battle` 的目标是提供可复用 Battle 组件，而不是预先固定一个完整的业务 Subsystem。实现阶段应让三层可以独立导出和替换；exact package export path 属于工程细节，但概念上至少包含：
 
 ```text
-Host/Coordinator -> Simulation    : getObservation / getPlanConstraints
-Host/Coordinator -> Decision      : decide(input)
-Decision         -> Host/Coordinator : PlanSubmission
-Host/Coordinator -> Simulation    : submitPlan(...)
-
-Host/Coordinator -> Simulation    : tick()
-Simulation       -> Host/Coordinator : BattleTickOutput
-Host/Coordinator -> Presentation  : initialize(...) / apply(RenderProjection)
+@loomrealm-game/battle
+  contracts
+  decision
+  simulation
+  presentation
 ```
 
-这里的调用方向属于 Host/Coordinator 的 wiring；Simulation 不持有 Presentation instance，Decision 也不需要知道 Simulation/Presentation concrete implementation。
+共享依赖方向：
 
-集成层必须保持以下权威边界：
+```text
+                    contracts / ports
+                  /        |          \
+                 /         |           \
+          Decision     Simulation     Presentation
+```
 
-- Decision 只提出意图，不直接修改 Battle State，也不知道 Presentation；
-- Simulation 负责校验、调度、结算和 BattleResult，不依赖 Decision/Presentation concrete implementation；
-- Simulation 对外发布 Snapshot / Event / RenderProjection 等纯数据，不直接调用或等待 Presentation；
-- Presentation 只消费 Scene 初始化数据与 Projection/render command，不需要知道 Decision protocol 或 Simulation reducer；
-- Host/Coordinator 负责请求 Decision、提交 Plan、推进 Simulation，并把 Simulation 输出转交 Presentation；
-- Host/Frame 负责 Battle 外部生命周期和授权；
-- Contracts 只传数据，不拥有状态；
-- Host/Coordinator 只是 wiring/orchestration，不是第四个 gameplay Runtime Layer。
+三层运行职责：
 
-### 1.1 独立 Port 的概念边界
+- **Decision / Plan**：消费 Observation/Constraints/Guidance，产生 `PlanSubmission`。Mock/Script/Manual/Random/LLM 可以替换。
+- **Simulation / Execute**：完整 Battle Runtime。自己拥有 Battle clock、200 ms scheduler、event queue、Tick reducer、Decision lifecycle、accepted-plan execution、Battle State、Result 与 Replay。
+- **Presentation / Present**：初始化 Map/Actor 视图并表现 Simulation 已决定的 movement/turn/effect/state；自己拥有插值、camera、viewport 和视觉资源生命周期。
 
-exact API 命名仍由 Contracts/实现阶段冻结，但职责至少应能映射为以下独立能力：
+使用 Battle 的 Application/Subsystem 只做 **composition**：
+
+```text
+Application / Subsystem
+  ├─ choose/create Decision implementation
+  ├─ choose/create Presentation implementation
+  ├─ create Simulation and inject required Ports/capabilities
+  └─ map Frame abort + Host pause/background + external services
+```
+
+它不负责 Battle scheduler，不调用公开 `tick()` 来实施战斗，也不在每个 Decision/Projection 之间承担规则转发。Simulation 根据自己的 Runtime 状态请求 Decision，并把已决定的视觉事实交给 Presentation Port。
+
+### 1.1 Port 的概念边界
+
+exact TypeScript signature 仍由 Contracts/Integration OPEN 冻结，但职责应保持如下：
 
 ```ts
 DecisionPort
-  decide(DecisionInput) -> Promise<PlanSubmission>
-
-SimulationPort
-  getObservation(actorId) -> BattleObservation
-  getPlanConstraints(actorId) -> PlanConstraints
-  submitPlan(actorId, decisionGeneration, plan) -> PlanAcceptance
-  tick() -> BattleTickOutput
-  cancel()
+  decide(DecisionRequest) -> Promise<DecisionCompletion>
 
 PresentationPort
   initialize(BattleSceneInit)
   apply(RenderProjection)
   dispose()
+
+BattleRuntime
+  start() -> Promise<BattleResult>
+  pause()
+  resume()
+  cancel()
+  getSnapshot()
+  getReplay()
 ```
 
-Presentation 内部也可以把 `apply(RenderProjection)` 拆成 `moveActor / turnActor / playSkillEffect / updateHp` 等命令接口；这些只是视觉 API 组织方式。Simulation 不直接调用这些方法，Host/Coordinator 根据 Simulation 输出驱动 Presentation。
+`BattleRuntime` 的 public surface 不需要暴露“由业务每 200 ms 调一次”的 `tick()`。实现内部可以有可测试的 `processTick(currentTick)`、FakeClock 或 scheduler seam，但 Tick ownership 仍属于 Simulation。
+
+Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、LLMDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
 
 ## 2. RPGMap Resource 兼容
 
@@ -127,7 +141,7 @@ Battle 不得把以下模块当作 Battle 权威：
 
 Presentation 只负责显示，并且必须可以脱离 Decision/Simulation concrete implementation 独立初始化与测试。
 
-Host/Coordinator 先提供 `BattleSceneInit` 一类的纯数据描述，使 Presentation 能建立 Map 与 Actor 初始视图；之后每个逻辑 Tick 只把 Simulation 发布的 RenderProjection/render command 转交给 Presentation。
+业务在构造阶段选择 Presentation implementation；Simulation 通过共享 PresentationPort 提供 `BattleSceneInit` 与已经决定的 RenderProjection/表现命令。Presentation 不需要知道 Decision protocol 或 Simulation reducer 的内部实现。
 
 职责包括：
 
@@ -164,7 +178,7 @@ viewportChanged
 
 Simulation 不得等待动画完成后才提交移动、扣血、死亡或 BattleResult。
 
-同样，Simulation 不得通过直接调用 `moveActor / playSkillEffect` 等 Presentation 方法来推进规则；这些视觉调用只能由 Host/Coordinator 根据已经产生的 Simulation 输出触发。
+Simulation 可以在权威状态已经由 reducer 决定后调用 PresentationPort（无论最终是 `apply(RenderProjection)` 还是更细的 `moveActor / playSkillEffect`）。这些调用只发布表现事实；Simulation 不得等待其动画完成、Promise 顺序或 Browser ACK 后才推进 Battle Rule。
 
 ### 3.3 Camera
 
@@ -238,6 +252,8 @@ LLMDecision
 
 Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
+Decision module 只负责“如何从输入得到 Plan”。`decisionGeneration`、何时创建 Decision Request、deadline、trusted completion fact 到 `dueTick` 的映射、stale generation fencing、correction retry 与 Replay timing 都仍属于 Simulation 的 Runtime lifecycle；这些不能下放给业务 composition adapter。
+
 ## 6. LLM Decision Adapter
 
 当前仓库公开的 Subsystem surface 还没有冻结 Battle 的最终 LLM 服务接口。
@@ -304,7 +320,9 @@ InputTarget / Host / Guidance exact contract 尚未冻结。
 
 ## 8. Frame / Abort / Subsystem 生命周期
 
-Battle 运行在 LoomRealm Frame/Subsystem 生命周期中。
+Battle 可以被 LoomRealm Frame/Subsystem 组合使用，但 `game-libs/battle` 本身不等于一个预先构建好的独立 Subsystem 进程。
+
+业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause()`、resume → `battle.resume()`。真正的 Battle 内部终止/冻结语义仍由 Simulation 执行。
 
 Frame abort / Battle cancel 遵循 `CTRL-001`：
 
@@ -378,12 +396,12 @@ Battle 当前仍是 design-only。
 1. 冻结 BattleActor / BattleSkill / BattleEffect v1 serialization schema
 2. 冻结 BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance
 3. 实现 Content validator
-4. 实现 headless Simulation reducer + scheduler + event queue，并保持无 Presentation 依赖
-5. 用 Mock/Script Decision 通过 Host/Coordinator 提交 Plan
+4. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
+5. 定义 DecisionPort，并用 Mock/Script Decision 注入 Simulation 验证完整 Battle
 6. 跑 frozen-rule deterministic Test Matrix
-7. 实现 BattleSceneInit / RenderProjection + 独立 Presentation，并由 Host/Coordinator wiring
-8. 接真实 LLM Decision Adapter
-9. 接 Guidance / Host
+7. 实现 BattleSceneInit / RenderProjection + 独立 PresentationPort/Presentation implementation
+8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
+9. 接真实 LLM Decision Adapter，再接 Guidance / Host
 10. 验证 package-lock / npm ci / unit / Browser E2E
 ```
 

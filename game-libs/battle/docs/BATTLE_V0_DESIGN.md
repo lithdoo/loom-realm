@@ -147,7 +147,7 @@ protection      命中后的有限免疫区间
 以下信息没有因为去重而删除，已进入唯一规范位置：
 
 - Battle 三层架构与 Simulation sole authority；
-- 三层 concrete implementation 彼此解耦，只共享 Contracts；Host/Coordinator 负责 Decision→Plan、Simulation Tick 与 Presentation wiring；
+- Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports；Simulation 自己拥有 Battle clock、scheduler、Tick reducer 与 Plan execution，业务 Subsystem 只做构造、注入和外部生命周期映射；
 - RPGMap 只复用素材/数据形式，不复用 Runtime；
 - 双 Actor 同时行动，无传统回合；
 - 1 Tick = 200 ms；
@@ -208,12 +208,12 @@ protection      命中后的有限免疫区间
 1. 冻结/实现 Content serialization schema
 2. 冻结/实现核心 Contracts
 3. Content validator
-4. headless Simulation reducer
-5. Mock/Script Decision
+4. headless Simulation Runtime（clock + scheduler + event queue + reducer）
+5. DecisionPort + Mock/Script Decision
 6. TEST_MATRIX 全部 frozen-rule 场景
-7. Presentation
-8. real LLM Decision Adapter
-9. Guidance / Host E2E
+7. PresentationPort + Presentation
+8. 业务 Subsystem thin composition
+9. real LLM Decision Adapter + Guidance / Host E2E
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。

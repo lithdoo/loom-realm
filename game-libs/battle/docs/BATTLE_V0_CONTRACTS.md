@@ -12,7 +12,6 @@
 battle/contracts
   BattleConfig
   BattleSceneInit
-  BattleTickOutput
   BattleSnapshot
   BattleObservation
   PlanConstraints
@@ -28,7 +27,7 @@ Simulation / Decision / Presentation 可以依赖这些数据类型。
 
 Contracts 自己不拥有运行状态，不是第四个 Runtime Layer。
 
-按 `ARCH-005`，三层共享的是这些纯数据边界，而不是彼此的 class/service implementation。Host/Coordinator 可以持有各层实例并负责 wiring，但 Simulation/Decision/Presentation 的核心实现不应互相持有 concrete implementation。
+按 `ARCH-005`，三层共享的是稳定 Contract/Port，而不是彼此的 concrete implementation。Application/Subsystem 可以选择并注入 Decision、Simulation、Presentation 的具体实现，但 Battle clock、scheduler、Tick reducer 与 accepted-plan execution 仍由 Simulation 自己拥有。
 
 ## 2. Serialization 状态
 
@@ -467,7 +466,7 @@ type SkillResolveResult =
 
 ### 14.1 BattleSceneInit
 
-Presentation 初始化必须能够只依赖纯数据描述，而不要求传入 Simulation 或 Decision instance。
+Presentation 初始化必须能够只依赖纯数据描述，而不要求知道 Simulation 或 Decision 的 concrete implementation。
 
 概念：
 
@@ -487,21 +486,7 @@ type BattleSceneInit = {
 
 这里描述的是“地图与 Actor 初始应该如何显示”。Presentation 可以自行加载资源、创建 Sprite/Canvas node，并维护非权威视觉状态。
 
-### 14.2 BattleTickOutput
-
-Simulation 每个 Tick 对外发布的结果应保持为纯数据。概念 envelope：
-
-```ts
-type BattleTickOutput = {
-  snapshot: BattleSnapshot
-  events: BattleEvent[]
-  render: RenderProjection
-}
-```
-
-实际实现可以采用 return value、subscription 或 queue 等 transport，但 Simulation 不得因此依赖 Presentation concrete implementation，也不得等待 Presentation ACK。
-
-### 14.3 RenderProjection
+### 14.2 RenderProjection
 
 RenderProjection 是非权威视觉数据。
 
@@ -519,16 +504,18 @@ type RenderProjection = {
 
 Presentation 可以自行插值和控制 camera，但不得 reverse-sync 回 Simulation。
 
-### CONTRACT-OPEN-003 — Projection Schema — OPEN
+Simulation 可以通过 PresentationPort 发布已经由 reducer 决定的 Projection/表现事实；这不赋予 Presentation Rule authority，也不得把动画完成当作 Simulation commit 条件。
+
+### CONTRACT-OPEN-003 — Projection / Presentation Port Schema — OPEN
 
 尚未冻结：
 
-- exact `BattleSceneInit` / `BattleTickOutput` / `RenderProjection` shape；
-- Presentation port 的 exact method naming（例如单一 `apply(projection)` 或更细的 move/effect command）；
+- exact `BattleSceneInit` / `RenderProjection` shape；
+- PresentationPort 的 exact method naming（例如单一 `apply(projection)` 或更细的 move/effect command）；
 - Browser node/effect lifecycle；
 - Simulation 是否输出非权威 camera focus hint。
 
-无论最终 shape 如何，`ARCH-005` 的依赖方向已经冻结：Simulation 发布纯数据，Host/Coordinator 转交，Presentation 不要求 Simulation/Decision concrete instance。
+无论最终 API shape 如何，`ARCH-005` 的边界已经冻结：Presentation module 可独立实现/测试；Simulation 只依赖共享 Port，不依赖 Browser concrete implementation；业务 Subsystem 不承担逐 Tick Projection 转发职责。
 
 ## 15. SkillEffectProjection
 
@@ -586,7 +573,7 @@ BattleResult
 
 - **CONTRACT-OPEN-001**：Content subject/version、字段命名、key/id 对齐、引用编码。
 - **CONTRACT-OPEN-002**：BattleEffect v1 Schema。
-- **CONTRACT-OPEN-003**：BattleSceneInit / BattleTickOutput / RenderProjection / SkillEffectProjection exact Schema、Presentation port method naming 与 camera hint。
+- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact Schema、PresentationPort method naming 与 camera hint。
 - Runtime 的 exact discriminated unions / enum names。
 - Observation history budget 与 prompt-facing representation。
 
