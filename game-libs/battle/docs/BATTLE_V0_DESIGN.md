@@ -147,6 +147,7 @@ protection      命中后的有限免疫区间
 以下信息没有因为去重而删除，已进入唯一规范位置：
 
 - Battle 三层架构与 Simulation sole authority；
+- 三层 concrete implementation 彼此解耦，只共享 Contracts；Host/Coordinator 负责 Decision→Plan、Simulation Tick 与 Presentation wiring；
 - RPGMap 只复用素材/数据形式，不复用 Runtime；
 - 双 Actor 同时行动，无传统回合；
 - 1 Tick = 200 ms；

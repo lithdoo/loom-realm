@@ -42,6 +42,20 @@ Presentation 决定“怎样显示”。
 
 Battle 可以消费 LoomRealm 已有 Map/Tileset/Autotile/Character 的 Content/Resource 形式，但不得把 RPGMap Runtime 的移动、计时器、Transfer/Bridge、探索状态作为 Battle 权威。
 
+### ARCH-005 — 三层实现解耦，由 Host 负责组装 — FROZEN
+
+Decision、Simulation、Presentation 必须可以独立实现和测试；三者只共享稳定的数据 Contract，不得依赖彼此的 concrete implementation。
+
+依赖边界：
+
+- Decision 只消费 `BattleObservation / PlanConstraints / RecentEvents / Optional Guidance`，只产出 `PlanSubmission`；它不知道 Simulation reducer 或 Presentation 如何实现。
+- Simulation 只接受结构化输入并维护权威 Battle State；它产出 `BattleSnapshot / BattleEvent / RenderProjection` 等纯数据事实，不直接调用 Presentation 业务方法，也不得等待动画、DOM 或 Browser ACK。
+- Presentation 只需要纯数据的 Scene 初始化描述与 RenderProjection/render command；它不知道 Decision 如何决策，也不需要 Simulation concrete instance 才能初始化或测试。
+- Host/Coordinator 负责组装三者：请求 Decision、向 Simulation 提交 Plan、推进 Tick，并把 Simulation 输出转交 Presentation。
+- Host/Coordinator 是集成编排边界，不是第四个 gameplay Runtime Layer，也没有 Battle Rule authority。
+
+因此 headless Simulation 必须能在没有 Presentation 的情况下完整运行；Presentation 也必须能用 synthetic Scene/Projection 数据独立验证。
+
 ## 2. Canonical terminology
 
 整套 Battle 文档统一使用以下术语：

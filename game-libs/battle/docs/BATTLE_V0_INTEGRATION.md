@@ -6,23 +6,54 @@
 
 ## 1. 集成职责边界
 
-Battle 运行时保持三层：
+Battle 运行时保持三层，但三层的 concrete implementation 彼此解耦。典型 orchestration sequence：
 
 ```text
-Decision
-  ↓ PlanSubmission
-Simulation
-  ↓ Snapshot / Events / RenderProjection
-Presentation
+Host/Coordinator -> Simulation    : getObservation / getPlanConstraints
+Host/Coordinator -> Decision      : decide(input)
+Decision         -> Host/Coordinator : PlanSubmission
+Host/Coordinator -> Simulation    : submitPlan(...)
+
+Host/Coordinator -> Simulation    : tick()
+Simulation       -> Host/Coordinator : BattleTickOutput
+Host/Coordinator -> Presentation  : initialize(...) / apply(RenderProjection)
 ```
+
+这里的调用方向属于 Host/Coordinator 的 wiring；Simulation 不持有 Presentation instance，Decision 也不需要知道 Simulation/Presentation concrete implementation。
 
 集成层必须保持以下权威边界：
 
-- Decision 只提出意图，不直接修改 Battle State；
-- Simulation 负责校验、调度、结算和 BattleResult；
-- Presentation 只消费 Projection；
+- Decision 只提出意图，不直接修改 Battle State，也不知道 Presentation；
+- Simulation 负责校验、调度、结算和 BattleResult，不依赖 Decision/Presentation concrete implementation；
+- Simulation 对外发布 Snapshot / Event / RenderProjection 等纯数据，不直接调用或等待 Presentation；
+- Presentation 只消费 Scene 初始化数据与 Projection/render command，不需要知道 Decision protocol 或 Simulation reducer；
+- Host/Coordinator 负责请求 Decision、提交 Plan、推进 Simulation，并把 Simulation 输出转交 Presentation；
 - Host/Frame 负责 Battle 外部生命周期和授权；
-- Contracts 只传数据，不拥有状态。
+- Contracts 只传数据，不拥有状态；
+- Host/Coordinator 只是 wiring/orchestration，不是第四个 gameplay Runtime Layer。
+
+### 1.1 独立 Port 的概念边界
+
+exact API 命名仍由 Contracts/实现阶段冻结，但职责至少应能映射为以下独立能力：
+
+```ts
+DecisionPort
+  decide(DecisionInput) -> Promise<PlanSubmission>
+
+SimulationPort
+  getObservation(actorId) -> BattleObservation
+  getPlanConstraints(actorId) -> PlanConstraints
+  submitPlan(actorId, decisionGeneration, plan) -> PlanAcceptance
+  tick() -> BattleTickOutput
+  cancel()
+
+PresentationPort
+  initialize(BattleSceneInit)
+  apply(RenderProjection)
+  dispose()
+```
+
+Presentation 内部也可以把 `apply(RenderProjection)` 拆成 `moveActor / turnActor / playSkillEffect / updateHp` 等命令接口；这些只是视觉 API 组织方式。Simulation 不直接调用这些方法，Host/Coordinator 根据 Simulation 输出驱动 Presentation。
 
 ## 2. RPGMap Resource 兼容
 
@@ -94,7 +125,9 @@ Battle 不得把以下模块当作 Battle 权威：
 
 ## 3. Presentation 集成
 
-Presentation 只负责显示。
+Presentation 只负责显示，并且必须可以脱离 Decision/Simulation concrete implementation 独立初始化与测试。
+
+Host/Coordinator 先提供 `BattleSceneInit` 一类的纯数据描述，使 Presentation 能建立 Map 与 Actor 初始视图；之后每个逻辑 Tick 只把 Simulation 发布的 RenderProjection/render command 转交给 Presentation。
 
 职责包括：
 
@@ -130,6 +163,8 @@ viewportChanged
 这些默认都不是 Battle Rule ACK。
 
 Simulation 不得等待动画完成后才提交移动、扣血、死亡或 BattleResult。
+
+同样，Simulation 不得通过直接调用 `moveActor / playSkillEffect` 等 Presentation 方法来推进规则；这些视觉调用只能由 Host/Coordinator 根据已经产生的 Simulation 输出触发。
 
 ### 3.3 Camera
 
@@ -343,10 +378,10 @@ Battle 当前仍是 design-only。
 1. 冻结 BattleActor / BattleSkill / BattleEffect v1 serialization schema
 2. 冻结 BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance
 3. 实现 Content validator
-4. 实现 headless Simulation reducer + scheduler + event queue
-5. 用 Mock/Script Decision 驱动
+4. 实现 headless Simulation reducer + scheduler + event queue，并保持无 Presentation 依赖
+5. 用 Mock/Script Decision 通过 Host/Coordinator 提交 Plan
 6. 跑 frozen-rule deterministic Test Matrix
-7. 实现 RenderProjection + Presentation
+7. 实现 BattleSceneInit / RenderProjection + 独立 Presentation，并由 Host/Coordinator wiring
 8. 接真实 LLM Decision Adapter
 9. 接 Guidance / Host
 10. 验证 package-lock / npm ci / unit / Browser E2E

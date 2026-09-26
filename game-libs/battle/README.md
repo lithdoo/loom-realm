@@ -35,6 +35,8 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 - 双 Actor 同时行动，无传统交替回合；
 - Simulation 是唯一业务权威；
+- Decision / Simulation / Presentation 的 concrete implementation 彼此解耦，只共享纯数据 Contracts；Host/Coordinator 负责 wiring；
+- Simulation 发布 Snapshot/Event/RenderProjection，不直接调用或等待 Presentation；Presentation 可用 Scene/Projection 数据独立初始化和测试；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
 - Decision 直接生成结构化 `PlanSubmission`，Simulation 只校验/执行；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
