@@ -14,7 +14,8 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
-- **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、Presentation、LLM Adapter、Host/Frame、Guidance、workspace 集成。
+- **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
+- **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — Presentation 独立设计：Map 风格 Builder/Handler、RenderDomain 接入、session 生命周期、并发与最小接口草案。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
 - **[BATTLE_V0_DESIGN.md](./docs/BATTLE_V0_DESIGN.md)** — 文档索引、旧章节迁移表和历史说明。
 
@@ -35,6 +36,10 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 - 双 Actor 同时行动，无传统交替回合；
 - Simulation 是唯一业务权威；
+- Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports，不依赖彼此的 concrete implementation；
+- Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；
+- Simulation 可以通过注入的 DecisionPort / PresentationPort 使用具体组件，但不等待 Browser 动画/ACK 推进规则；Presentation 可用 Scene/Projection 数据独立初始化和测试；
+- 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
 - Decision 直接生成结构化 `PlanSubmission`，Simulation 只校验/执行；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
@@ -77,10 +82,11 @@ README 与 DESIGN 索引不覆盖上述规范。
 ```text
 Content/Contracts schema
 → validator
-→ headless Simulation
-→ Mock/Script Decision
+→ self-driven headless Simulation Runtime
+→ DecisionPort + Mock/Script Decision
 → frozen-rule tests
-→ Presentation
+→ PresentationPort + Presentation
+→ business Subsystem thin composition
 → real LLM Decision
 → Guidance / Host E2E
 ```

@@ -42,6 +42,20 @@ Presentation 决定“怎样显示”。
 
 Battle 可以消费 LoomRealm 已有 Map/Tileset/Autotile/Character 的 Content/Resource 形式，但不得把 RPGMap Runtime 的移动、计时器、Transfer/Bridge、探索状态作为 Battle 权威。
 
+### ARCH-005 — 三层模块独立导出，Simulation 自有运行循环 — FROZEN
+
+Decision、Simulation、Presentation 必须可以作为独立模块实现、导出和测试。三者可以依赖共享 Contract/Port，但不得依赖彼此的 concrete implementation。
+
+依赖与运行边界：
+
+- **Decision = Plan**：只根据 `BattleObservation / PlanConstraints / RecentEvents / Optional Guidance` 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
+- **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
+- **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
+- Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
+- 使用 Battle 的 Application/Subsystem 只负责选择 concrete implementation、构造/注入三层、提供 Host capability，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。它不是第四个 gameplay Runtime Layer，也不负责逐 Tick 实施 Battle。
+
+因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
+
 ## 2. Canonical terminology
 
 整套 Battle 文档统一使用以下术语：

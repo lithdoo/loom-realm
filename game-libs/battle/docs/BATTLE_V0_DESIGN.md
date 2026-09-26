@@ -61,7 +61,22 @@ Contracts 不重新定义玩法规则。
 - workspace / package-lock；
 - 实施顺序。
 
-### 1.4 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
+### 1.4 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md) — Presentation 设计
+
+负责：
+
+- 参考现有 Map 包的 Builder/Handler 工程模式；
+- Presentation 与 SubsystemScope / Frame / RenderDomain 的接入；
+- `initialize / render / pause / resume / close` 建议接口；
+- Battle session 生命周期；
+- 多 Battle 并发与同屏布局边界；
+- `sceneEpoch / visualEpoch / motionId` 视觉 fencing；
+- Simulation 操作到 Projection/视觉 reconciliation 的映射；
+- Presentation 独立测试要求。
+
+本文不重新定义 gameplay Rule，exact Schema/method naming 在对应 OPEN 冻结前仍是设计草案。
+
+### 1.5 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
 
 负责把 Rule ID 映射为可执行场景：
 
@@ -84,6 +99,9 @@ BATTLE_V0_CONTRACTS.md
 
 BATTLE_V0_INTEGRATION.md
   ↓ LoomRealm / Browser / LLM integration
+
+BATTLE_V0_PRESENTATION.md
+  ↓ Presentation module design
 
 BATTLE_V0_TEST_MATRIX.md
   ↓ acceptance scenarios
@@ -147,6 +165,7 @@ protection      命中后的有限免疫区间
 以下信息没有因为去重而删除，已进入唯一规范位置：
 
 - Battle 三层架构与 Simulation sole authority；
+- Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports；Simulation 自己拥有 Battle clock、scheduler、Tick reducer 与 Plan execution，业务 Subsystem 只做构造、注入和外部生命周期映射；
 - RPGMap 只复用素材/数据形式，不复用 Runtime；
 - 双 Actor 同时行动，无传统回合；
 - 1 Tick = 200 ms；
@@ -207,12 +226,12 @@ protection      命中后的有限免疫区间
 1. 冻结/实现 Content serialization schema
 2. 冻结/实现核心 Contracts
 3. Content validator
-4. headless Simulation reducer
-5. Mock/Script Decision
+4. headless Simulation Runtime（clock + scheduler + event queue + reducer）
+5. DecisionPort + Mock/Script Decision
 6. TEST_MATRIX 全部 frozen-rule 场景
-7. Presentation
-8. real LLM Decision Adapter
-9. Guidance / Host E2E
+7. PresentationPort + Presentation
+8. 业务 Subsystem thin composition
+9. real LLM Decision Adapter + Guidance / Host E2E
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。
