@@ -75,6 +75,8 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 这些 OPEN 不得改变已经冻结的 Core gameplay 语义。
 
+Presentation 实现前先完成 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`：抽取 Map 已验证的纯 tile viewport/layout primitive，并让 Map 先使用 shared implementation。Battle 不复制 Map layout 代码，也不通过依赖 `@loomrealm-game/map` 获取该能力。
+
 ## 下一阶段
 
 优先顺序：
@@ -85,6 +87,7 @@ Content/Contracts schema
 → self-driven headless Simulation Runtime
 → DecisionPort + Mock/Script Decision
 → frozen-rule tests
+→ @loomrealm-game/tile-presentation 抽取 + Map 切换/回归
 → PresentationPort + Presentation
 → business Subsystem thin composition
 → real LLM Decision
