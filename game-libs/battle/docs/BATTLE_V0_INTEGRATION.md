@@ -401,10 +401,11 @@ Battle 当前仍是 design-only。
 4. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
 5. 定义 DecisionPort，并用 Mock/Script Decision 注入 Simulation 验证完整 Battle
 6. 跑 frozen-rule deterministic Test Matrix
-7. 实现 BattleSceneInit / RenderProjection + 独立 PresentationPort/Presentation implementation
-8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-9. 接真实 LLM Decision Adapter，再接 Guidance / Host
-10. 验证 package-lock / npm ci / unit / Browser E2E
+7. 渲染前置：建立 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`，抽取 Map 已验证的通用 tile viewport layout primitive，并让 Map 先切换到 shared implementation + regression PASS
+8. 实现 BattleSceneInit / RenderProjection + 独立 PresentationPort/Presentation implementation，直接依赖 `@loomrealm-game/tile-presentation`
+9. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
+10. 接真实 LLM Decision Adapter，再接 Guidance / Host
+11. 验证 package-lock / npm ci / unit / Browser E2E
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。
@@ -418,5 +419,7 @@ Battle 当前仍是 design-only。
 - **INTEGRATION-OPEN-003**：Decision Adapter API/timing/error/cancel/defaults。
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
 - Runtime 开始后还需处理 package-lock / build 验证。
+
+Presentation 实现前置已经确定为抽取 `@loomrealm-game/tile-presentation`；该任务不属于 Integration OPEN。viewport clamp/default/min/max 是否也升级为 shared entry policy 仍需后续明确。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
