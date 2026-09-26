@@ -622,19 +622,14 @@ domain.close()
 
 `domain.replace()` 应保留给真正的 Scene/结构重建，而不是 move、damage、turn、skill effect 等普通运行操作。
 
-### 14.2 屏幕适配与 Footer：完整沿用 Map
+### 14.2 屏幕适配与 Footer：复用 Map 已实现的几何规则
 
-Battle v0 的 viewport/layout/footer 适配规则不再单独设计，直接沿用现有 Map 的规则。目标是保证 Map → Battle 切换时 tile 尺度、逻辑可视区域、缩放方式和 footer 高度保持一致。
+Battle v0 不再单独发明一套 viewport layout 算法。目标是让 Map → Battle 切换时 tile 尺度、逻辑可视区域、缩放方式和 footer 高度保持一致。
 
-当前 Map 规则包括：
+当前 Map Runtime 实际用于 Presentation layout 的核心是 `calculateLayout(width, height)`：
 
 ```text
 tileSize = 32
-
-viewport:
-  default = 640 × 480
-  min     = 320 × 240
-  max     = 1920 × 1080
 
 barHeight:
   height < 480  → 24
@@ -659,28 +654,37 @@ logicalHeight = rows * 32
 
 scaleX = contentWidth / logicalWidth
 scaleY = contentHeight / logicalHeight
-
-resize settle = 100 ms
 ```
 
-Battle 应保持这些规则与 Map 一致，包括：
+Map 的 `semantics.ts` 另外定义并测试了：
 
-- viewport clamp/default/min/max；
-- 32×32 tile；
-- `barHeight` breakpoint；
-- `contentWidth / contentHeight`；
-- `minRows=14 / maxRows=33`；
-- columns/rows 计算；
-- `logicalWidth / logicalHeight`；
-- `scaleX / scaleY`；
-- resize settle policy；
-- Browser logical world 到实际 viewport 的缩放方式。
+```text
+DEFAULT_VIEWPORT = 640 × 480
+MIN_VIEWPORT     = 320 × 240
+MAX_VIEWPORT     = 1920 × 1080
+clampViewport(...)
+```
 
-Battle 不应另行发明一套 responsive breakpoint 或 logical grid 算法。
+但**当前 Map Runtime 的 `layoutFromViewport()` 并不会先调用 `clampViewport()`**；它把 `SubsystemScope.viewport` 提供的正整数宽高直接传给 `calculateLayout()`。因此 Battle 文档不能把上述 clamp/default/min/max 描述成当前 Map Presentation Runtime 已经统一执行的入口规则。
+
+Battle v0 当前冻结的是：
+
+- 复用 Map 的 32×32 tile；
+- 复用 `calculateLayout` 的 `barHeight` breakpoint；
+- 复用 `contentWidth / contentHeight`；
+- 复用 `minRows=14 / maxRows=33`；
+- 复用 columns/rows 计算；
+- 复用 `logicalWidth / logicalHeight`；
+- 复用 `scaleX / scaleY`；
+- Browser logical world 到实际 viewport 的缩放语义。
+
+**viewport clamp/default/min/max 是否成为 Map/Battle 共用的 Presentation 入口规则仍需单独明确。** 如果未来决定共用，应优先让 Map 与 Battle 通过同一个 shared viewport normalization primitive 实现，而不是只让 Battle 单方面调用 `clampViewport()`。
+
+Battle 不应另行发明另一套 responsive breakpoint 或 logical grid 算法。
 
 ### 14.2.1 Footer 的 Battle 内容
 
-Map 使用 footer 显示 Map 信息；Battle 复用**相同 footer 几何**，但替换为 Battle HUD 内容：
+Map 的 footer 目前由 `lr-map-view` 自己在 Shadow DOM 中实现，并不是独立 RenderDomain node。Battle **只复用相同的 footer 几何/layout policy**，而采用自己的稳定逻辑 HUD node/slot 来承载 Battle HUD 内容：
 
 ```text
 ┌────────────────────────────────────┐
@@ -730,7 +734,14 @@ type BattleHudRenderData = {
 }
 ```
 
-exact field naming 仍由 Contracts/Presentation Schema 冻结，但“footer 固定存在并显示双方 current/max HP”是本文采用的 v0 Presentation 设计。
+exact field naming 仍由 Contracts/Presentation Schema 冻结，但以下 v0 Presentation 语义已经确定：
+
+- 存在一个稳定的 Battle HUD visual slot/node；
+- 它占用与 Map 相同的 footer 几何区域；
+- 它显示双方 current/max HP；
+- 它不复用 Map footer 的 RPGMap-specific data contract。
+
+逻辑 HUD slot/node 已确定；最终 Browser custom-element tag、RenderNode key 细节和 node data exact Schema 仍保持 OPEN。
 
 HP 更新应与本次 visual commit 的其他节点使用同一个 `visualEpoch`。Browser HUD 不根据 HP 数值推导 damage、death、protection 或 interruption。
 
@@ -744,7 +755,9 @@ TileViewportLayout
   └─ Battle Presentation
 ```
 
-如果 v0 为降低改动暂时不能抽取共享实现，则 Battle 的实现必须对 Map 的 layout algorithm 建立 parity test，保证相同 viewport 输入得到相同：
+当前 parity 的权威基线应是 **Map Runtime 实际调用的 `calculateLayout(width, height)` 行为**，而不是未被 Runtime 接入的 `clampViewport()` helper。
+
+如果 v0 为降低改动暂时不能抽取共享实现，则 Battle 的实现必须对 Map layout 建立 parity test，保证相同有效 viewport 输入得到相同：
 
 ```text
 barHeight
@@ -754,11 +767,13 @@ logicalWidth/logicalHeight
 scaleX/scaleY
 ```
 
+若未来把 viewport clamp/default/min/max 升级为共享入口语义，则应同时修改 Map/Battle 并增加对应 parity test；不应只让一侧采用。
+
 不应长期维护两份可独立漂移的算法。
 
 ### 14.2.3 Camera 不属于这次“完全复用”
 
-完整复用的是 **viewport/layout/footer/scale/resize policy**，不是 Map 的单 Player camera policy。
+复用的是 **layout/footer/scale 的几何 policy**，以及实现时应与 Map 对齐的 resize settlement semantics；不是 Map 的单 Player camera policy，也不是当前尚未统一接入 Runtime 的 viewport clamp helper。
 
 Map camera 以单个 Player 为中心；Battle 同时有两个 Actor，因此 Battle camera/focus 仍由 Battle Presentation 单独设计，例如双 Actor framing。Camera 不得因为复用 Map layout 而隐式跟随 ally。
 
@@ -1171,8 +1186,10 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 - BattleEffect exact anchor/timing/outcome visuals；
 - camera `focusHint`；
 - Browser node/effect cleanup exact contract；
-- Render Tree 各 node 的 exact data Schema（稳定 `battle:hud` 节点、Map-compatible footer geometry 与 current/max HP 内容已确定）；
-- Map/Battle 共用 viewport layout 的最终共享代码位置，以及 tile/character 纯视觉 primitive 是否一并抽取；
+- Render Tree 各 node 的 exact data Schema 与 Browser custom-element tag/key；稳定的 Battle HUD logical slot/node、Map-compatible footer geometry 与 current/max HP 内容已确定；
+- Map/Battle 共用 viewport layout 的最终共享代码位置；
+- viewport clamp/default/min/max 是否升级为 Map/Battle 共用的 Presentation 入口规则；
+- tile/character 纯视觉 primitive 是否一并抽取；
 - Host/Runtime Control suspend/resume 到 Battle pause/resume 的 exact wiring；
 - 多 Battle 同屏时的 viewport region / layout ownership。
 
