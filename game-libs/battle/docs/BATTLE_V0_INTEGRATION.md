@@ -139,6 +139,8 @@ Battle 不得把以下模块当作 Battle 权威：
 
 ## 3. Presentation 集成
 
+Presentation 的独立模块设计、Map 风格 Builder/Handler、Subsystem/RenderDomain 接入、session 生命周期与并发模型详见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档不覆盖本文件或 Contracts 中仍为 OPEN 的 exact Schema/API。
+
 Presentation 只负责显示，并且必须可以脱离 Decision/Simulation concrete implementation 独立初始化与测试。
 
 业务在构造阶段选择 Presentation implementation；Simulation 通过共享 PresentationPort 提供 `BattleSceneInit` 与已经决定的 RenderProjection/表现命令。Presentation 不需要知道 Decision protocol 或 Simulation reducer 的内部实现。

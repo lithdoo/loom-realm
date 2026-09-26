@@ -61,7 +61,22 @@ Contracts 不重新定义玩法规则。
 - workspace / package-lock；
 - 实施顺序。
 
-### 1.4 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
+### 1.4 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md) — Presentation 设计
+
+负责：
+
+- 参考现有 Map 包的 Builder/Handler 工程模式；
+- Presentation 与 SubsystemScope / Frame / RenderDomain 的接入；
+- `initialize / render / pause / resume / close` 建议接口；
+- Battle session 生命周期；
+- 多 Battle 并发与同屏布局边界；
+- `sceneEpoch / visualEpoch / motionId` 视觉 fencing；
+- Simulation 操作到 Projection/视觉 reconciliation 的映射；
+- Presentation 独立测试要求。
+
+本文不重新定义 gameplay Rule，exact Schema/method naming 在对应 OPEN 冻结前仍是设计草案。
+
+### 1.5 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
 
 负责把 Rule ID 映射为可执行场景：
 
@@ -84,6 +99,9 @@ BATTLE_V0_CONTRACTS.md
 
 BATTLE_V0_INTEGRATION.md
   ↓ LoomRealm / Browser / LLM integration
+
+BATTLE_V0_PRESENTATION.md
+  ↓ Presentation module design
 
 BATTLE_V0_TEST_MATRIX.md
   ↓ acceptance scenarios
