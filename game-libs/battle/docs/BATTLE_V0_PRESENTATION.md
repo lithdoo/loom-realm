@@ -770,9 +770,9 @@ exact field naming 仍由 Contracts/Presentation Schema 冻结，但以下 v0 Pr
 
 HP 更新应与本次 visual commit 的其他节点使用同一个 `visualEpoch`。Browser HUD 不根据 HP 数值推导 damage、death、protection 或 interruption。
 
-### 14.2.2 Presentation 实现前置：抽取共享 Tile Presentation primitive
+### 14.2.2 已完成的 Presentation 实现前置：共享 Tile Presentation primitive
 
-Battle Presentation **开始实现前**，先从现有 Map 中抽取与 RPGMap gameplay 无关的纯视觉 primitive，形成独立 game-lib：
+已从现有 Map 中抽取与 RPGMap gameplay 无关的纯视觉 primitive，形成独立 game-lib：
 
 ```text
 game-libs/tile-presentation
@@ -828,19 +828,19 @@ resize safe-commit state machine
 
 其中 resize 的 `100 ms` constant 可以共享，但“什么时候可以安全 commit pending layout”仍由 Map/Battle 各自的 Presentation/session lifecycle 决定。
 
-实施顺序：
+已完成的迁移顺序：
 
 ```text
-1. 建立 @loomrealm-game/tile-presentation
-2. 从 Map 搬迁已验证的纯 layout/tile primitive
-3. Map 改为 import shared package
-4. Map 原有 layout/runtime regression tests 全绿
-5. Battle Presentation 再直接 import 同一 package
+1. 已建立 @loomrealm-game/tile-presentation
+2. 已从 Map 搬迁已验证的纯 layout/tile primitive
+3. Map 已改为 import shared package
+4. Map 原有 layout/runtime regression tests 保持覆盖
+5. Battle Presentation 实现时直接 import 同一 package
 ```
 
 这样 Map 与 Battle 不需要长期维护两份 layout algorithm，也不需要把 parity test 当成防漂移的主要机制；两边直接消费同一个 implementation。
 
-当前 shared implementation 的事实基线仍是 **Map Runtime 实际调用的 `calculateLayout(width, height)` 行为**，而不是尚未接入 Runtime 的 `clampViewport()` helper。
+当前 shared implementation 的事实基线是 **Map Runtime 原先实际调用的 `calculateLayout(width, height)` 行为**，而不是尚未接入 Runtime 的 `clampViewport()` helper。此次迁移没有启用 viewport clamp，也没有修改 Map resize safe-commit lifecycle。
 
 ### 14.2.3 Camera 不属于这次“完全复用”
 
@@ -1224,17 +1224,17 @@ Battle clock/tick 属于 Simulation；Projection 到 RenderDomain 的翻译属�
 
 ## 17. Presentation 实现 Gate
 
-在开始 Battle Browser Presentation / RenderDomain implementation 之前，必须先完成：
+Battle Browser Presentation / RenderDomain implementation 的 shared primitive Gate 已完成：
 
-1. 创建 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`；
-2. 将 Map 当前已验证的通用 tile viewport layout primitive 迁入该 package；
-3. 让 `@loomrealm-game/map` 改为依赖并使用 shared implementation；
-4. Map layout/runtime regression tests 保持通过；
-5. 再由 `@loomrealm-game/battle` Presentation 依赖同一 package。
+1. 已创建 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`；
+2. 已将 Map 验证过的通用 tile viewport layout primitive 迁入该 package；
+3. `@loomrealm-game/map` 已改为依赖并使用 shared implementation；
+4. Map layout/runtime regression tests 继续作为集成保障；
+5. `@loomrealm-game/battle` Presentation 实现时再依赖同一 package。
 
 这是一项**渲染层实现前置任务**，不是 Battle Core gameplay 的前置任务。headless Simulation、DecisionPort 和 frozen-rule deterministic tests 不需要等待它。
 
-完成该 Gate 前，不应在 Battle package 内复制一份 Map `calculateLayout` 实现。
+该 Gate 已完成；后续仍不应在 Battle package 内复制 Map `calculateLayout` 实现。Battle Presentation 仍是 design-only，尚未实现。
 
 ## 18. 最低测试要求
 

@@ -1,5 +1,5 @@
 {
-  "name": "@loomrealm-game/map",
+  "name": "@loomrealm-game/tile-presentation",
   "version": "0.1.0-alpha.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,20 +8,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./browser/map.browser.js": "./dist/browser/map.browser.js",
-    "./browser/map.css": "./dist/browser/map.css"
+    }
   },
   "files": [
     "dist/"
   ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-browser.mjs",
+    "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.mjs"
   },
-  "dependencies": {
-    "@loomrealm/subsystem": "0.1.0-alpha.0",
-    "@loomrealm-game/tile-presentation": "0.1.0-alpha.0"
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "typescript": "5.9.2"
