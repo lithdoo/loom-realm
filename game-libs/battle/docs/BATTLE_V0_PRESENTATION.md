@@ -438,31 +438,43 @@ Presentation 可以看到 HP 改变、movement 消失、hit effect 同时出现�
 
 ## 10. visualEpoch / motionId
 
-Battle Presentation 建议参考 Map 已使用的视觉 fencing 模式：
+Battle Presentation 建议参考 Map 已使用的视觉 fencing 思想，但不能照搬 Map 的“单 player motion”假设。
+
+Scene 级视觉身份：
 
 ```text
 sceneEpoch
 visualEpoch
-motionId
 ```
 
-目的不是创建 gameplay generation，而是防止旧视觉工作污染新画面。
+Actor movement identity 则属于各 Actor 自己：
+
+```text
+actor A → motionId=17
+actor B → motionId=9
+```
+
+如果 camera 有独立动画，应使用单独的 camera motion identity，而不是复用某个 Actor 的 `motionId`。
+
+原因是 Battle 允许双方同时行动，同一个 visual epoch 中可能同时存在两个不同 Actor motion、camera motion 和多个 effectId。
+
+这些 identity 的目的不是创建 gameplay generation，而是防止旧视觉工作污染新画面。
 
 例如：
 
 ```text
-motionId=17 正在 Browser 插值
+Actor A motionId=17 正在 Browser 插值
         ↓
 Simulation 中该 move 已经失效
         ↓
-发布更高 visualEpoch，Projection 不再含 motionId=17
+发布更高 visualEpoch；Actor A 新 Projection 不再含 motionId=17
         ↓
 Presentation/Browser 旧 motion completion 变成 stale visual fact
         ↓
 不得反向提交 Battle 状态
 ```
 
-即使没有 Browser completion callback，epoch/id 也有利于幂等 reconciliation 和测试。
+因此 Battle 不应设计一个 scene-global `motionId` 来代表整场画面的唯一运动。即使没有 Browser completion callback，scene/visual epoch 与 actor-local motion identity 仍有利于幂等 reconciliation 和测试。
 
 ## 11. pause / resume
 
@@ -537,7 +549,366 @@ Handler 内部直接使用：
 
 Presentation 不需要持有 Simulation 或 Decision concrete instance。
 
-## 14. Browser 实现
+## 14. Render Tree 设计
+
+Battle Render Tree 应把现有 Map 包作为主要工程基线：**一个稳定 Root View、少量长期存在的语义 Child Node、频繁变化放进 node.data、Browser custom element 内部处理 Canvas/DOM/动画。**
+
+现有 Map 的核心树形是：
+
+```text
+RenderDomain
+└── lr-map-view
+    ├── lr-map-sprite
+    └── lr-map-sprite ...
+```
+
+Battle v0 建议保持同样的稳定树思想：
+
+```text
+RenderDomain
+└── battle:view
+    tag = lr-battle-view
+    │
+    ├── battle:actor:<allyActorId>
+    │   tag = lr-battle-actor
+    │
+    ├── battle:actor:<enemyActorId>
+    │   tag = lr-battle-actor
+    │
+    └── battle:effects
+        tag = lr-battle-effects
+```
+
+如果后续确认 HUD 需要独立 visual lifecycle，可以增加一个稳定节点：
+
+```text
+    └── battle:hud
+        tag = lr-battle-hud
+```
+
+HUD 是否独立成节点仍属于 Presentation UX/Schema 设计，不影响 gameplay authority。
+
+### 14.1 为什么树必须稳定
+
+当前 `@loomrealm/subsystem` 的 `RenderDomain.update()` surface 只支持更新**已有节点**的 attrs/data：
+
+```ts
+interface RenderDomainUpdate {
+  zIndex?: number
+  nodes?: readonly {
+    key: string
+    attrs?: RenderStringDelta
+    data?: RenderDataDelta
+  }[]
+}
+```
+
+结构变化不通过该 `update()` surface 完成；当前 Map 在需要重建结构时使用 `domain.replace(state)`。
+
+因此 Battle 不应把高频 gameplay/visual 变化建模成 Render Tree structural change。例如不建议：
+
+```text
+一个 Tile 一个动态 RenderNode
+一个 HP bar 一个动态 RenderNode
+一个 SkillEffect 一个 RenderNode
+一帧动画一个 RenderNode
+```
+
+Battle v0 固定两个 Actor、一个 battle view、一个 effects layer，所以整场 Battle 的正常路径应尽量是：
+
+```text
+createRenderDomain(initial stable tree)
+        ↓
+大量 domain.update(...)
+        ↓
+domain.close()
+```
+
+`domain.replace()` 应保留给真正的 Scene/结构重建，而不是 move、damage、turn、skill effect 等普通运行操作。
+
+### 14.2 lr-battle-view
+
+`lr-battle-view` 对应 Map 的 `lr-map-view` 职责域，负责：
+
+```text
+Map / Tileset / Autotile
+viewport geometry
+logical coordinate space
+scale
+camera
+tile layer/depth
+child visual container
+```
+
+概念 data：
+
+```ts
+type BattleViewRenderData = {
+  sceneEpoch: number
+  visualEpoch: number
+
+  viewportWidth: number
+  viewportHeight: number
+
+  logicalWidth: number
+  logicalHeight: number
+  scaleX: number
+  scaleY: number
+
+  mapWidth: number
+  mapHeight: number
+
+  cameraX: number
+  cameraY: number
+
+  tileset: ResourceRef
+  autotiles: readonly (ResourceRef | null)[]
+  tiles: readonly TileTuple[]
+}
+```
+
+Battle 可以复用/抽取 Map 已验证的纯视觉概念，例如 32×32 tile geometry、Tileset/Autotile projection、resource identity、pixelated rendering、viewport scaling；不得因此复用 RPGMap movement/Transfer/Bridge/Event authority。
+
+### 14.3 lr-battle-actor
+
+v0 固定两个 Actor，因此两个 actor node 从初始化到 close 都保持稳定。
+
+概念 data：
+
+```ts
+type BattleActorRenderData = {
+  sceneEpoch: number
+  visualEpoch: number
+
+  actorId: string
+
+  tileX: number
+  tileY: number
+
+  screenX: number
+  screenY: number
+
+  direction: Direction
+  pattern: Pattern
+
+  sprite: ResourceRef
+
+  hp: number
+  maxHp: number
+  life: "alive" | "dead"
+
+  motion: BattleActorMotion | null
+}
+
+type BattleActorMotion = {
+  id: number
+  fromScreenX: number
+  fromScreenY: number
+  durationMs: number
+}
+```
+
+exact field shape 仍是 OPEN。
+
+Browser actor element 内部可以负责：
+
+- Character 4×4 atlas crop；
+- screen position；
+- movement interpolation；
+- walking pattern；
+- direction；
+- actor-local HP/death visual（如果最终 UX 选择 actor-local）。
+
+它不能根据 damage/effect 自己决定 gameplay movement 是否中断。
+
+### 14.4 lr-battle-effects
+
+技能/受击等 transient visual 不建议“一次 effect 一个 RenderNode”。
+
+建议整场 Battle 固定一个：
+
+```text
+battle:effects
+tag = lr-battle-effects
+```
+
+其 data 携带当前需要接收的 effect facts：
+
+```ts
+type BattleEffectsRenderData = {
+  sceneEpoch: number
+  visualEpoch: number
+
+  effects: readonly {
+    effectId: string
+    effect: string
+    result: SkillResolveResult
+    tile?: GridPosition
+    startTick: number
+  }[]
+}
+```
+
+Browser element 内部可维护：
+
+```ts
+Map<effectId, ActiveVisualEffect>
+```
+
+行为：
+
+```text
+新的 effectId
+→ 创建 visual effect
+
+已接受过的 effectId
+→ 不重复播放
+
+视觉生命周期结束
+→ 清理 Browser 内部 canvas/div/resource
+```
+
+这属于 Presentation-local transient lifecycle，不要求改变 Render Tree，也不产生 Battle ACK。
+
+`effectId` 必须足够稳定，使相同 Projection 重复 render 时不会重复生成同一次 effect。
+
+### 14.5 普通 Battle 操作只更新 data
+
+例如双方同时开始移动，Tree 不变，只更新同一 visual epoch 下的节点 data：
+
+```ts
+domain.update({
+  nodes: [
+    {
+      key: "battle:view",
+      data: {
+        set: {
+          visualEpoch: 12,
+        },
+      },
+    },
+    {
+      key: "battle:actor:ally",
+      data: {
+        set: {
+          visualEpoch: 12,
+          direction: 6,
+          motion: allyMotion,
+        },
+      },
+    },
+    {
+      key: "battle:actor:enemy",
+      data: {
+        set: {
+          visualEpoch: 12,
+          direction: 4,
+          motion: enemyMotion,
+        },
+      },
+    },
+    {
+      key: "battle:effects",
+      data: {
+        set: {
+          visualEpoch: 12,
+        },
+      },
+    },
+  ],
+})
+```
+
+这里两个 Actor 可以拥有不同的 actor-local `motion.id`。
+
+`move_complete`、turn、HP change、death、move interruption 同样都应该优先表现为 node.data transition，而不是 remove/insert Actor node。
+
+### 14.6 move interruption 的 Tree 行为
+
+当 Simulation 已经根据 Core Rule 决定 move 失效时，Render Tree 不发生结构变化：
+
+```text
+before:
+  actor node
+    tile = origin
+    motion = motionId 17
+
+after:
+  same actor node
+    tile = origin
+    hp = newHp
+    motion = null
+```
+
+如果同 Tick 还有受击特效，则同一 visual commit 更新固定 `battle:effects` 节点。
+
+Presentation 只执行 visual reconciliation；不得从“damage > 0”推导“所以 motion 应取消”。
+
+### 14.7 sceneEpoch / visualEpoch 一致性
+
+参考 Map 的 Browser fencing，建议一次视觉 commit 涉及的固定节点使用一致的：
+
+```text
+sceneEpoch
+visualEpoch
+```
+
+例如：
+
+```text
+battle:view          visualEpoch=57
+battle:actor:ally    visualEpoch=57
+battle:actor:enemy   visualEpoch=57
+battle:effects       visualEpoch=57
+```
+
+Browser implementation 可以拒绝/延后组合不一致的候选数据，从而避免同一画面混用不同 visual epoch。
+
+这仍然只是 Presentation consistency，不具有 gameplay commit authority。
+
+### 14.8 Map 可复用边界
+
+可以优先复用或抽取的纯表现能力：
+
+```text
+32×32 tile geometry
+Tileset projection
+Autotile projection
+tile depth sorting
+resource identity
+4×4 Character atlas crop
+pixelated rendering
+viewport scaling
+```
+
+可以参考但 Battle 自己定义：
+
+```text
+camera policy
+Battle projection window
+Actor placement
+actor-local concurrent motion
+visual epoch policy
+effect lifecycle
+HUD
+```
+
+不得复用为 Battle authority：
+
+```text
+RPGMap movement semantics
+bridgeLevel gameplay
+Transfer
+NPC event logic
+MapAction
+player input movement
+Map Browser motion completion
+```
+
+实现阶段如果发现 tile/character rendering primitive 值得共享，应独立抽取公共视觉 primitive；不应为了 Battle v0 强迫重构 Map，也不应让 Battle 直接绑定 `lr-map-view / lr-map-sprite` 的 RPGMap-specific data contract。
+
+
+## 15. Browser 实现
 
 建议 package 跟随 Map 的 asset 形态：
 
@@ -551,14 +922,14 @@ browser/battle.css
 ```text
 lr-battle-view
 lr-battle-actor
-lr-battle-effect
+lr-battle-effects
 ```
 
 exact tag 与节点结构不在本文冻结。
 
 Battle 不应为了复用代码直接绑定 RPGMap 的 `lr-map-view / lr-map-sprite` Runtime contract；未来如果确实有稳定的通用 tile-map / character-sprite primitive，应独立抽取共享组件。
 
-## 15. 建议的业务组装
+## 16. 建议的业务组装
 
 业务 Subsystem 只做 composition：
 
@@ -606,7 +977,7 @@ RenderProjection forwarding loop
 
 Battle clock/tick 属于 Simulation；Projection 到 RenderDomain 的翻译属于 Presentation。
 
-## 16. 最低测试要求
+## 17. 最低测试要求
 
 Presentation 可以完全脱离真实 Simulation/Decision 测试。
 
@@ -623,9 +994,13 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 9. pause/resume 冻结并恢复视觉时间；
 10. close 幂等，关闭 RenderDomain 并阻止 stale async write；
 11. 两个 PresentationHandler 同时存在时 visual/session state 不串场；
-12. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
+12. 正常 move/turn/damage/effect 更新不改变稳定 Render Tree 结构；
+13. 两个 Actor 可以在同一 visual epoch 拥有不同 motionId 并同时插值；
+14. 重复提交相同 effectId 不重复创建 transient visual；
+15. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
+16. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
 
-## 17. 仍待冻结的 Presentation OPEN
+## 18. 仍待冻结的 Presentation OPEN
 
 本文不关闭以下现有 OPEN：
 
@@ -634,6 +1009,8 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 - BattleEffect exact anchor/timing/outcome visuals；
 - camera `focusHint`；
 - Browser node/effect cleanup exact contract；
+- Render Tree/HUD exact node shape 与各 node data Schema；
+- 是否需要把 Map 的 tile/character 纯视觉 primitive 抽成共享实现；
 - Host/Runtime Control suspend/resume 到 Battle pause/resume 的 exact wiring；
 - 多 Battle 同屏时的 viewport region / layout ownership。
 
