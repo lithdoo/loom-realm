@@ -582,7 +582,7 @@ RenderDomain
         tag = lr-battle-hud
 ```
 
-`battle:hud` 是 v0 的稳定节点，不再是 optional。它占用与 Map footer 完全相同的 footer 区域，用于显示双方 Actor 的 `当前 HP / 最大 HP`。HUD 只显示 Simulation 已经决定的 HP 事实，不计算 damage、death 或任何 gameplay transition。
+v0 确定存在一个**稳定的 Battle HUD logical slot/node**，不再是 optional。本文示例使用 `battle:hud / lr-battle-hud` 表达它，但 exact RenderNode key / custom-element tag 仍由 Presentation Schema 冻结。该 HUD 占用与 Map footer 相同的 footer 几何区域，用于显示双方 Actor 的 `当前 HP / 最大 HP`。HUD 只显示 Simulation 已经决定的 HP 事实，不计算 damage、death 或任何 gameplay transition。
 
 ### 14.1 为什么树必须稳定
 
@@ -681,6 +681,31 @@ Battle v0 当前冻结的是：
 **viewport clamp/default/min/max 是否成为 Map/Battle 共用的 Presentation 入口规则仍需单独明确。** 如果未来决定共用，应优先让 Map 与 Battle 通过同一个 shared viewport normalization primitive 实现，而不是只让 Battle 单方面调用 `clampViewport()`。
 
 Battle 不应另行发明另一套 responsive breakpoint 或 logical grid 算法。
+
+#### Resize settlement 必须对齐 Map 实际 Runtime 语义
+
+Map 当前的 resize 行为不是简单的“所有 viewport resize 都 debounce 100 ms”。
+
+实际语义包括：
+
+- 首次可接受 layout / 尚未进入 settled resize 状态时，可以立即 commit；
+- 已进入 settled resize 状态后，普通连续 resize 使用 `RESIZE_SETTLE_MS = 100`；
+- active move、Map transition、NPC setting 等 operation busy 状态会推迟 layout commit；
+- pending layout 可以在 operation 结束后的安全 commit 点被提交；
+- 相同 layout 不重复发布；
+- resize commit 会产生新的 visual epoch，并同步更新相关 visual data。
+
+Battle 没有 RPGMap transition / NPC setting 这些具体状态，因此不能机械复制 Map Runtime 状态机；但应复用其**核心 settlement 原则**：
+
+```text
+viewport change
+→ 记录 latest/pending layout
+→ 避免在不安全的 visual transition 中途撕裂画面
+→ settled 连续 resize 使用 100 ms settle window
+→ 到安全 commit 点原子发布一组一致 visualEpoch 的 layout/camera/HUD/actor visual facts
+```
+
+实现阶段如果抽出共享 resize primitive，应以 Map 当前实际 Runtime 行为为基线；如果 Battle 保持独立实现，则测试应验证等价的 settlement properties，而不是只断言“等待 100 ms”。
 
 ### 14.2.1 Footer 的 Battle 内容
 
@@ -1043,7 +1068,7 @@ Browser implementation 可以拒绝/延后组合不一致的候选数据，从�
 Map viewport clamp/default/min/max
 Map calculateLayout policy
 Map footer/barHeight geometry
-Map resize settle policy
+Map resize settlement semantics（100 ms 只是 settled 连续 resize 的参数，不代表全部状态机）
 32×32 tile geometry
 Tileset projection
 Autotile projection
@@ -1099,7 +1124,7 @@ lr-battle-effects
 lr-battle-hud
 ```
 
-exact tag 与节点结构不在本文冻结。
+上述 custom-element 名称与 RenderNode key 都是概念示例。v0 已冻结“存在稳定 Battle HUD logical slot/node”这一结构职责，但 exact tag/key、其余 node 结构和 data Schema 仍未冻结。
 
 Battle 不应为了复用代码直接绑定 RPGMap 的 `lr-map-view / lr-map-sprite` Runtime contract；未来如果确实有稳定的通用 tile-map / character-sprite primitive，应独立抽取共享组件。
 
@@ -1165,7 +1190,7 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 6. 相同 Projection 重复 render 不重复产生一次性 effect；
 7. stale `sceneEpoch / visualEpoch / motionId` 不污染新状态；
 8. 与 Map 对相同 viewport 输入产生相同 barHeight/content/rows/columns/logical size/scale；
-9. viewport resize 使用与 Map 相同的 clamp + 100 ms settle policy，只改变 Presentation layout/camera；
+9. viewport resize 对齐 Map 当前 settlement properties：首次/未 settled 可及时 commit、settled 连续 resize 使用 100 ms window、busy visual transition 期间保留 pending layout 并在安全点提交；不要求 Battle 单方面采用当前未接入 Map Runtime 的 clamp helper；
 10. footer 高度与 Map 一致，并持续显示双方 current/max HP；
 11. HP Projection 更新在同一 visualEpoch 更新固定 HUD，不改变 Render Tree 结构；
 12. pause/resume 冻结并恢复视觉时间；
