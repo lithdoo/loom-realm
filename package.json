@@ -34,7 +34,7 @@
     "test:m13:pack": "npm pack -w @loomrealm/renderer --dry-run",
     "test:m13": "npm run test:m12 && npm run test:m13:qualification:run && node --test test/m13-boundary.test.mjs && npm run test:m13:pack",
     "test:m13:pr": "npm run build:desktop-stack && npm run test:m13:qualification:run && node --test test/m13-boundary.test.mjs && npm run test:m13:pack",
-    "test:m14:pack": "npm pack -w @loomrealm-game/map --dry-run",
+    "test:m14:pack": "npm pack -w @loomrealm-game/tile-presentation -w @loomrealm-game/map --dry-run",
     "build:m14": "npm run build -w @loomrealm/fsdb -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/game-package -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm/main -w @loomrealm/game-launcher-hostra -w @loomrealm/desktop -w @loomrealm-game/tile-presentation -w @loomrealm-game/map",
     "test:m14:projection": "node --test tools/fixtures/essentials-v21.1/m14-consumer.test.mjs",
     "test:m14:vertical": "node --test test/m14-vertical.test.mjs",

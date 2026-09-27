@@ -7,7 +7,6 @@ import {
   RESIZE_SETTLE_MS,
   TILE_SIZE_PX,
   calculateTileViewportLayout,
-  tileViewportLayoutsEqual,
 } from "@loomrealm-game/tile-presentation";
 
 const root = new URL("../", import.meta.url);
@@ -44,7 +43,7 @@ test("M14 workspace identity and dependency direction are explicit", async () =>
   assert.equal(TILE_SIZE_PX, 32);
   assert.equal(RESIZE_SETTLE_MS, 100);
   assert.equal(typeof calculateTileViewportLayout, "function");
-  assert.equal(typeof tileViewportLayoutsEqual, "function");
+  assert.deepEqual(Object.keys(await import("@loomrealm-game/tile-presentation")), ["RESIZE_SETTLE_MS", "TILE_SIZE_PX", "calculateTileViewportLayout"]);
 });
 
 test("framework packages never acquire reverse game/example dependencies", async () => {

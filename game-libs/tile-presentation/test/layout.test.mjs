@@ -4,7 +4,6 @@ import {
   RESIZE_SETTLE_MS,
   TILE_SIZE_PX,
   calculateTileViewportLayout,
-  tileViewportLayoutsEqual,
 } from "@loomrealm-game/tile-presentation";
 
 const cases = [
@@ -66,12 +65,4 @@ test("calculateTileViewportLayout rejects invalid and overflowing inputs", () =>
     [0, 480], [-1, 480], [640, Number.NaN], [640.5, 480], [640, 24],
     [640, 480, 0], [640, 480, 3, 2], [640, 480, 14, 33, Number.MAX_SAFE_INTEGER],
   ]) assert.throws(() => calculateTileViewportLayout(...args));
-});
-
-test("tileViewportLayoutsEqual compares the viewport identity used by resize settlement", () => {
-  const original = calculateTileViewportLayout(640, 480);
-  assert.equal(tileViewportLayoutsEqual(original, original), true);
-  assert.equal(tileViewportLayoutsEqual(original, calculateTileViewportLayout(640, 480, 1, 1)), true);
-  assert.equal(tileViewportLayoutsEqual(original, calculateTileViewportLayout(641, 480)), false);
-  assert.equal(tileViewportLayoutsEqual(original, calculateTileViewportLayout(640, 481)), false);
 });

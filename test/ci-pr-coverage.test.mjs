@@ -28,6 +28,7 @@ test("M13 canonical chain remains intact and its PR suite equals the exclusive M
 test("M14 canonical chain remains intact and its PR suite contains every exclusive M14 check", () => {
   assert.equal(scripts["test:m14"], "npm run test:m13 && npm run test:m14:pr");
   assert.equal(scripts["test:m14:pr"], `npm run build:m14 && ${m14Only}`);
+  assert.equal(scripts["test:m14:pack"], "npm pack -w @loomrealm-game/tile-presentation -w @loomrealm-game/map --dry-run");
   assert.ok(scripts["build:m14"].indexOf("-w @loomrealm-game/tile-presentation") < scripts["build:m14"].indexOf("-w @loomrealm-game/map"));
   assert.ok(scripts["build:m14"].includes("-w @loomrealm-game/map"));
 });

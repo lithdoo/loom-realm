@@ -796,7 +796,6 @@ Battle 不通过依赖 `@loomrealm-game/map` 来获得这些能力。
 TileViewportLayout
 TILE_SIZE_PX = 32
 calculateTileViewportLayout(width, height)
-tileViewportLayoutsEqual(a, b)
 RESIZE_SETTLE_MS = 100
 ```
 

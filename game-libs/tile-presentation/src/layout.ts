@@ -39,7 +39,7 @@ export function calculateTileViewportLayout(
   const barHeight = windowHeight < 480 ? 24 : windowHeight < 720 ? 32 : 48;
   const contentWidth = windowWidth;
   const contentHeight = windowHeight - barHeight;
-  if (contentHeight <= 0) throw new RangeError("Map content height must be positive");
+  if (contentHeight <= 0) throw new RangeError("Tile viewport content height must be positive");
 
   const rawColumns = Math.ceil(contentWidth / tileSize);
   const rawRows = Math.ceil(contentHeight / tileSize);
@@ -50,12 +50,12 @@ export function calculateTileViewportLayout(
   const logicalWidth = columns * tileSize;
   const logicalHeight = rows * tileSize;
   if (!Number.isSafeInteger(logicalWidth) || !Number.isSafeInteger(logicalHeight)) {
-    throw new RangeError("Map logical dimensions exceed the safe integer range");
+    throw new RangeError("Tile viewport logical dimensions exceed the safe integer range");
   }
   const scaleX = contentWidth / logicalWidth;
   const scaleY = contentHeight / logicalHeight;
   if (![scaleX, scaleY].every((value) => Number.isFinite(value) && value > 0)) {
-    throw new RangeError("Map scale is not renderable");
+    throw new RangeError("Tile viewport scale is not renderable");
   }
 
   return Object.freeze({
@@ -71,8 +71,4 @@ export function calculateTileViewportLayout(
     scaleX,
     scaleY,
   });
-}
-
-export function tileViewportLayoutsEqual(left: TileViewportLayout, right: TileViewportLayout): boolean {
-  return left.windowWidth === right.windowWidth && left.windowHeight === right.windowHeight;
 }
