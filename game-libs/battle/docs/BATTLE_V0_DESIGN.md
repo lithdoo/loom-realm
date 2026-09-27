@@ -229,7 +229,7 @@ protection      命中后的有限免疫区间
 4. headless Simulation Runtime（clock + scheduler + event queue + reducer）
 5. DecisionPort + Mock/Script Decision
 6. TEST_MATRIX 全部 frozen-rule 场景
-7. 渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression PASS
+7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. PresentationPort + Presentation（直接依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
 10. real LLM Decision Adapter + Guidance / Host E2E

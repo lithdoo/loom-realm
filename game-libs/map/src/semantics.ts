@@ -1,3 +1,7 @@
+import { RESIZE_SETTLE_MS, TILE_SIZE_PX } from "@loomrealm-game/tile-presentation";
+
+export { RESIZE_SETTLE_MS, TILE_SIZE_PX } from "@loomrealm-game/tile-presentation";
+
 export type Direction = 2 | 4 | 6 | 8;
 
 export interface ProjectedTable {
@@ -107,7 +111,6 @@ export const WALK_DURATION_MS = 250;
 /** PROJECT-DECISION-PROVISIONAL: not a vanilla RGSS measurement. Shared by Runtime and Browser via motion.durationMs. */
 export const JUMP_DURATION_MS = 400;
 export const JUMP_PEAK_RULE = "distancePx * 3 / 8";
-export const TILE_SIZE_PX = 32;
 export const TILE_SIZE = TILE_SIZE_PX;
 export const LEGAL_BRIDGE_LEVELS = Object.freeze([0, 2] as const);
 export type BridgeLevel = 0 | 2;
@@ -115,7 +118,6 @@ export const VIEW_DATA_GUARD = 196_608;
 export const DEFAULT_VIEWPORT = Object.freeze({ width: 640, height: 480 });
 export const MIN_VIEWPORT = Object.freeze({ width: 320, height: 240 });
 export const MAX_VIEWPORT = Object.freeze({ width: 1920, height: 1080 });
-export const RESIZE_SETTLE_MS = 100;
 
 export type ViewportSize = Readonly<{ width: number; height: number }>;
 export type LogicalViewport = Readonly<{

@@ -10,6 +10,7 @@ on:
     paths:
       - .github/workflows/rpgmap-v1.yml
       - game-libs/map/**
+      - game-libs/tile-presentation/**
       - examples/essentials-v21.1/**
       - examples/essentials-v21.1-local/**
       - tools/fixtures/essentials-v21.1/**
