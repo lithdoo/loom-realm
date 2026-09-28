@@ -702,7 +702,7 @@ RenderDomain (zIndex = 0)
 规则：
 
 - root 永远只有 `battle:view`；
-- actor key 只由 `actorId` 构造，不含 ally/enemy slot；
+- actor key 只由 `actorId` 构造，不含 ally/enemy slot；`ActorId` 的 1..115 UTF-8 byte Contract 保证 `battle:actor:<actorId>` 不超过 Renderer 128-byte node-key 上限；
 - actor children 按 actorId 字典序稳定排列；
 - `battle:effects` 位于所有 actor node 之后；
 - `battle:hud` 最后；
@@ -979,6 +979,35 @@ Map 小于 logical viewport 时 camera 对应轴固定为 0；Browser 使用 Map
 
 Camera 只消费 Projection/Map/viewport 视觉事实，不反向产生 gameplay fact。
 
+### 14.2.4 Renderer protocol capacity — FROZEN
+
+Battle Presentation 必须在调用 RenderDomain 前做容量 preflight，不把 Renderer hard limit 留给偶发运行时错误。当前 Render protocol 的关键上限为：
+
+```text
+RenderNode key UTF-8 bytes <= 128
+single node RenderData JSON <= 262144 bytes
+whole render message <= 1048576 bytes
+RenderNode count <= 16384
+```
+
+v0 使用与现有 Map 相同方向的保守 guard：
+
+```text
+serialized BattleViewRenderData < 196608 bytes
+serialized initial RenderDomain state / one update candidate < 1000000 bytes
+```
+
+规则：
+
+- `ActorId` Contract 已保证 actor RenderNode key 不超 128 bytes；
+- view 的 tile projection 仍使用 §14.3 冻结的“可视范围四周扩 1 tile”窗口，不允许为了塞进 payload 而静默缩成 0 margin；
+- v0 不引入 tile chunking、多 RenderNode 分片、streaming 或 silent truncation；
+- first render 若 required view/state 无法通过容量 guard，必须在创建 RenderDomain 前以 `PRESENTATION_COMMIT_FAILED` 失败；
+- subsequent Projection/resize 若 candidate update 无法通过容量 guard，必须整次 commit 失败并由 Runtime 走已冻结的 Presentation fatal → Battle `failure` 路径；不得提交半个 visual epoch；
+- 实现可以使用更严格但不得更宽松的内部预检，只要不改变上述 observable failure semantics。
+
+这样“不启用 viewport clamp”与底层 Renderer capacity 可以同时成立：正常尺寸直接渲染，超出协议承载能力则明确失败，而不是由 agent 自行发明新的分页/分块架构。
+
 ### 14.3 lr-battle-view — FROZEN
 
 `lr-battle-view` 负责 Map/Tileset/Autotile、logical viewport、camera/world transform、tile depth 与 named slots。
@@ -1043,6 +1072,8 @@ Tile projection policy：
 - Browser tile layer CSS z-index = `tileDepth * 2`；
 - Battle v0 不应用 RPGMap bridgeLevel 特例；
 - regular/autotile blit 与 Integration 中现有 Map resource format 一致；
+- Autotile animation cadence 与当前 Map Browser 保持一致：base animation quantum = **50 ms**；资源 key 文件名末尾存在 `[N]`（允许括号内空白）时，每帧时长 = `N * 50 ms`，其中 N 必须是正 safe integer；没有该 suffix 时默认 `5 * 50 = 250 ms`；匹配到但 N=0/非 safe integer 属于该 Autotile visual preparation failure，按 Browser fallback/diagnostic policy 处理，不修改 gameplay；
+- Autotile frame progress 使用 Presentation-local visual time；pause 冻结、resume 续播，不用 Battle Tick 反向驱动画面；
 - world layer logical transform 为 `origin - camera`；外层再按 `scaleX/scaleY` 映射到 physical content；
 - `originX = max(0, (logicalWidth - mapWidth*32)/2)`，Y 同理；
 - `slot="world"` 位于该 world transform 内；
@@ -1173,6 +1204,14 @@ worldY = tile.y * 32 + 16
 anchor = image center
 ```
 
+v0 effect stacking 也固定：
+
+- `lr-battle-effects` 是 **world-space overlay plane**，跟随与 Actor 相同的 `origin - camera` transform 和外层 scale；
+- transient BattleEffect **永远绘制在所有 battlefield tile 与 actor visual 之上**；
+- effect 不参与 tile priority / actor logical-depth 排序，也不会被高 priority tile 遮挡；
+- HUD 仍在独立 `slot="hud"` 中，不属于该 world overlay；
+- 具体 CSS z-index 数字是 Browser implementation detail，但必须满足上述稳定 ordering，不得根据 effect/actor 输入顺序改变。
+
 timing 来自 initialize 已解析的 `struct.BattleEffect`：
 
 ```text
@@ -1194,7 +1233,7 @@ Browser 内部维护 `Map<effectId, ActiveVisualEffect>`：
 
 opacity 使用 linear fade：0 → maxOpacity → hold → 0。
 
-### 14.6 普通 Battle 操作只更新 data### 14.6 普通 Battle 操作只更新 data
+### 14.6 普通 Battle 操作只更新 data
 
 例如双方同时开始移动，Tree 不变，只更新同一 visual epoch 下的节点 data：
 
@@ -1461,7 +1500,11 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 27. initialize twice / pre-init render 等非法状态按 §6.1 失败；CLOSED 后 close/render race-safe；
 28. same tick conflicting Projection fail，older tick ignore，same tick equal replay no visualEpoch increment；
 29. Character/Tileset/Autotile/BattleEffect Browser decode failure只走 placeholder/skip，不改变 gameplay；
-30. 普通 32px 与高于 32px Character 都按 Map-compatible logical depth + odd character stack value 排序，priority tile 使用 even tile stack value，遮挡关系稳定。
+30. 普通 32px 与高于 32px Character 都按 Map-compatible logical depth + odd character stack value 排序，priority tile 使用 even tile stack value，遮挡关系稳定；
+31. ActorId 位于 115 UTF-8 bytes 上界时 `battle:actor:<actorId>` 仍可通过 Renderer key validation；超出上界在 Battle/Scene validator 阶段 reject，不进入 RenderDomain；
+32. BattleEffect world overlay 在普通 tile、priority tile 与 actor visual 之上稳定绘制，camera/resize 后仍保持 world anchor；HUD 不受该 overlay 影响；
+33. required visible tile window 导致 `BattleViewRenderData` 或完整 state/update 超出 §14.2.4 guard 时，整次 commit 以 `PRESENTATION_COMMIT_FAILED` 失败，不 clamp viewport、不截断 tiles、不做 partial visualEpoch；
+34. Autotile 无 suffix 时每帧 250 ms，`[N]` suffix 使用 `N*50 ms`；pause/resume 冻结/恢复同一 visual timeline。
 
 ## 19. Freeze status / NON-GOALS
 
@@ -1473,7 +1516,7 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 - dynamic roster spawn/despawn：NON-GOAL；
 - dynamic zoom / camera animation / cinematic focus：NON-GOAL；
 - outcome-specific BattleEffect image、projectile、particle、shader：NON-GOAL；
-- viewport clamp/default/min/max normalization：v0 明确不启用；
+- viewport clamp/default/min/max normalization：v0 明确不启用；超出 Renderer capacity 时按 §14.2.4 明确失败，不以 clamp/chunking 兜底；
 - 进一步抽取 shared tile/character browser painter：future refactor；
 - Host/Runtime Control suspend/resume 如何接到 `battle.pause/resume`：Integration OPEN，但 Presentation 的 pause/resume 行为本身已冻结；
 - Guidance / real LLM provider wiring：不属于 Presentation implementation。
