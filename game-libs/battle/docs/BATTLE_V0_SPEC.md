@@ -104,7 +104,7 @@ Runtime 字段统一使用 **direction**；不得再用 `facing` 表示同一个
 
 v0 固定为双方各一个 Actor，每个 Actor 占一个格。
 
-BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle。两个 Actor 的 identity/side 必须来自显式字段，不得由 `actors[0] / actors[1]` 的数组位置推导。
+BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle，并且两个 Actor 必须恰好包含 **1 个 `ally` + 1 个 `enemy`**。两个 Actor 的 `actorId` 必须唯一；identity/side 必须来自显式字段，不得由 `actors[0] / actors[1]` 的数组位置推导。
 
 实现内部仍遵循 `ARCH-006` 的 actorId-addressed collection；“集合可容纳 N Actor”只是降低未来版本迁移成本，不代表 v0 接受 N>2。
 
@@ -241,6 +241,8 @@ dueTick?
 ```
 
 Simulation 只用映射后的 Battle time 判断 deadline / dueTick。如果 `completedAtBattleTimeMs <= deadlineBattleTimeMs`，即使宿主 callback 更晚才被处理，也算按时完成；timeout/ready 不能由 callback 先后顺序决定。
+
+`completedAtMonotonicMs` 必须属于 **BattleClock 用于 wall-time→Battle-time 映射与 pause history 的同一 raw monotonic time domain**。Decision provider/worker/远端服务自己的 `performance.now()`、进程启动时间或不可比较的时钟值不得直接作为该字段返回；若 completion 发生在不同进程/服务，Host/Adapter 必须先把完成事实映射到 BattleClock 可解释的受信 timebase。
 
 ### DEC-002 — 旧 generation 无提交权 — FROZEN
 
