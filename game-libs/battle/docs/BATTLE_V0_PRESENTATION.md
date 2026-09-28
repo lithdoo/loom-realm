@@ -906,7 +906,7 @@ Battle 可以复用/抽取 Map 已验证的纯视觉概念，例如 32×32 tile 
 
 ### 14.4 lr-battle-actor
 
-v0 固定两个 Actor，因此两个 actor node 从初始化到 close 都保持稳定。
+v0 合法 Scene roster 恰好包含两个 Actor，但 renderer 不拥有“两个固定 actor slot”。初始化时对 `scene.actors` 中每个唯一 `actorId` 创建一个 actor node；roster 在本 session 内保持稳定，因此这些 actor node 从 initialize 到 close 都保持结构稳定。
 
 概念 data：
 
@@ -1062,7 +1062,7 @@ domain.update({
 })
 ```
 
-这里两个 Actor 可以拥有不同的 actor-local `motion.id`。
+这里每个 Actor 都拥有自己的 actor-local `motion.id`；v0 恰好有两个 Actor，因此可以同时存在两个不同 motion identity。
 
 `move_complete`、turn、HP change、death、move interruption 同样都应该优先表现为 node.data transition，而不是 remove/insert Actor node。
 

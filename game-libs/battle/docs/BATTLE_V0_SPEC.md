@@ -66,6 +66,8 @@ Actor 数量限制属于 Battle Rule / validation，不属于底层存储形状�
 
 这条规则**不开放多人 v0**：`BATTLE-001` 仍要求 v0 BattleConfig 恰好两个 combat Actor。未来若加入组队或 FFA，需要新版本规则明确 hostility/team、Observation、terminal/result 等语义，但不得因此要求重写 Battle clock、event queue、actor-addressed state 或 Presentation actor collection。
 
+N Actor-ready 只表示“初始化 roster 的 cardinality 不写死进基础结构”；它不自动引入 Battle 中途 spawn/despawn。动态 roster mutation 若未来需要，必须作为独立版本规则和 Render Tree structural-change contract 明确定义。
+
 ## 2. Canonical terminology
 
 整套 Battle 文档统一使用以下术语：
