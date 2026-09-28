@@ -292,7 +292,7 @@ stale generation fencing、Plan validation、`PLAN-006` 的一次 correction ret
 
 Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
 
-## 6. Decision Protocol 与 PlanSubmission## 6. Decision Protocol 与 PlanSubmission
+## 6. Decision Protocol 与 PlanSubmission
 
 ### PLAN-002 — Decision 读取 Observation + Constraints — FROZEN
 

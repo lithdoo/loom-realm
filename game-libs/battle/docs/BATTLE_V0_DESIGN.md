@@ -53,7 +53,7 @@ Contracts 不重新定义玩法规则。
 - Presentation / camera / Browser 生命周期；
 - BattleEffect 表现；
 - Mock / Script / Manual / Random / LLM Decision Adapter；
-- LLM 完成时间、授权、cancel/error 集成问题；
+- LLM Adapter 授权、provider timeout/cancel/error 集成问题；
 - 玩家 Guidance；
 - Frame / Host / Abort；
 - pause/background；
@@ -171,7 +171,7 @@ protection      命中后的有限免疫区间
 - v0 双 Actor 同时行动，无传统回合；Actor cardinality 是 v0 rule，跨层/Runtime 以 actorId collection 建模，不把 1v1 写死成 actorA/actorB slots；
 - 1 Tick = 200 ms；
 - overdue Tick 必须逐 Tick 归约；
-- LLM/Decision 实际耗时计入 Battle 时间；
+- Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；真实 wall-clock latency 不直接进入 gameplay timing；
 - one valid Decision Request per Actor generation；Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；
 - Decision 直接生成结构化 `PlanSubmission`；
 - `path` 不含起点、四方向、默认 `maxPathSteps=6`；

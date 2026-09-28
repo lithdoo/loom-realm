@@ -373,7 +373,7 @@ v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-cl
 - model/service limit；
 - credential/authorization wiring。
 
-## 7. Player Guidance## 7. Player Guidance
+## 7. Player Guidance
 
 未来玩家作为“训练师”给我方下一次 Decision 提供临时 Guidance。
 

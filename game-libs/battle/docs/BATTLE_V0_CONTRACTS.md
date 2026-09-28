@@ -683,7 +683,7 @@ Provider/network timeout 属于 Decision implementation 的 infrastructure polic
 
 Decision Inbox 是 Simulation internal runtime structure，不属于 Presentation Contract，也不作为 `BattleEvent(dueTick)` 序列化。
 
-## 17. ReplayRecord## 17. ReplayRecord
+## 17. ReplayRecord
 
 Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 

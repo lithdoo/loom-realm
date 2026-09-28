@@ -36,7 +36,7 @@
 | T-TIME-009 | DEC-001, TIME-004 | Battle pause 时 LLM completion 返回并进入 inbox | pause 中不消费；resume 后第一个实际 reducer Tick 才可消费 |
 | T-TIME-010 | DEC-001, REPLAY-001 | 两次真实运行的 LLM wall-clock latency 不同，但 Replay 记录相同 consumed/accepted Tick | Replay 不依赖 completion timestamp，不重新调用 LLM，按记录 Tick 复现 Plan 生效 |
 
-## 3. PlanSubmission## 3. PlanSubmission
+## 3. PlanSubmission
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
@@ -162,7 +162,7 @@
 | T-PRES-010 | ARCH-003 | Tick N 发布 effectStarts=[effect-1]，Tick N+1 effectStarts=[] | effect-1 继续按 Presentation-local visual timing 播放并自行 cleanup；Simulation 不维护 active visual effect |
 | T-PRES-011 | ARCH-003 | 同一个 effectId 因重复 render 再次出现 | 不重复创建 transient visual |
 | T-PRES-012 | ARCH-003, ARCH-005 | initialize 完成后 first render | 只创建一次完整 RenderDomain；root/actor/effects/HUD key、tag、slot 与 FROZEN Render Tree 完全一致 |
-| T-PRES-013 | ARCH-006 | Scene actor 输入顺序交换 | actor RenderNode 仍按 actorId 字典序稳定排列，identity 不随输入顺序改变 |
+| T-PRES-013 | ARCH-006 | Scene actor 输入顺序交换 | actor RenderNode 仍按 Contracts 定义的 ActorId ECMAScript ordinal string order 稳定排列，identity 不随输入顺序改变 |
 | T-PRES-014 | ARCH-003 | Actor active movement，同时 viewport resize/camera 改变 | Actor data 只含 world motion，不含 screenX/fromScreenX；motionId/fingerprint/elapsed 不重启，只改变 parent transform |
 | T-PRES-015 | ARCH-003 | 两个 alive Actor 分处地图两点 | camera 使用 movement.to-or-tile target 的 bounding midpoint，clamp Map bounds；无 zoom/animation |
 | T-PRES-016 | ARCH-003 | Map 小于 logical viewport | 对应 camera 轴为 0，并通过 originX/originY 在 logical viewport 居中 |
