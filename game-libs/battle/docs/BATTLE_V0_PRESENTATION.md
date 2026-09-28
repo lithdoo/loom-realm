@@ -304,7 +304,7 @@ type BattleActorRenderInit = {
 
 Actor collection 的语义要求：
 
-- `actorId` 唯一且是唯一 identity；
+- 每个 `actorId` 必须满足 Contracts 的 ActorId 非空/Unicode/1..115 UTF-8 byte 约束，且 roster 内唯一；
 - collection 顺序不表示 ally/enemy 或优先级；
 - v0 Simulation 按 `BATTLE-001` 只产生两个 Actor；
 - Presentation 本身按 collection 建节点/更新，不把两个固定 slot 写进 renderer；合法 v0 Simulation 仍只会提供两个 Actor；
@@ -328,7 +328,7 @@ minCoefficient
 `initialize(scene)` MUST：
 
 ```text
-validate scene identity / unique actorId / stable effectIds
+validate scene identity / ActorId bounds+uniqueness / stable effectIds
     ↓
 创建 session AbortController，并与 frame.signal 共同作为资源取消 authority
     ↓
