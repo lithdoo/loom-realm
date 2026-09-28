@@ -240,11 +240,14 @@ NEW
 INITIALIZING
  │ success
  ▼
+INITIALIZED
+ │ first render()
+ ▼
 READY ⇄ PAUSED
  │        │
  └── close() ──→ CLOSED
 
-initialize failure / close during initialize
+initialize failure / first-render failure / close during initialize
 → cleanup
 → CLOSED
 ```
@@ -252,10 +255,12 @@ initialize failure / close during initialize
 规则：
 
 - `initialize()` 只允许从 NEW 调用；重复调用 MUST throw；
+- first `render()` 只允许从 INITIALIZED 调用并负责创建唯一 RenderDomain；
+- subsequent `render()` 只允许从 READY/PAUSED 调用；
 - `render()` 在 NEW/INITIALIZING 调用 MUST throw；
 - `pause()`：READY → PAUSED；PAUSED 重复调用 no-op；
 - `resume()`：PAUSED → READY；READY 重复调用 no-op；
-- `pause()/resume()` 在 NEW/INITIALIZING 属于 programmer error；CLOSED 后 no-op；
+- `pause()/resume()` 在 NEW/INITIALIZING/INITIALIZED 属于 programmer error；CLOSED 后 no-op；
 - `close()` 可从任何状态调用且 MUST idempotent；
 - CLOSED 后 `render()` no-op，用于吸收 teardown race；不得重新创建 RenderDomain；
 - close during INITIALIZING 必须使所有迟到资源 Promise / viewport callback 失去提交权；
@@ -488,7 +493,8 @@ custom elements
 
 | Simulation 已决定的事实 | Presentation 输入 | Presentation 行为 |
 | --- | --- | --- |
-| Battle 初始化 | `initialize(scene)` | 建立地图、Actor、HUD 等初始视图 |
+| Battle 初始化 | `initialize(scene)` | 加载/解析静态资源并等待首次 viewport；不创建半完整 RenderDomain |
+| 初始 Projection | first `render(projection)` | 创建唯一完整 RenderDomain 与稳定 view/actor/effects/HUD tree |
 | Actor 原地 turn | 新 Projection 的 `direction` 改变 | 更新 Sprite 朝向 |
 | `move_start` | committed `tile=origin` + `movement={from,to,...}` | 开始视觉插值 |
 | movement 进行中 | 同一 `motionId` 仍存在 | 继续视觉插值 |
@@ -540,7 +546,20 @@ Presentation → visualEpoch
 Actor movement → actor-local motionId
 ```
 
-`visualEpoch` 不出现在 RenderProjection 中。Presentation 每次把 Simulation Projection、viewport resize 或 camera/layout 变化提交给 RenderDomain 时，自行推进 `visualEpoch`。
+`visualEpoch` 不出现在 RenderProjection 中。Presentation 自己维护一个正 safe integer counter：
+
+```text
+first render / createRenderDomain → visualEpoch = 1
+accepted newer-tick Projection   → visualEpoch++
+accepted resize commit           → visualEpoch++
+pause READY→PAUSED               → visualEpoch++
+resume PAUSED→READY              → visualEpoch++
+same-tick idempotent replay      → no commit / no increment
+stale older tick                 → no commit / no increment
+close                            → no commit
+```
+
+每个 visual commit MUST 在 view / all actors / effects / HUD 使用同一个 visualEpoch。counter 若无法安全递增属于 `PRESENTATION_COMMIT_FAILED`.
 
 Actor movement identity 则属于各 Actor 自己：
 
@@ -633,7 +652,7 @@ Frame abort / Battle cancel / fatal Presentation failure 由 Runtime 进入即�
 
 ## 13. 与 Subsystem 的实际联动
 
-建议调用方式直接参考 Map：
+v0 调用方式固定为：
 
 ```ts
 const presentation =
@@ -696,7 +715,7 @@ RenderDomain (zIndex = 0)
 - `slot="world"`：位于 battlefield logical world transform 内；
 - `slot="hud"`：位于 footer，不接受 camera/world transform。
 
-### 14.1 为什么树必须稳定### 14.1 为什么树必须稳定
+### 14.1 为什么树必须稳定
 
 当前 `@loomrealm/subsystem` 的 `RenderDomain.update()` surface 只支持更新**已有节点**的 attrs/data：
 
@@ -832,7 +851,7 @@ timer fires:
 - resize 不产生 Simulation input，不改变 tick/gameplay state；
 - 首次 viewport 不走 100 ms debounce。
 
-### 14.2.1 Footer 的 Battle 内容### 14.2.1 Footer 的 Battle 内容
+### 14.2.1 Footer 的 Battle 内容
 
 Map 的 footer 目前由 `lr-map-view` 自己在 Shadow DOM 中实现，并不是独立 RenderDomain node。Battle **只复用相同的 footer 几何/layout policy**，而采用自己的稳定逻辑 HUD node/slot 来承载 Battle HUD 内容：
 
@@ -1276,51 +1295,32 @@ Browser implementation 可以拒绝/延后组合不一致的候选数据，从�
 
 这仍然只是 Presentation consistency，不具有 gameplay commit authority。
 
-### 14.9 Map 可复用边界
+### 14.9 Map 复用边界 — FROZEN
 
-可以优先复用或抽取的纯表现能力：
-
-```text
-Map viewport clamp/default/min/max
-Map calculateLayout policy
-Map footer/barHeight geometry
-Map resize settlement semantics（100 ms 只是 settled 连续 resize 的参数，不代表全部状态机）
-32×32 tile geometry
-Tileset projection
-Autotile projection
-tile depth sorting
-resource identity
-4×4 Character atlas crop
-pixelated rendering
-viewport scaling
-```
-
-可以参考但 Battle 自己定义：
+Battle v0 的复用边界已经确定：
 
 ```text
-camera policy
-Battle projection window
-Actor placement
-actor-local concurrent motion
-visual epoch policy
-effect lifecycle
-HUD content/styling
+MUST 直接复用
+- @loomrealm-game/tile-presentation:
+  TILE_SIZE_PX
+  RESIZE_SETTLE_MS
+  TileViewportLayout
+  calculateTileViewportLayout
+
+Battle Browser 自己实现纯视觉
+- 32×32 Tileset blit
+- Autotile block/cell projection
+- tile depth
+- 4×4 Character atlas crop
+- pixelated rendering
+
+MUST NOT 依赖
+- @loomrealm-game/map Runtime
+- lr-map-view / lr-map-sprite data contract
+- RPGMap movement / Bridge / Transfer / NPC / MapAction / player input
 ```
 
-不得复用为 Battle authority：
-
-```text
-RPGMap movement semantics
-bridgeLevel gameplay
-Transfer
-NPC event logic
-MapAction
-player input movement
-Map Browser motion completion
-```
-
-实现阶段如果发现 tile/character rendering primitive 值得共享，应独立抽取公共视觉 primitive；不应为了 Battle v0 强迫重构 Map，也不应让 Battle 直接绑定 `lr-map-view / lr-map-sprite` 的 RPGMap-specific data contract。
-
+进一步共享 tile/character browser painter 属于 future refactor，agent 在本 v0 实现中不得把它变成前置重构。
 
 ## 15. Browser 实现 — FROZEN
 
@@ -1355,7 +1355,7 @@ Content record/resource identity 在 subsystem Presentation initialize 阶段无
 
 Battle MUST NOT import/bind `lr-map-view / lr-map-sprite` 或 RPGMap Runtime contract。
 
-## 16. FROZEN 业务组装## 16. 建议的业务组装
+## 16. FROZEN 业务组装
 
 业务 Subsystem MUST 只做 composition：
 
@@ -1421,7 +1421,7 @@ Battle Browser Presentation / RenderDomain implementation 的 shared primitive G
 
 这是一项**渲染层实现前置任务**，不是 Battle Core gameplay 的前置任务。headless Simulation、DecisionPort 和 frozen-rule deterministic tests 不需要等待它。
 
-该 Gate 已完成；后续仍不应在 Battle package 内复制 Map `calculateLayout` 实现。Battle Presentation 仍是 design-only，尚未实现。
+该 Gate 已完成；Battle package MUST 直接消费 shared layout implementation，不复制 `calculateLayout`。Presentation specification 已冻结，但代码尚未实现。
 
 ## 18. 最低测试要求
 
@@ -1429,7 +1429,7 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 
 至少覆盖：
 
-1. synthetic `BattleSceneInit` 可以创建 Map/Actor 初始 RenderDomain；
+1. synthetic `BattleSceneInit` initialize 只准备资源；随后 first RenderProjection 创建一次完整 Map/Actor/HUD/Effects RenderDomain；
 2. direction 改变只改变 visual direction；
 3. movement Projection 创建对应 motion；
 4. motion 正常结束后收敛 destination；
@@ -1447,9 +1447,17 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 16. 任意 Actor 都有独立 actor-local motion identity；v0 两个 Actor 可在同一 Presentation-local visualEpoch 拥有不同 motionId 并同时插值；
 17. Presentation projector/render-tree 的非 v0 结构性 fixture 使用 4 个唯一 actorId 时，可按 collection 生成 4 个 actor node/HUD entry，且不存在固定 ally/enemy slot；public v0 BattleConfig 仍由 BATTLE-001 限制为 2；
 18. 重复提交相同 effectId 不重复创建 transient visual；
-19. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
+19. first render 后所有普通运行/resize/pause/resume 路径只使用 domain.update()，不调用 domain.replace()；
 20. 正常 Battle terminal 发布 final Projection 后保持最终画面，直到 Application 调用 `battle.close()`、再由 Runtime 调用 Presentation close；cancel/abort 由 Runtime 立即 cleanup；
-21. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
+21. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer；
+22. Render Tree key/tag/attrs 与 §14 完全一致，actor children 按 actorId 稳定排序；
+23. Actor Browser data 不出现 screenX/screenY/fromScreenX/fromScreenY；resize/camera 只改 parent transform；
+24. camera 对 alive actor（无 alive 时全部 actor）使用 movement.to-or-tile midpoint 算法并 clamp map bounds；无 zoom/animation；
+25. initial viewport 不 clamp；后续 resize 使用 trailing-edge 100 ms，paused/moving/effect 中均可 commit；
+26. hit effect maxOpacity=1.0、immune=0.6、miss/invalid 不创建 visual；四种 outcome 都消费 effectId；
+27. initialize twice / pre-init render 等非法状态按 §6.1 失败；CLOSED 后 close/render race-safe；
+28. same tick conflicting Projection fail，older tick ignore，same tick equal replay no visualEpoch increment；
+29. Character/Tileset/Autotile/BattleEffect Browser decode failure只走 placeholder/skip，不改变 gameplay。
 
 ## 19. Freeze status / NON-GOALS
 
@@ -1500,18 +1508,3 @@ Definition of Done：
 - package build/test/browser assets 可被 workspace 正常消费。
 
 若实现发现规范无法满足，必须先提交 spec amendment；不得在代码中引入未记录的替代 architecture。
-
-## 19. 仍待冻结的 Presentation OPEN
-
-本文不关闭以下现有 OPEN：
-
-- `BattleSceneInit / RenderProjection / SkillEffectProjection` exact serialization / RenderNode data Schema；`visualEpoch` ownership 与 one-shot `effectStarts` semantics 已确定；
-- BattleEffect exact anchor/timing/outcome visuals；
-- Browser node/effect cleanup exact contract；
-- Render Tree 各 node 的 exact data Schema 与 Browser custom-element tag/key；actorId collection、稳定 HUD logical slot/node、Map-compatible footer geometry 与 current/max HP 内容已确定；
-- viewport clamp/default/min/max 是否升级为 Map/Battle 共用的 Presentation 入口规则；
-- 除首批 layout/tile primitive 外，character-atlas 等纯视觉 primitive 是否继续进入 `@loomrealm-game/tile-presentation`；
-- Host/Runtime Control suspend/resume 到 Battle pause/resume 的 exact wiring；
-- 多 Battle 同屏时的 viewport region / layout ownership。
-
-这些问题必须在实现前或实现过程中显式冻结，不能由 Browser implementation 隐式定义。

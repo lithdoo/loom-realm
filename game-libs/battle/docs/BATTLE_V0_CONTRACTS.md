@@ -238,7 +238,7 @@ type BattleEffectContent = {
 
 hit/immune/miss/invalid 是否创建 transient visual 的固定 policy 在 Presentation/Integration FROZEN 规范中定义。
 
-## 5. BattleConfig## 5. BattleConfig
+## 5. BattleConfig
 
 概念：
 
@@ -515,11 +515,9 @@ type SkillResolveResult =
 
 ## 14. Presentation 数据边界
 
-### 14.1 BattleSceneInit
+### 14.1 BattleSceneInit — FROZEN
 
-Presentation 初始化必须能够只依赖纯数据描述，而不要求知道 Simulation 或 Decision 的 concrete implementation。
-
-概念：
+Presentation 初始化只依赖纯数据描述，不要求知道 Simulation 或 Decision concrete implementation。下面 shape 是 v0 exact Presentation ABI：
 
 ```ts
 type BattleSceneInit = {
@@ -621,7 +619,7 @@ type SkillEffectProjection = {
 - Presentation 不从该结构反推 damage、interrupt、death 或其他 gameplay transition；
 - hit/immune/miss/invalid 的 v0 可见性 policy 在 Presentation FROZEN spec 中固定。
 
-## 16. DecisionPort / DecisionTiming## 16. DecisionPort / DecisionTiming
+## 16. DecisionPort / DecisionTiming
 
 DecisionPort 的职责是“一次调用完成一次 attempt”，不拥有 Battle deadline / retry policy。
 
