@@ -177,7 +177,7 @@ Battle 不得把以下模块当作 Battle 权威：
 
 ## 3. Presentation 集成
 
-Presentation 的独立模块设计、Map 风格 Builder/Handler、Subsystem/RenderDomain 接入、session 生命周期与并发模型详见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档不覆盖本文件或 Contracts 中仍为 OPEN 的 exact Schema/API。
+Presentation 的规范性实现合同见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档当前状态为 **FROZEN FOR IMPLEMENTATION**，负责 Render Tree、Browser ABI、坐标/camera/viewport/effect/lifecycle 的 exact v0 行为；本 Integration 文档负责其外部 LoomRealm/Host 组合边界，不再把 Presentation exact ABI 留给实现自行决定。
 
 Presentation 只负责显示，并且必须可以脱离 Decision/Simulation concrete implementation 独立初始化与测试。
 
@@ -189,7 +189,7 @@ Presentation 只负责显示，并且必须可以脱离 Decision/Simulation conc
 - Character Sprite；
 - authoritative A→B step 的插值；
 - BattleEffect；
-- camera follow/focus/zoom；
+- v0 fixed camera framing（无 zoom/focusHint/camera animation）；
 - viewport/layout；
 - resource load/dispose 生命周期。
 
@@ -235,49 +235,57 @@ zoom
 focusHint
 ```
 
-v0 RenderProjection 不携带 camera focus hint。Presentation 根据 actor collection、Map、viewport 与自身 camera policy 计算 framing；collection 顺序不承载 camera priority。未来 N Actor 可以改变 framing 算法，而无需修改 Simulation Contract。
+v0 RenderProjection 不携带 camera focus hint。Presentation 按 FROZEN spec 使用 alive actors（若无 alive 则全部 actors）的 movement.to-or-tile bounding midpoint 计算固定 camera，并 clamp 到 Map bounds；无 zoom、camera animation。collection 顺序不承载 camera priority。未来版本可以改变 framing 算法，但必须先修订 Presentation spec，不修改 Simulation authority。
 
-## 4. BattleEffect 表现
+## 4. BattleEffect 表现 — FROZEN
 
-BattleEffect 是 Presentation-only Content。
+BattleEffect 是 Presentation-only Content。cross-layer 与 Browser 行为已经冻结，实施时不得重新选择另一套 effect model。
 
-v0 当前最小方向：
-
-- 一张 Graphics；
-- 一个 anchor；
-- 简单 fade-in / hold / fade-out；
-- 不预埋 projectile、particle、Shader、复杂 animation editor。
-
-资源 key 约定：
+Content：
 
 ```text
-resource.Graphics/BattleEffects/<EffectName>
+subject = struct.BattleEffect
+record key = effect id
+
+image.namespace = resource.Graphics
+image.key       = BattleEffects/<...>
+anchor          = tile-center
+timing          = fade_in_ticks / hold_ticks / fade_out_ticks
 ```
 
-Simulation 只输出 effect identity/result、逻辑目标位置（例如 tile/actor）与 startTick 等已经决定的 **one-shot effect start fact**；视觉 anchor、offset、fade timing、active-effect 状态与 cleanup 由 BattleEffect Content / Presentation 自己解析。后续 Tick 不需要为“仍在播放”重复发送同一 effect。
+Simulation 只输出 one-shot `effectStarts[]`：
 
-概念 Projection：
-
-```json
-{
-  "effectId": "effect-00012",
-  "sceneEpoch": 1,
-  "result": "hit",
-  "effect": "firebolt",
-  "tile": { "x": 4, "y": 3 },
-  "startTick": 120
+```ts
+type SkillEffectProjection = {
+  effectId: string
+  result: "hit" | "immune" | "miss" | "invalid"
+  effect: string
+  tile: GridPosition | null
+  startTick: number
 }
 ```
 
-### INTEGRATION-OPEN-002 — BattleEffect 视觉细节 — OPEN
+Presentation v0 policy：
 
-尚未冻结：
+```text
+hit
+→ tile 必须非 null
+→ 播放对应 BattleEffect
+→ max opacity = 1.0
 
-- exact anchor/timing Schema；
-- `immune` 是否有独立免疫视觉；
-- `miss` 是否播放空挥/落空效果；
-- `invalid` 是否完全无视觉；
-- Browser effect cleanup 生命周期。
+immune
+→ tile 必须非 null
+→ 播放同一 BattleEffect
+→ max opacity = 0.6
+
+miss / invalid
+→ 消费 effectId
+→ 不创建 visual
+```
+
+fade-in / hold / fade-out 使用 BattleEffect ticks × `tickDurationMs`；Browser 自己维护 ActiveVisualEffect、pause/resume elapsed time、natural cleanup。后续 Simulation Tick 不重复发送“仍在播放”的 effect，Browser 也不向 Simulation 回 ACK。
+
+Browser effect image decode/load 失败只跳过该 transient visual并可发 diagnostic；`struct.BattleEffect` record/资源 identity 在 initialize 阶段无法解析则属于 Presentation fatal，Battle 不启动。
 
 ## 5. Decision 实现类型
 
@@ -506,7 +514,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle 当前仍是 design-only。
+Battle Runtime/Presentation 代码当前仍未实现；但 Core gameplay 与 Presentation v0 implementation spec 已达到 FROZEN 状态。
 
 已知工程项：
 
@@ -519,26 +527,23 @@ Battle 当前仍是 design-only。
 ## 13. 推荐实施顺序
 
 ```text
-1. 冻结 BattleActor / BattleSkill / BattleEffect v1 serialization schema
-2. 冻结 BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance
-3. 实现 Content validator
-4. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
-5. 定义 DecisionPort，并用 Mock/Script Decision 注入 Simulation 验证完整 Battle
-6. 跑 frozen-rule deterministic Test Matrix
-7. 已完成渲染前置：建立 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`，抽取 Map 已验证的通用 tile viewport layout primitive，并让 Map 切换到 shared implementation + regression coverage
-8. 实现 BattleSceneInit / RenderProjection + 独立 PresentationPort/Presentation implementation，直接依赖 `@loomrealm-game/tile-presentation`
-9. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-10. 接真实 LLM Decision Adapter，再接 Guidance / Host
-11. 验证 package-lock / npm ci / unit / Browser E2E
+1. 完成其余非 Presentation Content/Contracts validator
+2. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
+3. 实现 frozen DecisionPort + Mock/Script Decision
+4. 跑 frozen-rule deterministic Test Matrix
+5. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
+6. 按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现 Presentation
+7. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
+8. 接真实 LLM Decision Adapter，再接 Guidance / Host
+9. 验证 package-lock / npm ci / unit / Browser E2E
 ```
 
-真实 LLM 不是验证 Simulation 正确性的前置条件。
+Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
 
 ## 14. Integration OPEN 汇总
 
 仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-002**：BattleEffect Schema / outcome visuals / cleanup。
 - **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership 已确定。
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
 - Runtime 开始后还需处理 package-lock / build 验证。

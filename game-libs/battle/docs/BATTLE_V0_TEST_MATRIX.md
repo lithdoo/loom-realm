@@ -1,8 +1,8 @@
 # Battle v0 测试矩阵
 
-> 状态：**Design only / Acceptance Matrix**。本文不重新定义规则；每个 Expected 必须能追溯到 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule ID。
+> 状态：**Core + Presentation FROZEN Acceptance Matrix；实现未完成**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
 >
-> OPEN Rule 只保留占位测试，冻结前不得断言具体结果。
+> 尚未冻结的真实 LLM provider、Guidance/Host wiring 不在本矩阵中被实现代码自行假设。
 
 ## 1. Architecture / Authority
 
@@ -150,7 +150,7 @@
 | --- | --- | --- | --- |
 | T-PRES-001 | ARCH-003 | Browser 掉帧 | Simulation result 不变 |
 | T-PRES-002 | ARCH-003 | Effect asset load fail | damage/result 不变，可发 diagnostic |
-| T-PRES-003 | ARCH-003 | camera zoom/focus 改变 | 不改 Simulation State |
+| T-PRES-003 | ARCH-003 | Presentation camera/viewport 重新布局 | 不改 Simulation State；v0 camera 无 zoom/focusHint/animation |
 | T-PRES-004 | STATE-001 | Sprite 插值位置 x=2.7 | Decision/Simulation 仍只看到 committed integer tile |
 | T-PRES-005 | ARCH-006, BATTLE-001 | 仅用 synthetic Presentation input 初始化 4 个唯一 actorId | Presentation 可创建 4 个 actor visual/HUD entry 且无固定 ally/enemy slot；这不使 v0 Simulation 接受 4 Actor |
 | T-PRES-006 | ARCH-003, ARCH-005 | Runtime 启动 Battle session | 先 await Presentation.initialize，再 render initial Projection，之后才启动 200ms Battle clock；SceneInit 不重复维护 tile/direction/HP 初值 |
@@ -159,6 +159,20 @@
 | T-PRES-009 | ARCH-003 | 没有新 Simulation Projection，仅 viewport resize | Simulation state/tick 不变；Presentation 自行推进 visualEpoch 并提交新 layout |
 | T-PRES-010 | ARCH-003 | Tick N 发布 effectStarts=[effect-1]，Tick N+1 effectStarts=[] | effect-1 继续按 Presentation-local visual timing 播放并自行 cleanup；Simulation 不维护 active visual effect |
 | T-PRES-011 | ARCH-003 | 同一个 effectId 因重复 render 再次出现 | 不重复创建 transient visual |
+| T-PRES-012 | ARCH-003, ARCH-005 | initialize 完成后 first render | 只创建一次完整 RenderDomain；root/actor/effects/HUD key、tag、slot 与 FROZEN Render Tree 完全一致 |
+| T-PRES-013 | ARCH-006 | Scene actor 输入顺序交换 | actor RenderNode 仍按 actorId 字典序稳定排列，identity 不随输入顺序改变 |
+| T-PRES-014 | ARCH-003 | Actor active movement，同时 viewport resize/camera 改变 | Actor data 只含 world motion，不含 screenX/fromScreenX；motionId/fingerprint/elapsed 不重启，只改变 parent transform |
+| T-PRES-015 | ARCH-003 | 两个 alive Actor 分处地图两点 | camera 使用 movement.to-or-tile target 的 bounding midpoint，clamp Map bounds；无 zoom/animation |
+| T-PRES-016 | ARCH-003 | Map 小于 logical viewport | 对应 camera 轴为 0，并通过 originX/originY 在 logical viewport 居中 |
+| T-PRES-017 | ARCH-003 | initialize 首个 viewport 与后续连续 resize | 首次立即接受且不 clamp；后续只在 trailing-edge 100ms 提交 latest layout；相同 layout no-op |
+| T-PRES-018 | TIME-004, ARCH-003 | PAUSED 中 movement/effect/autotile 正在进行且发生 resize | visual elapsed 全部冻结；resize 仍可提交且 paused=true；resume 后从冻结点继续 |
+| T-PRES-019 | ARCH-003 | hit/immune/miss/invalid 四种 effectStarts | hit opacity 1.0；immune 0.6；miss/invalid 不创建 visual；四种 outcome 都消费 effectId |
+| T-PRES-020 | ARCH-003 | initialize twice、pre-init render、pause before initial render | 按 Handler FROZEN 状态机产生 programmer/state error；close 幂等，CLOSED 后 render race-safe no-op |
+| T-PRES-021 | ARCH-003 | older tick、same tick identical replay、same tick conflicting Projection | older ignore；identical replay no commit/no visualEpoch++；conflict fail fast |
+| T-PRES-022 | ARCH-003 | Character/BattleEffect/Tileset/Autotile Browser decode failure | actor/tile 使用 placeholder或 effect skip + diagnostic；不改变 gameplay、不产生 Battle ACK |
+| T-PRES-023 | ARCH-003 | first render 后执行 move/turn/damage/effect/pause/resume/resize | 全部使用 domain.update()；normal path 不调用 domain.replace() |
+| T-PRES-024 | ARCH-003 | 两个 Actor 同时拥有不同 motionId | 两个 Browser motion 并行插值，不共享 scene-global motion id |
+
 
 ## 11. Result / Termination
 
@@ -174,7 +188,7 @@
 
 当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
 
-Contracts / Integration 仍有 Schema、Presentation、Decision Adapter、Guidance 等 OPEN；这些在对应接口冻结后再增加集成测试，不在本 Core Rule Matrix 中暗定。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance。剩余 OPEN 只涉及非 Presentation Content 统一 schema、真实 Decision provider metadata/cancel defaults、Guidance/Host wiring 等；这些不得反向改变已冻结的 Core/Presentation Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 

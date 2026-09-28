@@ -1,6 +1,6 @@
 # Battle v0 文档索引与迁移说明
 
-> 状态：**Design only / 未实现**。
+> 状态：**Core gameplay + Presentation implementation spec 已冻结；代码未实现**。
 >
 > 本文件不再重复定义 Battle 规则。2026-09-25 起，原单体 `BATTLE_V0_DESIGN.md` 已重构为“核心规范 / 数据契约 / 集成说明 / 测试矩阵”四份文档，以避免同一规则在多个章节重复维护。
 >
@@ -38,9 +38,9 @@
 - `PlanConstraints`；
 - `PlanSubmission / PlanAcceptance`；
 - `BattleSnapshot / BattleEvent`；
-- `RenderProjection / SkillEffectProjection`；
+- 已冻结的 Presentation `BattleSceneInit / RenderProjection / SkillEffectProjection / BattleEffect`；
 - Replay 数据边界；
-- 尚未冻结的 subject/version、字段命名和正式 Schema 细节。
+- 其余非 Presentation subject/version、字段命名和正式 Schema OPEN。
 
 Contracts 不重新定义玩法规则。
 
@@ -61,7 +61,7 @@ Contracts 不重新定义玩法规则。
 - workspace / package-lock；
 - 实施顺序。
 
-### 1.4 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md) — Presentation 设计
+### 1.4 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md) — Presentation Implementation Spec — FROZEN
 
 负责：
 
@@ -74,7 +74,7 @@ Contracts 不重新定义玩法规则。
 - Simulation 操作到 Projection/视觉 reconciliation 的映射；
 - Presentation 独立测试要求。
 
-本文不重新定义 gameplay Rule；Presentation lifecycle verbs 已统一，exact serialization / RenderNode data Schema 仍由对应 OPEN 收敛。
+本文不重新定义 gameplay Rule；Presentation public API、cross-layer Projection、Render Tree、Browser node data ABI、world-coordinate model、camera、viewport/resize、effect policy、lifecycle/failure/stale handling 已冻结，**Blocking Presentation OPEN = 0**。
 
 ### 1.5 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
 
@@ -116,8 +116,9 @@ README 和本索引只是导航，不覆盖上述规范。
 当前文档统一只使用四种状态：
 
 - **FROZEN / MUST**：v0 实现必须遵守。
+- **FROZEN FOR IMPLEMENTATION**：该模块 blocking design choice 已清零，可直接交由 implementation agent 落地。
 - **SHOULD**：实现建议，不改变核心兼容语义。
-- **OPEN**：尚未冻结，代码不得自行假设。
+- **OPEN**：尚未冻结，代码不得自行假设；如果被标明为某 frozen 模块的 NON-GOAL/外部 wiring，则不得阻塞该模块实现。
 - **NON-GOAL**：明确不进入 v0。
 
 不再使用“产品方向 / 实现前方向 / 建议默认 / 基本冻结”等多套相近状态词。
