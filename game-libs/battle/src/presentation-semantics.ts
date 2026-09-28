@@ -35,22 +35,22 @@ export function validateTileset(value: unknown, id: number): TilesetRecord {
 function at(tableValue: ProjectedTable, x: number, y = 0, z = 0): number { return tableValue.values[x + y * tableValue.xSize + z * tableValue.xSize * tableValue.ySize]!; }
 export function cameraFor(map: MapRecord, layout: TileViewportLayout, actors: readonly ActorRenderProjection[]) {
   const alive = actors.filter((actor) => actor.life === "alive"); const targets = alive.length ? alive : actors;
-  const centers = targets.map((actor) => actor.movement?.to ?? actor.tile).map((tile) => ({ x: tile.x * TILE_SIZE_PX + 16, y: tile.y * TILE_SIZE_PX + 16 }));
+  const centers = targets.map((actor) => actor.movement?.to ?? actor.tile).map((tile) => ({ x: tile.x * TILE_SIZE_PX + TILE_SIZE_PX / 2, y: tile.y * TILE_SIZE_PX + TILE_SIZE_PX / 2 }));
   const focusX = (Math.min(...centers.map((p) => p.x)) + Math.max(...centers.map((p) => p.x))) / 2;
   const focusY = (Math.min(...centers.map((p) => p.y)) + Math.max(...centers.map((p) => p.y))) / 2;
   return Object.freeze({
-    cameraX: Math.min(Math.max(Math.round(focusX - layout.logicalWidth / 2), 0), Math.max(map.width * 32 - layout.logicalWidth, 0)),
-    cameraY: Math.min(Math.max(Math.round(focusY - layout.logicalHeight / 2), 0), Math.max(map.height * 32 - layout.logicalHeight, 0)),
+    cameraX: Math.min(Math.max(Math.round(focusX - layout.logicalWidth / 2), 0), Math.max(map.width * TILE_SIZE_PX - layout.logicalWidth, 0)),
+    cameraY: Math.min(Math.max(Math.round(focusY - layout.logicalHeight / 2), 0), Math.max(map.height * TILE_SIZE_PX - layout.logicalHeight, 0)),
   });
 }
 export function projectTiles(source: LoadedBattleMap, cameraX: number, cameraY: number, layout: TileViewportLayout): readonly TileTuple[] {
-  const minX = Math.max(0, Math.floor(cameraX / 32) - 1), minY = Math.max(0, Math.floor(cameraY / 32) - 1);
-  const maxX = Math.min(source.map.width - 1, Math.floor((cameraX + layout.logicalWidth - 1) / 32) + 1), maxY = Math.min(source.map.height - 1, Math.floor((cameraY + layout.logicalHeight - 1) / 32) + 1);
+  const minX = Math.max(0, Math.floor(cameraX / TILE_SIZE_PX) - 1), minY = Math.max(0, Math.floor(cameraY / TILE_SIZE_PX) - 1);
+  const maxX = Math.min(source.map.width - 1, Math.floor((cameraX + layout.logicalWidth - 1) / TILE_SIZE_PX) + 1), maxY = Math.min(source.map.height - 1, Math.floor((cameraY + layout.logicalHeight - 1) / TILE_SIZE_PX) + 1);
   const result: TileTuple[] = [];
   for (const z of [0, 1, 2] as const) for (let y = minY; y <= maxY; y += 1) for (let x = minX; x <= maxX; x += 1) {
     const tileId = at(source.map.data, x, y, z); if (tileId === 0) continue;
     if (tileId < 48 || (tileId < 384 && source.autotileRefs[Math.floor((tileId - 48) / 48)] === null) || tileId >= source.tileset.priorities.xSize) throw new TypeError(`Unsupported map tile ${tileId}`);
-    const priority = at(source.tileset.priorities, tileId); const depth = priority === 0 ? 0 : (y + priority + 1) * 32;
+    const priority = at(source.tileset.priorities, tileId); const depth = priority === 0 ? 0 : (y + priority + 1) * TILE_SIZE_PX;
     result.push(Object.freeze([x, y, z, tileId, depth]));
   }
   return Object.freeze(result);

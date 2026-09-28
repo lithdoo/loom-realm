@@ -1,4 +1,4 @@
-import { calculateTileViewportLayout, RESIZE_SETTLE_MS, type TileViewportLayout } from "@loomrealm-game/tile-presentation";
+import { calculateTileViewportLayout, RESIZE_SETTLE_MS, TILE_SIZE_PX, type TileViewportLayout } from "@loomrealm-game/tile-presentation";
 import type { Frame, RenderDomain, RenderDomainState, RenderDomainUpdate, SubsystemScope, ViewportSize } from "@loomrealm/subsystem";
 import {
   compareActorId, validateBattleEffectContent, validateBattleSceneInit, validateRenderProjection,
@@ -15,7 +15,22 @@ export interface BattlePresentationHandler extends PresentationPort {}
 type State = "NEW" | "INITIALIZING" | "INITIALIZED" | "READY" | "PAUSED" | "CLOSED";
 type EffectAsset = Readonly<{ content: BattleEffectContent; image: ResolvedResourceRef }>;
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
-const resolved = (namespace: string, key: string, contentVersion: string): ResolvedResourceRef => Object.freeze({ namespace, key, contentVersion });
+const safeProduct = (left: number, right: number, label: string): number => {
+  const value = left * right;
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${label} exceeds the safe integer range`);
+  return value;
+};
+const safeSum = (left: number, right: number, label: string): number => {
+  const value = left + right;
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${label} exceeds the safe integer range`);
+  return value;
+};
+const resolved = (namespace: string, key: string, contentVersion: string): ResolvedResourceRef => {
+  if ([namespace, key, contentVersion].some((value) => typeof value !== "string" || value.length === 0)) {
+    throw new TypeError("Resolved resource identity must contain non-empty strings");
+  }
+  return Object.freeze({ namespace, key, contentVersion });
+};
 const canonicalProjection = (projection: RenderProjection) => JSON.stringify({ ...projection, actors: [...projection.actors].sort((a, b) => compareActorId(a.actorId, b.actorId)), effectStarts: [...projection.effectStarts].sort((a, b) => compareActorId(a.effectId, b.effectId)) });
 
 function contentFailure(error: unknown): BattlePresentationError { return error instanceof BattlePresentationError ? error : new BattlePresentationError("PRESENTATION_CONTENT_FAILED", error instanceof Error ? error.message : "Content preparation failed", { cause: error }); }
@@ -29,12 +44,15 @@ class Handler implements BattlePresentationHandler {
   private readonly abortListener = () => this.close();
   constructor(private readonly scope: SubsystemScope, private readonly frame: Frame) {
     frame.signal.addEventListener("abort", this.abortListener, { once: true }); scope.signal.addEventListener("abort", this.abortListener, { once: true });
+    if (frame.signal.aborted || scope.signal.aborted) this.close();
   }
   async initialize(scene: BattleSceneInit): Promise<void> {
     if (this.state !== "NEW") throw new BattlePresentationError("PRESENTATION_INVALID_STATE");
     this.state = "INITIALIZING"; const generation = ++this.generation;
     try {
-      validateBattleSceneInit(scene); this.scene = scene;
+      let validatedScene: BattleSceneInit;
+      try { validatedScene = validateBattleSceneInit(scene); } catch (error) { throw invalidData(error); }
+      this.scene = validatedScene; scene = validatedScene;
       const signal = this.session.signal;
       const mapTask = (async () => {
         const map = validateMap((await this.scope.content.record("struct.Map", String(scene.map.mapId), { signal })).value);
@@ -57,17 +75,22 @@ class Handler implements BattlePresentationHandler {
       const [loaded, actors, effects] = await Promise.all([mapTask, actorTask, effectTask]);
       const viewport = await this.firstViewport(signal);
       if (this.state !== "INITIALIZING" || generation !== this.generation || signal.aborted) return;
-      this.loaded = loaded; this.actorRefs = new Map(actors); this.effects = new Map(effects); this.layout = calculateTileViewportLayout(viewport.width, viewport.height);
-      this.unsubscribe = this.scope.viewport.subscribe((value) => this.onViewport(value)); this.state = "INITIALIZED";
+      let layout: TileViewportLayout;
+      try { layout = calculateTileViewportLayout(viewport.width, viewport.height); } catch (error) { throw invalidData(error); }
+      this.loaded = loaded; this.actorRefs = new Map(actors); this.effects = new Map(effects); this.layout = layout;
+      this.unsubscribe = this.scope.viewport.subscribe((value) => this.onViewport(value));
+      const current = this.scope.viewport.current;
+      if (current !== null && (current.width !== viewport.width || current.height !== viewport.height)) this.onViewport(current);
+      this.state = "INITIALIZED";
     } catch (error) {
       if (this.session.signal.aborted) return;
-      this.close(); throw contentFailure(error);
+      this.close(); throw error instanceof BattlePresentationError ? error : contentFailure(error);
     }
   }
   render(projection: RenderProjection): void {
     if (this.state === "CLOSED") return;
     if (this.state !== "INITIALIZED" && this.state !== "READY" && this.state !== "PAUSED") throw new BattlePresentationError("PRESENTATION_INVALID_STATE");
-    try { validateRenderProjection(projection); } catch (error) { throw invalidData(error); }
+    try { projection = validateRenderProjection(projection); } catch (error) { throw invalidData(error); }
     if (projection.sceneEpoch !== this.scene!.sceneEpoch) throw new BattlePresentationError("PRESENTATION_SCENE_MISMATCH");
     const roster = [...this.scene!.actors.map((a) => a.actorId)].sort(compareActorId), incoming = [...projection.actors.map((a) => a.actorId)].sort(compareActorId);
     if (JSON.stringify(roster) !== JSON.stringify(incoming) || projection.effectStarts.some((effect) => !this.effects.has(effect.effect))) throw new BattlePresentationError("PRESENTATION_INVALID_DATA");
@@ -107,19 +130,31 @@ class Handler implements BattlePresentationHandler {
   close(): void {
     if (this.state === "CLOSED") return; this.state = "CLOSED"; this.generation += 1; this.session.abort();
     this.frame.signal.removeEventListener("abort", this.abortListener); this.scope.signal.removeEventListener("abort", this.abortListener);
-    this.unsubscribe?.(); this.unsubscribe = undefined; if (this.resizeTimer) clearTimeout(this.resizeTimer); this.resizeTimer = undefined; this.pendingViewport = undefined;
-    try { this.domain?.close(); } finally { this.domain = undefined; this.effects.clear(); this.actorRefs.clear(); this.projection = undefined; this.loaded = undefined; }
+    const unsubscribe = this.unsubscribe; this.unsubscribe = undefined; try { unsubscribe?.(); } catch {}
+    if (this.resizeTimer) clearTimeout(this.resizeTimer); this.resizeTimer = undefined; this.pendingViewport = undefined;
+    const domain = this.domain; this.domain = undefined; try { domain?.close(); } catch {}
+    this.effects.clear(); this.actorRefs.clear(); this.seenEffects.clear(); this.motionFacts.clear();
+    this.projection = undefined; this.lastCanonical = undefined; this.loaded = undefined; this.layout = undefined; this.scene = undefined;
   }
   private firstViewport(signal: AbortSignal): Promise<ViewportSize> {
     if (signal.aborted) return Promise.reject(new DOMException("Presentation closed", "AbortError"));
     if (this.scope.viewport.current !== null) return Promise.resolve(this.scope.viewport.current);
     return new Promise((resolve, reject) => {
-      const unsubscribe = this.scope.viewport.subscribe((value) => { if (value) { unsubscribe(); signal.removeEventListener("abort", aborted); resolve(value); } });
-      const aborted = () => { unsubscribe(); reject(new DOMException("Presentation closed", "AbortError")); }; signal.addEventListener("abort", aborted, { once: true });
+      let settled = false; let unsubscribe = () => {};
+      const finish = (value: ViewportSize) => {
+        if (settled) return; settled = true; unsubscribe(); signal.removeEventListener("abort", aborted); resolve(value);
+      };
+      const aborted = () => {
+        if (settled) return; settled = true; unsubscribe(); reject(new DOMException("Presentation closed", "AbortError"));
+      };
+      unsubscribe = this.scope.viewport.subscribe((value) => { if (value !== null) finish(value); });
+      if (settled) unsubscribe();
+      signal.addEventListener("abort", aborted, { once: true });
+      if (signal.aborted) aborted();
     });
   }
   private onViewport(value: ViewportSize | null) {
-    if (this.state === "CLOSED" || value === null) return; this.pendingViewport = value; if (this.resizeTimer) clearTimeout(this.resizeTimer);
+    if (this.state === "CLOSED" || value === null) return; this.pendingViewport = Object.freeze({ width: value.width, height: value.height }); if (this.resizeTimer) clearTimeout(this.resizeTimer);
     this.resizeTimer = setTimeout(() => { this.resizeTimer = undefined; this.settleResize(); }, RESIZE_SETTLE_MS);
   }
   private settleResize() {
@@ -145,8 +180,8 @@ class Handler implements BattlePresentationHandler {
   private payloads(projection: RenderProjection, visualEpoch: number, effects: readonly SkillEffectProjection[], paused: boolean) {
     const actors = [...projection.actors].sort((a, b) => compareActorId(a.actorId, b.actorId)); const camera = cameraFor(this.loaded!.map, this.layout!, actors);
     const view = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, viewportWidth: this.layout!.windowWidth, viewportHeight: this.layout!.windowHeight, barHeight: this.layout!.barHeight, contentWidth: this.layout!.contentWidth, contentHeight: this.layout!.contentHeight, columns: this.layout!.columns, rows: this.layout!.rows, logicalWidth: this.layout!.logicalWidth, logicalHeight: this.layout!.logicalHeight, scaleX: this.layout!.scaleX, scaleY: this.layout!.scaleY, mapWidth: this.loaded!.map.width, mapHeight: this.loaded!.map.height, ...camera, tileset: this.loaded!.tilesetRef, autotiles: this.loaded!.autotileRefs, tiles: projectTiles(this.loaded!, camera.cameraX, camera.cameraY, this.layout!) };
-    const actorData = actors.map((actor) => ({ sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, actorId: actor.actorId, tileX: actor.tile.x, tileY: actor.tile.y, direction: actor.direction, sprite: this.actorRefs.get(actor.actorId)!, life: actor.life, motion: actor.movement === null ? null : { id: actor.movement.motionId, fromWorldX: actor.movement.from.x * 32, fromWorldY: actor.movement.from.y * 32, toWorldX: actor.movement.to.x * 32, toWorldY: actor.movement.to.y * 32, durationMs: (actor.movement.completeTick - actor.movement.startTick) * this.scene!.tickDurationMs } }));
-    const effectData = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, effectStarts: effects.map((effect) => { const asset = this.effects.get(effect.effect)!; return { effectId: effect.effectId, result: effect.result as "hit" | "immune", image: asset.image, worldX: effect.tile!.x * 32 + 16, worldY: effect.tile!.y * 32 + 16, fadeInMs: asset.content.timing.fade_in_ticks * 200, holdMs: asset.content.timing.hold_ticks * 200, fadeOutMs: asset.content.timing.fade_out_ticks * 200 }; }) };
+    const actorData = actors.map((actor) => ({ sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, actorId: actor.actorId, tileX: actor.tile.x, tileY: actor.tile.y, direction: actor.direction, sprite: this.actorRefs.get(actor.actorId)!, life: actor.life, motion: actor.movement === null ? null : { id: actor.movement.motionId, fromWorldX: safeProduct(actor.movement.from.x, TILE_SIZE_PX, "movement.fromWorldX"), fromWorldY: safeProduct(actor.movement.from.y, TILE_SIZE_PX, "movement.fromWorldY"), toWorldX: safeProduct(actor.movement.to.x, TILE_SIZE_PX, "movement.toWorldX"), toWorldY: safeProduct(actor.movement.to.y, TILE_SIZE_PX, "movement.toWorldY"), durationMs: safeProduct(actor.movement.completeTick - actor.movement.startTick, this.scene!.tickDurationMs, "movement.durationMs") } }));
+    const effectData = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, paused, effectStarts: effects.map((effect) => { const asset = this.effects.get(effect.effect)!; return { effectId: effect.effectId, result: effect.result as "hit" | "immune", image: asset.image, worldX: safeSum(safeProduct(effect.tile!.x, TILE_SIZE_PX, "effect.worldX"), TILE_SIZE_PX / 2, "effect.worldX"), worldY: safeSum(safeProduct(effect.tile!.y, TILE_SIZE_PX, "effect.worldY"), TILE_SIZE_PX / 2, "effect.worldY"), fadeInMs: safeProduct(asset.content.timing.fade_in_ticks, this.scene!.tickDurationMs, "effect.fadeInMs"), holdMs: safeProduct(asset.content.timing.hold_ticks, this.scene!.tickDurationMs, "effect.holdMs"), fadeOutMs: safeProduct(asset.content.timing.fade_out_ticks, this.scene!.tickDurationMs, "effect.fadeOutMs") }; }) };
     const hud = { sceneEpoch: this.scene!.sceneEpoch, visualEpoch, actors: actors.map((actor) => ({ actorId: actor.actorId, team: this.scene!.actors.find((item) => item.actorId === actor.actorId)!.team, hp: actor.hp, maxHp: actor.maxHp })) };
     return { view, actors: actorData, effects: effectData, hud };
   }
@@ -155,7 +190,7 @@ class Handler implements BattlePresentationHandler {
   private preflight(candidate: unknown, view: unknown) {
     const value = candidate as { roots?: readonly { data: unknown; children: readonly { data: unknown }[] }[]; nodes?: readonly { data?: { set?: unknown } }[] };
     const nodeData = value.roots ? value.roots.flatMap((root) => [root.data, ...root.children.map((child) => child.data)]) : (value.nodes ?? []).map((node) => node.data?.set);
-    if (bytes(view) >= 196_608 || nodeData.some((data) => bytes(data) > 262_144) || bytes(candidate) >= 1_000_000 || 3 + this.scene!.actors.length > 16_384) throw this.failCommit(new Error("Renderer capacity exceeded"));
+    if (bytes(view) >= 196_608 || nodeData.some((data) => bytes(data) > 262_144) || bytes(candidate) >= 1_000_000 || 3 + this.scene!.actors.length > 4_096) throw this.failCommit(new Error("Renderer capacity exceeded"));
   }
   private failCommit(error: unknown) { const failure = new BattlePresentationError("PRESENTATION_COMMIT_FAILED", error instanceof Error ? error.message : "Render commit failed", { cause: error }); this.close(); return failure; }
 }
