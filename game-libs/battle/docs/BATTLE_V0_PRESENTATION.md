@@ -283,7 +283,7 @@ PRESENTATION_INVALID_DATA
 
 Scene Init 只包含建立稳定 Scene/资源身份所需事实；所有会变化的 Actor visual state 统一从 RenderProjection 进入。
 
-概念：
+FROZEN cross-layer shape：
 
 ```ts
 type BattleSceneInit = {
@@ -369,11 +369,11 @@ start Battle clock / scheduler
 
 因此 SceneInit 不复制 initial tile/direction/HP；所有动态 visual facts 从第一次 RenderProjection 开始只有一个数据来源。
 
-## 8. render(projection)## 8. render(projection)
+## 8. render(projection)
 
 `render()` 是正常运行阶段唯一主要入口。
 
-概念 Projection：
+FROZEN cross-layer Projection：
 
 ```ts
 type RenderProjection = {
@@ -536,7 +536,7 @@ Presentation 可以看到 HP 改变、movement 消失、hit effect 同时出现�
 
 ## 10. visualEpoch / motionId
 
-Battle Presentation 建议参考 Map 已使用的视觉 fencing 思想，但不能照搬 Map 的“单 player motion”假设。
+Battle Presentation 使用与 Map 一致的视觉 fencing 原则，但 actor motion identity 必须保持 actor-local，不能照搬 Map 的“单 player motion”假设。
 
 Ownership 明确区分：
 
@@ -568,9 +568,9 @@ actor A → motionId=17
 actor B → motionId=9
 ```
 
-如果 camera 有独立动画，应使用单独的 camera motion identity，而不是复用某个 Actor 的 `motionId`。
+v0 camera 没有 animation，因此不存在 camera motion identity。
 
-原因是 Battle 允许双方同时行动，同一个 visual epoch 中可能同时存在两个不同 Actor motion、camera motion 和多个 effectId。
+Battle 允许双方同时行动；同一个 visualEpoch 可以同时存在多个不同 actor-local motionId 和多个 effectId。
 
 这些 identity 的目的不是创建 gameplay generation，而是防止旧视觉工作污染新画面。
 
@@ -611,7 +611,7 @@ viewport resize settlement 属于 Host layout control，不属于 Battle animati
 
 这些操作不修改 Simulation。
 
-推荐 Runtime 调用：
+Runtime lifecycle mapping MUST 保持：
 
 ```text
 battle.pause()
@@ -627,7 +627,7 @@ battle.resume()
 
 ## 12. close()
 
-`close()` 是 terminal 生命周期操作，建议幂等。
+`close()` 是 terminal 生命周期操作，并且 MUST idempotent。
 
 内部至少清理：
 
