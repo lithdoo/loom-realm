@@ -45,7 +45,7 @@ Application / Subsystem
 
 ### 1.1 Port 的概念边界
 
-exact TypeScript type/export detail 仍可在 Contracts/Integration 中收敛，但 lifecycle verbs 已统一如下：
+PresentationPort / BattlePresentationHandler 的 lifecycle surface 已由 Contracts/Presentation 冻结；这里不再保留另一套 method naming。其余非 Presentation 的 package export organization 与尚未冻结的外部 provider detail 仍可在实现阶段按仓库惯例落位：
 
 ```ts
 DecisionPort
@@ -78,7 +78,7 @@ Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concre
 
 `BattlePresentationHandler` 应直接实现 `PresentationPort`；不需要额外建立一个只做 method forwarding 的 adapter。
 
-Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 仍严格要求两个 combat Actor；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
+Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 严格要求两个 combat Actor，并且恰好为 1 个 `ally` + 1 个 `enemy`；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
 
 ### 1.2 Simulation 只依赖窄 capability
 
@@ -334,6 +334,8 @@ host callback handled = 700 ms
 
 不能只把 JavaScript callback 真正被调度到的时刻当“模型思考时间”。
 
+`completedAtMonotonicMs` 必须和 Simulation 的 BattleClock raw monotonic source 处于同一 time domain。若 provider/worker/远端服务只能提供自己的时钟，Host/Adapter 必须先把 completion fact 映射到 BattleClock 可解释的 monotonic timestamp；不得把不同进程的 `performance.now()` 等不可比较值直接跨层传递。
+
 ### 6.2 Battle deadline 与 provider timeout 分离
 
 不同模型、网络、供应商可以有自己的 provider/network timeout 或 product limit，但不得修改 Core 的 Battle gameplay deadline，也不得自己计算 `dueTick`。
@@ -355,7 +357,7 @@ Pause/background 时间是否计入 Decision latency 只由 Simulation 按 `TIME
 已经确定：
 
 - 一次 `decide()` = 一次 attempt；
-- Adapter 返回 trusted completion fact，不返回 `dueTick`；
+- Adapter 返回与 BattleClock 同一 monotonic time domain 的 trusted completion fact，不返回 `dueTick`；
 - Battle deadline / stale / correction retry 属于 Simulation；
 - Simulation 通过 AbortSignal 取消失效 attempt。
 
@@ -544,7 +546,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership已确定；
+- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership以及 completion timestamp 的 clock-domain 约束已确定；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
