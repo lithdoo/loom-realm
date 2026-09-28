@@ -990,7 +990,7 @@ whole render message <= 1048576 bytes
 RenderNode count <= 16384
 ```
 
-v0 使用与现有 Map 相同方向的保守 guard：
+v0 使用与现有 Map 相同方向的保守 guard；这里的 serialized byte length 固定按 `new TextEncoder().encode(JSON.stringify(value)).byteLength` 计算：
 
 ```text
 serialized BattleViewRenderData < 196608 bytes
@@ -1072,7 +1072,7 @@ Tile projection policy：
 - Browser tile layer CSS z-index = `tileDepth * 2`；
 - Battle v0 不应用 RPGMap bridgeLevel 特例；
 - regular/autotile blit 与 Integration 中现有 Map resource format 一致；
-- Autotile animation cadence 与当前 Map Browser 保持一致：base animation quantum = **50 ms**；资源 key 文件名末尾存在 `[N]`（允许括号内空白）时，每帧时长 = `N * 50 ms`，其中 N 必须是正 safe integer；没有该 suffix 时默认 `5 * 50 = 250 ms`；匹配到但 N=0/非 safe integer 属于该 Autotile visual preparation failure，按 Browser fallback/diagnostic policy 处理，不修改 gameplay；
+- Autotile animation cadence 与当前 Map Browser 保持一致：base animation quantum = **50 ms**；资源 key 文件名末尾存在 `[N]`（允许括号内空白）时，每帧时长 = `N * 50 ms`，其中 N 必须是正 safe integer；没有该 suffix 时默认 `5 * 50 = 250 ms`；匹配到但 N=0/非 safe integer 属于该 Autotile visual preparation failure，该 slot 使用可见 placeholder并可发 diagnostic，不终止/修改 gameplay；
 - Autotile frame progress 使用 Presentation-local visual time；pause 冻结、resume 续播，不用 Battle Tick 反向驱动画面；
 - world layer logical transform 为 `origin - camera`；外层再按 `scaleX/scaleY` 映射到 physical content；
 - `originX = max(0, (logicalWidth - mapWidth*32)/2)`，Y 同理；
