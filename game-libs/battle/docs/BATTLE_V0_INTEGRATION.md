@@ -184,7 +184,7 @@ viewportChanged
 
 Simulation 不得等待动画完成后才提交移动、扣血、死亡或 BattleResult。
 
-Simulation 可以在权威状态已经由 reducer 决定后调用 PresentationPort（无论最终是 `apply(RenderProjection)` 还是更细的 `moveActor / playSkillEffect`）。这些调用只发布表现事实；Simulation 不得等待其动画完成、Promise 顺序或 Browser ACK 后才推进 Battle Rule。
+Simulation 可以在权威状态已经由 reducer 决定后调用 `PresentationPort.render(RenderProjection)`。这只发布表现事实；Simulation 不得等待动画完成、Promise 顺序或 Browser ACK 后才推进 Battle Rule。
 
 ### 3.3 Camera
 

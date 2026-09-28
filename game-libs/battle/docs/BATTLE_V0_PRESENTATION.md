@@ -261,7 +261,7 @@ Actor collection 的语义要求：
 - `actorId` 唯一且是唯一 identity；
 - collection 顺序不表示 ally/enemy 或优先级；
 - v0 Simulation 按 `BATTLE-001` 只产生两个 Actor；
-- Presentation 本身按 collection 建节点/更新，不实现“必须恰好两个”的 gameplay validation；
+- Presentation 本身按 collection 建节点/更新，不把两个固定 slot 写进 renderer；合法 v0 Simulation 仍只会提供两个 Actor；
 - 同一 Battle session 的 roster 在 v0 初始化后保持稳定。
 
 不进入 Scene Init 的 Simulation 内部字段包括：
@@ -1263,7 +1263,7 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 14. 两个 PresentationHandler 同时存在时 visual/session state 不串场；
 15. 正常 move/turn/damage/effect 更新不改变稳定 Render Tree 结构；
 16. 任意 Actor 都有独立 actor-local motion identity；v0 两个 Actor 可以在同一 visual epoch 拥有不同 motionId 并同时插值；
-17. synthetic Presentation scene 使用 4 个唯一 actorId 时，可按 collection 建立 4 个 actor node/HUD entry，且不存在固定 ally/enemy slot；这不代表 v0 Simulation 接受 4 Actor；
+17. Presentation projector/render-tree 的非 v0 结构性 fixture 使用 4 个唯一 actorId 时，可按 collection 生成 4 个 actor node/HUD entry，且不存在固定 ally/enemy slot；public v0 BattleConfig 仍由 BATTLE-001 限制为 2；
 18. 重复提交相同 effectId 不重复创建 transient visual；
 19. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
 20. 正常 Battle terminal 发布 final Projection 后保持最终画面，直到 scene owner 调用 close；cancel/abort 则立即 close；

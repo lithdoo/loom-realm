@@ -56,6 +56,14 @@ type ActorId = string
 
 v0 仍由 `BATTLE-001` 限制为恰好两个 combat Actor。Contract 使用 collection shape 是为了避免把 cardinality 编码进跨层 ABI，不表示 v0 支持多人。
 
+### Team
+
+```ts
+type Team = "ally" | "enemy"
+```
+
+这是 v0 的两方 team identity，与 collection 顺序无关。未来组队可以在同一 Team 下拥有多个 Actor；FFA/多阵营若需要超过两种 Team，属于新版本 gameplay contract，不在 v0 暗中扩展。
+
 ### GridPosition
 
 ```ts
