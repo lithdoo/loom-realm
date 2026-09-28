@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Core gameplay + Presentation implementation spec 已冻结；代码未实现**。当前还没有完整 Runtime `src/`、运行入口、构建/测试通过结论或可加载的 LoomRealm Battle Subsystem。
+> 状态：**Battle v0 Presentation IMPLEMENTED + TESTED；Core gameplay 尚未实现**。当前包已提供冻结的 Presentation contracts、Builder/Handler、Browser assets、synthetic acceptance tests 与 Browser E2E；Simulation、Decision、完整 Battle Subsystem orchestration 仍不在本阶段范围内。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -80,7 +80,7 @@ Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 
 
 这些 OPEN 不得改变已经冻结的 Core gameplay 或 Presentation ABI/行为语义。
 
-`game-libs/tile-presentation` / `@loomrealm-game/tile-presentation` 已落地，Map 已迁移到其中已验证的纯 tile viewport/layout shared implementation。Battle Presentation MUST 直接消费该 package；Battle 不复制 Map layout 代码，也不依赖 `@loomrealm-game/map` Runtime。Presentation specification 已冻结，但实现尚未开始。
+`game-libs/tile-presentation` / `@loomrealm-game/tile-presentation` 已落地，Map 与 Battle Presentation 都直接消费其中已验证的纯 tile viewport/layout shared implementation。Battle 不复制 Map layout 代码，也不依赖 `@loomrealm-game/map` Runtime。Presentation specification 保持冻结，实现与测试已落地。
 
 ## 下一阶段
 
@@ -93,7 +93,7 @@ Content/Contracts schema
 → DecisionPort + Mock/Script Decision
 → frozen-rule tests
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
-→ **现在可直接执行：按 FROZEN Presentation Agent contract 实现 PresentationPort + Browser Presentation**
+→ **已完成：按 FROZEN Presentation Agent contract 实现 PresentationPort + Browser Presentation**
 → business Subsystem thin composition
 → real LLM Decision
 → Guidance / Host E2E
