@@ -172,7 +172,7 @@ protection      命中后的有限免疫区间
 - 1 Tick = 200 ms；
 - overdue Tick 必须逐 Tick 归约；
 - LLM/Decision 实际耗时计入 Battle 时间；
-- one valid Decision Request per Actor generation；
+- one valid Decision Request per Actor generation；Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；
 - Decision 直接生成结构化 `PlanSubmission`；
 - `path` 不含起点、四方向、默认 `maxPathSteps=6`；
 - `minCoefficient` 只控制技能起手；
@@ -221,7 +221,7 @@ protection      命中后的有限免疫区间
 
 ## 8. 当前实施入口
 
-当前 Battle 仍是 design-only。建议下一步：
+当前 **Core gameplay 与 Presentation implementation spec 已冻结，Runtime/Decision/Presentation 代码实现仍待完成**。推荐实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema

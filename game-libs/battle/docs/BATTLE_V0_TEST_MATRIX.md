@@ -27,16 +27,16 @@
 | --- | --- | --- | --- |
 | T-TIME-001 | TIME-001 | 推进 1 Tick | 逻辑时长固定 200 ms |
 | T-TIME-002 | TIME-003 | 上次处理 Tick 10，scheduler/event loop 晚醒时 target Tick 14 | 依次处理 11/12/13/14 |
-| T-TIME-003 | TIME-003 | catch-up 中事件分别 due 11 和 14 | 不视为同一批同时事件 |
-| T-TIME-004 | DEC-001 | Decision 实际耗时 500 ms | 最早 600 ms / 3 Tick 可用 |
-| T-TIME-005 | DEC-001 | completedAt == deadline | 判定完成成功 |
-| T-TIME-006 | DEC-001 | 模型 deadline 前完成，但 Host callback 更晚处理 | 使用 trusted completion time，不看 callback 顺序 |
+| T-TIME-003 | TIME-003 | catch-up 中 scheduled events 分别 due 11 和 14 | 不视为同一批同时事件 |
+| T-TIME-004 | DEC-001, TIME-002 | Tick 20 reducer 已结束，Decision completion 在 Tick 21 snapshot 前进入 inbox | Tick 21 消费/校验；若合法且 Actor 可行动，最早 Tick 21 Action phase 执行 |
+| T-TIME-005 | DEC-001, TIME-002 | Decision completion 在 Tick 21 snapshot 后、Tick 21 reducer 处理中到达 | 不得重入 Tick 21；最早 Tick 22 消费 |
+| T-TIME-006 | DEC-001 | Promise callback 拿到合法 Plan | callback 只 enqueue；Actor/acceptedPlan/HP/position 等权威状态在 reducer 前完全不变 |
 | T-TIME-007 | TIME-004 | Battle pause/background 期间现实经过 30 秒 | currentTick 不推进，不产生 150 个 catch-up Tick |
-| T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；pause freeze 不改变正常 catch-up 规则 |
-| T-TIME-009 | DEC-003, TIME-004 | LLM provider 真实时间中完成，期间 Battle pause 10 秒 | Adapter 只返回 trusted completion timestamp；Simulation 用 Battle clock/pause history 计算 deadline/dueTick，pause 时间不计入 gameplay latency |
-| T-TIME-010 | DEC-001, DEC-003 | provider/worker completion timestamp 来自与 BattleClock 不同的 monotonic origin | 不得直接作为 DecisionCompletion timestamp；Host/Adapter 必须先映射到 BattleClock raw monotonic time domain，再由 Simulation 计算 Battle time/dueTick |
+| T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；每个 Tick 独立建立 event/inbox snapshot |
+| T-TIME-009 | DEC-001, TIME-004 | Battle pause 时 LLM completion 返回并进入 inbox | pause 中不消费；resume 后第一个实际 reducer Tick 才可消费 |
+| T-TIME-010 | DEC-001, REPLAY-001 | 两次真实运行的 LLM wall-clock latency 不同，但 Replay 记录相同 consumed/accepted Tick | Replay 不依赖 completion timestamp，不重新调用 LLM，按记录 Tick 复现 Plan 生效 |
 
-## 3. PlanSubmission
+## 3. PlanSubmission## 3. PlanSubmission
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
@@ -127,12 +127,12 @@
 | --- | --- | --- | --- |
 | T-DEC-001 | STATE-003 | 同 Tick 多个原因调用 ensureDecision | 当前 generation 只存在一个有效 request |
 | T-DEC-002 | SKILL-004 | Actor 在 recovery | Thinking 可以继续/开始 |
-| T-DEC-003 | SKILL-004 | recovery 中 Decision ready | Plan 可暂存，但不能启动新 Action |
+| T-DEC-003 | SKILL-004, DEC-001 | recovery 中 reducer 消费并接受 Decision Plan | Plan 可暂存，但 recovery 结束前不能启动新 Action |
 | T-DEC-004 | DEC-002 | hit 使 generation 失效后旧 LLM 返回 | 无提交权 |
 | T-DEC-005 | STATE-005, SKILL-004 | Actor 正在 recovery 时 Decision request thinking | actionState=recovery 与 decisionState=thinking 可同时存在，不互相覆盖 |
 | T-DEC-006 | STATE-005 | Actor moving 时启动 Decision | actionState=moving 与 decisionState=thinking 可同时存在 |
 | T-DEC-007 | DEC-003, PLAN-006 | 第一次 Decision completion 返回非法 Plan | Adapter 不自行重试；Simulation validation 后决定是否发起唯一 correction attempt |
-| T-DEC-008 | DEC-003 | DecisionCompletion 返回 trusted completion fact | Decision 不返回 dueTick/stale/timeout gameplay 判定；Simulation 统一计算 |
+| T-DEC-008 | DEC-001, DEC-003 | DecisionCompletion 返回 Plan/failure | Completion 只含 requestId/generation/result；无 gameplay timing/dueTick；callback 只 enqueue，Simulation reducer 决定 stale/validation/acceptance |
 
 ## 9. Control Plane / Replay
 
@@ -142,7 +142,7 @@
 | T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
 | T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
 | T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
-| T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM |
+| T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
 
@@ -201,7 +201,7 @@ Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation accept
 至少应先用 headless Mock/Script 测通：
 
 - overdue Tick catch-up；
-- timeout/ready 同边界；
+- Decision inbox snapshot 边界：snapshot 前到达本 Tick消费、snapshot 后到达下一 Tick消费；
 - turn-only / turn+skill 的 Action 配额；
 - move_start 瞬间转向；
 - moving Actor 被 positive damage 中断并留 committed origin；

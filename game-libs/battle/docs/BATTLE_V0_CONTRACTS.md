@@ -472,7 +472,7 @@ type DecisionState =
   | { type: "ready"; requestId: string; generation: integer }
 ```
 
-exact payload 仍可在实现时正式化，但 `thinking` 不得进入 ActionState。这样才能表达 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 已冻结组合。
+exact payload 仍可在实现时正式化，但 `thinking` 不得进入 ActionState。这样才能表达 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 已冻结组合。`ready` 只能由 Tick reducer 消费并接受 inbox completion 后进入；异步 callback 本身不得直接修改 ActorRuntimeState。
 
 `turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
 
@@ -492,14 +492,15 @@ type BattleEvent = {
 }
 ```
 
-核心事件概念：
+核心 scheduled event：
 
 ```text
-decision_ready
 move_complete
 skill_resolve
 recovery_complete
 ```
+
+DecisionCompletion 不属于 BattleEvent，也没有 `dueTick`；它进入 Simulation-owned Decision Inbox。
 
 原地 `turn` 即时完成，不需要 `turn_complete` 事件。
 
@@ -627,11 +628,9 @@ type SkillEffectProjection = {
 - Presentation 不从该结构反推 damage、interrupt、death 或其他 gameplay transition；
 - hit/immune/miss/invalid 的 v0 可见性 policy 在 Presentation FROZEN spec 中固定。
 
-## 16. DecisionPort / DecisionTiming
+## 16. DecisionPort / Decision Inbox — FROZEN
 
-DecisionPort 的职责是“一次调用完成一次 attempt”，不拥有 Battle deadline / retry policy。
-
-概念：
+DecisionPort 的职责是“一次调用完成一次 attempt”。它不返回 Battle timing，也不拥有 Tick/Plan lifecycle。
 
 ```ts
 type DecisionRequest = {
@@ -651,14 +650,12 @@ type DecisionCompletion =
       type: "completed"
       requestId: string
       generation: integer
-      completedAtMonotonicMs: number
       plan: PlanSubmission
     }
   | {
       type: "failed"
       requestId: string
       generation: integer
-      completedAtMonotonicMs: number
       error: DecisionFailure
     }
 
@@ -670,27 +667,23 @@ interface DecisionPort {
 }
 ```
 
-`generation` / `requestId` 是 Simulation 生成的 correlation identity；Decision implementation 只能原样返回，不拥有其生命周期。
+`requestId / generation` 是 Simulation 生成的 correlation identity；Decision implementation 必须原样返回，不拥有其生命周期。
 
-`completedAtMonotonicMs` 是 Adapter 必须提供的受信完成时间事实，并且必须处于 **与 BattleClock raw monotonic source 相同的 time domain**。Provider/worker/远端服务自己的不可比较 monotonic origin 不得直接写入该字段；若 completion 来自其他时钟域，Adapter/Host 必须先映射成 BattleClock 可解释的 timestamp。Simulation 自己维护 Runtime timing record，例如：
+DecisionCompletion 不携带任何 wall-clock/Battle-time timing 字段，也不携带 Decision dueTick / acceptedTick。
 
-```ts
-type DecisionTiming = {
-  requestId: string
-  generation: integer
-  startedAtBattleTimeMs: number
-  deadlineBattleTimeMs: number
-  completedAtMonotonicMs?: number
-  dueTick?: integer
-  status: DecisionStatus
-}
-```
+异步 completion 到达时只进入 Simulation-owned Decision Inbox。Simulation 在 Tick reducer snapshot 中消费它，并负责：
 
-其中 `deadlineBattleTimeMs / dueTick / stale / correction retry` 都由 Simulation 根据 Battle clock、pause history 与 Core Rule 计算。Decision implementation 不返回 `dueTick`，也不自行发起 `PLAN-006` correction retry。
+- stale generation fencing；
+- Plan validation；
+- accepted-plan queue；
+- `PLAN-006` correction retry；
+- consumedTick / acceptedTick Replay facts。
 
-Provider/network timeout 属于 Decision implementation 的 infrastructure policy，可以产生 `DecisionFailure`；它不是 Battle gameplay deadline。exact failure enum / provider wiring 在 Integration 文档维护。
+Provider/network timeout 属于 Decision implementation 的 infrastructure policy，可以产生 `DecisionCompletion { type: "failed" }`；它不是 Battle gameplay deadline。
 
-## 17. ReplayRecord
+Decision Inbox 是 Simulation internal runtime structure，不属于 Presentation Contract，也不作为 `BattleEvent(dueTick)` 序列化。
+
+## 17. ReplayRecord## 17. ReplayRecord
 
 Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 
@@ -698,7 +691,7 @@ Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 initial config/content refs
 battleSeed
 accepted PlanSubmissions + acceptedPlanIds
-Decision timing/generation facts
+Decision request/consume/accept Tick + generation facts
 movement reservation/contention
 skill outcomes + coefficient
 damage/protection
@@ -710,7 +703,7 @@ BattleResult
 ## 18. Contracts OPEN
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
-- Decision failure enum / provider-specific metadata exact shape；Decision attempt/timing ownership与 completion timestamp 的 clock-domain 约束已确定。
+- Decision failure enum / provider-specific metadata exact shape；Decision attempt/inbox/Tick-boundary ownership 已确定。
 - Runtime 的其余 exact discriminated-union payload / enum names。
 - Observation history budget 与 prompt-facing representation。
 

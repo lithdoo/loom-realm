@@ -42,7 +42,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 - Simulation 可以通过注入的 DecisionPort / PresentationPort 使用具体组件，但不等待 Browser 动画/ACK 推进规则；Presentation 可用 Scene/Projection 数据独立初始化和测试；
 - 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
-- Decision 每次调用只完成一次 Plan/failure attempt；completion timestamp 必须映射到 BattleClock 同一 monotonic time domain；Simulation 拥有 generation、Battle deadline、dueTick、stale 判定与 correction retry，并负责校验/执行 Plan；
+- Decision 每次调用只完成一次 Plan/failure attempt；completion 不带 gameplay timing/dueTick，只即时进入 Simulation-owned inbox；Tick reducer 在 snapshot 边界消费，Simulation 拥有 generation、stale 判定、Plan validation、correction retry 与 accepted-plan queue；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
 - move_start 瞬间更新 direction；v0 保留独立原地 `turn` Action；
 - 同格竞争使用 `battleSeed` 的可回放等概率伪随机；
@@ -75,6 +75,8 @@ README 与 DESIGN 索引不覆盖上述规范。
 - DecisionFailure/provider metadata、provider cancel guarantee、provider/network timeout defaults；
 - Guidance Host/InputTarget wiring；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
+
+Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 删除，不再属于 OPEN；provider timeout 只作为基础设施失败策略。
 
 这些 OPEN 不得改变已经冻结的 Core gameplay 或 Presentation ABI/行为语义。
 

@@ -38,6 +38,8 @@ Presentation 不解释 Battle Rule，不决定 gameplay transition。
 
 这些事实必须先由 Simulation 决定，再进入 Presentation。
 
+Decision completion / Decision Inbox / Plan acceptance Tick 都属于 Decision↔Simulation 内部协议，不进入 Presentation ABI。Presentation 不观察 LLM completion timing，只消费 Simulation 已发布的 `RenderProjection`；因此 Decision inbox 模型的变化不得要求 Browser/Render Tree 增加反馈或 timing 字段。
+
 ## 2. 参考现有 Map 包的工程模式
 
 Battle Presentation 应优先沿用已经实现的 `game-libs/map` 工程惯例，而不是另建一套渲染基础设施。

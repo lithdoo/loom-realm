@@ -301,7 +301,7 @@ LLMDecision
 
 Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
-Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Battle deadline、trusted completion fact 到 `dueTick` 的映射、stale generation fencing、correction retry 与 Replay timing 都属于 Simulation 的 Runtime lifecycle；这些不能下放给业务 composition adapter。
+Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、accepted-plan queue 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
 
 ## 6. LLM Decision Adapter
 
@@ -312,54 +312,58 @@ Adapter 最终需要解决：
 - LLM 请求位于哪个 Host 层；
 - authorization / credential；
 - 接收 Simulation 提供的 AbortSignal；
-- trusted completion timestamp；
 - provider/network timeout 与 service error metadata；
 - structured output 解析为 `PlanSubmission` / failure。
 
-Adapter **不拥有** Battle deadline、`dueTick`、stale generation 判断或 correction retry。Correction 是否发生由 Simulation 按 `PLAN-006 / DEC-003` 决定；发生时 Simulation 发起第二个明确的 Decision attempt。
+Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直接接受 Plan，也不自行 correction retry**。
+
+固定数据流：
+
+```text
+Simulation
+  → DecisionPort.decide(request, signal)
+        ↓ async
+DecisionCompletion
+        ↓
+Simulation-owned Decision Inbox
+        ↓
+next reducer snapshot that can see it
+        ↓
+generation / validation / correction
+        ↓
+accepted-plan queue
+```
+
+Promise resolve / worker message / provider callback 只允许 enqueue completion。即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
 
 Browser 不应持有模型密钥。
 
-### 6.1 Completion time
+### 6.1 Provider timeout 与 Battle gameplay 分离
 
-Adapter 必须提供可信的真实完成时间，以满足 `DEC-001`。
+Provider/network timeout 是 infrastructure policy。例如模型服务在其配置的时限后返回 timeout，可以产生：
 
-例如：
-
-```text
-model completed = 480 ms
-host callback handled = 700 ms
-→ Battle 应按可信 480 ms 映射 dueTick
+```ts
+{
+  type: "failed",
+  requestId,
+  generation,
+  error
+}
 ```
 
-不能只把 JavaScript callback 真正被调度到的时刻当“模型思考时间”。
+这个 failure 和普通 completion 一样进入 Decision Inbox，由后续 Tick reducer 消费。
 
-`completedAtMonotonicMs` 必须和 Simulation 的 BattleClock raw monotonic source 处于同一 time domain。若 provider/worker/远端服务只能提供自己的时钟，Host/Adapter 必须先把 completion fact 映射到 BattleClock 可解释的 monotonic timestamp；不得把不同进程的 `performance.now()` 等不可比较值直接跨层传递。
+v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-clock latency 计算 `dueTick`。Battle pause 时 LLM 可以完成并 enqueue，但没有 Tick 就不会产生 gameplay effect。
 
-### 6.2 Battle deadline 与 provider timeout 分离
-
-不同模型、网络、供应商可以有自己的 provider/network timeout 或 product limit，但不得修改 Core 的 Battle gameplay deadline，也不得自己计算 `dueTick`。
-
-```text
-Decision Adapter
-  └─ trusted completedAtMonotonicMs / infrastructure failure
-                         ↓
-Simulation
-  └─ Battle clock + pause history + generation/deadline
-                         ↓
-                  dueTick / stale / retry
-```
-
-Pause/background 时间是否计入 Decision latency 只由 Simulation 按 `TIME-004` 处理。
-
-### INTEGRATION-OPEN-003 — Decision Adapter API — OPEN
+### INTEGRATION-OPEN-003 — Decision Adapter provider detail — OPEN
 
 已经确定：
 
 - 一次 `decide()` = 一次 attempt；
-- Adapter 返回与 BattleClock 同一 monotonic time domain 的 trusted completion fact，不返回 `dueTick`；
-- Battle deadline / stale / correction retry 属于 Simulation；
-- Simulation 通过 AbortSignal 取消失效 attempt。
+- DecisionCompletion 不带 gameplay timing / dueTick；
+- completion callback 只 enqueue 到 Simulation-owned inbox；
+- stale / validation / correction / accepted-plan queue 属于 Simulation；
+- Simulation 通过 AbortSignal best-effort 取消失效 attempt。
 
 尚未冻结：
 
@@ -369,7 +373,7 @@ Pause/background 时间是否计入 Decision latency 只由 Simulation 按 `TIME
 - model/service limit；
 - credential/authorization wiring。
 
-## 7. Player Guidance
+## 7. Player Guidance## 7. Player Guidance
 
 未来玩家作为“训练师”给我方下一次 Decision 提供临时 Guidance。
 
@@ -481,8 +485,9 @@ Pause/background policy 已由 Core `TIME-004` 冻结：
 
 - Host 明确暂停 Battle，或 App/Host 进入 background 状态时，Battle monotonic clock 一起冻结；
 - pause 期间不推进 `currentTick`；
-- pause 期间现实时间不计入 Decision latency、movement、windup、recovery 或 protection；
-- resume 后从原逻辑时刻继续，不补算 pause 期间 Tick。
+- pause 期间 movement、windup、recovery、protection 等 Tick 生命周期不推进；
+- Decision completion 可以在 pause 期间进入 inbox，但不会被消费、不会接受 Plan、不会启动 Action；
+- resume 后从原逻辑时刻继续，不补算 pause 期间 Tick；已排队 completion 在后续实际 Tick 消费。
 
 Core 的逐 Tick catch-up 仍保留，但只用于 Battle clock **仍在运行**时 scheduler/event loop 晚醒的情况。
 
@@ -546,7 +551,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership以及 completion timestamp 的 clock-domain 约束已确定；
+- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/inbox/Tick-boundary/retry ownership已确定；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
