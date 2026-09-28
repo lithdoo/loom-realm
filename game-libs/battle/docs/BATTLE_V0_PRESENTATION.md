@@ -309,7 +309,7 @@ Actor collection 的语义要求：
 - v0 Simulation 按 `BATTLE-001` 只产生两个 Actor；
 - Presentation 本身按 collection 建节点/更新，不把两个固定 slot 写进 renderer；合法 v0 Simulation 仍只会提供两个 Actor；
 - 同一 Battle session 的 roster 在 v0 初始化后保持稳定；
-- `effectIds` 是本场所有可引用 BattleEffect id 的去重、字典序稳定数组。
+- `effectIds` 是本场所有可引用 BattleEffect id 的去重、按 ECMAScript ordinal string order 稳定排列数组。
 
 不进入 Scene Init 的 Simulation 内部字段包括：
 
@@ -688,7 +688,7 @@ RenderDomain (zIndex = 0)
     ├── key = battle:actor:<actorId>
     │   tag = lr-battle-actor
     │   attrs = { slot: "world" }
-    │   ... one node per scene actor, actorId lexicographic order
+    │   ... one node per scene actor, ActorId ordinal string order
     │
     ├── key = battle:effects
     │   tag = lr-battle-effects
@@ -703,7 +703,7 @@ RenderDomain (zIndex = 0)
 
 - root 永远只有 `battle:view`；
 - actor key 只由 `actorId` 构造，不含 ally/enemy slot；`ActorId` 的 1..115 UTF-8 byte Contract 保证 `battle:actor:<actorId>` 不超过 Renderer 128-byte node-key 上限；
-- actor children 按 actorId 字典序稳定排列；
+- actor children 按 Contracts 定义的 ActorId ordinal string order 稳定排列；
 - `battle:effects` 位于所有 actor node 之后；
 - `battle:hud` 最后；
 - roster 在 session 中不变，所以 tree structure 在 first render 后不变；
@@ -905,7 +905,7 @@ type BattleHudRenderData = {
 
 未来 N Actor 版本可以改变 HUD 的排版/滚动/分组策略，但不需要把 HUD Contract 从“两个固定 slot”迁移为 collection。
 
-HUD key/tag/data 已冻结为 `battle:hud / lr-battle-hud / BattleHudRenderData`。Browser v0 按 `team` 排序：ally 在左、enemy 在右；单方内部未来若出现多个 Actor，再按 actorId 排序。v0 显示文本固定为 `Ally <hp> / <maxHp>` 与 `Enemy <hp> / <maxHp>`。
+HUD key/tag/data 已冻结为 `battle:hud / lr-battle-hud / BattleHudRenderData`。Browser v0 按 `team` 排序：ally 在左、enemy 在右；单方内部未来若出现多个 Actor，再按 Contracts 定义的 ActorId ordinal string order 排序。v0 显示文本固定为 `Ally <hp> / <maxHp>` 与 `Enemy <hp> / <maxHp>`。
 
 HP 更新应与本次 visual commit 的其他节点使用同一个 `visualEpoch`。Browser HUD 不根据 HP 数值推导 damage、death、protection 或 interruption。
 
