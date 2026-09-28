@@ -52,7 +52,9 @@ Schema version 应代表**结构兼容性**，不应因为 Fireball damage 从 5
 type ActorId = string
 ```
 
-所有 Actor collection 都以 `actorId` 作为语义 identity。数组/迭代顺序不代表 ally/enemy、先后手或裁决优先级；需要 deterministic 顺序时必须显式按稳定 key 排序。
+v0 `ActorId` 必须是合法 Unicode scalar string，UTF-8 byte length 为 **1..115**。该限制既保证 identity 非空，也保证冻结的 RenderNode key `battle:actor:<actorId>` 永远不超过 Renderer 的 128-byte node-key 上限（固定前缀 `battle:actor:` 占 13 bytes）。
+
+所有 Actor collection 都以 `actorId` 作为语义 identity。数组/迭代顺序不代表 ally/enemy、先后手或裁决优先级；需要 deterministic 顺序时必须显式按稳定 key 排序。排序按 `actorId` 字符串的确定性 lexicographic order 执行，不依赖 insertion order。
 
 v0 仍由 `BATTLE-001` 限制为恰好两个 combat Actor。Contract 使用 collection shape 是为了避免把 cardinality 编码进跨层 ABI，不表示 v0 支持多人。
 
@@ -256,9 +258,15 @@ type BattleConfig = {
 }
 ```
 
-`actors` 是 actorId-addressed collection；`InitialActorPlacement` 必须携带唯一 `actorId` 与显式 v0 side/team identity，数组顺序不承载 side 语义。
+`actors` 是 actorId-addressed collection；`InitialActorPlacement` 必须携带满足 ActorId 约束的唯一 `actorId` 与显式 v0 side/team identity，数组顺序不承载 side 语义。
 
-v0 serialization/schema 可以直接约束 `actors.length === 2`，validator 也必须按 `BATTLE-001` 拒绝其他 cardinality。这里使用 collection 而不是 TypeScript tuple，是为了不把“2”扩散到 Runtime/Presentation 的数据结构。
+v0 serialization/schema 必须同时约束：
+
+- `actors.length === 2`；
+- 两个 `actorId` 唯一；
+- team 恰好为 **1 个 `ally` + 1 个 `enemy`**。
+
+validator 必须按 `BATTLE-001` 拒绝其他 cardinality、重复 actorId、双 ally 或双 enemy。这里使用 collection 而不是 TypeScript tuple，是为了不把“2”扩散到 Runtime/Presentation 的数据结构。
 
 `tickDurationMs=200` 和默认 `maxPathSteps=6` 已冻结。
 
@@ -664,7 +672,7 @@ interface DecisionPort {
 
 `generation` / `requestId` 是 Simulation 生成的 correlation identity；Decision implementation 只能原样返回，不拥有其生命周期。
 
-`completedAtMonotonicMs` 是 Adapter 必须提供的受信完成时间事实。Simulation 自己维护 Runtime timing record，例如：
+`completedAtMonotonicMs` 是 Adapter 必须提供的受信完成时间事实，并且必须处于 **与 BattleClock raw monotonic source 相同的 time domain**。Provider/worker/远端服务自己的不可比较 monotonic origin 不得直接写入该字段；若 completion 来自其他时钟域，Adapter/Host 必须先映射成 BattleClock 可解释的 timestamp。Simulation 自己维护 Runtime timing record，例如：
 
 ```ts
 type DecisionTiming = {
@@ -702,7 +710,7 @@ BattleResult
 ## 18. Contracts OPEN
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
-- Decision failure enum / provider-specific metadata exact shape；Decision attempt/timing ownership 已确定。
+- Decision failure enum / provider-specific metadata exact shape；Decision attempt/timing ownership与 completion timestamp 的 clock-domain 约束已确定。
 - Runtime 的其余 exact discriminated-union payload / enum names。
 - Observation history budget 与 prompt-facing representation。
 
