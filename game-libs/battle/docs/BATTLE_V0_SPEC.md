@@ -834,4 +834,4 @@ collisionRetryCount
 
 **当前 Core gameplay 没有未冻结 OPEN 项。**
 
-Content subject/version、BattleEffect 视觉细节、Decision Adapter API、Host/Browser 接口等仍分别在 Contracts / Integration 文档维护为 OPEN；这些不改变已经冻结的 Core gameplay 语义。
+Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。

@@ -542,12 +542,13 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 ## 14. Integration OPEN 汇总
 
-仍未冻结的集成项只包括：
+Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership 已确定。
-- **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
+- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership已确定；
+- **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
+- Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-Presentation 实现前置 `@loomrealm-game/tile-presentation` 已落地，Map 已迁移；Battle Presentation 仍未实现。viewport clamp/default/min/max 是否也升级为 shared entry policy 仍需后续明确。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation spec 已冻结，代码尚未实现。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
