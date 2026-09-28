@@ -544,7 +544,7 @@ type BattleSceneInit = {
 
 这里描述的是**本 Battle Scene 的稳定视觉资源/identity**，不重复携带会随 Runtime 改变的 tile、direction、HP 或 movement。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
 
-Presentation 可以据此加载 Map/Character/BattleEffect 等静态视觉资源；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。`effectIds` 必须是本 Battle 可能由 Skill 引用的 BattleEffect id 的去重、按字典序稳定排列集合；Presentation 在 initialize 阶段解析 `struct.BattleEffect` 与其 Graphics。
+Presentation 可以据此加载 Map/Character/BattleEffect 等静态视觉资源；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。`effectIds` 必须是本 Battle 可能由 Skill 引用的 BattleEffect id 的去重、按 ECMAScript ordinal string order 稳定排列集合；不得使用 locale-sensitive 排序。Presentation 在 initialize 阶段解析 `struct.BattleEffect` 与其 Graphics。
 
 Runtime 必须在 Battle clock 启动前先完成 `initialize(scene)`，再发布 initial Projection（通常为 tick 0），从而避免 SceneInit 与 RenderProjection 同时维护两份 tile/direction/HP 初值。
 
