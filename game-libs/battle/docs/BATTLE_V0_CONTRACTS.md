@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**Design only / Contract 草案**。本文定义 Battle v0 的 canonical 数据边界，不代表 TypeScript/Zod/JSON Schema 已实现。
+> 状态：**Presentation contract FROZEN FOR IMPLEMENTATION；其余 Contract 仍可含明确标注的 OPEN**。本文定义 Battle v0 canonical 数据边界；冻结表示 v0 实现不得自行改变字段语义或 ownership，不代表 TypeScript/Zod/JSON Schema 已经落地。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
@@ -96,6 +96,16 @@ type ResourceRef = {
 ```
 
 实现时应优先复用仓库已有公共类型，而不是再定义一套平行结构。
+
+### MapRef — FROZEN
+
+```ts
+type MapRef = {
+  mapId: integer
+}
+```
+
+`mapId` 必须是正 safe integer，并对应 `struct.Map` 的 record key。Presentation 不接受 Map Runtime instance。
 
 ## 4. Battle Content
 
@@ -193,35 +203,42 @@ target/effect type
 
 Range Schema 校验遵循 `SKILL-001`。
 
-### 4.3 BattleEffect
+### 4.3 BattleEffect — Presentation v0 FROZEN
 
-BattleEffect 只属于 Presentation Content。
+BattleEffect 只属于 Presentation Content。v0 record subject 固定为 `struct.BattleEffect`，record key 必须等于 `id`。
 
-当前概念结构：
+exact v0 shape：
 
-```json
-{
-  "id": "firebolt",
-  "image": {
-    "namespace": "resource.Graphics",
-    "key": "BattleEffects/Firebolt"
-  },
-  "anchor": "tile-center",
-  "timing": {
-    "fade_in_ticks": 1,
-    "hold_ticks": 2,
-    "fade_out_ticks": 1
+```ts
+type BattleEffectContent = {
+  id: string
+  image: {
+    namespace: "resource.Graphics"
+    key: string
+  }
+  anchor: "tile-center"
+  timing: {
+    fade_in_ticks: integer
+    hold_ticks: integer
+    fade_out_ticks: integer
   }
 }
 ```
 
-BattleEffect 的视觉 timing 不得改变 Skill windup/recovery/damage timing。
+约束：
 
-### CONTRACT-OPEN-002 — BattleEffect v1 Schema — OPEN
+- `id` 非空且等于 record key；
+- `image.key` 必须以 `BattleEffects/` 开头；
+- 三个 timing 字段均为非负 safe integer；
+- 三个 timing 之和必须大于 0；
+- v0 只有 `"tile-center"` anchor；
+- visual duration = 对应 ticks × 本场 `tickDurationMs`；
+- BattleEffect timing 只控制视觉，不得改变 Skill windup/recovery/damage timing；
+- v0 不支持 outcome-specific image、projectile、particle、shader 或 animation editor。
 
-尚未冻结 exact image/timing/anchor 字段，以及 outcome-specific visuals。
+hit/immune/miss/invalid 是否创建 transient visual 的固定 policy 在 Presentation/Integration FROZEN 规范中定义。
 
-## 5. BattleConfig
+## 5. BattleConfig## 5. BattleConfig
 
 概念：
 
@@ -515,18 +532,19 @@ type BattleSceneInit = {
     team: Team
     character: ResourceRef
   }>
+  effectIds: readonly string[]
 }
 ```
 
 这里描述的是**本 Battle Scene 的稳定视觉资源/identity**，不重复携带会随 Runtime 改变的 tile、direction、HP 或 movement。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
 
-Presentation 可以据此加载 Map/Character 等资源并建立稳定 Render Tree；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。Runtime 必须在 Battle clock 启动前先完成 `initialize(scene)`，再发布 initial Projection（通常为 tick 0），从而避免 SceneInit 与 RenderProjection 同时维护两份 tile/direction/HP 初值。
+Presentation 可以据此加载 Map/Character/BattleEffect 等静态视觉资源；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。`effectIds` 必须是本 Battle 可能由 Skill 引用的 BattleEffect id 的去重、按字典序稳定排列集合；Presentation 在 initialize 阶段解析 `struct.BattleEffect` 与其 Graphics。
 
-### 14.2 RenderProjection
+Runtime 必须在 Battle clock 启动前先完成 `initialize(scene)`，再发布 initial Projection（通常为 tick 0），从而避免 SceneInit 与 RenderProjection 同时维护两份 tile/direction/HP 初值。
 
-RenderProjection 是非权威视觉数据。
+### 14.2 RenderProjection — FROZEN
 
-概念：
+RenderProjection 是非权威视觉数据。下面 shape 是 v0 exact cross-layer ABI：
 
 ```ts
 type RenderProjection = {
@@ -567,40 +585,43 @@ v0 不从 Simulation 向 Presentation 发送 camera `focusHint`。Camera framing
 
 Simulation 可以通过 PresentationPort 发布已经由 reducer 决定的 Projection/表现事实；这不赋予 Presentation Rule authority，也不得把动画完成当作 Simulation commit 条件。
 
-### CONTRACT-OPEN-003 — Projection / Presentation exact serialization — OPEN
+### CONTRACT-PRES-003 — Projection / Presentation serialization — FROZEN
 
-已经确定的 v0 结构不变量：
+v0 固定：
 
 - Actor 以 `actorId` collection 表示，顺序不承载 identity；
 - Actor movement 是 actor-local projection，不存在独立 `movements[]` join；
-- `BattleSceneInit` 只携带稳定 Scene/Actor identity/resource facts；初始及后续动态状态都走 `RenderProjection`；
-- Simulation Projection 携带 `sceneEpoch + tick` 等 Battle publication identity；`visualEpoch` 是 Presentation-local，不跨层；
+- `BattleSceneInit` 只携带稳定 Scene/Actor/effect identity/resource facts；初始及后续动态状态都走 `RenderProjection`；
+- Simulation Projection 携带 `sceneEpoch + tick`；`visualEpoch` 是 Presentation-local，不跨层；
 - `effectStarts[]` 是 one-shot effect start facts，不是 active-effect snapshot；
 - v0 不输出 camera `focusHint`；
-- Presentation lifecycle verbs 统一为 `initialize / render / pause / resume / close`。
+- Presentation lifecycle verbs 固定为 `initialize / render / pause / resume / close`；
+- 所有字段均为 required；需要“无值”的字段使用显式 `null`，不得通过字段缺失表达状态。
 
-仍未冻结的是 exact serialization 字段 optionality/命名、Browser RenderNode data ABI 与 effect lifecycle 细节。
+`ARCH-005` 的边界同时冻结：Presentation module 可独立实现/测试；Simulation 只依赖共享 Port，不依赖 Browser concrete implementation；业务 Subsystem 不承担逐 Tick Projection 转发职责。
 
-无论最终 API shape 如何，`ARCH-005` 的边界已经冻结：Presentation module 可独立实现/测试；Simulation 只依赖共享 Port，不依赖 Browser concrete implementation；业务 Subsystem 不承担逐 Tick Projection 转发职责。
-
-## 15. SkillEffectProjection
-
-概念：
+## 15. SkillEffectProjection — FROZEN
 
 ```ts
 type SkillEffectProjection = {
   effectId: string
-  sceneEpoch: integer
   result: "hit" | "immune" | "miss" | "invalid"
   effect: string
-  tile?: GridPosition
+  tile: GridPosition | null
   startTick: integer
 }
 ```
 
-`miss / invalid` 是否产生可见效果属于 Presentation policy。
+约束：
 
-## 16. DecisionPort / DecisionTiming
+- `effectId` 在一个 Battle session 内唯一；
+- `effect` 必须存在于 `BattleSceneInit.effectIds`；
+- `startTick` 是产生该 outcome 的 Simulation tick；
+- 有逻辑 anchor 时 `tile` 为对应格；不存在合法逻辑 anchor 时显式为 `null`；
+- Presentation 不从该结构反推 damage、interrupt、death 或其他 gameplay transition；
+- hit/immune/miss/invalid 的 v0 可见性 policy 在 Presentation FROZEN spec 中固定。
+
+## 16. DecisionPort / DecisionTiming## 16. DecisionPort / DecisionTiming
 
 DecisionPort 的职责是“一次调用完成一次 attempt”，不拥有 Battle deadline / retry policy。
 
@@ -682,9 +703,7 @@ BattleResult
 
 ## 18. Contracts OPEN
 
-- **CONTRACT-OPEN-001**：Content subject/version、字段命名、key/id 对齐、引用编码。
-- **CONTRACT-OPEN-002**：BattleEffect v1 Schema。
-- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact serialization、Browser RenderNode data ABI 与 effect visual lifecycle 细节；actor collection、actor-local movement、Presentation-local visualEpoch、one-shot effectStarts、无 camera hint、Presentation lifecycle verbs 已确定。
+- **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
 - Decision failure enum / provider-specific metadata exact shape；Decision attempt/timing ownership 已确定。
 - Runtime 的其余 exact discriminated-union payload / enum names。
 - Observation history budget 与 prompt-facing representation。
