@@ -506,17 +506,13 @@ type BattleSceneInit = {
     actorId: ActorId
     team: Team
     character: ResourceRef
-    tile: GridPosition
-    direction: Direction
-    hp: integer
-    maxHp: integer
   }>
 }
 ```
 
-这里描述的是“地图与 Actor 初始应该如何显示”。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
+这里描述的是**本 Battle Scene 的稳定视觉资源/identity**，不重复携带会随 Runtime 改变的 tile、direction、HP 或 movement。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
 
-Presentation 可以自行加载资源、创建 Sprite/Canvas node，并维护非权威视觉状态。
+Presentation 可以据此加载 Map/Character 等资源并建立稳定 Render Tree；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。Runtime 必须在 Battle clock 启动前先完成 `initialize(scene)`，再发布 initial Projection（通常为 tick 0），从而避免 SceneInit 与 RenderProjection 同时维护两份 tile/direction/HP 初值。
 
 ### 14.2 RenderProjection
 
@@ -566,6 +562,7 @@ Simulation 可以通过 PresentationPort 发布已经由 reducer 决定的 Proje
 
 - Actor 以 `actorId` collection 表示，顺序不承载 identity；
 - Actor movement 是 actor-local projection，不存在独立 `movements[]` join；
+- `BattleSceneInit` 只携带稳定 Scene/Actor identity/resource facts；初始及后续动态状态都走 `RenderProjection`；
 - Scene/Projection 携带 `sceneEpoch / visualEpoch` 所需 fencing；
 - v0 不输出 camera `focusHint`；
 - Presentation lifecycle verbs 统一为 `initialize / render / pause / resume / close`。

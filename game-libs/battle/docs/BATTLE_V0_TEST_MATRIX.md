@@ -17,6 +17,7 @@
 | T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 LLMDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
 | T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
+| T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
 
 ## 2. Time / Scheduler
 
@@ -144,6 +145,9 @@
 | T-PRES-003 | ARCH-003 | camera zoom/focus 改变 | 不改 Simulation State |
 | T-PRES-004 | STATE-001 | Sprite 插值位置 x=2.7 | Decision/Simulation 仍只看到 committed integer tile |
 | T-PRES-005 | ARCH-006, BATTLE-001 | 仅用 synthetic Presentation input 初始化 4 个唯一 actorId | Presentation 可创建 4 个 actor visual/HUD entry 且无固定 ally/enemy slot；这不使 v0 Simulation 接受 4 Actor |
+| T-PRES-006 | ARCH-003, ARCH-005 | Runtime 启动 Battle session | 先 await Presentation.initialize，再 render initial Projection，之后才启动 200ms Battle clock；SceneInit 不重复维护 tile/direction/HP 初值 |
+| T-PRES-007 | ARCH-003 | 正常 BattleResult 已 resolve 但 scene 尚未退出 | final Projection 保持可见；直到 battle.close() 才关闭 Presentation |
+| T-PRES-008 | CTRL-001 | RUNNING 状态直接调用 battle.close() | 等价于 cancel authority + cleanup；scheduler/late completion 无提交权，Presentation close 幂等 |
 
 ## 11. Result / Termination
 

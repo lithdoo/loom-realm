@@ -37,8 +37,8 @@
 Application / Subsystem
   ├─ choose/create Decision implementation
   ├─ choose/create Presentation implementation
-  ├─ create Simulation and inject required Ports/capabilities
-  └─ map Frame abort + Host pause/background + external services
+  ├─ create BattleRuntime and inject required Ports/capabilities
+  └─ after injection, only control BattleRuntime lifecycle
 ```
 
 它不负责 Battle scheduler，不调用公开 `tick()` 来实施战斗，也不在每个 Decision/Projection 之间承担规则转发。Simulation 根据自己的 Runtime 状态请求 Decision，并把已决定的视觉事实交给 Presentation Port。
@@ -59,17 +59,24 @@ PresentationPort
   close()
 
 BattleRuntime
-  start() -> Promise<BattleResult>
+  run() -> Promise<BattleResult>
   pause()
   resume()
   cancel()
+  close()
   getSnapshot()
   getReplay()
 ```
 
-`BattleRuntime` 的 public surface 不需要暴露“由业务每 200 ms 调一次”的 `tick()`。实现内部可以有可测试的 `processTick(currentTick)`、FakeClock 或 scheduler seam，但 Tick ownership 仍属于 Simulation。
+`run()` 是 one-shot session entry，命名与现有 Map Handler 的 `run()` 习惯对齐；同一 Runtime 实例不得第二次 run。它在 Presentation 初始化与 initial Projection 发布完成后才启动 Battle clock。
+
+`BattleRuntime` 的 public surface 不暴露“由业务每 200 ms 调一次”的 `tick()`。实现内部可以有可测试的 `processTick(currentTick)`、FakeClock 或 scheduler seam，但 Tick ownership 仍属于 Simulation。
+
+Runtime 对注入的 Decision/Presentation lifecycle 负责：业务注入完成后不直接调用 `presentation.pause/resume/close`。
 
 Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、LLMDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
+
+`BattlePresentationHandler` 应直接实现 `PresentationPort`；不需要额外建立一个只做 method forwarding 的 adapter。
 
 Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 仍严格要求两个 combat Actor；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
 
@@ -327,7 +334,7 @@ InputTarget / Host / Guidance exact contract 尚未冻结。
 
 Battle 可以被 LoomRealm Frame/Subsystem 组合使用，但 `game-libs/battle` 本身不等于一个预先构建好的独立 Subsystem 进程。
 
-业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause()`、resume → `battle.resume()`。真正的 Battle 内部终止/冻结语义仍由 Simulation 执行。
+业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause()`、resume → `battle.resume()`、Frame/session 离开 → `battle.close()`。真正的 Battle 内部终止/冻结语义仍由 Runtime 执行。
 
 Frame abort / Battle cancel 遵循 `CTRL-001`：
 
@@ -335,9 +342,9 @@ Frame abort / Battle cancel 遵循 `CTRL-001`：
 abort/cancel
 → 立即失效 Battle authority/epoch
 → 停 scheduler
-→ best-effort cancel LLM/resource
-→ Presentation cleanup
-→ Frame cleanup
+→ best-effort cancel Decision/resource
+→ Runtime 调用 Presentation.close()
+→ Runtime 进入 CLOSED
 ```
 
 不等待下一个 200 ms Tick。
@@ -351,13 +358,35 @@ terminal gate
 → Simulation 产生最终权威状态 / BattleResult
 → 发布 final RenderProjection
 → 停止 Battle scheduler / 新 Action
-→ Presentation 保持最终画面
+→ BattleRuntime.run() resolve
+→ Runtime 保持 SETTLED + final visual
 → 业务离开 Battle scene
-→ Presentation.close()
-→ Frame cleanup
+→ battle.close()
+→ Runtime 调用 Presentation.close()
+→ CLOSED
 ```
 
 Simulation 不等待 final animation ACK；“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
+
+推荐 Runtime 生命周期：
+
+```text
+CREATED
+  │ run()
+  ▼
+INITIALIZING
+  │ initialize + initial render
+  ▼
+RUNNING ⇄ PAUSED
+  │ normal result
+  ▼
+SETTLED
+  │ close()
+  ▼
+CLOSED
+```
+
+`cancel()` / abort / fatal failure 可从 INITIALIZING、RUNNING、PAUSED 直接进入 CLOSED。`close()` 幂等；如果在仍运行时调用，应等价于“取消 authority + cleanup”，而不是留下半活跃 scheduler。
 
 ## 9. Pause / Background
 

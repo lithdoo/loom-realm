@@ -67,7 +67,7 @@ Contracts 不重新定义玩法规则。
 
 - 参考现有 Map 包的 Builder/Handler 工程模式；
 - Presentation 与 SubsystemScope / Frame / RenderDomain 的接入；
-- canonical `initialize / render / pause / resume / close` lifecycle；
+- canonical `initialize / render / pause / resume / close` Presentation lifecycle，以及 Runtime 对其 lifecycle ownership；
 - Battle session 生命周期；
 - 多 Battle 并发与同屏布局边界；
 - `sceneEpoch / visualEpoch / motionId` 视觉 fencing；

@@ -38,7 +38,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 - v0 严格双 Actor 同时行动，无传统交替回合；Actor cardinality 是 v0 validation rule，跨层与 Runtime 使用 actorId-addressed collection，禁止用数组 slot 表达 identity；
 - Simulation 是唯一业务权威；
 - Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports，不依赖彼此的 concrete implementation；
-- Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；
+- Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；public session 采用 one-shot `run()`，并由 Runtime 统一拥有注入后的 Decision/Presentation lifecycle；
 - Simulation 可以通过注入的 DecisionPort / PresentationPort 使用具体组件，但不等待 Browser 动画/ACK 推进规则；Presentation 可用 Scene/Projection 数据独立初始化和测试；
 - 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；

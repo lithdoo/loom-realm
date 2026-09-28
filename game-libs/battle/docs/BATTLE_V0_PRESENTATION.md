@@ -204,7 +204,7 @@ export class BattlePresentationBuilder {
 ## 6. 建议的最小 Handler 接口
 
 ```ts
-export interface BattlePresentationHandler {
+export interface BattlePresentationHandler extends PresentationPort {
   initialize(
     scene: BattleSceneInit,
   ): Promise<void>
@@ -228,11 +228,11 @@ export interface BattlePresentationHandler {
 - `pause()/resume()`：冻结/恢复视觉时间，不产生任何 Battle Rule；
 - `close()`：终止本 session 的视觉生命周期并释放 RenderDomain/resource/listener。
 
-这五个 lifecycle verbs 作为 v0 Presentation canonical surface 统一使用；后续 exact TypeScript export/type detail 可以调整，但不再并行维护 `apply/dispose` 第二套术语。
+这五个 lifecycle verbs 作为 v0 Presentation canonical surface 统一使用；`BattlePresentationHandler` 本身就是业务注入 Simulation 的 `PresentationPort` concrete implementation，不再增加一层只做转发的 Presentation adapter。后续 exact TypeScript export/type detail 可以调整，但不再并行维护 `apply/dispose` 第二套术语。
 
 ## 7. initialize(scene)
 
-建议初始输入只包含建立画面所需事实。
+Scene Init 只包含建立稳定 Scene/资源身份所需事实；所有会变化的 Actor visual state 统一从 RenderProjection 进入。
 
 概念：
 
@@ -249,10 +249,6 @@ type BattleActorRenderInit = {
   actorId: string
   team: Team
   character: ResourceRef
-  tile: GridPosition
-  direction: Direction
-  hp: number
-  maxHp: number
 }
 ```
 
@@ -287,16 +283,28 @@ scope.content: Map / Tileset / Autotile / Character resources
     ↓
 scope.viewport: initial layout
     ↓
-buildInitialRenderState()
+build stable Render Tree / resource identity
     ↓
 scope.createRenderDomain(initial)
     ↓
 subscribe viewport
+    ↓
+READY_FOR_INITIAL_PROJECTION
 ```
 
 `initialize()` 可以异步，因为资源准备天然可能异步。
 
-正常设计是 Presentation 初始化完成后，Simulation 才启动本场 Battle clock；Battle 已运行后，不得等待 Browser 动画完成来推进 gameplay。
+Runtime 的启动顺序固定为：
+
+```text
+await presentation.initialize(scene)
+        ↓
+presentation.render(initialProjection)
+        ↓
+start Battle clock / scheduler
+```
+
+因此 SceneInit 不需要复制 initial tile/direction/HP。Battle 已运行后，Simulation 也不得等待 Browser 动画完成来推进 gameplay。
 
 ## 8. render(projection)
 
@@ -529,11 +537,13 @@ session-local visual state
 
 `close()` 后实例不可重新 initialize。
 
-Frame abort / Battle cancel / fatal Presentation failure 进入即时 cleanup。
+Presentation 被注入 `BattleRuntime` 后，生命周期 ownership 归 Runtime；Application 不再直接驱动 `presentation.pause/resume/close`。
 
-正常 BattleResult 不等于立即 `close()`：Simulation 应先发布 final Projection 并停止规则推进；Presentation 保持 final visual state。真正离开 Battle scene 时，由上层生命周期调用 `close()`。这样最后一击、死亡状态和 HUD 最终 HP 不会因 Result 产生的同一时刻 cleanup 被直接抹掉。
+Frame abort / Battle cancel / fatal Presentation failure 由 Runtime 进入即时 cleanup。
 
-BattleResult 与失败语义仍由 Simulation/业务 composition 决定，不由 Presentation 决定。
+正常 BattleResult 不等于立即关闭 Presentation：Simulation 先发布 final Projection 并停止规则推进；Runtime 进入 settled 状态并保持 final visual。真正离开 Battle scene 时，Application 调用 `battle.close()`，再由 Runtime 调用 `presentation.close()`。这样最后一击、死亡状态和 HUD 最终 HP 不会因 Result 产生的同一时刻 cleanup 被直接抹掉。
+
+`presentation.close()` 自身保持幂等，以便 Runtime 的 cancel/failure/close 路径安全收敛。BattleResult 与失败语义仍由 Simulation/业务 composition 决定，不由 Presentation 决定。
 
 ## 13. 与 Subsystem 的实际联动
 
@@ -1208,7 +1218,13 @@ defineSubsystem((scope) => ({
         presentation,
       })
 
-    return await battle.run()
+    try {
+      return await battle.run()
+    } finally {
+      // frame 离开即结束本 Battle session；
+      // Runtime 统一释放 Presentation / Decision / scheduler resources。
+      battle.close()
+    }
   },
 }))
 ```
@@ -1225,7 +1241,7 @@ playEffect()
 RenderProjection forwarding loop
 ```
 
-Battle clock/tick 属于 Simulation；Projection 到 RenderDomain 的翻译属于 Presentation。
+Battle clock/tick 属于 Simulation；Projection 到 RenderDomain 的翻译属于 Presentation。业务在注入后只操作 `BattleRuntime`，不再直接操作 Presentation lifecycle。
 
 ## 17. Presentation 实现 Gate
 
