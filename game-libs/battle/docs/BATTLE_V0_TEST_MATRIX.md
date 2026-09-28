@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core + Presentation FROZEN Acceptance Matrix；实现未完成**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
+> 状态：**Core + Presentation FROZEN Acceptance Matrix；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED，Core Simulation/Decision 尚未实现**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
 >
 > 尚未冻结的真实 LLM provider、Guidance/Host wiring 不在本矩阵中被实现代码自行假设。
 
@@ -142,6 +142,7 @@
 | T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
 | T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
 | T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
+| T-CTRL-005 | RESULT-001 | Presentation resize timer/internal callback 出现已分类 async fatal | Presentation 立即 cleanup 并只完成一次 `failure` channel；Runtime 观察后停止 authority并归约为 Battle failure；不得成为 unhandled callback exception |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
@@ -178,6 +179,10 @@
 | T-PRES-026 | ARCH-003 | hit/immune effect 与 actor、priority tile 位于同一 world 区域 | effect 作为 world-space overlay 始终绘制在 battlefield tile/actor 之上；HUD 独立，不参与 world overlay |
 | T-PRES-027 | ARCH-003 | 超大合法 viewport 使 required +1-tile view payload 超过 Renderer capacity guard | 不 clamp、不截断、不 chunk；整次 visual commit 以 PRESENTATION_COMMIT_FAILED 失败且不产生 partial visualEpoch |
 | T-PRES-028 | ARCH-003, TIME-004 | animated Autotile 无 suffix / `[N]` suffix，期间 pause/resume | 默认 250ms/frame；`[N]` 为 N*50ms/frame；pause 冻结 visual time，resume 从冻结点继续 |
+| T-PRES-029 | ARCH-003 | resource/decode 延迟 >200ms，期间连续多个 visual commit | Character 与 Tileset/Autotile 的同 identity 请求共享 in-flight Promise，最终显示且 decoded Image 复用；seq fencing 不造成 starvation；reject 后允许 retry |
+| T-PRES-030 | ARCH-003, ARCH-005 | synthetic Scene/Projection 驱动真实 BattlePresentationHandler | Handler 自建 RenderDomain，数据经 RenderManager → renderer-data → RendererRenderStore → WebProjector 到 lr-battle DOM；movement/effect/resize/close 可见 |
+| T-PRES-031 | ARCH-003 | package build 后通过 Browser/HTTP 加载 Battle CSS | `dist/browser/battle.css` 存在、package export 正确、请求非 404 |
+| T-PRES-032 | ARCH-003 | first full state 与 later update 分别做 capacity preflight | full state 使用 16384 node count；update 使用 4096 node operations并检查 prospective state；两者不混用 |
 
 
 ## 11. Result / Termination

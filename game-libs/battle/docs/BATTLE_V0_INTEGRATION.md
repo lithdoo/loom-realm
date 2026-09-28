@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Design only / Integration 草案**。本文说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成。
+> 状态：**Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Core Runtime/Decision integration 仍为草案**。本文说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -52,6 +52,7 @@ DecisionPort
   decide(DecisionRequest, AbortSignal) -> Promise<DecisionCompletion>
 
 PresentationPort
+  readonly failure: Promise<PresentationFailure>
   initialize(BattleSceneInit)
   render(RenderProjection)
   pause()
@@ -77,6 +78,8 @@ Runtime 对注入的 Decision/Presentation lifecycle 负责：业务注入完成
 Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、LLMDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
 
 `BattlePresentationHandler` 应直接实现 `PresentationPort`；不需要额外建立一个只做 method forwarding 的 adapter。
+
+`failure` 是最小的 Presentation async fatal channel：Runtime 在 active session 中观察它，但 Presentation 只报告 failure fact，不创建或选择 `BattleResult`。channel one-shot；Presentation 在报告前先停止自己的 visual authority/cleanup；Runtime 才拥有停止 gameplay authority并把它归约为 `failure` 的职责。显式 close 后迟到 callback 不得完成该 channel。
 
 Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 严格要求两个 combat Actor，并且恰好为 1 个 `ally` + 1 个 `enemy`；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
 
@@ -177,7 +180,7 @@ Battle 不得把以下模块当作 Battle 权威：
 
 ## 3. Presentation 集成
 
-Presentation 的规范性实现合同见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档当前状态为 **FROZEN FOR IMPLEMENTATION**，负责 Render Tree、Browser ABI、坐标/camera/viewport/effect/lifecycle 的 exact v0 行为；本 Integration 文档负责其外部 LoomRealm/Host 组合边界，不再把 Presentation exact ABI 留给实现自行决定。
+Presentation 的规范性实现合同见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档当前状态为 **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**，负责 Render Tree、Browser ABI、坐标/camera/viewport/effect/lifecycle 的 exact v0 行为；本 Integration 文档负责其外部 LoomRealm/Host 组合边界，不再把 Presentation exact ABI 留给实现自行决定。
 
 Presentation 只负责显示，并且必须可以脱离 Decision/Simulation concrete implementation 独立初始化与测试。
 
@@ -474,6 +477,11 @@ render / RenderDomain 同步 fatal
 → cleanup
 → run() = failure
 
+resize/resource/internal callback 的异步 terminal fatal
+→ Presentation cleanup + resolve one-shot `presentation.failure`
+→ Runtime 观察后 stop authority
+→ run() = failure
+
 Browser 可降级的异步视觉资源失败
 → fallback / diagnostic
 → 不改变 gameplay，不终止 Battle
@@ -521,15 +529,14 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle Runtime/Presentation 代码当前仍未实现；但 Core gameplay 与 Presentation v0 implementation spec 已达到 FROZEN 状态。
+Battle v0 Presentation 已完成 closed-loop qualification；Core Simulation、Decision 与完整 Battle Runtime 仍未实现。
 
-已知工程项：
+已验证工程状态：
 
-- 根 `package.json` 通过 `game-libs/*` 识别 Battle 和已落地的 `@loomrealm-game/tile-presentation`；
-- Battle 合入时根 `package-lock.json` 尚未做对应同步验证；
-- Runtime 开发后必须单独验证 `npm ci`、build、unit test、Browser E2E。
-
-文档更新不能被描述成“构建/测试已经通过”。
+- 根 `package.json` 通过 `game-libs/*` 识别 Battle 和 `@loomrealm-game/tile-presentation`；
+- 根 `package-lock.json` 已通过干净 `npm ci`；
+- `npm run test:battle` 明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle unit/Browser E2E；
+- Battle package dry-run tarball 包含 `dist/browser/battle.browser.js` 与 `dist/browser/battle.css`。
 
 ## 13. 推荐实施顺序
 
@@ -539,10 +546,10 @@ Battle Runtime/Presentation 代码当前仍未实现；但 Core gameplay 与 Pre
 3. 实现 frozen DecisionPort + Mock/Script Decision
 4. 跑 frozen-rule deterministic Test Matrix
 5. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
-6. 按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现 Presentation
+6. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
 7. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
 8. 接真实 LLM Decision Adapter，再接 Guidance / Host
-9. 验证 package-lock / npm ci / unit / Browser E2E
+9. Presentation 已完成：验证 package-lock / npm ci / unit / Browser E2E；未来 Runtime 实现仍需自己的 qualification
 ```
 
 Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
@@ -556,6 +563,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation spec 已冻结，代码尚未实现。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 已冻结、实现并完成 closed-loop qualification；Core Simulation/Decision/full Runtime 仍未实现。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。

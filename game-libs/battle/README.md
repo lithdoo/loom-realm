@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Presentation IMPLEMENTED + TESTED；Core gameplay 尚未实现**。当前包已提供冻结的 Presentation contracts、Builder/Handler、Browser assets、synthetic acceptance tests 与 Browser E2E；Simulation、Decision、完整 Battle Subsystem orchestration 仍不在本阶段范围内。
+> 状态：**Battle v0 Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Core gameplay 尚未实现**。当前包已提供冻结的 Presentation contracts、Builder/Handler、Browser assets、synthetic acceptance tests、真实 Handler→Browser transport E2E 与干净环境 qualification；Simulation、Decision、完整 Battle Runtime/Subsystem orchestration 仍不在本阶段范围内。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -15,7 +15,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
 - **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
-- **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN FOR IMPLEMENTATION**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
+- **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
 - **[BATTLE_V0_DESIGN.md](./docs/BATTLE_V0_DESIGN.md)** — 文档索引、旧章节迁移表和历史说明。
 
@@ -101,6 +101,10 @@ Content/Contracts schema
 
 ## Workspace 注意
 
-根 `package.json` 通过 `game-libs/*` 识别 Battle 包，但根 `package-lock.json` 同步与 `npm ci` 仍需在实现阶段单独验证。
+根 `package.json` 通过 `game-libs/*` 识别 Battle 包，根 `package-lock.json` 已通过干净 `npm ci` 验证。官方 Presentation qualification 命令是：
 
-本次文档重构不代表 Battle Runtime、build、unit test 或 Browser E2E 已完成。
+```text
+npm run test:battle
+```
+
+该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle unit/Browser E2E。这里的 closed-loop qualified 只指 Battle v0 Presentation；Core Simulation、Decision 与完整 Battle Runtime 仍未实现。

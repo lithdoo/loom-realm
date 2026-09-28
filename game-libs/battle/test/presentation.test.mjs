@@ -138,7 +138,7 @@ test("pause/resume and resize atomically advance visualEpoch without replace", a
 });
 
 test("invalid lifecycle, close cleanup, abort and late initialization are fenced", async () => {
-  const h = harness(); const handler = new BattlePresentationBuilder(h.scope, h.frame).build(); assert.throws(() => handler.pause(), { code: "PRESENTATION_INVALID_STATE" }); await handler.initialize(scene()); await assert.rejects(handler.initialize(scene()), { code: "PRESENTATION_INVALID_STATE" }); assert.throws(() => handler.pause(), { code: "PRESENTATION_INVALID_STATE" }); handler.render(projection()); handler.close(); handler.close(); handler.render(projection(1)); assert.equal(h.domains[0].closed, 1); assert.equal(h.listeners.size, 0);
+  const h = harness(); const handler = new BattlePresentationBuilder(h.scope, h.frame).build(); assert.throws(() => handler.pause(), { code: "PRESENTATION_INVALID_STATE" }); assert.throws(() => handler.resume(), { code: "PRESENTATION_INVALID_STATE" }); await handler.initialize(scene()); await assert.rejects(handler.initialize(scene()), { code: "PRESENTATION_INVALID_STATE" }); assert.throws(() => handler.pause(), { code: "PRESENTATION_INVALID_STATE" }); assert.throws(() => handler.resume(), { code: "PRESENTATION_INVALID_STATE" }); handler.render(projection()); handler.close(); handler.close(); handler.render(projection(1)); assert.equal(h.domains[0].closed, 1); assert.equal(h.listeners.size, 0);
   const delayed = harness(null); const pendingHandler = new BattlePresentationBuilder(delayed.scope, delayed.frame).build(); const pending = pendingHandler.initialize(scene()); pendingHandler.close(); await pending; assert.equal(delayed.domains.length, 0);
   const hostile = harness({ width: 640, height: 480 }, { scope: { createRenderDomain(state) { const domain = new Domain(state); domain.close = () => { throw new Error("teardown failed"); }; return domain; } } }); const bestEffort = new BattlePresentationBuilder(hostile.scope, hostile.frame).build(); await bestEffort.initialize(scene()); bestEffort.render(projection()); assert.doesNotThrow(() => bestEffort.close()); assert.doesNotThrow(() => bestEffort.close()); assert.equal(hostile.listeners.size, 0);
 });
@@ -221,6 +221,43 @@ test("subsequent renderer-capacity failure closes atomically without a partial v
   assert.throws(() => handler.render(projection(1, { effectStarts })), { code: "PRESENTATION_COMMIT_FAILED" });
   assert.equal(domain.updates.length, 0); assert.equal(domain.state.roots[0].data.visualEpoch, 1); assert.equal(domain.closed, 1);
   assert.doesNotThrow(() => handler.render(projection(2)));
+});
+
+test("async resize capacity fatal closes once and resolves the Runtime failure channel", async () => {
+  const width = 10_000, height = 16, values = Array(width * height * 3).fill(384);
+  const oversized = harness({ width: 640, height: 480 }, { content: { async record(namespace, key) {
+    if (namespace === "struct.Map") return { value: { tileset_id: 1, width, height, data: table(values, width, height, 3) }, contentVersion: version };
+    const value = records.get(`${namespace}:${key}`); if (!value) throw new Error("missing"); return { value, contentVersion: version };
+  } } });
+  const { h, handler } = await ready(oversized); handler.render(projection());
+  const domain = h.domains[0]; let notifications = 0;
+  handler.failure.then(() => { notifications += 1; });
+  h.emitViewport({ width: 10_000_000, height: 480 });
+  const failure = await Promise.race([
+    handler.failure,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("failure channel timed out")), 1_000)),
+  ]);
+  assert.equal(failure.code, "PRESENTATION_COMMIT_FAILED");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(notifications, 1); assert.equal(domain.updates.length, 0); assert.equal(domain.closed, 1); assert.equal(h.listeners.size, 0);
+  h.emitViewport({ width: 20_000_000, height: 480 });
+  await new Promise((resolve) => setTimeout(resolve, 130));
+  assert.equal(notifications, 1); assert.equal(domain.updates.length, 0);
+});
+
+test("async resize RenderDomain fatal is classified through the failure channel", async () => {
+  const h = harness();
+  h.scope.createRenderDomain = (state) => {
+    const domain = new Domain(state); domain.update = () => { throw new Error("async renderer down"); }; h.domains.push(domain); return domain;
+  };
+  const { handler } = await ready(h); handler.render(projection());
+  h.emitViewport({ width: 800, height: 600 });
+  const failure = await Promise.race([
+    handler.failure,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("failure channel timed out")), 1_000)),
+  ]);
+  assert.equal(failure.code, "PRESENTATION_COMMIT_FAILED"); assert.match(failure.message, /async renderer down/);
+  assert.equal(h.domains[0].closed, 1); assert.equal(h.listeners.size, 0);
 });
 
 test("normal terminal projection remains visible until explicit close", async () => {

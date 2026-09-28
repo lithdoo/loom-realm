@@ -1,5 +1,12 @@
 import { TILE_SIZE_PX, type TileViewportLayout } from "@loomrealm-game/tile-presentation";
-import type { ActorRenderProjection, ResolvedResourceRef } from "./contracts.js";
+import type {
+  ActorRenderProjection,
+  GridPosition,
+  MovementProjection,
+  RenderProjection,
+  ResolvedResourceRef,
+  SkillEffectProjection,
+} from "./contracts.js";
 
 export interface ProjectedTable { readonly dimensions: number; readonly xSize: number; readonly ySize: number; readonly zSize: number; readonly values: readonly number[] }
 export interface MapRecord { readonly tileset_id: number; readonly width: number; readonly height: number; readonly data: ProjectedTable }
@@ -55,4 +62,64 @@ export function projectTiles(source: LoadedBattleMap, cameraX: number, cameraY: 
   }
   return Object.freeze(result);
 }
-export function sameLayout(a: TileViewportLayout, b: TileViewportLayout): boolean { return JSON.stringify(a) === JSON.stringify(b); }
+
+function samePoint(left: GridPosition, right: GridPosition): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
+export function sameMovement(left: MovementProjection, right: MovementProjection): boolean {
+  return left.motionId === right.motionId
+    && samePoint(left.from, right.from)
+    && samePoint(left.to, right.to)
+    && left.startTick === right.startTick
+    && left.completeTick === right.completeTick;
+}
+
+export function sameActorProjection(left: ActorRenderProjection, right: ActorRenderProjection): boolean {
+  return left.actorId === right.actorId
+    && samePoint(left.tile, right.tile)
+    && left.direction === right.direction
+    && left.hp === right.hp
+    && left.maxHp === right.maxHp
+    && left.life === right.life
+    && (left.movement === null
+      ? right.movement === null
+      : right.movement !== null && sameMovement(left.movement, right.movement));
+}
+
+export function sameEffectProjection(left: SkillEffectProjection, right: SkillEffectProjection): boolean {
+  return left.effectId === right.effectId
+    && left.result === right.result
+    && left.effect === right.effect
+    && left.startTick === right.startTick
+    && (left.tile === null ? right.tile === null : right.tile !== null && samePoint(left.tile, right.tile));
+}
+
+export function sameProjection(left: RenderProjection, right: RenderProjection): boolean {
+  if (left.sceneEpoch !== right.sceneEpoch || left.tick !== right.tick
+    || left.actors.length !== right.actors.length
+    || left.effectStarts.length !== right.effectStarts.length) return false;
+  const leftActors = new Map(left.actors.map((actor) => [actor.actorId, actor]));
+  const leftEffects = new Map(left.effectStarts.map((effect) => [effect.effectId, effect]));
+  return right.actors.every((actor) => {
+    const previous = leftActors.get(actor.actorId);
+    return previous !== undefined && sameActorProjection(previous, actor);
+  }) && right.effectStarts.every((effect) => {
+    const previous = leftEffects.get(effect.effectId);
+    return previous !== undefined && sameEffectProjection(previous, effect);
+  });
+}
+
+export function sameLayout(a: TileViewportLayout, b: TileViewportLayout): boolean {
+  return a.windowWidth === b.windowWidth
+    && a.windowHeight === b.windowHeight
+    && a.barHeight === b.barHeight
+    && a.contentWidth === b.contentWidth
+    && a.contentHeight === b.contentHeight
+    && a.columns === b.columns
+    && a.rows === b.rows
+    && a.logicalWidth === b.logicalWidth
+    && a.logicalHeight === b.logicalHeight
+    && a.scaleX === b.scaleX
+    && a.scaleY === b.scaleY;
+}

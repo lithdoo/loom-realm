@@ -3,18 +3,31 @@ import type { Frame, RenderDomain, RenderDomainState, RenderDomainUpdate, Subsys
 import {
   compareActorId, validateBattleEffectContent, validateBattleSceneInit, validateRenderProjection,
   type ActorRenderProjection, type BattleEffectContent, type BattleSceneInit, type PresentationPort,
-  type RenderProjection, type ResolvedResourceRef, type SkillEffectProjection,
+  type PresentationErrorCode, type PresentationFailure, type RenderProjection,
+  type ResolvedResourceRef, type SkillEffectProjection,
 } from "./contracts.js";
-import { cameraFor, projectTiles, sameLayout, validateMap, validateTileset, type LoadedBattleMap } from "./presentation-semantics.js";
+import {
+  cameraFor, projectTiles, sameEffectProjection, sameLayout, sameMovement, sameProjection,
+  validateMap, validateTileset, type LoadedBattleMap,
+} from "./presentation-semantics.js";
 
-export type PresentationErrorCode = "PRESENTATION_INVALID_STATE" | "PRESENTATION_SCENE_MISMATCH" | "PRESENTATION_PROJECTION_CONFLICT" | "PRESENTATION_CONTENT_FAILED" | "PRESENTATION_COMMIT_FAILED" | "PRESENTATION_INVALID_DATA";
+export type { PresentationErrorCode } from "./contracts.js";
+
 export class BattlePresentationError extends Error {
   constructor(readonly code: PresentationErrorCode, message: string = code, options?: ErrorOptions) { super(message, options); this.name = "BattlePresentationError"; }
 }
 export interface BattlePresentationHandler extends PresentationPort {}
 type State = "NEW" | "INITIALIZING" | "INITIALIZED" | "READY" | "PAUSED" | "CLOSED";
 type EffectAsset = Readonly<{ content: BattleEffectContent; image: ResolvedResourceRef }>;
-const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+const encoder = new TextEncoder();
+const bytes = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength;
+const textBytes = (value: string) => encoder.encode(value).byteLength;
+const RENDER_MAX_NODES = 16_384;
+const RENDER_MAX_NODE_OPS = 4_096;
+const RENDER_MAX_NODE_DATA_BYTES = 262_144;
+const RENDER_MAX_KEY_BYTES = 128;
+const BATTLE_MAX_VIEW_DATA_BYTES = 196_608;
+const BATTLE_MAX_COMMIT_BYTES = 1_000_000;
 const safeProduct = (left: number, right: number, label: string): number => {
   const value = left * right;
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${label} exceeds the safe integer range`);
@@ -31,8 +44,6 @@ const resolved = (namespace: string, key: string, contentVersion: string): Resol
   }
   return Object.freeze({ namespace, key, contentVersion });
 };
-const canonicalProjection = (projection: RenderProjection) => JSON.stringify({ ...projection, actors: [...projection.actors].sort((a, b) => compareActorId(a.actorId, b.actorId)), effectStarts: [...projection.effectStarts].sort((a, b) => compareActorId(a.effectId, b.effectId)) });
-
 function contentFailure(error: unknown): BattlePresentationError { return error instanceof BattlePresentationError ? error : new BattlePresentationError("PRESENTATION_CONTENT_FAILED", error instanceof Error ? error.message : "Content preparation failed", { cause: error }); }
 function invalidData(error: unknown): BattlePresentationError { return error instanceof BattlePresentationError ? error : new BattlePresentationError("PRESENTATION_INVALID_DATA", error instanceof Error ? error.message : "Invalid presentation data", { cause: error }); }
 
@@ -40,9 +51,12 @@ class Handler implements BattlePresentationHandler {
   private state: State = "NEW"; private session = new AbortController(); private generation = 0;
   private scene?: BattleSceneInit; private loaded?: LoadedBattleMap; private actorRefs = new Map<string, ResolvedResourceRef>(); private effects = new Map<string, EffectAsset>();
   private layout?: TileViewportLayout; private domain?: RenderDomain; private unsubscribe?: () => void; private resizeTimer?: ReturnType<typeof setTimeout>; private pendingViewport?: ViewportSize;
-  private visualEpoch = 0; private lastTick = -1; private lastCanonical?: string; private projection?: RenderProjection; private seenEffects = new Map<string, string>(); private motionFacts = new Map<string, string>();
+  private visualEpoch = 0; private lastTick = -1; private projection?: RenderProjection; private seenEffects = new Map<string, SkillEffectProjection>(); private motionFacts = new Map<string, NonNullable<ActorRenderProjection["movement"]>>();
+  private resolveFailure!: (failure: PresentationFailure) => void; private failureReported = false;
+  readonly failure: Promise<PresentationFailure>;
   private readonly abortListener = () => this.close();
   constructor(private readonly scope: SubsystemScope, private readonly frame: Frame) {
+    this.failure = new Promise<PresentationFailure>((resolveFailure) => { this.resolveFailure = resolveFailure; });
     frame.signal.addEventListener("abort", this.abortListener, { once: true }); scope.signal.addEventListener("abort", this.abortListener, { once: true });
     if (frame.signal.aborted || scope.signal.aborted) this.close();
   }
@@ -93,31 +107,30 @@ class Handler implements BattlePresentationHandler {
     try { projection = validateRenderProjection(projection); } catch (error) { throw invalidData(error); }
     if (projection.sceneEpoch !== this.scene!.sceneEpoch) throw new BattlePresentationError("PRESENTATION_SCENE_MISMATCH");
     const roster = [...this.scene!.actors.map((a) => a.actorId)].sort(compareActorId), incoming = [...projection.actors.map((a) => a.actorId)].sort(compareActorId);
-    if (JSON.stringify(roster) !== JSON.stringify(incoming) || projection.effectStarts.some((effect) => !this.effects.has(effect.effect))) throw new BattlePresentationError("PRESENTATION_INVALID_DATA");
+    if (roster.length !== incoming.length || roster.some((actorId, index) => actorId !== incoming[index]) || projection.effectStarts.some((effect) => !this.effects.has(effect.effect))) throw new BattlePresentationError("PRESENTATION_INVALID_DATA");
     const inside = (point: { readonly x: number; readonly y: number }) => point.x < this.loaded!.map.width && point.y < this.loaded!.map.height;
     if (projection.actors.some((actor) => !inside(actor.tile) || (actor.movement !== null && (!inside(actor.movement.from) || !inside(actor.movement.to)))) || projection.effectStarts.some((effect) => effect.tile !== null && !inside(effect.tile))) throw new BattlePresentationError("PRESENTATION_INVALID_DATA");
     if (projection.tick < this.lastTick) return;
-    const canonical = canonicalProjection(projection);
     if (projection.tick === this.lastTick) {
-      if (canonical === this.lastCanonical) return;
+      if (this.projection !== undefined && sameProjection(projection, this.projection)) return;
       throw new BattlePresentationError("PRESENTATION_PROJECTION_CONFLICT");
     }
     for (const actor of projection.actors) if (actor.movement) {
-      const key = `${actor.actorId}\0${actor.movement.motionId}`, fact = JSON.stringify(actor.movement), previous = this.motionFacts.get(key);
-      if (previous !== undefined && previous !== fact) throw new BattlePresentationError("PRESENTATION_PROJECTION_CONFLICT"); this.motionFacts.set(key, fact);
+      const key = `${actor.actorId}\0${actor.movement.motionId}`, previous = this.motionFacts.get(key);
+      if (previous !== undefined && !sameMovement(previous, actor.movement)) throw new BattlePresentationError("PRESENTATION_PROJECTION_CONFLICT"); this.motionFacts.set(key, actor.movement);
     }
     const starts = this.consumeEffects(projection.effectStarts);
     const nextEpoch = this.visualEpoch + 1; if (!Number.isSafeInteger(nextEpoch)) throw this.failCommit(new Error("visualEpoch exhausted"));
     let payload: ReturnType<Handler["payloads"]>; try { payload = this.payloads(projection, nextEpoch, starts, this.state === "PAUSED"); } catch (error) { throw this.failCommit(error); }
     if (this.state === "INITIALIZED") {
-      const initial = this.renderState(payload); this.preflight(initial, payload.view);
+      const initial = this.renderState(payload); this.preflight(initial, payload.view, initial, "state");
       try { this.domain = this.scope.createRenderDomain(initial); } catch (error) { throw this.failCommit(error); }
       this.state = "READY";
     } else {
-      const update = this.renderUpdate(payload); this.preflight(update, payload.view);
+      const update = this.renderUpdate(payload); this.preflight(update, payload.view, this.renderState(payload), "update");
       try { this.domain!.update(update); } catch (error) { throw this.failCommit(error); }
     }
-    this.visualEpoch = nextEpoch; this.lastTick = projection.tick; this.lastCanonical = canonical; this.projection = projection;
+    this.visualEpoch = nextEpoch; this.lastTick = projection.tick; this.projection = projection;
   }
   pause(): void {
     if (this.state === "CLOSED" || this.state === "PAUSED") return; if (this.state !== "READY") throw new BattlePresentationError("PRESENTATION_INVALID_STATE");
@@ -134,7 +147,7 @@ class Handler implements BattlePresentationHandler {
     if (this.resizeTimer) clearTimeout(this.resizeTimer); this.resizeTimer = undefined; this.pendingViewport = undefined;
     const domain = this.domain; this.domain = undefined; try { domain?.close(); } catch {}
     this.effects.clear(); this.actorRefs.clear(); this.seenEffects.clear(); this.motionFacts.clear();
-    this.projection = undefined; this.lastCanonical = undefined; this.loaded = undefined; this.layout = undefined; this.scene = undefined;
+    this.projection = undefined; this.loaded = undefined; this.layout = undefined; this.scene = undefined;
   }
   private firstViewport(signal: AbortSignal): Promise<ViewportSize> {
     if (signal.aborted) return Promise.reject(new DOMException("Presentation closed", "AbortError"));
@@ -155,7 +168,10 @@ class Handler implements BattlePresentationHandler {
   }
   private onViewport(value: ViewportSize | null) {
     if (this.state === "CLOSED" || value === null) return; this.pendingViewport = Object.freeze({ width: value.width, height: value.height }); if (this.resizeTimer) clearTimeout(this.resizeTimer);
-    this.resizeTimer = setTimeout(() => { this.resizeTimer = undefined; this.settleResize(); }, RESIZE_SETTLE_MS);
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = undefined;
+      try { this.settleResize(); } catch (error) { this.reportAsyncFailure(error); }
+    }, RESIZE_SETTLE_MS);
   }
   private settleResize() {
     if (this.state === "CLOSED" || !this.pendingViewport || !this.layout) return;
@@ -165,15 +181,15 @@ class Handler implements BattlePresentationHandler {
   }
   private commitLocal(paused: boolean) {
     const nextEpoch = this.visualEpoch + 1; if (!Number.isSafeInteger(nextEpoch)) throw this.failCommit(new Error("visualEpoch exhausted"));
-    let payload: ReturnType<Handler["payloads"]>; try { payload = this.payloads(this.projection!, nextEpoch, [], paused); } catch (error) { throw this.failCommit(error); } const update = this.renderUpdate(payload); this.preflight(update, payload.view);
+    let payload: ReturnType<Handler["payloads"]>; try { payload = this.payloads(this.projection!, nextEpoch, [], paused); } catch (error) { throw this.failCommit(error); } const update = this.renderUpdate(payload); this.preflight(update, payload.view, this.renderState(payload), "update");
     try { this.domain!.update(update); } catch (error) { throw this.failCommit(error); } this.visualEpoch = nextEpoch;
   }
   private consumeEffects(values: readonly SkillEffectProjection[]) {
     const starts: SkillEffectProjection[] = [];
     for (const effect of values) {
-      const fact = JSON.stringify(effect), previous = this.seenEffects.get(effect.effectId);
-      if (previous !== undefined) { if (previous !== fact) throw new BattlePresentationError("PRESENTATION_PROJECTION_CONFLICT"); continue; }
-      this.seenEffects.set(effect.effectId, fact); if (effect.result === "hit" || effect.result === "immune") starts.push(effect);
+      const previous = this.seenEffects.get(effect.effectId);
+      if (previous !== undefined) { if (!sameEffectProjection(previous, effect)) throw new BattlePresentationError("PRESENTATION_PROJECTION_CONFLICT"); continue; }
+      this.seenEffects.set(effect.effectId, effect); if (effect.result === "hit" || effect.result === "immune") starts.push(effect);
     }
     return starts;
   }
@@ -187,12 +203,34 @@ class Handler implements BattlePresentationHandler {
   }
   private renderState(p: ReturnType<Handler["payloads"]>): RenderDomainState { return { zIndex: 0, roots: [{ key: "battle:view", tag: "lr-battle-view", attrs: {}, data: p.view as never, children: [...p.actors.map((data) => ({ key: `battle:actor:${data.actorId}`, tag: "lr-battle-actor", attrs: { slot: "world" }, data: data as never, children: [] })), { key: "battle:effects", tag: "lr-battle-effects", attrs: { slot: "world" }, data: p.effects as never, children: [] }, { key: "battle:hud", tag: "lr-battle-hud", attrs: { slot: "hud" }, data: p.hud as never, children: [] }] }] } }
   private renderUpdate(p: ReturnType<Handler["payloads"]>): RenderDomainUpdate { return { nodes: [{ key: "battle:view", data: { set: p.view as never } }, ...p.actors.map((data) => ({ key: `battle:actor:${data.actorId}`, data: { set: data as never } })), { key: "battle:effects", data: { set: p.effects as never } }, { key: "battle:hud", data: { set: p.hud as never } }] } }
-  private preflight(candidate: unknown, view: unknown) {
-    const value = candidate as { roots?: readonly { data: unknown; children: readonly { data: unknown }[] }[]; nodes?: readonly { data?: { set?: unknown } }[] };
-    const nodeData = value.roots ? value.roots.flatMap((root) => [root.data, ...root.children.map((child) => child.data)]) : (value.nodes ?? []).map((node) => node.data?.set);
-    if (bytes(view) >= 196_608 || nodeData.some((data) => bytes(data) > 262_144) || bytes(candidate) >= 1_000_000 || 3 + this.scene!.actors.length > 4_096) throw this.failCommit(new Error("Renderer capacity exceeded"));
+  private preflight(candidate: unknown, view: unknown, prospective: RenderDomainState, kind: "state" | "update") {
+    const updates = (candidate as { nodes?: readonly { key: string; data?: { set?: unknown } }[] }).nodes ?? [];
+    const stack = [...prospective.roots]; const keys: string[] = []; const nodeData: unknown[] = [];
+    while (stack.length > 0) {
+      const node = stack.pop()!; keys.push(node.key); nodeData.push(node.data); stack.push(...node.children);
+    }
+    if (bytes(view) >= BATTLE_MAX_VIEW_DATA_BYTES
+      || keys.length > RENDER_MAX_NODES
+      || (kind === "update" && updates.length > RENDER_MAX_NODE_OPS)
+      || keys.some((key) => textBytes(key) > RENDER_MAX_KEY_BYTES)
+      || nodeData.some((data) => bytes(data) > RENDER_MAX_NODE_DATA_BYTES)
+      || bytes(candidate) >= BATTLE_MAX_COMMIT_BYTES
+      || bytes(prospective) >= BATTLE_MAX_COMMIT_BYTES) {
+      throw this.failCommit(new Error("Renderer capacity exceeded"));
+    }
   }
   private failCommit(error: unknown) { const failure = new BattlePresentationError("PRESENTATION_COMMIT_FAILED", error instanceof Error ? error.message : "Render commit failed", { cause: error }); this.close(); return failure; }
+  private reportAsyncFailure(error: unknown): void {
+    if (this.failureReported) return;
+    let failure: BattlePresentationError;
+    if (error instanceof BattlePresentationError && error.code === "PRESENTATION_COMMIT_FAILED") failure = error;
+    else {
+      if (this.state === "CLOSED") return;
+      failure = this.failCommit(error);
+    }
+    this.failureReported = true;
+    this.resolveFailure(failure);
+  }
 }
 
 export class BattlePresentationBuilder {
@@ -201,8 +239,10 @@ export class BattlePresentationBuilder {
   build(): BattlePresentationHandler { if (this.built) throw new BattlePresentationError("PRESENTATION_INVALID_STATE"); this.built = true; return new Handler(this.scope, this.frame); }
 }
 
-export class NullPresentation implements PresentationPort { async initialize(_scene: BattleSceneInit) {} render(_projection: RenderProjection) {} pause() {} resume() {} close() {} }
+const pendingFailure = (): Promise<PresentationFailure> => new Promise(() => {});
+export class NullPresentation implements PresentationPort { readonly failure = pendingFailure(); async initialize(_scene: BattleSceneInit) {} render(_projection: RenderProjection) {} pause() {} resume() {} close() {} }
 export class RecordingPresentation implements PresentationPort {
+  readonly failure = pendingFailure();
   readonly scenes: BattleSceneInit[] = []; readonly projections: RenderProjection[] = []; paused = false; closed = false;
   async initialize(scene: BattleSceneInit) { this.scenes.push(scene); } render(projection: RenderProjection) { this.projections.push(projection); } pause() { this.paused = true; } resume() { this.paused = false; } close() { this.closed = true; }
 }

@@ -71,6 +71,19 @@ export interface RenderProjection {
   readonly effectStarts: readonly SkillEffectProjection[];
 }
 
+export type PresentationErrorCode =
+  | "PRESENTATION_INVALID_STATE"
+  | "PRESENTATION_SCENE_MISMATCH"
+  | "PRESENTATION_PROJECTION_CONFLICT"
+  | "PRESENTATION_CONTENT_FAILED"
+  | "PRESENTATION_COMMIT_FAILED"
+  | "PRESENTATION_INVALID_DATA";
+
+export interface PresentationFailure {
+  readonly code: PresentationErrorCode;
+  readonly message: string;
+}
+
 export interface BattleEffectContent {
   readonly id: string;
   readonly image: {
@@ -86,6 +99,7 @@ export interface BattleEffectContent {
 }
 
 export interface PresentationPort {
+  readonly failure: Promise<PresentationFailure>;
   initialize(scene: BattleSceneInit): Promise<void>;
   render(projection: RenderProjection): void;
   pause(): void;

@@ -1,6 +1,6 @@
 # Battle v0 Presentation Implementation Spec
 
-> 状态：**FROZEN FOR IMPLEMENTATION**。
+> 状态：**FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。
 >
 > 本文是 Battle v0 Presentation 的规范性实现合同。**Blocking Presentation OPEN = 0**：实现 agent 不得自行更换 public API、Render Tree、Node data ABI、坐标模型、camera、viewport policy、effect policy 或 lifecycle 语义。
 >
@@ -208,6 +208,8 @@ export class BattlePresentationBuilder {
 
 ```ts
 export interface BattlePresentationHandler extends PresentationPort {
+  readonly failure: Promise<PresentationFailure>
+
   initialize(
     scene: BattleSceneInit,
   ): Promise<void>
@@ -232,6 +234,8 @@ export interface BattlePresentationHandler extends PresentationPort {
 - `close()`：终止本 session 的视觉生命周期并释放 RenderDomain/resource/listener。
 
 这五个 lifecycle verbs 是 v0 Presentation canonical surface；`BattlePresentationHandler` 本身就是业务注入 Simulation 的 `PresentationPort` concrete implementation，不增加转发 adapter，也不允许 `apply/dispose` 第二套术语。
+
+`failure` 不是第六个 lifecycle verb，也不是 Browser ACK。它是每个 Handler session 独立的 one-shot async terminal channel：resize timer、resource completion 或其他 internal callback 中的 fatal 无法从原始 Runtime 调用栈同步抛出时，Handler 必须立即关闭自身 visual authority并通过该 Promise 暴露已分类 `PresentationFailure`。Runtime 观察它并独占最终 Battle failure mapping；Presentation 不决定 `BattleResult`。显式 close 后 channel 不得完成，同一 fatal 不得重复发送；同步 `render()/pause()/resume()` fatal 仍直接 throw。
 
 ### 6.1 Handler 状态机 — FROZEN
 
@@ -267,6 +271,7 @@ initialize failure / first-render failure / close during initialize
 - CLOSED 后 `render()` no-op，用于吸收 teardown race；不得重新创建 RenderDomain；
 - close during INITIALIZING 必须使所有迟到资源 Promise / viewport callback 失去提交权；
 - initialize 或首次 render fatal 后 Handler 进入 CLOSED，不允许复用。
+- async callback fatal 必须进入 CLOSED，并且 `failure` 恰好完成一次；不得成为 unhandled timer exception；
 
 实现至少提供以下机器可识别错误语义：
 
@@ -990,6 +995,7 @@ RenderNode key UTF-8 bytes <= 128
 single node RenderData JSON <= 262144 bytes
 whole render message <= 1048576 bytes
 RenderNode count <= 16384
+RenderDomainUpdate node operations <= 4096
 ```
 
 v0 使用与现有 Map 相同方向的保守 guard；这里的 serialized byte length 固定按 `new TextEncoder().encode(JSON.stringify(value)).byteLength` 计算：
@@ -1002,6 +1008,8 @@ serialized initial RenderDomain state / one update candidate < 1000000 bytes
 规则：
 
 - `ActorId` Contract 已保证 actor RenderNode key 不超 128 bytes；
+- initial full `RenderDomainState` 对 node count 使用 16384 hard limit；不得用 update operation limit 4096 代替；
+- `RenderDomainUpdate` 对 node operations 使用 4096 hard limit，并同时预检更新后 prospective state；
 - view 的 tile projection 仍使用 §14.3 冻结的“可视范围四周扩 1 tile”窗口，不允许为了塞进 payload 而静默缩成 0 margin；
 - v0 不引入 tile chunking、多 RenderNode 分片、streaming 或 silent truncation；
 - first render 若 required view/state 无法通过容量 guard，必须在创建 RenderDomain 前以 `PRESENTATION_COMMIT_FAILED` 失败；
@@ -1395,6 +1403,8 @@ Browser resource decode/load failure不反向修改 Simulation：
 - Tileset/Autotile image failure →对应 tile 使用可见 placeholder；
 - 均可产生 diagnostics，但不产生 Battle ACK。
 
+同一 Browser session 内，Character/Tileset/Autotile/BattleEffect 必须共用按 `namespace + key + contentVersion` 标识的 image cache。cache 同时保存 in-flight Promise 与 resolved decoded Image：并发请求共享同一个 Promise，完成后复用 decoded Image；失败 entry 必须移除以允许 retry。Blob URL 在单次 decode 完成后必须 revoke；close/disconnect 的迟到结果可进入 session cache，但不得提交到已经失效的 element/session。该 cache 不替代 RendererResourceClient 自己的 bytes cache。
+
 Content record/resource identity 在 subsystem Presentation initialize 阶段无法解析时属于 `PRESENTATION_CONTENT_FAILED`，Battle 不启动。
 
 Battle MUST NOT import/bind `lr-map-view / lr-map-sprite` 或 RPGMap Runtime contract。
@@ -1465,7 +1475,7 @@ Battle Browser Presentation / RenderDomain implementation 的 shared primitive G
 
 这是一项**渲染层实现前置任务**，不是 Battle Core gameplay 的前置任务。headless Simulation、DecisionPort 和 frozen-rule deterministic tests 不需要等待它。
 
-该 Gate 已完成；Battle package MUST 直接消费 shared layout implementation，不复制 `calculateLayout`。Presentation specification 已冻结，但代码尚未实现。
+该 Gate 已完成；Battle package 直接消费 shared layout implementation，不复制 `calculateLayout`。Presentation specification、实现、unit/Browser/transport qualification 均已完成。
 
 ## 18. 最低测试要求
 
@@ -1507,6 +1517,10 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 32. BattleEffect world overlay 在普通 tile、priority tile 与 actor visual 之上稳定绘制，camera/resize 后仍保持 world anchor；HUD 不受该 overlay 影响；
 33. required visible tile window 导致 `BattleViewRenderData` 或完整 state/update 超出 §14.2.4 guard 时，整次 commit 以 `PRESENTATION_COMMIT_FAILED` 失败，不 clamp viewport、不截断 tiles、不做 partial visualEpoch；
 34. Autotile 无 suffix 时每帧 250 ms，`[N]` suffix 使用 `N*50 ms`；pause/resume 冻结/恢复同一 visual timeline。
+35. resize timer/callback 中的 terminal fatal 通过 one-shot `failure` 暴露、Handler 自行关闭且不产生 unhandled exception；Runtime 保留最终 Battle failure ownership；
+36. resource/decode 延迟超过 200 ms 且连续收到多个 visual commit 时，同 identity 的 Character 与 Tileset/Autotile 最终仍显示、只共享一次 in-flight/decode，不因 seq fencing starvation；失败 identity 可在后续 commit retry；
+37. frozen Handler 创建的 RenderDomain 数据完整穿过 RenderManager → renderer-data → RendererRenderStore → WebProjector 到 `lr-battle-*` DOM，并覆盖 movement/effect/resize/close；
+38. `battle.css` 存在于 dist、由 package export 暴露且 Browser/HTTP qualification 可无 404 加载。
 
 ## 19. Freeze status / NON-GOALS
 
