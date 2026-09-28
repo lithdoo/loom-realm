@@ -18,6 +18,7 @@
 | T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 | T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
+| T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 
 ## 2. Time / Scheduler
 
@@ -31,6 +32,7 @@
 | T-TIME-006 | DEC-001 | 模型 deadline 前完成，但 Host callback 更晚处理 | 使用 trusted completion time，不看 callback 顺序 |
 | T-TIME-007 | TIME-004 | Battle pause/background 期间现实经过 30 秒 | currentTick 不推进，不产生 150 个 catch-up Tick |
 | T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；pause freeze 不改变正常 catch-up 规则 |
+| T-TIME-009 | DEC-003, TIME-004 | LLM provider 真实时间中完成，期间 Battle pause 10 秒 | Adapter 只返回 trusted completion timestamp；Simulation 用 Battle clock/pause history 计算 deadline/dueTick，pause 时间不计入 gameplay latency |
 
 ## 3. PlanSubmission
 
@@ -125,6 +127,10 @@
 | T-DEC-002 | SKILL-004 | Actor 在 recovery | Thinking 可以继续/开始 |
 | T-DEC-003 | SKILL-004 | recovery 中 Decision ready | Plan 可暂存，但不能启动新 Action |
 | T-DEC-004 | DEC-002 | hit 使 generation 失效后旧 LLM 返回 | 无提交权 |
+| T-DEC-005 | STATE-005, SKILL-004 | Actor 正在 recovery 时 Decision request thinking | actionState=recovery 与 decisionState=thinking 可同时存在，不互相覆盖 |
+| T-DEC-006 | STATE-005 | Actor moving 时启动 Decision | actionState=moving 与 decisionState=thinking 可同时存在 |
+| T-DEC-007 | DEC-003, PLAN-006 | 第一次 Decision completion 返回非法 Plan | Adapter 不自行重试；Simulation validation 后决定是否发起唯一 correction attempt |
+| T-DEC-008 | DEC-003 | DecisionCompletion 返回 trusted completion fact | Decision 不返回 dueTick/stale/timeout gameplay 判定；Simulation 统一计算 |
 
 ## 9. Control Plane / Replay
 
@@ -132,6 +138,8 @@
 | --- | --- | --- | --- |
 | T-CTRL-001 | CTRL-001 | 两个 Tick 之间 Frame abort | 立即失效 authority，不等下个 Tick |
 | T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
+| T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
+| T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
@@ -148,6 +156,9 @@
 | T-PRES-006 | ARCH-003, ARCH-005 | Runtime 启动 Battle session | 先 await Presentation.initialize，再 render initial Projection，之后才启动 200ms Battle clock；SceneInit 不重复维护 tile/direction/HP 初值 |
 | T-PRES-007 | ARCH-003 | 正常 BattleResult 已 resolve 但 scene 尚未退出 | final Projection 保持可见；直到 battle.close() 才关闭 Presentation |
 | T-PRES-008 | CTRL-001 | RUNNING 状态直接调用 battle.close() | 等价于 cancel authority + cleanup；scheduler/late completion 无提交权，Presentation close 幂等 |
+| T-PRES-009 | ARCH-003 | 没有新 Simulation Projection，仅 viewport resize | Simulation state/tick 不变；Presentation 自行推进 visualEpoch 并提交新 layout |
+| T-PRES-010 | ARCH-003 | Tick N 发布 effectStarts=[effect-1]，Tick N+1 effectStarts=[] | effect-1 继续按 Presentation-local visual timing 播放并自行 cleanup；Simulation 不维护 active visual effect |
+| T-PRES-011 | ARCH-003 | 同一个 effectId 因重复 render 再次出现 | 不重复创建 transient visual |
 
 ## 11. Result / Termination
 

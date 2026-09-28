@@ -49,7 +49,7 @@ exact TypeScript type/export detail 仍可在 Contracts/Integration 中收敛，
 
 ```ts
 DecisionPort
-  decide(DecisionRequest) -> Promise<DecisionCompletion>
+  decide(DecisionRequest, AbortSignal) -> Promise<DecisionCompletion>
 
 PresentationPort
   initialize(BattleSceneInit)
@@ -79,6 +79,33 @@ Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concre
 `BattlePresentationHandler` 应直接实现 `PresentationPort`；不需要额外建立一个只做 method forwarding 的 adapter。
 
 Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 仍严格要求两个 combat Actor；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
+
+### 1.2 Simulation 只依赖窄 capability
+
+Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；LLMDecision concrete implementation 也可以依赖 Host/service capability。
+
+Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。推荐概念：
+
+```ts
+const battle = new BattleSimulationBuilder({
+  clock,
+  signal,
+  decision,
+  presentation,
+}).build(config)
+```
+
+其中 Simulation 只知道：
+
+```text
+BattleClock
+AbortSignal
+DecisionPort
+PresentationPort
+BattleConfig / resolved Battle content
+```
+
+它不知道 RenderDomain、Viewport、DOM、InputListener 或 `frame.call()`。测试环境可直接注入 FakeClock + ScriptDecision + RecordingPresentation，不需要模拟整个 LoomRealm Subsystem。
 
 ## 2. RPGMap Resource 兼容
 
@@ -193,6 +220,8 @@ Simulation 不得等待动画完成后才提交移动、扣血、死亡或 Battl
 
 Simulation 可以在权威状态已经由 reducer 决定后调用 `PresentationPort.render(RenderProjection)`。这只发布表现事实；Simulation 不得等待动画完成、Promise 顺序或 Browser ACK 后才推进 Battle Rule。
 
+Simulation 不发布 `visualEpoch`。Presentation 将 RenderProjection 或本地 viewport/camera/layout 变化转换成 RenderDomain visual commit 时，自行维护 `visualEpoch`。
+
 ### 3.3 Camera
 
 Camera 完全属于 Presentation。
@@ -225,7 +254,7 @@ v0 当前最小方向：
 resource.Graphics/BattleEffects/<EffectName>
 ```
 
-Simulation 只输出 effect identity/result、逻辑目标位置（例如 tile/actor）与 startTick 等已经决定的事实；视觉 anchor、offset、fade timing 与 cleanup 由 BattleEffect Content / Presentation 自己解析。
+Simulation 只输出 effect identity/result、逻辑目标位置（例如 tile/actor）与 startTick 等已经决定的 **one-shot effect start fact**；视觉 anchor、offset、fade timing、active-effect 状态与 cleanup 由 BattleEffect Content / Presentation 自己解析。后续 Tick 不需要为“仍在播放”重复发送同一 effect。
 
 概念 Projection：
 
@@ -264,7 +293,7 @@ LLMDecision
 
 Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
-Decision module 只负责“如何从输入得到 Plan”。`decisionGeneration`、何时创建 Decision Request、deadline、trusted completion fact 到 `dueTick` 的映射、stale generation fencing、correction retry 与 Replay timing 都仍属于 Simulation 的 Runtime lifecycle；这些不能下放给业务 composition adapter。
+Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Battle deadline、trusted completion fact 到 `dueTick` 的映射、stale generation fencing、correction retry 与 Replay timing 都属于 Simulation 的 Runtime lifecycle；这些不能下放给业务 composition adapter。
 
 ## 6. LLM Decision Adapter
 
@@ -274,12 +303,12 @@ Adapter 最终需要解决：
 
 - LLM 请求位于哪个 Host 层；
 - authorization / credential；
-- AbortSignal / cancel；
+- 接收 Simulation 提供的 AbortSignal；
 - trusted completion timestamp；
-- deadline；
-- service/network error metadata；
-- structured output validation；
-- 同 generation 的一次 correction retry。
+- provider/network timeout 与 service error metadata；
+- structured output 解析为 `PlanSubmission` / failure。
+
+Adapter **不拥有** Battle deadline、`dueTick`、stale generation 判断或 correction retry。Correction 是否发生由 Simulation 按 `PLAN-006 / DEC-003` 决定；发生时 Simulation 发起第二个明确的 Decision attempt。
 
 Browser 不应持有模型密钥。
 
@@ -297,18 +326,36 @@ host callback handled = 700 ms
 
 不能只把 JavaScript callback 真正被调度到的时刻当“模型思考时间”。
 
-### 6.2 Model / Service 差异
+### 6.2 Battle deadline 与 provider timeout 分离
 
-不同模型、网络、供应商可以有不同 deadline/product limit，但不得修改 Core 中“completion fact → dueTick”的确定性规则。
+不同模型、网络、供应商可以有自己的 provider/network timeout 或 product limit，但不得修改 Core 的 Battle gameplay deadline，也不得自己计算 `dueTick`。
+
+```text
+Decision Adapter
+  └─ trusted completedAtMonotonicMs / infrastructure failure
+                         ↓
+Simulation
+  └─ Battle clock + pause history + generation/deadline
+                         ↓
+                  dueTick / stale / retry
+```
+
+Pause/background 时间是否计入 Decision latency 只由 Simulation 按 `TIME-004` 处理。
 
 ### INTEGRATION-OPEN-003 — Decision Adapter API — OPEN
 
+已经确定：
+
+- 一次 `decide()` = 一次 attempt；
+- Adapter 返回 trusted completion fact，不返回 `dueTick`；
+- Battle deadline / stale / correction retry 属于 Simulation；
+- Simulation 通过 AbortSignal 取消失效 attempt。
+
 尚未冻结：
 
-- exact Adapter interface；
-- error enum；
-- cancel guarantee；
-- default deadline；
+- `DecisionFailure` exact enum / provider metadata；
+- provider cancel guarantee；
+- provider/network timeout defaults；
 - model/service limit；
 - credential/authorization wiring。
 
@@ -386,7 +433,37 @@ SETTLED
 CLOSED
 ```
 
-`cancel()` / abort / fatal failure 可从 INITIALIZING、RUNNING、PAUSED 直接进入 CLOSED。`close()` 幂等；如果在仍运行时调用，应等价于“取消 authority + cleanup”，而不是留下半活跃 scheduler。
+`cancel()` / abort / fatal failure 可从 INITIALIZING、RUNNING、PAUSED 终止 active authority。`close()` 幂等；如果在仍运行时调用，应等价于“cancel authority + cleanup”，而不是留下半活跃 scheduler。
+
+### 8.1 run() 的单一结果通道
+
+可预期的 session 终止统一通过 `run(): Promise<BattleResult>` 返回：
+
+```text
+正常胜负             → ally win / enemy win / simultaneous defeat
+cancel / active close → cancelled
+已分类 Runtime/Presentation/Decision fatal → failure
+```
+
+不要同时维护“同一种失败既可能 `BattleResult.failure` 又可能 Promise rejection”两条业务通道。只有 programmer error / invariant violation（例如非法重复 `run()`、内部不变量被破坏）可以 throw/reject。
+
+Presentation failure 最低分类：
+
+```text
+initialize 所需关键资源失败
+→ Battle clock 尚未开始
+→ Runtime cleanup
+→ run() = failure
+
+render / RenderDomain 同步 fatal
+→ stop authority
+→ cleanup
+→ run() = failure
+
+Browser 可降级的异步视觉资源失败
+→ fallback / diagnostic
+→ 不改变 gameplay，不终止 Battle
+```
 
 ## 9. Pause / Background
 
@@ -462,7 +539,7 @@ Battle 当前仍是 design-only。
 仍未冻结的集成项只包括：
 
 - **INTEGRATION-OPEN-002**：BattleEffect Schema / outcome visuals / cleanup。
-- **INTEGRATION-OPEN-003**：Decision Adapter API/timing/error/cancel/defaults。
+- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/Battle timing/retry ownership 已确定。
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
 - Runtime 开始后还需处理 package-lock / build 验证。
 

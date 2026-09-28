@@ -70,7 +70,7 @@ Contracts 不重新定义玩法规则。
 - canonical `initialize / render / pause / resume / close` Presentation lifecycle，以及 Runtime 对其 lifecycle ownership；
 - Battle session 生命周期；
 - 多 Battle 并发与同屏布局边界；
-- `sceneEpoch / visualEpoch / motionId` 视觉 fencing；
+- `sceneEpoch / Presentation-local visualEpoch / actor-local motionId` 视觉 fencing；
 - Simulation 操作到 Projection/视觉 reconciliation 的映射；
 - Presentation 独立测试要求。
 

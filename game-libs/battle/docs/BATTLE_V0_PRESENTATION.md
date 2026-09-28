@@ -315,11 +315,10 @@ start Battle clock / scheduler
 ```ts
 type RenderProjection = {
   sceneEpoch: number
-  visualEpoch: number
   tick: number
 
   actors: readonly ActorRenderProjection[]
-  effects: readonly SkillEffectProjection[]
+  effectStarts: readonly SkillEffectProjection[]
 }
 ```
 
@@ -419,7 +418,7 @@ custom elements
 | move 被规则中断 | Simulation 已保留 origin；新 Projection 中 `movement` 消失 | 终止旧 visual motion 并收敛到当前 Projection |
 | HP 改变 | `hp` 改变 | 更新 HP 表现 |
 | Actor 死亡 | `life="dead"` | 表现死亡状态 |
-| skill resolve | 新的 `SkillEffectProjection` | 播放对应 transient effect |
+| skill resolve | 新的 `effectStarts[]` entry | 播放对应 transient effect |
 | protection/recovery | 如果没有专门视觉，则无 Presentation 字段 | 不做任何额外推导 |
 | Battle pause | `pause()` | 冻结插值/effect/camera 的视觉时间 |
 | Battle resume | `resume()` | 恢复视觉时间 |
@@ -455,12 +454,15 @@ Presentation 可以看到 HP 改变、movement 消失、hit effect 同时出现�
 
 Battle Presentation 建议参考 Map 已使用的视觉 fencing 思想，但不能照搬 Map 的“单 player motion”假设。
 
-Scene 级视觉身份：
+Ownership 明确区分：
 
 ```text
-sceneEpoch
-visualEpoch
+Simulation → sceneEpoch + tick + gameplay facts
+Presentation → visualEpoch
+Actor movement → actor-local motionId
 ```
+
+`visualEpoch` 不出现在 RenderProjection 中。Presentation 每次把 Simulation Projection、viewport resize 或 camera/layout 变化提交给 RenderDomain 时，自行推进 `visualEpoch`。
 
 Actor movement identity 则属于各 Actor 自己：
 
@@ -482,7 +484,7 @@ Actor A motionId=17 正在 Browser 插值
         ↓
 Simulation 中该 move 已经失效
         ↓
-发布更高 visualEpoch；Actor A 新 Projection 不再含 motionId=17
+收到更新的 Simulation Projection；Actor A 不再含 motionId=17，Presentation 随本次 visual commit 推进 visualEpoch
         ↓
 Presentation/Browser 旧 motion completion 变成 stale visual fact
         ↓
@@ -720,7 +722,8 @@ Battle 没有 RPGMap transition / NPC setting 这些具体状态，因此不复�
 viewport change
 → 记录 latest layout
 → settled 连续 resize 使用 RESIZE_SETTLE_MS = 100 ms 合并
-→ 原子发布一组一致 visualEpoch 的 layout/camera/HUD/actor visual facts
+→ Presentation 自行推进 visualEpoch
+→ 原子发布一组同 visualEpoch 的 layout/camera/HUD/actor visual facts
 ```
 
 Actor movement / effect animation **不是 resize blocker**。如果 resize 发生在 motion 中间，Presentation 在保持同一 actor-local `motionId` 和逻辑 progress 的前提下，按新 layout/camera 重新投影视觉坐标；不得暂停或修改 Simulation movement。
@@ -977,14 +980,14 @@ battle:effects
 tag = lr-battle-effects
 ```
 
-其 data 携带当前需要接收的 effect facts：
+其 data 携带本次 visual commit 新接收的 one-shot effect start facts：
 
 ```ts
 type BattleEffectsRenderData = {
   sceneEpoch: number
   visualEpoch: number
 
-  effects: readonly {
+  effectStarts: readonly {
     effectId: string
     effect: string
     result: SkillResolveResult
@@ -1005,11 +1008,16 @@ Map<effectId, ActiveVisualEffect>
 ```text
 新的 effectId
 → 创建 visual effect
+→ 加入 Presentation-local ActiveVisualEffect
 
-已接受过的 effectId
+后续 Simulation Projection
+→ 不需要重复携带“仍在播放”的 effect
+
+重复收到已接受 effectId
 → 不重复播放
 
 视觉生命周期结束
+→ 从 ActiveVisualEffect 删除
 → 清理 Browser 内部 canvas/div/resource
 ```
 
@@ -1033,7 +1041,7 @@ domain.update({
       },
     },
     {
-      key: "battle:actor:ally",
+      key: "battle:actor:<actorAId>",
       data: {
         set: {
           visualEpoch: 12,
@@ -1043,7 +1051,7 @@ domain.update({
       },
     },
     {
-      key: "battle:actor:enemy",
+      key: "battle:actor:<actorBId>",
       data: {
         set: {
           visualEpoch: 12,
@@ -1101,7 +1109,7 @@ Presentation 只执行 visual reconciliation；不得从“damage > 0”推导�
 
 ### 14.8 sceneEpoch / visualEpoch 一致性
 
-参考 Map 的 Browser fencing，建议一次视觉 commit 涉及的固定节点使用一致的：
+`sceneEpoch` 来自 Battle session；`visualEpoch` 由 Presentation 自己生成。参考 Map 的 Browser fencing，一次 Presentation visual commit 涉及的固定节点使用一致的：
 
 ```text
 sceneEpoch
@@ -1209,14 +1217,12 @@ defineSubsystem((scope) => ({
       ).build(/* ... */)
 
     const battle =
-      new BattleSimulationBuilder(
-        scope,
-        frame,
-      ).build({
-        config,
+      new BattleSimulationBuilder({
+        clock,
+        signal: frame.signal,
         decision,
         presentation,
-      })
+      }).build(config)
 
     try {
       return await battle.run()
@@ -1240,6 +1246,8 @@ interruptMovement()
 playEffect()
 RenderProjection forwarding loop
 ```
+
+这里的 `clock` 是业务提供给 Core 的窄 BattleClock capability（生产环境可包装 Host monotonic clock，测试使用 FakeClock），不是整个 SubsystemScope。
 
 Battle clock/tick 属于 Simulation；Projection 到 RenderDomain 的翻译属于 Presentation。业务在注入后只操作 `BattleRuntime`，不再直接操作 Presentation lifecycle。
 
@@ -1268,12 +1276,12 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 3. movement Projection 创建对应 motion；
 4. motion 正常结束后收敛 destination；
 5. 新 Projection 取消旧 motion 时只做 visual reconciliation，不执行 gameplay rule；
-6. 相同 Projection 重复 render 不重复产生一次性 effect；
-7. stale `sceneEpoch / visualEpoch / motionId` 不污染新状态；
+6. `effectStarts` 只携带新 effect；相同 Projection/effectId 重复 render 不重复产生一次性 effect；
+7. stale `sceneEpoch / Presentation-local visualEpoch / motionId` 不污染新状态；
 8. 与 Map 对相同 viewport 输入产生相同 barHeight/content/rows/columns/logical size/scale；
 9. viewport resize 使用 100 ms settle 合并；Actor 正在 movement/effect 时也可提交新 layout，并保持 motionId/progress，不等待全体静止；
 10. footer 高度与 Map 一致，并持续显示 v0 两个 Actor 的 current/max HP；
-11. HP Projection 更新在同一 visualEpoch 更新固定 HUD，不改变 Render Tree 结构；
+11. HP Projection 到来后，Presentation 在同一个新 visualEpoch 中更新相关 Actor/HUD，不改变 Render Tree 结构；
 12. pause/resume 冻结并恢复视觉时间；
 13. close 幂等，关闭 RenderDomain 并阻止 stale async write；
 14. 两个 PresentationHandler 同时存在时 visual/session state 不串场；
@@ -1282,14 +1290,14 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 17. Presentation projector/render-tree 的非 v0 结构性 fixture 使用 4 个唯一 actorId 时，可按 collection 生成 4 个 actor node/HUD entry，且不存在固定 ally/enemy slot；public v0 BattleConfig 仍由 BATTLE-001 限制为 2；
 18. 重复提交相同 effectId 不重复创建 transient visual；
 19. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
-20. 正常 Battle terminal 发布 final Projection 后保持最终画面，直到 scene owner 调用 close；cancel/abort 则立即 close；
+20. 正常 Battle terminal 发布 final Projection 后保持最终画面，直到 Application 调用 `battle.close()`、再由 Runtime 调用 Presentation close；cancel/abort 由 Runtime 立即 cleanup；
 21. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
 
 ## 19. 仍待冻结的 Presentation OPEN
 
 本文不关闭以下现有 OPEN：
 
-- `BattleSceneInit / RenderProjection / SkillEffectProjection` exact serialization / RenderNode data Schema；
+- `BattleSceneInit / RenderProjection / SkillEffectProjection` exact serialization / RenderNode data Schema；`visualEpoch` ownership 与 one-shot `effectStarts` semantics 已确定；
 - BattleEffect exact anchor/timing/outcome visuals；
 - Browser node/effect cleanup exact contract；
 - Render Tree 各 node 的 exact data Schema 与 Browser custom-element tag/key；actorId collection、稳定 HUD logical slot/node、Map-compatible footer geometry 与 current/max HP 内容已确定；
