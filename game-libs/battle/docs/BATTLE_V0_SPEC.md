@@ -226,20 +226,21 @@ TIME-003 的 catch-up 只用于**Battle clock 仍在运行时** scheduler/event 
 
 ### DEC-001 — Decision 延迟计入游戏时间 — FROZEN
 
-Decision/LLM 的真实耗时属于 Battle 时间。
+Decision/LLM 在 **Battle clock 正常运行期间**消耗的时间属于 Battle 时间；`TIME-004` 冻结期间的现实时间不计入 Decision gameplay latency。
 
-例如真实用时 500 ms，最早可在 600 ms / 3 Tick 边界使用。
+例如 Battle 未暂停且 Decision 真实用时 500 ms，最早可在 600 ms / 3 Tick 边界使用。
 
-Decision State 至少记录：
+Runtime 至少维护：
 
 ```text
-startedAtMonotonicMs
-completedAtMonotonicMs?
-deadlineMonotonicMs
+startedAtBattleTimeMs
+completedAtMonotonicMs?   // Adapter 提供的 trusted raw completion fact
+completedAtBattleTimeMs?  // Simulation 通过 BattleClock/pause history 映射
+deadlineBattleTimeMs
 dueTick?
 ```
 
-如果 `completedAt <= deadline`，即使宿主 callback 更晚才被处理，也算按时完成；timeout/ready 不能由 callback 先后顺序决定。
+Simulation 只用映射后的 Battle time 判断 deadline / dueTick。如果 `completedAtBattleTimeMs <= deadlineBattleTimeMs`，即使宿主 callback 更晚才被处理，也算按时完成；timeout/ready 不能由 callback 先后顺序决定。
 
 ### DEC-002 — 旧 generation 无提交权 — FROZEN
 

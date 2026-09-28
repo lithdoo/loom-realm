@@ -71,7 +71,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 - Content subject/version、key/id 和正式 Schema；
 - BattleEffect / RenderProjection exact shape；
-- Decision Adapter error/cancel/deadline 接口；
+- DecisionFailure/provider metadata、cancel guarantee、provider/network timeout 接口；
 - Guidance Host/InputTarget wiring。
 
 这些 OPEN 不得改变已经冻结的 Core gameplay 语义。
