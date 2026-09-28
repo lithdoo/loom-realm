@@ -1,7 +1,32 @@
 {
   "name": "@loomrealm-game/battle",
   "version": "0.1.0-alpha.0",
-  "private": true,
   "type": "module",
-  "description": "Design-only placeholder for the LoomRealm LLM-driven tactical battle game library"
+  "description": "LoomRealm Battle contracts and frozen v0 browser presentation",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./presentation": {
+      "types": "./dist/presentation.d.ts",
+      "import": "./dist/presentation.js"
+    },
+    "./browser/battle.browser.js": "./dist/browser/battle.browser.js",
+    "./browser/battle.css": "./dist/browser/battle.css"
+  },
+  "files": ["dist/"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-browser.mjs",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@loomrealm/subsystem": "0.1.0-alpha.0",
+    "@loomrealm-game/tile-presentation": "0.1.0-alpha.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
 }
