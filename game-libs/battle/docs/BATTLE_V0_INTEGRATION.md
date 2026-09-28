@@ -344,6 +344,21 @@ abort/cancel
 
 所有迟到 Decision/Event 都必须因 generation/epoch 校验失败而失去提交权。
 
+正常 BattleResult 使用不同的视觉生命周期：
+
+```text
+terminal gate
+→ Simulation 产生最终权威状态 / BattleResult
+→ 发布 final RenderProjection
+→ 停止 Battle scheduler / 新 Action
+→ Presentation 保持最终画面
+→ 业务离开 Battle scene
+→ Presentation.close()
+→ Frame cleanup
+```
+
+Simulation 不等待 final animation ACK；“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
+
 ## 9. Pause / Background
 
 Pause/background policy 已由 Core `TIME-004` 冻结：
