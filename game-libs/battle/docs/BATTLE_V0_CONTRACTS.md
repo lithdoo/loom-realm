@@ -54,7 +54,7 @@ type ActorId = string
 
 v0 `ActorId` 必须是合法 Unicode scalar string，UTF-8 byte length 为 **1..115**。该限制既保证 identity 非空，也保证冻结的 RenderNode key `battle:actor:<actorId>` 永远不超过 Renderer 的 128-byte node-key 上限（固定前缀 `battle:actor:` 占 13 bytes）。
 
-所有 Actor collection 都以 `actorId` 作为语义 identity。数组/迭代顺序不代表 ally/enemy、先后手或裁决优先级；需要 deterministic 顺序时必须显式按稳定 key 排序。排序按 `actorId` 字符串的确定性 lexicographic order 执行，不依赖 insertion order。
+所有 Actor collection 都以 `actorId` 作为语义 identity。数组/迭代顺序不代表 ally/enemy、先后手或裁决优先级；需要 deterministic 顺序时必须显式按稳定 key 排序。排序按 `actorId` 的 ECMAScript ordinal string order（等价于使用普通 `< / >` 比较 UTF-16 code units）执行，不使用 locale-sensitive `localeCompare()`，也不依赖 insertion order。
 
 v0 仍由 `BATTLE-001` 限制为恰好两个 combat Actor。Contract 使用 collection shape 是为了避免把 cardinality 编码进跨层 ABI，不表示 v0 支持多人。
 
