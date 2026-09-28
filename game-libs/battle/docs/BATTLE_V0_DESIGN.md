@@ -24,7 +24,7 @@
 - BattleResult / cancel；
 - deterministic replay；
 - v0 non-goals；
-- 尚未冻结的核心规则。
+- Core OPEN 状态（当前 gameplay blocking OPEN = 0）。
 
 所有已冻结 gameplay/runtime 语义必须以这里的 Rule ID 为准。
 
@@ -150,7 +150,7 @@ protection      命中后的有限免疫区间
 | §2 决策状态总表 | 本索引 + SPEC Rule IDs | 改为导航，不再重复定义规则 |
 | §3 三层架构/接口 | SPEC §1；CONTRACTS；INTEGRATION §1/3/8 | 按“权威 / 数据 / 集成”拆分 |
 | §4 Content 与素材 | CONTRACTS §4；SPEC §8；INTEGRATION §2/4 | 静态数据、规则语义、素材格式分离 |
-| §5 Tick/事件队列 | SPEC §5/10；INTEGRATION §9 | 核心时间规则保留，pause 移到集成 OPEN |
+| §5 Tick/事件队列 | SPEC §5/10；INTEGRATION §9 | 核心时间规则保留；pause 规则已冻结，只有 Host suspend/resume 来源映射仍属 Integration OPEN |
 | §6 Actor/代次/取消 | SPEC §4/5/9/11 | 归入 Runtime invariants / lifecycle |
 | §7 LLM→短期计划 | SPEC §6；CONTRACTS §6–9；INTEGRATION §5–6 | Decision 协议与 LLM Adapter 分离 |
 | §8 移动 | SPEC §7 | 成为唯一 Movement 规则源 |
@@ -217,7 +217,7 @@ protection      命中后的有限免疫区间
 
 **当前 Core gameplay 没有未冻结 OPEN 项。**
 
-仍存在的 OPEN 只属于 Contracts / Integration，例如 Content subject/version、BattleEffect/RenderProjection exact Schema、Decision Adapter、Guidance Host wiring；它们不得改变 Core 已冻结玩法语义。
+仍存在的 OPEN 只属于 Presentation 之外的 Contracts / Integration，例如非 Presentation Content subject/version、DecisionFailure/provider metadata/cancel/timeout defaults、Guidance Host wiring 与 Host suspend/resume 来源映射。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
@@ -231,7 +231,7 @@ protection      命中后的有限免疫区间
 5. DecisionPort + Mock/Script Decision
 6. TEST_MATRIX 全部 frozen-rule 场景
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
-8. PresentationPort + Presentation（直接依赖 shared tile-presentation）
+8. 按 FROZEN Presentation Agent contract 直接实现 PresentationPort + Browser Presentation（依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
 10. real LLM Decision Adapter + Guidance / Host E2E
 ```
