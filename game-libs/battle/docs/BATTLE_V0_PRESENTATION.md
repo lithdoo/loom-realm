@@ -1040,6 +1040,7 @@ Tile projection policy：
 - tuple 按 `z → y → x` 严格升序；
 - priority 0 tile depth = 0；
 - priority > 0 tile depth = `(y + priority + 1) * 32`；
+- Browser tile layer CSS z-index = `tileDepth * 2`；
 - Battle v0 不应用 RPGMap bridgeLevel 特例；
 - regular/autotile blit 与 Integration 中现有 Map resource format 一致；
 - world layer logical transform 为 `origin - camera`；外层再按 `scaleX/scaleY` 映射到 physical content；
@@ -1114,7 +1115,9 @@ Browser v0 Character policy：
 - active motion 前半段 pattern 1，后半段 pattern 2；
 - frame row = `(direction - 2) / 2`；
 - Character frame 可以大于 32×32，底部居中于 Actor tile；
-- actor visual depth 每帧由当前插值 worldY 计算为 `(round(worldY) + 32) * 2 + 1`；
+- actor logical depth 每帧按 Map-compatible 规则计算：`round(worldY) + 32 + (frameHeight > 32 ? 31 : 0)`；
+- actor CSS stack value = `logicalDepth * 2 + 1`；
+- tile layer CSS stack value = `tileDepth * 2`，因此同 depth 的 Character 稳定压在 Tile layer 上方；
 - dead actor 保留在 committed tile、停止 walking pattern，并使用 opacity `0.5`；
 - Presentation/Browser 不根据 HP/effect 推断 movement interruption。
 
@@ -1457,7 +1460,8 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 26. hit effect maxOpacity=1.0、immune=0.6、miss/invalid 不创建 visual；四种 outcome 都消费 effectId；
 27. initialize twice / pre-init render 等非法状态按 §6.1 失败；CLOSED 后 close/render race-safe；
 28. same tick conflicting Projection fail，older tick ignore，same tick equal replay no visualEpoch increment；
-29. Character/Tileset/Autotile/BattleEffect Browser decode failure只走 placeholder/skip，不改变 gameplay。
+29. Character/Tileset/Autotile/BattleEffect Browser decode failure只走 placeholder/skip，不改变 gameplay；
+30. 普通 32px 与高于 32px Character 都按 Map-compatible logical depth + odd character stack value 排序，priority tile 使用 even tile stack value，遮挡关系稳定。
 
 ## 19. Freeze status / NON-GOALS
 
