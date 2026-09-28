@@ -35,14 +35,14 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 已经冻结的核心边界包括：
 
-- v0 严格双 Actor 同时行动，无传统交替回合；Actor cardinality 是 v0 validation rule，跨层与 Runtime 使用 actorId-addressed collection，禁止用数组 slot 表达 identity；
+- v0 严格双 Actor 同时行动，无传统交替回合；validator 要求恰好 1 ally + 1 enemy；Actor cardinality 是 v0 rule，跨层与 Runtime 使用有界 ActorId-addressed collection，禁止用数组 slot 表达 identity；
 - Simulation 是唯一业务权威；
 - Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports，不依赖彼此的 concrete implementation；
 - Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；public session 采用 one-shot `run()`，并由 Runtime 统一拥有注入后的 Decision/Presentation lifecycle；Core 只依赖 BattleClock/AbortSignal/Ports 等窄 capability，不依赖整个 SubsystemScope/Frame；
 - Simulation 可以通过注入的 DecisionPort / PresentationPort 使用具体组件，但不等待 Browser 动画/ACK 推进规则；Presentation 可用 Scene/Projection 数据独立初始化和测试；
 - 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
-- Decision 每次调用只完成一次 Plan/failure attempt；Simulation 拥有 generation、Battle deadline、dueTick、stale 判定与 correction retry，并负责校验/执行 Plan；
+- Decision 每次调用只完成一次 Plan/failure attempt；completion timestamp 必须映射到 BattleClock 同一 monotonic time domain；Simulation 拥有 generation、Battle deadline、dueTick、stale 判定与 correction retry，并负责校验/执行 Plan；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
 - move_start 瞬间更新 direction；v0 保留独立原地 `turn` Action；
 - 同格竞争使用 `battleSeed` 的可回放等概率伪随机；
@@ -67,7 +67,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 此前关于 direction/turn、移动中致命受击、zero-damage hit、LOS、pause/background clock、stalemate 的问题都已经冻结进 SPEC。
 
-**Presentation v0 Blocking OPEN = 0。** Presentation 所需 BattleEffect / BattleSceneInit / RenderProjection / SkillEffectProjection、Render Tree、Browser data ABI、camera/viewport/effect/lifecycle 已冻结。
+**Presentation v0 Blocking OPEN = 0。** Presentation 所需 BattleEffect / BattleSceneInit / RenderProjection / SkillEffectProjection、Render Tree、Browser data ABI、camera/viewport/effect/lifecycle、effect stacking 与 Renderer capacity failure policy 已冻结。
 
 仍待冻结的内容只包括与 Presentation 完整落地无关的外部/后续细节，例如：
 
