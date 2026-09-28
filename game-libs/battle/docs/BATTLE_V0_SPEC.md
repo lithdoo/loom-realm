@@ -38,6 +38,8 @@ Presentation 决定“怎样显示”。
 
 屏幕插值坐标、掉帧、动画完成、camera、viewport 等不得反向修改权威位置、伤害、时间或胜负。
 
+`visualEpoch` 是 Presentation-local 的视觉一致性版本，只用于 RenderDomain / Browser fencing。Simulation 不生成、存储或解释 `visualEpoch`；Simulation 跨层发布的是 Battle `sceneEpoch`、逻辑 `tick` 与已经决定的 gameplay facts。
+
 ### ARCH-004 — 不复用 RPGMap Runtime — FROZEN
 
 Battle 可以消费 LoomRealm 已有 Map/Tileset/Autotile/Character 的 Content/Resource 形式，但不得把 RPGMap Runtime 的移动、计时器、Transfer/Bridge、探索状态作为 Battle 权威。
@@ -52,6 +54,7 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 - **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
 - **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
 - Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
+- Simulation Core 只接收所需的窄 capability（例如 Battle clock、AbortSignal、DecisionPort、PresentationPort、已解析 Battle config/content）；不得把 `SubsystemScope`、`Frame`、RenderDomain、Viewport 等 LoomRealm integration object 作为 Core Runtime 必需依赖。
 - 使用 Battle 的 Application/Subsystem 只负责选择 concrete implementation、构造/注入三层、提供 Host capability，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。它不是第四个 gameplay Runtime Layer，也不负责逐 Tick 实施 Battle。
 
 因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
@@ -168,6 +171,21 @@ Skill range 旋转读取 Simulation direction，而不是 Presentation Sprite �
 
 即使 windup/recovery 为 0，一个 Actor 在一个逻辑 Tick 内也最多启动一次新的主动 Action。
 
+### STATE-005 — Action lifecycle 与 Decision lifecycle 正交 — FROZEN
+
+Actor 的“身体正在做什么”和“Decision 是否正在思考/已 ready”是两条独立状态轴。
+
+因此以下组合都是合法的：
+
+```text
+moving   + thinking
+recovery + thinking
+idle     + thinking
+protected + thinking
+```
+
+`thinking` 不得作为与 `moving / windup / recovery` 互斥的 `ActionState` 分支。ActionState 只描述 gameplay Action lifecycle；DecisionState 单独描述 Decision Request / ready lifecycle。
+
 ## 5. 时间、事件队列与异步完成
 
 ### TIME-002 — Simulation 自有事件队列 — FROZEN
@@ -228,6 +246,22 @@ dueTick?
 Decision Request 绑定 `decisionGeneration`。
 
 generation 失效后，迟到响应只能记录诊断，不能再次提交计划。
+
+### DEC-003 — 一次 Decision 调用只完成一次 attempt — FROZEN
+
+一次 `DecisionPort.decide(...)` 只代表一次 Decision attempt。Decision implementation 可以返回 Plan 或 infrastructure/service failure，并提供受信的完成时间事实；它不得自行决定：
+
+```text
+Battle deadline 是否到期
+dueTick
+generation 是否 stale
+Plan 是否被 Simulation 接受
+是否还有 correction retry
+```
+
+Battle gameplay deadline、trusted completion fact 到 Battle-time / `dueTick` 的映射、stale generation fencing，以及 `PLAN-006` 的一次 correction retry 都由 Simulation 决定并记录 Replay。
+
+Provider/network timeout 可以作为 Decision implementation 自己的基础设施失败，但不得替代或修改 Battle gameplay deadline。Pause/background 对 Battle Decision 时间的冻结仍由 Simulation 按 `TIME-004` 处理。
 
 ## 6. Decision Protocol 与 PlanSubmission
 

@@ -416,7 +416,9 @@ type ActorRuntimeState = {
   hp: integer
   tile: GridPosition
   direction: Direction
+
   actionState: ActionState
+  decisionState: DecisionState
 
   acceptedPlanId?: string
   activeStep?: ActiveStep
@@ -428,20 +430,26 @@ type ActorRuntimeState = {
 }
 ```
 
-ActionState 至少要能区分：
+两条状态轴必须分开：
 
-```text
-thinking/idle
-moving
-windup
-recovery
-dead
-terminated
+```ts
+type ActionState =
+  | { type: "idle" }
+  | { type: "moving"; /* active step ref */ }
+  | { type: "windup"; /* action ref */ }
+  | { type: "recovery"; /* action ref */ }
+  | { type: "dead" }
+  | { type: "terminated" }
+
+type DecisionState =
+  | { type: "none" }
+  | { type: "thinking"; requestId: string; generation: integer }
+  | { type: "ready"; requestId: string; generation: integer }
 ```
 
-`turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
+exact payload 仍可在实现时正式化，但 `thinking` 不得进入 ActionState。这样才能表达 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 已冻结组合。
 
-最终 discriminated union 可在实现时正式化。
+`turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
 
 ## 12. BattleEvent
 
@@ -523,10 +531,9 @@ RenderProjection 是非权威视觉数据。
 ```ts
 type RenderProjection = {
   sceneEpoch: integer
-  visualEpoch: integer
   tick: integer
   actors: readonly ActorRenderProjection[]
-  effects: readonly SkillEffectProjection[]
+  effectStarts: readonly SkillEffectProjection[]
 }
 
 type ActorRenderProjection = {
@@ -550,7 +557,11 @@ type MovementProjection = {
 
 Presentation 可以自行插值和控制 camera，但不得 reverse-sync 回 Simulation。
 
-Movement identity 是 actor-local：不同 Actor 可以在同一 `visualEpoch` 拥有不同 `motionId`。不再维护独立 `movements[]` 表让 Presentation 二次 join Actor；每个 Actor 的当前 movement 直接附着在对应 Actor projection 上。
+Movement identity 是 actor-local：不同 Actor 可以同时拥有不同 `motionId`。不再维护独立 `movements[]` 表让 Presentation 二次 join Actor；每个 Actor 的当前 movement 直接附着在对应 Actor projection 上。
+
+`visualEpoch` 不属于跨层 Contract。Presentation 每次把 Simulation Projection、viewport resize 或 camera/layout 变化归约成 Browser visual commit 时，自行推进 Presentation-local `visualEpoch`。
+
+`effectStarts` 只表示**本次 Simulation Projection 新产生的一次性 effect start facts**，不是“当前仍在播放的所有 effect”。Presentation 以 `effectId` 去重并自行维护 fade/hold/cleanup；后续 Projection 不需要重复携带仍在播放的 effect。
 
 v0 不从 Simulation 向 Presentation 发送 camera `focusHint`。Camera framing 只消费 Presentation 已经拥有的 Actor collection / Map / viewport 事实，由 Presentation 自己决定。
 
@@ -563,7 +574,8 @@ Simulation 可以通过 PresentationPort 发布已经由 reducer 决定的 Proje
 - Actor 以 `actorId` collection 表示，顺序不承载 identity；
 - Actor movement 是 actor-local projection，不存在独立 `movements[]` join；
 - `BattleSceneInit` 只携带稳定 Scene/Actor identity/resource facts；初始及后续动态状态都走 `RenderProjection`；
-- Scene/Projection 携带 `sceneEpoch / visualEpoch` 所需 fencing；
+- Simulation Projection 携带 `sceneEpoch + tick` 等 Battle publication identity；`visualEpoch` 是 Presentation-local，不跨层；
+- `effectStarts[]` 是 one-shot effect start facts，不是 active-effect snapshot；
 - v0 不输出 camera `focusHint`；
 - Presentation lifecycle verbs 统一为 `initialize / render / pause / resume / close`。
 
@@ -588,23 +600,68 @@ type SkillEffectProjection = {
 
 `miss / invalid` 是否产生可见效果属于 Presentation policy。
 
-## 16. DecisionTiming
+## 16. DecisionPort / DecisionTiming
 
-Decision Adapter 最终需要提供足够的受信时间事实：
+DecisionPort 的职责是“一次调用完成一次 attempt”，不拥有 Battle deadline / retry policy。
+
+概念：
+
+```ts
+type DecisionRequest = {
+  requestId: string
+  actorId: ActorId
+  generation: integer
+  observation: BattleObservation
+  constraints: PlanConstraints
+  correction?: {
+    rejectedPlan: PlanSubmission
+    reason: PlanRejectReason
+  }
+}
+
+type DecisionCompletion =
+  | {
+      type: "completed"
+      requestId: string
+      generation: integer
+      completedAtMonotonicMs: number
+      plan: PlanSubmission
+    }
+  | {
+      type: "failed"
+      requestId: string
+      generation: integer
+      completedAtMonotonicMs: number
+      error: DecisionFailure
+    }
+
+interface DecisionPort {
+  decide(
+    request: DecisionRequest,
+    signal: AbortSignal,
+  ): Promise<DecisionCompletion>
+}
+```
+
+`generation` / `requestId` 是 Simulation 生成的 correlation identity；Decision implementation 只能原样返回，不拥有其生命周期。
+
+`completedAtMonotonicMs` 是 Adapter 必须提供的受信完成时间事实。Simulation 自己维护 Runtime timing record，例如：
 
 ```ts
 type DecisionTiming = {
   requestId: string
   generation: integer
-  startedAtMonotonicMs: number
+  startedAtBattleTimeMs: number
+  deadlineBattleTimeMs: number
   completedAtMonotonicMs?: number
-  deadlineMonotonicMs: number
   dueTick?: integer
   status: DecisionStatus
 }
 ```
 
-exact Adapter API、error/cancel metadata 在 Integration 文档维护。
+其中 `deadlineBattleTimeMs / dueTick / stale / correction retry` 都由 Simulation 根据 Battle clock、pause history 与 Core Rule 计算。Decision implementation 不返回 `dueTick`，也不自行发起 `PLAN-006` correction retry。
+
+Provider/network timeout 属于 Decision implementation 的 infrastructure policy，可以产生 `DecisionFailure`；它不是 Battle gameplay deadline。exact failure enum / provider wiring 在 Integration 文档维护。
 
 ## 17. ReplayRecord
 
@@ -627,8 +684,9 @@ BattleResult
 
 - **CONTRACT-OPEN-001**：Content subject/version、字段命名、key/id 对齐、引用编码。
 - **CONTRACT-OPEN-002**：BattleEffect v1 Schema。
-- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact serialization、Browser RenderNode data ABI 与 effect lifecycle 细节；actor collection、actor-local movement、无 camera hint、Presentation lifecycle verbs 已确定。
-- Runtime 的 exact discriminated unions / enum names。
+- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact serialization、Browser RenderNode data ABI 与 effect visual lifecycle 细节；actor collection、actor-local movement、Presentation-local visualEpoch、one-shot effectStarts、无 camera hint、Presentation lifecycle verbs 已确定。
+- Decision failure enum / provider-specific metadata exact shape；Decision attempt/timing ownership 已确定。
+- Runtime 的其余 exact discriminated-union payload / enum names。
 - Observation history budget 与 prompt-facing representation。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
