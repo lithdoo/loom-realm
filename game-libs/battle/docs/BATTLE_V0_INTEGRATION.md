@@ -45,7 +45,7 @@ Application / Subsystem
 
 ### 1.1 Port 的概念边界
 
-exact TypeScript signature 仍由 Contracts/Integration OPEN 冻结，但职责应保持如下：
+exact TypeScript type/export detail 仍可在 Contracts/Integration 中收敛，但 lifecycle verbs 已统一如下：
 
 ```ts
 DecisionPort
@@ -53,8 +53,10 @@ DecisionPort
 
 PresentationPort
   initialize(BattleSceneInit)
-  apply(RenderProjection)
-  dispose()
+  render(RenderProjection)
+  pause()
+  resume()
+  close()
 
 BattleRuntime
   start() -> Promise<BattleResult>
@@ -68,6 +70,8 @@ BattleRuntime
 `BattleRuntime` 的 public surface 不需要暴露“由业务每 200 ms 调一次”的 `tick()`。实现内部可以有可测试的 `processTick(currentTick)`、FakeClock 或 scheduler seam，但 Tick ownership 仍属于 Simulation。
 
 Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、LLMDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
+
+Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 仍严格要求两个 combat Actor；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
 
 ## 2. RPGMap Resource 兼容
 
@@ -192,11 +196,10 @@ Simulation 不拥有：
 cameraX
 cameraY
 zoom
+focusHint
 ```
 
-### INTEGRATION-OPEN-001 — camera focus hint — OPEN
-
-是否允许 RenderProjection 携带非权威 `focusHint` 尚未冻结。
+v0 RenderProjection 不携带 camera focus hint。Presentation 根据 actor collection、Map、viewport 与自身 camera policy 计算 framing；collection 顺序不承载 camera priority。未来 N Actor 可以改变 framing 算法，而无需修改 Simulation Contract。
 
 ## 4. BattleEffect 表现
 
@@ -215,7 +218,7 @@ v0 当前最小方向：
 resource.Graphics/BattleEffects/<EffectName>
 ```
 
-Simulation 只输出 effect identity/result/anchor/startTick 等权威事实；视觉生命周期由 Presentation 自己处理。
+Simulation 只输出 effect identity/result、逻辑目标位置（例如 tile/actor）与 startTick 等已经决定的事实；视觉 anchor、offset、fade timing 与 cleanup 由 BattleEffect Content / Presentation 自己解析。
 
 概念 Projection：
 
@@ -414,7 +417,6 @@ Battle 当前仍是 design-only。
 
 仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-001**：camera focus hint。
 - **INTEGRATION-OPEN-002**：BattleEffect Schema / outcome visuals / cleanup。
 - **INTEGRATION-OPEN-003**：Decision Adapter API/timing/error/cancel/defaults。
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。

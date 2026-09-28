@@ -46,6 +46,16 @@ Schema version 应代表**结构兼容性**，不应因为 Fireball damage 从 5
 
 ## 3. Shared primitives
 
+### ActorId
+
+```ts
+type ActorId = string
+```
+
+所有 Actor collection 都以 `actorId` 作为语义 identity。数组/迭代顺序不代表 ally/enemy、先后手或裁决优先级；需要 deterministic 顺序时必须显式按稳定 key 排序。
+
+v0 仍由 `BATTLE-001` 限制为恰好两个 combat Actor。Contract 使用 collection shape 是为了避免把 cardinality 编码进跨层 ABI，不表示 v0 支持多人。
+
 ### GridPosition
 
 ```ts
@@ -217,9 +227,13 @@ type BattleConfig = {
   protectionTicks: integer
 
   map: MapRef
-  actors: InitialActorPlacement[2]
+  actors: readonly InitialActorPlacement[]
 }
 ```
+
+`actors` 是 actorId-addressed collection；`InitialActorPlacement` 必须携带唯一 `actorId` 与显式 v0 side/team identity，数组顺序不承载 side 语义。
+
+v0 serialization/schema 可以直接约束 `actors.length === 2`，validator 也必须按 `BATTLE-001` 拒绝其他 cardinality。这里使用 collection 而不是 TypeScript tuple，是为了不把“2”扩散到 Runtime/Presentation 的数据结构。
 
 `tickDurationMs=200` 和默认 `maxPathSteps=6` 已冻结。
 
@@ -332,13 +346,17 @@ Decision 看到的是 Simulation 事实，不是 Render State。
 ```ts
 type BattleObservation = {
   tick: integer
-  self: ObservedActor
-  opponent: ObservedActor
+  selfActorId: ActorId
+  actors: readonly ObservedActor[]
   map: ObservationMap
   recentEvents: ObservedEvent[]
   guidance?: Guidance
 }
 ```
+
+v0 中 `actors` 恰好包含两个 Actor，`selfActorId` 指向其中一个；唯一另一个 Actor 就是当前 v0 的 opponent。Decision Adapter 可以为 prompt 派生 `self/opponent` 便利视图，但 canonical Contract 不把“opponent 是单个字段”编码进底层结构。
+
+未来 N Actor 版本可以继续使用同一个 container shape，再单独定义 team/hostility/visibility 规则；这不会反向改变 v0 的 1v1 gameplay。
 
 Observed Actor 至少应包含有战术意义的公开事实：
 
@@ -474,17 +492,23 @@ Presentation 初始化必须能够只依赖纯数据描述，而不要求知道 
 type BattleSceneInit = {
   battleId: string
   sceneEpoch: integer
+  tickDurationMs: 200
   map: MapRef
-  actors: Array<{
-    actorId: string
+  actors: readonly Array<{
+    actorId: ActorId
+    team: Team
     character: ResourceRef
     tile: GridPosition
     direction: Direction
+    hp: integer
+    maxHp: integer
   }>
 }
 ```
 
-这里描述的是“地图与 Actor 初始应该如何显示”。Presentation 可以自行加载资源、创建 Sprite/Canvas node，并维护非权威视觉状态。
+这里描述的是“地图与 Actor 初始应该如何显示”。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
+
+Presentation 可以自行加载资源、创建 Sprite/Canvas node，并维护非权威视觉状态。
 
 ### 14.2 RenderProjection
 
@@ -494,26 +518,51 @@ RenderProjection 是非权威视觉数据。
 
 ```ts
 type RenderProjection = {
+  sceneEpoch: integer
+  visualEpoch: integer
   tick: integer
-  actors: ActorRenderProjection[]
-  movements: MovementProjection[]
-  effects: SkillEffectProjection[]
-  focusHint?: CameraFocusHint
+  actors: readonly ActorRenderProjection[]
+  effects: readonly SkillEffectProjection[]
+}
+
+type ActorRenderProjection = {
+  actorId: ActorId
+  tile: GridPosition
+  direction: Direction
+  hp: integer
+  maxHp: integer
+  life: "alive" | "dead"
+  movement: MovementProjection | null
+}
+
+type MovementProjection = {
+  motionId: integer
+  from: GridPosition
+  to: GridPosition
+  startTick: integer
+  completeTick: integer
 }
 ```
 
 Presentation 可以自行插值和控制 camera，但不得 reverse-sync 回 Simulation。
 
+Movement identity 是 actor-local：不同 Actor 可以在同一 `visualEpoch` 拥有不同 `motionId`。不再维护独立 `movements[]` 表让 Presentation 二次 join Actor；每个 Actor 的当前 movement 直接附着在对应 Actor projection 上。
+
+v0 不从 Simulation 向 Presentation 发送 camera `focusHint`。Camera framing 只消费 Presentation 已经拥有的 Actor collection / Map / viewport 事实，由 Presentation 自己决定。
+
 Simulation 可以通过 PresentationPort 发布已经由 reducer 决定的 Projection/表现事实；这不赋予 Presentation Rule authority，也不得把动画完成当作 Simulation commit 条件。
 
-### CONTRACT-OPEN-003 — Projection / Presentation Port Schema — OPEN
+### CONTRACT-OPEN-003 — Projection / Presentation exact serialization — OPEN
 
-尚未冻结：
+已经确定的 v0 结构不变量：
 
-- exact `BattleSceneInit` / `RenderProjection` shape；
-- PresentationPort 的 exact method naming（例如单一 `apply(projection)` 或更细的 move/effect command）；
-- Browser node/effect lifecycle；
-- Simulation 是否输出非权威 camera focus hint。
+- Actor 以 `actorId` collection 表示，顺序不承载 identity；
+- Actor movement 是 actor-local projection，不存在独立 `movements[]` join；
+- Scene/Projection 携带 `sceneEpoch / visualEpoch` 所需 fencing；
+- v0 不输出 camera `focusHint`；
+- Presentation lifecycle verbs 统一为 `initialize / render / pause / resume / close`。
+
+仍未冻结的是 exact serialization 字段 optionality/命名、Browser RenderNode data ABI 与 effect lifecycle 细节。
 
 无论最终 API shape 如何，`ARCH-005` 的边界已经冻结：Presentation module 可独立实现/测试；Simulation 只依赖共享 Port，不依赖 Browser concrete implementation；业务 Subsystem 不承担逐 Tick Projection 转发职责。
 
@@ -573,7 +622,7 @@ BattleResult
 
 - **CONTRACT-OPEN-001**：Content subject/version、字段命名、key/id 对齐、引用编码。
 - **CONTRACT-OPEN-002**：BattleEffect v1 Schema。
-- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact Schema、PresentationPort method naming 与 camera hint。
+- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact serialization、Browser RenderNode data ABI 与 effect lifecycle 细节；actor collection、actor-local movement、无 camera hint、Presentation lifecycle verbs 已确定。
 - Runtime 的 exact discriminated unions / enum names。
 - Observation history budget 与 prompt-facing representation。
 

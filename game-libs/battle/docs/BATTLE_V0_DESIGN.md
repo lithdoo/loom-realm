@@ -57,7 +57,7 @@ Contracts 不重新定义玩法规则。
 - 玩家 Guidance；
 - Frame / Host / Abort；
 - pause/background；
-- LOS、stalemate 的产品/集成待定项；
+- 已冻结的 LOS / stalemate / pause 规则在 Host/Presentation 集成中的影响；
 - workspace / package-lock；
 - 实施顺序。
 
@@ -167,7 +167,7 @@ protection      命中后的有限免疫区间
 - Battle 三层架构与 Simulation sole authority；
 - Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports；Simulation 自己拥有 Battle clock、scheduler、Tick reducer 与 Plan execution，业务 Subsystem 只做构造、注入和外部生命周期映射；
 - RPGMap 只复用素材/数据形式，不复用 Runtime；
-- 双 Actor 同时行动，无传统回合；
+- v0 双 Actor 同时行动，无传统回合；Actor cardinality 是 v0 rule，跨层/Runtime 以 actorId collection 建模，不把 1v1 写死成 actorA/actorB slots；
 - 1 Tick = 200 ms；
 - overdue Tick 必须逐 Tick 归约；
 - LLM/Decision 实际耗时计入 Battle 时间；

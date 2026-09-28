@@ -25,6 +25,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 SPEC
 → CONTRACTS
 → INTEGRATION
+→ PRESENTATION
 → TEST_MATRIX
 ```
 
@@ -34,7 +35,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 已经冻结的核心边界包括：
 
-- 双 Actor 同时行动，无传统交替回合；
+- v0 严格双 Actor 同时行动，无传统交替回合；Actor cardinality 是 v0 validation rule，跨层与 Runtime 使用 actorId-addressed collection，禁止用数组 slot 表达 identity；
 - Simulation 是唯一业务权威；
 - Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports，不依赖彼此的 concrete implementation；
 - Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；

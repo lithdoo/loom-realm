@@ -6,7 +6,7 @@
 >
 > - gameplay/runtime 权威语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；
 > - 数据字段的最终 Schema 仍以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准；
-> - 本文中的 exact TypeScript method/type shape 在 `CONTRACT-OPEN-003` 冻结前属于推荐设计，不覆盖已有 FROZEN Rule。
+> - exact serialization / RenderNode data 字段仍由 `CONTRACT-OPEN-003` 维护；actorId collection、actor-local movement 与 Presentation lifecycle verbs 已在当前设计中收敛，不覆盖已有 gameplay FROZEN Rule。
 
 ## 1. 目标
 
@@ -228,7 +228,7 @@ export interface BattlePresentationHandler {
 - `pause()/resume()`：冻结/恢复视觉时间，不产生任何 Battle Rule；
 - `close()`：终止本 session 的视觉生命周期并释放 RenderDomain/resource/listener。
 
-在最终 API 冻结前，`render` 也可以最终命名为 `apply`，`close` 也可以最终命名为 `dispose`；本文关注的是职责与生命周期，而不是提前覆盖 `CONTRACT-OPEN-003`。
+这五个 lifecycle verbs 作为 v0 Presentation canonical surface 统一使用；后续 exact TypeScript export/type detail 可以调整，但不再并行维护 `apply/dispose` 第二套术语。
 
 ## 7. initialize(scene)
 
@@ -247,7 +247,7 @@ type BattleSceneInit = {
 
 type BattleActorRenderInit = {
   actorId: string
-  team: "ally" | "enemy"
+  team: Team
   character: ResourceRef
   tile: GridPosition
   direction: Direction
@@ -255,6 +255,14 @@ type BattleActorRenderInit = {
   maxHp: number
 }
 ```
+
+Actor collection 的语义要求：
+
+- `actorId` 唯一且是唯一 identity；
+- collection 顺序不表示 ally/enemy 或优先级；
+- v0 Simulation 按 `BATTLE-001` 只产生两个 Actor；
+- Presentation 本身按 collection 建节点/更新，不实现“必须恰好两个”的 gameplay validation；
+- 同一 Battle session 的 roster 在 v0 初始化后保持稳定。
 
 不进入 Scene Init 的 Simulation 内部字段包括：
 
@@ -304,8 +312,6 @@ type RenderProjection = {
 
   actors: readonly ActorRenderProjection[]
   effects: readonly SkillEffectProjection[]
-
-  focusHint?: CameraFocusHint
 }
 ```
 
@@ -322,7 +328,7 @@ type ActorRenderProjection = {
   maxHp: number
   life: "alive" | "dead"
 
-  movement?: MovementProjection
+  movement: MovementProjection | null
 }
 ```
 
@@ -409,7 +415,8 @@ custom elements
 | protection/recovery | 如果没有专门视觉，则无 Presentation 字段 | 不做任何额外推导 |
 | Battle pause | `pause()` | 冻结插值/effect/camera 的视觉时间 |
 | Battle resume | `resume()` | 恢复视觉时间 |
-| Battle terminal/cancel | `close()` | 清理本 session |
+| Battle 正常 terminal | final `render(projection)` | 发布最终视觉状态；Simulation 停止规则推进，但 Presentation 保持画面直到上层离开 Battle scene |
+| Battle cancel / Frame abort | `close()` | 立即清理本 session，不等待动画 |
 
 关键禁止：
 
@@ -522,7 +529,11 @@ session-local visual state
 
 `close()` 后实例不可重新 initialize。
 
-Frame abort / Battle cancel / terminal result / fatal Presentation failure 都最终需要进入 session cleanup，但 BattleResult 与失败语义仍由 Simulation/业务 composition 决定，不由 Presentation 决定。
+Frame abort / Battle cancel / fatal Presentation failure 进入即时 cleanup。
+
+正常 BattleResult 不等于立即 `close()`：Simulation 应先发布 final Projection 并停止规则推进；Presentation 保持 final visual state。真正离开 Battle scene 时，由上层生命周期调用 `close()`。这样最后一击、死亡状态和 HUD 最终 HP 不会因 Result 产生的同一时刻 cleanup 被直接抹掉。
+
+BattleResult 与失败语义仍由 Simulation/业务 composition 决定，不由 Presentation 决定。
 
 ## 13. 与 Subsystem 的实际联动
 
@@ -569,11 +580,9 @@ RenderDomain
 └── battle:view
     tag = lr-battle-view
     │
-    ├── battle:actor:<allyActorId>
+    ├── battle:actor:<actorId>
     │   tag = lr-battle-actor
-    │
-    ├── battle:actor:<enemyActorId>
-    │   tag = lr-battle-actor
+    │   ... one node per scene actor
     │
     ├── battle:effects
     │   tag = lr-battle-effects
@@ -610,7 +619,7 @@ interface RenderDomainUpdate {
 一帧动画一个 RenderNode
 ```
 
-Battle v0 固定两个 Actor、一个 battle view、一个 effects layer，所以整场 Battle 的正常路径应尽量是：
+Battle v0 gameplay 固定两个 Actor，但 Presentation tree 的 actor child 是按初始化 roster collection 创建的；tree shape 不使用固定 ally/enemy slot。v0 roster 在 session 内稳定，因此整场 Battle 的正常路径应尽量是：
 
 ```text
 createRenderDomain(initial stable tree)
@@ -695,17 +704,18 @@ Map 当前的 resize 行为不是简单的“所有 viewport resize 都 debounce
 - 相同 layout 不重复发布；
 - resize commit 会产生新的 visual epoch，并同步更新相关 visual data。
 
-Battle 没有 RPGMap transition / NPC setting 这些具体状态，因此不能机械复制 Map Runtime 状态机；但应复用其**核心 settlement 原则**：
+Battle 没有 RPGMap transition / NPC setting 这些具体状态，因此不复制 Map 的 operation-busy 状态机。Battle resize 采用更直接的 Presentation 语义：
 
 ```text
 viewport change
-→ 记录 latest/pending layout
-→ 避免在不安全的 visual transition 中途撕裂画面
-→ settled 连续 resize 使用 100 ms settle window
-→ 到安全 commit 点原子发布一组一致 visualEpoch 的 layout/camera/HUD/actor visual facts
+→ 记录 latest layout
+→ settled 连续 resize 使用 RESIZE_SETTLE_MS = 100 ms 合并
+→ 原子发布一组一致 visualEpoch 的 layout/camera/HUD/actor visual facts
 ```
 
-实现阶段如果抽出共享 resize primitive，应以 Map 当前实际 Runtime 行为为基线；如果 Battle 保持独立实现，则测试应验证等价的 settlement properties，而不是只断言“等待 100 ms”。
+Actor movement / effect animation **不是 resize blocker**。如果 resize 发生在 motion 中间，Presentation 在保持同一 actor-local `motionId` 和逻辑 progress 的前提下，按新 layout/camera 重新投影视觉坐标；不得暂停或修改 Simulation movement。
+
+首次可用 layout 可以立即建立初始 Scene；相同 layout 不重复发布。这样不会因为未来 N Actor 长时间总有 Actor 在移动而让 resize 永久等待“全体静止”的 safe point。
 
 ### 14.2.1 Footer 的 Battle 内容
 
@@ -742,20 +752,12 @@ type BattleHudRenderData = {
   sceneEpoch: number
   visualEpoch: number
 
-  actors: readonly [
-    {
-      actorId: string
-      side: "ally"
-      hp: number
-      maxHp: number
-    },
-    {
-      actorId: string
-      side: "enemy"
-      hp: number
-      maxHp: number
-    },
-  ]
+  actors: readonly Array<{
+    actorId: string
+    team: Team
+    hp: number
+    maxHp: number
+  }>
 }
 ```
 
@@ -763,8 +765,11 @@ exact field naming 仍由 Contracts/Presentation Schema 冻结，但以下 v0 Pr
 
 - 存在一个稳定的 Battle HUD visual slot/node；
 - 它占用与 Map 相同的 footer 几何区域；
-- 它显示双方 current/max HP；
+- HUD data 是 actorId-addressed collection，不是固定二元素 tuple；
+- v0 因 `BATTLE-001` 实际显示两个 Actor 的 current/max HP；
 - 它不复用 Map footer 的 RPGMap-specific data contract。
+
+未来 N Actor 版本可以改变 HUD 的排版/滚动/分组策略，但不需要把 HUD Contract 从“两个固定 slot”迁移为 collection。
 
 逻辑 HUD slot/node 已确定；最终 Browser custom-element tag、RenderNode key 细节和 node data exact Schema 仍保持 OPEN。
 
@@ -845,7 +850,9 @@ resize safe-commit state machine
 
 复用的是 **layout/footer/scale 的几何 policy**，以及实现时应与 Map 对齐的 resize settlement semantics；不是 Map 的单 Player camera policy，也不是当前尚未统一接入 Runtime 的 viewport clamp helper。
 
-Map camera 以单个 Player 为中心；Battle 同时有两个 Actor，因此 Battle camera/focus 仍由 Battle Presentation 单独设计，例如双 Actor framing。Camera 不得因为复用 Map layout 而隐式跟随 ally。
+Map camera 以单个 Player 为中心；Battle camera/focus 由 Battle Presentation 自己根据当前 actor collection、Map 与 viewport 决定，不从 Simulation 接收 `focusHint`。v0 collection 恰好两个 Actor，未来 N Actor 可以继续使用 collection framing，而不把 camera API 固定为 `ally/enemy` 两个参数。
+
+Camera 不得因为复用 Map layout 而隐式跟随某个固定数组 slot。
 
 ### 14.3 lr-battle-view
 
@@ -1094,11 +1101,10 @@ visualEpoch
 例如：
 
 ```text
-battle:view          visualEpoch=57
-battle:actor:ally    visualEpoch=57
-battle:actor:enemy   visualEpoch=57
-battle:effects       visualEpoch=57
-battle:hud           visualEpoch=57
+battle:view                visualEpoch=57
+battle:actor:<actorId> *    visualEpoch=57
+battle:effects             visualEpoch=57
+battle:hud                 visualEpoch=57
 ```
 
 Browser implementation 可以拒绝/延后组合不一致的候选数据，从而避免同一画面混用不同 visual epoch。
@@ -1249,28 +1255,28 @@ Presentation 可以完全脱离真实 Simulation/Decision 测试。
 6. 相同 Projection 重复 render 不重复产生一次性 effect；
 7. stale `sceneEpoch / visualEpoch / motionId` 不污染新状态；
 8. 与 Map 对相同 viewport 输入产生相同 barHeight/content/rows/columns/logical size/scale；
-9. viewport resize 对齐 Map 当前 settlement properties：首次/未 settled 可及时 commit、settled 连续 resize 使用 100 ms window、busy visual transition 期间保留 pending layout 并在安全点提交；不要求 Battle 单方面采用当前未接入 Map Runtime 的 clamp helper；
-10. footer 高度与 Map 一致，并持续显示双方 current/max HP；
+9. viewport resize 使用 100 ms settle 合并；Actor 正在 movement/effect 时也可提交新 layout，并保持 motionId/progress，不等待全体静止；
+10. footer 高度与 Map 一致，并持续显示 v0 两个 Actor 的 current/max HP；
 11. HP Projection 更新在同一 visualEpoch 更新固定 HUD，不改变 Render Tree 结构；
 12. pause/resume 冻结并恢复视觉时间；
 13. close 幂等，关闭 RenderDomain 并阻止 stale async write；
 14. 两个 PresentationHandler 同时存在时 visual/session state 不串场；
 15. 正常 move/turn/damage/effect 更新不改变稳定 Render Tree 结构；
-16. 两个 Actor 可以在同一 visual epoch 拥有不同 motionId 并同时插值；
-17. 重复提交相同 effectId 不重复创建 transient visual；
-18. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
-19. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
+16. 任意 Actor 都有独立 actor-local motion identity；v0 两个 Actor 可以在同一 visual epoch 拥有不同 motionId 并同时插值；
+17. synthetic Presentation scene 使用 4 个唯一 actorId 时，可按 collection 建立 4 个 actor node/HUD entry，且不存在固定 ally/enemy slot；这不代表 v0 Simulation 接受 4 Actor；
+18. 重复提交相同 effectId 不重复创建 transient visual；
+19. 普通运行路径以 domain.update() 为主，不因 transient effect 频繁 domain.replace()；
+20. 正常 Battle terminal 发布 final Projection 后保持最终画面，直到 scene owner 调用 close；cancel/abort 则立即 close；
+21. Null/Recording Presentation 可替换 Browser Presentation，而不改变 Simulation reducer。
 
 ## 19. 仍待冻结的 Presentation OPEN
 
 本文不关闭以下现有 OPEN：
 
-- `BattleSceneInit / RenderProjection / SkillEffectProjection` exact Schema；
-- `render` vs `apply`、`close` vs `dispose` 等最终 method naming；
+- `BattleSceneInit / RenderProjection / SkillEffectProjection` exact serialization / RenderNode data Schema；
 - BattleEffect exact anchor/timing/outcome visuals；
-- camera `focusHint`；
 - Browser node/effect cleanup exact contract；
-- Render Tree 各 node 的 exact data Schema 与 Browser custom-element tag/key；稳定的 Battle HUD logical slot/node、Map-compatible footer geometry 与 current/max HP 内容已确定；
+- Render Tree 各 node 的 exact data Schema 与 Browser custom-element tag/key；actorId collection、稳定 HUD logical slot/node、Map-compatible footer geometry 与 current/max HP 内容已确定；
 - viewport clamp/default/min/max 是否升级为 Map/Battle 共用的 Presentation 入口规则；
 - 除首批 layout/tile primitive 外，character-atlas 等纯视觉 primitive 是否继续进入 `@loomrealm-game/tile-presentation`；
 - Host/Runtime Control suspend/resume 到 Battle pause/resume 的 exact wiring；

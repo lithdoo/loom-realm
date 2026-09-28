@@ -15,6 +15,8 @@
 | T-ARCH-005 | ARCH-005, TIME-001, TIME-002, TIME-003 | 业务只构造 Simulation + ScriptDecision + Null/Recording Presentation，并用可控 clock 推进时间；业务不调用 public tick | Simulation 自己按 200 ms scheduler / event queue / reducer 运行完整 Battle、结算 BattleResult 并记录 Replay |
 | T-ARCH-006 | ARCH-005 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 Map/Actor 并表现 movement/effect；无需了解 Decision/Simulation concrete implementation |
 | T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 LLMDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
+| T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
+| T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 
 ## 2. Time / Scheduler
 
@@ -141,6 +143,7 @@
 | T-PRES-002 | ARCH-003 | Effect asset load fail | damage/result 不变，可发 diagnostic |
 | T-PRES-003 | ARCH-003 | camera zoom/focus 改变 | 不改 Simulation State |
 | T-PRES-004 | STATE-001 | Sprite 插值位置 x=2.7 | Decision/Simulation 仍只看到 committed integer tile |
+| T-PRES-005 | ARCH-006, BATTLE-001 | 仅用 synthetic Presentation input 初始化 4 个唯一 actorId | Presentation 可创建 4 个 actor visual/HUD entry 且无固定 ally/enemy slot；这不使 v0 Simulation 接受 4 Actor |
 
 ## 11. Result / Termination
 

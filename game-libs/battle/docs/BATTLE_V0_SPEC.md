@@ -56,6 +56,16 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 
 因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
 
+### ARCH-006 — Actor identity 使用集合建模，v0 cardinality 仍为 2 — FROZEN
+
+Actor 数量限制属于 Battle Rule / validation，不属于底层存储形状。
+
+跨层 Contract、Simulation Runtime、Presentation projection 与内部遍历必须以 `actorId` 标识 Actor，并使用 collection / map 语义；不得把 Actor identity 编码成固定的 `actorA/actorB`、`allySlot/enemySlot` 或数组下标。
+
+集合顺序不是 gameplay identity，也不得参与规则裁决。需要稳定顺序时必须显式按稳定 key（例如 `actorId`）排序。
+
+这条规则**不开放多人 v0**：`BATTLE-001` 仍要求 v0 BattleConfig 恰好两个 combat Actor。未来若加入组队或 FFA，需要新版本规则明确 hostility/team、Observation、terminal/result 等语义，但不得因此要求重写 Battle clock、event queue、actor-addressed state 或 Presentation actor collection。
+
 ## 2. Canonical terminology
 
 整套 Battle 文档统一使用以下术语：
@@ -88,6 +98,10 @@ Runtime 字段统一使用 **direction**；不得再用 `facing` 表示同一个
 ### BATTLE-001 — v0 只有两个 combat Actor — FROZEN
 
 v0 固定为双方各一个 Actor，每个 Actor 占一个格。
+
+BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle。两个 Actor 的 identity/side 必须来自显式字段，不得由 `actors[0] / actors[1]` 的数组位置推导。
+
+实现内部仍遵循 `ARCH-006` 的 actorId-addressed collection；“集合可容纳 N Actor”只是降低未来版本迁移成本，不代表 v0 接受 N>2。
 
 ### BATTLE-002 — 默认满血开战 — FROZEN
 
@@ -760,7 +774,7 @@ collisionRetryCount
 - 逐格调用 LLM；
 - MP / 通用技能资源条；
 - 职业/装备/升级；
-- 超过两个 combat Actor；
+- 超过两个 combat Actor（底层 collection 可 N-ready，但 v0 validator 仍必须拒绝）；
 - 复杂状态系统；
 - 地面选点；
 - AOE / 第二张 effect matrix；
