@@ -38,6 +38,8 @@ Presentation 决定“怎样显示”。
 
 屏幕插值坐标、掉帧、动画完成、camera、viewport 等不得反向修改权威位置、伤害、时间或胜负。
 
+`visualEpoch` 是 Presentation-local 的视觉一致性版本，只用于 RenderDomain / Browser fencing。Simulation 不生成、存储或解释 `visualEpoch`；Simulation 跨层发布的是 Battle `sceneEpoch`、逻辑 `tick` 与已经决定的 gameplay facts。
+
 ### ARCH-004 — 不复用 RPGMap Runtime — FROZEN
 
 Battle 可以消费 LoomRealm 已有 Map/Tileset/Autotile/Character 的 Content/Resource 形式，但不得把 RPGMap Runtime 的移动、计时器、Transfer/Bridge、探索状态作为 Battle 权威。
@@ -52,9 +54,22 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 - **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
 - **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
 - Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
+- Simulation Core 只接收所需的窄 capability（例如 Battle clock、AbortSignal、DecisionPort、PresentationPort、已解析 Battle config/content）；不得把 `SubsystemScope`、`Frame`、RenderDomain、Viewport 等 LoomRealm integration object 作为 Core Runtime 必需依赖。
 - 使用 Battle 的 Application/Subsystem 只负责选择 concrete implementation、构造/注入三层、提供 Host capability，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。它不是第四个 gameplay Runtime Layer，也不负责逐 Tick 实施 Battle。
 
 因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
+
+### ARCH-006 — Actor identity 使用集合建模，v0 cardinality 仍为 2 — FROZEN
+
+Actor 数量限制属于 Battle Rule / validation，不属于底层存储形状。
+
+跨层 Contract、Simulation Runtime、Presentation projection 与内部遍历必须以 `actorId` 标识 Actor，并使用 collection / map 语义；不得把 Actor identity 编码成固定的 `actorA/actorB`、`allySlot/enemySlot` 或数组下标。
+
+集合顺序不是 gameplay identity，也不得参与规则裁决。需要稳定顺序时必须显式按稳定 key（例如 `actorId`）排序。
+
+这条规则**不开放多人 v0**：`BATTLE-001` 仍要求 v0 BattleConfig 恰好两个 combat Actor。未来若加入组队或 FFA，需要新版本规则明确 hostility/team、Observation、terminal/result 等语义，但不得因此要求重写 Battle clock、event queue、actor-addressed state 或 Presentation actor collection。
+
+N Actor-ready 只表示“初始化 roster 的 cardinality 不写死进基础结构”；它不自动引入 Battle 中途 spawn/despawn。动态 roster mutation 若未来需要，必须作为独立版本规则和 Render Tree structural-change contract 明确定义。
 
 ## 2. Canonical terminology
 
@@ -88,6 +103,10 @@ Runtime 字段统一使用 **direction**；不得再用 `facing` 表示同一个
 ### BATTLE-001 — v0 只有两个 combat Actor — FROZEN
 
 v0 固定为双方各一个 Actor，每个 Actor 占一个格。
+
+BattleConfig / validator 必须拒绝 combat Actor 数量不是 2 的 v0 Battle，并且两个 Actor 必须恰好包含 **1 个 `ally` + 1 个 `enemy`**。两个 Actor 的 `actorId` 必须唯一；identity/side 必须来自显式字段，不得由 `actors[0] / actors[1]` 的数组位置推导。
+
+实现内部仍遵循 `ARCH-006` 的 actorId-addressed collection；“集合可容纳 N Actor”只是降低未来版本迁移成本，不代表 v0 接受 N>2。
 
 ### BATTLE-002 — 默认满血开战 — FROZEN
 
@@ -152,20 +171,49 @@ Skill range 旋转读取 Simulation direction，而不是 Presentation Sprite �
 
 即使 windup/recovery 为 0，一个 Actor 在一个逻辑 Tick 内也最多启动一次新的主动 Action。
 
-## 5. 时间、事件队列与异步完成
+### STATE-005 — Action lifecycle 与 Decision lifecycle 正交 — FROZEN
 
-### TIME-002 — Simulation 自有事件队列 — FROZEN
+Actor 的“身体正在做什么”和“Decision 是否正在思考/已 ready”是两条独立状态轴。
 
-事件按 `dueTick` 排序，核心概念包括：
+因此以下组合都是合法的：
 
 ```text
-decision_ready
-move_complete
-skill_resolve
-recovery_complete
+moving   + thinking
+recovery + thinking
+idle     + thinking
+protected + thinking
 ```
 
-异步回调只能登记完成事实/时间戳或未来事件，不得直接改 Battle State。
+`thinking` 不得作为与 `moving / windup / recovery` 互斥的 `ActionState` 分支。ActionState 只描述 gameplay Action lifecycle；DecisionState 单独描述 Decision Request / ready lifecycle。
+
+## 5. 时间、事件队列与异步完成
+
+### TIME-002 — Simulation 自有定时事件队列与 Decision Inbox — FROZEN
+
+Simulation 同时拥有两类异步输入结构，它们语义不同：
+
+```text
+Scheduled Event Queue
+  dueTick-addressed
+  ├─ move_complete
+  ├─ skill_resolve
+  └─ recovery_complete
+
+Decision Inbox
+  arrival-addressed, no dueTick
+  └─ DecisionCompletion
+```
+
+定时事件按 `dueTick` 排序。Decision Completion **不得转换成 dueTick 事件**。
+
+异步 Decision callback 唯一允许做的事是把 `DecisionCompletion` 追加到 Simulation-owned Decision Inbox；它不得直接修改 Actor/Plan/Battle State、不得直接校验/接受 Plan、不得启动 Action。
+
+每个 Tick reducer 开始时必须原子截取：
+
+1. `dueTick === currentTick` 的 scheduled-event snapshot；
+2. **在本 Tick snapshot 边界之前已经进入 inbox** 的 DecisionCompletion snapshot。
+
+snapshot 之后才到达的 DecisionCompletion 不得重入当前 reducer，只能等待下一逻辑 Tick。
 
 ### TIME-003 — 积压 Tick 必须逐 Tick 归约 — FROZEN
 
@@ -177,7 +225,7 @@ while lastProcessedTick < targetTick:
   processTick(lastProcessedTick)
 ```
 
-不同 `dueTick` 绝不能压成同一个“同时事件批次”。
+不同 `dueTick` 绝不能压成同一个“同时事件批次”。每个 catch-up Tick 都有自己的 Decision Inbox snapshot 边界；异步 callback 不得插入已经开始处理的 Tick。
 
 ### TIME-004 — Pause / Background 冻结 Battle Clock — FROZEN
 
@@ -185,33 +233,64 @@ while lastProcessedTick < targetTick:
 
 - Battle monotonic clock 冻结；
 - `currentTick` 不推进；
-- pause/background 期间的现实时间不计入 Decision、move、windup、recovery 或 protection；
-- 恢复后从原逻辑时刻继续，不补算暂停期间对应的 Tick。
+- move、windup、recovery、protection 等 gameplay Tick 生命周期不推进；
+- Decision/LLM 可以在现实时间继续完成并把 completion 放进 Decision Inbox，但 pause 期间不会消费 inbox、不会接受 Plan、不会启动 Action；
+- 恢复后从原逻辑时刻继续，不补算暂停期间对应的 Tick；已排队 completion 在 resume 后第一个实际 reducer Tick 才有机会被消费。
 
 TIME-003 的 catch-up 只用于**Battle clock 仍在运行时** scheduler/event loop 晚醒等情况。
 
-### DEC-001 — Decision 延迟计入游戏时间 — FROZEN
+### DEC-001 — Decision Completion 即时入 Inbox、Tick 边界生效 — FROZEN
 
-Decision/LLM 的真实耗时属于 Battle 时间。
+Decision/LLM 完成后，completion **立即进入 Simulation-owned Decision Inbox**。这一步不是 gameplay mutation。
 
-例如真实用时 500 ms，最早可在 600 ms / 3 Tick 边界使用。
-
-Decision State 至少记录：
+Plan 的权威生效点固定在 Tick reducer：
 
 ```text
-startedAtMonotonicMs
-completedAtMonotonicMs?
-deadlineMonotonicMs
-dueTick?
+async Decision completion
+        ↓
+Simulation Decision Inbox
+        ↓
+next reducer snapshot that can see it
+        ↓
+generation check
+        ↓
+Plan validation / failure handling
+        ↓
+accepted plan / correction request
+        ↓
+same reducer later Action phase may execute accepted plan
 ```
 
-如果 `completedAt <= deadline`，即使宿主 callback 更晚才被处理，也算按时完成；timeout/ready 不能由 callback 先后顺序决定。
+因此：
+
+- completion 在 Tick N reducer **开始前**已经入 inbox → 可在 Tick N 的 Decision phase 被消费；
+- completion 在 Tick N reducer **snapshot 之后**到达 → Tick N 不可见，最早 Tick N+1 消费；
+- Promise callback、worker message、provider callback 都不得直接触发 Plan execution；
+- v0 gameplay 不记录或比较 LLM wall-clock completion timestamp；
+- v0 不存在由 LLM wall-clock completion 推导的 Decision dueTick 或 gameplay Decision deadline。
+
+Replay 的确定性边界是“completion 被哪个 Tick reducer 消费 / Plan 被哪个 Tick 接受”，不是真实世界 completion timestamp。
 
 ### DEC-002 — 旧 generation 无提交权 — FROZEN
 
 Decision Request 绑定 `decisionGeneration`。
 
-generation 失效后，迟到响应只能记录诊断，不能再次提交计划。
+generation 失效后，迟到 completion 即使已经进入 inbox，在 reducer 消费时也只能丢弃/记录诊断，不能提交计划。
+
+### DEC-003 — 一次 Decision 调用只完成一次 attempt — FROZEN
+
+一次 `DecisionPort.decide(...)` 只代表一次 Decision attempt。Decision implementation 返回 Plan 或 infrastructure/service failure；它不得自行决定：
+
+```text
+generation 是否 stale
+Plan 是否被 Simulation 接受
+是否还有 correction retry
+Plan 从哪个 Tick 开始执行
+```
+
+stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、accepted-plan queue 与 Replay consume/accept tick 都由 Simulation 决定。
+
+Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
 
 ## 6. Decision Protocol 与 PlanSubmission
 
@@ -308,7 +387,7 @@ actor_not_ready
 - Actor 保持 idle；
 - 最早下一逻辑 Tick 才能新建 Decision generation。
 
-如果修正需要再次调用 LLM，其耗时照常计入 Battle 时间。
+如果修正需要再次调用 LLM，Simulation 在当前 Tick 发起新的明确 attempt；其 completion 同样只进入 Decision Inbox，不能重入当前 reducer，最早由后续 Tick 消费。
 
 ### PLAN-007 — Plan 动态执行 — FROZEN
 
@@ -524,7 +603,7 @@ resolve 前受到实际伤害会取消未完成 windup。
 Recovery 是**行动锁，不是思考锁**：
 
 - Decision Thinking 可以开始/继续；
-- ready 的下一 Plan 可以暂存；
+- reducer 已接受的下一 Plan 可以暂存；
 - recovery 中不能启动 move/turn/windup；
 - 实际伤害 `hit` 会中断 recovery，并进入正常受击流程；
 - `immune` 不会中断 recovery。
@@ -664,15 +743,15 @@ finalDamage = 0
 
 每个 `currentTick`：
 
-1. 截取 `dueTick === currentTick` 的事件快照。
-2. 过滤 Battle/Actor 生命周期、已取消 active step 和旧 generation 事件。
+1. 原子截取 `dueTick === currentTick` 的 scheduled-event snapshot，以及 snapshot 边界前已进入 Decision Inbox 的 completion snapshot。
+2. 过滤 scheduled events 的 Battle/Actor 生命周期、已取消 active step 和旧 generation；Decision snapshot 留到第 9 阶段统一处理。
 3. 提交仍有效且在本 Tick 到期的 `move_complete`，并处理有效 `recovery_complete`。
 4. 收集此前已经启动、在本 Tick 到期的 `skill_resolve`。
 5. 用移动完成后的 committed position/direction 和 batch-start protection，把普通技能归约为 `hit / immune / miss / invalid`。
 6. 同步批量应用普通 `hit` damage。
 7. 对 `finalDamage > 0` 的目标应用 HIT-003 aftermath：包括中断 active movement、释放 reservation、失效 Action/Plan/Decision；死亡者不获得 protection 或新 Decision。
 8. 执行普通批次 terminal gate；如果 Battle 已结束，不再启动新的游戏 Action。
-9. 接收本 Tick 可用 Decision；按完成时间/deadline/generation 判断，不看 callback 顺序。
+9. 消费第 1 步截取的 DecisionCompletion snapshot：按 generation fencing，处理 failure，校验 Plan；合法 Plan 进入 accepted-plan queue，非法 Plan 按 PLAN-006 决定是否发起唯一 correction attempt。snapshot 之后到达的 completion 留给下一 Tick。
 10. 推进 existing/new plan；每 Actor 最多产生一个“新 Action 意图”。pending turn 在这里立即执行并消耗 Action 配额；skill/move 按规则产生后续意图。
 11. 收集第 10 步新启动的 `windup_ticks=0` 技能，组成一次 bounded instant-resolve batch。
 12. 用与普通技能相同的 outcome / simultaneous damage / HIT-003 aftermath / terminal 规则结算即时批次。
@@ -730,13 +809,13 @@ Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
 - 初始 Battle/Map/Actor 配置标识；
 - `battleSeed`；
 - accepted `PlanSubmission` + 内部 `acceptedPlanId`；
-- Decision generation/start/completion/dueTick/timeout；
+- Decision generation、requestTick、completion consumedTick、Plan accepted/rejected tick 与 correction attempt；
 - movement reservation 与 contention 结果；
 - skill `hit / immune / miss / invalid` + resolve coefficient；
 - 实际伤害与 protection 区间；
 - BattleResult。
 
-Replay **不重新调用 LLM**。
+Replay **不重新调用 LLM**，也不依赖真实世界 LLM completion timestamp；重放按记录的 Tick 注入/恢复对应 Decision 结果与 accepted Plan。
 
 ### REPLAY-002 — diagnostics 不改变规则 — FROZEN
 
@@ -760,7 +839,7 @@ collisionRetryCount
 - 逐格调用 LLM；
 - MP / 通用技能资源条；
 - 职业/装备/升级；
-- 超过两个 combat Actor；
+- 超过两个 combat Actor（底层 collection 可 N-ready，但 v0 validator 仍必须拒绝）；
 - 复杂状态系统；
 - 地面选点；
 - AOE / 第二张 effect matrix；
@@ -783,4 +862,4 @@ collisionRetryCount
 
 **当前 Core gameplay 没有未冻结 OPEN 项。**
 
-Content subject/version、BattleEffect 视觉细节、Decision Adapter API、Host/Browser 接口等仍分别在 Contracts / Integration 文档维护为 OPEN；这些不改变已经冻结的 Core gameplay 语义。
+Presentation v0 的 BattleEffect、Projection、Browser ABI、camera/viewport/effect lifecycle 已在 Contracts / Presentation 中冻结。仍保持 OPEN 的主要是非 Presentation Content 的统一 subject/version、真实 Decision provider metadata/cancel/defaults、Guidance/Host wiring 等外部集成项；这些不改变已经冻结的 Core gameplay 或 Presentation 语义。

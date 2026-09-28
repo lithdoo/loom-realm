@@ -1,8 +1,8 @@
 # Battle v0 测试矩阵
 
-> 状态：**Design only / Acceptance Matrix**。本文不重新定义规则；每个 Expected 必须能追溯到 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule ID。
+> 状态：**Core + Presentation FROZEN Acceptance Matrix；实现未完成**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
 >
-> OPEN Rule 只保留占位测试，冻结前不得断言具体结果。
+> 尚未冻结的真实 LLM provider、Guidance/Host wiring 不在本矩阵中被实现代码自行假设。
 
 ## 1. Architecture / Authority
 
@@ -15,6 +15,11 @@
 | T-ARCH-005 | ARCH-005, TIME-001, TIME-002, TIME-003 | 业务只构造 Simulation + ScriptDecision + Null/Recording Presentation，并用可控 clock 推进时间；业务不调用 public tick | Simulation 自己按 200 ms scheduler / event queue / reducer 运行完整 Battle、结算 BattleResult 并记录 Replay |
 | T-ARCH-006 | ARCH-005 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 Map/Actor 并表现 movement/effect；无需了解 Decision/Simulation concrete implementation |
 | T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 LLMDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
+| T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
+| T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
+| T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
+| T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
+| T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
 ## 2. Time / Scheduler
 
@@ -22,12 +27,14 @@
 | --- | --- | --- | --- |
 | T-TIME-001 | TIME-001 | 推进 1 Tick | 逻辑时长固定 200 ms |
 | T-TIME-002 | TIME-003 | 上次处理 Tick 10，scheduler/event loop 晚醒时 target Tick 14 | 依次处理 11/12/13/14 |
-| T-TIME-003 | TIME-003 | catch-up 中事件分别 due 11 和 14 | 不视为同一批同时事件 |
-| T-TIME-004 | DEC-001 | Decision 实际耗时 500 ms | 最早 600 ms / 3 Tick 可用 |
-| T-TIME-005 | DEC-001 | completedAt == deadline | 判定完成成功 |
-| T-TIME-006 | DEC-001 | 模型 deadline 前完成，但 Host callback 更晚处理 | 使用 trusted completion time，不看 callback 顺序 |
+| T-TIME-003 | TIME-003 | catch-up 中 scheduled events 分别 due 11 和 14 | 不视为同一批同时事件 |
+| T-TIME-004 | DEC-001, TIME-002 | Tick 20 reducer 已结束，Decision completion 在 Tick 21 snapshot 前进入 inbox | Tick 21 消费/校验；若合法且 Actor 可行动，最早 Tick 21 Action phase 执行 |
+| T-TIME-005 | DEC-001, TIME-002 | Decision completion 在 Tick 21 snapshot 后、Tick 21 reducer 处理中到达 | 不得重入 Tick 21；最早 Tick 22 消费 |
+| T-TIME-006 | DEC-001 | Promise callback 拿到合法 Plan | callback 只 enqueue；Actor/acceptedPlan/HP/position 等权威状态在 reducer 前完全不变 |
 | T-TIME-007 | TIME-004 | Battle pause/background 期间现实经过 30 秒 | currentTick 不推进，不产生 150 个 catch-up Tick |
-| T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；pause freeze 不改变正常 catch-up 规则 |
+| T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；每个 Tick 独立建立 event/inbox snapshot |
+| T-TIME-009 | DEC-001, TIME-004 | Battle pause 时 LLM completion 返回并进入 inbox | pause 中不消费；resume 后第一个实际 reducer Tick 才可消费 |
+| T-TIME-010 | DEC-001, REPLAY-001 | 两次真实运行的 LLM wall-clock latency 不同，但 Replay 记录相同 consumed/accepted Tick | Replay 不依赖 completion timestamp，不重新调用 LLM，按记录 Tick 复现 Plan 生效 |
 
 ## 3. PlanSubmission
 
@@ -120,8 +127,12 @@
 | --- | --- | --- | --- |
 | T-DEC-001 | STATE-003 | 同 Tick 多个原因调用 ensureDecision | 当前 generation 只存在一个有效 request |
 | T-DEC-002 | SKILL-004 | Actor 在 recovery | Thinking 可以继续/开始 |
-| T-DEC-003 | SKILL-004 | recovery 中 Decision ready | Plan 可暂存，但不能启动新 Action |
+| T-DEC-003 | SKILL-004, DEC-001 | recovery 中 reducer 消费并接受 Decision Plan | Plan 可暂存，但 recovery 结束前不能启动新 Action |
 | T-DEC-004 | DEC-002 | hit 使 generation 失效后旧 LLM 返回 | 无提交权 |
+| T-DEC-005 | STATE-005, SKILL-004 | Actor 正在 recovery 时 Decision request thinking | actionState=recovery 与 decisionState=thinking 可同时存在，不互相覆盖 |
+| T-DEC-006 | STATE-005 | Actor moving 时启动 Decision | actionState=moving 与 decisionState=thinking 可同时存在 |
+| T-DEC-007 | DEC-003, PLAN-006 | 第一次 Decision completion 返回非法 Plan | Adapter 不自行重试；Simulation validation 后决定是否发起唯一 correction attempt |
+| T-DEC-008 | DEC-001, DEC-003 | DecisionCompletion 返回 Plan/failure | Completion 只含 requestId/generation/result；无 gameplay timing/dueTick；callback 只 enqueue，Simulation reducer 决定 stale/validation/acceptance |
 
 ## 9. Control Plane / Replay
 
@@ -129,7 +140,9 @@
 | --- | --- | --- | --- |
 | T-CTRL-001 | CTRL-001 | 两个 Tick 之间 Frame abort | 立即失效 authority，不等下个 Tick |
 | T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
-| T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM |
+| T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
+| T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
+| T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
 
@@ -139,8 +152,33 @@
 | --- | --- | --- | --- |
 | T-PRES-001 | ARCH-003 | Browser 掉帧 | Simulation result 不变 |
 | T-PRES-002 | ARCH-003 | Effect asset load fail | damage/result 不变，可发 diagnostic |
-| T-PRES-003 | ARCH-003 | camera zoom/focus 改变 | 不改 Simulation State |
+| T-PRES-003 | ARCH-003 | Presentation camera/viewport 重新布局 | 不改 Simulation State；v0 camera 无 zoom/focusHint/animation |
 | T-PRES-004 | STATE-001 | Sprite 插值位置 x=2.7 | Decision/Simulation 仍只看到 committed integer tile |
+| T-PRES-005 | ARCH-006, BATTLE-001 | 仅用 synthetic Presentation input 初始化 4 个唯一 actorId | Presentation 可创建 4 个 actor visual/HUD entry 且无固定 ally/enemy slot；这不使 v0 Simulation 接受 4 Actor |
+| T-PRES-006 | ARCH-003, ARCH-005 | Runtime 启动 Battle session | 先 await Presentation.initialize，再 render initial Projection，之后才启动 200ms Battle clock；SceneInit 不重复维护 tile/direction/HP 初值 |
+| T-PRES-007 | ARCH-003 | 正常 BattleResult 已 resolve 但 scene 尚未退出 | final Projection 保持可见；直到 battle.close() 才关闭 Presentation |
+| T-PRES-008 | CTRL-001 | RUNNING 状态直接调用 battle.close() | 等价于 cancel authority + cleanup；scheduler/late completion 无提交权，Presentation close 幂等 |
+| T-PRES-009 | ARCH-003 | 没有新 Simulation Projection，仅 viewport resize | Simulation state/tick 不变；Presentation 自行推进 visualEpoch 并提交新 layout |
+| T-PRES-010 | ARCH-003 | Tick N 发布 effectStarts=[effect-1]，Tick N+1 effectStarts=[] | effect-1 继续按 Presentation-local visual timing 播放并自行 cleanup；Simulation 不维护 active visual effect |
+| T-PRES-011 | ARCH-003 | 同一个 effectId 因重复 render 再次出现 | 不重复创建 transient visual |
+| T-PRES-012 | ARCH-003, ARCH-005 | initialize 完成后 first render | 只创建一次完整 RenderDomain；root/actor/effects/HUD key、tag、slot 与 FROZEN Render Tree 完全一致 |
+| T-PRES-013 | ARCH-006 | Scene actor 输入顺序交换 | actor RenderNode 仍按 Contracts 定义的 ActorId ECMAScript ordinal string order 稳定排列，identity 不随输入顺序改变 |
+| T-PRES-014 | ARCH-003 | Actor active movement，同时 viewport resize/camera 改变 | Actor data 只含 world motion，不含 screenX/fromScreenX；motionId/fingerprint/elapsed 不重启，只改变 parent transform |
+| T-PRES-015 | ARCH-003 | 两个 alive Actor 分处地图两点 | camera 使用 movement.to-or-tile target 的 bounding midpoint，clamp Map bounds；无 zoom/animation |
+| T-PRES-016 | ARCH-003 | Map 小于 logical viewport | 对应 camera 轴为 0，并通过 originX/originY 在 logical viewport 居中 |
+| T-PRES-017 | ARCH-003 | initialize 首个 viewport 与后续连续 resize | 首次立即接受且不 clamp；后续只在 trailing-edge 100ms 提交 latest layout；相同 layout no-op |
+| T-PRES-018 | TIME-004, ARCH-003 | PAUSED 中 movement/effect/autotile 正在进行且发生 resize | visual elapsed 全部冻结；resize 仍可提交且 paused=true；resume 后从冻结点继续 |
+| T-PRES-019 | ARCH-003 | hit/immune/miss/invalid 四种 effectStarts | hit opacity 1.0；immune 0.6；miss/invalid 不创建 visual；四种 outcome 都消费 effectId |
+| T-PRES-020 | ARCH-003 | initialize twice、pre-init render、pause before initial render | 按 Handler FROZEN 状态机产生 programmer/state error；close 幂等，CLOSED 后 render race-safe no-op |
+| T-PRES-021 | ARCH-003 | older tick、same tick identical replay、same tick conflicting Projection | older ignore；identical replay no commit/no visualEpoch++；conflict fail fast |
+| T-PRES-022 | ARCH-003 | Character/BattleEffect/Tileset/Autotile Browser decode failure | actor/tile 使用 placeholder或 effect skip + diagnostic；不改变 gameplay、不产生 Battle ACK |
+| T-PRES-023 | ARCH-003 | first render 后执行 move/turn/damage/effect/pause/resume/resize | 全部使用 domain.update()；normal path 不调用 domain.replace() |
+| T-PRES-024 | ARCH-003 | 两个 Actor 同时拥有不同 motionId | 两个 Browser motion 并行插值，不共享 scene-global motion id |
+| T-PRES-025 | ARCH-006 | ActorId 恰好 115 UTF-8 bytes / 超过 115 UTF-8 bytes | 上界值生成的 `battle:actor:<actorId>` 不超过 Renderer 128-byte key limit；超界 ActorId 在进入 RenderDomain 前 reject |
+| T-PRES-026 | ARCH-003 | hit/immune effect 与 actor、priority tile 位于同一 world 区域 | effect 作为 world-space overlay 始终绘制在 battlefield tile/actor 之上；HUD 独立，不参与 world overlay |
+| T-PRES-027 | ARCH-003 | 超大合法 viewport 使 required +1-tile view payload 超过 Renderer capacity guard | 不 clamp、不截断、不 chunk；整次 visual commit 以 PRESENTATION_COMMIT_FAILED 失败且不产生 partial visualEpoch |
+| T-PRES-028 | ARCH-003, TIME-004 | animated Autotile 无 suffix / `[N]` suffix，期间 pause/resume | 默认 250ms/frame；`[N]` 为 N*50ms/frame；pause 冻结 visual time，resume 从冻结点继续 |
+
 
 ## 11. Result / Termination
 
@@ -156,14 +194,14 @@
 
 当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
 
-Contracts / Integration 仍有 Schema、Presentation、Decision Adapter、Guidance 等 OPEN；这些在对应接口冻结后再增加集成测试，不在本 Core Rule Matrix 中暗定。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance。剩余 OPEN 只涉及非 Presentation Content 统一 schema、真实 Decision provider metadata/cancel defaults、Guidance/Host wiring 等；这些不得反向改变已冻结的 Core/Presentation Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 
 至少应先用 headless Mock/Script 测通：
 
 - overdue Tick catch-up；
-- timeout/ready 同边界；
+- Decision inbox snapshot 边界：snapshot 前到达本 Tick消费、snapshot 后到达下一 Tick消费；
 - turn-only / turn+skill 的 Action 配额；
 - move_start 瞬间转向；
 - moving Actor 被 positive damage 中断并留 committed origin；

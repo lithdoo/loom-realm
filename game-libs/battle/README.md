@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Design only / 未实现**。当前 Battle 规范已经完成结构重构，但还没有 Runtime `src/`、运行入口、构建/测试通过结论或可加载的 LoomRealm Subsystem。
+> 状态：**Core gameplay + Presentation implementation spec 已冻结；代码未实现**。当前还没有完整 Runtime `src/`、运行入口、构建/测试通过结论或可加载的 LoomRealm Battle Subsystem。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -15,7 +15,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
 - **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
-- **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — Presentation 独立设计：Map 风格 Builder/Handler、RenderDomain 接入、session 生命周期、并发与最小接口草案。
+- **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN FOR IMPLEMENTATION**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
 - **[BATTLE_V0_DESIGN.md](./docs/BATTLE_V0_DESIGN.md)** — 文档索引、旧章节迁移表和历史说明。
 
@@ -25,6 +25,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 SPEC
 → CONTRACTS
 → INTEGRATION
+→ PRESENTATION
 → TEST_MATRIX
 ```
 
@@ -34,14 +35,14 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 已经冻结的核心边界包括：
 
-- 双 Actor 同时行动，无传统交替回合；
+- v0 严格双 Actor 同时行动，无传统交替回合；validator 要求恰好 1 ally + 1 enemy；Actor cardinality 是 v0 rule，跨层与 Runtime 使用有界 ActorId-addressed collection，禁止用数组 slot 表达 identity；
 - Simulation 是唯一业务权威；
 - Decision / Simulation / Presentation 作为可独立导出、替换和测试的模块，只共享 Contracts/Ports，不依赖彼此的 concrete implementation；
-- Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；
+- Simulation 是完整、自驱动的 Battle Runtime：自己拥有 200 ms Battle clock、scheduler、event queue、Tick reducer 与 accepted-plan execution；public session 采用 one-shot `run()`，并由 Runtime 统一拥有注入后的 Decision/Presentation lifecycle；Core 只依赖 BattleClock/AbortSignal/Ports 等窄 capability，不依赖整个 SubsystemScope/Frame；
 - Simulation 可以通过注入的 DecisionPort / PresentationPort 使用具体组件，但不等待 Browser 动画/ACK 推进规则；Presentation 可用 Scene/Projection 数据独立初始化和测试；
 - 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
-- Decision 直接生成结构化 `PlanSubmission`，Simulation 只校验/执行；
+- Decision 每次调用只完成一次 Plan/failure attempt；completion 不带 gameplay timing/dueTick，只即时进入 Simulation-owned inbox；Tick reducer 在 snapshot 边界消费，Simulation 拥有 generation、stale 判定、Plan validation、correction retry 与 accepted-plan queue；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
 - move_start 瞬间更新 direction；v0 保留独立原地 `turn` Action；
 - 同格竞争使用 `battleSeed` 的可回放等概率伪随机；
@@ -56,7 +57,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 - v0 不做 LOS；
 - pause/background 冻结 Battle clock；
 - v0 不设正式 stalemate / 最大战斗时长；
-- Presentation/Browser/camera 不反向修改 Simulation。
+- Presentation/Browser/camera 不反向修改 Simulation；`visualEpoch`、layout/camera/effect visual lifetime 属于 Presentation-local，Simulation 不发布 visualEpoch。
 
 具体语义请只查 SPEC Rule IDs。
 
@@ -66,16 +67,20 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 此前关于 direction/turn、移动中致命受击、zero-damage hit、LOS、pause/background clock、stalemate 的问题都已经冻结进 SPEC。
 
-仍待冻结的是数据/集成细节，例如：
+**Presentation v0 Blocking OPEN = 0。** Presentation 所需 BattleEffect / BattleSceneInit / RenderProjection / SkillEffectProjection、Render Tree、Browser data ABI、camera/viewport/effect/lifecycle、effect stacking 与 Renderer capacity failure policy 已冻结。
 
-- Content subject/version、key/id 和正式 Schema；
-- BattleEffect / RenderProjection exact shape；
-- Decision Adapter error/cancel/deadline 接口；
-- Guidance Host/InputTarget wiring。
+仍待冻结的内容只包括与 Presentation 完整落地无关的外部/后续细节，例如：
 
-这些 OPEN 不得改变已经冻结的 Core gameplay 语义。
+- BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、key/id 与部分正式 Schema；
+- DecisionFailure/provider metadata、provider cancel guarantee、provider/network timeout defaults；
+- Guidance Host/InputTarget wiring；
+- Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
-`game-libs/tile-presentation` / `@loomrealm-game/tile-presentation` 已落地，Map 已迁移到其中已验证的纯 tile viewport/layout shared implementation。Battle Presentation 可以直接消费该 package；Battle 不复制 Map layout 代码，也不通过依赖 `@loomrealm-game/map` 获取该能力。Battle Presentation 本身仍未实现。
+Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 删除，不再属于 OPEN；provider timeout 只作为基础设施失败策略。
+
+这些 OPEN 不得改变已经冻结的 Core gameplay 或 Presentation ABI/行为语义。
+
+`game-libs/tile-presentation` / `@loomrealm-game/tile-presentation` 已落地，Map 已迁移到其中已验证的纯 tile viewport/layout shared implementation。Battle Presentation MUST 直接消费该 package；Battle 不复制 Map layout 代码，也不依赖 `@loomrealm-game/map` Runtime。Presentation specification 已冻结，但实现尚未开始。
 
 ## 下一阶段
 
@@ -88,7 +93,7 @@ Content/Contracts schema
 → DecisionPort + Mock/Script Decision
 → frozen-rule tests
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
-→ PresentationPort + Presentation
+→ **现在可直接执行：按 FROZEN Presentation Agent contract 实现 PresentationPort + Browser Presentation**
 → business Subsystem thin composition
 → real LLM Decision
 → Guidance / Host E2E

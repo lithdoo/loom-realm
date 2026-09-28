@@ -37,37 +37,75 @@
 Application / Subsystem
   ├─ choose/create Decision implementation
   ├─ choose/create Presentation implementation
-  ├─ create Simulation and inject required Ports/capabilities
-  └─ map Frame abort + Host pause/background + external services
+  ├─ create BattleRuntime and inject required Ports/capabilities
+  └─ after injection, only control BattleRuntime lifecycle
 ```
 
 它不负责 Battle scheduler，不调用公开 `tick()` 来实施战斗，也不在每个 Decision/Projection 之间承担规则转发。Simulation 根据自己的 Runtime 状态请求 Decision，并把已决定的视觉事实交给 Presentation Port。
 
 ### 1.1 Port 的概念边界
 
-exact TypeScript signature 仍由 Contracts/Integration OPEN 冻结，但职责应保持如下：
+PresentationPort / BattlePresentationHandler 的 lifecycle surface 已由 Contracts/Presentation 冻结；这里不再保留另一套 method naming。其余非 Presentation 的 package export organization 与尚未冻结的外部 provider detail 仍可在实现阶段按仓库惯例落位：
 
 ```ts
 DecisionPort
-  decide(DecisionRequest) -> Promise<DecisionCompletion>
+  decide(DecisionRequest, AbortSignal) -> Promise<DecisionCompletion>
 
 PresentationPort
   initialize(BattleSceneInit)
-  apply(RenderProjection)
-  dispose()
+  render(RenderProjection)
+  pause()
+  resume()
+  close()
 
 BattleRuntime
-  start() -> Promise<BattleResult>
+  run() -> Promise<BattleResult>
   pause()
   resume()
   cancel()
+  close()
   getSnapshot()
   getReplay()
 ```
 
-`BattleRuntime` 的 public surface 不需要暴露“由业务每 200 ms 调一次”的 `tick()`。实现内部可以有可测试的 `processTick(currentTick)`、FakeClock 或 scheduler seam，但 Tick ownership 仍属于 Simulation。
+`run()` 是 one-shot session entry，命名与现有 Map Handler 的 `run()` 习惯对齐；同一 Runtime 实例不得第二次 run。它在 Presentation 初始化与 initial Projection 发布完成后才启动 Battle clock。
+
+`BattleRuntime` 的 public surface 不暴露“由业务每 200 ms 调一次”的 `tick()`。实现内部可以有可测试的 `processTick(currentTick)`、FakeClock 或 scheduler seam，但 Tick ownership 仍属于 Simulation。
+
+Runtime 对注入的 Decision/Presentation lifecycle 负责：业务注入完成后不直接调用 `presentation.pause/resume/close`。
 
 Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、LLMDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
+
+`BattlePresentationHandler` 应直接实现 `PresentationPort`；不需要额外建立一个只做 method forwarding 的 adapter。
+
+Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 严格要求两个 combat Actor，并且恰好为 1 个 `ally` + 1 个 `enemy`；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
+
+### 1.2 Simulation 只依赖窄 capability
+
+Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；LLMDecision concrete implementation 也可以依赖 Host/service capability。
+
+Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。推荐概念：
+
+```ts
+const battle = new BattleSimulationBuilder({
+  clock,
+  signal,
+  decision,
+  presentation,
+}).build(config)
+```
+
+其中 Simulation 只知道：
+
+```text
+BattleClock
+AbortSignal
+DecisionPort
+PresentationPort
+BattleConfig / resolved Battle content
+```
+
+它不知道 RenderDomain、Viewport、DOM、InputListener 或 `frame.call()`。测试环境可直接注入 FakeClock + ScriptDecision + RecordingPresentation，不需要模拟整个 LoomRealm Subsystem。
 
 ## 2. RPGMap Resource 兼容
 
@@ -139,7 +177,7 @@ Battle 不得把以下模块当作 Battle 权威：
 
 ## 3. Presentation 集成
 
-Presentation 的独立模块设计、Map 风格 Builder/Handler、Subsystem/RenderDomain 接入、session 生命周期与并发模型详见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档不覆盖本文件或 Contracts 中仍为 OPEN 的 exact Schema/API。
+Presentation 的规范性实现合同见 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md)。该文档当前状态为 **FROZEN FOR IMPLEMENTATION**，负责 Render Tree、Browser ABI、坐标/camera/viewport/effect/lifecycle 的 exact v0 行为；本 Integration 文档负责其外部 LoomRealm/Host 组合边界，不再把 Presentation exact ABI 留给实现自行决定。
 
 Presentation 只负责显示，并且必须可以脱离 Decision/Simulation concrete implementation 独立初始化与测试。
 
@@ -151,7 +189,7 @@ Presentation 只负责显示，并且必须可以脱离 Decision/Simulation conc
 - Character Sprite；
 - authoritative A→B step 的插值；
 - BattleEffect；
-- camera follow/focus/zoom；
+- v0 fixed camera framing（无 zoom/focusHint/camera animation）；
 - viewport/layout；
 - resource load/dispose 生命周期。
 
@@ -180,7 +218,9 @@ viewportChanged
 
 Simulation 不得等待动画完成后才提交移动、扣血、死亡或 BattleResult。
 
-Simulation 可以在权威状态已经由 reducer 决定后调用 PresentationPort（无论最终是 `apply(RenderProjection)` 还是更细的 `moveActor / playSkillEffect`）。这些调用只发布表现事实；Simulation 不得等待其动画完成、Promise 顺序或 Browser ACK 后才推进 Battle Rule。
+Simulation 可以在权威状态已经由 reducer 决定后调用 `PresentationPort.render(RenderProjection)`。这只发布表现事实；Simulation 不得等待动画完成、Promise 顺序或 Browser ACK 后才推进 Battle Rule。
+
+Simulation 不发布 `visualEpoch`。Presentation 将 RenderProjection 或本地 viewport/camera/layout 变化转换成 RenderDomain visual commit 时，自行维护 `visualEpoch`。
 
 ### 3.3 Camera
 
@@ -192,53 +232,60 @@ Simulation 不拥有：
 cameraX
 cameraY
 zoom
+focusHint
 ```
 
-### INTEGRATION-OPEN-001 — camera focus hint — OPEN
+v0 RenderProjection 不携带 camera focus hint。Presentation 按 FROZEN spec 使用 alive actors（若无 alive 则全部 actors）的 movement.to-or-tile bounding midpoint 计算固定 camera，并 clamp 到 Map bounds；无 zoom、camera animation。collection 顺序不承载 camera priority。未来版本可以改变 framing 算法，但必须先修订 Presentation spec，不修改 Simulation authority。
 
-是否允许 RenderProjection 携带非权威 `focusHint` 尚未冻结。
+## 4. BattleEffect 表现 — FROZEN
 
-## 4. BattleEffect 表现
+BattleEffect 是 Presentation-only Content。cross-layer 与 Browser 行为已经冻结，实施时不得重新选择另一套 effect model。
 
-BattleEffect 是 Presentation-only Content。
-
-v0 当前最小方向：
-
-- 一张 Graphics；
-- 一个 anchor；
-- 简单 fade-in / hold / fade-out；
-- 不预埋 projectile、particle、Shader、复杂 animation editor。
-
-资源 key 约定：
+Content：
 
 ```text
-resource.Graphics/BattleEffects/<EffectName>
+subject = struct.BattleEffect
+record key = effect id
+
+image.namespace = resource.Graphics
+image.key       = BattleEffects/<...>
+anchor          = tile-center
+timing          = fade_in_ticks / hold_ticks / fade_out_ticks
 ```
 
-Simulation 只输出 effect identity/result/anchor/startTick 等权威事实；视觉生命周期由 Presentation 自己处理。
+Simulation 只输出 one-shot `effectStarts[]`：
 
-概念 Projection：
-
-```json
-{
-  "effectId": "effect-00012",
-  "sceneEpoch": 1,
-  "result": "hit",
-  "effect": "firebolt",
-  "tile": { "x": 4, "y": 3 },
-  "startTick": 120
+```ts
+type SkillEffectProjection = {
+  effectId: string
+  result: "hit" | "immune" | "miss" | "invalid"
+  effect: string
+  tile: GridPosition | null
+  startTick: number
 }
 ```
 
-### INTEGRATION-OPEN-002 — BattleEffect 视觉细节 — OPEN
+Presentation v0 policy：
 
-尚未冻结：
+```text
+hit
+→ tile 必须非 null
+→ 播放对应 BattleEffect
+→ max opacity = 1.0
 
-- exact anchor/timing Schema；
-- `immune` 是否有独立免疫视觉；
-- `miss` 是否播放空挥/落空效果；
-- `invalid` 是否完全无视觉；
-- Browser effect cleanup 生命周期。
+immune
+→ tile 必须非 null
+→ 播放同一 BattleEffect
+→ max opacity = 0.6
+
+miss / invalid
+→ 消费 effectId
+→ 不创建 visual
+```
+
+fade-in / hold / fade-out 使用 BattleEffect ticks × `tickDurationMs`；Browser 自己维护 ActiveVisualEffect、pause/resume elapsed time、natural cleanup。后续 Simulation Tick 不重复发送“仍在播放”的 effect，Browser 也不向 Simulation 回 ACK。
+
+Browser effect image decode/load 失败只跳过该 transient visual并可发 diagnostic；`struct.BattleEffect` record/资源 identity 在 initialize 阶段无法解析则属于 Presentation fatal，Battle 不启动。
 
 ## 5. Decision 实现类型
 
@@ -254,7 +301,7 @@ LLMDecision
 
 Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
-Decision module 只负责“如何从输入得到 Plan”。`decisionGeneration`、何时创建 Decision Request、deadline、trusted completion fact 到 `dueTick` 的映射、stale generation fencing、correction retry 与 Replay timing 都仍属于 Simulation 的 Runtime lifecycle；这些不能下放给业务 composition adapter。
+Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、accepted-plan queue 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
 
 ## 6. LLM Decision Adapter
 
@@ -264,41 +311,65 @@ Adapter 最终需要解决：
 
 - LLM 请求位于哪个 Host 层；
 - authorization / credential；
-- AbortSignal / cancel；
-- trusted completion timestamp；
-- deadline；
-- service/network error metadata；
-- structured output validation；
-- 同 generation 的一次 correction retry。
+- 接收 Simulation 提供的 AbortSignal；
+- provider/network timeout 与 service error metadata；
+- structured output 解析为 `PlanSubmission` / failure。
+
+Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直接接受 Plan，也不自行 correction retry**。
+
+固定数据流：
+
+```text
+Simulation
+  → DecisionPort.decide(request, signal)
+        ↓ async
+DecisionCompletion
+        ↓
+Simulation-owned Decision Inbox
+        ↓
+next reducer snapshot that can see it
+        ↓
+generation / validation / correction
+        ↓
+accepted-plan queue
+```
+
+Promise resolve / worker message / provider callback 只允许 enqueue completion。即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
 
 Browser 不应持有模型密钥。
 
-### 6.1 Completion time
+### 6.1 Provider timeout 与 Battle gameplay 分离
 
-Adapter 必须提供可信的真实完成时间，以满足 `DEC-001`。
+Provider/network timeout 是 infrastructure policy。例如模型服务在其配置的时限后返回 timeout，可以产生：
 
-例如：
-
-```text
-model completed = 480 ms
-host callback handled = 700 ms
-→ Battle 应按可信 480 ms 映射 dueTick
+```ts
+{
+  type: "failed",
+  requestId,
+  generation,
+  error
+}
 ```
 
-不能只把 JavaScript callback 真正被调度到的时刻当“模型思考时间”。
+这个 failure 和普通 completion 一样进入 Decision Inbox，由后续 Tick reducer 消费。
 
-### 6.2 Model / Service 差异
+v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-clock latency 计算 `dueTick`。Battle pause 时 LLM 可以完成并 enqueue，但没有 Tick 就不会产生 gameplay effect。
 
-不同模型、网络、供应商可以有不同 deadline/product limit，但不得修改 Core 中“completion fact → dueTick”的确定性规则。
+### INTEGRATION-OPEN-003 — Decision Adapter provider detail — OPEN
 
-### INTEGRATION-OPEN-003 — Decision Adapter API — OPEN
+已经确定：
+
+- 一次 `decide()` = 一次 attempt；
+- DecisionCompletion 不带 gameplay timing / dueTick；
+- completion callback 只 enqueue 到 Simulation-owned inbox；
+- stale / validation / correction / accepted-plan queue 属于 Simulation；
+- Simulation 通过 AbortSignal best-effort 取消失效 attempt。
 
 尚未冻结：
 
-- exact Adapter interface；
-- error enum；
-- cancel guarantee；
-- default deadline；
+- `DecisionFailure` exact enum / provider metadata；
+- provider cancel guarantee；
+- provider/network timeout defaults；
 - model/service limit；
 - credential/authorization wiring。
 
@@ -324,7 +395,7 @@ InputTarget / Host / Guidance exact contract 尚未冻结。
 
 Battle 可以被 LoomRealm Frame/Subsystem 组合使用，但 `game-libs/battle` 本身不等于一个预先构建好的独立 Subsystem 进程。
 
-业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause()`、resume → `battle.resume()`。真正的 Battle 内部终止/冻结语义仍由 Simulation 执行。
+业务 composition 负责把 Frame/Host 生命周期映射给 Battle Runtime，例如 `frame.signal` abort → `battle.cancel()`、background → `battle.pause()`、resume → `battle.resume()`、Frame/session 离开 → `battle.close()`。真正的 Battle 内部终止/冻结语义仍由 Runtime 执行。
 
 Frame abort / Battle cancel 遵循 `CTRL-001`：
 
@@ -332,14 +403,81 @@ Frame abort / Battle cancel 遵循 `CTRL-001`：
 abort/cancel
 → 立即失效 Battle authority/epoch
 → 停 scheduler
-→ best-effort cancel LLM/resource
-→ Presentation cleanup
-→ Frame cleanup
+→ best-effort cancel Decision/resource
+→ Runtime 调用 Presentation.close()
+→ Runtime 进入 CLOSED
 ```
 
 不等待下一个 200 ms Tick。
 
 所有迟到 Decision/Event 都必须因 generation/epoch 校验失败而失去提交权。
+
+正常 BattleResult 使用不同的视觉生命周期：
+
+```text
+terminal gate
+→ Simulation 产生最终权威状态 / BattleResult
+→ 发布 final RenderProjection
+→ 停止 Battle scheduler / 新 Action
+→ BattleRuntime.run() resolve
+→ Runtime 保持 SETTLED + final visual
+→ 业务离开 Battle scene
+→ battle.close()
+→ Runtime 调用 Presentation.close()
+→ CLOSED
+```
+
+Simulation 不等待 final animation ACK；“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
+
+推荐 Runtime 生命周期：
+
+```text
+CREATED
+  │ run()
+  ▼
+INITIALIZING
+  │ initialize + initial render
+  ▼
+RUNNING ⇄ PAUSED
+  │ normal result
+  ▼
+SETTLED
+  │ close()
+  ▼
+CLOSED
+```
+
+`cancel()` / abort / fatal failure 可从 INITIALIZING、RUNNING、PAUSED 终止 active authority。`close()` 幂等；如果在仍运行时调用，应等价于“cancel authority + cleanup”，而不是留下半活跃 scheduler。
+
+### 8.1 run() 的单一结果通道
+
+可预期的 session 终止统一通过 `run(): Promise<BattleResult>` 返回：
+
+```text
+正常胜负             → ally win / enemy win / simultaneous defeat
+cancel / active close → cancelled
+已分类 Runtime/Presentation/Decision fatal → failure
+```
+
+不要同时维护“同一种失败既可能 `BattleResult.failure` 又可能 Promise rejection”两条业务通道。只有 programmer error / invariant violation（例如非法重复 `run()`、内部不变量被破坏）可以 throw/reject。
+
+Presentation failure 最低分类：
+
+```text
+initialize 所需关键资源失败
+→ Battle clock 尚未开始
+→ Runtime cleanup
+→ run() = failure
+
+render / RenderDomain 同步 fatal
+→ stop authority
+→ cleanup
+→ run() = failure
+
+Browser 可降级的异步视觉资源失败
+→ fallback / diagnostic
+→ 不改变 gameplay，不终止 Battle
+```
 
 ## 9. Pause / Background
 
@@ -347,8 +485,9 @@ Pause/background policy 已由 Core `TIME-004` 冻结：
 
 - Host 明确暂停 Battle，或 App/Host 进入 background 状态时，Battle monotonic clock 一起冻结；
 - pause 期间不推进 `currentTick`；
-- pause 期间现实时间不计入 Decision latency、movement、windup、recovery 或 protection；
-- resume 后从原逻辑时刻继续，不补算 pause 期间 Tick。
+- pause 期间 movement、windup、recovery、protection 等 Tick 生命周期不推进；
+- Decision completion 可以在 pause 期间进入 inbox，但不会被消费、不会接受 Plan、不会启动 Action；
+- resume 后从原逻辑时刻继续，不补算 pause 期间 Tick；已排队 completion 在后续实际 Tick 消费。
 
 Core 的逐 Tick catch-up 仍保留，但只用于 Battle clock **仍在运行**时 scheduler/event loop 晚醒的情况。
 
@@ -382,7 +521,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle 当前仍是 design-only。
+Battle Runtime/Presentation 代码当前仍未实现；但 Core gameplay 与 Presentation v0 implementation spec 已达到 FROZEN 状态。
 
 已知工程项：
 
@@ -395,31 +534,28 @@ Battle 当前仍是 design-only。
 ## 13. 推荐实施顺序
 
 ```text
-1. 冻结 BattleActor / BattleSkill / BattleEffect v1 serialization schema
-2. 冻结 BattleObservation / PlanConstraints / PlanSubmission / PlanAcceptance
-3. 实现 Content validator
-4. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
-5. 定义 DecisionPort，并用 Mock/Script Decision 注入 Simulation 验证完整 Battle
-6. 跑 frozen-rule deterministic Test Matrix
-7. 已完成渲染前置：建立 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation`，抽取 Map 已验证的通用 tile viewport layout primitive，并让 Map 切换到 shared implementation + regression coverage
-8. 实现 BattleSceneInit / RenderProjection + 独立 PresentationPort/Presentation implementation，直接依赖 `@loomrealm-game/tile-presentation`
-9. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-10. 接真实 LLM Decision Adapter，再接 Guidance / Host
-11. 验证 package-lock / npm ci / unit / Browser E2E
+1. 完成其余非 Presentation Content/Contracts validator
+2. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
+3. 实现 frozen DecisionPort + Mock/Script Decision
+4. 跑 frozen-rule deterministic Test Matrix
+5. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
+6. 按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现 Presentation
+7. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
+8. 接真实 LLM Decision Adapter，再接 Guidance / Host
+9. 验证 package-lock / npm ci / unit / Browser E2E
 ```
 
-真实 LLM 不是验证 Simulation 正确性的前置条件。
+Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
 
 ## 14. Integration OPEN 汇总
 
-仍未冻结的集成项只包括：
+Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-001**：camera focus hint。
-- **INTEGRATION-OPEN-002**：BattleEffect Schema / outcome visuals / cleanup。
-- **INTEGRATION-OPEN-003**：Decision Adapter API/timing/error/cancel/defaults。
-- **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring。
+- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/inbox/Tick-boundary/retry ownership已确定；
+- **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
+- Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-Presentation 实现前置 `@loomrealm-game/tile-presentation` 已落地，Map 已迁移；Battle Presentation 仍未实现。viewport clamp/default/min/max 是否也升级为 shared entry policy 仍需后续明确。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation spec 已冻结，代码尚未实现。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。

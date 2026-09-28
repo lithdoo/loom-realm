@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**Design only / Contract 草案**。本文定义 Battle v0 的 canonical 数据边界，不代表 TypeScript/Zod/JSON Schema 已实现。
+> 状态：**Presentation contract FROZEN FOR IMPLEMENTATION；其余 Contract 仍可含明确标注的 OPEN**。本文定义 Battle v0 canonical 数据边界；冻结表示 v0 实现不得自行改变字段语义或 ownership，不代表 TypeScript/Zod/JSON Schema 已经落地。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
@@ -46,6 +46,26 @@ Schema version 应代表**结构兼容性**，不应因为 Fireball damage 从 5
 
 ## 3. Shared primitives
 
+### ActorId
+
+```ts
+type ActorId = string
+```
+
+v0 `ActorId` 必须是合法 Unicode scalar string，UTF-8 byte length 为 **1..115**。该限制既保证 identity 非空，也保证冻结的 RenderNode key `battle:actor:<actorId>` 永远不超过 Renderer 的 128-byte node-key 上限（固定前缀 `battle:actor:` 占 13 bytes）。
+
+所有 Actor collection 都以 `actorId` 作为语义 identity。数组/迭代顺序不代表 ally/enemy、先后手或裁决优先级；需要 deterministic 顺序时必须显式按稳定 key 排序。排序按 `actorId` 的 ECMAScript ordinal string order（等价于使用普通 `< / >` 比较 UTF-16 code units）执行，不使用 locale-sensitive `localeCompare()`，也不依赖 insertion order。
+
+v0 仍由 `BATTLE-001` 限制为恰好两个 combat Actor。Contract 使用 collection shape 是为了避免把 cardinality 编码进跨层 ABI，不表示 v0 支持多人。
+
+### Team
+
+```ts
+type Team = "ally" | "enemy"
+```
+
+这是 v0 的两方 team identity，与 collection 顺序无关。未来组队可以在同一 Team 下拥有多个 Actor；FFA/多阵营若需要超过两种 Team，属于新版本 gameplay contract，不在 v0 暗中扩展。
+
 ### GridPosition
 
 ```ts
@@ -78,6 +98,16 @@ type ResourceRef = {
 ```
 
 实现时应优先复用仓库已有公共类型，而不是再定义一套平行结构。
+
+### MapRef — FROZEN
+
+```ts
+type MapRef = {
+  mapId: integer
+}
+```
+
+`mapId` 必须是正 safe integer，并对应 `struct.Map` 的 record key。Presentation 不接受 Map Runtime instance。
 
 ## 4. Battle Content
 
@@ -175,33 +205,40 @@ target/effect type
 
 Range Schema 校验遵循 `SKILL-001`。
 
-### 4.3 BattleEffect
+### 4.3 BattleEffect — Presentation v0 FROZEN
 
-BattleEffect 只属于 Presentation Content。
+BattleEffect 只属于 Presentation Content。v0 record subject 固定为 `struct.BattleEffect`，record key 必须等于 `id`。
 
-当前概念结构：
+exact v0 shape：
 
-```json
-{
-  "id": "firebolt",
-  "image": {
-    "namespace": "resource.Graphics",
-    "key": "BattleEffects/Firebolt"
-  },
-  "anchor": "tile-center",
-  "timing": {
-    "fade_in_ticks": 1,
-    "hold_ticks": 2,
-    "fade_out_ticks": 1
+```ts
+type BattleEffectContent = {
+  id: string
+  image: {
+    namespace: "resource.Graphics"
+    key: string
+  }
+  anchor: "tile-center"
+  timing: {
+    fade_in_ticks: integer
+    hold_ticks: integer
+    fade_out_ticks: integer
   }
 }
 ```
 
-BattleEffect 的视觉 timing 不得改变 Skill windup/recovery/damage timing。
+约束：
 
-### CONTRACT-OPEN-002 — BattleEffect v1 Schema — OPEN
+- `id` 非空且等于 record key；
+- `image.key` 必须以 `BattleEffects/` 开头；
+- 三个 timing 字段均为非负 safe integer；
+- 三个 timing 之和必须大于 0；
+- v0 只有 `"tile-center"` anchor；
+- visual duration = 对应 ticks × 本场 `tickDurationMs`；
+- BattleEffect timing 只控制视觉，不得改变 Skill windup/recovery/damage timing；
+- v0 不支持 outcome-specific image、projectile、particle、shader 或 animation editor。
 
-尚未冻结 exact image/timing/anchor 字段，以及 outcome-specific visuals。
+hit/immune/miss/invalid 是否创建 transient visual 的固定 policy 在 Presentation/Integration FROZEN 规范中定义。
 
 ## 5. BattleConfig
 
@@ -217,9 +254,19 @@ type BattleConfig = {
   protectionTicks: integer
 
   map: MapRef
-  actors: InitialActorPlacement[2]
+  actors: readonly InitialActorPlacement[]
 }
 ```
+
+`actors` 是 actorId-addressed collection；`InitialActorPlacement` 必须携带满足 ActorId 约束的唯一 `actorId` 与显式 v0 side/team identity，数组顺序不承载 side 语义。
+
+v0 serialization/schema 必须同时约束：
+
+- `actors.length === 2`；
+- 两个 `actorId` 唯一；
+- team 恰好为 **1 个 `ally` + 1 个 `enemy`**。
+
+validator 必须按 `BATTLE-001` 拒绝其他 cardinality、重复 actorId、双 ally 或双 enemy。这里使用 collection 而不是 TypeScript tuple，是为了不把“2”扩散到 Runtime/Presentation 的数据结构。
 
 `tickDurationMs=200` 和默认 `maxPathSteps=6` 已冻结。
 
@@ -332,13 +379,17 @@ Decision 看到的是 Simulation 事实，不是 Render State。
 ```ts
 type BattleObservation = {
   tick: integer
-  self: ObservedActor
-  opponent: ObservedActor
+  selfActorId: ActorId
+  actors: readonly ObservedActor[]
   map: ObservationMap
   recentEvents: ObservedEvent[]
   guidance?: Guidance
 }
 ```
+
+v0 中 `actors` 恰好包含两个 Actor，`selfActorId` 指向其中一个；唯一另一个 Actor 就是当前 v0 的 opponent。Decision Adapter 可以为 prompt 派生 `self/opponent` 便利视图，但 canonical Contract 不把“opponent 是单个字段”编码进底层结构。
+
+未来 N Actor 版本可以继续使用同一个 container shape，再单独定义 team/hostility/visibility 规则；这不会反向改变 v0 的 1v1 gameplay。
 
 Observed Actor 至少应包含有战术意义的公开事实：
 
@@ -390,7 +441,9 @@ type ActorRuntimeState = {
   hp: integer
   tile: GridPosition
   direction: Direction
+
   actionState: ActionState
+  decisionState: DecisionState
 
   acceptedPlanId?: string
   activeStep?: ActiveStep
@@ -402,20 +455,26 @@ type ActorRuntimeState = {
 }
 ```
 
-ActionState 至少要能区分：
+两条状态轴必须分开：
 
-```text
-thinking/idle
-moving
-windup
-recovery
-dead
-terminated
+```ts
+type ActionState =
+  | { type: "idle" }
+  | { type: "moving"; /* active step ref */ }
+  | { type: "windup"; /* action ref */ }
+  | { type: "recovery"; /* action ref */ }
+  | { type: "dead" }
+  | { type: "terminated" }
+
+type DecisionState =
+  | { type: "none" }
+  | { type: "thinking"; requestId: string; generation: integer }
+  | { type: "ready"; requestId: string; generation: integer }
 ```
 
-`turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
+exact payload 仍可在实现时正式化，但 `thinking` 不得进入 ActionState。这样才能表达 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 已冻结组合。`ready` 只能由 Tick reducer 消费并接受 inbox completion 后进入；异步 callback 本身不得直接修改 ActorRuntimeState。
 
-最终 discriminated union 可在实现时正式化。
+`turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
 
 ## 12. BattleEvent
 
@@ -433,14 +492,15 @@ type BattleEvent = {
 }
 ```
 
-核心事件概念：
+核心 scheduled event：
 
 ```text
-decision_ready
 move_complete
 skill_resolve
 recovery_complete
 ```
+
+DecisionCompletion 不属于 BattleEvent，也没有 `dueTick`；它进入 Simulation-owned Decision Inbox。
 
 原地 `turn` 即时完成，不需要 `turn_complete` 事件。
 
@@ -464,93 +524,164 @@ type SkillResolveResult =
 
 ## 14. Presentation 数据边界
 
-### 14.1 BattleSceneInit
+### 14.1 BattleSceneInit — FROZEN
 
-Presentation 初始化必须能够只依赖纯数据描述，而不要求知道 Simulation 或 Decision 的 concrete implementation。
-
-概念：
+Presentation 初始化只依赖纯数据描述，不要求知道 Simulation 或 Decision concrete implementation。下面 shape 是 v0 exact Presentation ABI：
 
 ```ts
 type BattleSceneInit = {
   battleId: string
   sceneEpoch: integer
+  tickDurationMs: 200
   map: MapRef
-  actors: Array<{
-    actorId: string
+  actors: readonly Array<{
+    actorId: ActorId
+    team: Team
     character: ResourceRef
-    tile: GridPosition
-    direction: Direction
   }>
+  effectIds: readonly string[]
 }
 ```
 
-这里描述的是“地图与 Actor 初始应该如何显示”。Presentation 可以自行加载资源、创建 Sprite/Canvas node，并维护非权威视觉状态。
+这里描述的是**本 Battle Scene 的稳定视觉资源/identity**，不重复携带会随 Runtime 改变的 tile、direction、HP 或 movement。Actor identity 只由 `actorId` 决定，collection 顺序不承载 team/side 语义。v0 Simulation 只会产生两个 Actor，但 Presentation 的 collection/reconciliation 不应硬编码固定两个 slot。
 
-### 14.2 RenderProjection
+Presentation 可以据此加载 Map/Character/BattleEffect 等静态视觉资源；第一次权威动态视觉状态统一由随后的一次 `RenderProjection` 提供。`effectIds` 必须是本 Battle 可能由 Skill 引用的 BattleEffect id 的去重、按 ECMAScript ordinal string order 稳定排列集合；不得使用 locale-sensitive 排序。Presentation 在 initialize 阶段解析 `struct.BattleEffect` 与其 Graphics。
 
-RenderProjection 是非权威视觉数据。
+Runtime 必须在 Battle clock 启动前先完成 `initialize(scene)`，再发布 initial Projection（通常为 tick 0），从而避免 SceneInit 与 RenderProjection 同时维护两份 tile/direction/HP 初值。
 
-概念：
+### 14.2 RenderProjection — FROZEN
+
+RenderProjection 是非权威视觉数据。下面 shape 是 v0 exact cross-layer ABI：
 
 ```ts
 type RenderProjection = {
+  sceneEpoch: integer
   tick: integer
-  actors: ActorRenderProjection[]
-  movements: MovementProjection[]
-  effects: SkillEffectProjection[]
-  focusHint?: CameraFocusHint
+  actors: readonly ActorRenderProjection[]
+  effectStarts: readonly SkillEffectProjection[]
+}
+
+type ActorRenderProjection = {
+  actorId: ActorId
+  tile: GridPosition
+  direction: Direction
+  hp: integer
+  maxHp: integer
+  life: "alive" | "dead"
+  movement: MovementProjection | null
+}
+
+type MovementProjection = {
+  motionId: integer
+  from: GridPosition
+  to: GridPosition
+  startTick: integer
+  completeTick: integer
 }
 ```
 
 Presentation 可以自行插值和控制 camera，但不得 reverse-sync 回 Simulation。
 
+Movement identity 是 actor-local：不同 Actor 可以同时拥有不同 `motionId`。不再维护独立 `movements[]` 表让 Presentation 二次 join Actor；每个 Actor 的当前 movement 直接附着在对应 Actor projection 上。
+
+`visualEpoch` 不属于跨层 Contract。Presentation 每次把 Simulation Projection、viewport resize 或 camera/layout 变化归约成 Browser visual commit 时，自行推进 Presentation-local `visualEpoch`。
+
+`effectStarts` 只表示**本次 Simulation Projection 新产生的一次性 effect start facts**，不是“当前仍在播放的所有 effect”。Presentation 以 `effectId` 去重并自行维护 fade/hold/cleanup；后续 Projection 不需要重复携带仍在播放的 effect。
+
+v0 不从 Simulation 向 Presentation 发送 camera `focusHint`。Camera framing 只消费 Presentation 已经拥有的 Actor collection / Map / viewport 事实，由 Presentation 自己决定。
+
 Simulation 可以通过 PresentationPort 发布已经由 reducer 决定的 Projection/表现事实；这不赋予 Presentation Rule authority，也不得把动画完成当作 Simulation commit 条件。
 
-### CONTRACT-OPEN-003 — Projection / Presentation Port Schema — OPEN
+### CONTRACT-PRES-003 — Projection / Presentation serialization — FROZEN
 
-尚未冻结：
+v0 固定：
 
-- exact `BattleSceneInit` / `RenderProjection` shape；
-- PresentationPort 的 exact method naming（例如单一 `apply(projection)` 或更细的 move/effect command）；
-- Browser node/effect lifecycle；
-- Simulation 是否输出非权威 camera focus hint。
+- Actor 以 `actorId` collection 表示，顺序不承载 identity；
+- Actor movement 是 actor-local projection，不存在独立 `movements[]` join；
+- `BattleSceneInit` 只携带稳定 Scene/Actor/effect identity/resource facts；初始及后续动态状态都走 `RenderProjection`；
+- Simulation Projection 携带 `sceneEpoch + tick`；`visualEpoch` 是 Presentation-local，不跨层；
+- `effectStarts[]` 是 one-shot effect start facts，不是 active-effect snapshot；
+- v0 不输出 camera `focusHint`；
+- Presentation lifecycle verbs 固定为 `initialize / render / pause / resume / close`；
+- 所有字段均为 required；需要“无值”的字段使用显式 `null`，不得通过字段缺失表达状态。
 
-无论最终 API shape 如何，`ARCH-005` 的边界已经冻结：Presentation module 可独立实现/测试；Simulation 只依赖共享 Port，不依赖 Browser concrete implementation；业务 Subsystem 不承担逐 Tick Projection 转发职责。
+`ARCH-005` 的边界同时冻结：Presentation module 可独立实现/测试；Simulation 只依赖共享 Port，不依赖 Browser concrete implementation；业务 Subsystem 不承担逐 Tick Projection 转发职责。
 
-## 15. SkillEffectProjection
-
-概念：
+## 15. SkillEffectProjection — FROZEN
 
 ```ts
 type SkillEffectProjection = {
   effectId: string
-  sceneEpoch: integer
   result: "hit" | "immune" | "miss" | "invalid"
   effect: string
-  tile?: GridPosition
+  tile: GridPosition | null
   startTick: integer
 }
 ```
 
-`miss / invalid` 是否产生可见效果属于 Presentation policy。
+约束：
 
-## 16. DecisionTiming
+- `effectId` 在一个 Battle session 内唯一；
+- `effect` 必须存在于 `BattleSceneInit.effectIds`；
+- `startTick` 是产生该 outcome 的 Simulation tick；
+- 有逻辑 anchor 时 `tile` 为对应格；不存在合法逻辑 anchor 时显式为 `null`；
+- Presentation 不从该结构反推 damage、interrupt、death 或其他 gameplay transition；
+- hit/immune/miss/invalid 的 v0 可见性 policy 在 Presentation FROZEN spec 中固定。
 
-Decision Adapter 最终需要提供足够的受信时间事实：
+## 16. DecisionPort / Decision Inbox — FROZEN
+
+DecisionPort 的职责是“一次调用完成一次 attempt”。它不返回 Battle timing，也不拥有 Tick/Plan lifecycle。
 
 ```ts
-type DecisionTiming = {
+type DecisionRequest = {
   requestId: string
+  actorId: ActorId
   generation: integer
-  startedAtMonotonicMs: number
-  completedAtMonotonicMs?: number
-  deadlineMonotonicMs: number
-  dueTick?: integer
-  status: DecisionStatus
+  observation: BattleObservation
+  constraints: PlanConstraints
+  correction?: {
+    rejectedPlan: PlanSubmission
+    reason: PlanRejectReason
+  }
+}
+
+type DecisionCompletion =
+  | {
+      type: "completed"
+      requestId: string
+      generation: integer
+      plan: PlanSubmission
+    }
+  | {
+      type: "failed"
+      requestId: string
+      generation: integer
+      error: DecisionFailure
+    }
+
+interface DecisionPort {
+  decide(
+    request: DecisionRequest,
+    signal: AbortSignal,
+  ): Promise<DecisionCompletion>
 }
 ```
 
-exact Adapter API、error/cancel metadata 在 Integration 文档维护。
+`requestId / generation` 是 Simulation 生成的 correlation identity；Decision implementation 必须原样返回，不拥有其生命周期。
+
+DecisionCompletion 不携带任何 wall-clock/Battle-time timing 字段，也不携带 Decision dueTick / acceptedTick。
+
+异步 completion 到达时只进入 Simulation-owned Decision Inbox。Simulation 在 Tick reducer snapshot 中消费它，并负责：
+
+- stale generation fencing；
+- Plan validation；
+- accepted-plan queue；
+- `PLAN-006` correction retry；
+- consumedTick / acceptedTick Replay facts。
+
+Provider/network timeout 属于 Decision implementation 的 infrastructure policy，可以产生 `DecisionCompletion { type: "failed" }`；它不是 Battle gameplay deadline。
+
+Decision Inbox 是 Simulation internal runtime structure，不属于 Presentation Contract，也不作为 `BattleEvent(dueTick)` 序列化。
 
 ## 17. ReplayRecord
 
@@ -560,7 +691,7 @@ Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 initial config/content refs
 battleSeed
 accepted PlanSubmissions + acceptedPlanIds
-Decision timing/generation facts
+Decision request/consume/accept Tick + generation facts
 movement reservation/contention
 skill outcomes + coefficient
 damage/protection
@@ -571,10 +702,9 @@ BattleResult
 
 ## 18. Contracts OPEN
 
-- **CONTRACT-OPEN-001**：Content subject/version、字段命名、key/id 对齐、引用编码。
-- **CONTRACT-OPEN-002**：BattleEffect v1 Schema。
-- **CONTRACT-OPEN-003**：BattleSceneInit / RenderProjection / SkillEffectProjection exact Schema、PresentationPort method naming 与 camera hint。
-- Runtime 的 exact discriminated unions / enum names。
+- **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
+- Decision failure enum / provider-specific metadata exact shape；Decision attempt/inbox/Tick-boundary ownership 已确定。
+- Runtime 的其余 exact discriminated-union payload / enum names。
 - Observation history budget 与 prompt-facing representation。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
