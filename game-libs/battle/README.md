@@ -76,7 +76,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 - Guidance Host/InputTarget wiring；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
-这些 OPEN 不得改变已经冻结的 Core gameplay 语义。
+这些 OPEN 不得改变已经冻结的 Core gameplay 或 Presentation ABI/行为语义。
 
 `game-libs/tile-presentation` / `@loomrealm-game/tile-presentation` 已落地，Map 已迁移到其中已验证的纯 tile viewport/layout shared implementation。Battle Presentation MUST 直接消费该 package；Battle 不复制 Map layout 代码，也不依赖 `@loomrealm-game/map` Runtime。Presentation specification 已冻结，但实现尚未开始。
 
