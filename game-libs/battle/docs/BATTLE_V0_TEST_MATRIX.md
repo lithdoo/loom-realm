@@ -19,6 +19,7 @@
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 | T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
+| T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
 ## 2. Time / Scheduler
 
@@ -33,6 +34,7 @@
 | T-TIME-007 | TIME-004 | Battle pause/background 期间现实经过 30 秒 | currentTick 不推进，不产生 150 个 catch-up Tick |
 | T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；pause freeze 不改变正常 catch-up 规则 |
 | T-TIME-009 | DEC-003, TIME-004 | LLM provider 真实时间中完成，期间 Battle pause 10 秒 | Adapter 只返回 trusted completion timestamp；Simulation 用 Battle clock/pause history 计算 deadline/dueTick，pause 时间不计入 gameplay latency |
+| T-TIME-010 | DEC-001, DEC-003 | provider/worker completion timestamp 来自与 BattleClock 不同的 monotonic origin | 不得直接作为 DecisionCompletion timestamp；Host/Adapter 必须先映射到 BattleClock raw monotonic time domain，再由 Simulation 计算 Battle time/dueTick |
 
 ## 3. PlanSubmission
 
@@ -172,6 +174,10 @@
 | T-PRES-022 | ARCH-003 | Character/BattleEffect/Tileset/Autotile Browser decode failure | actor/tile 使用 placeholder或 effect skip + diagnostic；不改变 gameplay、不产生 Battle ACK |
 | T-PRES-023 | ARCH-003 | first render 后执行 move/turn/damage/effect/pause/resume/resize | 全部使用 domain.update()；normal path 不调用 domain.replace() |
 | T-PRES-024 | ARCH-003 | 两个 Actor 同时拥有不同 motionId | 两个 Browser motion 并行插值，不共享 scene-global motion id |
+| T-PRES-025 | ARCH-006 | ActorId 恰好 115 UTF-8 bytes / 超过 115 UTF-8 bytes | 上界值生成的 `battle:actor:<actorId>` 不超过 Renderer 128-byte key limit；超界 ActorId 在进入 RenderDomain 前 reject |
+| T-PRES-026 | ARCH-003 | hit/immune effect 与 actor、priority tile 位于同一 world 区域 | effect 作为 world-space overlay 始终绘制在 battlefield tile/actor 之上；HUD 独立，不参与 world overlay |
+| T-PRES-027 | ARCH-003 | 超大合法 viewport 使 required +1-tile view payload 超过 Renderer capacity guard | 不 clamp、不截断、不 chunk；整次 visual commit 以 PRESENTATION_COMMIT_FAILED 失败且不产生 partial visualEpoch |
+| T-PRES-028 | ARCH-003, TIME-004 | animated Autotile 无 suffix / `[N]` suffix，期间 pause/resume | 默认 250ms/frame；`[N]` 为 N*50ms/frame；pause 冻结 visual time，resume 从冻结点继续 |
 
 
 ## 11. Result / Termination
