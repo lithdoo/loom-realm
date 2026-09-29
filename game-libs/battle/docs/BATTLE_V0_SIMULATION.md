@@ -114,7 +114,7 @@ class BattleSimulationBuilder {
 }
 ```
 
-Builder 是 one-shot：同一 Builder 只能成功 `build()` 一次；重复 build 属 programmer error。构造/Build 阶段只做 dependency presence + resolved definition validation，不启动 clock、不调用 Decision/Presentation、不监听 gameplay Tick。
+Builder 是 one-shot：同一 Builder 只能成功 `build()` 一次；重复 successful build 属 programmer error。validation失败不消耗 Builder，允许修正 definition 后再次 build。构造/Build 阶段只做 dependency presence + resolved definition validation，不启动 clock、不调用 Decision/Presentation、不监听 gameplay Tick。
 
 外部 `AbortSignal` 的 active authority 从 `run()` 开始：
 
@@ -187,7 +187,8 @@ type ResolvedBattleSkill = {
 - 两个 Actor 初始 committed tile 不得相同，必须在 bounds 内且 `passable[y][x] === true`；
 - Actor `maxHp >= 1` safe integer；direction必须为 2/4/6/8；character必须是合法 ResourceRef；
 - 每 Actor skillId 唯一；`baseDamage >= 0` safe integer；`windupTicks/recoveryTicks >= 0` safe integer；range遵循 SKILL-001/DAMAGE-001；effect为非空 id；
-- validator 成功后 Runtime 初始 HP = maxHp、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；
+- validator 成功后必须生成 detached immutable/deep-frozen Simulation-owned definition；Runtime/Replay不得持有调用方可变 actors/skills/range/passable 数组引用；
+- Runtime 初始 HP = maxHp、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；
 - `passable` 是纯数据，不把 RPGMap Runtime 注入 Simulation；
 - Runtime 内 coefficient 使用 normalized integer units；
 - Simulation 从 resolved facts 构造 `BattleSceneInit`：actors按 actorId稳定排序，`effectIds` 对所有 actor skills 的 effect 去重后按 ECMAScript ordinal string order排序；后续 `RenderProjection.actors` 同样使用稳定 actorId顺序。
@@ -1289,10 +1290,36 @@ type RuntimeCommand =
 
 future BattleEvent不是外部command，只由Tick output提交到ScheduledEventQueue。
 
+Runtime处理 `request_decision` 时必须为**每一次 request**创建独立 AbortController；不得把整个 Battle external/session signal直接作为唯一 request signal：
+
+```text
+create request AbortController
+link session abort → request.abort()
+remember handle by actorId + requestId
+decision.decide(request, request.signal)
+→ Promise settle
+→ remove request handle
+→ if session still accepts intake:
+     DecisionInbox.enqueue({ actorId, completion })
+```
+
+request AbortController/handle 属 Runtime shell async bookkeeping，不属于 BattleState/Snapshot/Replay gameplay authority。
+
+必须 best-effort abort request：
+
+- damaging hit / death 使该 actor current decision generation失效；
+- correction/new generation 替换旧 active request；
+- cancel/close/session fatal；
+- invariant rejection cleanup。
+
+Abort不是 correctness fence：provider可以忽略signal，late completion仍必须靠 lifecycle + requestId + generation fencing失去提交权。正常 Promise settle后abort handle立即移除。
+
+Runtime处理 `request_decision`：
+
 Runtime处理 `request_decision`：
 
 ```text
-decision.decide(request, signal)
+decision.decide(request, requestScopedSignal)
 → Promise
 → completion callback
 → DecisionInbox.enqueue
