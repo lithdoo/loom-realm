@@ -227,7 +227,7 @@ CREATED
 - Battle clock 在 Presentation initialize + initial Projection 成功前不得启动；
 - initial Decision Request 的 `requestTick = 0`；
 - initial Decision 调用可以在 clock 启动前被 shell 发出，但 completion 仍只能 enqueue；最早由第一个真实 reducer Tick消费；
-- initialize/render 的 classified fatal 走 `BattleResult.failure`；
+- initialize/render/pause/resume 的 classified Presentation fatal 均由 Runtime 捕获并归约为 `BattleResult.failure { source: "presentation" }`；不得把同一类失败同时作为 Runtime method throw 和 run() failure 两条业务通道；
 - async Presentation failure observer 必须在 initialize 前挂上，避免观察窗口；
 - tick 0 只发布 initial Projection，不执行 TICK-001 gameplay reducer。
 
@@ -285,17 +285,19 @@ Pause：
 RUNNING
 → accumulatedRunningMs += now - runningAnchorMs
 → cancel wake
-→ PAUSED
-→ presentation.pause()
+→ call presentation.pause() inside Runtime call boundary
+→ if classified sync fatal: finish(presentation failure)
+→ else status = PAUSED
 ```
 
 Resume：
 
 ```text
 PAUSED
-→ runningAnchorMs = now
-→ RUNNING
-→ presentation.resume()
+→ call presentation.resume() inside Runtime call boundary
+→ if classified sync fatal: finish(presentation failure)
+→ else runningAnchorMs = now
+→ status = RUNNING
 → schedule next wake
 ```
 
@@ -1098,6 +1100,20 @@ AbortSignal是best effort；consume时仍必须requestId + decisionGeneration fe
 ### RACE-007 Scheduler wake vs pause
 
 若同步 `processTick` 已进入，则该Tick完整完成后pause生效；若pause callback先执行，则取消wake且不进入新Tick。control-plane不会中断reducer半途。
+
+### RACE-008 Initialize vs async Presentation failure / cancel
+
+```text
+arm failure observer
+→ await presentation.initialize()
+→ before initial render, re-check INITIALIZING + terminal not committed
+```
+
+如果 initialize 尚未返回时 `presentation.failure`、cancel 或 active close 已经先提交 terminal，则 initialize 返回后不得继续 initial render、initial Decision requests 或启动 scheduler。late initialize completion只允许被丢弃/cleanup，不得恢复 session authority。
+
+### RACE-009 pause/resume vs sync Presentation fatal
+
+`pause()/resume()` 的 Presentation调用位于 Runtime同步call boundary。classified Presentation throw 被 Runtime捕获并送入同一terminal arbiter；调用方不同时收到同义业务throw。programmer/state error仍可throw。
 
 ## 28. Shell / reducer command boundary
 
