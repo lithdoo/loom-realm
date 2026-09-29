@@ -21,6 +21,7 @@
 | T-ARCH-011 | SIMULATION §5 | Runtime run() 初始化 | arm presentation.failure → initialize → initial tick-0 Projection → initial Decision requests(requestTick=0) → start clock，顺序固定 |
 | T-ARCH-012 | SIMULATION §16/27 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
 | T-ARCH-013 | SIMULATION §3 | headless Simulation 构造 | 只依赖 ResolvedBattleDefinition + narrow capabilities，不需要 ContentClient/SubsystemScope/Frame |
+| T-ARCH-014 | CONTRACTS §5, SIMULATION §3 | moveTicks=0 或任一 timing 为负数 | validator reject；v0 movement 至少 1 Tick，windup/recovery/protection 可为 0 但不可为负 |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
@@ -76,7 +77,7 @@
 | T-MOVE-002 | MOVE-001 | `move_complete` 到期且 step 未被中断 | 原子释放 A、占用 B、释放 reservation |
 | T-MOVE-003 | MOVE-002 | path A→B→C | A→B 提交前不得启动 B→C |
 | T-MOVE-004 | MOVE-003, RNG-001 | A/B 同 Tick 抢同一格 | 只一个赢家；使用 seeded 等概率裁决 |
-| T-MOVE-005 | MOVE-003 | 相同 seed/Tick/tile/competitors Replay | 得到同一赢家 |
+| T-MOVE-005 | MOVE-003, SIMULATION §19 | seed="seed", Tick=10, target=(2,4), competitors=["a","b"] | canonical FNV-1a32 hash=0xc9c67389，h&1=1，因此 winner="b"；Replay/不同遍历顺序一致 |
 | T-MOVE-006 | MOVE-003 | 改变 Promise/遍历顺序 | 裁决结果仍只由稳定输入决定 |
 | T-MOVE-007 | MOVE-004 | 相邻 Actor 同 Tick 直接 swap | v0 禁止 |
 | T-MOVE-008 | MOVE-005 | Actor 输掉 contested tile | 留原格、plan 结束、后续重规划，不同 Tick 零时间重试 |
@@ -145,7 +146,7 @@
 | T-DEC-005 | STATE-005, SKILL-004 | Actor 正在 recovery 时 Decision request thinking | actionState=recovery 与 decisionState=thinking 可同时存在，不互相覆盖 |
 | T-DEC-006 | STATE-005 | Actor moving 时启动 Decision | actionState=moving 与 decisionState=thinking 可同时存在 |
 | T-DEC-007 | DEC-003, PLAN-006 | 第一次 Decision completion 返回非法 Plan | Adapter 不自行重试；Simulation validation 后决定是否发起唯一 correction attempt |
-| T-DEC-008 | DEC-001, DEC-003 | DecisionCompletion 返回 Plan/failure | Completion 只含 requestId/generation/result；无 gameplay timing/dueTick；callback 只 enqueue，Simulation reducer 决定 stale/validation/acceptance |
+| T-DEC-008 | DEC-001, DEC-003, SIMULATION §15 | DecisionCompletion 返回 Plan/failure | Completion 不要求 provider 回传 actorId；Runtime callback closure 以 {actorId, completion} 入 Inbox；无 gameplay timing/dueTick，callback 不修改 Actor state |
 | T-DEC-009 | STATE-005, STATE-006 | 当前 Plan 仍有未 materialize 的后续 path/skill intent | 不为“下一 Plan”提前开启新 generation；当前 Plan 继续拥有 future intent |
 | T-DEC-010 | STATE-006 | 当前 Plan 的最后一个 intent 已 materialize 成 active move/windup/recovery | 当前 Action 可继续，同时允许最多一个 next Decision 进入 thinking |
 | T-DEC-011 | STATE-006, SKILL-004 | action lock 未结束时 next Decision completion 被 reducer 接受 | 保存为唯一 pending accepted plan；不得启动 Action，也不得接受第三份排队 Plan |
@@ -165,14 +166,14 @@
 | T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
 | T-CTRL-005 | RESULT-001 | Presentation resize timer/internal callback 出现已分类 async fatal | Presentation 立即 cleanup 并只完成一次 `failure` channel；Runtime 观察后停止 authority并归约为 Battle failure；不得成为 unhandled callback exception |
 | T-CTRL-006 | SIMULATION §22 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
-| T-CTRL-007 | SIMULATION §22/26 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
+| T-CTRL-007 | SIMULATION §23/27 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
 | T-CTRL-008 | SIMULATION §4 | CREATED 调 pause/resume 或第二次 run | programmer error；close 幂等；RUNNING重复 resume / PAUSED重复 pause 为 no-op |
 | T-CTRL-009 | SIMULATION §4 | SETTLED 后 cancel，再 close 两次 | cancel no-op；第一次 close→CLOSED并清理Presentation，第二次 close no-op |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
-| T-REPLAY-004 | SIMULATION §24/25 | live run记录completion consumedTick，随后Replay | Replay在recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
-| T-REPLAY-005 | SIMULATION §25 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
+| T-REPLAY-004 | SIMULATION §26/26 | live run记录completion consumedTick，随后Replay | Replay在recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
+| T-REPLAY-005 | SIMULATION §26 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
 
 ## 10. Presentation
 
@@ -210,7 +211,7 @@
 | T-PRES-030 | ARCH-003, ARCH-005 | synthetic Scene/Projection 驱动真实 BattlePresentationHandler | Handler 自建 RenderDomain，数据经 RenderManager → renderer-data → RendererRenderStore → WebProjector 到 lr-battle DOM；movement/effect/resize/close 可见 |
 | T-PRES-031 | ARCH-003 | package build 后通过 Browser/HTTP 加载 Battle CSS | `dist/browser/battle.css` 存在、package export 正确、请求非 404 |
 | T-PRES-032 | ARCH-003 | first full state 与 later update 分别做 capacity preflight | full state 使用 16384 node count；update 使用 4096 node operations并检查 prospective state；两者不混用 |
-| T-PRES-033 | SIMULATION §21 | scheduler late wake catch-up Tick 11/12/13/14 | Simulation依次 render 4份 Projection；不dirty-coalesce，effectStarts/motion facts不丢 |
+| T-PRES-033 | SIMULATION §22 | scheduler late wake catch-up Tick 11/12/13/14 | Simulation依次 render 4份 Projection；不dirty-coalesce，effectStarts/motion facts不丢 |
 
 
 ## 11. Result / Termination
