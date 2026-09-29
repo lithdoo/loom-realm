@@ -142,6 +142,7 @@ type ResolvedBattleSkill = {
 约束：
 
 - validator 必须先验证 v0 恰好 1 ally + 1 enemy、唯一 actorId、tile/direction/map bounds/passability、skill/range/timing 等；
+- `moveTicks >= 1`；`protectionTicks >= 0`；每个 skill 的 `windupTicks / recoveryTicks >= 0`；全部为整数；
 - `passable` 是纯数据，不把 RPGMap Runtime 注入 Simulation；
 - Runtime 内 coefficient 使用 normalized integer units；
 - Simulation 负责从 resolved facts 构造 `BattleSceneInit` 与后续 `RenderProjection`。
@@ -180,7 +181,7 @@ SETTLED
 CLOSED
 ```
 
-Fatal/cancel/active close 可从 INITIALIZING/RUNNING/PAUSED 终止 active authority。
+Fatal/cancel/active close 可从 INITIALIZING/RUNNING/PAUSED 终止 active authority。normal gameplay result 进入 SETTLED 并保留 final visual；cancel 或 classified failure 在提交 result 后立即执行 Presentation cleanup 并进入 CLOSED。
 
 Method semantics：
 
@@ -197,8 +198,10 @@ Method semantics：
 
 - `run()` one-shot；重复 run 属 programmer error；
 - `close()` 幂等；
-- active `close()` 等价于 cancel authority + cleanup；
+- active `close()` 等价于 cancel authority + cleanup，并使 active run 以 `cancelled` settle；
+- CREATED 上直接 `close()` 只进入 CLOSED，不制造未发生的 BattleResult；CREATED 上 `cancel()` 记录 `cancelled` 后进入 CLOSED；
 - normal terminal 后保留 SETTLED final visual，直到 `close()`；
+- cancel / Decision session fatal / Presentation fatal / classified Simulation fatal 提交结果后立即 cleanup Presentation并进入 CLOSED；
 - `getSnapshot()/getReplay()` 在 CREATED 后均可调用；CLOSED 后仍返回最终 detached data；
 - Runtime build/constructor 在进入 CREATED 前完成 resolved definition validation并构造 detached-able tick-0 initial state；因此 CREATED 时 snapshot/replay 可反映尚未 run 的初始 session facts。validation 失败时 Runtime 不应被创建。
 
@@ -339,6 +342,17 @@ type ActorRuntimeState = {
   nextMotionId: number
 }
 ```
+
+ID allocation固定使用 session-local monotonic counters，不使用随机 UUID：
+
+```text
+planId    = "plan:" + nextPlanId++
+requestId = "request:" + nextRequestId++
+eventId   = "event:" + nextEventId++
+effectId  = "effect:" + nextEffectOccurrenceId++
+```
+
+counter 从 1 开始；不得以 Promise完成顺序或 wall-clock 时间生成 gameplay/replay identity。
 
 原则：
 
@@ -598,7 +612,7 @@ clear()
 DecisionInbox 最小操作：
 
 ```text
-enqueue(completion)
+enqueue(entry)
 snapshotAndDrain()
 clear()
 ```
@@ -642,7 +656,7 @@ type TickContext = {
   startedActionActors: Set<ActorId>
 
   dueEvents: BattleEvent[]
-  decisionCompletions: DecisionCompletion[]
+  decisionCompletions: DecisionInboxEntry[]
 
   ordinarySkillResolves: SkillResolveIntent[]
   instantSkillIntents: SkillIntent[]
@@ -722,7 +736,64 @@ else
 - SkillIntent开始后剩余path放弃；
 - plan failure记录reason并按 §13安排后续redecision。
 
-## 19. Movement and reservation
+## 19. Seeded contention function
+
+MOVE-003 的 v0 winner 算法必须跨实现一致。因为 v0只有两个 combat Actor，同一目的格最多两个竞争者，不维护可消费的全局 RNG stream。
+
+输入：
+
+```text
+battleSeed
+currentTick
+targetTile.x
+targetTile.y
+sorted competingActorIds
+```
+
+canonical bytes：
+
+```ts
+const seedTag =
+  typeof battleSeed === "number"
+    ? `n:${battleSeed}`
+    : `s:${battleSeed}`
+
+const key = JSON.stringify([
+  seedTag,
+  currentTick,
+  targetTile.x,
+  targetTile.y,
+  ...sortedActorIds,
+])
+
+const bytes = new TextEncoder().encode(key)
+```
+
+使用 FNV-1a 32-bit：
+
+```ts
+let h = 0x811c9dc5
+for (const byte of bytes) {
+  h ^= byte
+  h = Math.imul(h, 0x01000193) >>> 0
+}
+```
+
+v0 两个竞争者时：
+
+```ts
+winner = sortedActorIds[h & 1]
+```
+
+要求：
+
+- competing actorIds 先按 ECMAScript ordinal string order排序；
+- 1个申请者无需随机，直接成功；
+- 不使用 `Math.random()`、Promise顺序、遍历顺序或共享 RNG consumption count；
+- Replay重新计算该winner并与recorded contention fact比较；
+- 未来 N Actor版本若允许同格超过2个竞争者，必须单独版本化公平选取算法，不得静默扩展 `h & 1`。
+
+## 20. Movement and reservation
 
 Reservation authority：
 
@@ -751,7 +822,7 @@ schedule move_complete(dueTick = currentTick + moveTicks)
 
 damaging hit中断：释放destination reservation、保持origin committed tile、action generation失效、active/pending Plan按规则失效；旧move_complete后续只能stale drop。
 
-## 20. Skill / recovery scheduling
+## 21. Skill / recovery scheduling
 
 Skill start：
 
@@ -770,7 +841,7 @@ resolve后：
 
 resolve时range/coefficient重新读取当前 committed facts；不tracking。
 
-## 21. Projection cadence and identities
+## 22. Projection cadence and identities
 
 Publication cadence固定：
 
@@ -791,7 +862,7 @@ Identity：
 - `sceneEpoch`：session-level cross-layer scene identity，来自 resolved definition；
 - `visualEpoch`：Presentation-local，Simulation从不生成。
 
-## 22. BattleResult and terminal arbitration
+## 23. BattleResult and terminal arbitration
 
 BattleResult exact public union见 Contracts。Runtime内部只有一个 one-shot terminal arbiter：
 
@@ -799,8 +870,11 @@ BattleResult exact public union见 Contracts。Runtime内部只有一个 one-sho
 finish(candidate)
 → if already committed: false
 → mark terminal committed
+→ state.result = candidate
 → stop scheduler
 → abort Decision work
+→ if normal win/defeat: status = SETTLED, keep Presentation open
+→ else: Presentation.close(), status = CLOSED
 → settle run() exactly once
 ```
 
@@ -827,11 +901,11 @@ cancel、Presentation async fatal、Decision session fatal与normal terminal均�
 
 Programmer error/invariant violation不伪装成业务 `BattleResult.failure`，允许throw/reject。
 
-## 23. Snapshot
+## 24. Snapshot
 
 `getSnapshot()` 返回 detached immutable value，不暴露Runtime mutable reference。
 
-Public Snapshot只包含跨层/诊断有用facts：
+ActorSnapshot / ReservationSnapshot exact public fields 见 Contracts。Public Snapshot只包含跨层/诊断有用facts：
 
 ```text
 battleId
@@ -858,7 +932,7 @@ scheduler handles
 
 Snapshot在每个 processed Tick结束后与该 Tick Projection基于同一 committed state产生。
 
-## 24. ReplayRecord
+## 25. ReplayRecord
 
 Replay exact v0 schema：
 
@@ -887,28 +961,80 @@ type ReplayDecisionRecord = {
 
   completion:
     | { type: "completed"; plan: PlanSubmission }
-    | { type: "failed"; category: DecisionFailureCategory; code: string }
+    | {
+        type: "failed"
+        category: DecisionFailureCategory
+        code: string
+      }
 
-  acceptance:
+  consumeOutcome:
     | { type: "accepted"; acceptedTick: number; planId: string }
     | { type: "rejected"; rejectedTick: number; reason: PlanRejectReason }
+    | { type: "attempt_failed" }
+    | { type: "session_fatal" }
     | { type: "stale" }
 }
 
 type ReplayTickRecord = {
   tick: number
-  movementContentions: readonly MovementContentionFact[]
-  skillOutcomes: readonly SkillOutcomeFact[]
-  damage: readonly DamageFact[]
-  protection: readonly ProtectionFact[]
+  movements: readonly ReplayMovementFact[]
+  skills: readonly ReplaySkillFact[]
+  damage: readonly ReplayDamageFact[]
+  protections: readonly ReplayProtectionFact[]
+}
+
+type ReplayMovementFact =
+  | {
+      type: "move_started"
+      actorId: ActorId
+      from: GridPosition
+      to: GridPosition
+      motionId: number
+    }
+  | {
+      type: "contention"
+      tile: GridPosition
+      competitors: readonly ActorId[]
+      winnerActorId: ActorId
+    }
+  | {
+      type: "move_failed"
+      actorId: ActorId
+      tile: GridPosition
+      reason: "blocked" | "occupied" | "contested" | "swap_forbidden"
+    }
+
+type ReplaySkillFact = {
+  effectId: string
+  casterActorId: ActorId
+  targetActorId: ActorId
+  skillId: string
+  result: "hit" | "immune" | "miss" | "invalid"
+  coefficientUnits: number
+}
+
+type ReplayDamageFact = {
+  sourceActorId: ActorId
+  targetActorId: ActorId
+  skillId: string
+  amount: number
+  hpBefore: number
+  hpAfter: number
+}
+
+type ReplayProtectionFact = {
+  actorId: ActorId
+  startTick: number
+  protectedUntilTickExclusive: number
 }
 ```
 
-不记录真实 Decision completion timestamp。
+不记录真实 Decision completion timestamp。Replay arrays 按产生 Tick、再按 actorId / effectId 等稳定 identity 写入，不以 Map insertion order 或 Promise order作为序列化权威。
 
-`definitionFingerprint` 验证Replay使用相同resolved gameplay definition；fingerprint算法可作为内部deterministic canonical serialization实现，但必须版本化。
+`definitionFingerprint` 验证Replay使用相同resolved gameplay definition；fingerprint算法是 Replay container integrity detail，可以在实现中采用版本化 canonical serialization，不参与 gameplay裁决。
 
-## 25. Replay execution
+
+## 26. Replay execution
 
 Replay不得实现第二套Battle规则。
 
@@ -936,7 +1062,7 @@ Replay成功标准：
 
 Presentation可替换为 Null/RecordingPresentation；Replay correctness不依赖Browser。
 
-## 26. Runtime async races
+## 27. Runtime async races
 
 以下 race semantics冻结：
 
@@ -973,7 +1099,7 @@ AbortSignal是best effort；consume时仍必须requestId + decisionGeneration fe
 
 若同步 `processTick` 已进入，则该Tick完整完成后pause生效；若pause callback先执行，则取消wake且不进入新Tick。control-plane不会中断reducer半途。
 
-## 27. Shell / reducer command boundary
+## 28. Shell / reducer command boundary
 
 Reducer/plan helpers不得直接调用Ports。
 
@@ -997,7 +1123,7 @@ decision.decide(request, signal)
 
 Presentation render在完整Tick committed后由shell调用；同步throw立即进入terminal arbitration。
 
-## 28. Testing architecture
+## 29. Testing architecture
 
 Simulation qualification必须提供：
 
@@ -1017,7 +1143,7 @@ Simulation qualification必须提供：
 5. Replay qualification：live→record→replay结果/snapshot/projection一致；
 6. existing Presentation integration：Simulation只消费已冻结Port，不重测Browser内部语义。
 
-## 29. Implementation invariants
+## 30. Implementation invariants
 
 实现必须持续满足：
 
@@ -1034,7 +1160,7 @@ Simulation qualification必须提供：
 11. cancel/fatal后late work无提交权；
 12. terminal result最多commit一次。
 
-## 30. FROZEN FOR IMPLEMENTATION gate
+## 31. FROZEN FOR IMPLEMENTATION gate
 
 Simulation可以标为 FROZEN FOR IMPLEMENTATION，因为以下 blocking choice已有唯一答案：
 
