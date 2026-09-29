@@ -159,8 +159,8 @@
 | T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
 | T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
 | T-DEC-017 | STATE-006, SIMULATION §9/11/17 | skill 在 phase 10 materialize 当前 Plan 最后 intent 并进入 windup/recovery lifecycle | 当前 Tick可用 prefetch_after_materialize 发起 next Decision；不等同于无 Action 的 plan_exhausted |
-| T-DEC-019 | PLAN-009, TURN-001 | pure turn 是当前 Plan 最后 intent | turn 同 Tick完成，不做 prefetch_after_materialize；最早下一 Tick创建新 generation |
 | T-DEC-018 | STATE-006, SIMULATION §17/20 | final move intent 在 phase 13 reservation成功并 move_start | phase 13 才清空 activePlan并可发 next Decision；reservation失败则不走 prefetch_after_materialize，而按 plan_failed 最早下一 Tick重决策 |
+| T-DEC-019 | PLAN-009, TURN-001 | pure turn 是当前 Plan 最后 intent | turn 同 Tick完成，不做 prefetch_after_materialize；最早下一 Tick创建新 generation |
 
 ## 9. Control Plane / Replay
 
@@ -169,7 +169,7 @@
 | T-CTRL-001 | CTRL-001 | 两个 Tick 之间 Frame abort | 立即失效 authority，不等下个 Tick |
 | T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
 | T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
-| T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
+| T-CTRL-004 | RESULT-001, SIMULATION §23 | Presentation 抛 CONTENT_FAILED / COMMIT_FAILED | Runtime cleanup，run() 返回 failure source=presentation；INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA 走 programmer/invariant throw/reject |
 | T-CTRL-005 | RESULT-001 | Presentation resize timer/internal callback 出现已分类 async fatal | Presentation 立即 cleanup 并只完成一次 `failure` channel；Runtime 观察后停止 authority并归约为 Battle failure；不得成为 unhandled callback exception |
 | T-CTRL-006 | SIMULATION §23 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
 | T-CTRL-007 | SIMULATION §23/27 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
