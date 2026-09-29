@@ -10,17 +10,22 @@
 
 ```text
 battle/contracts
-  BattleConfig
   BattleSceneInit
   BattleSnapshot
   BattleObservation
   PlanConstraints
   PlanSubmission
-  PlanAcceptance
   BattleEvent
   RenderProjection
   SkillEffectProjection
+  DecisionRequest / DecisionCompletion / DecisionPort
   ReplayRecord
+
+battle/simulation
+  ResolvedBattleDefinition
+  BattleSimulationBuilder
+  BattleRuntime
+  BattleClock
 ```
 
 Simulation / Decision / Presentation 可以依赖这些数据类型。
@@ -336,15 +341,17 @@ type PlanConstraints = {
 
 ```ts
 type PlanSubmission = {
-  turn?: Direction
-  path: GridPosition[]
-  skill?: {
-    skillId: string
-    targetActorId: string
-    minCoefficient: number
+  readonly turn?: Direction
+  readonly path: readonly GridPosition[]
+  readonly skill?: {
+    readonly skillId: string
+    readonly targetActorId: ActorId
+    readonly minCoefficient: number
   }
 }
 ```
+
+Runtime validation 先做 exact structural validation：顶层只允许 `turn/path/skill`；`path` 必须存在且为数组；GridPosition 只允许 integer `x/y`；skill只允许 `skillId/targetActorId/minCoefficient`。缺字段、额外字段、错误类型、非整数坐标、NaN/Infinity 等统一 reject `invalid_plan_shape`，再进入下述语义校验。
 
 Contract 语义：
 
@@ -364,6 +371,7 @@ exact v0 union：
 
 ```ts
 type PlanRejectReason =
+  | "invalid_plan_shape"
   | "path_too_long"
   | "path_out_of_bounds"
   | "path_not_adjacent"
@@ -379,16 +387,13 @@ type PlanRejectReason =
 
 不得把 dynamic execution 的 `occupied / reserved / contested / target_moved` 混入 submission reject union；这些发生在 accepted Plan执行阶段，属于 Plan failure / Replay facts。
 
-## 8. PlanAcceptance
+## 8. Plan validation result — Simulation internal
 
-概念：
+`PlanAcceptance` 不是 public/cross-layer API；DecisionPort只返回 PlanSubmission。Simulation内部 validation 可以使用等价结果：
 
 ```ts
-type PlanAcceptance =
-  | {
-      accepted: true
-      acceptedPlanId: string
-    }
+type PlanValidationResult =
+  | { accepted: true }
   | {
       accepted: false
       reason: PlanRejectReason
@@ -396,7 +401,24 @@ type PlanAcceptance =
     }
 ```
 
-同步 acceptance 只表示当前可以进入执行，不保证未来 path/skill 一定成功。
+`correctionAllowed = true` 仅当当前 request `attempt === 0` 且 reason 属于：
+
+```text
+invalid_plan_shape
+path_too_long
+path_out_of_bounds
+path_not_adjacent
+terrain_blocked
+invalid_turn
+turn_with_path
+unknown_skill
+invalid_target
+invalid_min_coefficient
+```
+
+`stale_decision_generation / actor_not_ready` 永远不发 correction。attempt=1 任意 reject 都结束当前 generation。
+
+accepted 只表示当前可以进入 active/pending pipeline，不保证未来 path/skill 一定成功。
 
 ### 8.1 Accepted Plan runtime pipeline — FROZEN boundary
 
@@ -906,7 +928,12 @@ interface DecisionPort {
 }
 ```
 
-`requestId / generation` 是 Simulation 生成的 correlation identity；Decision implementation 必须原样返回，不拥有其生命周期。
+`requestId / generation` 是 Simulation 生成的 correlation identity；Decision implementation 必须原样返回，不拥有其生命周期。Runtime为每次调用捕获 expected `actorId/requestId/generation`。
+
+- resolved completion 的 requestId/generation 与 expected 不一致 → DecisionPort protocol invariant violation；Runtime cleanup并 reject active `run()`，不包装成 Plan reject 或 BattleResult.failure；
+- DecisionPort Promise rejection / synchronous throw 表示 adapter/programmer invariant（预期 provider/network failure MUST 归一化成 `DecisionCompletion.failed`）；Runtime cleanup并 reject active `run()`；
+- malformed completion object 同样属于 DecisionPort protocol invariant；
+- 上述 invariant path 必须被 Runtime 捕获，不能成为 unhandled Promise rejection。
 
 DecisionCompletion 不携带任何 wall-clock/Battle-time timing 字段，也不携带 Decision dueTick / acceptedTick。
 
