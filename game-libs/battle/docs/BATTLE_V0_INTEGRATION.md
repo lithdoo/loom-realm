@@ -83,6 +83,35 @@ Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concre
 
 Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 严格要求两个 combat Actor，并且恰好为 1 个 `ally` + 1 个 `enemy`；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
 
+### 1.1.1 Simulation execution pipeline
+
+Simulation implementation 应保持一条有界 pipeline，而不是通用 Task/Command framework：
+
+```text
+DecisionCompletion
+      ↓
+Decision Inbox
+      ↓ Tick snapshot / validation
+active or pending AcceptedPlan
+      ↓ one intent at a time
+ActionState
+      ↓ dueTick
+Scheduled Event Queue
+      ↓
+next Tick reducer
+```
+
+关键约束：
+
+- path 不预展开成整串 scheduled tasks；只有当前 movement step 真正获得 reservation 后才 schedule 对应 `move_complete`；
+- active plan 仍有 future intent 时不预取下一 Plan；
+- active plan 的最后一个 intent 已 materialize 后，允许 Action execution 与 next Decision Thinking 重叠；
+- next Plan 最多暂存一份 pending accepted plan；它不能绕过当前 action lock；
+- Decision Inbox 与 Scheduled Event Queue 保持两套结构，不把 completion 转换成 `dueTick` event；
+- Runtime shell 负责 async Ports / clock / lifecycle；Tick authoritative mutation 不等待 Decision、Browser 或其他外部 Promise。
+
+`ready` Decision state、独立于 `ActionState.moving` 的第二份 `activeStep` authority、以及无界 accepted-plan FIFO 都不是 v0 implementation requirement。
+
 ### 1.2 Simulation 只依赖窄 capability
 
 Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；LLMDecision concrete implementation 也可以依赖 Host/service capability。
@@ -304,7 +333,7 @@ LLMDecision
 
 Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
-Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、accepted-plan queue 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
+Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
 
 ## 6. LLM Decision Adapter
 
@@ -334,7 +363,7 @@ next reducer snapshot that can see it
         ↓
 generation / validation / correction
         ↓
-accepted-plan queue
+bounded active/pending accepted-plan pipeline
 ```
 
 Promise resolve / worker message / provider callback 只允许 enqueue completion。即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
@@ -365,7 +394,7 @@ v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-cl
 - 一次 `decide()` = 一次 attempt；
 - DecisionCompletion 不带 gameplay timing / dueTick；
 - completion callback 只 enqueue 到 Simulation-owned inbox；
-- stale / validation / correction / accepted-plan queue 属于 Simulation；
+- stale / validation / correction / bounded active/pending accepted-plan pipeline 属于 Simulation；
 - Simulation 通过 AbortSignal best-effort 取消失效 attempt。
 
 尚未冻结：
