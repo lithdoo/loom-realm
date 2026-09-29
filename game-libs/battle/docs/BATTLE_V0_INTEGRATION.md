@@ -450,8 +450,9 @@ abort/cancel
 
 ```text
 terminal gate
-→ Simulation 产生最终权威状态 / BattleResult
+→ Simulation 产生最终 gameplay state + normal result candidate
 → 发布 final RenderProjection
+→ render 成功后 terminal arbiter commit BattleResult
 → 停止 Battle scheduler / 新 Action
 → BattleRuntime.run() resolve
 → Runtime 保持 SETTLED + final visual
@@ -461,7 +462,7 @@ terminal gate
 → CLOSED
 ```
 
-Simulation 不等待 final animation ACK；“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
+Simulation 不等待 final animation ACK；normal result 的 commit cut 只要求 final `render()` 同步调用成功，不等待动画完成。“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
 
 Runtime exact lifecycle/method matrix 已由 BATTLE_V0_SIMULATION.md 冻结；集成层生命周期摘要：
 
