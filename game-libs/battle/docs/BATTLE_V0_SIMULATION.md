@@ -714,7 +714,7 @@ Promise callback唯一允许：
 
 ```text
 if session still accepts intake:
-  inbox.enqueue(completion)
+  inbox.enqueue({ actorId, completion })
 ```
 
 它不得校验、接受Plan、推进generation或启动Action。
