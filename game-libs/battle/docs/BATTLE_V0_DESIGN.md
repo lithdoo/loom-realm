@@ -240,11 +240,11 @@ protection      命中后的有限免疫区间
 
 **当前 Core gameplay 没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
 
-仍存在的 OPEN 只属于 Presentation 之外的 Contracts / Integration，例如非 Presentation Content subject/version、DecisionFailure/provider metadata/cancel/timeout defaults、Guidance Host wiring 与 Host suspend/resume 来源映射。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
+仍存在的 OPEN 只属于不阻塞 Simulation/Presentation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、provider-specific Decision metadata/cancel/timeout defaults、Guidance Host wiring 与 Host suspend/resume 来源映射；Decision failure 的 attempt/session-fatal authority classification 已冻结。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
-当前 **Core gameplay 与 Presentation implementation spec 已冻结，Runtime/Decision/Presentation 代码实现仍待完成**。推荐实施顺序：
+当前 **Core gameplay 已冻结，Simulation implementation spec 已 FROZEN FOR IMPLEMENTATION，Presentation 已实现并通过 closed-loop qualification；待实现的是 Simulation/Decision/full Runtime composition**。推荐实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema
