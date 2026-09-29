@@ -963,7 +963,7 @@ damage/protection
 BattleResult
 ```
 
-ReplayRecord exact v0 schema、fact shapes 与 ReplayDriver 执行方式已在 BATTLE_V0_SIMULATION.md §25–26 冻结；Replay 不要求把 Runtime 实现为通用 event-sourcing framework。
+ReplayRecord exact v0 schema、fact shapes 与 ReplayDriver 执行方式已在 BATTLE_V0_SIMULATION.md §26–27 冻结；Replay 不要求把 Runtime 实现为通用 event-sourcing framework。
 
 ## 18. Contracts OPEN
 
