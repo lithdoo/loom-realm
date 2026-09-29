@@ -155,6 +155,8 @@
 | T-DEC-014 | DEC-004 | DecisionCompletion.failed(category=session_fatal) | 进入 Runtime terminal arbiter，BattleResult=failure source=decision |
 | T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
 | T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
+| T-DEC-017 | STATE-006, SIMULATION §9/11/17 | skill/turn 在 phase 10 materialize 当前 Plan 最后 intent | 当前 Tick可用 prefetch_after_materialize 发起 next Decision；不等同于无 Action 的 plan_exhausted |
+| T-DEC-018 | STATE-006, SIMULATION §17/20 | final move intent 在 phase 13 reservation成功并 move_start | phase 13 才清空 activePlan并可发 next Decision；reservation失败则不走 prefetch_after_materialize，而按 plan_failed 最早下一 Tick重决策 |
 
 ## 9. Control Plane / Replay
 
@@ -171,6 +173,8 @@
 | T-CTRL-009 | SIMULATION §4 | SETTLED 后 cancel，再 close 两次 | cancel no-op；第一次 close→CLOSED并清理Presentation，第二次 close no-op |
 | T-CTRL-010 | SIMULATION §5/27 | presentation.initialize 尚未返回时 async failure 或 cancel 先终止 session | initialize 后续返回不得继续 initial render / initial Decision / scheduler start；run() 保持已commit终止结果 |
 | T-CTRL-011 | SIMULATION §6/27 | battle.pause()/resume() 调用 Presentation 时同步 classified fatal | Runtime 捕获并通过 terminal arbiter归约为 presentation failure；不得同时向调用方抛同义业务错误 |
+| T-CTRL-012 | SIMULATION §16/17/23 | phase 7 已产生 redecision need，但 phase 8 terminal gate 随后结束 Battle | 不调用 DecisionPort；terminal suppress 同 Tick尚未发出的 Decision commands |
+| T-CTRL-013 | SIMULATION §16/23 | 非 terminal Tick reducer输出 Decision command，但 presentation.render 同步 fatal | 先归约 presentation failure并 suppress Decision command；provider 不收到新 request |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
