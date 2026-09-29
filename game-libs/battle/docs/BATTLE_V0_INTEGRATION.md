@@ -504,10 +504,14 @@ initialize 所需关键资源失败
 → Runtime cleanup
 → run() = failure
 
-render / RenderDomain 同步 fatal
+PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED
 → stop authority
 → cleanup
-→ run() = failure
+→ run() = presentation failure
+
+PRESENTATION_INVALID_STATE / SCENE_MISMATCH / PROJECTION_CONFLICT / INVALID_DATA
+→ Runtime/contract invariant or programmer error
+→ throw/reject，不包装成 BattleResult.failure
 
 resize/resource/internal callback 的异步 terminal fatal
 → Presentation cleanup + resolve one-shot `presentation.failure`
@@ -573,15 +577,16 @@ Battle v0 Presentation 已完成 closed-loop qualification；Simulation 已 FROZ
 ## 13. 推荐实施顺序
 
 ```text
-1. 完成其余非 Presentation Content/Contracts validator
-2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime：state + clock + scheduler + queues + reducer + replay
-3. 实现 frozen DecisionPort + Mock/Script Decision
+1. 实现 ResolvedBattleDefinition / Simulation-facing validator
+2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime，并新增 package `./simulation` export
+3. 实现 frozen DecisionPort + Mock/Script/Deferred Decision
 4. 跑 frozen-rule deterministic Test Matrix
-5. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
-6. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
-7. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-8. 接真实 LLM Decision Adapter，再接 Guidance / Host
-9. Presentation 已完成：验证 package-lock / npm ci / unit / Browser E2E；未来 Runtime 实现仍需自己的 qualification
+5. 外部 BattleActor/BattleSkill serialization schema 可并行/随后收口，不阻塞 headless Runtime
+6. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
+7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
+8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
+9. 接真实 LLM Decision Adapter，再接 Guidance / Host
+10. Presentation 已完成：验证 package-lock / npm ci / unit / Browser E2E；未来 Runtime 实现仍需自己的 qualification
 ```
 
 Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
