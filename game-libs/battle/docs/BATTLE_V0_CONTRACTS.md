@@ -362,8 +362,8 @@ Contract 语义：
 
 - `turn` 表示原地转向；
 - 出现 `turn` 时 path 必须为空；
-- path 不含当前 Actor tile；
-- path 只允许 cardinal step；
+- path 不重复 `DecisionRequest.planningOrigin`；
+- path 第一格从 planningOrigin 起算，之后只允许 cardinal step；moving prefetch 时 path 可包含旧 committed origin，只要它是 planningOrigin 之后的合法 future destination；
 - empty path + no turn + no skill = hold/reobserve；
 - empty path + no turn + skill = direct cast；
 - empty path + turn + no skill = pure turn；
