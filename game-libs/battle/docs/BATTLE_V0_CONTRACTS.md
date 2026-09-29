@@ -272,9 +272,9 @@ validator 必须按 `BATTLE-001` 拒绝其他 cardinality、重复 actorId、双
 
 以下属于可调平衡参数，不属于 Contract 版本变化：
 
-- `moveTicks`；
-- `protectionTicks`；
-- Skill damage/range/windup/recovery；
+- `moveTicks`，且 v0 必须为整数 `>= 1`；movement 不支持 0-Tick completion；
+- `protectionTicks`，整数 `>= 0`；
+- Skill damage/range/windup/recovery；其中 `windup_ticks / recovery_ticks` 必须为整数 `>= 0`；
 - map size。
 
 ## 6. PlanConstraints
@@ -473,7 +473,50 @@ type BattleSnapshot = {
 }
 ```
 
-ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。
+ActorSnapshot / ReservationSnapshot exact public shape：
+
+```ts
+type ActorSnapshot = {
+  actorId: ActorId
+  team: Team
+  hp: integer
+  maxHp: integer
+  tile: GridPosition
+  direction: Direction
+  action:
+    | { type: "idle" }
+    | {
+        type: "moving"
+        motionId: integer
+        from: GridPosition
+        to: GridPosition
+        startTick: integer
+        completeTick: integer
+      }
+    | {
+        type: "windup"
+        skillId: string
+        targetActorId: ActorId
+        startTick: integer
+        resolveTick: integer
+      }
+    | {
+        type: "recovery"
+        skillId: string
+        completeTick: integer
+      }
+    | { type: "dead" }
+  decision: "none" | "thinking"
+  protectedUntilTickExclusive: integer
+}
+
+type ReservationSnapshot = {
+  actorId: ActorId
+  tile: GridPosition
+}
+```
+
+ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。Public Snapshot 不暴露 action/decision generation、requestId、Plan cursor 或 queue state。
 
 BattleSnapshot 与 RenderProjection 是两类不同数据。v0 不公开没有明确 consumer/递增语义的 `battleEpoch / stateVersion`；late async fencing 使用 Runtime lifecycle、AbortSignal、`actionGeneration / decisionGeneration`。内部实现若需要诊断 revision，不得因此扩张 public Snapshot ABI。
 
@@ -800,7 +843,6 @@ BattleResult
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
 - Decision provider-specific metadata / provider code 的 exact shape；`attempt_failure | session_fatal` authority classification 已冻结。
-- Observation-facing ActorSnapshot / ReservationSnapshot 的最终字段细节可随 Simulation implementation补齐，但不得改变已冻结 Runtime/result/state semantics。
 - Observation history budget 与 prompt-facing representation。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
