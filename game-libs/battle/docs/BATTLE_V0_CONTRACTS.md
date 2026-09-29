@@ -205,6 +205,29 @@ target/effect type
 
 Range Schema 校验遵循 `SKILL-001`。
 
+Simulation-facing resolved range 不保留字符串 `"↑"`，固定规范化为：
+
+```ts
+type ResolvedRangeMatrix = {
+  width: integer
+  height: integer
+  originX: integer
+  originY: integer
+  coefficientUnits: readonly (readonly integer[])[]
+}
+```
+
+约束：
+
+- `width/height >= 1`；
+- `0 <= originX < width`、`0 <= originY < height`；
+- `coefficientUnits.length === height` 且每行长度严格等于 width；
+- origin cell 的 coefficientUnits 必须为 0；
+- 所有 cell 为非负 safe integer；
+- authored finite coefficient 按 `round(value * 1000)` 规范化；由于 authored coefficient 最多 3 位小数，该转换必须 exact；
+- authored `"↑"` 的唯一坐标成为 `originX/originY`，其 cell 写 0；
+- runtime range rotation 只读取该 resolved matrix，不再解析字符串 marker。
+
 ### 4.3 BattleEffect — Presentation v0 FROZEN
 
 BattleEffect 只属于 Presentation Content。v0 record subject 固定为 `struct.BattleEffect`，record key 必须等于 `id`。
@@ -281,7 +304,7 @@ validator 必须按 `BATTLE-001` 拒绝其他 cardinality、重复 actorId、双
 
 `PlanConstraints` 告诉 Decision“允许生成什么”，不是给它列战术菜单。
 
-概念：
+exact v0 shape：
 
 ```ts
 type PlanConstraints = {
@@ -292,16 +315,20 @@ type PlanConstraints = {
   turn: {
     allowed: true
   }
-  skills: Array<{
+  skills: readonly {
     skillId: string
-    minCoefficients: number[]
-  }>
+    minCoefficients: readonly number[]
+  }[]
 }
 ```
 
-`minCoefficients` 来自 Skill range matrix 实际存在的去重正 coefficient。
+约束：
 
-Runtime 内部可以同时暴露/缓存规范化后的整数 units。
+- `maxPathSteps` 为非负 safe integer；
+- `movement.cardinalOnly` 与 `turn.allowed` 固定为 literal `true`；
+- skills 按 `skillId` ECMAScript ordinal稳定排序；
+- 每个 skill 的 `minCoefficients` 来自 ResolvedRangeMatrix 中去重后的正 `coefficientUnits`，转换回 `units / 1000`，按数值升序排列；
+- 不包含 occupancy、目标推荐、可走路径或策略菜单；这些是 Observation/Decision自己的推理输入。
 
 ## 7. PlanSubmission
 
@@ -331,25 +358,26 @@ Contract 语义：
 - empty path + turn + skill = turn-first plan；turn 消耗本 Tick Action，skill intent 留到后续 Tick；
 - 不包含自由执行字段。
 
-### PlanRejectReason
+### PlanRejectReason — FROZEN
 
-至少应保留以下机器可读语义：
+exact v0 union：
 
-```text
-path_too_long
-path_out_of_bounds
-path_not_adjacent
-terrain_blocked
-invalid_turn
-turn_with_path
-unknown_skill
-invalid_target
-invalid_min_coefficient
-stale_decision_generation
-actor_not_ready
+```ts
+type PlanRejectReason =
+  | "path_too_long"
+  | "path_out_of_bounds"
+  | "path_not_adjacent"
+  | "terrain_blocked"
+  | "invalid_turn"
+  | "turn_with_path"
+  | "unknown_skill"
+  | "invalid_target"
+  | "invalid_min_coefficient"
+  | "stale_decision_generation"
+  | "actor_not_ready"
 ```
 
-正式 enum 命名可以在实现类型时最终冻结，但不得合并掉这些不同失败原因。
+不得把 dynamic execution 的 `occupied / reserved / contested / target_moved` 混入 submission reject union；这些发生在 accepted Plan执行阶段，属于 Plan failure / Replay facts。
 
 ## 8. PlanAcceptance
 
@@ -394,11 +422,9 @@ at most one pending accepted plan
 
 这一区分避免两种错误实现：一是把整条 path 一次性预排进 Scheduled Event Queue；二是把 accepted-plan queue 泛化成无界 FIFO。
 
-## 9. BattleObservation
+## 9. BattleObservation — FROZEN
 
-Decision 看到的是 Simulation 事实，不是 Render State。
-
-概念：
+Decision 看到的是 Simulation committed facts，不是 Render State。canonical v0 contract：
 
 ```ts
 type BattleObservation = {
@@ -406,29 +432,103 @@ type BattleObservation = {
   selfActorId: ActorId
   actors: readonly ObservedActor[]
   map: ObservationMap
-  recentEvents: ObservedEvent[]
-  guidance?: Guidance
+  recentEvents: readonly ObservedEvent[]
 }
+
+type ObservationMap = {
+  width: integer
+  height: integer
+  passable: readonly (readonly boolean[])[]
+}
+
+type ObservedActor = {
+  actorId: ActorId
+  team: Team
+  hp: integer
+  maxHp: integer
+  tile: GridPosition
+  direction: Direction
+  action: ObservedAction
+  protectedUntilTickExclusive: integer
+  skills: readonly ObservedSkill[]
+}
+
+type ObservedAction =
+  | { type: "idle" }
+  | {
+      type: "moving"
+      from: GridPosition
+      to: GridPosition
+      startTick: integer
+      completeTick: integer
+    }
+  | {
+      type: "windup"
+      skillId: string
+      targetActorId: ActorId
+      startTick: integer
+      resolveTick: integer
+    }
+  | {
+      type: "recovery"
+      skillId: string
+      completeTick: integer
+    }
+  | { type: "dead" }
+
+type ObservedSkill = {
+  skillId: string
+  baseDamage: integer
+  windupTicks: integer
+  recoveryTicks: integer
+  range: ResolvedRangeMatrix
+}
+
+type ObservedEvent =
+  | {
+      type: "move_failed"
+      tick: integer
+      actorId: ActorId
+      tile: GridPosition
+      reason: "blocked" | "occupied" | "contested" | "swap_forbidden"
+    }
+  | {
+      type: "move_interrupted"
+      tick: integer
+      actorId: ActorId
+      reason: "damaging_hit"
+    }
+  | {
+      type: "skill_resolved"
+      tick: integer
+      casterActorId: ActorId
+      targetActorId: ActorId
+      skillId: string
+      result: SkillResolveResult
+      coefficientUnits: integer
+      finalDamage: integer
+    }
+  | {
+      type: "protection_started"
+      tick: integer
+      actorId: ActorId
+      protectedUntilTickExclusive: integer
+    }
 ```
 
-v0 中 `actors` 恰好包含两个 Actor，`selfActorId` 指向其中一个；唯一另一个 Actor 就是当前 v0 的 opponent。Decision Adapter 可以为 prompt 派生 `self/opponent` 便利视图，但 canonical Contract 不把“opponent 是单个字段”编码进底层结构。
+约束：
 
-未来 N Actor 版本可以继续使用同一个 container shape，再单独定义 team/hostility/visibility 规则；这不会反向改变 v0 的 1v1 gameplay。
+- `actors` 恰好包含本场两个 Actor，按 actorId ordinal稳定排序；`selfActorId` 必须命中其中一个；
+- `skills` 按 skillId ordinal稳定排序；dead Actor 仍保留其静态 skill facts；
+- `map.passable` 是 resolved gameplay passability 的 detached readonly view，不包含 Presentation tile/sprite/camera facts；
+- moving Actor 的 `tile` 仍是 committed origin；`action.to` 只是当前 active movement目标；
+- 不暴露 `actionGeneration / decisionGeneration / requestId / Plan cursor / reservation owner` 等 Runtime fencing 细节；
+- `recentEvents` 是 deterministic bounded history：只包含 observation Tick `tick` 与 `tick - 1` 两个 Tick中产生的上述事件；按 `event.tick`、再按事件 kind固定顺序 `move_failed < move_interrupted < skill_resolved < protection_started`、再按相关 actorId ordinal稳定排序；
+- initial tick 0 没有 prior gameplay event，`recentEvents = []`；
+- Observation builder 不持有无界历史；这些 event 可从最近两个 ReplayTick facts/当前 Tick facts派生；
+- Optional Guidance **不属于 canonical BattleObservation**。Guidance Host/adapter 在调用真实模型前把外部 guidance 与 `DecisionRequest.observation` 组合；Simulation Core 不解析、不存储、不回放 Guidance。
 
-Observed Actor 至少应包含有战术意义的公开事实：
-
-- HP / max HP；
-- committed tile；
-- direction；
-- action state；
-- protection 边界/剩余；
-- 当前 moving/windup/recovery 事实；
-- 可用 Skill 定义/range matrix。
-
-不得把插值后的 Sprite 坐标作为权威 position。
-
-Prompt 面向的具体序列化与 RecentEvents budget 属于实现细节。
-
+Prompt 文本格式可以由 Decision adapter自行选择，但不得改变上述结构化输入facts。
 ## 10. BattleResult / BattleStatus / BattleSnapshot
 
 Simulation public result contract 冻结为：
