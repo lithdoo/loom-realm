@@ -200,7 +200,7 @@ Method semantics：
 - active `close()` 等价于 cancel authority + cleanup；
 - normal terminal 后保留 SETTLED final visual，直到 `close()`；
 - `getSnapshot()/getReplay()` 在 CREATED 后均可调用；CLOSED 后仍返回最终 detached data；
-- CREATED 时 snapshot/replay 反映 tick 0 尚未运行的初始 session metadata；若构造阶段 validation 失败，Runtime 不应被创建。
+- Runtime build/constructor 在进入 CREATED 前完成 resolved definition validation并构造 detached-able tick-0 initial state；因此 CREATED 时 snapshot/replay 可反映尚未 run 的初始 session facts。validation 失败时 Runtime 不应被创建。
 
 ## 5. Initialization order
 
@@ -210,7 +210,7 @@ Method semantics：
 CREATED
 → INITIALIZING
 → arm presentation.failure observer
-→ construct authoritative state at tick 0
+→ use prevalidated authoritative state at tick 0
 → presentation.initialize(scene)
 → presentation.render(initial projection tick 0)
 → create initial Decision generation/request for each alive actor
