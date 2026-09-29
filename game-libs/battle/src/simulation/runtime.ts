@@ -114,6 +114,8 @@ export class BattleRuntimeImpl implements BattleRuntime {
   readonly #requests = new Map<string, RequestHandle>();
   readonly #requestFacts = new Map<string, DecisionRequest>();
   readonly #matchedReplayRequests = new Set<string>();
+  readonly #verifiedReplayTicks = new Set<number>();
+  readonly #verifiedReplayDecisions = new Set<string>();
   #runCalled = false;
   #runResolve: ((result: BattleResult) => void) | null = null;
   #runReject: ((error: unknown) => void) | null = null;
@@ -197,7 +199,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
     try {
       const now = this.#readClock();
       const delta = now - this.#runningAnchorMs;
-      if (!Number.isSafeInteger(delta) || delta < 0 || this.#accumulatedRunningMs > Number.MAX_SAFE_INTEGER - delta) throw new Error("Invalid BattleClock elapsed time");
+      if (!Number.isFinite(delta) || delta < 0 || this.#accumulatedRunningMs > Number.MAX_SAFE_INTEGER - delta) throw new Error("Invalid BattleClock elapsed time");
       this.#accumulatedRunningMs += delta;
       this.#cancelWake();
       this.#presentation.pause();
@@ -251,7 +253,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
 
   #readClock(): number {
     const now = this.#clock.nowMs();
-    if (!Number.isSafeInteger(now) || now < 0 || (this.#lastClockMs !== null && now < this.#lastClockMs)) throw new Error("BattleClock must be finite, non-negative, safe-integer, and monotonic");
+    if (!Number.isFinite(now) || now < 0 || (this.#lastClockMs !== null && now < this.#lastClockMs)) throw new Error("BattleClock must be finite, non-negative, and monotonic");
     this.#lastClockMs = now;
     return now;
   }
@@ -260,7 +262,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
     if (this.#state.status !== "running") return this.#accumulatedRunningMs;
     const now = this.#readClock();
     const delta = now - this.#runningAnchorMs;
-    if (delta < 0 || this.#accumulatedRunningMs > Number.MAX_SAFE_INTEGER - delta) throw new Error("BattleClock elapsed time overflow");
+    if (!Number.isFinite(delta) || delta < 0 || this.#accumulatedRunningMs > Number.MAX_SAFE_INTEGER - delta) throw new Error("BattleClock elapsed time overflow");
     return this.#accumulatedRunningMs + delta;
   }
 
@@ -336,6 +338,10 @@ export class BattleRuntimeImpl implements BattleRuntime {
   #invokeCommands(commands: readonly RequestDecisionCommand[]): void {
     for (const command of commands) {
       if (this.#state.status !== "running" && this.#state.status !== "initializing") return;
+      const actor = this.#state.actors.get(command.request.actorId);
+      if (actor?.decision.type !== "thinking"
+        || actor.decision.requestId !== command.request.requestId
+        || actor.decision.generation !== command.request.generation) continue;
       this.#requestFacts.set(command.request.requestId, command.request);
       if (this.#replaySource !== undefined) {
         this.#matchReplayRequest(command.request);
@@ -360,6 +366,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
     Promise.resolve(promise).then((raw) => {
       const handle = this.#requests.get(request.actorId);
       if (handle?.requestId === request.requestId) this.#requests.delete(request.actorId);
+      if (this.#state.status !== "running" && this.#state.status !== "paused" && this.#state.status !== "initializing") return;
       let completion: DecisionCompletion;
       try {
         completion = normalizeCompletion(raw, request);
@@ -367,16 +374,26 @@ export class BattleRuntimeImpl implements BattleRuntime {
         this.#rejectInvariant(error);
         return;
       }
-      if (this.#state.status === "running" || this.#state.status === "paused" || this.#state.status === "initializing") {
-        this.#inbox.enqueue({ actorId: request.actorId, completion });
-      }
-    }, (error) => this.#rejectInvariant(error));
+      // Aborted requests release their tombstone immediately. If a provider
+      // nevertheless resolves later, restore only the facts needed to record
+      // that completion as stale at the next Tick boundary.
+      if (!this.#requestFacts.has(request.requestId)) this.#requestFacts.set(request.requestId, request);
+      this.#inbox.enqueue({ actorId: request.actorId, completion });
+    }, (error) => {
+      const handle = this.#requests.get(request.actorId);
+      const authoritative = handle?.requestId === request.requestId;
+      if (authoritative) this.#requests.delete(request.actorId);
+      if (!authoritative || !this.#requestFacts.has(request.requestId)
+        || (this.#state.status !== "running" && this.#state.status !== "paused" && this.#state.status !== "initializing")) return;
+      this.#rejectInvariant(error);
+    });
   }
 
   #abortRequest(actorId: string): void {
     const handle = this.#requests.get(actorId);
     if (handle === undefined) return;
     this.#requests.delete(actorId);
+    this.#requestFacts.delete(handle.requestId);
     handle.controller.abort();
   }
 
@@ -407,6 +424,8 @@ export class BattleRuntimeImpl implements BattleRuntime {
     if (expectedTick === undefined || JSON.stringify(expectedTick) !== JSON.stringify(tick)) throw new Error("Replay Tick fact mismatch");
     const expectedDecisions = this.#replaySource.decisions.filter((item) => item.consumedTick === tick.tick);
     if (JSON.stringify(expectedDecisions) !== JSON.stringify(decisions)) throw new Error("Replay Decision fact mismatch");
+    this.#verifiedReplayTicks.add(tick.tick);
+    for (const decision of expectedDecisions) this.#verifiedReplayDecisions.add(decision.requestId);
   }
 
   #cancelWake(): void {
@@ -434,13 +453,17 @@ export class BattleRuntimeImpl implements BattleRuntime {
 
   #finish(result: BattleResult, replayability: ReplayRecord["replayability"]): boolean {
     if (this.#terminalCommitted) return false;
-    this.#terminalCommitted = true;
-    if (this.#replaySource !== undefined && replayability.type === "deterministic"
-      && JSON.stringify(result) !== JSON.stringify(this.#replaySource.result)) {
-      this.#terminalCommitted = false;
-      this.#rejectInvariant(new Error("Replay final result mismatch"));
-      return false;
+    if (this.#replaySource !== undefined && replayability.type === "deterministic") {
+      const complete = JSON.stringify(result) === JSON.stringify(this.#replaySource.result)
+        && this.#verifiedReplayTicks.size === this.#replaySource.ticks.length
+        && this.#verifiedReplayDecisions.size === this.#replaySource.decisions.length
+        && this.#matchedReplayRequests.size === this.#replaySource.decisions.length;
+      if (!complete) {
+        this.#rejectInvariant(new Error("Replay deterministic record was not fully consumed or final result mismatched"));
+        return false;
+      }
     }
+    this.#terminalCommitted = true;
     this.#state.result = result;
     this.#recorder.finish(result, replayability);
     this.#cancelWake();

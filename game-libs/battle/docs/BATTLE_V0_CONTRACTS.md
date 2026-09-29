@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**Simulation-facing contracts 已按 FROZEN FOR IMPLEMENTATION 收口；Presentation contract FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；仅外部 serialization/provider/prompt 细节保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界；Presentation TypeScript contract/validator 已落地，Simulation/Decision contract 的冻结不代表对应代码已经实现。
+> 状态：**Simulation-facing contracts FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation contract FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；仅外部 serialization/provider/prompt 细节保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界；Simulation 与 Presentation TypeScript contract/validator 均已落地。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 

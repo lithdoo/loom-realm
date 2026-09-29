@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Simulation implementation contract FROZEN FOR IMPLEMENTATION；Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；provider/Guidance/Host wiring 仍可含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**Simulation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；provider/Guidance/Host wiring 仍可含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -565,7 +565,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation 已完成 closed-loop qualification；Simulation 已 FROZEN FOR IMPLEMENTATION，但 Core Simulation、Decision 与完整 Battle Runtime 尚未实现。
+Battle v0 Presentation 与 Simulation 均已完成 closed-loop qualification；Core Simulation、DecisionPort/测试 doubles、完整 Battle Runtime、Replay 与 package export 均已实现。真实 provider、Guidance 与 Host composition 仍属于外部集成工作。
 
 已验证工程状态：
 
@@ -586,7 +586,7 @@ Battle v0 Presentation 已完成 closed-loop qualification；Simulation 已 FROZ
 7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
 8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
 9. 接真实 LLM Decision Adapter，再接 Guidance / Host
-10. Presentation 已完成：验证 package-lock / npm ci / unit / Browser E2E；未来 Runtime 实现仍需自己的 qualification
+10. Presentation 与 Simulation 已完成：验证 package-lock / build / unit / Browser E2E / package dry-run / Simulation subpath import；后续真实 provider 与 Host composition 仍需各自的集成 qualification
 ```
 
 Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
@@ -600,6 +600,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 已冻结、实现并完成 closed-loop qualification；Core Simulation/Decision/full Runtime 仍未实现。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 与 Core Simulation/DecisionPort/full Runtime 均已冻结、实现并完成 closed-loop qualification；真实 provider 与业务 Host composition 仍待外部集成。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。

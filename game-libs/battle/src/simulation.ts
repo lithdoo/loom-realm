@@ -6,7 +6,7 @@ import {
   type BattleRuntime,
   type BattleSimulationDependencies,
 } from "./simulation/runtime.js";
-import type { ReplayRecord } from "./simulation/replay.js";
+import { validateReplayRecord, type ReplayRecord } from "./simulation/replay.js";
 import {
   validateResolvedBattleDefinition,
   type ResolvedBattleActor,
@@ -74,11 +74,9 @@ export class BattleReplayBuilder {
 
   build(record: ReplayRecord): BattleRuntime {
     if (this.#built) throw new Error("BattleReplayBuilder.build() is one-shot");
-    if (record === null || typeof record !== "object" || record.version !== 1 || record.replayability?.type !== "deterministic" || record.result === undefined) {
-      throw new TypeError("BattleReplayBuilder requires a deterministic ReplayRecord");
-    }
-    const initial = validateResolvedBattleDefinition(record.initial);
-    const detached: ReplayRecord = Object.freeze({ ...structuredClone(record), initial });
+    const validatedRecord = validateReplayRecord(record);
+    const initial = validateResolvedBattleDefinition(validatedRecord.initial);
+    const detached: ReplayRecord = Object.freeze({ ...validatedRecord, initial });
     const runtime = new BattleRuntimeImpl(initial, { ...this.#dependencies, replaySource: detached });
     this.#built = true;
     return runtime;

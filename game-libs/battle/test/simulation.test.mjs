@@ -8,6 +8,7 @@ import {
 } from "../dist/simulation.js";
 import { NullPresentation, RecordingPresentation } from "../dist/presentation.js";
 import { coefficientAt, contentionWinner } from "../dist/simulation/combat.js";
+import { takeCounter } from "../dist/simulation/numeric.js";
 import { createInitialState } from "../dist/simulation/state.js";
 import { validatePlan } from "../dist/simulation/plan.js";
 
@@ -184,6 +185,34 @@ test("pause freezes logical time and queued Decision until resume", async () => 
   assert.equal(runtime.getSnapshot().currentTick, 1);
   clock.advance(1);
   assert.equal(runtime.getSnapshot().currentTick, 2);
+  runtime.cancel();
+  assert.deepEqual(await run, { type: "cancelled" });
+});
+
+test("scheduler wake and pause cannot leave a partially committed Tick", async () => {
+  const clock = new FakeBattleClock();
+  const presentation = new RecordingPresentation();
+  let runtime;
+  const baseRender = presentation.render.bind(presentation);
+  presentation.render = (projection) => {
+    baseRender(projection);
+    if (projection.tick === 1) runtime.pause();
+  };
+  runtime = new BattleSimulationBuilder({
+    clock,
+    signal: new AbortController().signal,
+    decision: new DeferredDecision(),
+    presentation,
+  }).build(definition());
+  const run = runtime.run(); await flush();
+
+  clock.advance(200);
+  assert.equal(runtime.getSnapshot().currentTick, 1);
+  assert.equal(runtime.getSnapshot().status, "paused");
+  assert.deepEqual(presentation.projections.map((projection) => projection.tick), [0, 1]);
+  clock.advance(1_000);
+  assert.equal(runtime.getSnapshot().currentTick, 1);
+
   runtime.cancel();
   assert.deepEqual(await run, { type: "cancelled" });
 });
@@ -608,4 +637,183 @@ test("cancel during initialization fences late initialize completion", async () 
   assert.equal(presentation.projections.length, 0);
   assert.equal(decision.requests.length, 0);
   assert.equal(setup.clock.tasks.length, 0);
+});
+
+test("fractional monotonic clocks are supported while NaN, Infinity, and rollback reject", async () => {
+  const fractional = new FakeBattleClock();
+  fractional.now = 10.5;
+  const live = runtimeFor(definition(), new DeferredDecision(), { clock: fractional });
+  live.runtime.run(); await flush();
+  fractional.advance(199.49);
+  assert.equal(live.runtime.getSnapshot().currentTick, 0);
+  fractional.advance(0.51);
+  assert.equal(live.runtime.getSnapshot().currentTick, 1);
+  live.runtime.cancel();
+
+  for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY]) {
+    const clock = new FakeBattleClock(); clock.now = invalid;
+    const runtime = runtimeFor(definition(), new DeferredDecision(), { clock }).runtime;
+    await assert.rejects(runtime.run(), /BattleClock/);
+  }
+
+  const rollbackClock = new FakeBattleClock(); rollbackClock.now = 10;
+  const rollback = runtimeFor(definition(), new DeferredDecision(), { clock: rollbackClock });
+  const rollbackRun = rollback.runtime.run(); await flush();
+  rollbackClock.now = 9;
+  rollback.runtime.pause();
+  await assert.rejects(rollbackRun, /BattleClock/);
+});
+
+test("same-Tick invalidated prefetch commands are fenced before DecisionPort invocation", async () => {
+  const base = definition();
+  const def = definition({ actors: [
+    { ...base.actors[0], maxHp: 10, skills: [{ ...base.actors[0].skills[0], baseDamage: 1 }] },
+    { ...base.actors[1], maxHp: 10, skills: [{ ...base.actors[1].skills[0], baseDamage: 1 }] },
+  ] });
+  const decision = new ScriptDecision((request) => request.generation === 1
+    ? { path: [], skill: { skillId: "strike", targetActorId: request.actorId === "a" ? "b" : "a", minCoefficient: 1 } }
+    : { path: [] });
+  const live = runtimeFor(def, decision);
+  live.runtime.run(); await flush(); live.clock.advance(200); await flush();
+  assert.equal(decision.requests.some((request) => request.generation === 2), false);
+  assert.deepEqual(decision.requests.filter((request) => request.generation === 3).map((request) => request.actorId).sort(), ["a", "b"]);
+  live.runtime.cancel();
+});
+
+function interruptedPrefetchSetup() {
+  const base = definition();
+  const def = definition({ moveTicks: 3, actors: [
+    { ...base.actors[0], tile: point(1, 1), direction: 2, maxHp: 10, skills: [] },
+    { ...base.actors[1], tile: point(2, 1), direction: 4, maxHp: 10, skills: [{ ...base.actors[1].skills[0], baseDamage: 1, windupTicks: 1 }] },
+  ] });
+  let abandoned;
+  const decision = {
+    requests: [],
+    decide(request, signal) {
+      this.requests.push({ request, signal });
+      if (request.actorId === "a" && request.generation === 2) {
+        return new Promise((resolve, reject) => { abandoned = { request, signal, resolve, reject }; });
+      }
+      const plan = request.generation === 1
+        ? (request.actorId === "a"
+            ? { path: [point(1, 2)] }
+            : { path: [], skill: { skillId: "strike", targetActorId: "a", minCoefficient: 1 } })
+        : { path: [] };
+      return Promise.resolve({ type: "completed", requestId: request.requestId, generation: request.generation, plan });
+    },
+  };
+  const live = runtimeFor(def, decision);
+  return { ...live, abandoned: () => abandoned };
+}
+
+test("aborted never-settling request releases authority and late rejection is ignored", async () => {
+  const live = interruptedPrefetchSetup();
+  const run = live.runtime.run(); await flush(); live.clock.advance(200); await flush();
+  const abandoned = live.abandoned();
+  assert.equal(abandoned.signal.aborted, false);
+  live.clock.advance(200);
+  assert.equal(abandoned.signal.aborted, true);
+  abandoned.reject(new DOMException("aborted", "AbortError"));
+  await flush();
+  assert.equal(live.runtime.getSnapshot().status, "running");
+  live.runtime.cancel();
+  assert.deepEqual(await run, { type: "cancelled" });
+});
+
+test("late completion after request abort is consumed and recorded as stale", async () => {
+  const live = interruptedPrefetchSetup();
+  const run = live.runtime.run(); await flush(); live.clock.advance(200); await flush();
+  const abandoned = live.abandoned();
+  live.clock.advance(200);
+  assert.equal(abandoned.signal.aborted, true);
+  abandoned.resolve({
+    type: "completed",
+    requestId: abandoned.request.requestId,
+    generation: abandoned.request.generation,
+    plan: { path: [] },
+  });
+  await flush(); live.clock.advance(200);
+  assert.equal(live.runtime.getReplay().decisions.some((record) => record.requestId === abandoned.request.requestId
+    && record.consumeOutcome.type === "stale"), true);
+  live.runtime.cancel();
+  assert.deepEqual(await run, { type: "cancelled" });
+});
+
+test("Presentation async failure and pause/resume classified fatal use the single result channel", async () => {
+  let fail;
+  const asyncPresentation = new RecordingPresentation();
+  asyncPresentation.failure = new Promise((resolve) => { fail = resolve; });
+  const asyncLive = runtimeFor(definition(), new DeferredDecision(), { presentation: asyncPresentation });
+  const asyncRun = asyncLive.runtime.run(); await flush();
+  fail({ code: "PRESENTATION_COMMIT_FAILED", message: "resize failed" });
+  assert.deepEqual(await asyncRun, { type: "failure", source: "presentation", code: "PRESENTATION_COMMIT_FAILED" });
+
+  const pausePresentation = new RecordingPresentation();
+  pausePresentation.pause = () => { throw Object.assign(new Error("pause failed"), { code: "PRESENTATION_COMMIT_FAILED" }); };
+  const pauseLive = runtimeFor(definition(), new DeferredDecision(), { presentation: pausePresentation });
+  const pauseRun = pauseLive.runtime.run(); await flush();
+  assert.doesNotThrow(() => pauseLive.runtime.pause());
+  assert.deepEqual(await pauseRun, { type: "failure", source: "presentation", code: "PRESENTATION_COMMIT_FAILED" });
+
+  const resumePresentation = new RecordingPresentation();
+  resumePresentation.resume = () => { throw Object.assign(new Error("resume failed"), { code: "PRESENTATION_COMMIT_FAILED" }); };
+  const resumeLive = runtimeFor(definition(), new DeferredDecision(), { presentation: resumePresentation });
+  const resumeRun = resumeLive.runtime.run(); await flush();
+  resumeLive.runtime.pause();
+  assert.doesNotThrow(() => resumeLive.runtime.resume());
+  assert.deepEqual(await resumeRun, { type: "failure", source: "presentation", code: "PRESENTATION_COMMIT_FAILED" });
+});
+
+test("counter allocation fails before exceeding the safe-integer domain", () => {
+  const holder = { next: Number.MAX_SAFE_INTEGER };
+  assert.throws(() => takeCounter(holder, "next"), (error) => error?.code === "BATTLE_COUNTER_OVERFLOW");
+  assert.equal(holder.next, Number.MAX_SAFE_INTEGER);
+});
+
+async function deterministicContentionRecord() {
+  const base = definition();
+  const def = definition({ moveTicks: 1, actors: [
+    { ...base.actors[0], tile: point(1, 2), direction: 6 },
+    { ...base.actors[1], tile: point(3, 2), direction: 4 },
+  ] });
+  const decision = new ScriptDecision((request) => request.generation === 1
+    ? { path: [point(2, 2)] }
+    : { path: [], skill: { skillId: "strike", targetActorId: request.actorId === "a" ? "b" : "a", minCoefficient: 1 } });
+  const live = runtimeFor(def, decision);
+  const run = live.runtime.run(); await flush(); live.clock.advance(200); await flush(); live.clock.advance(200);
+  await run;
+  return live.runtime.getReplay();
+}
+
+test("Replay rejects duplicate IDs/ticks, malformed facts, tail facts, and tampered contention", async () => {
+  const record = await deterministicContentionRecord();
+  assert.equal(record.ticks[0].movements.some((fact) => fact.type === "contention"), true);
+  const dependencies = () => ({ clock: new FakeBattleClock(), signal: new AbortController().signal, presentation: new NullPresentation() });
+
+  const duplicateRequest = structuredClone(record);
+  duplicateRequest.decisions.push(structuredClone(duplicateRequest.decisions[0]));
+  assert.throws(() => new BattleReplayBuilder(dependencies()).build(duplicateRequest), /requestId must be unique/);
+
+  const duplicateTick = structuredClone(record);
+  duplicateTick.ticks.push(structuredClone(duplicateTick.ticks.at(-1)));
+  assert.throws(() => new BattleReplayBuilder(dependencies()).build(duplicateTick), /ticks must be unique/);
+
+  const malformed = structuredClone(record);
+  malformed.ticks[0].movements[0].actorId = 42;
+  assert.throws(() => new BattleReplayBuilder(dependencies()).build(malformed));
+
+  const tail = structuredClone(record);
+  tail.ticks.push({ tick: tail.ticks.length + 1, movements: [], skills: [], damage: [], protections: [] });
+  const tailDeps = dependencies();
+  const tailReplay = new BattleReplayBuilder(tailDeps).build(tail);
+  const tailRun = tailReplay.run(); await flush(); tailDeps.clock.advance(400);
+  await assert.rejects(tailRun, /not fully consumed/);
+
+  const tampered = structuredClone(record);
+  const contention = tampered.ticks[0].movements.find((fact) => fact.type === "contention");
+  contention.winnerActorId = contention.competitors.find((actorId) => actorId !== contention.winnerActorId);
+  const tamperedDeps = dependencies();
+  const tamperedReplay = new BattleReplayBuilder(tamperedDeps).build(tampered);
+  const tamperedRun = tamperedReplay.run(); await flush(); tamperedDeps.clock.advance(200);
+  await assert.rejects(tamperedRun, /Replay Tick fact mismatch/);
 });
