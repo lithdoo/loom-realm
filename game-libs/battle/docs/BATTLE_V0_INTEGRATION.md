@@ -435,7 +435,7 @@ Frame abort / Battle cancel 遵循 `CTRL-001`：
 
 ```text
 abort/cancel
-→ 立即失效 Battle authority/epoch
+→ 立即失效 Battle active authority
 → 停 scheduler
 → best-effort cancel Decision/resource
 → Runtime 调用 Presentation.close()
@@ -444,7 +444,7 @@ abort/cancel
 
 不等待下一个 200 ms Tick。
 
-所有迟到 Decision/Event 都必须因 generation/epoch 校验失败而失去提交权。
+所有迟到 Decision/Event 都必须因 Runtime lifecycle、AbortSignal 与 action/decision generation fencing 失去提交权。
 
 正常 BattleResult 使用不同的视觉生命周期：
 
@@ -463,7 +463,7 @@ terminal gate
 
 Simulation 不等待 final animation ACK；“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
 
-推荐 Runtime 生命周期：
+Runtime exact lifecycle/method matrix 已由 BATTLE_V0_SIMULATION.md 冻结；集成层生命周期摘要：
 
 ```text
 CREATED
