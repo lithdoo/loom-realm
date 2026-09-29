@@ -1,6 +1,6 @@
 # Battle v0 核心规范
 
-> 状态：**Design only / 规范草案**。本文是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；不代表 Runtime、Schema、构建或测试已经实现。
+> 状态：**Core gameplay FROZEN；Simulation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/Host 集成状态以 Contracts / Integration 文档为准。
 >
 > 统一状态词：
 > - **FROZEN / MUST**：v0 实现必须遵守。

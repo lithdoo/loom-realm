@@ -107,6 +107,229 @@ export interface PresentationPort {
   close(): void;
 }
 
+export interface ResolvedRangeMatrix {
+  readonly width: number;
+  readonly height: number;
+  readonly originX: number;
+  readonly originY: number;
+  readonly coefficientUnits: readonly (readonly number[])[];
+}
+
+export interface PlanConstraints {
+  readonly maxPathSteps: number;
+  readonly movement: { readonly cardinalOnly: true };
+  readonly turn: { readonly allowed: true };
+  readonly skills: readonly {
+    readonly skillId: string;
+    readonly minCoefficients: readonly number[];
+  }[];
+}
+
+export interface PlanSubmission {
+  readonly turn?: Direction;
+  readonly path: readonly GridPosition[];
+  readonly skill?: {
+    readonly skillId: string;
+    readonly targetActorId: ActorId;
+    readonly minCoefficient: number;
+  };
+}
+
+export type PlanRejectReason =
+  | "invalid_plan_shape"
+  | "path_too_long"
+  | "path_out_of_bounds"
+  | "path_not_adjacent"
+  | "terrain_blocked"
+  | "invalid_turn"
+  | "turn_with_path"
+  | "unknown_skill"
+  | "invalid_target"
+  | "invalid_min_coefficient";
+
+export type SkillResolveResult = "hit" | "immune" | "miss" | "invalid";
+export type MovementFailureReason = "blocked" | "occupied" | "reserved" | "contested" | "swap_forbidden";
+
+export type ObservedAction =
+  | { readonly type: "idle" }
+  | {
+      readonly type: "moving";
+      readonly from: GridPosition;
+      readonly to: GridPosition;
+      readonly startTick: number;
+      readonly completeTick: number;
+    }
+  | {
+      readonly type: "windup";
+      readonly skillId: string;
+      readonly targetActorId: ActorId;
+      readonly startTick: number;
+      readonly resolveTick: number;
+    }
+  | { readonly type: "recovery"; readonly skillId: string; readonly completeTick: number }
+  | { readonly type: "dead" };
+
+export interface ObservedSkill {
+  readonly skillId: string;
+  readonly baseDamage: number;
+  readonly windupTicks: number;
+  readonly recoveryTicks: number;
+  readonly range: ResolvedRangeMatrix;
+}
+
+export interface ObservedActor {
+  readonly actorId: ActorId;
+  readonly team: Team;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly tile: GridPosition;
+  readonly direction: Direction;
+  readonly action: ObservedAction;
+  readonly protectedUntilTickExclusive: number;
+  readonly skills: readonly ObservedSkill[];
+}
+
+export type ObservedEvent =
+  | {
+      readonly type: "move_failed";
+      readonly tick: number;
+      readonly actorId: ActorId;
+      readonly tile: GridPosition;
+      readonly reason: MovementFailureReason;
+    }
+  | {
+      readonly type: "move_interrupted";
+      readonly tick: number;
+      readonly actorId: ActorId;
+      readonly reason: "damaging_hit";
+    }
+  | {
+      readonly type: "skill_resolved";
+      readonly tick: number;
+      readonly casterActorId: ActorId;
+      readonly targetActorId: ActorId;
+      readonly skillId: string;
+      readonly result: SkillResolveResult;
+      readonly coefficientUnits: number;
+      readonly finalDamage: number;
+    }
+  | {
+      readonly type: "protection_started";
+      readonly tick: number;
+      readonly actorId: ActorId;
+      readonly protectedUntilTickExclusive: number;
+    };
+
+export interface BattleObservation {
+  readonly tick: number;
+  readonly selfActorId: ActorId;
+  readonly actors: readonly ObservedActor[];
+  readonly map: {
+    readonly width: number;
+    readonly height: number;
+    readonly passable: readonly (readonly boolean[])[];
+  };
+  readonly recentEvents: readonly ObservedEvent[];
+}
+
+export interface DecisionRequest {
+  readonly requestId: string;
+  readonly actorId: ActorId;
+  readonly generation: number;
+  readonly planningOrigin: GridPosition;
+  readonly observation: BattleObservation;
+  readonly constraints: PlanConstraints;
+  readonly correction?: {
+    readonly rejectedPlan: PlanSubmission;
+    readonly reason: PlanRejectReason;
+  };
+}
+
+export interface DecisionFailure {
+  readonly category: "attempt_failure" | "session_fatal";
+  readonly code: string;
+  readonly metadata?: unknown;
+}
+
+export type DecisionCompletion =
+  | {
+      readonly type: "completed";
+      readonly requestId: string;
+      readonly generation: number;
+      readonly plan: PlanSubmission;
+    }
+  | {
+      readonly type: "failed";
+      readonly requestId: string;
+      readonly generation: number;
+      readonly error: DecisionFailure;
+    };
+
+export interface DecisionPort {
+  decide(request: DecisionRequest, signal: AbortSignal): Promise<DecisionCompletion>;
+}
+
+export type BattleResult =
+  | { readonly type: "ally_win" }
+  | { readonly type: "enemy_win" }
+  | { readonly type: "simultaneous_defeat" }
+  | { readonly type: "cancelled" }
+  | {
+      readonly type: "failure";
+      readonly source: "simulation" | "decision" | "presentation";
+      readonly code: string;
+    };
+
+export type BattleStatus = "created" | "initializing" | "running" | "paused" | "settled" | "closed";
+
+export type ActorSnapshotAction =
+  | { readonly type: "idle" }
+  | {
+      readonly type: "moving";
+      readonly motionId: number;
+      readonly from: GridPosition;
+      readonly to: GridPosition;
+      readonly startTick: number;
+      readonly completeTick: number;
+    }
+  | {
+      readonly type: "windup";
+      readonly skillId: string;
+      readonly targetActorId: ActorId;
+      readonly startTick: number;
+      readonly resolveTick: number;
+    }
+  | { readonly type: "recovery"; readonly skillId: string; readonly completeTick: number }
+  | { readonly type: "dead" };
+
+export interface ActorSnapshot {
+  readonly actorId: ActorId;
+  readonly team: Team;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly tile: GridPosition;
+  readonly direction: Direction;
+  readonly action: ActorSnapshotAction;
+  readonly decision: "none" | "thinking";
+  readonly protectedUntilTickExclusive: number;
+}
+
+export interface ReservationSnapshot {
+  readonly actorId: ActorId;
+  readonly tile: GridPosition;
+}
+
+export interface BattleSnapshot {
+  readonly battleId: string;
+  readonly sceneEpoch: number;
+  readonly currentTick: number;
+  readonly tickDurationMs: 200;
+  readonly status: BattleStatus;
+  readonly actors: readonly ActorSnapshot[];
+  readonly reservations: readonly ReservationSnapshot[];
+  readonly result?: BattleResult;
+}
+
 const encoder = new TextEncoder();
 
 export function compareActorId(left: string, right: string): number {

@@ -2,7 +2,7 @@
   "name": "@loomrealm-game/battle",
   "version": "0.1.0-alpha.0",
   "type": "module",
-  "description": "LoomRealm Battle contracts and frozen v0 browser presentation",
+  "description": "LoomRealm Battle contracts, frozen v0 simulation, and browser presentation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -13,6 +13,10 @@
     "./presentation": {
       "types": "./dist/presentation.d.ts",
       "import": "./dist/presentation.js"
+    },
+    "./simulation": {
+      "types": "./dist/simulation.d.ts",
+      "import": "./dist/simulation.js"
     },
     "./browser/battle.browser.js": "./dist/browser/battle.browser.js",
     "./browser/battle.css": "./dist/browser/battle.css"

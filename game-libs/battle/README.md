@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Simulation FROZEN FOR IMPLEMENTATION；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Core Simulation/Decision 代码尚未实现，但 Simulation 的 blocking design choice 已在 implementation spec 中清零；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
+> 状态：**Battle v0 Simulation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Simulation 已完成 contracts、resolved-input validation、self-driven Runtime、Decision/Plan pipeline、deterministic Replay、headless acceptance 与 package export；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -14,7 +14,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
-- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **FROZEN FOR IMPLEMENTATION**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
+- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
 - **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
 - **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
@@ -92,7 +92,7 @@ Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 
 
 ```text
 Resolved Battle input/validator
-→ **按 FROZEN Simulation spec 实现 self-driven headless Simulation Runtime**
+→ **已完成：按 FROZEN Simulation spec 实现 self-driven headless Simulation Runtime**
 → DecisionPort + Mock/Script Decision
 → frozen-rule tests
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
@@ -110,4 +110,4 @@ Resolved Battle input/validator
 npm run test:battle
 ```
 
-该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle unit/Browser E2E。当前 closed-loop qualified 仍只指 Battle v0 Presentation；Simulation 已 FROZEN FOR IMPLEMENTATION，但 Core Simulation/Decision 与完整 Battle Runtime 尚未实现。
+该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle Simulation unit/acceptance 与 Presentation/Browser E2E。Battle v0 Simulation 与 Presentation 均已完成 closed-loop qualification；真实 provider、Guidance 与业务 Host composition 仍按 Integration 文档作为独立后续集成项。

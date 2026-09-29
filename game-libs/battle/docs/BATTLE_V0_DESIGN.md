@@ -1,6 +1,6 @@
 # Battle v0 文档索引与迁移说明
 
-> 状态：**Core gameplay 已冻结；Simulation implementation spec = FROZEN FOR IMPLEMENTATION；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Simulation/Decision 代码尚未实现。
+> 状态：**Core gameplay 已冻结；Simulation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。真实 provider、Guidance 与 Host composition 仍属于外部集成工作。
 >
 > 本文件不再重复定义 Battle 规则。2026-09-25 起，原单体 `BATTLE_V0_DESIGN.md` 已重构为“核心规范 / 数据契约 / 集成说明 / 测试矩阵”四份文档，以避免同一规则在多个章节重复维护。
 >
@@ -44,7 +44,7 @@
 
 Contracts 不重新定义玩法规则。
 
-### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — FROZEN FOR IMPLEMENTATION
+### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED
 
 负责：
 
@@ -244,7 +244,7 @@ protection      命中后的有限免疫区间
 
 ## 8. 当前实施入口
 
-当前 **Core gameplay 已冻结，Simulation implementation spec 已 FROZEN FOR IMPLEMENTATION，Presentation 已实现并通过 closed-loop qualification；待实现的是 Simulation/Decision/full Runtime composition**。推荐实施顺序：
+当前 **Core gameplay 已冻结，Simulation/DecisionPort/full Runtime 与 Presentation 均已实现并通过 closed-loop qualification；待完成的是外部 serialization、真实 provider、Guidance 与业务 Host composition**。已完成/后续实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema
