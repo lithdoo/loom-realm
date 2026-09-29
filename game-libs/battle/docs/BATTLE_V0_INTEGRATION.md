@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Core Runtime/Decision integration 仍为草案**。本文说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成。
+> 状态：**Simulation implementation contract FROZEN FOR IMPLEMENTATION；Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；provider/Guidance/Host wiring 仍可含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -83,11 +83,42 @@ Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concre
 
 Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻址，不使用 `actorA/actorB` 或数组下标表达 identity。v0 Config validator 严格要求两个 combat Actor，并且恰好为 1 个 `ally` + 1 个 `enemy`；未来 N Actor 版本只扩展规则语义，不改变三层组合方式。
 
+### 1.1.1 Simulation execution pipeline
+
+Simulation exact implementation contract 见 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md)。本节只保留集成层摘要；若与 Simulation implementation spec 存在解释空间，以后者为准。
+
+Simulation implementation 应保持一条有界 pipeline，而不是通用 Task/Command framework：
+
+```text
+DecisionCompletion
+      ↓
+Decision Inbox
+      ↓ Tick snapshot / validation
+active or pending AcceptedPlan
+      ↓ one intent at a time
+ActionState
+      ↓ dueTick
+Scheduled Event Queue
+      ↓
+next Tick reducer
+```
+
+关键约束：
+
+- path 不预展开成整串 scheduled tasks；只有当前 movement step 真正获得 reservation 后才 schedule 对应 `move_complete`；
+- active plan 仍有 future intent 时不预取下一 Plan；
+- active plan 的最后一个 intent 已 materialize 后，允许 Action execution 与 next Decision Thinking 重叠；
+- next Plan 最多暂存一份 pending accepted plan；它不能绕过当前 action lock；
+- Decision Inbox 与 Scheduled Event Queue 保持两套结构，不把 completion 转换成 `dueTick` event；
+- Runtime shell 负责 async Ports / clock / lifecycle；Tick authoritative mutation 不等待 Decision、Browser 或其他外部 Promise。
+
+`ready` Decision state、独立于 `ActionState.moving` 的第二份 `activeStep` authority、以及无界 accepted-plan FIFO 都不是 v0 implementation requirement。
+
 ### 1.2 Simulation 只依赖窄 capability
 
 Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；LLMDecision concrete implementation 也可以依赖 Host/service capability。
 
-Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。推荐概念：
+Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。构造方式可按仓库惯例命名；Simulation-facing capability 与 resolved input 形状已由 BATTLE_V0_SIMULATION.md 冻结。概念：
 
 ```ts
 const battle = new BattleSimulationBuilder({
@@ -304,7 +335,7 @@ LLMDecision
 
 Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
 
-Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、accepted-plan queue 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
+Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
 
 ## 6. LLM Decision Adapter
 
@@ -334,7 +365,7 @@ next reducer snapshot that can see it
         ↓
 generation / validation / correction
         ↓
-accepted-plan queue
+bounded active/pending accepted-plan pipeline
 ```
 
 Promise resolve / worker message / provider callback 只允许 enqueue completion。即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
@@ -365,7 +396,7 @@ v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-cl
 - 一次 `decide()` = 一次 attempt；
 - DecisionCompletion 不带 gameplay timing / dueTick；
 - completion callback 只 enqueue 到 Simulation-owned inbox；
-- stale / validation / correction / accepted-plan queue 属于 Simulation；
+- stale / validation / correction / bounded active/pending accepted-plan pipeline 属于 Simulation；
 - Simulation 通过 AbortSignal best-effort 取消失效 attempt。
 
 尚未冻结：
@@ -404,7 +435,7 @@ Frame abort / Battle cancel 遵循 `CTRL-001`：
 
 ```text
 abort/cancel
-→ 立即失效 Battle authority/epoch
+→ 立即失效 Battle active authority
 → 停 scheduler
 → best-effort cancel Decision/resource
 → Runtime 调用 Presentation.close()
@@ -413,14 +444,15 @@ abort/cancel
 
 不等待下一个 200 ms Tick。
 
-所有迟到 Decision/Event 都必须因 generation/epoch 校验失败而失去提交权。
+所有迟到 Decision/Event 都必须因 Runtime lifecycle、AbortSignal 与 action/decision generation fencing 失去提交权。
 
 正常 BattleResult 使用不同的视觉生命周期：
 
 ```text
 terminal gate
-→ Simulation 产生最终权威状态 / BattleResult
+→ Simulation 产生最终 gameplay state + normal result candidate
 → 发布 final RenderProjection
+→ render 成功后 terminal arbiter commit BattleResult
 → 停止 Battle scheduler / 新 Action
 → BattleRuntime.run() resolve
 → Runtime 保持 SETTLED + final visual
@@ -430,9 +462,9 @@ terminal gate
 → CLOSED
 ```
 
-Simulation 不等待 final animation ACK；“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
+Simulation 不等待 final animation ACK；normal result 的 commit cut 只要求 final `render()` 同步调用成功，不等待动画完成。“保留最终画面”只是 Presentation lifetime，不延长 Battle gameplay authority。这样 normal result 与 abort/cancel 的即时 cleanup 不再混为同一路径。
 
-推荐 Runtime 生命周期：
+Runtime exact lifecycle/method matrix 已由 BATTLE_V0_SIMULATION.md 冻结；集成层生命周期摘要：
 
 ```text
 CREATED
@@ -472,10 +504,14 @@ initialize 所需关键资源失败
 → Runtime cleanup
 → run() = failure
 
-render / RenderDomain 同步 fatal
+PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED
 → stop authority
 → cleanup
-→ run() = failure
+→ run() = presentation failure
+
+PRESENTATION_INVALID_STATE / SCENE_MISMATCH / PROJECTION_CONFLICT / INVALID_DATA
+→ Runtime/contract invariant or programmer error
+→ throw/reject，不包装成 BattleResult.failure
 
 resize/resource/internal callback 的异步 terminal fatal
 → Presentation cleanup + resolve one-shot `presentation.failure`
@@ -529,7 +565,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation 已完成 closed-loop qualification；Core Simulation、Decision 与完整 Battle Runtime 仍未实现。
+Battle v0 Presentation 已完成 closed-loop qualification；Simulation 已 FROZEN FOR IMPLEMENTATION，但 Core Simulation、Decision 与完整 Battle Runtime 尚未实现。
 
 已验证工程状态：
 
@@ -541,15 +577,16 @@ Battle v0 Presentation 已完成 closed-loop qualification；Core Simulation、D
 ## 13. 推荐实施顺序
 
 ```text
-1. 完成其余非 Presentation Content/Contracts validator
-2. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
-3. 实现 frozen DecisionPort + Mock/Script Decision
+1. 实现 ResolvedBattleDefinition / Simulation-facing validator
+2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime，并新增 package `./simulation` export
+3. 实现 frozen DecisionPort + Mock/Script/Deferred Decision
 4. 跑 frozen-rule deterministic Test Matrix
-5. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
-6. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
-7. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-8. 接真实 LLM Decision Adapter，再接 Guidance / Host
-9. Presentation 已完成：验证 package-lock / npm ci / unit / Browser E2E；未来 Runtime 实现仍需自己的 qualification
+5. 外部 BattleActor/BattleSkill serialization schema 可并行/随后收口，不阻塞 headless Runtime
+6. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
+7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
+8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
+9. 接真实 LLM Decision Adapter，再接 Guidance / Host
+10. Presentation 已完成：验证 package-lock / npm ci / unit / Browser E2E；未来 Runtime 实现仍需自己的 qualification
 ```
 
 Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
@@ -558,7 +595,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/inbox/Tick-boundary/retry ownership已确定；
+- **INTEGRATION-OPEN-003**：provider-specific Decision metadata/cancel guarantee/provider timeout defaults；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。

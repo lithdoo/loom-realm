@@ -1,6 +1,6 @@
 # Battle v0 文档索引与迁移说明
 
-> 状态：**Core gameplay + Presentation implementation spec 已冻结；代码未实现**。
+> 状态：**Core gameplay 已冻结；Simulation implementation spec = FROZEN FOR IMPLEMENTATION；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Simulation/Decision 代码尚未实现。
 >
 > 本文件不再重复定义 Battle 规则。2026-09-25 起，原单体 `BATTLE_V0_DESIGN.md` 已重构为“核心规范 / 数据契约 / 集成说明 / 测试矩阵”四份文档，以避免同一规则在多个章节重复维护。
 >
@@ -36,15 +36,33 @@
 - `BattleConfig`；
 - `BattleObservation`；
 - `PlanConstraints`；
-- `PlanSubmission / PlanAcceptance`；
-- `BattleSnapshot / BattleEvent`；
+- `PlanSubmission / PlanConstraints / PlanRejectReason`；
+- `BattleSnapshot`；
 - 已冻结的 Presentation `BattleSceneInit / RenderProjection / SkillEffectProjection / BattleEffect`；
-- Replay 数据边界；
+- Decision-facing shared data boundary；
 - 其余非 Presentation subject/version、字段命名和正式 Schema OPEN。
 
 Contracts 不重新定义玩法规则。
 
-### 1.3 [BATTLE_V0_INTEGRATION.md](./BATTLE_V0_INTEGRATION.md) — LoomRealm / Browser / LLM 集成
+### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — FROZEN FOR IMPLEMENTATION
+
+负责：
+
+- ResolvedBattleDefinition 与 Simulation input boundary；
+- Runtime/Actor/Action/Decision/AcceptedPlan exact state；
+- initialization 与 initial Decision request；
+- BattleClock、scheduler、pause/resume、late-wake catch-up；
+- ScheduledEventQueue / DecisionInbox exact boundary；
+- TICK-001 transaction 与 shell/reducer command boundary；
+- bounded active/pending Plan handoff；
+- Projection cadence、motion/effect identity；
+- terminal arbitration、BattleResult/Snapshot public semantics；
+- Simulation-owned `BattleEvent`、`ReplayRecord / ReplayDriver`；
+- async race semantics、BattleReplayBuilder、headless test doubles 与 Agent execution contract / Definition of Done。
+
+Simulation 实施细节不得重新定义 SPEC gameplay Rule，也不得改变 Presentation frozen ABI。
+
+### 1.4 [BATTLE_V0_INTEGRATION.md](./BATTLE_V0_INTEGRATION.md) — LoomRealm / Browser / LLM 集成
 
 负责：
 
@@ -61,7 +79,7 @@ Contracts 不重新定义玩法规则。
 - workspace / package-lock；
 - 实施顺序。
 
-### 1.4 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md) — Presentation Implementation Spec — FROZEN
+### 1.5 [BATTLE_V0_PRESENTATION.md](./BATTLE_V0_PRESENTATION.md) — Presentation Implementation Spec — FROZEN
 
 负责：
 
@@ -76,7 +94,7 @@ Contracts 不重新定义玩法规则。
 
 本文不重新定义 gameplay Rule；Presentation public API、cross-layer Projection、Render Tree、Browser node data ABI、world-coordinate model、camera、viewport/resize、effect policy、lifecycle/failure/stale handling 已冻结，**Blocking Presentation OPEN = 0**。
 
-### 1.5 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
+### 1.6 [BATTLE_V0_TEST_MATRIX.md](./BATTLE_V0_TEST_MATRIX.md) — 验收矩阵
 
 负责把 Rule ID 映射为可执行场景：
 
@@ -96,6 +114,9 @@ BATTLE_V0_SPEC.md
 
 BATTLE_V0_CONTRACTS.md
   ↓ data shapes
+
+BATTLE_V0_SIMULATION.md
+  ↓ Simulation implementation contract
 
 BATTLE_V0_INTEGRATION.md
   ↓ LoomRealm / Browser / LLM integration
@@ -156,7 +177,7 @@ protection      命中后的有限免疫区间
 | §8 移动 | SPEC §7 | 成为唯一 Movement 规则源 |
 | §9 技能 | SPEC §8–9；INTEGRATION §4 | 规则与视觉表现分离 |
 | §10 受击 | SPEC §9 | 与 protection/interruption 合并 |
-| §11 Tick Event Loop | SPEC §10–12 | reducer 保留为最终顺序；Replay 独立 |
+| §11 Tick Event Loop | SPEC §10–12；SIMULATION §16–27 | reducer 顺序仍由 SPEC 冻结；Simulation 文档冻结 transaction/scheduler/replay implementation |
 | §12 Guidance/Frame | INTEGRATION §7–9；SPEC CTRL-001 | 产品输入与核心 cancel 分离 |
 | §13 MVP 验收 | TEST_MATRIX；INTEGRATION §13 | 从“第二份规则”改成测试引用 |
 | §14 已冻结/待定 | SPEC §14；CONTRACTS §18；INTEGRATION §14 | OPEN 项按领域集中管理 |
@@ -173,6 +194,8 @@ protection      命中后的有限免疫区间
 - overdue Tick 必须逐 Tick 归约；
 - Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；真实 wall-clock latency 不直接进入 gameplay timing；
 - one valid Decision Request per Actor generation；Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；
+- Decision/Action 采用有界流水：当前 Plan future intent 耗尽后可以在 active Action 尚未结束时预取下一 Decision，但最多只暂存一个 pending accepted plan；
+- accepted path 逐 step materialize；未成功提交前一格时不创建后续 move task；
 - Decision 直接生成结构化 `PlanSubmission`；
 - `path` 不含起点、四方向、默认 `maxPathSteps=6`；
 - `minCoefficient` 只控制技能起手；
@@ -215,19 +238,19 @@ protection      命中后的有限免疫区间
 | `OPEN-CLOCK-001` | `TIME-004`：pause/background 冻结 Battle clock |
 | `OPEN-STALEMATE-001` | `RESULT-002`：v0 不设正式 stalemate/最大时长 |
 
-**当前 Core gameplay 没有未冻结 OPEN 项。**
+**当前 Core gameplay 没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
 
-仍存在的 OPEN 只属于 Presentation 之外的 Contracts / Integration，例如非 Presentation Content subject/version、DecisionFailure/provider metadata/cancel/timeout defaults、Guidance Host wiring 与 Host suspend/resume 来源映射。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
+仍存在的 OPEN 只属于不阻塞 Simulation/Presentation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、provider-specific Decision metadata/cancel/timeout defaults、Guidance Host wiring 与 Host suspend/resume 来源映射；Decision failure 的 attempt/session-fatal authority classification 已冻结。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
-当前 **Core gameplay 与 Presentation implementation spec 已冻结，Runtime/Decision/Presentation 代码实现仍待完成**。推荐实施顺序：
+当前 **Core gameplay 已冻结，Simulation implementation spec 已 FROZEN FOR IMPLEMENTATION，Presentation 已实现并通过 closed-loop qualification；待实现的是 Simulation/Decision/full Runtime composition**。推荐实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema
 2. 冻结/实现核心 Contracts
 3. Content validator
-4. headless Simulation Runtime（clock + scheduler + event queue + reducer）
+4. 按 BATTLE_V0_SIMULATION.md 直接实现 headless Simulation Runtime（state + clock + scheduler + queues + reducer + replay）
 5. DecisionPort + Mock/Script Decision
 6. TEST_MATRIX 全部 frozen-rule 场景
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage

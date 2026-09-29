@@ -50,7 +50,7 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 
 依赖与运行边界：
 
-- **Decision = Plan**：只根据 `BattleObservation / PlanConstraints / RecentEvents / Optional Guidance` 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
+- **Decision = Plan**：根据 Simulation 的 `BattleObservation / PlanConstraints` 与 adapter-side Optional Guidance 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
 - **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
 - **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
 - Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
@@ -135,8 +135,8 @@ hp
 tile
 direction
 actionState
-acceptedPlanId?
-activeStep?
+activePlan?
+pendingPlan?
 protectedUntilTickExclusive
 actionGeneration
 decisionGeneration
@@ -173,7 +173,7 @@ Skill range 旋转读取 Simulation direction，而不是 Presentation Sprite �
 
 ### STATE-005 — Action lifecycle 与 Decision lifecycle 正交 — FROZEN
 
-Actor 的“身体正在做什么”和“Decision 是否正在思考/已 ready”是两条独立状态轴。
+Actor 的“身体正在做什么”和“Decision Request 是否正在进行”是两条独立状态轴。
 
 因此以下组合都是合法的：
 
@@ -184,7 +184,20 @@ idle     + thinking
 protected + thinking
 ```
 
-`thinking` 不得作为与 `moving / windup / recovery` 互斥的 `ActionState` 分支。ActionState 只描述 gameplay Action lifecycle；DecisionState 单独描述 Decision Request / ready lifecycle。
+`thinking` 不得作为与 `moving / windup / recovery` 互斥的 `ActionState` 分支。ActionState 只描述 gameplay Action lifecycle；DecisionState 单独描述尚未完成的 Decision Request。异步 completion 在被 Tick reducer 消费前只存在于 Decision Inbox，不建立额外的 Actor `ready` authority state。
+
+### STATE-006 — Decision 预取是有界的 — FROZEN
+
+Decision 与 Action 可以流水重叠，但 v0 不允许无界 Plan 排队。
+
+- Actor 同时最多一个有效 pending Decision Request；
+- 当前 accepted plan 仍有尚未 materialize 的 turn / path step / skill intent 时，不为“下一 Plan”提前开启新的 generation；
+- 当当前 Plan 的最后一个 future intent 已经 materialize 成正在执行的 Action 后，即使该 Action 仍处于 moving / windup / recovery，Simulation 可以为后续行为提前进入 Thinking；
+- 提前返回且被 reducer 接受的下一 Plan 只能作为**至多一个 pending accepted plan** 暂存；它在当前 Action lock 解除前不得启动 Action；
+- current/pending 之外不得继续接受第三份 Plan，也不得建立通用无界 FIFO；
+- damaging hit、death、cancel 或其他使当前 Decision/Plan authority 失效的事实，必须同时 fence 掉不再合法的 pending Plan。
+
+这里的“Plan intent 已 materialize”表示该 intent 已经转化为当前权威 Action（例如 active movement / windup / recovery 链），不是指该 Action 已经完成。
 
 ## 5. 时间、事件队列与异步完成
 
@@ -288,24 +301,33 @@ Plan 是否被 Simulation 接受
 Plan 从哪个 Tick 开始执行
 ```
 
-stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、accepted-plan queue 与 Replay consume/accept tick 都由 Simulation 决定。
+stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、active/pending accepted-plan pipeline 与 Replay consume/accept tick 都由 Simulation 决定。
 
 Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
+
+### DEC-004 — Decision failure authority classification — FROZEN
+
+Decision infrastructure failure 对 Simulation 只有两种 authority category：
+
+- `attempt_failure`：只结束当前 Decision attempt/generation，不终止 Battle；Actor 最早下一逻辑 Tick重新进入 Decision lifecycle；
+- `session_fatal`：该 failure 是 Battle terminal candidate，由 Runtime 归约为 `BattleResult.failure`。
+
+Provider-specific HTTP/network/error metadata、默认 timeout 数值等仍可在 Integration 层配置，但不得让 Simulation自行猜测某个 provider error 是否终止整场 Battle。
+
+默认 provider timeout 属于 `attempt_failure`；concrete adapter 若要把某类基础设施错误升级为 `session_fatal`，必须在返回 DecisionFailure 时明确分类。
 
 ## 6. Decision Protocol 与 PlanSubmission
 
 ### PLAN-002 — Decision 读取 Observation + Constraints — FROZEN
 
-Decision 只读取 Simulation 提供的：
+Decision 的 gameplay input 只读取 Simulation 提供的：
 
 ```text
-BattleObservation
+BattleObservation（内含 bounded RecentEvents）
 PlanConstraints
-RecentEvents
-Optional Guidance
 ```
 
-不得直接把 Presentation DOM/Sprite/camera/动画进度当作战斗事实。
+Optional Guidance 属于 Decision adapter/Host 的外部 prompt augmentation，不进入 Simulation authoritative Observation、Replay 或 Tick state。不得直接把 Presentation DOM/Sprite/camera/动画进度当作战斗事实。
 
 ### PLAN-003 — 最小 PlanSubmission — FROZEN
 
@@ -324,8 +346,9 @@ PlanSubmission
 
 规则：
 
-- `path` 只包含未来目的格，不包含 Actor 当前格；
-- 只允许上下左右四方向，每一步 Manhattan distance = 1；
+- `path` 只包含 future destination，不重复该 Decision Request 的 `planningOrigin`；
+- path 第一格必须与 `planningOrigin` Manhattan distance = 1；后续每一步也必须上下左右四方向相邻；
+- moving prefetch 时 `planningOrigin` 可以是 active move destination，而 Observation 的 committed tile 仍是 origin；因此 future path 可以合法走回旧 committed origin。
 - `path.length <= PlanConstraints.maxPathSteps`；
 - `turn` 只表达**原地转向**，因此出现 `turn` 时 `path` 必须为空；
 - `path: []`、无 turn、无 skill = hold/reobserve；
@@ -346,11 +369,11 @@ Simulation 在提交时校验：
 
 - path 长度；
 - 坐标为整数且不越界；
-- 四方向邻接；
+- 从 `DecisionRequest.planningOrigin` 开始的四方向邻接；
 - 静态地形可通行；
 - `turn` 必须是合法 Direction，且不能与非空 path 同时出现；
 - skill 属于 Actor；
-- target 当前合法；
+- target 必须存在于当前 Battle、不是 self、team 与 caster 不同、且当前 `hp > 0 / action != dead`；v0 恰好双 Actor，因此唯一合法 target 是当前存活的对方 Actor；
 - `minCoefficient` 合法；
 - `decisionGeneration` 仍有效；
 - Actor 当前状态允许接受计划。
@@ -363,9 +386,10 @@ Plan 被接受只表示“当前可以开始”，不保证未来一定走完或
 
 ### PLAN-006 — Reject 与一次修正机会 — FROZEN
 
-Reject 必须返回机器可读 reason，例如：
+Reject 必须返回机器可读 reason；exact union见 Contracts，包括：
 
 ```text
+invalid_plan_shape
 path_too_long
 path_out_of_bounds
 path_not_adjacent
@@ -375,9 +399,9 @@ turn_with_path
 unknown_skill
 invalid_target
 invalid_min_coefficient
-stale_decision_generation
-actor_not_ready
 ```
+
+旧 generation / dead / terminal 等 authority fencing 在 Plan validation 前完成，不属于 Plan reject reason。
 
 同一 `decisionGeneration` 最多允许**一次修正重试**。
 
@@ -400,11 +424,25 @@ accepted plan 在执行过程中持续面对实时战场：
 - coefficient 为 0/矩阵外或低于 `minCoefficient` 时不施法，只要剩余 path 合法就继续移动；
 - 达到 `minCoefficient` 且 Actor 可以攻击时，停止尚未使用的 path，进入 windup；
 - path 已耗尽仍未达到阈值时，不得自动“降级”为更低 coefficient 攻击；计划结束/保持并进入后续 Decision；
-- 路线被阻、目标消失、计划失去意义时结束计划，并在后续合法 Tick 重规划；不得同 Tick 零时间反复重试。
+- 尚未 materialize skill windup 前，如果 target 不再满足“存在、非 self、敌对、alive”，以 `target_invalid` 结束计划，并在后续合法 Tick 重规划；
+- movement execution 失败只使用 MOVE-005 冻结的 `blocked / swap_forbidden / occupied / reserved / contested` taxonomy；
+- 不存在额外的“计划失去意义”catch-all；无法归入 Plan exhausted、上述 exact failure、damaging interruption 或 stale authority 的状态属于 Runtime invariant；
+- 不得同 Tick 零时间反复重试。
 
 ### PLAN-008 — move-only 不会自动攻击 — FROZEN
 
 没有 skill intent 的 Plan 永远不会因为途中进入某技能合法范围而自动施法。
+
+### PLAN-009 — hold/reobserve 与 Plan 结束后的 redecision — FROZEN
+
+`path: []`、无 turn、无 skill 的 Plan 表示“本 Tick不启动 Action，并在后续 Tick重新观察”，不是永久 idle。
+
+统一规则：
+
+- hold/reobserve 在被接受的当前 Tick立即视为 Plan exhausted，但不得同 Tick创建新的 Decision generation；
+- 如果最后一个 move/skill intent 已 materialize 成仍在执行的 Action，可按 STATE-006 在 Action完成前预取下一 Decision；除此之外，move/path最终结束、pure turn完成且无剩余 skill、path耗尽仍未达到 `minCoefficient`、动态阻挡/目标失效等 Plan正常结束或失败后，如果没有已预取的 thinking/pending Plan，最早下一逻辑 Tick才可创建新的 Decision generation；
+- damaging hit 仍按 HIT-003 的受击 redecision 规则处理；
+- 不得通过 hold/失败/Plan结束在同一 Tick形成零时间 Decision 循环。
 
 ## 7. Turn 与 Movement
 
@@ -466,11 +504,27 @@ Presentation 可以平滑插值，但 Simulation 在完成前仍认为 Actor 位
 
 相邻两个 Actor 不允许在同 Tick 直接穿过彼此交换格子。
 
-### MOVE-005 — 冲突失败方 — FROZEN
+### MOVE-005 — movement failure taxonomy 与优先级 — FROZEN
 
-失败方留在原格，当前计划结束，记录如 `contested` 的原因，并在后续 Tick 重规划。
+对已经通过 lifecycle/generation fence、准备在本 Tick启动的 MoveIntent，失败 reason 与判定优先级唯一：
 
-不得同 Tick 零时间重试。
+1. `blocked`：destination 越界或静态不可通行；
+2. `swap_forbidden`：两个 surviving intents 恰好互相以对方 committed origin 为 destination；在普通 occupied 检查前识别；
+3. `occupied`：destination 当前由另一个 Actor committed 占用；即使该 Actor 本 Tick也计划离开，在其 move_complete 前 origin 仍占用；
+4. `reserved`：destination 已被更早 active movement 持有 reservation；
+5. `contested`：通过以上检查后，本 phase 多个新 intents 申请同一原本 free/unreserved destination；seeded winner成功，其余失败；
+6. 其余单一申请成功。
+
+同一 MoveIntent只记录第一个命中的 reason。stale/dead/terminal intent 在进入 taxonomy 前被 fence，不产生 `move_failed`。
+
+任何 movement failure：
+
+- Actor 保持原 committed tile；
+- 不创建 reservation / active move；
+- 当前 Plan结束；
+- 记录 exact reason；
+- 最早后续合法 Tick重规划；
+- 不得同 Tick零时间重试。
 
 ### MOVE-006 — move_start 瞬间转向 — FROZEN
 
@@ -603,7 +657,7 @@ resolve 前受到实际伤害会取消未完成 windup。
 Recovery 是**行动锁，不是思考锁**：
 
 - Decision Thinking 可以开始/继续；
-- reducer 已接受的下一 Plan 可以暂存；
+- reducer 已接受的下一 Plan 可以按 STATE-006 暂存为唯一 pending accepted plan；
 - recovery 中不能启动 move/turn/windup；
 - 实际伤害 `hit` 会中断 recovery，并进入正常受击流程；
 - `immune` 不会中断 recovery。
@@ -652,13 +706,24 @@ invalid
 protected = currentTick < protectedUntilTickExclusive
 ```
 
-例如 Tick 10 受击后获得 3 个完整保护 Tick：
+damaging hit 在 Tick `t` 存活后设置：
 
 ```text
+protectedUntilTickExclusive = t + protectionTicks + 1
+```
+
+因此受击 Tick 剩余阶段也处于 protection；`protectionTicks` 表示**受击 Tick之后**额外完整保护的 Tick 数。
+
+例如 Tick 10 受击后 `protectionTicks = 3`：
+
+```text
+Tick 10 后续阶段 protected
 Tick 11/12/13 protected
 protectedUntilTickExclusive = 14
 Tick 14 恢复正常
 ```
+
+若 `protectionTicks = 0`，只保护 Tick 10 的后续阶段，不产生额外完整保护 Tick。
 
 无需 `protection_expire` 业务事件。
 
@@ -751,7 +816,7 @@ finalDamage = 0
 6. 同步批量应用普通 `hit` damage。
 7. 对 `finalDamage > 0` 的目标应用 HIT-003 aftermath：包括中断 active movement、释放 reservation、失效 Action/Plan/Decision；死亡者不获得 protection 或新 Decision。
 8. 执行普通批次 terminal gate；如果 Battle 已结束，不再启动新的游戏 Action。
-9. 消费第 1 步截取的 DecisionCompletion snapshot：按 generation fencing，处理 failure，校验 Plan；合法 Plan 进入 accepted-plan queue，非法 Plan 按 PLAN-006 决定是否发起唯一 correction attempt。snapshot 之后到达的 completion 留给下一 Tick。
+9. 消费第 1 步截取的 DecisionCompletion snapshot：按 generation fencing，处理 failure，校验 Plan；合法 Plan 进入 STATE-006 的 active/pending accepted-plan pipeline，非法 Plan 按 PLAN-006 决定是否发起唯一 correction attempt。snapshot 之后到达的 completion 留给下一 Tick。
 10. 推进 existing/new plan；每 Actor 最多产生一个“新 Action 意图”。pending turn 在这里立即执行并消耗 Action 配额；skill/move 按规则产生后续意图。
 11. 收集第 10 步新启动的 `windup_ticks=0` 技能，组成一次 bounded instant-resolve batch。
 12. 用与普通技能相同的 outcome / simultaneous damage / HIT-003 aftermath / terminal 规则结算即时批次。
@@ -792,7 +857,7 @@ Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
 
 必须立即：
 
-- 失效 Battle authority/epoch；
+- 立即失效 Battle active authority；
 - 禁止后续规则提交；
 - 停止 scheduler；
 - best-effort 取消 LLM/资源工作；
@@ -816,6 +881,20 @@ Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
 - BattleResult。
 
 Replay **不重新调用 LLM**，也不依赖真实世界 LLM completion timestamp；重放按记录的 Tick 注入/恢复对应 Decision 结果与 accepted Plan。
+
+Deterministic Replay 的保证范围只覆盖由 initial resolved facts + recorded Decision completions + deterministic Simulation rules 能重建的 session 结果：
+
+- normal win / defeat / simultaneous defeat；
+- recorded Decision `session_fatal`；
+- deterministic Simulation failure。
+
+以下 external terminal 不要求 ReplayDriver伪造或重现发生边界，只保留 partial/audit record：
+
+- external `cancel()` / pre-aborted signal；
+- Presentation infrastructure failure；
+- programmer/invariant rejection。
+
+ReplayRecord 必须显式区分 deterministic 与 audit-only；ReplayDriver 不得把 audit-only record 当作完整 deterministic replay。
 
 ### REPLAY-002 — diagnostics 不改变规则 — FROZEN
 
