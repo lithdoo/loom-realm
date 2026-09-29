@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Core gameplay 尚未实现**。当前包已提供冻结的 Presentation contracts、Builder/Handler、Browser assets、synthetic acceptance tests、真实 Handler→Browser transport E2E 与干净环境 qualification；Simulation、Decision、完整 Battle Runtime/Subsystem orchestration 仍不在本阶段范围内。
+> 状态：**Battle v0 Simulation FROZEN FOR IMPLEMENTATION；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Core Simulation/Decision 代码尚未实现，但 Simulation 的 blocking design choice 已在 implementation spec 中清零；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -14,6 +14,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
+- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **FROZEN FOR IMPLEMENTATION**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
 - **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
 - **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
@@ -24,6 +25,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 ```text
 SPEC
 → CONTRACTS
+→ SIMULATION
 → INTEGRATION
 → PRESENTATION
 → TEST_MATRIX
@@ -65,16 +67,16 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 ## 当前 OPEN
 
-**Core gameplay 当前没有未冻结 OPEN 项。**
+**Core gameplay 当前没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
 
 此前关于 direction/turn、移动中致命受击、zero-damage hit、LOS、pause/background clock、stalemate 的问题都已经冻结进 SPEC。
 
 **Presentation v0 Blocking OPEN = 0。** Presentation 所需 BattleEffect / BattleSceneInit / RenderProjection / SkillEffectProjection、Render Tree、Browser data ABI、camera/viewport/effect/lifecycle、effect stacking 与 Renderer capacity failure policy 已冻结。
 
-仍待冻结的内容只包括与 Presentation 完整落地无关的外部/后续细节，例如：
+仍保持 OPEN 的只包括不阻塞 Simulation/Presentation implementation 的外部/后续细节，例如：
 
 - BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、key/id 与部分正式 Schema；
-- DecisionFailure/provider metadata、provider cancel guarantee、provider/network timeout defaults；
+- Decision provider-specific metadata、provider cancel guarantee、provider/network timeout defaults；`attempt_failure | session_fatal` authority classification 已冻结；
 - Guidance Host/InputTarget wiring；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
@@ -89,9 +91,8 @@ Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 
 优先顺序：
 
 ```text
-Content/Contracts schema
-→ validator
-→ self-driven headless Simulation Runtime
+Resolved Battle input/validator
+→ **按 FROZEN Simulation spec 实现 self-driven headless Simulation Runtime**
 → DecisionPort + Mock/Script Decision
 → frozen-rule tests
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
@@ -109,4 +110,4 @@ Content/Contracts schema
 npm run test:battle
 ```
 
-该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle unit/Browser E2E。这里的 closed-loop qualified 只指 Battle v0 Presentation；Core Simulation、Decision 与完整 Battle Runtime 仍未实现。
+该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle unit/Browser E2E。当前 closed-loop qualified 仍只指 Battle v0 Presentation；Simulation 已 FROZEN FOR IMPLEMENTATION，但 Core Simulation/Decision 与完整 Battle Runtime 尚未实现。
