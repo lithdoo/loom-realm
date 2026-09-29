@@ -419,6 +419,7 @@ type DecisionState =
 
 ```text
 initial
+prefetch_after_materialize
 plan_exhausted
 plan_failed
 damaging_hit
@@ -429,8 +430,9 @@ decision_attempt_failed
 reason 对 earliest eligible Tick 的映射固定：
 
 - `initial`：tick 0；
-- `damaging_hit`：受击 Tick 本身即可创建新的 request command；
-- `plan_exhausted / plan_failed / hold_reobserve / decision_attempt_failed`：最早下一逻辑 Tick；
+- `prefetch_after_materialize`：当前 Plan 的最后一个 future intent 已成功 materialize 成 Action 后，当前 Tick即可创建 request command；这不是“无 Action 的 Plan exhausted 重决策”；
+- `damaging_hit`：受击 Tick 本身可标记 redecision；若随后 terminal gate 结束 Battle，则同 Tick request command 必须被抑制；
+- `plan_exhausted / plan_failed / hold_reobserve / decision_attempt_failed`：没有 ongoing materialized Action 可用于预取时，最早下一逻辑 Tick；
 - correction attempt 不创建新 generation，按同 Tick phase 9规则直接产生 attempt=1 request。
 
 `ensureDecision(actor, reason, earliestTick)` 是唯一入口，必须满足：
@@ -507,7 +509,7 @@ materialization rule：
 - movement reservation成功并真正 `move_start` 时消费该 path intent：`pathCursor++`；
 - skill windup真正开始时 `skillConsumed = true`，剩余 path立即放弃；
 - 每次 materialization 后立即检查 Plan 是否仍有 future intent；若没有，`activePlan = null`。已 materialize Action 本身继续由 ActionState拥有，不需要 Plan 保持 authority；
-- 因此“最后一个 move/skill 已启动但 Action 尚未完成”可以同时满足 `activePlan = null` 并开始预取 next Decision；
+- 因此“最后一个 move/skill 已启动但 Action 尚未完成”可以同时满足 `activePlan = null` 并以 `prefetch_after_materialize` 开始预取 next Decision；skill/turn materialize 若发生在 phase 10，可在 phase 10产生 request command；final move 只有 phase 13 reservation成功后才可在 phase 13产生该 command；
 - Action后续若被 damaging hit打断，当前 Action与任何 prefetch/pending Plan按 generation/lifecycle失效；不回滚已消费的 Plan cursor；
 - 未 materialize 的后续 path永远没有 scheduled event authority。
 
@@ -673,15 +675,20 @@ type TickContext = {
 
 `startedActionActors` 实施 STATE-004；0 recovery不需要跨 Tick flag。
 
-Runtime shell在 Tick同步结束后执行 command side effects：
+Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 
 ```text
-enqueue future events
-invoke DecisionPort for RequestDecisionCommand
-append Replay facts
-render Projection
-possibly commit terminal result
+1. enqueue future events
+2. append Replay facts
+3. call presentation.render(projection)
+   └─ classified sync fatal → finish(presentation failure), suppress Decision commands
+4. if Tick produced terminal candidate
+   └─ finish(candidate), suppress Decision commands
+5. otherwise invoke DecisionPort for RequestDecisionCommand
+6. schedule/retain next wake
 ```
+
+因此 terminal Tick、render-fatal Tick都不会在结果已经确定后额外发起新的 Decision provider call。future events 即使在 terminal前已入 queue，也会随 `finish()` 停止/清空，不再获得提交机会。
 
 ## 17. TICK-001 implementation mapping
 
@@ -693,13 +700,13 @@ possibly commit terminal result
 4. collect previously-started due skill_resolve；
 5. resolve ordinary skill outcome with post-move committed facts；
 6. batch apply ordinary hit damage；
-7. damaging-hit aftermath/interruption；
-8. ordinary terminal gate；
+7. damaging-hit aftermath/interruption；只记录/缓冲 redecision need，不让随后可能成立的 terminal 仍发出外部 Decision call；
+8. ordinary terminal gate；若 terminal成立，抑制本 Tick全部尚未发出的 gameplay Decision request commands；
 9. consume Decision snapshot / validation / correction / active-pending acceptance；
-10. promote pending as eligible；advance active Plan；每 Actor最多一个新 Action intent；turn即时执行；
+10. promote pending as eligible；advance active Plan；每 Actor最多一个新 Action intent；turn/skill若在这里消费最后 future intent，可产生 `prefetch_after_materialize` request command；
 11. collect newly-started windup=0 skills；
-12. resolve instant batch + aftermath + terminal；
-13. surviving movement intents统一 reservation/contention；成功才 materialize move_start；
+12. resolve instant batch + aftermath + terminal；若 terminal成立，同样抑制尚未发出的 Decision request commands；
+13. surviving movement intents统一 reservation/contention；成功才 materialize move_start；若这是 active Plan 最后 future intent，清空 activePlan并可产生 `prefetch_after_materialize` request command；
 14. schedule future events + produce Snapshot/Projection/Replay facts。
 
 补充：
@@ -820,7 +827,7 @@ action = moving(...)
 schedule move_complete(dueTick = currentTick + moveTicks)
 ```
 
-多格path只materialize当前step。move_complete成功后commit destination、释放origin occupancy语义/目的reservation，随后phase10重新advance Plan。
+多格path只materialize当前step。若成功 move_start 消费的是 active Plan 最后一个 future intent，则 phase 13立即 `activePlan = null` 并允许 `prefetch_after_materialize`；move_complete成功后commit destination、释放origin occupancy语义/目的reservation，后续 Tick phase10再决定 promoted/new Plan 是否可执行。
 
 damaging hit中断：释放destination reservation、保持origin committed tile、action generation失效、active/pending Plan按规则失效；旧move_complete后续只能stale drop。
 
@@ -874,6 +881,7 @@ finish(candidate)
 → mark terminal committed
 → state.result = candidate
 → stop scheduler
+→ clear ScheduledEventQueue + DecisionInbox intake authority
 → abort Decision work
 → if normal win/defeat: status = SETTLED, keep Presentation open
 → else: Presentation.close(), status = CLOSED
