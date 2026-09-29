@@ -76,6 +76,9 @@
 | T-MOVE-011 | MOVE-007, HIT-003 | active step A→B 中受到致命 damage | step 立即失败；释放 B reservation；dead 留在 A；无新 protection/Decision |
 | T-MOVE-012 | MOVE-007, TICK-001 | Tick N phase 3 已成功 move_complete 到 B，随后 phase 5–7 被命中 | 伤害发生时 step 已完成，Actor 留在 B，不回滚到 A |
 | T-MOVE-013 | MOVE-006, MOVE-007 | move_start 向右后被中断 | committed tile 留 origin，但 direction 保持 right，不回滚 |
+| T-MOVE-014 | MOVE-002, PLAN-007 | path A→B→C 被接受 | start 时只 materialize A→B；不得提前 schedule B→C 的 move_complete |
+| T-MOVE-015 | MOVE-002, PLAN-007 | A→B 成功提交且 Plan 仍有 B→C | move_complete 后推进 plan cursor；后续 Action phase 才重新校验并尝试 B→C |
+| T-MOVE-016 | MOVE-005, PLAN-007 | A→B 在 reservation contention 失败 | 当前 Plan 终止；未 materialize 的 B→C 不产生 event；后续合法 Tick 重规划 |
 
 ## 5. Skill Range / Coefficient
 
@@ -133,6 +136,10 @@
 | T-DEC-006 | STATE-005 | Actor moving 时启动 Decision | actionState=moving 与 decisionState=thinking 可同时存在 |
 | T-DEC-007 | DEC-003, PLAN-006 | 第一次 Decision completion 返回非法 Plan | Adapter 不自行重试；Simulation validation 后决定是否发起唯一 correction attempt |
 | T-DEC-008 | DEC-001, DEC-003 | DecisionCompletion 返回 Plan/failure | Completion 只含 requestId/generation/result；无 gameplay timing/dueTick；callback 只 enqueue，Simulation reducer 决定 stale/validation/acceptance |
+| T-DEC-009 | STATE-005, STATE-006 | 当前 Plan 仍有未 materialize 的后续 path/skill intent | 不为“下一 Plan”提前开启新 generation；当前 Plan 继续拥有 future intent |
+| T-DEC-010 | STATE-006 | 当前 Plan 的最后一个 intent 已 materialize 成 active move/windup/recovery | 当前 Action 可继续，同时允许最多一个 next Decision 进入 thinking |
+| T-DEC-011 | STATE-006, SKILL-004 | action lock 未结束时 next Decision completion 被 reducer 接受 | 保存为唯一 pending accepted plan；不得启动 Action，也不得接受第三份排队 Plan |
+| T-DEC-012 | STATE-006, HIT-003 | active Action 受 damaging hit 且 pending Plan 已存在 | 旧 action/plan/decision authority 一并失效；不允许 stale pending Plan 在后续启动 |
 
 ## 9. Control Plane / Replay
 
