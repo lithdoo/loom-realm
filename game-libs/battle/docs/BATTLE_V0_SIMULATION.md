@@ -88,6 +88,18 @@ src/
 
 不要预先建立通用 Task framework、Command Bus、Event Store、Aggregate 或多层 scheduler abstraction。
 
+Canonical package export：
+
+```ts
+import {
+  BattleSimulationBuilder,
+  type BattleRuntime,
+  type BattleClock,
+} from "@loomrealm-game/battle/simulation"
+```
+
+实现 Simulation 时 package `exports` MUST 新增 `"./simulation"` subpath；`src/simulation.ts` 是该 subpath entry。root `@loomrealm-game/battle` 可以继续导出共享 contracts，但不得要求业务通过 Presentation concrete module 才能构造 Simulation。Decision concrete adapters 未来可独立 subpath，不阻塞本实现。
+
 ## 3. Resolved Simulation input
 
 Serialized Content 的 subject/version 仍可由 Contracts/Integration 单独演进；Simulation 不因此等待 ContentClient schema。Composition/loader 必须先把资源解析成纯数据 `ResolvedBattleDefinition`。
@@ -227,7 +239,7 @@ CREATED
 - Battle clock 在 Presentation initialize + initial Projection 成功前不得启动；
 - initial Decision Request 的 `requestTick = 0`；
 - initial Decision 调用可以在 clock 启动前被 shell 发出，但 completion 仍只能 enqueue；最早由第一个真实 reducer Tick消费；
-- initialize/render/pause/resume 的 classified Presentation fatal 均由 Runtime 捕获并归约为 `BattleResult.failure { source: "presentation" }`；不得把同一类失败同时作为 Runtime method throw 和 run() failure 两条业务通道；
+- initialize/render/pause/resume 抛出的 `PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED` 由 Runtime捕获并归约为 Presentation failure；Presentation programmer/invariant codes 按 §23 直接 throw/reject；同一错误不得同时走两条通道；
 - async Presentation failure observer 必须在 initialize 前挂上，避免观察窗口；
 - tick 0 只发布 initial Projection，不执行 TICK-001 gameplay reducer。
 
@@ -277,7 +289,8 @@ while (lifecycle === "RUNNING" && currentTick < targetTick) {
 - 不得把多个 dueTick压成一个批次；
 - scheduler callback 不得重入正在执行的 `processOneTick`；
 - JS callback/PROMISE 只会在同步 Tick stack 结束后执行；实现仍应有明确 `processingTick` invariant 防止手工重入；
-- close/cancel/fatal 必须取消 pending wake。
+- close/cancel/fatal 必须取消 pending wake；
+- `currentTick`、logical elapsed换算结果及所有 monotonic counters 必须保持 non-negative safe integer；任何下一次递增/换算将超出 safe integer 时，必须在溢出前停止 authority并产生 `BattleResult.failure { source: "simulation", code: "BATTLE_COUNTER_OVERFLOW" }`，不得 wrap、变成浮点不精确或静默继续。
 
 Pause：
 
@@ -831,6 +844,15 @@ schedule move_complete(dueTick = currentTick + moveTicks)
 
 damaging hit中断：释放destination reservation、保持origin committed tile、action generation失效、active/pending Plan按规则失效；旧move_complete后续只能stale drop。
 
+Protection assignment implementation follows HIT-002 exactly:
+
+```ts
+protectedUntilTickExclusive =
+  currentTick + protectionTicks + 1
+```
+
+Use safe-integer checked addition. `protectionTicks = 0` still protects the remainder of the hit Tick, but adds no later full Tick.
+
 ## 21. Skill / recovery scheduling
 
 Skill start：
@@ -908,6 +930,11 @@ Async `presentation.failure`：
 - normal/cancel/failure已经commit → 不得改写BattleResult。
 
 cancel、Presentation async fatal、Decision session fatal与normal terminal均竞争同一个 terminal arbiter；**第一个成功commit的 terminal candidate拥有最终结果**。由于单 Tick reducer同步不可重入，外部异步callback不能插入 reducer中间。
+
+Presentation sync error classification固定：
+
+- `PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED` → classified session failure，进入 `BattleResult.failure { source: "presentation", code }`；
+- `PRESENTATION_INVALID_STATE / PRESENTATION_SCENE_MISMATCH / PRESENTATION_PROJECTION_CONFLICT / PRESENTATION_INVALID_DATA` → Runtime/contract invariant or programmer error，允许 throw/reject，不伪装成业务 BattleResult。
 
 Programmer error/invariant violation不伪装成业务 `BattleResult.failure`，允许throw/reject。
 
