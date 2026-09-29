@@ -207,7 +207,7 @@
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
-| T-REPLAY-004 | SIMULATION §26/27 | live run记录completion consumedTick，随后Replay | Replay从record.initial的ResolvedBattleDefinition重建，按recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
+| T-REPLAY-004 | SIMULATION §26/27 | live run记录completion consumedTick，随后Replay | Replay从record.initial重建，按recorded consumedTick注入，不调用DecisionPort；重新生成的requestId/generation/requestTick/planningOrigin与record一致；final result/snapshot/gameplay Projection sequence一致 |
 | T-REPLAY-005 | SIMULATION §27 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
 | T-REPLAY-006 | REPLAY-001, SIMULATION §26–27 | normal/decision-session-fatal/deterministic-simulation-failure record | replayability=deterministic；BattleReplayBuilder可运行并验证最终结果 |
 | T-REPLAY-007 | REPLAY-001, SIMULATION §26–27 | external cancel 或 Presentation failure | replayability=audit_only；保留partial facts/result但 BattleReplayBuilder 明确拒绝 deterministic replay |
