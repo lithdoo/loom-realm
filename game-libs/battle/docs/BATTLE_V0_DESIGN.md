@@ -173,6 +173,8 @@ protection      命中后的有限免疫区间
 - overdue Tick 必须逐 Tick 归约；
 - Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；真实 wall-clock latency 不直接进入 gameplay timing；
 - one valid Decision Request per Actor generation；Decision completion 只进入 Simulation Inbox，并在 Tick reducer snapshot 中消费；
+- Decision/Action 采用有界流水：当前 Plan future intent 耗尽后可以在 active Action 尚未结束时预取下一 Decision，但最多只暂存一个 pending accepted plan；
+- accepted path 逐 step materialize；未成功提交前一格时不创建后续 move task；
 - Decision 直接生成结构化 `PlanSubmission`；
 - `path` 不含起点、四方向、默认 `maxPathSteps=6`；
 - `minCoefficient` 只控制技能起手；
