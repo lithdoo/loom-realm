@@ -385,9 +385,10 @@ Plan 被接受只表示“当前可以开始”，不保证未来一定走完或
 
 ### PLAN-006 — Reject 与一次修正机会 — FROZEN
 
-Reject 必须返回机器可读 reason，例如：
+Reject 必须返回机器可读 reason；exact union见 Contracts，包括：
 
 ```text
+invalid_plan_shape
 path_too_long
 path_out_of_bounds
 path_not_adjacent
@@ -397,9 +398,9 @@ turn_with_path
 unknown_skill
 invalid_target
 invalid_min_coefficient
-stale_decision_generation
-actor_not_ready
 ```
+
+旧 generation / dead / terminal 等 authority fencing 在 Plan validation 前完成，不属于 Plan reject reason。
 
 同一 `decisionGeneration` 最多允许**一次修正重试**。
 
