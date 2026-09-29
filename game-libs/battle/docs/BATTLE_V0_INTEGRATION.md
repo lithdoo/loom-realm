@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Core Runtime/Decision integration 仍为草案**。本文说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成。
+> 状态：**Simulation implementation contract FROZEN FOR IMPLEMENTATION；Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；provider/Guidance/Host wiring 仍可含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -85,6 +85,8 @@ Actor collection 同样遵循 `ARCH-006`：Runtime/Port 以唯一 `actorId` 寻�
 
 ### 1.1.1 Simulation execution pipeline
 
+Simulation exact implementation contract 见 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md)。本节只保留集成层摘要；若与 Simulation implementation spec 存在解释空间，以后者为准。
+
 Simulation implementation 应保持一条有界 pipeline，而不是通用 Task/Command framework：
 
 ```text
@@ -116,7 +118,7 @@ next Tick reducer
 
 Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；LLMDecision concrete implementation 也可以依赖 Host/service capability。
 
-Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。推荐概念：
+Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。构造方式可按仓库惯例命名；Simulation-facing capability 与 resolved input 形状已由 BATTLE_V0_SIMULATION.md 冻结。概念：
 
 ```ts
 const battle = new BattleSimulationBuilder({
@@ -558,7 +560,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation 已完成 closed-loop qualification；Core Simulation、Decision 与完整 Battle Runtime 仍未实现。
+Battle v0 Presentation 已完成 closed-loop qualification；Simulation 已 FROZEN FOR IMPLEMENTATION，但 Core Simulation、Decision 与完整 Battle Runtime 尚未实现。
 
 已验证工程状态：
 
@@ -571,7 +573,7 @@ Battle v0 Presentation 已完成 closed-loop qualification；Core Simulation、D
 
 ```text
 1. 完成其余非 Presentation Content/Contracts validator
-2. 实现自驱动 headless Simulation Runtime：Battle clock + scheduler + event queue + reducer
+2. 按 BATTLE_V0_SIMULATION.md 实现自驱动 headless Simulation Runtime：state + clock + scheduler + queues + reducer + replay
 3. 实现 frozen DecisionPort + Mock/Script Decision
 4. 跑 frozen-rule deterministic Test Matrix
 5. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
@@ -587,7 +589,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：DecisionFailure/provider metadata/cancel guarantee/provider timeout defaults；Decision attempt/inbox/Tick-boundary/retry ownership已确定；
+- **INTEGRATION-OPEN-003**：provider-specific Decision metadata/cancel guarantee/provider timeout defaults；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
