@@ -28,6 +28,7 @@
 | T-ARCH-018 | CONTRACTS §6 | 同一 Skill range 包含 0.5/1.0/0.5 | PlanConstraints.minCoefficients = [0.5, 1.0]，去重且数值升序；skills按skillId ordinal |
 | T-ARCH-019 | SIMULATION §3 | build 后调用方修改原 definition/passable/range 数组 | Runtime/Replay事实不变；builder已deep-copy/freeze Simulation-owned resolved definition |
 | T-ARCH-020 | SIMULATION §7/31 | 两个 Actor 同 Tick都分配 request/event/ordered facts | actorId ordinal traversal决定稳定 ID/输出顺序；改变Map insertion order不改变Replay/Projection/requestId |
+| T-ARCH-021 | CONTRACTS §10 | ActorId 包含开放字符串如 "__proto__"/"10"/"a" | BattleSnapshot.actors 仍为 ordinal-sorted readonly array，不使用 Record/object key authority；reservations同样稳定排序 |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
@@ -74,6 +75,10 @@
 | T-PLAN-017 | SIMULATION §11 | Plan path A→B→C，A→B reservation成功并 move_start | A→B intent 在 materialize 时消费，cursor 指向 C；但 B→C 仍不得在 A→B complete 前启动 |
 | T-PLAN-018 | CONTRACTS §7 | PlanSubmission 缺 path / 含未知字段 / 坐标非整数 / skill含未知字段 | reject invalid_plan_shape；attempt0允许唯一 correction，attempt1结束generation |
 | T-PLAN-019 | CONTRACTS §8 | attempt0 返回任一真正 PlanRejectReason | correctionAllowed=true；唯一 correction 后 attempt1 任一 reject 都结束 generation；stale authority 不进入 Plan validation |
+| T-PLAN-020 | CONTRACTS §16, SIMULATION §9/11 | Actor moving A→B，最后 move materialize 后预取 next Decision | DecisionRequest.planningOrigin=B，但 observation.self.tile=A 且 action.to=B；next Plan path 按 B 为起点校验 |
+| T-PLAN-021 | CONTRACTS §16, SIMULATION §12 | moving-prefetch Plan 已 pending，A→B 正常 complete | promotion 时 committed tile=B=planningOrigin，允许继续；若 move 被 hit 中断则 pending/Decision authority提前失效，不得从 A 解释该 path |
+| T-PLAN-022 | PLAN-005 | skill target=self / same-team / dead / unknown actor | reject invalid_target；v0 唯一合法 target 是当前存活的对方 Actor |
+| T-PLAN-023 | PLAN-007 | accepted attack Plan 尚未 windup 时 target 不再合法 | plan failed=target_invalid；不启动 windup；最早后续合法 Tick重决策 |
 
 ## 4. Turn / Movement / Contention
 
@@ -99,6 +104,10 @@
 | T-MOVE-014 | MOVE-002, PLAN-007 | path A→B→C 被接受 | start 时只 materialize A→B；不得提前 schedule B→C 的 move_complete |
 | T-MOVE-015 | MOVE-002, PLAN-007, SIMULATION §11 | A→B 已 materialize，Plan 仍有 B→C | cursor 已指向下一未 materialize step；只有 A→B move_complete 成功后，后续 Action phase 才重新校验并尝试 B→C |
 | T-MOVE-016 | MOVE-005, PLAN-007 | A→B 在 reservation contention 失败 | 当前 Plan 终止；未 materialize 的 B→C 不产生 event；后续合法 Tick 重规划 |
+| T-MOVE-017 | MOVE-005 | destination committed occupied，且 occupant 本 Tick也想离开 | reason=occupied；origin 在 move_complete 前仍占用，不把它当 free |
+| T-MOVE-018 | MOVE-005 | destination 已被更早 active move reservation | reason=reserved；不参与本 phase seeded contention |
+| T-MOVE-019 | MOVE-004, MOVE-005 | A→B origin、B→A origin 形成直接 reciprocal swap | 在 occupied 前识别，双方 reason=swap_forbidden |
+| T-MOVE-020 | MOVE-003, MOVE-005 | free/unreserved tile 同 phase 有两个 surviving intents | seeded winner成功，loser reason=contested；reason priority不受遍历顺序影响 |
 
 ## 5. Skill Range / Coefficient
 
@@ -136,7 +145,7 @@
 | T-HIT-001 | HIT-001 | skill/target 有效、范围内、未保护 | `hit` |
 | T-HIT-002 | HIT-001, HIT-004 | target 在 protection 且范围内 | `immune`；0 damage、不中断、不刷新 |
 | T-HIT-003 | HIT-001 | target 在 resolve 前离开范围 | `miss`，不是 `invalid` |
-| T-HIT-004 | HIT-001 | target 已死/消失/action invalid | `invalid` |
+| T-HIT-004 | HIT-001 | windup已开始后 target 已死/消失/action invalid | `invalid`、0 damage；若 session仍active则按 skill recovery rule结束此 Action |
 | T-HIT-005 | HIT-002 | Tick 10 hit 后 protectionTicks=3 | protectedUntilTickExclusive=14；Tick10后续阶段及11/12/13 protected，14 normal |
 | T-HIT-014 | HIT-002 | Tick 10 hit 后 protectionTicks=0 | protectedUntilTickExclusive=11；只保护Tick10后续阶段，Tick11正常 |
 | T-HIT-006 | HIT-003 | windup 中受到正 damage | windup invalid；protection set；只创建一个新 Decision generation |
@@ -199,6 +208,9 @@
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
 | T-REPLAY-004 | SIMULATION §26/27 | live run记录completion consumedTick，随后Replay | Replay从record.initial的ResolvedBattleDefinition重建，按recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
 | T-REPLAY-005 | SIMULATION §27 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
+| T-REPLAY-006 | REPLAY-001, SIMULATION §26–27 | normal/decision-session-fatal/deterministic-simulation-failure record | replayability=deterministic；BattleReplayBuilder可运行并验证最终结果 |
+| T-REPLAY-007 | REPLAY-001, SIMULATION §26–27 | external cancel 或 Presentation failure | replayability=audit_only；保留partial facts/result但 BattleReplayBuilder 明确拒绝 deterministic replay |
+| T-REPLAY-008 | REPLAY-001, SIMULATION §26–27 | invariant rejection | replayability=audit_only(invariant_rejection)，无业务 result；不得伪造 replay terminal boundary |
 
 ## 10. Presentation
 
