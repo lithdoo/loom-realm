@@ -135,8 +135,8 @@ hp
 tile
 direction
 actionState
-activePlanId?
-pendingPlanId?
+activePlan?
+pendingPlan?
 protectedUntilTickExclusive
 actionGeneration
 decisionGeneration
