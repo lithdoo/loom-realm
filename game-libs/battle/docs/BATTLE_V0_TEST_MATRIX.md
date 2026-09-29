@@ -19,11 +19,13 @@
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 | T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
 | T-ARCH-011 | SIMULATION §5 | Runtime run() 初始化 | arm presentation.failure → initialize → initial tick-0 Projection → initial Decision requests(requestTick=0) → start clock，顺序固定 |
-| T-ARCH-012 | SIMULATION §16/28 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
+| T-ARCH-012 | SIMULATION §16/29 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
 | T-ARCH-013 | SIMULATION §3 | headless Simulation 构造 | 只依赖 ResolvedBattleDefinition + narrow capabilities，不需要 ContentClient/SubsystemScope/Frame |
 | T-ARCH-014 | CONTRACTS §5, SIMULATION §3 | moveTicks=0 或任一 timing 为负数 | validator reject；v0 movement 至少 1 Tick，windup/recovery/protection 可为 0 但不可为负 |
 | T-ARCH-015 | SIMULATION §2 | package build 后 import @loomrealm-game/battle/simulation | subpath export 存在并导出 BattleSimulationBuilder/BattleRuntime/BattleClock；不依赖 Presentation concrete import |
 | T-ARCH-016 | SIMULATION §2/5 | Builder build 两次 / run 前 external signal 已 aborted | second build programmer error；pre-aborted run直接 cancelled+CLOSED，不 initialize、不请求Decision、不启动clock |
+| T-ARCH-017 | CONTRACTS §9 | initial DecisionRequest observation | actors/skills actorId+skillId ordinal stable；recentEvents=[]；map/passability为detached committed facts；无 Guidance/runtime generations |
+| T-ARCH-018 | CONTRACTS §6 | 同一 Skill range 包含 0.5/1.0/0.5 | PlanConstraints.minCoefficients = [0.5, 1.0]，去重且数值升序；skills按skillId ordinal |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
@@ -43,7 +45,9 @@
 | T-TIME-010 | DEC-001, REPLAY-001 | 两次真实运行的 LLM wall-clock latency 不同，但 Replay 记录相同 consumed/accepted Tick | Replay 不依赖 completion timestamp，不重新调用 LLM，按记录 Tick 复现 Plan 生效 |
 | T-TIME-011 | SIMULATION §6 | FakeClock 从 0 advance 199ms / 200ms | 199ms 不处理 Tick；200ms 恰好处理 Tick 1 |
 | T-TIME-012 | SIMULATION §6 | RUNNING 到 350ms pause，现实暂停 30s 后 resume | logical elapsed 保留350ms；暂停30s不计入，恢复后再累计到400ms才处理 Tick 2 |
-| T-TIME-013 | SIMULATION §6/27 | scheduler wake 与 pause 同时竞争 | 已进入同步 Tick则完整结束后pause；pause先执行则不进入新Tick；不存在半Tick状态 |
+| T-TIME-013 | SIMULATION §6/28 | scheduler wake 与 pause 同时竞争 | 已进入同步 Tick则完整结束后pause；pause先执行则不进入新Tick；不存在半Tick状态 |
+| T-TIME-014 | SIMULATION §6 | Tick处理本身耗时跨过后续deadline | wake loop每轮重新读取logicalElapsed并继续catch-up；next wake按(nextTick*200 - elapsed)剩余时间调度，不按callback结束后再固定等200ms |
+| T-TIME-015 | SIMULATION §6 | BattleClock.nowMs 回退/NaN/Infinity | Runtime invariant error并cleanup；不得产生负delay、倒退Tick或业务BattleResult |
 
 ## 3. PlanSubmission
 
@@ -66,6 +70,8 @@
 | T-PLAN-015 | PLAN-009 | hold/reobserve 在 Tick N 被接受 | Tick N 不启动 Action、不递归 Decision；Plan exhausted，最早 Tick N+1 创建新 generation |
 | T-PLAN-016 | PLAN-009 | move-only path 正常耗尽且无 pending Plan | 当前 Tick不零时间重决策；最早下一 Tick ensureDecision |
 | T-PLAN-017 | SIMULATION §11 | Plan path A→B→C，A→B reservation成功并 move_start | A→B intent 在 materialize 时消费，cursor 指向 C；但 B→C 仍不得在 A→B complete 前启动 |
+| T-PLAN-018 | CONTRACTS §7 | PlanSubmission 缺 path / 含未知字段 / 坐标非整数 / skill含未知字段 | reject invalid_plan_shape；attempt0允许唯一 correction，attempt1结束generation |
+| T-PLAN-019 | CONTRACTS §8 | stale_decision_generation 或 actor_not_ready | correctionAllowed=false；不得向 provider 发 correction attempt |
 
 ## 4. Turn / Movement / Contention
 
@@ -108,6 +114,8 @@
 | T-SKILL-010 | SKILL-003, HIT-001 | 前摇中目标离开矩阵 | `miss` |
 | T-SKILL-011 | SKILL-002, SKILL-003 | min=1.0 起手，resolve 时只剩 0.5 | 不二次检查 min；按 0.5 结算 |
 | T-SKILL-012 | SKILL-006 | caster 与 target 中间有不可通行 Tile，但 target 在正 coefficient 格 | v0 不做 LOS；范围规则仍合法 |
+| T-SKILL-013 | SKILL-001, SIMULATION §21 | canonical矩阵 origin上方 cell=1000 | direction 8→world up，2→down，4→left，6→right；exact rotation mapping与Presentation无关 |
+| T-SKILL-014 | DAMAGE-001, SIMULATION §6/21 | baseDamage × coefficientUnits 将超 safe integer | 在不精确乘法前终止为 failure source=simulation code=BATTLE_NUMERIC_OVERFLOW |
 
 ## 6. Instant Skill / Tick Batch
 
@@ -117,7 +125,7 @@
 | T-INSTANT-002 | STATE-004, TICK-002 | windup=0 + recovery=0 | 同 Actor 本 Tick不能启动第二个 Action |
 | T-INSTANT-003 | SKILL-005, HIT-006 | 双方同 Tick 启动致命 instant skill | 两个技能都先收集；允许 simultaneous defeat |
 | T-INSTANT-004 | TICK-001 | instant skill 杀死原本有“尚未启动移动意图”的 Actor | phase 12 不再为其启动 reservation |
-| T-INSTANT-005 | SKILL-005, SIMULATION §17/21 | windup=0 + recovery=0 | resolve 后直接 action=idle，不创建 currentTick recovery event；startedActionActors 仍阻止本 Tick第二 Action |
+| T-INSTANT-005 | SKILL-005, SIMULATION §17/22 | windup=0 + recovery=0 | resolve 后直接 action=idle，不创建 currentTick recovery event；startedActionActors 仍阻止本 Tick第二 Action |
 
 ## 7. Hit / Protection / Recovery
 
@@ -161,6 +169,9 @@
 | T-DEC-017 | STATE-006, SIMULATION §9/11/17 | skill 在 phase 10 materialize 当前 Plan 最后 intent 并进入 windup/recovery lifecycle | 当前 Tick可用 prefetch_after_materialize 发起 next Decision；不等同于无 Action 的 plan_exhausted |
 | T-DEC-018 | STATE-006, SIMULATION §17/20 | final move intent 在 phase 13 reservation成功并 move_start | phase 13 才清空 activePlan并可发 next Decision；reservation失败则不走 prefetch_after_materialize，而按 plan_failed 最早下一 Tick重决策 |
 | T-DEC-019 | PLAN-009, TURN-001 | pure turn 是当前 Plan 最后 intent | turn 同 Tick完成，不做 prefetch_after_materialize；最早下一 Tick创建新 generation |
+| T-DEC-020 | CONTRACTS §16 | DecisionPort resolve 的 requestId/generation 与 expected 不一致 | protocol invariant；Runtime cleanup并 reject run()，不变成 Plan reject/BattleResult |
+| T-DEC-021 | CONTRACTS §16 | DecisionPort Promise reject 或同步 throw | 预期provider失败未按Completion.failed归一化，视为adapter/programmer invariant；Runtime捕获cleanup并 reject run()，无 unhandled rejection |
+| T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
 
 ## 9. Control Plane / Replay
 
@@ -169,23 +180,23 @@
 | T-CTRL-001 | CTRL-001 | 两个 Tick 之间 Frame abort | 立即失效 authority，不等下个 Tick |
 | T-CTRL-002 | CTRL-001 | Battle cancel 后 Promise/LLM 返回 | 不得修改结束 Battle |
 | T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
-| T-CTRL-004 | RESULT-001, SIMULATION §23 | Presentation 抛 CONTENT_FAILED / COMMIT_FAILED | Runtime cleanup，run() 返回 failure source=presentation；INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA 走 programmer/invariant throw/reject |
+| T-CTRL-004 | RESULT-001, SIMULATION §24 | Presentation 抛 CONTENT_FAILED / COMMIT_FAILED | Runtime cleanup，run() 返回 failure source=presentation；INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA 走 programmer/invariant throw/reject |
 | T-CTRL-005 | RESULT-001 | Presentation resize timer/internal callback 出现已分类 async fatal | Presentation 立即 cleanup 并只完成一次 `failure` channel；Runtime 观察后停止 authority并归约为 Battle failure；不得成为 unhandled callback exception |
-| T-CTRL-006 | SIMULATION §23 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
-| T-CTRL-007 | SIMULATION §23/27 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
+| T-CTRL-006 | SIMULATION §24 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
+| T-CTRL-007 | SIMULATION §24/28 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
 | T-CTRL-008 | SIMULATION §4 | CREATED 调 pause/resume 或第二次 run | programmer error；close 幂等；RUNNING重复 resume / PAUSED重复 pause 为 no-op |
 | T-CTRL-009 | SIMULATION §4 | SETTLED 后 cancel，再 close 两次 | cancel no-op；第一次 close→CLOSED并清理Presentation，第二次 close no-op |
-| T-CTRL-010 | SIMULATION §5/27 | presentation.initialize 尚未返回时 async failure 或 cancel 先终止 session | initialize 后续返回不得继续 initial render / initial Decision / scheduler start；run() 保持已commit终止结果 |
-| T-CTRL-011 | SIMULATION §6/27 | battle.pause()/resume() 调用 Presentation 时同步 classified fatal | Runtime 捕获并通过 terminal arbiter归约为 presentation failure；不得同时向调用方抛同义业务错误 |
-| T-CTRL-012 | SIMULATION §16/17/23 | phase 7 已产生 redecision need，但 phase 8 terminal gate 随后结束 Battle | 不调用 DecisionPort；terminal suppress 同 Tick尚未发出的 Decision commands |
-| T-CTRL-013 | SIMULATION §16/23 | 非 terminal Tick reducer输出 Decision command，但 presentation.render 同步 fatal | 先归约 presentation failure并 suppress Decision command；provider 不收到新 request |
-| T-CTRL-014 | SIMULATION §23 | Presentation抛 INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA | 视为 Runtime/contract invariant或programmer error，throw/reject；不包装成 BattleResult.failure |
+| T-CTRL-010 | SIMULATION §5/28 | presentation.initialize 尚未返回时 async failure 或 cancel 先终止 session | initialize 后续返回不得继续 initial render / initial Decision / scheduler start；run() 保持已commit终止结果 |
+| T-CTRL-011 | SIMULATION §6/28 | battle.pause()/resume() 调用 Presentation 时同步 classified fatal | Runtime 捕获并通过 terminal arbiter归约为 presentation failure；不得同时向调用方抛同义业务错误 |
+| T-CTRL-012 | SIMULATION §16/17/24 | phase 7 已产生 redecision need，但 phase 8 terminal gate 随后结束 Battle | 不调用 DecisionPort；terminal suppress 同 Tick尚未发出的 Decision commands |
+| T-CTRL-013 | SIMULATION §16/24 | 非 terminal Tick reducer输出 Decision command，但 presentation.render 同步 fatal | 先归约 presentation failure并 suppress Decision command；provider 不收到新 request |
+| T-CTRL-014 | SIMULATION §24 | Presentation抛 INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA | 视为 Runtime/contract invariant或programmer error，throw/reject；不包装成 BattleResult.failure |
 | T-CTRL-015 | SIMULATION §6/7 | currentTick/ID counter 下一次递增将超出 safe integer | 在溢出前停止 authority，BattleResult=failure source=simulation code=BATTLE_COUNTER_OVERFLOW；不得 wrap/继续 |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
-| T-REPLAY-004 | SIMULATION §25/26 | live run记录completion consumedTick，随后Replay | Replay从record.initial的ResolvedBattleDefinition重建，按recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
-| T-REPLAY-005 | SIMULATION §26 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
+| T-REPLAY-004 | SIMULATION §26/27 | live run记录completion consumedTick，随后Replay | Replay从record.initial的ResolvedBattleDefinition重建，按recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
+| T-REPLAY-005 | SIMULATION §27 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
 
 ## 10. Presentation
 
@@ -223,7 +234,7 @@
 | T-PRES-030 | ARCH-003, ARCH-005 | synthetic Scene/Projection 驱动真实 BattlePresentationHandler | Handler 自建 RenderDomain，数据经 RenderManager → renderer-data → RendererRenderStore → WebProjector 到 lr-battle DOM；movement/effect/resize/close 可见 |
 | T-PRES-031 | ARCH-003 | package build 后通过 Browser/HTTP 加载 Battle CSS | `dist/browser/battle.css` 存在、package export 正确、请求非 404 |
 | T-PRES-032 | ARCH-003 | first full state 与 later update 分别做 capacity preflight | full state 使用 16384 node count；update 使用 4096 node operations并检查 prospective state；两者不混用 |
-| T-PRES-033 | SIMULATION §22 | scheduler late wake catch-up Tick 11/12/13/14 | Simulation依次 render 4份 Projection；不dirty-coalesce，effectStarts/motion facts不丢 |
+| T-PRES-033 | SIMULATION §23 | scheduler late wake catch-up Tick 11/12/13/14 | Simulation依次 render 4份 Projection；不dirty-coalesce，effectStarts/motion facts不丢 |
 
 
 ## 11. Result / Termination
