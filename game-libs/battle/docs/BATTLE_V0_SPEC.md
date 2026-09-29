@@ -346,8 +346,9 @@ PlanSubmission
 
 规则：
 
-- `path` 只包含未来目的格，不包含 Actor 当前格；
-- 只允许上下左右四方向，每一步 Manhattan distance = 1；
+- `path` 只包含 future destination，不重复该 Decision Request 的 `planningOrigin`；
+- path 第一格必须与 `planningOrigin` Manhattan distance = 1；后续每一步也必须上下左右四方向相邻；
+- moving prefetch 时 `planningOrigin` 可以是 active move destination，而 Observation 的 committed tile 仍是 origin；因此 future path 可以合法走回旧 committed origin。
 - `path.length <= PlanConstraints.maxPathSteps`；
 - `turn` 只表达**原地转向**，因此出现 `turn` 时 `path` 必须为空；
 - `path: []`、无 turn、无 skill = hold/reobserve；
@@ -368,7 +369,7 @@ Simulation 在提交时校验：
 
 - path 长度；
 - 坐标为整数且不越界；
-- 四方向邻接；
+- 从 `DecisionRequest.planningOrigin` 开始的四方向邻接；
 - 静态地形可通行；
 - `turn` 必须是合法 Direction，且不能与非空 path 同时出现；
 - skill 属于 Actor；
