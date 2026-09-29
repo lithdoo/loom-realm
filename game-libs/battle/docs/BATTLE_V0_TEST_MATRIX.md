@@ -155,7 +155,8 @@
 | T-DEC-014 | DEC-004 | DecisionCompletion.failed(category=session_fatal) | 进入 Runtime terminal arbiter，BattleResult=failure source=decision |
 | T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
 | T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
-| T-DEC-017 | STATE-006, SIMULATION §9/11/17 | skill/turn 在 phase 10 materialize 当前 Plan 最后 intent | 当前 Tick可用 prefetch_after_materialize 发起 next Decision；不等同于无 Action 的 plan_exhausted |
+| T-DEC-017 | STATE-006, SIMULATION §9/11/17 | skill 在 phase 10 materialize 当前 Plan 最后 intent 并进入 windup/recovery lifecycle | 当前 Tick可用 prefetch_after_materialize 发起 next Decision；不等同于无 Action 的 plan_exhausted |
+| T-DEC-019 | PLAN-009, TURN-001 | pure turn 是当前 Plan 最后 intent | turn 同 Tick完成，不做 prefetch_after_materialize；最早下一 Tick创建新 generation |
 | T-DEC-018 | STATE-006, SIMULATION §17/20 | final move intent 在 phase 13 reservation成功并 move_start | phase 13 才清空 activePlan并可发 next Decision；reservation失败则不走 prefetch_after_materialize，而按 plan_failed 最早下一 Tick重决策 |
 
 ## 9. Control Plane / Replay
