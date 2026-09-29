@@ -391,6 +391,31 @@ type ActorRuntimeState = {
 }
 ```
 
+初始 authoritative values 固定：
+
+```text
+currentTick = 0
+result = null
+reservations = empty
+
+per actor:
+  hp = maxHp
+  action = idle
+  decision = none
+  activePlan = null
+  pendingPlan = null
+  protectedUntilTickExclusive = 0
+  actionGeneration = 0
+  decisionGeneration = 0
+  nextMotionId = 1
+
+battle counters:
+  nextPlanId = 1
+  nextRequestId = 1
+  nextEventId = 1
+  nextEffectOccurrenceId = 1
+```
+
 ID allocation固定使用 session-local monotonic counters，不使用随机 UUID：
 
 ```text
@@ -1009,11 +1034,7 @@ Replay exact v0 schema：
 ```ts
 type ReplayRecord = {
   version: 1
-  initial: {
-    battleId: string
-    definitionFingerprint: string
-    battleSeed: string | number
-  }
+  initial: ResolvedBattleDefinition
 
   decisions: readonly ReplayDecisionRecord[]
   ticks: readonly ReplayTickRecord[]
@@ -1101,7 +1122,7 @@ type ReplayProtectionFact = {
 
 不记录真实 Decision completion timestamp。Replay arrays 按产生 Tick、再按 actorId / effectId 等稳定 identity 写入，不以 Map insertion order 或 Promise order作为序列化权威。
 
-`definitionFingerprint` 验证Replay使用相同resolved gameplay definition；fingerprint算法是 Replay container integrity detail，可以在实现中采用版本化 canonical serialization，不参与 gameplay裁决。
+`initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
 
 
 ## 26. Replay execution
@@ -1111,7 +1132,7 @@ Replay不得实现第二套Battle规则。
 ReplayDriver：
 
 ```text
-same BattleState
+record.initial → same initial BattleState
 same ScheduledEventQueue
 same processTick()
 same Plan validation/execution
@@ -1119,7 +1140,7 @@ same seeded contention
 different Decision input source
 ```
 
-按 `ReplayDecisionRecord.consumedTick` 在对应 Tick snapshot注入recorded completion，不调用真实 DecisionPort。
+Replay必须从 `record.initial` 重建 Runtime state。按 `ReplayDecisionRecord.consumedTick` 在对应 Tick snapshot注入recorded completion，不调用真实 DecisionPort；同时校验 reducer重新生成的 actorId/generation/requestId/requestTick 与recorded request facts一致，不一致即 Replay invariant failure。
 
 seeded contention在Replay中必须重新计算并与recorded fact比较；不直接把recorded winner当authority。若不一致，属于Replay invariant failure。
 
