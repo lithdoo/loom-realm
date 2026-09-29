@@ -1167,6 +1167,11 @@ type ReplayMovementFact =
       tile: GridPosition
       reason: "blocked" | "occupied" | "contested" | "swap_forbidden"
     }
+  | {
+      type: "move_interrupted"
+      actorId: ActorId
+      reason: "damaging_hit"
+    }
 
 type ReplaySkillFact = {
   effectId: string
@@ -1314,9 +1319,7 @@ request AbortController/handle 属 Runtime shell async bookkeeping，不属于 B
 
 Abort不是 correctness fence：provider可以忽略signal，late completion仍必须靠 lifecycle + requestId + generation fencing失去提交权。正常 Promise settle后abort handle立即移除。
 
-Runtime处理 `request_decision`：
-
-Runtime处理 `request_decision`：
+Runtime处理 `request_decision` 的 settle path：
 
 ```text
 decision.decide(request, requestScopedSignal)
