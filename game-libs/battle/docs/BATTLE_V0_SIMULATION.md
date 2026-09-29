@@ -93,8 +93,11 @@ Canonical package export：
 ```ts
 import {
   BattleSimulationBuilder,
+  BattleReplayBuilder,
   type BattleRuntime,
   type BattleClock,
+  type ResolvedBattleDefinition,
+  type ReplayRecord,
 } from "@loomrealm-game/battle/simulation"
 ```
 
@@ -112,9 +115,20 @@ class BattleSimulationBuilder {
   constructor(dependencies: BattleSimulationDependencies)
   build(definition: ResolvedBattleDefinition): BattleRuntime
 }
+
+type BattleReplayDependencies = {
+  clock: BattleClock
+  signal: AbortSignal
+  presentation: PresentationPort
+}
+
+class BattleReplayBuilder {
+  constructor(dependencies: BattleReplayDependencies)
+  build(record: ReplayRecord): BattleRuntime
+}
 ```
 
-Builder 是 one-shot：同一 Builder 只能成功 `build()` 一次；重复 successful build 属 programmer error。validation失败不消耗 Builder，允许修正 definition 后再次 build。构造/Build 阶段只做 dependency presence + resolved definition validation，不启动 clock、不调用 Decision/Presentation、不监听 gameplay Tick。
+BattleSimulationBuilder / BattleReplayBuilder 都是 one-shot：同一 Builder 只能成功 `build()` 一次；重复 successful build 属 programmer error。validation失败不消耗 Builder。ReplayBuilder 不接受 DecisionPort，也不得在 replay run 中调用真实 Decision。构造/Build 阶段只做 dependency presence + resolved definition validation，不启动 clock、不调用 Decision/Presentation、不监听 gameplay Tick。
 
 外部 `AbortSignal` 的 active authority 从 `run()` 开始：
 
@@ -507,6 +521,7 @@ type DecisionState =
       requestId: string
       attempt: 0 | 1
       requestTick: number
+      planningOrigin: GridPosition
     }
 ```
 
@@ -540,21 +555,38 @@ reason 对 earliest eligible Tick 的映射固定：
 4. active Plan 不再拥有未 materialize future intent；
 5. 当前 Tick 已到达该 redecision 的 earliest eligible Tick。
 
-创建时：
+创建时先捕获 request-scoped planning origin：
+
+```text
+if reason == prefetch_after_materialize && action.type == moving:
+  planningOrigin = action.to
+else:
+  planningOrigin = actor.tile
+```
+
+然后：
 
 ```text
 decisionGeneration++
 requestId = nextRequestId++
-decision = thinking(generation, requestId, attempt=0, requestTick=currentTick)
-emit RequestDecisionCommand
+decision = thinking(
+  generation,
+  requestId,
+  attempt=0,
+  requestTick=currentTick,
+  planningOrigin,
+)
+emit RequestDecisionCommand(planningOrigin)
 ```
+
+Plan path 的第一步 adjacency/static-terrain validation 从 `planningOrigin` 开始，而不是从 completion 消费时的 `actor.tile` 重新选择起点。
 
 同 generation 的 correction：
 
 - generation不变；
 - requestId必须新建；
 - attempt = 1；
-- correction request 可以在 phase 9当前 Tick发出；
+- correction request 可以在 phase 9当前 Tick发出，并继承 attempt=0 的同一 `planningOrigin`；
 - completion只入 Inbox，不能重入当前 Tick；
 - attempt=1再次非法或 attempt failure 后，当前 generation结束，Actor保持无 active/pending Plan；最早下一 Tick才允许新 generation。
 
@@ -583,6 +615,7 @@ Decision返回的 `PlanSubmission` 通过 validation后必须复制/规范化成
 type AcceptedPlan = {
   readonly planId: string
   readonly decisionGeneration: number
+  readonly planningOrigin: GridPosition
 
   readonly turn?: Direction
   readonly path: readonly GridPosition[]
@@ -643,6 +676,8 @@ and actor is eligible to progress a plan:
 
 promotion **不等于立即 Action start**；promoted Plan仍按最新 state重新检查 protection、target、range、occupancy/reservation/lifecycle。
 
+对于 moving-prefetch pending Plan，promotion 前必须满足 `actor.tile === pendingPlan.planningOrigin`。正常路径中 move interruption/damaging hit 会提前 invalidate 该 pending Plan，因此出现 valid pending authority 但 committed tile 与 planningOrigin 不一致属于 Runtime invariant，不重新解释 path origin。
+
 ## 13. Plan exhaustion, hold and redecision
 
 所有 Plan出口必须有明确后续：
@@ -651,7 +686,9 @@ promotion **不等于立即 Action start**；promoted Plan仍按最新 state重�
 - move-only path耗尽 → plan exhausted；
 - path耗尽仍未达到 minCoefficient → plan exhausted；
 - skill intent被 materialize → 原 Plan future intent exhausted；
-- contested / blocked / target invalid / plan meaningless → plan failed；
+- move execution 的 `blocked / occupied / reserved / contested / swap_forbidden` → plan failed；
+- 尚未 materialize skill windup 前，target 不再满足“存在、非 self、敌对、alive” → `target_invalid` plan failed；
+- 不存在额外的 `plan meaningless` catch-all；无法归入上述、plan exhausted、damaging interruption 或 authority stale 的状态属于 Runtime invariant。
 - damaging hit → plan invalidated；
 - hold/reobserve（空 path、无 turn、无 skill）→ 本 Tick立即 exhausted，但不启动 Action。
 
@@ -663,7 +700,7 @@ promotion **不等于立即 Action start**；promoted Plan仍按最新 state重�
 
 ## 14. Scheduled events
 
-Core event union必须 exact，不使用 `payload?: unknown`：
+Core event union必须 exact，不使用 `payload?: unknown`。它是 Simulation internal type，不从 root `battle/contracts` export：
 
 ```ts
 type BattleEvent =
@@ -842,7 +879,10 @@ else
 - path future dynamic occupancy不在 Plan acceptance时保证；
 - MovementIntent在phase 13争格成功后才变成 `ActionState.moving`；
 - SkillIntent开始后剩余path放弃；
-- plan failure记录reason并按 §13安排后续redecision。
+- skill target eligibility exact predicate：target actor存在、`targetActorId !== actor.actorId`、`target.team !== actor.team`、`target.hp > 0` 且 `target.action.type !== "dead"`；
+- 该 predicate 在 submission validation 与每次尚未 materialize skill windup 的 Plan advancement时都检查；失败时结束 Plan为 `target_invalid`，不启动 windup；
+- windup已经 materialize 后不再把 target变化解释成 Plan failure；resolve 时由 HIT-001 得到 hit/immune/miss/invalid。若 target 当时 dead/不存在，则 outcome=invalid、0 damage，并按该 Skill 的 recovery rule结束此 Action（若 Battle terminal gate 已先结束 session，则不会继续启动 gameplay）；
+- plan failure记录 exact reason并按 §13安排后续redecision。
 
 ## 19. Seeded contention function
 
@@ -914,6 +954,17 @@ type Reservation = {
 ```
 
 `reservations` 是 tile-global authority index；moving action中的 `to` 是动作payload，不单独拥有tile reservation authority。
+
+phase 13 movement failure taxonomy 与判定优先级固定。对已通过 lifecycle/generation fence 的 MoveIntent：
+
+1. `blocked`：destination 越界或静态 `passable=false`；
+2. `swap_forbidden`：两个 surviving intents 恰好互相以对方 committed origin 为 destination；在普通 occupied 检查前识别，因此 direct swap 记录该 reason；
+3. `occupied`：destination 当前被另一个 Actor 的 committed tile 占用；即使该 Actor 本 Tick也想离开，move_complete 前 origin 仍占用；
+4. `reserved`：destination 已存在由更早 active movement 持有的 reservation；
+5. `contested`：通过以上检查后，本 phase 有多个新 intents 申请同一原本 free/unreserved destination；seeded winner成功，其余失败；
+6. 其余单一申请成功。
+
+同一 MoveIntent只记录第一个命中的 reason。stale/dead/terminal intent 在进入此 taxonomy 前被 fence，不产生 move_failed。
 
 move_start成功：
 
@@ -1073,7 +1124,7 @@ Programmer error/invariant violation不伪装成业务 `BattleResult.failure`，
 
 `getSnapshot()` 返回 detached immutable value，不暴露Runtime mutable reference。
 
-ActorSnapshot / ReservationSnapshot exact public fields 见 Contracts。Public Snapshot只包含跨层/诊断有用facts：
+ActorSnapshot / ReservationSnapshot exact public fields及 ordinal-sorted readonly-array collection shape 见 Contracts。Public Snapshot只包含跨层/诊断有用facts：
 
 ```text
 battleId
@@ -1111,6 +1162,17 @@ type ReplayRecord = {
 
   decisions: readonly ReplayDecisionRecord[]
   ticks: readonly ReplayTickRecord[]
+
+  replayability:
+    | { type: "in_progress" }
+    | { type: "deterministic" }
+    | {
+        type: "audit_only"
+        reason:
+          | "cancelled"
+          | "presentation_failure"
+          | "invariant_rejection"
+      }
 
   result?: BattleResult
 }
@@ -1165,7 +1227,7 @@ type ReplayMovementFact =
       type: "move_failed"
       actorId: ActorId
       tile: GridPosition
-      reason: "blocked" | "occupied" | "contested" | "swap_forbidden"
+      reason: "blocked" | "occupied" | "reserved" | "contested" | "swap_forbidden"
     }
   | {
       type: "move_interrupted"
@@ -1198,6 +1260,16 @@ type ReplayProtectionFact = {
 }
 ```
 
+Replay terminal scope：
+
+- active Runtime：`replayability = in_progress`；
+- normal win/defeat/simultaneous defeat、recorded Decision `session_fatal`、deterministic Simulation failure：terminal 后为 `deterministic`；
+- external `cancel()` / pre-aborted signal：`audit_only(cancelled)`；
+- Presentation infrastructure failure：`audit_only(presentation_failure)`；
+- programmer/invariant rejection：`audit_only(invariant_rejection)` 且没有业务 `result`。
+
+ReplayDriver只接受 `replayability.type === "deterministic"`。对于 `in_progress/audit_only` record 必须明确拒绝 deterministic replay；这些 records 只用于 prefix/audit inspection，不伪造 external terminal 的发生 Tick/phase。
+
 不记录真实 Decision completion timestamp。Replay arrays 按产生 Tick、再按 actorId / effectId 等稳定 identity 写入，不以 Map insertion order 或 Promise order作为序列化权威。
 
 `initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
@@ -1206,6 +1278,8 @@ type ReplayProtectionFact = {
 ## 27. Replay execution
 
 Replay不得实现第二套Battle规则。
+
+Replay public entrypoint 是 `BattleReplayBuilder.build(record)`。它先要求 `record.replayability.type === "deterministic"`，然后构造同一个 `BattleRuntime` core，只把 Decision input source换成 recorded input。
 
 ReplayDriver：
 
@@ -1367,7 +1441,77 @@ Simulation qualification必须提供：
 11. cancel/fatal后late work无提交权；
 12. terminal result最多commit一次。
 
-## 32. FROZEN FOR IMPLEMENTATION gate
+## 32. Agent execution contract / Definition of Done
+
+Implementation agent 按以下顺序落地，不重新设计边界：
+
+```text
+1. shared contracts.ts
+   - Decision-facing frozen contracts
+   - Snapshot/Result/Projection shared types + validators
+
+2. simulation.ts public entry
+   - BattleSimulationBuilder
+   - BattleReplayBuilder
+   - ./simulation package export
+
+3. simulation/state.ts
+   - ResolvedBattleDefinition validator/copy
+   - Battle/Actor/Action/Decision/AcceptedPlan state
+
+4. simulation/queues.ts
+   - DecisionInbox
+   - ScheduledEventQueue
+
+5. simulation/plan.ts
+   - Observation builder
+   - PlanConstraints
+   - Plan structural/semantic validation
+   - planningOrigin/correction/prefetch
+   - advancePlan
+
+6. simulation/combat.ts
+   - range rotation/coefficient
+   - movement taxonomy/contention/reservations
+   - skill/damage/protection
+
+7. simulation/tick.ts
+   - exact TICK-001 14-stage transaction
+   - stable ordering + commands/facts/projection
+
+8. simulation/replay.ts
+   - recorder
+   - recorded Decision source
+   - deterministic-only ReplayBuilder path
+
+9. simulation/runtime.ts
+   - clock/scheduler/pause/resume
+   - request-scoped abort
+   - Presentation bridge
+   - terminal arbiter/invariant rejection
+
+10. qualification
+   - reducer/scheduler/Decision race/lifecycle/Replay/Presentation integration tests
+```
+
+Definition of Done：
+
+- `npm run build:battle` passes；
+- `npm test -w @loomrealm-game/battle` passes；
+- `npm run test:battle` passes from repo root；
+- `npm pack -w @loomrealm-game/battle --dry-run` includes `dist/simulation.js` / `dist/simulation.d.ts` and package `./simulation` export resolves；
+- all Simulation rows in `BATTLE_V0_TEST_MATRIX.md` that do not require real provider/Host wiring have executable automated coverage；
+- FakeClock tests never depend on real sleep/timer drift；
+- no gameplay path uses `Date.now()`, `Math.random()`, Browser animation ACK, Map Runtime state, or public `tick()`；
+- Decision callback never mutates gameplay state；
+- deterministic live→Replay qualification matches final result/snapshot/gameplay Projection sequence；
+- external cancel/Presentation/invariant records are correctly marked audit-only；
+- existing Presentation qualification remains green and its ABI is unchanged；
+- no remaining implementation TODO may change public ABI, Tick ordering, authority owner, failure classification, replayability scope or deterministic ordering.
+
+Agent may choose local helper names/data structures only where本文明确标为 internal representation freedom；如果测试/实现发现 frozen documents互相冲突，应停止并报告冲突，而不是自行选择一套新语义。
+
+## 33. FROZEN FOR IMPLEMENTATION gate
 
 Simulation可以标为 FROZEN FOR IMPLEMENTATION，因为以下 blocking choice已有唯一答案：
 
