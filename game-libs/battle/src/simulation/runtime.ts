@@ -339,7 +339,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
     for (const command of commands) {
       if (this.#state.status !== "running" && this.#state.status !== "initializing") return;
       const actor = this.#state.actors.get(command.request.actorId);
-      if (actor?.decision.type !== "thinking"
+      if (actor === undefined || actor.hp <= 0 || actor.action.type === "dead" || actor.decision.type !== "thinking"
         || actor.decision.requestId !== command.request.requestId
         || actor.decision.generation !== command.request.generation) continue;
       this.#requestFacts.set(command.request.requestId, command.request);

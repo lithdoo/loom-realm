@@ -117,6 +117,17 @@ function result(value: unknown): void {
   id(failure.code, "Replay failure code");
 }
 
+function deterministicResult(value: unknown, decisions: readonly ReplayDecisionRecord[]): void {
+  const item = value as Record<string, unknown>;
+  if (item.type === "ally_win" || item.type === "enemy_win" || item.type === "simultaneous_defeat") return;
+  if (item.type === "failure" && item.source === "simulation"
+    && (item.code === "BATTLE_COUNTER_OVERFLOW" || item.code === "BATTLE_NUMERIC_OVERFLOW")) return;
+  if (item.type === "failure" && item.source === "decision" && decisions.some((decision) => decision.completion.type === "failed"
+    && decision.completion.category === "session_fatal" && decision.completion.code === item.code
+    && decision.consumeOutcome.type === "session_fatal")) return;
+  throw new TypeError("Deterministic Replay result is not replayable");
+}
+
 function validateDecision(value: unknown, index: number, tickSet: ReadonlySet<number>): string {
   const label = `Replay decisions[${index}]`;
   const item = record(value, [
@@ -228,6 +239,7 @@ export function validateReplayRecord(value: unknown): ReplayRecord {
     if (consumedTick < lastConsumedTick) throw new TypeError("Replay decisions must be ordered by consumedTick");
     lastConsumedTick = consumedTick;
   }
+  deterministicResult(item.result, item.decisions as ReplayDecisionRecord[]);
   return structuredClone(value) as ReplayRecord;
 }
 

@@ -10,7 +10,7 @@ import { NullPresentation, RecordingPresentation } from "../dist/presentation.js
 import { coefficientAt, contentionWinner } from "../dist/simulation/combat.js";
 import { takeCounter } from "../dist/simulation/numeric.js";
 import { createInitialState } from "../dist/simulation/state.js";
-import { validatePlan } from "../dist/simulation/plan.js";
+import { buildObservation, validatePlan } from "../dist/simulation/plan.js";
 
 class FakeBattleClock {
   now = 0;
@@ -166,6 +166,23 @@ test("scheduler waits for 200ms and late wake emits every catch-up Projection", 
   assert.equal(runtime.getSnapshot().currentTick, 4);
   assert.deepEqual(presentation.projections.map((item) => item.tick), [0, 1, 2, 3, 4]);
   runtime.cancel();
+});
+
+test("wake loop recomputes elapsed time when Tick processing crosses another deadline", async () => {
+  const clock = new FakeBattleClock();
+  const presentation = new RecordingPresentation();
+  const baseRender = presentation.render.bind(presentation);
+  presentation.render = (projection) => {
+    baseRender(projection);
+    if (projection.tick === 1) clock.advance(200);
+  };
+  const live = runtimeFor(definition(), new DeferredDecision(), { clock, presentation });
+  const run = live.runtime.run(); await flush();
+  clock.advance(200);
+  assert.equal(live.runtime.getSnapshot().currentTick, 2);
+  assert.deepEqual(presentation.projections.map((projection) => projection.tick), [0, 1, 2]);
+  live.runtime.cancel();
+  assert.deepEqual(await run, { type: "cancelled" });
 });
 
 test("pause freezes logical time and queued Decision until resume", async () => {
@@ -770,6 +787,26 @@ test("counter allocation fails before exceeding the safe-integer domain", () => 
   assert.equal(holder.next, Number.MAX_SAFE_INTEGER);
 });
 
+test("Observation recentEvents is a two-Tick window and idle Battles do not auto-stalemate", async () => {
+  const resolved = validateResolvedBattleDefinition(definition());
+  const state = createInitialState(resolved);
+  state.currentTick = 4;
+  const replayTicks = [1, 2, 3, 4].map((tick) => ({
+    tick,
+    movements: [{ type: "move_failed", actorId: "a", tile: point(2, 3), reason: "blocked" }],
+    skills: [], damage: [], protections: [],
+  }));
+  assert.deepEqual(buildObservation(resolved, state, "a", replayTicks).recentEvents.map((event) => event.tick), [3, 4]);
+
+  const live = runtimeFor(definition(), new DeferredDecision());
+  const run = live.runtime.run(); await flush();
+  live.clock.jump(4_000);
+  assert.equal(live.runtime.getSnapshot().currentTick, 20);
+  assert.equal(live.runtime.getSnapshot().status, "running");
+  live.runtime.cancel();
+  assert.deepEqual(await run, { type: "cancelled" });
+});
+
 async function deterministicContentionRecord() {
   const base = definition();
   const def = definition({ moveTicks: 1, actors: [
@@ -801,6 +838,17 @@ test("Replay rejects duplicate IDs/ticks, malformed facts, tail facts, and tampe
   const malformed = structuredClone(record);
   malformed.ticks[0].movements[0].actorId = 42;
   assert.throws(() => new BattleReplayBuilder(dependencies()).build(malformed));
+
+  for (const invalidResult of [
+    { type: "cancelled" },
+    { type: "failure", source: "presentation", code: "PRESENTATION_COMMIT_FAILED" },
+    { type: "failure", source: "decision", code: "UNMATCHED_SESSION_FATAL" },
+    { type: "failure", source: "simulation", code: "NON_DETERMINISTIC_FAILURE" },
+  ]) {
+    const invalidScope = structuredClone(record);
+    invalidScope.result = invalidResult;
+    assert.throws(() => new BattleReplayBuilder(dependencies()).build(invalidScope), /not replayable/);
+  }
 
   const tail = structuredClone(record);
   tail.ticks.push({ tick: tail.ticks.length + 1, movements: [], skills: [], damage: [], protections: [] });
