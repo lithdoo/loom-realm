@@ -19,7 +19,7 @@
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 | T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
 | T-ARCH-011 | SIMULATION §5 | Runtime run() 初始化 | arm presentation.failure → initialize → initial tick-0 Projection → initial Decision requests(requestTick=0) → start clock，顺序固定 |
-| T-ARCH-012 | SIMULATION §16/27 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
+| T-ARCH-012 | SIMULATION §16/28 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
 | T-ARCH-013 | SIMULATION §3 | headless Simulation 构造 | 只依赖 ResolvedBattleDefinition + narrow capabilities，不需要 ContentClient/SubsystemScope/Frame |
 | T-ARCH-014 | CONTRACTS §5, SIMULATION §3 | moveTicks=0 或任一 timing 为负数 | validator reject；v0 movement 至少 1 Tick，windup/recovery/protection 可为 0 但不可为负 |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
@@ -41,7 +41,7 @@
 | T-TIME-010 | DEC-001, REPLAY-001 | 两次真实运行的 LLM wall-clock latency 不同，但 Replay 记录相同 consumed/accepted Tick | Replay 不依赖 completion timestamp，不重新调用 LLM，按记录 Tick 复现 Plan 生效 |
 | T-TIME-011 | SIMULATION §6 | FakeClock 从 0 advance 199ms / 200ms | 199ms 不处理 Tick；200ms 恰好处理 Tick 1 |
 | T-TIME-012 | SIMULATION §6 | RUNNING 到 350ms pause，现实暂停 30s 后 resume | logical elapsed 保留350ms；暂停30s不计入，恢复后再累计到400ms才处理 Tick 2 |
-| T-TIME-013 | SIMULATION §6/26 | scheduler wake 与 pause 同时竞争 | 已进入同步 Tick则完整结束后pause；pause先执行则不进入新Tick；不存在半Tick状态 |
+| T-TIME-013 | SIMULATION §6/27 | scheduler wake 与 pause 同时竞争 | 已进入同步 Tick则完整结束后pause；pause先执行则不进入新Tick；不存在半Tick状态 |
 
 ## 3. PlanSubmission
 
@@ -115,7 +115,7 @@
 | T-INSTANT-002 | STATE-004, TICK-002 | windup=0 + recovery=0 | 同 Actor 本 Tick不能启动第二个 Action |
 | T-INSTANT-003 | SKILL-005, HIT-006 | 双方同 Tick 启动致命 instant skill | 两个技能都先收集；允许 simultaneous defeat |
 | T-INSTANT-004 | TICK-001 | instant skill 杀死原本有“尚未启动移动意图”的 Actor | phase 12 不再为其启动 reservation |
-| T-INSTANT-005 | SKILL-005, SIMULATION §17/20 | windup=0 + recovery=0 | resolve 后直接 action=idle，不创建 currentTick recovery event；startedActionActors 仍阻止本 Tick第二 Action |
+| T-INSTANT-005 | SKILL-005, SIMULATION §17/21 | windup=0 + recovery=0 | resolve 后直接 action=idle，不创建 currentTick recovery event；startedActionActors 仍阻止本 Tick第二 Action |
 
 ## 7. Hit / Protection / Recovery
 
@@ -165,14 +165,14 @@
 | T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
 | T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
 | T-CTRL-005 | RESULT-001 | Presentation resize timer/internal callback 出现已分类 async fatal | Presentation 立即 cleanup 并只完成一次 `failure` channel；Runtime 观察后停止 authority并归约为 Battle failure；不得成为 unhandled callback exception |
-| T-CTRL-006 | SIMULATION §22 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
+| T-CTRL-006 | SIMULATION §23 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
 | T-CTRL-007 | SIMULATION §23/27 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
 | T-CTRL-008 | SIMULATION §4 | CREATED 调 pause/resume 或第二次 run | programmer error；close 幂等；RUNNING重复 resume / PAUSED重复 pause 为 no-op |
 | T-CTRL-009 | SIMULATION §4 | SETTLED 后 cancel，再 close 两次 | cancel no-op；第一次 close→CLOSED并清理Presentation，第二次 close no-op |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
-| T-REPLAY-004 | SIMULATION §26/26 | live run记录completion consumedTick，随后Replay | Replay在recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
+| T-REPLAY-004 | SIMULATION §25/26 | live run记录completion consumedTick，随后Replay | Replay在recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
 | T-REPLAY-005 | SIMULATION §26 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
 
 ## 10. Presentation
