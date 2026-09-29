@@ -414,7 +414,7 @@ invalid_target
 invalid_min_coefficient
 ```
 
-`stale_decision_generation / actor_not_ready` 永远不发 correction。attempt=1 任意 reject 都结束当前 generation。
+authority/lifecycle stale 不属于 PlanRejectReason，也不进入 correction；attempt=1 任意真正 Plan reject 都结束当前 generation。
 
 accepted 只表示当前可以进入 active/pending pipeline，不保证未来 path/skill 一定成功。
 
@@ -543,7 +543,7 @@ type ObservedEvent =
 - `map.passable` 是 resolved gameplay passability 的 detached readonly view，不包含 Presentation tile/sprite/camera facts；
 - moving Actor 的 `tile` 仍是 committed origin；`action.to` 只是当前 active movement目标；
 - 不暴露 `actionGeneration / decisionGeneration / requestId / Plan cursor / reservation owner` 等 Runtime fencing 细节；
-- `recentEvents` 是 deterministic bounded history：只包含 observation Tick `tick` 与 `tick - 1` 两个 Tick中产生的上述事件；按 `event.tick`、再按事件 kind固定顺序 `move_failed < move_interrupted < skill_resolved < protection_started`、再按相关 actorId ordinal稳定排序；
+- `recentEvents` 是 deterministic bounded history：只包含 observation Tick `tick` 与 `tick - 1` 两个 Tick中产生的上述事件；排序 key 固定为 `(event.tick, kindRank, primaryActorId, secondaryActorId)`，其中 kindRank 为 `move_failed=0 / move_interrupted=1 / skill_resolved=2 / protection_started=3`；move/protection 的 primaryActorId 是 actorId、secondary 为空串，skill 的 primary= casterActorId、secondary=targetActorId；字符串均按 ECMAScript ordinal 比较；
 - initial tick 0 没有 prior gameplay event，`recentEvents = []`；
 - Observation builder 不持有无界历史；这些 event 可从最近两个 ReplayTick facts/当前 Tick facts派生；
 - Optional Guidance **不属于 canonical BattleObservation**。Guidance Host/adapter 在调用真实模型前把外部 guidance 与 `DecisionRequest.observation` 组合；Simulation Core 不解析、不存储、不回放 Guidance。
