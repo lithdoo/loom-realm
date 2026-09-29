@@ -135,8 +135,8 @@ hp
 tile
 direction
 actionState
-acceptedPlanId?
-activeStep?
+activePlanId?
+pendingPlanId?
 protectedUntilTickExclusive
 actionGeneration
 decisionGeneration
@@ -764,7 +764,7 @@ finalDamage = 0
 6. 同步批量应用普通 `hit` damage。
 7. 对 `finalDamage > 0` 的目标应用 HIT-003 aftermath：包括中断 active movement、释放 reservation、失效 Action/Plan/Decision；死亡者不获得 protection 或新 Decision。
 8. 执行普通批次 terminal gate；如果 Battle 已结束，不再启动新的游戏 Action。
-9. 消费第 1 步截取的 DecisionCompletion snapshot：按 generation fencing，处理 failure，校验 Plan；合法 Plan 进入 accepted-plan queue，非法 Plan 按 PLAN-006 决定是否发起唯一 correction attempt。snapshot 之后到达的 completion 留给下一 Tick。
+9. 消费第 1 步截取的 DecisionCompletion snapshot：按 generation fencing，处理 failure，校验 Plan；合法 Plan 进入 STATE-006 的 active/pending accepted-plan pipeline，非法 Plan 按 PLAN-006 决定是否发起唯一 correction attempt。snapshot 之后到达的 completion 留给下一 Tick。
 10. 推进 existing/new plan；每 Actor 最多产生一个“新 Action 意图”。pending turn 在这里立即执行并消耗 Action 配额；skill/move 按规则产生后续意图。
 11. 收集第 10 步新启动的 `windup_ticks=0` 技能，组成一次 bounded instant-resolve batch。
 12. 用与普通技能相同的 outcome / simultaneous damage / HIT-003 aftermath / terminal 规则结算即时批次。
