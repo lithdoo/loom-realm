@@ -381,8 +381,6 @@ type PlanRejectReason =
   | "unknown_skill"
   | "invalid_target"
   | "invalid_min_coefficient"
-  | "stale_decision_generation"
-  | "actor_not_ready"
 ```
 
 不得把 dynamic execution 的 `occupied / reserved / contested / target_moved` 混入 submission reject union；这些发生在 accepted Plan执行阶段，属于 Plan failure / Replay facts。
