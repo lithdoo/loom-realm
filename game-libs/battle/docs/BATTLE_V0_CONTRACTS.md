@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**Presentation contract FROZEN FOR IMPLEMENTATION；其余 Contract 仍可含明确标注的 OPEN**。本文定义 Battle v0 canonical 数据边界；冻结表示 v0 实现不得自行改变字段语义或 ownership，不代表 TypeScript/Zod/JSON Schema 已经落地。
+> 状态：**Presentation contract FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；其余 Contract 仍可含明确标注的 OPEN**。本文定义 Battle v0 canonical 数据边界；Presentation TypeScript contract/validator 已落地，其余冻结项不自动代表全部 Simulation/Decision Schema 已实现。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
@@ -523,6 +523,21 @@ type SkillResolveResult =
 相关 Event/Replay 应携带实际 resolve coefficient（Runtime 内优先使用 normalized units）。
 
 ## 14. Presentation 数据边界
+
+PresentationPort 的 v0 surface 包含一个只读、one-shot 的异步 terminal failure channel：
+
+```ts
+interface PresentationPort {
+  readonly failure: Promise<PresentationFailure>
+  initialize(scene: BattleSceneInit): Promise<void>
+  render(projection: RenderProjection): void
+  pause(): void
+  resume(): void
+  close(): void
+}
+```
+
+`failure` 只暴露 Presentation 在 resize/resource/internal callback 中发生、无法由调用栈捕获的 terminal fatal 事实。它不决定 `BattleResult`，不授予 Browser gameplay authority；Presentation 必须立即停止自己的 visual authority 并 cleanup，Runtime 观察后负责停止 Battle authority、映射最终 `BattleResult.failure`。该 channel 每 session 最多完成一次；显式 `close()` 后不得再完成。同步 `render()/pause()/resume()` fatal 仍直接 throw，由 Runtime 的同步调用边界处理。
 
 ### 14.1 BattleSceneInit — FROZEN
 

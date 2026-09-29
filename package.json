@@ -41,6 +41,8 @@
     "test:m14:essentials-local": "npm run build:m14 && node scripts/m14-essentials-local.mjs",
     "test:m14:pr": "npm run build:m14 && node --test test/m14-boundary.test.mjs && npm run test:m14:projection && npm test -w @loomrealm-game/tile-presentation && npm test -w @loomrealm-game/map && npm test -w @loomrealm-example/essentials-v21.1 && npm run test:m14:vertical && npm run test:m14:pack",
     "test:m14": "npm run test:m13 && npm run test:m14:pr",
+    "build:battle": "npm run build -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm-game/tile-presentation -w @loomrealm-game/battle",
+    "test:battle": "npm run build:battle && npm test -w @loomrealm-game/battle",
     "build:m15": "npm run build:m14",
     "test:m15:desktop": "node --test apps/desktop/test/renderer-input-source.test.mjs apps/desktop/test/renderer-viewport-source.test.mjs apps/desktop/test/product-viewport-composition.test.mjs apps/desktop/test/loopback-renderer-control.test.mjs apps/desktop/test/product-lifecycle.test.mjs test/m15-boundary.test.mjs",
     "test:m15:hostra": "node --test --test-concurrency=1 test/m15-hostra-product.test.mjs",
