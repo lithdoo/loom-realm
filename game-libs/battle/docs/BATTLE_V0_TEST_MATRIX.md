@@ -56,7 +56,7 @@
 
 | Test ID | Rules | 场景 | Expected |
 | --- | --- | --- | --- |
-| T-PLAN-001 | PLAN-003 | Actor 在 (2,2)，path 为 (3,2),(4,2) | 合法；path 不重复当前格 |
+| T-PLAN-001 | PLAN-003 | planningOrigin=(2,2)，path 为 (3,2),(4,2) | 合法；path 不重复 planningOrigin |
 | T-PLAN-002 | PLAN-003 | 从 (2,2) 直接走 (3,3) | reject `path_not_adjacent` |
 | T-PLAN-003 | PLAN-001, PLAN-003 | 默认 maxPathSteps=6 时提交 7 步 | reject `path_too_long` |
 | T-PLAN-004 | PLAN-003 | 空 path、无 skill | hold/reobserve |
@@ -77,6 +77,7 @@
 | T-PLAN-019 | CONTRACTS §8 | attempt0 返回任一真正 PlanRejectReason | correctionAllowed=true；唯一 correction 后 attempt1 任一 reject 都结束 generation；stale authority 不进入 Plan validation |
 | T-PLAN-020 | CONTRACTS §16, SIMULATION §9/11 | Actor moving A→B，最后 move materialize 后预取 next Decision | DecisionRequest.planningOrigin=B，但 observation.self.tile=A 且 action.to=B；next Plan path 按 B 为起点校验 |
 | T-PLAN-021 | CONTRACTS §16, SIMULATION §12 | moving-prefetch Plan 已 pending，A→B 正常 complete | promotion 时 committed tile=B=planningOrigin，允许继续；若 move 被 hit 中断则 pending/Decision authority提前失效，不得从 A 解释该 path |
+| T-PLAN-024 | PLAN-003, CONTRACTS §16 | moving A→B prefetch，planningOrigin=B，next path 第一格=A | 若 B→A cardinal且静态可走则合法；旧 committed A 不作为 next Plan origin，也不因当前 self occupancy 在 submission 时拒绝 |
 | T-PLAN-022 | PLAN-005 | skill target=self / same-team / dead / unknown actor | reject invalid_target；v0 唯一合法 target 是当前存活的对方 Actor |
 | T-PLAN-023 | PLAN-007 | accepted attack Plan 尚未 windup 时 target 不再合法 | plan failed=target_invalid；不启动 windup；最早后续合法 Tick重决策 |
 
