@@ -438,7 +438,6 @@ type BattleSnapshot = {
   battleId: string
   battleEpoch: integer
   sceneEpoch: integer
-  stateVersion: integer
 
   currentTick: integer
   tickDurationMs: 200
@@ -452,7 +451,7 @@ type BattleSnapshot = {
 
 ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。
 
-BattleSnapshot 与 RenderProjection 是两类不同数据。
+BattleSnapshot 与 RenderProjection 是两类不同数据。v0 不额外公开没有明确 consumer/递增语义的 `stateVersion`；内部实现若需要诊断 revision，不得因此扩张 public Snapshot ABI。
 
 ## 11. ActorRuntimeState
 
