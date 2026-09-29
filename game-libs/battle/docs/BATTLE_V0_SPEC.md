@@ -50,7 +50,7 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 
 依赖与运行边界：
 
-- **Decision = Plan**：只根据 `BattleObservation / PlanConstraints / RecentEvents / Optional Guidance` 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
+- **Decision = Plan**：根据 Simulation 的 `BattleObservation / PlanConstraints` 与 adapter-side Optional Guidance 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
 - **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
 - **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
 - Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
@@ -320,16 +320,14 @@ Provider-specific HTTP/network/error metadata、默认 timeout 数值等仍可�
 
 ### PLAN-002 — Decision 读取 Observation + Constraints — FROZEN
 
-Decision 只读取 Simulation 提供的：
+Decision 的 gameplay input 只读取 Simulation 提供的：
 
 ```text
-BattleObservation
+BattleObservation（内含 bounded RecentEvents）
 PlanConstraints
-RecentEvents
-Optional Guidance
 ```
 
-不得直接把 Presentation DOM/Sprite/camera/动画进度当作战斗事实。
+Optional Guidance 属于 Decision adapter/Host 的外部 prompt augmentation，不进入 Simulation authoritative Observation、Replay 或 Tick state。不得直接把 Presentation DOM/Sprite/camera/动画进度当作战斗事实。
 
 ### PLAN-003 — 最小 PlanSubmission — FROZEN
 
