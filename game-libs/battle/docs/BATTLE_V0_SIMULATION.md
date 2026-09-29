@@ -98,6 +98,31 @@ import {
 } from "@loomrealm-game/battle/simulation"
 ```
 
+Builder surface 冻结：
+
+```ts
+type BattleSimulationDependencies = {
+  clock: BattleClock
+  signal: AbortSignal
+  decision: DecisionPort
+  presentation: PresentationPort
+}
+
+class BattleSimulationBuilder {
+  constructor(dependencies: BattleSimulationDependencies)
+  build(definition: ResolvedBattleDefinition): BattleRuntime
+}
+```
+
+Builder 是 one-shot：同一 Builder 只能成功 `build()` 一次；重复 build 属 programmer error。构造/Build 阶段只做 dependency presence + resolved definition validation，不启动 clock、不调用 Decision/Presentation、不监听 gameplay Tick。
+
+外部 `AbortSignal` 的 active authority 从 `run()` 开始：
+
+- `run()` 进入初始化前先检查 `signal.aborted`；若已 aborted，直接提交 `cancelled`、调用幂等 `presentation.close()`、进入 CLOSED，不执行 initialize/Decision/clock；
+- run active 后 signal abort 等价于 `cancel()`；
+- SETTLED/CLOSED 后 signal abort 不改写结果；
+- Runtime close 后移除 signal listener。
+
 实现 Simulation 时 package `exports` MUST 新增 `"./simulation"` subpath；`src/simulation.ts` 是该 subpath entry。root `@loomrealm-game/battle` 可以继续导出共享 contracts，但不得要求业务通过 Presentation concrete module 才能构造 Simulation。Decision concrete adapters 未来可独立 subpath，不阻塞本实现。
 
 ## 3. Resolved Simulation input
@@ -153,11 +178,19 @@ type ResolvedBattleSkill = {
 
 约束：
 
-- validator 必须先验证 v0 恰好 1 ally + 1 enemy、唯一 actorId、tile/direction/map bounds/passability、skill/range/timing 等；
-- `moveTicks >= 1`；`protectionTicks >= 0`；每个 skill 的 `windupTicks / recoveryTicks >= 0`；全部为整数；
+- `battleId` 为非空 Unicode scalar string；`sceneEpoch` 为正 safe integer；
+- `battleSeed` 为非空 string 或 safe integer；number/string identity 不混同；
+- `tickDurationMs === 200`；
+- `moveTicks >= 1`、`protectionTicks >= 0`、`maxPathSteps >= 0`，全部为 safe integer；
+- map `width/height >= 1` 且为 safe integer；`passable.length === height`，每行长度严格等于 width，元素只能是 boolean；
+- v0 actors 恰好两个、actorId唯一、team恰好1 ally + 1 enemy；
+- 两个 Actor 初始 committed tile 不得相同，必须在 bounds 内且 `passable[y][x] === true`；
+- Actor `maxHp >= 1` safe integer；direction必须为 2/4/6/8；character必须是合法 ResourceRef；
+- 每 Actor skillId 唯一；`baseDamage >= 0` safe integer；`windupTicks/recoveryTicks >= 0` safe integer；range遵循 SKILL-001/DAMAGE-001；effect为非空 id；
+- validator 成功后 Runtime 初始 HP = maxHp、reservations为空、action=idle、decision=none、Plan slots为空、generation/counters使用本文固定初值；
 - `passable` 是纯数据，不把 RPGMap Runtime 注入 Simulation；
 - Runtime 内 coefficient 使用 normalized integer units；
-- Simulation 负责从 resolved facts 构造 `BattleSceneInit` 与后续 `RenderProjection`。
+- Simulation 从 resolved facts 构造 `BattleSceneInit`：actors按 actorId稳定排序，`effectIds` 对所有 actor skills 的 effect 去重后按 ECMAScript ordinal string order排序；后续 `RenderProjection.actors` 同样使用稳定 actorId顺序。
 
 ## 4. Runtime public surface and lifecycle
 
@@ -219,7 +252,7 @@ Method semantics：
 
 ## 5. Initialization order
 
-`run()` 必须按以下唯一顺序启动：
+`run()` 首先激活 external AbortSignal listener并检查 pre-aborted state。pre-aborted 直接走 cancelled terminal path；否则必须按以下唯一顺序启动：
 
 ```text
 CREATED
