@@ -22,6 +22,8 @@
 | T-ARCH-012 | SIMULATION §16/28 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
 | T-ARCH-013 | SIMULATION §3 | headless Simulation 构造 | 只依赖 ResolvedBattleDefinition + narrow capabilities，不需要 ContentClient/SubsystemScope/Frame |
 | T-ARCH-014 | CONTRACTS §5, SIMULATION §3 | moveTicks=0 或任一 timing 为负数 | validator reject；v0 movement 至少 1 Tick，windup/recovery/protection 可为 0 但不可为负 |
+| T-ARCH-015 | SIMULATION §2 | package build 后 import @loomrealm-game/battle/simulation | subpath export 存在并导出 BattleSimulationBuilder/BattleRuntime/BattleClock；不依赖 Presentation concrete import |
+| T-ARCH-016 | SIMULATION §2/5 | Builder build 两次 / run 前 external signal 已 aborted | second build programmer error；pre-aborted run直接 cancelled+CLOSED，不 initialize、不请求Decision、不启动clock |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
@@ -125,7 +127,8 @@
 | T-HIT-002 | HIT-001, HIT-004 | target 在 protection 且范围内 | `immune`；0 damage、不中断、不刷新 |
 | T-HIT-003 | HIT-001 | target 在 resolve 前离开范围 | `miss`，不是 `invalid` |
 | T-HIT-004 | HIT-001 | target 已死/消失/action invalid | `invalid` |
-| T-HIT-005 | HIT-002 | Tick 10 hit 后给 3 个完整保护 Tick | 11/12/13 protected，14 normal |
+| T-HIT-005 | HIT-002 | Tick 10 hit 后 protectionTicks=3 | protectedUntilTickExclusive=14；Tick10后续阶段及11/12/13 protected，14 normal |
+| T-HIT-014 | HIT-002 | Tick 10 hit 后 protectionTicks=0 | protectedUntilTickExclusive=11；只保护Tick10后续阶段，Tick11正常 |
 | T-HIT-006 | HIT-003 | windup 中受到正 damage | windup invalid；protection set；只创建一个新 Decision generation |
 | T-HIT-007 | HIT-003, SKILL-004 | recovery 中受到正 damage | recovery 中断并进入新 Decision 流程 |
 | T-HIT-008 | HIT-004 | recovery 中收到 immune impact | recovery 继续 |
@@ -176,10 +179,12 @@
 | T-CTRL-011 | SIMULATION §6/27 | battle.pause()/resume() 调用 Presentation 时同步 classified fatal | Runtime 捕获并通过 terminal arbiter归约为 presentation failure；不得同时向调用方抛同义业务错误 |
 | T-CTRL-012 | SIMULATION §16/17/23 | phase 7 已产生 redecision need，但 phase 8 terminal gate 随后结束 Battle | 不调用 DecisionPort；terminal suppress 同 Tick尚未发出的 Decision commands |
 | T-CTRL-013 | SIMULATION §16/23 | 非 terminal Tick reducer输出 Decision command，但 presentation.render 同步 fatal | 先归约 presentation failure并 suppress Decision command；provider 不收到新 request |
+| T-CTRL-014 | SIMULATION §23 | Presentation抛 INVALID_STATE/SCENE_MISMATCH/PROJECTION_CONFLICT/INVALID_DATA | 视为 Runtime/contract invariant或programmer error，throw/reject；不包装成 BattleResult.failure |
+| T-CTRL-015 | SIMULATION §6/7 | currentTick/ID counter 下一次递增将超出 safe integer | 在溢出前停止 authority，BattleResult=failure source=simulation code=BATTLE_COUNTER_OVERFLOW；不得 wrap/继续 |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
-| T-REPLAY-004 | SIMULATION §25/26 | live run记录completion consumedTick，随后Replay | Replay在recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
+| T-REPLAY-004 | SIMULATION §25/26 | live run记录completion consumedTick，随后Replay | Replay从record.initial的ResolvedBattleDefinition重建，按recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
 | T-REPLAY-005 | SIMULATION §26 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
 
 ## 10. Presentation
