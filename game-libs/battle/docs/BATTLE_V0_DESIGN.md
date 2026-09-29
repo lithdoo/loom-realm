@@ -36,7 +36,7 @@
 - `BattleConfig`；
 - `BattleObservation`；
 - `PlanConstraints`；
-- `PlanSubmission / PlanAcceptance`；
+- `PlanSubmission / PlanConstraints / PlanRejectReason`；
 - `BattleSnapshot / BattleEvent`；
 - 已冻结的 Presentation `BattleSceneInit / RenderProjection / SkillEffectProjection / BattleEffect`；
 - Replay 数据边界；
@@ -177,7 +177,7 @@ protection      命中后的有限免疫区间
 | §8 移动 | SPEC §7 | 成为唯一 Movement 规则源 |
 | §9 技能 | SPEC §8–9；INTEGRATION §4 | 规则与视觉表现分离 |
 | §10 受击 | SPEC §9 | 与 protection/interruption 合并 |
-| §11 Tick Event Loop | SPEC §10–12；SIMULATION §16–25 | reducer 顺序仍由 SPEC 冻结；Simulation 文档冻结 transaction/scheduler/replay implementation |
+| §11 Tick Event Loop | SPEC §10–12；SIMULATION §16–27 | reducer 顺序仍由 SPEC 冻结；Simulation 文档冻结 transaction/scheduler/replay implementation |
 | §12 Guidance/Frame | INTEGRATION §7–9；SPEC CTRL-001 | 产品输入与核心 cancel 分离 |
 | §13 MVP 验收 | TEST_MATRIX；INTEGRATION §13 | 从“第二份规则”改成测试引用 |
 | §14 已冻结/待定 | SPEC §14；CONTRACTS §18；INTEGRATION §14 | OPEN 项按领域集中管理 |
