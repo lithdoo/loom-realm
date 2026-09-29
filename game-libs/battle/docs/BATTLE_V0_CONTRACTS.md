@@ -390,7 +390,7 @@ type PlanRejectReason =
   | "invalid_min_coefficient"
 ```
 
-不得把 dynamic execution 的 `occupied / reserved / contested / target_moved` 混入 submission reject union；这些发生在 accepted Plan执行阶段，属于 Plan failure / Replay facts。
+不得把 dynamic execution 的 `blocked / occupied / reserved / contested / swap_forbidden / target_invalid` 混入 submission reject union；这些发生在 accepted Plan执行阶段，属于 Plan failure / Replay facts。
 
 ## 8. Plan validation result — Simulation internal
 
