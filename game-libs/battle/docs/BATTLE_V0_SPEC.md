@@ -687,13 +687,24 @@ invalid
 protected = currentTick < protectedUntilTickExclusive
 ```
 
-例如 Tick 10 受击后获得 3 个完整保护 Tick：
+damaging hit 在 Tick `t` 存活后设置：
 
 ```text
+protectedUntilTickExclusive = t + protectionTicks + 1
+```
+
+因此受击 Tick 剩余阶段也处于 protection；`protectionTicks` 表示**受击 Tick之后**额外完整保护的 Tick 数。
+
+例如 Tick 10 受击后 `protectionTicks = 3`：
+
+```text
+Tick 10 后续阶段 protected
 Tick 11/12/13 protected
 protectedUntilTickExclusive = 14
 Tick 14 恢复正常
 ```
+
+若 `protectionTicks = 0`，只保护 Tick 10 的后续阶段，不产生额外完整保护 Tick。
 
 无需 `protection_expire` 业务事件。
 
