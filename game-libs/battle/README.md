@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Simulation FROZEN FOR IMPLEMENTATION；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Core Simulation/Decision 代码尚未实现，但 Simulation 的 blocking design choice 已在 implementation spec 中清零；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
+> 状态：**Battle v0 Simulation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Simulation 已完成 contracts、resolved-input validation、self-driven Runtime、Decision/Plan pipeline、deterministic Replay、headless acceptance 与 package export；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -92,7 +92,7 @@ Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 
 
 ```text
 Resolved Battle input/validator
-→ **按 FROZEN Simulation spec 实现 self-driven headless Simulation Runtime**
+→ **已完成：按 FROZEN Simulation spec 实现 self-driven headless Simulation Runtime**
 → DecisionPort + Mock/Script Decision
 → frozen-rule tests
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
@@ -110,4 +110,4 @@ Resolved Battle input/validator
 npm run test:battle
 ```
 
-该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle unit/Browser E2E。当前 closed-loop qualified 仍只指 Battle v0 Presentation；Simulation 已 FROZEN FOR IMPLEMENTATION，但 Core Simulation/Decision 与完整 Battle Runtime 尚未实现。
+该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle Simulation unit/acceptance 与 Presentation/Browser E2E。Battle v0 Simulation 与 Presentation 均已完成 closed-loop qualification；真实 provider、Guidance 与业务 Host composition 仍按 Integration 文档作为独立后续集成项。
