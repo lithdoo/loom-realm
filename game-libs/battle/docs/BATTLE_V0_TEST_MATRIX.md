@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core + Presentation FROZEN Acceptance Matrix；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED，Core Simulation/Decision 尚未实现**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
+> 状态：**Core gameplay FROZEN；Simulation Acceptance = FROZEN FOR IMPLEMENTATION；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Simulation/Decision 代码尚未实现**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
 >
 > 尚未冻结的真实 LLM provider、Guidance/Host wiring 不在本矩阵中被实现代码自行假设。
 
