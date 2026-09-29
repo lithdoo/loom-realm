@@ -827,8 +827,7 @@ Decision Inbox 是 Simulation internal runtime structure，不属于 Presentatio
 Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 
 ```text
-initial config/content refs
-battleSeed
+detached ResolvedBattleDefinition initial facts（含 battleSeed）
 accepted PlanSubmissions + acceptedPlanIds
 Decision request/consume/accept Tick + generation facts
 movement reservation/contention
