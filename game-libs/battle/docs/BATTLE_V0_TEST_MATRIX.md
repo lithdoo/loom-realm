@@ -18,6 +18,9 @@
 | T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 | T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
+| T-ARCH-011 | SIMULATION §5 | Runtime run() 初始化 | arm presentation.failure → initialize → initial tick-0 Projection → initial Decision requests(requestTick=0) → start clock，顺序固定 |
+| T-ARCH-012 | SIMULATION §16/27 | Tick reducer 需要新 Decision | reducer 只输出 request_decision command；DecisionPort Promise 在同步 Tick stack 外调用，callback 只 enqueue |
+| T-ARCH-013 | SIMULATION §3 | headless Simulation 构造 | 只依赖 ResolvedBattleDefinition + narrow capabilities，不需要 ContentClient/SubsystemScope/Frame |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
@@ -35,6 +38,9 @@
 | T-TIME-008 | TIME-003, TIME-004 | Battle clock 正常运行但 scheduler 晚醒 4 Tick | 仍逐 Tick catch-up；每个 Tick 独立建立 event/inbox snapshot |
 | T-TIME-009 | DEC-001, TIME-004 | Battle pause 时 LLM completion 返回并进入 inbox | pause 中不消费；resume 后第一个实际 reducer Tick 才可消费 |
 | T-TIME-010 | DEC-001, REPLAY-001 | 两次真实运行的 LLM wall-clock latency 不同，但 Replay 记录相同 consumed/accepted Tick | Replay 不依赖 completion timestamp，不重新调用 LLM，按记录 Tick 复现 Plan 生效 |
+| T-TIME-011 | SIMULATION §6 | FakeClock 从 0 advance 199ms / 200ms | 199ms 不处理 Tick；200ms 恰好处理 Tick 1 |
+| T-TIME-012 | SIMULATION §6 | RUNNING 到 350ms pause，现实暂停 30s 后 resume | logical elapsed 保留350ms；暂停30s不计入，恢复后再累计到400ms才处理 Tick 2 |
+| T-TIME-013 | SIMULATION §6/26 | scheduler wake 与 pause 同时竞争 | 已进入同步 Tick则完整结束后pause；pause先执行则不进入新Tick；不存在半Tick状态 |
 
 ## 3. PlanSubmission
 
@@ -54,6 +60,9 @@
 | T-PLAN-012 | PLAN-008 | move-only plan 途中进入技能合法格 | 不自动施法 |
 | T-PLAN-013 | PLAN-003, PLAN-005 | 同时提交 turn + 非空 path | reject `turn_with_path` |
 | T-PLAN-014 | PLAN-003 | turn 使用非法 Direction | reject `invalid_turn` |
+| T-PLAN-015 | PLAN-009 | hold/reobserve 在 Tick N 被接受 | Tick N 不启动 Action、不递归 Decision；Plan exhausted，最早 Tick N+1 创建新 generation |
+| T-PLAN-016 | PLAN-009 | move-only path 正常耗尽且无 pending Plan | 当前 Tick不零时间重决策；最早下一 Tick ensureDecision |
+| T-PLAN-017 | SIMULATION §11 | Plan path A→B→C，A→B reservation成功并 move_start | A→B intent 在 materialize 时消费，cursor 指向 C；但 B→C 仍不得在 A→B complete 前启动 |
 
 ## 4. Turn / Movement / Contention
 
@@ -77,7 +86,7 @@
 | T-MOVE-012 | MOVE-007, TICK-001 | Tick N phase 3 已成功 move_complete 到 B，随后 phase 5–7 被命中 | 伤害发生时 step 已完成，Actor 留在 B，不回滚到 A |
 | T-MOVE-013 | MOVE-006, MOVE-007 | move_start 向右后被中断 | committed tile 留 origin，但 direction 保持 right，不回滚 |
 | T-MOVE-014 | MOVE-002, PLAN-007 | path A→B→C 被接受 | start 时只 materialize A→B；不得提前 schedule B→C 的 move_complete |
-| T-MOVE-015 | MOVE-002, PLAN-007 | A→B 成功提交且 Plan 仍有 B→C | move_complete 后推进 plan cursor；后续 Action phase 才重新校验并尝试 B→C |
+| T-MOVE-015 | MOVE-002, PLAN-007, SIMULATION §11 | A→B 已 materialize，Plan 仍有 B→C | cursor 已指向下一未 materialize step；只有 A→B move_complete 成功后，后续 Action phase 才重新校验并尝试 B→C |
 | T-MOVE-016 | MOVE-005, PLAN-007 | A→B 在 reservation contention 失败 | 当前 Plan 终止；未 materialize 的 B→C 不产生 event；后续合法 Tick 重规划 |
 
 ## 5. Skill Range / Coefficient
@@ -105,6 +114,7 @@
 | T-INSTANT-002 | STATE-004, TICK-002 | windup=0 + recovery=0 | 同 Actor 本 Tick不能启动第二个 Action |
 | T-INSTANT-003 | SKILL-005, HIT-006 | 双方同 Tick 启动致命 instant skill | 两个技能都先收集；允许 simultaneous defeat |
 | T-INSTANT-004 | TICK-001 | instant skill 杀死原本有“尚未启动移动意图”的 Actor | phase 12 不再为其启动 reservation |
+| T-INSTANT-005 | SKILL-005, SIMULATION §17/20 | windup=0 + recovery=0 | resolve 后直接 action=idle，不创建 currentTick recovery event；startedActionActors 仍阻止本 Tick第二 Action |
 
 ## 7. Hit / Protection / Recovery
 
@@ -140,6 +150,10 @@
 | T-DEC-010 | STATE-006 | 当前 Plan 的最后一个 intent 已 materialize 成 active move/windup/recovery | 当前 Action 可继续，同时允许最多一个 next Decision 进入 thinking |
 | T-DEC-011 | STATE-006, SKILL-004 | action lock 未结束时 next Decision completion 被 reducer 接受 | 保存为唯一 pending accepted plan；不得启动 Action，也不得接受第三份排队 Plan |
 | T-DEC-012 | STATE-006, HIT-003 | active Action 受 damaging hit 且 pending Plan 已存在 | 旧 action/plan/decision authority 一并失效；不允许 stale pending Plan 在后续启动 |
+| T-DEC-013 | DEC-004 | DecisionCompletion.failed(category=attempt_failure) | 不终止 Battle；当前 generation结束，最早下一逻辑 Tick重新 Decision |
+| T-DEC-014 | DEC-004 | DecisionCompletion.failed(category=session_fatal) | 进入 Runtime terminal arbiter，BattleResult=failure source=decision |
+| T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
+| T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
 
 ## 9. Control Plane / Replay
 
@@ -150,9 +164,15 @@
 | T-CTRL-003 | CTRL-001, RESULT-001 | RUNNING 时 battle.close() | 取消 authority、清理资源，run() 通过单一结果通道得到 cancelled，不同时产生同义 Promise rejection |
 | T-CTRL-004 | RESULT-001 | Presentation initialize/render 出现已分类 fatal | Runtime cleanup，run() 返回 failure；programmer/invariant error 才允许 throw/reject |
 | T-CTRL-005 | RESULT-001 | Presentation resize timer/internal callback 出现已分类 async fatal | Presentation 立即 cleanup 并只完成一次 `failure` channel；Runtime 观察后停止 authority并归约为 Battle failure；不得成为 unhandled callback exception |
+| T-CTRL-006 | SIMULATION §22 | terminal Tick 已判 ally win，但 final render 同步 throw classified fatal | normal result尚未commit；最终 BattleResult=failure source=presentation |
+| T-CTRL-007 | SIMULATION §22/26 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
+| T-CTRL-008 | SIMULATION §4 | CREATED 调 pause/resume 或第二次 run | programmer error；close 幂等；RUNNING重复 resume / PAUSED重复 pause 为 no-op |
+| T-CTRL-009 | SIMULATION §4 | SETTLED 后 cancel，再 close 两次 | cancel no-op；第一次 close→CLOSED并清理Presentation，第二次 close no-op |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
+| T-REPLAY-004 | SIMULATION §24/25 | live run记录completion consumedTick，随后Replay | Replay在recorded consumedTick注入，不调用DecisionPort；final result/snapshot/gameplay Projection sequence一致 |
+| T-REPLAY-005 | SIMULATION §25 | recorded contention winner与当前seed重算结果不一致 | Replay invariant failure，不静默采用recorded winner |
 
 ## 10. Presentation
 
@@ -163,7 +183,7 @@
 | T-PRES-003 | ARCH-003 | Presentation camera/viewport 重新布局 | 不改 Simulation State；v0 camera 无 zoom/focusHint/animation |
 | T-PRES-004 | STATE-001 | Sprite 插值位置 x=2.7 | Decision/Simulation 仍只看到 committed integer tile |
 | T-PRES-005 | ARCH-006, BATTLE-001 | 仅用 synthetic Presentation input 初始化 4 个唯一 actorId | Presentation 可创建 4 个 actor visual/HUD entry 且无固定 ally/enemy slot；这不使 v0 Simulation 接受 4 Actor |
-| T-PRES-006 | ARCH-003, ARCH-005 | Runtime 启动 Battle session | 先 await Presentation.initialize，再 render initial Projection，之后才启动 200ms Battle clock；SceneInit 不重复维护 tile/direction/HP 初值 |
+| T-PRES-006 | ARCH-003, ARCH-005, SIMULATION §5 | Runtime 启动 Battle session | 先观察 failure channel、await initialize、render tick-0 initial Projection、创建 requestTick=0 initial Decision，再启动 200ms Battle clock；SceneInit 不重复维护动态初值 |
 | T-PRES-007 | ARCH-003 | 正常 BattleResult 已 resolve 但 scene 尚未退出 | final Projection 保持可见；直到 battle.close() 才关闭 Presentation |
 | T-PRES-008 | CTRL-001 | RUNNING 状态直接调用 battle.close() | 等价于 cancel authority + cleanup；scheduler/late completion 无提交权，Presentation close 幂等 |
 | T-PRES-009 | ARCH-003 | 没有新 Simulation Projection，仅 viewport resize | Simulation state/tick 不变；Presentation 自行推进 visualEpoch 并提交新 layout |
@@ -190,6 +210,7 @@
 | T-PRES-030 | ARCH-003, ARCH-005 | synthetic Scene/Projection 驱动真实 BattlePresentationHandler | Handler 自建 RenderDomain，数据经 RenderManager → renderer-data → RendererRenderStore → WebProjector 到 lr-battle DOM；movement/effect/resize/close 可见 |
 | T-PRES-031 | ARCH-003 | package build 后通过 Browser/HTTP 加载 Battle CSS | `dist/browser/battle.css` 存在、package export 正确、请求非 404 |
 | T-PRES-032 | ARCH-003 | first full state 与 later update 分别做 capacity preflight | full state 使用 16384 node count；update 使用 4096 node operations并检查 prospective state；两者不混用 |
+| T-PRES-033 | SIMULATION §21 | scheduler late wake catch-up Tick 11/12/13/14 | Simulation依次 render 4份 Projection；不dirty-coalesce，effectStarts/motion facts不丢 |
 
 
 ## 11. Result / Termination
