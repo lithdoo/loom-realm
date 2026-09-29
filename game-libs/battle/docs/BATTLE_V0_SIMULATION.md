@@ -135,7 +135,7 @@ type ResolvedBattleSkill = {
   windupTicks: number
   recoveryTicks: number
   range: ResolvedRangeMatrix
-  effectId: string
+  effect: string
 }
 ```
 
@@ -315,7 +315,7 @@ type BattleState = {
   nextPlanId: number
   nextRequestId: number
   nextEventId: number
-  nextEffectId: number
+  nextEffectOccurrenceId: number
 }
 
 type ActorRuntimeState = {
@@ -410,6 +410,13 @@ hold_reobserve
 decision_attempt_failed
 ```
 
+reason 对 earliest eligible Tick 的映射固定：
+
+- `initial`：tick 0；
+- `damaging_hit`：受击 Tick 本身即可创建新的 request command；
+- `plan_exhausted / plan_failed / hold_reobserve / decision_attempt_failed`：最早下一逻辑 Tick；
+- correction attempt 不创建新 generation，按同 Tick phase 9规则直接产生 attempt=1 request。
+
 `ensureDecision(actor, reason, earliestTick)` 是唯一入口，必须满足：
 
 1. Actor alive；
@@ -483,7 +490,9 @@ materialization rule：
 - turn执行时 `turnConsumed = true`；
 - movement reservation成功并真正 `move_start` 时消费该 path intent：`pathCursor++`；
 - skill windup真正开始时 `skillConsumed = true`，剩余 path立即放弃；
-- Action后续若被 damaging hit打断，整个 active Plan失效，不回滚 cursor；
+- 每次 materialization 后立即检查 Plan 是否仍有 future intent；若没有，`activePlan = null`。已 materialize Action 本身继续由 ActionState拥有，不需要 Plan 保持 authority；
+- 因此“最后一个 move/skill 已启动但 Action 尚未完成”可以同时满足 `activePlan = null` 并开始预取 next Decision；
+- Action后续若被 damaging hit打断，当前 Action与任何 prefetch/pending Plan按 generation/lifecycle失效；不回滚已消费的 Plan cursor；
 - 未 materialize 的后续 path永远没有 scheduled event authority。
 
 ## 12. Bounded active/pending Plan pipeline
@@ -501,7 +510,7 @@ materialization rule：
 规则：
 
 - active Plan还有 future intent时，不预取下一 Decision；
-- active Plan最后一个 intent已 materialize成当前 Action后，可以在该 Action仍 moving/windup/recovery 时预取下一 Decision；
+- active Plan最后一个 intent已 materialize后立即清空 `activePlan`；该 Action仍可 moving/windup/recovery，同时预取下一 Decision；
 - next completion被接受但 action lock未解除时，放唯一 `pendingPlan`；
 - 不接受第三份 Plan，不建立无界 FIFO；
 - damaging hit/death/cancel/session fatal 必须 fence 掉不再合法的 active/pending Plan；
@@ -778,7 +787,7 @@ terminal Tick的该份 Projection就是 final Projection。
 Identity：
 
 - `motionId`：actor-local monotonic positive safe integer，每次成功 move_start消费一个；
-- `effectId`：battle-local monotonic positive safe integer，每个 skill resolve outcome occurrence消费一个；即使 miss/invalid不产生可见 transient visual，也消费 occurrence identity以保持 deterministic facts；
+- `SkillEffectProjection.effectId`：battle-local monotonic positive safe integer，由 `nextEffectOccurrenceId` 分配；每个 skill resolve outcome occurrence消费一个；即使 miss/invalid不产生可见 transient visual，也消费 occurrence identity以保持 deterministic facts；
 - `sceneEpoch`：session-level cross-layer scene identity，来自 resolved definition；
 - `visualEpoch`：Presentation-local，Simulation从不生成。
 
@@ -794,6 +803,8 @@ finish(candidate)
 → abort Decision work
 → settle run() exactly once
 ```
+
+Reducer产生 normal terminal **candidate** 时只提交 gameplay terminal facts（例如 HP/dead），不先写入 public `state.result`。只有 terminal arbiter `finish(candidate)` 成功后，`state.result` 才成为最终 committed BattleResult。
 
 Normal gameplay terminal commit cut：
 
