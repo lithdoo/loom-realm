@@ -372,7 +372,7 @@ Simulation 在提交时校验：
 - 静态地形可通行；
 - `turn` 必须是合法 Direction，且不能与非空 path 同时出现；
 - skill 属于 Actor；
-- target 当前合法；
+- target 必须存在于当前 Battle、不是 self、team 与 caster 不同、且当前 `hp > 0 / action != dead`；v0 恰好双 Actor，因此唯一合法 target 是当前存活的对方 Actor；
 - `minCoefficient` 合法；
 - `decisionGeneration` 仍有效；
 - Actor 当前状态允许接受计划。
@@ -423,7 +423,10 @@ accepted plan 在执行过程中持续面对实时战场：
 - coefficient 为 0/矩阵外或低于 `minCoefficient` 时不施法，只要剩余 path 合法就继续移动；
 - 达到 `minCoefficient` 且 Actor 可以攻击时，停止尚未使用的 path，进入 windup；
 - path 已耗尽仍未达到阈值时，不得自动“降级”为更低 coefficient 攻击；计划结束/保持并进入后续 Decision；
-- 路线被阻、目标消失、计划失去意义时结束计划，并在后续合法 Tick 重规划；不得同 Tick 零时间反复重试。
+- 尚未 materialize skill windup 前，如果 target 不再满足“存在、非 self、敌对、alive”，以 `target_invalid` 结束计划，并在后续合法 Tick 重规划；
+- movement execution 失败只使用 MOVE-005 冻结的 `blocked / swap_forbidden / occupied / reserved / contested` taxonomy；
+- 不存在额外的“计划失去意义”catch-all；无法归入 Plan exhausted、上述 exact failure、damaging interruption 或 stale authority 的状态属于 Runtime invariant；
+- 不得同 Tick 零时间反复重试。
 
 ### PLAN-008 — move-only 不会自动攻击 — FROZEN
 
@@ -500,11 +503,27 @@ Presentation 可以平滑插值，但 Simulation 在完成前仍认为 Actor 位
 
 相邻两个 Actor 不允许在同 Tick 直接穿过彼此交换格子。
 
-### MOVE-005 — 冲突失败方 — FROZEN
+### MOVE-005 — movement failure taxonomy 与优先级 — FROZEN
 
-失败方留在原格，当前计划结束，记录如 `contested` 的原因，并在后续 Tick 重规划。
+对已经通过 lifecycle/generation fence、准备在本 Tick启动的 MoveIntent，失败 reason 与判定优先级唯一：
 
-不得同 Tick 零时间重试。
+1. `blocked`：destination 越界或静态不可通行；
+2. `swap_forbidden`：两个 surviving intents 恰好互相以对方 committed origin 为 destination；在普通 occupied 检查前识别；
+3. `occupied`：destination 当前由另一个 Actor committed 占用；即使该 Actor 本 Tick也计划离开，在其 move_complete 前 origin 仍占用；
+4. `reserved`：destination 已被更早 active movement 持有 reservation；
+5. `contested`：通过以上检查后，本 phase 多个新 intents 申请同一原本 free/unreserved destination；seeded winner成功，其余失败；
+6. 其余单一申请成功。
+
+同一 MoveIntent只记录第一个命中的 reason。stale/dead/terminal intent 在进入 taxonomy 前被 fence，不产生 `move_failed`。
+
+任何 movement failure：
+
+- Actor 保持原 committed tile；
+- 不创建 reservation / active move；
+- 当前 Plan结束；
+- 记录 exact reason；
+- 最早后续合法 Tick重规划；
+- 不得同 Tick零时间重试。
 
 ### MOVE-006 — move_start 瞬间转向 — FROZEN
 
@@ -861,6 +880,20 @@ Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
 - BattleResult。
 
 Replay **不重新调用 LLM**，也不依赖真实世界 LLM completion timestamp；重放按记录的 Tick 注入/恢复对应 Decision 结果与 accepted Plan。
+
+Deterministic Replay 的保证范围只覆盖由 initial resolved facts + recorded Decision completions + deterministic Simulation rules 能重建的 session 结果：
+
+- normal win / defeat / simultaneous defeat；
+- recorded Decision `session_fatal`；
+- deterministic Simulation failure。
+
+以下 external terminal 不要求 ReplayDriver伪造或重现发生边界，只保留 partial/audit record：
+
+- external `cancel()` / pre-aborted signal；
+- Presentation infrastructure failure；
+- programmer/invariant rejection。
+
+ReplayRecord 必须显式区分 deterministic 与 audit-only；ReplayDriver 不得把 audit-only record 当作完整 deterministic replay。
 
 ### REPLAY-002 — diagnostics 不改变规则 — FROZEN
 
