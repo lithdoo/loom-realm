@@ -15,17 +15,22 @@ battle/contracts
   BattleObservation
   PlanConstraints
   PlanSubmission
-  BattleEvent
   RenderProjection
   SkillEffectProjection
   DecisionRequest / DecisionCompletion / DecisionPort
-  ReplayRecord
 
 battle/simulation
   ResolvedBattleDefinition
-  BattleSimulationBuilder
+  BattleSimulationBuilder / BattleReplayBuilder
   BattleRuntime
   BattleClock
+  ReplayRecord
+
+simulation/internal
+  BattleEvent
+  AcceptedPlan
+  DecisionInboxEntry
+  Runtime Tick intents/facts
 ```
 
 Simulation / Decision / Presentation 可以依赖这些数据类型。
@@ -363,7 +368,9 @@ Contract 语义：
 - empty path + no turn + skill = direct cast；
 - empty path + turn + no skill = pure turn；
 - empty path + turn + skill = turn-first plan；turn 消耗本 Tick Action，skill intent 留到后续 Tick；
-- 不包含自由执行字段。
+- 不包含自由执行字段；
+- skill target 在 submission validation 时必须：存在于当前 Battle、不是 self、team 与 self 不同、且当前 `hp > 0 / action != dead`；v0 恰好双 Actor，因此合法 target 就是当前存活的对方 Actor；
+- path adjacency/static terrain 校验**不隐式使用 Observation.self.tile**，而从 `DecisionRequest.planningOrigin` 开始；这使 moving prefetch 可以基于成功提交后的 destination 规划下一段 path。
 
 ### PlanRejectReason — FROZEN
 
@@ -510,7 +517,7 @@ type ObservedEvent =
       tick: integer
       actorId: ActorId
       tile: GridPosition
-      reason: "blocked" | "occupied" | "contested" | "swap_forbidden"
+      reason: "blocked" | "occupied" | "reserved" | "contested" | "swap_forbidden"
     }
   | {
       type: "move_interrupted"
@@ -587,8 +594,8 @@ type BattleSnapshot = {
   tickDurationMs: 200
   status: BattleStatus
 
-  actors: Record<ActorId, ActorSnapshot>
-  reservations: ReservationSnapshot[]
+  actors: readonly ActorSnapshot[]
+  reservations: readonly ReservationSnapshot[]
   result?: BattleResult
 }
 ```
@@ -637,6 +644,8 @@ type ReservationSnapshot = {
 ```
 
 ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。Public Snapshot 不暴露 action/decision generation、requestId、Plan cursor 或 queue state。
+
+Snapshot ordering 固定：`actors` 按 actorId ECMAScript ordinal排序；`reservations` 按 actorId ordinal排序。v0 不使用 `Record<ActorId, ...>` 作为 public actor collection，避免开放字符串 key 的普通 JS object 特殊语义。
 
 BattleSnapshot 与 RenderProjection 是两类不同数据。v0 不公开没有明确 consumer/递增语义的 `battleEpoch / stateVersion`；late async fencing 使用 Runtime lifecycle、AbortSignal、`actionGeneration / decisionGeneration`。内部实现若需要诊断 revision，不得因此扩张 public Snapshot ABI。
 
@@ -707,9 +716,9 @@ windup/recovery exact payload、AcceptedPlan cursor 与 Runtime-only counters �
 
 `turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
 
-## 12. BattleEvent
+## 12. BattleEvent — Simulation internal
 
-Simulation core scheduled event union 冻结为：
+`BattleEvent` 只属于 ScheduledEventQueue，不是 root `battle/contracts` export，也没有跨层 consumer。Simulation core scheduled event union 冻结为：
 
 ```ts
 type BattleEvent =
@@ -890,12 +899,23 @@ type DecisionRequest = {
   requestId: string
   actorId: ActorId
   generation: integer
+  planningOrigin: GridPosition
   observation: BattleObservation
   constraints: PlanConstraints
   correction?: {
     rejectedPlan: PlanSubmission
     reason: PlanRejectReason
   }
+}
+
+`planningOrigin` 是该 request 返回 Plan 的 path 校验起点：
+
+- 普通/initial/redecision：等于 request 创建时 Actor committed `tile`；
+- moving prefetch：等于当前 `ActionState.moving.to`，即该 move 成功后的预期 committed tile；
+- windup/recovery prefetch：仍等于当前 committed `tile`；
+- correction attempt 必须继承原 attempt 的同一 planningOrigin，不重新捕获；
+- Observation 中 moving Actor 的 `tile` 仍保持 committed origin；Decision 同时看到 `planningOrigin` 与 `observation.action.to`，不得把预测位置伪装成 committed fact。
+
 }
 
 type DecisionFailure = {
@@ -947,7 +967,9 @@ Provider/network timeout 属于 Decision implementation 的 infrastructure polic
 
 Decision Inbox 是 Simulation internal runtime structure，不属于 Presentation Contract，也不作为 `BattleEvent(dueTick)` 序列化。
 
-## 17. ReplayRecord
+## 17. ReplayRecord — Simulation public contract
+
+`ReplayRecord` 从 `@loomrealm-game/battle/simulation` 导出，与 `ResolvedBattleDefinition` 同 module ownership；root shared contracts 不反向依赖 Simulation。
 
 Replay 必须足以在**不重新调用 Decision/LLM**的情况下复现：
 
@@ -967,6 +989,6 @@ ReplayRecord exact v0 schema、fact shapes 与 ReplayDriver 执行方式已在 B
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
 - Decision provider-specific metadata / provider code 的 exact shape；`attempt_failure | session_fatal` authority classification 已冻结。
-- Observation history budget 与 prompt-facing representation。
+- Decision adapter 的 prompt/token formatting；structured `BattleObservation.recentEvents` 的两-Tick history window 已冻结，不再是 OPEN。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
