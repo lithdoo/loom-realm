@@ -370,6 +370,30 @@ type PlanAcceptance =
 
 同步 acceptance 只表示当前可以进入执行，不保证未来 path/skill 一定成功。
 
+### 8.1 Accepted Plan runtime pipeline — FROZEN boundary
+
+`PlanSubmission` 被接受后必须先复制/规范化为 Simulation-owned immutable plan facts，Decision 返回对象本身不得成为 mutable Runtime authority。
+
+v0 的 accepted-plan pipeline 是**有界**的：
+
+```text
+active accepted plan
+        +
+at most one pending accepted plan
+```
+
+语义：
+
+- active plan 持有尚未 materialize 的 turn/path/skill intent 及执行 cursor；
+- 每次只把一个 intent materialize 成当前 Action；多格 path 不预先转换成整串 future move tasks；
+- 一格 movement 只有在前一格 `move_complete` 成功提交后，才允许推进 cursor 并重新评估 skill / next move；
+- 当前 Plan 的最后一个 intent 已 materialize 后，Action 可以继续执行，同时按 `STATE-006` 预取下一 Decision；
+- 下一 Plan 若在 action lock 解除前被接受，只占用唯一 pending slot；
+- pending Plan 不得覆盖仍有 future intent 的 active Plan，也不得在 moving/windup/recovery lock 解除前启动 Action；
+- damaging interruption / death / cancel 等 authority invalidation 必须同时处理 active/pending Plan 的 stale fencing。
+
+这一区分避免两种错误实现：一是把整条 path 一次性预排进 Scheduled Event Queue；二是把 accepted-plan queue 泛化成无界 FIFO。
+
 ## 9. BattleObservation
 
 Decision 看到的是 Simulation 事实，不是 Render State。
@@ -445,8 +469,8 @@ type ActorRuntimeState = {
   actionState: ActionState
   decisionState: DecisionState
 
-  acceptedPlanId?: string
-  activeStep?: ActiveStep
+  activePlanId?: string
+  pendingPlanId?: string
 
   protectedUntilTickExclusive: integer
 
@@ -460,19 +484,37 @@ type ActorRuntimeState = {
 ```ts
 type ActionState =
   | { type: "idle" }
-  | { type: "moving"; /* active step ref */ }
-  | { type: "windup"; /* action ref */ }
-  | { type: "recovery"; /* action ref */ }
+  | {
+      type: "moving"
+      generation: integer
+      from: GridPosition
+      to: GridPosition
+      startTick: integer
+      completeTick: integer
+    }
+  | { type: "windup"; /* exact skill action payload */ }
+  | { type: "recovery"; /* exact recovery payload */ }
   | { type: "dead" }
   | { type: "terminated" }
 
 type DecisionState =
   | { type: "none" }
-  | { type: "thinking"; requestId: string; generation: integer }
-  | { type: "ready"; requestId: string; generation: integer }
+  | {
+      type: "thinking"
+      requestId: string
+      generation: integer
+      attempt: 0 | 1
+    }
 ```
 
-exact payload 仍可在实现时正式化，但 `thinking` 不得进入 ActionState。这样才能表达 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 已冻结组合。`ready` 只能由 Tick reducer 消费并接受 inbox completion 后进入；异步 callback 本身不得直接修改 ActorRuntimeState。
+exact windup/recovery payload 仍可在 Simulation implementation spec 中正式冻结，但以下 authority 边界已经固定：
+
+- `thinking` 不得进入 ActionState；因此 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 组合可直接表达；
+- Decision completion 在 reducer 消费前只存在于 Decision Inbox，不建立独立的 Actor `ready` state；
+- active movement step 的权威 payload 直接属于 `ActionState { type: "moving" }`，不再并行维护第二份 `activeStep` authority；
+- `activePlanId` 标识仍有未完成/已 materialize Action 生命周期的当前 Plan；`pendingPlanId` 只用于 `STATE-006` 允许的唯一下一 Plan，v0 不要求通用 Plan FIFO；
+- `actionGeneration` 是 move/windup/recovery scheduled-event 的统一 stale fence，不再为 movement/skill/recovery 各自创造重复 generation；
+- `decisionGeneration` 是 Decision authority generation；`requestId` 只做某次异步 attempt 的 correlation identity，二者不得合并。
 
 `turn` 是同 Tick 即时 Action，不需要持久化 `turning` ActionState 或 `turn_complete` 事件；accepted plan 内部只需能记录 pending/completed turn intent。
 
@@ -690,7 +732,7 @@ DecisionCompletion 不携带任何 wall-clock/Battle-time timing 字段，也不
 
 - stale generation fencing；
 - Plan validation；
-- accepted-plan queue；
+- STATE-006 的 active/pending accepted-plan pipeline；
 - `PLAN-006` correction retry；
 - consumedTick / acceptedTick Replay facts。
 
@@ -713,7 +755,7 @@ damage/protection
 BattleResult
 ```
 
-具体持久化格式可以在实现时选择。
+具体持久化格式仍需在 Simulation implementation spec 中冻结；Replay 不要求把 Runtime 实现为通用 event-sourcing framework。
 
 ## 18. Contracts OPEN
 
