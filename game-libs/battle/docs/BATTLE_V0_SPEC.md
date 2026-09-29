@@ -305,6 +305,17 @@ stale generation fencing、Plan validation、`PLAN-006` 的一次 correction ret
 
 Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
 
+### DEC-004 — Decision failure authority classification — FROZEN
+
+Decision infrastructure failure 对 Simulation 只有两种 authority category：
+
+- `attempt_failure`：只结束当前 Decision attempt/generation，不终止 Battle；Actor 最早下一逻辑 Tick重新进入 Decision lifecycle；
+- `session_fatal`：该 failure 是 Battle terminal candidate，由 Runtime 归约为 `BattleResult.failure`。
+
+Provider-specific HTTP/network/error metadata、默认 timeout 数值等仍可在 Integration 层配置，但不得让 Simulation自行猜测某个 provider error 是否终止整场 Battle。
+
+默认 provider timeout 属于 `attempt_failure`；concrete adapter 若要把某类基础设施错误升级为 `session_fatal`，必须在返回 DecisionFailure 时明确分类。
+
 ## 6. Decision Protocol 与 PlanSubmission
 
 ### PLAN-002 — Decision 读取 Observation + Constraints — FROZEN
@@ -418,6 +429,17 @@ accepted plan 在执行过程中持续面对实时战场：
 ### PLAN-008 — move-only 不会自动攻击 — FROZEN
 
 没有 skill intent 的 Plan 永远不会因为途中进入某技能合法范围而自动施法。
+
+### PLAN-009 — hold/reobserve 与 Plan 结束后的 redecision — FROZEN
+
+`path: []`、无 turn、无 skill 的 Plan 表示“本 Tick不启动 Action，并在后续 Tick重新观察”，不是永久 idle。
+
+统一规则：
+
+- hold/reobserve 在被接受的当前 Tick立即视为 Plan exhausted，但不得同 Tick创建新的 Decision generation；
+- move-only path耗尽、pure turn完成且无剩余 skill、path耗尽仍未达到 `minCoefficient`、动态阻挡/目标失效等 Plan正常结束或失败后，如果没有已预取的 pending Plan，最早下一逻辑 Tick才可创建新的 Decision generation；
+- damaging hit 仍按 HIT-003 的受击 redecision 规则处理；
+- 不得通过 hold/失败/Plan结束在同一 Tick形成零时间 Decision 循环。
 
 ## 7. Turn 与 Movement
 
