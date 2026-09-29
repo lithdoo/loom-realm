@@ -907,6 +907,7 @@ type DecisionRequest = {
     reason: PlanRejectReason
   }
 }
+```
 
 `planningOrigin` 是该 request 返回 Plan 的 path 校验起点：
 
@@ -916,8 +917,7 @@ type DecisionRequest = {
 - correction attempt 必须继承原 attempt 的同一 planningOrigin，不重新捕获；
 - Observation 中 moving Actor 的 `tile` 仍保持 committed origin；Decision 同时看到 `planningOrigin` 与 `observation.action.to`，不得把预测位置伪装成 committed fact。
 
-}
-
+```ts
 type DecisionFailure = {
   category: "attempt_failure" | "session_fatal"
   code: string
