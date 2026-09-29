@@ -37,9 +37,9 @@
 - `BattleObservation`；
 - `PlanConstraints`；
 - `PlanSubmission / PlanConstraints / PlanRejectReason`；
-- `BattleSnapshot / BattleEvent`；
+- `BattleSnapshot`；
 - 已冻结的 Presentation `BattleSceneInit / RenderProjection / SkillEffectProjection / BattleEffect`；
-- Replay 数据边界；
+- Decision-facing shared data boundary；
 - 其余非 Presentation subject/version、字段命名和正式 Schema OPEN。
 
 Contracts 不重新定义玩法规则。
@@ -57,8 +57,8 @@ Contracts 不重新定义玩法规则。
 - bounded active/pending Plan handoff；
 - Projection cadence、motion/effect identity；
 - terminal arbitration、BattleResult/Snapshot public semantics；
-- ReplayRecord / ReplayDriver；
-- async race semantics 与 headless test doubles。
+- Simulation-owned `BattleEvent`、`ReplayRecord / ReplayDriver`；
+- async race semantics、BattleReplayBuilder、headless test doubles 与 Agent execution contract / Definition of Done。
 
 Simulation 实施细节不得重新定义 SPEC gameplay Rule，也不得改变 Presentation frozen ABI。
 
