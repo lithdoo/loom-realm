@@ -1183,6 +1183,7 @@ type ReplayDecisionRecord = {
   attempt: 0 | 1
   requestId: string
   requestTick: number
+  planningOrigin: GridPosition
   consumedTick: number
 
   completion:
@@ -1292,7 +1293,7 @@ same seeded contention
 different Decision input source
 ```
 
-Replay必须从 `record.initial` 重建 Runtime state。按 `ReplayDecisionRecord.consumedTick` 在对应 Tick snapshot注入recorded completion，不调用真实 DecisionPort；同时校验 reducer重新生成的 actorId/generation/requestId/requestTick 与recorded request facts一致，不一致即 Replay invariant failure。
+Replay必须从 `record.initial` 重建 Runtime state。按 `ReplayDecisionRecord.consumedTick` 在对应 Tick snapshot注入recorded completion，不调用真实 DecisionPort；同时校验 reducer重新生成的 actorId/generation/requestId/requestTick/planningOrigin 与recorded request facts一致，不一致即 Replay invariant failure。
 
 seeded contention在Replay中必须重新计算并与recorded fact比较；不直接把recorded winner当authority。若不一致，属于Replay invariant failure。
 
@@ -1509,7 +1510,7 @@ Definition of Done：
 - existing Presentation qualification remains green and its ABI is unchanged；
 - no remaining implementation TODO may change public ABI, Tick ordering, authority owner, failure classification, replayability scope or deterministic ordering.
 
-Agent may choose local helper names/data structures only where本文明确标为 internal representation freedom；如果测试/实现发现 frozen documents互相冲突，应停止并报告冲突，而不是自行选择一套新语义。
+Agent may choose local helper names/data structures only where 本文明确标为 internal representation freedom；如果测试/实现发现 frozen documents互相冲突，应停止并报告冲突，而不是自行选择一套新语义。
 
 ## 33. FROZEN FOR IMPLEMENTATION gate
 
@@ -1517,7 +1518,7 @@ Simulation可以标为 FROZEN FOR IMPLEMENTATION，因为以下 blocking choice�
 
 - initialization与initial Decision request Tick；
 - RuntimeState/ActionState/DecisionState/AcceptedPlan；
-- active/pending Plan bounded pipeline与promotion；
+- request-scoped planningOrigin、active/pending Plan bounded pipeline与promotion；
 - hold/plan end/redecision出口；
 - BattleClock/scheduler/pause/catch-up；
 - Decision Inbox与ScheduledEventQueue；
@@ -1526,10 +1527,11 @@ Simulation可以标为 FROZEN FOR IMPLEMENTATION，因为以下 blocking choice�
 - recovery=0与same-Tick Action quota；
 - Projection cadence与motion/effect identity；
 - BattleResult terminal arbiter与Presentation race；
-- Snapshot public boundary；
-- ReplayRecord/ReplayDriver；
+- exact target eligibility 与 movement failure taxonomy；
+- Snapshot ordinal-sorted public boundary；
+- ReplayRecord replayability scope / BattleReplayBuilder；
 - cancel/pause/late async races；
-- headless test doubles与qualification path。
+- headless test doubles、Agent execution order、build/test/pack Definition of Done。
 
 仍可OPEN且不阻塞Simulation Core实现的内容：
 
