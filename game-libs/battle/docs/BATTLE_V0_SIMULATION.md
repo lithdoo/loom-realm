@@ -272,7 +272,7 @@ CREATED
 - Battle clock 在 Presentation initialize + initial Projection 成功前不得启动；
 - initial Decision Request 的 `requestTick = 0`；
 - initial Decision 调用可以在 clock 启动前被 shell 发出，但 completion 仍只能 enqueue；最早由第一个真实 reducer Tick消费；
-- initialize/render/pause/resume 抛出的 `PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED` 由 Runtime捕获并归约为 Presentation failure；Presentation programmer/invariant codes 按 §23 直接 throw/reject；同一错误不得同时走两条通道；
+- initialize/render/pause/resume 抛出的 `PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED` 由 Runtime捕获并归约为 Presentation failure；Presentation programmer/invariant codes 按 §24 直接 throw/reject；同一错误不得同时走两条通道；
 - async Presentation failure observer 必须在 initialize 前挂上，避免观察窗口；
 - tick 0 只发布 initial Projection，不执行 TICK-001 gameplay reducer。
 
@@ -308,13 +308,27 @@ logicalElapsedMs =
 targetTick = floor(logicalElapsedMs / 200)
 ```
 
-wake callback：
+wake callback 每轮重新读取 logical time，不能只在 callback入口缓存一次 target：
 
 ```ts
-while (lifecycle === "RUNNING" && currentTick < targetTick) {
+while (lifecycle === "RUNNING") {
+  const targetTick = Math.floor(logicalElapsedMs() / 200)
+  if (currentTick >= targetTick) break
   processOneTick(currentTick + 1)
 }
+scheduleNextWake()
 ```
+
+下一 wake 按**下一个逻辑 Tick deadline**调度，而不是“callback结束后再固定等200ms”：
+
+```ts
+const elapsed = logicalElapsedMs()
+const nextDeadline = (currentTick + 1) * 200
+const delayMs = Math.max(0, nextDeadline - elapsed)
+wakeCancel = clock.schedule(delayMs, wake)
+```
+
+进入 RUNNING/resume 后也使用同一个 `scheduleNextWake()`。
 
 要求：
 
@@ -323,7 +337,11 @@ while (lifecycle === "RUNNING" && currentTick < targetTick) {
 - scheduler callback 不得重入正在执行的 `processOneTick`；
 - JS callback/PROMISE 只会在同步 Tick stack 结束后执行；实现仍应有明确 `processingTick` invariant 防止手工重入；
 - close/cancel/fatal 必须取消 pending wake；
-- `currentTick`、logical elapsed换算结果及所有 monotonic counters 必须保持 non-negative safe integer；任何下一次递增/换算将超出 safe integer 时，必须在溢出前停止 authority并产生 `BattleResult.failure { source: "simulation", code: "BATTLE_COUNTER_OVERFLOW" }`，不得 wrap、变成浮点不精确或静默继续。
+- `BattleClock.nowMs()` 对单 session 必须 finite、non-negative、monotonic non-decreasing；回退/NaN/Infinity 属 Runtime invariant error；
+- `currentTick`、logical elapsed换算结果、dueTick/protection arithmetic、damage intermediate arithmetic及所有 monotonic counters 必须保持 non-negative safe integer；
+- counter本身下一次递增超界 → `BattleResult.failure { source: "simulation", code: "BATTLE_COUNTER_OVERFLOW" }`；
+- 其他 checked gameplay arithmetic（例如 `currentTick + moveTicks`、`baseDamage * coefficientUnits`）超界 → `BattleResult.failure { source: "simulation", code: "BATTLE_NUMERIC_OVERFLOW" }`；
+- 都必须在产生不精确值之前失败，不得 wrap/静默继续。
 
 Pause：
 
@@ -746,6 +764,8 @@ type TickContext = {
 
 `startedActionActors` 实施 STATE-004；0 recovery不需要跨 Tick flag。
 
+`SkillResolveIntent / SkillIntent / MoveIntent / TileKey / ReplayFact` 等只在 Simulation module内部流转，不属于跨层 Contract。Agent可以选择 readonly object/type alias/局部helper representation，但必须满足本文 stage ordering、stable ordering、single-authority 与测试 Expected；不得因此新增第二份持久 authority或改变 public ABI。
+
 Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 
 ```text
@@ -911,7 +931,37 @@ protectedUntilTickExclusive =
 
 Use safe-integer checked addition. `protectionTicks = 0` still protects the remainder of the hit Tick, but adds no later full Tick.
 
-## 21. Skill / recovery scheduling
+## 21. Range lookup and rotation
+
+`ResolvedRangeMatrix` 采用屏幕/Map坐标：x向右增加，y向下增加。canonical matrix按 caster朝上（Direction=8）解析，origin由 `originX/originY` 指定。
+
+对 matrix cell：
+
+```text
+dx = cellX - originX
+dy = cellY - originY
+```
+
+转成 world delta 的 exact mapping：
+
+```ts
+direction 8 (up):    { dx,       dy      }
+direction 2 (down):  { dx: -dx,  dy: -dy }
+direction 4 (left):  { dx: dy,   dy: -dx }
+direction 6 (right): { dx: -dy,  dy: dx  }
+```
+
+目标 coefficient lookup等价于遍历 resolved matrix正 cell并比较：
+
+```text
+caster.tile + rotatedDelta == target.tile
+```
+
+匹配则返回该 cell的 `coefficientUnits`；无匹配返回0。origin cell固定0，因此 caster自身格不会因marker产生攻击系数。
+
+实现可以预计算 direction-specific lookup Map，但结果必须与上述公式逐项相同；不得把 Presentation方向/屏幕插值带入计算。
+
+## 22. Skill / recovery scheduling
 
 Skill start：
 
@@ -930,7 +980,7 @@ resolve后：
 
 resolve时range/coefficient重新读取当前 committed facts；不tracking。
 
-## 22. Projection cadence and identities
+## 23. Projection cadence and identities
 
 Publication cadence固定：
 
@@ -951,7 +1001,7 @@ Identity：
 - `sceneEpoch`：session-level cross-layer scene identity，来自 resolved definition；
 - `visualEpoch`：Presentation-local，Simulation从不生成。
 
-## 23. BattleResult and terminal arbitration
+## 24. BattleResult and terminal arbitration
 
 BattleResult exact public union见 Contracts。Runtime内部只有一个 one-shot terminal arbiter：
 
@@ -996,7 +1046,7 @@ Presentation sync error classification固定：
 
 Programmer error/invariant violation不伪装成业务 `BattleResult.failure`，允许throw/reject。
 
-## 24. Snapshot
+## 25. Snapshot
 
 `getSnapshot()` 返回 detached immutable value，不暴露Runtime mutable reference。
 
@@ -1027,7 +1077,7 @@ scheduler handles
 
 Snapshot在每个 processed Tick结束后与该 Tick Projection基于同一 committed state产生。
 
-## 25. ReplayRecord
+## 26. ReplayRecord
 
 Replay exact v0 schema：
 
@@ -1125,7 +1175,7 @@ type ReplayProtectionFact = {
 `initial` 是 Runtime build 时已验证的 `ResolvedBattleDefinition` 的 detached immutable deep copy；Replay 不重新访问 Decision/LLM 来恢复初始 gameplay facts，也不额外引入 definition fingerprint/hash algorithm。外部 Content serialization subject/version 如何生成该 resolved definition 仍属于 Integration，不影响 Replay。
 
 
-## 26. Replay execution
+## 27. Replay execution
 
 Replay不得实现第二套Battle规则。
 
@@ -1153,7 +1203,7 @@ Replay成功标准：
 
 Presentation可替换为 Null/RecordingPresentation；Replay correctness不依赖Browser。
 
-## 27. Runtime async races
+## 28. Runtime async races
 
 以下 race semantics冻结：
 
@@ -1204,7 +1254,7 @@ arm failure observer
 
 `pause()/resume()` 的 Presentation调用位于 Runtime同步call boundary。classified Presentation throw 被 Runtime捕获并送入同一terminal arbiter；调用方不同时收到同义业务throw。programmer/state error仍可throw。
 
-## 28. Shell / reducer command boundary
+## 29. Shell / reducer command boundary
 
 Reducer/plan helpers不得直接调用Ports。
 
@@ -1228,7 +1278,7 @@ decision.decide(request, signal)
 
 Presentation render在完整Tick committed后由shell调用；同步throw立即进入terminal arbitration。
 
-## 29. Testing architecture
+## 30. Testing architecture
 
 Simulation qualification必须提供：
 
@@ -1248,7 +1298,7 @@ Simulation qualification必须提供：
 5. Replay qualification：live→record→replay结果/snapshot/projection一致；
 6. existing Presentation integration：Simulation只消费已冻结Port，不重测Browser内部语义。
 
-## 30. Implementation invariants
+## 31. Implementation invariants
 
 实现必须持续满足：
 
@@ -1265,7 +1315,7 @@ Simulation qualification必须提供：
 11. cancel/fatal后late work无提交权；
 12. terminal result最多commit一次。
 
-## 31. FROZEN FOR IMPLEMENTATION gate
+## 32. FROZEN FOR IMPLEMENTATION gate
 
 Simulation可以标为 FROZEN FOR IMPLEMENTATION，因为以下 blocking choice已有唯一答案：
 
