@@ -26,6 +26,8 @@
 | T-ARCH-016 | SIMULATION §2/5 | Builder build 两次 / run 前 external signal 已 aborted | second build programmer error；pre-aborted run直接 cancelled+CLOSED，不 initialize、不请求Decision、不启动clock |
 | T-ARCH-017 | CONTRACTS §9 | initial DecisionRequest observation | actors/skills actorId+skillId ordinal stable；recentEvents=[]；map/passability为detached committed facts；无 Guidance/runtime generations |
 | T-ARCH-018 | CONTRACTS §6 | 同一 Skill range 包含 0.5/1.0/0.5 | PlanConstraints.minCoefficients = [0.5, 1.0]，去重且数值升序；skills按skillId ordinal |
+| T-ARCH-019 | SIMULATION §3 | build 后调用方修改原 definition/passable/range 数组 | Runtime/Replay事实不变；builder已deep-copy/freeze Simulation-owned resolved definition |
+| T-ARCH-020 | SIMULATION §7/31 | 两个 Actor 同 Tick都分配 request/event/ordered facts | actorId ordinal traversal决定稳定 ID/输出顺序；改变Map insertion order不改变Replay/Projection/requestId |
 | T-ARCH-011 | ARCH-005 | headless Simulation 只注入 FakeClock + AbortSignal + ScriptDecision + RecordingPresentation | 不需要构造 SubsystemScope/Frame/Viewport/RenderDomain；Core Runtime 仍可完整运行 |
 | T-ARCH-012 | BATTLE-001, ARCH-006 | v0 BattleConfig 为两个 Actor，但 team 是 ally+ally 或 enemy+enemy | 启动前 validation reject；v0 必须恰好 1 ally + 1 enemy |
 
@@ -71,7 +73,7 @@
 | T-PLAN-016 | PLAN-009 | move-only path 正常耗尽且无 pending Plan | 当前 Tick不零时间重决策；最早下一 Tick ensureDecision |
 | T-PLAN-017 | SIMULATION §11 | Plan path A→B→C，A→B reservation成功并 move_start | A→B intent 在 materialize 时消费，cursor 指向 C；但 B→C 仍不得在 A→B complete 前启动 |
 | T-PLAN-018 | CONTRACTS §7 | PlanSubmission 缺 path / 含未知字段 / 坐标非整数 / skill含未知字段 | reject invalid_plan_shape；attempt0允许唯一 correction，attempt1结束generation |
-| T-PLAN-019 | CONTRACTS §8 | stale_decision_generation 或 actor_not_ready | correctionAllowed=false；不得向 provider 发 correction attempt |
+| T-PLAN-019 | CONTRACTS §8 | attempt0 返回任一真正 PlanRejectReason | correctionAllowed=true；唯一 correction 后 attempt1 任一 reject 都结束 generation；stale authority 不进入 Plan validation |
 
 ## 4. Turn / Movement / Contention
 
@@ -153,7 +155,7 @@
 | T-DEC-001 | STATE-003 | 同 Tick 多个原因调用 ensureDecision | 当前 generation 只存在一个有效 request |
 | T-DEC-002 | SKILL-004 | Actor 在 recovery | Thinking 可以继续/开始 |
 | T-DEC-003 | SKILL-004, DEC-001 | recovery 中 reducer 消费并接受 Decision Plan | Plan 可暂存，但 recovery 结束前不能启动新 Action |
-| T-DEC-004 | DEC-002 | hit 使 generation 失效后旧 LLM 返回 | 无提交权 |
+| T-DEC-004 | DEC-002, SIMULATION §29 | hit 使 generation 失效且旧 LLM仍在执行 | Runtime best-effort abort该 request-scoped signal；provider即使忽略abort并迟到返回也无提交权 |
 | T-DEC-005 | STATE-005, SKILL-004 | Actor 正在 recovery 时 Decision request thinking | actionState=recovery 与 decisionState=thinking 可同时存在，不互相覆盖 |
 | T-DEC-006 | STATE-005 | Actor moving 时启动 Decision | actionState=moving 与 decisionState=thinking 可同时存在 |
 | T-DEC-007 | DEC-003, PLAN-006 | 第一次 Decision completion 返回非法 Plan | Adapter 不自行重试；Simulation validation 后决定是否发起唯一 correction attempt |
