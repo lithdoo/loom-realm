@@ -827,7 +827,7 @@ Frame abort、Battle cancel、Subsystem 退出不是普通 Tick Event。
 
 必须立即：
 
-- 失效 Battle authority/epoch；
+- 立即失效 Battle active authority；
 - 禁止后续规则提交；
 - 停止 scheduler；
 - best-effort 取消 LLM/资源工作；
