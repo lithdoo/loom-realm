@@ -169,6 +169,8 @@
 | T-CTRL-007 | SIMULATION §23/27 | normal result final render成功并已commit，随后 async presentation.failure 到达 | 不改写已commit BattleResult |
 | T-CTRL-008 | SIMULATION §4 | CREATED 调 pause/resume 或第二次 run | programmer error；close 幂等；RUNNING重复 resume / PAUSED重复 pause 为 no-op |
 | T-CTRL-009 | SIMULATION §4 | SETTLED 后 cancel，再 close 两次 | cancel no-op；第一次 close→CLOSED并清理Presentation，第二次 close no-op |
+| T-CTRL-010 | SIMULATION §5/27 | presentation.initialize 尚未返回时 async failure 或 cancel 先终止 session | initialize 后续返回不得继续 initial render / initial Decision / scheduler start；run() 保持已commit终止结果 |
+| T-CTRL-011 | SIMULATION §6/27 | battle.pause()/resume() 调用 Presentation 时同步 classified fatal | Runtime 捕获并通过 terminal arbiter归约为 presentation failure；不得同时向调用方抛同义业务错误 |
 | T-REPLAY-001 | REPLAY-001 | Replay 一场已记录 Battle | 不重新调用 LLM；按记录的 request/consume/accept Tick 与 Plan 复现，不依赖真实 completion timestamp |
 | T-REPLAY-002 | REPLAY-001, RNG-001 | Replay seeded contention | 相同 winner/result |
 | T-REPLAY-003 | REPLAY-002 | 开关 diagnostics | gameplay result 不变 |
