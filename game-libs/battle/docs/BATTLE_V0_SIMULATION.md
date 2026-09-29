@@ -58,7 +58,7 @@ Promise callback、scheduler wake callback、Presentation async failure callback
 
 ## 2. Module shape
 
-v0 推荐且足够的实现结构：
+v0 canonical implementation module shape：
 
 ```text
 src/
@@ -129,7 +129,7 @@ Builder 是 one-shot：同一 Builder 只能成功 `build()` 一次；重复 bui
 
 Serialized Content 的 subject/version 仍可由 Contracts/Integration 单独演进；Simulation 不因此等待 ContentClient schema。Composition/loader 必须先把资源解析成纯数据 `ResolvedBattleDefinition`。
 
-概念 exact Simulation-facing shape：
+exact Simulation-facing shape：
 
 ```ts
 type ResolvedBattleDefinition = {
@@ -433,6 +433,13 @@ battle counters:
   nextEventId = 1
   nextEffectOccurrenceId = 1
 ```
+
+Deterministic traversal invariant：
+
+- 任何可能分配 session-global ID、产生 ordered public/replay output、或建立外部 Decision command 的 actor iteration，都必须先按 `compareActorId` / ECMAScript ordinal排序；
+- initial Decision requests、phase 9 completion processing、phase 10 plan advancement、phase 13 movement winner application、phase 14 event emission均遵循该排序；
+- 同一 dueTick、同一 event type 的 scheduled events按 actorId ordinal处理；event type 的 phase顺序由 TICK-001 本身决定，不依赖 queue insertion order；
+- Map/Set insertion order从不作为 gameplay/replay identity source。
 
 ID allocation固定使用 session-local monotonic counters，不使用随机 UUID：
 
@@ -1043,6 +1050,21 @@ Presentation sync error classification固定：
 
 - `PRESENTATION_CONTENT_FAILED / PRESENTATION_COMMIT_FAILED` → classified session failure，进入 `BattleResult.failure { source: "presentation", code }`；
 - `PRESENTATION_INVALID_STATE / PRESENTATION_SCENE_MISMATCH / PRESENTATION_PROJECTION_CONFLICT / PRESENTATION_INVALID_DATA` → Runtime/contract invariant or programmer error，允许 throw/reject，不伪装成业务 BattleResult。
+
+Active Runtime invariant/programmer failure 使用独立 one-shot rejection cleanup path：
+
+```text
+rejectInvariant(error)
+→ if terminal/result already committed: do not rewrite result
+→ otherwise stop scheduler
+→ clear queues/intake
+→ abort Decision work
+→ presentation.close()
+→ status = CLOSED
+→ reject run() exactly once
+```
+
+它不写入 `state.result`，Replay可保留截至失败前的partial facts但没有业务result。同步 public method misuse可直接throw；async provider/Presentation invariant必须被捕获后走上述cleanup，不能成为unhandled rejection。
 
 Programmer error/invariant violation不伪装成业务 `BattleResult.failure`，允许throw/reject。
 
