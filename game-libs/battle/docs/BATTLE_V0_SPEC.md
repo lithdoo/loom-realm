@@ -173,7 +173,7 @@ Skill range 旋转读取 Simulation direction，而不是 Presentation Sprite �
 
 ### STATE-005 — Action lifecycle 与 Decision lifecycle 正交 — FROZEN
 
-Actor 的“身体正在做什么”和“Decision 是否正在思考/已 ready”是两条独立状态轴。
+Actor 的“身体正在做什么”和“Decision Request 是否正在进行”是两条独立状态轴。
 
 因此以下组合都是合法的：
 
@@ -184,7 +184,20 @@ idle     + thinking
 protected + thinking
 ```
 
-`thinking` 不得作为与 `moving / windup / recovery` 互斥的 `ActionState` 分支。ActionState 只描述 gameplay Action lifecycle；DecisionState 单独描述 Decision Request / ready lifecycle。
+`thinking` 不得作为与 `moving / windup / recovery` 互斥的 `ActionState` 分支。ActionState 只描述 gameplay Action lifecycle；DecisionState 单独描述尚未完成的 Decision Request。异步 completion 在被 Tick reducer 消费前只存在于 Decision Inbox，不建立额外的 Actor `ready` authority state。
+
+### STATE-006 — Decision 预取是有界的 — FROZEN
+
+Decision 与 Action 可以流水重叠，但 v0 不允许无界 Plan 排队。
+
+- Actor 同时最多一个有效 pending Decision Request；
+- 当前 accepted plan 仍有尚未 materialize 的 turn / path step / skill intent 时，不为“下一 Plan”提前开启新的 generation；
+- 当当前 Plan 的最后一个 future intent 已经 materialize 成正在执行的 Action 后，即使该 Action 仍处于 moving / windup / recovery，Simulation 可以为后续行为提前进入 Thinking；
+- 提前返回且被 reducer 接受的下一 Plan 只能作为**至多一个 pending accepted plan** 暂存；它在当前 Action lock 解除前不得启动 Action；
+- current/pending 之外不得继续接受第三份 Plan，也不得建立通用无界 FIFO；
+- damaging hit、death、cancel 或其他使当前 Decision/Plan authority 失效的事实，必须同时 fence 掉不再合法的 pending Plan。
+
+这里的“Plan intent 已 materialize”表示该 intent 已经转化为当前权威 Action（例如 active movement / windup / recovery 链），不是指该 Action 已经完成。
 
 ## 5. 时间、事件队列与异步完成
 
@@ -288,7 +301,7 @@ Plan 是否被 Simulation 接受
 Plan 从哪个 Tick 开始执行
 ```
 
-stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、accepted-plan queue 与 Replay consume/accept tick 都由 Simulation 决定。
+stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、active/pending accepted-plan pipeline 与 Replay consume/accept tick 都由 Simulation 决定。
 
 Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
 
@@ -603,7 +616,7 @@ resolve 前受到实际伤害会取消未完成 windup。
 Recovery 是**行动锁，不是思考锁**：
 
 - Decision Thinking 可以开始/继续；
-- reducer 已接受的下一 Plan 可以暂存；
+- reducer 已接受的下一 Plan 可以按 STATE-006 暂存为唯一 pending accepted plan；
 - recovery 中不能启动 move/turn/windup；
 - 实际伤害 `hit` 会中断 recovery，并进入正常受击流程；
 - `immune` 不会中断 recovery。
