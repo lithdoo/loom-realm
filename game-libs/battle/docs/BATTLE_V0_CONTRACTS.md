@@ -429,14 +429,38 @@ Observed Actor 至少应包含有战术意义的公开事实：
 
 Prompt 面向的具体序列化与 RecentEvents budget 属于实现细节。
 
-## 10. BattleSnapshot
+## 10. BattleResult / BattleStatus / BattleSnapshot
 
-BattleSnapshot 是权威状态快照，概念：
+Simulation public result contract 冻结为：
+
+```ts
+type BattleResult =
+  | { type: "ally_win" }
+  | { type: "enemy_win" }
+  | { type: "simultaneous_defeat" }
+  | { type: "cancelled" }
+  | {
+      type: "failure"
+      source: "simulation" | "decision" | "presentation"
+      code: string
+    }
+
+type BattleStatus =
+  | "created"
+  | "initializing"
+  | "running"
+  | "paused"
+  | "settled"
+  | "closed"
+```
+
+稳定 Contract 不携带 raw `Error`、stack、provider response 或 Browser internal object；这些只进入 diagnostics/logging。
+
+BattleSnapshot 是 detached authoritative state view：
 
 ```ts
 type BattleSnapshot = {
   battleId: string
-  battleEpoch: integer
   sceneEpoch: integer
 
   currentTick: integer
@@ -451,7 +475,7 @@ type BattleSnapshot = {
 
 ActorSnapshot 的 canonical 字段必须叫 `direction`，不得再并行使用 `facing`。
 
-BattleSnapshot 与 RenderProjection 是两类不同数据。v0 不额外公开没有明确 consumer/递增语义的 `stateVersion`；内部实现若需要诊断 revision，不得因此扩张 public Snapshot ABI。
+BattleSnapshot 与 RenderProjection 是两类不同数据。v0 不公开没有明确 consumer/递增语义的 `battleEpoch / stateVersion`；late async fencing 使用 Runtime lifecycle、AbortSignal、`actionGeneration / decisionGeneration`。内部实现若需要诊断 revision，不得因此扩张 public Snapshot ABI。
 
 ## 11. ActorRuntimeState
 
@@ -701,6 +725,12 @@ type DecisionRequest = {
   }
 }
 
+type DecisionFailure = {
+  category: "attempt_failure" | "session_fatal"
+  code: string
+  metadata?: unknown
+}
+
 type DecisionCompletion =
   | {
       type: "completed"
@@ -759,8 +789,8 @@ BattleResult
 ## 18. Contracts OPEN
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
-- Decision failure enum / provider-specific metadata exact shape；Decision attempt/inbox/Tick-boundary ownership 已确定。
-- Runtime 的其余 exact discriminated-union payload / enum names。
+- Decision provider-specific metadata / provider code 的 exact shape；`attempt_failure | session_fatal` authority classification 已冻结。
+- Observation-facing ActorSnapshot / ReservationSnapshot 的最终字段细节可随 Simulation implementation补齐，但不得改变已冻结 Runtime/result/state semantics。
 - Observation history budget 与 prompt-facing representation。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
