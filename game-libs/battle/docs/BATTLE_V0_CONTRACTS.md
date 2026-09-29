@@ -486,19 +486,21 @@ type ActorRuntimeState = {
   actorId: string
   team: Team
   hp: integer
+  maxHp: integer
   tile: GridPosition
   direction: Direction
 
-  actionState: ActionState
-  decisionState: DecisionState
+  action: ActionState
+  decision: DecisionState
 
-  activePlanId?: string
-  pendingPlanId?: string
+  activePlan: AcceptedPlan | null
+  pendingPlan: AcceptedPlan | null
 
   protectedUntilTickExclusive: integer
 
   actionGeneration: integer
   decisionGeneration: integer
+  nextMotionId: integer
 }
 ```
 
@@ -510,6 +512,7 @@ type ActionState =
   | {
       type: "moving"
       generation: integer
+      motionId: integer
       from: GridPosition
       to: GridPosition
       startTick: integer
@@ -518,7 +521,6 @@ type ActionState =
   | { type: "windup"; /* exact skill action payload */ }
   | { type: "recovery"; /* exact recovery payload */ }
   | { type: "dead" }
-  | { type: "terminated" }
 
 type DecisionState =
   | { type: "none" }
@@ -527,15 +529,16 @@ type DecisionState =
       requestId: string
       generation: integer
       attempt: 0 | 1
+      requestTick: integer
     }
 ```
 
-exact windup/recovery payload 仍可在 Simulation implementation spec 中正式冻结，但以下 authority 边界已经固定：
+windup/recovery exact payload、AcceptedPlan cursor 与 Runtime-only counters 已在 BATTLE_V0_SIMULATION.md 冻结；Contracts 这里只保留跨文档 authority 关系：
 
 - `thinking` 不得进入 ActionState；因此 `moving + thinking`、`recovery + thinking` 等 `STATE-005` 组合可直接表达；
 - Decision completion 在 reducer 消费前只存在于 Decision Inbox，不建立独立的 Actor `ready` state；
 - active movement step 的权威 payload 直接属于 `ActionState { type: "moving" }`，不再并行维护第二份 `activeStep` authority；
-- `activePlanId` 标识仍有未完成/已 materialize Action 生命周期的当前 Plan；`pendingPlanId` 只用于 `STATE-006` 允许的唯一下一 Plan，v0 不要求通用 Plan FIFO；
+- `activePlan` 是当前 Simulation-owned Plan；`pendingPlan` 只用于 `STATE-006` 允许的唯一下一 Plan，v0 不要求通用 Plan FIFO；
 - `actionGeneration` 是 move/windup/recovery scheduled-event 的统一 stale fence，不再为 movement/skill/recovery 各自创造重复 generation；
 - `decisionGeneration` 是 Decision authority generation；`requestId` 只做某次异步 attempt 的 correlation identity，二者不得合并。
 
@@ -543,27 +546,34 @@ exact windup/recovery payload 仍可在 Simulation implementation spec 中正式
 
 ## 12. BattleEvent
 
-概念 envelope：
+Simulation core scheduled event union 冻结为：
 
 ```ts
-type BattleEvent = {
-  eventId: string
-  dueTick: integer
-  type: BattleEventType
-  actorId?: string
-  actionGeneration?: integer
-  decisionGeneration?: integer
-  payload?: unknown
-}
+type BattleEvent =
+  | {
+      type: "move_complete"
+      eventId: string
+      dueTick: integer
+      actorId: ActorId
+      actionGeneration: integer
+    }
+  | {
+      type: "skill_resolve"
+      eventId: string
+      dueTick: integer
+      actorId: ActorId
+      actionGeneration: integer
+    }
+  | {
+      type: "recovery_complete"
+      eventId: string
+      dueTick: integer
+      actorId: ActorId
+      actionGeneration: integer
+    }
 ```
 
-核心 scheduled event：
-
-```text
-move_complete
-skill_resolve
-recovery_complete
-```
+Event 不重复保存 movement from/to、skill target 等 authoritative action payload；消费时从当前 ActionState 读取并用 actionGeneration fencing。
 
 DecisionCompletion 不属于 BattleEvent，也没有 `dueTick`；它进入 Simulation-owned Decision Inbox。
 
