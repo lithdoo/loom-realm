@@ -437,7 +437,7 @@ accepted plan 在执行过程中持续面对实时战场：
 统一规则：
 
 - hold/reobserve 在被接受的当前 Tick立即视为 Plan exhausted，但不得同 Tick创建新的 Decision generation；
-- move-only path耗尽、pure turn完成且无剩余 skill、path耗尽仍未达到 `minCoefficient`、动态阻挡/目标失效等 Plan正常结束或失败后，如果没有已预取的 pending Plan，最早下一逻辑 Tick才可创建新的 Decision generation；
+- 如果最后一个 move/skill intent 已 materialize 成仍在执行的 Action，可按 STATE-006 在 Action完成前预取下一 Decision；除此之外，move/path最终结束、pure turn完成且无剩余 skill、path耗尽仍未达到 `minCoefficient`、动态阻挡/目标失效等 Plan正常结束或失败后，如果没有已预取的 thinking/pending Plan，最早下一逻辑 Tick才可创建新的 Decision generation；
 - damaging hit 仍按 HIT-003 的受击 redecision 规则处理；
 - 不得通过 hold/失败/Plan结束在同一 Tick形成零时间 Decision 循环。
 
