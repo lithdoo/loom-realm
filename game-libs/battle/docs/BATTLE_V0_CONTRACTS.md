@@ -553,7 +553,7 @@ type ObservedEvent =
 - `recentEvents` 是 deterministic bounded history：只包含 observation Tick `tick` 与 `tick - 1` 两个 Tick中产生的上述事件；排序 key 固定为 `(event.tick, kindRank, primaryActorId, secondaryActorId)`，其中 kindRank 为 `move_failed=0 / move_interrupted=1 / skill_resolved=2 / protection_started=3`；move/protection 的 primaryActorId 是 actorId、secondary 为空串，skill 的 primary= casterActorId、secondary=targetActorId；字符串均按 ECMAScript ordinal 比较；
 - initial tick 0 没有 prior gameplay event，`recentEvents = []`；
 - Observation builder 不持有无界历史；这些 event 可从最近两个 ReplayTick facts/当前 Tick facts派生；
-- Optional Guidance **不属于 canonical BattleObservation**。Guidance Host/adapter 在调用真实模型前把外部 guidance 与 `DecisionRequest.observation` 组合；Simulation Core 不解析、不存储、不回放 Guidance。
+- Future PlayerGuidance **不属于 canonical BattleObservation**，当前 v0 不实现其 concrete contract。未来若启用，必须通过 BATTLE_V0_DECISION.md 冻结的 request-scoped typed `DecisionWorkflow` capability/data 进入某一次 workflow run；Simulation Core 不解析、不存储、不回放 Guidance，也不因此修改 `DecisionPort`。
 
 Contracts 不定义 provider prompt 文本；Battle v0 concrete DeepSeekDecision 的 prompt/context formatting 已在 BATTLE_V0_DECISION.md 冻结。任何 concrete formatter 都不得改变上述结构化 input facts。
 ## 10. BattleResult / BattleStatus / BattleSnapshot
