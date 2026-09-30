@@ -818,6 +818,8 @@ function extractOutputText(value: unknown): string
 
 唯一算法：
 
+> 下列 `require` 任一失败都归一化为 `attempt_failure / DECISION_PROVIDER_UNAVAILABLE`；只有成功提取 provider visible text 后，文本本身为空/坏 Plan JSON/shape invalid 才归入 `DECISION_OUTPUT_INVALID`。
+
 ~~~text
 require top-level object
 require object === "response"
@@ -903,7 +905,8 @@ DECISION_OUTPUT_INVALID
 | HTTP 500 / 502 / 503 / 504 / other 5xx | attempt_failure | DECISION_PROVIDER_UNAVAILABLE |
 | Responses incomplete: content_filter | attempt_failure | DECISION_PROVIDER_REFUSED |
 | Responses incomplete: max_output_tokens | attempt_failure | DECISION_PROVIDER_INCOMPLETE |
-| completed but empty/malformed/schema-invalid output | attempt_failure | DECISION_OUTPUT_INVALID |
+| HTTP 2xx malformed JSON / malformed Responses envelope / unexpected output item | attempt_failure | DECISION_PROVIDER_UNAVAILABLE |
+| completed + extracted visible text empty, or Call B visible text bad JSON/Plan shape | attempt_failure | DECISION_OUTPUT_INVALID |
 
 ### 11.2 session_fatal
 
