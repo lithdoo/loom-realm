@@ -100,7 +100,7 @@ v0 唯一外部 provider configuration 是 apiKey。
 - retry；
 - structured-output mode。
 
-DeepSeekDecision 不读取 process.env、配置文件或 Browser storage。credential 必须由 Host/Application composition 显式注入。
+DeepSeekDecision 不读取 process.env、配置文件或 Browser storage。credential 必须由 Host/Application composition 显式注入。constructor 对空字符串或仅 whitespace 的 apiKey 同步抛出配置/programmer error，不发网络请求。
 
 ## 3. Fixed DeepSeek transport profile
 
@@ -573,12 +573,10 @@ canonical schema 必须与 current PlanSubmission structural shape 对齐：
       "required": ["skillId", "targetActorId", "minCoefficient"],
       "properties": {
         "skillId": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "targetActorId": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "minCoefficient": {
           "type": "number"
@@ -656,6 +654,8 @@ response.status = completed
 
 - response.status = incomplete；
 - response.status = failed；
+  - 若 error 可映射到已冻结 auth/quota/rate-limit/context-too-large taxonomy，则使用对应 DecisionFailure；
+  - 其他 failed response → attempt_failure / DECISION_PROVIDER_UNAVAILABLE；
 - completed 但没有非空 output_text；
 - Call B output 无法 parse 成 schema-compatible PlanSubmission。
 
@@ -664,7 +664,7 @@ response.incomplete_details.reason：
 - content_filter → provider refusal；
 - max_output_tokens → provider incomplete。
 
-Reasoning item 仅用于 provider processing/diagnostics，不作为 Battle facts，不进入 Call B strategy memo；Call A 只使用最终 visible output text。
+Reasoning item 不作为 Battle facts，不进入 Call B strategy memo；adapter 只使用最终 visible output text。v0 不保存、不记录、不向 Host 暴露 provider reasoning_text，只允许记录 reasoning token count。
 
 ## 11. Failure taxonomy
 
@@ -689,7 +689,7 @@ DECISION_OUTPUT_INVALID
 | DNS/socket/fetch transport error | attempt_failure | DECISION_PROVIDER_NETWORK |
 | 60s provider request timeout | attempt_failure | DECISION_PROVIDER_TIMEOUT |
 | HTTP 429 | attempt_failure | DECISION_PROVIDER_RATE_LIMITED |
-| HTTP 500 / 503 / other transient 5xx | attempt_failure | DECISION_PROVIDER_UNAVAILABLE |
+| HTTP 500 / 502 / 503 / 504 / other 5xx | attempt_failure | DECISION_PROVIDER_UNAVAILABLE |
 | Responses incomplete: content_filter | attempt_failure | DECISION_PROVIDER_REFUSED |
 | Responses incomplete: max_output_tokens | attempt_failure | DECISION_PROVIDER_INCOMPLETE |
 | completed but empty/malformed/schema-invalid output | attempt_failure | DECISION_OUTPUT_INVALID |
@@ -713,7 +713,7 @@ DECISION_CONTEXT_TOO_LARGE
 以下不是正常 DecisionFailure：
 
 - adapter 构造出 provider 明确拒绝的固定 request shape；
-- unexpected HTTP 400/422 且不是可识别 context-too-large；
+- unexpected HTTP 400/404/422 或其他未显式分类的 4xx，且不是可识别 auth/quota/rate-limit/context-too-large；
 - response object shape 与 frozen DeepSeek transport contract 不符；
 - internal impossible state；
 - local code bug；
