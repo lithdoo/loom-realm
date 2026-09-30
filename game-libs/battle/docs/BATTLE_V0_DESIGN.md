@@ -1,6 +1,6 @@
 # Battle v0 文档索引与迁移说明
 
-> 状态：**Core gameplay 已冻结；Simulation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision = FROZEN FOR IMPLEMENTATION**。DeepSeek concrete Decision architecture 已唯一化；真实实现、Guidance 与 Host composition 仍属于后续工作。
+> 状态：**Core gameplay 已冻结；Simulation gameplay baseline = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision + Decision availability circuit = FROZEN FOR IMPLEMENTATION**。DeepSeek concrete Decision 与连续 provider failure 自动暂停 Battle 的 live Runtime policy 已唯一化；真实实现、qualification、Guidance 与 Host composition 仍属于后续工作。
 >
 > 本文件不再重复定义 Battle 规则。2026-09-25 起，原单体 `BATTLE_V0_DESIGN.md` 已重构为“核心规范 / 数据契约 / 集成说明 / 测试矩阵”四份文档，以避免同一规则在多个章节重复维护。
 >
