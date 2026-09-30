@@ -1294,7 +1294,7 @@ Transport 不知道 Battle failure taxonomy；Shell 不知道 Call A/Call B/prov
 - 不进入 PlanSubmission；
 - 不进入 Replay outcome；
 - 不影响 correction；
-- 不包含 apiKey；
+- 不包含 provider credential；
 - v0 不把完整 prompt/strategy/provider raw body 作为 gameplay/public diagnostic contract。
 
 Host telemetry wiring不是 Decision implementation blocker；若未来加入 sink，必须保持 non-authoritative。
@@ -1303,11 +1303,13 @@ Host telemetry wiring不是 Decision implementation blocker；若未来加入 si
 
 必须满足：
 
-- apiKey 只存在 Host/Application composition 与 DeepSeek transport；
-- Browser Presentation 不持有 apiKey；
-- Simulation 不持有 apiKey；
-- Replay 不记录 apiKey；
-- logs/errors 不输出 Authorization header；
+- provider credential 只存在 trusted product/platform composition 与 configured `DeepSeekTransport` 的 private physical realization；
+- `DeepSeekDecision` 没有独立 credential/apiKey field 或 public option；
+- game/business composition 只接收 configured `DeepSeekTransport` capability，不接收 provider secret 本身；
+- Browser Presentation 不持有 provider credential；
+- Simulation 不持有 provider credential；
+- Replay 不记录 provider credential；
+- logs/errors 不输出 Authorization header / secret；
 - provider response 视为不可信；
 - game/content/Guidance strings 视为 untrusted data；
 - 模型没有外部 tool authority。
@@ -1393,13 +1395,15 @@ SituationAnalysis
 
 ### 17.3 Backward-compatible product surface
 
-v0 调用方只写：
+v0 game/business composition 只写：
 
 ~~~ts
-new DeepSeekDecision({ apiKey })
+new DeepSeekDecision({
+  transport,
+})
 ~~~
 
-未来如果 Guidance 需要额外 Host capability，应通过新增 optional typed composition capability 或新的 compatible factory/constructor overload 演进；现有只提供 `apiKey` 的调用方式必须继续有效，不能要求业务为了 workflow 内部拆分而重写 Simulation wiring。
+其中 `transport` 已由 trusted product/platform composition 配置完成。未来如果 Guidance 需要额外 typed capability，应通过兼容的 optional composition capability 或新的 compatible factory/constructor overload 演进；现有 transport-only construction path 必须继续有效，不能要求业务为了 workflow 内部拆分而重写 Simulation wiring。
 
 因此：
 
@@ -1407,7 +1411,7 @@ new DeepSeekDecision({ apiKey })
 stable:
   DecisionPort
   DeepSeekDecision.decide()
-  existing apiKey-only construction path
+  existing transport-only construction path
 
 replaceable:
   DecisionWorkflow
@@ -1500,7 +1504,7 @@ BattleSimulationBuilder
 至少验证：
 
 ~~~text
-apiKey present
+configured real DeepSeekTransport available
 → Call A completed non-empty text
 → Call B completed structured output
 → local parser accepts PlanSubmission shape
@@ -1530,14 +1534,14 @@ Implementation agent 必须：
 
 1. 不修改 frozen Simulation/Presentation gameplay semantics；
 2. 不扩张 DecisionRequest / PlanSubmission / DecisionCompletion public ABI 以方便 prompt；
-3. 实现 DeepSeek-only、apiKey-only public config；
+3. 实现 DeepSeek-only、transport-only public Decision config；`DeepSeekDecision` 不接收独立 apiKey，production/testing 都通过同一 `DeepSeekTransport` seam；
 4. 使用固定 Responses API / model / endpoint；
 5. 实现 stable DeepSeekDecision shell + internal DecisionWorkflow seam，并让 v0 workflow 使用 stateless two-call pipeline；
 6. 实现 deterministic context formatter；
 7. 实现 direct JSON Schema structured Plan output；
 8. 保留 local strict parser；
 9. 实现本文 failure/timeout/no-retry/abort semantics，并只上报单次 availability signal；跨 request streak / circuit pause 属于 Simulation；
-10. 提供只表达 HTTP status/bodyText/network reject 的 FakeDeepSeekTransport 与测试；
+10. 提供只表达 raw status/bodyText/network reject 的 FakeDeepSeekTransport 与测试；不增加 testing-only transport injection factory；
 11. 保持真实 provider test credential-gated；
 12. 不引入 generic AI/provider/workflow framework；只保留 DecisionPort → DecisionWorkflow → DeepSeekTransport 三个 seam，其余 provider helpers 使用 module-local pure functions/constants；
 13. 不实现 PlayerGuidance concrete contract，但不得通过 stage-level public API 或 hidden mutable state 阻塞未来 workflow 扩展。
@@ -1558,7 +1562,8 @@ Implementation agent 必须：
 
 满足以下全部条件后，Battle v0 Decision implementation 才算完成：
 
-- DeepSeekDecision public API 落地；
+- `DeepSeekDecision({ transport })` public API 与 exported `DeepSeekTransport` contract 落地；
+- `DeepSeekDecision` 不接收/读取/保存独立 apiKey；credential/network realization 保持在 external configured transport boundary；
 - DeepSeekDecision shell 不暴露 stage-level methods，并通过 internal DecisionWorkflow 承载 v0 orchestration；
 - ./decision 与 ./decision/testing exports 可解析；
 - normal decide() = exactly Call A + Call B；
@@ -1576,7 +1581,7 @@ Implementation agent 必须：
 - exact Responses output extractor 落地；
 - concurrent decide() safety test 通过；
 - abort-over-timeout precedence test 通过；
-- Fake transport tests 完整；
+- Fake transport tests 完整，并复用 production constructor seam；
 - tests 证明 Battle-facing caller 不依赖 workflow stage/call topology；
 - Simulation integration tests 通过；
 - existing Simulation/Presentation tests 全绿；
