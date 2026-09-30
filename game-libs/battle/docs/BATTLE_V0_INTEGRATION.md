@@ -686,6 +686,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 与 Core Simulation/DecisionPort/full Runtime 均已冻结、实现并完成 closed-loop qualification；真实 provider 与业务 Host composition 仍待外部集成。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 与既有 Simulation baseline/DecisionPort 已完成 qualification；新增 Decision availability circuit 与 DeepSeekDecision 尚待实现，configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。
