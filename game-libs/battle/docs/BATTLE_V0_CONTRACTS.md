@@ -555,7 +555,7 @@ type ObservedEvent =
 - Observation builder 不持有无界历史；这些 event 可从最近两个 ReplayTick facts/当前 Tick facts派生；
 - Optional Guidance **不属于 canonical BattleObservation**。Guidance Host/adapter 在调用真实模型前把外部 guidance 与 `DecisionRequest.observation` 组合；Simulation Core 不解析、不存储、不回放 Guidance。
 
-Prompt 文本格式可以由 Decision adapter自行选择，但不得改变上述结构化输入facts。
+Contracts 不定义 provider prompt 文本；Battle v0 concrete DeepSeekDecision 的 prompt/context formatting 已在 BATTLE_V0_DECISION.md 冻结。任何 concrete formatter 都不得改变上述结构化 input facts。
 ## 10. BattleResult / BattleStatus / BattleSnapshot
 
 Simulation public result contract 冻结为：
@@ -988,7 +988,7 @@ ReplayRecord exact v0 schema、fact shapes 与 ReplayDriver 执行方式已在 B
 ## 18. Contracts OPEN
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
-- Decision provider-specific metadata / provider code 的 exact shape；`attempt_failure | session_fatal` authority classification 已冻结。
-- Decision adapter 的 prompt/token formatting；structured `BattleObservation.recentEvents` 的两-Tick history window 已冻结，不再是 OPEN。
+
+Decision concrete provider code、prompt/token formatting、structured-output/parser/failure/timeout/retry 已集中冻结在 BATTLE_V0_DECISION.md，不再属于 Contracts OPEN；`attempt_failure | session_fatal` authority classification 与 `BattleObservation.recentEvents` 两-Tick history window 继续保持现有 frozen semantics。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。
