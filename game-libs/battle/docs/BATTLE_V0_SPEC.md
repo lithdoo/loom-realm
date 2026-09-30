@@ -303,18 +303,49 @@ Plan 从哪个 Tick 开始执行
 
 stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、active/pending accepted-plan pipeline 与 Replay consume/accept tick 都由 Simulation 决定。
 
-Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
+Provider/network timeout 可以作为 concrete Decision implementation 的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。具体 provider/model/timeout/retry/error code 由 concrete Decision implementation spec 冻结，不属于 Simulation gameplay contract。
 
 ### DEC-004 — Decision failure authority classification — FROZEN
 
-Decision infrastructure failure 对 Simulation 只有两种 authority category：
+Decision failure 对 Simulation 只有两种 authority category：
 
-- `attempt_failure`：只结束当前 Decision attempt/generation，不终止 Battle；Actor 最早下一逻辑 Tick重新进入 Decision lifecycle；
+- `attempt_failure`：结束当前 Decision attempt/generation，本身不是 Battle terminal result；
 - `session_fatal`：该 failure 是 Battle terminal candidate，由 Runtime 归约为 `BattleResult.failure`。
 
-Provider-specific HTTP/network/error metadata、默认 timeout 数值等仍可在 Integration 层配置，但不得让 Simulation自行猜测某个 provider error 是否终止整场 Battle。
+Simulation 只能按 `DecisionCompletion.type`、`DecisionFailure.category` 与 request lifecycle authority 分支；不得解释 concrete `DecisionFailure.code`、provider HTTP status 或 provider metadata。对于 `session_fatal`，Runtime 可以把 opaque `error.code` 原样传播到 `BattleResult.failure.code`，但不得按其具体值改变 gameplay/runtime authority。
 
-默认 provider timeout 属于 `attempt_failure`；concrete adapter 若要把某类基础设施错误升级为 `session_fatal`，必须在返回 DecisionFailure 时明确分类。
+### DEC-005 — Live Decision availability circuit — FROZEN
+
+Live Runtime 对 authority-valid Decision completion 使用 provider-neutral availability policy：
+
+~~~text
+completed
+→ availability success
+→ consecutiveFailures = 0
+
+attempt_failure
+→ availability failure
+→ consecutiveFailures += 1
+
+session_fatal
+→ terminal candidate
+
+stale / lifecycle-invalid completion
+→ no availability signal
+~~~
+
+连续 3 个 authority-valid `attempt_failure` 后，当前 Tick完整提交，再进入 `PAUSED`：
+
+- 冻结 Battle logical clock；
+- suppress 尚未发出的 Decision request；
+- 撤销并 best-effort abort 所有 active Decision request authority；
+- 不自动 cooldown/resume；
+- 必须外部显式 `battle.resume()` 才恢复，并把 availability streak 清零；
+- Replay 不执行该 live availability circuit。
+
+Runtime 主动 abort request 时必须先撤销其 authority，所以随后到达的 abort completion 只走 stale/lifecycle fence；Simulation 不需要识别 concrete abort code。
+
+该 circuit 是 operational control state，不进入 gameplay Snapshot/Replay，不改变 Plan validation、Actor state 或 Battle Tick规则。
 
 ## 6. Decision Protocol 与 PlanSubmission
 
@@ -327,7 +358,7 @@ BattleObservation（内含 bounded RecentEvents）
 PlanConstraints
 ```
 
-Optional Guidance 属于 Decision adapter/Host 的外部 prompt augmentation，不进入 Simulation authoritative Observation、Replay 或 Tick state。不得直接把 Presentation DOM/Sprite/camera/动画进度当作战斗事实。
+PlayerGuidance concrete capability **不在 v0 实现范围**，也不进入 Simulation authoritative Observation、Replay 或 Tick state。未来若启用，只能作为 request-scoped typed DecisionWorkflow capability/data 进入某一次 Decision workflow run，不改变 `DecisionPort` 或 Simulation authority。Presentation DOM/Sprite/camera/动画进度不得作为战斗事实。
 
 ### PLAN-003 — 最小 PlanSubmission — FROZEN
 
