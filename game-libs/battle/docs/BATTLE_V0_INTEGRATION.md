@@ -339,15 +339,23 @@ Decision module 只负责“一次 request 如何得到一次 Plan/failure compl
 
 ## 6. LLM Decision Adapter
 
-当前仓库公开的 Subsystem surface 还没有冻结 Battle 的最终 LLM 服务接口。
+Battle v0 的 LLM provider scope 已收窄并冻结：
+
+- **只支持 OpenAI-compatible API protocol**；
+- v0 **不设计通用 multi-provider AI framework**，也不要求 Battle Core 直接依赖某个 vendor SDK；
+- `apiKey`、`model`、`baseUrl` 都由外部 Host/Application composition 提供；
+- 默认 provider profile 使用 **DeepSeek**；外部仍可通过 `baseUrl + model` 指向其他 OpenAI-compatible service；
+- credential 不进入 `DecisionRequest`、`BattleObservation`、Simulation state、Replay 或 Browser Presentation。
+
+当前仓库公开的 Subsystem surface 仍没有冻结 Host 到 Decision Adapter 的最终 provider transport/wiring；这属于外部 integration，不改变 Battle Decision/Simulation contracts。
 
 Adapter 最终需要解决：
 
-- LLM 请求位于哪个 Host 层；
-- authorization / credential；
-- 接收 Simulation 提供的 AbortSignal；
+- LLM 请求位于哪个 Host/service 层；
+- 外部 `apiKey / model / baseUrl` 的 composition 与 credential ownership；
+- 接收并向下传递 Simulation 提供的 AbortSignal；
 - provider/network timeout 与 service error metadata；
-- structured output 解析为 `PlanSubmission` / failure。
+- OpenAI-compatible structured output 解析为 `PlanSubmission` / failure。
 
 Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直接接受 Plan，也不自行 correction retry**。
 
@@ -372,7 +380,32 @@ Promise resolve / worker message / provider callback 只允许 enqueue completio
 
 Browser 不应持有模型密钥。
 
-### 6.1 Provider timeout 与 Battle gameplay 分离
+### 6.1 v0 provider protocol / configuration boundary
+
+v0 provider configuration 的 authority boundary：
+
+```text
+Host / Application composition
+  ├─ apiKey
+  ├─ model
+  └─ baseUrl
+        ↓
+OpenAI-compatible Decision Adapter
+        ↓
+LLMDecision
+        ↓
+DecisionCompletion
+```
+
+冻结规则：
+
+- `apiKey`、`model`、`baseUrl` 是外部配置，不属于 gameplay Contract；
+- 默认 provider profile 指向 DeepSeek，但 Battle gameplay/Simulation 不感知 provider 名称；
+- 其他服务只有在满足 v0 所需 OpenAI-compatible request/structured-output contract 时才可替换；
+- v0 不因为支持兼容 endpoint 而引入 provider registry、provider selection DSL 或大型 generic AI abstraction；
+- exact OpenAI-compatible endpoint surface（例如具体 request API shape）若尚未冻结，必须在 Decision implementation freeze 中唯一化，不能由 implementation agent 自行选择。
+
+### 6.2 Provider timeout 与 Battle gameplay 分离
 
 Provider/network timeout 是 infrastructure policy。例如模型服务在其配置的时限后返回 timeout，可以产生：
 
@@ -397,15 +430,20 @@ v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-cl
 - DecisionCompletion 不带 gameplay timing / dueTick；
 - completion callback 只 enqueue 到 Simulation-owned inbox；
 - stale / validation / correction / bounded active/pending accepted-plan pipeline 属于 Simulation；
-- Simulation 通过 AbortSignal best-effort 取消失效 attempt。
+- Simulation 通过 AbortSignal best-effort 取消失效 attempt；
+- v0 只支持 **OpenAI-compatible API protocol**；
+- `apiKey`、`model`、`baseUrl` 由 Host/Application 外部提供；
+- 默认 provider profile 使用 **DeepSeek**；
+- Battle Core 不拥有 credential，也不建立 generic multi-provider AI framework。
 
 尚未冻结：
 
-- `DecisionFailure` exact enum / provider metadata；
+- exact OpenAI-compatible request API shape / structured-output invocation；
+- `DecisionFailure` exact provider code / metadata normalization；
 - provider cancel guarantee；
 - provider/network timeout defaults；
 - model/service limit；
-- credential/authorization wiring。
+- credential 从 Host 到 concrete adapter 的 exact wiring。
 
 ## 7. Player Guidance
 
@@ -595,7 +633,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：provider-specific Decision metadata/cancel guarantee/provider timeout defaults；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
+- **INTEGRATION-OPEN-003**：v0 provider protocol 已冻结为 OpenAI-compatible，`apiKey / model / baseUrl` 由外部提供且默认 provider profile 为 DeepSeek；仍 OPEN 的仅是 exact request/structured-output API shape、provider-specific metadata/cancel guarantee/provider timeout defaults、model/service limits 与 Host credential wiring；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
