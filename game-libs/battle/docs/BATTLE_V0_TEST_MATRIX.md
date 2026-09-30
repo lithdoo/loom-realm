@@ -187,7 +187,7 @@
 | T-DEC-023 | SIMULATION §10 | counted provider failure 连续第1、2次被authority-valid消费 | streak=1/2；Battle保持RUNNING；按既有attempt_failure规则后续可重新Decision |
 | T-DEC-024 | SIMULATION §10 | 两次counted failure后消费一个DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不计LLM failure |
 | T-DEC-025 | SIMULATION §10 | 连续第3个counted failure在Tick N phase 9消费 | Tick N完整提交；shell render/terminal检查后trip circuit；status=PAUSED；本Tick尚未发出的Decision commands全部suppressed；不schedule next wake |
-| T-DEC-026 | SIMULATION §10/29 | circuit trip时另一个Actor仍有active Decision request | Runtime best-effort abort所有active request-scoped controllers；这些DECISION_ABORTED不增加streak |
+| T-DEC-026 | SIMULATION §10/29, DECISION §12 | circuit trip时另一个Actor仍有active Decision request | Runtime abort所有active request-scoped controllers；DeepSeekDecision本地settle DECISION_ABORTED并可在PAUSED中enqueue；这些completion不增加streak，迟到HTTP结果无authority |
 | T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
 | T-DEC-028 | SIMULATION §10 | streak=2后消费DECISION_ABORTED或stale completion | 不增加、不重置streak；不触发pause |
 | T-DEC-029 | SIMULATION §10 | 任意时刻消费session_fatal | 不等待failure threshold；直接terminal BattleResult=failure source=decision |
@@ -221,7 +221,7 @@
 | T-DDEC-017 | DECISION §11.3 | unexpected fixed-request 400/422 | adapter/provider-contract invariant，Promise reject；不伪装为 Plan reject/BattleResult failure |
 | T-DDEC-018 | DECISION §12 | external AbortSignal 在 Call A 前 abort | 不发 provider request；settle once，code=DECISION_ABORTED |
 | T-DDEC-019 | DECISION §12 | Call A 完成后、Call B 前 abort | 不发 Call B；settle once；late provider callback 无额外 completion |
-| T-DDEC-020 | DECISION §12 | Call B 中 abort 且 transport忽略 | best-effort abort；迟到结果不得绕过 Simulation generation/lifecycle fencing |
+| T-DDEC-020 | DECISION §12 | Call B 中 abort 且 transport忽略 | DeepSeekDecision 本地立即settle once为DECISION_ABORTED，不等待transport；迟到resolve/reject丢弃且不得产生第二completion |
 | T-DDEC-021 | DECISION §12.1 | 单个 provider request 超过 60s | attempt_failure DECISION_PROVIDER_TIMEOUT；不是 Battle gameplay deadline/dueTick |
 | T-DDEC-022 | DECISION §14 | FakeDeepSeekTransport | 可脚本化 success/HTTP/error/incomplete/abort/late resolve，不允许测试 seam 改 provider/model/baseUrl |
 | T-DDEC-023 | DECISION §17.3 | real Simulation + DeepSeekDecision(Fake transport) | initial request 两次 provider call→Plan→accept；existing Tick/Inbox/Replay semantics 不变 |
