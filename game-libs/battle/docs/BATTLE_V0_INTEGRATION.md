@@ -75,7 +75,7 @@ BattleRuntime
 
 Runtime 对注入的 Decision/Presentation lifecycle 负责：业务注入完成后不直接调用 `presentation.pause/resume/close`。
 
-Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、LLMDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
+Simulation 依赖 `DecisionPort / PresentationPort` 并不意味着依赖 concrete implementation：业务可以注入 ScriptDecision、DeepSeekDecision、BrowserPresentation、NullPresentation 或 RecordingPresentation，而 Simulation reducer 不随之改变。
 
 `BattlePresentationHandler` 应直接实现 `PresentationPort`；不需要额外建立一个只做 method forwarding 的 adapter。
 
@@ -116,7 +116,7 @@ next Tick reducer
 
 ### 1.2 Simulation 只依赖窄 capability
 
-Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；LLMDecision concrete implementation 也可以依赖 Host/service capability。
+Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；DeepSeekDecision concrete implementation 也可以依赖 Host/service capability。
 
 Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。构造方式可按仓库惯例命名；Simulation-facing capability 与 resolved input 形状已由 BATTLE_V0_SIMULATION.md 冻结。概念：
 
