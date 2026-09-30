@@ -997,9 +997,9 @@ DECISION_ABORTED
 
 只用于 concrete diagnostics / failure code，不是 Simulation branching ABI。
 
-Runtime 主动 abort request 时先撤销 request authority；后续 `DECISION_ABORTED` completion 会被 lifecycle/stale fence 丢弃，因此不需要 Simulation 识别这个 code。
+Runtime 只有在既有 lifecycle invalidation（例如 damaging hit/death、cancel/close、session fatal、request replacement）时才会主动 abort request；这类 abort 前先撤销 request authority，后续 `DECISION_ABORTED` completion 由 lifecycle/stale fence处理，因此 Simulation 不需要识别这个 code。
 
-连续失败阈值、自动 pause、active request authority revoke/abort 与 explicit resume 的 exact Runtime semantics 由 BATTLE_V0_SIMULATION.md §10 冻结。
+Availability circuit 本身只触发 Simulation Runtime 的既有 PAUSED lifecycle，不 revoke/abort Decision request。连续失败阈值、pause/resume 与 Replay exclusion 的 exact Runtime semantics 由 BATTLE_V0_SIMULATION.md §10 冻结。
 
 ## 12. Timeout / retry / AbortSignal
 
