@@ -70,12 +70,14 @@ Simulation 实施细节不得重新定义 SPEC gameplay Rule，也不得改变 P
 - v0 DeepSeek-only / apiKey-only public configuration；
 - fixed `deepseek-flash` + Responses API transport profile；
 - stable `DeepSeekDecision` shell + replaceable internal `DecisionWorkflow` orchestration seam；
+- minimal internal layering = `DecisionPort → DecisionWorkflow → DeepSeekTransport`；Transport 只负责 HTTP，Workflow 负责 provider protocol，其他 formatter/parser/classifier/budget/concurrency 逻辑保持 pure functions/constants；
 - 当前 v0 workflow = Analyze + Strategize → Materialize（两次物理调用）；call/stage topology 不是 DecisionPort/public ABI；
 - deterministic DecisionRequest → provider context formatting；
 - compact terrain window；
 - direct JSON Schema Plan output 与 local parser；
 - concrete failure codes；
 - 60s/request timeout、no automatic retry、AbortSignal；
+- final serialized provider request 512 KiB hard budget；同一 `DeepSeekDecision` instance concurrent-safe，依靠 request-local state 而非 mutex/global queue；
 - stateless correction behavior；
 - FakeDeepSeekTransport、Simulation integration、qualification 与 Agent execution contract。
 
