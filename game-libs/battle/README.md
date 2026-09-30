@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Simulation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision FROZEN FOR IMPLEMENTATION**。Simulation 与 Presentation 已完成 closed-loop qualification；DeepSeek concrete Decision 的 provider/model/API、两阶段调用、structured output、failure、timeout/retry、Abort 与测试架构已经冻结，implementation 尚未落地。
+> 状态：**Battle v0 Simulation gameplay baseline FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision + Decision availability circuit FROZEN FOR IMPLEMENTATION**。既有 Simulation/Presentation closed-loop qualification 保持有效；DeepSeek concrete Decision 及连续 provider failure 自动暂停 Battle 的 live Runtime circuit 尚未落地。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
