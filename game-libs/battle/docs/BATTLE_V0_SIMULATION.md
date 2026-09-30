@@ -599,7 +599,7 @@ Decision completion被 reducer消费后，对应 `thinking` 被清除；callback
 
 ## 10. Decision failure classification / live availability circuit
 
-Simulation 仍只接受两个 Decision authority category：
+Simulation 只认识共享 Decision authority outcome，不认识 concrete provider/DeepSeek failure code：
 
 ~~~ts
 type DecisionFailureCategory =
@@ -607,10 +607,13 @@ type DecisionFailureCategory =
   | "session_fatal"
 ~~~
 
-- `session_fatal`：立即成为 Runtime terminal candidate = `BattleResult.failure { source: "decision" }`；不进入 circuit breaker；
-- `attempt_failure`：结束当前 attempt/generation；是否计入 live Decision availability streak 取决于 concrete Decision code。
+Simulation **不得**按 `DECISION_PROVIDER_* / DECISION_OUTPUT_* / provider HTTP status` 分支。concrete Decision code 只用于 diagnostics / BattleResult code，不决定 live availability circuit。
 
-### 10.1 Counted consecutive LLM failures
+- `session_fatal`：立即成为 Runtime terminal candidate = `BattleResult.failure { source: "decision" }`；不进入 circuit breaker；
+- authority-valid `attempt_failure`：结束当前 attempt/generation，并作为一次 Decision availability failure；
+- authority-valid `DecisionCompletion.completed`：表示本次 Decision pipeline 成功产生结构有效的候选 Plan，并作为一次 Decision availability success。
+
+### 10.1 Consecutive Decision availability failures
 
 Battle v0 live Runtime 固定：
 
@@ -618,28 +621,42 @@ Battle v0 live Runtime 固定：
 MAX_CONSECUTIVE_DECISION_FAILURES = 3
 ~~~
 
-以下 DeepSeekDecision attempt failure code 计入连续失败：
+provider-neutral health signal 只有：
 
 ~~~text
-DECISION_PROVIDER_NETWORK
-DECISION_PROVIDER_TIMEOUT
-DECISION_PROVIDER_RATE_LIMITED
-DECISION_PROVIDER_UNAVAILABLE
-DECISION_PROVIDER_REFUSED
-DECISION_PROVIDER_INCOMPLETE
-DECISION_OUTPUT_INVALID
+authority-valid completed
+→ success
+
+authority-valid attempt_failure
+→ failure
+
+session_fatal
+→ terminal
+
+stale / lifecycle-invalid completion
+→ no signal
 ~~~
 
-以下不计入：
+因此 Runtime 不需要知道：
 
-- `DECISION_ABORTED`；
-- stale/lifecycle-fenced completion；
-- DecisionPort invariant reject/throw；
-- Simulation `PlanRejectReason`；
-- dynamic accepted-plan execution failure；
-- `session_fatal`。
+~~~text
+NETWORK
+TIMEOUT
+RATE_LIMITED
+UNAVAILABLE
+REFUSED
+INCOMPLETE
+OUTPUT_INVALID
+ABORTED
+~~~
 
-任意 authority-valid `DecisionCompletion.completed` 在进入 gameplay Plan validation前即表示 provider pipeline 成功，必须把 consecutive failure streak 重置为 0。即使该 Plan 随后被 Simulation reject 并产生 correction，也不计作 LLM failure。
+这些 concrete code 的含义。
+
+request-scoped AbortSignal 由 Runtime lifecycle/generation ownership 控制。Runtime 主动 abort 一个 request 时必须先撤销/失效该 request 的 authority；因此随后到达的 `DECISION_ABORTED` completion 只会被 existing stale/lifecycle fence 丢弃，不需要在 circuit 中按 code 特判。
+
+任意 authority-valid `DecisionCompletion.completed` 在进入 gameplay Plan validation前即把 consecutive failure streak 重置为 0。即使该 Plan 随后被 Simulation validator reject 并产生 correction，也不算 Decision service failure，因为 Decision pipeline 已正常返回结构有效的候选 Plan。
+
+Simulation `PlanRejectReason`、accepted-plan dynamic execution failure、DecisionPort programmer/invariant rejection 都不是 Decision availability completion，不进入 streak。
 
 同一个 Tick snapshot 内 completion 已按 actorId → requestId stable order处理；availability signal 使用相同顺序。因此“连续”的定义是：
 
@@ -675,14 +692,14 @@ phase 9 对 authority-valid Decision completion 产生 shell-only health signal�
 completed
 → success
 
-counted attempt_failure
-→ counted_failure
-
-DECISION_ABORTED / stale
-→ no signal
+attempt_failure
+→ failure
 
 session_fatal
 → terminal candidate
+
+stale / lifecycle-invalid
+→ no signal
 ~~~
 
 ReplayDriver 即使重放 recorded DecisionCompletion，也**不得启用 live Decision availability circuit**；Replay 不因历史 provider availability 等待人工 resume。
@@ -696,7 +713,7 @@ success
 → if circuitOpen == false:
      consecutiveFailures = 0
 
-counted_failure
+failure
 → if circuitOpen == false:
      consecutiveFailures += 1
      if consecutiveFailures >= 3:
@@ -704,22 +721,23 @@ counted_failure
        trip
 ~~~
 
-一旦本 Tick已 trip，circuitOpen latch 到 explicit `resume()`；同一 Tick后续 success signal 不得自动关闭 circuit。
+一旦本 Tick已 trip，`circuitOpen` latch 到 explicit `resume()`；同一 Tick后续 success signal 不得自动关闭 circuit。
 
 trip 的 exact behavior：
 
 ~~~text
 current Tick synchronous transaction finishes
 → suppress all not-yet-issued DecisionPort request commands from this Tick
+→ revoke authority of all still-active Decision requests
+→ best-effort abort their request-scoped AbortControllers
 → cancel/retain no next scheduler wake
 → call presentation.pause() through the normal Runtime pause boundary
 → if Presentation pause classified fatal: finish(presentation failure)
 → else status = PAUSED
-→ best-effort abort all still-active request-scoped Decision AbortControllers
 → issue no new Decision request while PAUSED
 ~~~
 
-trip 不回滚本 Tick已经提交的 gameplay facts。也就是说，第三个 counted failure 在 Tick N 被合法消费后，Tick N仍是完整 deterministic transaction；从 Tick N 结束后开始冻结 logical clock。
+trip 不回滚本 Tick已经提交的 gameplay facts。也就是说，第三个 failure 在 Tick N 被合法消费后，Tick N仍是完整 deterministic transaction；从 Tick N 结束后开始冻结 logical clock。
 
 Circuit pause 与普通 pause 共享：
 
@@ -728,9 +746,7 @@ Circuit pause 与普通 pause 共享：
 - resume后不做 pause catch-up；
 - HP/tile/action/protection/timers 在 pause 期间不推进。
 
-区别是 circuit trip 额外 abort 所有 active Decision requests，防止 provider 不可用时继续消耗请求。
-
-这些 circuit-triggered abort 的 `DECISION_ABORTED` completion 不计入 failure streak，也不能递归触发第二次 trip。
+区别是 circuit trip 额外撤销并 abort 所有 active Decision requests，防止 provider 不可用时继续消耗请求。它们之后的 completion 已经 lifecycle-invalid，因此只走 stale fence，不产生新的 availability signal，也不能递归触发第二次 trip。
 
 ### 10.4 Explicit resume
 
@@ -754,7 +770,7 @@ circuitOpen = false
 
 后续最早合法 Tick由现有 `ensureDecision` 规则创建新的 Decision request。
 
-如果 provider 仍然不可用，后续再次连续 3 个 counted failure 会再次 trip。
+如果 Decision service 仍然不可用，后续再次连续 3 个 authority-valid `attempt_failure` 会再次 trip。
 
 普通外部 pause/resume 在 `circuitOpen === false` 时不因 pause 本身修改 failure streak。
 
@@ -762,11 +778,11 @@ circuitOpen = false
 
 在未达到 threshold 时：
 
-- counted `attempt_failure` 与其他 attempt failure 一样结束当前 attempt/generation；
+- authority-valid `attempt_failure` 结束当前 attempt/generation；
 - 最早下一逻辑 Tick可重新 Decision；
-- DeepSeekDecision 本身不做 transport retry/backoff。
+- concrete Decision implementation 自己是否有 provider retry/backoff 由其 implementation spec 冻结；DeepSeekDecision v0 = none。
 
-因此 v0 不需要再叠加 provider cooldown/exponential retry；连续失败由 Runtime circuit-pause 截断请求风暴。
+因此 v0 不需要 Simulation 理解 provider retry、HTTP 或 failure code；连续失败由 provider-neutral Runtime circuit-pause 截断请求风暴。
 
 ## 11. AcceptedPlan
 
