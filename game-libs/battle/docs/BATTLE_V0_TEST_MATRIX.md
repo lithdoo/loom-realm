@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..033 尚待实现后 qualification。
+> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..035 尚待实现后 qualification。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -186,15 +186,18 @@
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
 | T-DEC-023 | DEC-004/DEC-005, SIMULATION §10 | authority-valid attempt_failure 连续第1、2次被消费，code可任意不同 | Simulation不解释code；streak=1/2；Battle保持RUNNING；最早下一合法Tick可重新Decision |
 | T-DEC-024 | DEC-005, SIMULATION §10 | 两次attempt_failure后消费一个authority-valid DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不属于Decision availability failure |
-| T-DEC-025 | DEC-005, SIMULATION §10 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；shell render/terminal检查后trip circuit；status=PAUSED；本Tick尚未发出的Decision commands全部suppressed；不schedule next wake |
-| T-DEC-026 | DEC-005, SIMULATION §10/29, DECISION §12 | circuit trip时另一个Actor仍有active Decision request | Runtime先撤销request authority再best-effort abort；后续abort completion即使入Inbox也被stale/lifecycle fence丢弃，不产生availability signal；迟到HTTP结果无authority |
+| T-DEC-025 | DEC-005, SIMULATION §10/§16 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；render/terminal检查正常完成；本Tick已生成的合法Decision commands仍正常调用；随后进入既有PAUSED lifecycle；不schedule next wake |
+| T-DEC-026 | DEC-005, SIMULATION §10/§29 | circuit trip时另一个Actor仍有active Decision request | 不abort、不revoke；Actor decision/requestId/generation保持不变；request可在PAUSED期间完成并enqueue；resume后第一个真实Tick按正常authority fence消费 |
 | T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
-| T-DEC-028 | DEC-005, SIMULATION §10 | streak=2后，Runtime已撤销authority的request其completion迟到 | 不读取concrete code；按stale/lifecycle-invalid丢弃，不增加、不重置streak，不触发pause |
+| T-DEC-028 | DEC-005, SIMULATION §10 | streak=2后消费一个因既有lifecycle原因已stale的completion | 不读取concrete code；stale/lifecycle-invalid不产生availability signal，不增加、不重置streak，不触发pause |
 | T-DEC-029 | DEC-004/DEC-005, SIMULATION §10 | 任意authority-valid session_fatal，code取任意opaque值 | 不等待failure threshold；直接terminal BattleResult=failure source=decision，并可原样传播code但不按code分支 |
-| T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；后续合法Tick才重新Decision |
-| T-DEC-031 | SIMULATION §10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；ordinary pause不abort active Decision |
-| T-DEC-032 | DEC-005, SIMULATION §10/Replay | Replay中重放3个recorded attempt_failure | 不启用live availability circuit，不进入PAUSED等待人工resume；Replay deterministic流程继续 |
+| T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；保留原thinking/in-flight request；PAUSED期间已enqueue completion在后续首个真实Tick正常消费 |
+| T-DEC-031 | SIMULATION §6/§10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；external pause与circuit pause都不abort/revoke active Decision；差异只在circuit guard与trigger |
+| T-DEC-032 | DEC-005, SIMULATION §10/Replay | Live中曾因3个attempt_failure进入circuit PAUSED；Replay重放相同Decision records | Replay不启用live circuit、不进入PAUSED；由于live circuit未改写requestId/generation/Actor decision authority，Replay仍产生相同Decision request/consume trace |
 | T-DEC-033 | DEC-004/DEC-005, CONTRACTS §16 | 三个authority-valid attempt_failure分别使用完全不同的concrete code | Simulation结果与code值无关：都只按category累计；证明circuit对Decision implementation/provider-neutral |
+| T-DEC-034 | SIMULATION §6/§10/§28 | late scheduler wake需要catch-up多个Tick，circuit在其中Tick N trip | Tick N完整提交后立即进入PAUSED；N+1..target不继续处理；resume后不得补跑pause前未处理的wall-time backlog |
+| T-DEC-035 | SIMULATION §10/§16/Replay | Tick N同时产生合法Decision command且health signal使circuit trip | command仍在Tick N shell中调用并建立正常request authority；随后PAUSED；Replay不运行circuit时仍生成相同requestId/generation与后续Decision record |
+
 
 
 
