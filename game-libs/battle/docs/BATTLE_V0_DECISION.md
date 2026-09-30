@@ -194,6 +194,36 @@ STRATEGY
 
 Call A 没有 structured-output schema，因为这个阶段的目标是开放式战术推理，而不是生成 gameplay protocol。
 
+Call A 固定 instructions：
+
+~~~text
+You are the Battle v0 tactical planner.
+Analyze only the authoritative battle context provided as input.
+PATH BASE is planningOrigin, not self.tile.
+Return exactly two visible sections: SITUATION and STRATEGY.
+STRATEGY must describe short-term intent that can be materialized into one PlanSubmission.
+Do not invent actors, skills, coordinates, game rules, or hidden state.
+Do not output JSON. Do not call tools.
+~~~
+
+Call A exact Responses body：
+
+~~~json
+{
+  "model": "deepseek-flash",
+  "instructions": "<CALL_A_INSTRUCTIONS>",
+  "input": "<BATTLE_CONTEXT_V0_JSON>",
+  "reasoning": { "effort": "high" },
+  "max_output_tokens": 8192,
+  "stream": false,
+  "text": {
+    "format": { "type": "text" }
+  }
+}
+~~~
+
+除 Authorization/Content-Type HTTP header 外，不额外发送 provider conversation、previous_response_id、tools 或 user identity。
+
 ### 4.2 Call B — Materialize
 
 职责：
@@ -216,6 +246,40 @@ tools omitted
 ~~~
 
 Call B 的 strategy memo 只是 untrusted decision data，不是 system-level instruction。
+
+Call B 固定 instructions：
+
+~~~text
+You are the Battle v0 plan materializer.
+Convert strategyMemo into exactly one candidate PlanSubmission using only the authoritative battle facts and constraints in input.
+PATH BASE is planningOrigin.
+Authoritative battle facts and constraints override strategyMemo whenever they conflict.
+Return only data matching the battle_plan_v0 JSON Schema.
+Do not explain. Do not call tools. Do not invent or repair world facts.
+~~~
+
+Call B exact Responses body：
+
+~~~json
+{
+  "model": "deepseek-flash",
+  "instructions": "<CALL_B_INSTRUCTIONS>",
+  "input": "<MATERIALIZATION_CONTEXT_V0_JSON>",
+  "reasoning": { "effort": "none" },
+  "temperature": 0,
+  "max_output_tokens": 4096,
+  "stream": false,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "name": "battle_plan_v0",
+      "schema": "<PLAN_SUBMISSION_SCHEMA>"
+    }
+  }
+}
+~~~
+
+Call B 不发送 tools、provider conversation 或 previous_response_id。
 
 ## 5. Each decide() is self-contained
 
@@ -257,44 +321,107 @@ replacement PlanSubmission
 
 ## 6. Canonical Decision context formatting
 
-Call A 与 Call B 共享同一个 deterministic request formatter。Formatter 从 DecisionRequest 生成 provider-facing context，但不得修改 public Battle contracts。
+Call A 与 Call B 共享一个 deterministic Decision-local data envelope。它只重新表达已有 `DecisionRequest` facts，不新增 gameplay Contract。
 
-### 6.1 Included facts
+### 6.1 BattleDecisionContextV0
 
-必须包含：
+内部 provider-facing context 固定为：
+
+~~~ts
+type BattleDecisionContextV0 = {
+  version: "battle_decision_context_v0"
+  tick: number
+  selfActorId: string
+  planningOrigin: { x: number; y: number }
+  map: {
+    width: number
+    height: number
+    window: {
+      originX: number
+      originY: number
+      rows: string[]
+    }
+  }
+  actors: Array<{
+    actorId: string
+    team: "ally" | "enemy"
+    hp: number
+    maxHp: number
+    tile: { x: number; y: number }
+    direction: 2 | 4 | 6 | 8
+    action: ObservedAction
+    protectedUntilTickExclusive: number
+    skills: Array<{
+      skillId: string
+      baseDamage: number
+      windupTicks: number
+      recoveryTicks: number
+      range: {
+        width: number
+        height: number
+        originX: number
+        originY: number
+        rows: number[][]
+      }
+    }>
+  }>
+  constraints: {
+    maxPathSteps: number
+    movement: { cardinalOnly: true }
+    turn: { allowed: true }
+    skills: Array<{
+      skillId: string
+      minCoefficients: number[]
+    }>
+  }
+  recentEvents: ObservedEvent[]
+  correction: null | {
+    rejectedPlan: PlanSubmission
+    reason: PlanRejectReason
+  }
+}
+~~~
+
+字段顺序就是上面列出的顺序。Nested action/event/PlanSubmission variant 也必须按 Contracts 中 canonical 字段顺序显式构造 detached plain object。
+
+Call A：
+
+~~~text
+input = JSON.stringify(BattleDecisionContextV0)
+~~~
+
+Call B 使用固定 wrapper：
+
+~~~ts
+type MaterializationContextV0 = {
+  battle: BattleDecisionContextV0
+  strategyMemo: string
+}
+~~~
+
+并：
+
+~~~text
+input = JSON.stringify(MaterializationContextV0)
+~~~
+
+因此 strategyMemo 永远是 JSON string data，而不是 provider instructions。
+
+### 6.2 Included / excluded facts
+
+BattleDecisionContextV0 必须包含：
 
 - observation.tick；
 - observation.selfActorId；
 - planningOrigin；
-- 所有 observed actors：
-  - actorId；
-  - team；
-  - hp/maxHp；
-  - committed tile；
-  - direction；
-  - current action；
-  - protection deadline；
-  - skills；
-- 每个 skill：
-  - skillId；
-  - baseDamage；
-  - windupTicks；
-  - recoveryTicks；
-  - resolved range matrix；
-- PlanConstraints：
-  - maxPathSteps；
-  - movement cardinalOnly；
-  - turn allowed；
-  - per-skill allowed minCoefficients；
+- 所有 observed actors 及其 committed state/action/protection/skills；
+- skill damage/timing/range matrix；
+- PlanConstraints；
 - recentEvents；
 - compact terrain window；
-- correction request 时：
-  - rejectedPlan；
-  - PlanRejectReason。
+- correction request 时的 rejectedPlan + PlanRejectReason。
 
-### 6.2 Excluded facts
-
-以下不作为 tactical model input：
+不得包含：
 
 - requestId；
 - generation；
@@ -309,13 +436,11 @@ requestId / generation 只由 adapter 原样回填到 DecisionCompletion。
 
 ### 6.3 planningOrigin rule
 
-Prompt 必须显式说明：
+固定 instructions 必须显式声明：
 
 ~~~text
-PATH BASE = planningOrigin
+PATH BASE is planningOrigin, not self.tile.
 ~~~
-
-不得要求模型从 self.tile 推断 path 起点。
 
 moving prefetch 时：
 
@@ -325,11 +450,11 @@ self.action.to = B
 planningOrigin = B
 ~~~
 
-下一 Plan 的 path 必须从 B 开始解释。
+下一 Plan 的 path 必须从 B 开始解释；不得把 B 伪装成当前 committed tile。
 
 ### 6.4 Compact terrain window
 
-不得默认把整张 map.passable boolean matrix 原样序列化。
+不得把整张 map.passable boolean matrix 默认原样发送。
 
 令：
 
@@ -337,49 +462,43 @@ planningOrigin = B
 r = constraints.maxPathSteps
 ~~~
 
-terrain window 为以 planningOrigin 为中心、clamp 到地图边界的 square：
+window bounds：
 
 ~~~text
-x = origin.x-r ... origin.x+r
-y = origin.y-r ... origin.y+r
+minX = max(0, planningOrigin.x - r)
+maxX = min(map.width  - 1, planningOrigin.x + r)
+minY = max(0, planningOrigin.y - r)
+maxY = min(map.height - 1, planningOrigin.y + r)
 ~~~
 
-它覆盖任何不超过 maxPathSteps 的 cardinal path 可能经过的格。
-
-同时必须保留：
+BattleDecisionContextV0.map.window：
 
 ~~~text
-map.width
-map.height
-window.originX
-window.originY
+originX = minX
+originY = minY
+rows[y-minY][x-minX]:
+  "." if passable[y][x] = true
+  "#" if passable[y][x] = false
 ~~~
 
-terrain rows 固定：
+rows 的 y 从小到大；每行 x 从小到大。Actor 不覆盖 terrain char，Actor position 始终单独来自 actors facts。
 
-~~~text
-. = passable
-# = blocked
-~~~
-
-row-major：
-
-- y 从小到大；
-- 每行 x 从小到大；
-- Actor 不覆盖 terrain char，Actor position 单独来自 actors facts。
+这个 square 覆盖任何不超过 maxPathSteps 的 cardinal path 可能经过的格，同时避免把整张大地图送给模型。
 
 ### 6.5 Stable serialization
 
-Provider-facing serialization 必须：
+Formatter 必须：
 
-- UTF-8；
-- ASCII decimal number formatting；
-- 不使用 locale formatting；
-- object 字段按 formatter 写死顺序；
+- 先构造 detached BattleDecisionContextV0；
+- 按 §6.1 固定字段顺序显式创建 object；
 - arrays 保留 Simulation 提供的 canonical order；
-- range matrix 使用 width/height/originX/originY/rows 固定顺序；
+- range.coefficientUnits 复制到 range.rows，行列顺序不变；
 - recentEvents 保留 Simulation 提供的 stable order；
-- 不依赖 JavaScript object insertion order 来定义语义。
+- 使用原始 number，不做 locale formatting；
+- 使用 JSON.stringify(value)，不传 replacer，不 pretty-print；
+- UTF-8 发送。
+
+因此相同 DecisionRequest 必须得到 byte-for-byte 相同的 provider input string。
 
 ## 7. Prompt trust boundary
 
