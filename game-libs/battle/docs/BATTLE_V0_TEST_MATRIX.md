@@ -184,16 +184,18 @@
 | T-DEC-020 | CONTRACTS §16 | DecisionPort resolve 的 requestId/generation 与 expected 不一致 | protocol invariant；Runtime cleanup并 reject run()，不变成 Plan reject/BattleResult |
 | T-DEC-021 | CONTRACTS §16 | DecisionPort Promise reject 或同步 throw | 预期provider失败未按Completion.failed归一化，视为adapter/programmer invariant；Runtime捕获cleanup并 reject run()，无 unhandled rejection |
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
-| T-DEC-023 | SIMULATION §10 | counted provider failure 连续第1、2次被authority-valid消费 | streak=1/2；Battle保持RUNNING；按既有attempt_failure规则后续可重新Decision |
-| T-DEC-024 | SIMULATION §10 | 两次counted failure后消费一个DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不计LLM failure |
-| T-DEC-025 | SIMULATION §10 | 连续第3个counted failure在Tick N phase 9消费 | Tick N完整提交；shell render/terminal检查后trip circuit；status=PAUSED；本Tick尚未发出的Decision commands全部suppressed；不schedule next wake |
-| T-DEC-026 | SIMULATION §10/29, DECISION §12 | circuit trip时另一个Actor仍有active Decision request | Runtime abort所有active request-scoped controllers；DeepSeekDecision本地settle DECISION_ABORTED并可在PAUSED中enqueue；这些completion不增加streak，迟到HTTP结果无authority |
+| T-DEC-023 | DEC-004/DEC-005, SIMULATION §10 | authority-valid attempt_failure 连续第1、2次被消费，code可任意不同 | Simulation不解释code；streak=1/2；Battle保持RUNNING；最早下一合法Tick可重新Decision |
+| T-DEC-024 | DEC-005, SIMULATION §10 | 两次attempt_failure后消费一个authority-valid DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不属于Decision availability failure |
+| T-DEC-025 | DEC-005, SIMULATION §10 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；shell render/terminal检查后trip circuit；status=PAUSED；本Tick尚未发出的Decision commands全部suppressed；不schedule next wake |
+| T-DEC-026 | DEC-005, SIMULATION §10/29, DECISION §12 | circuit trip时另一个Actor仍有active Decision request | Runtime先撤销request authority再best-effort abort；后续abort completion即使入Inbox也被stale/lifecycle fence丢弃，不产生availability signal；迟到HTTP结果无authority |
 | T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
-| T-DEC-028 | SIMULATION §10 | streak=2后消费DECISION_ABORTED或stale completion | 不增加、不重置streak；不触发pause |
-| T-DEC-029 | SIMULATION §10 | 任意时刻消费session_fatal | 不等待failure threshold；直接terminal BattleResult=failure source=decision |
+| T-DEC-028 | DEC-005, SIMULATION §10 | streak=2后，Runtime已撤销authority的request其completion迟到 | 不读取concrete code；按stale/lifecycle-invalid丢弃，不增加、不重置streak，不触发pause |
+| T-DEC-029 | DEC-004/DEC-005, SIMULATION §10 | 任意authority-valid session_fatal，code取任意opaque值 | 不等待failure threshold；直接terminal BattleResult=failure source=decision，并可原样传播code但不按code分支 |
 | T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；后续合法Tick才重新Decision |
 | T-DEC-031 | SIMULATION §10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；ordinary pause不abort active Decision |
-| T-DEC-032 | SIMULATION §10/Replay | Replay中重放3个recorded counted Decision failure | 不启用live availability circuit，不进入PAUSED等待人工resume；Replay deterministic流程继续 |
+| T-DEC-032 | DEC-005, SIMULATION §10/Replay | Replay中重放3个recorded attempt_failure | 不启用live availability circuit，不进入PAUSED等待人工resume；Replay deterministic流程继续 |
+| T-DEC-033 | DEC-004/DEC-005, CONTRACTS §16 | 三个authority-valid attempt_failure分别使用完全不同的concrete code | Simulation结果与code值无关：都只按category累计；证明circuit对Decision implementation/provider-neutral |
+
 
 
 ## 8.1 DeepSeekDecision concrete acceptance — FROZEN FOR IMPLEMENTATION
@@ -237,10 +239,10 @@
 | T-DDEC-033 | DECISION §6.6 | Call A/Call B final serialized request body = 512 KiB | 允许发送；byte size只看最终UTF-8 JSON body |
 | T-DDEC-034 | DECISION §6.6/§11 | final serialized request body > 512 KiB | 不发HTTP；session_fatal DECISION_CONTEXT_TOO_LARGE；不tokenize、不自动截断 |
 | T-DDEC-035 | DECISION §10.1 | completed response含 reasoning item + assistant message/output_text | reasoning内容忽略；按provider顺序拼接所有assistant output_text |
-| T-DDEC-036 | DECISION §10.1 | completed response含 function_call/web_search_call/unknown output item | provider/output contract violation；不得把tool结果当visible text |
+| T-DDEC-036 | DECISION §10.1/§11 | HTTP 2xx completed response含 function_call/web_search_call/unknown output item | attempt_failure DECISION_PROVIDER_UNAVAILABLE；不得把tool结果当visible text，不升级成Runtime invariant |
 | T-DDEC-037 | DECISION §10.1 | response.model返回具体版本名而非 deepseek-flash alias | 仍可成功；model只作为non-authoritative diagnostics |
 | T-DDEC-038 | DECISION §14 | HTTP 503且body是HTML/plain text | transport resolve status=503/bodyText；Workflow直接映射DECISION_PROVIDER_UNAVAILABLE，不JSON.parse错误body |
-| T-DDEC-039 | DECISION §14 | HTTP 2xx但body不是JSON | provider-contract invariant reject；不误归类成network/Plan invalid |
+| T-DDEC-039 | DECISION §10–11/§14 | HTTP 2xx但body不是JSON或Responses envelope malformed | attempt_failure DECISION_PROVIDER_UNAVAILABLE；进入普通Decision failure/circuit路径，不升级成Runtime invariant |
 | T-DDEC-040 | DECISION §12.3 | external abort与60s timeout竞争 | settle判定时signal已aborted则DECISION_ABORTED优先；否则timeout→DECISION_PROVIDER_TIMEOUT；只settle一次并清理timer/listener |
 | T-DDEC-041 | DECISION §14.2 | 同一DeepSeekDecision并发decide(A)/decide(B)，provider calls交错 | strategy/stage/timeout/abort/requestId/generation不串线；不得依赖mutex/global queue/per-actor mutable cache |
 | T-DDEC-042 | DECISION §2.2/§14.1 | implementation structure review | 只保留DecisionPort→DecisionWorkflow→DeepSeekTransport三层seam；Analyzer/ErrorClassifier/BudgetManager/ConcurrencyManager等不得成为v0 framework/interface |
