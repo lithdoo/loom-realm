@@ -788,10 +788,11 @@ provider transport retry、Simulation correction、later new Decision generation
 - Call A 中 abort → best-effort cancel transport；
 - Call A 完成后、Call B 前 signal aborted → 不发 Call B；
 - Call B 中 abort → best-effort cancel transport；
-- abort path settle once；
-- provider 即使忽略 abort 并迟到返回，也不能绕过 Simulation requestId/generation/lifecycle fencing。
+- **DeepSeekDecision 必须在观察到 request AbortSignal 后本地 settle once 为 attempt_failure / DECISION_ABORTED，不得等待底层 HTTP 真正取消或返回**；
+- transport/provider 后续迟到 resolve/reject 必须被 adapter 丢弃，不得产生第二个 completion；
+- provider 即使完全忽略 abort，也不能让旧 request继续占有 Decision authority或绕过 Simulation fencing。
 
-Decision correctness 不依赖 DeepSeek 一定支持 cancellation。
+因此 AbortSignal cancellation 的 correctness 依赖 adapter local settle + Runtime requestId/generation fencing，不依赖 DeepSeek/HTTP transport cancellation guarantee。
 
 ## 13. Correction
 
