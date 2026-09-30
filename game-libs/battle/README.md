@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Simulation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Simulation 已完成 contracts、resolved-input validation、self-driven Runtime、Decision/Plan pipeline、deterministic Replay、headless acceptance 与 package export；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
+> 状态：**Battle v0 Simulation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision FROZEN FOR IMPLEMENTATION**。Simulation 与 Presentation 已完成 closed-loop qualification；DeepSeek concrete Decision 的 provider/model/API、两阶段调用、structured output、failure、timeout/retry、Abort 与测试架构已经冻结，implementation 尚未落地。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -15,7 +15,8 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
 - **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
-- **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
+- **[BATTLE_V0_DECISION.md](./docs/BATTLE_V0_DECISION.md)** — **FROZEN FOR IMPLEMENTATION**：DeepSeek-only concrete Decision、apiKey-only 配置、Analyze/Strategize/Materialize pipeline、Responses API、JSON Schema、parser、failure、timeout/retry/Abort、测试与 Agent contract。
+- **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、Host/Frame、Decision credential wiring、Guidance、workspace 集成。
 - **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
 - **[BATTLE_V0_DESIGN.md](./docs/BATTLE_V0_DESIGN.md)** — 文档索引、旧章节迁移表和历史说明。
@@ -26,6 +27,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 SPEC
 → CONTRACTS
 → SIMULATION
+→ DECISION
 → INTEGRATION
 → PRESENTATION
 → TEST_MATRIX
@@ -76,7 +78,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 仍保持 OPEN 的只包括不阻塞 Simulation/Presentation implementation 的外部/后续细节，例如：
 
 - BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、key/id 与部分正式 Schema；
-- Decision v0 已冻结为 **DeepSeek only**：外部只提供 `apiKey`，`baseUrl / model / provider protocol` 内部固定；LLM pipeline 为 Analyze → Strategize → Materialize，默认两次物理调用，最终 Plan 直接使用 structured JSON 而非 Tool Calling，correction 默认只重跑 Materialization；仍 OPEN 的是 exact fixed model/request/structured-output API shape、provider-specific metadata、cancel guarantee、provider/network timeout defaults 与 Host credential wiring；`attempt_failure | session_fatal` authority classification 已冻结；
+- Decision v0 concrete implementation 已在 **BATTLE_V0_DECISION.md** 达到 **FROZEN FOR IMPLEMENTATION**：DeepSeek only、外部仅 `apiKey`、固定 `deepseek-flash` + Responses API、每次 `decide()` 自包含 Call A + Call B、direct JSON Schema output、本地 parser、60s/request timeout、no automatic retry、failure codes 与 Abort semantics 均已唯一化；剩余仅 Host 到 concrete Decision 的 credential/composition wiring，不再有 blocking Decision implementation OPEN；
 - Guidance Host/InputTarget wiring；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
@@ -98,7 +100,7 @@ Resolved Battle input/validator
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
 → **已完成：按 FROZEN Presentation Agent contract 实现 PresentationPort + Browser Presentation**
 → business Subsystem thin composition
-→ real LLM Decision
+→ **下一步：按 FROZEN Decision spec 实现 DeepSeekDecision**
 → Guidance / Host E2E
 ```
 
