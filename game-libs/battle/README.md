@@ -1,6 +1,6 @@
 # Battle 游戏库
 
-> 状态：**Battle v0 Simulation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。Simulation 已完成 contracts、resolved-input validation、self-driven Runtime、Decision/Plan pipeline、deterministic Replay、headless acceptance 与 package export；Presentation 已完成 contracts、Builder/Handler、Browser assets、synthetic acceptance、真实 transport E2E 与干净环境 qualification。
+> 状态：**Battle v0 Simulation gameplay baseline FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision + Decision availability circuit FROZEN FOR IMPLEMENTATION**。既有 Simulation/Presentation closed-loop qualification 保持有效；DeepSeek concrete Decision 及连续 provider failure 自动暂停 Battle 的 live Runtime circuit 尚未落地。
 
 Battle 是一个独立的双 Actor 同时行动战斗系统：
 
@@ -14,8 +14,9 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
-- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
-- **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、LLM Adapter、Host/Frame、Guidance、workspace 集成。
+- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **gameplay/runtime baseline FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、provider-neutral live availability circuit、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
+- **[BATTLE_V0_DECISION.md](./docs/BATTLE_V0_DECISION.md)** — **FROZEN FOR IMPLEMENTATION**：DeepSeek-only concrete Decision、stable shell + replaceable internal DecisionWorkflow、v0 Analyze+Strategize→Materialize two-call workflow、Responses API、JSON Schema、parser、failure、timeout/retry/Abort、未来 PlayerGuidance 扩展余量、测试与 Agent contract。
+- **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、Host/Frame、configured DeepSeekTransport credential/network capability wiring、Guidance、workspace 集成。
 - **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
 - **[BATTLE_V0_TEST_MATRIX.md](./docs/BATTLE_V0_TEST_MATRIX.md)** — Rule ID → 场景 → 预期结果的验收矩阵。
 - **[BATTLE_V0_DESIGN.md](./docs/BATTLE_V0_DESIGN.md)** — 文档索引、旧章节迁移表和历史说明。
@@ -26,6 +27,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 SPEC
 → CONTRACTS
 → SIMULATION
+→ DECISION
 → INTEGRATION
 → PRESENTATION
 → TEST_MATRIX
@@ -45,6 +47,9 @@ README 与 DESIGN 索引不覆盖上述规范。
 - 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
 - Decision 每次调用只完成一次 Plan/failure attempt；completion 不带 gameplay timing/dueTick，只即时进入 Simulation-owned inbox；Tick reducer 在 snapshot 边界消费，Simulation 拥有 generation、stale 判定、Plan validation、correction retry 与 bounded active/pending accepted-plan pipeline；
+- Battle-facing Decision API 只稳定为 `DecisionPort.decide()`；`DeepSeekDecision` 内部通过 replaceable `DecisionWorkflow` 编排模型调用。当前“两次调用”只属于 v0 workflow，不是 Host/Simulation ABI；未来可加入 PlayerGuidance 或更复杂 workflow 而不改 Simulation wiring；
+- Decision v0 刻意保持最小抽象：`DecisionPort → DecisionWorkflow → DeepSeekTransport`，Transport 只负责 raw HTTP；provider normalization/size budget/parser 由 Workflow 内 pure helpers完成；同一实例必须并发安全且不保存 request-local mutable state；
+- live Runtime 对 authority-valid Decision outcome 使用 provider-neutral circuit breaker：连续 3 个 `attempt_failure` 后在当前 Tick完整提交后复用既有 PAUSED lifecycle；不abort/revoke现有Decision request，也不suppress本Tick已生成的合法request command；PAUSED期间不推进Tick，completion可继续enqueue；必须显式 `battle.resume()` 才恢复；`session_fatal` 仍直接终止 Battle，Replay 不执行该 live availability policy；
 - accepted Plan 采用逐 Action materialization：多格 path 只 materialize 当前一格；reservation 成功并 move_start 时消费该 path intent，但下一格必须等当前 `move_complete` 成功后才重新判断并尝试；未 materialize 的后续 intent 不产生 future event；
 - Decision 与 Action 可以流水重叠，但只有当前 Plan 的 future intent 已全部 materialize 后才能预取下一 Decision；v0 最多保留一份 pending accepted plan，不建立无界 Plan FIFO；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
@@ -67,7 +72,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 ## 当前 OPEN
 
-**Core gameplay 当前没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
+**Core gameplay 当前没有未冻结 design OPEN；Simulation baseline 已 qualification，Decision availability circuit 已冻结待实现；不存在需要实现者自行决定语义的 blocking OPEN。**
 
 此前关于 direction/turn、移动中致命受击、zero-damage hit、LOS、pause/background clock、stalemate 的问题都已经冻结进 SPEC。
 
@@ -76,8 +81,8 @@ README 与 DESIGN 索引不覆盖上述规范。
 仍保持 OPEN 的只包括不阻塞 Simulation/Presentation implementation 的外部/后续细节，例如：
 
 - BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、key/id 与部分正式 Schema；
-- Decision provider-specific metadata、provider cancel guarantee、provider/network timeout defaults；`attempt_failure | session_fatal` authority classification 已冻结；
-- Guidance Host/InputTarget wiring；
+- Decision v0 concrete implementation 已在 **BATTLE_V0_DECISION.md** 达到 **FROZEN FOR IMPLEMENTATION**：DeepSeek only、`DeepSeekDecision` 外部只接收 configured `DeepSeekTransport` capability、不接收 apiKey、stable shell + internal DecisionWorkflow、固定 `deepseek-flash` + Responses protocol、当前 v0 workflow 每次 `decide()` 自包含 Call A + Call B、direct JSON Schema output、本地 parser、512 KiB final-request hard budget、60s/request timeout、no automatic retry、failure codes、并发与 Abort/timeout semantics 均已唯一化；credential/network physical realization 留在 trusted product/platform composition；
+- PlayerGuidance concrete contract/Host/InputTarget wiring 明确延期；架构上已要求未来通过 request-scoped typed DecisionWorkflow capability/data 扩展，不修改 Simulation-facing DecisionPort；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
 Decision completion wall-clock mapping 与 gameplay Decision deadline 已从 v0 删除，不再属于 OPEN；provider timeout 只作为基础设施失败策略。
@@ -98,8 +103,11 @@ Resolved Battle input/validator
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
 → **已完成：按 FROZEN Presentation Agent contract 实现 PresentationPort + Browser Presentation**
 → business Subsystem thin composition
-→ real LLM Decision
-→ Guidance / Host E2E
+→ **下一步：按 FROZEN specs 实现 DeepSeekDecision + Simulation availability circuit delta**
+   - tick.ts: ordered DecisionHealthSignal output
+   - runtime.ts: live-only guard + Tick-boundary PAUSED transition + Replay bypass
+→ configured DeepSeekTransport / product Host E2E
+→ Future: PlayerGuidance 独立设计/实现
 ```
 
 ## Workspace 注意
@@ -110,4 +118,4 @@ Resolved Battle input/validator
 npm run test:battle
 ```
 
-该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle Simulation unit/acceptance 与 Presentation/Browser E2E。Battle v0 Simulation 与 Presentation 均已完成 closed-loop qualification；真实 provider、Guidance 与业务 Host composition 仍按 Integration 文档作为独立后续集成项。
+该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle Simulation unit/acceptance 与 Presentation/Browser E2E。Battle v0 既有 Simulation baseline 与 Presentation 已完成 closed-loop qualification；DeepSeekDecision 与 Simulation availability circuit delta（T-DEC-023..036）仍待实现/qualification，业务 Host composition 随后集成。PlayerGuidance concrete feature 明确延期，但 DecisionWorkflow 扩展边界已提前冻结。

@@ -1,6 +1,6 @@
 # Battle v0 核心规范
 
-> 状态：**Core gameplay FROZEN；Simulation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/Host 集成状态以 Contracts / Integration 文档为准。
+> 状态：**Core gameplay FROZEN；Simulation gameplay/runtime baseline IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/physical transport/product composition 状态以 Contracts / Decision / Integration 文档为准。
 >
 > 统一状态词：
 > - **FROZEN / MUST**：v0 实现必须遵守。
@@ -50,12 +50,12 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 
 依赖与运行边界：
 
-- **Decision = Plan**：根据 Simulation 的 `BattleObservation / PlanConstraints` 与 adapter-side Optional Guidance 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
+- **Decision = Plan**：v0 根据 Simulation 的 `BattleObservation / PlanConstraints` 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。PlayerGuidance concrete capability 不在 v0；未来若启用，只能通过 request-scoped typed `DecisionWorkflow` capability/data 扩展。
 - **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
 - **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
 - Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
 - Simulation Core 只接收所需的窄 capability（例如 Battle clock、AbortSignal、DecisionPort、PresentationPort、已解析 Battle config/content）；不得把 `SubsystemScope`、`Frame`、RenderDomain、Viewport 等 LoomRealm integration object 作为 Core Runtime 必需依赖。
-- 使用 Battle 的 Application/Subsystem 只负责选择 concrete implementation、构造/注入三层、提供 Host capability，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。它不是第四个 gameplay Runtime Layer，也不负责逐 Tick 实施 Battle。
+- 使用 Battle 的 game/business composition（通常位于具体业务 Subsystem 一侧）只负责选择 concrete Decision/Presentation、构造/注入 Battle Runtime，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。trusted product/platform composition 可以提供 credential/network 等物理 capability，但不得因此获得 Battle business authority，也不应直接拥有 concrete Battle topology。
 
 因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
 
@@ -303,18 +303,50 @@ Plan 从哪个 Tick 开始执行
 
 stale generation fencing、Plan validation、`PLAN-006` 的一次 correction retry、active/pending accepted-plan pipeline 与 Replay consume/accept tick 都由 Simulation 决定。
 
-Provider/network timeout 可以作为 Decision implementation 自己的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。
+Provider/network timeout 可以作为 concrete Decision implementation 的基础设施 policy，并产生一次 failed DecisionCompletion；它不是 Battle gameplay deadline，也不拥有 Battle Tick。具体 provider/model/timeout/retry/error code 由 concrete Decision implementation spec 冻结，不属于 Simulation gameplay contract。
 
 ### DEC-004 — Decision failure authority classification — FROZEN
 
-Decision infrastructure failure 对 Simulation 只有两种 authority category：
+Decision failure 对 Simulation 只有两种 authority category：
 
-- `attempt_failure`：只结束当前 Decision attempt/generation，不终止 Battle；Actor 最早下一逻辑 Tick重新进入 Decision lifecycle；
+- `attempt_failure`：结束当前 Decision attempt/generation，本身不是 Battle terminal result；
 - `session_fatal`：该 failure 是 Battle terminal candidate，由 Runtime 归约为 `BattleResult.failure`。
 
-Provider-specific HTTP/network/error metadata、默认 timeout 数值等仍可在 Integration 层配置，但不得让 Simulation自行猜测某个 provider error 是否终止整场 Battle。
+Simulation 只能按 `DecisionCompletion.type`、`DecisionFailure.category` 与 request lifecycle authority 分支；不得解释 concrete `DecisionFailure.code`、provider HTTP status 或 provider metadata。对于 `session_fatal`，Runtime 可以把 opaque `error.code` 原样传播到 `BattleResult.failure.code`，但不得按其具体值改变 gameplay/runtime authority。
 
-默认 provider timeout 属于 `attempt_failure`；concrete adapter 若要把某类基础设施错误升级为 `session_fatal`，必须在返回 DecisionFailure 时明确分类。
+### DEC-005 — Live Decision availability circuit — FROZEN
+
+Live Runtime 对 authority-valid Decision completion 使用 provider-neutral availability policy：
+
+~~~text
+completed
+→ availability success
+→ consecutiveFailures = 0
+
+attempt_failure
+→ availability failure
+→ consecutiveFailures += 1
+
+session_fatal
+→ terminal candidate
+
+stale / lifecycle-invalid completion
+→ no availability signal
+~~~
+
+连续 3 个 authority-valid `attempt_failure` 后，当前 Tick完整提交，再通过 Runtime 既有 pause control path 进入 `PAUSED`：
+
+- 在当前已提交 Tick 边界冻结 Battle logical clock；
+- 本 Tick reducer 已生成的合法 Decision request command **仍按正常顺序调用**；circuit 不撤销、不 suppress 该 Tick 已建立的 request lifecycle；
+- 已经 in-flight 的 Decision request **不因 circuit pause 被 abort/revoke**；它们可以在 pause 期间完成并把 completion 放入 Decision Inbox，等 resume 后的真实 Tick消费；
+- PAUSED 期间没有后续 Tick，因此自然不会继续产生新的 Tick-driven Decision generation/request；
+- 不自动 cooldown/resume；
+- 必须外部显式 `battle.resume()` 才恢复，并把 availability streak 清零；
+- Replay 不执行该 live availability circuit，因为 circuit pause 不改变 requestId / decisionGeneration / Actor decision authority / Decision record trace。
+
+Circuit 本身不得修改 Actor `decision` state、`decisionGeneration`、requestId 或 accepted-plan authority，也不得调用 request AbortController。Decision request 只有既有 lifecycle 原因（例如 damaging hit/death、cancel/close、session fatal、request replacement）才会按原规则失效/abort。
+
+该 circuit 是 operational control state，不进入 gameplay Snapshot/Replay，不改变 Plan validation、Actor state 或 Battle Tick规则。
 
 ## 6. Decision Protocol 与 PlanSubmission
 
@@ -327,7 +359,7 @@ BattleObservation（内含 bounded RecentEvents）
 PlanConstraints
 ```
 
-Optional Guidance 属于 Decision adapter/Host 的外部 prompt augmentation，不进入 Simulation authoritative Observation、Replay 或 Tick state。不得直接把 Presentation DOM/Sprite/camera/动画进度当作战斗事实。
+PlayerGuidance concrete capability **不在 v0 实现范围**，也不进入 Simulation authoritative Observation、Replay 或 Tick state。未来若启用，只能作为 request-scoped typed DecisionWorkflow capability/data 进入某一次 Decision workflow run，不改变 `DecisionPort` 或 Simulation authority。Presentation DOM/Sprite/camera/动画进度不得作为战斗事实。
 
 ### PLAN-003 — 最小 PlanSubmission — FROZEN
 

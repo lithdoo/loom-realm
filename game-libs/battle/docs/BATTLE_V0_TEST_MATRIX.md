@@ -1,8 +1,8 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文不重新定义规则；Core Expected 追溯到 SPEC Rule ID，Presentation Expected 追溯到 FROZEN Presentation/Contracts。
+> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..036 尚待实现后 qualification。
 >
-> 尚未冻结的真实 LLM provider、Guidance/Host wiring 不在本矩阵中被实现代码自行假设。
+> DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
 ## 1. Architecture / Authority
 
@@ -14,7 +14,7 @@
 | T-ARCH-004 | ARCH-001, ARCH-003 | camera/DOM/Sprite 状态变化 | 不改变权威 Battle State |
 | T-ARCH-005 | ARCH-005, TIME-001, TIME-002, TIME-003 | 业务只构造 Simulation + ScriptDecision + Null/Recording Presentation，并用可控 clock 推进时间；业务不调用 public tick | Simulation 自己按 200 ms scheduler / event queue / reducer 运行完整 Battle、结算 BattleResult 并记录 Replay |
 | T-ARCH-006 | ARCH-005 | 不创建 Decision/Simulation instance，只给 Presentation BattleSceneInit + synthetic RenderProjection | 可初始化 Map/Actor 并表现 movement/effect；无需了解 Decision/Simulation concrete implementation |
-| T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 LLMDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
+| T-ARCH-007 | ARCH-002, ARCH-005 | 仅替换注入的 ScriptDecision 为 DeepSeekDecision，二者实现同一 DecisionPort | Simulation 的 clock/reducer/Plan 规则无需改变；Presentation 无感知 |
 | T-ARCH-008 | ARCH-006, BATTLE-001 | v0 BattleConfig 提供 3 个 combat Actor | 启动前 validation reject；actor collection N-ready 不等于 v0 支持多人 |
 | T-ARCH-009 | ARCH-006 | 同一合法 1v1 Config 只交换 actors collection 的排列顺序，actorId/team/其他事实不变 | identity、side 与规则语义不随数组位置改变；需要稳定遍历时按稳定 actorId key |
 | T-ARCH-010 | ARCH-005 | Runtime 注入 Presentation 后，业务只调用 battle.run/pause/resume/cancel/close | Runtime 自己调用 Presentation initialize/render/pause/resume/close；业务不承担 Projection 转发或 Presentation lifecycle |
@@ -174,7 +174,7 @@
 | T-DEC-010 | STATE-006 | 当前 Plan 的最后一个 intent 已 materialize 成 active move/windup/recovery | 当前 Action 可继续，同时允许最多一个 next Decision 进入 thinking |
 | T-DEC-011 | STATE-006, SKILL-004 | action lock 未结束时 next Decision completion 被 reducer 接受 | 保存为唯一 pending accepted plan；不得启动 Action，也不得接受第三份排队 Plan |
 | T-DEC-012 | STATE-006, HIT-003 | active Action 受 damaging hit 且 pending Plan 已存在 | 旧 action/plan/decision authority 一并失效；不允许 stale pending Plan 在后续启动 |
-| T-DEC-013 | DEC-004 | DecisionCompletion.failed(category=attempt_failure) | 不终止 Battle；当前 generation结束，最早下一逻辑 Tick重新 Decision |
+| T-DEC-013 | DEC-004/DEC-005, SIMULATION §10 | authority-valid DecisionCompletion.failed(category=attempt_failure)，code任意 | 单次失败不终止 Battle；当前 generation结束；Simulation不解释code，只按category更新availability streak；未达3时最早下一逻辑Tick重新Decision |
 | T-DEC-014 | DEC-004 | DecisionCompletion.failed(category=session_fatal) | 进入 Runtime terminal arbiter，BattleResult=failure source=decision |
 | T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
 | T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
@@ -184,6 +184,74 @@
 | T-DEC-020 | CONTRACTS §16 | DecisionPort resolve 的 requestId/generation 与 expected 不一致 | protocol invariant；Runtime cleanup并 reject run()，不变成 Plan reject/BattleResult |
 | T-DEC-021 | CONTRACTS §16 | DecisionPort Promise reject 或同步 throw | 预期provider失败未按Completion.failed归一化，视为adapter/programmer invariant；Runtime捕获cleanup并 reject run()，无 unhandled rejection |
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
+| T-DEC-023 | DEC-004/DEC-005, SIMULATION §10 | authority-valid attempt_failure 连续第1、2次被消费，code可任意不同 | Simulation不解释code；streak=1/2；Battle保持RUNNING；最早下一合法Tick可重新Decision |
+| T-DEC-024 | DEC-005, SIMULATION §10 | 两次attempt_failure后消费一个authority-valid DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不属于Decision availability failure |
+| T-DEC-025 | DEC-005, SIMULATION §10/§16 | 连续第3个authority-valid attempt_failure在Tick N phase 9消费 | Tick N完整提交；render/terminal检查正常完成；本Tick已生成的合法Decision commands仍正常调用；随后进入既有PAUSED lifecycle；不schedule next wake |
+| T-DEC-026 | DEC-005, SIMULATION §10/§29 | circuit trip时另一个Actor仍有active Decision request | 不abort、不revoke；Actor decision/requestId/generation保持不变；request可在PAUSED期间完成并enqueue；resume后第一个真实Tick按正常authority fence消费 |
+| T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
+| T-DEC-028 | DEC-005, SIMULATION §10 | streak=2后消费一个因既有lifecycle原因已stale的completion | 不读取concrete code；stale/lifecycle-invalid不产生availability signal，不增加、不重置streak，不触发pause |
+| T-DEC-029 | DEC-004/DEC-005, SIMULATION §10 | 任意authority-valid session_fatal，code取任意opaque值 | 不等待failure threshold；直接terminal BattleResult=failure source=decision，并可原样传播code但不按code分支 |
+| T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；保留原thinking/in-flight request；PAUSED期间已enqueue completion在后续首个真实Tick正常消费 |
+| T-DEC-031 | SIMULATION §6/§10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；external pause与circuit pause都不abort/revoke active Decision；差异只在circuit guard与trigger |
+| T-DEC-032 | DEC-005, SIMULATION §10/Replay | Live中曾因3个attempt_failure进入circuit PAUSED；Replay重放相同Decision records | Replay不启用live circuit、不进入PAUSED；由于live circuit未改写requestId/generation/Actor decision authority，Replay仍产生相同Decision request/consume trace |
+| T-DEC-033 | DEC-004/DEC-005, CONTRACTS §16 | 三个authority-valid attempt_failure分别使用完全不同的concrete code | Simulation结果与code值无关：都只按category累计；证明circuit对Decision implementation/provider-neutral |
+| T-DEC-034 | SIMULATION §6/§10/§28 | late scheduler wake需要catch-up多个Tick，circuit在其中Tick N trip | Tick N完整提交后立即进入PAUSED；`accumulatedRunningMs = N * 200`；N+1..target不继续处理；resume后不得补跑pause前未处理的wall-time backlog |
+| T-DEC-035 | SIMULATION §10/§16/Replay | Tick N同时产生合法Decision command且health signal使circuit trip | command仍在Tick N shell中调用并建立正常request authority；随后PAUSED；Replay不运行circuit时仍生成相同requestId/generation与后续Decision record |
+| T-DEC-036 | SIMULATION §10/§16/Replay | 新建live Runtime与Replay Runtime分别处理同一Decision failure序列 | live guard初值固定为 streak=0/circuitOpen=false 并按规则更新；Replay path不启用/不读写availability guard，也不因三次failure进入PAUSED |
+
+
+
+
+## 8.1 DeepSeekDecision concrete acceptance — FROZEN FOR IMPLEMENTATION
+
+以下测试针对 BATTLE_V0_DECISION.md，不依赖真实付费 provider；默认使用 FakeDeepSeekTransport。
+
+| Test ID | Rules | 场景 | Expected |
+| --- | --- | --- | --- |
+| T-DDEC-001 | DECISION §2–4/§14 | 构造 DeepSeekDecision | public option 只有 configured DeepSeekTransport；不接收 apiKey/provider/model/baseUrl/timeout/retry |
+| T-DDEC-002 | DECISION §3 | normal decide() | exactly 两个 provider request；都使用 deepseek-flash + POST /responses + stream=false，无 tools |
+| T-DDEC-003 | DECISION §4.1 | Call A request | reasoning.effort=high、text output、max_output_tokens=8192；temperature 不发送 |
+| T-DDEC-004 | DECISION §4.2/8 | Call B request | reasoning.effort=none、temperature=0、json_schema name=battle_plan_v0、max_output_tokens=4096 |
+| T-DDEC-005 | DECISION §5/13 | Simulation correction request | 作为新的 decide() 自包含重新执行 Call A + Call B；不得复用上一 request strategy/provider session |
+| T-DDEC-006 | DECISION §6.3 | moving prefetch A→B | prompt 明确 PATH BASE=planningOrigin=B，同时保留 self.tile=A/action.to=B |
+| T-DDEC-007 | DECISION §6.4 | maxPathSteps=r | terrain 只序列化 clamp 后 origin±r square，带 global map size/window origin，row-major . / # |
+| T-DDEC-008 | DECISION §6.5 | 相同 DecisionRequest 两次格式化 | provider-facing context byte-for-byte stable，不受 locale/object insertion order 影响 |
+| T-DDEC-009 | DECISION §7 | strategy memo 含类似 instruction 文本 | Call B 仍把 memo 放在 data/context，不能提升为 system/instructions policy |
+| T-DDEC-010 | DECISION §8–9 | Call B 返回合法 JSON shape | local parser 产出 detached PlanSubmission，requestId/generation 原样 echo |
+| T-DDEC-011 | DECISION §9 | JSON 非法/空输出/unknown field/string coordinate/missing path | attempt_failure code=DECISION_OUTPUT_INVALID；不 regex repair、不 coercion |
+| T-DDEC-012 | DECISION §8–9 | Plan shape 合法但 path 穿墙/target 不合法 | DecisionCompletion.completed；交给 Simulation validator 产生 PlanRejectReason |
+| T-DDEC-013 | DECISION §10–11 | Responses incomplete content_filter | attempt_failure DECISION_PROVIDER_REFUSED |
+| T-DDEC-014 | DECISION §10–11 | Responses incomplete max_output_tokens | attempt_failure DECISION_PROVIDER_INCOMPLETE |
+| T-DDEC-015 | DECISION §11 | HTTP 429 / 5xx / network / timeout | 分别映射 RATE_LIMITED / UNAVAILABLE / NETWORK / TIMEOUT，且无 automatic retry |
+| T-DDEC-016 | DECISION §11/§14 | HTTP 401/403 / 402 | 分别 session_fatal AUTH / QUOTA；transport只返回status/bodyText，不解析provider error body |
+| T-DDEC-017 | DECISION §11.3 | unexpected fixed-request 400/422 | adapter/provider-contract invariant，Promise reject；不伪装为 Plan reject/BattleResult failure |
+| T-DDEC-018 | DECISION §12 | external AbortSignal 在 Call A 前 abort | 不发 provider request；settle once，code=DECISION_ABORTED |
+| T-DDEC-019 | DECISION §12 | Call A 完成后、Call B 前 abort | 不发 Call B；settle once；late provider callback 无额外 completion |
+| T-DDEC-020 | DECISION §12 | Call B 中 abort 且 transport忽略 | DeepSeekDecision 本地立即settle once为DECISION_ABORTED，不等待transport；迟到resolve/reject丢弃且不得产生第二completion |
+| T-DDEC-021 | DECISION §12.1 | 单个 provider request 超过 60s | attempt_failure DECISION_PROVIDER_TIMEOUT；不是 Battle gameplay deadline/dueTick |
+| T-DDEC-022 | DECISION §14 | FakeDeepSeekTransport | 与 production 共用 `new DeepSeekDecision({ transport })` seam；只脚本化 `{status, bodyText}` / network reject / deferred / abort-late-resolve；不增加 testing-only injection factory |
+| T-DDEC-023 | DECISION §18.3 | real Simulation + DeepSeekDecision(Fake transport) | initial request 两次 provider call→Plan→accept；existing Tick/Inbox/Replay semantics 不变 |
+| T-DDEC-024 | DECISION §18.3 | first Plan gameplay-invalid | Simulation 发 correction decide()；新 request 再两次 provider call；attempt1 invalid 后按 frozen generation rule 结束 |
+| T-DDEC-025 | DECISION §18.4 | configured real-transport / credential-gated smoke | product integration 提供真实 configured DeepSeekTransport，可手动验证 Call A non-empty + Call B structured + local parser；普通 CI 不访问 DeepSeek |
+| T-DDEC-026 | DECISION §19 | package qualification | npm run test:battle 与 npm pack dry-run 通过；./decision 与 ./decision/testing 可解析 |
+| T-DDEC-027 | DECISION §2 | transport 缺失/结构非法 | constructor/programmer configuration reject；不得自行读取 env/browser/global credential 或发网络请求 |
+| T-DDEC-028 | DECISION §10–11 | HTTP 2xx + response.status=failed | attempt_failure DECISION_PROVIDER_UNAVAILABLE；provider error.code/message只可进入private diagnostics，不参与authority classification |
+| T-DDEC-029 | DECISION §2.1/§4 | production caller 构造 DeepSeekDecision 并调用 decide | caller 只依赖 DecisionPort/DeepSeekDecision；production export 不暴露 analyze/strategize/materialize 或 workflow stage API |
+| T-DDEC-030 | DECISION §2.1/§4 | v0 workflow 内部执行 Call A + Call B | exactly two calls 仍是当前 workflow acceptance；测试不得把 call count 写成 Simulation/Host ABI |
+| T-DDEC-031 | DECISION §17 | 检查 v0 PlayerGuidance reservation | v0 不存在 setGuidance/currentGuidance/provider-thread Guidance hidden state，也不增加 generic extensions bag；existing transport-only construction path保持成立 |
+| T-DDEC-032 | DECISION §17 | future-workflow architecture fixture/structural review | workflow 可在不修改 DecisionPort 与 Simulation wiring 的前提下由 Analyze+Strategize→Materialize 演进为 Analyze→Guidance→Strategize→Materialize；exact future Guidance type 不在 v0 实现中伪造 |
+| T-DDEC-033 | DECISION §6.6 | Call A/Call B final serialized request body = 512 KiB | 允许发送；byte size只看最终UTF-8 JSON body |
+| T-DDEC-034 | DECISION §6.6/§11 | final serialized request body > 512 KiB | 不发HTTP；session_fatal DECISION_CONTEXT_TOO_LARGE；不tokenize、不自动截断 |
+| T-DDEC-035 | DECISION §10.1 | completed response含 reasoning item + assistant message/output_text | reasoning内容忽略；按provider顺序拼接所有assistant output_text |
+| T-DDEC-036 | DECISION §10.1/§11 | HTTP 2xx completed response含 function_call/web_search_call/unknown output item | attempt_failure DECISION_PROVIDER_UNAVAILABLE；不得把tool结果当visible text，不升级成Runtime invariant |
+| T-DDEC-037 | DECISION §10.1 | response.model返回具体版本名而非 deepseek-flash alias | 仍可成功；model只作为non-authoritative diagnostics |
+| T-DDEC-038 | DECISION §14 | HTTP 503且body是HTML/plain text | transport resolve status=503/bodyText；Workflow直接映射DECISION_PROVIDER_UNAVAILABLE，不JSON.parse错误body |
+| T-DDEC-039 | DECISION §10–11/§14 | HTTP 2xx但body不是JSON或Responses envelope malformed | attempt_failure DECISION_PROVIDER_UNAVAILABLE；进入普通Decision failure/circuit路径，不升级成Runtime invariant |
+| T-DDEC-040 | DECISION §12.3 | external abort与60s timeout竞争 | settle判定时signal已aborted则DECISION_ABORTED优先；否则timeout→DECISION_PROVIDER_TIMEOUT；只settle一次并清理timer/listener |
+| T-DDEC-041 | DECISION §14.2 | 同一DeepSeekDecision并发decide(A)/decide(B)，provider calls交错 | strategy/stage/timeout/abort/requestId/generation不串线；不得依赖mutex/global queue/per-actor mutable cache |
+| T-DDEC-042 | DECISION §2.2/§14.1 | implementation structure review | 只保留DecisionPort→DecisionWorkflow→DeepSeekTransport三层seam；Analyzer/ErrorClassifier/BudgetManager/ConcurrencyManager等不得成为v0 framework/interface |
+| T-DDEC-043 | DECISION §12.1/§14 | Call A与Call B | 两者共用同一callDeepSeek normalization path；不得复制HTTP/timeout/output-extraction分支 |
+
 
 ## 9. Control Plane / Replay
 
@@ -266,7 +334,7 @@
 
 当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
 
-Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance。剩余 OPEN 只涉及非 Presentation Content 统一 schema、真实 Decision provider metadata/cancel defaults、Guidance/Host wiring 等；这些不得反向改变已冻结的 Core/Presentation Expected。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；剩余 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance/Host wiring 与 configured DeepSeekTransport 的 credential/network/product capability handoff，这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 

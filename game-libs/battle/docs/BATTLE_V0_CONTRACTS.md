@@ -1,6 +1,6 @@
 # Battle v0 数据契约
 
-> 状态：**Simulation-facing contracts FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation contract FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；仅外部 serialization/provider/prompt 细节保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界；Simulation 与 Presentation TypeScript contract/validator 均已落地。
+> 状态：**Simulation-facing contracts FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation contract FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision provider/prompt/structured-output concrete implementation 已由 BATTLE_V0_DECISION.md 冻结；仅外部 serialization 与 Host/Guidance wiring 保留明确 OPEN**。本文定义 Battle v0 canonical 数据边界；Simulation 与 Presentation TypeScript contract/validator 均已落地。
 >
 > 核心 gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；本文不重新定义 reducer 行为。
 
@@ -553,9 +553,9 @@ type ObservedEvent =
 - `recentEvents` 是 deterministic bounded history：只包含 observation Tick `tick` 与 `tick - 1` 两个 Tick中产生的上述事件；排序 key 固定为 `(event.tick, kindRank, primaryActorId, secondaryActorId)`，其中 kindRank 为 `move_failed=0 / move_interrupted=1 / skill_resolved=2 / protection_started=3`；move/protection 的 primaryActorId 是 actorId、secondary 为空串，skill 的 primary= casterActorId、secondary=targetActorId；字符串均按 ECMAScript ordinal 比较；
 - initial tick 0 没有 prior gameplay event，`recentEvents = []`；
 - Observation builder 不持有无界历史；这些 event 可从最近两个 ReplayTick facts/当前 Tick facts派生；
-- Optional Guidance **不属于 canonical BattleObservation**。Guidance Host/adapter 在调用真实模型前把外部 guidance 与 `DecisionRequest.observation` 组合；Simulation Core 不解析、不存储、不回放 Guidance。
+- Future PlayerGuidance **不属于 canonical BattleObservation**，当前 v0 不实现其 concrete contract。未来若启用，必须通过 BATTLE_V0_DECISION.md 冻结的 request-scoped typed `DecisionWorkflow` capability/data 进入某一次 workflow run；Simulation Core 不解析、不存储、不回放 Guidance，也不因此修改 `DecisionPort`。
 
-Prompt 文本格式可以由 Decision adapter自行选择，但不得改变上述结构化输入facts。
+Contracts 不定义 provider prompt 文本；Battle v0 concrete DeepSeekDecision 的 prompt/context formatting 已在 BATTLE_V0_DECISION.md 冻结。任何 concrete formatter 都不得改变上述结构化 input facts。
 ## 10. BattleResult / BattleStatus / BattleSnapshot
 
 Simulation public result contract 冻结为：
@@ -948,6 +948,13 @@ interface DecisionPort {
 
 `requestId / generation` 是 Simulation 生成的 correlation identity；Decision implementation 必须原样返回，不拥有其生命周期。Runtime为每次调用捕获 expected `actorId/requestId/generation`。
 
+`DecisionFailure.category` 是 Simulation authority contract；`DecisionFailure.code` 与 `metadata` 对 Simulation branching 是 opaque concrete-Decision diagnostics。Simulation：
+
+- 可以按 `attempt_failure | session_fatal` 分支；
+- 可以在 `session_fatal` terminal result 中原样传播 `error.code`；
+- **不得**按具体 code、provider HTTP status 或 metadata 改变 retry/pause/terminal authority；
+- live availability circuit 只按 authority-valid completion outcome/category 与 lifecycle fencing 运行。
+
 - resolved completion 的 requestId/generation 与 expected 不一致 → DecisionPort protocol invariant violation；Runtime cleanup并 reject active `run()`，不包装成 Plan reject 或 BattleResult.failure；
 - DecisionPort Promise rejection / synchronous throw 表示 adapter/programmer invariant（预期 provider/network failure MUST 归一化成 `DecisionCompletion.failed`）；Runtime cleanup并 reject active `run()`；
 - malformed completion object 同样属于 DecisionPort protocol invariant；
@@ -963,7 +970,7 @@ DecisionCompletion 不携带任何 wall-clock/Battle-time timing 字段，也不
 - `PLAN-006` correction retry；
 - consumedTick / acceptedTick Replay facts。
 
-Provider/network timeout 属于 Decision implementation 的 infrastructure policy，可以产生 `DecisionCompletion { type: "failed" }`；它不是 Battle gameplay deadline。
+Provider/network/response failure 属于 concrete Decision implementation 的 infrastructure policy，必须在预期失败路径归一化成 `DecisionCompletion { type: "failed" }`；它不是 Battle gameplay deadline。具体 provider code/timeout 值不属于 Simulation branching contract。
 
 Decision Inbox 是 Simulation internal runtime structure，不属于 Presentation Contract，也不作为 `BattleEvent(dueTick)` 序列化。
 
@@ -988,7 +995,7 @@ ReplayRecord exact v0 schema、fact shapes 与 ReplayDriver 执行方式已在 B
 ## 18. Contracts OPEN
 
 - **CONTRACT-OPEN-001**：BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、全局 key/id 与引用编码；Presentation v0 所需 `struct.BattleEffect` subject/key 已冻结。
-- Decision provider-specific metadata / provider code 的 exact shape；`attempt_failure | session_fatal` authority classification 已冻结。
-- Decision adapter 的 prompt/token formatting；structured `BattleObservation.recentEvents` 的两-Tick history window 已冻结，不再是 OPEN。
+
+Decision concrete provider code、prompt/token formatting、structured-output/parser/failure/timeout/retry 已集中冻结在 BATTLE_V0_DECISION.md，不再属于 Contracts OPEN；`attempt_failure | session_fatal` authority classification 与 `BattleObservation.recentEvents` 两-Tick history window 继续保持现有 frozen semantics。
 
 这些 OPEN 不得改变 SPEC 中已冻结的 gameplay 语义。

@@ -1,6 +1,6 @@
 # Battle v0 Simulation Implementation Spec
 
-> 状态：**FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
+> 状态：**Simulation gameplay/runtime baseline = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit (§10/§16) = FROZEN FOR IMPLEMENTATION**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。新增 circuit-pause 尚未落地代码/qualification，不得把既有 baseline qualification 误解为该新增行为已实现。
 >
 > 目标：implementation agent 应能直接实现 headless/self-driven Simulation，而不需要自行选择 Clock、queue、Decision lifecycle、Plan handoff、Tick transaction、Projection cadence、terminal race 或 Replay 架构。
 
@@ -360,25 +360,45 @@ wakeCancel = clock.schedule(delayMs, wake)
 
 Pause：
 
-```text
+~~~text
 RUNNING
 → accumulatedRunningMs += now - runningAnchorMs
 → cancel wake
 → call presentation.pause() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else status = PAUSED
-```
+~~~
 
 Resume：
 
-```text
+~~~text
 PAUSED
+→ if decision availability circuitOpen:
+     consecutiveFailures = 0
+     circuitOpen = false
 → call presentation.resume() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else runningAnchorMs = now
 → status = RUNNING
 → schedule next wake
-```
+~~~
+
+普通 external pause 与 Decision circuit pause 都**不 abort Decision**；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。
+
+两者复用同一内部 PAUSED transition（cancel wake → presentation.pause() → status=PAUSED），但 logical-time cut 不同：
+
+~~~text
+external pause
+→ freeze at current logicalElapsed
+
+decision circuit trip after Tick N
+→ freeze at the committed Tick-N boundary
+→ accumulatedRunningMs = checked(currentTick * tickDurationMs)
+→ runningAnchorMs is irrelevant until resume assigns a new anchor
+→ any not-yet-processed catch-up backlog is treated as paused wall time
+~~~
+
+因此 circuit 如果在 late-wake catch-up 的 Tick N 触发，必须立即停止 catch-up；冻结值精确等于 `N * 200ms`。该乘法必须沿用现有 safe-integer/checked arithmetic 约束。resume 后从 Tick N 的冻结位置继续，**不得补跑 circuit pause 前尚未处理的 wall-time backlog**。
 
 pause期间 wall time 不进入 logicalElapsed，不产生 pause catch-up。
 
@@ -592,20 +612,222 @@ Plan path 的第一步 adjacency/static-terrain validation 从 `planningOrigin` 
 
 Decision completion被 reducer消费后，对应 `thinking` 被清除；callback本身不修改该字段。
 
-## 10. Decision failure classification
+## 10. Decision failure classification / live availability circuit
 
-Provider-specific code/metadata 可以继续由 Integration定义，但 Simulation 必须只看到两个 authority category：
+Simulation 只认识共享 Decision authority outcome，不认识 concrete provider/DeepSeek failure code：
 
-```ts
+~~~ts
 type DecisionFailureCategory =
   | "attempt_failure"
   | "session_fatal"
-```
+~~~
 
-- `attempt_failure`：结束当前 attempt/generation，不终止 Battle；最早下一逻辑 Tick重新 Decision；
-- `session_fatal`：Runtime terminal candidate = `BattleResult.failure { source: "decision" }`。
+Simulation **不得**按 `DECISION_PROVIDER_* / DECISION_OUTPUT_* / provider HTTP status` 分支。concrete Decision code 只用于 diagnostics / BattleResult code，不决定 live availability circuit。
 
-Provider timeout默认属于 attempt_failure，除非 concrete adapter明确配置为 session fatal；该基础设施配置不得改变 gameplay Tick timing。
+- `session_fatal`：立即成为 Runtime terminal candidate = `BattleResult.failure { source: "decision" }`；不进入 circuit breaker；
+- authority-valid `attempt_failure`：结束当前 attempt/generation，并作为一次 Decision availability failure；
+- authority-valid `DecisionCompletion.completed`：表示本次 Decision pipeline 成功产生结构有效的候选 Plan，并作为一次 Decision availability success。
+
+### 10.1 Consecutive Decision availability failures
+
+Battle v0 live Runtime 固定：
+
+~~~text
+MAX_CONSECUTIVE_DECISION_FAILURES = 3
+~~~
+
+provider-neutral health signal 只有：
+
+~~~text
+authority-valid completed
+→ success
+
+authority-valid attempt_failure
+→ failure
+
+session_fatal
+→ terminal
+
+stale / lifecycle-invalid completion
+→ no signal
+~~~
+
+因此 Runtime 不需要知道：
+
+~~~text
+NETWORK
+TIMEOUT
+RATE_LIMITED
+UNAVAILABLE
+REFUSED
+INCOMPLETE
+OUTPUT_INVALID
+ABORTED
+~~~
+
+这些 concrete code 的含义。
+
+request-scoped AbortSignal 仍只服务于既有 request lifecycle invalidation（例如 damaging hit/death、cancel/close、session fatal、request replacement）。**Availability circuit pause 本身不 abort request，也不改变 request authority**，因此 Runtime 不需要在 circuit 中解释 `DECISION_ABORTED` code。
+
+任意 authority-valid `DecisionCompletion.completed` 在进入 gameplay Plan validation前即把 consecutive failure streak 重置为 0。即使该 Plan 随后被 Simulation validator reject 并产生 correction，也不算 Decision service failure，因为 Decision pipeline 已正常返回结构有效的候选 Plan。
+
+Simulation `PlanRejectReason`、accepted-plan dynamic execution failure、DecisionPort programmer/invariant rejection 都不是 Decision availability completion，不进入 streak。
+
+同一个 Tick snapshot 内 completion 已按 actorId → requestId stable order处理；availability signal 使用相同顺序。因此“连续”的定义是：
+
+~~~text
+live authority-valid Decision completion consumption order
+~~~
+
+不得按 Promise wall-clock resolve order计数。
+
+### 10.2 Operational guard，不属于 gameplay / Replay state
+
+Live Runtime shell 维护：
+
+~~~ts
+type DecisionAvailabilityGuard = {
+  consecutiveFailures: number
+  circuitOpen: boolean
+}
+~~~
+
+live Runtime 构造时固定初始化：
+
+~~~text
+consecutiveFailures = 0
+circuitOpen = false
+~~~
+
+该 guard **只在 live Runtime 启用**。Replay runtime/ReplayDriver 不处理 `decisionHealthSignals`、不更新 guard、也不因 recorded failure进入 PAUSED；实现可以不创建 replay guard，或创建但必须完全不读写，二者不得改变 observable semantics。
+
+它是 operational control state：
+
+- 不属于 `BattleState` gameplay facts；
+- 不进入 `BattleSnapshot`；
+- 不进入 `ReplayRecord`；
+- 不参与 deterministic Replay；
+- 不生成 gameplay Tick/dueTick；
+- 不修改 Actor generation/HP/tile/action 规则。
+
+phase 9 对 authority-valid Decision completion 产生 shell-only health signal：
+
+~~~text
+completed
+→ success
+
+attempt_failure
+→ failure
+
+session_fatal
+→ terminal candidate
+
+stale / lifecycle-invalid
+→ no signal
+~~~
+
+ReplayDriver 即使重放 recorded DecisionCompletion，也**不得启用 live Decision availability circuit**；Replay 不因历史 provider availability 等待人工 resume。
+
+### 10.3 Circuit trip → existing PAUSED lifecycle
+
+shell 按 stable health-signal 顺序更新 guard：
+
+~~~text
+success
+→ if circuitOpen == false:
+     consecutiveFailures = 0
+
+failure
+→ if circuitOpen == false:
+     consecutiveFailures += 1
+     if consecutiveFailures >= 3:
+       circuitOpen = true
+       mark circuitPausePending
+~~~
+
+一旦本 Tick已达到 threshold，`circuitOpen` latch 到 explicit `resume()`；同一 Tick后续 success signal不得自动关闭 circuit。
+
+**Circuit 不建立第二套 pause state machine。** 它只在当前 Tick shell side effects 完成后进入既有 `PAUSED` lifecycle。
+
+exact behavior：
+
+~~~text
+current Tick synchronous transaction finishes
+→ enqueue events / append Replay / render / terminal check
+→ process health signals and latch circuitPausePending
+→ invoke this Tick's already-produced valid Decision request commands normally
+→ if circuitPausePending:
+     enter the existing Runtime PAUSED transition
+     using the current committed Tick boundary as the logical-time cut
+     cancel/retain no next scheduler wake
+     call presentation.pause()
+     if Presentation pause classified fatal:
+       finish(presentation failure)
+     else:
+       status = PAUSED
+→ while PAUSED, process no further Tick
+~~~
+
+因此 circuit trip **不会**：
+
+- suppress 本 Tick已经生成的合法 Decision command；
+- 清除 Actor `decision: thinking`；
+- 修改 `decisionGeneration` / requestId / attempt；
+- revoke 或 abort in-flight Decision request；
+- 清空 Decision Inbox；
+- 删除 ScheduledEventQueue 中的 future gameplay event。
+
+本 Tick新调用或此前已 in-flight 的 Decision request都可以在现实时间继续完成；completion 仍只 enqueue。因为 PAUSED 期间没有 reducer Tick，它们不会被消费、不会接受 Plan、不会启动 Action；显式 resume 后由第一个真实 Tick按既有 requestId/generation fence正常消费。
+
+如果 circuit 在 late-wake catch-up 中的 Tick N trip，Runtime 必须在 Tick N 后停止该 catch-up，并把 pause logical cut 固定在**已提交的 Tick N 边界**；pause 前尚未处理的 wall-time backlog 不在 resume 后补算。
+
+这个选择保证 circuit 是纯 operational pause policy：它不改变 live Decision request/generation trace，因此 Replay 可以完全不执行 availability circuit，而仍复现相同的 requestId、generation、Decision records 与 consume outcomes。
+
+Circuit pause 与普通 pause 共享：
+
+- Battle logical time冻结；
+- wall time不进入 logicalElapsed；
+- completion 可以进入 Inbox但 pause期间不消费；
+- resume后不做 pause catch-up；
+- HP/tile/action/protection/timers 在 pause 期间不推进。
+
+两者唯一与 availability 相关的差异是：circuit pause 同时保持 `circuitOpen=true`，直到 explicit `resume()` 清零 guard。
+
+### 10.4 Explicit resume
+
+Decision circuit **不自动恢复**，不使用 retry timer/cooldown 自动 `resume()`。
+
+当 Runtime 当前 PAUSED 且 `circuitOpen === true` 时，外部显式调用：
+
+~~~text
+battle.resume()
+~~~
+
+执行：
+
+~~~text
+consecutiveFailures = 0
+circuitOpen = false
+→ normal presentation.resume() boundary
+→ if success: status = RUNNING
+→ restart scheduler from frozen logical time
+~~~
+
+resume 不主动重建或替换 Decision request。暂停前仍在 thinking/in-flight 的 request保持原 requestId/generation；暂停期间已完成的 completion仍在 Inbox，最早由 resume 后第一个真实 Tick消费。只有 Actor 已按既有规则结束上一 generation 且满足 `ensureDecision` 条件时，后续 Tick才创建新的 Decision request。
+
+如果 Decision service 仍然不可用，resume 清零 streak 后，后续消费到的 authority-valid `attempt_failure`（包括暂停期间已完成、resume 后才消费的 completion）从 0 重新累计；再次连续 3 次会再次 trip。
+
+普通外部 pause/resume 在 `circuitOpen === false` 时不因 pause 本身修改 failure streak。
+
+### 10.5 attempt_failure generation semantics unchanged
+
+在未达到 threshold 时：
+
+- authority-valid `attempt_failure` 结束当前 attempt/generation；
+- 最早下一逻辑 Tick可重新 Decision；
+- concrete Decision implementation 自己是否有 provider retry/backoff 由其 implementation spec 冻结；DeepSeekDecision v0 = none。
+
+因此 v0 不需要 Simulation 理解 provider retry、HTTP 或 failure code；连续失败由 provider-neutral Runtime circuit-pause 截断请求风暴。
 
 ## 11. AcceptedPlan
 
@@ -786,7 +1008,13 @@ actorId ECMAScript ordinal
 - no recursive Tick；
 - no scheduler reentry。
 
-Tick-local transient使用 `TickContext`，不得污染跨 Tick authority：
+Tick-local transient使用 `TickContext`，不得污染跨 Tick authority。availability signal 的 exact internal type 冻结为：
+
+```ts
+type DecisionHealthSignal = "success" | "failure"
+```
+
+仅 authority-valid `completed` 产生 `"success"`；仅 authority-valid `attempt_failure` 产生 `"failure"`；`session_fatal` 只产生 terminal candidate，stale/lifecycle-invalid completion 不产生 signal。
 
 ```ts
 type TickContext = {
@@ -801,6 +1029,7 @@ type TickContext = {
   movementIntents: MoveIntent[]
 
   decisionCommands: RequestDecisionCommand[]
+  decisionHealthSignals: DecisionHealthSignal[]
   scheduledEvents: BattleEvent[]
   replayFacts: ReplayFact[]
   effectStarts: SkillEffectProjection[]
@@ -809,22 +1038,36 @@ type TickContext = {
 
 `startedActionActors` 实施 STATE-004；0 recovery不需要跨 Tick flag。
 
+`processOneTick()` 的 `TickOutput` 必须新增：
+
+```ts
+readonly decisionHealthSignals: readonly DecisionHealthSignal[]
+```
+
+它严格保持 phase 9 的 stable completion consumption order；Runtime shell只消费这个 output，不重新遍历 Decision records 猜测 health。Replay path仍生成相同 gameplay/Decision records，但**不得执行 live health-signal guard**。
+
 `SkillResolveIntent / SkillIntent / MoveIntent / TileKey / ReplayFact` 等只在 Simulation module内部流转，不属于跨层 Contract。Agent可以选择 readonly object/type alias/局部helper representation，但必须满足本文 stage ordering、stable ordering、single-authority 与测试 Expected；不得因此新增第二份持久 authority或改变 public ABI。
 
 Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 
-```text
+~~~text
 1. enqueue future events
 2. append Replay facts
 3. call presentation.render(projection)
    └─ classified sync fatal → finish(presentation failure), suppress Decision commands
 4. if Tick produced terminal candidate
    └─ finish(candidate), suppress Decision commands
-5. otherwise invoke DecisionPort for RequestDecisionCommand
-6. schedule/retain next wake
-```
+5. process decisionHealthSignals in their stable phase-9 completion order
+   └─ threshold reached → latch circuitPausePending
+6. invoke DecisionPort for this Tick's valid RequestDecisionCommand
+7. if circuitPausePending:
+     enter existing PAUSED transition at current committed Tick boundary
+     do not schedule next wake
+   else:
+     schedule/retain next wake
+~~~
 
-因此 terminal Tick、render-fatal Tick都不会在结果已经确定后额外发起新的 Decision provider call。future events 即使在 terminal前已入 queue，也会随 `finish()` 停止/清空，不再获得提交机会。
+因此 terminal Tick / render-fatal Tick仍会 suppress尚未发出的 Decision command；**Decision-circuit-trip Tick不会**。Circuit 只阻止后续 Tick继续推进，不重写当前 Tick已经建立的 Decision lifecycle。future events 在 PAUSED 时保持未消费、terminal finish时停止/清空；Decision completions在 PAUSED时可继续进入 Inbox。
 
 ## 17. TICK-001 implementation mapping
 
@@ -838,7 +1081,7 @@ Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 6. batch apply ordinary hit damage；
 7. damaging-hit aftermath/interruption；只记录/缓冲 redecision need，不让随后可能成立的 terminal 仍发出外部 Decision call；
 8. ordinary terminal gate；若 terminal成立，抑制本 Tick全部尚未发出的 gameplay Decision request commands；
-9. consume Decision snapshot / validation / correction / active-pending acceptance；
+9. consume Decision snapshot / emit live-only decision health signals / validation / correction / active-pending acceptance；
 10. promote pending as eligible；advance active Plan；每 Actor最多一个新 Action intent；skill若在这里消费最后 future intent且进入 windup/recovery lifecycle，可产生 `prefetch_after_materialize` request command；pure turn完成最后 intent时不做同 Tick prefetch；
 11. collect newly-started windup=0 skills；
 12. resolve instant batch + aftermath + terminal；若 terminal成立，同样抑制尚未发出的 Decision request commands；
@@ -1341,7 +1584,9 @@ AbortSignal是best effort；consume时仍必须requestId + decisionGeneration fe
 
 ### RACE-007 Scheduler wake vs pause
 
-若同步 `processTick` 已进入，则该Tick完整完成后pause生效；若pause callback先执行，则取消wake且不进入新Tick。control-plane不会中断reducer半途。
+若同步 `processTick` 已进入，则该Tick完整完成后pause生效；若external pause callback先执行，则取消wake且不进入新Tick。control-plane不会中断reducer半途。
+
+若 availability circuit 在 catch-up loop 的 Tick N 达到 threshold，则 Tick N shell side effects（包括合法 Decision commands）完整提交后进入 PAUSED，并立即停止后续 catch-up Tick；logical-time cut 以已提交的 Tick N 边界为准，pause 前未处理的 wall-time backlog 不得在 resume 后补跑。
 
 ### RACE-008 Initialize vs async Presentation failure / cancel
 
@@ -1477,22 +1722,34 @@ Implementation agent 按以下顺序落地，不重新设计边界：
    - skill/damage/protection
 
 7. simulation/tick.ts
-   - exact TICK-001 14-stage transaction
-   - stable ordering + commands/facts/projection
+   - keep existing TICK-001 14-stage transaction
+   - add DecisionHealthSignal = "success" | "failure"
+   - emit TickOutput.decisionHealthSignals in exact phase-9 stable completion order
+   - completed emits success before Plan validation
+   - attempt_failure emits failure
+   - stale/session_fatal emit no availability signal
 
 8. simulation/replay.ts
-   - recorder
-   - recorded Decision source
-   - deterministic-only ReplayBuilder path
+   - keep existing recorder / recorded Decision source / deterministic-only ReplayBuilder schema
+   - no new circuit/replay record type
+   - ReplayDriver must not execute live availability guard
 
 9. simulation/runtime.ts
-   - clock/scheduler/pause/resume
-   - request-scoped abort
-   - Presentation bridge
-   - terminal arbiter/invariant rejection
+   - preserve existing public pause()/resume() behavior for external pause
+   - add live-only DecisionAvailabilityGuard initialized to { consecutiveFailures: 0, circuitOpen: false }
+   - after render + terminal gate, process TickOutput.decisionHealthSignals in order
+   - threshold 3 latches circuitOpen/circuitPausePending
+   - invoke current Tick valid Decision commands before circuit pause
+   - circuit pause reuses Presentation/status PAUSED transition but freezes accumulatedRunningMs exactly at checked(currentTick * tickDurationMs)
+   - stop current catch-up loop immediately after the trip Tick
+   - do not abort/revoke/clear Decision requests or Inbox for circuit pause
+   - resume while circuitOpen resets guard before normal Presentation resume/scheduler restart
+   - replaySource path bypasses live guard entirely
 
 10. qualification
-   - reducer/scheduler/Decision race/lifecycle/Replay/Presentation integration tests
+   - retain existing Simulation baseline tests
+   - add executable coverage for T-DEC-023..036
+   - run reducer/scheduler/Decision race/lifecycle/Replay/Presentation regression suites
 ```
 
 Definition of Done：
@@ -1502,6 +1759,10 @@ Definition of Done：
 - `npm run test:battle` passes from repo root；
 - `npm pack -w @loomrealm-game/battle --dry-run` includes `dist/simulation.js` / `dist/simulation.d.ts` and package `./simulation` export resolves；
 - all Simulation rows in `BATTLE_V0_TEST_MATRIX.md` that do not require real provider/Host wiring have executable automated coverage；
+- Decision availability circuit T-DEC-023..036 全部有自动化覆盖；
+- live Runtime guard 初值固定为 `0 / false`，Replay path不启用 guard；
+- circuit trip 不改变 Actor Decision authority/requestId/generation，也不 abort in-flight request；
+- circuit catch-up cut 通过 FakeClock 验证为 `accumulatedRunningMs = currentTick * 200`，resume 不补跑 pause 前 backlog；
 - FakeClock tests never depend on real sleep/timer drift；
 - no gameplay path uses `Date.now()`, `Math.random()`, Browser animation ACK, Map Runtime state, or public `tick()`；
 - Decision callback never mutates gameplay state；
@@ -1514,7 +1775,9 @@ Agent may choose local helper names/data structures only where 本文明确标�
 
 ## 33. Implementation qualification gate
 
-Simulation 已完成 implementation 与 closed-loop qualification；冻结时的 blocking choice 均已有唯一答案并已由实现与自动化测试固化：
+Simulation **既有 gameplay/runtime baseline** 已完成 implementation 与 closed-loop qualification；Decision availability circuit (§10/§16) 已达到 FROZEN FOR IMPLEMENTATION，但尚未落地代码/qualification。
+
+baseline 已固化的 blocking choice：
 
 - initialization与initial Decision request Tick；
 - RuntimeState/ActionState/DecisionState/AcceptedPlan；
@@ -1533,10 +1796,29 @@ Simulation 已完成 implementation 与 closed-loop qualification；冻结时的
 - cancel/pause/late async races；
 - headless test doubles、Agent execution order、build/test/pack Definition of Done。
 
-仍可OPEN且不阻塞Simulation Core实现的内容：
+本 PR implementation agent **必须新增并 qualification** 的 Simulation delta 只有：
+
+~~~text
+tick.ts
+  → DecisionHealthSignal + TickOutput.decisionHealthSignals
+
+runtime.ts
+  → live-only availability guard
+  → threshold processing
+  → Tick-boundary circuit pause
+  → resume guard reset
+  → replay guard bypass
+
+tests
+  → T-DEC-023..036
+~~~
+
+除上述 delta 外，不得重写已 qualification 的 reducer、Decision lifecycle、Replay schema 或 public Runtime ABI。
+
+仍可OPEN且不阻塞Simulation/Decision implementation的内容：
 
 - serialized BattleActor/BattleSkill external subject/version/key encoding；
-- provider-specific Decision metadata/HTTP/network fields；
+- DeepSeek concrete Decision 的 provider/HTTP/failure semantics 已由 BATTLE_V0_DECISION.md 冻结且不属于 Simulation；这里只允许 Host credential/composition wiring 保持外部 OPEN；
 - Guidance Host/InputTarget wiring；
 - Host具体background/suspend事件来源。
 
