@@ -76,7 +76,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 仍保持 OPEN 的只包括不阻塞 Simulation/Presentation implementation 的外部/后续细节，例如：
 
 - BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、key/id 与部分正式 Schema；
-- Decision v0 provider protocol 已冻结为 **OpenAI-compatible only**：`apiKey / model / baseUrl` 由外部 Host/Application 提供，默认 provider profile 使用 **DeepSeek**；仍 OPEN 的是 exact request/structured-output API shape、provider-specific metadata、cancel guarantee、provider/network timeout defaults 与 Host credential wiring；`attempt_failure | session_fatal` authority classification 已冻结；
+- Decision v0 已冻结为 **DeepSeek only**：外部只提供 `apiKey`，`baseUrl / model / provider protocol` 内部固定；LLM pipeline 为 Analyze → Strategize → Materialize，默认两次物理调用，最终 Plan 直接使用 structured JSON 而非 Tool Calling，correction 默认只重跑 Materialization；仍 OPEN 的是 exact fixed model/request/structured-output API shape、provider-specific metadata、cancel guarantee、provider/network timeout defaults 与 Host credential wiring；`attempt_failure | session_fatal` authority classification 已冻结；
 - Guidance Host/InputTarget wiring；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
