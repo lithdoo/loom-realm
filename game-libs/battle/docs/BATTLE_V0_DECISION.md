@@ -48,7 +48,7 @@ v0 concrete product implementation 叫：
 DeepSeekDecision
 ~~~
 
-建议 package layout：
+建议 package layout 保持小而直接；文件边界按实际代码量合并，不要求“一 helper 一文件”：
 
 ~~~text
 src/
@@ -56,12 +56,14 @@ src/
   decision/
     deepseek.ts
     workflow.ts
+    transport.ts
     prompt.ts
     schema.ts
     parse.ts
-    failure.ts
     testing.ts
 ~~~
+
+`callDeepSeek / classifyHttpStatus / extractOutputText` 等普通 helper 可以直接留在 `workflow.ts` 或相邻实现文件；只有代码量/复用性真正增加时再拆分。
 
 package exports：
 
