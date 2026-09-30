@@ -246,21 +246,20 @@ MAX_DEEPSEEK_REQUEST_BYTES
 
 > 为已经存在的稳定变化轴保留 seam；为未来猜测保留普通函数，不提前制造 abstraction。
 
-## 3. Fixed DeepSeek transport profile
+## 3. Fixed DeepSeek logical provider profile
 
-v0 固定：
+v0 Decision protocol 固定：
 
 ~~~text
-provider = DeepSeek
-base URL = https://api.deepseek.com
-endpoint = POST /responses
+logical provider = DeepSeek
+canonical direct API = POST https://api.deepseek.com/responses
 model = deepseek-flash
 stream = false
 tools = none
 conversation/thread memory = none
 ~~~
 
-physical `DeepSeekTransport` contract 对 direct DeepSeek realization 对应：
+对于 direct trusted transport，canonical physical request 是：
 
 ~~~text
 POST https://api.deepseek.com/responses
@@ -268,14 +267,16 @@ Authorization: Bearer <transport-private credential>
 Content-Type: application/json
 ~~~
 
-`DeepSeekDecision` 本身不构造 Authorization header、不读取 credential，也不知道 direct HTTP 与 trusted backend proxy 的物理差异；它只调用 `transport.postResponses(exactBodyText, signal)`。无论物理 realization 如何，transport 对 Decision 暴露的 logical semantics 必须与 §14 相同。
+对于 trusted backend/proxy transport，physical endpoint/authentication 可以不同，但它必须代表同一个 DeepSeek Responses logical capability，并向 Decision 保持 §14 固定的 `postResponses(bodyText, signal) → {status, bodyText}` / reject / abort semantics。proxy 不得把 Decision payload 解释成第二套 gameplay protocol。
 
-deepseek-flash、base URL 与 Responses endpoint 是 Decision implementation constants，不是 Battle gameplay ABI。未来 provider 因兼容性升级需要替换 model alias/endpoint 时，可以作为 Decision provider maintenance patch 处理；不得借此改变 DecisionPort、Simulation 或 Replay semantics。
+`DeepSeekDecision` 本身不构造 Authorization header、不读取 credential，也不知道 direct HTTP 与 trusted backend/proxy 的物理差异；它只生成 fixed DeepSeek request body 并调用 configured transport。
+
+`deepseek-flash` 与 DeepSeek Responses logical protocol 是 Decision implementation constants，不是 Battle gameplay ABI。未来 provider maintenance 若必须替换 model alias/API compatibility，可以作为 Decision/provider integration patch处理；不得借此改变 DecisionPort、Simulation 或 Replay semantics。
 
 v0 不支持：
 
-- custom baseUrl；
-- custom model；
+- caller-supplied baseUrl / physical endpoint；
+- caller-supplied model；
 - provider registry；
 - provider failover；
 - OpenAI-compatible generic provider abstraction；
