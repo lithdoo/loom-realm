@@ -839,10 +839,10 @@ for each output item in provider order:
         require content.text is string
         append content.text to visibleParts
       else:
-        reject as provider/output contract violation
+        return attempt_failure / DECISION_PROVIDER_UNAVAILABLE
 
   else:
-    reject as provider/output contract violation
+    return attempt_failure / DECISION_PROVIDER_UNAVAILABLE
 
 visibleText = visibleParts.join("")
 
@@ -872,7 +872,7 @@ v0 不读取/保存 provider `reasoning_text`。Reasoning item 可以用于 prov
 - `status = "failed"`
   - HTTP 已经是 2xx，因此不再根据 provider-specific `error.code/message` 做 authority classification；
   - 统一 → `attempt_failure / DECISION_PROVIDER_UNAVAILABLE`
-- completed 但 output shape/output_text 非法 → `DECISION_OUTPUT_INVALID` 或 provider-contract invariant，按 §10.1 / §11.3 区分；
+- HTTP 2xx 但 JSON/envelope/output item shape 与 frozen Responses contract 不匹配 → `attempt_failure / DECISION_PROVIDER_UNAVAILABLE`；
 - Call B visible text 无法 JSON.parse 或 strict parse 成 PlanSubmission → `DECISION_OUTPUT_INVALID`。
 
 provider `error.code/message` 可以进入 private diagnostics，但不得驱动 Battle failure category/code。
@@ -921,16 +921,29 @@ DECISION_CONTEXT_TOO_LARGE
 
 ### 11.3 invariant rejection
 
-以下不是正常 DecisionFailure：
+以下才属于 adapter/programmer invariant，而不是 provider attempt failure：
 
-- adapter 构造出 provider 明确拒绝的固定 request shape；
-- HTTP 400/404/422 或其他未显式分类的 4xx；local 512 KiB preflight 已负责 v0 expected context-too-large case，因此不再解析 provider error message 猜测 context overflow；
-- response object shape 与 frozen DeepSeek transport contract 不符；
+- implementation 自己构造出违反本文 frozen request shape 的 body；
 - internal impossible state；
 - local code bug；
-- resolved DecisionCompletion requestId/generation 不可能匹配 adapter 输入。
+- `DeepSeekDecision` 最终向 Simulation 返回 malformed `DecisionCompletion`；
+- resolved `DecisionCompletion` requestId/generation 不可能匹配 adapter 输入。
 
-这些属于 adapter/provider-contract/programmer invariant，允许 throw/reject；Simulation 已冻结的 Runtime invariant path 负责 cleanup。
+HTTP 400/404/422 或其他未显式分类的 4xx 表示 frozen request 与当前 provider API 不兼容，仍属于 adapter/provider integration invariant，允许 throw/reject。
+
+但**已经收到 HTTP 2xx 后的 malformed JSON、malformed Responses envelope、unexpected output item、missing assistant message/content 等全部属于本次 provider attempt failure**：
+
+~~~text
+attempt_failure / DECISION_PROVIDER_UNAVAILABLE
+~~~
+
+它们不得升级成 Runtime/programmer invariant；这样连续 provider protocol故障可以进入 Simulation 的 provider-neutral availability circuit。
+
+只有 completed response 已成功提取 visible text，但该 visible text 为空/坏 JSON/不满足 PlanSubmission structural parser 时，使用：
+
+~~~text
+attempt_failure / DECISION_OUTPUT_INVALID
+~~~
 
 Provider 原始 response body、credential、完整 prompt、完整 strategy memo 不进入 BattleResult、Replay 或 public DecisionFailure.metadata。
 
@@ -940,7 +953,17 @@ DeepSeekDecision v0 产生的正常 DecisionFailure 一律省略 metadata；prov
 
 DeepSeekDecision 只报告单次 `decide()` 的 completion；它**不维护跨 request failure streak，也不直接调用 BattleRuntime.pause()**。
 
-Live Runtime 将以下 attempt failure 视为“Decision service 本次调用不可用”信号：
+DeepSeekDecision 只负责把单次调用归一化为：
+
+~~~text
+DecisionCompletion.completed
+DecisionCompletion.failed(category = attempt_failure)
+DecisionCompletion.failed(category = session_fatal)
+~~~
+
+Simulation 的 availability circuit **只读取这些共享 outcome/category，不读取任何 DeepSeek-specific code**。
+
+因此 concrete code：
 
 ~~~text
 DECISION_PROVIDER_NETWORK
@@ -950,15 +973,14 @@ DECISION_PROVIDER_UNAVAILABLE
 DECISION_PROVIDER_REFUSED
 DECISION_PROVIDER_INCOMPLETE
 DECISION_OUTPUT_INVALID
+DECISION_ABORTED
 ~~~
 
-`DECISION_ABORTED` 不属于 provider health failure，不计入连续失败。
+只用于 concrete diagnostics / failure code，不是 Simulation branching ABI。
 
-任意 authority-valid `DecisionCompletion.completed` 都表示本次 LLM Decision pipeline 成功完成并产生了结构有效的 Plan，因此会重置 live Runtime 的连续 LLM failure streak；即使该 Plan 随后被 Simulation gameplay validator reject，也不算 LLM 调用失败。
+Runtime 主动 abort request 时先撤销 request authority；后续 `DECISION_ABORTED` completion 会被 lifecycle/stale fence 丢弃，因此不需要 Simulation 识别这个 code。
 
-`session_fatal` 不参与连续失败计数，仍由 Simulation 立即走 terminal decision failure。
-
-连续失败阈值、自动 pause、active request abort 与 explicit resume 的 exact Runtime semantics 由 BATTLE_V0_SIMULATION.md §10 冻结。
+连续失败阈值、自动 pause、active request authority revoke/abort 与 explicit resume 的 exact Runtime semantics 由 BATTLE_V0_SIMULATION.md §10 冻结。
 
 ## 12. Timeout / retry / AbortSignal
 
