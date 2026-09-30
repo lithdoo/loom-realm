@@ -67,7 +67,7 @@ Simulation 实施细节不得重新定义 SPEC gameplay Rule，也不得改变 P
 负责：
 
 - concrete product implementation `DeepSeekDecision`；
-- v0 DeepSeek-only / apiKey-only public configuration；
+- v0 DeepSeek-only / configured-`DeepSeekTransport`-only public Decision configuration；credential 不进入 `DeepSeekDecision` options；
 - fixed `deepseek-flash` + Responses API transport profile；
 - stable `DeepSeekDecision` shell + replaceable internal `DecisionWorkflow` orchestration seam；
 - minimal internal layering = `DecisionPort → DecisionWorkflow → DeepSeekTransport`；Transport 只负责 HTTP，Workflow 负责 provider protocol，其他 formatter/parser/classifier/budget/concurrency 逻辑保持 pure functions/constants；
@@ -264,7 +264,7 @@ protection      命中后的有限免疫区间
 
 **当前 Core gameplay 没有未冻结 design OPEN；Simulation baseline 已 qualification，新增 Decision availability circuit 已冻结且待实现，不再存在需要 implementation agent 自行决策的 blocking OPEN。**
 
-仍存在的 OPEN 只属于不阻塞 Simulation/Presentation/Decision implementation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Host suspend/resume 来源映射，以及 Host 到 DeepSeekDecision 的 apiKey/composition wiring。PlayerGuidance concrete contract/Host wiring 明确延期；其 workflow extensibility requirement 已冻结，不是当前 implementation OPEN。Concrete Decision 的 shell/workflow boundary、v0 topology、model/API、prompt/context、structured output、parser、failure、timeout/retry、Abort、correction statelessness 与 testing 已集中冻结在 **BATTLE_V0_DECISION.md**，不再属于 implementation OPEN。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结；这些外部 OPEN 不得反向改变 Core/Decision/Presentation 已冻结语义。
+仍存在的 OPEN 只属于不阻塞 Simulation/Presentation/Decision implementation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Host suspend/resume 来源映射，以及 configured DeepSeekTransport 的 credential/network/product capability handoff。PlayerGuidance concrete contract/Host wiring 明确延期；其 workflow extensibility requirement 已冻结，不是当前 implementation OPEN。Concrete Decision 的 shell/workflow boundary、v0 topology、model/API、prompt/context、structured output、parser、failure、timeout/retry、Abort、correction statelessness 与 testing 已集中冻结在 **BATTLE_V0_DECISION.md**，不再属于 implementation OPEN。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结；这些外部 OPEN 不得反向改变 Core/Decision/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
@@ -280,7 +280,7 @@ protection      命中后的有限免疫区间
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. 按 FROZEN Presentation Agent contract 直接实现 PresentationPort + Browser Presentation（依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
-10. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 apiKey / Host E2E；PlayerGuidance 后续独立设计/实现
+10. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 configured DeepSeekTransport / product Host E2E；PlayerGuidance 后续独立设计/实现
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。
