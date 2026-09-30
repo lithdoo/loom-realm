@@ -14,7 +14,7 @@ Battle 使用 200 ms/Tick 的确定性 Simulation，不复用 RPGMap Runtime；�
 
 - **[BATTLE_V0_SPEC.md](./docs/BATTLE_V0_SPEC.md)** — 唯一核心 gameplay/runtime 规范，含 Rule IDs、Tick reducer、OPEN/non-goals。
 - **[BATTLE_V0_CONTRACTS.md](./docs/BATTLE_V0_CONTRACTS.md)** — Content、Observation、PlanSubmission、Snapshot、Event、Projection 等数据契约。
-- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
+- **[BATTLE_V0_SIMULATION.md](./docs/BATTLE_V0_SIMULATION.md)** — **gameplay/runtime baseline FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION**：Simulation Runtime state、Clock/scheduler、Decision/Plan pipeline、provider-neutral live availability circuit、Tick transaction、events、Projection cadence、terminal arbitration、Snapshot/Replay 与测试 doubles。
 - **[BATTLE_V0_DECISION.md](./docs/BATTLE_V0_DECISION.md)** — **FROZEN FOR IMPLEMENTATION**：DeepSeek-only concrete Decision、stable shell + replaceable internal DecisionWorkflow、v0 Analyze+Strategize→Materialize two-call workflow、Responses API、JSON Schema、parser、failure、timeout/retry/Abort、未来 PlayerGuidance 扩展余量、测试与 Agent contract。
 - **[BATTLE_V0_INTEGRATION.md](./docs/BATTLE_V0_INTEGRATION.md)** — RPGMap 素材兼容、三层组合、Host/Frame、Decision credential wiring、Guidance、workspace 集成。
 - **[BATTLE_V0_PRESENTATION.md](./docs/BATTLE_V0_PRESENTATION.md)** — **FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**：Presentation API、Render Tree/Browser ABI、world-coordinate motion、camera、viewport/resize、HUD/effects、lifecycle/failure 与 Agent execution contract。
