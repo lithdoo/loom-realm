@@ -72,7 +72,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 
 ## 当前 OPEN
 
-**Core gameplay 当前没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
+**Core gameplay 当前没有未冻结 design OPEN；Simulation baseline 已 qualification，Decision availability circuit 已冻结待实现；不存在需要实现者自行决定语义的 blocking OPEN。**
 
 此前关于 direction/turn、移动中致命受击、zero-damage hit、LOS、pause/background clock、stalemate 的问题都已经冻结进 SPEC。
 
