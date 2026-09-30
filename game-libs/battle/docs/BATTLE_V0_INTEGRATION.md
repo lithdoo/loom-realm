@@ -321,46 +321,67 @@ fade-in / hold / fade-out 使用 BattleEffect ticks × `tickDurationMs`；Browse
 
 Browser effect image decode/load 失败只跳过该 transient visual并可发 diagnostic；`struct.BattleEffect` record/资源 identity 在 initialize 阶段无法解析则属于 Presentation fatal，Battle 不启动。
 
-## 5. Decision 实现类型
+## 5. Decision implementation / composition
 
-Decision 是可替换组件，预期可以有：
+Decision 的 gameplay-facing Port 仍是共享的 `DecisionPort`。Simulation 必须在没有 Browser、没有真实网络 provider 时，也能由 Script/Deferred/Fake Decision 驱动完成 headless Battle。
+
+Battle v0 的 concrete product Decision 已单独冻结在：
+
+- **[BATTLE_V0_DECISION.md](./BATTLE_V0_DECISION.md) — FROZEN FOR IMPLEMENTATION**
+
+v0 product implementation 唯一要求为：
 
 ```text
-MockDecision
-ScriptDecision
-ManualDecision
-RandomDecision
-LLMDecision
+DeepSeekDecision
+  provider = DeepSeek only
+  external config = apiKey only
+  model = deepseek-flash
+  API = POST https://api.deepseek.com/responses
+  normal decide() = Call A + Call B
 ```
 
-Simulation 必须在**没有 Browser、没有真实 LLM**时也能被 Mock/Script 驱动跑完整 Battle。
+Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、Simulation correction、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都继续属于 Simulation Runtime lifecycle。
 
-Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、correction retry、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都属于 Simulation Runtime lifecycle；这些不能下放给业务 composition adapter。
+业务 composition 只负责：
 
-## 6. LLM Decision Adapter
+```text
+obtain apiKey
+→ construct DeepSeekDecision
+→ inject as DecisionPort
+```
 
-Battle v0 的 LLM Decision provider scope 已进一步收窄并冻结：
+业务不得接管 provider callback、Plan validation 或 Tick lifecycle。
 
-- **只支持 DeepSeek**；
-- 外部 Host/Application **只提供 `apiKey`**；
-- `baseUrl`、`model`、provider protocol 与 request shape 都由 Battle Decision implementation 内部固定，不作为 v0 public configuration；
-- v0 **不支持自定义 baseUrl、自定义 model、多 provider 或 generic AI framework**；
-- credential 不进入 `DecisionRequest`、`BattleObservation`、Simulation state、Replay 或 Browser Presentation；
-- Browser 不持有模型密钥。
+## 6. DeepSeek credential / Host integration
 
-当前仓库公开的 Subsystem surface 仍没有冻结 Host 到 concrete Decision Adapter 的最终 credential transport/wiring；这属于外部 integration，不改变 Battle Decision/Simulation contracts。
+Concrete provider/model/API/prompt/schema/parser/failure/timeout/retry/Abort semantics 已在 **BATTLE_V0_DECISION.md** 唯一化，本 Integration 文档不重复维护另一份 provider implementation spec。
 
-Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直接接受 Plan，也不自行拥有 Simulation correction authority**。
+Host/Application 只需要向 Decision 提供：
 
-固定数据流：
+```ts
+new DeepSeekDecision({
+  apiKey,
+})
+```
+
+credential boundary：
+
+- `apiKey` 不进入 `DecisionRequest`；
+- `apiKey` 不进入 `BattleObservation`；
+- `apiKey` 不进入 Simulation state / Replay；
+- `apiKey` 不进入 Browser Presentation；
+- `DeepSeekDecision` 不自行读取 `process.env`；
+- Host/Application 决定 secret 从何处取得并在 composition 时显式注入。
+
+固定 authority flow：
 
 ```text
 Simulation
   → DecisionPort.decide(request, signal)
         ↓ async
-LLMDecision
-        ↓
-DecisionCompletion
+DeepSeekDecision
+  → DeepSeek Responses API
+  → DecisionCompletion
         ↓
 Simulation-owned Decision Inbox
         ↓
@@ -371,182 +392,17 @@ generation / validation / correction
 bounded active/pending accepted-plan pipeline
 ```
 
-Promise resolve / provider callback 只允许产生一次 `DecisionCompletion`。Runtime 随后负责 enqueue 到 Simulation-owned Decision Inbox；即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
+Provider callback/Promise completion 不直接写 Battle State。DecisionCompletion 仍然没有 gameplay timestamp/dueTick；真实 provider wall-clock latency 不进入 Simulation authority。
 
-### 6.1 v0 provider / configuration boundary
+### INTEGRATION-OPEN-003 — DeepSeek apiKey Host wiring — OPEN
 
-v0 public configuration：
+Decision implementation 本身已经没有 blocking provider OPEN。当前仅剩 Host/Application composition 需要在业务集成阶段决定：
 
-```text
-Host / Application composition
-        │
-        │ apiKey
-        ▼
-     LLMDecision
-        │
-        │ internally fixed:
-        │ - DeepSeek endpoint
-        │ - model
-        │ - provider protocol
-        ▼
-     DeepSeek API
-```
+- apiKey 的产品级 secret storage/source；
+- 哪个 Host/composition object 构造 `DeepSeekDecision`；
+- credential unavailable 时业务在启动 Battle 前如何呈现/处理配置缺失。
 
-冻结规则：
-
-- `apiKey` 是唯一外部 provider configuration；
-- `baseUrl` 与 `model` **不得作为 v0 public option 暴露**；
-- DeepSeek endpoint、model 与 wire protocol 必须在 Decision implementation 内集中定义，不能散落在 prompt / request 逻辑中；
-- Battle gameplay/Simulation 不读取 provider configuration，也不感知 provider lifecycle；
-- v0 不建立 provider registry、provider selection DSL、OpenAI-compatible generic client 或 multi-provider abstraction；
-- 未来若需要 custom model/baseUrl/其他 provider，属于 v1+ capability expansion，不反向扩张 v0 gameplay contracts。
-
-### 6.2 Decision LLM pipeline
-
-一次逻辑上的 Decision attempt 采用三阶段语义：
-
-```text
-DecisionRequest
-      ↓
-1. Analyze
-   理解当前战况
-      ↓
-2. Strategize
-   形成短期策略 / 行动意图
-      ↓
-3. Materialize
-   将策略转换为 PlanSubmission
-      ↓
-DecisionCompletion
-```
-
-v0 默认采用 **两次物理 LLM 调用**，而不是三次网络调用：
-
-```text
-Call A — Reasoning
-Battle facts + constraints + planningOrigin + recentEvents
-      ↓
-Situation analysis
-      ↓
-Action strategy
-
-Call B — Materialization
-required Battle facts + constraints + action strategy
-      ↓
-structured PlanSubmission JSON
-```
-
-边界规则：
-
-- Analyze / Strategize 可以使用自然语言或内部半结构化结果；它们没有 gameplay authority；
-- Stage 2 的 strategy 是 Decision 内部数据，**不得被当作新的 system/developer instruction**；
-- Call B 使用固定的 Battle materialization instruction，并把 strategy 作为不可信 context/data；
-- Call B 仍需得到足够的 authoritative facts，例如 `planningOrigin`、合法 actor/skill IDs、path constraints、必要地图信息与 allowed `minCoefficient`，不能只凭 strategy 自由补全世界事实；
-- 每次 `decide()` 必须 self-contained；v0 不依赖 provider conversation/thread memory 作为隐藏必要状态。
-
-### 6.3 Structured output boundary
-
-Battle v0 **不通过 Tool Calling / function-call arguments 提交 Plan**。
-
-模型最终直接产生结构化 `PlanSubmission` 数据：
-
-```text
-DeepSeek structured output
-        ↓
-local shape parser / schema validation
-        ↓
-PlanSubmission
-        ↓
-Simulation authoritative gameplay validation
-```
-
-冻结规则：
-
-- Tool Calling 不是 v0 Plan output mechanism；
-- 模型没有 `move()`、`attack()`、`submit_plan()` 等 Battle tool authority；
-- provider structured-output guarantee 不能替代本地 parser；
-- malformed JSON、schema/shape violation 属于 Decision/provider output failure；
-- structurally valid 但 gameplay-invalid 的 `PlanSubmission` 必须正常交给 Simulation，由 Simulation 产生 `PlanRejectReason`；
-- Decision 不复制 Simulation 的 path adjacency、terrain、target、skill、minCoefficient gameplay validator。
-
-### 6.4 Correction 与多阶段 pipeline
-
-Simulation 仍拥有 correction authority。
-
-初次 attempt：
-
-```text
-Call A: Analyze + Strategize
-Call B: Materialize Plan
-        ↓
-Simulation validate
-```
-
-如果 Plan 结构有效但 gameplay validation 失败，并且 Simulation 允许本 generation 的 correction：
-
-```text
-original analysis/strategy
-+ rejected Plan
-+ PlanRejectReason
-        ↓
-Call B only
-        ↓
-replacement PlanSubmission
-```
-
-v0 correction 默认**不重新执行 Call A**。这样保留原战术目标，只重新 materialize 一个满足最新 correction feedback 的候选 Plan。
-
-这不改变已冻结的 Simulation 规则：
-
-- attempt 0 invalid → Simulation 决定是否产生 correction request；
-- attempt 1 invalid → generation 结束；
-- Decision Adapter 不自行增加第三次 gameplay correction；
-- provider/network transport retry 与 Simulation Plan correction 仍是两个不同概念。
-
-### 6.5 Provider timeout 与 Battle gameplay 分离
-
-Provider/network timeout 是 infrastructure policy。例如模型服务在其配置的时限后返回 timeout，可以产生：
-
-```ts
-{
-  type: "failed",
-  requestId,
-  generation,
-  error
-}
-```
-
-这个 failure 和普通 completion 一样进入 Decision Inbox，由后续 Tick reducer 消费。
-
-v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-clock latency 计算 `dueTick`。Battle pause 时 LLM 可以完成并 enqueue，但没有 Tick 就不会产生 gameplay effect。
-
-### INTEGRATION-OPEN-003 — Decision Adapter provider detail — OPEN
-
-已经确定：
-
-- 一次 `decide()` = 一次 gameplay Decision attempt；
-- v0 provider = **DeepSeek only**；
-- 外部 provider configuration = **`apiKey` only**；
-- `baseUrl`、`model`、provider protocol 由 implementation 内部固定；
-- Decision pipeline = Analyze → Strategize → Materialize；
-- v0 默认两次物理 LLM 调用：Reasoning + structured Materialization；
-- Plan output 使用直接 structured JSON，不使用 Tool Calling；
-- local parser 与 Simulation gameplay validator 保持分层；
-- correction 默认复用原 analysis/strategy，只重跑 Materialization；
-- DecisionCompletion 不带 gameplay timing / dueTick；
-- completion callback 不拥有 Battle State mutation authority；
-- stale / validation / correction / bounded active/pending accepted-plan pipeline 属于 Simulation；
-- Simulation 通过 AbortSignal best-effort 取消失效 attempt。
-
-尚未冻结：
-
-- DeepSeek v0 **exact fixed model identifier**；
-- DeepSeek exact request endpoint/API surface 与 structured-output invocation 细节；
-- `DecisionFailure` exact provider code / metadata normalization；
-- provider cancel guarantee；
-- provider/network timeout defaults；
-- model/service limits；
-- `apiKey` 从 Host 到 concrete adapter 的 exact credential wiring。
+这些 wiring 不得扩张 `DecisionPort` 或修改 frozen Decision/Simulation semantics。
 
 ## 7. Player Guidance
 
@@ -736,7 +592,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：v0 provider 已冻结为 **DeepSeek only**，外部只提供 `apiKey`，`baseUrl / model / provider protocol` 由 Decision implementation 内部固定；LLM pipeline 已冻结为 Analyze → Strategize → Materialize、默认两次物理调用，最终 Plan 直接使用 structured JSON 而非 Tool Calling；仍 OPEN 的仅是 exact fixed model/request/structured-output API shape、provider-specific metadata/cancel guarantee/provider timeout defaults、model/service limits 与 Host credential wiring；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
+- **INTEGRATION-OPEN-003**：DeepSeek Decision implementation 已由 BATTLE_V0_DECISION.md 冻结；Integration 只剩 apiKey 的 Host secret source、DeepSeekDecision construction/injection 与缺失 credential 的产品级 wiring；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
