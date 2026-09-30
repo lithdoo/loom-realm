@@ -103,7 +103,9 @@ Resolved Battle input/validator
 → 已完成：@loomrealm-game/tile-presentation 抽取 + Map 切换/回归
 → **已完成：按 FROZEN Presentation Agent contract 实现 PresentationPort + Browser Presentation**
 → business Subsystem thin composition
-→ **下一步：按 FROZEN Decision spec 实现 DeepSeekDecision**
+→ **下一步：按 FROZEN specs 实现 DeepSeekDecision + Simulation availability circuit delta**
+   - tick.ts: ordered DecisionHealthSignal output
+   - runtime.ts: live-only guard + Tick-boundary PAUSED transition + Replay bypass
 → configured DeepSeekTransport / product Host E2E
 → Future: PlayerGuidance 独立设计/实现
 ```
@@ -116,4 +118,4 @@ Resolved Battle input/validator
 npm run test:battle
 ```
 
-该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle Simulation unit/acceptance 与 Presentation/Browser E2E。Battle v0 既有 Simulation baseline 与 Presentation 已完成 closed-loop qualification；DeepSeekDecision/availability circuit 与业务 Host composition 仍待实现。PlayerGuidance concrete feature 明确延期，但 DecisionWorkflow 扩展边界已提前冻结。
+该命令明确构建 subsystem、renderer、tile-presentation、battle，并运行 Battle Simulation unit/acceptance 与 Presentation/Browser E2E。Battle v0 既有 Simulation baseline 与 Presentation 已完成 closed-loop qualification；DeepSeekDecision 与 Simulation availability circuit delta（T-DEC-023..036）仍待实现/qualification，业务 Host composition 随后集成。PlayerGuidance concrete feature 明确延期，但 DecisionWorkflow 扩展边界已提前冻结。
