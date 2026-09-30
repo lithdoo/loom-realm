@@ -1080,7 +1080,7 @@ else if provider timeout has fired:
   → DECISION_PROVIDER_TIMEOUT
 ~~~
 
-也就是说 caller/session abort 优先于 infrastructure timeout。availability circuit 不检查这些 concrete code；Runtime 发出 abort 前已撤销 request authority，所以 abort completion 走 stale/lifecycle fence，而一个仍具 authority 的 timeout completion 会以 `attempt_failure` 参与 provider-neutral availability policy。
+也就是说 caller/session abort 优先于 infrastructure timeout。availability circuit 不检查这些 concrete code，也**不会因为 circuit pause 本身发出 request AbortSignal**。只有 damaging hit/death、cancel/close、session fatal、request replacement 等既有 lifecycle invalidation 才会由 Runtime 撤销 request authority并 abort；仍具 authority 的 timeout completion会以 `attempt_failure` 参与 provider-neutral availability policy。
 
 每个 `callDeepSeek()` 的 timeout handle、linked AbortController/listener、settled flag 都必须是 call-local；任意 settle path 都必须清理 timer/listener 并忽略 late transport resolve/reject。
 
