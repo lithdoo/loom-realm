@@ -443,6 +443,25 @@ abort/cancel
 
 所有迟到 Decision/Event 都必须因 Runtime lifecycle、AbortSignal 与 action/decision generation fencing 失去提交权。
 
+### 8.1 Decision availability circuit pause
+
+连续 LLM/provider 调用错误导致的暂停不是 DeepSeekDecision 自己调用 `battle.pause()`，而是 live Battle Runtime 根据已消费的 DecisionCompletion 维护 operational circuit breaker。
+
+固定策略：
+
+~~~text
+3 consecutive counted Decision failures
+→ automatic Battle PAUSED
+→ freeze logical clock
+→ suppress new Decision requests
+→ abort all active Decision requests
+→ explicit battle.resume() required
+~~~
+
+counted failure、reset、same-Tick ordering、Replay exclusion 与 session_fatal bypass 的 exact semantics 以 BATTLE_V0_SIMULATION.md §10 为准。
+
+这类自动暂停对外继续使用现有 `BattleStatus = "paused"` 与 `battle.resume()` lifecycle，不新增 gameplay timing/dueTick。Host/Product 如何向玩家呈现“AI 决策服务暂时不可用”、是否显示重试按钮，以及如何区分 background/manual pause 的 UI 文案属于产品级 integration；不得改变 Runtime circuit semantics。
+
 正常 BattleResult 使用不同的视觉生命周期：
 
 ```text
@@ -594,7 +613,7 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 
 - **INTEGRATION-OPEN-003**：DeepSeek Decision implementation 已由 BATTLE_V0_DECISION.md 冻结；Integration 只剩 apiKey 的 Host secret source、DeepSeekDecision construction/injection 与缺失 credential 的产品级 wiring；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
-- Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
+- Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
 `@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 与 Core Simulation/DecisionPort/full Runtime 均已冻结、实现并完成 closed-loop qualification；真实 provider 与业务 Host composition 仍待外部集成。
