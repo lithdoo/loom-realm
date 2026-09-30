@@ -240,7 +240,7 @@ protection      命中后的有限免疫区间
 
 **当前 Core gameplay 没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
 
-仍存在的 OPEN 只属于不阻塞 Simulation/Presentation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、provider-specific Decision metadata/cancel/timeout defaults、Guidance Host wiring 与 Host suspend/resume 来源映射；Decision failure 的 attempt/session-fatal authority classification 已冻结。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
+仍存在的 OPEN 只属于不阻塞 Simulation/Presentation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Decision provider 的 exact OpenAI-compatible request/structured-output API shape、provider-specific metadata/cancel/timeout defaults、Host credential wiring、Guidance Host wiring 与 Host suspend/resume 来源映射。Decision v0 provider protocol 已冻结为 **OpenAI-compatible only**，`apiKey / model / baseUrl` 由外部 Host/Application composition 提供，默认 provider profile 使用 **DeepSeek**；Battle Core 不持有 credential，也不建立 generic multi-provider AI framework。Decision failure 的 attempt/session-fatal authority classification 已冻结。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结，不再属于 OPEN；剩余 OPEN 不得改变 Core/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
