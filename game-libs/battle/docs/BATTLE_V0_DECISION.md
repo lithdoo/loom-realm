@@ -55,6 +55,7 @@ src/
   decision.ts
   decision/
     deepseek.ts
+    workflow.ts
     prompt.ts
     schema.ts
     parse.ts
@@ -102,6 +103,88 @@ v0 唯一外部 provider configuration 是 apiKey。
 
 DeepSeekDecision 不读取 process.env、配置文件或 Browser storage。credential 必须由 Host/Application composition 显式注入。constructor 对空字符串或仅 whitespace 的 apiKey 同步抛出配置/programmer error，不发网络请求。
 
+### 2.1 Stable shell / replaceable workflow boundary
+
+Battle-facing stable boundary 继续只有：
+
+~~~text
+Simulation
+  → DecisionPort.decide(request, signal)
+  → DeepSeekDecision
+~~~
+
+`DeepSeekDecision` 内部必须把“稳定 adapter shell”与“可替换决策编排”分开：
+
+~~~text
+DecisionPort
+    │
+    ▼
+DeepSeekDecision
+    │ stable shell
+    │ - requestId / generation echo
+    │ - request-scoped abort + settle-once
+    │ - workflow result → DecisionCompletion
+    ▼
+DecisionWorkflow
+    │ replaceable internal orchestration
+    │ - context assembly
+    │ - provider call graph
+    │ - intermediate reasoning/strategy data
+    │ - structured materialization
+    ▼
+DeepSeekTransport / future typed workflow capabilities
+~~~
+
+内部最小 seam：
+
+~~~ts
+type DecisionWorkflowResult =
+  | {
+      readonly type: "completed"
+      readonly plan: PlanSubmission
+    }
+  | {
+      readonly type: "failed"
+      readonly error: DecisionFailure
+    }
+
+interface DecisionWorkflow {
+  run(
+    request: DecisionRequest,
+    signal: AbortSignal,
+  ): Promise<DecisionWorkflowResult>
+}
+~~~
+
+冻结边界：
+
+- `DecisionWorkflow` 是 **Decision module internal orchestration seam**，不是第四个 Battle runtime layer，也不是新的 gameplay Port；
+- production `@loomrealm-game/battle/decision` 不导出 workflow/stage graph，不要求 Host 注入 workflow；
+- `DeepSeekDecision({ apiKey })` 生产构造函数内部选择当前 frozen v0 workflow；
+- Simulation、Replay、Presentation、Host 不知道也不依赖 workflow 内有几次 LLM call、有哪些 stage、是顺序/分支还是未来其他 topology；
+- `DeepSeekDecision` 不暴露 `analyze()`、`strategize()`、`materialize()` 等 stage-level public methods；
+- intermediate analysis/strategy shape 不属于 public ABI、Replay 或 BattleSnapshot；
+- future workflow 可以改变 stage count / call count / branch topology，只要仍满足 `DecisionPort`、failure/abort/security authority contract；
+- v0 implementation 仍必须实现本文 §4 的 exact two-call workflow；“workflow topology 可演进”不授权 implementation agent 自行修改当前 v0 call graph。
+
+这样未来从：
+
+~~~text
+Analyze + Strategize
+→ Materialize
+~~~
+
+演进为：
+
+~~~text
+Analyze
+→ obtain PlayerGuidance
+→ Strategize
+→ Materialize
+~~~
+
+甚至更复杂的 branching/critique/revision workflow，都不要求修改 `DecisionPort` 或 Simulation gameplay architecture。
+
 ## 3. Fixed DeepSeek transport profile
 
 v0 固定：
@@ -135,9 +218,9 @@ v0 不支持：
 - OpenAI-compatible generic provider abstraction；
 - Tool Calling 作为 Plan 输出机制。
 
-## 4. Stateless two-call pipeline
+## 4. V0 DecisionWorkflow — stateless two-call implementation
 
-一次逻辑上的 decide(request, signal) 采用三阶段语义、两次物理 LLM 请求：
+当前 v0 production workflow 固定采用三阶段语义、两次物理 LLM 请求。**两次调用是 v0 concrete workflow contract，不是 DecisionPort/public API contract**：
 
 ~~~text
 DecisionRequest
@@ -918,9 +1001,116 @@ Host telemetry wiring不是 Decision implementation blocker；若未来加入 si
 - game/content/Guidance strings 视为 untrusted data；
 - 模型没有外部 tool authority。
 
-## 17. Testing architecture
+## 17. Future workflow extensibility / PlayerGuidance reservation
 
-### 17.1 Pure tests
+PlayerGuidance **不在当前 v0 implementation scope 内实现**。这里的状态不是“架构不考虑”，而是：
+
+~~~text
+PlayerGuidance
+NOT IMPLEMENTED IN V0
+
+architecture reservation:
+future DecisionWorkflow capability
+
+exact Guidance contract:
+NOT FROZEN YET
+~~~
+
+### 17.1 Required future-proofing
+
+v0 implementation 必须保证未来加入 Guidance 时不需要：
+
+- 修改 Simulation Tick/reducer；
+- 修改 `DecisionPort.decide(request, signal)`；
+- 把 Guidance 变成 Battle gameplay authority；
+- 在 `DeepSeekDecision` 上增加 `setGuidance()` / `currentGuidance` 等 mutable cross-request state；
+- 把 Guidance 塞进 provider conversation/thread hidden memory；
+- 建立 generic `extensions: Record<string, unknown>` 插件袋。
+
+未来 Guidance 应以 **request-scoped、typed、explicit workflow capability/data** 进入某一次 workflow run。例如未来可以单独冻结一个类似：
+
+~~~text
+authorized PlayerGuidance source
+        ↓
+workflow run for one Decision request
+        ↓
+Guidance data
+        ↓
+Strategize stage
+~~~
+
+的 contract；其 exact TypeScript shape、消费/失效语义、ally/enemy applicability、Host/InputTarget ownership 现在仍属于未来设计，不在 v0 预定义。
+
+### 17.2 Expected future topology
+
+当前 v0：
+
+~~~text
+DecisionRequest
+  ↓
+Analyze + Strategize
+  ↓
+Materialize
+  ↓
+PlanSubmission
+~~~
+
+未来 PlayerGuidance candidate：
+
+~~~text
+DecisionRequest
+  ↓
+Analyze
+  ↓
+SituationAnalysis
+  ├──────────────┐
+  │              │
+  │       PlayerGuidance
+  │              │
+  └──────┬───────┘
+         ↓
+     Strategize
+         ↓
+      Strategy
+         ↓
+     Materialize
+         ↓
+    PlanSubmission
+~~~
+
+这个图只冻结 **扩展方向**，不冻结未来 stage API。未来业务也可以根据真实需求使用更多 stage、条件分支、critique/revision 或其他 orchestration；唯一必须稳定的是外层 `DecisionPort` authority boundary 和 `DeepSeekDecision` 对调用方的兼容 surface。
+
+### 17.3 Backward-compatible product surface
+
+v0 调用方只写：
+
+~~~ts
+new DeepSeekDecision({ apiKey })
+~~~
+
+未来如果 Guidance 需要额外 Host capability，应通过新增 optional typed composition capability 或新的 compatible factory/constructor overload 演进；现有只提供 `apiKey` 的调用方式必须继续有效，不能要求业务为了 workflow 内部拆分而重写 Simulation wiring。
+
+因此：
+
+~~~text
+stable:
+  DecisionPort
+  DeepSeekDecision.decide()
+  existing apiKey-only construction path
+
+replaceable:
+  DecisionWorkflow
+  provider call topology
+  intermediate data
+  stage count / stage names
+
+future:
+  typed PlayerGuidance capability
+~~~
+
+## 18. Testing architecture
+
+### 18.1 Pure tests
 
 必须覆盖：
 
@@ -935,7 +1125,7 @@ Host telemetry wiring不是 Decision implementation blocker；若未来加入 si
 - provider output → parser；
 - provider failure → failure code。
 
-### 17.2 Fake transport tests
+### 18.2 Fake transport tests
 
 必须覆盖：
 
@@ -957,7 +1147,7 @@ Host telemetry wiring不是 Decision implementation blocker；若未来加入 si
 - exactly two physical provider calls on correction decide()；
 - requestId/generation echo unchanged。
 
-### 17.3 Simulation integration
+### 18.3 Simulation integration
 
 使用真实：
 
@@ -980,7 +1170,7 @@ BattleSimulationBuilder
 - late provider completion cannot regain authority；
 - Replay does not call DeepSeekDecision。
 
-### 17.4 Real provider smoke test
+### 18.4 Real provider smoke test
 
 真实 DeepSeek test：
 
@@ -999,7 +1189,7 @@ apiKey present
 → local parser accepts PlanSubmission shape
 ~~~
 
-## 18. Package qualification
+## 19. Package qualification
 
 Decision implementation 完成后至少运行：
 
@@ -1017,7 +1207,7 @@ npm pack -w @loomrealm-game/battle --dry-run
 
 正常 qualification 不允许依赖真实 DeepSeek credential/network。
 
-## 19. Implementation agent contract
+## 20. Implementation agent contract
 
 Implementation agent 必须：
 
@@ -1025,14 +1215,15 @@ Implementation agent 必须：
 2. 不扩张 DecisionRequest / PlanSubmission / DecisionCompletion public ABI 以方便 prompt；
 3. 实现 DeepSeek-only、apiKey-only public config；
 4. 使用固定 Responses API / model / endpoint；
-5. 实现 stateless two-call pipeline；
+5. 实现 stable DeepSeekDecision shell + internal DecisionWorkflow seam，并让 v0 workflow 使用 stateless two-call pipeline；
 6. 实现 deterministic context formatter；
 7. 实现 direct JSON Schema structured Plan output；
 8. 保留 local strict parser；
 9. 实现本文 failure/timeout/no-retry/abort semantics，并只上报单次 availability signal；跨 request streak / circuit pause 属于 Simulation；
 10. 提供 FakeDeepSeekTransport 与测试；
 11. 保持真实 provider test credential-gated；
-12. 不引入 generic AI/provider framework。
+12. 不引入 generic AI/provider/workflow framework；只保留最小 DecisionWorkflow orchestration seam；
+13. 不实现 PlayerGuidance concrete contract，但不得通过 stage-level public API 或 hidden mutable state 阻塞未来 workflow 扩展。
 
 不得自行重新选择：
 
@@ -1040,21 +1231,22 @@ Implementation agent 必须：
 - Tool Calling vs direct JSON；
 - model；
 - baseUrl；
-- number of model calls；
+- v0 workflow 的 number of model calls（当前固定为 2；未来版本可通过替换 workflow 演进，但不属于本次 implementation freedom）；
 - correction cache；
 - retry policy；
 - failure categories/codes；
 - Simulation validation ownership。
 
-## 20. Definition of Done
+## 21. Definition of Done
 
 满足以下全部条件后，Battle v0 Decision implementation 才算完成：
 
 - DeepSeekDecision public API 落地；
+- DeepSeekDecision shell 不暴露 stage-level methods，并通过 internal DecisionWorkflow 承载 v0 orchestration；
 - ./decision 与 ./decision/testing exports 可解析；
 - normal decide() = exactly Call A + Call B；
 - correction decide() 同样自包含 Call A + Call B；
-- no hidden conversation/session state；
+- no hidden conversation/session/Guidance state；
 - structured Plan output + local parser；
 - Simulation 仍是唯一 gameplay validator；
 - frozen failure taxonomy；
@@ -1063,6 +1255,7 @@ Implementation agent 必须：
 - counted failure codes 与 Simulation §10 circuit policy 对齐，DeepSeekDecision 本身不直接 pause Runtime；
 - request-scoped AbortSignal 全链路；
 - Fake transport tests 完整；
+- tests 证明 Battle-facing caller 不依赖 workflow stage/call topology；
 - Simulation integration tests 通过；
 - existing Simulation/Presentation tests 全绿；
 - package dry-run 通过；
