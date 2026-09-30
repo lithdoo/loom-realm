@@ -1,6 +1,6 @@
 # Battle v0 文档索引与迁移说明
 
-> 状态：**Core gameplay 已冻结；Simulation gameplay baseline = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision + Decision availability circuit = FROZEN FOR IMPLEMENTATION**。DeepSeek concrete Decision 与连续 provider failure 自动暂停 Battle 的 live Runtime policy 已唯一化；真实实现、qualification、Guidance 与 Host composition 仍属于后续工作。
+> 状态：**Core gameplay 已冻结；Simulation gameplay baseline = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision + Decision availability circuit = FROZEN FOR IMPLEMENTATION**。DeepSeek concrete Decision、replaceable DecisionWorkflow boundary 与连续 provider failure 自动暂停 Battle 的 live Runtime policy 已唯一化；PlayerGuidance concrete contract 明确延期，真实实现/qualification 与 Host composition 仍属于后续工作。
 >
 > 本文件不再重复定义 Battle 规则。2026-09-25 起，原单体 `BATTLE_V0_DESIGN.md` 已重构为“核心规范 / 数据契约 / 集成说明 / 测试矩阵”四份文档，以避免同一规则在多个章节重复维护。
 >
@@ -69,7 +69,8 @@ Simulation 实施细节不得重新定义 SPEC gameplay Rule，也不得改变 P
 - concrete product implementation `DeepSeekDecision`；
 - v0 DeepSeek-only / apiKey-only public configuration；
 - fixed `deepseek-flash` + Responses API transport profile；
-- Analyze → Strategize → Materialize 三阶段语义与两次物理调用；
+- stable `DeepSeekDecision` shell + replaceable internal `DecisionWorkflow` orchestration seam；
+- 当前 v0 workflow = Analyze + Strategize → Materialize（两次物理调用）；call/stage topology 不是 DecisionPort/public ABI；
 - deterministic DecisionRequest → provider context formatting；
 - compact terrain window；
 - direct JSON Schema Plan output 与 local parser；
@@ -90,7 +91,7 @@ Decision spec 不拥有 Plan validation/correction/gameplay execution authority�
 - BattleEffect 表现；
 - Mock / Script / Manual / Random / LLM Decision Adapter；
 - LLM Adapter 授权、provider timeout/cancel/error 集成问题；
-- 玩家 Guidance；
+- Future PlayerGuidance：v0 不实现 concrete contract；仅冻结“通过 request-scoped typed DecisionWorkflow capability/data 扩展、不得修改 Simulation-facing DecisionPort”的架构余量；
 - Frame / Host / Abort；
 - pause/background；
 - 已冻结的 LOS / stalemate / pause 规则在 Host/Presentation 集成中的影响；
@@ -243,7 +244,7 @@ protection      命中后的有限免疫区间
 - Replay 不重新调用 LLM；
 - Presentation/camera/DOM 无规则提交权；
 - BattleEffect 与 Skill 规则分离；
-- Guidance 只进入 Decision，不直接修改 Simulation；
+- Future PlayerGuidance 只允许进入某次 DecisionWorkflow run，不直接修改 Simulation，也不得通过 DeepSeekDecision mutable state/provider conversation 隐式跨 request 保留；
 - 当前不强制总 Battle 时长，先记录无进展诊断。
 
 ## 7. Core gameplay OPEN 状态
@@ -261,11 +262,11 @@ protection      命中后的有限免疫区间
 
 **当前 Core gameplay 没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
 
-仍存在的 OPEN 只属于不阻塞 Simulation/Presentation/Decision implementation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Guidance Host wiring、Host suspend/resume 来源映射，以及 Host 到 DeepSeekDecision 的 apiKey/composition wiring。Concrete Decision 的 model/API、prompt/context、structured output、parser、failure、timeout/retry、Abort、correction statelessness 与 testing 已集中冻结在 **BATTLE_V0_DECISION.md**，不再属于 implementation OPEN。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结；这些外部 OPEN 不得反向改变 Core/Decision/Presentation 已冻结语义。
+仍存在的 OPEN 只属于不阻塞 Simulation/Presentation/Decision implementation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Host suspend/resume 来源映射，以及 Host 到 DeepSeekDecision 的 apiKey/composition wiring。PlayerGuidance concrete contract/Host wiring 明确延期；其 workflow extensibility requirement 已冻结，不是当前 implementation OPEN。Concrete Decision 的 shell/workflow boundary、v0 topology、model/API、prompt/context、structured output、parser、failure、timeout/retry、Abort、correction statelessness 与 testing 已集中冻结在 **BATTLE_V0_DECISION.md**，不再属于 implementation OPEN。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结；这些外部 OPEN 不得反向改变 Core/Decision/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
-当前 **Core gameplay 已冻结，Simulation/DecisionPort/full Runtime 与 Presentation 均已实现并通过 closed-loop qualification；待完成的是外部 serialization、真实 provider、Guidance 与业务 Host composition**。已完成/后续实施顺序：
+当前 **Core gameplay 已冻结，既有 Simulation baseline/DecisionPort/full Runtime 与 Presentation 已通过 closed-loop qualification；待完成的是 DeepSeekDecision + availability circuit implementation、外部 serialization 与业务 Host composition；PlayerGuidance concrete capability 延期到后续独立阶段**。已完成/后续实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema
@@ -277,7 +278,7 @@ protection      命中后的有限免疫区间
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. 按 FROZEN Presentation Agent contract 直接实现 PresentationPort + Browser Presentation（依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
-10. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision，再接 Guidance / Host E2E
+10. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 apiKey / Host E2E；PlayerGuidance 后续独立设计/实现
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。
