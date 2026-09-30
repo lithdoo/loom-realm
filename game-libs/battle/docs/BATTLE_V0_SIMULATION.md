@@ -1536,7 +1536,7 @@ Simulation 已完成 implementation 与 closed-loop qualification；冻结时的
 仍可OPEN且不阻塞Simulation Core实现的内容：
 
 - serialized BattleActor/BattleSkill external subject/version/key encoding；
-- provider-specific Decision metadata/HTTP/network fields；
+- DeepSeek concrete Decision 的 provider/HTTP/failure semantics 已由 BATTLE_V0_DECISION.md 冻结且不属于 Simulation；这里只允许 Host credential/composition wiring 保持外部 OPEN；
 - Guidance Host/InputTarget wiring；
 - Host具体background/suspend事件来源。
 
