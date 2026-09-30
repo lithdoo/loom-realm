@@ -75,8 +75,18 @@ package exports：
 public product API：
 
 ~~~ts
+export interface DeepSeekTransport {
+  postResponses(
+    bodyText: string,
+    signal: AbortSignal,
+  ): Promise<{
+    readonly status: number
+    readonly bodyText: string
+  }>
+}
+
 export interface DeepSeekDecisionOptions {
-  readonly apiKey: string;
+  readonly transport: DeepSeekTransport
 }
 
 export class DeepSeekDecision implements DecisionPort {
@@ -89,10 +99,11 @@ export class DeepSeekDecision implements DecisionPort {
 }
 ~~~
 
-v0 唯一外部 provider configuration 是 apiKey。
+v0 唯一外部 Decision capability 是一个**已经配置完成的 `DeepSeekTransport`**。`DeepSeekDecision` 不接收、读取或存储独立 `apiKey` option。
 
-以下全部不是 v0 public option：
+以下全部不是 v0 `DeepSeekDecision` public option：
 
+- apiKey / credential；
 - provider；
 - baseUrl；
 - model；
@@ -103,7 +114,9 @@ v0 唯一外部 provider configuration 是 apiKey。
 - retry；
 - structured-output mode。
 
-DeepSeekDecision 不读取 process.env、配置文件或 Browser storage。credential 必须由 Host/Application composition 显式注入。constructor 对空字符串或仅 whitespace 的 apiKey 同步抛出配置/programmer error，不发网络请求。
+credential source、Node/browser/backend-proxy 等 physical network realization 属于 trusted product/platform composition。外部 composition 负责把这些物理细节封装进一个满足本文 §14 contract 的 `DeepSeekTransport` capability；game/business composition 再把该 capability 注入 `DeepSeekDecision`。
+
+`DeepSeekDecision` 不读取 `process.env`、配置文件、Browser storage 或 ambient/global credential。constructor 收到缺失/结构非法的 transport 属 programmer/configuration error；不得尝试自行发现网络或 credential。
 
 ### 2.1 Stable shell / replaceable workflow boundary
 
@@ -162,7 +175,7 @@ interface DecisionWorkflow {
 
 - `DecisionWorkflow` 是 **Decision module internal orchestration seam**，不是第四个 Battle runtime layer，也不是新的 gameplay Port；
 - production `@loomrealm-game/battle/decision` 不导出 workflow/stage graph，不要求 Host 注入 workflow；
-- `DeepSeekDecision({ apiKey })` 生产构造函数内部选择当前 frozen v0 workflow；
+- `DeepSeekDecision({ transport })` 生产构造函数内部选择当前 frozen v0 workflow；
 - Simulation、Replay、Presentation、Host 不知道也不依赖 workflow 内有几次 LLM call、有哪些 stage、是顺序/分支还是未来其他 topology；
 - `DeepSeekDecision` 不暴露 `analyze()`、`strategize()`、`materialize()` 等 stage-level public methods；
 - intermediate analysis/strategy shape 不属于 public ABI、Replay 或 BattleSnapshot；
@@ -247,13 +260,15 @@ tools = none
 conversation/thread memory = none
 ~~~
 
-HTTP：
+physical `DeepSeekTransport` contract 对 direct DeepSeek realization 对应：
 
 ~~~text
 POST https://api.deepseek.com/responses
-Authorization: Bearer <apiKey>
+Authorization: Bearer <transport-private credential>
 Content-Type: application/json
 ~~~
+
+`DeepSeekDecision` 本身不构造 Authorization header、不读取 credential，也不知道 direct HTTP 与 trusted backend proxy 的物理差异；它只调用 `transport.postResponses(exactBodyText, signal)`。无论物理 realization 如何，transport 对 Decision 暴露的 logical semantics 必须与 §14 相同。
 
 deepseek-flash、base URL 与 Responses endpoint 是 Decision implementation constants，不是 Battle gameplay ABI。未来 provider 因兼容性升级需要替换 model alias/endpoint 时，可以作为 Decision provider maintenance patch 处理；不得借此改变 DecisionPort、Simulation 或 Replay semantics。
 
@@ -1099,9 +1114,11 @@ Decision implementation 不得：
 - 自己制造 attempt 1；
 - 在一个 decide() 内循环直到 Simulation 接受。
 
-## 14. Internal transport seam
+## 14. DeepSeekTransport — external physical capability seam
 
-v0 不创建 generic provider abstraction。DeepSeek-specific transport seam **只负责 HTTP**：
+v0 不创建 generic provider/network abstraction。`DeepSeekTransport` 是 DeepSeek-specific、窄的 physical capability seam，并从 `@loomrealm-game/battle/decision` 导出，因为 production `DeepSeekDecision` 需要由 game/business composition 注入它。
+
+其 contract 与 §2 public type 相同：
 
 ~~~ts
 export interface DeepSeekTransport {
@@ -1115,35 +1132,35 @@ export interface DeepSeekTransport {
 }
 ~~~
 
-固定语义：
+固定 logical semantics：
 
 ~~~text
-HTTP response received
+HTTP/provider response received
 → resolve { status, bodyText }
   even when status is 4xx/5xx
   even when body is not JSON
 
-DNS/socket/fetch/network failure before HTTP response
+physical network failure before provider/backend response
 → reject
 
 AbortSignal
-→ best-effort cancel underlying fetch
+→ best-effort cancel underlying physical request
 ~~~
 
-production transport：
+configured production transport capability 必须：
 
-- 捕获 constructor 注入的 apiKey；
-- 固定 POST https://api.deepseek.com/responses；
-- 固定 Authorization / Content-Type headers；
-- 使用传入的 exact `bodyText`；
-- 返回 HTTP status + raw response text；
-- 不调用 `response.json()`；
-- 不做 retry/backoff；
-- 不解析 DeepSeek Responses object；
-- 不生成 DecisionFailure code；
-- 不泄漏 credential。
+- 在 trusted product/platform composition 中取得并私有持有 credential/network binding；
+- 对 direct DeepSeek realization 使用固定 `POST https://api.deepseek.com/responses`；
+- direct realization 使用固定 Authorization / Content-Type headers；
+- backend/proxy realization 不得改变 Decision 可观察的 `{ status, bodyText }` / reject / abort semantics；
+- 使用 Decision 传入的 exact `bodyText`，不得静默重写 Battle/provider payload；
+- 返回 status + raw response text；
+- 不做 Decision-level retry/backoff；
+- 不解析 `PlanSubmission`；
+- 不生成 `DecisionFailure` code；
+- 不向 game/business layer、Simulation、Presentation、Replay 或 logs 泄漏 provider credential。
 
-HTTP/provider semantics 由 Workflow 统一处理：
+HTTP/provider semantics 仍由 Workflow 统一处理：
 
 ~~~text
 2xx
@@ -1163,26 +1180,30 @@ HTTP/provider semantics 由 Workflow 统一处理：
 → attempt_failure / DECISION_PROVIDER_UNAVAILABLE
 
 400 / 404 / 422 / other unclassified 4xx
-→ provider-contract / programmer invariant reject
+→ provider-contract / integration invariant reject
 ~~~
 
-这样即使 503 body 是 HTML/plain-text，也仍稳定归类为 provider unavailable，不会因为 JSON.parse 失败改变分类。
+direct transport 即使收到 503 HTML/plain-text body，也必须 resolve raw status/body；Workflow 才按 503 归类，不因 JSON.parse 错误改变 failure category。
 
-测试 export：
+### 14.1 Production vs testing composition
+
+production 与 testing 使用**同一个** constructor seam：
 
 ~~~ts
-export function createDeepSeekDecisionForTesting(
-  transport: DeepSeekTransport,
-): DecisionPort;
+new DeepSeekDecision({
+  transport,
+})
 ~~~
 
-只存在于：
+因此 v0 **不再提供**额外的 `createDeepSeekDecisionForTesting()` transport-injection factory。
 
-~~~text
-@loomrealm-game/battle/decision/testing
+`@loomrealm-game/battle/decision/testing` 只需要导出测试辅助实现，例如：
+
+~~~ts
+export class FakeDeepSeekTransport implements DeepSeekTransport {
+  // scripted test implementation
+}
 ~~~
-
-production `./decision` 不暴露 transport injection。
 
 `FakeDeepSeekTransport` 至少支持：
 
@@ -1193,43 +1214,55 @@ production `./decision` 不暴露 transport injection。
 - 观察传入 AbortSignal；
 - 模拟忽略 abort 后迟到 resolve/reject。
 
-### 14.1 Exact ownership
+真实 physical transport implementation/factory 属 product/platform integration，不要求 `game-libs/battle` 建立 generic HTTP/Ajax/NetworkService abstraction。
+
+### 14.2 Exact ownership
 
 v0 ownership 固定：
 
 ~~~text
+trusted product/platform composition
+  - credential source/storage
+  - physical network binding
+  - direct DeepSeek vs trusted backend/proxy realization
+  - produce configured DeepSeekTransport capability
+
+game/business composition
+  - receives DeepSeekTransport capability
+  - constructs DeepSeekDecision({ transport })
+  - injects it as DecisionPort into Battle Runtime
+
 DeepSeekDecision shell
   - DecisionPort boundary
   - requestId / generation echo
   - workflow result → DecisionCompletion
-  - request-scoped settle-once
 
 DecisionWorkflow
   - Battle context assembly
   - v0 Call A / Call B orchestration
   - request byte budget
   - timeout / abort race normalization
-  - HTTP status classification
+  - provider status classification
   - Responses JSON parsing / output extraction
   - PlanSubmission strict parsing
   - expected provider failure → DecisionFailure
 
 DeepSeekTransport
-  - HTTPS POST only
-  - Authorization header
-  - raw HTTP status/body
-  - network I/O / best-effort cancellation
+  - one narrow DeepSeek Responses physical request capability
+  - raw status/body or physical-network reject
+  - best-effort cancellation
+  - credential remains private to physical realization
 ~~~
 
-Transport 不知道 Battle failure taxonomy；Shell 不知道 Call A/Call B/provider payload shape。
+Transport 不知道 Battle failure taxonomy；Shell 不知道 Call A/Call B/provider payload shape。trusted product/platform composition 不因此获得 Battle Plan/Simulation authority；game/business composition 不因此获得 credential storage/network bootstrap authority。
 
-### 14.2 Concurrency safety
+### 14.3 Concurrency safety
 
 同一个 `DeepSeekDecision` instance **必须支持多个 concurrent `decide()`**。
 
 允许 instance-shared 的只有 immutable dependency/config，例如：
 
-- apiKey-owning transport；
+- immutable configured `DeepSeekTransport`；
 - immutable workflow/config/constants。
 
 以下必须是 call-local，禁止写入 instance mutable field：
@@ -1244,7 +1277,6 @@ Transport 不知道 Battle failure taxonomy；Shell 不知道 Call A/Call B/prov
 - parser intermediate state。
 
 禁止为 v0 增加 mutex、global queue、ConcurrencyManager 或 per-actor mutable cache。并发安全通过“无 request-local shared mutable state”获得，而不是通过序列化所有 Decision 请求获得。
-
 ## 15. Diagnostics
 
 允许 transport/Decision 在内部采集：
