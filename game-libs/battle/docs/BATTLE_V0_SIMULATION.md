@@ -962,6 +962,7 @@ type TickContext = {
   movementIntents: MoveIntent[]
 
   decisionCommands: RequestDecisionCommand[]
+  decisionHealthSignals: Array<"success" | "counted_failure">
   scheduledEvents: BattleEvent[]
   replayFacts: ReplayFact[]
   effectStarts: SkillEffectProjection[]
@@ -974,18 +975,24 @@ type TickContext = {
 
 Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 
-```text
+~~~text
 1. enqueue future events
 2. append Replay facts
 3. call presentation.render(projection)
    └─ classified sync fatal → finish(presentation failure), suppress Decision commands
 4. if Tick produced terminal candidate
    └─ finish(candidate), suppress Decision commands
-5. otherwise invoke DecisionPort for RequestDecisionCommand
-6. schedule/retain next wake
-```
+5. process decisionHealthSignals in their stable phase-9 completion order
+   └─ if circuit trips:
+        enter decision-circuit PAUSED
+        abort active Decision requests
+        suppress this Tick's not-yet-issued Decision commands
+        do not schedule next wake
+6. otherwise invoke DecisionPort for RequestDecisionCommand
+7. schedule/retain next wake
+~~~
 
-因此 terminal Tick、render-fatal Tick都不会在结果已经确定后额外发起新的 Decision provider call。future events 即使在 terminal前已入 queue，也会随 `finish()` 停止/清空，不再获得提交机会。
+因此 terminal Tick、render-fatal Tick、Decision-circuit-trip Tick都不会在结果已经确定或 Runtime 已冻结后额外发起新的 Decision provider call。future events 即使已入 queue，也会在 PAUSED 时保持未消费、在 terminal finish 时停止/清空；circuit pause 不删除 future gameplay events，只冻结其 logical due time。
 
 ## 17. TICK-001 implementation mapping
 
@@ -999,7 +1006,7 @@ Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 6. batch apply ordinary hit damage；
 7. damaging-hit aftermath/interruption；只记录/缓冲 redecision need，不让随后可能成立的 terminal 仍发出外部 Decision call；
 8. ordinary terminal gate；若 terminal成立，抑制本 Tick全部尚未发出的 gameplay Decision request commands；
-9. consume Decision snapshot / validation / correction / active-pending acceptance；
+9. consume Decision snapshot / emit live-only decision health signals / validation / correction / active-pending acceptance；
 10. promote pending as eligible；advance active Plan；每 Actor最多一个新 Action intent；skill若在这里消费最后 future intent且进入 windup/recovery lifecycle，可产生 `prefetch_after_materialize` request command；pure turn完成最后 intent时不做同 Tick prefetch；
 11. collect newly-started windup=0 skills；
 12. resolve instant batch + aftermath + terminal；若 terminal成立，同样抑制尚未发出的 Decision request commands；
