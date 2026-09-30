@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..035 尚待实现后 qualification。
+> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..036 尚待实现后 qualification。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -195,8 +195,9 @@
 | T-DEC-031 | SIMULATION §6/§10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；external pause与circuit pause都不abort/revoke active Decision；差异只在circuit guard与trigger |
 | T-DEC-032 | DEC-005, SIMULATION §10/Replay | Live中曾因3个attempt_failure进入circuit PAUSED；Replay重放相同Decision records | Replay不启用live circuit、不进入PAUSED；由于live circuit未改写requestId/generation/Actor decision authority，Replay仍产生相同Decision request/consume trace |
 | T-DEC-033 | DEC-004/DEC-005, CONTRACTS §16 | 三个authority-valid attempt_failure分别使用完全不同的concrete code | Simulation结果与code值无关：都只按category累计；证明circuit对Decision implementation/provider-neutral |
-| T-DEC-034 | SIMULATION §6/§10/§28 | late scheduler wake需要catch-up多个Tick，circuit在其中Tick N trip | Tick N完整提交后立即进入PAUSED；N+1..target不继续处理；resume后不得补跑pause前未处理的wall-time backlog |
+| T-DEC-034 | SIMULATION §6/§10/§28 | late scheduler wake需要catch-up多个Tick，circuit在其中Tick N trip | Tick N完整提交后立即进入PAUSED；`accumulatedRunningMs = N * 200`；N+1..target不继续处理；resume后不得补跑pause前未处理的wall-time backlog |
 | T-DEC-035 | SIMULATION §10/§16/Replay | Tick N同时产生合法Decision command且health signal使circuit trip | command仍在Tick N shell中调用并建立正常request authority；随后PAUSED；Replay不运行circuit时仍生成相同requestId/generation与后续Decision record |
+| T-DEC-036 | SIMULATION §10/§16/Replay | 新建live Runtime与Replay Runtime分别处理同一Decision failure序列 | live guard初值固定为 streak=0/circuitOpen=false 并按规则更新；Replay path不启用/不读写availability guard，也不因三次failure进入PAUSED |
 
 
 
