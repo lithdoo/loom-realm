@@ -174,7 +174,7 @@
 | T-DEC-010 | STATE-006 | 当前 Plan 的最后一个 intent 已 materialize 成 active move/windup/recovery | 当前 Action 可继续，同时允许最多一个 next Decision 进入 thinking |
 | T-DEC-011 | STATE-006, SKILL-004 | action lock 未结束时 next Decision completion 被 reducer 接受 | 保存为唯一 pending accepted plan；不得启动 Action，也不得接受第三份排队 Plan |
 | T-DEC-012 | STATE-006, HIT-003 | active Action 受 damaging hit 且 pending Plan 已存在 | 旧 action/plan/decision authority 一并失效；不允许 stale pending Plan 在后续启动 |
-| T-DEC-013 | DEC-004 | DecisionCompletion.failed(category=attempt_failure) | 不终止 Battle；当前 generation结束，最早下一逻辑 Tick重新 Decision |
+| T-DEC-013 | DEC-004, SIMULATION §10 | DecisionCompletion.failed(category=attempt_failure) | 单次失败不终止 Battle；当前 generation结束；counted provider failure 更新 live availability streak，未达3时最早下一逻辑 Tick重新 Decision |
 | T-DEC-014 | DEC-004 | DecisionCompletion.failed(category=session_fatal) | 进入 Runtime terminal arbiter，BattleResult=failure source=decision |
 | T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
 | T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
@@ -184,6 +184,17 @@
 | T-DEC-020 | CONTRACTS §16 | DecisionPort resolve 的 requestId/generation 与 expected 不一致 | protocol invariant；Runtime cleanup并 reject run()，不变成 Plan reject/BattleResult |
 | T-DEC-021 | CONTRACTS §16 | DecisionPort Promise reject 或同步 throw | 预期provider失败未按Completion.failed归一化，视为adapter/programmer invariant；Runtime捕获cleanup并 reject run()，无 unhandled rejection |
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
+| T-DEC-023 | SIMULATION §10 | counted provider failure 连续第1、2次被authority-valid消费 | streak=1/2；Battle保持RUNNING；按既有attempt_failure规则后续可重新Decision |
+| T-DEC-024 | SIMULATION §10 | 两次counted failure后消费一个DecisionCompletion.completed，但Plan随后被Simulation reject | completion先把streak重置0；PlanRejectReason/correction不计LLM failure |
+| T-DEC-025 | SIMULATION §10 | 连续第3个counted failure在Tick N phase 9消费 | Tick N完整提交；shell render/terminal检查后trip circuit；status=PAUSED；本Tick尚未发出的Decision commands全部suppressed；不schedule next wake |
+| T-DEC-026 | SIMULATION §10/29 | circuit trip时另一个Actor仍有active Decision request | Runtime best-effort abort所有active request-scoped controllers；这些DECISION_ABORTED不增加streak |
+| T-DEC-027 | SIMULATION §10 | 同一Decision Inbox snapshot按stable order为 failure, failure, failure, success | 第3个failure后circuit latch open；同Tick后续success不得自动解锁；必须显式resume |
+| T-DEC-028 | SIMULATION §10 | streak=2后消费DECISION_ABORTED或stale completion | 不增加、不重置streak；不触发pause |
+| T-DEC-029 | SIMULATION §10 | 任意时刻消费session_fatal | 不等待failure threshold；直接terminal BattleResult=failure source=decision |
+| T-DEC-030 | SIMULATION §10 | decision circuit PAUSED后外部显式battle.resume() | streak清0、circuit关闭、presentation.resume成功后RUNNING；无pause catch-up；后续合法Tick才重新Decision |
+| T-DEC-031 | SIMULATION §10 | ordinary external pause/resume且circuit未open | 不因pause/resume本身清零已有failure streak；ordinary pause不abort active Decision |
+| T-DEC-032 | SIMULATION §10/Replay | Replay中重放3个recorded counted Decision failure | 不启用live availability circuit，不进入PAUSED等待人工resume；Replay deterministic流程继续 |
+
 
 ## 8.1 DeepSeekDecision concrete acceptance — FROZEN FOR IMPLEMENTATION
 
