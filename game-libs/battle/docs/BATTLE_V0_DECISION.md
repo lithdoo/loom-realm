@@ -1028,7 +1028,7 @@ Implementation agent 必须：
 6. 实现 deterministic context formatter；
 7. 实现 direct JSON Schema structured Plan output；
 8. 保留 local strict parser；
-9. 实现本文 failure/timeout/no-retry/abort semantics；
+9. 实现本文 failure/timeout/no-retry/abort semantics，并只上报单次 availability signal；跨 request streak / circuit pause 属于 Simulation；
 10. 提供 FakeDeepSeekTransport 与测试；
 11. 保持真实 provider test credential-gated；
 12. 不引入 generic AI/provider framework。
@@ -1059,6 +1059,7 @@ Implementation agent 必须：
 - frozen failure taxonomy；
 - 60s/request timeout；
 - no automatic provider retry；
+- counted failure codes 与 Simulation §10 circuit policy 对齐，DeepSeekDecision 本身不直接 pause Runtime；
 - request-scoped AbortSignal 全链路；
 - Fake transport tests 完整；
 - Simulation integration tests 通过；
