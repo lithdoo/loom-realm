@@ -45,7 +45,7 @@ Application / Subsystem
 
 ### 1.1 Port 的概念边界
 
-PresentationPort / BattlePresentationHandler 的 lifecycle surface 已由 Contracts/Presentation 冻结；这里不再保留另一套 method naming。其余非 Presentation 的 package export organization 与尚未冻结的外部 provider detail 仍可在实现阶段按仓库惯例落位：
+PresentationPort / BattlePresentationHandler 的 lifecycle surface 已由 Contracts/Presentation 冻结；这里不再保留另一套 method naming。Decision provider/protocol/error/timeout/transport seam 已由 BATTLE_V0_DECISION.md 冻结；Integration 只保留 Host composition 与未来 PlayerGuidance 等明确外部 wiring：
 
 ```ts
 DecisionPort
