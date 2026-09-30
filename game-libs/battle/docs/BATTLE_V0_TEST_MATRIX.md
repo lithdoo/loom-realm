@@ -217,23 +217,35 @@
 | T-DDEC-013 | DECISION §10–11 | Responses incomplete content_filter | attempt_failure DECISION_PROVIDER_REFUSED |
 | T-DDEC-014 | DECISION §10–11 | Responses incomplete max_output_tokens | attempt_failure DECISION_PROVIDER_INCOMPLETE |
 | T-DDEC-015 | DECISION §11 | HTTP 429 / 5xx / network / timeout | 分别映射 RATE_LIMITED / UNAVAILABLE / NETWORK / TIMEOUT，且无 automatic retry |
-| T-DDEC-016 | DECISION §11 | HTTP 401 / 402 | 分别 session_fatal AUTH / QUOTA |
+| T-DDEC-016 | DECISION §11/§14 | HTTP 401/403 / 402 | 分别 session_fatal AUTH / QUOTA；transport只返回status/bodyText，不解析provider error body |
 | T-DDEC-017 | DECISION §11.3 | unexpected fixed-request 400/422 | adapter/provider-contract invariant，Promise reject；不伪装为 Plan reject/BattleResult failure |
 | T-DDEC-018 | DECISION §12 | external AbortSignal 在 Call A 前 abort | 不发 provider request；settle once，code=DECISION_ABORTED |
 | T-DDEC-019 | DECISION §12 | Call A 完成后、Call B 前 abort | 不发 Call B；settle once；late provider callback 无额外 completion |
 | T-DDEC-020 | DECISION §12 | Call B 中 abort 且 transport忽略 | DeepSeekDecision 本地立即settle once为DECISION_ABORTED，不等待transport；迟到resolve/reject丢弃且不得产生第二completion |
 | T-DDEC-021 | DECISION §12.1 | 单个 provider request 超过 60s | attempt_failure DECISION_PROVIDER_TIMEOUT；不是 Battle gameplay deadline/dueTick |
-| T-DDEC-022 | DECISION §14 | FakeDeepSeekTransport | 可脚本化 success/HTTP/error/incomplete/abort/late resolve，不允许测试 seam 改 provider/model/baseUrl |
+| T-DDEC-022 | DECISION §14 | FakeDeepSeekTransport | 只脚本化 `{status, bodyText}` / network reject / deferred / abort-late-resolve；不内建 Battle failure taxonomy，也不允许改 provider/model/baseUrl |
 | T-DDEC-023 | DECISION §18.3 | real Simulation + DeepSeekDecision(Fake transport) | initial request 两次 provider call→Plan→accept；existing Tick/Inbox/Replay semantics 不变 |
 | T-DDEC-024 | DECISION §18.3 | first Plan gameplay-invalid | Simulation 发 correction decide()；新 request 再两次 provider call；attempt1 invalid 后按 frozen generation rule 结束 |
 | T-DDEC-025 | DECISION §18.4 | credential-gated real-provider smoke | 可手动验证 Call A non-empty + Call B structured + local parser；普通 CI 不访问 DeepSeek |
 | T-DDEC-026 | DECISION §19 | package qualification | npm run test:battle 与 npm pack dry-run 通过；./decision 与 ./decision/testing 可解析 |
 | T-DDEC-027 | DECISION §2 | apiKey 为空或仅 whitespace | constructor 同步 reject；不得发网络请求 |
-| T-DDEC-028 | DECISION §10–11 | response.status=failed 且无已知 auth/quota/rate/context 分类 | attempt_failure DECISION_PROVIDER_UNAVAILABLE；不读取/保存 reasoning_text |
+| T-DDEC-028 | DECISION §10–11 | HTTP 2xx + response.status=failed | attempt_failure DECISION_PROVIDER_UNAVAILABLE；provider error.code/message只可进入private diagnostics，不参与authority classification |
 | T-DDEC-029 | DECISION §2.1/§4 | production caller 构造 DeepSeekDecision 并调用 decide | caller 只依赖 DecisionPort/DeepSeekDecision；production export 不暴露 analyze/strategize/materialize 或 workflow stage API |
 | T-DDEC-030 | DECISION §2.1/§4 | v0 workflow 内部执行 Call A + Call B | exactly two calls 仍是当前 workflow acceptance；测试不得把 call count 写成 Simulation/Host ABI |
 | T-DDEC-031 | DECISION §17 | 检查 v0 PlayerGuidance reservation | v0 不存在 setGuidance/currentGuidance/provider-thread Guidance hidden state，也不增加 generic extensions bag；existing apiKey-only product path保持成立 |
 | T-DDEC-032 | DECISION §17 | future-workflow architecture fixture/structural review | workflow 可在不修改 DecisionPort 与 Simulation wiring 的前提下由 Analyze+Strategize→Materialize 演进为 Analyze→Guidance→Strategize→Materialize；exact future Guidance type 不在 v0 实现中伪造 |
+| T-DDEC-033 | DECISION §6.6 | Call A/Call B final serialized request body = 512 KiB | 允许发送；byte size只看最终UTF-8 JSON body |
+| T-DDEC-034 | DECISION §6.6/§11 | final serialized request body > 512 KiB | 不发HTTP；session_fatal DECISION_CONTEXT_TOO_LARGE；不tokenize、不自动截断 |
+| T-DDEC-035 | DECISION §10.1 | completed response含 reasoning item + assistant message/output_text | reasoning内容忽略；按provider顺序拼接所有assistant output_text |
+| T-DDEC-036 | DECISION §10.1 | completed response含 function_call/web_search_call/unknown output item | provider/output contract violation；不得把tool结果当visible text |
+| T-DDEC-037 | DECISION §10.1 | response.model返回具体版本名而非 deepseek-flash alias | 仍可成功；model只作为non-authoritative diagnostics |
+| T-DDEC-038 | DECISION §14 | HTTP 503且body是HTML/plain text | transport resolve status=503/bodyText；Workflow直接映射DECISION_PROVIDER_UNAVAILABLE，不JSON.parse错误body |
+| T-DDEC-039 | DECISION §14 | HTTP 2xx但body不是JSON | provider-contract invariant reject；不误归类成network/Plan invalid |
+| T-DDEC-040 | DECISION §12.3 | external abort与60s timeout竞争 | settle判定时signal已aborted则DECISION_ABORTED优先；否则timeout→DECISION_PROVIDER_TIMEOUT；只settle一次并清理timer/listener |
+| T-DDEC-041 | DECISION §14.2 | 同一DeepSeekDecision并发decide(A)/decide(B)，provider calls交错 | strategy/stage/timeout/abort/requestId/generation不串线；不得依赖mutex/global queue/per-actor mutable cache |
+| T-DDEC-042 | DECISION §2.2/§14.1 | implementation structure review | 只保留DecisionPort→DecisionWorkflow→DeepSeekTransport三层seam；Analyzer/ErrorClassifier/BudgetManager/ConcurrencyManager等不得成为v0 framework/interface |
+| T-DDEC-043 | DECISION §12.1/§14 | Call A与Call B | 两者共用同一callDeepSeek normalization path；不得复制HTTP/timeout/output-extraction分支 |
+
 
 ## 9. Control Plane / Replay
 
