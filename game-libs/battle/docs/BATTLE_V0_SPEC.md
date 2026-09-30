@@ -1,6 +1,6 @@
 # Battle v0 核心规范
 
-> 状态：**Core gameplay FROZEN；Simulation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/Host 集成状态以 Contracts / Integration 文档为准。
+> 状态：**Core gameplay FROZEN；Simulation gameplay/runtime baseline IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/physical transport/product composition 状态以 Contracts / Decision / Integration 文档为准。
 >
 > 统一状态词：
 > - **FROZEN / MUST**：v0 实现必须遵守。
@@ -50,12 +50,12 @@ Decision、Simulation、Presentation 必须可以作为独立模块实现、导�
 
 依赖与运行边界：
 
-- **Decision = Plan**：根据 Simulation 的 `BattleObservation / PlanConstraints` 与 adapter-side Optional Guidance 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。
+- **Decision = Plan**：v0 根据 Simulation 的 `BattleObservation / PlanConstraints` 产生结构化 `PlanSubmission`；不得直接修改 Battle State，也不需要知道 Presentation 如何实现。PlayerGuidance concrete capability 不在 v0；未来若启用，只能通过 request-scoped typed `DecisionWorkflow` capability/data 扩展。
 - **Simulation = Execute**：是完整、自驱动的 Battle Runtime，自己拥有 Battle clock、200 ms Tick scheduler、event queue、`TICK-001` reducer、accepted plan execution、authoritative state、BattleResult 与 Replay。业务层不得接管或重写这些运行职责。
 - **Presentation = Present**：根据 Scene 初始化数据与 Simulation 已决定的 Projection/表现命令更新视图；不得参与规则判定，也不得通过动画完成、DOM/Sprite 状态或 Browser ACK 反向驱动 Simulation。
 - Simulation 可以通过共享的 `DecisionPort` / `PresentationPort` 使用业务注入的实现；这种依赖只针对稳定接口，不得 import 或假设具体 Decision/Browser implementation。
 - Simulation Core 只接收所需的窄 capability（例如 Battle clock、AbortSignal、DecisionPort、PresentationPort、已解析 Battle config/content）；不得把 `SubsystemScope`、`Frame`、RenderDomain、Viewport 等 LoomRealm integration object 作为 Core Runtime 必需依赖。
-- 使用 Battle 的 Application/Subsystem 只负责选择 concrete implementation、构造/注入三层、提供 Host capability，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。它不是第四个 gameplay Runtime Layer，也不负责逐 Tick 实施 Battle。
+- 使用 Battle 的 game/business composition（通常位于具体业务 Subsystem 一侧）只负责选择 concrete Decision/Presentation、构造/注入 Battle Runtime，并把 Frame abort、pause/background 等外部生命周期映射给 Battle Runtime。trusted product/platform composition 可以提供 credential/network 等物理 capability，但不得因此获得 Battle business authority，也不应直接拥有 concrete Battle topology。
 
 因此，headless Simulation 必须能用 Mock/Script Decision、可控时钟以及 Null/Recording Presentation 跑完整 Battle；Decision 与 Presentation 也必须分别能够使用 synthetic input 独立验证。
 
