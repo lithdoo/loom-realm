@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Simulation/Presentation baseline integration 已完成 qualification；DeepSeek Decision implementation、replaceable DecisionWorkflow boundary 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION；PlayerGuidance concrete feature 明确延期；apiKey product wiring、pause-reason/retry UI 与 Host composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**Simulation/Presentation baseline integration 已完成 qualification；DeepSeek Decision implementation、replaceable DecisionWorkflow boundary 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -31,17 +31,24 @@
 - **Simulation / Execute**：完整 Battle Runtime。自己拥有 Battle clock、200 ms scheduler、event queue、Tick reducer、Decision lifecycle、accepted-plan execution、Battle State、Result 与 Replay。
 - **Presentation / Present**：初始化 Map/Actor 视图并表现 Simulation 已决定的 movement/turn/effect/state；自己拥有插值、camera、viewport 和视觉资源生命周期。
 
-使用 Battle 的 Application/Subsystem 只做 **composition**：
+Battle composition 分成两个不同职责：
 
 ```text
-Application / Subsystem
-  ├─ choose/create Decision implementation
-  ├─ choose/create Presentation implementation
+trusted product/platform composition
+  └─ own credential + physical network realization
+       ↓
+     configured DeepSeekTransport capability
+
+game/business composition / concrete Subsystem
+  ├─ receive configured DeepSeekTransport
+  ├─ choose/create DeepSeekDecision + Presentation
   ├─ create BattleRuntime and inject required Ports/capabilities
   └─ after injection, only control BattleRuntime lifecycle
 ```
 
-它不负责 Battle scheduler，不调用公开 `tick()` 来实施战斗，也不在每个 Decision/Projection 之间承担规则转发。Simulation 根据自己的 Runtime 状态请求 Decision，并把已决定的视觉事实交给 Presentation Port。
+generic platform app（例如 `apps/desktop`）不得因为提供 physical network/secret capability 而获得 Battle business semantics；game/business composition 也不读取 provider secret 或接管 network bootstrap。
+
+业务 composition 不负责 Battle scheduler，不调用公开 `tick()` 来实施战斗，也不在每个 Decision/Projection 之间承担规则转发。Simulation 根据自己的 Runtime 状态请求 Decision，并把已决定的视觉事实交给 Presentation Port。
 
 ### 1.1 Port 的概念边界
 
@@ -116,7 +123,7 @@ next Tick reducer
 
 ### 1.2 Simulation 只依赖窄 capability
 
-Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；DeepSeekDecision concrete implementation 也可以依赖 Host/service capability。
+Presentation concrete implementation 可以依赖 `SubsystemScope / Frame`，因为它确实需要 Content、Viewport、RenderDomain；`DeepSeekDecision` 不直接依赖整个 Host/Platform/SubsystemScope，只依赖一个 externally configured `DeepSeekTransport` 窄 capability。
 
 Simulation Core 不应直接接收整个 `SubsystemScope / Frame`。构造方式可按仓库惯例命名；Simulation-facing capability 与 resolved input 形状已由 BATTLE_V0_SIMULATION.md 冻结。概念：
 
@@ -325,18 +332,18 @@ Browser effect image decode/load 失败只跳过该 transient visual并可发 di
 
 Decision 的 gameplay-facing Port 仍是共享的 `DecisionPort`。Simulation 必须在没有 Browser、没有真实网络 provider 时，也能由 Script/Deferred/Fake Decision 驱动完成 headless Battle。
 
-Battle v0 的 concrete product Decision 已单独冻结在：
+Battle v0 的 concrete Decision 已单独冻结在：
 
 - **[BATTLE_V0_DECISION.md](./BATTLE_V0_DECISION.md) — FROZEN FOR IMPLEMENTATION**
 
-v0 product implementation 唯一要求为：
+v0 Decision product surface：
 
 ```text
 DeepSeekDecision
-  provider = DeepSeek only
-  external config = apiKey only
+  provider protocol = DeepSeek only
+  external Decision capability = configured DeepSeekTransport only
   model = deepseek-flash
-  API = POST https://api.deepseek.com/responses
+  logical provider API = Responses
 
   public Battle-facing call:
     decide(request, signal)
@@ -345,40 +352,52 @@ DeepSeekDecision
     Call A + Call B
 ```
 
-两次 provider call 属于当前 v0 `DecisionWorkflow` implementation，不属于 Host/Simulation public contract。Host 不得调用或依赖 Analyze/Strategize/Materialize stage；未来 workflow 拆分、增加 Guidance、增加分支或改变 provider-call topology 时，外部仍通过同一个 `DecisionPort.decide()` 使用 Decision。
+两次 provider call 属于当前 v0 `DecisionWorkflow` implementation，不属于 product/platform/Simulation public contract。外部 composition 不得调用或依赖 Analyze/Strategize/Materialize stage；未来 workflow 拆分、增加 Guidance、增加分支或改变 provider-call topology 时，外部仍通过同一个 `DecisionPort.decide()` 使用 Decision。
 
-Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、Simulation correction、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都继续属于 Simulation Runtime lifecycle。
+Decision module 只负责“一次 request 如何通过 configured transport 得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、Simulation correction、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都继续属于 Simulation Runtime lifecycle。
 
-业务 composition 只负责：
+game/business composition 只负责：
 
 ```text
-obtain apiKey
-→ construct DeepSeekDecision
+receive configured DeepSeekTransport
+→ construct DeepSeekDecision({ transport })
 → inject as DecisionPort
 ```
 
-业务不得接管 provider callback、Plan validation 或 Tick lifecycle。
+它不得读取 provider credential，也不得接管 provider callback、Plan validation 或 Tick lifecycle。
 
-## 6. DeepSeek credential / Host integration
+## 6. DeepSeekTransport / credential / product integration
 
-Concrete provider/model/API/prompt/schema/parser/failure/timeout/retry/Abort semantics 已在 **BATTLE_V0_DECISION.md** 唯一化，本 Integration 文档不重复维护另一份 provider implementation spec。
+Concrete model/prompt/schema/parser/failure/timeout/retry/Abort semantics 与 `DeepSeekTransport` logical contract 已在 **BATTLE_V0_DECISION.md** 唯一化，本 Integration 文档不重复维护另一份 provider implementation spec。
 
-Host/Application 只需要向 Decision 提供：
+职责拆分固定：
 
-```ts
-new DeepSeekDecision({
-  apiKey,
-})
+```text
+trusted product/platform composition
+  ├─ obtain/store credential
+  ├─ choose physical realization
+  │    direct trusted Node HTTPS
+  │    or trusted backend/proxy
+  └─ produce configured DeepSeekTransport
+             ↓
+game/business composition
+  └─ new DeepSeekDecision({ transport })
+             ↓
+Simulation
+  └─ only sees DecisionPort
 ```
 
 credential boundary：
 
-- `apiKey` 不进入 `DecisionRequest`；
-- `apiKey` 不进入 `BattleObservation`；
-- `apiKey` 不进入 Simulation state / Replay；
-- `apiKey` 不进入 Browser Presentation；
-- `DeepSeekDecision` 不自行读取 `process.env`；
-- Host/Application 决定 secret 从何处取得并在 composition 时显式注入。
+- provider credential 不进入 `DeepSeekDecision` options；
+- provider credential 不进入 `DecisionRequest` / `BattleObservation`；
+- provider credential 不进入 Simulation state / Replay；
+- provider credential 不进入 Browser Presentation；
+- game/business composition 只拿 configured `DeepSeekTransport` capability，不拿 secret；
+- `DeepSeekDecision` 不读取 `process.env`、Browser storage 或 ambient credential；
+- configured transport 自己私有持有 direct credential 或 backend/proxy authentication binding。
+
+generic `apps/desktop` / platform role 不应直接拥有 Battle topology、Plan 或 DecisionWorkflow 语义。若产品需要把 configured `DeepSeekTransport` 交给某个 concrete game/business composition，exact capability handoff 属 product integration wiring，但不得把 Battle semantics下沉进 generic platform package。
 
 固定 authority flow：
 
@@ -387,7 +406,8 @@ Simulation
   → DecisionPort.decide(request, signal)
         ↓ async
 DeepSeekDecision
-  → DeepSeek Responses API
+  → DecisionWorkflow
+  → configured DeepSeekTransport
   → DecisionCompletion
         ↓
 Simulation-owned Decision Inbox
@@ -399,18 +419,18 @@ generation / validation / correction
 bounded active/pending accepted-plan pipeline
 ```
 
-Provider callback/Promise completion 不直接写 Battle State。DecisionCompletion 仍然没有 gameplay timestamp/dueTick；真实 provider wall-clock latency 不进入 Simulation authority。
+Transport/Promise completion 不直接写 Battle State。DecisionCompletion 仍然没有 gameplay timestamp/dueTick；真实 provider wall-clock latency 不进入 Simulation authority。
 
-### INTEGRATION-OPEN-003 — DeepSeek apiKey Host wiring — OPEN
+### INTEGRATION-OPEN-003 — Configured DeepSeekTransport product wiring — OPEN
 
-Decision implementation 本身已经没有 blocking provider OPEN。当前仅剩 Host/Application composition 需要在业务集成阶段决定：
+Decision implementation 本身已经没有 blocking provider-protocol OPEN。当前只剩 product/platform integration 需要决定：
 
-- apiKey 的产品级 secret storage/source；
-- 哪个 Host/composition object 构造 `DeepSeekDecision`；
-- credential unavailable 时业务在启动 Battle 前如何呈现/处理配置缺失。
+- provider credential 的产品级 secret storage/source；
+- direct trusted HTTPS vs trusted backend/proxy 的 physical realization；
+- configured `DeepSeekTransport` 如何交给具体 game/business composition，而不让 generic platform app 拥有 Battle business semantics；
+- credential/network capability unavailable 时，产品在启动 Battle 前如何呈现/处理配置缺失。
 
-这些 wiring 不得扩张 `DecisionPort` 或修改 frozen Decision/Simulation semantics。
-
+这些 wiring 不得扩张 `DecisionPort`、让 `DeepSeekDecision`重新接收 apiKey、或修改 frozen Decision/Simulation semantics。
 ## 7. PlayerGuidance — future capability, not implemented in v0
 
 PlayerGuidance **不进入当前 DeepSeekDecision v0 implementation scope**。本阶段不冻结 Guidance 的 TypeScript contract、UI/InputTarget、消费时机或具体卡牌数据。
