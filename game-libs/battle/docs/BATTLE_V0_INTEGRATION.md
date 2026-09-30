@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Simulation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation integration FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；provider/Guidance/Host wiring 仍可含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**Simulation/Presentation baseline integration 已完成 qualification；DeepSeek Decision implementation 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION；Guidance、apiKey product wiring、pause-reason/retry UI 与 Host composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
