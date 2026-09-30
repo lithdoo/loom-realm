@@ -1061,7 +1061,7 @@ else if provider timeout has fired:
   → DECISION_PROVIDER_TIMEOUT
 ~~~
 
-也就是说 caller/session abort 优先于 infrastructure timeout；因为 `DECISION_ABORTED` 不计入 availability circuit，而 timeout 会计入。
+也就是说 caller/session abort 优先于 infrastructure timeout。availability circuit 不检查这些 concrete code；Runtime 发出 abort 前已撤销 request authority，所以 abort completion 走 stale/lifecycle fence，而一个仍具 authority 的 timeout completion 会以 `attempt_failure` 参与 provider-neutral availability policy。
 
 每个 `callDeepSeek()` 的 timeout handle、linked AbortController/listener、settled flag 都必须是 call-local；任意 settle path 都必须清理 timer/listener 并忽略 late transport resolve/reject。
 
@@ -1534,7 +1534,7 @@ Implementation agent 必须：
 - frozen failure taxonomy；
 - 60s/request timeout；
 - no automatic provider retry；
-- counted failure codes 与 Simulation §10 circuit policy 对齐，DeepSeekDecision 本身不直接 pause Runtime；
+- completion outcome/category 与 Simulation §10 provider-neutral circuit policy 对齐；DeepSeekDecision code 对 Simulation branching 保持 opaque，DeepSeekDecision 本身不直接 pause Runtime；
 - request-scoped AbortSignal 全链路；
 - final request body 512 KiB hard budget 落地；
 - DeepSeekTransport 只返回 raw HTTP status/bodyText，Workflow拥有 provider protocol/error normalization；
