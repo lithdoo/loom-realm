@@ -185,6 +185,39 @@
 | T-DEC-021 | CONTRACTS §16 | DecisionPort Promise reject 或同步 throw | 预期provider失败未按Completion.failed归一化，视为adapter/programmer invariant；Runtime捕获cleanup并 reject run()，无 unhandled rejection |
 | T-DEC-022 | CONTRACTS §9 | Tick N damaging hit触发新Decision | Observation recentEvents只含Tick N与N-1 relevant facts，稳定排序；长期Battle不积累无界Observation history |
 
+## 8.1 DeepSeekDecision concrete acceptance — FROZEN FOR IMPLEMENTATION
+
+以下测试针对 BATTLE_V0_DECISION.md，不依赖真实付费 provider；默认使用 FakeDeepSeekTransport。
+
+| Test ID | Rules | 场景 | Expected |
+| --- | --- | --- | --- |
+| T-DDEC-001 | DECISION §2–4 | 构造 DeepSeekDecision | public option 只有 apiKey；不暴露 provider/model/baseUrl/timeout/retry |
+| T-DDEC-002 | DECISION §3 | normal decide() | exactly 两个 provider request；都使用 deepseek-flash + POST /responses + stream=false，无 tools |
+| T-DDEC-003 | DECISION §4.1 | Call A request | reasoning.effort=high、text output、max_output_tokens=8192；temperature 不发送 |
+| T-DDEC-004 | DECISION §4.2/8 | Call B request | reasoning.effort=none、temperature=0、json_schema name=battle_plan_v0、max_output_tokens=4096 |
+| T-DDEC-005 | DECISION §5/13 | Simulation correction request | 作为新的 decide() 自包含重新执行 Call A + Call B；不得复用上一 request strategy/provider session |
+| T-DDEC-006 | DECISION §6.3 | moving prefetch A→B | prompt 明确 PATH BASE=planningOrigin=B，同时保留 self.tile=A/action.to=B |
+| T-DDEC-007 | DECISION §6.4 | maxPathSteps=r | terrain 只序列化 clamp 后 origin±r square，带 global map size/window origin，row-major . / # |
+| T-DDEC-008 | DECISION §6.5 | 相同 DecisionRequest 两次格式化 | provider-facing context byte-for-byte stable，不受 locale/object insertion order 影响 |
+| T-DDEC-009 | DECISION §7 | strategy memo 含类似 instruction 文本 | Call B 仍把 memo 放在 data/context，不能提升为 system/instructions policy |
+| T-DDEC-010 | DECISION §8–9 | Call B 返回合法 JSON shape | local parser 产出 detached PlanSubmission，requestId/generation 原样 echo |
+| T-DDEC-011 | DECISION §9 | JSON 非法/空输出/unknown field/string coordinate/missing path | attempt_failure code=DECISION_OUTPUT_INVALID；不 regex repair、不 coercion |
+| T-DDEC-012 | DECISION §8–9 | Plan shape 合法但 path 穿墙/target 不合法 | DecisionCompletion.completed；交给 Simulation validator 产生 PlanRejectReason |
+| T-DDEC-013 | DECISION §10–11 | Responses incomplete content_filter | attempt_failure DECISION_PROVIDER_REFUSED |
+| T-DDEC-014 | DECISION §10–11 | Responses incomplete max_output_tokens | attempt_failure DECISION_PROVIDER_INCOMPLETE |
+| T-DDEC-015 | DECISION §11 | HTTP 429 / 5xx / network / timeout | 分别映射 RATE_LIMITED / UNAVAILABLE / NETWORK / TIMEOUT，且无 automatic retry |
+| T-DDEC-016 | DECISION §11 | HTTP 401 / 402 | 分别 session_fatal AUTH / QUOTA |
+| T-DDEC-017 | DECISION §11.3 | unexpected fixed-request 400/422 | adapter/provider-contract invariant，Promise reject；不伪装为 Plan reject/BattleResult failure |
+| T-DDEC-018 | DECISION §12 | external AbortSignal 在 Call A 前 abort | 不发 provider request；settle once，code=DECISION_ABORTED |
+| T-DDEC-019 | DECISION §12 | Call A 完成后、Call B 前 abort | 不发 Call B；settle once；late provider callback 无额外 completion |
+| T-DDEC-020 | DECISION §12 | Call B 中 abort 且 transport忽略 | best-effort abort；迟到结果不得绕过 Simulation generation/lifecycle fencing |
+| T-DDEC-021 | DECISION §12.1 | 单个 provider request 超过 60s | attempt_failure DECISION_PROVIDER_TIMEOUT；不是 Battle gameplay deadline/dueTick |
+| T-DDEC-022 | DECISION §14 | FakeDeepSeekTransport | 可脚本化 success/HTTP/error/incomplete/abort/late resolve，不允许测试 seam 改 provider/model/baseUrl |
+| T-DDEC-023 | DECISION §17.3 | real Simulation + DeepSeekDecision(Fake transport) | initial request 两次 provider call→Plan→accept；existing Tick/Inbox/Replay semantics 不变 |
+| T-DDEC-024 | DECISION §17.3 | first Plan gameplay-invalid | Simulation 发 correction decide()；新 request 再两次 provider call；attempt1 invalid 后按 frozen generation rule 结束 |
+| T-DDEC-025 | DECISION §17.4 | credential-gated real-provider smoke | 可手动验证 Call A non-empty + Call B structured + local parser；普通 CI 不访问 DeepSeek |
+| T-DDEC-026 | DECISION §18 | package qualification | npm run test:battle 与 npm pack dry-run 通过；./decision 与 ./decision/testing 可解析 |
+
 ## 9. Control Plane / Replay
 
 | Test ID | Rules | 场景 | Expected |
@@ -266,7 +299,7 @@
 
 当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
 
-Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance。剩余 OPEN 只涉及非 Presentation Content 统一 schema、真实 Decision provider metadata/cancel defaults、Guidance/Host wiring 等；这些不得反向改变已冻结的 Core/Presentation Expected。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。剩余 OPEN 只涉及非 Presentation Content 统一 schema、Guidance/Host wiring 与 apiKey 产品级 credential composition；这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 
