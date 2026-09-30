@@ -725,6 +725,30 @@ Provider 原始 response body、credential、完整 prompt、完整 strategy mem
 
 DeepSeekDecision v0 产生的正常 DecisionFailure 一律省略 metadata；provider-specific diagnostics 只留在 non-authoritative diagnostics/test 层。
 
+### 11.4 Battle availability signal
+
+DeepSeekDecision 只报告单次 `decide()` 的 completion；它**不维护跨 request failure streak，也不直接调用 BattleRuntime.pause()**。
+
+Live Runtime 将以下 attempt failure 视为“Decision service 本次调用不可用”信号：
+
+~~~text
+DECISION_PROVIDER_NETWORK
+DECISION_PROVIDER_TIMEOUT
+DECISION_PROVIDER_RATE_LIMITED
+DECISION_PROVIDER_UNAVAILABLE
+DECISION_PROVIDER_REFUSED
+DECISION_PROVIDER_INCOMPLETE
+DECISION_OUTPUT_INVALID
+~~~
+
+`DECISION_ABORTED` 不属于 provider health failure，不计入连续失败。
+
+任意 authority-valid `DecisionCompletion.completed` 都表示本次 LLM Decision pipeline 成功完成并产生了结构有效的 Plan，因此会重置 live Runtime 的连续 LLM failure streak；即使该 Plan 随后被 Simulation gameplay validator reject，也不算 LLM 调用失败。
+
+`session_fatal` 不参与连续失败计数，仍由 Simulation 立即走 terminal decision failure。
+
+连续失败阈值、自动 pause、active request abort 与 explicit resume 的 exact Runtime semantics 由 BATTLE_V0_SIMULATION.md §10 冻结。
+
 ## 12. Timeout / retry / AbortSignal
 
 ### 12.1 Timeout
@@ -752,7 +776,7 @@ v0 不做任何 automatic transport retry。
 - 不切 model；
 - 不切 provider。
 
-provider transport retry、Simulation correction、later new Decision generation 是三种不同机制；v0 只保留后两种由 Simulation 已冻结 semantics 驱动。
+provider transport retry、Simulation correction、later new Decision generation 是三种不同机制；v0 不在 DeepSeekDecision 内做 retry/backoff。live Runtime 对连续 Decision service failure 使用 Simulation §10 的 circuit-pause policy，避免 200 ms Tick 持续制造 provider 请求。
 
 ### 12.3 Abort
 
@@ -927,6 +951,7 @@ Host telemetry wiring不是 Decision implementation blocker；若未来加入 si
 - abort during Call B；
 - provider ignores abort and resolves late；
 - no automatic retry；
+- DeepSeekDecision 本身不维护跨 request failure streak、不调用 Runtime pause；
 - exactly two physical provider calls on normal success；
 - exactly two physical provider calls on correction decide()；
 - requestId/generation echo unchanged。
