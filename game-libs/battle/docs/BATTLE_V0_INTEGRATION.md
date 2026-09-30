@@ -736,7 +736,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：v0 provider protocol 已冻结为 OpenAI-compatible，`apiKey / model / baseUrl` 由外部提供且默认 provider profile 为 DeepSeek；仍 OPEN 的仅是 exact request/structured-output API shape、provider-specific metadata/cancel guarantee/provider timeout defaults、model/service limits 与 Host credential wiring；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
+- **INTEGRATION-OPEN-003**：v0 provider 已冻结为 **DeepSeek only**，外部只提供 `apiKey`，`baseUrl / model / provider protocol` 由 Decision implementation 内部固定；LLM pipeline 已冻结为 Analyze → Strategize → Materialize、默认两次物理调用，最终 Plan 直接使用 structured JSON 而非 Tool Calling；仍 OPEN 的仅是 exact fixed model/request/structured-output API shape、provider-specific metadata/cancel guarantee/provider timeout defaults、model/service limits 与 Host credential wiring；Decision failure 的 `attempt_failure | session_fatal` authority classification、attempt/inbox/Tick-boundary/retry ownership均已冻结；
 - **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
