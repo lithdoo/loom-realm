@@ -334,16 +334,17 @@ stale / lifecycle-invalid completion
 → no availability signal
 ~~~
 
-连续 3 个 authority-valid `attempt_failure` 后，当前 Tick完整提交，再进入 `PAUSED`：
+连续 3 个 authority-valid `attempt_failure` 后，当前 Tick完整提交，再通过 Runtime 既有 pause control path 进入 `PAUSED`：
 
-- 冻结 Battle logical clock；
-- suppress 尚未发出的 Decision request；
-- 撤销并 best-effort abort 所有 active Decision request authority；
+- 在当前已提交 Tick 边界冻结 Battle logical clock；
+- 本 Tick reducer 已生成的合法 Decision request command **仍按正常顺序调用**；circuit 不撤销、不 suppress 该 Tick 已建立的 request lifecycle；
+- 已经 in-flight 的 Decision request **不因 circuit pause 被 abort/revoke**；它们可以在 pause 期间完成并把 completion 放入 Decision Inbox，等 resume 后的真实 Tick消费；
+- PAUSED 期间没有后续 Tick，因此自然不会继续产生新的 Tick-driven Decision generation/request；
 - 不自动 cooldown/resume；
 - 必须外部显式 `battle.resume()` 才恢复，并把 availability streak 清零；
-- Replay 不执行该 live availability circuit。
+- Replay 不执行该 live availability circuit，因为 circuit pause 不改变 requestId / decisionGeneration / Actor decision authority / Decision record trace。
 
-Runtime 主动 abort request 时必须先撤销其 authority，所以随后到达的 abort completion 只走 stale/lifecycle fence；Simulation 不需要识别 concrete abort code。
+Circuit 本身不得修改 Actor `decision` state、`decisionGeneration`、requestId 或 accepted-plan authority，也不得调用 request AbortController。Decision request 只有既有 lifecycle 原因（例如 damaging hit/death、cancel/close、session fatal、request replacement）才会按原规则失效/abort。
 
 该 circuit 是 operational control state，不进入 gameplay Snapshot/Replay，不改变 Plan validation、Actor state 或 Battle Tick规则。
 
