@@ -185,6 +185,52 @@ Analyze
 
 甚至更复杂的 branching/critique/revision workflow，都不要求修改 `DecisionPort` 或 Simulation gameplay architecture。
 
+### 2.2 Minimal abstraction rule
+
+v0 只允许保留三个真正有稳定边界价值的 seam：
+
+~~~text
+DecisionPort
+    ↓
+DecisionWorkflow
+    ↓
+DeepSeekTransport
+~~~
+
+其中只有 `DecisionPort` 属于 Battle architecture；后两个都只是 Decision module internal seam。
+
+以下职责**不得**为了“可扩展性”额外升级成 interface/service/framework：
+
+~~~text
+Analyzer
+Strategizer
+Materializer
+ResponseNormalizer
+ErrorClassifier
+ContextBudgetManager
+ConcurrencyManager
+CancellationCoordinator
+ProviderRegistry
+WorkflowGraph / DAG engine
+~~~
+
+这些在 v0 应优先实现为 module-local pure function / constant，例如：
+
+~~~text
+formatBattleContext()
+buildAnalysisRequest()
+buildMaterializationRequest()
+callDeepSeek()
+classifyHttpStatus()
+extractOutputText()
+parsePlanSubmission()
+MAX_DEEPSEEK_REQUEST_BYTES
+~~~
+
+原则：
+
+> 为已经存在的稳定变化轴保留 seam；为未来猜测保留普通函数，不提前制造 abstraction。
+
 ## 3. Fixed DeepSeek transport profile
 
 v0 固定：
@@ -583,6 +629,39 @@ Formatter 必须：
 
 因此相同 DecisionRequest 必须得到 byte-for-byte 相同的 provider input string。
 
+### 6.6 Provider request hard budget
+
+v0 不实现 tokenizer / token-budget service。每次物理 DeepSeek request 在真正发 HTTP 前，只对**最终序列化后的完整 JSON request body**做 UTF-8 byte-size preflight：
+
+~~~text
+MAX_DEEPSEEK_REQUEST_BYTES = 512 * 1024
+~~~
+
+固定流程：
+
+~~~text
+build exact request body object
+→ JSON.stringify(body)
+→ UTF-8 byte length
+→ if > 512 KiB:
+     DecisionFailure {
+       category: "session_fatal",
+       code: "DECISION_CONTEXT_TOO_LARGE"
+     }
+→ otherwise send HTTP
+~~~
+
+Call A / Call B 都独立检查最终 body；因此 Call B 的 strategyMemo、instructions、schema 等也自动计入预算。
+
+禁止：
+
+- 引入 tokenizer dependency；
+- 根据 provider error message 猜 token count；
+- 自动截断 actors/map/range/recentEvents/strategy；
+- 静默裁剪 prompt 后继续。
+
+这个 budget 是 provider-safety / cost guard，不是 gameplay rule，不进入 Tick/Replay。
+
 ## 7. Prompt trust boundary
 
 ### 7.1 Trusted instructions
@@ -725,29 +804,76 @@ structurally valid 但 gameplay-invalid 的 Plan 必须返回 DecisionCompletion
 
 ## 10. DeepSeek response normalization
 
-每个物理请求只接受：
+DeepSeek raw REST response 统一先视为 `unknown`。Workflow 只接受 HTTP 2xx body 被 JSON.parse 后得到的 frozen Responses object shape。
 
-~~~text
-response.status = completed
+### 10.1 Exact visible-output extractor
+
+内部使用一个 module-local pure function：
+
+~~~ts
+function extractOutputText(value: unknown): string
 ~~~
 
-并从 assistant message 的 output_text 得到 visible text。
+唯一算法：
 
-以下 provider response 不是成功：
+~~~text
+require top-level object
+require object === "response"
+require status === "completed"
+require output is array
 
-- response.status = incomplete；
-- response.status = failed；
-  - 若 error 可映射到已冻结 auth/quota/rate-limit/context-too-large taxonomy，则使用对应 DecisionFailure；
-  - 其他 failed response → attempt_failure / DECISION_PROVIDER_UNAVAILABLE；
-- completed 但没有非空 output_text；
-- Call B output 无法 parse 成 schema-compatible PlanSubmission。
+visibleParts = []
 
-response.incomplete_details.reason：
+for each output item in provider order:
+  if item.type === "reasoning":
+    ignore reasoning text/content completely
 
-- content_filter → provider refusal；
-- max_output_tokens → provider incomplete。
+  else if item.type === "message":
+    require item.role === "assistant"
+    require item.content is array
 
-Reasoning item 不作为 Battle facts，不进入 Call B strategy memo；adapter 只使用最终 visible output text。v0 不保存、不记录、不向 Host 暴露 provider reasoning_text，只允许记录 reasoning token count。
+    for each content item in provider order:
+      if content.type === "output_text":
+        require content.text is string
+        append content.text to visibleParts
+      else:
+        reject as provider/output contract violation
+
+  else:
+    reject as provider/output contract violation
+
+visibleText = visibleParts.join("")
+
+if visibleText.trim().length === 0:
+  DecisionFailure {
+    category: "attempt_failure",
+    code: "DECISION_OUTPUT_INVALID"
+  }
+
+return visibleText
+~~~
+
+v0 不读取/保存 provider `reasoning_text`。Reasoning item 可以用于 provider processing/usage diagnostics，但其内容不进入 strategyMemo、Plan、Replay、Host diagnostics 或 logs。
+
+请求固定没有 tools，因此任何 `function_call` / `web_search_call` / 其他 unexpected output item 都不是合法 v0 output。
+
+不要要求 provider 返回的 `response.model` 等于请求 alias `deepseek-flash`；returned model identifier 只允许作为 non-authoritative diagnostics。
+
+### 10.2 Non-completed response status
+
+以下不是成功：
+
+- `status = "incomplete"`
+  - `incomplete_details.reason = "content_filter"` → `DECISION_PROVIDER_REFUSED`
+  - `incomplete_details.reason = "max_output_tokens"` → `DECISION_PROVIDER_INCOMPLETE`
+  - 其他 incomplete reason → `DECISION_PROVIDER_INCOMPLETE`
+- `status = "failed"`
+  - HTTP 已经是 2xx，因此不再根据 provider-specific `error.code/message` 做 authority classification；
+  - 统一 → `attempt_failure / DECISION_PROVIDER_UNAVAILABLE`
+- completed 但 output shape/output_text 非法 → `DECISION_OUTPUT_INVALID` 或 provider-contract invariant，按 §10.1 / §11.3 区分；
+- Call B visible text 无法 JSON.parse 或 strict parse 成 PlanSubmission → `DECISION_OUTPUT_INVALID`。
+
+provider `error.code/message` 可以进入 private diagnostics，但不得驱动 Battle failure category/code。
 
 ## 11. Failure taxonomy
 
@@ -787,16 +913,16 @@ DECISION_CONTEXT_TOO_LARGE
 
 | Case | category | code |
 | --- | --- | --- |
-| HTTP 401 / authorization-denied equivalent | session_fatal | DECISION_PROVIDER_AUTH |
-| HTTP 402 / account balance or hard quota unavailable | session_fatal | DECISION_PROVIDER_QUOTA |
-| provider explicitly reports request context exceeds supported limit | session_fatal | DECISION_CONTEXT_TOO_LARGE |
+| HTTP 401 / 403 | session_fatal | DECISION_PROVIDER_AUTH |
+| HTTP 402 | session_fatal | DECISION_PROVIDER_QUOTA |
+| local final-request-body size > 512 KiB | session_fatal | DECISION_CONTEXT_TOO_LARGE |
 
 ### 11.3 invariant rejection
 
 以下不是正常 DecisionFailure：
 
 - adapter 构造出 provider 明确拒绝的固定 request shape；
-- unexpected HTTP 400/404/422 或其他未显式分类的 4xx，且不是可识别 auth/quota/rate-limit/context-too-large；
+- HTTP 400/404/422 或其他未显式分类的 4xx；local 512 KiB preflight 已负责 v0 expected context-too-large case，因此不再解析 provider error message 猜测 context overflow；
 - response object shape 与 frozen DeepSeek transport contract 不符；
 - internal impossible state；
 - local code bug；
@@ -844,6 +970,31 @@ provider timeout = 60,000 ms wall clock
 
 Call A 与 Call B 分别计时。
 
+每个物理调用统一通过一个 module-local helper：
+
+~~~ts
+async function callDeepSeek(
+  body: Readonly<Record<string, unknown>>,
+  signal: AbortSignal,
+): Promise<string>
+~~~
+
+它集中负责：
+
+~~~text
+JSON.stringify exact body
+→ 512 KiB preflight
+→ setup 60s timeout
+→ DeepSeekTransport POST
+→ HTTP status classification
+→ JSON.parse 2xx body
+→ normalize Responses status
+→ extractOutputText()
+→ cleanup timer/listener
+~~~
+
+Call A / Call B 不得各自复制 timeout/HTTP/response-normalization 逻辑。
+
 v0 没有额外的 whole-decision wall-clock deadline；一次成功 Decision 最坏 provider waiting time 可以接近两次 request timeout 之和，但这些 wall-clock 时间不进入 Battle Tick authority。
 
 ### 12.2 Retry
@@ -876,6 +1027,19 @@ provider transport retry、Simulation correction、later new Decision generation
 - provider 即使完全忽略 abort，也不能让旧 request继续占有 Decision authority或绕过 Simulation fencing。
 
 因此 AbortSignal cancellation 的 correctness 依赖 adapter local settle + Runtime requestId/generation fencing，不依赖 DeepSeek/HTTP transport cancellation guarantee。
+
+Abort 与 60s timeout race 的 precedence 固定：
+
+~~~text
+if external request signal is aborted when settle is decided:
+  → DECISION_ABORTED
+else if provider timeout has fired:
+  → DECISION_PROVIDER_TIMEOUT
+~~~
+
+也就是说 caller/session abort 优先于 infrastructure timeout；因为 `DECISION_ABORTED` 不计入 availability circuit，而 timeout 会计入。
+
+每个 `callDeepSeek()` 的 timeout handle、linked AbortController/listener、settled flag 都必须是 call-local；任意 settle path 都必须清理 timer/listener 并忽略 late transport resolve/reject。
 
 ## 13. Correction
 
@@ -910,34 +1074,72 @@ Decision implementation 不得：
 
 ## 14. Internal transport seam
 
-v0 不创建 generic provider abstraction，但需要一个 DeepSeek-specific internal/test seam。
-
-生产 public constructor 仍然只有：
-
-~~~ts
-new DeepSeekDecision({ apiKey })
-~~~
-
-内部 seam 固定为：
+v0 不创建 generic provider abstraction。DeepSeek-specific transport seam **只负责 HTTP**：
 
 ~~~ts
 export interface DeepSeekTransport {
-  createResponse(
-    body: Readonly<Record<string, unknown>>,
+  postResponses(
+    bodyText: string,
     signal: AbortSignal,
-  ): Promise<unknown>;
+  ): Promise<{
+    readonly status: number
+    readonly bodyText: string
+  }>
 }
+~~~
+
+固定语义：
+
+~~~text
+HTTP response received
+→ resolve { status, bodyText }
+  even when status is 4xx/5xx
+  even when body is not JSON
+
+DNS/socket/fetch/network failure before HTTP response
+→ reject
+
+AbortSignal
+→ best-effort cancel underlying fetch
 ~~~
 
 production transport：
 
 - 捕获 constructor 注入的 apiKey；
 - 固定 POST https://api.deepseek.com/responses；
-- 添加 Authorization / Content-Type；
-- 把 §4 frozen body 原样作为 JSON body；
-- 返回 parsed provider response object；
-- 不做 retry；
+- 固定 Authorization / Content-Type headers；
+- 使用传入的 exact `bodyText`；
+- 返回 HTTP status + raw response text；
+- 不调用 `response.json()`；
+- 不做 retry/backoff；
+- 不解析 DeepSeek Responses object；
+- 不生成 DecisionFailure code；
 - 不泄漏 credential。
+
+HTTP/provider semantics 由 Workflow 统一处理：
+
+~~~text
+2xx
+→ JSON.parse(bodyText)
+→ Responses normalization / extractOutputText
+
+401 / 403
+→ session_fatal / DECISION_PROVIDER_AUTH
+
+402
+→ session_fatal / DECISION_PROVIDER_QUOTA
+
+429
+→ attempt_failure / DECISION_PROVIDER_RATE_LIMITED
+
+5xx
+→ attempt_failure / DECISION_PROVIDER_UNAVAILABLE
+
+400 / 404 / 422 / other unclassified 4xx
+→ provider-contract / programmer invariant reject
+~~~
+
+这样即使 503 body 是 HTML/plain-text，也仍稳定归类为 provider unavailable，不会因为 JSON.parse 失败改变分类。
 
 测试 export：
 
@@ -947,24 +1149,74 @@ export function createDeepSeekDecisionForTesting(
 ): DecisionPort;
 ~~~
 
-这个 factory 只存在于：
+只存在于：
 
 ~~~text
 @loomrealm-game/battle/decision/testing
 ~~~
 
-生产 ./decision export 不暴露 transport injection。
+production `./decision` 不暴露 transport injection。
 
-./decision/testing 还应导出 FakeDeepSeekTransport。Fake 至少必须支持：
+`FakeDeepSeekTransport` 至少支持：
 
-- 记录每次 request body；
-- script resolve(response)；
-- script reject(error)；
+- 记录 exact bodyText；
+- script `{ status, bodyText }`；
+- script network reject；
 - deferred resolve/reject；
 - 观察传入 AbortSignal；
-- 模拟忽略 abort 后迟到 resolve。
+- 模拟忽略 abort 后迟到 resolve/reject。
 
-测试 seam 不得让生产调用方选择 provider/model/baseUrl，也不得成为新的 gameplay Port。
+### 14.1 Exact ownership
+
+v0 ownership 固定：
+
+~~~text
+DeepSeekDecision shell
+  - DecisionPort boundary
+  - requestId / generation echo
+  - workflow result → DecisionCompletion
+  - request-scoped settle-once
+
+DecisionWorkflow
+  - Battle context assembly
+  - v0 Call A / Call B orchestration
+  - request byte budget
+  - timeout / abort race normalization
+  - HTTP status classification
+  - Responses JSON parsing / output extraction
+  - PlanSubmission strict parsing
+  - expected provider failure → DecisionFailure
+
+DeepSeekTransport
+  - HTTPS POST only
+  - Authorization header
+  - raw HTTP status/body
+  - network I/O / best-effort cancellation
+~~~
+
+Transport 不知道 Battle failure taxonomy；Shell 不知道 Call A/Call B/provider payload shape。
+
+### 14.2 Concurrency safety
+
+同一个 `DeepSeekDecision` instance **必须支持多个 concurrent `decide()`**。
+
+允许 instance-shared 的只有 immutable dependency/config，例如：
+
+- apiKey-owning transport；
+- immutable workflow/config/constants。
+
+以下必须是 call-local，禁止写入 instance mutable field：
+
+- current request；
+- strategyMemo；
+- current stage；
+- timeout handle；
+- AbortController/listener；
+- provider body/response；
+- settle flag；
+- parser intermediate state。
+
+禁止为 v0 增加 mutex、global queue、ConcurrencyManager 或 per-actor mutable cache。并发安全通过“无 request-local shared mutable state”获得，而不是通过序列化所有 Decision 请求获得。
 
 ## 15. Diagnostics
 
@@ -1123,7 +1375,9 @@ future:
 - Call B fixed request profile；
 - battle_plan_v0 schema；
 - provider output → parser；
-- provider failure → failure code。
+- exact Responses output extraction（reasoning ignore / assistant output_text / unexpected item）；
+- HTTP status → failure code；
+- final request body >512 KiB → CONTEXT_TOO_LARGE。
 
 ### 18.2 Fake transport tests
 
@@ -1141,6 +1395,10 @@ future:
 - abort between Call A/Call B；
 - abort during Call B；
 - provider ignores abort and resolves late；
+- abort 与 timeout 同时竞争时 external abort precedence；
+- non-JSON 5xx body 仍按 HTTP status 归类；
+- 2xx malformed JSON / malformed Responses object；
+- concurrent decide(A/B) interleaving，无 strategy/abort/request identity 串线；
 - no automatic retry；
 - DeepSeekDecision 本身不维护跨 request failure streak、不调用 Runtime pause；
 - exactly two physical provider calls on normal success；
@@ -1220,9 +1478,9 @@ Implementation agent 必须：
 7. 实现 direct JSON Schema structured Plan output；
 8. 保留 local strict parser；
 9. 实现本文 failure/timeout/no-retry/abort semantics，并只上报单次 availability signal；跨 request streak / circuit pause 属于 Simulation；
-10. 提供 FakeDeepSeekTransport 与测试；
+10. 提供只表达 HTTP status/bodyText/network reject 的 FakeDeepSeekTransport 与测试；
 11. 保持真实 provider test credential-gated；
-12. 不引入 generic AI/provider/workflow framework；只保留最小 DecisionWorkflow orchestration seam；
+12. 不引入 generic AI/provider/workflow framework；只保留 DecisionPort → DecisionWorkflow → DeepSeekTransport 三个 seam，其余 provider helpers 使用 module-local pure functions/constants；
 13. 不实现 PlayerGuidance concrete contract，但不得通过 stage-level public API 或 hidden mutable state 阻塞未来 workflow 扩展。
 
 不得自行重新选择：
@@ -1254,6 +1512,11 @@ Implementation agent 必须：
 - no automatic provider retry；
 - counted failure codes 与 Simulation §10 circuit policy 对齐，DeepSeekDecision 本身不直接 pause Runtime；
 - request-scoped AbortSignal 全链路；
+- final request body 512 KiB hard budget 落地；
+- DeepSeekTransport 只返回 raw HTTP status/bodyText，Workflow拥有 provider protocol/error normalization；
+- exact Responses output extractor 落地；
+- concurrent decide() safety test 通过；
+- abort-over-timeout precedence test 通过；
 - Fake transport tests 完整；
 - tests 证明 Battle-facing caller 不依赖 workflow stage/call topology；
 - Simulation integration tests 通过；
