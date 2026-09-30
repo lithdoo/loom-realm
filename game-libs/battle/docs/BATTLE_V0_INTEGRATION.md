@@ -508,7 +508,7 @@ abort/cancel
 → explicit battle.resume() required
 ~~~
 
-counted failure、reset、same-Tick ordering、Replay exclusion 与 session_fatal bypass 的 exact semantics 以 BATTLE_V0_SIMULATION.md §10 为准。
+authority-valid attempt_failure、completed reset、same-Tick ordering、Replay exclusion 与 session_fatal bypass 的 exact semantics 以 BATTLE_V0_SIMULATION.md §10 为准；Host 不解释 concrete Decision code。
 
 这类自动暂停对外继续使用现有 `BattleStatus = "paused"` 与 `battle.resume()` lifecycle，不新增 gameplay timing/dueTick。Host/Product 如何向玩家呈现“AI 决策服务暂时不可用”、是否显示重试按钮，以及如何区分 background/manual pause 的 UI 文案属于产品级 integration；不得改变 Runtime circuit semantics。
 
