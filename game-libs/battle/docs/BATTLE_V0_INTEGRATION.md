@@ -520,17 +520,20 @@ abort/cancel
 固定策略：
 
 ~~~text
-3 consecutive counted Decision failures
-→ automatic Battle PAUSED
-→ freeze logical clock
-→ suppress new Decision requests
-→ abort all active Decision requests
+3 consecutive authority-valid attempt_failure
+→ finish current Tick
+→ invoke that Tick's already-produced valid Decision commands normally
+→ enter the existing Battle PAUSED lifecycle
+→ freeze logical clock at the committed Tick boundary
+→ no later Tick / no new Tick-driven Decision generation while paused
+→ keep existing/in-flight Decision request authority unchanged
+→ Decision completion may enqueue while paused
 → explicit battle.resume() required
 ~~~
 
-authority-valid attempt_failure、completed reset、same-Tick ordering、Replay exclusion 与 session_fatal bypass 的 exact semantics 以 BATTLE_V0_SIMULATION.md §10 为准；Host 不解释 concrete Decision code。
+Circuit pause 不调用 Decision AbortSignal、不把 existing request变 stale，也不建立第二套 pause state machine。authority-valid attempt_failure、completed reset、same-Tick ordering、Replay exclusion、catch-up cut 与 session_fatal bypass 的 exact semantics 以 BATTLE_V0_SIMULATION.md §10/§16 为准；Host 不解释 concrete Decision code。
 
-这类自动暂停对外继续使用现有 `BattleStatus = "paused"` 与 `battle.resume()` lifecycle，不新增 gameplay timing/dueTick。Host/Product 如何向玩家呈现“AI 决策服务暂时不可用”、是否显示重试按钮，以及如何区分 background/manual pause 的 UI 文案属于产品级 integration；不得改变 Runtime circuit semantics。
+这类自动暂停对外继续使用现有 `BattleStatus = "paused"` 与 `battle.resume()` lifecycle，不新增 gameplay timing/dueTick。Host/Product 如何向玩家呈现“AI 决策服务暂时不可用”、是否显示重试按钮，以及如何区分 background/manual pause 的 UI 文案属于产品级 integration；不得改变 Runtime circuit semantics。Host 的 background/foreground wiring 不应把任何 PAUSED 状态机械地无条件 resume；它只应恢复自己拥有的 external pause，circuit pause 仍要求产品显式调用 `battle.resume()`。
 
 正常 BattleResult 使用不同的视觉生命周期：
 
