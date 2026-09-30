@@ -44,7 +44,7 @@
 
 Contracts 不重新定义玩法规则。
 
-### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED
+### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — baseline QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION
 
 负责：
 
@@ -262,7 +262,7 @@ protection      命中后的有限免疫区间
 | `OPEN-CLOCK-001` | `TIME-004`：pause/background 冻结 Battle clock |
 | `OPEN-STALEMATE-001` | `RESULT-002`：v0 不设正式 stalemate/最大时长 |
 
-**当前 Core gameplay 没有未冻结 OPEN 项；Simulation blocking implementation OPEN = 0。**
+**当前 Core gameplay 没有未冻结 design OPEN；Simulation baseline 已 qualification，新增 Decision availability circuit 已冻结且待实现，不再存在需要 implementation agent 自行决策的 blocking OPEN。**
 
 仍存在的 OPEN 只属于不阻塞 Simulation/Presentation/Decision implementation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Host suspend/resume 来源映射，以及 Host 到 DeepSeekDecision 的 apiKey/composition wiring。PlayerGuidance concrete contract/Host wiring 明确延期；其 workflow extensibility requirement 已冻结，不是当前 implementation OPEN。Concrete Decision 的 shell/workflow boundary、v0 topology、model/API、prompt/context、structured output、parser、failure、timeout/retry、Abort、correction statelessness 与 testing 已集中冻结在 **BATTLE_V0_DECISION.md**，不再属于 implementation OPEN。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结；这些外部 OPEN 不得反向改变 Core/Decision/Presentation 已冻结语义。
 
