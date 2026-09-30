@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..032 尚待实现后 qualification。
+> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..033 尚待实现后 qualification。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -174,7 +174,7 @@
 | T-DEC-010 | STATE-006 | 当前 Plan 的最后一个 intent 已 materialize 成 active move/windup/recovery | 当前 Action 可继续，同时允许最多一个 next Decision 进入 thinking |
 | T-DEC-011 | STATE-006, SKILL-004 | action lock 未结束时 next Decision completion 被 reducer 接受 | 保存为唯一 pending accepted plan；不得启动 Action，也不得接受第三份排队 Plan |
 | T-DEC-012 | STATE-006, HIT-003 | active Action 受 damaging hit 且 pending Plan 已存在 | 旧 action/plan/decision authority 一并失效；不允许 stale pending Plan 在后续启动 |
-| T-DEC-013 | DEC-004, SIMULATION §10 | DecisionCompletion.failed(category=attempt_failure) | 单次失败不终止 Battle；当前 generation结束；counted provider failure 更新 live availability streak，未达3时最早下一逻辑 Tick重新 Decision |
+| T-DEC-013 | DEC-004/DEC-005, SIMULATION §10 | authority-valid DecisionCompletion.failed(category=attempt_failure)，code任意 | 单次失败不终止 Battle；当前 generation结束；Simulation不解释code，只按category更新availability streak；未达3时最早下一逻辑Tick重新Decision |
 | T-DEC-014 | DEC-004 | DecisionCompletion.failed(category=session_fatal) | 进入 Runtime terminal arbiter，BattleResult=failure source=decision |
 | T-DEC-015 | SIMULATION §12/17 | recovery_complete 在 phase 3 到期且已有 pending Plan | phase 3 action→idle；phase 10 promote pending→active 并可按最新状态启动本 Tick唯一新 Action |
 | T-DEC-016 | SIMULATION §12 | pending attack Plan promotion时 Actor仍 protected | 只获得 active execution authority；不得 windup，保留 intent并等待后续合法 Tick重检 |
