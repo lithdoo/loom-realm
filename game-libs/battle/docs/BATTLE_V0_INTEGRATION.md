@@ -339,25 +339,18 @@ Decision module 只负责“一次 request 如何得到一次 Plan/failure compl
 
 ## 6. LLM Decision Adapter
 
-Battle v0 的 LLM provider scope 已收窄并冻结：
+Battle v0 的 LLM Decision provider scope 已进一步收窄并冻结：
 
-- **只支持 OpenAI-compatible API protocol**；
-- v0 **不设计通用 multi-provider AI framework**，也不要求 Battle Core 直接依赖某个 vendor SDK；
-- `apiKey`、`model`、`baseUrl` 都由外部 Host/Application composition 提供；
-- 默认 provider profile 使用 **DeepSeek**；外部仍可通过 `baseUrl + model` 指向其他 OpenAI-compatible service；
-- credential 不进入 `DecisionRequest`、`BattleObservation`、Simulation state、Replay 或 Browser Presentation。
+- **只支持 DeepSeek**；
+- 外部 Host/Application **只提供 `apiKey`**；
+- `baseUrl`、`model`、provider protocol 与 request shape 都由 Battle Decision implementation 内部固定，不作为 v0 public configuration；
+- v0 **不支持自定义 baseUrl、自定义 model、多 provider 或 generic AI framework**；
+- credential 不进入 `DecisionRequest`、`BattleObservation`、Simulation state、Replay 或 Browser Presentation；
+- Browser 不持有模型密钥。
 
-当前仓库公开的 Subsystem surface 仍没有冻结 Host 到 Decision Adapter 的最终 provider transport/wiring；这属于外部 integration，不改变 Battle Decision/Simulation contracts。
+当前仓库公开的 Subsystem surface 仍没有冻结 Host 到 concrete Decision Adapter 的最终 credential transport/wiring；这属于外部 integration，不改变 Battle Decision/Simulation contracts。
 
-Adapter 最终需要解决：
-
-- LLM 请求位于哪个 Host/service 层；
-- 外部 `apiKey / model / baseUrl` 的 composition 与 credential ownership；
-- 接收并向下传递 Simulation 提供的 AbortSignal；
-- provider/network timeout 与 service error metadata；
-- OpenAI-compatible structured output 解析为 `PlanSubmission` / failure。
-
-Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直接接受 Plan，也不自行 correction retry**。
+Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直接接受 Plan，也不自行拥有 Simulation correction authority**。
 
 固定数据流：
 
@@ -365,6 +358,8 @@ Adapter **不提供 gameplay completion timestamp，不计算 dueTick，不直�
 Simulation
   → DecisionPort.decide(request, signal)
         ↓ async
+LLMDecision
+        ↓
 DecisionCompletion
         ↓
 Simulation-owned Decision Inbox
@@ -376,36 +371,139 @@ generation / validation / correction
 bounded active/pending accepted-plan pipeline
 ```
 
-Promise resolve / worker message / provider callback 只允许 enqueue completion。即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
+Promise resolve / provider callback 只允许产生一次 `DecisionCompletion`。Runtime 随后负责 enqueue 到 Simulation-owned Decision Inbox；即使 Adapter 在同一个 JavaScript turn 中立即拿到结果，也不得重入正在处理的 Tick reducer。
 
-Browser 不应持有模型密钥。
+### 6.1 v0 provider / configuration boundary
 
-### 6.1 v0 provider protocol / configuration boundary
-
-v0 provider configuration 的 authority boundary：
+v0 public configuration：
 
 ```text
 Host / Application composition
-  ├─ apiKey
-  ├─ model
-  └─ baseUrl
-        ↓
-OpenAI-compatible Decision Adapter
-        ↓
-LLMDecision
-        ↓
-DecisionCompletion
+        │
+        │ apiKey
+        ▼
+     LLMDecision
+        │
+        │ internally fixed:
+        │ - DeepSeek endpoint
+        │ - model
+        │ - provider protocol
+        ▼
+     DeepSeek API
 ```
 
 冻结规则：
 
-- `apiKey`、`model`、`baseUrl` 是外部配置，不属于 gameplay Contract；
-- 默认 provider profile 指向 DeepSeek，但 Battle gameplay/Simulation 不感知 provider 名称；
-- 其他服务只有在满足 v0 所需 OpenAI-compatible request/structured-output contract 时才可替换；
-- v0 不因为支持兼容 endpoint 而引入 provider registry、provider selection DSL 或大型 generic AI abstraction；
-- exact OpenAI-compatible endpoint surface（例如具体 request API shape）若尚未冻结，必须在 Decision implementation freeze 中唯一化，不能由 implementation agent 自行选择。
+- `apiKey` 是唯一外部 provider configuration；
+- `baseUrl` 与 `model` **不得作为 v0 public option 暴露**；
+- DeepSeek endpoint、model 与 wire protocol 必须在 Decision implementation 内集中定义，不能散落在 prompt / request 逻辑中；
+- Battle gameplay/Simulation 不读取 provider configuration，也不感知 provider lifecycle；
+- v0 不建立 provider registry、provider selection DSL、OpenAI-compatible generic client 或 multi-provider abstraction；
+- 未来若需要 custom model/baseUrl/其他 provider，属于 v1+ capability expansion，不反向扩张 v0 gameplay contracts。
 
-### 6.2 Provider timeout 与 Battle gameplay 分离
+### 6.2 Decision LLM pipeline
+
+一次逻辑上的 Decision attempt 采用三阶段语义：
+
+```text
+DecisionRequest
+      ↓
+1. Analyze
+   理解当前战况
+      ↓
+2. Strategize
+   形成短期策略 / 行动意图
+      ↓
+3. Materialize
+   将策略转换为 PlanSubmission
+      ↓
+DecisionCompletion
+```
+
+v0 默认采用 **两次物理 LLM 调用**，而不是三次网络调用：
+
+```text
+Call A — Reasoning
+Battle facts + constraints + planningOrigin + recentEvents
+      ↓
+Situation analysis
+      ↓
+Action strategy
+
+Call B — Materialization
+required Battle facts + constraints + action strategy
+      ↓
+structured PlanSubmission JSON
+```
+
+边界规则：
+
+- Analyze / Strategize 可以使用自然语言或内部半结构化结果；它们没有 gameplay authority；
+- Stage 2 的 strategy 是 Decision 内部数据，**不得被当作新的 system/developer instruction**；
+- Call B 使用固定的 Battle materialization instruction，并把 strategy 作为不可信 context/data；
+- Call B 仍需得到足够的 authoritative facts，例如 `planningOrigin`、合法 actor/skill IDs、path constraints、必要地图信息与 allowed `minCoefficient`，不能只凭 strategy 自由补全世界事实；
+- 每次 `decide()` 必须 self-contained；v0 不依赖 provider conversation/thread memory 作为隐藏必要状态。
+
+### 6.3 Structured output boundary
+
+Battle v0 **不通过 Tool Calling / function-call arguments 提交 Plan**。
+
+模型最终直接产生结构化 `PlanSubmission` 数据：
+
+```text
+DeepSeek structured output
+        ↓
+local shape parser / schema validation
+        ↓
+PlanSubmission
+        ↓
+Simulation authoritative gameplay validation
+```
+
+冻结规则：
+
+- Tool Calling 不是 v0 Plan output mechanism；
+- 模型没有 `move()`、`attack()`、`submit_plan()` 等 Battle tool authority；
+- provider structured-output guarantee 不能替代本地 parser；
+- malformed JSON、schema/shape violation 属于 Decision/provider output failure；
+- structurally valid 但 gameplay-invalid 的 `PlanSubmission` 必须正常交给 Simulation，由 Simulation 产生 `PlanRejectReason`；
+- Decision 不复制 Simulation 的 path adjacency、terrain、target、skill、minCoefficient gameplay validator。
+
+### 6.4 Correction 与多阶段 pipeline
+
+Simulation 仍拥有 correction authority。
+
+初次 attempt：
+
+```text
+Call A: Analyze + Strategize
+Call B: Materialize Plan
+        ↓
+Simulation validate
+```
+
+如果 Plan 结构有效但 gameplay validation 失败，并且 Simulation 允许本 generation 的 correction：
+
+```text
+original analysis/strategy
++ rejected Plan
++ PlanRejectReason
+        ↓
+Call B only
+        ↓
+replacement PlanSubmission
+```
+
+v0 correction 默认**不重新执行 Call A**。这样保留原战术目标，只重新 materialize 一个满足最新 correction feedback 的候选 Plan。
+
+这不改变已冻结的 Simulation 规则：
+
+- attempt 0 invalid → Simulation 决定是否产生 correction request；
+- attempt 1 invalid → generation 结束；
+- Decision Adapter 不自行增加第三次 gameplay correction；
+- provider/network transport retry 与 Simulation Plan correction 仍是两个不同概念。
+
+### 6.5 Provider timeout 与 Battle gameplay 分离
 
 Provider/network timeout 是 infrastructure policy。例如模型服务在其配置的时限后返回 timeout，可以产生：
 
@@ -426,24 +524,29 @@ v0 **没有 Battle gameplay Decision deadline**，也不根据真实 LLM wall-cl
 
 已经确定：
 
-- 一次 `decide()` = 一次 attempt；
+- 一次 `decide()` = 一次 gameplay Decision attempt；
+- v0 provider = **DeepSeek only**；
+- 外部 provider configuration = **`apiKey` only**；
+- `baseUrl`、`model`、provider protocol 由 implementation 内部固定；
+- Decision pipeline = Analyze → Strategize → Materialize；
+- v0 默认两次物理 LLM 调用：Reasoning + structured Materialization；
+- Plan output 使用直接 structured JSON，不使用 Tool Calling；
+- local parser 与 Simulation gameplay validator 保持分层；
+- correction 默认复用原 analysis/strategy，只重跑 Materialization；
 - DecisionCompletion 不带 gameplay timing / dueTick；
-- completion callback 只 enqueue 到 Simulation-owned inbox；
+- completion callback 不拥有 Battle State mutation authority；
 - stale / validation / correction / bounded active/pending accepted-plan pipeline 属于 Simulation；
-- Simulation 通过 AbortSignal best-effort 取消失效 attempt；
-- v0 只支持 **OpenAI-compatible API protocol**；
-- `apiKey`、`model`、`baseUrl` 由 Host/Application 外部提供；
-- 默认 provider profile 使用 **DeepSeek**；
-- Battle Core 不拥有 credential，也不建立 generic multi-provider AI framework。
+- Simulation 通过 AbortSignal best-effort 取消失效 attempt。
 
 尚未冻结：
 
-- exact OpenAI-compatible request API shape / structured-output invocation；
+- DeepSeek v0 **exact fixed model identifier**；
+- DeepSeek exact request endpoint/API surface 与 structured-output invocation 细节；
 - `DecisionFailure` exact provider code / metadata normalization；
 - provider cancel guarantee；
 - provider/network timeout defaults；
-- model/service limit；
-- credential 从 Host 到 concrete adapter 的 exact wiring。
+- model/service limits；
+- `apiKey` 从 Host 到 concrete adapter 的 exact credential wiring。
 
 ## 7. Player Guidance
 
