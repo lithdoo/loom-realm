@@ -948,6 +948,13 @@ interface DecisionPort {
 
 `requestId / generation` 是 Simulation 生成的 correlation identity；Decision implementation 必须原样返回，不拥有其生命周期。Runtime为每次调用捕获 expected `actorId/requestId/generation`。
 
+`DecisionFailure.category` 是 Simulation authority contract；`DecisionFailure.code` 与 `metadata` 对 Simulation branching 是 opaque concrete-Decision diagnostics。Simulation：
+
+- 可以按 `attempt_failure | session_fatal` 分支；
+- 可以在 `session_fatal` terminal result 中原样传播 `error.code`；
+- **不得**按具体 code、provider HTTP status 或 metadata 改变 retry/pause/terminal authority；
+- live availability circuit 只按 authority-valid completion outcome/category 与 lifecycle fencing 运行。
+
 - resolved completion 的 requestId/generation 与 expected 不一致 → DecisionPort protocol invariant violation；Runtime cleanup并 reject active `run()`，不包装成 Plan reject 或 BattleResult.failure；
 - DecisionPort Promise rejection / synchronous throw 表示 adapter/programmer invariant（预期 provider/network failure MUST 归一化成 `DecisionCompletion.failed`）；Runtime cleanup并 reject active `run()`；
 - malformed completion object 同样属于 DecisionPort protocol invariant；
@@ -963,7 +970,7 @@ DecisionCompletion 不携带任何 wall-clock/Battle-time timing 字段，也不
 - `PLAN-006` correction retry；
 - consumedTick / acceptedTick Replay facts。
 
-Provider/network timeout 属于 Decision implementation 的 infrastructure policy，可以产生 `DecisionCompletion { type: "failed" }`；它不是 Battle gameplay deadline。
+Provider/network/response failure 属于 concrete Decision implementation 的 infrastructure policy，必须在预期失败路径归一化成 `DecisionCompletion { type: "failed" }`；它不是 Battle gameplay deadline。具体 provider code/timeout 值不属于 Simulation branching contract。
 
 Decision Inbox 是 Simulation internal runtime structure，不属于 Presentation Contract，也不作为 `BattleEvent(dueTick)` 序列化。
 
