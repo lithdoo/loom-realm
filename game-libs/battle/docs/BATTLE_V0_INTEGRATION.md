@@ -1,6 +1,6 @@
 # Battle v0 集成说明
 
-> 状态：**Simulation/Presentation baseline integration 已完成 qualification；DeepSeek Decision implementation、replaceable DecisionWorkflow boundary 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
+> 状态：**Simulation（含 Decision availability circuit）、DeepSeek Decision implementation/replaceable DecisionWorkflow boundary 与 Presentation integration 已完成 closed-loop qualification；PlayerGuidance concrete feature 明确延期；configured DeepSeekTransport 的 product/platform wiring、pause-reason/retry UI 与 Host lifecycle composition 仍含明确 OPEN**。本文只说明 Battle Core 如何与 LoomRealm Resource、Presentation、Decision Adapter、Host/Frame 生命周期及 workspace 工程集成；Simulation exact Runtime 行为以 BATTLE_V0_SIMULATION.md 为准。
 >
 > Gameplay 语义只以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 为准；数据结构以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准。
 
@@ -334,7 +334,7 @@ Decision 的 gameplay-facing Port 仍是共享的 `DecisionPort`。Simulation �
 
 Battle v0 的 concrete Decision 已单独冻结在：
 
-- **[BATTLE_V0_DECISION.md](./BATTLE_V0_DECISION.md) — FROZEN FOR IMPLEMENTATION**
+- **[BATTLE_V0_DECISION.md](./BATTLE_V0_DECISION.md) — FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**
 
 v0 Decision product surface：
 
@@ -654,7 +654,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qualification；DeepSeekDecision 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION。PlayerGuidance 明确延期，不是当前 Decision implementation blocker；configured DeepSeekTransport 的 credential/network/product capability handoff 与 Host lifecycle composition 仍属于外部集成工作。
+Battle v0 Presentation、Simulation（含 Decision availability circuit）与 DeepSeekDecision 均已完成 closed-loop qualification。PlayerGuidance 明确延期；configured DeepSeekTransport 的 credential/network/product capability handoff、产品级 pause-reason/retry UI 与 Host lifecycle composition 仍属于外部集成工作。
 
 已验证工程状态：
 
@@ -674,7 +674,7 @@ Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qu
 6. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
 7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
 8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-9. 按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16/§32 实现 DeepSeekDecision 与 Simulation availability circuit delta（tick.ts health signals；runtime.ts live guard/Tick-boundary pause/resume reset/Replay bypass），完成 T-DEC-023..036 + T-DDEC-* qualification，再做 configured DeepSeekTransport / product Host E2E；PlayerGuidance 留到后续独立阶段
+9. 已按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16/§32 实现 DeepSeekDecision 与 Simulation availability circuit delta（tick.ts health signals；runtime.ts live guard/Tick-boundary pause/resume reset/Replay bypass），并完成 T-DEC-023..036 + T-DDEC-* qualification；下一步做 configured DeepSeekTransport / product Host E2E，PlayerGuidance 留到后续独立阶段
 10. Presentation 与 Simulation baseline 已完成；本阶段完成 circuit/Decision 后重新验证 package-lock / build / unit / Browser E2E / package dry-run / Simulation+Decision subpath import；后续真实 configured transport 与 Host composition 再做集成 qualification
 ```
 
@@ -689,6 +689,6 @@ Presentation blocking integration OPEN 已清零。仍未冻结的集成项只�
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
-`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation 与既有 Simulation baseline/DecisionPort 已完成 qualification；新增 Decision availability circuit 与 DeepSeekDecision 尚待实现，configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
+`@loomrealm-game/tile-presentation` 已落地且 Map 已迁移；Battle v0 明确不启用 viewport clamp/default/min/max normalization。Battle Presentation、Simulation（含 Decision availability circuit）与 DeepSeekDecision 已完成 qualification；configured DeepSeekTransport 与 product/Host composition 尚待外部集成。
 
 Pause/background、LOS、stalemate 已进入 Core FROZEN 规则，不再属于 Integration OPEN。

@@ -9,7 +9,7 @@ import {
   type PresentationFailure,
   type PresentationPort,
 } from "../contracts.js";
-import { SimulationFailure } from "./numeric.js";
+import { checkedMultiply, SimulationFailure } from "./numeric.js";
 import { ensureDecision, type RequestDecisionCommand } from "./plan.js";
 import { DecisionInbox, ScheduledEventQueue } from "./queues.js";
 import { ReplayRecorder, type ReplayDecisionRecord, type ReplayRecord } from "./replay.js";
@@ -56,6 +56,13 @@ interface RuntimeOptions {
   readonly decision?: DecisionPort;
   readonly replaySource?: ReplayRecord;
 }
+
+interface DecisionAvailabilityGuard {
+  consecutiveFailures: number;
+  circuitOpen: boolean;
+}
+
+const MAX_CONSECUTIVE_DECISION_FAILURES = 3;
 
 function isClassifiedPresentation(code: unknown): code is "PRESENTATION_CONTENT_FAILED" | "PRESENTATION_COMMIT_FAILED" {
   return code === "PRESENTATION_CONTENT_FAILED" || code === "PRESENTATION_COMMIT_FAILED";
@@ -116,6 +123,7 @@ export class BattleRuntimeImpl implements BattleRuntime {
   readonly #matchedReplayRequests = new Set<string>();
   readonly #verifiedReplayTicks = new Set<number>();
   readonly #verifiedReplayDecisions = new Set<string>();
+  readonly #decisionAvailabilityGuard: DecisionAvailabilityGuard | null;
   #runCalled = false;
   #runResolve: ((result: BattleResult) => void) | null = null;
   #runReject: ((error: unknown) => void) | null = null;
@@ -135,6 +143,9 @@ export class BattleRuntimeImpl implements BattleRuntime {
     this.#decision = options.decision;
     this.#presentation = options.presentation;
     this.#replaySource = options.replaySource;
+    this.#decisionAvailabilityGuard = options.replaySource === undefined
+      ? { consecutiveFailures: 0, circuitOpen: false }
+      : null;
     this.#state = createInitialState(definition);
     this.#recorder = new ReplayRecorder(definition);
   }
@@ -213,6 +224,10 @@ export class BattleRuntimeImpl implements BattleRuntime {
     if (this.#state.status === "created") throw new Error("Cannot resume before run");
     if (this.#state.status !== "paused") return;
     try {
+      if (this.#decisionAvailabilityGuard?.circuitOpen === true) {
+        this.#decisionAvailabilityGuard.consecutiveFailures = 0;
+        this.#decisionAvailabilityGuard.circuitOpen = false;
+      }
       this.#presentation.resume();
       if (this.#state.status !== "paused") return;
       this.#runningAnchorMs = this.#readClock();
@@ -324,7 +339,11 @@ export class BattleRuntimeImpl implements BattleRuntime {
           this.#finish(output.terminalCandidate, { type: "deterministic" });
           break;
         }
+        const circuitPausePending = this.#processDecisionHealthSignals(output.decisionHealthSignals);
         this.#invokeCommands(output.decisionCommands);
+        if (circuitPausePending && this.#state.status === "running") {
+          this.#pauseAtCommittedTickBoundary();
+        }
       }
     } catch (error) {
       this.#processingTick = false;
@@ -333,6 +352,36 @@ export class BattleRuntimeImpl implements BattleRuntime {
       } else this.#rejectInvariant(error);
     }
     if (this.#state.status === "running") this.#scheduleNextWake();
+  }
+
+  #processDecisionHealthSignals(signals: readonly ("success" | "failure")[]): boolean {
+    const guard = this.#decisionAvailabilityGuard;
+    if (guard === null) return false;
+    let circuitPausePending = false;
+    for (const signal of signals) {
+      if (guard.circuitOpen) continue;
+      if (signal === "success") {
+        guard.consecutiveFailures = 0;
+        continue;
+      }
+      guard.consecutiveFailures += 1;
+      if (guard.consecutiveFailures >= MAX_CONSECUTIVE_DECISION_FAILURES) {
+        guard.circuitOpen = true;
+        circuitPausePending = true;
+      }
+    }
+    return circuitPausePending;
+  }
+
+  #pauseAtCommittedTickBoundary(): void {
+    try {
+      this.#accumulatedRunningMs = checkedMultiply(this.#state.currentTick, this.#definition.tickDurationMs);
+      this.#cancelWake();
+      this.#presentation.pause();
+      if (this.#state.status === "running") this.#state.status = "paused";
+    } catch (error) {
+      this.#handlePresentationOrClockThrow(error);
+    }
   }
 
   #invokeCommands(commands: readonly RequestDecisionCommand[]): void {

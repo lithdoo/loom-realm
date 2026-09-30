@@ -1,6 +1,6 @@
 # Battle v0 Decision Implementation Spec
 
-> 状态：**FROZEN FOR IMPLEMENTATION**。
+> 状态：**FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。
 >
 > 本文冻结 Battle v0 concrete Decision implementation。它不重新定义 Simulation gameplay authority：DecisionPort / DecisionRequest / DecisionCompletion / PlanSubmission 以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准；generation、Decision Inbox、Plan validation、correction authority、accepted/pending Plan、Replay 与 BattleResult 以 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) 为准。
 >
