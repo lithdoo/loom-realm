@@ -268,7 +268,7 @@ protection      命中后的有限免疫区间
 
 ## 8. 当前实施入口
 
-当前 **Core gameplay 已冻结，既有 Simulation baseline/DecisionPort/full Runtime 与 Presentation 已通过 closed-loop qualification；待完成的是 DeepSeekDecision + availability circuit implementation、外部 serialization 与业务 Host composition；PlayerGuidance concrete capability 延期到后续独立阶段**。已完成/后续实施顺序：
+当前 **Core gameplay 已冻结，既有 Simulation baseline/DecisionPort Runtime 与 Presentation 已通过 closed-loop qualification；待完成的是 DeepSeekDecision + Simulation availability circuit delta、外部 serialization 与业务 Host composition；PlayerGuidance concrete capability 延期到后续独立阶段**。已完成/后续实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema
@@ -280,7 +280,13 @@ protection      命中后的有限免疫区间
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. 按 FROZEN Presentation Agent contract 直接实现 PresentationPort + Browser Presentation（依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
-10. 按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16 实现 DeepSeekDecision + availability circuit delta（仅 tick.ts health signals、runtime.ts live guard/Tick-boundary pause/Replay bypass），完成 T-DEC-023..036 与 T-DDEC-* qualification，再做 configured DeepSeekTransport / product Host E2E；PlayerGuidance 后续独立设计/实现
+10. 按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16/§32 实现：
+    - DeepSeekDecision
+    - simulation/tick.ts：DecisionHealthSignal + TickOutput.decisionHealthSignals
+    - simulation/runtime.ts：live-only guard + threshold processing + checked(currentTick * 200) Tick-boundary pause + resume reset + replaySource bypass
+    - simulation/replay.ts：schema不变，仅验证 ReplayDriver 不执行 live circuit
+    - tests：T-DEC-023..036 + T-DDEC-*
+    完成 qualification 后再做 configured DeepSeekTransport / product Host E2E；PlayerGuidance 后续独立设计/实现
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。
