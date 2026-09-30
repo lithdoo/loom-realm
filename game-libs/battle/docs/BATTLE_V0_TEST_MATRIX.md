@@ -210,7 +210,7 @@
 | --- | --- | --- | --- |
 | T-DDEC-001 | DECISION §2–4/§14 | 构造 DeepSeekDecision | public option 只有 configured DeepSeekTransport；不接收 apiKey/provider/model/baseUrl/timeout/retry |
 | T-DDEC-002 | DECISION §3 | normal decide() | exactly 两个 provider request；都使用 deepseek-flash + POST /responses + stream=false，无 tools |
-| T-DDEC-003 | DECISION §4.1 | Call A request | reasoning.effort=high、text output、max_output_tokens=8192；temperature 不发送 |
+| T-DDEC-003 | DECISION §4.1 | Call A request | reasoning.effort=high、text output、max_output_tokens=65536；temperature 不发送 |
 | T-DDEC-004 | DECISION §4.2/8 | Call B request | reasoning.effort=none、temperature=0、json_schema name=battle_plan_v0、max_output_tokens=4096 |
 | T-DDEC-005 | DECISION §5/13 | Simulation correction request | 作为新的 decide() 自包含重新执行 Call A + Call B；不得复用上一 request strategy/provider session |
 | T-DDEC-006 | DECISION §6.3 | moving prefetch A→B | prompt 明确 PATH BASE=planningOrigin=B，同时保留 self.tile=A/action.to=B |

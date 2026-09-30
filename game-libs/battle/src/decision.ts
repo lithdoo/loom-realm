@@ -242,7 +242,7 @@ function buildAnalysisRequest(battle: Record<string, unknown>): Record<string, u
     instructions: CALL_A_INSTRUCTIONS,
     input: JSON.stringify(battle),
     reasoning: { effort: "high" },
-    max_output_tokens: 8192,
+    max_output_tokens: 65_536,
     stream: false,
     text: { format: { type: "text" } },
   };

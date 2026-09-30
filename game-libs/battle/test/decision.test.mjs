@@ -130,7 +130,7 @@ test("DeepSeekDecision sends the exact two-call profiles and deterministic canon
   assert.deepEqual(Object.keys(callA), ["model", "instructions", "input", "reasoning", "max_output_tokens", "stream", "text"]);
   assert.equal(callA.model, "deepseek-flash");
   assert.deepEqual(callA.reasoning, { effort: "high" });
-  assert.equal(callA.max_output_tokens, 8192);
+  assert.equal(callA.max_output_tokens, 65_536);
   assert.equal(callA.stream, false);
   assert.deepEqual(callA.text, { format: { type: "text" } });
   assert.equal("temperature" in callA, false);
