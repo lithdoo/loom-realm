@@ -802,9 +802,9 @@ circuitOpen = false
 → restart scheduler from frozen logical time
 ~~~
 
-后续最早合法 Tick由现有 `ensureDecision` 规则创建新的 Decision request。
+resume 不主动重建或替换 Decision request。暂停前仍在 thinking/in-flight 的 request保持原 requestId/generation；暂停期间已完成的 completion仍在 Inbox，最早由 resume 后第一个真实 Tick消费。只有 Actor 已按既有规则结束上一 generation 且满足 `ensureDecision` 条件时，后续 Tick才创建新的 Decision request。
 
-如果 Decision service 仍然不可用，后续再次连续 3 个 authority-valid `attempt_failure` 会再次 trip。
+如果 Decision service 仍然不可用，resume 清零 streak 后，后续消费到的 authority-valid `attempt_failure`（包括暂停期间已完成、resume 后才消费的 completion）从 0 重新累计；再次连续 3 次会再次 trip。
 
 普通外部 pause/resume 在 `circuitOpen === false` 时不因 pause 本身修改 failure streak。
 
@@ -1559,7 +1559,9 @@ AbortSignal是best effort；consume时仍必须requestId + decisionGeneration fe
 
 ### RACE-007 Scheduler wake vs pause
 
-若同步 `processTick` 已进入，则该Tick完整完成后pause生效；若pause callback先执行，则取消wake且不进入新Tick。control-plane不会中断reducer半途。
+若同步 `processTick` 已进入，则该Tick完整完成后pause生效；若external pause callback先执行，则取消wake且不进入新Tick。control-plane不会中断reducer半途。
+
+若 availability circuit 在 catch-up loop 的 Tick N 达到 threshold，则 Tick N shell side effects（包括合法 Decision commands）完整提交后进入 PAUSED，并立即停止后续 catch-up Tick；logical-time cut 以已提交的 Tick N 边界为准，pause 前未处理的 wall-time backlog 不得在 resume 后补跑。
 
 ### RACE-008 Initialize vs async Presentation failure / cancel
 
