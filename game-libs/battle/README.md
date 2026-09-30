@@ -48,6 +48,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
 - Decision 每次调用只完成一次 Plan/failure attempt；completion 不带 gameplay timing/dueTick，只即时进入 Simulation-owned inbox；Tick reducer 在 snapshot 边界消费，Simulation 拥有 generation、stale 判定、Plan validation、correction retry 与 bounded active/pending accepted-plan pipeline；
 - Battle-facing Decision API 只稳定为 `DecisionPort.decide()`；`DeepSeekDecision` 内部通过 replaceable `DecisionWorkflow` 编排模型调用。当前“两次调用”只属于 v0 workflow，不是 Host/Simulation ABI；未来可加入 PlayerGuidance 或更复杂 workflow 而不改 Simulation wiring；
+- Decision v0 刻意保持最小抽象：`DecisionPort → DecisionWorkflow → DeepSeekTransport`，Transport 只负责 raw HTTP；provider normalization/size budget/parser 由 Workflow 内 pure helpers完成；同一实例必须并发安全且不保存 request-local mutable state；
 - live Runtime 对连续 Decision service failure 使用固定 circuit breaker：连续 3 个 counted LLM/provider failure 后自动进入 PAUSED、冻结 Battle clock、abort active Decision 并停止新请求；必须显式 `battle.resume()` 才恢复；session_fatal 仍直接终止 Battle，Replay 不执行该 live availability policy；
 - accepted Plan 采用逐 Action materialization：多格 path 只 materialize 当前一格；reservation 成功并 move_start 时消费该 path intent，但下一格必须等当前 `move_complete` 成功后才重新判断并尝试；未 materialize 的后续 intent 不产生 future event；
 - Decision 与 Action 可以流水重叠，但只有当前 Plan 的 future intent 已全部 materialize 后才能预取下一 Decision；v0 最多保留一份 pending accepted plan，不建立无界 Plan FIFO；
@@ -80,7 +81,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 仍保持 OPEN 的只包括不阻塞 Simulation/Presentation implementation 的外部/后续细节，例如：
 
 - BattleActor/BattleSkill 等非 Presentation Content 的统一 subject/version、key/id 与部分正式 Schema；
-- Decision v0 concrete implementation 已在 **BATTLE_V0_DECISION.md** 达到 **FROZEN FOR IMPLEMENTATION**：DeepSeek only、外部仅 `apiKey`、stable shell + internal DecisionWorkflow、固定 `deepseek-flash` + Responses API、当前 v0 workflow 每次 `decide()` 自包含 Call A + Call B、direct JSON Schema output、本地 parser、60s/request timeout、no automatic retry、failure codes 与 Abort semantics 均已唯一化；workflow topology 不属于 public ABI；剩余仅 Host credential/composition wiring，不再有 blocking Decision implementation OPEN；
+- Decision v0 concrete implementation 已在 **BATTLE_V0_DECISION.md** 达到 **FROZEN FOR IMPLEMENTATION**：DeepSeek only、外部仅 `apiKey`、stable shell + internal DecisionWorkflow、固定 `deepseek-flash` + Responses API、当前 v0 workflow 每次 `decide()` 自包含 Call A + Call B、direct JSON Schema output、本地 parser、512 KiB final-request hard budget、60s/request timeout、no automatic retry、typed raw-HTTP transport、failure codes、并发与 Abort/timeout semantics 均已唯一化；workflow topology 不属于 public ABI；剩余仅 Host credential/composition wiring，不再有 blocking Decision implementation OPEN；
 - PlayerGuidance concrete contract/Host/InputTarget wiring 明确延期；架构上已要求未来通过 request-scoped typed DecisionWorkflow capability/data 扩展，不修改 Simulation-facing DecisionPort；
 - Host suspend/resume 来源到 `battle.pause()/resume()` 的具体 composition wiring。
 
