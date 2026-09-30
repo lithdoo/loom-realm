@@ -223,6 +223,8 @@ test("provider status, envelope, visible output, and network failures use the fr
     [{ type: "response", status: 200, bodyText: JSON.stringify({ object: "response", status: "incomplete", incomplete_details: { reason: "max_output_tokens" } }) }, "attempt_failure", "DECISION_PROVIDER_INCOMPLETE"],
     [{ type: "response", status: 200, bodyText: providerResponse("   ") }, "attempt_failure", "DECISION_OUTPUT_INVALID"],
     [{ type: "response", status: 200, bodyText: providerResponse("ignored", { output: [{ type: "function_call" }] }) }, "attempt_failure", "DECISION_PROVIDER_UNAVAILABLE"],
+    [{ type: "response", status: 200, bodyText: providerResponse("ignored", { output: [{ type: "web_search_call" }] }) }, "attempt_failure", "DECISION_PROVIDER_UNAVAILABLE"],
+    [{ type: "response", status: 200, bodyText: providerResponse("ignored", { output: [{ type: "future_unknown_item" }] }) }, "attempt_failure", "DECISION_PROVIDER_UNAVAILABLE"],
     [{ type: "reject", error: new Error("socket") }, "attempt_failure", "DECISION_PROVIDER_NETWORK"],
   ];
   for (const [step, category, code] of cases) {
@@ -232,11 +234,13 @@ test("provider status, envelope, visible output, and network failures use the fr
     assert.equal("metadata" in completion.error, false);
   }
 
-  const invariantTransport = new FakeDeepSeekTransport().enqueueResponse(422, "bad request");
-  await assert.rejects(
-    new DeepSeekDecision({ transport: invariantTransport }).decide(request(), new AbortController().signal),
-    /contract rejected with HTTP 422/,
-  );
+  for (const status of [400, 422]) {
+    const invariantTransport = new FakeDeepSeekTransport().enqueueResponse(status, "bad request");
+    await assert.rejects(
+      new DeepSeekDecision({ transport: invariantTransport }).decide(request(), new AbortController().signal),
+      new RegExp(`contract rejected with HTTP ${status}`),
+    );
+  }
 
   const callBIncomplete = new FakeDeepSeekTransport()
     .enqueueResponse(200, providerResponse("strategy"))
@@ -251,7 +255,9 @@ test("visible output extraction ignores reasoning and concatenates assistant out
     object: "response", status: "completed", model: "provider-version-not-alias",
     output: [
       { type: "reasoning", content: [{ type: "reasoning_text", text: "private" }] },
-      { type: "message", role: "assistant", content: [{ type: "output_text", text: "STRAT" }, { type: "output_text", text: "EGY" }] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "STRAT" }] },
+      { type: "reasoning", content: [{ type: "reasoning_text", text: "still private" }] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "EGY" }] },
     ],
   });
   const transport = new FakeDeepSeekTransport()
@@ -321,6 +327,15 @@ test("each physical call uses the 60s timeout and external abort wins the race",
     timerCallback();
     assert.deepEqual((await pendingTimeout).error, { category: "attempt_failure", code: "DECISION_PROVIDER_TIMEOUT" });
 
+    const callBTimeoutTransport = new FakeDeepSeekTransport().enqueueResponse(200, providerResponse("strategy"));
+    callBTimeoutTransport.enqueueDeferred();
+    const pendingCallBTimeout = new DeepSeekDecision({ transport: callBTimeoutTransport }).decide(request(), new AbortController().signal);
+    await flush();
+    assert.equal(callBTimeoutTransport.requests.length, 2);
+    assert.equal(timeoutDelay, 60_000);
+    timerCallback();
+    assert.deepEqual((await pendingCallBTimeout).error, { category: "attempt_failure", code: "DECISION_PROVIDER_TIMEOUT" });
+
     const abortTransport = new FakeDeepSeekTransport();
     abortTransport.enqueueDeferred();
     const controller = new AbortController();
@@ -358,6 +373,33 @@ test("same instance safely interleaves concurrent decide calls without identity 
 });
 
 test("final serialized request body accepts exactly 512 KiB and rejects one byte more before transport", async () => {
+  const correctionWithSkillId = (skillId) => request({
+    correction: {
+      rejectedPlan: { path: [], skill: { skillId, targetActorId: "enemy", minCoefficient: 1 } },
+      reason: "invalid_target",
+    },
+  });
+  const callABaseline = new FakeDeepSeekTransport()
+    .enqueueResponse(200, providerResponse("strategy"))
+    .enqueueResponse(200, providerResponse('{"path":[]}'));
+  await new DeepSeekDecision({ transport: callABaseline }).decide(correctionWithSkillId(""), new AbortController().signal);
+  const callAOverhead = encoder.encode(callABaseline.requests[0].bodyText).byteLength;
+  const exactCallASkillId = "x".repeat(MAX_BYTES - callAOverhead);
+
+  const exactCallA = new FakeDeepSeekTransport().enqueueResponse(200, providerResponse("strategy"));
+  const exactCallAResult = await new DeepSeekDecision({ transport: exactCallA }).decide(
+    correctionWithSkillId(exactCallASkillId), new AbortController().signal,
+  );
+  assert.equal(encoder.encode(exactCallA.requests[0].bodyText).byteLength, MAX_BYTES);
+  assert.deepEqual(exactCallAResult.error, { category: "session_fatal", code: "DECISION_CONTEXT_TOO_LARGE" });
+
+  const overCallA = new FakeDeepSeekTransport();
+  const overCallAResult = await new DeepSeekDecision({ transport: overCallA }).decide(
+    correctionWithSkillId(`${exactCallASkillId}x`), new AbortController().signal,
+  );
+  assert.deepEqual(overCallAResult.error, { category: "session_fatal", code: "DECISION_CONTEXT_TOO_LARGE" });
+  assert.equal(overCallA.requests.length, 0);
+
   const baseline = new FakeDeepSeekTransport()
     .enqueueResponse(200, providerResponse("x"))
     .enqueueResponse(200, providerResponse('{"path":[]}'));
@@ -389,6 +431,10 @@ test("constructor accepts only configured transport and package subpaths resolve
   assert.equal("createDeepSeekDecisionForTesting" in testing, false);
   assert.equal("Analyzer" in product, false);
   assert.equal("DecisionWorkflow" in product, false);
+  const decision = new DeepSeekDecision({ transport: new FakeDeepSeekTransport() });
+  assert.equal("setGuidance" in decision, false);
+  assert.equal("currentGuidance" in decision, false);
+  assert.equal("extensions" in decision, false);
 });
 
 test("real Simulation consumes DeepSeekDecision output and correction performs a fresh two-call workflow", async () => {

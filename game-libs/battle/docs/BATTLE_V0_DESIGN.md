@@ -1,6 +1,6 @@
 # Battle v0 文档索引与迁移说明
 
-> 状态：**Core gameplay 已冻结；Simulation gameplay baseline = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision + Decision availability circuit = FROZEN FOR IMPLEMENTATION**。DeepSeek concrete Decision、replaceable DecisionWorkflow boundary 与连续 provider failure 自动暂停 Battle 的 live Runtime policy 已唯一化；PlayerGuidance concrete contract 明确延期，真实实现/qualification 与 Host composition 仍属于后续工作。
+> 状态：**Core gameplay 已冻结；Simulation（含 Decision availability circuit）、Decision 与 Presentation 均为 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。DeepSeek concrete Decision、replaceable DecisionWorkflow boundary 与连续 provider failure 自动暂停 Battle 的 live Runtime policy 均已落地并完成 qualification；configured DeepSeekTransport 的 product credential/network wiring、PlayerGuidance concrete contract 与产品级 pause reason/retry UI 仍属于后续工作。
 >
 > 本文件不再重复定义 Battle 规则。2026-09-25 起，原单体 `BATTLE_V0_DESIGN.md` 已重构为“核心规范 / 数据契约 / 集成说明 / 测试矩阵”四份文档，以避免同一规则在多个章节重复维护。
 >
@@ -44,7 +44,7 @@
 
 Contracts 不重新定义玩法规则。
 
-### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — baseline QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION
+### 1.3 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) — Simulation Implementation Spec — FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED
 
 负责：
 
@@ -62,7 +62,7 @@ Contracts 不重新定义玩法规则。
 
 Simulation 实施细节不得重新定义 SPEC gameplay Rule，也不得改变 Presentation frozen ABI。
 
-### 1.4 [BATTLE_V0_DECISION.md](./BATTLE_V0_DECISION.md) — Decision Implementation Spec — FROZEN FOR IMPLEMENTATION
+### 1.4 [BATTLE_V0_DECISION.md](./BATTLE_V0_DECISION.md) — Decision Implementation Spec — FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED
 
 负责：
 
@@ -262,13 +262,13 @@ protection      命中后的有限免疫区间
 | `OPEN-CLOCK-001` | `TIME-004`：pause/background 冻结 Battle clock |
 | `OPEN-STALEMATE-001` | `RESULT-002`：v0 不设正式 stalemate/最大时长 |
 
-**当前 Core gameplay 没有未冻结 design OPEN；Simulation baseline 已 qualification，新增 Decision availability circuit 已冻结且待实现，不再存在需要 implementation agent 自行决策的 blocking OPEN。**
+**当前 Core gameplay 没有未冻结 design OPEN；Simulation（含 Decision availability circuit）、Decision 与 Presentation 均已完成 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED，不再存在需要 implementation agent 自行决策的 blocking OPEN。**
 
 仍存在的 OPEN 只属于不阻塞 Simulation/Presentation/Decision implementation 的外部 Contracts / Integration，例如非 Presentation Content subject/version、Host suspend/resume 来源映射，以及 configured DeepSeekTransport 的 credential/network/product capability handoff。PlayerGuidance concrete contract/Host wiring 明确延期；其 workflow extensibility requirement 已冻结，不是当前 implementation OPEN。Concrete Decision 的 shell/workflow boundary、v0 topology、model/API、prompt/context、structured output、parser、failure、timeout/retry、Abort、correction statelessness 与 testing 已集中冻结在 **BATTLE_V0_DECISION.md**，不再属于 implementation OPEN。BattleEffect、BattleSceneInit、RenderProjection、SkillEffectProjection、Presentation lifecycle/Browser ABI 已冻结；这些外部 OPEN 不得反向改变 Core/Decision/Presentation 已冻结语义。
 
 ## 8. 当前实施入口
 
-当前 **Core gameplay 已冻结，既有 Simulation baseline/DecisionPort Runtime 与 Presentation 已通过 closed-loop qualification；待完成的是 DeepSeekDecision + Simulation availability circuit delta、外部 serialization 与业务 Host composition；PlayerGuidance concrete capability 延期到后续独立阶段**。已完成/后续实施顺序：
+当前 **Core gameplay 已冻结，Simulation（含 Decision availability circuit）、DeepSeekDecision 与 Presentation 已通过 closed-loop qualification；待完成的是 configured DeepSeekTransport 的 product credential/network wiring、外部 serialization 与业务 Host composition，产品级 pause reason/retry UI 及 PlayerGuidance concrete capability 延期到后续独立阶段**。已完成/后续实施顺序：
 
 ```text
 1. 冻结/实现 Content serialization schema
@@ -280,13 +280,13 @@ protection      命中后的有限免疫区间
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. 按 FROZEN Presentation Agent contract 直接实现 PresentationPort + Browser Presentation（依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
-10. 按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16/§32 实现：
+10. 已按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16/§32 完成实现与 qualification：
     - DeepSeekDecision
     - simulation/tick.ts：DecisionHealthSignal + TickOutput.decisionHealthSignals
     - simulation/runtime.ts：live-only guard + threshold processing + checked(currentTick * 200) Tick-boundary pause + resume reset + replaySource bypass
     - simulation/replay.ts：schema不变，仅验证 ReplayDriver 不执行 live circuit
     - tests：T-DEC-023..036 + T-DDEC-*
-    完成 qualification 后再做 configured DeepSeekTransport / product Host E2E；PlayerGuidance 后续独立设计/实现
+    下一步做 configured DeepSeekTransport / product Host E2E 与产品级 pause reason/retry UI；PlayerGuidance 后续独立设计/实现
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。

@@ -151,6 +151,38 @@ test("T-DEC-023/025/026/027/033/035: third provider-neutral failure latches afte
   assert.deepEqual(await run, { type: "cancelled" });
 });
 
+test("T-DEC-024: an authority-valid completion resets the streak before Simulation rejects its Plan", async () => {
+  const live = liveRuntime();
+  const run = live.runtime.run();
+  await flush();
+  live.decision.fail(0, "before-reset-one");
+  live.decision.fail(1, "before-reset-two");
+  await flush();
+  live.clock.advance(200);
+  assert.equal(live.runtime.getSnapshot().status, "running");
+
+  live.clock.advance(200);
+  live.decision.complete(2, { path: [point(99, 99)] });
+  await flush();
+  live.clock.advance(200);
+  assert.equal(live.runtime.getSnapshot().status, "running");
+  assert.equal(live.decision.requests.length, 5, "the rejected Plan must create the normal correction request");
+
+  live.decision.fail(3, "after-reset-one");
+  live.decision.fail(4, "after-reset-two");
+  await flush();
+  live.clock.advance(200);
+  assert.equal(live.runtime.getSnapshot().status, "running", "two failures after the rejected completion remain below threshold");
+
+  live.clock.advance(200);
+  live.decision.fail(5, "after-reset-three");
+  await flush();
+  live.clock.advance(200);
+  assert.equal(live.runtime.getSnapshot().status, "paused", "the third failure after reset starts a fresh circuit trip");
+  live.runtime.cancel();
+  await run;
+});
+
 test("T-DEC-024/028/029: reducer emits success before rejection, no signal for stale/session-fatal, and keeps stable actor order", () => {
   const resolved = validateResolvedBattleDefinition(definition());
   const state = createInitialState(resolved);
@@ -171,6 +203,29 @@ test("T-DEC-024/028/029: reducer emits success before rejection, no signal for s
   assert.deepEqual(output.decisionHealthSignals, ["success"]);
   assert.equal(output.decisionRecords[0].consumeOutcome.type, "stale");
   assert.equal(output.decisionRecords[1].consumeOutcome.type, "rejected");
+
+  const staleState = createInitialState(resolved);
+  const staleRequests = new Map();
+  const staleActor = staleState.actors.get("a");
+  const currentCommand = ensureDecision(resolved, staleState, staleActor, [], "initial", 0);
+  staleRequests.set(currentCommand.request.requestId, currentCommand.request);
+  const staleRequest = {
+    ...currentCommand.request,
+    requestId: "stale-only-request",
+    generation: currentCommand.request.generation - 1,
+  };
+  staleRequests.set(staleRequest.requestId, staleRequest);
+  staleState.currentTick = 1;
+  staleState.status = "running";
+  const staleInbox = new DecisionInbox();
+  staleInbox.enqueue({ actorId: "a", completion: {
+    type: "failed", requestId: staleRequest.requestId, generation: staleRequest.generation,
+    error: { category: "attempt_failure", code: "opaque-stale-failure" },
+  } });
+  const staleOnly = processOneTick(resolved, staleState, new ScheduledEventQueue(), staleInbox, [], staleRequests);
+  assert.deepEqual(staleOnly.decisionHealthSignals, []);
+  assert.equal(staleOnly.decisionRecords[0].consumeOutcome.type, "stale");
+  assert.equal(staleActor.decision.requestId, currentCommand.request.requestId);
 
   const fatalState = createInitialState(resolved);
   const fatalRequests = new Map();
@@ -205,18 +260,33 @@ test("T-DEC-030/031: circuit resume resets the guard, while ordinary pause/resum
   const circuit = liveRuntime();
   const circuitRun = circuit.runtime.run();
   await flush();
-  circuit.decision.fail(0);
-  circuit.decision.fail(1);
+  circuit.decision.fail(0, "initial-provider-network");
+  circuit.decision.fail(1, "initial-provider-rate-limit");
   await flush();
   circuit.clock.advance(200);
   circuit.clock.advance(200);
-  circuit.decision.fail(2);
+  circuit.decision.fail(2, "initial-provider-unavailable");
   await flush();
   circuit.clock.advance(200);
   assert.equal(circuit.runtime.getSnapshot().status, "paused");
+
   circuit.runtime.resume();
+  assert.equal(circuit.runtime.getSnapshot().status, "running");
+
+  circuit.decision.fail(3, "post-resume-failure-one");
+  await flush();
   circuit.clock.advance(200);
   assert.equal(circuit.runtime.getSnapshot().status, "running", "one post-resume failure starts a new streak instead of re-tripping");
+
+  circuit.decision.fail(4, "post-resume-failure-two");
+  await flush();
+  circuit.clock.advance(200);
+  assert.equal(circuit.runtime.getSnapshot().status, "running", "two post-resume failures remain below the threshold");
+
+  circuit.decision.fail(5, "post-resume-failure-three");
+  await flush();
+  circuit.clock.advance(200);
+  assert.equal(circuit.runtime.getSnapshot().status, "paused", "the third post-resume failure trips a fresh circuit");
   circuit.runtime.cancel();
   await circuitRun;
 
