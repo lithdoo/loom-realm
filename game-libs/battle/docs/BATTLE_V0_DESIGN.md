@@ -280,7 +280,7 @@ protection      命中后的有限免疫区间
 7. 已完成渲染前置：抽取 `@loomrealm-game/tile-presentation`，迁移 Map 通用 tile viewport/layout primitive，并让 Map 切换到 shared implementation + regression coverage
 8. 按 FROZEN Presentation Agent contract 直接实现 PresentationPort + Browser Presentation（依赖 shared tile-presentation）
 9. 业务 Subsystem thin composition
-10. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 configured DeepSeekTransport / product Host E2E；PlayerGuidance 后续独立设计/实现
+10. 按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16 实现 DeepSeekDecision + availability circuit delta（仅 tick.ts health signals、runtime.ts live guard/Tick-boundary pause/Replay bypass），完成 T-DEC-023..036 与 T-DDEC-* qualification，再做 configured DeepSeekTransport / product Host E2E；PlayerGuidance 后续独立设计/实现
 ```
 
 真实 LLM 不是验证 Simulation 正确性的前置条件。
