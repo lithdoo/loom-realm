@@ -674,8 +674,8 @@ Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qu
 6. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
 7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
 8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-9. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 configured DeepSeekTransport / product Host E2E；PlayerGuidance 留到后续独立阶段
-10. Presentation 与 Simulation 已完成：验证 package-lock / build / unit / Browser E2E / package dry-run / Simulation subpath import；后续真实 provider 与 Host composition 仍需各自的集成 qualification
+9. 按 BATTLE_V0_DECISION.md + BATTLE_V0_SIMULATION.md §10/§16/§32 实现 DeepSeekDecision 与 Simulation availability circuit delta（tick.ts health signals；runtime.ts live guard/Tick-boundary pause/resume reset/Replay bypass），完成 T-DEC-023..036 + T-DDEC-* qualification，再做 configured DeepSeekTransport / product Host E2E；PlayerGuidance 留到后续独立阶段
+10. Presentation 与 Simulation baseline 已完成；本阶段完成 circuit/Decision 后重新验证 package-lock / build / unit / Browser E2E / package dry-run / Simulation+Decision subpath import；后续真实 configured transport 与 Host composition 再做集成 qualification
 ```
 
 Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-specific DecisionFailure schema；它只依赖已冻结的 Presentation contracts/ports 与 synthetic Projection fixtures。
