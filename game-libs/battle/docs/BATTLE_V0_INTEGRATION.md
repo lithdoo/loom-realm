@@ -651,7 +651,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qualification；DeepSeekDecision 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION。PlayerGuidance 明确延期，不是当前 Decision implementation blocker；apiKey/Host composition 仍属于外部集成工作。
+Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qualification；DeepSeekDecision 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION。PlayerGuidance 明确延期，不是当前 Decision implementation blocker；configured DeepSeekTransport 的 credential/network/product capability handoff 与 Host lifecycle composition 仍属于外部集成工作。
 
 已验证工程状态：
 
@@ -671,7 +671,7 @@ Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qu
 6. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
 7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
 8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-9. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 apiKey / Host E2E；PlayerGuidance 留到后续独立阶段
+9. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 configured DeepSeekTransport / product Host E2E；PlayerGuidance 留到后续独立阶段
 10. Presentation 与 Simulation 已完成：验证 package-lock / build / unit / Browser E2E / package dry-run / Simulation subpath import；后续真实 provider 与 Host composition 仍需各自的集成 qualification
 ```
 
@@ -681,7 +681,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
-- **INTEGRATION-OPEN-003**：DeepSeek Decision implementation 已由 BATTLE_V0_DECISION.md 冻结；Integration 只剩 apiKey 的 Host secret source、DeepSeekDecision construction/injection 与缺失 credential 的产品级 wiring；
+- **INTEGRATION-OPEN-003**：DeepSeek Decision protocol/workflow 已由 BATTLE_V0_DECISION.md 冻结；Integration 只剩 credential/network physical realization、configured DeepSeekTransport capability handoff 与缺失 capability 的产品级 wiring；
 - **INTEGRATION-OPEN-004**：PlayerGuidance exact contract / Host/InputTarget wiring 明确延期；DecisionWorkflow 扩展边界已冻结，因此该未来功能不得要求重构 Simulation-facing DecisionPort；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
