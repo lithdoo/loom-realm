@@ -383,7 +383,20 @@ PAUSED
 → schedule next wake
 ~~~
 
-普通 external pause 不 abort Decision；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。**Decision circuit trip 是唯一额外要求 abort all active Decision requests 的 pause source**，exact behavior 见 §10。
+普通 external pause 与 Decision circuit pause 都**不 abort Decision**；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。
+
+两者复用同一内部 PAUSED transition（cancel wake → presentation.pause() → status=PAUSED），但 logical-time cut 不同：
+
+~~~text
+external pause
+→ freeze at current logicalElapsed
+
+decision circuit trip after Tick N
+→ freeze at the committed Tick-N boundary
+→ any not-yet-processed catch-up backlog is treated as paused wall time
+~~~
+
+因此 circuit 如果在 late-wake catch-up 的 Tick N 触发，必须立即停止 catch-up；resume 后从 Tick N 的冻结位置继续，**不得补跑 circuit pause 前尚未处理的 wall-time backlog**。
 
 pause期间 wall time 不进入 logicalElapsed，不产生 pause catch-up。
 
@@ -652,7 +665,7 @@ ABORTED
 
 这些 concrete code 的含义。
 
-request-scoped AbortSignal 由 Runtime lifecycle/generation ownership 控制。Runtime 主动 abort 一个 request 时必须先撤销/失效该 request 的 authority；因此随后到达的 `DECISION_ABORTED` completion 只会被 existing stale/lifecycle fence 丢弃，不需要在 circuit 中按 code 特判。
+request-scoped AbortSignal 仍只服务于既有 request lifecycle invalidation（例如 damaging hit/death、cancel/close、session fatal、request replacement）。**Availability circuit pause 本身不 abort request，也不改变 request authority**，因此 Runtime 不需要在 circuit 中解释 `DECISION_ABORTED` code。
 
 任意 authority-valid `DecisionCompletion.completed` 在进入 gameplay Plan validation前即把 consecutive failure streak 重置为 0。即使该 Plan 随后被 Simulation validator reject 并产生 correction，也不算 Decision service failure，因为 Decision pipeline 已正常返回结构有效的候选 Plan。
 
@@ -704,7 +717,7 @@ stale / lifecycle-invalid
 
 ReplayDriver 即使重放 recorded DecisionCompletion，也**不得启用 live Decision availability circuit**；Replay 不因历史 provider availability 等待人工 resume。
 
-### 10.3 Circuit trip → automatic Battle PAUSED
+### 10.3 Circuit trip → existing PAUSED lifecycle
 
 shell 按 stable health-signal 顺序更新 guard：
 
@@ -718,35 +731,56 @@ failure
      consecutiveFailures += 1
      if consecutiveFailures >= 3:
        circuitOpen = true
-       trip
+       mark circuitPausePending
 ~~~
 
-一旦本 Tick已 trip，`circuitOpen` latch 到 explicit `resume()`；同一 Tick后续 success signal 不得自动关闭 circuit。
+一旦本 Tick已达到 threshold，`circuitOpen` latch 到 explicit `resume()`；同一 Tick后续 success signal不得自动关闭 circuit。
 
-trip 的 exact behavior：
+**Circuit 不建立第二套 pause state machine。** 它只在当前 Tick shell side effects 完成后进入既有 `PAUSED` lifecycle。
+
+exact behavior：
 
 ~~~text
 current Tick synchronous transaction finishes
-→ suppress all not-yet-issued DecisionPort request commands from this Tick
-→ revoke authority of all still-active Decision requests
-→ best-effort abort their request-scoped AbortControllers
-→ cancel/retain no next scheduler wake
-→ call presentation.pause() through the normal Runtime pause boundary
-→ if Presentation pause classified fatal: finish(presentation failure)
-→ else status = PAUSED
-→ issue no new Decision request while PAUSED
+→ enqueue events / append Replay / render / terminal check
+→ process health signals and latch circuitPausePending
+→ invoke this Tick's already-produced valid Decision request commands normally
+→ if circuitPausePending:
+     enter the existing Runtime PAUSED transition
+     using the current committed Tick boundary as the logical-time cut
+     cancel/retain no next scheduler wake
+     call presentation.pause()
+     if Presentation pause classified fatal:
+       finish(presentation failure)
+     else:
+       status = PAUSED
+→ while PAUSED, process no further Tick
 ~~~
 
-trip 不回滚本 Tick已经提交的 gameplay facts。也就是说，第三个 failure 在 Tick N 被合法消费后，Tick N仍是完整 deterministic transaction；从 Tick N 结束后开始冻结 logical clock。
+因此 circuit trip **不会**：
+
+- suppress 本 Tick已经生成的合法 Decision command；
+- 清除 Actor `decision: thinking`；
+- 修改 `decisionGeneration` / requestId / attempt；
+- revoke 或 abort in-flight Decision request；
+- 清空 Decision Inbox；
+- 删除 ScheduledEventQueue 中的 future gameplay event。
+
+本 Tick新调用或此前已 in-flight 的 Decision request都可以在现实时间继续完成；completion 仍只 enqueue。因为 PAUSED 期间没有 reducer Tick，它们不会被消费、不会接受 Plan、不会启动 Action；显式 resume 后由第一个真实 Tick按既有 requestId/generation fence正常消费。
+
+如果 circuit 在 late-wake catch-up 中的 Tick N trip，Runtime 必须在 Tick N 后停止该 catch-up，并把 pause logical cut 固定在**已提交的 Tick N 边界**；pause 前尚未处理的 wall-time backlog 不在 resume 后补算。
+
+这个选择保证 circuit 是纯 operational pause policy：它不改变 live Decision request/generation trace，因此 Replay 可以完全不执行 availability circuit，而仍复现相同的 requestId、generation、Decision records 与 consume outcomes。
 
 Circuit pause 与普通 pause 共享：
 
 - Battle logical time冻结；
 - wall time不进入 logicalElapsed；
+- completion 可以进入 Inbox但 pause期间不消费；
 - resume后不做 pause catch-up；
 - HP/tile/action/protection/timers 在 pause 期间不推进。
 
-区别是 circuit trip 额外撤销并 abort 所有 active Decision requests，防止 provider 不可用时继续消耗请求。它们之后的 completion 已经 lifecycle-invalid，因此只走 stale fence，不产生新的 availability signal，也不能递归触发第二次 trip。
+两者唯一与 availability 相关的差异是：circuit pause 同时保持 `circuitOpen=true`，直到 explicit `resume()` 清零 guard。
 
 ### 10.4 Explicit resume
 
@@ -999,16 +1033,16 @@ Runtime shell在 Tick同步结束后按唯一顺序提交 side effects：
 4. if Tick produced terminal candidate
    └─ finish(candidate), suppress Decision commands
 5. process decisionHealthSignals in their stable phase-9 completion order
-   └─ if circuit trips:
-        enter decision-circuit PAUSED
-        abort active Decision requests
-        suppress this Tick's not-yet-issued Decision commands
-        do not schedule next wake
-6. otherwise invoke DecisionPort for RequestDecisionCommand
-7. schedule/retain next wake
+   └─ threshold reached → latch circuitPausePending
+6. invoke DecisionPort for this Tick's valid RequestDecisionCommand
+7. if circuitPausePending:
+     enter existing PAUSED transition at current committed Tick boundary
+     do not schedule next wake
+   else:
+     schedule/retain next wake
 ~~~
 
-因此 terminal Tick、render-fatal Tick、Decision-circuit-trip Tick都不会在结果已经确定或 Runtime 已冻结后额外发起新的 Decision provider call。future events 即使已入 queue，也会在 PAUSED 时保持未消费、在 terminal finish 时停止/清空；circuit pause 不删除 future gameplay events，只冻结其 logical due time。
+因此 terminal Tick / render-fatal Tick仍会 suppress尚未发出的 Decision command；**Decision-circuit-trip Tick不会**。Circuit 只阻止后续 Tick继续推进，不重写当前 Tick已经建立的 Decision lifecycle。future events 在 PAUSED 时保持未消费、terminal finish时停止/清空；Decision completions在 PAUSED时可继续进入 Inbox。
 
 ## 17. TICK-001 implementation mapping
 
