@@ -27,7 +27,7 @@
 
 三层运行职责：
 
-- **Decision / Plan**：消费 Observation/Constraints/Guidance，产生 `PlanSubmission`。Mock/Script/Manual/Random/LLM 可以替换。
+- **Decision / Plan**：v0 消费 Observation/Constraints 并产生 `PlanSubmission`；未来 PlayerGuidance 只能通过 DecisionWorkflow 的 request-scoped typed capability/data 扩展，不改变 Simulation-facing DecisionPort。Mock/Script/Manual/Random/LLM 可以替换。
 - **Simulation / Execute**：完整 Battle Runtime。自己拥有 Battle clock、200 ms scheduler、event queue、Tick reducer、Decision lifecycle、accepted-plan execution、Battle State、Result 与 Replay。
 - **Presentation / Present**：初始化 Map/Actor 视图并表现 Simulation 已决定的 movement/turn/effect/state；自己拥有插值、camera、viewport 和视觉资源生命周期。
 
@@ -337,8 +337,15 @@ DeepSeekDecision
   external config = apiKey only
   model = deepseek-flash
   API = POST https://api.deepseek.com/responses
-  normal decide() = Call A + Call B
+
+  public Battle-facing call:
+    decide(request, signal)
+
+  internal v0 workflow:
+    Call A + Call B
 ```
+
+两次 provider call 属于当前 v0 `DecisionWorkflow` implementation，不属于 Host/Simulation public contract。Host 不得调用或依赖 Analyze/Strategize/Materialize stage；未来 workflow 拆分、增加 Guidance、增加分支或改变 provider-call topology 时，外部仍通过同一个 `DecisionPort.decide()` 使用 Decision。
 
 Decision module 只负责“一次 request 如何得到一次 Plan/failure completion”。`decisionGeneration`、何时创建 Decision Request、Decision Inbox、stale generation fencing、Plan validation、Simulation correction、bounded active/pending accepted-plan pipeline 与 Replay consume/accept Tick 都继续属于 Simulation Runtime lifecycle。
 
@@ -404,23 +411,66 @@ Decision implementation 本身已经没有 blocking provider OPEN。当前仅剩
 
 这些 wiring 不得扩张 `DecisionPort` 或修改 frozen Decision/Simulation semantics。
 
-## 7. Player Guidance
+## 7. PlayerGuidance — future capability, not implemented in v0
 
-未来玩家作为“训练师”给我方下一次 Decision 提供临时 Guidance。
+PlayerGuidance **不进入当前 DeepSeekDecision v0 implementation scope**。本阶段不冻结 Guidance 的 TypeScript contract、UI/InputTarget、消费时机或具体卡牌数据。
 
-Guidance：
+但架构扩展方向已冻结：
 
-- 必须从授权的 Host/InputTarget 路径进入；
-- 只成为下一次 Decision Observation/context；
-- 不直接修改 HP、position、protection、damage；
-- 不暂停对手时间轴；
-- 不保证 AI 一定遵从。
+~~~text
+Simulation
+  → DecisionPort.decide(request, signal)
+        ↓
+DeepSeekDecision stable shell
+        ↓
+DecisionWorkflow
+        ├─ current v0:
+        │    Analyze + Strategize
+        │    → Materialize
+        │
+        └─ future candidate:
+             Analyze
+             → request-scoped PlayerGuidance
+             → Strategize
+             → Materialize
+~~~
 
-产品方向仍是四张预配置 Guidance 卡。v0 Core 开发阶段可以固定 Guidance 或完全跳过。
+未来加入 PlayerGuidance 时必须满足：
 
-### INTEGRATION-OPEN-004 — Guidance Host Wiring — OPEN
+- 不修改 Simulation Tick/reducer 与 gameplay authority；
+- 不要求修改 `DecisionPort.decide(request, signal)`；
+- 不增加 `DeepSeekDecision.setGuidance()` / `currentGuidance` 等跨 request mutable state；
+- 不依赖 provider conversation/thread 隐藏状态；
+- Guidance 只作为 advisory/untrusted Decision workflow data，不直接修改 HP、position、protection、damage、BattleResult；
+- Guidance 的来源必须是授权 Host/InputTarget capability；
+- Guidance 必须与具体 workflow run/request 明确关联，不能通过“最近一次全局 Guidance”隐式绑定；
+- v0 不预建 generic extension/plugin bag；未来出现真实需求后再冻结 typed Guidance capability。
 
-InputTarget / Host / Guidance exact contract 尚未冻结。
+因此当前状态为：
+
+~~~text
+PlayerGuidance implementation:
+DEFERRED / NOT IN V0
+
+workflow extensibility reservation:
+FROZEN
+
+exact PlayerGuidance contract:
+FUTURE / NOT FROZEN
+~~~
+
+### INTEGRATION-OPEN-004 — Future PlayerGuidance contract / Host wiring — DEFERRED
+
+未来需要 PlayerGuidance 时再冻结：
+
+- authorized Host/InputTarget source；
+- request association / consumption / expiry；
+- ally/enemy applicability；
+- composition capability shape；
+- UI/card model；
+- failure/absence semantics。
+
+这些未来选择不得要求重构 Simulation 或把 workflow stage 暴露成 Battle public API。
 
 ## 8. Frame / Abort / Subsystem 生命周期
 
@@ -581,7 +631,7 @@ collisionRetryCount
 
 ## 12. Workspace / Build 状态
 
-Battle v0 Presentation 与 Simulation 均已完成 closed-loop qualification；Core Simulation、DecisionPort/测试 doubles、完整 Battle Runtime、Replay 与 package export 均已实现。真实 provider、Guidance 与 Host composition 仍属于外部集成工作。
+Battle v0 Presentation 与既有 Simulation baseline 均已完成 closed-loop qualification；DeepSeekDecision 与 Decision availability circuit 已 FROZEN FOR IMPLEMENTATION。PlayerGuidance 明确延期，不是当前 Decision implementation blocker；apiKey/Host composition 仍属于外部集成工作。
 
 已验证工程状态：
 
@@ -601,7 +651,7 @@ Battle v0 Presentation 与 Simulation 均已完成 closed-loop qualification；C
 6. 已完成：@loomrealm-game/tile-presentation layout 抽取 + Map regression
 7. 已完成：按 BATTLE_V0_PRESENTATION.md 的 Agent execution contract 完整实现并闭环验证 Presentation
 8. 在业务 Subsystem 中做薄 composition：构造三层并映射 Frame/Host lifecycle
-9. 接真实 LLM Decision Adapter，再接 Guidance / Host
+9. 按 BATTLE_V0_DECISION.md 实现 DeepSeekDecision + availability circuit，再完成 apiKey / Host E2E；PlayerGuidance 留到后续独立阶段
 10. Presentation 与 Simulation 已完成：验证 package-lock / build / unit / Browser E2E / package dry-run / Simulation subpath import；后续真实 provider 与 Host composition 仍需各自的集成 qualification
 ```
 
@@ -612,7 +662,7 @@ Presentation implementation 不需要等待真实 LLM、Guidance 或 provider-sp
 Presentation blocking integration OPEN 已清零。仍未冻结的集成项只包括：
 
 - **INTEGRATION-OPEN-003**：DeepSeek Decision implementation 已由 BATTLE_V0_DECISION.md 冻结；Integration 只剩 apiKey 的 Host secret source、DeepSeekDecision construction/injection 与缺失 credential 的产品级 wiring；
-- **INTEGRATION-OPEN-004**：Guidance Host/InputTarget wiring；
+- **INTEGRATION-OPEN-004**：PlayerGuidance exact contract / Host/InputTarget wiring 明确延期；DecisionWorkflow 扩展边界已冻结，因此该未来功能不得要求重构 Simulation-facing DecisionPort；
 - Host/Runtime Control 的具体 suspend/resume 来源如何映射到 `battle.pause()/resume()`；Decision circuit 的 automatic pause / explicit resume Runtime semantics 已冻结，产品层如何展示其 pause reason/重试 UI 仍属 integration wiring；Presentation 的 pause/resume 行为本身已冻结；
 - Runtime 开始后还需处理 package-lock / build 验证。
 
