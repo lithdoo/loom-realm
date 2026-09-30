@@ -723,6 +723,8 @@ DECISION_CONTEXT_TOO_LARGE
 
 Provider 原始 response body、credential、完整 prompt、完整 strategy memo 不进入 BattleResult、Replay 或 public DecisionFailure.metadata。
 
+DeepSeekDecision v0 产生的正常 DecisionFailure 一律省略 metadata；provider-specific diagnostics 只留在 non-authoritative diagnostics/test 层。
+
 ## 12. Timeout / retry / AbortSignal
 
 ### 12.1 Timeout
@@ -800,28 +802,61 @@ Decision implementation 不得：
 
 ## 14. Internal transport seam
 
-v0 不创建 generic provider abstraction，但需要一个 DeepSeek-specific internal test seam，例如：
+v0 不创建 generic provider abstraction，但需要一个 DeepSeek-specific internal/test seam。
+
+生产 public constructor 仍然只有：
 
 ~~~ts
-interface DeepSeekTransport {
-  respond(
-    request: DeepSeekResponseRequest,
+new DeepSeekDecision({ apiKey })
+~~~
+
+内部 seam 固定为：
+
+~~~ts
+export interface DeepSeekTransport {
+  createResponse(
+    body: Readonly<Record<string, unknown>>,
     signal: AbortSignal,
-  ): Promise<DeepSeekResponse>;
+  ): Promise<unknown>;
 }
 ~~~
 
-它属于 decision/ internal implementation/testing seam，不是 product provider Port。
+production transport：
 
-默认实现执行真实 HTTPS；Fake transport 用于 deterministic tests。
+- 捕获 constructor 注入的 apiKey；
+- 固定 POST https://api.deepseek.com/responses；
+- 添加 Authorization / Content-Type；
+- 把 §4 frozen body 原样作为 JSON body；
+- 返回 parsed provider response object；
+- 不做 retry；
+- 不泄漏 credential。
 
-@loomrealm-game/battle/decision/testing 可以导出：
+测试 export：
 
-- FakeDeepSeekTransport；
-- transport response builders；
-- prompt/schema fixtures required by tests。
+~~~ts
+export function createDeepSeekDecisionForTesting(
+  transport: DeepSeekTransport,
+): DecisionPort;
+~~~
 
-测试 seam 不得让生产调用方选择 provider/model/baseUrl。
+这个 factory 只存在于：
+
+~~~text
+@loomrealm-game/battle/decision/testing
+~~~
+
+生产 ./decision export 不暴露 transport injection。
+
+./decision/testing 还应导出 FakeDeepSeekTransport。Fake 至少必须支持：
+
+- 记录每次 request body；
+- script resolve(response)；
+- script reject(error)；
+- deferred resolve/reject；
+- 观察传入 AbortSignal；
+- 模拟忽略 abort 后迟到 resolve。
+
+测试 seam 不得让生产调用方选择 provider/model/baseUrl，也不得成为新的 gameplay Port。
 
 ## 15. Diagnostics
 
