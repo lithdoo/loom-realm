@@ -47,6 +47,7 @@ README 与 DESIGN 索引不覆盖上述规范。
 - 使用 Battle 的业务 Subsystem 只负责构造三层、注入 Host capability 和映射 Frame/pause/abort 生命周期，不负责逐 Tick 实施 Battle；
 - 1 Tick = 200 ms，积压 Tick 顺序补算；
 - Decision 每次调用只完成一次 Plan/failure attempt；completion 不带 gameplay timing/dueTick，只即时进入 Simulation-owned inbox；Tick reducer 在 snapshot 边界消费，Simulation 拥有 generation、stale 判定、Plan validation、correction retry 与 bounded active/pending accepted-plan pipeline；
+- live Runtime 对连续 Decision service failure 使用固定 circuit breaker：连续 3 个 counted LLM/provider failure 后自动进入 PAUSED、冻结 Battle clock、abort active Decision 并停止新请求；必须显式 `battle.resume()` 才恢复；session_fatal 仍直接终止 Battle，Replay 不执行该 live availability policy；
 - accepted Plan 采用逐 Action materialization：多格 path 只 materialize 当前一格；reservation 成功并 move_start 时消费该 path intent，但下一格必须等当前 `move_complete` 成功后才重新判断并尝试；未 materialize 的后续 intent 不产生 future event；
 - Decision 与 Action 可以流水重叠，但只有当前 Plan 的 future intent 已全部 materialize 后才能预取下一 Decision；v0 最多保留一份 pending accepted plan，不建立无界 Plan FIFO；
 - 单格移动使用 committed origin + next-tile reservation + move_complete 原子提交，但 active step 可被 damaging hit 立即中断；
