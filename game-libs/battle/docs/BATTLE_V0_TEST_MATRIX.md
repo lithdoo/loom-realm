@@ -2,7 +2,7 @@
 
 > 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..032 尚待实现后 qualification。
 >
-> 尚未冻结的真实 LLM provider、Guidance/Host wiring 不在本矩阵中被实现代码自行假设。
+> DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
 ## 1. Architecture / Authority
 
@@ -224,12 +224,16 @@
 | T-DDEC-020 | DECISION §12 | Call B 中 abort 且 transport忽略 | DeepSeekDecision 本地立即settle once为DECISION_ABORTED，不等待transport；迟到resolve/reject丢弃且不得产生第二completion |
 | T-DDEC-021 | DECISION §12.1 | 单个 provider request 超过 60s | attempt_failure DECISION_PROVIDER_TIMEOUT；不是 Battle gameplay deadline/dueTick |
 | T-DDEC-022 | DECISION §14 | FakeDeepSeekTransport | 可脚本化 success/HTTP/error/incomplete/abort/late resolve，不允许测试 seam 改 provider/model/baseUrl |
-| T-DDEC-023 | DECISION §17.3 | real Simulation + DeepSeekDecision(Fake transport) | initial request 两次 provider call→Plan→accept；existing Tick/Inbox/Replay semantics 不变 |
+| T-DDEC-023 | DECISION §18.3 | real Simulation + DeepSeekDecision(Fake transport) | initial request 两次 provider call→Plan→accept；existing Tick/Inbox/Replay semantics 不变 |
 | T-DDEC-024 | DECISION §17.3 | first Plan gameplay-invalid | Simulation 发 correction decide()；新 request 再两次 provider call；attempt1 invalid 后按 frozen generation rule 结束 |
-| T-DDEC-025 | DECISION §17.4 | credential-gated real-provider smoke | 可手动验证 Call A non-empty + Call B structured + local parser；普通 CI 不访问 DeepSeek |
-| T-DDEC-026 | DECISION §18 | package qualification | npm run test:battle 与 npm pack dry-run 通过；./decision 与 ./decision/testing 可解析 |
+| T-DDEC-025 | DECISION §18.4 | credential-gated real-provider smoke | 可手动验证 Call A non-empty + Call B structured + local parser；普通 CI 不访问 DeepSeek |
+| T-DDEC-026 | DECISION §19 | package qualification | npm run test:battle 与 npm pack dry-run 通过；./decision 与 ./decision/testing 可解析 |
 | T-DDEC-027 | DECISION §2 | apiKey 为空或仅 whitespace | constructor 同步 reject；不得发网络请求 |
 | T-DDEC-028 | DECISION §10–11 | response.status=failed 且无已知 auth/quota/rate/context 分类 | attempt_failure DECISION_PROVIDER_UNAVAILABLE；不读取/保存 reasoning_text |
+| T-DDEC-029 | DECISION §2.1/§4 | production caller 构造 DeepSeekDecision 并调用 decide | caller 只依赖 DecisionPort/DeepSeekDecision；production export 不暴露 analyze/strategize/materialize 或 workflow stage API |
+| T-DDEC-030 | DECISION §2.1/§4 | v0 workflow 内部执行 Call A + Call B | exactly two calls 仍是当前 workflow acceptance；测试不得把 call count 写成 Simulation/Host ABI |
+| T-DDEC-031 | DECISION §17 | 检查 v0 PlayerGuidance reservation | v0 不存在 setGuidance/currentGuidance/provider-thread Guidance hidden state，也不增加 generic extensions bag；existing apiKey-only product path保持成立 |
+| T-DDEC-032 | DECISION §17 | future-workflow architecture fixture/structural review | workflow 可在不修改 DecisionPort 与 Simulation wiring 的前提下由 Analyze+Strategize→Materialize 演进为 Analyze→Guidance→Strategize→Materialize；exact future Guidance type 不在 v0 实现中伪造 |
 
 ## 9. Control Plane / Replay
 
@@ -312,7 +316,7 @@
 
 当前 Core gameplay 的 6 个原 OPEN 均已冻结，因此不再保留“没有 Expected 的核心测试占位”。
 
-Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。剩余 OPEN 只涉及非 Presentation Content 统一 schema、Guidance/Host wiring 与 apiKey 产品级 credential composition；这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
+Presentation blocking OPEN 已清零，§10 已给出 frozen Presentation acceptance；Decision implementation acceptance 已在 §8.1 冻结。PlayerGuidance concrete contract/wiring 明确延期，但 DecisionWorkflow extensibility boundary 已冻结；剩余 OPEN 只涉及非 Presentation Content 统一 schema、未来 Guidance/Host wiring 与 apiKey 产品级 credential composition，这些不得反向改变已冻结的 Core/Decision/Presentation Expected。
 
 ## 13. 接真实 LLM 前的最低 Gate
 
