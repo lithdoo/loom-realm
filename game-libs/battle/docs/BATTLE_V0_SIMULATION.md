@@ -360,25 +360,30 @@ wakeCancel = clock.schedule(delayMs, wake)
 
 Pause：
 
-```text
+~~~text
 RUNNING
 → accumulatedRunningMs += now - runningAnchorMs
 → cancel wake
 → call presentation.pause() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else status = PAUSED
-```
+~~~
 
 Resume：
 
-```text
+~~~text
 PAUSED
+→ if decision availability circuitOpen:
+     consecutiveFailures = 0
+     circuitOpen = false
 → call presentation.resume() inside Runtime call boundary
 → if classified sync fatal: finish(presentation failure)
 → else runningAnchorMs = now
 → status = RUNNING
 → schedule next wake
-```
+~~~
+
+普通 external pause 不 abort Decision；Decision completion 可以在 pause期间进入 Inbox并等待后续 Tick消费。**Decision circuit trip 是唯一额外要求 abort all active Decision requests 的 pause source**，exact behavior 见 §10。
 
 pause期间 wall time 不进入 logicalElapsed，不产生 pause catch-up。
 
@@ -592,20 +597,176 @@ Plan path 的第一步 adjacency/static-terrain validation 从 `planningOrigin` 
 
 Decision completion被 reducer消费后，对应 `thinking` 被清除；callback本身不修改该字段。
 
-## 10. Decision failure classification
+## 10. Decision failure classification / live availability circuit
 
-Provider-specific code/metadata 可以继续由 Integration定义，但 Simulation 必须只看到两个 authority category：
+Simulation 仍只接受两个 Decision authority category：
 
-```ts
+~~~ts
 type DecisionFailureCategory =
   | "attempt_failure"
   | "session_fatal"
-```
+~~~
 
-- `attempt_failure`：结束当前 attempt/generation，不终止 Battle；最早下一逻辑 Tick重新 Decision；
-- `session_fatal`：Runtime terminal candidate = `BattleResult.failure { source: "decision" }`。
+- `session_fatal`：立即成为 Runtime terminal candidate = `BattleResult.failure { source: "decision" }`；不进入 circuit breaker；
+- `attempt_failure`：结束当前 attempt/generation；是否计入 live Decision availability streak 取决于 concrete Decision code。
 
-Provider timeout默认属于 attempt_failure，除非 concrete adapter明确配置为 session fatal；该基础设施配置不得改变 gameplay Tick timing。
+### 10.1 Counted consecutive LLM failures
+
+Battle v0 live Runtime 固定：
+
+~~~text
+MAX_CONSECUTIVE_DECISION_FAILURES = 3
+~~~
+
+以下 DeepSeekDecision attempt failure code 计入连续失败：
+
+~~~text
+DECISION_PROVIDER_NETWORK
+DECISION_PROVIDER_TIMEOUT
+DECISION_PROVIDER_RATE_LIMITED
+DECISION_PROVIDER_UNAVAILABLE
+DECISION_PROVIDER_REFUSED
+DECISION_PROVIDER_INCOMPLETE
+DECISION_OUTPUT_INVALID
+~~~
+
+以下不计入：
+
+- `DECISION_ABORTED`；
+- stale/lifecycle-fenced completion；
+- DecisionPort invariant reject/throw；
+- Simulation `PlanRejectReason`；
+- dynamic accepted-plan execution failure；
+- `session_fatal`。
+
+任意 authority-valid `DecisionCompletion.completed` 在进入 gameplay Plan validation前即表示 provider pipeline 成功，必须把 consecutive failure streak 重置为 0。即使该 Plan 随后被 Simulation reject 并产生 correction，也不计作 LLM failure。
+
+同一个 Tick snapshot 内 completion 已按 actorId → requestId stable order处理；availability signal 使用相同顺序。因此“连续”的定义是：
+
+~~~text
+live authority-valid Decision completion consumption order
+~~~
+
+不得按 Promise wall-clock resolve order计数。
+
+### 10.2 Operational guard，不属于 gameplay / Replay state
+
+Live Runtime shell 维护：
+
+~~~ts
+type DecisionAvailabilityGuard = {
+  consecutiveFailures: number
+  circuitOpen: boolean
+}
+~~~
+
+它是 operational control state：
+
+- 不属于 `BattleState` gameplay facts；
+- 不进入 `BattleSnapshot`；
+- 不进入 `ReplayRecord`；
+- 不参与 deterministic Replay；
+- 不生成 gameplay Tick/dueTick；
+- 不修改 Actor generation/HP/tile/action 规则。
+
+phase 9 对 authority-valid Decision completion 产生 shell-only health signal：
+
+~~~text
+completed
+→ success
+
+counted attempt_failure
+→ counted_failure
+
+DECISION_ABORTED / stale
+→ no signal
+
+session_fatal
+→ terminal candidate
+~~~
+
+ReplayDriver 即使重放 recorded DecisionCompletion，也**不得启用 live Decision availability circuit**；Replay 不因历史 provider availability 等待人工 resume。
+
+### 10.3 Circuit trip → automatic Battle PAUSED
+
+shell 按 stable health-signal 顺序更新 guard：
+
+~~~text
+success
+→ if circuitOpen == false:
+     consecutiveFailures = 0
+
+counted_failure
+→ if circuitOpen == false:
+     consecutiveFailures += 1
+     if consecutiveFailures >= 3:
+       circuitOpen = true
+       trip
+~~~
+
+一旦本 Tick已 trip，circuitOpen latch 到 explicit `resume()`；同一 Tick后续 success signal 不得自动关闭 circuit。
+
+trip 的 exact behavior：
+
+~~~text
+current Tick synchronous transaction finishes
+→ suppress all not-yet-issued DecisionPort request commands from this Tick
+→ cancel/retain no next scheduler wake
+→ call presentation.pause() through the normal Runtime pause boundary
+→ if Presentation pause classified fatal: finish(presentation failure)
+→ else status = PAUSED
+→ best-effort abort all still-active request-scoped Decision AbortControllers
+→ issue no new Decision request while PAUSED
+~~~
+
+trip 不回滚本 Tick已经提交的 gameplay facts。也就是说，第三个 counted failure 在 Tick N 被合法消费后，Tick N仍是完整 deterministic transaction；从 Tick N 结束后开始冻结 logical clock。
+
+Circuit pause 与普通 pause 共享：
+
+- Battle logical time冻结；
+- wall time不进入 logicalElapsed；
+- resume后不做 pause catch-up；
+- HP/tile/action/protection/timers 在 pause 期间不推进。
+
+区别是 circuit trip 额外 abort 所有 active Decision requests，防止 provider 不可用时继续消耗请求。
+
+这些 circuit-triggered abort 的 `DECISION_ABORTED` completion 不计入 failure streak，也不能递归触发第二次 trip。
+
+### 10.4 Explicit resume
+
+Decision circuit **不自动恢复**，不使用 retry timer/cooldown 自动 `resume()`。
+
+当 Runtime 当前 PAUSED 且 `circuitOpen === true` 时，外部显式调用：
+
+~~~text
+battle.resume()
+~~~
+
+执行：
+
+~~~text
+consecutiveFailures = 0
+circuitOpen = false
+→ normal presentation.resume() boundary
+→ if success: status = RUNNING
+→ restart scheduler from frozen logical time
+~~~
+
+后续最早合法 Tick由现有 `ensureDecision` 规则创建新的 Decision request。
+
+如果 provider 仍然不可用，后续再次连续 3 个 counted failure 会再次 trip。
+
+普通外部 pause/resume 在 `circuitOpen === false` 时不因 pause 本身修改 failure streak。
+
+### 10.5 attempt_failure generation semantics unchanged
+
+在未达到 threshold 时：
+
+- counted `attempt_failure` 与其他 attempt failure 一样结束当前 attempt/generation；
+- 最早下一逻辑 Tick可重新 Decision；
+- DeepSeekDecision 本身不做 transport retry/backoff。
+
+因此 v0 不需要再叠加 provider cooldown/exponential retry；连续失败由 Runtime circuit-pause 截断请求风暴。
 
 ## 11. AcceptedPlan
 
