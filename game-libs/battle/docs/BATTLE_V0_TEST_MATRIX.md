@@ -217,6 +217,8 @@
 | T-DDEC-024 | DECISION §17.3 | first Plan gameplay-invalid | Simulation 发 correction decide()；新 request 再两次 provider call；attempt1 invalid 后按 frozen generation rule 结束 |
 | T-DDEC-025 | DECISION §17.4 | credential-gated real-provider smoke | 可手动验证 Call A non-empty + Call B structured + local parser；普通 CI 不访问 DeepSeek |
 | T-DDEC-026 | DECISION §18 | package qualification | npm run test:battle 与 npm pack dry-run 通过；./decision 与 ./decision/testing 可解析 |
+| T-DDEC-027 | DECISION §2 | apiKey 为空或仅 whitespace | constructor 同步 reject；不得发网络请求 |
+| T-DDEC-028 | DECISION §10–11 | response.status=failed 且无已知 auth/quota/rate/context 分类 | attempt_failure DECISION_PROVIDER_UNAVAILABLE；不读取/保存 reasoning_text |
 
 ## 9. Control Plane / Replay
 
