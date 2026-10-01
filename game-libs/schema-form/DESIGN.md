@@ -571,21 +571,29 @@ initial-value precedence, canonical form values, or submission validity.
 
 ### Render tree
 
-The v1 presentation uses one root element and one stable child RenderNode per field:
+The v1 presentation uses one root element and one stable child RenderNode per field.
+
+Each `openSchemaForm()` call allocates a unique root RenderNode key for that form
+instance. The key is stable for the lifetime of the open form and is used to correlate
+presentation events back to that instance without exposing the RenderDomain wire id.
+
+For example:
 
 ```text
-lr-schema-form
-├── lr-schema-form-field   field:name
-├── lr-schema-form-field   field:age
-├── lr-schema-form-field   field:enabled
-└── lr-schema-form-field   field:class
+lr-schema-form                schema-form:12
+├── lr-schema-form-field      field:name
+├── lr-schema-form-field      field:age
+├── lr-schema-form-field      field:enabled
+└── lr-schema-form-field      field:class
 ```
 
 Conceptually:
 
 ```ts
+const rootKey = allocateSchemaFormRootKey();
+
 {
-  key: "schema-form",
+  key: rootKey,
   tag: "lr-schema-form",
   attrs: {},
   data: formRenderData,
@@ -599,7 +607,11 @@ Conceptually:
 }
 ```
 
-The field declaration key is semantic form identity. The RenderNode key derives
+A root key may be implemented with a process-local monotonic serial such as
+`schema-form:12`. The exact textual serial is private implementation detail; uniqueness
+among concurrently/live created form RenderNodes is the requirement.
+
+The field declaration key is semantic form identity. The field RenderNode key derives
 deterministically from it. Field order is represented by RenderNode child order.
 
 A field kind is stable for the lifetime of an open form. The presentation must not
@@ -1118,28 +1130,31 @@ submit
 cancel
 ```
 
-All three events originate from the root RenderNode:
+All three events originate from the unique root RenderNode allocated for that
+`openSchemaForm()` instance:
 
 ```text
-targetKey = "schema-form"
+targetKey = rootKey
 ```
+
+The Schema Form module records `rootKey` when opening the form and uses it as the
+instance correlation token for incoming presentation events.
 
 There are no field-level outward `change` or `clear` events in v1.
 
 ### Presentation edit snapshot
 
-Change and Submit both carry a complete current presentation edit snapshot.
+Change and Submit both carry a complete current presentation value snapshot.
 
-This is intentionally not the same type as canonical `SchemaFormDataV1`.
+The field component converts its browser-local editor state into a JSON-compatible
+typed value before the root form collects the snapshot.
 
-The presentation snapshot must preserve editing states that are meaningful in the
-browser but are not yet canonical Schema Form values.
-
-Conceptually:
+The outward presentation value type is:
 
 ```ts
 export type SchemaFormPresentationValueV1 =
   | string
+  | number
   | boolean
   | null;
 
@@ -1151,29 +1166,35 @@ Field mapping:
 
 ```text
 string   → string | null
-number   → raw lexical string | null
+number   → finite number | null
 boolean  → boolean | null
 select   → string | null
 ```
 
-`null` means the field is currently unset in the presentation protocol. It is not a
-canonical Schema Form value.
+`null` means unset from the subsystem's point of view. It is not a canonical
+Schema Form value and is omitted from canonical `SchemaFormDataV1`.
 
-Therefore:
+For number fields, the field component may retain arbitrary presentation-local
+lexical drafts while editing. If the current draft cannot be converted to a finite
+number when the value snapshot is collected, the field contributes `null`.
+
+For example:
 
 ```text
-optional boolean:
-  null  != false
-
-optional string:
-  null  != ""
-
-number:
-  "1." is a valid presentation edit state
-  but is not a canonical JSON number
+local draft "12.5" → outward value 12.5
+local draft "1."   → outward value null
+local draft "-"    → outward value null
+empty/unset        → outward value null
 ```
 
-The root form collects one entry for every current field RenderNode by key.
+The lexical draft remains local to `lr-schema-form-field`; the subsystem never
+receives an invalid-number draft string.
+
+This intentionally treats an unconvertible optional number as unset. A required
+number therefore fails built-in required validation when its field contributes
+`null`, while an optional number may be submitted as absent.
+
+The root form collects exactly one entry for every current schema field key.
 
 Conceptually:
 
@@ -1197,6 +1218,19 @@ class SchemaFormElement extends HTMLElement {
 }
 ```
 
+For every Change and Submit event:
+
+```text
+Object.keys(values)
+==
+the exact SchemaFormV1.fields[*].key set
+```
+
+No schema field may be omitted, including optional fields. Optional/unset fields are
+represented explicitly with `null`.
+
+Unknown extra keys and missing keys are malformed presentation snapshots.
+
 The form should accept a field notification only while that field is still a direct
 current child of the form, for example by checking `field.parentElement === this`.
 
@@ -1217,7 +1251,7 @@ Example:
 {
   "values": {
     "name": "Alice",
-    "age": "1.",
+    "age": null,
     "enabled": false,
     "class": "mage"
   }
@@ -1255,11 +1289,12 @@ that submit attempt.
 It then:
 
 ```text
-validate presentation snapshot shape
+validate exact presentation snapshot shape
         ↓
-interpret values using SchemaFormV1
+interpret typed values using SchemaFormV1
         ↓
-parse/canonicalize candidate values
+null → omit field from canonical candidate
+typed value → canonical candidate value
         ↓
 run built-in validation
         ↓
@@ -1294,13 +1329,14 @@ The authority split is:
 
 ```text
 field component
-  owns DOM editor state / lexical draft / unset distinction
+  owns DOM editor state / lexical draft
+  converts local editor state to string/number/boolean/null
 
 lr-schema-form
-  owns aggregation of the current presentation edit snapshot
+  owns aggregation of the complete typed presentation snapshot
 
 Schema Form module
-  owns parsing, canonical values, validation, errors, submit/cancel completion
+  owns canonical data construction, validation, errors, submit/cancel completion
 ```
 
 In short:
@@ -1308,37 +1344,35 @@ In short:
 > Form Component owns the current presentation edit snapshot; Schema Form module owns
 > the canonical form state.
 
-A Change snapshot may update the module's current canonical state when values can be
-parsed, but a Submit attempt must always interpret its own complete snapshot rather
-than assuming that all previous Change events were delivered.
+A Change snapshot deterministically maps `null` to absence and typed non-null values
+to the current canonical candidate. A Submit attempt must always interpret its own
+complete snapshot rather than assuming that all previous Change events were delivered.
 
 ### RenderData reconciliation after validation
 
-Subsystem validation may update only field errors while the user still has a
-presentation-local lexical draft.
+A field component may retain a browser-local lexical draft that does not match its
+last authoritative RenderData value.
 
 For example:
 
 ```text
 authoritative number value = 1
 local numeric draft         = "1."
+outward presentation value  = null
 ```
 
-After a Change event, the subsystem may return:
+The local draft `"1."` is not sent to the subsystem. The root form contributes
+`null` for that field.
 
-```text
-value = 1
-error = "Invalid number"
-```
-
-The field component must update the error without unnecessarily replacing its local
-draft `"1."`.
+If validation causes the subsystem to return RenderData whose authoritative value has
+not changed, the field component must not unnecessarily destroy the active local
+draft merely because the authoritative value remains `1` or becomes absent.
 
 A field should therefore distinguish at least:
 
 ```text
 last authoritative value
-current presentation-local edit value
+current presentation-local editor state
 ```
 
 On `receiveRenderData()`:
@@ -1352,8 +1386,8 @@ authoritative value actually changed
 → authoritative replacement may reset local draft
 ```
 
-This keeps number editing, selection, focus, and IME behavior stable while retaining
-subsystem authority over canonical values.
+This keeps number editing, selection, focus, and IME behavior stable while the
+subsystem continues to own canonical values and validation.
 
 ### Required LoomRealm Web Presentation extension
 
@@ -1578,7 +1612,7 @@ Example Submit payload:
 ```json
 {
   "domainId": "d3",
-  "targetKey": "schema-form",
+  "targetKey": "schema-form:12",
   "name": "submit",
   "data": {}
 }
@@ -1589,12 +1623,12 @@ Example Change payload:
 ```json
 {
   "domainId": "d3",
-  "targetKey": "schema-form",
+  "targetKey": "schema-form:12",
   "name": "change",
   "data": {
     "values": {
       "name": "Alice",
-      "age": "1.",
+      "age": null,
       "enabled": false,
       "class": "mage"
     }
@@ -1753,51 +1787,59 @@ const listener = scope.createInputListener({
 listener.on(
   "x.loomrealm.web-presentation.event",
   (event) => {
-    // accept only this active form Domain + root target
+    // accept only the unique root target allocated for this open form
     // then handle change / submit / cancel
   },
 );
 ```
 
-The module must match the event against its own currently open form Domain and root
-RenderNode:
+The module records the unique `rootKey` created for the form instance and correlates
+incoming events with:
 
 ```text
-domainId = current form domain
-targetKey = "schema-form"
+targetKey = rootKey
 ```
 
-Unknown event names, stale domains, non-root targets, malformed snapshots, unknown
-field keys, missing required field entries, wrong presentation value types, invalid
-select values, and invalid numeric lexical values must not be trusted merely because
-they came from Presentation.
+Schema Form does not need access to the Renderer wire `domainId` to identify its
+own form instance. `domainId` may remain present in the generic presentation-event
+payload as Renderer provenance, but it is not part of the Schema Form module's
+correlation contract.
+
+For Change and Submit, `data.values` must have exactly the schema field-key set.
+Missing keys, unknown extra keys, wrong value types, non-finite numbers, invalid
+select values, stale root targets, and unknown event names are malformed or
+inapplicable input and must not be trusted merely because they came from
+Presentation.
 
 For `change`:
 
 ```text
-complete presentation snapshot
+complete typed presentation snapshot
     ↓
-decode according to schema field kinds
+null values → omit from canonical candidate
+non-null values → validate against schema kind
     ↓
-update current canonical values where representable
+built-in field validation
     ↓
-built-in validation
-    ↓
-validateOnChange
+validateOnChange(canonicalData)
     ↓
 RenderDomain.update(field errors/current authoritative data)
 ```
+
+A browser-local number draft that cannot be converted is already represented as
+`null` by the field component, so the subsystem does not parse lexical numeric
+drafts.
 
 For `submit`:
 
 ```text
 complete submit snapshot
     ↓
-decode independently of previous Change delivery
+construct canonical candidate independently of previous Change delivery
     ↓
 complete built-in validation
     ↓
-validateOnSubmit
+validateOnSubmit(canonicalData)
     ↓
 errors → keep RenderDomain open and update field errors
 valid  → resolve submitted result and close RenderDomain
@@ -1812,9 +1854,9 @@ allowed → resolve cancelled and close RenderDomain
 denied  → ignore
 ```
 
-This preserves the rule that the module owns canonical values, validation, completion,
-and RenderDomain lifetime while the Web Component only reports the current
-presentation edit snapshot and user intent.
+This preserves the rule that field components own browser-local conversion, while the
+Schema Form module owns canonical data, validation, completion, and RenderDomain
+lifetime.
 
 ### Implementation impact
 
@@ -1884,7 +1926,7 @@ and a current validation error for `age`, the projection may be:
 {
   zIndex: 100,
   roots: [{
-    key: "schema-form",
+    key: "schema-form:12",
     tag: "lr-schema-form",
     attrs: {},
     data: {
