@@ -127,11 +127,62 @@ cancelable === false | undefined
 The default is non-cancelable. Frame cancellation/abort remains distinct from a user
 cancel action.
 
+### Frame abort and cleanup
+
+`openSchemaForm()` is bound to the supplied Frame lifetime.
+
+If `frame.signal` aborts while the form is still open, Schema Form must terminate
+the interaction immediately.
+
+The presentation effect is similar to user cancellation because the visible form is
+removed and all form-owned resources are released, but the business result is
+different:
+
+```text
+user Cancel
+→ close form resources
+→ resolve { type: "cancelled" }
+
+Frame abort
+→ close form resources
+→ reject with AbortError
+```
+
+Frame abort must never be converted into a user-cancel result.
+
+The rejected error must have:
+
+```text
+name = "AbortError"
+```
+
+An implementation may use the platform `DOMException` AbortError or an equivalent
+Error object with the same observable name.
+
+All terminal paths use one settle-once cleanup path:
+
+```text
+submitted successfully
+user cancelled
+Frame aborted
+validator/program failure
+internal module failure
+        ↓
+stop accepting further form events
+close InputListener
+close RenderDomain
+remove abort listener / owned callbacks
+settle openSchemaForm() exactly once
+```
+
+After terminal settlement, duplicate Submit/Cancel/custom events are ignored.
+
 A Builder/Handler abstraction is intentionally not introduced in v1. The interaction
 has a simple one-shot lifetime:
 
 ```text
-open → edit → submit/cancel → return
+open → edit → submit/cancel → resolve
+            ↘ Frame abort/failure → reject
 ```
 
 If future requirements introduce a persistent control surface that survives beyond
