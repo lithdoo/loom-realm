@@ -719,43 +719,46 @@ readonly cancelable: boolean;
 The Web Component must not inspect the original request object to determine
 cancelability.
 
-### Modal input authority
+### Modal interaction blocking
 
-Visual modality and input modality are distinct requirements.
+Schema Form modality is a browser-presentation concern in v1. It does not introduce
+or require a new LoomRealm input-authority mechanism.
 
-A full-screen backdrop can block pointer interaction with underlying DOM, but it does
-not by itself guarantee that lower-level gameplay keyboard, pointer, or gamepad input
-listeners stop producing game actions through LoomRealm's User Input pipeline.
+While the modal is open, the presentation must prevent underlying browser mouse and
+keyboard interaction from reaching lower presentation layers.
 
-Therefore the v1 modal requirement is:
+The full-screen backdrop blocks pointer interaction with elements underneath it.
 
-> While Schema Form is active, underlying gameplay interaction must not produce
-> business effects.
+The modal must also keep keyboard focus inside the dialog. Keyboard and pointer
+events originating inside the modal presentation must be stopped before they bubble
+to the Window-level Renderer physical input source.
 
-The intended behavior is conceptually:
+Conceptually:
 
 ```text
-Schema Form active
-       ↓
-Schema Form interaction remains active
-       ↓
-underlying gameplay interaction is suppressed
+pointer
+  ↓
+full-screen modal backdrop/dialog
+  ↓
+handled locally + stopPropagation()
+  ×
+underlying DOM / Window gameplay input listener
+
+keyboard
+  ↓
+focus remains inside modal
+  ↓
+handled locally + stopPropagation()
+  ×
+Window gameplay input listener
 ```
 
-The current public `InputListener` API provides channel subscription/update/close,
-but does not define an exclusive/capture/priority input primitive.
+This requirement is intentionally limited to browser mouse/pointer and keyboard
+interaction. Schema Form v1 does not add InputListener priority, capture, exclusivity,
+or suspension semantics and does not modify Main/InputTarget/InputGate authority.
 
-Therefore the mechanism that provides true modal input exclusion is not yet frozen.
-
-Acceptable future solutions may include a platform-level exclusive input capability or
-an explicit caller-side suspension policy, but the browser backdrop alone is not
-sufficient to satisfy the modal contract.
-
-This modal-exclusivity problem is separate from the Web Presentation custom-event
-capability described below. Custom events solve Web Component → Subsystem semantic
-notification; they do not by themselves suppress ordinary keyboard, pointer, or
-gamepad gameplay input.
-
+Gamepad or other non-DOM physical input suppression is outside this modal
+presentation requirement.
 
 ### Field RenderData
 
@@ -1766,23 +1769,21 @@ connection and does not need a reverse Render transport.
 The existing Renderer presentation attachment is sufficient to connect WebProjector
 to Renderer-owned capability handling.
 
-### Separation from modal input exclusivity
+### Separation from modal event blocking
 
-This custom-event capability solves:
-
-```text
-Web Component semantic action
-→ owning subsystem
-```
-
-It does not solve:
+The custom-event capability and modal event blocking are independent presentation
+concerns:
 
 ```text
-Schema Form modal active
-→ suppress underlying gameplay keyboard/pointer/gamepad effects
+emitCustomEvent(...)
+→ reports semantic form actions to the owning subsystem
+
+backdrop + focus containment + stopPropagation()
+→ prevents underlying browser pointer/keyboard interaction
 ```
 
-True modal input exclusion remains a separate input-authority design problem.
+The latter remains entirely within Web Presentation and requires no change to
+LoomRealm input authority or protocol semantics.
 
 ### RenderData example
 
