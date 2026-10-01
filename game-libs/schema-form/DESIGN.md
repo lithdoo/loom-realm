@@ -612,8 +612,11 @@ validator returns an invalid result shape
 → SCHEMA_FORM_INVALID_VALIDATOR_RESULT
 ```
 
-These failures use the same settle-once cleanup path as every other terminal outcome
-and reject with `SchemaFormError`.
+`SCHEMA_FORM_ALREADY_OPEN` is rejected before the second call creates any form
+resources and must not disturb the already-active form.
+
+Validator/program failures for an already-open form use the normal settle-once cleanup
+path and reject with `SchemaFormError`.
 
 Frame abort remains separate and rejects with `AbortError`, not `SchemaFormError`.
 
