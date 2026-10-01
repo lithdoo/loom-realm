@@ -529,6 +529,331 @@ SchemaFormV1.
 }
 ```
 
+
+## Presentation and RenderData
+
+Schema Form projects authoritative module state into ordinary LoomRealm RenderNodes.
+The Web presentation must consume presentation snapshots; it must not reinterpret the
+original SchemaForm declaration as an independent source of form state.
+
+The intended flow is:
+
+```text
+SchemaFormV1
+    ↓ interpret
+Schema Form authoritative state
+    ↓ project
+RenderData
+    ↓
+Web Components
+```
+
+The presentation layer is not validation authority and does not own defaults,
+initial-value precedence, canonical form values, or submission validity.
+
+### Render tree
+
+The v1 presentation uses one root element and one stable child RenderNode per field:
+
+```text
+lr-schema-form
+├── lr-schema-form-field   field:name
+├── lr-schema-form-field   field:age
+├── lr-schema-form-field   field:enabled
+└── lr-schema-form-field   field:class
+```
+
+Conceptually:
+
+```ts
+{
+  key: "schema-form",
+  tag: "lr-schema-form",
+  attrs: {},
+  data: formRenderData,
+  children: fields.map((field) => ({
+    key: `field:${field.key}`,
+    tag: "lr-schema-form-field",
+    attrs: {},
+    data: fieldRenderData,
+    children: [],
+  })),
+}
+```
+
+The field declaration key is semantic form identity. The RenderNode key derives
+deterministically from it. Field order is represented by RenderNode child order.
+
+A field kind is stable for the lifetime of an open form. The presentation must not
+change the tag of a live RenderNode.
+
+### Root RenderData
+
+The root receives only state needed to present the form shell:
+
+```ts
+export interface SchemaFormRenderDataV1 {
+  readonly title?: string;
+  readonly description?: string;
+  readonly submitting: boolean;
+}
+```
+
+The root is responsible for the form shell, title, description, field slot, and
+submit/cancel controls.
+
+A submit control represents a submit attempt. Browser-native validity and button
+state are not authoritative form validity.
+
+### Field RenderData
+
+Field RenderData is a presentation snapshot rather than the original field schema.
+
+```ts
+interface SchemaFormFieldRenderBaseV1 {
+  readonly key: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly required: boolean;
+  readonly error?: string;
+}
+
+export type SchemaFormFieldRenderDataV1 =
+  | (SchemaFormFieldRenderBaseV1 & {
+      readonly kind: "string";
+      readonly value?: string;
+      readonly placeholder?: string;
+      readonly multiline: boolean;
+      readonly minLength?: number;
+      readonly maxLength?: number;
+    })
+  | (SchemaFormFieldRenderBaseV1 & {
+      readonly kind: "number";
+      readonly value?: number;
+      readonly min?: number;
+      readonly max?: number;
+      readonly integer: boolean;
+    })
+  | (SchemaFormFieldRenderBaseV1 & {
+      readonly kind: "boolean";
+      readonly value?: boolean;
+    })
+  | (SchemaFormFieldRenderBaseV1 & {
+      readonly kind: "select";
+      readonly value?: string;
+      readonly options: readonly {
+        readonly value: string;
+        readonly label: string;
+      }[];
+    });
+```
+
+Each field node is self-contained. For example, a field receives its own current
+error string rather than the complete form error map.
+
+The Web Component must not receive or execute:
+
+- field defaults;
+- invocation `initialValue`;
+- `validateOnChange`;
+- `validateOnSubmit`;
+- validator source;
+- validation authority state that it is expected to reinterpret.
+
+Schema Form resolves those concerns before projection.
+
+For example, if a number field has `default: 1`, the presentation receives
+`value: 1`; it does not receive an absent value plus a default and decide which one
+to display.
+
+### Web Components
+
+The v1 browser presentation uses two Custom Elements:
+
+```text
+lr-schema-form
+lr-schema-form-field
+```
+
+`lr-schema-form` owns the visual form shell and submit/cancel controls.
+
+`lr-schema-form-field` selects the appropriate native editing control from
+`data.kind`:
+
+```text
+string + multiline=false → single-line text editor
+string + multiline=true  → multiline text editor
+number                    → numeric editor
+boolean                   → boolean control
+select                    → option selector
+```
+
+These mappings are browser-presentation implementation choices. They are not part of
+the public SchemaForm schema ABI.
+
+The components receive state through the existing Web presentation
+`receiveRenderData(data)` convention. They should validate the incoming RenderData
+shape before applying it.
+
+### Stable editing DOM
+
+A Web Component must not rebuild its editing control on every
+`receiveRenderData()` call.
+
+Repeated replacement of an active input can destroy focus, selection, and IME
+composition state. Components should create stable DOM and patch changed properties
+and text instead.
+
+Changing a field's `kind` while the form is open is not supported.
+
+### Presentation-local drafts
+
+The browser presentation may retain transient editing state that is not itself a
+valid canonical JSON value.
+
+This is especially important for number editing. Text such as:
+
+```text
+-
+1.
+```
+
+can be a meaningful in-progress browser edit even though it is not a valid JSON
+number.
+
+Therefore:
+
+```text
+presentation-local lexical draft
+              ≠
+canonical Schema Form value
+```
+
+Transient DOM editing mechanics, including cursor position, selection, composition,
+and incomplete numeric text, belong to Presentation.
+
+Schema Form remains authority for canonical field values.
+
+An incoming RenderData refresh must not unnecessarily destroy an equivalent active
+local draft. An actual authoritative value change may replace the local draft.
+
+### Presentation actions
+
+The semantic actions required by the browser presentation are:
+
+```ts
+export type SchemaFormPresentationActionV1 =
+  | {
+      readonly type: "change";
+      readonly key: string;
+      readonly value: JsonValue;
+    }
+  | {
+      readonly type: "clear";
+      readonly key: string;
+    }
+  | {
+      readonly type: "submit";
+    }
+  | {
+      readonly type: "cancel";
+    };
+```
+
+These actions describe presentation intent. They do not grant the Web Component
+authority to mutate Schema Form state directly.
+
+The intended authority path is:
+
+```text
+Web Component
+    ↓
+semantic presentation action
+    ↓
+trusted Renderer input adapter
+    ↓
+RendererInputSource / custom User Input channel
+    ↓
+existing User Input authority gate
+    ↓
+scope.createInputListener(...)
+    ↓
+Schema Form module
+```
+
+Direct callbacks from a Web Component into subsystem/module state, global mutable
+managers, DOM references in the public SchemaForm API, and reverse use of the Render
+Update protocol are not acceptable substitutes.
+
+The repository currently has the Renderer-to-subsystem User Input path and custom
+input channels, but the trusted Web Component-to-custom-`RendererInputSource`
+adapter contract is not yet a frozen public presentation capability. That seam must
+be designed/frozen separately before the interactive browser implementation depends
+on it.
+
+### RenderData example
+
+Given canonical data:
+
+```json
+{
+  "name": "Alice",
+  "age": 15
+}
+```
+
+and a current validation error for `age`, the projection may be:
+
+```ts
+{
+  zIndex: 100,
+  roots: [{
+    key: "schema-form",
+    tag: "lr-schema-form",
+    attrs: {},
+    data: {
+      title: "Character",
+      submitting: false,
+    },
+    children: [
+      {
+        key: "field:name",
+        tag: "lr-schema-form-field",
+        attrs: {},
+        data: {
+          key: "name",
+          kind: "string",
+          label: "Name",
+          required: false,
+          value: "Alice",
+          multiline: false,
+        },
+        children: [],
+      },
+      {
+        key: "field:age",
+        tag: "lr-schema-form-field",
+        attrs: {},
+        data: {
+          key: "age",
+          kind: "number",
+          label: "Age",
+          required: false,
+          value: 15,
+          integer: true,
+          error: "Must be at least 18",
+        },
+        children: [],
+      },
+    ],
+  }],
+}
+```
+
+The projection is a complete current presentation snapshot. Presentation errors or
+Renderer teardown must not be interpreted as submit or cancel.
+
+
 ## Explicit v1 exclusions
 
 This declaration model does not define:
