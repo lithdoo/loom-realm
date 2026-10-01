@@ -14,6 +14,25 @@ import { attachRendererPresentation } from "../../packages/renderer/dist/interna
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const version = `sha256:${"c".repeat(64)}`;
+const CHROMIUM_TEST_TIMEOUT_MS = 30_000;
+const ASYNC_STAGE_TIMEOUT_MS = 10_000;
+
+async function within(promise, label, timeoutMs = ASYNC_STAGE_TIMEOUT_MS) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out waiting for ${label}`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function executablePath() {
   const configured = process.env.LOOMREALM_CHROMIUM_PATH;
@@ -91,13 +110,23 @@ async function fixtureServer(t) {
     response.end();
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  t.after(async () => {
+    try {
+      await within(
+        new Promise((resolve) => server.close(resolve)),
+        "fixture server close",
+      );
+    } catch (error) {
+      server.closeAllConnections?.();
+      throw error;
+    }
+  });
   return { origin: `http://127.0.0.1:${server.address().port}`, requests };
 }
 
 async function browserPage(t) {
   const browser = await chromium.launch({ headless: true, ...(executablePath() ? { executablePath: executablePath() } : {}) });
-  t.after(() => browser.close());
+  t.after(() => within(browser.close(), "Chromium browser close"));
   return browser.newPage();
 }
 
@@ -108,8 +137,9 @@ const controlSnapshot = (sessionId, revision, dataAuthorities) => ({
 });
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
-async function waitFor(predicate, label) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+async function waitFor(predicate, label, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (predicate()) return;
     await turn();
   }
@@ -126,7 +156,7 @@ function controlMain(pair, sessionId, authorities) {
   });
 }
 
-test("real Chromium proves ordered bootstrap, Custom Element registration, load barrier and evaluation failure", async (t) => {
+test("real Chromium proves ordered bootstrap, Custom Element registration, load barrier and evaluation failure", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
   const fixture = await fixtureServer(t);
   const page = await browserPage(t);
   await page.goto(fixture.origin);
@@ -187,7 +217,7 @@ test("real Chromium proves ordered bootstrap, Custom Element registration, load 
   assert.deepEqual(loadFailure, { rejected: true, started: false });
 });
 
-test("real Chromium proves Projector identity, receiver ordering, currentness and permanent structural freeze", async (t) => {
+test("real Chromium proves Projector identity, receiver ordering, currentness and permanent structural freeze", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
   const fixture = await fixtureServer(t);
   const page = await browserPage(t);
   await page.goto(fixture.origin);
@@ -273,11 +303,11 @@ test("real Chromium proves Projector identity, receiver ordering, currentness an
   });
 });
 
-test("real Control/Data/Store commits drive the real Chromium Projector with per-subsystem currentness", async (t) => {
+test("real Control/Data/Store commits drive the real Chromium Projector with per-subsystem currentness", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
   const fixture = await fixtureServer(t);
   const page = await browserPage(t);
-  await page.goto(fixture.origin);
-  await page.evaluate(async ({ origin }) => {
+  await within(page.goto(fixture.origin), "initial Chromium navigation");
+  await within(page.evaluate(async ({ origin }) => {
     const { WebProjector } = await import(`${origin}/packages/renderer/dist/internal/web-projector.js`);
     let serial = 0;
     class VerticalElement extends HTMLElement {
@@ -290,7 +320,7 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
     customElements.define("lr-vertical", VerticalElement);
     const projector = new WebProjector({ document, resourceClient: { async resource() { throw new Error("unused"); } } });
     globalThis.applyRendererView = (view) => projector.reevaluate({ read: () => view });
-  }, { origin: fixture.origin });
+  }, { origin: fixture.origin }), "initial Projector bootstrap");
 
   const peers = [];
   const holder = createRendererControlHolder({
@@ -306,7 +336,10 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
       return pair.right;
     },
   });
-  t.after(async () => Promise.allSettled(peers.map(({ peer }) => peer.close())));
+  t.after(() => within(
+    Promise.allSettled(peers.map(({ peer }) => peer.close())),
+    "Renderer Data peer cleanup",
+  ));
   let browserDelivery = Promise.resolve();
   let presentationNotifications = 0;
   const detach = attachRendererPresentation(holder, {
@@ -320,14 +353,17 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
 
   const control = createMemoryCarrierPair();
   const publisher = controlMain(control, "S", [dataAuthority("A"), dataAuthority("B")]);
-  await holder.connect({ carrier: control.right, rendererControlToken: "token" });
+  await within(
+    holder.connect({ carrier: control.right, rendererControlToken: "token" }),
+    "Renderer Control connect",
+  );
   await waitFor(() => peers.length === 2, "A/B Data peers");
   const node = (key, value) => ({ key, tag: "lr-vertical", attrs: { "data-key": key }, data: { value }, children: [] });
   for (const entry of peers) {
     await entry.peer.render.sendDomains({ type: "render.domains", domains: ["d"] });
     await entry.peer.render.sendSnapshot({ type: "render.snapshot", domainId: "d", revision: 1, zIndex: 0, roots: [node("same", entry.subsystemKey)] });
   }
-  await browserDelivery;
+  await within(browserDelivery, "initial browser delivery");
   const initial = await page.evaluate(() => [...document.body.children].map((element) => ({ key: element.getAttribute("data-key"), value: element.value, instance: element.instance })));
   assert.deepEqual(initial.map(({ value }) => value), ["A", "B"]);
   assert.notEqual(initial[0].instance, initial[1].instance);
@@ -339,26 +375,26 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   assert.equal(presentationNotifications, notificationsBeforeEvent, "RenderEvent does not trigger presentation");
 
   const a = peers.find((entry) => entry.subsystemKey === "A");
-  await a.peer.close();
+  await within(a.peer.close(), "retire A Data peer");
   await waitFor(() => peers.filter((entry) => entry.subsystemKey === "A").length === 2, "A replacement carrier");
   const aBefore = initial[0].instance;
   const b = peers.find((entry) => entry.subsystemKey === "B");
   await b.peer.render.sendPatch({ type: "render.patch", domainId: "d", baseRevision: 1, revision: 2, ops: [{ op: "update", key: "same", data: { set: { value: "B2" } } }] });
-  await browserDelivery;
+  await within(browserDelivery, "B patch browser delivery");
   assert.deepEqual(await page.evaluate(() => [...document.body.children].map((element) => [element.value, element.instance])), [["A", aBefore], ["B2", initial[1].instance]]);
 
   const replacementA = peers.filter((entry) => entry.subsystemKey === "A").at(-1);
   await replacementA.peer.render.sendDomains({ type: "render.domains", domains: ["d", "later"] });
   await replacementA.peer.render.sendSnapshot({ type: "render.snapshot", domainId: "d", revision: 10, zIndex: 0, roots: [node("same", "A-partial")] });
-  await browserDelivery;
+  await within(browserDelivery, "replacement A partial browser delivery");
   assert.equal(await page.evaluate(() => document.body.children[0].value), "A");
   await replacementA.peer.render.sendSnapshot({ type: "render.snapshot", domainId: "later", revision: 1, zIndex: 1, roots: [] });
-  await browserDelivery;
+  await within(browserDelivery, "replacement A complete browser delivery");
   assert.deepEqual(await page.evaluate(() => [document.body.children[0].value, document.body.children[0].instance]), ["A-partial", aBefore]);
 
   publisher.publish(controlSnapshot("S", 2, [dataAuthority("B")]));
   await waitFor(() => holder.current().snapshot.revision === 2, "authority removal");
-  await browserDelivery;
+  await within(browserDelivery, "authority removal browser delivery");
   assert.deepEqual(await page.evaluate(() => [...document.body.children].map((element) => element.value)), ["B2"]);
 
   const beforeControlLoss = await page.evaluate(() => {
@@ -367,7 +403,7 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   });
   publisher.retire();
   await waitFor(() => holder.current() === null, "Control terminal");
-  await browserDelivery;
+  await within(browserDelivery, "control terminal browser delivery");
   const afterControlLoss = await page.evaluate(() => {
     const element = document.body.children[0];
     return { html: document.body.innerHTML, instance: element.instance, contexts: element.contexts, connects: element.connects, disconnects: element.disconnects ?? 0, deliveries: element.deliveries };
@@ -375,7 +411,7 @@ test("real Control/Data/Store commits drive the real Chromium Projector with per
   assert.deepEqual(afterControlLoss, beforeControlLoss, "Control transport loss freezes the mounted browser presentation");
 });
 
-test("real Chromium proves structural data delivery and independent optional receivers", async (t) => {
+test("real Chromium proves structural data delivery and independent optional receivers", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
   const fixture = await fixtureServer(t);
   const page = await browserPage(t);
   await page.goto(fixture.origin);
@@ -443,7 +479,7 @@ test("real Chromium proves structural data delivery and independent optional rec
   });
 });
 
-test("real Chromium business context reaches Renderer-private resource bytes and dies with Window presentation", async (t) => {
+test("real Chromium business context reaches Renderer-private resource bytes and dies with Window presentation", { timeout: CHROMIUM_TEST_TIMEOUT_MS }, async (t) => {
   const fixture = await fixtureServer(t);
   const page = await browserPage(t);
   await page.goto(fixture.origin);
