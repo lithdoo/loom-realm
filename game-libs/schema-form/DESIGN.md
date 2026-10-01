@@ -695,6 +695,186 @@ The components receive state through the existing Web presentation
 `receiveRenderData(data)` convention. They should validate the incoming RenderData
 shape before applying it.
 
+
+### Browser component implementation strategy
+
+The browser presentation should avoid reimplementing low-level form-control behavior
+such as keyboard interaction, focus management, accessibility semantics, select
+popups, checkbox behavior, and basic control styling.
+
+The preferred v1 implementation stack is:
+
+```text
+LoomRealm Renderer contract
+        │
+        │ receiveRenderData(data)
+        ▼
+lr-schema-form / lr-schema-form-field
+        │
+        │ implemented with
+        ▼
+Lit
+        │
+        │ composes
+        ▼
+Web Awesome controls
+```
+
+Lit is used only as an implementation aid for the two LoomRealm-owned Custom
+Elements. It provides stable reactive rendering and localized DOM updates while the
+public Renderer contract remains the ordinary Custom Element
+`receiveRenderData(data)` convention.
+
+Web Awesome provides the underlying browser form controls.
+
+The intended mapping is:
+
+```text
+Schema Form field                  Browser control
+────────────────────────────────   ─────────────────────
+string + multiline=false           wa-input
+string + multiline=true            wa-textarea
+number                              wa-number-input
+boolean                             wa-checkbox
+select                              wa-select + wa-option
+
+form action                         wa-button
+```
+
+The LoomRealm-owned wrapper components remain:
+
+```text
+lr-schema-form
+lr-schema-form-field
+```
+
+Third-party component names must not appear in `SchemaFormV1`,
+`SchemaFormFieldRenderDataV1`, public module APIs, or authoritative form state.
+They are browser-presentation implementation details only.
+
+In particular, v1 must not introduce schema properties such as:
+
+```ts
+widget: "wa-input"
+component: "wa-select"
+```
+
+The dependency direction must remain:
+
+```text
+Schema contract
+    ↓
+Schema Form authority
+    ↓
+RenderData contract
+    ↓
+LoomRealm Web Component wrapper
+    ↓
+Lit / Web Awesome
+```
+
+and never the reverse.
+
+#### Root form behavior
+
+`lr-schema-form` should render a semantic browser `<form>` shell, field slot, and
+submit/cancel controls.
+
+The browser form should not become validation authority. The preferred browser
+presentation uses `novalidate` and treats Submit as a semantic submit attempt.
+
+Built-in browser or third-party constraint-validation behavior may assist
+presentation, but the Schema Form module remains the authority that decides whether
+submission completes.
+
+#### Field wrapper behavior
+
+`lr-schema-form-field` should translate
+`SchemaFormFieldRenderDataV1` into the corresponding third-party form control and
+translate control interaction back into Schema Form presentation actions.
+
+It remains responsible for Schema Form-specific presentation concerns such as:
+
+- mapping `label`, `description`, `required`, and `error`;
+- maintaining presentation-local edit state when required;
+- preserving focus, selection, and IME composition;
+- exposing the current error with appropriate accessible semantics;
+- producing `change` / `clear` presentation actions;
+- insulating the Schema Form contract from third-party component APIs.
+
+The field wrapper should not own defaults, validation rules, canonical value
+authority, or submission decisions.
+
+#### Error presentation
+
+The RenderData contract remains:
+
+```ts
+readonly error?: string;
+```
+
+The wrapper may map this onto whatever error, hint, invalid-state, ARIA, or supporting
+text facilities the selected component library provides.
+
+If the third-party component does not provide an appropriate error presentation, the
+wrapper may render LoomRealm-owned error markup around it.
+
+The Schema Form authority must not depend on a third-party validation API or
+third-party error object shape.
+
+#### Number-control qualification
+
+The numeric control requires explicit qualification before its implementation choice
+is frozen.
+
+A browser numeric editor must preserve usable transient lexical states such as:
+
+```text
+-
+1.
+```
+
+without prematurely forcing them into canonical JSON numbers or destroying the
+user's local draft.
+
+The preferred first candidate is `wa-number-input`.
+
+Before freezing that choice, an implementation spike must verify its behavior for:
+
+- incomplete numeric input;
+- negative sign entry;
+- decimal separator entry;
+- focus and selection preservation across RenderData refreshes;
+- `beforeinput`, `input`, and `change` behavior;
+- external authoritative value replacement.
+
+If its normalization behavior conflicts with Schema Form's canonical-value versus
+presentation-draft model, the wrapper should instead use a text-capable control
+(for example `wa-input` with an appropriate input mode) and own numeric lexical
+draft handling itself.
+
+#### Alternative component libraries
+
+Other standards-based Web Component libraries may be evaluated, but they must remain
+behind the same LoomRealm-owned wrapper boundary.
+
+Spectrum Web Components is a possible alternative when adopting the Adobe Spectrum
+design language is desirable.
+
+Lion is a possible white-label foundation, but its own model-value, validation,
+formatting, parsing, and form-registration abstractions overlap substantially with
+Schema Form authority. For v1, that overlap makes it a less direct fit than a thinner
+presentation library.
+
+The preferred v1 direction is therefore:
+
+```text
+Lit + Web Awesome
+```
+
+subject to the number-control qualification above.
+
+
 ### Stable editing DOM
 
 A Web Component must not rebuild its editing control on every
