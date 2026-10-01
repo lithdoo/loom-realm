@@ -2,10 +2,16 @@
 
 Status: draft
 
-This document defines the v1 form declaration shape for `@loomrealm-game/schema-form`.
-It intentionally focuses on the declarative form schema and synchronous validation
-contract. Lifecycle, rendering, transport, and subsystem integration are specified
-separately.
+This document defines the v1 form declaration shape and public module boundary for
+`@loomrealm-game/schema-form`.
+
+Schema Form is a game-lib module that runs inside the caller's current subsystem
+Frame. It is not an independently registered subsystem and is not invoked through
+`frame.call()`.
+
+This document focuses on the declarative form schema, the synchronous validation
+contract, and the module-facing API. Renderer-specific implementation details remain
+separate.
 
 ## Goals
 
@@ -20,6 +26,98 @@ The v1 schema should be:
 
 The schema describes fields and validation rules. Invocation-specific values are not
 part of the schema.
+
+## Module boundary
+
+Schema Form is a reusable module owned by the currently executing subsystem.
+
+The caller supplies its existing `SubsystemScope` and `Frame`. Schema Form uses
+those capabilities directly for the duration of the form interaction.
+
+Conceptually:
+
+```text
+current subsystem Frame
+        │
+        ├── game logic
+        │
+        ├── openSchemaForm(scope, frame, request)
+        │       ├── render form
+        │       ├── receive form input
+        │       ├── maintain form data
+        │       ├── validate
+        │       └── submit / cancel
+        │
+        └── continue game logic with result
+```
+
+Schema Form does not create or register another subsystem Frame.
+
+In particular, the module must not implement its public operation by calling:
+
+```ts
+frame.call("schema-form", ...)
+```
+
+There is no `schemaFormDefinition` in the v1 public API.
+
+The module shares the caller's existing Frame lifetime, abort signal, input authority,
+and render ownership context.
+
+## Public API
+
+The v1 module API is intentionally one-shot:
+
+```ts
+export type SchemaFormDataV1 =
+  Readonly<Record<string, JsonValue>>;
+
+export interface SchemaFormRequestV1 {
+  readonly schema: SchemaFormV1;
+  readonly initialValue?: SchemaFormDataV1;
+}
+
+export type SchemaFormResultV1 =
+  | {
+      readonly type: "submitted";
+      readonly value: SchemaFormDataV1;
+    }
+  | {
+      readonly type: "cancelled";
+    };
+
+export function openSchemaForm(
+  scope: SubsystemScope,
+  frame: Frame,
+  request: SchemaFormRequestV1,
+): Promise<SchemaFormResultV1>;
+```
+
+Typical usage:
+
+```ts
+const result = await openSchemaForm(scope, frame, {
+  schema,
+  initialValue,
+});
+
+if (result.type === "submitted") {
+  // consume result.value
+}
+```
+
+The public function is a convenience module API, not a service locator and not a
+wrapper around `frame.call()`.
+
+A Builder/Handler abstraction is intentionally not introduced in v1. The interaction
+has a simple one-shot lifetime:
+
+```text
+open → edit → submit/cancel → return
+```
+
+If future requirements introduce a persistent control surface that survives beyond
+one interaction, that API shape can be reconsidered separately.
 
 ## Top-level schema
 
@@ -332,14 +430,14 @@ failure.
 
 It must not be converted into an ordinary field error.
 
-A stable subsystem failure code should be used, for example:
+A stable module error code should be used, for example:
 
 ```text
 SCHEMA_FORM_VALIDATOR_FAILED
 SCHEMA_FORM_INVALID_VALIDATOR_RESULT
 ```
 
-The exact failure-code contract is frozen with the subsystem lifecycle contract,
+The exact failure-code contract is frozen with the module lifecycle/error contract,
 not by this document.
 
 ## Validator data isolation
