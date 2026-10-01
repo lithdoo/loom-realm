@@ -943,7 +943,11 @@ submission completes.
 
 `lr-schema-form-field` should translate
 `SchemaFormFieldRenderDataV1` into the corresponding third-party form control and
-translate control interaction back into Schema Form presentation actions.
+report local edit changes to its owning `lr-schema-form`.
+
+Field components do not communicate with the Renderer or subsystem directly.
+`lr-schema-form` is the single outward communication boundary for the complete
+form component tree.
 
 It remains responsible for Schema Form-specific presentation concerns such as:
 
@@ -951,7 +955,8 @@ It remains responsible for Schema Form-specific presentation concerns such as:
 - maintaining presentation-local edit state when required;
 - preserving focus, selection, and IME composition;
 - exposing the current error with appropriate accessible semantics;
-- producing `change` / `clear` presentation actions;
+- exposing its current presentation edit value to the owning form;
+- notifying the owning form when that local edit value changes;
 - insulating the Schema Form contract from third-party component APIs.
 
 The field wrapper should not own defaults, validation rules, canonical value
@@ -1071,39 +1076,281 @@ local draft. An actual authoritative value change may replace the local draft.
 
 ### Presentation actions
 
-Interactive Schema Form controls must notify the owning subsystem of semantic user
-actions. A Web Component must not mutate Schema Form state directly and must not
-reverse the Render Update protocol.
-
-The required actions are:
+Schema Form uses one outward communication boundary for the whole component tree:
 
 ```text
-schema-form root
-  submit
-  cancel
-
-schema-form field
-  change
-  clear
+lr-schema-form-field
+        │
+        │ local method / callback
+        ▼
+lr-schema-form
+        │
+        │ the only emitCustomEvent() user
+        ▼
+Renderer
+        ▼
+Subsystem
 ```
 
-The source RenderNode is itself the action target identity. A field component does
-not need to supply its own field key as trusted routing metadata.
+Field components do not emit Renderer custom events directly.
+
+The root `lr-schema-form` owns:
+
+```text
+fieldChanged(...)
+submit()
+cancel()
+collectValues()
+```
+
+Submit/Cancel buttons are presentation-internal controls. They call the owning form
+component directly. Field editors likewise notify the owning form directly when their
+presentation-local value changes.
+
+The only Schema Form custom-event names emitted through the Renderer capability are:
+
+```text
+change
+submit
+cancel
+```
+
+All three events originate from the root RenderNode:
+
+```text
+targetKey = "schema-form"
+```
+
+There are no field-level outward `change` or `clear` events in v1.
+
+### Presentation edit snapshot
+
+Change and Submit both carry a complete current presentation edit snapshot.
+
+This is intentionally not the same type as canonical `SchemaFormDataV1`.
+
+The presentation snapshot must preserve editing states that are meaningful in the
+browser but are not yet canonical Schema Form values.
+
+Conceptually:
+
+```ts
+export type SchemaFormPresentationValueV1 =
+  | string
+  | boolean
+  | null;
+
+export type SchemaFormPresentationValuesV1 =
+  Readonly<Record<string, SchemaFormPresentationValueV1>>;
+```
+
+Field mapping:
+
+```text
+string   → string | null
+number   → raw lexical string | null
+boolean  → boolean | null
+select   → string | null
+```
+
+`null` means the field is currently unset in the presentation protocol. It is not a
+canonical Schema Form value.
+
+Therefore:
+
+```text
+optional boolean:
+  null  != false
+
+optional string:
+  null  != ""
+
+number:
+  "1." is a valid presentation edit state
+  but is not a canonical JSON number
+```
+
+The root form collects one entry for every current field RenderNode by key.
+
+Conceptually:
+
+```ts
+interface SchemaFormFieldElement {
+  readFormValue(): {
+    readonly key: string;
+    readonly value: SchemaFormPresentationValueV1;
+  };
+}
+```
+
+and:
+
+```ts
+class SchemaFormElement extends HTMLElement {
+  fieldChanged(field: SchemaFormFieldElement): void;
+  submit(): void;
+  cancel(): void;
+  collectValues(): SchemaFormPresentationValuesV1;
+}
+```
+
+The form should accept a field notification only while that field is still a direct
+current child of the form, for example by checking `field.parentElement === this`.
+
+### Change event
+
+When any field changes, the root form collects the complete latest edit snapshot and
+emits:
+
+```ts
+context.emitCustomEvent("change", {
+  values: this.collectValues(),
+});
+```
+
+Example:
+
+```json
+{
+  "values": {
+    "name": "Alice",
+    "age": "1.",
+    "enabled": false,
+    "class": "mage"
+  }
+}
+```
+
+A Change event represents the current presentation snapshot, not an incremental
+command log.
+
+This is intentionally compatible with existing User Input `.event` semantics:
+intermediate events may be dropped under bounded backpressure, while any later Change
+event contains the complete current edit snapshot and can converge the subsystem to
+the latest presentation state.
+
+Presentation may coalesce multiple rapid field changes into one later Change event,
+provided that the emitted event contains the complete latest snapshot.
+
+### Submit event
+
+Submit must independently collect the complete current snapshot at the moment of the
+submit attempt:
+
+```ts
+context.emitCustomEvent("submit", {
+  values: this.collectValues(),
+});
+```
+
+Submission correctness must not depend on all prior Change events having been
+delivered.
+
+The subsystem treats the Submit snapshot itself as the complete candidate input for
+that submit attempt.
+
+It then:
+
+```text
+validate presentation snapshot shape
+        ↓
+interpret values using SchemaFormV1
+        ↓
+parse/canonicalize candidate values
+        ↓
+run built-in validation
+        ↓
+run validateOnSubmit
+        ↓
+errors → update RenderData and keep form open
+valid  → resolve submitted result and close RenderDomain
+```
+
+The Web Component must not remove or hide itself on Submit. A successful submit is
+closed only by authoritative subsystem RenderDomain removal.
+
+### Cancel event
+
+The root form emits:
+
+```ts
+context.emitCustomEvent("cancel");
+```
+
+for the header close button, footer Cancel button, and Escape when
+`cancelable=true`.
+
+The presentation must not remove itself on Cancel.
+
+The subsystem re-checks `request.cancelable`. If cancellation is allowed, it
+resolves the cancelled result and closes the RenderDomain.
+
+### Canonical state versus presentation snapshot
+
+The authority split is:
+
+```text
+field component
+  owns DOM editor state / lexical draft / unset distinction
+
+lr-schema-form
+  owns aggregation of the current presentation edit snapshot
+
+Schema Form module
+  owns parsing, canonical values, validation, errors, submit/cancel completion
+```
+
+In short:
+
+> Form Component owns the current presentation edit snapshot; Schema Form module owns
+> the canonical form state.
+
+A Change snapshot may update the module's current canonical state when values can be
+parsed, but a Submit attempt must always interpret its own complete snapshot rather
+than assuming that all previous Change events were delivered.
+
+### RenderData reconciliation after validation
+
+Subsystem validation may update only field errors while the user still has a
+presentation-local lexical draft.
 
 For example:
 
-```ts
-// lr-schema-form
-context.emitCustomEvent("submit");
-context.emitCustomEvent("cancel");
-
-// lr-schema-form-field
-context.emitCustomEvent("change", { value: "Alice" });
-context.emitCustomEvent("clear");
+```text
+authoritative number value = 1
+local numeric draft         = "1."
 ```
 
-The Renderer binds the event to the actual live RenderNode that received the
-capability.
+After a Change event, the subsystem may return:
+
+```text
+value = 1
+error = "Invalid number"
+```
+
+The field component must update the error without unnecessarily replacing its local
+draft `"1."`.
+
+A field should therefore distinguish at least:
+
+```text
+last authoritative value
+current presentation-local edit value
+```
+
+On `receiveRenderData()`:
+
+```text
+authoritative value unchanged
+→ preserve compatible active local draft
+→ update error/label/constraints
+
+authoritative value actually changed
+→ authoritative replacement may reset local draft
+```
+
+This keeps number editing, selection, focus, and IME behavior stable while retaining
+subsystem authority over canonical values.
 
 ### Required LoomRealm Web Presentation extension
 
@@ -1254,20 +1501,28 @@ Example Submit payload:
 }
 ```
 
-Example field-change payload:
+Example Change payload:
 
 ```json
 {
   "domainId": "d3",
-  "targetKey": "field:name",
+  "targetKey": "schema-form",
   "name": "change",
   "data": {
-    "value": "Alice"
+    "values": {
+      "name": "Alice",
+      "age": "1.",
+      "enabled": false,
+      "class": "mage"
+    }
   }
 }
 ```
 
-The Web Component itself supplies only `name` and `data`. The Renderer supplies
+Schema Form emits outward events only from the root `lr-schema-form` RenderNode.
+Field components communicate with that root locally.
+
+The Web Component supplies only `name` and `data`. The Renderer supplies
 `domainId` and `targetKey`.
 
 ### Reuse of User Input
@@ -1415,29 +1670,68 @@ const listener = scope.createInputListener({
 listener.on(
   "x.loomrealm.web-presentation.event",
   (event) => {
-    // match the active form domain/target and handle:
-    // submit / cancel / change / clear
+    // accept only this active form Domain + root target
+    // then handle change / submit / cancel
   },
 );
 ```
 
-The module must match the event against its own currently open form Domain and
-expected RenderNode keys before applying it.
-
-For Schema Form:
+The module must match the event against its own currently open form Domain and root
+RenderNode:
 
 ```text
+domainId = current form domain
 targetKey = "schema-form"
-  submit
-  cancel
-
-targetKey = "field:<field-key>"
-  change
-  clear
 ```
 
-This preserves the rule that the module owns canonical values, validation, and
-completion while the Web Component only reports presentation intent.
+Unknown event names, stale domains, non-root targets, malformed snapshots, unknown
+field keys, missing required field entries, wrong presentation value types, invalid
+select values, and invalid numeric lexical values must not be trusted merely because
+they came from Presentation.
+
+For `change`:
+
+```text
+complete presentation snapshot
+    ↓
+decode according to schema field kinds
+    ↓
+update current canonical values where representable
+    ↓
+built-in validation
+    ↓
+validateOnChange
+    ↓
+RenderDomain.update(field errors/current authoritative data)
+```
+
+For `submit`:
+
+```text
+complete submit snapshot
+    ↓
+decode independently of previous Change delivery
+    ↓
+complete built-in validation
+    ↓
+validateOnSubmit
+    ↓
+errors → keep RenderDomain open and update field errors
+valid  → resolve submitted result and close RenderDomain
+```
+
+For `cancel`:
+
+```text
+re-check request.cancelable
+    ↓
+allowed → resolve cancelled and close RenderDomain
+denied  → ignore
+```
+
+This preserves the rule that the module owns canonical values, validation, completion,
+and RenderDomain lifetime while the Web Component only reports the current
+presentation edit snapshot and user intent.
 
 ### Implementation impact
 
