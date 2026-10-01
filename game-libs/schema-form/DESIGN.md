@@ -1357,17 +1357,17 @@ subsystem authority over canonical values.
 
 ### Required LoomRealm Web Presentation extension
 
-The current Web Presentation API injects a narrow Renderer-owned context into each
+The existing Web Presentation API already injects a Renderer-owned context into each
 business Custom Element through:
 
 ```ts
 receiveRenderContext(context)
 ```
 
-Schema Form requires that context to be extended with a Renderer-mediated custom
-event capability.
+Schema Form does not require a second public capability object or a separate
+presentation-event API surface.
 
-Conceptually:
+Instead, the existing `WebPresentationContext` is extended directly:
 
 ```ts
 interface WebPresentationContext {
@@ -1380,19 +1380,107 @@ interface WebPresentationContext {
 }
 ```
 
+The intended public surface is exactly the context above. v1 does not introduce an
+additional shape such as:
+
+```ts
+context.events.emit(...)
+```
+
+or a separate public `PresentationEventClient`.
+
 This is an intentional reopen of the current Web Presentation v1 context, whose
 frozen shape currently contains only `resources`.
 
 The reason for reopening is a demonstrated interactive business-component
-requirement: presentation-owned controls such as Submit, Cancel, and editable fields
-must report semantic user actions back to the subsystem that owns their RenderNode.
+requirement: a business Custom Element must be able to report semantic user actions
+back through the Renderer while preserving existing LoomRealm authority boundaries.
 
 This extension must not create a reverse Render protocol and must not make DOM state
 authoritative.
 
-### Identity-bound capability
+### Shared resources, per-RenderNode context
 
-The custom-event capability is scoped to one live RenderNode identity.
+The current WebProjector implementation creates one shared
+`WebPresentationContext` instance and injects that same object into every projected
+Custom Element.
+
+That implementation is sufficient while the context contains only a Window-scoped
+resource capability:
+
+```text
+all projected elements
+        ↓
+same WebPresentationContext
+        ↓
+same PresentationResourceClient
+```
+
+It is not sufficient once `emitCustomEvent()` is added.
+
+A call such as:
+
+```ts
+context.emitCustomEvent("submit", data);
+```
+
+must be attributed to the exact live RenderNode that received that context. The
+business component must not be required or allowed to provide Renderer authority
+identity itself.
+
+Therefore the WebProjector implementation changes from:
+
+```text
+one shared WebPresentationContext
+```
+
+to:
+
+```text
+one shared PresentationResourceClient
++ one WebPresentationContext per live RenderNode
+```
+
+The resource capability remains shared because its authority/lifetime is
+Renderer-Window scoped.
+
+The event closure is per RenderNode because its authority/lifetime is bound to that
+specific live projected identity.
+
+Conceptually:
+
+```ts
+const sharedResources =
+  createPresentationResourceClient(...);
+
+const context = Object.freeze({
+  resources: sharedResources,
+
+  emitCustomEvent(name, data = {}) {
+    emitPresentationEvent({
+      sessionId: record.sessionId,
+      subsystemKey: record.subsystemKey,
+      generation: record.generation,
+      domainId: record.domainId,
+      targetKey: record.targetKey,
+      name,
+      data,
+    });
+  },
+});
+```
+
+The public component API therefore stays simple:
+
+```ts
+context.emitCustomEvent("submit", {
+  values: this.collectValues(),
+});
+```
+
+while the closure already knows which RenderNode emitted the event.
+
+### Identity-bound capability
 
 A live projected node already has the Renderer-known identity:
 
@@ -1415,31 +1503,23 @@ input channel
 
 Those values are Renderer/Main authority facts.
 
-Therefore the WebProjector must inject a per-element event closure rather than one
-fully shared event context.
+The semantic rule is:
 
-Conceptually:
+```text
+receiveRenderData(...)
+→ data belongs to this RenderNode
 
-```ts
-const context = Object.freeze({
-  resources: sharedResources,
-
-  emitCustomEvent(name, data = {}) {
-    emitPresentationEvent({
-      sessionId: record.sessionId,
-      subsystemKey: record.subsystemKey,
-      generation: record.generation,
-      domainId: record.domainId,
-      targetKey: record.targetKey,
-      name,
-      data,
-    });
-  },
-});
+emitCustomEvent(...)
+→ event also belongs to this RenderNode
 ```
 
-The resource capability may remain Window-scoped/shared. The event capability is
-RenderNode-scoped.
+That symmetry is the reason for binding `emitCustomEvent()` through a
+per-RenderNode context closure rather than through a shared anonymous event function.
+
+Schema Form itself uses the capability only on the root `lr-schema-form`; field
+components communicate with that root locally. The Renderer-level capability remains
+generic so other business Web Components may use the same context contract in the
+future.
 
 ### Stale capability behavior
 
@@ -1742,7 +1822,9 @@ The intended LoomRealm implementation changes are narrowly scoped:
 
 ```text
 packages/renderer/src/internal/web-projector.ts
-  inject per-LiveElement emitCustomEvent capability
+  keep one shared PresentationResourceClient
+  inject one identity-bound WebPresentationContext per LiveElement
+  add emitCustomEvent directly to the existing context shape
 
 packages/renderer/src/internal/presentation-seam.ts
   add Renderer-internal presentation-event forwarding capability
