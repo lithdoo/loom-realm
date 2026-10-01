@@ -69,8 +69,13 @@ and render ownership context.
 The v1 module API is intentionally one-shot:
 
 ```ts
+export type SchemaFormValueV1 =
+  | string
+  | number
+  | boolean;
+
 export type SchemaFormDataV1 =
-  Readonly<Record<string, JsonValue>>;
+  Readonly<Record<string, SchemaFormValueV1>>;
 
 export interface SchemaFormRequestV1 {
   readonly schema: SchemaFormV1;
@@ -188,6 +193,24 @@ open → edit → submit/cancel → resolve
 If future requirements introduce a persistent control surface that survives beyond
 one interaction, that API shape can be reconsidered separately.
 
+### One active form per Frame
+
+Schema Form v1 allows at most one active `openSchemaForm()` interaction for the same
+Frame at a time.
+
+Opening a second form while another Schema Form is still active for that Frame fails
+immediately with:
+
+```text
+SCHEMA_FORM_ALREADY_OPEN
+```
+
+This avoids introducing modal stacking, competing focus traps, or Escape-key ordering
+semantics in v1.
+
+The active-form registration is released by the same settle-once cleanup path used by
+submit, user cancel, Frame abort, and failures.
+
 ## Top-level schema
 
 ```ts
@@ -274,7 +297,8 @@ export interface SchemaFormBooleanFieldV1 extends SchemaFormFieldBaseV1 {
 }
 ```
 
-`false` is an explicit value and must never be treated as absent.
+`false` is the ordinary unchecked value. Boolean fields do not distinguish
+`null`/unset from `false` in v1.
 
 ### Select field
 
@@ -312,20 +336,27 @@ initialValue[field.key]
     ↓
 field.default
     ↓
-absent
+field-kind empty value
 ```
 
-Therefore:
+The v1 field-kind empty values are:
 
 ```text
-initialValue > default > absent
+string  → ""
+number  → absent
+boolean → false
+select  → absent
 ```
+
+Therefore an absent initial/default string is presented as an empty string and an
+absent initial/default checkbox is presented as unchecked/false.
 
 No additional `initial`, `value`, or `defaultValue` aliases are defined in v1.
 
 ## Value semantics
 
-Submitted form data is a plain object keyed by field key.
+Submitted form data is a plain object keyed by field key and contains only
+`string | number | boolean` values.
 
 Example:
 
@@ -338,9 +369,24 @@ Example:
 }
 ```
 
-Optional fields with no value are omitted.
+String and boolean fields always have an outward value once the form is presented:
 
-The following values are explicit values, not absence:
+```text
+string   → string
+boolean  → true | false
+```
+
+For string fields, `""` is the ordinary empty value. If `required=true`, `""`
+fails required validation. Schema Form does not trim before applying this rule.
+
+For boolean fields, unchecked means `false`. Schema Form does not distinguish an
+unset checkbox from `false`. `required` does not mean "must be checked"; boolean
+fields are already present as either `true` or `false`.
+
+Number and select fields may be unset. Unset number/select fields are omitted from
+canonical `SchemaFormDataV1`.
+
+The following values are explicit values and must never be treated as absence:
 
 ```text
 false
@@ -348,13 +394,57 @@ false
 ""
 ```
 
-For required string fields, an empty string does not satisfy `required`.
-
-For select fields, submitted values must exactly match one declared
+For select fields, non-empty submitted values must exactly match one declared
 `options[*].value`.
 
 Schema Form does not perform implicit trimming, case folding, Unicode normalization,
 locale number conversion, or other value normalization in v1.
+
+## Schema validity and limits
+
+Schema Form validates the schema and `initialValue` before opening Presentation.
+
+The v1 limits are:
+
+```text
+maximum fields                 128
+maximum field.key UTF-8 bytes  128
+maximum custom-event payload   128 KiB
+```
+
+`field.key` must be a non-empty valid Unicode string and unique within the form.
+
+String constraints must satisfy:
+
+```text
+minLength / maxLength are non-negative integers
+minLength <= maxLength when both are present
+```
+
+Number constraints and defaults must use finite JSON-compatible numbers and satisfy:
+
+```text
+min <= max when both are present
+integer=true → default/initial number must be an integer
+```
+
+Every field default and every supplied `initialValue[field.key]` must match the
+declared field kind and built-in constraints.
+
+Select rules are:
+
+```text
+option.value values are unique
+default, when present, matches one option.value
+initialValue, when present, matches one option.value
+```
+
+`initialValue` must not contain unknown field keys.
+
+A Change or Submit presentation payload must remain below 128 KiB after compact JSON
+encoding. Presentation must contain an oversize snapshot locally rather than passing
+it into the Renderer/Data writer. The lower limit intentionally leaves room below
+the generic User Input transport hard limit.
 
 ## Trusted scripted validation
 
@@ -493,21 +583,39 @@ it in both validators.
 
 ## Validator failure
 
-If validator compilation or execution throws, or if a validator returns an invalid
-result shape, that is a schema/program failure rather than a user-data validation
-failure.
+Validator/program failures reject `openSchemaForm()`; they are never converted into
+ordinary field validation errors.
 
-It must not be converted into an ordinary field error.
+The public error contract is:
 
-A stable module error code should be used, for example:
+```ts
+export type SchemaFormErrorCode =
+  | "SCHEMA_FORM_ALREADY_OPEN"
+  | "SCHEMA_FORM_VALIDATOR_FAILED"
+  | "SCHEMA_FORM_INVALID_VALIDATOR_RESULT";
 
-```text
-SCHEMA_FORM_VALIDATOR_FAILED
-SCHEMA_FORM_INVALID_VALIDATOR_RESULT
+export class SchemaFormError extends Error {
+  readonly code: SchemaFormErrorCode;
+}
 ```
 
-The exact failure-code contract is frozen with the module lifecycle/error contract,
-not by this document.
+The code mapping is:
+
+```text
+second active form for same Frame
+→ SCHEMA_FORM_ALREADY_OPEN
+
+validator compilation or execution throws
+→ SCHEMA_FORM_VALIDATOR_FAILED
+
+validator returns an invalid result shape
+→ SCHEMA_FORM_INVALID_VALIDATOR_RESULT
+```
+
+These failures use the same settle-once cleanup path as every other terminal outcome
+and reject with `SchemaFormError`.
+
+Frame abort remains separate and rejects with `AbortError`, not `SchemaFormError`.
 
 ## Validator data isolation
 
@@ -677,7 +785,6 @@ export interface SchemaFormRenderDataV1 {
   readonly title?: string;
   readonly description?: string;
   readonly cancelable: boolean;
-  readonly submitting: boolean;
 }
 ```
 
@@ -1213,17 +1320,23 @@ export type SchemaFormPresentationValuesV1 =
   Readonly<Record<string, SchemaFormPresentationValueV1>>;
 ```
 
-Field mapping:
+Field mapping is intentionally asymmetric:
 
 ```text
-string   → string | null
+string   → string
 number   → finite number | null
-boolean  → boolean | null
+boolean  → boolean
 select   → string | null
 ```
 
-`null` means unset from the subsystem's point of view. It is not a canonical
-Schema Form value and is omitted from canonical `SchemaFormDataV1`.
+For string fields, empty input is represented as `""`; there is no separate
+string-null state.
+
+For checkbox/boolean fields, unchecked is `false`; there is no separate boolean-null
+state.
+
+For number and select fields, `null` means unset from the subsystem's point of view
+and is omitted from canonical `SchemaFormDataV1`.
 
 For number fields, the field component may retain arbitrary presentation-local
 lexical drafts while editing. If the current draft cannot be converted to a finite
@@ -1232,18 +1345,16 @@ number when the value snapshot is collected, the field contributes `null`.
 For example:
 
 ```text
-local draft "12.5" → outward value 12.5
-local draft "1."   → outward value null
-local draft "-"    → outward value null
-empty/unset        → outward value null
+string ""          → outward value ""
+checkbox unchecked → outward value false
+number "12.5"      → outward value 12.5
+number "1."        → outward value null
+number "-"         → outward value null
+unset select       → outward value null
 ```
 
-The lexical draft remains local to `lr-schema-form-field`; the subsystem never
-receives an invalid-number draft string.
-
-This intentionally treats an unconvertible optional number as unset. A required
-number therefore fails built-in required validation when its field contributes
-`null`, while an optional number may be submitted as absent.
+The lexical number draft remains local to `lr-schema-form-field`; the subsystem
+never receives an invalid-number draft string.
 
 The root form collects exactly one entry for every current schema field key.
 
@@ -1277,8 +1388,8 @@ Object.keys(values)
 the exact SchemaFormV1.fields[*].key set
 ```
 
-No schema field may be omitted, including optional fields. Optional/unset fields are
-represented explicitly with `null`.
+No schema field may be omitted from the presentation snapshot. Number/select fields
+that are unset use `null`; string/boolean fields always use their concrete value.
 
 Unknown extra keys and missing keys are malformed presentation snapshots.
 
@@ -1344,8 +1455,8 @@ validate exact presentation snapshot shape
         ↓
 interpret typed values using SchemaFormV1
         ↓
-null → omit field from canonical candidate
-typed value → canonical candidate value
+number/select null → omit field from canonical candidate
+string/boolean and non-null number/select → canonical candidate value
         ↓
 run built-in validation
         ↓
@@ -1381,7 +1492,8 @@ The authority split is:
 ```text
 field component
   owns DOM editor state / lexical draft
-  converts local editor state to string/number/boolean/null
+  maps string to string and checkbox to boolean
+  maps number/select unset or unconvertible number state to null
 
 lr-schema-form
   owns aggregation of the complete typed presentation snapshot
@@ -1395,8 +1507,8 @@ In short:
 > Form Component owns the current presentation edit snapshot; Schema Form module owns
 > the canonical form state.
 
-A Change snapshot deterministically maps `null` to absence and typed non-null values
-to the current canonical candidate. A Submit attempt must always interpret its own
+A Change snapshot maps `null` to absence only for number/select fields. String and
+boolean fields always contribute their concrete value, including `""` and `false`. A Submit attempt must always interpret its own
 complete snapshot rather than assuming that all previous Change events were delivered.
 
 ### RenderData reconciliation after validation
@@ -1857,18 +1969,18 @@ payload as Renderer provenance, but it is not part of the Schema Form module's
 correlation contract.
 
 For Change and Submit, `data.values` must have exactly the schema field-key set.
-Missing keys, unknown extra keys, wrong value types, non-finite numbers, invalid
-select values, stale root targets, and unknown event names are malformed or
-inapplicable input and must not be trusted merely because they came from
-Presentation.
+Missing keys, unknown extra keys, wrong value types, non-finite numbers, null
+string/boolean values, invalid select values, stale root targets, and unknown event
+names are malformed or inapplicable input and must not be trusted merely because
+they came from Presentation.
 
 For `change`:
 
 ```text
 complete typed presentation snapshot
     ↓
-null values → omit from canonical candidate
-non-null values → validate against schema kind
+number/select null → omit from canonical candidate
+string/boolean and non-null number/select → validate against schema kind
     ↓
 built-in field validation
     ↓
@@ -1983,7 +2095,6 @@ and a current validation error for `age`, the projection may be:
     data: {
       title: "Character",
       cancelable: true,
-      submitting: false,
     },
     children: [
       {
