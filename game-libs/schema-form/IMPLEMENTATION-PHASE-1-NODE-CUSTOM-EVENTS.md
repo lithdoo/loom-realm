@@ -1,12 +1,16 @@
 # Phase 1 Implementation Contract: Web Presentation Node Custom Events
 
-Status: **frozen / implementation-ready**
+Status: **frozen / implementation-ready / no design discretion**
 
 This document is the implementation contract for phase 1 of Schema Form support.
 
-An implementation agent should be able to execute this document without making new
+An implementation agent must be able to execute this document without making new
 architecture decisions. If current repository code materially contradicts this
-contract, stop and update the contract rather than inventing a new abstraction.
+contract, update this contract before changing the architecture.
+
+Allowed implementation freedom is limited to private variable/function names,
+mechanically equivalent control-flow refactoring, and test fixture organization that
+does not change any observable behavior or ownership boundary frozen below.
 
 The phase implements exactly one capability:
 
@@ -255,8 +259,9 @@ On `teardown()`:
 this.presentationEmitNodeEvent = null;
 ```
 
-Structural failure may leave the field intact because `failed` itself permanently
-blocks emission.
+Structural failure leaves the callback field untouched; the existing permanent
+`failed` gate blocks all future emission. `teardown()` clears the callback field.
+Do not add a second revocation mechanism for structural failure.
 
 ### 5.4 Per-live-node context
 
@@ -727,7 +732,9 @@ compact JSON <= 262,144 UTF-8 bytes
 no cyclic / non-JSON host values
 ```
 
-The helper is validation only; it may return the validated input object.
+The helper is validation only and returns the same validated object reference passed
+in by the caller. It does not clone or freeze. Detachment/freeze remains exclusively
+owned by `BoundedInputPublisher.offerEvent()`.
 
 The existing `BoundedInputPublisher.offerEvent()` performs the synchronous detached
 frozen snapshot before queueing.
@@ -840,9 +847,14 @@ doc/15-contracts/user-input-v1.md
   no wire version change
 ```
 
-A small dedicated Renderer test file may be added for WebProjector node-event behavior
-if existing tests do not provide an appropriate home. Do not create production
-abstractions merely to make tests convenient.
+Add the dedicated Renderer test file:
+
+```text
+packages/renderer/test/web-projector-events.test.mjs
+```
+
+Use existing test files for the other affected units where appropriate. Do not create
+production abstractions merely to make tests convenient.
 
 No change is required to:
 
@@ -1005,7 +1017,33 @@ Implement in this order to keep each layer independently testable:
 
 Do not start Schema Form phase 2 in the same implementation change.
 
-## 20. Frozen completion invariant
+## 20. Implementation acceptance checklist
+
+Before declaring phase 1 complete, verify all of the following without introducing
+additional production abstractions:
+
+```text
+public context shape exactly matches §2
+reserved channel exactly matches §3
+one shared resource client, one context per live node
+per-node context never captures an attachment callback directly
+attachment callback is token-revoked on detach
+ControlHolder currentness check precedes business argument validation
+current-source invalid arguments throw TypeError synchronously
+stale/revoked sources silently drop
+InputGate delivery is targeted, never broadcast
+reserved channel availability is built-in, not mutable state
+ordinary RendererInputSource cannot publish the reserved channel
+full payload is validated before InputGate publication
+queued accepted events are not retracted by RenderNode removal
+no new wire message / profile / Main authority / Render authority is introduced
+all §18 tests pass
+contract docs are updated consistently
+```
+
+If all items hold, no additional architecture review is required for phase 1.
+
+## 21. Frozen completion invariant
 
 Phase 1 is complete only when this is true:
 
