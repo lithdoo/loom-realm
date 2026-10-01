@@ -75,6 +75,7 @@ export type SchemaFormDataV1 =
 export interface SchemaFormRequestV1 {
   readonly schema: SchemaFormV1;
   readonly initialValue?: SchemaFormDataV1;
+  readonly cancelable?: boolean;
 }
 
 export type SchemaFormResultV1 =
@@ -99,6 +100,7 @@ Typical usage:
 const result = await openSchemaForm(scope, frame, {
   schema,
   initialValue,
+  cancelable: true,
 });
 
 if (result.type === "submitted") {
@@ -108,6 +110,22 @@ if (result.type === "submitted") {
 
 The public function is a convenience module API, not a service locator and not a
 wrapper around `frame.call()`.
+
+`cancelable` controls whether the user may actively dismiss the form.
+
+```text
+cancelable === true
+→ header close control is available
+→ footer Cancel control is available
+→ Escape requests cancel
+
+cancelable === false | undefined
+→ no user-visible cancel controls
+→ Escape does not cancel
+```
+
+The default is non-cancelable. Frame cancellation/abort remains distinct from a user
+cancel action.
 
 A Builder/Handler abstraction is intentionally not introduced in v1. The interaction
 has a simple one-shot lifetime:
@@ -595,6 +613,7 @@ The root receives only state needed to present the form shell:
 export interface SchemaFormRenderDataV1 {
   readonly title?: string;
   readonly description?: string;
+  readonly cancelable: boolean;
   readonly submitting: boolean;
 }
 ```
@@ -604,6 +623,137 @@ submit/cancel controls.
 
 A submit control represents a submit attempt. Browser-native validity and button
 state are not authoritative form validity.
+
+
+### Modal presentation
+
+Schema Form is always presented as a modal dialog in v1.
+
+The modal must visually and interactively cover the underlying presentation while it
+is open.
+
+Its fixed structural regions are:
+
+```text
+backdrop
+└── dialog
+    ├── header
+    │   ├── title
+    │   └── close icon button   (cancelable=true only)
+    │
+    ├── body
+    │   └── form field slot
+    │
+    └── footer
+        ├── Cancel button       (cancelable=true only)
+        └── Submit button
+```
+
+The header displays the form title. The body contains the projected field nodes. The
+footer contains form actions.
+
+The preferred browser layout constraints are:
+
+```css
+.dialog {
+  width: 600px;
+  max-width: 80vw;
+  max-height: 80vh;
+
+  display: grid;
+  grid-template-rows:
+    auto
+    minmax(0, 1fr)
+    auto;
+}
+
+.body {
+  overflow: auto;
+}
+```
+
+The header and footer remain fixed within the dialog while only the body scrolls when
+the field content exceeds the available height.
+
+The backdrop covers the full viewport:
+
+```css
+.backdrop {
+  position: fixed;
+  inset: 0;
+
+  display: grid;
+  place-items: center;
+
+  pointer-events: auto;
+}
+```
+
+The root dialog must expose modal accessibility semantics, conceptually:
+
+```html
+<section role="dialog" aria-modal="true">
+```
+
+The browser implementation must trap focus within the dialog while open and restore
+the previous focus target when the modal closes.
+
+When `cancelable=true`, the header close icon button, footer Cancel button, and
+Escape key all produce the same semantic action:
+
+```ts
+{ type: "cancel" }
+```
+
+Backdrop clicks do not cancel the form in v1.
+
+When `cancelable=false` or is omitted, no user-visible cancel affordance is rendered
+and Escape does not request cancellation.
+
+The root RenderData carries the resolved boolean:
+
+```ts
+readonly cancelable: boolean;
+```
+
+The Web Component must not inspect the original request object to determine
+cancelability.
+
+### Modal input authority
+
+Visual modality and input modality are distinct requirements.
+
+A full-screen backdrop can block pointer interaction with underlying DOM, but it does
+not by itself guarantee that lower-level gameplay keyboard, pointer, or gamepad input
+listeners stop producing game actions through LoomRealm's User Input pipeline.
+
+Therefore the v1 modal requirement is:
+
+> While Schema Form is active, underlying gameplay interaction must not produce
+> business effects.
+
+The intended behavior is conceptually:
+
+```text
+Schema Form active
+       ↓
+Schema Form interaction remains active
+       ↓
+underlying gameplay interaction is suppressed
+```
+
+The current public `InputListener` API provides channel subscription/update/close,
+but does not define an exclusive/capture/priority input primitive.
+
+Therefore the mechanism that provides true modal input exclusion is not yet frozen.
+
+Acceptable future solutions may include a platform-level exclusive input capability or
+an explicit caller-side suspension policy, but the browser backdrop alone is not
+sufficient to satisfy the modal contract.
+
+This unresolved input-authority seam should be designed together with the trusted
+Web Component-to-`RendererInputSource` adapter.
+
 
 ### Field RenderData
 
@@ -993,6 +1143,7 @@ and a current validation error for `age`, the projection may be:
     attrs: {},
     data: {
       title: "Character",
+      cancelable: true,
       submitting: false,
     },
     children: [
