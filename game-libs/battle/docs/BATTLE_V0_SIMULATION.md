@@ -1,6 +1,6 @@
 # Battle v0 Simulation Implementation Spec
 
-> 状态：**Simulation gameplay/runtime baseline = FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit (§10/§16) = FROZEN FOR IMPLEMENTATION**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。新增 circuit-pause 尚未落地代码/qualification，不得把既有 baseline qualification 误解为该新增行为已实现。
+> 状态：**Simulation gameplay/runtime baseline 与 Decision availability circuit (§10/§16) 均 FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文定义 Battle v0 Simulation 的实施结构、状态交接、调度、异步边界、Replay 与 Runtime lifecycle；gameplay 语义仍以 [BATTLE_V0_SPEC.md](./BATTLE_V0_SPEC.md) 的 Rule IDs 为唯一权威，cross-layer 数据以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准，Presentation ABI/行为不得在本文重新设计。
 >
 > 目标：implementation agent 应能直接实现 headless/self-driven Simulation，而不需要自行选择 Clock、queue、Decision lifecycle、Plan handoff、Tick transaction、Projection cadence、terminal race 或 Replay 架构。
 
@@ -1775,7 +1775,7 @@ Agent may choose local helper names/data structures only where 本文明确标�
 
 ## 33. Implementation qualification gate
 
-Simulation **既有 gameplay/runtime baseline** 已完成 implementation 与 closed-loop qualification；Decision availability circuit (§10/§16) 已达到 FROZEN FOR IMPLEMENTATION，但尚未落地代码/qualification。
+Simulation **既有 gameplay/runtime baseline** 与 Decision availability circuit (§10/§16) 均已完成 implementation、automated acceptance 与 closed-loop qualification。
 
 baseline 已固化的 blocking choice：
 
@@ -1796,7 +1796,7 @@ baseline 已固化的 blocking choice：
 - cancel/pause/late async races；
 - headless test doubles、Agent execution order、build/test/pack Definition of Done。
 
-本 PR implementation agent **必须新增并 qualification** 的 Simulation delta 只有：
+本次已实现并 qualification 的 Simulation delta 为：
 
 ~~~text
 tick.ts

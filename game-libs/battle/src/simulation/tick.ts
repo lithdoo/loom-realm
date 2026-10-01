@@ -67,10 +67,13 @@ interface TickFacts {
   protections: ReplayProtectionFact[];
 }
 
+type DecisionHealthSignal = "success" | "failure";
+
 export interface TickOutput {
   readonly scheduledEvents: readonly BattleEvent[];
   readonly decisionCommands: readonly RequestDecisionCommand[];
   readonly decisionRecords: readonly ReplayDecisionRecord[];
+  readonly decisionHealthSignals: readonly DecisionHealthSignal[];
   readonly replayTick: ReplayTickRecord;
   readonly projection: RenderProjection;
   readonly terminalCandidate: BattleResult | null;
@@ -329,6 +332,7 @@ export function processOneTick(
   const scheduledEvents: BattleEvent[] = [];
   const commands: RequestDecisionCommand[] = [];
   const decisionRecords: ReplayDecisionRecord[] = [];
+  const decisionHealthSignals: DecisionHealthSignal[] = [];
   const effectStarts: SkillEffectProjection[] = [];
   const abortActorIds = new Set<string>();
   const startedActionActors = new Set<string>();
@@ -386,9 +390,11 @@ export function processOneTick(
           terminalCandidate = { type: "failure", source: "decision", code: entry.completion.error.code };
           break;
         }
+        decisionHealthSignals.push("failure");
         actor.nextDecisionTick = checkedAdd(state.currentTick, 1);
         continue;
       }
+      decisionHealthSignals.push("success");
       const validation = validatePlan(definition, state, actor, decision.planningOrigin, entry.completion.plan);
       if (!validation.accepted) {
         decisionRecords.push({
@@ -515,6 +521,7 @@ export function processOneTick(
     scheduledEvents: Object.freeze(scheduledEvents),
     decisionCommands: Object.freeze(commands),
     decisionRecords: Object.freeze(decisionRecords),
+    decisionHealthSignals: Object.freeze(decisionHealthSignals),
     replayTick: finalReplayTick,
     projection: buildProjection(state, effectStarts),
     terminalCandidate,
@@ -531,6 +538,7 @@ export function processOneTick(
       scheduledEvents: Object.freeze(scheduledEvents),
       decisionCommands: Object.freeze([]),
       decisionRecords: Object.freeze(decisionRecords),
+      decisionHealthSignals: Object.freeze(decisionHealthSignals),
       replayTick: replayTick(state.currentTick, facts),
       projection: buildProjection(state, effectStarts),
       terminalCandidate: Object.freeze({ type: "failure", source: "simulation", code }),

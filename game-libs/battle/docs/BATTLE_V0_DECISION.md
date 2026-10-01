@@ -1,6 +1,6 @@
 # Battle v0 Decision Implementation Spec
 
-> 状态：**FROZEN FOR IMPLEMENTATION**。
+> 状态：**FROZEN + IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。
 >
 > 本文冻结 Battle v0 concrete Decision implementation。它不重新定义 Simulation gameplay authority：DecisionPort / DecisionRequest / DecisionCompletion / PlanSubmission 以 [BATTLE_V0_CONTRACTS.md](./BATTLE_V0_CONTRACTS.md) 为准；generation、Decision Inbox、Plan validation、correction authority、accepted/pending Plan、Replay 与 BattleResult 以 [BATTLE_V0_SIMULATION.md](./BATTLE_V0_SIMULATION.md) 为准。
 >
@@ -321,11 +321,13 @@ DecisionCompletion.completed
 model = deepseek-flash
 reasoning.effort = high
 text.format.type = text
-max_output_tokens = 8192
+max_output_tokens = 65536
 stream = false
 tools omitted
 temperature omitted
 ~~~
+
+这是 Decision/provider maintenance compatibility rule，不是 gameplay rule。DeepSeek Responses 的 `max_output_tokens` 同时包含 reasoning 与 visible output tokens；real-provider qualification 已证明 `8192` 配合 `reasoning.effort=high` 可能在产生任何 visible strategy output 前于 reasoning 阶段终止。因此 v0 将 Call A 固定为 `65536`，同时保留 `reasoning.effort=high`。
 
 Call A 的 visible output 是一个 opaque UTF-8 strategyMemo string。Prompt 要求模型使用：
 
@@ -361,7 +363,7 @@ Call A exact Responses body：
   "instructions": "<CALL_A_INSTRUCTIONS>",
   "input": "<BATTLE_CONTEXT_V0_JSON>",
   "reasoning": { "effort": "high" },
-  "max_output_tokens": 8192,
+  "max_output_tokens": 65536,
   "stream": false,
   "text": {
     "format": { "type": "text" }

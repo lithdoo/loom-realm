@@ -1,6 +1,6 @@
 # Battle v0 测试矩阵
 
-> 状态：**Core gameplay FROZEN；既有 Simulation Acceptance IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Presentation IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；DeepSeekDecision + Decision availability circuit acceptance FROZEN FOR IMPLEMENTATION**。本文不重新定义规则；新增 T-DDEC-* 与 T-DEC-023..036 尚待实现后 qualification。
+> 状态：**Core gameplay FROZEN；Simulation（含 Decision availability circuit）、DeepSeekDecision 与 Presentation Acceptance 均 IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文不重新定义规则；T-DDEC-* 与 T-DEC-023..036 已纳入普通 credential-free automated qualification，真实 provider smoke 仍为 explicit opt-in。
 >
 > DeepSeek provider/workflow 已由 BATTLE_V0_DECISION.md 冻结；PlayerGuidance concrete contract 与 Host/InputTarget wiring 明确延期，不得由当前实现自行假设。
 
@@ -202,7 +202,7 @@
 
 
 
-## 8.1 DeepSeekDecision concrete acceptance — FROZEN FOR IMPLEMENTATION
+## 8.1 DeepSeekDecision concrete acceptance — IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED
 
 以下测试针对 BATTLE_V0_DECISION.md，不依赖真实付费 provider；默认使用 FakeDeepSeekTransport。
 
@@ -210,7 +210,7 @@
 | --- | --- | --- | --- |
 | T-DDEC-001 | DECISION §2–4/§14 | 构造 DeepSeekDecision | public option 只有 configured DeepSeekTransport；不接收 apiKey/provider/model/baseUrl/timeout/retry |
 | T-DDEC-002 | DECISION §3 | normal decide() | exactly 两个 provider request；都使用 deepseek-flash + POST /responses + stream=false，无 tools |
-| T-DDEC-003 | DECISION §4.1 | Call A request | reasoning.effort=high、text output、max_output_tokens=8192；temperature 不发送 |
+| T-DDEC-003 | DECISION §4.1 | Call A request | reasoning.effort=high、text output、max_output_tokens=65536；temperature 不发送 |
 | T-DDEC-004 | DECISION §4.2/8 | Call B request | reasoning.effort=none、temperature=0、json_schema name=battle_plan_v0、max_output_tokens=4096 |
 | T-DDEC-005 | DECISION §5/13 | Simulation correction request | 作为新的 decide() 自包含重新执行 Call A + Call B；不得复用上一 request strategy/provider session |
 | T-DDEC-006 | DECISION §6.3 | moving prefetch A→B | prompt 明确 PATH BASE=planningOrigin=B，同时保留 self.tile=A/action.to=B |

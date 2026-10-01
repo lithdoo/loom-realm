@@ -1,6 +1,6 @@
 # Battle v0 核心规范
 
-> 状态：**Core gameplay FROZEN；Simulation gameplay/runtime baseline IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED；Decision availability circuit FROZEN FOR IMPLEMENTATION**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/physical transport/product composition 状态以 Contracts / Decision / Integration 文档为准。
+> 状态：**Core gameplay FROZEN；Simulation gameplay/runtime（含 Decision availability circuit）IMPLEMENTED + TESTED + CLOSED-LOOP QUALIFIED**。本文仍是 Battle v0 已冻结 gameplay/runtime 语义的唯一权威来源；外部 serialization/provider/physical transport/product composition 状态以 Contracts / Decision / Integration 文档为准。
 >
 > 统一状态词：
 > - **FROZEN / MUST**：v0 实现必须遵守。
