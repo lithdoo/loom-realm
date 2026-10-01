@@ -8,6 +8,7 @@ import type {
   InputStateV1,
   RendererDataPeer,
 } from "@loomrealm/data";
+import { WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
 import type { RendererAuthoritySnapshotV1 } from "@loomrealm/renderer-control";
 
 interface Lease {
@@ -294,6 +295,16 @@ export class RendererInputGate {
     }
   }
 
+  emitEventForSubsystem(
+    subsystemKey: string,
+    channel: InputEventChannelV1,
+    payload: InputEventV1["payload"],
+  ): void {
+    const slot = this.slots.get(subsystemKey);
+    if (slot === undefined || slot.lease === null || !slot.effective.has(channel)) return;
+    slot.publisher.offerEvent(slot.lease, channel, payload);
+  }
+
   resetProducerFacts(): void {
     this.availability.clear();
     this.stateSamples.clear();
@@ -301,6 +312,7 @@ export class RendererInputGate {
   }
 
   private producerAvailable(channel: InputChannelV1): boolean {
+    if (channel === WEB_PRESENTATION_EVENT_CHANNEL_V1) return true;
     if (this.availability.get(channel) !== true) return false;
     return !channel.endsWith(".state") || this.stateSamples.has(channel as InputStateChannelV1);
   }

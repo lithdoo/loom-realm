@@ -29,6 +29,11 @@ interface RenderDataReceiver {
 
 interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
+
+  emitCustomEvent(
+    name: string,
+    data?: InputEventV1["payload"],
+  ): void;
 }
 
 interface PresentationResourceClient {
@@ -58,7 +63,7 @@ interface PresentationResourceError extends Error {
 }
 ```
 
-`WebPresentationContext` V1 closed shape = exactly `resources`。Error contract是 structural `Error + readonly code`；不冻结 shared constructor/`instanceof` identity。
+`WebPresentationContext` V1 closed shape = exactly `resources` + `emitCustomEvent`。Error contract是 structural `Error + readonly code`；不冻结 shared constructor/`instanceof` identity。
 
 该 TypeScript surface 描述 **structural ABI shape**，不要求 M13 新增独立 `@loomrealm/presentation` package、public runtime object或 mandatory base class。Business code MAY 以兼容 structural type直接实现；是否在后续真实 author consumer 中增加 type-only package/subpath，只能由真实 ergonomics/correctness需求 reopen，不能为了 package symmetry预建。
 
@@ -325,6 +330,42 @@ Teardown 后，任何**格式正确**的 `resource()` 调用 MUST reject `CONTEN
 Caller-provided AbortSignal只取消其单次 read；caller cancellation同样映射 `CONTENT_CANCELLED`。
 
 ---
+
+### 8.1 RenderNode custom event return path
+
+Each live RenderNode receives its own stable `WebPresentationContext`; all such contexts share the same Window-lifetime `PresentationResourceClient`. `emitCustomEvent(name, data = {})` is the only Phase 1 reverse capability. It emits through the existing User Input v1 wire using the reserved channel:
+
+```ts
+const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
+  "x.loomrealm.web-presentation.event" as const;
+```
+
+The Renderer, not business code, binds provenance. The resulting `input.event.payload` is exactly:
+
+```ts
+{
+  domainId: string;
+  targetKey: string;
+  name: string;
+  data: InputEventV1["payload"];
+}
+```
+
+Business components MUST NOT provide or override `sessionId`, `subsystemKey`, `generation`, `domainId`, `targetKey`, `frameId`, `activationId`, or `channel`. `domainId` and `targetKey` come from the exact current live RenderNode; `frameId` and `activationId` come from current Main authority.
+
+Acceptance order is normative:
+
+```text
+attachment + Control/Data/Store/RenderNode currentness
+→ name and data validation
+→ targeted InputGate delivery to the owning subsystem
+```
+
+Events from a detached attachment, ended or structurally failed Projector, expired exact live record, old Session/generation, retired carrier, partial rebaseline, or removed target MUST be silently dropped before argument validation. A current source with an invalid name or payload MUST synchronously throw `TypeError` and MUST NOT enter InputGate or the Data writer. Names are valid Unicode scalar strings of 1..128 UTF-8 bytes. Data uses the existing User Input payload JSON/depth/member/byte limits.
+
+Delivery is targeted to the RenderNode's owning subsystem. A different current `InputTarget` MUST cause a drop, never a redirect. Once the bounded User Input publisher accepts an event, later RenderNode removal does not retract it.
+
+No new wire message, Renderer Data profile version, Main Control protocol, Frame model, or Render Update version is introduced.
 
 ## 9. Structural Failure / Preflight
 

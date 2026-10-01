@@ -170,6 +170,30 @@ channel total = 1..128 ASCII bytes
 
 Custom payload root MUST 是 bounded JSON object，并服从相同 lifetime/authority/State/Event 规则。
 
+### Reserved Web Presentation event channel
+
+```ts
+const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
+  "x.loomrealm.web-presentation.event" as const;
+```
+
+This is a Renderer built-in producer carried by the existing `InputEventV1`; it does not add a new wire message or change `loomrealm.user-input / 1`, its conformance revision, or the Renderer Data profile. Its payload is:
+
+```ts
+{
+  domainId: string;
+  targetKey: string;
+  name: string;
+  data: InputEventV1["payload"];
+}
+```
+
+Renderer-bound Web Presentation provenance supplies `domainId`, `targetKey`, and owning `subsystemKey`. Main authority supplies the current `frameId` and `activationId`. Delivery uses the ordinary Interest and current InputTarget gates, but is targeted only to the owning subsystem; it MUST NOT broadcast or redirect to another subsystem.
+
+The reserved producer is always available for Effective-gate calculation, including after `resetProducerFacts()`. Ordinary `RendererInputSource` implementations MUST NOT declare availability, State, or Event production for this channel; attempting to do so synchronously throws `TypeError` under the existing source failure semantics.
+
+Before publication, Renderer MUST establish attachment, Control/Data carrier, Store baseline, and live RenderNode currentness. Stale or revoked sources are silently dropped without validating their event arguments. Current sources validate the event name and the existing bounded JSON payload rules; invalid arguments synchronously throw `TypeError` without entering InputGate or Data writer. Once accepted by the bounded publisher, an Event remains established even if its RenderNode is later removed.
+
 ---
 
 ## 5. Frame Input Interest Registry

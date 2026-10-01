@@ -46,6 +46,28 @@ test("production presentation reads only narrow current Store facts", () => {
   assert.ok(Object.isFrozen(facts.domains));
 });
 
+test("presentation target currentness requires a current fully-baselined live target", () => {
+  const store = new RendererRenderStore(3);
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), false);
+  store.beginCarrier();
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), false);
+  store.onDomains(domains("d1", "d2"));
+  store.onSnapshot(snapshot("d1", 1, [node("root")]));
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), false, "partial rebaseline");
+  store.onSnapshot(snapshot("d2", 1, [node("other")]));
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), true);
+  assert.equal(store.isPresentationTargetCurrent("missing", "root"), false);
+  assert.equal(store.isPresentationTargetCurrent("d1", "missing"), false);
+  store.retireCarrier();
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), false);
+  store.beginCarrier();
+  store.onDomains(domains("d1", "d2"));
+  store.onSnapshot(snapshot("d1", 2, [node("root")]));
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), false);
+  store.onSnapshot(snapshot("d2", 2, [node("other")]));
+  assert.equal(store.isPresentationTargetCurrent("d1", "root"), true);
+});
+
 test("Patch applies insert, move, update and remove in order with one final commit", () => {
   const store = new RendererRenderStore(1);
   store.beginCarrier();

@@ -1,4 +1,4 @@
-import type { RenderNodeV1 } from "@loomrealm/data";
+import type { InputEventV1, RenderNodeV1 } from "@loomrealm/data";
 import {
   createPresentationResourceClient,
   type PresentationResourceClient,
@@ -7,12 +7,14 @@ import type { RendererResourceClient } from "./resource-client.js";
 import type {
   PresentationDomainView,
   RendererPresentationEffect,
+  RendererPresentationNodeEvent,
   RendererPresentationSource,
   RendererPresentationView,
 } from "./presentation-seam.js";
 
 export interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
+  emitCustomEvent(name: string, data?: InputEventV1["payload"]): void;
 }
 
 export interface WebProjectorOptions {
@@ -40,10 +42,12 @@ interface LiveElement {
   readonly subsystemKey: string;
   readonly generation: number;
   readonly domainId: string;
+  readonly targetKey: string;
   zIndex: number;
   order: number;
   readonly tag: string;
   readonly element: HTMLElement;
+  readonly context: WebPresentationContext;
   managedAttributes: Set<string>;
   deliveredData: unknown;
   dataAttempted: boolean;
@@ -113,20 +117,24 @@ function authorityKey(sessionId: string, subsystemKey: string, generation: numbe
 
 export class WebProjector implements RendererPresentationEffect {
   private readonly live = new Map<string, LiveElement>();
-  private readonly context: WebPresentationContext;
+  private readonly resources: PresentationResourceClient;
+  private presentationEmitNodeEvent: ((event: RendererPresentationNodeEvent) => void) | null = null;
   private failed = false;
   private ended = false;
   private readonly lifetime = new AbortController();
 
   constructor(private readonly options: WebProjectorOptions) {
     if (options.document === null || typeof options.document !== "object") throw new TypeError("Invalid Projector document");
-    this.context = Object.freeze({
-      resources: createPresentationResourceClient(options.resourceClient, this.lifetime.signal),
-    });
+    this.resources = createPresentationResourceClient(options.resourceClient, this.lifetime.signal);
   }
 
-  reevaluate(source: RendererPresentationSource): void {
-    if (this.failed || this.ended) return;
+  reevaluate(
+    source: RendererPresentationSource,
+    emitNodeEvent: (event: RendererPresentationNodeEvent) => void,
+  ): void {
+    if (this.ended) return;
+    this.presentationEmitNodeEvent = emitNodeEvent ?? null;
+    if (this.failed) return;
     const view = source.read();
     if (view === null) return;
     try {
@@ -137,6 +145,7 @@ export class WebProjector implements RendererPresentationEffect {
   }
 
   teardown(): void {
+    this.presentationEmitNodeEvent = null;
     if (this.ended) return;
     this.ended = true;
     this.lifetime.abort();
@@ -180,16 +189,25 @@ export class WebProjector implements RendererPresentationEffect {
     for (const candidate of desired.values()) {
       if (this.live.has(candidate.identity)) continue;
       const element = this.options.document.createElement(candidate.node.tag);
-      const record: LiveElement = {
+      let record: LiveElement;
+      const context: WebPresentationContext = Object.freeze({
+        resources: this.resources,
+        emitCustomEvent: (name: string, data: InputEventV1["payload"] = {}) => {
+          this.emitNodeEvent(record, name, data);
+        },
+      });
+      record = {
         identity: candidate.identity,
         sessionId: candidate.sessionId,
         subsystemKey: candidate.subsystemKey,
         generation: candidate.generation,
         domainId: candidate.domainId,
+        targetKey: candidate.node.key,
         zIndex: candidate.zIndex,
         order: candidate.order,
         tag: candidate.node.tag,
         element,
+        context,
         managedAttributes: new Set(),
         deliveredData: noData,
         dataAttempted: false,
@@ -197,7 +215,7 @@ export class WebProjector implements RendererPresentationEffect {
       created.set(candidate.identity, record);
       try {
         const receiver = element as HTMLElement & { receiveRenderContext?: (context: WebPresentationContext) => void };
-        receiver.receiveRenderContext?.(this.context);
+        receiver.receiveRenderContext?.(record.context);
       } catch (cause) {
         this.options.reportFailure?.(cause);
       }
@@ -265,6 +283,19 @@ export class WebProjector implements RendererPresentationEffect {
         }
       }
     }
+  }
+
+  private emitNodeEvent(record: LiveElement, name: unknown, data: unknown): void {
+    if (this.ended || this.failed || this.live.get(record.identity) !== record) return;
+    this.presentationEmitNodeEvent?.({
+      sessionId: record.sessionId,
+      subsystemKey: record.subsystemKey,
+      generation: record.generation,
+      domainId: record.domainId,
+      targetKey: record.targetKey,
+      name,
+      data,
+    });
   }
 
   private fail(cause: unknown): void {

@@ -4,6 +4,7 @@ import {
   createRendererDataPeer,
   createSubsystemDataPeer,
   RENDERER_DATA_PROFILE_V1,
+  validateInputPayloadV1,
 } from "../dist/index.js";
 
 const accepted = () => ({ kind: "accepted" });
@@ -67,6 +68,33 @@ function nested(depth) {
   for (let i = 0; i < depth; i += 1) value = { a: value };
   return value;
 }
+
+test("validateInputPayloadV1 validates without cloning or freezing", () => {
+  const payload = { nested: { values: [1, true, null, "ok"] } };
+  assert.equal(validateInputPayloadV1(payload), payload);
+  assert.equal(Object.isFrozen(payload), false);
+
+  const cyclic = {};
+  cyclic.self = cyclic;
+  class Instance { value = 1; }
+  for (const invalid of [
+    null,
+    [],
+    new Date(),
+    new Instance(),
+    cyclic,
+    { value: NaN },
+    { value: Infinity },
+    { value: 1n },
+    { value() {} },
+    { value: Symbol("invalid") },
+    nested(33),
+    { value: "x".repeat(262_145) },
+    { values: Array.from({ length: 16_385 }, () => null) },
+  ]) {
+    assert.throws(() => validateInputPayloadV1(invalid));
+  }
+});
 
 test("unsorted interest frames are rejected without a canonicalizer", async () => {
   const carrier = hangingCarrier();

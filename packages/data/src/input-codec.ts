@@ -172,6 +172,10 @@ function standardPayload(ch: string, payload: JsonObject): void {
   else if (ch === "gamepad.event") gamepadPayload(payload, true);
 }
 
+export function validateInputPayloadV1(raw: unknown): InputEventV1["payload"] {
+  return assertPayload(raw, "input");
+}
+
 export function validateInputInterest(raw: unknown): InputInterestV1 {
   const p = exact(raw, ["type", "frames"], [], "input");
   if (p.type !== "input.interest") fail("input", "wrong type");

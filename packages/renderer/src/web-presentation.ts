@@ -11,7 +11,12 @@ export { bootstrapWebPresentation } from "./internal/web-presentation-bootstrap.
 export {
   attachRendererPresentation,
   type RendererPresentationEffect,
+  type RendererPresentationNodeEvent,
   type RendererPresentationSource,
   type RendererPresentationView,
 } from "./internal/presentation-seam.js";
-export { WebProjector, type WebProjectorOptions } from "./internal/web-projector.js";
+export {
+  WebProjector,
+  type WebPresentationContext,
+  type WebProjectorOptions,
+} from "./internal/web-projector.js";

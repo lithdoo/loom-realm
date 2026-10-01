@@ -21,6 +21,9 @@ export type InputStateChannelV1 = "keyboard.state" | "pointer.state" | "gamepad.
 export type InputEventChannelV1 = "keyboard.event" | "pointer.event" | "gamepad.event" | CustomInputEventChannelV1;
 export type InputChannelV1 = InputStateChannelV1 | InputEventChannelV1;
 
+export const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
+  "x.loomrealm.web-presentation.event" as const;
+
 export interface FrameInputInterestV1 {
   readonly frameId: string;
   readonly channels: readonly InputChannelV1[];

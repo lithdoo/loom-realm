@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
 import { RendererInputGate } from "../dist/internal/input-gate.js";
 
 function deferred() {
@@ -268,4 +269,46 @@ test("producer return requires fresh State while Event return remains future-onl
   gate.setAvailability("keyboard.state", true);
   assert.equal(harness.sent.length, 2);
   assert.equal(harness.sent[1].type, "input.state");
+});
+
+test("Web Presentation events are built-in, reset-stable, and targeted to the owning subsystem", async () => {
+  const gate = new RendererInputGate();
+  const a = peerHarness();
+  const b = peerHarness();
+  gate.installData("A", a.peer);
+  gate.installData("B", b.peer);
+  gate.setControl({
+    sessionId: "s",
+    revision: 1,
+    runtimes: [{ subsystemKey: "A", state: "ready" }, { subsystemKey: "B", state: "ready" }],
+    stack: [
+      { frameId: "a-frame", subsystemKey: "A", lifecycle: "active", activationId: "a1" },
+      { frameId: "b-frame", subsystemKey: "B", lifecycle: "active", activationId: "b1" },
+    ],
+    inputTarget: { subsystemKey: "A", frameId: "a-frame", activationId: "a1" },
+    dataAuthorities: [],
+  });
+  gate.replaceInterest("A", a.peer, {
+    type: "input.interest",
+    frames: [{ frameId: "a-frame", channels: [WEB_PRESENTATION_EVENT_CHANNEL_V1] }],
+  });
+  gate.replaceInterest("B", b.peer, {
+    type: "input.interest",
+    frames: [{ frameId: "b-frame", channels: [WEB_PRESENTATION_EVENT_CHANNEL_V1] }],
+  });
+
+  gate.emitEventForSubsystem("A", WEB_PRESENTATION_EVENT_CHANNEL_V1, { marker: 1 });
+  gate.emitEventForSubsystem("B", WEB_PRESENTATION_EVENT_CHANNEL_V1, { marker: 2 });
+  assert.equal(a.sent.length, 1);
+  assert.equal(b.sent.length, 0, "an A InputTarget never redirects an event to B");
+
+  gate.resetProducerFacts();
+  gate.emitEventForSubsystem("A", WEB_PRESENTATION_EVENT_CHANNEL_V1, { marker: 3 });
+  await release(a, 0);
+  assert.deepEqual(a.sent.map(({ payload }) => payload.marker), [1, 3]);
+
+  const noInterest = peerHarness();
+  gate.installData("C", noInterest.peer);
+  gate.emitEventForSubsystem("C", WEB_PRESENTATION_EVENT_CHANNEL_V1, { marker: 4 });
+  assert.equal(noInterest.sent.length, 0);
 });

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryCarrierPair } from "@loomrealm/foundation/testing";
-import { createSubsystemDataPeer } from "@loomrealm/data";
+import { createSubsystemDataPeer, WEB_PRESENTATION_EVENT_CHANNEL_V1 } from "@loomrealm/data";
 import { createMainRendererControlPeer, prepareRendererHelloResultV1 } from "@loomrealm/renderer-control";
 import { createRendererControlHolder } from "../dist/index.js";
 
@@ -95,6 +95,29 @@ test("public holder factory keeps old M8 calls valid while accepting the M10 sou
   );
   assert.throws(() => createRendererControlHolder(undefined, null), /Invalid RendererInputSource/);
   assert.throws(() => createRendererControlHolder(undefined, undefined, null), /Invalid RendererViewportSource/);
+});
+
+test("ordinary RendererInputSource synchronously rejects the reserved presentation channel", async () => {
+  let sourceEmit;
+  const holder = createRendererControlHolder(undefined, {
+    start(emit) {
+      sourceEmit = emit;
+      return () => {};
+    },
+  });
+  const pair = createMemoryCarrierPair();
+  main(pair, "a");
+  await holder.connect({ carrier: pair.right, rendererControlToken: "t" });
+  assert.throws(() => sourceEmit({
+    kind: "event",
+    channel: WEB_PRESENTATION_EVENT_CHANNEL_V1,
+    payload: {},
+  }), TypeError);
+  assert.throws(() => sourceEmit({
+    kind: "availability",
+    channel: WEB_PRESENTATION_EVENT_CHANNEL_V1,
+    available: true,
+  }), TypeError);
 });
 
 test("replacement identity ignores old late state and old terminal", async () => {

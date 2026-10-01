@@ -411,6 +411,15 @@ export class RendererRenderStore {
     return accepted;
   }
 
+  isPresentationTargetCurrent(domainId: string, targetKey: string): boolean {
+    if (!this.currentCarrier || !this.registrySeen) return false;
+    if ([...this.domains.values()].some((domain) => !domain.baselined)) return false;
+    const domain = this.domains.get(domainId);
+    return domain !== undefined &&
+      domain.baselined &&
+      this.identities.get(domainId)?.liveTags.has(targetKey) === true;
+  }
+
   snapshotForQualification(): RenderStoreSnapshot {
     const domains = [...this.domains.values()].map((domain) => ({
       domainId: domain.domainId,

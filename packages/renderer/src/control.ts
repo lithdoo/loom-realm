@@ -1,7 +1,10 @@
 import {
   createRendererDataPeer,
   RENDERER_DATA_PROFILE_V1,
+  validateInputPayloadV1,
+  WEB_PRESENTATION_EVENT_CHANNEL_V1,
   type RendererDataPeer,
+  type InputEventV1,
 } from "@loomrealm/data";
 import type { RendererDataBinding } from "@loomrealm/platform-ports";
 import {
@@ -17,6 +20,7 @@ import { renderQualification } from "./internal/render-qualification.js";
 import {
   presentationAttachment,
   type RendererPresentationEffect,
+  type RendererPresentationNodeEvent,
   type RendererPresentationSource,
   type RendererPresentationView,
 } from "./internal/presentation-seam.js";
@@ -88,6 +92,32 @@ function bestEffortCloseCarrier(value: unknown): void {
   }
 }
 
+function validatePresentationEventName(value: unknown): string {
+  if (typeof value !== "string") throw new TypeError("Invalid Web Presentation custom event name");
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x7f) {
+      bytes += 1;
+    } else if (codeUnit <= 0x7ff) {
+      bytes += 2;
+    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        throw new TypeError("Invalid Web Presentation custom event name");
+      }
+      bytes += 4;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      throw new TypeError("Invalid Web Presentation custom event name");
+    } else {
+      bytes += 3;
+    }
+  }
+  if (bytes < 1 || bytes > 128) throw new TypeError("Invalid Web Presentation custom event name");
+  return value;
+}
+
 function validateRendererDataBinding(
   data: RendererDataBinding | undefined,
 ): void {
@@ -154,6 +184,8 @@ class ControlHolder implements RendererControlHolder {
   private viewportSubscription: ViewportSourceSubscription | null = null;
   private readonly viewportPublisher = new RendererViewportPublisher();
   private presentationEffect: RendererPresentationEffect | null = null;
+  private presentationAttachmentToken: object | null = null;
+  private presentationEmitNodeEvent: ((event: RendererPresentationNodeEvent) => void) | null = null;
   private readonly presentationSource: RendererPresentationSource = Object.freeze({
     read: () => this.readPresentation(),
   });
@@ -174,10 +206,20 @@ class ControlHolder implements RendererControlHolder {
 
   [presentationAttachment](effect: RendererPresentationEffect): () => void {
     if (this.presentationEffect !== null) throw new TypeError("Renderer presentation already attached");
+    const token = Object.freeze({});
+    const emitNodeEvent = (event: RendererPresentationNodeEvent): void => {
+      if (this.presentationAttachmentToken !== token || this.presentationEffect !== effect) return;
+      this.emitPresentationNodeEvent(event);
+    };
     this.presentationEffect = effect;
+    this.presentationAttachmentToken = token;
+    this.presentationEmitNodeEvent = emitNodeEvent;
     if (this.currentValue !== null) this.notifyPresentation();
     return () => {
-      if (this.presentationEffect === effect) this.presentationEffect = null;
+      if (this.presentationAttachmentToken !== token) return;
+      this.presentationEffect = null;
+      this.presentationAttachmentToken = null;
+      this.presentationEmitNodeEvent = null;
     };
   }
 
@@ -450,11 +492,48 @@ class ControlHolder implements RendererControlHolder {
   }
 
   private notifyPresentation(): void {
+    const effect = this.presentationEffect;
+    const emitNodeEvent = this.presentationEmitNodeEvent;
+    if (effect === null || emitNodeEvent === null) return;
     try {
-      this.presentationEffect?.reevaluate(this.presentationSource);
+      effect.reevaluate(this.presentationSource, emitNodeEvent);
     } catch {
       // Presentation failure cannot roll back committed authority or Store state.
     }
+  }
+
+  private emitPresentationNodeEvent(event: RendererPresentationNodeEvent): void {
+    const current = this.currentValue;
+    if (current === null || event.sessionId !== current.snapshot.sessionId) return;
+    const authority = current.snapshot.dataAuthorities.find(
+      ({ subsystemKey }) => subsystemKey === event.subsystemKey,
+    );
+    if (authority === undefined || authority.generation !== event.generation) return;
+    const slot = this.dataSlots.get(event.subsystemKey);
+    const carrier = slot?.current;
+    if (
+      slot === undefined ||
+      carrier === null ||
+      carrier === undefined ||
+      carrier.identity.controlPeer !== current.peer ||
+      carrier.identity.subsystemKey !== event.subsystemKey ||
+      carrier.identity.generation !== authority.generation ||
+      carrier.identity.dataProfile !== authority.dataProfile ||
+      !slot.render.isPresentationTargetCurrent(event.domainId, event.targetKey)
+    ) return;
+
+    const name = validatePresentationEventName(event.name);
+    let data: InputEventV1["payload"];
+    try {
+      data = validateInputPayloadV1(event.data);
+    } catch {
+      throw new TypeError("Invalid Web Presentation custom event data");
+    }
+    this.inputGate.emitEventForSubsystem(
+      event.subsystemKey,
+      WEB_PRESENTATION_EVENT_CHANNEL_V1,
+      { domainId: event.domainId, targetKey: event.targetKey, name, data },
+    );
   }
 
   private readPresentation(): RendererPresentationView | null {
@@ -651,6 +730,9 @@ class ControlHolder implements RendererControlHolder {
       if (typeof change.channel !== "string" || typeof change.available !== "boolean") {
         throw new TypeError("Invalid Renderer input availability change");
       }
+      if (change.channel === WEB_PRESENTATION_EVENT_CHANNEL_V1) {
+        throw new TypeError("Renderer input source cannot produce the Web Presentation event channel");
+      }
       return;
     }
     if (change.kind === "state" || change.kind === "event") {
@@ -660,6 +742,9 @@ class ControlHolder implements RendererControlHolder {
         typeof change.payload !== "object" ||
         Array.isArray(change.payload)
       ) throw new TypeError("Invalid Renderer input payload change");
+      if (change.channel === WEB_PRESENTATION_EVENT_CHANNEL_V1) {
+        throw new TypeError("Renderer input source cannot produce the Web Presentation event channel");
+      }
       return;
     }
     throw new TypeError("Invalid Renderer input source change kind");

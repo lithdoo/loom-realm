@@ -22,8 +22,21 @@ export interface RendererPresentationSource {
   read(): RendererPresentationView | null;
 }
 
+export interface RendererPresentationNodeEvent {
+  readonly sessionId: string;
+  readonly subsystemKey: string;
+  readonly generation: number;
+  readonly domainId: string;
+  readonly targetKey: string;
+  readonly name: unknown;
+  readonly data: unknown;
+}
+
 export interface RendererPresentationEffect {
-  reevaluate(source: RendererPresentationSource): void;
+  reevaluate(
+    source: RendererPresentationSource,
+    emitNodeEvent: (event: RendererPresentationNodeEvent) => void,
+  ): void;
 }
 
 export const presentationAttachment = Symbol("loomrealm.renderer.presentation-attachment");
