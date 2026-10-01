@@ -1,43 +1,79 @@
-# Phase 1 Implementation: Web Presentation Node Custom Events
+# Phase 1 Implementation Contract: Web Presentation Node Custom Events
 
-Status: implementation-ready
+Status: **frozen / implementation-ready**
 
-This document defines the first implementation phase required by Schema Form:
+This document is the implementation contract for phase 1 of Schema Form support.
 
-> A projected Web Presentation RenderNode may emit a semantic custom event back to
-> its owning Subsystem through the existing User Input v1 path.
+An implementation agent should be able to execute this document without making new
+architecture decisions. If current repository code materially contradicts this
+contract, stop and update the contract rather than inventing a new abstraction.
 
-This phase implements only the LoomRealm architecture extension. It does not
-implement Schema Form business behavior or Schema Form browser components.
+The phase implements exactly one capability:
 
-The implementation should stay deliberately small:
+> A live projected Web Presentation RenderNode may emit a bounded semantic custom
+> event back to its owning Subsystem through the existing User Input v1 path.
+
+This phase does **not** implement Schema Form state, validation, rendering, or browser
+controls.
+
+## 1. Frozen design rules
+
+The implementation must remain deliberately small.
+
+Use the existing objects and lifetimes:
 
 - extend the existing `WebPresentationContext` directly;
-- bind event provenance in `WebProjector`;
-- re-check currentness in `ControlHolder`;
-- reuse existing User Input v1 custom event transport;
-- add no reverse Render protocol;
-- add no DOM event bus;
-- add no second presentation store;
-- add no generic capability framework;
-- add no generic producer registry for this one built-in event source.
+- keep one shared `PresentationResourceClient`;
+- create one context object per live RenderNode;
+- bind node provenance inside `WebProjector`;
+- use one attachment-scoped revocable callback through the existing presentation seam;
+- re-check authority/currentness in `ControlHolder`;
+- reuse existing User Input v1 custom-event transport;
+- use targeted delivery in `RendererInputGate`.
 
-## 1. Required observable API
+Do not add:
 
-The existing context becomes:
+- a reverse Render protocol;
+- DOM `CustomEvent` routing;
+- a second presentation store;
+- a second Renderer↔Subsystem transport;
+- `PresentationEventClient`;
+- `context.events`;
+- a global EventBus;
+- a generic capability registry;
+- a generic Renderer-local producer registry;
+- component-supplied Renderer identity.
+
+The reserved presentation event channel is the only new producer case needed here.
+
+## 2. Public Web Presentation API
+
+The existing context is reopened and frozen as:
 
 ```ts
-interface WebPresentationContext {
+export interface WebPresentationContext {
   readonly resources: PresentationResourceClient;
 
   emitCustomEvent(
     name: string,
-    data?: JsonObject,
+    data?: InputEventV1["payload"],
   ): void;
 }
 ```
 
-A business Custom Element uses it as:
+`WebPresentationContext` must be exported from:
+
+```text
+@loomrealm/renderer/web-presentation
+```
+
+Concretely, `packages/renderer/src/web-presentation.ts` must export the type from
+`internal/web-projector.ts`.
+
+Do **not** add a direct `@loomrealm/wire` dependency to Renderer merely to spell
+`JsonObject`. Reuse `InputEventV1["payload"]` from `@loomrealm/data`.
+
+Business component usage:
 
 ```ts
 context.emitCustomEvent("submit", {
@@ -54,7 +90,7 @@ name
 data
 ```
 
-It must never supply or override:
+It never supplies:
 
 ```text
 sessionId
@@ -69,61 +105,31 @@ input channel
 
 Those remain Renderer/Main authority facts.
 
-## 2. End-to-end path
+## 3. Reserved User Input channel
 
-The complete path is:
-
-```text
-Business Web Component
-    ↓
-WebPresentationContext.emitCustomEvent(name, data)
-    ↓
-WebProjector identity-bound closure
-    ↓
-attachment-scoped Renderer presentation callback
-    ↓
-ControlHolder currentness validation
-    ↓
-RendererInputGate.emitEventForSubsystem(...)
-    ↓
-x.loomrealm.web-presentation.event
-    ↓
-existing Renderer Data / User Input v1
-    ↓
-Subsystem InputListener
-```
-
-No new Renderer↔Subsystem message type is introduced.
-
-The User Input message remains the existing:
-
-```ts
-interface InputEventV1 {
-  readonly type: "input.event";
-  readonly frameId: string;
-  readonly activationId: string;
-  readonly channel: InputEventChannelV1;
-  readonly payload: JsonObject;
-}
-```
-
-## 3. Reserved channel
-
-Add one exported constant owned by the Data/User Input contract:
+Add to `packages/data/src/model.ts`:
 
 ```ts
 export const WEB_PRESENTATION_EVENT_CHANNEL_V1 =
   "x.loomrealm.web-presentation.event" as const;
 ```
 
-The presentation event payload is:
+Re-export it from `@loomrealm/data`.
+
+The channel already conforms to User Input v1 custom-channel grammar, so:
+
+- no User Input wire version changes;
+- no new Data message shape;
+- no Renderer Data profile change.
+
+The payload delivered through the existing `InputEventV1` is:
 
 ```ts
 interface WebPresentationCustomEventPayloadV1 {
   readonly domainId: string;
   readonly targetKey: string;
   readonly name: string;
-  readonly data: JsonObject;
+  readonly data: InputEventV1["payload"];
 }
 ```
 
@@ -142,27 +148,48 @@ Example:
 }
 ```
 
-The reserved channel is a Renderer-built-in event producer. For InputGate
-availability it is always considered available.
+The Renderer adds `domainId` and `targetKey`. The component cannot override them.
 
-This avoids introducing a second availability registry solely for Web Presentation.
+## 4. End-to-end path
 
-Ordinary `RendererInputSource` must not be allowed to publish the reserved channel.
-The channel's provenance must remain the Web Presentation node-event path.
+The complete path is fixed:
 
-## 4. WebProjector: shared resources, per-node context
+```text
+Business Web Component
+    ↓
+WebPresentationContext.emitCustomEvent(name, data)
+    ↓
+WebProjector exact-live-record gate
+    ↓
+current attachment callback
+    ↓
+ControlHolder attachment/currentness gate
+    ↓
+ControlHolder payload validation
+    ↓
+RendererInputGate.emitEventForSubsystem(...)
+    ↓
+x.loomrealm.web-presentation.event
+    ↓
+existing Renderer Data / User Input v1
+    ↓
+Subsystem InputListener
+```
 
-Current implementation shares one `WebPresentationContext` across all elements.
-That must change because `emitCustomEvent()` must identify the exact RenderNode that
-received the context.
+There is no other path for this event.
 
-Keep only the resource client shared:
+## 5. WebProjector implementation
+
+### 5.1 Shared resource capability
+
+Replace the current shared `WebPresentationContext` field with one shared resource
+client:
 
 ```ts
 private readonly resources: PresentationResourceClient;
 ```
 
-Create it once:
+Create it once in the constructor:
 
 ```ts
 this.resources = createPresentationResourceClient(
@@ -171,7 +198,9 @@ this.resources = createPresentationResourceClient(
 );
 ```
 
-Extend `LiveElement` with the missing node key:
+### 5.2 Exact RenderNode provenance
+
+Extend `LiveElement`:
 
 ```ts
 interface LiveElement {
@@ -182,93 +211,147 @@ interface LiveElement {
   readonly domainId: string;
   readonly targetKey: string;
 
-  // existing fields...
+  // existing fields remain
 }
 ```
 
-When a new element is created, create its context once:
+`targetKey` is the source `RenderNodeV1.key`.
+
+Do not derive identity later from DOM state.
+
+### 5.3 Current attachment callback
+
+Add one mutable private callback slot:
+
+```ts
+private presentationEmitNodeEvent:
+  ((event: RendererPresentationNodeEvent) => void) | null = null;
+```
+
+`WebProjector.reevaluate()` becomes:
+
+```ts
+reevaluate(
+  source: RendererPresentationSource,
+  emitNodeEvent: (event: RendererPresentationNodeEvent) => void,
+): void
+```
+
+The method must store the callback for the current attachment before reconciliation:
+
+```ts
+this.presentationEmitNodeEvent = emitNodeEvent;
+```
+
+The per-node context must **not** capture the callback passed during the node's
+creation. It must call through the projector's current callback slot.
+
+This is required so the same `WebProjector` can be detached and later attached again
+without retained nodes holding an obsolete revoked callback.
+
+On `teardown()`:
+
+```ts
+this.presentationEmitNodeEvent = null;
+```
+
+Structural failure may leave the field intact because `failed` itself permanently
+blocks emission.
+
+### 5.4 Per-live-node context
+
+Create one frozen context for every newly created `LiveElement`:
 
 ```ts
 const context: WebPresentationContext = Object.freeze({
   resources: this.resources,
 
-  emitCustomEvent: (name, data = EMPTY_JSON_OBJECT) => {
-    this.emitNodeEvent(record, name, data);
+  emitCustomEvent: (name, data) => {
+    this.emitNodeEvent(
+      record,
+      name,
+      data ?? EMPTY_JSON_OBJECT,
+    );
   },
 });
-
-receiver.receiveRenderContext?.(context);
 ```
 
-The context remains stable for that HTMLElement lifetime.
+Use one module-local constant:
 
-### 4.1 First stale gate
+```ts
+const EMPTY_JSON_OBJECT =
+  Object.freeze({}) as InputEventV1["payload"];
+```
 
-Before forwarding:
+The context is delivered exactly once through the existing
+`receiveRenderContext(context)` callback and remains stable for the lifetime of that
+HTMLElement.
+
+### 5.5 First stale gate and exact runtime ordering
+
+`emitNodeEvent()` accepts runtime-untrusted arguments:
 
 ```ts
 private emitNodeEvent(
   record: LiveElement,
-  name: string,
+  name: unknown,
   data: unknown,
-): void {
-  if (this.ended || this.failed) return;
-
-  if (this.live.get(record.identity) !== record) {
-    return;
-  }
-
-  // validate arguments, then forward
-}
+): void
 ```
 
-The identity check must compare the exact `LiveElement` record, not merely
-`Map.has(identity)`.
-
-This prevents an old retained HTMLElement/context from emitting after its live node
-has been removed or replaced.
-
-### 4.2 Argument failure behavior
-
-Invalid component arguments are presentation-local programmer errors.
-
-Examples:
+The exact order is:
 
 ```text
-empty event name
-oversized event name
-invalid Unicode event name
-non-JSON data
-cyclic data
-Date / DOM object / class instance
-NaN / Infinity / BigInt / Function / Symbol
-payload over User Input limits
+1. ended / structuralFailed?
+   yes → drop
+
+2. this.live.get(record.identity) === record?
+   no → drop
+
+3. presentationEmitNodeEvent exists?
+   no → drop
+
+4. forward Renderer-owned identity + raw name/data
+   synchronously to the current attachment callback
 ```
 
-These should fail synchronously at the presentation boundary and must not reach the
-Data writer.
+The exact record comparison is mandatory:
 
-Currentness/lifetime failure is different:
+```ts
+this.live.get(record.identity) === record
+```
+
+Do not use only `Map.has(identity)`.
+
+No name/data validation happens before steps 1–3. A stale or revoked presentation
+source is inert even if it attempts to pass malformed arguments.
+
+### 5.6 Emission during receiveRenderContext
+
+Current WebProjector construction order is preserved:
 
 ```text
-node removed
-projector torn down
-structural failure
-old Session
-old generation
-carrier lost
-partial rebaseline
-no current InputTarget
-no current Interest
+create HTMLElement
+→ create LiveElement record
+→ receiveRenderContext(context)
+→ later install created records into this.live
 ```
 
-Those are normal races and are silently dropped.
+Therefore an event emitted synchronously from inside `receiveRenderContext()` is
+dropped by the exact-live-record gate.
 
-## 5. Presentation seam: one revocable callback, no new framework
+This behavior is intentional and frozen.
 
-Do not add a generic event bus or a public event-client object.
+Do not reorder reconciliation or insert the record into `this.live` early merely to
+support emission during context delivery.
 
-Add one internal node-event shape:
+A node becomes an event source only after it is installed as the current live record.
+
+## 6. Presentation seam
+
+### 6.1 Internal event shape
+
+Add to `packages/renderer/src/internal/presentation-seam.ts`:
 
 ```ts
 export interface RendererPresentationNodeEvent {
@@ -277,12 +360,28 @@ export interface RendererPresentationNodeEvent {
   readonly generation: number;
   readonly domainId: string;
   readonly targetKey: string;
-  readonly name: string;
-  readonly data: JsonObject;
+
+  readonly name: unknown;
+  readonly data: unknown;
 }
 ```
 
-Extend the existing effect callback with one function argument:
+`name` and `data` are intentionally `unknown` here. They originate from business
+JavaScript and are validated at the authoritative acceptance boundary.
+
+Renderer-owned identity fields are trusted closure facts.
+
+### 6.2 Effect signature
+
+Change:
+
+```ts
+export interface RendererPresentationEffect {
+  reevaluate(source: RendererPresentationSource): void;
+}
+```
+
+to:
 
 ```ts
 export interface RendererPresentationEffect {
@@ -293,19 +392,31 @@ export interface RendererPresentationEffect {
 }
 ```
 
-Existing JavaScript consumers that ignore the second argument remain valid.
+Existing JavaScript effects that ignore the second argument remain valid.
 
-### 5.1 Attachment-scoped revocation
+Do not put the reverse operation on `RendererPresentationSource`; that object remains
+read-only presentation facts.
 
-The reverse callback must be created per presentation attachment.
+## 7. ControlHolder attachment lifetime
 
-Conceptually:
+The reverse callback is scoped to one call of `attachRendererPresentation()`.
+
+Add one private token and one private callback field. The exact private names are not
+ABI, but the semantics are:
 
 ```ts
 [presentationAttachment](effect) {
+  if (this.presentationEffect !== null) {
+    throw new TypeError(
+      "Renderer presentation already attached",
+    );
+  }
+
   const token = {};
 
-  const emitNodeEvent = (event: RendererPresentationNodeEvent) => {
+  const emitNodeEvent = (
+    event: RendererPresentationNodeEvent,
+  ): void => {
     if (this.presentationToken !== token) return;
     this.acceptPresentationNodeEvent(event);
   };
@@ -314,7 +425,9 @@ Conceptually:
   this.presentationEffect = effect;
   this.presentationEmitNodeEvent = emitNodeEvent;
 
-  // existing initial reevaluation...
+  if (this.currentValue !== null) {
+    this.notifyPresentation();
+  }
 
   return () => {
     if (this.presentationToken !== token) return;
@@ -326,44 +439,118 @@ Conceptually:
 }
 ```
 
-An old projector may retain an old callback after detach, but the token check makes
-that capability permanently inert.
+The callback object is stable for one attachment.
 
-There is no reusable global presentation event sink.
+After detach, a retained old callback silently drops forever.
 
-## 6. ControlHolder: authoritative second gate
+A later attachment creates a new token and a new callback.
 
-`ControlHolder` is the authoritative acceptance boundary.
+No global reusable presentation event sink is allowed.
 
-For each node event, verify:
+### 7.1 notifyPresentation
+
+`notifyPresentation()` must invoke:
+
+```ts
+effect.reevaluate(
+  this.presentationSource,
+  emitNodeEvent,
+);
+```
+
+only when both the effect and current attachment callback are present.
+
+The callback supplied to the projector is the attachment-scoped callback described
+above.
+
+## 8. ControlHolder authoritative acceptance gate
+
+Add one private `acceptPresentationNodeEvent()`.
+
+The exact order is frozen.
+
+### 8.1 Currentness checks
+
+Before validating business arguments, check:
 
 ```text
 current Control exists
 AND event.sessionId == current Session
 AND current DataAuthority contains event.subsystemKey
 AND authority generation == event.generation
+AND matching current Data slot exists
 AND matching current Data carrier exists
 AND carrier belongs to current Control peer
-AND carrier generation/profile match current authority
-AND RenderStore is presentation-current
-AND event.domainId is current and baselined
-AND event.targetKey is live in that domain
+AND carrier generation matches event.generation
+AND carrier dataProfile matches current authority
+AND RenderStore.isPresentationTargetCurrent(
+      event.domainId,
+      event.targetKey
+    )
 ```
 
-Only after those checks build:
+If any currentness check fails:
+
+```text
+→ silent drop
+→ no argument validation
+→ no InputGate mutation
+→ no Data publication
+```
+
+This is normal asynchronous lifetime/currentness behavior.
+
+### 8.2 Argument validation
+
+After currentness succeeds, validate `event.name`.
+
+Required name rules:
+
+```text
+type = string
+UTF-8 byte length = 1..128
+valid Unicode scalar sequence
+```
+
+Implement this as one small private helper in `control.ts`.
+
+Do not introduce a general Renderer validation framework.
+
+Then construct the complete payload:
 
 ```ts
 const payload = {
   domainId: event.domainId,
   targetKey: event.targetKey,
-  name: event.name,
+  name,
   data: event.data,
 };
 ```
 
-Validate the complete payload before sending it to InputGate.
+Validate the **complete** payload using the Data helper defined in §11.
 
-Then call:
+Validation includes the Renderer-added envelope, not only component `data`.
+
+If name or payload validation fails:
+
+```text
+→ synchronously throw TypeError
+→ no InputGate mutation
+→ no Data writer call
+→ do not report Render/Data protocol-fatal
+```
+
+Any internal `DataProtocolError`/validation error from the Data helper is contained
+and converted to a presentation-boundary `TypeError`.
+
+The exception propagates synchronously back through the attachment callback and
+`WebPresentationContext.emitCustomEvent()` when the source is still current.
+
+Do not expose Data codec error classes as Web Presentation ABI.
+
+### 8.3 Input authority gate
+
+After validation, call exactly:
 
 ```ts
 this.inputGate.emitEventForSubsystem(
@@ -373,45 +560,56 @@ this.inputGate.emitEventForSubsystem(
 );
 ```
 
-The component-provided event cannot choose another subsystem.
+At this point:
 
-## 7. RenderStore: one readonly target-current query
+- no current InputTarget;
+- wrong current InputTarget;
+- no current Activation;
+- no Frame interest in the reserved channel;
 
-Add one method only:
+are ordinary User Input applicability cases and are silently dropped by InputGate.
+
+Argument validation still occurs first because the RenderNode itself was current.
+
+## 9. RenderStore readonly current-target query
+
+Add exactly one method:
 
 ```ts
 isPresentationTargetCurrent(
   domainId: string,
   targetKey: string,
-): boolean;
+): boolean
 ```
 
-Its semantics match existing Web Presentation eligibility.
-
-Return true only when:
+Return `true` only when all are true:
 
 ```text
 currentCarrier
-AND registrySeen
-AND every current domain is baselined
-AND requested domain exists
-AND requested domain is baselined
-AND targetKey is live in that domain
+registrySeen
+every currently registered domain is baselined
+requested domain exists
+requested domain is baselined
+targetKey is currently live in that domain
 ```
 
-The "every domain baselined" check is required because same-generation carrier loss
-freezes the previous DOM until complete rebaseline. A frozen old DOM must not become
-an input source during partial rebaseline.
+Implementation uses existing Store facts only.
 
-This method is a readonly query over existing Store facts. It creates no new
-authority or retained state.
+It must not:
 
-## 8. InputGate: targeted event only
+- mutate Store state;
+- create a second index;
+- create new authority;
+- consume Render events;
+- consult DOM.
 
-Current `emitEvent()` broadcasts a Renderer-wide physical producer event to every
-eligible subsystem slot.
+The "every domain baselined" check is required. During same-generation carrier
+recovery, Web Presentation freezes old DOM until complete rebaseline. Frozen old DOM
+must not regain event authority during partial rebaseline.
 
-Node events already have an owning subsystem, so add one method:
+## 10. RendererInputGate targeted delivery
+
+Add exactly one public-internal method:
 
 ```ts
 emitEventForSubsystem(
@@ -435,161 +633,216 @@ emitEventForSubsystem(
 }
 ```
 
-This preserves all existing Main-owned gates:
+Do not implement this by calling the existing broadcast `emitEvent()`.
 
-```text
-InputTarget
-Activation
-Frame interest
-Data currentness
-bounded Event queue
-```
+A node belonging to subsystem A can only address subsystem A.
 
-If a node belongs to subsystem A while subsystem B owns the current InputTarget, the
-A event is dropped. It must never be redirected to B.
+If subsystem B currently owns InputTarget, the event from A is dropped and must never
+be redirected to B.
 
-### 8.1 Built-in channel availability
+All existing bounded queue/backpressure behavior remains owned by
+`BoundedInputPublisher`.
 
-Keep the existing physical availability map unchanged.
+## 11. Built-in producer availability
 
-Modify `producerAvailable()` only:
+The reserved channel is a Renderer built-in producer.
+
+Do not add mutable availability state for it.
+
+Modify `producerAvailable()`:
 
 ```ts
-if (channel === WEB_PRESENTATION_EVENT_CHANNEL_V1) {
+if (
+  channel === WEB_PRESENTATION_EVENT_CHANNEL_V1
+) {
   return true;
 }
 ```
 
-Then continue with existing physical source logic.
+Then execute the existing physical-source availability logic for all other channels.
 
-`resetProducerFacts()` therefore needs no special case and cannot accidentally
-disable Web Presentation events.
+Consequences:
 
-This is simpler than introducing a second mutable local-availability registry.
+- `resetProducerFacts()` does not affect the reserved channel;
+- presentation detach needs no InputGate availability mutation;
+- a Frame may publish Interest in the channel before a WebProjector is attached;
+- no events exist unless a current presentation node actually emits.
 
-## 9. Block the reserved channel from RendererInputSource
+This is intentional.
 
-In `ControlHolder.validateSourceChange()`, reject:
+## 12. RendererInputSource may not use the reserved channel
 
-```ts
-change.channel === WEB_PRESENTATION_EVENT_CHANNEL_V1
+In `ControlHolder.validateSourceChange()`, reject every
+`RendererInputSourceChange` whose `channel` equals:
+
+```text
+x.loomrealm.web-presentation.event
 ```
 
-for every physical/input-source change kind.
+The failure is:
+
+```text
+→ synchronous TypeError
+→ no InputGate mutation for that change
+```
+
+Use the existing RendererInputSource failure/lifetime behavior around that exception.
+Do not add a new quarantine or recovery mechanism specifically for this channel.
 
 Reason:
 
 ```text
 RendererInputSource
-→ Renderer-wide physical/custom producer
-→ has no RenderNode provenance
+→ Renderer-wide producer
+→ no RenderNode provenance
 
-Web Presentation custom event
+Web Presentation node event
 → exact subsystem/domain/target provenance
 ```
 
-Allowing the ordinary source seam to publish the reserved channel would permit a
-source to forge `domainId` / `targetKey` and would bypass targeted routing.
+The reserved channel must have only the second provenance path.
 
-## 10. Reuse User Input payload validation
+## 13. Reuse User Input payload validation
 
-Do not duplicate User Input JSON limits in Renderer.
-
-Expose one small Data helper from the existing input codec:
+Expose from `packages/data/src/input-codec.ts`:
 
 ```ts
 export function validateInputPayloadV1(
   raw: unknown,
-): JsonObject {
+): InputEventV1["payload"] {
   return assertPayload(raw, "input");
 }
 ```
 
-Re-export it from `@loomrealm/data`.
+Re-export it from `packages/data/src/index.ts`.
 
-The helper owns the existing User Input rules:
+Do not duplicate these rules in Renderer:
 
 ```text
 plain JSON object
-payload depth <= 32
+finite JSON numbers
+payload relative depth <= 32
 container members <= 16,384
 compact JSON <= 262,144 UTF-8 bytes
-finite JSON numbers
-no cyclic/non-JSON host values
+no cyclic / non-JSON host values
 ```
 
-`ControlHolder` validates the complete reserved payload:
+The helper is validation only; it may return the validated input object.
 
-```ts
-validateInputPayloadV1({
-  domainId,
-  targetKey,
-  name,
-  data,
-});
-```
+The existing `BoundedInputPublisher.offerEvent()` performs the synchronous detached
+frozen snapshot before queueing.
 
-The existing InputGate publisher then performs its normal synchronous detached/frozen
-snapshot before queueing.
-
-Because validation and queue snapshot happen in one synchronous call chain, the
-component cannot mutate the accepted object between those two steps.
-
-Event-name validation remains a Web Presentation concern:
+The acceptance call chain therefore is synchronous:
 
 ```text
-1..128 UTF-8 bytes
-valid Unicode scalar string
+ControlHolder validate complete payload
+→ InputGate targeted applicability check
+→ BoundedInputPublisher detachedFrozen snapshot
+→ enqueue
 ```
 
-Use one small local helper; do not introduce a general validation framework for this.
+There is no asynchronous mutation window between validation and the queued snapshot.
 
-## 11. Files to change
+## 14. Accepted-event boundary
 
-Required implementation scope:
+Once `BoundedInputPublisher.offerEvent()` accepts and queues the event, the event is
+established as a User Input event.
+
+A later RenderNode removal does **not** retract or scan the Input queue.
+
+Do not add coupling such as:
+
+```text
+RenderNode remove
+→ search pending input events
+→ delete matching targetKey events
+```
+
+Existing User Input lifecycle rules remain authoritative:
+
+- lease replacement/reset may discard old-lease pending input;
+- Data retirement retires that publisher/queue;
+- bounded Event overflow may drop unsent events under existing rules.
+
+RenderNode removal after queue acceptance is not a new cancellation rule.
+
+## 15. Failure taxonomy
+
+The implementation must follow this exact table:
+
+| Condition | Behavior |
+| --- | --- |
+| projector ended / structural-failed | silent drop |
+| exact LiveElement record no longer current | silent drop |
+| no current attachment callback | silent drop |
+| attachment token revoked | silent drop |
+| old Session/generation/Data carrier | silent drop |
+| target domain/node no longer presentation-current | silent drop |
+| invalid event name on current source | synchronous `TypeError` |
+| invalid/non-JSON/oversized complete payload on current source | synchronous `TypeError` |
+| no current InputTarget/Activation | InputGate drop |
+| no reserved-channel Frame Interest | InputGate drop |
+| targeted event belongs to non-target subsystem | never redirected |
+| reserved channel emitted by ordinary RendererInputSource | synchronous `TypeError` |
+| event already queued, then node removed | keep normal queued event semantics |
+
+No case above becomes Render protocol-fatal or Frame failure.
+
+## 16. Files to change
+
+The implementation scope is frozen to these existing areas.
 
 ```text
 packages/data/src/model.ts
   add WEB_PRESENTATION_EVENT_CHANNEL_V1
 
 packages/data/src/input-codec.ts
-  expose validateInputPayloadV1()
+  export validateInputPayloadV1()
 
 packages/data/src/index.ts
-  export channel constant + validation helper
+  re-export channel constant + validator
 
 packages/renderer/src/internal/web-projector.ts
-  shared resources
+  shared resources only
   per-LiveElement context
-  identity-bound emitCustomEvent()
+  current attachment callback slot
+  exact-live-record emit gate
 
 packages/renderer/src/internal/presentation-seam.ts
-  node-event type
-  second reevaluate callback argument
+  RendererPresentationNodeEvent
+  second reevaluate callback parameter
 
 packages/renderer/src/control.ts
-  attachment-scoped callback revocation
-  currentness gate
-  reserved-channel source rejection
-  validated targeted publication
+  attachment token + revocable callback
+  notifyPresentation callback forwarding
+  authoritative currentness gate
+  name/full-payload validation
+  reserved RendererInputSource rejection
+  targeted publication
 
 packages/renderer/src/internal/render-store.ts
   isPresentationTargetCurrent()
 
 packages/renderer/src/internal/input-gate.ts
   emitEventForSubsystem()
-  built-in reserved-channel availability
+  reserved channel built-in availability
 
 packages/renderer/src/web-presentation.ts
-  export WebPresentationContext type if needed by browser consumers
+  export WebPresentationContext
 
 doc/15-contracts/web-presentation-api-v1.md
-  reopen context shape and define node custom-event semantics
+  reopen frozen context shape
+  define node custom-event capability/lifetime/failure semantics
 
 doc/15-contracts/user-input-v1.md
   reserve x.loomrealm.web-presentation.event provenance
+  document built-in producer + targeted routing
   no wire version change
 ```
+
+A small dedicated Renderer test file may be added for WebProjector node-event behavior
+if existing tests do not provide an appropriate home. Do not create production
+abstractions merely to make tests convenient.
 
 No change is required to:
 
@@ -597,29 +850,24 @@ No change is required to:
 InputEventV1 wire shape
 Renderer Data profile
 Main Control protocol
-Frame model
-Render Update protocol
+Subsystem Frame model
+Render Update wire protocol
 RenderDomain public API
-desktop keyboard/pointer source behavior
+desktop keyboard/pointer event mechanism
 ```
 
-## 12. Explicitly rejected implementation shortcuts
+## 17. Explicitly rejected alternatives
 
-### DOM CustomEvent / Window listener
-
-Do not implement:
+Do not use DOM events as the transport:
 
 ```text
 Custom Element
 → DOM CustomEvent
-→ window listener
+→ Window listener
 → Renderer
 ```
 
-DOM ancestry/event propagation is presentation state, not Renderer provenance
-authority.
-
-### Reverse RenderEvent
+DOM propagation is presentation state, not Renderer provenance authority.
 
 Do not reuse:
 
@@ -627,13 +875,10 @@ Do not reuse:
 RenderDomain.emit(...)
 ```
 
-`render.event` is Subsystem → Renderer. Node custom events are Renderer
-Presentation → Subsystem. Reusing the Render direction would invert the existing
-contract.
+`render.event` is Subsystem → Renderer. This capability is Renderer Presentation →
+Subsystem.
 
-### Component-supplied identity
-
-Do not expose:
+Do not let the component send:
 
 ```ts
 emitCustomEvent({
@@ -643,53 +888,44 @@ emitCustomEvent({
 });
 ```
 
-The node must not assert its own Renderer identity.
+Renderer identity is closure-bound.
 
-### Generic capability/event framework
+Do not add an abstraction whose only consumer is this path when an existing object can
+hold the required behavior.
 
-Do not add:
+## 18. Required test closure
 
-```text
-PresentationEventClient
-context.events
-global EventBus
-generic capability registry
-generic local producer registry
-second presentation transport
-```
-
-None is required for this feature.
-
-## 13. Test closure
-
-Implementation is not complete until the following cases pass.
+Implementation is incomplete until all cases below are covered.
 
 ### WebProjector
 
 ```text
-two live nodes receive different identity-bound contexts
-same live node keeps the same context
-node A emits targetKey A
-node B emits targetKey B
-removed node's retained context cannot emit
-projector teardown prevents retained context emission
-structural-failed projector prevents emission
-invalid name/data fails before Renderer/Data publication
+two live nodes receive different context objects
+same live node retains the same context
+both contexts share the same resources capability
+node A emits Renderer-bound identity A
+node B emits Renderer-bound identity B
+event inside receiveRenderContext() is dropped
+removed node retained context is inert
+teardown retained context is inert
+structural-failed projector retained context is inert
+reattached same projector uses the new attachment callback
 ```
 
-### Presentation attachment
+### Presentation seam / attachment
 
 ```text
-attached projector can emit
-detach revokes old callback
-new attachment gets a new callback
-old attachment cannot emit through the new attachment
+attachment callback is stable within one attachment
+detach permanently revokes the old callback
+new attachment creates a distinct callback
+old attachment cannot emit into the new attachment
+existing effect that ignores second reevaluate argument still works
 ```
 
-### RenderStore / currentness
+### RenderStore
 
 ```text
-live baselined target → true
+live fully-baselined target → true
 missing domain → false
 missing target → false
 carrier lost → false
@@ -700,38 +936,85 @@ complete rebaseline + live target → true
 ### InputGate
 
 ```text
-targeted subsystem receives event when lease + interest are current
+targeted subsystem receives event when lease + Interest are current
 other subsystem never receives it
 wrong InputTarget → drop
-no interest → drop
-reserved channel stays available across resetProducerFacts()
-existing bounded Event queue behavior remains unchanged
+no Interest → drop
+reserved channel remains producer-available across resetProducerFacts()
+existing Event queue bounds/order remain unchanged
 ```
 
 ### ControlHolder integration
 
 ```text
-current node event reaches owning Subsystem as input.event
-payload contains Renderer-added domainId/targetKey
-Frame/Activation come from current Main authority
-old Session event → drop
-old generation event → drop
-retired Data carrier event → drop
-removed target event → drop
-partial rebaseline event → drop
-ordinary RendererInputSource reserved-channel attempt → reject locally
-invalid JSON/oversized presentation payload never reaches Data writer
+current node event reaches owning Subsystem as existing input.event
+frameId/activationId come from current Main authority
+payload domainId/targetKey come from Renderer-bound node identity
+old Session → drop
+old generation → drop
+retired carrier → drop
+removed target → drop
+partial rebaseline → drop
+invalid current-source name → synchronous TypeError
+invalid current-source JSON → synchronous TypeError
+oversized complete payload → synchronous TypeError
+ordinary RendererInputSource reserved-channel attempt → synchronous TypeError
+accepted queued event is not retracted by later RenderNode removal
 ```
 
-## 14. Completion invariant
+### Data helper
 
-Phase 1 is complete when this statement is true:
+```text
+valid JSON object accepted
+non-object rejected
+non-plain object rejected
+cycle rejected
+NaN / Infinity rejected
+depth/member/byte limit violations rejected
+```
 
-> A live projected RenderNode can emit a bounded JSON semantic event through its
-> existing Web Presentation context; Renderer binds and re-validates the node
-> provenance; existing Main InputTarget/Activation/Interest authority decides whether
-> the owning Subsystem receives it; stale or forged sources cannot cross the boundary.
+## 19. Agent implementation order
 
-At that point Schema Form phase 2 should require no further Renderer architecture
-change. It only needs to listen to the reserved channel and implement its own
-form-state/rendering behavior.
+Implement in this order to keep each layer independently testable:
+
+```text
+1. Data
+   constant + validateInputPayloadV1()
+
+2. InputGate
+   built-in availability + targeted event
+
+3. RenderStore
+   readonly current-target query
+
+4. presentation-seam
+   event shape + callback parameter
+
+5. ControlHolder
+   attachment revocation + currentness + validation + routing
+
+6. WebProjector
+   per-node context + current callback + exact-live gate
+
+7. public web-presentation export
+
+8. contract docs
+
+9. full tests / qualification
+```
+
+Do not start Schema Form phase 2 in the same implementation change.
+
+## 20. Frozen completion invariant
+
+Phase 1 is complete only when this is true:
+
+> A current live projected RenderNode can synchronously emit a bounded JSON semantic
+> event through its existing Web Presentation context. Renderer binds the source
+> identity, independently re-validates current presentation authority, and targets only
+> the owning subsystem. Main-owned InputTarget/Activation and Subsystem-owned Interest
+> still decide actual User Input delivery. Stale, revoked, forged, or malformed sources
+> cannot cross the boundary.
+
+After this invariant is satisfied, Schema Form phase 2 must require no additional
+Renderer architecture design.
