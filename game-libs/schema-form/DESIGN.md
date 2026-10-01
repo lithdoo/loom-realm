@@ -751,8 +751,10 @@ Acceptable future solutions may include a platform-level exclusive input capabil
 an explicit caller-side suspension policy, but the browser backdrop alone is not
 sufficient to satisfy the modal contract.
 
-This unresolved input-authority seam should be designed together with the trusted
-Web Component-to-`RendererInputSource` adapter.
+This modal-exclusivity problem is separate from the Web Presentation custom-event
+capability described below. Custom events solve Web Component → Subsystem semantic
+notification; they do not by themselves suppress ordinary keyboard, pointer, or
+gamepad gameplay input.
 
 
 ### Field RenderData
@@ -1069,57 +1071,424 @@ local draft. An actual authoritative value change may replace the local draft.
 
 ### Presentation actions
 
-The semantic actions required by the browser presentation are:
+Interactive Schema Form controls must notify the owning subsystem of semantic user
+actions. A Web Component must not mutate Schema Form state directly and must not
+reverse the Render Update protocol.
 
-```ts
-export type SchemaFormPresentationActionV1 =
-  | {
-      readonly type: "change";
-      readonly key: string;
-      readonly value: JsonValue;
-    }
-  | {
-      readonly type: "clear";
-      readonly key: string;
-    }
-  | {
-      readonly type: "submit";
-    }
-  | {
-      readonly type: "cancel";
-    };
+The required actions are:
+
+```text
+schema-form root
+  submit
+  cancel
+
+schema-form field
+  change
+  clear
 ```
 
-These actions describe presentation intent. They do not grant the Web Component
-authority to mutate Schema Form state directly.
+The source RenderNode is itself the action target identity. A field component does
+not need to supply its own field key as trusted routing metadata.
 
-The intended authority path is:
+For example:
+
+```ts
+// lr-schema-form
+context.emitCustomEvent("submit");
+context.emitCustomEvent("cancel");
+
+// lr-schema-form-field
+context.emitCustomEvent("change", { value: "Alice" });
+context.emitCustomEvent("clear");
+```
+
+The Renderer binds the event to the actual live RenderNode that received the
+capability.
+
+### Required LoomRealm Web Presentation extension
+
+The current Web Presentation API injects a narrow Renderer-owned context into each
+business Custom Element through:
+
+```ts
+receiveRenderContext(context)
+```
+
+Schema Form requires that context to be extended with a Renderer-mediated custom
+event capability.
+
+Conceptually:
+
+```ts
+interface WebPresentationContext {
+  readonly resources: PresentationResourceClient;
+
+  emitCustomEvent(
+    name: string,
+    data?: JsonObject,
+  ): void;
+}
+```
+
+This is an intentional reopen of the current Web Presentation v1 context, whose
+frozen shape currently contains only `resources`.
+
+The reason for reopening is a demonstrated interactive business-component
+requirement: presentation-owned controls such as Submit, Cancel, and editable fields
+must report semantic user actions back to the subsystem that owns their RenderNode.
+
+This extension must not create a reverse Render protocol and must not make DOM state
+authoritative.
+
+### Identity-bound capability
+
+The custom-event capability is scoped to one live RenderNode identity.
+
+A live projected node already has the Renderer-known identity:
+
+```text
+(Session, subsystemKey, generation, domainId, targetKey)
+```
+
+The Web Component must not be allowed to provide or override:
+
+```text
+sessionId
+subsystemKey
+generation
+domainId
+targetKey
+frameId
+activationId
+input channel
+```
+
+Those values are Renderer/Main authority facts.
+
+Therefore the WebProjector must inject a per-element event closure rather than one
+fully shared event context.
+
+Conceptually:
+
+```ts
+const context = Object.freeze({
+  resources: sharedResources,
+
+  emitCustomEvent(name, data = {}) {
+    emitPresentationEvent({
+      sessionId: record.sessionId,
+      subsystemKey: record.subsystemKey,
+      generation: record.generation,
+      domainId: record.domainId,
+      targetKey: record.targetKey,
+      name,
+      data,
+    });
+  },
+});
+```
+
+The resource capability may remain Window-scoped/shared. The event capability is
+RenderNode-scoped.
+
+### Stale capability behavior
+
+A business component may retain a reference to an old presentation context.
+
+Therefore `emitCustomEvent()` must fail closed after its source RenderNode is no
+longer live.
+
+Before forwarding an event, the WebProjector must verify that:
+
+```text
+Projector is not torn down
+AND Projector has not structurally failed
+AND the bound LiveElement record is still the current record for that identity
+```
+
+If any check fails, the event is dropped.
+
+The ControlHolder must independently re-check current authority before accepting the
+event. At minimum:
+
+```text
+current Session matches
+AND current subsystem Data slot exists
+AND current generation matches
+AND current carrier/store is presentation-current
+AND domainId is live and baselined
+AND targetKey is currently live in that domain
+```
+
+A stale Session, retired generation, removed node, missing baseline, or retired Data
+carrier must never produce subsystem input.
+
+### Presentation custom-event payload
+
+The Web Presentation layer should map the node-bound event onto one reserved custom
+User Input event channel:
+
+```text
+x.loomrealm.web-presentation.event
+```
+
+The payload is:
+
+```ts
+interface WebPresentationCustomEventPayloadV1 {
+  readonly domainId: string;
+  readonly targetKey: string;
+  readonly name: string;
+  readonly data: JsonObject;
+}
+```
+
+Example Submit payload:
+
+```json
+{
+  "domainId": "d3",
+  "targetKey": "schema-form",
+  "name": "submit",
+  "data": {}
+}
+```
+
+Example field-change payload:
+
+```json
+{
+  "domainId": "d3",
+  "targetKey": "field:name",
+  "name": "change",
+  "data": {
+    "value": "Alice"
+  }
+}
+```
+
+The Web Component itself supplies only `name` and `data`. The Renderer supplies
+`domainId` and `targetKey`.
+
+### Reuse of User Input
+
+No new Renderer↔Subsystem wire protocol is required.
+
+The reserved presentation event channel uses the existing User Input custom-channel
+mechanism:
 
 ```text
 Web Component
     ↓
-semantic presentation action
+context.emitCustomEvent(...)
     ↓
-trusted Renderer input adapter
+WebProjector identity-bound capability
     ↓
-RendererInputSource / custom User Input channel
+Renderer currentness validation
     ↓
-existing User Input authority gate
+RendererInputGate
+    ↓
+x.loomrealm.web-presentation.event
+    ↓
+existing Renderer Data / User Input transport
+    ↓
+Subsystem InputManager
     ↓
 scope.createInputListener(...)
     ↓
 Schema Form module
 ```
 
-Direct callbacks from a Web Component into subsystem/module state, global mutable
-managers, DOM references in the public SchemaForm API, and reverse use of the Render
-Update protocol are not acceptable substitutes.
+The following remain unchanged:
 
-The repository currently has the Renderer-to-subsystem User Input path and custom
-input channels, but the trusted Web Component-to-custom-`RendererInputSource`
-adapter contract is not yet a frozen public presentation capability. That seam must
-be designed/frozen separately before the interactive browser implementation depends
-on it.
+- Renderer Data connection framing;
+- `input.event` wire shape;
+- Main-owned InputTarget / Activation authority;
+- Subsystem `InputListener` delivery semantics;
+- Render Update direction and authority.
+
+### Targeted Renderer input delivery
+
+Ordinary physical `RendererInputSource` events such as keyboard/pointer/gamepad are
+Renderer-wide producer observations.
+
+A Web Presentation custom event is different because its source subsystem is already
+known from the projected RenderNode.
+
+Therefore the Renderer input gate should support a targeted event operation,
+conceptually:
+
+```ts
+emitEventForSubsystem(
+  subsystemKey: string,
+  channel: InputEventChannelV1,
+  payload: InputEventV1["payload"],
+): void;
+```
+
+This method must inspect only the matching subsystem slot.
+
+The event is delivered only if that subsystem currently has:
+
+```text
+a valid InputTarget lease
+AND current Activation
+AND interest in x.loomrealm.web-presentation.event
+AND producer availability for that channel
+```
+
+If the RenderNode belongs to subsystem A while subsystem B owns the current
+InputTarget, the event from A is dropped rather than redirected to B.
+
+This is why Presentation custom events should not be flattened into the existing
+global `RendererInputSource.emitEvent()` path before subsystem identity is checked.
+
+### Renderer-local producer availability
+
+The Presentation custom-event channel is a Renderer-owned producer capability, not a
+physical platform input source.
+
+Renderer input gating should therefore distinguish physical-source availability from
+Renderer-local producer availability.
+
+Conceptually:
+
+```text
+physical source availability
+  keyboard / pointer / gamepad
+
+Renderer-local availability
+  x.loomrealm.web-presentation.event
+```
+
+The effective producer check may treat a channel as available when either the
+appropriate physical source or the appropriate Renderer-local producer is available.
+
+Resetting/restarting the external physical `RendererInputSource` must not
+accidentally clear the Window-local Presentation custom-event capability.
+
+### Event argument validation
+
+`emitCustomEvent()` is a business presentation boundary and must validate before
+entering the Renderer input publisher.
+
+It must reject or locally contain invalid values rather than allowing an invalid
+payload to reach Data serialization.
+
+At minimum:
+
+```text
+name
+  non-empty valid Unicode string
+  bounded consistently with presentation/input identifiers
+
+data
+  plain JSON object
+  no DOM/Host objects
+  no class instances
+  no undefined / Function / Symbol / BigInt
+  no NaN / Infinity
+  no cycles
+  bounded by existing User Input payload depth/member/byte limits
+```
+
+The complete payload, including Renderer-added `domainId`, `targetKey`, and
+`name`, must satisfy existing User Input payload limits before publication.
+
+The implementation should reuse or expose the existing Data/Wire JSON payload
+validation semantics instead of creating an incompatible duplicate validator.
+
+The Renderer must snapshot/detach the accepted JSON data so later mutation by the
+Web Component cannot alter an already accepted event.
+
+### Subsystem consumption
+
+Schema Form listens on the reserved presentation channel using the same Frame that
+opened the form:
+
+```ts
+const listener = scope.createInputListener({
+  frame,
+  channels: ["x.loomrealm.web-presentation.event"],
+});
+
+listener.on(
+  "x.loomrealm.web-presentation.event",
+  (event) => {
+    // match the active form domain/target and handle:
+    // submit / cancel / change / clear
+  },
+);
+```
+
+The module must match the event against its own currently open form Domain and
+expected RenderNode keys before applying it.
+
+For Schema Form:
+
+```text
+targetKey = "schema-form"
+  submit
+  cancel
+
+targetKey = "field:<field-key>"
+  change
+  clear
+```
+
+This preserves the rule that the module owns canonical values, validation, and
+completion while the Web Component only reports presentation intent.
+
+### Implementation impact
+
+The intended LoomRealm implementation changes are narrowly scoped:
+
+```text
+packages/renderer/src/internal/web-projector.ts
+  inject per-LiveElement emitCustomEvent capability
+
+packages/renderer/src/internal/presentation-seam.ts
+  add Renderer-internal presentation-event forwarding capability
+
+packages/renderer/src/control.ts
+  validate current Session/subsystem/generation/store target
+  forward targeted presentation event into InputGate
+
+packages/renderer/src/internal/render-store.ts
+  expose a readonly current-target check for domainId/targetKey
+
+packages/renderer/src/internal/input-gate.ts
+  support targeted subsystem events
+  support Renderer-local producer availability
+
+packages/data / wire-facing helpers
+  expose/reuse bounded JSON input-payload validation if needed
+  keep existing input.event wire schema unchanged
+```
+
+Desktop/PWA platform composition does not need a second presentation-specific Data
+connection and does not need a reverse Render transport.
+
+The existing Renderer presentation attachment is sufficient to connect WebProjector
+to Renderer-owned capability handling.
+
+### Separation from modal input exclusivity
+
+This custom-event capability solves:
+
+```text
+Web Component semantic action
+→ owning subsystem
+```
+
+It does not solve:
+
+```text
+Schema Form modal active
+→ suppress underlying gameplay keyboard/pointer/gamepad effects
+```
+
+True modal input exclusion remains a separate input-authority design problem.
 
 ### RenderData example
 
