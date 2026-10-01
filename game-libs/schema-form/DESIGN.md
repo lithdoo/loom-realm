@@ -404,6 +404,19 @@ locale number conversion, or other value normalization in v1.
 
 Schema Form validates the schema and `initialValue` before opening Presentation.
 
+Validation failures use the public preflight error codes:
+
+```text
+invalid SchemaFormV1
+→ SCHEMA_FORM_INVALID_SCHEMA
+
+invalid initialValue
+→ SCHEMA_FORM_INVALID_INITIAL_VALUE
+```
+
+These are configuration/program errors, not user field-validation errors. They reject
+`openSchemaForm()` and never render field error messages.
+
 The v1 limits are:
 
 ```text
@@ -590,18 +603,28 @@ The public error contract is:
 
 ```ts
 export type SchemaFormErrorCode =
+  | "SCHEMA_FORM_INVALID_SCHEMA"
+  | "SCHEMA_FORM_INVALID_INITIAL_VALUE"
   | "SCHEMA_FORM_ALREADY_OPEN"
   | "SCHEMA_FORM_VALIDATOR_FAILED"
   | "SCHEMA_FORM_INVALID_VALIDATOR_RESULT";
 
 export class SchemaFormError extends Error {
   readonly code: SchemaFormErrorCode;
+  readonly path?: string;
 }
 ```
 
 The code mapping is:
 
 ```text
+schema shape, field declaration, constraint, default, or schema limit is invalid
+→ SCHEMA_FORM_INVALID_SCHEMA
+
+initialValue contains an unknown key, wrong value type, invalid select value,
+non-finite number, or violates a declared field constraint
+→ SCHEMA_FORM_INVALID_INITIAL_VALUE
+
 second active form for same Frame
 → SCHEMA_FORM_ALREADY_OPEN
 
@@ -612,8 +635,41 @@ validator returns an invalid result shape
 → SCHEMA_FORM_INVALID_VALIDATOR_RESULT
 ```
 
-`SCHEMA_FORM_ALREADY_OPEN` is rejected before the second call creates any form
-resources and must not disturb the already-active form.
+Schema and initial-value validation are preflight checks. They run before Schema Form
+creates a RenderDomain, InputListener, abort subscription, or active-form registration.
+
+Therefore:
+
+```text
+invalid schema / initialValue
+→ reject SchemaFormError immediately
+→ create no presentation/input resources
+→ require no cleanup
+```
+
+When useful, `SchemaFormError.path` should identify the failing declaration location,
+for example:
+
+```text
+schema.fields[2].key
+schema.fields[4].min
+initialValue.level
+```
+
+`path` is diagnostic metadata only; callers must branch on `code`, not on message
+text or path formatting.
+
+Preflight validation order is:
+
+```text
+validate schema
+→ validate initialValue against the validated schema
+→ check one-active-form-per-Frame precondition
+→ create the form session/resources
+```
+
+`SCHEMA_FORM_ALREADY_OPEN` is therefore also rejected before the second call creates
+any form resources and must not disturb the already-active form.
 
 Validator/program failures for an already-open form use the normal settle-once cleanup
 path and reject with `SchemaFormError`.
