@@ -1114,8 +1114,12 @@ Elements as an import side effect.
 The browser entry point exports:
 
 ```ts
-registerSchemaFormElements(): void;
+registerSchemaFormElements(): Promise<void>;
 ```
+
+Registration is asynchronous because Web Awesome component modules are loaded only
+inside this explicit operation. Importing the browser subpath itself does not register
+Schema Form or Web Awesome Custom Elements.
 
 That function registers exactly:
 
@@ -1127,13 +1131,25 @@ lr-schema-form-field
 Registration is explicit. Importing either package entry point alone does not mutate
 the global CustomElementRegistry.
 
-Repeated registration is a no-op only when the existing registrations are the exact
-constructors owned by this module. If either tag is already registered to a different
-constructor, `registerSchemaFormElements()` synchronously throws `TypeError`.
+`registerSchemaFormElements()` first checks for conflicting LoomRealm tags, then
+dynamically imports the required Web Awesome component modules, then re-checks and
+defines the two Schema Form elements. Repeated/concurrent calls converge on one
+registration operation.
+
+If an existing Schema Form tag is already registered to a different constructor, the
+returned Promise rejects with `TypeError`. If both tags are already registered to
+the exact module constructors, the Promise resolves without loading or redefining
+anything.
 
 The implementation commit updates `package.json` to export `./browser` and keeps
 `sideEffects: false`. Browser compilation includes the DOM library, but the root
 entry point stays platform-neutral in its runtime dependencies.
+
+Web Awesome's global theme stylesheet is intentionally not injected by this module.
+The Web Presentation host/bootstrap that uses Schema Form browser components MUST load
+a compatible Web Awesome theme stylesheet (the v1 qualification uses the pinned
+package's default theme) before presenting the form. This keeps document-global style
+ownership outside a reusable component registration function.
 
 ### Browser component implementation strategy
 
@@ -1158,8 +1174,8 @@ The implementation commit pins direct dependencies:
 }
 ```
 
-It cherry-picks only the required Web Awesome component modules rather than loading
-an autoloader or the full component set:
+The explicit async registration function cherry-picks only the required Web Awesome
+component modules rather than loading an autoloader or the full component set:
 
 ```text
 @awesome.me/webawesome/dist/components/input/input.js
