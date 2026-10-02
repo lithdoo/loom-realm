@@ -394,8 +394,19 @@ false
 ""
 ```
 
-For select fields, non-empty submitted values must exactly match one declared
-`options[*].value`.
+For select fields, `null` is the only presentation representation of unset.
+Every string, including `""`, is an explicit select value and must exactly match one
+declared `options[*].value`. Schema Form does not reserve the empty string as a
+select sentinel.
+
+For string fields, `minLength` and `maxLength` use ECMAScript `value.length`
+semantics (UTF-16 code units). v1 does not perform grapheme segmentation or Unicode
+code-point counting.
+
+`required` is an interaction-time validation rule. It does not make an otherwise
+well-typed explicit default or `initialValue` invalid during preflight merely
+because that value is empty/unset. This keeps explicit empty values equivalent to
+the same empty values reached through fallback initialization.
 
 Schema Form does not perform implicit trimming, case folding, Unicode normalization,
 locale number conversion, or other value normalization in v1.
@@ -420,10 +431,22 @@ These are configuration/program errors, not user field-validation errors. They r
 The v1 limits are:
 
 ```text
-maximum fields                 128
-maximum field.key UTF-8 bytes  128
-maximum custom-event payload   128 KiB
+maximum fields                           128
+maximum field.key UTF-8 bytes            128
+maximum compact SchemaFormV1 JSON        65,536 bytes
+maximum compact initialValue JSON        65,536 bytes
+maximum compact validator error-map JSON 65,536 bytes
+maximum Change/Submit event data         131,072 bytes
 ```
+
+The three 65,536-byte limits are Schema Form preflight/program boundaries, not
+generic LoomRealm transport limits. They deliberately keep valid Schema Form
+metadata, initial canonical data, and validator-produced presentation errors well
+inside the existing RenderData/Render-message ceilings.
+
+`SchemaFormV1` and `initialValue` byte counts use compact JSON UTF-8 encoding of
+their complete validated objects. Validator error-map size is measured after result
+shape validation but before accepting it as current validation state.
 
 `field.key` must be a non-empty valid Unicode string and unique within the form.
 
@@ -442,7 +465,8 @@ integer=true → default/initial number must be an integer
 ```
 
 Every field default and every supplied `initialValue[field.key]` must match the
-declared field kind and built-in constraints.
+declared field kind and all built-in constraints except `required`. The `required`
+rule is evaluated only for interactive Change/Submit validation.
 
 Select rules are:
 
@@ -458,8 +482,10 @@ For Change and Submit, the complete component-supplied custom-event data object
 (`{ values: ... }`) must have compact JSON UTF-8 size <= 131,072 bytes (128 KiB).
 The browser root performs this check before calling `emitCustomEvent()`. Oversize
 Change snapshots remain local and are not emitted; an oversize Submit also remains
-local and displays the presentation-local form-size error defined below. The lower
-limit intentionally leaves room below the generic User Input transport hard limit.
+local and displays the presentation-local form-size error defined below. The
+subsystem repeats the same bound check for every current-root Change/Submit event
+before parsing it. The lower limit intentionally leaves room below the generic User
+Input transport hard limit.
 
 ## Trusted scripted validation
 
@@ -548,6 +574,11 @@ false
 
 An invalid validator result is a validator failure, not a user validation failure.
 
+After structural result validation, the compact JSON UTF-8 encoding of a non-null
+validator error map must be <= 65,536 bytes. Exceeding that bound is
+`SCHEMA_FORM_INVALID_VALIDATOR_RESULT`. This prevents a trusted validator from
+turning an otherwise valid interaction into an oversized RenderData update.
+
 ## Change validation
 
 `validateOnChange` runs after the authoritative form value has changed.
@@ -595,6 +626,17 @@ semantics. A submit does not implicitly re-run `validateOnChange`.
 
 If the same cross-field rule must run at both times, the schema author must declare
 it in both validators.
+
+Built-in and scripted validation results are merged deterministically:
+
+```text
+built-in error wins for the same field
+scripted error fills only fields without a built-in error
+```
+
+The scripted validator still runs when built-in errors already exist so it can
+produce cross-field errors for other fields. A scripted validator cannot hide a
+built-in declaration constraint.
 
 ## Validator failure
 
@@ -1097,85 +1139,95 @@ The components receive state through the existing Web presentation
 shape before applying it.
 
 
-### Browser module and registration boundary
+### Browser build and registration boundary
 
-The platform-neutral module and browser presentation use separate package entry
-points:
+The platform-neutral TypeScript entry point remains:
 
 ```text
 @loomrealm-game/schema-form
-@loomrealm-game/schema-form/browser
 ```
 
-The root entry point exports Schema Form declarations, errors, RenderData types, and
-`openSchemaForm()`. It MUST NOT import DOM, Lit, Web Awesome, or register Custom
-Elements as an import side effect.
+It exports Schema Form declarations, errors, RenderData types, and
+`openSchemaForm()`. It MUST NOT import DOM, Lit, Web Awesome, or browser-only code.
 
-The browser entry point exports:
+Browser presentation is not a second runtime module-loading API. It follows the
+existing LoomRealm Web Presentation Config v1 model used by other game libraries.
+The Schema Form package builds two self-contained presentation artifacts:
 
-```ts
-registerSchemaFormElements(): Promise<void>;
+```text
+dist/browser/schema-form.browser.js
+dist/browser/schema-form.browser.css
 ```
 
-Registration is asynchronous because Web Awesome component modules are loaded only
-inside this explicit operation. Importing the browser subpath itself does not register
-Schema Form or Web Awesome Custom Elements.
-
-That function registers exactly:
+The JS artifact is a classic-script-compatible self-executing bundle. Evaluation
+registers exactly:
 
 ```text
 lr-schema-form
 lr-schema-form-field
 ```
 
-Registration is explicit. Importing either package entry point alone does not mutate
-the global CustomElementRegistry.
+before projection begins. If either LoomRealm-owned tag is already registered, script
+evaluation throws `TypeError` rather than overwriting or silently accepting a
+foreign definition.
 
-`registerSchemaFormElements()` first checks for conflicting LoomRealm tags, then
-dynamically imports the required Web Awesome component modules, then re-checks and
-defines the two Schema Form elements. Repeated/concurrent calls converge on one
-registration operation.
+There is no public `registerSchemaFormElements()`, no runtime `import()`, no bare
+npm specifier resolution in the Renderer Window, and no Schema Form-specific browser
+loader. Web Presentation Config loads the finished CSS/JS resources through its
+ordinary ordered bootstrap:
 
-If an existing Schema Form tag is already registered to a different constructor, the
-returned Promise rejects with `TypeError`. If both tags are already registered to
-the exact module constructors, the Promise resolves without loading or redefining
-anything.
+```text
+styles[]  → schema-form.browser.css
+scripts[] → schema-form.browser.js
+window.onload
+→ presentation starts
+```
 
-The implementation commit updates `package.json` to export `./browser` and keeps
-`sideEffects: false`. Browser compilation includes the DOM library, but the root
-entry point stays platform-neutral in its runtime dependencies.
+Package exports expose the built files as browser resources:
 
-Web Awesome's global theme stylesheet is intentionally not injected by this module.
-The Web Presentation host/bootstrap that uses Schema Form browser components MUST load
-a compatible Web Awesome theme stylesheet (the v1 qualification uses the pinned
-package's default theme) before presenting the form. This keeps document-global style
-ownership outside a reusable component registration function.
+```text
+./browser/schema-form.browser.js
+./browser/schema-form.browser.css
+```
+
+The browser bundle is side-effectful by design because its classic-script evaluation
+registers Custom Elements. Package metadata MUST NOT incorrectly mark that browser
+artifact as tree-shake-safe side-effect-free code; the root TypeScript module may
+remain side-effect-free.
 
 ### Browser component implementation strategy
 
-The v1 browser stack is frozen to:
+The authoring stack is frozen to:
 
 ```text
-LoomRealm Web Presentation contract
-        ↓
-lr-schema-form / lr-schema-form-field
+Schema Form browser source
         ↓
 Lit 3.3.3
         ↓
 Web Awesome 3.14.0
+        ↓
+esbuild 0.25.9 at build time
+        ↓
+self-contained classic JS + CSS
+        ↓
+Web Presentation Config v1
 ```
 
-The implementation commit pins direct dependencies:
+Lit and Web Awesome are build-time browser dependencies, not runtime module-loading
+requirements of Renderer Window. esbuild bundles all selected component JavaScript
+into `schema-form.browser.js`.
 
-```json
-{
-  "lit": "3.3.3",
-  "@awesome.me/webawesome": "3.14.0"
-}
+The browser style entry imports Web Awesome's bundled stylesheet:
+
+```ts
+import "@awesome.me/webawesome/dist/styles/webawesome.css";
 ```
 
-The explicit async registration function cherry-picks only the required Web Awesome
-component modules rather than loading an autoloader or the full component set:
+plus Schema Form modal/layout/override styles. esbuild emits the resulting
+`schema-form.browser.css`. Games and Renderer hosts do not separately know which
+Web Awesome theme, palette, or version Schema Form uses.
+
+The browser source imports only required Web Awesome component implementations:
 
 ```text
 @awesome.me/webawesome/dist/components/input/input.js
@@ -1185,6 +1237,10 @@ component modules rather than loading an autoloader or the full component set:
 @awesome.me/webawesome/dist/components/option/option.js
 @awesome.me/webawesome/dist/components/button/button.js
 ```
+
+The final classic bundle MUST contain no dynamic `import()`, no external bare npm
+specifier, no ESM module graph, and no dependency on `node_modules` at presentation
+runtime.
 
 The v1 control mapping is frozen:
 
@@ -1719,6 +1775,12 @@ malformed change/submit payload   → ignore with no state mutation
 cancel while cancelable=false     → ignore
 duplicate event after settlement  → ignore
 ```
+
+For current-root Change/Submit events, the subsystem independently re-measures the
+complete component-supplied event data object using compact JSON UTF-8 encoding.
+If it exceeds 131,072 bytes, the event is malformed and is ignored with zero state
+or error mutation. The browser-side size check is early UX containment; this
+subsystem-side recheck is the authoritative Schema Form boundary.
 
 Malformed presentation input does not add another public `SchemaFormErrorCode`.
 Validator/program failures remain the only opened-form program failures described by
