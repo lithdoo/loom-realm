@@ -78,6 +78,11 @@ async function browserPage(t) {
 async function setup(page, origin, { cancelable = true } = {}) {
   await page.goto(origin);
   await page.evaluate(async ({ cancelable }) => {
+    const outsideFocusTarget = document.createElement("button");
+    outsideFocusTarget.id = "schema-form-focus-origin";
+    outsideFocusTarget.textContent = "Outside focus target";
+    document.body.append(outsideFocusTarget);
+    outsideFocusTarget.focus();
     const [foundation, runtimeControl, rendererControl, subsystem, subsystemHost, renderer, presentation, schemaForm] = await Promise.all([
       import("@loomrealm/foundation/testing"),
       import("@loomrealm/runtime-control"),
@@ -209,7 +214,12 @@ async function setup(page, origin, { cancelable = true } = {}) {
         await waitFor(() => returns.length === 1, "Frame return");
         await waitFor(() => document.querySelector("lr-schema-form") === null, "Schema Form removal");
         const returned = structuredClone(returns[0].result);
-        return { returned, projectorFailures: [...projectorFailures] };
+        await Promise.resolve();
+        return {
+          returned,
+          projectorFailures: [...projectorFailures],
+          focusRestored: document.activeElement === outsideFocusTarget,
+        };
       },
     };
   }, { cancelable });
@@ -257,6 +267,7 @@ test("real Chromium submits through the complete Schema Form authority path", { 
   assert.deepEqual(result, {
     returned: { type: "completed", value: { observation: "resolved", result: { type: "submitted", value: { name: "Alice", enabled: false } } } },
     projectorFailures: [],
+    focusRestored: true,
   });
   assert.ok(server.requests.includes("/game-libs/schema-form/dist/browser/schema-form.browser.js"));
   assert.ok(server.requests.includes("/game-libs/schema-form/dist/browser/schema-form.browser.css"));
@@ -268,8 +279,11 @@ test("real Chromium user Cancel resolves cancelled through the existing input ch
   await setup(page, server.origin, { cancelable: true });
   await page.locator("lr-schema-form").locator("wa-button").filter({ hasText: "Cancel" }).locator("button").click();
   const result = await page.evaluate(() => globalThis.schemaQualification.finish());
-  assert.deepEqual(result.returned, { type: "completed", value: { observation: "resolved", result: { type: "cancelled" } } });
-  assert.deepEqual(result.projectorFailures, []);
+  assert.deepEqual(result, {
+    returned: { type: "completed", value: { observation: "resolved", result: { type: "cancelled" } } },
+    projectorFailures: [],
+    focusRestored: true,
+  });
 });
 
 test("real Frame abort rejects openSchemaForm with AbortError and removes presentation", { timeout: TIMEOUT }, async (t) => {
@@ -284,11 +298,18 @@ test("real Frame abort rejects openSchemaForm with AbortError and removes presen
   const result = await page.evaluate(async () => {
     const state = globalThis.schemaQualification;
     const observation = structuredClone(state.observations[0]);
-    return { observation, projectorFailures: [...state.projectorFailures], formPresent: document.querySelector("lr-schema-form") !== null };
+    await Promise.resolve();
+    return {
+      observation,
+      projectorFailures: [...state.projectorFailures],
+      formPresent: document.querySelector("lr-schema-form") !== null,
+      focusRestored: document.activeElement?.id === "schema-form-focus-origin",
+    };
   });
   assert.deepEqual(result, {
     observation: { observation: "rejected", name: "AbortError" },
     projectorFailures: [],
     formPresent: false,
+    focusRestored: true,
   });
 });

@@ -150,12 +150,49 @@ test("field controls keep stable DOM, exact event mapping, number drafts and sel
   assert.equal(result.requiredMarker, true);
 });
 
+test("browser snapshots preserve prototype-like field keys as own properties", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(async () => {
+    const events = [];
+    const root = document.createElement("lr-schema-form");
+    root.receiveRenderContext({ resources: {}, emitCustomEvent(name, data = {}) { events.push({ name, data }); } });
+    root.receiveRenderData({ cancelable: false });
+    const keys = ["constructor", "toString", "__proto__"];
+    const fields = keys.map((key) => {
+      const field = document.createElement("lr-schema-form-field");
+      field.receiveRenderData({ key, kind: "string", label: key, required: false, value: key, multiline: false });
+      root.append(field);
+      return field;
+    });
+    document.body.append(root);
+    await Promise.all([root.updateComplete, ...fields.map((field) => field.updateComplete)]);
+    const controls = fields.map((field) => field.shadowRoot.querySelector("wa-input"));
+    controls.forEach((control, index) => { control.value = `value-${index}`; });
+    controls[0].dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    const values = events[0].data.values;
+    return {
+      eventCount: events.length,
+      own: keys.map((key) => Object.hasOwn(values, key)),
+      values: keys.map((key) => values[key]),
+      prototypeUnchanged: Object.getPrototypeOf(values) === Object.prototype,
+    };
+  });
+  assert.equal(result.eventCount, 1);
+  assert.deepEqual(result.own, [true, true, true]);
+  assert.deepEqual(result.values, ["value-0", "value-1", "value-2"]);
+  assert.equal(result.prototypeUnchanged, true);
+});
+
 test("modal cancel semantics, propagation blocking and local size limit are exact", async (t) => {
   const page = await pageWithBundle(t);
   const result = await page.evaluate(async () => {
     const events = [];
-    let windowKeys = 0;
-    window.addEventListener("keydown", () => { windowKeys += 1; });
+    const windowEvents = Object.fromEntries([
+      "keydown", "keyup", "pointerdown", "pointermove", "pointerup", "pointercancel",
+    ].map((name) => [name, 0]));
+    for (const name of Object.keys(windowEvents)) {
+      window.addEventListener(name, () => { windowEvents[name] += 1; });
+    }
     const root = document.createElement("lr-schema-form");
     const field = document.createElement("lr-schema-form-field");
     root.append(field);
@@ -167,7 +204,12 @@ test("modal cancel semantics, propagation blocking and local size limit are exac
     const dialog = root.shadowRoot.querySelector("wa-dialog");
     const denied = new CustomEvent("wa-hide", { bubbles: true, cancelable: true, composed: true });
     dialog.dispatchEvent(denied);
-    dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, composed: true, key: "A" }));
+    const shell = root.shadowRoot.querySelector(".shell");
+    shell.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, composed: true, key: "A" }));
+    shell.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, composed: true, key: "A" }));
+    for (const name of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+      shell.dispatchEvent(new PointerEvent(name, { bubbles: true, composed: true, pointerId: 1 }));
+    }
     const deniedEvents = events.length;
 
     root.receiveRenderData({ title: "Title", cancelable: true });
@@ -191,7 +233,7 @@ test("modal cancel semantics, propagation blocking and local size limit are exac
       oversizeCount,
       showedSizeError,
       sizeErrorCleared: root.shadowRoot.querySelector(".size-error") === null,
-      windowKeys,
+      windowEvents,
       label: root.shadowRoot.querySelector("wa-dialog").label,
       open: root.shadowRoot.querySelector("wa-dialog").open,
       lightDismiss: root.shadowRoot.querySelector("wa-dialog").lightDismiss,
@@ -204,8 +246,147 @@ test("modal cancel semantics, propagation blocking and local size limit are exac
   assert.equal(result.oversizeCount, 1);
   assert.equal(result.showedSizeError, "Form data is too large");
   assert.equal(result.sizeErrorCleared, true);
-  assert.equal(result.windowKeys, 0);
+  assert.deepEqual(result.windowEvents, {
+    keydown: 0,
+    keyup: 0,
+    pointerdown: 0,
+    pointermove: 0,
+    pointerup: 0,
+    pointercancel: 0,
+  });
   assert.equal(result.label, "Title");
   assert.equal(result.open, true);
   assert.equal(result.lightDismiss, false);
+});
+
+test("real dialog layout gives scrolling only to the Schema Form body", async (t) => {
+  const page = await pageWithBundle(t);
+  await page.setViewportSize({ width: 1000, height: 600 });
+  const result = await page.evaluate(async () => {
+    const root = document.createElement("lr-schema-form");
+    root.receiveRenderContext({ resources: {}, emitCustomEvent() {} });
+    root.receiveRenderData({ title: "Layout", description: "Scrollable form", cancelable: true });
+    const fields = Array.from({ length: 30 }, (_, index) => {
+      const field = document.createElement("lr-schema-form-field");
+      field.receiveRenderData({ key: `field-${index}`, kind: "string", label: `Field ${index}`, required: false, value: "", multiline: false });
+      root.append(field);
+      return field;
+    });
+    document.body.append(root);
+    await Promise.all([root.updateComplete, ...fields.map((field) => field.updateComplete)]);
+    const dialogHost = root.shadowRoot.querySelector("wa-dialog");
+    await dialogHost.updateComplete;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const nativeDialog = dialogHost.shadowRoot.querySelector("dialog");
+    const waBody = dialogHost.shadowRoot.querySelector('[part="body"]');
+    const shell = root.shadowRoot.querySelector(".shell");
+    const body = root.shadowRoot.querySelector(".body");
+    const header = root.shadowRoot.querySelector("header");
+    const footer = root.shadowRoot.querySelector("footer");
+    const before = { header: header.getBoundingClientRect().top, footer: footer.getBoundingClientRect().top };
+    body.scrollTop = body.scrollHeight;
+    const after = { header: header.getBoundingClientRect().top, footer: footer.getBoundingClientRect().top };
+    const dialogRect = nativeDialog.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    return {
+      dialogWidth: dialogRect.width,
+      dialogHeight: dialogRect.height,
+      shellHeight: shellRect.height,
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      waBodyOverflow: getComputedStyle(waBody).overflow,
+      waBodyScrollable: waBody.scrollHeight > waBody.clientHeight,
+      bodyOverflowY: getComputedStyle(body).overflowY,
+      bodyScrollable: body.scrollHeight > body.clientHeight,
+      headerAndFooterOutsideBody: header.parentElement === shell && footer.parentElement === shell && !body.contains(header) && !body.contains(footer),
+      headerFixed: before.header === after.header,
+      footerFixed: before.footer === after.footer,
+    };
+  });
+  assert.ok(result.dialogWidth <= 600.5, JSON.stringify(result));
+  assert.ok(result.dialogWidth <= result.viewportWidth * 0.8 + 0.5, JSON.stringify(result));
+  assert.ok(result.dialogWidth >= 599.5, JSON.stringify(result));
+  assert.ok(result.dialogHeight <= result.viewportHeight * 0.8 + 0.5, JSON.stringify(result));
+  assert.ok(result.shellHeight <= result.viewportHeight * 0.8 + 0.5, JSON.stringify(result));
+  assert.equal(result.waBodyOverflow, "hidden");
+  assert.equal(result.waBodyScrollable, false);
+  assert.equal(result.bodyOverflowY, "auto");
+  assert.equal(result.bodyScrollable, true);
+  assert.equal(result.headerAndFooterOutsideBody, true);
+  assert.equal(result.headerFixed, true);
+  assert.equal(result.footerFixed, true);
+});
+
+test("focus returns after cancel and submit, and removed targets are ignored", async (t) => {
+  const page = await pageWithBundle(t);
+  const result = await page.evaluate(async () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const deepActiveElement = () => {
+      let active = document.activeElement;
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+      return active;
+    };
+    const belongsTo = (node, ancestor) => {
+      let current = node;
+      while (current !== null) {
+        if (current === ancestor) return true;
+        const root = current.getRootNode();
+        current = root instanceof ShadowRoot ? root.host : current.parentElement;
+      }
+      return false;
+    };
+    const run = async (action) => {
+      const outside = document.createElement("button");
+      outside.textContent = `outside-${action}`;
+      document.body.append(outside);
+      outside.focus();
+      const root = document.createElement("lr-schema-form");
+      const field = document.createElement("lr-schema-form-field");
+      field.receiveRenderData({ key: "text", kind: "string", label: "Text", required: false, value: "ok", multiline: false });
+      root.append(field);
+      root.receiveRenderContext({
+        resources: {},
+        emitCustomEvent(name) {
+          if (name === action) root.remove();
+        },
+      });
+      root.receiveRenderData({ title: "Focus", cancelable: true });
+      document.body.append(root);
+      await Promise.all([root.updateComplete, field.updateComplete]);
+      const dialog = root.shadowRoot.querySelector("wa-dialog");
+      await dialog.updateComplete;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const focusedInside = belongsTo(deepActiveElement(), root);
+      const buttons = [...root.shadowRoot.querySelectorAll("wa-button")];
+      const button = action === "cancel"
+        ? buttons.find((candidate) => candidate.textContent.trim() === "Cancel")
+        : buttons.find((candidate) => candidate.getAttribute("variant") === "brand");
+      button.shadowRoot.querySelector("button").click();
+      await tick();
+      await tick();
+      const restored = document.activeElement === outside;
+      outside.remove();
+      return { focusedInside, restored };
+    };
+    const cancel = await run("cancel");
+    const submit = await run("submit");
+
+    let errors = 0;
+    window.addEventListener("error", () => { errors += 1; });
+    const removedTarget = document.createElement("button");
+    document.body.append(removedTarget);
+    removedTarget.focus();
+    const root = document.createElement("lr-schema-form");
+    root.receiveRenderContext({ resources: {}, emitCustomEvent() {} });
+    root.receiveRenderData({ cancelable: false });
+    document.body.append(root);
+    await root.updateComplete;
+    removedTarget.remove();
+    root.remove();
+    await tick();
+    return { cancel, submit, removedTargetErrors: errors };
+  });
+  assert.deepEqual(result.cancel, { focusedInside: true, restored: true });
+  assert.deepEqual(result.submit, { focusedInside: true, restored: true });
+  assert.equal(result.removedTargetErrors, 0);
 });

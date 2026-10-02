@@ -20,7 +20,7 @@
     "./dist/browser/schema-form.browser.css"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/build-browser.mjs",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json && node scripts/build-browser.mjs",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "engines": {

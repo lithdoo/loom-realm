@@ -131,13 +131,11 @@ export class SchemaFormFieldElement extends LitElement {
   private current?: SchemaFormFieldRenderDataV1;
   private draft = "";
   private dirty = false;
-  private authoritativeValue: number | undefined;
 
   receiveRenderData(data: Readonly<Record<string, unknown>>): void {
     const validated = validateFieldData(data);
     if (this.current !== undefined && this.current.kind !== validated.kind) throw new TypeError("Schema Form field kind changed");
     if (validated.kind === "number") {
-      this.authoritativeValue = validated.value;
       if (!this.dirty) this.draft = validated.value === undefined ? "" : String(validated.value);
     }
     this.current = validated;
@@ -212,11 +210,13 @@ export class SchemaFormFieldElement extends LitElement {
 
 export class SchemaFormElement extends LitElement {
   static styles = css`
-    .shell { width: 600px; max-width: 80vw; max-height: 80vh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+    wa-dialog { --width: min(600px, 80vw); --spacing: 0; }
+    wa-dialog::part(body) { padding: 0; overflow: hidden; }
+    .shell { box-sizing: border-box; width: 100%; max-height: 80vh; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
     header, footer { display: flex; align-items: center; gap: .75rem; padding: 1rem; }
     header { justify-content: space-between; border-bottom: 1px solid var(--wa-color-neutral-30); }
     header h2 { margin: 0; }
-    .body { overflow: auto; padding: 1rem; }
+    .body { min-height: 0; overflow: auto; padding: 1rem; }
     .description { margin: 0 0 1rem; color: var(--wa-color-neutral-60); }
     ::slotted(lr-schema-form-field) { margin-bottom: 1rem; }
     footer { justify-content: flex-end; border-top: 1px solid var(--wa-color-neutral-30); }
@@ -226,6 +226,27 @@ export class SchemaFormElement extends LitElement {
   private context?: WebPresentationContext;
   private current?: SchemaFormRenderDataV1;
   private sizeError = false;
+  private previousFocus?: HTMLElement;
+
+  connectedCallback(): void {
+    const active = document.activeElement;
+    this.previousFocus = active instanceof HTMLElement && active !== document.body && active !== document.documentElement
+      ? active
+      : undefined;
+    super.connectedCallback();
+  }
+
+  disconnectedCallback(): void {
+    const previousFocus = this.previousFocus;
+    this.previousFocus = undefined;
+    super.disconnectedCallback();
+    queueMicrotask(() => {
+      if (previousFocus === undefined || !previousFocus.isConnected ||
+          previousFocus.matches(":disabled, [inert], [hidden]") || previousFocus.closest("[inert]") !== null ||
+          previousFocus.getClientRects().length === 0) return;
+      try { previousFocus.focus({ preventScroll: true }); } catch { /* detached or no longer focusable */ }
+    });
+  }
 
   receiveRenderContext(context: WebPresentationContext): void {
     if (context === null || typeof context !== "object" || typeof context.emitCustomEvent !== "function") {
@@ -287,7 +308,9 @@ export class SchemaFormElement extends LitElement {
     const cancelable = data?.cancelable === true;
     return html`
       <wa-dialog open without-header .label=${data?.title ?? "Form"} @wa-hide=${this.hideRequested}
-        @keydown=${this.stop} @keyup=${this.stop} @pointerdown=${this.stop} @pointerup=${this.stop} @click=${this.stop}>
+        @keydown=${this.stop} @keyup=${this.stop}
+        @pointerdown=${this.stop} @pointermove=${this.stop} @pointerup=${this.stop} @pointercancel=${this.stop}
+        @click=${this.stop}>
         <form class="shell" novalidate @submit=${(event: Event) => { event.preventDefault(); this.submit(); }}>
           <header>
             <h2>${data?.title ?? ""}</h2>

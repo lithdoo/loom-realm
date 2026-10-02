@@ -79,12 +79,13 @@ function fieldRenderData(
   canonical: SchemaFormDataV1,
   errors: Readonly<Record<string, string>>,
 ): SchemaFormFieldRenderDataV1 {
+  const error = Object.hasOwn(errors, field.key) ? errors[field.key] : undefined;
   const base = {
     key: field.key,
     label: field.label,
     ...(field.description === undefined ? {} : { description: field.description }),
     required: field.required === true,
-    ...(errors[field.key] === undefined ? {} : { error: errors[field.key] }),
+    ...(error === undefined ? {} : { error }),
   };
   if (field.kind === "string") return {
     ...base,

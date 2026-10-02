@@ -35,6 +35,10 @@ function exactMembers(value: Record<string, unknown>, allowed: readonly string[]
   return keys.length <= allowed.length && keys.every((key) => allowed.includes(key));
 }
 
+function unknownMember(value: Record<string, unknown>, allowed: readonly string[]): string | undefined {
+  return Object.keys(value).find((key) => !allowed.includes(key));
+}
+
 function denseArray(value: unknown, path: string): readonly unknown[] {
   if (!Array.isArray(value)) schemaFailure(path);
   const keys = Reflect.ownKeys(value);
@@ -112,11 +116,11 @@ function requireString(value: unknown, path: string): asserts value is string {
 }
 
 function validateOptionalString(object: Record<string, unknown>, name: string, path: string): void {
-  if (name in object) requireString(object[name], `${path}.${name}`);
+  if (Object.hasOwn(object, name)) requireString(object[name], `${path}.${name}`);
 }
 
 function validateOptionalBoolean(object: Record<string, unknown>, name: string, path: string): void {
-  if (name in object && typeof object[name] !== "boolean") schemaFailure(`${path}.${name}`);
+  if (Object.hasOwn(object, name) && typeof object[name] !== "boolean") schemaFailure(`${path}.${name}`);
 }
 
 function finiteNumber(value: unknown): value is number {
@@ -168,28 +172,32 @@ function validateField(value: unknown, index: number, keys: Set<string>): Schema
     validateOptionalString(value, "placeholder", path);
     validateOptionalBoolean(value, "multiline", path);
     for (const name of ["minLength", "maxLength"] as const) {
-      if (name in value && (!Number.isInteger(value[name]) || (value[name] as number) < 0)) schemaFailure(`${path}.${name}`);
+      if (Object.hasOwn(value, name) && (!Number.isInteger(value[name]) || (value[name] as number) < 0)) {
+        schemaFailure(`${path}.${name}`);
+      }
     }
     if (typeof value.minLength === "number" && typeof value.maxLength === "number" && value.minLength > value.maxLength) {
       schemaFailure(`${path}.minLength`);
     }
   } else if (kind === "number") {
     for (const name of ["default", "min", "max"] as const) {
-      if (name in value && !finiteNumber(value[name])) schemaFailure(`${path}.${name}`);
+      if (Object.hasOwn(value, name) && !finiteNumber(value[name])) schemaFailure(`${path}.${name}`);
     }
     validateOptionalBoolean(value, "integer", path);
     if (typeof value.min === "number" && typeof value.max === "number" && value.min > value.max) schemaFailure(`${path}.min`);
   } else if (kind === "boolean") {
-    if ("default" in value && typeof value.default !== "boolean") schemaFailure(`${path}.default`);
+    if (Object.hasOwn(value, "default") && typeof value.default !== "boolean") schemaFailure(`${path}.default`);
   } else if (kind === "select") {
     const options = denseArray(value.options, `${path}.options`);
     const optionValues = new Set<string>();
     for (let optionIndex = 0; optionIndex < options.length; optionIndex += 1) {
       const option = options[optionIndex];
       const optionPath = `${path}.options[${optionIndex}]`;
-      if (!ownDataObject(option) || !exactMembers(option, ["value", "label"]) || !("value" in option) || !("label" in option)) {
-        schemaFailure(optionPath);
-      }
+      if (!ownDataObject(option)) schemaFailure(optionPath);
+      const unknown = unknownMember(option, ["value", "label"]);
+      if (unknown !== undefined) schemaFailure(`${optionPath}.${unknown}`);
+      if (!Object.hasOwn(option, "value")) schemaFailure(`${optionPath}.value`);
+      if (!Object.hasOwn(option, "label")) schemaFailure(`${optionPath}.label`);
       requireString(option.value, `${optionPath}.value`);
       requireString(option.label, `${optionPath}.label`);
       if (optionValues.has(option.value)) schemaFailure(`${optionPath}.value`);
@@ -200,16 +208,17 @@ function validateField(value: unknown, index: number, keys: Set<string>): Schema
     schemaFailure(`${path}.kind`);
   }
 
-  if ("default" in value && !validateFieldValue(value as unknown as SchemaFormFieldV1, value.default)) {
+  if (Object.hasOwn(value, "default") && !validateFieldValue(value as unknown as SchemaFormFieldV1, value.default)) {
     schemaFailure(`${path}.default`);
   }
   return value as unknown as SchemaFormFieldV1;
 }
 
 export function validateSchema(value: unknown): SchemaFormV1 {
-  if (!ownDataObject(value) || !exactMembers(value, ["version", "title", "description", "fields", "validateOnChange", "validateOnSubmit"])) {
-    schemaFailure("schema");
-  }
+  if (!ownDataObject(value)) schemaFailure("schema");
+  const allowed = ["version", "title", "description", "fields", "validateOnChange", "validateOnSubmit"];
+  const unknown = unknownMember(value, allowed);
+  if (unknown !== undefined) schemaFailure(`schema.${unknown}`);
   if (value.version !== 1) schemaFailure("schema");
   validateOptionalString(value, "title", "schema");
   validateOptionalString(value, "description", "schema");
@@ -356,7 +365,7 @@ export function validateEventData(
   data: unknown,
   schema: SchemaFormV1,
 ): Record<string, SchemaFormValueV1> | null {
-  if (!ownDataObject(data) || Object.keys(data).length !== 1 || !("values" in data)) return null;
+  if (!ownDataObject(data) || Object.keys(data).length !== 1 || !Object.hasOwn(data, "values")) return null;
   try {
     if (compactJsonBytes(data) > SCHEMA_FORM_EVENT_LIMIT) return null;
   } catch {

@@ -89,11 +89,11 @@ test("closed schema validation covers field kinds and boundary declarations", as
 
   for (const [schema, path] of [
     [{ version: 2, fields: [] }, "schema"],
-    [{ version: 1, fields: [], extra: true }, "schema"],
+    [{ version: 1, fields: [], extra: true }, "schema.extra"],
     [baseSchema([stringField({ extra: true })]), "schema.fields[0].extra"],
     [baseSchema([stringField(), stringField()]), "schema.fields[1].key"],
     [baseSchema([{ key: "x", kind: "future", label: "" }]), "schema.fields[0].kind"],
-    [baseSchema([{ key: "x", kind: "select", label: "", options: [{ value: "a", label: "", extra: 1 }] }]), "schema.fields[0].options[0]"],
+    [baseSchema([{ key: "x", kind: "select", label: "", options: [{ value: "a", label: "", extra: 1 }] }]), "schema.fields[0].options[0].extra"],
     [baseSchema([{ key: "x", kind: "string", label: "", minLength: 2, maxLength: 1 }]), "schema.fields[0].minLength"],
     [baseSchema([{ key: "x", kind: "number", label: "", default: Infinity }]), "schema.fields[0].default"],
   ]) {
@@ -186,6 +186,61 @@ test("initial value validation and canonical precedence preserve false, zero and
   await assert.rejects(openSchemaForm(harness().scope, harness().frame, { schema: boundarySchema, initialValue: { text: initial.text + "x" } }), {
     code: "SCHEMA_FORM_INVALID_INITIAL_VALUE", path: "initialValue",
   });
+});
+
+test("prototype-like field keys remain own data properties through validation and submission", async () => {
+  const keys = ["constructor", "toString", "__proto__"];
+  const ownValues = (values) => Object.fromEntries(keys.map((key, index) => [key, values[index]]));
+  const schema = {
+    ...baseSchema(keys.map((key) => stringField({ key, label: key, required: true }))),
+    validateOnChange: `(data) => {
+      for (const key of ["constructor", "toString", "__proto__"]) {
+        if (!Object.hasOwn(data, key)) throw new Error("missing own key");
+      }
+      return data.toString === "script"
+        ? Object.fromEntries([
+            ["constructor", "Scripted constructor error"],
+            ["toString", "Scripted toString error"],
+            ["__proto__", "Scripted __proto__ error"],
+          ])
+        : null;
+    }`,
+  };
+  const h = harness();
+  const pending = openSchemaForm(h.scope, h.frame, {
+    schema,
+    initialValue: ownValues(["initial-constructor", "initial-toString", "initial-proto"]),
+  });
+  const initialFields = h.domains[0].state.roots[0].children.map((node) => node.data);
+  assert.deepEqual(initialFields.map((data) => data.value), ["initial-constructor", "initial-toString", "initial-proto"]);
+  assert.ok(initialFields.every((data) => !Object.hasOwn(data, "error")), "prototype properties must not become phantom errors");
+
+  h.event("change", { values: ownValues(["", "", ""]) });
+  const builtIn = h.updates.at(-1).nodes.map((node) => node.data.set);
+  assert.deepEqual(builtIn.map((data) => data.error), ["Required", "Required", "Required"]);
+
+  h.event("change", { values: ownValues(["valid", "script", "valid"]) });
+  const scripted = h.updates.at(-1).nodes;
+  assert.deepEqual(scripted.map((node) => node.data.set.error), [
+    "Scripted constructor error",
+    "Scripted toString error",
+    "Scripted __proto__ error",
+  ]);
+
+  h.event("change", { values: ownValues(["clean-constructor", "clean-toString", "clean-proto"]) });
+  const cleared = h.updates.at(-1).nodes;
+  assert.ok(cleared.every((node) => node.data.remove.includes("error")));
+  assert.ok(cleared.every((node) => !Object.hasOwn(node.data.set, "error")));
+
+  h.event("submit", { values: ownValues(["submitted-constructor", "submitted-toString", "submitted-proto"]) });
+  const result = await pending;
+  assert.equal(result.type, "submitted");
+  for (const key of keys) assert.equal(Object.hasOwn(result.value, key), true);
+  assert.equal(result.value.constructor, "submitted-constructor");
+  assert.equal(result.value.toString, "submitted-toString");
+  assert.equal(result.value.__proto__, "submitted-proto");
+  assert.equal(Object.getPrototypeOf(result.value), Object.prototype);
+  assert.equal({}.polluted, undefined);
 });
 
 test("required is interaction-only and built-in text/precedence are exact", async () => {
