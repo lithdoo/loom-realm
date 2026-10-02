@@ -1433,6 +1433,8 @@ Phase 2 is complete only if:
 [ ] browser delivery is one classic self-contained JS bundle + one CSS bundle
 [ ] no frame.call/schema-form subsystem exists
 [ ] one active form per Frame enforced
+[ ] openSchemaForm() never synchronously throws argument/preflight failures
+[ ] all openSchemaForm() failures are observed as Promise rejection
 [ ] all preflight error codes match DESIGN
 [ ] Frame abort rejects AbortError
 [ ] settle-once cleanup covers every terminal path
@@ -1444,6 +1446,7 @@ Phase 2 is complete only if:
 [ ] required is interaction-only, not preflight rejection
 [ ] string min/max length uses ECMAScript value.length
 [ ] select "" is explicit option value; null alone means unset
+[ ] trusted validators receive detached frozen SchemaFormDataV1
 [ ] trusted validators are isolated and synchronous
 [ ] internal RenderNode identity never derives from field.key
 [ ] string/boolean RenderData value is always concrete
