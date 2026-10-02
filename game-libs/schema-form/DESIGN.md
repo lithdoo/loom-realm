@@ -1045,6 +1045,26 @@ The explicit Schema Form Close and Cancel buttons do not directly close
 `wa-dialog`; they call the same local `cancel()` action. Submit likewise never
 directly closes the dialog.
 
+`wa-dialog` owns the modal/top-layer mechanics, focus containment while open, and
+backdrop/modal browser behavior. `lr-schema-form` owns previous-focus capture and
+restoration after RenderDomain-driven removal. When connected, `lr-schema-form`
+captures the previously focused meaningful `HTMLElement`. When the form is removed
+after submit, cancel, or Frame abort, its `disconnectedCallback()` queues restoration
+and calls `focus({ preventScroll: true })` only if the previous target remains
+connected, visible, enabled, not inert, and focusable. A detached, disabled, hidden,
+inert, or otherwise unfocusable target is skipped silently without throwing.
+
+Because Schema Form prevents every `wa-hide`, the normal successful `wa-dialog`
+close path is not a settlement path. The actual lifecycle is:
+
+```text
+semantic submit/cancel/abort
+→ Subsystem settles
+→ RenderDomain closes
+→ Schema Form DOM is removed
+→ lr-schema-form restores previous focus
+```
+
 ### Modal interaction blocking
 
 Browser modality is delegated to `wa-dialog`; Schema Form does not add
@@ -1350,7 +1370,6 @@ A number field deliberately uses a text-capable `wa-input`. The field wrapper ke
 ```ts
 private draft: string;
 private dirty: boolean;
-private authoritativeValue: number | undefined;
 ```
 
 The presentation snapshot conversion is exact:
@@ -1383,7 +1402,6 @@ come from the same browser presentation snapshots.
 
 ```text
 first successful RenderData
-→ authoritativeValue = incoming value
 → draft = incoming value === undefined ? "" : String(incoming value)
 → dirty = false
 
@@ -1392,11 +1410,9 @@ local number input
 → dirty = true
 
 later successful RenderData while dirty=false
-→ authoritativeValue = incoming value
 → synchronize draft from incoming value
 
 later successful RenderData while dirty=true
-→ authoritativeValue = incoming value
 → NEVER overwrite draft
 → update only errors/label/constraints/other presentation facts
 ```
@@ -1755,8 +1771,8 @@ The local draft `"1."` is not sent to the subsystem. The root form contributes
 
 If validation returns RenderData after such an edit, the field component preserves
 the exact draft regardless of whether the canonical authoritative value is unchanged,
-changed to another number, or becomes absent. It still records the new authoritative
-value and applies new errors/labels/constraints.
+changed to another number, or becomes absent. While dirty, it applies only new
+errors, labels, constraints, and other presentation facts.
 
 This keeps number editing, selection, focus, and IME behavior stable while the
 Subsystem continues to own canonical values and validation. There is no v1

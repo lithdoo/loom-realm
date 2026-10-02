@@ -1132,14 +1132,12 @@ The number field keeps:
 ```ts
 private draft: string;
 private dirty: boolean;
-private authoritativeValue: number | undefined;
 ```
 
 State transitions are frozen:
 
 ```text
 first successful RenderData:
-  authoritativeValue = incoming value
   draft = incoming value === undefined ? "" : String(incoming value)
   dirty = false
 
@@ -1148,11 +1146,9 @@ local input:
   dirty = true
 
 later RenderData while dirty=false:
-  authoritativeValue = incoming value
   draft = incoming value === undefined ? "" : String(incoming value)
 
 later RenderData while dirty=true:
-  authoritativeValue = incoming value
   preserve draft exactly
   update errors/label/constraints/etc.
 ```
@@ -1160,9 +1156,8 @@ later RenderData while dirty=true:
 Once dirty, the field remains dirty for that element lifetime. Only a fresh field
 element/form resets it.
 
-Do not compare incoming authoritative value to decide whether a dirty draft should be
-rewritten. In particular, all of these must survive their own Change/validation
-round-trip unchanged:
+Later successful RenderData must never rewrite a dirty draft. In particular, all of
+these must survive their own Change/validation round-trip unchanged:
 
 ```text
 "-"
@@ -1295,7 +1290,29 @@ RenderData refresh preserves body scrollTop through stable DOM
 accessible label = title ?? "Form"
 light-dismiss disabled
 wa-hide always preventDefault()
-previous focus restoration is owned by wa-dialog/browser behavior
+wa-dialog owns modal/top-layer mechanics, focus containment while open,
+  and backdrop/modal browser behavior
+lr-schema-form owns previous-focus capture and restoration after
+  RenderDomain-driven removal
+```
+
+On connection, `lr-schema-form` captures the previously focused meaningful
+`HTMLElement`. Removal after submit, cancel, or Frame abort runs
+`disconnectedCallback()`, which queues restoration. It calls
+`focus({ preventScroll: true })` only if the previous target remains connected,
+visible, enabled, not inert, and focusable. If the target is detached, disabled,
+hidden, inert, or otherwise unfocusable, restoration is skipped silently without
+throwing.
+
+Because every `wa-hide` is prevented, the normal successful `wa-dialog` close path
+is not a settlement path. The actual lifecycle is:
+
+```text
+semantic submit/cancel/abort
+→ Subsystem settles
+→ RenderDomain closes
+→ Schema Form DOM is removed
+→ lr-schema-form restores previous focus
 ```
 
 Pointer/keyboard events handled inside the Schema Form presentation are still stopped
@@ -1496,7 +1513,8 @@ fresh element resets dirty state from authoritative value
 Chromium qualification covers:
 
 ```text
-wa-dialog supplies modal semantics/focus behavior
+wa-dialog supplies modal/top-layer mechanics and focus containment while open
+lr-schema-form restores previous focus after RenderDomain-driven removal
 accessible label title/fallback
 cancelable controls
 wa-hide is always prevented
@@ -1644,7 +1662,9 @@ Phase 2 is complete only if:
 [ ] browser event data <= 131072 bytes before emit
 [ ] subsystem independently rechecks <= 131072 bytes before parsing
 [ ] dirty number draft is never overwritten by later RenderData in same element lifetime
-[ ] wa-dialog owns modal/focus/backdrop mechanics; Schema Form owns semantic cancel
+[ ] wa-dialog owns modal/top-layer/focus-containment/backdrop mechanics
+[ ] lr-schema-form owns previous-focus capture/restoration after RenderDomain removal
+[ ] Schema Form owns semantic cancel
 [ ] modal DOM blocking does not change LoomRealm input authority
 [ ] browser bundle contains no runtime ESM/dynamic-import/bare-specifier dependency
 [ ] CSS bundle owns only required Web Awesome theme/palette + Schema Form styles
