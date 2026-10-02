@@ -270,9 +270,8 @@ cancelable present but not boolean
 
 Do not map those outer API-shape failures to a `SchemaFormErrorCode`.
 
-Implement `openSchemaForm()` as an async function (or an observably equivalent
-always-Promise function). It MUST NOT synchronously throw for argument/preflight
-validation. All failures are observed by awaiting/catching the returned Promise:
+Implement `openSchemaForm()` as an `async function`. It MUST NOT synchronously
+throw for argument/preflight validation. All failures are observed by awaiting/catching the returned Promise:
 
 ```text
 outer API shape        → reject TypeError
@@ -572,9 +571,29 @@ number min/max/integer                   → error when violated
 Presentation snapshots with an invalid select option or wrong primitive type are
 malformed input and are ignored before built-in validation.
 
-Exact built-in error message text is presentation text, not public ABI. Use stable,
-short English messages in tests, but tests should primarily assert field/error
-presence rather than message prose.
+Built-in error text is frozen for v1:
+
+```text
+required string/number/select  → "Required"
+string minLength=N             → "Must be at least N characters"
+string maxLength=N             → "Must be at most N characters"
+number min=N                   → "Must be at least N"
+number max=N                   → "Must be at most N"
+integer=true violation         → "Must be an integer"
+```
+
+When multiple built-in constraints fail for one field, choose the first applicable
+error in this exact precedence:
+
+```text
+required
+→ minLength / min
+→ maxLength / max
+→ integer
+```
+
+This message text is part of the frozen v1 browser presentation behavior even though
+callers must not branch on it.
 
 ## 13. Combining built-in and scripted errors
 
@@ -1009,6 +1028,11 @@ Every `receiveRenderData()` application is atomic. Invalid data synchronously th
 
 Do not forward Schema Form `required`, `minLength`, `maxLength`, `min`,
 `max`, or `integer` into Web Awesome/native constraint-validation properties.
+
+The field wrapper MUST render the exact field label, append a presentation-only
+visible `" *"` marker when `required=true`, render `description` as hint text
+when present, render module-produced `error` as the only validation-error text when
+present, and apply string `placeholder` when present.
 The field wrapper renders its own required marker and module-produced error. It may
 apply label/description/placeholder presentation values, but native validity is never
 Schema Form authority.
@@ -1345,6 +1369,7 @@ empty/non-string error value
 Promise result invalid
 validator receives detached frozen canonical snapshot
 built-in error precedence
+exact frozen built-in error text
 scripted errors still fill other fields
 change validator independent from submit validator
 ```
@@ -1577,6 +1602,7 @@ Phase 2 is complete only if:
 [ ] string min/max length uses ECMAScript value.length
 [ ] select "" is explicit option value; null alone means unset
 [ ] wa-select uses private option tokens and with-clear so semantic "" != unset
+[ ] built-in error messages and precedence exactly match frozen v1 text
 [ ] trusted validators receive detached frozen SchemaFormDataV1
 [ ] trusted validators are isolated and synchronous
 [ ] internal RenderNode identity never derives from field.key
