@@ -1113,14 +1113,21 @@ unknown members
 duplicate field keys
 128-field limit
 128-byte key boundary + invalid Unicode
+65,536-byte complete schema boundary + over-limit rejection
+65,536-byte complete initialValue boundary + over-limit rejection
 all min/max ordering
 finite-number enforcement
 integer rules
+string min/maxLength uses UTF-16 value.length
+required does not reject explicit empty/unset default or initialValue at preflight
+required still fails the same value during Change/Submit validation
 select option uniqueness/membership
-default constraint violations
+select option value "" is explicit and valid when declared
+select null alone represents unset
+default constraint violations excluding required
 unknown initial keys
 wrong initial types
-initial constraint violations
+initial constraint violations excluding required
 false / 0 / "" preserved
 fallback precedence
 ```
@@ -1137,12 +1144,15 @@ expression evaluates non-function
 execution throw
 null / undefined / {} pass
 valid error map
+65,536-byte validator error-map boundary
+over-limit validator error map → SCHEMA_FORM_INVALID_VALIDATOR_RESULT
 primitive/array/class/accessor/symbol invalid result
 unknown field error
 empty/non-string error value
 Promise result invalid
 validator receives detached frozen canonical snapshot
 built-in error precedence
+scripted errors still fill other fields
 change validator independent from submit validator
 ```
 
@@ -1172,11 +1182,14 @@ Cover:
 exact field-key set required
 number/select null omission in canonical candidate
 string/boolean null rejected as malformed
+select "" accepted only when declared as an option
 unknown/extra/missing fields ignored with zero mutation
 nonfinite number ignored
 invalid select option ignored
 wrong root target ignored
 unknown event name ignored
+current-root Change/Submit at 131,072-byte boundary accepted
+current-root Change/Submit over 131,072 bytes ignored with zero mutation
 cancel denied when cancelable=false
 Submit candidate independent of prior Change
 Change validation error keeps changed value
@@ -1212,7 +1225,8 @@ Cover:
 classic bundle evaluation registers both Schema Form tags
 foreign Schema Form tag collision throws TypeError before defining either tag
 bundle contains required Web Awesome element registrations
-no runtime dynamic import/module loader
+bundle CSS includes Web Awesome + Schema Form styles
+no runtime dynamic import/module loader/bare npm specifier
 root/field RenderData runtime validation
 stable control identity across refreshes
 field→root local communication only
@@ -1222,6 +1236,7 @@ omitted/undefined presentation context data not used accidentally
 string empty ""
 boolean unchecked false
 select unset null
+select explicit "" option
 number lexical cases
 authoritative number unchanged preserves draft
 authoritative number changed replaces draft
@@ -1239,8 +1254,9 @@ Escape cancel only when allowed
 backdrop does not cancel
 pointer/keyboard propagation blocked before Window input source
 Change/Submit emit complete snapshots
->128 KiB data never reaches emitCustomEvent
+browser >128 KiB data never reaches emitCustomEvent
 size error clears after snapshot becomes small
+subsystem independently rejects forged/oversize current-root event data
 ```
 
 ## 39. Integration qualification
