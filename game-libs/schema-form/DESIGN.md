@@ -559,7 +559,7 @@ undefined
 {}
 ```
 
-Internally these may all be normalized to an empty error map.
+Internally all three passing forms MUST normalize to one empty error map.
 
 ### Failing result
 
@@ -1115,19 +1115,18 @@ lr-schema-form-field
 
 `lr-schema-form` owns the visual form shell and submit/cancel controls.
 
-`lr-schema-form-field` selects the appropriate native editing control from
-`data.kind`:
+`lr-schema-form-field` uses the frozen Web Awesome mapping:
 
 ```text
-string + multiline=false → single-line text editor
-string + multiline=true  → multiline text editor
-number                    → numeric editor
-boolean                   → boolean control
-select                    → option selector
+string + multiline=false → wa-input
+string + multiline=true  → wa-textarea
+number                    → wa-input, type=text, inputmode=decimal
+boolean                   → wa-checkbox
+select                    → wa-select + wa-option
 ```
 
-These mappings are browser-presentation implementation choices. They are not part of
-the public SchemaForm schema ABI.
+These browser tags are implementation detail rather than public Schema Form schema
+ABI, but the v1 browser artifact MUST use this mapping.
 
 The components receive state through the existing Web presentation
 `receiveRenderData(data)` convention. They MUST validate the complete incoming
@@ -1394,8 +1393,8 @@ A Web Component must not rebuild its editing control on every
 `receiveRenderData()` call.
 
 Repeated replacement of an active input can destroy focus, selection, and IME
-composition state. Components should create stable DOM and patch changed properties
-and text instead.
+composition state. Components MUST create stable editing DOM and patch changed
+properties/text instead.
 
 Changing a field's `kind` while the form is open is not supported.
 
@@ -1577,8 +1576,9 @@ that are unset use `null`; string/boolean fields always use their concrete value
 
 Unknown extra keys and missing keys are malformed presentation snapshots.
 
-The form should accept a field notification only while that field is still a direct
-current child of the form, for example by checking `field.parentElement === this`.
+The form MUST accept a field notification only when
+`field.parentElement === this` at notification time. Any other/stale field
+notification is ignored.
 
 ### Change event
 
