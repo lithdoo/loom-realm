@@ -1,6 +1,6 @@
 # Phase 2 Implementation Contract: Schema Form
 
-Status: **frozen / implementation-ready / no design discretion**
+Status: **frozen / AI implementation-ready / no design discretion**
 
 This document is the implementation contract for
 `@loomrealm-game/schema-form` v1.
@@ -78,8 +78,9 @@ game-libs/schema-form/
 └── package.json
 ```
 
-Private helpers MAY remain in the nearest file when extraction would create a
-single-use abstraction. Do not add Manager/Service/Controller/Registry layers.
+Private helper placement is not observable ABI. Keep single-use helpers in the
+nearest existing file unless reuse requires extraction. Do not add
+Manager/Service/Controller/Registry layers.
 
 The only process-global mutable state required by the core module is:
 
@@ -89,8 +90,9 @@ const activeForms = new WeakMap<Frame, Session>();
 
 plus the private monotonic form serial allocator.
 
-Browser source may use ordinary local modules if needed for readability, but the
-published browser runtime is exactly the two bundled files in `dist/browser/`.
+Browser source helper modules are allowed only under `browser/`; regardless of
+source split, the published browser runtime is exactly the two bundled files in
+`dist/browser/`.
 
 ## 3. Package dependencies, build, and exports
 
@@ -113,11 +115,23 @@ and styles are bundled into the published browser artifacts:
   "typescript": "5.9.2",
   "esbuild": "0.25.9",
   "lit": "3.3.3",
-  "@awesome.me/webawesome": "3.14.0"
+  "@awesome.me/webawesome": "3.14.0",
+  "@loomrealm/renderer": "0.1.0-alpha.0"
 }
 ```
 
 Do not require Lit, Web Awesome, esbuild, or `node_modules` in the Renderer Window.
+
+Browser source MUST import the formal context contract only as a TypeScript type:
+
+```ts
+import type {
+  WebPresentationContext,
+} from "@loomrealm/renderer/web-presentation";
+```
+
+The emitted browser bundle MUST contain no runtime import/reference to
+`@loomrealm/renderer`.
 
 The build is:
 
@@ -164,13 +178,17 @@ The root entry point MUST NOT import browser source, Lit, Web Awesome, or DOM-on
 runtime code.
 
 The browser JS artifact is intentionally side-effectful because classic-script
-evaluation registers Custom Elements. Package metadata MUST either omit a package-wide
-`sideEffects: false` declaration or use a sideEffects allow-list that preserves:
+evaluation registers Custom Elements. Package metadata is frozen to:
 
-```text
-./dist/browser/schema-form.browser.js
-./dist/browser/schema-form.browser.css
+```json
+"sideEffects": [
+  "./dist/browser/schema-form.browser.js",
+  "./dist/browser/schema-form.browser.css"
+]
 ```
+
+Do not omit this field, do not use package-wide `sideEffects: false`, and do not use
+a different allow-list.
 
 Do not publish a `@loomrealm-game/schema-form/browser` runtime API and do not expose
 a registration function.
@@ -211,6 +229,13 @@ export type SchemaFormErrorCode =
   | "SCHEMA_FORM_INVALID_VALIDATOR_RESULT";
 
 export class SchemaFormError extends Error {
+  constructor(
+    code: SchemaFormErrorCode,
+    message: string = code,
+    path?: string,
+    options?: ErrorOptions,
+  );
+
   readonly code: SchemaFormErrorCode;
   readonly path?: string;
 }
@@ -321,6 +346,9 @@ accepted projection well below the existing RenderData/message ceilings.
 Rules include:
 
 - `version === 1`;
+- `fields.length` is 0..128 inclusive;
+- select `options.length` may be zero and has no count limit beyond the complete
+  65,536-byte schema budget;
 - field keys unique;
 - `required` boolean when present;
 - string defaults/constraints exact;
@@ -335,6 +363,11 @@ Rules include:
 - select default matches an option;
 - no unknown field kind;
 - no unknown declaration members.
+- every schema string contains valid Unicode scalar sequences;
+- `field.key` is the only schema string required to be non-empty;
+- every other schema string, including title/description/label/placeholder/option
+  label/option value/validator source, may be `""`;
+- validator error-map values remain required non-empty strings.
 
 A schema default must satisfy field kind/type constraints and all built-in
 constraints except `required`. `required` is interaction-time validation only.
@@ -346,20 +379,41 @@ After structural schema validation, compact-JSON UTF-8 encode the complete valid
 `SchemaFormV1`. If it exceeds 65,536 bytes, reject
 `SCHEMA_FORM_INVALID_SCHEMA`.
 
-Throw:
+Construct errors only through the frozen public constructor:
 
 ```ts
-new SchemaFormError(
-  "SCHEMA_FORM_INVALID_SCHEMA",
-  message,
-  path,
-)
+new SchemaFormError(code, message, path, options?)
 ```
 
-using an internal constructor signature as convenient. Public callers depend only on
-`code` and optional `path`.
+The implementation sets `error.name = "SchemaFormError"`.
 
-Paths use the existing diagnostic form:
+Diagnostic paths are exact:
+
+```text
+SCHEMA_FORM_INVALID_SCHEMA
+  concrete declaration/member failure
+  → exact schema path
+  whole schema shape/version/size failure
+  → "schema"
+
+SCHEMA_FORM_INVALID_INITIAL_VALUE
+  concrete field/member failure
+  → initialValue.<fieldKey>
+  whole initialValue shape/size failure
+  → "initialValue"
+
+SCHEMA_FORM_ALREADY_OPEN
+  → undefined
+
+SCHEMA_FORM_VALIDATOR_FAILED
+SCHEMA_FORM_INVALID_VALIDATOR_RESULT
+  validateOnChange
+  → "schema.validateOnChange"
+  validateOnSubmit
+  → "schema.validateOnSubmit"
+```
+
+Examples of exact declaration paths:
 
 ```text
 schema.fields[2].key
@@ -950,6 +1004,28 @@ The field element:
   method/callback, not Renderer custom events;
 - implements `readFormValue()`.
 
+Every `receiveRenderData()` application is atomic. Invalid data synchronously throws
+`TypeError` before any control/DOM/editor-state mutation.
+
+Do not forward Schema Form `required`, `minLength`, `maxLength`, `min`,
+`max`, or `integer` into Web Awesome/native constraint-validation properties.
+The field wrapper renders its own required marker and module-produced error. It may
+apply label/description/placeholder presentation values, but native validity is never
+Schema Form authority.
+
+User-originated edit triggers are exact and there is no debounce/coalescing layer:
+
+```text
+string / wa-input       → listen "input"
+multiline / wa-textarea → listen "input"
+number / wa-input       → listen "input"
+boolean / wa-checkbox   → listen "change"
+select / wa-select      → listen "change"
+```
+
+Each accepted user event calls the parent exactly once. Programmatic property updates
+during `receiveRenderData()` MUST NOT call the parent or create Change feedback.
+
 String:
 
 ```text
@@ -968,10 +1044,20 @@ read unchecked → false
 Select:
 
 ```text
-wa-select + wa-option
-unset → null
-selected → declared option string
+wa-select with-clear
+unset browser value = ""
+semantic options use private DOM tokens:
+  option index 0 → "o:0"
+  option index 1 → "o:1"
+  ...
+RenderData semantic value → token
+user token → declared semantic option.value
+read unset → null
+read selected → declared semantic option string, including ""
 ```
+
+Never place semantic `option.value` directly in `wa-option.value`. This keeps
+Schema Form semantic `""` distinct from Web Awesome's empty/unset control value.
 
 Number:
 
@@ -1107,6 +1193,17 @@ submit
 cancel
 ```
 
+`fieldChanged()` is synchronous:
+
+```text
+collect current complete field snapshot
+→ compact JSON size check
+→ <= 131072 bytes: emit exactly one "change"
+→ > 131072 bytes: emit nothing and show/retain local size error
+```
+
+There is no timer, debounce, microtask coalescing, or deduplication stage in v1.
+
 No field-level Renderer custom event exists.
 
 ## 29. 128 KiB presentation-local event limit
@@ -1203,8 +1300,12 @@ every valid field kind
 closed schema objects
 unknown members
 duplicate field keys
+0-field schema valid
 128-field limit
+empty select options valid
+all schema strings except field.key may be ""
 128-byte key boundary + invalid Unicode
+SchemaFormError.name/constructor/path mapping
 65,536-byte complete schema boundary + over-limit rejection
 65,536-byte complete initialValue boundary + over-limit rejection
 all min/max ordering
@@ -1331,7 +1432,12 @@ omitted/undefined presentation context data not used accidentally
 string empty ""
 boolean unchecked false
 select unset null
-select explicit "" option
+select with-clear returns to unset
+select internal option-token mapping
+select explicit semantic "" option distinct from unset
+exact control input/change event mapping
+one user control event → one parent fieldChanged → one Change
+receiveRenderData programmatic updates emit no Change
 number lexical cases
 pristine number follows authoritative RenderData
 dirty "-", "1.", "1.0", "1e" survive canonical RenderData round trips exactly
@@ -1359,25 +1465,45 @@ subsystem independently rejects forged/oversize current-root event data
 
 ## 39. Integration qualification
 
-Create an end-to-end Schema Form qualification using real Subsystem author APIs plus
-real Renderer/Web Presentation where practical:
+Add exactly:
 
 ```text
-openSchemaForm(scope, frame, request)
-→ RenderDomain projects lr-schema-form tree
-→ Chromium edits controls
-→ root emitCustomEvent
-→ existing reserved User Input channel
-→ InputListener
+test/schema-form-v1/qualification.test.mjs
+```
+
+The qualification MUST use the real repository stack end to end:
+
+```text
+real openSchemaForm(scope, frame, request)
+→ real Subsystem runtime author APIs
+→ real RenderDomain/Data path
+→ real Renderer presentation seam/WebProjector
+→ real bundled schema-form.browser.css + schema-form.browser.js
+→ real Chromium
+→ real WebPresentationContext.emitCustomEvent
+→ real x.loomrealm.web-presentation.event User Input path
+→ real InputListener
 → canonical Change
-→ RenderData error/value reconciliation
-→ Submit
+→ RenderData reconciliation
+→ real Submit
 → openSchemaForm resolves submitted data
 ```
 
-Also qualify user Cancel and Frame abort separately.
+The same file MUST separately qualify user Cancel and Frame abort.
 
-No test-only reverse transport is allowed in the end-to-end path.
+No fake/reverse test transport, direct Session invocation, manually injected
+InputListener payload shortcut, or DOM-only submit shortcut is allowed in this
+qualification.
+
+The implementation also adds these exact root scripts:
+
+```json
+"test:schema-form:qualification:run":
+  "node --test test/schema-form-v1/qualification.test.mjs",
+
+"test:schema-form:qualification":
+  "npm run build -w @loomrealm/foundation -w @loomrealm/wire -w @loomrealm/platform-ports -w @loomrealm/runtime-control -w @loomrealm/renderer-control -w @loomrealm/data -w @loomrealm/subsystem -w @loomrealm/renderer -w @loomrealm-game/schema-form && npm run test:schema-form:qualification:run"
+```
 
 ## 40. Implementation order
 
@@ -1418,7 +1544,7 @@ npm test -w @loomrealm/subsystem
 npm test -w @loomrealm/renderer
 npm run test:m10:qualification
 npm run test:m13:qualification
-Schema Form Chromium/integration qualification
+npm run test:schema-form:qualification
 npm pack -w @loomrealm-game/schema-form --dry-run
 ```
 
@@ -1431,11 +1557,15 @@ Phase 2 is complete only if:
 ```text
 [ ] root module is platform-neutral at runtime
 [ ] browser delivery is one classic self-contained JS bundle + one CSS bundle
+[ ] @loomrealm/renderer is type-only devDependency for WebPresentationContext
 [ ] no frame.call/schema-form subsystem exists
 [ ] one active form per Frame enforced
 [ ] openSchemaForm() never synchronously throws argument/preflight failures
 [ ] all openSchemaForm() failures are observed as Promise rejection
 [ ] all preflight error codes match DESIGN
+[ ] SchemaFormError constructor/name/path mapping exactly matches DESIGN
+[ ] fields 0..128 and empty select options are accepted
+[ ] all schema strings except field.key may be empty
 [ ] Frame abort rejects AbortError
 [ ] settle-once cleanup covers every terminal path
 [ ] canonical data contains only string/number/boolean
@@ -1446,6 +1576,7 @@ Phase 2 is complete only if:
 [ ] required is interaction-only, not preflight rejection
 [ ] string min/max length uses ECMAScript value.length
 [ ] select "" is explicit option value; null alone means unset
+[ ] wa-select uses private option tokens and with-clear so semantic "" != unset
 [ ] trusted validators receive detached frozen SchemaFormDataV1
 [ ] trusted validators are isolated and synchronous
 [ ] internal RenderNode identity never derives from field.key
@@ -1453,6 +1584,7 @@ Phase 2 is complete only if:
 [ ] number/select RenderData removes value when unset
 [ ] only root emits Renderer custom events
 [ ] full Change/Submit snapshots are exact-key
+[ ] control edit event mapping is exact and Change is never debounced/coalesced
 [ ] malformed presentation input is fail-closed
 [ ] Submit is independent of previous Change delivery
 [ ] browser event data <= 131072 bytes before emit
@@ -1464,6 +1596,7 @@ Phase 2 is complete only if:
 [ ] CSS bundle owns only required Web Awesome theme/palette + Schema Form styles
 [ ] bundled Web Awesome tag namespace ownership/collision behavior is qualified
 [ ] Chromium qualification proves real bundled browser path
+[ ] test/schema-form-v1/qualification.test.mjs uses only the real end-to-end path
 [ ] no new Renderer/Main/Subsystem architecture change was required
 ```
 
